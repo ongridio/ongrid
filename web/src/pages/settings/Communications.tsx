@@ -71,11 +71,11 @@ const TYPE_CARDS: TypeMeta[] = [
   {
     type: 'wecom',
     group: 'cn',
-    labelZh: '微信',
-    labelEn: 'WeChat',
+    labelZh: '企业微信',
+    labelEn: 'WeCom',
     icon: MessageCircle,
-    hintZh: '微信推送走企业微信群机器人 webhook（key 在 URL 里）；消费版微信没有群机器人接口。',
-    hintEn: 'WeChat delivery via a WeCom group-bot webhook (key in the URL); consumer WeChat has no bot API.',
+    hintZh: '企业微信群机器人 webhook（key 在 URL 里）。',
+    hintEn: 'WeCom group-bot webhook (key embedded in the URL).',
     endpointPlaceholder: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxx',
   },
   {
@@ -112,7 +112,7 @@ const TYPE_CARDS: TypeMeta[] = [
 
 // Locale-aware ordering: surface the channels most relevant to the UI
 // language first. English → Slack / Telegram first; Chinese → 飞书 / 钉钉 /
-// 微信 first. Webhook (generic) stays last either way. Within a group the
+// 企业微信 first. Webhook (generic) stays last either way. Within a group the
 // declaration order above is preserved (Array.prototype.sort is stable).
 const GROUP_RANK: Record<string, Record<TypeMeta['group'], number>> = {
   'en-US': { intl: 0, cn: 1, generic: 2 },
