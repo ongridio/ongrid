@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 // Client is a minimal Telegram Bot API client. It uses a zero-value
@@ -117,13 +118,21 @@ func (c *Client) SendMessage(ctx context.Context, chatID, text string) (int, err
 	return m.MessageID, nil
 }
 
-// EditMessageText replaces the text of (chatID, messageID).
+// EditMessageText replaces the text of (chatID, messageID). Telegram 400s a
+// no-op edit ("message is not modified") when the new text already equals the
+// message's current content — harmless for progressive streaming, where a
+// throttled tick or the final flush can repeat the last chunk. Unlike Feishu,
+// Telegram rejects it, so we swallow that specific error as success; any other
+// 400/error still propagates.
 func (c *Client) EditMessageText(ctx context.Context, chatID string, messageID int, text string) error {
 	_, err := c.call(ctx, "editMessageText", map[string]any{
 		"chat_id":    chatID,
 		"message_id": messageID,
 		"text":       text,
 	})
+	if err != nil && strings.Contains(err.Error(), "message is not modified") {
+		return nil
+	}
 	return err
 }
 

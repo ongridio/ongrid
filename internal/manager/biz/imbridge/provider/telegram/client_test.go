@@ -66,6 +66,19 @@ func TestEditMessageText(t *testing.T) {
 	}
 }
 
+// Telegram 400s a no-op edit; progressive streaming repeats the last chunk on
+// the final flush, so EditMessageText must treat "message is not modified" as
+// success — otherwise the whole inbound handling reports failure on a delivered
+// reply.
+func TestEditMessageTextNoopIsSuccess(t *testing.T) {
+	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"ok":false,"error_code":400,"description":"Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message"}`)
+	})
+	if err := c.EditMessageText(context.Background(), "999", 42, "same"); err != nil {
+		t.Errorf("no-op edit should be treated as success, got %v", err)
+	}
+}
+
 func TestGetUpdatesParses(t *testing.T) {
 	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, `{"ok":true,"result":[
