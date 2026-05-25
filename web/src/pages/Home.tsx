@@ -18,6 +18,7 @@ import {
   TrendingUp,
 } from 'lucide-react';
 import { ChatInput, type ModelSelection } from '@/components/ChatInput';
+import { useModelSelection } from '@/store/modelSelection';
 import { PromptCard } from '@/components/PromptCard';
 import { StatusRow } from '@/components/StatusRow';
 import { createSession, listModels, type LLMProvider } from '@/api/chat';
@@ -140,7 +141,13 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
   const [edgeTotal, setEdgeTotal] = useState<number | null>(null);
   const [providers, setProviders] = useState<LLMProvider[]>([]);
-  const [selectedModel, setSelectedModel] = useState<ModelSelection | null>(null);
+  // Model selection lives in a persisted store (shared with ChatThread), so a
+  // pick survives navigation + reload and the launched session inherits it.
+  // selected==null → fall back to the live catalog default.
+  const storeModel = useModelSelection((s) => s.selected);
+  const setStoreModel = useModelSelection((s) => s.setSelected);
+  const [catalogDefault, setCatalogDefault] = useState<ModelSelection | null>(null);
+  const selectedModel = storeModel ?? catalogDefault;
   // SearXNG ships zero-key zero-quota in our compose stack — leave on by default.
   const [webSearchEnabled, setWebSearchEnabled] = useState(true);
 
@@ -164,7 +171,7 @@ export default function HomePage() {
         if (cancelled) return;
         setProviders(cat.providers ?? []);
         if (cat.default && cat.default.provider) {
-          setSelectedModel({ provider: cat.default.provider, model: cat.default.model || '' });
+          setCatalogDefault({ provider: cat.default.provider, model: cat.default.model || '' });
         }
       })
       .catch(() => {
@@ -186,10 +193,10 @@ export default function HomePage() {
       // coordinator-equivalent toolBag on the backend.
       const session = await createSession({ title, agent_id: 'default' });
       // Don't post here — ChatThread takes the initialPrompt and runs it
-      // through the SSE streamMessage path so the user sees tool cards
-      // and the assistant reply incrementally. Carry the picked model so the
-      // first turn runs on the user's choice, not the catalog default.
-      navigate(`/chat/${session.id}`, { state: { initialPrompt: content, initialModel: selectedModel } });
+      // through the SSE streamMessage path so the user sees tool cards and
+      // the assistant reply incrementally. The picked model rides the shared
+      // store (useModelSelection), so the launched session inherits it.
+      navigate(`/chat/${session.id}`, { state: { initialPrompt: content } });
     } catch (err) {
       setError((err as Error).message || tr('创建会话失败', 'Failed to create session'));
       setSubmitting(false);
@@ -219,7 +226,7 @@ export default function HomePage() {
             autoFocus
             providers={providers}
             selectedModel={selectedModel}
-            onModelChange={setSelectedModel}
+            onModelChange={setStoreModel}
             webSearchEnabled={webSearchEnabled}
             onWebSearchToggle={setWebSearchEnabled}
           />

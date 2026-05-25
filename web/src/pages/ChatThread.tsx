@@ -14,13 +14,10 @@ import {
 } from '@/api/chat';
 import { invalidateChatSessions, useChatSessions } from '@/store/chatSessions';
 import { usePermissions } from '@/store/me';
+import { useModelSelection } from '@/store/modelSelection';
 import { useI18n } from '@/i18n/locale';
 
-// initialModel carries the model the user picked on Home through the
-// navigate() into this thread, so the very first turn (and the rest of the
-// session) runs on their choice instead of re-defaulting to the catalog
-// default.
-type LocationState = { initialPrompt?: string; initialModel?: ModelSelection } | null;
+type LocationState = { initialPrompt?: string } | null;
 
 export default function ChatThreadPage() {
   const { tr, locale } = useI18n();
@@ -28,7 +25,6 @@ export default function ChatThreadPage() {
   const { sessionId = '' } = useParams<{ sessionId: string }>();
   const location = useLocation();
   const initialPrompt = (location.state as LocationState)?.initialPrompt;
-  const initialModel = (location.state as LocationState)?.initialModel;
 
   const sessions = useChatSessions((s) => s.sessions);
   const sessionMeta = sessions.find((s) => String(s.id) === String(sessionId));
@@ -48,9 +44,13 @@ export default function ChatThreadPage() {
   // "session-level state"). Empty providers → ChatInput hides the
   // selector entirely.
   const [providers, setProviders] = useState<LLMProvider[]>([]);
-  // Seed synchronously from Home's pick (if any) so the auto-sent initial
-  // prompt uses it — the async catalog fetch below must NOT clobber it.
-  const [selectedModel, setSelectedModel] = useState<ModelSelection | null>(initialModel ?? null);
+  // Shared, persisted model selection (also used by Home). The auto-sent
+  // initial prompt and every later turn use storeModel; only when the user
+  // hasn't picked do we fall back to the live catalog default.
+  const storeModel = useModelSelection((s) => s.selected);
+  const setStoreModel = useModelSelection((s) => s.setSelected);
+  const [catalogDefault, setCatalogDefault] = useState<ModelSelection | null>(null);
+  const selectedModel = storeModel ?? catalogDefault;
   // Web-search toggle is per-thread (not per-message): once a user
   // enables it for a topic, every follow-up turn until they disable it
   // also exposes the skill. Defaults ON because SearXNG (default provider)
@@ -63,10 +63,8 @@ export default function ChatThreadPage() {
       .then((cat) => {
         if (cancelled) return;
         setProviders(cat.providers ?? []);
-        // Only fall back to the catalog default when Home didn't hand us a
-        // pick — otherwise we'd overwrite the user's selection with glm.
-        if (!initialModel && cat.default && cat.default.provider) {
-          setSelectedModel({ provider: cat.default.provider, model: cat.default.model || '' });
+        if (cat.default && cat.default.provider) {
+          setCatalogDefault({ provider: cat.default.provider, model: cat.default.model || '' });
         }
       })
       .catch(() => {
@@ -365,7 +363,7 @@ export default function ChatThreadPage() {
               placeholder={tr('继续聊…  按 ⌘↵ 换行', 'Continue the conversation… press ⌘↵ for newline')}
               providers={providers}
               selectedModel={selectedModel}
-              onModelChange={setSelectedModel}
+              onModelChange={setStoreModel}
               webSearchEnabled={webSearchEnabled}
               onWebSearchToggle={setWebSearchEnabled}
             />
