@@ -1,4 +1,4 @@
-# <img src="web/public/ongrid-logo.svg" alt="" width="30" style="vertical-align: middle;" /> ongrid
+# <img src="web/public/ongrid-logo.svg" alt="" width="40" align="middle" style="vertical-align: middle;" /> ongrid
 
 > **各ホストに軽量エージェントを配置し、自然言語でトラブルシューティング —— アラート・ログ・メトリクス・トレース・トポロジー・ソースコードを、クラウドの AIOps エージェントがまとめて分析します。**
 

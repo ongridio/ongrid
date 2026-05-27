@@ -1,4 +1,4 @@
-# <img src="web/public/ongrid-logo.svg" alt="" width="30" style="vertical-align: middle;" /> ongrid
+# <img src="web/public/ongrid-logo.svg" alt="" width="40" align="middle" style="vertical-align: middle;" /> ongrid
 
 > **Installez un agent léger sur chaque hôte, puis dépannez en langage naturel —— alertes, logs, métriques, traces, topologie et code source, analysés ensemble par un agent AIOps dans le cloud.**
 

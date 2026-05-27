@@ -1,4 +1,4 @@
-# <img src="web/public/ongrid-logo.svg" alt="" width="30" style="vertical-align: middle;" /> ongrid
+# <img src="web/public/ongrid-logo.svg" alt="" width="40" align="middle" style="vertical-align: middle;" /> ongrid
 
 > **모든 호스트에 경량 에이전트를 설치하고 자연어로 트러블슈팅 —— 알림·로그·메트릭·트레이스·토폴로지·소스 코드를 클라우드 AIOps 에이전트가 함께 분석합니다.**
 

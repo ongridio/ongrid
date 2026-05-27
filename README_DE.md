@@ -1,4 +1,4 @@
-# <img src="web/public/ongrid-logo.svg" alt="" width="30" style="vertical-align: middle;" /> ongrid
+# <img src="web/public/ongrid-logo.svg" alt="" width="40" align="middle" style="vertical-align: middle;" /> ongrid
 
 > **Installieren Sie auf jedem Host einen leichtgewichtigen Agenten und beheben Sie Störungen in natürlicher Sprache —— Alarme, Logs, Metriken, Traces, Topologie und Quellcode, gemeinsam analysiert von einem Cloud-AIOps-Agenten.**
 

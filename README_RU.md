@@ -1,4 +1,4 @@
-# <img src="web/public/ongrid-logo.svg" alt="" width="30" style="vertical-align: middle;" /> ongrid
+# <img src="web/public/ongrid-logo.svg" alt="" width="40" align="middle" style="vertical-align: middle;" /> ongrid
 
 > **Установите лёгкий агент на каждый хост и устраняйте неполадки на естественном языке —— оповещения, логи, метрики, трейсы, топология и исходный код анализируются вместе облачным AIOps-агентом.**
 

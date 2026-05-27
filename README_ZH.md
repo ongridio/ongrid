@@ -1,4 +1,4 @@
-# <img src="web/public/ongrid-logo.svg" alt="" width="30" style="vertical-align: middle;" /> ongrid
+# <img src="web/public/ongrid-logo.svg" alt="" width="40" align="middle" style="vertical-align: middle;" /> ongrid
 
 > **给每台主机装上一个轻量 agent，然后用自然语言排障 —— 告警、日志、指标、链路、拓扑、源码，交给云端的 AIOps Agent 一起分析。**
 
