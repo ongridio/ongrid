@@ -1,6 +1,8 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> ongrid
 
-> **各ホストに軽量エージェントを配置し、自然言語でトラブルシューティング —— アラート・ログ・メトリクス・トレース・トポロジー・ソースコードを、クラウドの AIOps エージェントがまとめて分析します。**
+> **運用のための AI エージェント。** 各ホストに軽量エージェントを配置すると、ongrid がメトリクス・ログ・トレース・トポロジー・ソースコードを横断的に分析し、自然言語で根本原因を特定します。
+>
+> *SRE・プラットフォーム・オンコールチームのために。*
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/ongridio/ongrid)](https://goreportcard.com/report/github.com/ongridio/ongrid)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
@@ -14,7 +16,7 @@
 
 ## 概要
 
-ongrid はオープンソースでセルフホスト可能な AIOps プラットフォームです。各ホストに軽量な `ongrid-edge` エージェントを配置すると、単一の多重化された**アウトバウンド**トンネル経由でメトリクス・ログ・トレースをクラウドへ送信します —— ホスト側にインバウンドポートは一切不要です。クラウドは LLM 駆動の運用エージェントで、自然言語で質問すると、自ら PromQL / LogQL / TraceQL を実行し、サービストポロジーをたどり、ナレッジベースを検索し、ソースコードを読み、読み取り専用のホストツールを呼び出して、根拠のある回答を返します。
+ongrid はオープンソースでセルフホスト可能な、運用のための AI エージェントです。各ホストに軽量な `ongrid-edge` エージェントを配置すると、単一の多重化された**アウトバウンド**トンネル経由でメトリクス・ログ・トレースをクラウドへ送信します —— ホスト側にインバウンドポートは一切不要です。クラウドは LLM 駆動の運用エージェントで、自然言語で質問すると、自ら PromQL / LogQL / TraceQL を実行し、サービストポロジーをたどり、ナレッジベースを検索し、ソースコードを読み、読み取り専用のホストツールを呼び出して、根拠のある回答を返します。
 
 解決する課題:
 

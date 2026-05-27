@@ -1,6 +1,8 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> ongrid
 
-> **모든 호스트에 경량 에이전트를 설치하고 자연어로 트러블슈팅 —— 알림·로그·메트릭·트레이스·토폴로지·소스 코드를 클라우드 AIOps 에이전트가 함께 분석합니다.**
+> **운영을 위한 AI 에이전트.** 모든 호스트에 경량 에이전트를 설치하면 ongrid가 메트릭·로그·트레이스·토폴로지·소스 코드를 종합 분석해 자연어로 근본 원인을 짚어냅니다.
+>
+> *SRE, 플랫폼, 온콜 팀을 위해 만들었습니다.*
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/ongridio/ongrid)](https://goreportcard.com/report/github.com/ongridio/ongrid)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
@@ -14,7 +16,7 @@
 
 ## 개요
 
-ongrid 은 오픈소스이며 셀프 호스팅 가능한 AIOps 플랫폼입니다. 각 호스트에 경량 `ongrid-edge` 에이전트를 설치하면, 단일 다중화 **아웃바운드** 터널을 통해 메트릭·로그·트레이스를 클라우드로 전송합니다 —— 호스트에 인바운드 포트가 전혀 필요 없습니다. 클라우드는 LLM 기반 운영 에이전트로, 자연어로 질문하면 스스로 PromQL / LogQL / TraceQL 을 실행하고, 서비스 토폴로지를 탐색하고, 지식 베이스를 검색하고, 소스 코드를 읽고, 읽기 전용 호스트 도구를 호출하여 근거 있는 답변을 제공합니다.
+ongrid 은 오픈소스이며 셀프 호스팅 가능한, 운영을 위한 AI 에이전트입니다. 각 호스트에 경량 `ongrid-edge` 에이전트를 설치하면, 단일 다중화 **아웃바운드** 터널을 통해 메트릭·로그·트레이스를 클라우드로 전송합니다 —— 호스트에 인바운드 포트가 전혀 필요 없습니다. 클라우드는 LLM 기반 운영 에이전트로, 자연어로 질문하면 스스로 PromQL / LogQL / TraceQL 을 실행하고, 서비스 토폴로지를 탐색하고, 지식 베이스를 검색하고, 소스 코드를 읽고, 읽기 전용 호스트 도구를 호출하여 근거 있는 답변을 제공합니다.
 
 해결하는 문제:
 

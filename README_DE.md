@@ -1,6 +1,8 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> ongrid
 
-> **Installieren Sie auf jedem Host einen leichtgewichtigen Agenten und beheben Sie Störungen in natürlicher Sprache —— Alarme, Logs, Metriken, Traces, Topologie und Quellcode, gemeinsam analysiert von einem Cloud-AIOps-Agenten.**
+> **Ein KI-Agent für den Betrieb.** Installieren Sie auf jedem Host einen leichtgewichtigen Agenten; ongrid analysiert Ihre Metriken, Logs, Traces, Topologie und Ihren Quellcode und ermittelt die Grundursache in natürlicher Sprache.
+>
+> *Entwickelt für SRE-, Plattform- und Bereitschaftsteams (On-Call).*
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/ongridio/ongrid)](https://goreportcard.com/report/github.com/ongridio/ongrid)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
@@ -14,7 +16,7 @@
 
 ## Überblick
 
-ongrid ist eine quelloffene, selbst-hostbare AIOps-Plattform. Ein leichtgewichtiger `ongrid-edge`-Agent auf jedem Host sendet Metriken, Logs und Traces über einen einzigen gemultiplexten **ausgehenden** Tunnel in die Cloud —— keine eingehenden Ports auf dem Host. Die Cloud ist ein LLM-gesteuerter Ops-Agent: Sie fragen in natürlicher Sprache, und er führt selbst PromQL / LogQL / TraceQL aus, durchläuft die Service-Topologie, durchsucht die Wissensdatenbank, liest Quellcode und ruft schreibgeschützte Host-Tools auf, um eine fundierte Antwort zu liefern.
+ongrid ist ein quelloffener, selbst-hostbarer KI-Agent für den Betrieb. Ein leichtgewichtiger `ongrid-edge`-Agent auf jedem Host sendet Metriken, Logs und Traces über einen einzigen gemultiplexten **ausgehenden** Tunnel in die Cloud —— keine eingehenden Ports auf dem Host. Die Cloud ist ein LLM-gesteuerter Ops-Agent: Sie fragen in natürlicher Sprache, und er führt selbst PromQL / LogQL / TraceQL aus, durchläuft die Service-Topologie, durchsucht die Wissensdatenbank, liest Quellcode und ruft schreibgeschützte Host-Tools auf, um eine fundierte Antwort zu liefern.
 
 Was es löst:
 

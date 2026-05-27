@@ -1,6 +1,6 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> ongrid
 
-> **An AI agent for Operations.** Put a lightweight agent on every host; ongrid reasons over your metrics, logs, traces, topology, and source code to pinpoint root cause in plain language — and can act, with guardrails.
+> **An AI agent for Operations.** Put a lightweight agent on every host; ongrid reasons over your metrics, logs, traces, topology, and source code to pinpoint root cause in plain language.
 >
 > *Built for SRE, platform, and on-call teams.*
 
@@ -16,7 +16,7 @@ English | [简体中文](./README_ZH.md) | [日本語](./README_JA.md) | [한국
 
 ## Overview
 
-ongrid is an open-source, self-hostable AIOps platform. A lightweight `ongrid-edge` agent on each host ships metrics, logs, and traces to the cloud over a single **outbound** tunnel — no inbound ports on the host. The cloud is an LLM-driven ops agent: ask in natural language and it runs the PromQL / LogQL / TraceQL, walks the service topology, searches the knowledge base, reads source code, and calls read-only host tools to return a grounded, evidence-backed answer.
+ongrid is an open-source, self-hostable AI agent for operations. A lightweight `ongrid-edge` agent on each host ships metrics, logs, and traces to the cloud over a single **outbound** tunnel — no inbound ports on the host. The cloud is an LLM-driven ops agent: ask in natural language and it runs the PromQL / LogQL / TraceQL, walks the service topology, searches the knowledge base, reads source code, and calls read-only host tools to return a grounded, evidence-backed answer.
 
 What it solves:
 
