@@ -28,6 +28,16 @@ Was es löst:
 
 ## Schnellstart
 
+**Aus einem Release installieren** —— privates Repo, Abruf mit `gh`:
+
+```bash
+gh release download v0.7.158 --repo ongridio/ongrid -p 'ongrid-v0.7.158-linux-amd64.tar.gz*'
+tar xzf ongrid-v0.7.158-linux-amd64.tar.gz && cd ongrid-v0.7.158-linux-amd64
+sudo ./install.sh
+```
+
+**Oder aus dem Quellcode ausführen** (lokale Entwicklung):
+
 ```bash
 # 1. konfigurieren: Admin-Konto + einen Modell-API-Key festlegen
 cp deploy/.env.example deploy/.env

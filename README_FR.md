@@ -28,6 +28,16 @@ Ce qu'il résout :
 
 ## Démarrage rapide
 
+**Installer depuis une release** —— dépôt privé, récupération avec `gh` :
+
+```bash
+gh release download v0.7.158 --repo ongridio/ongrid -p 'ongrid-v0.7.158-linux-amd64.tar.gz*'
+tar xzf ongrid-v0.7.158-linux-amd64.tar.gz && cd ongrid-v0.7.158-linux-amd64
+sudo ./install.sh
+```
+
+**Ou exécuter depuis les sources** (dev local) :
+
 ```bash
 # 1. configurer : définissez le compte admin + une clé API de modèle
 cp deploy/.env.example deploy/.env
