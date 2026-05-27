@@ -1,4 +1,4 @@
-# <img src="web/public/ongrid-logo.svg" alt="" width="40" align="middle" style="vertical-align: middle;" /> ongrid
+# <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> ongrid
 
 > **Put a lightweight agent on every host, then troubleshoot in natural language — alerts, logs, metrics, traces, topology, and source code, analyzed together by a cloud AIOps agent.**
 

@@ -1,4 +1,4 @@
-# <img src="web/public/ongrid-logo.svg" alt="" width="40" align="middle" style="vertical-align: middle;" /> ongrid
+# <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> ongrid
 
 > **Pon un agente ligero en cada host y diagnostica en lenguaje natural —— alertas, logs, métricas, trazas, topología y código fuente, analizados en conjunto por un agente de AIOps en la nube.**
 
