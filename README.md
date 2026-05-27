@@ -1,6 +1,8 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> ongrid
 
-> **Put a lightweight agent on every host, then troubleshoot in natural language — alerts, logs, metrics, traces, topology, and source code, analyzed together by a cloud AIOps agent.**
+> **An AI agent for Operations.** Put a lightweight agent on every host; ongrid reasons over your metrics, logs, traces, topology, and source code to pinpoint root cause in plain language — and can act, with guardrails.
+>
+> *Built for SRE, platform, and on-call teams.*
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/ongridio/ongrid)](https://goreportcard.com/report/github.com/ongridio/ongrid)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
