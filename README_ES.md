@@ -1,8 +1,8 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> ongrid
 
-> **Un agente de IA para Operaciones.** Pon un agente ligero en cada host; ongrid analiza tus métricas, logs, trazas, topología y código fuente para identificar la causa raíz en lenguaje natural.
+> **Un agente de IA para Operaciones.** Pon un agente ligero en cada host; Ongrid analiza tus métricas, logs, trazas, topología y código fuente para identificar la causa raíz en lenguaje natural.
 >
-> *Hecho para equipos de SRE, plataforma y guardia (on-call).*
+> *Hecho para equipos de SRE, DevOps y plataforma.*
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/ongridio/ongrid)](https://goreportcard.com/report/github.com/ongridio/ongrid)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
@@ -16,7 +16,7 @@
 
 ## Visión general
 
-ongrid es un agente de IA para operaciones, de código abierto y autoalojable. Un agente ligero `ongrid-edge` en cada host envía métricas, logs y trazas a la nube a través de un único túnel **saliente** multiplexado —— sin puertos entrantes en el host. La nube es un agente de operaciones impulsado por LLM: preguntas en lenguaje natural y él mismo ejecuta PromQL / LogQL / TraceQL, recorre la topología de servicios, busca en la base de conocimiento, lee el código fuente y llama a herramientas de host de solo lectura para devolver una respuesta fundamentada.
+Ongrid es un agente de IA para operaciones, de código abierto y autoalojable. Un agente ligero `ongrid-edge` en cada host envía métricas, logs y trazas a la nube a través de un único túnel **saliente** multiplexado —— sin puertos entrantes en el host. La nube es un agente de operaciones impulsado por LLM: preguntas en lenguaje natural y él mismo ejecuta PromQL / LogQL / TraceQL, recorre la topología de servicios, busca en la base de conocimiento, lee el código fuente y llama a herramientas de host de solo lectura para devolver una respuesta fundamentada.
 
 Qué resuelve:
 

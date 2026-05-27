@@ -1,8 +1,8 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> ongrid
 
-> **Un agent IA pour les opérations.** Installez un agent léger sur chaque hôte ; ongrid analyse vos métriques, logs, traces, topologie et code source pour identifier la cause racine en langage naturel.
+> **Un agent IA pour les opérations.** Installez un agent léger sur chaque hôte ; Ongrid analyse vos métriques, logs, traces, topologie et code source pour identifier la cause racine en langage naturel.
 >
-> *Conçu pour les équipes SRE, plateforme et d'astreinte (on-call).*
+> *Conçu pour les équipes SRE, DevOps et plateforme.*
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/ongridio/ongrid)](https://goreportcard.com/report/github.com/ongridio/ongrid)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
@@ -16,7 +16,7 @@
 
 ## Aperçu
 
-ongrid est un agent IA pour les opérations, open source et auto-hébergeable. Un agent léger `ongrid-edge` sur chaque hôte envoie métriques, logs et traces vers le cloud via un unique tunnel **sortant** multiplexé —— aucun port entrant sur l'hôte. Le cloud est un agent d'exploitation piloté par LLM : posez une question en langage naturel et il exécute lui-même les PromQL / LogQL / TraceQL, parcourt la topologie de services, interroge la base de connaissances, lit le code source et appelle des outils hôte en lecture seule pour fournir une réponse étayée.
+Ongrid est un agent IA pour les opérations, open source et auto-hébergeable. Un agent léger `ongrid-edge` sur chaque hôte envoie métriques, logs et traces vers le cloud via un unique tunnel **sortant** multiplexé —— aucun port entrant sur l'hôte. Le cloud est un agent d'exploitation piloté par LLM : posez une question en langage naturel et il exécute lui-même les PromQL / LogQL / TraceQL, parcourt la topologie de services, interroge la base de connaissances, lit le code source et appelle des outils hôte en lecture seule pour fournir une réponse étayée.
 
 Ce qu'il résout :
 

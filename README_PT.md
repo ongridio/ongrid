@@ -1,8 +1,8 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> ongrid
 
-> **Um agente de IA para Operações.** Coloque um agente leve em cada host; o ongrid analisa suas métricas, logs, traces, topologia e código-fonte para identificar a causa raiz em linguagem natural.
+> **Um agente de IA para Operações.** Coloque um agente leve em cada host; o Ongrid analisa suas métricas, logs, traces, topologia e código-fonte para identificar a causa raiz em linguagem natural.
 >
-> *Feito para equipes de SRE, plataforma e plantão (on-call).*
+> *Feito para equipes de SRE, DevOps e plataforma.*
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/ongridio/ongrid)](https://goreportcard.com/report/github.com/ongridio/ongrid)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
@@ -16,7 +16,7 @@
 
 ## Visão geral
 
-ongrid é um agente de IA para operações, open source e auto-hospedável. Um agente leve `ongrid-edge` em cada host envia métricas, logs e traces para a nuvem por um único túnel **de saída** multiplexado —— sem portas de entrada no host. A nuvem é um agente de operações orientado por LLM: você pergunta em linguagem natural e ele mesmo executa PromQL / LogQL / TraceQL, percorre a topologia de serviços, busca na base de conhecimento, lê o código-fonte e chama ferramentas de host somente leitura para dar uma resposta fundamentada.
+Ongrid é um agente de IA para operações, open source e auto-hospedável. Um agente leve `ongrid-edge` em cada host envia métricas, logs e traces para a nuvem por um único túnel **de saída** multiplexado —— sem portas de entrada no host. A nuvem é um agente de operações orientado por LLM: você pergunta em linguagem natural e ele mesmo executa PromQL / LogQL / TraceQL, percorre a topologia de serviços, busca na base de conhecimento, lê o código-fonte e chama ferramentas de host somente leitura para dar uma resposta fundamentada.
 
 O que resolve:
 
