@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -286,22 +287,37 @@ func (f *FakeTelegram) handle(w http.ResponseWriter, r *http.Request) {
 
 // ─── Fake Prometheus query backend ─────────────────────────────────────
 //
-// Minimal /api/v1/query_range that returns whatever the test injected via
-// SetSeries. Tests that want to drive alert rules push fake series in
-// before they trigger the evaluator tick.
+// Two endpoints with subtly different response shapes:
+//   /api/v1/query        → resultType="vector", value=[ts, "v"]   (instant)
+//   /api/v1/query_range  → resultType="matrix", values=[[ts,"v"]] (range)
+//
+// Alert evaluators use the instant variant (predicate baked into PromQL
+// returns the firing rows). Range is wired for grafana-shaped panels.
 
 type FakeProm struct {
 	server *httptest.Server
 
-	mu     sync.Mutex
-	series map[string][][2]any // query → [ [timestamp, value], ... ]
+	mu      sync.Mutex
+	series  map[string][][2]any         // for query_range: query → samples
+	instant map[string][]InstantEntry   // for query: query → entries
+}
+
+// InstantEntry is one vector entry the FakeProm returns for /api/v1/query.
+// Labels are emitted as the entry's "metric" map; Value is rendered as
+// the Prom-canonical [unix_ts, "<float-as-string>"] pair.
+type InstantEntry struct {
+	Labels map[string]string
+	Value  float64
 }
 
 func NewFakeProm() *FakeProm {
-	f := &FakeProm{series: map[string][][2]any{}}
+	f := &FakeProm{
+		series:  map[string][][2]any{},
+		instant: map[string][]InstantEntry{},
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/query_range", f.queryRange)
-	mux.HandleFunc("/api/v1/query", f.queryRange)
+	mux.HandleFunc("/api/v1/query", f.queryInstant)
 	f.server = httptest.NewServer(mux)
 	return f
 }
@@ -310,16 +326,28 @@ func (f *FakeProm) URL() string { return f.server.URL }
 func (f *FakeProm) Close()      { f.server.Close() }
 
 // SetSeries lets a test inject a canned response for an exact query
-// string. Subsequent matching /api/v1/query_range hits return this series.
-// Unmatched queries return an empty result (success, but no data).
+// string on /api/v1/query_range. Unmatched queries return an empty
+// matrix (success, no data).
 func (f *FakeProm) SetSeries(query string, samples [][2]any) {
 	f.mu.Lock()
 	f.series[query] = samples
 	f.mu.Unlock()
 }
 
+// SetInstant injects a canned vector response for /api/v1/query. Each
+// entry maps to one "firing" series in the alert evaluator's view (the
+// predicate is baked into the PromQL expression itself, so the very
+// presence of an entry means "the rule fires for this label set").
+//
+//	SetInstant("up == 0", []InstantEntry{{Labels: nil, Value: 0}})
+func (f *FakeProm) SetInstant(query string, entries []InstantEntry) {
+	f.mu.Lock()
+	f.instant[query] = entries
+	f.mu.Unlock()
+}
+
 func (f *FakeProm) queryRange(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query().Get("query")
+	q := readQueryParam(r)
 	f.mu.Lock()
 	samples := f.series[q]
 	f.mu.Unlock()
@@ -339,6 +367,44 @@ func (f *FakeProm) queryRange(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeOK(w, resp)
+}
+
+func (f *FakeProm) queryInstant(w http.ResponseWriter, r *http.Request) {
+	q := readQueryParam(r)
+	f.mu.Lock()
+	entries := f.instant[q]
+	f.mu.Unlock()
+	result := make([]any, 0, len(entries))
+	ts := time.Now().Unix()
+	for _, e := range entries {
+		metric := map[string]any{}
+		for k, v := range e.Labels {
+			metric[k] = v
+		}
+		valStr := strconv.FormatFloat(e.Value, 'f', -1, 64)
+		result = append(result, map[string]any{
+			"metric": metric,
+			"value":  []any{ts, valStr},
+		})
+	}
+	writeOK(w, map[string]any{
+		"status": "success",
+		"data": map[string]any{
+			"resultType": "vector",
+			"result":     result,
+		},
+	})
+}
+
+// readQueryParam returns the PromQL expression: Prom accepts it either
+// on the query string (GET) or in form body (POST). The real client
+// sends POST application/x-www-form-urlencoded, so we parse both.
+func readQueryParam(r *http.Request) string {
+	if v := r.URL.Query().Get("query"); v != "" {
+		return v
+	}
+	_ = r.ParseForm()
+	return r.Form.Get("query")
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────

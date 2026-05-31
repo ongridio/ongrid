@@ -69,7 +69,7 @@
 
 | # | 用例 | 触发 | 关键断言点 | 优 | 实现 |
 |---|---|---|---|---|---|
-| E1 | metric_raw 规则 fire(PromQL) | 推 fake metric cpu>90 | `alert_incidents` 行 status=open | **P0** | |
+| E1 | metric_raw 规则 fire(PromQL) | 推 fake metric cpu>90 | `alert_incidents` 行 status=open | **P0** | ✅ `tests/e2e/alert_evaluator_test.go` |
 | E2 | device_offline 规则 fire | 停 edge 5min | incident 创建、target_type=edge | **P0** | |
 | E3 | incident → notification 投递 | E1 之后 | `notification_deliveries` status=ok | **P0** | |
 | E4 | 通知 cooldown | E1 紧接第二次 fire | 第二次不发(or throttled) | P1 | |
