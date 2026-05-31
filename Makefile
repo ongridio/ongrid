@@ -45,7 +45,7 @@ build-ongrid-edge: ## 构建边端 ongrid-edge
 # test
 # ----------------------------------------------------------------------------
 
-.PHONY: test test-race test-integration
+.PHONY: test test-race test-integration test-e2e test-e2e-live
 test: ## 单元测试
 	go test ./...
 
@@ -54,6 +54,12 @@ test-race: ## 单元测试 + race
 
 test-integration: ## 集成测试（build tag: integration）
 	go test -tags=integration ./...
+
+test-e2e: ## E2E（默认 fakes，无外部凭证；catalog: docs/test/e2e-catalog.md）
+	go test -tags=e2e -count=1 ./tests/e2e/...
+
+test-e2e-live: ## E2E live mode（用 tests/e2e/secrets.local.env 打通真实外部服务）
+	E2E_LIVE_ALL=1 go test -tags=e2e -count=1 -timeout=15m ./tests/e2e/...
 
 # ----------------------------------------------------------------------------
 # lint

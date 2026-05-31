@@ -1,0 +1,11 @@
+# Real secrets — operator fills locally, never committed.
+# CI either passes secrets via env or mounts secrets.local.env from a
+# secret manager at the same path. See README.md and secrets.example.env.
+secrets.local.env
+secrets.*.local.env
+
+# Anything ending in .local.* is the "fill yourself, don't commit" tier.
+*.local.*
+
+# go test temp artifacts that might leak fixture data.
+testdata/_tmp/
