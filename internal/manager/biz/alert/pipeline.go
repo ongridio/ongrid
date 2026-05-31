@@ -116,7 +116,7 @@ type PipelineEvaluator struct {
 // NewPipelineEvaluator builds the evaluator with sensible defaults applied.
 func NewPipelineEvaluator(opts PipelineEvaluatorOpts) *PipelineEvaluator {
 	if opts.Interval <= 0 {
-		opts.Interval = 30 * time.Second
+		opts.Interval = 5 * time.Minute
 	}
 	if opts.Cooldown <= 0 {
 		opts.Cooldown = 10 * time.Minute

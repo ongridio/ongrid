@@ -1806,9 +1806,56 @@ function ChannelsField({
     else onChange([...selectedIds, id]);
   };
 
+  // Effective fallback channels — match the backend resolver (router.go
+  // ChannelsFor): when no channel is pinned at the rule level, every
+  // ENABLED instance whose severity floor / scope filter matches the
+  // incident gets the notification. The SPA can't compute scope (we don't
+  // know the incident shape yet) but enabled+severity is the dominant
+  // filter, and listing those is far more honest than the implicit
+  // "nothing selected = nothing notified" the picker visually suggests.
+  // We don't auto-check them in the form because the storage shape is
+  // intentionally "empty = use defaults"; the chips are informational so
+  // operators see WYSIWYG without flipping the persistence semantics.
+  const fallbackChannels = useMemo(
+    () => channels.filter((c) => c.enabled),
+    [channels],
+  );
+  const showFallbackHint = selectedIds.length === 0 && fallbackChannels.length > 0;
+
   return (
     <Field label={tr('通知方式', 'Notification channels')}>
       <div className="space-y-1.5">
+        {showFallbackHint && (
+          <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-2.5 py-2 text-[11px] text-amber-200/90">
+            <div className="mb-1 font-medium">
+              {tr(
+                '未勾选 ≠ 不通知。规则未选渠道时,会走全部"已启用 + severity 达标"的渠道（resolver fallback)。',
+                "No selection ≠ no notification. When a rule pins nothing, the resolver falls back to every enabled channel whose severity floor matches.",
+              )}
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {fallbackChannels.map((c) => (
+                <span
+                  key={c.id}
+                  className="inline-flex items-center gap-1 rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-200"
+                  title={tr(
+                    `当前规则不选任何渠道时会命中:${c.name} (${c.type})`,
+                    `Will fire to ${c.name} (${c.type}) when this rule has nothing pinned.`,
+                  )}
+                >
+                  <span className="opacity-70">⌘</span>
+                  {c.name}
+                </span>
+              ))}
+            </div>
+            <div className="mt-1.5 text-[10px] text-amber-200/60">
+              {tr(
+                '想只通知部分渠道,在下面勾上对应类型即可 — 一旦勾选,fallback 不再生效。',
+                'To narrow it down, tick the channels below — pinning any disables the fallback.',
+              )}
+            </div>
+          </div>
+        )}
         {CHANNEL_TYPE_ORDER.map(({ type, icon: Icon }) => {
           const instances = byType[type] ?? [];
           const total = instances.length;

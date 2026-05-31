@@ -179,7 +179,11 @@ type AlertConfig struct {
 	Load1 float64
 	// EvaluatorInterval is how often the pipeline evaluator scans edges
 	// and queries Prom for `up` / remote_write health.
-	// env: ONGRID_ALERT_EVAL_INTERVAL; default 30s.
+	// env: ONGRID_ALERT_EVAL_INTERVAL; default 5m (was 30s pre-2026-05-31 —
+	// too noisy on long-firing rules, an always-true rule racked up
+	// ~3900 alert_events in 32h). Notification cadence is independently
+	// bounded by Alert.Cooldown so stretching this doesn't multiply
+	// notifications — only the storage + evaluator-CPU side.
 	EvaluatorInterval time.Duration
 	// EdgeOfflineThreshold is the heartbeat staleness above which an edge
 	// counts as offline.
@@ -455,7 +459,7 @@ func Load() (*Config, error) {
 	c.Alert.MemPercent = getEnvFloat("ONGRID_ALERT_MEM_PERCENT", 90)
 	c.Alert.DiskUsedPercent = getEnvFloat("ONGRID_ALERT_DISK_USED_PERCENT", 90)
 	c.Alert.Load1 = getEnvFloat("ONGRID_ALERT_LOAD1", 0)
-	c.Alert.EvaluatorInterval = getEnvDuration("ONGRID_ALERT_EVAL_INTERVAL", 30*time.Second)
+	c.Alert.EvaluatorInterval = getEnvDuration("ONGRID_ALERT_EVAL_INTERVAL", 5*time.Minute)
 	c.Alert.EdgeOfflineThreshold = getEnvDuration("ONGRID_ALERT_EDGE_OFFLINE_THRESHOLD", 90*time.Second)
 	c.Alert.PromIngestFailLimit = getEnvInt("ONGRID_ALERT_PROM_INGEST_FAIL_LIMIT", 5)
 

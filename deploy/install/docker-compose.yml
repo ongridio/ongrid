@@ -168,10 +168,11 @@ services:
       ONGRID_ALERT_ENABLED: ${ONGRID_ALERT_ENABLED:-true}
       ONGRID_ALERT_COOLDOWN: ${ONGRID_ALERT_COOLDOWN:-10m}
       # How often the pipeline evaluator re-runs every enabled rule.
-      # Empty = Go-side default (30s). Stretching this to e.g. 5m makes
-      # alert_events grow slower + cuts evaluator load when the fleet
-      # has many always-firing rules, at the cost of detection latency.
-      # Notification cadence is separately bounded by ONGRID_ALERT_COOLDOWN.
+      # Empty = Go-side default (5m as of 2026-05-31; was 30s — too
+      # noisy on long-firing rules, an always-true rule racked up
+      # ~3900 alert_events in 32 h). Drop to 30s only for chasing
+      # latency-sensitive rules. Notification cadence is separately
+      # bounded by ONGRID_ALERT_COOLDOWN above.
       ONGRID_ALERT_EVAL_INTERVAL: ${ONGRID_ALERT_EVAL_INTERVAL:-}
       ONGRID_ALERT_CPU_PERCENT: ${ONGRID_ALERT_CPU_PERCENT:-90}
       ONGRID_ALERT_MEM_PERCENT: ${ONGRID_ALERT_MEM_PERCENT:-90}
