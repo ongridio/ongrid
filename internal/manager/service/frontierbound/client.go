@@ -99,10 +99,37 @@ func newWithService(svc service, log *slog.Logger) *Client {
 	}
 }
 
+// ErrDisabled is returned from any Call / OpenStream / NotifyX on a
+// Client that was constructed via NewDisabled — i.e. the e2e and
+// degraded-broker bring-up where the frontier dial is intentionally
+// skipped. Register / RegisterEdgeOnline etc. are no-ops on a disabled
+// client (return nil) since there is no broker to register against.
+var ErrDisabled = errors.New("frontierbound: disabled")
+
+// NewDisabled returns a Client whose svc is nil. All outbound calls
+// fail with ErrDisabled; all reverse-call Registers are no-ops; Close
+// is a no-op. Used by main.go when ONGRID_FRONTIER_DISABLED=true to
+// bring the manager up without a real geminio broker (e2e harness,
+// degraded-broker recovery testing).
+func NewDisabled(log *slog.Logger) *Client {
+	if log == nil {
+		log = slog.Default()
+	}
+	return &Client{
+		svc:               nil,
+		log:               log,
+		transportToEdgeID: make(map[uint64]uint64),
+		edgeIDToTransport: make(map[uint64]uint64),
+	}
+}
+
 // Call invokes a method on a specific edge by ID. The body is treated as
 // opaque bytes (callers are responsible for JSON marshaling) and the
 // response payload bytes are returned as-is.
 func (c *Client) Call(ctx context.Context, edgeID uint64, method string, body []byte) ([]byte, error) {
+	if c.svc == nil {
+		return nil, ErrDisabled
+	}
 	transportID := c.resolveTransportID(edgeID)
 	req := c.svc.NewRequest(body)
 	rsp, err := c.svc.Call(ctx, transportID, method, req)
@@ -123,6 +150,9 @@ func (c *Client) Register(ctx context.Context, method string, h Handler) error {
 	if h == nil {
 		return fmt.Errorf("frontierbound: nil handler for %q", method)
 	}
+	if c.svc == nil {
+		return nil
+	}
 	wrap := func(rpcCtx context.Context, req geminio.Request, rsp geminio.Response) {
 		edgeID := req.ClientID()
 		out, err := h(rpcCtx, edgeID, req.Data())
@@ -139,16 +169,25 @@ func (c *Client) Register(ctx context.Context, method string, h Handler) error {
 // to map the edge's Meta blob (JSON {access_key, secret_key}) to a uint64
 // edge id. Returning an error force-closes the dial.
 func (c *Client) RegisterGetEdgeID(ctx context.Context, fn func(meta []byte) (uint64, error)) error {
+	if c.svc == nil {
+		return nil
+	}
 	return c.svc.RegisterGetEdgeID(ctx, fbsvc.GetEdgeID(fn))
 }
 
 // RegisterEdgeOnline wires the edge-online lifecycle callback.
 func (c *Client) RegisterEdgeOnline(ctx context.Context, fn func(edgeID uint64, meta []byte, addr net.Addr) error) error {
+	if c.svc == nil {
+		return nil
+	}
 	return c.svc.RegisterEdgeOnline(ctx, fbsvc.EdgeOnline(fn))
 }
 
 // RegisterEdgeOffline wires the edge-offline lifecycle callback.
 func (c *Client) RegisterEdgeOffline(ctx context.Context, fn func(edgeID uint64, meta []byte, addr net.Addr) error) error {
+	if c.svc == nil {
+		return nil
+	}
 	return c.svc.RegisterEdgeOffline(ctx, fbsvc.EdgeOffline(fn))
 }
 
@@ -167,6 +206,9 @@ func (c *Client) RegisterEdgeOffline(ctx context.Context, fn func(edgeID uint64,
 // future stream-based protocols (port forwarding, file copy) only
 // touches Meta.
 func (c *Client) OpenStream(ctx context.Context, edgeID uint64) (geminio.Stream, error) {
+	if c.svc == nil {
+		return nil, ErrDisabled
+	}
 	transportID := c.resolveTransportID(edgeID)
 	s, err := c.svc.OpenStream(ctx, transportID)
 	if err != nil {

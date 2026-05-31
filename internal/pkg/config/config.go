@@ -235,6 +235,12 @@ type FrontierClientConfig struct {
 	// ServiceName is the identifier reported to the frontier on connect
 	// via fbsvc.OptionServiceName. Defaults to "ongrid-manager".
 	ServiceName string
+	// Disabled skips the long-lived service-end dial to the frontier
+	// broker entirely. Set by ONGRID_FRONTIER_DISABLED=true. The e2e
+	// harness uses it to bring the manager up without a real geminio
+	// broker — features that require fbClient (webssh, edge reverse
+	// calls) error at call site rather than failing manager startup.
+	Disabled bool
 }
 
 // DBConfig selects the backend (MySQL by default, SQLite opt-in) and
@@ -403,6 +409,7 @@ func Load() (*Config, error) {
 
 	c.FrontierClient.Addr = getEnv("ONGRID_FRONTIER_ADDR", "frontier:40011")
 	c.FrontierClient.ServiceName = getEnv("ONGRID_FRONTIER_SERVICE_NAME", "ongrid-manager")
+	c.FrontierClient.Disabled = getEnvBool("ONGRID_FRONTIER_DISABLED", false)
 
 	c.Prom.Enabled = getEnvBool("ONGRID_PROM_ENABLED", false)
 	c.Prom.URL = getEnv("ONGRID_PROM_URL", "http://prometheus:9090")

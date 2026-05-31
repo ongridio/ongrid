@@ -20,7 +20,7 @@ func TestAuth_LoginAndSelf_B1(t *testing.T) {
 		t.Fatalf("LoginAdmin returned empty access_token")
 	}
 
-	status, body, err := env.DoJSON("GET", "/v1/self", nil, pair.AccessToken)
+	status, body, err := env.DoJSON("GET", "/api/v1/self", nil, pair.AccessToken)
 	if err != nil {
 		t.Fatalf("/v1/self: %v", err)
 	}
@@ -33,7 +33,7 @@ func TestAuth_LoginAndSelf_B1(t *testing.T) {
 
 	// Negative path: wrong-bearer must 401 (the auth middleware rejects
 	// before the handler runs).
-	bad, _, err := env.DoJSON("GET", "/v1/self", nil, "not-a-real-jwt")
+	bad, _, err := env.DoJSON("GET", "/api/v1/self", nil, "not-a-real-jwt")
 	if err != nil {
 		t.Fatalf("/v1/self (bad token): %v", err)
 	}

@@ -19,7 +19,7 @@ func TestNotify_SlackRichFormat_G3(t *testing.T) {
 	pair := env.LoginAdmin()
 
 	// 1. Create a Slack channel pointing at our fake.
-	createStatus, body, err := env.DoJSON("POST", "/v1/notification-channels", map[string]any{
+	createStatus, body, err := env.DoJSON("POST", "/api/v1/notification-channels", map[string]any{
 		"name":     "e2e-slack",
 		"type":     "slack",
 		"endpoint": env.FakeSlack().WebhookURL(),
@@ -41,7 +41,7 @@ func TestNotify_SlackRichFormat_G3(t *testing.T) {
 	}
 
 	// 2. Fire the test send.
-	testStatus, testBody, err := env.DoJSON("POST", "/v1/notification-channels/"+channelID+"/test", nil, pair.AccessToken)
+	testStatus, testBody, err := env.DoJSON("POST", "/api/v1/notification-channels/"+channelID+"/test", nil, pair.AccessToken)
 	if err != nil {
 		t.Fatalf("test channel: %v", err)
 	}

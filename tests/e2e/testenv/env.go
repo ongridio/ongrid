@@ -99,14 +99,21 @@ func Start(t *testing.T, opts ...Option) *Env {
 	binary := managerBinary(t)
 
 	env := &Env{
-		t:             t,
-		cfg:           cfg,
-		llm:           NewFakeLLM(),
-		slack:         NewFakeSlack(),
-		telegram:      NewFakeTelegram(),
-		prom:          NewFakeProm(),
+		t:        t,
+		cfg:      cfg,
+		llm:      NewFakeLLM(),
+		slack:    NewFakeSlack(),
+		telegram: NewFakeTelegram(),
+		prom:     NewFakeProm(),
+		// AdminEmail / AdminPassword are shared across every Start within
+		// a `go test` invocation: BootstrapAdmin only seeds the first
+		// time (subsequent Starts see users>0 and skip), so the password
+		// the *first* test brought up must be the same one all later
+		// tests log in with. Both live inside the ephemeral test MySQL
+		// container so the "known credentials" surface is bounded to
+		// this process.
 		AdminEmail:    "admin@ongrid.local",
-		AdminPassword: "Admin!Pass-" + randomSuffix(),
+		AdminPassword: "E2E!Admin-pass-do-not-reuse",
 	}
 	t.Cleanup(env.Stop)
 
@@ -145,6 +152,12 @@ func Start(t *testing.T, opts ...Option) *Env {
 		"ONGRID_ZHIPU_BASE_URL":    env.llm.URL() + "/v1",
 		"ONGRID_ZHIPU_MODEL":       "glm-fake",
 		"ONGRID_ALERT_EVAL_INTERVAL": "30s",
+		// No frontier broker in the harness — disable the geminio dial
+		// so manager comes up without waiting on a non-existent broker.
+		// Edge-tunnel-only features (webssh, edge reverse calls) error
+		// with frontierbound.ErrDisabled at the call site; tests that
+		// need them get marked t.Skip via RequireSecret-style gates.
+		"ONGRID_FRONTIER_DISABLED": "true",
 	}
 	for k, v := range cfg.extraEnv {
 		managerEnv[k] = v
@@ -206,7 +219,7 @@ func (e *Env) BaseURL() string             { return e.httpBase }
 
 // DoJSON sends method+path with optional JSON body and optional bearer.
 // Returns status + decoded JSON body if any. Path is appended to BaseURL
-// without modification — caller passes "/v1/auth/login" etc.
+// without modification — caller passes "/api/v1/auth/login" etc.
 func (e *Env) DoJSON(method, path string, body any, bearer string) (int, map[string]any, error) {
 	var rdr io.Reader
 	if body != nil {
@@ -255,7 +268,7 @@ func (e *Env) LoginAdmin() LoginResult {
 // Login is the generic login helper.
 func (e *Env) Login(email, password string) LoginResult {
 	e.t.Helper()
-	status, body, err := e.DoJSON("POST", "/v1/auth/login", map[string]string{
+	status, body, err := e.DoJSON("POST", "/api/v1/auth/login", map[string]string{
 		"email":    email,
 		"password": password,
 	}, "")

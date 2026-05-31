@@ -942,13 +942,27 @@ func main() {
 	// to the upstream frontier broker (a separate docker container) and
 	// installs lifecycle callbacks + reverse-call handlers. aiops tools
 	// reuse fbClient.Call to dispatch back to specific edges.
-	fbClient, err := managersvcfb.New(managersvcfb.Config{
-		Addr:        cfg.FrontierClient.Addr,
-		ServiceName: cfg.FrontierClient.ServiceName,
-	}, log.With(slog.String("comp", "frontierbound")))
-	if err != nil {
-		log.Error("frontierbound: new client", slog.Any("err", err))
-		os.Exit(1)
+	//
+	// ONGRID_FRONTIER_DISABLED=true bypasses the dial entirely — the
+	// resulting Client errors all Call/OpenStream/NotifyX with
+	// frontierbound.ErrDisabled and is a no-op for Register. Used by the
+	// e2e harness so manager can come up without a real broker. The HTTP
+	// surface and DB stack are unaffected; edge-tunnel-only features
+	// (webssh, edge reverse calls) surface ErrDisabled at the call site.
+	var fbClient *managersvcfb.Client
+	if cfg.FrontierClient.Disabled {
+		log.Warn("frontierbound: disabled (ONGRID_FRONTIER_DISABLED=true) — edge-tunnel features will error at call site")
+		fbClient = managersvcfb.NewDisabled(log.With(slog.String("comp", "frontierbound")))
+	} else {
+		c, err := managersvcfb.New(managersvcfb.Config{
+			Addr:        cfg.FrontierClient.Addr,
+			ServiceName: cfg.FrontierClient.ServiceName,
+		}, log.With(slog.String("comp", "frontierbound")))
+		if err != nil {
+			log.Error("frontierbound: new client", slog.Any("err", err))
+			os.Exit(1)
+		}
+		fbClient = c
 	}
 	defer func() {
 		if err := fbClient.Close(); err != nil {

@@ -89,6 +89,15 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 		log = slog.Default()
 	}
 
+	// Disabled client (NewDisabled): nothing to register against; report
+	// success so main.go's bring-up sequence can continue to the HTTP
+	// server. Edge-facing reverse calls won't ever fire, but that is the
+	// whole point of the e2e harness path.
+	if c.svc == nil {
+		log.Info("frontierbound: Install skipped — client is disabled")
+		return nil
+	}
+
 	if w.EdgeAuthn == nil {
 		return fmt.Errorf("frontierbound: Install: EdgeAuthn is required")
 	}
