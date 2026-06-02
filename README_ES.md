@@ -13,7 +13,7 @@
 ---
 
 <p align="center">
-  <video src="https://github.com/ongridio/ongrid/releases/download/v0.7.159/demo.mp4" autoplay loop muted playsinline width="100%"></video>
+  <img src="docs/assets/demo.gif" alt="Ongrid demo" width="100%" />
 </p>
 
 ## Instalación
