@@ -428,6 +428,13 @@ services:
       # works for read-only access from the ongrid UI's drilldown links.
       GF_AUTH_DISABLE_LOGIN_FORM: "false"
       GF_USERS_DEFAULT_THEME: system
+      # Default UI language for anonymous viewers. Without this Grafana
+      # picks from Accept-Language so a zh-CN browser shows Chinese
+      # even when the ongrid product UI is in EN. We pin en-US as the
+      # fallback; web/lib/drilldown.ts also appends ?lang=zh-Hans /
+      # en-US so the per-tab locale follows the product UI on Grafana
+      # 11.x where the query param is honored.
+      GF_USERS_DEFAULT_LANGUAGE: en-US
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
       # Datasource provisioning URLs (loki / tempo). Set as env so the

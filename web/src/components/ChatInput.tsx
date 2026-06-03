@@ -606,9 +606,24 @@ function ModelDropdown({
     ? tr('未配置模型', 'No model configured')
     : activeModel || (providers[0]?.model ?? providers[0]?.models?.[0] ?? tr('选择模型', 'Select model'));
 
+  // Auto-flip: the home page input sits near viewport top (more room
+  // below); the chat thread input sits near the bottom (more room
+  // above). Measure once per open so the menu never gets clipped by
+  // the viewport edge or the hero section above.
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const [openUp, setOpenUp] = useState(true);
+  useEffect(() => {
+    if (!open || !triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    const spaceAbove = rect.top;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    setOpenUp(spaceAbove >= spaceBelow);
+  }, [open]);
+
   return (
     <div className="relative">
       <button
+        ref={triggerRef}
         type="button"
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -632,7 +647,10 @@ function ModelDropdown({
         <div
           role="listbox"
           aria-label={tr('选择模型', 'Select model')}
-          className="absolute bottom-full left-0 z-30 mb-1 min-w-[260px] overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 shadow-xl"
+          className={cn(
+            'absolute left-0 z-30 min-w-[260px] max-h-[60vh] overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-950 shadow-xl',
+            openUp ? 'bottom-full mb-1' : 'top-full mt-1',
+          )}
         >
           {empty ? (
             <div className="px-3 py-3 text-[12px] text-zinc-300">

@@ -371,11 +371,16 @@ func (a *Agent) registerEdge(ctx context.Context) error {
 }
 
 // heartbeatLoop sends one heartbeat every HeartbeatInterval until ctx
-// cancels. Errors are logged but do not abort the loop — the tunnel
-// layer handles reconnect transparently.
+// cancels. Errors are logged; transient ones (TCP/RPC blips) are
+// recovered by the tunnel layer transparently. When heartbeats fail
+// continuously for tunnelStuckThreshold ticks we treat the tunnel as
+// stuck (geminio RetryEnd silently giving up on TLS handshake / frontier
+// route never re-validating) and return errTunnelStuck so Agent.Run
+// unwinds and systemd respawns the process with a clean dial.
 func (a *Agent) heartbeatLoop(ctx context.Context) error {
 	t := time.NewTicker(a.cfg.HeartbeatInterval)
 	defer t.Stop()
+	var consecutiveFail int
 	for {
 		select {
 		case <-ctx.Done():
@@ -397,11 +402,33 @@ func (a *Agent) heartbeatLoop(ctx context.Context) error {
 				}, nil)
 			cancel()
 			if err != nil {
-				a.log.Warn("agent: heartbeat failed", slog.Any("err", err))
+				consecutiveFail++
+				a.log.Warn("agent: heartbeat failed",
+					slog.Int("consecutive_fail", consecutiveFail),
+					slog.Any("err", err))
+				if consecutiveFail >= tunnelStuckThreshold {
+					a.log.Error("agent: tunnel stuck; exiting for systemd respawn",
+						slog.Int("consecutive_fail", consecutiveFail))
+					return errTunnelStuck
+				}
+				continue
 			}
+			consecutiveFail = 0
 		}
 	}
 }
+
+// tunnelStuckThreshold = consecutive heartbeat failures before we declare
+// the tunnel stuck and exit. With HeartbeatInterval=30s and threshold=5,
+// the edge tolerates ~2.5min of network/manager wobble (TCP timeouts +
+// 2 normal retries) before bailing. Tuned for "manager restart cycle
+// completes within ~90s" vs "transient packet loss never lasts >60s".
+const tunnelStuckThreshold = 5
+
+// errTunnelStuck is the sentinel returned from heartbeatLoop when N
+// consecutive heartbeats failed. errgroup cancels siblings and Run
+// returns this error so systemd (Restart=always) respawns the process.
+var errTunnelStuck = errors.New("tunnel stuck: heartbeat failed N times")
 
 // metricsLoop samples the collector every MetricsInterval and fans out
 // the result to the legacy push_host_metrics path and the new

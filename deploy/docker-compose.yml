@@ -279,6 +279,13 @@ services:
       GF_AUTH_ANONYMOUS_ORG_ROLE: Editor
       GF_AUTH_DISABLE_LOGIN_FORM: "true"
       GF_USERS_DEFAULT_THEME: system
+      # Default UI language for anonymous viewers. Without this the
+      # Grafana picker follows Accept-Language → a CN-zh browser sees
+      # Chinese even when the ongrid product UI is in EN mode. We pin
+      # en-US as the fallback; the web/drilldown URL builder also
+      # appends ?lang=zh-Hans / en-US so the per-tab locale follows
+      # the product UI on Grafana 11.x where the param is honored.
+      GF_USERS_DEFAULT_LANGUAGE: en-US
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
       # iframe embedding for ongrid /monitor solo-mode panels. Default

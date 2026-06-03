@@ -1,6 +1,7 @@
 import { createPrometheusLaunch } from '@/api/prometheus';
 import { listSettings } from '@/api/settings';
 import { useObservability } from '@/store/observability';
+import { getLocale } from '@/i18n/locale';
 
 // openObservabilityUrl opens a Grafana Loki/Tempo Explore deep-link after
 // minting the prometheus-ticket cookie that nginx auth_request gates
@@ -129,6 +130,19 @@ function isBrowserReachableURL(rawUrl: string): boolean {
   }
 }
 
+// grafanaLangFromLocale maps the product UI locale to Grafana's IETF
+// language tag ("zh-CN" → "zh-Hans"; everything else → "en-US"). Grafana
+// 11.x reads the `lang` query param when localizationForVisualizations
+// is on; if it's off the param is harmlessly ignored and the user falls
+// back to GF_USERS_DEFAULT_LANGUAGE (set to en-US in docker-compose).
+function grafanaLangFromLocale(): string {
+  try {
+    return getLocale() === 'zh-CN' ? 'zh-Hans' : 'en-US';
+  } catch {
+    return 'en-US';
+  }
+}
+
 async function buildGrafanaUrl(input: DrilldownInput): Promise<string | null> {
   const { grafanaDashboardUid, grafanaOrgId } = useObservability.getState();
   const baseUrl = await fetchGrafanaRootURL();
@@ -137,6 +151,7 @@ async function buildGrafanaUrl(input: DrilldownInput): Promise<string | null> {
   const params = new URLSearchParams();
   params.set('from', toRelativeFrom(input.rangeInput));
   params.set('to', 'now');
+  params.set('lang', grafanaLangFromLocale());
   if (grafanaOrgId.trim()) {
     params.set('orgId', grafanaOrgId.trim());
   }
@@ -206,6 +221,7 @@ export function buildExploreUrl(opts: {
   const params = new URLSearchParams();
   params.set('schemaVersion', '1');
   params.set('panes', panes);
+  params.set('lang', grafanaLangFromLocale());
   if (opts.orgId && opts.orgId.trim()) params.set('orgId', opts.orgId.trim());
   return `${base}/explore?${params.toString()}`;
 }
