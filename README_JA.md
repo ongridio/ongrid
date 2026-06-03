@@ -1,6 +1,6 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> Ongrid
 
-> **システムを理解する運用 AI エージェント。** *アラートから根本原因まで —— メトリクス・ログ・トレース・コードを横断的に。*
+> **インフラを理解し、診断し、運用する AI エージェント。** *可観測性、リモート実行、ナレッジベース、エージェントとスキル —— すべてチャット駆動。Slack、Telegram、Lark、あるいはチームが既にいるチャットアプリにそのまま組み込めます。*
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/ongridio/ongrid)](https://goreportcard.com/report/github.com/ongridio/ongrid)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)

@@ -1,6 +1,6 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> Ongrid
 
-> **시스템을 이해하는 운영 AI 에이전트.** *알림과 근본 원인을 잇다 —— 메트릭, 로그, 트레이스, 소스 코드 전반에 걸쳐.*
+> **인프라를 이해하고 진단하고 운영하는 AI 에이전트.** *가관측성, 원격 실행, 지식 베이스, 에이전트와 스킬 —— 모두 채팅으로 구동. Slack, Telegram, Lark, 혹은 팀이 이미 모여 있는 채팅 앱에 그대로 넣으세요.*
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/ongridio/ongrid)](https://goreportcard.com/report/github.com/ongridio/ongrid)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)

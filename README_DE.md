@@ -1,6 +1,6 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> Ongrid
 
-> **Ein KI-Agent, der Ihre Systeme kennt.** *Schließt den Kreis zwischen Alarm und Ursache —— über Metriken, Logs, Traces und Code hinweg.*
+> **KI-Agent zum Verstehen, Diagnostizieren und Betreiben Ihrer Infrastruktur.** *Observability, Remote-Ausführung, Wissensbasis, Agenten und Skills —— alles per Chat. Einfach in Slack, Telegram, Lark oder die Chat-App einbinden, in der Ihr Team bereits unterwegs ist.*
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/ongridio/ongrid)](https://goreportcard.com/report/github.com/ongridio/ongrid)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)

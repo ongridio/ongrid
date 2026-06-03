@@ -1,6 +1,6 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> Ongrid
 
-> **Um agente de IA que conhece seus sistemas.** *Fecha o ciclo entre alerta e causa raiz —— através de métricas, logs, traces e código.*
+> **Agente de IA para entender, diagnosticar e operar sua infraestrutura.** *Observabilidade, execução remota, base de conhecimento, agentes e skills —— tudo via chat. Coloque no Slack, Telegram, Lark ou no app onde sua equipe já vive.*
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/ongridio/ongrid)](https://goreportcard.com/report/github.com/ongridio/ongrid)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)

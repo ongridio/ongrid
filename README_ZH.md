@@ -1,6 +1,6 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> Ongrid
 
-> **懂你系统的 AI 运维 Agent。** *把告警和根因接起来 —— 跨指标、日志、链路和源码。*
+> **理解、诊断并运维基础设施的 AI Agent。** *可观测、远程执行、知识库、智能体与技能 —— 全部对话驱动。放进 Slack、Telegram、飞书，或者你团队已经常驻的任何聊天里。*
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/ongridio/ongrid)](https://goreportcard.com/report/github.com/ongridio/ongrid)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)

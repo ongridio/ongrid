@@ -1,6 +1,6 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> Ongrid
 
-> **AI-агент, который знает ваши системы.** *Замыкает цикл от алерта до первопричины —— по метрикам, логам, трейсам и коду.*
+> **AI-агент для понимания, диагностики и эксплуатации инфраструктуры.** *Observability, удалённое выполнение, база знаний, агенты и skills —— всё через чат. Поднимите в Slack, Telegram, Lark или в мессенджере, где команда уже общается.*
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/ongridio/ongrid)](https://goreportcard.com/report/github.com/ongridio/ongrid)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
