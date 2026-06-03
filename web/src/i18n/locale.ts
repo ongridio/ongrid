@@ -19,10 +19,49 @@ export type Locale = 'zh-CN' | 'en-US';
 const LOCALE_STORAGE_KEY = 'ongrid-locale';
 const LOCALE_CHANGE_EVENT = 'ongrid-locale-change';
 
+// Mainland-CN + HK/Macau timezones. The user's effective time zone is the
+// primary auto-detect signal because foreign visitors with zh-* set in
+// their browser (e.g. heritage speakers, students) still want the English
+// UI; conversely, an in-CN user whose browser is en-US (corp default)
+// still wants the Chinese UI.
+const CN_TIMEZONES = new Set<string>([
+  'Asia/Shanghai',
+  'Asia/Chongqing',
+  'Asia/Urumqi',
+  'Asia/Harbin',
+  'Asia/Hong_Kong',
+  'Asia/Macau',
+]);
+
+function autoDetectLocale(): Locale {
+  // Run only in the browser; SSR / unit-test envs fall back to zh-CN
+  // (preserves the old "Chinese-default" behaviour for non-browser paths).
+  if (typeof navigator === 'undefined' || typeof Intl === 'undefined') {
+    return 'zh-CN';
+  }
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+    if (CN_TIMEZONES.has(tz)) return 'zh-CN';
+    // Secondary signal: browser language. Treat as a tie-breaker for
+    // timezones we don't recognise but where the user clearly speaks
+    // Chinese (e.g. tz=UTC because of a misconfigured docker host).
+    const lang = (navigator.language || '').toLowerCase();
+    if (lang.startsWith('zh')) return 'zh-CN';
+  } catch {
+    /* Intl unavailable in this runtime — fall through */
+  }
+  return 'en-US';
+}
+
 export const getLocale = (): Locale => {
   if (typeof localStorage === 'undefined') return 'zh-CN';
   const v = localStorage.getItem(LOCALE_STORAGE_KEY);
-  return v === 'en-US' ? 'en-US' : 'zh-CN';
+  // User-explicit choice (set via the language switcher) ALWAYS wins.
+  if (v === 'en-US' || v === 'zh-CN') return v;
+  // First visit (or storage cleared): auto-detect from timezone +
+  // browser language. Applies on the login page too because the React
+  // SPA boots through this same hook before the route resolves.
+  return autoDetectLocale();
 };
 
 export const setLocale = (locale: Locale): void => {
