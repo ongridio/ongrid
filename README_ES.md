@@ -42,18 +42,16 @@ make compose-up    # make compose-down to stop
 
 ## Características
 
-|   | Feature | Description |
-|---|---|---|
-| 🤖 | **Agentes en dos niveles Coordinator + Specialist** | El coordinator gestiona la conversación y delega a sub-agentes SRE / red / DB / activos. Cada specialist tiene su propio toolbag y persona; la locale de UI se propaga por toda la cadena. |
-| 🚨 | **Auto-investigación al disparar alerta** | La alerta dispara → el investigator lanza un RCA worker → causa raíz + cadena de evidencias se escriben de vuelta en la sesión de chat. Se ejecuta aunque no haya nadie de guardia. |
-| 🔍 | **RCA de causa raíz, no charla superficial** | El agente recorre la topología de servicios para analizar el radio de impacto, correlaciona métricas / logs / trazas y precisa el "por qué" hasta una **línea de código fuente**. |
-| 🔒 | **Cero puertos entrantes** | El edge sale al exterior; los hosts no abren ningún puerto 22 / 80 / 443. El plano de datos de telemetría está separado del plano de control. |
-| 💻 | **SSH en el navegador** | Un shell interactivo a cualquier host a través del mismo túnel saliente revertido. Sin distribuir claves SSH, sin jumpbox, sin puerto 22. Cada comando auditado. |
-| 🐳 | **Autoalojable en un comando** | `docker compose up` levanta toda la stack (manager + MySQL + Qdrant + frontier). Cero dependencia SaaS. |
-| 📊 | **Stack de observabilidad integrada** | Prometheus (métricas) / Loki (logs) / Tempo (trazas) / Grafana (dashboards) listos automáticamente. Pregunta en lenguaje natural y el agente escribe el PromQL / LogQL / TraceQL. |
-| 🧠 | **Trae tu propio modelo** | Anthropic / OpenAI / GLM / DeepSeek / Gemini / Kimi o cualquier endpoint compatible con OpenAI. El enrutamiento de proveedores y el cambio de modelo por defecto son en caliente, sin reinicio. |
-| 💬 | **Canales IM bidireccionales** | Slack / Telegram / Larksuite (Feishu) / DingTalk / WeCom — pregunta desde donde tu equipo ya habla; allow-list por canal y idioma por canal. |
-| 🛠️ | **Herramientas de host de solo lectura, cada llamada auditada** | bash (sandbox), `host_probe_*`, `query_promql`, `expand_topology`, 26+ herramientas. El rol viewer obtiene automáticamente solo el subconjunto ClassSafe. |
+- 🤖 **Agentes Coordinator + Specialist** — el coordinator delega a sub-agentes SRE / red / DB / activos
+- 🚨 **Auto-investigación en alerta** — el investigator lanza un RCA worker y escribe la causa al chat
+- 🔍 **RCA de causa raíz** — recorre la topología, correlaciona métricas/logs/trazas, llega a una línea de código
+- 🔒 **Cero puertos entrantes** — el edge sale al exterior; ningún puerto 22 / 80 / 443 en hosts
+- 💻 **SSH en el navegador** — shell por túnel inverso, sin claves, sin jumpbox, todo auditado
+- 🐳 **Self-host en un comando** — `docker compose up` levanta toda la stack
+- 📊 **Observabilidad integrada** — Prometheus + Loki + Tempo + Grafana listos, el agente escribe las queries
+- 🧠 **Trae tu propio modelo** — Anthropic / OpenAI / GLM / DeepSeek / Gemini / Kimi, enrutamiento en caliente
+- 💬 **Canales IM bidireccionales** — Slack / Telegram / Larksuite / DingTalk / WeCom, idioma por canal
+- 🛠️ **Herramientas de host solo-lectura** — sandbox bash + 26+ herramientas, cada llamada auditada
 
 ## Integraciones
 

@@ -42,18 +42,16 @@ make compose-up    # make compose-down to stop
 
 ## 特性
 
-|   | Feature | Description |
-|---|---|---|
-| 🤖 | **Coordinator + Specialist 双层 Agent** | coordinator 接对话和派活，按领域路由到 SRE / 网络 / DB / 资产 specialist 子 agent，各自独立 toolbag 和 persona；UI locale 全链贯穿。 |
-| 🚨 | **告警触发自动调查** | 告警起飞 → investigator 自动派 RCA worker → 根因 + 证据链回填到聊天会话，没人值班也会跑。 |
-| 🔍 | **根因 RCA，不是表面问答** | Agent 沿业务拓扑做爆炸半径分析、跨指标 / 日志 / 链路相关，定位**源码行**给出"为什么"。 |
-| 🔒 | **零入站端口** | edge 主动外联，host 不开 22 / 80 / 443 任何端口；遥测数据面与控制面分离。 |
-| 💻 | **浏览器 SSH** | 走同一条出站隧道反向打通，UI 内拿到目标主机交互式 shell；不用 SSH key / 跳板机 / 开 22；全程审计。 |
-| 🐳 | **一行命令自托管整套栈** | `docker compose up` 起 manager + MySQL + Qdrant + frontier，零 SaaS 依赖。 |
-| 📊 | **可观测全栈内置** | Prometheus 指标 / Loki 日志 / Tempo 链路 / Grafana 看板 自动起；自然语言提问，Agent 自动写 PromQL / LogQL / TraceQL。 |
-| 🧠 | **自带任意模型** | Anthropic / OpenAI / GLM / DeepSeek / Gemini / Kimi 或任意 OpenAI 兼容端点；provider 路由 + default-model 热切换不用重启。 |
-| 💬 | **双向 IM 通道** | Slack / Telegram / Larksuite (飞书) / DingTalk / WeCom，团队在哪聊就在哪发问；按通道 allow-list + 按通道语言。 |
-| 🛠️ | **只读主机巡检工具 + 审计** | bash 沙箱、`host_probe_*`、`query_promql`、`expand_topology` 等 26+ 工具；viewer 角色只看 ClassSafe 工具。 |
+- 🤖 **Coordinator + Specialist 双层 Agent** — coordinator 派活给 SRE / 网络 / DB 子 agent
+- 🚨 **告警触发自动调查** — investigator 派 RCA worker, 根因 + 证据回填到聊天
+- 🔍 **根因 RCA** — 沿拓扑做爆炸半径分析, 跨指标/日志/链路相关到源码行
+- 🔒 **零入站端口** — edge 主动外联, host 不开 22 / 80 / 443
+- 💻 **浏览器 SSH** — 反向隧道开交互式 shell, 不用 key / 跳板机, 全程审计
+- 🐳 **一行命令自托管** — `docker compose up` 起整套栈
+- 📊 **可观测全栈内置** — Prometheus + Loki + Tempo + Grafana 自动起, Agent 自动写 query
+- 🧠 **自带任意模型** — Anthropic / OpenAI / GLM / DeepSeek / Gemini / Kimi, 热路由
+- 💬 **双向 IM 通道** — Slack / Telegram / Larksuite / DingTalk / WeCom, 按通道语言
+- 🛠️ **只读主机巡检工具** — bash 沙箱 + 26+ 工具, 每次调用全审计
 
 ## 集成
 

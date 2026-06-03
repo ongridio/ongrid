@@ -42,18 +42,16 @@ make compose-up    # make compose-down to stop
 
 ## Funktionen
 
-|   | Feature | Description |
-|---|---|---|
-| 🤖 | **Coordinator + Specialist Zweischicht-Agent** | Der Coordinator führt das Gespräch und verteilt an Sub-Agenten SRE / Netzwerk / DB / Asset. Jeder Specialist hat eine eigene Toolbag und Persona; die UI-Sprache wird durch die gesamte Kette geleitet. |
-| 🚨 | **Auto-Investigation bei Alarm** | Alarm löst aus → der Investigator startet einen RCA-Worker → Grundursache + Beweisketten werden in die Chat-Session zurückgeschrieben. Läuft auch außerhalb der Bereitschaft. |
-| 🔍 | **Grundursache-RCA, kein Oberflächengespräch** | Der Agent geht die Service-Topologie für den Blast Radius durch, korreliert Metriken / Logs / Traces und schließt das "Warum" bis zu einer **Quellcode-Zeile** ein. |
-| 🔒 | **Null eingehende Ports** | Der Edge wählt nach außen; Hosts öffnen kein Port 22 / 80 / 443. Telemetrie-Datenebene ist von der Steuerungsebene getrennt. |
-| 💻 | **SSH im Browser** | Eine interaktive Shell zu jedem Host über denselben ausgehenden Tunnel rückwärts. Keine SSH-Schlüssel verteilen, kein Jumpbox, kein Port 22. Jeder Befehl auditiert. |
-| 🐳 | **Selbst-gehostet in einem Befehl** | `docker compose up` startet die gesamte Stack (manager + MySQL + Qdrant + frontier). Null SaaS-Abhängigkeit. |
-| 📊 | **Vollständiger Observability-Stack integriert** | Prometheus (Metriken) / Loki (Logs) / Tempo (Traces) / Grafana (Dashboards) werden automatisch bereitgestellt. Fragen Sie in natürlicher Sprache, der Agent schreibt PromQL / LogQL / TraceQL. |
-| 🧠 | **Eigenes Modell mitbringen** | Anthropic / OpenAI / GLM / DeepSeek / Gemini / Kimi oder jeder OpenAI-kompatible Endpunkt. Provider-Routing und Standardmodell-Wechsel im Betrieb, ohne Neustart. |
-| 💬 | **Zweiwege-IM-Kanäle** | Slack / Telegram / Larksuite (Feishu) / DingTalk / WeCom — fragen Sie dort, wo Ihr Team bereits spricht; Allow-list pro Kanal und Sprache pro Kanal. |
-| 🛠️ | **Schreibgeschützte Host-Tools, jeder Aufruf auditiert** | bash (Sandbox), `host_probe_*`, `query_promql`, `expand_topology`, 26+ Tools. Die Viewer-Rolle erhält automatisch nur das ClassSafe-Subset. |
+- 🤖 **Coordinator + Specialist Agenten** — der Coordinator delegiert an SRE / Netzwerk / DB / Asset Sub-Agenten
+- 🚨 **Auto-Investigation bei Alarm** — der Investigator startet einen RCA-Worker, schreibt die Ursache in den Chat
+- 🔍 **Grundursachen-RCA** — durchläuft die Topologie, korreliert Metriken/Logs/Traces, identifiziert eine Quellcode-Zeile
+- 🔒 **Null eingehende Ports** — der Edge wählt nach außen; kein Port 22 / 80 / 443 auf Hosts
+- 💻 **SSH im Browser** — Shell über Rückwärtstunnel, keine Schlüssel, kein Jumpbox, alles auditiert
+- 🐳 **Selbst-Hosting in einem Befehl** — `docker compose up` startet die gesamte Stack
+- 📊 **Eingebaute Observability** — Prometheus + Loki + Tempo + Grafana bereit, der Agent schreibt die Queries
+- 🧠 **Eigenes Modell mitbringen** — Anthropic / OpenAI / GLM / DeepSeek / Gemini / Kimi, Hot-Routing
+- 💬 **Zweiwege-IM-Kanäle** — Slack / Telegram / Larksuite / DingTalk / WeCom, Sprache pro Kanal
+- 🛠️ **Schreibgeschützte Host-Tools** — bash Sandbox + 26+ Tools, jeder Aufruf auditiert
 
 ## Integrationen
 

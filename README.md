@@ -42,18 +42,16 @@ make compose-up    # make compose-down to stop
 
 ## Features
 
-|   | Feature | Description |
-|---|---|---|
-| 🤖 | **Coordinator + Specialist two-tier agent** | The coordinator runs the conversation and dispatches to SRE / network / DB / asset specialist sub-agents, each with its own toolbag and persona. The UI locale is threaded end-to-end. |
-| 🚨 | **Auto-investigate on alert** | An alert fires, the investigator spawns an RCA worker, follows the trail, and writes the root cause + evidence chain back to a chat session — runs whether you are on call or not. |
-| 🔍 | **Root-cause RCA, not surface chat** | The agent walks the service topology for blast radius, correlates metrics / logs / traces, and pins the "why" down to a **source-code line**. |
-| 🔒 | **Zero inbound ports** | The edge dials out; hosts open no port 22 / 80 / 443. The telemetry data plane is separated from the control plane. |
-| 💻 | **Browser SSH** | A reverse-tunnel interactive shell into any host over the same outbound connection — no SSH keys to distribute, no jumpbox, no port 22. Every command audited. |
-| 🐳 | **Self-hostable in one command** | `docker compose up` brings up the full stack (manager + MySQL + Qdrant + frontier). No SaaS dependency. |
-| 📊 | **Full observability stack built in** | Prometheus (metrics), Loki (logs), Tempo (traces), Grafana (dashboards) wired up out of the box. Ask in natural language; the agent writes the PromQL / LogQL / TraceQL. |
-| 🧠 | **Bring your own model** | Anthropic / OpenAI / GLM / DeepSeek / Gemini / Kimi or any OpenAI-compatible endpoint. Provider routing and default-model switching are hot — no restart. |
-| 💬 | **Two-way IM channels** | Slack / Telegram / Larksuite (Feishu) / DingTalk / WeCom — ask from wherever your team already talks. Per-channel allow-list and per-channel locale. |
-| 🛠️ | **Read-only host tools, every call audited** | bash (sandboxed), `host_probe_*`, `query_promql`, `expand_topology`, 26+ inspection tools. The viewer role automatically gets the ClassSafe-only subset. |
+- 🤖 **Coordinator + Specialist agents** — coordinator dispatches to SRE / network / DB sub-agents
+- 🚨 **Auto-investigate on alert** — investigator spawns an RCA worker, writes the cause back to chat
+- 🔍 **Root-cause RCA** — walks topology, correlates m/l/t, pins the "why" to a source-code line
+- 🔒 **Zero inbound ports** — edge dials out; no port 22 / 80 / 443 on hosts
+- 💻 **Browser SSH** — reverse-tunnel shell into any host; no keys, no jumpbox, all audited
+- 🐳 **Self-host in one command** — `docker compose up` brings up the full stack
+- 📊 **Built-in observability** — Prometheus + Loki + Tempo + Grafana wired; the agent writes the queries
+- 🧠 **Bring your own model** — Anthropic / OpenAI / GLM / DeepSeek / Gemini / Kimi, hot routing
+- 💬 **Two-way IM channels** — Slack / Telegram / Larksuite / DingTalk / WeCom, per-channel locale
+- 🛠️ **Read-only host tools** — bash sandbox + 26+ inspection tools; every call audited
 
 ## Integrations
 

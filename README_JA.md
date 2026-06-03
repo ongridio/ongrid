@@ -42,18 +42,16 @@ make compose-up    # make compose-down to stop
 
 ## 機能
 
-|   | Feature | Description |
-|---|---|---|
-| 🤖 | **Coordinator + Specialist の階層 Agent** | coordinator が対話と派遣を担当し、SRE / ネットワーク / DB / アセット の specialist サブ agent にルーティング。各 specialist は独立した toolbag と persona を持ち、UI ロケールは全チェーンで伝搬。 |
-| 🚨 | **アラート発火で自動調査** | アラートが鳴る → investigator が RCA worker を派遣 → 根本原因 + 証拠チェーンをチャットセッションに書き戻す。当番不在の時間帯でも動く。 |
-| 🔍 | **根本原因 RCA、表層対話ではない** | Agent がサービストポロジーで影響範囲を分析し、メトリクス / ログ / トレースを相関させ、「なぜ」を**ソースコードの行**まで特定する。 |
-| 🔒 | **インバウンドポートゼロ** | edge がアウトバウンドダイヤル。ホストは 22 / 80 / 443 を開かない。テレメトリのデータプレーンと制御プレーンは分離。 |
-| 💻 | **ブラウザ SSH** | 同じアウトバウンドトンネルを逆方向で開通し、UI から任意ホストの対話シェルへ。SSH 鍵配布も踏み台も 22 番ポートも不要。全コマンド監査。 |
-| 🐳 | **1 コマンドでセルフホスト** | `docker compose up` でフルスタック起動（manager + MySQL + Qdrant + frontier）。SaaS 依存ゼロ。 |
-| 📊 | **可観測性スタック組み込み** | Prometheus (メトリクス) / Loki (ログ) / Tempo (トレース) / Grafana (ダッシュボード) を自動配備。自然言語で質問すれば Agent が PromQL / LogQL / TraceQL を書く。 |
-| 🧠 | **任意モデル持ち込み** | Anthropic / OpenAI / GLM / DeepSeek / Gemini / Kimi、その他 OpenAI 互換エンドポイント全般。プロバイダールーティングとデフォルトモデルの切り替えは無再起動。 |
-| 💬 | **双方向 IM チャネル** | Slack / Telegram / Larksuite (Feishu) / DingTalk / WeCom。チームが普段話す場所からそのまま問い合わせ。チャネル別 allow-list とチャネル別ロケール。 |
-| 🛠️ | **読み取り専用ホストツール、全コール監査** | bash (サンドボックス)、`host_probe_*`、`query_promql`、`expand_topology` など 26+ のツール。Viewer ロールは ClassSafe のみ。 |
+- 🤖 **Coordinator + Specialist エージェント** — coordinator が SRE / ネットワーク / DB のサブエージェントへ派遣
+- 🚨 **アラート発火で自動調査** — investigator が RCA worker を派遣、原因をチャットに記録
+- 🔍 **根本原因 RCA** — トポロジーで影響範囲を分析、メトリクス/ログ/トレースを相関、ソースコード行まで
+- 🔒 **インバウンドポートゼロ** — edge はアウトバウンドのみ、ホストは 22 / 80 / 443 を開かない
+- 💻 **ブラウザ SSH** — 逆トンネルで対話シェル、鍵不要、踏み台不要、全コマンド監査
+- 🐳 **1 コマンドでセルフホスト** — `docker compose up` でフルスタック起動
+- 📊 **可観測性スタック組み込み** — Prometheus + Loki + Tempo + Grafana 自動配備、エージェントがクエリを書く
+- 🧠 **任意モデル持ち込み** — Anthropic / OpenAI / GLM / DeepSeek / Gemini / Kimi、ホット切り替え
+- 💬 **双方向 IM チャネル** — Slack / Telegram / Larksuite / DingTalk / WeCom、チャネル別ロケール
+- 🛠️ **読み取り専用ホストツール** — bash サンドボックス + 26+ ツール、全コール監査
 
 ## インテグレーション
 
