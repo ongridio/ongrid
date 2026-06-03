@@ -15,6 +15,7 @@
 <p align="center">
   <img src="docs/assets/demo.gif" alt="Ongrid demo" width="100%" />
 </p>
+<p align="center"><sub><a href="https://github.com/ongridio/ongrid/releases/download/v0.7.168/Area2.mp4">▶ Ver demo completa en HD (MP4, 47 MB)</a></sub></p>
 
 ## Características
 
@@ -35,10 +36,10 @@ Descarga la última release, descomprímela y ejecuta el instalador (Ubuntu 22.0
 
 ```bash
 # 1. Descarga la última release (Ubuntu 22.04+, Debian 12+, RHEL/Rocky 9)
-wget https://github.com/ongridio/ongrid/releases/download/v0.7.167/ongrid-v0.7.167-linux-amd64.tar.xz
+wget https://github.com/ongridio/ongrid/releases/download/v0.7.168/ongrid-v0.7.168-linux-amd64.tar.xz
 
 # 2. Descomprimir
-tar -xf ongrid-v0.7.167-linux-amd64.tar.xz && cd ongrid-v0.7.167-linux-amd64
+tar -xf ongrid-v0.7.168-linux-amd64.tar.xz && cd ongrid-v0.7.168-linux-amd64
 
 # 3. Instalar
 sudo ./install.sh
