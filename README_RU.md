@@ -1,6 +1,6 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> Ongrid
 
-> **Ops-AI, который понимает ваши системы, находит первопричину и сам исправляет.** *Мониторинг, удалённое выполнение, база знаний, специалисты-агенты, экосистема skills —— всё одним сообщением. Поднимите в Slack, Telegram или Lark: он живёт там, где живёт ваша команда.*
+> **Ops-AI: понимает, находит причину и чинит.** *Мониторинг, удалённое выполнение, база знаний, специалисты-агенты, экосистема skills —— всё одним сообщением. Поднимите в Slack, Telegram или Lark: он живёт там, где живёт ваша команда.*
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/ongridio/ongrid)](https://goreportcard.com/report/github.com/ongridio/ongrid)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
