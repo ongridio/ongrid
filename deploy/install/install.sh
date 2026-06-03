@@ -711,10 +711,14 @@ if [[ $HEALTH_OK -eq 0 ]]; then
 fi
 
 # ---------- detect host address for banner ----------
-# Prefer the host from ONGRID_PUBLIC_URL (the address edges actually use);
-# otherwise the LAN/egress IP. `hostname -f` is a last resort — stock cloud
-# images often return a useless 'localhost.localdomain' that no one can reach.
-HOST_HINT="$(printf '%s' "${ONGRID_PUBLIC_URL:-}" | sed -E 's#^[a-zA-Z]+://##; s#[:/].*$##')"
+# Source of truth is $ENV_FILE: that's the value the manager and the edges
+# actually use (whether typed at the prompt, taken from an exported env, or
+# auto-detected from cloud metadata). The earlier `fill_blank` writes it to
+# .env but does NOT export to the current shell, so reading `$ONGRID_PUBLIC_URL`
+# would come back empty. Read the file. Fall back to hostname / route only
+# when .env genuinely has no value.
+HOST_FROM_ENV="$(grep -E '^ONGRID_PUBLIC_URL=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- | sed -E 's#^[a-zA-Z]+://##; s#[:/].*$##')"
+HOST_HINT="$HOST_FROM_ENV"
 if [[ -z "$HOST_HINT" || "$HOST_HINT" == localhost* ]]; then
     HOST_HINT="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -Ev '^(127\.|$)' | head -1 || true)"
 fi
