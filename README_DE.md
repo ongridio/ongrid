@@ -1,6 +1,6 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> Ongrid
 
-> **Eine Ops-KI, die versteht, die Ursache findet und behebt.** *Monitoring, Remote-Ausführung, Wissensbasis, Spezialisten-Agenten, Skill-Ökosystem —— alles per Chat-Befehl. Direkt in Slack, Telegram oder Lark — sie lebt dort, wo Ihr Team lebt.*
+> **Eine Ops-KI, die versteht, die Ursache findet und behebt.** *Monitoring, Remote-Exec, Wissen, Agenten, Skills —— per Chat. Lebt in Slack, Telegram oder Lark.*
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/ongridio/ongrid)](https://goreportcard.com/report/github.com/ongridio/ongrid)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
