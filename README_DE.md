@@ -1,6 +1,6 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> Ongrid
 
-> **KI-Agent zum Verstehen, Diagnostizieren und Betreiben Ihrer Infrastruktur.** *Observability, Remote-Ausführung, Wissensbasis, Agenten und Skills —— alles per Chat. Einfach in Slack, Telegram, Lark oder die Chat-App einbinden, in der Ihr Team bereits unterwegs ist.*
+> **Eine Ops-KI, die Ihre Systeme versteht, die Grundursache findet und selbst Hand anlegt.** *Monitoring, Remote-Ausführung, Wissensbasis, Spezialisten-Agenten, Skill-Ökosystem —— alles per Chat-Befehl. Direkt in Slack, Telegram oder Lark — sie lebt dort, wo Ihr Team lebt.*
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/ongridio/ongrid)](https://goreportcard.com/report/github.com/ongridio/ongrid)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
@@ -15,7 +15,7 @@
 <p align="center">
   <img src="docs/assets/demo.gif" alt="Ongrid demo" width="100%" />
 </p>
-<p align="center"><sub><a href="https://github.com/ongridio/ongrid/releases/download/v0.7.168/Area2.mp4">▶ Vollständige Demo in HD ansehen (MP4, 47 MB)</a></sub></p>
+<p align="center"><sub><a href="https://github.com/ongridio/ongrid/releases/download/v0.7.168/Area2_hq.mp4">▶ Vollständige Demo in HD ansehen (MP4, 18 MB)</a></sub></p>
 
 ## Funktionen
 

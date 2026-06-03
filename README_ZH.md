@@ -1,6 +1,6 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> Ongrid
 
-> **理解、诊断并运维基础设施的 AI Agent。** *可观测、远程执行、知识库、智能体与技能 —— 全部对话驱动。放进 Slack、Telegram、飞书，或者你团队已经常驻的任何聊天里。*
+> **一个看得懂系统、查得出根因、还能动手解决的运维 AI。** *监控、远程执行、知识库、专家智能体、各类技能——全都一句话调度。直接装进 Slack、Telegram、飞书：团队在哪儿，它就在哪儿。*
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/ongridio/ongrid)](https://goreportcard.com/report/github.com/ongridio/ongrid)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
@@ -15,7 +15,7 @@
 <p align="center">
   <img src="docs/assets/demo.gif" alt="Ongrid demo" width="100%" />
 </p>
-<p align="center"><sub><a href="https://github.com/ongridio/ongrid/releases/download/v0.7.168/Area2.mp4">▶ 观看高清完整视频 (MP4, 47 MB)</a></sub></p>
+<p align="center"><sub><a href="https://github.com/ongridio/ongrid/releases/download/v0.7.168/Area2_hq.mp4">▶ 观看高清完整视频 (MP4, 18 MB)</a></sub></p>
 
 ## 特性
 

@@ -1,6 +1,6 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> Ongrid
 
-> **AI agent for understanding, diagnosing, and operating infrastructure.** *Observability, remote execution, knowledge base, agents and skills — all chat-driven. Drop it into Slack, Telegram, Lark, or wherever your team already lives.*
+> **An ops AI that understands your systems, finds the root cause, and actually fixes things.** *Monitoring, remote execution, knowledge base, specialist agents, an open skill ecosystem — all one prompt away. Drop it into Slack, Telegram, or Lark: it lives where your team lives.*
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/ongridio/ongrid)](https://goreportcard.com/report/github.com/ongridio/ongrid)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
@@ -15,7 +15,7 @@ English | [简体中文](./README_ZH.md) | [日本語](./README_JA.md) | [한국
 <p align="center">
   <img src="docs/assets/demo.gif" alt="Ongrid demo" width="100%" />
 </p>
-<p align="center"><sub><a href="https://github.com/ongridio/ongrid/releases/download/v0.7.168/Area2.mp4">▶ Watch full demo in HD (MP4, 47 MB)</a></sub></p>
+<p align="center"><sub><a href="https://github.com/ongridio/ongrid/releases/download/v0.7.168/Area2_hq.mp4">▶ Watch full demo in HD (MP4, 18 MB)</a></sub></p>
 
 ## Features
 

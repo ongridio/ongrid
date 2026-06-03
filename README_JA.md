@@ -1,6 +1,6 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> Ongrid
 
-> **インフラを理解し、診断し、運用する AI エージェント。** *可観測性、リモート実行、ナレッジベース、エージェントとスキル —— すべてチャット駆動。Slack、Telegram、Lark、あるいはチームが既にいるチャットアプリにそのまま組み込めます。*
+> **システムを理解し、根本原因を突き止め、自ら手を動かして解決する運用 AI。** *監視、リモート実行、ナレッジベース、スペシャリストエージェント、各種スキル —— すべて一言で呼び出せる。Slack、Telegram、Lark にそのまま入る。チームのいる場所で動く。*
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/ongridio/ongrid)](https://goreportcard.com/report/github.com/ongridio/ongrid)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
@@ -15,7 +15,7 @@
 <p align="center">
   <img src="docs/assets/demo.gif" alt="Ongrid demo" width="100%" />
 </p>
-<p align="center"><sub><a href="https://github.com/ongridio/ongrid/releases/download/v0.7.168/Area2.mp4">▶ フル動画 (HD) を見る (MP4, 47 MB)</a></sub></p>
+<p align="center"><sub><a href="https://github.com/ongridio/ongrid/releases/download/v0.7.168/Area2_hq.mp4">▶ フル動画 (HD) を見る (MP4, 18 MB)</a></sub></p>
 
 ## 機能
 

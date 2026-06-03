@@ -1,6 +1,6 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> Ongrid
 
-> **AI-агент для понимания, диагностики и эксплуатации инфраструктуры.** *Observability, удалённое выполнение, база знаний, агенты и skills —— всё через чат. Поднимите в Slack, Telegram, Lark или в мессенджере, где команда уже общается.*
+> **Ops-AI, который понимает ваши системы, находит первопричину и сам исправляет.** *Мониторинг, удалённое выполнение, база знаний, специалисты-агенты, экосистема skills —— всё одним сообщением. Поднимите в Slack, Telegram или Lark: он живёт там, где живёт ваша команда.*
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/ongridio/ongrid)](https://goreportcard.com/report/github.com/ongridio/ongrid)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
@@ -15,7 +15,7 @@
 <p align="center">
   <img src="docs/assets/demo.gif" alt="Ongrid demo" width="100%" />
 </p>
-<p align="center"><sub><a href="https://github.com/ongridio/ongrid/releases/download/v0.7.168/Area2.mp4">▶ Смотреть полное демо в HD (MP4, 47 MB)</a></sub></p>
+<p align="center"><sub><a href="https://github.com/ongridio/ongrid/releases/download/v0.7.168/Area2_hq.mp4">▶ Смотреть полное демо в HD (MP4, 18 MB)</a></sub></p>
 
 ## Возможности
 

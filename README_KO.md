@@ -1,6 +1,6 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> Ongrid
 
-> **인프라를 이해하고 진단하고 운영하는 AI 에이전트.** *가관측성, 원격 실행, 지식 베이스, 에이전트와 스킬 —— 모두 채팅으로 구동. Slack, Telegram, Lark, 혹은 팀이 이미 모여 있는 채팅 앱에 그대로 넣으세요.*
+> **시스템을 이해하고, 근본 원인을 찾아내고, 직접 손을 써서 해결하는 운영 AI.** *모니터링, 원격 실행, 지식 베이스, 전문가 에이전트, 각종 스킬 —— 모두 한 마디로 호출. Slack, Telegram, Lark 에 그대로 들어갑니다. 팀이 있는 곳에서 동작합니다.*
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/ongridio/ongrid)](https://goreportcard.com/report/github.com/ongridio/ongrid)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
@@ -15,7 +15,7 @@
 <p align="center">
   <img src="docs/assets/demo.gif" alt="Ongrid demo" width="100%" />
 </p>
-<p align="center"><sub><a href="https://github.com/ongridio/ongrid/releases/download/v0.7.168/Area2.mp4">▶ 전체 HD 영상 보기 (MP4, 47 MB)</a></sub></p>
+<p align="center"><sub><a href="https://github.com/ongridio/ongrid/releases/download/v0.7.168/Area2_hq.mp4">▶ 전체 HD 영상 보기 (MP4, 18 MB)</a></sub></p>
 
 ## 기능
 

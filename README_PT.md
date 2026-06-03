@@ -1,6 +1,6 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> Ongrid
 
-> **Agente de IA para entender, diagnosticar e operar sua infraestrutura.** *Observabilidade, execução remota, base de conhecimento, agentes e skills —— tudo via chat. Coloque no Slack, Telegram, Lark ou no app onde sua equipe já vive.*
+> **Uma IA de ops que entende seus sistemas, encontra a causa raiz e põe a mão na massa.** *Monitoramento, execução remota, base de conhecimento, agentes especialistas, ecossistema de skills —— tudo a um comando de distância. Coloque no Slack, Telegram ou Lark: ela vive onde sua equipe vive.*
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/ongridio/ongrid)](https://goreportcard.com/report/github.com/ongridio/ongrid)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
@@ -15,7 +15,7 @@
 <p align="center">
   <img src="docs/assets/demo.gif" alt="Ongrid demo" width="100%" />
 </p>
-<p align="center"><sub><a href="https://github.com/ongridio/ongrid/releases/download/v0.7.168/Area2.mp4">▶ Ver demo completa em HD (MP4, 47 MB)</a></sub></p>
+<p align="center"><sub><a href="https://github.com/ongridio/ongrid/releases/download/v0.7.168/Area2_hq.mp4">▶ Ver demo completa em HD (MP4, 18 MB)</a></sub></p>
 
 ## Recursos
 
