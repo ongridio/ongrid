@@ -1,6 +1,6 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> Ongrid
 
-> **An ops AI that understands, finds the root cause, and fixes things.** *Monitoring, remote exec, knowledge, agents, skills — one prompt. Lives in Slack, Telegram, or Lark.*
+> **An ops AI that understands, finds the root cause, and fixes things.** *Monitoring, remote execution, knowledge base, specialist agents, Bash, files, and more skills — issue commands directly from Slack, Telegram, or Lark.*
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/ongridio/ongrid)](https://goreportcard.com/report/github.com/ongridio/ongrid)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
