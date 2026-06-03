@@ -8,13 +8,26 @@
 
 [English](./README.md) | [简体中文](./README_ZH.md) | 日本語 | [한국어](./README_KO.md) | [Español](./README_ES.md) | [Français](./README_FR.md) | [Deutsch](./README_DE.md) | [Português](./README_PT.md) | [Русский](./README_RU.md)
 
-[インストール](#インストール) • [機能](#機能) • [インテグレーション](#インテグレーション) • [ライセンス](#ライセンス)
+[機能](#機能) • [インストール](#インストール) • [インテグレーション](#インテグレーション) • [ライセンス](#ライセンス)
 
 ---
 
 <p align="center">
   <img src="docs/assets/demo.gif" alt="Ongrid demo" width="100%" />
 </p>
+
+## 機能
+
+- 🤖 **Coordinator + Specialist エージェント** — coordinator が SRE / ネットワーク / DB のサブエージェントへ派遣
+- 🚨 **アラート発火で自動調査** — investigator が RCA worker を派遣、原因をチャットに記録
+- 🔍 **根本原因 RCA** — トポロジーで影響範囲を分析、メトリクス/ログ/トレースを相関、ソースコード行まで
+- 🔒 **インバウンドポートゼロ** — edge はアウトバウンドのみ、ホストは 22 / 80 / 443 を開かない
+- 💻 **ブラウザ SSH** — 逆トンネルで対話シェル、鍵不要、踏み台不要、全コマンド監査
+- 🐳 **1 コマンドでセルフホスト** — `docker compose up` でフルスタック起動
+- 📊 **可観測性スタック組み込み** — Prometheus + Loki + Tempo + Grafana 自動配備、エージェントがクエリを書く
+- 🧠 **任意モデル持ち込み** — Anthropic / OpenAI / GLM / DeepSeek / Gemini / Kimi、ホット切り替え
+- 💬 **双方向 IM チャネル** — Slack / Telegram / Larksuite / DingTalk / WeCom、チャネル別ロケール
+- 🛠️ **読み取り専用ホストツール** — bash サンドボックス + 26+ ツール、全コール監査
 
 ## インストール
 
@@ -39,19 +52,6 @@ sudo ./install.sh
 cp deploy/.env.example deploy/.env
 make compose-up    # make compose-down to stop
 ```
-
-## 機能
-
-- 🤖 **Coordinator + Specialist エージェント** — coordinator が SRE / ネットワーク / DB のサブエージェントへ派遣
-- 🚨 **アラート発火で自動調査** — investigator が RCA worker を派遣、原因をチャットに記録
-- 🔍 **根本原因 RCA** — トポロジーで影響範囲を分析、メトリクス/ログ/トレースを相関、ソースコード行まで
-- 🔒 **インバウンドポートゼロ** — edge はアウトバウンドのみ、ホストは 22 / 80 / 443 を開かない
-- 💻 **ブラウザ SSH** — 逆トンネルで対話シェル、鍵不要、踏み台不要、全コマンド監査
-- 🐳 **1 コマンドでセルフホスト** — `docker compose up` でフルスタック起動
-- 📊 **可観測性スタック組み込み** — Prometheus + Loki + Tempo + Grafana 自動配備、エージェントがクエリを書く
-- 🧠 **任意モデル持ち込み** — Anthropic / OpenAI / GLM / DeepSeek / Gemini / Kimi、ホット切り替え
-- 💬 **双方向 IM チャネル** — Slack / Telegram / Larksuite / DingTalk / WeCom、チャネル別ロケール
-- 🛠️ **読み取り専用ホストツール** — bash サンドボックス + 26+ ツール、全コール監査
 
 ## インテグレーション
 

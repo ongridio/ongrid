@@ -8,13 +8,26 @@
 
 [English](./README.md) | [简体中文](./README_ZH.md) | [日本語](./README_JA.md) | [한국어](./README_KO.md) | [Español](./README_ES.md) | Français | [Deutsch](./README_DE.md) | [Português](./README_PT.md) | [Русский](./README_RU.md)
 
-[Installation](#installation) • [Fonctionnalités](#fonctionnalités) • [Intégrations](#intégrations) • [Licence](#licence)
+[Fonctionnalités](#fonctionnalités) • [Installation](#installation) • [Intégrations](#intégrations) • [Licence](#licence)
 
 ---
 
 <p align="center">
   <img src="docs/assets/demo.gif" alt="Ongrid demo" width="100%" />
 </p>
+
+## Fonctionnalités
+
+- 🤖 **Agents Coordinator + Specialist** — le coordinator délègue aux sous-agents SRE / réseau / DB / actifs
+- 🚨 **Auto-investigation sur alerte** — l’investigator lance un RCA worker et écrit la cause au chat
+- 🔍 **RCA cause racine** — parcourt la topologie, corrèle métriques/logs/traces, identifie une ligne de code
+- 🔒 **Zéro port entrant** — l’edge sort vers l’extérieur ; aucun port 22 / 80 / 443 sur l’hôte
+- 💻 **SSH dans le navigateur** — shell par tunnel inverse, pas de clé, pas de jumpbox, tout audité
+- 🐳 **Auto-hébergeable en une commande** — `docker compose up` lance toute la stack
+- 📊 **Observabilité intégrée** — Prometheus + Loki + Tempo + Grafana prêts, l’agent écrit les requêtes
+- 🧠 **Apportez votre modèle** — Anthropic / OpenAI / GLM / DeepSeek / Gemini / Kimi, routage à chaud
+- 💬 **Canaux IM bidirectionnels** — Slack / Telegram / Larksuite / DingTalk / WeCom, langue par canal
+- 🛠️ **Outils host en lecture seule** — sandbox bash + 26+ outils, chaque appel audité
 
 ## Installation
 
@@ -39,19 +52,6 @@ Dev local : configurez le compte admin et une clé API de modèle, puis lancez l
 cp deploy/.env.example deploy/.env
 make compose-up    # make compose-down to stop
 ```
-
-## Fonctionnalités
-
-- 🤖 **Agents Coordinator + Specialist** — le coordinator délègue aux sous-agents SRE / réseau / DB / actifs
-- 🚨 **Auto-investigation sur alerte** — l’investigator lance un RCA worker et écrit la cause au chat
-- 🔍 **RCA cause racine** — parcourt la topologie, corrèle métriques/logs/traces, identifie une ligne de code
-- 🔒 **Zéro port entrant** — l’edge sort vers l’extérieur ; aucun port 22 / 80 / 443 sur l’hôte
-- 💻 **SSH dans le navigateur** — shell par tunnel inverse, pas de clé, pas de jumpbox, tout audité
-- 🐳 **Auto-hébergeable en une commande** — `docker compose up` lance toute la stack
-- 📊 **Observabilité intégrée** — Prometheus + Loki + Tempo + Grafana prêts, l’agent écrit les requêtes
-- 🧠 **Apportez votre modèle** — Anthropic / OpenAI / GLM / DeepSeek / Gemini / Kimi, routage à chaud
-- 💬 **Canaux IM bidirectionnels** — Slack / Telegram / Larksuite / DingTalk / WeCom, langue par canal
-- 🛠️ **Outils host en lecture seule** — sandbox bash + 26+ outils, chaque appel audité
 
 ## Intégrations
 

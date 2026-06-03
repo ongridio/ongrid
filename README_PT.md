@@ -8,13 +8,26 @@
 
 [English](./README.md) | [简体中文](./README_ZH.md) | [日本語](./README_JA.md) | [한국어](./README_KO.md) | [Español](./README_ES.md) | [Français](./README_FR.md) | [Deutsch](./README_DE.md) | Português | [Русский](./README_RU.md)
 
-[Instalação](#instalação) • [Recursos](#recursos) • [Integrações](#integrações) • [Licença](#licença)
+[Recursos](#recursos) • [Instalação](#instalação) • [Integrações](#integrações) • [Licença](#licença)
 
 ---
 
 <p align="center">
   <img src="docs/assets/demo.gif" alt="Ongrid demo" width="100%" />
 </p>
+
+## Recursos
+
+- 🤖 **Agentes Coordinator + Specialist** — o coordinator delega para sub-agentes SRE / rede / DB / ativos
+- 🚨 **Auto-investigação no alerta** — o investigator lança um RCA worker e escreve a causa no chat
+- 🔍 **RCA de causa raiz** — percorre a topologia, correlaciona métricas/logs/traces, identifica uma linha de código
+- 🔒 **Zero portas de entrada** — o edge disca para fora; nenhuma porta 22 / 80 / 443 em hosts
+- 💻 **SSH no navegador** — shell por túnel reverso, sem chaves, sem jumpbox, tudo auditado
+- 🐳 **Self-host em um comando** — `docker compose up` sobe toda a stack
+- 📊 **Observabilidade integrada** — Prometheus + Loki + Tempo + Grafana prontos, o agente escreve as queries
+- 🧠 **Traga seu próprio modelo** — Anthropic / OpenAI / GLM / DeepSeek / Gemini / Kimi, roteamento a quente
+- 💬 **Canais IM bidirecionais** — Slack / Telegram / Larksuite / DingTalk / WeCom, idioma por canal
+- 🛠️ **Ferramentas de host só-leitura** — sandbox bash + 26+ ferramentas, cada chamada auditada
 
 ## Instalação
 
@@ -39,19 +52,6 @@ Desenvolvimento local: configure a conta admin e uma API key de modelo, depois s
 cp deploy/.env.example deploy/.env
 make compose-up    # make compose-down to stop
 ```
-
-## Recursos
-
-- 🤖 **Agentes Coordinator + Specialist** — o coordinator delega para sub-agentes SRE / rede / DB / ativos
-- 🚨 **Auto-investigação no alerta** — o investigator lança um RCA worker e escreve a causa no chat
-- 🔍 **RCA de causa raiz** — percorre a topologia, correlaciona métricas/logs/traces, identifica uma linha de código
-- 🔒 **Zero portas de entrada** — o edge disca para fora; nenhuma porta 22 / 80 / 443 em hosts
-- 💻 **SSH no navegador** — shell por túnel reverso, sem chaves, sem jumpbox, tudo auditado
-- 🐳 **Self-host em um comando** — `docker compose up` sobe toda a stack
-- 📊 **Observabilidade integrada** — Prometheus + Loki + Tempo + Grafana prontos, o agente escreve as queries
-- 🧠 **Traga seu próprio modelo** — Anthropic / OpenAI / GLM / DeepSeek / Gemini / Kimi, roteamento a quente
-- 💬 **Canais IM bidirecionais** — Slack / Telegram / Larksuite / DingTalk / WeCom, idioma por canal
-- 🛠️ **Ferramentas de host só-leitura** — sandbox bash + 26+ ferramentas, cada chamada auditada
 
 ## Integrações
 

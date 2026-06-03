@@ -8,13 +8,26 @@
 
 [English](./README.md) | [简体中文](./README_ZH.md) | [日本語](./README_JA.md) | [한국어](./README_KO.md) | [Español](./README_ES.md) | [Français](./README_FR.md) | [Deutsch](./README_DE.md) | [Português](./README_PT.md) | Русский
 
-[Установка](#установка) • [Возможности](#возможности) • [Интеграции](#интеграции) • [Лицензия](#лицензия)
+[Возможности](#возможности) • [Установка](#установка) • [Интеграции](#интеграции) • [Лицензия](#лицензия)
 
 ---
 
 <p align="center">
   <img src="docs/assets/demo.gif" alt="Ongrid demo" width="100%" />
 </p>
+
+## Возможности
+
+- 🤖 **Агенты Coordinator + Specialist** — coordinator делегирует суб-агентам SRE / сеть / БД / активы
+- 🚨 **Авто-исследование по алерту** — investigator запускает RCA-worker и пишет причину в чат
+- 🔍 **Корневая RCA** — обходит топологию, коррелирует метрики/логи/трейсы, до строки исходного кода
+- 🔒 **Ноль входящих портов** — edge выходит наружу; нет порта 22 / 80 / 443 на хосте
+- 💻 **SSH в браузере** — оболочка через обратный туннель, без ключей, без jumpbox, в аудите
+- 🐳 **Self-host одной командой** — `docker compose up` поднимает весь стек
+- 📊 **Встроенная observability** — Prometheus + Loki + Tempo + Grafana готовы, агент пишет запросы
+- 🧠 **Принесите свою модель** — Anthropic / OpenAI / GLM / DeepSeek / Gemini / Kimi, горячая маршрутизация
+- 💬 **Двусторонние IM-каналы** — Slack / Telegram / Larksuite / DingTalk / WeCom, локаль на канал
+- 🛠️ **Read-only host-инструменты** — sandbox bash + 26+ инструментов, каждый вызов в аудите
 
 ## Установка
 
@@ -39,19 +52,6 @@ sudo ./install.sh
 cp deploy/.env.example deploy/.env
 make compose-up    # make compose-down to stop
 ```
-
-## Возможности
-
-- 🤖 **Агенты Coordinator + Specialist** — coordinator делегирует суб-агентам SRE / сеть / БД / активы
-- 🚨 **Авто-исследование по алерту** — investigator запускает RCA-worker и пишет причину в чат
-- 🔍 **Корневая RCA** — обходит топологию, коррелирует метрики/логи/трейсы, до строки исходного кода
-- 🔒 **Ноль входящих портов** — edge выходит наружу; нет порта 22 / 80 / 443 на хосте
-- 💻 **SSH в браузере** — оболочка через обратный туннель, без ключей, без jumpbox, в аудите
-- 🐳 **Self-host одной командой** — `docker compose up` поднимает весь стек
-- 📊 **Встроенная observability** — Prometheus + Loki + Tempo + Grafana готовы, агент пишет запросы
-- 🧠 **Принесите свою модель** — Anthropic / OpenAI / GLM / DeepSeek / Gemini / Kimi, горячая маршрутизация
-- 💬 **Двусторонние IM-каналы** — Slack / Telegram / Larksuite / DingTalk / WeCom, локаль на канал
-- 🛠️ **Read-only host-инструменты** — sandbox bash + 26+ инструментов, каждый вызов в аудите
 
 ## Интеграции
 

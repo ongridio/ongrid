@@ -8,13 +8,26 @@
 
 [English](./README.md) | [简体中文](./README_ZH.md) | [日本語](./README_JA.md) | [한국어](./README_KO.md) | [Español](./README_ES.md) | [Français](./README_FR.md) | Deutsch | [Português](./README_PT.md) | [Русский](./README_RU.md)
 
-[Installation](#installation) • [Funktionen](#funktionen) • [Integrationen](#integrationen) • [Lizenz](#lizenz)
+[Funktionen](#funktionen) • [Installation](#installation) • [Integrationen](#integrationen) • [Lizenz](#lizenz)
 
 ---
 
 <p align="center">
   <img src="docs/assets/demo.gif" alt="Ongrid demo" width="100%" />
 </p>
+
+## Funktionen
+
+- 🤖 **Coordinator + Specialist Agenten** — der Coordinator delegiert an SRE / Netzwerk / DB / Asset Sub-Agenten
+- 🚨 **Auto-Investigation bei Alarm** — der Investigator startet einen RCA-Worker, schreibt die Ursache in den Chat
+- 🔍 **Grundursachen-RCA** — durchläuft die Topologie, korreliert Metriken/Logs/Traces, identifiziert eine Quellcode-Zeile
+- 🔒 **Null eingehende Ports** — der Edge wählt nach außen; kein Port 22 / 80 / 443 auf Hosts
+- 💻 **SSH im Browser** — Shell über Rückwärtstunnel, keine Schlüssel, kein Jumpbox, alles auditiert
+- 🐳 **Selbst-Hosting in einem Befehl** — `docker compose up` startet die gesamte Stack
+- 📊 **Eingebaute Observability** — Prometheus + Loki + Tempo + Grafana bereit, der Agent schreibt die Queries
+- 🧠 **Eigenes Modell mitbringen** — Anthropic / OpenAI / GLM / DeepSeek / Gemini / Kimi, Hot-Routing
+- 💬 **Zweiwege-IM-Kanäle** — Slack / Telegram / Larksuite / DingTalk / WeCom, Sprache pro Kanal
+- 🛠️ **Schreibgeschützte Host-Tools** — bash Sandbox + 26+ Tools, jeder Aufruf auditiert
 
 ## Installation
 
@@ -39,19 +52,6 @@ Lokale Entwicklung: Admin-Konto und einen Modell-API-Key konfigurieren, dann die
 cp deploy/.env.example deploy/.env
 make compose-up    # make compose-down to stop
 ```
-
-## Funktionen
-
-- 🤖 **Coordinator + Specialist Agenten** — der Coordinator delegiert an SRE / Netzwerk / DB / Asset Sub-Agenten
-- 🚨 **Auto-Investigation bei Alarm** — der Investigator startet einen RCA-Worker, schreibt die Ursache in den Chat
-- 🔍 **Grundursachen-RCA** — durchläuft die Topologie, korreliert Metriken/Logs/Traces, identifiziert eine Quellcode-Zeile
-- 🔒 **Null eingehende Ports** — der Edge wählt nach außen; kein Port 22 / 80 / 443 auf Hosts
-- 💻 **SSH im Browser** — Shell über Rückwärtstunnel, keine Schlüssel, kein Jumpbox, alles auditiert
-- 🐳 **Selbst-Hosting in einem Befehl** — `docker compose up` startet die gesamte Stack
-- 📊 **Eingebaute Observability** — Prometheus + Loki + Tempo + Grafana bereit, der Agent schreibt die Queries
-- 🧠 **Eigenes Modell mitbringen** — Anthropic / OpenAI / GLM / DeepSeek / Gemini / Kimi, Hot-Routing
-- 💬 **Zweiwege-IM-Kanäle** — Slack / Telegram / Larksuite / DingTalk / WeCom, Sprache pro Kanal
-- 🛠️ **Schreibgeschützte Host-Tools** — bash Sandbox + 26+ Tools, jeder Aufruf auditiert
 
 ## Integrationen
 

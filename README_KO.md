@@ -8,13 +8,26 @@
 
 [English](./README.md) | [简体中文](./README_ZH.md) | [日本語](./README_JA.md) | 한국어 | [Español](./README_ES.md) | [Français](./README_FR.md) | [Deutsch](./README_DE.md) | [Português](./README_PT.md) | [Русский](./README_RU.md)
 
-[설치](#설치) • [기능](#기능) • [연동](#연동) • [라이선스](#라이선스)
+[기능](#기능) • [설치](#설치) • [연동](#연동) • [라이선스](#라이선스)
 
 ---
 
 <p align="center">
   <img src="docs/assets/demo.gif" alt="Ongrid demo" width="100%" />
 </p>
+
+## 기능
+
+- 🤖 **Coordinator + Specialist 에이전트** — coordinator가 SRE / 네트워크 / DB 서브 에이전트로 라우팅
+- 🚨 **알림 발생 시 자동 조사** — investigator가 RCA worker 파견, 근본 원인을 채팅에 기록
+- 🔍 **근본 원인 RCA** — 토폴로지로 영향 범위 분석, 메트릭/로그/트레이스 상관, 소스 코드 라인까지
+- 🔒 **인바운드 포트 0** — edge가 외부로 발신, 호스트는 22 / 80 / 443 미오픈
+- 💻 **브라우저 SSH** — 역방향 터널로 대화형 셸, 키 / 점프 호스트 불필요, 모든 명령 감사
+- 🐳 **한 줄로 셀프 호스팅** — `docker compose up`으로 전체 스택 기동
+- 📊 **가관측성 전체 스택 내장** — Prometheus + Loki + Tempo + Grafana 자동 배포, Agent가 쿼리 작성
+- 🧠 **원하는 모델 사용** — Anthropic / OpenAI / GLM / DeepSeek / Gemini / Kimi, 핫 라우팅
+- 💬 **양방향 IM 채널** — Slack / Telegram / Larksuite / DingTalk / WeCom, 채널별 로케일
+- 🛠️ **읽기 전용 호스트 도구** — bash 샌드박스 + 26+ 도구, 모든 호출 감사
 
 ## 설치
 
@@ -39,19 +52,6 @@ sudo ./install.sh
 cp deploy/.env.example deploy/.env
 make compose-up    # make compose-down to stop
 ```
-
-## 기능
-
-- 🤖 **Coordinator + Specialist 에이전트** — coordinator가 SRE / 네트워크 / DB 서브 에이전트로 라우팅
-- 🚨 **알림 발생 시 자동 조사** — investigator가 RCA worker 파견, 근본 원인을 채팅에 기록
-- 🔍 **근본 원인 RCA** — 토폴로지로 영향 범위 분석, 메트릭/로그/트레이스 상관, 소스 코드 라인까지
-- 🔒 **인바운드 포트 0** — edge가 외부로 발신, 호스트는 22 / 80 / 443 미오픈
-- 💻 **브라우저 SSH** — 역방향 터널로 대화형 셸, 키 / 점프 호스트 불필요, 모든 명령 감사
-- 🐳 **한 줄로 셀프 호스팅** — `docker compose up`으로 전체 스택 기동
-- 📊 **가관측성 전체 스택 내장** — Prometheus + Loki + Tempo + Grafana 자동 배포, Agent가 쿼리 작성
-- 🧠 **원하는 모델 사용** — Anthropic / OpenAI / GLM / DeepSeek / Gemini / Kimi, 핫 라우팅
-- 💬 **양방향 IM 채널** — Slack / Telegram / Larksuite / DingTalk / WeCom, 채널별 로케일
-- 🛠️ **읽기 전용 호스트 도구** — bash 샌드박스 + 26+ 도구, 모든 호출 감사
 
 ## 연동
 

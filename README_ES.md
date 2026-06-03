@@ -8,13 +8,26 @@
 
 [English](./README.md) | [简体中文](./README_ZH.md) | [日本語](./README_JA.md) | [한국어](./README_KO.md) | Español | [Français](./README_FR.md) | [Deutsch](./README_DE.md) | [Português](./README_PT.md) | [Русский](./README_RU.md)
 
-[Instalación](#instalación) • [Características](#características) • [Integraciones](#integraciones) • [Licencia](#licencia)
+[Características](#características) • [Instalación](#instalación) • [Integraciones](#integraciones) • [Licencia](#licencia)
 
 ---
 
 <p align="center">
   <img src="docs/assets/demo.gif" alt="Ongrid demo" width="100%" />
 </p>
+
+## Características
+
+- 🤖 **Agentes Coordinator + Specialist** — el coordinator delega a sub-agentes SRE / red / DB / activos
+- 🚨 **Auto-investigación en alerta** — el investigator lanza un RCA worker y escribe la causa al chat
+- 🔍 **RCA de causa raíz** — recorre la topología, correlaciona métricas/logs/trazas, llega a una línea de código
+- 🔒 **Cero puertos entrantes** — el edge sale al exterior; ningún puerto 22 / 80 / 443 en hosts
+- 💻 **SSH en el navegador** — shell por túnel inverso, sin claves, sin jumpbox, todo auditado
+- 🐳 **Self-host en un comando** — `docker compose up` levanta toda la stack
+- 📊 **Observabilidad integrada** — Prometheus + Loki + Tempo + Grafana listos, el agente escribe las queries
+- 🧠 **Trae tu propio modelo** — Anthropic / OpenAI / GLM / DeepSeek / Gemini / Kimi, enrutamiento en caliente
+- 💬 **Canales IM bidireccionales** — Slack / Telegram / Larksuite / DingTalk / WeCom, idioma por canal
+- 🛠️ **Herramientas de host solo-lectura** — sandbox bash + 26+ herramientas, cada llamada auditada
 
 ## Instalación
 
@@ -39,19 +52,6 @@ Desarrollo local: configura la cuenta de admin y una API key de modelo, y levant
 cp deploy/.env.example deploy/.env
 make compose-up    # make compose-down to stop
 ```
-
-## Características
-
-- 🤖 **Agentes Coordinator + Specialist** — el coordinator delega a sub-agentes SRE / red / DB / activos
-- 🚨 **Auto-investigación en alerta** — el investigator lanza un RCA worker y escribe la causa al chat
-- 🔍 **RCA de causa raíz** — recorre la topología, correlaciona métricas/logs/trazas, llega a una línea de código
-- 🔒 **Cero puertos entrantes** — el edge sale al exterior; ningún puerto 22 / 80 / 443 en hosts
-- 💻 **SSH en el navegador** — shell por túnel inverso, sin claves, sin jumpbox, todo auditado
-- 🐳 **Self-host en un comando** — `docker compose up` levanta toda la stack
-- 📊 **Observabilidad integrada** — Prometheus + Loki + Tempo + Grafana listos, el agente escribe las queries
-- 🧠 **Trae tu propio modelo** — Anthropic / OpenAI / GLM / DeepSeek / Gemini / Kimi, enrutamiento en caliente
-- 💬 **Canales IM bidireccionales** — Slack / Telegram / Larksuite / DingTalk / WeCom, idioma por canal
-- 🛠️ **Herramientas de host solo-lectura** — sandbox bash + 26+ herramientas, cada llamada auditada
 
 ## Integraciones
 
