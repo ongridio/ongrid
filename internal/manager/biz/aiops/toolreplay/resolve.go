@@ -144,6 +144,41 @@ func MarkDependentToolsForSkip(history []*aiopsmodel.Message, assistantIdx, n in
 	}
 }
 
+// IndexToolMessagesByCallID maps tool_call_id (the LLM-assigned id
+// carried on chat_messages.tool_call_id for role=tool rows) to the
+// history index of the corresponding role=tool row.
+//
+// Used to REORDER history at replay time: an assistant turn with
+// tool_calls must be immediately followed by tool responses paired by
+// tool_call_id, but persistence stores rows by created_at — and
+// long-running tools (notably AgentTool spawning a specialist sub-agent)
+// finish later than other intermediate turns, so the natural order
+// interleaves another assistant between the parent and its response.
+// Strict providers (DeepSeek v4+) reject this with HTTP 400 "insufficient
+// tool messages following tool_calls message". The fix is to hoist each
+// tool result to immediately after its parent assistant; this index lets
+// the build functions look the rows up in O(1) when emitting.
+//
+// Returns a map keyed on tool_call_id only when the row has a non-empty
+// tool_call_id (orphan-pattern tool rows are not indexed).
+func IndexToolMessagesByCallID(history []*aiopsmodel.Message) map[string]int {
+	out := make(map[string]int, len(history))
+	for i, m := range history {
+		if m.Role != aiopsmodel.RoleTool {
+			continue
+		}
+		if m.ToolCallID == nil || *m.ToolCallID == "" {
+			continue
+		}
+		if _, exists := out[*m.ToolCallID]; exists {
+			// First-write-wins; defensive guard against a duplicate id.
+			continue
+		}
+		out[*m.ToolCallID] = i
+	}
+	return out
+}
+
 // MarkAllFollowingToolsForSkip flags every consecutive role=tool
 // message after assistantIdx — used when the assistant row carries
 // no usable signal at all (content=NULL AND no hydrated ToolCalls,

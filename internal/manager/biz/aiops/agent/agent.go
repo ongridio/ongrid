@@ -676,11 +676,42 @@ func (a *Agent) runInternal(ctx context.Context, sessionID string, userID uint64
 // at worst regresses to the old behavior, never makes it worse.
 func (a *Agent) buildMessages(history []*model.Message) []llm.Message {
 	callIDs := toolreplay.Resolve(history)
+	// See chatruntime.buildEinoHistory for rationale: index tool rows by
+	// tool_call_id so we can hoist responses next to their parent
+	// assistant regardless of created_at order. Same pattern, kept in
+	// lock-step with the graph kernel.
+	toolIdx := toolreplay.IndexToolMessagesByCallID(history)
 	skipTool := make(map[int]bool)
 
 	out := make([]llm.Message, 0, len(history)+1)
 	if a.cfg.SystemPrompt != "" {
 		out = append(out, llm.Message{Role: "system", Content: a.cfg.SystemPrompt})
+	}
+
+	emitToolByCallID := func(callID string) {
+		j, ok := toolIdx[callID]
+		if !ok {
+			return
+		}
+		tm := history[j]
+		content := ""
+		if tm.Content != nil {
+			content = *tm.Content
+		}
+		var tcID, tname string
+		if tm.ToolCallID != nil {
+			tcID = *tm.ToolCallID
+		}
+		if tm.ToolName != nil {
+			tname = *tm.ToolName
+		}
+		out = append(out, llm.Message{
+			Role:       model.RoleTool,
+			Content:    content,
+			ToolCallID: tcID,
+			ToolName:   tname,
+		})
+		skipTool[j] = true
 	}
 	for idx, m := range history {
 		switch m.Role {
@@ -719,6 +750,12 @@ func (a *Agent) buildMessages(history []*model.Message) []llm.Message {
 				continue
 			}
 			out = append(out, msg)
+			// HOIST: pull each tool_call's response in by id so it
+			// follows the assistant immediately, regardless of where
+			// the natural created_at order put it.
+			for _, tc := range msg.ToolCalls {
+				emitToolByCallID(tc.ID)
+			}
 		case model.RoleTool:
 			if skipTool[idx] {
 				continue

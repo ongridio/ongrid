@@ -796,8 +796,49 @@ func buildEinoHistory(rows []*aiopsmodel.Message) []*schema.Message {
 	// trailing-user trim doesn't accidentally break pair-by-order
 	// resolution for an assistant just before the trimmed user.
 	callIDs := toolreplay.Resolve(rows)
+	// Index role=tool rows by tool_call_id so an assistant with tool_calls
+	// can hoist its responses to the immediate-next position regardless
+	// of the persisted created_at order. Without this, long-running
+	// AgentTool sub-agent spawns leave their parent assistant's tool_call
+	// slot dangling — strict providers (DeepSeek v4+) reject with
+	// HTTP 400 "insufficient tool messages following tool_calls message".
+	toolIdx := toolreplay.IndexToolMessagesByCallID(rows)
 	skipTool := make(map[int]bool)
 	out := make([]*schema.Message, 0, end)
+
+	// emitToolByCallID looks up the tool row matching callID in toolIdx,
+	// appends it to out (as schema.Message), and marks it skipped so the
+	// natural-order iterator below doesn't re-emit it.
+	emitToolByCallID := func(callID string) {
+		j, ok := toolIdx[callID]
+		if !ok || j >= end {
+			// Tool result wasn't persisted (in flight) or sits in the
+			// trimmed trailing user range. Skip silently — the assistant
+			// turn that emitted this tool_call may need to be dropped
+			// upstream; here we simply omit this slot.
+			return
+		}
+		tm := rows[j]
+		content := ""
+		if tm.Content != nil {
+			content = *tm.Content
+		}
+		tcID := ""
+		if tm.ToolCallID != nil {
+			tcID = *tm.ToolCallID
+		}
+		tname := ""
+		if tm.ToolName != nil {
+			tname = *tm.ToolName
+		}
+		out = append(out, &schema.Message{
+			Role:       schema.RoleType(aiopsmodel.RoleTool),
+			Content:    content,
+			ToolCallID: tcID,
+			ToolName:   tname,
+		})
+		skipTool[j] = true
+	}
 	for i := 0; i < end; i++ {
 		m := rows[i]
 		switch m.Role {
@@ -844,6 +885,16 @@ func buildEinoHistory(rows []*aiopsmodel.Message) []*schema.Message {
 				continue
 			}
 			out = append(out, msg)
+			// HOIST: for every tool_call in this assistant's slot,
+			// look up its response by tool_call_id and emit it RIGHT
+			// HERE so the LLM API's "tool messages must immediately
+			// follow tool_calls" invariant holds — even when the
+			// natural created_at order interleaves another assistant
+			// (e.g. long-running AgentTool finishing after later
+			// short tools).
+			for _, tc := range msg.ToolCalls {
+				emitToolByCallID(tc.ID)
+			}
 		case aiopsmodel.RoleTool:
 			if skipTool[i] {
 				continue

@@ -104,6 +104,28 @@ func TestResolve_MixedSources(t *testing.T) {
 	}
 }
 
+func TestIndexToolMessagesByCallID(t *testing.T) {
+	history := []*aiopsmodel.Message{
+		{Role: aiopsmodel.RoleUser},
+		{Role: aiopsmodel.RoleAssistant},
+		{Role: aiopsmodel.RoleTool, ToolCallID: sp("call_a"), ToolName: sp("tool_a")},
+		{Role: aiopsmodel.RoleTool, ToolCallID: sp("call_b"), ToolName: sp("tool_b")},
+		{Role: aiopsmodel.RoleTool, ToolCallID: sp("call_agent"), ToolName: sp("AgentTool")},
+		// orphan from polluted-data era — must NOT land under "".
+		{Role: aiopsmodel.RoleTool, ToolCallID: nil},
+	}
+	got := IndexToolMessagesByCallID(history)
+	if len(got) != 3 {
+		t.Fatalf("len = %d, want 3", len(got))
+	}
+	if got["call_a"] != 2 || got["call_b"] != 3 || got["call_agent"] != 4 {
+		t.Errorf("indices wrong: %+v", got)
+	}
+	if _, found := got[""]; found {
+		t.Errorf("nil ToolCallID indexed under empty string")
+	}
+}
+
 func TestMarkAllFollowingToolsForSkip(t *testing.T) {
 	// Polluted-data shape: assistant content=NULL, no hydrated
 	// ToolCalls, followed by N tool rows with synthetic ids — drop
