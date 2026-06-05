@@ -143,3 +143,23 @@ func MarkDependentToolsForSkip(history []*aiopsmodel.Message, assistantIdx, n in
 		}
 	}
 }
+
+// MarkAllFollowingToolsForSkip flags every consecutive role=tool
+// message after assistantIdx — used when the assistant row carries
+// no usable signal at all (content=NULL AND no hydrated ToolCalls,
+// i.e. the polluted-data case where chat_tool_calls was never
+// written and the assistant is unreplayable). Stops at the next
+// user / assistant / system boundary; we drop the whole tool-call
+// group rather than send the LLM dangling tool messages strict
+// providers (DeepSeek v4+) reject with HTTP 400.
+func MarkAllFollowingToolsForSkip(history []*aiopsmodel.Message, assistantIdx int, skip map[int]bool) {
+	for j := assistantIdx + 1; j < len(history); j++ {
+		next := history[j]
+		switch next.Role {
+		case aiopsmodel.RoleTool:
+			skip[j] = true
+		case aiopsmodel.RoleAssistant, aiopsmodel.RoleUser, aiopsmodel.RoleSystem:
+			return
+		}
+	}
+}

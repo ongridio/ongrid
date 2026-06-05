@@ -830,6 +830,10 @@ func buildEinoHistory(rows []*aiopsmodel.Message) []*schema.Message {
 				}
 			}
 			if content == "" && len(msg.ToolCalls) == 0 {
+				// Polluted-data case: assistant with no replayable
+				// signal AND no hydrated tool_calls. Drop assistant
+				// + dependent tool rows so the LLM never sees orphans.
+				toolreplay.MarkAllFollowingToolsForSkip(rows, i, skipTool)
 				continue
 			}
 			out = append(out, msg)

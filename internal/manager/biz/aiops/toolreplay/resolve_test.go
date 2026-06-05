@@ -104,6 +104,28 @@ func TestResolve_MixedSources(t *testing.T) {
 	}
 }
 
+func TestMarkAllFollowingToolsForSkip(t *testing.T) {
+	// Polluted-data shape: assistant content=NULL, no hydrated
+	// ToolCalls, followed by N tool rows with synthetic ids — drop
+	// all of them or DeepSeek orphans them with HTTP 400.
+	history := []*aiopsmodel.Message{
+		{Role: aiopsmodel.RoleAssistant, Content: nil}, // idx 0
+		{Role: aiopsmodel.RoleTool},                    // idx 1 — drop
+		{Role: aiopsmodel.RoleTool},                    // idx 2 — drop
+		{Role: aiopsmodel.RoleTool},                    // idx 3 — drop
+		{Role: aiopsmodel.RoleAssistant},               // idx 4 — boundary
+		{Role: aiopsmodel.RoleTool},                    // idx 5 — keep (next turn)
+	}
+	skip := map[int]bool{}
+	MarkAllFollowingToolsForSkip(history, 0, skip)
+	if !skip[1] || !skip[2] || !skip[3] {
+		t.Errorf("expected 1,2,3 flagged, got %+v", skip)
+	}
+	if skip[5] {
+		t.Errorf("idx 5 belongs to next turn, should NOT be flagged")
+	}
+}
+
 func TestMarkDependentToolsForSkip(t *testing.T) {
 	history := []*aiopsmodel.Message{
 		{Role: aiopsmodel.RoleAssistant},

@@ -711,6 +711,11 @@ func (a *Agent) buildMessages(history []*model.Message) []llm.Message {
 				}
 			}
 			if content == "" && len(msg.ToolCalls) == 0 {
+				// Polluted-data case: assistant turn with no replayable
+				// signal AND no hydrated tool_calls. Drop the assistant
+				// AND the dependent tool rows so they don't become
+				// orphans in the replay.
+				toolreplay.MarkAllFollowingToolsForSkip(history, idx, skipTool)
 				continue
 			}
 			out = append(out, msg)

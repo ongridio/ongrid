@@ -95,15 +95,52 @@ type PersistenceHandler struct {
 	// SSEHandler — see chain.go. Set by NewDefaultHandlers; nil when
 	// tests use NewPersistenceHandler directly.
 	assistantIDRelay *assistantIDRelay
+
+	// lastIDsMu protects the two pieces of cross-callback state below.
+	// Both flow ChatModel.OnEnd → Tool.OnStart/OnEnd within a single
+	// ReAct iteration, which is serial — no two tool calls overlap —
+	// so a plain FIFO + scalar is correct.
+	lastIDsMu sync.Mutex
+	// lastAssistantID is the chat_messages.id of the most recent
+	// assistant row this handler wrote. Used as MessageID for the
+	// chat_tool_calls rows the FOLLOWING tools persist; MessageID is
+	// NOT NULL on chat_tool_calls so without this every insert
+	// silently fails the NOT NULL check and the table stays empty —
+	// the exact state observed on test sessions pre-fix.
+	lastAssistantID string
+	// pendingLLMCalls is the FIFO of {llm_call_id, tool_name} pairs
+	// extracted from ChatModel.OnEnd's msg.ToolCalls. Tool.OnStart
+	// pops the head to associate the upcoming chat_tool_calls row
+	// with the real LLM-assigned id (e.g. "call_abc123"). Without
+	// this, persistToolEnd writes the synthetic
+	// "<tool_name>|<tool_type>" fallback into chat_messages.tool_call_id
+	// and history replay loses the linkage strict providers need.
+	pendingLLMCalls []pendingLLMCall
+}
+
+// pendingLLMCall carries the LLM-assigned call id (e.g.
+// "call_abc123") + the tool name from the assistant turn that emitted
+// the tool_calls slot. ReAct serializes tool execution so we can
+// dequeue by order; the toolName is checked for sanity (mismatch =
+// graph wiring change, surface as a recorded error).
+type pendingLLMCall struct {
+	llmCallID string
+	toolName  string
 }
 
 // toolCallEntry tracks per-call state across OnStart → OnEnd.
 type toolCallEntry struct {
-	rowID     string
-	startedAt time.Time
-	toolName  string
-	argsJSON  string
-	toolCallID string // eino's tool_call_id (== ChatGPT-shape call id)
+	rowID      string
+	startedAt  time.Time
+	toolName   string
+	argsJSON   string
+	toolCallID string // eino's per-graph-run tool_call_id (or synthetic fallback)
+	// llmCallID is the LLM-assigned id (e.g. "call_abc123") flowed
+	// from ChatModel.OnEnd via the handler's pendingLLMCalls FIFO.
+	// Empty when the wiring didn't propagate (synthetic fallback);
+	// persistToolEnd uses it for chat_messages.tool_call_id so history
+	// replay can pair the tool turn with the assistant tool_calls slot.
+	llmCallID string
 }
 
 // NewPersistenceHandler builds the handler. Returns nil if SessionID
@@ -165,33 +202,71 @@ func (h *PersistenceHandler) OnStart(ctx context.Context, info *callbacks.RunInf
 		return ctx
 	}
 	startedAt := time.Now().UTC()
+	// Resolve MessageID + LLM call id from the assistant turn that
+	// just emitted this tool_call. Explicit ctx seams (WithMessageID /
+	// WithToolCallID) take precedence for test isolation; production
+	// falls back to the handler's internal tracking populated in
+	// persistAssistant.
+	messageID := messageIDFromCtx(ctx)
+	if messageID == "" {
+		messageID = h.currentAssistantID()
+	}
+	llmCallID := ""
+	if v := ctxToolCallID(ctx); v != "" && v != fallbackToolCallID(info) {
+		llmCallID = v
+	} else {
+		llmCallID = h.popPendingLLMCall(info.Name)
+	}
 	row := &model.ToolCall{
-		// MessageID is filled by chatruntime when it appends the assistant
-		// row; for PR-6 we leave it empty and rely on the cutover layer
-		// to provide a per-turn message id via context. The legacy
-		// agent.go also stores tool_calls under the assistant message id;
-		// spec preserves that.
-		MessageID:     messageIDFromCtx(ctx),
+		MessageID:     messageID,
 		ToolName:      info.Name,
 		ArgumentsJSON: tin.ArgumentsInJSON,
 		Status:        model.StatusPending,
 		StartedAt:     startedAt,
 		CreatedAt:     startedAt,
 	}
+	if llmCallID != "" {
+		id := llmCallID
+		row.LLMCallID = &id
+	}
 	if err := h.deps.Repo.CreateToolCall(ctx, row); err != nil {
 		h.recordErr("tool_call_insert", err)
 		return ctx
 	}
+	// stash by the eino tool_call_id so OnEnd can update the same row;
+	// llmCallID (if any) flows downstream so the role=tool chat_messages
+	// row carries the real id strict providers expect.
+	einoTCID := toolCallIDFromCtx(ctx, info)
 	h.toolCallsMu.Lock()
-	h.toolCalls[toolCallIDFromCtx(ctx, info)] = toolCallEntry{
+	h.toolCalls[einoTCID] = toolCallEntry{
 		rowID:      row.ID,
 		startedAt:  startedAt,
 		toolName:   info.Name,
 		argsJSON:   tin.ArgumentsInJSON,
-		toolCallID: toolCallIDFromCtx(ctx, info),
+		toolCallID: einoTCID,
+		llmCallID:  llmCallID,
 	}
 	h.toolCallsMu.Unlock()
 	return ctx
+}
+
+// ctxToolCallID returns the WithToolCallID seam value, or "" when
+// unset. Pulled out so OnStart's logic can ignore the seam when its
+// only value is the synthetic "name|type" fallback (which carries no
+// real id information).
+func ctxToolCallID(ctx context.Context) string {
+	v, _ := ctx.Value(toolCallIDCtxKey{}).(string)
+	return v
+}
+
+// fallbackToolCallID is the synthetic id toolCallIDFromCtx returns
+// when no ctx value is set. Exposed for the comparison inside OnStart
+// so we don't mistake the fallback for a real LLM-assigned id.
+func fallbackToolCallID(info *callbacks.RunInfo) string {
+	if info == nil {
+		return ""
+	}
+	return info.Name + "|" + info.Type
 }
 
 // OnEnd is the hook fired after a component succeeds.
@@ -293,6 +368,68 @@ func (h *PersistenceHandler) persistAssistant(ctx context.Context, mo *einomodel
 	h.asstMu.Lock()
 	h.asstWrites++
 	h.asstMu.Unlock()
+
+	// Tool-call linkage for downstream Tool.OnStart:
+	//   - lastAssistantID is the MessageID the next chat_tool_calls
+	//     rows should attach to.
+	//   - pendingLLMCalls carries the real LLM call ids emitted in
+	//     msg.ToolCalls so the FOLLOWING tool callbacks can persist
+	//     them as llm_call_id (and replay can pair correctly).
+	// Both reset on every assistant turn — the next assistant
+	// supersedes the previous turn's tool_calls slot.
+	pending := make([]pendingLLMCall, 0, len(msg.ToolCalls))
+	for _, tc := range msg.ToolCalls {
+		if tc.ID == "" || tc.Function.Name == "" {
+			continue
+		}
+		pending = append(pending, pendingLLMCall{
+			llmCallID: tc.ID,
+			toolName:  tc.Function.Name,
+		})
+	}
+	h.lastIDsMu.Lock()
+	h.lastAssistantID = row.ID
+	h.pendingLLMCalls = pending
+	h.lastIDsMu.Unlock()
+}
+
+// popPendingLLMCall returns the head of the FIFO matching toolName,
+// or "" if the queue is empty / next entry doesn't match (which would
+// indicate a graph wiring change we want to surface, not silently
+// mispair).
+func (h *PersistenceHandler) popPendingLLMCall(toolName string) string {
+	h.lastIDsMu.Lock()
+	defer h.lastIDsMu.Unlock()
+	if len(h.pendingLLMCalls) == 0 {
+		return ""
+	}
+	head := h.pendingLLMCalls[0]
+	if head.toolName != toolName {
+		// Mismatch — surface so the wiring change is caught in dev.
+		// Do not consume the head; the tool row will fall back to
+		// the synthetic id and replay will drop this turn safely.
+		h.recordErr("tool_call_fifo_mismatch", errToolFIFOMismatch{
+			expected: head.toolName,
+			got:      toolName,
+		})
+		return ""
+	}
+	h.pendingLLMCalls = h.pendingLLMCalls[1:]
+	return head.llmCallID
+}
+
+func (h *PersistenceHandler) currentAssistantID() string {
+	h.lastIDsMu.Lock()
+	defer h.lastIDsMu.Unlock()
+	return h.lastAssistantID
+}
+
+type errToolFIFOMismatch struct {
+	expected, got string
+}
+
+func (e errToolFIFOMismatch) Error() string {
+	return "tool_call FIFO head=" + e.expected + " but tool=" + e.got
 }
 
 func (h *PersistenceHandler) persistToolEnd(ctx context.Context, info *callbacks.RunInfo, tout *einotool.CallbackOutput, execErr error) {
@@ -329,10 +466,18 @@ func (h *PersistenceHandler) persistToolEnd(ctx context.Context, info *callbacks
 	}
 
 	// Append a role=tool message so history replay sees the tool
-	// result. agent.go's existing behaviour — preserved by
-	// 数据层 invariants.
+	// result. Use the LLM-assigned call id (entry.llmCallID) when
+	// available — that's what strict providers (DeepSeek v4+) match
+	// against the assistant turn's tool_calls slot. Falls back to the
+	// eino-internal tool_call_id only when the wiring didn't capture
+	// the real id (e.g. test or pre-fix data); toolreplay.Resolve
+	// drops the assistant turn for those, preserving correctness over
+	// orphan tool replay.
 	tname := entry.toolName
-	tcallID := entry.toolCallID
+	tcallID := entry.llmCallID
+	if tcallID == "" {
+		tcallID = entry.toolCallID
+	}
 	body := ""
 	if resultPtr != nil {
 		body = *resultPtr
