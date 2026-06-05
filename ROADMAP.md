@@ -26,7 +26,7 @@ across sections.
 
 ---
 
-## A · Causal RCA depth (HLD-013 Phase 3)
+## A · Root-cause RCA diagnosis (HLD-013 Phase 3)
 
 - **A.1** `✓` Phase 1 — investigator prompt as a causal traversal loop
   - `max_turns` 25 → 40
@@ -46,6 +46,12 @@ across sections.
   - `incident_resolutions` table + embedding store
   - `query_similar_incidents` BaseTool
   - resolve-modal in the incident UI closes the "seen this before" loop
+- **A.6** `□` RCA confidence calibration
+  - track per-incident confidence vs operator-marked correctness
+  - feed back into prompt / model selection
+- **A.7** `□` Root-cause graph visualisation
+  - render the causal chain as a node-edge graph alongside the report
+  - hovering a node opens the evidence (PromQL, log line, trace span)
 
 ---
 
@@ -85,6 +91,9 @@ across sections.
 - **C.2** `□` Chat → Grafana panel
   - natural-language description picks a panel + range + variables
   - either deep-link or embed inline in chat
+- **C.3** `□` Schema-aware autocomplete
+  - inline editor for hand-written queries
+  - suggests labels + functions from live `/api/v1/labels`
 
 ---
 
@@ -106,6 +115,41 @@ across sections.
   - 5–10 golden incidents annotated with expected tool set + answer keywords
   - `cmd/ongrid-eval` CLI
   - CI hook on prompt / persona / tool-description changes
+- **D.4** `□` Proposal and confirmation mediation
+  - **Purpose**: any agent-initiated mutating action — whether from chat,
+    SOP execution (K), or a watch task (L.3) — flows through one pipeline.
+  - **D.4.1** Proposal lifecycle
+    - `pending` → `approved` / `rejected` / `expired` / `executed` / `rolled-back`
+    - persisted in `mutating_proposal` (signed envelope)
+  - **D.4.2** `review_gate` sub-agent
+    - reviewer worker drafts the proposal, names the SOP step, surfaces
+      blast radius, attaches dry-run output
+  - **D.4.3** Approval policies
+    - severity tiers (`safe` auto / `mutating` operator / `dangerous` two-person)
+    - role gates (viewer never, user with scope, admin global)
+    - per-edge / per-resource overrides
+  - **D.4.4** IM-side approval
+    - Slack / Lark / Telegram message with `Approve` / `Reject` / `Defer`
+    - signed via short-lived token bound to the proposal
+  - **D.4.5** Proposal preview (dry-run diff)
+    - render the to-be-applied change before signing
+    - file-mode shows unified diff; service-mode shows pre/post state probe
+  - **D.4.6** Bulk batching
+    - one proposal, N edges, all-or-nothing or rolling
+    - per-edge confirmation can opt out
+  - **D.4.7** Expiry + auto-decline
+    - default 24h, configurable per policy
+    - expired proposals never silently execute
+  - **D.4.8** Delegation + on-call routing
+    - off-hours proposals route to current on-call (see G.10)
+    - delegate-when-busy with a fallback chain
+  - **D.4.9** Proposal audit trail
+    - hash-chained entries (ties into I.4)
+    - shareable proposal URL for retrospectives
+- **D.5** `□` Cost + token budget controls
+  - per-org / per-user monthly cap
+  - per-call hard timeout + token cap
+  - graceful degradation (smaller model / fewer iterations) before cutoff
 
 ---
 
@@ -128,6 +172,10 @@ across sections.
 - **E.5** `□` Reasoning timeline visualisation
   - chat toggle that renders
     `user → thought → tool_calls → tool_results → final` as a tree
+- **E.6** `□` Approval UI
+  - one-click approve / reject for D.4 proposals
+  - mobile-friendly card view
+  - swipe-through inbox for on-call shifts
 
 ---
 
@@ -223,6 +271,9 @@ across sections.
   - wholesale-purges plugin binaries + work dir
   - stops units unconditionally with a `pkill -9` fallback
   - PR #46, PR #47
+- **G.1.8** `□` Air-gapped install bundle
+  - one tarball, no outbound calls
+  - bundled docker images, mirror config, license check
 
 ### G.2 Edge lifecycle
 
@@ -234,6 +285,11 @@ across sections.
 - **G.2.4** `□` Offline upgrade bundle
   - internal-network customers
   - manager acts as the mirror
+- **G.2.5** `□` Bulk edge re-enrol
+  - rotate edge credentials / re-register across a fleet in one click
+- **G.2.6** `□` Edge fleet labels + selectors
+  - `env=prod`, `region=cn-east`, `role=db`
+  - selector applies to upgrades, SOP targets, alert routing
 
 ### G.3 Prometheus production hardening (parked)
 
@@ -257,90 +313,274 @@ across sections.
 - **G.4.3** `□` Self-diagnostic agent
   - periodic self-RCA against the manager's own metrics
 
-### G.5 Security / sandbox
+### G.5 Backup, restore, disaster recovery
 
-- **G.5.1** `◯` microsandbox upgrade path
-  - only when a customer demands kernel isolation
-  - `host_bash` + `cmdpolicy` covers 90% of diagnostic surface
-- **G.5.2** `□` WebSSH (ADR-019)
-  - geminio stream + xterm.js
-  - exposed as a fallback inside SOP execution
-- **G.5.3** `□` Per-tool RBAC + audit replay
-  - ADR-022 gates by viewer role
-  - granularity needs to drop to per-tool
+- **G.5.1** `□` Manager state snapshot
+  - dump MySQL + Qdrant + objects to a single tarball
+  - configurable retention
+- **G.5.2** `□` One-command restore
+  - point a fresh manager at a snapshot tarball
+  - verifies schema version + edge re-handshake plan
+- **G.5.3** `□` Off-site replication
+  - rsync / S3 sync to a cold-standby region
+- **G.5.4** `□` Drill mode
+  - timed restore exercise from latest backup; report MTTR
+- **G.5.5** `□` Edge-side state checkpoint
+  - plugin work dir snapshot before upgrade (already partial via `.previous`)
 
-### G.6 Credentials and knowledge
+### G.6 HA and failover
 
-- **G.6.1** `✓` ADR-023 SSH key table + Git credentials dual rail
-- **G.6.2** `□` ADR-018 RepoFetcher
+- **G.6.1** `◯` Active-standby manager pair
+  - shared MySQL via DRBD / managed cluster
+  - VRRP / floating IP
+  - trigger: customer asks SLA or > 100 edges
+- **G.6.2** `◯` Multi-region read replica
+- **G.6.3** `□` Manager health gate
+  - `/healthz` deep-mode that exercises every dependency
+- **G.6.4** `□` Tunnel session migration
+  - move geminio sessions between manager replicas without edge reconnect
+
+### G.7 Alert lifecycle
+
+- **G.7.1** `□` Deduplication + grouping
+  - hash on `alertname + labels` window
+  - emit one notification per group, append details
+- **G.7.2** `□` Silencing
+  - operator-set time-bounded silence with reason field
+  - silences flow through D.4 if they touch dangerous classes
+- **G.7.3** `□` Correlation
+  - graph-walk linked alerts (same edge, same service, same incident)
+  - collapse into one incident artefact
+- **G.7.4** `□` Routing policy DSL
+  - per-team / per-severity / per-time-of-day routing
+  - escalation if not acknowledged within N min
+- **G.7.5** `□` Notification preferences
+  - per-user channels, do-not-disturb windows
+
+### G.8 On-call and maintenance windows
+
+- **G.8.1** `□` On-call schedule
+  - team + rotation calendar
+  - escalation chain
+  - integrates with G.7.4 routing
+- **G.8.2** `□` Maintenance window
+  - per-edge / per-fleet window
+  - suppresses alerts AND parks SOP execution proposals
+- **G.8.3** `□` Handover digest
+  - shift-change summary: open incidents, paused proposals, recent changes
+
+### G.9 Bulk operations and config drift
+
+- **G.9.1** `□` Multi-edge SOP execution
+  - apply the same playbook to a selector (G.2.6)
+  - per-edge dry-run result, rolling apply
+- **G.9.2** `□` Config-as-code (GitOps)
+  - alerts / SOPs / channels live in a Git repo
+  - manager reconciles
+- **G.9.3** `□` Configuration drift detection
+  - diff applied config vs desired
+  - surface as a low-severity incident
+- **G.9.4** `□` Asset inventory / CMDB
+  - one table: edge → host → installed packages → exposed ports → owner
+  - feed into RCA and topology
+
+### G.10 NOC view and operational dashboard
+
+- **G.10.1** `□` Single-pane status board
+  - all edges, all incidents, all open proposals
+  - colour-coded by severity
+- **G.10.2** `□` Kiosk mode
+  - wall-display friendly
+  - auto-rotate between fleets
+- **G.10.3** `□` Saved views per role
+  - "L1 triage", "DBA on-call", "network on-call"
+
+### G.11 Patch and vulnerability management
+
+- **G.11.1** `□` OS / package CVE scan
+  - per-edge inventory + CVE feed
+  - propose patch SOP through D.4
+- **G.11.2** `□` Edge agent self-update CVE awareness
+  - manager warns on outdated edge bin with known CVE
+
+### G.12 Postmortem and change management
+
+- **G.12.1** `□` Incident postmortem template
+  - auto-fill from incident timeline
+  - LLM-drafted narrative, operator edits
+- **G.12.2** `□` Change calendar
+  - lightweight "what's deploying when"
+  - cross-references SOP executions
+
+### G.13 Credentials and knowledge
+
+- **G.13.1** `✓` ADR-023 SSH key table + Git credentials dual rail
+- **G.13.2** `□` ADR-018 RepoFetcher
   - per-repo auth without re-introducing the token leakage that tabled
     the first revision
-- **G.6.3** `□` Offline vault bundle
+- **G.13.3** `□` Offline vault bundle
   - customers without outbound internet
   - built-in vault + offline snapshot tarball
 
 ---
 
-## H · Ecosystem / late-stage
+## H · Sandbox and execution isolation
 
-- **H.1** `◯` Skill marketplace public listing (ADR-017)
+A common substrate for "agent wants to try something risky" — covers
+dry-run, capability gating, kernel isolation, and skill testing.
+Powered today by `cmdpolicy` + tool classes; this section sketches
+how it grows.
+
+- **H.1** `◯` microsandbox runtime (escape hatch)
+  - rootless + OCI single binary
+  - first plugin-style sandbox; switched on per customer who asks for
+    kernel isolation
+  - cmdpolicy + bash stays the default channel
+- **H.2** `◯` Python execution channel (script_python tool)
+  - parked until microsandbox lands (N+16 memo)
+  - seccomp + import allowlist + env scrub
+- **H.3** `□` Dry-run sandbox for SOP playbooks
+  - executes a playbook against a `--dry-run` shim
+  - returns expected diff, no real side-effects
+  - mandatory for `dangerous` class before D.4 confirmation
+- **H.4** `□` Browser sandbox for web-fetch tools
+  - ephemeral headless chromium in container
+  - no persistent cookies, per-call profile
+- **H.5** `□` Skill / playbook authoring sandbox
+  - skill author edits + tests against a synthetic edge fixture
+  - "publish" only after sandbox green
+- **H.6** `□` Per-tenant compute budget
+  - CPU / mem caps on agent + tool subprocesses
+  - rate limit per-user-per-minute
+- **H.7** `□` seccomp + capability profile library
+  - per-tool profile committed in-repo
+  - generator from `cmdpolicy` rules
+- **H.8** `□` Dangerous-class ephemeral container wrapper
+  - I/O-destructive commands run inside a throwaway container with
+    bind-mounted target dirs
+  - rollback by container delete
+
+---
+
+## I · Security and compliance
+
+- **I.1** `□` SSO / SAML / OIDC
+  - Okta / Azure AD / Google Workspace
+  - just-in-time user provisioning with role mapping
+- **I.2** `□` MFA enforcement
+  - TOTP minimum
+  - per-org policy: required / optional / off
+- **I.3** `□` Session management
+  - active sessions list per user
+  - revoke from admin UI
+  - IP allowlist per org
+- **I.4** `□` Tamper-evident audit log
+  - hash-chained rows (chain hash referenced in D.4 proposal envelope)
+  - daily root hash anchored to Git for external verification
+- **I.5** `□` Credential rotation policy
+  - LLM keys, IM tokens, Git deploy keys
+  - operator-defined rotate period; UI surfaces age
+- **I.6** `□` TLS cert auto-rotation
+  - manager via Let's Encrypt + self-signed fallback
+  - edge agents pull fresh manager cert on heartbeat
+- **I.7** `□` Edge binary vulnerability tracking
+  - bundled bin versions exposed via `/edge/inventory`
+  - CVE feed → action card
+- **I.8** `□` LLM PII filtering on prompts
+  - configurable redaction (IPs, emails, hostnames optional)
+  - on-prem mode pins all LLM traffic to self-hosted
+- **I.9** `□` Prompt-injection defense + output content filter
+  - tool descriptions tagged with trust level
+  - output scanned for leaked credentials before display
+- **I.10** `□` Rate limiting per user / org
+  - chat msgs / min, tool calls / hour, IM webhook / sec
+- **I.11** `□` Encryption at rest
+  - MySQL + Qdrant + object storage
+  - per-org KMS option for enterprise
+- **I.12** `□` Compliance evidence pack
+  - one-click export: audit log, access list, change history,
+    incident timelines
+  - SOC2 / ISO 27001 / 等保 friendly format
+- **I.13** `□` Per-org secrets vault
+  - encrypted at rest, scoped to org
+  - injected into SOP runtime via env
+- **I.14** `□` Anomalous-usage detection
+  - login from new geo, spike in dangerous tool calls
+  - notification + auto-quarantine option
+
+---
+
+## J · Ecosystem / late-stage
+
+- **J.1** `◯` Skill marketplace public listing (ADR-017)
   - unpark when the skill count crosses ~30
-- **H.2** `□` HLD-009 coordinator e2e evaluation
+- **J.2** `□` HLD-009 coordinator e2e evaluation
   - currently a design
   - becomes runnable once D.3 eval framework lands
-- **H.3** `□` HLD-012 code-aware analysis
+- **J.3** `□` HLD-012 code-aware analysis
   - combine a code repo with incidents
   - PR diff → impact analysis
-- **H.4** `◯` Open ecosystem
+- **J.4** `◯` Open ecosystem
   - plugin SDK docs + third-party BaseTool registration
   - defer until open-core split (ADR-030) attracts contributors
 
 ---
 
-## I · SOP / Runbook execution loop
+## K · SOP / Runbook execution loop
 
-The most ambitious chunk on the roadmap. Listed last on purpose:
-sections A–H either unblock SOP or have to be solid before SOP can
-ship safely. **Do not start until B and D are in a reliable place** —
-otherwise the executable path becomes an outage generator instead of
-a moat.
+The most ambitious chunk on the roadmap. Listed near the end on
+purpose: sections A–I either unblock SOP or have to be solid before
+SOP can ship safely. **Do not start until B (diagnostic tools), D
+(agent kernel + D.4 proposal mediation), H (sandbox), and I (security)
+are in a reliable place** — otherwise the executable path becomes an
+outage generator instead of a moat.
 
-- **I.1** `□` Tool.Class three-tier
+- **K.1** `□` Tool.Class three-tier
   - `safe` (read-only) / `mutating` (state change) / `dangerous` (irreversible)
   - replaces today's binary read/write split
-- **I.2** `□` SOP DSL
+- **K.2** `□` SOP DSL
   - YAML runbooks: `triggers` / `steps` / `approvals` / `rollback`
-- **I.3** `□` Two-signature execution chain
+- **K.3** `□` Two-signature execution chain
   - manager RSA signs
   - edge verifies
   - both ends audit-log every step
-- **I.4** `□` `review_gate` sub-agent
-  - mutating step spawns a reviewer worker
-  - writes a `mutating_proposal` row
-  - UI surfaces an action card
-  - operator signs → edge executes
-  - timeline gets a `mutating_action_executed` entry
-- **I.5** `□` Initial playbook library
+  - flows through D.4 for the operator confirmation half
+- **K.4** `□` Per-step rollback
+  - every mutating step declares its inverse (or `noop` if irreversible)
+  - aborted runs unwind in reverse order
+- **K.5** `□` Initial playbook library
   - `host_restart_service`
   - `disk_cleanup`
   - `log_rotate`
   - `certificate_renew`
+- **K.6** `□` Playbook marketplace (internal)
+  - share + import playbooks between orgs
+  - signed by author org
+- **K.7** `□` SOP execution timeline
+  - per-run view: step-by-step with logs, exit codes, diff before/after
+  - replayable for postmortem
 
 ---
 
-## J · Periodic agent jobs
+## L · Periodic agent jobs
 
 Built on a shared scheduler primitive; sized for "agent watches over
 time" workloads rather than synchronous chat.
 
-- **J.1** `□` Inspection (巡检)
+- **L.1** `□` Inspection (巡检)
   - scheduled (daily / weekly) sweeps over every edge
   - lightweight RCA: `top_load_anomaly`, `dep_health_check`, `cert_expiry_check`
   - matches auto-create incidents
-- **J.2** `□` Weekly / monthly digest
+- **L.2** `□` Weekly / monthly digest
   - cross-edge aggregate of alerts, incidents, executed actions
   - LLM-written summary
   - IM-pushed
-- **J.3** `□` Watch tasks / proactive notification
+- **L.3** `□` Watch tasks / proactive notification
   - `create_watch(condition, expire_at)` BaseTool
   - when the condition fires, push back into the original session over SSE
+- **L.4** `□` Capacity forecast
+  - extrapolate disk / memory / cardinality trends
+  - file a proposal (D.4) when a threshold projects within N days
+- **L.5** `□` Cost roll-up
+  - LLM token + storage + bandwidth attribution per org
+  - mailed monthly
