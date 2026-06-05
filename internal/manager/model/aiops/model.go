@@ -113,6 +113,15 @@ type Message struct {
 	PromptTokens     *int    `gorm:"column:prompt_tokens"`
 	CompletionTokens *int    `gorm:"column:completion_tokens"`
 	CreatedAt        time.Time
+
+	// ToolCalls is the set of chat_tool_calls rows attached to this
+	// message. Populated by SessionRepo.ListMessages so the agent's
+	// buildMessages can replay role=assistant turns with content=NULL
+	// but tool_calls populated — without it the LLM history sends an
+	// orphan role=tool message and strict providers (DeepSeek v4+)
+	// reject the request with "tool must follow tool_calls". Transient:
+	// `gorm:"-"` keeps it out of the chat_messages schema.
+	ToolCalls []ToolCall `gorm:"-"`
 }
 
 // TableName pins the SQLite table name.
@@ -142,7 +151,15 @@ type ToolCall struct {
 	StartedAt     time.Time
 	EndedAt       *time.Time `gorm:"column:ended_at"`
 	DeviceID      *uint64    `gorm:"column:device_id"`
-	CreatedAt     time.Time
+	// LLMCallID is the call id the LLM assigned to this tool invocation
+	// (e.g. "call_00_j5VjpXHsPpCS0JXjCv2O5578"). Stored so history
+	// replay can emit role=assistant {content:null, tool_calls:[{id,...}]}
+	// and the subsequent role=tool {tool_call_id:...} stays paired —
+	// strict providers (DeepSeek v4+) reject orphan tool messages with
+	// HTTP 400. NULL on rows written before this column existed; the
+	// replay path falls back to pairing by order for those.
+	LLMCallID *string `gorm:"size:64;column:llm_call_id"`
+	CreatedAt time.Time
 }
 
 // TableName pins the SQLite table name.

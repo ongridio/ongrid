@@ -24,6 +24,7 @@ import (
 	"time"
 
 	biz "github.com/ongridio/ongrid/internal/manager/biz/aiops"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/toolreplay"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools"
 	model "github.com/ongridio/ongrid/internal/manager/model/aiops"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
@@ -425,10 +426,12 @@ func (a *Agent) runInternal(ctx context.Context, sessionID string, userID uint64
 		// result or error, and feed a role=tool message back to the LLM.
 		for _, tc := range resp.Assistant.ToolCalls {
 			startedAt := time.Now().UTC()
+			llmCallID := tc.ID
 			tcRow := &model.ToolCall{
 				MessageID:     asstRow.ID,
 				ToolName:      tc.Name,
 				ArgumentsJSON: string(tc.Args),
+				LLMCallID:     &llmCallID,
 				Status:        model.StatusPending,
 				StartedAt:     startedAt,
 				CreatedAt:     startedAt,
@@ -651,18 +654,35 @@ func (a *Agent) runInternal(ctx context.Context, sessionID string, userID uint64
 }
 
 // buildMessages translates persisted history rows + optional system prompt
-// into the llm.Message shape. Tool-call metadata on assistant rows is not
-// replayable from our persistence schema (we only store content + usage),
-// so assistant rows with nil content are dropped from the replay — they were
-// tool-only turns whose outcome is already reflected in the following
-// role=tool rows, so the LLM can resume without them. For MVP this is
-// acceptable; when we need exact replay we'll add a tool_calls_json column.
+// into the llm.Message shape.
+//
+// Tool-call replay: chat_messages stores assistant turns that emit
+// tool_calls as Content=NULL rows (because the LLM gave us no natural-
+// language text on that turn). The actual tool_calls metadata lives in
+// chat_tool_calls and is hydrated onto Message.ToolCalls by the repo
+// (see SessionRepo.hydrateToolCalls). We rebuild the assistant message
+// as {role:assistant, content:"", tool_calls:[…]} so strict providers
+// (DeepSeek v4+) don't reject the request with "tool must follow
+// tool_calls" once the following role=tool messages appear.
+//
+// LLM call id resolution: NEW rows store the id the LLM assigned in
+// chat_tool_calls.llm_call_id. OLD rows have NULL there; the
+// pairing-by-order fallback walks forward through history matching
+// the next N role=tool rows to the assistant's N tool_calls (in their
+// stored order) and uses each tool row's tool_call_id. When pairing
+// fails entirely (assistant has tool_calls but no usable id and no
+// matching tool row), we drop both the assistant row and dependent
+// tool rows — the same shape the pre-fix MVP emitted — so the request
+// at worst regresses to the old behavior, never makes it worse.
 func (a *Agent) buildMessages(history []*model.Message) []llm.Message {
+	callIDs := toolreplay.Resolve(history)
+	skipTool := make(map[int]bool)
+
 	out := make([]llm.Message, 0, len(history)+1)
 	if a.cfg.SystemPrompt != "" {
 		out = append(out, llm.Message{Role: "system", Content: a.cfg.SystemPrompt})
 	}
-	for _, m := range history {
+	for idx, m := range history {
 		switch m.Role {
 		case model.RoleUser, model.RoleSystem:
 			if m.Content == nil {
@@ -670,12 +690,34 @@ func (a *Agent) buildMessages(history []*model.Message) []llm.Message {
 			}
 			out = append(out, llm.Message{Role: m.Role, Content: *m.Content})
 		case model.RoleAssistant:
-			if m.Content == nil {
-				// Tool-only assistant turn; see comment above.
+			calls, ok := callIDs[m.ID]
+			if len(m.ToolCalls) > 0 && !ok {
+				toolreplay.MarkDependentToolsForSkip(history, idx, len(m.ToolCalls), skipTool)
 				continue
 			}
-			out = append(out, llm.Message{Role: m.Role, Content: *m.Content})
+			content := ""
+			if m.Content != nil {
+				content = *m.Content
+			}
+			msg := llm.Message{Role: m.Role, Content: content}
+			if ok {
+				msg.ToolCalls = make([]llm.ToolCall, 0, len(calls))
+				for _, tc := range calls {
+					msg.ToolCalls = append(msg.ToolCalls, llm.ToolCall{
+						ID:   tc.ID,
+						Name: tc.Name,
+						Args: json.RawMessage(tc.ArgsJSON),
+					})
+				}
+			}
+			if content == "" && len(msg.ToolCalls) == 0 {
+				continue
+			}
+			out = append(out, msg)
 		case model.RoleTool:
+			if skipTool[idx] {
+				continue
+			}
 			var content string
 			if m.Content != nil {
 				content = *m.Content

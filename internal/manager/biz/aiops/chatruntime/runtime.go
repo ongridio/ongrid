@@ -49,6 +49,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	biz "github.com/ongridio/ongrid/internal/manager/biz/aiops"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/toolreplay"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/graph"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/graph/callbacks"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
@@ -764,22 +765,31 @@ func (rt *Runtime) toCallbackEmitter(emit Emit, sessionID string) callbacks.SSEE
 }
 
 // buildEinoHistory translates persisted aiopsmodel.Message rows into
-// schema.Message. Tool-only assistant rows (Content == nil) are
-// dropped — same rule legacy agent.go's buildMessages applies. Tool
-// result messages keep their tool_call_id + name so the model can
-// thread them back to the original call.
+// schema.Message.
+//
+// Tool-call replay: tool-only assistant rows (Content=NULL, with hydrated
+// ToolCalls) are emitted as {role:assistant, content:"", tool_calls:[...]}
+// so the following role=tool messages remain paired. Strict providers
+// (DeepSeek v4+) reject orphan tool messages with HTTP 400; OpenAI silently
+// tolerated them. See toolreplay.Resolve for the LLM-call-id recovery
+// rules (post-fix llm_call_id column + back-compat pair-by-order).
+//
+// The graph assembler appends the user turn separately (from Input.UserText);
+// to avoid the LLM seeing the same turn twice we strip a trailing role=user
+// row from the persisted history.
 func buildEinoHistory(rows []*aiopsmodel.Message) []*schema.Message {
 	if len(rows) == 0 {
 		return nil
 	}
-	// The graph assembler will append the user turn separately (it
-	// receives Input.UserText); to avoid the LLM seeing the same
-	// turn twice we strip the trailing user message from the
-	// persisted history.
 	end := len(rows)
 	if end > 0 && rows[end-1].Role == aiopsmodel.RoleUser {
 		end--
 	}
+	// Resolve against the WHOLE history (not just rows[:end]) so the
+	// trailing-user trim doesn't accidentally break pair-by-order
+	// resolution for an assistant just before the trimmed user.
+	callIDs := toolreplay.Resolve(rows)
+	skipTool := make(map[int]bool)
 	out := make([]*schema.Message, 0, end)
 	for i := 0; i < end; i++ {
 		m := rows[i]
@@ -793,18 +803,40 @@ func buildEinoHistory(rows []*aiopsmodel.Message) []*schema.Message {
 				Content: *m.Content,
 			})
 		case aiopsmodel.RoleAssistant:
-			if m.Content == nil {
-				// Legacy parity — tool-only assistant rows are not
-				// replayable from our persistence schema and the
-				// following role=tool rows already capture the
-				// outcome.
+			calls, ok := callIDs[m.ID]
+			if len(m.ToolCalls) > 0 && !ok {
+				toolreplay.MarkDependentToolsForSkip(rows, i, len(m.ToolCalls), skipTool)
 				continue
 			}
-			out = append(out, &schema.Message{
+			content := ""
+			if m.Content != nil {
+				content = *m.Content
+			}
+			msg := &schema.Message{
 				Role:    schema.RoleType(m.Role),
-				Content: *m.Content,
-			})
+				Content: content,
+			}
+			if ok {
+				msg.ToolCalls = make([]schema.ToolCall, 0, len(calls))
+				for _, tc := range calls {
+					msg.ToolCalls = append(msg.ToolCalls, schema.ToolCall{
+						ID:   tc.ID,
+						Type: "function",
+						Function: schema.FunctionCall{
+							Name:      tc.Name,
+							Arguments: tc.ArgsJSON,
+						},
+					})
+				}
+			}
+			if content == "" && len(msg.ToolCalls) == 0 {
+				continue
+			}
+			out = append(out, msg)
 		case aiopsmodel.RoleTool:
+			if skipTool[i] {
+				continue
+			}
 			content := ""
 			if m.Content != nil {
 				content = *m.Content

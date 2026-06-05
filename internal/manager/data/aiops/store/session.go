@@ -164,6 +164,12 @@ func (r *SessionRepo) AppendMessage(ctx context.Context, m *model.Message) error
 
 // ListMessages returns messages for sessionID ordered by created_at ASC.
 // A non-positive limit returns all rows.
+//
+// Hydrates message.ToolCalls from chat_tool_calls in a single batched
+// query keyed on assistant message IDs — without this, replay drops
+// any assistant turn whose Content is NULL (tool-call-only turns) and
+// the following role=tool messages become orphans, which strict LLM
+// providers reject with HTTP 400 "tool must follow tool_calls".
 func (r *SessionRepo) ListMessages(ctx context.Context, sessionID string, limit int) ([]*model.Message, error) {
 	tx := r.db.WithContext(ctx).Model(&model.Message{}).Where("session_id = ?", sessionID).Order("created_at ASC, id ASC")
 	if limit > 0 {
@@ -173,7 +179,44 @@ func (r *SessionRepo) ListMessages(ctx context.Context, sessionID string, limit 
 	if err := tx.Find(&out).Error; err != nil {
 		return nil, err
 	}
+	if err := r.hydrateToolCalls(ctx, out); err != nil {
+		return nil, err
+	}
 	return out, nil
+}
+
+// hydrateToolCalls batches one SELECT against chat_tool_calls keyed on
+// the assistant message ids in msgs, and attaches the rows to each
+// message in-place. Order within a single assistant turn is preserved
+// by sorting on (created_at, id) — the agent persists tool_calls one
+// at a time so created_at is monotonic, and id is the stable tiebreak.
+func (r *SessionRepo) hydrateToolCalls(ctx context.Context, msgs []*model.Message) error {
+	assistantIDs := make([]string, 0, len(msgs))
+	byID := make(map[string]*model.Message, len(msgs))
+	for _, m := range msgs {
+		if m.Role != model.RoleAssistant {
+			continue
+		}
+		assistantIDs = append(assistantIDs, m.ID)
+		byID[m.ID] = m
+	}
+	if len(assistantIDs) == 0 {
+		return nil
+	}
+	var tcs []model.ToolCall
+	if err := r.db.WithContext(ctx).
+		Where("message_id IN ?", assistantIDs).
+		Order("created_at ASC, id ASC").
+		Find(&tcs).Error; err != nil {
+		return err
+	}
+	for i := range tcs {
+		tc := tcs[i]
+		if m, ok := byID[tc.MessageID]; ok {
+			m.ToolCalls = append(m.ToolCalls, tc)
+		}
+	}
+	return nil
 }
 
 // CreateToolCall inserts tc.
