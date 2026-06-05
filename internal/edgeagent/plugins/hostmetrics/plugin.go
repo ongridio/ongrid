@@ -178,9 +178,22 @@ func (p *plugin) runSupplementaryProducer(ctx context.Context) {
 const (
 	conntrackCountPath = "/proc/sys/net/netfilter/nf_conntrack_count"
 	conntrackMaxPath   = "/proc/sys/net/netfilter/nf_conntrack_max"
+	// conntrackLegacyCountPath is what node_exporter 1.8.2's built-in
+	// collector reads. If the kernel exposes the file here, the
+	// collector is already emitting node_nf_conntrack_entries and we
+	// MUST stay quiet — both sources writing the same metric collide on
+	// scrape and Prometheus rejects the duplicate sample. On modern
+	// kernels the file exists only at the netfilter/ path and the
+	// collector goes silent, which is what makes this shim necessary.
+	conntrackLegacyCountPath = "/proc/sys/net/nf_conntrack_count"
 )
 
 func (p *plugin) writeConntrackTextfile() {
+	if _, err := os.Stat(conntrackLegacyCountPath); err == nil {
+		// Older kernel — node_exporter's built-in collector handles it.
+		// Skip so we don't double-emit.
+		return
+	}
 	countBytes, err := os.ReadFile(conntrackCountPath)
 	if err != nil {
 		// Module not loaded (e.g. containers / minimal hosts) — silent;
