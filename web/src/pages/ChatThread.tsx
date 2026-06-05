@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
 import { ChatInput, type ModelSelection, type SubmitPayload } from '@/components/ChatInput';
 import { MessageBubble } from '@/components/MessageBubble';
@@ -37,6 +37,20 @@ export default function ChatThreadPage() {
   const [loading, setLoading] = useState(true);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const sentInitialRef = useRef(false);
+  // stickToBottomRef tracks whether new messages should auto-scroll the
+  // viewport down. Default true (fresh thread starts at bottom); flips
+  // to false when the user manually scrolls up to read older context,
+  // back to true when they scroll back to within 120px of the bottom.
+  //
+  // Why a ref instead of computing distance inside the auto-scroll
+  // effect: when a new message lands, React appends it to the DOM
+  // BEFORE the effect runs, so el.scrollHeight has already grown. The
+  // post-update distance always reads as large for any reasonably
+  // tall new bubble (assistant content, RCA table, etc.) → the
+  // distance ≤ 80 guard incorrectly concludes "user scrolled up" and
+  // bails. The ref captures the user's intent at scroll time, not at
+  // measurement time.
+  const stickToBottomRef = useRef(true);
 
   // Per-session model selection + provider catalog. The catalog is
   // fetched once on mount; the selection persists in component state
@@ -153,20 +167,29 @@ export default function ChatThreadPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, initialPrompt, sessionId, messages.length]);
 
-  // Auto-scroll to bottom — but ONLY if the user was already at (or
-  // near) the bottom. Without this guard, every messages update (new
-  // stream chunk OR idle poll) would yank a scrolled-up reader back
-  // down, which reads as "the page is jumping / content is repeating"
-  // (the user complained about exactly this). 80px slack tolerates the
-  // user being just-above-bottom while a tool card lands.
+  // Auto-scroll to bottom — but ONLY if the user hasn't scrolled up.
+  // Driven by stickToBottomRef (see its definition above for why we
+  // can't measure distance post-update). The onScroll listener wired
+  // on the scroller flips the ref when the user takes manual control.
   useEffect(() => {
     const el = scrollerRef.current;
     if (!el) return;
-    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-    if (distance <= 80) {
+    if (stickToBottomRef.current) {
       el.scrollTop = el.scrollHeight;
     }
   }, [messages]);
+
+  // onScrollerScroll updates stickToBottomRef from the user's actual
+  // position. 120px slack tolerates "almost at bottom" without losing
+  // sticky mode (user clicking just above the latest message to copy
+  // text, transient layout shifts as a tool card lands). useCallback
+  // so React doesn't reattach the listener on every render.
+  const onScrollerScroll = useCallback(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    stickToBottomRef.current = distance <= 120;
+  }, []);
 
   async function send(content: string, mentions: Mention[]) {
     if (!sessionId || !content.trim()) return;
@@ -322,7 +345,7 @@ export default function ChatThreadPage() {
           }
         />
 
-        <div ref={scrollerRef} className="flex-1 overflow-y-auto">
+        <div ref={scrollerRef} onScroll={onScrollerScroll} className="flex-1 overflow-y-auto">
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-6 py-8">
             {loading ? (
               <div className="text-center text-sm text-zinc-500">{tr('加载中…', 'Loading…')}</div>
