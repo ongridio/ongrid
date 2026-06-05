@@ -15,7 +15,7 @@
 <p align="center">
   <img src="docs/assets/demo.gif" alt="Ongrid demo" width="100%" />
 </p>
-<p align="center"><sub><a href="https://github.com/ongridio/ongrid/releases/download/v0.7.168/Area2_hq.mp4">▶ フル動画 (HD) を見る (MP4, 18 MB)</a></sub></p>
+<p align="center"><sub><a href="https://github.com/ongridio/ongrid/releases/download/v0.7.169/Area2_hq.mp4">▶ フル動画 (HD) を見る (MP4, 18 MB)</a></sub></p>
 
 ## 機能
 
@@ -36,10 +36,10 @@
 
 ```bash
 # 1. 最新リリースをダウンロード（Ubuntu 22.04+、Debian 12+、RHEL/Rocky 9）
-wget https://github.com/ongridio/ongrid/releases/download/v0.7.168/ongrid-v0.7.168-linux-amd64.tar.xz
+wget https://github.com/ongridio/ongrid/releases/download/v0.7.169/ongrid-v0.7.169-linux-amd64.tar.xz
 
 # 2. 展開
-tar -xf ongrid-v0.7.168-linux-amd64.tar.xz && cd ongrid-v0.7.168-linux-amd64
+tar -xf ongrid-v0.7.169-linux-amd64.tar.xz && cd ongrid-v0.7.169-linux-amd64
 
 # 3. インストール
 sudo ./install.sh
