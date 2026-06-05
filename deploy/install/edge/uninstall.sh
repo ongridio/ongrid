@@ -28,19 +28,23 @@ if [[ $EUID -ne 0 ]]; then
     exec sudo -E bash "$0" "$@"
 fi
 
-# Stop + disable the unit; ignore errors (e.g. unit not installed).
-if systemctl list-unit-files | grep -q '^ongrid-edge\.service'; then
-    systemctl disable --now ongrid-edge 2>/dev/null || true
-fi
+# Stop + disable units unconditionally. The previous "list-unit-files
+# | grep -q ^name.service" precondition silently skipped the stop on
+# hosts where the output formatting (leading whitespace, deprecated/
+# masked decorations, paged output) confused the anchored grep. The
+# uninstaller then went on to rm -f the binary while the supervisor
+# was still running — agent + every subprocess survived, printed [OK].
+# `systemctl stop` is safe to call on an unknown unit (logs to stderr,
+# returns non-zero) so we just suppress + ignore failures.
+systemctl stop    ongrid-edge ongrid-node-exporter ongrid-process-exporter 2>/dev/null || true
+systemctl disable ongrid-edge ongrid-node-exporter ongrid-process-exporter 2>/dev/null || true
 
-# Also stop the bundled exporters (installed alongside edge by
-# install-edge.sh). Best-effort — fine if either was never installed.
-if systemctl list-unit-files | grep -q '^ongrid-node-exporter\.service'; then
-    systemctl disable --now ongrid-node-exporter 2>/dev/null || true
-fi
-if systemctl list-unit-files | grep -q '^ongrid-process-exporter\.service'; then
-    systemctl disable --now ongrid-process-exporter 2>/dev/null || true
-fi
+# Defensive: if systemd never actually managed the agent (manual
+# install, broken unit file, etc.), kill the supervisor and any
+# subprocess plugins by binary path. Matches every plugin (promtail,
+# otelcol-contrib, node_exporter, process_exporter, ...) without
+# enumerating them.
+pkill -9 -f '/usr/local/bin/ongrid-edge|/usr/local/lib/ongrid-edge/' 2>/dev/null || true
 
 rm -f "$SERVICE_FILE" "$INSTALL_DIR/ongrid-edge"
 rm -f /etc/systemd/system/ongrid-node-exporter.service
