@@ -4,16 +4,24 @@
 # Usage:
 #   curl -k -sSL https://<server>/uninstall.sh | bash
 #
-# Stops the systemd unit (if present), removes the binary, env file,
-# log dir, and the service user. Idempotent — safe to re-run.
+# Wipes the agent end-to-end: systemd units (agent + bundled exporters),
+# binary, env, logs, bundled plugin binaries, plugin work dir (rendered
+# configs + subprocess logs + .upgrade stage dir), and the service user.
+# Idempotent — safe to re-run.
 
 set -euo pipefail
 
 INSTALL_DIR="/usr/local/bin"
-ENV_FILE="/etc/ongrid-edge/ongrid-edge.env"
+ENV_DIR="/etc/ongrid-edge"
 SERVICE_FILE="/etc/systemd/system/ongrid-edge.service"
 LOG_DIR="/var/log/ongrid-edge"
 SERVICE_USER="ongrid-edge"
+# Wholesale plugin dirs: bundled binaries (promtail, node_exporter,
+# process_exporter, ...) and plugin work state (configs + textfile
+# producer outputs + .upgrade stage). Both are agent-owned; leaving
+# either behind makes reinstall non-deterministic.
+PLUGIN_BIN_DIR="/usr/local/lib/ongrid-edge"
+PLUGIN_WORK_DIR="/var/lib/ongrid-edge"
 
 if [[ $EUID -ne 0 ]]; then
     echo "[INFO] re-executing with sudo"
@@ -37,10 +45,10 @@ fi
 rm -f "$SERVICE_FILE" "$INSTALL_DIR/ongrid-edge"
 rm -f /etc/systemd/system/ongrid-node-exporter.service
 rm -f /etc/systemd/system/ongrid-process-exporter.service
-rm -f /usr/local/lib/ongrid-edge/node_exporter
-rm -f /usr/local/lib/ongrid-edge/process_exporter
-rm -rf "$(dirname "$ENV_FILE")"
+rm -rf "$ENV_DIR"
 rm -rf "$LOG_DIR"
+rm -rf "$PLUGIN_BIN_DIR"
+rm -rf "$PLUGIN_WORK_DIR"
 
 systemctl daemon-reload 2>/dev/null || true
 
