@@ -59,6 +59,15 @@ type SpawnWorkerRequest struct {
 	// = no directive (back-compat for callers that don't have a UI
 	// locale, e.g. investigator auto-spawn).
 	Locale string
+	// Provider + Model carry the coordinator's resolved LLM choice
+	// down to the sub-agent. Without this, runWorker's g.Invoke threads
+	// no chatModelOpts → the routing chat model falls back to its
+	// built-in default ("openai"), and installs without an OpenAI key
+	// see specialist sub-agents fail with `provider "openai" not
+	// configured`. Empty fields preserve the worker's own default
+	// behaviour for the investigator auto-spawn path.
+	Provider string
+	Model    string
 }
 
 // WorkerHandle is the seam-side projection of chatruntime.Worker. Only
@@ -269,6 +278,8 @@ func (t *AgentTool) InvokableRun(ctx context.Context, argsJSON string, opts ...b
 		AgentName: args.SubagentType,
 		Prompt:    args.Prompt,
 		Locale:    basetool.LocaleFromContext(ctx),
+		Provider:  basetool.LLMProviderFromContext(ctx),
+		Model:     basetool.LLMModelFromContext(ctx),
 	})
 	if err != nil {
 		return "", fmt.Errorf("AgentTool: spawn: %w", err)

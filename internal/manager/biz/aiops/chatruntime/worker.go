@@ -51,12 +51,14 @@ import (
 	"time"
 
 	einocallbacks "github.com/cloudwego/eino/callbacks"
+	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/compose"
 
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/graph"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/graph/callbacks"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	aiopsmodel "github.com/ongridio/ongrid/internal/manager/model/aiops"
+	"github.com/ongridio/ongrid/internal/pkg/llm"
 )
 
 // WorkerStatus enumerates the worker state machine. See package header
@@ -156,6 +158,15 @@ type SpawnRequest struct {
 	// (otherwise GLM defaults to zh on English questions). Empty = no
 	// directive, back-compat with investigator/auto-spawned workers.
 	Locale string
+	// Provider + Model are the coordinator's resolved LLM choice. Threaded
+	// into runWorker's g.Invoke as chatModelOpts so the sub-agent runs
+	// against the same LLM the user picked for the coordinator — without
+	// this, runWorker falls through to the RoutingChatModel default and
+	// installs without an OpenAI key see specialists fail with
+	// `provider "openai" not configured`. Empty = no override; the worker
+	// uses whatever the routing default is.
+	Provider string
+	Model    string
 }
 
 // TaskNotification is the payload of a task_notification streaming
@@ -340,6 +351,13 @@ func (rt *Runtime) SpawnWorker(ctx context.Context, req SpawnRequest) (*Worker, 
 		w.StartedAt = time.Now().UTC()
 		w.mu.Unlock()
 
+		// Stamp the coordinator's LLM choice onto workerCtx so runWorker
+		// can read it back as chatModelOpts. Without this the sub-agent
+		// falls through to the routing default ("openai") even though
+		// the user picked something else (e.g. deepseek) for the
+		// coordinator. SendToWorker's runWorker callsite uses ctx as-is
+		// because SendTo inherits the coordinator's ctx directly.
+		workerCtx = basetool.WithLLMChoice(workerCtx, req.Provider, req.Model)
 		result, err := rt.runWorker(workerCtx, agentDef, sessID, req.Prompt, req.Locale)
 
 		w.mu.Lock()
@@ -591,12 +609,24 @@ func (rt *Runtime) runWorker(ctx context.Context, agentDef *Agent, sessID, userT
 		handlers = callbacks.NewDefaultHandlers(deps)
 	}
 
+	// Thread the coordinator's resolved LLM choice (stamped on ctx via
+	// basetool.WithLLMChoice at the SpawnWorker boundary) onto the
+	// graph's ChatModel as eino model options. Without these, the
+	// RoutingChatModel falls through to its built-in default — which
+	// is "openai" — and installs with no OpenAI key see the worker
+	// fail with `provider "openai" not configured`. Empty fields add
+	// no option, preserving back-compat with auto-spawn paths
+	// (investigator) that don't carry a coordinator choice.
+	invokeOpts := []compose.Option{compose.WithCallbacks(handlers...)}
+	if mopts := workerChatModelOpts(ctx); len(mopts) > 0 {
+		invokeOpts = append(invokeOpts, compose.WithChatModelOption(mopts...))
+	}
 	out, err := g.Invoke(ctx, &graph.Input{
 		SystemPrompt: systemPrompt,
 		History:      nil,
 		UserText:     userText,
 		Locale:       locale,
-	}, compose.WithCallbacks(handlers...))
+	}, invokeOpts...)
 	if err != nil {
 		return "", err
 	}
@@ -869,5 +899,23 @@ func (rt *Runtime) prologueKBLookup(ctx context.Context, bag []basetool.BaseTool
 	}
 	b.WriteString("\n\n请基于这份 playbook 推进诊断；末尾在答案里标注 `（参考 KB: " + top.Title + "）`。如果 playbook 不适用，可以忽略并自由发挥。")
 	return b.String()
+}
+
+// workerChatModelOpts mirrors chatModelOpts but reads the (provider,
+// model) pair from ctx instead of a *Request, so SpawnWorker and
+// SendToWorker (which has no Request) share the same plumbing.
+// RoutingChatModel.pick consumes WithProvider; the inner
+// clientChatModel honours WithModel. Empty fields add no option, so
+// auto-spawn paths that don't carry a coordinator choice fall through
+// to the routing default unchanged.
+func workerChatModelOpts(ctx context.Context) []model.Option {
+	var opts []model.Option
+	if p := strings.TrimSpace(basetool.LLMProviderFromContext(ctx)); p != "" {
+		opts = append(opts, llm.WithProvider(p))
+	}
+	if m := strings.TrimSpace(basetool.LLMModelFromContext(ctx)); m != "" {
+		opts = append(opts, model.WithModel(m))
+	}
+	return opts
 }
 

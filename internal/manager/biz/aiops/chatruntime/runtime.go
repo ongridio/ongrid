@@ -612,6 +612,13 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (*Reply, error) {
 	// specialist that answers in zh (GLM default) — see
 	// feedback_ai_output_locale.md regression 2026-06-02.
 	ctx = basetool.WithLocale(ctx, req.Locale)
+	// Same idea for the LLM choice: stamp the coordinator's resolved
+	// provider+model so AgentTool can plumb them into the sub-agent's
+	// SpawnRequest. runWorker reads them back as chatModelOpts.
+	// Without this, sub-agents fall through to the routing default
+	// ("openai"), and installs without an OpenAI key see specialists
+	// fail with `provider "openai" not configured`.
+	ctx = basetool.WithLLMChoice(ctx, req.Provider, req.Model)
 	out, invokeErr := g.Invoke(ctx, &graph.Input{
 		SystemPrompt:     systemPrompt,
 		History:          einoHistory,

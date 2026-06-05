@@ -2232,6 +2232,8 @@ func (s chatruntimeSpawnerShim) SpawnWorker(ctx context.Context, req aiopstools.
 		ParentSession: req.ParentSession,
 		ParentEmit:    aiopschatruntime.EmitFromContext(ctx),
 		Locale:        req.Locale,
+		Provider:      req.Provider,
+		Model:         req.Model,
 	})
 	if err != nil {
 		return nil, err
