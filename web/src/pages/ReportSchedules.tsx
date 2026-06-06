@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, CalendarClock, Pencil, Play, Plus, Power, Trash2 } from 'lucide-react';
+import { ArrowLeft, Pencil, Play, Plus, Power, Trash2 } from 'lucide-react';
 import { Modal } from '@/components/Modal';
 import { cn } from '@/lib/cn';
 import { fullDateTime } from '@/lib/format';
@@ -74,16 +74,13 @@ export default function ReportSchedulesPage() {
 
   return (
     <main className="anim-fade flex flex-1 flex-col overflow-hidden">
-      <header className="app-header border-b border-zinc-800 px-6 py-4">
+      <header className="app-header border-b border-zinc-800/60 px-6 py-4">
         <Link to="/reports" className="mb-2 inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300">
           <ArrowLeft size={13} /> {tr('返回报告', 'Back to reports')}
         </Link>
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h1 className="flex items-center gap-2 text-base font-semibold text-zinc-100">
-              <CalendarClock size={18} className="text-indigo-400" />
-              {tr('定时生成', 'Scheduled')}
-            </h1>
+            <h1 className="text-base font-semibold text-zinc-100">{tr('定时生成', 'Scheduled')}</h1>
             <p className="mt-0.5 text-xs text-zinc-500">
               {tr('按日/周/月定时自动生成报告并投递', 'Auto-generate and deliver reports on a daily/weekly/monthly cadence')}
             </p>

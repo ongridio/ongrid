@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { CalendarClock, FileText, Plus, RefreshCw, Settings } from 'lucide-react';
+import { CalendarClock, Plus, RefreshCw, Settings } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { relativeTime } from '@/lib/format';
 import { usePoll } from '@/lib/usePoll';
@@ -72,13 +72,10 @@ export default function ReportsPage() {
 
   return (
     <main className="anim-fade flex flex-1 flex-col overflow-hidden">
-      <header className="app-header border-b border-zinc-800 px-6 py-4">
+      <header className="app-header border-b border-zinc-800/60 px-6 py-4">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h1 className="flex items-center gap-2 text-base font-semibold text-zinc-100">
-              <FileText size={18} className="text-indigo-400" />
-              {tr('报告', 'Reports')}
-            </h1>
+            <h1 className="text-base font-semibold text-zinc-100">{tr('报告', 'Reports')}</h1>
             <p className="mt-0.5 text-xs text-zinc-500">
               {tr('定时或手动生成的运维报告', 'Scheduled and on-demand ops reports')}
             </p>
