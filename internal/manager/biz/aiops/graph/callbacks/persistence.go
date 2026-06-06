@@ -55,6 +55,9 @@ type PersistenceDeps struct {
 // the graph executes. Mirrors the persistence side-effects the legacy
 // agent.go for-loop performs synchronously; spec:
 //
+//	OnChatModelStart → flushIncompleteBatch (autoheal stubs for
+//	                   any tool_call from the PREVIOUS assistant turn
+//	                   whose OnEnd never fired — see currentBatch)
 //	OnChatModelEnd → INSERT chat_messages (role=assistant)
 //	OnToolStart → INSERT chat_tool_calls (status=pending)
 //	OnToolEnd → UPDATE chat_tool_calls + INSERT chat_messages (role=tool)
@@ -69,6 +72,25 @@ type PersistenceDeps struct {
 // so the SessionID + per-call state stay scoped. Tool start times are
 // stashed on context (per-call) which is goroutine-safe.
 //
+// Autoheal background (currentBatch). eino's ToolsNode runs sibling
+// tool_calls from one assistant turn in parallel. In live production
+// (.91, session b528bfb0 on 2026-06-06) we observed an assistant
+// turn emitting 4 host_bash tool_calls where only 2 of the 4 OnEnd
+// callbacks fired — chat_tool_calls had all 4 rows but chat_messages
+// was missing 2 role=tool rows, with NO recorded persistence error.
+// Replay then produced an envelope strict providers (DeepSeek v4+)
+// reject with HTTP 400 "insufficient tool messages following
+// tool_calls". The replay-side defense (toolreplay precheck +
+// MarkDependentToolsForSkip) keeps the user out of the loop, but the
+// dropped tool results are still lost. To stop this from happening
+// silently we track per-assistant batches here: persistAssistant
+// records the expected llm_call_id set; persistToolEnd marks each
+// seen; the next ChatModel.OnStart (signalling the previous batch is
+// terminally done) flushes any leftover llm_call_ids as autoheal
+// stub role=tool rows so the next replay envelope is structurally
+// valid AND the LLM gets honest "tool result was not captured"
+// signal instead of a fabricated success.
+//
 // Errors: persist failures NEVER abort the graph — the handler logs +
 // counts and returns ctx unchanged. 可观测性: audit/
 // persist best-effort.
@@ -78,11 +100,19 @@ type PersistenceHandler struct {
 	// errCounter is the lazy collector for persist failures. Resolved
 	// at construction; nil when Registerer is nil.
 	errCounter *prometheus.CounterVec
+	// lossCounter is the autoheal observability collector. Labels:
+	//   outcome="autoheal_stub" — a stub row was inserted
+	//   tool_name=<the tool whose response was lost>
+	// Cardinality: tool_name set is small (bounded by registered tools).
+	lossCounter *prometheus.CounterVec
 
 	// toolCalls maps eino tool_call_id → the chat_tool_calls row id we
 	// inserted on OnStart, so OnEnd can update the same row. eino
 	// guarantees the tool_call_id is unique within a graph run; we
 	// scope the map to this handler instance, not globally.
+	// Entries are deleted on OnEnd/OnError; what remains here at flush
+	// time is exactly the set of tool calls whose end-callback never
+	// fired — those are what flushIncompleteBatch heals.
 	toolCalls   map[string]toolCallEntry
 	toolCallsMu sync.Mutex
 
@@ -116,6 +146,28 @@ type PersistenceHandler struct {
 	// "<tool_name>|<tool_type>" fallback into chat_messages.tool_call_id
 	// and history replay loses the linkage strict providers need.
 	pendingLLMCalls []pendingLLMCall
+
+	// batchMu guards currentBatch. Held only while opening / sealing /
+	// flushing — individual mark-seen calls inside persistToolEnd take
+	// it just long enough to update one map. Tool callbacks fire in
+	// parallel from eino's ToolsNode so the mutex is non-trivial.
+	batchMu      sync.Mutex
+	currentBatch *assistantBatch
+}
+
+// assistantBatch tracks the tool_call → tool_response pairing for one
+// assistant turn so flushIncompleteBatch can emit stub responses for
+// any tool_call whose OnEnd never fired. expected is the set of
+// LLM-assigned call ids the assistant emitted; seen accumulates as
+// persistToolEnd writes role=tool rows; toolName lets the stub carry
+// the right tool_name into chat_messages for replay parity. Per the
+// per-request handler scoping (see handler doc), at most one batch
+// is live at a time.
+type assistantBatch struct {
+	assistantID string
+	expected    map[string]string // llmCallID → toolName (recorded on register)
+	seen        map[string]struct{}
+	openedAt    time.Time
 }
 
 // pendingLLMCall carries the LLM-assigned call id (e.g.
@@ -162,12 +214,24 @@ func NewPersistenceHandler(deps PersistenceDeps) *PersistenceHandler {
 			},
 			[]string{"kind"},
 		)).(*prometheus.CounterVec)
+		h.lossCounter = registerOrExisting(deps.Registerer, prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "ongrid_chat_tool_response_loss_total",
+				Help: "Total ongrid AIOps tool responses lost (OnEnd never fired) and autohealed via stub.",
+			},
+			[]string{"outcome", "tool_name"},
+		)).(*prometheus.CounterVec)
 	}
 	return h
 }
 
 // Needed signals which timings to wire so eino can short-circuit the
 // expensive ones we don't use.
+//
+// ChatModel.OnStart is wired (in addition to OnEnd) so flushIncompleteBatch
+// can autoheal the previous turn before the next LLM call goes out — its
+// position in the callback stream is the cleanest "previous batch is
+// terminally done" signal we have.
 func (h *PersistenceHandler) Needed(_ context.Context, info *callbacks.RunInfo, timing callbacks.CallbackTiming) bool {
 	if h == nil {
 		return false
@@ -177,7 +241,7 @@ func (h *PersistenceHandler) Needed(_ context.Context, info *callbacks.RunInfo, 
 	}
 	switch info.Component {
 	case components.ComponentOfChatModel:
-		return timing == callbacks.TimingOnEnd
+		return timing == callbacks.TimingOnStart || timing == callbacks.TimingOnEnd
 	case components.ComponentOfTool:
 		return timing == callbacks.TimingOnStart || timing == callbacks.TimingOnEnd || timing == callbacks.TimingOnError
 	default:
@@ -186,12 +250,18 @@ func (h *PersistenceHandler) Needed(_ context.Context, info *callbacks.RunInfo, 
 }
 
 // OnStart is the hook fired before a component runs. For PersistenceHandler:
-//   - ChatModel start: no-op (user message is persisted by chatruntime
-//     entry, before the graph starts; spec).
+//   - ChatModel start: flush any incomplete tool batch from the previous
+//     assistant turn (autoheal stub) BEFORE this LLM call goes out. Also
+//     traces the entry for instrumentation.
 //   - Tool start: write a chat_tool_calls row in pending state and
 //     stash the row id on the handler so OnEnd can find it.
 func (h *PersistenceHandler) OnStart(ctx context.Context, info *callbacks.RunInfo, input callbacks.CallbackInput) context.Context {
 	if h == nil || info == nil {
+		return ctx
+	}
+	if info.Component == components.ComponentOfChatModel {
+		h.trace(ctx, "chat_model_start", info, "")
+		h.flushIncompleteBatch(ctx)
 		return ctx
 	}
 	if info.Component != components.ComponentOfTool {
@@ -199,8 +269,10 @@ func (h *PersistenceHandler) OnStart(ctx context.Context, info *callbacks.RunInf
 	}
 	tin := einotool.ConvCallbackInput(input)
 	if tin == nil {
+		h.trace(ctx, "tool_start_skip_nil_input", info, "")
 		return ctx
 	}
+	h.trace(ctx, "tool_start", info, "")
 	startedAt := time.Now().UTC()
 	// Resolve MessageID + LLM call id from the assistant turn that
 	// just emitted this tool_call. Explicit ctx seams (WithMessageID /
@@ -283,14 +355,18 @@ func (h *PersistenceHandler) OnEnd(ctx context.Context, info *callbacks.RunInfo,
 	case components.ComponentOfChatModel:
 		mo := einomodel.ConvCallbackOutput(output)
 		if mo == nil || mo.Message == nil {
+			h.trace(ctx, "chat_model_end_skip_nil", info, "")
 			return ctx
 		}
+		h.trace(ctx, "chat_model_end", info, "")
 		h.persistAssistant(ctx, mo)
 	case components.ComponentOfTool:
 		tout := einotool.ConvCallbackOutput(output)
 		if tout == nil {
+			h.trace(ctx, "tool_end_skip_nil_output", info, "")
 			return ctx
 		}
+		h.trace(ctx, "tool_end_success", info, toolCallIDFromCtx(ctx, info))
 		h.persistToolEnd(ctx, info, tout, nil)
 	}
 	return ctx
@@ -308,6 +384,7 @@ func (h *PersistenceHandler) OnError(ctx context.Context, info *callbacks.RunInf
 	if info.Component != components.ComponentOfTool {
 		return ctx
 	}
+	h.trace(ctx, "tool_end_error", info, toolCallIDFromCtx(ctx, info))
 	h.persistToolEnd(ctx, info, nil, err)
 	return ctx
 }
@@ -391,6 +468,136 @@ func (h *PersistenceHandler) persistAssistant(ctx context.Context, mo *einomodel
 	h.lastAssistantID = row.ID
 	h.pendingLLMCalls = pending
 	h.lastIDsMu.Unlock()
+	// Open a new batch tracker — flushIncompleteBatch will heal it on
+	// the next ChatModel.OnStart. If the assistant emitted no tool_calls
+	// (terminal text answer), expected is empty and the batch is a
+	// no-op on flush.
+	h.openBatch(row.ID, pending)
+}
+
+// openBatch starts tracking the tool-call → tool-response pairing for
+// a fresh assistant turn. Replaces any prior batch (which means the
+// previous batch was abandoned without its OnEnds firing AND without
+// a ChatModel.OnStart flushing it — drop counter so we can see it).
+func (h *PersistenceHandler) openBatch(assistantID string, calls []pendingLLMCall) {
+	expected := make(map[string]string, len(calls))
+	for _, c := range calls {
+		if c.llmCallID == "" {
+			continue
+		}
+		expected[c.llmCallID] = c.toolName
+	}
+	h.batchMu.Lock()
+	if h.currentBatch != nil && len(h.currentBatch.expected) > 0 {
+		// Surface as recordErr so we know if openBatch ever races with
+		// an unflushed prior batch (would mean ChatModel.OnEnd fired
+		// twice without an intervening OnStart — very unusual).
+		h.recordErr("batch_overwrite_unflushed", errBatchOverwrite{
+			prevAssistant: h.currentBatch.assistantID,
+			newAssistant:  assistantID,
+			lost:          len(h.currentBatch.expected) - len(h.currentBatch.seen),
+		})
+	}
+	h.currentBatch = &assistantBatch{
+		assistantID: assistantID,
+		expected:    expected,
+		seen:        make(map[string]struct{}, len(expected)),
+		openedAt:    time.Now().UTC(),
+	}
+	h.batchMu.Unlock()
+}
+
+// markSeen records that a tool_call_id's response has been persisted.
+// Called from persistToolEnd AFTER the AppendMessage succeeds.
+func (h *PersistenceHandler) markSeen(llmCallID string) {
+	if llmCallID == "" {
+		return
+	}
+	h.batchMu.Lock()
+	if h.currentBatch != nil {
+		h.currentBatch.seen[llmCallID] = struct{}{}
+	}
+	h.batchMu.Unlock()
+}
+
+// flushIncompleteBatch is the autoheal step. Called at the start of
+// the NEXT ChatModel call (and from FinalizeBatch on handler teardown),
+// which is the cleanest signal that the previous assistant turn's
+// tool batch is terminally done. For every expected llm_call_id that
+// never landed a seen mark, write a stub role=tool row so the next
+// replay envelope is structurally valid AND the LLM gets honest
+// signal that the tool result was lost.
+//
+// Idempotent: clears currentBatch on exit, so a redundant call is a
+// no-op.
+func (h *PersistenceHandler) flushIncompleteBatch(ctx context.Context) {
+	h.batchMu.Lock()
+	batch := h.currentBatch
+	h.currentBatch = nil
+	h.batchMu.Unlock()
+	if batch == nil || len(batch.expected) == 0 {
+		return
+	}
+	missing := make(map[string]string) // llmCallID → toolName
+	for id, tname := range batch.expected {
+		if _, ok := batch.seen[id]; ok {
+			continue
+		}
+		missing[id] = tname
+	}
+	if len(missing) == 0 {
+		return
+	}
+	if h.deps.Logger != nil {
+		h.deps.Logger.Warn("tool response loss detected; autohealing with stub rows",
+			slog.String("session_id", h.deps.SessionID),
+			slog.String("assistant_id", batch.assistantID),
+			slog.Int("expected", len(batch.expected)),
+			slog.Int("seen", len(batch.seen)),
+			slog.Int("missing", len(missing)),
+			slog.Int64("batch_age_ms", time.Since(batch.openedAt).Milliseconds()),
+		)
+	}
+	for callID, tname := range missing {
+		body := `{"error":"tool response was not persisted (eino ToolsNode OnEnd loss); placeholder synthesised by manager to keep history envelope valid","autoheal":true}`
+		cid := callID
+		tn := tname
+		row := &model.Message{
+			SessionID:  h.deps.SessionID,
+			Role:       model.RoleTool,
+			Content:    &body,
+			ToolCallID: &cid,
+			ToolName:   &tn,
+			CreatedAt:  time.Now().UTC(),
+		}
+		if err := h.deps.Repo.AppendMessage(ctx, row); err != nil {
+			h.recordErr("autoheal_stub_insert", err)
+			continue
+		}
+		if h.lossCounter != nil {
+			h.lossCounter.WithLabelValues("autoheal_stub", tname).Inc()
+		}
+	}
+}
+
+// FinalizeBatch flushes any in-flight batch before the handler is
+// retired. Called from chatruntime after the graph invoke returns so
+// "user closed browser mid-batch" doesn't leave orphan tool_calls
+// behind (the ChatModel.OnStart hook only catches in-session cases).
+func (h *PersistenceHandler) FinalizeBatch(ctx context.Context) {
+	if h == nil {
+		return
+	}
+	h.flushIncompleteBatch(ctx)
+}
+
+type errBatchOverwrite struct {
+	prevAssistant, newAssistant string
+	lost                        int
+}
+
+func (e errBatchOverwrite) Error() string {
+	return "batch overwrite prev=" + e.prevAssistant + " new=" + e.newAssistant
 }
 
 // popPendingLLMCall returns the head of the FIFO matching toolName,
@@ -439,9 +646,14 @@ func (h *PersistenceHandler) persistToolEnd(ctx context.Context, info *callbacks
 	delete(h.toolCalls, tcID)
 	h.toolCallsMu.Unlock()
 	if !ok {
-		// No matching OnStart — chatruntime didn't fire it (e.g.
-		// graph injection edge case). Skip the update so we don't
-		// orphan a tool_calls row.
+		// No matching OnStart — chatruntime didn't fire it OR the same
+		// tcID was double-deleted by a callback race. Used to be a
+		// silent return; record it now so we can correlate against
+		// flushIncompleteBatch stub events.
+		h.recordErr("tool_call_lookup_miss", errToolCallLookupMiss{
+			toolCallID: tcID,
+			toolName:   runInfoName(info),
+		})
 		return
 	}
 
@@ -496,7 +708,57 @@ func (h *PersistenceHandler) persistToolEnd(ctx context.Context, info *callbacks
 	}
 	if err := h.deps.Repo.AppendMessage(ctx, row); err != nil {
 		h.recordErr("tool_msg_insert", err)
+		return
 	}
+	// Mark seen AFTER AppendMessage succeeds so a failed insert doesn't
+	// fool flushIncompleteBatch into thinking this call landed. Tracked
+	// by llmCallID (what the batch's expected set is keyed on) — falls
+	// back to the synthetic id if the wiring lost the real one, which
+	// preserves the at-least-one-mark invariant for sanity.
+	if entry.llmCallID != "" {
+		h.markSeen(entry.llmCallID)
+	} else {
+		h.markSeen(entry.toolCallID)
+	}
+}
+
+type errToolCallLookupMiss struct {
+	toolCallID, toolName string
+}
+
+func (e errToolCallLookupMiss) Error() string {
+	return "tool_call lookup miss id=" + e.toolCallID + " name=" + e.toolName
+}
+
+func runInfoName(info *callbacks.RunInfo) string {
+	if info == nil {
+		return ""
+	}
+	return info.Name
+}
+
+// trace emits a single info-level breadcrumb for one callback firing.
+// Used to detect "OnEnd never fired" cases by absence in logs — every
+// expected callback should emit exactly one trace line. Cheap (one
+// slog.Info call); operators can drop the log level to filter out if
+// noise becomes a concern.
+func (h *PersistenceHandler) trace(_ context.Context, event string, info *callbacks.RunInfo, toolCallID string) {
+	if h == nil || h.deps.Logger == nil {
+		return
+	}
+	name := ""
+	typ := ""
+	if info != nil {
+		name = info.Name
+		typ = string(info.Component)
+	}
+	h.deps.Logger.Info("persistence callback",
+		slog.String("event", event),
+		slog.String("session_id", h.deps.SessionID),
+		slog.String("component", typ),
+		slog.String("name", name),
+		slog.String("tool_call_id", toolCallID),
+	)
 }
 
 func (h *PersistenceHandler) recordErr(kind string, err error) {

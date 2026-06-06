@@ -619,6 +619,14 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (*Reply, error) {
 	// ("openai"), and installs without an OpenAI key see specialists
 	// fail with `provider "openai" not configured`.
 	ctx = basetool.WithLLMChoice(ctx, req.Provider, req.Model)
+	// Always autoheal any in-flight tool batch on the way out — covers
+	// the "user closed browser mid-tool-batch" case the in-session
+	// ChatModel.OnStart flush can't reach. Defer with a background-rooted
+	// ctx so a cancelled request ctx doesn't block the stub inserts.
+	defer func() {
+		flushCtx := context.WithoutCancel(ctx)
+		callbacks.FinalizeBatches(flushCtx, handlers)
+	}()
 	out, invokeErr := g.Invoke(ctx, &graph.Input{
 		SystemPrompt:     systemPrompt,
 		History:          einoHistory,

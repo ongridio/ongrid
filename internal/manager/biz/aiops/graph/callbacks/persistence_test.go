@@ -282,8 +282,11 @@ func TestPersistenceHandler_NeededFiltersComponent(t *testing.T) {
 	if !h.Needed(context.Background(), chatModelInfo(), callbacks.TimingOnEnd) {
 		t.Errorf("ChatModel OnEnd should be needed")
 	}
-	if h.Needed(context.Background(), chatModelInfo(), callbacks.TimingOnStart) {
-		t.Errorf("ChatModel OnStart should NOT be needed (user msg is persisted upstream)")
+	// ChatModel.OnStart became Needed once flushIncompleteBatch was
+	// added — it's the cleanest signal that the previous tool batch
+	// is terminally done, so the autoheal flush hooks there.
+	if !h.Needed(context.Background(), chatModelInfo(), callbacks.TimingOnStart) {
+		t.Errorf("ChatModel OnStart should be needed (autoheal flush hook)")
 	}
 	if !h.Needed(context.Background(), toolInfo("t"), callbacks.TimingOnStart) {
 		t.Errorf("Tool OnStart should be needed")
@@ -292,4 +295,251 @@ func TestPersistenceHandler_NeededFiltersComponent(t *testing.T) {
 	if h.Needed(context.Background(), other, callbacks.TimingOnEnd) {
 		t.Errorf("non-tool/non-chat component should be skipped")
 	}
+}
+
+// --- autoheal / batch tracker tests ---------------------------------------
+
+// assistantEndWithToolCalls drives ChatModel.OnEnd with a synthesised
+// assistant message that emits N tool_calls — the same shape ChatModel
+// produces when the model wants to fan out to tools. Used to set up
+// the batch tracker for autoheal tests.
+func assistantEndWithToolCalls(t *testing.T, h *PersistenceHandler, calls ...struct{ ID, Name string }) {
+	t.Helper()
+	toolCalls := make([]schema.ToolCall, 0, len(calls))
+	for _, c := range calls {
+		toolCalls = append(toolCalls, schema.ToolCall{
+			ID:   c.ID,
+			Type: "function",
+			Function: schema.FunctionCall{Name: c.Name},
+		})
+	}
+	out := &einomodel.CallbackOutput{
+		Message: &schema.Message{
+			Role:      schema.Assistant,
+			Content:   "",
+			ToolCalls: toolCalls,
+		},
+	}
+	h.OnEnd(context.Background(), chatModelInfo(), out)
+}
+
+func TestAutoheal_NoMissing_NoStubInserted(t *testing.T) {
+	t.Parallel()
+	repo := newFakeSessionRepo()
+	h := NewPersistenceHandler(PersistenceDeps{SessionID: "s", Repo: repo})
+
+	// Assistant emits 2 tool_calls and both OnEnds fire normally.
+	assistantEndWithToolCalls(t, h,
+		struct{ ID, Name string }{ID: "call_a", Name: "host_bash"},
+		struct{ ID, Name string }{ID: "call_b", Name: "host_bash"},
+	)
+	for _, id := range []string{"call_a", "call_b"} {
+		ctx := WithToolCallID(context.Background(), id)
+		h.OnStart(ctx, toolInfo("host_bash"), &einotool.CallbackInput{ArgumentsInJSON: `{}`})
+		h.OnEnd(ctx, toolInfo("host_bash"), &einotool.CallbackOutput{Response: `{"ok":true}`})
+	}
+
+	// Trigger flush via next ChatModel.OnStart.
+	h.OnStart(context.Background(), chatModelInfo(), nil)
+
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	// Expect: 1 assistant + 2 tool messages = 3 total. No autoheal stub.
+	if got := len(repo.messages); got != 3 {
+		t.Fatalf("messages = %d, want 3 (1 assistant + 2 tool)", got)
+	}
+	for _, m := range repo.messages {
+		if m.Content != nil && contains(*m.Content, `"autoheal":true`) {
+			t.Errorf("autoheal stub written when not expected: %s", *m.Content)
+		}
+	}
+}
+
+func TestAutoheal_TwoOfFourMissing_StubsInserted(t *testing.T) {
+	t.Parallel()
+	repo := newFakeSessionRepo()
+	reg := prometheus.NewRegistry()
+	h := NewPersistenceHandler(PersistenceDeps{
+		SessionID:  "s",
+		Repo:       repo,
+		Registerer: reg,
+	})
+
+	// Assistant emits 4 parallel host_bash tool_calls.
+	assistantEndWithToolCalls(t, h,
+		struct{ ID, Name string }{ID: "call_00", Name: "host_bash"},
+		struct{ ID, Name string }{ID: "call_01", Name: "host_bash"},
+		struct{ ID, Name string }{ID: "call_02", Name: "host_bash"},
+		struct{ ID, Name string }{ID: "call_03", Name: "host_bash"},
+	)
+	// Only 01 and 03's OnStart+OnEnd fire — 00 and 02 silently dropped.
+	for _, id := range []string{"call_01", "call_03"} {
+		ctx := WithToolCallID(context.Background(), id)
+		h.OnStart(ctx, toolInfo("host_bash"), &einotool.CallbackInput{ArgumentsInJSON: `{}`})
+		h.OnEnd(ctx, toolInfo("host_bash"), &einotool.CallbackOutput{Response: `{"ok":true}`})
+	}
+
+	// Next ChatModel.OnStart triggers flush.
+	h.OnStart(context.Background(), chatModelInfo(), nil)
+
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	// Expect 1 assistant + 2 real tool + 2 stub tool = 5.
+	if got := len(repo.messages); got != 5 {
+		t.Fatalf("messages = %d, want 5 (1 asst + 2 real tool + 2 stub)", got)
+	}
+	stubIDs := map[string]bool{}
+	for _, m := range repo.messages {
+		if m.Role != model.RoleTool {
+			continue
+		}
+		if m.Content != nil && contains(*m.Content, `"autoheal":true`) {
+			if m.ToolCallID == nil {
+				t.Fatalf("stub row has no ToolCallID")
+			}
+			stubIDs[*m.ToolCallID] = true
+		}
+	}
+	if !stubIDs["call_00"] || !stubIDs["call_02"] {
+		t.Errorf("stub ids = %v, want call_00 + call_02", stubIDs)
+	}
+	if stubIDs["call_01"] || stubIDs["call_03"] {
+		t.Errorf("real responses got autohealed: %v", stubIDs)
+	}
+	if v := counterValue(t, reg, "ongrid_chat_tool_response_loss_total", "autoheal_stub", "host_bash"); v != 2 {
+		t.Errorf("autoheal counter = %v, want 2", v)
+	}
+}
+
+func TestAutoheal_NoBatch_NoOp(t *testing.T) {
+	t.Parallel()
+	repo := newFakeSessionRepo()
+	h := NewPersistenceHandler(PersistenceDeps{SessionID: "s", Repo: repo})
+	// Very first turn — no prior assistant batch.
+	h.OnStart(context.Background(), chatModelInfo(), nil)
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	if got := len(repo.messages); got != 0 {
+		t.Fatalf("messages = %d, want 0 (flush should no-op without a batch)", got)
+	}
+}
+
+func TestAutoheal_SequentialBatches_OnlyOwnFlushed(t *testing.T) {
+	t.Parallel()
+	repo := newFakeSessionRepo()
+	h := NewPersistenceHandler(PersistenceDeps{SessionID: "s", Repo: repo})
+
+	// Batch 1: 2 tool_calls, both complete.
+	assistantEndWithToolCalls(t, h,
+		struct{ ID, Name string }{ID: "b1_a", Name: "host_bash"},
+		struct{ ID, Name string }{ID: "b1_b", Name: "host_bash"},
+	)
+	for _, id := range []string{"b1_a", "b1_b"} {
+		ctx := WithToolCallID(context.Background(), id)
+		h.OnStart(ctx, toolInfo("host_bash"), &einotool.CallbackInput{})
+		h.OnEnd(ctx, toolInfo("host_bash"), &einotool.CallbackOutput{Response: `{}`})
+	}
+	// Next ChatModel.OnStart flushes batch 1 (no stubs).
+	h.OnStart(context.Background(), chatModelInfo(), nil)
+	// Batch 2: 3 tool_calls, only 1 completes.
+	assistantEndWithToolCalls(t, h,
+		struct{ ID, Name string }{ID: "b2_a", Name: "host_bash"},
+		struct{ ID, Name string }{ID: "b2_b", Name: "host_bash"},
+		struct{ ID, Name string }{ID: "b2_c", Name: "host_bash"},
+	)
+	ctx := WithToolCallID(context.Background(), "b2_a")
+	h.OnStart(ctx, toolInfo("host_bash"), &einotool.CallbackInput{})
+	h.OnEnd(ctx, toolInfo("host_bash"), &einotool.CallbackOutput{Response: `{}`})
+	// FinalizeBatch should flush batch 2's missing b2_b and b2_c only.
+	h.FinalizeBatch(context.Background())
+
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	stubIDs := map[string]bool{}
+	for _, m := range repo.messages {
+		if m.Role != model.RoleTool || m.Content == nil {
+			continue
+		}
+		if contains(*m.Content, `"autoheal":true`) && m.ToolCallID != nil {
+			stubIDs[*m.ToolCallID] = true
+		}
+	}
+	if stubIDs["b1_a"] || stubIDs["b1_b"] {
+		t.Errorf("batch 1 leaked stubs after its flush: %v", stubIDs)
+	}
+	if !stubIDs["b2_b"] || !stubIDs["b2_c"] {
+		t.Errorf("batch 2 stub ids = %v, want b2_b + b2_c", stubIDs)
+	}
+	if stubIDs["b2_a"] {
+		t.Errorf("completed call b2_a got stubbed: %v", stubIDs)
+	}
+}
+
+func TestAutoheal_FinalizeBatchIdempotent(t *testing.T) {
+	t.Parallel()
+	repo := newFakeSessionRepo()
+	h := NewPersistenceHandler(PersistenceDeps{SessionID: "s", Repo: repo})
+	assistantEndWithToolCalls(t, h,
+		struct{ ID, Name string }{ID: "x", Name: "host_bash"},
+	)
+	h.FinalizeBatch(context.Background())
+	h.FinalizeBatch(context.Background()) // second call should be a no-op
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	stubCount := 0
+	for _, m := range repo.messages {
+		if m.Content != nil && contains(*m.Content, `"autoheal":true`) {
+			stubCount++
+		}
+	}
+	if stubCount != 1 {
+		t.Errorf("stub count = %d, want 1 (second Finalize must be no-op)", stubCount)
+	}
+}
+
+// --- helpers --------------------------------------------------------------
+
+func contains(s, sub string) bool {
+	return len(sub) > 0 && len(s) >= len(sub) && indexOf(s, sub) >= 0
+}
+
+func indexOf(s, sub string) int {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
+	}
+	return -1
+}
+
+// counterValue gathers the registry and returns the value for a
+// label-keyed counter, asserting it exists. Returns -1 when not found.
+func counterValue(t *testing.T, reg *prometheus.Registry, name string, labelValues ...string) float64 {
+	t.Helper()
+	families, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("gather: %v", err)
+	}
+	for _, fam := range families {
+		if fam.GetName() != name {
+			continue
+		}
+		for _, m := range fam.GetMetric() {
+			labels := m.GetLabel()
+			if len(labels) != len(labelValues) {
+				continue
+			}
+			match := true
+			for i, lv := range labelValues {
+				if labels[i].GetValue() != lv {
+					match = false
+					break
+				}
+			}
+			if match {
+				return m.GetCounter().GetValue()
+			}
+		}
+	}
+	return -1
 }

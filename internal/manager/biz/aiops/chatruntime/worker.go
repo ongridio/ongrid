@@ -621,6 +621,13 @@ func (rt *Runtime) runWorker(ctx context.Context, agentDef *Agent, sessID, userT
 	if mopts := workerChatModelOpts(ctx); len(mopts) > 0 {
 		invokeOpts = append(invokeOpts, compose.WithChatModelOption(mopts...))
 	}
+	// Autoheal any tool batch still open when the worker exits — same
+	// rationale as the parent runtime defer. context.WithoutCancel
+	// keeps the stub inserts running even if the caller cancelled.
+	defer func() {
+		flushCtx := context.WithoutCancel(ctx)
+		callbacks.FinalizeBatches(flushCtx, handlers)
+	}()
 	out, err := g.Invoke(ctx, &graph.Input{
 		SystemPrompt: systemPrompt,
 		History:      nil,

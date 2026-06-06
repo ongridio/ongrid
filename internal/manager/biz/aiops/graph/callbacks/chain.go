@@ -1,6 +1,7 @@
 package callbacks
 
 import (
+	"context"
 	"errors"
 	"sync/atomic"
 
@@ -106,6 +107,21 @@ func NewDefaultHandlers(deps Deps) []callbacks.Handler {
 		out = append(out, llm.NewBudgetCallbackHandler(deps.BudgetChecker, deps.BudgetUserID))
 	}
 	return out
+}
+
+// FinalizeBatches runs end-of-request bookkeeping on every handler in
+// the chain that wants one. Currently this is just PersistenceHandler:
+// see flushIncompleteBatch — the ChatModel.OnStart hook autoheals the
+// previous batch DURING a session, but a session that ends mid-batch
+// (user closes browser, request cancels) never gets the next OnStart.
+// chatruntime defers FinalizeBatches after compose.Invoke returns so
+// the batch always gets a final flush.
+func FinalizeBatches(ctx context.Context, handlers []callbacks.Handler) {
+	for _, h := range handlers {
+		if p, ok := h.(*PersistenceHandler); ok {
+			p.FinalizeBatch(ctx)
+		}
+	}
 }
 
 // ErrNoHandlers is returned by helpers that require at least one
