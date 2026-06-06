@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -259,6 +261,7 @@ func (c *openaiClient) effectiveCreds(ctx context.Context) (string, string, stri
 // transport always overrides — but we still feed it the raw key so the
 // (apiKey, baseURL) cache key stays stable across calls.
 func (c *openaiClient) sdkFor(apiKey, baseURL string) *openai.Client {
+	baseURL = normalizeOpenAIBaseURL(baseURL)
 	k := sdkKey{apiKey: apiKey, baseURL: baseURL}
 	c.sdkMu.Lock()
 	defer c.sdkMu.Unlock()
@@ -280,6 +283,41 @@ func (c *openaiClient) sdkFor(apiKey, baseURL string) *openai.Client {
 	sdk := openai.NewClientWithConfig(sdkCfg)
 	c.sdkCache[k] = sdk
 	return sdk
+}
+
+// normalizeOpenAIBaseURL prepares a user-supplied base URL for the
+// go-openai SDK. The SDK builds every request as
+// TrimRight(BaseURL,"/") + "/chat/completions" — it does NOT insert a
+// "/v1" version segment. OpenAI's own default base URL already ends in
+// "/v1", and so does every hosted provider's documented endpoint, so the
+// SDK works as long as the configured base URL carries that segment.
+//
+// Operators pointing the Custom (OpenAI-compatible) provider at a local
+// Ollama / LM Studio / vLLM box routinely paste just the bare address
+// they use everywhere else — e.g. "http://192.168.8.5:11434". The SDK
+// then POSTs to ".../chat/completions", which Ollama serves nothing on
+// (its OpenAI-compatible route is "/v1/chat/completions"), so the request
+// 404s and the chat surfaces a "stream error". When the base URL has no
+// path of its own we append "/v1" so the request lands on the
+// OpenAI-compatible route. A URL that already carries a path (".../v1",
+// ".../openai", a gateway prefix) is trusted verbatim — named providers
+// whose defaults include "/v1" are therefore untouched.
+func normalizeOpenAIBaseURL(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return s
+	}
+	u, err := url.Parse(s)
+	if err != nil || u.Host == "" {
+		// Malformed / scheme-less input: leave as-is so the SDK surfaces
+		// the real error rather than us silently reshaping garbage.
+		return s
+	}
+	if strings.Trim(u.Path, "/") == "" {
+		u.Path = "/v1"
+		return u.String()
+	}
+	return s
 }
 
 // zhipuJWTTransport rewrites the Authorization header on every outbound

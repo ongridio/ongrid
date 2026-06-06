@@ -57,7 +57,12 @@ func sampleChatResponse(content string, toolCalls []map[string]any) []byte {
 func fakeServer(t *testing.T, handler http.HandlerFunc) (*httptest.Server, Config) {
 	t.Helper()
 	mux := http.NewServeMux()
+	// A bare base URL (srv.URL) is normalized to ".../v1" before it
+	// reaches the SDK, mirroring how a real OpenAI-compatible server
+	// (Ollama et al.) exposes "/v1/chat/completions". Mount both so the
+	// fake answers regardless of whether the caller pre-versioned the URL.
 	mux.HandleFunc("/chat/completions", handler)
+	mux.HandleFunc("/v1/chat/completions", handler)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return srv, Config{
@@ -411,4 +416,88 @@ func sortedCopy(in []string) []string {
 		}
 	}
 	return out
+}
+
+func TestNormalizeOpenAIBaseURL(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		// Bare Ollama / LM Studio / vLLM address — the exact shape an
+		// operator pastes from the box's homepage. Must gain "/v1".
+		{"ollama bare", "http://192.168.8.5:11434", "http://192.168.8.5:11434/v1"},
+		{"ollama trailing slash", "http://192.168.8.5:11434/", "http://192.168.8.5:11434/v1"},
+		{"localhost bare", "http://localhost:1234", "http://localhost:1234/v1"},
+		{"whitespace bare", "  http://host:11434  ", "http://host:11434/v1"},
+		// Already carries a path — trusted verbatim.
+		{"already v1", "http://192.168.8.5:11434/v1", "http://192.168.8.5:11434/v1"},
+		{"openrouter", "https://openrouter.ai/api/v1", "https://openrouter.ai/api/v1"},
+		{"gateway prefix", "https://gw.example.com/openai", "https://gw.example.com/openai"},
+		{"zhipu v4", "https://open.bigmodel.cn/api/paas/v4", "https://open.bigmodel.cn/api/paas/v4"},
+		// Degenerate input — left untouched so the SDK surfaces the real error.
+		{"empty", "", ""},
+		{"scheme-less", "192.168.8.5:11434", "192.168.8.5:11434"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := normalizeOpenAIBaseURL(tc.in); got != tc.want {
+				t.Fatalf("normalizeOpenAIBaseURL(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestOllamaBareBaseURLReproduction reproduces the field bug
+// (https://github.com/ongridio/ongrid/pull/54): an operator points the
+// Custom provider at a bare Ollama address "http://host:11434" (no /v1).
+//
+// The fake mimics Ollama exactly: it is a Go mux, so any unregistered
+// route — including the "/chat/completions" go-openai would hit for a
+// bare base URL — returns Go's stock "404 page not found", which is byte
+// for byte what real Ollama (gin) returns. The OpenAI-compatible route
+// lives only at "/v1/chat/completions".
+//
+// Part 1 documents the pre-fix failure: a raw POST to the bare
+// "/chat/completions" 404s. Part 2 verifies the fix: our client, handed
+// the bare base URL, normalizes to "/v1" and completes the chat.
+func TestOllamaBareBaseURLReproduction(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(sampleChatResponse("pong from ollama", nil))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	// Part 1 — the bug: bare path 404s with Ollama's exact body.
+	resp, err := http.Post(srv.URL+"/chat/completions", "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatalf("probe POST: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("bare /chat/completions status = %d, want 404 (Ollama serves nothing here)", resp.StatusCode)
+	}
+	if !strings.Contains(string(body), "404 page not found") {
+		t.Fatalf("bare /chat/completions body = %q, want Ollama-style \"404 page not found\"", string(body))
+	}
+
+	// Part 2 — the fix: bare base URL, client normalizes to /v1 and succeeds.
+	client := newTestClient(t, Config{
+		APIKey:  "ollama", // keyless local server — placeholder key
+		Model:   "deepseek-r1:7b",
+		BaseURL: srv.URL, // bare http://host:port, exactly as the operator pasted
+		Timeout: 2 * time.Second,
+	}, nil)
+	out, err := client.Chat(context.Background(), ChatReq{
+		Messages: []Message{{Role: "user", Content: "你是"}},
+	})
+	if err != nil {
+		t.Fatalf("Chat with bare Ollama base URL failed (fix not working): %v", err)
+	}
+	if out.Assistant.Content != "pong from ollama" {
+		t.Fatalf("content = %q, want %q", out.Assistant.Content, "pong from ollama")
+	}
 }
