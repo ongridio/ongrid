@@ -856,6 +856,26 @@ func buildEinoHistory(rows []*aiopsmodel.Message) []*schema.Message {
 				toolreplay.MarkDependentToolsForSkip(rows, i, len(m.ToolCalls), skipTool)
 				continue
 			}
+			// Precheck: every tool_call we'd emit must have a hoistable
+			// response inside the current window. If any is missing
+			// (parallel ToolsNode dropped an OnEnd → chat_tool_calls
+			// row written but no role=tool chat_messages row), drop the
+			// whole assistant turn + its dependent tools rather than
+			// send an envelope strict providers reject with HTTP 400
+			// "insufficient tool messages following tool_calls".
+			if ok && len(calls) > 0 {
+				complete := true
+				for _, tc := range calls {
+					if j, found := toolIdx[tc.ID]; !found || j >= end {
+						complete = false
+						break
+					}
+				}
+				if !complete {
+					toolreplay.MarkDependentToolsForSkip(rows, i, len(calls), skipTool)
+					continue
+				}
+			}
 			content := ""
 			if m.Content != nil {
 				content = *m.Content
@@ -1215,14 +1235,32 @@ func buildGraphErrorApology(err error) string {
 		return "本次请求超时或被取消。一般是上游 LLM / 设备响应慢。请稍后重试，或换简单的问法。"
 	case strings.Contains(low, "budget"):
 		return "今日 LLM 预算已用完。请联系 admin 调整配额或明天再试。"
+	// History replay produced a tool_calls envelope that the upstream
+	// provider rejected because one or more tool responses are missing
+	// from chat_messages (eino ToolsNode dropped an OnEnd in parallel
+	// execution; the chat_tool_calls row is there but the role=tool
+	// chat_messages row is not). Distinct user message — this is a
+	// dirty-session issue, not a provider or quota problem; new session
+	// is the clean way out.
+	case strings.Contains(low, "insufficient tool messages"),
+		strings.Contains(low, "tool_calls must be followed"),
+		strings.Contains(low, "tool messages responding"):
+		return "本会话历史里有一轮工具调用的响应没落库（并行调用写入丢失），后续每条消息送上游都会被拒。请新开一个会话继续，这个会话先放一放——后端会再修。"
 	// LLM provider quota / rate-limit / insufficient balance. Substring
-	// covers OpenAI ("rate limit reached"), Zhipu ("余额不足"), generic
-	// "429 Too Many Requests" wording. All of these are operator-side
-	// (refill / change provider), not user-side — make that clear.
+	// covers OpenAI ("insufficient_quota"), Anthropic ("credit balance"),
+	// Zhipu ("余额不足"), generic 429 wording. Operator-side issues, not
+	// user-side. The `insufficient` substring is intentionally narrow —
+	// the bare word also appears in protocol error strings like
+	// "insufficient tool messages following tool_calls", which used to
+	// land here and mislead the user into chasing a quota that was fine.
 	case strings.Contains(low, "429"),
 		strings.Contains(low, "too many requests"),
 		strings.Contains(low, "余额不足"),
-		strings.Contains(low, "insufficient"),
+		strings.Contains(low, "insufficient_quota"),
+		strings.Contains(low, "insufficient balance"),
+		strings.Contains(low, "insufficient credit"),
+		strings.Contains(low, "insufficient funds"),
+		strings.Contains(low, "credit balance is too low"),
 		strings.Contains(low, "rate limit"),
 		strings.Contains(low, "quota"):
 		return "LLM provider 当前不可用——可能是配额用尽 / 限流 / 余额不足。请到「设置 → 模型」检查 provider 的状态和余额；问题在配置层面，重试不会解决。"

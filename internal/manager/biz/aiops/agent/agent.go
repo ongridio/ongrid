@@ -726,6 +726,26 @@ func (a *Agent) buildMessages(history []*model.Message) []llm.Message {
 				toolreplay.MarkDependentToolsForSkip(history, idx, len(m.ToolCalls), skipTool)
 				continue
 			}
+			// Precheck: every tool_call we'd emit must have a hoistable
+			// response. If any is missing (parallel ToolsNode dropped an
+			// OnEnd → chat_tool_calls row written but no role=tool
+			// chat_messages row), drop the whole assistant turn + its
+			// dependent tools rather than send an envelope that strict
+			// providers (DeepSeek v4+) reject with HTTP 400
+			// "insufficient tool messages following tool_calls".
+			if ok && len(calls) > 0 {
+				complete := true
+				for _, tc := range calls {
+					if _, found := toolIdx[tc.ID]; !found {
+						complete = false
+						break
+					}
+				}
+				if !complete {
+					toolreplay.MarkDependentToolsForSkip(history, idx, len(calls), skipTool)
+					continue
+				}
+			}
 			content := ""
 			if m.Content != nil {
 				content = *m.Content
