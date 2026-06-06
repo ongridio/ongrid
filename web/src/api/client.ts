@@ -82,6 +82,12 @@ export async function request<T = unknown>(
       if (typeof obj.error === 'string') msg = obj.error;
       else if (typeof obj.message === 'string') msg = obj.message;
       if (typeof obj.code === 'string') code = obj.code;
+    } else if (typeof parsed === 'string' && parsed.trim()) {
+      // Plain-text body (e.g. handlers calling http.Error). Surface a
+      // trimmed slice so the UI can show actionable detail like
+      // "llm: context deadline exceeded" instead of a bare "HTTP 502".
+      const text = parsed.trim();
+      msg = `HTTP ${res.status}: ${text.length > 200 ? text.slice(0, 200) + '…' : text}`;
     }
     if (res.status === 401 && !opts.noAuth) {
       const nextToken = await refreshAccessToken();

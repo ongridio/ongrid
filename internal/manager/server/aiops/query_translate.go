@@ -10,8 +10,12 @@
 //   - User reviews and edits before running
 //
 // Backend protections:
-//   - Tight 6-second timeout — if the LLM is slow, just fail fast
-//     so the user can fall back to typing the query themselves.
+//   - 20-second timeout — long enough that mainstream LLMs (Anthropic
+//     Opus 4.x, OpenAI GPT-5.x, DeepSeek v4-flash, Zhipu GLM-4-plus)
+//     finish a short JSON output without false-failing, short enough
+//     that the user gives up on the helper and types by hand. The
+//     original 6 s was tuned for a Haiku-class default and produced
+//     spurious HTTP 502s once the cluster default moved to DeepSeek.
 //   - Force JSON-only output via system prompt + parse with leniency
 //     (strip ```json fences, trim whitespace) so a chatty model still
 //     produces something usable.
@@ -33,7 +37,7 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/tenantctx"
 )
 
-const queryTranslateTimeout = 6 * time.Second
+const queryTranslateTimeout = 20 * time.Second
 
 type queryTranslateReq struct {
 	// Dialect: "logql" | "traceql" | "promql".
