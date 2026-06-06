@@ -32,7 +32,14 @@ var (
 	ErrNoAPIKey = errors.New("llm: OPENAI_API_KEY not set")
 )
 
-const defaultTimeout = 30 * time.Second
+// defaultTimeout is the fallback for callers that build a Chat request
+// without putting a deadline on their context. 120s is the project-wide
+// unification floor — short enough that a stuck request still gives up
+// on a human-grade timescale, long enough that the slowest mainstream
+// reasoning model finishes a tool-rich turn without false-failing
+// (Anthropic Opus 4.x extended, DeepSeek v4 reasoning, GPT-5.x). The
+// 30s prior default broke once the cluster default moved to DeepSeek.
+const defaultTimeout = 120 * time.Second
 
 // Config is the LLM client configuration.
 //

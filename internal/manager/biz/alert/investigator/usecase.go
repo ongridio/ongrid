@@ -203,7 +203,12 @@ func NewUsecase(repo Repo, spawner WorkerSpawner, summarizer LLMSummarizer, cfg 
 		cfg.WorkerTimeout = 5 * time.Minute
 	}
 	if cfg.SummarizerTimeout == 0 {
-		cfg.SummarizerTimeout = 30 * time.Second
+		// Unified with the project-wide LLM timeout floor (see
+		// internal/pkg/llm/client.go::defaultTimeout). Was 30 s when
+		// the default model was Haiku-class; bumped to 120 s once the
+		// cluster default moved to slower reasoning models so the
+		// report extractor's structured-JSON pass stops false-failing.
+		cfg.SummarizerTimeout = 120 * time.Second
 	}
 	if cfg.MinSeverity == "" {
 		cfg.MinSeverity = "warning"

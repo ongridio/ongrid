@@ -51,7 +51,11 @@ import (
 const (
 	defaultWorkers      = 3
 	defaultQueueDepth   = 100
-	defaultLLMTimeout   = 60 * time.Second
+	// Unified with the project-wide LLM timeout floor (see
+	// internal/pkg/llm/client.go::defaultTimeout). The 60 s prior
+	// default false-failed on reasoning-model defaults; 120 s gives a
+	// tool-rich turn room without escaping the human-grade timescale.
+	defaultLLMTimeout = 120 * time.Second
 	defaultUserMsgCap   = 30 * 1024 // ~30KB upper bound for the bundle text
 	defaultModelDefault = "gpt-5.4"
 )

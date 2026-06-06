@@ -10,12 +10,13 @@
 //   - User reviews and edits before running
 //
 // Backend protections:
-//   - 20-second timeout — long enough that mainstream LLMs (Anthropic
-//     Opus 4.x, OpenAI GPT-5.x, DeepSeek v4-flash, Zhipu GLM-4-plus)
-//     finish a short JSON output without false-failing, short enough
-//     that the user gives up on the helper and types by hand. The
-//     original 6 s was tuned for a Haiku-class default and produced
-//     spurious HTTP 502s once the cluster default moved to DeepSeek.
+//   - 120-second timeout — project-wide unification floor for any LLM
+//     call (see internal/pkg/llm/client.go::defaultTimeout). Originally
+//     6 s tuned for a Haiku-class default; bumped to 20 s once the
+//     cluster default moved to DeepSeek; finally unified at 120 s with
+//     the rest of the LLM-call sites so a slow reasoning model can
+//     finish a tool-rich turn. Still short enough that a stuck request
+//     gives up on a human-grade timescale.
 //   - Force JSON-only output via system prompt + parse with leniency
 //     (strip ```json fences, trim whitespace) so a chatty model still
 //     produces something usable.
@@ -37,7 +38,7 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/tenantctx"
 )
 
-const queryTranslateTimeout = 20 * time.Second
+const queryTranslateTimeout = 120 * time.Second
 
 type queryTranslateReq struct {
 	// Dialect: "logql" | "traceql" | "promql".
