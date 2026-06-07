@@ -1,6 +1,6 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> Ongrid
 
-> **Um agente de IA de ops que entende sua infraestrutura, encontra a causa raiz e a corrige — direto do Slack ou Telegram.** *Monitoramento · execução remota · base de conhecimento · agentes especialistas · Bash · arquivos — e mais.*
+> **Um agente de IA de ops que entende sua infraestrutura, encontra a causa raiz e a corrige — direto do Slack ou Telegram.** *Métricas · logs · traces · raio de impacto da topologia · correlação de causa raiz · execução remota · investigação automática acionada por alertas · busca RAG em conhecimento e código · agentes especialistas e skills.*
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/ongridio/ongrid)](https://goreportcard.com/report/github.com/ongridio/ongrid)
 [![Release](https://img.shields.io/github/v/release/ongridio/ongrid?logo=github&label=release&color=2563eb)](https://github.com/ongridio/ongrid/releases/latest)
