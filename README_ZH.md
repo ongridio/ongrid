@@ -13,14 +13,18 @@
 
 [English](./README.md) | 简体中文 | [日本語](./README_JA.md) | [한국어](./README_KO.md) | [Español](./README_ES.md) | [Français](./README_FR.md) | [Deutsch](./README_DE.md) | [Português](./README_PT.md) | [Русский](./README_RU.md)
 
-[特性](#特性) • [安装](#安装) • [集成](#集成) • [许可证](#许可证)
-
 ---
 
 <p align="center">
   <img src="docs/assets/demo.gif" alt="Ongrid demo" width="100%" />
 </p>
 <p align="center"><sub><a href="https://github.com/ongridio/ongrid/releases/download/v0.7.169/Area2_hq.mp4">▶ 观看高清完整视频 (MP4, 18 MB)</a></sub></p>
+
+<div align="center">
+
+[特性](#特性) • [安装](#安装) • [集成](#集成) • [许可证](#许可证)
+
+</div>
 
 ## 特性
 

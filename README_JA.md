@@ -13,14 +13,18 @@
 
 [English](./README.md) | [简体中文](./README_ZH.md) | 日本語 | [한국어](./README_KO.md) | [Español](./README_ES.md) | [Français](./README_FR.md) | [Deutsch](./README_DE.md) | [Português](./README_PT.md) | [Русский](./README_RU.md)
 
-[機能](#機能) • [インストール](#インストール) • [インテグレーション](#インテグレーション) • [ライセンス](#ライセンス)
-
 ---
 
 <p align="center">
   <img src="docs/assets/demo.gif" alt="Ongrid demo" width="100%" />
 </p>
 <p align="center"><sub><a href="https://github.com/ongridio/ongrid/releases/download/v0.7.169/Area2_hq.mp4">▶ フル動画 (HD) を見る (MP4, 18 MB)</a></sub></p>
+
+<div align="center">
+
+[機能](#機能) • [インストール](#インストール) • [インテグレーション](#インテグレーション) • [ライセンス](#ライセンス)
+
+</div>
 
 ## 機能
 
