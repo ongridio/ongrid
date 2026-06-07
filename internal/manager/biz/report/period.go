@@ -2,6 +2,7 @@ package report
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	model "github.com/ongridio/ongrid/internal/manager/model/report"
@@ -73,21 +74,28 @@ func PeriodFor(kind string, fireAt time.Time, loc *time.Location, prevFireAt tim
 // custom gets a date range. Language-neutral structure — the period
 // label is locale-agnostic (numbers + ISO), only the kind word would
 // localise, which the SPA does at render time from Kind.
-func TitleFor(kind string, p Period) string {
+func TitleFor(kind string, p Period, locale string) string {
+	en := strings.HasPrefix(strings.ToLower(locale), "en")
+	mtr := func(zh, eng string) string {
+		if en {
+			return eng
+		}
+		return zh
+	}
 	switch kind {
 	case model.KindDaily:
-		return fmt.Sprintf("日报 · %s", p.Start.Format("2006-01-02"))
+		return fmt.Sprintf("%s · %s", mtr("日报", "Daily"), p.Start.Format("2006-01-02"))
 	case model.KindWeekly:
 		y, w := p.Start.ISOWeek()
-		return fmt.Sprintf("周报 · %d W%02d (%s – %s)", y, w,
+		return fmt.Sprintf("%s · %d W%02d (%s – %s)", mtr("周报", "Weekly"), y, w,
 			p.Start.Format("01-02"), p.End.AddDate(0, 0, -1).Format("01-02"))
 	case model.KindMonthly:
-		return fmt.Sprintf("月报 · %s", p.Start.Format("2006-01"))
+		return fmt.Sprintf("%s · %s", mtr("月报", "Monthly"), p.Start.Format("2006-01"))
 	case model.KindCustom:
-		return fmt.Sprintf("报告 · %s – %s",
+		return fmt.Sprintf("%s · %s – %s", mtr("报告", "Report"),
 			p.Start.Format("2006-01-02 15:04"), p.End.Format("2006-01-02 15:04"))
 	default:
-		return fmt.Sprintf("报告 · %s – %s",
+		return fmt.Sprintf("%s · %s – %s", mtr("报告", "Report"),
 			p.Start.Format("2006-01-02"), p.End.Format("2006-01-02"))
 	}
 }

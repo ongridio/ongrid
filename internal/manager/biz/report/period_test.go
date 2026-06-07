@@ -133,7 +133,7 @@ func TestTitleFor(t *testing.T) {
 		Start: time.Date(2026, 6, 1, 0, 0, 0, 0, loc),
 		End:   time.Date(2026, 6, 8, 0, 0, 0, 0, loc),
 	}
-	got := TitleFor(model.KindWeekly, weekly)
+	got := TitleFor(model.KindWeekly, weekly, "zh")
 	// 2026-06-01 is ISO week 23.
 	if got != "周报 · 2026 W23 (06-01 – 06-07)" {
 		t.Errorf("weekly title = %q", got)

@@ -62,6 +62,19 @@ type Usecase struct {
 	read  ReadRepo // attached via WithReadRepo for the API path; nil on the scheduler-only path
 	gen   Generator
 	idGen IDGen
+	// defaultLocale stamps scheduled (headless) reports' title + content
+	// language; manual generate/run-now override it with the requester's
+	// Accept-Language. Empty → Chinese title default. Set via
+	// WithDefaultLocale in main.go (ONGRID_DEFAULT_LOCALE).
+	defaultLocale string
+}
+
+// WithDefaultLocale sets the headless/scheduled report locale (the
+// generator's DefaultLocale). Builder-style so the test callsites stay
+// on the 3-arg NewUsecase.
+func (u *Usecase) WithDefaultLocale(locale string) *Usecase {
+	u.defaultLocale = locale
+	return u
 }
 
 // errExpiredShare is returned when a share token has passed its TTL.
@@ -180,11 +193,14 @@ func (u *Usecase) GenerateNow(ctx context.Context, createdBy uint64, kind, tz, s
 	if _, err := loadLocation(tz); err != nil {
 		return nil, err
 	}
+	if locale == "" {
+		locale = u.defaultLocale
+	}
 	rpt := &model.Report{
 		ID:          u.idGen(),
 		ScheduleID:  nil,
 		CreatedBy:   createdBy,
-		Title:       TitleFor(kind, period),
+		Title:       TitleFor(kind, period, locale),
 		Kind:        kind,
 		PeriodStart: period.Start,
 		PeriodEnd:   period.End,
@@ -210,11 +226,12 @@ func (u *Usecase) buildPendingReport(s *model.ReportSchedule, p Period) *model.R
 		ID:            u.idGen(),
 		ScheduleID:    &id,
 		CreatedBy:     s.CreatedBy,
-		Title:         TitleFor(s.Kind, p),
+		Title:         TitleFor(s.Kind, p, u.defaultLocale),
 		Kind:          s.Kind,
 		PeriodStart:   p.Start,
 		PeriodEnd:     p.End,
 		Timezone:      s.Timezone,
+		Locale:        u.defaultLocale,
 		Status:        model.StatusPending,
 		ErrorMsg:      "",
 		ContentJSON:   "",

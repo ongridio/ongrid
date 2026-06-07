@@ -1562,7 +1562,8 @@ func main() {
 			log,
 		).WithDeliverer(reportDelivererShim{channels: alertRepo, router: notifyRouter})
 		reportUC := managerbizreport.NewUsecase(reportRepo, reportGen, uuid.NewString).
-			WithReadRepo(reportRepo)
+			WithReadRepo(reportRepo).
+			WithDefaultLocale(firstNonEmpty(os.Getenv("ONGRID_DEFAULT_LOCALE"), "en"))
 		managerbizreport.NewScheduler(reportUC, log).Start(rootCtx)
 		reportHandler = managerserverreport.NewHandler(reportUC)
 		log.Info("report: scheduler + API wired")
