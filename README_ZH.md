@@ -1,6 +1,6 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> Ongrid
 
-> **一个看得懂系统、查得出根因、还能动手解决的运维 AI。** *监控、远程执行、知识库、专家智能体、Bash、文件等各类技能 —— 直接通过飞书、Slack、Telegram 下达指令。*
+> **懂你的系统和基础设施、查得出根因、还能动手修复的 AI Agent，直接在飞书和钉钉里指挥。** *监控 · 远程执行 · 知识库 · 专家 Agent · Bash · 文件 —— 等更多技能。*
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/ongridio/ongrid)](https://goreportcard.com/report/github.com/ongridio/ongrid)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)

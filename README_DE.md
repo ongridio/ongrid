@@ -1,6 +1,6 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> Ongrid
 
-> **Eine Ops-KI, die versteht, die Ursache findet und behebt.** *Monitoring, Remote-Ausführung, Wissensbasis, Spezialisten-Agenten, Bash, Dateien und weitere Skills —— Befehle direkt aus Slack, Telegram oder Lark.*
+> **Ein Ops-KI-Agent, der deine Infrastruktur versteht, die Ursache findet und sie behebt — direkt aus Slack oder Telegram.** *Monitoring · Remote-Ausführung · Wissensdatenbank · Spezialisten-Agenten · Bash · Dateien — und mehr.*
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/ongridio/ongrid)](https://goreportcard.com/report/github.com/ongridio/ongrid)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)

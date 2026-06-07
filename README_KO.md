@@ -1,6 +1,6 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> Ongrid
 
-> **이해하고, 원인을 짚고, 직접 고치는 운영 AI.** *모니터링, 원격 실행, 지식 베이스, 전문가 에이전트, Bash, 파일 등 각종 스킬 —— Slack, Telegram, Lark 에서 직접 명령을 내린다.*
+> **인프라를 이해하고, 근본 원인을 찾아내고, 직접 고치는 운영 AI 에이전트 — Slack과 Telegram에서 바로.** *모니터링 · 원격 실행 · 지식 베이스 · 전문 에이전트 · Bash · 파일 — 그 외 다수.*
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/ongridio/ongrid)](https://goreportcard.com/report/github.com/ongridio/ongrid)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)

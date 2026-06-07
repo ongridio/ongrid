@@ -1,6 +1,6 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> Ongrid
 
-> **システムを理解し、原因を突き止め、自ら直す運用 AI。** *監視、リモート実行、ナレッジベース、スペシャリストエージェント、Bash、ファイルなど各種スキル —— Slack、Telegram、Lark から直接指示を送る。*
+> **インフラを理解し、原因を突き止め、自ら直す運用 AI エージェント — Slack や Telegram から直接。** *監視 · リモート実行 · ナレッジベース · 専門エージェント · Bash · ファイル — ほか多数。*
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/ongridio/ongrid)](https://goreportcard.com/report/github.com/ongridio/ongrid)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)

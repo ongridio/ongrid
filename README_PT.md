@@ -1,6 +1,6 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> Ongrid
 
-> **Uma IA de ops que entende, encontra a causa e corrige.** *Monitoramento, execução remota, base de conhecimento, agentes especialistas, Bash, arquivos e outras skills —— dê os comandos direto do Slack, Telegram ou Lark.*
+> **Um agente de IA de ops que entende sua infraestrutura, encontra a causa raiz e a corrige — direto do Slack ou Telegram.** *Monitoramento · execução remota · base de conhecimento · agentes especialistas · Bash · arquivos — e mais.*
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/ongridio/ongrid)](https://goreportcard.com/report/github.com/ongridio/ongrid)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
