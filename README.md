@@ -36,13 +36,19 @@ Download the latest release, extract it, and run the installer (Ubuntu 22.04+, D
 
 ```bash
 # 1. Download latest release (Ubuntu 22.04+, Debian 12+, RHEL/Rocky 9)
-wget https://github.com/ongridio/ongrid/releases/download/v0.7.169/ongrid-v0.7.169-linux-amd64.tar.xz
+wget https://github.com/ongridio/ongrid/releases/download/v0.8.2/ongrid-v0.8.2-linux-amd64.tar.xz
 
 # 2. Extract
-tar -xf ongrid-v0.7.169-linux-amd64.tar.xz && cd ongrid-v0.7.169-linux-amd64
+tar -xf ongrid-v0.8.2-linux-amd64.tar.xz && cd ongrid-v0.8.2-linux-amd64
 
 # 3. Install
 sudo ./install.sh
+```
+
+**🇨🇳 Mainland China** — if GitHub is slow, download step 1 from the CDN mirror instead (everything else is the same):
+
+```bash
+wget https://ongrid.cloud/dl/ongrid-v0.8.2-linux-amd64.tar.xz
 ```
 
 ### Or run from source
