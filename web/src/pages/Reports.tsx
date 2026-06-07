@@ -35,6 +35,17 @@ const KIND_FILTERS: { key: string; zh: string; en: string }[] = [
 const KIND_ZH: Record<string, string> = { daily: '日报', weekly: '周报', monthly: '月报', custom: '自定义' };
 const KIND_EN: Record<string, string> = { daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', custom: 'Custom' };
 
+const STATUS_ZH: Record<ReportStatus, string> = { ready: '已就绪', generating: '生成中', pending: '待生成', failed: '失败' };
+const STATUS_EN: Record<ReportStatus, string> = { ready: 'Ready', generating: 'Generating', pending: 'Pending', failed: 'Failed' };
+
+// periodLabel strips the localized kind prefix ("日报 · " / "Daily · ")
+// from a stored title, leaving the locale-neutral date/period for the
+// table's primary line. Falls back to the full title if there's no " · ".
+function periodLabel(title: string): string {
+  const i = title.indexOf(' · ');
+  return i >= 0 ? title.slice(i + 3) : title;
+}
+
 export default function ReportsPage() {
   const { tr } = useI18n();
   const { canMutate } = usePermissions();
@@ -122,23 +133,22 @@ export default function ReportsPage() {
           <table className="w-full text-sm">
             <thead className="border-b border-zinc-800/60 bg-zinc-950/40 text-[11px] uppercase tracking-wider text-zinc-500">
               <tr>
-                <th className="px-4 py-2.5 text-left">{tr('标题', 'Title')}</th>
-                <th className="px-4 py-2.5 text-left">{tr('类型', 'Kind')}</th>
-                <th className="hidden px-4 py-2.5 text-left md:table-cell">{tr('摘要', 'Summary')}</th>
-                <th className="px-4 py-2.5 text-left">{tr('状态', 'Status')}</th>
-                <th className="px-4 py-2.5 text-right">{tr('生成时间', 'Generated')}</th>
+                <th className="px-5 py-3 text-left">{tr('报告', 'Report')}</th>
+                <th className="px-4 py-3 text-left">{tr('状态', 'Status')}</th>
+                <th className="hidden px-4 py-3 text-left md:table-cell">{tr('摘要', 'Summary')}</th>
+                <th className="px-5 py-3 text-right">{tr('生成时间', 'Generated')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/40">
               {loading && items.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-4 py-10 text-center text-zinc-500">
+                  <td colSpan={4} className="px-4 py-10 text-center text-zinc-500">
                     {tr('加载中…', 'Loading…')}
                   </td>
                 </tr>
               ) : items.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-4 py-10 text-center text-zinc-500">
+                  <td colSpan={4} className="px-4 py-10 text-center text-zinc-500">
                     {page > 0
                       ? tr('这一页没有报告', 'No reports on this page')
                       : tr('暂无报告。点右上角「立即生成」，或设一个定时任务。', 'No reports yet. Click "Generate now" or set up a schedule.')}
@@ -151,15 +161,21 @@ export default function ReportsPage() {
                     className="cursor-pointer transition-colors hover:bg-zinc-900/40"
                     onClick={() => navigate(`/reports/${r.id}`)}
                   >
-                    <td className="whitespace-nowrap px-4 py-2.5 font-medium text-zinc-100">{r.title}</td>
-                    <td className="whitespace-nowrap px-4 py-2.5 text-zinc-400">{tr(KIND_ZH[r.kind] ?? r.kind, KIND_EN[r.kind] ?? r.kind)}</td>
-                    <td className="hidden max-w-md truncate px-4 py-2.5 text-zinc-500 md:table-cell">{r.summary}</td>
-                    <td className="whitespace-nowrap px-4 py-2.5">
-                      <span className={cn('rounded border px-1.5 py-0.5 text-[10px] font-medium', STATUS_STYLE[r.status])}>
-                        {r.status}
+                    {/* NAME cell — two lines: period (bold) + kind (grey),
+                        mirroring the skills table's name + slug. */}
+                    <td className="whitespace-nowrap px-5 py-3">
+                      <div className="font-semibold text-zinc-100">{periodLabel(r.title)}</div>
+                      <div className="mt-0.5 text-xs text-zinc-500">
+                        {tr(KIND_ZH[r.kind] ?? r.kind, KIND_EN[r.kind] ?? r.kind)}
+                      </div>
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3">
+                      <span className={cn('inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium', STATUS_STYLE[r.status])}>
+                        {tr(STATUS_ZH[r.status], STATUS_EN[r.status])}
                       </span>
                     </td>
-                    <td className="whitespace-nowrap px-4 py-2.5 text-right text-xs text-zinc-500">
+                    <td className="hidden max-w-md truncate px-4 py-3 text-zinc-400 md:table-cell">{r.summary}</td>
+                    <td className="whitespace-nowrap px-5 py-3 text-right text-xs text-zinc-500">
                       {r.generated_at ? relativeTime(r.generated_at) : relativeTime(r.created_at)}
                     </td>
                   </tr>
