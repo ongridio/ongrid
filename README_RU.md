@@ -1,6 +1,8 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> Ongrid
 
-> **ИИ-агент для эксплуатации, который понимает вашу инфраструктуру, находит первопричину и устраняет её — прямо из Slack или Telegram.** *Метрики · логи · трейсы · радиус влияния топологии · корреляция первопричин · удалённое выполнение · автоматическое расследование по алертам · RAG-поиск по знаниям и коду · специализированные агенты и навыки.*
+> **ИИ-агент для эксплуатации, который понимает вашу инфраструктуру, находит первопричину и устраняет её — прямо из Slack или Telegram.**
+
+*Метрики · логи · трейсы · радиус влияния топологии · корреляция первопричин · удалённое выполнение · автоматическое расследование по алертам · RAG-поиск по знаниям и коду · специализированные агенты и навыки.*
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/ongridio/ongrid)](https://goreportcard.com/report/github.com/ongridio/ongrid)
 [![Release](https://img.shields.io/github/v/release/ongridio/ongrid?logo=github&label=release&color=2563eb)](https://github.com/ongridio/ongrid/releases/latest)

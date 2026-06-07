@@ -1,6 +1,8 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> Ongrid
 
-> **인프라를 이해하고, 근본 원인을 찾아내고, 직접 고치는 운영 AI 에이전트 — Slack과 Telegram에서 바로.** *메트릭 · 로그 · 트레이스 · 토폴로지 영향 범위 · 근본 원인 상관 분석 · 원격 실행 · 알림 기반 자동 조사 · 지식·코드 RAG 검색 · 전문 에이전트와 스킬.*
+> **인프라를 이해하고, 근본 원인을 찾아내고, 직접 고치는 운영 AI 에이전트 — Slack과 Telegram에서 바로.**
+
+*메트릭 · 로그 · 트레이스 · 토폴로지 영향 범위 · 근본 원인 상관 분석 · 원격 실행 · 알림 기반 자동 조사 · 지식·코드 RAG 검색 · 전문 에이전트와 스킬.*
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/ongridio/ongrid)](https://goreportcard.com/report/github.com/ongridio/ongrid)
 [![Release](https://img.shields.io/github/v/release/ongridio/ongrid?logo=github&label=release&color=2563eb)](https://github.com/ongridio/ongrid/releases/latest)

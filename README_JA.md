@@ -1,6 +1,8 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> Ongrid
 
-> **インフラを理解し、原因を突き止め、自ら直す運用 AI エージェント — Slack や Telegram から直接。** *メトリクス · ログ · トレース · トポロジ影響範囲 · 根本原因の相関 · リモート実行 · アラート起点の自動調査 · ナレッジ＆コードの RAG 検索 · 専門エージェントとスキル。*
+> **インフラを理解し、原因を突き止め、自ら直す運用 AI エージェント — Slack や Telegram から直接。**
+
+*メトリクス · ログ · トレース · トポロジ影響範囲 · 根本原因の相関 · リモート実行 · アラート起点の自動調査 · ナレッジ＆コードの RAG 検索 · 専門エージェントとスキル。*
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/ongridio/ongrid)](https://goreportcard.com/report/github.com/ongridio/ongrid)
 [![Release](https://img.shields.io/github/v/release/ongridio/ongrid?logo=github&label=release&color=2563eb)](https://github.com/ongridio/ongrid/releases/latest)

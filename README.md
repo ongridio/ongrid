@@ -1,6 +1,8 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> Ongrid
 
-> **An ops AI Agent that understands your infrastructure, finds the root cause, and fixes it — right from Slack or Telegram.** *Metrics · logs · traces · topology blast-radius · root-cause correlation · remote execution · alert-driven auto-investigation · RAG knowledge & code search · specialist agents & skills.*
+> **An ops AI Agent that understands your infrastructure, finds the root cause, and fixes it — right from Slack or Telegram.**
+
+*Metrics · logs · traces · topology blast-radius · root-cause correlation · remote execution · alert-driven auto-investigation · RAG knowledge & code search · specialist agents & skills.*
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/ongridio/ongrid)](https://goreportcard.com/report/github.com/ongridio/ongrid)
 [![Release](https://img.shields.io/github/v/release/ongridio/ongrid?logo=github&label=release&color=2563eb)](https://github.com/ongridio/ongrid/releases/latest)
