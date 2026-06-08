@@ -61,6 +61,8 @@ web/tsconfig.tsbuildinfo
 # Local dev artifacts (deploy/)
 deploy/docker-compose.override.yml
 deploy/certs/
+deploy/install/certs/
+/local/
 
 # build cache: stack-dep upstream binaries fetched by dist/package.sh
 .cache/

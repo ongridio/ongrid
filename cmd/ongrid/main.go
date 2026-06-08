@@ -16,12 +16,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	neturl "net/url"
 	"os"
 	"os/signal"
-	"io"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -46,7 +46,6 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/qdrantx"
 	"github.com/ongridio/ongrid/internal/pkg/tracing"
 
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	pkglogquery "github.com/ongridio/ongrid/internal/pkg/logquery"
 	"github.com/ongridio/ongrid/internal/pkg/notify"
 	"github.com/ongridio/ongrid/internal/pkg/prom"
@@ -54,6 +53,7 @@ import (
 	pkgpromquery "github.com/ongridio/ongrid/internal/pkg/promquery"
 	pkgpromwrite "github.com/ongridio/ongrid/internal/pkg/promwrite"
 	pkgtracequery "github.com/ongridio/ongrid/internal/pkg/tracequery"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	iambizauthz "github.com/ongridio/ongrid/internal/iam/biz/authz"
 	iambizmembership "github.com/ongridio/ongrid/internal/iam/biz/membership"
@@ -68,15 +68,15 @@ import (
 
 	managerbizdevice "github.com/ongridio/ongrid/internal/manager/biz/device"
 	managerbizedge "github.com/ongridio/ongrid/internal/manager/biz/edge"
-	managerbiztopology "github.com/ongridio/ongrid/internal/manager/biz/topology"
 	managerbizmetric "github.com/ongridio/ongrid/internal/manager/biz/metric"
 	managerbizpromwrite "github.com/ongridio/ongrid/internal/manager/biz/promwrite"
+	managerbiztopology "github.com/ongridio/ongrid/internal/manager/biz/topology"
 	manageralertdata "github.com/ongridio/ongrid/internal/manager/data/alert/store"
-	managermodelalert "github.com/ongridio/ongrid/internal/manager/model/alert"
 	managerdevicedata "github.com/ongridio/ongrid/internal/manager/data/device/store"
 	manageredgedata "github.com/ongridio/ongrid/internal/manager/data/edge/store"
-	managertopologydata "github.com/ongridio/ongrid/internal/manager/data/topology/store"
 	managermetricdata "github.com/ongridio/ongrid/internal/manager/data/metric/store"
+	managertopologydata "github.com/ongridio/ongrid/internal/manager/data/topology/store"
+	managermodelalert "github.com/ongridio/ongrid/internal/manager/model/alert"
 
 	managerbizaiops "github.com/ongridio/ongrid/internal/manager/biz/aiops"
 	aiopsagent "github.com/ongridio/ongrid/internal/manager/biz/aiops/agent"
@@ -84,45 +84,43 @@ import (
 	aiopsgraph "github.com/ongridio/ongrid/internal/manager/biz/aiops/graph"
 	aiopsgraphcb "github.com/ongridio/ongrid/internal/manager/biz/aiops/graph/callbacks"
 	aiopsinvestigator "github.com/ongridio/ongrid/internal/manager/biz/aiops/investigator"
-	investigator "github.com/ongridio/ongrid/internal/manager/biz/alert/investigator"
 	managerbizaiopsmentions "github.com/ongridio/ongrid/internal/manager/biz/aiops/mentions"
 	aiopstools "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools"
 	aiopstoolsbase "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	aiopstoolsdec "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/decorators"
 	managerbizalert "github.com/ongridio/ongrid/internal/manager/biz/alert"
-	managerbizknowledge "github.com/ongridio/ongrid/internal/manager/biz/knowledge"
-	managerknowledgedata "github.com/ongridio/ongrid/internal/manager/data/knowledge/store"
-	managerserverknowledge "github.com/ongridio/ongrid/internal/manager/server/knowledge"
+	investigator "github.com/ongridio/ongrid/internal/manager/biz/alert/investigator"
+	managerbizgrafana "github.com/ongridio/ongrid/internal/manager/biz/grafana"
 	managerbizimbridge "github.com/ongridio/ongrid/internal/manager/biz/imbridge"
 	managerbizimbridgefeishu "github.com/ongridio/ongrid/internal/manager/biz/imbridge/provider/feishu"
 	managerbizimbridgeslack "github.com/ongridio/ongrid/internal/manager/biz/imbridge/provider/slack"
 	managerbizimbridgetelegram "github.com/ongridio/ongrid/internal/manager/biz/imbridge/provider/telegram"
-	managerimbridgedata "github.com/ongridio/ongrid/internal/manager/data/imbridge/store"
-	managerserverimbridge "github.com/ongridio/ongrid/internal/manager/server/imbridge"
-	managerbizgrafana "github.com/ongridio/ongrid/internal/manager/biz/grafana"
+	managerbizknowledge "github.com/ongridio/ongrid/internal/manager/biz/knowledge"
 	managerbizmarketplace "github.com/ongridio/ongrid/internal/manager/biz/marketplace"
+	managerbizmonitor "github.com/ongridio/ongrid/internal/manager/biz/monitor"
 	managerbizsetting "github.com/ongridio/ongrid/internal/manager/biz/setting"
 	managerbizskill "github.com/ongridio/ongrid/internal/manager/biz/skill"
+	managerwebshellbiz "github.com/ongridio/ongrid/internal/manager/biz/webshell"
 	manageraiopsdata "github.com/ongridio/ongrid/internal/manager/data/aiops/store"
-	managerbizmonitor "github.com/ongridio/ongrid/internal/manager/biz/monitor"
+	managerimbridgedata "github.com/ongridio/ongrid/internal/manager/data/imbridge/store"
+	managerknowledgedata "github.com/ongridio/ongrid/internal/manager/data/knowledge/store"
 	managermarketplacedata "github.com/ongridio/ongrid/internal/manager/data/marketplace/store"
 	managermonitordata "github.com/ongridio/ongrid/internal/manager/data/monitor/store"
-	managerwebshelldata "github.com/ongridio/ongrid/internal/manager/data/webshell/store"
-	managerwebshellbiz "github.com/ongridio/ongrid/internal/manager/biz/webshell"
-	managerwebshellserver "github.com/ongridio/ongrid/internal/manager/server/webshell"
-	wsmodel "github.com/ongridio/ongrid/internal/manager/model/webshell"
 	managersettingdata "github.com/ongridio/ongrid/internal/manager/data/setting/store"
+	managerwebshelldata "github.com/ongridio/ongrid/internal/manager/data/webshell/store"
 	settingmodel "github.com/ongridio/ongrid/internal/manager/model/setting"
+	wsmodel "github.com/ongridio/ongrid/internal/manager/model/webshell"
+	managerserverimbridge "github.com/ongridio/ongrid/internal/manager/server/imbridge"
+	managerserverknowledge "github.com/ongridio/ongrid/internal/manager/server/knowledge"
+	managerwebshellserver "github.com/ongridio/ongrid/internal/manager/server/webshell"
 
 	managerbizaudit "github.com/ongridio/ongrid/internal/manager/biz/audit"
-	manageraudtdata "github.com/ongridio/ongrid/internal/manager/data/audit/store"
 	managerbizreport "github.com/ongridio/ongrid/internal/manager/biz/report"
+	manageraudtdata "github.com/ongridio/ongrid/internal/manager/data/audit/store"
 	managerreportdata "github.com/ongridio/ongrid/internal/manager/data/report/store"
-	managerserverreport "github.com/ongridio/ongrid/internal/manager/server/report"
 	managerserveraiops "github.com/ongridio/ongrid/internal/manager/server/aiops"
 	managerserveralert "github.com/ongridio/ongrid/internal/manager/server/alert"
 	managerserveraudit "github.com/ongridio/ongrid/internal/manager/server/audit"
-	managermiddleware "github.com/ongridio/ongrid/internal/manager/server/middleware"
 	managerserverdevice "github.com/ongridio/ongrid/internal/manager/server/device"
 	managerserveredge "github.com/ongridio/ongrid/internal/manager/server/edge"
 	managerserveredgeauth "github.com/ongridio/ongrid/internal/manager/server/edgeauth"
@@ -130,10 +128,13 @@ import (
 	managerserverlogs "github.com/ongridio/ongrid/internal/manager/server/logs"
 	managerservermarketplace "github.com/ongridio/ongrid/internal/manager/server/marketplace"
 	managerservermetric "github.com/ongridio/ongrid/internal/manager/server/metric"
+	managermiddleware "github.com/ongridio/ongrid/internal/manager/server/middleware"
 	managerservermonitor "github.com/ongridio/ongrid/internal/manager/server/monitor"
 	managerserverprom "github.com/ongridio/ongrid/internal/manager/server/prometheus"
+	managerserverreport "github.com/ongridio/ongrid/internal/manager/server/report"
 	managerserversetting "github.com/ongridio/ongrid/internal/manager/server/setting"
 	managerserverskill "github.com/ongridio/ongrid/internal/manager/server/skill"
+	managerserversystemhealth "github.com/ongridio/ongrid/internal/manager/server/systemhealth"
 	managerservertopology "github.com/ongridio/ongrid/internal/manager/server/topology"
 	managerservertraces "github.com/ongridio/ongrid/internal/manager/server/traces"
 
@@ -143,6 +144,7 @@ import (
 	managersvcfb "github.com/ongridio/ongrid/internal/manager/service/frontierbound"
 	managersvcmetric "github.com/ongridio/ongrid/internal/manager/service/metric"
 	managersvcprom "github.com/ongridio/ongrid/internal/manager/service/prometheus"
+	managersvcsystemhealth "github.com/ongridio/ongrid/internal/manager/service/systemhealth"
 
 	// Builtin skill init() blocks register Executors with the shared
 	// internal/skill registry. Both manager (metadata) and edge
@@ -230,6 +232,10 @@ func main() {
 	); err != nil {
 		log.Error("run migrations", slog.Any("err", err))
 		os.Exit(1)
+	}
+	sqlDB, errDB := db.DB()
+	if errDB != nil {
+		log.Warn("gorm.DB() failed; DB pool metrics and health ping will be unavailable", slog.Any("err", errDB))
 	}
 
 	// iam wiring.
@@ -390,9 +396,10 @@ func main() {
 		}
 	}
 	// Grafana seed. Out of the box the manager points at the embedded
-	// Grafana on the docker network; admin still needs to paste an SA
-	// token after creating one in Grafana UI. SetIfAbsent honors prior
-	// admin edits across restarts.
+	// Grafana on the docker network. When bootstrap admin creds are
+	// provided, startup creates an SA token automatically; otherwise the
+	// admin can paste one in the UI. SetIfAbsent honors prior admin edits
+	// across restarts.
 	if err := settingSvc.SetIfAbsent(rootCtx, settingmodel.CategoryGrafana, settingmodel.KeyGrafanaRootURL, cfg.Grafana.InternalRootURL, false); err != nil {
 		log.Warn("seed grafana root_url", slog.Any("err", err))
 	}
@@ -1620,6 +1627,36 @@ func main() {
 	if rcaInvConcrete != nil {
 		alertHandler.WithInvestigationTrigger(rcaInvConcrete)
 	}
+	var healthDB managersvcsystemhealth.DBPinger
+	if errDB == nil {
+		healthDB = sqlDB
+	}
+	systemHealthSvc := managersvcsystemhealth.New(managersvcsystemhealth.Config{
+		Version:             version,
+		PromEnabled:         cfg.Prom.Enabled,
+		LogsEnabled:         cfg.Logs.URL != "",
+		TracesEnabled:       cfg.Traces.URL != "",
+		AlertEnabled:        cfg.Alert.Enabled,
+		EvaluatorInterval:   cfg.Alert.EvaluatorInterval,
+		NotifyCooldown:      cfg.Alert.Cooldown,
+		FrontierAddr:        cfg.FrontierClient.Addr,
+		FrontierDisabled:    cfg.FrontierClient.Disabled,
+		LLMConfigured:       cfg.OpenAI.APIKey != "",
+		EmbeddingConfigured: embErr == nil,
+		QdrantURL:           qdrantURL,
+		QdrantCollection:    managerbizknowledge.CollectionName,
+	}, managersvcsystemhealth.Dependencies{
+		DB:        healthDB,
+		Prom:      promTester,
+		Grafana:   grafanaSvc,
+		Loki:      lokiProbe,
+		Tempo:     tempoProbe,
+		Rules:     alertSvc,
+		Incidents: alertSvc,
+		Edges:     edgeSvc,
+		LLM:       llmSettingsResolver,
+	})
+	systemHealthHandler := managerserversystemhealth.NewHandler(systemHealthSvc)
 
 	// HTTP handler for the knowledge base — built here, wired to routes
 	// below. The biz Usecase + tool registry SetKnowledgeSearcher were
@@ -1830,6 +1867,7 @@ func main() {
 			tracesHandler.Register(protected)
 			aiopsHandler.Register(protected)
 			alertHandler.Register(protected)
+			systemHealthHandler.Register(protected)
 			imbridgeHandler.RegisterProtected(protected)
 			skillHandler.Register(protected)
 			if knowledgeHandler != nil {
@@ -1872,7 +1910,6 @@ func main() {
 	// gorm's underlying *sql.DB. WaitCount is a monotone counter inside
 	// database/sql, so we expose the delta (DBStats already accumulates).
 	eg.Go(func() error {
-		sqlDB, errDB := db.DB()
 		if errDB != nil {
 			log.Warn("db pool sampler: gorm.DB() failed; pool gauges will stay at zero", slog.Any("err", errDB))
 			return nil
@@ -2423,9 +2460,10 @@ func (p *providerInjectingClient) Chat(ctx context.Context, req llm.ChatReq) (*l
 // when the chat runtime can't build (no LLM provider, build failure).
 //
 // Env knobs mirror the values buildAIOpsRuntime used to read inline:
-//   ONGRID_BUILTIN_AGENTS_ROOT  default ./agents
-//   ONGRID_BUILTIN_SKILLS_ROOT  default ./skills
-//   ONGRID_SKILLS_ROOT          default /var/lib/ongrid/skills (marketplace mutable root)
+//
+//	ONGRID_BUILTIN_AGENTS_ROOT  default ./agents
+//	ONGRID_BUILTIN_SKILLS_ROOT  default ./skills
+//	ONGRID_SKILLS_ROOT          default /var/lib/ongrid/skills (marketplace mutable root)
 func loadBootstrapRegistries(log *slog.Logger) (*aiopschatruntime.SkillRegistry, *aiopschatruntime.AgentRegistry) {
 	builtinSkillsRoot := firstNonEmpty(os.Getenv("ONGRID_BUILTIN_SKILLS_ROOT"), "./skills")
 	builtinAgentsRoot := firstNonEmpty(os.Getenv("ONGRID_BUILTIN_AGENTS_ROOT"), "./agents")
@@ -2678,7 +2716,7 @@ func buildAIOpsRuntime(
 		Name:        "default",
 		Description: "默认助理",
 		WhenToUse:   "首页发起的会话默认绑定它；适合任何运维 / 排查 / 知识库查询场景。",
-		Tools: coordinatorToolNames,
+		Tools:       coordinatorToolNames,
 		// Coordinator's ReAct ceiling. 30 (the global default) lets
 		// a runaway LLM rack up 120+ tool calls per turn before the
 		// graph aborts; 10 is enough for "1-3 dispatches + 1
@@ -2805,11 +2843,11 @@ specialist 名单（subagent_type 参数）：
 // 重点纠正一个观察到的失败模式（self-loop 诊断 30 轮空转）：LLM 在
 // tool_calls 模式下默认 content 为空，看不到推理；又会无限探索同一类
 // 工具拿不到收敛结论。这段 prompt 强制：
-//   1) 每次 tool_call 之前在 content 写一句话说为什么调用
-//   2) ≥3 个独立数据点之后必须给阶段性结论（即使是 "未发现异常"）
-//   3) 同一工具同一参数禁止重复
-//   4) 拿到的数据如果跟用户问题无关也要明确说"未发现 X 相关信号"
-//   5) 最多调用 8 个工具就应当给出最终答案
+//  1. 每次 tool_call 之前在 content 写一句话说为什么调用
+//  2. ≥3 个独立数据点之后必须给阶段性结论（即使是 "未发现异常"）
+//  3. 同一工具同一参数禁止重复
+//  4. 拿到的数据如果跟用户问题无关也要明确说"未发现 X 相关信号"
+//  5. 最多调用 8 个工具就应当给出最终答案
 func ongridBasePrompt() string {
 	// NOTE: backticks in the body (around tool names like
 	// correlate_incident) are emitted via "`" + ... + "`" because Go
