@@ -71,7 +71,7 @@ var dialectGuide = map[string]string{
 - 严禁随意编造标签，只用上面列出的
 示例：
 "dev-host-3 最近 error 日志" → {device_id="3"} |~ "(?i)error"
-"sshd 服务的失败登录" → {unit="sshd.service"} |~ "(Failed|invalid)"
+"ssh 服务的失败登录" → {unit=~"sshd?\\.service"} |~ "(?i)(Failed|invalid)"
 "OOM 杀掉的进程" → {} |~ "(Out of memory|OOM|invoked oom-killer)"`,
 
 	"traceql": `TraceQL（Tempo 查询语言）。规则：

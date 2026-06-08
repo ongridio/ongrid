@@ -82,8 +82,8 @@ const LOGS_QUICK_CHIPS: { labelZh: string; labelEn: string; query: string; title
   },
   {
     labelZh: 'ssh 失败', labelEn: 'ssh failures',
-    query: '{unit="sshd.service"} |~ "(Failed|invalid)"',
-    titleZh: 'sshd 登录失败 / 非法用户', titleEn: 'sshd login failures / invalid users',
+    query: '{unit=~"sshd?\\.service"} |~ "(?i)(Failed|invalid)"',
+    titleZh: 'ssh 登录失败 / 非法用户', titleEn: 'ssh login failures / invalid users',
   },
 ];
 
