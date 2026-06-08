@@ -244,7 +244,7 @@ export default function HomePage() {
         <div className="mx-auto flex w-full max-w-3xl flex-col items-stretch px-6 pb-16 pt-16 sm:pt-20">
           <StatusRow />
 
-          <h1 className="mb-8 mt-4 text-center text-3xl font-semibold tracking-tight text-zinc-100">
+          <h1 className="mb-8 mt-8 text-center text-3xl font-semibold tracking-tight text-zinc-100">
             {greeting}
           </h1>
 

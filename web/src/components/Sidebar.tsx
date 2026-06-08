@@ -336,9 +336,9 @@ export function Sidebar() {
       <Link
         to="/"
         aria-label={tr('Ongrid 首页', 'Ongrid home')}
-        className="flex items-center gap-2.5 border-b border-zinc-800/60 px-3 py-3 hover:bg-zinc-800/40"
+        className="flex items-center gap-1.5 border-b border-zinc-800/60 px-3 py-3 hover:bg-zinc-800/40"
       >
-        <OngridLogo size={32} />
+        <OngridLogo size={32} className="-mr-0.5" />
         <span className="text-[16px] font-semibold tracking-tight text-zinc-100">Ongrid</span>
       </Link>
 

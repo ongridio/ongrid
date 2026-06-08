@@ -96,6 +96,17 @@ html.light .bg-zinc-800           { background-color: rgb(226 232 240); }  /* sl
 html.light .bg-zinc-700           { background-color: rgb(203 213 225); }  /* slate-300 */
 html.light .bg-zinc-500           { background-color: rgb(100 116 139); }  /* slate-500 mid */
 
+/* Transparency variants — Tailwind emits a DISTINCT class for `/NN`
+   opacity (e.g. .bg-zinc-900\/20), which the plain .bg-zinc-900 override
+   above does NOT match, so those surfaces stayed dark in light mode
+   (Traces table rows/header/expanded rows). Map the used ones to light. */
+html.light .bg-zinc-900\/20              { background-color: rgb(248 250 252); }
+html.light .bg-zinc-900\/40              { background-color: rgb(241 245 249); }
+html.light .bg-zinc-900\/60              { background-color: rgb(241 245 249); }
+html.light .bg-zinc-950\/30              { background-color: rgb(248 250 252); }
+html.light .bg-zinc-950\/40              { background-color: rgb(248 250 252); }
+html.light .hover\:bg-zinc-900\/50:hover { background-color: rgb(226 232 240); }
+
 /* Primary-button pattern: `bg-zinc-100 text-zinc-900 hover:bg-white`
    is the high-contrast filled CTA used across the app (保存 / 创建 /
    登录 / etc). In dark it reads as a near-white pill on dark canvas.

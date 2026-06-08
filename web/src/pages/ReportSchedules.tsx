@@ -105,7 +105,7 @@ export default function ReportSchedulesPage() {
           {tr('还没有定时任务。新建一个日报/周报定时生成。', 'No schedules yet. Create a daily/weekly scheduled report.')}
         </div>
       ) : (
-        <div className="mx-auto max-w-3xl space-y-2">
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
           {items.map((s) => (
             <div key={s.id} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3.5">
               <div className="flex items-center justify-between gap-2">

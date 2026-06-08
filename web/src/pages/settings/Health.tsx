@@ -24,7 +24,7 @@ import {
   type HealthReport,
   type HealthStatus,
 } from '@/api/systemHealth';
-import { Button, Card, Chip } from '@/components/ui';
+import { Card } from '@/components/ui';
 import { cn } from '@/lib/cn';
 import type { IconType } from '@/lib/icon';
 import { useI18n } from '@/i18n/locale';
@@ -45,21 +45,21 @@ const STATUS_META: Record<HealthStatus, StatusMeta> = {
     labelEn: 'OK',
     tone: 'success',
     icon: CheckCircle2,
-    dot: 'bg-emerald-400',
+    dot: 'bg-emerald-500',
   },
   degraded: {
     labelZh: '降级',
     labelEn: 'Degraded',
     tone: 'warning',
     icon: AlertTriangle,
-    dot: 'bg-amber-400',
+    dot: 'bg-amber-500',
   },
   failed: {
     labelZh: '异常',
     labelEn: 'Failed',
     tone: 'danger',
     icon: XCircle,
-    dot: 'bg-red-400',
+    dot: 'bg-red-500',
   },
   unknown: {
     labelZh: '未知',
@@ -150,117 +150,101 @@ export default function SettingsHealth() {
   const checkedAt = report?.checked_at
     ? new Date(report.checked_at).toLocaleString(locale === 'zh-CN' ? 'zh-CN' : 'en-US')
     : tr('尚未检查', 'Not checked');
-  const refreshingExistingReport = loading && report !== null;
 
   return (
-    <div className="space-y-4" aria-busy={loading}>
-      <Card
-        className={cn(
-          'p-5 transition-[box-shadow,border-color] duration-300',
-          refreshingExistingReport && 'border-violet-500/30 shadow-[0_0_0_1px_rgba(139,92,246,0.14)]',
-        )}
-      >
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+    <div className="space-y-3" aria-busy={loading}>
+      <Card className="p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
-            <div className="mb-2 flex items-center gap-2">
+            <div className="flex items-center gap-2">
               <Activity size={15} className="text-zinc-400" />
               <h2 className="text-sm font-medium text-zinc-100">{tr('系统健康', 'System health')}</h2>
               {report && <StatusChip status={report.status} />}
             </div>
-            <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-500">
+            <div className="mt-1 flex items-center gap-1.5 text-[11px] text-zinc-500">
               <Clock3 size={12} className="text-zinc-600" />
               <span>{checkedAt}</span>
-              {refreshingExistingReport && (
-                <span
-                  className="inline-flex items-center gap-1.5 rounded-full border border-violet-500/25 bg-violet-500/10 px-2 py-0.5 text-violet-200"
-                  aria-live="polite"
-                >
-                  <span className="h-1.5 w-1.5 rounded-full bg-violet-300 motion-safe:animate-pulse" />
-                  {tr('正在刷新', 'Refreshing')}
-                </span>
-              )}
             </div>
           </div>
-          <Button
+          <button
+            type="button"
             onClick={() => void run(true)}
             disabled={loading}
-            variant="primary"
-            className={cn(
-              'w-full justify-center transition-transform duration-150 motion-safe:active:scale-[0.98] sm:w-auto',
-              loading && 'shadow-[0_0_0_3px_rgba(139,92,246,0.14)]',
-            )}
+            className="inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-indigo-600 bg-indigo-600/20 px-3 py-1.5 text-xs font-medium text-indigo-200 hover:bg-indigo-600/30 disabled:opacity-50 sm:w-auto"
           >
             {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
             {loading ? tr('检查中', 'Checking') : tr('一键检查', 'Run check')}
-          </Button>
+          </button>
         </div>
         {err && (
-          <div className="mt-4 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+          <div className="mt-3 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
             {err}
           </div>
         )}
       </Card>
 
       {report && (
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          <SummaryTile status="ok" count={report.summary.ok} refreshing={refreshingExistingReport} />
-          <SummaryTile status="degraded" count={report.summary.degraded} refreshing={refreshingExistingReport} />
-          <SummaryTile status="failed" count={report.summary.failed} refreshing={refreshingExistingReport} />
-          <SummaryTile status="unknown" count={report.summary.unknown} refreshing={refreshingExistingReport} />
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+          <SummaryTile status="ok" count={report.summary.ok} />
+          <SummaryTile status="degraded" count={report.summary.degraded} />
+          <SummaryTile status="failed" count={report.summary.failed} />
+          <SummaryTile status="unknown" count={report.summary.unknown} />
         </div>
       )}
 
       {loading && !report ? (
-        <Card className="flex h-40 items-center justify-center text-sm text-zinc-500">
+        <Card className="flex h-32 items-center justify-center text-sm text-zinc-500">
           <Loader2 size={15} className="mr-2 animate-spin" /> {tr('检查中…', 'Checking…')}
         </Card>
       ) : (
         groups.map(({ group, checks }) => (
-          <HealthGroup key={group} group={group} checks={checks} refreshing={refreshingExistingReport} />
+          <HealthGroup key={group} group={group} checks={checks} />
         ))
       )}
     </div>
   );
 }
 
-function SummaryTile({ status, count, refreshing }: { status: HealthStatus; count: number; refreshing: boolean }) {
+function SummaryTile({ status, count }: { status: HealthStatus; count: number }) {
   const { tr } = useI18n();
   const meta = STATUS_META[status];
   const Icon = meta.icon;
   return (
-    <Card compact className={cn('min-h-20 transition-opacity duration-300', refreshing && 'motion-safe:animate-pulse')}>
+    <Card compact>
       <div className="flex items-center justify-between gap-2">
-        <Chip tone={meta.tone} dense>
+        <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-xs text-zinc-400">
           <span className={cn('h-1.5 w-1.5 rounded-full', meta.dot)} />
           {tr(meta.labelZh, meta.labelEn)}
-        </Chip>
-        <Icon size={14} className="text-zinc-500" />
+        </span>
+        <Icon size={14} className="text-zinc-600" />
       </div>
-      <div className="mt-3 text-2xl font-semibold text-zinc-100">{count}</div>
+      <div className="mt-2 text-xl font-semibold text-zinc-100">{count}</div>
     </Card>
   );
 }
 
-function HealthGroup({ group, checks, refreshing }: { group: string; checks: HealthCheck[]; refreshing: boolean }) {
+function HealthGroup({ group, checks }: { group: string; checks: HealthCheck[] }) {
   const { tr } = useI18n();
   const meta = GROUP_META[group] ?? { labelZh: group, labelEn: group, icon: Wifi };
   const Icon = meta.icon;
   return (
-    <section className="space-y-2">
+    <section className="space-y-1.5">
       <div className="flex items-center gap-2 px-1 text-xs font-medium text-zinc-400">
         <Icon size={13} />
         <span>{tr(meta.labelZh, meta.labelEn)}</span>
       </div>
-      <div className="space-y-2">
-        {checks.map((check) => (
-          <HealthRow key={check.id} check={check} refreshing={refreshing} />
-        ))}
-      </div>
+      <Card compact className="overflow-hidden p-0">
+        <div className="divide-y divide-zinc-800/60">
+          {checks.map((check) => (
+            <HealthRow key={check.id} check={check} />
+          ))}
+        </div>
+      </Card>
     </section>
   );
 }
 
-function HealthRow({ check, refreshing }: { check: HealthCheck; refreshing: boolean }) {
+function HealthRow({ check }: { check: HealthCheck }) {
   const { tr } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const meta = STATUS_META[check.status] ?? STATUS_META.unknown;
@@ -291,19 +275,19 @@ function HealthRow({ check, refreshing }: { check: HealthCheck; refreshing: bool
   );
 
   return (
-    <Card compact className={cn('overflow-hidden p-0 transition-opacity duration-300', refreshing && 'motion-safe:animate-pulse')}>
+    <div>
       {expandable ? (
         <button
           type="button"
           aria-expanded={expanded}
           aria-controls={detailId}
           onClick={() => setExpanded((v) => !v)}
-          className="flex w-full items-center justify-between gap-3 px-3.5 py-3 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-zinc-700"
+          className="flex w-full items-center justify-between gap-3 px-3.5 py-2.5 text-left hover:bg-zinc-800/30 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-zinc-700"
         >
           {rowContent}
         </button>
       ) : (
-        <div className="flex items-center justify-between gap-3 px-3.5 py-3">
+        <div className="flex items-center justify-between gap-3 px-3.5 py-2.5">
           {rowContent}
         </div>
       )}
@@ -335,7 +319,7 @@ function HealthRow({ check, refreshing }: { check: HealthCheck; refreshing: bool
           )}
         </div>
       )}
-    </Card>
+    </div>
   );
 }
 
@@ -343,10 +327,10 @@ function StatusChip({ status }: { status: HealthStatus }) {
   const { tr } = useI18n();
   const meta = STATUS_META[status] ?? STATUS_META.unknown;
   return (
-    <Chip tone={meta.tone} dense>
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-xs text-zinc-400">
       <span className={cn('h-1.5 w-1.5 rounded-full', meta.dot)} />
       {tr(meta.labelZh, meta.labelEn)}
-    </Chip>
+    </span>
   );
 }
 
