@@ -6,6 +6,7 @@ import {
   Loader2,
   MessagesSquare,
   Gauge,
+  HeartPulse,
   Plug,
   Shield,
 } from 'lucide-react';
@@ -28,6 +29,7 @@ type RailItem = {
 };
 
 const RAIL_ITEMS: RailItem[] = [
+  { to: 'health', icon: HeartPulse, labelZh: '健康', labelEn: 'Health', hintZh: '平台自检 / 依赖状态', hintEn: 'Platform self-check / dependency status' },
   { to: 'integrations', icon: Plug, labelZh: '集成', labelEn: 'Integrations', hintZh: 'Prometheus / Grafana 等外部系统', hintEn: 'External systems — Prometheus / Grafana / etc.' },
   // marketplace entry retired 2026-05-19 — install/uninstall moved to
   // /skills?tab=install so the whole skill story (loaded + installed)

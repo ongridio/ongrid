@@ -68,19 +68,29 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # bump doesn't silently change ABI. v1.20.1 is the latest stable that
 # fastembed-go's yalue/onnxruntime_go@v1.7.0 was tested against.
 ARG ONNXRUNTIME_VERSION=1.20.1
-ARG TARGETARCH=amd64
+ARG TARGETARCH
 RUN set -eux; \
-    case "${TARGETARCH}" in \
-        amd64) ORT_ARCH=x64 ;; \
-        arm64) ORT_ARCH=aarch64 ;; \
-        *) echo "unsupported arch ${TARGETARCH}" >&2; exit 1 ;; \
+    apt-get update && apt-get install -y --no-install-recommends unzip; \
+    arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    case "${arch}" in \
+        amd64|x86_64) ORT_ARCH=x64; NUGET_RID=linux-x64 ;; \
+        arm64|aarch64) ORT_ARCH=aarch64; NUGET_RID=linux-arm64 ;; \
+        *) echo "unsupported arch ${arch}" >&2; exit 1 ;; \
     esac; \
-    curl -fsSL -o /tmp/ort.tgz \
-        "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-linux-${ORT_ARCH}-${ONNXRUNTIME_VERSION}.tgz"; \
-    tar -xzf /tmp/ort.tgz -C /tmp; \
-    install -m 0755 /tmp/onnxruntime-linux-${ORT_ARCH}-${ONNXRUNTIME_VERSION}/lib/libonnxruntime.so.${ONNXRUNTIME_VERSION} /usr/lib/; \
+    if curl -fsSL -o /tmp/ort.tgz \
+        "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-linux-${ORT_ARCH}-${ONNXRUNTIME_VERSION}.tgz"; then \
+        tar -xzf /tmp/ort.tgz -C /tmp; \
+        install -m 0755 /tmp/onnxruntime-linux-${ORT_ARCH}-${ONNXRUNTIME_VERSION}/lib/libonnxruntime.so.${ONNXRUNTIME_VERSION} /usr/lib/; \
+    else \
+        curl -fsSL -o /tmp/ort.nupkg \
+            "https://www.nuget.org/api/v2/package/Microsoft.ML.OnnxRuntime/${ONNXRUNTIME_VERSION}"; \
+        unzip -q /tmp/ort.nupkg "runtimes/${NUGET_RID}/native/libonnxruntime.so" -d /tmp/ort-nuget; \
+        install -m 0755 /tmp/ort-nuget/runtimes/${NUGET_RID}/native/libonnxruntime.so /usr/lib/libonnxruntime.so.${ONNXRUNTIME_VERSION}; \
+    fi; \
     ln -sf /usr/lib/libonnxruntime.so.${ONNXRUNTIME_VERSION} /usr/lib/libonnxruntime.so; \
-    rm -rf /tmp/ort.tgz /tmp/onnxruntime-linux-${ORT_ARCH}-${ONNXRUNTIME_VERSION}; \
+    rm -rf /tmp/ort.tgz /tmp/ort.nupkg /tmp/ort-nuget /tmp/onnxruntime-linux-${ORT_ARCH}-${ONNXRUNTIME_VERSION}; \
+    apt-get purge -y --auto-remove unzip; \
+    rm -rf /var/lib/apt/lists/*; \
     ldconfig
 ENV ONNX_PATH=/usr/lib/libonnxruntime.so
 

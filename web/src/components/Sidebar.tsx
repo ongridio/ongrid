@@ -304,7 +304,7 @@ export function Sidebar() {
         </Link>
         <div className="mt-auto flex flex-col items-center gap-2">
           <Link
-            to="/settings/integrations"
+            to="/settings/health"
             aria-label={tr('设置', 'Settings')}
             className="rounded-lg p-2 text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
           >
@@ -475,7 +475,7 @@ export function Sidebar() {
       {isAdmin && (
         <div className="mb-4 border-t border-zinc-800/60 p-2">
           <SidebarNavItem to="/admin/users" icon={UsersRound} label={tr('用户管理', 'Users & Orgs')} level={2} />
-          <SidebarNavItem to="/settings/integrations" icon={Settings} label={tr('设置', 'Settings')} level={2} />
+          <SidebarNavItem to="/settings/health" icon={Settings} label={tr('设置', 'Settings')} level={2} />
         </div>
       )}
 
