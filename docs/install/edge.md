@@ -21,13 +21,25 @@ The install script detects the host architecture and downloads the matching bina
 Release tarballs include pre-built binaries. If you are running from source, build and stage the binary before any host can install:
 
 ```bash
-# 1. Cross-compile for linux/amd64
+# 1. Cross-compile the edge agent for linux/amd64
 make build-edge-linux-amd64
 # Output: bin/linux-amd64/ongrid-edge
 
-# 2. Stage so nginx serves it at /edge/ongrid-edge-linux-amd64
+# 2. Fetch the exporter/collector bundles the edge plugins rely on.
+#    The edge ships metrics/logs/traces via node_exporter, process_exporter,
+#    promtail and otelcol — these are NOT produced by `go build`. Without
+#    them the edge installs fine but has no data source: Monitor panels stay
+#    empty, and there are no logs or traces.
+make fetch-node-exporter fetch-process-exporter fetch-promtail fetch-otelcol
+
+# 3. Stage so nginx serves the edge binary at /edge/ongrid-edge-linux-amd64
 cp bin/linux-amd64/ongrid-edge bin/ongrid-edge-linux-amd64
 ```
+
+> **Tip:** the cleanest source path is `make package` — it cross-compiles the
+> edge, fetches all four bundles, and stages everything into one tarball (the
+> same artifact a release ships). The manual steps above only serve a bare
+> edge binary for local development.
 
 For all architectures (linux amd64/arm64, darwin amd64/arm64):
 
@@ -49,10 +61,10 @@ cp bin/linux-arm64/ongrid-edge  bin/ongrid-edge-linux-arm64
 
 ### Tunnel port
 
-`--server-edge-addr` points to the geminio tunnel endpoint. The default port is **40012**, but `install.sh` increments automatically if the port is already in use. Always check the actual value in `.env` (`ONGRID_TUNNEL_ADDR`):
+`--server-edge-addr` points to the geminio tunnel endpoint. The default port is **40012**, but `install.sh` increments automatically if the port is already in use. Always check the actual value in `.env` (`ONGRID_TUNNEL_PORT`):
 
 ```bash
-grep ONGRID_TUNNEL_ADDR /opt/ongrid/.env
+grep ONGRID_TUNNEL_PORT /opt/ongrid/.env
 ```
 
 ### Same-host installs (hairpin NAT)
