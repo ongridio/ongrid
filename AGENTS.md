@@ -55,6 +55,7 @@
 - 避免 `any` / `interface{}` 出现在公共 API 边界（解码 / SDK 适配等不可避免时就近注释）
 
 ### 前端 UI
+- **跟随大多数页面**（总纲）：约定没写明的，照现有**大多数页面**的做法来——页头、列表 / 表格结构、间距、空状态、加载态、交互，对齐主流惯例、不自创风格；和多数页面不一致时，要改的是你这页去迁就大盘，而不是反过来。动手前先翻几个成熟页（如 Alerts / Devices / Monitor）对一眼
 - **复用组件**：优先用 `web/src/components/ui/`（`Card` / `Chip` / `Button` / `PageHeader` / `EmptyState`），不要手搓
 - **配色**：中性骨架用 zinc（容器 `bg-zinc-900/40` + `border-zinc-800/60`，文字 `zinc-100` / `zinc-400` / `zinc-500`）；主操作 / 强调用 indigo（按钮 `indigo-600`）；语义状态只有 emerald(成功) / amber(降级) / red(异常) / sky(信息)，走 Chip `tone`，状态点用 `-500` 档（不用 -400，太亮）；品牌紫 `--accent` 只给 logo / 品牌面，不做大面积按钮
 - **克制**（产品灵魂）：满屏正常态用「小圆点 + 灰字」，不给每个 OK 铺彩色底（满屏彩底很 low），只让异常跳出；一组数据用「一个 `Card` + `divide-y` 分行」而非每行一卡；禁止 `animate-pulse` / 发光阴影 / `hover:scale` / 花哨「刷新中」徽章
