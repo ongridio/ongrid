@@ -234,18 +234,19 @@ docker-build-web: ## [release] 构建 ongrid-web:$(VERSION) 镜像（前端 SPA 
 # upstream source and ship it in the release tarball.
 FRONTIER_SRC     ?= $(HOME)/frontier
 FRONTIER_VERSION ?= v1.2.4
+FRONTIER_BUILD_FORCE ?= 1
 
 .PHONY: docker-build-broker
-docker-build-broker: ## [release] 本地构建 singchia/frontier:$(FRONTIER_VERSION)（已存在则跳过）
+docker-build-broker: ## [release] 本地构建 singchia/frontier:$(FRONTIER_VERSION)
 	@existing_platform=$$(docker image inspect -f '{{.Os}}/{{.Architecture}}' singchia/frontier:$(FRONTIER_VERSION) 2>/dev/null || true); \
-	if [ "$$existing_platform" = "$(PLATFORM)" ]; then \
+	if [ "$(FRONTIER_BUILD_FORCE)" != "1" ] && [ "$$existing_platform" = "$(PLATFORM)" ]; then \
 		echo "[broker] singchia/frontier:$(FRONTIER_VERSION) already present for $(PLATFORM) — skipping rebuild"; \
 	else \
 		test -d $(FRONTIER_SRC) || { echo "FRONTIER_SRC=$(FRONTIER_SRC) not found and local image is not for $(PLATFORM)"; exit 1; }; \
 		docker buildx build \
 			--platform $(PLATFORM) \
 			-t singchia/frontier:$(FRONTIER_VERSION) \
-			-f $(FRONTIER_SRC)/images/Dockerfile.frontier \
+			-f deploy/Dockerfile.frontier \
 			--load $(FRONTIER_SRC); \
 	fi
 

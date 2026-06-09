@@ -1,0 +1,30 @@
+# syntax=docker/dockerfile:1.7
+
+FROM golang:1.24-alpine AS builder
+
+RUN apk add --no-cache build-base make
+
+ENV GO111MODULE=on \
+    GOPROXY=https://goproxy.cn,https://goproxy.io,https://proxy.golang.org,direct \
+    CGO_CFLAGS="-D_LARGEFILE64_SOURCE"
+
+WORKDIR /go/src/github.com/singchia/frontier
+COPY . .
+
+RUN make DESTDIR=/tmp/install all install-frontier
+
+FROM alpine:3.20
+
+RUN apk add --no-cache ca-certificates \
+    && addgroup -S -g 65532 frontier \
+    && adduser -S -D -H -u 65532 -G frontier frontier
+
+COPY --from=builder /tmp/install/ /
+
+USER 65532:65532
+
+EXPOSE 40011
+EXPOSE 40012
+
+ENTRYPOINT ["/usr/bin/frontier"]
+CMD ["--config", "/usr/conf/frontier.yaml"]
