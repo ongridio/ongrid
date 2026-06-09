@@ -47,10 +47,10 @@
 
 ```bash
 # 1. Скачайте последний релиз (Ubuntu 22.04+, Debian 12+, RHEL/Rocky 9)
-wget https://github.com/ongridio/ongrid/releases/download/v0.8.2/ongrid-v0.8.2-linux-amd64.tar.xz
+wget https://github.com/ongridio/ongrid/releases/download/v0.8.3/ongrid-v0.8.3-linux-amd64.tar.xz
 
 # 2. Распаковка
-tar -xf ongrid-v0.8.2-linux-amd64.tar.xz && cd ongrid-v0.8.2-linux-amd64
+tar -xf ongrid-v0.8.3-linux-amd64.tar.xz && cd ongrid-v0.8.3-linux-amd64
 
 # 3. Установка
 sudo ./install.sh
@@ -59,7 +59,7 @@ sudo ./install.sh
 **🇨🇳 Материковый Китай** — если GitHub медленный, скачайте шаг 1 с CDN-зеркала (остальное без изменений):
 
 ```bash
-wget https://ongrid.cloud/dl/ongrid-v0.8.2-linux-amd64.tar.xz
+wget https://ongrid.cloud/dl/ongrid-v0.8.3-linux-amd64.tar.xz
 ```
 
 ### Или запустить из исходников

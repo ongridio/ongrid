@@ -47,10 +47,10 @@
 
 ```bash
 # 1. 최신 릴리스 다운로드 (Ubuntu 22.04+, Debian 12+, RHEL/Rocky 9)
-wget https://github.com/ongridio/ongrid/releases/download/v0.8.2/ongrid-v0.8.2-linux-amd64.tar.xz
+wget https://github.com/ongridio/ongrid/releases/download/v0.8.3/ongrid-v0.8.3-linux-amd64.tar.xz
 
 # 2. 압축 해제
-tar -xf ongrid-v0.8.2-linux-amd64.tar.xz && cd ongrid-v0.8.2-linux-amd64
+tar -xf ongrid-v0.8.3-linux-amd64.tar.xz && cd ongrid-v0.8.3-linux-amd64
 
 # 3. 설치
 sudo ./install.sh
@@ -59,7 +59,7 @@ sudo ./install.sh
 **🇨🇳 중국 본토 사용자** — GitHub이 느리면 1단계를 CDN 미러에서 다운로드하세요(나머지는 동일):
 
 ```bash
-wget https://ongrid.cloud/dl/ongrid-v0.8.2-linux-amd64.tar.xz
+wget https://ongrid.cloud/dl/ongrid-v0.8.3-linux-amd64.tar.xz
 ```
 
 ### 또는 소스에서 실행
