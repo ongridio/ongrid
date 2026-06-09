@@ -54,6 +54,14 @@
 - 禁止全局可变变量（只读单例 / collector 除外）
 - 避免 `any` / `interface{}` 出现在公共 API 边界（解码 / SDK 适配等不可避免时就近注释）
 
+### 前端 UI
+- **复用组件**：优先用 `web/src/components/ui/`（`Card` / `Chip` / `Button` / `PageHeader` / `EmptyState`），不要手搓
+- **配色**：中性骨架用 zinc（容器 `bg-zinc-900/40` + `border-zinc-800/60`，文字 `zinc-100` / `zinc-400` / `zinc-500`）；主操作 / 强调用 indigo（按钮 `indigo-600`）；语义状态只有 emerald(成功) / amber(降级) / red(异常) / sky(信息)，走 Chip `tone`，状态点用 `-500` 档（不用 -400，太亮）；品牌紫 `--accent` 只给 logo / 品牌面，不做大面积按钮
+- **克制**（产品灵魂）：满屏正常态用「小圆点 + 灰字」，不给每个 OK 铺彩色底（满屏彩底很 low），只让异常跳出；一组数据用「一个 `Card` + `divide-y` 分行」而非每行一卡；禁止 `animate-pulse` / 发光阴影 / `hover:scale` / 花哨「刷新中」徽章
+- **light/dark**：light 靠 `web/src/styles/index.css` 的 `html.light` 覆盖 zinc 类；坑——带透明度的 `bg-zinc-900/20` 不被纯 `.bg-zinc-900` 覆盖匹配，优先用纯 zinc 类，非用透明度变体不可时在 `index.css` 补 `html.light .bg-zinc-900\/NN`
+- **i18n**：文案走 `tr('中文','English')` 跟随 locale，禁止同一字符串中英并排拼接
+- **验证**：视觉改动必须 chrome headless 截图实看再提交；涉及主题的 light + dark 各截一张
+
 ### API
 - 所有 API 变更先更新 `.proto`，禁止改生成代码
 - Handler 必须有 Swagger 注释：`@Summary`、`@Router`、`@Success` 缺一不可
