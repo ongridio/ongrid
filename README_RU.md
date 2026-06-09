@@ -48,10 +48,10 @@
 ```bash
 # 1. Скачайте последний релиз (Ubuntu 22.04+, Debian 12+, RHEL/Rocky 9)
 #    ARM64-серверы: замените linux-amd64 на linux-arm64.
-wget https://github.com/ongridio/ongrid/releases/download/v0.8.3/ongrid-v0.8.3-linux-amd64.tar.xz
+wget https://github.com/ongridio/ongrid/releases/download/v0.8.4/ongrid-v0.8.4-linux-amd64.tar.xz
 
 # 2. Распаковка
-tar -xf ongrid-v0.8.3-linux-amd64.tar.xz && cd ongrid-v0.8.3-linux-amd64
+tar -xf ongrid-v0.8.4-linux-amd64.tar.xz && cd ongrid-v0.8.4-linux-amd64
 
 # 3. Установка
 sudo ./install.sh
@@ -61,7 +61,7 @@ sudo ./install.sh
 
 ```bash
 # ARM64-серверы: замените linux-amd64 на linux-arm64.
-wget https://ongrid.cloud/dl/ongrid-v0.8.3-linux-amd64.tar.xz
+wget https://ongrid.cloud/dl/ongrid-v0.8.4-linux-amd64.tar.xz
 ```
 
 ### Или запустить из исходников

@@ -162,21 +162,23 @@ jobs:
             (cd dist/out && sha256sum -c "ongrid-${tag}-linux-${arch}.tar.xz.sha256")
           done
 
-      - name: Write release notes
+      - name: Write release install notes
         shell: bash
         run: |
           set -euo pipefail
           tag="${{ steps.tag.outputs.tag }}"
           cat > "$RUNNER_TEMP/release-notes.md" <<EOF
-          Install (Ubuntu 22.04+/Debian 12+/RHEL/Rocky 9):
+          ## Install
 
-          AMD64:
+          Ubuntu 22.04+, Debian 12+, RHEL/Rocky 9 are supported.
+
+          ### AMD64
           \`\`\`bash
           wget https://github.com/ongridio/ongrid/releases/download/${tag}/ongrid-${tag}-linux-amd64.tar.xz
           tar -xf ongrid-${tag}-linux-amd64.tar.xz && cd ongrid-${tag}-linux-amd64 && sudo ./install.sh
           \`\`\`
 
-          ARM64:
+          ### ARM64
           \`\`\`bash
           wget https://github.com/ongridio/ongrid/releases/download/${tag}/ongrid-${tag}-linux-arm64.tar.xz
           tar -xf ongrid-${tag}-linux-arm64.tar.xz && cd ongrid-${tag}-linux-arm64 && sudo ./install.sh
@@ -190,6 +192,7 @@ jobs:
         run: |
           set -euo pipefail
           tag="${{ steps.tag.outputs.tag }}"
+          release_notes="$(cat "$RUNNER_TEMP/release-notes.md")"
           gh release create "$tag" \
             "dist/out/ongrid-${tag}-linux-amd64.tar.xz" \
             "dist/out/ongrid-${tag}-linux-amd64.tar.xz.sha256" \
@@ -197,4 +200,5 @@ jobs:
             "dist/out/ongrid-${tag}-linux-arm64.tar.xz.sha256" \
             --verify-tag \
             --title "Ongrid ${tag}" \
-            --notes-file "$RUNNER_TEMP/release-notes.md"
+            --generate-notes \
+            --notes "$release_notes"

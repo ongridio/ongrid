@@ -48,10 +48,10 @@
 ```bash
 # 1. 최신 릴리스 다운로드 (Ubuntu 22.04+, Debian 12+, RHEL/Rocky 9)
 #    ARM64 서버는 linux-amd64를 linux-arm64로 바꾸세요.
-wget https://github.com/ongridio/ongrid/releases/download/v0.8.3/ongrid-v0.8.3-linux-amd64.tar.xz
+wget https://github.com/ongridio/ongrid/releases/download/v0.8.4/ongrid-v0.8.4-linux-amd64.tar.xz
 
 # 2. 압축 해제
-tar -xf ongrid-v0.8.3-linux-amd64.tar.xz && cd ongrid-v0.8.3-linux-amd64
+tar -xf ongrid-v0.8.4-linux-amd64.tar.xz && cd ongrid-v0.8.4-linux-amd64
 
 # 3. 설치
 sudo ./install.sh
@@ -61,7 +61,7 @@ sudo ./install.sh
 
 ```bash
 # ARM64 서버는 linux-amd64를 linux-arm64로 바꾸세요.
-wget https://ongrid.cloud/dl/ongrid-v0.8.3-linux-amd64.tar.xz
+wget https://ongrid.cloud/dl/ongrid-v0.8.4-linux-amd64.tar.xz
 ```
 
 ### 또는 소스에서 실행

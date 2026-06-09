@@ -48,10 +48,10 @@ Téléchargez la dernière release adaptée à l’architecture de votre serveur
 ```bash
 # 1. Téléchargez la dernière release (Ubuntu 22.04+, Debian 12+, RHEL/Rocky 9)
 #    Serveurs ARM64 : remplacez linux-amd64 par linux-arm64.
-wget https://github.com/ongridio/ongrid/releases/download/v0.8.3/ongrid-v0.8.3-linux-amd64.tar.xz
+wget https://github.com/ongridio/ongrid/releases/download/v0.8.4/ongrid-v0.8.4-linux-amd64.tar.xz
 
 # 2. Décompresser
-tar -xf ongrid-v0.8.3-linux-amd64.tar.xz && cd ongrid-v0.8.3-linux-amd64
+tar -xf ongrid-v0.8.4-linux-amd64.tar.xz && cd ongrid-v0.8.4-linux-amd64
 
 # 3. Installer
 sudo ./install.sh
@@ -61,7 +61,7 @@ sudo ./install.sh
 
 ```bash
 # Serveurs ARM64 : remplacez linux-amd64 par linux-arm64.
-wget https://ongrid.cloud/dl/ongrid-v0.8.3-linux-amd64.tar.xz
+wget https://ongrid.cloud/dl/ongrid-v0.8.4-linux-amd64.tar.xz
 ```
 
 ### Ou exécuter depuis les sources
