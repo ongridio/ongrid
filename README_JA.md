@@ -45,23 +45,30 @@
 
 サーバーのアーキテクチャ（`linux-amd64` または `linux-arm64`）に合う最新リリースをダウンロードし、展開してインストーラーを実行します（Ubuntu 22.04+、Debian 12+、RHEL/Rocky 9）：
 
+サーバーのアーキテクチャに合うコマンドを選択してください：
+
+**AMD64**
 ```bash
-# 1. 最新リリースをダウンロード（Ubuntu 22.04+、Debian 12+、RHEL/Rocky 9）
-#    ARM64 サーバーでは linux-amd64 を linux-arm64 に置き換えてください。
 wget https://github.com/ongridio/ongrid/releases/download/v0.8.4/ongrid-v0.8.4-linux-amd64.tar.xz
-
-# 2. 展開
 tar -xf ongrid-v0.8.4-linux-amd64.tar.xz && cd ongrid-v0.8.4-linux-amd64
-
-# 3. インストール
 sudo ./install.sh
 ```
 
-**🇨🇳 中国本土ユーザー** — GitHub が遅い場合は、手順 1 を CDN ミラーからダウンロード（他の手順は同じ）：
+**ARM64**
+```bash
+wget https://github.com/ongridio/ongrid/releases/download/v0.8.4/ongrid-v0.8.4-linux-arm64.tar.xz
+tar -xf ongrid-v0.8.4-linux-arm64.tar.xz && cd ongrid-v0.8.4-linux-arm64
+sudo ./install.sh
+```
+
+**🇨🇳 中国本土ユーザー** — GitHub が遅い場合は、アーキテクチャに合う CDN ミラー URL を使用してください：
 
 ```bash
-# ARM64 サーバーでは linux-amd64 を linux-arm64 に置き換えてください。
+# AMD64
 wget https://ongrid.cloud/dl/ongrid-v0.8.4-linux-amd64.tar.xz
+
+# ARM64
+wget https://ongrid.cloud/dl/ongrid-v0.8.4-linux-arm64.tar.xz
 ```
 
 ### またはソースから実行

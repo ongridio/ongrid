@@ -45,23 +45,30 @@
 
 서버 아키텍처(`linux-amd64` 또는 `linux-arm64`)에 맞는 최신 릴리스를 다운로드하고 압축을 푼 다음 설치 스크립트를 실행하세요 (Ubuntu 22.04+, Debian 12+, RHEL/Rocky 9):
 
+서버 아키텍처에 맞는 명령을 선택하세요:
+
+**AMD64**
 ```bash
-# 1. 최신 릴리스 다운로드 (Ubuntu 22.04+, Debian 12+, RHEL/Rocky 9)
-#    ARM64 서버는 linux-amd64를 linux-arm64로 바꾸세요.
 wget https://github.com/ongridio/ongrid/releases/download/v0.8.4/ongrid-v0.8.4-linux-amd64.tar.xz
-
-# 2. 압축 해제
 tar -xf ongrid-v0.8.4-linux-amd64.tar.xz && cd ongrid-v0.8.4-linux-amd64
-
-# 3. 설치
 sudo ./install.sh
 ```
 
-**🇨🇳 중국 본토 사용자** — GitHub이 느리면 1단계를 CDN 미러에서 다운로드하세요(나머지는 동일):
+**ARM64**
+```bash
+wget https://github.com/ongridio/ongrid/releases/download/v0.8.4/ongrid-v0.8.4-linux-arm64.tar.xz
+tar -xf ongrid-v0.8.4-linux-arm64.tar.xz && cd ongrid-v0.8.4-linux-arm64
+sudo ./install.sh
+```
+
+**🇨🇳 중국 본토 사용자** — GitHub이 느리면 아키텍처에 맞는 CDN 미러 URL을 사용하세요:
 
 ```bash
-# ARM64 서버는 linux-amd64를 linux-arm64로 바꾸세요.
+# AMD64
 wget https://ongrid.cloud/dl/ongrid-v0.8.4-linux-amd64.tar.xz
+
+# ARM64
+wget https://ongrid.cloud/dl/ongrid-v0.8.4-linux-arm64.tar.xz
 ```
 
 ### 또는 소스에서 실행

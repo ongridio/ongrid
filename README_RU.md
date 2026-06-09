@@ -45,23 +45,30 @@
 
 Скачайте последний релиз для архитектуры вашего сервера (`linux-amd64` или `linux-arm64`), распакуйте и запустите скрипт установки (Ubuntu 22.04+, Debian 12+, RHEL/Rocky 9):
 
+Выберите команду для архитектуры вашего сервера:
+
+**AMD64**
 ```bash
-# 1. Скачайте последний релиз (Ubuntu 22.04+, Debian 12+, RHEL/Rocky 9)
-#    ARM64-серверы: замените linux-amd64 на linux-arm64.
 wget https://github.com/ongridio/ongrid/releases/download/v0.8.4/ongrid-v0.8.4-linux-amd64.tar.xz
-
-# 2. Распаковка
 tar -xf ongrid-v0.8.4-linux-amd64.tar.xz && cd ongrid-v0.8.4-linux-amd64
-
-# 3. Установка
 sudo ./install.sh
 ```
 
-**🇨🇳 Материковый Китай** — если GitHub медленный, скачайте шаг 1 с CDN-зеркала (остальное без изменений):
+**ARM64**
+```bash
+wget https://github.com/ongridio/ongrid/releases/download/v0.8.4/ongrid-v0.8.4-linux-arm64.tar.xz
+tar -xf ongrid-v0.8.4-linux-arm64.tar.xz && cd ongrid-v0.8.4-linux-arm64
+sudo ./install.sh
+```
+
+**🇨🇳 Материковый Китай** — если GitHub медленный, используйте URL CDN-зеркала для вашей архитектуры:
 
 ```bash
-# ARM64-серверы: замените linux-amd64 на linux-arm64.
+# AMD64
 wget https://ongrid.cloud/dl/ongrid-v0.8.4-linux-amd64.tar.xz
+
+# ARM64
+wget https://ongrid.cloud/dl/ongrid-v0.8.4-linux-arm64.tar.xz
 ```
 
 ### Или запустить из исходников

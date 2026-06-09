@@ -45,23 +45,30 @@
 
 Baixe a última release para a arquitetura do seu servidor (`linux-amd64` ou `linux-arm64`), descompacte e execute o instalador (Ubuntu 22.04+, Debian 12+, RHEL/Rocky 9):
 
+Escolha o comando para a arquitetura do seu servidor:
+
+**AMD64**
 ```bash
-# 1. Baixe a última release (Ubuntu 22.04+, Debian 12+, RHEL/Rocky 9)
-#    Servidores ARM64: substitua linux-amd64 por linux-arm64.
 wget https://github.com/ongridio/ongrid/releases/download/v0.8.4/ongrid-v0.8.4-linux-amd64.tar.xz
-
-# 2. Descompactar
 tar -xf ongrid-v0.8.4-linux-amd64.tar.xz && cd ongrid-v0.8.4-linux-amd64
-
-# 3. Instalar
 sudo ./install.sh
 ```
 
-**🇨🇳 China continental** — se o GitHub estiver lento, baixe o passo 1 do mirror CDN (o resto é igual):
+**ARM64**
+```bash
+wget https://github.com/ongridio/ongrid/releases/download/v0.8.4/ongrid-v0.8.4-linux-arm64.tar.xz
+tar -xf ongrid-v0.8.4-linux-arm64.tar.xz && cd ongrid-v0.8.4-linux-arm64
+sudo ./install.sh
+```
+
+**🇨🇳 China continental** — se o GitHub estiver lento, use a URL do mirror CDN correspondente à sua arquitetura:
 
 ```bash
-# Servidores ARM64: substitua linux-amd64 por linux-arm64.
+# AMD64
 wget https://ongrid.cloud/dl/ongrid-v0.8.4-linux-amd64.tar.xz
+
+# ARM64
+wget https://ongrid.cloud/dl/ongrid-v0.8.4-linux-arm64.tar.xz
 ```
 
 ### Ou executar a partir do código
