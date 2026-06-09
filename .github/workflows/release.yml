@@ -13,10 +13,21 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
-    name: Build and publish release
-    runs-on: ubuntu-24.04
+  build:
+    name: Build ${{ matrix.arch }} package
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
 
     env:
       FRONTIER_VERSION: v1.2.4
@@ -56,11 +67,6 @@ jobs:
           go-version: '1.25.x'
           cache: true
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -83,11 +89,67 @@ jobs:
           set -euo pipefail
           make fetch-embedding-model
 
-      - name: Build amd64 and arm64 packages
+      - name: Build ${{ matrix.arch }} package
         shell: bash
         run: |
           set -euo pipefail
-          make package-all
+          make package TARGET_OS=linux TARGET_ARCH=${{ matrix.arch }} PLATFORM=${{ matrix.platform }}
+
+      - name: Verify package
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ steps.tag.outputs.tag }}"
+          arch="${{ matrix.arch }}"
+          test -s "dist/out/ongrid-${tag}-linux-${arch}.tar.xz"
+          test -s "dist/out/ongrid-${tag}-linux-${arch}.tar.xz.sha256"
+          (cd dist/out && sha256sum -c "ongrid-${tag}-linux-${arch}.tar.xz.sha256")
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-${{ matrix.arch }}
+          path: |
+            dist/out/ongrid-${{ steps.tag.outputs.tag }}-linux-${{ matrix.arch }}.tar.xz
+            dist/out/ongrid-${{ steps.tag.outputs.tag }}-linux-${{ matrix.arch }}.tar.xz.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish release
+    runs-on: ubuntu-24.04
+    needs: build
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve tag
+        id: tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "release tag must match vMAJOR.MINOR.PATCH, got: $tag" >&2
+            exit 2
+          fi
+          version="$(tr -d '[:space:]' < VERSION)"
+          if [[ "$version" != "$tag" ]]; then
+            echo "VERSION ($version) must match tag ($tag)" >&2
+            exit 2
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Download package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-assets-*
+          path: dist/out
+          merge-multiple: true
 
       - name: Verify release assets
         shell: bash
