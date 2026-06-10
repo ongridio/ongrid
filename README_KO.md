@@ -87,4 +87,9 @@ Apache 2.0 — [LICENSE](LICENSE) 참조.
 
 ## Star 기록
 
-[![Star 기록 차트](https://api.star-history.com/svg?repos=ongridio/ongrid&type=Date)](https://www.star-history.com/#ongridio/ongrid&Date)
+<a href="https://www.star-history.com/#ongridio/ongrid&amp;Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=ongridio/ongrid&amp;type=Date&amp;theme=dark" />
+    <img alt="Star 기록 차트" src="https://api.star-history.com/svg?repos=ongridio/ongrid&amp;type=Date" />
+  </picture>
+</a>

@@ -87,4 +87,9 @@ Apache 2.0 — siehe [LICENSE](LICENSE).
 
 ## Star-Verlauf
 
-[![Star-Verlaufsdiagramm](https://api.star-history.com/svg?repos=ongridio/ongrid&type=Date)](https://www.star-history.com/#ongridio/ongrid&Date)
+<a href="https://www.star-history.com/#ongridio/ongrid&amp;Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=ongridio/ongrid&amp;type=Date&amp;theme=dark" />
+    <img alt="Star-Verlaufsdiagramm" src="https://api.star-history.com/svg?repos=ongridio/ongrid&amp;type=Date" />
+  </picture>
+</a>

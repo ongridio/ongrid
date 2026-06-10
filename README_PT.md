@@ -87,4 +87,9 @@ Apache 2.0 — veja [LICENSE](LICENSE).
 
 ## Histórico de estrelas
 
-[![Gráfico do histórico de estrelas](https://api.star-history.com/svg?repos=ongridio/ongrid&type=Date)](https://www.star-history.com/#ongridio/ongrid&Date)
+<a href="https://www.star-history.com/#ongridio/ongrid&amp;Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=ongridio/ongrid&amp;type=Date&amp;theme=dark" />
+    <img alt="Gráfico do histórico de estrelas" src="https://api.star-history.com/svg?repos=ongridio/ongrid&amp;type=Date" />
+  </picture>
+</a>
