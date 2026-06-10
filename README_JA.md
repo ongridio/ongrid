@@ -35,7 +35,7 @@
 - 🔍 **根本原因 RCA** — トポロジーで影響範囲を分析、メトリクス/ログ/トレースを相関、ソースコード行まで
 - 🔒 **インバウンドポートゼロ** — edge はアウトバウンドのみ、ホストは 22 / 80 / 443 を開かない
 - 💻 **ブラウザ SSH** — 逆トンネルで対話シェル、鍵不要、踏み台不要、全コマンド監査
-- 🐳 **1 コマンドでセルフホスト** — `docker compose up` でフルスタック起動
+- 🐳 **1 コマンドでセルフホスト** — `install.sh` でフルスタック起動
 - 📊 **可観測性スタック組み込み** — Prometheus + Loki + Tempo + Grafana 自動配備、エージェントがクエリを書く
 - 🧠 **任意モデル持ち込み** — Anthropic / OpenAI / GLM / DeepSeek / Gemini / Kimi、ホット切り替え
 - 💬 **双方向 IM チャネル** — Slack / Telegram / Larksuite / DingTalk / WeCom、チャネル別ロケール
@@ -69,15 +69,6 @@ wget https://ongrid.cloud/dl/ongrid-v0.8.4-linux-amd64.tar.xz
 
 # ARM64
 wget https://ongrid.cloud/dl/ongrid-v0.8.4-linux-arm64.tar.xz
-```
-
-### またはソースから実行
-
-ローカル開発: 管理者アカウントとモデル API キーを設定し、フルスタックを起動します。
-
-```bash
-cp deploy/.env.example deploy/.env
-make compose-up    # make compose-down to stop
 ```
 
 ## インテグレーション

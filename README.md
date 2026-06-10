@@ -35,7 +35,7 @@ English | [简体中文](./README_ZH.md) | [日本語](./README_JA.md) | [한국
 - 🔍 **Root-cause RCA** — walks topology, correlates m/l/t, pins the "why" to a source-code line
 - 🔒 **Zero inbound ports** — edge dials out; no port 22 / 80 / 443 on hosts
 - 💻 **Browser SSH** — reverse-tunnel shell into any host; no keys, no jumpbox, all audited
-- 🐳 **Self-host in one command** — `docker compose up` brings up the full stack
+- 🐳 **Self-host in one command** — `install.sh` brings up the full stack
 - 📊 **Built-in observability** — Prometheus + Loki + Tempo + Grafana wired; the agent writes the queries
 - 🧠 **Bring your own model** — Anthropic / OpenAI / GLM / DeepSeek / Gemini / Kimi, hot routing
 - 💬 **Two-way IM channels** — Slack / Telegram / Larksuite / DingTalk / WeCom, per-channel locale
@@ -69,15 +69,6 @@ wget https://ongrid.cloud/dl/ongrid-v0.8.4-linux-amd64.tar.xz
 
 # ARM64
 wget https://ongrid.cloud/dl/ongrid-v0.8.4-linux-arm64.tar.xz
-```
-
-### Or run from source
-
-Local dev: set the admin account + one model API key, then bring up the full stack.
-
-```bash
-cp deploy/.env.example deploy/.env
-make compose-up    # make compose-down to stop
 ```
 
 ## Integrations

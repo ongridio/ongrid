@@ -35,7 +35,7 @@
 - 🔍 **根因 RCA** — 沿拓扑做爆炸半径分析, 跨指标/日志/链路相关到源码行
 - 🔒 **零入站端口** — edge 主动外联, host 不开 22 / 80 / 443
 - 💻 **浏览器 SSH** — 反向隧道开交互式 shell, 不用 key / 跳板机, 全程审计
-- 🐳 **一行命令自托管** — `docker compose up` 起整套栈
+- 🐳 **一行命令自托管** — `install.sh` 起整套栈
 - 📊 **可观测全栈内置** — Prometheus + Loki + Tempo + Grafana 自动起, Agent 自动写 query
 - 🧠 **自带任意模型** — Anthropic / OpenAI / GLM / DeepSeek / Gemini / Kimi, 热路由
 - 💬 **双向 IM 通道** — Slack / Telegram / Larksuite / DingTalk / WeCom, 按通道语言
@@ -69,15 +69,6 @@ wget https://ongrid.cloud/dl/ongrid-v0.8.4-linux-amd64.tar.xz
 
 # ARM64
 wget https://ongrid.cloud/dl/ongrid-v0.8.4-linux-arm64.tar.xz
-```
-
-### 或从源码运行
-
-本地开发：先配好管理员账号和一个模型 API key，再起整套栈。
-
-```bash
-cp deploy/.env.example deploy/.env
-make compose-up    # make compose-down to stop
 ```
 
 ## 集成

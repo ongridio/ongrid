@@ -35,7 +35,7 @@
 - 🔍 **근본 원인 RCA** — 토폴로지로 영향 범위 분석, 메트릭/로그/트레이스 상관, 소스 코드 라인까지
 - 🔒 **인바운드 포트 0** — edge가 외부로 발신, 호스트는 22 / 80 / 443 미오픈
 - 💻 **브라우저 SSH** — 역방향 터널로 대화형 셸, 키 / 점프 호스트 불필요, 모든 명령 감사
-- 🐳 **한 줄로 셀프 호스팅** — `docker compose up`으로 전체 스택 기동
+- 🐳 **한 줄로 셀프 호스팅** — `install.sh`으로 전체 스택 기동
 - 📊 **가관측성 전체 스택 내장** — Prometheus + Loki + Tempo + Grafana 자동 배포, Agent가 쿼리 작성
 - 🧠 **원하는 모델 사용** — Anthropic / OpenAI / GLM / DeepSeek / Gemini / Kimi, 핫 라우팅
 - 💬 **양방향 IM 채널** — Slack / Telegram / Larksuite / DingTalk / WeCom, 채널별 로케일
@@ -69,15 +69,6 @@ wget https://ongrid.cloud/dl/ongrid-v0.8.4-linux-amd64.tar.xz
 
 # ARM64
 wget https://ongrid.cloud/dl/ongrid-v0.8.4-linux-arm64.tar.xz
-```
-
-### 또는 소스에서 실행
-
-로컬 개발: 관리자 계정과 모델 API 키를 설정한 후 전체 스택을 기동합니다.
-
-```bash
-cp deploy/.env.example deploy/.env
-make compose-up    # make compose-down to stop
 ```
 
 ## 연동
