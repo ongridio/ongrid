@@ -26,6 +26,7 @@ import {
   Upload,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/cn';
 import { fullDateTime } from '@/lib/format';
 import { Modal } from '@/components/Modal';
@@ -966,6 +967,10 @@ function DocEditor({
       <Modal
         open
         onClose={onClose}
+        // 阅读态默认给到 max-w-4xl，并允许拖左右边缘自行调宽 ——
+        // 内置 runbook 普遍带宽表格，md(448px) 下表格没法看。
+        size="xl"
+        resizable
         title={existing ? localizedDocTitle(existing) : tr('文档', 'Document')}
         footer={
           <>
@@ -1030,14 +1035,18 @@ function DocEditor({
                 </span>
               ))}
           </div>
-          <div className="max-h-[60vh] overflow-y-auto rounded-md border border-zinc-800 bg-zinc-950/40 p-4">
+          {/* 不再自限 60vh：Modal 本体已 max-h-90vh + 内部滚动，
+              嵌套两层滚动条阅读体验差 */}
+          <div className="rounded-md border border-zinc-800 bg-zinc-950/40 p-4">
             {loading ? (
               <div className="text-xs text-zinc-500">{tr('加载中…', 'Loading…')}</div>
             ) : err ? (
               <div className="text-xs text-red-300">{err}</div>
             ) : content ? (
               <div className="md-body text-sm text-zinc-200">
-                <ReactMarkdown>{content}</ReactMarkdown>
+                {/* remark-gfm：表格 / 删除线 / 任务列表等 GFM 语法，
+                    缺了它表格按普通段落渲染成一行竖线文本 */}
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
               </div>
             ) : (
               <div className="text-xs text-zinc-500">{tr('该文档没有正文内容', 'This document has no body content')}</div>

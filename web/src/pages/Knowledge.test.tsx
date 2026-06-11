@@ -30,7 +30,9 @@ const vaultDoc = {
   updated_at: '2026-06-01T00:00:00Z',
 };
 
-const vaultContent = '# Runbook 正文\n\n第一步：查看告警上下文';
+const vaultContent =
+  '# Runbook 正文\n\n第一步：查看告警上下文\n\n' +
+  '| Severity | Acknowledge |\n|---|---|\n| SEV1 | < 5 min |\n';
 
 const manualDoc = {
   id: '202',
@@ -79,6 +81,10 @@ describe('KnowledgePage', () => {
 
     // 查看器：拉取 GET /knowledge/docs/:id 并渲染 markdown 正文
     expect(await screen.findByText('第一步：查看告警上下文')).toBeInTheDocument();
+    // GFM 表格渲染为真 <table>（remark-gfm），而非一行竖线文本
+    expect(screen.getByRole('table')).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Severity' })).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: '< 5 min' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /复制为组织文档/ })).toBeInTheDocument();
     // 只读：没有「保存」按钮
     expect(screen.queryByRole('button', { name: '保存' })).not.toBeInTheDocument();
@@ -111,7 +117,8 @@ describe('KnowledgePage', () => {
     await waitFor(() => expect(createdBody).not.toBeNull());
     expect(createdBody).toMatchObject({
       title: 'Host Metric Alerts Runbook',
-      content: vaultContent,
+      // 提交时 trim：fixture 末尾的换行不入库
+      content: vaultContent.trim(),
       path: 'alerts',
     });
     // 来源 url（builtin/repo 文件路径）不带入副本
