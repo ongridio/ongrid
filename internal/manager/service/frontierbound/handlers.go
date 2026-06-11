@@ -193,6 +193,18 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 			return nil, fmt.Errorf("register_edge: decode: %w", err)
 		}
 		canonicalEdgeID := c.canonicalizeEdgeID(edgeID)
+		if canonicalEdgeID == 0 {
+			// Transport→canonical binding not established yet (EdgeOnline's
+			// resolveEdgeID must land first). Registering with 0 makes
+			// HandleRegister(0) fail AND leaves the edge_devices host
+			// junction uncreated — after which every metric falls back to
+			// edge_id (issue #96 root cause). Fail loudly so the edge
+			// retries once the binding is ready, instead of silently
+			// mis-registering and poisoning the device_id labels.
+			log.Error("frontierbound: register_edge — no canonical edge id (transport binding not ready, retry)",
+				slog.Uint64("transport_edge_id", edgeID))
+			return nil, fmt.Errorf("register_edge: edge binding not ready")
+		}
 		if err := w.EdgeUC.HandleRegister(rpcCtx, canonicalEdgeID, in.HostInfo, in.AgentVersion); err != nil {
 			log.Error("frontierbound: HandleRegister",
 				slog.Uint64("edge_id", canonicalEdgeID),
@@ -276,6 +288,17 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 			return json.Marshal(tunnel.PushHostMetricsResponse{Accepted: 0})
 		}
 		deviceID := resolveDeviceID(rpcCtx, w.DeviceResolver, canonicalEdgeID)
+		if deviceID == 0 {
+			// Host junction missing — drop rather than write edge_id as a
+			// bogus device_id label (issue #96). Accepted=0 lets the edge
+			// retry; the link is created by register_edge.
+			log.Warn("frontierbound: push_host_metrics dropped — device_id unresolved (edge_devices host junction missing; edge needs to (re)register)",
+				slog.Uint64("edge_id", canonicalEdgeID),
+				slog.Uint64("transport_edge_id", edgeID),
+				slog.Int("n", len(in.Points)),
+			)
+			return json.Marshal(tunnel.PushHostMetricsResponse{Accepted: 0})
+		}
 		if err := w.MetricIngester.Push(rpcCtx, deviceID, in.Points); err != nil {
 			log.Warn("frontierbound: ingest push",
 				slog.Uint64("edge_id", canonicalEdgeID),
@@ -323,6 +346,18 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 			return json.Marshal(tunnel.PushPromSamplesResponse{Accepted: n})
 		}
 		deviceID := resolveDeviceID(rpcCtx, w.DeviceResolver, canonicalEdgeID)
+		if deviceID == 0 {
+			// Host junction missing — drop rather than pollute the TSDB
+			// with edge_id-as-device_id (issue #96). Accepted=n so the
+			// edge does not spin-retry; the link lands on register_edge.
+			log.Warn("frontierbound: push_prom_samples dropped — device_id unresolved (edge_devices host junction missing; edge needs to (re)register)",
+				slog.Uint64("edge_id", canonicalEdgeID),
+				slog.Uint64("transport_edge_id", edgeID),
+				slog.String("source", in.Source),
+				slog.Int("n", n),
+			)
+			return json.Marshal(tunnel.PushPromSamplesResponse{Accepted: n})
+		}
 		if err := w.PromIngester.Push(rpcCtx, deviceID, in.Source, in.Samples); err != nil {
 			log.Warn("frontierbound: prom ingest push",
 				slog.Uint64("edge_id", canonicalEdgeID),
@@ -424,20 +459,25 @@ func safeAddr(a net.Addr) string {
 }
 
 // resolveDeviceID maps a tunnel-side edge_id to the host device_id
-// labelled into the push pipeline. When DeviceResolver is wired and
-// returns a positive id, that's authoritative. Otherwise we fall back
-// to edge_id (which numerically equals device_id for pre-launch data
-// thanks to the backfill that reuses the integer).
+// labelled into the push pipeline. Returns the resolved device_id, or 0
+// when it cannot be resolved.
+//
+// It MUST NOT fall back to edge_id. After the edge/device entity split
+// (May 2026) edge_id and device.ID are independent auto-increment
+// sequences, so a fallback writes a WRONG device_id label into the
+// immutable Prometheus TSDB (issue #96 — Monitor showed edge_ids like
+// 10/11/12 that don't exist on the Devices page). Callers MUST drop the
+// batch when this returns 0 rather than persist a bogus label.
 func resolveDeviceID(ctx context.Context, dr DeviceResolver, edgeID uint64) uint64 {
 	if dr == nil || edgeID == 0 {
-		return edgeID
+		return 0
 	}
 	id, err := dr.LookupHostDevice(ctx, edgeID)
 	if err != nil || id == 0 {
-		// Junction missing (race during register) — fall back to the
-		// numerically-equal edge id. The backfill keeps these in sync
-		// for any edge that has ever connected.
-		return edgeID
+		// Host junction not resolvable (edge not yet linked to a device).
+		// Return 0 so the caller drops this batch instead of polluting
+		// history with edge_id-as-device_id.
+		return 0
 	}
 	return id
 }

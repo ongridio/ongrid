@@ -42,6 +42,25 @@ func (f *fakeMetricIngester) Push(_ context.Context, _ uint64, _ []tunnel.HostMe
 	return nil
 }
 
+// fakeDeviceResolver resolves edge_id -> device_id. By default it returns
+// the edge_id itself (1:1, simulating a present host junction) so push
+// tests reach the ingester. Set err (or id) to exercise the
+// "junction missing -> drop" path (issue #96).
+type fakeDeviceResolver struct {
+	id  uint64 // when non-zero, always return this device_id
+	err error  // when non-nil, simulate an unresolvable junction
+}
+
+func (f *fakeDeviceResolver) LookupHostDevice(_ context.Context, edgeID uint64) (uint64, error) {
+	if f.err != nil {
+		return 0, f.err
+	}
+	if f.id != 0 {
+		return f.id, nil
+	}
+	return edgeID, nil
+}
+
 // installAndDispatch runs Install on a fakeService-backed Client, then
 // returns the registered RPC for `method`. Tests call it like a function.
 func installAndDispatch(t *testing.T, w Wiring) (*fakeService, geminio.RPC) {
@@ -60,6 +79,10 @@ func installAndDispatch(t *testing.T, w Wiring) (*fakeService, geminio.RPC) {
 	}
 	if w.MetricIngester == nil {
 		w.MetricIngester = &fakeMetricIngester{}
+	}
+	if w.DeviceResolver == nil {
+		// Default: a present 1:1 junction so push tests reach the ingester.
+		w.DeviceResolver = &fakeDeviceResolver{}
 	}
 	if err := Install(context.Background(), c, w); err != nil {
 		t.Fatalf("Install: %v", err)
@@ -156,6 +179,31 @@ func TestInstall_PushPromSamples_IngesterError(t *testing.T) {
 	rpc(context.Background(), &fakeReq{data: body, clientID: 1}, rsp)
 	if rsp.err == nil {
 		t.Errorf("expected rsp.err on ingester failure")
+	}
+}
+
+// Issue #96: when the host junction can't be resolved, resolveDeviceID
+// returns 0 and the handler MUST drop the batch (never write edge_id as
+// the device_id label). The ingester must not be called.
+func TestInstall_PushPromSamples_DropsWhenDeviceUnresolved(t *testing.T) {
+	pi := &fakePromIngester{}
+	_, rpc := installAndDispatch(t, Wiring{
+		PromIngester:   pi,
+		DeviceResolver: &fakeDeviceResolver{err: errors.New("no host junction")},
+		Log:            slog.Default(),
+	})
+	body, _ := json.Marshal(tunnel.PushPromSamplesRequest{
+		EdgeID:  5,
+		Source:  "embedded",
+		Samples: []tunnel.PromSample{{Name: "x", Value: 1, TsMs: 1}},
+	})
+	rsp := &fakeResp{}
+	rpc(context.Background(), &fakeReq{data: body, clientID: 1}, rsp)
+	if rsp.err != nil {
+		t.Fatalf("drop must not error: %v", rsp.err)
+	}
+	if pi.pushCnt != 0 {
+		t.Fatalf("ingester called %d times, want 0 — must drop, never write edge_id as device_id", pi.pushCnt)
 	}
 }
 
