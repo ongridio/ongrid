@@ -28,17 +28,17 @@ import (
 //   - edge_id (in the wire payload) — tunnel session knows which edge is
 //     calling, manager injects on the way out.
 type PluginConfig struct {
-	ID         uint64         `gorm:"primaryKey;autoIncrement"`
-	EdgeID     uint64         `gorm:"not null;column:edge_id;uniqueIndex:uk_edge_plugin,priority:1;index:idx_edge_plugin_edge"`
-	PluginName string         `gorm:"size:32;not null;column:plugin_name;uniqueIndex:uk_edge_plugin,priority:2"`
-	Enabled    bool           `gorm:"not null;default:false;column:enabled"`
+	ID         uint64 `gorm:"primaryKey;autoIncrement"`
+	EdgeID     uint64 `gorm:"not null;column:edge_id;uniqueIndex:uk_edge_plugin,priority:1;index:idx_edge_plugin_edge"`
+	PluginName string `gorm:"size:32;not null;column:plugin_name;uniqueIndex:uk_edge_plugin,priority:2"`
+	Enabled    bool   `gorm:"not null;default:false;column:enabled"`
 	// SpecJSON is plugin-specific settings as JSON. No DEFAULT clause —
 	// MySQL rejects DEFAULT on TEXT columns (Error 1101). Application
 	// code always writes a non-empty value (at minimum "{}" via Set).
-	SpecJSON   string         `gorm:"type:text;not null;column:spec_json"`
-	CreatedAt  time.Time      `gorm:"column:created_at"`
-	UpdatedAt  time.Time      `gorm:"column:updated_at"`
-	DeletedAt  gorm.DeletedAt `gorm:"index;column:deleted_at"`
+	SpecJSON  string         `gorm:"type:text;not null;column:spec_json"`
+	CreatedAt time.Time      `gorm:"column:created_at"`
+	UpdatedAt time.Time      `gorm:"column:updated_at"`
+	DeletedAt gorm.DeletedAt `gorm:"index;column:deleted_at"`
 }
 
 // TableName pins the SQLite table.
@@ -47,15 +47,17 @@ func (PluginConfig) TableName() string { return "edge_plugin_configs" }
 // Plugin name constants. Keep in lock-step with
 // internal/edgeagent/plugins/<name> packages and
 const (
-	PluginNameMetrics     = "metrics"
-	PluginNameLogs        = "logs"
-	PluginNameTraces      = "traces"
-	PluginNameProfiles    = "profiles"
+	PluginNameMetrics  = "metrics"
+	PluginNameLogs     = "logs"
+	PluginNameTraces   = "traces"
+	PluginNameProfiles = "profiles"
 	// hostmetrics / procmetrics wrap Prometheus-ecosystem exporters
 	// (node_exporter, ncabatoff/process-exporter) the edge ships as
 	// bundled subprocess plugins. Manager toggles enable + spec.
-	PluginNameHostMetrics = "hostmetrics"
-	PluginNameProcMetrics = "procmetrics"
+	PluginNameHostMetrics     = "hostmetrics"
+	PluginNameProcMetrics     = "procmetrics"
+	PluginNameCustomMetrics   = "custommetrics"
+	PluginNameDatabaseMetrics = "databasemetrics"
 )
 
 // IsKnownPluginName reports whether n is a plugin the manager knows
@@ -65,7 +67,8 @@ const (
 func IsKnownPluginName(n string) bool {
 	switch n {
 	case PluginNameMetrics, PluginNameLogs, PluginNameTraces, PluginNameProfiles,
-		PluginNameHostMetrics, PluginNameProcMetrics:
+		PluginNameHostMetrics, PluginNameProcMetrics,
+		PluginNameCustomMetrics, PluginNameDatabaseMetrics:
 		return true
 	}
 	return false

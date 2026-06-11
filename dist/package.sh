@@ -454,6 +454,22 @@ for target in linux-amd64 linux-arm64; do
     fi
 done
 
+# Database exporters for the databasemetrics plugin. These are edge-managed
+# subprocesses; the manager stores only the edge-local secret file path.
+for exporter in mysqld_exporter postgres_exporter redis_exporter mongodb_exporter; do
+    for target in linux-amd64 linux-arm64; do
+        src="${REPO_ROOT}/bin/${target}/${exporter}"
+        dst="${STAGE_DIR}/edge/${exporter}-${target}"
+        if [ -f "$src" ]; then
+            cp "$src" "$dst"
+            chmod 755 "$dst"
+            log "  + edge/${exporter}-${target}"
+        else
+            warn "${exporter} binary ${src} missing; related databasemetrics sources won't work on ${target}. Run 'make fetch-db-exporters'."
+        fi
+    done
+done
+
 # --- loki config (ADR-012) --------------------------------------------------
 copy_opt "${REPO_ROOT}/deploy/install/loki-config.yaml" \
          "${STAGE_DIR}/loki-config.yaml"

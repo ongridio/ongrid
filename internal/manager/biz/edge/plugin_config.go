@@ -91,12 +91,14 @@ type PluginRow struct {
 // Data path:
 //   - hostmetrics — node_exporter subprocess exposing :9102/metrics
 //   - procmetrics — process_exporter subprocess exposing :9256/metrics
-//   - metrics — in-process scraper that pulls localhost:9102 and
-//     pushes via the tunnel's push_prom_samples RPC into cloud Prom's
+//   - metrics — parent metrics pipeline whose sub-plugins push via
+//     the tunnel's push_prom_samples RPC into cloud Prom's
 //     remote_write. This is the universal path that works for any
 //     edge (local or across the internet). It replaces the legacy
 //     prometheus.yml host.docker.internal scrape, which only ever
 //     worked for an edge co-resident with the manager.
+//   - custommetrics / databasemetrics — operator configured metric
+//     sub-plugins. They stay disabled until targets/sources are set.
 //   - logs / traces — promtail / otelcol subprocesses pushing direct
 //     to manager nginx via publicURL.
 //
@@ -134,6 +136,8 @@ func (uc *PluginConfigUC) ListForUI(ctx context.Context, edgeID uint64) ([]Plugi
 		model.PluginNameProfiles,
 		model.PluginNameHostMetrics,
 		model.PluginNameProcMetrics,
+		model.PluginNameCustomMetrics,
+		model.PluginNameDatabaseMetrics,
 	}
 	out := make([]PluginRow, 0, len(knownPlugins))
 	for _, name := range knownPlugins {
@@ -212,6 +216,8 @@ func (uc *PluginConfigUC) FetchForEdge(ctx context.Context, edgeID uint64) (*Wir
 		model.PluginNameProfiles,
 		model.PluginNameHostMetrics,
 		model.PluginNameProcMetrics,
+		model.PluginNameCustomMetrics,
+		model.PluginNameDatabaseMetrics,
 	}
 	out := &WireSnapshot{EdgeID: edgeID, Configs: make(map[string]WireConfig, len(knownPlugins))}
 	enabledNames := make([]string, 0, len(knownPlugins))

@@ -213,6 +213,19 @@ else
     log_warn "process_exporter-${OS}-${ARCH} not bundled; procmetrics plugin will fail to start until present"
 fi
 
+# Database exporters used by databasemetrics. They are optional at install
+# time because the plugin is disabled until an operator configures database
+# sources, but surfacing missing binaries here makes future enablement clear.
+for exporter in mysqld_exporter postgres_exporter redis_exporter mongodb_exporter; do
+    src="${SCRIPT_DIR}/${exporter}-${OS}-${ARCH}"
+    if [[ -f "$src" ]]; then
+        log_info "installing ${exporter} to ${PLUGIN_BIN_DIR}/${exporter}"
+        install -m 0755 -o root -g root "$src" "${PLUGIN_BIN_DIR}/${exporter}"
+    else
+        log_warn "${exporter}-${OS}-${ARCH} not bundled; databasemetrics sources using it will fail until present"
+    fi
+done
+
 # ---------- render env file ----------
 log_info "rendering $ENV_FILE"
 mkdir -p "$CONFIG_DIR"
@@ -272,7 +285,7 @@ echo "${C_BOLD}${C_CYAN}--- self-check ---${C_RESET}"
 SELFCHECK_FAIL=0
 
 # 1) plugin binaries present + executable
-for tool in promtail otelcol-contrib node_exporter process_exporter; do
+for tool in promtail otelcol-contrib node_exporter process_exporter mysqld_exporter postgres_exporter redis_exporter mongodb_exporter; do
     if [[ -x "${PLUGIN_BIN_DIR}/${tool}" ]]; then
         log_info "plugin binary present: ${tool}"
     else

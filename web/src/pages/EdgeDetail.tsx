@@ -38,6 +38,7 @@ import {
 import {
   listEdgePlugins,
   setEdgePlugin,
+  type PluginTargetHealth,
   type PluginRow,
 } from '@/api/integrations';
 import { ApiError } from '@/api/client';
@@ -712,7 +713,7 @@ const PLUGIN_META: Record<
   metrics: {
     label: 'metrics',
     pill: 'bg-sky-500/10 text-sky-300 ring-sky-500/30',
-    getHint: () => trInline('主机 metric 采集（in-process collector）', 'Host metric collection (in-process collector)'),
+    getHint: () => trInline('指标父级管道：子插件本地采集后通过 push_prom_samples 上报', 'Parent metrics pipeline: sub-plugins scrape locally and push through push_prom_samples'),
   },
   logs: {
     label: 'logs',
@@ -734,8 +735,8 @@ const PLUGIN_META: Record<
     pill: 'bg-cyan-500/10 text-cyan-300 ring-cyan-500/30',
     getHint: () =>
       trInline(
-        'subprocess node_exporter，整机 CPU / 内存 / 磁盘 / 网络 / load（暴露 :9102 给 manager Prom 抓取）',
-        'subprocess node_exporter — host CPU / memory / disk / network / load (exposes :9102 for manager Prom to scrape)',
+        'subprocess node_exporter，整机 CPU / 内存 / 磁盘 / 网络 / load（由 metrics 管道抓取并上报）',
+        'subprocess node_exporter — host CPU / memory / disk / network / load (scraped and pushed by the metrics pipeline)',
       ),
   },
   procmetrics: {
@@ -743,8 +744,26 @@ const PLUGIN_META: Record<
     pill: 'bg-fuchsia-500/10 text-fuchsia-300 ring-fuchsia-500/30',
     getHint: () =>
       trInline(
-        'subprocess process-exporter，按进程名分组的 CPU / 内存 / IO（暴露 :9256 给 manager Prom 抓取）',
-        'subprocess process-exporter — per-process CPU / memory / IO grouped by comm (exposes :9256 for manager Prom to scrape)',
+        'subprocess process-exporter，按进程名分组的 CPU / 内存 / IO（由 metrics 管道抓取并上报）',
+        'subprocess process-exporter — per-process CPU / memory / IO grouped by comm (scraped and pushed by the metrics pipeline)',
+      ),
+  },
+  custommetrics: {
+    label: 'custommetrics',
+    pill: 'bg-sky-500/10 text-sky-300 ring-sky-500/30',
+    getHint: () =>
+      trInline(
+        '自定义 Prometheus /metrics URL 采集；不托管账号密码或 exporter',
+        'Custom Prometheus /metrics URL scraping; does not manage credentials or exporters',
+      ),
+  },
+  databasemetrics: {
+    label: 'databasemetrics',
+    pill: 'bg-amber-500/10 text-amber-300 ring-amber-500/30',
+    getHint: () =>
+      trInline(
+        'edge 侧托管数据库 exporter；manager 只保存本机 secret 文件路径',
+        'Edge-managed database exporters; manager stores only edge-local secret file paths',
       ),
   },
 };
@@ -895,14 +914,18 @@ function PluginsTab({ edgeId }: { edgeId: number }) {
         </div>
       ) : (
         <div className="space-y-2">
-          {/* Metric-family plugins (hostmetrics + procmetrics) hang
+          {/* Metric-family plugins hang
               under the "metrics" parent card to mirror their semantic
-              grouping — they're all metric-shaped collectors, just
-              different scrape targets. Filter them out of the top-level
+              grouping. Filter them out of the top-level
               list, then thread them in as children of the metrics card
               so the UI shows one row per OTel signal kind. */}
           {(() => {
-            const childNames = new Set(['hostmetrics', 'procmetrics']);
+            const childNames = new Set([
+              'hostmetrics',
+              'procmetrics',
+              'custommetrics',
+              'databasemetrics',
+            ]);
             const topRows = rows.filter((r) => !childNames.has(r.plugin_name));
             const childRowsByParent: Record<string, PluginRow[]> = {
               metrics: rows.filter((r) => childNames.has(r.plugin_name)),
@@ -943,8 +966,7 @@ function PluginCard({
 }: {
   row: PluginRow;
   /** Child plugin rows rendered inside this card's expanded body. Used
-   *  to group sibling exporters under their semantic parent (hostmetrics
-   *  + procmetrics under metrics). */
+   *  to group metric collectors under their semantic parent. */
   children?: PluginRow[];
   expanded: boolean;
   onToggleExpand(): void;
@@ -953,12 +975,9 @@ function PluginCard({
 }) {
   const { tr } = useI18n();
   const meta = pluginMeta(row.plugin_name);
-  // metrics is special: actual host-metric collection runs on the legacy
-  // collector → push_host_metrics path, NOT through the plugin runtime
-  // yet — refactoring it into a metrics plugin is a follow-up PR.
-  // Until then, metrics is always-on regardless
-  // of the plugin row's enabled flag — show that explicitly so operators
-  // don't think toggling it does anything.
+  // metrics is special in the product model: it is the parent pipeline for
+  // child metric collectors, so the useful operator controls are the
+  // children shown inside this card.
   const isMetricsBuiltin = row.plugin_name === 'metrics';
   // State pill: prefer the live heartbeat-reported health (running / crashed
   // / starting / stopped). Falls back to inferring from enabled when the edge
@@ -1013,8 +1032,8 @@ function PluginCard({
             <div className="mt-0.5 truncate text-[11px] text-zinc-500">
               {isMetricsBuiltin
                 ? tr(
-                    'built-in collector path（push_host_metrics → cloud Prometheus）。toggle 不生效，待 refactor 进 plugin runtime。',
-                    'Built-in collector path (push_host_metrics → cloud Prometheus). The toggle has no effect — pending the refactor into the plugin runtime.',
+                    '父级指标管道。子插件本地采集后统一走 push_prom_samples → manager remote_write → Prometheus。',
+                    'Parent metrics pipeline. Child collectors scrape locally and use push_prom_samples → manager remote_write → Prometheus.',
                   )
                 : meta.hint}
             </div>
@@ -1051,7 +1070,7 @@ function PluginCard({
             </button>
           )}
           {/* The expand chevron is also shown for metrics when it has
-              children (hostmetrics / procmetrics sub-toggles), so
+              child collectors, so
               operators can reach those without an Edit-config target. */}
           {(!isMetricsBuiltin || children.length > 0) && (
             <button
@@ -1072,8 +1091,7 @@ function PluginCard({
 
       {expanded && (
         <div className="border-t border-zinc-800 px-4 py-4 space-y-3">
-          {/* Sub-plugin children (hostmetrics / procmetrics under
-              metrics): each gets its own enable toggle + spec editor,
+          {/* Sub-plugin children under metrics: each gets its own enable toggle + spec editor,
               rendered as a more-compact mini card so the visual nesting
               is clear. */}
           {children.length > 0 && (
@@ -1105,9 +1123,9 @@ function PluginCard({
 
 // PluginSubCard is a compact PluginCard used when a plugin row is
 // rendered as a child inside another card's expanded body (e.g.
-// hostmetrics + procmetrics under metrics). Same toggle + spec editor
-// affordances, tighter padding + no separate state pill, so the visual
-// nesting reads as "these belong to the parent".
+// metric collectors under metrics). Same toggle + spec editor affordances,
+// with tighter padding so the visual nesting reads as "these belong to the
+// parent".
 function PluginSubCard({
   row,
   onSave,
@@ -1118,6 +1136,16 @@ function PluginSubCard({
   const { tr } = useI18n();
   const meta = pluginMeta(row.plugin_name);
   const [editing, setEditing] = useState(false);
+  const health = row.health;
+  const stateLabel = health?.state ? health.state : row.enabled ? 'running' : 'stopped';
+  const stateStyle =
+    stateLabel === 'crashed'
+      ? 'bg-rose-500/10 text-rose-300 ring-rose-500/30'
+      : stateLabel === 'running'
+        ? 'bg-emerald-500/10 text-emerald-300 ring-emerald-500/30'
+        : stateLabel === 'starting'
+          ? 'bg-amber-500/10 text-amber-300 ring-amber-500/30'
+          : 'bg-zinc-700/40 text-zinc-400 ring-zinc-600';
   const toggle = async () => {
     await onSave({ enabled: !row.enabled, spec: row.spec });
   };
@@ -1136,6 +1164,14 @@ function PluginSubCard({
           <div className="min-w-0 truncate text-[11px] text-zinc-400">{meta.hint}</div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <span
+            className={cn(
+              'rounded-md px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset',
+              stateStyle,
+            )}
+          >
+            {stateLabel}
+          </span>
           <button
             type="button"
             onClick={() => void toggle()}
@@ -1158,6 +1194,20 @@ function PluginSubCard({
           </button>
         </div>
       </div>
+      {health?.last_error && (
+        <div
+          className="border-t border-zinc-800 px-3 py-2 text-[11px] text-rose-400"
+          title={health.last_error}
+        >
+          {health.last_error}
+          {health.restart_count
+            ? tr(` · 重启 ${health.restart_count} 次`, ` · ${health.restart_count} restarts`)
+            : ''}
+        </div>
+      )}
+      {health?.targets && health.targets.length > 0 && (
+        <SourceHealthList targets={health.targets} />
+      )}
       {editing && (
         <div className="border-t border-zinc-800 px-3 py-3">
           <PluginSpecEditor
@@ -1168,6 +1218,60 @@ function PluginSubCard({
           />
         </div>
       )}
+    </div>
+  );
+}
+
+function SourceHealthList({ targets }: { targets: PluginTargetHealth[] }) {
+  const { tr } = useI18n();
+  const stateClass = (state: string) =>
+    state === 'running'
+      ? 'bg-emerald-500/10 text-emerald-300 ring-emerald-500/30'
+      : state === 'failed' || state === 'crashed'
+        ? 'bg-rose-500/10 text-rose-300 ring-rose-500/30'
+        : state === 'disabled' || state === 'stopped'
+          ? 'bg-zinc-700/40 text-zinc-400 ring-zinc-600'
+          : 'bg-amber-500/10 text-amber-300 ring-amber-500/30';
+  return (
+    <div className="border-t border-zinc-800 divide-y divide-zinc-800/80">
+      {targets.map((target) => (
+        <div key={target.id} className="flex items-start justify-between gap-3 px-3 py-2">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="font-mono text-[11px] text-zinc-200">
+                {target.name || target.id}
+              </span>
+              {target.name && target.name !== target.id && (
+                <span className="font-mono text-[10px] text-zinc-500">{target.id}</span>
+              )}
+              {target.kind && (
+                <span className="rounded px-1.5 py-0.5 text-[10px] text-zinc-400 ring-1 ring-inset ring-zinc-700">
+                  {target.kind}
+                </span>
+              )}
+              <span
+                className={cn(
+                  'rounded px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset',
+                  stateClass(target.state),
+                )}
+              >
+                {target.state}
+              </span>
+            </div>
+            {target.last_error && (
+              <div className="mt-0.5 truncate text-[11px] text-rose-400" title={target.last_error}>
+                {target.last_error}
+              </div>
+            )}
+          </div>
+          <div className="shrink-0 text-right text-[10px] text-zinc-500">
+            <div>{tr('样本', 'Samples')}: {target.samples ?? 0}</div>
+            {target.last_success_at && (
+              <div>{tr('成功', 'OK')}: {relativeTime(target.last_success_at)}</div>
+            )}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -1188,7 +1292,11 @@ function PluginSpecEditor({
 }) {
   const { tr } = useI18n();
   // Default to structured form for known plugins; JSON fallback otherwise.
-  const supportsForm = name === 'logs' || name === 'traces';
+  const supportsForm =
+    name === 'logs' ||
+    name === 'traces' ||
+    name === 'custommetrics' ||
+    name === 'databasemetrics';
   const [mode, setMode] = useState<'form' | 'json'>(supportsForm ? 'form' : 'json');
   const [draft, setDraft] = useState<Record<string, unknown>>(spec);
   const [jsonText, setJsonText] = useState<string>(() =>
@@ -1265,6 +1373,12 @@ function PluginSpecEditor({
       )}
       {mode === 'form' && name === 'traces' && (
         <TracesSpecForm draft={draft} onChange={setDraft} />
+      )}
+      {mode === 'form' && name === 'custommetrics' && (
+        <CustomMetricsSpecForm draft={draft} onChange={setDraft} />
+      )}
+      {mode === 'form' && name === 'databasemetrics' && (
+        <DatabaseMetricsSpecForm draft={draft} onChange={setDraft} />
       )}
       {mode === 'json' && (
         <div>
@@ -1377,6 +1491,497 @@ function asStringMap(v: unknown): Record<string, string> {
     if (typeof val === 'string') out[k] = val;
   }
   return out;
+}
+
+function asObjectArray(v: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter(
+    (x): x is Record<string, unknown> =>
+      !!x && typeof x === 'object' && !Array.isArray(x),
+  );
+}
+
+function StringMapField({
+  label,
+  values,
+  onChange,
+  emptyText,
+}: {
+  label: string;
+  values: Record<string, string>;
+  onChange(next: Record<string, string>): void;
+  emptyText: string;
+}) {
+  const { tr } = useI18n();
+  const entries = Object.entries(values).sort(([a], [b]) => a.localeCompare(b));
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between">
+        <span className="text-xs text-zinc-400">{label}</span>
+        <button
+          type="button"
+          onClick={() => onChange({ ...values, '': '' })}
+          className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-200"
+        >
+          <Plus size={11} /> {tr('添加 label', 'Add label')}
+        </button>
+      </div>
+      {entries.length === 0 && (
+        <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-[11px] text-zinc-500">
+          {emptyText}
+        </div>
+      )}
+      <div className="space-y-1.5">
+        {entries.map(([k, v]) => (
+          <div key={k} className="flex items-center gap-2">
+            <input
+              value={k}
+              onChange={(e) => {
+                const nextKey = e.target.value;
+                const next: Record<string, string> = {};
+                for (const [oldK, oldV] of entries) {
+                  if (oldK === k) next[nextKey] = oldV;
+                  else next[oldK] = oldV;
+                }
+                onChange(next);
+              }}
+              placeholder="service"
+              className="w-32 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 font-mono text-[11px] text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            />
+            <span className="text-[11px] text-zinc-500">=</span>
+            <input
+              value={v}
+              onChange={(e) => onChange({ ...values, [k]: e.target.value })}
+              placeholder="api"
+              className="flex-1 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 font-mono text-[11px] text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                const next = { ...values };
+                delete next[k];
+                onChange(next);
+              }}
+              className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-red-400"
+              aria-label={tr('移除 label', 'Remove label')}
+            >
+              <Trash2 size={11} />
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CustomMetricsSpecForm({
+  draft,
+  onChange,
+}: {
+  draft: Record<string, unknown>;
+  onChange(next: Record<string, unknown>): void;
+}) {
+  const { tr } = useI18n();
+  const targets = asObjectArray(draft.targets);
+  const setTargets = (next: Record<string, unknown>[]) =>
+    onChange({ ...draft, targets: next });
+  const updateTarget = (idx: number, next: Record<string, unknown>) =>
+    setTargets(targets.map((t, i) => (i === idx ? next : t)));
+  const addTarget = () => {
+    const id = `custom-${targets.length + 1}`;
+    setTargets([
+      ...targets,
+      {
+        id,
+        enabled: true,
+        name: id,
+        target_url: 'http://127.0.0.1:8080/metrics',
+        scrape_interval: '30s',
+        scrape_timeout: '5s',
+        source_label: `custom:${id}`,
+        extra_labels: {},
+        sample_limit: 5000,
+        label_drop: [],
+      },
+    ]);
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="text-xs text-zinc-400">{tr('自定义采集源', 'Custom scrape sources')}</div>
+        <button
+          type="button"
+          onClick={addTarget}
+          className="inline-flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-[11px] text-zinc-200 hover:bg-zinc-800"
+        >
+          <Plus size={11} /> {tr('添加自定义采集源', 'Add custom source')}
+        </button>
+      </div>
+      {targets.length === 0 && (
+        <div className="rounded-md border border-dashed border-zinc-800 px-3 py-3 text-[11px] text-zinc-500">
+          {tr('添加已有 Prometheus /metrics URL，edge 只负责抓取并上报，不启动 exporter。', 'Add existing Prometheus /metrics URLs. The edge only scrapes and pushes; it does not start exporters.')}
+        </div>
+      )}
+      <div className="space-y-3">
+        {targets.map((target, idx) => (
+          <CustomTargetEditor
+            key={idx}
+            target={target}
+            onChange={(next) => updateTarget(idx, next)}
+            onRemove={() => setTargets(targets.filter((_, i) => i !== idx))}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CustomTargetEditor({
+  target,
+  onChange,
+  onRemove,
+}: {
+  target: Record<string, unknown>;
+  onChange(next: Record<string, unknown>): void;
+  onRemove(): void;
+}) {
+  const { tr } = useI18n();
+  const id = typeof target.id === 'string' ? target.id : '';
+  const name = typeof target.name === 'string' ? target.name : id;
+  const enabled = target.enabled !== false;
+  const sampleLimit = typeof target.sample_limit === 'number' ? target.sample_limit : 5000;
+  const setField = (key: string, value: unknown) => onChange({ ...target, [key]: value });
+  return (
+    <div className="rounded-md border border-zinc-800 bg-zinc-950/40 p-3">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <label className="flex items-center gap-2 text-[12px] text-zinc-300">
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={(e) => setField('enabled', e.target.checked)}
+            className="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-900"
+          />
+          {tr('启用', 'Enabled')}
+        </label>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-red-400"
+          aria-label={tr('移除采集源', 'Remove source')}
+        >
+          <Trash2 size={12} />
+        </button>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        <SpecInput label="id" value={id} placeholder="service-api" onChange={(v) => setField('id', v)} />
+        <SpecInput label="name" value={name} placeholder="service-api" onChange={(v) => setField('name', v)} />
+      </div>
+      <div className="mt-3">
+        <SpecInput
+          label="target_url"
+          value={typeof target.target_url === 'string' ? target.target_url : ''}
+          placeholder="http://127.0.0.1:8080/metrics"
+          onChange={(v) => setField('target_url', v)}
+        />
+      </div>
+      <div className="mt-3 grid gap-3 md:grid-cols-4">
+        <SpecInput
+          label="scrape_interval"
+          value={typeof target.scrape_interval === 'string' ? target.scrape_interval : '30s'}
+          placeholder="30s"
+          onChange={(v) => setField('scrape_interval', v)}
+        />
+        <SpecInput
+          label="scrape_timeout"
+          value={typeof target.scrape_timeout === 'string' ? target.scrape_timeout : '5s'}
+          placeholder="5s"
+          onChange={(v) => setField('scrape_timeout', v)}
+        />
+        <SpecInput
+          label="source_label"
+          value={typeof target.source_label === 'string' ? target.source_label : `custom:${id}`}
+          placeholder="custom:service-api"
+          onChange={(v) => setField('source_label', v)}
+        />
+        <SpecNumberInput
+          label="sample_limit"
+          value={sampleLimit}
+          onChange={(v) => setField('sample_limit', v)}
+        />
+      </div>
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
+        <StringListField
+          label="label_drop"
+          values={asStringArray(target.label_drop)}
+          placeholder="trace_id"
+          onChange={(next) => setField('label_drop', next)}
+          hint={tr('采样前删除高基数 label。', 'Drop high-cardinality labels before pushing.')}
+        />
+        <StringMapField
+          label="extra_labels"
+          values={asStringMap(target.extra_labels)}
+          onChange={(next) => setField('extra_labels', next)}
+          emptyText={tr('—（可选，建议只放低基数字段）', '— (optional; use low-cardinality fields only)')}
+        />
+      </div>
+    </div>
+  );
+}
+
+const DB_LISTEN_DEFAULT: Record<string, string> = {
+  mysql: '127.0.0.1:19104',
+  postgresql: '127.0.0.1:19187',
+  redis: '127.0.0.1:19121',
+  mongodb: '127.0.0.1:19216',
+};
+
+function DatabaseMetricsSpecForm({
+  draft,
+  onChange,
+}: {
+  draft: Record<string, unknown>;
+  onChange(next: Record<string, unknown>): void;
+}) {
+  const { tr } = useI18n();
+  const sources = asObjectArray(draft.sources);
+  const setSources = (next: Record<string, unknown>[]) =>
+    onChange({ ...draft, sources: next });
+  const updateSource = (idx: number, next: Record<string, unknown>) =>
+    setSources(sources.map((s, i) => (i === idx ? next : s)));
+  const addSource = () => {
+    const id = `mysql-${sources.length + 1}`;
+    setSources([
+      ...sources,
+      {
+        id,
+        enabled: true,
+        db_type: 'mysql',
+        name: id,
+        listen_address: DB_LISTEN_DEFAULT.mysql,
+        connection: { type: 'file', path: `/etc/ongrid-edge/secrets/${id}.my.cnf` },
+        scrape_interval: '30s',
+        scrape_timeout: '5s',
+        source_label: `db:${id}`,
+        extra_labels: { db_type: 'mysql', service: id },
+        sample_limit: 5000,
+        label_drop: ['query', 'statement', 'collection'],
+      },
+    ]);
+  };
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-xs text-zinc-400">{tr('数据库采集源', 'Database metric sources')}</div>
+          <div className="mt-0.5 text-[11px] text-zinc-500">
+            {tr('这里只配置 edge 本机 secret 文件路径；manager 不保存数据库明文密码。', 'Only configure an edge-local secret file path here; the manager never stores plaintext database passwords.')}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={addSource}
+          className="inline-flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-[11px] text-zinc-200 hover:bg-zinc-800"
+        >
+          <Plus size={11} /> {tr('添加数据库采集源', 'Add database source')}
+        </button>
+      </div>
+      {sources.length === 0 && (
+        <div className="rounded-md border border-dashed border-zinc-800 px-3 py-3 text-[11px] text-zinc-500">
+          {tr('用于需要 Ongrid 在 edge 上托管 exporter 的数据库。已有 /metrics 接口的数据库 exporter 请放到 custommetrics。', 'Use this when Ongrid should manage the exporter on the edge. Existing database /metrics exporters belong in custommetrics.')}
+        </div>
+      )}
+      <div className="space-y-3">
+        {sources.map((source, idx) => (
+          <DatabaseSourceEditor
+            key={idx}
+            source={source}
+            onChange={(next) => updateSource(idx, next)}
+            onRemove={() => setSources(sources.filter((_, i) => i !== idx))}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DatabaseSourceEditor({
+  source,
+  onChange,
+  onRemove,
+}: {
+  source: Record<string, unknown>;
+  onChange(next: Record<string, unknown>): void;
+  onRemove(): void;
+}) {
+  const { tr } = useI18n();
+  const id = typeof source.id === 'string' ? source.id : '';
+  const dbType = typeof source.db_type === 'string' ? source.db_type : 'mysql';
+  const name = typeof source.name === 'string' ? source.name : id;
+  const enabled = source.enabled !== false;
+  const sampleLimit = typeof source.sample_limit === 'number' ? source.sample_limit : 5000;
+  const secretPlaceholder =
+    dbType === 'mysql'
+      ? '/etc/ongrid-edge/secrets/mysql-prod.my.cnf'
+      : `/etc/ongrid-edge/secrets/${id || 'db-source'}.dsn`;
+  const connection =
+    source.connection && typeof source.connection === 'object' && !Array.isArray(source.connection)
+      ? (source.connection as Record<string, unknown>)
+      : {};
+  const setField = (key: string, value: unknown) => onChange({ ...source, [key]: value });
+  const setDBType = (nextType: string) => {
+    const currentLabels = asStringMap(source.extra_labels);
+    onChange({
+      ...source,
+      db_type: nextType,
+      listen_address: DB_LISTEN_DEFAULT[nextType] ?? DB_LISTEN_DEFAULT.mysql,
+      extra_labels: { ...currentLabels, db_type: nextType },
+    });
+  };
+  return (
+    <div className="rounded-md border border-zinc-800 bg-zinc-950/40 p-3">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <label className="flex items-center gap-2 text-[12px] text-zinc-300">
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={(e) => setField('enabled', e.target.checked)}
+            className="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-900"
+          />
+          {tr('启用', 'Enabled')}
+        </label>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-red-400"
+          aria-label={tr('移除采集源', 'Remove source')}
+        >
+          <Trash2 size={12} />
+        </button>
+      </div>
+      <div className="grid gap-3 md:grid-cols-3">
+        <SpecInput label="id" value={id} placeholder="mysql-prod" onChange={(v) => setField('id', v)} />
+        <SpecInput label="name" value={name} placeholder="mysql-prod" onChange={(v) => setField('name', v)} />
+        <div>
+          <label className="mb-1 block text-xs text-zinc-400">db_type</label>
+          <select
+            value={dbType}
+            onChange={(e) => setDBType(e.target.value)}
+            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 font-mono text-[11px] text-zinc-100 focus:border-zinc-600 focus:outline-none"
+          >
+            <option value="mysql">mysql</option>
+            <option value="postgresql">postgresql</option>
+            <option value="redis">redis</option>
+            <option value="mongodb">mongodb</option>
+          </select>
+        </div>
+      </div>
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
+        <SpecInput
+          label="listen_address"
+          value={typeof source.listen_address === 'string' ? source.listen_address : DB_LISTEN_DEFAULT[dbType] ?? ''}
+          placeholder={DB_LISTEN_DEFAULT[dbType] ?? '127.0.0.1:19104'}
+          onChange={(v) => setField('listen_address', v)}
+        />
+        <SpecInput
+          label="connection.path"
+          value={typeof connection.path === 'string' ? connection.path : ''}
+          placeholder={secretPlaceholder}
+          onChange={(v) => setField('connection', { type: 'file', path: v })}
+        />
+      </div>
+      <div className="mt-1 text-[11px] text-zinc-500">
+        {tr('secret 文件必须在 edge 本机创建，建议权限 0600；MySQL 使用 my.cnf，其他类型使用 DSN/URI。表单不会接收数据库密码。', 'Create the secret file on the edge with 0600 permissions. MySQL uses my.cnf; other types use a DSN/URI. This form does not accept database passwords.')}
+      </div>
+      <div className="mt-3 grid gap-3 md:grid-cols-4">
+        <SpecInput
+          label="scrape_interval"
+          value={typeof source.scrape_interval === 'string' ? source.scrape_interval : '30s'}
+          placeholder="30s"
+          onChange={(v) => setField('scrape_interval', v)}
+        />
+        <SpecInput
+          label="scrape_timeout"
+          value={typeof source.scrape_timeout === 'string' ? source.scrape_timeout : '5s'}
+          placeholder="5s"
+          onChange={(v) => setField('scrape_timeout', v)}
+        />
+        <SpecInput
+          label="source_label"
+          value={typeof source.source_label === 'string' ? source.source_label : `db:${id}`}
+          placeholder="db:mysql-prod"
+          onChange={(v) => setField('source_label', v)}
+        />
+        <SpecNumberInput
+          label="sample_limit"
+          value={sampleLimit}
+          onChange={(v) => setField('sample_limit', v)}
+        />
+      </div>
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
+        <StringListField
+          label="label_drop"
+          values={asStringArray(source.label_drop)}
+          placeholder="query"
+          onChange={(next) => setField('label_drop', next)}
+          hint={tr('默认删除 query / statement / collection 等高基数字段。', 'Defaults drop high-cardinality fields such as query / statement / collection.')}
+        />
+        <StringMapField
+          label="extra_labels"
+          values={asStringMap(source.extra_labels)}
+          onChange={(next) => setField('extra_labels', next)}
+          emptyText={tr('—（默认会注入 db_type / service）', '— (db_type / service are added by default)')}
+        />
+      </div>
+    </div>
+  );
+}
+
+function SpecInput({
+  label,
+  value,
+  placeholder,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  placeholder?: string;
+  onChange(value: string): void;
+}) {
+  return (
+    <label>
+      <span className="mb-1 block text-xs text-zinc-400">{label}</span>
+      <input
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 font-mono text-[11px] text-zinc-100 focus:border-zinc-600 focus:outline-none"
+      />
+    </label>
+  );
+}
+
+function SpecNumberInput({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange(value: number): void;
+}) {
+  return (
+    <label>
+      <span className="mb-1 block text-xs text-zinc-400">{label}</span>
+      <input
+        type="number"
+        min={0}
+        value={Number.isFinite(value) ? value : 0}
+        onChange={(e) => onChange(Number(e.target.value || 0))}
+        className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 font-mono text-[11px] text-zinc-100 focus:border-zinc-600 focus:outline-none"
+      />
+    </label>
+  );
 }
 
 function LogsSpecForm({

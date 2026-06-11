@@ -14,7 +14,27 @@ import { request } from './client';
 // string union so callers get autocomplete; unknown names are still
 // representable (subprocess plugins added later) — the UI falls back to
 // a raw JSON editor for those.
-export type PluginName = 'metrics' | 'logs' | 'traces' | 'profiles' | string;
+export type PluginName =
+  | 'metrics'
+  | 'logs'
+  | 'traces'
+  | 'profiles'
+  | 'hostmetrics'
+  | 'procmetrics'
+  | 'custommetrics'
+  | 'databasemetrics'
+  | string;
+
+export type PluginTargetHealth = {
+  id: string;
+  name?: string;
+  kind?: string;
+  state: 'stopped' | 'starting' | 'running' | 'crashed' | 'failed' | string;
+  last_error?: string;
+  samples?: number;
+  last_success_at?: string;
+  updated_at?: string;
+};
 
 // PluginHealth is the live runtime health the edge ships on each heartbeat
 // (in-memory on the manager). Absent (undefined) when the edge is offline or
@@ -29,6 +49,7 @@ export type PluginHealth = {
   started_at?: string;
   updated_at?: string;
   reported_at?: string;
+  targets?: PluginTargetHealth[];
 };
 
 // PluginRow is the UI/HTTP-friendly view returned by ListForUI. Every

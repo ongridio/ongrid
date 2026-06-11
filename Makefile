@@ -323,6 +323,10 @@ NODE_EXPORTER_VERSION ?= 1.8.2
 # ecosystem (matches node_exporter's deploy + metric-naming model)
 # rather than mixing in otelcol hostmetrics.
 PROCESS_EXPORTER_VERSION ?= 0.8.4
+MYSQLD_EXPORTER_VERSION ?= 0.19.0
+POSTGRES_EXPORTER_VERSION ?= 0.19.1
+REDIS_EXPORTER_VERSION ?= 1.86.0
+MONGODB_EXPORTER_VERSION ?= 0.51.0
 
 .PHONY: fetch-node-exporter
 fetch-node-exporter: ## [release] 下载 node_exporter 到 bin/<os>-<arch>/node_exporter (linux-only)
@@ -366,6 +370,81 @@ fetch-process-exporter: ## [release] 下载 process-exporter 到 bin/<os>-<arch>
 		echo "[process_exporter] staged $$dest"; \
 	done
 	@echo "[process_exporter] note: linux-only"
+
+.PHONY: fetch-db-exporters fetch-mysqld-exporter fetch-postgres-exporter fetch-redis-exporter fetch-mongodb-exporter
+fetch-db-exporters: fetch-mysqld-exporter fetch-postgres-exporter fetch-redis-exporter fetch-mongodb-exporter ## [release] 下载数据库 exporter 到 bin/<os>-<arch>/ (linux-only)
+
+fetch-mysqld-exporter: ## [release] 下载 mysqld_exporter 到 bin/<os>-<arch>/mysqld_exporter
+	@for target in linux-amd64 linux-arm64; do \
+		dest=$(BIN_DIR)/$$target/mysqld_exporter; \
+		if [ -f $$dest ]; then echo "[mysqld_exporter] $$dest already present — skip"; continue; fi; \
+		mkdir -p $(BIN_DIR)/$$target; \
+		os=$${target%-*}; arch=$${target##*-}; \
+		tgz=/tmp/mysqld_exporter-$$os-$$arch.tar.gz; tmpdir=$$(mktemp -d); \
+		url=https://github.com/prometheus/mysqld_exporter/releases/download/v$(MYSQLD_EXPORTER_VERSION)/mysqld_exporter-$(MYSQLD_EXPORTER_VERSION).$${os}-$${arch}.tar.gz; \
+		echo "[mysqld_exporter] downloading $$url"; \
+		curl $(FETCH_CURL_FLAGS) -o $$tgz $$url || { rm -rf $$tmpdir; echo "mysqld_exporter download failed for $$target"; exit 1; }; \
+		tar -xzf $$tgz -C $$tmpdir || { rm -rf $$tmpdir $$tgz; echo "extract failed for $$target"; exit 1; }; \
+		found=$$(find $$tmpdir -type f -name mysqld_exporter -print -quit); \
+		test -n "$$found" || { rm -rf $$tmpdir $$tgz; echo "mysqld_exporter binary missing in archive for $$target"; exit 1; }; \
+		install -m 0755 "$$found" $$dest; \
+		rm -rf $$tmpdir $$tgz; \
+		echo "[mysqld_exporter] staged $$dest"; \
+	done
+
+fetch-postgres-exporter: ## [release] 下载 postgres_exporter 到 bin/<os>-<arch>/postgres_exporter
+	@for target in linux-amd64 linux-arm64; do \
+		dest=$(BIN_DIR)/$$target/postgres_exporter; \
+		if [ -f $$dest ]; then echo "[postgres_exporter] $$dest already present — skip"; continue; fi; \
+		mkdir -p $(BIN_DIR)/$$target; \
+		os=$${target%-*}; arch=$${target##*-}; \
+		tgz=/tmp/postgres_exporter-$$os-$$arch.tar.gz; tmpdir=$$(mktemp -d); \
+		url=https://github.com/prometheus-community/postgres_exporter/releases/download/v$(POSTGRES_EXPORTER_VERSION)/postgres_exporter-$(POSTGRES_EXPORTER_VERSION).$${os}-$${arch}.tar.gz; \
+		echo "[postgres_exporter] downloading $$url"; \
+		curl $(FETCH_CURL_FLAGS) -o $$tgz $$url || { rm -rf $$tmpdir; echo "postgres_exporter download failed for $$target"; exit 1; }; \
+		tar -xzf $$tgz -C $$tmpdir || { rm -rf $$tmpdir $$tgz; echo "extract failed for $$target"; exit 1; }; \
+		found=$$(find $$tmpdir -type f -name postgres_exporter -print -quit); \
+		test -n "$$found" || { rm -rf $$tmpdir $$tgz; echo "postgres_exporter binary missing in archive for $$target"; exit 1; }; \
+		install -m 0755 "$$found" $$dest; \
+		rm -rf $$tmpdir $$tgz; \
+		echo "[postgres_exporter] staged $$dest"; \
+	done
+
+fetch-redis-exporter: ## [release] 下载 redis_exporter 到 bin/<os>-<arch>/redis_exporter
+	@for target in linux-amd64 linux-arm64; do \
+		dest=$(BIN_DIR)/$$target/redis_exporter; \
+		if [ -f $$dest ]; then echo "[redis_exporter] $$dest already present — skip"; continue; fi; \
+		mkdir -p $(BIN_DIR)/$$target; \
+		os=$${target%-*}; arch=$${target##*-}; \
+		tgz=/tmp/redis_exporter-$$os-$$arch.tar.gz; tmpdir=$$(mktemp -d); \
+		url=https://github.com/oliver006/redis_exporter/releases/download/v$(REDIS_EXPORTER_VERSION)/redis_exporter-v$(REDIS_EXPORTER_VERSION).$${os}-$${arch}.tar.gz; \
+		echo "[redis_exporter] downloading $$url"; \
+		curl $(FETCH_CURL_FLAGS) -o $$tgz $$url || { rm -rf $$tmpdir; echo "redis_exporter download failed for $$target"; exit 1; }; \
+		tar -xzf $$tgz -C $$tmpdir || { rm -rf $$tmpdir $$tgz; echo "extract failed for $$target"; exit 1; }; \
+		found=$$(find $$tmpdir -type f -name redis_exporter -print -quit); \
+		test -n "$$found" || { rm -rf $$tmpdir $$tgz; echo "redis_exporter binary missing in archive for $$target"; exit 1; }; \
+		install -m 0755 "$$found" $$dest; \
+		rm -rf $$tmpdir $$tgz; \
+		echo "[redis_exporter] staged $$dest"; \
+	done
+
+fetch-mongodb-exporter: ## [release] 下载 mongodb_exporter 到 bin/<os>-<arch>/mongodb_exporter
+	@for target in linux-amd64 linux-arm64; do \
+		dest=$(BIN_DIR)/$$target/mongodb_exporter; \
+		if [ -f $$dest ]; then echo "[mongodb_exporter] $$dest already present — skip"; continue; fi; \
+		mkdir -p $(BIN_DIR)/$$target; \
+		os=$${target%-*}; arch=$${target##*-}; \
+		tgz=/tmp/mongodb_exporter-$$os-$$arch.tar.gz; tmpdir=$$(mktemp -d); \
+		url=https://github.com/percona/mongodb_exporter/releases/download/v$(MONGODB_EXPORTER_VERSION)/mongodb_exporter-$(MONGODB_EXPORTER_VERSION).$${os}-$${arch}.tar.gz; \
+		echo "[mongodb_exporter] downloading $$url"; \
+		curl $(FETCH_CURL_FLAGS) -o $$tgz $$url || { rm -rf $$tmpdir; echo "mongodb_exporter download failed for $$target"; exit 1; }; \
+		tar -xzf $$tgz -C $$tmpdir || { rm -rf $$tmpdir $$tgz; echo "extract failed for $$target"; exit 1; }; \
+		found=$$(find $$tmpdir -type f -name mongodb_exporter -print -quit); \
+		test -n "$$found" || { rm -rf $$tmpdir $$tgz; echo "mongodb_exporter binary missing in archive for $$target"; exit 1; }; \
+		install -m 0755 "$$found" $$dest; \
+		rm -rf $$tmpdir $$tgz; \
+		echo "[mongodb_exporter] staged $$dest"; \
+	done
 
 # package deps deliberately exclude `build-linux` and `build-web`:
 #   - build-linux produces a host-side ongrid binary which dist/package.sh
@@ -412,7 +491,7 @@ check-release-target:
 # For offline RAG (ONGRID_EMBEDDING_PROVIDER=local) run
 # `make fetch-embedding-model` once before `make package`, otherwise
 # dist/package.sh warns and ships a tarball without the model.
-package: check-release-target fetch-promtail fetch-otelcol fetch-node-exporter fetch-process-exporter build-edge-all docker-build docker-build-broker docker-build-web ## [release] 打单架构 release tarball 到 dist/out/（TARGET_ARCH 可覆盖）
+package: check-release-target fetch-promtail fetch-otelcol fetch-node-exporter fetch-process-exporter fetch-db-exporters build-edge-all docker-build docker-build-broker docker-build-web ## [release] 打单架构 release tarball 到 dist/out/（TARGET_ARCH 可覆盖）
 	@if [ "$(PACKAGE_CLEAN)" = "1" ]; then rm -rf dist/stage dist/out; fi
 	@mkdir -p dist/stage dist/out
 	@$(MAKE) --no-print-directory build-edge-bundle

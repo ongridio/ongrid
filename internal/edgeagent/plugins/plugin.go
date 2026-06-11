@@ -61,8 +61,8 @@ type Plugin interface {
 // at manager nginx.
 type PluginConfig struct {
 	Enabled  bool                   `json:"enabled"`
-	EdgeID   uint64                 `json:"edge_id"`            // baked into label set
-	Endpoint string                 `json:"endpoint,omitempty"` // data plane URL (https://manager/loki/api/v1/push, etc.)
+	EdgeID   uint64                 `json:"edge_id"`             // baked into label set
+	Endpoint string                 `json:"endpoint,omitempty"`  // data plane URL (https://manager/loki/api/v1/push, etc.)
 	AuthUser string                 `json:"auth_user,omitempty"` // basic-auth username (= edge access key)
 	AuthPass string                 `json:"auth_pass,omitempty"` // basic-auth password (= edge secret key) or bearer token if AuthUser empty
 	Spec     map[string]interface{} `json:"spec,omitempty"`
@@ -82,13 +82,27 @@ const (
 // LastError is populated on crash; cleared once a fresh start succeeds.
 // PID is the subprocess PID (0 for in-process plugins).
 type PluginHealth struct {
-	Name         string      `json:"name"`
-	State        PluginState `json:"state"`
-	LastError    string      `json:"last_error,omitempty"`
-	RestartCount int         `json:"restart_count"`
-	PID          int         `json:"pid,omitempty"`
-	StartedAt    time.Time   `json:"started_at,omitempty"`
-	UpdatedAt    time.Time   `json:"updated_at"`
+	Name         string         `json:"name"`
+	State        PluginState    `json:"state"`
+	LastError    string         `json:"last_error,omitempty"`
+	RestartCount int            `json:"restart_count"`
+	PID          int            `json:"pid,omitempty"`
+	StartedAt    time.Time      `json:"started_at,omitempty"`
+	UpdatedAt    time.Time      `json:"updated_at"`
+	Targets      []TargetHealth `json:"targets,omitempty"`
+}
+
+// TargetHealth is the source-level runtime state reported by multi-target
+// metric plugins such as custommetrics and databasemetrics.
+type TargetHealth struct {
+	ID            string    `json:"id"`
+	Name          string    `json:"name,omitempty"`
+	Kind          string    `json:"kind,omitempty"`
+	State         string    `json:"state"`
+	LastError     string    `json:"last_error,omitempty"`
+	Samples       int       `json:"samples,omitempty"`
+	LastSuccessAt time.Time `json:"last_success_at,omitempty"`
+	UpdatedAt     time.Time `json:"updated_at,omitempty"`
 }
 
 // ConfigFetcher abstracts where the Supervisor reads plugin configs from.

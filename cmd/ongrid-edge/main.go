@@ -22,11 +22,12 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 
 	edgebash "github.com/ongridio/ongrid/internal/edgeagent/bash"
-	edgewebshell "github.com/ongridio/ongrid/internal/edgeagent/webshell"
 	edgebiz "github.com/ongridio/ongrid/internal/edgeagent/biz"
 	edgecollector "github.com/ongridio/ongrid/internal/edgeagent/collector"
 	edgehostfiles "github.com/ongridio/ongrid/internal/edgeagent/host_files"
 	edgeplugins "github.com/ongridio/ongrid/internal/edgeagent/plugins"
+	edgeplugincustommetrics "github.com/ongridio/ongrid/internal/edgeagent/plugins/custommetrics"
+	edgeplugindatabasemetrics "github.com/ongridio/ongrid/internal/edgeagent/plugins/databasemetrics"
 	edgepluginhostmetrics "github.com/ongridio/ongrid/internal/edgeagent/plugins/hostmetrics"
 	edgepluginlogs "github.com/ongridio/ongrid/internal/edgeagent/plugins/logs"
 	edgepluginmetrics "github.com/ongridio/ongrid/internal/edgeagent/plugins/metrics"
@@ -34,6 +35,7 @@ import (
 	edgeplugintraces "github.com/ongridio/ongrid/internal/edgeagent/plugins/traces"
 	edgerestartservice "github.com/ongridio/ongrid/internal/edgeagent/restart_service"
 	edgesvc "github.com/ongridio/ongrid/internal/edgeagent/service"
+	edgewebshell "github.com/ongridio/ongrid/internal/edgeagent/webshell"
 
 	// Builtin skill init() blocks register Executors with the shared
 	// internal/skill registry. The edge-side dispatcher
@@ -200,6 +202,13 @@ func main() {
 		// which is the join key the Monitor / alert rule preview /
 		// correlate_incident all rely on.
 		edgepluginmetrics.New(client, agent.EdgeID, pluginLog),
+		// custommetrics: in-process scraper for arbitrary operator-provided
+		// Prometheus /metrics endpoints.
+		edgeplugincustommetrics.New(client, agent.EdgeID, pluginLog),
+		// databasemetrics: edge-side managed database exporters. The manager
+		// sends source specs; the edge reads local secret files and starts the
+		// exporter subprocesses.
+		edgeplugindatabasemetrics.New(pluginBinDir, pluginWorkDir, client, agent.EdgeID, pluginLog),
 		// hostmetrics plugin: subprocess node_exporter. Exposes node_*
 		// at :9102 (configurable via spec.listen_address) for the
 		// manager-side Prometheus to scrape through the docker bridge.
@@ -236,12 +245,31 @@ func main() {
 		snaps := supervisor.HealthSnapshots()
 		out := make([]tunnel.PluginHealthWire, 0, len(snaps))
 		for _, s := range snaps {
+			targets := make([]tunnel.PluginTargetHealthWire, 0, len(s.Targets))
+			for _, th := range s.Targets {
+				wth := tunnel.PluginTargetHealthWire{
+					ID:        th.ID,
+					Name:      th.Name,
+					Kind:      th.Kind,
+					State:     th.State,
+					LastError: th.LastError,
+					Samples:   th.Samples,
+				}
+				if !th.LastSuccessAt.IsZero() {
+					wth.LastSuccessAt = th.LastSuccessAt.Unix()
+				}
+				if !th.UpdatedAt.IsZero() {
+					wth.UpdatedAt = th.UpdatedAt.Unix()
+				}
+				targets = append(targets, wth)
+			}
 			w := tunnel.PluginHealthWire{
 				Name:         s.Name,
 				State:        string(s.State),
 				LastError:    s.LastError,
 				RestartCount: s.RestartCount,
 				PID:          s.PID,
+				Targets:      targets,
 			}
 			if !s.StartedAt.IsZero() {
 				w.StartedAt = s.StartedAt.Unix()

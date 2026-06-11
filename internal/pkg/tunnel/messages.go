@@ -234,13 +234,28 @@ type HeartbeatRequest struct {
 // start (e.g. "subprocess binary missing") — that string is the whole point
 // of this field: it turns a silent failure into an operator-visible reason.
 type PluginHealthWire struct {
-	Name         string `json:"name"`
-	State        string `json:"state"`
-	LastError    string `json:"last_error,omitempty"`
-	RestartCount int    `json:"restart_count,omitempty"`
-	PID          int    `json:"pid,omitempty"`
-	StartedAt    int64  `json:"started_at,omitempty"` // unix sec, 0 if never started
-	UpdatedAt    int64  `json:"updated_at,omitempty"` // unix sec
+	Name         string                   `json:"name"`
+	State        string                   `json:"state"`
+	LastError    string                   `json:"last_error,omitempty"`
+	RestartCount int                      `json:"restart_count,omitempty"`
+	PID          int                      `json:"pid,omitempty"`
+	StartedAt    int64                    `json:"started_at,omitempty"` // unix sec, 0 if never started
+	UpdatedAt    int64                    `json:"updated_at,omitempty"` // unix sec
+	Targets      []PluginTargetHealthWire `json:"targets,omitempty"`
+}
+
+// PluginTargetHealthWire is the source-level health carried inside a plugin
+// heartbeat entry. Multi-target metric plugins use this for individual scrape
+// targets / database sources.
+type PluginTargetHealthWire struct {
+	ID            string `json:"id"`
+	Name          string `json:"name,omitempty"`
+	Kind          string `json:"kind,omitempty"`
+	State         string `json:"state"`
+	LastError     string `json:"last_error,omitempty"`
+	Samples       int    `json:"samples,omitempty"`
+	LastSuccessAt int64  `json:"last_success_at,omitempty"`
+	UpdatedAt     int64  `json:"updated_at,omitempty"`
 }
 
 // HeartbeatResponse is empty but kept as a typed value so callers can

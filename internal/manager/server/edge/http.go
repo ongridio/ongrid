@@ -185,6 +185,19 @@ func (h *Handler) listPlugins(w http.ResponseWriter, r *http.Request) {
 	// → health is null and the UI shows "unknown".
 	healthByName := map[string]*pluginHealthDTO{}
 	for _, hp := range h.svc.PluginHealth(id) {
+		targets := make([]pluginTargetHealthDTO, 0, len(hp.Targets))
+		for _, ht := range hp.Targets {
+			targets = append(targets, pluginTargetHealthDTO{
+				ID:            ht.ID,
+				Name:          ht.Name,
+				Kind:          ht.Kind,
+				State:         ht.State,
+				LastError:     ht.LastError,
+				Samples:       ht.Samples,
+				LastSuccessAt: nilIfZero(ht.LastSuccessAt),
+				UpdatedAt:     nilIfZero(ht.UpdatedAt),
+			})
+		}
 		healthByName[hp.Name] = &pluginHealthDTO{
 			State:        hp.State,
 			LastError:    hp.LastError,
@@ -193,6 +206,7 @@ func (h *Handler) listPlugins(w http.ResponseWriter, r *http.Request) {
 			StartedAt:    nilIfZero(hp.StartedAt),
 			UpdatedAt:    nilIfZero(hp.UpdatedAt),
 			ReportedAt:   nilIfZero(hp.ReportedAt),
+			Targets:      targets,
 		}
 	}
 	items := make([]pluginItemDTO, 0, len(rows))
@@ -219,13 +233,25 @@ type pluginItemDTO struct {
 // pluginHealthDTO is the wire shape for one plugin's heartbeat-reported
 // runtime health. nil times render as omitted.
 type pluginHealthDTO struct {
-	State        string     `json:"state"`
-	LastError    string     `json:"last_error,omitempty"`
-	RestartCount int        `json:"restart_count,omitempty"`
-	PID          int        `json:"pid,omitempty"`
-	StartedAt    *time.Time `json:"started_at,omitempty"`
-	UpdatedAt    *time.Time `json:"updated_at,omitempty"`
-	ReportedAt   *time.Time `json:"reported_at,omitempty"`
+	State        string                  `json:"state"`
+	LastError    string                  `json:"last_error,omitempty"`
+	RestartCount int                     `json:"restart_count,omitempty"`
+	PID          int                     `json:"pid,omitempty"`
+	StartedAt    *time.Time              `json:"started_at,omitempty"`
+	UpdatedAt    *time.Time              `json:"updated_at,omitempty"`
+	ReportedAt   *time.Time              `json:"reported_at,omitempty"`
+	Targets      []pluginTargetHealthDTO `json:"targets,omitempty"`
+}
+
+type pluginTargetHealthDTO struct {
+	ID            string     `json:"id"`
+	Name          string     `json:"name,omitempty"`
+	Kind          string     `json:"kind,omitempty"`
+	State         string     `json:"state"`
+	LastError     string     `json:"last_error,omitempty"`
+	Samples       int        `json:"samples,omitempty"`
+	LastSuccessAt *time.Time `json:"last_success_at,omitempty"`
+	UpdatedAt     *time.Time `json:"updated_at,omitempty"`
 }
 
 // nilIfZero returns a pointer to t, or nil when t is the zero time (so the
@@ -319,14 +345,14 @@ type hostInfoDTO struct {
 }
 
 type listItem struct {
-	ID          uint64       `json:"id"`
-	Name        string       `json:"name"`
-	Status      string       `json:"status"`
+	ID     uint64 `json:"id"`
+	Name   string `json:"name"`
+	Status string `json:"status"`
 	// Roles is denormalised from the linked Device for legacy UI compat
 	// — empty array means 未分类 OR no host device linked yet.
-	Roles       []string     `json:"roles"`
-	LastSeenAt  *time.Time   `json:"last_seen_at"`
-	AccessKeyID string       `json:"access_key_id"`
+	Roles       []string   `json:"roles"`
+	LastSeenAt  *time.Time `json:"last_seen_at"`
+	AccessKeyID string     `json:"access_key_id"`
 	// AgentVersion = self-reported on register_edge (optional). Empty
 	// for edges that registered with a pre-introduction binary.
 	AgentVersion string       `json:"agent_version,omitempty"`
