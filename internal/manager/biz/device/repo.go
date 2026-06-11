@@ -38,6 +38,13 @@ type Repo interface {
 	// use UpdateHostFacts for that.
 	FindOrCreateByFingerprint(ctx context.Context, seed *model.Device) (*model.Device, error)
 
+	// RebindFingerprint moves a device from oldFP to newFP in place when
+	// newFP isn't already taken — migrates a device to a new fingerprint
+	// algorithm without orphaning it (device.ID and history preserved).
+	// No-op when oldFP == newFP, either side is empty, or newFP already
+	// exists (the new device already won; nothing to migrate).
+	RebindFingerprint(ctx context.Context, oldFP, newFP string) error
+
 	// UpdateHostFacts overwrites Hostname / OS / Arch / KernelVersion /
 	// CPUCount / MemTotalBytes / DiskTotalBytes / OSVersion for the
 	// device. Called after a fresh register payload arrives so we always

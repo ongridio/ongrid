@@ -46,6 +46,25 @@ func (d *fakeDeviceRepo) FindOrCreateByFingerprint(_ context.Context, seed *devi
 	return &cp, nil
 }
 
+func (d *fakeDeviceRepo) RebindFingerprint(_ context.Context, oldFP, newFP string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if oldFP == "" || newFP == "" || oldFP == newFP {
+		return nil
+	}
+	if _, taken := d.byFP[newFP]; taken {
+		return nil // newFP already won — nothing to migrate
+	}
+	id, ok := d.byFP[oldFP]
+	if !ok {
+		return nil // no device under oldFP
+	}
+	delete(d.byFP, oldFP)
+	d.byFP[newFP] = id
+	d.byID[id].Fingerprint = newFP // same device.ID, only fp changes
+	return nil
+}
+
 func (d *fakeDeviceRepo) UpdateHostFacts(_ context.Context, id uint64, f devicebiz.HostFacts) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -711,5 +730,59 @@ func TestHandleRegisterMirrorsDeviceToNode(t *testing.T) {
 	}
 	if len(mirror.calls) != 1 {
 		t.Errorf("mirror called %d times after second register, want still 1", len(mirror.calls))
+	}
+}
+
+func TestDeviceFingerprintDistinguishesClonedVMs(t *testing.T) {
+	// Cloned VMs share product_uuid (machine-id) but differ by hostname.
+	a := tunnel.HostInfo{Fingerprint: "same-uuid", Hostname: "master01"}
+	b := tunnel.HostInfo{Fingerprint: "same-uuid", Hostname: "master02"}
+	if deviceFingerprintV1(a) != deviceFingerprintV1(b) {
+		t.Fatal("precondition: v1 (no hostname) should collapse cloned VMs")
+	}
+	if deviceFingerprint(a) == deviceFingerprint(b) {
+		t.Fatal("v2 must NOT collapse cloned VMs that have distinct hostnames")
+	}
+}
+
+func TestHandleRegisterMigratesV1FingerprintInPlace(t *testing.T) {
+	repo := newFakeRepo()
+	devices := newFakeDeviceRepo()
+	uc := NewUsecase(repo, devices, nil, nil)
+	ctx := context.Background()
+
+	res, err := uc.Create(ctx, "edge-mig", nil)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	info := tunnel.HostInfo{Fingerprint: "uuid-x", Hostname: "master01", OS: "linux"}
+
+	// Pre-seed a device under the OLD (v1) fingerprint, as a pre-upgrade
+	// manager would have created it.
+	oldFP := deviceFingerprintV1(info)
+	pre, err := devices.FindOrCreateByFingerprint(ctx, &devicemodel.Device{Fingerprint: oldFP, Hostname: "master01"})
+	if err != nil {
+		t.Fatalf("seed device: %v", err)
+	}
+	oldID := pre.ID
+
+	// Register through the upgraded manager — must rebind in place.
+	if err := uc.HandleRegister(ctx, res.Edge.ID, info, ""); err != nil {
+		t.Fatalf("HandleRegister: %v", err)
+	}
+
+	newFP := deviceFingerprint(info)
+	if newFP == oldFP {
+		t.Fatal("precondition: v2 fp should differ from v1")
+	}
+	got, err := devices.FindOrCreateByFingerprint(ctx, &devicemodel.Device{Fingerprint: newFP})
+	if err != nil {
+		t.Fatalf("lookup new fp: %v", err)
+	}
+	if got.ID != oldID {
+		t.Fatalf("device.ID changed on migration: old=%d new=%d (must be in-place)", oldID, got.ID)
+	}
+	if _, stillThere := devices.byFP[oldFP]; stillThere {
+		t.Fatalf("old fingerprint %q still present after migration", oldFP)
 	}
 }

@@ -52,6 +52,30 @@ func (r *Repo) FindOrCreateByFingerprint(ctx context.Context, seed *model.Device
 	return &out, nil
 }
 
+// RebindFingerprint moves a device from oldFP to newFP in place. See the
+// biz.Repo interface doc.
+func (r *Repo) RebindFingerprint(ctx context.Context, oldFP, newFP string) error {
+	if oldFP == "" || newFP == "" || oldFP == newFP {
+		return nil
+	}
+	// Skip if newFP already exists — the v2 device already won; nothing to
+	// migrate (and the UPDATE would hit the unique index anyway).
+	var cnt int64
+	if err := r.db.WithContext(ctx).Model(&model.Device{}).
+		Where("fingerprint = ?", newFP).Count(&cnt).Error; err != nil {
+		return err
+	}
+	if cnt > 0 {
+		return nil
+	}
+	// In-place rebind: same row, only the fingerprint column changes, so
+	// device.ID / junction / history all carry over. Idempotent — if no row
+	// carries oldFP, this updates nothing.
+	return r.db.WithContext(ctx).Model(&model.Device{}).
+		Where("fingerprint = ?", oldFP).
+		Update("fingerprint", newFP).Error
+}
+
 // UpdateHostFacts overwrites the host fact columns for the device. We
 // don't include online/last_seen_at here — those have a separate
 // lifecycle (MarkOnline / MarkOffline).

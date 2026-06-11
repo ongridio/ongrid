@@ -260,6 +260,16 @@ func (u *Usecase) HandleRegister(ctx context.Context, edgeID uint64, info tunnel
 	}
 
 	fp := deviceFingerprint(info)
+	// Migrate a device registered under the old (hostname-less) fingerprint
+	// to the v2 fingerprint in place — so improving cloned-VM dedup doesn't
+	// orphan existing devices on upgrade (device.ID / history preserved).
+	// Best-effort: on failure the device is simply re-created under the new
+	// fp on this register.
+	if oldFP := deviceFingerprintV1(info); oldFP != fp {
+		if err := u.devices.RebindFingerprint(ctx, oldFP, fp); err != nil && u.log != nil {
+			u.log.Warn("device fingerprint rebind failed", "old", oldFP, "new", fp, "err", err)
+		}
+	}
 	seed := &devicemodel.Device{
 		Fingerprint:   fp,
 		UserID:        edge.CreatedBy,
@@ -352,6 +362,28 @@ func (u *Usecase) HandleRegister(ctx context.Context, edgeID uint64, info tunnel
 // trade-off is that a hostname change on a fingerprint-less host will
 // look like a brand-new device.
 func deviceFingerprint(info tunnel.HostInfo) string {
+	hn := strings.ToLower(strings.TrimSpace(info.Hostname))
+	seed := strings.TrimSpace(info.Fingerprint)
+	if seed == "" {
+		seed = "hostname:" + hn
+	} else {
+		// v2: machine-id + hostname. machine-id alone (gopsutil HostID,
+		// which on Linux prefers SMBIOS product_uuid) collapses cloned VMs
+		// — same product_uuid → same fingerprint → folded into one device.
+		// Folding in the hostname keeps master01/master02/... distinct.
+		// Trade-off: a hostname change re-registers as a new device, but
+		// that's rare and deliberate; not colliding clones is the bigger win.
+		seed = "machine-id:" + seed + "|hostname:" + hn
+	}
+	h := sha256.Sum256([]byte(seed))
+	return "fp_" + hex.EncodeToString(h[:16])
+}
+
+// deviceFingerprintV1 reproduces the pre-hostname algorithm. Used only to
+// locate a device registered under the old fingerprint so HandleRegister
+// can rebind it to the v2 fingerprint in place (preserving device.ID and
+// history) on first re-register after upgrade.
+func deviceFingerprintV1(info tunnel.HostInfo) string {
 	seed := strings.TrimSpace(info.Fingerprint)
 	if seed == "" {
 		seed = "hostname:" + strings.ToLower(strings.TrimSpace(info.Hostname))
