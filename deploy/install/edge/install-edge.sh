@@ -22,15 +22,23 @@ log_error() { printf '%s[ERROR]%s %s\n' "$C_RED"    "$C_RESET" "$*" >&2; }
 
 trap 'log_error "install-edge failed at line $LINENO"' ERR
 
+BASE_DIR=/mnt/data/tool-temp
+
+# Verify base directory exists; abort if not (prevents silent fallback to rootfs).
+if [[ ! -d "$BASE_DIR" ]]; then
+    log_error "base directory $BASE_DIR does not exist — create it first or mount the volume"
+    exit 1
+fi
+
 SERVICE_USER=ongrid-edge
 SERVICE_GROUP=ongrid-edge
 BIN_DEST=/usr/local/bin/ongrid-edge
-PLUGIN_BIN_DIR=/usr/local/lib/ongrid-edge   # bundled plugin binaries (promtail, etc.)
-PLUGIN_WORK_DIR=/var/lib/ongrid-edge/plugins # rendered plugin configs + subprocess logs
-CONFIG_DIR=/etc/ongrid-edge
+PLUGIN_BIN_DIR="${BASE_DIR}/lib/ongrid-edge"   # bundled plugin binaries (promtail, etc.)
+PLUGIN_WORK_DIR="${BASE_DIR}/lib/ongrid-edge/plugins" # rendered plugin configs + subprocess logs
+CONFIG_DIR="${BASE_DIR}/etc/ongrid-edge"
 ENV_FILE="${CONFIG_DIR}/ongrid-edge.env"
 UNIT_FILE=/etc/systemd/system/ongrid-edge.service
-LOG_DIR=/var/log/ongrid-edge
+LOG_DIR="${BASE_DIR}/log/ongrid-edge"
 
 UNINSTALL=0
 while [[ $# -gt 0 ]]; do
@@ -68,7 +76,9 @@ if [[ $UNINSTALL -eq 1 ]]; then
     systemctl daemon-reload || true
     rm -f "$BIN_DEST"
     rm -rf "$CONFIG_DIR"
-    # keep logs in /var/log/ongrid-edge for post-mortem; operator can rm -rf if desired.
+    rm -rf "$PLUGIN_BIN_DIR"
+    rm -rf "$PLUGIN_WORK_DIR"
+    # keep logs for post-mortem; operator can rm -rf if desired.
     log_info "ongrid-edge uninstalled (logs under $LOG_DIR preserved)"
     exit 0
 fi
@@ -177,9 +187,9 @@ fi
 # Stage dir for remote upgrade — edge writes pending binary here, swap
 # script reads it. Pre-create so the agent doesn't need to chown at
 # runtime.
-mkdir -p /var/lib/ongrid-edge/.upgrade
-chown -R "$SERVICE_USER":"$SERVICE_GROUP" /var/lib/ongrid-edge/.upgrade
-chmod 0750 /var/lib/ongrid-edge/.upgrade
+mkdir -p "${BASE_DIR}/lib/ongrid-edge/.upgrade"
+chown -R "$SERVICE_USER":"$SERVICE_GROUP" "${BASE_DIR}/lib/ongrid-edge/.upgrade"
+chmod 0750 "${BASE_DIR}/lib/ongrid-edge/.upgrade"
 
 # otelcol-contrib (traces plugin, ADR-013). Upstream doesn't ship darwin
 # builds in the contrib stream — traces plugin stays disabled on darwin
@@ -333,6 +343,9 @@ echo "${C_BOLD}${C_CYAN}========================================================
 echo "Binary:     $BIN_DEST"
 echo "Env file:   $ENV_FILE"
 echo "Unit file:  $UNIT_FILE"
+echo "Log dir:    $LOG_DIR"
+echo "Plugin dir: $PLUGIN_BIN_DIR"
+echo "Work dir:   $PLUGIN_WORK_DIR"
 echo "Logs:       journalctl -u ongrid-edge -f"
 echo "Cloud addr: $ONGRID_CLOUD_ADDR"
 echo ""

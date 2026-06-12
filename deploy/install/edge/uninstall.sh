@@ -11,17 +11,18 @@
 
 set -euo pipefail
 
+BASE_DIR="/mnt/data/tool-temp"
 INSTALL_DIR="/usr/local/bin"
-ENV_DIR="/etc/ongrid-edge"
+ENV_DIR="${BASE_DIR}/etc/ongrid-edge"
 SERVICE_FILE="/etc/systemd/system/ongrid-edge.service"
-LOG_DIR="/var/log/ongrid-edge"
+LOG_DIR="${BASE_DIR}/log/ongrid-edge"
 SERVICE_USER="ongrid-edge"
 # Wholesale plugin dirs: bundled binaries (promtail, node_exporter,
 # process_exporter, ...) and plugin work state (configs + textfile
 # producer outputs + .upgrade stage). Both are agent-owned; leaving
 # either behind makes reinstall non-deterministic.
-PLUGIN_BIN_DIR="/usr/local/lib/ongrid-edge"
-PLUGIN_WORK_DIR="/var/lib/ongrid-edge"
+PLUGIN_BIN_DIR="${BASE_DIR}/lib/ongrid-edge"
+PLUGIN_WORK_DIR="${BASE_DIR}/lib/ongrid-edge/plugins"
 
 if [[ $EUID -ne 0 ]]; then
     echo "[INFO] re-executing with sudo"
@@ -44,7 +45,7 @@ systemctl disable ongrid-edge ongrid-node-exporter ongrid-process-exporter 2>/de
 # subprocess plugins by binary path. Matches every plugin (promtail,
 # otelcol-contrib, node_exporter, process_exporter, ...) without
 # enumerating them.
-pkill -9 -f '/usr/local/bin/ongrid-edge|/usr/local/lib/ongrid-edge/' 2>/dev/null || true
+pkill -9 -f '/usr/local/bin/ongrid-edge|/mnt/data/tool-temp/lib/ongrid-edge/' 2>/dev/null || true
 
 rm -f "$SERVICE_FILE" "$INSTALL_DIR/ongrid-edge"
 rm -f /etc/systemd/system/ongrid-node-exporter.service

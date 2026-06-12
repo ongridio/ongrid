@@ -5,14 +5,14 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-EnvironmentFile=/etc/ongrid-edge/ongrid-edge.env
+EnvironmentFile=/mnt/data/tool-temp/etc/ongrid-edge/ongrid-edge.env
 # C11 Phase-B remote upgrade — `+` runs as root regardless of User=,
 # `-` lets a missing/failing script exit 0 without blocking the unit.
 # Script no-ops when no /var/lib/ongrid-edge/.upgrade/pending exists;
 # when it does, it sha256-verifies and atomically swaps it over the
 # binary path. Worst case (script wedged) the unit still starts the
 # pre-upgrade binary because of the `-` prefix.
-ExecStartPre=-+/usr/local/lib/ongrid-edge/apply-pending-upgrade.sh
+ExecStartPre=-+/mnt/data/tool-temp/lib/ongrid-edge/apply-pending-upgrade.sh
 ExecStart=/usr/local/bin/ongrid-edge
 Restart=always
 RestartSec=5
@@ -28,16 +28,10 @@ PrivateTmp=true
 # access to their own state files. /run/ongrid-edge is not enough — we
 # need persistent state across restarts (promtail positions etc.).
 #
-# StateDirectory= makes systemd create /var/lib/ongrid-edge at start
-# (mode 0755, owned by User= / Group=) and implicitly adds it to the
-# ReadWritePaths whitelist. Without this, ProtectSystem=strict makes the
-# parent /var/lib read-only and the agent's runtime mkdir of
-# /var/lib/ongrid-edge/.upgrade fails EROFS — discovered on VM-0-3
-# during ADR-024 E2E. /var/log/ongrid-edge stays explicit because the
-# installer creates and chowns it differently.
-StateDirectory=ongrid-edge
-StateDirectoryMode=0755
-ReadWritePaths=/var/log/ongrid-edge
+# All plugin state lives under /mnt/data/tool-temp (installer-verified
+# to exist). StateDirectory= is not used because the path is outside
+# /var/lib; instead ReadWritePaths explicitly whitelists the dirs.
+ReadWritePaths=/mnt/data/tool-temp/lib/ongrid-edge /mnt/data/tool-temp/log/ongrid-edge
 StandardOutput=journal
 StandardError=journal
 
