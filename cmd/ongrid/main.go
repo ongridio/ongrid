@@ -42,6 +42,8 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/httpserver"
 	"github.com/ongridio/ongrid/internal/pkg/llm"
 	"github.com/ongridio/ongrid/internal/pkg/logger"
+
+	"encoding/json"
 	"strconv"
 
 	"github.com/ongridio/ongrid/internal/pkg/embedding"
@@ -117,8 +119,10 @@ import (
 	managerwebshellserver "github.com/ongridio/ongrid/internal/manager/server/webshell"
 
 	managerbizaudit "github.com/ongridio/ongrid/internal/manager/biz/audit"
+	managerbizflow "github.com/ongridio/ongrid/internal/manager/biz/flow"
 	managerbizreport "github.com/ongridio/ongrid/internal/manager/biz/report"
 	manageraudtdata "github.com/ongridio/ongrid/internal/manager/data/audit/store"
+	managerflowdata "github.com/ongridio/ongrid/internal/manager/data/flow/store"
 	managerreportdata "github.com/ongridio/ongrid/internal/manager/data/report/store"
 	managerserveraiops "github.com/ongridio/ongrid/internal/manager/server/aiops"
 	managerserveralert "github.com/ongridio/ongrid/internal/manager/server/alert"
@@ -126,6 +130,7 @@ import (
 	managerserverdevice "github.com/ongridio/ongrid/internal/manager/server/device"
 	managerserveredge "github.com/ongridio/ongrid/internal/manager/server/edge"
 	managerserveredgeauth "github.com/ongridio/ongrid/internal/manager/server/edgeauth"
+	managerserverflow "github.com/ongridio/ongrid/internal/manager/server/flow"
 	managerserverintegration "github.com/ongridio/ongrid/internal/manager/server/integration"
 	managerserverlogs "github.com/ongridio/ongrid/internal/manager/server/logs"
 	managerservermarketplace "github.com/ongridio/ongrid/internal/manager/server/marketplace"
@@ -231,6 +236,7 @@ func main() {
 		managerwebshelldata.Migrate,
 		manageraudtdata.Migrate,
 		managerreportdata.Migrate,
+		managerflowdata.Migrate,
 	); err != nil {
 		log.Error("run migrations", slog.Any("err", err))
 		os.Exit(1)
@@ -1541,6 +1547,25 @@ func main() {
 	}
 	reportHandler := managerserverreport.NewHandler(reportUC)
 
+	// Flow orchestration (HLD-016): user-authored workflow DAGs executed
+	// over the existing agent / tool / notify subsystems. Routes mount
+	// even when the LLM runtime is down — tool/notify/condition nodes
+	// still work; only agent nodes degrade with a clear error.
+	flowRepo := managerflowdata.NewRepo(db)
+	flowRunRepo := managerflowdata.NewRunRepo(db)
+	flowExec := managerbizflow.Executors{
+		Tools:  flowToolInvoker{reg: toolsReg},
+		Notify: flowNotifierShim{channels: alertRepo, router: notifyRouter},
+	}
+	if flowRT, ok := aiopsRuntime.(*aiopschatruntime.Runtime); ok && flowRT != nil {
+		flowExec.Agent = flowAgentRunner{rt: flowRT}
+	}
+	flowUC := managerbizflow.NewUsecase(flowRepo, flowRunRepo,
+		managerbizflow.NewEngine(flowExec, flowRunRepo, log), log)
+	flowUC.HealStaleRuns(rootCtx)
+	flowHandler := managerserverflow.NewHandler(flowUC)
+	log.Info("flow: orchestration wired")
+
 	// Boot compensation pass for the structured RCA path: incidents that
 	// fired while no LLM provider was configured had their auto-investigation
 	// silently skipped (RecordFiring nil-checks the investigator), so the
@@ -1842,6 +1867,7 @@ func main() {
 			promProxyHandler.RegisterProtected(protected)
 			managerserveraudit.NewHandler(auditUC).Register(protected)
 			reportHandler.Register(protected)
+			flowHandler.Register(protected)
 		})
 	})
 
@@ -3004,4 +3030,98 @@ func (a webshellAuditAdapter) Close(ctx context.Context, sessionID string, ended
 
 func (a webshellAuditAdapter) List(ctx context.Context, limit int) ([]*wsmodel.Session, error) {
 	return a.repo.List(ctx, limit)
+}
+
+// flowToolInvoker implements bizflow.ToolInvoker over the aiops tool
+// registry — flow tool nodes dispatch through the exact same Registry
+// (and decorator chain) the chat agent uses.
+type flowToolInvoker struct{ reg *aiopstools.Registry }
+
+func (s flowToolInvoker) InvokeTool(ctx context.Context, name string, args json.RawMessage) (json.RawMessage, error) {
+	res, err := s.reg.Invoke(ctx, name, args)
+	if err != nil {
+		return nil, err
+	}
+	return res.ResultJSON, nil
+}
+
+// flowAgentRunner implements bizflow.AgentRunner over the chatruntime —
+// one synchronous worker per agent node (mirrors the RCA investigator's
+// WorkerSpawner usage).
+type flowAgentRunner struct{ rt *aiopschatruntime.Runtime }
+
+func (s flowAgentRunner) RunAgent(ctx context.Context, persona, prompt string) (string, error) {
+	w, err := s.rt.SpawnWorker(ctx, aiopschatruntime.SpawnRequest{
+		AgentName:   persona,
+		Prompt:      prompt,
+		Background:  false, // sync — the flow engine owns concurrency
+		SessionKind: "flow",
+	})
+	if err != nil {
+		return "", err
+	}
+	if w == nil {
+		return "", fmt.Errorf("agent runner: nil worker")
+	}
+	if w.Status != aiopschatruntime.WorkerStatusCompleted {
+		reason := w.Err
+		if reason == "" {
+			reason = string(w.Status)
+		}
+		return "", fmt.Errorf("agent worker %s: %s", w.ID, reason)
+	}
+	return w.Result, nil
+}
+
+// flowNotifierShim implements bizflow.Notifier over the alert channel
+// store + notify router — same BuildSenderFromChannel path the alert
+// notifier and report deliverer use.
+type flowNotifierShim struct {
+	channels *manageralertdata.Repo
+	router   *notify.Router
+}
+
+func (s flowNotifierShim) Notify(ctx context.Context, channelIDs []uint64, title, message string) error {
+	var firstErr error
+	sent := 0
+	for _, id := range channelIDs {
+		ch, err := s.channels.GetChannelByID(ctx, id)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("channel %d: not found", id)
+			}
+			continue
+		}
+		if !ch.Enabled {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("channel %d: disabled", id)
+			}
+			continue
+		}
+		sender, err := managerbizalert.BuildSenderFromChannel(ch)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("channel %d: %w", id, err)
+			}
+			continue
+		}
+		msg := notify.Message{
+			Subject:    title,
+			Body:       message,
+			Severity:   notify.SeverityInfo,
+			Source:     "flow",
+			OccurredAt: time.Now().UTC(),
+		}
+		if err := s.router.SendVia(ctx, msg, sender); err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("channel %d: %w", id, err)
+			}
+			continue
+		}
+		sent++
+	}
+	if sent == 0 && firstErr != nil {
+		return firstErr
+	}
+	return nil
 }

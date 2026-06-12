@@ -22,6 +22,8 @@ const ReportSchedulesPage = lazy(() => import('@/pages/ReportSchedules'));
 const SkillsPage = lazy(() => import('@/pages/Skills'));
 const SkillRunPage = lazy(() => import('@/pages/SkillRun'));
 const AgentsPage = lazy(() => import('@/pages/Agents'));
+const FlowsPage = lazy(() => import('@/pages/Flows'));
+const FlowEditorPage = lazy(() => import('@/pages/FlowEditor'));
 const KnowledgePage = lazy(() => import('@/pages/Knowledge'));
 const KnowledgeReposPage = lazy(() => import('@/pages/KnowledgeRepos'));
 const TopologyPage = lazy(() => import('@/pages/Topology'));
@@ -106,6 +108,8 @@ export default function App() {
         <Route path="/skills" element={<SkillsPage />} />
         <Route path="/skills/:key" element={<SkillRunPage />} />
         <Route path="/agents" element={<AgentsPage />} />
+        <Route path="/workflows" element={<FlowsPage />} />
+        <Route path="/workflows/:id" element={<FlowEditorPage />} />
         <Route path="/knowledge" element={<KnowledgePage />} />
         <Route path="/knowledge/repos" element={<KnowledgeReposPage />} />
         <Route path="/topology" element={<TopologyPage />} />
