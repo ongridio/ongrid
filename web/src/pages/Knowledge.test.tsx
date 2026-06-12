@@ -90,6 +90,30 @@ describe('KnowledgePage', () => {
     expect(screen.queryByRole('button', { name: '保存' })).not.toBeInTheDocument();
   });
 
+  it('frontmatter 不渲染为标题，元信息以弱化 key/value 展示', async () => {
+    server.use(
+      http.get(`${listURL}/101`, () =>
+        HttpResponse.json({
+          ...vaultDoc,
+          content: '---\ntitle: Linux Memory Model\ntags: [linux, memory]\n---\n\n正文内容',
+        }),
+      ),
+    );
+    render(<KnowledgePage />);
+    await openBuiltinScope();
+    await userEvent.click(await screen.findByText('Host Metric Alerts Runbook'));
+
+    expect(await screen.findByText('正文内容')).toBeInTheDocument();
+    // 元信息行存在（dt/dd），tags 拆成单个 chip
+    expect(screen.getByText('Linux Memory Model')).toBeInTheDocument();
+    expect(screen.getByText('linux')).toBeInTheDocument();
+    expect(screen.getByText('memory')).toBeInTheDocument();
+    // 不再被 setext 语法渲染成 <h2> 粗体标题
+    expect(
+      screen.queryByRole('heading', { name: /Linux Memory Model/ }),
+    ).not.toBeInTheDocument();
+  });
+
   it('复制为组织文档：预填表单并 POST 新建', async () => {
     let createdBody: Record<string, unknown> | null = null;
     server.use(

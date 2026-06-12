@@ -29,6 +29,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/cn';
 import { fullDateTime } from '@/lib/format';
+import { splitFrontmatter, stripFrontmatter } from '@/lib/frontmatter';
 import { Modal } from '@/components/Modal';
 import { Button, Card, EmptyState, PageHeader } from '@/components/ui';
 import {
@@ -855,9 +856,43 @@ function SearchHitCard({ hit }: { hit: SearchHit }) {
         </div>
         <span>score {hit.score.toFixed(2)}</span>
       </div>
+      {/* 预览只给正文：frontmatter 占满 3 行预览毫无信息量 */}
       <div className="mt-1 line-clamp-3 whitespace-pre-wrap break-words text-[12px] text-zinc-300">
-        {hit.doc.content}
+        {stripFrontmatter(hit.doc.content ?? '')}
       </div>
+    </div>
+  );
+}
+
+// 阅读态正文：先剥离 YAML frontmatter 再渲染 —— 否则 `title: …\n---`
+// 会按 setext 标题渲染成粗体大字。元信息以弱化的 key/value 行单独展示。
+function DocBody({ content }: { content: string }) {
+  const fm = useMemo(() => splitFrontmatter(content), [content]);
+  return (
+    <div className="md-body text-sm text-zinc-200">
+      {fm && (
+        <dl className="mb-4 space-y-1 border-b border-zinc-800 pb-3">
+          {fm.meta.map(([key, value]) => (
+            <div key={key} className="flex items-baseline gap-2 text-xs">
+              <dt className="shrink-0 font-mono text-[11px] text-zinc-500">{key}</dt>
+              {Array.isArray(value) ? (
+                <dd className="flex flex-wrap gap-1">
+                  {value.map((v) => (
+                    <span key={v} className="rounded bg-zinc-800/60 px-1.5 py-0.5 text-[11px] text-zinc-400">
+                      {v}
+                    </span>
+                  ))}
+                </dd>
+              ) : (
+                <dd className="text-zinc-400">{value}</dd>
+              )}
+            </div>
+          ))}
+        </dl>
+      )}
+      {/* remark-gfm：表格 / 删除线 / 任务列表等 GFM 语法，
+          缺了它表格按普通段落渲染成一行竖线文本 */}
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{fm ? fm.body : content}</ReactMarkdown>
     </div>
   );
 }
@@ -1043,11 +1078,7 @@ function DocEditor({
             ) : err ? (
               <div className="text-xs text-red-300">{err}</div>
             ) : content ? (
-              <div className="md-body text-sm text-zinc-200">
-                {/* remark-gfm：表格 / 删除线 / 任务列表等 GFM 语法，
-                    缺了它表格按普通段落渲染成一行竖线文本 */}
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-              </div>
+              <DocBody content={content} />
             ) : (
               <div className="text-xs text-zinc-500">{tr('该文档没有正文内容', 'This document has no body content')}</div>
             )}
