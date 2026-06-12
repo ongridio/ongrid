@@ -27,6 +27,7 @@ import (
 	edgecollector "github.com/ongridio/ongrid/internal/edgeagent/collector"
 	edgehostfiles "github.com/ongridio/ongrid/internal/edgeagent/host_files"
 	edgeplugins "github.com/ongridio/ongrid/internal/edgeagent/plugins"
+	edgepluginaudit "github.com/ongridio/ongrid/internal/edgeagent/plugins/audit"
 	edgepluginhostmetrics "github.com/ongridio/ongrid/internal/edgeagent/plugins/hostmetrics"
 	edgepluginlogs "github.com/ongridio/ongrid/internal/edgeagent/plugins/logs"
 	edgepluginmetrics "github.com/ongridio/ongrid/internal/edgeagent/plugins/metrics"
@@ -206,6 +207,11 @@ func main() {
 		// Default-disabled; manager toggles enabled=true via the
 		// Plugins UI to bring it up.
 		edgepluginhostmetrics.New(pluginBinDir, pluginWorkDir, pluginLog),
+		// audit plugin: subprocess auditbeat. Captures file integrity
+		// (FIM) events and writes JSONL to a local file. The logs
+		// plugin (promtail) tails this file and pushes to manager Loki.
+		// Default-disabled; manager toggles via Plugins UI.
+		edgepluginaudit.New(pluginBinDir, pluginWorkDir, pluginLog),
 		// procmetrics plugin: subprocess process-exporter. Exposes
 		// namedprocess_namegroup_* at :9256 grouped by comm (default)
 		// or operator-tuned regex. Backs the Monitor "Top N processes"

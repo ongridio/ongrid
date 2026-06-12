@@ -34,6 +34,7 @@ ENTRIES=(
   "process_exporter         0755 /usr/local/lib/ongrid-edge/process_exporter         process_exporter-${ARCH}"
   "promtail                 0755 /usr/local/lib/ongrid-edge/promtail                 promtail-${ARCH}"
   "otelcol-contrib          0755 /usr/local/lib/ongrid-edge/otelcol-contrib          otelcol-contrib-${ARCH}"
+  "auditbeat                0755 /usr/local/lib/ongrid-edge/auditbeat                auditbeat-${ARCH}"
   "apply-pending-upgrade.sh 0755 /usr/local/lib/ongrid-edge/apply-pending-upgrade.sh apply-pending-upgrade.sh"
 )
 

@@ -284,7 +284,11 @@ fi
 docker compose version >/dev/null 2>&1 || { log_error "docker compose v2 not found (need the 'docker compose' subcommand)"; exit 1; }
 
 # ---------- install dir ----------
-INSTALL_DIR="${ONGRID_INSTALL_DIR:-/opt/ongrid}"
+if [[ -z "${ONGRID_INSTALL_DIR:-}" ]]; then
+    log_error "ONGRID_INSTALL_DIR is not set; please export it before running this script"
+    exit 1
+fi
+INSTALL_DIR="$ONGRID_INSTALL_DIR"
 log_info "install dir: $INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
 

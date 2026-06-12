@@ -37,6 +37,7 @@ ENTRIES=(
   "process_exporter       0755 /usr/local/lib/ongrid-edge/process_exporter           $BIN_DIR/process_exporter"
   "promtail               0755 /usr/local/lib/ongrid-edge/promtail                   $BIN_DIR/promtail"
   "otelcol-contrib        0755 /usr/local/lib/ongrid-edge/otelcol-contrib            $BIN_DIR/otelcol-contrib"
+  "auditbeat              0755 /usr/local/lib/ongrid-edge/auditbeat                  $BIN_DIR/auditbeat"
   "apply-pending-upgrade.sh 0755 /usr/local/lib/ongrid-edge/apply-pending-upgrade.sh $APPLY_SCRIPT"
 )
 

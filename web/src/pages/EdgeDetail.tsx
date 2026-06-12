@@ -243,7 +243,7 @@ export default function EdgeDetailPage() {
   );
 
   const toggleSeries = (panel: PanelKey, key: string) => {
-    setHidden((prev) => {
+    setHidden((prev: Record<PanelKey, Set<string>>) => {
       const nextSet = new Set(prev[panel]);
       if (nextSet.has(key)) nextSet.delete(key);
       else nextSet.add(key);
@@ -1188,7 +1188,7 @@ function PluginSpecEditor({
 }) {
   const { tr } = useI18n();
   // Default to structured form for known plugins; JSON fallback otherwise.
-  const supportsForm = name === 'logs' || name === 'traces';
+  const supportsForm = name === 'logs' || name === 'traces' || name === 'audit';
   const [mode, setMode] = useState<'form' | 'json'>(supportsForm ? 'form' : 'json');
   const [draft, setDraft] = useState<Record<string, unknown>>(spec);
   const [jsonText, setJsonText] = useState<string>(() =>
@@ -1265,6 +1265,9 @@ function PluginSpecEditor({
       )}
       {mode === 'form' && name === 'traces' && (
         <TracesSpecForm draft={draft} onChange={setDraft} />
+      )}
+      {mode === 'form' && name === 'audit' && (
+        <AuditSpecForm draft={draft} onChange={setDraft} />
       )}
       {mode === 'json' && (
         <div>
@@ -1503,6 +1506,48 @@ function LogsSpecForm({
             '受 label 白名单约束 —— 高基数字段（trace_id / request_id）请放在 log 内容里，不要做 label。',
             'Constrained by label allow-list — keep high-cardinality fields (trace_id / request_id) in the log body, not as labels.',
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AuditSpecForm({
+  draft,
+  onChange,
+}: {
+  draft: Record<string, unknown>;
+  onChange(next: Record<string, unknown>): void;
+}) {
+  const { tr } = useI18n();
+  const fimPaths = ((draft.fim_paths as string[] | undefined) ?? [
+    '/etc',
+    '/bin',
+    '/sbin',
+    '/usr/bin',
+    '/usr/sbin',
+  ]);
+  const outputFile = (draft.output_file as string | undefined) ?? 'audit.jsonl';
+
+  return (
+    <div className="space-y-4">
+      <StringListField
+        label={tr('FIM 监控路径', 'FIM watch paths')}
+        hint={tr('auditbeat file_integrity 模块递归监控这些目录的创建、修改、删除事件', 'auditbeat file_integrity module recursively watches these dirs for create/modify/delete events')}
+        values={fimPaths}
+        placeholder="/etc"
+        onChange={(next) => onChange({ ...draft, fim_paths: next })}
+      />
+      <div>
+        <span className="mb-1 block text-xs text-zinc-400">{tr('输出文件', 'Output file')}</span>
+        <input
+          type="text"
+          value={outputFile}
+          onChange={(e) => onChange({ ...draft, output_file: e.target.value })}
+          className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 font-mono text-[11px] text-zinc-100 focus:border-zinc-600 focus:outline-none"
+        />
+        <div className="mt-1 text-[11px] text-zinc-500">
+          {tr('JSONL 输出路径（相对插件工作目录）；logs 插件的 promtail 会自动采集此文件推送到 Loki', 'JSONL output path (relative to plugin workDir); the logs plugin promtail auto-tails this file into Loki')}
         </div>
       </div>
     </div>

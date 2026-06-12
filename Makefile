@@ -367,6 +367,44 @@ fetch-process-exporter: ## [release] 下载 process-exporter 到 bin/<os>-<arch>
 	done
 	@echo "[process_exporter] note: linux-only"
 
+# Auditbeat — file integrity monitoring (FIM) bundled with the edge package.
+# Captures file create/modify/delete events and writes JSONL for the
+# logs plugin (promtail) to tail into Loki. Elastic ships linux-only
+# in OSS releases; macOS hosts will see audit plugin disabled.
+# Cached under bin/<os>-<arch>/auditbeat.
+# Priority: resource/ (offline/air-gapped) → download (online).
+AUDITBEAT_VERSION ?= 9.4.2
+
+.PHONY: fetch-auditbeat
+fetch-auditbeat: ## [release] 下载/解压 auditbeat 到 bin/<os>-<arch>/auditbeat (linux-only)
+	@for target in linux-amd64 linux-arm64; do \
+		dest=$(BIN_DIR)/$$target/auditbeat; \
+		if [ -f $$dest ]; then \
+			echo "[auditbeat] $$dest already present — skip"; \
+			continue; \
+		fi; \
+		mkdir -p $(BIN_DIR)/$$target; \
+		os=$${target%-*}; arch=$${target##*-}; \
+		if [ "$$arch" = "amd64" ]; then elastic_arch="x86_64"; else elastic_arch="$$arch"; fi; \
+		resource_tgz=$(CURDIR)/resource/auditbeat-$(AUDITBEAT_VERSION)-$${os}-$${elastic_arch}.tar.gz; \
+		if [ -f $$resource_tgz ]; then \
+			echo "[auditbeat] extracting from resource/ ($$resource_tgz)"; \
+			tar -xzf $$resource_tgz --strip-components=1 -C $(BIN_DIR)/$$target auditbeat-$(AUDITBEAT_VERSION)-$${os}-$${elastic_arch}/auditbeat || { echo "extract failed for $$target"; exit 1; }; \
+			chmod +x $$dest; \
+			echo "[auditbeat] staged $$dest (from resource)"; \
+		else \
+			tgz=/tmp/auditbeat-$$os-$$arch.tar.gz; \
+			url=https://artifacts.elastic.co/downloads/beats/auditbeat/auditbeat-$(AUDITBEAT_VERSION)-$${os}-$${elastic_arch}.tar.gz; \
+			echo "[auditbeat] downloading $$url"; \
+			curl $(FETCH_CURL_FLAGS) -o $$tgz $$url || { echo "auditbeat download failed for $$target"; exit 1; }; \
+			tar -xzf $$tgz --strip-components=1 -C $(BIN_DIR)/$$target auditbeat-$(AUDITBEAT_VERSION)-$${os}-$${elastic_arch}/auditbeat || { echo "extract failed for $$target"; exit 1; }; \
+			chmod +x $$dest; \
+			rm -f $$tgz; \
+			echo "[auditbeat] staged $$dest (downloaded)"; \
+		fi; \
+	 done
+	@echo "[auditbeat] note: linux-only (upstream doesn't ship darwin in OSS releases)"
+
 # package deps deliberately exclude `build-linux` and `build-web`:
 #   - build-linux produces a host-side ongrid binary which dist/package.sh
 #     never consumes (the manager binary inside ongrid:VERSION docker
@@ -412,7 +450,7 @@ check-release-target:
 # For offline RAG (ONGRID_EMBEDDING_PROVIDER=local) run
 # `make fetch-embedding-model` once before `make package`, otherwise
 # dist/package.sh warns and ships a tarball without the model.
-package: check-release-target fetch-promtail fetch-otelcol fetch-node-exporter fetch-process-exporter build-edge-all docker-build docker-build-broker docker-build-web ## [release] 打单架构 release tarball 到 dist/out/（TARGET_ARCH 可覆盖）
+package: check-release-target fetch-promtail fetch-otelcol fetch-node-exporter fetch-process-exporter fetch-auditbeat build-edge-all docker-build docker-build-broker docker-build-web ## [release] 打单架构 release tarball 到 dist/out/（TARGET_ARCH 可覆盖）
 	@if [ "$(PACKAGE_CLEAN)" = "1" ]; then rm -rf dist/stage dist/out; fi
 	@mkdir -p dist/stage dist/out
 	@$(MAKE) --no-print-directory build-edge-bundle

@@ -213,6 +213,16 @@ else
     log_warn "process_exporter-${OS}-${ARCH} not bundled; procmetrics plugin will fail to start until present"
 fi
 
+# auditbeat — file integrity monitoring (FIM) used by the audit edge plugin.
+# Elastic ships linux-only; darwin edges will see audit plugin disabled.
+AUDITBEAT_SRC="${SCRIPT_DIR}/auditbeat-${OS}-${ARCH}"
+if [[ -f "$AUDITBEAT_SRC" ]]; then
+    log_info "installing auditbeat to ${PLUGIN_BIN_DIR}/auditbeat"
+    install -m 0755 -o root -g root "$AUDITBEAT_SRC" "${PLUGIN_BIN_DIR}/auditbeat"
+else
+    log_warn "auditbeat-${OS}-${ARCH} not bundled; audit plugin will fail to start until present"
+fi
+
 # ---------- render env file ----------
 log_info "rendering $ENV_FILE"
 mkdir -p "$CONFIG_DIR"
@@ -272,7 +282,7 @@ echo "${C_BOLD}${C_CYAN}--- self-check ---${C_RESET}"
 SELFCHECK_FAIL=0
 
 # 1) plugin binaries present + executable
-for tool in promtail otelcol-contrib node_exporter process_exporter; do
+for tool in promtail otelcol-contrib node_exporter process_exporter auditbeat; do
     if [[ -x "${PLUGIN_BIN_DIR}/${tool}" ]]; then
         log_info "plugin binary present: ${tool}"
     else
