@@ -734,18 +734,26 @@ func TestHandleRegisterMirrorsDeviceToNode(t *testing.T) {
 }
 
 func TestDeviceFingerprintDistinguishesClonedVMs(t *testing.T) {
-	// Cloned VMs share product_uuid (machine-id) but differ by hostname.
-	a := tunnel.HostInfo{Fingerprint: "same-uuid", Hostname: "master01"}
-	b := tunnel.HostInfo{Fingerprint: "same-uuid", Hostname: "master02"}
-	if deviceFingerprintV1(a) != deviceFingerprintV1(b) {
-		t.Fatal("precondition: v1 (no hostname) should collapse cloned VMs")
+	// Cloned VMs share the gopsutil HostID (SMBIOS product_uuid) but the
+	// hypervisor hands each a fresh NIC MAC -> distinct HardwareFingerprint.
+	a := tunnel.HostInfo{Fingerprint: "same-uuid", Hostname: "master01", HardwareFingerprint: "mac-aa-cpu-disk"}
+	b := tunnel.HostInfo{Fingerprint: "same-uuid", Hostname: "master02", HardwareFingerprint: "mac-bb-cpu-disk"}
+	if deviceFingerprintLegacy(a) != deviceFingerprintLegacy(b) {
+		t.Fatal("precondition: legacy (HostID only) should collapse cloned VMs")
 	}
 	if deviceFingerprint(a) == deviceFingerprint(b) {
-		t.Fatal("v2 must NOT collapse cloned VMs that have distinct hostnames")
+		t.Fatal("v3 must NOT collapse cloned VMs that have distinct hardware fingerprints")
+	}
+	// And clones that share a hardware fingerprint (e.g. identical MAC pinned
+	// in the clone config) still collapse — v3 keys purely on hardware, not
+	// hostname, so this is the accepted residual.
+	c := tunnel.HostInfo{Fingerprint: "same-uuid", Hostname: "master03", HardwareFingerprint: "mac-aa-cpu-disk"}
+	if deviceFingerprint(a) != deviceFingerprint(c) {
+		t.Fatal("v3 keys on hardware only: identical hardware fingerprint must map to one device")
 	}
 }
 
-func TestHandleRegisterMigratesV1FingerprintInPlace(t *testing.T) {
+func TestHandleRegisterMigratesLegacyFingerprintInPlace(t *testing.T) {
 	repo := newFakeRepo()
 	devices := newFakeDeviceRepo()
 	uc := NewUsecase(repo, devices, nil, nil)
@@ -755,11 +763,13 @@ func TestHandleRegisterMigratesV1FingerprintInPlace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	info := tunnel.HostInfo{Fingerprint: "uuid-x", Hostname: "master01", OS: "linux"}
+	// Upgraded agent reports BOTH HostID (info.Fingerprint) and the new
+	// HardwareFingerprint, so the manager can locate the old row and rebind.
+	info := tunnel.HostInfo{Fingerprint: "uuid-x", Hostname: "master01", OS: "linux", HardwareFingerprint: "mac-aa-cpu-disk"}
 
-	// Pre-seed a device under the OLD (v1) fingerprint, as a pre-upgrade
-	// manager would have created it.
-	oldFP := deviceFingerprintV1(info)
+	// Pre-seed a device under the OLD (legacy, HostID-derived) fingerprint,
+	// as a pre-upgrade manager would have created it.
+	oldFP := deviceFingerprintLegacy(info)
 	pre, err := devices.FindOrCreateByFingerprint(ctx, &devicemodel.Device{Fingerprint: oldFP, Hostname: "master01"})
 	if err != nil {
 		t.Fatalf("seed device: %v", err)
@@ -773,7 +783,7 @@ func TestHandleRegisterMigratesV1FingerprintInPlace(t *testing.T) {
 
 	newFP := deviceFingerprint(info)
 	if newFP == oldFP {
-		t.Fatal("precondition: v2 fp should differ from v1")
+		t.Fatal("precondition: v3 fp should differ from legacy")
 	}
 	got, err := devices.FindOrCreateByFingerprint(ctx, &devicemodel.Device{Fingerprint: newFP})
 	if err != nil {

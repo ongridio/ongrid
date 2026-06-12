@@ -244,6 +244,8 @@ func (s *Scraper) HostInfo(ctx context.Context) (tunnel.HostInfo, error) {
 		// the rationale.
 		hi.Fingerprint = info.HostID
 	}
+	// Clone-resistant hardware identity — see embedded.go.
+	hi.HardwareFingerprint = hardwareFingerprint()
 	if vm, err := mem.VirtualMemoryWithContext(ctx); err == nil && vm != nil {
 		hi.MemTotalBytes = vm.Total
 	}

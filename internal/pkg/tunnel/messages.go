@@ -196,6 +196,17 @@ type HostInfo struct {
 	CPUCount      int    `json:"cpu_count"`
 	MemTotalBytes uint64 `json:"mem_total_bytes"`
 	Fingerprint   string `json:"fingerprint,omitempty"`
+
+	// HardwareFingerprint is a clone-resistant hardware identity computed
+	// edge-side from physical-NIC MACs + CPU model + disk serials (see
+	// internal/edgeagent/collector hardwareFingerprint). Unlike Fingerprint
+	// (gopsutil HostID), it does NOT collapse cloned Linux VMs, which share a
+	// single SMBIOS product_uuid (issue #96): a hypervisor regenerates the NIC
+	// MAC per clone. The cloud prefers this when non-empty and falls back to
+	// Fingerprint otherwise (older agents / hosts with no physical NIC). Both
+	// fields are sent together so the cloud can migrate a device from its old
+	// HostID-derived fingerprint to this one in place. Empty is allowed.
+	HardwareFingerprint string `json:"hardware_fingerprint,omitempty"`
 }
 
 // RegisterEdgeRequest is the first RPC the edge sends after connecting.

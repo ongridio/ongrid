@@ -91,8 +91,14 @@ func (c *EmbeddedCollector) HostInfo(ctx context.Context) (tunnel.HostInfo, erro
 		//   Windows: MachineGuid
 		// We forward it as the device fingerprint so a re-installed edge
 		// agent on the same host keeps mapping to the same device row.
+		// NOTE: on cloned Linux VMs HostID collapses to a shared SMBIOS
+		// product_uuid — HardwareFingerprint (below) disambiguates those.
 		hi.Fingerprint = info.HostID
 	}
+	// Clone-resistant hardware identity (MAC|CPU|disk). Sent alongside
+	// HostID so the cloud prefers it but can still migrate older device
+	// rows keyed by HostID. "" when no physical NIC is found.
+	hi.HardwareFingerprint = hardwareFingerprint()
 	if vm, err := mem.VirtualMemoryWithContext(ctx); err == nil && vm != nil {
 		hi.MemTotalBytes = vm.Total
 	}

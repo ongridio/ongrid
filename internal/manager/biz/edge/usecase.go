@@ -260,12 +260,15 @@ func (u *Usecase) HandleRegister(ctx context.Context, edgeID uint64, info tunnel
 	}
 
 	fp := deviceFingerprint(info)
-	// Migrate a device registered under the old (hostname-less) fingerprint
-	// to the v2 fingerprint in place — so improving cloned-VM dedup doesn't
-	// orphan existing devices on upgrade (device.ID / history preserved).
-	// Best-effort: on failure the device is simply re-created under the new
-	// fp on this register.
-	if oldFP := deviceFingerprintV1(info); oldFP != fp {
+	// Migrate a device registered under the legacy HostID-derived fingerprint
+	// to the hardware fingerprint (v3) in place — so a host that previously
+	// registered under its gopsutil HostID, then upgrades to an agent that
+	// also reports HardwareFingerprint, keeps its device.ID / history instead
+	// of orphaning into a fresh row. The new agent still sends HostID in
+	// info.Fingerprint, so the old fp is recomputable here. Best-effort: on
+	// failure the device is simply re-created under the new fp on this
+	// register (see RebindFingerprint for the ghost-row caveat).
+	if oldFP := deviceFingerprintLegacy(info); oldFP != fp {
 		if err := u.devices.RebindFingerprint(ctx, oldFP, fp); err != nil && u.log != nil {
 			u.log.Warn("device fingerprint rebind failed", "old", oldFP, "new", fp, "err", err)
 		}
@@ -349,47 +352,46 @@ func (u *Usecase) HandleRegister(ctx context.Context, edgeID uint64, info tunnel
 	return nil
 }
 
-// deviceFingerprint derives a stable per-host id from the register
-// payload. The agent supplies HostID (machine-id / IOPlatformUUID /
-// MachineGuid) when available — that's the right answer because it
-// survives hostname renames and edge re-installs on the same host.
-// We hash + prefix it so the column shape is uniform across platforms
-// and so a leaked machine-id can't be used to enumerate devices.
+// deviceFingerprint derives the stable per-host id stored in
+// devices.fingerprint. Preference order:
 //
-// When the agent doesn't supply a fingerprint (older builds or
-// platforms where gopsutil can't read the id), we fall back to hashing
-// the hostname. That's weaker but keeps the system functional; the
-// trade-off is that a hostname change on a fingerprint-less host will
-// look like a brand-new device.
+//  1. HardwareFingerprint (v3) — a MAC|CPU|disk hash the agent computes
+//     edge-side. This is the right primary key because a hypervisor
+//     regenerates the NIC MAC for every clone, so cloned VMs stay distinct
+//     (issue #96). Newer agents always send it.
+//  2. HostID-derived (legacy) — gopsutil HostID (machine-id /
+//     IOPlatformUUID / MachineGuid), else hashed hostname. Used for older
+//     agents or hosts with no physical NIC. Survives hostname renames and
+//     re-installs, but on cloned Linux VMs collapses to a shared SMBIOS
+//     product_uuid — which is exactly why v3 exists.
+//
+// We hash + prefix every variant so the column shape is uniform across
+// platforms and a leaked raw id can't be used to enumerate devices.
 func deviceFingerprint(info tunnel.HostInfo) string {
-	hn := strings.ToLower(strings.TrimSpace(info.Hostname))
-	seed := strings.TrimSpace(info.Fingerprint)
-	if seed == "" {
-		seed = "hostname:" + hn
-	} else {
-		// v2: machine-id + hostname. machine-id alone (gopsutil HostID,
-		// which on Linux prefers SMBIOS product_uuid) collapses cloned VMs
-		// — same product_uuid → same fingerprint → folded into one device.
-		// Folding in the hostname keeps master01/master02/... distinct.
-		// Trade-off: a hostname change re-registers as a new device, but
-		// that's rare and deliberate; not colliding clones is the bigger win.
-		seed = "machine-id:" + seed + "|hostname:" + hn
+	if hw := strings.TrimSpace(info.HardwareFingerprint); hw != "" {
+		return hashFingerprint("hw:" + hw)
 	}
-	h := sha256.Sum256([]byte(seed))
-	return "fp_" + hex.EncodeToString(h[:16])
+	return deviceFingerprintLegacy(info)
 }
 
-// deviceFingerprintV1 reproduces the pre-hostname algorithm. Used only to
-// locate a device registered under the old fingerprint so HandleRegister
-// can rebind it to the v2 fingerprint in place (preserving device.ID and
-// history) on first re-register after upgrade.
-func deviceFingerprintV1(info tunnel.HostInfo) string {
+// deviceFingerprintLegacy reproduces the pre-v3 HostID-derived algorithm.
+// Used (a) as the fallback when the agent reports no HardwareFingerprint and
+// (b) to locate a device registered under the old fingerprint so
+// HandleRegister can rebind it to the v3 fingerprint in place (preserving
+// device.ID and history) on first re-register after upgrade.
+func deviceFingerprintLegacy(info tunnel.HostInfo) string {
 	seed := strings.TrimSpace(info.Fingerprint)
 	if seed == "" {
 		seed = "hostname:" + strings.ToLower(strings.TrimSpace(info.Hostname))
 	} else {
 		seed = "machine-id:" + seed
 	}
+	return hashFingerprint(seed)
+}
+
+// hashFingerprint maps a raw identity seed to the stored fingerprint column
+// shape: "fp_" + first-16-bytes of sha256, hex-encoded.
+func hashFingerprint(seed string) string {
 	h := sha256.Sum256([]byte(seed))
 	return "fp_" + hex.EncodeToString(h[:16])
 }
