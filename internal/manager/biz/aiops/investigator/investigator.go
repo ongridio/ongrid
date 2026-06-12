@@ -49,15 +49,14 @@ import (
 // at peak; 3 concurrent LLM round-trips + 100 deep buffer leaves ample
 // headroom while capping spend on a misconfigured rule storm.
 const (
-	defaultWorkers      = 3
-	defaultQueueDepth   = 100
+	defaultWorkers    = 3
+	defaultQueueDepth = 100
 	// Unified with the project-wide LLM timeout floor (see
 	// internal/pkg/llm/client.go::defaultTimeout). The 60 s prior
 	// default false-failed on reasoning-model defaults; 120 s gives a
 	// tool-rich turn room without escaping the human-grade timescale.
 	defaultLLMTimeout = 120 * time.Second
-	defaultUserMsgCap   = 30 * 1024 // ~30KB upper bound for the bundle text
-	defaultModelDefault = "gpt-5.4"
+	defaultUserMsgCap = 30 * 1024 // ~30KB upper bound for the bundle text
 )
 
 // systemPrompt is the fixed system prompt sent on every investigation.
@@ -87,9 +86,9 @@ type ToolInvoker interface {
 
 // Config tunes the investigator. Zero values pick the package defaults.
 type Config struct {
-	// Model is the LLM model slug used in the chat request. Empty falls
-	// back to "gpt-4o" so investigation works even before main.go gets
-	// around to passing cfg.OpenAI.Model through.
+	// Model is the LLM model slug used in the chat request. Empty means
+	// use the router/catalog default so background diagnosis follows the
+	// same default provider+model as the home-page picker.
 	Model string
 	// Workers is the goroutine pool size. Default 3.
 	Workers int
@@ -114,10 +113,10 @@ type Investigator struct {
 	cfg       Config
 	log       *slog.Logger
 
-	jobs    chan job
-	wg      sync.WaitGroup
+	jobs     chan job
+	wg       sync.WaitGroup
 	stopOnce sync.Once
-	stopped chan struct{}
+	stopped  chan struct{}
 }
 
 type job struct {
@@ -130,7 +129,7 @@ type job struct {
 //
 // Any of llmClient / tools / events being nil renders the Investigator a
 // no-op: InvestigateAsync drops the job silently. main.go is expected
-// to gate construction on cfg.OpenAI.APIKey != "" so the no-op shape is
+// to gate construction on an available LLM provider so the no-op shape is
 // only hit in tests.
 func New(llmClient llm.Client, tools ToolInvoker, events EventWriter, cfg Config, log *slog.Logger) *Investigator {
 	if cfg.Workers <= 0 {
@@ -144,9 +143,6 @@ func New(llmClient llm.Client, tools ToolInvoker, events EventWriter, cfg Config
 	}
 	if cfg.UserMsgCap <= 0 {
 		cfg.UserMsgCap = defaultUserMsgCap
-	}
-	if cfg.Model == "" {
-		cfg.Model = defaultModelDefault
 	}
 	if log == nil {
 		log = slog.Default()

@@ -1410,20 +1410,20 @@ func main() {
 	// investigatorChain so each new-fire fans out to both. Either side
 	// can be nil — the chain skips nil.
 	var legacyInv managerbizalert.Investigator
-	if cfg.OpenAI.APIKey != "" {
+	if hasConfiguredLLMProvider(llmRouter) {
 		legacy := aiopsinvestigator.New(
 			llmClient,
 			toolsReg,
 			alertRepo,
-			aiopsinvestigator.Config{Model: cfg.OpenAI.Model},
+			aiopsinvestigator.Config{},
 			log,
 		)
 		defer legacy.Close()
 		legacyInv = legacy
 		log.Info("alert: legacy AI initial-diagnosis investigator wired",
-			slog.String("model", cfg.OpenAI.Model))
+			slog.String("model_source", "llm_default"))
 	} else {
-		log.Info("alert: legacy AI investigator disabled (no LLM)")
+		log.Info("alert: legacy AI investigator disabled (no LLM provider)")
 	}
 
 	var (
@@ -1447,73 +1447,21 @@ func main() {
 					maxCC = n
 				}
 			}
-			// The RCA summarizer (structured-report extraction) must use the
-			// configured DEFAULT chat provider + its model. The old code
-			// defaulted SummarizerModel to cfg.OpenAI.Model (gpt-4o) with an
-			// empty provider, so on a non-OpenAI deployment (e.g. zhipu/GLM)
-			// the summarize call shipped model=gpt-4o to the zhipu endpoint →
-			// 400 "模型不存在". The extractor then fell back to an unstructured
-			// report every time, which surfaced as the RCA "总是在转圈".
-			// Mirror buildAIOpsRuntime's default-provider resolution.
-			defSumProvider, defSumModel := llm.ProviderOpenAI, firstNonEmpty(cfg.OpenAI.Model, "gpt-5.4")
-			switch cfg.LLM.Default {
-			case llm.ProviderZhipu:
-				defSumProvider, defSumModel = llm.ProviderZhipu, firstNonEmpty(cfg.LLM.Zhipu.Model, "glm-4.7")
-			case llm.ProviderAnthropic:
-				defSumProvider, defSumModel = llm.ProviderAnthropic, firstNonEmpty(cfg.LLM.Anthropic.Model, "claude-sonnet-4-6")
-			case llm.ProviderGemini:
-				defSumProvider, defSumModel = llm.ProviderGemini, firstNonEmpty(cfg.LLM.Gemini.Model, "gemini-2.5-pro")
-			case llm.ProviderDeepSeek:
-				defSumProvider, defSumModel = llm.ProviderDeepSeek, firstNonEmpty(cfg.LLM.DeepSeek.Model, "deepseek-v4-flash")
-			case llm.ProviderKimi:
-				defSumProvider, defSumModel = llm.ProviderKimi, firstNonEmpty(cfg.LLM.Kimi.Model, "kimi-k2.6")
-			case llm.ProviderOpenAI, "":
-				// Empty/openai: fall back to the first provider that actually
-				// has a key (mirrors the routing model's fallback) so an
-				// unset default_provider still picks a usable summarizer.
-				switch {
-				case cfg.OpenAI.APIKey != "":
-					// keep openai default
-				case cfg.LLM.Zhipu.APIKey != "":
-					defSumProvider, defSumModel = llm.ProviderZhipu, firstNonEmpty(cfg.LLM.Zhipu.Model, "glm-4.7")
-				case cfg.LLM.Anthropic.APIKey != "":
-					defSumProvider, defSumModel = llm.ProviderAnthropic, firstNonEmpty(cfg.LLM.Anthropic.Model, "claude-sonnet-4-6")
-				case cfg.LLM.Gemini.APIKey != "":
-					defSumProvider, defSumModel = llm.ProviderGemini, firstNonEmpty(cfg.LLM.Gemini.Model, "gemini-2.5-pro")
-				case cfg.LLM.DeepSeek.APIKey != "":
-					defSumProvider, defSumModel = llm.ProviderDeepSeek, firstNonEmpty(cfg.LLM.DeepSeek.Model, "deepseek-v4-flash")
-				case cfg.LLM.Kimi.APIKey != "":
-					defSumProvider, defSumModel = llm.ProviderKimi, firstNonEmpty(cfg.LLM.Kimi.Model, "kimi-k2.6")
-				}
-			}
-			// Prefer the DB-resolved default (default_provider + its model) —
-			// the same source the home-page picker writes and the routing
-			// model's DefaultResolver uses — over the env-only cfg.LLM.Default
-			// switch above, so the summarizer stays consistent with chat / RCA.
-			// Boot-time: a later default change is picked up on restart (the
-			// summarizer is the cheap extraction step; the analysis worker
-			// already tracks the default live via DefaultResolver).
-			if llmSettingsResolver != nil {
-				if provCfgs, resolvedDefault, rerr := llmSettingsResolver.ResolveProviders(rootCtx); rerr == nil && resolvedDefault != "" {
-					defSumProvider = resolvedDefault
-					for _, pc := range provCfgs {
-						if pc.ID == resolvedDefault {
-							if pc.Model != "" {
-								defSumModel = pc.Model
-							}
-							break
-						}
-					}
-				}
-			}
+			// Empty provider/model means the extractor follows the live
+			// llm.MultiClient default — the same default_provider +
+			// <provider>_default_model the home-page picker writes and
+			// invalidateLLMRouter refreshes. Env vars remain an explicit
+			// operator override for rare cases.
+			sumProvider := os.Getenv("ONGRID_INVESTIGATOR_SUMMARIZER_PROVIDER")
+			sumModel := os.Getenv("ONGRID_INVESTIGATOR_SUMMARIZER_MODEL")
 			rcaInvConcrete = investigator.NewUsecase(invRepo, concreteRt, llmClient, investigator.Config{
 				Enabled:            true,
 				MinSeverity:        firstNonEmpty(os.Getenv("ONGRID_INVESTIGATOR_MIN_SEVERITY"), "warning"),
 				DedupWindow:        5 * time.Minute,
 				WorkerTimeout:      5 * time.Minute,
 				AgentName:          "incident-investigator",
-				SummarizerModel:    firstNonEmpty(os.Getenv("ONGRID_INVESTIGATOR_SUMMARIZER_MODEL"), defSumModel),
-				SummarizerProvider: firstNonEmpty(os.Getenv("ONGRID_INVESTIGATOR_SUMMARIZER_PROVIDER"), defSumProvider),
+				SummarizerModel:    sumModel,
+				SummarizerProvider: sumProvider,
 				SummarizerTimeout:  30 * time.Second,
 				MaxConcurrent:      maxCC,
 				// Fall-back language for auto-fire + backfill (no request
@@ -1535,8 +1483,8 @@ func main() {
 				WithMessageReader(aiopsRepo)
 			rcaInv = rcaInvConcrete
 			log.Info("alert: structured RCA investigator wired",
-				slog.String("summarizer_provider", firstNonEmpty(os.Getenv("ONGRID_INVESTIGATOR_SUMMARIZER_PROVIDER"), defSumProvider)),
-				slog.String("summarizer_model", firstNonEmpty(os.Getenv("ONGRID_INVESTIGATOR_SUMMARIZER_MODEL"), defSumModel)))
+				slog.String("summarizer_provider", firstNonEmpty(sumProvider, "llm_default")),
+				slog.String("summarizer_model", firstNonEmpty(sumModel, "llm_default")))
 		}
 	}
 
@@ -2231,6 +2179,14 @@ func reportLLMReady(resolver *managerbizsetting.LLMSettingsResolver) func(contex
 		}
 		return fmt.Errorf("%w: LLM provider not configured", errs.ErrNotWiredYet)
 	}
+}
+
+type llmProviderCatalog interface {
+	Providers() []llm.ProviderInfo
+}
+
+func hasConfiguredLLMProvider(catalog llmProviderCatalog) bool {
+	return catalog != nil && len(catalog.Providers()) > 0
 }
 
 // pickProviderDefault mirrors llm.MultiClient's catalog default:

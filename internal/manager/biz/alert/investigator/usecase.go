@@ -130,13 +130,13 @@ type Config struct {
 	// a different name without recompiling.
 	AgentName string
 
-	// SummarizerModel selects the cheap model used for the structured
-	// extraction (PR-3). Empty → skip the extraction step and fall
-	// back to first-line root_cause + full markdown findings.
+	// SummarizerModel optionally pins the model used for the structured
+	// extraction (PR-3). Empty → use the LLM router default, which tracks
+	// the home-page/default_provider model selection.
 	SummarizerModel string
 
-	// SummarizerProvider routes the extraction call to a specific
-	// provider (e.g. "zhipu" for GLM-4-air). Empty → default provider.
+	// SummarizerProvider optionally routes extraction to a specific
+	// provider (e.g. "zhipu" for GLM-4-air). Empty → router default.
 	SummarizerProvider string
 
 	// SummarizerTimeout bounds the extraction LLM call. Default 30s

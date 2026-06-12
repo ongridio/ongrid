@@ -56,7 +56,7 @@ func (uc *Usecase) extractStructured(ctx context.Context, incident alertmodel.In
 		ToolCallCount:         toolCallCount,
 	}
 
-	if uc.summarizer == nil || uc.cfg.SummarizerModel == "" {
+	if uc.summarizer == nil {
 		return fallback
 	}
 

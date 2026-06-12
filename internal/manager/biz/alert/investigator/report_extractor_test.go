@@ -11,10 +11,10 @@ import (
 )
 
 type fakeSummarizer struct {
-	resp     *llm.ChatResp
-	err      error
-	lastReq  llm.ChatReq
-	calls    int
+	resp    *llm.ChatResp
+	err     error
+	lastReq llm.ChatReq
+	calls   int
 }
 
 func (f *fakeSummarizer) Chat(_ context.Context, req llm.ChatReq) (*llm.ChatResp, error) {
@@ -200,6 +200,27 @@ func TestExtractStructured_ParsesValid(t *testing.T) {
 	}
 	if sum.lastReq.Model != "glm-4-air" {
 		t.Errorf("model = %q, want glm-4-air", sum.lastReq.Model)
+	}
+}
+
+func TestExtractStructured_EmptyModelUsesRouterDefault(t *testing.T) {
+	sum := &fakeSummarizer{resp: &llm.ChatResp{
+		Assistant: llm.Message{Role: "assistant", Content: `{"root_cause":"router default"}`},
+	}}
+	uc := &Usecase{
+		summarizer: sum,
+		cfg:        Config{SummarizerTimeout: time.Second},
+	}
+
+	fields := uc.extractStructured(context.Background(), alertmodel.Incident{ID: 1}, "narrative", 2, "")
+	if fields.RootCause != "router default" {
+		t.Fatalf("root_cause = %q, want router default", fields.RootCause)
+	}
+	if sum.calls != 1 {
+		t.Fatalf("summarizer calls = %d, want 1", sum.calls)
+	}
+	if sum.lastReq.Provider != "" || sum.lastReq.Model != "" {
+		t.Fatalf("summarizer request = provider %q model %q, want empty router defaults", sum.lastReq.Provider, sum.lastReq.Model)
 	}
 }
 

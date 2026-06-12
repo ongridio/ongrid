@@ -177,6 +177,25 @@ func TestInvestigateAsyncWritesEvent(t *testing.T) {
 	}
 }
 
+func TestInvestigateAsyncEmptyModelUsesRouterDefault(t *testing.T) {
+	llmFake := &fakeLLM{content: "initial diagnosis"}
+	toolsFake := &fakeTools{bundle: json.RawMessage(`{"incident":{"id":8}}`)}
+	writer := &fakeWriter{}
+
+	inv := New(llmFake, toolsFake, writer, Config{Workers: 1, QueueDepth: 4}, newQuietLogger())
+	defer inv.Close()
+
+	inv.InvestigateAsync(&model.Incident{ID: 8, Rule: "cpu_high", Severity: "warning"})
+	inv.Close()
+
+	if len(llmFake.gotModels) != 1 {
+		t.Fatalf("llm calls = %d, want 1", len(llmFake.gotModels))
+	}
+	if llmFake.gotModels[0] != "" {
+		t.Fatalf("legacy investigator model = %q, want empty router default", llmFake.gotModels[0])
+	}
+}
+
 // TestInvestigateAsyncDropsOnFullQueue: when the queue is saturated,
 // new jobs are silently dropped (logged warning) rather than blocking.
 func TestInvestigateAsyncDropsOnFullQueue(t *testing.T) {
