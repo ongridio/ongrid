@@ -516,7 +516,12 @@ function AgentDetailModal({
 
         {agent.critical_reminder && (
           <DetailSection label={tr('关键提醒', 'Critical reminder')}>
-            <p className="whitespace-pre-wrap text-xs leading-relaxed text-amber-200/80">{agent.critical_reminder}</p>
+            {/* 用不带透明度的 text-amber-300：light 主题有 amber-300→amber-700
+                的覆盖（index.css），透明度变体 /80 不在覆盖内、浅色下会发灰看不清。
+                配一层 amber 描边底色，强化「提醒」语义又保证两主题都够对比度。 */}
+            <p className="whitespace-pre-wrap rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs leading-relaxed text-amber-300">
+              {agent.critical_reminder}
+            </p>
           </DetailSection>
         )}
 
