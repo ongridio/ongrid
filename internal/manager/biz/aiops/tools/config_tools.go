@@ -2,6 +2,8 @@ package tools
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -52,6 +54,7 @@ type ConfigChangeApplyArgs struct {
 	Action           string               `json:"action"`
 	Rule             AlertRuleConfigInput `json:"rule,omitempty"`
 	Payload          json.RawMessage      `json:"payload,omitempty"`
+	DraftHash        string               `json:"draft_hash,omitempty"`
 	Confirmed        bool                 `json:"confirmed"`
 	ConfirmationText string               `json:"confirmation_text,omitempty"`
 }
@@ -75,6 +78,7 @@ type ConfigDraft struct {
 	Warnings  []string        `json:"warnings,omitempty"`
 	Rollback  string          `json:"rollback,omitempty"`
 	ApplyTool string          `json:"apply_tool"`
+	DraftHash string          `json:"draft_hash,omitempty"`
 }
 
 type ConfigApplyResult struct {
@@ -205,6 +209,9 @@ func (t *ConfigTool) InvokableRun(ctx context.Context, argsJSON string, opts ...
 		if err := in.applyPayloadDefaults(); err != nil {
 			return "", fmt.Errorf("%s: %w", ToolNameApplyConfigChange, err)
 		}
+		if err := in.validateDraftHash(); err != nil {
+			return "", fmt.Errorf("%s: %w", ToolNameApplyConfigChange, err)
+		}
 		out, err := t.applyConfigChange(ctx, caller, in)
 		if err != nil {
 			return "", fmt.Errorf("%s: %w", ToolNameApplyConfigChange, err)
@@ -289,22 +296,74 @@ func normalizeConfigCreateAction(action string) (string, error) {
 
 func (in *ConfigChangeApplyArgs) applyPayloadDefaults() error {
 	if len(in.Payload) == 0 {
-		return nil
+		return fmt.Errorf("%w: payload from config_draft is required before applying", errs.ErrInvalid)
 	}
 	var payload struct {
-		Action string               `json:"action"`
-		Rule   AlertRuleConfigInput `json:"rule,omitempty"`
+		Action    string               `json:"action"`
+		Rule      AlertRuleConfigInput `json:"rule,omitempty"`
+		DraftHash string               `json:"draft_hash,omitempty"`
 	}
 	if err := json.Unmarshal(in.Payload, &payload); err != nil {
 		return fmt.Errorf("bad draft payload: %w", err)
 	}
-	if in.Action == "" {
-		in.Action = payload.Action
+	in.Action = payload.Action
+	in.Rule = payload.Rule
+	if in.DraftHash == "" {
+		in.DraftHash = payload.DraftHash
 	}
 	if isZeroAlertRuleInput(in.Rule) {
-		in.Rule = payload.Rule
+		return fmt.Errorf("%w: payload.rule from config_draft is required before applying", errs.ErrInvalid)
 	}
 	return nil
+}
+
+func (in ConfigChangeApplyArgs) validateDraftHash() error {
+	got := strings.TrimSpace(in.DraftHash)
+	if got == "" {
+		return fmt.Errorf("%w: draft_hash from config_draft is required before applying", errs.ErrInvalid)
+	}
+	want, err := AlertRuleConfigDraftHash(in.Action, in.Rule)
+	if err != nil {
+		return err
+	}
+	if !strings.EqualFold(got, want) {
+		return fmt.Errorf("%w: draft_hash does not match config_draft payload", errs.ErrInvalid)
+	}
+	return nil
+}
+
+// AlertRuleConfigDraftPayload returns the canonical draft payload and its hash.
+func AlertRuleConfigDraftPayload(action string, rule AlertRuleConfigInput) (json.RawMessage, string, error) {
+	payload := struct {
+		Action string               `json:"action"`
+		Rule   AlertRuleConfigInput `json:"rule"`
+	}{
+		Action: action,
+		Rule:   rule,
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return nil, "", fmt.Errorf("marshal alert rule draft payload: %w", err)
+	}
+	hash := alertRuleConfigDraftHashBytes(b)
+	return json.RawMessage(b), hash, nil
+}
+
+// AlertRuleConfigDraftHash returns the hash expected when applying a draft.
+func AlertRuleConfigDraftHash(action string, rule AlertRuleConfigInput) (string, error) {
+	payload, hash, err := AlertRuleConfigDraftPayload(action, rule)
+	if err != nil {
+		return "", err
+	}
+	if len(payload) == 0 {
+		return "", fmt.Errorf("%w: empty alert rule draft payload", errs.ErrInvalid)
+	}
+	return hash, nil
+}
+
+func alertRuleConfigDraftHashBytes(b []byte) string {
+	sum := sha256.Sum256(b)
+	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
 func isZeroAlertRuleInput(in AlertRuleConfigInput) bool {
@@ -410,7 +469,7 @@ var draftConfigChangeSchema = json.RawMessage(`{
         "spec": {
           "type": "object",
           "additionalProperties": true,
-          "description": "Kind-specific spec. metric_raw: either expr/promql/query with the full PromQL predicate, or catalog_metric/db_metric/metric plus operator and threshold. For exact collected metrics, set metric to the Prometheus metric name and operator/threshold, e.g. redis_connected_clients > 100. Database catalog_metric examples: mysql_connection_usage_pct, mysql_slow_queries_15m, postgresql_connection_usage_pct, postgresql_deadlocks_15m, redis_memory_usage_pct, redis_keyspace_hit_ratio_pct, mongodb_connections_current, mongodb_wiredtiger_cache_usage_pct. Optional selector/label_selector/matchers or labels can scope the metric. metric_anomaly: metric, method(zscore|mad), baseline_window, baseline_step, deviation. metric_forecast: metric, fit_window, predict_seconds, operator, threshold. metric_burn_rate: sli using $window, slo, burns[{window,multiplier}]. log_match: stream_selector, line_filter, window, operator, threshold. log_volume: stream_selector, window, ratio_op, ratio_threshold. trace_latency: service, operation(optional), quantile(p50|p95|p99), window, threshold_ms. trace_error_rate: service, window, operator, threshold_pct."
+	          "description": "Kind-specific spec. metric_raw: either expr/promql/query with the full PromQL predicate, or catalog_metric/db_metric/metric plus operator and threshold. For exact collected metrics, set metric to the Prometheus metric name and operator/threshold, e.g. redis_connected_clients > 100. Database catalog_metric examples: mysql_connection_usage_pct, mysql_slow_queries_15m, postgresql_connection_usage_pct, postgresql_deadlocks_15m, redis_memory_usage_pct, redis_keyspace_hit_ratio_pct, redis_key_count, mongodb_connections_current, mongodb_operations_per_second, mongodb_resident_memory_bytes, mongodb_wiredtiger_cache_usage_pct. Optional selector/label_selector/matchers or labels can scope the metric. metric_anomaly: metric, method(zscore|mad), baseline_window, baseline_step, deviation. metric_forecast: metric, fit_window, predict_seconds, operator, threshold. metric_burn_rate: sli using $window, slo, burns[{window,multiplier}]. log_match: stream_selector, line_filter, window, operator, threshold. log_volume: stream_selector, window, ratio_op, ratio_threshold. trace_latency: service, operation(optional), quantile(p50|p95|p99), window, threshold_ms. trace_error_rate: service, window, operator, threshold_pct."
         },
         "labels": {"type": "object", "additionalProperties": {"type": "string"}},
         "runbook_url": {"type": "string"},
@@ -435,7 +494,7 @@ var draftConfigChangeSchema = json.RawMessage(`{
 
 var applyConfigChangeSchema = json.RawMessage(`{
   "type": "object",
-  "required": ["domain", "action", "confirmed"],
+  "required": ["domain", "action", "confirmed", "payload", "draft_hash"],
   "properties": {
     "domain": {
       "type": "string",
@@ -444,10 +503,11 @@ var applyConfigChangeSchema = json.RawMessage(`{
     },
     "action": {"type": "string", "enum": ["create"]},
     "confirmed": {"type": "boolean", "description": "Must be true after explicit user confirmation."},
+    "draft_hash": {"type": "string", "description": "Exact draft_hash returned by draft_config_change. The payload is rejected if this hash does not match."},
     "confirmation_text": {"type": "string"},
     "payload": {
       "type": "object",
-      "description": "Optional payload object returned by draft_config_change; used as defaults for action/rule."
+      "description": "Exact payload object returned by draft_config_change; it is the source of truth for action/rule."
     },
     "rule": {"type": "object", "additionalProperties": true}
   }

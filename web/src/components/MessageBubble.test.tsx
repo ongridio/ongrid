@@ -45,6 +45,7 @@ function draftFor(kind: string): ConfigDraftResult {
     warnings: [`${kind} preview warning`],
     rollback: 'Disable or edit the rule from Alerts.',
     apply_tool: 'apply_config_change',
+    draft_hash: `sha256:${kind}`,
   };
 }
 
@@ -131,6 +132,22 @@ describe('MessageBubble config draft card', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /已取消|Cancelled/ })).toBeDisabled();
     });
+  });
+
+  it('allows retry when confirm fails', async () => {
+    const user = userEvent.setup();
+    const onConfirm = vi.fn().mockResolvedValue(false);
+
+    render(<MessageBubble message={toolCardMessage(draftFor('metric_raw'))} onConfirmConfigDraft={onConfirm} />);
+    await act(async () => {
+      await user.click(screen.getByRole('button', { name: /确认应用|Apply/ }));
+    });
+
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /确认应用|Apply/ })).toBeEnabled();
+    });
+    expect(screen.queryByRole('button', { name: /已确认|Confirmed/ })).not.toBeInTheDocument();
   });
 
   it('does not render a config draft card for unsupported config domains', () => {

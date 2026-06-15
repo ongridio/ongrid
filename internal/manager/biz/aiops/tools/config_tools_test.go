@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -111,7 +112,7 @@ func TestConfigApplyToolAdminCallsManager(t *testing.T) {
 	fake := &fakeConfigManager{}
 	tool := NewApplyConfigChangeTool(fake, nil)
 	ctx := tenantctx.With(context.Background(), tenantctx.Tenant{UserID: 1, Role: "admin"})
-	got, err := tool.InvokableRun(ctx, `{"domain":"alert_rule","action":"create","confirmed":true}`)
+	got, err := tool.InvokableRun(ctx, applyArgsJSON(t, "create", AlertRuleConfigInput{RuleKey: "cpu_high", Name: "CPU High"}, ""))
 	if err != nil {
 		t.Fatalf("InvokableRun() error = %v", err)
 	}
@@ -127,7 +128,7 @@ func TestConfigApplyToolUsesPayloadDefaults(t *testing.T) {
 	fake := &fakeConfigManager{}
 	tool := NewApplyConfigChangeTool(fake, nil)
 	ctx := tenantctx.With(context.Background(), tenantctx.Tenant{UserID: 1, Role: "admin"})
-	args := `{"domain":"alert_rule","confirmed":true,"payload":{"action":"create","rule":{"rule_key":"cpu_high","name":"CPU High"}}}`
+	args := applyArgsJSON(t, "create", AlertRuleConfigInput{RuleKey: "cpu_high", Name: "CPU High"}, "")
 	if _, err := tool.InvokableRun(ctx, args); err != nil {
 		t.Fatalf("InvokableRun() error = %v", err)
 	}
@@ -139,15 +140,71 @@ func TestConfigApplyToolUsesPayloadDefaults(t *testing.T) {
 	}
 }
 
+func TestConfigApplyToolUsesPayloadAsSourceOfTruth(t *testing.T) {
+	fake := &fakeConfigManager{}
+	tool := NewApplyConfigChangeTool(fake, nil)
+	ctx := tenantctx.With(context.Background(), tenantctx.Tenant{UserID: 1, Role: "admin"})
+	payload, hash, err := AlertRuleConfigDraftPayload("create", AlertRuleConfigInput{RuleKey: "cpu_high", Name: "CPU High"})
+	if err != nil {
+		t.Fatalf("AlertRuleConfigDraftPayload() error = %v", err)
+	}
+	args := fmt.Sprintf(`{"domain":"alert_rule","action":"create","confirmed":true,"draft_hash":%q,"payload":%s,"rule":{"rule_key":"mem_high","name":"Memory High"}}`, hash, string(payload))
+
+	if _, err := tool.InvokableRun(ctx, args); err != nil {
+		t.Fatalf("InvokableRun() error = %v", err)
+	}
+	if fake.lastApply.Rule.RuleKey != "cpu_high" {
+		t.Fatalf("apply rule = %+v, want payload rule cpu_high", fake.lastApply.Rule)
+	}
+}
+
+func TestConfigApplyToolRejectsMismatchedDraftHash(t *testing.T) {
+	fake := &fakeConfigManager{}
+	tool := NewApplyConfigChangeTool(fake, nil)
+	ctx := tenantctx.With(context.Background(), tenantctx.Tenant{UserID: 1, Role: "admin"})
+	_, err := tool.InvokableRun(ctx, applyArgsJSON(t, "create", AlertRuleConfigInput{RuleKey: "cpu_high", Name: "CPU High"}, "sha256:bad"))
+	if err == nil {
+		t.Fatalf("expected draft_hash mismatch error")
+	}
+	if fake.applyAlertCalls != 0 {
+		t.Fatalf("apply called for mismatched draft_hash")
+	}
+}
+
+func TestConfigApplyToolRequiresDraftPayload(t *testing.T) {
+	fake := &fakeConfigManager{}
+	tool := NewApplyConfigChangeTool(fake, nil)
+	ctx := tenantctx.With(context.Background(), tenantctx.Tenant{UserID: 1, Role: "admin"})
+	_, err := tool.InvokableRun(ctx, `{"domain":"alert_rule","action":"create","confirmed":true,"draft_hash":"sha256:bad"}`)
+	if err == nil {
+		t.Fatalf("expected missing payload error")
+	}
+	if fake.applyAlertCalls != 0 {
+		t.Fatalf("apply called without payload")
+	}
+}
+
 func TestConfigApplyToolRejectsNonCreateAction(t *testing.T) {
 	fake := &fakeConfigManager{}
 	tool := NewApplyConfigChangeTool(fake, nil)
 	ctx := tenantctx.With(context.Background(), tenantctx.Tenant{UserID: 1, Role: "admin"})
-	_, err := tool.InvokableRun(ctx, `{"domain":"alert_rule","action":"disable","confirmed":true}`)
+	_, err := tool.InvokableRun(ctx, applyArgsJSON(t, "disable", AlertRuleConfigInput{RuleKey: "cpu_high", Name: "CPU High"}, ""))
 	if err == nil {
 		t.Fatalf("expected unsupported action error")
 	}
 	if fake.applyAlertCalls != 0 {
 		t.Fatalf("apply called for unsupported action")
 	}
+}
+
+func applyArgsJSON(t *testing.T, action string, rule AlertRuleConfigInput, hashOverride string) string {
+	t.Helper()
+	payload, hash, err := AlertRuleConfigDraftPayload(action, rule)
+	if err != nil {
+		t.Fatalf("AlertRuleConfigDraftPayload() error = %v", err)
+	}
+	if hashOverride != "" {
+		hash = hashOverride
+	}
+	return fmt.Sprintf(`{"domain":"alert_rule","action":%q,"confirmed":true,"draft_hash":%q,"payload":%s}`, action, hash, string(payload))
 }

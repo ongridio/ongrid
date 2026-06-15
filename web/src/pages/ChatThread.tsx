@@ -191,10 +191,16 @@ export default function ChatThreadPage() {
     stickToBottomRef.current = distance <= 120;
   }, []);
 
-  async function send(content: string, mentions: Mention[]) {
-    if (!sessionId || !content.trim()) return;
+  async function send(
+    content: string,
+    mentions: Mention[],
+    opts: { expectedTool?: string } = {},
+  ): Promise<boolean> {
+    if (!sessionId || !content.trim()) return false;
     setError(null);
     setSubmitting(true);
+    let expectedToolSeen = !opts.expectedTool;
+    let expectedToolFailed = false;
 
     // Optimistic user bubble; tool cards and final assistant bubble are
     // appended as the SSE stream delivers them. Tool-only assistant
@@ -256,6 +262,10 @@ export default function ChatThreadPage() {
             setMessages((prev) => [...prev, card]);
           },
           onToolEnd: (t) => {
+            if (opts.expectedTool && t.name === opts.expectedTool) {
+              expectedToolSeen = true;
+              expectedToolFailed = !!t.error || t.status === 'error' || t.status === 'timeout';
+            }
             const targetId = toolCardId(t.tool_call_id);
             setMessages((prev) =>
               prev.map((m) =>
@@ -295,6 +305,7 @@ export default function ChatThreadPage() {
           locale,
         },
       );
+      return expectedToolSeen && !expectedToolFailed;
     } catch (err) {
       const msg = (err as Error).message || tr('请求失败', 'Request failed');
       setError(msg);
@@ -307,30 +318,33 @@ export default function ChatThreadPage() {
           pending: false,
         },
       ]);
+      return false;
     } finally {
       setSubmitting(false);
     }
   }
 
-  function confirmConfigDraft(draft: ConfigDraftResult) {
-    if (submitting) return;
+  function confirmConfigDraft(draft: ConfigDraftResult): Promise<boolean> {
+    if (submitting) return Promise.resolve(false);
     const applyTool = draft.apply_tool || 'apply_config_change';
     const payload = JSON.stringify(draft.payload ?? {}, null, 2);
+    const draftHash = draft.draft_hash || '';
     const content = [
       tr('确认应用这个配置草案。', 'Confirm applying this configuration draft.'),
       `domain: ${draft.domain || 'config'}`,
       `action: ${draft.action || 'apply'}`,
+      draftHash ? `draft_hash: ${draftHash}` : '',
       applyTool ? `apply_tool: ${applyTool}` : '',
       tr(
-        '请调用 apply_config_change，传 confirmed=true、domain=alert_rule、action=create 和下方 payload，创建这条告警规则。',
-        'Call apply_config_change with confirmed=true, domain=alert_rule, action=create, and the payload below to create this alert rule.',
+        '请调用 apply_config_change，传 confirmed=true、domain=alert_rule、action=create、上方 draft_hash 和下方原始 payload，创建这条告警规则；不要改写 payload。',
+        'Call apply_config_change with confirmed=true, domain=alert_rule, action=create, the draft_hash above, and the exact payload below; do not rewrite the payload.',
       ),
       'payload:',
       '```json',
       payload,
       '```',
     ].filter(Boolean).join('\n');
-    void send(content, []);
+    return send(content, [], { expectedTool: applyTool });
   }
 
   function ThinkingIndicator() {

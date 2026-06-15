@@ -19,11 +19,14 @@ export type ConfigDraftResult = {
   warnings?: string[];
   rollback?: string;
   apply_tool?: string;
+  draft_hash?: string;
 };
+
+type ConfirmConfigDraft = (draft: ConfigDraftResult) => boolean | void | Promise<boolean | void>;
 
 type Props = {
   message: ChatMessage;
-  onConfirmConfigDraft?: (draft: ConfigDraftResult) => void;
+  onConfirmConfigDraft?: ConfirmConfigDraft;
 };
 
 export function MessageBubble({ message, onConfirmConfigDraft }: Props) {
@@ -132,9 +135,9 @@ function ToolCallSummaryBlock({
     result?: unknown;
     duration_ms?: number;
     error?: string;
-  };
-  onConfirmConfigDraft?: (draft: ConfigDraftResult) => void;
-}) {
+	  };
+	  onConfirmConfigDraft?: ConfirmConfigDraft;
+	}) {
   const { tr } = useI18n();
   const [open, setOpen] = useState(false);
   const status = call.status ?? (call.error ? 'error' : 'success');
@@ -223,10 +226,10 @@ function ConfigDraftCard({
   onConfirm,
 }: {
   draft: ConfigDraftResult;
-  onConfirm?: (draft: ConfigDraftResult) => void;
+  onConfirm?: ConfirmConfigDraft;
 }) {
   const { tr } = useI18n();
-  const [state, setState] = useState<'idle' | 'confirmed' | 'cancelled'>('idle');
+  const [state, setState] = useState<'idle' | 'submitting' | 'confirmed' | 'cancelled'>('idle');
   const preview = previewSummary(draft.preview);
   const warnings = Array.isArray(draft.warnings) ? draft.warnings.filter(Boolean) : [];
   const payload = payloadSummary(draft.payload);
@@ -267,13 +270,23 @@ function ConfigDraftCard({
           <Button
             variant="primary"
             disabled={disabled}
-            onClick={() => {
-              setState('confirmed');
-              onConfirm?.(draft);
+            onClick={async () => {
+              if (!onConfirm) return;
+              setState('submitting');
+              try {
+                const ok = await onConfirm(draft);
+                setState(ok === false ? 'idle' : 'confirmed');
+              } catch {
+                setState('idle');
+              }
             }}
           >
             <CheckCircle2 size={13} />
-            {state === 'confirmed' ? tr('已确认', 'Confirmed') : tr('确认应用', 'Apply')}
+            {state === 'confirmed'
+              ? tr('已确认', 'Confirmed')
+              : state === 'submitting'
+                ? tr('应用中', 'Applying')
+                : tr('确认应用', 'Apply')}
           </Button>
           <Button
             variant="ghost"

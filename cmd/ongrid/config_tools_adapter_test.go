@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
 	aiopstools "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools"
+	managersvcalert "github.com/ongridio/ongrid/internal/manager/service/alert"
 )
 
 func TestNormalizeAlertRuleConfigInputCanonicalizesHostMetricAliases(t *testing.T) {
@@ -157,6 +160,62 @@ func TestNormalizeAlertRuleConfigInputExpandsDatabaseCatalogMetric(t *testing.T)
 	}
 }
 
+func TestDraftAlertRuleConfigIncludesMatchingDraftHash(t *testing.T) {
+	adapter := newChatConfigAdapter(managersvcalert.NewStub())
+	draft, err := adapter.DraftAlertRuleConfig(context.Background(), aiopstools.ConfigCaller{}, aiopstools.AlertRuleConfigArgs{
+		Action: "create",
+		Rule: aiopstools.AlertRuleConfigInput{
+			Kind: "trace_latency",
+			Spec: map[string]interface{}{
+				"service":      "checkout",
+				"threshold_ms": 750,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("DraftAlertRuleConfig() error = %v", err)
+	}
+	if draft.DraftHash == "" {
+		t.Fatalf("DraftHash should be populated")
+	}
+	var payload struct {
+		Action string                          `json:"action"`
+		Rule   aiopstools.AlertRuleConfigInput `json:"rule"`
+	}
+	if err := json.Unmarshal(draft.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal draft payload: %v", err)
+	}
+	want, err := aiopstools.AlertRuleConfigDraftHash(payload.Action, payload.Rule)
+	if err != nil {
+		t.Fatalf("AlertRuleConfigDraftHash() error = %v", err)
+	}
+	if draft.DraftHash != want {
+		t.Fatalf("DraftHash = %q, want %q", draft.DraftHash, want)
+	}
+}
+
+func TestApplyAlertRuleConfigRejectsSkippedPreview(t *testing.T) {
+	adapter := newChatConfigAdapter(managersvcalert.NewStub())
+	_, err := adapter.ApplyAlertRuleConfig(context.Background(), aiopstools.ConfigCaller{Role: "admin"}, aiopstools.AlertRuleApplyArgs{
+		Action: "create",
+		Rule: aiopstools.AlertRuleConfigInput{
+			RuleKey:  "trace_latency_missing_service",
+			Kind:     "trace_latency",
+			Name:     "Trace latency missing service",
+			Severity: "warning",
+			Spec: map[string]interface{}{
+				"threshold_ms": 750,
+			},
+		},
+	})
+	if err == nil {
+		t.Fatalf("expected skipped preview error")
+	}
+	if !strings.Contains(err.Error(), "preview skipped before create") {
+		t.Fatalf("error = %v, want skipped preview", err)
+	}
+}
+
 func TestNormalizeAlertRuleConfigInputBuildsRawPredicateForCollectedMetricName(t *testing.T) {
 	in := aiopstools.AlertRuleConfigInput{
 		Spec: map[string]interface{}{
@@ -229,8 +288,10 @@ func TestDatabaseAlertMetricExprCoversSupportedCatalogMetrics(t *testing.T) {
 		"redis_blocked_clients",
 		"redis_slowlog_length",
 		"redis_latency_usec",
+		"redis_key_count",
 		"mongodb_up",
 		"mongodb_connections_current",
+		"mongodb_connections_available",
 		"mongodb_operations_per_second",
 		"mongodb_asserts_15m",
 		"mongodb_page_faults_15m",
@@ -250,6 +311,35 @@ func TestDatabaseAlertMetricExprCoversSupportedCatalogMetrics(t *testing.T) {
 			}
 			if !strings.Contains(expr, `device_id="db-1"`) {
 				t.Fatalf("expr = %q, want selector propagated", expr)
+			}
+		})
+	}
+}
+
+func TestDatabaseAlertMetricExprCoversAnalyzerFallbackMetrics(t *testing.T) {
+	tests := []struct {
+		name string
+		want []string
+	}{
+		{name: "redis_ops_per_second", want: []string{"redis_commands_processed_total", "redis_commands_total"}},
+		{name: "redis_key_count", want: []string{"redis_db_keys", "redis_keys_count"}},
+		{name: "mongodb_connections_current", want: []string{"mongodb_ss_connections", "conn_type=\"current\"", "mongodb_connections", "state=\"current\""}},
+		{name: "mongodb_operations_per_second", want: []string{"mongodb_ss_opcounters", "mongodb_op_counters_total"}},
+		{name: "mongodb_asserts_15m", want: []string{"mongodb_ss_asserts", "mongodb_asserts_total"}},
+		{name: "mongodb_page_faults_15m", want: []string{"mongodb_ss_extra_info_page_faults", "mongodb_ss_extra_info_page_faults_total"}},
+		{name: "mongodb_resident_memory_bytes", want: []string{"mongodb_ss_mem_resident", "mongodb_mongod_mem_resident_megabytes"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			expr, ok := databaseAlertMetricExpr(tt.name, `device_id="db-1"`)
+			if !ok {
+				t.Fatalf("databaseAlertMetricExpr(%q) ok = false, want true", tt.name)
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(expr, want) {
+					t.Fatalf("expr = %q, want to contain %q", expr, want)
+				}
 			}
 		})
 	}

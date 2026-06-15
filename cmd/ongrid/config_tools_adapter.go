@@ -49,10 +49,7 @@ func (a *chatConfigAdapter) DraftAlertRuleConfig(ctx context.Context, caller aio
 	if err != nil {
 		return nil, err
 	}
-	payload, err := configRaw(map[string]interface{}{
-		"action": action,
-		"rule":   rule,
-	})
+	payload, draftHash, err := aiopstools.AlertRuleConfigDraftPayload(action, rule)
 	if err != nil {
 		return nil, err
 	}
@@ -66,6 +63,7 @@ func (a *chatConfigAdapter) DraftAlertRuleConfig(ctx context.Context, caller aio
 		Warnings:  warnings,
 		Rollback:  "可在 Alerts 规则列表中禁用或继续编辑该规则。",
 		ApplyTool: aiopstools.ToolNameApplyConfigChange,
+		DraftHash: draftHash,
 	}, nil
 }
 
@@ -79,8 +77,12 @@ func (a *chatConfigAdapter) ApplyAlertRuleConfig(ctx context.Context, caller aio
 	}
 	alertCaller := toAlertServiceCaller(caller)
 	ruleInput := toAlertRuleInput(in.Rule)
-	if _, err := a.alert.PreviewRule(ctx, alertCaller, ruleInput, 0); err != nil {
+	res, err := a.alert.PreviewRule(ctx, alertCaller, ruleInput, 0)
+	if err != nil {
 		return nil, fmt.Errorf("preview alert rule before create: %w", err)
+	}
+	if res != nil && strings.TrimSpace(res.SkippedReason) != "" {
+		return nil, fmt.Errorf("%w: preview skipped before create: %s", errs.ErrInvalid, strings.TrimSpace(res.SkippedReason))
 	}
 	rule, err := a.alert.CreateRule(ctx, alertCaller, ruleInput)
 	if err != nil {
@@ -450,8 +452,11 @@ func databaseAlertMetricExpr(metric string, selector string) (string, bool) {
 			ms("redis_connected_clients"), ms("redis_config_maxclients")), true
 	case "redis_connected_clients":
 		return fmt.Sprintf("max(%s)", ms("redis_connected_clients")), true
-	case "redis_ops_per_second", "redis_qps", "redis_commands_per_second":
-		return fmt.Sprintf("sum(rate(%s[5m]))", ms("redis_commands_processed_total")), true
+	case "redis_ops_per_second", "redis_qps", "redis_commands_per_second", "redis_commands_total", "redis_throughput":
+		return promOr(
+			fmt.Sprintf("sum(rate(%s[5m]))", ms("redis_commands_processed_total")),
+			fmt.Sprintf("sum(rate(%s[5m]))", ms("redis_commands_total")),
+		), true
 	case "redis_keyspace_hit_ratio_pct", "redis_cache_hit_ratio_pct":
 		return fmt.Sprintf("100 * sum(rate(%s[5m])) / clamp_min(sum(rate(%s[5m])) + sum(rate(%s[5m])), 1)",
 			ms("redis_keyspace_hits_total"), ms("redis_keyspace_hits_total"), ms("redis_keyspace_misses_total")), true
@@ -465,18 +470,43 @@ func databaseAlertMetricExpr(metric string, selector string) (string, bool) {
 		return fmt.Sprintf("max(%s)", ms("redis_slowlog_length")), true
 	case "redis_latency_usec", "redis_latency_high":
 		return fmt.Sprintf("max(%s)", ms("redis_latency_percentiles_usec")), true
+	case "redis_key_count", "redis_keys_count", "redis_db_keys":
+		return promOr(
+			fmt.Sprintf("sum(%s)", ms("redis_db_keys")),
+			fmt.Sprintf("sum(%s)", ms("redis_keys_count")),
+		), true
 	case "mongodb_up", "mongo_up", "mongodb_liveness":
 		return fmt.Sprintf("min(%s)", ms("mongodb_up")), true
 	case "mongodb_connections_current", "mongodb_current_connections":
-		return fmt.Sprintf("max(%s)", metricSelector("mongodb_ss_connections", mergeSelector(selector, `conn_type="current"`))), true
-	case "mongodb_operations_per_second", "mongodb_ops_per_second":
-		return fmt.Sprintf("sum(rate(%s[5m]))", ms("mongodb_ss_opcounters")), true
-	case "mongodb_asserts_15m":
-		return fmt.Sprintf("sum(increase(%s[15m]))", ms("mongodb_ss_asserts")), true
-	case "mongodb_page_faults_15m":
-		return fmt.Sprintf("sum(increase(%s[15m]))", ms("mongodb_ss_extra_info_page_faults")), true
-	case "mongodb_resident_memory_bytes":
-		return fmt.Sprintf("max(%s) * 1024 * 1024", ms("mongodb_ss_mem_resident")), true
+		return promOr(
+			fmt.Sprintf("max(%s)", metricSelector("mongodb_ss_connections", mergeSelector(selector, `conn_type="current"`))),
+			fmt.Sprintf("max(%s)", metricSelector("mongodb_connections", mergeSelector(selector, `state="current"`))),
+		), true
+	case "mongodb_connections_available", "mongodb_available_connections":
+		return promOr(
+			fmt.Sprintf("max(%s)", metricSelector("mongodb_ss_connections", mergeSelector(selector, `conn_type="available"`))),
+			fmt.Sprintf("max(%s)", metricSelector("mongodb_connections", mergeSelector(selector, `state="available"`))),
+		), true
+	case "mongodb_operations_per_second", "mongodb_ops_per_second", "mongodb_operations":
+		return promOr(
+			fmt.Sprintf("sum(rate(%s[5m]))", ms("mongodb_ss_opcounters")),
+			fmt.Sprintf("sum(rate(%s[5m]))", ms("mongodb_op_counters_total")),
+		), true
+	case "mongodb_asserts_15m", "mongodb_asserts":
+		return promOr(
+			fmt.Sprintf("sum(increase(%s[15m]))", ms("mongodb_ss_asserts")),
+			fmt.Sprintf("sum(increase(%s[15m]))", ms("mongodb_asserts_total")),
+		), true
+	case "mongodb_page_faults_15m", "mongodb_page_faults":
+		return promOr(
+			fmt.Sprintf("sum(increase(%s[15m]))", ms("mongodb_ss_extra_info_page_faults")),
+			fmt.Sprintf("sum(increase(%s[15m]))", ms("mongodb_ss_extra_info_page_faults_total")),
+		), true
+	case "mongodb_resident_memory_bytes", "mongodb_resident_memory":
+		return promOr(
+			fmt.Sprintf("max(%s) * 1024 * 1024", ms("mongodb_ss_mem_resident")),
+			fmt.Sprintf("max(%s) * 1024 * 1024", ms("mongodb_mongod_mem_resident_megabytes")),
+		), true
 	case "mongodb_wiredtiger_cache_usage_pct", "mongodb_cache_usage_pct":
 		return fmt.Sprintf("100 * max(%s) / clamp_min(max(%s), 1)",
 			ms("mongodb_ss_wt_cache_bytes_currently_in_the_cache"), ms("mongodb_ss_wt_cache_maximum_bytes_configured")), true
@@ -511,6 +541,10 @@ func metricSelector(metric, selector string) string {
 		return metric
 	}
 	return fmt.Sprintf("%s{%s}", metric, selector)
+}
+
+func promOr(lhs, rhs string) string {
+	return fmt.Sprintf("(%s) or (%s)", lhs, rhs)
 }
 
 func mergeSelector(a, b string) string {
