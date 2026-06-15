@@ -119,15 +119,15 @@ type RuleCondition struct {
 
 // Rule is the DTO returned by rule endpoints.
 type Rule struct {
-	ID         uint64            `json:"id"`
-	RuleKey    string            `json:"rule_key"`
-	Kind       string            `json:"kind"`
-	Name       string            `json:"name"`
-	SourceType string            `json:"source_type"`
-	ScopeType  string            `json:"scope_type"`
-	JoinMode   string            `json:"join_mode"`
-	Severity   string            `json:"severity"`
-	Enabled    bool              `json:"enabled"`
+	ID         uint64 `json:"id"`
+	RuleKey    string `json:"rule_key"`
+	Kind       string `json:"kind"`
+	Name       string `json:"name"`
+	SourceType string `json:"source_type"`
+	ScopeType  string `json:"scope_type"`
+	JoinMode   string `json:"join_mode"`
+	Severity   string `json:"severity"`
+	Enabled    bool   `json:"enabled"`
 	// Conditions is populated for kind=metric_threshold; empty for other kinds.
 	Conditions []RuleCondition `json:"conditions,omitempty"`
 	// Spec is populated for non-metric_threshold kinds (decoded from
@@ -137,7 +137,7 @@ type Rule struct {
 	RunbookURL string            `json:"runbook_url,omitempty"`
 	// NotifyChannelIDs lists channels this rule pins notifications to.
 	// Empty / nil → router falls back to global channel filters.
-	NotifyChannelIDs []uint64  `json:"notify_channel_ids,omitempty"`
+	NotifyChannelIDs []uint64 `json:"notify_channel_ids,omitempty"`
 	// NotifyWindowSeconds + NotifyMinFires expose the per-rule
 	// 「发送策略」 dampening config. Both zero = disabled (UI hides
 	// the "已启用" badge); both > 0 = enabled.
@@ -149,13 +149,13 @@ type Rule struct {
 
 // RuleInput is the transport-side rule create/update payload.
 type RuleInput struct {
-	RuleKey    string
-	Kind       string
-	Name       string
-	ScopeType  string
-	JoinMode   string
-	Severity   string
-	Enabled    bool
+	RuleKey   string
+	Kind      string
+	Name      string
+	ScopeType string
+	JoinMode  string
+	Severity  string
+	Enabled   bool
 	// Conditions populates kind=metric_threshold rules.
 	Conditions []RuleCondition
 	// Spec is the kind-specific opaque payload for non-metric_threshold

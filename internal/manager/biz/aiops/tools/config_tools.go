@@ -1,0 +1,454 @@
+package tools
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"strings"
+
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
+	"github.com/ongridio/ongrid/internal/pkg/errs"
+	"github.com/ongridio/ongrid/internal/pkg/tenantctx"
+)
+
+const (
+	ToolNameDraftConfigChange = "draft_config_change"
+	ToolNameApplyConfigChange = "apply_config_change"
+)
+
+const (
+	ConfigDomainAlertRule = "alert_rule"
+	ConfigResultKindDraft = "config_draft"
+	ConfigResultKindApply = "config_apply_result"
+)
+
+// ConfigCaller is the caller identity the config tools hand to the cmd-layer
+// adapter. The adapter enforces admin-only writes using the same role model as
+// the Alerts HTTP handlers.
+type ConfigCaller struct {
+	UserID      uint64
+	Role        string
+	IsSuperuser bool
+}
+
+// ConfigManager is the consumer-owned seam for conversational alert rule
+// creation. The tools package owns JSON schema + tool gating; cmd/ongrid owns
+// mapping to the existing alert service.
+type ConfigManager interface {
+	DraftAlertRuleConfig(ctx context.Context, caller ConfigCaller, in AlertRuleConfigArgs) (*ConfigDraft, error)
+	ApplyAlertRuleConfig(ctx context.Context, caller ConfigCaller, in AlertRuleApplyArgs) (*ConfigApplyResult, error)
+}
+
+type ConfigChangeDraftArgs struct {
+	Domain          string               `json:"domain"`
+	Action          string               `json:"action"`
+	LookbackSeconds int                  `json:"lookback_seconds,omitempty"`
+	Rule            AlertRuleConfigInput `json:"rule,omitempty"`
+}
+
+type ConfigChangeApplyArgs struct {
+	Domain           string               `json:"domain"`
+	Action           string               `json:"action"`
+	Rule             AlertRuleConfigInput `json:"rule,omitempty"`
+	Payload          json.RawMessage      `json:"payload,omitempty"`
+	Confirmed        bool                 `json:"confirmed"`
+	ConfirmationText string               `json:"confirmation_text,omitempty"`
+}
+
+type ConfigTarget struct {
+	ID       uint64 `json:"id,omitempty"`
+	Name     string `json:"name,omitempty"`
+	Type     string `json:"type,omitempty"`
+	Existing bool   `json:"existing,omitempty"`
+}
+
+type ConfigDraft struct {
+	Kind      string          `json:"kind"`
+	Domain    string          `json:"domain"`
+	Action    string          `json:"action"`
+	Summary   string          `json:"summary"`
+	Target    *ConfigTarget   `json:"target,omitempty"`
+	Payload   json.RawMessage `json:"payload,omitempty"`
+	Preview   json.RawMessage `json:"preview,omitempty"`
+	Diff      json.RawMessage `json:"diff,omitempty"`
+	Warnings  []string        `json:"warnings,omitempty"`
+	Rollback  string          `json:"rollback,omitempty"`
+	ApplyTool string          `json:"apply_tool"`
+}
+
+type ConfigApplyResult struct {
+	Kind       string        `json:"kind"`
+	Domain     string        `json:"domain"`
+	Action     string        `json:"action"`
+	Status     string        `json:"status"`
+	ResourceID uint64        `json:"resource_id,omitempty"`
+	Resource   *ConfigTarget `json:"resource,omitempty"`
+	Message    string        `json:"message,omitempty"`
+	Rollback   string        `json:"rollback,omitempty"`
+}
+
+type AlertRuleConfigArgs struct {
+	Action          string               `json:"action"`
+	LookbackSeconds int                  `json:"lookback_seconds,omitempty"`
+	Rule            AlertRuleConfigInput `json:"rule,omitempty"`
+}
+
+type AlertRuleApplyArgs struct {
+	Action           string               `json:"action"`
+	Rule             AlertRuleConfigInput `json:"rule,omitempty"`
+	Confirmed        bool                 `json:"confirmed"`
+	ConfirmationText string               `json:"confirmation_text,omitempty"`
+}
+
+type AlertRuleConfigInput struct {
+	RuleKey             string                 `json:"rule_key,omitempty"`
+	Kind                string                 `json:"kind,omitempty"`
+	Name                string                 `json:"name,omitempty"`
+	ScopeType           string                 `json:"scope_type,omitempty"`
+	JoinMode            string                 `json:"join_mode,omitempty"`
+	Severity            string                 `json:"severity,omitempty"`
+	Enabled             *bool                  `json:"enabled,omitempty"`
+	Conditions          []AlertRuleCondition   `json:"conditions,omitempty"`
+	Spec                map[string]interface{} `json:"spec,omitempty"`
+	Labels              map[string]string      `json:"labels,omitempty"`
+	RunbookURL          string                 `json:"runbook_url,omitempty"`
+	NotifyChannelIDs    []uint64               `json:"notify_channel_ids,omitempty"`
+	NotifyWindowSeconds int                    `json:"notify_window_seconds,omitempty"`
+	NotifyMinFires      int                    `json:"notify_min_fires,omitempty"`
+}
+
+type AlertRuleCondition struct {
+	Metric     string  `json:"metric"`
+	Operator   string  `json:"operator"`
+	Threshold  float64 `json:"threshold"`
+	Window     string  `json:"window,omitempty"`
+	For        string  `json:"for,omitempty"`
+	Aggregator string  `json:"aggregator,omitempty"`
+}
+
+type configToolKind string
+
+const (
+	configToolDraftChange configToolKind = "draft_change"
+	configToolApplyChange configToolKind = "apply_change"
+)
+
+type ConfigTool struct {
+	kind    configToolKind
+	manager ConfigManager
+	log     *slog.Logger
+}
+
+func NewDraftConfigChangeTool(manager ConfigManager, log *slog.Logger) *ConfigTool {
+	return newConfigTool(configToolDraftChange, manager, log)
+}
+
+func NewApplyConfigChangeTool(manager ConfigManager, log *slog.Logger) *ConfigTool {
+	return newConfigTool(configToolApplyChange, manager, log)
+}
+
+func newConfigTool(kind configToolKind, manager ConfigManager, log *slog.Logger) *ConfigTool {
+	if log == nil {
+		log = slog.Default()
+	}
+	return &ConfigTool{kind: kind, manager: manager, log: log}
+}
+
+func (t *ConfigTool) Info(_ context.Context) (*basetool.ToolInfo, error) {
+	switch t.kind {
+	case configToolDraftChange:
+		return &basetool.ToolInfo{
+			Name:        ToolNameDraftConfigChange,
+			Description: "Create a read-only configuration draft for a new alert rule across all supported alert rule kinds. It never persists business config.",
+			WhenToUse:   "Use directly when the user asks to configure, create, or add an alert rule from natural language. Only domain=alert_rule and action=create are supported. Supports metric_threshold, metric_raw, metric_anomaly, metric_forecast, metric_burn_rate, log_match, log_volume, trace_latency, and trace_error_rate. Use metric_threshold only for the host closed-set metrics; use metric_raw for database, custom, or arbitrary collected Prometheus metrics. Do not call query_knowledge, code tools, or AgentTool first for alert-rule creation requests. After one successful config_draft, stop tool calls and ask the user to confirm or cancel; do not call this tool again in the same turn.",
+			Parameters:  draftConfigChangeSchema,
+			Class:       "read",
+		}, nil
+	case configToolApplyChange:
+		return &basetool.ToolInfo{
+			Name:        ToolNameApplyConfigChange,
+			Description: "Apply a previously confirmed new alert-rule configuration draft.",
+			WhenToUse:   "MUTATING. Use only after the user explicitly confirms an alert-rule config_draft. Requires confirmed=true, an admin caller, domain=alert_rule, action=create, and the payload from the draft.",
+			Parameters:  applyConfigChangeSchema,
+			Class:       "write",
+		}, nil
+	default:
+		return nil, fmt.Errorf("unknown config tool kind %q", t.kind)
+	}
+}
+
+func (t *ConfigTool) InvokableRun(ctx context.Context, argsJSON string, opts ...basetool.InvokeOption) (string, error) {
+	if t.manager == nil {
+		return "", fmt.Errorf("config tool: manager not configured")
+	}
+	caller := configCallerFromContext(ctx, opts)
+	switch t.kind {
+	case configToolDraftChange:
+		var in ConfigChangeDraftArgs
+		if err := json.Unmarshal([]byte(argsJSON), &in); err != nil {
+			return "", fmt.Errorf("%s: bad args: %w", ToolNameDraftConfigChange, err)
+		}
+		out, err := t.draftConfigChange(ctx, caller, in)
+		if err != nil {
+			return "", fmt.Errorf("%s: %w", ToolNameDraftConfigChange, err)
+		}
+		return marshalConfigToolResult(out)
+	case configToolApplyChange:
+		var in ConfigChangeApplyArgs
+		if err := json.Unmarshal([]byte(argsJSON), &in); err != nil {
+			return "", fmt.Errorf("%s: bad args: %w", ToolNameApplyConfigChange, err)
+		}
+		if err := validateApplyGate(caller, in.Confirmed); err != nil {
+			return "", fmt.Errorf("%s: %w", ToolNameApplyConfigChange, err)
+		}
+		if err := in.applyPayloadDefaults(); err != nil {
+			return "", fmt.Errorf("%s: %w", ToolNameApplyConfigChange, err)
+		}
+		out, err := t.applyConfigChange(ctx, caller, in)
+		if err != nil {
+			return "", fmt.Errorf("%s: %w", ToolNameApplyConfigChange, err)
+		}
+		return marshalConfigToolResult(out)
+	default:
+		return "", fmt.Errorf("unknown config tool kind %q", t.kind)
+	}
+}
+
+func (t *ConfigTool) draftConfigChange(ctx context.Context, caller ConfigCaller, in ConfigChangeDraftArgs) (*ConfigDraft, error) {
+	if _, err := normalizeConfigDomain(in.Domain); err != nil {
+		return nil, err
+	}
+	action, err := normalizeConfigCreateAction(in.Action)
+	if err != nil {
+		return nil, err
+	}
+	return t.manager.DraftAlertRuleConfig(ctx, caller, AlertRuleConfigArgs{
+		Action:          action,
+		LookbackSeconds: in.LookbackSeconds,
+		Rule:            in.Rule,
+	})
+}
+
+func (t *ConfigTool) applyConfigChange(ctx context.Context, caller ConfigCaller, in ConfigChangeApplyArgs) (*ConfigApplyResult, error) {
+	if _, err := normalizeConfigDomain(in.Domain); err != nil {
+		return nil, err
+	}
+	action, err := normalizeConfigCreateAction(in.Action)
+	if err != nil {
+		return nil, err
+	}
+	return t.manager.ApplyAlertRuleConfig(ctx, caller, AlertRuleApplyArgs{
+		Action:           action,
+		Rule:             in.Rule,
+		Confirmed:        in.Confirmed,
+		ConfirmationText: in.ConfirmationText,
+	})
+}
+
+func configCallerFromContext(ctx context.Context, opts []basetool.InvokeOption) ConfigCaller {
+	resolved := basetool.ResolveOptions(opts)
+	caller := ConfigCaller{UserID: resolved.UserID}
+	if t, ok := tenantctx.From(ctx); ok {
+		caller.UserID = t.UserID
+		caller.Role = t.Role
+		caller.IsSuperuser = t.IsSuperuser
+	}
+	return caller
+}
+
+func validateApplyGate(caller ConfigCaller, confirmed bool) error {
+	if !confirmed {
+		return fmt.Errorf("%w: confirmed=true required before applying a configuration draft", errs.ErrInvalid)
+	}
+	if caller.Role != "admin" && !caller.IsSuperuser {
+		return fmt.Errorf("%w: admin role required to apply configuration", errs.ErrForbidden)
+	}
+	return nil
+}
+
+func normalizeConfigDomain(domain string) (string, error) {
+	d := strings.ToLower(strings.TrimSpace(domain))
+	switch d {
+	case ConfigDomainAlertRule, "alert", "alert_rule_config":
+		return ConfigDomainAlertRule, nil
+	default:
+		return "", fmt.Errorf("%w: domain must be alert_rule; v1 only supports creating alert rules", errs.ErrInvalid)
+	}
+}
+
+func normalizeConfigCreateAction(action string) (string, error) {
+	a := strings.ToLower(strings.TrimSpace(action))
+	switch a {
+	case "", "create":
+		return "create", nil
+	default:
+		return "", fmt.Errorf("%w: action must be create; v1 only supports creating alert rules", errs.ErrInvalid)
+	}
+}
+
+func (in *ConfigChangeApplyArgs) applyPayloadDefaults() error {
+	if len(in.Payload) == 0 {
+		return nil
+	}
+	var payload struct {
+		Action string               `json:"action"`
+		Rule   AlertRuleConfigInput `json:"rule,omitempty"`
+	}
+	if err := json.Unmarshal(in.Payload, &payload); err != nil {
+		return fmt.Errorf("bad draft payload: %w", err)
+	}
+	if in.Action == "" {
+		in.Action = payload.Action
+	}
+	if isZeroAlertRuleInput(in.Rule) {
+		in.Rule = payload.Rule
+	}
+	return nil
+}
+
+func isZeroAlertRuleInput(in AlertRuleConfigInput) bool {
+	return in.RuleKey == "" &&
+		in.Kind == "" &&
+		in.Name == "" &&
+		in.ScopeType == "" &&
+		in.JoinMode == "" &&
+		in.Severity == "" &&
+		in.Enabled == nil &&
+		len(in.Conditions) == 0 &&
+		len(in.Spec) == 0 &&
+		len(in.Labels) == 0 &&
+		in.RunbookURL == "" &&
+		len(in.NotifyChannelIDs) == 0 &&
+		in.NotifyWindowSeconds == 0 &&
+		in.NotifyMinFires == 0
+}
+
+func marshalConfigToolResult(v interface{}) (string, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return "", fmt.Errorf("marshal config result: %w", err)
+	}
+	var decoded interface{}
+	if err := json.Unmarshal(b, &decoded); err == nil {
+		scrubConfigSecrets(decoded)
+		b, err = json.Marshal(decoded)
+		if err != nil {
+			return "", fmt.Errorf("marshal scrubbed config result: %w", err)
+		}
+	}
+	return string(b), nil
+}
+
+func scrubConfigSecrets(v interface{}) {
+	switch x := v.(type) {
+	case map[string]interface{}:
+		for k, value := range x {
+			if isSensitiveConfigKey(k) {
+				if s, ok := value.(string); ok && s != "" {
+					x[k] = "******"
+					continue
+				}
+			}
+			scrubConfigSecrets(value)
+		}
+	case []interface{}:
+		for _, item := range x {
+			scrubConfigSecrets(item)
+		}
+	}
+}
+
+func isSensitiveConfigKey(key string) bool {
+	k := strings.ToLower(strings.TrimSpace(key))
+	switch k {
+	case "secret", "app_secret", "verify_token", "encrypt_key", "token", "password", "api_key", "apikey":
+		return true
+	default:
+		return false
+	}
+}
+
+var draftConfigChangeSchema = json.RawMessage(`{
+  "type": "object",
+  "required": ["domain", "action", "rule"],
+  "properties": {
+    "domain": {
+      "type": "string",
+      "enum": ["alert_rule"],
+      "description": "Only alert_rule is supported in v1."
+    },
+    "action": {"type": "string", "enum": ["create"]},
+    "lookback_seconds": {
+      "type": "integer",
+      "minimum": 60,
+      "maximum": 604800,
+      "description": "alert_rule preview lookback window; default 86400."
+    },
+    "rule": {"$ref": "#/$defs/rule", "description": "Required for creating an alert rule."}
+  },
+  "$defs": {
+    "rule": {
+      "type": "object",
+      "properties": {
+        "rule_key": {"type": "string", "description": "Required for create. Lower snake case."},
+        "kind": {
+          "type": "string",
+          "enum": ["metric_threshold", "metric_raw", "metric_anomaly", "metric_forecast", "metric_burn_rate", "log_match", "log_volume", "trace_latency", "trace_error_rate"],
+          "description": "Choose the existing alert creation mode. metric_threshold is only for host closed-set metrics. metric_raw is for arbitrary PromQL predicates, database metrics, custommetrics, and any exact collected metric name."
+        },
+        "name": {"type": "string"},
+        "scope_type": {"type": "string"},
+        "join_mode": {"type": "string", "enum": ["all", "any"]},
+        "severity": {"type": "string", "enum": ["info", "warning", "critical"]},
+        "enabled": {"type": "boolean"},
+        "conditions": {
+          "type": "array",
+          "description": "Only for kind=metric_threshold host rules. Canonical host metrics: cpu_pct, mem_pct, disk_used_pct, disk_avail_bytes, load1, load5, load15, net_rx_bps, net_tx_bps. Do not put MySQL/PostgreSQL/Redis/MongoDB/custom metrics here; use metric_raw instead.",
+          "items": {"$ref": "#/$defs/condition"}
+        },
+        "spec": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Kind-specific spec. metric_raw: either expr/promql/query with the full PromQL predicate, or catalog_metric/db_metric/metric plus operator and threshold. For exact collected metrics, set metric to the Prometheus metric name and operator/threshold, e.g. redis_connected_clients > 100. Database catalog_metric examples: mysql_connection_usage_pct, mysql_slow_queries_15m, postgresql_connection_usage_pct, postgresql_deadlocks_15m, redis_memory_usage_pct, redis_keyspace_hit_ratio_pct, mongodb_connections_current, mongodb_wiredtiger_cache_usage_pct. Optional selector/label_selector/matchers or labels can scope the metric. metric_anomaly: metric, method(zscore|mad), baseline_window, baseline_step, deviation. metric_forecast: metric, fit_window, predict_seconds, operator, threshold. metric_burn_rate: sli using $window, slo, burns[{window,multiplier}]. log_match: stream_selector, line_filter, window, operator, threshold. log_volume: stream_selector, window, ratio_op, ratio_threshold. trace_latency: service, operation(optional), quantile(p50|p95|p99), window, threshold_ms. trace_error_rate: service, window, operator, threshold_pct."
+        },
+        "labels": {"type": "object", "additionalProperties": {"type": "string"}},
+        "runbook_url": {"type": "string"},
+        "notify_channel_ids": {"type": "array", "items": {"type": "integer"}},
+        "notify_window_seconds": {"type": "integer", "minimum": 0},
+        "notify_min_fires": {"type": "integer", "minimum": 0}
+      }
+    },
+    "condition": {
+      "type": "object",
+      "properties": {
+        "metric": {"type": "string"},
+        "operator": {"type": "string"},
+        "threshold": {"type": "number"},
+        "window": {"type": "string"},
+        "for": {"type": "string"},
+        "aggregator": {"type": "string"}
+      }
+    }
+  }
+}`)
+
+var applyConfigChangeSchema = json.RawMessage(`{
+  "type": "object",
+  "required": ["domain", "action", "confirmed"],
+  "properties": {
+    "domain": {
+      "type": "string",
+      "enum": ["alert_rule"],
+      "description": "Configuration domain from the config_draft."
+    },
+    "action": {"type": "string", "enum": ["create"]},
+    "confirmed": {"type": "boolean", "description": "Must be true after explicit user confirmation."},
+    "confirmation_text": {"type": "string"},
+    "payload": {
+      "type": "object",
+      "description": "Optional payload object returned by draft_config_change; used as defaults for action/rule."
+    },
+    "rule": {"type": "object", "additionalProperties": true}
+  }
+}`)

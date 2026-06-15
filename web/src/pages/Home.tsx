@@ -12,7 +12,6 @@ import {
   History,
   ListTree,
   Network,
-  PlugZap,
   Search,
   ShieldAlert,
   TrendingUp,
@@ -70,7 +69,7 @@ const PROMPT_POOL: PromptPreset[] = [
   { titleZh: '列出离线超过 24 小时的设备', titleEn: 'List devices offline > 24h',
     descZh: '找掉线节点', descEn: 'Find disconnected nodes',
     promptZh: '列出离线超过 24 小时的设备，按最后在线时间倒序展示。',
-    promptEn: 'List devices offline for over 24h, sorted by last-seen descending.', icon: PlugZap },
+    promptEn: 'List devices offline for over 24h, sorted by last-seen descending.', icon: AlertTriangle },
   { titleZh: '对比本周和上周的整体负载', titleEn: 'Compare load: this week vs. last',
     descZh: '看趋势变化', descEn: 'See the trend',
     promptZh: '对比本周和上周所有设备的整体 CPU、内存、负载趋势，指出变化最大的节点。',
@@ -127,6 +126,10 @@ const PROMPT_POOL: PromptPreset[] = [
     descZh: 'MySQL / PostgreSQL / Redis / MongoDB', descEn: 'MySQL / PostgreSQL / Redis / MongoDB',
     promptZh: '分析当前数据库状态，覆盖 MySQL、PostgreSQL、Redis、MongoDB；按异常优先输出总体结论、每个数据库的关键指标、风险和证据。',
     promptEn: 'Analyze current database status across MySQL, PostgreSQL, Redis, and MongoDB. Prioritize anomalies and include the overall conclusion, key metrics, risks, and evidence for each database.', icon: Database },
+  { titleZh: '配置一条 CPU 告警', titleEn: 'Configure a CPU alert',
+    descZh: '先草案试算，确认后应用', descEn: 'Draft and preview before applying',
+    promptZh: '配置一条 CPU 超过 90% 且持续 5 分钟的 warning 告警，先生成草案并试算，不要直接应用。',
+    promptEn: 'Configure a warning alert for CPU over 90% for 5 minutes. Generate a draft with preview first; do not apply it yet.', icon: Bell },
 ];
 
 function samplePrompts(n: number): typeof PROMPT_POOL {

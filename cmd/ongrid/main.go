@@ -1046,6 +1046,31 @@ func main() {
 	)
 	webshellHandler.SetAuthz(authzMW)
 
+	alertSvc := managersvcalert.New(alertUC, alertRepo, notifyRouter, log.With(slog.String("comp", "alert-svc")))
+	// Wire the read-only preview clients (Prom range + Loki range). Each
+	// is optional — when nil, the corresponding kind returns skipped_reason
+	// instead of a hard error. Built before the AIOps runtime so
+	// conversational draft tools can reuse the same service path.
+	{
+		previewDeps := managerbizalert.PreviewDeps{}
+		if promQueryClient != nil {
+			previewDeps.Prom = promQueryClient
+		}
+		if cfg.Logs.URL != "" {
+			previewDeps.Log = pkglogquery.New(cfg.Logs.URL, log.With(slog.String("comp", "alert-preview-log")))
+		}
+		alertSvc.SetPreviewDeps(previewDeps)
+	}
+
+	// IM bridge admin repo/UC is needed by Settings -> Channels HTTP handlers.
+	// The runtime-facing Bridge service still wires later, after aiopsSvc
+	// exists.
+	if err := managerimbridgedata.Migrate(db); err != nil {
+		log.Error("imbridge: migrate failed", slog.Any("err", err))
+	}
+	imbridgeRepo := managerimbridgedata.New(db)
+	imbridgeUC := managerbizimbridge.NewUC(imbridgeRepo)
+
 	// manager/aiops biz + service + server.
 	//
 	// BudgetChecker wiring: cfg.LLM.DailyTokenLimit (ONGRID_LLM_DAILY_TOKEN_LIMIT,
@@ -1073,6 +1098,7 @@ func main() {
 	}
 	toolsReg := aiopstools.NewRegistry(fbClient, edgeUC, deviceUC, promQuerier, logQuerier, traceQuerier, alertUC, log)
 	toolsReg.SetPluginConfigLister(pluginConfigUC)
+	toolsReg.SetConfigManager(newChatConfigAdapter(alertSvc))
 	// query_change_events (HLD-013 Phase 2) — RCA "what changed near T".
 	// *audit.Usecase satisfies aiopstools.AuditLister via ListChanges.
 	toolsReg.SetAuditLister(auditUC)
@@ -1315,16 +1341,11 @@ func main() {
 	// group; signature verification is enforced inside the handler.
 	// Threads map to ongrid chat_sessions owned by a service-account
 	// user — S3 will replace that with per-IM-user binding.
-	if err := managerimbridgedata.Migrate(db); err != nil {
-		log.Error("imbridge: migrate failed", slog.Any("err", err))
-	}
-	imbridgeRepo := managerimbridgedata.New(db)
 	// Service-account user_id: superuser admin (id=1 on every install
 	// thanks to bootstrap). Future: take from cfg.
 	const imBridgeServiceUserID uint64 = 1
 	imbridgeAgentAdapter := managerbizimbridge.NewAiopsAdapter(aiopsSvc, imBridgeServiceUserID, llmSettingsResolver, log)
 	imbridgeSvc := managerbizimbridge.NewBridge(imbridgeRepo, imbridgeAgentAdapter, imBridgeServiceUserID, log)
-	imbridgeUC := managerbizimbridge.NewUC(imbridgeRepo)
 	imbridgeHandler := managerserverimbridge.NewHandler(imbridgeSvc, imbridgeRepo, imbridgeUC, log)
 
 	// Stream supervisor: long-connection mode. Runs one
@@ -1572,20 +1593,6 @@ func main() {
 		}()
 	}
 
-	alertSvc := managersvcalert.New(alertUC, alertRepo, notifyRouter, log.With(slog.String("comp", "alert-svc")))
-	// Wire the read-only preview clients (Prom range + Loki range). Each
-	// is optional — when nil, the corresponding kind returns
-	// skipped_reason instead of a hard error.
-	{
-		previewDeps := managerbizalert.PreviewDeps{}
-		if promQueryClient != nil {
-			previewDeps.Prom = promQueryClient
-		}
-		if cfg.Logs.URL != "" {
-			previewDeps.Log = pkglogquery.New(cfg.Logs.URL, log.With(slog.String("comp", "alert-preview-log")))
-		}
-		alertSvc.SetPreviewDeps(previewDeps)
-	}
 	alertHandler := managerserveralert.NewHandler(alertSvc, alertSvc, alertSvc).
 		WithInvestigations(manageralertdata.NewInvestigationRepo(db)).
 		WithRuntime(cfg.Alert.EvaluatorInterval, cfg.Alert.Cooldown)
@@ -2546,6 +2553,8 @@ var coordinatorToolNames = []string{
 	"list_repo_sources",
 	"read_source",
 	"grep_source",
+	"draft_config_change",
+	"apply_config_change",
 }
 
 // Heavy on parameters because every dep flows through this site
@@ -2753,9 +2762,12 @@ func buildAIOpsRuntime(
 		SystemPrompt: strings.TrimSpace(`
 你是 ongrid 的 AIOps 协调员。你的本职是**判断派给谁 / 直接知识答 / 直接拒绝**，不亲自做深度数据查询。
 
-你手上能用的工具就是当前 toolBag 里显式注册的那几个（query_devices / query_incidents / get_topology / list_database_sources / analyze_database_status / query_knowledge / search_web 这类轻量定位 + 知识工具，list_repo_sources / read_source / grep_source 这三个只读读码工具，加上 AgentTool 这个派活工具）。**不要尝试调用任何没有在 schema 中提供的工具名**——深度的实时集群数据查询（promql / logql / host_*）被设计成只在 specialist 手上；数据库状态、明确类型的库/表/集合/key 数量、集群/复制、可选高级 collector、指标覆盖和性能总览，只要 MySQL / PostgreSQL / Redis / MongoDB exporter 可能覆盖，统一先用 analyze_database_status；纯配置/资产问题，比如"我有多少数据库 / 配置了哪些采集源 / 采集源在哪个设备 / 我的数据库在哪台设备 / 来源插件关系 / 采集源数量"，用 list_database_sources。
+你手上能用的工具就是当前 toolBag 里显式注册的那几个（query_devices / query_incidents / get_topology / list_database_sources / analyze_database_status / query_knowledge / search_web 这类轻量定位 + 知识工具，list_repo_sources / read_source / grep_source 这三个只读读码工具，draft_config_change / apply_config_change 配置工具，加上 AgentTool 这个派活工具）。**不要尝试调用任何没有在 schema 中提供的工具名**——深度的实时集群数据查询（promql / logql / host_*）被设计成只在 specialist 手上；数据库状态、明确类型的库/表/集合/key 数量、集群/复制、可选高级 collector、指标覆盖和性能总览，只要 MySQL / PostgreSQL / Redis / MongoDB exporter 可能覆盖，统一先用 analyze_database_status；纯配置/资产问题，比如"我有多少数据库 / 配置了哪些采集源 / 采集源在哪个设备 / 我的数据库在哪台设备 / 来源插件关系 / 采集源数量"，用 list_database_sources。
+
+最高优先级例外：用户要求"配置 / 创建 / 新增"告警规则时，这是**对话式配置**，不是知识问答、不是源码问题、不是排障。只允许调用 draft_config_change 或 apply_config_change；domain 必须是 alert_rule，action 必须是 create。不要 query_knowledge，不要 list_repo_sources/read_source/grep_source，不要 AgentTool。draft_config_change 一旦成功返回 config_draft，立刻停止工具调用，用最终回答概括草案并等待用户点确认/取消；同一轮绝不第二次调用 draft_config_change。创建告警规则支持现有所有 rule kind：metric_threshold / metric_raw / metric_anomaly / metric_forecast / metric_burn_rate / log_match / log_volume / trace_latency / trace_error_rate。host 简单阈值用 metric_threshold 的 closed-set 指标；数据库、自定义采集和其它真实 Prometheus 指标用 metric_raw，必须把完整 PromQL predicate 或 catalog_metric/metric+operator+threshold 交给工具 preview。缺少可自动默认的字段时用合理默认值，不要反复查资料。用户要求更新/启用/禁用/删除告警规则，或配置通知渠道、IM bot、LLM 模型集成时，直接说明 v1 暂只支持自然语言创建告警规则。
 
 工作流程：
+  0. 对话式配置（自然语言创建告警规则）→ 直接调用 draft_config_change，并设置 domain=alert_rule、action=create；draft 成功后马上最终回答，不再调用任何工具。用户确认后才调用 apply_config_change，并传 confirmed=true、domain=alert_rule、action=create 和草案 payload。自然语言创建规则支持当前所有创建方式；数据库 / custommetrics / 任意已采集 Prometheus 指标用 metric_raw，不要塞进 metric_threshold。通知渠道、IM bot、LLM 模型集成，以及更新/启用/禁用/删除告警规则不属于 v1，直接说明暂不支持。
   1. 用户问运维 / 排查 / 性能 / 资源 / 告警 / 健康 类问题 → 用 AgentTool 派给对应 specialist（**你的本职就是这一步**）
   2. 用户问"X 怎么做 / Y 怎么排查"类知识题 → query_knowledge 一次拉 KB，然后基于 playbook 回答
   2b. 用户问源码 / 某文件某行 / 函数或类型定义 / 把告警·日志里的 file:line·栈关联到代码 → 直接用 grep_source（搜函数名·报错串）/ read_source（读文件或行区间）/ list_repo_sources（看仓库结构）回答。这是只读查询，和 query_knowledge 一样是你自己能做的，**不要为读代码去派 specialist**。repo 参数用仓库名子串（如 "geminio"）。**做逻辑探查**：定位到一段代码后，顺着它调用的函数 / 引用的类型 / 报错分支继续 grep + read 逐层跟读，理清「输入怎么流到这、为什么走到这个分支」再下结论，别只读一处。
@@ -2889,7 +2901,7 @@ func ongridBasePrompt() string {
 
 1. **专家派活是第一选择**（看用户问题前先想这一步）。Ongrid 有 5 个 specialist worker，每个 toolBag 都比你裁剪过、推理更聚焦。**只要用户的问题落入任一专家域——不管单域还是跨域——必须用 ` + bt + `AgentTool` + bt + ` 派给 specialist，而不是自己一路 query_***。"单域问题我自己也能搞定"是错觉，是被监控的反模式。
 
-   **触发条件**（命中即派，不要犹豫；不要先自己跑工具"探探"再决定）：
+   **触发条件**（命中即派，不要犹豫；不要先自己跑工具"探探"再决定）。但"配置/创建/新增告警规则"是对话式配置例外，即使句子里出现 CPU / 内存 / 数据库 / 日志 / 链路 / 告警 / 配置，也不要派 specialist，直接走 draft_config_change。创建规则支持现有全部 rule kind；host closed-set 用 metric_threshold，数据库 / custommetrics / 其它已采集 Prometheus 指标用 metric_raw。更新/启用/禁用/删除告警规则，或配置通知渠道、IM bot、LLM 模型集成不属于 v1，直接说明暂不支持：
 
    | 用户话里出现 | 派给 |
    |---|---|
@@ -2920,6 +2932,7 @@ func ongridBasePrompt() string {
    prompt 必须自包含（worker 看不到你的对话）。description 是给人看的一句话摘要。
 
    **不要派 AgentTool 的边界**——仅限以下场景：
+   - 对话式配置（自然语言创建告警规则）→ 直接 draft_config_change，不派专家、不查 KB、不读代码；数据库 / custommetrics / 任意已采集 Prometheus 指标用 metric_raw；其他配置类需求说明 v1 暂不支持
    - 单一已知数据点的事实查询（"device 3 现在 CPU 多少" / "ongrid 集群有几台 device"）→ 直接调对应工具
    - 知识库 / 文档查询（"OOM 怎么排查"）→ 直接 query_knowledge
    - 不存在的设备 / 模糊澄清 → 先 query_devices 或问用户
@@ -2962,6 +2975,8 @@ func ongridBasePrompt() string {
     - 未命中再走通用诊断或调实时数据工具
     - query 用自然语言整句即可（不必拆词，向量检索喜欢完整语义）
     - 同一会话同一主题只查一次 KB；KB 已答过的话题不要重复查
+
+    **RAG-first 例外**：用户是在要求创建告警规则时，不要 query_knowledge；直接按对话式配置规则调用 ` + bt + `draft_config_change` + bt + `，成功后停止工具调用并等待确认。创建规则支持现有全部 rule kind；host closed-set 用 metric_threshold，数据库 / custommetrics / 其它已采集 Prometheus 指标用 metric_raw。更新/启用/禁用/删除告警规则，或配置通知渠道、IM bot、LLM 模型集成时，直接说明 v1 暂不支持。
 `)
 }
 

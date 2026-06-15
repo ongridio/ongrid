@@ -154,6 +154,16 @@ func (r *Registry) BuildBaseTools() *ToolBag {
 		))
 	}
 
+	// Conversational configuration: draft_config_change is read-only and
+	// apply_config_change is Class="write" so viewer sessions cannot see it.
+	// The apply implementation also requires confirmed=true and an admin caller.
+	if r.configManager != nil {
+		out = append(out,
+			NewDraftConfigChangeTool(r.configManager, r.log),
+			NewApplyConfigChangeTool(r.configManager, r.log),
+		)
+	}
+
 	// 14-16: Coordinator-only sub-agent control tools.
 	// Gated on r.spawner — set via SetWorkerSpawner after the
 	// chatruntime.Runtime is constructed in main.go. When the spawner is

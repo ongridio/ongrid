@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
 import { ChatInput, type ModelSelection, type SubmitPayload } from '@/components/ChatInput';
-import { MessageBubble } from '@/components/MessageBubble';
+import { MessageBubble, type ConfigDraftResult } from '@/components/MessageBubble';
 import { AgentBadge } from '@/components/AgentBadge';
 import { PageHeader } from '@/components/ui';
 import {
@@ -312,6 +312,27 @@ export default function ChatThreadPage() {
     }
   }
 
+  function confirmConfigDraft(draft: ConfigDraftResult) {
+    if (submitting) return;
+    const applyTool = draft.apply_tool || 'apply_config_change';
+    const payload = JSON.stringify(draft.payload ?? {}, null, 2);
+    const content = [
+      tr('确认应用这个配置草案。', 'Confirm applying this configuration draft.'),
+      `domain: ${draft.domain || 'config'}`,
+      `action: ${draft.action || 'apply'}`,
+      applyTool ? `apply_tool: ${applyTool}` : '',
+      tr(
+        '请调用 apply_config_change，传 confirmed=true、domain=alert_rule、action=create 和下方 payload，创建这条告警规则。',
+        'Call apply_config_change with confirmed=true, domain=alert_rule, action=create, and the payload below to create this alert rule.',
+      ),
+      'payload:',
+      '```json',
+      payload,
+      '```',
+    ].filter(Boolean).join('\n');
+    void send(content, []);
+  }
+
   function ThinkingIndicator() {
     return (
       <div className="flex items-center gap-2 text-[11px] text-zinc-600">
@@ -352,7 +373,13 @@ export default function ChatThreadPage() {
             ) : messages.length === 0 ? (
               <div className="text-center text-sm text-zinc-500">{tr('这是一个新的会话，发条消息试试。', "This is a new session — try sending a message.")}</div>
             ) : (
-              messages.map((m) => <MessageBubble key={m.id} message={m} />)
+              messages.map((m) => (
+                <MessageBubble
+                  key={m.id}
+                  message={m}
+                  onConfirmConfigDraft={isViewer ? undefined : confirmConfigDraft}
+                />
+              ))
             )}
             {submitting && <ThinkingIndicator />}
             {error && (
