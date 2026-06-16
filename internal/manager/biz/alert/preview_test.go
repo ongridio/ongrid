@@ -15,6 +15,8 @@ import (
 type fakePromRange struct {
 	lastExpr  string
 	lastStep  time.Duration
+	lastStart time.Time
+	lastEnd   time.Time
 	queries   []string
 	res       *promquery.InstantResult
 	err       error
@@ -22,9 +24,11 @@ type fakePromRange struct {
 	errs      []error
 }
 
-func (f *fakePromRange) QueryRange(_ context.Context, expr string, _, _ time.Time, step time.Duration) (*promquery.InstantResult, error) {
+func (f *fakePromRange) QueryRange(_ context.Context, expr string, start, end time.Time, step time.Duration) (*promquery.InstantResult, error) {
 	f.lastExpr = expr
 	f.lastStep = step
+	f.lastStart = start
+	f.lastEnd = end
 	f.queries = append(f.queries, expr)
 	idx := len(f.queries) - 1
 	if idx < len(f.errs) && f.errs[idx] != nil {
@@ -34,6 +38,41 @@ func (f *fakePromRange) QueryRange(_ context.Context, expr string, _, _ time.Tim
 		return f.responses[idx], nil
 	}
 	return f.res, f.err
+}
+
+func TestPreviewRule_ClampsLookbackWindow(t *testing.T) {
+	now := time.Unix(1714003600, 0).UTC()
+	prom := &fakePromRange{
+		res: matrix(t, []struct {
+			Ts    int64
+			Value string
+			Label map[string]string
+		}{
+			{Ts: 1714000000, Value: "92.3", Label: map[string]string{"device_id": "1"}},
+		}),
+	}
+	in := PreviewInput{
+		Input: RuleInput{
+			Kind:      "metric_raw",
+			Name:      "test",
+			Severity:  "warning",
+			Enabled:   true,
+			ScopeType: "global",
+			Spec:      map[string]interface{}{"expr": `up > 0`},
+		},
+		LookbackSeconds: maxPreviewLookbackSeconds * 10,
+	}
+
+	_, err := PreviewRule(context.Background(), in, PreviewDeps{
+		Prom: prom,
+		Now:  func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("PreviewRule: %v", err)
+	}
+	if got, want := prom.lastEnd.Sub(prom.lastStart), time.Duration(maxPreviewLookbackSeconds)*time.Second; got != want {
+		t.Fatalf("lookback range = %s, want %s", got, want)
+	}
 }
 
 type fakeLogRange struct {

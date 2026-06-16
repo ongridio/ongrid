@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"strings"
 
+	alertdraft "github.com/ongridio/ongrid/internal/manager/biz/aiops/alertdraft"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/tenantctx"
@@ -107,33 +108,9 @@ type AlertRuleApplyArgs struct {
 	ConfirmationText string               `json:"confirmation_text,omitempty"`
 }
 
-type AlertRuleConfigInput struct {
-	RuleKey             string                 `json:"rule_key,omitempty"`
-	Kind                string                 `json:"kind,omitempty"`
-	Name                string                 `json:"name,omitempty"`
-	ScopeType           string                 `json:"scope_type,omitempty"`
-	JoinMode            string                 `json:"join_mode,omitempty"`
-	Window              string                 `json:"window,omitempty"`
-	For                 string                 `json:"for,omitempty"`
-	Severity            string                 `json:"severity,omitempty"`
-	Enabled             *bool                  `json:"enabled,omitempty"`
-	Conditions          []AlertRuleCondition   `json:"conditions,omitempty"`
-	Spec                map[string]interface{} `json:"spec,omitempty"`
-	Labels              map[string]string      `json:"labels,omitempty"`
-	RunbookURL          string                 `json:"runbook_url,omitempty"`
-	NotifyChannelIDs    []uint64               `json:"notify_channel_ids,omitempty"`
-	NotifyWindowSeconds int                    `json:"notify_window_seconds,omitempty"`
-	NotifyMinFires      int                    `json:"notify_min_fires,omitempty"`
-}
+type AlertRuleConfigInput = alertdraft.RuleConfigInput
 
-type AlertRuleCondition struct {
-	Metric     string  `json:"metric"`
-	Operator   string  `json:"operator"`
-	Threshold  float64 `json:"threshold"`
-	Window     string  `json:"window,omitempty"`
-	For        string  `json:"for,omitempty"`
-	Aggregator string  `json:"aggregator,omitempty"`
-}
+type AlertRuleCondition = alertdraft.RuleCondition
 
 type configToolKind string
 

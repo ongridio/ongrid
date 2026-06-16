@@ -65,7 +65,12 @@ type PreviewResult struct {
 // maxPreviewSeriesPoints is the upper bound on points returned to the
 // UI. A 24h window at 60s step yields 1440 points so 1500 leaves
 // headroom; larger ranges get downsampled by skipping samples evenly.
-const maxPreviewSeriesPoints = 1500
+const (
+	maxPreviewSeriesPoints        = 1500
+	defaultPreviewLookbackSeconds = 86400
+	minPreviewLookbackSeconds     = 60
+	maxPreviewLookbackSeconds     = 604800
+)
 
 // PreviewPromQuerier is the narrow PromQL range surface PreviewRule
 // needs. *promquery.Client satisfies it.
@@ -117,10 +122,7 @@ func PreviewRule(ctx context.Context, in PreviewInput, deps PreviewDeps) (*Previ
 	if deps.Now != nil {
 		now = deps.Now()
 	}
-	lookback := in.LookbackSeconds
-	if lookback <= 0 {
-		lookback = 86400
-	}
+	lookback := normalizePreviewLookbackSeconds(in.LookbackSeconds)
 	start := now.Add(-time.Duration(lookback) * time.Second)
 
 	// metric_threshold is a UI-only entry form: buildRuleRow has already
@@ -147,6 +149,19 @@ func PreviewRule(ctx context.Context, in PreviewInput, deps PreviewDeps) (*Previ
 		return previewTraceErrorRate(ctx, row, start, now, deps)
 	}
 	return &PreviewResult{SkippedReason: "kind not supported by preview"}, nil
+}
+
+func normalizePreviewLookbackSeconds(lookback int) int {
+	switch {
+	case lookback <= 0:
+		return defaultPreviewLookbackSeconds
+	case lookback < minPreviewLookbackSeconds:
+		return minPreviewLookbackSeconds
+	case lookback > maxPreviewLookbackSeconds:
+		return maxPreviewLookbackSeconds
+	default:
+		return lookback
+	}
 }
 
 // ---- Prom matrix walker -----------------------------------------------------
