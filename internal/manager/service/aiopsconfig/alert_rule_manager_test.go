@@ -1,4 +1,4 @@
-package main
+package aiopsconfig
 
 import (
 	"context"
@@ -13,6 +13,35 @@ import (
 	managersvcalert "github.com/ongridio/ongrid/internal/manager/service/alert"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
+
+type fakeAlertRuleService struct {
+	preview    *managersvcalert.PreviewResult
+	previewErr error
+	createErr  error
+
+	createCalls int
+	lastCreate  managersvcalert.RuleInput
+}
+
+func (f *fakeAlertRuleService) PreviewRule(_ context.Context, _ managersvcalert.Caller, _ managersvcalert.RuleInput, _ int) (*managersvcalert.PreviewResult, error) {
+	return f.preview, f.previewErr
+}
+
+func (f *fakeAlertRuleService) CreateRule(_ context.Context, _ managersvcalert.Caller, in managersvcalert.RuleInput) (*managersvcalert.Rule, error) {
+	f.createCalls++
+	f.lastCreate = in
+	if f.createErr != nil {
+		return nil, f.createErr
+	}
+	return &managersvcalert.Rule{
+		ID:       uint64(f.createCalls),
+		RuleKey:  in.RuleKey,
+		Kind:     in.Kind,
+		Name:     in.Name,
+		Severity: in.Severity,
+		Enabled:  in.Enabled,
+	}, nil
+}
 
 func TestNormalizeAlertRuleConfigInputCanonicalizesHostMetricAliases(t *testing.T) {
 	in := aiopstools.AlertRuleConfigInput{
@@ -406,7 +435,7 @@ func TestNormalizeAlertRuleConfigInputExpandsDatabaseCatalogMetricWithSelectorMa
 }
 
 func TestDraftAlertRuleConfigIncludesMatchingDraftHash(t *testing.T) {
-	adapter := newChatConfigAdapter(managersvcalert.NewStub())
+	adapter := NewAlertRuleManager(managersvcalert.NewStub())
 	draft, err := adapter.DraftAlertRuleConfig(context.Background(), aiopstools.ConfigCaller{}, aiopstools.AlertRuleConfigArgs{
 		Action: "create",
 		Rule: aiopstools.AlertRuleConfigInput{
@@ -424,13 +453,17 @@ func TestDraftAlertRuleConfigIncludesMatchingDraftHash(t *testing.T) {
 		t.Fatalf("DraftHash should be populated")
 	}
 	var payload struct {
-		Action string                          `json:"action"`
-		Rule   aiopstools.AlertRuleConfigInput `json:"rule"`
+		DraftID string                          `json:"draft_id"`
+		Action  string                          `json:"action"`
+		Rule    aiopstools.AlertRuleConfigInput `json:"rule"`
 	}
 	if err := json.Unmarshal(draft.Payload, &payload); err != nil {
 		t.Fatalf("unmarshal draft payload: %v", err)
 	}
-	want, err := aiopstools.AlertRuleConfigDraftHash(payload.Action, payload.Rule)
+	if payload.DraftID == "" {
+		t.Fatalf("payload draft_id should be populated")
+	}
+	want, err := aiopstools.AlertRuleConfigDraftHashForID(payload.Action, payload.Rule, payload.DraftID)
 	if err != nil {
 		t.Fatalf("AlertRuleConfigDraftHash() error = %v", err)
 	}
@@ -475,30 +508,105 @@ func TestCompactAlertPreviewLimitsLongSeriesAndSamples(t *testing.T) {
 	}
 }
 
-func TestApplyAlertRuleConfigRejectsStructuralSkippedPreview(t *testing.T) {
-	adapter := newChatConfigAdapter(managersvcalert.NewStub())
-	_, err := adapter.ApplyAlertRuleConfig(context.Background(), aiopstools.ConfigCaller{Role: "admin"}, aiopstools.AlertRuleApplyArgs{
+func applyArgsFromDraft(t *testing.T, draft *aiopstools.ConfigDraft) aiopstools.AlertRuleApplyArgs {
+	t.Helper()
+	if draft == nil {
+		t.Fatal("draft is nil")
+	}
+	var payload struct {
+		DraftID string                          `json:"draft_id"`
+		Action  string                          `json:"action"`
+		Rule    aiopstools.AlertRuleConfigInput `json:"rule"`
+	}
+	if err := json.Unmarshal(draft.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal draft payload: %v", err)
+	}
+	if payload.DraftID == "" || draft.DraftHash == "" {
+		t.Fatalf("draft missing id/hash: id=%q hash=%q", payload.DraftID, draft.DraftHash)
+	}
+	return aiopstools.AlertRuleApplyArgs{
+		Action:    payload.Action,
+		Rule:      payload.Rule,
+		DraftID:   payload.DraftID,
+		DraftHash: draft.DraftHash,
+		Confirmed: true,
+	}
+}
+
+func TestApplyAlertRuleConfigRejectsUnissuedDraft(t *testing.T) {
+	fake := &fakeAlertRuleService{}
+	adapter := NewAlertRuleManager(fake)
+	rule := aiopstools.AlertRuleConfigInput{
+		RuleKey:  "trace_latency_checkout",
+		Kind:     "trace_latency",
+		Name:     "Trace latency checkout",
+		Severity: "warning",
+		Spec: map[string]interface{}{
+			"service":      "checkout",
+			"threshold_ms": 750,
+		},
+	}
+	draftID := "forged-draft"
+	draftHash, err := aiopstools.AlertRuleConfigDraftHashForID("create", rule, draftID)
+	if err != nil {
+		t.Fatalf("AlertRuleConfigDraftHashForID() error = %v", err)
+	}
+
+	_, err = adapter.ApplyAlertRuleConfig(context.Background(), aiopstools.ConfigCaller{UserID: 7, Role: "admin"}, aiopstools.AlertRuleApplyArgs{
+		Action:    "create",
+		Rule:      rule,
+		DraftID:   draftID,
+		DraftHash: draftHash,
+	})
+	if err == nil {
+		t.Fatalf("expected unissued draft error")
+	}
+	if !strings.Contains(err.Error(), "not issued") {
+		t.Fatalf("error = %v, want unissued draft rejection", err)
+	}
+	if fake.createCalls != 0 {
+		t.Fatalf("create calls = %d, want 0", fake.createCalls)
+	}
+}
+
+func TestApplyAlertRuleConfigConsumesDraftOnce(t *testing.T) {
+	fake := &fakeAlertRuleService{}
+	adapter := NewAlertRuleManager(fake)
+	caller := aiopstools.ConfigCaller{UserID: 7, Role: "admin"}
+	draft, err := adapter.DraftAlertRuleConfig(context.Background(), caller, aiopstools.AlertRuleConfigArgs{
 		Action: "create",
 		Rule: aiopstools.AlertRuleConfigInput{
-			RuleKey:  "trace_latency_missing_service",
+			RuleKey:  "trace_latency_checkout",
 			Kind:     "trace_latency",
-			Name:     "Trace latency missing service",
+			Name:     "Trace latency checkout",
 			Severity: "warning",
 			Spec: map[string]interface{}{
+				"service":      "checkout",
 				"threshold_ms": 750,
 			},
 		},
 	})
-	if err == nil {
-		t.Fatalf("expected skipped preview error")
+	if err != nil {
+		t.Fatalf("DraftAlertRuleConfig() error = %v", err)
 	}
-	if !strings.Contains(err.Error(), "preview skipped before create") {
-		t.Fatalf("error = %v, want skipped preview", err)
+	apply := applyArgsFromDraft(t, draft)
+
+	if _, err := adapter.ApplyAlertRuleConfig(context.Background(), caller, apply); err != nil {
+		t.Fatalf("first ApplyAlertRuleConfig() error = %v", err)
+	}
+	if fake.createCalls != 1 {
+		t.Fatalf("create calls after first apply = %d, want 1", fake.createCalls)
+	}
+	if _, err := adapter.ApplyAlertRuleConfig(context.Background(), caller, apply); err == nil {
+		t.Fatalf("second ApplyAlertRuleConfig() should reject consumed draft")
+	}
+	if fake.createCalls != 1 {
+		t.Fatalf("create calls after replay = %d, want 1", fake.createCalls)
 	}
 }
 
 func TestDraftAlertRuleConfigRejectsStructuralSkippedPreview(t *testing.T) {
-	adapter := newChatConfigAdapter(managersvcalert.NewStub())
+	adapter := NewAlertRuleManager(managersvcalert.NewStub())
 	_, err := adapter.DraftAlertRuleConfig(context.Background(), aiopstools.ConfigCaller{}, aiopstools.AlertRuleConfigArgs{
 		Action: "create",
 		Rule: aiopstools.AlertRuleConfigInput{
@@ -527,8 +635,9 @@ func TestAlertPreviewSkipBlockingCoversMissingTraceService(t *testing.T) {
 }
 
 func TestApplyAlertRuleConfigAllowsEnvironmentOnlySkippedPreview(t *testing.T) {
-	adapter := newChatConfigAdapter(managersvcalert.NewStub())
-	_, err := adapter.ApplyAlertRuleConfig(context.Background(), aiopstools.ConfigCaller{Role: "admin"}, aiopstools.AlertRuleApplyArgs{
+	adapter := NewAlertRuleManager(managersvcalert.NewStub())
+	caller := aiopstools.ConfigCaller{Role: "admin"}
+	draft, err := adapter.DraftAlertRuleConfig(context.Background(), caller, aiopstools.AlertRuleConfigArgs{
 		Action: "create",
 		Rule: aiopstools.AlertRuleConfigInput{
 			RuleKey:  "trace_latency_checkout",
@@ -541,6 +650,10 @@ func TestApplyAlertRuleConfigAllowsEnvironmentOnlySkippedPreview(t *testing.T) {
 			},
 		},
 	})
+	if err != nil {
+		t.Fatalf("DraftAlertRuleConfig() error = %v", err)
+	}
+	_, err = adapter.ApplyAlertRuleConfig(context.Background(), caller, applyArgsFromDraft(t, draft))
 	if !errors.Is(err, errs.ErrNotWiredYet) {
 		t.Fatalf("error = %v, want create path to reach service stub", err)
 	}
@@ -1617,7 +1730,7 @@ func TestNormalizeAlertRuleConfigInputNormalizesBurnRateRatioSLOToPercent(t *tes
 }
 
 func TestDraftAlertRuleConfigRejectsBurnRateWithoutWindowedSLI(t *testing.T) {
-	adapter := newChatConfigAdapter(managersvcalert.NewStub())
+	adapter := NewAlertRuleManager(managersvcalert.NewStub())
 	_, err := adapter.DraftAlertRuleConfig(context.Background(), aiopstools.ConfigCaller{}, aiopstools.AlertRuleConfigArgs{
 		Action: "create",
 		Rule: aiopstools.AlertRuleConfigInput{

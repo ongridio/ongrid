@@ -27,55 +27,27 @@ func TestCoordinatorRosterHasCodeTools(t *testing.T) {
 
 func TestBasePromptRequiresMetricCatalogBeforeAlertDraft(t *testing.T) {
 	prompt := ongridBasePrompt()
-	for _, want := range []string{"analyze_database_status", "list_metric_catalog", "draft_config_change", "数据库告警", "custommetrics"} {
+	for _, want := range []string{"analyze_database_status", "list_metric_catalog", "draft_config_change", "apply_config_change"} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("base prompt missing %q", want)
 		}
 	}
-	if !strings.Contains(prompt, "先 list_metric_catalog") || !strings.Contains(prompt, "draft_config_change") {
+	if !strings.Contains(prompt, "list_metric_catalog 一次") || !strings.Contains(prompt, "draft_config_change") {
 		t.Fatalf("base prompt should require list_metric_catalog before metric alert draft")
-	}
-	if !strings.Contains(prompt, "数据库告警也先 list_metric_catalog") {
-		t.Fatalf("base prompt should route database alert drafts through list_metric_catalog first")
 	}
 	if !strings.Contains(prompt, "不调 list_database_sources") {
 		t.Fatalf("base prompt should forbid list_database_sources during alert-rule creation")
 	}
-	if !strings.Contains(prompt, "最多一次") {
+	if !strings.Contains(prompt, "没有匹配指标就停止") {
 		t.Fatalf("base prompt should forbid repeated metric catalog discovery in one draft flow")
 	}
-	if !strings.Contains(prompt, "PromQL vector matching") ||
-		!strings.Contains(prompt, "counter/rate/increase 用 sum by") ||
-		!strings.Contains(prompt, "gauge/容量/当前值用 max by") {
-		t.Fatalf("base prompt should require explicit vector matching for composed metric_raw PromQL")
-	}
-	if !strings.Contains(prompt, "用户未指定时不要复制 sample label 的具体值") ||
-		!strings.Contains(prompt, "让所有采集源各自独立评估") {
-		t.Fatalf("base prompt should forbid hard-coding sample ongrid_source when user did not specify a source")
-	}
-	if !strings.Contains(prompt, "MongoDB 连接使用率必须用") ||
-		!strings.Contains(prompt, `conn_type="current"`) ||
-		!strings.Contains(prompt, `conn_type="active"`) {
-		t.Fatalf("base prompt should force MongoDB connection usage to current/(current+available)")
-	}
-	if !strings.Contains(prompt, "禁止只输出文字草案") ||
-		!strings.Contains(prompt, "config_draft/draft_hash") {
+	if !strings.Contains(prompt, "禁止只输出文字草案") || !strings.Contains(prompt, "config_draft/draft_hash") {
 		t.Fatalf("base prompt should forbid plain-text alert drafts without config_draft")
 	}
-	if !strings.Contains(prompt, "metric_burn_rate 的 sli 必须") ||
-		!strings.Contains(prompt, "$window") {
-		t.Fatalf("base prompt should require burn-rate SLI to use $window")
+	if !strings.Contains(prompt, "原始 payload/draft_hash") {
+		t.Fatalf("base prompt should require applying the exact config_draft payload/hash")
 	}
-	if !strings.Contains(prompt, "trace_latency / trace_error_rate 缺少 service 时不能创建") ||
-		!strings.Contains(prompt, "traces_spanmetrics_*") {
-		t.Fatalf("base prompt should require trace service before drafting trace alerts")
-	}
-	if !strings.Contains(prompt, "用户已经明确给出 service 时") ||
-		!strings.Contains(prompt, "必须直接调用 draft_config_change") {
-		t.Fatalf("base prompt should require direct draft_config_change when trace service is explicit")
-	}
-	if !strings.Contains(prompt, "创建服务 ongrid-manager p95 延迟超过 500ms 的告警") ||
-		!strings.Contains(prompt, "spec.service=ongrid-manager") {
-		t.Fatalf("base prompt should include a concrete trace_latency drafting example")
+	if !strings.Contains(prompt, "具体 rule kind 与表达式规范交给工具 schema 和后端 compiler") {
+		t.Fatalf("base prompt should delegate detailed alert semantics to schema/compiler")
 	}
 }

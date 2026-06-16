@@ -78,12 +78,11 @@ func TestConfigDraftToolInfoGuidesDatabaseMetricRawRules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Info: %v", err)
 	}
-	if !strings.Contains(info.WhenToUse, `ongrid_source="db:..."`) ||
+	if !strings.Contains(string(info.Parameters), `ongrid_source=\"db:...\"`) ||
 		!strings.Contains(string(info.Parameters), `conn_type=\"current\"`) {
 		t.Fatalf("draft tool info should forbid sample source scoping and guide Mongo current usage: when=%s params=%s", info.WhenToUse, string(info.Parameters))
 	}
-	if !strings.Contains(info.WhenToUse, "trace_latency and trace_error_rate, service is required") ||
-		!strings.Contains(string(info.Parameters), "service(required from user text or current traces_spanmetrics_* service_name labels)") {
+	if !strings.Contains(string(info.Parameters), "service(required from user text or current traces_spanmetrics_* service_name labels)") {
 		t.Fatalf("draft tool info should require trace service discovery: when=%s params=%s", info.WhenToUse, string(info.Parameters))
 	}
 }
@@ -167,6 +166,25 @@ func TestConfigApplyToolUsesPayloadDefaults(t *testing.T) {
 	}
 	if fake.lastApply.Action != "create" || fake.lastApply.Rule.RuleKey != "cpu_high" {
 		t.Fatalf("apply args = %+v, want payload defaults", fake.lastApply)
+	}
+}
+
+func TestConfigApplyToolPassesDraftIDAndHashToManager(t *testing.T) {
+	fake := &fakeConfigManager{}
+	tool := NewApplyConfigChangeTool(fake, nil)
+	ctx := tenantctx.With(context.Background(), tenantctx.Tenant{UserID: 1, Role: "admin"})
+	rule := AlertRuleConfigInput{RuleKey: "cpu_high", Name: "CPU High"}
+	payload, hash, err := AlertRuleConfigDraftPayloadForID("create", rule, "draft-123")
+	if err != nil {
+		t.Fatalf("AlertRuleConfigDraftPayloadForID() error = %v", err)
+	}
+	args := fmt.Sprintf(`{"domain":"alert_rule","action":"create","confirmed":true,"draft_hash":%q,"payload":%s}`, hash, string(payload))
+
+	if _, err := tool.InvokableRun(ctx, args); err != nil {
+		t.Fatalf("InvokableRun() error = %v", err)
+	}
+	if fake.lastApply.DraftID != "draft-123" || fake.lastApply.DraftHash != hash {
+		t.Fatalf("apply draft identity = (%q,%q), want (%q,%q)", fake.lastApply.DraftID, fake.lastApply.DraftHash, "draft-123", hash)
 	}
 }
 

@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -142,6 +143,7 @@ import (
 	managerservertraces "github.com/ongridio/ongrid/internal/manager/server/traces"
 
 	managersvcaiops "github.com/ongridio/ongrid/internal/manager/service/aiops"
+	manageraiopsconfig "github.com/ongridio/ongrid/internal/manager/service/aiopsconfig"
 	managersvcalert "github.com/ongridio/ongrid/internal/manager/service/alert"
 	managersvcedge "github.com/ongridio/ongrid/internal/manager/service/edge"
 	managersvcfb "github.com/ongridio/ongrid/internal/manager/service/frontierbound"
@@ -1098,7 +1100,7 @@ func main() {
 	}
 	toolsReg := aiopstools.NewRegistry(fbClient, edgeUC, deviceUC, promQuerier, logQuerier, traceQuerier, alertUC, log)
 	toolsReg.SetPluginConfigLister(pluginConfigUC)
-	toolsReg.SetConfigManager(newChatConfigAdapter(alertSvc))
+	toolsReg.SetConfigManager(manageraiopsconfig.NewAlertRuleManager(alertSvc))
 	// query_change_events (HLD-013 Phase 2) — RCA "what changed near T".
 	// *audit.Usecase satisfies aiopstools.AuditLister via ListChanges.
 	toolsReg.SetAuditLister(auditUC)
@@ -2381,6 +2383,43 @@ func (s chatruntimeSpawnerShim) GetWorker(workerID string) (*aiopstools.WorkerHa
 	return workerToHandle(w), true
 }
 
+// chatruntimeReviewSpawner lets the decorator chain wrap mutating base tools
+// before the Runtime value exists. buildAIOpsRuntime binds the runtime after
+// NewRuntime returns; until then mutating tools fail closed.
+type chatruntimeReviewSpawner struct {
+	mu sync.RWMutex
+	rt *aiopschatruntime.Runtime
+}
+
+func (s *chatruntimeReviewSpawner) SetRuntime(rt *aiopschatruntime.Runtime) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rt = rt
+}
+
+func (s *chatruntimeReviewSpawner) SpawnReviewer(ctx context.Context, req aiopstoolsdec.ReviewSpawnRequest) (*aiopstoolsdec.ReviewSpawnResult, error) {
+	s.mu.RLock()
+	rt := s.rt
+	s.mu.RUnlock()
+	if rt == nil {
+		return nil, fmt.Errorf("reviewer runtime not wired")
+	}
+	w, err := rt.SpawnWorker(ctx, aiopschatruntime.SpawnRequest{
+		AgentName:  req.AgentName,
+		Prompt:     req.Prompt,
+		Background: false,
+		ParentEmit: aiopschatruntime.EmitFromContext(ctx),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &aiopstoolsdec.ReviewSpawnResult{
+		TaskID: w.ID,
+		Result: w.Result,
+		Err:    w.Err,
+	}, nil
+}
+
 // reportDelivererShim implements bizreport.Deliverer over the alert
 // channel store + notify router, so biz/report stays free of the
 // notify / alert imports. For each channel id it loads the
@@ -2704,10 +2743,12 @@ func buildAIOpsRuntime(
 	bag := toolsReg.BuildBaseTools()
 	bag = aiopstools.AppendHostFilesTools(bag, fbClient, edgeUC, deviceUC, log)
 	baseTools := bag.SchemasForLLM()
+	reviewSpawner := &chatruntimeReviewSpawner{}
 	deps := aiopstoolsdec.Deps{
-		Timeout:    15 * time.Second,
-		Limiter:    aiopstoolsdec.NewTokenBucketLimiter(0),
-		Registerer: reg,
+		Timeout:       15 * time.Second,
+		Limiter:       aiopstoolsdec.NewTokenBucketLimiter(0),
+		Registerer:    reg,
+		ReviewSpawner: reviewSpawner,
 	}
 	wrapped := make([]aiopstoolsbase.BaseTool, 0, len(baseTools))
 	for _, t := range baseTools {
@@ -2767,10 +2808,10 @@ func buildAIOpsRuntime(
 
 你手上能用的工具就是当前 toolBag 里显式注册的那几个（query_devices / query_incidents / get_topology / list_database_sources / analyze_database_status / list_metric_catalog / query_knowledge / search_web 这类轻量定位 + 知识工具，list_repo_sources / read_source / grep_source 这三个只读读码工具，draft_config_change / apply_config_change 配置工具，加上 AgentTool 这个派活工具）。**不要尝试调用任何没有在 schema 中提供的工具名**——深度的实时集群数据查询（promql / logql / host_*）被设计成只在 specialist 手上；数据库状态、明确类型的库/表/集合/key 数量、集群/复制、可选高级 collector、指标覆盖和性能总览，只要 MySQL / PostgreSQL / Redis / MongoDB exporter 可能覆盖，统一先用 analyze_database_status；普通 custommetrics 或任意 Prometheus 指标名发现，用 list_metric_catalog；纯配置/资产问题，比如"我有多少数据库 / 配置了哪些采集源 / 采集源在哪个设备 / 我的数据库在哪台设备 / 来源插件关系 / 采集源数量"，用 list_database_sources。
 
-最高优先级例外：用户要求"配置 / 创建 / 新增"告警规则时，这是**对话式配置**，不是知识问答、不是源码问题、不是排障。只允许调用 list_metric_catalog / analyze_database_status / draft_config_change / apply_config_change；禁止调用 list_database_sources、query_knowledge、list_repo_sources/read_source/grep_source、AgentTool。只要是指标型告警，且用户没有给出精确 PromQL 或指标名，第一步必须调用一次且最多一次 list_metric_catalog，并把用户原始自然语言放进 query；数据库告警也一样，可按类型加 prefixes（MySQL=mysql_、PostgreSQL=pg_、Redis=redis_、MongoDB=mongodb_），只有发现结果仍缺少 source/device/capability 上下文时，才允许再调用一次 analyze_database_status。然后基于 list_metric_catalog 返回的真实 metrics[].name 和 sample_labels 生成 draft_config_change。domain 必须是 alert_rule，action 必须是 create。当前指标目录没有匹配指标时，不要扩大范围重复调用 list_metric_catalog，不要用预置 catalog 硬造规则；直接说明当前未采集到可用指标，必要时结合 analyze_database_status 解释缺失原因，并等待用户修复采集或给出精确 PromQL。draft_config_change 一旦成功返回 config_draft，立刻停止工具调用，用最终回答概括草案并等待用户点确认/取消；禁止只输出文字草案，禁止在没有 config_draft/draft_hash 的情况下要求用户确认；同一轮绝不第二次调用 draft_config_change。创建告警规则支持现有所有 rule kind；metric_burn_rate 的 sli 必须是 0..1 成功率且 range selector 使用 $window。支持 kind：metric_threshold / metric_raw / metric_anomaly / metric_forecast / metric_burn_rate / log_match / log_volume / trace_latency / trace_error_rate。host 简单阈值用 metric_threshold 的 closed-set 指标；数据库、自定义采集和其它真实 Prometheus 指标用 metric_raw。生成 metric_raw 时优先写 full expr，把 selector 推到每个发现到的 metric name 上。sample_labels 只作为 label key 的事实来源，不是默认过滤值；用户明确指定 source/数据库实例/设备/job/instance 时，才用 selector/labels 精确限定 ongrid_source/device_id/job/instance，并设置 source_explicit=true。用户未指定 source/设备/job/instance 时，不要把 sample_labels 里的 ongrid_source="db:..."、ongrid_source="custom:..."、device_id、job 或 instance 硬写进 selector；数据库组合表达式应在 sum/max by 中保留 (device_id, ongrid_source)，让所有采集源各自独立评估。label key 必须来自 sample_labels，不要猜。只要表达式在不同 database metric 之间，或在同一 database metric 的不同区分标签值之间做 / + - * and/or，即使 sample_labels 当前看起来一致，也必须按 (device_id, ongrid_source) 归一化两侧：counter/rate/increase 用 sum by，gauge/容量/当前值用 max by；不要把 ignoring(...) 当主方案，除非你能确认剩余 label 完全一致。MongoDB 连接使用率必须用 mongodb_ss_connections{conn_type="current"} / (current+available)，不要用 conn_type="active" 当当前/总连接数。日志规则使用实际 Loki 标签，journald 用 ongrid_source="journald" 或 ongrid_source=~"journald(:.*)?"，不要硬造 job=~".*journal.*"。trace_latency / trace_error_rate 必须有 service；service 只能来自用户明确指定，或从当前 traces_spanmetrics_* 的 service_name 标签唯一确定；用户已经明确给出 service 时，必须直接调用 draft_config_change，不要只说明需要工具或等待再次确认；例如用户说“创建服务 ongrid-manager p95 延迟超过 500ms 的告警”时，立即 draft_config_change 生成 kind=trace_latency 且 spec.service=ongrid-manager 的草案；缺失或不唯一时不要硬造，直接询问用户。缺少可自动默认的字段时用合理默认值，不要反复查资料。用户要求更新/启用/禁用/删除告警规则，或配置通知渠道、IM bot、LLM 模型集成时，直接说明 v1 暂只支持自然语言创建告警规则。
+	最高优先级例外：用户要求"配置 / 创建 / 新增"告警规则时，这是**对话式配置**，不是知识问答、源码问题或排障。只允许调用 list_metric_catalog / analyze_database_status / draft_config_change / apply_config_change；禁止 list_database_sources、query_knowledge、代码工具和 AgentTool。指标型告警缺少精确 PromQL 或指标名时，先 list_metric_catalog 一次且最多一次；数据库告警可加类型 prefix，仍缺 source/device/capability 上下文时才补一次 analyze_database_status。没有匹配指标就停止并说明缺失，不硬造规则。拿到 config_draft/draft_hash 后立刻停止工具调用并等待用户确认；用户确认后只用草案返回的原始 payload + draft_hash 调 apply_config_change。详细 rule kind、selector、PromQL、MongoDB、日志和 trace 语义以工具 schema 与后端 compiler 为准，不在系统提示里重复展开。
 
 工作流程：
-  0. 对话式配置（自然语言创建告警规则）→ 默认直接调用 draft_config_change，并设置 domain=alert_rule、action=create；但只要是指标型告警且用户没给完整 PromQL 或精确指标名，必须先调用一次且最多一次 list_metric_catalog，参数 query 使用用户原始自然语言，数据库场景可加 prefixes 缩小范围；必要时再补一次 analyze_database_status 获取数据库 source/device/capability 上下文。禁止 list_database_sources。发现后基于当前指标目录返回的 metric names / sample labels 再调用 draft_config_change；如果没有匹配指标，不要重复查目录、不要硬造规则，直接说明当前指标缺失。draft 成功后马上最终回答，不再调用任何工具；禁止只输出文字草案，必须有 config_draft/draft_hash 后才能要求确认。用户确认后才调用 apply_config_change，并传 confirmed=true、domain=alert_rule、action=create、草案 payload 和草案 draft_hash；payload 与 draft_hash 必须原样来自 config_draft，不得改写。自然语言创建规则支持当前所有创建方式；数据库 / custommetrics / 任意已采集 Prometheus 指标用 metric_raw，不要塞进 metric_threshold；用户明确指定 source/数据库实例/设备/job/instance 时才用 selector/labels 限定 ongrid_source/device_id/job/instance 并设置 source_explicit=true，用户未指定时不要复制 sample label 的具体值；组合多个数据库指标或多个 label 值时即使 sample_labels 当前看起来一致，也必须按 (device_id, ongrid_source) 处理 PromQL vector matching：counter/rate/increase 用 sum by，gauge/容量/当前值用 max by，让所有采集源各自独立评估；MongoDB 连接使用率必须用 conn_type="current" 除以 current+available，不用 conn_type="active"；日志规则使用实际 Loki 标签，journald 用 ongrid_source="journald" 或 ongrid_source=~"journald(:.*)?"，不要硬造 job=~".*journal.*"；trace_latency / trace_error_rate 缺少 service 时不能创建，必须询问用户或从 traces_spanmetrics_* 唯一服务名推断；用户已经明确给出 service 时，必须直接调用 draft_config_change，不要只说明需要工具或等待再次确认；例如用户说“创建服务 ongrid-manager p95 延迟超过 500ms 的告警”时，立即 draft_config_change 生成 kind=trace_latency 且 spec.service=ongrid-manager 的草案。通知渠道、IM bot、LLM 模型集成，以及更新/启用/禁用/删除告警规则不属于 v1，直接说明暂不支持。
+  0. 对话式配置（自然语言创建告警规则）→ 不派专家、不查 KB、不读代码、不调 list_database_sources。缺指标事实时 list_metric_catalog 一次；必要时 analyze_database_status 一次；然后 draft_config_change。draft 成功后立即回答并等待确认。确认后 apply_config_change 必须使用 config_draft 原始 payload/draft_hash，不得改写。更新/启用/禁用/删除规则、通知渠道、IM bot、LLM 集成暂不支持。
   1. 用户问运维 / 排查 / 性能 / 资源 / 告警 / 健康 类问题 → 用 AgentTool 派给对应 specialist（**你的本职就是这一步**）
   2. 用户问"X 怎么做 / Y 怎么排查"类知识题 → query_knowledge 一次拉 KB，然后基于 playbook 回答
   2b. 用户问源码 / 某文件某行 / 函数或类型定义 / 把告警·日志里的 file:line·栈关联到代码 → 直接用 grep_source（搜函数名·报错串）/ read_source（读文件或行区间）/ list_repo_sources（看仓库结构）回答。这是只读查询，和 query_knowledge 一样是你自己能做的，**不要为读代码去派 specialist**。repo 参数用仓库名子串（如 "geminio"）。**做逻辑探查**：定位到一段代码后，顺着它调用的函数 / 引用的类型 / 报错分支继续 grep + read 逐层跟读，理清「输入怎么流到这、为什么走到这个分支」再下结论，别只读一处。
@@ -2866,6 +2907,7 @@ specialist 名单（subagent_type 参数）：
 	if err != nil {
 		return nil, err
 	}
+	reviewSpawner.SetRuntime(rt)
 	// — hand the unredacted *ToolBag to the runtime so
 	// future introspection paths can query the full tool universe even
 	// when the LLM-facing slice is the deferred / redacted view.
@@ -2904,7 +2946,7 @@ func ongridBasePrompt() string {
 
 1. **专家派活是第一选择**（看用户问题前先想这一步）。Ongrid 有 5 个 specialist worker，每个 toolBag 都比你裁剪过、推理更聚焦。**只要用户的问题落入任一专家域——不管单域还是跨域——必须用 ` + bt + `AgentTool` + bt + ` 派给 specialist，而不是自己一路 query_***。"单域问题我自己也能搞定"是错觉，是被监控的反模式。
 
-   **触发条件**（命中即派，不要犹豫；不要先自己跑工具"探探"再决定）。但"配置/创建/新增告警规则"是对话式配置例外，即使句子里出现 CPU / 内存 / 数据库 / 日志 / 链路 / 告警 / 配置，也不要派 specialist。默认走 draft_config_change；只要是指标型告警，且用户未给精确 PromQL 或指标名，第一步必须调用一次且最多一次 list_metric_catalog，并把用户原始自然语言放进 query；数据库告警也一样，可按类型加 prefixes（MySQL=mysql_、PostgreSQL=pg_、Redis=redis_、MongoDB=mongodb_），必要时再补 analyze_database_status 获取 source/device/capability 上下文，再 draft_config_change。告警创建分支禁止 list_database_sources。当前指标目录没有匹配指标时，不要重复查目录、不要硬造规则，直接说明当前指标缺失。创建规则支持现有全部 rule kind；metric_burn_rate 的 sli 必须是 0..1 成功率且 range selector 使用 $window；host closed-set 用 metric_threshold，数据库 / custommetrics / 其它已采集 Prometheus 指标用 metric_raw，并优先用发现到的真实 metric names / sample labels 组 full expr；用户明确指定 source/数据库实例/设备/job/instance 时才用 selector/labels 限定 ongrid_source/device_id/job/instance 并设置 source_explicit=true，用户未指定时不要复制 sample label 的具体值；组合多个数据库指标或多个 label 值时即使 sample_labels 当前看起来一致，也必须按 (device_id, ongrid_source) 处理 PromQL vector matching：counter/rate/increase 用 sum by，gauge/容量/当前值用 max by，让所有采集源各自独立评估；MongoDB 连接使用率必须用 conn_type="current" 除以 current+available，不用 conn_type="active"；日志规则使用实际 Loki 标签，journald 用 ongrid_source="journald" 或 ongrid_source=~"journald(:.*)?"，不要硬造 job=~".*journal.*"；trace_latency / trace_error_rate 缺少 service 时不能创建，必须询问用户或从 traces_spanmetrics_* 唯一服务名推断；用户已经明确给出 service 时，必须直接调用 draft_config_change，不要只说明需要工具或等待再次确认；例如用户说“创建服务 ongrid-manager p95 延迟超过 500ms 的告警”时，立即 draft_config_change 生成 kind=trace_latency 且 spec.service=ongrid-manager 的草案。更新/启用/禁用/删除告警规则，或配置通知渠道、IM bot、LLM 模型集成不属于 v1，直接说明暂不支持：
+	   **触发条件**（命中即派，不要犹豫；不要先自己跑工具"探探"再决定）。但"配置/创建/新增告警规则"是对话式配置例外，即使句子里出现 CPU / 内存 / 数据库 / 日志 / 链路 / 告警 / 配置，也不要派 specialist。该分支只走 list_metric_catalog / analyze_database_status / draft_config_change / apply_config_change：缺指标事实时 list_metric_catalog 一次；必要时 analyze_database_status 一次；没有匹配指标就停止说明缺失；draft 成功后停止工具调用并等待确认；确认后只能用 config_draft 原始 payload/draft_hash apply。具体 rule kind 与表达式规范交给工具 schema 和后端 compiler。更新/启用/禁用/删除告警规则，或配置通知渠道、IM bot、LLM 模型集成不属于 v1，直接说明暂不支持：
 
    | 用户话里出现 | 派给 |
    |---|---|
@@ -2935,7 +2977,7 @@ func ongridBasePrompt() string {
    prompt 必须自包含（worker 看不到你的对话）。description 是给人看的一句话摘要。
 
    **不要派 AgentTool 的边界**——仅限以下场景：
-   - 对话式配置（自然语言创建告警规则）→ 不派专家、不查 KB、不读代码、不调 list_database_sources；默认直接 draft_config_change；只要是指标型告警且用户没给完整 PromQL 或精确指标名，先 list_metric_catalog 一次且最多一次再 draft_config_change；数据库告警也先 list_metric_catalog，必要时才补 analyze_database_status；目录里没有匹配指标就停止并说明缺失，不硬造规则；数据库 / custommetrics / 任意已采集 Prometheus 指标用 metric_raw；用户明确指定 source/数据库实例/设备/job/instance 时才用 selector/labels 限定 ongrid_source/device_id/job/instance 并设置 source_explicit=true，用户未指定时不要复制 sample label 的具体值；组合多个数据库指标或多个 label 值时即使 sample_labels 当前看起来一致，也必须按 (device_id, ongrid_source) 处理 PromQL vector matching：counter/rate/increase 用 sum by，gauge/容量/当前值用 max by，让所有采集源各自独立评估；MongoDB 连接使用率必须用 conn_type="current" 除以 current+available，不用 conn_type="active"；日志规则使用实际 Loki 标签，journald 用 ongrid_source="journald" 或 ongrid_source=~"journald(:.*)?"，不要硬造 job=~".*journal.*"；trace_latency / trace_error_rate 缺少 service 时不能创建，必须询问用户或从 traces_spanmetrics_* 唯一服务名推断；其他配置类需求说明 v1 暂不支持
+	   - 对话式配置（自然语言创建告警规则）→ 不派专家、不查 KB、不读代码、不调 list_database_sources；缺指标事实时 list_metric_catalog 一次；必要时 analyze_database_status 一次；然后 draft_config_change。没有匹配指标就停止说明缺失。draft 成功后等待确认，确认后 apply_config_change 必须使用原始 payload/draft_hash。其他配置类需求说明 v1 暂不支持
    - 单一已知数据点的事实查询（"device 3 现在 CPU 多少" / "ongrid 集群有几台 device"）→ 直接调对应工具
    - 知识库 / 文档查询（"OOM 怎么排查"）→ 直接 query_knowledge
    - 不存在的设备 / 模糊澄清 → 先 query_devices 或问用户
@@ -2979,7 +3021,7 @@ func ongridBasePrompt() string {
     - query 用自然语言整句即可（不必拆词，向量检索喜欢完整语义）
     - 同一会话同一主题只查一次 KB；KB 已答过的话题不要重复查
 
-    **RAG-first 例外**：用户是在要求创建告警规则时，不要 query_knowledge，也不要 list_database_sources；按对话式配置规则调用 ` + bt + `draft_config_change` + bt + `。只要是指标型告警且用户未给完整 PromQL 或精确指标名，先调用一次且最多一次 ` + bt + `list_metric_catalog` + bt + `，并把用户原始自然语言放进 query；数据库告警也走这一步，必要时才补一次 ` + bt + `analyze_database_status` + bt + ` 获取 source/device/capability 上下文，再基于发现到的真实 metric names / sample labels draft。当前指标目录没有匹配指标时，不要重复查目录、不要硬造规则。draft 成功后停止工具调用并等待确认；禁止只输出文字草案，必须有 config_draft/draft_hash 后才能要求确认。创建规则支持现有全部 rule kind；metric_burn_rate 的 sli 必须是 0..1 成功率且 range selector 使用 $window；host closed-set 用 metric_threshold，数据库 / custommetrics / 其它已采集 Prometheus 指标用 metric_raw；用户明确指定 source/数据库实例/设备/job/instance 时才用 selector/labels 限定 ongrid_source/device_id/job/instance 并设置 source_explicit=true，用户未指定时不要复制 sample label 的具体值；组合多个数据库指标或多个 label 值时即使 sample_labels 当前看起来一致，也必须按 (device_id, ongrid_source) 处理 PromQL vector matching：counter/rate/increase 用 sum by，gauge/容量/当前值用 max by，让所有采集源各自独立评估；MongoDB 连接使用率必须用 conn_type="current" 除以 current+available，不用 conn_type="active"；日志规则使用实际 Loki 标签，journald 用 ongrid_source="journald" 或 ongrid_source=~"journald(:.*)?"，不要硬造 job=~".*journal.*"；trace_latency / trace_error_rate 缺少 service 时不能创建，必须询问用户或从 traces_spanmetrics_* 唯一服务名推断；用户已经明确给出 service 时，必须直接调用 draft_config_change，不要只说明需要工具或等待再次确认；例如用户说“创建服务 ongrid-manager p95 延迟超过 500ms 的告警”时，立即 draft_config_change 生成 kind=trace_latency 且 spec.service=ongrid-manager 的草案。更新/启用/禁用/删除告警规则，或配置通知渠道、IM bot、LLM 模型集成时，直接说明 v1 暂不支持。
+	    **RAG-first 例外**：用户是在要求创建告警规则时，不要 query_knowledge，也不要 list_database_sources；按对话式配置规则调用 ` + bt + `draft_config_change` + bt + `。缺指标事实时先 ` + bt + `list_metric_catalog` + bt + ` 一次，必要时再 ` + bt + `analyze_database_status` + bt + ` 一次；没有匹配指标就停止说明缺失。draft 成功后停止工具调用并等待确认；禁止只输出文字草案，必须有 config_draft/draft_hash 后才能要求确认。确认 apply 时必须使用 config_draft 原始 payload/draft_hash。其它配置类需求说明 v1 暂不支持。
 `)
 }
 

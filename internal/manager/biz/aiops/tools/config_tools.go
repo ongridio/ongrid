@@ -36,8 +36,8 @@ type ConfigCaller struct {
 }
 
 // ConfigManager is the consumer-owned seam for conversational alert rule
-// creation. The tools package owns JSON schema + tool gating; cmd/ongrid owns
-// mapping to the existing alert service.
+// creation. The tools package owns JSON schema + tool gating; the manager
+// service adapter maps this seam to the existing alert service.
 type ConfigManager interface {
 	DraftAlertRuleConfig(ctx context.Context, caller ConfigCaller, in AlertRuleConfigArgs) (*ConfigDraft, error)
 	ApplyAlertRuleConfig(ctx context.Context, caller ConfigCaller, in AlertRuleApplyArgs) (*ConfigApplyResult, error)
@@ -56,6 +56,7 @@ type ConfigChangeApplyArgs struct {
 	Action           string               `json:"action"`
 	Rule             AlertRuleConfigInput `json:"rule,omitempty"`
 	Payload          json.RawMessage      `json:"payload,omitempty"`
+	DraftID          string               `json:"draft_id,omitempty"`
 	DraftHash        string               `json:"draft_hash,omitempty"`
 	Confirmed        bool                 `json:"confirmed"`
 	ConfirmationText string               `json:"confirmation_text,omitempty"`
@@ -104,6 +105,8 @@ type AlertRuleConfigArgs struct {
 type AlertRuleApplyArgs struct {
 	Action           string               `json:"action"`
 	Rule             AlertRuleConfigInput `json:"rule,omitempty"`
+	DraftID          string               `json:"draft_id,omitempty"`
+	DraftHash        string               `json:"draft_hash,omitempty"`
 	Confirmed        bool                 `json:"confirmed"`
 	ConfirmationText string               `json:"confirmation_text,omitempty"`
 }
@@ -146,7 +149,7 @@ func (t *ConfigTool) Info(_ context.Context) (*basetool.ToolInfo, error) {
 		return &basetool.ToolInfo{
 			Name:        ToolNameDraftConfigChange,
 			Description: "Create a read-only configuration draft for a new alert rule across all supported alert rule kinds. It never persists business config.",
-			WhenToUse:   "Use directly when the user asks to configure, create, or add an alert rule from natural language. Only domain=alert_rule and action=create are supported. Supports metric_threshold, metric_raw, metric_anomaly, metric_forecast, metric_burn_rate, log_match, log_volume, trace_latency, and trace_error_rate. Use metric_threshold only for the host closed-set metrics; use metric_raw for database, custom, or arbitrary collected Prometheus metrics. If an exact PromQL or metric name is missing, use list_metric_catalog once and only once first for every metric-based alert, including database alerts; for database alerts, use analyze_database_status afterwards only if source/capability context is still needed. Prefer full expr built from discovered metric names and labels. Use sample_labels exactly for label names; never invent label keys. If the user explicitly names a source, database instance, device, job, service, or instance endpoint, scope selectors with that exact ongrid_source/device_id/job/service/instance and set spec.source_explicit=true. If the user did not specify a source/device/job/service/instance, do not copy sample label values such as ongrid_source=\"db:...\" or ongrid_source=\"custom:...\", device_id, job, service, or instance into selectors; omit spec.source_explicit or set it false, and keep ongrid_source only in sum/max by grouping for per-source evaluation when needed. When metric_raw combines database metrics or same-metric series with different discriminator labels such as conn_type/count_type/datname/db, aggregate each side by (device_id, ongrid_source) even if current sample labels look identical: use sum by for counters/rate/increase and max by for gauges/capacity/current values; do not use ignoring(...) as the main fix unless all remaining labels are known to match. For MongoDB connection usage, use mongodb_ss_connections{conn_type=\"current\"} / (current + available); conn_type=\"active\" is not the total/current connection count. For log_match/log_volume, use actual Loki labels: journald streams use ongrid_source=\"journald\" or ongrid_source=~\"journald(:.*)?\"; do not invent job=~\".*journal.*\". For trace_latency and trace_error_rate, service is required; use a service explicitly named by the user or discovered from current traces_spanmetrics_* service_name labels. If the user explicitly names the service, call this tool directly instead of explaining that a tool is needed or waiting for another confirmation; for example, \"create an alert when service ongrid-manager p95 latency exceeds 500ms\" maps to kind=trace_latency with spec.service=\"ongrid-manager\", quantile=\"p95\", threshold_ms=500. Ask for service when it is absent or ambiguous. Do not call list_database_sources, query_knowledge, code tools, or AgentTool first for alert-rule creation requests. A natural-language alert creation is not complete until this tool returns config_draft with draft_hash; never ask the user to confirm a plain-text draft. After one successful config_draft, stop tool calls and ask the user to confirm or cancel; do not call this tool again in the same turn.",
+			WhenToUse:   "Use when the user asks to configure, create, or add an alert rule from natural language. Only domain=alert_rule and action=create are supported. For metric-based requests without an exact metric name or PromQL, call list_metric_catalog once first; use analyze_database_status only if database source/capability context is still missing. Do not call list_database_sources, query_knowledge, code tools, or AgentTool for alert-rule creation. A natural-language alert creation is not complete until this tool returns config_draft with draft_hash; never ask the user to confirm a plain-text draft. After one successful config_draft, stop tool calls and ask the user to confirm or cancel.",
 			Parameters:  draftConfigChangeSchema,
 			Class:       "read",
 		}, nil
@@ -234,6 +237,8 @@ func (t *ConfigTool) applyConfigChange(ctx context.Context, caller ConfigCaller,
 	return t.manager.ApplyAlertRuleConfig(ctx, caller, AlertRuleApplyArgs{
 		Action:           action,
 		Rule:             in.Rule,
+		DraftID:          in.DraftID,
+		DraftHash:        in.DraftHash,
 		Confirmed:        in.Confirmed,
 		ConfirmationText: in.ConfirmationText,
 	})
@@ -286,6 +291,7 @@ func (in *ConfigChangeApplyArgs) applyPayloadDefaults() error {
 	}
 	var payload struct {
 		Action    string               `json:"action"`
+		DraftID   string               `json:"draft_id,omitempty"`
 		Rule      AlertRuleConfigInput `json:"rule,omitempty"`
 		DraftHash string               `json:"draft_hash,omitempty"`
 	}
@@ -293,6 +299,7 @@ func (in *ConfigChangeApplyArgs) applyPayloadDefaults() error {
 		return fmt.Errorf("bad draft payload: %w", err)
 	}
 	in.Action = payload.Action
+	in.DraftID = payload.DraftID
 	in.Rule = payload.Rule
 	if in.DraftHash == "" {
 		in.DraftHash = payload.DraftHash
@@ -308,7 +315,7 @@ func (in ConfigChangeApplyArgs) validateDraftHash() error {
 	if got == "" {
 		return fmt.Errorf("%w: draft_hash from config_draft is required before applying", errs.ErrInvalid)
 	}
-	want, err := AlertRuleConfigDraftHash(in.Action, in.Rule)
+	want, err := AlertRuleConfigDraftHashForID(in.Action, in.Rule, in.DraftID)
 	if err != nil {
 		return err
 	}
@@ -320,12 +327,20 @@ func (in ConfigChangeApplyArgs) validateDraftHash() error {
 
 // AlertRuleConfigDraftPayload returns the canonical draft payload and its hash.
 func AlertRuleConfigDraftPayload(action string, rule AlertRuleConfigInput) (json.RawMessage, string, error) {
+	return AlertRuleConfigDraftPayloadForID(action, rule, "")
+}
+
+// AlertRuleConfigDraftPayloadForID returns the canonical draft payload for a
+// service-issued draft id and its matching hash.
+func AlertRuleConfigDraftPayloadForID(action string, rule AlertRuleConfigInput, draftID string) (json.RawMessage, string, error) {
 	payload := struct {
-		Action string               `json:"action"`
-		Rule   AlertRuleConfigInput `json:"rule"`
+		DraftID string               `json:"draft_id,omitempty"`
+		Action  string               `json:"action"`
+		Rule    AlertRuleConfigInput `json:"rule"`
 	}{
-		Action: action,
-		Rule:   rule,
+		DraftID: draftID,
+		Action:  action,
+		Rule:    rule,
 	}
 	b, err := json.Marshal(payload)
 	if err != nil {
@@ -337,7 +352,13 @@ func AlertRuleConfigDraftPayload(action string, rule AlertRuleConfigInput) (json
 
 // AlertRuleConfigDraftHash returns the hash expected when applying a draft.
 func AlertRuleConfigDraftHash(action string, rule AlertRuleConfigInput) (string, error) {
-	payload, hash, err := AlertRuleConfigDraftPayload(action, rule)
+	return AlertRuleConfigDraftHashForID(action, rule, "")
+}
+
+// AlertRuleConfigDraftHashForID returns the hash expected when applying a
+// service-issued draft id.
+func AlertRuleConfigDraftHashForID(action string, rule AlertRuleConfigInput, draftID string) (string, error) {
+	payload, hash, err := AlertRuleConfigDraftPayloadForID(action, rule, draftID)
 	if err != nil {
 		return "", err
 	}
@@ -495,9 +516,10 @@ var applyConfigChangeSchema = json.RawMessage(`{
       "enum": ["alert_rule"],
       "description": "Configuration domain from the config_draft."
     },
-    "action": {"type": "string", "enum": ["create"]},
-    "confirmed": {"type": "boolean", "description": "Must be true after explicit user confirmation."},
-    "draft_hash": {"type": "string", "description": "Exact draft_hash returned by draft_config_change. The payload is rejected if this hash does not match."},
+	    "action": {"type": "string", "enum": ["create"]},
+	    "confirmed": {"type": "boolean", "description": "Must be true after explicit user confirmation."},
+	    "draft_id": {"type": "string", "description": "Optional top-level copy of payload.draft_id; the exact payload remains the source of truth."},
+	    "draft_hash": {"type": "string", "description": "Exact draft_hash returned by draft_config_change. The payload is rejected if this hash does not match."},
     "confirmation_text": {"type": "string"},
     "payload": {
       "type": "object",
