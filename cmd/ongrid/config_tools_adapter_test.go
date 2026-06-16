@@ -230,7 +230,7 @@ func TestNormalizeAlertRuleConfigInputMergesSelectorWithoutTouchingPromQLSyntax(
 	}
 }
 
-func TestNormalizeAlertRuleConfigInputDoesNotDuplicateExistingSelector(t *testing.T) {
+func TestNormalizeAlertRuleConfigInputMergesExistingSelector(t *testing.T) {
 	in := aiopstools.AlertRuleConfigInput{
 		Kind: "metric_raw",
 		Spec: map[string]interface{}{
@@ -242,15 +242,32 @@ func TestNormalizeAlertRuleConfigInputDoesNotDuplicateExistingSelector(t *testin
 	got := normalizeAlertRuleConfigInput(in)
 	expr, _ := got.Spec["expr"].(string)
 	for _, want := range []string{
-		`ongrid_http_requests_total{code=~"5.."}`,
+		`ongrid_http_requests_total{code=~"5..",job="ongrid-manager"}`,
 		`ongrid_http_requests_total{job="ongrid-manager"}`,
 	} {
 		if !strings.Contains(expr, want) {
 			t.Fatalf("expr = %q, want to contain %q", expr, want)
 		}
 	}
-	if strings.Contains(expr, `code=~"5..",job="ongrid-manager"`) {
-		t.Fatalf("expr = %q, should not rewrite an existing selector", expr)
+}
+
+func TestNormalizeAlertRuleConfigInputReplacesConflictingExistingSelector(t *testing.T) {
+	in := aiopstools.AlertRuleConfigInput{
+		Kind: "metric_raw",
+		Spec: map[string]interface{}{
+			"expr":     `sum(rate(ongrid_http_requests_total{job="old",code=~"5.."}[5m])) > 0`,
+			"selector": `job="ongrid-manager"`,
+		},
+	}
+
+	got := normalizeAlertRuleConfigInput(in)
+	expr, _ := got.Spec["expr"].(string)
+	want := `ongrid_http_requests_total{code=~"5..",job="ongrid-manager"}`
+	if !strings.Contains(expr, want) {
+		t.Fatalf("expr = %q, want to contain %q", expr, want)
+	}
+	if strings.Contains(expr, `job="old"`) {
+		t.Fatalf("expr = %q, should replace conflicting selector", expr)
 	}
 }
 

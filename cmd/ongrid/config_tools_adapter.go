@@ -2081,8 +2081,12 @@ func mergeSelectorIntoPromQL(expr string, selector string) (string, bool) {
 		if j < len(expr) && expr[j] == '{' {
 			sel, end, ok := readPromSelector(expr, j)
 			if ok {
+				merged := mergeMetricSelectorFragments(sel, selector)
 				b.WriteString(token)
-				b.WriteString(sel)
+				b.WriteString(merged)
+				if merged != sel {
+					changed = true
+				}
 				i = end
 				continue
 			}
@@ -2091,6 +2095,38 @@ func mergeSelectorIntoPromQL(expr string, selector string) (string, bool) {
 		changed = true
 	}
 	return b.String(), changed
+}
+
+func mergeMetricSelectorFragments(existing, add string) string {
+	add = normalizeSelectorPart(add)
+	if add == "" {
+		if normalizeSelectorPart(existing) == "" {
+			return ""
+		}
+		return "{" + normalizeSelectorPart(existing) + "}"
+	}
+	existingParts := splitPromSelectorMatchers(normalizeSelectorPart(existing))
+	addParts := splitPromSelectorMatchers(add)
+	addKeys := make(map[string]struct{}, len(addParts))
+	for _, part := range addParts {
+		if key, _, _, ok := parsePromLabelMatcherWithOperator(part); ok {
+			addKeys[key] = struct{}{}
+		}
+	}
+	merged := make([]string, 0, len(existingParts)+len(addParts))
+	for _, part := range existingParts {
+		if key, _, _, ok := parsePromLabelMatcherWithOperator(part); ok {
+			if _, replaced := addKeys[key]; replaced {
+				continue
+			}
+		}
+		merged = append(merged, part)
+	}
+	merged = append(merged, addParts...)
+	if len(merged) == 0 {
+		return ""
+	}
+	return "{" + strings.Join(merged, ",") + "}"
 }
 
 func skipPromSpaces(s string, i int) int {
