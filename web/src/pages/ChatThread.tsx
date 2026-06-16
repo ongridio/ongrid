@@ -16,6 +16,7 @@ import { invalidateChatSessions, useChatSessions } from '@/store/chatSessions';
 import { usePermissions } from '@/store/me';
 import { useModelSelection } from '@/store/modelSelection';
 import { useI18n } from '@/i18n/locale';
+import { buildConfigDraftConfirmMessage, configDraftApplyTool } from '@/lib/configDraftConfirmation';
 
 type LocationState = { initialPrompt?: string } | null;
 
@@ -329,24 +330,8 @@ export default function ChatThreadPage() {
 
   function confirmConfigDraft(draft: ConfigDraftResult): Promise<boolean> {
     if (submitting) return Promise.resolve(false);
-    const applyTool = draft.apply_tool || 'apply_config_change';
-    const payload = JSON.stringify(draft.payload ?? {}, null, 2);
-    const draftHash = draft.draft_hash || '';
-    const content = [
-      tr('确认应用这个配置草案。', 'Confirm applying this configuration draft.'),
-      `domain: ${draft.domain || 'config'}`,
-      `action: ${draft.action || 'apply'}`,
-      draftHash ? `draft_hash: ${draftHash}` : '',
-      applyTool ? `apply_tool: ${applyTool}` : '',
-      tr(
-        '请调用 apply_config_change，传 confirmed=true、domain=alert_rule、action=create、上方 draft_hash 和下方原始 payload，创建这条告警规则；不要改写 payload。',
-        'Call apply_config_change with confirmed=true, domain=alert_rule, action=create, the draft_hash above, and the exact payload below; do not rewrite the payload.',
-      ),
-      'payload:',
-      '```json',
-      payload,
-      '```',
-    ].filter(Boolean).join('\n');
+    const applyTool = configDraftApplyTool(draft);
+    const content = buildConfigDraftConfirmMessage(draft, tr);
     return send(content, [], {
       expectedTool: applyTool,
       displayContent: tr('确认创建这条告警规则', 'Confirm creating this alert rule'),

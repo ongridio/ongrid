@@ -6,7 +6,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	alertdraft "github.com/ongridio/ongrid/internal/manager/biz/aiops/alertdraft"
 	aiopstools "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools"
@@ -472,39 +471,11 @@ func TestDraftAlertRuleConfigIncludesMatchingDraftHash(t *testing.T) {
 	}
 }
 
-func TestCompactAlertPreviewLimitsLongSeriesAndSamples(t *testing.T) {
-	now := time.Now()
-	in := &managersvcalert.PreviewResult{}
-	for i := 0; i < 200; i++ {
-		in.Series = append(in.Series, managersvcalert.PreviewSeriesPoint{
-			Timestamp: now.Add(time.Duration(i) * time.Minute),
-			Value:     float64(i),
-		})
-		in.Samples = append(in.Samples, managersvcalert.PreviewSample{
-			Timestamp: now.Add(time.Duration(i) * time.Minute),
-			Value:     float64(i),
-			Summary:   "sample",
-		})
-	}
-
-	got := compactAlertPreview(in)
-	if got == nil {
-		t.Fatal("compactAlertPreview() = nil")
-	}
-	if len(got.Series) != configDraftPreviewSeriesLimit {
-		t.Fatalf("Series len = %d, want %d", len(got.Series), configDraftPreviewSeriesLimit)
-	}
-	if len(got.Samples) != configDraftPreviewSampleLimit {
-		t.Fatalf("Samples len = %d, want %d", len(got.Samples), configDraftPreviewSampleLimit)
-	}
-	if got.Series[0].Value != 0 || got.Series[len(got.Series)-1].Value != 199 {
-		t.Fatalf("Series should preserve first and last point, got first=%v last=%v", got.Series[0].Value, got.Series[len(got.Series)-1].Value)
-	}
-	if got.Samples[0].Value != 0 || got.Samples[len(got.Samples)-1].Value != 199 {
-		t.Fatalf("Samples should preserve first and last point, got first=%v last=%v", got.Samples[0].Value, got.Samples[len(got.Samples)-1].Value)
-	}
-	if len(in.Series) != 200 || len(in.Samples) != 200 {
-		t.Fatalf("compactAlertPreview mutated input lengths: series=%d samples=%d", len(in.Series), len(in.Samples))
+func TestNewAlertRuleManagerNilServiceReturnsNotWired(t *testing.T) {
+	adapter := NewAlertRuleManager(nil)
+	_, err := adapter.DraftAlertRuleConfig(context.Background(), aiopstools.ConfigCaller{}, aiopstools.AlertRuleConfigArgs{})
+	if !errors.Is(err, errs.ErrNotWiredYet) {
+		t.Fatalf("DraftAlertRuleConfig() error = %v, want ErrNotWiredYet", err)
 	}
 }
 
@@ -602,6 +573,40 @@ func TestApplyAlertRuleConfigConsumesDraftOnce(t *testing.T) {
 	}
 	if fake.createCalls != 1 {
 		t.Fatalf("create calls after replay = %d, want 1", fake.createCalls)
+	}
+}
+
+func TestApplyAlertRuleConfigKeepsDraftRetryableAfterCreateFailure(t *testing.T) {
+	fake := &fakeAlertRuleService{createErr: errs.ErrInvalid}
+	adapter := NewAlertRuleManager(fake)
+	caller := aiopstools.ConfigCaller{UserID: 7, Role: "admin"}
+	draft, err := adapter.DraftAlertRuleConfig(context.Background(), caller, aiopstools.AlertRuleConfigArgs{
+		Action: "create",
+		Rule: aiopstools.AlertRuleConfigInput{
+			RuleKey:  "trace_latency_checkout",
+			Kind:     "trace_latency",
+			Name:     "Trace latency checkout",
+			Severity: "warning",
+			Spec: map[string]interface{}{
+				"service":      "checkout",
+				"threshold_ms": 750,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("DraftAlertRuleConfig() error = %v", err)
+	}
+	apply := applyArgsFromDraft(t, draft)
+
+	if _, err := adapter.ApplyAlertRuleConfig(context.Background(), caller, apply); !errors.Is(err, errs.ErrInvalid) {
+		t.Fatalf("first ApplyAlertRuleConfig() error = %v, want ErrInvalid", err)
+	}
+	fake.createErr = nil
+	if _, err := adapter.ApplyAlertRuleConfig(context.Background(), caller, apply); err != nil {
+		t.Fatalf("retry ApplyAlertRuleConfig() error = %v", err)
+	}
+	if fake.createCalls != 2 {
+		t.Fatalf("create calls = %d, want 2", fake.createCalls)
 	}
 }
 

@@ -31,6 +31,25 @@ func TestAlertDraftGuard_ReplacesPlainTextAlertDraftWithoutToolDraft(t *testing.
 	}
 }
 
+func TestAlertDraftGuard_InstallsForRuleRequestWithoutAlertWord(t *testing.T) {
+	guard := NewAlertDraftGuardHandler(AlertDraftGuardDeps{
+		UserText: "配置 SLO burn rate 规则，1 小时窗口超过 14.4 倍就触发",
+	})
+	if guard == nil {
+		t.Fatal("guard = nil")
+	}
+	out := &einomodel.CallbackOutput{Message: &schema.Message{
+		Role:    schema.Assistant,
+		Content: "config_draft 已准备好，draft_hash: sha256:fake，请确认后调用 apply_config_change。",
+	}}
+
+	guard.OnEnd(context.Background(), chatModelRunInfo(), out)
+
+	if out.Message.Content != alertDraftGuardBlockedMessage {
+		t.Fatalf("content = %q, want guard message", out.Message.Content)
+	}
+}
+
 func TestAlertDraftGuard_AllowsAlertDraftAfterSuccessfulDraftTool(t *testing.T) {
 	guard := NewAlertDraftGuardHandler(AlertDraftGuardDeps{
 		UserText: "创建一个 MongoDB 数据库告警规则",

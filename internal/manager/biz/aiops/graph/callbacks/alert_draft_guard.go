@@ -142,28 +142,31 @@ func AlertDraftGuardFromHandlers(handlers []einocallbacks.Handler) *AlertDraftGu
 
 func looksLikeAlertRuleCreationRequest(text string) bool {
 	lower := strings.ToLower(text)
-	hasAlert := strings.Contains(text, "告警") || strings.Contains(lower, "alert")
-	if !hasAlert {
-		return false
-	}
-	createNeedles := []string{
+	if !containsAnyNeedle(text, lower, []string{
 		"创建", "新增", "添加", "配置", "生成",
 		"create", "add", "configure", "new", "generate",
+	}) {
+		return false
 	}
-	for _, needle := range createNeedles {
-		if strings.Contains(lower, needle) || strings.Contains(text, needle) {
-			return true
-		}
-	}
-	return false
+	return containsAnyNeedle(text, lower, []string{
+		"告警", "告警规则", "监控规则", "规则", "链路", "日志",
+		"alert", "rule", "monitoring rule", "slo", "burn rate", "metric", "log", "trace",
+	})
 }
 
 func looksLikeConfirmableAlertDraft(content string) bool {
 	lower := strings.ToLower(content)
+	if containsAnyNeedle(content, lower, []string{
+		"config_draft",
+		"apply_config_change",
+	}) {
+		return true
+	}
 	hasAlertRule := strings.Contains(content, "告警") ||
 		strings.Contains(content, "规则键") ||
 		strings.Contains(lower, "alert") ||
-		strings.Contains(lower, "rule_key")
+		strings.Contains(lower, "rule_key") ||
+		strings.Contains(lower, "draft_hash")
 	if !hasAlertRule {
 		return false
 	}
@@ -178,6 +181,15 @@ func looksLikeConfirmableAlertDraft(content string) bool {
 	}
 	for _, needle := range confirmableNeedles {
 		if strings.Contains(lower, needle) || strings.Contains(content, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsAnyNeedle(text, lowerText string, needles []string) bool {
+	for _, needle := range needles {
+		if strings.Contains(lowerText, needle) || strings.Contains(text, needle) {
 			return true
 		}
 	}
@@ -248,6 +260,15 @@ func isUsableTraceServiceName(name string) bool {
 }
 
 func toolResultLooksLikeConfigDraft(result string) bool {
+	var resp struct {
+		Kind      string `json:"kind"`
+		DraftHash string `json:"draft_hash"`
+	}
+	if err := json.Unmarshal([]byte(result), &resp); err == nil &&
+		strings.TrimSpace(resp.Kind) == "config_draft" &&
+		strings.TrimSpace(resp.DraftHash) != "" {
+		return true
+	}
 	lower := strings.ToLower(result)
 	return strings.Contains(lower, "config_draft") &&
 		strings.Contains(lower, "draft_hash")

@@ -1,4 +1,4 @@
-package aiopsconfig
+package alertconfig
 
 import (
 	"context"
@@ -6,13 +6,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"strings"
-	"sync"
 	"time"
 
 	alertdraft "github.com/ongridio/ongrid/internal/manager/biz/aiops/alertdraft"
 	aiopstools "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools"
-	managersvcalert "github.com/ongridio/ongrid/internal/manager/service/alert"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
 
@@ -22,26 +19,81 @@ const (
 	alertRuleDraftTTL             = 30 * time.Minute
 )
 
-type alertRuleService interface {
-	PreviewRule(ctx context.Context, caller managersvcalert.Caller, in managersvcalert.RuleInput, lookbackSeconds int) (*managersvcalert.PreviewResult, error)
-	CreateRule(ctx context.Context, caller managersvcalert.Caller, in managersvcalert.RuleInput) (*managersvcalert.Rule, error)
+type AlertRulePort interface {
+	PreviewRule(ctx context.Context, caller aiopstools.ConfigCaller, in RuleInput, lookbackSeconds int) (*PreviewResult, error)
+	CreateRule(ctx context.Context, caller aiopstools.ConfigCaller, in RuleInput) (*Rule, error)
 }
 
-// AlertRuleManager adapts conversational aiops config tools to the alert
-// service. It keeps cmd/ongrid limited to wiring while the draft/apply flow
-// remains close to the manager service layer.
+type RuleCondition struct {
+	Metric     string
+	Operator   string
+	Threshold  float64
+	Window     string
+	For        string
+	Aggregator string
+}
+
+type RuleInput struct {
+	RuleKey             string
+	Kind                string
+	Name                string
+	ScopeType           string
+	JoinMode            string
+	Severity            string
+	Enabled             bool
+	Conditions          []RuleCondition
+	Spec                map[string]interface{}
+	Labels              map[string]string
+	RunbookURL          string
+	NotifyChannelIDs    []uint64
+	NotifyWindowSeconds int
+	NotifyMinFires      int
+}
+
+type Rule struct {
+	ID   uint64
+	Kind string
+	Name string
+}
+
+type PreviewSample struct {
+	Timestamp time.Time         `json:"ts"`
+	Labels    map[string]string `json:"labels,omitempty"`
+	Value     float64           `json:"value"`
+	Summary   string            `json:"summary"`
+}
+
+type PreviewSeriesPoint struct {
+	Timestamp time.Time `json:"ts"`
+	Value     float64   `json:"value"`
+}
+
+type PreviewResult struct {
+	FireCount     int                  `json:"fire_count"`
+	FirstFireAt   *time.Time           `json:"first_fire_at,omitempty"`
+	LastFireAt    *time.Time           `json:"last_fire_at,omitempty"`
+	Samples       []PreviewSample      `json:"samples,omitempty"`
+	Series        []PreviewSeriesPoint `json:"series,omitempty"`
+	Threshold     *float64             `json:"threshold,omitempty"`
+	Unit          string               `json:"unit,omitempty"`
+	SkippedReason string               `json:"skipped_reason,omitempty"`
+}
+
+// AlertRuleManager owns the natural-language alert-rule draft/apply flow.
+// Persistence and preview execution stay behind AlertRulePort so this package
+// does not depend on service-layer DTOs.
 type AlertRuleManager struct {
-	alert      alertRuleService
-	drafts     *alertRuleDraftStore
+	alert      AlertRulePort
+	drafts     alertRuleDraftStore
 	newDraftID func() (string, error)
 }
 
 // NewAlertRuleManager wires natural-language alert-rule draft/apply tools to
-// the existing alert service.
-func NewAlertRuleManager(alertSvc alertRuleService) *AlertRuleManager {
+// a narrow alert-rule port.
+func NewAlertRuleManager(alertSvc AlertRulePort) *AlertRuleManager {
 	return &AlertRuleManager{
 		alert:      alertSvc,
-		drafts:     newAlertRuleDraftStore(time.Now),
+		drafts:     newMemoryAlertRuleDraftStore(time.Now),
 		newDraftID: newAlertRuleDraftID,
 	}
 }
@@ -58,9 +110,8 @@ func (a *AlertRuleManager) DraftAlertRuleConfig(ctx context.Context, caller aiop
 	if err != nil {
 		return nil, err
 	}
-	alertCaller := toAlertServiceCaller(caller)
 	ruleInput := toAlertRuleInput(compiled.Rule)
-	res, err := a.alert.PreviewRule(ctx, alertCaller, ruleInput, in.LookbackSeconds)
+	res, err := a.alert.PreviewRule(ctx, caller, ruleInput, in.LookbackSeconds)
 	if err != nil {
 		return nil, fmt.Errorf("preview alert rule: %w", err)
 	}
@@ -82,7 +133,7 @@ func (a *AlertRuleManager) DraftAlertRuleConfig(ctx context.Context, caller aiop
 		newDraftID = newAlertRuleDraftID
 	}
 	if a.drafts == nil {
-		a.drafts = newAlertRuleDraftStore(time.Now)
+		a.drafts = newMemoryAlertRuleDraftStore(time.Now)
 	}
 	draftID, err := newDraftID()
 	if err != nil {
@@ -97,7 +148,7 @@ func (a *AlertRuleManager) DraftAlertRuleConfig(ctx context.Context, caller aiop
 		UserID:    caller.UserID,
 		Action:    compiled.Action,
 		Hash:      draftHash,
-		ExpiresAt: a.drafts.now().Add(alertRuleDraftTTL),
+		ExpiresAt: a.drafts.expiresAt(alertRuleDraftTTL),
 	})
 	return &aiopstools.ConfigDraft{
 		Kind:      aiopstools.ConfigResultKindDraft,
@@ -113,7 +164,7 @@ func (a *AlertRuleManager) DraftAlertRuleConfig(ctx context.Context, caller aiop
 	}, nil
 }
 
-func compactAlertPreview(in *managersvcalert.PreviewResult) *managersvcalert.PreviewResult {
+func compactAlertPreview(in *PreviewResult) *PreviewResult {
 	if in == nil {
 		return nil
 	}
@@ -123,17 +174,17 @@ func compactAlertPreview(in *managersvcalert.PreviewResult) *managersvcalert.Pre
 	return &out
 }
 
-func samplePreviewSeries(in []managersvcalert.PreviewSeriesPoint, limit int) []managersvcalert.PreviewSeriesPoint {
+func samplePreviewSeries(in []PreviewSeriesPoint, limit int) []PreviewSeriesPoint {
 	if limit <= 0 || len(in) == 0 {
 		return nil
 	}
 	if len(in) <= limit {
-		return append([]managersvcalert.PreviewSeriesPoint(nil), in...)
+		return append([]PreviewSeriesPoint(nil), in...)
 	}
 	if limit == 1 {
-		return []managersvcalert.PreviewSeriesPoint{in[len(in)-1]}
+		return []PreviewSeriesPoint{in[len(in)-1]}
 	}
-	out := make([]managersvcalert.PreviewSeriesPoint, 0, limit)
+	out := make([]PreviewSeriesPoint, 0, limit)
 	last := len(in) - 1
 	for i := 0; i < limit; i++ {
 		out = append(out, in[i*last/(limit-1)])
@@ -141,17 +192,17 @@ func samplePreviewSeries(in []managersvcalert.PreviewSeriesPoint, limit int) []m
 	return out
 }
 
-func samplePreviewSamples(in []managersvcalert.PreviewSample, limit int) []managersvcalert.PreviewSample {
+func samplePreviewSamples(in []PreviewSample, limit int) []PreviewSample {
 	if limit <= 0 || len(in) == 0 {
 		return nil
 	}
 	if len(in) <= limit {
-		return append([]managersvcalert.PreviewSample(nil), in...)
+		return append([]PreviewSample(nil), in...)
 	}
 	if limit == 1 {
-		return []managersvcalert.PreviewSample{in[len(in)-1]}
+		return []PreviewSample{in[len(in)-1]}
 	}
-	out := make([]managersvcalert.PreviewSample, 0, limit)
+	out := make([]PreviewSample, 0, limit)
 	last := len(in) - 1
 	for i := 0; i < limit; i++ {
 		out = append(out, in[i*last/(limit-1)])
@@ -167,12 +218,21 @@ func (a *AlertRuleManager) ApplyAlertRuleConfig(ctx context.Context, caller aiop
 	if err != nil {
 		return nil, err
 	}
-	if err := a.drafts.consume(caller, action, in.Rule, in.DraftID, in.DraftHash); err != nil {
+	if a.drafts == nil {
+		a.drafts = newMemoryAlertRuleDraftStore(time.Now)
+	}
+	lease, err := a.drafts.beginApply(caller, action, in.Rule, in.DraftID, in.DraftHash)
+	if err != nil {
 		return nil, err
 	}
-	alertCaller := toAlertServiceCaller(caller)
+	applied := false
+	defer func() {
+		if !applied {
+			lease.rollback()
+		}
+	}()
 	ruleInput := toAlertRuleInput(in.Rule)
-	res, err := a.alert.PreviewRule(ctx, alertCaller, ruleInput, 0)
+	res, err := a.alert.PreviewRule(ctx, caller, ruleInput, 0)
 	if err != nil {
 		return nil, fmt.Errorf("preview alert rule before create: %w", err)
 	}
@@ -182,10 +242,12 @@ func (a *AlertRuleManager) ApplyAlertRuleConfig(ctx context.Context, caller aiop
 			return nil, fmt.Errorf("%w: preview skipped before create: %s", errs.ErrInvalid, reason)
 		}
 	}
-	rule, err := a.alert.CreateRule(ctx, alertCaller, ruleInput)
+	rule, err := a.alert.CreateRule(ctx, caller, ruleInput)
 	if err != nil {
 		return nil, fmt.Errorf("create alert rule: %w", err)
 	}
+	lease.commit()
+	applied = true
 	return &aiopstools.ConfigApplyResult{
 		Kind:       aiopstools.ConfigResultKindApply,
 		Domain:     aiopstools.ConfigDomainAlertRule,
@@ -202,15 +264,15 @@ func (a *AlertRuleManager) ApplyAlertRuleConfig(ctx context.Context, caller aiop
 	}, nil
 }
 
-func toAlertRuleInput(in aiopstools.AlertRuleConfigInput) managersvcalert.RuleInput {
+func toAlertRuleInput(in aiopstools.AlertRuleConfigInput) RuleInput {
 	in = alertdraft.NormalizeRuleConfigInput(in)
 	enabled := true
 	if in.Enabled != nil {
 		enabled = *in.Enabled
 	}
-	conds := make([]managersvcalert.RuleCondition, 0, len(in.Conditions))
+	conds := make([]RuleCondition, 0, len(in.Conditions))
 	for _, c := range in.Conditions {
-		conds = append(conds, managersvcalert.RuleCondition{
+		conds = append(conds, RuleCondition{
 			Metric:     c.Metric,
 			Operator:   c.Operator,
 			Threshold:  c.Threshold,
@@ -219,7 +281,7 @@ func toAlertRuleInput(in aiopstools.AlertRuleConfigInput) managersvcalert.RuleIn
 			Aggregator: c.Aggregator,
 		})
 	}
-	return managersvcalert.RuleInput{
+	return RuleInput{
 		RuleKey:             in.RuleKey,
 		Kind:                in.Kind,
 		Name:                in.Name,
@@ -235,10 +297,6 @@ func toAlertRuleInput(in aiopstools.AlertRuleConfigInput) managersvcalert.RuleIn
 		NotifyWindowSeconds: in.NotifyWindowSeconds,
 		NotifyMinFires:      in.NotifyMinFires,
 	}
-}
-
-func toAlertServiceCaller(c aiopstools.ConfigCaller) managersvcalert.Caller {
-	return managersvcalert.Caller{UserID: c.UserID, Role: c.Role}
 }
 
 func configRaw(v interface{}) (json.RawMessage, error) {
@@ -265,81 +323,13 @@ type alertRuleDraftRecord struct {
 	ExpiresAt time.Time
 }
 
-type alertRuleDraftStore struct {
-	mu      sync.Mutex
-	records map[string]alertRuleDraftRecord
-	nowFn   func() time.Time
+type alertRuleDraftStore interface {
+	put(rec alertRuleDraftRecord)
+	beginApply(caller aiopstools.ConfigCaller, action string, rule aiopstools.AlertRuleConfigInput, draftID, draftHash string) (alertRuleDraftApplyLease, error)
+	expiresAt(ttl time.Duration) time.Time
 }
 
-func newAlertRuleDraftStore(nowFn func() time.Time) *alertRuleDraftStore {
-	if nowFn == nil {
-		nowFn = time.Now
-	}
-	return &alertRuleDraftStore{
-		records: make(map[string]alertRuleDraftRecord),
-		nowFn:   nowFn,
-	}
-}
-
-func (s *alertRuleDraftStore) now() time.Time {
-	if s == nil || s.nowFn == nil {
-		return time.Now()
-	}
-	return s.nowFn()
-}
-
-func (s *alertRuleDraftStore) put(rec alertRuleDraftRecord) {
-	if s == nil {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := s.now()
-	for id, existing := range s.records {
-		if !existing.ExpiresAt.IsZero() && !existing.ExpiresAt.After(now) {
-			delete(s.records, id)
-		}
-	}
-	s.records[rec.ID] = rec
-}
-
-func (s *alertRuleDraftStore) consume(caller aiopstools.ConfigCaller, action string, rule aiopstools.AlertRuleConfigInput, draftID, draftHash string) error {
-	if s == nil {
-		return fmt.Errorf("%w: alert rule draft store is not configured", errs.ErrInvalid)
-	}
-	draftID = strings.TrimSpace(draftID)
-	if draftID == "" {
-		return fmt.Errorf("%w: draft_id from config_draft payload is required before applying", errs.ErrInvalid)
-	}
-	draftHash = strings.TrimSpace(draftHash)
-	if draftHash == "" {
-		return fmt.Errorf("%w: draft_hash from config_draft is required before applying", errs.ErrInvalid)
-	}
-	expectedHash, err := aiopstools.AlertRuleConfigDraftHashForID(action, rule, draftID)
-	if err != nil {
-		return err
-	}
-	if !strings.EqualFold(draftHash, expectedHash) {
-		return fmt.Errorf("%w: draft_hash does not match config_draft payload", errs.ErrInvalid)
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	rec, ok := s.records[draftID]
-	if !ok {
-		return fmt.Errorf("%w: config_draft was not issued by this server or was already applied", errs.ErrInvalid)
-	}
-	now := s.now()
-	if !rec.ExpiresAt.IsZero() && !rec.ExpiresAt.After(now) {
-		delete(s.records, draftID)
-		return fmt.Errorf("%w: config_draft expired", errs.ErrInvalid)
-	}
-	if rec.UserID != caller.UserID {
-		return fmt.Errorf("%w: config_draft belongs to a different user", errs.ErrForbidden)
-	}
-	if rec.Action != action || !strings.EqualFold(rec.Hash, draftHash) {
-		return fmt.Errorf("%w: config_draft does not match the issued payload", errs.ErrInvalid)
-	}
-	delete(s.records, draftID)
-	return nil
+type alertRuleDraftApplyLease interface {
+	commit()
+	rollback()
 }

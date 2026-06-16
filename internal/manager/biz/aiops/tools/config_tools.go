@@ -26,9 +26,8 @@ const (
 	ConfigResultKindApply = "config_apply_result"
 )
 
-// ConfigCaller is the caller identity the config tools hand to the cmd-layer
-// adapter. The adapter enforces admin-only writes using the same role model as
-// the Alerts HTTP handlers.
+// ConfigCaller is the caller identity the config tools hand to the config
+// manager. The apply tool enforces admin-only writes before the manager runs.
 type ConfigCaller struct {
 	UserID      uint64
 	Role        string
@@ -36,8 +35,9 @@ type ConfigCaller struct {
 }
 
 // ConfigManager is the consumer-owned seam for conversational alert rule
-// creation. The tools package owns JSON schema + tool gating; the manager
-// service adapter maps this seam to the existing alert service.
+// creation. The tools package owns JSON schema and tool gating; the concrete
+// manager owns draft lifecycle and delegates rule persistence through a narrow
+// port.
 type ConfigManager interface {
 	DraftAlertRuleConfig(ctx context.Context, caller ConfigCaller, in AlertRuleConfigArgs) (*ConfigDraft, error)
 	ApplyAlertRuleConfig(ctx context.Context, caller ConfigCaller, in AlertRuleApplyArgs) (*ConfigApplyResult, error)

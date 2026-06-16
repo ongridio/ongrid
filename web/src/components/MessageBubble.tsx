@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import { Wrench, ChevronDown, ChevronRight, Loader2, AlertCircle, CheckCircle2, XCircle } from 'lucide-react';
 import type { ChatMessage, ToolCallSummary } from '@/api/chat';
 import { cn } from '@/lib/cn';
+import { isConfigDraftConfirmationMessage } from '@/lib/configDraftConfirmation';
 import { useI18n } from '@/i18n/locale';
 import { Button } from '@/components/ui';
 
@@ -90,18 +91,7 @@ function compactUserContent(
   content: string,
   tr: (zh: string, en: string) => string,
 ): string {
-  const text = content.trim();
-  const isConfigDraftConfirmation =
-    (
-      text.startsWith('确认应用这个配置草案。') ||
-      text.startsWith('Confirm applying this configuration draft.')
-    ) &&
-    text.includes('apply_config_change') &&
-    text.includes('draft_hash:') &&
-    text.includes('payload:') &&
-    text.includes('```json');
-
-  if (!isConfigDraftConfirmation) return content;
+  if (!isConfigDraftConfirmationMessage(content)) return content;
   return tr('确认创建这条告警规则', 'Confirm creating this alert rule');
 }
 
