@@ -187,6 +187,12 @@ func NewRegistry(caller Caller, edges *edgebiz.Usecase, devices *devicebiz.Useca
 			Schema:      QueryPromQLSchema,
 			Execute:     r.executeQueryPromQL,
 		})
+		r.Register(Tool{
+			Name:        ToolNameListMetricCatalog,
+			Description: ListMetricCatalogDescription,
+			Schema:      ListMetricCatalogSchema,
+			Execute:     r.executeListMetricCatalog,
+		})
 	}
 	if logQuery != nil {
 		r.Register(Tool{

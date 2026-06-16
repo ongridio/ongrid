@@ -49,9 +49,9 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	biz "github.com/ongridio/ongrid/internal/manager/biz/aiops"
-	"github.com/ongridio/ongrid/internal/manager/biz/aiops/toolreplay"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/graph"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/graph/callbacks"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/toolreplay"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	aiopsmodel "github.com/ongridio/ongrid/internal/manager/model/aiops"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
@@ -142,8 +142,8 @@ type Emit func(Event)
 
 // Request bundles every per-call input the runtime needs.
 type Request struct {
-	SessionID        string
-	UserID           uint64
+	SessionID string
+	UserID    uint64
 	// Role is the caller's system role (admin | user | viewer).
 	// gates the toolbag against this — viewer drops Class!=read so the
 	// LLM cannot reach mutating tools no matter what the persona allows.
@@ -155,7 +155,7 @@ type Request struct {
 	WebSearchEnabled bool
 	// Locale is the UI language ("en-US"/"zh-CN") the reply should use;
 	// threaded into graph.Input so the assembler adds a language directive.
-	Locale           string
+	Locale string
 	// Emit is the streaming sink. nil = no streaming (blocking call).
 	Emit Emit
 }
@@ -566,6 +566,7 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (*Reply, error) {
 	//    rt.cfg.CallbackDeps. The SSE handler is appended via the
 	//    cutover layer's emitter when req.Emit != nil.
 	deps := rt.cfg.CallbackDeps
+	deps.AlertDraftGuard.UserText = req.UserText
 	deps.Persistence.SessionID = sess.ID
 	deps.Persistence.Model = strings.TrimSpace(req.Model)
 	if deps.Persistence.Repo == nil {
@@ -606,6 +607,9 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (*Reply, error) {
 	if mopts := chatModelOpts(req); len(mopts) > 0 {
 		invokeOpts = append(invokeOpts, compose.WithChatModelOption(mopts...))
 	}
+	invokeOpts = append(invokeOpts, compose.WithToolsNodeOption(
+		compose.WithToolOption(graph.WithInvokeOpts(basetool.WithUserText(req.UserText))),
+	))
 	// Thread the UI locale onto ctx so AgentTool can pick it up and
 	// forward it into the sub-agent's SpawnRequest. Without this, a
 	// coordinator that handles an English question hands off to a
@@ -685,6 +689,9 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (*Reply, error) {
 		// canonical row written by PersistenceHandler lives in
 		// chat_messages; we mirror its fields here for the wire DTO.
 		content := out.AssistantMessage.Content
+		if guard := callbacks.AlertDraftGuardFromHandlers(handlers); guard != nil {
+			content = guard.SanitizeAssistantContent(content)
+		}
 		var contentPtr *string
 		if content != "" {
 			contentPtr = &content

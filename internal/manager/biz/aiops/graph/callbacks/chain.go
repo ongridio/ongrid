@@ -50,6 +50,10 @@ func (r *assistantIDRelay) load() string {
 //
 // Reference: Callback 链 + 主参考图 callback 链.
 type Deps struct {
+	// AlertDraftGuard blocks model-only alert-rule drafts before they are
+	// persisted or streamed. It must run before Persistence/SSE.
+	AlertDraftGuard AlertDraftGuardDeps
+
 	// Persistence wiring (chat_messages / chat_tool_calls writes).
 	Persistence PersistenceDeps
 
@@ -82,7 +86,11 @@ type Deps struct {
 // discards the handlers when the request finishes (so per-call state
 // is bounded by the request lifetime).
 func NewDefaultHandlers(deps Deps) []callbacks.Handler {
-	out := make([]callbacks.Handler, 0, 5)
+	out := make([]callbacks.Handler, 0, 6)
+
+	if h := NewAlertDraftGuardHandler(deps.AlertDraftGuard); h != nil {
+		out = append(out, h)
+	}
 
 	// Shared relay so Persistence (runs first) can hand the freshly-
 	// written assistant row id to SSE (runs second) for the
@@ -148,4 +156,3 @@ func registerOrExisting(reg prometheus.Registerer, c prometheus.Collector) prome
 	}
 	panic(err)
 }
-

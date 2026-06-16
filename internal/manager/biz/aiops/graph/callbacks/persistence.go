@@ -52,6 +52,15 @@ type PersistenceDeps struct {
 	Model string
 }
 
+const persistenceWriteTimeout = 5 * time.Second
+
+func persistenceWriteContext(parent context.Context) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	return context.WithTimeout(context.WithoutCancel(parent), persistenceWriteTimeout)
+}
+
 // PersistenceHandler writes chat_messages + chat_tool_calls rows as
 // the graph executes. Mirrors the persistence side-effects the legacy
 // agent.go for-loop performs synchronously; spec:
@@ -311,7 +320,9 @@ func (h *PersistenceHandler) OnStart(ctx context.Context, info *callbacks.RunInf
 		id := llmCallID
 		row.LLMCallID = &id
 	}
-	if err := h.deps.Repo.CreateToolCall(ctx, row); err != nil {
+	writeCtx, cancel := persistenceWriteContext(ctx)
+	defer cancel()
+	if err := h.deps.Repo.CreateToolCall(writeCtx, row); err != nil {
 		h.recordErr("tool_call_insert", err)
 		return ctx
 	}
@@ -444,7 +455,9 @@ func (h *PersistenceHandler) persistAssistant(ctx context.Context, mo *einomodel
 		row.PromptTokens = &pt
 		row.CompletionTokens = &ct
 	}
-	if err := h.deps.Repo.AppendMessage(ctx, row); err != nil {
+	writeCtx, cancel := persistenceWriteContext(ctx)
+	defer cancel()
+	if err := h.deps.Repo.AppendMessage(writeCtx, row); err != nil {
 		h.recordErr("assistant_insert", err)
 		return
 	}
@@ -580,7 +593,10 @@ func (h *PersistenceHandler) flushIncompleteBatch(ctx context.Context) {
 			ToolName:   &tn,
 			CreatedAt:  time.Now().UTC(),
 		}
-		if err := h.deps.Repo.AppendMessage(ctx, row); err != nil {
+		writeCtx, cancel := persistenceWriteContext(ctx)
+		err := h.deps.Repo.AppendMessage(writeCtx, row)
+		cancel()
+		if err != nil {
 			h.recordErr("autoheal_stub_insert", err)
 			continue
 		}
@@ -694,7 +710,9 @@ func (h *PersistenceHandler) persistToolEnd(ctx context.Context, info *callbacks
 		resultPtr = &s
 	}
 
-	if err := h.deps.Repo.UpdateToolCallResult(ctx, entry.rowID, status, resultPtr, errStr, endedAt); err != nil {
+	writeCtx, cancel := persistenceWriteContext(ctx)
+	defer cancel()
+	if err := h.deps.Repo.UpdateToolCallResult(writeCtx, entry.rowID, status, resultPtr, errStr, endedAt); err != nil {
 		h.recordErr("tool_call_update", err)
 	}
 
@@ -727,7 +745,7 @@ func (h *PersistenceHandler) persistToolEnd(ctx context.Context, info *callbacks
 		ToolName:   &tname,
 		CreatedAt:  endedAt,
 	}
-	if err := h.deps.Repo.AppendMessage(ctx, row); err != nil {
+	if err := h.deps.Repo.AppendMessage(writeCtx, row); err != nil {
 		h.recordErr("tool_msg_insert", err)
 		return
 	}

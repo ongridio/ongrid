@@ -2,8 +2,10 @@ package alert
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -79,6 +81,38 @@ func TestServiceListChannelsStubReturnsNotWired(t *testing.T) {
 	_, err := svc.ListChannels(context.Background(), Caller{}, 1, 20)
 	if !errors.Is(err, errs.ErrNotWiredYet) {
 		t.Fatalf("ListChannels() err = %v, want not wired yet", err)
+	}
+}
+
+func TestToServicePreviewDropsNonFiniteValues(t *testing.T) {
+	t.Parallel()
+
+	threshold := math.NaN()
+	now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
+	got := toServicePreview(&bizalert.PreviewResult{
+		Threshold: &threshold,
+		Series: []bizalert.PreviewSeriesPoint{
+			{Timestamp: now, Value: math.NaN()},
+			{Timestamp: now.Add(time.Minute), Value: math.Inf(1)},
+			{Timestamp: now.Add(2 * time.Minute), Value: 42},
+		},
+		Samples: []bizalert.PreviewSample{
+			{Timestamp: now, Value: math.NaN(), Summary: "bad"},
+			{Timestamp: now.Add(time.Minute), Value: 1, Summary: "ok"},
+		},
+	})
+
+	if got.Threshold != nil {
+		t.Fatalf("Threshold = %v, want nil for NaN", *got.Threshold)
+	}
+	if len(got.Series) != 1 || got.Series[0].Value != 42 {
+		t.Fatalf("Series = %+v, want only finite point", got.Series)
+	}
+	if len(got.Samples) != 1 || got.Samples[0].Summary != "ok" {
+		t.Fatalf("Samples = %+v, want only finite sample", got.Samples)
+	}
+	if _, err := json.Marshal(got); err != nil {
+		t.Fatalf("json.Marshal() err = %v", err)
 	}
 }
 
@@ -400,4 +434,3 @@ func TestServiceTestChannelReportsFailure(t *testing.T) {
 		t.Fatalf("TestChannel().Message = %q, want 503 detail", got.Message)
 	}
 }
-

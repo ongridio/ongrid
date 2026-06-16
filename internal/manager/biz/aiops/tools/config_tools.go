@@ -45,6 +45,7 @@ type ConfigManager interface {
 type ConfigChangeDraftArgs struct {
 	Domain          string               `json:"domain"`
 	Action          string               `json:"action"`
+	RequestText     string               `json:"request_text,omitempty"`
 	LookbackSeconds int                  `json:"lookback_seconds,omitempty"`
 	Rule            AlertRuleConfigInput `json:"rule,omitempty"`
 }
@@ -94,6 +95,7 @@ type ConfigApplyResult struct {
 
 type AlertRuleConfigArgs struct {
 	Action          string               `json:"action"`
+	RequestText     string               `json:"request_text,omitempty"`
 	LookbackSeconds int                  `json:"lookback_seconds,omitempty"`
 	Rule            AlertRuleConfigInput `json:"rule,omitempty"`
 }
@@ -111,6 +113,8 @@ type AlertRuleConfigInput struct {
 	Name                string                 `json:"name,omitempty"`
 	ScopeType           string                 `json:"scope_type,omitempty"`
 	JoinMode            string                 `json:"join_mode,omitempty"`
+	Window              string                 `json:"window,omitempty"`
+	For                 string                 `json:"for,omitempty"`
 	Severity            string                 `json:"severity,omitempty"`
 	Enabled             *bool                  `json:"enabled,omitempty"`
 	Conditions          []AlertRuleCondition   `json:"conditions,omitempty"`
@@ -165,7 +169,7 @@ func (t *ConfigTool) Info(_ context.Context) (*basetool.ToolInfo, error) {
 		return &basetool.ToolInfo{
 			Name:        ToolNameDraftConfigChange,
 			Description: "Create a read-only configuration draft for a new alert rule across all supported alert rule kinds. It never persists business config.",
-			WhenToUse:   "Use directly when the user asks to configure, create, or add an alert rule from natural language. Only domain=alert_rule and action=create are supported. Supports metric_threshold, metric_raw, metric_anomaly, metric_forecast, metric_burn_rate, log_match, log_volume, trace_latency, and trace_error_rate. Use metric_threshold only for the host closed-set metrics; use metric_raw for database, custom, or arbitrary collected Prometheus metrics. Do not call query_knowledge, code tools, or AgentTool first for alert-rule creation requests. After one successful config_draft, stop tool calls and ask the user to confirm or cancel; do not call this tool again in the same turn.",
+			WhenToUse:   "Use directly when the user asks to configure, create, or add an alert rule from natural language. Only domain=alert_rule and action=create are supported. Supports metric_threshold, metric_raw, metric_anomaly, metric_forecast, metric_burn_rate, log_match, log_volume, trace_latency, and trace_error_rate. Use metric_threshold only for the host closed-set metrics; use metric_raw for database, custom, or arbitrary collected Prometheus metrics. If an exact PromQL or metric name is missing, use list_metric_catalog once and only once first for every metric-based alert, including database alerts; for database alerts, use analyze_database_status afterwards only if source/capability context is still needed. Prefer full expr built from discovered metric names and labels. Use sample_labels exactly for label names; never invent label keys. If the user explicitly names a source, database instance, device, job, service, or instance endpoint, scope selectors with that exact ongrid_source/device_id/job/service/instance and set spec.source_explicit=true. If the user did not specify a source/device/job/service/instance, do not copy sample label values such as ongrid_source=\"db:...\" or ongrid_source=\"custom:...\", device_id, job, service, or instance into selectors; omit spec.source_explicit or set it false, and keep ongrid_source only in sum/max by grouping for per-source evaluation when needed. When metric_raw combines database metrics or same-metric series with different discriminator labels such as conn_type/count_type/datname/db, aggregate each side by (device_id, ongrid_source) even if current sample labels look identical: use sum by for counters/rate/increase and max by for gauges/capacity/current values; do not use ignoring(...) as the main fix unless all remaining labels are known to match. For MongoDB connection usage, use mongodb_ss_connections{conn_type=\"current\"} / (current + available); conn_type=\"active\" is not the total/current connection count. For log_match/log_volume, use actual Loki labels: journald streams use ongrid_source=\"journald\" or ongrid_source=~\"journald(:.*)?\"; do not invent job=~\".*journal.*\". For trace_latency and trace_error_rate, service is required; use a service explicitly named by the user or discovered from current traces_spanmetrics_* service_name labels. If the user explicitly names the service, call this tool directly instead of explaining that a tool is needed or waiting for another confirmation; for example, \"create an alert when service ongrid-manager p95 latency exceeds 500ms\" maps to kind=trace_latency with spec.service=\"ongrid-manager\", quantile=\"p95\", threshold_ms=500. Ask for service when it is absent or ambiguous. Do not call list_database_sources, query_knowledge, code tools, or AgentTool first for alert-rule creation requests. A natural-language alert creation is not complete until this tool returns config_draft with draft_hash; never ask the user to confirm a plain-text draft. After one successful config_draft, stop tool calls and ask the user to confirm or cancel; do not call this tool again in the same turn.",
 			Parameters:  draftConfigChangeSchema,
 			Class:       "read",
 		}, nil
@@ -186,12 +190,16 @@ func (t *ConfigTool) InvokableRun(ctx context.Context, argsJSON string, opts ...
 	if t.manager == nil {
 		return "", fmt.Errorf("config tool: manager not configured")
 	}
+	resolved := basetool.ResolveOptions(opts)
 	caller := configCallerFromContext(ctx, opts)
 	switch t.kind {
 	case configToolDraftChange:
 		var in ConfigChangeDraftArgs
 		if err := json.Unmarshal([]byte(argsJSON), &in); err != nil {
 			return "", fmt.Errorf("%s: bad args: %w", ToolNameDraftConfigChange, err)
+		}
+		if strings.TrimSpace(in.RequestText) == "" {
+			in.RequestText = resolved.UserText
 		}
 		out, err := t.draftConfigChange(ctx, caller, in)
 		if err != nil {
@@ -232,6 +240,7 @@ func (t *ConfigTool) draftConfigChange(ctx context.Context, caller ConfigCaller,
 	}
 	return t.manager.DraftAlertRuleConfig(ctx, caller, AlertRuleConfigArgs{
 		Action:          action,
+		RequestText:     in.RequestText,
 		LookbackSeconds: in.LookbackSeconds,
 		Rule:            in.Rule,
 	})
@@ -372,6 +381,8 @@ func isZeroAlertRuleInput(in AlertRuleConfigInput) bool {
 		in.Name == "" &&
 		in.ScopeType == "" &&
 		in.JoinMode == "" &&
+		in.Window == "" &&
+		in.For == "" &&
 		in.Severity == "" &&
 		in.Enabled == nil &&
 		len(in.Conditions) == 0 &&
@@ -430,7 +441,7 @@ func isSensitiveConfigKey(key string) bool {
 
 var draftConfigChangeSchema = json.RawMessage(`{
   "type": "object",
-  "required": ["domain", "action", "rule"],
+  "required": ["domain", "action", "request_text", "rule"],
   "properties": {
     "domain": {
       "type": "string",
@@ -438,6 +449,10 @@ var draftConfigChangeSchema = json.RawMessage(`{
       "description": "Only alert_rule is supported in v1."
     },
     "action": {"type": "string", "enum": ["create"]},
+    "request_text": {
+      "type": "string",
+      "description": "Exact current user request text that triggered this draft. Always copy the user's latest natural-language request verbatim; backend normalization uses it to verify scope labels such as log level/unit and explicit database source intent."
+    },
     "lookback_seconds": {
       "type": "integer",
       "minimum": 60,
@@ -457,8 +472,10 @@ var draftConfigChangeSchema = json.RawMessage(`{
           "description": "Choose the existing alert creation mode. metric_threshold is only for host closed-set metrics. metric_raw is for arbitrary PromQL predicates, database metrics, custommetrics, and any exact collected metric name."
         },
         "name": {"type": "string"},
-        "scope_type": {"type": "string"},
+        "scope_type": {"type": "string", "enum": ["global", "host", "monitoring_pipeline"], "description": "Use global for database, custommetrics, log, trace, and arbitrary metric_raw rules unless the rule is explicitly host-scoped."},
         "join_mode": {"type": "string", "enum": ["all", "any"]},
+        "window": {"type": "string", "description": "Compatibility alias. Prefer kind-specific spec.window or condition.window; backend normalizes this field into the correct place."},
+        "for": {"type": "string", "description": "Compatibility alias for sustained duration. Prefer spec.for for metric_raw or condition.for for metric_threshold; backend normalizes this field into the correct place."},
         "severity": {"type": "string", "enum": ["info", "warning", "critical"]},
         "enabled": {"type": "boolean"},
         "conditions": {
@@ -469,7 +486,7 @@ var draftConfigChangeSchema = json.RawMessage(`{
         "spec": {
           "type": "object",
           "additionalProperties": true,
-	          "description": "Kind-specific spec. metric_raw: either expr/promql/query with the full PromQL predicate, or catalog_metric/db_metric/metric plus operator and threshold. For exact collected metrics, set metric to the Prometheus metric name and operator/threshold, e.g. redis_connected_clients > 100. Database catalog_metric examples: mysql_connection_usage_pct, mysql_slow_queries_15m, postgresql_connection_usage_pct, postgresql_deadlocks_15m, redis_memory_usage_pct, redis_keyspace_hit_ratio_pct, redis_key_count, mongodb_connections_current, mongodb_operations_per_second, mongodb_resident_memory_bytes, mongodb_wiredtiger_cache_usage_pct. Optional selector/label_selector/matchers or labels can scope the metric. metric_anomaly: metric, method(zscore|mad), baseline_window, baseline_step, deviation. metric_forecast: metric, fit_window, predict_seconds, operator, threshold. metric_burn_rate: sli using $window, slo, burns[{window,multiplier}]. log_match: stream_selector, line_filter, window, operator, threshold. log_volume: stream_selector, window, ratio_op, ratio_threshold. trace_latency: service, operation(optional), quantile(p50|p95|p99), window, threshold_ms. trace_error_rate: service, window, operator, threshold_pct."
+		          "description": "Kind-specific spec. metric_raw: either expr/promql/query with the full PromQL predicate, or catalog_metric/db_metric/metric plus operator and threshold. For exact collected metrics, set metric to the Prometheus metric name and operator/threshold, e.g. redis_connected_clients > 100. For full PromQL, use exact label keys from list_metric_catalog sample_labels. If the user explicitly names a source, database instance, device, job, service, or instance endpoint, scope selectors with that exact ongrid_source/device_id/job/service/instance and set source_explicit=true. If the user did not specify a source/device/job/service/instance, do not copy sample label values such as ongrid_source=\"db:...\" or ongrid_source=\"custom:...\", device_id, job, service, or instance into selectors; omit source_explicit or set it false, and keep ongrid_source only in sum/max by grouping for per-source evaluation when needed. If combining database metrics or different values of labels such as conn_type/count_type/datname/db, aggregate each side by (device_id, ongrid_source) even if current sample labels look identical: use sum by for counters/rate/increase and max by for gauges/capacity/current values; raw arithmetic between differently labeled series usually returns empty, and ignoring(...) is unsafe unless all remaining labels are known to match. MongoDB connection usage must use mongodb_ss_connections{conn_type=\"current\"} divided by current+available; do not use conn_type=\"active\" as current/total usage. Database catalog_metric examples: mysql_connection_usage_pct, mysql_slow_queries_15m, postgresql_connection_usage_pct, postgresql_active_connections, postgresql_deadlocks_15m, redis_memory_usage_pct, redis_keyspace_hit_ratio_pct, redis_key_count, mongodb_connection_usage_pct, mongodb_connections_current, mongodb_global_lock_queue, mongodb_operations_per_second, mongodb_resident_memory_bytes, mongodb_wiredtiger_cache_usage_pct. Optional selector/label_selector/matchers or labels can scope the metric only when the user explicitly requested that scope and source_explicit=true. metric_anomaly: metric, method(zscore|mad), baseline_window, baseline_step, deviation. metric_forecast: metric, fit_window, predict_seconds, operator, threshold. metric_burn_rate: sli must be a 0..1 success ratio that uses $window inside range selectors, e.g. sum(rate(http_requests_total{code!~\"5..\"}[$window])) / sum(rate(http_requests_total[$window])), plus slo and burns[{window,multiplier}]. log_match: stream_selector, line_filter, window, operator, threshold; journald streams use ongrid_source=\"journald\" or ongrid_source=~\"journald(:.*)?\", not job. log_volume: stream_selector, window, ratio_op, ratio_threshold. trace_latency: service(required from user text or current traces_spanmetrics_* service_name labels), operation(optional), quantile(p50|p95|p99), window, threshold_ms. trace_error_rate: service(required from user text or current traces_spanmetrics_* service_name labels), window, operator, threshold_pct."
         },
         "labels": {"type": "object", "additionalProperties": {"type": "string"}},
         "runbook_url": {"type": "string"},

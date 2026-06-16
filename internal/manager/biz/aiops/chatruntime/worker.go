@@ -621,6 +621,9 @@ func (rt *Runtime) runWorker(ctx context.Context, agentDef *Agent, sessID, userT
 	if mopts := workerChatModelOpts(ctx); len(mopts) > 0 {
 		invokeOpts = append(invokeOpts, compose.WithChatModelOption(mopts...))
 	}
+	invokeOpts = append(invokeOpts, compose.WithToolsNodeOption(
+		compose.WithToolOption(graph.WithInvokeOpts(basetool.WithUserText(userText))),
+	))
 	// Autoheal any tool batch still open when the worker exits — same
 	// rationale as the parent runtime defer. context.WithoutCancel
 	// keeps the stub inserts running even if the caller cancelled.
@@ -860,8 +863,8 @@ func (rt *Runtime) prologueKBLookup(ctx context.Context, bag []basetool.BaseTool
 	// Schema across versions has used both "query" and "q"; send
 	// "query" and let the tool ignore extras.
 	args, _ := json.Marshal(map[string]any{
-		"query":    userText,
-		"top_k":    3,
+		"query":     userText,
+		"top_k":     3,
 		"min_score": 0.6,
 	})
 	out, err := kb.InvokableRun(ctx, string(args))
@@ -925,4 +928,3 @@ func workerChatModelOpts(ctx context.Context) []model.Option {
 	}
 	return opts
 }
-

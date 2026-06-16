@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	"github.com/ongridio/ongrid/internal/pkg/tenantctx"
 )
 
@@ -55,6 +56,35 @@ func TestConfigDraftToolCallsAlertRuleManager(t *testing.T) {
 	}
 	if !strings.Contains(got, `"kind":"config_draft"`) {
 		t.Fatalf("unexpected result: %s", got)
+	}
+}
+
+func TestConfigDraftToolUsesInvokeUserTextWhenRequestTextMissing(t *testing.T) {
+	fake := &fakeConfigManager{}
+	tool := NewDraftConfigChangeTool(fake, nil)
+	_, err := tool.InvokableRun(context.Background(), `{"domain":"alert_rule","action":"create","rule":{"rule_key":"log_rule","name":"Log Rule"}}`,
+		basetool.WithUserText("系统 journald 日志 level=6 ERROR 超过 3 次"))
+	if err != nil {
+		t.Fatalf("InvokableRun() error = %v", err)
+	}
+	if fake.lastDraft.RequestText != "系统 journald 日志 level=6 ERROR 超过 3 次" {
+		t.Fatalf("RequestText = %q, want invoke user text", fake.lastDraft.RequestText)
+	}
+}
+
+func TestConfigDraftToolInfoGuidesDatabaseMetricRawRules(t *testing.T) {
+	tool := NewDraftConfigChangeTool(&fakeConfigManager{}, nil)
+	info, err := tool.Info(context.Background())
+	if err != nil {
+		t.Fatalf("Info: %v", err)
+	}
+	if !strings.Contains(info.WhenToUse, `ongrid_source="db:..."`) ||
+		!strings.Contains(string(info.Parameters), `conn_type=\"current\"`) {
+		t.Fatalf("draft tool info should forbid sample source scoping and guide Mongo current usage: when=%s params=%s", info.WhenToUse, string(info.Parameters))
+	}
+	if !strings.Contains(info.WhenToUse, "trace_latency and trace_error_rate, service is required") ||
+		!strings.Contains(string(info.Parameters), "service(required from user text or current traces_spanmetrics_* service_name labels)") {
+		t.Fatalf("draft tool info should require trace service discovery: when=%s params=%s", info.WhenToUse, string(info.Parameters))
 	}
 }
 

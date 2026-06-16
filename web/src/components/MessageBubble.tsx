@@ -72,15 +72,37 @@ function safeParse(s: string): unknown {
 }
 
 function UserBubble({ message }: Props) {
+  const { tr } = useI18n();
+  const content = compactUserContent(message.content ?? '', tr);
+
   // Codex-style: small, compact zinc chip pinned right. No accent color
   // — keeps the visual weight on the assistant content below.
   return (
     <div className="flex justify-end">
       <div className="max-w-[78%] rounded-2xl rounded-br-md bg-zinc-800/80 px-3.5 py-2 text-[14px] leading-relaxed text-zinc-100 ring-1 ring-zinc-700/60">
-        {message.content}
+        {content}
       </div>
     </div>
   );
+}
+
+function compactUserContent(
+  content: string,
+  tr: (zh: string, en: string) => string,
+): string {
+  const text = content.trim();
+  const isConfigDraftConfirmation =
+    (
+      text.startsWith('确认应用这个配置草案。') ||
+      text.startsWith('Confirm applying this configuration draft.')
+    ) &&
+    text.includes('apply_config_change') &&
+    text.includes('draft_hash:') &&
+    text.includes('payload:') &&
+    text.includes('```json');
+
+  if (!isConfigDraftConfirmation) return content;
+  return tr('确认创建这条告警规则', 'Confirm creating this alert rule');
 }
 
 function AssistantBubble({ message, onConfirmConfigDraft }: Props) {

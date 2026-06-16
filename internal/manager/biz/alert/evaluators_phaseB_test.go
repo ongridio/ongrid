@@ -44,6 +44,27 @@ func TestCompileLogMatch_Errors(t *testing.T) {
 	}
 }
 
+func TestCompileLogVolume_PreservesLineFilter(t *testing.T) {
+	spec, _ := json.Marshal(map[string]any{
+		"stream_selector": `{ongrid_source=~"journald(:.*)?",level!="7"}`,
+		"line_filter":     "(?i)(error|failed)",
+		"window":          "10m",
+		"ratio_op":        ">",
+		"ratio_threshold": 3.0,
+	})
+	row := &model.Rule{ID: 2, RuleKey: "log_volume_err", ConditionsJSON: string(spec)}
+	r, err := compileLogVolumeRule(row)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if r.LineFilter != "(?i)(error|failed)" {
+		t.Fatalf("LineFilter = %q, want content regex", r.LineFilter)
+	}
+	if q := buildLogMatchQuery(r.StreamSelector, r.LineFilter, r.Window); !strings.Contains(q, `|~ "(?i)(error|failed)"`) {
+		t.Fatalf("query = %q, want log volume filter applied", q)
+	}
+}
+
 func TestCompileTraceLatency_BuildsPromExpr(t *testing.T) {
 	spec, _ := json.Marshal(map[string]any{
 		"service":      "ongrid-edge",
@@ -106,4 +127,3 @@ func TestBuildLogMatchQuery(t *testing.T) {
 		t.Errorf("with filter: %q", q)
 	}
 }
-

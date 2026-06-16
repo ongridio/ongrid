@@ -100,7 +100,7 @@ func (e *PipelineEvaluator) evaluateLogVolume(ctx context.Context, now time.Time
 	for _, rule := range rules {
 		var evalErr error
 		done := observeEval(model.RuleKindLogVolume, &evalErr)
-		expr := buildLogMatchQuery(rule.StreamSelector, "", rule.Window)
+		expr := buildLogMatchQuery(rule.StreamSelector, rule.LineFilter, rule.Window)
 		entries, err := runLokiInstant(ctx, e.logq, expr, now)
 		if err != nil {
 			e.log.Warn("alert: loki query failed",

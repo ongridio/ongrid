@@ -596,9 +596,10 @@ func (r *Repo) UpdateRule(ctx context.Context, id uint64, in *model.Rule) error 
 	return nil
 }
 
-// DeleteRule soft-deletes a rule via gorm's DeletedAt column.
+// DeleteRule hard-deletes a custom rule so its unique rule_key can be reused.
+// The biz layer blocks built-in rules before reaching this repo method.
 func (r *Repo) DeleteRule(ctx context.Context, id uint64) error {
-	res := r.db.WithContext(ctx).Delete(&model.Rule{}, id)
+	res := r.db.WithContext(ctx).Unscoped().Delete(&model.Rule{}, id)
 	if res.Error != nil {
 		return res.Error
 	}

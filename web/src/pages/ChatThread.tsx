@@ -194,7 +194,7 @@ export default function ChatThreadPage() {
   async function send(
     content: string,
     mentions: Mention[],
-    opts: { expectedTool?: string } = {},
+    opts: { expectedTool?: string; displayContent?: string } = {},
   ): Promise<boolean> {
     if (!sessionId || !content.trim()) return false;
     setError(null);
@@ -208,7 +208,10 @@ export default function ChatThreadPage() {
     // skipped so the UI doesn't fill up with N "思考中" placeholders —
     // a single global indicator at the bottom covers in-flight state.
     const tempUserId = `optimistic-user-${Date.now()}`;
-    setMessages((prev) => [...prev, { id: tempUserId, role: 'user', content }]);
+    setMessages((prev) => [
+      ...prev,
+      { id: tempUserId, role: 'user', content: opts.displayContent ?? content },
+    ]);
 
     try {
       await streamMessage(
@@ -344,7 +347,10 @@ export default function ChatThreadPage() {
       payload,
       '```',
     ].filter(Boolean).join('\n');
-    return send(content, [], { expectedTool: applyTool });
+    return send(content, [], {
+      expectedTool: applyTool,
+      displayContent: tr('确认创建这条告警规则', 'Confirm creating this alert rule'),
+    });
   }
 
   function ThinkingIndicator() {

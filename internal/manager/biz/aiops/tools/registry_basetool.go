@@ -83,6 +83,7 @@ func (r *Registry) BuildBaseTools() *ToolBag {
 	// 3: query_promql — gated on Prom client.
 	if r.promQuery != nil {
 		out = append(out, NewQueryPromQLTool(r.promQuery, r.log))
+		out = append(out, NewListMetricCatalogTool(r.promQuery, r.log))
 	}
 	// 3a: list_database_sources — configured databasemetrics /
 	// database-tagged custommetrics inventory, no PromQL.

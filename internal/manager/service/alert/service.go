@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"strings"
 	"time"
 
@@ -673,16 +674,25 @@ func toServicePreview(r *bizalert.PreviewResult) *PreviewResult {
 		FirstFireAt:   r.FirstFireAt,
 		LastFireAt:    r.LastFireAt,
 		SkippedReason: r.SkippedReason,
-		Threshold:     r.Threshold,
 		Unit:          r.Unit,
 	}
+	if r.Threshold != nil && isFinitePreviewValue(*r.Threshold) {
+		tcopy := *r.Threshold
+		out.Threshold = &tcopy
+	}
 	for _, p := range r.Series {
+		if !isFinitePreviewValue(p.Value) {
+			continue
+		}
 		out.Series = append(out.Series, PreviewSeriesPoint{
 			Timestamp: p.Timestamp,
 			Value:     p.Value,
 		})
 	}
 	for _, s := range r.Samples {
+		if !isFinitePreviewValue(s.Value) {
+			continue
+		}
 		out.Samples = append(out.Samples, PreviewSample{
 			Timestamp: s.Timestamp,
 			Labels:    s.Labels,
@@ -691,6 +701,10 @@ func toServicePreview(r *bizalert.PreviewResult) *PreviewResult {
 		})
 	}
 	return out
+}
+
+func isFinitePreviewValue(v float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0)
 }
 
 func (s *Service) DeleteRule(ctx context.Context, _ Caller, id uint64) error {

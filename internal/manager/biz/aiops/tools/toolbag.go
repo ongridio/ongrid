@@ -56,6 +56,7 @@ var tierByName = map[string]string{
 	"get_host_load":           "core",
 	"get_host_processes":      "core",
 	"query_promql":            "core",
+	"list_metric_catalog":     "core",
 	"list_database_sources":   "core",
 	"analyze_database_status": "core",
 	"query_logql":             "core",

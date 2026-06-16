@@ -93,6 +93,39 @@ function toolCardMessage(draft: ConfigDraftResult): ChatMessage {
 }
 
 describe('MessageBubble config draft card', () => {
+  it('compacts persisted config confirmation user payloads', () => {
+    const longConfirmation = [
+      '确认应用这个配置草案。',
+      'domain: alert_rule',
+      'action: create',
+      'draft_hash: sha256:test',
+      'apply_tool: apply_config_change',
+      '请调用 apply_config_change，传 confirmed=true、domain=alert_rule、action=create、上方 draft_hash 和下方原始 payload，创建这条告警规则；不要改写 payload。',
+      'payload:',
+      '```json',
+      JSON.stringify({
+        action: 'create',
+        rule: {
+          rule_key: 'system_disk_pressure_v2',
+          kind: 'metric_raw',
+        },
+      }, null, 2),
+      '```',
+    ].join('\n');
+
+    render(<MessageBubble message={{ id: 'user-confirmation', role: 'user', content: longConfirmation }} />);
+
+    expect(screen.getByText('确认创建这条告警规则')).toBeInTheDocument();
+    expect(screen.queryByText(/draft_hash/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/system_disk_pressure_v2/)).not.toBeInTheDocument();
+  });
+
+  it('keeps ordinary user messages unchanged', () => {
+    render(<MessageBubble message={{ id: 'user-normal', role: 'user', content: '创建一个 CPU 告警' }} />);
+
+    expect(screen.getByText('创建一个 CPU 告警')).toBeInTheDocument();
+  });
+
   it.each(supportedKinds)('renders and confirms %s drafts', async (kind) => {
     const user = userEvent.setup();
     const onConfirm = vi.fn();

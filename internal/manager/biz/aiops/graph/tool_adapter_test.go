@@ -276,6 +276,69 @@ func TestEinoToolAdapter_PerToolCallCap(t *testing.T) {
 	}
 }
 
+func TestEinoToolAdapter_DraftConfigChangeSingleCallCap(t *testing.T) {
+	t.Parallel()
+	inner := &fakeBaseTool{name: "draft_config_change", class: "read", runResp: `{"kind":"config_draft"}`}
+	a := &einoToolAdapter{inner: inner, memo: newToolMemo()}
+	ctx := context.Background()
+
+	out, _ := a.InvokableRun(ctx, `{"rule":"one"}`)
+	if strings.Contains(out, "call_budget_exceeded") {
+		t.Fatalf("first draft should execute, got budget directive: %s", out)
+	}
+	out, _ = a.InvokableRun(ctx, `{"rule":"two"}`)
+	if !strings.Contains(out, "call_budget_exceeded") {
+		t.Fatalf("second draft should be capped, got %q", out)
+	}
+	if got := inner.calls.Load(); got != 1 {
+		t.Fatalf("draft executions = %d, want 1", got)
+	}
+}
+
+func TestEinoToolAdapter_ListMetricCatalogSingleCallCap(t *testing.T) {
+	t.Parallel()
+	inner := &fakeBaseTool{name: "list_metric_catalog", class: "read", runResp: `{"status":"ok"}`}
+	a := &einoToolAdapter{inner: inner, memo: newToolMemo()}
+	ctx := context.Background()
+
+	out, _ := a.InvokableRun(ctx, `{"query":"mongo connection usage"}`)
+	if strings.Contains(out, "call_budget_exceeded") {
+		t.Fatalf("first metric catalog lookup should execute, got budget directive: %s", out)
+	}
+	out, _ = a.InvokableRun(ctx, `{"query":"mongo conn_type values"}`)
+	if !strings.Contains(out, "call_budget_exceeded") {
+		t.Fatalf("second metric catalog lookup should be capped, got %q", out)
+	}
+	if got := inner.calls.Load(); got != 1 {
+		t.Fatalf("metric catalog executions = %d, want 1", got)
+	}
+}
+
+func TestEinoToolAdapter_DraftConfigChangeFailureDoesNotConsumeSingleCallCap(t *testing.T) {
+	t.Parallel()
+	inner := &fakeBaseTool{name: "draft_config_change", class: "read", runErr: errors.New("invalid scope")}
+	a := &einoToolAdapter{inner: inner, memo: newToolMemo()}
+	ctx := context.Background()
+
+	out, _ := a.InvokableRun(ctx, `{"rule":"bad"}`)
+	if !strings.Contains(out, `"status":"failed"`) {
+		t.Fatalf("failed draft should return failure envelope, got %q", out)
+	}
+	inner.runErr = nil
+	inner.runResp = `{"kind":"config_draft"}`
+	out, _ = a.InvokableRun(ctx, `{"rule":"fixed"}`)
+	if strings.Contains(out, "call_budget_exceeded") {
+		t.Fatalf("fixed draft after validation failure should execute, got %q", out)
+	}
+	out, _ = a.InvokableRun(ctx, `{"rule":"extra"}`)
+	if !strings.Contains(out, "call_budget_exceeded") {
+		t.Fatalf("second successful draft should be capped, got %q", out)
+	}
+	if got := inner.calls.Load(); got != 2 {
+		t.Fatalf("draft executions = %d, want failed+fixed executions", got)
+	}
+}
+
 // The single-tool WrapBaseTool path leaves memo nil — no caching.
 func TestEinoToolAdapter_NoMemoByDefault(t *testing.T) {
 	t.Parallel()

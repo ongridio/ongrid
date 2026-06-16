@@ -70,14 +70,32 @@ func (t *toolMemo) bump(name string) {
 // enough that normal multi-step investigation isn't clipped.
 const maxToolCallsPerRun = 8
 
+func maxCallsForTool(name string) int {
+	switch name {
+	case "draft_config_change", "list_metric_catalog":
+		return 1
+	default:
+		return maxToolCallsPerRun
+	}
+}
+
+func countFailedToolCall(name string) bool {
+	switch name {
+	case "draft_config_change":
+		return false
+	default:
+		return true
+	}
+}
+
 // toolBudgetExceeded is the synthetic tool result returned once a tool hits
 // maxToolCallsPerRun. Shaped like a normal JSON tool result so the LLM reads
 // it as data and (re)directs to answering.
 func toolBudgetExceeded(name string, n int) string {
 	b, _ := json.Marshal(map[string]any{
-		"status": "call_budget_exceeded",
-		"tool":   name,
-		"calls":  n,
+		"status":      "call_budget_exceeded",
+		"tool":        name,
+		"calls":       n,
 		"instruction": fmt.Sprintf("You have already called %q %d times this turn — that is the per-tool limit. Do NOT call it again. Answer the user from the results you already gathered; if they're insufficient, state specifically what is missing and ask the user.", name, n),
 	})
 	return string(b)
@@ -240,18 +258,20 @@ func (a *einoToolAdapter) InvokableRun(ctx context.Context, argumentsInJSON stri
 		//    back a "synthesize now" directive. Catches the distinct-args
 		//    repeat loop (query_promql/query_alert_rules called over and over)
 		//    that the memo can't.
-		if a.cacheName != "" && a.memo.count(a.cacheName) >= maxToolCallsPerRun {
+		if a.cacheName != "" && a.memo.count(a.cacheName) >= maxCallsForTool(a.cacheName) {
 			return toolBudgetExceeded(a.cacheName, a.memo.count(a.cacheName)), nil
 		}
 	}
 	resolved := einotool.GetImplSpecificOptions(&einoInvokeOptKey{}, opts...)
 	out, err := a.inner.InvokableRun(ctx, argumentsInJSON, resolved.opts...)
-	// Count this real execution toward the per-tool cap (success or failure;
-	// a failing tool that's hammered is also waste the cap should bound).
-	if a.memo != nil && a.cacheName != "" {
-		a.memo.bump(a.cacheName)
-	}
 	if err != nil {
+		// Count most failures toward the cap so a failing tool cannot be
+		// hammered. draft_config_change is the exception: validation failures
+		// are common while the model corrects structured config args, and only
+		// a successful draft should consume the one-draft-per-turn budget.
+		if a.memo != nil && a.cacheName != "" && countFailedToolCall(a.cacheName) {
+			a.memo.bump(a.cacheName)
+		}
 		// Re-shape as a tool-result-style JSON so the LLM gets it as a
 		// message instead of having the graph terminate. Truncate long
 		// errors so we don't blow the context window with stack traces.
@@ -270,6 +290,10 @@ func (a *einoToolAdapter) InvokableRun(ctx context.Context, argumentsInJSON stri
 			return "", err
 		}
 		return string(envelope), nil
+	}
+	// Count this successful real execution toward the per-tool cap.
+	if a.memo != nil && a.cacheName != "" {
+		a.memo.bump(a.cacheName)
 	}
 	// Cache successful read-tool results only — a failed call stays
 	// retryable (a transient error shouldn't be pinned for the whole run).
