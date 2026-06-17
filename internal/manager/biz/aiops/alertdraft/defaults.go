@@ -80,7 +80,7 @@ func suggestedAlertRuleKey(in RuleConfigInput) string {
 func suggestedAlertRuleKeyFromSpec(in RuleConfigInput) string {
 	switch strings.TrimSpace(in.Kind) {
 	case "metric_raw":
-		if metric, ok := firstSpecString(in.Spec, "catalog_metric", "db_metric", "semantic_metric", "metric", "metric_key", "metric_name"); ok {
+		if metric, ok := firstSpecString(in.Spec, "metric", "metric_key", "metric_name"); ok {
 			return sanitizeRuleKey(metric)
 		}
 		if expr, ok := alertSpecString(in.Spec, "expr"); ok {
@@ -128,16 +128,8 @@ func specReferencesDatabaseMetric(spec map[string]interface{}) bool {
 	if spec == nil {
 		return false
 	}
-	if _, ok := firstSpecString(spec, "db_metric", "semantic_metric"); ok {
+	if metric, ok := firstSpecString(spec, "metric", "metric_key", "metric_name"); ok && isDatabaseMetricName(metric) {
 		return true
-	}
-	if metric, ok := firstSpecString(spec, "catalog_metric", "metric", "metric_key", "metric_name"); ok {
-		if isDatabaseMetricName(metric) {
-			return true
-		}
-		if _, ok := databaseAlertMetricExpr(metric, ""); ok {
-			return true
-		}
 	}
 	return false
 }
@@ -201,7 +193,7 @@ func suggestedAlertRuleName(in RuleConfigInput) string {
 func suggestedAlertRuleNameFromSpec(in RuleConfigInput) string {
 	switch strings.TrimSpace(in.Kind) {
 	case "metric_raw":
-		if metric, ok := firstSpecString(in.Spec, "catalog_metric", "db_metric", "semantic_metric", "metric", "metric_key", "metric_name"); ok {
+		if metric, ok := firstSpecString(in.Spec, "metric", "metric_key", "metric_name"); ok {
 			return "Metric alert: " + metric
 		}
 		return "PromQL alert"

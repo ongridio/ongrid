@@ -29,6 +29,33 @@ func TestAlertDraftGuard_ReplacesPlainTextAlertDraftWithoutToolDraft(t *testing.
 	if out.Message.Content != alertDraftGuardBlockedMessage {
 		t.Fatalf("content = %q, want guard message", out.Message.Content)
 	}
+	if strings.Contains(out.Message.Content, "重新发送创建需求") {
+		t.Fatalf("guard message should not ask the user to resend the request: %q", out.Message.Content)
+	}
+}
+
+func TestAlertDraftGuard_ReplacesConfirmableRuleDesignWithoutToolDraft(t *testing.T) {
+	guard := NewAlertDraftGuardHandler(AlertDraftGuardDeps{
+		UserText: "创建一条 Redis 告警：缓存命中率明显偏低并持续一段时间时提醒我。",
+	})
+	if guard == nil {
+		t.Fatal("guard = nil")
+	}
+	out := &einomodel.CallbackOutput{Message: &schema.Message{
+		Role: schema.Assistant,
+		Content: "**规则设计：Redis 缓存命中率偏低**（Warning 级别）\n\n" +
+			"| 项目 | 内容 |\n|------|------|\n" +
+			"| **规则 Key** | `redis_cache_hit_rate_low` |\n" +
+			"| **触发条件** | 最近 5 分钟缓存命中率 < 90%，且持续 5 分钟 |\n" +
+			"| **PromQL** | `100 * rate(redis_keyspace_hits_total[5m]) / (rate(redis_keyspace_hits_total[5m]) + rate(redis_keyspace_misses_total[5m])) < 90` |\n\n" +
+			"需要确认创建吗？",
+	}}
+
+	guard.OnEnd(context.Background(), chatModelRunInfo(), out)
+
+	if out.Message.Content != alertDraftGuardBlockedMessage {
+		t.Fatalf("content = %q, want guard message", out.Message.Content)
+	}
 }
 
 func TestAlertDraftGuard_InstallsForRuleRequestWithoutAlertWord(t *testing.T) {
@@ -69,6 +96,35 @@ func TestAlertDraftGuard_AllowsAlertDraftAfterSuccessfulDraftTool(t *testing.T) 
 
 	if out.Message.Content != "告警规则草案已创建，草案哈希: sha256:real，请确认应用。" {
 		t.Fatalf("content = %q, want unchanged real draft text", out.Message.Content)
+	}
+}
+
+func TestAlertDraftGuard_DoesNotBlockPendingDraftToolCall(t *testing.T) {
+	guard := NewAlertDraftGuardHandler(AlertDraftGuardDeps{
+		UserText: "创建一条主机 CPU 和内存告警",
+	})
+	if guard == nil {
+		t.Fatal("guard = nil")
+	}
+	out := &einomodel.CallbackOutput{Message: &schema.Message{
+		Role:    schema.Assistant,
+		Content: "告警规则草案已生成，等待 draft_config_change 返回 config_draft。",
+		ToolCalls: []schema.ToolCall{
+			{
+				ID:       "call_draft",
+				Type:     "function",
+				Function: schema.FunctionCall{Name: draftConfigChangeToolName},
+			},
+		},
+	}}
+
+	guard.OnEnd(context.Background(), chatModelRunInfo(), out)
+
+	if out.Message.Content == alertDraftGuardBlockedMessage {
+		t.Fatalf("content was blocked before draft tool executed")
+	}
+	if !strings.Contains(out.Message.Content, "等待 draft_config_change") {
+		t.Fatalf("content = %q, want unchanged pending draft text", out.Message.Content)
 	}
 }
 

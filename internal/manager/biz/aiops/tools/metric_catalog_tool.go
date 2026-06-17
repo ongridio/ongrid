@@ -21,10 +21,10 @@ const ToolNameListMetricCatalog = "list_metric_catalog"
 const metricCatalogMaxSampleLabels = 3
 
 const ListMetricCatalogDescription = "List currently scraped Prometheus metric names with representative labels. " +
-	"Use this once before drafting any metric-based alert rule, including database, custommetrics, host, or arbitrary Prometheus metrics, when the user describes the rule in natural language but does not provide an exact metric name or full PromQL. " +
+	"Use this once before drafting any metric-based alert rule, including database, custommetrics, host, or arbitrary Prometheus metrics, so the draft uses currently scraped metric names and labels. " +
 	"Use returned sample_labels as the source of truth for label names; never invent label keys. If the user explicitly names a source, database instance, device, job, service, or instance endpoint, scope selectors with that exact ongrid_source/device_id/job/service/instance and set spec.source_explicit=true when drafting the rule; otherwise do not copy sample label values such as ongrid_source=\"db:...\" or ongrid_source=\"custom:...\", device_id, job, service, or instance into selectors. For unscoped database alerts, keep ongrid_source as a grouping dimension so every collected source is evaluated independently. When combining database metrics or different label values in PromQL, aggregate each side by (device_id, ongrid_source) even if current sample labels look identical: use sum by for counters/rate/increase and max by for gauges/capacity/current values. MongoDB connection usage must use mongodb_ss_connections{conn_type=\"current\"} over current+available; do not use conn_type=\"active\" as total/current connection usage. Do not rely on ignoring(...) unless all remaining labels are known to match."
 
-const listMetricCatalogWhenToUse = "When creating a metric-based alert rule from natural language and the exact metric name is not known, including database, custommetrics, host, and arbitrary Prometheus metrics. " +
+const listMetricCatalogWhenToUse = "When creating a metric-based alert rule from natural language, including database, custommetrics, host, and arbitrary Prometheus metrics. " +
 	"Pass the user's natural-language intent as query, optionally with prefixes, selector, or labels if known. " +
 	"For MySQL/PostgreSQL/Redis/MongoDB database alerts, call this first to expose the currently scraped database metric names and sample labels; analyze_database_status may be used afterwards only if source/capability context is still needed. " +
 	"Use sample_labels exactly for label names, not as mandatory label values. If the user explicitly names a source, database instance, device, job, service, or instance endpoint, scope selectors with that exact ongrid_source/device_id/job/service/instance and set spec.source_explicit=true when drafting the rule; otherwise do not copy example ongrid_source/device_id/job/service/instance values from sample_labels into selectors. For unscoped database alerts, keep ongrid_source in sum/max by grouping so every collected source is evaluated independently. For binary PromQL across database metrics or label-discriminated series like conn_type/count_type/datname/db, aggregate each side by (device_id, ongrid_source) even if current sample labels look identical: use sum by for counters/rate/increase and max by for gauges/capacity/current values. For MongoDB connection usage, choose conn_type=\"current\" as the numerator and conn_type=\"available\" only as remaining capacity; do not use conn_type=\"active\" for current/total connection usage. Raw arithmetic between different labels will usually match no series, and ignoring(...) is unsafe unless all remaining labels are known to match. " +
@@ -336,18 +336,14 @@ func metricCatalogNeedsHTTPStatusLabel(query string) bool {
 	if q == "" {
 		return false
 	}
-	for _, token := range []string{
-		"5xx",
-		"500",
-		"error rate",
-		"errors",
-		"burn rate",
-		"slo",
-		"错误率",
-		"错误预算",
-		"错误",
-	} {
-		if strings.Contains(q, token) {
+	for _, phrase := range []string{"error rate", "burn rate", "错误率", "错误预算"} {
+		if strings.Contains(q, phrase) {
+			return true
+		}
+	}
+	for _, token := range metricCatalogQueryTokens(q) {
+		switch token {
+		case "5xx", "500", "slo", "errors":
 			return true
 		}
 	}

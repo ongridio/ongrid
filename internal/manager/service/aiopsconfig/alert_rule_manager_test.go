@@ -349,11 +349,11 @@ func TestNormalizeAlertRuleConfigInputHostMetricSpecBecomesThreshold(t *testing.
 	}
 }
 
-func TestNormalizeAlertRuleConfigInputExpandsDatabaseCatalogMetric(t *testing.T) {
+func TestNormalizeAlertRuleConfigInputBuildsRawMetricFromExactMetricName(t *testing.T) {
 	in := aiopstools.AlertRuleConfigInput{
 		Kind: "metric_raw",
 		Spec: map[string]interface{}{
-			"catalog_metric":  "redis_memory_usage_pct",
+			"metric":          "redis_connected_clients",
 			"operator":        ">",
 			"threshold":       80,
 			"source_explicit": true,
@@ -366,8 +366,7 @@ func TestNormalizeAlertRuleConfigInputExpandsDatabaseCatalogMetric(t *testing.T)
 	got := alertdraft.NormalizeRuleConfigInput(in)
 	expr, _ := got.Spec["expr"].(string)
 	for _, want := range []string{
-		"redis_memory_used_bytes{device_id=\"7\"}",
-		"redis_memory_max_bytes{device_id=\"7\"}",
+		"redis_connected_clients{device_id=\"7\"}",
 		"> 80",
 	} {
 		if !strings.Contains(expr, want) {
@@ -382,11 +381,11 @@ func TestNormalizeAlertRuleConfigInputExpandsDatabaseCatalogMetric(t *testing.T)
 	}
 }
 
-func TestNormalizeAlertRuleConfigInputExpandsDatabaseCatalogMetricWithMatcherArray(t *testing.T) {
+func TestNormalizeAlertRuleConfigInputBuildsRawMetricWithMatcherArray(t *testing.T) {
 	in := aiopstools.AlertRuleConfigInput{
 		Kind: "metric_raw",
 		Spec: map[string]interface{}{
-			"catalog_metric":  "mysql_connection_usage_pct",
+			"metric":          "mysql_global_status_threads_connected",
 			"operator":        ">",
 			"threshold":       80,
 			"source_explicit": true,
@@ -401,7 +400,6 @@ func TestNormalizeAlertRuleConfigInputExpandsDatabaseCatalogMetricWithMatcherArr
 	expr, _ := got.Spec["expr"].(string)
 	for _, want := range []string{
 		`mysql_global_status_threads_connected{device_id="5",ongrid_source="db:mysql-1"}`,
-		`mysql_global_variables_max_connections{device_id="5",ongrid_source="db:mysql-1"}`,
 		"> 80",
 	} {
 		if !strings.Contains(expr, want) {
@@ -410,11 +408,11 @@ func TestNormalizeAlertRuleConfigInputExpandsDatabaseCatalogMetricWithMatcherArr
 	}
 }
 
-func TestNormalizeAlertRuleConfigInputExpandsDatabaseCatalogMetricWithSelectorMap(t *testing.T) {
+func TestNormalizeAlertRuleConfigInputBuildsRawMetricWithSelectorMap(t *testing.T) {
 	in := aiopstools.AlertRuleConfigInput{
 		Kind: "metric_raw",
 		Spec: map[string]interface{}{
-			"catalog_metric":  "mysql_threads_running",
+			"metric":          "mysql_global_status_threads_running",
 			"operator":        ">",
 			"threshold":       20,
 			"source_explicit": true,
@@ -610,9 +608,9 @@ func TestApplyAlertRuleConfigKeepsDraftRetryableAfterCreateFailure(t *testing.T)
 	}
 }
 
-func TestDraftAlertRuleConfigRejectsStructuralSkippedPreview(t *testing.T) {
+func TestDraftAlertRuleConfigReturnsValidationFailedForStructuralSkippedPreview(t *testing.T) {
 	adapter := NewAlertRuleManager(managersvcalert.NewStub())
-	_, err := adapter.DraftAlertRuleConfig(context.Background(), aiopstools.ConfigCaller{}, aiopstools.AlertRuleConfigArgs{
+	got, err := adapter.DraftAlertRuleConfig(context.Background(), aiopstools.ConfigCaller{}, aiopstools.AlertRuleConfigArgs{
 		Action: "create",
 		Rule: aiopstools.AlertRuleConfigInput{
 			RuleKey:  "trace_latency_missing_service",
@@ -624,11 +622,17 @@ func TestDraftAlertRuleConfigRejectsStructuralSkippedPreview(t *testing.T) {
 			},
 		},
 	})
-	if err == nil {
-		t.Fatalf("expected skipped preview error")
+	if err != nil {
+		t.Fatalf("DraftAlertRuleConfig() error = %v", err)
 	}
-	if !strings.Contains(err.Error(), "preview skipped before draft") {
-		t.Fatalf("error = %v, want skipped preview before draft", err)
+	if got.Kind != aiopstools.ConfigResultKindValidationFailed {
+		t.Fatalf("Kind = %q, want validation failed", got.Kind)
+	}
+	if got.DraftHash != "" || len(got.Payload) != 0 {
+		t.Fatalf("validation failed result must not be confirmable: hash=%q payload=%s", got.DraftHash, string(got.Payload))
+	}
+	if got.Validation == nil || got.Validation.Status != "failed" {
+		t.Fatalf("Validation = %#v, want failed", got.Validation)
 	}
 }
 
@@ -973,7 +977,7 @@ func TestNormalizeAlertRuleConfigInputDropsImplicitDatabaseServiceSelector(t *te
 	in := aiopstools.AlertRuleConfigInput{
 		Kind: "metric_raw",
 		Spec: map[string]interface{}{
-			"db_metric": "mongodb_connection_usage_pct",
+			"metric":    "mongodb_ss_connections",
 			"selector":  `service="mongo-test",ongrid_source="db:mongo-test"`,
 			"operator":  ">",
 			"threshold": 80,
@@ -1017,7 +1021,7 @@ func TestNormalizeAlertRuleConfigInputDropsImplicitDatabaseSourceFromCatalogSele
 	in := aiopstools.AlertRuleConfigInput{
 		Kind: "metric_raw",
 		Spec: map[string]interface{}{
-			"db_metric":   "mongodb_connection_usage_pct",
+			"metric":      "mongodb_ss_connections",
 			"selector":    `ongrid_source="db:mongo-test"`,
 			"operator":    ">",
 			"threshold":   80,
@@ -1035,16 +1039,13 @@ func TestNormalizeAlertRuleConfigInputDropsImplicitDatabaseSourceFromCatalogSele
 	if _, exists := got.Spec["selector"]; exists {
 		t.Fatalf("selector = %#v, should remove implicit sample database source selector", got.Spec["selector"])
 	}
-	if count := strings.Count(expr, `by (device_id, ongrid_source)`); count < 2 {
-		t.Fatalf("expr = %q, want per-source grouping for catalog database metric", expr)
-	}
 }
 
 func TestNormalizeAlertRuleConfigInputKeepsNonIdentitySelectorWhenSourceLeaks(t *testing.T) {
 	in := aiopstools.AlertRuleConfigInput{
 		Kind: "metric_raw",
 		Spec: map[string]interface{}{
-			"db_metric":   "postgresql_active_connections",
+			"metric":      "pg_stat_database_numbackends",
 			"selector":    `datname="postgres",ongrid_source="db:pg-test",instance="127.0.0.1:9187"`,
 			"operator":    ">",
 			"threshold":   100,
@@ -1125,185 +1126,6 @@ func TestNormalizeAlertRuleConfigInputNormalizesMongoConnectionUsageRatioThresho
 	}
 	if strings.HasSuffix(expr, `> 0.8`) || !strings.HasSuffix(expr, `> 80`) {
 		t.Fatalf("expr = %q, want ratio threshold normalized to 80 percent", expr)
-	}
-}
-
-func TestNormalizeAlertRuleConfigInputNormalizesPercentCatalogMetricRatioThreshold(t *testing.T) {
-	in := aiopstools.AlertRuleConfigInput{
-		Kind: "metric_raw",
-		Spec: map[string]interface{}{
-			"db_metric": "mongodb_connection_usage_pct",
-			"operator":  ">",
-			"threshold": 0.8,
-		},
-	}
-
-	got := alertdraft.NormalizeRuleConfigInput(in)
-	expr, _ := got.Spec["expr"].(string)
-	if strings.HasSuffix(expr, `> 0.8`) || !strings.Contains(expr, `> 80`) {
-		t.Fatalf("expr = %q, want percent catalog threshold normalized to 80", expr)
-	}
-}
-
-func TestDatabaseAlertMetricExprCoversSupportedCatalogMetrics(t *testing.T) {
-	catalogMetrics := []string{
-		"mysql_up",
-		"mysql_connection_usage_pct",
-		"mysql_threads_running",
-		"mysql_qps",
-		"mysql_slow_queries_15m",
-		"mysql_aborted_connects_15m",
-		"mysql_innodb_buffer_pool_hit_pct",
-		"mysql_row_lock_waits_15m",
-		"mysql_open_files_usage_pct",
-		"mysql_temp_disk_tables_15m",
-		"postgresql_up",
-		"postgresql_connection_usage_pct",
-		"postgresql_active_connections",
-		"postgresql_deadlocks_15m",
-		"postgresql_cache_hit_ratio_pct",
-		"postgresql_temp_bytes_15m",
-		"postgresql_replication_lag_seconds",
-		"postgresql_long_transaction_seconds",
-		"postgresql_locks_count",
-		"postgresql_database_size_bytes",
-		"postgresql_tps",
-		"redis_up",
-		"redis_memory_usage_pct",
-		"redis_client_usage_pct",
-		"redis_connected_clients",
-		"redis_ops_per_second",
-		"redis_keyspace_hit_ratio_pct",
-		"redis_evicted_keys_15m",
-		"redis_rejected_connections_15m",
-		"redis_blocked_clients",
-		"redis_slowlog_length",
-		"redis_latency_usec",
-		"redis_key_count",
-		"mongodb_up",
-		"mongodb_connections_current",
-		"mongodb_connections_active",
-		"mongodb_connection_usage_pct",
-		"mongodb_connections_available",
-		"mongodb_global_lock_queue",
-		"mongodb_operations_per_second",
-		"mongodb_asserts_15m",
-		"mongodb_page_faults_15m",
-		"mongodb_resident_memory_bytes",
-		"mongodb_wiredtiger_cache_usage_pct",
-		"mongodb_wiredtiger_dirty_cache_pct",
-		"mongodb_operation_latency_ms",
-		"mongodb_collection_scans_15m",
-		"mongodb_sort_spills_15m",
-	}
-
-	for _, metric := range catalogMetrics {
-		t.Run(metric, func(t *testing.T) {
-			expr, ok := alertdraft.DatabaseMetricExpr(metric, `device_id="db-1"`)
-			if !ok {
-				t.Fatalf("alertdraft.DatabaseMetricExpr(%q) ok = false, want true", metric)
-			}
-			if !strings.Contains(expr, `device_id="db-1"`) {
-				t.Fatalf("expr = %q, want selector propagated", expr)
-			}
-		})
-	}
-}
-
-func TestDatabaseAlertMetricExprGroupsEveryUnscopedCatalogMetricBySource(t *testing.T) {
-	catalogMetrics := []string{
-		"mysql_up",
-		"mysql_connection_usage_pct",
-		"mysql_threads_running",
-		"mysql_qps",
-		"mysql_slow_queries_15m",
-		"mysql_aborted_connects_15m",
-		"mysql_innodb_buffer_pool_hit_pct",
-		"mysql_row_lock_waits_15m",
-		"mysql_open_files_usage_pct",
-		"mysql_temp_disk_tables_15m",
-		"postgresql_up",
-		"postgresql_connection_usage_pct",
-		"postgresql_active_connections",
-		"postgresql_deadlocks_15m",
-		"postgresql_cache_hit_ratio_pct",
-		"postgresql_temp_bytes_15m",
-		"postgresql_replication_lag_seconds",
-		"postgresql_long_transaction_seconds",
-		"postgresql_locks_count",
-		"postgresql_database_size_bytes",
-		"postgresql_tps",
-		"redis_up",
-		"redis_memory_usage_pct",
-		"redis_client_usage_pct",
-		"redis_connected_clients",
-		"redis_ops_per_second",
-		"redis_keyspace_hit_ratio_pct",
-		"redis_evicted_keys_15m",
-		"redis_rejected_connections_15m",
-		"redis_blocked_clients",
-		"redis_slowlog_length",
-		"redis_latency_usec",
-		"redis_key_count",
-		"mongodb_up",
-		"mongodb_connections_current",
-		"mongodb_connections_active",
-		"mongodb_connection_usage_pct",
-		"mongodb_connections_available",
-		"mongodb_global_lock_queue",
-		"mongodb_operations_per_second",
-		"mongodb_asserts_15m",
-		"mongodb_page_faults_15m",
-		"mongodb_resident_memory_bytes",
-		"mongodb_wiredtiger_cache_usage_pct",
-		"mongodb_wiredtiger_dirty_cache_pct",
-		"mongodb_operation_latency_ms",
-		"mongodb_collection_scans_15m",
-		"mongodb_sort_spills_15m",
-	}
-
-	for _, metric := range catalogMetrics {
-		t.Run(metric, func(t *testing.T) {
-			expr, ok := alertdraft.DatabaseMetricExpr(metric, "")
-			if !ok {
-				t.Fatalf("alertdraft.DatabaseMetricExpr(%q) ok = false, want true", metric)
-			}
-			if !strings.Contains(expr, "by (device_id, ongrid_source)") {
-				t.Fatalf("expr = %q, want per-source grouping for unscoped database alert", expr)
-			}
-		})
-	}
-}
-
-func TestDatabaseAlertMetricExprCoversAnalyzerFallbackMetrics(t *testing.T) {
-	tests := []struct {
-		name string
-		want []string
-	}{
-		{name: "redis_ops_per_second", want: []string{"redis_commands_processed_total", "redis_commands_total"}},
-		{name: "redis_key_count", want: []string{"redis_db_keys", "redis_keys_count"}},
-		{name: "postgresql_connection_usage_pct", want: []string{"pg_stat_database_numbackends", "pg_stat_activity_count", "pg_settings_max_connections", "by (device_id, ongrid_source)"}},
-		{name: "mongodb_connections_current", want: []string{"mongodb_ss_connections", "conn_type=\"current\"", "mongodb_connections", "state=\"current\""}},
-		{name: "mongodb_connection_usage_pct", want: []string{"conn_type=\"current\"", "conn_type=\"available\"", "by (device_id, ongrid_source)"}},
-		{name: "mongodb_global_lock_queue", want: []string{"mongodb_ss_globalLock_currentQueue", "count_type=\"total\"", "by (device_id, ongrid_source)"}},
-		{name: "mongodb_operations_per_second", want: []string{"mongodb_ss_opcounters", "mongodb_op_counters_total"}},
-		{name: "mongodb_asserts_15m", want: []string{"mongodb_ss_asserts", "mongodb_asserts_total"}},
-		{name: "mongodb_page_faults_15m", want: []string{"mongodb_ss_extra_info_page_faults", "mongodb_ss_extra_info_page_faults_total"}},
-		{name: "mongodb_resident_memory_bytes", want: []string{"mongodb_ss_mem_resident", "mongodb_mongod_mem_resident_megabytes"}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			expr, ok := alertdraft.DatabaseMetricExpr(tt.name, `device_id="db-1"`)
-			if !ok {
-				t.Fatalf("alertdraft.DatabaseMetricExpr(%q) ok = false, want true", tt.name)
-			}
-			for _, want := range tt.want {
-				if !strings.Contains(expr, want) {
-					t.Fatalf("expr = %q, want to contain %q", expr, want)
-				}
-			}
-		})
 	}
 }
 

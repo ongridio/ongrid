@@ -169,6 +169,18 @@ func TestListMetricCatalogTool_InstructsWhenBurnRateMetricsLackStatusLabel(t *te
 	}
 }
 
+func TestMetricCatalogNeedsHTTPStatusLabelDoesNotTreatSlowAsSLO(t *testing.T) {
+	if metricCatalogNeedsHTTPStatusLabel("MySQL slow queries") {
+		t.Fatalf("MySQL slow queries should not require HTTP status labels")
+	}
+	if !metricCatalogNeedsHTTPStatusLabel("API 5xx burn rate") {
+		t.Fatalf("5xx burn rate should require HTTP status labels")
+	}
+	if !metricCatalogNeedsHTTPStatusLabel("SLO error budget") {
+		t.Fatalf("SLO error budget should require HTTP status labels")
+	}
+}
+
 func TestListMetricCatalogTool_ReturnsFilesystemMountpointSamples(t *testing.T) {
 	pq := &fakePromQuerier{
 		resp: &promquery.InstantResult{

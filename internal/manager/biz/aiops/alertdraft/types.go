@@ -86,10 +86,6 @@ func Summary(action string, in RuleConfigInput) string {
 	return fmt.Sprintf("%s alert rule %q", action, name)
 }
 
-func DatabaseMetricExpr(metric string, selector string) (string, bool) {
-	return databaseAlertMetricExpr(metric, selector)
-}
-
 func firstNonEmpty(vals ...string) string {
 	for _, v := range vals {
 		if strings.TrimSpace(v) != "" {

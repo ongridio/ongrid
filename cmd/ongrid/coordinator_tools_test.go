@@ -38,11 +38,17 @@ func TestBasePromptRequiresMetricCatalogBeforeAlertDraft(t *testing.T) {
 	if !strings.Contains(prompt, "不调 list_database_sources") {
 		t.Fatalf("base prompt should forbid list_database_sources during alert-rule creation")
 	}
-	if !strings.Contains(prompt, "没有匹配指标就停止") {
-		t.Fatalf("base prompt should forbid repeated metric catalog discovery in one draft flow")
+	if !strings.Contains(prompt, "catalog 有可用指标后") || !strings.Contains(prompt, "catalog 为空/不可用时停止说明缺失") {
+		t.Fatalf("base prompt should require a usable metric catalog before metric alert draft")
+	}
+	if !strings.Contains(prompt, "catalog 为空/不可用时说明缺失") {
+		t.Fatalf("base prompt should stop when the metric catalog is unavailable")
 	}
 	if !strings.Contains(prompt, "禁止只输出文字草案") || !strings.Contains(prompt, "config_draft/draft_hash") {
 		t.Fatalf("base prompt should forbid plain-text alert drafts without config_draft")
+	}
+	if !strings.Contains(prompt, "config_validation_failed") || !strings.Contains(prompt, "validation.issues") {
+		t.Fatalf("base prompt should require repairing validation failed drafts")
 	}
 	if !strings.Contains(prompt, "原始 payload/draft_hash") {
 		t.Fatalf("base prompt should require applying the exact config_draft payload/hash")

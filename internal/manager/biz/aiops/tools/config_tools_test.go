@@ -72,6 +72,18 @@ func TestConfigDraftToolUsesInvokeUserTextWhenRequestTextMissing(t *testing.T) {
 	}
 }
 
+func TestConfigDraftToolRejectsEmptyRule(t *testing.T) {
+	fake := &fakeConfigManager{}
+	tool := NewDraftConfigChangeTool(fake, nil)
+	_, err := tool.InvokableRun(context.Background(), `{"domain":"alert_rule","action":"create","request_text":"创建 CPU 告警","rule":{}}`)
+	if err == nil {
+		t.Fatalf("expected empty rule error")
+	}
+	if fake.draftAlertCalls != 0 {
+		t.Fatalf("draft called for empty rule")
+	}
+}
+
 func TestConfigDraftToolInfoGuidesDatabaseMetricRawRules(t *testing.T) {
 	tool := NewDraftConfigChangeTool(&fakeConfigManager{}, nil)
 	info, err := tool.Info(context.Background())

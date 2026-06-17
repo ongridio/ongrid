@@ -115,18 +115,23 @@ func (a *AlertRuleManager) DraftAlertRuleConfig(ctx context.Context, caller aiop
 	if err != nil {
 		return nil, fmt.Errorf("preview alert rule: %w", err)
 	}
-	warnings := []string(nil)
-	if res != nil && res.SkippedReason != "" {
-		reason := res.SkippedReason
-		if alertdraft.ShouldBlockCreateOnPreviewSkip(reason) {
-			return nil, fmt.Errorf("%w: preview skipped before draft: %s", errs.ErrInvalid, reason)
-		}
-		warnings = append(warnings, reason)
-	}
+	validation := validateAlertRuleDraft(compiled.Rule, in.RequestText, res)
+	warnings := validationWarnings(validation)
 	previewRes := compactAlertPreview(res)
 	preview, err := configRaw(previewRes)
 	if err != nil {
 		return nil, err
+	}
+	if validationHasErrors(validation) {
+		return &aiopstools.ConfigDraft{
+			Kind:       aiopstools.ConfigResultKindValidationFailed,
+			Domain:     aiopstools.ConfigDomainAlertRule,
+			Action:     compiled.Action,
+			Summary:    "alert rule draft validation failed: " + compiled.Summary,
+			Preview:    preview,
+			Validation: &validation,
+			Warnings:   warnings,
+		}, nil
 	}
 	newDraftID := a.newDraftID
 	if newDraftID == nil {
@@ -151,16 +156,17 @@ func (a *AlertRuleManager) DraftAlertRuleConfig(ctx context.Context, caller aiop
 		ExpiresAt: a.drafts.expiresAt(alertRuleDraftTTL),
 	})
 	return &aiopstools.ConfigDraft{
-		Kind:      aiopstools.ConfigResultKindDraft,
-		Domain:    aiopstools.ConfigDomainAlertRule,
-		Action:    compiled.Action,
-		Summary:   compiled.Summary,
-		Payload:   payload,
-		Preview:   preview,
-		Warnings:  warnings,
-		Rollback:  "可在 Alerts 规则列表中禁用或继续编辑该规则。",
-		ApplyTool: aiopstools.ToolNameApplyConfigChange,
-		DraftHash: draftHash,
+		Kind:       aiopstools.ConfigResultKindDraft,
+		Domain:     aiopstools.ConfigDomainAlertRule,
+		Action:     compiled.Action,
+		Summary:    compiled.Summary,
+		Payload:    payload,
+		Preview:    preview,
+		Validation: &validation,
+		Warnings:   warnings,
+		Rollback:   "可在 Alerts 规则列表中禁用或继续编辑该规则。",
+		ApplyTool:  aiopstools.ToolNameApplyConfigChange,
+		DraftHash:  draftHash,
 	}, nil
 }
 

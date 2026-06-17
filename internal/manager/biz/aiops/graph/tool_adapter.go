@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	einotool "github.com/cloudwego/eino/components/tool"
@@ -27,10 +28,11 @@ type toolMemo struct {
 	mu     sync.Mutex
 	m      map[string]string // (tool\x00args) -> result, identical-call cache
 	counts map[string]int    // tool name -> distinct executions this run
+	last   map[string]string // tool name -> most recent successful result this run
 }
 
 func newToolMemo() *toolMemo {
-	return &toolMemo{m: make(map[string]string), counts: make(map[string]int)}
+	return &toolMemo{m: make(map[string]string), counts: make(map[string]int), last: make(map[string]string)}
 }
 
 func (t *toolMemo) get(k string) (string, bool) {
@@ -60,6 +62,24 @@ func (t *toolMemo) bump(name string) {
 	t.counts[name]++
 }
 
+func (t *toolMemo) putLast(name, result string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.last[name] = result
+}
+
+func (t *toolMemo) lastResult(name string) (string, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	result, ok := t.last[name]
+	return result, ok
+}
+
+const (
+	toolNameDraftConfigChange = "draft_config_change"
+	toolNameListMetricCatalog = "list_metric_catalog"
+)
+
 // maxToolCallsPerRun caps how many times any one tool may EXECUTE within a
 // single agent run. Identical-arg repeats are served from the memo and don't
 // count; this catches the other failure mode — the model calling the same
@@ -88,16 +108,151 @@ func countFailedToolCall(name string) bool {
 	}
 }
 
+func countSuccessfulToolCall(name, result string) bool {
+	if name != toolNameDraftConfigChange {
+		return true
+	}
+	var raw struct {
+		Kind      string `json:"kind"`
+		DraftHash string `json:"draft_hash"`
+	}
+	if err := json.Unmarshal([]byte(result), &raw); err != nil {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(raw.Kind), "config_draft") &&
+		strings.TrimSpace(raw.DraftHash) != ""
+}
+
+type draftConfigChangeGateArgs struct {
+	Domain string `json:"domain"`
+	Rule   struct {
+		Kind       string                 `json:"kind"`
+		Conditions []struct{}             `json:"conditions"`
+		Spec       map[string]interface{} `json:"spec"`
+	} `json:"rule"`
+}
+
+func (a *einoToolAdapter) draftMetricCatalogPreflight(argumentsInJSON string) (string, bool) {
+	if a.memo == nil || a.cacheName != toolNameDraftConfigChange {
+		return "", false
+	}
+	if !draftConfigChangeNeedsMetricCatalog(argumentsInJSON) {
+		return "", false
+	}
+	catalogResult, ok := a.memo.lastResult(toolNameListMetricCatalog)
+	if !ok {
+		return metricCatalogRequiredResult(), true
+	}
+	if blocked := metricCatalogBlockedResult(catalogResult); blocked != "" {
+		return blocked, true
+	}
+	return "", false
+}
+
+func draftConfigChangeNeedsMetricCatalog(argumentsInJSON string) bool {
+	var in draftConfigChangeGateArgs
+	if err := json.Unmarshal([]byte(argumentsInJSON), &in); err != nil {
+		return false
+	}
+	domain := strings.ToLower(strings.TrimSpace(in.Domain))
+	if domain != "" && domain != "alert_rule" {
+		return false
+	}
+	if len(in.Rule.Conditions) > 0 {
+		return true
+	}
+	kind := strings.ToLower(strings.TrimSpace(in.Rule.Kind))
+	switch kind {
+	case "metric_threshold", "metric_raw", "metric_anomaly", "metric_forecast", "metric_burn_rate",
+		"trace_latency", "trace_error_rate":
+		return true
+	case "log_match", "log_volume":
+		return false
+	case "":
+		return len(in.Rule.Spec) > 0
+	default:
+		return false
+	}
+}
+
+func metricCatalogRequiredResult() string {
+	return toolResultJSON(map[string]interface{}{
+		"status":      "blocked",
+		"error":       "metric_catalog_required",
+		"instruction": "Metric-based alert-rule drafts must call list_metric_catalog once earlier in this same user turn. Use the returned metric names and sample_labels to build the rule, then call draft_config_change again.",
+	})
+}
+
+func metricCatalogBlockedResult(result string) string {
+	var raw map[string]interface{}
+	if err := json.Unmarshal([]byte(result), &raw); err != nil {
+		return toolResultJSON(map[string]interface{}{
+			"status":      "blocked",
+			"error":       "metric_catalog_unparseable",
+			"instruction": "The previous list_metric_catalog result was not parseable JSON. Do not draft an alert rule from guessed metrics; tell the user the metric catalog result is unavailable and ask for an exact metric or PromQL.",
+		})
+	}
+	status, _ := raw["status"].(string)
+	if strings.EqualFold(status, "empty") ||
+		jsonNumberLTE(raw, "returned", 0) ||
+		jsonNumberLTE(raw, "metric_count", 0) ||
+		jsonArrayEmpty(raw, "metrics") {
+		return toolResultJSON(map[string]interface{}{
+			"status":      "blocked",
+			"error":       "metric_catalog_empty",
+			"instruction": "The previous list_metric_catalog result did not find usable metrics for this alert. Do not call draft_config_change again in this turn; tell the user which metric signal is missing or ask for an exact metric or PromQL.",
+		})
+	}
+	return ""
+}
+
+func jsonNumberLTE(raw map[string]interface{}, key string, limit float64) bool {
+	v, ok := raw[key]
+	if !ok {
+		return false
+	}
+	n, ok := v.(float64)
+	return ok && n <= limit
+}
+
+func jsonArrayEmpty(raw map[string]interface{}, key string) bool {
+	v, ok := raw[key]
+	if !ok {
+		return false
+	}
+	arr, ok := v.([]interface{})
+	return ok && len(arr) == 0
+}
+
+func toolResultJSON(fields map[string]interface{}) string {
+	b, err := json.Marshal(fields)
+	if err != nil {
+		return `{"status":"blocked","error":"tool_result_marshal_failed"}`
+	}
+	return string(b)
+}
+
 // toolBudgetExceeded is the synthetic tool result returned once a tool hits
 // maxToolCallsPerRun. Shaped like a normal JSON tool result so the LLM reads
 // it as data and (re)directs to answering.
 func toolBudgetExceeded(name string, n int) string {
-	b, _ := json.Marshal(map[string]any{
-		"status":      "call_budget_exceeded",
-		"tool":        name,
-		"calls":       n,
-		"instruction": fmt.Sprintf("You have already called %q %d times this turn — that is the per-tool limit. Do NOT call it again. Answer the user from the results you already gathered; if they're insufficient, state specifically what is missing and ask the user.", name, n),
+	instruction := fmt.Sprintf("You have already called %q %d times in the current user turn — that is the per-tool limit for this turn only and it expires on the next user message. Do NOT call it again in this turn. Answer the user from the results you already gathered; if they're insufficient, state specifically what is missing and ask the user.", name, n)
+	b, err := json.Marshal(struct {
+		Status      string `json:"status"`
+		Tool        string `json:"tool"`
+		Calls       int    `json:"calls"`
+		Scope       string `json:"scope"`
+		Instruction string `json:"instruction"`
+	}{
+		Status:      "call_budget_exceeded",
+		Tool:        name,
+		Calls:       n,
+		Scope:       "current_user_turn",
+		Instruction: instruction,
 	})
+	if err != nil {
+		return fmt.Sprintf(`{"status":"call_budget_exceeded","scope":"current_user_turn","instruction":%q}`, instruction)
+	}
 	return string(b)
 }
 
@@ -261,6 +416,9 @@ func (a *einoToolAdapter) InvokableRun(ctx context.Context, argumentsInJSON stri
 		if a.cacheName != "" && a.memo.count(a.cacheName) >= maxCallsForTool(a.cacheName) {
 			return toolBudgetExceeded(a.cacheName, a.memo.count(a.cacheName)), nil
 		}
+		if blocked, ok := a.draftMetricCatalogPreflight(argumentsInJSON); ok {
+			return blocked, nil
+		}
 	}
 	resolved := einotool.GetImplSpecificOptions(&einoInvokeOptKey{}, opts...)
 	out, err := a.inner.InvokableRun(ctx, argumentsInJSON, resolved.opts...)
@@ -291,9 +449,15 @@ func (a *einoToolAdapter) InvokableRun(ctx context.Context, argumentsInJSON stri
 		}
 		return string(envelope), nil
 	}
-	// Count this successful real execution toward the per-tool cap.
+	// Count this successful real execution toward the per-tool cap. A
+	// config_validation_failed result from draft_config_change is a normal
+	// repair signal, not a confirmable draft, so it remains retryable within
+	// the same user turn. Only a real config_draft consumes the one-draft cap.
 	if a.memo != nil && a.cacheName != "" {
-		a.memo.bump(a.cacheName)
+		if countSuccessfulToolCall(a.cacheName, out) {
+			a.memo.bump(a.cacheName)
+		}
+		a.memo.putLast(a.cacheName, out)
 	}
 	// Cache successful read-tool results only — a failed call stays
 	// retryable (a transient error shouldn't be pinned for the whole run).

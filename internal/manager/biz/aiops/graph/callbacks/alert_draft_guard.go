@@ -18,7 +18,8 @@ import (
 const draftConfigChangeToolName = "draft_config_change"
 const listMetricCatalogToolName = "list_metric_catalog"
 
-const alertDraftGuardBlockedMessage = "我还没有通过 draft_config_change 生成可应用的 config_draft，因此不能让你确认这条告警规则。请重新发送创建需求；我会先调用正式草案工具，只有拿到 draft_hash 后才会让你确认应用。"
+const AlertDraftGuardBlockedMessage = "这次没有通过 list_metric_catalog + draft_config_change 生成可应用的 config_draft/draft_hash，我已拦截文字草案，避免把它误当成可确认的告警规则。继续这个创建需求时，我会先查询指标目录，再生成正式草案。"
+const alertDraftGuardBlockedMessage = AlertDraftGuardBlockedMessage
 const traceServiceRequiredMessage = "这条链路告警还缺少 service。trace_latency / trace_error_rate 必须指定服务名，或只能在当前 traces_spanmetrics_* 只有唯一 service_name 时自动推断。请补充服务名，例如：创建服务 ongrid-manager 的 p95 延迟超过 500ms 持续 10 分钟的告警。"
 
 var collectedSourceMentionRE = regexp.MustCompile(`\b(?:db|custom):[A-Za-z0-9_.:-]+`)
@@ -88,6 +89,9 @@ func (h *AlertDraftGuardHandler) OnEnd(ctx context.Context, info *einocallbacks.
 		if mo == nil || mo.Message == nil {
 			return ctx
 		}
+		if messageCallsTool(mo.Message, draftConfigChangeToolName) {
+			return ctx
+		}
 		mo.Message.Content = h.SanitizeAssistantContent(mo.Message.Content)
 	}
 	return ctx
@@ -140,6 +144,31 @@ func AlertDraftGuardFromHandlers(handlers []einocallbacks.Handler) *AlertDraftGu
 	return nil
 }
 
+func LooksLikeAlertRuleCreationText(text string) bool {
+	return looksLikeAlertRuleCreationRequest(text)
+}
+
+func messageCallsTool(msg *schema.Message, toolName string) bool {
+	if msg == nil {
+		return false
+	}
+	for _, tc := range msg.ToolCalls {
+		if strings.EqualFold(strings.TrimSpace(tc.Function.Name), toolName) {
+			return true
+		}
+	}
+	return false
+}
+
+func LooksLikeAlertDraftGuardBlockedMessage(content string) bool {
+	lower := strings.ToLower(content)
+	return strings.Contains(lower, "draft_config_change") &&
+		strings.Contains(lower, "config_draft") &&
+		(strings.Contains(content, "拦截文字草案") ||
+			strings.Contains(content, "没有通过 draft_config_change") ||
+			strings.Contains(content, "我还没有通过 draft_config_change"))
+}
+
 func looksLikeAlertRuleCreationRequest(text string) bool {
 	lower := strings.ToLower(text)
 	if !containsAnyNeedle(text, lower, []string{
@@ -164,6 +193,8 @@ func looksLikeConfirmableAlertDraft(content string) bool {
 	}
 	hasAlertRule := strings.Contains(content, "告警") ||
 		strings.Contains(content, "规则键") ||
+		strings.Contains(content, "规则设计") ||
+		strings.Contains(strings.ToLower(content), "规则 key") ||
 		strings.Contains(lower, "alert") ||
 		strings.Contains(lower, "rule_key") ||
 		strings.Contains(lower, "draft_hash")
@@ -183,6 +214,25 @@ func looksLikeConfirmableAlertDraft(content string) bool {
 		if strings.Contains(lower, needle) || strings.Contains(content, needle) {
 			return true
 		}
+	}
+	hasRuleDesign := containsAnyNeedle(content, lower, []string{
+		"规则设计",
+		"规则 key",
+		"规则key",
+		"promql",
+		"触发条件",
+		"生效范围",
+	})
+	asksForConfirm := containsAnyNeedle(content, lower, []string{
+		"需要确认",
+		"确认创建",
+		"要确认",
+		"确认吗",
+		"confirm",
+		"approve",
+	})
+	if hasRuleDesign && asksForConfirm {
+		return true
 	}
 	return false
 }
@@ -346,8 +396,7 @@ func missingMetricMessageFromCatalogResult(result string) string {
 		return ""
 	}
 	status := strings.ToLower(strings.TrimSpace(resp.Status))
-	instruction := strings.TrimSpace(resp.Instruction)
-	if status != "empty" && !strings.Contains(instruction, "cannot build a 5xx") {
+	if status != "empty" {
 		return ""
 	}
 	query := strings.TrimSpace(resp.Query)
@@ -355,9 +404,6 @@ func missingMetricMessageFromCatalogResult(result string) string {
 		query = "该告警所需指标"
 	}
 	reason := "当前没有采集到匹配的指标。"
-	if strings.Contains(instruction, "cannot build a 5xx") || strings.Contains(instruction, "status/code") {
-		reason = "当前返回的指标不包含 HTTP status/code 标签，无法构造 5xx 错误率或 burn rate SLI。"
-	}
 	return fmt.Sprintf("当前指标目录未匹配到 `%s` 所需的已采集指标，因此没有生成可应用的 config_draft，也不会硬造 PromQL 规则。%s 请先配置对应指标采集，或提供精确的指标名/PromQL 后再创建。", query, reason)
 }
 

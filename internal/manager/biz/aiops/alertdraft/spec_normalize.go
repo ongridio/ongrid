@@ -46,7 +46,7 @@ func normalizeAlertRuleKind(kind string) string {
 		return k
 	case "threshold", "host_threshold", "host_metric", "host_metric_threshold":
 		return "metric_threshold"
-	case "promql", "prom_query", "raw_promql", "raw_metric", "database_metric", "db_metric", "custom_metric":
+	case "promql", "prom_query", "raw_promql", "raw_metric", "custom_metric":
 		return "metric_raw"
 	case "anomaly", "metric_baseline", "baseline":
 		return "metric_anomaly"
@@ -90,7 +90,7 @@ func inferAlertRuleKind(in RuleConfigInput) string {
 		return "metric_forecast"
 	case hasAnySpecKey(spec, "baseline_window", "baseline_step", "deviation", "method"):
 		return "metric_anomaly"
-	case hasAnySpecKey(spec, "expr", "promql", "query", "catalog_metric", "db_metric", "metric_key", "metric", "metric_name"):
+	case hasAnySpecKey(spec, "expr", "promql", "query", "metric_key", "metric", "metric_name"):
 		return "metric_raw"
 	default:
 		return ""
