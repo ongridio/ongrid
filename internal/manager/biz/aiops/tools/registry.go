@@ -83,7 +83,6 @@ type Registry struct {
 	topology TopologyInfo
 
 	// topologyGraph is the business-topology usecase used by
-	// expand_topology / find_topology_node. Distinct from the
 	// deployment-level `topology` field above (which feeds get_topology);
 	// the naming overlap is unfortunate but the two surfaces address
 	// different audiences. nil-safe — the two BaseTools simply aren't
@@ -271,6 +270,20 @@ func NewRegistry(caller Caller, edges *edgebiz.Usecase, devices *devicebiz.Useca
 			Execute:     r.executeGetEdgeSummary,
 		})
 	}
+	// query_database dispatches read-only SQL to edge agents. Always
+	// registered when the caller is available (required param).
+	r.Register(Tool{
+		Name:        ToolNameQueryDatabase,
+		Description: QueryDatabaseDescription,
+		Schema:      QueryDatabaseSchema,
+		Execute:     r.executeQueryDatabase,
+	})
+	r.Register(Tool{
+		Name:        ToolNameInspectSchema,
+		Description: InspectSchemaDescription,
+		Schema:      InspectSchemaSchema,
+		Execute:     r.executeInspectSchema,
+	})
 	// correlate_incident is the AIOps killer composite — it pulls
 	// metrics + logs + traces + edge state in one shot. Only registers
 	// when ALL four sources are wired (prom + log + trace + alertUC) so

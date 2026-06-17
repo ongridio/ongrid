@@ -40,6 +40,11 @@ const (
 	// snapshot still carries only non-secret metadata.
 	MethodWriteDatabaseMetricsSecret = "write_database_metrics_secret"
 
+	// MethodPushDBInstanceInfo is edge → manager: report auto-discovered
+	// database instance metadata (version, config parameters, connectivity
+	// status). The manager upserts into its database_instances table.
+	MethodPushDBInstanceInfo = "push_db_instance_info"
+
 	// WebSSH (manager → edge): edge agent acts as an SSH client into
 	// the host's local sshd. Each browser session is identified by a
 	// uuid SessionID; multiple concurrent sessions per edge are fine.
@@ -188,6 +193,30 @@ type WriteDatabaseMetricsSecretsRequest struct {
 // WriteDatabaseMetricsSecretResponse acknowledges that the edge wrote the
 // requested credential file.
 type WriteDatabaseMetricsSecretResponse struct {
+	OK bool `json:"ok"`
+}
+
+// DBInstanceInfo carries auto-discovered metadata about one database
+// instance on the edge. Edge sends this via MethodPushDBInstanceInfo.
+type DBInstanceInfo struct {
+	DBType      string `json:"db_type"`
+	Name        string `json:"name"`
+	Host        string `json:"host"`
+	Port        int    `json:"port"`
+	Version     string `json:"version"`
+	Status      string `json:"status"`
+	ConfigJSON  string `json:"config_json,omitempty"`
+	SourceLabel string `json:"source_label,omitempty"` // e.g. "db:my-mysql"
+	PluginType  string `json:"plugin_type,omitempty"`  // "databasemetrics" or "custommetrics"
+}
+
+// PushDBInstanceInfoRequest batches one or more instance reports.
+type PushDBInstanceInfoRequest struct {
+	Instances []DBInstanceInfo `json:"instances"`
+}
+
+// PushDBInstanceInfoResponse acknowledges the push.
+type PushDBInstanceInfoResponse struct {
 	OK bool `json:"ok"`
 }
 

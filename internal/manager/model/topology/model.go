@@ -37,6 +37,7 @@ const (
 	NodeTypeCluster NodeKind = "cluster"
 	NodeTypeApp     NodeKind = "app"
 	NodeTypeRack    NodeKind = "rack"
+	NodeTypeDB      NodeKind = "database"
 )
 
 // Node is one vertex in the topology graph. The detail columns owned
@@ -210,6 +211,14 @@ func BuiltinNodeTypes() []NodeType {
 			Builtin:       true,
 			Tier:          4,
 			Description:   "物理位置（机房 / 机架 / 可用区）— 故障域 / blast-radius 计算的物理边界。",
+		},
+t	{
+			Name:          string(NodeTypeDB),
+			DisplayName:   "数据库",
+			DisplayNameEN: "Database",
+			Builtin:       true,
+			Tier:          2,
+			Description:   "数据库实例（MySQL / PostgreSQL / Redis / MongoDB / Oracle / SelectDB）— 由 ongrid-edge 管理。",
 		},
 	}
 }

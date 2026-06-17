@@ -50,6 +50,9 @@ func SeedBuiltinRules(ctx context.Context, repo *Repo, cfg config.AlertConfig) e
 	if err := seedFDExhaustionRule(ctx, repo); err != nil {
 		return err
 	}
+	if err := seedDatabaseRules(ctx, repo); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -326,6 +329,99 @@ func seedFDExhaustionRule(ctx context.Context, repo *Repo) error {
 	}
 	if _, err := repo.UpsertBuiltinRule(ctx, row); err != nil {
 		return fmt.Errorf("upsert fd_exhaustion rule: %w", err)
+	}
+	return nil
+}
+
+// seedDatabaseRules seeds built-in alert rules for managed database instances.
+// Each rule targets exporter-provided metrics. Rules are disabled by default
+// so operators opt in per their fleet rather than getting surprised.
+func seedDatabaseRules(ctx context.Context, repo *Repo) error {
+	type dbSeed struct {
+		Key, Name, Severity, Expr string
+	}
+	candidates := []dbSeed{
+		// MySQL: connection usage > 80%
+		{
+			Key: "db_mysql_connections", Name: "MySQL 连接数过高",
+			Severity: "warning",
+			Expr:     `mysql_global_status_threads_connected / mysql_global_variables_max_connections > 0.8`,
+		},
+		// PostgreSQL: replication lag > 100MB
+		{
+			Key: "db_pg_replication_lag", Name: "PostgreSQL 复制延迟",
+			Severity: "warning",
+			Expr:     `pg_replication_lag{db_type="postgresql"} > 104857600`,
+		},
+		// Redis: memory usage > 80%
+		{
+			Key: "db_redis_memory", Name: "Redis 内存高占用",
+			Severity: "warning",
+			Expr:     `redis_memory_used_bytes / redis_config_maxmemory > 0.8`,
+		},
+		// MongoDB: replication lag > 10s
+		{
+			Key: "db_mongo_replication_lag", Name: "MongoDB 复制延迟",
+			Severity: "warning",
+			Expr:     `mongodb_mongod_repl_set_member_optime_date_lag{db_type="mongodb"} > 10`,
+		},
+		// Oracle: active sessions > 80% of processes limit
+		{
+			Key: "db_oracle_sessions", Name: "Oracle 活跃会话过高",
+			Severity: "warning",
+			Expr:     `oracle_session_active_count{db_type="oracle"} / oracle_processes_limit > 0.8`,
+		},
+		// Oracle: tablespace usage > 90%
+		{
+			Key: "db_oracle_tablespace", Name: "Oracle 表空间使用率超过 90%",
+			Severity: "critical",
+			Expr:     `oracle_tablespace_used_pct{db_type="oracle"} > 90`,
+		},
+		// SelectDB: query p99 latency > 5s
+		{
+			Key: "db_selectdb_query_latency", Name: "SelectDB 查询延迟高",
+			Severity: "warning",
+			Expr:     `doris_fe_query_latency_ms{db_type="selectdb"} > 5000`,
+		},
+		// SelectDB: BE node offline
+		{
+			Key: "db_selectdb_be_status", Name: "SelectDB BE 节点离线",
+			Severity: "critical",
+			Expr:     `doris_be_online{db_type="selectdb"} == 0`,
+		},
+		// MySQL: slow query rate spike
+		{
+			Key: "db_mysql_slow_queries", Name: "MySQL 慢查询速率异常",
+			Severity: "warning",
+			Expr:     `rate(mysql_global_status_slow_queries{db_type="mysql"}[5m]) > 5`,
+		},
+		// PostgreSQL: long running transactions > 60s
+		{
+			Key: "db_pg_long_running_xacts", Name: "PostgreSQL 长事务",
+			Severity: "warning",
+			Expr:     `pg_stat_activity_max_tx_duration{db_type="postgresql"} > 60`,
+		},
+	}
+	for _, c := range candidates {
+		spec := map[string]any{"expr": c.Expr}
+		condJSON, err := json.Marshal(spec)
+		if err != nil {
+			return fmt.Errorf("marshal seed rule %q: %w", c.Key, err)
+		}
+		row := &model.Rule{
+			RuleKey:        c.Key,
+			Kind:           model.RuleKindMetricRaw,
+			Name:           c.Name,
+			SourceType:     model.RuleSourceBuiltin,
+			ScopeType:      model.RuleScopeMonitoringPipeline,
+			JoinMode:       model.RuleJoinModeAll,
+			Severity:       c.Severity,
+			Enabled:        false, // opt-in by default
+			ConditionsJSON: string(condJSON),
+		}
+		if _, err := repo.UpsertBuiltinRule(ctx, row); err != nil {
+			return fmt.Errorf("upsert seed rule %q: %w", c.Key, err)
+		}
 	}
 	return nil
 }

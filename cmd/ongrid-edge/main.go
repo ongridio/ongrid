@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"golang.org/x/sync/errgroup"
@@ -28,6 +29,7 @@ import (
 	edgeplugins "github.com/ongridio/ongrid/internal/edgeagent/plugins"
 	edgeplugincustommetrics "github.com/ongridio/ongrid/internal/edgeagent/plugins/custommetrics"
 	edgeplugindatabasemetrics "github.com/ongridio/ongrid/internal/edgeagent/plugins/databasemetrics"
+	edgedbcli "github.com/ongridio/ongrid/internal/edgeagent/plugins/dbcli"
 	edgepluginhostmetrics "github.com/ongridio/ongrid/internal/edgeagent/plugins/hostmetrics"
 	edgepluginlogs "github.com/ongridio/ongrid/internal/edgeagent/plugins/logs"
 	edgepluginmetrics "github.com/ongridio/ongrid/internal/edgeagent/plugins/metrics"
@@ -291,7 +293,34 @@ func main() {
 	})
 	eg.Go(func() error { return supervisor.Run(egCtx) })
 
+	// Database instance discovery: periodically probes configured database
+	// sources and reports metadata to the manager. Runs every 5 minutes.
+	dbDiscoverer := edgedbcli.NewDiscoverer(client, log)
+	eg.Go(func() error {
+		// First pass after a short delay so the tunnel + plugins are up.
+		select {
+		case <-egCtx.Done():
+			return egCtx.Err()
+		case <-time.After(15 * time.Second):
+		}
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			if _, err := dbDiscoverer.RunOnce(egCtx); err != nil {
+				log.Debug("db discovery pass", slog.Any("err", err))
+			}
+			select {
+			case <-egCtx.Done():
+				return egCtx.Err()
+			case <-ticker.C:
+			}
+		}
+	})
+
 	err = eg.Wait()
+
+	// Close database connection pool.
+	edgedbcli.GlobalPool.CloseAll()
 
 	if err != nil && !errors.Is(err, context.Canceled) {
 		log.Error("shutdown with error", slog.Any("err", err))

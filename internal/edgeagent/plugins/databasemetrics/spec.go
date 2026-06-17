@@ -197,6 +197,9 @@ func (s sourceSpec) command(binDir, secretPath, secret string) (binary string, a
 	case "mongodb":
 		args := append([]string{listenArg}, mongodbExporterArgs(s.Exporter)...)
 		return filepath.Join(binDir, "mongodb_exporter"), args, []string{"MONGODB_URI=" + secret}, nil
+	case "oracle":
+		args := append([]string{listenArg}, oracleExporterArgs(s.Exporter)...)
+		return filepath.Join(binDir, "oracledb_exporter"), args, []string{"DATA_SOURCE_NAME=" + secret}, nil
 	default:
 		return "", nil, nil, fmt.Errorf("unsupported db_type %q", s.DBType)
 	}
@@ -245,6 +248,14 @@ func mongodbExporterArgs(exporter exporterSpec) []string {
 	args = appendStringFlags(args, exporter.Strings, mongoDBStringExporterFlags)
 	args = appendIntFlags(args, exporter.Ints, mongoDBIntExporterFlags)
 	args = appendListFlags(args, exporter.Lists, mongoDBListExporterFlags)
+	return args
+}
+
+func oracleExporterArgs(exporter exporterSpec) []string {
+	args := make([]string, 0, len(exporter.Bools)+len(exporter.Strings)+len(exporter.Ints))
+	args = appendBoolFlags(args, exporter.Bools, oracleBoolExporterFlags)
+	args = appendStringFlags(args, exporter.Strings, oracleStringExporterFlags)
+	args = appendIntFlags(args, exporter.Ints, oracleIntExporterFlags)
 	return args
 }
 
@@ -389,7 +400,7 @@ func (s sourceSpec) scrapeTarget() metricscommon.Target {
 
 func isSupportedDBType(v string) bool {
 	switch v {
-	case "mysql", "postgresql", "redis", "mongodb":
+	case "mysql", "postgresql", "redis", "mongodb", "oracle":
 		return true
 	default:
 		return false
@@ -406,6 +417,8 @@ func defaultListenAddress(dbType string) string {
 		return "127.0.0.1:19121"
 	case "mongodb":
 		return "127.0.0.1:19216"
+	case "oracle":
+		return "127.0.0.1:19161"
 	default:
 		return "127.0.0.1:19100"
 	}
@@ -417,6 +430,8 @@ func defaultLabelDrop(dbType string) []string {
 		return []string{"query", "statement"}
 	case "mongodb":
 		return []string{"collection", "query"}
+	case "oracle":
+		return []string{"sql_id", "sql_text", "module"}
 	default:
 		return nil
 	}
@@ -540,6 +555,12 @@ func allowedExporterFields(dbType string) exporterFieldMaps {
 			strings: mongoDBStringExporterFlags,
 			ints:    mongoDBIntExporterFlags,
 			lists:   mongoDBListExporterFlags,
+		}
+	case "oracle":
+		return exporterFieldMaps{
+			bools:   oracleBoolExporterFlags,
+			strings: oracleStringExporterFlags,
+			ints:    oracleIntExporterFlags,
 		}
 	default:
 		return exporterFieldMaps{}
@@ -771,6 +792,27 @@ var mongoDBCollectorFlags = map[string]struct{}{
 	"fcv":                {},
 	"shards":             {},
 	"pbm":                {},
+}
+
+var oracleBoolExporterFlags = map[string]string{
+	"custom_metrics":          "custom.metrics",
+	"default_metrics":         "default.metrics",
+	"enable_database_mode":    "database.mode",
+	"enable_exporter_metrics": "exporter.metrics",
+}
+
+var oracleStringExporterFlags = map[string]string{
+	"config_file":           "config.file",
+	"custom_metrics_config": "custom.metrics.file",
+	"log_level":             "log.level",
+	"log_format":            "log.format",
+	"metrics_path":          "web.telemetry-path",
+}
+
+var oracleIntExporterFlags = map[string]string{
+	"max_connections":       "database.max-connections",
+	"query_timeout":         "query.timeout",
+	"scrape_timeout_offset": "web.timeout-offset",
 }
 
 var reservedListenPorts = map[string]string{

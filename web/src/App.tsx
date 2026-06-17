@@ -8,6 +8,8 @@ const HomePage = lazy(() => import('@/pages/Home'));
 const ChatThreadPage = lazy(() => import('@/pages/ChatThread'));
 const EdgesPage = lazy(() => import('@/pages/Edges'));
 const EdgeDetailPage = lazy(() => import('@/pages/EdgeDetail'));
+const DatabasesPage = lazy(() => import('@/pages/Databases'));
+const DatabaseDetailPage = lazy(() => import('@/pages/DatabaseDetail'));
 const DeviceShellPage = lazy(() => import('@/pages/DeviceShell'));
 const DashboardPage = lazy(() => import('@/pages/Dashboard'));
 const MonitorPage = lazy(() => import('@/pages/Monitor'));
@@ -94,6 +96,8 @@ export default function App() {
         {/* WebSSH: deviceId is the Prom-label device_id, not the edge.id.
             See DeviceShell.tsx for the rationale. */}
         <Route path="/devices/:deviceId/shell" element={<DeviceShellPage />} />
+        <Route path="/databases" element={<DatabasesPage />} />
+        <Route path="/databases/:id" element={<DatabaseDetailPage />} />
         <Route path="/monitor" element={<MonitorPage />} />
         <Route path="/logs" element={<LogsPage />} />
         <Route path="/traces" element={<TracesPage />} />

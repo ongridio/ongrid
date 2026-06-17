@@ -46,6 +46,7 @@ import { useMe, usePermissions } from '@/store/me';
 import { useChatSessions, invalidateChatSessions } from '@/store/chatSessions';
 import { deleteSession, renameSession, type ChatSession } from '@/api/chat';
 import { listEdges, type EdgeRole } from '@/api/edges';
+import { listDatabases } from '@/api/databases';
 import { getManagerVersion } from '@/api/version';
 import { checkSystemUpgrade } from '@/api/systemUpgrade';
 import { onDevicesChanged } from '@/lib/events';
@@ -505,6 +506,10 @@ export function Sidebar() {
             <SidebarNavItem to="/devices?roles=network" icon={Network} label={tr('网络设备', 'Network')} />
           )}
           <SidebarNavItem to="/topology" icon={Share2} label={tr('拓扑', 'Topology')} />
+        </CollapsibleSection>
+
+        <CollapsibleSection storageKey="databases" title={tr('数据库实例', 'DB Instances')} defaultOpen={false}>
+          <SidebarNavItem to="/databases" icon={Database} label={tr('全部实例', 'All Instances')} />
         </CollapsibleSection>
 
         <CollapsibleSection storageKey="observability" title={tr('监控告警', 'Observability')} defaultOpen={false}>

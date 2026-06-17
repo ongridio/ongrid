@@ -1,4 +1,4 @@
-package frontierbound
+﻿package frontierbound
 
 import (
 	"context"
@@ -16,7 +16,7 @@ import (
 // PromwriteIngester is the narrow surface the push_prom_samples handler
 // needs from internal/manager/biz/promwrite. Declared here as an interface
 // so this package does not import the biz package directly (matches the
-// MetricIngester pattern). A nil value means Prom is disabled — the
+// MetricIngester pattern). A nil value means Prom is disabled 閳?the
 // handler still installs but silently 200s so edges back off cleanly.
 //
 // Post-split (May 2026): the deviceID arg is the host device id resolved
@@ -42,7 +42,7 @@ type Wiring struct {
 	EdgeAuthn      *edgebiz.AccessKeyAuthenticator
 	EdgeUC         *edgebiz.Usecase
 	MetricIngester metricbiz.IngestService
-	// PromIngester is optional — nil means Prom is disabled. When nil the
+	// PromIngester is optional 閳?nil means Prom is disabled. When nil the
 	// push_prom_samples handler still installs but silently accepts and
 	// drops every batch so edges (which don't know the cloud's Prom state)
 	// don't churn on errors.
@@ -52,9 +52,12 @@ type Wiring struct {
 	// snapshot via tunnel.
 	PluginConfigUC PluginConfigFetcher
 	// WebshellRouter routes edge-to-manager shell_output / shell_exit
-	// pushes to the live WebSocket bridge for that session. Optional —
-	// when nil the two handlers don't install and webshell is disabled.
+	// pushes to the live WebSocket bridge for that session. Optional 閳?	// when nil the two handlers don't install and webshell is disabled.
 	WebshellRouter WebshellRouter
+	// DBInstanceIngester, when non-nil, receives auto-discovered database
+	// instance reports from edges via MethodPushDBInstanceInfo. The ingester
+	// upserts into the database_instances table.
+	DBInstanceIngester DBInstanceIngester
 	// DeviceResolver, when non-nil, is consulted on every push to map
 	// the tunnel session's edge_id to the host device_id used as the
 	// metric/log/trace label. nil falls back to edge_id == device_id
@@ -66,10 +69,16 @@ type Wiring struct {
 
 // PluginConfigFetcher is the narrow surface frontierbound needs from
 // WebshellRouter is the narrow surface needed by the shell_output /
-// shell_exit handlers — *biz/webshell.Router satisfies it.
+// shell_exit handlers 閳?*biz/webshell.Router satisfies it.
 type WebshellRouter interface {
 	DispatchOutput(sid string, data []byte) error
 	DispatchExit(sid string, exitCode int, errMsg string)
+}
+
+// DBInstanceIngester upserts database instance info discovered by the
+// edge agent. *databasestore.Repo satisfies this.
+type DBInstanceIngester interface {
+	UpsertFromDiscovery(ctx context.Context, edgeID uint64, dbType, name, host string, port int, version, status, configJSON string) error
 }
 
 // the edge biz PluginConfigUC. *edgebiz.PluginConfigUC satisfies it.
@@ -94,7 +103,7 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 	// server. Edge-facing reverse calls won't ever fire, but that is the
 	// whole point of the e2e harness path.
 	if c.svc == nil {
-		log.Info("frontierbound: Install skipped — client is disabled")
+		log.Info("frontierbound: Install skipped 閳?client is disabled")
 		return nil
 	}
 
@@ -129,7 +138,7 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 
 	// Lifecycle: GetEdgeID parses the edge's Meta JSON, runs access-key
 	// authentication, and returns the resolved EdgeID. Any failure path
-	// returns 0 + error so frontier rejects the dial — the manager never
+	// returns 0 + error so frontier rejects the dial 閳?the manager never
 	// allocates anonymous IDs.
 	if err := c.RegisterGetEdgeID(ctx, resolveEdgeID); err != nil {
 		return fmt.Errorf("frontierbound: register GetEdgeID: %w", err)
@@ -158,7 +167,7 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 
 	if err := c.RegisterEdgeOffline(ctx, func(edgeID uint64, _ []byte, addr net.Addr) error {
 		// Translate the frontier transport id to the canonical Edge.ID
-		// before unbinding — we need the canonical id for the alert
+		// before unbinding 閳?we need the canonical id for the alert
 		// notifier and the unbind clears the mapping.
 		canonicalEdgeID := c.canonicalizeEdgeID(edgeID)
 		c.unbindTransport(edgeID)
@@ -194,14 +203,14 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 		}
 		canonicalEdgeID := c.canonicalizeEdgeID(edgeID)
 		if canonicalEdgeID == 0 {
-			// Transport→canonical binding not established yet (EdgeOnline's
+			// Transport閳妽anonical binding not established yet (EdgeOnline's
 			// resolveEdgeID must land first). Registering with 0 makes
 			// HandleRegister(0) fail AND leaves the edge_devices host
-			// junction uncreated — after which every metric falls back to
+			// junction uncreated 閳?after which every metric falls back to
 			// edge_id (issue #96 root cause). Fail loudly so the edge
 			// retries once the binding is ready, instead of silently
 			// mis-registering and poisoning the device_id labels.
-			log.Error("frontierbound: register_edge — no canonical edge id (transport binding not ready, retry)",
+			log.Error("frontierbound: register_edge 閳?no canonical edge id (transport binding not ready, retry)",
 				slog.Uint64("transport_edge_id", edgeID))
 			return nil, fmt.Errorf("register_edge: edge binding not ready")
 		}
@@ -247,7 +256,7 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 			return nil, fmt.Errorf("heartbeat: %w", err)
 		}
 		// Piggybacked plugin health (best-effort, in-memory only). Lets the
-		// UI show "logs: crashed — binary missing" instead of silent empty
+		// UI show "logs: crashed 閳?binary missing" instead of silent empty
 		// telemetry. Never fail the heartbeat on this.
 		if len(in.Plugins) > 0 {
 			items := make([]edgebiz.PluginHealth, 0, len(in.Plugins))
@@ -296,17 +305,17 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 		}
 		if canonicalEdgeID == 0 {
 			// Edge hasn't completed register_edge yet (race on first
-			// connect). Silent drop — edge will retry once the binding
+			// connect). Silent drop 閳?edge will retry once the binding
 			// is set up. Letting transport ID through would create
 			// ghost edge_id labels in Prom (v0.7.39 fix).
 			return json.Marshal(tunnel.PushHostMetricsResponse{Accepted: 0})
 		}
 		deviceID := resolveDeviceID(rpcCtx, w.DeviceResolver, canonicalEdgeID)
 		if deviceID == 0 {
-			// Host junction missing — drop rather than write edge_id as a
+			// Host junction missing 閳?drop rather than write edge_id as a
 			// bogus device_id label (issue #96). Accepted=0 lets the edge
 			// retry; the link is created by register_edge.
-			log.Warn("frontierbound: push_host_metrics dropped — device_id unresolved (edge_devices host junction missing; edge needs to (re)register)",
+			log.Warn("frontierbound: push_host_metrics dropped 閳?device_id unresolved (edge_devices host junction missing; edge needs to (re)register)",
 				slog.Uint64("edge_id", canonicalEdgeID),
 				slog.Uint64("transport_edge_id", edgeID),
 				slog.Int("n", len(in.Points)),
@@ -330,7 +339,7 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 
 	// push_prom_samples: forward open-set samples to Prometheus via the
 	// promwrite ingester. When the ingester is nil (Prom disabled), accept
-	// silently — the edge has no business knowing the cloud's Prom state.
+	// silently 閳?the edge has no business knowing the cloud's Prom state.
 	if err := c.Register(ctx, tunnel.MethodPushPromSamples, func(rpcCtx context.Context, edgeID uint64, body []byte) ([]byte, error) {
 		var in tunnel.PushPromSamplesRequest
 		if err := json.Unmarshal(body, &in); err != nil {
@@ -361,10 +370,10 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 		}
 		deviceID := resolveDeviceID(rpcCtx, w.DeviceResolver, canonicalEdgeID)
 		if deviceID == 0 {
-			// Host junction missing — drop rather than pollute the TSDB
+			// Host junction missing 閳?drop rather than pollute the TSDB
 			// with edge_id-as-device_id (issue #96). Accepted=n so the
 			// edge does not spin-retry; the link lands on register_edge.
-			log.Warn("frontierbound: push_prom_samples dropped — device_id unresolved (edge_devices host junction missing; edge needs to (re)register)",
+			log.Warn("frontierbound: push_prom_samples dropped 閳?device_id unresolved (edge_devices host junction missing; edge needs to (re)register)",
 				slog.Uint64("edge_id", canonicalEdgeID),
 				slog.Uint64("transport_edge_id", edgeID),
 				slog.String("source", in.Source),
@@ -388,7 +397,7 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 	}
 
 	// get_plugin_configs: serve the edge its own plugin config snapshot
-	//Optional — only registered when PluginConfigUC is wired
+	//Optional 閳?only registered when PluginConfigUC is wired
 	// (lets ongrid run without the plugin runtime when no plugins are
 	// in use).
 	if w.PluginConfigUC != nil {
@@ -416,6 +425,28 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 			return fmt.Errorf("frontierbound: register %q: %w", tunnel.MethodGetPluginConfigs, err)
 		}
 	}
+		// push_db_instance_info: edge reports auto-discovered database
+		// instance metadata. The ingester upserts into database_instances.
+		if w.DBInstanceIngester != nil {
+			if err := c.Register(ctx, tunnel.MethodPushDBInstanceInfo, func(rpcCtx context.Context, edgeID uint64, body []byte) ([]byte, error) {
+				var in tunnel.PushDBInstanceInfoRequest
+				if err := json.Unmarshal(body, &in); err != nil {
+					return nil, fmt.Errorf("push_db_instance_info: decode: %w", err)
+				}
+				canonicalEdgeID := c.canonicalizeEdgeID(edgeID)
+				for _, inst := range in.Instances {
+					if err := w.DBInstanceIngester.UpsertFromDiscovery(rpcCtx, canonicalEdgeID, inst.DBType, inst.Name, inst.Host, inst.Port, inst.Version, inst.Status, inst.ConfigJSON); err != nil {
+						log.Warn("push_db_instance_info: upsert",
+							slog.Uint64("edge_id", canonicalEdgeID),
+							slog.String("name", inst.Name),
+							slog.Any("err", err))
+					}
+				}
+				return json.Marshal(tunnel.PushDBInstanceInfoResponse{OK: true})
+			}); err != nil {
+				return fmt.Errorf("frontierbound: register %q: %w", tunnel.MethodPushDBInstanceInfo, err)
+			}
+		}
 
 	// shell_output / shell_exit: edge-to-manager pushes for the WebSSH
 	// streaming layer. Each chunk is routed by SessionID to the live
@@ -451,8 +482,8 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 }
 
 // NotifyPluginConfigsChanged pushes a reload notification to one edge.
-// Cloud → edge RPC; the edge handler simply triggers Supervisor.Reload.
-// Body is empty by design — edge re-fetches via MethodGetPluginConfigs
+// Cloud 閳?edge RPC; the edge handler simply triggers Supervisor.Reload.
+// Body is empty by design 閳?edge re-fetches via MethodGetPluginConfigs
 // to avoid wire-format coupling between push payload and pull response.
 //
 // Failure modes are caller's responsibility to log; in particular this
@@ -479,7 +510,7 @@ func safeAddr(a net.Addr) string {
 // It MUST NOT fall back to edge_id. After the edge/device entity split
 // (May 2026) edge_id and device.ID are independent auto-increment
 // sequences, so a fallback writes a WRONG device_id label into the
-// immutable Prometheus TSDB (issue #96 — Monitor showed edge_ids like
+// immutable Prometheus TSDB (issue #96 閳?Monitor showed edge_ids like
 // 10/11/12 that don't exist on the Devices page). Callers MUST drop the
 // batch when this returns 0 rather than persist a bogus label.
 func resolveDeviceID(ctx context.Context, dr DeviceResolver, edgeID uint64) uint64 {
