@@ -212,9 +212,9 @@ func (r metricCatalogRunner) run(ctx context.Context, args []byte) ([]byte, erro
 	instruction := ""
 	if len(items) == 0 {
 		status = "empty"
-		instruction = "No currently scraped metric matched this query/selector. Stop tool use now: do not call list_metric_catalog again, do not call any other tool to broaden the search, and do not invent a PromQL rule. Your next assistant message must tell the user which metric signal is missing and ask them to configure collection or provide an exact metric/PromQL."
+		instruction = "No currently scraped metric matched this query/selector. Do not invent metric names. If the user supplied an exact PromQL or exact metric name, you may call draft_config_change and let draft validation verify it; otherwise ask the user to configure collection or provide an exact metric/PromQL."
 	} else if metricCatalogNeedsHTTPStatusLabel(in.Query) && !metricCatalogItemsHaveAnySampleLabel(outItems, metricCatalogHTTPStatusLabels()...) {
-		instruction = "The returned metrics do not expose any HTTP status/code label in sample_labels, so they cannot build a 5xx/error-rate/burn-rate SLI. Stop tool use now: do not call list_metric_catalog again or broaden the search. Tell the user that request-count metrics with status/code labels are missing, or ask for an exact PromQL."
+		instruction = "The returned metrics do not expose any HTTP status/code label in sample_labels, so they may not be enough to build a 5xx/error-rate/burn-rate SLI. Do not invent missing labels; if the user supplied an exact PromQL, you may call draft_config_change and let draft validation verify it, otherwise ask for a metric with status/code labels or exact PromQL."
 	}
 	resp := MetricCatalogResponse{
 		Status:      status,

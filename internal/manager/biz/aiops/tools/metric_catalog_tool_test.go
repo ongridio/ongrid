@@ -112,7 +112,7 @@ func TestListMetricCatalogTool_RanksDatabaseMetricsFromNaturalLanguage(t *testin
 	}
 }
 
-func TestListMetricCatalogTool_EmptyResultInstructsNoRetryOrInventedRule(t *testing.T) {
+func TestListMetricCatalogTool_EmptyResultInstructsNoInventedMetricsButAllowsValidation(t *testing.T) {
 	pq := &fakePromQuerier{
 		resp: &promquery.InstantResult{
 			ResultType: "vector",
@@ -132,7 +132,7 @@ func TestListMetricCatalogTool_EmptyResultInstructsNoRetryOrInventedRule(t *test
 	if resp.Status != "empty" {
 		t.Fatalf("status = %q, want empty", resp.Status)
 	}
-	for _, want := range []string{"Stop tool use now", "do not call list_metric_catalog again", "do not invent a PromQL rule"} {
+	for _, want := range []string{"Do not invent metric names", "exact PromQL", "draft validation verify"} {
 		if !strings.Contains(resp.Instruction, want) {
 			t.Fatalf("instruction = %q, want %q", resp.Instruction, want)
 		}
@@ -162,7 +162,7 @@ func TestListMetricCatalogTool_InstructsWhenBurnRateMetricsLackStatusLabel(t *te
 	if resp.Status != "ok" {
 		t.Fatalf("status = %q, want ok", resp.Status)
 	}
-	for _, want := range []string{"do not call list_metric_catalog again", "status/code label", "cannot build a 5xx"} {
+	for _, want := range []string{"status/code label", "Do not invent missing labels", "exact PromQL"} {
 		if !strings.Contains(resp.Instruction, want) {
 			t.Fatalf("instruction = %q, want %q", resp.Instruction, want)
 		}

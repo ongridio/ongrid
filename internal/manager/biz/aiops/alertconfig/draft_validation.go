@@ -56,6 +56,15 @@ func validateMetricRawDraft(rule aiopstools.AlertRuleConfigInput, requestText st
 		return nil
 	}
 	var issues []aiopstools.ConfigValidationIssue
+	if !hasMetricRawComparisonPredicate(expr) {
+		issues = append(issues, aiopstools.ConfigValidationIssue{
+			Severity:   validationSeverityError,
+			Code:       "metric_raw_predicate_missing",
+			Message:    "metric_raw 的 PromQL 必须是布尔告警谓词；裸数值序列会在返回任意样本时被规则引擎当成触发。",
+			Suggestion: "为表达式补上明确比较条件，例如 `rate(x[5m]) > 0.5`，或把持续性写进 PromQL 后再比较阈值。",
+		})
+		return issues
+	}
 	if lhs, threshold, ok := splitMetricRawComparison(expr); ok {
 		if preview != nil && strings.TrimSpace(preview.SkippedReason) == "" && noPreviewSignal(preview) && looksLikeArithmetic(lhs) {
 			issues = append(issues, aiopstools.ConfigValidationIssue{
@@ -135,6 +144,53 @@ func splitMetricRawComparison(expr string) (string, float64, bool) {
 		return "", 0, false
 	}
 	return strings.TrimSpace(m[1]), threshold, true
+}
+
+func hasMetricRawComparisonPredicate(expr string) bool {
+	expr = strings.TrimSpace(expr)
+	if expr == "" {
+		return false
+	}
+	var quote byte
+	selectorDepth := 0
+	for i := 0; i < len(expr); i++ {
+		c := expr[i]
+		if quote != 0 {
+			if c == '\\' && i+1 < len(expr) {
+				i++
+				continue
+			}
+			if c == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch c {
+		case '"', '\'', '`':
+			quote = c
+			continue
+		case '{':
+			selectorDepth++
+			continue
+		case '}':
+			if selectorDepth > 0 {
+				selectorDepth--
+			}
+			continue
+		}
+		if selectorDepth > 0 {
+			continue
+		}
+		switch c {
+		case '>', '<':
+			return true
+		case '=', '!':
+			if i+1 < len(expr) && expr[i+1] == '=' {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func noPreviewSignal(preview *PreviewResult) bool {

@@ -139,12 +139,8 @@ func (a *einoToolAdapter) draftMetricCatalogPreflight(argumentsInJSON string) (s
 	if !draftConfigChangeNeedsMetricCatalog(argumentsInJSON) {
 		return "", false
 	}
-	catalogResult, ok := a.memo.lastResult(toolNameListMetricCatalog)
-	if !ok {
+	if _, ok := a.memo.lastResult(toolNameListMetricCatalog); !ok {
 		return metricCatalogRequiredResult(), true
-	}
-	if blocked := metricCatalogBlockedResult(catalogResult); blocked != "" {
-		return blocked, true
 	}
 	return "", false
 }
@@ -181,47 +177,6 @@ func metricCatalogRequiredResult() string {
 		"error":       "metric_catalog_required",
 		"instruction": "Metric-based alert-rule drafts must call list_metric_catalog once earlier in this same user turn. Use the returned metric names and sample_labels to build the rule, then call draft_config_change again.",
 	})
-}
-
-func metricCatalogBlockedResult(result string) string {
-	var raw map[string]interface{}
-	if err := json.Unmarshal([]byte(result), &raw); err != nil {
-		return toolResultJSON(map[string]interface{}{
-			"status":      "blocked",
-			"error":       "metric_catalog_unparseable",
-			"instruction": "The previous list_metric_catalog result was not parseable JSON. Do not draft an alert rule from guessed metrics; tell the user the metric catalog result is unavailable and ask for an exact metric or PromQL.",
-		})
-	}
-	status, _ := raw["status"].(string)
-	if strings.EqualFold(status, "empty") ||
-		jsonNumberLTE(raw, "returned", 0) ||
-		jsonNumberLTE(raw, "metric_count", 0) ||
-		jsonArrayEmpty(raw, "metrics") {
-		return toolResultJSON(map[string]interface{}{
-			"status":      "blocked",
-			"error":       "metric_catalog_empty",
-			"instruction": "The previous list_metric_catalog result did not find usable metrics for this alert. Do not call draft_config_change again in this turn; tell the user which metric signal is missing or ask for an exact metric or PromQL.",
-		})
-	}
-	return ""
-}
-
-func jsonNumberLTE(raw map[string]interface{}, key string, limit float64) bool {
-	v, ok := raw[key]
-	if !ok {
-		return false
-	}
-	n, ok := v.(float64)
-	return ok && n <= limit
-}
-
-func jsonArrayEmpty(raw map[string]interface{}, key string) bool {
-	v, ok := raw[key]
-	if !ok {
-		return false
-	}
-	arr, ok := v.([]interface{})
-	return ok && len(arr) == 0
 }
 
 func toolResultJSON(fields map[string]interface{}) string {

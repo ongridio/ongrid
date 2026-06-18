@@ -122,6 +122,37 @@ func TestDraftAlertRuleConfigReturnsValidationFailedForSuspiciousMetricMagnitude
 	}
 }
 
+func TestDraftAlertRuleConfigReturnsValidationFailedForMetricRawWithoutPredicate(t *testing.T) {
+	manager := NewAlertRuleManager(fakeAlertRulePort{
+		preview: &PreviewResult{FireCount: 1441},
+	})
+
+	got, err := manager.DraftAlertRuleConfig(context.Background(), aiopstools.ConfigCaller{}, aiopstools.AlertRuleConfigArgs{
+		Action: "create",
+		Rule: aiopstools.AlertRuleConfigInput{
+			RuleKey:  "mysql_slow_queries",
+			Kind:     "metric_raw",
+			Name:     "MySQL slow queries",
+			Severity: "warning",
+			Spec: map[string]interface{}{
+				"expr": `rate(mysql_global_status_slow_queries{job!="test"}[5m])`,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("DraftAlertRuleConfig() error = %v", err)
+	}
+	if got.Kind != aiopstools.ConfigResultKindValidationFailed {
+		t.Fatalf("Kind = %q, want validation failed", got.Kind)
+	}
+	if got.DraftHash != "" || len(got.Payload) != 0 || got.ApplyTool != "" {
+		t.Fatalf("validation failed result must not be confirmable: hash=%q payload=%s apply=%q", got.DraftHash, string(got.Payload), got.ApplyTool)
+	}
+	if got.Validation == nil || !validationIssueContains(*got.Validation, "metric_raw_predicate_missing") {
+		t.Fatalf("Validation = %#v, want predicate missing issue", got.Validation)
+	}
+}
+
 func TestDraftAlertRuleConfigAllowsWarningValidationWithDraftHash(t *testing.T) {
 	now := time.Now()
 	manager := NewAlertRuleManager(fakeAlertRulePort{preview: &PreviewResult{
@@ -152,6 +183,37 @@ func TestDraftAlertRuleConfigAllowsWarningValidationWithDraftHash(t *testing.T) 
 	}
 	if len(got.Warnings) == 0 || !strings.Contains(got.Warnings[0], "持续") {
 		t.Fatalf("Warnings = %#v, want sustained warning", got.Warnings)
+	}
+}
+
+func TestHasMetricRawComparisonPredicateIgnoresLabelMatchers(t *testing.T) {
+	cases := []struct {
+		name string
+		expr string
+		want bool
+	}{
+		{
+			name: "bare_metric_with_not_equal_matcher",
+			expr: `rate(mysql_global_status_slow_queries{job!="test"}[5m])`,
+			want: false,
+		},
+		{
+			name: "simple_comparison",
+			expr: `rate(mysql_global_status_slow_queries{job!="test"}[5m]) > 0.5`,
+			want: true,
+		},
+		{
+			name: "compound_comparison",
+			expr: `up{job="node"} == 0 or process_resident_memory_bytes > 1024`,
+			want: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := hasMetricRawComparisonPredicate(tc.expr); got != tc.want {
+				t.Fatalf("hasMetricRawComparisonPredicate(%q) = %v, want %v", tc.expr, got, tc.want)
+			}
+		})
 	}
 }
 

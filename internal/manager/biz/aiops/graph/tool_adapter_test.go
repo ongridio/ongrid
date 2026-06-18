@@ -372,7 +372,7 @@ func TestEinoToolAdapter_DraftConfigChangeIgnoresCatalogInstructionWhenMetricsEx
 	}
 }
 
-func TestEinoToolAdapter_DraftConfigChangeBlocksAfterEmptyMetricCatalog(t *testing.T) {
+func TestEinoToolAdapter_DraftConfigChangeAllowsValidationAfterEmptyMetricCatalog(t *testing.T) {
 	t.Parallel()
 	memo := newToolMemo()
 	catalog := &fakeBaseTool{name: "list_metric_catalog", class: "read", runResp: `{"status":"empty","query":"cpu","metric_count":0,"returned":0,"metrics":[]}`}
@@ -388,11 +388,11 @@ func TestEinoToolAdapter_DraftConfigChangeBlocksAfterEmptyMetricCatalog(t *testi
 	if err != nil {
 		t.Fatalf("draft InvokableRun() error = %v", err)
 	}
-	if !strings.Contains(out, "metric_catalog_empty") {
-		t.Fatalf("draft after empty catalog should be blocked, got %q", out)
+	if !strings.Contains(out, `"kind":"config_draft"`) {
+		t.Fatalf("draft after empty catalog should execute for validation, got %q", out)
 	}
-	if got := draft.calls.Load(); got != 0 {
-		t.Fatalf("draft executions = %d, want 0", got)
+	if got := draft.calls.Load(); got != 1 {
+		t.Fatalf("draft executions = %d, want 1", got)
 	}
 }
 
