@@ -3,7 +3,7 @@ package edge
 import (
 	"time"
 
-	"gorm.io/gorm"
+	"gorm.io/plugin/soft_delete"
 )
 
 // PluginConfig is one row in edge_plugin_configs — the per-edge
@@ -35,10 +35,11 @@ type PluginConfig struct {
 	// SpecJSON is plugin-specific settings as JSON. No DEFAULT clause —
 	// MySQL rejects DEFAULT on TEXT columns (Error 1101). Application
 	// code always writes a non-empty value (at minimum "{}" via Set).
-	SpecJSON  string         `gorm:"type:text;not null;column:spec_json"`
-	CreatedAt time.Time      `gorm:"column:created_at"`
-	UpdatedAt time.Time      `gorm:"column:updated_at"`
-	DeletedAt gorm.DeletedAt `gorm:"index;column:deleted_at"`
+	SpecJSON     string                `gorm:"type:text;not null;column:spec_json"`
+	CreatedAt    time.Time             `gorm:"column:created_at"`
+	UpdatedAt    time.Time             `gorm:"column:updated_at"`
+	DeletedAt    *time.Time            `gorm:"index;column:deleted_at"`
+	DeleteMarker soft_delete.DeletedAt `gorm:"column:delete_marker;not null;default:0;softDelete:milli,DeletedAtField:DeletedAt;uniqueIndex:uk_edge_plugin,priority:3"`
 }
 
 // TableName pins the SQLite table.

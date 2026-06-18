@@ -156,4 +156,17 @@ func TestRepoDeleteSoft(t *testing.T) {
 	if len(items) != 0 {
 		t.Fatalf("List after delete = %d, want 0", len(items))
 	}
+
+	reinstalled := samplePack("etcd-tools")
+	reinstalled.DisplayName = "etcd-tools reinstalled"
+	if err := repo.Create(ctx, reinstalled); err != nil {
+		t.Fatalf("Create after DeleteSoft: %v", err)
+	}
+	got, err := repo.GetByPackID(ctx, 0, "etcd-tools")
+	if err != nil {
+		t.Fatalf("GetByPackID after reinstall: %v", err)
+	}
+	if got.ID != reinstalled.ID || got.DisplayName != "etcd-tools reinstalled" {
+		t.Fatalf("unexpected reinstalled row: %+v", got)
+	}
 }
