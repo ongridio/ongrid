@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/plugin/soft_delete"
 )
 
 // NodeKind is the canonical set of built-in entity kinds — string
@@ -47,13 +48,13 @@ const (
 // and a free-form props bag (e.g. owner_team / region / cost_center)
 // that doesn't deserve its own column.
 type Node struct {
-	ID         uint64    `gorm:"primaryKey;autoIncrement"`
-	Type       string    `gorm:"size:32;not null;index:idx_nodes_type_name,priority:1"`
-	Name       string    `gorm:"size:255;not null;index:idx_nodes_type_name,priority:2"`
-	PropsJSON  string    `gorm:"type:text;not null;column:props_jsonb"`
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-	DeletedAt  gorm.DeletedAt `gorm:"index"`
+	ID        uint64 `gorm:"primaryKey;autoIncrement"`
+	Type      string `gorm:"size:32;not null;index:idx_nodes_type_name,priority:1"`
+	Name      string `gorm:"size:255;not null;index:idx_nodes_type_name,priority:2"`
+	PropsJSON string `gorm:"type:text;not null;column:props_jsonb"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	DeletedAt gorm.DeletedAt `gorm:"index"`
 }
 
 // TableName pins the table name so cross-module reads can hit a known
@@ -66,14 +67,15 @@ func (Node) TableName() string { return "nodes" }
 // same pair can carry multiple relations only when they differ in type
 // (a service can both `depends_on` and `monitors` another service).
 type Relation struct {
-	ID        uint64    `gorm:"primaryKey;autoIncrement"`
-	SrcID     uint64    `gorm:"not null;column:src_id;uniqueIndex:idx_relations_src_dst_type,priority:1;index:idx_relations_src_type"`
-	DstID     uint64    `gorm:"not null;column:dst_id;uniqueIndex:idx_relations_src_dst_type,priority:2;index:idx_relations_dst_type"`
-	Type      string    `gorm:"size:64;not null;uniqueIndex:idx_relations_src_dst_type,priority:3"`
-	PropsJSON string    `gorm:"type:text;not null;column:props_jsonb"`
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	DeletedAt gorm.DeletedAt `gorm:"index"`
+	ID           uint64 `gorm:"primaryKey;autoIncrement"`
+	SrcID        uint64 `gorm:"not null;column:src_id;uniqueIndex:idx_relations_src_dst_type,priority:1;index:idx_relations_src_type"`
+	DstID        uint64 `gorm:"not null;column:dst_id;uniqueIndex:idx_relations_src_dst_type,priority:2;index:idx_relations_dst_type"`
+	Type         string `gorm:"size:64;not null;uniqueIndex:idx_relations_src_dst_type,priority:3"`
+	PropsJSON    string `gorm:"type:text;not null;column:props_jsonb"`
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	DeletedAt    *time.Time            `gorm:"index;column:deleted_at"`
+	DeleteMarker soft_delete.DeletedAt `gorm:"column:delete_marker;not null;default:0;softDelete:milli,DeletedAtField:DeletedAt;uniqueIndex:idx_relations_src_dst_type,priority:4"`
 }
 
 func (Relation) TableName() string { return "relations" }
@@ -102,13 +104,13 @@ const (
 type SemanticsTag string
 
 const (
-	SemanticsHardDep    SemanticsTag = "hard_dep"
-	SemanticsRuntimeDep SemanticsTag = "runtime_dep"
+	SemanticsHardDep     SemanticsTag = "hard_dep"
+	SemanticsRuntimeDep  SemanticsTag = "runtime_dep"
 	SemanticsAggregation SemanticsTag = "aggregation"
-	SemanticsRedundancy SemanticsTag = "redundancy"
+	SemanticsRedundancy  SemanticsTag = "redundancy"
 	SemanticsObservation SemanticsTag = "observation"
-	SemanticsTraffic    SemanticsTag = "traffic"
-	SemanticsAnnotation SemanticsTag = "annotation"
+	SemanticsTraffic     SemanticsTag = "traffic"
+	SemanticsAnnotation  SemanticsTag = "annotation"
 )
 
 // KnownSemanticsTags is the closed set custom RelationType rows must
@@ -229,8 +231,8 @@ func BuiltinNodeTypes() []NodeType {
 // declare the three semantic fields so the reasoning layer keeps
 // working without per-type code.
 type RelationType struct {
-	Name              string `gorm:"size:64;primaryKey;column:name"`
-	DisplayName       string `gorm:"size:128;not null;default:''"`
+	Name        string `gorm:"size:64;primaryKey;column:name"`
+	DisplayName string `gorm:"size:128;not null;default:''"`
 	// DisplayNameEN — optional English overlay (locale=en-US). Empty
 	// falls back to DisplayName. Mirrors NodeType.DisplayNameEN.
 	DisplayNameEN     string `gorm:"size:128;not null;default:'';column:display_name_en"`

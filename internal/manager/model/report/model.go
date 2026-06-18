@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/plugin/soft_delete"
 )
 
 // Kind enumerates the schedule cadence presets. daily/weekly/monthly
@@ -143,15 +144,16 @@ type Report struct {
 	WorkerID         *string    `gorm:"column:worker_id;size:64"`              // cancel / re-attach on restart
 
 	// Share: short token, external read-only, 30-day TTL
-	ShareToken     *string    `gorm:"column:share_token;size:32;uniqueIndex:idx_report_share"`
+	ShareToken     *string    `gorm:"column:share_token;size:32;uniqueIndex:idx_report_share,priority:1"`
 	ShareExpiresAt *time.Time `gorm:"column:share_expires_at"`
 
 	// Delivery results: [{channel_id, channel_type, status, sent_at, error, fallback_used}]
 	DeliveryJSON string `gorm:"column:delivery_json;type:text;not null"`
 
-	CreatedAt time.Time      `gorm:"column:created_at;autoCreateTime"`
-	UpdatedAt time.Time      `gorm:"column:updated_at;autoUpdateTime"`
-	DeletedAt gorm.DeletedAt `gorm:"column:deleted_at;index"`
+	CreatedAt    time.Time             `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt    time.Time             `gorm:"column:updated_at;autoUpdateTime"`
+	DeletedAt    *time.Time            `gorm:"column:deleted_at;index"`
+	DeleteMarker soft_delete.DeletedAt `gorm:"column:delete_marker;not null;default:0;softDelete:milli,DeletedAtField:DeletedAt;uniqueIndex:uniq_report_sched_period,priority:3;uniqueIndex:idx_report_share,priority:2"`
 }
 
 func (Report) TableName() string { return "reports" }
