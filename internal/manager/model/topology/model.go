@@ -212,7 +212,7 @@ func BuiltinNodeTypes() []NodeType {
 			Tier:          4,
 			Description:   "物理位置（机房 / 机架 / 可用区）— 故障域 / blast-radius 计算的物理边界。",
 		},
-t	{
+	{
 			Name:          string(NodeTypeDB),
 			DisplayName:   "数据库",
 			DisplayNameEN: "Database",
