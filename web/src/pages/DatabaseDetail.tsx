@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { ArrowLeft, Database, Clock, Activity, Server, BarChart3, MessageSquare, AlertTriangle, Search, ChevronDown, ChevronUp, Eye, Terminal, AlertCircle } from 'lucide-react';
 import { StatusPill } from '@/components/StatusPill';
 import { Sparkline } from '@/components/Sparkline';
+import { Card, EmptyState } from '@/components/ui';
 import { relativeTime, formatNumber } from '@/lib/format';
 import { cn } from '@/lib/cn';
 import { useI18n } from '@/i18n/locale';
@@ -14,12 +15,9 @@ const DB_ICONS: Record<string, string> = {
   mysql: '🐬', postgresql: '🐘', redis: '🔴', mongodb: '🍃', oracle: '🟢', selectdb: '📊',
 };
 
-// Per-DB-type PromQL metric definitions for the monitoring dashboard.
-// Each metric has a label, a PromQL expression ({{instance}} is replaced
-// with the target's db_type label filter), and a unit.
 interface MetricDef {
   label: string;
-  expr: string;          // PromQL, with {{db_type}} placeholder
+  expr: string;
   unit: string;
   color: string;
 }
@@ -29,7 +27,7 @@ const DB_METRICS: Record<string, MetricDef[]> = {
     { label: '连接数', expr: 'sum(mysql_global_status_threads_connected{db_type="{{db_type}}"})', unit: 'conns', color: '#60a5fa' },
     { label: 'QPS', expr: 'rate(mysql_global_status_questions{db_type="{{db_type}}"}[5m])', unit: 'q/s', color: '#34d399' },
     { label: '慢查询', expr: 'rate(mysql_global_status_slow_queries{db_type="{{db_type}}"}[5m])', unit: 'q/s', color: '#f59e0b' },
-    { label: 'InnoDB 缓冲命中率', expr: '(1 - (mysql_global_status_innodb_buffer_pool_reads{db_type="{{db_type}}"}) / (mysql_global_status_innodb_buffer_pool_read_requests{db_type="{{db_type}}"})) * 100', unit: '%', color: '#a78bfa' },
+    { label: 'InnoDB 缓冲命中率', expr: '(1 - (mysql_global_status_innodb_buffer_pool_reads{db_type="{{db_type}}"}) / (mysql_global_status_innodb_buffer_pool_read_requests{db_type="{{db_type}}"}) ) * 100', unit: '%', color: '#a78bfa' },
     { label: '复制延迟', expr: 'mysql_slave_status_seconds_behind_master{db_type="{{db_type}}"}>0', unit: 's', color: '#f87171' },
   ],
   postgresql: [
@@ -97,9 +95,8 @@ export default function DatabaseDetailPage() {
 
   useEffect(() => { void loadInst(); }, [loadInst]);
 
-  // Poll prometheus metrics
   const now = useMemo(() => Date.now(), []);
-  const from = new Date(now - 3600000).toISOString(); // last 1h
+  const from = new Date(now - 3600000).toISOString();
   const to = new Date(now).toISOString();
 
   const refreshMetrics = useCallback(async () => {
@@ -131,59 +128,68 @@ export default function DatabaseDetailPage() {
   }, [inst, from, to]);
 
   useEffect(() => { void refreshMetrics(); }, [refreshMetrics]);
-
-  // Auto-refresh every 30s
   usePoll(refreshMetrics, 30000, !!inst?.id);
 
   if (loading) {
     return (
-      <div className="flex h-full items-center justify-center text-zinc-500">
-        {tr('加载中...', 'Loading...')}
-      </div>
+      <main className="anim-fade flex flex-1 flex-col overflow-hidden">
+        <div className="flex h-40 items-center justify-center text-sm text-zinc-500">
+          {tr('加载中...', 'Loading...')}
+        </div>
+      </main>
     );
   }
 
   if (error || !inst) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 text-zinc-500">
-        <p className="text-red-400">{error ?? tr('实例未找到', 'Instance not found')}</p>
-        <button onClick={() => navigate('/databases')}
-          className="text-sm text-indigo-400 hover:text-indigo-300">
-          {tr('返回列表', 'Back to list')}
-        </button>
-      </div>
+      <main className="anim-fade flex flex-1 flex-col overflow-hidden">
+        <div className="flex h-full flex-col items-center justify-center gap-3">
+          <EmptyState
+            icon={Database}
+            title={error ?? tr('实例未找到', 'Instance not found')}
+            action={
+              <button
+                onClick={() => navigate('/databases')}
+                className="rounded-md bg-accent px-2.5 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent/90"
+              >
+                {tr('返回列表', 'Back to list')}
+              </button>
+            }
+          />
+        </div>
+      </main>
     );
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <main className="anim-fade flex flex-1 flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex items-center gap-3 border-b border-zinc-800 px-6 py-4">
-        <button onClick={() => navigate('/databases')}
-          className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200">
+      <header className="app-header flex items-center gap-3 border-b border-zinc-800/60 px-6 py-4">
+        <button
+          onClick={() => navigate('/databases')}
+          className="rounded-md p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+        >
           <ArrowLeft size={18} />
         </button>
         <span className="text-xl">{DB_ICONS[inst.db_type] ?? '🗄️'}</span>
-        <div>
-          <h1 className="text-lg font-semibold text-zinc-100">{inst.name}</h1>
-          <p className="text-xs text-zinc-500">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-base font-semibold text-zinc-100">{inst.name}</h1>
+          <p className="mt-0.5 text-xs text-zinc-500">
             {DB_TYPE_LABELS[inst.db_type as DBType] ?? inst.db_type} · {inst.host}:{inst.port}
             {inst.version ? ` · v${inst.version}` : ''}
           </p>
         </div>
-        <div className="ml-auto flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-3">
           <StatusPill status={inst.status} />
-          <span className="text-xs text-zinc-500">
-            Edge #{inst.edge_id}
-          </span>
+          <span className="text-xs text-zinc-500">Edge #{inst.edge_id}</span>
         </div>
-      </div>
+      </header>
 
       {/* Content */}
-      <div className="flex-1 overflow-auto p-6">
+      <div className="flex-1 overflow-y-auto px-6 py-6">
         {/* Overview cards */}
         <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
+          <Card compact as="div">
             <div className="flex items-center gap-2 text-xs text-zinc-500">
               <Activity size={14} />
               {tr('状态', 'Status')}
@@ -193,8 +199,8 @@ export default function DatabaseDetailPage() {
                inst.status === 'offline' ? tr('离线', 'Offline') :
                tr('未知', 'Unknown')}
             </p>
-          </div>
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
+          </Card>
+          <Card compact as="div">
             <div className="flex items-center gap-2 text-xs text-zinc-500">
               <Clock size={14} />
               {tr('创建时间', 'Created')}
@@ -202,8 +208,8 @@ export default function DatabaseDetailPage() {
             <p className="mt-1 text-sm font-medium text-zinc-200">
               {inst.created_at ? relativeTime(inst.created_at) : '-'}
             </p>
-          </div>
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
+          </Card>
+          <Card compact as="div">
             <div className="flex items-center gap-2 text-xs text-zinc-500">
               <Server size={14} />
               {tr('类型', 'Type')}
@@ -211,8 +217,8 @@ export default function DatabaseDetailPage() {
             <p className="mt-1 text-sm font-medium text-zinc-200">
               {DB_TYPE_LABELS[inst.db_type as DBType] ?? inst.db_type}
             </p>
-          </div>
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
+          </Card>
+          <Card compact as="div">
             <div className="flex items-center gap-2 text-xs text-zinc-500">
               <Database size={14} />
               {tr('版本', 'Version')}
@@ -220,15 +226,15 @@ export default function DatabaseDetailPage() {
             <p className="mt-1 text-sm font-medium text-zinc-200">
               {inst.version || '-'}
             </p>
-          </div>
+          </Card>
         </div>
 
         {/* Monitoring charts */}
         <h2 className="mb-3 flex items-center gap-2 text-sm font-medium text-zinc-300">
-          <BarChart3 size={16} className="text-indigo-400" />
+          <BarChart3 size={16} />
           {tr('监控指标', 'Monitoring Metrics')}
         </h2>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="mb-6 grid gap-4 sm:grid-cols-2">
           {(DB_METRICS[inst.db_type] ?? []).map((def) => {
             const data = promData[def.label];
             const chartData = data?.matrix?.[0]?.values?.map(([ts, v]) => ({
@@ -237,8 +243,7 @@ export default function DatabaseDetailPage() {
             })) ?? [];
 
             return (
-              <div key={def.label}
-                className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
+              <Card key={def.label} compact as="div">
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-xs font-medium text-zinc-400">{def.label}</span>
                   <span className="text-xs text-zinc-500">{def.unit}</span>
@@ -259,50 +264,34 @@ export default function DatabaseDetailPage() {
                     {tr('当前', 'Current')}: {metrics.find((m) => m.label === def.label)?.value} {def.unit}
                   </p>
                 )}
-              </div>
+              </Card>
             );
           })}
         </div>
 
-        {/* If no metrics defined for this DB type */}
+        {/* No metrics placeholder */}
         {(DB_METRICS[inst.db_type] ?? []).length === 0 && (
-          <div className="flex items-center justify-center py-12 text-xs text-zinc-500">
+          <div className="mb-6 flex items-center justify-center py-12 text-xs text-zinc-500">
             {tr('该数据库类型暂未定义监控指标', 'No monitoring metrics defined for this database type')}
           </div>
         )}
 
         {/* Slow Query Analysis */}
-        <h2 className="mb-3 mt-8 flex items-center gap-2 text-sm font-medium text-zinc-300">
+        <h2 className="mb-3 flex items-center gap-2 text-sm font-medium text-zinc-300">
           <AlertTriangle size={16} className="text-amber-400" />
           {tr('慢查询分析', 'Slow Query Analysis')}
         </h2>
 
-        <SlowQueryPanel inst={inst} tr={tr} />
+        <SlowQueryPanel inst={inst} />
       </div>
-    </div>
+    </main>
   );
-}
-
-function dbDefaultPort(dbType: string): number {
-  switch (dbType) {
-    case 'mysql': return 3306;
-    case 'postgresql': return 5432;
-    case 'redis': return 6379;
-    case 'mongodb': return 27017;
-    case 'oracle': return 1521;
-    case 'selectdb': return 9030;
-    default: return 3306;
-  }
 }
 
 // ─── Slow Query Panel ─────────────────────────────────────────────────────
 
-interface SlowQueryPanelProps {
-  inst: DatabaseInstance;
-  tr: (zh: string, en: string) => string;
-}
-
-function SlowQueryPanel({ inst, tr }: SlowQueryPanelProps) {
+function SlowQueryPanel({ inst }: { inst: DatabaseInstance }) {
+  const { tr } = useI18n();
   const [phase, setPhase] = useState<'connect' | 'loading' | 'results' | 'error'>('connect');
   const [sqUser, setSqUser] = useState('');
   const [sqPass, setSqPass] = useState('');
@@ -371,10 +360,10 @@ function SlowQueryPanel({ inst, tr }: SlowQueryPanelProps) {
   const supportPerfSchema = inst.db_type === 'mysql' || inst.db_type === 'postgresql';
 
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900/40">
+    <Card as="div" className="not-prose">
       {/* Connection form */}
       {phase === 'connect' && (
-        <div className="p-4">
+        <div>
           <div className="mb-3 flex items-start justify-between">
             <div>
               <p className="mb-1 text-sm text-zinc-300">
@@ -392,7 +381,7 @@ function SlowQueryPanel({ inst, tr }: SlowQueryPanelProps) {
                 `数据库类型 ${DB_TYPE_LABELS[inst.db_type as DBType] ?? inst.db_type}。` +
                 `请先查看慢查询指标趋势，然后连接数据库获取 TOP SQL 并分析根因。`
               )}`}
-              className="flex items-center gap-1 rounded-lg bg-indigo-600/20 px-2.5 py-1.5 text-xs text-indigo-300 hover:bg-indigo-600/30 shrink-0"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-accent px-2.5 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent/90"
             >
               <MessageSquare size={12} />
               {tr('AI 分析', 'AI Analysis')}
@@ -402,7 +391,7 @@ function SlowQueryPanel({ inst, tr }: SlowQueryPanelProps) {
             <div className="min-w-[140px] flex-1">
               <label className="mb-1 block text-xs text-zinc-500">{tr('用户名', 'Username')}</label>
               <input
-                className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-100 outline-none focus:border-indigo-500"
+                className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
                 value={sqUser}
                 onChange={(e) => setSqUser(e.target.value)}
                 placeholder="monitor"
@@ -412,7 +401,7 @@ function SlowQueryPanel({ inst, tr }: SlowQueryPanelProps) {
               <label className="mb-1 block text-xs text-zinc-500">{tr('密码', 'Password')}</label>
               <input
                 type="password"
-                className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-100 outline-none focus:border-indigo-500"
+                className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
                 value={sqPass}
                 onChange={(e) => setSqPass(e.target.value)}
                 placeholder="••••••••"
@@ -421,7 +410,7 @@ function SlowQueryPanel({ inst, tr }: SlowQueryPanelProps) {
             <div className="w-36">
               <label className="mb-1 block text-xs text-zinc-500">{tr('数据库(可选)', 'Database (opt)')}</label>
               <input
-                className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-100 outline-none focus:border-indigo-500"
+                className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
                 value={sqDb}
                 onChange={(e) => setSqDb(e.target.value)}
                 placeholder={tr('留空自动', 'Auto')}
@@ -430,7 +419,7 @@ function SlowQueryPanel({ inst, tr }: SlowQueryPanelProps) {
             <div className="w-28">
               <label className="mb-1 block text-xs text-zinc-500">{tr('最慢阈值', 'Min duration')}</label>
               <select
-                className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-100 outline-none focus:border-indigo-500"
+                className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
                 value={sqMinDuration}
                 onChange={(e) => setSqMinDuration(Number(e.target.value))}
               >
@@ -445,9 +434,9 @@ function SlowQueryPanel({ inst, tr }: SlowQueryPanelProps) {
             <button
               onClick={runAnalysis}
               disabled={!sqUser || !sqPass}
-              className="flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-1.5 text-sm text-white hover:bg-amber-500 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-md bg-amber-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-amber-500 disabled:opacity-50"
             >
-              <Search size={14} />
+              <Search size={12} />
               {tr('分析慢查询', 'Analyze')}
             </button>
           </div>
@@ -466,7 +455,7 @@ function SlowQueryPanel({ inst, tr }: SlowQueryPanelProps) {
 
       {/* Error */}
       {phase === 'error' && (
-        <div className="p-4">
+        <div>
           <div className="mb-3 flex items-center gap-2 text-amber-400">
             <AlertCircle size={14} />
             <span className="text-sm font-medium">{tr('慢查询分析失败', 'Slow query analysis failed')}</span>
@@ -477,7 +466,7 @@ function SlowQueryPanel({ inst, tr }: SlowQueryPanelProps) {
           <div className="flex gap-2">
             <button
               onClick={() => setPhase('connect')}
-              className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+              className="rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
             >
               {tr('返回重试', 'Back & Retry')}
             </button>
@@ -487,7 +476,7 @@ function SlowQueryPanel({ inst, tr }: SlowQueryPanelProps) {
                 `数据库类型 ${DB_TYPE_LABELS[inst.db_type as DBType] ?? inst.db_type}。` +
                 `失败原因：${sqError}。请尝试连接数据库获取 TOP SQL 并分析根因。`
               )}`}
-              className="flex items-center gap-1 rounded-lg bg-indigo-600/20 px-3 py-1.5 text-xs text-indigo-300 hover:bg-indigo-600/30"
+              className="inline-flex items-center gap-1.5 rounded-md bg-accent px-2.5 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent/90"
             >
               <MessageSquare size={12} />
               {tr('AI 分析', 'AI Analysis')}
@@ -500,7 +489,7 @@ function SlowQueryPanel({ inst, tr }: SlowQueryPanelProps) {
       {phase === 'results' && (
         <div>
           {/* Toolbar */}
-          <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-2">
+          <div className="-mx-4 -mt-4 mb-2 flex items-center justify-between border-b border-zinc-800/60 px-4 py-2">
             <div className="flex items-center gap-2 text-xs text-zinc-500">
               <Terminal size={12} />
               <span>
@@ -522,13 +511,13 @@ function SlowQueryPanel({ inst, tr }: SlowQueryPanelProps) {
             <div className="flex gap-2">
               <button
                 onClick={() => setPhase('connect')}
-                className="rounded-lg border border-zinc-700 px-2 py-1 text-xs text-zinc-400 hover:bg-zinc-800"
+                className="rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-400 hover:bg-zinc-800"
               >
                 {tr('更换账号', 'Change Account')}
               </button>
               <button
                 onClick={runAnalysis}
-                className="flex items-center gap-1 rounded-lg bg-amber-600/20 px-2 py-1 text-xs text-amber-300 hover:bg-amber-600/30"
+                className="inline-flex items-center gap-1 rounded-md bg-amber-600/20 px-2 py-1 text-xs text-amber-300 hover:bg-amber-600/30"
               >
                 <Search size={12} />
                 {tr('刷新', 'Refresh')}
@@ -548,10 +537,10 @@ function SlowQueryPanel({ inst, tr }: SlowQueryPanelProps) {
 
           {/* Table */}
           {sortedQueries.length > 0 && (
-            <div className="overflow-x-auto">
+            <div className="-mx-4 overflow-x-auto px-4">
               <table className="w-full text-left text-xs">
                 <thead>
-                  <tr className="border-b border-zinc-800 text-zinc-500">
+                  <tr className="border-b border-zinc-800/60 text-zinc-500">
                     <th className="px-4 py-2 font-medium">{tr('SQL', 'SQL')}</th>
                     <th
                       className="cursor-pointer px-4 py-2 font-medium hover:text-zinc-300"
@@ -619,7 +608,7 @@ function SlowQueryPanel({ inst, tr }: SlowQueryPanelProps) {
                           <td className="px-4 py-2.5">
                             <button
                               onClick={(e) => { e.stopPropagation(); setExpandedRow(isExpanded ? null : i); }}
-                              className="flex items-center gap-1 text-indigo-400 hover:text-indigo-300"
+                              className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
                             >
                               <Eye size={12} />
                               {isExpanded ? tr('收起', 'Hide') : tr('详情', 'Detail')}
@@ -708,6 +697,7 @@ function SlowQueryPanel({ inst, tr }: SlowQueryPanelProps) {
           )}
         </div>
       )}
-    </div>
+    </Card>
   );
 }
+

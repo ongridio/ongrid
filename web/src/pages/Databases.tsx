@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import { Plus, Database, Server, AlertTriangle, Trash2 } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
+import { Plus, Database, Server, AlertTriangle, Trash2, Search } from 'lucide-react';
 import { StatusPill } from '@/components/StatusPill';
 import { Modal } from '@/components/Modal';
+import { Button, Card, EmptyState, PageHeader } from '@/components/ui';
 import { relativeTime } from '@/lib/format';
 import { cn } from '@/lib/cn';
 import { useI18n } from '@/i18n/locale';
@@ -49,6 +50,7 @@ export default function DatabasesPage() {
   const [instances, setInstances] = useState<DatabaseInstance[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DatabaseInstance | null>(null);
   const [form, setForm] = useState<CreateDBInput>({
@@ -78,6 +80,17 @@ export default function DatabasesPage() {
 
   useEffect(() => { void refresh(); }, [refresh]);
 
+  const filtered = useMemo(() => {
+    if (!query.trim()) return instances;
+    const q = query.trim().toLowerCase();
+    return instances.filter(
+      (d) =>
+        d.name.toLowerCase().includes(q) ||
+        d.host.toLowerCase().includes(q) ||
+        d.db_type.toLowerCase().includes(q),
+    );
+  }, [instances, query]);
+
   const handleCreate = async () => {
     try {
       const inst = await createDatabase(form);
@@ -106,84 +119,112 @@ export default function DatabasesPage() {
   ];
 
   return (
-    <div className="flex h-full flex-col">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-zinc-800 px-6 py-4">
-        <div className="flex items-center gap-3">
-          <Database className="h-6 w-6 text-indigo-400" />
-          <h1 className="text-lg font-semibold text-zinc-100">
-            {tr('数据库实例', 'Database Instances')}
-          </h1>
-        </div>
-        {canMutate && (
-          <button
-            onClick={() => setCreateOpen(true)}
-            className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500"
-          >
-            <Plus size={16} />
-            {tr('添加实例', 'Add Instance')}
-          </button>
-        )}
-      </div>
-
-      {/* Type filter tabs */}
-      <div className="flex gap-1 border-b border-zinc-800 px-6 py-2">
-        {dbTypeOptions.map((opt) => {
-          const isActive = filterType === opt.value;
-          const href = opt.value ? `?db_type=${opt.value}` : '/databases';
-          return (
-            <Link
-              key={opt.value}
-              to={href}
-              className={cn(
-                'rounded-md px-3 py-1 text-xs font-medium transition-colors',
-                isActive
-                  ? 'bg-indigo-600/20 text-indigo-300'
-                  : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200',
-              )}
-            >
-              {opt.label}
-            </Link>
-          );
-        })}
-      </div>
-
-      {/* Content */}
-      <div className="flex-1 overflow-auto p-6">
-        {loading ? (
-          <div className="flex items-center justify-center py-20 text-zinc-500">
-            {tr('加载中...', 'Loading...')}
+    <main className="anim-fade flex flex-1 flex-col overflow-hidden">
+      <PageHeader
+        title={tr('数据库实例', 'Database Instances')}
+        subtitle={tr(`${filtered.length} 个实例`, `${filtered.length} instance(s)`)}
+        actions={
+          <>
+            <Button variant="ghost" onClick={() => void refresh()}>
+              {tr('刷新', 'Refresh')}
+            </Button>
+            {canMutate && (
+              <Button variant="primary" onClick={() => setCreateOpen(true)}>
+                <Plus size={12} /> {tr('添加实例', 'Add Instance')}
+              </Button>
+            )}
+          </>
+        }
+        extra={
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="relative block w-64">
+              <span className="sr-only">{tr('搜索', 'Search')}</span>
+              <Search size={12} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
+              <input
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={tr('搜索名称 / 主机 / 类型', 'Search name / host / type')}
+                className="w-full rounded-md border border-zinc-800 bg-zinc-950/40 py-1.5 pl-8 pr-2 text-xs text-zinc-200 placeholder:text-zinc-500 focus:border-zinc-700 focus:outline-none"
+              />
+            </label>
+            <div className="flex flex-wrap gap-1">
+              {dbTypeOptions.map((opt) => {
+                const isActive = filterType === opt.value;
+                const href = opt.value ? `?db_type=${opt.value}` : '/databases';
+                return (
+                  <a
+                    key={opt.value}
+                    href={href}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      window.history.pushState(null, '', href);
+                      // Force re-render — Location-based filterType will pick up the new search
+                      setInstances((prev) => [...prev]);
+                    }}
+                    className={cn(
+                      'rounded-md border px-2 py-0.5 text-[11px] transition-colors',
+                      isActive
+                        ? 'border-zinc-600 bg-zinc-800 text-zinc-100'
+                        : 'border-zinc-800 bg-zinc-900/50 text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200',
+                    )}
+                  >
+                    {opt.label}
+                  </a>
+                );
+              })}
+            </div>
           </div>
-        ) : error ? (
-          <div className="flex items-center justify-center gap-2 py-20 text-red-400">
-            <AlertTriangle size={16} />
+        }
+      />
+
+      <div className="flex-1 overflow-y-auto px-6 py-6">
+        {error && (
+          <div
+            role="alert"
+            className="mb-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-300"
+          >
             {error}
           </div>
-        ) : instances.length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-3 py-20 text-zinc-500">
-            <Database size={40} className="text-zinc-600" />
-            <p>
-              {filterType
-                ? tr('没有匹配的数据库实例', 'No matching database instances')
-                : tr('还没有数据库实例', 'No database instances yet')}
-            </p>
-            {canMutate && !filterType && (
-              <button
-                onClick={() => setCreateOpen(true)}
-                className="text-sm text-indigo-400 hover:text-indigo-300"
-              >
-                {tr('添加第一个实例', 'Add your first instance')}
-              </button>
-            )}
+        )}
+
+        {loading ? (
+          <div className="flex h-40 items-center justify-center text-sm text-zinc-500">
+            {tr('加载中...', 'Loading...')}
           </div>
+        ) : filtered.length === 0 ? (
+          <EmptyState
+            icon={Database}
+            title={
+              query || filterType
+                ? tr('没有匹配的数据库实例', 'No matching database instances')
+                : tr('还没有数据库实例', 'No database instances yet')
+            }
+            hint={
+              query || filterType
+                ? tr('换个关键字或清除筛选条件', 'Try a different keyword or clear filters')
+                : tr('添加第一个实例后它会出现在这里', 'Add your first instance and it will appear here')
+            }
+            action={
+              canMutate && !query && !filterType ? (
+                <Button variant="primary" onClick={() => setCreateOpen(true)}>
+                  <Plus size={12} /> {tr('添加第一个实例', 'Add your first instance')}
+                </Button>
+              ) : undefined
+            }
+          />
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {instances.map((inst) => (
-              <div
-                key={inst.id}
-                className="group relative rounded-lg border border-zinc-800 bg-zinc-900/40 transition hover:border-zinc-700 hover:bg-zinc-800/60"
-              >
-                <Link to={`/databases/${inst.id}`} className="block p-4">
+            {filtered.map((inst) => (
+              <Card key={inst.id} interactive as="div">
+                <a
+                  href={`/databases/${inst.id}`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    window.location.href = `/databases/${inst.id}`;
+                  }}
+                  className="block"
+                >
                   <div className="flex items-start justify-between">
                     <div className="flex items-center gap-2">
                       <span className="text-xl">{DB_ICONS[inst.db_type] ?? '🗄️'}</span>
@@ -193,9 +234,7 @@ export default function DatabasesPage() {
                     </div>
                     <StatusPill status={inst.status} />
                   </div>
-                  <h3 className="mt-2 text-sm font-medium text-zinc-200 group-hover:text-zinc-100">
-                    {inst.name}
-                  </h3>
+                  <h3 className="mt-2 text-sm font-medium text-zinc-200">{inst.name}</h3>
                   <p className="mt-1 text-xs text-zinc-500">
                     {inst.host}:{inst.port}
                     {inst.version ? ` · v${inst.version}` : ''}
@@ -211,101 +250,121 @@ export default function DatabasesPage() {
                       </span>
                     )}
                   </div>
-                </Link>
+                </a>
                 {canMutate && (
                   <button
-                    onClick={(e) => { e.stopPropagation(); setDeleteTarget(inst); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      setDeleteTarget(inst);
+                    }}
                     className="absolute right-2 top-2 hidden rounded-md p-1 text-zinc-500 hover:bg-zinc-700 hover:text-red-400 group-hover:block"
                     title={tr('删除', 'Delete')}
                   >
                     <Trash2 size={14} />
                   </button>
                 )}
-              </div>
+              </Card>
             ))}
           </div>
         )}
       </div>
 
       {/* Create Modal */}
-      {createOpen && (
-        <Modal open={createOpen} onClose={() => setCreateOpen(false)}>
-          <div className="w-full max-w-md space-y-4 p-6">
-            <h2 className="text-lg font-semibold text-zinc-100">
-              {tr('添加数据库实例', 'Add Database Instance')}
-            </h2>
-            <div className="space-y-3">
-              <div>
-                <label className="mb-1 block text-xs text-zinc-400">{tr('名称', 'Name')}</label>
-                <input className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
-                  value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs text-zinc-400">{tr('类型', 'Type')}</label>
-                <select className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
-                  value={form.db_type} onChange={(e) => setForm((f) => ({ ...f, db_type: e.target.value as DBType, port: dbDefaultPort(e.target.value) }))}>
-                  {DB_TYPES.map((t) => (
-                    <option key={t} value={t}>{DB_TYPE_LABELS[t]}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex gap-3">
-                <div className="flex-1">
-                  <label className="mb-1 block text-xs text-zinc-400">{tr('主机', 'Host')}</label>
-                  <input className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
-                    value={form.host} onChange={(e) => setForm((f) => ({ ...f, host: e.target.value }))} />
-                </div>
-                <div className="w-24">
-                  <label className="mb-1 block text-xs text-zinc-400">{tr('端口', 'Port')}</label>
-                  <input type="number" className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
-                    value={form.port} onChange={(e) => setForm((f) => ({ ...f, port: parseInt(e.target.value) || 0 }))} />
-                </div>
-              </div>
-              <div>
-                <label className="mb-1 block text-xs text-zinc-400">{tr('Edge ID', 'Edge ID')}</label>
-                <input type="number" className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
-                  value={form.edge_id} onChange={(e) => setForm((f) => ({ ...f, edge_id: parseInt(e.target.value) || 0 }))} />
-              </div>
+      <Modal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        title={tr('添加数据库实例', 'Add Database Instance')}
+        size="md"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setCreateOpen(false)}>
+              {tr('取消', 'Cancel')}
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleCreate}
+              disabled={!form.name || !form.host}
+            >
+              {tr('创建', 'Create')}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <div>
+            <label className="mb-1 block text-xs text-zinc-500">{tr('名称', 'Name')}</label>
+            <input
+              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              value={form.name}
+              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-zinc-500">{tr('类型', 'Type')}</label>
+            <select
+              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              value={form.db_type}
+              onChange={(e) => setForm((f) => ({ ...f, db_type: e.target.value as DBType, port: dbDefaultPort(e.target.value) }))}
+            >
+              {DB_TYPES.map((t) => (
+                <option key={t} value={t}>{DB_TYPE_LABELS[t]}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="mb-1 block text-xs text-zinc-500">{tr('主机', 'Host')}</label>
+              <input
+                className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                value={form.host}
+                onChange={(e) => setForm((f) => ({ ...f, host: e.target.value }))}
+              />
             </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <button onClick={() => setCreateOpen(false)}
-                className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800">
-                {tr('取消', 'Cancel')}
-              </button>
-              <button onClick={handleCreate}
-                disabled={!form.name || !form.host}
-                className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm text-white hover:bg-indigo-500 disabled:opacity-50">
-                {tr('创建', 'Create')}
-              </button>
+            <div className="w-24">
+              <label className="mb-1 block text-xs text-zinc-500">{tr('端口', 'Port')}</label>
+              <input
+                type="number"
+                className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                value={form.port}
+                onChange={(e) => setForm((f) => ({ ...f, port: parseInt(e.target.value) || 0 }))}
+              />
             </div>
           </div>
-        </Modal>
-      )}
+          <div>
+            <label className="mb-1 block text-xs text-zinc-500">{tr('Edge ID', 'Edge ID')}</label>
+            <input
+              type="number"
+              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              value={form.edge_id}
+              onChange={(e) => setForm((f) => ({ ...f, edge_id: parseInt(e.target.value) || 0 }))}
+            />
+          </div>
+        </div>
+      </Modal>
 
       {/* Delete confirm */}
-      {deleteTarget && (
-        <Modal open={!!deleteTarget} onClose={() => setDeleteTarget(null)}>
-          <div className="w-full max-w-sm space-y-4 p-6">
-            <h2 className="text-lg font-semibold text-zinc-100">
-              {tr('确认删除', 'Confirm Delete')}
-            </h2>
-            <p className="text-sm text-zinc-400">
-              {tr('确定要删除', 'Are you sure you want to delete')} <strong>{deleteTarget.name}</strong>?
-            </p>
-            <div className="flex justify-end gap-2">
-              <button onClick={() => setDeleteTarget(null)}
-                className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800">
-                {tr('取消', 'Cancel')}
-              </button>
-              <button onClick={handleDelete}
-                className="rounded-lg bg-red-600 px-3 py-1.5 text-sm text-white hover:bg-red-500">
-                {tr('删除', 'Delete')}
-              </button>
-            </div>
-          </div>
-        </Modal>
-      )}
-    </div>
+      <Modal
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        title={tr('确认删除', 'Confirm Delete')}
+        size="sm"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setDeleteTarget(null)}>
+              {tr('取消', 'Cancel')}
+            </Button>
+            <Button variant="danger" onClick={handleDelete}>
+              {tr('删除', 'Delete')}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-zinc-300">
+          {tr('确定要删除', 'Are you sure you want to delete')} <strong>{deleteTarget?.name}</strong>?
+        </p>
+      </Modal>
+    </main>
   );
 }
 
