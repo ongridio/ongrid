@@ -531,9 +531,10 @@ func parseSlowQueryRows(dbType string, raw json.RawMessage, limit int, hasPerfSc
 
 	out := make([]slowQueryRow, 0, min(len(wrapper.Rows), limit))
 	for _, row := range wrapper.Rows {
+		sqlText := stringOrZero(row["sql_text"])
 		sr := slowQueryRow{
-			SQLText:      stringOrZero(row["sql_text"]),
-			SQLTruncated: len(sr.SQLText) > 2000,
+			SQLText:      sqlText,
+			SQLTruncated: len(sqlText) > 2000,
 			ExecCount:    int64OrZero(row["exec_count"]),
 		}
 		if sr.SQLTruncated {
