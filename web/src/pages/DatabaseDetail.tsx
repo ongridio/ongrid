@@ -7,7 +7,7 @@ import { Card, EmptyState } from '@/components/ui';
 import { relativeTime, formatNumber } from '@/lib/format';
 import { cn } from '@/lib/cn';
 import { useI18n } from '@/i18n/locale';
-import { getDatabase, fetchSlowQueries, DB_TYPE_LABELS, type DatabaseInstance, type DBType, type SlowQueryRow, type SlowQueryResponse } from '@/api/databases';
+import { getDatabase, fetchSlowQueries, probeDatabase, DB_TYPE_LABELS, type DatabaseInstance, type DBType, type SlowQueryRow, type SlowQueryResponse } from '@/api/databases';
 import { promQueryRange, type PromRangeResp } from '@/api/edges';
 import { usePoll } from '@/lib/usePoll';
 
@@ -24,39 +24,54 @@ interface MetricDef {
 
 const DB_METRICS: Record<string, MetricDef[]> = {
   mysql: [
-    { label: '连接数', expr: 'sum(mysql_global_status_threads_connected{db_type="{{db_type}}"})', unit: 'conns', color: '#60a5fa' },
-    { label: 'QPS', expr: 'rate(mysql_global_status_questions{db_type="{{db_type}}"}[5m])', unit: 'q/s', color: '#34d399' },
-    { label: '慢查询', expr: 'rate(mysql_global_status_slow_queries{db_type="{{db_type}}"}[5m])', unit: 'q/s', color: '#f59e0b' },
-    { label: 'InnoDB 缓冲命中率', expr: '(1 - (mysql_global_status_innodb_buffer_pool_reads{db_type="{{db_type}}"}) / (mysql_global_status_innodb_buffer_pool_read_requests{db_type="{{db_type}}"}) ) * 100', unit: '%', color: '#a78bfa' },
+    { label: '连接数', expr: 'max(mysql_global_status_threads_connected{db_type="{{db_type}}"})', unit: 'conns', color: '#60a5fa' },
+    { label: 'QPS', expr: 'sum(rate(mysql_global_status_questions{db_type="{{db_type}}"}[5m]))', unit: 'q/s', color: '#34d399' },
+    { label: '慢查询', expr: 'sum(rate(mysql_global_status_slow_queries{db_type="{{db_type}}"}[5m]))', unit: 'q/s', color: '#f59e0b' },
+    { label: 'InnoDB 缓冲命中率', expr: '100 * (1 - sum(rate(mysql_global_status_innodb_buffer_pool_reads{db_type="{{db_type}}"}[5m])) / clamp_min(sum(rate(mysql_global_status_innodb_buffer_pool_read_requests{db_type="{{db_type}}"}[5m])), 1))', unit: '%', color: '#a78bfa' },
     { label: '复制延迟', expr: 'mysql_slave_status_seconds_behind_master{db_type="{{db_type}}"}>0', unit: 's', color: '#f87171' },
+    { label: '磁盘临时表', expr: 'sum(increase(mysql_global_status_created_tmp_disk_tables{db_type="{{db_type}}"}[15m]))', unit: '15m', color: '#f97316' },
+    { label: '连接错误', expr: 'sum(increase(mysql_global_status_connection_errors_total{db_type="{{db_type}}"}[15m]))', unit: '15m', color: '#ef4444' },
+    { label: 'InnoDB 行锁等待', expr: 'max(mysql_global_status_innodb_row_lock_current_waits{db_type="{{db_type}}"})', unit: 'waits', color: '#eab308' },
+    { label: '表锁等待', expr: 'sum(increase(mysql_global_status_table_locks_waited{db_type="{{db_type}}"}[15m]))', unit: '15m', color: '#f59e0b' },
+    { label: '中止连接', expr: 'sum(increase(mysql_global_status_aborted_connects{db_type="{{db_type}}"}[15m]))', unit: '15m', color: '#dc2626' },
+    { label: '打开文件使用率', expr: '100 * max(mysql_global_status_open_files{db_type="{{db_type}}"}) / clamp_min(max(mysql_global_variables_open_files_limit{db_type="{{db_type}}"}), 1)', unit: '%', color: '#8b5cf6' },
+    { label: '网络接收', expr: 'sum(rate(mysql_global_status_bytes_received{db_type="{{db_type}}"}[5m]))', unit: 'B/s', color: '#06b6d4' },
+    { label: '网络发送', expr: 'sum(rate(mysql_global_status_bytes_sent{db_type="{{db_type}}"}[5m]))', unit: 'B/s', color: '#14b8a6' },
   ],
   postgresql: [
     { label: '活跃连接', expr: 'sum(pg_stat_activity_count{db_type="{{db_type}}",state="active"})', unit: 'conns', color: '#60a5fa' },
-    { label: 'QPS', expr: 'rate(pg_stat_database_xact_commit{db_type="{{db_type}}"}[5m])', unit: 'tps', color: '#34d399' },
+    { label: 'TPS', expr: 'sum(rate(pg_stat_database_xact_commit{db_type="{{db_type}}"}[5m]))', unit: 'tps', color: '#34d399' },
+    { label: '缓存命中率', expr: '100 * sum(rate(pg_stat_database_blks_hit{db_type="{{db_type}}"}[5m])) / clamp_min(sum(rate(pg_stat_database_blks_hit{db_type="{{db_type}}"}[5m]) + rate(pg_stat_database_blks_read{db_type="{{db_type}}"}[5m])), 1)', unit: '%', color: '#a78bfa' },
+    { label: '死锁', expr: 'sum(increase(pg_stat_database_deadlocks{db_type="{{db_type}}"}[15m]))', unit: '15m', color: '#ef4444' },
     { label: '复制延迟', expr: 'pg_replication_lag{db_type="{{db_type}}"}>0', unit: 'bytes', color: '#f87171' },
     { label: '长事务', expr: 'pg_stat_activity_max_tx_duration{db_type="{{db_type}}"}>0', unit: 's', color: '#f59e0b' },
+    { label: '临时文件大小', expr: 'sum(increase(pg_stat_database_temp_bytes{db_type="{{db_type}}"}[15m]))', unit: 'B/15m', color: '#f97316' },
   ],
   redis: [
     { label: '内存使用', expr: 'redis_memory_used_bytes{db_type="{{db_type}}"}/1048576', unit: 'MB', color: '#60a5fa' },
-    { label: '连接数', expr: 'redis_connected_clients{db_type="{{db_type}}"}}', unit: 'conns', color: '#34d399' },
-    { label: 'QPS', expr: 'rate(redis_commands_processed_total{db_type="{{db_type}}"}[5m])', unit: 'ops/s', color: '#f59e0b' },
-    { label: '键总数', expr: 'redis_db_keys{db_type="{{db_type}}"}}', unit: 'keys', color: '#a78bfa' },
+    { label: '连接数', expr: 'redis_connected_clients{db_type="{{db_type}}"}', unit: 'conns', color: '#34d399' },
+    { label: 'QPS', expr: 'sum(rate(redis_commands_processed_total{db_type="{{db_type}}"}[5m]))', unit: 'ops/s', color: '#f59e0b' },
+    { label: '键总数', expr: 'redis_db_keys{db_type="{{db_type}}"}', unit: 'keys', color: '#a78bfa' },
+    { label: '命中率', expr: '100 * sum(rate(redis_keyspace_hits_total{db_type="{{db_type}}"}[5m])) / clamp_min(sum(rate(redis_keyspace_hits_total{db_type="{{db_type}}"}[5m]) + rate(redis_keyspace_misses_total{db_type="{{db_type}}"}[5m])), 1)', unit: '%', color: '#a78bfa' },
+    { label: '过期键', expr: 'sum(increase(redis_expired_keys_total{db_type="{{db_type}}"}[15m]))', unit: '15m', color: '#f59e0b' },
   ],
   mongodb: [
-    { label: '连接数', expr: 'mongodb_connections{db_type="{{db_type}}"}}', unit: 'conns', color: '#60a5fa' },
-    { label: 'QPS', expr: 'rate(mongodb_database_operations_total{db_type="{{db_type}}"}[5m])', unit: 'ops/s', color: '#34d399' },
+    { label: '连接数', expr: 'mongodb_connections{db_type="{{db_type}}"}', unit: 'conns', color: '#60a5fa' },
+    { label: 'QPS', expr: 'sum(rate(mongodb_database_operations_total{db_type="{{db_type}}"}[5m]))', unit: 'ops/s', color: '#34d399' },
     { label: '复制延迟', expr: 'mongodb_mongod_repl_set_member_optime_date_lag{db_type="{{db_type}}"}>0', unit: 's', color: '#f87171' },
+    { label: '内存使用', expr: 'mongodb_ss_mem_resident{db_type="{{db_type}}"}/1048576', unit: 'MB', color: '#60a5fa' },
   ],
   oracle: [
-    { label: '活跃会话', expr: 'oracle_session_active_count{db_type="{{db_type}}"}}', unit: 'sessions', color: '#60a5fa' },
-    { label: '表空间使用率', expr: 'oracle_tablespace_used_pct{db_type="{{db_type}}"}}', unit: '%', color: '#f59e0b' },
-    { label: 'QPS', expr: 'rate(oracle_requests_total{db_type="{{db_type}}"}[5m])', unit: 'q/s', color: '#34d399' },
+    { label: '活跃会话', expr: 'oracle_session_active_count{db_type="{{db_type}}"}', unit: 'sessions', color: '#60a5fa' },
+    { label: '表空间使用率', expr: 'oracle_tablespace_used_pct{db_type="{{db_type}}"}', unit: '%', color: '#f59e0b' },
+    { label: 'QPS', expr: 'sum(rate(oracle_requests_total{db_type="{{db_type}}"}[5m]))', unit: 'q/s', color: '#34d399' },
+    { label: '磁盘读', expr: 'sum(rate(oracle_physical_reads_total{db_type="{{db_type}}"}[5m]))', unit: 'r/s', color: '#f97316' },
   ],
   selectdb: [
-    { label: 'QPS', expr: 'rate(doris_fe_query_total{db_type="{{db_type}}"}[5m])', unit: 'q/s', color: '#34d399' },
-    { label: '查询延迟', expr: 'doris_fe_query_latency_ms{db_type="{{db_type}}"}}', unit: 'ms', color: '#f59e0b' },
-    { label: 'BE 节点数', expr: 'doris_be_online{db_type="{{db_type}}"}}', unit: 'nodes', color: '#60a5fa' },
-    { label: '存储使用', expr: 'doris_be_disk_used_pct{db_type="{{db_type}}"}}', unit: '%', color: '#f87171' },
+    { label: 'QPS', expr: 'sum(rate(doris_fe_query_total{db_type="{{db_type}}"}[5m]))', unit: 'q/s', color: '#34d399' },
+    { label: '查询延迟', expr: 'doris_fe_query_latency_ms{db_type="{{db_type}}"}', unit: 'ms', color: '#f59e0b' },
+    { label: 'BE 节点数', expr: 'doris_be_online{db_type="{{db_type}}"}', unit: 'nodes', color: '#60a5fa' },
+    { label: '存储使用', expr: 'doris_be_disk_used_pct{db_type="{{db_type}}"}', unit: '%', color: '#f87171' },
   ],
 };
 
@@ -80,6 +95,13 @@ export default function DatabaseDetailPage() {
   const [metrics, setMetrics] = useState<MetricState[]>([]);
   const [promData, setPromData] = useState<Record<string, PromRangeResp | null>>({});
 
+  // Probe state
+  const [probeOpen, setProbeOpen] = useState(false);
+  const [probeUser, setProbeUser] = useState('');
+  const [probePass, setProbePass] = useState('');
+  const [probing, setProbing] = useState(false);
+  const [probeError, setProbeError] = useState<string | null>(null);
+
   const loadInst = useCallback(async () => {
     if (!id) return;
     try {
@@ -92,6 +114,25 @@ export default function DatabaseDetailPage() {
       setLoading(false);
     }
   }, [id, tr]);
+
+  const runProbe = useCallback(async () => {
+    if (!id || !probeUser) return;
+    setProbing(true);
+    setProbeError(null);
+    try {
+      const resp = await probeDatabase(id, { user: probeUser, password: probePass });
+      if (resp.error) {
+        setProbeError(resp.error);
+      } else if (resp.updated_inst) {
+        setInst(resp.updated_inst);
+        setProbeOpen(false);
+      }
+    } catch (err: any) {
+      setProbeError(err?.message ?? tr('探活失败', 'Probe failed'));
+    } finally {
+      setProbing(false);
+    }
+  }, [id, probeUser, probePass, tr]);
 
   useEffect(() => { void loadInst(); }, [loadInst]);
 
@@ -181,6 +222,59 @@ export default function DatabaseDetailPage() {
         </div>
         <div className="flex shrink-0 items-center gap-3">
           <StatusPill status={inst.status} />
+          <div className="relative">
+            <button
+              onClick={() => { setProbeOpen((v) => !v); setProbeError(null); }}
+              className="inline-flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-400 hover:border-zinc-600 hover:text-zinc-200"
+            >
+              <Activity size={12} />
+              {tr('探活', 'Probe')}
+            </button>
+            {probeOpen && (
+              <div className="absolute right-0 top-full z-50 mt-2 w-64 rounded-lg border border-zinc-700 bg-zinc-900 p-3 shadow-xl">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-xs font-medium text-zinc-300">
+                    {tr('检测连接', 'Check Connection')}
+                  </span>
+                  <button
+                    onClick={() => setProbeOpen(false)}
+                    className="text-zinc-500 hover:text-zinc-300"
+                  >
+                    <span className="text-xs">✕</span>
+                  </button>
+                </div>
+                <div className="mb-2">
+                  <label className="mb-1 block text-[11px] text-zinc-500">{tr('用户名', 'User')}</label>
+                  <input
+                    className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                    value={probeUser}
+                    onChange={(e) => setProbeUser(e.target.value)}
+                    placeholder="root"
+                  />
+                </div>
+                <div className="mb-3">
+                  <label className="mb-1 block text-[11px] text-zinc-500">{tr('密码', 'Password')}</label>
+                  <input
+                    type="password"
+                    className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                    value={probePass}
+                    onChange={(e) => setProbePass(e.target.value)}
+                    placeholder="••••••••"
+                  />
+                </div>
+                {probeError && (
+                  <p className="mb-2 text-[11px] text-amber-400">{probeError}</p>
+                )}
+                <button
+                  onClick={runProbe}
+                  disabled={!probeUser || probing}
+                  className="w-full rounded-md bg-accent px-2.5 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent/90 disabled:opacity-50"
+                >
+                  {probing ? tr('连接中...', 'Connecting...') : tr('检测', 'Probe')}
+                </button>
+              </div>
+            )}
+          </div>
           <span className="text-xs text-zinc-500">Edge #{inst.edge_id}</span>
         </div>
       </header>

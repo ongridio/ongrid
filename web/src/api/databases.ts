@@ -140,3 +140,21 @@ export type SlowQueryResponse = {
 export function fetchSlowQueries(id: string | number, params: SlowQueryParams) {
   return request<SlowQueryResponse>('POST', `/databases/${encodeURIComponent(String(id))}/slow-queries`, params);
 }
+
+// --- Probe (health check + version detection) ---
+
+export type ProbeParams = {
+  user: string;
+  password: string;
+};
+
+export type ProbeResponse = {
+  status: string;
+  version?: string;
+  error?: string;
+  updated_inst?: DatabaseInstance;
+};
+
+export function probeDatabase(id: string | number, params: ProbeParams) {
+  return request<ProbeResponse>('POST', `/databases/${encodeURIComponent(String(id))}/probe`, params);
+}

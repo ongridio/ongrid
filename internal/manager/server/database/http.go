@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -26,6 +27,8 @@ type Service interface {
 	GetByID(ctx context.Context, id uint64) (*model.DatabaseInstance, error)
 	List(ctx context.Context, f biz.ListFilter) ([]*model.DatabaseInstance, error)
 	Update(ctx context.Context, inst *model.DatabaseInstance) error
+	UpdateStatus(ctx context.Context, id uint64, status string) error
+	UpdateVersion(ctx context.Context, id uint64, version string) error
 	Delete(ctx context.Context, id uint64) error
 }
 
@@ -69,6 +72,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Put("/v1/databases/{id}", h.update)
 	r.Delete("/v1/databases/{id}", h.delete)
 	r.Post("/v1/databases/{id}/slow-queries", h.slowQueries)
+	r.Post("/v1/databases/{id}/probe", h.probe)
 }
 
 // --- request / response DTOs ---
@@ -652,4 +656,152 @@ func boolOrZero(v any) bool {
 		return f > 0
 	}
 	return false
+}
+
+// --- probe (health check + version auto-detect) ---
+
+// probeRequest is the JSON body for POST /v1/databases/{id}/probe.
+type probeRequest struct {
+	User     string `json:"user"`
+	Password string `json:"password"`
+}
+
+// probe responds to POST /v1/databases/{id}/probe.
+// It connects to the database via the edge agent, runs SELECT VERSION(),
+// and updates the instance status and version accordingly.
+func (h *Handler) probe(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+
+	var req probeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, errs.ErrInvalid)
+		return
+	}
+	if req.User == "" || req.Password == "" {
+		writeErr(w, errors.New("user and password are required"))
+		return
+	}
+
+	if h.dbQuery == nil {
+		writeErr(w, errors.New("db query executor not configured"))
+		return
+	}
+
+	inst, err := h.svc.GetByID(r.Context(), id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+
+	// Run SELECT VERSION() through the edge agent.
+	rawResult, err := h.dbQuery.ExecuteOnEdge(r.Context(),
+		inst.EdgeID, inst.DBType, inst.Host, inst.Port,
+		req.User, req.Password, "", "SELECT VERSION()", 10, 1,
+	)
+	if err != nil {
+		// Mark offline on connection failure.
+		_ = h.svc.UpdateStatus(r.Context(), id, model.StatusOffline)
+		writeJSON(w, http.StatusOK, probeResponse{
+			Status: model.StatusOffline,
+			Error:  err.Error(),
+		})
+		return
+	}
+
+	// Parse version from the result.
+	version := parseVersionFromResult(rawResult)
+
+	// Update status and version.
+	if version != "" {
+		_ = h.svc.UpdateVersion(r.Context(), id, version)
+	}
+	_ = h.svc.UpdateStatus(r.Context(), id, model.StatusOnline)
+
+	// Re-fetch to return full updated state.
+	updated, err := h.svc.GetByID(r.Context(), id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, probeResponse{
+		Status:      model.StatusOnline,
+		Version:     version,
+		UpdatedInst: toResponse(updated),
+	})
+}
+
+// probeResponse is the JSON response for a database probe.
+type probeResponse struct {
+	Status      string           `json:"status"`
+	Version     string           `json:"version,omitempty"`
+	Error       string           `json:"error,omitempty"`
+	UpdatedInst instanceResponse `json:"updated_inst,omitempty"`
+}
+
+// parseVersionFromResult extracts a version string from the edge skill's
+// JSON result. Expects the wrapper shape: {"rows": [{"VERSION()":"x.y.z"}], ...}
+func parseVersionFromResult(raw json.RawMessage) string {
+	var wrapper struct {
+		Rows []map[string]any `json:"rows"`
+	}
+	if err := json.Unmarshal(raw, &wrapper); err != nil || len(wrapper.Rows) == 0 {
+		return ""
+	}
+	row := wrapper.Rows[0]
+	for _, v := range row {
+		s := fmt.Sprintf("%v", v)
+		if s != "" && s != "<nil>" {
+			return extractVersion(s)
+		}
+	}
+	return ""
+}
+
+// extractVersion pulls a compact version string from a database version banner.
+// Examples: "8.0.32", "PostgreSQL 15.4 on x86_64..." → "15.4", "5.7.42-log" → "5.7.42"
+func extractVersion(raw string) string {
+	raw = strings.TrimSpace(raw)
+	// Try to find X.Y or X.Y.Z pattern.
+	parts := strings.Fields(raw)
+	for _, part := range parts {
+		// Trim trailing commas/semicolons.
+		part = strings.TrimRight(part, ",;")
+		// Count dots to identify version-like tokens.
+		dots := strings.Count(part, ".")
+		if dots >= 2 {
+			// X.Y.Z — strip trailing non-digit suffix like "-log", "-debug".
+			return stripVersionSuffix(part)
+		}
+	}
+	// Fallback: find first token with at least one dot.
+	for _, part := range parts {
+		part = strings.TrimRight(part, ",;")
+		if strings.Count(part, ".") >= 1 {
+			return stripVersionSuffix(part)
+		}
+	}
+	// Last resort: return first 20 chars.
+	if len(raw) > 20 {
+		return raw[:20]
+	}
+	return raw
+}
+
+// stripVersionSuffix removes known non-numeric suffixes from version tokens.
+func stripVersionSuffix(v string) string {
+	// Remove common suffixes: -log, -debug, -standard, -enterprise, -community, -Percona, etc.
+	suffixes := []string{"-log", "-debug", "-standard", "-enterprise", "-community", "-ubuntu", "-debian", "-rhel", "-el"}
+	for _, s := range suffixes {
+		if idx := strings.Index(v, s); idx > 0 {
+			v = v[:idx]
+		}
+	}
+	// Remove leading non-digit prefix like "PostgreSQL " — not needed here since
+	// we split by spaces and already found a dotted token.
+	return v
 }

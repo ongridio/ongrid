@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	_ "github.com/go-sql-driver/mysql" // register mysql driver for database/sql
 )
 
 // defaultPoolSize is the max open connections per pool entry.
