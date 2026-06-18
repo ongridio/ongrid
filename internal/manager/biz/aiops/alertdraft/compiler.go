@@ -115,6 +115,7 @@ func normalizeNotifyPolicyAliases(in RuleConfigInput) RuleConfigInput {
 func normalizeAlertRuleConfigInputForRequest(in RuleConfigInput, requestText string) RuleConfigInput {
 	in = normalizeMetricSourceScopeForRequest(in, requestText)
 	in = normalizeAlertRuleConfigInput(in)
+	in = normalizeAlertScopeForRequest(in, requestText)
 	return applyAlertRuleRequestHints(in, requestText)
 }
 

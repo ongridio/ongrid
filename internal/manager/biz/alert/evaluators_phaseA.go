@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -385,12 +386,21 @@ func (e *PipelineEvaluator) runVectorRule(ctx context.Context, vr vectorRule, no
 		seen[dedupeKey] = true
 		summary := vr.fmtSummary(ent.Metric, v)
 		val := v
+		var devID *uint64
+		if vr.scopeType == model.RuleScopeHost {
+			if raw := strings.TrimSpace(ent.Metric["device_id"]); raw != "" {
+				if id, err := strconv.ParseUint(raw, 10, 64); err == nil && id > 0 {
+					devID = &id
+				}
+			}
+		}
 		res2, err := e.uc.RecordFiring(ctx, FiringInput{
 			ScopeType:  vr.scopeType,
 			Scope:      vr.scopeType,
 			Rule:       vr.ruleKey,
 			RuleName:   vr.ruleName,
 			Severity:   ruleSev(vr.severity, notify.SeverityWarning),
+			DeviceID:   devID,
 			DedupeKey:  dedupeKey,
 			OccurredAt: now,
 			Title:      summary,

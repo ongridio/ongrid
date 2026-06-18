@@ -18,6 +18,8 @@ export type ConfigDraftResult = {
   preview?: unknown;
   diff?: unknown;
   warnings?: string[];
+  scope?: { type?: string; label?: string; reason?: string; change_hint?: string };
+  confirmation_prompt?: string;
   rollback?: string;
   apply_tool?: string;
   draft_hash?: string;
@@ -245,6 +247,7 @@ function ConfigDraftCard({
   const preview = previewSummary(draft.preview);
   const warnings = Array.isArray(draft.warnings) ? draft.warnings.filter(Boolean) : [];
   const payload = payloadSummary(draft.payload);
+  const scope = scopeSummary(draft.scope, tr, !draft.confirmation_prompt);
   const disabled = state !== 'idle' || !onConfirm;
 
   return (
@@ -265,6 +268,10 @@ function ConfigDraftCard({
           <div className="text-sm font-medium text-zinc-100">
             {draft.summary || tr('配置草案', 'Configuration draft')}
           </div>
+          {scope && <div className="text-[11px] leading-5 text-zinc-300">{scope}</div>}
+          {draft.confirmation_prompt && (
+            <div className="text-[11px] leading-5 text-zinc-400">{draft.confirmation_prompt}</div>
+          )}
           {payload && <div className="text-[11px] leading-5 text-zinc-400">{payload}</div>}
           {preview && <div className="text-[11px] leading-5 text-zinc-400">{preview}</div>}
           {warnings.length > 0 && (
@@ -341,6 +348,22 @@ function previewSummary(preview: unknown): string {
     return `Preview fire_count=${p.fire_count}${unit}`;
   }
   return '';
+}
+
+function scopeSummary(
+  scope: ConfigDraftResult['scope'] | undefined,
+  tr: (zh: string, en: string) => string,
+  includeHint: boolean,
+): string {
+  if (!scope) return '';
+  const label = typeof scope.label === 'string' ? scope.label.trim() : '';
+  const type = typeof scope.type === 'string' ? scope.type.trim() : '';
+  const scopeText = label || type;
+  if (!scopeText) return '';
+  const hint = typeof scope.change_hint === 'string' ? scope.change_hint.trim() : '';
+  return includeHint && hint
+    ? `${tr('范围：', 'Scope: ')}${scopeText} · ${hint}`
+    : `${tr('范围：', 'Scope: ')}${scopeText}`;
 }
 
 function payloadSummary(payload: unknown): string {

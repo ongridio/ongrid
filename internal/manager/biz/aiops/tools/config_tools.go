@@ -71,19 +71,28 @@ type ConfigTarget struct {
 }
 
 type ConfigDraft struct {
-	Kind       string                  `json:"kind"`
-	Domain     string                  `json:"domain"`
-	Action     string                  `json:"action"`
-	Summary    string                  `json:"summary"`
-	Target     *ConfigTarget           `json:"target,omitempty"`
-	Payload    json.RawMessage         `json:"payload,omitempty"`
-	Preview    json.RawMessage         `json:"preview,omitempty"`
-	Diff       json.RawMessage         `json:"diff,omitempty"`
-	Validation *ConfigValidationResult `json:"validation,omitempty"`
-	Warnings   []string                `json:"warnings,omitempty"`
-	Rollback   string                  `json:"rollback,omitempty"`
-	ApplyTool  string                  `json:"apply_tool"`
-	DraftHash  string                  `json:"draft_hash,omitempty"`
+	Kind               string                  `json:"kind"`
+	Domain             string                  `json:"domain"`
+	Action             string                  `json:"action"`
+	Summary            string                  `json:"summary"`
+	Target             *ConfigTarget           `json:"target,omitempty"`
+	Payload            json.RawMessage         `json:"payload,omitempty"`
+	Preview            json.RawMessage         `json:"preview,omitempty"`
+	Diff               json.RawMessage         `json:"diff,omitempty"`
+	Validation         *ConfigValidationResult `json:"validation,omitempty"`
+	Warnings           []string                `json:"warnings,omitempty"`
+	Scope              *ConfigScopeSummary     `json:"scope,omitempty"`
+	ConfirmationPrompt string                  `json:"confirmation_prompt,omitempty"`
+	Rollback           string                  `json:"rollback,omitempty"`
+	ApplyTool          string                  `json:"apply_tool"`
+	DraftHash          string                  `json:"draft_hash,omitempty"`
+}
+
+type ConfigScopeSummary struct {
+	Type       string `json:"type,omitempty"`
+	Label      string `json:"label,omitempty"`
+	Reason     string `json:"reason,omitempty"`
+	ChangeHint string `json:"change_hint,omitempty"`
 }
 
 type ConfigValidationResult struct {
@@ -163,7 +172,7 @@ func (t *ConfigTool) Info(_ context.Context) (*basetool.ToolInfo, error) {
 		return &basetool.ToolInfo{
 			Name:        ToolNameDraftConfigChange,
 			Description: "Create and validate a read-only configuration draft for a new alert rule across all supported alert rule kinds. It never persists business config.",
-			WhenToUse:   "Use when the user asks to create an alert rule and you have enough intent to draft one. For metric-based rules, call list_metric_catalog first in the same user turn unless the user supplied exact PromQL or metric names. This tool validates the candidate and returns either config_validation_failed with issues to fix, or config_draft with draft_hash. Only config_draft is confirmable; after one successful draft, stop tool calls and ask the user to confirm or cancel.",
+			WhenToUse:   "Use when the user asks to create an alert rule and you have enough intent to draft one. For metric-based rules, call list_metric_catalog first in the same user turn unless the user supplied exact PromQL or metric names. This tool validates the candidate and returns either config_validation_failed with issues to fix, or config_draft with draft_hash. Only config_draft is confirmable; after one successful draft, stop tool calls, disclose the draft scope from scope.label/type, and ask the user to confirm, cancel, or request a scope change.",
 			Parameters:  draftConfigChangeSchema,
 			Class:       "read",
 		}, nil
@@ -487,7 +496,7 @@ var draftConfigChangeSchema = json.RawMessage(`{
           "description": "Choose the existing alert creation mode. metric_threshold is only for host closed-set metrics. metric_raw is for arbitrary PromQL predicates, database metrics, custommetrics, and any exact collected metric name."
         },
         "name": {"type": "string"},
-        "scope_type": {"type": "string", "enum": ["global", "host", "monitoring_pipeline"], "description": "Use global for database, custommetrics, log, trace, and arbitrary metric_raw rules unless the rule is explicitly host-scoped."},
+        "scope_type": {"type": "string", "enum": ["global", "host", "monitoring_pipeline"], "description": "Use host when the alert should be associated with a specific machine or device-collected instance, such as CPU, memory, disk/filesystem, load, network, system/journald logs, database/Redis/MongoDB metrics, or when the final PromQL/LogQL result keeps a device_id label. Use global only for service, SLO, trace, or intentionally aggregated fleet-wide rules where no single host/device should own the incident."},
         "join_mode": {"type": "string", "enum": ["all", "any"]},
         "window": {"type": "string", "description": "Compatibility alias. Prefer kind-specific spec.window or condition.window; backend normalizes this field into the correct place."},
         "for": {"type": "string", "description": "Compatibility alias for sustained duration. Prefer spec.for for metric_raw or condition.for for metric_threshold; backend normalizes this field into the correct place."},

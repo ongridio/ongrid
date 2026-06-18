@@ -139,6 +139,7 @@ func normalizeAlertRuleSpec(in RuleConfigInput) RuleConfigInput {
 			}
 		}
 	case "log_match":
+		normalizeLogQuerySpec(in.Spec)
 		if v, ok := firstSpecString(in.Spec, "filter", "regex", "pattern", "line_regex"); ok && strings.TrimSpace(alertSpecStringValue(in.Spec["line_filter"])) == "" {
 			in.Spec["line_filter"] = v
 		}
@@ -157,6 +158,7 @@ func normalizeAlertRuleSpec(in RuleConfigInput) RuleConfigInput {
 		in.Spec["operator"] = normalizeAlertOperator(alertSpecStringValue(in.Spec["operator"]))
 		setSpecDefaultNumber(in.Spec, "threshold", 1)
 	case "log_volume":
+		normalizeLogQuerySpec(in.Spec)
 		if op, ok := firstSpecString(in.Spec, "operator", "op"); ok && strings.TrimSpace(alertSpecStringValue(in.Spec["ratio_op"])) == "" {
 			in.Spec["ratio_op"] = op
 		}
@@ -201,6 +203,50 @@ func normalizeAlertRuleSpec(in RuleConfigInput) RuleConfigInput {
 	return in
 }
 
+func normalizeLogQuerySpec(spec map[string]interface{}) {
+	if spec == nil {
+		return
+	}
+	query := alertSpecStringValue(spec["query"])
+	if strings.TrimSpace(query) == "" {
+		return
+	}
+	stream, filter, ok := splitSimpleLogQLQuery(query)
+	if !ok {
+		return
+	}
+	if strings.TrimSpace(alertSpecStringValue(spec["stream_selector"])) == "" {
+		spec["stream_selector"] = stream
+	}
+	if strings.TrimSpace(alertSpecStringValue(spec["line_filter"])) == "" {
+		spec["line_filter"] = filter
+	}
+	delete(spec, "query")
+}
+
+func splitSimpleLogQLQuery(query string) (string, string, bool) {
+	query = strings.TrimSpace(query)
+	if query == "" || !strings.HasPrefix(query, "{") {
+		return "", "", false
+	}
+	stream, end, ok := readPromSelector(query, 0)
+	if !ok {
+		return "", "", false
+	}
+	rest := strings.TrimSpace(query[end:])
+	if rest == "" {
+		return stream, "", true
+	}
+	if len(parseLogLineFilterChain(rest)) == 0 {
+		return "", "", false
+	}
+	filter, selector := normalizeLogLineFilter(rest)
+	if selector != "" {
+		stream = mergeLogStreamSelector(stream, selector)
+	}
+	return stream, filter, true
+}
+
 func normalizeLogLineFilter(raw string) (string, string) {
 	filter := strings.TrimSpace(raw)
 	if filter == "" {
@@ -238,6 +284,9 @@ func normalizeLogLineFilter(raw string) (string, string) {
 		return normalizePlainLogLineFilter(filter)
 	}
 	op := match[1]
+	if op == "|=~" {
+		op = "|~"
+	}
 	body := strings.TrimSpace(match[2])
 	if len(body) >= 2 && strings.HasPrefix(body, `"`) && strings.HasSuffix(body, `"`) {
 		if unquoted, err := strconv.Unquote(body); err == nil {
@@ -309,12 +358,15 @@ func parseLogLineFilterChain(raw string) []parsedLogLineFilter {
 	out := []parsedLogLineFilter(nil)
 	for rest != "" {
 		op := ""
-		for _, candidate := range []string{"|=", "|~", "!=", "!~"} {
+		for _, candidate := range []string{"|=~", "|=", "|~", "!=", "!~"} {
 			if strings.HasPrefix(rest, candidate) {
 				op = candidate
 				rest = strings.TrimSpace(rest[len(candidate):])
 				break
 			}
+		}
+		if op == "|=~" {
+			op = "|~"
 		}
 		if op == "" {
 			return nil
@@ -355,7 +407,7 @@ func nextLogLineFilterOpIndex(s string) int {
 		if s[i-1] != ' ' && s[i-1] != '\t' {
 			continue
 		}
-		for _, op := range []string{"|=", "|~", "!=", "!~"} {
+		for _, op := range []string{"|=~", "|=", "|~", "!=", "!~"} {
 			if strings.HasPrefix(s[i:], op) {
 				return i
 			}

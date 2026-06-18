@@ -249,6 +249,36 @@ func TestMetricForecastExprUsesPredictLinear(t *testing.T) {
 	}
 }
 
+func TestMetricForecastHostScopeUsesDeviceIDLabel(t *testing.T) {
+	repo := newFakeRepo()
+	rules := NewStaticRulesProvider(WithMetricForecastRules([]MetricForecastRule{
+		{ID: 1, RuleKey: "disk_fill", Name: "Disk Fills", Severity: "warning",
+			ScopeType: "host", Metric: "disk_used_pct", FitWindow: "1h", PredictSeconds: 21600,
+			Operator: "<=", Threshold: 100},
+	}))
+	prom := &scriptedProm{results: []*promquery.InstantResult{
+		vectorInstantEntry(map[string]string{"device_id": "2", "mountpoint": "/"}, "1"),
+	}}
+	now := time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)
+	eval := newPipelineEvaluator(t, repo, &fakeNotifier{}, rules, PipelineEvaluatorOpts{
+		EdgeLister:  &fakeEdgeLister{},
+		PromQuerier: prom,
+		Cooldown:    time.Minute,
+		Now:         func() time.Time { return now },
+	})
+
+	eval.EvaluateOnce(context.Background())
+
+	if len(repo.incidents) != 1 {
+		t.Fatalf("incidents = %d, want 1", len(repo.incidents))
+	}
+	for _, inc := range repo.incidents {
+		if inc.DeviceID == nil || *inc.DeviceID != 2 {
+			t.Fatalf("DeviceID = %v, want 2", inc.DeviceID)
+		}
+	}
+}
+
 func TestMetricBurnRateRequiresAllWindowsToFire(t *testing.T) {
 	// First window fires (vector with one entry), second is empty → no
 	// firing, all-AND semantics. Then both fire → incident created.
@@ -329,9 +359,13 @@ func emptyVector() *promquery.InstantResult {
 }
 
 func singleEntry() *promquery.InstantResult {
+	return vectorInstantEntry(map[string]string{"__name__": "burn"}, "1")
+}
+
+func vectorInstantEntry(labels map[string]string, value string) *promquery.InstantResult {
 	body := []map[string]any{{
-		"metric": map[string]string{"__name__": "burn"},
-		"value":  []any{float64(time.Now().Unix()), "1"},
+		"metric": labels,
+		"value":  []any{float64(time.Now().Unix()), value},
 	}}
 	raw, _ := json.Marshal(body)
 	return &promquery.InstantResult{ResultType: "vector", Result: raw}

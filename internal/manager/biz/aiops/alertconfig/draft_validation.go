@@ -31,10 +31,12 @@ func validateAlertRuleDraft(rule aiopstools.AlertRuleConfigInput, requestText st
 			Suggestion: "根据 skipped_reason 补全缺失字段、修正 selector/metric，或在指标目录中选择实际存在的信号后重新生成草稿。",
 		})
 	}
+	issues = append(issues, validatePreviewContract(rule, preview)...)
+	issues = append(issues, validateScopeConsistency(rule, requestText, preview)...)
 	switch strings.ToLower(strings.TrimSpace(rule.Kind)) {
 	case "metric_raw":
 		issues = append(issues, validateMetricRawDraft(rule, requestText, preview)...)
-	case "log_match":
+	case "log_match", "log_volume":
 		issues = append(issues, validateLogMatchDraft(rule)...)
 	}
 	status := "passed"
@@ -94,30 +96,93 @@ func validateMetricRawDraft(rule aiopstools.AlertRuleConfigInput, requestText st
 			Suggestion: "检查阈值、聚合维度和持续窗口；如果这是预期行为，可以保留，否则提高阈值或增加更窄 selector。",
 		})
 	}
+	if issue, ok := sparseCounterMinRateIssue(expr); ok {
+		issues = append(issues, issue)
+	}
 	return issues
 }
 
 func validateLogMatchDraft(rule aiopstools.AlertRuleConfigInput) []aiopstools.ConfigValidationIssue {
 	stream := strings.ToLower(stringFromSpec(rule.Spec, "stream_selector", "selector"))
-	filter := strings.ToLower(stringFromSpec(rule.Spec, "line_filter", "filter", "query"))
-	if filter == "" {
-		return nil
+	filter := strings.ToLower(stringFromSpec(rule.Spec, "line_filter", "filter"))
+	query := strings.TrimSpace(stringFromSpec(rule.Spec, "query"))
+	var issues []aiopstools.ConfigValidationIssue
+	if query != "" && filter == "" {
+		issues = append(issues, aiopstools.ConfigValidationIssue{
+			Severity:   validationSeverityError,
+			Code:       "log_query_not_normalized",
+			Message:    "日志规则包含 query，但当前 evaluator 只执行 stream_selector + line_filter；直接保存 query 会被忽略。",
+			Suggestion: "把完整 LogQL 拆成 stream_selector 和 line_filter，或重新生成草稿让 draft_config_change 完成规范化。",
+		})
 	}
 	broadFilter := strings.Contains(filter, "error") || strings.Contains(filter, "panic") || strings.Contains(filter, "exception")
 	narrowStream := strings.Contains(stream, "unit=") || strings.Contains(stream, "service_name=") || strings.Contains(stream, "identifier=")
 	if broadFilter && !narrowStream {
-		return []aiopstools.ConfigValidationIssue{{
+		issues = append(issues, aiopstools.ConfigValidationIssue{
 			Severity:   validationSeverityWarning,
 			Code:       "broad_log_match",
 			Message:    "日志规则使用了较泛的错误关键字，但 stream_selector 没有限定 unit/service/identifier，容易把 exporter 或系统噪声当成业务故障。",
 			Suggestion: "优先把 stream_selector 收窄到明确的 unit/service/identifier，或提高 threshold/增加通知抑制策略。",
-		}}
+		})
 	}
-	return nil
+	return issues
+}
+
+func validatePreviewContract(rule aiopstools.AlertRuleConfigInput, preview *PreviewResult) []aiopstools.ConfigValidationIssue {
+	if preview == nil || preview.FireCount == 0 || strings.TrimSpace(preview.SkippedReason) != "" {
+		return nil
+	}
+	if strings.ToLower(strings.TrimSpace(rule.ScopeType)) != "host" {
+		return nil
+	}
+	if len(preview.Samples) == 0 {
+		return nil
+	}
+	for _, sample := range preview.Samples {
+		if sample.Labels != nil && strings.TrimSpace(sample.Labels["device_id"]) != "" {
+			return nil
+		}
+	}
+	return []aiopstools.ConfigValidationIssue{{
+		Severity:   validationSeverityError,
+		Code:       "host_preview_missing_device_id",
+		Message:    "host 作用域规则的预览结果没有 device_id label；创建后命中也无法写入主机告警事件。",
+		Suggestion: "让 PromQL/规则表达式按 device_id 保留结果标签，或将非主机维度规则改为 global 作用域。",
+	}}
+}
+
+func validateScopeConsistency(rule aiopstools.AlertRuleConfigInput, requestText string, preview *PreviewResult) []aiopstools.ConfigValidationIssue {
+	if strings.ToLower(strings.TrimSpace(rule.ScopeType)) != "global" {
+		return nil
+	}
+	if !alertdraft.HostScopeRecommended(rule, requestText) {
+		return nil
+	}
+	if !previewHasDeviceIDLabel(preview) {
+		return nil
+	}
+	return []aiopstools.ConfigValidationIssue{{
+		Severity:   validationSeverityWarning,
+		Code:       "host_scope_recommended",
+		Message:    "这条规则看起来是按主机维度命中的，但当前 scope_type=global；创建后告警能触发，不过不会作为设备告警关联到主机。",
+		Suggestion: "将 scope_type 改为 host，并确保预览结果保留 device_id label。",
+	}}
 }
 
 func metricRawExpr(rule aiopstools.AlertRuleConfigInput) string {
 	return stringFromSpec(rule.Spec, "expr", "promql", "query")
+}
+
+func previewHasDeviceIDLabel(preview *PreviewResult) bool {
+	if preview == nil || len(preview.Samples) == 0 {
+		return false
+	}
+	for _, sample := range preview.Samples {
+		if sample.Labels != nil && strings.TrimSpace(sample.Labels["device_id"]) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func stringFromSpec(spec map[string]interface{}, keys ...string) string {
@@ -227,6 +292,22 @@ func suspiciousMagnitudeIssue(preview *PreviewResult, threshold float64) (aiopst
 	return aiopstools.ConfigValidationIssue{}, false
 }
 
+func sparseCounterMinRateIssue(expr string) (aiopstools.ConfigValidationIssue, bool) {
+	lower := strings.ToLower(strings.ReplaceAll(expr, " ", ""))
+	if !strings.Contains(lower, "min_over_time(rate(") || !strings.Contains(lower, ")>0") {
+		return aiopstools.ConfigValidationIssue{}, false
+	}
+	if !(strings.Contains(lower, "_total") || strings.Contains(lower, "deadlock") || strings.Contains(lower, "error") || strings.Contains(lower, "fail")) {
+		return aiopstools.ConfigValidationIssue{}, false
+	}
+	return aiopstools.ConfigValidationIssue{
+		Severity:   validationSeverityWarning,
+		Code:       "sparse_counter_min_rate",
+		Message:    "表达式对稀疏事件计数器使用 min_over_time(rate(...)) > 0，可能要求整个窗口持续增长，容易漏掉单次事件。",
+		Suggestion: "如果目标是检测窗口内发生过事件，优先使用 increase(counter[窗口]) > 0；只有确实要求持续增长时才保留当前写法。",
+	}, true
+}
+
 func mentionsSustained(vals ...string) bool {
 	for _, v := range vals {
 		v = strings.ToLower(v)
@@ -266,4 +347,25 @@ func validationWarnings(v aiopstools.ConfigValidationResult) []string {
 		}
 	}
 	return out
+}
+
+func validationErrorMessage(v aiopstools.ConfigValidationResult) string {
+	out := make([]string, 0, len(v.Issues))
+	for _, issue := range v.Issues {
+		if issue.Severity != validationSeverityError {
+			continue
+		}
+		msg := strings.TrimSpace(issue.Message)
+		if issue.Suggestion != "" {
+			msg += " 建议：" + issue.Suggestion
+		}
+		if issue.Code != "" {
+			msg = issue.Code + ": " + msg
+		}
+		out = append(out, msg)
+	}
+	if len(out) == 0 {
+		return "unknown validation error"
+	}
+	return strings.Join(out, "; ")
 }

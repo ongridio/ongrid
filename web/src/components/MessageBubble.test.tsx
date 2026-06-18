@@ -43,6 +43,14 @@ function draftFor(kind: string): ConfigDraftResult {
       samples: [{ summary: `${kind} sample` }],
     },
     warnings: [`${kind} preview warning`],
+    scope: {
+      type: 'host',
+      label: '主机级',
+      reason: '命中后会关联到具体设备。',
+      change_hint: '如果要改成全局汇总，可以回复“改成全局”。',
+    },
+    confirmation_prompt:
+      '当前告警范围：主机级。命中后会关联到具体设备。如果要改成全局汇总，可以回复“改成全局”。确认无误后可点击确认应用或回复“ok”。',
     rollback: 'Disable or edit the rule from Alerts.',
     apply_tool: 'apply_config_change',
     draft_hash: `sha256:${kind}`,
@@ -134,6 +142,8 @@ describe('MessageBubble config draft card', () => {
     render(<MessageBubble message={toolCardMessage(draft)} onConfirmConfigDraft={onConfirm} />);
 
     expect(screen.getByText(`Create ${kind} rule`)).toBeInTheDocument();
+    expect(screen.getByText('范围：主机级')).toBeInTheDocument();
+    expect(screen.getByText(/当前告警范围：主机级/)).toBeInTheDocument();
     expect(screen.getByText(
       `action: create · rule_key: ${kind}_natural_language · kind: ${kind} · name: ${kind} from natural language · severity: warning`,
     )).toBeInTheDocument();
