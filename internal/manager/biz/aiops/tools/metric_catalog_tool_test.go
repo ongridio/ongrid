@@ -26,13 +26,18 @@ func TestListMetricCatalogTool_Info(t *testing.T) {
 	if !strings.Contains(info.WhenToUse, "custommetrics") {
 		t.Fatalf("WhenToUse should mention custommetrics: %s", info.WhenToUse)
 	}
-	if !strings.Contains(info.Description, "do not copy sample label values") ||
-		!strings.Contains(info.WhenToUse, "every collected source is evaluated independently") {
-		t.Fatalf("Info should forbid hard-coding sample source values: desc=%s when=%s", info.Description, info.WhenToUse)
+	if !strings.Contains(info.Description, "sample_labels are examples") ||
+		!strings.Contains(info.Description, "do not copy sample label values") {
+		t.Fatalf("Info should describe sample label boundaries: desc=%s when=%s", info.Description, info.WhenToUse)
 	}
-	if !strings.Contains(info.Description, `conn_type="current"`) ||
-		!strings.Contains(info.WhenToUse, `conn_type="active"`) {
-		t.Fatalf("Info should guide MongoDB connection usage semantics: desc=%s when=%s", info.Description, info.WhenToUse)
+	if !strings.Contains(info.WhenToUse, "draft_config_change") ||
+		!strings.Contains(info.WhenToUse, "query_promql") {
+		t.Fatalf("Info should describe surrounding tool contract: desc=%s when=%s", info.Description, info.WhenToUse)
+	}
+	for _, overSpecified := range []string{`conn_type="current"`, `conn_type="active"`, "clamp_min"} {
+		if strings.Contains(info.Description, overSpecified) || strings.Contains(info.WhenToUse, overSpecified) {
+			t.Fatalf("Info should not hard-code database PromQL policy %q: desc=%s when=%s", overSpecified, info.Description, info.WhenToUse)
+		}
 	}
 }
 

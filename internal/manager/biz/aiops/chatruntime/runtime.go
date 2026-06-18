@@ -1029,7 +1029,7 @@ func (rt *Runtime) calcDynamicHints(history []*aiopsmodel.Message) []string {
 		hints = append(hints, fmt.Sprintf("%s 已重复调用 %d 次（args: %s）：从你已有的数据下结论，不要再调用同款工具", name, n, args))
 	}
 	if alertDraftGuardNeedsDraftRetry(history) {
-		hints = append(hints, "上一轮告警草案被安全闸门拦截：当前用户消息仍在继续创建告警时，必须先调用 list_metric_catalog 查询指标目录，再调用 draft_config_change 生成 config_draft/draft_hash；不要要求用户重新发送，不要输出文字草案，不要仅解释流程")
+		hints = append(hints, "上一轮告警草案被安全闸门拦截：当前用户消息仍在继续创建告警时，直接调用 draft_config_change 生成 config_draft/draft_hash；metric 类规则需要先用 list_metric_catalog 获取当前指标。不要要求用户重新发送，不要输出文字草案，不要仅解释流程")
 	}
 	// "Promise-without-execution" detection — see ongridBasePrompt()
 	// 中等档位的 LLM (e.g. glm-4-plus) 偶尔写 "让我..." / "我先..." 这种

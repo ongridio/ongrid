@@ -92,8 +92,13 @@ const maxToolCallsPerRun = 8
 
 func maxCallsForTool(name string) int {
 	switch name {
-	case "draft_config_change", "list_metric_catalog":
+	case "draft_config_change":
+		// Only a confirmable config_draft increments this counter;
+		// config_validation_failed remains retryable so the model can repair
+		// a draft in the same user turn.
 		return 1
+	case "list_metric_catalog":
+		return 2
 	default:
 		return maxToolCallsPerRun
 	}

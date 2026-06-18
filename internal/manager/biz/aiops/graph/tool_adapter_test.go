@@ -276,7 +276,7 @@ func TestEinoToolAdapter_PerToolCallCap(t *testing.T) {
 	}
 }
 
-func TestEinoToolAdapter_DraftConfigChangeSingleCallCap(t *testing.T) {
+func TestEinoToolAdapter_DraftConfigChangeConfirmableDraftCap(t *testing.T) {
 	t.Parallel()
 	inner := &fakeBaseTool{name: "draft_config_change", class: "read", runResp: `{"kind":"config_draft","draft_hash":"sha256:ok"}`}
 	a := &einoToolAdapter{inner: inner, memo: newToolMemo()}
@@ -414,7 +414,7 @@ func TestEinoToolAdapter_DraftConfigChangeAllowsLogRuleWithoutMetricCatalog(t *t
 	}
 }
 
-func TestEinoToolAdapter_ListMetricCatalogSingleCallCap(t *testing.T) {
+func TestEinoToolAdapter_ListMetricCatalogAllowsOneRefinementBeforeCap(t *testing.T) {
 	t.Parallel()
 	inner := &fakeBaseTool{name: "list_metric_catalog", class: "read", runResp: `{"status":"ok"}`}
 	a := &einoToolAdapter{inner: inner, memo: newToolMemo()}
@@ -425,18 +425,22 @@ func TestEinoToolAdapter_ListMetricCatalogSingleCallCap(t *testing.T) {
 		t.Fatalf("first metric catalog lookup should execute, got budget directive: %s", out)
 	}
 	out, _ = a.InvokableRun(ctx, `{"query":"mongo conn_type values"}`)
+	if strings.Contains(out, "call_budget_exceeded") {
+		t.Fatalf("second metric catalog lookup should allow one refinement, got %q", out)
+	}
+	out, _ = a.InvokableRun(ctx, `{"query":"mongo all metrics"}`)
 	if !strings.Contains(out, "call_budget_exceeded") {
-		t.Fatalf("second metric catalog lookup should be capped, got %q", out)
+		t.Fatalf("third metric catalog lookup should be capped, got %q", out)
 	}
 	if !strings.Contains(out, `"scope":"current_user_turn"`) || !strings.Contains(out, "expires on the next user message") {
 		t.Fatalf("budget directive should be explicitly scoped to the current turn, got %q", out)
 	}
-	if got := inner.calls.Load(); got != 1 {
-		t.Fatalf("metric catalog executions = %d, want 1", got)
+	if got := inner.calls.Load(); got != 2 {
+		t.Fatalf("metric catalog executions = %d, want 2", got)
 	}
 }
 
-func TestEinoToolAdapter_DraftConfigChangeFailureDoesNotConsumeSingleCallCap(t *testing.T) {
+func TestEinoToolAdapter_DraftConfigChangeFailureDoesNotConsumeConfirmableDraftCap(t *testing.T) {
 	t.Parallel()
 	inner := &fakeBaseTool{name: "draft_config_change", class: "read", runErr: errors.New("invalid scope")}
 	a := &einoToolAdapter{inner: inner, memo: newToolMemo()}
@@ -461,7 +465,7 @@ func TestEinoToolAdapter_DraftConfigChangeFailureDoesNotConsumeSingleCallCap(t *
 	}
 }
 
-func TestEinoToolAdapter_DraftConfigValidationFailedDoesNotConsumeSingleCallCap(t *testing.T) {
+func TestEinoToolAdapter_DraftConfigValidationFailedDoesNotConsumeConfirmableDraftCap(t *testing.T) {
 	t.Parallel()
 	inner := &fakeBaseTool{name: "draft_config_change", class: "read", runResp: `{"kind":"config_validation_failed","validation":{"status":"failed"}}`}
 	a := &einoToolAdapter{inner: inner, memo: newToolMemo()}

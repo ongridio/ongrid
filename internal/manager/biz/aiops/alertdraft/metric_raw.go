@@ -13,9 +13,6 @@ func normalizeMetricRawSpec(in RuleConfigInput) RuleConfigInput {
 			sanitizeDatabaseIdentitySpecSelectors(in.Spec)
 		}
 		selector := alertSpecSelector(in.Spec)
-		if rewritten, changed := rewriteKnownDatabaseMetricRawExpr(expr, selector); changed {
-			expr = rewritten
-		}
 		if selector == "" && !sourceSelectorExplicitlyScoped(in.Spec) {
 			if stripped, changed := stripLeakedMetricSourceIdentityMatchersFromPromQL(expr); changed {
 				expr = stripped
@@ -37,73 +34,6 @@ func normalizeMetricRawSpec(in RuleConfigInput) RuleConfigInput {
 		return in
 	}
 	return normalizeSpecMetricCondition(in)
-}
-
-func rewriteKnownDatabaseMetricRawExpr(expr string, explicitSelector string) (string, bool) {
-	if rewritten, changed := rewriteMySQLConnectionUsageExpr(expr, explicitSelector); changed {
-		return rewritten, true
-	}
-	if rewritten, changed := rewriteMongoSSConnectionUsageExpr(expr, explicitSelector); changed {
-		return rewritten, true
-	}
-	lower := strings.ToLower(expr)
-	if strings.Contains(lower, "mongodb_ss_connections") &&
-		strings.Contains(lower, "conn_type") &&
-		strings.Contains(lower, "available") &&
-		strings.Contains(lower, "active") &&
-		strings.Contains(expr, "/") {
-		rewritten := mongoActiveConnectionMatcherRE.ReplaceAllString(expr, `conn_type="current"`)
-		return rewritten, rewritten != expr
-	}
-	return expr, false
-}
-
-func rewriteMySQLConnectionUsageExpr(expr string, explicitSelector string) (string, bool) {
-	lower := strings.ToLower(expr)
-	if !strings.Contains(lower, "mysql_global_status_threads_connected") ||
-		!strings.Contains(lower, "mysql_global_variables_max_connections") ||
-		!strings.Contains(expr, "/") {
-		return expr, false
-	}
-	selector := commonMySQLConnectionUsageSelector(expr)
-	if stripped, changed := stripDatabaseIdentityMatchers(selector); changed {
-		selector = stripped
-	}
-	selector = mergeSelector(selector, explicitSelector)
-	connected := fmt.Sprintf("max by (device_id, ongrid_source) (%s)",
-		metricSelector("mysql_global_status_threads_connected", selector))
-	maxConn := fmt.Sprintf("max by (device_id, ongrid_source) (%s)",
-		metricSelector("mysql_global_variables_max_connections", selector))
-	base := fmt.Sprintf("100 * %s / clamp_min(%s, 1)", connected, maxConn)
-	if m := promTrailingComparisonRE.FindStringSubmatch(expr); len(m) == 3 {
-		return fmt.Sprintf("(%s) %s %s", base, normalizeAlertOperator(m[1]), normalizePercentThresholdString(m[2])), true
-	}
-	return base, true
-}
-
-func rewriteMongoSSConnectionUsageExpr(expr string, explicitSelector string) (string, bool) {
-	lower := strings.ToLower(expr)
-	if !strings.Contains(lower, "mongodb_ss_connections") ||
-		!strings.Contains(lower, "conn_type") ||
-		!strings.Contains(lower, "available") ||
-		!(strings.Contains(lower, "current") || strings.Contains(lower, "active")) ||
-		!strings.Contains(expr, "/") {
-		return expr, false
-	}
-	selector := commonMongoSSConnectionSelector(expr)
-	if stripped, changed := stripDatabaseIdentityMatchers(selector); changed {
-		selector = stripped
-	}
-	selector = mergeSelector(selector, explicitSelector)
-	current := fmt.Sprintf("max by (device_id, ongrid_source) (%s)",
-		metricSelector("mongodb_ss_connections", mergeSelector(selector, `conn_type="current"`)))
-	available := fmt.Sprintf("max by (device_id, ongrid_source) (%s)",
-		metricSelector("mongodb_ss_connections", mergeSelector(selector, `conn_type="available"`)))
-	base := fmt.Sprintf("100 * %s / clamp_min(%s + %s, 1)", current, current, available)
-	if m := promTrailingComparisonRE.FindStringSubmatch(expr); len(m) == 3 {
-		return fmt.Sprintf("(%s) %s %s", base, normalizeAlertOperator(m[1]), normalizePercentThresholdString(m[2])), true
-	}
-	return base, true
 }
 
 func stripLeakedMetricSourceIdentityMatchersFromPromQL(expr string) (string, bool) {
@@ -449,49 +379,6 @@ func specBoolValue(raw interface{}) (bool, bool) {
 	}
 }
 
-func commonMongoSSConnectionSelector(expr string) string {
-	matches := mongoSSConnectionsSelectorRE.FindAllStringSubmatch(expr, -1)
-	if len(matches) == 0 {
-		return ""
-	}
-	var common map[string]string
-	for i, match := range matches {
-		labels := exactPromSelectorLabels(match[1])
-		delete(labels, "conn_type")
-		if i == 0 {
-			common = labels
-			continue
-		}
-		for k, v := range common {
-			if labels[k] != v {
-				delete(common, k)
-			}
-		}
-	}
-	return selectorFromSpecLabels(common)
-}
-
-func commonMySQLConnectionUsageSelector(expr string) string {
-	matches := mysqlConnectionUsageSelectorRE.FindAllStringSubmatch(expr, -1)
-	if len(matches) == 0 {
-		return ""
-	}
-	var common map[string]string
-	for i, match := range matches {
-		labels := exactPromSelectorLabels(match[1])
-		if i == 0 {
-			common = labels
-			continue
-		}
-		for k, v := range common {
-			if labels[k] != v {
-				delete(common, k)
-			}
-		}
-	}
-	return selectorFromSpecLabels(common)
-}
-
 func exactPromSelectorLabels(selector string) map[string]string {
 	selector = normalizeSelectorPart(selector)
 	out := map[string]string{}
@@ -579,14 +466,6 @@ func parsePromLabelMatcherWithOperator(part string) (string, string, string, boo
 	return "", "", "", false
 }
 
-func formatAlertFloatFromString(raw string) string {
-	n, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
-	if err != nil {
-		return strings.TrimSpace(raw)
-	}
-	return formatAlertFloat(n)
-}
-
 func normalizeSpecMetricCondition(in RuleConfigInput) RuleConfigInput {
 	if len(in.Conditions) > 0 || in.Spec == nil {
 		return in
@@ -668,14 +547,6 @@ func normalizePercentThresholdNumber(n float64) float64 {
 		return n * 100
 	}
 	return n
-}
-
-func normalizePercentThresholdString(raw string) string {
-	n, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
-	if err != nil {
-		return formatAlertFloatFromString(raw)
-	}
-	return formatAlertFloat(normalizePercentThresholdNumber(n))
 }
 
 func metricSelector(metric, selector string) string {

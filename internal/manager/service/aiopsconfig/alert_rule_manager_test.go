@@ -153,7 +153,7 @@ func TestNormalizeAlertRuleConfigInputMergesSelectorIntoRawExpr(t *testing.T) {
 	for _, want := range []string{
 		`mysql_global_status_threads_connected{ongrid_source="db:mysql-test"}`,
 		`mysql_global_variables_max_connections{ongrid_source="db:mysql-test"}`,
-		`100 *`,
+		`* 100`,
 		`> 80`,
 	} {
 		if !strings.Contains(expr, want) {
@@ -213,31 +213,6 @@ func TestNormalizeAlertRuleConfigInputDropsIncompleteNotifyPolicy(t *testing.T) 
 	})
 	if got.NotifyMinFires != 0 || got.NotifyWindowSeconds != 0 {
 		t.Fatalf("notify policy = min_fires:%d window:%d, want both cleared", got.NotifyMinFires, got.NotifyWindowSeconds)
-	}
-}
-
-func TestNormalizeAlertRuleConfigInputRewritesMySQLConnectionUsageBySource(t *testing.T) {
-	in := aiopstools.AlertRuleConfigInput{
-		Kind: "metric_raw",
-		Spec: map[string]interface{}{
-			"expr": `max by (device_id, ongrid_source) (mysql_global_status_threads_connected{ongrid_source="db:mysql-test"} / mysql_global_variables_max_connections{ongrid_source="db:mysql-test"}) * 100 > 75`,
-		},
-	}
-
-	got := alertdraft.NormalizeRuleConfigInput(in)
-	expr, _ := got.Spec["expr"].(string)
-	for _, want := range []string{
-		`max by (device_id, ongrid_source) (mysql_global_status_threads_connected)`,
-		`max by (device_id, ongrid_source) (mysql_global_variables_max_connections)`,
-		`clamp_min`,
-		`> 75`,
-	} {
-		if !strings.Contains(expr, want) {
-			t.Fatalf("expr = %q, want %q", expr, want)
-		}
-	}
-	if strings.Contains(expr, `ongrid_source="db:mysql-test"`) {
-		t.Fatalf("expr = %q, should drop implicit sample database source selector", expr)
 	}
 }
 
@@ -832,7 +807,7 @@ func TestNormalizeAlertRuleConfigInputNormalizesNaturalLanguageScope(t *testing.
 	}
 }
 
-func TestNormalizeAlertRuleConfigInputRewritesMongoConnectionUsageActiveToCurrent(t *testing.T) {
+func TestNormalizeAlertRuleConfigInputDropsImplicitMongoIdentityMatchersWithoutRewritingPromQL(t *testing.T) {
 	in := aiopstools.AlertRuleConfigInput{
 		Kind: "metric_raw",
 		Spec: map[string]interface{}{
@@ -842,17 +817,14 @@ func TestNormalizeAlertRuleConfigInputRewritesMongoConnectionUsageActiveToCurren
 
 	got := alertdraft.NormalizeRuleConfigInput(in)
 	expr, _ := got.Spec["expr"].(string)
-	if strings.Contains(expr, `conn_type="active"`) {
-		t.Fatalf("expr = %q, want active connection matcher rewritten", expr)
-	}
-	if count := strings.Count(expr, `conn_type="current"`); count != 2 {
-		t.Fatalf("expr = %q, current matcher count = %d, want 2", expr, count)
+	if count := strings.Count(expr, `conn_type="active"`); count != 2 {
+		t.Fatalf("expr = %q, active matcher count = %d, want original PromQL preserved", expr, count)
 	}
 	if !strings.Contains(expr, `conn_type="available"`) {
 		t.Fatalf("expr = %q, want available matcher preserved", expr)
 	}
 	if !strings.Contains(expr, `max by (device_id, ongrid_source)`) {
-		t.Fatalf("expr = %q, want canonical max-by-source aggregation", expr)
+		t.Fatalf("expr = %q, want original aggregation preserved", expr)
 	}
 	if strings.Contains(expr, `ongrid_source="db:mongo-test"`) || strings.Contains(expr, `device_id="2"`) {
 		t.Fatalf("expr = %q, should drop leaked sample database identity selectors", expr)
@@ -874,11 +846,11 @@ func TestNormalizeAlertRuleConfigInputPreservesExplicitDatabaseSourceSelector(t 
 	if !strings.Contains(expr, `ongrid_source="db:mongo-test"`) {
 		t.Fatalf("expr = %q, want explicit database source selector preserved", expr)
 	}
-	if strings.Contains(expr, `conn_type="active"`) {
-		t.Fatalf("expr = %q, want active connection matcher rewritten", expr)
+	if !strings.Contains(expr, `conn_type="active"`) {
+		t.Fatalf("expr = %q, want original PromQL matcher preserved", expr)
 	}
 	if strings.Count(expr, `ongrid_source="db:mongo-test"`) != 3 {
-		t.Fatalf("expr = %q, want explicit source on numerator, denominator current, and available selectors", expr)
+		t.Fatalf("expr = %q, want explicit source on numerator and denominator selectors", expr)
 	}
 }
 
@@ -903,8 +875,10 @@ func TestNormalizeAlertRuleConfigInputForRequestDropsModelClaimedExplicitDatabas
 	if _, exists := got.Spec["selector"]; exists {
 		t.Fatalf("selector = %#v, should remove implicit database source selector", got.Spec["selector"])
 	}
-	if count := strings.Count(expr, `max by (device_id, ongrid_source)`); count != 3 {
-		t.Fatalf("expr = %q, want per-source MongoDB connection usage expression", expr)
+	for _, want := range []string{`conn_type="current"`, `conn_type="available"`, `> 80`} {
+		if !strings.Contains(expr, want) {
+			t.Fatalf("expr = %q, want original expression component %q preserved", expr, want)
+		}
 	}
 }
 
@@ -945,8 +919,8 @@ func TestNormalizeAlertRuleConfigInputDropsImplicitDatabaseSourceSelector(t *tes
 	if _, exists := got.Spec["selector"]; exists {
 		t.Fatalf("selector = %#v, should remove implicit sample database source selector", got.Spec["selector"])
 	}
-	if !strings.Contains(expr, `max by (device_id, ongrid_source)`) {
-		t.Fatalf("expr = %q, want per-source grouping after dropping selector", expr)
+	if !strings.Contains(expr, `conn_type="active"`) {
+		t.Fatalf("expr = %q, want original PromQL matcher preserved", expr)
 	}
 }
 
@@ -965,11 +939,11 @@ func TestNormalizeAlertRuleConfigInputDropsImplicitMongoSourceFromConnectionUsag
 			t.Fatalf("expr = %q, should drop implicit sample MongoDB matcher %s", expr, leaked)
 		}
 	}
-	if strings.Contains(expr, `conn_type="active"`) {
-		t.Fatalf("expr = %q, want active matcher rewritten to current", expr)
+	if !strings.Contains(expr, `conn_type="active"`) {
+		t.Fatalf("expr = %q, want original PromQL matcher preserved", expr)
 	}
 	if count := strings.Count(expr, `max by (device_id, ongrid_source)`); count != 3 {
-		t.Fatalf("expr = %q, max-by-source count = %d, want 3", expr, count)
+		t.Fatalf("expr = %q, max-by-source count = %d, want original aggregation preserved", expr, count)
 	}
 }
 
@@ -1012,8 +986,8 @@ func TestNormalizeAlertRuleConfigInputPreservesExplicitDatabaseServiceSelector(t
 	if !strings.Contains(expr, `service="mongo-test"`) {
 		t.Fatalf("expr = %q, want explicit database service selector preserved", expr)
 	}
-	if strings.Contains(expr, `conn_type="active"`) {
-		t.Fatalf("expr = %q, want active matcher rewritten to current", expr)
+	if !strings.Contains(expr, `conn_type="active"`) {
+		t.Fatalf("expr = %q, want original PromQL matcher preserved", expr)
 	}
 }
 
@@ -1084,48 +1058,6 @@ func TestNormalizeAlertRuleConfigInputDropsLeakedDatabaseSourceFromRawExpr(t *te
 	}
 	if expr != `redis_connected_clients > 50` {
 		t.Fatalf("expr = %q, want database metric left unscoped", expr)
-	}
-}
-
-func TestNormalizeAlertRuleConfigInputRewritesMongoConnectionUsageSumToMax(t *testing.T) {
-	in := aiopstools.AlertRuleConfigInput{
-		Kind: "metric_raw",
-		Spec: map[string]interface{}{
-			"expr": `(sum by (device_id, ongrid_source) (mongodb_ss_connections{conn_type="current"}) / (sum by (device_id, ongrid_source) (mongodb_ss_connections{conn_type="current"}) + sum by (device_id, ongrid_source) (mongodb_ss_connections{conn_type="available"}))) * 100 > 85`,
-		},
-	}
-
-	got := alertdraft.NormalizeRuleConfigInput(in)
-	expr, _ := got.Spec["expr"].(string)
-	if strings.Contains(expr, "sum by") {
-		t.Fatalf("expr = %q, want gauge connection usage rewritten away from sum by", expr)
-	}
-	if count := strings.Count(expr, `max by (device_id, ongrid_source)`); count != 3 {
-		t.Fatalf("expr = %q, max-by-source count = %d, want 3", expr, count)
-	}
-	if strings.Contains(expr, `ongrid_source="db:mongo-test"`) {
-		t.Fatalf("expr = %q, should not invent a source selector", expr)
-	}
-	if !strings.HasSuffix(expr, `> 85`) {
-		t.Fatalf("expr = %q, want threshold preserved", expr)
-	}
-}
-
-func TestNormalizeAlertRuleConfigInputNormalizesMongoConnectionUsageRatioThreshold(t *testing.T) {
-	in := aiopstools.AlertRuleConfigInput{
-		Kind: "metric_raw",
-		Spec: map[string]interface{}{
-			"expr": `max by (device_id, ongrid_source) (mongodb_ss_connections{conn_type="current"}) / (max by (device_id, ongrid_source) (mongodb_ss_connections{conn_type="current"}) + max by (device_id, ongrid_source) (mongodb_ss_connections{conn_type="available"})) > 0.8`,
-		},
-	}
-
-	got := alertdraft.NormalizeRuleConfigInput(in)
-	expr, _ := got.Spec["expr"].(string)
-	if !strings.Contains(expr, `100 *`) {
-		t.Fatalf("expr = %q, want percent expression", expr)
-	}
-	if strings.HasSuffix(expr, `> 0.8`) || !strings.HasSuffix(expr, `> 80`) {
-		t.Fatalf("expr = %q, want ratio threshold normalized to 80 percent", expr)
 	}
 }
 

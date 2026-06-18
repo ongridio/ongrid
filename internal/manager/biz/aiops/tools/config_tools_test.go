@@ -84,18 +84,27 @@ func TestConfigDraftToolRejectsEmptyRule(t *testing.T) {
 	}
 }
 
-func TestConfigDraftToolInfoGuidesDatabaseMetricRawRules(t *testing.T) {
+func TestConfigDraftToolInfoDescribesDraftValidationContract(t *testing.T) {
 	tool := NewDraftConfigChangeTool(&fakeConfigManager{}, nil)
 	info, err := tool.Info(context.Background())
 	if err != nil {
 		t.Fatalf("Info: %v", err)
 	}
-	if !strings.Contains(string(info.Parameters), `ongrid_source=\"db:...\"`) ||
-		!strings.Contains(string(info.Parameters), `conn_type=\"current\"`) {
-		t.Fatalf("draft tool info should forbid sample source scoping and guide Mongo current usage: when=%s params=%s", info.WhenToUse, string(info.Parameters))
+	for _, want := range []string{"config_validation_failed", "config_draft", "draft_hash"} {
+		if !strings.Contains(info.WhenToUse, want) {
+			t.Fatalf("WhenToUse = %q, want %q", info.WhenToUse, want)
+		}
 	}
-	if !strings.Contains(string(info.Parameters), "service(required from user text or current traces_spanmetrics_* service_name labels)") {
-		t.Fatalf("draft tool info should require trace service discovery: when=%s params=%s", info.WhenToUse, string(info.Parameters))
+	params := string(info.Parameters)
+	for _, want := range []string{"metric_raw accepts expr/promql/query", "source_explicit=true"} {
+		if !strings.Contains(params, want) {
+			t.Fatalf("Parameters should describe alert draft contract, missing %q: %s", want, params)
+		}
+	}
+	for _, overSpecified := range []string{`conn_type=\"current\"`, `clamp_min`, `ongrid_source=\"db:...\"`} {
+		if strings.Contains(params, overSpecified) {
+			t.Fatalf("Parameters should not hard-code database PromQL policy %q: %s", overSpecified, params)
+		}
 	}
 }
 
