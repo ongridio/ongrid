@@ -195,6 +195,72 @@ func TestSQLiteSoftDeleteHidesRow(t *testing.T) {
 	if len(list) != 0 {
 		t.Errorf("List after delete = %d items, want 0", len(list))
 	}
+
+	recreated := &model.Edge{
+		Name:          "recreated",
+		AccessKeyID:   e.AccessKeyID,
+		SecretKeyHash: "h2",
+	}
+	if err := repo.Create(ctx, recreated); err != nil {
+		t.Fatalf("Create with soft-deleted access key: %v", err)
+	}
+	if recreated.ID == e.ID {
+		t.Fatalf("recreated edge reused soft-deleted id %d", e.ID)
+	}
+	if n, err := repo.Count(ctx); err != nil || n != 1 {
+		t.Errorf("Count after recreate = %d, %v; want 1,nil", n, err)
+	}
+}
+
+func TestSQLitePluginConfigSoftDeleteAllowsReuse(t *testing.T) {
+	repo := newTestRepo(t)
+	configs := NewPluginConfigRepo(repo.db)
+	ctx := context.Background()
+
+	first, err := configs.Upsert(ctx, &model.PluginConfig{
+		EdgeID:     7,
+		PluginName: model.PluginNameMetrics,
+		Enabled:    true,
+		SpecJSON:   `{}`,
+	})
+	if err != nil {
+		t.Fatalf("first Upsert: %v", err)
+	}
+	again, err := configs.Upsert(ctx, &model.PluginConfig{
+		EdgeID:     7,
+		PluginName: model.PluginNameMetrics,
+		Enabled:    false,
+		SpecJSON:   `{"next":true}`,
+	})
+	if err != nil {
+		t.Fatalf("second active Upsert: %v", err)
+	}
+	if again.ID != first.ID {
+		t.Fatalf("active upsert created id %d, want existing id %d", again.ID, first.ID)
+	}
+
+	if err := configs.Delete(ctx, 7, model.PluginNameMetrics); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	recreated, err := configs.Upsert(ctx, &model.PluginConfig{
+		EdgeID:     7,
+		PluginName: model.PluginNameMetrics,
+		Enabled:    true,
+		SpecJSON:   `{"recreated":true}`,
+	})
+	if err != nil {
+		t.Fatalf("recreate after soft delete: %v", err)
+	}
+	if recreated.ID == first.ID {
+		t.Fatalf("recreated config reused soft-deleted id %d", first.ID)
+	}
+	rows, err := configs.ListByEdge(ctx, 7)
+	if err != nil {
+		t.Fatalf("ListByEdge: %v", err)
+	}
+	if len(rows) != 1 || rows[0].ID != recreated.ID {
+		t.Fatalf("active rows after recreate = %+v, want recreated only", rows)
+	}
 }
 
 func TestSQLiteListFilters(t *testing.T) {

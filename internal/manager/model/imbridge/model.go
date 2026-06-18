@@ -9,7 +9,7 @@ package imbridge
 import (
 	"time"
 
-	"gorm.io/gorm"
+	"gorm.io/plugin/soft_delete"
 )
 
 const (
@@ -50,17 +50,17 @@ const (
 // platform-side identifier (Feishu app_id, DingTalk AppKey); the secret
 // is encrypted at rest by SystemSetting reveal/store flow.
 type ImApp struct {
-	ID          uint64    `gorm:"primaryKey;autoIncrement"`
-	Provider    string    `gorm:"size:16;not null;uniqueIndex:uk_provider_app_id,priority:1"`
+	ID       uint64 `gorm:"primaryKey;autoIncrement"`
+	Provider string `gorm:"size:16;not null;uniqueIndex:uk_provider_app_id,priority:1"`
 	// Mode = ModeStream (default) or ModeWebhook. Stream apps are
 	// supervised by imbridge.StreamSupervisor; webhook apps wait for
 	// inbound HTTP at /api/v1/im/{provider}/events.
-	Mode        string    `gorm:"size:16;not null;default:stream"`
-	Name        string    `gorm:"size:128;not null"`
-	AppID       string    `gorm:"column:app_id;size:128;not null;uniqueIndex:uk_provider_app_id,priority:2"`
-	AppSecret   string    `gorm:"column:app_secret;type:text;not null"`
-	VerifyToken string    `gorm:"column:verify_token;size:128"`
-	EncryptKey  string    `gorm:"column:encrypt_key;size:128"`
+	Mode        string `gorm:"size:16;not null;default:stream"`
+	Name        string `gorm:"size:128;not null"`
+	AppID       string `gorm:"column:app_id;size:128;not null;uniqueIndex:uk_provider_app_id,priority:2"`
+	AppSecret   string `gorm:"column:app_secret;type:text;not null"`
+	VerifyToken string `gorm:"column:verify_token;size:128"`
+	EncryptKey  string `gorm:"column:encrypt_key;size:128"`
 	// AllowFrom is the sender allowlist for PUBLICLY-discoverable
 	// providers (Telegram): comma/space/newline-separated numeric
 	// Telegram user IDs. Only these users may converse with the bot;
@@ -68,12 +68,12 @@ type ImApp struct {
 	// (a public bot with no allowlist is the exact "anyone can reach the
 	// platform" risk — see ADR-031, OpenClaw issue #73756). Unused by
 	// Feishu/DingTalk, which are gated by enterprise-tenant membership.
-	AllowFrom   string    `gorm:"column:allow_from;type:text"`
+	AllowFrom string `gorm:"column:allow_from;type:text"`
 	// IdleTimeoutSeconds is kept for legacy installs but is currently
 	// unused — sessions don't auto-rotate any more. Future "long
 	// conversation context window" work might re-introduce it as a
 	// soft window cap rather than a hard rotate. 0 = no behaviour.
-	IdleTimeoutSeconds int  `gorm:"column:idle_timeout_seconds;not null;default:0"`
+	IdleTimeoutSeconds int `gorm:"column:idle_timeout_seconds;not null;default:0"`
 	// DefaultLocale picks the language directive the bridge appends to
 	// every user message before handing off to the agent — so a Slack
 	// workspace whose admin set this to "en" gets English replies even
@@ -81,11 +81,12 @@ type ImApp struct {
 	// directive (LLM mirrors the user). Accepted: "en", "zh".
 	// Mirrors [[feedback_ai_output_locale]] for the IM path; RCA has its
 	// own Config.DefaultLocale on the investigator usecase.
-	DefaultLocale      string    `gorm:"column:default_locale;size:8;not null;default:''"`
-	Enabled     bool      `gorm:"not null;default:true"`
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	DeletedAt   gorm.DeletedAt `gorm:"index"`
+	DefaultLocale string `gorm:"column:default_locale;size:8;not null;default:''"`
+	Enabled       bool   `gorm:"not null;default:true"`
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	DeletedAt     *time.Time            `gorm:"index;column:deleted_at"`
+	DeleteMarker  soft_delete.DeletedAt `gorm:"column:delete_marker;not null;default:0;softDelete:milli,DeletedAtField:DeletedAt;uniqueIndex:uk_provider_app_id,priority:3"`
 }
 
 func (ImApp) TableName() string { return "im_apps" }
@@ -107,16 +108,16 @@ func (ImApp) TableName() string { return "im_apps" }
 // ImSenderID is recorded (for audit + future S3 binding) but is
 // NOT part of the uniqueness key.
 type ImThread struct {
-	ID              uint64    `gorm:"primaryKey;autoIncrement"`
-	ImAppID         uint64    `gorm:"column:im_app_id;not null;uniqueIndex:uk_app_chat,priority:1;index:idx_app_chat"`
-	Provider        string    `gorm:"size:16;not null"`
-	ImChatID        string    `gorm:"column:im_chat_id;size:128;not null;uniqueIndex:uk_app_chat,priority:2"`
-	ImThreadID      string    `gorm:"column:im_thread_id;size:128;uniqueIndex:uk_app_chat,priority:3"`
+	ID         uint64 `gorm:"primaryKey;autoIncrement"`
+	ImAppID    uint64 `gorm:"column:im_app_id;not null;uniqueIndex:uk_app_chat,priority:1;index:idx_app_chat"`
+	Provider   string `gorm:"size:16;not null"`
+	ImChatID   string `gorm:"column:im_chat_id;size:128;not null;uniqueIndex:uk_app_chat,priority:2"`
+	ImThreadID string `gorm:"column:im_thread_id;size:128;uniqueIndex:uk_app_chat,priority:3"`
 	// ImSenderID is the most recent sender — recorded for audit /
 	// future per-user binding but does NOT split the
 	// session mapping. All senders in a chat share one session.
-	ImSenderID      string    `gorm:"column:im_sender_id;size:128"`
-	OngridSessionID string    `gorm:"column:ongrid_session_id;size:128;not null;index:idx_session"`
+	ImSenderID      string `gorm:"column:im_sender_id;size:128"`
+	OngridSessionID string `gorm:"column:ongrid_session_id;size:128;not null;index:idx_session"`
 	LastSeenAt      time.Time
 	CreatedAt       time.Time
 	UpdatedAt       time.Time

@@ -16,7 +16,7 @@ package edge
 import (
 	"time"
 
-	"gorm.io/gorm"
+	"gorm.io/plugin/soft_delete"
 )
 
 // Edge is a registered edge agent (a tunnel-side identity). Post-pivot
@@ -28,13 +28,13 @@ import (
 // Post-split (May 2026): device-y fields (Hostname/OS/HW/Roles/usage)
 // have moved to model/device.Device. Edge keeps tunnel-y fields only.
 type Edge struct {
-	ID            uint64 `gorm:"primaryKey;autoIncrement"`
+	ID uint64 `gorm:"primaryKey;autoIncrement"`
 	// Name is the operator-friendly display name. Optional at create
 	// time — when left empty, edge.HandleRegister auto-fills it with
 	// the host's reported hostname on first tunnel handshake.
 	Name          string `gorm:"size:128;not null;default:''"`
-	AccessKeyID   string `gorm:"size:32;uniqueIndex;not null;column:access_key_id"`
-	SecretKeyHash string `gorm:"size:512;not null;column:secret_key_hash"` // argon2id
+	AccessKeyID   string `gorm:"size:32;not null;column:access_key_id;uniqueIndex:idx_edges_access_key_id,priority:1"`
+	SecretKeyHash string `gorm:"size:512;not null;column:secret_key_hash"`                     // argon2id
 	Status        string `gorm:"size:16;default:offline;check:status IN ('online','offline')"` // online | offline
 	Description   string `gorm:"size:255;not null;default:''"`
 
@@ -49,11 +49,12 @@ type Edge struct {
 	// this edge is running on). Source of truth is the edge_devices
 	// junction (Type=Host); this field is kept synchronised by the
 	// register flow so old callers that read e.DeviceID don't break.
-	DeviceID  *uint64        `gorm:"index;column:device_id"`
-	CreatedBy *uint64        `gorm:"column:created_by"` // audit only
-	CreatedAt time.Time      `gorm:"column:created_at"`
-	UpdatedAt time.Time      `gorm:"column:updated_at"`
-	DeletedAt gorm.DeletedAt `gorm:"index;column:deleted_at"` // soft delete
+	DeviceID     *uint64               `gorm:"index;column:device_id"`
+	CreatedBy    *uint64               `gorm:"column:created_by"` // audit only
+	CreatedAt    time.Time             `gorm:"column:created_at"`
+	UpdatedAt    time.Time             `gorm:"column:updated_at"`
+	DeletedAt    *time.Time            `gorm:"index;column:deleted_at"` // soft delete audit time
+	DeleteMarker soft_delete.DeletedAt `gorm:"column:delete_marker;not null;default:0;softDelete:milli,DeletedAtField:DeletedAt;uniqueIndex:idx_edges_access_key_id,priority:2"`
 }
 
 // TableName pins the SQLite table.

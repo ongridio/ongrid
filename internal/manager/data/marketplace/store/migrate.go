@@ -10,11 +10,20 @@ import (
 	"gorm.io/gorm"
 
 	model "github.com/ongridio/ongrid/internal/manager/model/marketplace"
+	"github.com/ongridio/ongrid/internal/pkg/dbx"
 )
 
 // Migrate registers the installed_skills table with GORM's AutoMigrate.
 // Composed from cmd/ongrid via dbx.RunMigrations like the other BC
 // migrations.
 func Migrate(db *gorm.DB) error {
-	return db.AutoMigrate(&model.InstalledPack{})
+	if dbx.NeedsDeleteMarkerMigration(db, model.InstalledPack{}.TableName()) {
+		if err := dbx.DropIndexes(db, &model.InstalledPack{}, "idx_tenant_pack"); err != nil {
+			return err
+		}
+	}
+	if err := db.AutoMigrate(&model.InstalledPack{}); err != nil {
+		return err
+	}
+	return dbx.BackfillDeleteMarker(db, model.InstalledPack{}.TableName())
 }

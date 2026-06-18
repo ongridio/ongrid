@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 
 	model "github.com/ongridio/ongrid/internal/manager/model/device"
+	"github.com/ongridio/ongrid/internal/pkg/dbx"
 )
 
 // Migrate registers the device + edge_devices schema and backfills any
@@ -24,7 +25,28 @@ import (
 // label and dashboards / saved alert filters keep working without a
 // value remap.
 func Migrate(db *gorm.DB) error {
+	if dbx.NeedsDeleteMarkerMigration(db, model.Device{}.TableName()) {
+		if err := dbx.DropIndexes(
+			db,
+			&model.Device{},
+			"idx_devices_fingerprint",
+			"idx_devices_node_id",
+		); err != nil {
+			return err
+		}
+	}
+	if dbx.NeedsDeleteMarkerMigration(db, model.EdgeDevice{}.TableName()) {
+		if err := dbx.DropIndexes(db, &model.EdgeDevice{}, "idx_edge_device_unique"); err != nil {
+			return err
+		}
+	}
 	if err := db.AutoMigrate(&model.Device{}, &model.EdgeDevice{}); err != nil {
+		return err
+	}
+	if err := dbx.BackfillDeleteMarker(db, model.Device{}.TableName()); err != nil {
+		return err
+	}
+	if err := dbx.BackfillDeleteMarker(db, model.EdgeDevice{}.TableName()); err != nil {
 		return err
 	}
 	return backfillFromEdges(db)

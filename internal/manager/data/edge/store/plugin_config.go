@@ -60,7 +60,7 @@ func (r *PluginConfigRepo) Upsert(ctx context.Context, in *model.PluginConfig) (
 	}
 	in.UpdatedAt = now
 	err := r.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "edge_id"}, {Name: "plugin_name"}},
+		Columns:   []clause.Column{{Name: "edge_id"}, {Name: "plugin_name"}, {Name: "delete_marker"}},
 		DoUpdates: clause.AssignmentColumns([]string{"enabled", "spec_json", "updated_at"}),
 	}).Create(in).Error
 	if err != nil {
