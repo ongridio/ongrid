@@ -945,26 +945,83 @@ function ToolArgsForm({
     );
   }
 
+  // setArg coerces the raw input into the type the tool expects and omits
+  // the key entirely when blank (so optional params truly stay unset). A
+  // {{…}} value is always kept as a string — it's resolved at run time.
+  const setArg = (key: string, raw: string, type?: string) => {
+    const next = { ...args };
+    const t = raw.trim();
+    if (t === '') {
+      delete next[key];
+    } else if (t.startsWith('{{')) {
+      next[key] = raw; // template — resolved at run time, stays a string
+    } else if (type === 'array' || type === 'object') {
+      try {
+        next[key] = JSON.parse(t);
+      } catch {
+        next[key] = raw; // let the user keep typing; tool will validate
+      }
+    } else if (type === 'number' || type === 'integer') {
+      const n = Number(t);
+      next[key] = Number.isNaN(n) ? raw : n;
+    } else {
+      next[key] = raw;
+    }
+    onChange(next);
+  };
+
+  // display turns a stored arg value back into the input's text form.
+  const display = (v: unknown): string => {
+    if (v === undefined || v === null) return '';
+    if (typeof v === 'string') return v;
+    if (Array.isArray(v) || typeof v === 'object') return JSON.stringify(v);
+    return String(v);
+  };
+
   return (
     <div>
       <div className="mb-2 rounded-md bg-zinc-900/60 p-2 text-[11px] leading-relaxed text-zinc-500">
         {schema?.description}
+        <div className="mt-1 text-zinc-600">
+          {tr(
+            '可选参数留空即可。数组填 [1, 2]，布尔选 true/false，数字直接填；任意字段也可用 {{…}} 引用上游。',
+            'Leave optional params blank. Arrays as [1, 2], booleans true/false, numbers plain; any field also accepts a {{…}} upstream ref.'
+          )}
+        </div>
       </div>
       {Object.entries(props).map(([key, spec]) => {
-        const val = (args[key] as string) ?? '';
+        const type = (spec as { type?: string }).type;
+        const stored = args[key];
+        const val = display(stored);
         const isEnum = Array.isArray(spec.enum) && spec.enum.length > 0;
+        const isBool = type === 'boolean';
+        const isTemplate = typeof stored === 'string' && stored.trim().startsWith('{{');
+        const typeBadge =
+          type === 'array' ? tr('数组', 'array')
+          : isBool ? tr('布尔', 'bool')
+          : type === 'number' || type === 'integer' ? tr('数字', 'number')
+          : '';
+        const ph =
+          type === 'array' ? '[1, 2]  或  {{…}}'
+          : type === 'number' || type === 'integer' ? `123  ${tr('或', 'or')}  {{…}}`
+          : '{{…}}';
         return (
           <label key={key} className="mb-3 block">
             <span className="mb-1 block text-[12px] text-zinc-500">
               <span className="font-mono text-zinc-400">{key}</span>
-              {required.has(key) && <span className="ml-1 text-red-400">*</span>}
+              {required.has(key) ? (
+                <span className="ml-1 text-red-400">*</span>
+              ) : (
+                <span className="ml-1 text-[10px] text-zinc-600">{tr('可选', 'optional')}</span>
+              )}
+              {typeBadge && <span className="ml-1 rounded bg-zinc-800 px-1 text-[9px] text-zinc-500">{typeBadge}</span>}
               {spec.description ? <span className="ml-1 text-zinc-600">— {spec.description}</span> : null}
             </span>
             {isEnum ? (
               <select
                 value={val}
                 disabled={disabled}
-                onChange={(e) => onChange({ ...args, [key]: e.target.value })}
+                onChange={(e) => setArg(key, e.target.value, type)}
                 className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-[13px] text-zinc-200 outline-none focus:border-indigo-500"
               >
                 <option value="">{tr('（不设置）', '(unset)')}</option>
@@ -974,12 +1031,28 @@ function ToolArgsForm({
                   </option>
                 ))}
               </select>
+            ) : isBool && !isTemplate ? (
+              <select
+                value={val}
+                disabled={disabled}
+                onChange={(e) => {
+                  const next = { ...args };
+                  if (e.target.value === '') delete next[key];
+                  else next[key] = e.target.value === 'true';
+                  onChange(next);
+                }}
+                className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-[13px] text-zinc-200 outline-none focus:border-indigo-500"
+              >
+                <option value="">{tr('（不设置）', '(unset)')}</option>
+                <option value="true">true</option>
+                <option value="false">false</option>
+              </select>
             ) : (
               <input
                 value={val}
                 disabled={disabled}
-                placeholder={spec.type === 'number' || spec.type === 'integer' ? '123 / {{…}}' : '{{…}}'}
-                onChange={(e) => onChange({ ...args, [key]: e.target.value })}
+                placeholder={ph}
+                onChange={(e) => setArg(key, e.target.value, type)}
                 className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-[12px] text-zinc-200 outline-none focus:border-indigo-500"
               />
             )}
