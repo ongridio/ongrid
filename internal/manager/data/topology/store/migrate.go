@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	model "github.com/ongridio/ongrid/internal/manager/model/topology"
+	"github.com/ongridio/ongrid/internal/pkg/dbx"
 )
 
 // Migrate registers nodes / relations / relation_types with GORM
@@ -17,7 +18,15 @@ import (
 // any device rows that don't yet point at a node. All
 // steps are idempotent; second boot is a no-op past AutoMigrate.
 func Migrate(db *gorm.DB) error {
+	if dbx.NeedsDeleteMarkerMigration(db, model.Relation{}.TableName()) {
+		if err := dbx.DropIndexes(db, &model.Relation{}, "idx_relations_src_dst_type"); err != nil {
+			return err
+		}
+	}
 	if err := db.AutoMigrate(&model.Node{}, &model.Relation{}, &model.RelationType{}, &model.NodeType{}); err != nil {
+		return err
+	}
+	if err := dbx.BackfillDeleteMarker(db, model.Relation{}.TableName()); err != nil {
 		return err
 	}
 	if err := seedBuiltinRelationTypes(db); err != nil {

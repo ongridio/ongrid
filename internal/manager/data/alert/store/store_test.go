@@ -34,7 +34,7 @@ func TestIncidentEventRoundTrip(t *testing.T) {
 
 	labels := `{"device_id":"2","rule":"cpu_high"}`
 	incident := &model.Incident{
-		DeviceID:       ptrUint64(2),
+		DeviceID:     ptrUint64(2),
 		Scope:        model.RuleScopeHost,
 		Rule:         "cpu_high",
 		RuleName:     "CPU High",
@@ -114,7 +114,7 @@ func TestSilenceRuleChannelDeliveryRoundTrip(t *testing.T) {
 	silence := &model.Silence{
 		Name:         "self-loop cpu maintenance",
 		Scope:        model.RuleScopeHost,
-		DeviceID:       ptrUint64(2),
+		DeviceID:     ptrUint64(2),
 		Rule:         "cpu_high",
 		Status:       model.SilenceStatusActive,
 		MatchersJSON: `[{"field":"device_id","operator":"=","value":"2"}]`,
@@ -230,6 +230,46 @@ func TestRepoNotFoundAndValidation(t *testing.T) {
 	}
 }
 
+func TestDeleteRuleHardDeletesAndFreesRuleKey(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	key := "custom_disk_pressure"
+
+	first := &model.Rule{
+		RuleKey:        key,
+		Kind:           model.RuleKindMetricRaw,
+		Name:           "Custom Disk Pressure",
+		ScopeType:      model.RuleScopeHost,
+		JoinMode:       model.RuleJoinModeAll,
+		Severity:       "warning",
+		Enabled:        true,
+		ConditionsJSON: `{"expr":"up == 0"}`,
+	}
+	if err := repo.CreateRule(ctx, first); err != nil {
+		t.Fatalf("CreateRule first: %v", err)
+	}
+	if err := repo.DeleteRule(ctx, first.ID); err != nil {
+		t.Fatalf("DeleteRule: %v", err)
+	}
+	if _, err := repo.GetRuleByKey(ctx, key); !errors.Is(err, errs.ErrNotFound) {
+		t.Fatalf("GetRuleByKey after delete err = %v, want ErrNotFound", err)
+	}
+
+	second := &model.Rule{
+		RuleKey:        key,
+		Kind:           model.RuleKindMetricRaw,
+		Name:           "Custom Disk Pressure Recreated",
+		ScopeType:      model.RuleScopeHost,
+		JoinMode:       model.RuleJoinModeAll,
+		Severity:       "warning",
+		Enabled:        true,
+		ConditionsJSON: `{"expr":"up == 1"}`,
+	}
+	if err := repo.CreateRule(ctx, second); err != nil {
+		t.Fatalf("CreateRule second with same key: %v", err)
+	}
+}
+
 // TestCountRulesReferencingChannel exercises the LIKE-based scan used
 // by the DeleteChannel guard. The matcher must distinguish id 1 from
 // id 11 inside JSON arrays of varying shape.
@@ -248,7 +288,7 @@ func TestCountRulesReferencingChannel(t *testing.T) {
 		{"rule_first", `[1,2,3]`},
 		{"rule_middle", `[5,1,8]`},
 		{"rule_last", `[7,9,1]`},
-		{"rule_eleven", `[11]`},     // must not match id 1
+		{"rule_eleven", `[11]`},           // must not match id 1
 		{"rule_eleven_first", `[11,2,3]`}, // must not match id 1
 	}
 	for _, c := range cases {

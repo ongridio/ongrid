@@ -118,6 +118,11 @@ type invokeConfig struct {
 	// (cluster-wide tools like query_promql) is distinguishable from
 	// "device 0".
 	DeviceID *uint64
+
+	// UserText is the current end-user turn. Tools use this only for
+	// validation/normalization that must be grounded in the user's actual
+	// request instead of the model's reconstructed arguments.
+	UserText string
 }
 
 // WithTenant sets the tenant identifier on the invoke config.
@@ -139,6 +144,11 @@ func WithDeviceID(deviceID *uint64) InvokeOption {
 	return func(c *invokeConfig) { c.DeviceID = deviceID }
 }
 
+// WithUserText sets the current end-user turn on the invoke config.
+func WithUserText(text string) InvokeOption {
+	return func(c *invokeConfig) { c.UserText = text }
+}
+
 // ResolveOptions applies opts to a fresh invokeConfig and returns it.
 // Exposed for the decorator package — tool implementations don't need
 // it (they receive the resolved values via decorators or skip them).
@@ -158,6 +168,7 @@ func ResolveOptions(opts []InvokeOption) Resolved {
 		Tenant:   c.Tenant,
 		UserID:   c.UserID,
 		DeviceID: c.DeviceID,
+		UserText: c.UserText,
 	}
 }
 
@@ -168,4 +179,5 @@ type Resolved struct {
 	Tenant   string
 	UserID   uint64
 	DeviceID *uint64
+	UserText string
 }

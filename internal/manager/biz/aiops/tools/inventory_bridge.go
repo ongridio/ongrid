@@ -1,11 +1,14 @@
 // inventory_bridge.go is the inverse of skill_bridge.go.
 //
 // skill_bridge:    skill registry  → aiops Tool registry  (so the LLM
-//                                    sees skills as function-calling tools)
+//
+//	sees skills as function-calling tools)
+//
 // inventory_bridge: aiops BaseTool bag → skill registry  (so the /skills
-//                                    page sees every cloud-side tool as
-//                                    an inventoried capability, with audit
-//                                    + class gate)
+//
+//	page sees every cloud-side tool as
+//	an inventoried capability, with audit
+//	+ class gate)
 //
 // Background. Before this bridge, the manager-side LLM toolset had two
 // parallel populations:
@@ -185,7 +188,7 @@ func classifyToolCategory(name string) string {
 		"query_alert_rules", "query_incidents", "get_incident_detail",
 		"rank_edges", "find_outlier_edges", "correlate_incident":
 		return "diagnostic"
-	case "query_promql", "query_logql", "query_traceql":
+	case "query_promql", "list_metric_catalog", "query_logql", "query_traceql":
 		return "telemetry"
 	case "agent", "send_message", "task_stop", "tool_search":
 		return "agent"

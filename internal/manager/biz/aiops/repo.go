@@ -46,8 +46,8 @@ type SessionRepo interface {
 
 	// Messages ------------------------------------------------------------
 	AppendMessage(ctx context.Context, m *model.Message) error
-	// ListMessages returns up to limit messages for sessionID, ordered by
-	// created_at ascending. A non-positive limit returns all messages.
+	// ListMessages returns up to limit recent messages for sessionID, ordered
+	// by created_at ascending. A non-positive limit returns all messages.
 	ListMessages(ctx context.Context, sessionID string, limit int) ([]*model.Message, error)
 
 	// Tool calls ----------------------------------------------------------

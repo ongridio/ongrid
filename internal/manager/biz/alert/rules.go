@@ -61,6 +61,7 @@ type MetricAnomalyRule struct {
 	RunbookURL     string
 	Labels         map[string]string
 	Metric         string  // e.g. "cpu_pct" — resolved to the canonical PromQL via metricExprFor
+	Selector       string  // optional Prometheus selector merged into the closed-set metric expression
 	Method         string  // "zscore" | "mad" (default zscore)
 	BaselineWindow string  // PromQL duration ("1h")
 	BaselineStep   string  // sub-query step ("5m"); defaults to 5m
@@ -81,6 +82,7 @@ type MetricForecastRule struct {
 	RunbookURL     string
 	Labels         map[string]string
 	Metric         string  // canonical metric (cpu_pct / disk_avail_bytes / ...)
+	Selector       string  // optional Prometheus selector merged into the closed-set metric expression
 	FitWindow      string  // PromQL duration the linear fit looks back over
 	PredictSeconds int     // how far into the future to extrapolate
 	Operator       string  // ">", ">=", "<", "<=", "==", "!="
@@ -124,6 +126,7 @@ type LogVolumeRule struct {
 	RunbookURL     string
 	Labels         map[string]string
 	StreamSelector string
+	LineFilter     string
 	Window         string
 	Operator       string
 	Threshold      float64
@@ -214,14 +217,14 @@ type RulesProvider interface {
 // rulesSnapshot is the immutable bundle CachedRulesProvider swaps in
 // atomically every refresh.
 type rulesSnapshot struct {
-	metricRaw       []MetricRawRule
-	metricAnomaly   []MetricAnomalyRule
-	metricForecast  []MetricForecastRule
-	metricBurnRate  []MetricBurnRateRule
-	logMatch        []LogMatchRule
-	logVolume       []LogVolumeRule
-	traceLatency    []TraceLatencyRule
-	traceErrorRate  []TraceErrorRateRule
+	metricRaw      []MetricRawRule
+	metricAnomaly  []MetricAnomalyRule
+	metricForecast []MetricForecastRule
+	metricBurnRate []MetricBurnRateRule
+	logMatch       []LogMatchRule
+	logVolume      []LogVolumeRule
+	traceLatency   []TraceLatencyRule
+	traceErrorRate []TraceErrorRateRule
 }
 
 // StaticRulesProvider serves a fixed snapshot. Used in tests and embedded
@@ -273,8 +276,8 @@ func (s *StaticRulesProvider) MetricForecastRules() []MetricForecastRule {
 func (s *StaticRulesProvider) MetricBurnRateRules() []MetricBurnRateRule {
 	return s.snap.metricBurnRate
 }
-func (s *StaticRulesProvider) LogMatchRules() []LogMatchRule       { return s.snap.logMatch }
-func (s *StaticRulesProvider) LogVolumeRules() []LogVolumeRule     { return s.snap.logVolume }
+func (s *StaticRulesProvider) LogMatchRules() []LogMatchRule   { return s.snap.logMatch }
+func (s *StaticRulesProvider) LogVolumeRules() []LogVolumeRule { return s.snap.logVolume }
 func (s *StaticRulesProvider) TraceLatencyRules() []TraceLatencyRule {
 	return s.snap.traceLatency
 }
@@ -340,8 +343,8 @@ func (c *CachedRulesProvider) MetricForecastRules() []MetricForecastRule {
 func (c *CachedRulesProvider) MetricBurnRateRules() []MetricBurnRateRule {
 	return c.load().metricBurnRate
 }
-func (c *CachedRulesProvider) LogMatchRules() []LogMatchRule       { return c.load().logMatch }
-func (c *CachedRulesProvider) LogVolumeRules() []LogVolumeRule     { return c.load().logVolume }
+func (c *CachedRulesProvider) LogMatchRules() []LogMatchRule   { return c.load().logMatch }
+func (c *CachedRulesProvider) LogVolumeRules() []LogVolumeRule { return c.load().logVolume }
 func (c *CachedRulesProvider) TraceLatencyRules() []TraceLatencyRule {
 	return c.load().traceLatency
 }
@@ -524,6 +527,7 @@ func compileMetricRawRule(r *model.Rule) (MetricRawRule, error) {
 
 type metricAnomalySpec struct {
 	Metric         string  `json:"metric"`
+	Selector       string  `json:"selector,omitempty"`
 	Method         string  `json:"method"`          // "zscore" (default) | "mad"
 	BaselineWindow string  `json:"baseline_window"` // e.g. "1h"
 	BaselineStep   string  `json:"baseline_step"`   // e.g. "5m"; default 5m
@@ -565,6 +569,7 @@ func compileMetricAnomalyRule(r *model.Rule) (MetricAnomalyRule, error) {
 		Severity:       r.Severity,
 		ScopeType:      effectiveScope(r.ScopeType, r.Kind),
 		Metric:         spec.Metric,
+		Selector:       spec.Selector,
 		Method:         method,
 		BaselineWindow: spec.BaselineWindow,
 		BaselineStep:   spec.BaselineStep,
@@ -582,6 +587,7 @@ func compileMetricAnomalyRule(r *model.Rule) (MetricAnomalyRule, error) {
 
 type metricForecastSpec struct {
 	Metric         string  `json:"metric"`
+	Selector       string  `json:"selector,omitempty"`
 	FitWindow      string  `json:"fit_window"`
 	PredictSeconds int     `json:"predict_seconds"`
 	Operator       string  `json:"operator"`
@@ -616,6 +622,7 @@ func compileMetricForecastRule(r *model.Rule) (MetricForecastRule, error) {
 		Severity:       r.Severity,
 		ScopeType:      effectiveScope(r.ScopeType, r.Kind),
 		Metric:         spec.Metric,
+		Selector:       spec.Selector,
 		FitWindow:      spec.FitWindow,
 		PredictSeconds: spec.PredictSeconds,
 		Operator:       spec.Operator,
@@ -650,9 +657,14 @@ func compileMetricBurnRateRule(r *model.Rule) (MetricBurnRateRule, error) {
 	if err := json.Unmarshal([]byte(r.ConditionsJSON), &spec); err != nil {
 		return MetricBurnRateRule{}, fmt.Errorf("decode conditions: %w", err)
 	}
+	spec.SLI = normalizeBurnRateSLIExpression(spec.SLI)
 	if strings.TrimSpace(spec.SLI) == "" {
 		return MetricBurnRateRule{}, fmt.Errorf("sli required")
 	}
+	if !burnRateSLIUsesWindow(spec.SLI) {
+		return MetricBurnRateRule{}, fmt.Errorf("sli must use $window or a PromQL range selector")
+	}
+	spec.SLO = normalizeBurnRateSLOPercent(spec.SLO)
 	if spec.SLO <= 0 || spec.SLO >= 100 {
 		return MetricBurnRateRule{}, fmt.Errorf("slo must be in (0, 100)")
 	}
@@ -710,6 +722,7 @@ type logMatchSpec struct {
 
 type logVolumeSpec struct {
 	StreamSelector string  `json:"stream_selector"`
+	LineFilter     string  `json:"line_filter"`
 	Window         string  `json:"window"`
 	RatioOp        string  `json:"ratio_op"`
 	RatioThreshold float64 `json:"ratio_threshold"`
@@ -799,6 +812,7 @@ func compileLogVolumeRule(r *model.Rule) (LogVolumeRule, error) {
 		Severity:       r.Severity,
 		ScopeType:      effectiveScope(r.ScopeType, r.Kind),
 		StreamSelector: spec.StreamSelector,
+		LineFilter:     spec.LineFilter,
 		Window:         spec.Window,
 		Operator:       op,
 		Threshold:      spec.RatioThreshold,

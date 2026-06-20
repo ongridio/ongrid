@@ -30,10 +30,11 @@ type Deps struct {
 	Registerer prometheus.Registerer
 
 	// ReviewSpawner is the chatruntime seam ReviewGate uses to spawn
-	// the reviewer worker. Nil → ReviewGate is NOT installed; mutating
-	// tools (Class="write"|"destructive") will run unguarded. cmd/main.go
-	// MUST wire this when the deployment includes the reviewer agent
-	// persona — otherwise SOP gating is silently disabled.
+	// the reviewer worker for mutating tools that are not covered by a
+	// deterministic approval policy. Nil → ReviewGate is NOT installed;
+	// mutating tools (Class="write"|"destructive") will run unguarded.
+	// cmd/main.go MUST wire this when the deployment includes the
+	// reviewer agent persona — otherwise SOP gating is silently disabled.
 	ReviewSpawner ReviewSpawner
 
 	// ReviewSink writes chat_mutating_proposals rows. Nil-safe.
@@ -53,9 +54,9 @@ type Deps struct {
 // Reading top-down (ASCII flow + SOP gating):
 // a request hits tenant_bind first (it's the outermost wrapper),
 // which resolves the tenant from ctx, then descends through
-// review_gate (gates mutating tools by spawning a reviewer worker —
-// PR-7), timeout (bound the inner call), audit (write start row),
-// ratelimit (refuse after audit so denials are recorded), and
+// review_gate (gates mutating tools by deterministic policy or by
+// spawning a reviewer worker — PR-7), timeout (bound the inner call),
+// audit (write start row), ratelimit (refuse after audit), and
 // finally metric — which observes the actual inner tool execution
 // time without timeout/audit/ratelimit overhead in the histogram.
 //

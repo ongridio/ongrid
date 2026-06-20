@@ -163,7 +163,8 @@ func (r *SessionRepo) AppendMessage(ctx context.Context, m *model.Message) error
 }
 
 // ListMessages returns messages for sessionID ordered by created_at ASC.
-// A non-positive limit returns all rows.
+// A non-positive limit returns all rows. A positive limit returns the most
+// recent N messages, still ordered ascending for history replay.
 //
 // Hydrates message.ToolCalls from chat_tool_calls in a single batched
 // query keyed on assistant message IDs — without this, replay drops
@@ -173,11 +174,20 @@ func (r *SessionRepo) AppendMessage(ctx context.Context, m *model.Message) error
 func (r *SessionRepo) ListMessages(ctx context.Context, sessionID string, limit int) ([]*model.Message, error) {
 	tx := r.db.WithContext(ctx).Model(&model.Message{}).Where("session_id = ?", sessionID).Order("created_at ASC, id ASC")
 	if limit > 0 {
-		tx = tx.Limit(limit)
+		tx = r.db.WithContext(ctx).
+			Model(&model.Message{}).
+			Where("session_id = ?", sessionID).
+			Order("created_at DESC, id DESC").
+			Limit(limit)
 	}
 	var out []*model.Message
 	if err := tx.Find(&out).Error; err != nil {
 		return nil, err
+	}
+	if limit > 0 {
+		for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+			out[i], out[j] = out[j], out[i]
+		}
 	}
 	if err := r.hydrateToolCalls(ctx, out); err != nil {
 		return nil, err

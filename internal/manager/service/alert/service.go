@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"strings"
 	"time"
 
@@ -119,15 +120,15 @@ type RuleCondition struct {
 
 // Rule is the DTO returned by rule endpoints.
 type Rule struct {
-	ID         uint64            `json:"id"`
-	RuleKey    string            `json:"rule_key"`
-	Kind       string            `json:"kind"`
-	Name       string            `json:"name"`
-	SourceType string            `json:"source_type"`
-	ScopeType  string            `json:"scope_type"`
-	JoinMode   string            `json:"join_mode"`
-	Severity   string            `json:"severity"`
-	Enabled    bool              `json:"enabled"`
+	ID         uint64 `json:"id"`
+	RuleKey    string `json:"rule_key"`
+	Kind       string `json:"kind"`
+	Name       string `json:"name"`
+	SourceType string `json:"source_type"`
+	ScopeType  string `json:"scope_type"`
+	JoinMode   string `json:"join_mode"`
+	Severity   string `json:"severity"`
+	Enabled    bool   `json:"enabled"`
 	// Conditions is populated for kind=metric_threshold; empty for other kinds.
 	Conditions []RuleCondition `json:"conditions,omitempty"`
 	// Spec is populated for non-metric_threshold kinds (decoded from
@@ -137,7 +138,7 @@ type Rule struct {
 	RunbookURL string            `json:"runbook_url,omitempty"`
 	// NotifyChannelIDs lists channels this rule pins notifications to.
 	// Empty / nil → router falls back to global channel filters.
-	NotifyChannelIDs []uint64  `json:"notify_channel_ids,omitempty"`
+	NotifyChannelIDs []uint64 `json:"notify_channel_ids,omitempty"`
 	// NotifyWindowSeconds + NotifyMinFires expose the per-rule
 	// 「发送策略」 dampening config. Both zero = disabled (UI hides
 	// the "已启用" badge); both > 0 = enabled.
@@ -149,13 +150,13 @@ type Rule struct {
 
 // RuleInput is the transport-side rule create/update payload.
 type RuleInput struct {
-	RuleKey    string
-	Kind       string
-	Name       string
-	ScopeType  string
-	JoinMode   string
-	Severity   string
-	Enabled    bool
+	RuleKey   string
+	Kind      string
+	Name      string
+	ScopeType string
+	JoinMode  string
+	Severity  string
+	Enabled   bool
 	// Conditions populates kind=metric_threshold rules.
 	Conditions []RuleCondition
 	// Spec is the kind-specific opaque payload for non-metric_threshold
@@ -673,16 +674,25 @@ func toServicePreview(r *bizalert.PreviewResult) *PreviewResult {
 		FirstFireAt:   r.FirstFireAt,
 		LastFireAt:    r.LastFireAt,
 		SkippedReason: r.SkippedReason,
-		Threshold:     r.Threshold,
 		Unit:          r.Unit,
 	}
+	if r.Threshold != nil && isFinitePreviewValue(*r.Threshold) {
+		tcopy := *r.Threshold
+		out.Threshold = &tcopy
+	}
 	for _, p := range r.Series {
+		if !isFinitePreviewValue(p.Value) {
+			continue
+		}
 		out.Series = append(out.Series, PreviewSeriesPoint{
 			Timestamp: p.Timestamp,
 			Value:     p.Value,
 		})
 	}
 	for _, s := range r.Samples {
+		if !isFinitePreviewValue(s.Value) {
+			continue
+		}
 		out.Samples = append(out.Samples, PreviewSample{
 			Timestamp: s.Timestamp,
 			Labels:    s.Labels,
@@ -691,6 +701,10 @@ func toServicePreview(r *bizalert.PreviewResult) *PreviewResult {
 		})
 	}
 	return out
+}
+
+func isFinitePreviewValue(v float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0)
 }
 
 func (s *Service) DeleteRule(ctx context.Context, _ Caller, id uint64) error {

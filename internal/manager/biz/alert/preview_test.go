@@ -13,16 +13,66 @@ import (
 )
 
 type fakePromRange struct {
-	lastExpr string
-	lastStep time.Duration
-	res      *promquery.InstantResult
-	err      error
+	lastExpr  string
+	lastStep  time.Duration
+	lastStart time.Time
+	lastEnd   time.Time
+	queries   []string
+	res       *promquery.InstantResult
+	err       error
+	responses []*promquery.InstantResult
+	errs      []error
 }
 
-func (f *fakePromRange) QueryRange(_ context.Context, expr string, _, _ time.Time, step time.Duration) (*promquery.InstantResult, error) {
+func (f *fakePromRange) QueryRange(_ context.Context, expr string, start, end time.Time, step time.Duration) (*promquery.InstantResult, error) {
 	f.lastExpr = expr
 	f.lastStep = step
+	f.lastStart = start
+	f.lastEnd = end
+	f.queries = append(f.queries, expr)
+	idx := len(f.queries) - 1
+	if idx < len(f.errs) && f.errs[idx] != nil {
+		return nil, f.errs[idx]
+	}
+	if idx < len(f.responses) {
+		return f.responses[idx], nil
+	}
 	return f.res, f.err
+}
+
+func TestPreviewRule_ClampsLookbackWindow(t *testing.T) {
+	now := time.Unix(1714003600, 0).UTC()
+	prom := &fakePromRange{
+		res: matrix(t, []struct {
+			Ts    int64
+			Value string
+			Label map[string]string
+		}{
+			{Ts: 1714000000, Value: "92.3", Label: map[string]string{"device_id": "1"}},
+		}),
+	}
+	in := PreviewInput{
+		Input: RuleInput{
+			Kind:      "metric_raw",
+			Name:      "test",
+			Severity:  "warning",
+			Enabled:   true,
+			ScopeType: "global",
+			Spec:      map[string]interface{}{"expr": `up > 0`},
+		},
+		LookbackSeconds: maxPreviewLookbackSeconds * 10,
+	}
+
+	_, err := PreviewRule(context.Background(), in, PreviewDeps{
+		Prom: prom,
+		Now:  func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("PreviewRule: %v", err)
+	}
+	if got, want := prom.lastEnd.Sub(prom.lastStart), time.Duration(maxPreviewLookbackSeconds)*time.Second; got != want {
+		t.Fatalf("lookback range = %s, want %s", got, want)
+	}
 }
 
 type fakeLogRange struct {
@@ -308,5 +358,125 @@ func TestPreviewMetricRaw_NoComparisonShipsFireCountWithoutChart(t *testing.T) {
 	}
 	if len(res.Series) != 0 {
 		t.Errorf("series should be empty for compound expr (no trailing comparison)")
+	}
+}
+
+func TestPreviewTraceLatency_WhenServiceMissingReturnsSkipped(t *testing.T) {
+	prom := &fakePromRange{
+		responses: []*promquery.InstantResult{
+			matrix(t, nil),
+		},
+	}
+	deps := PreviewDeps{Prom: prom, Now: func() time.Time { return time.Unix(1714003600, 0).UTC() }}
+	in := PreviewInput{
+		Input: RuleInput{
+			RuleKey:  "trace_latency_missing",
+			Kind:     "trace_latency",
+			Name:     "trace latency",
+			Severity: "warning",
+			Enabled:  true,
+			Spec: map[string]any{
+				"service":      "missing-service",
+				"threshold_ms": 750,
+			},
+		},
+		LookbackSeconds: 3600,
+	}
+	res, err := PreviewRule(context.Background(), in, deps)
+	if err != nil {
+		t.Fatalf("PreviewRule: %v", err)
+	}
+	if !strings.Contains(res.SkippedReason, `未发现 service_name="missing-service"`) {
+		t.Fatalf("skipped_reason = %q, want missing service_name", res.SkippedReason)
+	}
+	if len(prom.queries) != 1 || !strings.Contains(prom.queries[0], "traces_spanmetrics_latency_bucket") {
+		t.Fatalf("queries = %#v, want only latency spanmetrics lookup", prom.queries)
+	}
+}
+
+func TestPreviewTraceLatency_WhenServiceExistsQueriesPredicate(t *testing.T) {
+	prom := &fakePromRange{
+		responses: []*promquery.InstantResult{
+			matrix(t, []struct {
+				Ts    int64
+				Value string
+				Label map[string]string
+			}{
+				{Ts: 1714000000, Value: "1", Label: map[string]string{"service_name": "checkout"}},
+			}),
+			matrix(t, []struct {
+				Ts    int64
+				Value string
+				Label map[string]string
+			}{
+				{Ts: 1714000060, Value: "810", Label: map[string]string{"service_name": "checkout"}},
+			}),
+		},
+	}
+	deps := PreviewDeps{Prom: prom, Now: func() time.Time { return time.Unix(1714003600, 0).UTC() }}
+	in := PreviewInput{
+		Input: RuleInput{
+			RuleKey:  "trace_latency_checkout",
+			Kind:     "trace_latency",
+			Name:     "trace latency",
+			Severity: "warning",
+			Enabled:  true,
+			Spec: map[string]any{
+				"service":      "checkout",
+				"operation":    "GET /api",
+				"quantile":     "p95",
+				"threshold_ms": 750,
+			},
+		},
+		LookbackSeconds: 3600,
+	}
+	res, err := PreviewRule(context.Background(), in, deps)
+	if err != nil {
+		t.Fatalf("PreviewRule: %v", err)
+	}
+	if res.SkippedReason != "" {
+		t.Fatalf("skipped_reason = %q, want empty", res.SkippedReason)
+	}
+	if len(prom.queries) != 2 {
+		t.Fatalf("queries = %#v, want lookup and predicate", prom.queries)
+	}
+	if !strings.Contains(prom.queries[0], `service_name="checkout",span_name="GET /api"`) {
+		t.Fatalf("lookup query = %q, want service and span_name selector", prom.queries[0])
+	}
+	if !strings.Contains(prom.queries[1], "histogram_quantile") {
+		t.Fatalf("predicate query = %q, want latency predicate", prom.queries[1])
+	}
+}
+
+func TestPreviewTraceErrorRate_WhenServiceMissingReturnsSkipped(t *testing.T) {
+	prom := &fakePromRange{
+		responses: []*promquery.InstantResult{
+			matrix(t, nil),
+		},
+	}
+	deps := PreviewDeps{Prom: prom, Now: func() time.Time { return time.Unix(1714003600, 0).UTC() }}
+	in := PreviewInput{
+		Input: RuleInput{
+			RuleKey:  "trace_error_missing",
+			Kind:     "trace_error_rate",
+			Name:     "trace error rate",
+			Severity: "warning",
+			Enabled:  true,
+			Spec: map[string]any{
+				"service":       "missing-service",
+				"threshold_pct": 5,
+			},
+		},
+		LookbackSeconds: 3600,
+	}
+	res, err := PreviewRule(context.Background(), in, deps)
+	if err != nil {
+		t.Fatalf("PreviewRule: %v", err)
+	}
+	if !strings.Contains(res.SkippedReason, `未发现 service_name="missing-service"`) {
+		t.Fatalf("skipped_reason = %q, want missing service_name", res.SkippedReason)
+	}
+	if len(prom.queries) != 1 || !strings.Contains(prom.queries[0], "traces_spanmetrics_calls_total") {
+		t.Fatalf("queries = %#v, want only calls spanmetrics lookup", prom.queries)
 	}
 }

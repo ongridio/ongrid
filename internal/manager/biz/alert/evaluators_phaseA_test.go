@@ -90,12 +90,20 @@ func TestCompileMetricForecastRequiresPredictWindow(t *testing.T) {
 }
 
 func TestCompileMetricBurnRateValidatesBurns(t *testing.T) {
-	noWindows, _ := json.Marshal(map[string]any{"sli": "x", "slo": 99.9})
+	noWindows, _ := json.Marshal(map[string]any{"sli": "sum(rate(http_requests_total[$window]))", "slo": 99.9})
 	if _, err := compileMetricBurnRateRule(&model.Rule{RuleKey: "x", ConditionsJSON: string(noWindows)}); err == nil {
 		t.Errorf("compile should reject empty burns")
 	}
+	noWindowSLI, _ := json.Marshal(map[string]any{
+		"sli":   "http_success_ratio",
+		"slo":   99.9,
+		"burns": []any{map[string]any{"window": "1h", "multiplier": 14.4}},
+	})
+	if _, err := compileMetricBurnRateRule(&model.Rule{RuleKey: "x", ConditionsJSON: string(noWindowSLI)}); err == nil {
+		t.Errorf("compile should reject SLI without $window or range selector")
+	}
 	bad, _ := json.Marshal(map[string]any{
-		"sli":   "x",
+		"sli":   `sum(rate(http_requests_total{code!~"5.."}[5m])) / sum(rate(http_requests_total[5m]))`,
 		"slo":   99.9,
 		"burns": []any{map[string]any{"window": "1h", "multiplier": 14.4}},
 	})
@@ -105,6 +113,69 @@ func TestCompileMetricBurnRateValidatesBurns(t *testing.T) {
 	}
 	if len(r.Burns) != 1 || r.Burns[0].Window != "1h" || r.Burns[0].Multiplier != 14.4 {
 		t.Errorf("burns parse wrong: %+v", r.Burns)
+	}
+	if strings.Contains(r.SLI, "[5m]") || strings.Count(r.SLI, "[$window]") != 2 {
+		t.Errorf("SLI should normalize fixed ranges to $window, got %q", r.SLI)
+	}
+
+	ratioSLO, _ := json.Marshal(map[string]any{
+		"sli":   `sum(rate(http_requests_total{code!~"5.."}[$window])) / sum(rate(http_requests_total[$window]))`,
+		"slo":   0.999,
+		"burns": []any{map[string]any{"window": "1h", "multiplier": 14.4}},
+	})
+	r, err = compileMetricBurnRateRule(&model.Rule{RuleKey: "x", ConditionsJSON: string(ratioSLO)})
+	if err != nil {
+		t.Fatalf("compile ratio SLO: %v", err)
+	}
+	if r.SLO != 99.9 {
+		t.Fatalf("SLO = %v, want 99.9 percent", r.SLO)
+	}
+}
+
+func TestBuildConditionsJSONNormalizesBurnRateRatioSLOToPercent(t *testing.T) {
+	conditions, err := buildConditionsJSON(model.RuleKindMetricBurnRate, RuleInput{
+		Spec: map[string]any{
+			"sli":   `sum(rate(http_requests_total{code!~"5.."}[$window])) / sum(rate(http_requests_total[$window]))`,
+			"slo":   0.999,
+			"burns": []any{map[string]any{"window": "1h", "multiplier": 14.4}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildConditionsJSON: %v", err)
+	}
+	var got struct {
+		SLO float64 `json:"slo"`
+	}
+	if err := json.Unmarshal([]byte(conditions), &got); err != nil {
+		t.Fatalf("decode conditions: %v", err)
+	}
+	if got.SLO != 99.9 {
+		t.Fatalf("stored SLO = %v, want 99.9 percent", got.SLO)
+	}
+}
+
+func TestBuildConditionsJSONPreservesMetricForecastSelector(t *testing.T) {
+	conditions, err := buildConditionsJSON(model.RuleKindMetricForecast, RuleInput{
+		Spec: map[string]any{
+			"metric":          "disk_avail_bytes",
+			"selector":        `{mountpoint="/var"}`,
+			"fit_window":      "1h",
+			"predict_seconds": 21600,
+			"operator":        "<",
+			"threshold":       float64(10 * 1024 * 1024 * 1024),
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildConditionsJSON: %v", err)
+	}
+	var got struct {
+		Selector string `json:"selector"`
+	}
+	if err := json.Unmarshal([]byte(conditions), &got); err != nil {
+		t.Fatalf("decode conditions: %v", err)
+	}
+	if got.Selector != `{mountpoint="/var"}` {
+		t.Fatalf("selector = %q, want mountpoint selector", got.Selector)
 	}
 }
 
@@ -156,7 +227,7 @@ func TestMetricForecastExprUsesPredictLinear(t *testing.T) {
 	repo := newFakeRepo()
 	rules := NewStaticRulesProvider(WithMetricForecastRules([]MetricForecastRule{
 		{ID: 1, RuleKey: "disk_fill", Name: "Disk Fills", Severity: "warning",
-			Metric: "disk_avail_bytes", FitWindow: "1h", PredictSeconds: 21600,
+			Metric: "disk_avail_bytes", Selector: `{mountpoint="/var"}`, FitWindow: "1h", PredictSeconds: 21600,
 			Operator: "<=", Threshold: 0},
 	}))
 	now := time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)
@@ -172,6 +243,39 @@ func TestMetricForecastExprUsesPredictLinear(t *testing.T) {
 	}
 	if !strings.Contains(captured, "21600") {
 		t.Errorf("forecast expr missing predict seconds: %s", captured)
+	}
+	if !strings.Contains(captured, `node_filesystem_avail_bytes{mountpoint="/var"}`) {
+		t.Errorf("forecast expr missing selector override: %s", captured)
+	}
+}
+
+func TestMetricForecastHostScopeUsesDeviceIDLabel(t *testing.T) {
+	repo := newFakeRepo()
+	rules := NewStaticRulesProvider(WithMetricForecastRules([]MetricForecastRule{
+		{ID: 1, RuleKey: "disk_fill", Name: "Disk Fills", Severity: "warning",
+			ScopeType: "host", Metric: "disk_used_pct", FitWindow: "1h", PredictSeconds: 21600,
+			Operator: "<=", Threshold: 100},
+	}))
+	prom := &scriptedProm{results: []*promquery.InstantResult{
+		vectorInstantEntry(map[string]string{"device_id": "2", "mountpoint": "/"}, "1"),
+	}}
+	now := time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)
+	eval := newPipelineEvaluator(t, repo, &fakeNotifier{}, rules, PipelineEvaluatorOpts{
+		EdgeLister:  &fakeEdgeLister{},
+		PromQuerier: prom,
+		Cooldown:    time.Minute,
+		Now:         func() time.Time { return now },
+	})
+
+	eval.EvaluateOnce(context.Background())
+
+	if len(repo.incidents) != 1 {
+		t.Fatalf("incidents = %d, want 1", len(repo.incidents))
+	}
+	for _, inc := range repo.incidents {
+		if inc.DeviceID == nil || *inc.DeviceID != 2 {
+			t.Fatalf("DeviceID = %v, want 2", inc.DeviceID)
+		}
 	}
 }
 
@@ -255,9 +359,13 @@ func emptyVector() *promquery.InstantResult {
 }
 
 func singleEntry() *promquery.InstantResult {
+	return vectorInstantEntry(map[string]string{"__name__": "burn"}, "1")
+}
+
+func vectorInstantEntry(labels map[string]string, value string) *promquery.InstantResult {
 	body := []map[string]any{{
-		"metric": map[string]string{"__name__": "burn"},
-		"value":  []any{float64(time.Now().Unix()), "1"},
+		"metric": labels,
+		"value":  []any{float64(time.Now().Unix()), value},
 	}}
 	raw, _ := json.Marshal(body)
 	return &promquery.InstantResult{ResultType: "vector", Result: raw}

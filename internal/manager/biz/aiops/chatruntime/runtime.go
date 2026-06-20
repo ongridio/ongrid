@@ -37,6 +37,7 @@ package chatruntime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -49,9 +50,9 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	biz "github.com/ongridio/ongrid/internal/manager/biz/aiops"
-	"github.com/ongridio/ongrid/internal/manager/biz/aiops/toolreplay"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/graph"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/graph/callbacks"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/toolreplay"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	aiopsmodel "github.com/ongridio/ongrid/internal/manager/model/aiops"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
@@ -142,8 +143,8 @@ type Emit func(Event)
 
 // Request bundles every per-call input the runtime needs.
 type Request struct {
-	SessionID        string
-	UserID           uint64
+	SessionID string
+	UserID    uint64
 	// Role is the caller's system role (admin | user | viewer).
 	// gates the toolbag against this — viewer drops Class!=read so the
 	// LLM cannot reach mutating tools no matter what the persona allows.
@@ -155,7 +156,7 @@ type Request struct {
 	WebSearchEnabled bool
 	// Locale is the UI language ("en-US"/"zh-CN") the reply should use;
 	// threaded into graph.Input so the assembler adds a language directive.
-	Locale           string
+	Locale string
 	// Emit is the streaming sink. nil = no streaming (blocking call).
 	Emit Emit
 }
@@ -453,6 +454,9 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (*Reply, error) {
 	if err != nil {
 		return nil, fmt.Errorf("chatruntime: load history: %w", err)
 	}
+	if reply, handled := rt.tryApplyConfirmedConfigDraft(ctx, req, sess, history, emit); handled {
+		return reply, nil
+	}
 
 	// 5. Resolve active skills + compose the system prompt.
 	policy := Policy{AllowedClasses: []string{"*"}}
@@ -566,6 +570,7 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (*Reply, error) {
 	//    rt.cfg.CallbackDeps. The SSE handler is appended via the
 	//    cutover layer's emitter when req.Emit != nil.
 	deps := rt.cfg.CallbackDeps
+	deps.AlertDraftGuard.UserText = req.UserText
 	deps.Persistence.SessionID = sess.ID
 	deps.Persistence.Model = strings.TrimSpace(req.Model)
 	if deps.Persistence.Repo == nil {
@@ -606,6 +611,9 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (*Reply, error) {
 	if mopts := chatModelOpts(req); len(mopts) > 0 {
 		invokeOpts = append(invokeOpts, compose.WithChatModelOption(mopts...))
 	}
+	invokeOpts = append(invokeOpts, compose.WithToolsNodeOption(
+		compose.WithToolOption(graph.WithInvokeOpts(basetool.WithUserText(req.UserText))),
+	))
 	// Thread the UI locale onto ctx so AgentTool can pick it up and
 	// forward it into the sub-agent's SpawnRequest. Without this, a
 	// coordinator that handles an English question hands off to a
@@ -685,6 +693,9 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (*Reply, error) {
 		// canonical row written by PersistenceHandler lives in
 		// chat_messages; we mirror its fields here for the wire DTO.
 		content := out.AssistantMessage.Content
+		if guard := callbacks.AlertDraftGuardFromHandlers(handlers); guard != nil {
+			content = guard.SanitizeAssistantContent(content)
+		}
 		var contentPtr *string
 		if content != "" {
 			contentPtr = &content
@@ -829,7 +840,7 @@ func buildEinoHistory(rows []*aiopsmodel.Message) []*schema.Message {
 		tm := rows[j]
 		content := ""
 		if tm.Content != nil {
-			content = *tm.Content
+			content = sanitizeToolReplayContent(*tm.Content)
 		}
 		tcID := ""
 		if tm.ToolCallID != nil {
@@ -942,6 +953,37 @@ func buildEinoHistory(rows []*aiopsmodel.Message) []*schema.Message {
 	return out
 }
 
+const (
+	toolBudgetExceededStatus       = "call_budget_exceeded"
+	toolBudgetExpiredPreviousTurn  = "expired_previous_turn"
+	toolBudgetExpiredReplayMessage = "This per-turn tool budget result belonged to a previous user turn and has expired. The tool may be called again in the current user turn if needed."
+)
+
+type toolBudgetReplayEnvelope struct {
+	Status      string `json:"status"`
+	Scope       string `json:"scope,omitempty"`
+	Tool        string `json:"tool,omitempty"`
+	Calls       int    `json:"calls,omitempty"`
+	Instruction string `json:"instruction"`
+}
+
+func sanitizeToolReplayContent(content string) string {
+	var env toolBudgetReplayEnvelope
+	if err := json.Unmarshal([]byte(content), &env); err != nil {
+		return content
+	}
+	if env.Status != toolBudgetExceededStatus {
+		return content
+	}
+	env.Scope = toolBudgetExpiredPreviousTurn
+	env.Instruction = toolBudgetExpiredReplayMessage
+	b, err := json.Marshal(env)
+	if err != nil {
+		return content
+	}
+	return string(b)
+}
+
 // chatModelOpts turns the per-request model selection (SPA picker) into eino
 // model options for the graph's ChatModel node. Empty fields add no option,
 // so the routing default applies (unchanged default path). Provider routes
@@ -970,10 +1012,7 @@ func chatModelOpts(req *Request) []model.Option {
 // reminder we re-show every turn corrode the LLM's trust in the block):
 //
 //	(a) consecutive same-tool failures ≥ 2 → "switch tools or ask user"
-//	(b) ≥ 8 assistant turns → "give a partial conclusion now"
-//	(c) ≥ 15 assistant turns → "you must summarize next turn"
-//	(d) ≥ 25 assistant turns → "stop tool calls, answer directly"
-//	(e) repeated (tool, args) call ≥ 3 times → "stop repeating the same call"
+//	(b) repeated (tool, args) call ≥ 3 times → "stop repeating the same call"
 func (rt *Runtime) calcDynamicHints(history []*aiopsmodel.Message) []string {
 	if rt == nil {
 		return nil
@@ -989,14 +1028,8 @@ func (rt *Runtime) calcDynamicHints(history []*aiopsmodel.Message) []string {
 	if name, args, n := repeatedToolCall(history, 3); n >= 3 {
 		hints = append(hints, fmt.Sprintf("%s 已重复调用 %d 次（args: %s）：从你已有的数据下结论，不要再调用同款工具", name, n, args))
 	}
-	iter := countAssistantTurns(history)
-	switch {
-	case iter >= 25:
-		hints = append(hints, fmt.Sprintf("已经 %d 轮：停止调用工具，下一轮直接给最终回答", iter))
-	case iter >= 15:
-		hints = append(hints, fmt.Sprintf("已经 %d 轮：下一轮必须给最终回答，不再调用工具", iter))
-	case iter >= 8:
-		hints = append(hints, fmt.Sprintf(`已经 %d 轮：现在给一段阶段性结论（"目前看到 X / Y，初步判断是 Z"），再决定是否继续`, iter))
+	if alertDraftGuardNeedsDraftRetry(history) {
+		hints = append(hints, "上一轮告警草案被安全闸门拦截：当前用户消息仍在继续创建告警时，直接调用 draft_config_change 生成 config_draft/draft_hash；metric 类规则需要先用 list_metric_catalog 获取当前指标。不要要求用户重新发送，不要输出文字草案，不要仅解释流程")
 	}
 	// "Promise-without-execution" detection — see ongridBasePrompt()
 	// 中等档位的 LLM (e.g. glm-4-plus) 偶尔写 "让我..." / "我先..." 这种
@@ -1009,25 +1042,22 @@ func (rt *Runtime) calcDynamicHints(history []*aiopsmodel.Message) []string {
 	return hints
 }
 
-// repeatedToolCall walks the trailing tool messages looking for the most
-// frequent tool. Returns (name, argsExcerpt, n) where n is occurrence
-// count. Args excerpt = first 80 bytes of the latest call's args. n <
-// minN is reported as 0.
+// repeatedToolCall walks the previous user turn's tool messages looking for the
+// most frequent tool. Returns (name, argsExcerpt, n) where n is occurrence
+// count. Args excerpt = first 80 bytes of the latest call's args. n < minN is
+// reported as 0.
 func repeatedToolCall(history []*aiopsmodel.Message, minN int) (string, string, int) {
 	if minN <= 0 {
 		minN = 3
 	}
-	// Look at last 12 tool messages
-	const window = 12
+	start, end := previousUserTurnBounds(history)
 	counts := map[string]int{}
 	args := map[string]string{}
-	tail := 0
-	for i := len(history) - 1; i >= 0 && tail < window; i-- {
+	for i := end - 1; i >= start; i-- {
 		m := history[i]
 		if m == nil || m.Role != aiopsmodel.RoleTool {
 			continue
 		}
-		tail++
 		name := ""
 		if m.ToolName != nil {
 			name = *m.ToolName
@@ -1057,6 +1087,35 @@ func repeatedToolCall(history []*aiopsmodel.Message, minN int) (string, string, 
 		return "", "", 0
 	}
 	return topName, args[topName], topN
+}
+
+func previousUserTurnBounds(history []*aiopsmodel.Message) (int, int) {
+	if len(history) == 0 {
+		return 0, 0
+	}
+	currentUserIdx := -1
+	for i := len(history) - 1; i >= 0; i-- {
+		m := history[i]
+		if m != nil && m.Role == aiopsmodel.RoleUser {
+			currentUserIdx = i
+			break
+		}
+	}
+	if currentUserIdx < 0 {
+		return 0, len(history)
+	}
+	prevUserIdx := -1
+	for i := currentUserIdx - 1; i >= 0; i-- {
+		m := history[i]
+		if m != nil && m.Role == aiopsmodel.RoleUser {
+			prevUserIdx = i
+			break
+		}
+	}
+	if prevUserIdx < 0 {
+		return 0, currentUserIdx
+	}
+	return prevUserIdx + 1, currentUserIdx
 }
 
 // consecutiveFailedTool walks history backwards looking at the trailing
@@ -1123,6 +1182,69 @@ func consecutiveFailedTool(history []*aiopsmodel.Message, minN int) (string, int
 	return name, n
 }
 
+func alertDraftGuardNeedsDraftRetry(history []*aiopsmodel.Message) bool {
+	currentIdx, currentUser := latestUserMessage(history)
+	if currentIdx < 0 || strings.TrimSpace(currentUser) == "" {
+		return false
+	}
+	if !callbacks.LooksLikeAlertRuleCreationText(currentUser) && !looksLikeAlertDraftContinuation(currentUser) {
+		return false
+	}
+	for i := currentIdx - 1; i >= 0; i-- {
+		m := history[i]
+		if m == nil {
+			continue
+		}
+		switch m.Role {
+		case aiopsmodel.RoleAssistant:
+			if m.Content == nil {
+				return false
+			}
+			return callbacks.LooksLikeAlertDraftGuardBlockedMessage(*m.Content)
+		case aiopsmodel.RoleUser:
+			return false
+		}
+	}
+	return false
+}
+
+func latestUserMessage(history []*aiopsmodel.Message) (int, string) {
+	for i := len(history) - 1; i >= 0; i-- {
+		m := history[i]
+		if m == nil || m.Role != aiopsmodel.RoleUser || m.Content == nil {
+			continue
+		}
+		return i, *m.Content
+	}
+	return -1, ""
+}
+
+func looksLikeAlertDraftContinuation(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return false
+	}
+	lower := strings.ToLower(trimmed)
+	if strings.Contains(trimmed, "为什么") ||
+		strings.Contains(trimmed, "原因") ||
+		strings.Contains(lower, "why") {
+		return false
+	}
+	return containsAnyString(trimmed, lower, []string{
+		"继续", "继续创建", "直接创建", "生成草案", "生成 draft", "创建 draft", "draft_config_change",
+		"continue", "create it", "draft it", "generate draft",
+	})
+}
+
+func containsAnyString(text, lowerText string, needles []string) bool {
+	for _, needle := range needles {
+		if strings.Contains(lowerText, needle) || strings.Contains(text, needle) {
+			return true
+		}
+	}
+	return false
+}
+
 // looksLikeToolFailure is the heuristic used by consecutiveFailedTool.
 // True when the persisted tool message Content carries an "error" JSON
 // key — the decorator chain's standard failure shape.
@@ -1169,6 +1291,9 @@ func detectUnfollowedPromise(history []*aiopsmodel.Message) (string, bool) {
 		return "", false
 	}
 	content := strings.TrimSpace(*history[asstIdx].Content)
+	if callbacks.LooksLikeAlertDraftGuardBlockedMessage(content) {
+		return "", false
+	}
 	if content == "" || !containsAnyPromiseMarker(content) {
 		return "", false
 	}
@@ -1279,20 +1404,4 @@ func buildGraphErrorApology(err error) string {
 		}
 		return "抱歉，处理消息时遇到错误：\n```\n" + short + "\n```\n请换个问法再试，或截图反馈给我们。"
 	}
-}
-
-// countAssistantTurns returns the number of assistant role rows in
-// history. Tool-only assistant rows (Content == nil) still count — they
-// represent a ChatModel turn the loop took.
-func countAssistantTurns(history []*aiopsmodel.Message) int {
-	n := 0
-	for _, m := range history {
-		if m == nil {
-			continue
-		}
-		if m.Role == aiopsmodel.RoleAssistant {
-			n++
-		}
-	}
-	return n
 }

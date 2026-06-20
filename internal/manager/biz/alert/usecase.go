@@ -242,7 +242,7 @@ type FiringInput struct {
 	Rule       string
 	RuleName   string
 	Severity   string
-	DeviceID     *uint64
+	DeviceID   *uint64
 	OccurredAt time.Time
 
 	// DedupeKey overrides the default scope/edge/rule dedupe construction.
@@ -334,7 +334,7 @@ func (u *Usecase) RecordFiring(ctx context.Context, in FiringInput) (*FiringResu
 			title = defaultTitle(in)
 		}
 		newInc := &model.Incident{
-			DeviceID:          in.DeviceID,
+			DeviceID:        in.DeviceID,
 			Title:           title,
 			Scope:           in.Scope,
 			ScopeType:       in.ScopeType,
@@ -597,7 +597,6 @@ func (u *Usecase) CreateRule(ctx context.Context, in RuleInput, createdBy *uint6
 	} else if err != nil && !errors.Is(err, errs.ErrNotFound) {
 		return nil, err
 	}
-	row.SourceType = model.RuleSourceBuiltin
 	row.CreatedBy = createdBy
 	if err := u.repo.CreateRule(ctx, row); err != nil {
 		return nil, err
@@ -644,14 +643,21 @@ func (u *Usecase) SetRuleEnabled(ctx context.Context, id uint64, enabled bool) (
 	return u.repo.GetRuleByID(ctx, id)
 }
 
-// DeleteRule soft-deletes a rule. The cached evaluator picks up the change
-// on its next refresh tick.
+// DeleteRule removes a custom rule. Built-in seed rules are managed by
+// boot-time seeding and must be disabled instead of deleted.
 func (u *Usecase) DeleteRule(ctx context.Context, id uint64) error {
 	if u.repo == nil {
 		return errs.ErrNotWiredYet
 	}
 	if id == 0 {
 		return fmt.Errorf("%w: rule id required", errs.ErrInvalid)
+	}
+	existing, err := u.repo.GetRuleByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if existing.SourceType == model.RuleSourceBuiltin {
+		return fmt.Errorf("%w: built-in rules cannot be deleted", errs.ErrForbidden)
 	}
 	return u.repo.DeleteRule(ctx, id)
 }
@@ -845,8 +851,10 @@ func buildConditionsJSON(kind string, in RuleInput) (string, error) {
 			dev = 3
 		}
 		forSec, _ := numericFromSpec(in.Spec, "for_seconds")
+		selector, _ := stringFromSpec(in.Spec, "selector")
 		blob, err := json.Marshal(map[string]any{
 			"metric":          metric,
+			"selector":        selector,
 			"method":          method,
 			"baseline_window": baseline,
 			"baseline_step":   step,
@@ -876,8 +884,10 @@ func buildConditionsJSON(kind string, in RuleInput) (string, error) {
 		}
 		thr, _ := numericFromSpec(in.Spec, "threshold")
 		forSec, _ := numericFromSpec(in.Spec, "for_seconds")
+		selector, _ := stringFromSpec(in.Spec, "selector")
 		blob, err := json.Marshal(map[string]any{
 			"metric":          metric,
+			"selector":        selector,
 			"fit_window":      fitWindow,
 			"predict_seconds": int(predict),
 			"operator":        op,
@@ -890,10 +900,15 @@ func buildConditionsJSON(kind string, in RuleInput) (string, error) {
 		return string(blob), nil
 	case model.RuleKindMetricBurnRate:
 		sli, _ := stringFromSpec(in.Spec, "sli")
+		sli = normalizeBurnRateSLIExpression(sli)
 		if strings.TrimSpace(sli) == "" {
 			return "", fmt.Errorf("%w: metric_burn_rate.sli required", errs.ErrInvalid)
 		}
+		if !burnRateSLIUsesWindow(sli) {
+			return "", fmt.Errorf("%w: metric_burn_rate.sli must use $window or a PromQL range selector", errs.ErrInvalid)
+		}
 		slo, _ := numericFromSpec(in.Spec, "slo")
+		slo = normalizeBurnRateSLOPercent(slo)
 		if slo <= 0 || slo >= 100 {
 			return "", fmt.Errorf("%w: metric_burn_rate.slo must be in (0, 100)", errs.ErrInvalid)
 		}

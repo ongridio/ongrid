@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
 import { ChatInput, type ModelSelection, type SubmitPayload } from '@/components/ChatInput';
-import { MessageBubble } from '@/components/MessageBubble';
+import { MessageBubble, type ConfigDraftResult } from '@/components/MessageBubble';
 import { AgentBadge } from '@/components/AgentBadge';
 import { PageHeader } from '@/components/ui';
 import {
@@ -16,6 +16,7 @@ import { invalidateChatSessions, useChatSessions } from '@/store/chatSessions';
 import { usePermissions } from '@/store/me';
 import { useModelSelection } from '@/store/modelSelection';
 import { useI18n } from '@/i18n/locale';
+import { buildConfigDraftConfirmMessage, configDraftApplyTool } from '@/lib/configDraftConfirmation';
 
 type LocationState = { initialPrompt?: string } | null;
 
@@ -191,10 +192,16 @@ export default function ChatThreadPage() {
     stickToBottomRef.current = distance <= 120;
   }, []);
 
-  async function send(content: string, mentions: Mention[]) {
-    if (!sessionId || !content.trim()) return;
+  async function send(
+    content: string,
+    mentions: Mention[],
+    opts: { expectedTool?: string; displayContent?: string } = {},
+  ): Promise<boolean> {
+    if (!sessionId || !content.trim()) return false;
     setError(null);
     setSubmitting(true);
+    let expectedToolSeen = !opts.expectedTool;
+    let expectedToolFailed = false;
 
     // Optimistic user bubble; tool cards and final assistant bubble are
     // appended as the SSE stream delivers them. Tool-only assistant
@@ -202,7 +209,10 @@ export default function ChatThreadPage() {
     // skipped so the UI doesn't fill up with N "思考中" placeholders —
     // a single global indicator at the bottom covers in-flight state.
     const tempUserId = `optimistic-user-${Date.now()}`;
-    setMessages((prev) => [...prev, { id: tempUserId, role: 'user', content }]);
+    setMessages((prev) => [
+      ...prev,
+      { id: tempUserId, role: 'user', content: opts.displayContent ?? content },
+    ]);
 
     try {
       await streamMessage(
@@ -256,6 +266,10 @@ export default function ChatThreadPage() {
             setMessages((prev) => [...prev, card]);
           },
           onToolEnd: (t) => {
+            if (opts.expectedTool && t.name === opts.expectedTool) {
+              expectedToolSeen = true;
+              expectedToolFailed = !!t.error || t.status === 'error' || t.status === 'timeout';
+            }
             const targetId = toolCardId(t.tool_call_id);
             setMessages((prev) =>
               prev.map((m) =>
@@ -295,6 +309,7 @@ export default function ChatThreadPage() {
           locale,
         },
       );
+      return expectedToolSeen && !expectedToolFailed;
     } catch (err) {
       const msg = (err as Error).message || tr('请求失败', 'Request failed');
       setError(msg);
@@ -307,9 +322,20 @@ export default function ChatThreadPage() {
           pending: false,
         },
       ]);
+      return false;
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function confirmConfigDraft(draft: ConfigDraftResult): Promise<boolean> {
+    if (submitting) return Promise.resolve(false);
+    const applyTool = configDraftApplyTool(draft);
+    const content = buildConfigDraftConfirmMessage(draft, tr);
+    return send(content, [], {
+      expectedTool: applyTool,
+      displayContent: tr('确认创建这条告警规则', 'Confirm creating this alert rule'),
+    });
   }
 
   function ThinkingIndicator() {
@@ -352,7 +378,13 @@ export default function ChatThreadPage() {
             ) : messages.length === 0 ? (
               <div className="text-center text-sm text-zinc-500">{tr('这是一个新的会话，发条消息试试。', "This is a new session — try sending a message.")}</div>
             ) : (
-              messages.map((m) => <MessageBubble key={m.id} message={m} />)
+              messages.map((m) => (
+                <MessageBubble
+                  key={m.id}
+                  message={m}
+                  onConfirmConfigDraft={isViewer ? undefined : confirmConfigDraft}
+                />
+              ))
             )}
             {submitting && <ThinkingIndicator />}
             {error && (

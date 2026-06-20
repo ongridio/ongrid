@@ -276,6 +276,219 @@ func TestEinoToolAdapter_PerToolCallCap(t *testing.T) {
 	}
 }
 
+func TestEinoToolAdapter_DraftConfigChangeConfirmableDraftCap(t *testing.T) {
+	t.Parallel()
+	inner := &fakeBaseTool{name: "draft_config_change", class: "read", runResp: `{"kind":"config_draft","draft_hash":"sha256:ok"}`}
+	a := &einoToolAdapter{inner: inner, memo: newToolMemo()}
+	ctx := context.Background()
+
+	out, _ := a.InvokableRun(ctx, `{"rule":"one"}`)
+	if strings.Contains(out, "call_budget_exceeded") {
+		t.Fatalf("first draft should execute, got budget directive: %s", out)
+	}
+	out, _ = a.InvokableRun(ctx, `{"rule":"two"}`)
+	if !strings.Contains(out, "call_budget_exceeded") {
+		t.Fatalf("second draft should be capped, got %q", out)
+	}
+	if got := inner.calls.Load(); got != 1 {
+		t.Fatalf("draft executions = %d, want 1", got)
+	}
+}
+
+func TestEinoToolAdapter_DraftConfigChangeRequiresMetricCatalogForMetricRules(t *testing.T) {
+	t.Parallel()
+	inner := &fakeBaseTool{name: "draft_config_change", class: "read", runResp: `{"kind":"config_draft"}`}
+	a := &einoToolAdapter{inner: inner, memo: newToolMemo()}
+	ctx := context.Background()
+
+	out, err := a.InvokableRun(ctx, `{"domain":"alert_rule","action":"create","rule":{"kind":"metric_threshold","conditions":[{"metric":"cpu_pct","operator":">","threshold":85}]}}`)
+	if err != nil {
+		t.Fatalf("InvokableRun() error = %v", err)
+	}
+	if !strings.Contains(out, "metric_catalog_required") {
+		t.Fatalf("metric draft without catalog should be blocked, got %q", out)
+	}
+	if got := inner.calls.Load(); got != 0 {
+		t.Fatalf("draft executions = %d, want 0", got)
+	}
+}
+
+func TestEinoToolAdapter_DraftConfigChangeAllowsAfterMetricCatalog(t *testing.T) {
+	t.Parallel()
+	memo := newToolMemo()
+	catalog := &fakeBaseTool{
+		name:    "list_metric_catalog",
+		class:   "read",
+		runResp: `{"status":"ok","metric_count":1,"returned":1,"metrics":[{"name":"node_cpu_seconds_total"}]}`,
+	}
+	draft := &fakeBaseTool{name: "draft_config_change", class: "read", runResp: `{"kind":"config_draft","draft_hash":"sha256:ok"}`}
+	catalogAdapter := &einoToolAdapter{inner: catalog, memo: memo}
+	draftAdapter := &einoToolAdapter{inner: draft, memo: memo}
+	ctx := context.Background()
+
+	if out, err := catalogAdapter.InvokableRun(ctx, `{"query":"cpu"}`); err != nil || !strings.Contains(out, `"status":"ok"`) {
+		t.Fatalf("catalog out=%q err=%v", out, err)
+	}
+	out, err := draftAdapter.InvokableRun(ctx, `{"domain":"alert_rule","action":"create","rule":{"kind":"metric_raw","spec":{"metric":"node_cpu_seconds_total","operator":">","threshold":80}}}`)
+	if err != nil {
+		t.Fatalf("draft InvokableRun() error = %v", err)
+	}
+	if !strings.Contains(out, `"kind":"config_draft"`) {
+		t.Fatalf("draft output = %q, want config_draft", out)
+	}
+	if got := catalog.calls.Load(); got != 1 {
+		t.Fatalf("catalog executions = %d, want 1", got)
+	}
+	if got := draft.calls.Load(); got != 1 {
+		t.Fatalf("draft executions = %d, want 1", got)
+	}
+}
+
+func TestEinoToolAdapter_DraftConfigChangeIgnoresCatalogInstructionWhenMetricsExist(t *testing.T) {
+	t.Parallel()
+	memo := newToolMemo()
+	catalog := &fakeBaseTool{
+		name:    "list_metric_catalog",
+		class:   "read",
+		runResp: `{"status":"ok","instruction":"The returned metrics do not expose any HTTP status/code label in sample_labels, so they cannot build a 5xx/error-rate/burn-rate SLI. Stop tool use now.","metric_count":1,"returned":1,"metrics":[{"name":"mysql_global_status_slow_queries"}]}`,
+	}
+	draft := &fakeBaseTool{name: "draft_config_change", class: "read", runResp: `{"kind":"config_draft","draft_hash":"sha256:ok"}`}
+	catalogAdapter := &einoToolAdapter{inner: catalog, memo: memo}
+	draftAdapter := &einoToolAdapter{inner: draft, memo: memo}
+	ctx := context.Background()
+
+	if _, err := catalogAdapter.InvokableRun(ctx, `{"query":"MySQL slow queries"}`); err != nil {
+		t.Fatalf("catalog InvokableRun() error = %v", err)
+	}
+	out, err := draftAdapter.InvokableRun(ctx, `{"domain":"alert_rule","action":"create","rule":{"kind":"metric_raw","spec":{"expr":"rate(mysql_global_status_slow_queries[5m]) > 0.1"}}}`)
+	if err != nil {
+		t.Fatalf("draft InvokableRun() error = %v", err)
+	}
+	if !strings.Contains(out, `"kind":"config_draft"`) {
+		t.Fatalf("draft output = %q, want config_draft", out)
+	}
+	if got := draft.calls.Load(); got != 1 {
+		t.Fatalf("draft executions = %d, want 1", got)
+	}
+}
+
+func TestEinoToolAdapter_DraftConfigChangeAllowsValidationAfterEmptyMetricCatalog(t *testing.T) {
+	t.Parallel()
+	memo := newToolMemo()
+	catalog := &fakeBaseTool{name: "list_metric_catalog", class: "read", runResp: `{"status":"empty","query":"cpu","metric_count":0,"returned":0,"metrics":[]}`}
+	draft := &fakeBaseTool{name: "draft_config_change", class: "read", runResp: `{"kind":"config_draft"}`}
+	catalogAdapter := &einoToolAdapter{inner: catalog, memo: memo}
+	draftAdapter := &einoToolAdapter{inner: draft, memo: memo}
+	ctx := context.Background()
+
+	if _, err := catalogAdapter.InvokableRun(ctx, `{"query":"cpu"}`); err != nil {
+		t.Fatalf("catalog InvokableRun() error = %v", err)
+	}
+	out, err := draftAdapter.InvokableRun(ctx, `{"domain":"alert_rule","action":"create","rule":{"kind":"metric_raw","spec":{"metric":"cpu","operator":">","threshold":80}}}`)
+	if err != nil {
+		t.Fatalf("draft InvokableRun() error = %v", err)
+	}
+	if !strings.Contains(out, `"kind":"config_draft"`) {
+		t.Fatalf("draft after empty catalog should execute for validation, got %q", out)
+	}
+	if got := draft.calls.Load(); got != 1 {
+		t.Fatalf("draft executions = %d, want 1", got)
+	}
+}
+
+func TestEinoToolAdapter_DraftConfigChangeAllowsLogRuleWithoutMetricCatalog(t *testing.T) {
+	t.Parallel()
+	inner := &fakeBaseTool{name: "draft_config_change", class: "read", runResp: `{"kind":"config_draft"}`}
+	a := &einoToolAdapter{inner: inner, memo: newToolMemo()}
+	ctx := context.Background()
+
+	out, err := a.InvokableRun(ctx, `{"domain":"alert_rule","action":"create","rule":{"kind":"log_match","spec":{"line_filter":"error","window":"5m"}}}`)
+	if err != nil {
+		t.Fatalf("InvokableRun() error = %v", err)
+	}
+	if !strings.Contains(out, `"kind":"config_draft"`) {
+		t.Fatalf("log draft should execute without metric catalog, got %q", out)
+	}
+	if got := inner.calls.Load(); got != 1 {
+		t.Fatalf("draft executions = %d, want 1", got)
+	}
+}
+
+func TestEinoToolAdapter_ListMetricCatalogAllowsOneRefinementBeforeCap(t *testing.T) {
+	t.Parallel()
+	inner := &fakeBaseTool{name: "list_metric_catalog", class: "read", runResp: `{"status":"ok"}`}
+	a := &einoToolAdapter{inner: inner, memo: newToolMemo()}
+	ctx := context.Background()
+
+	out, _ := a.InvokableRun(ctx, `{"query":"mongo connection usage"}`)
+	if strings.Contains(out, "call_budget_exceeded") {
+		t.Fatalf("first metric catalog lookup should execute, got budget directive: %s", out)
+	}
+	out, _ = a.InvokableRun(ctx, `{"query":"mongo conn_type values"}`)
+	if strings.Contains(out, "call_budget_exceeded") {
+		t.Fatalf("second metric catalog lookup should allow one refinement, got %q", out)
+	}
+	out, _ = a.InvokableRun(ctx, `{"query":"mongo all metrics"}`)
+	if !strings.Contains(out, "call_budget_exceeded") {
+		t.Fatalf("third metric catalog lookup should be capped, got %q", out)
+	}
+	if !strings.Contains(out, `"scope":"current_user_turn"`) || !strings.Contains(out, "expires on the next user message") {
+		t.Fatalf("budget directive should be explicitly scoped to the current turn, got %q", out)
+	}
+	if got := inner.calls.Load(); got != 2 {
+		t.Fatalf("metric catalog executions = %d, want 2", got)
+	}
+}
+
+func TestEinoToolAdapter_DraftConfigChangeFailureDoesNotConsumeConfirmableDraftCap(t *testing.T) {
+	t.Parallel()
+	inner := &fakeBaseTool{name: "draft_config_change", class: "read", runErr: errors.New("invalid scope")}
+	a := &einoToolAdapter{inner: inner, memo: newToolMemo()}
+	ctx := context.Background()
+
+	out, _ := a.InvokableRun(ctx, `{"rule":"bad"}`)
+	if !strings.Contains(out, `"status":"failed"`) {
+		t.Fatalf("failed draft should return failure envelope, got %q", out)
+	}
+	inner.runErr = nil
+	inner.runResp = `{"kind":"config_draft","draft_hash":"sha256:ok"}`
+	out, _ = a.InvokableRun(ctx, `{"rule":"fixed"}`)
+	if strings.Contains(out, "call_budget_exceeded") {
+		t.Fatalf("fixed draft after validation failure should execute, got %q", out)
+	}
+	out, _ = a.InvokableRun(ctx, `{"rule":"extra"}`)
+	if !strings.Contains(out, "call_budget_exceeded") {
+		t.Fatalf("second successful draft should be capped, got %q", out)
+	}
+	if got := inner.calls.Load(); got != 2 {
+		t.Fatalf("draft executions = %d, want failed+fixed executions", got)
+	}
+}
+
+func TestEinoToolAdapter_DraftConfigValidationFailedDoesNotConsumeConfirmableDraftCap(t *testing.T) {
+	t.Parallel()
+	inner := &fakeBaseTool{name: "draft_config_change", class: "read", runResp: `{"kind":"config_validation_failed","validation":{"status":"failed"}}`}
+	a := &einoToolAdapter{inner: inner, memo: newToolMemo()}
+	ctx := context.Background()
+
+	out, _ := a.InvokableRun(ctx, `{"rule":"bad"}`)
+	if !strings.Contains(out, `"kind":"config_validation_failed"`) {
+		t.Fatalf("validation failure should return structured result, got %q", out)
+	}
+	inner.runResp = `{"kind":"config_draft","draft_hash":"sha256:ok"}`
+	out, _ = a.InvokableRun(ctx, `{"rule":"fixed"}`)
+	if strings.Contains(out, "call_budget_exceeded") {
+		t.Fatalf("fixed draft after validation failed result should execute, got %q", out)
+	}
+	out, _ = a.InvokableRun(ctx, `{"rule":"extra"}`)
+	if !strings.Contains(out, "call_budget_exceeded") {
+		t.Fatalf("second successful draft should be capped, got %q", out)
+	}
+	if got := inner.calls.Load(); got != 2 {
+		t.Fatalf("draft executions = %d, want validation+fixed executions", got)
+	}
+}
+
 // The single-tool WrapBaseTool path leaves memo nil — no caching.
 func TestEinoToolAdapter_NoMemoByDefault(t *testing.T) {
 	t.Parallel()

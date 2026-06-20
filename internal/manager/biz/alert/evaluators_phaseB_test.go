@@ -1,11 +1,14 @@
 package alert
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	model "github.com/ongridio/ongrid/internal/manager/model/alert"
+	"github.com/ongridio/ongrid/internal/pkg/logquery"
 )
 
 func TestCompileLogMatch_Defaults(t *testing.T) {
@@ -40,6 +43,65 @@ func TestCompileLogMatch_Errors(t *testing.T) {
 		row := &model.Rule{RuleKey: "k", ConditionsJSON: c.spec}
 		if _, err := compileLogMatchRule(row); err == nil {
 			t.Errorf("%s: expected error", c.name)
+		}
+	}
+}
+
+func TestCompileLogVolume_PreservesLineFilter(t *testing.T) {
+	spec, _ := json.Marshal(map[string]any{
+		"stream_selector": `{ongrid_source=~"journald(:.*)?",level!="7"}`,
+		"line_filter":     "(?i)(error|failed)",
+		"window":          "10m",
+		"ratio_op":        ">",
+		"ratio_threshold": 3.0,
+	})
+	row := &model.Rule{ID: 2, RuleKey: "log_volume_err", ConditionsJSON: string(spec)}
+	r, err := compileLogVolumeRule(row)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if r.LineFilter != "(?i)(error|failed)" {
+		t.Fatalf("LineFilter = %q, want content regex", r.LineFilter)
+	}
+	if q := buildLogMatchQuery(r.StreamSelector, r.LineFilter, r.Window); !strings.Contains(q, `|~ "(?i)(error|failed)"`) {
+		t.Fatalf("query = %q, want log volume filter applied", q)
+	}
+}
+
+func TestLogMatchHostScopeUsesDeviceIDLabel(t *testing.T) {
+	repo := newFakeRepo()
+	rules := NewStaticRulesProvider(WithLogMatchRules([]LogMatchRule{{
+		ID:             1,
+		RuleKey:        "system_log_error_keywords",
+		Name:           "System log error keywords",
+		Severity:       "warning",
+		ScopeType:      "host",
+		StreamSelector: `{ongrid_source=~"journald(:.*)?"}`,
+		LineFilter:     "(?i)(error|fatal|panic)",
+		Window:         "5m",
+		Operator:       ">=",
+		Threshold:      1,
+	}}))
+	logq := &scriptedLogRange{result: lokiMatrixEntry(map[string]string{
+		"device_id":     "2",
+		"ongrid_source": "journald",
+		"unit":          "sshd.service",
+	}, "3")}
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	eval := newPipelineEvaluator(t, repo, &fakeNotifier{}, rules, PipelineEvaluatorOpts{
+		LogQuerier: logq,
+		Cooldown:   time.Minute,
+		Now:        func() time.Time { return now },
+	})
+
+	eval.EvaluateOnce(context.Background())
+
+	if len(repo.incidents) != 1 {
+		t.Fatalf("incidents = %d, want 1", len(repo.incidents))
+	}
+	for _, inc := range repo.incidents {
+		if inc.DeviceID == nil || *inc.DeviceID != 2 {
+			t.Fatalf("DeviceID = %v, want 2", inc.DeviceID)
 		}
 	}
 }
@@ -107,3 +169,25 @@ func TestBuildLogMatchQuery(t *testing.T) {
 	}
 }
 
+type scriptedLogRange struct {
+	result *logquery.QueryRangeResult
+	err    error
+}
+
+func (s *scriptedLogRange) QueryRange(_ context.Context, _ logquery.QueryRangeOptions) (*logquery.QueryRangeResult, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.result, nil
+}
+
+func lokiMatrixEntry(labels map[string]string, value string) *logquery.QueryRangeResult {
+	body := []map[string]interface{}{{
+		"metric": labels,
+		"values": [][]interface{}{
+			{time.Now().UnixNano(), value},
+		},
+	}}
+	raw, _ := json.Marshal(body)
+	return &logquery.QueryRangeResult{ResultType: "matrix", Result: raw}
+}

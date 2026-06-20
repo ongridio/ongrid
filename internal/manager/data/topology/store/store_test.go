@@ -165,6 +165,14 @@ func TestRelationCRUD(t *testing.T) {
 	if _, err := rels.Get(ctx, r.ID); !errors.Is(err, errs.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
+
+	recreated := &model.Relation{SrcID: a.ID, DstID: b.ID, Type: model.RelDependsOn}
+	if err := rels.Create(ctx, recreated); err != nil {
+		t.Fatalf("recreate relation after soft delete: %v", err)
+	}
+	if recreated.ID == r.ID {
+		t.Fatalf("recreated relation reused soft-deleted id %d", r.ID)
+	}
 }
 
 func TestCountRelationsByTypeGuard(t *testing.T) {

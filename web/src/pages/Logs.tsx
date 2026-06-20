@@ -684,7 +684,7 @@ export default function LogsPage() {
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder={tr('留空 = 全部；或写 LogQL：{ongrid_source=~"journald:.+"}', 'Empty = all logs; or write LogQL like {ongrid_source=~"journald:.+"}')}
+                placeholder={tr('留空 = 全部；或写 LogQL：{ongrid_source=~"journald(:.*)?"}', 'Empty = all logs; or write LogQL like {ongrid_source=~"journald(:.*)?"}')}
                 className={cn(INPUT_BASE, 'font-mono')}
               />
               <NLQueryHelper

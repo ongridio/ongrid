@@ -1,20 +1,42 @@
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Wrench, ChevronDown, ChevronRight, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Wrench, ChevronDown, ChevronRight, Loader2, AlertCircle, CheckCircle2, XCircle } from 'lucide-react';
 import type { ChatMessage, ToolCallSummary } from '@/api/chat';
 import { cn } from '@/lib/cn';
+import { isConfigDraftConfirmationMessage } from '@/lib/configDraftConfirmation';
 import { useI18n } from '@/i18n/locale';
+import { Button } from '@/components/ui';
+
+export type ConfigDraftResult = {
+  kind: 'config_draft';
+  domain?: string;
+  action?: string;
+  summary?: string;
+  target?: { id?: number; name?: string; type?: string; existing?: boolean };
+  payload?: unknown;
+  preview?: unknown;
+  diff?: unknown;
+  warnings?: string[];
+  scope?: { type?: string; label?: string; reason?: string; change_hint?: string };
+  confirmation_prompt?: string;
+  rollback?: string;
+  apply_tool?: string;
+  draft_hash?: string;
+};
+
+type ConfirmConfigDraft = (draft: ConfigDraftResult) => boolean | void | Promise<boolean | void>;
 
 type Props = {
   message: ChatMessage;
+  onConfirmConfigDraft?: ConfirmConfigDraft;
 };
 
-export function MessageBubble({ message }: Props) {
+export function MessageBubble({ message, onConfirmConfigDraft }: Props) {
   if (message.kind === 'tool_card' && message.tool_call) {
-    return <ToolCallSummaryBlock call={fromSummary(message.tool_call)} />;
+    return <ToolCallSummaryBlock call={fromSummary(message.tool_call)} onConfirmConfigDraft={onConfirmConfigDraft} />;
   }
-  if (message.role === 'tool') return <ToolBubble message={message} />;
+  if (message.role === 'tool') return <ToolBubble message={message} onConfirmConfigDraft={onConfirmConfigDraft} />;
   if (message.role === 'user') return <UserBubble message={message} />;
   // Tool-only assistant rows (empty content + has tool_calls) shouldn't
   // appear during streaming; on history reload they would, so suppress.
@@ -25,7 +47,7 @@ export function MessageBubble({ message }: Props) {
   ) {
     return null;
   }
-  return <AssistantBubble message={message} />;
+  return <AssistantBubble message={message} onConfirmConfigDraft={onConfirmConfigDraft} />;
 }
 
 // fromSummary maps the wire-level ToolCallSummary (server SSE shape) to
@@ -53,18 +75,29 @@ function safeParse(s: string): unknown {
 }
 
 function UserBubble({ message }: Props) {
+  const { tr } = useI18n();
+  const content = compactUserContent(message.content ?? '', tr);
+
   // Codex-style: small, compact zinc chip pinned right. No accent color
   // — keeps the visual weight on the assistant content below.
   return (
     <div className="flex justify-end">
       <div className="max-w-[78%] rounded-2xl rounded-br-md bg-zinc-800/80 px-3.5 py-2 text-[14px] leading-relaxed text-zinc-100 ring-1 ring-zinc-700/60">
-        {message.content}
+        {content}
       </div>
     </div>
   );
 }
 
-function AssistantBubble({ message }: Props) {
+function compactUserContent(
+  content: string,
+  tr: (zh: string, en: string) => string,
+): string {
+  if (!isConfigDraftConfirmationMessage(content)) return content;
+  return tr('确认创建这条告警规则', 'Confirm creating this alert rule');
+}
+
+function AssistantBubble({ message, onConfirmConfigDraft }: Props) {
   // Codex-style: no rounded card around assistant prose. Render markdown
   // flush against the column so headings/lists/code blocks read like a
   // document. Tool calls (when attached) appear as their own rows inside
@@ -81,19 +114,20 @@ function AssistantBubble({ message }: Props) {
         </div>
       )}
       {message.tool_calls?.map((tc, i) => (
-        <ToolCallSummaryBlock key={`${tc.name}-${i}`} call={tc} />
+        <ToolCallSummaryBlock key={`${tc.name}-${i}`} call={tc} onConfirmConfigDraft={onConfirmConfigDraft} />
       ))}
     </div>
   );
 }
 
-function ToolBubble({ message }: Props) {
+function ToolBubble({ message, onConfirmConfigDraft }: Props) {
   // History-reload path: the message persisted by the agent loop only
   // carries the tool name + JSON result string. We don't have args for
   // these (would need to join chat_tool_calls); show what we have.
   const result = message.content ? safeParse(message.content) : undefined;
   return (
     <ToolCallSummaryBlock
+      onConfirmConfigDraft={onConfirmConfigDraft}
       call={{
         name: message.tool_name ?? 'tool',
         status: 'success',
@@ -105,6 +139,7 @@ function ToolBubble({ message }: Props) {
 
 function ToolCallSummaryBlock({
   call,
+  onConfirmConfigDraft,
 }: {
   call: {
     name: string;
@@ -114,14 +149,16 @@ function ToolCallSummaryBlock({
     result?: unknown;
     duration_ms?: number;
     error?: string;
-  };
-}) {
+	  };
+	  onConfirmConfigDraft?: ConfirmConfigDraft;
+	}) {
   const { tr } = useI18n();
   const [open, setOpen] = useState(false);
   const status = call.status ?? (call.error ? 'error' : 'success');
   const isPending = status === 'pending';
   const isError = status === 'error' || status === 'timeout' || !!call.error;
   const hint = argSummary(call.arguments);
+  const configDraft = !isError ? asConfigDraft(call.result) : null;
   return (
     <div
       className={cn(
@@ -161,6 +198,9 @@ function ToolCallSummaryBlock({
           )}
         </span>
       </button>
+      {configDraft && (
+        <ConfigDraftCard draft={configDraft} onConfirm={onConfirmConfigDraft} />
+      )}
       {open && (
         <div className="border-t border-zinc-800/80 bg-zinc-950/40 px-3 py-2">
           {call.arguments !== undefined && (
@@ -193,6 +233,159 @@ function ToolCallSummaryBlock({
       )}
     </div>
   );
+}
+
+function ConfigDraftCard({
+  draft,
+  onConfirm,
+}: {
+  draft: ConfigDraftResult;
+  onConfirm?: ConfirmConfigDraft;
+}) {
+  const { tr } = useI18n();
+  const [state, setState] = useState<'idle' | 'submitting' | 'confirmed' | 'cancelled'>('idle');
+  const preview = previewSummary(draft.preview);
+  const warnings = Array.isArray(draft.warnings) ? draft.warnings.filter(Boolean) : [];
+  const payload = payloadSummary(draft.payload);
+  const scope = scopeSummary(draft.scope, tr, !draft.confirmation_prompt);
+  const disabled = state !== 'idle' || !onConfirm;
+
+  return (
+    <div className="border-t border-zinc-800/80 bg-zinc-950/30 px-3 py-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] font-medium text-zinc-300">
+              {domainLabel(draft.domain, tr)}
+            </span>
+            {draft.action && (
+              <span className="text-[11px] uppercase text-zinc-500">{draft.action}</span>
+            )}
+            {draft.target?.name && (
+              <span className="truncate text-[11px] text-zinc-500">{draft.target.name}</span>
+            )}
+          </div>
+          <div className="text-sm font-medium text-zinc-100">
+            {draft.summary || tr('配置草案', 'Configuration draft')}
+          </div>
+          {scope && <div className="text-[11px] leading-5 text-zinc-300">{scope}</div>}
+          {draft.confirmation_prompt && (
+            <div className="text-[11px] leading-5 text-zinc-400">{draft.confirmation_prompt}</div>
+          )}
+          {payload && <div className="text-[11px] leading-5 text-zinc-400">{payload}</div>}
+          {preview && <div className="text-[11px] leading-5 text-zinc-400">{preview}</div>}
+          {warnings.length > 0 && (
+            <div className="space-y-1 text-[11px] leading-5 text-amber-300">
+              {warnings.slice(0, 3).map((w, i) => (
+                <div key={`${w}-${i}`}>{w}</div>
+              ))}
+            </div>
+          )}
+          {draft.rollback && (
+            <div className="text-[11px] leading-5 text-zinc-500">{draft.rollback}</div>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            variant="primary"
+            disabled={disabled}
+            onClick={async () => {
+              if (!onConfirm) return;
+              setState('submitting');
+              try {
+                const ok = await onConfirm(draft);
+                setState(ok === false ? 'idle' : 'confirmed');
+              } catch {
+                setState('idle');
+              }
+            }}
+          >
+            <CheckCircle2 size={13} />
+            {state === 'confirmed'
+              ? tr('已确认', 'Confirmed')
+              : state === 'submitting'
+                ? tr('应用中', 'Applying')
+                : tr('确认应用', 'Apply')}
+          </Button>
+          <Button
+            variant="ghost"
+            disabled={state !== 'idle'}
+            onClick={() => setState('cancelled')}
+          >
+            <XCircle size={13} />
+            {state === 'cancelled' ? tr('已取消', 'Cancelled') : tr('取消', 'Cancel')}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function asConfigDraft(result: unknown): ConfigDraftResult | null {
+  const value = typeof result === 'string' ? safeParse(result) : result;
+  if (!value || typeof value !== 'object') return null;
+  const obj = value as Record<string, unknown>;
+  if (obj.kind !== 'config_draft') return null;
+  if (obj.domain !== 'alert_rule') return null;
+  return obj as ConfigDraftResult;
+}
+
+function domainLabel(domain: string | undefined, tr: (zh: string, en: string) => string): string {
+  switch (domain) {
+    case 'alert_rule':
+      return tr('告警规则', 'Alert rule');
+    default:
+      return tr('配置', 'Config');
+  }
+}
+
+function previewSummary(preview: unknown): string {
+  if (!preview || typeof preview !== 'object') return '';
+  const p = preview as Record<string, unknown>;
+  if (typeof p.skipped_reason === 'string' && p.skipped_reason) return p.skipped_reason;
+  if (typeof p.fire_count === 'number') {
+    const unit = typeof p.unit === 'string' && p.unit ? ` ${p.unit}` : '';
+    return `Preview fire_count=${p.fire_count}${unit}`;
+  }
+  return '';
+}
+
+function scopeSummary(
+  scope: ConfigDraftResult['scope'] | undefined,
+  tr: (zh: string, en: string) => string,
+  includeHint: boolean,
+): string {
+  if (!scope) return '';
+  const label = typeof scope.label === 'string' ? scope.label.trim() : '';
+  const type = typeof scope.type === 'string' ? scope.type.trim() : '';
+  const scopeText = label || type;
+  if (!scopeText) return '';
+  const hint = typeof scope.change_hint === 'string' ? scope.change_hint.trim() : '';
+  return includeHint && hint
+    ? `${tr('范围：', 'Scope: ')}${scopeText} · ${hint}`
+    : `${tr('范围：', 'Scope: ')}${scopeText}`;
+}
+
+function payloadSummary(payload: unknown): string {
+  if (!payload || typeof payload !== 'object') return '';
+  const obj = payload as Record<string, unknown>;
+  const rows: string[] = [];
+  for (const [key, value] of Object.entries(obj)) {
+    if (rows.length >= 4) break;
+    if (value === null || value === undefined || value === '') continue;
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      rows.push(`${key}: ${String(value)}`);
+      continue;
+    }
+    if (typeof value === 'object') {
+      const nested = Object.entries(value as Record<string, unknown>)
+        .filter(([, v]) => v !== null && v !== undefined && v !== '')
+        .slice(0, 4)
+        .map(([k, v]) => `${k}: ${String(v)}`);
+      if (nested.length > 0) rows.push(nested.join(' · '));
+    }
+  }
+  return rows.join(' · ');
 }
 
 function StatusIcon({ status }: { status?: string }) {

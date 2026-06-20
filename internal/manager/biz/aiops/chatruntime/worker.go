@@ -621,6 +621,9 @@ func (rt *Runtime) runWorker(ctx context.Context, agentDef *Agent, sessID, userT
 	if mopts := workerChatModelOpts(ctx); len(mopts) > 0 {
 		invokeOpts = append(invokeOpts, compose.WithChatModelOption(mopts...))
 	}
+	invokeOpts = append(invokeOpts, compose.WithToolsNodeOption(
+		compose.WithToolOption(graph.WithInvokeOpts(basetool.WithUserText(userText))),
+	))
 	// Autoheal any tool batch still open when the worker exits — same
 	// rationale as the parent runtime defer. context.WithoutCancel
 	// keeps the stub inserts running even if the caller cancelled.
