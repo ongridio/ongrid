@@ -126,6 +126,7 @@ export type FlowToolMeta = {
   name: string;
   display_zh?: string;
   description: string;
+  description_zh?: string;
   when_to_use?: string;
   class: string; // read / write / destructive
   category: string;

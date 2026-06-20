@@ -14,13 +14,14 @@ import "encoding/json"
 
 // ToolMeta describes one BaseTool for the node palette.
 type ToolMeta struct {
-	Name        string          // wire name (goes into tool node config.tool)
-	DisplayZh   string          // Chinese display label (falls back to Name)
-	Description string          // one-line "what it does"
-	WhenToUse   string          // disambiguation hint
-	Class       string          // read / write / destructive
-	Category    string          // UI grouping (topology/host/observability/…)
-	Parameters  json.RawMessage // JSON Schema of the args object (form source)
+	Name          string          // wire name (goes into tool node config.tool)
+	DisplayZh     string          // Chinese display label (falls back to Name)
+	Description   string          // one-line "what it does" (English)
+	DescriptionZh string          // Chinese one-liner (falls back to Description)
+	WhenToUse     string          // disambiguation hint
+	Class         string          // read / write / destructive
+	Category      string          // UI grouping (topology/host/observability/…)
+	Parameters    json.RawMessage // JSON Schema of the args object (form source)
 }
 
 // ToolCatalog exposes the registered tool universe. Implemented in

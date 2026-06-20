@@ -322,13 +322,14 @@ func (h *Handler) getRun(w http.ResponseWriter, r *http.Request) {
 }
 
 type toolMetaDTO struct {
-	Name        string          `json:"name"`
-	DisplayZh   string          `json:"display_zh,omitempty"`
-	Description string          `json:"description"`
-	WhenToUse   string          `json:"when_to_use,omitempty"`
-	Class       string          `json:"class"`
-	Category    string          `json:"category"`
-	Parameters  json.RawMessage `json:"parameters,omitempty"`
+	Name          string          `json:"name"`
+	DisplayZh     string          `json:"display_zh,omitempty"`
+	Description   string          `json:"description"`
+	DescriptionZh string          `json:"description_zh,omitempty"`
+	WhenToUse     string          `json:"when_to_use,omitempty"`
+	Class         string          `json:"class"`
+	Category      string          `json:"category"`
+	Parameters    json.RawMessage `json:"parameters,omitempty"`
 }
 
 // listTools returns the tool-node palette (every registered BaseTool as
@@ -343,13 +344,14 @@ func (h *Handler) listTools(w http.ResponseWriter, r *http.Request) {
 	items := make([]toolMetaDTO, 0, len(metas))
 	for _, m := range metas {
 		items = append(items, toolMetaDTO{
-			Name:        m.Name,
-			DisplayZh:   m.DisplayZh,
-			Description: m.Description,
-			WhenToUse:   m.WhenToUse,
-			Class:       m.Class,
-			Category:    m.Category,
-			Parameters:  m.Parameters,
+			Name:          m.Name,
+			DisplayZh:     m.DisplayZh,
+			Description:   m.Description,
+			DescriptionZh: m.DescriptionZh,
+			WhenToUse:     m.WhenToUse,
+			Class:         m.Class,
+			Category:      m.Category,
+			Parameters:    m.Parameters,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})

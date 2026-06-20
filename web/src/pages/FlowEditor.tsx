@@ -17,6 +17,7 @@ import {
   NodeProps,
   Position,
   ReactFlow,
+  ReactFlowInstance,
   useEdgesState,
   useNodesState,
 } from '@xyflow/react';
@@ -274,6 +275,7 @@ export default function FlowEditorPage() {
   const [copied, setCopied] = useState('');
   const seq = useRef(1);
   const pollRef = useRef<number | null>(null);
+  const rfRef = useRef<ReactFlowInstance<CanvasNode, Edge> | null>(null);
   const [tools, setTools] = useState<FlowToolMeta[]>([]);
   const [toolQuery, setToolQuery] = useState('');
 
@@ -342,12 +344,13 @@ export default function FlowEditorPage() {
     (t: FlowNodeType, opts?: { label?: string; config?: Record<string, unknown> }) => {
       const meta = NODE_META[t];
       const nid = `n${seq.current++}`;
+      const pos = { x: 120 + nodes.length * 40, y: 120 + nodes.length * 30 };
       setNodes((ns) => [
         ...ns,
         {
           id: nid,
           type: 'flowNode',
-          position: { x: 120 + ns.length * 40, y: 120 + ns.length * 30 },
+          position: pos,
           data: {
             flowType: t,
             label: opts?.label ?? (locale === 'zh-CN' ? meta.zh : meta.en),
@@ -357,8 +360,13 @@ export default function FlowEditorPage() {
       ]);
       setSelectedID(nid);
       setDirty(true);
+      // Pan the canvas to the freshly added node so it's never off-screen.
+      window.setTimeout(() => {
+        const inst = rfRef.current;
+        if (inst) inst.setCenter(pos.x + 75, pos.y + 16, { zoom: inst.getZoom(), duration: 400 });
+      }, 30);
     },
-    [locale, setNodes]
+    [nodes.length, locale, setNodes]
   );
 
   const onConnect = useCallback(
@@ -584,6 +592,9 @@ export default function FlowEditorPage() {
             nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}
+            onInit={(inst) => {
+              rfRef.current = inst;
+            }}
             onNodesChange={(c) => {
               onNodesChange(c);
               if (c.some((x) => x.type === 'position' && x.dragging === false)) setDirty(true);
@@ -884,7 +895,7 @@ function ToolPalette({
                 <button
                   key={t.name}
                   type="button"
-                  title={t.description + (t.when_to_use ? '\n\n' + t.when_to_use : '')}
+                  title={(locale === 'zh-CN' ? t.description_zh || t.description : t.description) + (t.when_to_use ? '\n\n' + t.when_to_use : '')}
                   onClick={() => onPick(t)}
                   className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-[12px] text-zinc-300 transition-colors hover:bg-zinc-800"
                 >
@@ -929,7 +940,7 @@ function ToolArgsForm({
   disabled: boolean;
   onChange: (args: Record<string, unknown>) => void;
 }) {
-  const { tr } = useI18n();
+  const { tr, locale } = useI18n();
   const props = schema?.parameters?.properties;
   const required = new Set(schema?.parameters?.required ?? []);
 
@@ -981,7 +992,7 @@ function ToolArgsForm({
   return (
     <div>
       <div className="mb-2 rounded-md bg-zinc-900/60 p-2 text-[11px] leading-relaxed text-zinc-500">
-        {schema?.description}
+        {locale === 'zh-CN' ? schema?.description_zh || schema?.description : schema?.description}
         <div className="mt-1 text-zinc-600">
           {tr(
             '可选参数留空即可。数组填 [1, 2]，布尔选 true/false，数字直接填；任意字段也可用 {{…}} 引用上游。',

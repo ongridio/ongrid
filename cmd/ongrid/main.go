@@ -3218,13 +3218,14 @@ func (c flowToolCatalog) ListTools() []managerbizflow.ToolMeta {
 			continue
 		}
 		out = append(out, managerbizflow.ToolMeta{
-			Name:        info.Name,
-			DisplayZh:   flowToolLabelZh(info.Name),
-			Description: info.Description,
-			WhenToUse:   info.WhenToUse,
-			Class:       info.Class,
-			Category:    categorizeFlowTool(info.Name),
-			Parameters:  info.Parameters,
+			Name:          info.Name,
+			DisplayZh:     flowToolLabelZh(info.Name),
+			Description:   info.Description,
+			DescriptionZh: flowToolDescZh(info.Name),
+			WhenToUse:     info.WhenToUse,
+			Class:         info.Class,
+			Category:      categorizeFlowTool(info.Name),
+			Parameters:    info.Parameters,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -3324,4 +3325,40 @@ func flowToolLabelZh(name string) string {
 		return zh
 	}
 	return name
+}
+
+// flowToolDescZhMap is the Chinese one-line description per tool, shown in
+// the palette + config drawer when the UI is in zh-CN. Same single-source
+// rationale as flowToolLabelZhMap. Unmapped → empty (frontend falls back
+// to the English Description).
+var flowToolDescZhMap = map[string]string{
+	"query_promql":            "用 PromQL 查询指标时序数据。",
+	"query_logql":             "用 LogQL 查询 Loki 日志。",
+	"query_traceql":           "用 TraceQL 查询 Tempo 链路。",
+	"list_database_sources":   "列出已发现的数据库指标采集源。",
+	"analyze_database_status": "对数据库指标源做健康巡检（连接/慢查/复制等）。",
+	"host_bash":               "在边端主机上执行受白名单约束的只读命令。",
+	"host_restart_service":    "重启白名单内的 systemd 服务（写操作，走二审）。",
+	"get_host_load":           "获取主机 CPU / 内存 / 负载快照。",
+	"get_host_processes":      "获取主机 Top 进程列表。",
+	"get_topology":            "拉取业务拓扑全图（节点 + 关系）。",
+	"find_topology_node":      "按名称搜索拓扑节点。",
+	"expand_topology":         "从某节点 BFS 扩散，算故障爆炸半径。",
+	"correlate_incident":      "围绕某事件融合 指标 + 日志 + 链路 证据。",
+	"get_incident_detail":     "获取单条事件详情。",
+	"query_incidents":         "查询事件列表。",
+	"query_alert_rules":       "查询告警规则。",
+	"get_edge_summary":        "按边端聚合健康概览。",
+	"query_devices":           "查询设备 / 边端清单。",
+	"query_change_events":     "查询某时刻附近的变更事件（审计）。",
+	"rank_edges":              "按某个 PromQL 指标给边端排名。",
+	"find_outlier_edges":      "基于统计找出离群边端。",
+	"query_knowledge":         "在 playbook + 代码仓里做语义检索。",
+	"list_repo_sources":       "列出已注册的代码仓来源。",
+	"read_source":             "读取代码仓里的源文件。",
+	"grep_source":             "在代码仓里 grep 搜索。",
+}
+
+func flowToolDescZh(name string) string {
+	return flowToolDescZhMap[name]
 }
