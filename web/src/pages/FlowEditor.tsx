@@ -679,14 +679,24 @@ export default function FlowEditorPage() {
                 copied={copied}
               />
             )}
-            <div className="mt-2 rounded-md bg-zinc-900/60 p-2 text-[11px] leading-relaxed text-zinc-500">
-              {selected.data.flowType === 'agent' || selected.data.flowType === 'llm'
-                ? tr(
-                    '不声明输出 schema 时，answer 是自由文本——只能接 Agent / LLM / 通知节点；要接条件 / 工具，必须声明 schema 并引用 output.structured.*。',
-                    'Without an output schema the answer is free text — consumable only by agent / LLM / notify nodes. To feed condition / tool nodes, declare a schema and reference output.structured.*.'
-                  )
-                : tr('本节点输出引用：', 'This node output ref: ') + `{{nodes.${selected.id}.output.…}}`}
-            </div>
+            <SelfOutputRefs
+              node={selected}
+              runNodes={activeRun?.nodes?.length ? activeRun.nodes : lastRunNodes}
+              onCopy={(ref) => {
+                void navigator.clipboard?.writeText(ref);
+                setCopied(ref);
+                window.setTimeout(() => setCopied(''), 1500);
+              }}
+              copied={copied}
+            />
+            {(selected.data.flowType === 'agent' || selected.data.flowType === 'llm') && (
+              <div className="mt-2 rounded-md bg-zinc-900/60 p-2 text-[11px] leading-relaxed text-zinc-500">
+                {tr(
+                  '不声明输出 schema 时，answer 是自由文本——只能接 Agent / LLM / 通知节点；要接条件 / 工具，必须声明 schema 并引用 output.structured.*。',
+                  'Without an output schema the answer is free text — consumable only by agent / LLM / notify nodes. To feed condition / tool nodes, declare a schema and reference output.structured.*.'
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -1225,6 +1235,72 @@ function UpstreamRefs({
             </div>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// SelfOutputRefs shows the SELECTED node's own output fields — what it
+// emits, for downstream {{nodes.<id>.output.…}} refs and to understand a
+// tool's return shape. Live paths from the last run, else the node type's
+// known shape.
+function SelfOutputRefs({
+  node,
+  runNodes,
+  onCopy,
+  copied,
+}: {
+  node: CanvasNode;
+  runNodes: FlowRunNode[];
+  onCopy: (ref: string) => void;
+  copied: string;
+}) {
+  const { tr } = useI18n();
+  const { paths, live } = useMemo(() => {
+    const ran = runNodes.find((r) => r.node_id === node.id);
+    if (ran && ran.output && Object.keys(ran.output).length) {
+      return { paths: flattenPaths(ran.output), live: true };
+    }
+    const hasSchema = !!(node.data.config?.output_schema);
+    return { paths: staticOutputHints(node.data.flowType, hasSchema), live: false };
+  }, [node, runNodes]);
+
+  if (paths.length === 0) return null;
+
+  return (
+    <div className="mt-2 rounded-md border border-zinc-800 bg-zinc-900/40 p-2">
+      <div className="mb-1 flex items-center justify-between">
+        <span className="text-[11px] font-medium text-zinc-400">{tr('本节点输出', 'This node output')}</span>
+        {copied ? (
+          <span className="text-[10px] text-emerald-400">{tr('已复制', 'copied')}</span>
+        ) : live ? (
+          <span className="rounded bg-emerald-900/40 px-1 text-[8px] text-emerald-400">{tr('实测', 'live')}</span>
+        ) : (
+          <span className="rounded bg-zinc-800 px-1 text-[8px] text-zinc-500">{tr('预估', 'shape')}</span>
+        )}
+      </div>
+      <div className="mb-1.5 text-[10px] leading-relaxed text-zinc-600">
+        {tr('本节点输出的字段，供下游节点引用。点字段复制 {{…}}。', "This node's output fields, for downstream refs. Click to copy {{…}}.")}
+      </div>
+      <div className="flex flex-wrap gap-1">
+        {paths.map((p) => {
+          const ref = `{{nodes.${node.id}.output.${p}}}`;
+          return (
+            <button
+              key={p}
+              type="button"
+              title={ref}
+              onClick={() => onCopy(ref)}
+              className={`max-w-full truncate rounded border px-1 py-0.5 font-mono text-[9px] transition-colors ${
+                copied === ref
+                  ? 'border-emerald-700 bg-emerald-950/40 text-emerald-400'
+                  : 'border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200'
+              }`}
+            >
+              {p}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
