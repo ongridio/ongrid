@@ -13,6 +13,7 @@ import (
 	"time"
 
 	model "github.com/ongridio/ongrid/internal/manager/model/secret"
+	"github.com/ongridio/ongrid/internal/pkg/credinject"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/secretbox"
 )
@@ -31,6 +32,7 @@ type Repo interface {
 type View struct {
 	ID          uint64    `json:"id"`
 	Name        string    `json:"name"`
+	Type        string    `json:"type"`
 	Description string    `json:"description"`
 	FieldKeys   []string  `json:"field_keys"`
 	CreatedAt   time.Time `json:"created_at"`
@@ -43,11 +45,16 @@ type Usecase struct{ repo Repo }
 // NewUsecase wires the repo.
 func NewUsecase(repo Repo) *Usecase { return &Usecase{repo: repo} }
 
-// Create seals the field map and stores a new named credential.
-func (u *Usecase) Create(ctx context.Context, name, description string, fields map[string]string) (*View, error) {
+// Create seals the field map and stores a new named credential of credType
+// (empty → "custom").
+func (u *Usecase) Create(ctx context.Context, name, credType, description string, fields map[string]string) (*View, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, fmt.Errorf("%w: name required", errs.ErrInvalid)
+	}
+	credType = strings.TrimSpace(credType)
+	if credType == "" {
+		credType = CredTypeCustom
 	}
 	fields = clean(fields)
 	if len(fields) == 0 {
@@ -57,7 +64,7 @@ func (u *Usecase) Create(ctx context.Context, name, description string, fields m
 	if err != nil {
 		return nil, err
 	}
-	s := &model.Secret{Name: name, Data: sealed, Description: strings.TrimSpace(description)}
+	s := &model.Secret{Name: name, Type: credType, Data: sealed, Description: strings.TrimSpace(description)}
 	if err := u.repo.Create(ctx, s); err != nil {
 		return nil, err
 	}
@@ -108,6 +115,36 @@ func (u *Usecase) ResolveFields(ctx context.Context, name string) (map[string]st
 	return unseal(s.Data)
 }
 
+// ResolveInjection resolves a named credential into the env vars to inject,
+// using its TYPE's inject rule (n8n-style). A "custom"/typeless credential
+// injects each field as a same-named env var. Returns the env map + the
+// field names the type's rule referenced but the credential lacks. In-process
+// only. (Skills that declare their OWN slot.inject use ResolveFields +
+// credinject directly instead — that per-skill mapping wins.)
+func (u *Usecase) ResolveInjection(ctx context.Context, name string) (map[string]string, []string, error) {
+	s, err := u.repo.GetByName(ctx, name)
+	if err != nil {
+		return nil, nil, err
+	}
+	fields, err := unseal(s.Data)
+	if err != nil {
+		return nil, nil, err
+	}
+	t := LookupCredType(s.Type)
+	if t.IsCustom() || len(t.InjectEnv) == 0 {
+		env := map[string]string{}
+		for k, v := range fields {
+			env[k] = v
+		}
+		return env, nil, nil
+	}
+	plan, missing, err := credinject.Resolve(t.InjectEnv, nil, fields)
+	if err != nil {
+		return nil, nil, err
+	}
+	return plan.Env, missing, nil
+}
+
 // --- helpers ---
 
 func seal(fields map[string]string) (string, error) {
@@ -155,6 +192,7 @@ func toView(s *model.Secret, fields map[string]string) *View {
 	return &View{
 		ID:          s.ID,
 		Name:        s.Name,
+		Type:        s.Type,
 		Description: s.Description,
 		FieldKeys:   keys,
 		CreatedAt:   s.CreatedAt,

@@ -29,6 +29,16 @@ func (h *Handler) Register(r chi.Router) {
 	r.Post("/v1/secrets", h.create)
 	r.Put("/v1/secrets/{id}", h.update)
 	r.Delete("/v1/secrets/{id}", h.del)
+	r.Get("/v1/credential-types", h.types)
+}
+
+// types lists the reusable credential types (fields + which type injects how)
+// so the create-credential UI can render the right form.
+func (h *Handler) types(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireAdmin(w, r); !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": bizsecret.AllCredTypes()})
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
@@ -49,6 +59,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	}
 	var in struct {
 		Name        string            `json:"name"`
+		Type        string            `json:"type"`
 		Description string            `json:"description"`
 		Fields      map[string]string `json:"fields"`
 	}
@@ -56,7 +67,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, errors.Join(errs.ErrInvalid, err))
 		return
 	}
-	v, err := h.uc.Create(r.Context(), in.Name, in.Description, in.Fields)
+	v, err := h.uc.Create(r.Context(), in.Name, in.Type, in.Description, in.Fields)
 	if err != nil {
 		writeErr(w, err)
 		return

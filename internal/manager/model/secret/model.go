@@ -24,6 +24,11 @@ type Secret struct {
 	// the manifest maps this instance's fields to env vars.
 	Name string `gorm:"size:128;not null;uniqueIndex"`
 
+	// Type is the credential TYPE name (biz/secret.CredType, e.g.
+	// "tencentcloud" / "aws" / "custom"). Drives the create-form fields and
+	// the default inject rule. Empty → treated as "custom".
+	Type string `gorm:"size:64"`
+
 	// Data is the AES-GCM-sealed JSON object of the credential's fields
 	// (map[string]string). Reuses the original `value` column so no schema
 	// churn from the single-value era. NEVER returned by a read API.
