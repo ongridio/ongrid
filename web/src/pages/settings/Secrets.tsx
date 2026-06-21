@@ -112,7 +112,7 @@ export default function SecretsPage() {
     <div className="anim-fade space-y-5">
       <div className="flex items-center gap-2">
         <Lock size={18} className="text-zinc-400" />
-        <h1 className="text-lg font-semibold text-zinc-100">{tr('密钥', 'Secrets')}</h1>
+        <h1 className="text-lg font-semibold text-zinc-100">{tr('凭证', 'Credentials')}</h1>
         <button
           type="button"
           onClick={() => void load()}
