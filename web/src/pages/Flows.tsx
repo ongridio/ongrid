@@ -8,6 +8,7 @@ import { Play, Plus, Trash2, Workflow as WorkflowIcon } from 'lucide-react';
 import { createFlow, deleteFlow, listFlows, runFlow, toggleFlow, type Flow } from '@/api/flows';
 import { useI18n } from '@/i18n/locale';
 import { useAuth } from '@/store/auth';
+import { PageHeader } from '@/components/ui';
 
 export default function FlowsPage() {
   const { tr } = useI18n();
@@ -93,18 +94,14 @@ export default function FlowsPage() {
 
   return (
     <main className="anim-fade flex flex-1 flex-col overflow-hidden">
-      <header className="app-header border-b border-zinc-800 px-6 py-4">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <h1 className="text-base font-semibold text-zinc-100">{tr('工作流', 'Workflows')}</h1>
-            <p className="mt-0.5 text-xs text-zinc-500">
-              {tr(
-                `可视化工作流：触发 → Agent / 工具 / 条件 / 通知 节点连成自动化流程 · 共 ${items.length} 个`,
-                `Wire trigger → agent / tool / condition / notify nodes into automations · ${items.length} total`
-              )}
-            </p>
-          </div>
-          {canWrite && !creating && (
+      <PageHeader
+        title={tr('工作流', 'Workflows')}
+        subtitle={tr(
+          `可视化工作流：触发 → Agent / 工具 / 条件 / 通知 节点连成自动化流程 · 共 ${items.length} 个`,
+          `Wire trigger → agent / tool / condition / notify nodes into automations · ${items.length} total`,
+        )}
+        actions={
+          canWrite && !creating ? (
             <button
               type="button"
               onClick={() => setCreating(true)}
@@ -113,9 +110,9 @@ export default function FlowsPage() {
               <Plus size={14} />
               {tr('新建工作流', 'New workflow')}
             </button>
-          )}
-        </div>
-      </header>
+          ) : undefined
+        }
+      />
       <div className="flex-1 overflow-y-auto px-6 py-4">
 
       {creating && (
