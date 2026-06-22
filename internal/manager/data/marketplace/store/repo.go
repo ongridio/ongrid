@@ -118,19 +118,6 @@ func (r *Repo) DeleteSoft(ctx context.Context, tenantID uint64, packID string) e
 	return nil
 }
 
-// PurgeSoftDeleted hard-deletes any soft-deleted row for (tenant, pack).
-// Install calls this to free the (tenant_id, pack_id) unique slot a prior
-// Uninstall left behind — idx_tenant_pack does not span deleted_at, so a
-// soft-deleted row still blocks a reinstall INSERT. No-op when none match.
-func (r *Repo) PurgeSoftDeleted(ctx context.Context, tenantID uint64, packID string) error {
-	if packID == "" {
-		return fmt.Errorf("%w: pack_id required", errs.ErrInvalid)
-	}
-	return r.db.WithContext(ctx).Unscoped().
-		Where("tenant_id = ? AND pack_id = ? AND deleted_at IS NOT NULL", tenantID, packID).
-		Delete(&model.InstalledPack{}).Error
-}
-
 // SetBindings stores the slot→credential JSON for an installed pack
 // (HLD-017 credential binding). Empty/missing pack → ErrNotFound.
 func (r *Repo) SetBindings(ctx context.Context, tenantID uint64, packID, bindingsJSON string) error {

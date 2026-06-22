@@ -125,19 +125,6 @@ func (r *fakeRepo) SetBindings(_ context.Context, tenantID uint64, packID, bindi
 	return errs.ErrNotFound
 }
 
-func (r *fakeRepo) PurgeSoftDeleted(_ context.Context, tenantID uint64, packID string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	kept := r.rows[:0]
-	for _, row := range r.rows {
-		if row.DeletedAt != nil && row.TenantID == tenantID && row.PackID == packID {
-			continue // drop the soft-deleted row
-		}
-		kept = append(kept, row)
-	}
-	r.rows = kept
-	return nil
-}
 
 // ----- in-memory registries -------------------------------------------
 

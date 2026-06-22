@@ -15,11 +15,6 @@ type Repo interface {
 	List(ctx context.Context, tenantID uint64) ([]*model.InstalledPack, error)
 	DeleteSoft(ctx context.Context, tenantID uint64, packID string) error
 	SetBindings(ctx context.Context, tenantID uint64, packID, bindingsJSON string) error
-	// PurgeSoftDeleted hard-removes any soft-deleted row for (tenant, pack)
-	// so a reinstall of a previously-uninstalled pack doesn't collide with
-	// the unique index (idx_tenant_pack does NOT span deleted_at, so a
-	// soft-deleted row still occupies the (tenant_id, pack_id) slot).
-	PurgeSoftDeleted(ctx context.Context, tenantID uint64, packID string) error
 }
 
 // SkillRegistry is the narrow surface the usecase uses to hot-reload

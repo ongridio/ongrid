@@ -231,15 +231,9 @@ func (uc *Usecase) Install(ctx context.Context, caller Caller, src Source) (*Ins
 		return nil, err
 	}
 
-	// 6b. Free the (tenant, pack_id) unique slot a prior Uninstall left
-	// behind. Uninstall soft-deletes, but idx_tenant_pack does not span
-	// deleted_at — so the soft-deleted row still occupies the slot and the
-	// Create INSERT below would fail with a unique violation. The GetByPackID
-	// check above only sees LIVE rows, so we reach here legitimately.
-	if err := uc.repo.PurgeSoftDeleted(ctx, tenantID, pack.ID); err != nil {
-		cleanupStaging()
-		return nil, fmt.Errorf("purge soft-deleted row for %q: %w", pack.ID, err)
-	}
+	// (Reinstall after uninstall is handled upstream now: the InstalledPack
+	// soft-delete marker is part of idx_tenant_pack, so a soft-deleted row no
+	// longer occupies the live (tenant_id, pack_id) slot — Create just works.)
 
 	// 7. Move staging → install path. We use a rename when the staging
 	//    + install root sit on the same fs; fall back to a copy + RemoveAll
