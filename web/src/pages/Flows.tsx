@@ -79,7 +79,7 @@ export default function FlowsPage() {
   };
 
   const onDelete = async (f: Flow) => {
-    if (!window.confirm(tr(`删除编排「${f.name}」？运行历史一并不可见。`, `Delete workflow "${f.name}"?`))) return;
+    if (!window.confirm(tr(`删除工作流「${f.name}」？运行历史一并不可见。`, `Delete workflow "${f.name}"?`))) return;
     setBusyId(f.id);
     try {
       await deleteFlow(f.id);
@@ -96,10 +96,10 @@ export default function FlowsPage() {
       <header className="app-header border-b border-zinc-800 px-6 py-4">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h1 className="text-base font-semibold text-zinc-100">{tr('编排', 'Workflows')}</h1>
+            <h1 className="text-base font-semibold text-zinc-100">{tr('工作流', 'Workflows')}</h1>
             <p className="mt-0.5 text-xs text-zinc-500">
               {tr(
-                `可视化编排：触发 → Agent / 工具 / 条件 / 通知 节点连成自动化流程 · 共 ${items.length} 个`,
+                `可视化工作流：触发 → Agent / 工具 / 条件 / 通知 节点连成自动化流程 · 共 ${items.length} 个`,
                 `Wire trigger → agent / tool / condition / notify nodes into automations · ${items.length} total`
               )}
             </p>
@@ -111,7 +111,7 @@ export default function FlowsPage() {
               className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-500"
             >
               <Plus size={14} />
-              {tr('新建编排', 'New workflow')}
+              {tr('新建工作流', 'New workflow')}
             </button>
           )}
         </div>
@@ -128,7 +128,7 @@ export default function FlowsPage() {
               if (e.key === 'Enter') void onCreate();
               if (e.key === 'Escape') setCreating(false);
             }}
-            placeholder={tr('编排名称，如：磁盘告警自动处置', 'Workflow name, e.g. disk-alert auto-remediation')}
+            placeholder={tr('工作流名称，如：磁盘告警自动处置', 'Workflow name, e.g. disk-alert auto-remediation')}
             className="flex-1 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-[13px] text-zinc-200 outline-none focus:border-indigo-500"
           />
           <button
@@ -162,7 +162,7 @@ export default function FlowsPage() {
         <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-zinc-800 py-16">
           <WorkflowIcon size={28} className="text-zinc-600" />
           <div className="text-[13px] text-zinc-500">
-            {tr('还没有编排。新建一个，把告警处置 / 巡检 / 通知串成自动化。', 'No workflows yet. Create one to automate remediation, inspection, or notification chains.')}
+            {tr('还没有工作流。新建一个，把告警处置 / 巡检 / 通知串成自动化。', 'No workflows yet. Create one to automate remediation, inspection, or notification chains.')}
           </div>
         </div>
       ) : (

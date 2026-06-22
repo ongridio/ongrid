@@ -30,6 +30,7 @@ import {
   Trash2,
   Share2,
   Workflow,
+  Plug,
 } from 'lucide-react';
 import { Avatar } from './Avatar';
 import { AgentBadge } from './AgentBadge';
@@ -436,8 +437,9 @@ export function Sidebar() {
         <SectionLabel>Agent</SectionLabel>
         <NavSection>
           <SidebarNavItem to="/agents" icon={Bot} label={tr('助理', 'Assistants')} />
+          <SidebarNavItem to="/workflows" icon={Workflow} label={tr('工作流', 'Workflows')} />
           <SidebarNavItem to="/skills" icon={Wrench} label={tr('技能', 'Skills')} />
-          <SidebarNavItem to="/workflows" icon={Workflow} label={tr('编排', 'Workflows')} />
+          <SidebarNavItem to="/mcp" icon={Plug} label="MCP" />
         </NavSection>
 
         <SectionLabel>{tr('知识库', 'Knowledge')}</SectionLabel>

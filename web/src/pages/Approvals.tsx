@@ -67,7 +67,7 @@ export default function ApprovalsPage() {
     <main className="anim-fade flex flex-1 flex-col overflow-hidden">
       <PageHeader
         title={tr('待确认', 'Approvals')}
-        subtitle={tr('Agent / 编排提交的危险操作，需人工批准后才执行', 'Dangerous actions proposed by agents / flows — execute only after a human approves')}
+        subtitle={tr('Agent / 工作流提交的危险操作，需人工批准后才执行', 'Dangerous actions proposed by agents / flows — execute only after a human approves')}
         actions={
           <button
             type="button"

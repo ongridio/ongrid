@@ -23,6 +23,7 @@ const SkillsPage = lazy(() => import('@/pages/Skills'));
 const ApprovalsPage = lazy(() => import('@/pages/Approvals'));
 const SkillRunPage = lazy(() => import('@/pages/SkillRun'));
 const AgentsPage = lazy(() => import('@/pages/Agents'));
+const McpPage = lazy(() => import('@/pages/Mcp'));
 const FlowsPage = lazy(() => import('@/pages/Flows'));
 const FlowEditorPage = lazy(() => import('@/pages/FlowEditor'));
 const KnowledgePage = lazy(() => import('@/pages/Knowledge'));
@@ -111,6 +112,7 @@ export default function App() {
         <Route path="/approvals" element={<ApprovalsPage />} />
         <Route path="/skills/:key" element={<SkillRunPage />} />
         <Route path="/agents" element={<AgentsPage />} />
+        <Route path="/mcp" element={<McpPage />} />
         <Route path="/workflows" element={<FlowsPage />} />
         <Route path="/workflows/:id" element={<FlowEditorPage />} />
         <Route path="/knowledge" element={<KnowledgePage />} />
