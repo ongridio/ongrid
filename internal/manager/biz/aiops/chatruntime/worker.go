@@ -303,11 +303,15 @@ func (rt *Runtime) SpawnWorker(ctx context.Context, req SpawnRequest) (*Worker, 
 
 	// Background spawn always derives from the long-lived runtime context
 	// so a finishing HTTP request can't tear down the worker mid-run.
-	// Sync spawn inherits the caller's ctx so a cancel propagates.
-	parent := ctx
-	if req.Background {
-		parent = context.Background()
-	}
+	// Sync spawn inherits the caller's ctx via WithoutCancel so:
+	//   (a) a cancelled HTTP request doesn't kill the worker mid-analysis,
+	//   (b) the worker's eino-internal context values (ToolCallID, etc.)
+	//       don't leak back into the parent's context, which would
+	//       cause the parent's PersistenceHandler.OnEnd to look up the
+	//       wrong tool_call_id and silently lose the AgentTool result.
+	// Background spawn always derives from the long-lived runtime context
+	// so a finishing HTTP request can't tear down the worker mid-run.
+	parent := context.WithoutCancel(ctx)
 	workerCtx, cancel := context.WithCancel(parent)
 
 	w := &Worker{
