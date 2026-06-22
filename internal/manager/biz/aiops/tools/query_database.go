@@ -32,7 +32,11 @@ var QueryDatabaseSchema = json.RawMessage(`{
     },
     "edge_id": {
       "type": "integer",
-      "description": "Edge agent ID that hosts the database"
+      "description": "Edge agent ID that hosts the database (use device_id instead if you have it)"
+    },
+    "device_id": {
+      "type": "integer",
+      "description": "Device ID that hosts the database (resolved to edge_id automatically)"
     },
     "db_type": {
       "type": "string",

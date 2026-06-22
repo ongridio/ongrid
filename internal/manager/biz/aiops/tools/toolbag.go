@@ -62,6 +62,8 @@ var tierByName = map[string]string{
 	"query_logql":             "core",
 	"query_traceql":           "core",
 	"query_devices":           "core",
+		"query_database":          "core",
+		"inspect_schema":          "core",
 	"get_topology":            "core",
 	"query_incidents":         "core",
 	"get_edge_summary":        "core",

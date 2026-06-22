@@ -95,6 +95,15 @@ func (r *Registry) BuildBaseTools() *ToolBag {
 	if r.promQuery != nil && r.edges != nil && r.pluginConfigs != nil {
 		out = append(out, NewAnalyzeDatabaseStatusTool(r.promQuery, r.edges, r.devices, r.pluginConfigs, r.log))
 	}
+	// 3c: query_database — read-only SQL dispatch to edge agents.
+	// Registered when the tunnel caller is available. hostFilesDeviceResolver
+	// is built from the shared resolver pattern so credentials + device
+	// resolution can be injected uniformly.
+	if r.caller != nil {
+		resolver := deviceResolverAdapter{inner: NewDeviceResolver(r.devices, r.edges)}
+		out = append(out, NewQueryDatabaseTool(r.caller, r.credentialResolver, resolver, r.log))
+		out = append(out, NewInspectSchemaTool(r.caller, r.credentialResolver, resolver, r.log))
+	}
 	// 4: query_logql — gated on Loki client.
 	if r.logQuery != nil {
 		out = append(out, NewQueryLogQLTool(r.logQuery, r.log))
