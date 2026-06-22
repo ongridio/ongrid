@@ -479,12 +479,17 @@ function SlowQueryPanel({ inst }: { inst: DatabaseInstance }) {
   const supportPerfSchema = inst.db_type === 'mysql' || inst.db_type === 'postgresql';
 
   async function handleAIAnalysis(errorMsg?: string) {
+    const dbId = inst.id;
+    const edgeId = inst.edge_id;
     const basePrompt =
       `分析数据库实例 ${inst.name} (${inst.host}:${inst.port}) 的慢查询情况，` +
-      `数据库类型 ${DB_TYPE_LABELS[inst.db_type as DBType] ?? inst.db_type}。`;
+      `数据库类型 ${DB_TYPE_LABELS[inst.db_type as DBType] ?? inst.db_type}。` +
+      `数据库实例 ID 为 ${dbId}，所在边缘代理 ID 为 ${edgeId}。` +
+      `使用 query_database 工具时请传入 database_id=${dbId}、edge_id=${edgeId}（系统会自动解析凭证和路由），` +
+      `数据库类型为 "${inst.db_type}"，主机 "${inst.host}"，端口 ${inst.port}。`;
     const prompt = errorMsg
-      ? `${basePrompt}失败原因：${errorMsg}。请尝试连接数据库获取 TOP SQL 并分析根因。`
-      : `${basePrompt}请先查看慢查询指标趋势，然后连接数据库获取 TOP SQL 并分析根因。`;
+      ? `${basePrompt}失败原因：${errorMsg}。请使用 query_database 工具连接数据库获取 TOP SQL 并分析根因。`
+      : `${basePrompt}请先查看慢查询指标趋势，然后使用 query_database 工具连接数据库获取 TOP SQL 并分析根因。`;
     try {
       const session = await createSession({ title: prompt.slice(0, 30), agent_id: 'default' });
       navigate(`/chat/${session.id}`, { state: { initialPrompt: prompt } });
