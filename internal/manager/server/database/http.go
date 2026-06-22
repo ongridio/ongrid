@@ -49,6 +49,7 @@ type DBQueryExecutor interface {
 // CredentialStore stores and resolves database instance credentials.
 // Implementations should encrypt passwords at rest.
 type CredentialStore interface {
+	Get(ctx context.Context, instanceID uint64) (user, password string, found bool, err error)
 	Set(ctx context.Context, instanceID uint64, user, password string) error
 	Delete(ctx context.Context, instanceID uint64) error
 }
@@ -428,9 +429,22 @@ func (h *Handler) slowQueries(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, errs.ErrInvalid)
 		return
 	}
+	// Resolve credentials from the credential store when not provided,
+	// or store them for future use when they are provided.
+	if (req.User == "" || req.Password == "") && h.credDB != nil {
+		user, pass, found, err := h.credDB.Get(r.Context(), id)
+		if err == nil && found {
+			req.User = user
+			req.Password = pass
+		}
+	}
 	if req.User == "" || req.Password == "" {
 		writeErr(w, errors.New("user and password are required"))
 		return
+	}
+	// Store credentials for future use (AI query_database, next slow query).
+	if h.credDB != nil {
+		_ = h.credDB.Set(r.Context(), id, req.User, req.Password)
 	}
 	if req.Limit <= 0 {
 		req.Limit = 50
@@ -748,9 +762,21 @@ func (h *Handler) probe(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, errs.ErrInvalid)
 		return
 	}
+	// Resolve credentials from the credential store when not provided.
+	if (req.User == "" || req.Password == "") && h.credDB != nil {
+		user, pass, found, err := h.credDB.Get(r.Context(), id)
+		if err == nil && found {
+			req.User = user
+			req.Password = pass
+		}
+	}
 	if req.User == "" || req.Password == "" {
 		writeErr(w, errors.New("user and password are required"))
 		return
+	}
+	// Store credentials for future use.
+	if h.credDB != nil {
+		_ = h.credDB.Set(r.Context(), id, req.User, req.Password)
 	}
 
 	if h.dbQuery == nil {

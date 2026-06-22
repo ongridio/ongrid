@@ -486,7 +486,8 @@ function SlowQueryPanel({ inst }: { inst: DatabaseInstance }) {
       `数据库类型 ${DB_TYPE_LABELS[inst.db_type as DBType] ?? inst.db_type}。` +
       `数据库实例 ID 为 ${dbId}，所在边缘代理 ID 为 ${edgeId}。` +
       `使用 query_database 工具时请传入 database_id=${dbId}、edge_id=${edgeId}（系统会自动解析凭证和路由），` +
-      `数据库类型为 "${inst.db_type}"，主机 "${inst.host}"，端口 ${inst.port}。`;
+      `数据库类型为 "${inst.db_type}"，主机 "${inst.host}"，端口 ${inst.port}。` +
+      `注意：数据库连接凭证已存储在系统中，使用 database_id=${dbId} 即可自动解析，无需手动传入 user/password。`;
     const prompt = errorMsg
       ? `${basePrompt}失败原因：${errorMsg}。请使用 query_database 工具连接数据库获取 TOP SQL 并分析根因。`
       : `${basePrompt}请先查看慢查询指标趋势，然后使用 query_database 工具连接数据库获取 TOP SQL 并分析根因。`;
@@ -495,6 +496,38 @@ function SlowQueryPanel({ inst }: { inst: DatabaseInstance }) {
       navigate(`/chat/${session.id}`, { state: { initialPrompt: prompt } });
     } catch {
       // If session creation fails, fall back to old link-style navigation
+      window.open(`/chat/new?prompt=${encodeURIComponent(prompt)}`, '_blank');
+    }
+  }
+
+  async function handleSQLAnalysis(q: SlowQueryRow) {
+    const dbId = inst.id;
+    const edgeId = inst.edge_id;
+    const stats = [
+      q.exec_count != null ? `执行次数: ${q.exec_count}` : null,
+      q.avg_latency_ms != null ? `平均延迟: ${q.avg_latency_ms.toFixed(2)}ms` : null,
+      q.max_latency_ms != null ? `最大延迟: ${q.max_latency_ms.toFixed(2)}ms` : null,
+      q.total_latency_ms != null ? `总延迟: ${q.total_latency_ms.toFixed(2)}ms` : null,
+      q.avg_rows_examined != null ? `平均扫描行数: ${formatNumber(q.avg_rows_examined)}` : null,
+      q.avg_rows_sent != null ? `平均返回行数: ${formatNumber(q.avg_rows_sent)}` : null,
+      q.tmp_disk_tables != null && q.tmp_disk_tables > 0 ? `磁盘临时表: ${q.tmp_disk_tables}` : null,
+      q.has_no_index_used ? '⚠️ 存在全表扫描' : null,
+      q.has_no_good_index ? '⚠️ 无合适索引' : null,
+      q.cache_hit_pct != null ? `缓存命中率: ${q.cache_hit_pct.toFixed(1)}%` : null,
+    ].filter(Boolean).join('\n');
+    const prompt =
+      `分析以下慢查询 SQL，给出优化建议。\n\n` +
+      `数据库: ${inst.name} (${inst.host}:${inst.port}, ${DB_TYPE_LABELS[inst.db_type as DBType] ?? inst.db_type})\n\n` +
+      `SQL:\n\`\`\`sql\n${q.sql_text}\n\`\`\`\n\n` +
+      `执行指标:\n${stats}\n\n` +
+      `请分析：\n` +
+      `1. SQL 存在什么问题（索引缺失、全表扫描、数据倾斜等）\n` +
+      `2. 优化建议（创建索引、改写 SQL、调整配置等）\n` +
+      `3. 预期优化效果`;
+    try {
+      const session = await createSession({ title: `分析慢查询: ${(q.sql_text || '').slice(0, 30)}`, agent_id: 'default' });
+      navigate(`/chat/${session.id}`, { state: { initialPrompt: prompt } });
+    } catch {
       window.open(`/chat/new?prompt=${encodeURIComponent(prompt)}`, '_blank');
     }
   }
@@ -815,6 +848,16 @@ function SlowQueryPanel({ inst }: { inst: DatabaseInstance }) {
                                       </span>
                                     </div>
                                   )}
+                                </div>
+                                {/* AI Analysis button */}
+                                <div className="flex justify-end gap-2 pt-2">
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); handleSQLAnalysis(q); }}
+                                    className="inline-flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent/90"
+                                  >
+                                    <MessageSquare size={12} />
+                                    {tr('AI 分析', 'AI Analysis')}
+                                  </button>
                                 </div>
                               </div>
                             </td>
