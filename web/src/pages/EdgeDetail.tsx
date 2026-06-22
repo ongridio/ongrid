@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   CartesianGrid,
@@ -1365,14 +1365,25 @@ function PluginSpecEditor({
   const [jsonErr, setJsonErr] = useState<string | null>(null);
   const [saveErr, setSaveErr] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const dirtyRef = useRef(false);
+  const lastNameRef = useRef(name);
 
   useEffect(() => {
+    const nameChanged = lastNameRef.current !== name;
+    if (!nameChanged && dirtyRef.current) return;
+    lastNameRef.current = name;
     const nextSpec = spec ?? {};
     setDraft(nextSpec);
     setJsonText(JSON.stringify(nextSpec, null, 2));
     setJsonErr(null);
     setSaveErr(null);
+    dirtyRef.current = false;
   }, [name, spec]);
+
+  const updateDraft = (next: Record<string, unknown>) => {
+    dirtyRef.current = true;
+    setDraft(next);
+  };
 
   const submit = async () => {
     let payloadSpec: Record<string, unknown>;
@@ -1413,6 +1424,7 @@ function PluginSpecEditor({
         setDraft(savedSpec);
         setJsonText(JSON.stringify(savedSpec, null, 2));
       }
+      dirtyRef.current = false;
     } catch (e) {
       setSaveErr(e instanceof ApiError ? e.message : (e as Error).message || tr('保存失败', 'Save failed'));
     } finally {
@@ -1458,16 +1470,16 @@ function PluginSpecEditor({
       </div>
 
       {mode === 'form' && name === 'logs' && (
-        <LogsSpecForm draft={draft} onChange={setDraft} />
+        <LogsSpecForm draft={draft} onChange={updateDraft} />
       )}
       {mode === 'form' && name === 'traces' && (
-        <TracesSpecForm draft={draft} onChange={setDraft} />
+        <TracesSpecForm draft={draft} onChange={updateDraft} />
       )}
       {mode === 'form' && name === 'custommetrics' && (
-        <CustomMetricsSpecForm draft={draft} targetHealth={targetHealth} onChange={setDraft} />
+        <CustomMetricsSpecForm draft={draft} targetHealth={targetHealth} onChange={updateDraft} />
       )}
       {mode === 'form' && name === 'databasemetrics' && (
-        <DatabaseMetricsSpecForm draft={draft} targetHealth={targetHealth} onChange={setDraft} />
+        <DatabaseMetricsSpecForm draft={draft} targetHealth={targetHealth} onChange={updateDraft} />
       )}
       {mode === 'json' && (
         <div>
@@ -1476,6 +1488,7 @@ function PluginSpecEditor({
             onChange={(e) => {
               setJsonText(e.target.value);
               setJsonErr(null);
+              dirtyRef.current = true;
             }}
             spellCheck={false}
             rows={10}

@@ -36,7 +36,7 @@ func (r *Repo) FindOrCreateByFingerprint(ctx context.Context, seed *model.Device
 		return nil, errs.ErrInvalid
 	}
 	tx := r.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "fingerprint"}},
+		Columns:   []clause.Column{{Name: "fingerprint"}, {Name: "delete_marker"}},
 		DoNothing: true,
 	}).Create(seed)
 	if tx.Error != nil {

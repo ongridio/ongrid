@@ -31,6 +31,7 @@ import {
   Share2,
   Workflow,
   Plug,
+  ArrowUpCircle,
 } from 'lucide-react';
 import { Avatar } from './Avatar';
 import { AgentBadge } from './AgentBadge';
@@ -48,6 +49,7 @@ import { useChatSessions, invalidateChatSessions } from '@/store/chatSessions';
 import { deleteSession, renameSession, type ChatSession } from '@/api/chat';
 import { listEdges, type EdgeRole } from '@/api/edges';
 import { getManagerVersion } from '@/api/version';
+import { checkSystemUpgrade } from '@/api/systemUpgrade';
 import { onDevicesChanged } from '@/lib/events';
 
 export function Sidebar() {
@@ -73,6 +75,8 @@ export function Sidebar() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [managerVersion, setManagerVersion] = useState('');
   const managerVersionLabel = managerVersion.trim();
+  const [upgradeAvailable, setUpgradeAvailable] = useState<{ latestVersion: string } | null>(null);
+  const canCheckUpgrade = role === 'admin' || isAdmin;
 
   useEffect(() => {
     let cancelled = false;
@@ -87,6 +91,29 @@ export function Sidebar() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!canCheckUpgrade || !managerVersionLabel) {
+      setUpgradeAvailable(null);
+      return;
+    }
+    let cancelled = false;
+    void checkSystemUpgrade()
+      .then((info) => {
+        if (cancelled) return;
+        if (info.comparison_supported && info.update_available) {
+          setUpgradeAvailable({ latestVersion: info.latest_version });
+          return;
+        }
+        setUpgradeAvailable(null);
+      })
+      .catch(() => {
+        if (!cancelled) setUpgradeAvailable(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canCheckUpgrade, managerVersionLabel]);
 
   // Roles actually present in the user's fleet — drives which 设备 sub-
   // items appear. We don't render a role link for a role with 0 devices,
@@ -354,23 +381,42 @@ export function Sidebar() {
       {/* Brand row — keeps the product identity visible while the user
           row below still owns the avatar + menu. Clicking the wordmark
           goes home. */}
-      <Link
-        to="/"
-        aria-label={tr('Ongrid 首页', 'Ongrid home')}
-        className="flex items-center gap-1.5 border-b border-zinc-800/60 px-3 py-3 hover:bg-zinc-800/40"
-      >
-        <OngridLogo size={32} className="-mr-0.5" />
-        <span className="text-[16px] font-semibold tracking-tight text-zinc-100">Ongrid</span>
-        {managerVersionLabel ? (
-          <span
-            className="ml-1 max-w-[78px] truncate rounded-full border border-zinc-700/70 bg-zinc-800/60 px-1.5 py-0.5 text-[10px] font-medium leading-none text-zinc-400"
-            title={tr(`当前版本：${managerVersionLabel}`, `Current version: ${managerVersionLabel}`)}
-            aria-label={tr(`当前版本：${managerVersionLabel}`, `Current version: ${managerVersionLabel}`)}
+      <div className="flex items-center gap-1.5 border-b border-zinc-800/60 px-3 py-3">
+        <Link
+          to="/"
+          aria-label={tr('Ongrid 首页', 'Ongrid home')}
+          className="flex min-w-0 items-center gap-1.5 rounded-lg px-1 py-1 -ml-1 hover:bg-zinc-800/40"
+        >
+          <OngridLogo size={32} className="-mr-0.5 shrink-0" />
+          <span className="text-[16px] font-semibold tracking-tight text-zinc-100">Ongrid</span>
+          {managerVersionLabel ? (
+            <span
+              className="ml-1 max-w-[78px] shrink-0 truncate rounded-full border border-zinc-700/70 bg-zinc-800/60 px-1.5 py-0.5 text-[10px] font-medium leading-none text-zinc-400"
+              title={tr(`当前版本：${managerVersionLabel}`, `Current version: ${managerVersionLabel}`)}
+              aria-label={tr(`当前版本：${managerVersionLabel}`, `Current version: ${managerVersionLabel}`)}
+            >
+              {managerVersionLabel}
+            </span>
+          ) : null}
+        </Link>
+        {upgradeAvailable ? (
+          <Link
+            to="/settings/upgrade"
+            className="inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-500/45 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium leading-none text-emerald-700 transition hover:border-emerald-500/70 hover:bg-emerald-100 hover:text-emerald-800 focus:outline-none focus:ring-1 focus:ring-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-300 dark:hover:bg-emerald-500/15 dark:hover:text-emerald-200"
+            title={tr(
+              `发现新版本 ${upgradeAvailable.latestVersion}，点击查看升级命令`,
+              `New version ${upgradeAvailable.latestVersion} available. View upgrade commands`,
+            )}
+            aria-label={tr(
+              `发现新版本 ${upgradeAvailable.latestVersion}，打开升级页面`,
+              `New version ${upgradeAvailable.latestVersion} available. Open upgrade page`,
+            )}
           >
-            {managerVersionLabel}
-          </span>
+            <ArrowUpCircle size={11} />
+            <span>{tr('升级', 'Update')}</span>
+          </Link>
         ) : null}
-      </Link>
+      </div>
 
       {/* user / collapse / bell */}
       <div ref={userMenuRef} className="relative flex items-center gap-2 px-3 py-3">

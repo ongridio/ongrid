@@ -29,9 +29,10 @@ type fakeSessionRepo struct {
 	toolCalls map[string]*model.ToolCall
 	nextID    int
 
-	failAppend  bool
-	failCreate  bool
-	failUpdate  bool
+	failAppend             bool
+	failCreate             bool
+	failUpdate             bool
+	respectCanceledContext bool
 }
 
 func newFakeSessionRepo() *fakeSessionRepo {
@@ -57,7 +58,17 @@ func (r *fakeSessionRepo) CloseSession(context.Context, string) error {
 func (r *fakeSessionRepo) DeleteSession(context.Context, string) error {
 	return errs.ErrNotWiredYet
 }
-func (r *fakeSessionRepo) AppendMessage(_ context.Context, m *model.Message) error {
+func (r *fakeSessionRepo) ctxErr(ctx context.Context) error {
+	if !r.respectCanceledContext || ctx == nil {
+		return nil
+	}
+	return ctx.Err()
+}
+
+func (r *fakeSessionRepo) AppendMessage(ctx context.Context, m *model.Message) error {
+	if err := r.ctxErr(ctx); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.failAppend {
@@ -74,7 +85,10 @@ func (r *fakeSessionRepo) AppendMessage(_ context.Context, m *model.Message) err
 func (r *fakeSessionRepo) ListMessages(context.Context, string, int) ([]*model.Message, error) {
 	return nil, errs.ErrNotWiredYet
 }
-func (r *fakeSessionRepo) CreateToolCall(_ context.Context, tc *model.ToolCall) error {
+func (r *fakeSessionRepo) CreateToolCall(ctx context.Context, tc *model.ToolCall) error {
+	if err := r.ctxErr(ctx); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.failCreate {
@@ -88,7 +102,10 @@ func (r *fakeSessionRepo) CreateToolCall(_ context.Context, tc *model.ToolCall) 
 	r.toolCalls[tc.ID] = &cp
 	return nil
 }
-func (r *fakeSessionRepo) UpdateToolCallResult(_ context.Context, id, status string, resultJSON, errStr *string, endedAt time.Time) error {
+func (r *fakeSessionRepo) UpdateToolCallResult(ctx context.Context, id, status string, resultJSON, errStr *string, endedAt time.Time) error {
+	if err := r.ctxErr(ctx); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.failUpdate {
@@ -221,6 +238,43 @@ func TestPersistenceHandler_ToolStartEndCycle(t *testing.T) {
 	}
 }
 
+func TestPersistenceHandler_ToolEndPersistsAfterRequestContextCanceled(t *testing.T) {
+	t.Parallel()
+	repo := newFakeSessionRepo()
+	repo.respectCanceledContext = true
+	h := NewPersistenceHandler(PersistenceDeps{SessionID: "sess-1", Repo: repo})
+	ctx := WithToolCallID(WithMessageID(context.Background(), "msg-1"), "call-canceled")
+
+	h.OnStart(ctx, toolInfo("draft_config_change"), &einotool.CallbackInput{ArgumentsInJSON: `{"rule_key":"r1"}`})
+	canceledCtx, cancel := context.WithCancel(ctx)
+	cancel()
+	h.OnEnd(canceledCtx, toolInfo("draft_config_change"), &einotool.CallbackOutput{Response: `{"kind":"config_draft"}`})
+
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	if len(repo.toolCalls) != 1 {
+		t.Fatalf("toolCalls count = %d, want 1", len(repo.toolCalls))
+	}
+	for _, tc := range repo.toolCalls {
+		if tc.Status != model.StatusSuccess {
+			t.Fatalf("tool_call.status = %q, want success", tc.Status)
+		}
+		if tc.ResultJSON == nil || *tc.ResultJSON != `{"kind":"config_draft"}` {
+			t.Fatalf("tool_call.result_json = %v, want config draft response", tc.ResultJSON)
+		}
+	}
+	if len(repo.messages) != 1 {
+		t.Fatalf("messages = %d, want 1 role=tool message", len(repo.messages))
+	}
+	msg := repo.messages[0]
+	if msg.Role != model.RoleTool {
+		t.Fatalf("message.role = %q, want tool", msg.Role)
+	}
+	if msg.Content == nil || *msg.Content != `{"kind":"config_draft"}` {
+		t.Fatalf("message.content = %v, want config draft response", msg.Content)
+	}
+}
+
 func TestPersistenceHandler_ToolErrorMarksError(t *testing.T) {
 	t.Parallel()
 	repo := newFakeSessionRepo()
@@ -308,8 +362,8 @@ func assistantEndWithToolCalls(t *testing.T, h *PersistenceHandler, calls ...str
 	toolCalls := make([]schema.ToolCall, 0, len(calls))
 	for _, c := range calls {
 		toolCalls = append(toolCalls, schema.ToolCall{
-			ID:   c.ID,
-			Type: "function",
+			ID:       c.ID,
+			Type:     "function",
 			Function: schema.FunctionCall{Name: c.Name},
 		})
 	}

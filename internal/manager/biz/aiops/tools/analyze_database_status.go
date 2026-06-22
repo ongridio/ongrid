@@ -24,12 +24,14 @@ const ToolNameListDatabaseSources = "list_database_sources"
 const AnalyzeDatabaseStatusDescription = "Analyze database health and performance from ongrid database metrics sources. " +
 	"Use this as the first tool for any MySQL, PostgreSQL, Redis, or MongoDB question that exporter metrics can cover, before raw query_promql, query_knowledge, or AgentTool. " +
 	"This includes health, performance, logical database/schema/table/collection/key counts from metrics, cluster/replication, advanced/optional exporter collectors, and metric coverage. " +
+	"For database alert-rule creation, list_metric_catalog must discover the current metric names first; use this afterwards only if source, device, or capability context is still needed before drafting. " +
 	"It can answer typed object-inventory questions such as how many MySQL schemas, PostgreSQL databases/tables, Redis logical DBs/keys, or MongoDB databases/collections exist from collected exporter metrics; if object inventory metrics are not collected, the response says which capability is missing. " +
 	"The response includes discovered metric names, unmapped metric names, and a capability matrix; unavailable capabilities mean the exporter has not collected the needed metrics."
 
 const analyzeDatabaseStatusWhenToUse = "When the user asks about database health, connection pressure, slow queries, Redis memory, " +
 	"PostgreSQL deadlocks/cache hit, MongoDB exporter status, DB throughput, lock waits, temp files, replication, persistence, " +
 	"network IO, storage size, TLS/SSL, exporter collector coverage, logical database/schema/table/collection/key counts, cluster status, or which database metrics are available from the current exporter. " +
+	"For database alert-rule creation, use list_metric_catalog first to expose current metric names; call this tool afterwards only when the draft still needs database source/capability context. " +
 	"For database questions, prefer this tool whenever MySQL/PostgreSQL/Redis/MongoDB exporters could provide the answer, including advanced and optional collectors. " +
 	"If the user asks a database object question and the exporter has not collected that metric family, use this tool and report the missing capability instead of falling through to raw PromQL. " +
 	"NOT for arbitrary metric exploration after the high-level status is already known; use query_promql for deep custom PromQL."

@@ -14,7 +14,7 @@
 //
 //   - core = always exposes a full schema (host/cluster reads,
 //     query_*, database inventory/status helpers, coordinator-only
-//     AgentTool / SendMessage / TaskStop). 15 entries today.
+//     AgentTool / SendMessage / TaskStop, conversational config tools).
 //   - specialty = redacted-by-default when toolBag size > threshold;
 //     schema fetched on demand via ToolSearch (host_files
 //     trio, host_restart_service, alert detail, ranking helpers).
@@ -52,10 +52,11 @@ import (
 // call ToolSearch). Below threshold the bag never partitions, so
 // ToolSearch sits in the same flat slice as everything else.
 var tierByName = map[string]string{
-	// core (always full schema) — 15 entries.
+	// core (always full schema).
 	"get_host_load":           "core",
 	"get_host_processes":      "core",
 	"query_promql":            "core",
+	"list_metric_catalog":     "core",
 	"list_database_sources":   "core",
 	"analyze_database_status": "core",
 	"query_logql":             "core",
@@ -68,6 +69,8 @@ var tierByName = map[string]string{
 	"AgentTool":               "core",
 	"SendMessage":             "core",
 	"TaskStop":                "core",
+	"draft_config_change":     "core",
+	"apply_config_change":     "core",
 
 	// specialty (deferred when over threshold) — host-files trio,
 	// alert detail tools, ranking helpers, mutating restart, generic

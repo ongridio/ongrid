@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	model "github.com/ongridio/ongrid/internal/manager/model/edge"
+	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
 
@@ -35,7 +36,7 @@ func (r *fakePluginConfigRepo) ListByEdge(_ context.Context, edgeID uint64) ([]*
 func (r *fakePluginConfigRepo) Get(_ context.Context, edgeID uint64, plugin string) (*model.PluginConfig, error) {
 	row := r.rows[plugin]
 	if row == nil || row.EdgeID != edgeID {
-		return nil, nil
+		return nil, errs.ErrNotFound
 	}
 	cp := *row
 	return &cp, nil
@@ -250,8 +251,12 @@ func TestSetDatabaseMetrics_WhenSecretWriteFails_RollsBackConfig(t *testing.T) {
 	if writer.calls != 1 {
 		t.Fatalf("secret writer calls = %d, want 1", writer.calls)
 	}
-	if len(writer.reqs) != 2 {
-		t.Fatalf("secret writes = %d, want 2", len(writer.reqs))
+	if len(writer.reqs) != 3 {
+		t.Fatalf("secret writes = %d, want 3", len(writer.reqs))
+	}
+	deleteReq := writer.reqs[2]
+	if !deleteReq.Delete || deleteReq.Path != "/var/lib/ongrid-edge/secrets/old-redis.dsn" {
+		t.Fatalf("delete req = %#v, want old-redis delete", deleteReq)
 	}
 	got := repo.rows[model.PluginNameDatabaseMetrics]
 	if got == nil {
@@ -259,6 +264,54 @@ func TestSetDatabaseMetrics_WhenSecretWriteFails_RollsBackConfig(t *testing.T) {
 	}
 	if got.ID != 23 || got.Enabled != false || got.SpecJSON != oldSpec {
 		t.Fatalf("rolled back row = %#v, want old spec/enabled/id", got)
+	}
+}
+
+func TestSetDatabaseMetricsDeletesRemovedSecret(t *testing.T) {
+	oldSpec := `{"sources":[{"id":"pg-prod","db_type":"postgresql","enabled":true,"connection":{"type":"managed","path":"/var/lib/ongrid-edge/secrets/pg-prod.dsn","secret_set":true}},{"id":"redis-prod","db_type":"redis","enabled":true,"connection":{"type":"managed","path":"/var/lib/ongrid-edge/secrets/redis-prod.dsn","secret_set":true}}]}`
+	repo := newFakePluginConfigRepo()
+	repo.rows[model.PluginNameDatabaseMetrics] = &model.PluginConfig{
+		ID:         23,
+		EdgeID:     7,
+		PluginName: model.PluginNameDatabaseMetrics,
+		Enabled:    true,
+		SpecJSON:   oldSpec,
+	}
+	writer := &fakeDatabaseSecretWriter{}
+	uc := NewPluginConfigUC(repo, nil, fakeEndpointResolver{}, nil)
+	uc.SetDatabaseMetricsSecretWriter(writer)
+
+	_, err := uc.Set(context.Background(), 7, model.PluginNameDatabaseMetrics, SetInput{
+		Enabled: true,
+		Spec: map[string]interface{}{
+			"sources": []interface{}{
+				map[string]interface{}{
+					"id":             "pg-prod",
+					"db_type":        "postgresql",
+					"listen_address": "127.0.0.1:19187",
+					"connection": map[string]interface{}{
+						"type":       "managed",
+						"secret_set": true,
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Set() error = %v", err)
+	}
+	if writer.calls != 1 {
+		t.Fatalf("secret writer calls = %d, want 1", writer.calls)
+	}
+	if len(writer.reqs) != 1 {
+		t.Fatalf("secret requests = %d, want 1", len(writer.reqs))
+	}
+	req := writer.reqs[0]
+	if !req.Delete {
+		t.Fatalf("Delete = false, want true: %#v", req)
+	}
+	if req.SourceID != "redis-prod" || req.Path != "/var/lib/ongrid-edge/secrets/redis-prod.dsn" {
+		t.Fatalf("delete req = %#v", req)
 	}
 }
 

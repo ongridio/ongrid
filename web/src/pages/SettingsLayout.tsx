@@ -10,6 +10,7 @@ import {
   Lock,
   Plug,
   Shield,
+  UploadCloud,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import type { IconType } from '@/lib/icon';
@@ -31,6 +32,7 @@ type RailItem = {
 
 const RAIL_ITEMS: RailItem[] = [
   { to: 'health', icon: HeartPulse, labelZh: '健康', labelEn: 'Health', hintZh: '平台自检 / 依赖状态', hintEn: 'Platform self-check / dependency status' },
+  { to: 'upgrade', icon: UploadCloud, labelZh: '升级', labelEn: 'Upgrade', hintZh: '检测版本 / 复制命令', hintEn: 'Check version / copy command' },
   { to: 'integrations', icon: Plug, labelZh: '集成', labelEn: 'Integrations', hintZh: 'Prometheus / Grafana 等外部系统', hintEn: 'External systems — Prometheus / Grafana / etc.' },
   // marketplace entry retired 2026-05-19 — install/uninstall moved to
   // /skills?tab=install so the whole skill story (loaded + installed)

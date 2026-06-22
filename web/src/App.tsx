@@ -39,10 +39,10 @@ const SettingsLLM = lazy(() => import('@/pages/settings/LLM'));
 const SettingsNotifications = lazy(() => import('@/pages/settings/Notifications'));
 const SettingsChannels = lazy(() => import('@/pages/settings/Channels'));
 const SettingsIntegrations = lazy(() => import('@/pages/settings/Integrations'));
-const SettingsMarketplace = lazy(() => import('@/pages/settings/Marketplace'));
 const SettingsPreferences = lazy(() => import('@/pages/settings/Preferences'));
 const SettingsSecrets = lazy(() => import('@/pages/settings/Secrets'));
 const SettingsHealth = lazy(() => import('@/pages/settings/Health'));
+const SettingsUpgrade = lazy(() => import('@/pages/settings/Upgrade'));
 // Admin section (top-level "管理" tab) — platform governance pages.
 // Lifted out of /settings so adding RBAC editor / audit log doesn't
 // keep cluttering the settings rail. /settings now answers "how the
@@ -153,6 +153,7 @@ export default function App() {
           <Route path="channels" element={<SettingsChannels />} />
           <Route path="integrations" element={<SettingsIntegrations />} />
           <Route path="health" element={<SettingsHealth />} />
+          <Route path="upgrade" element={<SettingsUpgrade />} />
           {/* /settings/marketplace retired (2026-05-19). Install surface
               is currently hidden from visible nav (no AIOps skill
               ecosystem yet); reachable via /skills?tab=install URL only.

@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -95,6 +96,65 @@ func (uc *PluginConfigUC) writeDatabaseMetricsSecrets(ctx context.Context, edgeI
 		return fmt.Errorf("write databasemetrics secrets: %w", err)
 	}
 	return nil
+}
+
+func databaseMetricsSecretDeleteRequests(previousSpec, nextSpec map[string]interface{}) []tunnel.WriteDatabaseMetricsSecretRequest {
+	previousPaths := databaseMetricsManagedSecretPaths(previousSpec)
+	if len(previousPaths) == 0 {
+		return nil
+	}
+	nextPaths := databaseMetricsManagedSecretPaths(nextSpec)
+	paths := make([]string, 0, len(previousPaths))
+	for path := range previousPaths {
+		if _, stillUsed := nextPaths[path]; !stillUsed {
+			paths = append(paths, path)
+		}
+	}
+	sort.Strings(paths)
+	out := make([]tunnel.WriteDatabaseMetricsSecretRequest, 0, len(paths))
+	for _, path := range paths {
+		out = append(out, tunnel.WriteDatabaseMetricsSecretRequest{
+			SourceID: previousPaths[path],
+			Path:     path,
+			Delete:   true,
+		})
+	}
+	return out
+}
+
+func databaseMetricsManagedSecretPaths(spec map[string]interface{}) map[string]string {
+	out := map[string]string{}
+	rawSources, ok := spec["sources"].([]interface{})
+	if !ok {
+		return out
+	}
+	for _, raw := range rawSources {
+		source, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		id := strings.TrimSpace(mapString(source, "id"))
+		dbType := strings.ToLower(strings.TrimSpace(mapString(source, "db_type")))
+		path := ""
+		if connection, ok := mapValue(source["connection"]); ok {
+			connType := mapString(connection, "type")
+			if connType != "" && connType != "managed" {
+				continue
+			}
+			path = mapString(connection, "path")
+		}
+		if path == "" && id != "" && databaseMetricsDBTypeSupported(dbType) {
+			path = databaseMetricsSecretPath(id, dbType)
+		}
+		if path == "" {
+			continue
+		}
+		if id == "" {
+			id = filepath.Base(path)
+		}
+		out[path] = id
+	}
+	return out
 }
 
 func sanitizeDatabaseMetricsSource(i int, source map[string]interface{}) (map[string]interface{}, *tunnel.WriteDatabaseMetricsSecretRequest, error) {

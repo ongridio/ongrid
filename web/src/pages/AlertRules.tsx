@@ -1497,9 +1497,9 @@ function KindSpecificFields({
       <div className="space-y-3">
         <Field label="stream_selector（LogQL label match）">
           <input
-            value={(form.spec?.stream_selector as string) ?? '{ongrid_source=~"journald:.+"}'}
+            value={(form.spec?.stream_selector as string) ?? '{ongrid_source=~"journald(:.*)?"}'}
             onChange={(e) => setSpec({ stream_selector: e.target.value })}
-            placeholder='{device_id="123",ongrid_source=~"journald:.+"}'
+            placeholder='{device_id="123",ongrid_source=~"journald(:.*)?"}'
             className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
           />
         </Field>

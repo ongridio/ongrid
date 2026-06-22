@@ -32,7 +32,7 @@ func (r *EdgeDeviceRepo) Link(ctx context.Context, edgeID, deviceID uint64, t mo
 	row := model.EdgeDevice{EdgeID: edgeID, DeviceID: deviceID, Type: t}
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{
-			{Name: "edge_id"}, {Name: "device_id"}, {Name: "type"},
+			{Name: "edge_id"}, {Name: "device_id"}, {Name: "type"}, {Name: "delete_marker"},
 		},
 		DoNothing: true,
 	}).Create(&row).Error

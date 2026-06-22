@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	model "github.com/ongridio/ongrid/internal/manager/model/alert"
@@ -57,12 +58,17 @@ func (e *PipelineEvaluator) evaluateLogMatch(ctx context.Context, now time.Time)
 			summary := fmt.Sprintf("%s: log_match %g %s %g (labels=%s)",
 				rule.RuleKey, ent.Value, rule.Operator, rule.Threshold, labelSetKey(ent.Labels))
 			val := ent.Value
+			var devID *uint64
+			if scope == model.RuleScopeHost {
+				devID = deviceIDFromLabels(ent.Labels)
+			}
 			input := FiringInput{
 				ScopeType:  scope,
 				Scope:      scope,
 				Rule:       rule.RuleKey,
 				RuleName:   rule.Name,
 				Severity:   ruleSev(rule.Severity, notify.SeverityWarning),
+				DeviceID:   devID,
 				DedupeKey:  dedupeKey,
 				OccurredAt: now,
 				Title:      summary,
@@ -100,7 +106,7 @@ func (e *PipelineEvaluator) evaluateLogVolume(ctx context.Context, now time.Time
 	for _, rule := range rules {
 		var evalErr error
 		done := observeEval(model.RuleKindLogVolume, &evalErr)
-		expr := buildLogMatchQuery(rule.StreamSelector, "", rule.Window)
+		expr := buildLogMatchQuery(rule.StreamSelector, rule.LineFilter, rule.Window)
 		entries, err := runLokiInstant(ctx, e.logq, expr, now)
 		if err != nil {
 			e.log.Warn("alert: loki query failed",
@@ -122,12 +128,17 @@ func (e *PipelineEvaluator) evaluateLogVolume(ctx context.Context, now time.Time
 			summary := fmt.Sprintf("%s: log_volume %g %s %g (labels=%s)",
 				rule.RuleKey, ent.Value, rule.Operator, rule.Threshold, labelSetKey(ent.Labels))
 			val := ent.Value
+			var devID *uint64
+			if scope == model.RuleScopeHost {
+				devID = deviceIDFromLabels(ent.Labels)
+			}
 			input := FiringInput{
 				ScopeType:  scope,
 				Scope:      scope,
 				Rule:       rule.RuleKey,
 				RuleName:   rule.Name,
 				Severity:   ruleSev(rule.Severity, notify.SeverityWarning),
+				DeviceID:   devID,
 				DedupeKey:  dedupeKey,
 				OccurredAt: now,
 				Title:      summary,
@@ -375,6 +386,18 @@ func runLokiInstant(ctx context.Context, l LogQuerier, expr string, now time.Tim
 		out = append(out, vectorEntry{Labels: s.Metric, Value: v})
 	}
 	return out, nil
+}
+
+func deviceIDFromLabels(labels map[string]string) *uint64 {
+	raw := strings.TrimSpace(labels["device_id"])
+	if raw == "" {
+		return nil
+	}
+	id, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil || id == 0 {
+		return nil
+	}
+	return &id
 }
 
 // buildLogMatchQuery composes the LogQL query for log_match / log_volume.

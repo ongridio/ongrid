@@ -197,11 +197,14 @@ func (uc *PluginConfigUC) Set(ctx context.Context, edgeID uint64, plugin string,
 		}
 		in.Spec = spec
 		databaseSecretReqs = secretReqs
-		if len(databaseSecretReqs) > 0 {
-			previous, err = uc.repo.Get(ctx, edgeID, plugin)
-			if err != nil {
-				return nil, fmt.Errorf("load previous %s config: %w", plugin, err)
-			}
+		previous, err = uc.repo.Get(ctx, edgeID, plugin)
+		if errors.Is(err, errs.ErrNotFound) {
+			previous = nil
+		} else if err != nil {
+			return nil, fmt.Errorf("load previous %s config: %w", plugin, err)
+		}
+		if previous != nil {
+			databaseSecretReqs = append(databaseSecretReqs, databaseMetricsSecretDeleteRequests(decodeSpec(previous.SpecJSON), in.Spec)...)
 		}
 	}
 	specJSON := "{}"

@@ -4,6 +4,7 @@ import { Cloud, Cpu, Wrench, RefreshCw, Play, Search, Package } from 'lucide-rea
 import { cn } from '@/lib/cn';
 import { listSkills, localizedSkill, type SkillClass, type SkillScope, type SkillSummary } from '@/api/skills';
 import { ApiError } from '@/api/client';
+import { Modal } from '@/components/Modal';
 import { useI18n } from '@/i18n/locale';
 import { useAuth } from '@/store/auth';
 import { PageHeader } from '@/components/ui';
@@ -91,6 +92,9 @@ function CatalogTab() {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<string>('');
   const [scope, setScope] = useState<ScopeFilter>('');
+  // 详情弹窗：点击行打开（参照知识库文档的阅读弹窗）。技能由代码 /
+  // 技能包定义，注册表在内存——只读查看，无编辑路径。
+  const [viewing, setViewing] = useState<SkillSummary | null>(null);
 
   const fetchSkills = useCallback(async (silent = false) => {
     if (silent) setRefreshing(true);
@@ -244,13 +248,14 @@ function CatalogTab() {
                 </thead>
                 <tbody className="divide-y divide-zinc-800/40">
                   {filtered.map((skill) => (
-                    <SkillRow key={skill.key} skill={skill} />
+                    <SkillRow key={skill.key} skill={skill} onView={() => setViewing(skill)} />
                   ))}
                 </tbody>
               </table>
             </div>
           )}
         </div>
+        {viewing && <SkillDetailModal skill={viewing} onClose={() => setViewing(null)} />}
       </div>
   );
 }
@@ -280,10 +285,10 @@ function CategoryChip({
   );
 }
 
-function SkillRow({ skill }: { skill: SkillSummary }) {
+function SkillRow({ skill, onView }: { skill: SkillSummary; onView(): void }) {
   const { tr } = useI18n();
   return (
-    <tr className="transition-colors hover:bg-zinc-900/40">
+    <tr className="cursor-pointer transition-colors hover:bg-zinc-900/40" onClick={onView}>
       <td className="whitespace-nowrap px-4 py-2.5">
         <div className="flex items-center gap-1.5">
           <span className="font-medium text-zinc-100">{skill.name}</span>
@@ -336,6 +341,7 @@ function SkillRow({ skill }: { skill: SkillSummary }) {
         ) : (
           <Link
             to={`/skills/${encodeURIComponent(skill.key)}`}
+            onClick={(e) => e.stopPropagation()}
             className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1 text-[11px] text-zinc-200 hover:bg-zinc-800"
           >
             <Play size={11} /> {tr('执行', 'Run')}
@@ -386,6 +392,111 @@ export function ClassBadge({ value }: { value: SkillClass }) {
     >
       {value}
     </span>
+  );
+}
+
+// SkillDetailModal — 只读详情弹窗，参照知识库文档的阅读弹窗形态：
+// 顶部元信息条（运行位置 / 类别 / 分类 / key），正文完整描述 + 参数表。
+// 技能由代码或技能包定义、启动时注册进内存 registry，没有可编辑的
+// 存储——所以这里只有查看，没有编辑入口。
+function SkillDetailModal({ skill, onClose }: { skill: SkillSummary; onClose(): void }) {
+  const { tr } = useI18n();
+  return (
+    <Modal open onClose={onClose} size="lg" resizable title={skill.name}>
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <ScopeBadge value={skill.scope ?? 'host'} />
+          <ClassBadge value={skill.class} />
+          {skill.category && (
+            <span className="rounded-md border border-zinc-800 bg-zinc-950/40 px-1.5 py-0.5 text-[10px] text-zinc-400">
+              {skill.category}
+            </span>
+          )}
+          <span className="ml-auto font-mono text-[11px] text-zinc-500">{skill.key}</span>
+        </div>
+
+        <section>
+          <div className="mb-1.5 text-[11px] uppercase tracking-wider text-zinc-500">
+            {tr('描述（LLM 工具描述原文）', 'Description (raw LLM tool description)')}
+          </div>
+          <div className="whitespace-pre-wrap rounded-md border border-zinc-800 bg-zinc-950/40 p-3 text-xs leading-relaxed text-zinc-300">
+            {skill.description || '—'}
+          </div>
+        </section>
+
+        <section>
+          <div className="mb-1.5 text-[11px] uppercase tracking-wider text-zinc-500">
+            {tr('参数', 'Parameters')}
+          </div>
+          {skill.params.length === 0 ? (
+            <div className="text-xs text-zinc-500">
+              {skill.inventory_only
+                ? tr('参数为原始 JSON Schema（由 AI 在 chat 中调用，无手动表单）', 'Params are raw JSON Schema (invoked by the AI in chat; no manual form)')
+                : tr('无参数', 'No parameters')}
+            </div>
+          ) : (
+            <div className="overflow-hidden rounded-md border border-zinc-800">
+              <table className="w-full text-xs">
+                <thead className="border-b border-zinc-800 bg-zinc-950/40 text-[10px] uppercase tracking-wider text-zinc-500">
+                  <tr>
+                    <th className="px-3 py-1.5 text-left">{tr('名称', 'Name')}</th>
+                    <th className="px-3 py-1.5 text-left">{tr('类型', 'Type')}</th>
+                    <th className="px-3 py-1.5 text-left">{tr('必填', 'Required')}</th>
+                    <th className="px-3 py-1.5 text-left">{tr('默认值', 'Default')}</th>
+                    <th className="px-3 py-1.5 text-left">{tr('说明', 'Description')}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-800/60">
+                  {skill.params.map((p) => (
+                    <tr key={p.name}>
+                      <td className="whitespace-nowrap px-3 py-1.5 font-mono text-zinc-200">{p.name}</td>
+                      <td className="whitespace-nowrap px-3 py-1.5 text-zinc-400">
+                        {p.type}
+                        {p.enum && p.enum.length > 0 && (
+                          <span className="ml-1 text-zinc-500">({p.enum.join(' | ')})</span>
+                        )}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-1.5 text-zinc-400">{p.required ? tr('是', 'Yes') : '—'}</td>
+                      <td className="whitespace-nowrap px-3 py-1.5 font-mono text-zinc-400">
+                        {p.default === undefined || p.default === null ? '—' : String(p.default)}
+                      </td>
+                      <td className="px-3 py-1.5 text-zinc-400">{p.desc || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        {skill.result_preview && (
+          <section>
+            <div className="mb-1.5 text-[11px] uppercase tracking-wider text-zinc-500">
+              {tr('返回示意', 'Result preview')}
+            </div>
+            <div className="rounded-md border border-zinc-800 bg-zinc-950/40 p-3 font-mono text-[11px] text-zinc-400">
+              {skill.result_preview}
+            </div>
+          </section>
+        )}
+
+        <div className="flex items-center justify-between gap-3 border-t border-zinc-800 pt-3">
+          <span className="text-[11px] text-zinc-500">
+            {tr('技能由代码 / 技能包定义，不可在线编辑', 'Skills are defined in code / skill packs and cannot be edited online')}
+          </span>
+          {skill.inventory_only ? (
+            <span className="text-[11px] text-zinc-500">{tr('仅 AI 调用', 'AI only')}</span>
+          ) : (
+            <Link
+              to={`/skills/${encodeURIComponent(skill.key)}`}
+              className="inline-flex items-center gap-1.5 rounded-md bg-zinc-100 px-3 py-1.5 text-xs font-medium text-zinc-900 hover:bg-white"
+            >
+              <Play size={11} /> {tr('执行', 'Run')}
+            </Link>
+          )}
+        </div>
+      </div>
+    </Modal>
   );
 }
 

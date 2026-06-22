@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"gorm.io/gorm"
 
@@ -101,16 +100,15 @@ func (r *Repo) List(ctx context.Context, tenantID uint64) ([]*model.InstalledPac
 	return out, nil
 }
 
-// DeleteSoft sets deleted_at on the matching row. Idempotent: deleting
+// DeleteSoft soft-deletes the matching row. Idempotent: deleting
 // an already-deleted (or missing) row returns errs.ErrNotFound.
 func (r *Repo) DeleteSoft(ctx context.Context, tenantID uint64, packID string) error {
 	if packID == "" {
 		return fmt.Errorf("%w: pack_id required", errs.ErrInvalid)
 	}
-	now := time.Now().UTC()
-	res := r.db.WithContext(ctx).Model(&model.InstalledPack{}).
-		Where("tenant_id = ? AND pack_id = ? AND deleted_at IS NULL", tenantID, packID).
-		Update("deleted_at", now)
+	res := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND pack_id = ?", tenantID, packID).
+		Delete(&model.InstalledPack{})
 	if res.Error != nil {
 		return res.Error
 	}

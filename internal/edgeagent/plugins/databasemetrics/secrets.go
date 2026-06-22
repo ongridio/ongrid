@@ -38,7 +38,11 @@ func RegisterSecretHandler(client tunnel.Client, log *slog.Logger) {
 			return nil, err
 		}
 		for _, req := range reqs {
-			log.Info("databasemetrics secret written",
+			action := "written"
+			if req.Delete {
+				action = "deleted"
+			}
+			log.Info("databasemetrics secret "+action,
 				slog.String("source", req.SourceID),
 				slog.String("path", req.Path))
 		}
@@ -412,6 +416,7 @@ func writeManagedSecretsInBase(ctx context.Context, baseDir string, reqs []tunne
 type managedSecretWritePlan struct {
 	path    string
 	content string
+	delete  bool
 }
 
 type stagedManagedSecretWrite struct {
@@ -420,6 +425,7 @@ type stagedManagedSecretWrite struct {
 	backupPath  string
 	hadOriginal bool
 	installed   bool
+	deleteOnly  bool
 }
 
 func planManagedSecretWrites(ctx context.Context, baseDir string, reqs []tunnel.WriteDatabaseMetricsSecretRequest) ([]managedSecretWritePlan, error) {
@@ -437,6 +443,16 @@ func planManagedSecretWrites(ctx context.Context, baseDir string, reqs []tunnel.
 			return nil, fmt.Errorf("write database metrics secret: duplicate path %q for sources %q and %q", cleanPath, prevSourceID, req.SourceID)
 		}
 		seenPaths[cleanPath] = req.SourceID
+		if req.Delete {
+			if strings.TrimSpace(req.Content) != "" || req.PreservePassword {
+				return nil, fmt.Errorf("write database metrics secret: delete request must not include content or preserve_password")
+			}
+			plans = append(plans, managedSecretWritePlan{
+				path:   cleanPath,
+				delete: true,
+			})
+			continue
+		}
 		content := req.Content
 		if strings.TrimSpace(content) == "" && req.PreservePassword {
 			nextContent, err := buildManagedSecretPreservingPasswordInBase(baseDir, req)
@@ -495,6 +511,9 @@ func stageManagedSecretWrites(ctx context.Context, plans []managedSecretWritePla
 }
 
 func stageManagedSecretWrite(plan managedSecretWritePlan) (stagedManagedSecretWrite, error) {
+	if plan.delete {
+		return stagedManagedSecretWrite{path: plan.path, deleteOnly: true}, nil
+	}
 	dir := filepath.Dir(plan.path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return stagedManagedSecretWrite{}, fmt.Errorf("write database metrics secret: mkdir: %w", err)
@@ -545,6 +564,37 @@ func commitManagedSecretWrites(ctx context.Context, staged []stagedManagedSecret
 			return err
 		}
 		st := &staged[i]
+		if st.deleteOnly {
+			if info, err := os.Lstat(st.path); err == nil {
+				if info.Mode()&os.ModeSymlink != 0 {
+					if rollbackErr := rollbackManagedSecretWrites(staged); rollbackErr != nil {
+						return errors.Join(fmt.Errorf("write database metrics secret: refusing symlink path"), rollbackErr)
+					}
+					return fmt.Errorf("write database metrics secret: refusing symlink path")
+				}
+				backupPath, err := reserveManagedSecretBackupPath(filepath.Dir(st.path))
+				if err != nil {
+					if rollbackErr := rollbackManagedSecretWrites(staged); rollbackErr != nil {
+						return errors.Join(err, rollbackErr)
+					}
+					return err
+				}
+				if err := os.Rename(st.path, backupPath); err != nil {
+					if rollbackErr := rollbackManagedSecretWrites(staged); rollbackErr != nil {
+						return errors.Join(fmt.Errorf("write database metrics secret: backup existing before delete: %w", err), rollbackErr)
+					}
+					return fmt.Errorf("write database metrics secret: backup existing before delete: %w", err)
+				}
+				st.backupPath = backupPath
+				st.hadOriginal = true
+			} else if !os.IsNotExist(err) {
+				if rollbackErr := rollbackManagedSecretWrites(staged); rollbackErr != nil {
+					return errors.Join(fmt.Errorf("write database metrics secret: stat target: %w", err), rollbackErr)
+				}
+				return fmt.Errorf("write database metrics secret: stat target: %w", err)
+			}
+			continue
+		}
 		if info, err := os.Lstat(st.path); err == nil {
 			if info.Mode()&os.ModeSymlink != 0 {
 				if rollbackErr := rollbackManagedSecretWrites(staged); rollbackErr != nil {

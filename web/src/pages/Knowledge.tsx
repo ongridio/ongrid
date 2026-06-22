@@ -13,7 +13,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type
 import {
   BookOpen,
   ChevronRight,
+  Copy,
   DownloadCloud,
+  Eye,
   Folder,
   FolderOpen,
   Pencil,
@@ -24,8 +26,10 @@ import {
   Upload,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/cn';
 import { fullDateTime } from '@/lib/format';
+import { splitFrontmatter, stripFrontmatter } from '@/lib/frontmatter';
 import { Modal } from '@/components/Modal';
 import { Button, Card, EmptyState, PageHeader } from '@/components/ui';
 import {
@@ -754,11 +758,8 @@ function DocCard({
             }
           : undefined
       }
-      className={cn(
-        'flex flex-col py-2.5 transition-colors hover:bg-zinc-800/40',
-        editable && 'cursor-pointer',
-      )}
-      onClick={editable ? onEdit : undefined}
+      className="flex cursor-pointer flex-col py-2.5 transition-colors hover:bg-zinc-800/40"
+      onClick={onEdit}
     >
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
@@ -791,32 +792,46 @@ function DocCard({
             </div>
           )}
         </div>
-        {editable && (
-          <div className="flex shrink-0 items-center gap-1">
+        <div className="flex shrink-0 items-center gap-1">
+          {editable ? (
+            <>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEdit();
+                }}
+                title={tr('编辑', 'Edit')}
+                className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+              >
+                <Pencil size={11} />
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete();
+                }}
+                title={tr('删除', 'Delete')}
+                className="rounded p-1 text-zinc-500 hover:bg-red-900/30 hover:text-red-300"
+              >
+                <Trash2 size={11} />
+              </button>
+            </>
+          ) : (
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 onEdit();
               }}
-              title={tr('编辑', 'Edit')}
+              title={tr('查看', 'View')}
               className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
             >
-              <Pencil size={11} />
+              <Eye size={11} />
             </button>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete();
-              }}
-              title={tr('删除', 'Delete')}
-              className="rounded p-1 text-zinc-500 hover:bg-red-900/30 hover:text-red-300"
-            >
-              <Trash2 size={11} />
-            </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </Card>
   );
@@ -841,9 +856,43 @@ function SearchHitCard({ hit }: { hit: SearchHit }) {
         </div>
         <span>score {hit.score.toFixed(2)}</span>
       </div>
+      {/* 预览只给正文：frontmatter 占满 3 行预览毫无信息量 */}
       <div className="mt-1 line-clamp-3 whitespace-pre-wrap break-words text-[12px] text-zinc-300">
-        {hit.doc.content}
+        {stripFrontmatter(hit.doc.content ?? '')}
       </div>
+    </div>
+  );
+}
+
+// 阅读态正文：先剥离 YAML frontmatter 再渲染 —— 否则 `title: …\n---`
+// 会按 setext 标题渲染成粗体大字。元信息以弱化的 key/value 行单独展示。
+function DocBody({ content }: { content: string }) {
+  const fm = useMemo(() => splitFrontmatter(content), [content]);
+  return (
+    <div className="md-body text-sm text-zinc-200">
+      {fm && (
+        <dl className="mb-4 space-y-1 border-b border-zinc-800 pb-3">
+          {fm.meta.map(([key, value]) => (
+            <div key={key} className="flex items-baseline gap-2 text-xs">
+              <dt className="shrink-0 font-mono text-[11px] text-zinc-500">{key}</dt>
+              {Array.isArray(value) ? (
+                <dd className="flex flex-wrap gap-1">
+                  {value.map((v) => (
+                    <span key={v} className="rounded bg-zinc-800/60 px-1.5 py-0.5 text-[11px] text-zinc-400">
+                      {v}
+                    </span>
+                  ))}
+                </dd>
+              ) : (
+                <dd className="text-zinc-400">{value}</dd>
+              )}
+            </div>
+          ))}
+        </dl>
+      )}
+      {/* remark-gfm：表格 / 删除线 / 任务列表等 GFM 语法，
+          缺了它表格按普通段落渲染成一行竖线文本 */}
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{fm ? fm.body : content}</ReactMarkdown>
     </div>
   );
 }
@@ -871,11 +920,16 @@ function DocEditor({
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  // Repo-sourced docs are read-only — they were crawled from a git
-  // repo and rewriting them in the SPA would diverge from source.
-  // We still let users open them to read the body; the modal switches
-  // to a markdown viewer instead of the form.
-  const readOnly = mode === 'edit' && existing?.source_type === 'repo';
+  // Vault (built-in) and repo docs are read-only — both are regenerated
+  // on sync, so in-place edits would be silently lost (the backend PATCH
+  // rejects them too). Users can still open them to read the rendered
+  // body; the modal switches to a markdown viewer instead of the form.
+  // "复制为组织文档" forks the body into an editable org doc (manual),
+  // which is the supported way to customize built-in content.
+  const sourceReadOnly =
+    existing?.source_type === 'repo' || existing?.source_type === 'vault';
+  const [forked, setForked] = useState(false);
+  const readOnly = mode === 'edit' && sourceReadOnly && !forked;
   // An uploaded file's url is its identity (the filename); it can't be
   // re-pointed from the editor — the backend keeps it fixed. Show it but
   // lock the field so editing it isn't silently ignored.
@@ -911,12 +965,14 @@ function DocEditor({
         .map((s) => s.trim())
         .filter(Boolean)
         .join('/');
-      if (mode === 'create') {
+      if (mode === 'create' || forked) {
+        // forked: a read-only vault/repo doc copied into the org scope —
+        // lands as a brand-new manual doc, the original stays untouched.
         await createDoc({
           title: title.trim(),
           title_en: titleEN.trim() || undefined,
           content: content.trim(),
-          url: url.trim() || undefined,
+          url: forked ? undefined : url.trim() || undefined,
           path: cleanPath || undefined,
           tags: tags.length ? tags : undefined,
         });
@@ -937,27 +993,58 @@ function DocEditor({
     }
   };
 
-  // Read-only viewer for repo docs — render markdown body, show metadata
-  // in a header strip. Manual docs continue to the editor form below.
+  // Read-only viewer for vault/repo docs — render markdown body, show
+  // metadata in a header strip. Manual/upload docs continue to the editor
+  // form below.
   if (readOnly) {
+    const isVault = existing?.source_type === 'vault';
     return (
       <Modal
         open
         onClose={onClose}
+        // 阅读态默认给到 max-w-4xl，并允许拖左右边缘自行调宽 ——
+        // 内置 runbook 普遍带宽表格，md(448px) 下表格没法看。
+        size="xl"
+        resizable
         title={existing ? localizedDocTitle(existing) : tr('文档', 'Document')}
         footer={
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
-          >
-            {tr('关闭', 'Close')}
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+            >
+              {tr('关闭', 'Close')}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                // The copy is a fresh org doc — drop the source url
+                // (builtin://… / repo path) so it isn't carried over.
+                setUrl('');
+                setForked(true);
+              }}
+              disabled={loading || !content}
+              title={
+                isVault
+                  ? tr('内置文档随同步更新、不可直接修改；复制一份到组织知识库后即可编辑', 'Built-in docs are refreshed on sync and not directly editable; copy into the org knowledge base to edit')
+                  : tr('repo 文档随同步更新、不可直接修改；复制一份到组织知识库后即可编辑', 'Repo docs are refreshed on sync and not directly editable; copy into the org knowledge base to edit')
+              }
+              className="flex items-center gap-1.5 rounded-md bg-zinc-100 px-3 py-1.5 text-xs font-medium text-zinc-900 hover:bg-white disabled:opacity-50"
+            >
+              <Copy size={11} />
+              {tr('复制为组织文档', 'Copy as org doc')}
+            </button>
+          </>
         }
       >
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-500">
-            <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-emerald-300">repo</span>
+            {isVault ? (
+              <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-300">{tr('内置', 'built-in')}</span>
+            ) : (
+              <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-emerald-300">repo</span>
+            )}
             {existing?.path && (
               <span className="rounded bg-zinc-800/60 px-1.5 py-0.5 text-zinc-300">{localizedPath(existing.path)}</span>
             )}
@@ -966,27 +1053,32 @@ function DocEditor({
                 {t}
               </span>
             ))}
-            {existing?.url && (
-              <a
-                href={existing.url}
-                target="_blank"
-                rel="noreferrer"
-                className="ml-auto truncate font-mono text-[10px] text-zinc-500 hover:text-zinc-300 underline-offset-2 hover:underline"
-                title={existing.url}
-              >
-                {existing.url}
-              </a>
-            )}
+            {existing?.url &&
+              (existing.url.startsWith('http') ? (
+                <a
+                  href={existing.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="ml-auto truncate font-mono text-[10px] text-zinc-500 hover:text-zinc-300 underline-offset-2 hover:underline"
+                  title={existing.url}
+                >
+                  {existing.url}
+                </a>
+              ) : (
+                <span className="ml-auto truncate font-mono text-[10px] text-zinc-500" title={existing.url}>
+                  {existing.url}
+                </span>
+              ))}
           </div>
-          <div className="max-h-[60vh] overflow-y-auto rounded-md border border-zinc-800 bg-zinc-950/40 p-4">
+          {/* 不再自限 60vh：Modal 本体已 max-h-90vh + 内部滚动，
+              嵌套两层滚动条阅读体验差 */}
+          <div className="rounded-md border border-zinc-800 bg-zinc-950/40 p-4">
             {loading ? (
               <div className="text-xs text-zinc-500">{tr('加载中…', 'Loading…')}</div>
             ) : err ? (
               <div className="text-xs text-red-300">{err}</div>
             ) : content ? (
-              <div className="md-body text-sm text-zinc-200">
-                <ReactMarkdown>{content}</ReactMarkdown>
-              </div>
+              <DocBody content={content} />
             ) : (
               <div className="text-xs text-zinc-500">{tr('该文档没有正文内容', 'This document has no body content')}</div>
             )}
@@ -1000,7 +1092,13 @@ function DocEditor({
     <Modal
       open
       onClose={onClose}
-      title={mode === 'create' ? tr('新建知识文档', 'New knowledge doc') : tr(`编辑 ${existing ? localizedDocTitle(existing) : ''}`, `Edit ${existing ? localizedDocTitle(existing) : ''}`)}
+      title={
+        mode === 'create'
+          ? tr('新建知识文档', 'New knowledge doc')
+          : forked
+            ? tr(`复制「${existing ? localizedDocTitle(existing) : ''}」为组织文档`, `Copy "${existing ? localizedDocTitle(existing) : ''}" as org doc`)
+            : tr(`编辑 ${existing ? localizedDocTitle(existing) : ''}`, `Edit ${existing ? localizedDocTitle(existing) : ''}`)
+      }
       footer={
         <>
           <button

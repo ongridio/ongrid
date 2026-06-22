@@ -21,6 +21,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Bot,
+  Copy,
   MessageSquarePlus,
   Pencil,
   Plus,
@@ -54,8 +55,16 @@ export default function AgentsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [query, setQuery] = useState('');
-  const [editing, setEditing] = useState<{ mode: 'create' } | { mode: 'edit'; agent: AgentSummary } | null>(null);
+  // editing.seed 预填一份「基于内置助理新建」的草稿（fork），对齐知识库
+  // 「复制为组织文档」：内置 / 预置助理只读，想改就 fork 成自定义助理。
+  const [editing, setEditing] = useState<
+    | { mode: 'create'; seed?: AgentSummary }
+    | { mode: 'edit'; agent: AgentSummary }
+    | null
+  >(null);
   const [deleting, setDeleting] = useState<AgentSummary | null>(null);
+  // 详情查看弹窗：点击卡片主体打开（参照知识库文档 / 技能详情）。
+  const [viewing, setViewing] = useState<AgentSummary | null>(null);
 
   const fetchAgents = useCallback(async (silent = false) => {
     if (silent) setRefreshing(true);
@@ -149,6 +158,7 @@ export default function AgentsPage() {
               <AgentCard
                 key={a.name}
                 agent={a}
+                onView={() => setViewing(a)}
                 onEdit={() => setEditing({ mode: 'edit', agent: a })}
                 onDelete={() => setDeleting(a)}
               />
@@ -157,10 +167,27 @@ export default function AgentsPage() {
         )}
       </div>
 
+      {viewing && (
+        <AgentDetailModal
+          agent={viewing}
+          onClose={() => setViewing(null)}
+          onEdit={() => {
+            const a = viewing;
+            setViewing(null);
+            setEditing({ mode: 'edit', agent: a });
+          }}
+          onFork={() => {
+            const a = viewing;
+            setViewing(null);
+            setEditing({ mode: 'create', seed: a });
+          }}
+        />
+      )}
       {editing && (
         <AgentEditor
           mode={editing.mode}
           existing={editing.mode === 'edit' ? editing.agent : null}
+          seed={editing.mode === 'create' ? editing.seed : undefined}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
@@ -238,10 +265,12 @@ const SHORT_LABELS = new Proxy({} as Record<string, string>, {
 
 function AgentCard({
   agent,
+  onView,
   onEdit,
   onDelete,
 }: {
   agent: AgentSummary;
+  onView: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }) {
@@ -271,10 +300,10 @@ function AgentCard({
       setErr(e instanceof ApiError ? e.message : (e as Error).message);
       setBusy(false);
     }
-  }, [agent.name, busy, navigate]);
+  }, [agent.name, busy, navigate, tr]);
 
   return (
-    <Card className="flex flex-col">
+    <Card className="flex cursor-pointer flex-col transition-colors hover:bg-zinc-800/40" onClick={onView}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex items-center gap-2">
           <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-indigo-500/20 text-indigo-300 ring-1 ring-inset ring-indigo-500/40">
@@ -297,7 +326,10 @@ function AgentCard({
           {isUser && (
             <button
               type="button"
-              onClick={onEdit}
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit();
+              }}
               title={tr('编辑', 'Edit')}
               className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
             >
@@ -307,7 +339,10 @@ function AgentCard({
           {canDelete && (
             <button
               type="button"
-              onClick={onDelete}
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete();
+              }}
               title={isUser ? tr('删除', 'Delete') : tr('从助理列表中移除（重启后内置 persona 会自动加载回来）', 'Remove from the list (built-in personas reload automatically on restart)')}
               className="rounded p-1 text-zinc-500 hover:bg-red-900/30 hover:text-red-300"
             >
@@ -316,7 +351,10 @@ function AgentCard({
           )}
           <button
             type="button"
-            onClick={() => void onUse()}
+            onClick={(e) => {
+              e.stopPropagation();
+              void onUse();
+            }}
             disabled={busy}
             title={tr('用此助理开新会话', 'Start a new session with this assistant')}
             className="ml-1 inline-flex items-center gap-1 rounded-md border border-indigo-500/40 bg-indigo-500/10 px-2 py-1 text-[11px] text-indigo-200 hover:bg-indigo-500/20 disabled:opacity-50"
@@ -354,6 +392,177 @@ function SourceLabel({ source }: { source?: AgentSource }) {
 }
 
 
+// AgentDetailModal — 只读详情查看，参照知识库文档的阅读弹窗：完整展示
+// description / when_to_use / system prompt（原文）/ 工具清单 / 模型等。
+// 编辑路径按 source 区分（对齐知识库 vault 文档「只读 + 复制为组织文档」）：
+//   - user 自定义助理 → 「编辑」直接改 user_agents 行
+//   - builtin / disk 内置 / 预置 → 定义在代码 / agents/*.md，不可在线改，
+//     提供「复制为自定义助理」fork 出一份可编辑的草稿
+function AgentDetailModal({
+  agent,
+  onClose,
+  onEdit,
+  onFork,
+}: {
+  agent: AgentSummary;
+  onClose: () => void;
+  onEdit: () => void;
+  onFork: () => void;
+}) {
+  const { tr } = useI18n();
+  const navigate = useNavigate();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const displayName = SHORT_LABELS[agent.name] ?? agent.name;
+  const isUser = agent.source === 'user';
+  const toolCount = agent.tools?.length ?? 0;
+
+  const onUse = useCallback(async () => {
+    if (busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const title = tr(`使用 ${agent.name} - 新会话`, `Using ${agent.name} - new session`).slice(0, 60);
+      const session = await createSession({ title, agent_id: agent.name });
+      navigate(`/chat/${session.id}`);
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : (e as Error).message);
+      setBusy(false);
+    }
+  }, [agent.name, busy, navigate, tr]);
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      size="lg"
+      resizable
+      title={displayName}
+      footer={
+        <>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+          >
+            {tr('关闭', 'Close')}
+          </button>
+          {isUser ? (
+            <button
+              type="button"
+              onClick={onEdit}
+              className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800"
+            >
+              <Pencil size={11} /> {tr('编辑', 'Edit')}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onFork}
+              title={tr('内置 / 预置助理定义在代码 / agents/*.md，不可直接改；复制一份为自定义助理后即可编辑', 'Built-in / preset assistants are defined in code / agents/*.md and cannot be edited directly; copy into a custom assistant to edit')}
+              className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800"
+            >
+              <Copy size={11} /> {tr('复制为自定义助理', 'Copy as custom')}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => void onUse()}
+            disabled={busy}
+            className="inline-flex items-center gap-1.5 rounded-md bg-zinc-100 px-3 py-1.5 text-xs font-medium text-zinc-900 hover:bg-white disabled:opacity-50"
+          >
+            <MessageSquarePlus size={11} /> {busy ? tr('创建中…', 'Creating…') : tr('使用此助理', 'Use this')}
+          </button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-500">
+          <span className="font-mono text-zinc-400">{agent.name}</span>
+          <span>·</span>
+          <SourceLabel source={agent.source} />
+          {agent.permission_mode === 'read-only' && (
+            <>
+              <span className="text-zinc-700">·</span>
+              <span className="text-emerald-400">{tr('只读', 'Read-only')}</span>
+            </>
+          )}
+          <span className="ml-auto">
+            {toolCount > 0 ? tr(`${toolCount} 个工具`, `${toolCount} tool(s)`) : tr('继承全部工具', 'Inherits all tools')}
+          </span>
+        </div>
+
+        {err && <div className="text-[11px] text-red-300">{err}</div>}
+
+        <DetailSection label={tr('描述', 'Description')}>
+          <p className="text-xs leading-relaxed text-zinc-300">{agent.description || '—'}</p>
+        </DetailSection>
+
+        {agent.when_to_use && (
+          <DetailSection label={tr('何时使用', 'When to use')}>
+            <p className="whitespace-pre-wrap text-xs leading-relaxed text-zinc-300">{agent.when_to_use}</p>
+          </DetailSection>
+        )}
+
+        <DetailSection label={tr('系统提示（原文）', 'System prompt (raw)')}>
+          {agent.system_prompt ? (
+            <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-md border border-zinc-800 bg-zinc-950/40 p-3 font-mono text-[11px] leading-relaxed text-zinc-300">
+              {agent.system_prompt}
+            </pre>
+          ) : (
+            <p className="text-xs text-zinc-500">{tr('继承 coordinator 默认提示', 'Inherits the coordinator default prompt')}</p>
+          )}
+        </DetailSection>
+
+        {agent.critical_reminder && (
+          <DetailSection label={tr('关键提醒', 'Critical reminder')}>
+            {/* 用不带透明度的 text-amber-300：light 主题有 amber-300→amber-700
+                的覆盖（index.css），透明度变体 /80 不在覆盖内、浅色下会发灰看不清。
+                配一层 amber 描边底色，强化「提醒」语义又保证两主题都够对比度。 */}
+            <p className="whitespace-pre-wrap rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs leading-relaxed text-amber-300">
+              {agent.critical_reminder}
+            </p>
+          </DetailSection>
+        )}
+
+        <DetailSection label={tr('允许使用的工具', 'Allowed tools')}>
+          {toolCount === 0 ? (
+            <p className="text-xs text-zinc-500">{tr('继承 coordinator 的全部工具', 'Inherits all coordinator tools')}</p>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {agent.tools!.map((t) => (
+                <span key={t} className="rounded border border-zinc-800 bg-zinc-950/40 px-1.5 py-0.5 font-mono text-[10px] text-zinc-400">
+                  {t}
+                </span>
+              ))}
+            </div>
+          )}
+        </DetailSection>
+
+        {(agent.model || (agent.max_turns ?? 0) > 0) && (
+          <div className="flex flex-wrap gap-x-6 gap-y-1 text-[11px] text-zinc-500">
+            {agent.model && (
+              <span>{tr('模型', 'Model')}: <span className="font-mono text-zinc-300">{agent.model}</span></span>
+            )}
+            {(agent.max_turns ?? 0) > 0 && (
+              <span>{tr('最大轮数', 'Max turns')}: <span className="text-zinc-300">{agent.max_turns}</span></span>
+            )}
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+function DetailSection({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <section>
+      <div className="mb-1.5 text-[11px] uppercase tracking-wider text-zinc-500">{label}</div>
+      {children}
+    </section>
+  );
+}
+
 function AgentsEmpty({ hasItems, onCreate }: { hasItems: boolean; onCreate: () => void }) {
   const { tr } = useI18n();
   return (
@@ -371,28 +580,35 @@ function AgentsEmpty({ hasItems, onCreate }: { hasItems: boolean; onCreate: () =
   );
 }
 
-// AgentEditor is the create + edit form modal. Reused by both flows;
-// `existing` is null for create, the row for edit (Name field then
-// becomes read-only since name is the immutable identifier).
+// AgentEditor is the create + edit form modal. Reused by three flows:
+//   - create blank: existing=null, seed=undefined
+//   - create from fork: existing=null, seed=<内置/预置助理> — 预填正文，
+//     name 留空让用户取新名（对齐知识库「复制为组织文档」）
+//   - edit: existing=<user agent> — Name 字段只读（name 是不可变标识）
 function AgentEditor({
   mode,
   existing,
+  seed,
   onClose,
   onSaved,
 }: {
   mode: 'create' | 'edit';
   existing: AgentSummary | null;
+  seed?: AgentSummary;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const { tr } = useI18n();
+  // base 是预填来源：edit 用 existing，fork 新建用 seed。name 只在 edit
+  // 时承袭；fork 留空（不能与被 fork 的内置助理重名）。
+  const base = existing ?? seed ?? null;
   const [name, setName] = useState(existing?.name ?? '');
-  const [description, setDescription] = useState(existing?.description ?? '');
-  const [whenToUse, setWhenToUse] = useState(existing?.when_to_use ?? '');
-  const [systemPrompt, setSystemPrompt] = useState(existing?.system_prompt ?? '');
-  const [allowedTools, setAllowedTools] = useState<string[]>(existing?.tools ?? []);
-  const [model, setModel] = useState(existing?.model ?? '');
-  const [maxTurns, setMaxTurns] = useState<number>(existing?.max_turns ?? 0);
+  const [description, setDescription] = useState(base?.description ?? '');
+  const [whenToUse, setWhenToUse] = useState(base?.when_to_use ?? '');
+  const [systemPrompt, setSystemPrompt] = useState(base?.system_prompt ?? '');
+  const [allowedTools, setAllowedTools] = useState<string[]>(base?.tools ?? []);
+  const [model, setModel] = useState(base?.model ?? '');
+  const [maxTurns, setMaxTurns] = useState<number>(base?.max_turns ?? 0);
   const [skills, setSkills] = useState<SkillSummary[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -437,7 +653,13 @@ function AgentEditor({
     <Modal
       open
       onClose={onClose}
-      title={mode === 'create' ? tr('新建助理', 'New assistant') : tr(`编辑 ${existing?.name}`, `Edit ${existing?.name}`)}
+      title={
+        mode === 'edit'
+          ? tr(`编辑 ${existing?.name}`, `Edit ${existing?.name}`)
+          : seed
+            ? tr(`基于 ${seed.name} 新建助理`, `New assistant from ${seed.name}`)
+            : tr('新建助理', 'New assistant')
+      }
       footer={
         <>
           <button

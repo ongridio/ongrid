@@ -12,14 +12,14 @@ import (
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 )
 
-// ReviewGate is the SOP-double-sign decorator (+
-// mutating-class gate). When the wrapped BaseTool's
-// Class is "write" or "destructive", the decorator intercepts the
-// call, spawns a reviewer worker (agents/reviewer.md) to vet the
-// proposal, and only forwards to the inner tool if the reviewer
-// returns "Decision: approve". On reject the decorator returns an
-// error wrapping the reviewer's reason so the coordinator chat model
-// can explain the situation to the user.
+// ReviewGate is the SOP-double-sign decorator (+ mutating-class gate).
+// When the wrapped BaseTool's Class is "write" or "destructive", the
+// decorator intercepts the call. A narrow set of config writes can be
+// approved by deterministic policy; everything else spawns a reviewer
+// worker (agents/reviewer.md) and only forwards to the inner tool if
+// the reviewer returns "Decision: approve". On reject the decorator
+// returns an error wrapping the reviewer's reason so the coordinator
+// chat model can explain the situation to the user.
 //
 // Why ReviewGate is its own decorator (instead of folding it into the
 // agent loop or registry):
@@ -213,6 +213,10 @@ type ReviewGateConfig struct {
 	Timeout time.Duration
 }
 
+const deterministicPolicyReviewerAgent = "deterministic_policy"
+
+const alertRuleCreateDeterministicApprovalReason = "deterministic policy approved alert_rule/create: apply_config_change validates confirmed=true, admin role, payload, draft_hash, draft_id, compiler constraints, and rule uniqueness before persisting"
+
 // WithReviewGate returns inner wrapped so InvokableRun first checks
 // Class:
 //
@@ -221,8 +225,9 @@ type ReviewGateConfig struct {
 //     could conditionally apply at chain.Wrap time but applying
 //     unconditionally keeps the chain order documentable in one
 //     place.
-//   - Class == "write" || "destructive" → spawn reviewer worker,
-//     parse decision, gate the inner call.
+//   - Class == "write" || "destructive" → deterministic approval when
+//     narrowly allowed; otherwise spawn reviewer worker, parse
+//     decision, gate the inner call.
 //
 // A nil spawner falls back to the "always reject" safe posture: the
 // decorator returns ErrReviewerSpawn so a misconfigured deployment
@@ -268,6 +273,10 @@ func (g *ReviewGate) InvokableRun(ctx context.Context, argsJSON string, opts ...
 
 	if !isMutatingClass(info.Class) {
 		return g.inner.InvokableRun(ctx, argsJSON, opts...)
+	}
+
+	if reason, ok := deterministicReviewApproval(info.Name, argsJSON); ok {
+		return g.runWithDeterministicApproval(ctx, info, argsJSON, reason, opts...)
 	}
 
 	if g.spawner == nil {
@@ -326,9 +335,7 @@ func (g *ReviewGate) InvokableRun(ctx context.Context, argsJSON string, opts ...
 		g.recordDecision(ctx, proposalID, model_DecisionApprove, reason)
 		// 4) Run the inner tool.
 		out, runErr := g.inner.InvokableRun(ctx, argsJSON, opts...)
-		if g.sink != nil && proposalID != "" {
-			_ = g.sink.MarkExecuted(ctx, proposalID, g.nowFn().UTC())
-		}
+		g.markExecuted(ctx, proposalID)
 		return out, runErr
 	case "reject":
 		g.recordDecision(ctx, proposalID, model_DecisionReject, reason)
@@ -342,6 +349,31 @@ func (g *ReviewGate) InvokableRun(ctx context.Context, argsJSON string, opts ...
 	}
 }
 
+func (g *ReviewGate) runWithDeterministicApproval(ctx context.Context, info *basetool.ToolInfo, argsJSON, reason string, opts ...basetool.InvokeOption) (string, error) {
+	proposalID := ""
+	if g.sink != nil {
+		resolved := basetool.ResolveOptions(opts)
+		id, sinkErr := g.sink.Insert(ctx, MutatingProposalEvent{
+			ToolName:       info.Name,
+			ArgsJSON:       argsJSON,
+			ToolClass:      info.Class,
+			ReviewerAgent:  deterministicPolicyReviewerAgent,
+			ReviewerTaskID: "",
+			OperatorUserID: resolved.UserID,
+			SessionID:      resolved.Tenant,
+			CreatedAt:      g.nowFn().UTC(),
+		})
+		if sinkErr == nil {
+			proposalID = id
+			g.recordDecision(ctx, proposalID, model_DecisionApprove, reason)
+		}
+	}
+
+	out, runErr := g.inner.InvokableRun(ctx, argsJSON, opts...)
+	g.markExecuted(ctx, proposalID)
+	return out, runErr
+}
+
 // recordDecision is the best-effort sink update. We swallow errors so
 // audit outages don't fail the tool decision; production wires the
 // sink to log internally.
@@ -349,7 +381,20 @@ func (g *ReviewGate) recordDecision(ctx context.Context, id, decision, reason st
 	if g.sink == nil || id == "" {
 		return
 	}
-	_ = g.sink.UpdateDecision(ctx, id, decision, reason)
+	if err := g.sink.UpdateDecision(ctx, id, decision, reason); err != nil {
+		// Best-effort audit sink: the review decision remains authoritative.
+		return
+	}
+}
+
+func (g *ReviewGate) markExecuted(ctx context.Context, id string) {
+	if g.sink == nil || id == "" {
+		return
+	}
+	if err := g.sink.MarkExecuted(ctx, id, g.nowFn().UTC()); err != nil {
+		// Best-effort audit sink: do not change the already-computed tool result.
+		return
+	}
 }
 
 // isMutatingClass returns true for tool classes that require review.
@@ -359,6 +404,54 @@ func (g *ReviewGate) recordDecision(ctx context.Context, id, decision, reason st
 func isMutatingClass(class string) bool {
 	switch strings.ToLower(strings.TrimSpace(class)) {
 	case "write", "destructive":
+		return true
+	default:
+		return false
+	}
+}
+
+func deterministicReviewApproval(toolName, argsJSON string) (string, bool) {
+	if toolName != "apply_config_change" {
+		return "", false
+	}
+	var args struct {
+		Domain  string          `json:"domain"`
+		Action  string          `json:"action"`
+		Payload json.RawMessage `json:"payload"`
+	}
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		return "", false
+	}
+	if !isAlertRuleConfigDomain(args.Domain) {
+		return "", false
+	}
+	action := args.Action
+	if strings.TrimSpace(action) == "" && len(args.Payload) > 0 {
+		var payload struct {
+			Action string `json:"action"`
+		}
+		if err := json.Unmarshal(args.Payload, &payload); err == nil {
+			action = payload.Action
+		}
+	}
+	if !isCreateConfigAction(action) {
+		return "", false
+	}
+	return alertRuleCreateDeterministicApprovalReason, true
+}
+
+func isAlertRuleConfigDomain(domain string) bool {
+	switch strings.ToLower(strings.TrimSpace(domain)) {
+	case "alert_rule", "alert", "alert_rule_config":
+		return true
+	default:
+		return false
+	}
+}
+
+func isCreateConfigAction(action string) bool {
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case "", "create":
 		return true
 	default:
 		return false
@@ -503,7 +596,7 @@ func truncate(s string, n int) string {
 // DecisionReject without forcing this package to import
 // internal/manager/model/aiops (which would create a manager-side
 // dependency tree the decorator package must stay clear of —
-//The string values are the source-of-truth contract;
+// The string values are the source-of-truth contract;
 // the model file's constants must equal these.
 const (
 	model_DecisionApprove = "approve"

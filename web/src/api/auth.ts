@@ -5,7 +5,9 @@ export type LoginResponse = {
   refresh_token?: string;
   token_type?: string;
   expires_in?: number;
-  user: { email: string; role: string; id?: string };
+  role?: string;
+  email?: string;
+  user?: { email?: string; role?: string; id?: string };
 };
 
 export type SelfResponse = {

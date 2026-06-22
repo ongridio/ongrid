@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -59,6 +61,90 @@ func metricExprFor(metric string) (string, bool) {
 	return "", false
 }
 
+var metricExprNodeSelectorRE = regexp.MustCompile(`\b(node_[a-zA-Z0-9_:]+)(\{[^}]*\})?`)
+
+func applyClosedSetMetricSelector(expr, selector string) string {
+	selector = normalizePromSelectorFragment(selector)
+	if selector == "" {
+		return expr
+	}
+	return metricExprNodeSelectorRE.ReplaceAllStringFunc(expr, func(match string) string {
+		parts := metricExprNodeSelectorRE.FindStringSubmatch(match)
+		if len(parts) < 3 || parts[1] == "" {
+			return match
+		}
+		return parts[1] + mergePromSelectorFragments(parts[2], selector)
+	})
+}
+
+func normalizePromSelectorFragment(selector string) string {
+	selector = strings.TrimSpace(selector)
+	selector = strings.TrimPrefix(selector, "{")
+	selector = strings.TrimSuffix(selector, "}")
+	return strings.TrimSpace(selector)
+}
+
+func mergePromSelectorFragments(existing, add string) string {
+	add = normalizePromSelectorFragment(add)
+	if add == "" {
+		if strings.TrimSpace(existing) == "" {
+			return ""
+		}
+		return "{" + normalizePromSelectorFragment(existing) + "}"
+	}
+	existingParts := splitPromSelectorFragment(normalizePromSelectorFragment(existing))
+	addParts := splitPromSelectorFragment(add)
+	addKeys := make(map[string]struct{}, len(addParts))
+	for _, part := range addParts {
+		if key := promMatcherKey(part); key != "" {
+			addKeys[key] = struct{}{}
+		}
+	}
+	merged := make([]string, 0, len(existingParts)+len(addParts))
+	for _, part := range existingParts {
+		if key := promMatcherKey(part); key != "" {
+			if _, replaced := addKeys[key]; replaced {
+				continue
+			}
+		}
+		merged = append(merged, part)
+	}
+	merged = append(merged, addParts...)
+	if len(merged) == 0 {
+		return ""
+	}
+	return "{" + strings.Join(merged, ",") + "}"
+}
+
+func splitPromSelectorFragment(selector string) []string {
+	selector = normalizePromSelectorFragment(selector)
+	if selector == "" {
+		return nil
+	}
+	parts := strings.Split(selector, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+func promMatcherKey(matcher string) string {
+	matcher = strings.TrimSpace(matcher)
+	if matcher == "" {
+		return ""
+	}
+	for _, op := range []string{"=~", "!~", "!=", "="} {
+		if idx := strings.Index(matcher, op); idx > 0 {
+			return strings.TrimSpace(matcher[:idx])
+		}
+	}
+	return ""
+}
+
 // evaluateMetricAnomaly turns each metric_anomaly rule into a PromQL
 // query of the shape
 //
@@ -83,6 +169,7 @@ func (e *PipelineEvaluator) evaluateMetricAnomaly(ctx context.Context, now time.
 			done()
 			continue
 		}
+		base = applyClosedSetMetricSelector(base, rule.Selector)
 		var expr string
 		switch rule.Method {
 		case "mad":
@@ -98,13 +185,13 @@ func (e *PipelineEvaluator) evaluateMetricAnomaly(ctx context.Context, now time.
 			expr = fmt.Sprintf("abs((%s) - (%s)) > %g * (%s)", base, mean, rule.Deviation, std)
 		}
 		evalErr = e.runVectorRule(ctx, vectorRule{
-			ruleKey:    rule.RuleKey,
-			ruleName:   rule.Name,
-			severity:   rule.Severity,
-			scopeType:  effectiveScope(rule.ScopeType, model.RuleKindMetricAnomaly),
-			runbook:    rule.RunbookURL,
-			labels:     rule.Labels,
-			expr:       expr,
+			ruleKey:   rule.RuleKey,
+			ruleName:  rule.Name,
+			severity:  rule.Severity,
+			scopeType: effectiveScope(rule.ScopeType, model.RuleKindMetricAnomaly),
+			runbook:   rule.RunbookURL,
+			labels:    rule.Labels,
+			expr:      expr,
 			fmtSummary: func(labels map[string]string, value float64) string {
 				return fmt.Sprintf("%s: %s 偏离基线 ≥ %gσ (labels=%s)", rule.RuleKey, rule.Metric, rule.Deviation, labelSetKey(labels))
 			},
@@ -132,19 +219,20 @@ func (e *PipelineEvaluator) evaluateMetricForecast(ctx context.Context, now time
 			done()
 			continue
 		}
+		base = applyClosedSetMetricSelector(base, rule.Selector)
 		// predict_linear over a sub-query: use 5m step regardless — the
 		// fit window still controls how much history influences the
 		// slope, the step only affects sampling resolution.
 		expr := fmt.Sprintf("predict_linear((%s)[%s:5m], %d) %s %g",
 			base, rule.FitWindow, rule.PredictSeconds, rule.Operator, rule.Threshold)
 		evalErr = e.runVectorRule(ctx, vectorRule{
-			ruleKey:    rule.RuleKey,
-			ruleName:   rule.Name,
-			severity:   rule.Severity,
-			scopeType:  effectiveScope(rule.ScopeType, model.RuleKindMetricForecast),
-			runbook:    rule.RunbookURL,
-			labels:     rule.Labels,
-			expr:       expr,
+			ruleKey:   rule.RuleKey,
+			ruleName:  rule.Name,
+			severity:  rule.Severity,
+			scopeType: effectiveScope(rule.ScopeType, model.RuleKindMetricForecast),
+			runbook:   rule.RunbookURL,
+			labels:    rule.Labels,
+			expr:      expr,
 			fmtSummary: func(labels map[string]string, value float64) string {
 				return fmt.Sprintf("%s: %s 预计 %ds 后 %s %g (labels=%s)",
 					rule.RuleKey, rule.Metric, rule.PredictSeconds, rule.Operator, rule.Threshold, labelSetKey(labels))
@@ -298,12 +386,21 @@ func (e *PipelineEvaluator) runVectorRule(ctx context.Context, vr vectorRule, no
 		seen[dedupeKey] = true
 		summary := vr.fmtSummary(ent.Metric, v)
 		val := v
+		var devID *uint64
+		if vr.scopeType == model.RuleScopeHost {
+			if raw := strings.TrimSpace(ent.Metric["device_id"]); raw != "" {
+				if id, err := strconv.ParseUint(raw, 10, 64); err == nil && id > 0 {
+					devID = &id
+				}
+			}
+		}
 		res2, err := e.uc.RecordFiring(ctx, FiringInput{
 			ScopeType:  vr.scopeType,
 			Scope:      vr.scopeType,
 			Rule:       vr.ruleKey,
 			RuleName:   vr.ruleName,
 			Severity:   ruleSev(vr.severity, notify.SeverityWarning),
+			DeviceID:   devID,
 			DedupeKey:  dedupeKey,
 			OccurredAt: now,
 			Title:      summary,

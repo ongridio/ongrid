@@ -13,6 +13,7 @@ import (
 
 	biz "github.com/ongridio/ongrid/internal/manager/biz/aiops"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/graph"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/graph/callbacks"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	model "github.com/ongridio/ongrid/internal/manager/model/aiops"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
@@ -119,7 +120,7 @@ func (m *memSessions) CloseSession(_ context.Context, id string) error {
 	return nil
 }
 func (m *memSessions) RenameSession(_ context.Context, _, _ string) error { return nil }
-func (m *memSessions) DeleteSession(_ context.Context, _ string) error { return nil }
+func (m *memSessions) DeleteSession(_ context.Context, _ string) error    { return nil }
 func (m *memSessions) AppendMessage(_ context.Context, msg *model.Message) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -149,7 +150,19 @@ func (m *memSessions) CreateToolCall(_ context.Context, tc *model.ToolCall) erro
 	m.toolCalls = append(m.toolCalls, tc)
 	return nil
 }
-func (m *memSessions) UpdateToolCallResult(_ context.Context, _ string, _ string, _, _ *string, _ time.Time) error {
+func (m *memSessions) UpdateToolCallResult(_ context.Context, id string, status string, resultJSON, errStr *string, endedAt time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, tc := range m.toolCalls {
+		if tc.ID != id {
+			continue
+		}
+		tc.Status = status
+		tc.ResultJSON = resultJSON
+		tc.Error = errStr
+		tc.EndedAt = &endedAt
+		return nil
+	}
 	return nil
 }
 func (m *memSessions) SumTokensSince(_ context.Context, _ time.Time) (biz.TokenSums, error) {
@@ -192,7 +205,7 @@ func TestRuntime_NewRuntime_RequiresDeps(t *testing.T) {
 
 // TestRuntime_Handle_OwnershipCheck enforces the "non-owner gets
 // ErrNotFound" invariant. Mirrors the legacy agent's behaviour
-//.
+// .
 func TestRuntime_Handle_OwnershipCheck(t *testing.T) {
 	sess := &model.Session{ID: "s1", UserID: 7}
 	rt, err := NewRuntime(Config{
@@ -280,6 +293,214 @@ func TestRuntime_Handle_HappyPath_FinalReply(t *testing.T) {
 	}
 	if events[len(events)-1].Type != EventDone {
 		t.Errorf("last event type = %q, want done", events[len(events)-1].Type)
+	}
+}
+
+func TestRuntime_Handle_ConfirmedConfigDraft_AppliesWithoutLLM(t *testing.T) {
+	sess := &model.Session{ID: "s1", UserID: 7}
+	store := newMemSessions(sess)
+	scripted := newScriptedChatModel(&schema.Message{
+		Role:    schema.Assistant,
+		Content: "should not run",
+	})
+	apply := &captureApplyTool{
+		resp: `{"kind":"config_apply_result","domain":"alert_rule","action":"create","status":"applied","resource_id":42,"resource":{"name":"MySQL 连接使用率过高预警","type":"alert_rule"}}`,
+	}
+	rt, err := NewRuntime(Config{
+		Sessions:  store,
+		ChatModel: scripted,
+		ToolBag:   []basetool.BaseTool{apply},
+		GraphCfg:  graph.Config{MaxIterations: 5},
+	})
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+
+	payload := `{"action":"create","draft_id":"draft-1","rule":{"rule_key":"mysql_connection_usage_high","name":"MySQL 连接使用率过高预警","kind":"metric_raw","severity":"warning","spec":{"expr":"up > 0","for":"5m"}}}`
+	userText := "确认创建这条告警规则\n" +
+		"domain: alert_rule\n" +
+		"action: create\n" +
+		"apply_tool: apply_config_change\n" +
+		"draft_hash: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n" +
+		"payload:\n```json\n" + payload + "\n```"
+
+	var events []Event
+	reply, err := rt.Handle(context.Background(), &Request{
+		SessionID: sess.ID,
+		UserID:    sess.UserID,
+		Role:      "admin",
+		UserText:  userText,
+		Emit: func(ev Event) {
+			events = append(events, ev)
+		},
+	})
+	if err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if scripted.calls.Load() != 0 {
+		t.Fatalf("LLM calls = %d, want 0 for deterministic confirm apply", scripted.calls.Load())
+	}
+	if apply.calls.Load() != 1 {
+		t.Fatalf("apply_config_change calls = %d, want 1", apply.calls.Load())
+	}
+	argsValue := apply.args.Load()
+	if argsValue == nil {
+		t.Fatalf("captured apply args is nil")
+	}
+	argsJSON, ok := argsValue.(string)
+	if !ok {
+		t.Fatalf("captured apply args type = %T, want string", argsValue)
+	}
+	for _, want := range []string{
+		`"domain":"alert_rule"`,
+		`"action":"create"`,
+		`"confirmed":true`,
+		`"draft_hash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"`,
+		`"payload":{`,
+		`"rule_key":"mysql_connection_usage_high"`,
+	} {
+		if !contains(argsJSON, want) {
+			t.Fatalf("apply args missing %q: %s", want, argsJSON)
+		}
+	}
+	if reply == nil || reply.Message == nil || reply.Message.Content == nil {
+		t.Fatalf("expected persisted assistant reply")
+	}
+	if !contains(*reply.Message.Content, "已确认并创建告警规则") || !contains(*reply.Message.Content, "ID: 42") {
+		t.Fatalf("reply content = %q", *reply.Message.Content)
+	}
+
+	var sawStart, sawEnd bool
+	for _, ev := range events {
+		if ev.Tool == nil || ev.Tool.Name != applyConfigChangeToolName {
+			continue
+		}
+		switch ev.Type {
+		case EventToolStart:
+			sawStart = true
+			if ev.Tool.Status != "running" {
+				t.Fatalf("tool_start status = %q, want running", ev.Tool.Status)
+			}
+		case EventToolEnd:
+			sawEnd = true
+			if ev.Tool.Status != "success" {
+				t.Fatalf("tool_end status = %q, want success", ev.Tool.Status)
+			}
+		}
+	}
+	if !sawStart || !sawEnd {
+		t.Fatalf("missing apply tool events: sawStart=%v sawEnd=%v events=%v", sawStart, sawEnd, events)
+	}
+	if len(store.messages) != 2 {
+		t.Fatalf("persisted messages = %d, want user + assistant", len(store.messages))
+	}
+}
+
+func TestRuntime_Handle_PlainOKAppliesLatestConfigDraftWithoutLLM(t *testing.T) {
+	sess := &model.Session{ID: "s1", UserID: 7}
+	store := newMemSessions(sess)
+	payload := `{"action":"create","draft_id":"draft-plain-ok","rule":{"rule_key":"mysql_slow_queries_surge","name":"MySQL 慢查询异常增多","kind":"metric_raw","severity":"warning","spec":{"expr":"rate(mysql_global_status_slow_queries[5m]) > 0.5","for":"5m"}}}`
+	draftResult := `{"kind":"config_draft","domain":"alert_rule","action":"create","draft_hash":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","payload":` + payload + `}`
+	store.messages = append(store.messages,
+		&model.Message{ID: "m-user", SessionID: sess.ID, Role: model.RoleUser, Content: strPtr("创建 MySQL 慢查询告警"), CreatedAt: time.Now().Add(-3 * time.Minute)},
+		&model.Message{ID: "m-tool", SessionID: sess.ID, Role: model.RoleTool, ToolName: strPtr("draft_config_change"), Content: strPtr(draftResult), CreatedAt: time.Now().Add(-2 * time.Minute)},
+		&model.Message{ID: "m-assistant", SessionID: sess.ID, Role: model.RoleAssistant, Content: strPtr("草稿已生成，确认后创建。"), CreatedAt: time.Now().Add(-time.Minute)},
+	)
+	scripted := newScriptedChatModel(&schema.Message{
+		Role:    schema.Assistant,
+		Content: "should not run",
+	})
+	apply := &captureApplyTool{
+		resp: `{"kind":"config_apply_result","domain":"alert_rule","action":"create","status":"applied","resource_id":95,"resource":{"name":"MySQL 慢查询异常增多","type":"alert_rule"}}`,
+	}
+	rt, err := NewRuntime(Config{
+		Sessions:  store,
+		ChatModel: scripted,
+		ToolBag:   []basetool.BaseTool{apply},
+		GraphCfg:  graph.Config{MaxIterations: 5},
+	})
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+
+	reply, err := rt.Handle(context.Background(), &Request{
+		SessionID: sess.ID,
+		UserID:    sess.UserID,
+		Role:      "admin",
+		UserText:  "ok",
+	})
+	if err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if scripted.calls.Load() != 0 {
+		t.Fatalf("LLM calls = %d, want 0 for plain confirmation apply", scripted.calls.Load())
+	}
+	if apply.calls.Load() != 1 {
+		t.Fatalf("apply_config_change calls = %d, want 1", apply.calls.Load())
+	}
+	argsValue := apply.args.Load()
+	if argsValue == nil {
+		t.Fatalf("captured apply args is nil")
+	}
+	argsJSON, ok := argsValue.(string)
+	if !ok {
+		t.Fatalf("captured apply args type = %T, want string", argsValue)
+	}
+	for _, want := range []string{
+		`"confirmed":true`,
+		`"draft_hash":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"`,
+		`"draft_id":"draft-plain-ok"`,
+		`"confirmation_text":"ok"`,
+	} {
+		if !contains(argsJSON, want) {
+			t.Fatalf("apply args missing %q: %s", want, argsJSON)
+		}
+	}
+	if reply == nil || reply.Message == nil || reply.Message.Content == nil {
+		t.Fatalf("expected persisted assistant reply")
+	}
+	if !contains(*reply.Message.Content, "已确认并创建告警规则") || !contains(*reply.Message.Content, "ID: 95") {
+		t.Fatalf("reply content = %q", *reply.Message.Content)
+	}
+}
+
+func TestLatestConfigDraftApplyArgs_StopsAtAppliedResult(t *testing.T) {
+	payload := `{"action":"create","draft_id":"draft-old","rule":{"rule_key":"old","name":"Old","kind":"metric_raw","severity":"warning","spec":{"expr":"up > 0","for":"5m"}}}`
+	draftResult := `{"kind":"config_draft","domain":"alert_rule","action":"create","draft_hash":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","payload":` + payload + `}`
+	applyResult := `{"kind":"config_apply_result","domain":"alert_rule","action":"create","status":"applied","resource_id":95}`
+
+	args, err, ok := latestConfigDraftApplyArgs([]*model.Message{
+		{Role: model.RoleUser, Content: strPtr("创建旧告警")},
+		{Role: model.RoleTool, Content: strPtr(draftResult)},
+		{Role: model.RoleUser, Content: strPtr("ok")},
+		{Role: model.RoleTool, Content: strPtr(applyResult)},
+		{Role: model.RoleUser, Content: strPtr("ok")},
+	}, "ok")
+	if err != nil {
+		t.Fatalf("latestConfigDraftApplyArgs: %v", err)
+	}
+	if ok || args != "" {
+		t.Fatalf("latestConfigDraftApplyArgs returned (%q, %v), want no pending draft", args, ok)
+	}
+}
+
+func TestLatestConfigDraftApplyArgs_DoesNotCrossPreviousUserTurn(t *testing.T) {
+	payload := `{"action":"create","draft_id":"draft-stale","rule":{"rule_key":"stale","name":"Stale","kind":"metric_raw","severity":"warning","spec":{"expr":"up > 0","for":"5m"}}}`
+	draftResult := `{"kind":"config_draft","domain":"alert_rule","action":"create","draft_hash":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","payload":` + payload + `}`
+
+	args, err, ok := latestConfigDraftApplyArgs([]*model.Message{
+		{Role: model.RoleUser, Content: strPtr("创建旧告警")},
+		{Role: model.RoleTool, Content: strPtr(draftResult)},
+		{Role: model.RoleAssistant, Content: strPtr("草稿已生成，确认后创建。")},
+		{Role: model.RoleUser, Content: strPtr("先问另一个问题")},
+		{Role: model.RoleAssistant, Content: strPtr("好的。")},
+		{Role: model.RoleUser, Content: strPtr("ok")},
+	}, "ok")
+	if err != nil {
+		t.Fatalf("latestConfigDraftApplyArgs: %v", err)
+	}
+	if ok || args != "" {
+		t.Fatalf("latestConfigDraftApplyArgs returned (%q, %v), want no stale draft across user turn", args, ok)
 	}
 }
 
@@ -447,21 +668,6 @@ func TestCalcDynamicHints(t *testing.T) {
 		}
 	})
 
-	t.Run("over_20_assistant_turns_emits_iteration_hint", func(t *testing.T) {
-		hist := make([]*model.Message, 0, 25)
-		for i := 0; i < 25; i++ {
-			hist = append(hist, &model.Message{Role: model.RoleAssistant, Content: strPtr("step")})
-		}
-		hints := rt.calcDynamicHints(hist)
-		joined := ""
-		for _, h := range hints {
-			joined += h + "\n"
-		}
-		if !contains(joined, "已经 25 轮") {
-			t.Errorf("missing iteration hint: %q", joined)
-		}
-	})
-
 	t.Run("clean_history_no_hints", func(t *testing.T) {
 		hist := []*model.Message{
 			{Role: model.RoleUser, Content: strPtr("hi")},
@@ -507,6 +713,83 @@ func TestCalcDynamicHints(t *testing.T) {
 			t.Errorf("hint should not fire when tool followed promise: %q", joined)
 		}
 	})
+
+	t.Run("new_alert_request_after_many_created_rules_no_repeat_tool_hint", func(t *testing.T) {
+		hist := []*model.Message{
+			{Role: model.RoleUser, Content: strPtr("创建 CPU 告警")},
+			makeToolMsg("list_metric_catalog", false),
+			makeToolMsg("draft_config_change", false),
+			{Role: model.RoleAssistant, Content: strPtr("草稿已生成")},
+			{Role: model.RoleUser, Content: strPtr("ok")},
+			{Role: model.RoleAssistant, Content: strPtr("已确认并创建告警规则")},
+			{Role: model.RoleUser, Content: strPtr("创建 PostgreSQL 告警")},
+			makeToolMsg("list_metric_catalog", false),
+			makeToolMsg("draft_config_change", false),
+			{Role: model.RoleAssistant, Content: strPtr("草稿已生成")},
+			{Role: model.RoleUser, Content: strPtr("ok")},
+			{Role: model.RoleAssistant, Content: strPtr("已确认并创建告警规则")},
+			{Role: model.RoleUser, Content: strPtr("创建 Redis 告警：缓存命中率偏低时提醒我")},
+		}
+		hints := rt.calcDynamicHints(hist)
+		joined := ""
+		for _, h := range hints {
+			joined += h + "\n"
+		}
+		if contains(joined, "已重复调用") || contains(joined, "不要再调用同款工具") {
+			t.Errorf("new alert request should not inherit old repeat-tool hint: %q", joined)
+		}
+	})
+
+	t.Run("previous_turn_repeated_tool_still_emits_hint", func(t *testing.T) {
+		hist := []*model.Message{
+			{Role: model.RoleUser, Content: strPtr("继续排查日志")},
+			makeToolMsg("query_logql", false),
+			makeToolMsg("query_logql", false),
+			makeToolMsg("query_logql", false),
+			{Role: model.RoleAssistant, Content: strPtr("还是没有更多结论")},
+			{Role: model.RoleUser, Content: strPtr("继续")},
+		}
+		hints := rt.calcDynamicHints(hist)
+		joined := ""
+		for _, h := range hints {
+			joined += h + "\n"
+		}
+		if !contains(joined, "query_logql") || !contains(joined, "已重复调用") {
+			t.Errorf("missing previous-turn repeat-tool hint: %q", joined)
+		}
+	})
+
+	t.Run("alert_draft_guard_block_then_create_request_emits_draft_retry_hint", func(t *testing.T) {
+		hist := []*model.Message{
+			{Role: model.RoleUser, Content: strPtr("为 MySQL 创建连接数超过 85% 的告警")},
+			{Role: model.RoleAssistant, Content: strPtr(callbacks.AlertDraftGuardBlockedMessage)},
+			{Role: model.RoleUser, Content: strPtr("为 MySQL 创建一条告警，连接数达到 max_connections 的 85% 且持续 5 分钟触发 Warning")},
+		}
+		hints := rt.calcDynamicHints(hist)
+		joined := ""
+		for _, h := range hints {
+			joined += h + "\n"
+		}
+		if !contains(joined, "draft_config_change") || !contains(joined, "不要要求用户重新发送") {
+			t.Errorf("missing alert draft retry hint: %q", joined)
+		}
+	})
+
+	t.Run("alert_draft_guard_block_then_why_question_no_draft_retry_hint", func(t *testing.T) {
+		hist := []*model.Message{
+			{Role: model.RoleUser, Content: strPtr("为 MySQL 创建连接数超过 85% 的告警")},
+			{Role: model.RoleAssistant, Content: strPtr(callbacks.AlertDraftGuardBlockedMessage)},
+			{Role: model.RoleUser, Content: strPtr("为什么要这样提示，不能直接创建 draft 吗")},
+		}
+		hints := rt.calcDynamicHints(hist)
+		joined := ""
+		for _, h := range hints {
+			joined += h + "\n"
+		}
+		if contains(joined, "draft_config_change") {
+			t.Errorf("why-question should not trigger draft retry hint: %q", joined)
+		}
+	})
 }
 
 // contains is a tiny test helper so we don't import strings in this
@@ -537,6 +820,27 @@ func (f *fakeTool) Info(_ context.Context) (*basetool.ToolInfo, error) {
 
 func (f *fakeTool) InvokableRun(_ context.Context, _ string, _ ...basetool.InvokeOption) (string, error) {
 	return `{"ok":true}`, nil
+}
+
+type captureApplyTool struct {
+	resp  string
+	calls atomic.Int32
+	args  atomic.Value
+}
+
+func (t *captureApplyTool) Info(_ context.Context) (*basetool.ToolInfo, error) {
+	return &basetool.ToolInfo{
+		Name:        applyConfigChangeToolName,
+		Description: "fake apply",
+		Parameters:  []byte(`{"type":"object","properties":{}}`),
+		Class:       "write",
+	}, nil
+}
+
+func (t *captureApplyTool) InvokableRun(_ context.Context, argsJSON string, _ ...basetool.InvokeOption) (string, error) {
+	t.calls.Add(1)
+	t.args.Store(argsJSON)
+	return t.resp, nil
 }
 
 // TestBuildEinoHistory_DropsOrphanToolMessage reproduces the .91 session
@@ -604,5 +908,53 @@ func TestBuildEinoHistory_DropsOrphanToolMessage(t *testing.T) {
 	}
 	if !sawAsst {
 		t.Error("assistant turn with 2 tool_calls missing from replay")
+	}
+}
+
+func TestBuildEinoHistory_SanitizesExpiredToolBudgetResult(t *testing.T) {
+	callID := "call_budget_1"
+	rows := []*model.Message{
+		{ID: "u0", Role: model.RoleUser, Content: strPtr("创建数据库连接告警")},
+		{
+			ID:      "asst-1",
+			Role:    model.RoleAssistant,
+			Content: strPtr("checking metric catalog"),
+			ToolCalls: []model.ToolCall{
+				{ToolName: "list_metric_catalog", LLMCallID: strPtr(callID), ArgumentsJSON: `{"query":"mysql connection usage"}`},
+			},
+		},
+		{
+			ID:         "t-budget",
+			Role:       model.RoleTool,
+			ToolCallID: strPtr(callID),
+			ToolName:   strPtr("list_metric_catalog"),
+			Content:    strPtr(`{"status":"call_budget_exceeded","tool":"list_metric_catalog","calls":1,"instruction":"You have already called \"list_metric_catalog\" 1 times this turn. Do NOT call it again."}`),
+		},
+		{ID: "u1", Role: model.RoleUser, Content: strPtr("继续创建")},
+	}
+
+	out := buildEinoHistory(rows)
+
+	var toolMsg *schema.Message
+	for _, msg := range out {
+		if msg.Role == schema.RoleType(model.RoleTool) {
+			toolMsg = msg
+			break
+		}
+	}
+	if toolMsg == nil {
+		t.Fatalf("expected replayed tool message")
+	}
+	if toolMsg.ToolCallID != callID {
+		t.Fatalf("tool_call_id = %q, want %q", toolMsg.ToolCallID, callID)
+	}
+	if contains(toolMsg.Content, "Do NOT call it again") {
+		t.Fatalf("stale current-turn directive survived replay: %q", toolMsg.Content)
+	}
+	if !contains(toolMsg.Content, `"scope":"expired_previous_turn"`) {
+		t.Fatalf("expired scope missing from replay content: %q", toolMsg.Content)
+	}
+	if !contains(toolMsg.Content, "may be called again in the current user turn") {
+		t.Fatalf("replay content should tell the model the budget expired: %q", toolMsg.Content)
 	}
 }

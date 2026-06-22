@@ -83,6 +83,7 @@ func (r *Registry) BuildBaseTools() *ToolBag {
 	// 3: query_promql — gated on Prom client.
 	if r.promQuery != nil {
 		out = append(out, NewQueryPromQLTool(r.promQuery, r.log))
+		out = append(out, NewListMetricCatalogTool(r.promQuery, r.log))
 	}
 	// 3a: list_database_sources — configured databasemetrics /
 	// database-tagged custommetrics inventory, no PromQL.
@@ -152,6 +153,16 @@ func (r *Registry) BuildBaseTools() *ToolBag {
 		out = append(out, NewCorrelateIncidentTool(
 			r.alertUC, r.promQuery, r.logQuery, r.traceQuery, r.edges, r.devices, r.log,
 		))
+	}
+
+	// Conversational configuration: draft_config_change is read-only and
+	// apply_config_change is Class="write" so viewer sessions cannot see it.
+	// The apply implementation also requires confirmed=true and an admin caller.
+	if r.configManager != nil {
+		out = append(out,
+			NewDraftConfigChangeTool(r.configManager, r.log),
+			NewApplyConfigChangeTool(r.configManager, r.log),
+		)
 	}
 
 	// 14-16: Coordinator-only sub-agent control tools.

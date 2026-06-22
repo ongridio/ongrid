@@ -107,6 +107,9 @@ type Registry struct {
 	// post-construction from cmd/main.go because PluginConfigUC is built
 	// before chat runtime but after the registry's constructor deps.
 	pluginConfigs PluginConfigLister
+	// configManager feeds conversational configuration draft/apply tools.
+	// Wired from cmd/main.go after the alert service exists.
+	configManager ConfigManager
 
 	// cloudBashProposer wires the cloud_bash tool to the human approval
 	// inbox. Set post-construction (cmd/main.go) via SetCloudBashProposer;
@@ -148,6 +151,11 @@ func (r *Registry) SetPluginConfigLister(p PluginConfigLister) {
 	}
 }
 
+// SetConfigManager wires the conversational configuration tools consumed by
+// the graph BaseTool registry. The legacy closure-style registry does not
+// expose these mutating flows.
+func (r *Registry) SetConfigManager(m ConfigManager) { r.configManager = m }
+
 // NewRegistry builds a Registry and auto-registers the two MVP tools
 // (get_host_load, get_process_list). When promQuery / logQuery /
 // traceQuery are non-nil, the matching query_promql / query_logql /
@@ -187,6 +195,12 @@ func NewRegistry(caller Caller, edges *edgebiz.Usecase, devices *devicebiz.Useca
 			Description: QueryPromQLDescription,
 			Schema:      QueryPromQLSchema,
 			Execute:     r.executeQueryPromQL,
+		})
+		r.Register(Tool{
+			Name:        ToolNameListMetricCatalog,
+			Description: ListMetricCatalogDescription,
+			Schema:      ListMetricCatalogSchema,
+			Execute:     r.executeListMetricCatalog,
 		})
 	}
 	if logQuery != nil {

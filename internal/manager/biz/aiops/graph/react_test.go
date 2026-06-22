@@ -108,8 +108,8 @@ func makeAssistantToolCall(content, callID, toolName, args string) *schema.Messa
 		Content: content,
 		ToolCalls: []schema.ToolCall{
 			{
-				ID:   callID,
-				Type: "function",
+				ID:       callID,
+				Type:     "function",
 				Function: schema.FunctionCall{Name: toolName, Arguments: args},
 			},
 		},
@@ -251,6 +251,9 @@ func TestAssembleMessages_MentionsAndReminderInline(t *testing.T) {
 	}
 	if !strings.Contains(reminder.Content, "web_search 已被关闭") {
 		t.Errorf("reminder missing web_search disabled note: %q", reminder.Content)
+	}
+	if !strings.Contains(reminder.Content, "历史里的 call_budget_exceeded") {
+		t.Errorf("reminder missing per-turn budget reset note: %q", reminder.Content)
 	}
 	user := out[2]
 	if user.Role != schema.User {

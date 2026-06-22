@@ -100,6 +100,28 @@ func TestWriteManagedSecretsInBase_WhenLaterRequestInvalid_LeavesEarlierSecretUn
 	}
 }
 
+func TestWriteManagedSecretsInBaseDeletesSecret(t *testing.T) {
+	base := t.TempDir()
+	path := filepath.Join(base, "redis-prod.dsn")
+	if err := os.WriteFile(path, []byte("redis://:old-secret@127.0.0.1:6379/0\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	err := writeManagedSecretsInBase(context.Background(), base, []tunnel.WriteDatabaseMetricsSecretRequest{
+		{
+			SourceID: "redis-prod",
+			Path:     path,
+			Delete:   true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("writeManagedSecretsInBase() error = %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("Stat() error = %v, want not exist", err)
+	}
+}
+
 func TestBuildManagedSecretPreservingPasswordForPostgresSkipVerify(t *testing.T) {
 	base := t.TempDir()
 	path := filepath.Join(base, "pg-prod.dsn")

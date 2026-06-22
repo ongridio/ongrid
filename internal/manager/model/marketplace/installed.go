@@ -14,7 +14,11 @@
 // (tenant, pack) pair.
 package marketplace
 
-import "time"
+import (
+	"time"
+
+	"gorm.io/plugin/soft_delete"
+)
 
 // InstalledPack is one row of the installed_skills table — a single
 // installed pack on the manager (skill bundle / claude plugin /
@@ -97,13 +101,12 @@ type InstalledPack struct {
 	InstalledAt time.Time `gorm:"autoCreateTime"`
 	UpdatedAt   time.Time `gorm:"autoUpdateTime"`
 
-	// DeletedAt powers GORM soft delete. Uninstall sets this; List
-	// filters it out by default. Reinstall after uninstall is allowed
-	// because the row matched by (tenant, pack) only counts when
-	// DeletedAt IS NULL — but the unique index spans the column
-	// (composite with deleted_at being NULL via GORM's standard
-	// behaviour).
-	DeletedAt *time.Time `gorm:"index"`
+	// DeletedAt is the audit timestamp for uninstall. DeleteMarker is the
+	// database constraint marker: active rows keep marker=0, deleted rows get
+	// a non-zero marker so the same (tenant, pack) can be reinstalled later
+	// without weakening active-row uniqueness.
+	DeletedAt    *time.Time            `gorm:"column:deleted_at;index"`
+	DeleteMarker soft_delete.DeletedAt `gorm:"column:delete_marker;not null;default:0;softDelete:milli,DeletedAtField:DeletedAt;uniqueIndex:idx_tenant_pack,priority:3"`
 }
 
 // TableName pins the table name so future package renames don't

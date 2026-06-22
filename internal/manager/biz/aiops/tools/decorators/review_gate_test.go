@@ -172,6 +172,72 @@ func TestReviewGate_WriteClassApprove(t *testing.T) {
 	}
 }
 
+func TestReviewGate_ApplyConfigChangeAlertRuleCreateUsesDeterministicApproval(t *testing.T) {
+	inner := &fakeTool{name: "apply_config_change", class: "write", result: `{"status":"applied"}`}
+	spawner := &fakeReviewSpawner{plannedErr: errors.New("reviewer should not be spawned")}
+	sink := &fakeProposalSink{}
+	wrapped := WithReviewGate(inner, spawner, ReviewGateConfig{Sink: sink})
+
+	args := `{"domain":"alert_rule","action":"create","confirmed":true,"draft_hash":"sha256:test","payload":{"action":"create","draft_id":"draft-1","rule":{"rule_key":"cpu_high"}}}`
+	out, err := wrapped.InvokableRun(context.Background(), args, basetool.WithUserID(42), basetool.WithTenant("session-1"))
+	if err != nil {
+		t.Fatalf("deterministic approval should not error: %v", err)
+	}
+	if out != `{"status":"applied"}` {
+		t.Errorf("inner result not propagated: %q", out)
+	}
+	if spawner.calls != 0 {
+		t.Errorf("alert_rule/create apply must not spawn reviewer; got %d spawns", spawner.calls)
+	}
+	if int(inner.calls) != 1 {
+		t.Errorf("inner should run once, got %d", inner.calls)
+	}
+	if len(sink.inserts) != 1 {
+		t.Fatalf("expected one deterministic proposal insert, got %d", len(sink.inserts))
+	}
+	insert := sink.inserts[0]
+	if insert.ReviewerAgent != deterministicPolicyReviewerAgent {
+		t.Errorf("ReviewerAgent = %q, want %q", insert.ReviewerAgent, deterministicPolicyReviewerAgent)
+	}
+	if insert.OperatorUserID != 42 {
+		t.Errorf("OperatorUserID = %d, want 42", insert.OperatorUserID)
+	}
+	if insert.SessionID != "session-1" {
+		t.Errorf("SessionID = %q, want session-1", insert.SessionID)
+	}
+	if len(sink.updates) != 1 || sink.updates[0].Decision != "approve" {
+		t.Fatalf("expected one deterministic approve update, got %+v", sink.updates)
+	}
+	if !strings.Contains(sink.updates[0].Reason, "draft_hash") {
+		t.Errorf("approval reason should mention deterministic checks: %q", sink.updates[0].Reason)
+	}
+	if len(sink.executed) != 1 {
+		t.Errorf("expected MarkExecuted after deterministic approval, got %v", sink.executed)
+	}
+}
+
+func TestReviewGate_ApplyConfigChangeNonAlertRuleStillUsesReviewer(t *testing.T) {
+	inner := &fakeTool{name: "apply_config_change", class: "write", result: `{"status":"applied"}`}
+	spawner := &fakeReviewSpawner{
+		plannedRes: &ReviewSpawnResult{Result: "Decision: reject\n\nOnly alert_rule/create is deterministic-approved."},
+	}
+	wrapped := WithReviewGate(inner, spawner, ReviewGateConfig{})
+
+	_, err := wrapped.InvokableRun(context.Background(), `{"domain":"llm","action":"create","confirmed":true}`)
+	if err == nil {
+		t.Fatalf("non-alert config apply should still be review-gated")
+	}
+	if !errors.Is(err, ErrReviewRejected) {
+		t.Errorf("error should be ErrReviewRejected: %v", err)
+	}
+	if spawner.calls != 1 {
+		t.Errorf("expected reviewer spawn for non-alert config apply, got %d", spawner.calls)
+	}
+	if int(inner.calls) != 0 {
+		t.Errorf("inner must not run after reviewer reject; got %d calls", inner.calls)
+	}
+}
+
 func TestReviewGate_DestructiveClassApprove(t *testing.T) {
 	// "destructive" must be gated identically to "write".
 	inner := &fakeTool{name: "drop_silence", class: "destructive", result: `{"dropped":true}`}

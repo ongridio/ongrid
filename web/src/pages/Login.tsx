@@ -25,8 +25,8 @@ export default function LoginPage() {
       setSession({
         access_token: res.access_token,
         refresh_token: res.refresh_token,
-        role: res.user?.role ?? 'user',
-        email: res.user?.email ?? email.trim(),
+        role: res.user?.role ?? res.role ?? 'user',
+        email: res.user?.email ?? res.email ?? email.trim(),
       });
       navigate('/', { replace: true });
     } catch (err) {

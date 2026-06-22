@@ -32,6 +32,7 @@ const queryKnowledgeWhenToUse = "**回答任何运维 / 故障排查 / 部署 / 
 	"先用 GET /v1/knowledge/paths 看现有目录，再用 path_prefix 收窄（例 '网络/' 拿所有网络类，'网络/DNS' 拿 DNS 一支）。" +
 	"或带 tags 数组进一步过滤（例 ['dns','tls']，any-match 命中即可）。" +
 	"NOT for: 实时指标 / 告警 / 设备状态——那些用 query_promql / query_logql / get_edge_summary。" +
+	"NOT for conversational config requests that create alert rules; use draft_config_change/apply_config_change directly. Other config write requests are not supported in v1." +
 	"query 用自然语言整句（不必拆词）；同一主题同一会话只查一次。"
 
 const queryKnowledgeSchema = `{

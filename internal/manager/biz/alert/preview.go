@@ -19,8 +19,8 @@ import (
 // the shape of biz.RuleInput plus a lookback window in seconds — the
 // preview never persists, so RuleKey may be empty / scratch.
 type PreviewInput struct {
-	Input            RuleInput
-	LookbackSeconds  int
+	Input           RuleInput
+	LookbackSeconds int
 }
 
 // PreviewSample is one fire instant the preview detected, with the
@@ -65,7 +65,12 @@ type PreviewResult struct {
 // maxPreviewSeriesPoints is the upper bound on points returned to the
 // UI. A 24h window at 60s step yields 1440 points so 1500 leaves
 // headroom; larger ranges get downsampled by skipping samples evenly.
-const maxPreviewSeriesPoints = 1500
+const (
+	maxPreviewSeriesPoints        = 1500
+	defaultPreviewLookbackSeconds = 86400
+	minPreviewLookbackSeconds     = 60
+	maxPreviewLookbackSeconds     = 604800
+)
 
 // PreviewPromQuerier is the narrow PromQL range surface PreviewRule
 // needs. *promquery.Client satisfies it.
@@ -117,10 +122,7 @@ func PreviewRule(ctx context.Context, in PreviewInput, deps PreviewDeps) (*Previ
 	if deps.Now != nil {
 		now = deps.Now()
 	}
-	lookback := in.LookbackSeconds
-	if lookback <= 0 {
-		lookback = 86400
-	}
+	lookback := normalizePreviewLookbackSeconds(in.LookbackSeconds)
 	start := now.Add(-time.Duration(lookback) * time.Second)
 
 	// metric_threshold is a UI-only entry form: buildRuleRow has already
@@ -149,10 +151,23 @@ func PreviewRule(ctx context.Context, in PreviewInput, deps PreviewDeps) (*Previ
 	return &PreviewResult{SkippedReason: "kind not supported by preview"}, nil
 }
 
+func normalizePreviewLookbackSeconds(lookback int) int {
+	switch {
+	case lookback <= 0:
+		return defaultPreviewLookbackSeconds
+	case lookback < minPreviewLookbackSeconds:
+		return minPreviewLookbackSeconds
+	case lookback > maxPreviewLookbackSeconds:
+		return maxPreviewLookbackSeconds
+	default:
+		return lookback
+	}
+}
+
 // ---- Prom matrix walker -----------------------------------------------------
 
 type matrixSeries struct {
-	Metric map[string]string  `json:"metric"`
+	Metric map[string]string   `json:"metric"`
 	Values [][]json.RawMessage `json:"values"`
 }
 
@@ -360,6 +375,7 @@ func previewMetricAnomaly(ctx context.Context, row *model.Rule, start, end time.
 	if !ok {
 		return &PreviewResult{SkippedReason: fmt.Sprintf("metric %q 不在 closed-set", r.Metric)}, nil
 	}
+	base = applyClosedSetMetricSelector(base, r.Selector)
 	var expr string
 	switch r.Method {
 	case "mad":
@@ -387,6 +403,7 @@ func previewMetricForecast(ctx context.Context, row *model.Rule, start, end time
 	if !ok {
 		return &PreviewResult{SkippedReason: fmt.Sprintf("metric %q 不在 closed-set", r.Metric)}, nil
 	}
+	base = applyClosedSetMetricSelector(base, r.Selector)
 	expr := fmt.Sprintf("predict_linear((%s)[%s:5m], %d) %s %g",
 		base, r.FitWindow, r.PredictSeconds, r.Operator, r.Threshold)
 	return walkPromMatrix(ctx, deps.Prom, expr, start, end, 5*time.Minute, nil,
@@ -519,6 +536,7 @@ func previewLogVolume(ctx context.Context, row *model.Rule, start, end time.Time
 	}
 	var spec struct {
 		StreamSelector string  `json:"stream_selector"`
+		LineFilter     string  `json:"line_filter"`
 		Window         string  `json:"window"`
 		RatioOp        string  `json:"ratio_op"`
 		RatioThreshold float64 `json:"ratio_threshold"`
@@ -538,6 +556,9 @@ func previewLogVolume(ctx context.Context, row *model.Rule, start, end time.Time
 	// offset). Treat any non-zero volume as a candidate fire and let the
 	// operator tune the ratio against the absolute counts.
 	expr := fmt.Sprintf("count_over_time(%s [%s])", spec.StreamSelector, win)
+	if strings.TrimSpace(spec.LineFilter) != "" {
+		expr = fmt.Sprintf("count_over_time(%s |~ %q [%s])", spec.StreamSelector, spec.LineFilter, win)
+	}
 	op := spec.RatioOp
 	if op == "" {
 		op = ">="
@@ -548,6 +569,42 @@ func previewLogVolume(ctx context.Context, row *model.Rule, start, end time.Time
 		func(labels map[string]string, value float64, ts time.Time) string {
 			return fmt.Sprintf("%s: log_volume 当前窗口 %g 条 (labels=%s)", row.RuleKey, value, labelSetKey(labels))
 		})
+}
+
+func traceSpanMetricsSelectorHasPoints(ctx context.Context, prom PreviewPromQuerier, metric, selector string, start, end time.Time) (bool, error) {
+	if prom == nil {
+		return true, nil
+	}
+	expr := fmt.Sprintf("count by (service_name) (%s{%s})", metric, selector)
+	if strings.Contains(selector, "span_name=") {
+		expr = fmt.Sprintf("count by (service_name, span_name) (%s{%s})", metric, selector)
+	}
+	res, err := prom.QueryRange(ctx, expr, start, end, 60*time.Second)
+	if err != nil {
+		return false, fmt.Errorf("preview trace spanmetrics lookup: %w", err)
+	}
+	if res == nil {
+		return false, nil
+	}
+	if res.ResultType != "matrix" {
+		return false, nil
+	}
+	var series []matrixSeries
+	if err := json.Unmarshal(res.Result, &series); err != nil {
+		return false, fmt.Errorf("preview trace spanmetrics decode: %w", err)
+	}
+	for _, s := range series {
+		for _, v := range s.Values {
+			if _, _, ok := decodeMatrixSample(v); ok {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+func traceSpanMetricsMissingReason(metric, selector string) string {
+	return fmt.Sprintf("当前 %s 未发现 %s", metric, selector)
 }
 
 func previewTraceLatency(ctx context.Context, row *model.Rule, start, end time.Time, deps PreviewDeps) (*PreviewResult, error) {
@@ -581,6 +638,13 @@ func previewTraceLatency(ctx context.Context, row *model.Rule, start, end time.T
 	if spec.Operation != "" {
 		selector = fmt.Sprintf(`service_name=%q,span_name=%q`, spec.Service, spec.Operation)
 	}
+	exists, err := traceSpanMetricsSelectorHasPoints(ctx, deps.Prom, "traces_spanmetrics_latency_bucket", selector, start, end)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return &PreviewResult{SkippedReason: traceSpanMetricsMissingReason("traces_spanmetrics_latency_bucket", selector)}, nil
+	}
 	// Tempo emits histogram buckets in seconds; threshold is given in ms.
 	expr := fmt.Sprintf(
 		"histogram_quantile(%g, sum by (le) (rate(traces_spanmetrics_latency_bucket{%s}[%s]))) * 1000 > %g",
@@ -612,6 +676,14 @@ func previewTraceErrorRate(ctx context.Context, row *model.Rule, start, end time
 	op := spec.Operator
 	if op == "" {
 		op = ">="
+	}
+	selector := fmt.Sprintf(`service_name=%q`, spec.Service)
+	exists, err := traceSpanMetricsSelectorHasPoints(ctx, deps.Prom, "traces_spanmetrics_calls_total", selector, start, end)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return &PreviewResult{SkippedReason: traceSpanMetricsMissingReason("traces_spanmetrics_calls_total", selector)}, nil
 	}
 	expr := fmt.Sprintf(
 		"100 * (sum(rate(traces_spanmetrics_calls_total{service_name=%q,status_code=\"STATUS_CODE_ERROR\"}[%s])) / "+

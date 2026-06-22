@@ -145,6 +145,8 @@ func TestMessageAndToolCallLifecycle(t *testing.T) {
 	}
 	if len(limited) != 1 {
 		t.Errorf("ListMessages limit=1 returned %d", len(limited))
+	} else if limited[0].ID != asstMsg.ID {
+		t.Errorf("ListMessages limit=1 returned %s, want latest assistant message %s", limited[0].ID, asstMsg.ID)
 	}
 
 	// Unknown tool call update.

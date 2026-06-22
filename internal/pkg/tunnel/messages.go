@@ -176,6 +176,7 @@ type WriteDatabaseMetricsSecretRequest struct {
 	DBType           string                 `json:"db_type,omitempty"`
 	Credentials      map[string]interface{} `json:"credentials,omitempty"`
 	PreservePassword bool                   `json:"preserve_password,omitempty"`
+	Delete           bool                   `json:"delete,omitempty"`
 }
 
 // WriteDatabaseMetricsSecretsRequest batches edge-local credential writes so
