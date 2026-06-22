@@ -8,6 +8,7 @@ import { relativeTime, formatNumber } from '@/lib/format';
 import { cn } from '@/lib/cn';
 import { useI18n } from '@/i18n/locale';
 import { getDatabase, fetchSlowQueries, probeDatabase, DB_TYPE_LABELS, type DatabaseInstance, type DBType, type SlowQueryRow, type SlowQueryResponse } from '@/api/databases';
+import { createSession } from '@/api/chat';
 import { promQueryRange, type PromRangeResp } from '@/api/edges';
 import { usePoll } from '@/lib/usePoll';
 
@@ -413,6 +414,7 @@ const SortIcon = ({ field, sortField, sortDir }: SortIconProps) => {
 
 function SlowQueryPanel({ inst }: { inst: DatabaseInstance }) {
   const { tr } = useI18n();
+  const navigate = useNavigate();
   const [phase, setPhase] = useState<'connect' | 'loading' | 'results' | 'error'>('connect');
   const [sqUser, setSqUser] = useState('');
   const [sqPass, setSqPass] = useState('');
@@ -476,6 +478,22 @@ function SlowQueryPanel({ inst }: { inst: DatabaseInstance }) {
 
   const supportPerfSchema = inst.db_type === 'mysql' || inst.db_type === 'postgresql';
 
+  async function handleAIAnalysis(errorMsg?: string) {
+    const basePrompt =
+      `分析数据库实例 ${inst.name} (${inst.host}:${inst.port}) 的慢查询情况，` +
+      `数据库类型 ${DB_TYPE_LABELS[inst.db_type as DBType] ?? inst.db_type}。`;
+    const prompt = errorMsg
+      ? `${basePrompt}失败原因：${errorMsg}。请尝试连接数据库获取 TOP SQL 并分析根因。`
+      : `${basePrompt}请先查看慢查询指标趋势，然后连接数据库获取 TOP SQL 并分析根因。`;
+    try {
+      const session = await createSession({ title: prompt.slice(0, 30), agent_id: 'default' });
+      navigate(`/chat/${session.id}`, { state: { initialPrompt: prompt } });
+    } catch {
+      // If session creation fails, fall back to old link-style navigation
+      window.open(`/chat/new?prompt=${encodeURIComponent(prompt)}`, '_blank');
+    }
+  }
+
   return (
     <Card as="div" className="not-prose">
       {/* Connection form */}
@@ -492,17 +510,13 @@ function SlowQueryPanel({ inst }: { inst: DatabaseInstance }) {
                   : tr('需要数据库账号以查询系统视图', 'A DB account is required to query system views')}
               </p>
             </div>
-            <Link
-              to={`/chat/new?prompt=${encodeURIComponent(
-                `分析数据库实例 ${inst.name} (${inst.host}:${inst.port}) 的慢查询情况，` +
-                `数据库类型 ${DB_TYPE_LABELS[inst.db_type as DBType] ?? inst.db_type}。` +
-                `请先查看慢查询指标趋势，然后连接数据库获取 TOP SQL 并分析根因。`
-              )}`}
+            <button
+              onClick={() => handleAIAnalysis()}
               className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-accent px-2.5 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent/90"
             >
               <MessageSquare size={12} />
               {tr('AI 分析', 'AI Analysis')}
-            </Link>
+            </button>
           </div>
           <div className="flex flex-wrap items-end gap-3">
             <div className="min-w-[140px] flex-1">
@@ -587,17 +601,13 @@ function SlowQueryPanel({ inst }: { inst: DatabaseInstance }) {
             >
               {tr('返回重试', 'Back & Retry')}
             </button>
-            <Link
-              to={`/chat/new?prompt=${encodeURIComponent(
-                `分析数据库实例 ${inst.name} (${inst.host}:${inst.port}) 的慢查询情况，` +
-                `数据库类型 ${DB_TYPE_LABELS[inst.db_type as DBType] ?? inst.db_type}。` +
-                `失败原因：${sqError}。请尝试连接数据库获取 TOP SQL 并分析根因。`
-              )}`}
+            <button
+              onClick={() => handleAIAnalysis(sqError ?? undefined)}
               className="inline-flex items-center gap-1.5 rounded-md bg-accent px-2.5 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent/90"
             >
               <MessageSquare size={12} />
               {tr('AI 分析', 'AI Analysis')}
-            </Link>
+            </button>
           </div>
         </div>
       )}
