@@ -23,6 +23,105 @@ log_info()  { printf '%s[INFO]%s %s\n'  "$C_GREEN"  "$C_RESET" "$*"; }
 log_warn()  { printf '%s[WARN]%s %s\n'  "$C_YELLOW" "$C_RESET" "$*"; }
 log_error() { printf '%s[ERROR]%s %s\n' "$C_RED"    "$C_RESET" "$*" >&2; }
 
+generate_self_signed_tls_cert() {
+    local cert_dir="$1"
+    local cert_file="$cert_dir/tls.crt"
+    local key_file="$cert_dir/tls.key"
+    local openssl_conf openssl_output
+
+    command -v openssl >/dev/null 2>&1 || {
+        log_error "openssl not found; cannot generate self-signed cert"
+        log_error "install openssl, or drop tls.crt + tls.key into $cert_dir/ and re-run"
+        return 1
+    }
+
+    openssl_conf=$(mktemp "${TMPDIR:-/tmp}/ongrid-openssl.XXXXXX.cnf") || {
+        log_error "failed to create temporary OpenSSL config"
+        return 1
+    }
+    cat >"$openssl_conf" <<'EOF'
+[req]
+distinguished_name = dn
+prompt = no
+x509_extensions = v3_req
+
+[dn]
+CN = ongrid
+
+[v3_req]
+subjectAltName = DNS:ongrid,DNS:localhost,IP:127.0.0.1
+EOF
+
+    if ! openssl_output=$(openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+        -keyout "$key_file" \
+        -out "$cert_file" \
+        -config "$openssl_conf" \
+        -extensions v3_req 2>&1); then
+        log_error "failed to generate self-signed TLS cert using $(openssl version 2>/dev/null || printf 'openssl')"
+        [[ -z "$openssl_output" ]] || printf '%s\n' "$openssl_output" >&2
+        rm -f "$openssl_conf" "$cert_file" "$key_file"
+        return 1
+    fi
+
+    rm -f "$openssl_conf"
+    chmod 600 "$key_file"
+    chmod 644 "$cert_file"
+}
+
+docker_supports_host_gateway() {
+    local version major minor
+    version=$(docker version --format '{{.Server.Version}}' 2>/dev/null || true)
+    version=${version%%-*}
+    version=${version%%+*}
+    IFS=. read -r major minor _ <<<"$version"
+
+    [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ ]] || return 1
+    (( major > 20 || (major == 20 && minor >= 10) ))
+}
+
+detect_docker_bridge_gateway() {
+    local gateway
+    gateway=$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null | head -n 1 || true)
+    if [[ -z "$gateway" ]] && command -v ip >/dev/null 2>&1; then
+        gateway=$(ip -4 addr show docker0 2>/dev/null | sed -n -E 's/.*inet ([0-9.]+)\/.*/\1/p' | head -n 1 || true)
+    fi
+    printf '%s' "$gateway"
+}
+
+set_env_value() {
+    local key="$1" value="$2" esc
+    esc=$(printf '%s' "$value" | sed -e 's/[\\|&]/\\&/g')
+    if grep -qE "^${key}=" "$ENV_FILE"; then
+        sed -i.bak -E "s|^${key}=.*|${key}=${esc}|" "$ENV_FILE"
+        rm -f "${ENV_FILE}.bak"
+    else
+        printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
+    fi
+}
+
+ensure_host_gateway_env() {
+    local configured gateway
+    configured=$(grep -E '^ONGRID_HOST_GATEWAY=' "$ENV_FILE" 2>/dev/null | tail -n 1 | cut -d= -f2- || true)
+    if [[ -n "$configured" && "$configured" != "host-gateway" ]]; then
+        log_info "ONGRID_HOST_GATEWAY=${configured} (from .env)"
+        return
+    fi
+
+    if docker_supports_host_gateway; then
+        return
+    fi
+
+    gateway=$(detect_docker_bridge_gateway)
+    if [[ -z "$gateway" ]]; then
+        log_error "docker daemon does not support host-gateway and docker bridge gateway could not be detected"
+        log_error "set ONGRID_HOST_GATEWAY=<docker0 gateway IP> in ${ENV_FILE}, then re-run sudo ./install.sh"
+        return 1
+    fi
+
+    set_env_value ONGRID_HOST_GATEWAY "$gateway"
+    log_warn "docker daemon does not support host-gateway; using ONGRID_HOST_GATEWAY=${gateway}"
+}
+
 on_error() {
     local exit_code=$?
     log_error "install failed at line $1 (exit $exit_code)"
@@ -445,19 +544,7 @@ mkdir -p "$INSTALL_DIR/certs"
 chmod 700 "$INSTALL_DIR/certs"
 if [[ ! -f "$INSTALL_DIR/certs/tls.crt" || ! -f "$INSTALL_DIR/certs/tls.key" ]]; then
     log_info "generating self-signed TLS cert (valid 365d, CN=ongrid)"
-    command -v openssl >/dev/null 2>&1 || {
-        log_error "openssl not found; cannot generate self-signed cert"
-        log_error "install openssl, or drop tls.crt + tls.key into $INSTALL_DIR/certs/ and re-run"
-        exit 1
-    }
-    openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-        -subj "/CN=ongrid" \
-        -keyout "$INSTALL_DIR/certs/tls.key" \
-        -out    "$INSTALL_DIR/certs/tls.crt" \
-        -addext "subjectAltName = DNS:ongrid,DNS:localhost,IP:127.0.0.1" \
-        2>/dev/null
-    chmod 600 "$INSTALL_DIR/certs/tls.key"
-    chmod 644 "$INSTALL_DIR/certs/tls.crt"
+    generate_self_signed_tls_cert "$INSTALL_DIR/certs"
     log_warn "self-signed cert: browsers will warn — replace with a real cert in $INSTALL_DIR/certs/ later"
 fi
 
@@ -663,6 +750,8 @@ fi
 sed -i.bak -E "s|^ONGRID_VERSION=.*|ONGRID_VERSION=${VERSION_FROM_FILE}|" "$ENV_FILE"
 rm -f "${ENV_FILE}.bak"
 chmod 600 "$ENV_FILE"
+
+ensure_host_gateway_env
 
 # Load env for later banner use (read-only subset; don't export secrets).
 ONGRID_HTTP_PORT=$(grep -E '^ONGRID_HTTP_PORT=' "$ENV_FILE" | cut -d= -f2- || true)

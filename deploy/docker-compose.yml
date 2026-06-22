@@ -225,9 +225,10 @@ services:
     # Phase-A unblock: let the prometheus.yml `node-exporter-host` job
     # resolve `host.docker.internal` on Linux too. Docker Desktop already
     # provides this name; on Linux the docker-engine resolves the special
-    # value `host-gateway` to the docker0 bridge address.
+    # value `host-gateway` to the docker0 bridge address. Set
+    # ONGRID_HOST_GATEWAY to the docker bridge IP on older engines.
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - "host.docker.internal:${ONGRID_HOST_GATEWAY:-host-gateway}"
     ports:
       - "9090:9090"
     volumes:

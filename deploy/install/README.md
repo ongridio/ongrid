@@ -57,7 +57,7 @@ sudo ./install.sh
 1. 自检 Docker 环境；非 root 自动 `sudo` 重入。
 2. 创建 `/opt/ongrid/`（可通过 `ONGRID_INSTALL_DIR` 覆盖）。
 3. 拷贝 `docker-compose.yml`、`nginx.conf`、`prometheus.yml`、`grafana/`、`edge/`、`VERSION` 到安装目录。
-4. **生成自签 TLS 证书**（首次安装且 `certs/tls.crt` 不存在时）：`openssl req -x509 -nodes -days 365 -newkey rsa:2048 -subj '/CN=ongrid' -addext 'subjectAltName=DNS:ongrid,DNS:localhost,IP:127.0.0.1'`，落到 `${INSTALL_DIR}/certs/`，私钥 `chmod 600`。脚本不交互，直接生成；末尾 banner 提示替换真证书。
+4. **生成自签 TLS 证书**（首次安装且 `certs/tls.crt` 不存在时）：通过临时 OpenSSL 配置生成 CN=ongrid、SAN 包含 `ongrid` / `localhost` / `127.0.0.1` 的 365 天证书，落到 `${INSTALL_DIR}/certs/`，私钥 `chmod 600`。脚本不交互，直接生成；末尾 banner 提示替换真证书。
 5. `docker load -i images/ongrid.tar`、`images/frontier.tar`、`images/ongrid-web.tar` 加载所有镜像。
 6. 若 `/opt/ongrid/.env` 不存在则从 `.env.example` 创建，并对空字段（`MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD`、`ONGRID_JWT_SECRET`、`ONGRID_ADMIN_PASSWORD`）生成随机值，文件权限置 `600`。
 7. `docker compose up -d` 启动 MySQL + ongrid + frontier + nginx + prometheus（ADR-009）。
@@ -351,6 +351,7 @@ sudo ONGRID_CLOUD_ADDR=ongrid.example.com:40012 \
   ssh root@<host> 'docker exec ongrid-prometheus wget -qO- http://localhost:9090/-/ready'
   ```
 - **端口被占用**（`docker compose up` 报 `bind: address already in use`）：编辑 `.env` 里的 `ONGRID_HTTP_PORT`（默认 443）/ `ONGRID_HTTP_REDIRECT_PORT`（默认 80）/ `ONGRID_TUNNEL_PORT` / `ONGRID_METRICS_PORT`，重跑 `docker compose -f /opt/ongrid/docker-compose.yml --env-file /opt/ongrid/.env up -d`。把 `ONGRID_HTTP_REDIRECT_PORT=0` 可以彻底关掉 80→443 跳转监听。
+- **`invalid IP address in add-host: "host-gateway"`**：目标机 Docker daemon 太旧，不支持 Docker 20.10 引入的 `host-gateway` 特殊值。新版 `install.sh` / `upgrade.sh` 会自动把 `.env` 里的 `ONGRID_HOST_GATEWAY` 写成 Docker bridge 网关 IP；已经遇到该错误的机器可直接重跑 `sudo ./install.sh`。如仍失败，手动执行 `ip -4 addr show docker0` 查网关（通常是 `172.17.0.1`），写入 `/opt/ongrid/.env`：`ONGRID_HOST_GATEWAY=<网关IP>` 后再 `cd /opt/ongrid && sudo docker compose --env-file .env up -d`。
 - **MySQL healthcheck 超时**：首次拉起冷启动慢，observe `docker logs ongrid-mysql`。安装脚本最多等 60 秒，ongrid 容器会一直等到 mysql healthy；如 60s 内没进入 healthy，手动看 MySQL 日志。
 - **`/healthz` 不通**：`docker logs ongrid -n 200`，常见是 `.env` 里 `ONGRID_JWT_SECRET` 为空或 `ONGRID_DB_DSN` 错误。
 - **AI Chat 接口 500**：`OPENAI_API_KEY` 没填。要么填 key，要么不调用 chat 接口。

@@ -295,13 +295,14 @@ services:
       - --web.route-prefix=/prometheus/
     # Phase-A unblock for missing host metrics: let prometheus.yml's
     # node-exporter-host job reach the host's node_exporter on Linux too.
-    # `host-gateway` is a docker-engine special value that resolves to the
-    # docker0 bridge IP. Phase-B (edge metrics plugin tunnel-RPC push)
+    # `${ONGRID_HOST_GATEWAY:-host-gateway}` uses Docker's special value on
+    # modern engines; install.sh / upgrade.sh backfill a bridge IP on older
+    # engines that reject the special value. Phase-B (edge metrics plugin tunnel-RPC push)
     # will eventually obviate this static job, but the entry stays
     # harmless when no node_exporter is listening (Prom marks the target
     # DOWN and continues).
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - "host.docker.internal:${ONGRID_HOST_GATEWAY:-host-gateway}"
     volumes:
       # Bind-mount TSDB to host. Prometheus runs as nobody (uid 65534) so
       # install.sh chowns this dir accordingly. Move to a fast SSD or
