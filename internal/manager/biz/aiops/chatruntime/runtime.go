@@ -560,7 +560,26 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (*Reply, error) {
 	// must come AFTER filterToolsForAgent so they survive any name
 	// collision with the (already-stripped) real tools.
 	if isCoordinator && len(rt.cfg.CoordinatorStubs) > 0 {
-		sessionToolBag = append(sessionToolBag, rt.cfg.CoordinatorStubs...)
+		// Stubs are same-name shadows for tool names the filter STRIPPED.
+		// But if a name is BOTH a kept coordinator tool (e.g. merge added
+		// draft_config_change to coordinatorToolNames) AND has a stub, a
+		// blind append duplicates it — and strict LLM APIs (deepseek)
+		// reject "Tool names must be unique", crashing the whole chat.
+		// De-dupe: a real tool already in the bag always wins over its stub.
+		seen := map[string]bool{}
+		for _, t := range sessionToolBag {
+			if info, err := t.Info(ctx); err == nil && info != nil {
+				seen[info.Name] = true
+			}
+		}
+		for _, stub := range rt.cfg.CoordinatorStubs {
+			info, err := stub.Info(ctx)
+			if err != nil || info == nil || seen[info.Name] {
+				continue
+			}
+			seen[info.Name] = true
+			sessionToolBag = append(sessionToolBag, stub)
+		}
 	}
 	// AgentID="default" is the virtual top-level persona — same wiring
 	// as the no-agent coordinator (BasePrompt + full toolBag + agent
