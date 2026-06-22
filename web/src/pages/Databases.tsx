@@ -59,9 +59,9 @@ export default function DatabasesPage() {
     db_type: 'mysql',
     host: '',
     port: 3306,
+  });
   const mountedRef = useRef(true);
   useEffect(() => { return () => { mountedRef.current = false; }; }, []);
-  });
 
   const refresh = useCallback(async () => {
     try {
