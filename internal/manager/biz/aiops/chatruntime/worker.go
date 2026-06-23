@@ -540,6 +540,12 @@ func (rt *Runtime) GetWorker(workerID string) (*Worker, bool) {
 func (rt *Runtime) runWorker(ctx context.Context, agentDef *Agent, sessID, userText, locale string) (string, error) {
 	workerTools := filterToolsForAgent(rt.cfg.ToolBag, agentDef, false)
 
+	// Thread the persona-filtered tool view onto ctx so ToolSearch
+	// (which runs inside the worker graph) only returns tools the
+	// worker persona is allowed to see. ctx is per-request (each
+	// worker has its own), so concurrent workers don't race.
+	ctx = basetool.WithFilteredTools(ctx, workerTools)
+
 	systemPrompt := ComposeSystemPrompt(rt.cfg.BasePrompt, nil, agentDef)
 
 	// KB-first prologue. Weak coordinator models (GLM-4 etc) don't

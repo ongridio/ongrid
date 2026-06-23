@@ -614,6 +614,11 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (*Reply, error) {
 	invokeOpts = append(invokeOpts, compose.WithToolsNodeOption(
 		compose.WithToolOption(graph.WithInvokeOpts(basetool.WithUserText(req.UserText))),
 	))
+	// Thread the persona-filtered tool view onto ctx so ToolSearch
+	// (which runs inside the graph) only returns tools the current
+	// persona is allowed to see. Must happen BEFORE the coordinator-
+	// stub append so stubs don't leak into the filtered view.
+	ctx = basetool.WithFilteredTools(ctx, sessionToolBag)
 	// Thread the UI locale onto ctx so AgentTool can pick it up and
 	// forward it into the sub-agent's SpawnRequest. Without this, a
 	// coordinator that handles an English question hands off to a

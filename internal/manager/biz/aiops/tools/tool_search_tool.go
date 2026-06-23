@@ -147,8 +147,16 @@ func (t *ToolSearchTool) InvokableRun(ctx context.Context, argsJSON string, _ ..
 		maxResults = 20
 	}
 
-	all := t.bag.AllTools()
-	matches := matchTools(ctx, all, args.Query, maxResults)
+	// Use the persona-filtered view from ctx when available (set by
+	// chatruntime before graph.Invoke), so ToolSearch only returns tools
+	// the current persona (coordinator or worker) is allowed to see.
+	// Falls back to AllTools() when no filtering has been applied (e.g.
+	// legacy agent path, or a persona with no whitelist).
+	searchSet := basetool.FilteredToolsFromContext(ctx)
+	if searchSet == nil {
+		searchSet = t.bag.AllTools()
+	}
+	matches := matchTools(ctx, searchSet, args.Query, maxResults)
 
 	resp := toolSearchResponse{Query: args.Query, Tools: matches}
 	out, err := json.Marshal(resp)
