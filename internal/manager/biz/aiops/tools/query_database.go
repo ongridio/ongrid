@@ -107,7 +107,7 @@ func (r *Registry) executeQueryDatabase(ctx context.Context, args json.RawMessag
 		if in.EdgeID == 0 || in.DBType == "" || in.Host == "" || in.Port == 0 {
 			inst, err := r.instanceResolver.LookupInstance(ctx, in.DatabaseID)
 			if err != nil {
-				return ExecuteResult{}, fmt.Errorf("%s: resolve instance %d: %w", ToolNameQueryDatabase, in.DatabaseID, err)
+				return ExecuteResult{}, fmt.Errorf("%s: database_id=%d not found — the instance may have been deleted or the ID is incorrect. Use list_database_sources to discover available database IDs, then retry with a valid database_id. (resolve: %w)", ToolNameQueryDatabase, in.DatabaseID, err)
 			}
 			if inst != nil {
 				if in.EdgeID == 0 {
@@ -143,7 +143,7 @@ func (r *Registry) executeQueryDatabase(ctx context.Context, args json.RawMessag
 		}
 	}
 	if in.User == "" || in.Password == "" {
-		return ExecuteResult{}, fmt.Errorf("%s: user and password are required (provide database_id for server-side resolution, or pass credentials directly)", ToolNameQueryDatabase)
+		return ExecuteResult{}, fmt.Errorf("%s: user and password are required. The credential store has no entry for database_id=%d — credentials are automatically saved on the first connectivity probe or slow-query fetch. Go to the database detail page, run "Probe Connectivity" (will store credentials), then retry.", ToolNameQueryDatabase, in.DatabaseID)
 	}
 
 	// Build the skill params.

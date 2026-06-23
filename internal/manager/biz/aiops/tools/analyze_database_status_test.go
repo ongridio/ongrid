@@ -140,7 +140,7 @@ func TestAnalyzeDatabaseStatus_WhenAskedInventory_AdvertisesCoverage(t *testing.
 }
 
 func TestListDatabaseSources_WhenAskedGenericInventory_AdvertisesRoute(t *testing.T) {
-	tool := NewListDatabaseSourcesTool(nil, nil, nil, slog.Default())
+	tool := NewListDatabaseSourcesTool(nil, nil, nil, nil, slog.Default())
 	info, err := tool.Info(context.Background())
 	if err != nil {
 		t.Fatalf("Info() error = %v", err)

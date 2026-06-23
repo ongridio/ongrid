@@ -85,7 +85,7 @@ func (t *QueryDatabaseTool) InvokableRun(ctx context.Context, argsJSON string, _
 		if in.EdgeID == 0 || in.DBType == "" || in.Host == "" || in.Port == 0 {
 			inst, err := t.instanceResolver.LookupInstance(ctx, in.DatabaseID)
 			if err != nil {
-				return "", fmt.Errorf("%s: resolve instance %d: %w", ToolNameQueryDatabase, in.DatabaseID, err)
+				return "", fmt.Errorf("%s: database_id=%d not found — the instance may have been deleted or the ID is incorrect. Use list_database_sources to discover available database IDs, then retry with a valid database_id. (resolve: %w)", ToolNameQueryDatabase, in.DatabaseID, err)
 			}
 			if inst != nil {
 				if in.EdgeID == 0 {
@@ -113,7 +113,7 @@ func (t *QueryDatabaseTool) InvokableRun(ctx context.Context, argsJSON string, _
 		}
 	}
 	if edgeID == 0 {
-		return "", fmt.Errorf("%s: edge_id or device_id required", ToolNameQueryDatabase)
+		return "", fmt.Errorf("%s: edge_id or device_id required (pass database_id to auto-resolve)", ToolNameQueryDatabase)
 	}
 
 	// Resolve credentials server-side if not provided by the caller.
@@ -132,7 +132,7 @@ func (t *QueryDatabaseTool) InvokableRun(ctx context.Context, argsJSON string, _
 		}
 	}
 	if in.User == "" || in.Password == "" {
-		return "", fmt.Errorf("%s: user and password are required (provide database_id for server-side resolution, or pass credentials directly)", ToolNameQueryDatabase)
+		return "", fmt.Errorf("%s: user and password are required. The credential store has no entry for database_id=%d — credentials are automatically saved on the first connectivity probe or slow-query fetch. Go to the database detail page, run "Probe Connectivity" (will store credentials), then retry.", ToolNameQueryDatabase, in.DatabaseID)
 	}
 
 	// Build the skill params.
@@ -250,7 +250,7 @@ func (t *InspectSchemaTool) InvokableRun(ctx context.Context, argsJSON string, _
 		if in.EdgeID == 0 || in.DBType == "" || in.Host == "" || in.Port == 0 {
 			inst, err := t.instanceResolver.LookupInstance(ctx, in.DatabaseID)
 			if err != nil {
-				return "", fmt.Errorf("%s: resolve instance %d: %w", ToolNameInspectSchema, in.DatabaseID, err)
+				return "", fmt.Errorf("%s: database_id=%d not found — the instance may have been deleted or the ID is incorrect. Use list_database_sources to discover available database IDs, then retry with a valid database_id. (resolve: %w)", ToolNameInspectSchema, in.DatabaseID, err)
 			}
 			if inst != nil {
 				if in.EdgeID == 0 {
@@ -278,7 +278,7 @@ func (t *InspectSchemaTool) InvokableRun(ctx context.Context, argsJSON string, _
 		}
 	}
 	if edgeID == 0 {
-		return "", fmt.Errorf("%s: edge_id or device_id required", ToolNameInspectSchema)
+		return "", fmt.Errorf("%s: edge_id or device_id required (pass database_id to auto-resolve)", ToolNameInspectSchema)
 	}
 
 	// Resolve credentials server-side if not provided by the caller.
@@ -297,7 +297,7 @@ func (t *InspectSchemaTool) InvokableRun(ctx context.Context, argsJSON string, _
 		}
 	}
 	if in.User == "" || in.Password == "" {
-		return "", fmt.Errorf("%s: user and password are required (provide database_id for server-side resolution, or pass credentials directly)", ToolNameInspectSchema)
+		return "", fmt.Errorf("%s: user and password are required. The credential store has no entry for database_id=%d — credentials are automatically saved on the first connectivity probe or slow-query fetch. Go to the database detail page, run "Probe Connectivity" (will store credentials), then retry.", ToolNameInspectSchema, in.DatabaseID)
 	}
 
 	// Helper to run a query via db_exec_query on the edge.

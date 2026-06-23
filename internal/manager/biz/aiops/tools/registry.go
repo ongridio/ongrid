@@ -145,6 +145,10 @@ type Registry struct {
 	// When set, the LLM can call query_database(database_id=X, query="...")
 	// without manually supplying connection parameters.
 	instanceResolver InstanceResolver
+	// dbSourceResolver resolves a managed database instance ID from a metric
+	// source's (edge_id, db_type). Used by list_database_sources to bridge
+	// the gap between exporter-level sources and managed instances.
+	dbSourceResolver DatabaseSourceResolver
 
 	log   *slog.Logger
 	tools map[string]Tool
@@ -153,6 +157,11 @@ type Registry struct {
 // SetAuditLister wires the audit query seam consumed by
 // query_change_events. Call after NewRegistry (cmd/main.go).
 func (r *Registry) SetAuditLister(a AuditLister) { r.auditLister = a }
+
+// SetDatabaseSourceResolver wires the database source resolver for the
+// list_database_sources tool. When set, each source in the output includes a
+// database_id field resolved from the database_instances table.
+func (r *Registry) SetDatabaseSourceResolver(d DatabaseSourceResolver) { r.dbSourceResolver = d }
 
 // SetPluginConfigLister wires the plugin config source discovery seam used by
 // list_database_sources / analyze_database_status. Call after NewRegistry

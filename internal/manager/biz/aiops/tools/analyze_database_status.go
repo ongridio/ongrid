@@ -43,6 +43,7 @@ const (
 )
 
 const ListDatabaseSourcesDescription = "List configured database metrics sources without querying Prometheus. " +
+	"Each source includes a database_id field resolved from the database_instances table — use this database_id with query_database / inspect_schema for credential auto-resolution. " +
 	"Use this only for configured-source lists, source counts, generic database inventory questions like 'how many databases do I have', where a database source is located, and simple device/edge/plugin/source relationships when the user asks about configuration rather than current database state or collected database objects. " +
 	"Not for health, performance, or metric coverage analysis; use analyze_database_status for those."
 
@@ -156,6 +157,7 @@ type DatabaseSourceInventory struct {
 	DBType       string `json:"db_type"`
 	Plugin       string `json:"plugin"`
 	Enabled      bool   `json:"enabled"`
+	DatabaseID   uint64 `json:"database_id,omitempty"`
 	Relationship string `json:"relationship"`
 }
 
@@ -219,6 +221,15 @@ type PluginConfigLister interface {
 	ListForUI(ctx context.Context, edgeID uint64) ([]edgebiz.PluginRow, error)
 }
 
+// DatabaseSourceResolver resolves the managed database instance ID for a
+// metric source identified by (edge_id, db_type). Returns 0 when no managed
+// database instance matches — the source may be a standalone exporter with
+// no corresponding entry in the database_instances table.
+// Wired from the database_instances repo in cmd/ongrid/main.go.
+type DatabaseSourceResolver interface {
+	ResolveDatabaseID(ctx context.Context, edgeID uint64, dbType string) (uint64, error)
+}
+
 type AnalyzeDatabaseStatusTool struct {
 	promQuery     PromQuerier
 	edges         *edgebiz.Usecase
@@ -231,6 +242,7 @@ type ListDatabaseSourcesTool struct {
 	edges         *edgebiz.Usecase
 	devices       *devicebiz.Usecase
 	pluginConfigs PluginConfigLister
+	dbResolver    DatabaseSourceResolver
 	log           *slog.Logger
 }
 
@@ -241,11 +253,11 @@ func NewAnalyzeDatabaseStatusTool(p PromQuerier, edges *edgebiz.Usecase, devices
 	return &AnalyzeDatabaseStatusTool{promQuery: p, edges: edges, devices: devices, pluginConfigs: plugins, log: log}
 }
 
-func NewListDatabaseSourcesTool(edges *edgebiz.Usecase, devices *devicebiz.Usecase, plugins PluginConfigLister, log *slog.Logger) *ListDatabaseSourcesTool {
+func NewListDatabaseSourcesTool(edges *edgebiz.Usecase, devices *devicebiz.Usecase, plugins PluginConfigLister, dbResolver DatabaseSourceResolver, log *slog.Logger) *ListDatabaseSourcesTool {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &ListDatabaseSourcesTool{edges: edges, devices: devices, pluginConfigs: plugins, log: log}
+	return &ListDatabaseSourcesTool{edges: edges, devices: devices, pluginConfigs: plugins, dbResolver: dbResolver, log: log}
 }
 
 func (t *ListDatabaseSourcesTool) Info(_ context.Context) (*basetool.ToolInfo, error) {
@@ -263,6 +275,7 @@ func (t *ListDatabaseSourcesTool) InvokableRun(ctx context.Context, argsJSON str
 		edges:         t.edges,
 		devices:       t.devices,
 		pluginConfigs: t.pluginConfigs,
+		dbResolver:    t.dbResolver,
 		log:           t.log,
 	}
 	out, err := runner.run(ctx, []byte(argsJSON))
@@ -302,6 +315,7 @@ func (r *Registry) executeListDatabaseSources(ctx context.Context, args json.Raw
 		edges:         r.edges,
 		devices:       r.devices,
 		pluginConfigs: r.pluginConfigs,
+		dbResolver:    r.dbSourceResolver,
 		log:           r.log,
 	}
 	out, err := runner.run(ctx, args)
@@ -338,6 +352,7 @@ type databaseSourceInventoryRunner struct {
 	edges         *edgebiz.Usecase
 	devices       *devicebiz.Usecase
 	pluginConfigs PluginConfigLister
+	dbResolver    DatabaseSourceResolver
 	log           *slog.Logger
 }
 
@@ -409,6 +424,17 @@ func (r databaseSourceInventoryRunner) run(ctx context.Context, argsJSON []byte)
 			resp.Truncated = true
 			continue
 		}
+		// Resolve the managed database instance ID for this source.
+		// This bridges the gap between exporter-level sources
+		// (edge_plugin_configs) and managed instances
+		// (database_instances), letting the LLM discover
+		// database_id for query_database / inspect_schema.
+		var dbID uint64
+		if r.dbResolver != nil {
+			if id, err := r.dbResolver.ResolveDatabaseID(callCtx, src.EdgeID, src.DBType); err == nil && id > 0 {
+				dbID = id
+			}
+		}
 		resp.Sources = append(resp.Sources, DatabaseSourceInventory{
 			DeviceID:     src.DeviceID,
 			EdgeID:       src.EdgeID,
@@ -419,6 +445,7 @@ func (r databaseSourceInventoryRunner) run(ctx context.Context, argsJSON []byte)
 			DBType:       src.DBType,
 			Plugin:       src.Plugin,
 			Enabled:      src.Enabled,
+			DatabaseID:   dbID,
 			Relationship: databaseSourceRelationship(src),
 		})
 	}

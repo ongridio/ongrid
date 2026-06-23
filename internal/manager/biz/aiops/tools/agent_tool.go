@@ -116,8 +116,17 @@ type AgentTool struct {
 }
 
 type dedupeEntry struct {
-	result *agentToolResult
-	expiry time.Time
+	result   *agentToolResult
+	expiry   time.Time
+	inflight *inFlight
+}
+
+// inFlight serialises concurrent AgentTool calls for the same dedupe key.
+// The first caller stores an inFlight entry via LoadOrStore and spawns;
+// subsequent callers block on ch until the winner delivers the real result.
+type inFlight struct {
+	ch      chan *dedupeEntry
+	created time.Time
 }
 
 // dedupeTTL is how long a cached SpawnWorker result remains valid for
@@ -247,27 +256,61 @@ func (t *AgentTool) InvokableRun(ctx context.Context, argsJSON string, opts ...b
 	}
 
 	// Dedupe check: same (subagent_type, prompt) within dedupeTTL
-	// returns the prior result with an explicit "you already
-	// dispatched this" hint. The coordinator LLM doesn't observe
-	// this short-circuit — the result message looks like a normal
-	// AgentTool reply with a stronger nudge to stop looping.
+	// returns the prior result. Use LoadOrStore with an inFlight
+	// placeholder to make the check-and-set atomic — two goroutines
+	// racing for the same key must NOT both spawn workers. Only the
+	// winner spawns; the loser blocks on the inFlight channel until
+	// the winner delivers the real result.
 	dKey := dedupeKey(args.SubagentType, args.Prompt)
 	now := time.Now()
-	if v, ok := t.dedupe.Load(dKey); ok {
-		if entry, ok := v.(*dedupeEntry); ok && entry != nil && now.Before(entry.expiry) && entry.result != nil {
-			cached := *entry.result // copy so we can rewrite Hint
-			cached.Hint = "重复派活拦截：你刚刚（< " + dedupeTTL.String() + "）已经派过 " + args.SubagentType + " 跑同一份任务，结果就是 result 字段里这份。**立即基于它给用户写最终答复**；不要再调用任何工具。如果你想换个角度，把 prompt 改一下再派、或者换 specialist。"
-			body, mErr := json.Marshal(cached)
-			if mErr != nil {
-				return "", fmt.Errorf("AgentTool: marshal cached: %w", mErr)
+	placeholder := &dedupeEntry{
+		inflight: &inFlight{ch: make(chan *dedupeEntry, 1), created: now},
+	}
+	existing, loaded := t.dedupe.LoadOrStore(dKey, placeholder)
+	if loaded {
+		entry, _ := existing.(*dedupeEntry)
+		if entry != nil {
+			// Real cached result (expiry set by a prior winner).
+			if !entry.expiry.IsZero() && now.Before(entry.expiry) && entry.result != nil {
+				cached := *entry.result
+				cached.Hint = "重复派活拦截：你刚刚（< " + dedupeTTL.String() + "）已经派过 " + args.SubagentType + " 跑同一份任务，结果就是 result 字段里这份。**立即基于它给用户写最终答复**；不要再调用任何工具。如果你想换个角度，把 prompt 改一下再派、或者换 specialist。"
+				body, mErr := json.Marshal(cached)
+				if mErr != nil {
+					return "", fmt.Errorf("AgentTool: marshal cached: %w", mErr)
+				}
+				if t.log != nil {
+					t.log.Info("AgentTool: dedup hit",
+						slog.String("subagent_type", args.SubagentType),
+						slog.String("task_id", cached.TaskID),
+					)
+				}
+				return string(body), nil
 			}
-			if t.log != nil {
-				t.log.Info("AgentTool: dedup hit",
-					slog.String("subagent_type", args.SubagentType),
-					slog.String("task_id", cached.TaskID),
-				)
+			// Another goroutine is currently spawning; block on its
+			// inFlight channel.
+			if entry.inflight != nil && entry.inflight.ch != nil {
+				select {
+				case real, ok := <-entry.inflight.ch:
+					if !ok || real == nil || real.result == nil {
+						// Winner crashed; fall through to spawn our own.
+						t.dedupe.Delete(dKey)
+					} else {
+						cached := *real.result
+						cached.Hint = "重复派活拦截：你刚刚（< " + dedupeTTL.String() + "）已经派过 " + args.SubagentType + " 跑同一份任务，结果就是 result 字段里这份。**立即基于它给用户写最终答复**；不要再调用任何工具。"
+						body, mErr := json.Marshal(cached)
+						if mErr != nil {
+							return "", fmt.Errorf("AgentTool: marshal inflight: %w", mErr)
+						}
+						return string(body), nil
+					}
+				case <-ctx.Done():
+					return "", fmt.Errorf("AgentTool: dedup inflight cancelled: %w", ctx.Err())
+				}
 			}
-			return string(body), nil
+			// Stale entry with no inflight and no valid cache — clean up and spawn.
+			t.dedupe.Delete(dKey)
+			// Re-insert our placeholder
+			t.dedupe.LoadOrStore(dKey, placeholder)
 		}
 	}
 
@@ -282,6 +325,13 @@ func (t *AgentTool) InvokableRun(ctx context.Context, argsJSON string, opts ...b
 		Model:     basetool.LLMModelFromContext(ctx),
 	})
 	if err != nil {
+		// Clean up the dedupe placeholder on failure. Close the inFlight
+		// channel first so any blocked waiters wake up and retry (they
+		// detect the closed/nil result and fall through to spawn their own).
+		if placeholder.inflight != nil && placeholder.inflight.ch != nil {
+			close(placeholder.inflight.ch)
+		}
+		t.dedupe.CompareAndDelete(dKey, placeholder)
 		return "", fmt.Errorf("AgentTool: spawn: %w", err)
 	}
 
@@ -294,14 +344,27 @@ func (t *AgentTool) InvokableRun(ctx context.Context, argsJSON string, opts ...b
 	if res.Err != "" {
 		res.Hint = "Specialist " + args.SubagentType + " 已返回错误。请基于这个错误信息直接回答用户；不要重复派同一个 specialist 也不要 inline 探索。"
 	} else {
-		res.Hint = "Specialist " + args.SubagentType + " 已经返回最终结论（见 result 字段）。直接基于它给用户写最终答复；**不要再调用任何工具**（包括同一 specialist、其他 specialist、inline 工具）。如果用户问的是别的方面，下一轮再派对应 specialist。"
+		// The result field is already displayed to the user as a tool output.
+		// Tell the coordinator to SUMMARISE (2-3 sentences), NOT to restate
+		// the full report verbatim — otherwise the user sees the analysis twice.
+		res.Hint = "Specialist " + args.SubagentType + " 已完成分析（result 中的报告已展示给用户）。请用 2-3 句话简短总结核心发现，直接回复用户；**不要重复 result 的完整内容**（用户已经看到），也不要再调用任何工具。如果用户问的是别的方面，下一轮再派对应 specialist。"
 	}
-	// Store the fresh result for future dedupe lookups. We
-	// intentionally store the un-hinted form so a cache-hit gets the
-	// "你已经派过" hint while a fresh call gets the regular hint.
+	// Store the fresh result for future dedupe lookups. We intentionally
+	// store the un-hinted form so a cache-hit gets the stronger "你已经派过"
+	// hint while a fresh call gets the regular hint.
 	storeRes := res
 	storeRes.Hint = ""
-	t.dedupe.Store(dKey, &dedupeEntry{result: &storeRes, expiry: now.Add(dedupeTTL)})
+	finalEntry := &dedupeEntry{result: &storeRes, expiry: now.Add(dedupeTTL)}
+	t.dedupe.Store(dKey, finalEntry)
+
+	// Signal any inflight waiters blocked on this dedupe key. After
+	// this the placeholder's channel is retired — future callers will
+	// hit the real cached entry (result + expiry set).
+	if placeholder.inflight != nil && placeholder.inflight.ch != nil {
+		placeholder.inflight.ch <- finalEntry
+		close(placeholder.inflight.ch)
+	}
+
 	body, err := json.Marshal(res)
 	if err != nil {
 		return "", fmt.Errorf("AgentTool: marshal: %w", err)
