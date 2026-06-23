@@ -33,6 +33,7 @@ ENV_DIR="/etc/ongrid-edge"
 ENV_FILE="${ENV_DIR}/ongrid-edge.env"
 SERVICE_FILE="/etc/systemd/system/ongrid-edge.service"
 LOG_DIR="/var/log/ongrid-edge"
+STATE_DIR="/var/lib/ongrid-edge"
 SERVICE_USER="ongrid-edge"
 SERVICE_GROUP="ongrid-edge"
 
@@ -259,6 +260,22 @@ EOF
 chmod 640 "$ENV_FILE"
 chown "root:${SERVICE_GROUP}" "$ENV_FILE"
 
+# --- state dir ---------------------------------------------------------------
+#
+# The unit below sets StateDirectory=ongrid-edge so systemd creates
+# /var/lib/ongrid-edge (owned by the service user) at start. But
+# StateDirectory= requires systemd >= 235 and is SILENTLY IGNORED on older
+# releases — CentOS/RHEL 7 ships systemd 219. When ignored, the base dir is
+# never created, /var/lib stays root:root 0755, and the agent — running
+# unprivileged as ${SERVICE_USER} — cannot mkdir its plugin work dirs beneath
+# it. Every collector plugin then fails `configure` with EACCES, no exporter
+# starts, and the edge shows up "online but with no data". Create the dir
+# explicitly so the installer is correct regardless of systemd version. This
+# is idempotent and a harmless no-op where StateDirectory= already made it.
+mkdir -p "$STATE_DIR"
+chown "$SERVICE_USER":"$SERVICE_GROUP" "$STATE_DIR"
+chmod 0755 "$STATE_DIR"
+
 # --- systemd unit ------------------------------------------------------------
 
 cat > "$SERVICE_FILE" <<'EOF'
@@ -289,9 +306,15 @@ PrivateTmp=true
 # User=) at start and implicitly adds it to ReadWritePaths. Without
 # this, ProtectSystem=strict makes /var/lib read-only and the agent's
 # runtime mkdir of /var/lib/ongrid-edge/.upgrade fails EROFS.
+#
+# StateDirectory= needs systemd >= 235. On 233/234 ProtectSystem=strict and
+# ReadWritePaths= are honored but StateDirectory= is not, so its implicit
+# writable path is lost and the sandboxed agent still can't write the state
+# dir even after the installer pre-created it. List it in ReadWritePaths=
+# explicitly so writability never depends on StateDirectory= taking effect.
 StateDirectory=ongrid-edge
 StateDirectoryMode=0755
-ReadWritePaths=/var/log/ongrid-edge
+ReadWritePaths=/var/lib/ongrid-edge /var/log/ongrid-edge
 StandardOutput=journal
 StandardError=journal
 
@@ -378,6 +401,22 @@ for tool in promtail otelcol-contrib node_exporter process_exporter mysqld_expor
         SELFCHECK_FAIL=1
     fi
 done
+# State dir must exist and be writable by the service user. On systemd < 235
+# (CentOS/RHEL 7) the unit's StateDirectory= is silently ignored, so this is
+# the probe that catches the "online but no data" failure: without a writable
+# /var/lib/ongrid-edge every collector plugin fails `configure` with EACCES.
+if command -v runuser >/dev/null 2>&1; then
+    SVC_W=(runuser -u "$SERVICE_USER" -- test -w "$STATE_DIR")
+else
+    SVC_W=(sudo -u "$SERVICE_USER" test -w "$STATE_DIR")
+fi
+if [[ -d "$STATE_DIR" ]] && "${SVC_W[@]}" 2>/dev/null; then
+    log_ok "state dir writable by ${SERVICE_USER}: ${STATE_DIR}"
+else
+    log_error "${SERVICE_USER} cannot write ${STATE_DIR} — every collector plugin will fail; edge will be online with no data"
+    log_error "  fix: mkdir -p ${STATE_DIR}; chown ${SERVICE_USER}:${SERVICE_GROUP} ${STATE_DIR}; chmod 0755 ${STATE_DIR}; systemctl restart ongrid-edge"
+    SELFCHECK_FAIL=1
+fi
 if command -v runuser >/dev/null 2>&1; then
     JREAD=(runuser -u "$SERVICE_USER" -- journalctl -n 1 --no-pager)
 else

@@ -33,11 +33,18 @@ PrivateTmp=true
 # ReadWritePaths whitelist. Without this, ProtectSystem=strict makes the
 # parent /var/lib read-only and the agent's runtime mkdir of
 # /var/lib/ongrid-edge/.upgrade fails EROFS — discovered on VM-0-3
-# during ADR-024 E2E. /var/log/ongrid-edge stays explicit because the
-# installer creates and chowns it differently.
+# during ADR-024 E2E.
+#
+# But StateDirectory= needs systemd >= 235. On 233/234 ProtectSystem=strict
+# and ReadWritePaths= are honored while StateDirectory= is not, so its
+# *implicit* writable path is lost and the sandboxed agent still can't write
+# /var/lib/ongrid-edge even when the installer pre-created it on disk. List
+# the state dir in ReadWritePaths= explicitly so writability never depends on
+# StateDirectory= taking effect. Redundant (harmless) on systemd >= 235; a
+# no-op on < 232 where the sandbox itself is off.
 StateDirectory=ongrid-edge
 StateDirectoryMode=0755
-ReadWritePaths=/var/log/ongrid-edge
+ReadWritePaths=/var/lib/ongrid-edge /var/log/ongrid-edge
 StandardOutput=journal
 StandardError=journal
 

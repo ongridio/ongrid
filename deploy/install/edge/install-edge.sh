@@ -26,7 +26,8 @@ SERVICE_USER=ongrid-edge
 SERVICE_GROUP=ongrid-edge
 BIN_DEST=/usr/local/bin/ongrid-edge
 PLUGIN_BIN_DIR=/usr/local/lib/ongrid-edge   # bundled plugin binaries (promtail, etc.)
-PLUGIN_WORK_DIR=/var/lib/ongrid-edge/plugins # rendered plugin configs + subprocess logs
+STATE_DIR=/var/lib/ongrid-edge               # agent state root (StateDirectory=)
+PLUGIN_WORK_DIR="${STATE_DIR}/plugins"       # rendered plugin configs + subprocess logs
 CONFIG_DIR=/etc/ongrid-edge
 ENV_FILE="${CONFIG_DIR}/ongrid-edge.env"
 UNIT_FILE=/etc/systemd/system/ongrid-edge.service
@@ -148,6 +149,17 @@ install -m 0755 -o root -g root "$BIN_SRC" "$BIN_DEST"
 # Per-platform variant lives under SCRIPT_DIR with the same -OS-ARCH suffix
 # as the main edge binary.
 mkdir -p "$PLUGIN_BIN_DIR"
+# Base state dir. The subdirs below (plugins/, .upgrade/) get created and
+# chowned individually, but the agent also needs to own the base
+# /var/lib/ongrid-edge itself so it can create further state dirs at runtime.
+# The unit's StateDirectory= only guarantees that on systemd >= 235; it is
+# silently ignored on older releases (CentOS/RHEL 7 = systemd 219), which
+# otherwise leaves the base root-owned and unwritable by the service user —
+# every collector plugin then fails `configure` and the edge ships no data.
+# Create it explicitly so this holds regardless of systemd version.
+mkdir -p "$STATE_DIR"
+chown "$SERVICE_USER":"$SERVICE_GROUP" "$STATE_DIR" 2>/dev/null || true
+chmod 0755 "$STATE_DIR"
 mkdir -p "$PLUGIN_WORK_DIR"
 chown "$SERVICE_USER":"$SERVICE_GROUP" "$PLUGIN_WORK_DIR" 2>/dev/null || true
 chmod 750 "$PLUGIN_WORK_DIR"
@@ -293,6 +305,23 @@ for tool in promtail otelcol-contrib node_exporter process_exporter mysqld_expor
         SELFCHECK_FAIL=1
     fi
 done
+
+# 1b) state dir writable by the service user. On systemd < 235 (CentOS/RHEL 7)
+# the unit's StateDirectory= is silently ignored, so this probe catches the
+# "online but no data" failure: without a writable /var/lib/ongrid-edge every
+# collector plugin fails `configure` with EACCES.
+if command -v runuser >/dev/null 2>&1; then
+    SVC_W=(runuser -u "$SERVICE_USER" -- test -w "$STATE_DIR")
+else
+    SVC_W=(sudo -u "$SERVICE_USER" test -w "$STATE_DIR")
+fi
+if [[ -d "$STATE_DIR" ]] && "${SVC_W[@]}" 2>/dev/null; then
+    log_info "state dir writable by $SERVICE_USER: $STATE_DIR"
+else
+    log_error "$SERVICE_USER cannot write $STATE_DIR — every collector plugin will fail; edge will be online with no data"
+    log_error "  fix: mkdir -p $STATE_DIR; chown $SERVICE_USER:$SERVICE_GROUP $STATE_DIR; chmod 0755 $STATE_DIR; systemctl restart ongrid-edge"
+    SELFCHECK_FAIL=1
+fi
 
 # 2) service user can read the journal (logs plugin journald source).
 # Group membership added above is visible to a fresh runuser/sudo session.
