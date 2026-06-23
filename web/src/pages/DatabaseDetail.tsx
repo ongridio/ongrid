@@ -111,11 +111,17 @@ export default function DatabaseDetailPage() {
   const [probing, setProbing] = useState(false);
   const [probeError, setProbeError] = useState<string | null>(null);
 
+  // Probe requirements per DB type:
+  //   mysql / postgresql / oracle / selectdb — user + password required
+  //   redis — password optional (no username), can probe without auth
+  //   mongodb — both optional, can probe without auth
+  const needsUser = inst?.db_type ? !['redis', 'mongodb'].includes(inst.db_type) : true;
+  const needsPass = inst?.db_type ? !['redis', 'mongodb'].includes(inst.db_type) : true;
+
   const loadInst = useCallback(async () => {
     if (!id) return;
     try {
       const r = await getDatabase(id);
-      if (!mountedRef.current) return;
       if (!mountedRef.current) return;
       setInst(r);
       setError(null);
@@ -127,11 +133,13 @@ export default function DatabaseDetailPage() {
   }, [id, tr]);
 
   const runProbe = useCallback(async () => {
-    if (!id || !probeUser) return;
+    if (!id) return;
+    if (needsUser && !probeUser) return;
+    if (needsPass && !probePass) return;
     setProbing(true);
     setProbeError(null);
     try {
-      const resp = await probeDatabase(id, { user: probeUser, password: probePass });
+      const resp = await probeDatabase(id, { user: probeUser || undefined, password: probePass || undefined });
       if (!mountedRef.current) return;
       if (resp.error) {
         setProbeError(resp.error);
@@ -146,7 +154,7 @@ export default function DatabaseDetailPage() {
     } finally {
       setProbing(false);
     }
-  }, [id, probeUser, probePass, tr]);
+  }, [id, needsUser, needsPass, probeUser, probePass, tr]);
 
   useEffect(() => { void loadInst(); }, [loadInst]);
 
@@ -260,31 +268,74 @@ export default function DatabaseDetailPage() {
                     <span className="text-xs">✕</span>
                   </button>
                 </div>
-                <div className="mb-2">
-                  <label className="mb-1 block text-[11px] text-zinc-500">{tr('用户名', 'User')}</label>
-                  <input
-                    className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
-                    value={probeUser}
-                    onChange={(e) => setProbeUser(e.target.value)}
-                    placeholder="root"
-                  />
-                </div>
-                <div className="mb-3">
-                  <label className="mb-1 block text-[11px] text-zinc-500">{tr('密码', 'Password')}</label>
-                  <input
-                    type="password"
-                    className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
-                    value={probePass}
-                    onChange={(e) => setProbePass(e.target.value)}
-                    placeholder="••••••••"
-                  />
-                </div>
+
+                {/* Redis: no username needed */}
+                {inst.db_type === 'redis' ? (
+                  <div className="mb-2">
+                    <label className="mb-1 block text-[11px] text-zinc-500">{tr('密码（可选）', 'Password (opt)')}</label>
+                    <input
+                      type="password"
+                      className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                      value={probePass}
+                      onChange={(e) => setProbePass(e.target.value)}
+                      placeholder={tr('留空可免密连接', 'Leave empty for no auth')}
+                    />
+                    <p className="mt-1 text-[10px] text-zinc-600">
+                      {tr('Redis 6+ 可使用 default 用户，不填则无需认证', 'Redis 6+ uses default user; leave empty for no auth')}
+                    </p>
+                  </div>
+                ) : inst.db_type === 'mongodb' ? (
+                  <>
+                    <div className="mb-2">
+                      <label className="mb-1 block text-[11px] text-zinc-500">{tr('用户名（可选）', 'User (opt)')}</label>
+                      <input
+                        className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                        value={probeUser}
+                        onChange={(e) => setProbeUser(e.target.value)}
+                        placeholder={tr('留空可免密连接', 'Leave empty for no auth')}
+                      />
+                    </div>
+                    <div className="mb-3">
+                      <label className="mb-1 block text-[11px] text-zinc-500">{tr('密码（可选）', 'Password (opt)')}</label>
+                      <input
+                        type="password"
+                        className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                        value={probePass}
+                        onChange={(e) => setProbePass(e.target.value)}
+                        placeholder={tr('留空可免密连接', 'Leave empty for no auth')}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="mb-2">
+                      <label className="mb-1 block text-[11px] text-zinc-500">{tr('用户名', 'User')}</label>
+                      <input
+                        className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                        value={probeUser}
+                        onChange={(e) => setProbeUser(e.target.value)}
+                        placeholder="root"
+                      />
+                    </div>
+                    <div className="mb-3">
+                      <label className="mb-1 block text-[11px] text-zinc-500">{tr('密码', 'Password')}</label>
+                      <input
+                        type="password"
+                        className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                        value={probePass}
+                        onChange={(e) => setProbePass(e.target.value)}
+                        placeholder="••••••••"
+                      />
+                    </div>
+                  </>
+                )}
+
                 {probeError && (
                   <p className="mb-2 text-[11px] text-amber-400">{probeError}</p>
                 )}
                 <button
                   onClick={runProbe}
-                  disabled={!probeUser || probing}
+                  disabled={(needsUser && !probeUser) || (needsPass && !probePass) || probing}
                   className="w-full rounded-md bg-accent px-2.5 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent/90 disabled:opacity-50"
                 >
                   {probing ? tr('连接中...', 'Connecting...') : tr('检测', 'Probe')}

@@ -144,8 +144,8 @@ export function fetchSlowQueries(id: string | number, params: SlowQueryParams) {
 // --- Probe (health check + version detection) ---
 
 export type ProbeParams = {
-  user: string;
-  password: string;
+  user?: string;
+  password?: string;
 };
 
 export type ProbeResponse = {

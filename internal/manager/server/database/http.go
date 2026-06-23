@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -44,6 +43,9 @@ type TopologySyncer interface {
 // via the edge agent. The manager/biz skill service satisfies this.
 type DBQueryExecutor interface {
 	ExecuteOnEdge(ctx context.Context, edgeID uint64, dbType, host string, port int, user, password, database, query string, timeoutSecs, maxRows int) (json.RawMessage, error)
+	// PingOnEdge probes database connectivity via the edge agent's db_ping
+	// skill. Returns raw JSON with status/version/latency fields.
+	PingOnEdge(ctx context.Context, edgeID uint64, dbType, host string, port int, user, password string, timeoutSecs int) (json.RawMessage, error)
 }
 
 // CredentialStore stores and resolves database instance credentials.
@@ -387,16 +389,16 @@ type slowQueryRow struct {
 	MaxLatencyMs   float64 `json:"max_latency_ms,omitempty"`
 	MinLatencyMs   float64 `json:"min_latency_ms,omitempty"`
 	// MySQL-specific
-	AvgRowsExamined  float64 `json:"avg_rows_examined,omitempty"`
-	AvgRowsSent      float64 `json:"avg_rows_sent,omitempty"`
-	AvgRowsAffected  float64 `json:"avg_rows_affected,omitempty"`
-	HasNoIndexUsed   *bool   `json:"has_no_index_used,omitempty"`
-	HasNoGoodIndex   *bool   `json:"has_no_good_index,omitempty"`
-	TmpDiskTables    int64   `json:"tmp_disk_tables,omitempty"`
-	CacheHitPct      float64 `json:"cache_hit_pct,omitempty"`
-	TotalRows        int64   `json:"total_rows,omitempty"`
-	FirstSeen        string  `json:"first_seen,omitempty"`
-	LastSeen         string  `json:"last_seen,omitempty"`
+	AvgRowsExamined float64 `json:"avg_rows_examined,omitempty"`
+	AvgRowsSent     float64 `json:"avg_rows_sent,omitempty"`
+	AvgRowsAffected float64 `json:"avg_rows_affected,omitempty"`
+	HasNoIndexUsed  *bool   `json:"has_no_index_used,omitempty"`
+	HasNoGoodIndex  *bool   `json:"has_no_good_index,omitempty"`
+	TmpDiskTables   int64   `json:"tmp_disk_tables,omitempty"`
+	CacheHitPct     float64 `json:"cache_hit_pct,omitempty"`
+	TotalRows       int64   `json:"total_rows,omitempty"`
+	FirstSeen       string  `json:"first_seen,omitempty"`
+	LastSeen        string  `json:"last_seen,omitempty"`
 	// SelectDB-specific
 	QueryState string `json:"query_state,omitempty"`
 	Error      string `json:"error,omitempty"`
@@ -747,11 +749,25 @@ type probeRequest struct {
 	Password string `json:"password"`
 }
 
+// pingResult is the wire format returned by the edge's db_ping skill.
+type pingResult struct {
+	Status    string `json:"status"`
+	Version   string `json:"version,omitempty"`
+	Error     string `json:"error,omitempty"`
+	LatencyMS int64  `json:"latency_ms,omitempty"`
+}
+
 // probe responds to POST /v1/databases/{id}/probe.
-// It connects to the database via the edge agent, runs SELECT VERSION(),
-// and updates the instance status and version accordingly.
+// It probes database connectivity via the edge agent's db_ping skill,
+// which handles every DB type appropriately (SELECT VERSION() for SQL,
+// RESP PING for Redis, TCP dial for MongoDB).
 func (h *Handler) probe(w http.ResponseWriter, r *http.Request) {
 	id, err := parseID(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	inst, err := h.svc.GetByID(r.Context(), id)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -763,20 +779,18 @@ func (h *Handler) probe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Resolve credentials from the credential store when not provided.
+	// Fill in individual missing fields rather than overwriting both, so
+	// Redis/MongoDB partial credentials (e.g. password-only) are preserved.
 	if (req.User == "" || req.Password == "") && h.credDB != nil {
-		user, pass, found, err := h.credDB.Get(r.Context(), id)
+		storedUser, storedPass, found, err := h.credDB.Get(r.Context(), id)
 		if err == nil && found {
-			req.User = user
-			req.Password = pass
+			if req.User == "" {
+				req.User = storedUser
+			}
+			if req.Password == "" {
+				req.Password = storedPass
+			}
 		}
-	}
-	if req.User == "" || req.Password == "" {
-		writeErr(w, errors.New("user and password are required"))
-		return
-	}
-	// Store credentials for future use.
-	if h.credDB != nil {
-		_ = h.credDB.Set(r.Context(), id, req.User, req.Password)
 	}
 
 	if h.dbQuery == nil {
@@ -784,24 +798,20 @@ func (h *Handler) probe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	inst, err := h.svc.GetByID(r.Context(), id)
-	if err != nil {
-		writeErr(w, err)
-		return
+	// Store credentials back only when we have a complete pair.
+	if h.credDB != nil && req.User != "" && req.Password != "" {
+		_ = h.credDB.Set(r.Context(), id, req.User, req.Password)
 	}
 
-	// Use a background context for DB writes so the probe result is
-	// persisted even if the HTTP client disconnects mid-request.
-	writeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	// Run SELECT VERSION() through the edge agent.
-	rawResult, err := h.dbQuery.ExecuteOnEdge(r.Context(),
+	// Probe via the edge agent's db_ping skill.
+	rawResult, err := h.dbQuery.PingOnEdge(r.Context(),
 		inst.EdgeID, inst.DBType, inst.Host, inst.Port,
-		req.User, req.Password, "", "SELECT VERSION()", 10, 1,
+		req.User, req.Password, 10,
 	)
 	if err != nil {
-		// Mark offline on connection failure.
+		// Dispatch-level error (edge unreachable, skill not found).
+		writeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
 		_ = h.svc.UpdateStatus(writeCtx, id, model.StatusOffline)
 		writeJSON(w, http.StatusOK, probeResponse{
 			Status: model.StatusOffline,
@@ -810,10 +820,35 @@ func (h *Handler) probe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse version from the result.
-	version := parseVersionFromResult(rawResult)
+	// Parse the db_ping result.
+	var pr pingResult
+	if err := json.Unmarshal(rawResult, &pr); err != nil {
+		writeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = h.svc.UpdateStatus(writeCtx, id, model.StatusOffline)
+		writeJSON(w, http.StatusOK, probeResponse{
+			Status: model.StatusOffline,
+			Error:  fmt.Sprintf("parse ping result: %v", err),
+		})
+		return
+	}
 
-	// Update instance status and version atomically.
+	// Use a background context for DB writes so the probe result is
+	// persisted even if the HTTP client disconnects mid-request.
+	writeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if pr.Status != "online" {
+		_ = h.svc.UpdateStatus(writeCtx, id, model.StatusOffline)
+		writeJSON(w, http.StatusOK, probeResponse{
+			Status: model.StatusOffline,
+			Error:  pr.Error,
+		})
+		return
+	}
+
+	// Update instance status and version.
+	version := pr.Version
 	if version != "" {
 		inst.Version = version
 	}
@@ -836,70 +871,4 @@ type probeResponse struct {
 	Version     string           `json:"version,omitempty"`
 	Error       string           `json:"error,omitempty"`
 	UpdatedInst instanceResponse `json:"updated_inst,omitempty"`
-}
-
-// parseVersionFromResult extracts a version string from the edge skill's
-// JSON result. Expects the wrapper shape: {"rows": [{"VERSION()":"x.y.z"}], ...}
-func parseVersionFromResult(raw json.RawMessage) string {
-	var wrapper struct {
-		Rows []map[string]any `json:"rows"`
-	}
-	if err := json.Unmarshal(raw, &wrapper); err != nil || len(wrapper.Rows) == 0 {
-		return ""
-	}
-	row := wrapper.Rows[0]
-	// Look up each known version column name explicitly (avoid map iteration order).
-	for _, key := range []string{"VERSION()", "version", "@@version", "version()"} {
-		if v, ok := row[key]; ok {
-			s := fmt.Sprintf("%v", v)
-			if s != "" && s != "<nil>" {
-				return extractVersion(s)
-			}
-		}
-	}
-	return ""
-}
-
-// extractVersion pulls a compact version string from a database version banner.
-// Examples: "8.0.32", "PostgreSQL 15.4 on x86_64..." → "15.4", "5.7.42-log" → "5.7.42"
-func extractVersion(raw string) string {
-	raw = strings.TrimSpace(raw)
-	// Try to find X.Y or X.Y.Z pattern.
-	parts := strings.Fields(raw)
-	for _, part := range parts {
-		// Trim trailing commas/semicolons.
-		part = strings.TrimRight(part, ",;")
-		// Count dots to identify version-like tokens.
-		dots := strings.Count(part, ".")
-		if dots >= 2 {
-			// X.Y.Z — strip trailing non-digit suffix like "-log", "-debug".
-			return stripVersionSuffix(part)
-		}
-	}
-	// Fallback: find first token with at least one dot.
-	for _, part := range parts {
-		part = strings.TrimRight(part, ",;")
-		if strings.Count(part, ".") >= 1 {
-			return stripVersionSuffix(part)
-		}
-	}
-	// Last resort: return first 20 chars.
-	if len(raw) > 20 {
-		return raw[:20]
-	}
-	return raw
-}
-
-// stripVersionSuffix removes known non-numeric suffixes from version tokens.
-func stripVersionSuffix(v string) string {
-	// Remove common suffixes: -log, -debug, -standard, -enterprise, -community, -Percona, etc.
-	suffixes := []string{"-log", "-debug", "-standard", "-enterprise", "-community", "-ubuntu", "-debian", "-rhel", "-el"}
-	for _, s := range suffixes {
-		if idx := strings.Index(v, s); idx > 0 {
-			v = v[:idx]
-		}
-	}
-	// Remove leading non-digit prefix like "PostgreSQL " — not needed here since
-	// we split by spaces and already found a dotted token.
-	return v
 }

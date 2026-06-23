@@ -81,6 +81,55 @@ func (e *EdgeDBQueryExecutor) ExecuteOnEdge(
 	return resp.Result, nil
 }
 
+// PingOnEdge dispatches a database connectivity probe to an edge agent via
+// the tunnel's db_ping skill. Returns the raw JSON result containing status,
+// version, and latency info.
+func (e *EdgeDBQueryExecutor) PingOnEdge(
+	ctx context.Context, edgeID uint64,
+	dbType, host string, port int,
+	user, password string,
+	timeoutSecs int,
+) (json.RawMessage, error) {
+	if e.caller == nil {
+		return nil, fmt.Errorf("edge caller not configured")
+	}
+
+	if timeoutSecs <= 0 {
+		timeoutSecs = 10
+	}
+
+	params := map[string]any{
+		"db_type":      dbType,
+		"host":         host,
+		"port":         port,
+		"user":         user,
+		"password":     password,
+		"timeout_secs": timeoutSecs,
+	}
+
+	body, err := json.Marshal(tunnel.ExecuteSkillRequest{
+		Key:    "db_ping",
+		Params: mustMarshal(params),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal ping request: %w", err)
+	}
+
+	respBody, err := e.caller.Call(ctx, edgeID, tunnel.MethodExecuteSkill, body)
+	if err != nil {
+		return nil, fmt.Errorf("dispatch ping: %w", err)
+	}
+
+	var resp tunnel.ExecuteSkillResponse
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		return nil, fmt.Errorf("decode ping response: %w", err)
+	}
+	if resp.Error != "" {
+		return nil, fmt.Errorf("%s", resp.Error)
+	}
+	return resp.Result, nil
+}
+
 func mustMarshal(v any) json.RawMessage {
 	b, _ := json.Marshal(v)
 	return b
