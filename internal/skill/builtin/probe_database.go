@@ -342,7 +342,7 @@ func pingMongoDB(ctx context.Context, p dbPingParams) (json.RawMessage, error) {
 	binary.LittleEndian.PutUint32(msg[16:20], 0)             // flags
 	copy(msg[20:], collName)                                 // fullCollectionName
 	binary.LittleEndian.PutUint32(msg[32:36], 0)             // numberToSkip
-	binary.LittleEndian.PutUint32(msg[36:40], -1)            // numberToReturn (-1 = default)
+	binary.LittleEndian.PutUint32(msg[36:40], ^uint32(0))    // numberToReturn (-1 as int32, wire value 0xFFFFFFFF)
 	copy(msg[40:], query)                                    // query BSON
 
 	if _, err := conn.Write(msg); err != nil {
