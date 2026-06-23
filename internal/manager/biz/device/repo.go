@@ -17,13 +17,14 @@ import (
 // RolesUnknownOnly, when true, narrows to rows with roles == 0 (the
 // "未分类" bucket); it is mutually exclusive with RolesAny — set one or
 // the other, not both. Online filters by the live online flag.
-// Hostname / Name are substring matches.
+// Hostname / Name / IPAddress are substring matches.
 type ListFilter struct {
 	RolesAny         uint8
 	RolesUnknownOnly bool
 	Online           *bool
 	Hostname         string
 	Name             string
+	IPAddress        string
 	Limit            int
 	Offset           int
 }
