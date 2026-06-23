@@ -58,7 +58,7 @@ var CloudBashSchema = json.RawMessage(`{
   "properties": {
     "command": {
       "type": "string",
-      "description": "The shell command to run in the cloud (manager) sandbox, e.g. 'terraform plan'. Runs with the chosen credential's env injected."
+      "description": "The shell command to run in the cloud (manager) sandbox, e.g. 'terraform plan'. Runs with the chosen credential's env injected. The cwd is this conversation's PERSISTENT working directory — files you create (e.g. write main.tf, terraform init) survive to the next command, so use relative paths and build up state across calls rather than re-creating everything each time."
     },
     "credential": {
       "type": "string",

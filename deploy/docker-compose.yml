@@ -161,6 +161,8 @@ services:
       # HLD-017 cloud skill marketplace: persist user-installed skills so
       # they survive container recreation (bind-mount, not container layer).
       - ../.cache/ongrid-skills:/var/lib/ongrid/skills
+      # HLD-019 agent workspace: per-session persistent cwd for cloud_bash.
+      - ../.cache/ongrid-workspace:/var/lib/ongrid/workspace
     # ADR-008: HTTP API (8080) is no longer published to host in the
     # production-shape stack — nginx fronts it on 443/80. Metrics port
     # 9100 stays exposed for the host's Prometheus.

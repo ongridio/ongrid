@@ -45,6 +45,7 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/logger"
 	"github.com/ongridio/ongrid/internal/pkg/runner"
 	"github.com/ongridio/ongrid/internal/pkg/secretbox"
+	"github.com/ongridio/ongrid/internal/pkg/workspace"
 
 	"encoding/json"
 	"strconv"
@@ -105,8 +106,8 @@ import (
 	managerbizimbridgetelegram "github.com/ongridio/ongrid/internal/manager/biz/imbridge/provider/telegram"
 	managerbizknowledge "github.com/ongridio/ongrid/internal/manager/biz/knowledge"
 	managerbizmarketplace "github.com/ongridio/ongrid/internal/manager/biz/marketplace"
-	managerbizmonitor "github.com/ongridio/ongrid/internal/manager/biz/monitor"
 	managerbizmcp "github.com/ongridio/ongrid/internal/manager/biz/mcp"
+	managerbizmonitor "github.com/ongridio/ongrid/internal/manager/biz/monitor"
 	managerbizsecret "github.com/ongridio/ongrid/internal/manager/biz/secret"
 	managerbizsetting "github.com/ongridio/ongrid/internal/manager/biz/setting"
 	managerbizskill "github.com/ongridio/ongrid/internal/manager/biz/skill"
@@ -116,9 +117,8 @@ import (
 	managerimbridgedata "github.com/ongridio/ongrid/internal/manager/data/imbridge/store"
 	managerknowledgedata "github.com/ongridio/ongrid/internal/manager/data/knowledge/store"
 	managermarketplacedata "github.com/ongridio/ongrid/internal/manager/data/marketplace/store"
-	managermonitordata "github.com/ongridio/ongrid/internal/manager/data/monitor/store"
 	managermcpdata "github.com/ongridio/ongrid/internal/manager/data/mcp/store"
-	mcpclient "github.com/ongridio/ongrid/internal/pkg/mcpclient"
+	managermonitordata "github.com/ongridio/ongrid/internal/manager/data/monitor/store"
 	managersecretdata "github.com/ongridio/ongrid/internal/manager/data/secret/store"
 	managersettingdata "github.com/ongridio/ongrid/internal/manager/data/setting/store"
 	managerwebshelldata "github.com/ongridio/ongrid/internal/manager/data/webshell/store"
@@ -127,6 +127,7 @@ import (
 	managerserverimbridge "github.com/ongridio/ongrid/internal/manager/server/imbridge"
 	managerserverknowledge "github.com/ongridio/ongrid/internal/manager/server/knowledge"
 	managerwebshellserver "github.com/ongridio/ongrid/internal/manager/server/webshell"
+	mcpclient "github.com/ongridio/ongrid/internal/pkg/mcpclient"
 
 	managerbizaudit "github.com/ongridio/ongrid/internal/manager/biz/audit"
 	managerbizflow "github.com/ongridio/ongrid/internal/manager/biz/flow"
@@ -145,12 +146,12 @@ import (
 	managerserverintegration "github.com/ongridio/ongrid/internal/manager/server/integration"
 	managerserverlogs "github.com/ongridio/ongrid/internal/manager/server/logs"
 	managerservermarketplace "github.com/ongridio/ongrid/internal/manager/server/marketplace"
+	managerservermcp "github.com/ongridio/ongrid/internal/manager/server/mcp"
 	managerservermetric "github.com/ongridio/ongrid/internal/manager/server/metric"
 	managermiddleware "github.com/ongridio/ongrid/internal/manager/server/middleware"
 	managerservermonitor "github.com/ongridio/ongrid/internal/manager/server/monitor"
 	managerserverprom "github.com/ongridio/ongrid/internal/manager/server/prometheus"
 	managerserverreport "github.com/ongridio/ongrid/internal/manager/server/report"
-	managerservermcp "github.com/ongridio/ongrid/internal/manager/server/mcp"
 	managerserversecret "github.com/ongridio/ongrid/internal/manager/server/secret"
 	managerserversetting "github.com/ongridio/ongrid/internal/manager/server/setting"
 	managerserverskill "github.com/ongridio/ongrid/internal/manager/server/skill"
@@ -1803,6 +1804,15 @@ func main() {
 	// (resolve the bound credential → inject into the Runner sandbox → run)
 	// and wire the cloud_bash tool's proposer seam to the approval inbox.
 	cloudBashRunner := runner.NewShellRunner()
+	// HLD-019 agent workspace: per-session persistent cwd for cloud_bash so a
+	// skill (e.g. terraform-runner) can write .tf/state in one command and read
+	// it back in the next, instead of running in a throwaway temp dir. Root is
+	// a persistent volume; empty disables it (falls back to today's temp dir).
+	workspaceRoot := os.Getenv("ONGRID_WORKSPACE_ROOT")
+	if workspaceRoot == "" {
+		workspaceRoot = "/var/lib/ongrid/workspace"
+	}
+	wsMgr := workspace.New(workspaceRoot)
 	approvalUC.RegisterExecutor("cloud_bash", func(ctx context.Context, payloadJSON string) (string, error) {
 		var p cloudBashPayload
 		if err := json.Unmarshal([]byte(payloadJSON), &p); err != nil {
@@ -1824,7 +1834,13 @@ func main() {
 				env[k] = v
 			}
 		}
-		res, err := cloudBashRunner.Run(ctx, runner.Spec{Script: p.Command, Env: env})
+		// Resolve the session's persistent workspace as cwd (HLD-019). Empty
+		// workdir → runner uses a transient temp dir (legacy behavior).
+		workdir, err := wsMgr.Session(p.SessionID)
+		if err != nil {
+			return "", err
+		}
+		res, err := cloudBashRunner.Run(ctx, runner.Spec{Script: p.Command, Env: env, Workdir: workdir})
 		if err != nil {
 			return "", err
 		}
@@ -3291,6 +3307,11 @@ type cloudBashPayload struct {
 	Command     string   `json:"command"`
 	Credentials []string `json:"credentials,omitempty"`
 	Credential  string   `json:"credential,omitempty"` // legacy single
+	// SessionID is the chat session that proposed the command (HLD-019). The
+	// executor maps it to a persistent per-session working directory so files
+	// a tool writes in one command survive to the next, instead of running in
+	// a throwaway temp dir. Empty on legacy/pre-upgrade approvals.
+	SessionID string `json:"session_id,omitempty"`
 }
 
 // aiopstools.CloudBashProposer seam — the cloud_bash tool calls Propose to
@@ -3306,7 +3327,7 @@ func (s cloudBashProposerShim) Propose(ctx context.Context, command string, cred
 		Kind:       "cloud_bash",
 		Title:      title,
 		Summary:    strings.Join(credentials, ", "), // plain names; card shows them
-		Payload:    cloudBashPayload{Command: command, Credentials: credentials},
+		Payload:    cloudBashPayload{Command: command, Credentials: credentials, SessionID: sessionID},
 		Source:     "agent",
 		SessionID:  sessionID,
 		ProposedBy: userID,

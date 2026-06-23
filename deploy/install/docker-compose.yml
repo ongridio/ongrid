@@ -232,6 +232,11 @@ services:
       # container layer and are wiped on every `compose up` / image upgrade
       # (the installed_skills DB row would survive in mysql and dangle).
       - ${ONGRID_DATA_DIR:-/var/lib/ongrid}/skills:/var/lib/ongrid/skills
+      # HLD-019 agent workspace: per-session persistent cwd for cloud_bash
+      # (terraform .tf/state, scratch files). Same bind-mount rationale as
+      # skills — must survive image upgrades / `compose up`, else a tool's
+      # files written in one command vanish before the next.
+      - ${ONGRID_DATA_DIR:-/var/lib/ongrid}/workspace:/var/lib/ongrid/workspace
     logging:
       driver: json-file
       options:
