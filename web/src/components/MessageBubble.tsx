@@ -559,10 +559,10 @@ function PendingApprovalCard({ approvalID, command }: { approvalID: string; comm
   };
 
   return (
-    <div className="w-full overflow-hidden rounded-lg bg-amber-950/15 text-xs ring-1 ring-amber-700/40">
-      <div className="flex items-center gap-2 px-3 py-2">
-        <ShieldAlert size={13} className="text-amber-400" />
-        <span className="font-medium text-amber-200">{tr('需要你确认才能在云端执行', 'Needs your approval to run in the cloud')}</span>
+    <div className="w-full overflow-hidden rounded-lg bg-zinc-900/30 text-xs ring-1 ring-zinc-800/80">
+      <div className="flex items-center gap-2 border-b border-zinc-800/60 px-3 py-2">
+        <ShieldAlert size={13} className="text-amber-500/90" />
+        <span className="font-medium text-zinc-200">{tr('需要你确认才能在云端执行', 'Needs your approval to run in the cloud')}</span>
       </div>
       <div className="px-3 pb-2.5">
         <pre className="mb-2 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-zinc-950 p-2 text-[11px] text-zinc-300">
@@ -572,7 +572,7 @@ function PendingApprovalCard({ approvalID, command }: { approvalID: string; comm
           <div className="mb-2 flex flex-wrap items-center gap-1 text-[11px] text-zinc-400">
             <span>{tr('将注入凭证：', 'Injects credentials: ')}</span>
             {creds.map((c) => (
-              <span key={c} className="rounded bg-amber-950/40 px-1.5 py-0.5 font-mono text-amber-300 ring-1 ring-amber-800/40">
+              <span key={c} className="rounded bg-zinc-800/60 px-1.5 py-0.5 font-mono text-zinc-300 ring-1 ring-zinc-700/50">
                 {c}
               </span>
             ))}
