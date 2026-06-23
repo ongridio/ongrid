@@ -101,6 +101,7 @@ type HostFacts struct {
 	CPUCount       int
 	MemTotalBytes  uint64
 	DiskTotalBytes uint64
+	IPAddress      string
 }
 
 // Usage is the live percentage gauges for one device.

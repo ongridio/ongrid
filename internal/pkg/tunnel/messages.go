@@ -237,6 +237,14 @@ type HostInfo struct {
 	// fields are sent together so the cloud can migrate a device from its old
 	// HostID-derived fingerprint to this one in place. Empty is allowed.
 	HardwareFingerprint string `json:"hardware_fingerprint,omitempty"`
+
+	// IPAddress is the primary IPv4 address of the host, collected
+	// edge-side during register_edge. Used for display in the device
+	// list/detail so operators can identify hosts by IP without
+	// cross-referencing external tools. Empty string when the agent
+	// cannot determine a suitable address (e.g. no non-loopback
+	// interface found).
+	IPAddress string `json:"ip_address,omitempty"`
 }
 
 // RegisterEdgeRequest is the first RPC the edge sends after connecting.

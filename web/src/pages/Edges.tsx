@@ -231,6 +231,7 @@ export default function EdgesPage() {
                   <th className="px-4 py-2.5 text-left">ID</th>
                   <th className="px-4 py-2.5 text-left">{tr('名称', 'Name')}</th>
                   <th className="px-4 py-2.5 text-left">{tr('主机名', 'Hostname')}</th>
+                  <th className="px-4 py-2.5 text-left">IP</th>
                   <th className="px-4 py-2.5 text-left">{tr('角色', 'Roles')}</th>
                   <th className="px-4 py-2.5 text-left">{tr('状态', 'Status')}</th>
                   <th className="px-4 py-2.5 text-left">{tr('最后心跳', 'Last heartbeat')}</th>
@@ -242,13 +243,13 @@ export default function EdgesPage() {
               <tbody className="divide-y divide-zinc-800/40">
                 {loading && edges.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="px-4 py-10 text-center text-zinc-500">
+                    <td colSpan={10} className="px-4 py-10 text-center text-zinc-500">
                       {tr('加载中…', 'Loading…')}
                     </td>
                   </tr>
                 ) : edges.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="px-4 py-10 text-center text-zinc-500">
+                    <td colSpan={10} className="px-4 py-10 text-center text-zinc-500">
                       {rolesFilter
                         ? tr(
                             `没有 ${ROLE_FILTER_TITLES[rolesFilter]?.[0] ?? rolesFilter} 设备。点设备名打开详情后可在右上角分配角色。`,
@@ -283,6 +284,9 @@ export default function EdgesPage() {
                       </td>
                       <td className="whitespace-nowrap px-4 py-2.5 text-zinc-400">
                         {extractHostname(e.host_info) ?? '—'}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-zinc-400">
+                        {extractIP(e.host_info) ?? '—'}
                       </td>
                       <td
                         className="cursor-pointer whitespace-nowrap px-4 py-2.5"
@@ -758,6 +762,25 @@ function pickHostname(value: Record<string, unknown>): string | null {
     if (!normalized) continue;
     return normalized.includes(':') ? normalized.split(':')[0] || normalized : normalized;
   }
+  return null;
+}
+
+function extractIP(hostInfo: Edge['host_info']): string | null {
+  if (!hostInfo) return null;
+  if (typeof hostInfo === 'string') {
+    const parsed = safeParseHostInfo(hostInfo);
+    if (!parsed) return null;
+    return extractIPFromObj(parsed);
+  }
+  if (typeof hostInfo === 'object') {
+    return extractIPFromObj(hostInfo);
+  }
+  return null;
+}
+
+function extractIPFromObj(obj: Record<string, unknown>): string | null {
+  const v = obj.ip_address;
+  if (typeof v === 'string' && v.trim()) return v.trim();
   return null;
 }
 

@@ -246,6 +246,9 @@ func (s *Scraper) HostInfo(ctx context.Context) (tunnel.HostInfo, error) {
 	}
 	// Clone-resistant hardware identity — see embedded.go.
 	hi.HardwareFingerprint = hardwareFingerprint()
+	// Primary IPv4 address. Best-effort: "" when no suitable address
+	// can be determined.
+	hi.IPAddress = primaryIPv4()
 	if vm, err := mem.VirtualMemoryWithContext(ctx); err == nil && vm != nil {
 		hi.MemTotalBytes = vm.Total
 	}

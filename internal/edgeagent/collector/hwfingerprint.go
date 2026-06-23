@@ -154,3 +154,55 @@ func diskSignature() string {
 	}
 	return strings.Join(serials, ",")
 }
+
+// primaryIPv4 returns the first non-loopback IPv4 address found on the
+// host. It prefers addresses on physical NICs (same filter as
+// hardwareFingerprint) but falls back to any non-loopback address so
+// cloud-only / containerised hosts still get an IP. Returns "" when no
+// suitable address is found.
+func primaryIPv4() string {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+	// First pass: look for an address on a physical NIC.
+	for i := range ifaces {
+		if !isPhysicalNIC(&ifaces[i]) {
+			continue
+		}
+		addrs, err := ifaces[i].Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			ip, _, err := net.ParseCIDR(a.String())
+			if err != nil || ip == nil {
+				continue
+			}
+			if ip4 := ip.To4(); ip4 != nil && !ip4.IsLoopback() {
+				return ip4.String()
+			}
+		}
+	}
+	// Second pass: any non-loopback interface (fallback for cloud VMs
+	// where the primary NIC may not match isPhysicalNIC heuristics).
+	for i := range ifaces {
+		if ifaces[i].Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := ifaces[i].Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			ip, _, err := net.ParseCIDR(a.String())
+			if err != nil || ip == nil {
+				continue
+			}
+			if ip4 := ip.To4(); ip4 != nil && !ip4.IsLoopback() {
+				return ip4.String()
+			}
+		}
+	}
+	return ""
+}

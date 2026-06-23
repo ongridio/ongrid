@@ -99,6 +99,9 @@ func (c *EmbeddedCollector) HostInfo(ctx context.Context) (tunnel.HostInfo, erro
 	// HostID so the cloud prefers it but can still migrate older device
 	// rows keyed by HostID. "" when no physical NIC is found.
 	hi.HardwareFingerprint = hardwareFingerprint()
+	// Primary IPv4 address. Best-effort: "" when no suitable address
+	// can be determined (no non-loopback interface with an IPv4 addr).
+	hi.IPAddress = primaryIPv4()
 	if vm, err := mem.VirtualMemoryWithContext(ctx); err == nil && vm != nil {
 		hi.MemTotalBytes = vm.Total
 	}

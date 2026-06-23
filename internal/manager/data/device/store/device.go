@@ -89,6 +89,7 @@ func (r *Repo) UpdateHostFacts(ctx context.Context, id uint64, f biz.HostFacts) 
 		"cpu_count":        f.CPUCount,
 		"mem_total_bytes":  f.MemTotalBytes,
 		"disk_total_bytes": f.DiskTotalBytes,
+		"ip_address":       f.IPAddress,
 	})
 	if res.Error != nil {
 		return res.Error

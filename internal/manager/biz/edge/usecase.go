@@ -147,10 +147,10 @@ func (u *Usecase) Create(ctx context.Context, name string, createdBy *uint64) (*
 // Spec JSON shape mirrors what each plugin's defaults expect:
 //   - logs:        promtail tails /var/log/*. job=node-syslog by default.
 //   - traces:      otelcol-contrib OTLP receiver on :4318, exporter
-//                  points at the manager's /v1/traces (resolved by the
-//                  PluginConfigUC's EndpointResolver, so spec stays empty).
+//     points at the manager's /v1/traces (resolved by the
+//     PluginConfigUC's EndpointResolver, so spec stays empty).
 //   - metrics:     in-process scraper polling 127.0.0.1:9100 (the
-//                  hostmetrics plugin's node_exporter listen addr).
+//     hostmetrics plugin's node_exporter listen addr).
 //   - hostmetrics: subprocess node_exporter on :9102.
 //   - procmetrics: subprocess process-exporter on :9256.
 //
@@ -283,6 +283,7 @@ func (u *Usecase) HandleRegister(ctx context.Context, edgeID uint64, info tunnel
 		KernelVersion: info.KernelVersion,
 		CPUCount:      info.CPUCount,
 		MemTotalBytes: info.MemTotalBytes,
+		IPAddress:     info.IPAddress,
 		Online:        true,
 	}
 	dev, err := u.devices.FindOrCreateByFingerprint(ctx, seed)
@@ -296,6 +297,7 @@ func (u *Usecase) HandleRegister(ctx context.Context, edgeID uint64, info tunnel
 		KernelVersion: info.KernelVersion,
 		CPUCount:      info.CPUCount,
 		MemTotalBytes: info.MemTotalBytes,
+		IPAddress:     info.IPAddress,
 	}); err != nil {
 		return fmt.Errorf("update device host facts: %w", err)
 	}

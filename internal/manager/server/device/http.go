@@ -81,6 +81,7 @@ type deviceItem struct {
 	OSVersion      string     `json:"os_version,omitempty"`
 	Arch           string     `json:"arch,omitempty"`
 	KernelVersion  string     `json:"kernel_version,omitempty"`
+	IPAddress      string     `json:"ip_address,omitempty"`
 	CPUCount       int        `json:"cpu_count,omitempty"`
 	MemTotalBytes  uint64     `json:"mem_total_bytes,omitempty"`
 	DiskTotalBytes uint64     `json:"disk_total_bytes,omitempty"`
@@ -113,9 +114,9 @@ type updateRolesReq struct {
 }
 
 type edgeLinkRow struct {
-	EdgeID    uint64 `json:"edge_id"`
-	DeviceID  uint64 `json:"device_id"`
-	Type      string `json:"type"` // host | discovered
+	EdgeID    uint64    `json:"edge_id"`
+	DeviceID  uint64    `json:"device_id"`
+	Type      string    `json:"type"` // host | discovered
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -313,6 +314,7 @@ func devToItem(d *devicemodel.Device) deviceItem {
 		OSVersion:      d.OSVersion,
 		Arch:           d.Arch,
 		KernelVersion:  d.KernelVersion,
+		IPAddress:      d.IPAddress,
 		CPUCount:       d.CPUCount,
 		MemTotalBytes:  d.MemTotalBytes,
 		DiskTotalBytes: d.DiskTotalBytes,

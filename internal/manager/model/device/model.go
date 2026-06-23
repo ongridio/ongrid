@@ -50,6 +50,12 @@ type Device struct {
 	Arch          string `gorm:"size:32;not null"`
 	KernelVersion string `gorm:"size:128;not null;column:kernel_version"`
 
+	// IPAddress is the primary IPv4 address reported by the edge agent
+	// on its most recent register_edge handshake. Empty string when the
+	// agent hasn't reported one yet (pre-IP-collection binary) or when
+	// no suitable address was found on the host.
+	IPAddress string `gorm:"size:45;not null;default:'';column:ip_address"`
+
 	// Capacity facts. CPUCount is core count; MemTotalBytes / DiskTotalBytes
 	// are total capacity. liaison-cloud uses int for CPU/Memory/Disk; we
 	// keep CPUCount as int (matches the wire shape) and use uint64 for the
