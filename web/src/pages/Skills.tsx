@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Cloud, Cpu, Wrench, RefreshCw, Play, Search, Puzzle } from 'lucide-react';
+import { Cloud, Cpu, Wrench, RefreshCw, Play, Search, Puzzle, ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { listSkills, localizedSkill, type SkillClass, type SkillScope, type SkillSummary } from '@/api/skills';
 import { listFlowTools, type FlowToolMeta } from '@/api/flows';
@@ -11,7 +11,7 @@ import { ChatInput, type ModelSelection } from '@/components/ChatInput';
 import { useModelSelection } from '@/store/modelSelection';
 import { useI18n } from '@/i18n/locale';
 import { useAuth } from '@/store/auth';
-import { toolSkill, skillLabel, orderedSkillKeys } from '@/lib/toolSkill';
+import { toolGroupKey, groupTag, groupTitle, orderedGroupKeys } from '@/lib/toolSkill';
 import { PageHeader } from '@/components/ui';
 
 // Lazy-load the install/uninstall surface so the default Catalog tab
@@ -218,10 +218,19 @@ function CatalogTab() {
     fetchSkills();
   }, [fetchSkills]);
 
-  // Group by the single canonical skill (shared with the flow palette via
-  // toolSkill) — not the fine-grained backend category, which we no longer
-  // surface as a separate concept.
-  const skills = useMemo(() => orderedSkillKeys(items.map((s) => toolSkill(s.name))), [items]);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const toggleGroup = (k: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      next.has(k) ? next.delete(k) : next.add(k);
+      return next;
+    });
+
+  // The single canonical grouping (shared with the flow palette): built-in
+  // tools → 6 curated skills, MCP → per-server, SKILL.md packs → per-pack.
+  // Keyed by the WIRE name (s.key), not the localized display name.
+  const skillKey = useCallback((s: SkillSummary) => toolGroupKey(s.key, s.source, s.category), []);
+  const skills = useMemo(() => orderedGroupKeys(items.map(skillKey)), [items, skillKey]);
 
   // Scope defaults to 'host' on the backend when omitted (skillcore.EffectiveScope),
   // so for filter purposes we treat undefined as 'host'.
@@ -240,7 +249,7 @@ function CatalogTab() {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return items.filter((s) => {
-      if (category && toolSkill(s.name) !== category) return false;
+      if (category && skillKey(s) !== category) return false;
       if (scope && effectiveScope(s) !== scope) return false;
       if (!q) return true;
       return (
@@ -299,7 +308,7 @@ function CatalogTab() {
                     <CategoryChip
                       key={c}
                       active={category === c}
-                      label={skillLabel(c, locale === 'zh-CN')}
+                      label={groupTitle(c, locale === 'zh-CN', items.find((s) => skillKey(s) === c)?.name)}
                       onClick={() => setCategory(c)}
                     />
                   ))}
@@ -345,25 +354,32 @@ function CatalogTab() {
                     <th className="px-4 py-2.5 text-right">{tr('操作', 'Actions')}</th>
                   </tr>
                 </thead>
-                {orderedSkillKeys(filtered.map((s) => toolSkill(s.name))).map((sk) => (
-                  <tbody key={sk} className="divide-y divide-zinc-800/40">
-                    <tr className="border-t border-zinc-800/60 bg-zinc-950/50">
-                      <td colSpan={5} className="px-4 py-2">
-                        <span className="text-[13px] font-semibold text-zinc-200">
-                          {skillLabel(sk, locale === 'zh-CN')}
-                        </span>
-                        <span className="ml-2 text-[11px] text-zinc-500">
-                          {filtered.filter((s) => toolSkill(s.name) === sk).length} {tr('个工具', 'tools')}
-                        </span>
-                      </td>
-                    </tr>
-                    {filtered
-                      .filter((s) => toolSkill(s.name) === sk)
-                      .map((skill) => (
-                        <SkillRow key={skill.key} skill={skill} onView={() => setViewing(skill)} />
-                      ))}
-                  </tbody>
-                ))}
+                {orderedGroupKeys(filtered.map(skillKey)).map((gk) => {
+                  const rows = filtered.filter((s) => skillKey(s) === gk);
+                  const tag = groupTag(gk);
+                  const isCollapsed = collapsed.has(gk);
+                  return (
+                    <tbody key={gk} className="divide-y divide-zinc-800/40">
+                      <tr
+                        className="cursor-pointer select-none border-t border-zinc-800/60 bg-zinc-950/50 hover:bg-zinc-900/50"
+                        onClick={() => toggleGroup(gk)}
+                      >
+                        <td colSpan={5} className="px-3 py-2">
+                          <div className="flex items-center gap-1.5">
+                            {isCollapsed ? <ChevronRight size={13} className="text-zinc-500" /> : <ChevronDown size={13} className="text-zinc-500" />}
+                            <span className="text-[13px] font-semibold text-zinc-200">
+                              {groupTitle(gk, locale === 'zh-CN', rows[0]?.name)}
+                            </span>
+                            {tag === 'mcp' && <span className="rounded bg-sky-900/40 px-1 text-[9px] font-medium text-sky-300">mcp</span>}
+                            {tag === 'ext' && <span className="rounded bg-violet-900/40 px-1 text-[9px] font-medium text-violet-300">{tr('扩展', 'extension')}</span>}
+                            <span className="ml-1 text-[11px] text-zinc-500">{rows.length} {tr('个工具', 'tools')}</span>
+                          </div>
+                        </td>
+                      </tr>
+                      {!isCollapsed && rows.map((skill) => <SkillRow key={skill.key} skill={skill} onView={() => setViewing(skill)} />)}
+                    </tbody>
+                  );
+                })}
               </table>
             </div>
           )}
@@ -402,20 +418,8 @@ function SkillRow({ skill, onView }: { skill: SkillSummary; onView(): void }) {
   const { tr } = useI18n();
   return (
     <tr className="cursor-pointer transition-colors hover:bg-zinc-900/40" onClick={onView}>
-      <td className="whitespace-nowrap px-4 py-1.5 pl-6">
-        <div className="flex items-center gap-1.5">
-          <span className="text-[13px] text-zinc-200">{skill.name}</span>
-          {skill.source === 'mcp' ? (
-            <span className="rounded bg-sky-900/40 px-1 text-[9px] font-medium text-sky-300">mcp</span>
-          ) : skill.source && skill.source !== 'builtin' ? (
-            <span
-              className="rounded bg-violet-900/40 px-1 text-[9px] font-medium text-violet-300"
-              title={tr(`作为扩展安装（${skill.source}）`, `installed as extension (${skill.source})`)}
-            >
-              {tr('扩展', 'extension')}
-            </span>
-          ) : null}
-        </div>
+      <td className="whitespace-nowrap px-4 py-1.5 pl-8">
+        <span className="text-[13px] text-zinc-200">{skill.name}</span>
         <div className="font-mono text-[10px] text-zinc-600" title={skill.key}>
           {skill.key}
         </div>

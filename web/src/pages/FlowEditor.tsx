@@ -26,6 +26,8 @@ import {
   ArrowLeft,
   Bell,
   Bot,
+  ChevronDown,
+  ChevronRight,
   CircleDot,
   Clock,
   GitBranch,
@@ -60,7 +62,7 @@ import {
 } from '@/api/flows';
 import { useI18n } from '@/i18n/locale';
 import { useAuth } from '@/store/auth';
-import { toolSkill, skillLabel, orderedSkillKeys } from '@/lib/toolSkill';
+import { toolGroupKey, groupTag, groupTitle, orderedGroupKeys } from '@/lib/toolSkill';
 
 // ---------- node visual spec ----------------------------------------------
 
@@ -1079,13 +1081,20 @@ function ToolPalette({
   const byCat = useMemo(() => {
     const m = new Map<string, FlowToolMeta[]>();
     for (const t of filtered) {
-      const c = toolSkill(t.name);
+      const c = toolGroupKey(t.name);
       if (!m.has(c)) m.set(c, []);
       m.get(c)!.push(t);
     }
     return m;
   }, [filtered]);
-  const cats = useMemo(() => orderedSkillKeys(byCat.keys()), [byCat]);
+  const cats = useMemo(() => orderedGroupKeys(byCat.keys()), [byCat]);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const toggleGroup = (k: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      next.has(k) ? next.delete(k) : next.add(k);
+      return next;
+    });
 
   return (
     <div className="flex min-h-0 flex-1 flex-col border-t border-zinc-800">
@@ -1110,12 +1119,23 @@ function ToolPalette({
         ) : cats.length === 0 ? (
           <div className="px-2 py-3 text-[11px] text-zinc-600">{tr('无匹配', 'No match')}</div>
         ) : (
-          cats.map((cat) => (
+          cats.map((cat) => {
+            const tag = groupTag(cat);
+            const isCollapsed = collapsed.has(cat);
+            return (
             <div key={cat} className="mb-1">
-              <div className="px-2 pt-2 text-[10px] uppercase tracking-wide text-zinc-600">
-                {skillLabel(cat, locale === 'zh-CN')}
-              </div>
-              {byCat.get(cat)!.map((t) => (
+              <button
+                type="button"
+                onClick={() => toggleGroup(cat)}
+                className="flex w-full items-center gap-1 px-2 pt-2 pb-0.5 text-left text-[10px] uppercase tracking-wide text-zinc-500 hover:text-zinc-300"
+              >
+                {isCollapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
+                <span>{groupTitle(cat, locale === 'zh-CN')}</span>
+                {tag === 'mcp' && <span className="rounded bg-sky-900/40 px-1 text-[8px] font-medium normal-case text-sky-300">mcp</span>}
+                {tag === 'ext' && <span className="rounded bg-violet-900/40 px-1 text-[8px] font-medium normal-case text-violet-300">{tr('扩展', 'ext')}</span>}
+                <span className="text-zinc-600">{byCat.get(cat)!.length}</span>
+              </button>
+              {!isCollapsed && byCat.get(cat)!.map((t) => (
                 <button
                   key={t.name}
                   type="button"
@@ -1140,7 +1160,8 @@ function ToolPalette({
                 </button>
               ))}
             </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>

@@ -1,16 +1,19 @@
 // toolSkill — the single source of truth for grouping tools into skills.
 //
 // A "skill" here is the organising layer above atomic tools (the node /
-// execution model is unchanged): it just answers "which group does this tool
-// belong to". Both the workflow tool palette (FlowEditor) and the Skills page
-// group by this one function — there is no separate "category" / CATEGORY_ORDER
-// concept anymore.
+// execution model is unchanged). Both the workflow tool palette and the
+// Skills page group by these helpers — there is no separate "category" /
+// CATEGORY_ORDER concept anymore.
 //
-// MCP tools group by their server (each server is its own bundle, e.g. the
-// k8s server = the k8s tools). Built-in tools map by name into 6 curated
-// skills; anything unmatched falls to "other".
+// A group is one of:
+//   - a curated built-in skill (6 of them), keyed by the tool's WIRE name;
+//   - an MCP server: each server is its own group (tag "mcp");
+//   - a SKILL.md extension pack (category === "skill"): its own group (tag
+//     "ext").
+// Everything maps to a real group — "other" is a last-resort that should stay
+// empty in practice.
 
-export const SKILL_ORDER = ['observe', 'device', 'fleet', 'incident', 'knowledge', 'cloud'] as const;
+export const SKILL_ORDER = ['observe', 'device', 'fleet', 'incident', 'knowledge', 'cloud', 'other'] as const;
 
 const SKILL_LABEL: Record<string, { zh: string; en: string }> = {
   observe: { zh: '观测', en: 'Observability' },
@@ -22,33 +25,51 @@ const SKILL_LABEL: Record<string, { zh: string; en: string }> = {
   other: { zh: '其他', en: 'Other' },
 };
 
-// toolSkill returns the skill group key for a tool name.
-export function toolSkill(name: string): string {
-  if (name.startsWith('mcp__')) return 'mcp:' + (name.split('__')[1] || 'mcp');
-  if (/^(get_)?host_/.test(name) || name.includes('restart_service')) return 'device';
-  if (/^query_(promql|logql|traceql)$/.test(name) || name === 'list_metric_catalog' || name === 'list_database_sources' || name === 'analyze_database_status') return 'observe';
-  if (name.includes('topology') || name === 'query_devices' || name === 'query_edges' || name === 'rank_edges' || name === 'find_outlier_edges' || name === 'get_edge_summary') return 'fleet';
-  if (name.includes('incident') || name.includes('alert') || name === 'query_change_events') return 'incident';
-  if (name === 'query_knowledge' || name.includes('source')) return 'knowledge';
-  if (name === 'cloud_bash' || name.includes('config_change')) return 'cloud';
+// toolGroupKey returns the group key for a tool. `wire` is the wire name (the
+// tool's `key` on the Skills page, or FlowToolMeta.name on the palette — both
+// are the unsanitized identifier). source/category are optional (the Skills
+// page has them; the flow palette doesn't).
+export function toolGroupKey(wire: string, source?: string, category?: string): string {
+  if (wire.startsWith('mcp__') || source === 'mcp') {
+    const server = wire.startsWith('mcp__') ? wire.split('__')[1] || 'mcp' : 'mcp';
+    return 'mcp:' + server;
+  }
+  if (category === 'skill') return 'skill:' + wire; // a SKILL.md pack = its own group
+  if (/^(get_)?host_/.test(wire) || wire.includes('restart_service')) return 'device';
+  if (/^query_(promql|logql|traceql)$/.test(wire) || wire === 'list_metric_catalog' || wire === 'list_database_sources' || wire === 'analyze_database_status') return 'observe';
+  if (wire.includes('topology') || wire === 'query_devices' || wire === 'query_edges' || wire === 'rank_edges' || wire === 'find_outlier_edges' || wire === 'get_edge_summary') return 'fleet';
+  if (wire.includes('incident') || wire.includes('alert') || wire === 'query_change_events') return 'incident';
+  if (wire === 'query_knowledge' || wire === 'web_search' || wire.includes('source')) return 'knowledge';
+  if (wire === 'cloud_bash' || wire.includes('config_change')) return 'cloud';
   return 'other';
 }
 
-// skillLabel resolves a skill key to a display label. MCP server groups are
-// dynamic ("MCP · <server>"); the curated skills use the fixed map.
-export function skillLabel(key: string, zh: boolean): string {
-  if (key.startsWith('mcp:')) return 'MCP · ' + key.slice(4);
-  const l = SKILL_LABEL[key];
-  return l ? (zh ? l.zh : l.en) : key;
+// groupTag returns the type badge for a group key: 'mcp' for MCP servers,
+// 'ext' for extension packs, '' for built-in skills.
+export function groupTag(key: string): '' | 'mcp' | 'ext' {
+  if (key.startsWith('mcp:')) return 'mcp';
+  if (key.startsWith('skill:')) return 'ext';
+  return '';
 }
 
-// orderedSkillKeys returns the present skill keys in display order: the 6
-// curated skills first (fixed order), then MCP server groups (alphabetical),
-// then any remaining (e.g. "other") — so nothing is ever dropped.
-export function orderedSkillKeys(present: Iterable<string>): string[] {
-  const set = new Set(present);
+// groupTitle resolves a group key to its section title. MCP servers show the
+// server name, extension packs show the pack's display name (passed in via
+// fallback), curated skills use the fixed label.
+export function groupTitle(key: string, zh: boolean, fallback?: string): string {
+  if (key.startsWith('mcp:')) return key.slice(4);
+  if (key.startsWith('skill:')) return fallback || key.slice(6);
+  const l = SKILL_LABEL[key];
+  return l ? (zh ? l.zh : l.en) : fallback || key;
+}
+
+// orderedGroupKeys: curated skills first (fixed order), then MCP servers
+// (alphabetical), then extension packs (alphabetical), then anything else.
+export function orderedGroupKeys(keys: Iterable<string>): string[] {
+  const set = new Set(keys);
   const curated = SKILL_ORDER.filter((k) => set.has(k));
   const mcp = [...set].filter((k) => k.startsWith('mcp:')).sort();
-  const rest = [...set].filter((k) => !curated.includes(k as (typeof SKILL_ORDER)[number]) && !k.startsWith('mcp:')).sort();
-  return [...curated, ...mcp, ...rest];
+  const ext = [...set].filter((k) => k.startsWith('skill:')).sort();
+  const used = new Set<string>([...curated, ...mcp, ...ext]);
+  const rest = [...set].filter((k) => !used.has(k)).sort();
+  return [...curated, ...mcp, ...ext, ...rest];
 }
