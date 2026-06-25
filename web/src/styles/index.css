@@ -294,6 +294,64 @@ html.light .rounded-lg.bg-zinc-900\/40 {
   box-shadow: 0 1px 2px 0 rgb(15 23 42 / 0.04), 0 1px 6px -1px rgb(15 23 42 / 0.04);
 }
 
+/* ---- Remap gaps closed 2026-06-25 -------------------------------------
+   Audited the whole app: the blocks above miss (a) the zinc /50 opacity
+   tier, (b) DARK semantic fills bg-*-900/950 (badges / banners) which go
+   muddy on white, (c) several pale semantic TEXT shades (400 + the colors
+   not yet listed), and (d) dark semantic borders. Same html.light
+   higher-specificity approach — dark mode is untouched. */
+
+/* (a) zinc /50 opacity tier (section header bands, soft cards, hovers) */
+html.light .bg-zinc-950\/50              { background-color: rgb(var(--bg) / 0.6); }
+html.light .bg-zinc-900\/50              { background-color: rgb(var(--card-soft)); }
+html.light .bg-zinc-800\/50              { background-color: rgb(226 232 240 / 0.6); }
+
+/* (b) dark semantic fills -> light tints (bare + common opacity variants) */
+html.light .bg-red-900,
+html.light .bg-red-950,
+html.light .bg-red-900\/40,
+html.light .bg-red-950\/30,
+html.light .bg-red-950\/40               { background-color: rgb(254 226 226); }  /* red-100 */
+html.light .bg-amber-900,
+html.light .bg-amber-950,
+html.light .bg-amber-900\/40             { background-color: rgb(254 243 199); }  /* amber-100 */
+html.light .bg-emerald-900,
+html.light .bg-emerald-950,
+html.light .bg-emerald-900\/40           { background-color: rgb(209 250 229); }  /* emerald-100 */
+html.light .bg-green-900                  { background-color: rgb(220 252 231); }  /* green-100 */
+html.light .bg-sky-900,
+html.light .bg-sky-900\/40               { background-color: rgb(224 242 254); }  /* sky-100 */
+html.light .bg-violet-900,
+html.light .bg-violet-950,
+html.light .bg-violet-900\/40            { background-color: rgb(237 233 254); }  /* violet-100 */
+html.light .bg-indigo-900,
+html.light .bg-indigo-950                { background-color: rgb(224 231 255); }  /* indigo-100 */
+
+/* (c) remaining pale semantic text -> -700 (AA contrast on white) */
+html.light .text-red-400                 { color: rgb(185 28 28); }   /* red-700 */
+html.light .text-emerald-400             { color: rgb(4 120 87); }    /* emerald-700 */
+html.light .text-sky-400                 { color: rgb(3 105 161); }   /* sky-700 */
+html.light .text-violet-200,
+html.light .text-violet-300,
+html.light .text-violet-400              { color: rgb(109 40 217); }  /* violet-700 */
+html.light .text-indigo-400              { color: rgb(67 56 202); }   /* indigo-700 */
+html.light .text-rose-300,
+html.light .text-rose-400                { color: rgb(190 18 60); }   /* rose-700 */
+html.light .text-blue-300,
+html.light .text-blue-400                { color: rgb(29 78 216); }   /* blue-700 */
+html.light .text-cyan-400                { color: rgb(14 116 144); }  /* cyan-700 */
+html.light .text-teal-400                { color: rgb(15 118 110); }  /* teal-700 */
+html.light .text-orange-200,
+html.light .text-orange-300              { color: rgb(194 65 12); }   /* orange-700 */
+html.light .text-green-300               { color: rgb(21 128 61); }   /* green-700 */
+
+/* (d) dark semantic borders -> light tints */
+html.light .border-red-900,
+html.light .border-red-800               { border-color: rgb(254 202 202); }  /* red-200 */
+html.light .border-emerald-900           { border-color: rgb(167 243 208); }  /* emerald-200 */
+html.light .border-indigo-900            { border-color: rgb(199 210 254); }  /* indigo-200 */
+html.light .border-violet-900            { border-color: rgb(221 214 254); }  /* violet-200 */
+
 body {
   margin: 0;
   font-family: theme('fontFamily.sans');
