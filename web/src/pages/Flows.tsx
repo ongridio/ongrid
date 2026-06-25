@@ -207,7 +207,16 @@ export default function FlowsPage() {
               className="flex cursor-pointer items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900/40 px-4 py-3 transition-colors hover:border-zinc-700"
               onClick={() => navigate(`/workflows/${f.id}`)}
             >
-              <WorkflowIcon size={16} className={cn('shrink-0', f.enabled ? 'text-indigo-400' : 'text-zinc-600')} />
+              <div
+                className={cn(
+                  'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border',
+                  f.enabled
+                    ? 'border-indigo-500/30 bg-indigo-500/10 text-indigo-400'
+                    : 'border-zinc-800 bg-zinc-900 text-zinc-600',
+                )}
+              >
+                <WorkflowIcon size={15} />
+              </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="truncate text-[13px] font-medium text-zinc-200">{f.name}</span>
