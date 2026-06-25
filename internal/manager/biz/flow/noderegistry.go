@@ -180,6 +180,19 @@ func registerBuiltins() {
 		// OutputShape dynamic (the declared field names); frontend reads config.fields keys.
 		Execute: execTransform,
 	})
+	RegisterNode(&NodeSpec{
+		Type: NodeHTTP, Kind: KindAction, Category: "action",
+		LabelZh: "HTTP 请求", LabelEn: "HTTP Request",
+		ConfigFields: []ConfigFieldSpec{
+			{Key: "method", LabelZh: "方法", LabelEn: "Method", Kind: "select", Options: []string{"GET", "POST", "PUT", "PATCH", "DELETE"}},
+			{Key: "url", LabelZh: "URL（支持 {{…}}）", LabelEn: "URL ({{…}} templates)", Kind: "text", Placeholder: "https://api.example.com/v1/{{nodes.a.output.result.id}}"},
+			{Key: "headers", LabelZh: "请求头（JSON 对象，值支持 {{…}}）", LabelEn: "Headers (JSON object; values accept {{…}})", Kind: "json", Placeholder: `{"Authorization": "Bearer {{vars.token}}"}`},
+			{Key: "body", LabelZh: "请求体（JSON / 文本，支持 {{…}}）", LabelEn: "Body (JSON / text; {{…}} templates)", Kind: "textarea", Placeholder: `{"text": "{{nodes.diag.output.answer}}"}`},
+			{Key: "timeout_seconds", LabelZh: "超时秒数（默认 30，最大 120）", LabelEn: "Timeout seconds (default 30, max 120)", Kind: "text", Placeholder: "30"},
+		},
+		OutputShape: []string{"status", "body", "headers"},
+		Execute:     execHTTP,
+	})
 }
 
 // --- built-in executors (migrated verbatim from the old execute switch) ---

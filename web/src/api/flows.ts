@@ -16,7 +16,8 @@ export type FlowNodeType =
   | 'tool'
   | 'condition'
   | 'notify'
-  | 'set';
+  | 'set'
+  | 'http_request';
 
 export type FlowGraphNode = {
   id: string;

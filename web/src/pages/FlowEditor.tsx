@@ -30,6 +30,7 @@ import {
   ChevronRight,
   CircleDot,
   Clock,
+  Globe,
   GitBranch,
   History,
   Shuffle,
@@ -78,12 +79,13 @@ const NODE_META: Record<FlowNodeType, { icon: typeof Bot; color: string; zh: str
   notify: { icon: Bell, color: 'text-rose-400', zh: '通知', en: 'Notify' },
   set: { icon: Variable, color: 'text-zinc-400', zh: '变量', en: 'Set var' },
   transform: { icon: Shuffle, color: 'text-teal-400', zh: '字段映射', en: 'Edit Fields' },
+  http_request: { icon: Globe, color: 'text-cyan-400', zh: 'HTTP 请求', en: 'HTTP Request' },
 };
 
 // Core nodes the user hand-places. `tool` is excluded here — tool nodes
 // come from the searchable catalog (every registered BaseTool), added via
 // addNode('tool', {config:{tool}}).
-const BASE_NODE_TYPES: FlowNodeType[] = ['trigger.manual', 'trigger.alert_fired', 'trigger.cron', 'agent', 'llm', 'condition', 'notify', 'set', 'transform'];
+const BASE_NODE_TYPES: FlowNodeType[] = ['trigger.manual', 'trigger.alert_fired', 'trigger.cron', 'agent', 'llm', 'condition', 'notify', 'set', 'transform', 'http_request'];
 
 
 type CanvasData = {
@@ -250,6 +252,13 @@ const CONFIG_FIELDS: Record<FlowNodeType, FieldSpec[]> = {
   ],
   transform: [
     { key: 'fields', zh: '字段映射（JSON，每个字段值支持 {{…}}）。把上游数据重组成下游需要的字段。', en: 'Field mapping (JSON; each value accepts {{…}}). Reshape upstream data into the fields a downstream node needs.', kind: 'json' },
+  ],
+  http_request: [
+    { key: 'method', zh: '方法（GET / POST / PUT / PATCH / DELETE）', en: 'Method (GET / POST / PUT / PATCH / DELETE)', kind: 'text', placeholder: 'GET' },
+    { key: 'url', zh: 'URL（支持 {{…}}）', en: 'URL ({{…}} templates)', kind: 'text', placeholder: 'https://api.example.com/v1/{{nodes.a.output.result.id}}' },
+    { key: 'headers', zh: '请求头（JSON 对象，值支持 {{…}}）', en: 'Headers (JSON object; values accept {{…}})', kind: 'json', placeholder: '{"Authorization": "Bearer {{vars.token}}"}' },
+    { key: 'body', zh: '请求体（JSON / 文本，支持 {{…}}）', en: 'Body (JSON / text; {{…}} templates)', kind: 'textarea', placeholder: '{"text": "{{nodes.diag.output.answer}}"}' },
+    { key: 'timeout_seconds', zh: '超时秒数（默认 30，最大 120）', en: 'Timeout seconds (default 30, max 120)', kind: 'text', placeholder: '30' },
   ],
 };
 

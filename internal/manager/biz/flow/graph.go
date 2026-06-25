@@ -34,6 +34,7 @@ const (
 	NodeNotify        = "notify"
 	NodeSet           = "set"
 	NodeTransform     = "transform"
+	NodeHTTP          = "http_request"
 )
 
 // Control ports.
