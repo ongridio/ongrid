@@ -60,6 +60,8 @@ processors:
 exporters:
   otlphttp/manager:
     endpoint: {{ .Endpoint }}
+    tls:
+      insecure_skip_verify: {{ .TLSInsecureSkipVerify }}
     {{- if .AuthHeader }}
     headers:
       Authorization: "{{ .AuthHeader }}"
@@ -99,6 +101,7 @@ service:
 //	grpc_endpoint : string (default "127.0.0.1:4317")
 //	http_endpoint : string (default "127.0.0.1:4318")
 //	extra_attrs : map[string]string (extra resource attributes)
+//	tls_insecure_skip_verify : bool (default true; set false with a real cert)
 //
 // The Endpoint must be the manager's public OTLP HTTP write URL (e.g.
 // https://manager.example.com/v1/traces). Auth: when AuthUser is set we
@@ -115,6 +118,19 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 	httpEP := stringOr(cfg.Spec, "http_endpoint", "127.0.0.1:4318")
 	extra := stringMap(cfg.Spec, "extra_attrs")
 
+	// Default to skip-verify because the standard install ships a self-signed
+	// manager cert (deploy/install/upgrade.sh), and the OTLP push goes to the
+	// manager's HTTPS /v1/traces. Without this the exporter fails
+	// "x509: certificate signed by unknown authority" and no edge span ever
+	// lands — mirrors the logs plugin's tls_insecure_skip_verify default.
+	// Operators who plug in a real cert can set spec.tls_insecure_skip_verify=false.
+	tlsInsecure := true
+	if v, ok := cfg.Spec["tls_insecure_skip_verify"]; ok {
+		if b, ok := v.(bool); ok {
+			tlsInsecure = b
+		}
+	}
+
 	authHeader := ""
 	if cfg.AuthPass != "" {
 		if cfg.AuthUser != "" {
@@ -127,12 +143,13 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 	// text/template ranges over maps in key-sorted order (Go 1.12+), so
 	// passing the raw map yields stable rendered output across runs.
 	data := map[string]any{
-		"EdgeID":       cfg.EdgeID,
-		"GRPCEndpoint": grpcEP,
-		"HTTPEndpoint": httpEP,
-		"ExtraAttrs":   extra,
-		"Endpoint":     cfg.Endpoint,
-		"AuthHeader":   authHeader,
+		"EdgeID":                cfg.EdgeID,
+		"GRPCEndpoint":          grpcEP,
+		"HTTPEndpoint":          httpEP,
+		"ExtraAttrs":            extra,
+		"Endpoint":              cfg.Endpoint,
+		"AuthHeader":            authHeader,
+		"TLSInsecureSkipVerify": tlsInsecure,
 	}
 
 	tmpl, err := template.New("otelcol").Parse(otelcolTemplate)

@@ -57,6 +57,42 @@ func TestRenderHappyPath(t *testing.T) {
 	}
 }
 
+func TestRenderTLSInsecureSkipVerifyDefaultsTrue(t *testing.T) {
+	// The standard install ships a self-signed manager cert, so the OTLP push
+	// to the HTTPS /v1/traces endpoint must skip verification by default —
+	// otherwise the exporter fails x509 and no edge span ever lands.
+	cfg := plugins.PluginConfig{
+		Enabled:  true,
+		EdgeID:   1,
+		Endpoint: "https://manager.example.com/v1/traces",
+	}
+	out, err := render(cfg)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	body := string(out)
+	if !strings.Contains(body, "tls:") || !strings.Contains(body, "insecure_skip_verify: true") {
+		t.Errorf("expected tls.insecure_skip_verify: true by default\n--- body ---\n%s", body)
+	}
+}
+
+func TestRenderTLSInsecureSkipVerifyOptOut(t *testing.T) {
+	// Operators with a real cert can turn verification back on.
+	cfg := plugins.PluginConfig{
+		Enabled:  true,
+		EdgeID:   1,
+		Endpoint: "https://manager.example.com/v1/traces",
+		Spec:     map[string]interface{}{"tls_insecure_skip_verify": false},
+	}
+	out, err := render(cfg)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if body := string(out); !strings.Contains(body, "insecure_skip_verify: false") {
+		t.Errorf("expected insecure_skip_verify: false when opted out\n--- body ---\n%s", body)
+	}
+}
+
 func TestRenderDefaultEndpoints(t *testing.T) {
 	cfg := plugins.PluginConfig{
 		Enabled:  true,
@@ -126,4 +162,3 @@ func TestRenderRejectsMissingEdgeID(t *testing.T) {
 		t.Errorf("render must reject missing edge_id")
 	}
 }
-
