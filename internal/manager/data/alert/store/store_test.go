@@ -77,7 +77,8 @@ func TestIncidentEventRoundTrip(t *testing.T) {
 	if err := repo.CreateEvent(ctx, ev); err != nil {
 		t.Fatalf("CreateEvent: %v", err)
 	}
-	if err := repo.BumpIncidentFiring(ctx, got.ID, incident.FirstFiredAt.Add(5*time.Minute)); err != nil {
+	bumpedValue, bumpedThreshold := 42.0, 300.0
+	if err := repo.BumpIncidentFiring(ctx, got.ID, incident.FirstFiredAt.Add(5*time.Minute), "edge 2 cpu high (> 300)", &bumpedValue, &bumpedThreshold); err != nil {
 		t.Fatalf("BumpIncidentFiring: %v", err)
 	}
 	if err := repo.UpdateIncidentStatus(ctx, got.ID, model.IncidentStatusAcknowledged, ptrUint64(99), incident.FirstFiredAt.Add(6*time.Minute)); err != nil {
@@ -96,6 +97,15 @@ func TestIncidentEventRoundTrip(t *testing.T) {
 	}
 	if gotAfter.EventCount != 2 {
 		t.Fatalf("event_count = %d", gotAfter.EventCount)
+	}
+	if gotAfter.Summary != "edge 2 cpu high (> 300)" {
+		t.Fatalf("summary = %q, want refreshed", gotAfter.Summary)
+	}
+	if gotAfter.Value == nil || *gotAfter.Value != bumpedValue {
+		t.Fatalf("value = %v, want %v", gotAfter.Value, bumpedValue)
+	}
+	if gotAfter.Threshold == nil || *gotAfter.Threshold != bumpedThreshold {
+		t.Fatalf("threshold = %v, want %v", gotAfter.Threshold, bumpedThreshold)
 	}
 
 	list, err := repo.ListEventsByIncident(ctx, got.ID, 10)

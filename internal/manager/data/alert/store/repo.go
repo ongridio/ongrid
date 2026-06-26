@@ -173,16 +173,22 @@ func (r *Repo) UpdateIncidentStatus(ctx context.Context, id uint64, status strin
 }
 
 // BumpIncidentFiring increments event_count and refreshes last_fired_at on a
-// re-firing incident. Status is intentionally left untouched: an Ack or
-// Silence sticks across subsequent firings (rules 3 and 4).
+// re-firing incident. It also refreshes summary/value/threshold from the
+// latest firing so edits to the rule (e.g. a changed threshold) are reflected
+// in the open incident rather than frozen at first creation. Status is
+// intentionally left untouched: an Ack or Silence sticks across subsequent
+// firings (rules 3 and 4).
 // Use ReopenIncident for the resolved -> open transition.
-func (r *Repo) BumpIncidentFiring(ctx context.Context, id uint64, firedAt time.Time) error {
+func (r *Repo) BumpIncidentFiring(ctx context.Context, id uint64, firedAt time.Time, summary string, value, threshold *float64) error {
 	if firedAt.IsZero() {
 		firedAt = time.Now().UTC()
 	}
 	res := r.db.WithContext(ctx).Model(&model.Incident{}).Where("id = ?", id).Updates(map[string]any{
 		"last_fired_at": firedAt,
 		"event_count":   gorm.Expr("event_count + ?", 1),
+		"summary":       summary,
+		"value":         value,
+		"threshold":     threshold,
 	})
 	if res.Error != nil {
 		return res.Error
@@ -195,8 +201,10 @@ func (r *Repo) BumpIncidentFiring(ctx context.Context, id uint64, firedAt time.T
 
 // ReopenIncident transitions a resolved incident back to open and clears the
 // resolved_at / resolved_by columns. Used when a re-firing arrives for a
-// previously resolved incident with the same dedupe_key.
-func (r *Repo) ReopenIncident(ctx context.Context, id uint64, firedAt time.Time) error {
+// previously resolved incident with the same dedupe_key. It also refreshes
+// summary/value/threshold from the latest firing so the reopened incident
+// reflects the current rule rather than the content frozen at first creation.
+func (r *Repo) ReopenIncident(ctx context.Context, id uint64, firedAt time.Time, summary string, value, threshold *float64) error {
 	if firedAt.IsZero() {
 		firedAt = time.Now().UTC()
 	}
@@ -207,6 +215,9 @@ func (r *Repo) ReopenIncident(ctx context.Context, id uint64, firedAt time.Time)
 		"silenced_until": nil,
 		"resolved_at":    nil,
 		"resolved_by":    nil,
+		"summary":        summary,
+		"value":          value,
+		"threshold":      threshold,
 	})
 	if res.Error != nil {
 		return res.Error

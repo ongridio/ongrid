@@ -371,16 +371,19 @@ func (u *Usecase) RecordFiring(ctx context.Context, in FiringInput) (*FiringResu
 		// Existing incident path (cold or race-recovery).
 		switch existing.Status {
 		case model.IncidentStatusResolved:
-			if err := u.repo.ReopenIncident(ctx, existing.ID, occurredAt); err != nil {
+			if err := u.repo.ReopenIncident(ctx, existing.ID, occurredAt, in.Summary, in.Value, in.Threshold); err != nil {
 				return nil, fmt.Errorf("reopen incident: %w", err)
 			}
 			existing.Status = model.IncidentStatusOpen
 			existing.SilencedUntil = nil
 			existing.ResolvedAt = nil
 			existing.ResolvedBy = nil
+			existing.Summary = in.Summary
+			existing.Value = in.Value
+			existing.Threshold = in.Threshold
 			isReopen = true
 		default:
-			if err := u.repo.BumpIncidentFiring(ctx, existing.ID, occurredAt); err != nil {
+			if err := u.repo.BumpIncidentFiring(ctx, existing.ID, occurredAt, in.Summary, in.Value, in.Threshold); err != nil {
 				return nil, fmt.Errorf("bump incident: %w", err)
 			}
 		}

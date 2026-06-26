@@ -57,8 +57,8 @@ type Repo interface {
 	// Firing path.
 	GetIncidentByDedupeKey(ctx context.Context, dedupeKey string) (*model.Incident, error)
 	CreateIncident(ctx context.Context, in *model.Incident) error
-	BumpIncidentFiring(ctx context.Context, id uint64, firedAt time.Time) error
-	ReopenIncident(ctx context.Context, id uint64, firedAt time.Time) error
+	BumpIncidentFiring(ctx context.Context, id uint64, firedAt time.Time, summary string, value, threshold *float64) error
+	ReopenIncident(ctx context.Context, id uint64, firedAt time.Time, summary string, value, threshold *float64) error
 	MarkIncidentNotified(ctx context.Context, id uint64, at time.Time) error
 
 	// Silence matching for the firing path.

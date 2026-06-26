@@ -295,7 +295,7 @@ func (r *fakeRepo) CreateIncident(_ context.Context, in *model.Incident) error {
 	return nil
 }
 
-func (r *fakeRepo) BumpIncidentFiring(_ context.Context, id uint64, firedAt time.Time) error {
+func (r *fakeRepo) BumpIncidentFiring(_ context.Context, id uint64, firedAt time.Time, summary string, value, threshold *float64) error {
 	r.bumpCalls++
 	i, ok := r.incidents[id]
 	if !ok {
@@ -303,10 +303,13 @@ func (r *fakeRepo) BumpIncidentFiring(_ context.Context, id uint64, firedAt time
 	}
 	i.LastFiredAt = firedAt
 	i.EventCount++
+	i.Summary = summary
+	i.Value = value
+	i.Threshold = threshold
 	return nil
 }
 
-func (r *fakeRepo) ReopenIncident(_ context.Context, id uint64, firedAt time.Time) error {
+func (r *fakeRepo) ReopenIncident(_ context.Context, id uint64, firedAt time.Time, summary string, value, threshold *float64) error {
 	r.reopenCalls++
 	i, ok := r.incidents[id]
 	if !ok {
@@ -318,6 +321,9 @@ func (r *fakeRepo) ReopenIncident(_ context.Context, id uint64, firedAt time.Tim
 	i.ResolvedAt = nil
 	i.ResolvedBy = nil
 	i.EventCount++
+	i.Summary = summary
+	i.Value = value
+	i.Threshold = threshold
 	return nil
 }
 
