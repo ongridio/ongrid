@@ -585,6 +585,12 @@ func (r *Repo) UpdateRule(ctx context.Context, id uint64, in *model.Rule) error 
 		"labels_json":      in.LabelsJSON,
 		"annotations_json": in.AnnotationsJSON,
 		"runbook_url":      in.RunbookURL,
+		// 发送策略 (send-policy): a map-based Updates only writes the keys
+		// listed here — omitting these three silently dropped every edit to
+		// the rule's dampening window / threshold / pinned channels.
+		"notify_window_seconds":   in.NotifyWindowSeconds,
+		"notify_min_fires":        in.NotifyMinFires,
+		"notify_channel_ids_json": in.NotifyChannelIDsJSON,
 	}
 	res := r.db.WithContext(ctx).Model(&model.Rule{}).Where("id = ?", id).Updates(updates)
 	if res.Error != nil {
