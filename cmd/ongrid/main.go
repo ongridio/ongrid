@@ -1951,6 +1951,32 @@ func main() {
 		})
 	}
 
+	// Device presence reconciler: per-event MarkOnline/MarkOffline can't
+	// flip a device offline when its edge no longer exists (hard delete) or
+	// re-registered under a new fingerprint, and a manager restart while an
+	// edge is offline leaves the denormalised flag stale. This sweep flips
+	// online devices back offline when no linked edge is online — healing
+	// orphan "ghost" devices that otherwise read as perpetually online in
+	// the device list / query_devices. Runs once at boot, then every 60s
+	// (same cadence as edge offline detection). See #145.
+	eg.Go(func() error {
+		if _, err := deviceUC.ReconcilePresence(egCtx); err != nil {
+			log.Warn("device presence reconcile (boot) failed", slog.Any("err", err))
+		}
+		t := time.NewTicker(60 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-egCtx.Done():
+				return nil
+			case <-t.C:
+				if _, err := deviceUC.ReconcilePresence(egCtx); err != nil {
+					log.Warn("device presence reconcile failed", slog.Any("err", err))
+				}
+			}
+		}
+	})
+
 	// Pipeline evaluator: runs metric_raw / metric_anomaly /
 	// metric_forecast / metric_burn_rate rules on a ticker. Also refreshes
 	// the edge_last_seen_seconds_ago gauge (replacement

@@ -198,6 +198,34 @@ func (r *Repo) MarkOffline(ctx context.Context, id uint64) error {
 	return nil
 }
 
+// reconcileOfflineOrphansSQL flips online devices back to offline when no
+// linked, non-deleted edge is online. Correlated NOT EXISTS over the
+// edge_devices junction joined to edges. Plain SQL (no GORM soft-delete
+// scope) so the delete_marker filters are explicit and the statement is
+// portable across the MySQL and SQLite backends. delete_marker = 0 is the
+// soft_delete.DeletedAt "live row" sentinel.
+const reconcileOfflineOrphansSQL = `
+UPDATE devices SET online = ?, updated_at = ?
+WHERE delete_marker = 0 AND online = ?
+  AND NOT EXISTS (
+    SELECT 1 FROM edge_devices ed
+    JOIN edges e ON e.id = ed.edge_id
+    WHERE ed.device_id = devices.id
+      AND ed.delete_marker = 0
+      AND e.delete_marker = 0
+      AND e.status = ?
+  )`
+
+// ReconcileOfflineOrphans implements biz/device.Repo. See the interface doc.
+func (r *Repo) ReconcileOfflineOrphans(ctx context.Context) (int64, error) {
+	now := time.Now().UTC()
+	res := r.db.WithContext(ctx).Exec(reconcileOfflineOrphansSQL, false, now, true, "online")
+	if res.Error != nil {
+		return 0, res.Error
+	}
+	return res.RowsAffected, nil
+}
+
 // Get returns the device by primary key.
 func (r *Repo) Get(ctx context.Context, id uint64) (*model.Device, error) {
 	var d model.Device
