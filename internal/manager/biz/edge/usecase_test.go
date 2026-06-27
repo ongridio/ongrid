@@ -194,6 +194,10 @@ func (d *fakeDeviceRepo) Delete(_ context.Context, id uint64) error {
 	return nil
 }
 
+func (d *fakeDeviceRepo) ReconcileOfflineOrphans(_ context.Context) (int64, error) {
+	return 0, nil
+}
+
 // fakeRepo is an in-memory biz.Repo for usecase-level tests. Mirrors the
 // SQLite implementation's observable semantics (soft-delete hides rows,
 // lookups by AccessKey exclude deleted, etc.) without dragging in gorm.

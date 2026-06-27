@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm/logger"
 
 	model "github.com/ongridio/ongrid/internal/manager/model/device"
+	edgemodel "github.com/ongridio/ongrid/internal/manager/model/edge"
 )
 
 func newDeviceTestDB(t *testing.T) *gorm.DB {
@@ -104,5 +105,82 @@ func TestEdgeDeviceLinkSoftDeleteAllowsReuse(t *testing.T) {
 	}
 	if len(rows) != 1 {
 		t.Fatalf("active relink count = %d, want 1", len(rows))
+	}
+}
+
+func TestReconcileOfflineOrphans(t *testing.T) {
+	db := newDeviceTestDB(t)
+	// The device store Migrate creates devices + edge_devices; the reconcile
+	// join also needs the edges table.
+	if err := db.AutoMigrate(&edgemodel.Edge{}); err != nil {
+		t.Fatalf("AutoMigrate edges: %v", err)
+	}
+	repo := NewRepo(db)
+	ctx := context.Background()
+
+	mkOnlineDevice := func(fp string) uint64 {
+		d, err := repo.FindOrCreateByFingerprint(ctx, sampleDevice(fp))
+		if err != nil {
+			t.Fatalf("create device %s: %v", fp, err)
+		}
+		if err := repo.MarkOnline(ctx, d.ID); err != nil {
+			t.Fatalf("MarkOnline %s: %v", fp, err)
+		}
+		return d.ID
+	}
+	linkEdge := func(ak, status string, deviceID uint64, deleted bool) {
+		e := &edgemodel.Edge{AccessKeyID: ak, SecretKeyHash: "x", Status: status}
+		if err := db.Create(e).Error; err != nil {
+			t.Fatalf("create edge %s: %v", ak, err)
+		}
+		if err := db.Create(&model.EdgeDevice{EdgeID: e.ID, DeviceID: deviceID, Type: model.EdgeDeviceRelationHost}).Error; err != nil {
+			t.Fatalf("link edge %s: %v", ak, err)
+		}
+		if deleted {
+			if err := db.Delete(&edgemodel.Edge{}, e.ID).Error; err != nil {
+				t.Fatalf("soft-delete edge %s: %v", ak, err)
+			}
+		}
+	}
+
+	devOnline := mkOnlineDevice("dev-online")    // online edge linked -> stays online
+	devOffEdge := mkOnlineDevice("dev-off-edge") // offline edge linked -> flipped offline
+	devDelEdge := mkOnlineDevice("dev-del-edge") // edge soft-deleted -> flipped offline
+	devNoEdge := mkOnlineDevice("dev-no-edge")   // no edge at all -> flipped offline
+
+	linkEdge("ak-online", "online", devOnline, false)
+	linkEdge("ak-offline", "offline", devOffEdge, false)
+	linkEdge("ak-deleted", "online", devDelEdge, true) // online status but deleted row
+
+	n, err := repo.ReconcileOfflineOrphans(ctx)
+	if err != nil {
+		t.Fatalf("ReconcileOfflineOrphans: %v", err)
+	}
+	if n != 3 {
+		t.Errorf("flipped count = %d, want 3 (off-edge, del-edge, no-edge)", n)
+	}
+
+	assertOnline := func(id uint64, want bool, label string) {
+		d, err := repo.Get(ctx, id)
+		if err != nil {
+			t.Fatalf("Get %s: %v", label, err)
+		}
+		if d.Online != want {
+			t.Errorf("%s online=%v, want %v", label, d.Online, want)
+		}
+	}
+	assertOnline(devOnline, true, "dev-online")
+	assertOnline(devOffEdge, false, "dev-off-edge")
+	assertOnline(devDelEdge, false, "dev-del-edge")
+	assertOnline(devNoEdge, false, "dev-no-edge")
+
+	// Idempotent: a second pass flips nothing (the live device stays online,
+	// the rest are already offline).
+	n2, err := repo.ReconcileOfflineOrphans(ctx)
+	if err != nil {
+		t.Fatalf("second reconcile: %v", err)
+	}
+	if n2 != 0 {
+		t.Errorf("second reconcile flipped %d, want 0 (idempotent)", n2)
 	}
 }
