@@ -33,6 +33,25 @@ func (u *Usecase) Repo() Repo { return u.repo }
 // Links returns the underlying junction repo. May be nil.
 func (u *Usecase) Links() EdgeDeviceRepo { return u.links }
 
+// ReconcilePresence flips orphan "ghost" devices (online=true with no
+// online linked edge) back to offline and returns how many it healed.
+// Called once at boot and then on a ticker so device presence converges
+// even across manager restarts and hard edge deletes — the per-event
+// MarkOnline/MarkOffline paths can't see an edge that no longer exists.
+func (u *Usecase) ReconcilePresence(ctx context.Context) (int64, error) {
+	if u.repo == nil {
+		return 0, errs.ErrNotWiredYet
+	}
+	n, err := u.repo.ReconcileOfflineOrphans(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if n > 0 && u.log != nil {
+		u.log.Info("device presence reconcile: flipped orphan devices offline", "count", n)
+	}
+	return n, nil
+}
+
 // Get returns one device by id.
 func (u *Usecase) Get(ctx context.Context, id uint64) (*model.Device, error) {
 	if u.repo == nil {

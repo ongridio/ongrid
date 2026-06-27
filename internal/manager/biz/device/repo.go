@@ -89,6 +89,15 @@ type Repo interface {
 	// Delete soft-deletes a device (does NOT touch its junction rows;
 	// callers should remove the junction first if they want a clean cut).
 	Delete(ctx context.Context, id uint64) error
+
+	// ReconcileOfflineOrphans flips online=true devices back to offline
+	// when none of their linked (non-deleted) edges is online. Heals
+	// orphan "ghost" devices — a device whose edge was deleted, or whose
+	// host re-registered under a new fingerprint, used to stay online
+	// forever because only a tunnel-close (HandleOffline) flipped it.
+	// Returns the number of rows flipped. Run periodically by the
+	// presence reconciler.
+	ReconcileOfflineOrphans(ctx context.Context) (int64, error)
 }
 
 // HostFacts is the subset of Device columns updated on register.
