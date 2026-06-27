@@ -205,10 +205,22 @@ func (u *Usecase) List(ctx context.Context, f ListFilter) ([]*model.Edge, error)
 	return u.repo.List(ctx, f)
 }
 
-// Delete soft-deletes an edge.
+// Delete soft-deletes an edge. The linked Device is marked offline first
+// so deleting an edge doesn't leave its host stuck "online" in the device
+// list / query_devices forever (the device row outlives the edge row; only
+// HandleOffline on a tunnel close used to flip it, so a hard delete left an
+// orphan that read as perpetually online).
 func (u *Usecase) Delete(ctx context.Context, id uint64) error {
 	if u.repo == nil {
 		return errs.ErrNotWiredYet
+	}
+	if u.devices != nil {
+		edge, err := u.repo.GetByID(ctx, id)
+		if err == nil && edge.DeviceID != nil {
+			if derr := u.devices.MarkOffline(ctx, *edge.DeviceID); derr != nil && u.log != nil {
+				u.log.Warn("delete edge: device mark-offline failed", "edge_id", id, "device_id", *edge.DeviceID, "err", derr)
+			}
+		}
 	}
 	return u.repo.Delete(ctx, id)
 }
@@ -402,11 +414,32 @@ func hashFingerprint(seed string) string {
 // pinned to online because a heartbeat arriving at all implies a live
 // session; the authenticator already set online on handshake but subsequent
 // heartbeats also refresh the timestamp.
+//
+// The linked Device's denormalised last_seen_at is refreshed too. Without
+// this it was only bumped on register (MarkOnline in HandleRegister), so a
+// continuously-connected edge left its Device.LastSeenAt frozen at the last
+// reconnect time — the device list / query_devices then showed a host as
+// "last seen hours ago" while its edge heartbeat was seconds fresh, and any
+// last_seen freshness filter ("offline > N hours") was unusable.
 func (u *Usecase) HandleHeartbeat(ctx context.Context, edgeID uint64, ts time.Time) error {
 	if u.repo == nil {
 		return errs.ErrNotWiredYet
 	}
-	return u.repo.UpdateStatus(ctx, edgeID, model.StatusOnline, ts)
+	if err := u.repo.UpdateStatus(ctx, edgeID, model.StatusOnline, ts); err != nil {
+		return err
+	}
+	// Best-effort device mirror: a stale device last_seen must not fail the
+	// heartbeat. MarkOnline sets online=true + bumps last_seen_at, which is
+	// exactly the right semantics for a live heartbeat.
+	if u.devices != nil {
+		edge, err := u.repo.GetByID(ctx, edgeID)
+		if err == nil && edge.DeviceID != nil {
+			if derr := u.devices.MarkOnline(ctx, *edge.DeviceID); derr != nil && u.log != nil {
+				u.log.Warn("heartbeat: device last_seen bump failed", "edge_id", edgeID, "device_id", *edge.DeviceID, "err", derr)
+			}
+		}
+	}
+	return nil
 }
 
 // HandleOffline flips an edge's status to offline. Called from the

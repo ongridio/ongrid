@@ -223,7 +223,7 @@ func (r *fakeRepo) GetByID(_ context.Context, id uint64) (*model.Edge, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	e, ok := r.byID[id]
-	if !ok || e.DeletedAt.Valid {
+	if !ok || e.DeletedAt != nil {
 		return nil, errs.ErrNotFound
 	}
 	cp := *e
@@ -234,7 +234,7 @@ func (r *fakeRepo) GetByAccessKey(_ context.Context, ak string) (*model.Edge, er
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, e := range r.byID {
-		if e.AccessKeyID == ak && !e.DeletedAt.Valid {
+		if e.AccessKeyID == ak && e.DeletedAt == nil {
 			cp := *e
 			return &cp, nil
 		}
@@ -246,7 +246,7 @@ func (r *fakeRepo) GetByName(_ context.Context, name string) (*model.Edge, error
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, e := range r.byID {
-		if e.Name == name && !e.DeletedAt.Valid {
+		if e.Name == name && e.DeletedAt == nil {
 			cp := *e
 			return &cp, nil
 		}
@@ -259,7 +259,7 @@ func (r *fakeRepo) List(_ context.Context, f ListFilter) ([]*model.Edge, error) 
 	defer r.mu.Unlock()
 	var out []*model.Edge
 	for _, e := range r.byID {
-		if e.DeletedAt.Valid {
+		if e.DeletedAt != nil {
 			continue
 		}
 		if f.Status != "" && e.Status != f.Status {
@@ -278,7 +278,7 @@ func (r *fakeRepo) UpdateSecretHash(_ context.Context, id uint64, hash string) e
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	e, ok := r.byID[id]
-	if !ok || e.DeletedAt.Valid {
+	if !ok || e.DeletedAt != nil {
 		return errs.ErrNotFound
 	}
 	e.SecretKeyHash = hash
@@ -290,7 +290,7 @@ func (r *fakeRepo) UpdateStatus(_ context.Context, id uint64, status string, las
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	e, ok := r.byID[id]
-	if !ok || e.DeletedAt.Valid {
+	if !ok || e.DeletedAt != nil {
 		return errs.ErrNotFound
 	}
 	e.Status = status
@@ -303,7 +303,7 @@ func (r *fakeRepo) UpdateName(_ context.Context, id uint64, name string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	e, ok := r.byID[id]
-	if !ok || e.DeletedAt.Valid {
+	if !ok || e.DeletedAt != nil {
 		return errs.ErrNotFound
 	}
 	e.Name = name
@@ -314,7 +314,7 @@ func (r *fakeRepo) SetDeviceID(_ context.Context, id, deviceID uint64) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	e, ok := r.byID[id]
-	if !ok || e.DeletedAt.Valid {
+	if !ok || e.DeletedAt != nil {
 		return errs.ErrNotFound
 	}
 	d := deviceID
@@ -326,7 +326,7 @@ func (r *fakeRepo) SetAgentVersion(_ context.Context, id uint64, v string) error
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	e, ok := r.byID[id]
-	if !ok || e.DeletedAt.Valid {
+	if !ok || e.DeletedAt != nil {
 		return errs.ErrNotFound
 	}
 	e.AgentVersion = v
@@ -337,11 +337,11 @@ func (r *fakeRepo) Delete(_ context.Context, id uint64) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	e, ok := r.byID[id]
-	if !ok || e.DeletedAt.Valid {
+	if !ok || e.DeletedAt != nil {
 		return errs.ErrNotFound
 	}
-	e.DeletedAt.Valid = true
-	e.DeletedAt.Time = time.Now()
+	now := time.Now()
+	e.DeletedAt = &now
 	return nil
 }
 
@@ -350,7 +350,7 @@ func (r *fakeRepo) Count(_ context.Context) (int64, error) {
 	defer r.mu.Unlock()
 	var n int64
 	for _, e := range r.byID {
-		if !e.DeletedAt.Valid {
+		if e.DeletedAt == nil {
 			n++
 		}
 	}
@@ -586,6 +586,84 @@ func TestHandleRegisterIsIdempotentForSameHost(t *testing.T) {
 	}
 	if got := len(devices.byID); got != 1 {
 		t.Errorf("device rows = %d, want 1 (fingerprint dedupe)", got)
+	}
+}
+
+func TestHandleHeartbeatBumpsLinkedDeviceLastSeen(t *testing.T) {
+	repo := newFakeRepo()
+	devices := newFakeDeviceRepo()
+	uc := NewUsecase(repo, devices, nil, nil)
+	ctx := context.Background()
+
+	res, err := uc.Create(ctx, "edge-hb", nil)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	info := tunnel.HostInfo{Hostname: "hb-host", OS: "linux"}
+	if err := uc.HandleRegister(ctx, res.Edge.ID, info, ""); err != nil {
+		t.Fatalf("HandleRegister: %v", err)
+	}
+	// Register marks the device online once.
+	if devices.onlineCalls != 1 {
+		t.Fatalf("precondition: onlineCalls after register = %d, want 1", devices.onlineCalls)
+	}
+
+	// A heartbeat must refresh the DEVICE last_seen too, not just the edge —
+	// otherwise a continuously-connected edge leaves Device.LastSeenAt frozen
+	// at the register time.
+	if err := uc.HandleHeartbeat(ctx, res.Edge.ID, time.Now().UTC()); err != nil {
+		t.Fatalf("HandleHeartbeat: %v", err)
+	}
+	if devices.onlineCalls != 2 {
+		t.Errorf("onlineCalls after heartbeat = %d, want 2 (device last_seen not bumped on heartbeat)", devices.onlineCalls)
+	}
+	after, err := uc.Get(ctx, res.Edge.ID)
+	if err != nil || after.DeviceID == nil {
+		t.Fatalf("Get edge / DeviceID: %v", err)
+	}
+	dev, err := devices.Get(ctx, *after.DeviceID)
+	if err != nil {
+		t.Fatalf("Get device: %v", err)
+	}
+	if !dev.Online || dev.LastSeenAt == nil {
+		t.Errorf("device online=%v lastSeen=%v after heartbeat, want online + non-nil lastSeen", dev.Online, dev.LastSeenAt)
+	}
+}
+
+func TestDeleteMarksLinkedDeviceOffline(t *testing.T) {
+	repo := newFakeRepo()
+	devices := newFakeDeviceRepo()
+	uc := NewUsecase(repo, devices, nil, nil)
+	ctx := context.Background()
+
+	res, err := uc.Create(ctx, "edge-del", nil)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	info := tunnel.HostInfo{Hostname: "del-host", OS: "linux"}
+	if err := uc.HandleRegister(ctx, res.Edge.ID, info, ""); err != nil {
+		t.Fatalf("HandleRegister: %v", err)
+	}
+	after, err := uc.Get(ctx, res.Edge.ID)
+	if err != nil || after.DeviceID == nil {
+		t.Fatalf("Get edge / DeviceID: %v", err)
+	}
+	deviceID := *after.DeviceID
+	if dev, _ := devices.Get(ctx, deviceID); dev == nil || !dev.Online {
+		t.Fatalf("precondition: device should be online before delete")
+	}
+
+	// Deleting the edge must flip the linked device offline — otherwise the
+	// host stays "online" forever in the device list with no live edge.
+	if err := uc.Delete(ctx, res.Edge.ID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	dev, err := devices.Get(ctx, deviceID)
+	if err != nil {
+		t.Fatalf("Get device after delete: %v", err)
+	}
+	if dev.Online {
+		t.Errorf("device still online after edge delete — orphan ghost not prevented")
 	}
 }
 
