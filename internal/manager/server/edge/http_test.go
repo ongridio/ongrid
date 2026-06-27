@@ -44,6 +44,8 @@ func (d *fakeDeviceRepo) UpdateHostFacts(context.Context, uint64, devicebiz.Host
 }
 func (d *fakeDeviceRepo) MarkOnline(context.Context, uint64) error  { return nil }
 func (d *fakeDeviceRepo) MarkOffline(context.Context, uint64) error { return nil }
+
+func (d *fakeDeviceRepo) ReconcileOfflineOrphans(context.Context) (int64, error) { return 0, nil }
 func (d *fakeDeviceRepo) Get(_ context.Context, id uint64) (*devicemodel.Device, error) {
 	if v, ok := d.byID[id]; ok {
 		return v, nil
