@@ -49,15 +49,15 @@
 
 **AMD64**
 ```bash
-wget https://github.com/ongridio/ongrid/releases/download/v0.8.7/ongrid-v0.8.7-linux-amd64.tar.xz
-tar -xf ongrid-v0.8.7-linux-amd64.tar.xz && cd ongrid-v0.8.7-linux-amd64
+wget https://github.com/ongridio/ongrid/releases/download/v0.9.0/ongrid-v0.9.0-linux-amd64.tar.xz
+tar -xf ongrid-v0.9.0-linux-amd64.tar.xz && cd ongrid-v0.9.0-linux-amd64
 sudo ./install.sh
 ```
 
 **ARM64**
 ```bash
-wget https://github.com/ongridio/ongrid/releases/download/v0.8.7/ongrid-v0.8.7-linux-arm64.tar.xz
-tar -xf ongrid-v0.8.7-linux-arm64.tar.xz && cd ongrid-v0.8.7-linux-arm64
+wget https://github.com/ongridio/ongrid/releases/download/v0.9.0/ongrid-v0.9.0-linux-arm64.tar.xz
+tar -xf ongrid-v0.9.0-linux-arm64.tar.xz && cd ongrid-v0.9.0-linux-arm64
 sudo ./install.sh
 ```
 
@@ -65,10 +65,10 @@ sudo ./install.sh
 
 ```bash
 # AMD64
-wget https://ongrid.cloud/dl/ongrid-v0.8.7-linux-amd64.tar.xz
+wget https://ongrid.cloud/dl/ongrid-v0.9.0-linux-amd64.tar.xz
 
 # ARM64
-wget https://ongrid.cloud/dl/ongrid-v0.8.7-linux-arm64.tar.xz
+wget https://ongrid.cloud/dl/ongrid-v0.9.0-linux-arm64.tar.xz
 ```
 
 ## インテグレーション
