@@ -343,6 +343,8 @@ type hostInfoDTO struct {
 	CPUCount      int    `json:"cpu_count,omitempty"`
 	MemTotalBytes uint64 `json:"mem_total_bytes,omitempty"`
 	IPAddress     string `json:"ip_address,omitempty"`
+	GPUAvailable  bool   `json:"gpu_available,omitempty"`
+	GPUModel      string `json:"gpu_model,omitempty"`
 }
 
 type listItem struct {
@@ -793,6 +795,8 @@ func deviceToHostInfo(d *devicemodel.Device) *hostInfoDTO {
 		CPUCount:      d.CPUCount,
 		MemTotalBytes: d.MemTotalBytes,
 		IPAddress:     d.IPAddress,
+		GPUAvailable:  d.GPUAvailable,
+		GPUModel:      d.GPUModel,
 	}
 }
 

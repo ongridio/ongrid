@@ -251,6 +251,10 @@ type HostInfo struct {
 	// can show GPU capability per device. False on hosts without
 	// NVIDIA hardware or without the proprietary driver installed.
 	GPUAvailable bool `json:"gpu_available,omitempty"`
+
+	// GPUModel is the GPU model name reported by nvidia-smi (e.g. "NVIDIA GeForce RTX 4090").
+	// Empty string when no GPU is available or nvidia-smi cannot determine the model.
+	GPUModel string `json:"gpu_model,omitempty"`
 }
 
 // RegisterEdgeRequest is the first RPC the edge sends after connecting.

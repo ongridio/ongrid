@@ -74,6 +74,7 @@ func (d *fakeDeviceRepo) UpdateHostFacts(_ context.Context, id uint64, f deviceb
 	}
 	dev.Hostname, dev.OS, dev.Arch = f.Hostname, f.OS, f.Arch
 	dev.KernelVersion, dev.CPUCount, dev.MemTotalBytes = f.KernelVersion, f.CPUCount, f.MemTotalBytes
+	dev.GPUAvailable, dev.GPUModel = f.GPUAvailable, f.GPUModel
 	d.lastFacts = f
 	return nil
 }
@@ -537,10 +538,12 @@ func TestHandleRegisterUpsertsDeviceAndLinksEdge(t *testing.T) {
 	}
 
 	info := tunnel.HostInfo{
-		Hostname: "node-1",
-		OS:       "linux",
-		Arch:     "arm64",
-		CPUCount: 8,
+		Hostname:     "node-1",
+		OS:           "linux",
+		Arch:         "arm64",
+		CPUCount:     8,
+		GPUAvailable: true,
+		GPUModel:     "NVIDIA GeForce RTX 4090",
 	}
 	if err := uc.HandleRegister(ctx, res.Edge.ID, info, ""); err != nil {
 		t.Fatalf("HandleRegister: %v", err)
@@ -565,6 +568,12 @@ func TestHandleRegisterUpsertsDeviceAndLinksEdge(t *testing.T) {
 	}
 	if dev.Hostname != info.Hostname || dev.OS != info.OS || dev.Arch != info.Arch || dev.CPUCount != info.CPUCount {
 		t.Errorf("Device facts = %+v, want hostname/os/arch/cpu = %+v", dev, info)
+	}
+	if dev.GPUAvailable != info.GPUAvailable {
+		t.Errorf("Device.GPUAvailable = %v, want %v", dev.GPUAvailable, info.GPUAvailable)
+	}
+	if dev.GPUModel != info.GPUModel {
+		t.Errorf("Device.GPUModel = %q, want %q", dev.GPUModel, info.GPUModel)
 	}
 	if !dev.Online {
 		t.Errorf("Device.Online = false, want true after register")
