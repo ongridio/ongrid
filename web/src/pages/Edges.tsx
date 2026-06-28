@@ -399,12 +399,15 @@ export default function EdgesPage() {
   );
 
   async function openServerChart(edge: Edge) {
+    // host metric 的 PromQL label 是 device_id（Device.ID），不是 edge.id。
+    // 未关联设备时（device_id 为 null）才退回到 edge.id，保证旧数据兼容。
+    const did = edge.device_id ?? edge.id;
     await openMetricDrilldown({
-      expr: `100 * (1 - avg by (device_id) (rate(node_cpu_seconds_total{device_id="${edge.id}",mode="idle"}[5m])))`,
+      expr: `100 * (1 - avg by (device_id) (rate(node_cpu_seconds_total{device_id="${did}",mode="idle"}[5m])))`,
       rangeInput: '1h',
       stepInput: '30s',
       title: `${edge.name} CPU`,
-      edgeId: edge.id,
+      edgeId: did,
     });
   }
 }

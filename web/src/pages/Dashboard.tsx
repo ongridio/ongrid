@@ -264,12 +264,14 @@ export default function DashboardPage() {
 
   const openCPUDrilldown = useCallback(async (edge: Edge) => {
     try {
+      // host metric 按 device_id（Device.ID）过滤，未关联设备时回退到 edge.id。
+      const did = edge.device_id ?? edge.id;
       await openMetricDrilldown({
-        expr: `100 * (1 - avg by (device_id) (rate(node_cpu_seconds_total{device_id="${edge.id}",mode="idle"}[5m])))`,
+        expr: `100 * (1 - avg by (device_id) (rate(node_cpu_seconds_total{device_id="${did}",mode="idle"}[5m])))`,
         rangeInput: '1h',
         stepInput: '30s',
         title: `${edge.name} CPU`,
-        edgeId: edge.id,
+        edgeId: did,
       });
       setPromErr(null);
     } catch (err) {

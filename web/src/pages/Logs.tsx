@@ -254,8 +254,8 @@ export default function LogsPage() {
       // query returns empty rather than silently dropping the filter and
       // showing ALL logs — which is what made the role chip look broken.
       const matching = edges
-        .filter((e) => Array.isArray(e.roles) && (e.roles as string[]).includes(roleFilter))
-        .map((e) => String(e.id));
+        .filter((e) => Array.isArray(e.roles) && (e.roles as string[]).includes(roleFilter) && e.device_id != null)
+        .map((e) => String(e.device_id));
       if (matching.length === 0) {
         out.push({ label: 'device_id', value: '__no_match__', op: '=' });
       } else if (matching.length === 1) {

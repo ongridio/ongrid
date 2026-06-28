@@ -17,6 +17,7 @@ coverage.html
 bin/
 dist/stage/
 dist/out/
+dist/images/
 tmp/
 
 # Stray top-level binaries from `go build` / `go run`
@@ -52,7 +53,8 @@ go.work.sum
 .vscode/
 .DS_Store
 
-# Claude Code transient files
+# Qoder / AI transient files
+.qoder/
 .claude/
 web/dist/
 web/node_modules/
