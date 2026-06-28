@@ -258,7 +258,7 @@ func (s *Scraper) HostInfo(ctx context.Context) (tunnel.HostInfo, error) {
 	// NVIDIA GPU driver detection — see gpu_detect.go.
 	hi.GPUAvailable = HasNVIDIASMI()
 	if hi.GPUAvailable {
-		hi.GPUModel = NVIDIAGPUModel()
+		hi.GPUModel = NVIDIAGPUModel(ctx)
 	}
 	return hi, nil
 }

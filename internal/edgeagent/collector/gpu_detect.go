@@ -1,8 +1,10 @@
 package collector
 
 import (
+	"context"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // HasNVIDIASMI reports whether nvidia-smi is available in PATH.
@@ -15,14 +17,19 @@ func HasNVIDIASMI() bool {
 
 // NVIDIAGPUModel returns the first GPU model name reported by nvidia-smi,
 // or empty string if nvidia-smi is unavailable or returns no data.
-func NVIDIAGPUModel() string {
-	out, err := exec.Command("nvidia-smi", "--query-gpu=name", "--format=csv,noheader").Output()
+// Uses a 5-second timeout to handle cases where nvidia-smi hangs during
+// GPU reset or driver异常.
+func NVIDIAGPUModel(ctx context.Context) string {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "nvidia-smi", "--query-gpu=name", "--format=csv,noheader").Output()
 	if err != nil {
 		return ""
 	}
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	if len(lines) == 0 {
+	trimmed := strings.TrimSpace(string(out))
+	if trimmed == "" {
 		return ""
 	}
+	lines := strings.Split(trimmed, "\n")
 	return strings.TrimSpace(lines[0])
 }
