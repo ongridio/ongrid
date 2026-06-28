@@ -270,8 +270,13 @@ log_info "installing systemd unit"
 install -m 0644 -o root -g root "${SCRIPT_DIR}/ongrid-edge.service" "$UNIT_FILE"
 systemctl daemon-reload
 
-log_info "enabling + starting ongrid-edge"
-systemctl enable --now ongrid-edge
+log_info "enabling + (re)starting ongrid-edge"
+# `restart` (not `enable --now`) so a re-install over an already-running edge
+# actually picks up the freshly-written env (new keys / cloud addr). `enable
+# --now` only `start`s, which is a no-op when the old process is still up — it
+# would keep dialing with the previous credentials and fail "unauthorized".
+systemctl enable ongrid-edge >/dev/null 2>&1 || true
+systemctl restart ongrid-edge
 sleep 5
 
 echo ""
