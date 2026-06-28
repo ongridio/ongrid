@@ -766,6 +766,15 @@ const PLUGIN_META: Record<
         'Edge-managed database exporters; the UI sends connection info and the edge writes a local secret',
       ),
   },
+  gpumetrics: {
+    label: 'gpumetrics',
+    pill: 'bg-lime-500/10 text-lime-300 ring-lime-500/30',
+    getHint: () =>
+      trInline(
+        'subprocess nvidia_gpu_exporter，GPU 利用率 / 显存 / 温度 / 功耗（由 metrics 管道抓取并上报）',
+        'subprocess nvidia_gpu_exporter — GPU utilization / memory / temperature / power (scraped and pushed by the metrics pipeline)',
+      ),
+  },
 };
 
 function pluginMeta(name: string): { label: string; pill: string; hint: string } {
@@ -939,6 +948,7 @@ function PluginsTab({ edgeId }: { edgeId: number }) {
               'procmetrics',
               'custommetrics',
               'databasemetrics',
+              'gpumetrics',
             ]);
             const topRows = rows.filter((r) => !childNames.has(r.plugin_name));
             const childRowsByParent: Record<string, PluginRow[]> = {

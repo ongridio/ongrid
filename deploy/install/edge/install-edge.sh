@@ -238,6 +238,16 @@ for exporter in mysqld_exporter postgres_exporter redis_exporter mongodb_exporte
     fi
 done
 
+# GPU exporter used by gpumetrics. Optional — only needed on hosts
+# with NVIDIA GPUs and the proprietary driver installed.
+GPU_EXPORTER_SRC="${SCRIPT_DIR}/nvidia_gpu_exporter-${OS}-${ARCH}"
+if [[ -f "$GPU_EXPORTER_SRC" ]]; then
+    log_info "installing nvidia_gpu_exporter to ${PLUGIN_BIN_DIR}/nvidia_gpu_exporter"
+    install -m 0755 -o root -g root "$GPU_EXPORTER_SRC" "${PLUGIN_BIN_DIR}/nvidia_gpu_exporter"
+else
+    log_warn "nvidia_gpu_exporter-${OS}-${ARCH} not bundled; gpumetrics plugin will fail until present"
+fi
+
 # ---------- render env file ----------
 log_info "rendering $ENV_FILE"
 mkdir -p "$CONFIG_DIR"

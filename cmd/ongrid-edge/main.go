@@ -31,6 +31,7 @@ import (
 	edgepluginhostmetrics "github.com/ongridio/ongrid/internal/edgeagent/plugins/hostmetrics"
 	edgepluginlogs "github.com/ongridio/ongrid/internal/edgeagent/plugins/logs"
 	edgepluginmetrics "github.com/ongridio/ongrid/internal/edgeagent/plugins/metrics"
+	edgeplugingpumetrics "github.com/ongridio/ongrid/internal/edgeagent/plugins/gpumetrics"
 	edgepluginprocmetrics "github.com/ongridio/ongrid/internal/edgeagent/plugins/procmetrics"
 	edgeplugintraces "github.com/ongridio/ongrid/internal/edgeagent/plugins/traces"
 	edgerestartservice "github.com/ongridio/ongrid/internal/edgeagent/restart_service"
@@ -221,6 +222,11 @@ func main() {
 		// or operator-tuned regex. Backs the Monitor "Top N processes"
 		// timeline panel via PromQL.
 		edgepluginprocmetrics.New(pluginBinDir, pluginWorkDir, pluginLog),
+		// gpumetrics plugin: subprocess nvidia_gpu_exporter. Exposes
+		// nvidia_gpu_* at :9835 (GPU utilization / memory / temp / power).
+		// Backs GPU monitoring panels via PromQL. Skips start on hosts
+		// without NVIDIA GPU driver (nvidia-smi).
+		edgeplugingpumetrics.New(pluginBinDir, pluginWorkDir, pluginLog),
 	}
 	pluginNames := make([]string, 0, len(registered))
 	for _, p := range registered {

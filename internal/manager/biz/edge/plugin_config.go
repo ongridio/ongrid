@@ -154,6 +154,7 @@ func (uc *PluginConfigUC) ListForUI(ctx context.Context, edgeID uint64) ([]Plugi
 		model.PluginNameProcMetrics,
 		model.PluginNameCustomMetrics,
 		model.PluginNameDatabaseMetrics,
+		model.PluginNameGPUMetrics,
 	}
 	out := make([]PluginRow, 0, len(knownPlugins))
 	for _, name := range knownPlugins {
@@ -233,6 +234,20 @@ func (uc *PluginConfigUC) Set(ctx context.Context, edgeID uint64, plugin string,
 		}
 	}
 	uc.notify(ctx, edgeID, plugin)
+	// gpumetrics: sync GPU exporter URL into metrics plugin target_urls.
+	// Best-effort — if it fails the subprocess still starts, just the
+	// metrics pipeline won't scrape it.
+	if plugin == model.PluginNameGPUMetrics {
+		if in.Enabled {
+			if err := uc.syncGPUTargetURL(ctx, edgeID, in.Spec); err != nil {
+				uc.log.Warn("sync GPU target URL", slog.Any("err", err))
+			}
+		} else {
+			if err := uc.removeGPUTargetURL(ctx, edgeID, in.Spec); err != nil {
+				uc.log.Warn("remove GPU target URL", slog.Any("err", err))
+			}
+		}
+	}
 	return &PluginRow{PluginName: row.PluginName, Enabled: row.Enabled, Spec: decodeSpec(row.SpecJSON)}, nil
 }
 
@@ -274,6 +289,7 @@ func (uc *PluginConfigUC) FetchForEdge(ctx context.Context, edgeID uint64) (*Wir
 		model.PluginNameProcMetrics,
 		model.PluginNameCustomMetrics,
 		model.PluginNameDatabaseMetrics,
+		model.PluginNameGPUMetrics,
 	}
 	out := &WireSnapshot{EdgeID: edgeID, Configs: make(map[string]WireConfig, len(knownPlugins))}
 	enabledNames := make([]string, 0, len(knownPlugins))
@@ -349,6 +365,135 @@ func decodeSpec(raw string) map[string]interface{} {
 	}
 	if len(out) == 0 {
 		return nil
+	}
+	return out
+}
+
+// gpuDefaultListenAddress matches the gpumetrics plugin's default
+// (internal/edgeagent/plugins/gpumetrics DefaultListenAddress).
+// Keep in sync — both sides must agree on the port.
+const gpuDefaultListenAddress = ":9835"
+
+// gpuTargetURL builds the scrape URL for the GPU exporter from spec.
+func gpuTargetURL(spec map[string]interface{}) string {
+	listen := gpuDefaultListenAddress
+	if spec != nil {
+		if v, ok := spec["listen_address"].(string); ok && v != "" {
+			listen = v
+		}
+	}
+	return "http://127.0.0.1" + listen + "/metrics"
+}
+
+// syncGPUTargetURL adds the GPU exporter URL to the metrics plugin's
+// target_urls array. Idempotent — skips if the URL is already present.
+func (uc *PluginConfigUC) syncGPUTargetURL(ctx context.Context, edgeID uint64, gpuSpec map[string]interface{}) error {
+	url := gpuTargetURL(gpuSpec)
+	metricsRow, err := uc.repo.Get(ctx, edgeID, model.PluginNameMetrics)
+	if err != nil && !errors.Is(err, errs.ErrNotFound) {
+		return fmt.Errorf("get metrics config: %w", err)
+	}
+	var spec map[string]interface{}
+	if metricsRow != nil {
+		spec = decodeSpec(metricsRow.SpecJSON)
+	}
+	if spec == nil {
+		spec = map[string]interface{}{}
+	}
+	urls := extractStringSlice(spec["target_urls"])
+	for _, u := range urls {
+		if u == url {
+			return nil // already present
+		}
+	}
+	urls = append(urls, url)
+	spec["target_urls"] = toInterfaceSlice(urls)
+	blob, err := json.Marshal(spec)
+	if err != nil {
+		return fmt.Errorf("marshal metrics spec: %w", err)
+	}
+	if metricsRow == nil {
+		metricsRow = &model.PluginConfig{
+			EdgeID:     edgeID,
+			PluginName: model.PluginNameMetrics,
+			Enabled:    true,
+			SpecJSON:   string(blob),
+		}
+	} else {
+		metricsRow.SpecJSON = string(blob)
+	}
+	_, err = uc.repo.Upsert(ctx, metricsRow)
+	if err != nil {
+		return fmt.Errorf("upsert metrics config: %w", err)
+	}
+	uc.notify(ctx, edgeID, model.PluginNameMetrics)
+	return nil
+}
+
+// removeGPUTargetURL removes the GPU exporter URL from the metrics
+// plugin's target_urls array.
+func (uc *PluginConfigUC) removeGPUTargetURL(ctx context.Context, edgeID uint64, gpuSpec map[string]interface{}) error {
+	url := gpuTargetURL(gpuSpec)
+	metricsRow, err := uc.repo.Get(ctx, edgeID, model.PluginNameMetrics)
+	if err != nil {
+		if errors.Is(err, errs.ErrNotFound) {
+			return nil // no metrics config to update
+		}
+		return fmt.Errorf("get metrics config: %w", err)
+	}
+	spec := decodeSpec(metricsRow.SpecJSON)
+	if spec == nil {
+		return nil
+	}
+	urls := extractStringSlice(spec["target_urls"])
+	filtered := make([]string, 0, len(urls))
+	for _, u := range urls {
+		if u != url {
+			filtered = append(filtered, u)
+		}
+	}
+	if len(filtered) == len(urls) {
+		return nil // URL not present, nothing to remove
+	}
+	if len(filtered) > 0 {
+		spec["target_urls"] = toInterfaceSlice(filtered)
+	} else {
+		delete(spec, "target_urls")
+	}
+	blob, err := json.Marshal(spec)
+	if err != nil {
+		return fmt.Errorf("marshal metrics spec: %w", err)
+	}
+	metricsRow.SpecJSON = string(blob)
+	_, err = uc.repo.Upsert(ctx, metricsRow)
+	if err != nil {
+		return fmt.Errorf("upsert metrics config: %w", err)
+	}
+	uc.notify(ctx, edgeID, model.PluginNameMetrics)
+	return nil
+}
+
+// extractStringSlice coerces an interface{} to []string. JSON unmarshals
+// into []interface{} so we convert element-wise.
+func extractStringSlice(raw interface{}) []string {
+	arr, ok := raw.([]interface{})
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(arr))
+	for _, item := range arr {
+		if s, ok := item.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// toInterfaceSlice converts []string to []interface{} for JSON marshaling.
+func toInterfaceSlice(ss []string) []interface{} {
+	out := make([]interface{}, len(ss))
+	for i, s := range ss {
+		out[i] = s
 	}
 	return out
 }

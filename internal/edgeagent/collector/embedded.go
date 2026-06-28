@@ -108,6 +108,8 @@ func (c *EmbeddedCollector) HostInfo(ctx context.Context) (tunnel.HostInfo, erro
 	if logical, err := cpu.CountsWithContext(ctx, true); err == nil && logical > 0 {
 		hi.CPUCount = logical
 	}
+	// NVIDIA GPU driver detection — see gpu_detect.go.
+	hi.GPUAvailable = HasNVIDIASMI()
 	return hi, nil
 }
 
