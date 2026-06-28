@@ -153,6 +153,24 @@ log_info "new version: ${NEW_VERSION}"
 OLD_VERSION=$(grep -E '^ONGRID_VERSION=' "$ENV_FILE" | cut -d= -f2- | tr -d '[:space:]' || true)
 log_info "old version: ${OLD_VERSION:-unknown}"
 
+# 同版本校验需要提前知道 --force，因此先解析一次。
+FORCE=""
+for arg in "$@"; do
+    case "$arg" in
+        --force) FORCE=1 ;;
+    esac
+done
+
+# 如果已经是同版本，直接跳过，除非显式指定 --force。
+if [[ -n "$OLD_VERSION" ]]; then
+    NEW_VERSION_NORM=$(printf '%s' "$NEW_VERSION" | sed -e 's/^[vV]//' | tr -d '[:space:]')
+    OLD_VERSION_NORM=$(printf '%s' "$OLD_VERSION" | sed -e 's/^[vV]//' | tr -d '[:space:]')
+    if [[ "$OLD_VERSION_NORM" == "$NEW_VERSION_NORM" && -z "${FORCE:-}" ]]; then
+        log_info "already at version ${OLD_VERSION}; nothing to do (use --force to re-run upgrade)"
+        exit 0
+    fi
+fi
+
 # Stop stack first so legacy named volumes (if any) aren't being written
 # to during migration, and so bind-mount paths can be safely chowned.
 log_info "stopping stack"
