@@ -23,8 +23,11 @@ import {
   Loader2,
   Plus,
   Trash2,
+  Zap,
 } from 'lucide-react';
 import { StatusPill } from '@/components/StatusPill';
+import { Card } from '@/components/ui/Card';
+import { Chip } from '@/components/ui/Chip';
 import { cn } from '@/lib/cn';
 import { openMetricDrilldown } from '@/lib/drilldown';
 import { relativeTime } from '@/lib/format';
@@ -375,11 +378,14 @@ export default function EdgeDetailPage() {
           )}
 
           {tab === 'host' && (
-            <JsonCard
-              title="host_info"
-              data={(edge?.host_info as Record<string, unknown> | null) ?? null}
-              empty={tr('暂无主机信息（设备未上报或字段暂未识别）', 'No host info (device has not reported, or field not recognized)')}
-            />
+            <div className="space-y-4">
+              <GpuCapabilityCard hostInfo={edge?.host_info} />
+              <JsonCard
+                title="host_info"
+                data={(edge?.host_info as Record<string, unknown> | null) ?? null}
+                empty={tr('暂无主机信息（设备未上报或字段暂未识别）', 'No host info (device has not reported, or field not recognized)')}
+              />
+            </div>
           )}
 
           {tab === 'plugins' && edge && <PluginsTab edgeId={edge.id} />}
@@ -665,7 +671,7 @@ function JsonCard({
   empty: string;
 }) {
   return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+    <Card>
       <div className="mb-2 text-sm font-medium text-zinc-200">{title}</div>
       {data && Object.keys(data).length > 0 ? (
         <pre className="overflow-x-auto rounded-lg bg-zinc-950/60 p-3 text-xs leading-5 text-zinc-300">
@@ -676,7 +682,91 @@ function JsonCard({
           {empty}
         </div>
       )}
-    </div>
+    </Card>
+  );
+}
+
+// normalizeHostInfo coerces the loosely-typed host_info wire field into a
+// plain object. The backend sends an object, but older payloads / cached
+// edges may carry a JSON string; treat both so the GPU card never throws on
+// a stringified host_info.
+function normalizeHostInfo(
+  hostInfo: Edge['host_info'],
+): Record<string, unknown> | null {
+  if (!hostInfo) return null;
+  if (typeof hostInfo === 'string') {
+    try {
+      const parsed = JSON.parse(hostInfo);
+      return typeof parsed === 'object' && parsed !== null
+        ? (parsed as Record<string, unknown>)
+        : null;
+    } catch {
+      return null;
+    }
+  }
+  return hostInfo as Record<string, unknown>;
+}
+
+// GpuCapabilityCard surfaces GPU availability + model from host_info as a
+// structured readout, so the operator doesn't have to scan the raw JSON
+// dump below it.
+//
+// Backend wire shape (internal/manager/server/edge/http.go hostInfoDTO):
+//   gpu_available  bool   `json:"gpu_available,omitempty"`  // omitempty => absent when false
+//   gpu_model      string `json:"gpu_model,omitempty"`
+// "No GPU" is therefore `gpu_available !== true` (undefined or false), never
+// a bare false on the wire.
+function GpuCapabilityCard({ hostInfo }: { hostInfo: Edge['host_info'] }) {
+  const { tr } = useI18n();
+  const obj = useMemo(() => normalizeHostInfo(hostInfo), [hostInfo]);
+  const hasReported = !!obj && Object.keys(obj).length > 0;
+  const gpuAvailable = obj?.gpu_available === true;
+  const gpuModel =
+    typeof obj?.gpu_model === 'string' && obj.gpu_model ? obj.gpu_model : '';
+
+  const state: 'unreported' | 'none' | 'present' = !hasReported
+    ? 'unreported'
+    : gpuAvailable
+      ? 'present'
+      : 'none';
+
+  // State-driven content mapping keeps JSX flat and readable vs nested ternaries.
+  const content: Record<typeof state, ReactNode> = {
+    present: (
+      <span className="text-zinc-100">
+        {gpuModel || tr('NVIDIA GPU（型号未知）', 'NVIDIA GPU (model unknown)')}
+      </span>
+    ),
+    none: tr(
+      '未检测到 NVIDIA GPU（未安装 nvidia-smi 或无 NVIDIA 硬件）',
+      'No NVIDIA GPU detected (nvidia-smi not installed or no NVIDIA hardware)',
+    ),
+    unreported: tr('设备尚未上报主机信息', 'Device has not reported host info yet'),
+  };
+
+  return (
+    <Card>
+      <div className="mb-3 flex items-center justify-between">
+        <div className="flex items-center gap-2 text-sm font-medium text-zinc-200">
+          <Zap className="h-4 w-4 text-zinc-400" />
+          {tr('GPU 能力', 'GPU Capability')}
+        </div>
+        {state === 'present' ? (
+          <Chip tone="success">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
+            {tr('已检测', 'Detected')}
+          </Chip>
+        ) : (
+          <Chip tone="default">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-zinc-500" />
+            {state === 'none'
+              ? tr('未检测到', 'Not detected')
+              : tr('未上报', 'Not reported')}
+          </Chip>
+        )}
+      </div>
+      <div className="text-xs text-zinc-400">{content[state]}</div>
+    </Card>
   );
 }
 
