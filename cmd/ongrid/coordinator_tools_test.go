@@ -32,7 +32,7 @@ func TestBasePromptRequiresMetricCatalogBeforeAlertDraft(t *testing.T) {
 			t.Fatalf("base prompt missing %q", want)
 		}
 	}
-	if !strings.Contains(prompt, "list_metric_catalog 一次") || !strings.Contains(prompt, "draft_config_change") {
+	if !strings.Contains(prompt, "`list_metric_catalog` 一次") || !strings.Contains(prompt, "draft_config_change") {
 		t.Fatalf("base prompt should require list_metric_catalog before metric alert draft")
 	}
 	if !strings.Contains(prompt, "不调 list_database_sources") {
