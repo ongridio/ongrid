@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -153,6 +154,14 @@ func (h *Handler) Register(r chi.Router) {
 	// the stage ack) apply_package. URL+sha auto-resolved here so
 	// admin never types a hash.
 	r.With(h.writeMW("edge:*")).Post("/v1/edges/{id}/upgrade-package", h.upgradePackage)
+	// Batch fleet operations. Each takes {"ids":[...]} and fans out the
+	// per-edge service call with bounded concurrency, returning a
+	// per-id result envelope (never a single 500 — partial failures are
+	// the norm when some edges are offline). Static "batch" segment
+	// coexists with the {id} param above; chi matches static first.
+	r.With(h.writeMW("edge:*")).Post("/v1/edges/batch/upgrade-package", h.batchUpgradePackage)
+	r.With(h.writeMW("edge:*")).Post("/v1/edges/batch/upgrade", h.batchUpgradeAgent)
+	r.With(h.deleteMW("edge:*")).Post("/v1/edges/batch/delete", h.batchDelete)
 	// Process list — read-only host introspection. Monitor page's
 	// per-device process panel calls this; same RPC the LLM tool uses.
 	r.Get("/v1/edges/{id}/processes", h.getProcesses)
@@ -632,6 +641,213 @@ type upgradePkgResp struct {
 	ManifestFiles int    `json:"manifest_files"`
 	Applied       bool   `json:"applied"`
 	ApplyError    string `json:"apply_error,omitempty"`
+}
+
+// --------- batch fleet operations ---------
+
+// maxBatchIDs caps a single batch request. Generous enough for a
+// whole fleet click-through but bounded so a malformed/huge body can't
+// pin the manager fanning out RPCs.
+const maxBatchIDs = 500
+
+// batchConcurrency bounds in-flight per-edge RPCs. Upgrades download a
+// bundle on the far side, so we don't want to hammer every edge at
+// once; 8 is a balance between throughput and manager/network load.
+const batchConcurrency = 8
+
+// batchReq is the common envelope: just the target ids. Operation-
+// specific fields are embedded by the per-endpoint request structs.
+type batchReq struct {
+	IDs []uint64 `json:"ids"`
+}
+
+type batchUpgradePkgReq struct {
+	IDs     []uint64 `json:"ids"`
+	Arch    string   `json:"arch,omitempty"`
+	Version string   `json:"version,omitempty"`
+}
+
+type batchUpgradeAgentReq struct {
+	IDs    []uint64 `json:"ids"`
+	URL    string   `json:"url"`
+	SHA256 string   `json:"sha256"`
+}
+
+// batchResultItem is one edge's outcome. OK + Error are always set;
+// the upgrade-package extras (Version/ManifestFiles/Applied) are
+// populated only for that endpoint and dropped via omitempty otherwise.
+type batchResultItem struct {
+	ID            uint64 `json:"id"`
+	OK            bool   `json:"ok"`
+	Error         string `json:"error,omitempty"`
+	Code          string `json:"code,omitempty"`
+	Version       string `json:"version,omitempty"`
+	ManifestFiles int    `json:"manifest_files,omitempty"`
+	Applied       bool   `json:"applied,omitempty"`
+}
+
+type batchResp struct {
+	Total     int               `json:"total"`
+	Succeeded int               `json:"succeeded"`
+	Failed    int               `json:"failed"`
+	Results   []batchResultItem `json:"results"`
+}
+
+// normalizeBatchIDs validates + de-dupes the requested ids (order
+// preserved). Returns ErrInvalid for empty or over-cap requests.
+func normalizeBatchIDs(ids []uint64) ([]uint64, error) {
+	if len(ids) == 0 || len(ids) > maxBatchIDs {
+		return nil, errs.ErrInvalid
+	}
+	seen := make(map[uint64]struct{}, len(ids))
+	out := make([]uint64, 0, len(ids))
+	for _, id := range ids {
+		if id == 0 {
+			return nil, errs.ErrInvalid
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out, nil
+}
+
+// runEdgeBatch fans fn out over ids with bounded concurrency, preserving
+// input order in the result slice, and tallies the succeeded/failed
+// counts. fn must return a fully-populated batchResultItem (including ID
+// and OK) for its edge.
+func runEdgeBatch(ctx context.Context, ids []uint64, fn func(ctx context.Context, id uint64) batchResultItem) batchResp {
+	results := make([]batchResultItem, len(ids))
+	sem := make(chan struct{}, batchConcurrency)
+	var wg sync.WaitGroup
+	for i, id := range ids {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, id uint64) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			results[i] = fn(ctx, id)
+		}(i, id)
+	}
+	wg.Wait()
+	resp := batchResp{Total: len(ids), Results: results}
+	for _, r := range results {
+		if r.OK {
+			resp.Succeeded++
+		} else {
+			resp.Failed++
+		}
+	}
+	return resp
+}
+
+// batchDelete soft-deletes every requested edge. Partial failures (e.g.
+// an id that's already gone) are reported per-id rather than aborting
+// the whole batch.
+func (h *Handler) batchDelete(w http.ResponseWriter, r *http.Request) {
+	var req batchReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, errors.Join(errs.ErrInvalid, err))
+		return
+	}
+	ids, err := normalizeBatchIDs(req.IDs)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	resp := runEdgeBatch(r.Context(), ids, func(ctx context.Context, id uint64) batchResultItem {
+		if err := h.svc.Delete(ctx, id); err != nil {
+			return batchResultItem{ID: id, OK: false, Error: err.Error(), Code: errCode(err)}
+		}
+		return batchResultItem{ID: id, OK: true}
+	})
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// batchUpgradeAgent dispatches the same agent_upgrade RPC (URL + sha256)
+// to every requested edge. Mirrors the single upgradeAgent validation.
+func (h *Handler) batchUpgradeAgent(w http.ResponseWriter, r *http.Request) {
+	var req batchUpgradeAgentReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, errors.Join(errs.ErrInvalid, err))
+		return
+	}
+	if strings.TrimSpace(req.URL) == "" || strings.TrimSpace(req.SHA256) == "" {
+		writeErr(w, errs.ErrInvalid)
+		return
+	}
+	ids, err := normalizeBatchIDs(req.IDs)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	url, sha := strings.TrimSpace(req.URL), strings.TrimSpace(req.SHA256)
+	resp := runEdgeBatch(r.Context(), ids, func(ctx context.Context, id uint64) batchResultItem {
+		if _, err := h.svc.UpgradeAgent(ctx, id, url, sha); err != nil {
+			return batchResultItem{ID: id, OK: false, Error: err.Error(), Code: errCode(err)}
+		}
+		return batchResultItem{ID: id, OK: true}
+	})
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// batchUpgradePackage runs the one-button bundle upgrade across the
+// fleet. The bundle (url+sha) is resolved once from the shared arch +
+// version, then each edge does fetch_package + apply_package. A staged-
+// but-not-applied edge is reported OK=false with Applied=false so the
+// operator can see exactly which ones need a re-trigger.
+func (h *Handler) batchUpgradePackage(w http.ResponseWriter, r *http.Request) {
+	if h.pkgRes == nil {
+		writeErr(w, fmt.Errorf("%w: edge bundle not baked into this manager image", errs.ErrNotWiredYet))
+		return
+	}
+	var req batchUpgradePkgReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, errors.Join(errs.ErrInvalid, err))
+		return
+	}
+	ids, err := normalizeBatchIDs(req.IDs)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	arch := strings.TrimSpace(req.Arch)
+	if arch == "" {
+		arch = "linux-amd64"
+	}
+	url, sha, ver, err := h.pkgRes.ResolveBundle(arch, strings.TrimSpace(req.Version))
+	if err != nil {
+		writeErr(w, fmt.Errorf("%w: resolve bundle: %v", errs.ErrInvalid, err))
+		return
+	}
+	resp := runEdgeBatch(r.Context(), ids, func(ctx context.Context, id uint64) batchResultItem {
+		stageResp, err := h.svc.FetchPackage(ctx, id, url, sha, ver)
+		if err != nil {
+			return batchResultItem{ID: id, OK: false, Error: fmt.Sprintf("fetch_package: %v", err), Code: errCode(err), Version: ver}
+		}
+		applyResp, err := h.svc.ApplyPackage(ctx, id)
+		if err != nil {
+			// Staged but apply RPC failed — bundle is on disk; flag so
+			// the operator knows this one can be re-triggered.
+			return batchResultItem{
+				ID: id, OK: false,
+				Error:         fmt.Sprintf("staged but apply failed: %v", err),
+				Code:          errCode(err),
+				Version:       ver,
+				ManifestFiles: stageResp.ManifestFiles,
+				Applied:       false,
+			}
+		}
+		return batchResultItem{
+			ID: id, OK: applyResp.Accepted,
+			Version:       ver,
+			ManifestFiles: stageResp.ManifestFiles,
+			Applied:       applyResp.Accepted,
+		}
+	})
+	writeJSON(w, http.StatusOK, resp)
 }
 
 type processDTO struct {
