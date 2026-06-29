@@ -41,7 +41,7 @@ func TestBasePromptRequiresMetricCatalogBeforeAlertDraft(t *testing.T) {
 	if !strings.Contains(prompt, "catalog 有可用指标后") || !strings.Contains(prompt, "catalog 为空/不可用时停止说明缺失") {
 		t.Fatalf("base prompt should require a usable metric catalog before metric alert draft")
 	}
-	if !strings.Contains(prompt, "catalog 为空/不可用时说明缺失") {
+	if !strings.Contains(prompt, "catalog 为空/不可用时停止说明缺失") {
 		t.Fatalf("base prompt should stop when the metric catalog is unavailable")
 	}
 	if !strings.Contains(prompt, "禁止只输出文字草案") || !strings.Contains(prompt, "config_draft/draft_hash") {
