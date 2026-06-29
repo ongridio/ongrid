@@ -1,11 +1,17 @@
 #!/bin/bash
-# apply-pending-upgrade.sh — systemd ExecStartPre hook for ongrid-edge.
+# apply-pending-upgrade.sh — pre-start upgrade hook for ongrid-edge.
 #
-# Runs as root (the unit's ExecStartPre line uses the `+` prefix to
-# bypass User=ongrid-edge for this single command). Looks for a staged
-# upgrade bundle the agent dropped at /var/lib/ongrid-edge/.upgrade/
-# incoming/ and atomically swaps every file listed in MANIFEST.txt
-# into its declared dest path.
+# Runs as root via the ongrid-edge-upgrade.service oneshot, which
+# ongrid-edge.service pulls in (Wants= + After=) so this runs before every
+# agent start — including each Restart=always auto-restart. It runs as a
+# separate root unit (not the agent's own ExecStartPre) because ongrid-edge
+# runs sandboxed + non-root and cannot write /usr/local; the old
+# `ExecStartPre=-+...` relied on the `+` root-exec prefix, which systemd < 231
+# (CentOS 7 = 219) silently ignores, so the swap never applied there.
+#
+# Looks for a staged upgrade bundle the agent dropped at
+# /var/lib/ongrid-edge/.upgrade/incoming/ and atomically swaps every file
+# listed in MANIFEST.txt into its declared dest path.
 #
 # Three modes covered, in priority order:
 #
@@ -49,9 +55,10 @@ log() { logger -t ongrid-edge-upgrade "$*"; }
 # Bundle upgrades (ADR-024) DON'T re-run install-edge.sh, so a box that was
 # installed before that grant — or one whose groups got dropped — would
 # silently ship empty logs forever. Re-assert membership here: this hook
-# runs as root on every start (the unit's `+`-prefixed ExecStartPre), and
-# systemd resolves supplementary groups when it forks ExecStart, so a group
-# added now takes effect for the agent that starts moments later. Idempotent
+# runs as root on every start (via the ongrid-edge-upgrade.service oneshot,
+# ordered Before=ongrid-edge.service), and systemd resolves supplementary
+# groups when it forks the agent's ExecStart, so a group added now takes
+# effect for the agent that starts moments later. Idempotent
 # (usermod -aG is a no-op if already a member).
 ensure_log_groups() {
   id ongrid-edge >/dev/null 2>&1 || return 0

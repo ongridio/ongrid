@@ -1,0 +1,30 @@
+[Unit]
+Description=ongrid edge pending-upgrade apply (root, pre-start)
+Documentation=file:///usr/local/lib/ongrid-edge/apply-pending-upgrade.sh
+# Ordered before the agent so a staged whole-bundle upgrade is swapped in
+# (and the previous boot's health / auto-rollback check runs) BEFORE
+# ongrid-edge starts. ongrid-edge.service pulls this in via Wants=, which
+# re-runs this oneshot on EVERY start of the agent — including each
+# Restart=always auto-restart (verified on systemd 219 / CentOS 7). The
+# agent stages a bundle then exits; systemd restarts it and this hook
+# applies the swap first, so the agent comes back on the new binary.
+Before=ongrid-edge.service
+After=local-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+# Runs as root (no User=, no sandbox) so it can write the root-owned binary
+# paths under /usr/local that the sandboxed ongrid-edge.service cannot.
+#
+# This REPLACES the agent unit's old
+#   ExecStartPre=-+/usr/local/lib/ongrid-edge/apply-pending-upgrade.sh
+# The `+` (run-this-Exec-line-as-root) prefix only exists on systemd >= 231,
+# so on systemd 219 (CentOS/RHEL 7) it was SILENTLY IGNORED: the apply line
+# ran as the unprivileged User=ongrid-edge, couldn't write /usr/local, and
+# every fleet device on old systemd looped forever on the pre-upgrade binary.
+ExecStart=/usr/local/lib/ongrid-edge/apply-pending-upgrade.sh
+# The script is best-effort and already exits 0 on any internal error. It is
+# pulled via Wants= (not Requires=) and ordered with After=, so even a
+# missing or failing apply never blocks the agent from starting whatever
+# binary is already on disk — preserving the old `-` prefix's tolerance.
