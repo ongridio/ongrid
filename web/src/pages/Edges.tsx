@@ -399,12 +399,15 @@ export default function EdgesPage() {
   );
 
   async function openServerChart(edge: Edge) {
+    // Prometheus series are labelled by device_id, not edge.id. Fall back
+    // to edge.id only when the host-device junction is missing (#96).
+    const deviceId = edge.device_id ?? edge.id;
     await openMetricDrilldown({
-      expr: `100 * (1 - avg by (device_id) (rate(node_cpu_seconds_total{device_id="${edge.id}",mode="idle"}[5m])))`,
+      expr: `100 * (1 - avg by (device_id) (rate(node_cpu_seconds_total{device_id="${deviceId}",mode="idle"}[5m])))`,
       rangeInput: '1h',
       stepInput: '30s',
       title: `${edge.name} CPU`,
-      edgeId: edge.id,
+      deviceId,
     });
   }
 }

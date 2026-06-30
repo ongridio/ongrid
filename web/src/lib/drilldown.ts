@@ -53,7 +53,13 @@ type DrilldownInput = {
   rangeInput?: string;
   stepInput?: string;
   title?: string;
-  edgeId?: string | number;
+  // device_id label value used for the Grafana `var-device_id` template
+  // variable. This is the linked Device.ID — NOT edge.id. The two only
+  // coincide for pre-split / back-filled hosts; after the entity split a
+  // re-installed edge gets a fresh edge.id while keeping its device_id,
+  // so passing edge.id here points the dashboard at a non-existent series
+  // (#96).
+  deviceId?: string | number;
 };
 
 function trimTrailingSlash(value: string): string {
@@ -155,8 +161,8 @@ async function buildGrafanaUrl(input: DrilldownInput): Promise<string | null> {
   if (grafanaOrgId.trim()) {
     params.set('orgId', grafanaOrgId.trim());
   }
-  if (input.edgeId !== undefined && input.edgeId !== null && String(input.edgeId).trim() !== '') {
-    params.set('var-device_id', String(input.edgeId));
+  if (input.deviceId !== undefined && input.deviceId !== null && String(input.deviceId).trim() !== '') {
+    params.set('var-device_id', String(input.deviceId));
   }
   return `${baseUrl}/d/${dashboardUid}/server-detail?${params.toString()}`;
 }
