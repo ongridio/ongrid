@@ -296,6 +296,8 @@ func (u *Usecase) HandleRegister(ctx context.Context, edgeID uint64, info tunnel
 		CPUCount:      info.CPUCount,
 		MemTotalBytes: info.MemTotalBytes,
 		IPAddress:     info.IPAddress,
+		GPUAvailable:  info.GPUAvailable,
+		GPUModel:      info.GPUModel,
 		Online:        true,
 	}
 	dev, err := u.devices.FindOrCreateByFingerprint(ctx, seed)
@@ -310,6 +312,8 @@ func (u *Usecase) HandleRegister(ctx context.Context, edgeID uint64, info tunnel
 		CPUCount:      info.CPUCount,
 		MemTotalBytes: info.MemTotalBytes,
 		IPAddress:     info.IPAddress,
+		GPUAvailable:  info.GPUAvailable,
+		GPUModel:      info.GPUModel,
 	}); err != nil {
 		return fmt.Errorf("update device host facts: %w", err)
 	}

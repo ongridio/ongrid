@@ -333,6 +333,7 @@ MYSQLD_EXPORTER_VERSION ?= 0.19.0
 POSTGRES_EXPORTER_VERSION ?= 0.19.1
 REDIS_EXPORTER_VERSION ?= 1.86.0
 MONGODB_EXPORTER_VERSION ?= 0.51.0
+NVIDIA_GPU_EXPORTER_VERSION ?= 1.1.0
 
 .PHONY: fetch-node-exporter
 fetch-node-exporter: ## [release] 下载 node_exporter 到 bin/<os>-<arch>/node_exporter (linux-only)
@@ -452,6 +453,25 @@ fetch-mongodb-exporter: ## [release] 下载 mongodb_exporter 到 bin/<os>-<arch>
 		echo "[mongodb_exporter] staged $$dest"; \
 	done
 
+.PHONY: fetch-nvidia-gpu-exporter
+fetch-nvidia-gpu-exporter: ## [release] 下载 nvidia_gpu_exporter 到 bin/<os>-<arch>/nvidia_gpu_exporter
+	@for target in $(EDGE_PLUGIN_ARCHES); do \
+		dest=$(BIN_DIR)/$$target/nvidia_gpu_exporter; \
+		if [ -f $$dest ]; then echo "[nvidia_gpu_exporter] $$dest already present — skip"; continue; fi; \
+		mkdir -p $(BIN_DIR)/$$target; \
+		os=$${target%-*}; arch=$${target##*-}; \
+		tgz=/tmp/nvidia_gpu_exporter-$$os-$$arch.tar.gz; tmpdir=$$(mktemp -d); \
+		url=https://github.com/utkuozdemir/nvidia_gpu_exporter/releases/download/v$(NVIDIA_GPU_EXPORTER_VERSION)/nvidia_gpu_exporter_$(NVIDIA_GPU_EXPORTER_VERSION)_linux_$${arch}.tar.gz; \
+		echo "[nvidia_gpu_exporter] downloading $$url"; \
+		curl $(FETCH_CURL_FLAGS) -o $$tgz $$url || { rm -rf $$tmpdir; echo "nvidia_gpu_exporter download failed for $$target"; exit 1; }; \
+		tar -xzf $$tgz -C $$tmpdir || { rm -rf $$tmpdir $$tgz; echo "extract failed for $$target"; exit 1; }; \
+		found=$$(find $$tmpdir -type f -name nvidia_gpu_exporter -print -quit); \
+		test -n "$$found" || { rm -rf $$tmpdir $$tgz; echo "nvidia_gpu_exporter binary missing in archive for $$target"; exit 1; }; \
+		install -m 0755 "$$found" $$dest; \
+		rm -rf $$tmpdir $$tgz; \
+		echo "[nvidia_gpu_exporter] staged $$dest"; \
+	done
+
 # package deps deliberately exclude `build-linux` and `build-web`:
 #   - build-linux produces a host-side ongrid binary which dist/package.sh
 #     never consumes (the manager binary inside ongrid:VERSION docker
@@ -497,7 +517,7 @@ check-release-target:
 # For offline RAG (ONGRID_EMBEDDING_PROVIDER=local) run
 # `make fetch-embedding-model` once before `make package`, otherwise
 # dist/package.sh warns and ships a tarball without the model.
-package: check-release-target fetch-promtail fetch-otelcol fetch-node-exporter fetch-process-exporter fetch-db-exporters build-edge-all docker-build docker-build-broker docker-build-web ## [release] 打单架构 release tarball 到 dist/out/（TARGET_ARCH 可覆盖）
+package: check-release-target fetch-promtail fetch-otelcol fetch-node-exporter fetch-process-exporter fetch-db-exporters fetch-nvidia-gpu-exporter build-edge-all docker-build docker-build-broker docker-build-web ## [release] 打单架构 release tarball 到 dist/out/（TARGET_ARCH 可覆盖）
 	@if [ "$(PACKAGE_CLEAN)" = "1" ]; then rm -rf dist/stage dist/out; fi
 	@mkdir -p dist/stage dist/out
 	@$(MAKE) --no-print-directory build-edge-bundle

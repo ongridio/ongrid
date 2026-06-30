@@ -23,8 +23,11 @@ import {
   Loader2,
   Plus,
   Trash2,
+  Zap,
 } from 'lucide-react';
 import { StatusPill } from '@/components/StatusPill';
+import { Card } from '@/components/ui/Card';
+import { Chip } from '@/components/ui/Chip';
 import { cn } from '@/lib/cn';
 import { openMetricDrilldown } from '@/lib/drilldown';
 import { relativeTime } from '@/lib/format';
@@ -45,6 +48,19 @@ import { ApiError } from '@/api/client';
 import { getDevice } from '@/api/devices';
 import { NodeNeighbors } from '@/components/topology/NodeNeighbors';
 import { tr as trInline, useI18n } from '@/i18n/locale';
+import {
+  type GpuPanelKey,
+  buildGpuColorMap,
+  buildGpuExprs,
+  extractUuidsFromMatrix,
+  formatCelsius,
+  formatPercent,
+  formatWatts,
+  isGpuAvailable,
+  isGpuPanelEmpty,
+  matrixToGpuPanel,
+  normalizeHostInfo,
+} from '@/lib/edgeGpuMetrics';
 
 type Tab = 'metrics' | 'host' | 'plugins' | 'topology' | 'meta';
 
@@ -90,9 +106,34 @@ type PanelData = {
   series: SeriesDescriptor[];
 };
 
-type PanelKey = 'cpu' | 'disk' | 'netRx' | 'netTx';
+type HostPanelKey = 'cpu' | 'disk' | 'netRx' | 'netTx';
+type PanelKey = HostPanelKey | GpuPanelKey;
 
 const EMPTY_PANEL: PanelData = { rows: [], series: [] };
+
+const GPU_PANEL_KEYS: GpuPanelKey[] = ['gpuUtil', 'gpuMem', 'gpuTemp', 'gpuPower'];
+
+const INITIAL_PANELS: Record<PanelKey, PanelData> = {
+  cpu: EMPTY_PANEL,
+  disk: EMPTY_PANEL,
+  netRx: EMPTY_PANEL,
+  netTx: EMPTY_PANEL,
+  gpuUtil: EMPTY_PANEL,
+  gpuMem: EMPTY_PANEL,
+  gpuTemp: EMPTY_PANEL,
+  gpuPower: EMPTY_PANEL,
+};
+
+const INITIAL_HIDDEN: Record<PanelKey, Set<string>> = {
+  cpu: new Set(),
+  disk: new Set(),
+  netRx: new Set(),
+  netTx: new Set(),
+  gpuUtil: new Set(),
+  gpuMem: new Set(),
+  gpuTemp: new Set(),
+  gpuPower: new Set(),
+};
 
 export default function EdgeDetailPage() {
   const { tr } = useI18n();
@@ -102,20 +143,15 @@ export default function EdgeDetailPage() {
   const [edge, setEdge] = useState<Edge | null>(null);
   const [edgeErr, setEdgeErr] = useState<string | null>(null);
 
-  const [panels, setPanels] = useState<Record<PanelKey, PanelData>>({
-    cpu: EMPTY_PANEL,
-    disk: EMPTY_PANEL,
-    netRx: EMPTY_PANEL,
-    netTx: EMPTY_PANEL,
-  });
+  const [panels, setPanels] = useState<Record<PanelKey, PanelData>>(INITIAL_PANELS);
   const [metricsErr, setMetricsErr] = useState<string | null>(null);
   const [promErr, setPromErr] = useState<string | null>(null);
-  const [hidden, setHidden] = useState<Record<PanelKey, Set<string>>>({
-    cpu: new Set(),
-    disk: new Set(),
-    netRx: new Set(),
-    netTx: new Set(),
-  });
+  const [hidden, setHidden] = useState<Record<PanelKey, Set<string>>>(INITIAL_HIDDEN);
+
+  const gpuAvailable = useMemo(
+    () => isGpuAvailable(edge?.host_info),
+    [edge?.host_info],
+  );
 
   const [tab, setTab] = useState<Tab>('metrics');
 
@@ -161,7 +197,7 @@ export default function EdgeDetailPage() {
     // via the new path. device_id alone is the right scope.
     const labelSel = `device_id="${edge.device_id}"`;
 
-    const exprs: Record<PanelKey, { expr: string; nameLabel: string }> = {
+    const exprs: Record<HostPanelKey, { expr: string; nameLabel: string }> = {
       cpu: {
         // Per-core utilization: keep cpu label, average idle out and
         // subtract from 100. We *don't* aggregate by device_id so each cpu
@@ -183,9 +219,11 @@ export default function EdgeDetailPage() {
       },
     };
 
+    const hostKeys = ['cpu', 'disk', 'netRx', 'netTx'] as const;
+
     try {
-      const results = await Promise.all(
-        (Object.keys(exprs) as PanelKey[]).map(async (k) => {
+      const hostResults = await Promise.all(
+        hostKeys.map(async (k) => {
           const { expr, nameLabel } = exprs[k];
           const resp = await promQueryRange({
             expr,
@@ -196,14 +234,37 @@ export default function EdgeDetailPage() {
           return [k, matrixToPanel(resp.matrix ?? [], nameLabel, k)] as const;
         }),
       );
-      const next = { ...panels };
-      for (const [k, panel] of results) next[k] = panel;
+
+      const next: Record<PanelKey, PanelData> = { ...INITIAL_PANELS };
+      for (const [k, panel] of hostResults) next[k] = panel;
+
+      if (gpuAvailable) {
+        const gpuExprs = buildGpuExprs(edge.device_id);
+        const gpuResponses = await Promise.all(
+          GPU_PANEL_KEYS.map(async (k) => {
+            const resp = await promQueryRange({
+              expr: gpuExprs[k],
+              from: fromIso,
+              to: toIso,
+              step: STEP,
+            });
+            return [k, resp.matrix ?? []] as const;
+          }),
+        );
+        const utilMatrix =
+          gpuResponses.find(([k]) => k === 'gpuUtil')?.[1] ?? [];
+        const colorByUuid = buildGpuColorMap(extractUuidsFromMatrix(utilMatrix));
+        for (const [k, matrix] of gpuResponses) {
+          next[k] = matrixToGpuPanel(matrix, k, colorByUuid);
+        }
+      }
+
       setPanels(next);
       setMetricsErr(null);
     } catch (err) {
       setMetricsErr((err as Error).message || tr('加载指标失败', 'Failed to load metrics'));
     }
-  }, [edge?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [edge?.id, edge?.device_id, gpuAvailable, tr]);
 
   useEffect(() => {
     if (!edge?.id) return;
@@ -217,13 +278,20 @@ export default function EdgeDetailPage() {
     // every sample now carries ongrid_source="embedded"; the legacy
     // direct-scrape path is gone.
     const labelSel = `device_id="${edge.device_id}"`;
-    return {
+    const host = {
       cpu: `100 * (1 - rate(node_cpu_seconds_total{${labelSel},mode="idle"}[5m]))`,
       disk: `100 * (1 - node_filesystem_avail_bytes{${labelSel},fstype=~"ext4|xfs|btrfs|zfs|ext3|ext2|f2fs",device=~"(/dev/)?(vd|sd|xvd)[a-z]+[0-9]*|(/dev/)?nvme[0-9]+n[0-9]+(p[0-9]+)?"} / node_filesystem_size_bytes{${labelSel},fstype=~"ext4|xfs|btrfs|zfs|ext3|ext2|f2fs",device=~"(/dev/)?(vd|sd|xvd)[a-z]+[0-9]*|(/dev/)?nvme[0-9]+n[0-9]+(p[0-9]+)?"})`,
       netRx: `rate(node_network_receive_bytes_total{${labelSel}}[5m])`,
       netTx: `rate(node_network_transmit_bytes_total{${labelSel}}[5m])`,
     };
-  }, [edge?.id, edge?.device_id]);
+    if (!gpuAvailable) return host;
+    return { ...host, ...buildGpuExprs(edge.device_id) };
+  }, [edge?.id, edge?.device_id, gpuAvailable]);
+
+  const gpuPromExprs = useMemo(() => {
+    if (!gpuAvailable || edge?.device_id == null) return null;
+    return buildGpuExprs(edge.device_id);
+  }, [gpuAvailable, edge?.device_id]);
 
   const openDrilldown = useCallback(
     async (expr: string, title: string) => {
@@ -373,15 +441,110 @@ export default function EdgeDetailPage() {
                     : undefined
                 }
               />
+
+              {gpuAvailable && (
+                <>
+                  {isGpuPanelEmpty({
+                    gpuUtil: panels.gpuUtil,
+                    gpuMem: panels.gpuMem,
+                    gpuTemp: panels.gpuTemp,
+                    gpuPower: panels.gpuPower,
+                  }) && (
+                    <p className="text-xs text-zinc-500">
+                      {tr(
+                        '主机已上报 GPU，但暂无 GPU 时序数据（请确认 gpumetrics 插件已启用且 exporter 正常）',
+                        'GPU reported on host but no GPU time-series yet (check gpumetrics plugin and exporter)',
+                      )}
+                    </p>
+                  )}
+
+                  <MultiLinePanel
+                    title={tr('GPU 利用率', 'GPU utilization')}
+                    subtitle={tr(
+                      '最近 6 小时 · 1m 粒度 · 每条线 = 一张 GPU 卡',
+                      'Last 6h · 1m step · one line per GPU',
+                    )}
+                    icon={Zap}
+                    panel={panels.gpuUtil}
+                    hidden={hidden.gpuUtil}
+                    onToggle={(k) => toggleSeries('gpuUtil', k)}
+                    formatValue={formatPercent}
+                    yDomain={[0, 100]}
+                    onOpenDrilldown={
+                      gpuPromExprs
+                        ? () => void openDrilldown(gpuPromExprs.gpuUtil, 'GPU utilization')
+                        : undefined
+                    }
+                  />
+
+                  <MultiLinePanel
+                    title={tr('GPU 显存占用', 'GPU memory usage')}
+                    subtitle={tr(
+                      '最近 6 小时 · 1m 粒度 · 每条线 = 一张 GPU 卡',
+                      'Last 6h · 1m step · one line per GPU',
+                    )}
+                    icon={Zap}
+                    panel={panels.gpuMem}
+                    hidden={hidden.gpuMem}
+                    onToggle={(k) => toggleSeries('gpuMem', k)}
+                    formatValue={formatPercent}
+                    yDomain={[0, 100]}
+                    onOpenDrilldown={
+                      gpuPromExprs
+                        ? () => void openDrilldown(gpuPromExprs.gpuMem, 'GPU memory usage')
+                        : undefined
+                    }
+                  />
+
+                  <MultiLinePanel
+                    title={tr('GPU 温度', 'GPU temperature')}
+                    subtitle={tr(
+                      '最近 6 小时 · 1m 粒度 · 每条线 = 一张 GPU 卡',
+                      'Last 6h · 1m step · one line per GPU',
+                    )}
+                    icon={Zap}
+                    panel={panels.gpuTemp}
+                    hidden={hidden.gpuTemp}
+                    onToggle={(k) => toggleSeries('gpuTemp', k)}
+                    formatValue={formatCelsius}
+                    onOpenDrilldown={
+                      gpuPromExprs
+                        ? () => void openDrilldown(gpuPromExprs.gpuTemp, 'GPU temperature')
+                        : undefined
+                    }
+                  />
+
+                  <MultiLinePanel
+                    title={tr('GPU 功耗', 'GPU power draw')}
+                    subtitle={tr(
+                      '最近 6 小时 · 1m 粒度 · 每条线 = 一张 GPU 卡',
+                      'Last 6h · 1m step · one line per GPU',
+                    )}
+                    icon={Zap}
+                    panel={panels.gpuPower}
+                    hidden={hidden.gpuPower}
+                    onToggle={(k) => toggleSeries('gpuPower', k)}
+                    formatValue={formatWatts}
+                    onOpenDrilldown={
+                      gpuPromExprs
+                        ? () => void openDrilldown(gpuPromExprs.gpuPower, 'GPU power draw')
+                        : undefined
+                    }
+                  />
+                </>
+              )}
             </div>
           )}
 
           {tab === 'host' && (
-            <JsonCard
-              title="host_info"
-              data={(edge?.host_info as Record<string, unknown> | null) ?? null}
-              empty={tr('暂无主机信息（设备未上报或字段暂未识别）', 'No host info (device has not reported, or field not recognized)')}
-            />
+            <div className="space-y-4">
+              <GpuCapabilityCard hostInfo={edge?.host_info} />
+              <JsonCard
+                title="host_info"
+                data={(edge?.host_info as Record<string, unknown> | null) ?? null}
+                empty={tr('暂无主机信息（设备未上报或字段暂未识别）', 'No host info (device has not reported, or field not recognized)')}
+              />
+            </div>
           )}
 
           {tab === 'plugins' && edge && <PluginsTab edgeId={edge.id} />}
@@ -667,7 +830,7 @@ function JsonCard({
   empty: string;
 }) {
   return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+    <Card>
       <div className="mb-2 text-sm font-medium text-zinc-200">{title}</div>
       {data && Object.keys(data).length > 0 ? (
         <pre className="overflow-x-auto rounded-lg bg-zinc-950/60 p-3 text-xs leading-5 text-zinc-300">
@@ -678,7 +841,70 @@ function JsonCard({
           {empty}
         </div>
       )}
-    </div>
+    </Card>
+  );
+}
+
+// GpuCapabilityCard surfaces GPU availability + model from host_info as a
+// structured readout, so the operator doesn't have to scan the raw JSON
+// dump below it.
+//
+// Backend wire shape (internal/manager/server/edge/http.go hostInfoDTO):
+//   gpu_available  bool   `json:"gpu_available,omitempty"`  // omitempty => absent when false
+//   gpu_model      string `json:"gpu_model,omitempty"`
+// "No GPU" is therefore `gpu_available !== true` (undefined or false), never
+// a bare false on the wire.
+function GpuCapabilityCard({ hostInfo }: { hostInfo: Edge['host_info'] }) {
+  const { tr } = useI18n();
+  const obj = useMemo(() => normalizeHostInfo(hostInfo), [hostInfo]);
+  const hasReported = !!obj && Object.keys(obj).length > 0;
+  const gpuAvailable = obj?.gpu_available === true;
+  const gpuModel =
+    typeof obj?.gpu_model === 'string' && obj.gpu_model ? obj.gpu_model : '';
+
+  const state: 'unreported' | 'none' | 'present' = !hasReported
+    ? 'unreported'
+    : gpuAvailable
+      ? 'present'
+      : 'none';
+
+  // State-driven content mapping keeps JSX flat and readable vs nested ternaries.
+  const content: Record<typeof state, ReactNode> = {
+    present: (
+      <span className="text-zinc-100">
+        {gpuModel || tr('NVIDIA GPU（型号未知）', 'NVIDIA GPU (model unknown)')}
+      </span>
+    ),
+    none: tr(
+      '未检测到 NVIDIA GPU（未安装 nvidia-smi 或无 NVIDIA 硬件）',
+      'No NVIDIA GPU detected (nvidia-smi not installed or no NVIDIA hardware)',
+    ),
+    unreported: tr('设备尚未上报主机信息', 'Device has not reported host info yet'),
+  };
+
+  return (
+    <Card>
+      <div className="mb-3 flex items-center justify-between">
+        <div className="flex items-center gap-2 text-sm font-medium text-zinc-200">
+          <Zap className="h-4 w-4 text-zinc-400" />
+          {tr('GPU 能力', 'GPU Capability')}
+        </div>
+        {state === 'present' ? (
+          <Chip tone="success">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
+            {tr('已检测', 'Detected')}
+          </Chip>
+        ) : (
+          <Chip tone="default">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-zinc-500" />
+            {state === 'none'
+              ? tr('未检测到', 'Not detected')
+              : tr('未上报', 'Not reported')}
+          </Chip>
+        )}
+      </div>
+      <div className="text-xs text-zinc-400">{content[state]}</div>
+    </Card>
   );
 }
 
@@ -766,6 +992,15 @@ const PLUGIN_META: Record<
       trInline(
         'edge 侧托管数据库 exporter；UI 填连接信息后由 edge 写入本机 secret',
         'Edge-managed database exporters; the UI sends connection info and the edge writes a local secret',
+      ),
+  },
+  gpumetrics: {
+    label: 'gpumetrics',
+    pill: 'bg-lime-500/10 text-lime-300 ring-lime-500/30',
+    getHint: () =>
+      trInline(
+        'subprocess nvidia_gpu_exporter，GPU 利用率 / 显存 / 温度 / 功耗（由 metrics 管道抓取并上报）',
+        'subprocess nvidia_gpu_exporter — GPU utilization / memory / temperature / power (scraped and pushed by the metrics pipeline)',
       ),
   },
 };
@@ -941,6 +1176,7 @@ function PluginsTab({ edgeId }: { edgeId: number }) {
               'procmetrics',
               'custommetrics',
               'databasemetrics',
+              'gpumetrics',
             ]);
             const topRows = rows.filter((r) => !childNames.has(r.plugin_name));
             const childRowsByParent: Record<string, PluginRow[]> = {
