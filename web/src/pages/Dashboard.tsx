@@ -264,14 +264,15 @@ export default function DashboardPage() {
 
   const openCPUDrilldown = useCallback(async (edge: Edge) => {
     try {
-      // host metric 按 device_id（Device.ID）过滤，未关联设备时回退到 edge.id。
-      const did = edge.device_id ?? edge.id;
+      // Prometheus series are labelled by device_id, not edge.id. Fall
+      // back to edge.id only when the host-device junction is missing (#96).
+      const deviceId = edge.device_id ?? edge.id;
       await openMetricDrilldown({
-        expr: `100 * (1 - avg by (device_id) (rate(node_cpu_seconds_total{device_id="${did}",mode="idle"}[5m])))`,
+        expr: `100 * (1 - avg by (device_id) (rate(node_cpu_seconds_total{device_id="${deviceId}",mode="idle"}[5m])))`,
         rangeInput: '1h',
         stepInput: '30s',
         title: `${edge.name} CPU`,
-        edgeId: did,
+        deviceId,
       });
       setPromErr(null);
     } catch (err) {
