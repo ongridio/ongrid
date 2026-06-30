@@ -65,6 +65,14 @@ type Device struct {
 	MemTotalBytes  uint64 `gorm:"not null;column:mem_total_bytes"`
 	DiskTotalBytes uint64 `gorm:"not null;default:0;column:disk_total_bytes"`
 
+	// GPUAvailable is true when the device host has NVIDIA GPU driver
+	// (nvidia-smi) available. Reported by the edge agent on register_edge.
+	GPUAvailable bool `gorm:"not null;default:false;column:gpu_available"`
+
+	// GPUModel is the GPU model name (e.g. "NVIDIA GeForce RTX 4090").
+	// Empty string when no GPU is available.
+	GPUModel string `gorm:"size:128;not null;default:'';column:gpu_model"`
+
 	// Live usage percentages (0..100). Refreshed from the most recent
 	// host-metric push; ticker-driven aggregation keeps the device list
 	// snappy without a JOIN onto host_metrics every render.

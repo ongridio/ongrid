@@ -111,6 +111,8 @@ type HostFacts struct {
 	MemTotalBytes  uint64
 	DiskTotalBytes uint64
 	IPAddress      string
+	GPUAvailable   bool
+	GPUModel       string
 }
 
 // Usage is the live percentage gauges for one device.

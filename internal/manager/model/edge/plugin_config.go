@@ -59,6 +59,10 @@ const (
 	PluginNameProcMetrics     = "procmetrics"
 	PluginNameCustomMetrics   = "custommetrics"
 	PluginNameDatabaseMetrics = "databasemetrics"
+	// gpumetrics wraps nvidia_gpu_exporter (utkuozdemir/nvidia_gpu_exporter)
+	// the edge ships as a bundled subprocess plugin. Skips start on hosts
+	// without NVIDIA GPU driver (nvidia-smi).
+	PluginNameGPUMetrics = "gpumetrics"
 )
 
 // IsKnownPluginName reports whether n is a plugin the manager knows
@@ -69,7 +73,8 @@ func IsKnownPluginName(n string) bool {
 	switch n {
 	case PluginNameMetrics, PluginNameLogs, PluginNameTraces, PluginNameProfiles,
 		PluginNameHostMetrics, PluginNameProcMetrics,
-		PluginNameCustomMetrics, PluginNameDatabaseMetrics:
+		PluginNameCustomMetrics, PluginNameDatabaseMetrics,
+		PluginNameGPUMetrics:
 		return true
 	}
 	return false

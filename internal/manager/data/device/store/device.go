@@ -90,6 +90,8 @@ func (r *Repo) UpdateHostFacts(ctx context.Context, id uint64, f biz.HostFacts) 
 		"mem_total_bytes":  f.MemTotalBytes,
 		"disk_total_bytes": f.DiskTotalBytes,
 		"ip_address":       f.IPAddress,
+		"gpu_available":    f.GPUAvailable,
+		"gpu_model":        f.GPUModel,
 	})
 	if res.Error != nil {
 		return res.Error

@@ -245,6 +245,16 @@ type HostInfo struct {
 	// cannot determine a suitable address (e.g. no non-loopback
 	// interface found).
 	IPAddress string `json:"ip_address,omitempty"`
+
+	// GPUAvailable is true when the edge host has NVIDIA GPU driver
+	// (nvidia-smi) available. Sent on register_edge so the manager UI
+	// can show GPU capability per device. False on hosts without
+	// NVIDIA hardware or without the proprietary driver installed.
+	GPUAvailable bool `json:"gpu_available,omitempty"`
+
+	// GPUModel is the GPU model name reported by nvidia-smi (e.g. "NVIDIA GeForce RTX 4090").
+	// Empty string when no GPU is available or nvidia-smi cannot determine the model.
+	GPUModel string `json:"gpu_model,omitempty"`
 }
 
 // RegisterEdgeRequest is the first RPC the edge sends after connecting.

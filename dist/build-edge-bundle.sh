@@ -14,6 +14,7 @@
 #   bin/<arch>/postgres_exporter
 #   bin/<arch>/redis_exporter
 #   bin/<arch>/mongodb_exporter
+#   bin/<arch>/nvidia_gpu_exporter
 #   bin/<arch>/promtail
 #   bin/<arch>/otelcol-contrib
 #   deploy/install/apply-pending-upgrade.sh
@@ -43,6 +44,7 @@ ENTRIES=(
   "postgres_exporter      0755 /usr/local/lib/ongrid-edge/postgres_exporter          $BIN_DIR/postgres_exporter"
   "redis_exporter         0755 /usr/local/lib/ongrid-edge/redis_exporter             $BIN_DIR/redis_exporter"
   "mongodb_exporter       0755 /usr/local/lib/ongrid-edge/mongodb_exporter           $BIN_DIR/mongodb_exporter"
+  "nvidia_gpu_exporter    0755 /usr/local/lib/ongrid-edge/nvidia_gpu_exporter        $BIN_DIR/nvidia_gpu_exporter"
   "promtail               0755 /usr/local/lib/ongrid-edge/promtail                   $BIN_DIR/promtail"
   "otelcol-contrib        0755 /usr/local/lib/ongrid-edge/otelcol-contrib            $BIN_DIR/otelcol-contrib"
   "apply-pending-upgrade.sh 0755 /usr/local/lib/ongrid-edge/apply-pending-upgrade.sh $APPLY_SCRIPT"
