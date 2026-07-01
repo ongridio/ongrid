@@ -23,6 +23,10 @@ import {
   type RotateSecretResponse,
   upgradeEdgeAgent,
   upgradeEdgePackage,
+  batchUpgradeEdgePackage,
+  batchUpgradeEdgeAgent,
+  batchDeleteEdges,
+  type BatchResponse,
 } from '@/api/edges';
 import { getManagerVersion } from '@/api/version';
 import { usePermissions } from '@/store/me';
@@ -82,7 +86,15 @@ export default function EdgesPage() {
   // open a modal — the action is single-click and the result lands in
   // the existing toast pipeline.
   const [pkgUpgradingId, setPkgUpgradingId] = useState<number | null>(null);
-  const [pkgUpgradeToast, setPkgUpgradeToast] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  const [toast, setToast] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  // Batch selection: set of edge ids ticked via the per-row checkboxes.
+  // The toolbar above the table appears whenever this is non-empty.
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  // When set, the batch custom-upgrade (URL+sha) modal is open for the
+  // currently-selected ids.
+  const [batchUpgradeOpen, setBatchUpgradeOpen] = useState(false);
+  // True while any batch RPC is in flight (disables the toolbar buttons).
+  const [batchBusy, setBatchBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -101,6 +113,14 @@ export default function EdgesPage() {
         );
       }
       setEdges(items);
+      // Drop any selected ids that no longer appear (deleted / filtered out)
+      // so the toolbar count never lies.
+      setSelected((prev) => {
+        if (prev.size === 0) return prev;
+        const live = new Set(items.map((e) => e.id));
+        const next = new Set([...prev].filter((id) => live.has(id)));
+        return next.size === prev.size ? prev : next;
+      });
       setError(null);
     } catch (err) {
       setError((err as Error).message || tr('加载失败', 'Load failed'));
@@ -158,11 +178,11 @@ export default function EdgesPage() {
       `Upgrade ${e.name} package? Agent will briefly restart; failed upgrades auto-rollback to current version.`,
     ))) return;
     setPkgUpgradingId(e.id);
-    setPkgUpgradeToast(null);
+    setToast(null);
     try {
       const resp = await upgradeEdgePackage(e.id);
       const ok = resp.applied;
-      setPkgUpgradeToast({
+      setToast({
         kind: ok ? 'ok' : 'err',
         text: ok
           ? tr(
@@ -176,12 +196,101 @@ export default function EdgesPage() {
       });
       void refresh();
     } catch (err) {
-      setPkgUpgradeToast({
+      setToast({
         kind: 'err',
         text: (err as Error).message || tr('升级失败', 'Upgrade failed'),
       });
     } finally {
       setPkgUpgradingId(null);
+    }
+  }
+
+  const selectedIds = useMemo(() => [...selected], [selected]);
+  const allVisibleSelected = edges.length > 0 && edges.every((e) => selected.has(e.id));
+
+  const toggleOne = (id: number) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const toggleAllVisible = () => {
+    setSelected((prev) => {
+      if (edges.every((e) => prev.has(e.id))) {
+        // all selected → clear the visible ones
+        const next = new Set(prev);
+        edges.forEach((e) => next.delete(e.id));
+        return next;
+      }
+      const next = new Set(prev);
+      edges.forEach((e) => next.add(e.id));
+      return next;
+    });
+  };
+  const clearSelection = () => setSelected(new Set());
+
+  // summarizeBatch turns a per-id envelope into a single toast. All-ok →
+  // green; any failure → amber-red with the failed ids so the operator
+  // knows exactly which edges to retry.
+  function summarizeBatch(verb: string, resp: BatchResponse) {
+    if (resp.failed === 0) {
+      setToast({
+        kind: 'ok',
+        text: tr(`${verb}：${resp.succeeded} 台成功`, `${verb}: ${resp.succeeded} succeeded`),
+      });
+      return;
+    }
+    const failedIds = resp.results.filter((r) => !r.ok).map((r) => r.id).join(', ');
+    setToast({
+      kind: 'err',
+      text: tr(
+        `${verb}：${resp.succeeded} 成功 / ${resp.failed} 失败（失败 ID：${failedIds}）`,
+        `${verb}: ${resp.succeeded} ok / ${resp.failed} failed (failed IDs: ${failedIds})`,
+      ),
+    });
+  }
+
+  async function onBatchPackageUpgrade() {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    if (!confirm(tr(
+      `升级选中的 ${ids.length} 台设备整包？各 agent 会短暂重启；失败会自动回滚。`,
+      `Upgrade package on ${ids.length} selected device(s)? Each agent briefly restarts; failures auto-rollback.`,
+    ))) return;
+    setBatchBusy(true);
+    setToast(null);
+    try {
+      const resp = await batchUpgradeEdgePackage(ids);
+      summarizeBatch(tr('整包升级', 'Package upgrade'), resp);
+      clearSelection();
+      void refresh();
+    } catch (err) {
+      setToast({ kind: 'err', text: (err as Error).message || tr('升级失败', 'Upgrade failed') });
+    } finally {
+      setBatchBusy(false);
+    }
+  }
+
+  async function onBatchDelete() {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    if (!confirm(tr(
+      `确定要删除选中的 ${ids.length} 台设备？此操作不可恢复。`,
+      `Delete ${ids.length} selected device(s)? This cannot be undone.`,
+    ))) return;
+    setBatchBusy(true);
+    setToast(null);
+    try {
+      const resp = await batchDeleteEdges(ids);
+      summarizeBatch(tr('删除', 'Delete'), resp);
+      clearSelection();
+      void refresh();
+    } catch (err) {
+      setToast({ kind: 'err', text: (err as Error).message || tr('删除失败', 'Delete failed') });
+    } finally {
+      setBatchBusy(false);
     }
   }
 
@@ -224,10 +333,62 @@ export default function EdgesPage() {
             </div>
           )}
 
+          {selected.size > 0 && (
+            <div className="mb-3 flex items-center gap-2 rounded-lg border border-accent/40 bg-accent/10 px-3 py-2 text-xs">
+              <span className="font-medium text-zinc-100">
+                {tr(`已选择 ${selected.size} 台`, `${selected.size} selected`)}
+              </span>
+              <span className="flex-1" />
+              <button
+                type="button"
+                disabled={batchBusy}
+                onClick={() => void onBatchPackageUpgrade()}
+                className="inline-flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
+              >
+                <ExternalLink size={12} /> {tr('升级整包', 'Upgrade package')}
+              </button>
+              <button
+                type="button"
+                disabled={batchBusy}
+                onClick={() => setBatchUpgradeOpen(true)}
+                className="inline-flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
+              >
+                <ExternalLink size={12} /> {tr('自定义升级', 'Custom upgrade')}
+              </button>
+              <button
+                type="button"
+                disabled={batchBusy}
+                onClick={() => void onBatchDelete()}
+                className="inline-flex items-center gap-1 rounded-md border border-red-500/40 bg-red-500/10 px-2.5 py-1.5 text-red-300 hover:bg-red-500/20 disabled:opacity-50"
+              >
+                <Trash2 size={12} /> {tr('删除', 'Delete')}
+              </button>
+              <button
+                type="button"
+                onClick={clearSelection}
+                className="rounded-md px-2 py-1.5 text-zinc-400 hover:text-zinc-200"
+              >
+                {tr('清除', 'Clear')}
+              </button>
+            </div>
+          )}
+
           <div className="overflow-hidden rounded-xl border border-zinc-800/60 bg-zinc-900/40">
             <table className="w-full text-sm">
               <thead className="border-b border-zinc-800/60 bg-zinc-950/40 text-[11px] uppercase tracking-wider text-zinc-500">
                 <tr>
+                  <th className="w-10 px-4 py-2.5 text-left">
+                    <input
+                      type="checkbox"
+                      aria-label={tr('全选', 'Select all')}
+                      className="h-3.5 w-3.5 accent-accent"
+                      checked={allVisibleSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = selected.size > 0 && !allVisibleSelected;
+                      }}
+                      onChange={toggleAllVisible}
+                    />
+                  </th>
                   <th className="px-4 py-2.5 text-left">ID</th>
                   <th className="px-4 py-2.5 text-left">{tr('名称', 'Name')}</th>
                   <th className="px-4 py-2.5 text-left">{tr('主机名', 'Hostname')}</th>
@@ -243,13 +404,13 @@ export default function EdgesPage() {
               <tbody className="divide-y divide-zinc-800/40">
                 {loading && edges.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="px-4 py-10 text-center text-zinc-500">
+                    <td colSpan={11} className="px-4 py-10 text-center text-zinc-500">
                       {tr('加载中…', 'Loading…')}
                     </td>
                   </tr>
                 ) : edges.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="px-4 py-10 text-center text-zinc-500">
+                    <td colSpan={11} className="px-4 py-10 text-center text-zinc-500">
                       {rolesFilter
                         ? tr(
                             `没有 ${ROLE_FILTER_TITLES[rolesFilter]?.[0] ?? rolesFilter} 设备。点设备名打开详情后可在右上角分配角色。`,
@@ -274,6 +435,18 @@ export default function EdgesPage() {
                           wrap than have a name break across lines.
                           Heartbeat / access-key / agent are short and
                           formatted to a known width. */}
+                      <td
+                        className="w-10 px-4 py-2.5"
+                        onClick={(ev) => ev.stopPropagation()}
+                      >
+                        <input
+                          type="checkbox"
+                          aria-label={tr(`选择 ${e.name}`, `Select ${e.name}`)}
+                          className="h-3.5 w-3.5 accent-accent"
+                          checked={selected.has(e.id)}
+                          onChange={() => toggleOne(e.id)}
+                        />
+                      </td>
                       <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-zinc-400">
                         {e.id}
                       </td>
@@ -381,18 +554,38 @@ export default function EdgesPage() {
           }}
         />
       )}
-      {pkgUpgradeToast && (
+      {batchUpgradeOpen && (
+        <BatchUpgradeModal
+          count={selected.size}
+          onClose={() => setBatchUpgradeOpen(false)}
+          onSubmit={async (url, sha256) => {
+            setBatchBusy(true);
+            setToast(null);
+            try {
+              const resp = await batchUpgradeEdgeAgent(selectedIds, url, sha256);
+              summarizeBatch(tr('自定义升级', 'Custom upgrade'), resp);
+              setBatchUpgradeOpen(false);
+              clearSelection();
+              // Edges need ~30s to come back on the new version; polling
+              // picks them up. No immediate refresh.
+            } finally {
+              setBatchBusy(false);
+            }
+          }}
+        />
+      )}
+      {toast && (
         <div
           role="status"
-          onClick={() => setPkgUpgradeToast(null)}
+          onClick={() => setToast(null)}
           className={cn(
             'fixed bottom-6 right-6 z-50 max-w-md cursor-pointer rounded-lg px-4 py-2.5 text-sm shadow-2xl ring-1 ring-inset',
-            pkgUpgradeToast.kind === 'ok'
+            toast.kind === 'ok'
               ? 'bg-emerald-500/15 text-emerald-200 ring-emerald-500/40'
               : 'bg-red-500/15 text-red-200 ring-red-500/40',
           )}
         >
-          {pkgUpgradeToast.text}
+          {toast.text}
         </div>
       )}
     </>
@@ -528,6 +721,97 @@ function UpgradeModal({
             'edge downloads, verifies sha256, stages atomically and exits cleanly; on restart systemd ExecStartPre mv\'s the new binary to ',
           )}<code className="font-mono">/usr/local/bin/ongrid-edge</code>{tr('。失败时旧版本保持不变。', '. On failure the old version is left in place.')}
         </p>
+        {err && (
+          <div className="rounded-md border border-red-500/30 bg-red-500/10 px-2 py-1.5 text-red-300">
+            {err}
+          </div>
+        )}
+        <div className="flex justify-end gap-2 pt-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md border border-zinc-700 px-3 py-1.5 text-zinc-300 hover:bg-zinc-800"
+          >
+            {tr('取消', 'Cancel')}
+          </button>
+          <button
+            type="button"
+            disabled={submitting}
+            onClick={submit}
+            className="rounded-md bg-accent px-3 py-1.5 text-accent-fg hover:bg-accent/90 disabled:opacity-50"
+          >
+            {submitting ? tr('触发中…', 'Triggering…') : tr('触发升级', 'Trigger upgrade')}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// BatchUpgradeModal — the multi-device equivalent of UpgradeModal. The
+// same URL + sha256 is dispatched to every selected edge. Same explicit
+// URL+sha form (v1); a future revision can pick from an artifact
+// registry instead.
+function BatchUpgradeModal({
+  count,
+  onClose,
+  onSubmit,
+}: {
+  count: number;
+  onClose(): void;
+  onSubmit(url: string, sha256: string): Promise<void>;
+}) {
+  const { tr } = useI18n();
+  const [url, setUrl] = useState(() => {
+    const origin = window.location.origin.replace(/\/+$/, '');
+    return `${origin}/edge/ongrid-edge-linux-amd64`;
+  });
+  const [sha256, setSha256] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const submit = async () => {
+    if (!url.trim() || sha256.trim().length !== 64) {
+      setErr(tr('需要 URL + 64 位小写 sha256', 'URL + 64-char lowercase sha256 required'));
+      return;
+    }
+    setSubmitting(true);
+    setErr(null);
+    try {
+      await onSubmit(url.trim(), sha256.trim().toLowerCase());
+    } catch (e) {
+      setErr((e as Error)?.message ?? tr('触发失败', 'Trigger failed'));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  return (
+    <Modal open title={tr(`批量自定义升级 · ${count} 台`, `Batch custom upgrade · ${count} device(s)`)} onClose={onClose}>
+      <div className="space-y-3 text-xs text-zinc-300">
+        <p className="text-[11px] text-amber-300/90">
+          {tr(
+            `同一个二进制将下发到选中的 ${count} 台设备。请确认它们架构一致（默认 linux-amd64）。`,
+            `The same binary is dispatched to all ${count} selected devices. Make sure they share an architecture (default linux-amd64).`,
+          )}
+        </p>
+        <label className="block">
+          <span className="mb-1 block text-zinc-500">{tr('下载 URL', 'Download URL')}</span>
+          <input
+            type="text"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-[11px] text-zinc-100 focus:border-zinc-600 focus:outline-none"
+          />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-zinc-500">{tr('SHA256（64 位小写 hex）', 'SHA256 (64-char lowercase hex)')}</span>
+          <input
+            type="text"
+            value={sha256}
+            onChange={(e) => setSha256(e.target.value)}
+            placeholder="e.g. 3a7f...  by `sha256sum ongrid-edge-linux-amd64`"
+            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-[11px] text-zinc-100 focus:border-zinc-600 focus:outline-none"
+          />
+        </label>
         {err && (
           <div className="rounded-md border border-red-500/30 bg-red-500/10 px-2 py-1.5 text-red-300">
             {err}
