@@ -2,17 +2,22 @@
 Description=ongrid edge agent
 After=network-online.target
 Wants=network-online.target
+# C11 Phase-B / ADR-024 remote upgrade. The privileged "apply staged bundle"
+# step runs as a SEPARATE root oneshot (ongrid-edge-upgrade.service) because
+# this unit runs sandboxed (ProtectSystem=strict) and non-root (User=) and so
+# cannot write the binary paths under /usr/local. Wants= pulls the oneshot on
+# every (re)start of this unit — including Restart=always auto-restarts — and
+# After= guarantees the swap lands before the agent execs.
+#
+# This replaces the old `ExecStartPre=-+.../apply-pending-upgrade.sh`, whose
+# `+` root-exec prefix is unsupported on systemd < 231 (CentOS 7 = 219) and
+# was silently ignored there, so upgrades never applied on old systemd.
+Wants=ongrid-edge-upgrade.service
+After=ongrid-edge-upgrade.service
 
 [Service]
 Type=simple
 EnvironmentFile=/etc/ongrid-edge/ongrid-edge.env
-# C11 Phase-B remote upgrade — `+` runs as root regardless of User=,
-# `-` lets a missing/failing script exit 0 without blocking the unit.
-# Script no-ops when no /var/lib/ongrid-edge/.upgrade/pending exists;
-# when it does, it sha256-verifies and atomically swaps it over the
-# binary path. Worst case (script wedged) the unit still starts the
-# pre-upgrade binary because of the `-` prefix.
-ExecStartPre=-+/usr/local/lib/ongrid-edge/apply-pending-upgrade.sh
 ExecStart=/usr/local/bin/ongrid-edge
 Restart=always
 RestartSec=5

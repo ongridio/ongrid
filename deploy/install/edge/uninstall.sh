@@ -14,6 +14,7 @@ set -euo pipefail
 INSTALL_DIR="/usr/local/bin"
 ENV_DIR="/etc/ongrid-edge"
 SERVICE_FILE="/etc/systemd/system/ongrid-edge.service"
+UPGRADE_SERVICE_FILE="/etc/systemd/system/ongrid-edge-upgrade.service"
 LOG_DIR="/var/log/ongrid-edge"
 SERVICE_USER="ongrid-edge"
 # Wholesale plugin dirs: bundled binaries (promtail, node_exporter,
@@ -36,8 +37,8 @@ fi
 # was still running — agent + every subprocess survived, printed [OK].
 # `systemctl stop` is safe to call on an unknown unit (logs to stderr,
 # returns non-zero) so we just suppress + ignore failures.
-systemctl stop    ongrid-edge ongrid-node-exporter ongrid-process-exporter 2>/dev/null || true
-systemctl disable ongrid-edge ongrid-node-exporter ongrid-process-exporter 2>/dev/null || true
+systemctl stop    ongrid-edge ongrid-edge-upgrade ongrid-node-exporter ongrid-process-exporter 2>/dev/null || true
+systemctl disable ongrid-edge ongrid-edge-upgrade ongrid-node-exporter ongrid-process-exporter 2>/dev/null || true
 
 # Defensive: if systemd never actually managed the agent (manual
 # install, broken unit file, etc.), kill the supervisor and any
@@ -46,7 +47,7 @@ systemctl disable ongrid-edge ongrid-node-exporter ongrid-process-exporter 2>/de
 # enumerating them.
 pkill -9 -f '/usr/local/bin/ongrid-edge|/usr/local/lib/ongrid-edge/' 2>/dev/null || true
 
-rm -f "$SERVICE_FILE" "$INSTALL_DIR/ongrid-edge"
+rm -f "$SERVICE_FILE" "$UPGRADE_SERVICE_FILE" "$INSTALL_DIR/ongrid-edge"
 rm -f /etc/systemd/system/ongrid-node-exporter.service
 rm -f /etc/systemd/system/ongrid-process-exporter.service
 rm -rf "$ENV_DIR"

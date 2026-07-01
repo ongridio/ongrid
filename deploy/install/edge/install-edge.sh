@@ -31,6 +31,7 @@ PLUGIN_WORK_DIR="${STATE_DIR}/plugins"       # rendered plugin configs + subproc
 CONFIG_DIR=/etc/ongrid-edge
 ENV_FILE="${CONFIG_DIR}/ongrid-edge.env"
 UNIT_FILE=/etc/systemd/system/ongrid-edge.service
+UPGRADE_UNIT_FILE=/etc/systemd/system/ongrid-edge-upgrade.service
 LOG_DIR=/var/log/ongrid-edge
 
 UNINSTALL=0
@@ -65,7 +66,7 @@ if [[ $UNINSTALL -eq 1 ]]; then
     log_info "stopping ongrid-edge"
     systemctl stop ongrid-edge 2>/dev/null || true
     systemctl disable ongrid-edge 2>/dev/null || true
-    rm -f "$UNIT_FILE"
+    rm -f "$UNIT_FILE" "$UPGRADE_UNIT_FILE"
     systemctl daemon-reload || true
     rm -f "$BIN_DEST"
     rm -rf "$CONFIG_DIR"
@@ -172,12 +173,11 @@ else
     log_warn "promtail-${OS}-${ARCH} not bundled; logs plugin will fail to start until present"
 fi
 
-# C11 Phase-B remote upgrade hook — `apply-pending-upgrade.sh` runs as
-# root via systemd ExecStartPre and swaps the staged binary into place
-# at the next process restart. Idempotent / safe with no pending file
-# (exits 0). The unit file references this absolute path; missing
-# script makes the `-` prefix tolerate the failure but disables remote
-# upgrade. See ADR-018 / HLD-007.
+# C11 Phase-B / ADR-024 remote upgrade hook — `apply-pending-upgrade.sh`
+# runs as root via the ongrid-edge-upgrade.service oneshot (installed
+# below) before every agent start, and swaps the staged bundle into place.
+# Idempotent / safe with no pending file (exits 0). The oneshot unit
+# references this absolute path. See ADR-018 / ADR-024 / HLD-007.
 SWAP_SRC="${SCRIPT_DIR}/apply-pending-upgrade.sh"
 if [[ -f "$SWAP_SRC" ]]; then
     log_info "installing apply-pending-upgrade.sh to ${PLUGIN_BIN_DIR}/apply-pending-upgrade.sh"
@@ -265,8 +265,17 @@ mkdir -p "$LOG_DIR"
 chown "$SERVICE_USER":"$SERVICE_GROUP" "$LOG_DIR" 2>/dev/null || true
 chmod 750 "$LOG_DIR"
 
-# ---------- systemd unit ----------
-log_info "installing systemd unit"
+# ---------- systemd units ----------
+log_info "installing systemd units"
+# Privileged apply oneshot (ADR-024) — runs apply-pending-upgrade.sh as root
+# before the agent. ongrid-edge.service pulls it via Wants=. Guarded so an
+# older bundle without this file still installs the agent unit.
+UPGRADE_UNIT_SRC="${SCRIPT_DIR}/ongrid-edge-upgrade.service"
+if [[ -f "$UPGRADE_UNIT_SRC" ]]; then
+    install -m 0644 -o root -g root "$UPGRADE_UNIT_SRC" "$UPGRADE_UNIT_FILE"
+else
+    log_warn "ongrid-edge-upgrade.service not bundled; remote whole-bundle upgrade won't apply on this host"
+fi
 install -m 0644 -o root -g root "${SCRIPT_DIR}/ongrid-edge.service" "$UNIT_FILE"
 systemctl daemon-reload
 

@@ -499,10 +499,16 @@ copy_opt "${REPO_ROOT}/deploy/install/edge/ongrid-edge.env.example" \
          "${STAGE_DIR}/edge/ongrid-edge.env.example"
 copy_opt "${REPO_ROOT}/deploy/install/edge/ongrid-edge.service" \
          "${STAGE_DIR}/edge/ongrid-edge.service"
+# ADR-024 privileged apply oneshot — ongrid-edge.service pulls it via Wants=
+# so apply-pending-upgrade.sh runs as root before each agent start. Required
+# on systemd 219 (CentOS 7) where the old ExecStartPre `+` prefix was ignored.
+copy_opt "${REPO_ROOT}/deploy/install/edge/ongrid-edge-upgrade.service" \
+         "${STAGE_DIR}/edge/ongrid-edge-upgrade.service"
 
-# C11 Phase-B remote upgrade — ExecStartPre script runs as root before
-# each ongrid-edge start; swaps a sha256-verified pending binary into
-# place. install-edge.sh installs this to /usr/local/lib/ongrid-edge/.
+# C11 Phase-B / ADR-024 remote upgrade — apply script runs as root (via the
+# ongrid-edge-upgrade.service oneshot) before each ongrid-edge start; swaps a
+# sha256-verified staged bundle into place. install-edge.sh installs this to
+# /usr/local/lib/ongrid-edge/.
 copy_opt "${REPO_ROOT}/deploy/install/apply-pending-upgrade.sh" \
          "${STAGE_DIR}/edge/apply-pending-upgrade.sh" 755
 
