@@ -113,6 +113,43 @@ func TestRenderBasicWhenUserSet(t *testing.T) {
 	}
 }
 
+func TestRenderTLSInsecureSkipVerifyDefaultsOn(t *testing.T) {
+	cfg := plugins.PluginConfig{
+		Enabled:  true,
+		EdgeID:   1,
+		Endpoint: "https://manager.example.com/v1/traces",
+	}
+	out, err := render(cfg)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	body := string(out)
+	// Default-on so the standard self-signed manager cert doesn't fail the
+	// OTLP/HTTPS push (issue #144).
+	if !strings.Contains(body, "insecure_skip_verify: true") {
+		t.Errorf("expected tls.insecure_skip_verify by default, got:\n%s", body)
+	}
+}
+
+func TestRenderTLSInsecureSkipVerifyDisabled(t *testing.T) {
+	cfg := plugins.PluginConfig{
+		Enabled:  true,
+		EdgeID:   1,
+		Endpoint: "https://manager.example.com/v1/traces",
+		Spec:     map[string]interface{}{"tls_insecure_skip_verify": false},
+	}
+	out, err := render(cfg)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	body := string(out)
+	// With a real cert the operator opts out; the tls block must be absent
+	// so otelcol verifies the cert chain.
+	if strings.Contains(body, "insecure_skip_verify") {
+		t.Errorf("tls block must be absent when disabled, got:\n%s", body)
+	}
+}
+
 func TestRenderRejectsMissingEndpoint(t *testing.T) {
 	cfg := plugins.PluginConfig{Enabled: true, EdgeID: 1}
 	if _, err := render(cfg); err == nil {
@@ -126,4 +163,3 @@ func TestRenderRejectsMissingEdgeID(t *testing.T) {
 		t.Errorf("render must reject missing edge_id")
 	}
 }
-
