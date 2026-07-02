@@ -61,11 +61,11 @@ The target maturity is a governed loop: low-risk, well-tested actions can become
 
 ## Screenshots
 
-| Workflow editor | Skills inventory |
+| Workflow editor | Unified tasks |
 |---|---|
-| <img src="docs/assets/readme/workflow-editor.png" alt="Ongrid workflow editor" width="480" /> | <img src="docs/assets/readme/skills-inventory.png" alt="Ongrid skills inventory" width="480" /> |
+| <img src="docs/assets/readme/en-workflow-editor.png" alt="Ongrid workflow editor in English" width="480" /> | <img src="docs/assets/readme/en-tasks.png" alt="Ongrid unified tasks in English" width="480" /> |
 | Agent write gate | Artifacts center |
-| <img src="docs/assets/readme/agent-write-gate.png" alt="Ongrid agent write gate" width="480" /> | <img src="docs/assets/readme/artifacts-center.png" alt="Ongrid artifacts center" width="480" /> |
+| <img src="docs/assets/readme/en-agent-write-gate.png" alt="Ongrid agent write gate in English" width="480" /> | <img src="docs/assets/readme/en-artifacts.png" alt="Ongrid artifacts center in English" width="480" /> |
 
 ## Features
 
@@ -164,6 +164,14 @@ Drop-in for the observability, channel, and model stacks your team already uses.
 | **Observability** | <img src="https://api.iconify.design/logos:prometheus.svg" alt="Prometheus" title="Prometheus" width="28" height="28" />&nbsp;&nbsp;&nbsp;<img src="https://api.iconify.design/logos:grafana.svg" alt="Grafana" title="Grafana" width="28" height="28" />&nbsp;&nbsp;&nbsp;<img src="docs/assets/integrations/loki.svg" alt="Loki" title="Loki" width="28" height="28" />&nbsp;&nbsp;&nbsp;<img src="docs/assets/integrations/tempo.svg" alt="Tempo" title="Tempo" width="28" height="28" />&nbsp;&nbsp;&nbsp;<img src="docs/assets/integrations/opentelemetry.svg" alt="OpenTelemetry" title="OpenTelemetry" width="28" height="28" />&nbsp;&nbsp;&nbsp;<img src="https://api.iconify.design/logos:qdrant-icon.svg" alt="Qdrant" title="Qdrant" width="28" height="28" /> |
 | **Channels** | <img src="https://api.iconify.design/logos:slack-icon.svg" alt="Slack" title="Slack" width="28" height="28" />&nbsp;&nbsp;&nbsp;<img src="https://api.iconify.design/logos:telegram.svg" alt="Telegram" title="Telegram" width="28" height="28" />&nbsp;&nbsp;&nbsp;<img src="docs/assets/integrations/larksuite.svg" alt="Larksuite" title="Larksuite" width="28" height="28" />&nbsp;&nbsp;&nbsp;<img src="docs/assets/integrations/dingtalk.svg" alt="DingTalk" title="DingTalk" width="28" height="28" />&nbsp;&nbsp;&nbsp;<img src="https://cdn.simpleicons.org/wechat" alt="WeCom" title="WeCom" width="28" height="28" />&nbsp;&nbsp;&nbsp;<img src="https://api.iconify.design/logos:webhooks.svg" alt="Webhook" title="Webhook" width="28" height="28" /> |
 | **Models** | <img src="https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/claude-color.svg" alt="Anthropic" title="Anthropic" width="28" height="28" />&nbsp;&nbsp;&nbsp;<img src="docs/assets/integrations/openai.svg" alt="OpenAI" title="OpenAI" width="28" height="28" />&nbsp;&nbsp;&nbsp;<img src="https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/gemini-color.svg" alt="Gemini" title="Gemini" width="28" height="28" />&nbsp;&nbsp;&nbsp;<img src="https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/deepseek-color.svg" alt="DeepSeek" title="DeepSeek" width="28" height="28" />&nbsp;&nbsp;&nbsp;<img src="docs/assets/integrations/zhipu.svg" alt="Zhipu" title="Zhipu" width="28" height="28" />&nbsp;&nbsp;&nbsp;<img src="https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/kimi-color.svg" alt="Kimi" title="Kimi" width="28" height="28" /> |
+
+## Contributors
+
+Thanks to everyone helping build Ongrid.
+
+<a href="https://github.com/ongridio/ongrid/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=ongridio/ongrid" alt="Ongrid contributors" />
+</a>
 
 ## License
 

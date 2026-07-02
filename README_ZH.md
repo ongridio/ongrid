@@ -24,9 +24,17 @@
 
 <div align="center">
 
-[特性](#特性) • [安装](#安装) • [集成](#集成) • [许可证](#许可证)
+[截图](#截图) • [特性](#特性) • [安装](#安装) • [集成](#集成) • [贡献者](#贡献者) • [许可证](#许可证)
 
 </div>
+
+## 截图
+
+| 工作流编排 | 统一任务 |
+|---|---|
+| <img src="docs/assets/readme/zh-workflow-editor.png" alt="Ongrid 工作流编排中文界面" width="480" /> | <img src="docs/assets/readme/zh-tasks.png" alt="Ongrid 统一任务中文界面" width="480" /> |
+| Agent 写入开关 | 产物中心 |
+| <img src="docs/assets/readme/zh-agent-write-gate.png" alt="Ongrid Agent 写入开关中文界面" width="480" /> | <img src="docs/assets/readme/zh-artifacts.png" alt="Ongrid 产物中心中文界面" width="480" /> |
 
 ## 特性
 
@@ -80,6 +88,14 @@ wget https://ongrid.cloud/dl/ongrid-v0.9.0-linux-arm64.tar.xz
 | **可观测** | <img src="https://api.iconify.design/logos:prometheus.svg" alt="Prometheus" title="Prometheus" width="28" height="28" />&nbsp;&nbsp;&nbsp;<img src="https://api.iconify.design/logos:grafana.svg" alt="Grafana" title="Grafana" width="28" height="28" />&nbsp;&nbsp;&nbsp;<img src="docs/assets/integrations/loki.svg" alt="Loki" title="Loki" width="28" height="28" />&nbsp;&nbsp;&nbsp;<img src="docs/assets/integrations/tempo.svg" alt="Tempo" title="Tempo" width="28" height="28" />&nbsp;&nbsp;&nbsp;<img src="docs/assets/integrations/opentelemetry.svg" alt="OpenTelemetry" title="OpenTelemetry" width="28" height="28" />&nbsp;&nbsp;&nbsp;<img src="https://api.iconify.design/logos:qdrant-icon.svg" alt="Qdrant" title="Qdrant" width="28" height="28" /> |
 | **通道** | <img src="https://api.iconify.design/logos:slack-icon.svg" alt="Slack" title="Slack" width="28" height="28" />&nbsp;&nbsp;&nbsp;<img src="https://api.iconify.design/logos:telegram.svg" alt="Telegram" title="Telegram" width="28" height="28" />&nbsp;&nbsp;&nbsp;<img src="docs/assets/integrations/larksuite.svg" alt="Larksuite" title="Larksuite" width="28" height="28" />&nbsp;&nbsp;&nbsp;<img src="docs/assets/integrations/dingtalk.svg" alt="DingTalk" title="DingTalk" width="28" height="28" />&nbsp;&nbsp;&nbsp;<img src="https://cdn.simpleicons.org/wechat" alt="WeCom" title="WeCom" width="28" height="28" />&nbsp;&nbsp;&nbsp;<img src="https://api.iconify.design/logos:webhooks.svg" alt="Webhook" title="Webhook" width="28" height="28" /> |
 | **模型** | <img src="https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/claude-color.svg" alt="Anthropic" title="Anthropic" width="28" height="28" />&nbsp;&nbsp;&nbsp;<img src="docs/assets/integrations/openai.svg" alt="OpenAI" title="OpenAI" width="28" height="28" />&nbsp;&nbsp;&nbsp;<img src="https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/gemini-color.svg" alt="Gemini" title="Gemini" width="28" height="28" />&nbsp;&nbsp;&nbsp;<img src="https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/deepseek-color.svg" alt="DeepSeek" title="DeepSeek" width="28" height="28" />&nbsp;&nbsp;&nbsp;<img src="docs/assets/integrations/zhipu.svg" alt="Zhipu" title="Zhipu" width="28" height="28" />&nbsp;&nbsp;&nbsp;<img src="https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/kimi-color.svg" alt="Kimi" title="Kimi" width="28" height="28" /> |
+
+## 贡献者
+
+感谢所有一起建设 Ongrid 的贡献者。
+
+<a href="https://github.com/ongridio/ongrid/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=ongridio/ongrid" alt="Ongrid 贡献者" />
+</a>
 
 ## 许可证
 
