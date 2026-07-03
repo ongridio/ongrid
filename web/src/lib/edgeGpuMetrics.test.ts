@@ -3,14 +3,14 @@ import type { PromMatrixSeries } from '@/api/edges';
 import {
   buildGpuColorMap,
   buildGpuExprs,
+  collectGpuUuidsFromMatrices,
   extractUuidsFromMatrix,
-  gpuSeriesLabel,
+  gpuLegendLabel,
   isGpuAvailable,
   isGpuPanelEmpty,
   matrixToGpuPanel,
-  EMPTY_PANEL,
-  SERIES_COLORS,
 } from './edgeGpuMetrics';
+import { EMPTY_PANEL, SERIES_COLORS } from './metricsPanel';
 
 describe('buildGpuExprs', () => {
   it('includes device_id filter and no aggregation', () => {
@@ -38,10 +38,16 @@ describe('buildGpuColorMap', () => {
   });
 });
 
-describe('gpuSeriesLabel', () => {
-  it('returns GPU N labels', () => {
-    expect(gpuSeriesLabel(0)).toBe('GPU 0');
-    expect(gpuSeriesLabel(1)).toBe('GPU 1');
+describe('gpuLegendLabel', () => {
+  it('uses physical index with uuid tail when multiple GPUs', () => {
+    const map = buildGpuColorMap(['GPU-aaa', 'GPU-bbb']);
+    expect(gpuLegendLabel('GPU-aaa', map)).toBe('GPU 0 (aaa)');
+    expect(gpuLegendLabel('GPU-bbb', map)).toBe('GPU 1 (bbb)');
+  });
+
+  it('omits uuid tail for a single GPU', () => {
+    const map = buildGpuColorMap(['GPU-aaa']);
+    expect(gpuLegendLabel('GPU-aaa', map)).toBe('GPU 0');
   });
 });
 
@@ -78,13 +84,26 @@ function dualGpuMatrix(): PromMatrixSeries[] {
 }
 
 describe('matrixToGpuPanel', () => {
-  it('splits one line per uuid with GPU 0/1 legend labels', () => {
+  it('splits one line per uuid with physical GPU legend labels', () => {
     const colorByUuid = buildGpuColorMap(extractUuidsFromMatrix(dualGpuMatrix()));
     const panel = matrixToGpuPanel(dualGpuMatrix(), 'gpuUtil', colorByUuid);
     expect(panel.series).toHaveLength(2);
-    expect(panel.series.map((s) => s.label)).toEqual(['GPU 0', 'GPU 1']);
+    expect(panel.series.map((s) => s.label)).toEqual(['GPU 0 (aaa)', 'GPU 1 (bbb)']);
     expect(new Set(panel.series.map((s) => s.key)).size).toBe(2);
     expect(panel.rows).toHaveLength(3);
+  });
+
+  it('assigns distinct colors when util omits a card but temp has both', () => {
+    const full = dualGpuMatrix();
+    const utilOnlyFirst = [full[0]];
+    const colorByUuid = buildGpuColorMap(
+      collectGpuUuidsFromMatrices([utilOnlyFirst, full]),
+    );
+    const temp = matrixToGpuPanel(full, 'gpuTemp', colorByUuid);
+    expect(temp.series).toHaveLength(2);
+    expect(temp.series[0].color).not.toBe(temp.series[1].color);
+    expect(temp.series[0].color).toBe(SERIES_COLORS[0]);
+    expect(temp.series[1].color).toBe(SERIES_COLORS[1]);
   });
 
   it('shares colors across panels for the same uuid', () => {

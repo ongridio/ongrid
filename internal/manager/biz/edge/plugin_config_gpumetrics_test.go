@@ -126,6 +126,22 @@ func TestSetGPUMetrics_CustomListenAddress(t *testing.T) {
 	}
 }
 
+func TestGpuTargetURL_HostPortListenAddress(t *testing.T) {
+	got := gpuTargetURL(map[string]interface{}{"listen_address": "0.0.0.0:9999"})
+	want := "http://127.0.0.1:9999/metrics"
+	if got != want {
+		t.Fatalf("gpuTargetURL() = %q, want %q", got, want)
+	}
+}
+
+func TestGpuTargetURL_InvalidListenAddressFallsBackToDefaultPort(t *testing.T) {
+	got := gpuTargetURL(map[string]interface{}{"listen_address": "localhost"})
+	want := "http://127.0.0.1:9835/metrics"
+	if got != want {
+		t.Fatalf("gpuTargetURL() = %q, want %q", got, want)
+	}
+}
+
 func TestSetGPUMetrics_DisableRemovesTargetURL(t *testing.T) {
 	repo := newFakePluginConfigRepo()
 	uc := NewPluginConfigUC(repo, nil, fakeEndpointResolver{}, nil)
@@ -158,6 +174,81 @@ func TestSetGPUMetrics_DisableRemovesTargetURL(t *testing.T) {
 	}
 	if urls[0].(string) != "http://127.0.0.1:9102/metrics" || urls[1].(string) != "http://127.0.0.1:9256/metrics" {
 		t.Errorf("target_urls=%v, want default host/proc URLs", urls)
+	}
+}
+
+func TestSetGPUMetrics_CustomPortDisableRemovesTargetURL(t *testing.T) {
+	repo := newFakePluginConfigRepo()
+	uc := NewPluginConfigUC(repo, nil, fakeEndpointResolver{}, nil)
+
+	_, err := uc.Set(context.Background(), 1, model.PluginNameGPUMetrics, SetInput{
+		Enabled: true,
+		Spec:    map[string]interface{}{"listen_address": ":9999"},
+	})
+	if err != nil {
+		t.Fatalf("Set() enable error = %v", err)
+	}
+
+	// Disable with an empty spec — cleanup must use the previous listen_address.
+	_, err = uc.Set(context.Background(), 1, model.PluginNameGPUMetrics, SetInput{
+		Enabled: false,
+		Spec:    map[string]interface{}{},
+	})
+	if err != nil {
+		t.Fatalf("Set() disable error = %v", err)
+	}
+
+	var spec map[string]interface{}
+	_ = json.Unmarshal([]byte(repo.rows[model.PluginNameMetrics].SpecJSON), &spec)
+	urls := spec["target_urls"].([]interface{})
+	if len(urls) != 2 {
+		t.Fatalf("target_urls=%v, want host+proc only after custom-port disable", urls)
+	}
+	for _, u := range urls {
+		if u.(string) == "http://127.0.0.1:9999/metrics" {
+			t.Fatalf("stale custom GPU target still present: %v", spec["target_urls"])
+		}
+	}
+}
+
+func TestSetGPUMetrics_ChangeListenAddressRemovesOldTargetURL(t *testing.T) {
+	repo := newFakePluginConfigRepo()
+	uc := NewPluginConfigUC(repo, nil, fakeEndpointResolver{}, nil)
+
+	_, err := uc.Set(context.Background(), 1, model.PluginNameGPUMetrics, SetInput{
+		Enabled: true,
+		Spec:    map[string]interface{}{"listen_address": ":9999"},
+	})
+	if err != nil {
+		t.Fatalf("Set() initial enable error = %v", err)
+	}
+
+	_, err = uc.Set(context.Background(), 1, model.PluginNameGPUMetrics, SetInput{
+		Enabled: true,
+		Spec:    map[string]interface{}{"listen_address": ":8888"},
+	})
+	if err != nil {
+		t.Fatalf("Set() port change error = %v", err)
+	}
+
+	var spec map[string]interface{}
+	_ = json.Unmarshal([]byte(repo.rows[model.PluginNameMetrics].SpecJSON), &spec)
+	urls := spec["target_urls"].([]interface{})
+	if len(urls) != 3 {
+		t.Fatalf("target_urls=%v, want host+proc+one gpu URL", urls)
+	}
+	gpuURLs := 0
+	for _, u := range urls {
+		s := u.(string)
+		switch s {
+		case "http://127.0.0.1:9999/metrics":
+			t.Fatalf("stale old GPU target still present: %v", spec["target_urls"])
+		case "http://127.0.0.1:8888/metrics":
+			gpuURLs++
+		}
+	}
+	if gpuURLs != 1 {
+		t.Fatalf("target_urls=%v, want exactly one GPU URL on :8888", spec["target_urls"])
 	}
 }
 

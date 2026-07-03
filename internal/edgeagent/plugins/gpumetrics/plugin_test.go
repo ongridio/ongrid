@@ -63,22 +63,22 @@ func TestBuildArgs_emptyListenFallsBack(t *testing.T) {
 }
 
 func TestHasNVIDIASMI_deterministic(t *testing.T) {
-	// Create a temp dir with a fake nvidia-smi to test the detection.
-	tmpDir := t.TempDir()
-	fakeSMI := filepath.Join(tmpDir, "nvidia-smi")
+	// Positive case: a directory that only contains a fake nvidia-smi.
+	withSMI := t.TempDir()
+	fakeSMI := filepath.Join(withSMI, "nvidia-smi")
 	if err := os.WriteFile(fakeSMI, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// Negative case: a fresh empty directory — must not reuse withSMI,
+	// otherwise LookPath still finds the fake binary we just created.
+	withoutSMI := t.TempDir()
 
-	// With nvidia-smi in PATH
-	origPath := os.Getenv("PATH")
-	t.Setenv("PATH", tmpDir+string(os.PathListSeparator)+origPath)
+	t.Setenv("PATH", withSMI)
 	if !hasNVIDIASMILookPath() {
 		t.Error("expected HasNVIDIASMI() = true when nvidia-smi is in PATH")
 	}
 
-	// Without nvidia-smi in PATH
-	t.Setenv("PATH", tmpDir)
+	t.Setenv("PATH", withoutSMI)
 	if hasNVIDIASMILookPath() {
 		t.Error("expected HasNVIDIASMI() = false when nvidia-smi is not in PATH")
 	}

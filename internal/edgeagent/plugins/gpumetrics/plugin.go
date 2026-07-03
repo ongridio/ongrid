@@ -92,8 +92,8 @@ func (p *plugin) HealthSnapshot() plugins.PluginHealth {
 }
 
 // Start checks for NVIDIA GPU before spawning the subprocess.
-// On hosts without nvidia-smi the plugin stays stopped with a clear
-// log message instead of entering a useless crash-restart loop.
+// Detection runs once at start — installing a driver later requires
+// toggling the plugin (disable/enable) or restarting the edge agent.
 func (p *plugin) Start(ctx context.Context) error {
 	if !collector.HasNVIDIASMI() {
 		p.log.Info("no NVIDIA GPU detected (nvidia-smi not in PATH); skipping start")

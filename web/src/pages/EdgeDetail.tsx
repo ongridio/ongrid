@@ -52,7 +52,7 @@ import {
   type GpuPanelKey,
   buildGpuColorMap,
   buildGpuExprs,
-  extractUuidsFromMatrix,
+  collectGpuUuidsFromMatrices,
   formatCelsius,
   formatPercent,
   formatWatts,
@@ -61,6 +61,13 @@ import {
   matrixToGpuPanel,
   normalizeHostInfo,
 } from '@/lib/edgeGpuMetrics';
+import {
+  EMPTY_PANEL,
+  SERIES_COLORS,
+  type ChartRow,
+  type PanelData,
+  type SeriesDescriptor,
+} from '@/lib/metricsPanel';
 
 type Tab = 'metrics' | 'host' | 'plugins' | 'topology' | 'meta';
 
@@ -71,45 +78,8 @@ const RANGE_MS = 6 * 60 * 60 * 1000;
 const STEP = '1m';
 const REFRESH_MS = 30_000;
 
-// Same Grafana-leaning palette as Monitor.tsx so the two pages feel like
-// one product.
-const SERIES_COLORS = [
-  '#60a5fa',
-  '#34d399',
-  '#f59e0b',
-  '#a78bfa',
-  '#f87171',
-  '#22d3ee',
-  '#fb7185',
-  '#facc15',
-];
-
-// ChartRow is one bucket: {ts, tsLabel, <seriesKey>: number | null, ...}.
-type ChartRow = {
-  ts: number;
-  tsLabel: string;
-} & Record<string, number | null | string>;
-
-// SeriesDescriptor is what a panel needs to draw one line. The backend
-// matrix gives us label sets per series; the panel decides which label is
-// the "name" (cpu / mountpoint / device).
-type SeriesDescriptor = {
-  key: string; // unique column key in the ChartRow
-  label: string; // legend text, e.g. "cpu 0", "/", "eth0"
-  color: string;
-};
-
-// PanelData bundles the rows recharts consumes plus the per-series
-// metadata (legend / color / dataKey).
-type PanelData = {
-  rows: ChartRow[];
-  series: SeriesDescriptor[];
-};
-
 type HostPanelKey = 'cpu' | 'disk' | 'netRx' | 'netTx';
 type PanelKey = HostPanelKey | GpuPanelKey;
-
-const EMPTY_PANEL: PanelData = { rows: [], series: [] };
 
 const GPU_PANEL_KEYS: GpuPanelKey[] = ['gpuUtil', 'gpuMem', 'gpuTemp', 'gpuPower'];
 
@@ -222,7 +192,7 @@ export default function EdgeDetailPage() {
     const hostKeys = ['cpu', 'disk', 'netRx', 'netTx'] as const;
 
     try {
-      const hostResults = await Promise.all(
+      const hostFetch = Promise.all(
         hostKeys.map(async (k) => {
           const { expr, nameLabel } = exprs[k];
           const resp = await promQueryRange({
@@ -235,25 +205,34 @@ export default function EdgeDetailPage() {
         }),
       );
 
+      const deviceId = edge.device_id;
+      const gpuFetch =
+        gpuAvailable && deviceId != null
+          ? (async () => {
+              const gpuExprs = buildGpuExprs(deviceId);
+              return Promise.all(
+                GPU_PANEL_KEYS.map(async (k) => {
+                  const resp = await promQueryRange({
+                    expr: gpuExprs[k],
+                    from: fromIso,
+                    to: toIso,
+                    step: STEP,
+                  });
+                  return [k, resp.matrix ?? []] as const;
+                }),
+              );
+            })()
+          : Promise.resolve(null);
+
+      const [hostResults, gpuResponses] = await Promise.all([hostFetch, gpuFetch]);
+
       const next: Record<PanelKey, PanelData> = { ...INITIAL_PANELS };
       for (const [k, panel] of hostResults) next[k] = panel;
 
-      if (gpuAvailable) {
-        const gpuExprs = buildGpuExprs(edge.device_id);
-        const gpuResponses = await Promise.all(
-          GPU_PANEL_KEYS.map(async (k) => {
-            const resp = await promQueryRange({
-              expr: gpuExprs[k],
-              from: fromIso,
-              to: toIso,
-              step: STEP,
-            });
-            return [k, resp.matrix ?? []] as const;
-          }),
+      if (gpuResponses) {
+        const colorByUuid = buildGpuColorMap(
+          collectGpuUuidsFromMatrices(gpuResponses.map(([, matrix]) => matrix)),
         );
-        const utilMatrix =
-          gpuResponses.find(([k]) => k === 'gpuUtil')?.[1] ?? [];
-        const colorByUuid = buildGpuColorMap(extractUuidsFromMatrix(utilMatrix));
         for (const [k, matrix] of gpuResponses) {
           next[k] = matrixToGpuPanel(matrix, k, colorByUuid);
         }
@@ -274,19 +253,14 @@ export default function EdgeDetailPage() {
 
   const promExprs = useMemo(() => {
     if (!edge?.id || edge.device_id == null) return null;
-    // Same fix as above — drop the ongrid_source="" matcher because
-    // every sample now carries ongrid_source="embedded"; the legacy
-    // direct-scrape path is gone.
     const labelSel = `device_id="${edge.device_id}"`;
-    const host = {
+    return {
       cpu: `100 * (1 - rate(node_cpu_seconds_total{${labelSel},mode="idle"}[5m]))`,
       disk: `100 * (1 - node_filesystem_avail_bytes{${labelSel},fstype=~"ext4|xfs|btrfs|zfs|ext3|ext2|f2fs",device=~"(/dev/)?(vd|sd|xvd)[a-z]+[0-9]*|(/dev/)?nvme[0-9]+n[0-9]+(p[0-9]+)?"} / node_filesystem_size_bytes{${labelSel},fstype=~"ext4|xfs|btrfs|zfs|ext3|ext2|f2fs",device=~"(/dev/)?(vd|sd|xvd)[a-z]+[0-9]*|(/dev/)?nvme[0-9]+n[0-9]+(p[0-9]+)?"})`,
       netRx: `rate(node_network_receive_bytes_total{${labelSel}}[5m])`,
       netTx: `rate(node_network_transmit_bytes_total{${labelSel}}[5m])`,
     };
-    if (!gpuAvailable) return host;
-    return { ...host, ...buildGpuExprs(edge.device_id) };
-  }, [edge?.id, edge?.device_id, gpuAvailable]);
+  }, [edge?.id, edge?.device_id]);
 
   const gpuPromExprs = useMemo(() => {
     if (!gpuAvailable || edge?.device_id == null) return null;

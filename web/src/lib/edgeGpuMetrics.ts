@@ -1,36 +1,14 @@
 import type { PromMatrixSeries } from '@/api/edges';
+import {
+  EMPTY_PANEL,
+  SERIES_COLORS,
+  type ChartRow,
+  type PanelData,
+} from '@/lib/metricsPanel';
 
-/** Grafana-leaning palette — keep in sync with EdgeDetail / Monitor. */
-export const SERIES_COLORS = [
-  '#60a5fa',
-  '#34d399',
-  '#f59e0b',
-  '#a78bfa',
-  '#f87171',
-  '#22d3ee',
-  '#fb7185',
-  '#facc15',
-] as const;
+export { EMPTY_PANEL, SERIES_COLORS, type ChartRow, type PanelData };
 
 export type GpuPanelKey = 'gpuUtil' | 'gpuMem' | 'gpuTemp' | 'gpuPower';
-
-export type ChartRow = {
-  ts: number;
-  tsLabel: string;
-} & Record<string, number | null | string>;
-
-export type SeriesDescriptor = {
-  key: string;
-  label: string;
-  color: string;
-};
-
-export type PanelData = {
-  rows: ChartRow[];
-  series: SeriesDescriptor[];
-};
-
-export const EMPTY_PANEL: PanelData = { rows: [], series: [] };
 
 export function normalizeHostInfo(
   hostInfo: Record<string, unknown> | string | null | undefined,
@@ -56,8 +34,25 @@ export function isGpuAvailable(
   return obj?.gpu_available === true;
 }
 
-export function gpuSeriesLabel(index: number): string {
-  return `GPU ${index}`;
+/**
+ * Legend text: physical index from uuid lexicographic order, plus a short
+ * uuid tail when multiple GPUs are present.
+ */
+export function gpuLegendLabel(uuid: string, colorByUuid: Map<string, number>): string {
+  const physical = colorByUuid.get(uuid) ?? 0;
+  if (colorByUuid.size <= 1) {
+    return `GPU ${physical}`;
+  }
+  return `GPU ${physical} (${uuidLegendTail(uuid)})`;
+}
+
+function uuidLegendTail(uuid: string): string {
+  const parts = uuid.split(/[-_]/);
+  const last = parts[parts.length - 1]?.trim();
+  if (last) {
+    return last.length > 4 ? last.slice(-4) : last;
+  }
+  return uuid.length > 4 ? uuid.slice(-4) : uuid;
 }
 
 function deviceLabelSel(deviceId: number): string {
@@ -91,6 +86,15 @@ export function extractUuidsFromMatrix(matrix: PromMatrixSeries[]): string[] {
   return uuids;
 }
 
+/** Union uuids across all GPU panel matrices (util may be empty for a card). */
+export function collectGpuUuidsFromMatrices(matrices: PromMatrixSeries[][]): string[] {
+  const uuids: string[] = [];
+  for (const matrix of matrices) {
+    uuids.push(...extractUuidsFromMatrix(matrix));
+  }
+  return uuids;
+}
+
 function formatTimeLabel(ms: number): string {
   const date = new Date(ms);
   if (Number.isNaN(date.getTime())) return '';
@@ -119,7 +123,7 @@ export function matrixToGpuPanel(
       return {
         uuid,
         key,
-        label: gpuSeriesLabel(colorIdx),
+        label: gpuLegendLabel(uuid, colorByUuid),
         color: SERIES_COLORS[colorIdx % SERIES_COLORS.length],
         raw: s,
       };

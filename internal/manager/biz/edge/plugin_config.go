@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
+	"strings"
 
 	model "github.com/ongridio/ongrid/internal/manager/model/edge"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
@@ -207,6 +209,14 @@ func (uc *PluginConfigUC) Set(ctx context.Context, edgeID uint64, plugin string,
 		if previous != nil {
 			databaseSecretReqs = append(databaseSecretReqs, databaseMetricsSecretDeleteRequests(decodeSpec(previous.SpecJSON), in.Spec)...)
 		}
+	case model.PluginNameGPUMetrics:
+		var err error
+		previous, err = uc.repo.Get(ctx, edgeID, plugin)
+		if errors.Is(err, errs.ErrNotFound) {
+			previous = nil
+		} else if err != nil {
+			return nil, fmt.Errorf("load previous %s config: %w", plugin, err)
+		}
 	}
 	specJSON := "{}"
 	if in.Spec != nil {
@@ -237,15 +247,27 @@ func (uc *PluginConfigUC) Set(ctx context.Context, edgeID uint64, plugin string,
 	// gpumetrics: sync GPU exporter URL into metrics plugin target_urls.
 	// Best-effort — if it fails the subprocess still starts, just the
 	// metrics pipeline won't scrape it.
+	// Use the pre-upsert row for cleanup: disable with an empty request
+	// spec must still remove the URL that was active under the previous
+	// listen_address; a port change must drop the old target before adding
+	// the new one.
 	if plugin == model.PluginNameGPUMetrics {
+		prevSpec := gpuPreviousSpec(previous)
 		if in.Enabled {
+			if previous != nil && previous.Enabled {
+				oldURL := gpuTargetURL(prevSpec)
+				newURL := gpuTargetURL(in.Spec)
+				if oldURL != newURL {
+					if err := uc.removeGPUTargetURL(ctx, edgeID, prevSpec); err != nil {
+						uc.log.Warn("remove stale GPU target URL", slog.Any("err", err))
+					}
+				}
+			}
 			if err := uc.syncGPUTargetURL(ctx, edgeID, in.Spec); err != nil {
 				uc.log.Warn("sync GPU target URL", slog.Any("err", err))
 			}
-		} else {
-			if err := uc.removeGPUTargetURL(ctx, edgeID, in.Spec); err != nil {
-				uc.log.Warn("remove GPU target URL", slog.Any("err", err))
-			}
+		} else if err := uc.removeGPUTargetURL(ctx, edgeID, prevSpec); err != nil {
+			uc.log.Warn("remove GPU target URL", slog.Any("err", err))
 		}
 	}
 	return &PluginRow{PluginName: row.PluginName, Enabled: row.Enabled, Spec: decodeSpec(row.SpecJSON)}, nil
@@ -383,6 +405,15 @@ var defaultMetricsTargetURLs = []string{
 	"http://127.0.0.1:9256/metrics",
 }
 
+// gpuPreviousSpec returns the gpumetrics spec from the row that existed
+// before the current Set() upsert. Nil when there was no prior row.
+func gpuPreviousSpec(previous *model.PluginConfig) map[string]interface{} {
+	if previous == nil {
+		return nil
+	}
+	return decodeSpec(previous.SpecJSON)
+}
+
 // gpuTargetURL builds the scrape URL for the GPU exporter from spec.
 func gpuTargetURL(spec map[string]interface{}) string {
 	listen := gpuDefaultListenAddress
@@ -391,7 +422,51 @@ func gpuTargetURL(spec map[string]interface{}) string {
 			listen = v
 		}
 	}
-	return "http://127.0.0.1" + listen + "/metrics"
+	host, port := gpuListenHostPort(listen)
+	return fmt.Sprintf("http://%s:%s/metrics", host, port)
+}
+
+// gpuListenHostPort normalizes gpumetrics listen_address values into a
+// loopback host + port suitable for the metrics plugin target_urls.
+// Accepts ":9835", "0.0.0.0:9835", and bare port numbers. Invalid or
+// host-only values fall back to the default port.
+func gpuListenHostPort(listen string) (host, port string) {
+	defaultPort := strings.TrimPrefix(gpuDefaultListenAddress, ":")
+	if listen == "" {
+		return "127.0.0.1", defaultPort
+	}
+	if strings.HasPrefix(listen, ":") {
+		port = strings.TrimPrefix(listen, ":")
+		if !gpuPortDigits(port) {
+			port = defaultPort
+		}
+		return "127.0.0.1", port
+	}
+	if h, p, err := net.SplitHostPort(listen); err == nil {
+		if !gpuPortDigits(p) {
+			return "127.0.0.1", defaultPort
+		}
+		if h == "" || h == "0.0.0.0" || h == "[::]" {
+			return "127.0.0.1", p
+		}
+		return h, p
+	}
+	if gpuPortDigits(listen) {
+		return "127.0.0.1", listen
+	}
+	return "127.0.0.1", defaultPort
+}
+
+func gpuPortDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // syncGPUTargetURL adds the GPU exporter URL to the metrics plugin's

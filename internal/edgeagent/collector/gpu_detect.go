@@ -18,7 +18,7 @@ func HasNVIDIASMI() bool {
 // NVIDIAGPUModel returns the first GPU model name reported by nvidia-smi,
 // or empty string if nvidia-smi is unavailable or returns no data.
 // Uses a 5-second timeout to handle cases where nvidia-smi hangs during
-// GPU reset or driver异常.
+// GPU reset or driver faults.
 func NVIDIAGPUModel(ctx context.Context) string {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()

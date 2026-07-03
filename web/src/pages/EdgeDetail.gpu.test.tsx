@@ -141,8 +141,8 @@ describe('EdgeDetail GPU metrics tab', () => {
     expect(screen.getByText('GPU 功耗')).toBeInTheDocument();
 
     await waitFor(() => {
-      expect(screen.getAllByText('GPU 0').length).toBeGreaterThanOrEqual(4);
-      expect(screen.getAllByText('GPU 1').length).toBeGreaterThanOrEqual(4);
+      expect(screen.getAllByText(/GPU 0 \(/).length).toBeGreaterThanOrEqual(4);
+      expect(screen.getAllByText(/GPU 1 \(/).length).toBeGreaterThanOrEqual(4);
     });
 
     const gpuExprs = buildGpuExprs(25);
