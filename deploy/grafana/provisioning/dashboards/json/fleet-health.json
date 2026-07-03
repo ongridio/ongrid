@@ -1,0 +1,248 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 0,
+  "id": null,
+  "uid": "ongrid-fleet-health",
+  "title": "Ongrid Fleet Health (Troubleshooting)",
+  "tags": ["ongrid", "fleet", "troubleshooting"],
+  "timezone": "browser",
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "version": 1,
+  "time": { "from": "now-5m", "to": "now" },
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Offline devices (>90s)",
+      "datasource": { "type": "prometheus", "uid": "ongrid-prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "count((time() - max by (device_id) (device_last_seen_timestamp_seconds)) > 90)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Critical offline (>300s)",
+      "datasource": { "type": "prometheus", "uid": "ongrid-prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "targets": [
+        {
+          "expr": "count((time() - max by (device_id) (device_last_seen_timestamp_seconds)) > 300)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Edges connected",
+      "datasource": { "type": "prometheus", "uid": "ongrid-prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(ongrid_edge_connections{status=\"connected\"})",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Manager goroutines",
+      "datasource": { "type": "prometheus", "uid": "ongrid-prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "max(go_goroutines{job=\"ongrid-manager\"})",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Manager open FDs",
+      "datasource": { "type": "prometheus", "uid": "ongrid-prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "targets": [
+        {
+          "expr": "max(process_open_fds{job=\"ongrid-manager\"})",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Prometheus active series",
+      "datasource": { "type": "prometheus", "uid": "ongrid-prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+      "targets": [
+        {
+          "expr": "max(prometheus_tsdb_head_series)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Top 8 last_seen age",
+      "datasource": { "type": "prometheus", "uid": "ongrid-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        {
+          "expr": "topk(8, (time() - max by (device_id) (device_last_seen_timestamp_seconds)) * on(device_id) group_left(device_name) max by (device_id, device_name) (0 * device_last_seen_seconds_ago + 1))",
+          "legendFormat": "{{device_name}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 90 },
+              { "color": "red", "value": 300 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Offline device count",
+      "datasource": { "type": "prometheus", "uid": "ongrid-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "targets": [
+        {
+          "expr": "count((time() - max by (device_id) (device_last_seen_timestamp_seconds)) > 90)",
+          "legendFormat": ">90s",
+          "refId": "A"
+        },
+        {
+          "expr": "count((time() - max by (device_id) (device_last_seen_timestamp_seconds)) > 300)",
+          "legendFormat": ">300s",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Edge connections",
+      "datasource": { "type": "prometheus", "uid": "ongrid-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "targets": [
+        {
+          "expr": "sum by (status) (ongrid_edge_connections)",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Scrape failures by job",
+      "datasource": { "type": "prometheus", "uid": "ongrid-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "targets": [
+        {
+          "expr": "sum by (job) (up == 0)",
+          "legendFormat": "{{job}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Prom remote_write calls",
+      "datasource": { "type": "prometheus", "uid": "ongrid-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "targets": [
+        {
+          "expr": "sum by (result) (rate(prom_write_total[5m]))",
+          "legendFormat": "{{result}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Alert evaluator ticks",
+      "datasource": { "type": "prometheus", "uid": "ongrid-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "targets": [
+        {
+          "expr": "sum by (status) (rate(ongrid_alert_eval_ticks_total[5m]))",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Manager heap",
+      "datasource": { "type": "prometheus", "uid": "ongrid-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "targets": [
+        {
+          "expr": "go_memstats_heap_alloc_bytes{job=\"ongrid-manager\"}",
+          "legendFormat": "heap",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Prometheus active series",
+      "datasource": { "type": "prometheus", "uid": "ongrid-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+      "targets": [
+        {
+          "expr": "prometheus_tsdb_head_series",
+          "legendFormat": "series",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } }
+    }
+  ]
+}
