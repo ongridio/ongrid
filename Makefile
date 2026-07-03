@@ -218,6 +218,7 @@ docker-build: ## [release] 构建 ongrid:$(VERSION) 镜像（默认 linux/amd64�
 		--build-arg VERSION=$(VERSION) \
 		-t ongrid:$(VERSION) \
 		-f deploy/Dockerfile.ongrid \
+		$(DOCKER_BUILD_CACHE_ARGS) \
 		--load .
 
 # Frontend SPA + nginx (ADR-008). The image bakes web/dist/ into nginx so it
@@ -233,6 +234,7 @@ docker-build-web: ## [release] 构建 ongrid-web:$(VERSION) 镜像（前端 SPA 
 		--build-arg VERSION=$(VERSION) \
 		-t ongrid-web:$(VERSION) \
 		-f deploy/Dockerfile.web \
+		$(DOCKER_BUILD_WEB_CACHE_ARGS) \
 		--load .
 
 # Frontier broker is upstream singchia/frontier (ADR-007). Docker Hub pull
@@ -253,6 +255,7 @@ docker-build-broker: ## [release] 本地构建 singchia/frontier:$(FRONTIER_VERS
 			--platform $(PLATFORM) \
 			-t singchia/frontier:$(FRONTIER_VERSION) \
 			-f deploy/Dockerfile.frontier \
+			$(DOCKER_BUILD_BROKER_CACHE_ARGS) \
 			--load $(FRONTIER_SRC); \
 	fi
 
