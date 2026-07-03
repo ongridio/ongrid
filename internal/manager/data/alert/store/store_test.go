@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,6 +28,71 @@ func newTestRepo(t *testing.T) *Repo {
 		t.Fatalf("Migrate: %v", err)
 	}
 	return NewRepo(db)
+}
+
+func TestMigrateRewritesDeviceOfflineToTimestampExpr(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("gorm.Open sqlite :memory:: %v", err)
+	}
+	if err := Migrate(db); err != nil {
+		t.Fatalf("initial Migrate: %v", err)
+	}
+	rule := &model.Rule{
+		RuleKey:        "device_offline_custom",
+		Kind:           model.RuleKindMetricRaw,
+		Name:           "Device Offline",
+		SourceType:     model.RuleSourceBuiltin,
+		ScopeType:      model.RuleScopeGlobal,
+		Severity:       "critical",
+		Enabled:        true,
+		ConditionsJSON: `{"expr":"device_last_seen_seconds_ago > 90"}`,
+	}
+	if err := db.Create(rule).Error; err != nil {
+		t.Fatalf("create legacy rule: %v", err)
+	}
+	timestampRule := &model.Rule{
+		RuleKey:        "device_offline_timestamp_custom",
+		Kind:           model.RuleKindMetricRaw,
+		Name:           "Device Offline Timestamp",
+		SourceType:     model.RuleSourceBuiltin,
+		ScopeType:      model.RuleScopeGlobal,
+		Severity:       "critical",
+		Enabled:        true,
+		ConditionsJSON: `{"expr":"time() - device_last_seen_timestamp_seconds > 300"}`,
+	}
+	if err := db.Create(timestampRule).Error; err != nil {
+		t.Fatalf("create timestamp rule: %v", err)
+	}
+	if err := Migrate(db); err != nil {
+		t.Fatalf("second Migrate: %v", err)
+	}
+	var got model.Rule
+	if err := db.Where("rule_key = ?", rule.RuleKey).First(&got).Error; err != nil {
+		t.Fatalf("load rewritten rule: %v", err)
+	}
+	var spec map[string]string
+	if err := json.Unmarshal([]byte(got.ConditionsJSON), &spec); err != nil {
+		t.Fatalf("unmarshal rewritten conditions: %v", err)
+	}
+	if strings.Contains(spec["expr"], "device_last_seen_seconds_ago") {
+		t.Fatalf("conditions still use legacy gauge: %s", got.ConditionsJSON)
+	}
+	if spec["expr"] != "time() - max by (device_id) (device_last_seen_timestamp_seconds) > 90" {
+		t.Fatalf("conditions not rewritten to timestamp expr: %s", got.ConditionsJSON)
+	}
+	var gotTimestamp model.Rule
+	if err := db.Where("rule_key = ?", timestampRule.RuleKey).First(&gotTimestamp).Error; err != nil {
+		t.Fatalf("load rewritten timestamp rule: %v", err)
+	}
+	if err := json.Unmarshal([]byte(gotTimestamp.ConditionsJSON), &spec); err != nil {
+		t.Fatalf("unmarshal rewritten timestamp conditions: %v", err)
+	}
+	if spec["expr"] != "time() - max by (device_id) (device_last_seen_timestamp_seconds) > 300" {
+		t.Fatalf("timestamp conditions not deduped: %s", gotTimestamp.ConditionsJSON)
+	}
 }
 
 func TestIncidentEventRoundTrip(t *testing.T) {

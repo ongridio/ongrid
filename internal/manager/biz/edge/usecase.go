@@ -17,6 +17,7 @@ import (
 	model "github.com/ongridio/ongrid/internal/manager/model/edge"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/passwd"
+	"github.com/ongridio/ongrid/internal/pkg/prom"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
 
@@ -316,6 +317,7 @@ func (u *Usecase) HandleRegister(ctx context.Context, edgeID uint64, info tunnel
 	if err := u.devices.MarkOnline(ctx, dev.ID); err != nil {
 		return fmt.Errorf("mark device online: %w", err)
 	}
+	prom.SetDeviceLastSeenTimestampSeconds(fmt.Sprintf("%d", dev.ID), float64(time.Now().UTC().Unix()))
 	// device→topology mirror. Best-effort: a mirror failure
 	// must not break edge register, since the topology migration's
 	// backfill catches up on next boot. Log + continue.
@@ -428,14 +430,19 @@ func (u *Usecase) HandleHeartbeat(ctx context.Context, edgeID uint64, ts time.Ti
 	if err := u.repo.UpdateStatus(ctx, edgeID, model.StatusOnline, ts); err != nil {
 		return err
 	}
+	edge, err := u.repo.GetByID(ctx, edgeID)
+	if err == nil {
+		setLastSeenTimestampMetric(edge, ts)
+	}
 	// Best-effort device mirror: a stale device last_seen must not fail the
 	// heartbeat. MarkOnline sets online=true + bumps last_seen_at, which is
 	// exactly the right semantics for a live heartbeat.
-	if u.devices != nil {
-		edge, err := u.repo.GetByID(ctx, edgeID)
-		if err == nil && edge.DeviceID != nil {
+	if u.devices != nil && err == nil {
+		if edge.DeviceID != nil {
 			if derr := u.devices.MarkOnline(ctx, *edge.DeviceID); derr != nil && u.log != nil {
 				u.log.Warn("heartbeat: device last_seen bump failed", "edge_id", edgeID, "device_id", *edge.DeviceID, "err", derr)
+			} else if derr == nil {
+				prom.SetDeviceLastSeenTimestampSeconds(fmt.Sprintf("%d", *edge.DeviceID), float64(time.Now().UTC().Unix()))
 			}
 		}
 	}
@@ -455,13 +462,29 @@ func (u *Usecase) HandleOffline(ctx context.Context, edgeID uint64, at time.Time
 	if err := u.repo.UpdateStatus(ctx, edgeID, model.StatusOffline, at); err != nil {
 		return err
 	}
+	edge, err := u.repo.GetByID(ctx, edgeID)
+	if err == nil {
+		setLastSeenTimestampMetric(edge, at)
+	}
 	if u.devices != nil {
-		edge, err := u.repo.GetByID(ctx, edgeID)
 		if err == nil && edge.DeviceID != nil {
-			_ = u.devices.MarkOffline(ctx, *edge.DeviceID)
+			if derr := u.devices.MarkOffline(ctx, *edge.DeviceID); derr != nil && u.log != nil {
+				u.log.Warn("offline: device status update failed", "edge_id", edgeID, "device_id", *edge.DeviceID, "err", derr)
+			}
 		}
 	}
 	return nil
+}
+
+func setLastSeenTimestampMetric(edge *model.Edge, lastSeen time.Time) {
+	if edge == nil {
+		return
+	}
+	deviceID := edge.ID
+	if edge.DeviceID != nil && *edge.DeviceID != 0 {
+		deviceID = *edge.DeviceID
+	}
+	prom.SetDeviceLastSeenTimestampSeconds(fmt.Sprintf("%d", deviceID), float64(lastSeen.Unix()))
 }
 
 // randomURLSafe returns base64.RawURLEncoding of n random bytes.

@@ -863,7 +863,7 @@ func main() {
 	alertInhibitor := managerbizalert.NewBuiltinInhibitor(alertRepo)
 	// Lifecycle alerting path was removed in — every
 	// "edge offline" alert is now a metric_raw rule on the
-	// edge_last_seen_seconds_ago gauge that PipelineEvaluator refreshes
+	// device_last_seen_timestamp_seconds gauge that heartbeat/pipeline refreshes
 	// every tick. Detection delay = 1× evaluator interval (default 30s).
 
 	//-final collapse: HostMetricDecorator is gone. Every
@@ -2412,7 +2412,7 @@ func main() {
 
 	// Pipeline evaluator: runs metric_raw / metric_anomaly /
 	// metric_forecast / metric_burn_rate rules on a ticker. Also refreshes
-	// the edge_last_seen_seconds_ago gauge (replacement
+	// the device_last_seen_timestamp_seconds gauge (replacement
 	// for edge_absence). PromQuerier is nil-safe — deployments without
 	// cloud Prom skip every metric_* rule and just keep the gauge fresh.
 	var alertPromQuerier managerbizalert.PromQuerier
@@ -2437,6 +2437,7 @@ func main() {
 			DefaultChannels: cfg.Notification.DefaultChannels,
 			Cooldown:        cfg.Alert.Cooldown,
 			Interval:        cfg.Alert.EvaluatorInterval,
+			DeviceLister:    deviceUC,
 			EdgeLister:      edgeUC,
 			PromQuerier:     alertPromQuerier,
 			LogQuerier:      alertLogQuerier,

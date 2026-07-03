@@ -127,16 +127,15 @@ func seedHostMetricRules(ctx context.Context, repo *Repo, cfg config.AlertConfig
 	return nil
 }
 
-// seedEdgeOfflineRule plants a metric_raw rule on the
-// device_last_seen_seconds_ago gauge that PipelineEvaluator refreshes
-// every tick. Replaces the deleted edge_absence kind.
+// seedEdgeOfflineRule plants a metric_raw rule on the heartbeat timestamp
+// gauge. Replaces the deleted edge_absence kind.
 func seedEdgeOfflineRule(ctx context.Context, repo *Repo, cfg config.AlertConfig) error {
 	threshold := int(cfg.EdgeOfflineThreshold.Seconds())
 	if threshold <= 0 {
 		threshold = 90
 	}
 	spec := map[string]any{
-		"expr": fmt.Sprintf("device_last_seen_seconds_ago > %d", threshold),
+		"expr": fmt.Sprintf("time() - max by (device_id) (device_last_seen_timestamp_seconds) > %d", threshold),
 	}
 	condJSON, err := json.Marshal(spec)
 	if err != nil {

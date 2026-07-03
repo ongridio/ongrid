@@ -3,6 +3,7 @@ package edge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -11,7 +12,10 @@ import (
 	devicemodel "github.com/ongridio/ongrid/internal/manager/model/device"
 	model "github.com/ongridio/ongrid/internal/manager/model/edge"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
+	"github.com/ongridio/ongrid/internal/pkg/prom"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 // fakeDeviceRepo is the in-memory devicebiz.Repo used by HandleRegister
@@ -594,6 +598,8 @@ func TestHandleRegisterIsIdempotentForSameHost(t *testing.T) {
 }
 
 func TestHandleHeartbeatBumpsLinkedDeviceLastSeen(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	prom.RegisterManagerMetrics(reg, nil)
 	repo := newFakeRepo()
 	devices := newFakeDeviceRepo()
 	uc := NewUsecase(repo, devices, nil, nil)
@@ -631,6 +637,10 @@ func TestHandleHeartbeatBumpsLinkedDeviceLastSeen(t *testing.T) {
 	}
 	if !dev.Online || dev.LastSeenAt == nil {
 		t.Errorf("device online=%v lastSeen=%v after heartbeat, want online + non-nil lastSeen", dev.Online, dev.LastSeenAt)
+	}
+	got := testutil.ToFloat64(prom.DeviceLastSeenTimestampSeconds.WithLabelValues(fmt.Sprintf("%d", *after.DeviceID)))
+	if got < float64(dev.LastSeenAt.Unix()) || got > float64(time.Now().UTC().Add(time.Second).Unix()) {
+		t.Errorf("device_last_seen_timestamp_seconds = %v, want near device last_seen %v", got, dev.LastSeenAt)
 	}
 }
 
@@ -737,6 +747,28 @@ func TestHandleHeartbeatBumpsLastSeen(t *testing.T) {
 	}
 	if after.LastSeenAt == nil || !after.LastSeenAt.Equal(ts) {
 		t.Errorf("LastSeenAt = %v, want %v", after.LastSeenAt, ts)
+	}
+}
+
+func TestHandleHeartbeatUpdatesLastSeenTimestampMetric(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	prom.RegisterManagerMetrics(reg, nil)
+	repo := newFakeRepo()
+	uc := NewUsecase(repo, nil, nil, nil)
+	ctx := context.Background()
+
+	res, err := uc.Create(ctx, "edge-hb-metric", nil)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	ts := time.Date(2026, 4, 23, 12, 34, 56, 0, time.UTC)
+	if err := uc.HandleHeartbeat(ctx, res.Edge.ID, ts); err != nil {
+		t.Fatalf("HandleHeartbeat: %v", err)
+	}
+
+	got := testutil.ToFloat64(prom.DeviceLastSeenTimestampSeconds.WithLabelValues("1"))
+	if got != float64(ts.Unix()) {
+		t.Errorf("device_last_seen_timestamp_seconds = %v, want %v", got, float64(ts.Unix()))
 	}
 }
 
