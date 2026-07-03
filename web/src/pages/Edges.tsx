@@ -24,9 +24,11 @@ import {
   upgradeEdgeAgent,
   upgradeEdgePackage,
 } from '@/api/edges';
+import { listIncidents } from '@/api/alerts';
 import { getManagerVersion } from '@/api/version';
 import { usePermissions } from '@/store/me';
 import { notifyDevicesChanged } from '@/lib/events';
+import { buildOfflineAlertDeviceIDs, resolveDevicePresence } from '@/lib/deviceStatus';
 import { useI18n } from '@/i18n/locale';
 
 // Sidebar headers that map to ?roles= filters. Empty string = "全部"; the
@@ -59,6 +61,7 @@ export default function EdgesPage() {
   })();
 
   const [edges, setEdges] = useState<Edge[]>([]);
+  const [offlineAlertDeviceIDs, setOfflineAlertDeviceIDs] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // managerVersion drives the Agent column's drift chip — fetched once
@@ -86,7 +89,10 @@ export default function EdgesPage() {
 
   const refresh = useCallback(async () => {
     try {
-      const r = await listEdges(rolesFilter ? { roles: rolesFilter } : undefined);
+      const [r, incidents] = await Promise.all([
+        listEdges(rolesFilter ? { roles: rolesFilter } : undefined),
+        listIncidents({ status: 'open', pageSize: 100 }).catch(() => ({ items: [] })),
+      ]);
       // Backend currently doesn't filter by roles (the param is sent
       // for forward-compat); the post-split device.roles lives on
       // each row in `Roles []string`. Filter client-side so the
@@ -101,13 +107,14 @@ export default function EdgesPage() {
         );
       }
       setEdges(items);
+      setOfflineAlertDeviceIDs(buildOfflineAlertDeviceIDs(incidents.items ?? []));
       setError(null);
     } catch (err) {
       setError((err as Error).message || tr('加载失败', 'Load failed'));
     } finally {
       setLoading(false);
     }
-  }, [rolesFilter]);
+  }, [rolesFilter, tr]);
 
   useEffect(() => {
     void refresh();
@@ -299,7 +306,7 @@ export default function EdgesPage() {
                         <RoleChips roles={e.roles ?? []} />
                       </td>
                       <td className="whitespace-nowrap px-4 py-2.5">
-                        <StatusPill status={e.status} />
+                        <DevicePresencePill edge={e} offlineAlertDeviceIDs={offlineAlertDeviceIDs} />
                       </td>
                       <td className="whitespace-nowrap px-4 py-2.5 text-zinc-400">
                         {e.last_seen_at ? relativeTime(e.last_seen_at) : '—'}
@@ -787,6 +794,40 @@ function extractIPFromObj(obj: Record<string, unknown>): string | null {
   return null;
 }
 
+function DevicePresencePill({
+  edge,
+  offlineAlertDeviceIDs,
+}: {
+  edge: Edge;
+  offlineAlertDeviceIDs: Set<string>;
+}) {
+  const { tr } = useI18n();
+  const state = resolveDevicePresence(edge, offlineAlertDeviceIDs);
+  if (state === 'offline-alert') {
+    return (
+      <span
+        title={tr('存在未恢复的设备离线告警；tunnel 状态仅供参考', 'An unresolved device-offline alert exists; tunnel status is only a connectivity signal')}
+        className="inline-flex items-center gap-1.5 rounded-full bg-red-500/10 px-2 py-0.5 text-xs font-medium text-red-300 ring-1 ring-inset ring-red-500/30"
+      >
+        <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
+        {tr('离线告警', 'Offline alert')}
+      </span>
+    );
+  }
+  if (state === 'heartbeat-stale') {
+    return (
+      <span
+        title={tr('tunnel 仍标记在线，但最后心跳已超时', 'Tunnel is still marked online, but the last heartbeat is stale')}
+        className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-300 ring-1 ring-inset ring-amber-500/30"
+      >
+        <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+        {tr('心跳超时', 'Heartbeat stale')}
+      </span>
+    );
+  }
+  return <StatusPill status={state} />;
+}
+
 // ShellButton opens the WebSSH page for one device in a NEW tab. The
 // route key is device_id, not edge.id — Prom labels and the backend
 // WS handler both use device_id. Disabled when the edge is offline
@@ -1141,4 +1182,3 @@ function InstallCommandRow({ accessKey, secretKey }: { accessKey: string; secret
     </div>
   );
 }
-
