@@ -10,6 +10,19 @@ export { EMPTY_PANEL, SERIES_COLORS, type ChartRow, type PanelData };
 
 export type GpuPanelKey = 'gpuUtil' | 'gpuMem' | 'gpuTemp' | 'gpuPower';
 
+/**
+ * Stable Grafana panel ids on `ongrid-server-detail`.
+ * Keep in sync with internal/manager/biz/grafana/dashboards/server-detail.json
+ * (and the deploy provisioning copies). Changing these breaks Edge drilldown
+ * deep-links (`?viewPanel=`).
+ */
+export const GPU_GRAFANA_PANEL_IDS: Record<GpuPanelKey, number> = {
+  gpuUtil: 10,
+  gpuMem: 11,
+  gpuTemp: 12,
+  gpuPower: 13,
+};
+
 export function normalizeHostInfo(
   hostInfo: Record<string, unknown> | string | null | undefined,
 ): Record<string, unknown> | null {

@@ -60,6 +60,9 @@ type DrilldownInput = {
   // so passing edge.id here points the dashboard at a non-existent series
   // (#96).
   deviceId?: string | number;
+  // Optional Grafana panel id for `?viewPanel=` (single-panel view).
+  // Used by Edge GPU metrics to land on the matching server-detail panel.
+  viewPanel?: number;
 };
 
 function trimTrailingSlash(value: string): string {
@@ -149,22 +152,41 @@ function grafanaLangFromLocale(): string {
   }
 }
 
+/** Build dashboard query string. Exported for unit tests. */
+export function buildGrafanaDashboardQuery(input: {
+  rangeInput?: string;
+  deviceId?: string | number;
+  viewPanel?: number;
+  orgId?: string;
+}): string {
+  const params = new URLSearchParams();
+  params.set('from', toRelativeFrom(input.rangeInput));
+  params.set('to', 'now');
+  params.set('lang', grafanaLangFromLocale());
+  if (input.orgId && input.orgId.trim()) {
+    params.set('orgId', input.orgId.trim());
+  }
+  if (input.deviceId !== undefined && input.deviceId !== null && String(input.deviceId).trim() !== '') {
+    params.set('var-device_id', String(input.deviceId));
+  }
+  if (input.viewPanel != null && Number.isFinite(input.viewPanel)) {
+    params.set('viewPanel', String(input.viewPanel));
+  }
+  return params.toString();
+}
+
 async function buildGrafanaUrl(input: DrilldownInput): Promise<string | null> {
   const { grafanaDashboardUid, grafanaOrgId } = useObservability.getState();
   const baseUrl = await fetchGrafanaRootURL();
   const dashboardUid = grafanaDashboardUid.trim() || 'ongrid-server-detail';
   if (!dashboardUid) return null;
-  const params = new URLSearchParams();
-  params.set('from', toRelativeFrom(input.rangeInput));
-  params.set('to', 'now');
-  params.set('lang', grafanaLangFromLocale());
-  if (grafanaOrgId.trim()) {
-    params.set('orgId', grafanaOrgId.trim());
-  }
-  if (input.deviceId !== undefined && input.deviceId !== null && String(input.deviceId).trim() !== '') {
-    params.set('var-device_id', String(input.deviceId));
-  }
-  return `${baseUrl}/d/${dashboardUid}/server-detail?${params.toString()}`;
+  const qs = buildGrafanaDashboardQuery({
+    rangeInput: input.rangeInput,
+    deviceId: input.deviceId,
+    viewPanel: input.viewPanel,
+    orgId: grafanaOrgId,
+  });
+  return `${baseUrl}/d/${dashboardUid}/server-detail?${qs}`;
 }
 
 export async function openMetricDrilldown(input: DrilldownInput): Promise<void> {

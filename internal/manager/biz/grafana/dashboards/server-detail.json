@@ -113,7 +113,7 @@
             "uid": "ongrid-prometheus"
           },
           "editorMode": "code",
-          "expr": "100 * (1 - avg by (edge_id) (rate(node_cpu_seconds_total{edge_id=\"$edge_id\",mode=\"idle\"}[5m])))",
+          "expr": "100 * (1 - avg by (device_id) (rate(node_cpu_seconds_total{device_id=\"$device_id\",mode=\"idle\"}[5m])))",
           "legendFormat": "CPU",
           "range": true,
           "refId": "A"
@@ -214,7 +214,7 @@
             "uid": "ongrid-prometheus"
           },
           "editorMode": "code",
-          "expr": "100 * (1 - (node_memory_MemAvailable_bytes{edge_id=\"$edge_id\"} / node_memory_MemTotal_bytes{edge_id=\"$edge_id\"}))",
+          "expr": "100 * (1 - (node_memory_MemAvailable_bytes{device_id=\"$device_id\"} / node_memory_MemTotal_bytes{device_id=\"$device_id\"}))",
           "legendFormat": "Memory",
           "range": true,
           "refId": "A"
@@ -313,7 +313,7 @@
             "uid": "ongrid-prometheus"
           },
           "editorMode": "code",
-          "expr": "node_load1{edge_id=\"$edge_id\"}",
+          "expr": "node_load1{device_id=\"$device_id\"}",
           "legendFormat": "load1",
           "range": true,
           "refId": "A"
@@ -395,7 +395,7 @@
             "uid": "ongrid-prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (edge_id) (rate(node_network_receive_bytes_total{edge_id=\"$edge_id\"}[5m]))",
+          "expr": "sum by (device_id) (rate(node_network_receive_bytes_total{device_id=\"$device_id\"}[5m]))",
           "legendFormat": "rx",
           "range": true,
           "refId": "A"
@@ -496,7 +496,7 @@
             "uid": "ongrid-prometheus"
           },
           "editorMode": "code",
-          "expr": "100 * (1 - node_filesystem_avail_bytes{edge_id=\"$edge_id\"} / node_filesystem_size_bytes{edge_id=\"$edge_id\"})",
+          "expr": "100 * (1 - node_filesystem_avail_bytes{device_id=\"$device_id\"} / node_filesystem_size_bytes{device_id=\"$device_id\"})",
           "legendFormat": "{{mountpoint}}",
           "range": true,
           "refId": "A"
@@ -578,7 +578,7 @@
             "uid": "ongrid-prometheus"
           },
           "editorMode": "code",
-          "expr": "rate(node_network_receive_bytes_total{edge_id=\"$edge_id\"}[5m])",
+          "expr": "rate(node_network_receive_bytes_total{device_id=\"$device_id\"}[5m])",
           "legendFormat": "RX {{device}}",
           "range": true,
           "refId": "A"
@@ -589,7 +589,7 @@
             "uid": "ongrid-prometheus"
           },
           "editorMode": "code",
-          "expr": "rate(node_network_transmit_bytes_total{edge_id=\"$edge_id\"}[5m])",
+          "expr": "rate(node_network_transmit_bytes_total{device_id=\"$device_id\"}[5m])",
           "legendFormat": "TX {{device}}",
           "range": true,
           "refId": "B"
@@ -688,7 +688,7 @@
             "uid": "ongrid-prometheus"
           },
           "editorMode": "code",
-          "expr": "node_load1{edge_id=\"$edge_id\"}",
+          "expr": "node_load1{device_id=\"$device_id\"}",
           "legendFormat": "load1",
           "range": true,
           "refId": "A"
@@ -699,7 +699,7 @@
             "uid": "ongrid-prometheus"
           },
           "editorMode": "code",
-          "expr": "node_load5{edge_id=\"$edge_id\"}",
+          "expr": "node_load5{device_id=\"$device_id\"}",
           "legendFormat": "load5",
           "range": true,
           "refId": "B"
@@ -710,13 +710,405 @@
             "uid": "ongrid-prometheus"
           },
           "editorMode": "code",
-          "expr": "node_load15{edge_id=\"$edge_id\"}",
+          "expr": "node_load15{device_id=\"$device_id\"}",
           "legendFormat": "load15",
           "range": true,
           "refId": "C"
         }
       ],
       "title": "Load Average (1/5/15)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ongrid-prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 80
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          },
+          "unit": "percent",
+          "max": 100,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "id": 10,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ongrid-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "100 * nvidia_smi_utilization_gpu_ratio{device_id=\"$device_id\"}",
+          "legendFormat": "{{uuid}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "GPU 利用率",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ongrid-prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 80
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          },
+          "unit": "percent",
+          "max": 100,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ongrid-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "100 * nvidia_smi_memory_used_bytes{device_id=\"$device_id\"} / nvidia_smi_memory_total_bytes{device_id=\"$device_id\"}",
+          "legendFormat": "{{uuid}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "GPU 显存占用",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ongrid-prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 80
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          },
+          "unit": "celsius"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 40
+      },
+      "id": 12,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ongrid-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "nvidia_smi_temperature_gpu{device_id=\"$device_id\"}",
+          "legendFormat": "{{uuid}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "GPU 温度",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ongrid-prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "watt"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 40
+      },
+      "id": 13,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ongrid-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "nvidia_smi_power_draw_watts{device_id=\"$device_id\"}",
+          "legendFormat": "{{uuid}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "GPU 功耗",
       "type": "timeseries"
     }
   ],
@@ -738,20 +1130,20 @@
           "type": "prometheus",
           "uid": "ongrid-prometheus"
         },
-        "definition": "label_values(node_load1, edge_id)",
+        "definition": "label_values(node_load1, device_id)",
         "hide": 0,
         "includeAll": false,
         "label": "服务器",
         "multi": false,
-        "name": "edge_id",
+        "name": "device_id",
         "options": [],
         "query": {
           "qryType": 1,
-          "query": "label_values(node_load1, edge_id)",
+          "query": "label_values(node_load1, device_id)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 1,
-        "regex": "",
+        "regex": "/^([0-9]{1,9})$/",
         "skipUrlSync": false,
         "sort": 1,
         "type": "query"

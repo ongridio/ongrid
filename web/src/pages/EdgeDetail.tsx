@@ -50,6 +50,7 @@ import { NodeNeighbors } from '@/components/topology/NodeNeighbors';
 import { tr as trInline, useI18n } from '@/i18n/locale';
 import {
   type GpuPanelKey,
+  GPU_GRAFANA_PANEL_IDS,
   buildGpuColorMap,
   buildGpuExprs,
   collectGpuUuidsFromMatrices,
@@ -268,7 +269,7 @@ export default function EdgeDetailPage() {
   }, [gpuAvailable, edge?.device_id]);
 
   const openDrilldown = useCallback(
-    async (expr: string, title: string) => {
+    async (expr: string, title: string, viewPanel?: number) => {
       try {
         await openMetricDrilldown({
           expr,
@@ -278,13 +279,14 @@ export default function EdgeDetailPage() {
           // device_id label, not edge.id (#96). expr above already uses
           // device_id; keep var-device_id consistent with it.
           deviceId: edge?.device_id ?? edge?.id,
+          viewPanel,
         });
         setPromErr(null);
       } catch (err) {
         setPromErr((err as Error).message || tr('打开图表失败', 'Failed to open chart'));
       }
     },
-    [edge?.id, edge?.device_id],
+    [edge?.id, edge?.device_id, tr],
   );
 
   const toggleSeries = (panel: PanelKey, key: string) => {
@@ -446,7 +448,12 @@ export default function EdgeDetailPage() {
                     yDomain={[0, 100]}
                     onOpenDrilldown={
                       gpuPromExprs
-                        ? () => void openDrilldown(gpuPromExprs.gpuUtil, 'GPU utilization')
+                        ? () =>
+                            void openDrilldown(
+                              gpuPromExprs.gpuUtil,
+                              'GPU utilization',
+                              GPU_GRAFANA_PANEL_IDS.gpuUtil,
+                            )
                         : undefined
                     }
                   />
@@ -465,7 +472,12 @@ export default function EdgeDetailPage() {
                     yDomain={[0, 100]}
                     onOpenDrilldown={
                       gpuPromExprs
-                        ? () => void openDrilldown(gpuPromExprs.gpuMem, 'GPU memory usage')
+                        ? () =>
+                            void openDrilldown(
+                              gpuPromExprs.gpuMem,
+                              'GPU memory usage',
+                              GPU_GRAFANA_PANEL_IDS.gpuMem,
+                            )
                         : undefined
                     }
                   />
@@ -483,7 +495,12 @@ export default function EdgeDetailPage() {
                     formatValue={formatCelsius}
                     onOpenDrilldown={
                       gpuPromExprs
-                        ? () => void openDrilldown(gpuPromExprs.gpuTemp, 'GPU temperature')
+                        ? () =>
+                            void openDrilldown(
+                              gpuPromExprs.gpuTemp,
+                              'GPU temperature',
+                              GPU_GRAFANA_PANEL_IDS.gpuTemp,
+                            )
                         : undefined
                     }
                   />
@@ -501,7 +518,12 @@ export default function EdgeDetailPage() {
                     formatValue={formatWatts}
                     onOpenDrilldown={
                       gpuPromExprs
-                        ? () => void openDrilldown(gpuPromExprs.gpuPower, 'GPU power draw')
+                        ? () =>
+                            void openDrilldown(
+                              gpuPromExprs.gpuPower,
+                              'GPU power draw',
+                              GPU_GRAFANA_PANEL_IDS.gpuPower,
+                            )
                         : undefined
                     }
                   />
