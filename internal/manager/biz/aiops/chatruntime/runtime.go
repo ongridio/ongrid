@@ -651,6 +651,9 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (*Reply, error) {
 			basePrompt = basePrompt + "\n\n" + catalog
 		}
 	}
+	if digest := buildToolCapabilityDigest(sessionToolBag); digest != "" {
+		basePrompt = basePrompt + "\n\n" + digest
+	}
 	systemPrompt := ComposeSystemPrompt(basePrompt, activeSkills, nil)
 
 	// 6. Build the eino history slice. Convert persisted rows into

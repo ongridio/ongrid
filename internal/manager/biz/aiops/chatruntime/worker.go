@@ -567,6 +567,9 @@ func (rt *Runtime) runWorker(ctx context.Context, agentDef *Agent, sessID, userT
 	ctx = basetool.WithFilteredTools(ctx, workerTools)
 
 	systemPrompt := ComposeSystemPrompt(rt.cfg.BasePrompt, nil, agentDef)
+	if digest := buildToolCapabilityDigest(workerTools); digest != "" {
+		systemPrompt = systemPrompt + "\n\n" + digest
+	}
 
 	// KB-first prologue. Weak coordinator models (GLM-4 etc) don't
 	// reliably follow "rule 0 — query_knowledge before any other

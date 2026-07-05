@@ -252,7 +252,7 @@ func TestEinoToolAdapter_DoesNotMemoizeErrors(t *testing.T) {
 // the memo can't).
 func TestEinoToolAdapter_PerToolCallCap(t *testing.T) {
 	t.Parallel()
-	inner := &fakeBaseTool{name: "query_promql", class: "read", runResp: `{"v":1}`}
+	inner := &fakeBaseTool{name: "query_x", class: "read", runResp: `{"v":1}`}
 	a := &einoToolAdapter{inner: inner, memo: newToolMemo()}
 	ctx := context.Background()
 	// Distinct args each time so the identical-call memo doesn't short-circuit;
@@ -273,6 +273,34 @@ func TestEinoToolAdapter_PerToolCallCap(t *testing.T) {
 	}
 	if got := inner.calls.Load(); got != int32(maxToolCallsPerRun) {
 		t.Errorf("over-cap call must NOT execute; still want %d, got %d", maxToolCallsPerRun, got)
+	}
+}
+
+func TestEinoToolAdapter_QueryPromQLHasLowerCallCap(t *testing.T) {
+	t.Parallel()
+	inner := &fakeBaseTool{name: "query_promql", class: "read", runResp: `{"v":1}`}
+	a := &einoToolAdapter{inner: inner, memo: newToolMemo()}
+	ctx := context.Background()
+	limit := maxCallsForTool("query_promql")
+
+	if limit >= maxToolCallsPerRun {
+		t.Fatalf("query_promql limit = %d, want lower than generic %d", limit, maxToolCallsPerRun)
+	}
+	for i := 0; i < limit; i++ {
+		out, _ := a.InvokableRun(ctx, fmt.Sprintf(`{"q":"m%d"}`, i))
+		if strings.Contains(out, "call_budget_exceeded") {
+			t.Fatalf("call %d should execute, got budget directive: %s", i, out)
+		}
+	}
+	out, _ := a.InvokableRun(ctx, `{"q":"over"}`)
+	if !strings.Contains(out, "call_budget_exceeded") {
+		t.Fatalf("past query_promql cap should return budget directive, got %q", out)
+	}
+	if !strings.Contains(out, "aggregated PromQL") {
+		t.Fatalf("query_promql cap should nudge aggregation, got %q", out)
+	}
+	if got := inner.calls.Load(); got != int32(limit) {
+		t.Fatalf("query_promql executions = %d, want %d", got, limit)
 	}
 }
 

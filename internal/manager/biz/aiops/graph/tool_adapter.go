@@ -78,6 +78,7 @@ func (t *toolMemo) lastResult(name string) (string, bool) {
 const (
 	toolNameDraftConfigChange = "draft_config_change"
 	toolNameListMetricCatalog = "list_metric_catalog"
+	toolNameQueryPromQL       = "query_promql"
 )
 
 // maxToolCallsPerRun caps how many times any one tool may EXECUTE within a
@@ -99,6 +100,8 @@ func maxCallsForTool(name string) int {
 		return 1
 	case "list_metric_catalog":
 		return 2
+	case "query_promql":
+		return 4
 	default:
 		return maxToolCallsPerRun
 	}
@@ -197,6 +200,9 @@ func toolResultJSON(fields map[string]interface{}) string {
 // it as data and (re)directs to answering.
 func toolBudgetExceeded(name string, n int) string {
 	instruction := fmt.Sprintf("You have already called %q %d times in the current user turn — that is the per-tool limit for this turn only and it expires on the next user message. Do NOT call it again in this turn. Answer the user from the results you already gathered; if they're insufficient, state specifically what is missing and ask the user.", name, n)
+	if name == toolNameQueryPromQL {
+		instruction = fmt.Sprintf("You have already called %q %d times in the current user turn. Stop issuing one PromQL call per device/metric/mountpoint. Answer from gathered data, or replace the repeated probes with ONE aggregated PromQL expression using sum/topk and by(device_id, mountpoint, fstype) as appropriate.", name, n)
+	}
 	b, err := json.Marshal(struct {
 		Status      string `json:"status"`
 		Tool        string `json:"tool"`

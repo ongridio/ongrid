@@ -1,7 +1,12 @@
 package chatruntime
 
 import (
+	"context"
+	"fmt"
+	"sort"
 	"strings"
+
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 )
 
 // ComposeSystemPrompt assembles the SystemPrompt block ChatRuntime feeds
@@ -22,20 +27,10 @@ import (
 // doesn't (a) rabbit-hole through k8s tools for an ongrid-device question, or
 // (b) fall back to an uninstalled `kubectl` for a genuine k8s question instead
 // of the MCP tools. Injected only into the coordinator prompt (agentProfile==nil).
-const coordinatorToolRouting = `## 工具选型（重要）
-- **ongrid 管理的设备 / 主机 / 边端**的轻量事实查询 → 直接用 ongrid 原生只读工具：` +
-	"`query_devices`、`get_topology`、`query_incidents`、`get_edge_summary`、`get_host_load`、`get_host_processes`、`rank_edges`、`find_outlier_edges`" + `。
-- **复杂诊断 / 根因 / 影响面 / 处置建议** → 用 ` +
-	"`AgentTool`" + ` 派给对应 specialist。不要把多步专家诊断硬塞在 coordinator 里串行跑。
-- **host_bash / query_promql / query_logql / correlate_incident / 文件和网络探针** 默认属于专家深查工具；除非当前工具列表明确提供且用户只要非常窄的事实，否则派 specialist。
-- **外部系统**（k8s 集群、云厂商如腾讯云/AWS）→ 用对应的外部工具：k8s 用 ` +
-	"`mcp__k8s__*`（如 `mcp__k8s__namespaces_list` / `pods_list`），云厂商用 `cloud_bash`（tccli / awscli，凭证已注入）" + `。
-- **不要混淆**：k8s 的 node ≠ ongrid 的 device。问「ongrid 设备使用率」绝不要用 ` +
-	"`mcp__k8s__nodes_*`；问「k8s 集群」绝不要用 ongrid 设备工具、也不要用 `kubectl`（环境没装），直接用 `mcp__k8s__*`" + `。
-- **不要钻牛角尖**：某个工具/来源返回的数据明显跟用户目标不符，立刻换工具或换思路，**不要在同一个错误来源里反复探**（同一类工具连试 2 次还不对就停，换路子或直接告诉用户缺什么）。
-
-## 多专家并行（重要）
-跨多个**独立领域**的综合任务（例：「全面体检」= 计算 + 磁盘 + 网络）——在同一个回合里同时发起多个 AgentTool 调用（每个领域一个 specialist），最后汇总专家结论。简单 topN / 快照 / 列表查询不要派 AgentTool。`
+const coordinatorToolRouting = `## 工具选型补充
+- ongrid device/edge ≠ k8s node。问 ongrid 设备用 ongrid 工具；问 k8s 集群用 ` +
+	"`mcp__k8s__*`" + `，不要猜 ` + "`kubectl`" + `。
+- 复杂跨域任务可同轮并行多个 ` + "`AgentTool`" + `；简单 topN / 快照 / 列表仍直接查。错误来源连续 2 次不匹配就换路或说明缺口。`
 
 func ComposeSystemPrompt(basePrompt string, activeSkills []*Skill, agentProfile *Agent) string {
 	var parts []string
@@ -85,6 +80,136 @@ func ComposeSystemPrompt(basePrompt string, activeSkills []*Skill, agentProfile 
 	}
 
 	return strings.Join(parts, "\n\n")
+}
+
+const maxCapabilityDigestTools = 12
+
+// buildToolCapabilityDigest renders a compact, per-request inventory of the
+// tools that survived persona / role filtering. This is the dynamic
+// counterpart to the static base prompt: built-in routing rules stay small,
+// while MCP / installed-skill tools surface automatically as soon as they are
+// appended to the runtime toolbag.
+func buildToolCapabilityDigest(tools []basetool.BaseTool) string {
+	if len(tools) == 0 {
+		return ""
+	}
+	type row struct {
+		name, origin, class, desc string
+	}
+	rows := make([]row, 0, len(tools))
+	counts := map[string]int{}
+	for _, t := range tools {
+		if t == nil {
+			continue
+		}
+		info, err := t.Info(context.Background())
+		if err != nil || info == nil || strings.TrimSpace(info.Name) == "" {
+			continue
+		}
+		origin := strings.TrimSpace(info.Origin)
+		if origin == "" {
+			origin = "builtin"
+		}
+		class := strings.TrimSpace(info.Class)
+		if class == "" {
+			class = "read"
+		}
+		counts[origin+"/"+class]++
+		if info.Origin == "" && !isDigestBuiltin(info.Name) {
+			continue
+		}
+		rows = append(rows, row{
+			name:   info.Name,
+			origin: origin,
+			class:  class,
+			desc:   compactOneLine(firstNonEmpty(info.WhenToUse, info.Description), 72),
+		})
+	}
+	if len(rows) == 0 && len(counts) == 0 {
+		return ""
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].origin != rows[j].origin {
+			return rows[i].origin < rows[j].origin
+		}
+		return rows[i].name < rows[j].name
+	})
+
+	var b strings.Builder
+	b.WriteString("## 本轮可见能力（动态）\n")
+	if len(counts) > 0 {
+		keys := make([]string, 0, len(counts))
+		for k := range counts {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		b.WriteString("- counts: ")
+		for i, k := range keys {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteString(k)
+			b.WriteString("=")
+			b.WriteString(fmt.Sprint(counts[k]))
+		}
+		b.WriteString("\n")
+	}
+	limit := len(rows)
+	truncated := 0
+	if limit > maxCapabilityDigestTools {
+		truncated = limit - maxCapabilityDigestTools
+		limit = maxCapabilityDigestTools
+	}
+	for i := 0; i < limit; i++ {
+		r := rows[i]
+		b.WriteString("- ")
+		b.WriteString(r.name)
+		b.WriteString(" [")
+		b.WriteString(r.origin)
+		b.WriteString("/")
+		b.WriteString(r.class)
+		b.WriteString("]")
+		if r.desc != "" {
+			b.WriteString(": ")
+			b.WriteString(r.desc)
+		}
+		b.WriteString("\n")
+	}
+	if truncated > 0 {
+		b.WriteString("- ... ")
+		b.WriteString(fmt.Sprint(truncated))
+		b.WriteString(" more; use ToolSearch/select:<tool> if a schema is redacted or the exact tool is unclear.\n")
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func isDigestBuiltin(name string) bool {
+	switch name {
+	case "AgentTool", "ToolSearch", "query_devices", "query_incidents", "get_topology",
+		"get_edge_summary", "get_host_load", "get_host_processes", "rank_edges",
+		"find_outlier_edges", "host_bash", "cloud_bash", "list_metric_catalog",
+		"query_knowledge", "list_repo_sources", "read_source", "grep_source":
+		return true
+	default:
+		return false
+	}
+}
+
+func compactOneLine(s string, max int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if max <= 0 || len(s) <= max {
+		return s
+	}
+	return strings.TrimSpace(s[:max-1]) + "…"
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // buildAgentCatalog renders a markdown list of the registered agent
