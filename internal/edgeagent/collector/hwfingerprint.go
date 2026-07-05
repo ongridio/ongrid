@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net"
+	"os"
 	"sort"
 	"strings"
 
@@ -27,6 +28,9 @@ import (
 // the caller keeps HostID as the fallback fingerprint so such hosts still
 // register. All components are sorted so the value is stable across reboots.
 func hardwareFingerprint() string {
+	if fp := kubernetesNodeFingerprint(); fp != "" {
+		return fp
+	}
 	macs := physicalMACs()
 	if len(macs) == 0 {
 		return "" // no usable hardware signal — caller falls back to HostID
@@ -37,6 +41,35 @@ func hardwareFingerprint() string {
 		diskSignature(),
 	)
 	sum := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(sum[:])
+}
+
+// kubernetesNodeFingerprint returns a stable node identity for DaemonSet
+// deployments. In a normal pod network namespace, the agent often sees only
+// veth/cni interfaces, which physicalMACs deliberately filters out. Let the
+// manifest inject the Kubernetes node name/UID via the Downward API so
+// register_edge still maps one edge pod to the node it runs on, not to an
+// unstable pod identity.
+func kubernetesNodeFingerprint() string {
+	if uid := kubernetesNodeUID(); uid != "" {
+		return sha256Hex("k8s-node-uid:" + uid)
+	}
+	if name := kubernetesNodeName(); name != "" {
+		return sha256Hex("k8s-node-name:" + strings.ToLower(name))
+	}
+	return ""
+}
+
+func kubernetesNodeUID() string {
+	return strings.TrimSpace(os.Getenv("ONGRID_EDGE_NODE_UID"))
+}
+
+func kubernetesNodeName() string {
+	return strings.TrimSpace(os.Getenv("ONGRID_EDGE_NODE_NAME"))
+}
+
+func sha256Hex(seed string) string {
+	sum := sha256.Sum256([]byte(seed))
 	return hex.EncodeToString(sum[:])
 }
 

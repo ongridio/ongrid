@@ -2,6 +2,7 @@ package collector
 
 import (
 	"net"
+	"strings"
 	"testing"
 )
 
@@ -42,5 +43,36 @@ func TestHardwareFingerprintDeterministic(t *testing.T) {
 	}
 	if a != "" && len(a) != 64 {
 		t.Fatalf("non-empty fingerprint must be a sha256 hex (64 chars), got %d", len(a))
+	}
+}
+
+func TestKubernetesNodeFingerprintPrefersUID(t *testing.T) {
+	t.Setenv("ONGRID_EDGE_NODE_NAME", "worker-a")
+	t.Setenv("ONGRID_EDGE_NODE_UID", "node-uid-1")
+
+	got := kubernetesNodeFingerprint()
+	if got == "" || len(got) != 64 {
+		t.Fatalf("kubernetesNodeFingerprint() = %q, want sha256 hex", got)
+	}
+
+	t.Setenv("ONGRID_EDGE_NODE_UID", "node-uid-2")
+	if next := kubernetesNodeFingerprint(); next == got {
+		t.Fatalf("node UID change should change fingerprint")
+	}
+}
+
+func TestKubernetesNodeFingerprintFallsBackToLowercaseNodeName(t *testing.T) {
+	t.Setenv("ONGRID_EDGE_NODE_UID", "")
+	t.Setenv("ONGRID_EDGE_NODE_NAME", "Worker-A")
+	upper := kubernetesNodeFingerprint()
+
+	t.Setenv("ONGRID_EDGE_NODE_NAME", strings.ToLower("Worker-A"))
+	lower := kubernetesNodeFingerprint()
+
+	if upper == "" {
+		t.Fatal("node name fallback returned empty fingerprint")
+	}
+	if upper != lower {
+		t.Fatalf("node name fallback should be case-insensitive: %q vs %q", upper, lower)
 	}
 }

@@ -244,6 +244,9 @@ func (s *Scraper) HostInfo(ctx context.Context) (tunnel.HostInfo, error) {
 		// the rationale.
 		hi.Fingerprint = info.HostID
 	}
+	if nodeName := kubernetesNodeName(); nodeName != "" {
+		hi.Hostname = nodeName
+	}
 	// Clone-resistant hardware identity — see embedded.go.
 	hi.HardwareFingerprint = hardwareFingerprint()
 	// Primary IPv4 address. Best-effort: "" when no suitable address

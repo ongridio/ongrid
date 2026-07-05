@@ -132,8 +132,13 @@ docker: docker-ongrid docker-ongrid-edge ## 构建全部镜像
 docker-ongrid: ## 构建 ongrid 镜像
 	docker build --build-arg VERSION=$(VERSION) -t ongrid:$(VERSION) -f deploy/Dockerfile.ongrid .
 
-docker-ongrid-edge: ## 构建 ongrid-edge 镜像
-	docker build -t ongrid-edge:$(VERSION) -f deploy/Dockerfile.ongrid-edge .
+docker-ongrid-edge: fetch-promtail fetch-otelcol fetch-node-exporter fetch-process-exporter ## 构建 ongrid-edge 镜像
+	docker build \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg TARGETOS=$(TARGET_OS) \
+		--build-arg TARGETARCH=$(TARGET_ARCH) \
+		-t ongrid-edge:$(VERSION) \
+		-f deploy/Dockerfile.ongrid-edge .
 
 # ----------------------------------------------------------------------------
 # compose

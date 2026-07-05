@@ -95,6 +95,9 @@ func (c *EmbeddedCollector) HostInfo(ctx context.Context) (tunnel.HostInfo, erro
 		// product_uuid — HardwareFingerprint (below) disambiguates those.
 		hi.Fingerprint = info.HostID
 	}
+	if nodeName := kubernetesNodeName(); nodeName != "" {
+		hi.Hostname = nodeName
+	}
 	// Clone-resistant hardware identity (MAC|CPU|disk). Sent alongside
 	// HostID so the cloud prefers it but can still migrate older device
 	// rows keyed by HostID. "" when no physical NIC is found.
