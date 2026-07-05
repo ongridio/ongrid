@@ -82,6 +82,73 @@ func TestSpawnWorker_Sync(t *testing.T) {
 	}
 }
 
+func TestSpawnWorker_Sync_ForwardsWorkerToolEventsToParent(t *testing.T) {
+	scripted := newScriptedChatModel(
+		&schema.Message{
+			Role:    schema.Assistant,
+			Content: "checking metric",
+			ToolCalls: []schema.ToolCall{{
+				ID:       "call_worker_metric",
+				Type:     "function",
+				Function: schema.FunctionCall{Name: "query_promql", Arguments: `{"query":"up"}`},
+			}},
+		},
+		&schema.Message{Role: schema.Assistant, Content: "worker-result"},
+	)
+	store, parentID := newSeededRuntimeStore(t, 7)
+	rt := newRuntimeWithStore(t, "specialist-sre", scripted, []basetool.BaseTool{
+		&fakeTool{name: "query_promql", schema: `{"type":"object","properties":{"query":{"type":"string"}}}`},
+	}, store)
+
+	var events []Event
+	emit := func(ev Event) {
+		events = append(events, ev)
+	}
+	w, err := rt.SpawnWorker(context.Background(), SpawnRequest{
+		AgentName:     "specialist-sre",
+		Prompt:        "check prometheus",
+		ParentSession: parentID,
+		ParentEmit:    emit,
+	})
+	if err != nil {
+		t.Fatalf("SpawnWorker: %v", err)
+	}
+	if w.Status != WorkerStatusCompleted {
+		t.Fatalf("status = %q, want completed", w.Status)
+	}
+
+	var sawStart, sawEnd bool
+	for _, ev := range events {
+		if ev.Type == EventAssistant {
+			t.Fatalf("worker assistant event leaked to parent stream: %+v", ev)
+		}
+		if ev.Tool == nil || ev.Tool.Name != "query_promql" {
+			continue
+		}
+		if !strings.HasPrefix(ev.Tool.ToolCallID, w.ID+":") {
+			t.Fatalf("worker tool_call_id = %q, want %q prefix", ev.Tool.ToolCallID, w.ID+":")
+		}
+		switch ev.Type {
+		case EventToolStart:
+			sawStart = true
+			if ev.Tool.ArgsJSON != `{"query":"up"}` {
+				t.Fatalf("start args = %q", ev.Tool.ArgsJSON)
+			}
+		case EventToolEnd:
+			sawEnd = true
+			if ev.Tool.Status != "success" {
+				t.Fatalf("end status = %q, want success", ev.Tool.Status)
+			}
+			if !strings.Contains(ev.Tool.ResultJSON, `"ok":true`) {
+				t.Fatalf("end result = %q", ev.Tool.ResultJSON)
+			}
+		}
+	}
+	if !sawStart || !sawEnd {
+		t.Fatalf("missing forwarded worker tool events: sawStart=%v sawEnd=%v events=%+v", sawStart, sawEnd, events)
+	}
+}
+
 // TestSpawnWorker_Async drives SpawnWorker with Background=true and
 // verifies (a) immediate return with status running OR completed (race)
 // + (b) eventual TaskNotification fires through ParentEmit.
@@ -314,13 +381,13 @@ func TestSpawnWorker_UnknownAgent(t *testing.T) {
 // implicit coordinator-only strip.
 func TestFilterToolsForAgent(t *testing.T) {
 	bag := []basetool.BaseTool{
-		&fakeTool{name: "AgentTool", schema: `{"type":"object"}`},     // coordinator-only — always stripped
-		&fakeTool{name: "SendMessage", schema: `{"type":"object"}`},   // coordinator-only — always stripped
-		&fakeTool{name: "TaskStop", schema: `{"type":"object"}`},      // coordinator-only — always stripped
-		&fakeTool{name: "query_promql", schema: `{"type":"object"}`},  // whitelisted
-		&fakeTool{name: "query_logql", schema: `{"type":"object"}`},   // not whitelisted
+		&fakeTool{name: "AgentTool", schema: `{"type":"object"}`},            // coordinator-only — always stripped
+		&fakeTool{name: "SendMessage", schema: `{"type":"object"}`},          // coordinator-only — always stripped
+		&fakeTool{name: "TaskStop", schema: `{"type":"object"}`},             // coordinator-only — always stripped
+		&fakeTool{name: "query_promql", schema: `{"type":"object"}`},         // whitelisted
+		&fakeTool{name: "query_logql", schema: `{"type":"object"}`},          // not whitelisted
 		&fakeTool{name: "host_restart_service", schema: `{"type":"object"}`}, // blacklisted
-		&fakeTool{name: "kill_process", schema: `{"type":"object"}`},  // blacklisted via *_process
+		&fakeTool{name: "kill_process", schema: `{"type":"object"}`},         // blacklisted via *_process
 	}
 	ag := &Agent{
 		Name:            "test-worker",
