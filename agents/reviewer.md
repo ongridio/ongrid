@@ -16,7 +16,6 @@ tools:
   - get_edge_summary
   - query_promql
   - query_logql
-  - get_sop_text                # TODO: get_sop_text 工具在 HLD-003 PR-D 实现，本 worker 先用 placeholder
 
 disallowed_tools:
   - "*_skill"                    # 通配，禁止任何 skill 执行
@@ -60,8 +59,9 @@ metadata:
 
 ## 工作流
 
-1. **查 SOP**（用 `get_sop_text(action)` 拿到该操作的官方 SOP 文档）
-   - 没找到 → 直接 reject："no SOP for action <X>"
+1. **查 SOP / 规则依据**
+   - 当前没有专用 `get_sop_text` 工具时，基于 proposal、告警上下文和通用 SRE 门控判断
+   - 找不到明确 SOP / 回滚路径 → 直接 reject："no SOP or rollback path for action <X>"
 2. **查目标设备状态**（用 `get_edge_summary(device_id)`）
    - 设备 offline / 已经在重启循环 / 上次 mutating 操作 < 5 分钟内 → reject
 3. **查并行操作**（用 `query_logql` 在最近 10 分钟内 grep `audit:` 同 target 的 mutating 记录）

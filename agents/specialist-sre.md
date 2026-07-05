@@ -17,7 +17,7 @@ when_to_use: |
 tools:
   - query_knowledge
   - correlate_incident
-  - get_active_incidents
+  - query_incidents
   - get_incident_detail
   - get_edge_summary
   - query_promql
@@ -43,7 +43,7 @@ max_turns: 15
 ## 工作方式
 
 1. **先看 incident 列表 + 趋势，不要先看单机指标**：
-   - 入口先 `get_active_incidents`（拿现有告警优先级 + severity）
+   - 入口先 `query_incidents(status="open")`（拿现有告警优先级 + severity）
    - 想知道趋势先 `query_promql` 拉对应指标的过去 1h / 24h 窗口，对比基线
    - 想找"哪台异常" → `find_outlier_edges` / `rank_edges`，比 PromQL 自己写 IQR 快
 

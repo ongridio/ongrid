@@ -23,8 +23,11 @@ import (
 // (b) fall back to an uninstalled `kubectl` for a genuine k8s question instead
 // of the MCP tools. Injected only into the coordinator prompt (agentProfile==nil).
 const coordinatorToolRouting = `## 工具选型（重要）
-- **ongrid 管理的设备 / 主机 / 边端**的资源、使用率、负载、进程、磁盘问题 → 用 ongrid 原生工具：` +
-	"`rank_edges`（排序找使用率最高/最低）、`get_edge_summary`、`get_host_load` / `get_host_processes`、`query_devices`、`host_bash`" + `。
+- **ongrid 管理的设备 / 主机 / 边端**的轻量事实查询 → 直接用 ongrid 原生只读工具：` +
+	"`query_devices`、`get_topology`、`query_incidents`、`get_edge_summary`、`get_host_load`、`get_host_processes`、`rank_edges`、`find_outlier_edges`" + `。
+- **复杂诊断 / 根因 / 影响面 / 处置建议** → 用 ` +
+	"`AgentTool`" + ` 派给对应 specialist。不要把多步专家诊断硬塞在 coordinator 里串行跑。
+- **host_bash / query_promql / query_logql / correlate_incident / 文件和网络探针** 默认属于专家深查工具；除非当前工具列表明确提供且用户只要非常窄的事实，否则派 specialist。
 - **外部系统**（k8s 集群、云厂商如腾讯云/AWS）→ 用对应的外部工具：k8s 用 ` +
 	"`mcp__k8s__*`（如 `mcp__k8s__namespaces_list` / `pods_list`），云厂商用 `cloud_bash`（tccli / awscli，凭证已注入）" + `。
 - **不要混淆**：k8s 的 node ≠ ongrid 的 device。问「ongrid 设备使用率」绝不要用 ` +
@@ -32,7 +35,7 @@ const coordinatorToolRouting = `## 工具选型（重要）
 - **不要钻牛角尖**：某个工具/来源返回的数据明显跟用户目标不符，立刻换工具或换思路，**不要在同一个错误来源里反复探**（同一类工具连试 2 次还不对就停，换路子或直接告诉用户缺什么）。
 
 ## 多专家并行（重要）
-跨多个**独立领域**的综合任务（例：「全面体检」= 计算 + 磁盘 + 网络；「一台机器整体怎么样」= SRE + 运维）——**在同一个回合里同时发起多个 AgentTool 调用**（每个领域一个 specialist），它们会并行跑、互不阻塞，最后你把各专家的结论汇总成一份给用户。**不要一个一个串行派**（那样慢好几倍）。各专家相互独立时一律并行；只有当后一步依赖前一步结果时才串行。`
+跨多个**独立领域**的综合任务（例：「全面体检」= 计算 + 磁盘 + 网络）——在同一个回合里同时发起多个 AgentTool 调用（每个领域一个 specialist），最后汇总专家结论。简单 topN / 快照 / 列表查询不要派 AgentTool。`
 
 func ComposeSystemPrompt(basePrompt string, activeSkills []*Skill, agentProfile *Agent) string {
 	var parts []string
@@ -122,7 +125,7 @@ func buildAgentCatalog(reg *AgentRegistry) string {
 	}
 	var sb strings.Builder
 	sb.WriteString("## 可用的 specialist 助理（AgentTool 的 subagent_type）\n\n")
-	sb.WriteString("当任务专门属于以下领域时，**优先用 AgentTool 派给对应专家**而不是自己硬刚 — 专家的 toolBag 更聚焦、token 更省、推理更深：\n\n")
+	sb.WriteString("当任务需要多步诊断、根因判断、跨域分析或处置建议时，用 AgentTool 派给对应专家；简单 topN / 快照 / 列表查询由 coordinator 直接调用只读工具完成：\n\n")
 	for _, r := range rows {
 		sb.WriteString("- `")
 		sb.WriteString(r.name)

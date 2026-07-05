@@ -23,6 +23,27 @@ func TestCoordinatorRosterHasCodeTools(t *testing.T) {
 			t.Errorf("coordinator roster missing baseline tool %q", want)
 		}
 	}
+	// Lightweight read-only deep-dive tools stay on the coordinator so simple
+	// top-N / snapshot questions don't have to bounce through AgentTool.
+	for _, want := range []string{"get_edge_summary", "get_host_load", "get_host_processes", "rank_edges", "find_outlier_edges"} {
+		if !slices.Contains(coordinatorToolNames, want) {
+			t.Errorf("coordinator roster missing lightweight read tool %q", want)
+		}
+	}
+}
+
+func TestBasePromptAllowsLightweightCoordinatorReads(t *testing.T) {
+	prompt := ongridBasePrompt()
+	for _, want := range []string{"轻量只读查询", "rank_edges", "get_host_load", "get_host_processes"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("base prompt missing lightweight-read guidance %q", want)
+		}
+	}
+	for _, bad := range []string{"单域也必须派", "只要用户的问题落入任一专家域", "所有工具都需要通过 AgentTool"} {
+		if strings.Contains(prompt, bad) {
+			t.Fatalf("base prompt still contains old dispatch-only guidance %q", bad)
+		}
+	}
 }
 
 func TestBasePromptRequiresMetricCatalogBeforeAlertDraft(t *testing.T) {
