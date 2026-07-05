@@ -1,6 +1,6 @@
 # Ongrid Roadmap
 
-_Last updated: 2026-06-06 · Chinese version: [`ROADMAP.zh-CN.md`](ROADMAP.zh-CN.md)_
+_Last updated: 2026-06-06_
 
 Working roadmap for the open-core Ongrid project. Merges user-driven
 ideas from the 2026-06-06 planning session with the historical backlog
