@@ -22,7 +22,7 @@ Ongrid connects alerts, metrics, logs, traces, topology, host evidence, runbooks
 
 <div align="center">
 
-[Why Ongrid](#why-ongrid) - [Product Tour](#product-tour) - [In Action](#in-action) - [Capabilities](#capabilities) - [Integrations](#integrations) - [Install](#install) - [Docs](#documentation)
+[Why Ongrid](#why-ongrid) - [Product Tour](#product-tour) - [In Action](#in-action) - [What Ongrid Covers](#what-ongrid-covers) - [Integrations](#integrations) - [Install](#install) - [Docs](#documentation)
 
 </div>
 
@@ -45,49 +45,95 @@ Ongrid is not a thin chat wrapper over shell commands. It is designed around pro
 
 ## Product Tour
 
-### Agent Workspace
+Ongrid is organized around the real SRE operating loop: investigate, gather context, use governed tools, approve risky changes, automate repeatable work, and keep durable outputs for handoff and review.
 
-Ask operational questions, mention devices or resources, and let the agent collect evidence before answering. The workspace is where alerts, topology, host state, runbooks, source code, and tool results converge into one investigation thread.
+### 1. Investigate With Context
+
+Start from an alert or an operator question. Ongrid pulls together metrics, logs, traces, topology, host state, recent changes, runbooks, and source code before it explains what is happening.
+
+- Evidence-backed RCA instead of generic chat answers.
+- Specialist agents for SRE, network, disk, compute, database, and operations.
+- Root cause, confidence, blast radius, and next actions in one workspace.
+
+> Screenshot slot: investigation workspace / incident room
+
+### 2. Bring Your Knowledge Base Into Every RCA
+
+Runbooks, incident history, architecture notes, and repositories become searchable context for both humans and agents. Operators can inspect the same source material the agent used.
+
+- Git repository sync over HTTPS or SSH deploy keys.
+- Path and tag filters for runbooks, services, and domains.
+- Search-first answers grounded in internal documents.
+
+> Screenshot slot: knowledge vault / knowledge repositories
+
+### 3. Make Tools Visible and Governed
+
+Every tool the agent can call is visible in the Skills catalog or MCP server inventory. Operators can see where a tool runs, what risk class it has, and whether it requires approval.
+
+- Built-in host, network, observability, artifact, and messaging skills.
+- Safe, mutating, and dangerous risk classes.
+- External MCP tools from Grafana, Kubernetes, PagerDuty, GitHub, databases, Terraform, or internal platforms.
+
+> Screenshot slot: skills catalog and MCP servers
+
+### 4. Approve Production Changes Before They Run
+
+Ongrid separates reasoning from execution. Agents can propose a restart, config change, command, or remediation step, but humans decide what actually runs.
+
+- Scoped proposals with affected resources.
+- Dry-run context, rollback notes, and reviewer controls.
+- Approve / reject history attached to the operational record.
 
 <p align="center">
-  <img src="docs/assets/demo.gif" alt="Ongrid agent workspace" width="920" />
+  <img src="docs/assets/readme/en-agent-write-gate.png" alt="Ongrid approval gate" width="920" />
 </p>
 
-### Workflow Studio
+### 5. Turn Good Incident Handling Into Workflows
 
-Convert repeatable incident handling into visible workflows with triggers, tools, agents, conditions, notifications, and generated artifacts. A successful investigation can become a reusable operational path instead of another one-off prompt or shell script.
+Successful investigations can become repeatable workflows with triggers, agent nodes, tool nodes, HTTP calls, conditions, notifications, and generated artifacts.
+
+- Alert, manual, and scheduled triggers.
+- AI-generated workflows that remain editable.
+- Unified task history for one-off jobs and recurring reports.
 
 <p align="center">
   <img src="docs/assets/readme/en-workflow-editor.png" alt="Ongrid workflow editor" width="920" />
 </p>
 
-### Approval Gate
+### 6. Keep Durable Operational Artifacts
 
-Mutating actions become approval proposals with scope, target, dry-run context, rollback notes, and reviewer controls. Agents can recommend a fix, but execution stays explicit and auditable.
+Generated pages and reports are private by default, shareable only when operators decide, and useful for handoff, retrospectives, customer updates, and daily briefs.
 
-<p align="center">
-  <img src="docs/assets/readme/en-agent-write-gate.png" alt="Ongrid agent write gate" width="920" />
-</p>
-
-### Artifacts Center
-
-Generated pages and reports are private by default and can be shared deliberately with audit-friendly context. Use artifacts for incident handoff, daily operations briefs, customer updates, retrospectives, and reviewable RCA records.
+- RCA pages, operations reports, and investigation summaries.
+- Explicit sharing and TTL controls.
+- Artifacts tied back to tasks, workflows, and incidents.
 
 <p align="center">
   <img src="docs/assets/readme/en-artifacts.png" alt="Ongrid artifacts center" width="920" />
 </p>
 
-### Unified Tasks
+### 7. Run One-off and Recurring Operations From One Place
 
-One-off jobs and recurring reports share the same task surface, history, and output artifacts. Operators can see what generated each report, when it runs next, and which outputs are ready to review.
+Scheduled reports, one-off investigations, and generated outputs share the same task surface. Operators can see what generated each report, when it runs next, and which artifacts are ready to review.
+
+- One-off jobs and recurring schedules in the same view.
+- Output history tied to reports and generated pages.
+- Clear next-run and status information for handoff.
 
 <p align="center">
   <img src="docs/assets/readme/en-tasks.png" alt="Ongrid unified tasks" width="920" />
 </p>
 
-### Knowledge and Tools
+### 8. Operate Your Fleet Without Opening Inbound SSH
 
-Skills, MCP tools, runbooks, repositories, and built-in diagnostics make the agent useful inside your environment. Ongrid keeps tool visibility, runtime location, risk class, and knowledge sources visible to operators.
+Edge agents dial out, so operators can inspect hosts and services without exposing SSH, opening inbound ports, or distributing private keys.
+
+- Edge inventory and device health.
+- Browser shell and read-only host tools.
+- Process, journal, filesystem, DNS, TCP, and HTTP diagnostics.
+
+> Screenshot slot: fleet control / device detail
 
 ## In Action
 
@@ -118,66 +164,17 @@ Ongrid: runs approved read-only host tools through the outbound edge tunnel.
 Output: audited command results in the browser and attached to the incident timeline.
 ```
 
-## Capabilities
+## What Ongrid Covers
 
-| Area | What it includes | Operator outcome |
-|---|---|---|
-| **Incident Room** | Alerts, evidence, root-cause narrative, blast radius, related logs/traces, topology, and proposed actions. | A structured investigation record instead of another unsearchable chat thread. |
-| **Workflow Studio** | Triggers, agent nodes, tool nodes, HTTP requests, conditions, notifications, reports, and generated pages. | Successful operational patterns become repeatable automation. |
-| **Approval Gate** | Proposed command, affected resources, risk class, dry-run context, approve/reject controls, and audit trail. | Agents can propose changes while humans decide what runs. |
-| **Fleet Control** | Edge inventory, device health, process inspection, browser shell, and outbound tunnels. | Host diagnostics without public SSH or shared private keys. |
-| **Knowledge Vault** | Runbooks, incident history, architecture docs, source repositories, and semantic search. | The agent cites internal context instead of guessing from generic model memory. |
-| **Skills and MCP** | Built-in host tools, observability queries, hosted pages, IM delivery, and external MCP servers. | Tooling is visible, typed, permissioned, and reusable in chat or workflows. |
-| **Artifacts Center** | Generated pages, scheduled reports, one-off investigation summaries, share links, and TTL controls. | AI output becomes durable, reviewable operational material. |
-
-## Feature Details
-
-### Agent and RCA
-
-- **Coordinator plus specialist agents** - route work to SRE, network, disk, compute, database, and operations experts.
-- **Alert-driven investigation** - start RCA from an alert, incident reopen, chat request, or workflow trigger.
-- **Evidence-backed root cause** - correlate metrics, logs, traces, topology, host state, change events, docs, and source code.
-- **RAG for ops knowledge** - connect runbooks, incident history, architecture docs, and code repositories.
-- **Skill inventory** - expose tools with descriptions, schemas, runtime location, and risk class so agents call them predictably.
-
-### Knowledge and Context
-
-- **Knowledge vault** - index runbooks, architecture notes, incident templates, uploaded docs, and source repositories.
-- **Repository sync** - connect GitHub, GitLab, Gitea, or internal git servers over HTTPS or SSH deploy keys.
-- **Path and tag filters** - keep checkout, database, Kubernetes, release, security, and cost playbooks easy to browse.
-- **Search-first answers** - agents retrieve relevant internal context before drafting an RCA or remediation plan.
-- **Shared human view** - operators can inspect the same documents and snippets the agent used.
-
-### Skills and MCP
-
-- **Built-in SRE skills** - host diagnostics, journal reads, file stats, DNS/TCP/HTTP probes, PromQL, LogQL, traces, hosted pages, and IM delivery.
-- **Risk classes** - skills are marked safe, mutating, or dangerous so approval policy is visible before execution.
-- **Runtime location** - every tool shows whether it runs on the manager or through an edge device.
-- **MCP servers** - register external Grafana, Kubernetes, PagerDuty, GitHub, database, Terraform, or internal tool servers.
-- **Workflow-ready tools** - the same inventory powers chat, workflow nodes, and agent-generated automation.
-
-### Safe Execution
-
-- **Zero inbound ports** - edge agents dial out; hosts do not need exposed SSH or HTTP ports.
-- **Browser shell and host tools** - inspect hosts through audited reverse tunnels and read-only tools.
-- **Human-in-the-loop approvals** - write/change/execute tools produce approval cards before running.
-- **Agent write gate** - AI write capabilities are off by default and must be explicitly enabled by an admin.
-- **Audit trail** - tool calls, approvals, workflow runs, and artifacts are visible and traceable.
-
-### Workflow and Artifacts
-
-- **Visual workflows** - compose triggers, agents, tools, HTTP requests, conditions, notifications, and reports.
-- **AI-generated workflows** - describe a remediation or report flow in natural language and turn it into editable nodes.
-- **Unified tasks** - one-off and recurring jobs share the same task model, history, and artifacts.
-- **Artifacts center** - generated pages and reports are private by default, with explicit sharing and TTL controls.
-- **MCP client** - register external MCP servers and expose their tools to chat agents and workflows.
-
-### Platform
-
-- **Self-host in one command** - `install.sh` brings up the full stack.
-- **Built-in observability stack** - Prometheus, Loki, Tempo, and Grafana are wired for quick start.
-- **Bring your own model** - Anthropic, OpenAI, GLM, DeepSeek, Gemini, Kimi, and compatible gateways.
-- **Two-way IM channels** - Slack, Telegram, Lark, DingTalk, WeCom, and generic webhooks.
+| Layer | Capabilities |
+|---|---|
+| **Investigation** | Alerts, RCA, specialist agents, evidence collection, confidence, blast radius, and next actions. |
+| **Knowledge** | Runbooks, incident history, architecture notes, repositories, semantic search, path filters, and tags. |
+| **Tools** | Built-in skills, MCP servers, host diagnostics, observability queries, hosted pages, and IM delivery. |
+| **Governance** | Approval gate, risk classes, dry-run context, rollback notes, reviewer controls, and audit trail. |
+| **Automation** | Visual workflows, AI-generated flows, manual triggers, alert triggers, schedules, and unified tasks. |
+| **Artifacts** | RCA pages, daily reports, investigation summaries, share links, TTL controls, and task output history. |
+| **Platform** | Self-hosted manager, outbound edge agents, browser shell, built-in observability, and BYO model providers. |
 
 ## What Changed in v0.9.0?
 
