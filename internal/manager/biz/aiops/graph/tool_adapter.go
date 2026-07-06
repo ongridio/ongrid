@@ -101,7 +101,7 @@ func maxCallsForTool(name string) int {
 	case "list_metric_catalog":
 		return 2
 	case "query_promql":
-		return 4
+		return 3
 	default:
 		return maxToolCallsPerRun
 	}
