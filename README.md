@@ -8,17 +8,14 @@ Ongrid connects alerts, metrics, logs, traces, topology, host evidence, runbooks
 [![Release](https://img.shields.io/github/v/release/ongridio/ongrid?logo=github&label=release&color=2563eb)](https://github.com/ongridio/ongrid/releases/latest)
 [![Go](https://img.shields.io/github/go-mod/go-version/ongridio/ongrid?logo=go&logoColor=white&color=00ADD8)](go.mod)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg?logo=apache)](https://opensource.org/licenses/Apache-2.0)
-[![Stack](https://img.shields.io/badge/stack-Go%20%7C%20TypeScript%20%7C%20React-1e40af?logo=react&logoColor=white)](#features)
+[![Stack](https://img.shields.io/badge/stack-Go%20%7C%20TypeScript%20%7C%20React-1e40af?logo=react&logoColor=white)](#what-ongrid-covers)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-22c55e.svg?logo=git&logoColor=white)](CONTRIBUTING.md)
 [![Telegram](https://img.shields.io/badge/Telegram-Join-26A5E4?logo=telegram&logoColor=white)](https://t.me/ongridai)
 [![Slack](https://img.shields.io/badge/Slack-Join-4A154B?logo=slack&logoColor=white)](https://join.slack.com/t/ongrid-co/shared_invite/zt-400skx7hz-WU1nmF1XVYH4S3Q1NfWrbw)
 
----
-
 <p align="center">
-  <img src="docs/assets/demo.gif" alt="Ongrid demo" width="100%" />
+  <img src="docs/assets/readme/en-workflow-editor.png" alt="Ongrid workflow studio" width="920" />
 </p>
-<p align="center"><sub><a href="https://github.com/ongridio/ongrid/releases/download/v0.7.169/Area2_hq.mp4">Watch full demo in HD (MP4, 18 MB)</a></sub></p>
 
 <div align="center">
 
@@ -28,20 +25,9 @@ Ongrid connects alerts, metrics, logs, traces, topology, host evidence, runbooks
 
 ## Why Ongrid
 
-Ongrid is an open-source AIOps / SRE workspace for teams operating real infrastructure.
+Ongrid is an open-source AIOps / SRE workspace for teams operating real infrastructure. It connects alerts, observability, topology, host evidence, runbooks, source code, workflows, and approval gates into one governed operations loop.
 
-It turns noisy operational signals into a governed investigation and repair loop:
-
-```text
-Alert or question
-  -> collect evidence from observability, topology, hosts, changes, docs, and code
-  -> explain root cause, blast radius, and confidence
-  -> draft a workflow, report, page, chat update, or remediation proposal
-  -> require approval for risky actions
-  -> audit every tool call and execution result
-```
-
-Ongrid is not a thin chat wrapper over shell commands. It is designed around production boundaries: read/write separation, explicit approval, edge access without inbound ports, auditable tool calls, and workflows that can be reviewed before they change systems.
+It is not a thin chat wrapper over shell commands. Ongrid is built around production boundaries: evidence before answers, read/write separation, explicit approval, outbound edge access, auditable tool calls, and workflows that can be reviewed before they change systems.
 
 ## Product Tour
 
@@ -49,17 +35,21 @@ Ongrid is organized around the real SRE operating loop: automate repeatable work
 
 ### 1. Turn Good Incident Handling Into Workflows
 
+<p align="center">
+  <img src="docs/assets/readme/en-workflow-editor.png" alt="Ongrid workflow editor" width="920" />
+</p>
+
 Successful investigations can become repeatable workflows with triggers, agent nodes, tool nodes, HTTP calls, conditions, notifications, and generated artifacts.
 
 - Alert, manual, and scheduled triggers.
 - AI-generated workflows that remain editable.
 - Tool, agent, condition, notification, and artifact nodes in one graph.
 
-<p align="center">
-  <img src="docs/assets/readme/en-workflow-editor.png" alt="Ongrid workflow editor" width="920" />
-</p>
-
 ### 2. Approve Production Changes Before They Run
+
+<p align="center">
+  <img src="docs/assets/readme/en-agent-write-gate.png" alt="Ongrid approval gate" width="920" />
+</p>
 
 Ongrid separates reasoning from execution. Agents can propose a restart, config change, command, or remediation step, but humans decide what actually runs.
 
@@ -67,11 +57,11 @@ Ongrid separates reasoning from execution. Agents can propose a restart, config 
 - Dry-run context, rollback notes, and reviewer controls.
 - Approve / reject history attached to the operational record.
 
-<p align="center">
-  <img src="docs/assets/readme/en-agent-write-gate.png" alt="Ongrid approval gate" width="920" />
-</p>
-
 ### 3. Keep Durable Operational Artifacts
+
+<p align="center">
+  <img src="docs/assets/readme/en-artifacts.png" alt="Ongrid artifacts center" width="920" />
+</p>
 
 Generated pages and reports are private by default, shareable only when operators decide, and useful for handoff, retrospectives, customer updates, and daily briefs.
 
@@ -79,21 +69,17 @@ Generated pages and reports are private by default, shareable only when operator
 - Explicit sharing and TTL controls.
 - Artifacts tied back to tasks, workflows, and incidents.
 
-<p align="center">
-  <img src="docs/assets/readme/en-artifacts.png" alt="Ongrid artifacts center" width="920" />
-</p>
-
 ### 4. Run One-off and Recurring Operations From One Place
+
+<p align="center">
+  <img src="docs/assets/readme/en-tasks.png" alt="Ongrid unified tasks" width="920" />
+</p>
 
 Scheduled reports, one-off investigations, and generated outputs share the same task surface. Operators can see what generated each report, when it runs next, and which artifacts are ready to review.
 
 - One-off jobs and recurring schedules in the same view.
 - Output history tied to reports and generated pages.
 - Clear next-run and status information for handoff.
-
-<p align="center">
-  <img src="docs/assets/readme/en-tasks.png" alt="Ongrid unified tasks" width="920" />
-</p>
 
 ### More Product Surfaces
 
@@ -144,19 +130,6 @@ Output: audited command results in the browser and attached to the incident time
 | **Automation** | Visual workflows, AI-generated flows, manual triggers, alert triggers, schedules, and unified tasks. |
 | **Artifacts** | RCA pages, daily reports, investigation summaries, share links, TTL controls, and task output history. |
 | **Platform** | Self-hosted manager, outbound edge agents, browser shell, built-in observability, and BYO model providers. |
-
-## What Changed in v0.9.0?
-
-v0.9.0 moves Ongrid from diagnosis toward governed automation:
-
-- **Unified tasks** for one-off and recurring jobs.
-- **MCP client** for external tool integration.
-- **Agent write gate** with fail-safe default-off behavior.
-- **AI workflow generation**, HTTP nodes, persona selection, variable picker, and better run errors.
-- **Artifacts center** for generated pages and reports.
-- **Built-in `serve_page` and `send_im_message` skills** for sharing investigation output.
-
-See [CHANGELOG.md](CHANGELOG.md) for the full release notes.
 
 ## Install
 
