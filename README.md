@@ -45,20 +45,49 @@ Ongrid is not a thin chat wrapper over shell commands. It is designed around pro
 
 ## Product Tour
 
-| Agent workspace | Workflow automation |
-|---|---|
-| Ask operational questions, mention devices or resources, and let the agent collect evidence before answering. | Convert repeatable incident handling into visible workflows with triggers, tools, agents, conditions, notifications, and generated artifacts. |
-| <img src="docs/assets/demo.gif" alt="Ongrid agent workspace" width="480" /> | <img src="docs/assets/readme/en-workflow-editor.png" alt="Ongrid workflow editor" width="480" /> |
+### Agent Workspace
 
-| Governed execution | Durable artifacts |
-|---|---|
-| Mutating actions become approval proposals with scope, target, dry-run context, rollback notes, and reviewer controls. | Generated pages and reports are private by default and can be shared deliberately with audit-friendly context. |
-| <img src="docs/assets/readme/en-agent-write-gate.png" alt="Ongrid agent write gate" width="480" /> | <img src="docs/assets/readme/en-artifacts.png" alt="Ongrid artifacts center" width="480" /> |
+Ask operational questions, mention devices or resources, and let the agent collect evidence before answering. The workspace is where alerts, topology, host state, runbooks, source code, and tool results converge into one investigation thread.
 
-| Unified tasks | Knowledge and tools |
-|---|---|
-| One-off jobs and recurring reports share the same task surface, history, and output artifacts. | Skills, MCP tools, runbooks, repositories, and built-in diagnostics make the agent useful inside your environment. |
-| <img src="docs/assets/readme/en-tasks.png" alt="Ongrid unified tasks" width="480" /> | <img src="docs/assets/readme/en-workflow-editor.png" alt="Ongrid tools and knowledge" width="480" /> |
+<p align="center">
+  <img src="docs/assets/demo.gif" alt="Ongrid agent workspace" width="920" />
+</p>
+
+### Workflow Studio
+
+Convert repeatable incident handling into visible workflows with triggers, tools, agents, conditions, notifications, and generated artifacts. A successful investigation can become a reusable operational path instead of another one-off prompt or shell script.
+
+<p align="center">
+  <img src="docs/assets/readme/en-workflow-editor.png" alt="Ongrid workflow editor" width="920" />
+</p>
+
+### Approval Gate
+
+Mutating actions become approval proposals with scope, target, dry-run context, rollback notes, and reviewer controls. Agents can recommend a fix, but execution stays explicit and auditable.
+
+<p align="center">
+  <img src="docs/assets/readme/en-agent-write-gate.png" alt="Ongrid agent write gate" width="920" />
+</p>
+
+### Artifacts Center
+
+Generated pages and reports are private by default and can be shared deliberately with audit-friendly context. Use artifacts for incident handoff, daily operations briefs, customer updates, retrospectives, and reviewable RCA records.
+
+<p align="center">
+  <img src="docs/assets/readme/en-artifacts.png" alt="Ongrid artifacts center" width="920" />
+</p>
+
+### Unified Tasks
+
+One-off jobs and recurring reports share the same task surface, history, and output artifacts. Operators can see what generated each report, when it runs next, and which outputs are ready to review.
+
+<p align="center">
+  <img src="docs/assets/readme/en-tasks.png" alt="Ongrid unified tasks" width="920" />
+</p>
+
+### Knowledge and Tools
+
+Skills, MCP tools, runbooks, repositories, and built-in diagnostics make the agent useful inside your environment. Ongrid keeps tool visibility, runtime location, risk class, and knowledge sources visible to operators.
 
 ## In Action
 
