@@ -76,7 +76,7 @@ wget https://ongrid.cloud/dl/ongrid-v0.9.0-linux-arm64.tar.xz
 ### Root Cause Analysis
 
 <p align="center">
-  <img src="docs/assets/readme-tour/user-20260707-rca-session.png" alt="Root cause analysis session" width="100%" />
+  <img src="docs/assets/readme-tour/user-20260707-agent-write-gate.png" alt="Root cause analysis report" width="100%" />
 </p>
 
 Start from an operator question or alert, collect topology and device context, and produce an evidence-backed analysis with concrete next steps.
@@ -140,10 +140,12 @@ Visualize dependencies and blast radius so incidents can be traced through the a
 ### Approval and Write Gate
 
 <p align="center">
-  <img src="docs/assets/readme-tour/user-20260707-agent-write-gate.png" alt="Approval and write gate" width="100%" />
+  <img src="docs/assets/readme-tour/user-20260707-rca-session.png" alt="Approval and write gate" width="100%" />
 </p>
 
 Keep risky actions behind approvals, with a visible policy boundary before anything changes production systems.
+
+Read more in the docs: [Product showcase](docs/product-showcase.md) · [Workflow catalog](docs/workflow-catalog.md) · [Edge install](docs/install/edge.md).
 
 ## Integrations
 
