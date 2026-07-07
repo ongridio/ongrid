@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Plus, RotateCw, Trash2, MoreVertical, Copy, Check, ExternalLink, TerminalSquare } from 'lucide-react';
+import { Plus, RotateCw, Trash2, MoreVertical, Copy, Check, ExternalLink, TerminalSquare, Search } from 'lucide-react';
 import { StatusPill } from '@/components/StatusPill';
 import { Modal } from '@/components/Modal';
 import { cn } from '@/lib/cn';
@@ -18,6 +18,7 @@ import {
   EDGE_ROLE_LABELS,
   EDGE_ROLE_LABELS_EN,
   type Edge,
+  type EdgeStatus,
   type EdgeRole,
   type CreateEdgeResponse,
   type RotateSecretResponse,
@@ -41,16 +42,33 @@ const ROLE_FILTER_TITLES: Record<string, [string, string]> = {
   '': ['全部设备', 'All devices'],
   server: ['服务器', 'Servers'],
   storage: ['存储', 'Storage'],
+  database: ['数据库', 'Databases'],
   network: ['网络设备', 'Network devices'],
   unknown: ['未分类设备', 'Uncategorized devices'],
 };
+
+const STATUS_FILTERS: { value: '' | EdgeStatus; zh: string; en: string }[] = [
+  { value: '', zh: '全部状态', en: 'All statuses' },
+  { value: 'online', zh: '在线', en: 'Online' },
+  { value: 'offline', zh: '离线', en: 'Offline' },
+  { value: 'unknown', zh: '未知', en: 'Unknown' },
+];
+
+const ROLE_FILTERS: { value: string; zh: string; en: string }[] = [
+  { value: '', zh: '全部角色', en: 'All roles' },
+  { value: 'server', zh: '服务器', en: 'Servers' },
+  { value: 'storage', zh: '存储', en: 'Storage' },
+  { value: 'database', zh: '数据库', en: 'Databases' },
+  { value: 'network', zh: '网络设备', en: 'Network' },
+  { value: 'unknown', zh: '未分类', en: 'Uncategorized' },
+];
 
 export default function EdgesPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { tr } = useI18n();
   const { canMutate } = usePermissions();
-  // Sidebar sub-items navigate by appending ?roles=server|storage|network|unknown.
+  // Sidebar sub-items navigate by appending ?roles=server|storage|database|network|unknown.
   // No param = "全部". We forward the param to the backend so filtering uses the
   // sargable IN-list path (see internal/manager/biz/edge.ListFilter).
   const rolesFilter = useMemo(() => {
@@ -65,6 +83,9 @@ export default function EdgesPage() {
   const [edges, setEdges] = useState<Edge[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'' | EdgeStatus>('');
+  const [agentFilter, setAgentFilter] = useState('');
   // managerVersion drives the Agent column's drift chip — fetched once
   // on mount; failures degrade silently to "no chip" rather than red
   // because version mismatch isn't operationally critical.
@@ -101,17 +122,9 @@ export default function EdgesPage() {
       const r = await listEdges(rolesFilter ? { roles: rolesFilter } : undefined);
       // Backend currently doesn't filter by roles (the param is sent
       // for forward-compat); the post-split device.roles lives on
-      // each row in `Roles []string`. Filter client-side so the
-      // 服务器 / 存储 / 网络 sub-views show only matching devices,
-      // and 未分类 lands in its own bucket — never mixed in.
-      let items = r.items ?? [];
-      if (rolesFilter === 'unknown') {
-        items = items.filter((e) => !e.roles || e.roles.length === 0);
-      } else if (rolesFilter) {
-        items = items.filter(
-          (e) => Array.isArray(e.roles) && (e.roles as string[]).includes(rolesFilter),
-        );
-      }
+      // each row in `Roles []string`. `filteredEdges` below applies the
+      // role/status/agent/search facets to the raw fleet response.
+      const items = r.items ?? [];
       setEdges(items);
       // Drop any selected ids that no longer appear (deleted / filtered out)
       // so the toolbar count never lies.
@@ -133,6 +146,44 @@ export default function EdgesPage() {
     void refresh();
   }, [refresh]);
   usePoll(refresh, 10_000);
+
+  const agentOptions = useMemo(() => {
+    const versions = Array.from(
+      new Set(edges.map((e) => e.agent_version?.trim()).filter((v): v is string => !!v)),
+    ).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+    return versions;
+  }, [edges]);
+
+  const filteredEdges = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return edges.filter((e) => {
+      if (rolesFilter === 'unknown') {
+        if (e.roles && e.roles.length > 0) return false;
+      } else if (rolesFilter) {
+        if (!Array.isArray(e.roles) || !(e.roles as string[]).includes(rolesFilter)) return false;
+      }
+      if (statusFilter && e.status !== statusFilter) return false;
+      if (agentFilter === '__outdated') {
+        if (!managerVersion || !e.agent_version || e.agent_version === managerVersion) return false;
+      } else if (agentFilter === '__missing') {
+        if (e.agent_version) return false;
+      } else if (agentFilter && e.agent_version !== agentFilter) {
+        return false;
+      }
+      if (!q) return true;
+      const roleLabels = (e.roles ?? []).map((r) => `${r} ${EDGE_ROLE_LABELS[r]} ${EDGE_ROLE_LABELS_EN[r]}`);
+      return [
+        e.id,
+        e.device_id ?? '',
+        e.name,
+        extractHostname(e.host_info) ?? '',
+        extractIP(e.host_info) ?? '',
+        e.access_key_id,
+        e.agent_version ?? '',
+        ...roleLabels,
+      ].some((v) => String(v).toLowerCase().includes(q));
+    });
+  }, [agentFilter, edges, managerVersion, query, rolesFilter, statusFilter]);
 
   async function onCreate(name: string) {
     const created: CreateEdgeResponse = await createEdge({ name });
@@ -206,7 +257,8 @@ export default function EdgesPage() {
   }
 
   const selectedIds = useMemo(() => [...selected], [selected]);
-  const allVisibleSelected = edges.length > 0 && edges.every((e) => selected.has(e.id));
+  const allVisibleSelected = filteredEdges.length > 0 && filteredEdges.every((e) => selected.has(e.id));
+  const hasFilters = !!query.trim() || !!statusFilter || !!rolesFilter || !!agentFilter;
 
   const toggleOne = (id: number) => {
     setSelected((prev) => {
@@ -218,18 +270,31 @@ export default function EdgesPage() {
   };
   const toggleAllVisible = () => {
     setSelected((prev) => {
-      if (edges.every((e) => prev.has(e.id))) {
+      if (filteredEdges.every((e) => prev.has(e.id))) {
         // all selected → clear the visible ones
         const next = new Set(prev);
-        edges.forEach((e) => next.delete(e.id));
+        filteredEdges.forEach((e) => next.delete(e.id));
         return next;
       }
       const next = new Set(prev);
-      edges.forEach((e) => next.add(e.id));
+      filteredEdges.forEach((e) => next.add(e.id));
       return next;
     });
   };
   const clearSelection = () => setSelected(new Set());
+  const clearFilters = () => {
+    setQuery('');
+    setStatusFilter('');
+    setAgentFilter('');
+    if (rolesFilter) navigate('/devices', { replace: true });
+  };
+  const updateRoleFilter = (value: string) => {
+    if (!value) {
+      navigate('/devices', { replace: true });
+      return;
+    }
+    navigate(`/devices?${new URLSearchParams({ roles: value }).toString()}`, { replace: true });
+  };
 
   // summarizeBatch turns a per-id envelope into a single toast. All-ok →
   // green; any failure → amber-red with the failed ids so the operator
@@ -301,7 +366,12 @@ export default function EdgesPage() {
           <div>
             <h1 className="text-base font-semibold text-zinc-100">{headerTitle}</h1>
             <p className="mt-0.5 text-xs text-zinc-500">
-              {tr(`${edges.length} 台设备 · 每 10 秒自动刷新`, `${edges.length} device(s) · auto-refresh every 10s`)}
+              {hasFilters
+                ? tr(
+                    `${filteredEdges.length} / ${edges.length} 台设备 · 每 10 秒自动刷新`,
+                    `${filteredEdges.length} / ${edges.length} device(s) · auto-refresh every 10s`,
+                  )
+                : tr(`${edges.length} 台设备 · 每 10 秒自动刷新`, `${edges.length} device(s) · auto-refresh every 10s`)}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -332,6 +402,52 @@ export default function EdgesPage() {
               {error}
             </div>
           )}
+
+          <div className="mb-3 flex flex-wrap items-center gap-2 text-[12px]">
+            <label className="inline-flex min-w-64 items-center gap-1 rounded-md border border-zinc-800/60 bg-zinc-950/40 px-2 py-1 text-zinc-300 focus-within:border-zinc-600">
+              <Search size={12} className="text-zinc-500" />
+              <span className="text-[11px] text-zinc-500">{tr('搜索', 'Search')}</span>
+              <input
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={tr('名称 / 主机 / IP / ID', 'Name / host / IP / ID')}
+                className="min-w-0 flex-1 border-none bg-transparent px-1 text-[12px] text-zinc-100 placeholder:text-zinc-600 focus:outline-none"
+              />
+            </label>
+            <DeviceToolbarSelect
+              label={tr('状态', 'Status')}
+              value={statusFilter}
+              options={STATUS_FILTERS.map((o) => ({ value: o.value, label: tr(o.zh, o.en) }))}
+              onChange={(v) => setStatusFilter(v as '' | EdgeStatus)}
+            />
+            <DeviceToolbarSelect
+              label={tr('角色', 'Role')}
+              value={rolesFilter}
+              options={ROLE_FILTERS.map((o) => ({ value: o.value, label: tr(o.zh, o.en) }))}
+              onChange={updateRoleFilter}
+            />
+            <DeviceToolbarSelect
+              label="Agent"
+              value={agentFilter}
+              options={[
+                { value: '', label: tr('全部版本', 'All versions') },
+                ...(managerVersion ? [{ value: '__outdated', label: tr('与 Manager 不一致', 'Out of sync') }] : []),
+                { value: '__missing', label: tr('未上报版本', 'Not reported') },
+                ...agentOptions.map((v) => ({ value: v, label: v })),
+              ]}
+              onChange={setAgentFilter}
+            />
+            {hasFilters && (
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="rounded-md border border-zinc-800/60 bg-zinc-950/40 px-2.5 py-1.5 text-[12px] text-zinc-300 hover:bg-zinc-900"
+              >
+                {tr('清除筛选', 'Clear filters')}
+              </button>
+            )}
+          </div>
 
           {selected.size > 0 && (
             <div className="mb-3 flex items-center gap-2 rounded-lg border border-accent/40 bg-accent/10 px-3 py-2 text-xs">
@@ -373,8 +489,8 @@ export default function EdgesPage() {
             </div>
           )}
 
-          <div className="overflow-hidden rounded-xl border border-zinc-800/60 bg-zinc-900/40">
-            <table className="w-full text-sm">
+          <div className="overflow-x-auto rounded-xl border border-zinc-800/60 bg-zinc-900/40">
+            <table className="min-w-[1320px] w-full text-sm">
               <thead className="border-b border-zinc-800/60 bg-zinc-950/40 text-[11px] uppercase tracking-wider text-zinc-500">
                 <tr>
                   <th className="w-10 px-4 py-2.5 text-left">
@@ -389,7 +505,8 @@ export default function EdgesPage() {
                       onChange={toggleAllVisible}
                     />
                   </th>
-                  <th className="px-4 py-2.5 text-left">ID</th>
+                  <th className="whitespace-nowrap px-4 py-2.5 text-left">Edge ID</th>
+                  <th className="whitespace-nowrap px-4 py-2.5 text-left">Device ID</th>
                   <th className="px-4 py-2.5 text-left">{tr('名称', 'Name')}</th>
                   <th className="px-4 py-2.5 text-left">{tr('主机名', 'Hostname')}</th>
                   <th className="px-4 py-2.5 text-left">IP</th>
@@ -404,14 +521,16 @@ export default function EdgesPage() {
               <tbody className="divide-y divide-zinc-800/40">
                 {loading && edges.length === 0 ? (
                   <tr>
-                    <td colSpan={11} className="px-4 py-10 text-center text-zinc-500">
+                    <td colSpan={12} className="px-4 py-10 text-center text-zinc-500">
                       {tr('加载中…', 'Loading…')}
                     </td>
                   </tr>
-                ) : edges.length === 0 ? (
+                ) : filteredEdges.length === 0 ? (
                   <tr>
-                    <td colSpan={11} className="px-4 py-10 text-center text-zinc-500">
-                      {rolesFilter
+                    <td colSpan={12} className="px-4 py-10 text-center text-zinc-500">
+                      {hasFilters
+                        ? tr('没有匹配当前筛选条件的设备。', 'No devices match the current filters.')
+                        : rolesFilter
                         ? tr(
                             `没有 ${ROLE_FILTER_TITLES[rolesFilter]?.[0] ?? rolesFilter} 设备。点设备名打开详情后可在右上角分配角色。`,
                             `No ${ROLE_FILTER_TITLES[rolesFilter]?.[1] ?? rolesFilter} devices. Open a device detail page to assign roles.`,
@@ -423,7 +542,7 @@ export default function EdgesPage() {
                     </td>
                   </tr>
                 ) : (
-                  edges.map((e) => (
+                  filteredEdges.map((e) => (
                     <tr
                       key={e.id}
                       className="cursor-pointer transition-colors hover:bg-zinc-900/40"
@@ -449,6 +568,9 @@ export default function EdgesPage() {
                       </td>
                       <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-zinc-400">
                         {e.id}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-zinc-400">
+                        {e.device_id ?? '—'}
                       </td>
                       <td className="whitespace-nowrap px-4 py-2.5 text-zinc-100">
                         {e.name || (
@@ -603,6 +725,35 @@ export default function EdgesPage() {
       deviceId,
     });
   }
+}
+
+function DeviceToolbarSelect({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: { value: string; label: string }[];
+  onChange(value: string): void;
+}) {
+  return (
+    <label className="inline-flex items-center gap-1 rounded-md border border-zinc-800/60 bg-zinc-950/40 pl-2 pr-1 py-1 text-zinc-300 hover:border-zinc-700">
+      <span className="text-[11px] text-zinc-500">{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="appearance-none border-none bg-transparent pl-1 pr-4 text-[12px] text-zinc-100 focus:outline-none"
+      >
+        {options.map((o) => (
+          <option key={o.value} value={o.value} className="bg-zinc-900">
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
 }
 
 // AgentVersionCell shows the edge's reported agent_version + a drift
@@ -1425,4 +1576,3 @@ function InstallCommandRow({ accessKey, secretKey }: { accessKey: string; secret
     </div>
   );
 }
-
