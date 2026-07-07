@@ -71,6 +71,80 @@ wget https://ongrid.cloud/dl/ongrid-v0.9.0-linux-amd64.tar.xz
 wget https://ongrid.cloud/dl/ongrid-v0.9.0-linux-arm64.tar.xz
 ```
 
+## Product Tour
+
+### Root Cause Analysis
+
+<p align="center">
+  <img src="docs/assets/readme-tour/rca-rootcause.png" alt="Root cause analysis" width="100%" />
+</p>
+
+Start from an alert or operator question, then pull together metrics, logs, traces, topology, host state, and change history in one incident workspace.
+
+### Workflow Builder
+
+<p align="center">
+  <img src="docs/assets/readme-tour/workflow-editor.png" alt="Workflow builder" width="100%" />
+</p>
+
+Wire triggers, agents, tools, conditions, and notifications into repeatable automations that stay editable and reviewable.
+
+### Skills Catalog
+
+<p align="center">
+  <img src="docs/assets/readme-tour/skills-catalog.png" alt="Skills catalog" width="100%" />
+</p>
+
+Show the built-in skills your agents can call, with descriptions, scope, and a visible inventory for operators.
+
+### MCP Servers
+
+<p align="center">
+  <img src="docs/assets/readme-tour/mcp-servers.png" alt="MCP servers" width="100%" />
+</p>
+
+Register external MCP servers and expose their tools to chat agents and workflows with clear runtime and trust boundaries.
+
+### Knowledge Vault
+
+<p align="center">
+  <img src="docs/assets/readme-tour/knowledge-vault.png" alt="Knowledge vault" width="100%" />
+</p>
+
+Index runbooks, notes, incident history, and repositories so both humans and agents can search the same operational context.
+
+### Artifacts Center
+
+<p align="center">
+  <img src="docs/assets/readme-tour/artifacts-pages.png" alt="Artifacts center" width="100%" />
+</p>
+
+Keep generated pages and reports in one place, with private-by-default sharing and a clean handoff for review.
+
+### Monitoring
+
+<p align="center">
+  <img src="docs/assets/readme-tour/monitor.png" alt="Monitoring" width="100%" />
+</p>
+
+Use the built-in observability stack to inspect health, logs, traces, and alert state without leaving the product.
+
+### Topology Map
+
+<p align="center">
+  <img src="docs/assets/readme-tour/topology-map.png" alt="Topology map" width="100%" />
+</p>
+
+Visualize dependencies and blast radius so an incident can be traced back through the affected service graph.
+
+### Approval and Write Gate
+
+<p align="center">
+  <img src="docs/assets/readme-tour/agent-write-gate.png" alt="Approval and write gate" width="100%" />
+</p>
+
+Keep risky actions behind approvals, with a visible policy boundary before anything changes production systems.
+
 ## Integrations
 
 Drop-in for the observability, channel, and model stacks your team already uses.
