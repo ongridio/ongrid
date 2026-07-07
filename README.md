@@ -19,7 +19,7 @@ Ongrid connects alerts, metrics, logs, traces, topology, host evidence, runbooks
 
 <div align="center">
 
-[Why Ongrid](#why-ongrid) - [Product Tour](#product-tour) - [In Action](#in-action) - [What Ongrid Covers](#what-ongrid-covers) - [Integrations](#integrations) - [Install](#install) - [Docs](#documentation)
+[Why Ongrid](#why-ongrid) - [In Action](#in-action) - [What Ongrid Covers](#what-ongrid-covers) - [Install](#install) - [Product Tour](#product-tour) - [Integrations](#integrations) - [Docs](#documentation)
 
 </div>
 
@@ -28,67 +28,6 @@ Ongrid connects alerts, metrics, logs, traces, topology, host evidence, runbooks
 Ongrid is an open-source AIOps / SRE workspace for teams operating real infrastructure. It connects alerts, observability, topology, host evidence, runbooks, source code, workflows, and approval gates into one governed operations loop.
 
 It is not a thin chat wrapper over shell commands. Ongrid is built around production boundaries: evidence before answers, read/write separation, explicit approval, outbound edge access, auditable tool calls, and workflows that can be reviewed before they change systems.
-
-## Product Tour
-
-Ongrid is organized around the real SRE operating loop: automate repeatable work, approve risky changes, keep durable outputs, and connect every answer back to the tools and knowledge that produced it.
-
-### 1. Turn Good Incident Handling Into Workflows
-
-<p align="center">
-  <img src="docs/assets/readme/en-workflow-editor.png" alt="Ongrid workflow editor" width="920" />
-</p>
-
-Successful investigations can become repeatable workflows with triggers, agent nodes, tool nodes, HTTP calls, conditions, notifications, and generated artifacts.
-
-- Alert, manual, and scheduled triggers.
-- AI-generated workflows that remain editable.
-- Tool, agent, condition, notification, and artifact nodes in one graph.
-
-### 2. Approve Production Changes Before They Run
-
-<p align="center">
-  <img src="docs/assets/readme/en-agent-write-gate.png" alt="Ongrid approval gate" width="920" />
-</p>
-
-Ongrid separates reasoning from execution. Agents can propose a restart, config change, command, or remediation step, but humans decide what actually runs.
-
-- Scoped proposals with affected resources.
-- Dry-run context, rollback notes, and reviewer controls.
-- Approve / reject history attached to the operational record.
-
-### 3. Keep Durable Operational Artifacts
-
-<p align="center">
-  <img src="docs/assets/readme/en-artifacts.png" alt="Ongrid artifacts center" width="920" />
-</p>
-
-Generated pages and reports are private by default, shareable only when operators decide, and useful for handoff, retrospectives, customer updates, and daily briefs.
-
-- RCA pages, operations reports, and investigation summaries.
-- Explicit sharing and TTL controls.
-- Artifacts tied back to tasks, workflows, and incidents.
-
-### 4. Run One-off and Recurring Operations From One Place
-
-<p align="center">
-  <img src="docs/assets/readme/en-tasks.png" alt="Ongrid unified tasks" width="920" />
-</p>
-
-Scheduled reports, one-off investigations, and generated outputs share the same task surface. Operators can see what generated each report, when it runs next, and which artifacts are ready to review.
-
-- One-off jobs and recurring schedules in the same view.
-- Output history tied to reports and generated pages.
-- Clear next-run and status information for handoff.
-
-### More Product Surfaces
-
-| Surface | What it does |
-|---|---|
-| **Investigation workspace** | Starts from an alert or operator question, gathers evidence across metrics, logs, traces, topology, host state, changes, runbooks, and code, then explains root cause and blast radius. |
-| **Knowledge Vault** | Indexes runbooks, incident history, architecture notes, uploaded docs, and source repositories so agents can ground answers in internal context. |
-| **Skills and MCP** | Shows every built-in skill and external MCP tool with runtime location, risk class, schema, and approval behavior. |
-| **Fleet Control** | Uses outbound edge agents for device inventory, browser shell, process inspection, journal reads, filesystem checks, DNS, TCP, and HTTP diagnostics without inbound SSH. |
 
 ## In Action
 
@@ -160,6 +99,72 @@ wget https://ongrid.cloud/dl/ongrid-v0.9.0-linux-amd64.tar.xz
 # ARM64
 wget https://ongrid.cloud/dl/ongrid-v0.9.0-linux-arm64.tar.xz
 ```
+
+## Product Tour
+
+Ongrid is organized around the real SRE operating loop: detect, investigate, use governed tools, automate repeatable work, preserve outputs, and keep the surrounding knowledge and topology visible to humans.
+
+### 1. Evidence-backed RCA artifacts
+
+<p align="center">
+  <img src="docs/assets/readme/live/en-rca-artifact-view.png" alt="Ongrid RCA artifact" width="920" />
+</p>
+
+Agents turn an incident or operator question into a reviewable artifact with signal summary, blast radius, evidence, confidence, and the next approved step. The output is dark-theme, shareable, and useful for handoff rather than just another chat answer.
+
+### 2. Workflow studio for repeatable operations
+
+<p align="center">
+  <img src="docs/assets/readme/live/en-workflow-editor.png" alt="Ongrid workflow editor" width="920" />
+</p>
+
+Successful investigations can become editable workflows with alert, manual, or scheduled triggers; agent and tool nodes; conditions; notifications; and generated pages or reports.
+
+### 3. Artifacts center for durable outputs
+
+<p align="center">
+  <img src="docs/assets/readme/live/en-artifacts-pages.png" alt="Ongrid artifacts center" width="920" />
+</p>
+
+Generated RCA pages, operational reports, daily briefs, and customer-ready summaries stay private by default. Operators can inspect, share, and reuse outputs without hunting through chat history.
+
+### 4. Governed skills and external MCP tools
+
+<p align="center">
+  <img src="docs/assets/readme/live/en-skills-catalog.png" alt="Ongrid skills catalog" width="920" />
+</p>
+
+The Skills catalog shows what the agent can call, where it runs, and its risk class. Built-in SRE tools cover observability, devices, incidents, knowledge, cloud actions, artifacts, and messaging.
+
+<p align="center">
+  <img src="docs/assets/readme/live/en-mcp-inventory.png" alt="Ongrid MCP server inventory" width="920" />
+</p>
+
+External MCP servers bring Grafana, Prometheus, Loki, Tempo, Kubernetes, PagerDuty, GitHub, databases, Terraform, Slack, and internal platforms into the same governed tool inventory.
+
+### 5. Observability and fleet context
+
+<p align="center">
+  <img src="docs/assets/readme/live/en-monitor.png" alt="Ongrid monitoring dashboard" width="920" />
+</p>
+
+Operators can inspect fleet CPU, memory, disk, network, logs, traces, and alert state in the same workspace where the agent performs evidence collection.
+
+### 6. Topology and blast-radius mapping
+
+<p align="center">
+  <img src="docs/assets/readme/live/en-topology-map.png" alt="Ongrid topology graph" width="920" />
+</p>
+
+Topology connects apps, services, clusters, devices, and failure domains. RCA workflows can explain affected systems and dependency paths instead of treating alerts as isolated metrics.
+
+### 7. Knowledge base and source context
+
+<p align="center">
+  <img src="docs/assets/readme/live/en-knowledge-vault.png" alt="Ongrid knowledge base" width="920" />
+</p>
+
+Runbooks, architecture notes, built-in diagnostics, incident templates, uploaded docs, and repositories become searchable context that both operators and agents can inspect.
 
 ## Integrations
 
