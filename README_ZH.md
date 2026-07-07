@@ -20,7 +20,6 @@
 <p align="center">
   <img src="docs/assets/demo.gif" alt="Ongrid demo" width="100%" />
 </p>
-<p align="center"><sub><a href="https://github.com/ongridio/ongrid/releases/download/v0.7.169/Area2_hq.mp4">▶ 观看高清完整视频 (MP4, 18 MB)</a></sub></p>
 
 <div align="center">
 
@@ -157,14 +156,6 @@ wget https://ongrid.cloud/dl/ongrid-v0.9.0-linux-arm64.tar.xz
 | **Agent** | [概览](https://ongrid.cloud/docs/agents/overview) · [Coordinator](https://ongrid.cloud/docs/agents/coordinator) · [Incident investigator](https://ongrid.cloud/docs/agents/incident-investigator) · [Specialists](https://ongrid.cloud/docs/agents/specialists) · [Reviewer](https://ongrid.cloud/docs/agents/reviewer) |
 | **参考** | [API](https://ongrid.cloud/docs/reference/api) · [CLI](https://ongrid.cloud/docs/reference/cli) · [告警规则](https://ongrid.cloud/docs/reference/alert-rules) · [Skill manifest](https://ongrid.cloud/docs/reference/skill-manifest) · [Data plane](https://ongrid.cloud/docs/reference/data-plane) |
 
-### 微信开发者社区
-
-<p align="center">
-  <img src="docs/assets/community/wechat-dev-community.jpg" alt="Ongrid 微信开发者社区二维码" width="180" />
-</p>
-
-扫码加入 Ongrid 开发者社区，交流部署、AIOps 场景、工作流和插件扩展。
-
 ## 集成
 
 即插即用，对接团队现有的可观测、IM 通道与模型栈。
@@ -187,3 +178,11 @@ Apache 2.0 — 见 [LICENSE](LICENSE)。
     <img alt="Star 趋势图" src="https://api.star-history.com/svg?repos=ongridio/ongrid&amp;type=Date" />
   </picture>
 </a>
+
+## 加入群组
+
+<p align="center">
+  <img src="docs/assets/community/wechat-dev-community.jpg" alt="Ongrid 微信群二维码" width="200" />
+</p>
+
+扫码加入 Ongrid 开发者社区，交流部署、AIOps 场景、工作流和插件扩展。
