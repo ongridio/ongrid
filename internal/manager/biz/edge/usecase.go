@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -285,6 +286,9 @@ func (u *Usecase) HandleRegister(ctx context.Context, edgeID uint64, info tunnel
 			u.log.Warn("device fingerprint rebind failed", "old", oldFP, "new", fp, "err", err)
 		}
 	}
+	if err := u.rebindLinkedDeviceFingerprint(ctx, edge, info, fp); err != nil && u.log != nil {
+		u.log.Warn("linked device fingerprint rebind failed", "edge_id", edgeID, "device_id", edge.DeviceID, "new", fp, "err", err)
+	}
 	seed := &devicemodel.Device{
 		Fingerprint:   fp,
 		UserID:        edge.CreatedBy,
@@ -364,6 +368,41 @@ func (u *Usecase) HandleRegister(ctx context.Context, edgeID uint64, info tunnel
 		}
 	}
 	return nil
+}
+
+func (u *Usecase) rebindLinkedDeviceFingerprint(ctx context.Context, edge *model.Edge, info tunnel.HostInfo, newFP string) error {
+	if edge == nil || edge.DeviceID == nil || newFP == "" {
+		return nil
+	}
+	linked, err := u.devices.Get(ctx, *edge.DeviceID)
+	if err != nil {
+		if errors.Is(err, errs.ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	if linked.Fingerprint == "" || linked.Fingerprint == newFP || !sameRegisteredHost(linked, info) {
+		return nil
+	}
+	return u.devices.RebindFingerprint(ctx, linked.Fingerprint, newFP)
+}
+
+func sameRegisteredHost(device *devicemodel.Device, info tunnel.HostInfo) bool {
+	if device == nil {
+		return false
+	}
+	hostname := normalizeHostID(info.Hostname)
+	if hostname != "" {
+		if normalizeHostID(device.Hostname) == hostname || normalizeHostID(device.Name) == hostname {
+			return true
+		}
+	}
+	ip := strings.TrimSpace(info.IPAddress)
+	return ip != "" && strings.TrimSpace(device.IPAddress) == ip
+}
+
+func normalizeHostID(s string) string {
+	return strings.ToLower(strings.TrimSpace(s))
 }
 
 // deviceFingerprint derives the stable per-host id stored in

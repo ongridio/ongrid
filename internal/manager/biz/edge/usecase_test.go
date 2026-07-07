@@ -878,3 +878,67 @@ func TestHandleRegisterMigratesLegacyFingerprintInPlace(t *testing.T) {
 		t.Fatalf("old fingerprint %q still present after migration", oldFP)
 	}
 }
+
+func TestHandleRegisterRebindsPreviouslyLinkedDeviceWhenFingerprintChanges(t *testing.T) {
+	repo := newFakeRepo()
+	devices := newFakeDeviceRepo()
+	uc := NewUsecase(repo, devices, nil, nil)
+	ctx := context.Background()
+
+	res, err := uc.Create(ctx, "edge-linked", nil)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	oldFP := "legacy:edge:25"
+	pre, err := devices.FindOrCreateByFingerprint(ctx, &devicemodel.Device{
+		Fingerprint: oldFP,
+		Name:        "aigc-sit-work2",
+		Hostname:    "aigc-sit-work2",
+	})
+	if err != nil {
+		t.Fatalf("seed linked device: %v", err)
+	}
+	if err := repo.SetDeviceID(ctx, res.Edge.ID, pre.ID); err != nil {
+		t.Fatalf("seed edge device id: %v", err)
+	}
+
+	info := tunnel.HostInfo{
+		Fingerprint:         "uuid-that-does-not-match-old-row",
+		HardwareFingerprint: "new-mac-cpu-disk",
+		Hostname:            "aigc-sit-work2",
+		OS:                  "linux",
+		Arch:                "amd64",
+		IPAddress:           "192.168.0.42",
+		CPUCount:            8,
+		MemTotalBytes:       16 << 30,
+		KernelVersion:       "6.8.0",
+	}
+	if err := uc.HandleRegister(ctx, res.Edge.ID, info, ""); err != nil {
+		t.Fatalf("HandleRegister: %v", err)
+	}
+
+	newFP := deviceFingerprint(info)
+	if newFP == oldFP || newFP == deviceFingerprintLegacy(info) {
+		t.Fatal("precondition: test must exercise the linked-device rebind path")
+	}
+	after, err := uc.Get(ctx, res.Edge.ID)
+	if err != nil || after.DeviceID == nil {
+		t.Fatalf("Get edge / DeviceID: %v", err)
+	}
+	if *after.DeviceID != pre.ID {
+		t.Fatalf("edge moved to device %d, want existing linked device %d", *after.DeviceID, pre.ID)
+	}
+	got, err := devices.FindOrCreateByFingerprint(ctx, &devicemodel.Device{Fingerprint: newFP})
+	if err != nil {
+		t.Fatalf("lookup new fp: %v", err)
+	}
+	if got.ID != pre.ID {
+		t.Fatalf("new fingerprint points to device %d, want existing linked device %d", got.ID, pre.ID)
+	}
+	if len(devices.byID) != 1 {
+		t.Fatalf("device rows = %d, want 1 (no orphan duplicate)", len(devices.byID))
+	}
+	if _, stillThere := devices.byFP[oldFP]; stillThere {
+		t.Fatalf("old linked fingerprint %q still present after rebind", oldFP)
+	}
+}
