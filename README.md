@@ -147,12 +147,15 @@ Keep risky actions behind approvals, with a visible policy boundary before anyth
 
 ## Documentation
 
-| Document | What it covers | Use it when |
-|---|---|---|
-| [Product showcase](docs/product-showcase.md) | Product positioning, tour narrative, screenshot checklist, and homepage content guidance. | You want to understand what Ongrid should show first to new users. |
-| [Workflow catalog](docs/workflow-catalog.md) | Workflow node types, example automations, tool families, and screenshot framing. | You are building or explaining repeatable SRE automations. |
-| [Edge install](docs/install/edge.md) | Edge deployment, tunnel setup, host-side prerequisites, and operational notes. | You are connecting infrastructure hosts to Ongrid. |
-| [E2E catalog](docs/test/e2e-catalog.md) | End-to-end coverage across install, auth, edge, alerts, RCA, notifications, knowledge, skills, topology, and UI flows. | You need to verify product behavior before release. |
+The full product documentation is available at [ongrid.cloud](https://ongrid.cloud/docs/get-started/introduction).
+
+| Area | Start here |
+|---|---|
+| **Get started** | [Introduction](https://ongrid.cloud/docs/get-started/introduction) · [Quickstart](https://ongrid.cloud/docs/get-started/quickstart) · [Architecture](https://ongrid.cloud/docs/get-started/architecture) · [Concepts](https://ongrid.cloud/docs/get-started/concepts) |
+| **Install & operate** | [Server install](https://ongrid.cloud/docs/install/server) · [Edge install](https://ongrid.cloud/docs/install/edge) · [First boot](https://ongrid.cloud/docs/install/first-boot) · [Upgrade](https://ongrid.cloud/docs/install/upgrade) |
+| **Capabilities** | [Alerts](https://ongrid.cloud/docs/capabilities/alerts) · [RCA](https://ongrid.cloud/docs/capabilities/rca) · [Monitoring](https://ongrid.cloud/docs/capabilities/monitoring) · [Logs](https://ongrid.cloud/docs/capabilities/logs) · [Traces](https://ongrid.cloud/docs/capabilities/traces) · [Knowledge](https://ongrid.cloud/docs/capabilities/knowledge) · [Skills](https://ongrid.cloud/docs/capabilities/skills) |
+| **Agents** | [Overview](https://ongrid.cloud/docs/agents/overview) · [Coordinator](https://ongrid.cloud/docs/agents/coordinator) · [Incident investigator](https://ongrid.cloud/docs/agents/incident-investigator) · [Specialists](https://ongrid.cloud/docs/agents/specialists) · [Reviewer](https://ongrid.cloud/docs/agents/reviewer) |
+| **Reference** | [API](https://ongrid.cloud/docs/reference/api) · [CLI](https://ongrid.cloud/docs/reference/cli) · [Alert rules](https://ongrid.cloud/docs/reference/alert-rules) · [Skill manifest](https://ongrid.cloud/docs/reference/skill-manifest) · [Data plane](https://ongrid.cloud/docs/reference/data-plane) |
 
 ## Integrations
 
