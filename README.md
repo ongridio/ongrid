@@ -145,7 +145,14 @@ Visualize dependencies and blast radius so incidents can be traced through the a
 
 Keep risky actions behind approvals, with a visible policy boundary before anything changes production systems.
 
-Read more in the docs: [Product showcase](docs/product-showcase.md) · [Workflow catalog](docs/workflow-catalog.md) · [Edge install](docs/install/edge.md).
+## Documentation
+
+| Document | What it covers | Use it when |
+|---|---|---|
+| [Product showcase](docs/product-showcase.md) | Product positioning, tour narrative, screenshot checklist, and homepage content guidance. | You want to understand what Ongrid should show first to new users. |
+| [Workflow catalog](docs/workflow-catalog.md) | Workflow node types, example automations, tool families, and screenshot framing. | You are building or explaining repeatable SRE automations. |
+| [Edge install](docs/install/edge.md) | Edge deployment, tunnel setup, host-side prerequisites, and operational notes. | You are connecting infrastructure hosts to Ongrid. |
+| [E2E catalog](docs/test/e2e-catalog.md) | End-to-end coverage across install, auth, edge, alerts, RCA, notifications, knowledge, skills, topology, and UI flows. | You need to verify product behavior before release. |
 
 ## Integrations
 
