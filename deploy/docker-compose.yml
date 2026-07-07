@@ -207,7 +207,7 @@ services:
     # Upstream broker (ADR-007). No build stanza — image pulled from
     # Docker Hub. Edge-bound port 40012 is exposed on host:40012 so the
     # tunnel endpoint URL stays identical to pre-split deployments.
-    image: singchia/frontier:1.2.5
+    image: singchia/frontier:v1.2.4
     container_name: ongrid-frontier
     restart: unless-stopped
     volumes:

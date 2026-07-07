@@ -124,6 +124,10 @@ type Registry struct {
 	// Set post-construction (cmd/main.go); nil → serve_page NOT registered.
 	pageStore PageStore
 
+	// k8sSnapshot feeds query_k8s_snapshot. It reads manager DB snapshots,
+	// not the live Kubernetes API.
+	k8sSnapshot K8sSnapshotReader
+
 	log   *slog.Logger
 	tools map[string]Tool
 }
@@ -137,6 +141,35 @@ func (r *Registry) SetIMSender(s IMSender) { r.imSender = s }
 
 // SetPageStore wires serve_page → hosted-pages store.
 func (r *Registry) SetPageStore(p PageStore) { r.pageStore = p }
+
+// SetK8sSnapshotReader wires query_k8s_snapshot. Call after NewRegistry
+// because the Kubernetes service is assembled before, but kept out of
+// NewRegistry's already-heavy constructor.
+func (r *Registry) SetK8sSnapshotReader(k K8sSnapshotReader) {
+	r.k8sSnapshot = k
+	if k != nil {
+		r.Register(Tool{
+			Name:        ToolNameQueryK8sSnapshot,
+			Description: QueryK8sSnapshotDescription,
+			Schema:      QueryK8sSnapshotSchema,
+			Execute:     r.executeQueryK8sSnapshot,
+		})
+		if r.caller != nil {
+			r.Register(Tool{
+				Name:        ToolNameDescribeK8sResource,
+				Description: DescribeK8sResourceDescription,
+				Schema:      DescribeK8sResourceSchema,
+				Execute:     r.executeDescribeK8sResource,
+			})
+			r.Register(Tool{
+				Name:        ToolNameQueryK8sLogs,
+				Description: QueryK8sLogsDescription,
+				Schema:      QueryK8sLogsSchema,
+				Execute:     r.executeQueryK8sLogs,
+			})
+		}
+	}
+}
 
 // SetAuditLister wires the audit query seam consumed by
 // query_change_events. Call after NewRegistry (cmd/main.go).

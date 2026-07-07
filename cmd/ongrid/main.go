@@ -81,12 +81,14 @@ import (
 
 	managerbizdevice "github.com/ongridio/ongrid/internal/manager/biz/device"
 	managerbizedge "github.com/ongridio/ongrid/internal/manager/biz/edge"
+	managerbizk8s "github.com/ongridio/ongrid/internal/manager/biz/k8s"
 	managerbizmetric "github.com/ongridio/ongrid/internal/manager/biz/metric"
 	managerbizpromwrite "github.com/ongridio/ongrid/internal/manager/biz/promwrite"
 	managerbiztopology "github.com/ongridio/ongrid/internal/manager/biz/topology"
 	manageralertdata "github.com/ongridio/ongrid/internal/manager/data/alert/store"
 	managerdevicedata "github.com/ongridio/ongrid/internal/manager/data/device/store"
 	manageredgedata "github.com/ongridio/ongrid/internal/manager/data/edge/store"
+	managerk8sdata "github.com/ongridio/ongrid/internal/manager/data/k8s/store"
 	managermetricdata "github.com/ongridio/ongrid/internal/manager/data/metric/store"
 	managertopologydata "github.com/ongridio/ongrid/internal/manager/data/topology/store"
 	managermodelalert "github.com/ongridio/ongrid/internal/manager/model/alert"
@@ -130,6 +132,7 @@ import (
 	settingmodel "github.com/ongridio/ongrid/internal/manager/model/setting"
 	wsmodel "github.com/ongridio/ongrid/internal/manager/model/webshell"
 	managerserverimbridge "github.com/ongridio/ongrid/internal/manager/server/imbridge"
+	managerserverk8s "github.com/ongridio/ongrid/internal/manager/server/k8s"
 	managerserverknowledge "github.com/ongridio/ongrid/internal/manager/server/knowledge"
 	managerwebshellserver "github.com/ongridio/ongrid/internal/manager/server/webshell"
 	mcpclient "github.com/ongridio/ongrid/internal/pkg/mcpclient"
@@ -140,6 +143,7 @@ import (
 	manageraudtdata "github.com/ongridio/ongrid/internal/manager/data/audit/store"
 	managerflowdata "github.com/ongridio/ongrid/internal/manager/data/flow/store"
 	managerreportdata "github.com/ongridio/ongrid/internal/manager/data/report/store"
+	manageraiopsmodel "github.com/ongridio/ongrid/internal/manager/model/aiops"
 	managerserveraiops "github.com/ongridio/ongrid/internal/manager/server/aiops"
 	managerserveralert "github.com/ongridio/ongrid/internal/manager/server/alert"
 	managerserverapproval "github.com/ongridio/ongrid/internal/manager/server/approval"
@@ -170,6 +174,7 @@ import (
 	managersvcalert "github.com/ongridio/ongrid/internal/manager/service/alert"
 	managersvcedge "github.com/ongridio/ongrid/internal/manager/service/edge"
 	managersvcfb "github.com/ongridio/ongrid/internal/manager/service/frontierbound"
+	managersvck8s "github.com/ongridio/ongrid/internal/manager/service/k8s"
 	managersvcmetric "github.com/ongridio/ongrid/internal/manager/service/metric"
 	managersvcprom "github.com/ongridio/ongrid/internal/manager/service/prometheus"
 	managersvcsystemhealth "github.com/ongridio/ongrid/internal/manager/service/systemhealth"
@@ -248,6 +253,7 @@ func main() {
 		manageralertdata.Migrate,
 		managerdevicedata.Migrate,
 		manageredgedata.Migrate,
+		managerk8sdata.Migrate,
 		managertopologydata.Migrate,
 		managermetricdata.Migrate,
 		manageraiopsdata.Migrate,
@@ -763,6 +769,13 @@ func main() {
 	}
 	edgeAuthn := managerbizedge.NewAccessKeyAuthenticator(edgeRepo, log)
 	edgeSvc := managersvcedge.New(edgeUC, nil, log)
+	k8sRepo := managerk8sdata.NewRepo(db)
+	k8sUC := managerbizk8s.NewUsecase(k8sRepo, k8sEdgeIdentityIssuer{svc: edgeSvc}, managerbizk8s.Config{
+		PublicURL:  cfg.PublicURL,
+		TunnelAddr: cfg.TunnelAddr,
+	})
+	k8sSvc := managersvck8s.New(k8sUC)
+	k8sHandler := managerserverk8s.NewHandler(k8sSvc)
 
 	// Plugin runtime config storage. UC notifier
 	// (cloud → edge reload push) is back-filled after frontierbound is
@@ -813,6 +826,21 @@ func main() {
 	// backfilled by topology.Migrate above; this hook covers ongoing
 	// registers + any device that landed between migration and now.
 	edgeUC.SetNodeMirror(topologyUC)
+	deviceUC.SetTopologyMirror(topologyUC)
+	if n, err := deviceUC.ReconcileDeletedTopology(rootCtx); err != nil {
+		log.Warn("device: deleted topology reconcile on boot failed", slog.Any("err", err))
+	} else if n > 0 {
+		log.Info("device: deleted topology reconcile on boot completed", slog.Int("count", n))
+	}
+	if n, err := deviceUC.ReconcileOrphanDevices(rootCtx); err != nil {
+		log.Warn("device: orphan reconcile on boot failed", slog.Any("err", err))
+	} else if n > 0 {
+		log.Info("device: orphan reconcile on boot completed", slog.Int("count", n))
+	}
+	k8sUC.SetTopologyMirror(topologyUC)
+	if err := k8sUC.ReconcileTopology(rootCtx); err != nil {
+		log.Warn("k8s: topology reconcile on boot failed", slog.Any("err", err))
+	}
 
 	// Data plane auth verify — nginx auth_request
 	// calls this endpoint to validate edge basic-auth before proxy_pass'ing
@@ -1050,6 +1078,8 @@ func main() {
 		// resolution path (push pipeline). The biz junction repo is the
 		// source of truth.
 		DeviceResolver: edgeDeviceRepo,
+		K8sRegistry:    k8sSvc,
+		K8sInventory:   k8sSvc,
 		Log:            log.With(slog.String("comp", "frontierbound")),
 	}); err != nil {
 		log.Error("frontierbound: install handlers", slog.Any("err", err))
@@ -1107,6 +1137,7 @@ func main() {
 	// callback chain checks before each ChatModel turn — see Phase 4 cbDeps
 	// build below where the checker is set when the limit > 0.
 	aiopsRepo := manageraiopsdata.NewBizRepo(db)
+	mutatingProposalRepo := manageraiopsdata.NewMutatingProposalRepo(db)
 	// PromQuerier is the interface tools/registry takes; passing a typed-nil
 	// *Client would yield a non-nil interface and bypass the conditional
 	// tool registration. Explicitly hand it nil when Prom is disabled.
@@ -1128,6 +1159,7 @@ func main() {
 	toolsReg := aiopstools.NewRegistry(fbClient, edgeUC, deviceUC, promQuerier, logQuerier, traceQuerier, alertUC, log)
 	toolsReg.SetPluginConfigLister(pluginConfigUC)
 	toolsReg.SetConfigManager(manageraiopsconfig.NewAlertRuleManager(alertSvc))
+	toolsReg.SetK8sSnapshotReader(k8sSvc)
 	// query_change_events (HLD-013 Phase 2) — RCA "what changed near T".
 	// *audit.Usecase satisfies aiopstools.AuditLister via ListChanges.
 	toolsReg.SetAuditLister(auditUC)
@@ -1307,7 +1339,7 @@ func main() {
 		chatRT *aiopschatruntime.Runtime
 	)
 	if kernel == managersvcaiops.KernelGraph {
-		rt, rterr := buildAIOpsRuntime(rootCtx, cfg, llmClient, llmRouter, toolsReg, aiopsRepo, fbClient, edgeUC, deviceUC, reg, log, bootstrapSkillReg, bootstrapAgentReg, llmSettingsResolver)
+		rt, rterr := buildAIOpsRuntime(rootCtx, cfg, llmClient, llmRouter, toolsReg, aiopsRepo, mutatingProposalRepo, fbClient, edgeUC, deviceUC, reg, log, bootstrapSkillReg, bootstrapAgentReg, llmSettingsResolver)
 		if rterr != nil {
 			log.Warn("aiops runtime build failed — falling back to legacy kernel", slog.Any("err", rterr))
 			kernel = managersvcaiops.KernelLegacy
@@ -1363,6 +1395,7 @@ func main() {
 	}
 
 	aiopsSvc := managersvcaiops.NewWithKernel(aiopsAgent, aiopsRuntime, kernel, aiopsRepo, aiopsUsage, log)
+	aiopsSvc.SetMutatingProposalRepo(mutatingProposalRepo)
 	aiopsHandler := managerserveraiops.NewHandler(aiopsSvc)
 
 	// IM bridge: multi-turn chat via Feishu (S1) / DingTalk
@@ -2169,6 +2202,7 @@ func main() {
 	// without JWT. Network policy (docker-internal only) is the gate;
 	// nginx must NOT proxy_pass external traffic to /internal/auth/*.
 	edgeAuthHandler.Register(mux)
+	k8sHandler.RegisterInternal(mux)
 
 	// All BC HTTP lives under /api. Public iam routes (login / refresh)
 	// skip the auth middleware; everything else goes through it via
@@ -2265,6 +2299,7 @@ func main() {
 			})
 			iamHandler.RegisterProtected(protected)
 			edgeHandler.Register(protected)
+			k8sHandler.RegisterProtected(protected)
 			webshellHandler.Register(protected)
 			deviceHandler.Register(protected)
 			topologyHandler.Register(protected)
@@ -2487,6 +2522,44 @@ type llmResolverFunc struct {
 
 func newLLMResolver(svc *managerbizsetting.Service) *llmResolverFunc {
 	return &llmResolverFunc{svc: svc}
+}
+
+type k8sEdgeIdentityIssuer struct {
+	svc *managersvcedge.Service
+}
+
+func (i k8sEdgeIdentityIssuer) CreateEdgeIdentity(ctx context.Context, name string, createdBy *uint64) (*managerbizk8s.EdgeCredential, error) {
+	if i.svc == nil {
+		return nil, errs.ErrNotWiredYet
+	}
+	out, err := i.svc.Create(ctx, name, createdBy)
+	if err != nil {
+		return nil, err
+	}
+	return &managerbizk8s.EdgeCredential{
+		EdgeID:    out.Edge.ID,
+		AccessKey: out.AccessKey,
+		SecretKey: out.SecretKey,
+	}, nil
+}
+
+func (i k8sEdgeIdentityIssuer) RotateEdgeSecret(ctx context.Context, edgeID uint64) (*managerbizk8s.EdgeCredential, error) {
+	if i.svc == nil {
+		return nil, errs.ErrNotWiredYet
+	}
+	edge, err := i.svc.Get(ctx, edgeID)
+	if err != nil {
+		return nil, err
+	}
+	secret, err := i.svc.RotateSecret(ctx, edgeID)
+	if err != nil {
+		return nil, err
+	}
+	return &managerbizk8s.EdgeCredential{
+		EdgeID:    edgeID,
+		AccessKey: edge.AccessKeyID,
+		SecretKey: secret,
+	}, nil
 }
 
 // pluginEndpointResolver implements edgebiz.EndpointResolver: maps a
@@ -2879,6 +2952,64 @@ func (s *chatruntimeReviewSpawner) SpawnReviewer(ctx context.Context, req aiopst
 	}, nil
 }
 
+type mutatingProposalRepo interface {
+	Insert(ctx context.Context, p *manageraiopsmodel.MutatingProposal) error
+	UpdateDecision(ctx context.Context, id, decision string, reason *string) error
+	MarkExecuted(ctx context.Context, id string, t time.Time) error
+}
+
+// mutatingProposalSink adapts the aiops data repo to ReviewGate's
+// decorator-local audit seam. It belongs in cmd because it is pure DI
+// glue between the data repo and the tool decorator interface.
+type mutatingProposalSink struct {
+	repo mutatingProposalRepo
+}
+
+func newMutatingProposalSink(repo mutatingProposalRepo) *mutatingProposalSink {
+	if repo == nil {
+		return nil
+	}
+	return &mutatingProposalSink{repo: repo}
+}
+
+func (s *mutatingProposalSink) Insert(ctx context.Context, ev aiopstoolsdec.MutatingProposalEvent) (string, error) {
+	if s == nil || s.repo == nil {
+		return "", errs.ErrInvalid
+	}
+	argsJSON := ev.ArgsJSON
+	if strings.TrimSpace(argsJSON) == "" {
+		argsJSON = "{}"
+	}
+	p := &manageraiopsmodel.MutatingProposal{
+		SessionID:      ev.SessionID,
+		ToolName:       ev.ToolName,
+		ArgsJSON:       argsJSON,
+		ToolClass:      ev.ToolClass,
+		ReviewerAgent:  ev.ReviewerAgent,
+		ReviewerTaskID: ev.ReviewerTaskID,
+		OperatorUserID: ev.OperatorUserID,
+		CreatedAt:      ev.CreatedAt,
+	}
+	if err := s.repo.Insert(ctx, p); err != nil {
+		return "", fmt.Errorf("insert mutating proposal: %w", err)
+	}
+	return p.ID, nil
+}
+
+func (s *mutatingProposalSink) UpdateDecision(ctx context.Context, id, decision string, reason string) error {
+	if s == nil || s.repo == nil {
+		return errs.ErrInvalid
+	}
+	return s.repo.UpdateDecision(ctx, id, decision, &reason)
+}
+
+func (s *mutatingProposalSink) MarkExecuted(ctx context.Context, id string, t time.Time) error {
+	if s == nil || s.repo == nil {
+		return errs.ErrInvalid
+	}
+	return s.repo.MarkExecuted(ctx, id, t)
+}
+
 // reportDelivererShim implements bizreport.Deliverer over the alert
 // channel store + notify router, so biz/report stays free of the
 // notify / alert imports. For each channel id it loads the
@@ -3047,6 +3178,10 @@ var coordinatorToolNames = []string{
 	"list_database_sources",
 	"analyze_database_status",
 	"list_metric_catalog",
+	"query_k8s_snapshot",
+	"describe_k8s_resource",
+	"query_k8s_logs",
+	"execute_k8s_action",
 	"query_knowledge",
 	"search_web",
 	"list_repo_sources",
@@ -3086,6 +3221,7 @@ func buildAIOpsRuntime(
 	llmRouter *llm.MultiClient,
 	toolsReg *aiopstools.Registry,
 	sessions managerbizaiops.SessionRepo,
+	mutatingProposals mutatingProposalRepo,
 	fbClient *managersvcfb.Client,
 	edgeUC *managerbizedge.Usecase,
 	deviceUC *managerbizdevice.Usecase,
@@ -3208,9 +3344,9 @@ func buildAIOpsRuntime(
 	// 2. Tool bag — Registry.BuildBaseTools + AppendHostFilesTools,
 	//    then wrap the whole thing through the standard decorator
 	//    chain so audit / timeout / rate-limit / metric apply
-	//    uniformly. The audit sink stays nil for PR-9 (chat_tool_calls
-	//    writes still happen via the persistence callback in the
-	//    graph kernel).
+	//    uniformly. chat_tool_calls writes still happen via the
+	//    graph persistence callback, while mutating proposal decisions
+	//    are written by ReviewGate through chat_mutating_proposals.
 	//
 	//    BuildBaseTools now returns a *tools.ToolBag
 	//    (deferred-loading wrapper). When the bag size is below the
@@ -3223,11 +3359,13 @@ func buildAIOpsRuntime(
 	bag = aiopstools.AppendHostFilesTools(bag, fbClient, edgeUC, deviceUC, log)
 	baseTools := bag.SchemasForLLM()
 	reviewSpawner := &chatruntimeReviewSpawner{}
+	reviewSink := newMutatingProposalSink(mutatingProposals)
 	deps := aiopstoolsdec.Deps{
 		Timeout:       15 * time.Second,
 		Limiter:       aiopstoolsdec.NewTokenBucketLimiter(0),
 		Registerer:    reg,
 		ReviewSpawner: reviewSpawner,
+		ReviewSink:    reviewSink,
 	}
 	wrapped := make([]aiopstoolsbase.BaseTool, 0, len(baseTools))
 	for _, t := range baseTools {
@@ -3259,6 +3397,9 @@ func buildAIOpsRuntime(
 	//     databasemetrics / database-tagged custommetrics
 	//   - list_metric_catalog — arbitrary Prometheus/custommetrics metric
 	//     name discovery for natural-language alert drafting
+	//   - query_k8s_snapshot — Kubernetes DB snapshot inventory/counts
+	//   - describe_k8s_resource — live read-only Kubernetes describe via controller
+	//   - query_k8s_logs — bounded live Pod logs fallback via controller pods/log
 	//   - query_knowledge — RAG / KB lookup (T4-class questions)
 	//   - search_web — web search for general doc Qs
 	//   - list_repo_sources / read_source / grep_source — read SOURCE of
@@ -3535,13 +3676,11 @@ func (a webshellAuditAdapter) List(ctx context.Context, limit int) ([]*wsmodel.S
 // regOrExist), so building this second wrapped set over the same `reg`
 // does NOT double-register.
 //
-// NOTE on ReviewGate: it is NOT installed here — and currently isn't
-// installed on the chat path either, because Deps.ReviewSpawner is left
-// nil system-wide (no reviewer-agent wiring yet). So mutating-class tools
-// (e.g. restart_service) in a flow run UNGUARDED, exactly as on the chat
-// path. That is a pre-existing gap, not specific to flows; when the
-// ReviewSpawner is wired, decide separately whether unattended flow runs
-// (cron/alert) should block on a human reviewer at all.
+// NOTE on ReviewGate: it is intentionally NOT installed here. The chat
+// runtime wires ReviewGate + chat_mutating_proposals audit through
+// buildAIOpsRuntime, but flow runs may be unattended (cron/alert). Before
+// enabling mutating-class flow tools we need a separate product decision on
+// whether those executions should block on reviewer approval or be rejected.
 // cloudBashProposerShim adapts biz/approval.Usecase to the
 // cloudBashPayload is the approval payload for a queued cloud_bash command.
 // Credentials are vault credential NAMES; the executor resolves each one's
@@ -3834,6 +3973,9 @@ func (s *flowToolInvoker) mergeBag(bag *aiopstools.ToolBag) {
 		}
 		info, err := t.Info(context.Background())
 		if err != nil || info == nil || info.Name == "" {
+			continue
+		}
+		if isChatOnlyReviewTool(info.Name) {
 			continue
 		}
 		if _, exists := s.tools[info.Name]; exists {
@@ -4468,6 +4610,9 @@ func (c flowToolCatalog) ListTools() []managerbizflow.ToolMeta {
 		if isControlPlaneTool(info.Name) {
 			continue
 		}
+		if isChatOnlyReviewTool(info.Name) {
+			continue
+		}
 		// cloud_bash blocks on synchronous human approval (HLD-021); an
 		// automated flow run has no approver, so the node would just hang
 		// until timeout. It belongs in chat — hide it from the flow palette
@@ -4511,6 +4656,15 @@ func isControlPlaneTool(name string) bool {
 	return false
 }
 
+func isChatOnlyReviewTool(name string) bool {
+	switch name {
+	case aiopstools.ToolNameExecuteK8sAction:
+		return true
+	default:
+		return false
+	}
+}
+
 // categorizeFlowTool buckets a tool name into a palette group. Explicit
 // map for the hand-written tools, prefix rules for the families; unknown
 // names fall to "other" so the palette never drops a tool.
@@ -4526,12 +4680,16 @@ func categorizeFlowTool(name string) string {
 		return "knowledge"
 	case "list_database_sources", "analyze_database_status":
 		return "observability"
+	case "query_k8s_snapshot", "describe_k8s_resource", "query_k8s_logs", "execute_k8s_action":
+		return "kubernetes"
 	case "agent_tool", "send_message", "task_stop", "tool_search":
 		return "control"
 	}
 	switch {
 	case strings.HasPrefix(name, "mcp__"):
 		return "integration" // MCP server tools (HLD-018)
+	case strings.Contains(name, "k8s"):
+		return "kubernetes"
 	case strings.HasPrefix(name, "query_"):
 		return "observability"
 	case strings.HasPrefix(name, "host_") || strings.HasPrefix(name, "get_host_") || strings.Contains(name, "restart_service"):
@@ -4558,6 +4716,10 @@ var flowToolLabelZhMap = map[string]string{
 	"query_traceql":           "查询链路 (TraceQL)",
 	"list_database_sources":   "列出数据库源",
 	"analyze_database_status": "数据库健康分析",
+	"query_k8s_snapshot":      "查询 K8s 快照",
+	"describe_k8s_resource":   "实时查看 K8s 资源",
+	"query_k8s_logs":          "查询 K8s Pod 日志",
+	"execute_k8s_action":      "执行 K8s 动作",
 	// host
 	"host_bash":            "主机命令",
 	"host_restart_service": "重启服务",
@@ -4602,6 +4764,10 @@ var flowToolDescZhMap = map[string]string{
 	"query_traceql":           "用 TraceQL 查询 Tempo 链路。",
 	"list_database_sources":   "列出已发现的数据库指标采集源。",
 	"analyze_database_status": "对数据库指标源做健康巡检（连接/慢查/复制等）。",
+	"query_k8s_snapshot":      "查询 manager DB 中的 Kubernetes 资源快照。",
+	"describe_k8s_resource":   "通过 controller 实时读取单个 Kubernetes 资源。",
+	"query_k8s_logs":          "通过 controller 读取有界的 Pod 日志兜底片段。",
+	"execute_k8s_action":      "通过 controller 执行受审批保护的 Kubernetes 写动作。",
 	"host_bash":               "在边端主机上执行受白名单约束的只读命令。",
 	"host_restart_service":    "重启白名单内的 systemd 服务（写操作，走二审）。",
 	"get_host_load":           "获取主机 CPU / 内存 / 负载快照。",

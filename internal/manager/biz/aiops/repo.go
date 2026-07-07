@@ -68,3 +68,19 @@ type SessionRepo interface {
 	// scoping) — caller-side filtering is the right place to add scopes.
 	SumTokensSince(ctx context.Context, since time.Time) (TokenSums, error)
 }
+
+// MutatingProposalFilter narrows reviewer audit rows. It is intentionally
+// simple and SQL-index friendly; callers that need to inspect structured tool
+// arguments should parse ArgsJSON after fetching a bounded page.
+type MutatingProposalFilter struct {
+	ToolName string
+	Decision string
+	Limit    int
+	Offset   int
+}
+
+// MutatingProposalRepo persists ReviewGate proposal/audit rows.
+type MutatingProposalRepo interface {
+	ListMutatingProposals(ctx context.Context, f MutatingProposalFilter) ([]*model.MutatingProposal, error)
+	CountMutatingProposals(ctx context.Context, f MutatingProposalFilter) (int64, error)
+}

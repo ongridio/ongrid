@@ -37,7 +37,7 @@ import (
 //     chatruntime.Worker.ID via the in-memory map, NOT a FK; the
 //     workers table is in-memory only in PR-7)
 //   - decision ("pending" / "approve" / "reject") + decision_reason
-//     + decided_at — the reviewer's verdict
+//   - decided_at — the reviewer's verdict
 //   - operator_user_id — who triggered the proposal (the chat owner)
 //   - approver_user_id — reserved for the SPA dual-sign UI follow-up;
 //     the reviewer agent is a software approver, not a human
@@ -58,7 +58,7 @@ type MutatingProposal struct {
 	// chat_tool_calls.tool_name / arguments_json; the schema is
 	// independent so the reviewer can audit the proposal even after
 	// the chat row is purged.
-	ToolName string `gorm:"size:64;not null;column:tool_name"`
+	ToolName string `gorm:"size:64;not null;index:idx_chat_mutating_tool_created,priority:1;column:tool_name"`
 	ArgsJSON string `gorm:"type:text;not null;column:args_json"`
 
 	// ToolClass is "write" | "destructive" — the value ReviewGate
@@ -78,7 +78,7 @@ type MutatingProposal struct {
 	ReviewerTaskID string `gorm:"size:64;not null;column:reviewer_task_id"`
 
 	// Decision is the reviewer's verdict. Constants below.
-	Decision string `gorm:"size:16;not null;default:pending;check:decision IN ('pending','approve','reject');column:decision"`
+	Decision string `gorm:"size:16;not null;default:pending;check:decision IN ('pending','approve','reject');index:idx_chat_mutating_decision_created,priority:1;column:decision"`
 
 	// DecisionReason is the reviewer's rationale (the "Notes" / "Gates"
 	// block from the reviewer.md output). Stored verbatim so SPA can
@@ -99,7 +99,7 @@ type MutatingProposal struct {
 	// DecidedAt is when the reviewer returned. Two columns so the
 	// "reviewer round-trip duration" SLO can be computed without
 	// joining other tables.
-	CreatedAt  time.Time
+	CreatedAt  time.Time  `gorm:"index:idx_chat_mutating_tool_created,priority:2;index:idx_chat_mutating_decision_created,priority:2"`
 	DecidedAt  *time.Time `gorm:"column:decided_at"`
 	ExecutedAt *time.Time `gorm:"column:executed_at"`
 }

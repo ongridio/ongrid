@@ -3,6 +3,7 @@ package topology
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -247,6 +248,277 @@ func (u *Usecase) EnsureNodeForDevice(ctx context.Context, deviceID uint64, devi
 			slog.Uint64("device_id", deviceID), slog.Uint64("node_id", n.ID), slog.String("name", deviceName))
 	}
 	return n.ID, nil
+}
+
+// DeleteNodeForDevice removes the topology node owned by a deleted device.
+// Device deletion is the source of truth here, so every relation touching
+// the node is removed before the node itself.
+func (u *Usecase) DeleteNodeForDevice(ctx context.Context, deviceID, nodeID uint64) error {
+	if u.nodes == nil || u.relations == nil {
+		return errs.ErrNotWiredYet
+	}
+	if deviceID == 0 || nodeID == 0 {
+		return fmt.Errorf("%w: device_id and node_id are required", errs.ErrInvalid)
+	}
+	n, err := u.nodes.Get(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+	if n.Type != string(model.NodeTypeDevice) {
+		return fmt.Errorf("%w: topology node %d is %q, not device", errs.ErrInvalid, nodeID, n.Type)
+	}
+	rels, err := u.relations.List(ctx, RelationListFilter{SrcOrDstID: nodeID})
+	if err != nil {
+		return err
+	}
+	for _, rel := range rels {
+		if rel == nil {
+			continue
+		}
+		if err := u.relations.Delete(ctx, rel.ID); err != nil && !errors.Is(err, errs.ErrNotFound) {
+			return err
+		}
+	}
+	if err := u.nodes.Delete(ctx, nodeID); err != nil {
+		return err
+	}
+	if u.log != nil {
+		u.log.Info("topology: removed deleted device node",
+			slog.Uint64("device_id", deviceID),
+			slog.Uint64("node_id", nodeID),
+			slog.Int("relations", len(rels)))
+	}
+	return nil
+}
+
+// EnsureKubernetesCluster mirrors one onboarded Kubernetes cluster into the
+// generic topology graph as a type=cluster node. currentNodeID is the stable
+// k8s_clusters.node_id pointer when the k8s table already has one.
+func (u *Usecase) EnsureKubernetesCluster(ctx context.Context, clusterID uint64, currentNodeID *uint64, name, uid, mode, status string) (uint64, error) {
+	if u.nodes == nil {
+		return 0, errs.ErrNotWiredYet
+	}
+	if clusterID == 0 {
+		return 0, fmt.Errorf("%w: cluster_id required", errs.ErrInvalid)
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return 0, fmt.Errorf("%w: cluster name required", errs.ErrInvalid)
+	}
+	propsJSON, err := kubernetesClusterPropsJSON(clusterID, uid, mode, status)
+	if err != nil {
+		return 0, err
+	}
+	if currentNodeID != nil && *currentNodeID != 0 {
+		n, err := u.nodes.Get(ctx, *currentNodeID)
+		if err == nil && n.Type == string(model.NodeTypeCluster) {
+			if n.Name != name || n.PropsJSON != propsJSON {
+				if err := u.nodes.Update(ctx, n.ID, name, propsJSON); err != nil {
+					return 0, err
+				}
+			}
+			return n.ID, nil
+		}
+		if err != nil && !errors.Is(err, errs.ErrNotFound) {
+			return 0, err
+		}
+	}
+	if n, err := u.findKubernetesClusterNode(ctx, clusterID, name); err != nil {
+		return 0, err
+	} else if n != nil {
+		if n.Name != name || n.PropsJSON != propsJSON {
+			if err := u.nodes.Update(ctx, n.ID, name, propsJSON); err != nil {
+				return 0, err
+			}
+		}
+		return n.ID, nil
+	}
+	n := &model.Node{Type: string(model.NodeTypeCluster), Name: name, PropsJSON: propsJSON}
+	if err := u.nodes.Create(ctx, n); err != nil {
+		return 0, err
+	}
+	if u.log != nil {
+		u.log.Info("topology: mirrored kubernetes cluster",
+			slog.Uint64("k8s_cluster_id", clusterID), slog.Uint64("node_id", n.ID), slog.String("name", name))
+	}
+	return n.ID, nil
+}
+
+func (u *Usecase) findKubernetesClusterNode(ctx context.Context, clusterID uint64, name string) (*model.Node, error) {
+	rows, err := u.nodes.List(ctx, NodeListFilter{
+		Type:  string(model.NodeTypeCluster),
+		Q:     name,
+		Limit: 100,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var fallback *model.Node
+	for _, n := range rows {
+		if !strings.EqualFold(n.Name, name) {
+			continue
+		}
+		match, owned := topologyPropsMatchKubernetesCluster(n.PropsJSON, clusterID)
+		if match {
+			return n, nil
+		}
+		if !owned && fallback == nil {
+			fallback = n
+		}
+	}
+	return fallback, nil
+}
+
+// EnsureKubernetesNodeMembership mirrors one Kubernetes node's backing device
+// into the graph as device --member_of--> Kubernetes cluster.
+func (u *Usecase) EnsureKubernetesNodeMembership(ctx context.Context, clusterNodeID, deviceNodeID, clusterID, deviceID uint64, nodeName, nodeUID string) error {
+	if u.nodes == nil || u.relations == nil || u.types == nil {
+		return errs.ErrNotWiredYet
+	}
+	if clusterNodeID == 0 || deviceNodeID == 0 || clusterID == 0 || deviceID == 0 {
+		return fmt.Errorf("%w: cluster_node_id, device_node_id, cluster_id and device_id required", errs.ErrInvalid)
+	}
+	propsJSON, err := kubernetesNodeMembershipPropsJSON(clusterID, deviceID, nodeName, nodeUID)
+	if err != nil {
+		return err
+	}
+	existing, err := u.relations.List(ctx, RelationListFilter{
+		SrcID: deviceNodeID,
+		DstID: clusterNodeID,
+		Type:  model.RelMemberOf,
+		Limit: 1,
+	})
+	if err != nil {
+		return err
+	}
+	if len(existing) > 0 {
+		if existing[0].PropsJSON != propsJSON {
+			return u.relations.Update(ctx, existing[0].ID, propsJSON)
+		}
+		return nil
+	}
+	_, err = u.CreateRelation(ctx, deviceNodeID, clusterNodeID, model.RelMemberOf, propsJSON)
+	return err
+}
+
+// PruneKubernetesNodeMemberships removes stale Kubernetes-owned member_of
+// edges under a mirrored Kubernetes cluster. Manual member_of edges are left
+// untouched because they do not carry source=kubernetes in props.
+func (u *Usecase) PruneKubernetesNodeMemberships(ctx context.Context, clusterNodeID, clusterID uint64, keepDeviceNodeIDs []uint64) error {
+	if u.relations == nil {
+		return errs.ErrNotWiredYet
+	}
+	if clusterNodeID == 0 || clusterID == 0 {
+		return fmt.Errorf("%w: cluster_node_id and cluster_id required", errs.ErrInvalid)
+	}
+	keep := make(map[uint64]struct{}, len(keepDeviceNodeIDs))
+	for _, id := range keepDeviceNodeIDs {
+		if id != 0 {
+			keep[id] = struct{}{}
+		}
+	}
+	rels, err := u.relations.List(ctx, RelationListFilter{
+		DstID: clusterNodeID,
+		Type:  model.RelMemberOf,
+	})
+	if err != nil {
+		return err
+	}
+	for _, rel := range rels {
+		if _, ok := keep[rel.SrcID]; ok {
+			continue
+		}
+		if match, owned := topologyPropsMatchKubernetesCluster(rel.PropsJSON, clusterID); owned && match {
+			if err := u.relations.Delete(ctx, rel.ID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func kubernetesClusterPropsJSON(clusterID uint64, uid, mode, status string) (string, error) {
+	props := struct {
+		Source       string `json:"source"`
+		K8sClusterID uint64 `json:"k8s_cluster_id"`
+		ClusterUID   string `json:"k8s_cluster_uid,omitempty"`
+		Mode         string `json:"mode,omitempty"`
+		Status       string `json:"status,omitempty"`
+	}{
+		Source:       "kubernetes",
+		K8sClusterID: clusterID,
+		ClusterUID:   strings.TrimSpace(uid),
+		Mode:         strings.TrimSpace(mode),
+		Status:       strings.TrimSpace(status),
+	}
+	b, err := json.Marshal(props)
+	if err != nil {
+		return "", fmt.Errorf("marshal k8s cluster topology props: %w", err)
+	}
+	return string(b), nil
+}
+
+func kubernetesNodeMembershipPropsJSON(clusterID, deviceID uint64, nodeName, nodeUID string) (string, error) {
+	props := struct {
+		Source       string `json:"source"`
+		K8sClusterID uint64 `json:"k8s_cluster_id"`
+		DeviceID     uint64 `json:"device_id"`
+		NodeName     string `json:"k8s_node_name,omitempty"`
+		NodeUID      string `json:"k8s_node_uid,omitempty"`
+	}{
+		Source:       "kubernetes",
+		K8sClusterID: clusterID,
+		DeviceID:     deviceID,
+		NodeName:     strings.TrimSpace(nodeName),
+		NodeUID:      strings.TrimSpace(nodeUID),
+	}
+	b, err := json.Marshal(props)
+	if err != nil {
+		return "", fmt.Errorf("marshal k8s membership topology props: %w", err)
+	}
+	return string(b), nil
+}
+
+func topologyPropsMatchKubernetesCluster(propsJSON string, clusterID uint64) (match bool, owned bool) {
+	propsJSON = strings.TrimSpace(propsJSON)
+	if propsJSON == "" {
+		return false, false
+	}
+	var props map[string]any
+	if err := json.Unmarshal([]byte(propsJSON), &props); err != nil {
+		return false, false
+	}
+	source, _ := props["source"].(string)
+	if source != "kubernetes" {
+		return false, false
+	}
+	id, ok := jsonUint64(props["k8s_cluster_id"])
+	return ok && id == clusterID, true
+}
+
+func jsonUint64(v any) (uint64, bool) {
+	switch n := v.(type) {
+	case float64:
+		if n < 0 || n != float64(uint64(n)) {
+			return 0, false
+		}
+		return uint64(n), true
+	case int:
+		if n < 0 {
+			return 0, false
+		}
+		return uint64(n), true
+	case uint64:
+		return n, true
+	case string:
+		var out uint64
+		if _, err := fmt.Sscanf(n, "%d", &out); err != nil {
+			return 0, false
+		}
+		return out, true
+	default:
+		return 0, false
+	}
 }
 
 // ---------- RelationType ----------------------------------------------------

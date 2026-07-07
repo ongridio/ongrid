@@ -251,6 +251,7 @@ export default function EdgeDetailPage() {
       return { ...prev, [panel]: nextSet };
     });
   };
+  const edgeDisplayName = edge ? displayEdgeName(edge) : edgeId;
 
   return (
     <main className="anim-fade flex flex-1 flex-col overflow-hidden">
@@ -267,7 +268,7 @@ export default function EdgeDetailPage() {
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <h1 className="truncate text-base font-semibold text-zinc-100">
-                  {edge?.name ?? edgeId}
+                  {edgeDisplayName}
                 </h1>
                 {edge && <StatusPill status={edge.status} />}
               </div>
@@ -391,7 +392,8 @@ export default function EdgeDetailPage() {
               title={tr('元数据', 'Metadata')}
               data={{
                 id: edge.id,
-                name: edge.name,
+                name: edgeDisplayName,
+                ...(edge.name && edge.name !== edgeDisplayName ? { edge_name: edge.name } : {}),
                 status: edge.status,
                 access_key_id: edge.access_key_id,
                 last_seen_at: edge.last_seen_at,
@@ -404,6 +406,66 @@ export default function EdgeDetailPage() {
         </div>
       </main>
   );
+}
+
+function displayEdgeName(edge: Edge): string {
+  const name = edge.name?.trim() ?? '';
+  if (isK8sGeneratedEdgeName(name)) {
+    return extractHostname(edge.host_info) || extractK8sNamePart(name) || name || String(edge.id);
+  }
+  return name || extractHostname(edge.host_info) || String(edge.id);
+}
+
+function isK8sGeneratedEdgeName(name: string): boolean {
+  return name.startsWith('k8s:');
+}
+
+function extractK8sNamePart(name: string): string {
+  const parts = name.split(':');
+  return parts.length >= 3 ? parts.slice(2).join(':').trim() : '';
+}
+
+function extractHostname(hostInfo: Edge['host_info']): string | null {
+  if (!hostInfo) return null;
+  if (typeof hostInfo === 'string') {
+    const parsed = safeParseHostInfo(hostInfo);
+    if (!parsed) {
+      const raw = hostInfo.trim();
+      return raw && !raw.startsWith('{') ? raw : null;
+    }
+    return pickHostname(parsed);
+  }
+  if (typeof hostInfo === 'object') {
+    return pickHostname(hostInfo);
+  }
+  return null;
+}
+
+function safeParseHostInfo(value: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+function pickHostname(value: Record<string, unknown>): string | null {
+  const candidates = [
+    value.hostname,
+    value.hostName,
+    value.nodename,
+    value.nodeName,
+    value.host,
+    value.instance,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string') continue;
+    const normalized = candidate.trim();
+    if (!normalized) continue;
+    return normalized.includes(':') ? normalized.split(':')[0] || normalized : normalized;
+  }
+  return null;
 }
 
 // matrixToPanel pivots PromMatrixSeries[] into the recharts row form. Each

@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
+	biz "github.com/ongridio/ongrid/internal/manager/biz/aiops"
 	model "github.com/ongridio/ongrid/internal/manager/model/aiops"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
@@ -133,5 +134,68 @@ func TestMutatingProposalRepo_GetMissing(t *testing.T) {
 	repo := newProposalRepo(t)
 	if _, err := repo.Get(context.Background(), "nonexistent"); !errors.Is(err, errs.ErrNotFound) {
 		t.Errorf("missing proposal should return ErrNotFound, got %v", err)
+	}
+}
+
+func TestMutatingProposalRepo_ListAndCountByToolAndDecision(t *testing.T) {
+	repo := newProposalRepo(t)
+	ctx := context.Background()
+
+	rows := []*model.MutatingProposal{
+		{
+			SessionID:      "sess-k8s-approved",
+			ToolName:       "execute_k8s_action",
+			ArgsJSON:       `{"cluster_id":1,"action":"scale"}`,
+			ToolClass:      "write",
+			ReviewerAgent:  "reviewer",
+			ReviewerTaskID: "agent-1",
+			Decision:       model.DecisionApprove,
+			CreatedAt:      time.Date(2026, 6, 30, 10, 2, 0, 0, time.UTC),
+		},
+		{
+			SessionID:      "sess-k8s-pending",
+			ToolName:       "execute_k8s_action",
+			ArgsJSON:       `{"cluster_id":1,"action":"delete_pod"}`,
+			ToolClass:      "write",
+			ReviewerAgent:  "reviewer",
+			ReviewerTaskID: "agent-2",
+			Decision:       model.DecisionPending,
+			CreatedAt:      time.Date(2026, 6, 30, 10, 1, 0, 0, time.UTC),
+		},
+		{
+			SessionID:      "sess-host-approved",
+			ToolName:       "restart_service",
+			ArgsJSON:       `{"service":"nginx"}`,
+			ToolClass:      "write",
+			ReviewerAgent:  "reviewer",
+			ReviewerTaskID: "agent-3",
+			Decision:       model.DecisionApprove,
+			CreatedAt:      time.Date(2026, 6, 30, 10, 0, 0, 0, time.UTC),
+		},
+	}
+	for _, row := range rows {
+		if err := repo.Insert(ctx, row); err != nil {
+			t.Fatalf("Insert %s: %v", row.SessionID, err)
+		}
+	}
+
+	filter := biz.MutatingProposalFilter{
+		ToolName: "execute_k8s_action",
+		Decision: model.DecisionApprove,
+		Limit:    10,
+	}
+	got, err := repo.ListMutatingProposals(ctx, filter)
+	if err != nil {
+		t.Fatalf("ListMutatingProposals: %v", err)
+	}
+	if len(got) != 1 || got[0].SessionID != "sess-k8s-approved" {
+		t.Fatalf("items = %+v", got)
+	}
+	total, err := repo.CountMutatingProposals(ctx, filter)
+	if err != nil {
+		t.Fatalf("CountMutatingProposals: %v", err)
+	}
+	if total != 1 {
+		t.Fatalf("total = %d, want 1", total)
 	}
 }

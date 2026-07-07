@@ -1,0 +1,142 @@
+{{- if ne .Values.mode "serverless" }}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "ongrid-edge.fullname" . }}-node
+  namespace: {{ include "ongrid-edge.namespace" . }}
+  labels:
+    {{- include "ongrid-edge.labels" . | nindent 4 }}
+    app.kubernetes.io/component: node
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "ongrid-edge.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: node
+  template:
+    metadata:
+      labels:
+        {{- include "ongrid-edge.labels" . | nindent 8 }}
+        app.kubernetes.io/component: node
+    spec:
+      serviceAccountName: {{ include "ongrid-edge.nodeServiceAccount" . }}
+      hostPID: {{ eq .Values.mode "full-node" }}
+      {{- $supplementalGroups := .Values.podSecurity.supplementalGroups }}
+      {{- if and (eq .Values.mode "full-node") (not $supplementalGroups) }}
+      {{- $supplementalGroups = list 0 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: {{ .Values.podSecurity.runAsNonRoot }}
+        runAsUser: {{ .Values.podSecurity.runAsUser }}
+        runAsGroup: {{ .Values.podSecurity.runAsGroup }}
+        fsGroup: {{ .Values.podSecurity.fsGroup }}
+        {{- if $supplementalGroups }}
+        supplementalGroups:
+          {{- toYaml $supplementalGroups | nindent 10 }}
+        {{- end }}
+      tolerations:
+        {{- toYaml .Values.node.tolerations | nindent 8 }}
+      containers:
+        - name: edge-node
+          image: {{ include "ongrid-edge.edgeImage" . | quote }}
+          imagePullPolicy: {{ .Values.image.edge.pullPolicy }}
+          env:
+            - name: ONGRID_EDGE_MODE
+              value: k8s-node
+            - name: ONGRID_K8S_ROLE
+              value: node
+            - name: ONGRID_K8S_MODE
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-config
+                  key: mode
+            - name: ONGRID_K8S_CLUSTER_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-bootstrap
+                  key: cluster-id
+            - name: ONGRID_K8S_BOOTSTRAP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-bootstrap
+                  key: bootstrap-token
+            - name: ONGRID_MANAGER_PUBLIC_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-config
+                  key: manager-public-url
+            - name: ONGRID_EDGE_CLOUD_ADDR
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-config
+                  key: manager-tunnel-addr
+            - name: ONGRID_K8S_ENROLL_TLS_INSECURE
+              value: {{ .Values.manager.tlsInsecure | quote }}
+            - name: ONGRID_K8S_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: ONGRID_K8S_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: ONGRID_K8S_POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: ONGRID_EDGE_COLLECTOR_MODE
+              value: {{ default (ternary "embedded" "off" (eq .Values.mode "full-node")) .Values.node.collectorMode | quote }}
+          {{- if eq .Values.mode "full-node" }}
+            - name: HOST_PROC
+              value: /host/proc
+            - name: HOST_SYS
+              value: /host/sys
+            - name: HOST_ROOT
+              value: /host/root
+          {{- end }}
+          resources:
+            {{- toYaml .Values.node.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: edge-state
+              mountPath: /var/lib/ongrid-edge
+          {{- if eq .Values.mode "full-node" }}
+            - name: host-proc
+              mountPath: /host/proc
+              readOnly: true
+            - name: host-sys
+              mountPath: /host/sys
+              readOnly: true
+            - name: host-root
+              mountPath: /host/root
+              readOnly: true
+            - name: host-var-log
+              mountPath: /host/var/log
+              readOnly: true
+          {{- end }}
+      volumes:
+        - name: edge-state
+          emptyDir: {}
+      {{- if eq .Values.mode "full-node" }}
+        - name: host-proc
+          hostPath:
+            path: /proc
+            type: Directory
+        - name: host-sys
+          hostPath:
+            path: /sys
+            type: Directory
+        - name: host-root
+          hostPath:
+            path: /
+            type: Directory
+        - name: host-var-log
+          hostPath:
+            path: /var/log
+            type: Directory
+      {{- end }}
+{{- end }}

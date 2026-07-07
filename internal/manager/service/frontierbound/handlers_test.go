@@ -16,12 +16,17 @@ import (
 
 // fakePromIngester captures the last Push call.
 type fakePromIngester struct {
-	mu      sync.Mutex
-	gotEdge uint64
-	gotSrc  string
-	gotN    int
-	wantErr error
-	pushCnt int
+	mu             sync.Mutex
+	gotEdge        uint64
+	gotCluster     uint64
+	gotSrc         string
+	gotK8sSrc      string
+	gotN           int
+	gotK8sN        int
+	wantErr        error
+	wantK8sErr     error
+	pushCnt        int
+	pushK8sPushCnt int
 }
 
 func (f *fakePromIngester) Push(_ context.Context, edgeID uint64, source string, samples []tunnel.PromSample) error {
@@ -32,6 +37,16 @@ func (f *fakePromIngester) Push(_ context.Context, edgeID uint64, source string,
 	f.gotSrc = source
 	f.gotN = len(samples)
 	return f.wantErr
+}
+
+func (f *fakePromIngester) PushKubernetes(_ context.Context, clusterID uint64, source string, samples []tunnel.PromSample) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pushK8sPushCnt++
+	f.gotCluster = clusterID
+	f.gotK8sSrc = source
+	f.gotK8sN = len(samples)
+	return f.wantK8sErr
 }
 
 // fakeMetricIngester is a minimal stub for the existing MetricIngester
@@ -59,6 +74,36 @@ func (f *fakeDeviceResolver) LookupHostDevice(_ context.Context, edgeID uint64) 
 		return f.id, nil
 	}
 	return edgeID, nil
+}
+
+type fakePluginConfigFetcher struct {
+	calledEdgeID uint64
+	snap         *edgebiz.WireSnapshot
+	err          error
+}
+
+func (f *fakePluginConfigFetcher) FetchForEdge(_ context.Context, edgeID uint64) (*edgebiz.WireSnapshot, error) {
+	f.calledEdgeID = edgeID
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.snap != nil {
+		return f.snap, nil
+	}
+	return &edgebiz.WireSnapshot{EdgeID: edgeID, Configs: map[string]edgebiz.WireConfig{}}, nil
+}
+
+type fakeK8sRegistry struct {
+	clusterID uint64
+	err       error
+}
+
+func (f fakeK8sRegistry) HandleRegister(_ context.Context, _ uint64, _ *uint64, _ tunnel.KubernetesInfo) error {
+	return nil
+}
+
+func (f fakeK8sRegistry) LookupControllerCluster(_ context.Context, _ uint64) (uint64, error) {
+	return f.clusterID, f.err
 }
 
 // installAndDispatch runs Install on a fakeService-backed Client, then
@@ -92,6 +137,58 @@ func installAndDispatch(t *testing.T, w Wiring) (*fakeService, geminio.RPC) {
 		t.Fatalf("push_prom_samples not registered")
 	}
 	return fs, rpc
+}
+
+func TestInstall_GetPluginConfigs_UsesResolvedDeviceIDAsWireLabelID(t *testing.T) {
+	fs := newFakeService()
+	c := newWithService(fs, slog.Default())
+	fetcher := &fakePluginConfigFetcher{
+		snap: &edgebiz.WireSnapshot{
+			EdgeID: 42,
+			Configs: map[string]edgebiz.WireConfig{
+				"traces": {
+					Enabled:  true,
+					Endpoint: "https://manager.example.com/v1/traces",
+				},
+			},
+		},
+	}
+	w := Wiring{
+		EdgeAuthn:      &edgebiz.AccessKeyAuthenticator{},
+		EdgeUC:         &edgebiz.Usecase{},
+		MetricIngester: &fakeMetricIngester{},
+		DeviceResolver: &fakeDeviceResolver{id: 9001},
+		PluginConfigUC: fetcher,
+		Log:            slog.Default(),
+	}
+	if err := Install(context.Background(), c, w); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	c.bindEdgeTransport(777, 42)
+
+	rpc, ok := fs.rpcs[tunnel.MethodGetPluginConfigs]
+	if !ok {
+		t.Fatalf("get_plugin_configs not registered")
+	}
+	req := &fakeReq{clientID: 777}
+	rsp := &fakeResp{}
+	rpc(context.Background(), req, rsp)
+	if rsp.err != nil {
+		t.Fatalf("rpc returned error: %v", rsp.err)
+	}
+	if fetcher.calledEdgeID != 42 {
+		t.Fatalf("FetchForEdge edgeID = %d, want 42", fetcher.calledEdgeID)
+	}
+	var out tunnel.GetPluginConfigsResponse
+	if err := json.Unmarshal(rsp.data, &out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if out.EdgeID != 9001 {
+		t.Fatalf("wire edge_id label = %d, want resolved device_id 9001", out.EdgeID)
+	}
+	if got := out.Configs["traces"].Endpoint; got != "https://manager.example.com/v1/traces" {
+		t.Fatalf("traces endpoint = %q", got)
+	}
 }
 
 func TestInstall_PushPromSamples_HappyPath(t *testing.T) {
@@ -204,6 +301,77 @@ func TestInstall_PushPromSamples_DropsWhenDeviceUnresolved(t *testing.T) {
 	}
 	if pi.pushCnt != 0 {
 		t.Fatalf("ingester called %d times, want 0 — must drop, never write edge_id as device_id", pi.pushCnt)
+	}
+}
+
+func TestInstall_PushPromSamples_RoutesK8sControllerWithoutDeviceID(t *testing.T) {
+	pi := &fakePromIngester{}
+	_, rpc := installAndDispatch(t, Wiring{
+		PromIngester:   pi,
+		DeviceResolver: &fakeDeviceResolver{err: errors.New("no host junction")},
+		K8sRegistry:    fakeK8sRegistry{clusterID: 7},
+		Log:            slog.Default(),
+	})
+	body, _ := json.Marshal(tunnel.PushPromSamplesRequest{
+		EdgeID:  41,
+		Source:  "k8s:kube-state-metrics",
+		Samples: []tunnel.PromSample{{Name: "kube_pod_status_phase", Value: 1, TsMs: 1}},
+	})
+	rsp := &fakeResp{}
+	rpc(context.Background(), &fakeReq{data: body, clientID: 41}, rsp)
+	if rsp.err != nil {
+		t.Fatalf("rpc returned error: %v", rsp.err)
+	}
+	if pi.pushCnt != 0 {
+		t.Fatalf("host Push called %d times, want 0", pi.pushCnt)
+	}
+	if pi.pushK8sPushCnt != 1 {
+		t.Fatalf("PushKubernetes called %d times, want 1", pi.pushK8sPushCnt)
+	}
+	if pi.gotCluster != 7 {
+		t.Fatalf("clusterID = %d, want 7", pi.gotCluster)
+	}
+	if pi.gotK8sSrc != "k8s:kube-state-metrics" {
+		t.Fatalf("k8s source = %q", pi.gotK8sSrc)
+	}
+	if pi.gotK8sN != 1 {
+		t.Fatalf("k8s samples = %d, want 1", pi.gotK8sN)
+	}
+	var out tunnel.PushPromSamplesResponse
+	if err := json.Unmarshal(rsp.data, &out); err != nil {
+		t.Fatalf("decode resp: %v", err)
+	}
+	if out.Accepted != 1 {
+		t.Fatalf("Accepted = %d, want 1", out.Accepted)
+	}
+}
+
+func TestInstall_PushPromSamples_K8sSourceBypassesHostDeviceID(t *testing.T) {
+	pi := &fakePromIngester{}
+	_, rpc := installAndDispatch(t, Wiring{
+		PromIngester:   pi,
+		DeviceResolver: &fakeDeviceResolver{id: 3},
+		K8sRegistry:    fakeK8sRegistry{clusterID: 7},
+		Log:            slog.Default(),
+	})
+	body, _ := json.Marshal(tunnel.PushPromSamplesRequest{
+		EdgeID:  41,
+		Source:  "k8s:kube-state-metrics",
+		Samples: []tunnel.PromSample{{Name: "kube_deployment_status_replicas", Value: 1, TsMs: 1}},
+	})
+	rsp := &fakeResp{}
+	rpc(context.Background(), &fakeReq{data: body, clientID: 41}, rsp)
+	if rsp.err != nil {
+		t.Fatalf("rpc returned error: %v", rsp.err)
+	}
+	if pi.pushCnt != 0 {
+		t.Fatalf("host Push called %d times, want 0", pi.pushCnt)
+	}
+	if pi.pushK8sPushCnt != 1 {
+		t.Fatalf("PushKubernetes called %d times, want 1", pi.pushK8sPushCnt)
+	}
+	if pi.gotCluster != 7 {
+		t.Fatalf("clusterID = %d, want 7", pi.gotCluster)
 	}
 }
 

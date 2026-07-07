@@ -9,11 +9,16 @@
 #   (e.g. `curl localhost:9101/metrics`). Production deployments can ignore it.
 
 ARG VERSION=dev
+ARG PROMTAIL_VERSION=3.4.0
+ARG NODE_EXPORTER_VERSION=1.8.2
+ARG PROCESS_EXPORTER_VERSION=0.8.4
+ARG OTELCOL_VERSION=0.118.0
 
 # ---------- Stage 1: builder ----------
 FROM golang:1.25-alpine AS builder
 
 ARG VERSION
+ARG TARGETARCH
 WORKDIR /app
 
 COPY go.mod go.sum ./
@@ -21,15 +26,112 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux \
+RUN CGO_ENABLED=0 GOOS=linux GOARCH="${TARGETARCH:-$(go env GOARCH)}" \
     go build -trimpath \
     -ldflags="-s -w -X main.version=${VERSION}" \
     -o /out/ongrid-edge ./cmd/ongrid-edge
 
-# ---------- Stage 2: runtime (distroless, nonroot) ----------
-FROM gcr.io/distroless/static-debian12:nonroot
+# ---------- Stage 2: bundled logs plugin ----------
+FROM alpine:3.20 AS promtail
+
+ARG PROMTAIL_VERSION
+ARG TARGETARCH
+RUN apk add --no-cache ca-certificates curl unzip \
+    && set -eux; \
+    arch="${TARGETARCH:-$(apk --print-arch)}"; \
+    case "$arch" in \
+        x86_64) arch=amd64 ;; \
+        aarch64) arch=arm64 ;; \
+        amd64|arm64) ;; \
+        *) echo "unsupported promtail arch: $arch" >&2; exit 1 ;; \
+    esac; \
+    mkdir -p /out; \
+    curl -fL --retry 3 --retry-all-errors --retry-delay 3 --connect-timeout 15 \
+        -o /tmp/promtail.zip \
+        "https://github.com/grafana/loki/releases/download/v${PROMTAIL_VERSION}/promtail-linux-${arch}.zip"; \
+    unzip -p /tmp/promtail.zip > /out/promtail; \
+    chmod 0755 /out/promtail; \
+    rm -f /tmp/promtail.zip
+
+# ---------- Stage 3: bundled host metrics plugin ----------
+FROM alpine:3.20 AS node-exporter
+
+ARG NODE_EXPORTER_VERSION
+ARG TARGETARCH
+RUN apk add --no-cache ca-certificates curl tar \
+    && set -eux; \
+    arch="${TARGETARCH:-$(apk --print-arch)}"; \
+    case "$arch" in \
+        x86_64) arch=amd64 ;; \
+        aarch64) arch=arm64 ;; \
+        amd64|arm64) ;; \
+        *) echo "unsupported node_exporter arch: $arch" >&2; exit 1 ;; \
+    esac; \
+    mkdir -p /out; \
+    curl -fL --retry 3 --retry-all-errors --retry-delay 3 --connect-timeout 15 \
+        -o /tmp/node_exporter.tgz \
+        "https://github.com/prometheus/node_exporter/releases/download/v${NODE_EXPORTER_VERSION}/node_exporter-${NODE_EXPORTER_VERSION}.linux-${arch}.tar.gz"; \
+    tar -xzf /tmp/node_exporter.tgz --strip-components=1 -C /out \
+        "node_exporter-${NODE_EXPORTER_VERSION}.linux-${arch}/node_exporter"; \
+    chmod 0755 /out/node_exporter; \
+    rm -f /tmp/node_exporter.tgz
+
+# ---------- Stage 4: bundled process metrics plugin ----------
+FROM alpine:3.20 AS process-exporter
+
+ARG PROCESS_EXPORTER_VERSION
+ARG TARGETARCH
+RUN apk add --no-cache ca-certificates curl tar \
+    && set -eux; \
+    arch="${TARGETARCH:-$(apk --print-arch)}"; \
+    case "$arch" in \
+        x86_64) arch=amd64 ;; \
+        aarch64) arch=arm64 ;; \
+        amd64|arm64) ;; \
+        *) echo "unsupported process_exporter arch: $arch" >&2; exit 1 ;; \
+    esac; \
+    mkdir -p /out; \
+    curl -fL --retry 3 --retry-all-errors --retry-delay 3 --connect-timeout 15 \
+        -o /tmp/process_exporter.tgz \
+        "https://github.com/ncabatoff/process-exporter/releases/download/v${PROCESS_EXPORTER_VERSION}/process-exporter-${PROCESS_EXPORTER_VERSION}.linux-${arch}.tar.gz"; \
+    tar -xzf /tmp/process_exporter.tgz --strip-components=1 -C /out \
+        "process-exporter-${PROCESS_EXPORTER_VERSION}.linux-${arch}/process-exporter"; \
+    mv /out/process-exporter /out/process_exporter; \
+    chmod 0755 /out/process_exporter; \
+    rm -f /tmp/process_exporter.tgz
+
+# ---------- Stage 5: bundled traces plugin ----------
+FROM alpine:3.20 AS otelcol-contrib
+
+ARG OTELCOL_VERSION
+ARG TARGETARCH
+RUN apk add --no-cache ca-certificates curl tar \
+    && set -eux; \
+    arch="${TARGETARCH:-$(apk --print-arch)}"; \
+    case "$arch" in \
+        x86_64) arch=amd64 ;; \
+        aarch64) arch=arm64 ;; \
+        amd64|arm64) ;; \
+        *) echo "unsupported otelcol-contrib arch: $arch" >&2; exit 1 ;; \
+    esac; \
+    mkdir -p /out; \
+    curl -fL --retry 3 --retry-all-errors --retry-delay 3 --connect-timeout 15 \
+        -o /tmp/otelcol-contrib.tgz \
+        "https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v${OTELCOL_VERSION}/otelcol-contrib_${OTELCOL_VERSION}_linux_${arch}.tar.gz"; \
+    tar -xzf /tmp/otelcol-contrib.tgz -C /out otelcol-contrib; \
+    chmod 0755 /out/otelcol-contrib; \
+    rm -f /tmp/otelcol-contrib.tgz
+
+# ---------- Stage 6: runtime (distroless, nonroot) ----------
+# promtail is distributed as a dynamically linked Linux binary, so the
+# final image needs the base distroless runtime rather than static.
+FROM gcr.io/distroless/base-debian12:nonroot
 
 COPY --from=builder /out/ongrid-edge /ongrid-edge
+COPY --from=promtail /out/promtail /usr/local/lib/ongrid-edge/promtail
+COPY --from=node-exporter /out/node_exporter /usr/local/lib/ongrid-edge/node_exporter
+COPY --from=process-exporter /out/process_exporter /usr/local/lib/ongrid-edge/process_exporter
+COPY --from=otelcol-contrib /out/otelcol-contrib /usr/local/lib/ongrid-edge/otelcol-contrib
 
 # Local /metrics only — edge dials cloud, no inbound service ports.
 EXPOSE 9101

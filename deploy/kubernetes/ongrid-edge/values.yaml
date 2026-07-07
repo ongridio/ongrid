@@ -1,0 +1,99 @@
+mode: full-node
+
+namespace:
+  create: true
+  name: ongrid-system
+
+manager:
+  publicURL: ""
+  tunnelAddr: ""
+  tlsInsecure: false
+
+enrollment:
+  clusterID: ""
+  bootstrapToken: ""
+
+image:
+  edge:
+    repository: ghcr.io/ongridio/ongrid-edge
+    tag: ""
+    pullPolicy: IfNotPresent
+  controller:
+    repository: ghcr.io/ongridio/ongrid-edge
+    tag: ""
+    pullPolicy: IfNotPresent
+
+rbac:
+  scope: cluster
+
+node:
+  serviceAccountName: ""
+  collectorMode: ""
+  tolerations:
+    - operator: Exists
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+controller:
+  replicas: 1
+  serviceAccountName: ""
+  inventory:
+    watch: true
+  metrics:
+    enabled: false
+    endpoint: ""
+    interval: 30s
+    timeout: 5s
+    sampleLimit: 20000
+    appDiscovery:
+      enabled: false
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+kubeStateMetrics:
+  enabled: false
+  serviceAccountName: ""
+  image:
+    repository: registry.k8s.io/kube-state-metrics/kube-state-metrics
+    tag: v2.16.0
+    pullPolicy: IfNotPresent
+  port: 8080
+  telemetryPort: 8081
+  collectors: []
+  resources:
+    requests:
+      cpu: 20m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+telemetryGateway:
+  # null means: enabled automatically in serverless mode, disabled otherwise.
+  # Set true to expose controller OTLP receiver in full-node,
+  # or false to disable it even in serverless mode.
+  enabled: null
+  service:
+    type: ClusterIP
+    grpcPort: 4317
+    httpPort: 4318
+
+podSecurity:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  supplementalGroups: []
+
+networkPolicy:
+  enabled: false

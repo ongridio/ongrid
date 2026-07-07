@@ -29,6 +29,11 @@ import { useThemeMode } from '@/store/mode';
 
 const NODE_WIDTH = 160;
 const NODE_HEIGHT = 44;
+const HANDLE_TARGET_TOP = 'target-top';
+const HANDLE_TARGET_BOTTOM = 'target-bottom';
+const HANDLE_SOURCE_TOP = 'source-top';
+const HANDLE_SOURCE_BOTTOM = 'source-bottom';
+const HIDDEN_HANDLE_STYLE = { visibility: 'hidden' as const };
 
 // Per-node-type fill / border colors. Falls back to neutral zinc for
 // any user-defined type not in this table.
@@ -139,11 +144,12 @@ function CustomTopologyNode(props: NodeProps) {
         overflow: 'hidden',
       }}
     >
-      {/* For the TB tier layout, edges flow top->bottom: source is the
-          higher-tier node (e.g. service), target the lower (e.g. device).
-          Handles on Top/Bottom keep arrows perpendicular to tier bands
-          instead of looping around the side of the card. */}
-      <Handle type="target" position={Position.Top} style={{ visibility: 'hidden' }} />
+      {/* The graph is tiered, but relation direction is semantic rather
+          than always top->bottom (e.g. device member_of cluster points
+          upward). Expose hidden handles on both vertical sides so each
+          edge can pick the side that faces its target tier. */}
+      <Handle id={HANDLE_TARGET_TOP} type="target" position={Position.Top} style={HIDDEN_HANDLE_STYLE} />
+      <Handle id={HANDLE_SOURCE_TOP} type="source" position={Position.Top} style={HIDDEN_HANDLE_STYLE} />
       <div
         style={{
           fontWeight: 500,
@@ -156,7 +162,8 @@ function CustomTopologyNode(props: NodeProps) {
         {data.label}
       </div>
       <div style={{ fontSize: 10, opacity: 0.6, fontFamily: 'monospace' }}>{data.type}</div>
-      <Handle type="source" position={Position.Bottom} style={{ visibility: 'hidden' }} />
+      <Handle id={HANDLE_TARGET_BOTTOM} type="target" position={Position.Bottom} style={HIDDEN_HANDLE_STYLE} />
+      <Handle id={HANDLE_SOURCE_BOTTOM} type="source" position={Position.Bottom} style={HIDDEN_HANDLE_STYLE} />
     </div>
   );
 }
@@ -397,9 +404,9 @@ function layoutGraph(
   });
 
   // Edges. For TB tier layout with Top/Bottom handles, smoothstep gives
-  // clean orthogonal lines (down + sideways + down) that read as a
-  // dependency tree. Bezier curves were looping wildly when the source
-  // tier was BELOW the target (e.g. a deployed_on inverse pointing up).
+  // clean orthogonal lines. Pick handles per edge direction: semantic
+  // relations can point upward (device -> cluster member_of), and those
+  // must leave the source from the top instead of looping below the card.
   //
   // Label dedup: when multiple relations exist between the same pair
   // (e.g. order-api -> mysql-prod with both depends_on AND member_of),
@@ -410,6 +417,7 @@ function layoutGraph(
   // distinction; the dropper drawer shows the full relation list per
   // node for the labels.
   const seenPairs = new Set<string>();
+  const nodeByID = new Map(visibleNodes.map((n) => [n.id, n]));
   const rfEdges: Edge[] = includedRelations
     .filter((r) => visibleNodeIDs.has(r.src_id) && visibleNodeIDs.has(r.dst_id))
     .map((r) => {
@@ -420,10 +428,15 @@ function layoutGraph(
       const pairKey = `${r.src_id}->${r.dst_id}`;
       const showLabel = !seenPairs.has(pairKey);
       seenPairs.add(pairKey);
+      const srcTier = TYPE_TIER[nodeByID.get(r.src_id)?.type ?? ''] ?? 99;
+      const dstTier = TYPE_TIER[nodeByID.get(r.dst_id)?.type ?? ''] ?? 99;
+      const pointsUp = srcTier > dstTier;
       return {
         id: `rel-${r.id}`,
         source: String(r.src_id),
         target: String(r.dst_id),
+        sourceHandle: pointsUp ? HANDLE_SOURCE_TOP : HANDLE_SOURCE_BOTTOM,
+        targetHandle: pointsUp ? HANDLE_TARGET_BOTTOM : HANDLE_TARGET_TOP,
         type: 'smoothstep',
         animated: false,
         label: showLabel ? r.type : undefined,

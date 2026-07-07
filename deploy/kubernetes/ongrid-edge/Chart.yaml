@@ -1,0 +1,6 @@
+apiVersion: v2
+name: ongrid-edge
+description: Ongrid Kubernetes edge node and controller onboarding chart
+type: application
+version: 0.1.0
+appVersion: "0.9.0"

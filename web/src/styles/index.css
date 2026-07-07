@@ -103,6 +103,7 @@ html.light .bg-zinc-500           { background-color: rgb(100 116 139); }  /* sl
 html.light .bg-zinc-900\/20              { background-color: rgb(248 250 252); }
 html.light .bg-zinc-900\/40              { background-color: rgb(241 245 249); }
 html.light .bg-zinc-900\/60              { background-color: rgb(241 245 249); }
+html.light .bg-zinc-950\/20              { background-color: rgb(248 250 252); }
 html.light .bg-zinc-950\/30              { background-color: rgb(248 250 252); }
 html.light .bg-zinc-950\/40              { background-color: rgb(248 250 252); }
 html.light .hover\:bg-zinc-900\/50:hover { background-color: rgb(226 232 240); }

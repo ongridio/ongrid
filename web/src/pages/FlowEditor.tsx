@@ -1641,6 +1641,18 @@ const TOOL_OUTPUT_SHAPES: Record<string, string[]> = {
     'result.success_count',
     'result.error_count',
   ],
+  query_k8s_logs: [
+    'result.source',
+    'result.controller_edge_id',
+    'result.result.cluster_id',
+    'result.result.namespace',
+    'result.result.pod',
+    'result.result.container',
+    'result.result.line_count',
+    'result.result.bytes',
+    'result.result.truncated',
+    'result.result.logs',
+  ],
 };
 
 function prettifyLeaf(seg: string): string {

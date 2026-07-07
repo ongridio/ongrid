@@ -298,7 +298,7 @@ func (g *ReviewGate) InvokableRun(ctx context.Context, argsJSON string, opts ...
 			ReviewerAgent:  g.reviewerAgent,
 			ReviewerTaskID: "", // filled after spawn
 			OperatorUserID: resolved.UserID,
-			SessionID:      resolved.Tenant, // tenant carries session/user-derived id
+			SessionID:      proposalSessionID(ctx, resolved),
 			CreatedAt:      createdAt,
 		})
 		if sinkErr == nil {
@@ -360,7 +360,7 @@ func (g *ReviewGate) runWithDeterministicApproval(ctx context.Context, info *bas
 			ReviewerAgent:  deterministicPolicyReviewerAgent,
 			ReviewerTaskID: "",
 			OperatorUserID: resolved.UserID,
-			SessionID:      resolved.Tenant,
+			SessionID:      proposalSessionID(ctx, resolved),
 			CreatedAt:      g.nowFn().UTC(),
 		})
 		if sinkErr == nil {
@@ -395,6 +395,13 @@ func (g *ReviewGate) markExecuted(ctx context.Context, id string) {
 		// Best-effort audit sink: do not change the already-computed tool result.
 		return
 	}
+}
+
+func proposalSessionID(ctx context.Context, resolved basetool.Resolved) string {
+	if sessionID := basetool.SessionIDFromContext(ctx); sessionID != "" {
+		return sessionID
+	}
+	return resolved.Tenant
 }
 
 // isMutatingClass returns true for tool classes that require review.

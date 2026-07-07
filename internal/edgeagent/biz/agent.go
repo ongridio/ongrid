@@ -61,6 +61,9 @@ type Config struct {
 	// AgentVersion is reported on register_edge (optional).
 	AgentVersion string
 
+	// Kubernetes is set when this edge is deployed by the Kubernetes chart.
+	Kubernetes *tunnel.KubernetesInfo
+
 	// UpgradeStageDir is where agent_upgrade stages downloaded binaries.
 	// Default /var/lib/ongrid-edge/.upgrade. Empty disables the
 	// MethodAgentUpgrade handler entirely (useful for dev where systemd
@@ -350,11 +353,13 @@ func (a *Agent) registerEdge(ctx context.Context) error {
 	if err != nil {
 		a.log.Warn("agent: HostInfo collection failed", slog.Any("err", err))
 	}
+	applyKubernetesHostIdentity(a.cfg.Kubernetes, &info)
 	req := tunnel.RegisterEdgeRequest{
 		AccessKey:    "", // server-side AuthFunc matches by Meta, not body
 		SecretKey:    "",
 		HostInfo:     info,
 		AgentVersion: a.cfg.AgentVersion,
+		Kubernetes:   a.cfg.Kubernetes,
 	}
 	var resp tunnel.RegisterEdgeResponse
 	if err := a.client.Call(ctx, tunnel.MethodRegisterEdge, req, &resp); err != nil {
@@ -368,6 +373,24 @@ func (a *Agent) registerEdge(ctx context.Context) error {
 		slog.Int64("server_time", resp.ServerTime),
 	)
 	return nil
+}
+
+func applyKubernetesHostIdentity(k8sInfo *tunnel.KubernetesInfo, host *tunnel.HostInfo) {
+	if k8sInfo == nil || host == nil || strings.TrimSpace(k8sInfo.Role) != "node" {
+		return
+	}
+	nodeName := strings.TrimSpace(k8sInfo.NodeName)
+	if nodeName == "" {
+		return
+	}
+	nodeUID := strings.TrimSpace(k8sInfo.NodeUID)
+	if nodeUID == "" {
+		nodeUID = "name:" + nodeName
+	}
+	seed := fmt.Sprintf("k8s-node:%d:%s", k8sInfo.ClusterID, nodeUID)
+	host.Hostname = nodeName
+	host.Fingerprint = seed
+	host.HardwareFingerprint = seed
 }
 
 // heartbeatLoop sends one heartbeat every HeartbeatInterval until ctx

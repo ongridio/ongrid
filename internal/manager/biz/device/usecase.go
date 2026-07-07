@@ -4,6 +4,7 @@ package device
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -14,9 +15,10 @@ import (
 
 // Usecase is the manager/device biz-layer facade.
 type Usecase struct {
-	repo  Repo
-	links EdgeDeviceRepo
-	log   *slog.Logger
+	repo     Repo
+	links    EdgeDeviceRepo
+	topology TopologyMirror
+	log      *slog.Logger
 }
 
 // NewUsecase builds the usecase. links may be nil — junction-aware methods
@@ -24,6 +26,15 @@ type Usecase struct {
 func NewUsecase(repo Repo, links EdgeDeviceRepo, log *slog.Logger) *Usecase {
 	return &Usecase{repo: repo, links: links, log: log}
 }
+
+// TopologyMirror is the optional device → topology cleanup bridge. The
+// topology usecase implements it; keeping the interface here avoids a
+// device → topology package dependency.
+type TopologyMirror interface {
+	DeleteNodeForDevice(ctx context.Context, deviceID, nodeID uint64) error
+}
+
+func (u *Usecase) SetTopologyMirror(m TopologyMirror) { u.topology = m }
 
 // Repo returns the underlying device Repo for callers that need direct
 // access (e.g. the edge HTTP handler hydrating host_info on the listing
@@ -107,14 +118,124 @@ func (u *Usecase) UpdateNameDescription(ctx context.Context, id uint64, name, de
 	return u.repo.UpdateNameDescription(ctx, id, strings.TrimSpace(name), strings.TrimSpace(description))
 }
 
-// Delete soft-deletes a device. Junction rows are NOT auto-removed —
-// caller is responsible (the v1 UI doesn't expose device deletion yet
-// so this is a future hook).
+// Delete soft-deletes a device and removes the device-owned topology node
+// plus edge junction rows so deleted devices cannot leak into topology views.
 func (u *Usecase) Delete(ctx context.Context, id uint64) error {
 	if u.repo == nil {
 		return errs.ErrNotWiredYet
 	}
+	d, err := u.repo.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := u.deleteTopologyNode(ctx, d); err != nil {
+		return err
+	}
+	if err := u.unlinkDeviceEdges(ctx, id); err != nil {
+		return err
+	}
 	return u.repo.Delete(ctx, id)
+}
+
+type deletedTopologyDeviceLister interface {
+	ListDeletedWithNodeID(ctx context.Context, limit int) ([]*model.Device, error)
+}
+
+type orphanDeviceLister interface {
+	ListWithoutLiveEdges(ctx context.Context, limit int) ([]*model.Device, error)
+}
+
+// ReconcileDeletedTopology removes topology nodes that belong to devices
+// deleted before the topology cleanup hook existed.
+func (u *Usecase) ReconcileDeletedTopology(ctx context.Context) (int, error) {
+	if u.repo == nil {
+		return 0, errs.ErrNotWiredYet
+	}
+	if u.topology == nil {
+		return 0, nil
+	}
+	lister, ok := u.repo.(deletedTopologyDeviceLister)
+	if !ok {
+		return 0, nil
+	}
+	rows, err := lister.ListDeletedWithNodeID(ctx, 5000)
+	if err != nil {
+		return 0, err
+	}
+	cleaned := 0
+	for _, d := range rows {
+		if d == nil {
+			continue
+		}
+		if err := u.deleteTopologyNode(ctx, d); err != nil {
+			return cleaned, err
+		}
+		cleaned++
+	}
+	if cleaned > 0 && u.log != nil {
+		u.log.Info("device topology reconcile: removed deleted device nodes", "count", cleaned)
+	}
+	return cleaned, nil
+}
+
+// ReconcileOrphanDevices removes live device rows that no longer have any
+// live edge bound to them. This heals devices left behind by the older
+// DELETE /edges path used by the devices page.
+func (u *Usecase) ReconcileOrphanDevices(ctx context.Context) (int, error) {
+	if u.repo == nil {
+		return 0, errs.ErrNotWiredYet
+	}
+	lister, ok := u.repo.(orphanDeviceLister)
+	if !ok {
+		return 0, nil
+	}
+	rows, err := lister.ListWithoutLiveEdges(ctx, 5000)
+	if err != nil {
+		return 0, err
+	}
+	cleaned := 0
+	for _, d := range rows {
+		if d == nil {
+			continue
+		}
+		if err := u.Delete(ctx, d.ID); err != nil {
+			return cleaned, err
+		}
+		cleaned++
+	}
+	if cleaned > 0 && u.log != nil {
+		u.log.Info("device reconcile: removed devices without live edges", "count", cleaned)
+	}
+	return cleaned, nil
+}
+
+func (u *Usecase) deleteTopologyNode(ctx context.Context, d *model.Device) error {
+	if u.topology == nil || d == nil || d.NodeID == nil || *d.NodeID == 0 {
+		return nil
+	}
+	if err := u.topology.DeleteNodeForDevice(ctx, d.ID, *d.NodeID); err != nil && !errors.Is(err, errs.ErrNotFound) {
+		return fmt.Errorf("delete topology node for device %d: %w", d.ID, err)
+	}
+	return nil
+}
+
+func (u *Usecase) unlinkDeviceEdges(ctx context.Context, id uint64) error {
+	if u.links == nil {
+		return nil
+	}
+	rows, err := u.links.ListEdgesForDevice(ctx, id)
+	if err != nil {
+		return fmt.Errorf("list device edge links: %w", err)
+	}
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		if err := u.links.Unlink(ctx, row.EdgeID, row.DeviceID, row.Type); err != nil {
+			return fmt.Errorf("unlink device edge %d/%d: %w", row.EdgeID, row.DeviceID, err)
+		}
+	}
+	return nil
 }
 
 // LookupHostDevice resolves edge → host device_id. Returns 0,

@@ -61,6 +61,9 @@ var tierByName = map[string]string{
 	"analyze_database_status": "core",
 	"query_logql":             "core",
 	"query_traceql":           "core",
+	"query_k8s_snapshot":      "core",
+	"describe_k8s_resource":   "core",
+	"query_k8s_logs":          "core",
 	"query_devices":           "core",
 	"get_topology":            "core",
 	"query_incidents":         "core",
@@ -91,6 +94,7 @@ var tierByName = map[string]string{
 	"host_du_summary":       "specialty",
 	"host_stat_file":        "specialty",
 	"host_restart_service":  "specialty",
+	"execute_k8s_action":    "specialty",
 	"host_bash":             "specialty",
 }
 

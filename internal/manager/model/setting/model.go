@@ -47,9 +47,8 @@ const (
 // Well-known keys under CategoryAgent.
 const (
 	// KeyAgentWriteEnabled gates whether the chat agent may use write/mutating
-	// tools. "false" → read-only (only Class=="read" tools exposed to the LLM,
-	// even the propose-confirm ones are hidden). Unset / any other value →
-	// enabled (the default preserves existing behaviour).
+	// tools. Only "true" enables write tools; unset / any other value keeps the
+	// agent read-only (only Class=="read" tools exposed to the LLM).
 	KeyAgentWriteEnabled = "write_enabled"
 )
 

@@ -159,7 +159,7 @@ func (r *Registry) RegisterBaseToolsAsSkills(bag *ToolBag, log *slog.Logger) {
 
 // classifyToolClass maps the BaseTool's Class hint (typically "read"
 // or "write" — see basetool.ToolInfo) to the skill class taxonomy.
-// Tools that mutate state (host_restart_service) become Mutating; AgentTool
+// Tools that mutate state (host_restart_service, execute_k8s_action) become Mutating; AgentTool
 // / SendMessage / TaskStop are read-shaped (no edge mutation) and stay
 // Safe. Conservative default: Safe.
 func classifyToolClass(info *aiopstoolsbase.ToolInfo) skillcore.Class {
@@ -190,10 +190,14 @@ func classifyToolCategory(name string) string {
 		return "diagnostic"
 	case "query_promql", "list_metric_catalog", "query_logql", "query_traceql":
 		return "telemetry"
+	case "query_k8s_snapshot", "describe_k8s_resource", "query_k8s_logs":
+		return "kubernetes"
 	case "agent", "send_message", "task_stop", "tool_search":
 		return "agent"
 	case "host_restart_service":
 		return "process"
+	case "execute_k8s_action":
+		return "kubernetes"
 	}
 	return "agent"
 }

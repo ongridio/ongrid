@@ -35,9 +35,9 @@ func TestRenderHappyPath(t *testing.T) {
 		"http:",
 		"endpoint: 0.0.0.0:4317",
 		"endpoint: 0.0.0.0:4318",
-		// Exporter URL pointing at manager public endpoint.
-		"endpoint: https://manager.example.com/v1/traces",
-		// Resource attribute injection: edge_id is the load-bearing label.
+		// otlphttp exporter endpoint is the base URL; it appends /v1/traces.
+		"endpoint: https://manager.example.com",
+		// Resource attribute injection: device_id is the load-bearing label.
 		"key: device_id",
 		`value: "42"`,
 		"key: ongrid_source",
@@ -78,6 +78,26 @@ func TestRenderDefaultEndpoints(t *testing.T) {
 	}
 }
 
+func TestNormalizeOTLPHTTPBaseEndpoint(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "root", in: "https://manager.example.com", want: "https://manager.example.com"},
+		{name: "trace path", in: "https://manager.example.com/v1/traces", want: "https://manager.example.com"},
+		{name: "trace path trailing slash", in: "https://manager.example.com/v1/traces/", want: "https://manager.example.com"},
+		{name: "custom base path", in: "https://collector.example.com/otlp", want: "https://collector.example.com/otlp"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := normalizeOTLPHTTPBaseEndpoint(tc.in); got != tc.want {
+				t.Fatalf("normalizeOTLPHTTPBaseEndpoint(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRenderBearerWhenNoUser(t *testing.T) {
 	cfg := plugins.PluginConfig{
 		Enabled:  true,
@@ -92,6 +112,30 @@ func TestRenderBearerWhenNoUser(t *testing.T) {
 	body := string(out)
 	if !strings.Contains(body, "Bearer tok-abc") {
 		t.Errorf("expected Bearer auth header when AuthUser empty, got:\n%s", body)
+	}
+}
+
+func TestRenderTLSInsecureSkipVerify(t *testing.T) {
+	cfg := plugins.PluginConfig{
+		Enabled:  true,
+		EdgeID:   1,
+		Endpoint: "https://manager.example.com/v1/traces",
+		Spec: map[string]interface{}{
+			"tls_insecure_skip_verify": true,
+		},
+	}
+	out, err := render(cfg)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	body := string(out)
+	for _, want := range []string{
+		"tls:",
+		"insecure_skip_verify: true",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("rendered config missing %q\n--- full body ---\n%s", want, body)
+		}
 	}
 }
 
@@ -113,6 +157,89 @@ func TestRenderBasicWhenUserSet(t *testing.T) {
 	}
 }
 
+func TestRenderOmitDeviceIDForGateway(t *testing.T) {
+	cfg := plugins.PluginConfig{
+		Enabled:  true,
+		Endpoint: "https://manager.example.com/v1/traces",
+		Spec: map[string]interface{}{
+			"omit_device_id":          true,
+			"enable_k8sattributes":    true,
+			"enable_logs":             true,
+			"enable_metrics":          true,
+			"logs_endpoint":           "https://manager.example.com/loki/api/v1/push",
+			"metrics_export_endpoint": "127.0.0.1:9464",
+			"grpc_endpoint":           "0.0.0.0:4317",
+			"http_endpoint":           "0.0.0.0:4318",
+			"extra_attrs": map[string]interface{}{
+				"cluster_id": "1",
+			},
+		},
+	}
+	out, err := render(cfg)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	body := string(out)
+	if strings.Contains(body, "key: device_id") {
+		t.Fatalf("gateway config must not inject device_id:\n%s", body)
+	}
+	for _, want := range []string{
+		"endpoint: 0.0.0.0:4317",
+		"endpoint: 0.0.0.0:4318",
+		"k8sattributes:",
+		"auth_type: serviceAccount",
+		"k8s.namespace.name",
+		"k8s.deployment.name",
+		"key: loki.resource.labels",
+		"resource/loki_labels:",
+		"endpoint: https://manager.example.com/loki/api/v1/push",
+		"loki/manager:",
+		"logs:",
+		"exporters: [loki/manager]",
+		"prometheus/gateway:",
+		"endpoint: 127.0.0.1:9464",
+		"resource_to_telemetry_conversion:",
+		"metrics:",
+		"exporters: [prometheus/gateway]",
+		"processors: [k8sattributes, resource/device, batch]",
+		"processors: [k8sattributes, resource/device, resource/loki_labels, batch]",
+		"key: cluster_id",
+		`value: "1"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("rendered gateway config missing %q\n--- full body ---\n%s", want, body)
+		}
+	}
+}
+
+func TestRenderRejectsGatewayMetricsWithoutEndpoint(t *testing.T) {
+	cfg := plugins.PluginConfig{
+		Enabled:  true,
+		Endpoint: "https://manager.example.com/v1/traces",
+		Spec: map[string]interface{}{
+			"omit_device_id": true,
+			"enable_metrics": true,
+		},
+	}
+	if _, err := render(cfg); err == nil {
+		t.Errorf("render must reject enable_metrics without metrics_export_endpoint")
+	}
+}
+
+func TestRenderRejectsGatewayLogsWithoutEndpoint(t *testing.T) {
+	cfg := plugins.PluginConfig{
+		Enabled:  true,
+		Endpoint: "https://manager.example.com/v1/traces",
+		Spec: map[string]interface{}{
+			"omit_device_id": true,
+			"enable_logs":    true,
+		},
+	}
+	if _, err := render(cfg); err == nil {
+		t.Errorf("render must reject enable_logs without logs_endpoint")
+	}
+}
+
 func TestRenderRejectsMissingEndpoint(t *testing.T) {
 	cfg := plugins.PluginConfig{Enabled: true, EdgeID: 1}
 	if _, err := render(cfg); err == nil {
@@ -126,4 +253,3 @@ func TestRenderRejectsMissingEdgeID(t *testing.T) {
 		t.Errorf("render must reject missing edge_id")
 	}
 }
-

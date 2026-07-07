@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Plus, RotateCw, Trash2, MoreVertical, Copy, Check, ExternalLink, TerminalSquare } from 'lucide-react';
@@ -24,6 +24,10 @@ import {
   upgradeEdgeAgent,
   upgradeEdgePackage,
 } from '@/api/edges';
+import {
+  listKubernetesClusters,
+  listKubernetesNodes,
+} from '@/api/kubernetes';
 import { getManagerVersion } from '@/api/version';
 import { usePermissions } from '@/store/me';
 import { notifyDevicesChanged } from '@/lib/events';
@@ -40,6 +44,16 @@ const ROLE_FILTER_TITLES: Record<string, [string, string]> = {
   network: ['网络设备', 'Network devices'],
   unknown: ['未分类设备', 'Uncategorized devices'],
 };
+
+type K8sEdgeAttachment = {
+  kind: 'k8s-controller' | 'k8s-controller-runtime' | 'k8s-node';
+  clusterId: number;
+  clusterName: string;
+  clusterMode: string;
+  nodeName?: string;
+};
+
+type K8sEdgeAttachmentMap = Record<number, K8sEdgeAttachment[]>;
 
 export default function EdgesPage() {
   const navigate = useNavigate();
@@ -59,6 +73,11 @@ export default function EdgesPage() {
   })();
 
   const [edges, setEdges] = useState<Edge[]>([]);
+  const [k8sAttachments, setK8sAttachments] = useState<K8sEdgeAttachmentMap>({});
+  const visibleEdges = useMemo(
+    () => edges.filter((edge) => !(k8sAttachments[edge.id] ?? []).some((item) => item.kind === 'k8s-controller')),
+    [edges, k8sAttachments],
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // managerVersion drives the Agent column's drift chip — fetched once
@@ -109,10 +128,22 @@ export default function EdgesPage() {
     }
   }, [rolesFilter]);
 
+  const refreshK8sAttachments = useCallback(async () => {
+    try {
+      setK8sAttachments(await loadK8sEdgeAttachments());
+    } catch {
+      setK8sAttachments({});
+    }
+  }, []);
+
   useEffect(() => {
     void refresh();
   }, [refresh]);
   usePoll(refresh, 10_000);
+  useEffect(() => {
+    void refreshK8sAttachments();
+  }, [refreshK8sAttachments]);
+  usePoll(refreshK8sAttachments, 60_000);
 
   async function onCreate(name: string) {
     const created: CreateEdgeResponse = await createEdge({ name });
@@ -192,7 +223,7 @@ export default function EdgesPage() {
           <div>
             <h1 className="text-base font-semibold text-zinc-100">{headerTitle}</h1>
             <p className="mt-0.5 text-xs text-zinc-500">
-              {tr(`${edges.length} 台设备 · 每 10 秒自动刷新`, `${edges.length} device(s) · auto-refresh every 10s`)}
+              {tr(`${visibleEdges.length} 台设备 · 每 10 秒自动刷新`, `${visibleEdges.length} device(s) · auto-refresh every 10s`)}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -214,7 +245,7 @@ export default function EdgesPage() {
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto px-6 py-6">
+        <div className="min-w-0 flex-1 overflow-auto px-6 py-6">
           {error && (
             <div
               role="alert"
@@ -224,8 +255,8 @@ export default function EdgesPage() {
             </div>
           )}
 
-          <div className="overflow-hidden rounded-xl border border-zinc-800/60 bg-zinc-900/40">
-            <table className="w-full text-sm">
+          <div className="inline-block min-w-full rounded-xl border border-zinc-800/60 bg-zinc-900/40">
+            <table className="min-w-[1120px] text-sm">
               <thead className="border-b border-zinc-800/60 bg-zinc-950/40 text-[11px] uppercase tracking-wider text-zinc-500">
                 <tr>
                   <th className="px-4 py-2.5 text-left">ID</th>
@@ -241,13 +272,13 @@ export default function EdgesPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800/40">
-                {loading && edges.length === 0 ? (
+                {loading && visibleEdges.length === 0 ? (
                   <tr>
                     <td colSpan={10} className="px-4 py-10 text-center text-zinc-500">
                       {tr('加载中…', 'Loading…')}
                     </td>
                   </tr>
-                ) : edges.length === 0 ? (
+                ) : visibleEdges.length === 0 ? (
                   <tr>
                     <td colSpan={10} className="px-4 py-10 text-center text-zinc-500">
                       {rolesFilter
@@ -262,81 +293,90 @@ export default function EdgesPage() {
                     </td>
                   </tr>
                 ) : (
-                  edges.map((e) => (
-                    <tr
-                      key={e.id}
-                      className="cursor-pointer transition-colors hover:bg-zinc-900/40"
-                      onClick={() => navigate(`/edges/${encodeURIComponent(e.id)}`)}
-                    >
-                      {/* Identity columns are pinned `whitespace-nowrap`
-                          — when the table is squeezed (sidebar + many
-                          columns) we'd rather let the action column
-                          wrap than have a name break across lines.
-                          Heartbeat / access-key / agent are short and
-                          formatted to a known width. */}
-                      <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-zinc-400">
-                        {e.id}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-2.5 text-zinc-100">
-                        {e.name || (
-                          <span className="italic text-zinc-500">{tr('（待主机上线）', '(waiting for host)')}</span>
-                        )}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-2.5 text-zinc-400">
-                        {extractHostname(e.host_info) ?? '—'}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-zinc-400">
-                        {extractIP(e.host_info) ?? '—'}
-                      </td>
-                      <td
-                        className="cursor-pointer whitespace-nowrap px-4 py-2.5"
-                        title={tr('点击分配角色', 'Click to assign roles')}
-                        onClick={(ev) => {
-                          ev.stopPropagation();
-                          setRolesEditTarget(e);
-                        }}
+                  visibleEdges.map((e) => {
+                    const attachments = k8sAttachments[e.id] ?? [];
+                    const displayName = displayEdgeName(e, attachments);
+                    return (
+                      <tr
+                        key={e.id}
+                        className="cursor-pointer transition-colors hover:bg-zinc-900/40"
+                        onClick={() => navigate(`/edges/${encodeURIComponent(e.id)}`)}
                       >
-                        <RoleChips roles={e.roles ?? []} />
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-2.5">
-                        <StatusPill status={e.status} />
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-2.5 text-zinc-400">
-                        {e.last_seen_at ? relativeTime(e.last_seen_at) : '—'}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-zinc-400">
-                        <span className="rounded bg-zinc-800/60 px-1.5 py-0.5">
-                          {e.access_key_id.slice(0, 8)}…
-                        </span>
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-zinc-400">
-                        <AgentVersionCell agentVersion={e.agent_version} managerVersion={managerVersion} />
-                      </td>
-                      <td
-                        className="whitespace-nowrap px-4 py-2.5 text-right"
-                        onClick={(ev) => ev.stopPropagation()}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => void openServerChart(e)}
-                          title={tr(`在 Grafana 查看 ${e.name} 图表`, `View ${e.name} chart in Grafana`)}
-                          aria-label={tr(`在 Grafana 查看 ${e.name} 图表`, `View ${e.name} chart in Grafana`)}
-                          className="mr-1 inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                        {/* Identity columns are pinned `whitespace-nowrap`
+                            — when the table is squeezed (sidebar + many
+                            columns) we'd rather let the action column
+                            wrap than have a name break across lines.
+                            Heartbeat / access-key / agent are short and
+                            formatted to a known width. */}
+                        <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-zinc-400">
+                          {e.id}
+                        </td>
+                        <td className="min-w-[360px] max-w-[480px] px-4 py-2.5">
+                          <div className="flex min-w-0 items-center gap-1.5">
+                            <div className="min-w-0 flex-1 truncate text-zinc-100">
+                              {displayName || (
+                                <span className="italic text-zinc-500">{tr('（待主机上线）', '(waiting for host)')}</span>
+                              )}
+                            </div>
+                            <EdgeAccessMeta attachments={attachments} />
+                          </div>
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-2.5 text-zinc-400">
+                          {extractHostname(e.host_info) ?? '—'}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-zinc-400">
+                          {extractIP(e.host_info) ?? '—'}
+                        </td>
+                        <td
+                          className="cursor-pointer whitespace-nowrap px-4 py-2.5"
+                          title={tr('点击分配角色', 'Click to assign roles')}
+                          onClick={(ev) => {
+                            ev.stopPropagation();
+                            setRolesEditTarget(e);
+                          }}
                         >
-                          <ExternalLink size={14} />
-                          <span>{tr('查看图表', 'View chart')}</span>
-                        </button>
-                        <ShellButton edge={e} canMutate={canMutate} />
-                        <RowMenu
-                          onRotate={() => onRotate(e.id, e.name, e.access_key_id)}
-                          onDelete={() => onDelete(e.id, e.name)}
-                          onUpgrade={() => setUpgradeTarget(e)}
-                          onUpgradePackage={() => void onPackageUpgrade(e)}
-                          upgradePackageBusy={pkgUpgradingId === e.id}
-                        />
-                      </td>
-                    </tr>
-                  ))
+                          <RoleChips roles={e.roles ?? []} />
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-2.5">
+                          <StatusPill status={e.status} />
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-2.5 text-zinc-400">
+                          {e.last_seen_at ? relativeTime(e.last_seen_at) : '—'}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-zinc-400">
+                          <span className="rounded bg-zinc-800/60 px-1.5 py-0.5">
+                            {e.access_key_id.slice(0, 8)}…
+                          </span>
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-zinc-400">
+                          <AgentVersionCell agentVersion={e.agent_version} managerVersion={managerVersion} />
+                        </td>
+                        <td
+                          className="whitespace-nowrap px-4 py-2.5 text-right"
+                          onClick={(ev) => ev.stopPropagation()}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => void openServerChart(e)}
+                            title={tr(`在 Grafana 查看 ${e.name} 图表`, `View ${e.name} chart in Grafana`)}
+                            aria-label={tr(`在 Grafana 查看 ${e.name} 图表`, `View ${e.name} chart in Grafana`)}
+                            className="mr-1 inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                          >
+                            <ExternalLink size={14} />
+                            <span>{tr('查看图表', 'View chart')}</span>
+                          </button>
+                          <ShellButton edge={e} canMutate={canMutate} />
+                          <RowMenu
+                            onRotate={() => onRotate(e.id, e.name, e.access_key_id)}
+                            onDelete={() => onDelete(e.id, e.name)}
+                            onUpgrade={() => setUpgradeTarget(e)}
+                            onUpgradePackage={() => void onPackageUpgrade(e)}
+                            upgradePackageBusy={pkgUpgradingId === e.id}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -407,6 +447,143 @@ export default function EdgesPage() {
       edgeId: edge.id,
     });
   }
+}
+
+async function loadK8sEdgeAttachments(): Promise<K8sEdgeAttachmentMap> {
+  const clustersOut = await listKubernetesClusters({ limit: 100 });
+  const clusters = clustersOut.items ?? [];
+  const out = new Map<number, K8sEdgeAttachment[]>();
+
+  for (const cluster of clusters) {
+    if (cluster.controller_edge_id) {
+      addK8sEdgeAttachment(out, cluster.controller_edge_id, {
+        kind: 'k8s-controller',
+        clusterId: cluster.id,
+        clusterName: cluster.name,
+        clusterMode: cluster.mode,
+      });
+    }
+  }
+
+  const nodeLoads = await Promise.allSettled(
+    clusters.map(async (cluster) => ({
+      cluster,
+      nodes: (await listKubernetesNodes(cluster.id)).items ?? [],
+    })),
+  );
+  for (const result of nodeLoads) {
+    if (result.status !== 'fulfilled') continue;
+    const controllerNodeName = result.value.cluster.controller_node_name?.trim();
+    for (const node of result.value.nodes) {
+      if (!node.edge_id) continue;
+      addK8sEdgeAttachment(out, node.edge_id, {
+        kind: 'k8s-node',
+        clusterId: result.value.cluster.id,
+        clusterName: result.value.cluster.name,
+        clusterMode: result.value.cluster.mode,
+        nodeName: node.node_name,
+      });
+      if (controllerNodeName && node.node_name === controllerNodeName) {
+        addK8sEdgeAttachment(out, node.edge_id, {
+          kind: 'k8s-controller-runtime',
+          clusterId: result.value.cluster.id,
+          clusterName: result.value.cluster.name,
+          clusterMode: result.value.cluster.mode,
+          nodeName: node.node_name,
+        });
+      }
+    }
+  }
+
+  return Object.fromEntries(out.entries());
+}
+
+function addK8sEdgeAttachment(
+  out: Map<number, K8sEdgeAttachment[]>,
+  edgeID: number,
+  attachment: K8sEdgeAttachment,
+) {
+  const items = out.get(edgeID) ?? [];
+  if (
+    !items.some(
+      (item) =>
+        item.kind === attachment.kind &&
+        item.clusterId === attachment.clusterId &&
+        item.nodeName === attachment.nodeName,
+    )
+  ) {
+    items.push(attachment);
+  }
+  out.set(edgeID, items);
+}
+
+function EdgeAccessMeta({ attachments }: { attachments: K8sEdgeAttachment[] }) {
+  const { tr } = useI18n();
+  if (attachments.length === 0) {
+    return (
+      <div className="flex shrink-0 items-center gap-1">
+        <EdgeAccessPill>{tr('Host Edge', 'Host edge')}</EdgeAccessPill>
+      </div>
+    );
+  }
+  const clusters = uniqueAttachmentClusters(attachments);
+  return (
+    <div className="flex min-w-0 shrink-0 items-center gap-1">
+      {attachments.map((item) => (
+        <EdgeAccessPill key={`${item.kind}:${item.clusterId}:${item.nodeName ?? ''}`} kind={item.kind}>
+          {item.kind === 'k8s-node'
+            ? tr('K8s Node', 'K8s node')
+            : item.kind === 'k8s-controller-runtime'
+              ? tr('Controller Runtime', 'Controller runtime')
+              : item.clusterMode === 'serverless'
+                ? tr('Serverless Controller', 'Serverless controller')
+                : tr('K8s Controller', 'K8s controller')}
+        </EdgeAccessPill>
+      ))}
+      {clusters.map((item) => (
+        <Link
+          key={`cluster:${item.clusterId}`}
+          to={`/kubernetes/${item.clusterId}`}
+          onClick={(ev) => ev.stopPropagation()}
+          title={tr(`所属集群：${item.clusterName}`, `Cluster: ${item.clusterName}`)}
+          className="block max-w-[120px] truncate font-mono text-[10px] leading-4 text-zinc-500 hover:text-zinc-300"
+        >
+          {item.clusterName}
+        </Link>
+      ))}
+    </div>
+  );
+}
+
+function uniqueAttachmentClusters(attachments: K8sEdgeAttachment[]): K8sEdgeAttachment[] {
+  const out = new Map<number, K8sEdgeAttachment>();
+  for (const item of attachments) {
+    if (!out.has(item.clusterId)) out.set(item.clusterId, item);
+  }
+  return [...out.values()];
+}
+
+function EdgeAccessPill({
+  kind,
+  children,
+}: {
+  kind?: K8sEdgeAttachment['kind'];
+  children: ReactNode;
+}) {
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center whitespace-nowrap rounded border px-1 py-[1px] text-[10px] leading-4',
+        kind === 'k8s-controller' || kind === 'k8s-controller-runtime'
+          ? 'border-sky-500/30 bg-sky-500/10 text-sky-300'
+          : kind === 'k8s-node'
+            ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+            : 'border-zinc-700 bg-zinc-900 text-zinc-400',
+      )}
+    >
+      {children}
+    </span>
+  );
 }
 
 // AgentVersionCell shows the edge's reported agent_version + a drift
@@ -736,6 +913,15 @@ function extractHostname(hostInfo: Edge['host_info']): string | null {
     return pickHostname(hostInfo);
   }
   return null;
+}
+
+function displayEdgeName(edge: Edge, attachments: K8sEdgeAttachment[]): string {
+  const host = extractHostname(edge.host_info);
+  const k8sNode = attachments.find((item) => item.kind === 'k8s-node' || item.kind === 'k8s-controller-runtime');
+  if (k8sNode) {
+    return host || k8sNode.nodeName || edge.name || '';
+  }
+  return edge.name || host || '';
 }
 
 function safeParseHostInfo(value: string): Record<string, unknown> | null {
@@ -1138,4 +1324,3 @@ function InstallCommandRow({ accessKey, secretKey }: { accessKey: string; secret
     </div>
   );
 }
-

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"strings"
 	"time"
 
 	edgebiz "github.com/ongridio/ongrid/internal/manager/biz/edge"
@@ -26,6 +27,7 @@ import (
 // through DeviceResolver below for correctness.
 type PromwriteIngester interface {
 	Push(ctx context.Context, deviceID uint64, source string, samples []tunnel.PromSample) error
+	PushKubernetes(ctx context.Context, clusterID uint64, source string, samples []tunnel.PromSample) error
 }
 
 // DeviceResolver resolves a tunnel-side edge_id to its host device_id
@@ -34,6 +36,18 @@ type PromwriteIngester interface {
 // pre-launch data thanks to the migration's integer reuse).
 type DeviceResolver interface {
 	LookupHostDevice(ctx context.Context, edgeID uint64) (uint64, error)
+}
+
+// KubernetesRegistry reconciles optional Kubernetes metadata from register_edge.
+// Implemented by manager/service/k8s without importing that package here.
+type KubernetesRegistry interface {
+	HandleRegister(ctx context.Context, edgeID uint64, deviceID *uint64, info tunnel.KubernetesInfo) error
+	LookupControllerCluster(ctx context.Context, edgeID uint64) (uint64, error)
+}
+
+// KubernetesInventoryIngester persists controller-pushed Kubernetes snapshots.
+type KubernetesInventoryIngester interface {
+	IngestInventory(ctx context.Context, edgeID uint64, in tunnel.KubernetesInventoryRequest) (acceptedNodes int, acceptedWorkloads int, acceptedPods int, acceptedEvents int, err error)
 }
 
 // Wiring is the set of biz dependencies the manager-side handlers need.
@@ -61,6 +75,8 @@ type Wiring struct {
 	// (correct for pre-launch data; explicitly resolving here is the
 	// future-proof path for multi-agent hosts).
 	DeviceResolver DeviceResolver
+	K8sRegistry    KubernetesRegistry
+	K8sInventory   KubernetesInventoryIngester
 	Log            *slog.Logger
 }
 
@@ -118,12 +134,14 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 		if err != nil {
 			// AccessKeyAuthenticator already collapses all failure paths
 			// to errs.ErrUnauthorized so we don't leak enumeration here.
-			log.Debug("frontierbound: GetEdgeID: authn failed",
-				slog.String("access_key", m.AccessKey),
+			log.Warn("frontierbound: GetEdgeID: authn failed",
 				slog.Any("err", err),
 			)
 			return 0, err
 		}
+		log.Info("frontierbound: GetEdgeID: authn ok",
+			slog.Uint64("edge_id", sess.EdgeID),
+		)
 		return sess.EdgeID, nil
 	}
 
@@ -205,13 +223,43 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 				slog.Uint64("transport_edge_id", edgeID))
 			return nil, fmt.Errorf("register_edge: edge binding not ready")
 		}
-		if err := w.EdgeUC.HandleRegister(rpcCtx, canonicalEdgeID, in.HostInfo, in.AgentVersion); err != nil {
-			log.Error("frontierbound: HandleRegister",
-				slog.Uint64("edge_id", canonicalEdgeID),
-				slog.Uint64("transport_edge_id", edgeID),
-				slog.Any("err", err),
-			)
-			return nil, fmt.Errorf("register_edge: %w", err)
+		if in.Kubernetes != nil && isKubernetesControllerRole(in.Kubernetes.Role) {
+			if w.K8sRegistry != nil {
+				if err := w.K8sRegistry.HandleRegister(rpcCtx, canonicalEdgeID, nil, *in.Kubernetes); err != nil {
+					log.Error("frontierbound: k8s controller register",
+						slog.Uint64("edge_id", canonicalEdgeID),
+						slog.Uint64("cluster_id", in.Kubernetes.ClusterID),
+						slog.Any("err", err),
+					)
+					return nil, fmt.Errorf("register_edge: k8s controller: %w", err)
+				}
+			}
+			if err := w.EdgeUC.ClearHostDeviceLink(rpcCtx, canonicalEdgeID); err != nil {
+				return nil, fmt.Errorf("register_edge: k8s controller clear host link: %w", err)
+			}
+			if err := w.EdgeUC.HandleHeartbeat(rpcCtx, canonicalEdgeID, time.Now().UTC()); err != nil {
+				return nil, fmt.Errorf("register_edge: k8s controller heartbeat: %w", err)
+			}
+		} else {
+			if err := w.EdgeUC.HandleRegister(rpcCtx, canonicalEdgeID, in.HostInfo, in.AgentVersion); err != nil {
+				log.Error("frontierbound: HandleRegister",
+					slog.Uint64("edge_id", canonicalEdgeID),
+					slog.Uint64("transport_edge_id", edgeID),
+					slog.Any("err", err),
+				)
+				return nil, fmt.Errorf("register_edge: %w", err)
+			}
+			if in.Kubernetes != nil && w.K8sRegistry != nil {
+				var deviceID *uint64
+				if w.DeviceResolver != nil {
+					if resolved, err := w.DeviceResolver.LookupHostDevice(rpcCtx, canonicalEdgeID); err == nil {
+						deviceID = &resolved
+					}
+				}
+				if err := w.K8sRegistry.HandleRegister(rpcCtx, canonicalEdgeID, deviceID, *in.Kubernetes); err != nil {
+					return nil, fmt.Errorf("register_edge: k8s node: %w", err)
+				}
+			}
 		}
 		c.bindEdgeTransport(edgeID, canonicalEdgeID)
 		out := tunnel.RegisterEdgeResponse{
@@ -281,6 +329,51 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 		return json.Marshal(tunnel.HeartbeatResponse{})
 	}); err != nil {
 		return fmt.Errorf("frontierbound: register %q: %w", tunnel.MethodHeartbeat, err)
+	}
+
+	if err := c.Register(ctx, tunnel.MethodPushK8sInventory, func(rpcCtx context.Context, edgeID uint64, body []byte) ([]byte, error) {
+		var in tunnel.KubernetesInventoryRequest
+		if err := json.Unmarshal(body, &in); err != nil {
+			return nil, fmt.Errorf("push_k8s_inventory: decode: %w", err)
+		}
+		canonicalEdgeID := c.canonicalizeEdgeID(edgeID)
+		if in.EdgeID != 0 {
+			canonicalEdgeID = in.EdgeID
+			c.bindEdgeTransport(edgeID, canonicalEdgeID)
+		}
+		if canonicalEdgeID == 0 {
+			return json.Marshal(tunnel.KubernetesInventoryResponse{})
+		}
+		if w.K8sInventory == nil {
+			return json.Marshal(tunnel.KubernetesInventoryResponse{
+				AcceptedNodes:     len(in.Nodes),
+				AcceptedWorkloads: len(in.Workloads),
+				AcceptedPods:      len(in.Pods),
+				AcceptedEvents:    len(in.Events),
+			})
+		}
+		acceptedNodes, acceptedWorkloads, acceptedPods, acceptedEvents, err := w.K8sInventory.IngestInventory(rpcCtx, canonicalEdgeID, in)
+		if err != nil {
+			log.Warn("frontierbound: k8s inventory ingest",
+				slog.Uint64("edge_id", canonicalEdgeID),
+				slog.Uint64("transport_edge_id", edgeID),
+				slog.Uint64("cluster_id", in.ClusterID),
+				slog.Int("nodes", len(in.Nodes)),
+				slog.Int("workloads", len(in.Workloads)),
+				slog.Int("pods", len(in.Pods)),
+				slog.Int("events", len(in.Events)),
+				slog.Any("err", err),
+			)
+			return nil, fmt.Errorf("push_k8s_inventory: %w", err)
+		}
+		return json.Marshal(tunnel.KubernetesInventoryResponse{
+			AcceptedNodes:     acceptedNodes,
+			AcceptedWorkloads: acceptedWorkloads,
+			AcceptedPods:      acceptedPods,
+			AcceptedEvents:    acceptedEvents,
+		})
+	}); err != nil {
+		return fmt.Errorf("frontierbound: register %q: %w", tunnel.MethodPushK8sInventory, err)
 	}
 
 	// push_host_metrics: forward batches to the ingester.
@@ -359,8 +452,47 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 			)
 			return json.Marshal(tunnel.PushPromSamplesResponse{Accepted: n})
 		}
+		if isKubernetesPromSource(in.Source) {
+			clusterID := lookupK8sControllerCluster(rpcCtx, w.K8sRegistry, canonicalEdgeID, log)
+			if clusterID == 0 {
+				log.Warn("frontierbound: k8s push_prom_samples dropped — controller cluster unresolved",
+					slog.Uint64("edge_id", canonicalEdgeID),
+					slog.Uint64("transport_edge_id", edgeID),
+					slog.String("source", in.Source),
+					slog.Int("n", n),
+				)
+				return json.Marshal(tunnel.PushPromSamplesResponse{Accepted: n})
+			}
+			if err := w.PromIngester.PushKubernetes(rpcCtx, clusterID, in.Source, in.Samples); err != nil {
+				log.Warn("frontierbound: k8s prom ingest push",
+					slog.Uint64("edge_id", canonicalEdgeID),
+					slog.Uint64("transport_edge_id", edgeID),
+					slog.Uint64("cluster_id", clusterID),
+					slog.String("source", in.Source),
+					slog.Int("n", n),
+					slog.Any("err", err),
+				)
+				return nil, fmt.Errorf("push_prom_samples: %w", err)
+			}
+			return json.Marshal(tunnel.PushPromSamplesResponse{Accepted: n})
+		}
 		deviceID := resolveDeviceID(rpcCtx, w.DeviceResolver, canonicalEdgeID)
 		if deviceID == 0 {
+			clusterID := lookupK8sControllerCluster(rpcCtx, w.K8sRegistry, canonicalEdgeID, log)
+			if clusterID != 0 {
+				if err := w.PromIngester.PushKubernetes(rpcCtx, clusterID, in.Source, in.Samples); err != nil {
+					log.Warn("frontierbound: k8s prom ingest push",
+						slog.Uint64("edge_id", canonicalEdgeID),
+						slog.Uint64("transport_edge_id", edgeID),
+						slog.Uint64("cluster_id", clusterID),
+						slog.String("source", in.Source),
+						slog.Int("n", n),
+						slog.Any("err", err),
+					)
+					return nil, fmt.Errorf("push_prom_samples: %w", err)
+				}
+				return json.Marshal(tunnel.PushPromSamplesResponse{Accepted: n})
+			}
 			// Host junction missing — drop rather than pollute the TSDB
 			// with edge_id-as-device_id (issue #96). Accepted=n so the
 			// edge does not spin-retry; the link lands on register_edge.
@@ -400,8 +532,9 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 			}
 			// Convert biz snapshot to wire snapshot (same shape, separate
 			// types so internal/pkg/tunnel stays biz-free).
+			labelDeviceID := resolveDeviceID(rpcCtx, w.DeviceResolver, canonicalEdgeID)
 			out := tunnel.GetPluginConfigsResponse{
-				EdgeID:  snap.EdgeID,
+				EdgeID:  labelDeviceID,
 				Configs: make(map[string]tunnel.GetPluginConfigsEntry, len(snap.Configs)),
 			}
 			for name, cfg := range snap.Configs {
@@ -450,6 +583,15 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 	return nil
 }
 
+func isKubernetesControllerRole(role string) bool {
+	switch role {
+	case "controller", "serverless-controller":
+		return true
+	default:
+		return false
+	}
+}
+
 // NotifyPluginConfigsChanged pushes a reload notification to one edge.
 // Cloud → edge RPC; the edge handler simply triggers Supervisor.Reload.
 // Body is empty by design — edge re-fetches via MethodGetPluginConfigs
@@ -494,6 +636,27 @@ func resolveDeviceID(ctx context.Context, dr DeviceResolver, edgeID uint64) uint
 		return 0
 	}
 	return id
+}
+
+func isKubernetesPromSource(source string) bool {
+	return strings.HasPrefix(strings.TrimSpace(source), "k8s:")
+}
+
+func lookupK8sControllerCluster(ctx context.Context, reg KubernetesRegistry, edgeID uint64, log *slog.Logger) uint64 {
+	if reg == nil || edgeID == 0 {
+		return 0
+	}
+	clusterID, err := reg.LookupControllerCluster(ctx, edgeID)
+	if err != nil {
+		if log != nil {
+			log.Warn("frontierbound: lookup k8s controller cluster failed",
+				slog.Uint64("edge_id", edgeID),
+				slog.Any("err", err),
+			)
+		}
+		return 0
+	}
+	return clusterID
 }
 
 // unixOrZero converts a unix-seconds wire value to a UTC time, returning the

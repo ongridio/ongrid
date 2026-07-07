@@ -294,6 +294,50 @@ func (r *Repo) Count(ctx context.Context) (int64, error) {
 	return n, nil
 }
 
+// ListDeletedWithNodeID returns soft-deleted devices whose linked topology
+// node is still live. It is intentionally not part of biz/device.Repo; the
+// device usecase probes for it at boot to clean historical topology leaks.
+func (r *Repo) ListDeletedWithNodeID(ctx context.Context, limit int) ([]*model.Device, error) {
+	q := r.db.WithContext(ctx).Unscoped().
+		Model(&model.Device{}).
+		Joins("JOIN nodes ON nodes.id = devices.node_id AND nodes.deleted_at IS NULL").
+		Where("devices.delete_marker <> 0 AND devices.node_id IS NOT NULL").
+		Order("devices.id ASC")
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	var out []*model.Device
+	if err := q.Find(&out).Error; err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ListWithoutLiveEdges returns live devices whose host/discovered edge links
+// no longer point at any live edge. These rows are historical leftovers from
+// the old DELETE /edges behavior.
+func (r *Repo) ListWithoutLiveEdges(ctx context.Context, limit int) ([]*model.Device, error) {
+	q := r.db.WithContext(ctx).
+		Model(&model.Device{}).
+		Where(`NOT EXISTS (
+			SELECT 1
+			FROM edge_devices ed
+			JOIN edges e ON e.id = ed.edge_id
+			WHERE ed.device_id = devices.id
+			  AND ed.delete_marker = 0
+			  AND e.delete_marker = 0
+		)`).
+		Order("devices.id ASC")
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	var out []*model.Device
+	if err := q.Find(&out).Error; err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // Delete soft-deletes a device by id.
 func (r *Repo) Delete(ctx context.Context, id uint64) error {
 	res := r.db.WithContext(ctx).Delete(&model.Device{}, id)

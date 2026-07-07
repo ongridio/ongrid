@@ -39,6 +39,11 @@ type fakeService struct {
 	usageResp *biz.DailyUsage
 	usageErr  error
 
+	proposalsResp  []*model.MutatingProposal
+	proposalsTotal int64
+	proposalsErr   error
+	lastProposalF  biz.MutatingProposalFilter
+
 	lastCaller    svc.Caller
 	lastPostCt    string
 	lastCreateTtl string
@@ -102,6 +107,11 @@ func (f *fakeService) PostMessageStreamWithOpts(_ context.Context, c svc.Caller,
 func (f *fakeService) UsageToday(_ context.Context) (*biz.DailyUsage, error) {
 	return f.usageResp, f.usageErr
 }
+func (f *fakeService) ListMutatingProposals(_ context.Context, c svc.Caller, filter biz.MutatingProposalFilter) ([]*model.MutatingProposal, int64, error) {
+	f.lastCaller = c
+	f.lastProposalF = filter
+	return f.proposalsResp, f.proposalsTotal, f.proposalsErr
+}
 
 func buildRouter(h *Handler, tenant tenantctx.Tenant) http.Handler {
 	r := chi.NewRouter()
@@ -157,7 +167,7 @@ func TestPostMessageHappyPath(t *testing.T) {
 		ToolCalls: []*model.ToolCall{{
 			ToolName:  "get_host_load",
 			Status:    model.StatusSuccess,
-			DeviceID:    &edgeID,
+			DeviceID:  &edgeID,
 			StartedAt: startedAt,
 			EndedAt:   &endedAt,
 		}},
@@ -241,6 +251,72 @@ func TestListSessionsHappyPath(t *testing.T) {
 	}
 	if out.Total != 2 {
 		t.Errorf("total = %d, want 2", out.Total)
+	}
+}
+
+func TestListMutatingProposalsFiltersToolName(t *testing.T) {
+	createdAt := time.Date(2026, 6, 30, 10, 0, 0, 0, time.UTC)
+	reason := "safe rollout restart"
+	f := &fakeService{
+		proposalsResp: []*model.MutatingProposal{{
+			ID:             "proposal-1",
+			SessionID:      "session-1",
+			ToolName:       "execute_k8s_action",
+			ArgsJSON:       `{"cluster_id":1,"action":"rollout_restart","kind":"Deployment","name":"api"}`,
+			ToolClass:      "write",
+			ReviewerAgent:  "reviewer",
+			ReviewerTaskID: "agent-1",
+			Decision:       model.DecisionApprove,
+			DecisionReason: &reason,
+			OperatorUserID: 7,
+			CreatedAt:      createdAt,
+		}},
+		proposalsTotal: 1,
+	}
+	h := NewHandler(f)
+	r := buildRouter(h, tenantctx.Tenant{UserID: 1, Role: "admin"})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/aiops/mutating-proposals?tool_name=execute_k8s_action&decision=approve&limit=20&offset=1", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("code = %d, body = %s", w.Code, w.Body.String())
+	}
+	var out listMutatingProposalsResp
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Total != 1 || out.Limit != 20 || out.Offset != 1 {
+		t.Fatalf("pagination = total:%d limit:%d offset:%d", out.Total, out.Limit, out.Offset)
+	}
+	if len(out.Items) != 1 || out.Items[0].ToolName != "execute_k8s_action" || out.Items[0].DecisionReason == nil {
+		t.Fatalf("items = %+v", out.Items)
+	}
+	if f.lastProposalF.ToolName != "execute_k8s_action" || f.lastProposalF.Decision != "approve" {
+		t.Fatalf("filter = %+v", f.lastProposalF)
+	}
+	if f.lastCaller.UserID != 1 || f.lastCaller.Role != "admin" {
+		t.Fatalf("caller = %+v", f.lastCaller)
+	}
+}
+
+func TestListMutatingProposalsForbidsNonAdmin(t *testing.T) {
+	f := &fakeService{proposalsErr: errs.ErrForbidden}
+	h := NewHandler(f)
+	r := buildRouter(h, tenantctx.Tenant{UserID: 2, Role: "user"})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/aiops/mutating-proposals?tool_name=execute_k8s_action", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("code = %d, body = %s", w.Code, w.Body.String())
+	}
+	var body errorBody
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	if body.Code != "forbidden" {
+		t.Fatalf("error code = %q", body.Code)
 	}
 }
 

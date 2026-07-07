@@ -133,7 +133,14 @@ docker-ongrid: ## 构建 ongrid 镜像
 	docker build --build-arg VERSION=$(VERSION) -t ongrid:$(VERSION) -f deploy/Dockerfile.ongrid .
 
 docker-ongrid-edge: ## 构建 ongrid-edge 镜像
-	docker build -t ongrid-edge:$(VERSION) -f deploy/Dockerfile.ongrid-edge .
+	docker build \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg PROMTAIL_VERSION=$(PROMTAIL_VERSION) \
+		--build-arg NODE_EXPORTER_VERSION=$(NODE_EXPORTER_VERSION) \
+		--build-arg PROCESS_EXPORTER_VERSION=$(PROCESS_EXPORTER_VERSION) \
+		--build-arg OTELCOL_VERSION=$(OTELCOL_VERSION) \
+		-t ongrid-edge:$(VERSION) \
+		-f deploy/Dockerfile.ongrid-edge .
 
 # ----------------------------------------------------------------------------
 # compose

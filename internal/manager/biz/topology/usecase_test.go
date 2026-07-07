@@ -3,6 +3,7 @@ package topology_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -80,6 +81,120 @@ func TestCreateRelationValidates(t *testing.T) {
 	}
 	if r.ID == 0 || r.Type != model.RelDependsOn {
 		t.Fatalf("bad relation: %+v", r)
+	}
+}
+
+func TestEnsureKubernetesClusterUpsertsTopologyNode(t *testing.T) {
+	uc := newUC(t)
+	ctx := context.Background()
+
+	id, err := uc.EnsureKubernetesCluster(ctx, 42, nil, "prod", "uid-prod", "full-node", "online")
+	if err != nil {
+		t.Fatalf("EnsureKubernetesCluster(create) error = %v", err)
+	}
+	n, err := uc.GetNode(ctx, id)
+	if err != nil {
+		t.Fatalf("GetNode() error = %v", err)
+	}
+	if n.Type != string(model.NodeTypeCluster) || n.Name != "prod" {
+		t.Fatalf("node = %#v", n)
+	}
+	if !strings.Contains(n.PropsJSON, `"source":"kubernetes"`) || !strings.Contains(n.PropsJSON, `"k8s_cluster_id":42`) {
+		t.Fatalf("props_jsonb = %s", n.PropsJSON)
+	}
+
+	id2, err := uc.EnsureKubernetesCluster(ctx, 42, &id, "prod-renamed", "uid-prod", "full-node", "online")
+	if err != nil {
+		t.Fatalf("EnsureKubernetesCluster(update) error = %v", err)
+	}
+	if id2 != id {
+		t.Fatalf("node id after update = %d, want %d", id2, id)
+	}
+	n, err = uc.GetNode(ctx, id)
+	if err != nil {
+		t.Fatalf("GetNode(updated) error = %v", err)
+	}
+	if n.Name != "prod-renamed" {
+		t.Fatalf("updated name = %q, want prod-renamed", n.Name)
+	}
+}
+
+func TestEnsureKubernetesNodeMembershipCreatesAndPrunes(t *testing.T) {
+	uc := newUC(t)
+	ctx := context.Background()
+
+	clusterID, err := uc.EnsureKubernetesCluster(ctx, 7, nil, "prod", "", "full-node", "online")
+	if err != nil {
+		t.Fatalf("EnsureKubernetesCluster() error = %v", err)
+	}
+	devA, err := uc.CreateNode(ctx, string(model.NodeTypeDevice), "node-a", "")
+	if err != nil {
+		t.Fatalf("CreateNode(devA) error = %v", err)
+	}
+	devB, err := uc.CreateNode(ctx, string(model.NodeTypeDevice), "node-b", "")
+	if err != nil {
+		t.Fatalf("CreateNode(devB) error = %v", err)
+	}
+	if err := uc.EnsureKubernetesNodeMembership(ctx, clusterID, devA.ID, 7, 101, "node-a", "uid-a"); err != nil {
+		t.Fatalf("EnsureKubernetesNodeMembership(devA) error = %v", err)
+	}
+	if err := uc.EnsureKubernetesNodeMembership(ctx, clusterID, devB.ID, 7, 102, "node-b", "uid-b"); err != nil {
+		t.Fatalf("EnsureKubernetesNodeMembership(devB) error = %v", err)
+	}
+	rels, total, err := uc.ListRelations(ctx, biz.RelationListFilter{DstID: clusterID, Type: model.RelMemberOf})
+	if err != nil {
+		t.Fatalf("ListRelations() error = %v", err)
+	}
+	if total != 2 || len(rels) != 2 {
+		t.Fatalf("relations total=%d len=%d, want 2", total, len(rels))
+	}
+
+	if err := uc.PruneKubernetesNodeMemberships(ctx, clusterID, 7, []uint64{devA.ID}); err != nil {
+		t.Fatalf("PruneKubernetesNodeMemberships() error = %v", err)
+	}
+	rels, total, err = uc.ListRelations(ctx, biz.RelationListFilter{DstID: clusterID, Type: model.RelMemberOf})
+	if err != nil {
+		t.Fatalf("ListRelations(after prune) error = %v", err)
+	}
+	if total != 1 || len(rels) != 1 || rels[0].SrcID != devA.ID {
+		t.Fatalf("relations after prune total=%d rels=%#v, want only devA", total, rels)
+	}
+}
+
+func TestDeleteNodeForDeviceRemovesRelationsAndNode(t *testing.T) {
+	uc := newUC(t)
+	ctx := context.Background()
+
+	dev, err := uc.CreateNode(ctx, string(model.NodeTypeDevice), "node-a", "")
+	if err != nil {
+		t.Fatalf("CreateNode(device) error = %v", err)
+	}
+	svc, err := uc.CreateNode(ctx, string(model.NodeTypeService), "svc-a", "")
+	if err != nil {
+		t.Fatalf("CreateNode(service) error = %v", err)
+	}
+	if _, err := uc.CreateRelation(ctx, svc.ID, dev.ID, model.RelDeployedOn, ""); err != nil {
+		t.Fatalf("CreateRelation(deployed_on) error = %v", err)
+	}
+	if _, err := uc.CreateRelation(ctx, dev.ID, svc.ID, model.RelMonitors, ""); err != nil {
+		t.Fatalf("CreateRelation(monitors) error = %v", err)
+	}
+
+	if err := uc.DeleteNodeForDevice(ctx, 99, dev.ID); err != nil {
+		t.Fatalf("DeleteNodeForDevice() error = %v", err)
+	}
+	if _, err := uc.GetNode(ctx, dev.ID); !errors.Is(err, errs.ErrNotFound) {
+		t.Fatalf("deleted device node lookup error = %v, want ErrNotFound", err)
+	}
+	if _, err := uc.GetNode(ctx, svc.ID); err != nil {
+		t.Fatalf("service node should remain, got %v", err)
+	}
+	rels, total, err := uc.ListRelations(ctx, biz.RelationListFilter{SrcOrDstID: dev.ID})
+	if err != nil {
+		t.Fatalf("ListRelations() error = %v", err)
+	}
+	if total != 0 || len(rels) != 0 {
+		t.Fatalf("relations after delete total=%d len=%d, want 0", total, len(rels))
 	}
 }
 

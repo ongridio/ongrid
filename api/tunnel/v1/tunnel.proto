@@ -8,6 +8,7 @@ syntax = "proto3";
 package ongrid.tunnel.v1;
 
 import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
 
 option go_package = "github.com/singchia/ongrid/api/gen/tunnel/v1;tunnelv1";
 
@@ -162,4 +163,242 @@ message GetNetstatResponse {
     repeated ListeningSocket listening = 1 [json_name = "listening"];
     repeated EstablishedConnection established = 2 [json_name = "established"];
     google.protobuf.Timestamp sampled_at = 3 [json_name = "sampled_at"];
+}
+
+// ============================================================
+// cloud → edge controller：实时只读 Kubernetes describe
+// geminio method: "describe_k8s_resource"
+// ============================================================
+
+message KubernetesEventSnapshot {
+    string namespace = 1 [json_name = "namespace"];
+    string name = 2 [json_name = "name"];
+    string uid = 3 [json_name = "uid"];
+    string type = 4 [json_name = "type"];
+    string reason = 5 [json_name = "reason"];
+    string message = 6 [json_name = "message"];
+    string involved_kind = 7 [json_name = "involved_kind"];
+    string involved_namespace = 8 [json_name = "involved_namespace"];
+    string involved_name = 9 [json_name = "involved_name"];
+    string involved_uid = 10 [json_name = "involved_uid"];
+    string source_component = 11 [json_name = "source_component"];
+    string source_host = 12 [json_name = "source_host"];
+    string reporting_controller = 13 [json_name = "reporting_controller"];
+    string reporting_instance = 14 [json_name = "reporting_instance"];
+    string action = 15 [json_name = "action"];
+    int32 count = 16 [json_name = "count"];
+    string first_timestamp = 17 [json_name = "first_timestamp"];
+    string last_timestamp = 18 [json_name = "last_timestamp"];
+    string event_time = 19 [json_name = "event_time"];
+}
+
+message KubernetesNodeSnapshot {
+    string name = 1 [json_name = "name"];
+    string uid = 2 [json_name = "uid"];
+    string provider_id = 3 [json_name = "provider_id"];
+    map<string, string> labels = 4 [json_name = "labels"];
+    google.protobuf.ListValue taints = 5 [json_name = "taints"];
+    google.protobuf.ListValue conditions = 6 [json_name = "conditions"];
+    map<string, string> capacity = 7 [json_name = "capacity"];
+    map<string, string> allocatable = 8 [json_name = "allocatable"];
+    string kubelet_version = 9 [json_name = "kubelet_version"];
+}
+
+message KubernetesWorkloadSnapshot {
+    string kind = 1 [json_name = "kind"];
+    string namespace = 2 [json_name = "namespace"];
+    string name = 3 [json_name = "name"];
+    string uid = 4 [json_name = "uid"];
+    int32 desired_replicas = 5 [json_name = "desired_replicas"];
+    int32 ready_replicas = 6 [json_name = "ready_replicas"];
+    map<string, string> labels = 7 [json_name = "labels"];
+    map<string, string> annotations = 8 [json_name = "annotations"];
+    google.protobuf.ListValue conditions = 9 [json_name = "conditions"];
+}
+
+message KubernetesPodSnapshot {
+    string namespace = 1 [json_name = "namespace"];
+    string name = 2 [json_name = "name"];
+    string uid = 3 [json_name = "uid"];
+    string node_name = 4 [json_name = "node_name"];
+    string phase = 5 [json_name = "phase"];
+    string owner_kind = 6 [json_name = "owner_kind"];
+    string owner_name = 7 [json_name = "owner_name"];
+    int32 restart_count = 8 [json_name = "restart_count"];
+    string reason = 9 [json_name = "reason"];
+}
+
+message KubernetesNodeRef {
+    string name = 1 [json_name = "name"];
+    string uid = 2 [json_name = "uid"];
+}
+
+message KubernetesWorkloadRef {
+    string kind = 1 [json_name = "kind"];
+    string namespace = 2 [json_name = "namespace"];
+    string name = 3 [json_name = "name"];
+    string uid = 4 [json_name = "uid"];
+}
+
+message KubernetesPodRef {
+    string namespace = 1 [json_name = "namespace"];
+    string name = 2 [json_name = "name"];
+    string uid = 3 [json_name = "uid"];
+}
+
+message KubernetesEventRef {
+    string namespace = 1 [json_name = "namespace"];
+    string name = 2 [json_name = "name"];
+    string uid = 3 [json_name = "uid"];
+}
+
+message KubernetesInventoryRequest {
+    uint64 edge_id = 1 [json_name = "edge_id"];
+    uint64 cluster_id = 2 [json_name = "cluster_id"];
+    string mode = 3 [json_name = "mode"];
+    string role = 4 [json_name = "role"];
+    string scope = 5 [json_name = "scope"];
+    string namespace = 6 [json_name = "namespace"];
+    int64 ts = 7 [json_name = "ts"];
+    string resource_version = 8 [json_name = "resource_version"];
+    map<string, string> resource_versions = 9 [json_name = "resource_versions"];
+    int64 collect_duration_ms = 10 [json_name = "collect_duration_ms"];
+    repeated KubernetesNodeSnapshot nodes = 11 [json_name = "nodes"];
+    repeated KubernetesWorkloadSnapshot workloads = 12 [json_name = "workloads"];
+    repeated KubernetesPodSnapshot pods = 13 [json_name = "pods"];
+    repeated KubernetesEventSnapshot events = 14 [json_name = "events"];
+    int64 watch_event_observed_at = 15 [json_name = "watch_event_observed_at"];
+    string watch_trigger_reason = 16 [json_name = "watch_trigger_reason"];
+    string sync_type = 17 [json_name = "sync_type"];
+    repeated KubernetesNodeRef deleted_nodes = 18 [json_name = "deleted_nodes"];
+    repeated KubernetesWorkloadRef deleted_workloads = 19 [json_name = "deleted_workloads"];
+    repeated KubernetesPodRef deleted_pods = 20 [json_name = "deleted_pods"];
+    repeated KubernetesEventRef deleted_events = 21 [json_name = "deleted_events"];
+}
+
+message KubernetesInventoryResponse {
+    int32 accepted_nodes = 1 [json_name = "accepted_nodes"];
+    int32 accepted_workloads = 2 [json_name = "accepted_workloads"];
+    int32 accepted_pods = 3 [json_name = "accepted_pods"];
+    int32 accepted_events = 4 [json_name = "accepted_events"];
+}
+
+message KubernetesDescribeResourceRequest {
+    uint64 cluster_id = 1 [json_name = "cluster_id"];
+    string kind = 2 [json_name = "kind"];
+    string api_version = 3 [json_name = "api_version"];
+    string namespace = 4 [json_name = "namespace"];
+    string name = 5 [json_name = "name"];
+    bool include_events = 6 [json_name = "include_events"];
+    int32 events_limit = 7 [json_name = "events_limit"];
+}
+
+message KubernetesDescribeResourceResponse {
+    uint64 cluster_id = 1 [json_name = "cluster_id"];
+    string kind = 2 [json_name = "kind"];
+    string api_version = 3 [json_name = "api_version"];
+    string namespace = 4 [json_name = "namespace"];
+    string name = 5 [json_name = "name"];
+    string uid = 6 [json_name = "uid"];
+    string resource_version = 7 [json_name = "resource_version"];
+    int64 fetched_at = 8 [json_name = "fetched_at"];
+    google.protobuf.Struct object = 9 [json_name = "object"];
+    repeated KubernetesEventSnapshot events = 10 [json_name = "events"];
+}
+
+// ============================================================
+// cloud → edge controller：Kubernetes Pod 日志兜底查询
+// geminio method: "query_k8s_logs"
+// ============================================================
+
+message KubernetesPodLogsRequest {
+    uint64 cluster_id = 1 [json_name = "cluster_id"];
+    string namespace = 2 [json_name = "namespace"];
+    string pod = 3 [json_name = "pod"];
+    string container = 4 [json_name = "container"];
+    bool previous = 5 [json_name = "previous"];
+    int64 since_seconds = 6 [json_name = "since_seconds"];
+    int32 tail_lines = 7 [json_name = "tail_lines"];
+    int32 limit_bytes = 8 [json_name = "limit_bytes"];
+    bool timestamps = 9 [json_name = "timestamps"];
+}
+
+message KubernetesPodLogsResponse {
+    uint64 cluster_id = 1 [json_name = "cluster_id"];
+    string namespace = 2 [json_name = "namespace"];
+    string pod = 3 [json_name = "pod"];
+    string container = 4 [json_name = "container"];
+    bool previous = 5 [json_name = "previous"];
+    int64 since_seconds = 6 [json_name = "since_seconds"];
+    int32 tail_lines = 7 [json_name = "tail_lines"];
+    int32 limit_bytes = 8 [json_name = "limit_bytes"];
+    bool timestamps = 9 [json_name = "timestamps"];
+    int64 fetched_at = 10 [json_name = "fetched_at"];
+    int32 bytes = 11 [json_name = "bytes"];
+    int32 line_count = 12 [json_name = "line_count"];
+    bool truncated = 13 [json_name = "truncated"];
+    string logs = 14 [json_name = "logs"];
+}
+
+// ============================================================
+// cloud → edge controller：Kubernetes 写动作
+// geminio method: "execute_k8s_action"
+// ============================================================
+
+message KubernetesActionRequest {
+    uint64 cluster_id = 1 [json_name = "cluster_id"];
+    // rollout_restart, scale, delete_pod, evict_pod, cordon, uncordon, drain.
+    string action = 2 [json_name = "action"];
+    string kind = 3 [json_name = "kind"];
+    string api_version = 4 [json_name = "api_version"];
+    string namespace = 5 [json_name = "namespace"];
+    string name = 6 [json_name = "name"];
+    optional int32 replicas = 7 [json_name = "replicas"];
+    string expected_resource_version = 8 [json_name = "expected_resource_version"];
+    bool dry_run = 9 [json_name = "dry_run"];
+    string reason = 10 [json_name = "reason"];
+    optional int32 grace_period_seconds = 11 [json_name = "grace_period_seconds"];
+    int32 drain_timeout_seconds = 12 [json_name = "drain_timeout_seconds"];
+    int32 drain_retry_seconds = 13 [json_name = "drain_retry_seconds"];
+    optional bool ignore_daemonsets = 14 [json_name = "ignore_daemonsets"];
+    bool delete_emptydir_data = 15 [json_name = "delete_emptydir_data"];
+    bool force = 16 [json_name = "force"];
+    bool disable_eviction = 17 [json_name = "disable_eviction"];
+}
+
+message KubernetesActionPreflight {
+    string kind = 1 [json_name = "kind"];
+    string api_version = 2 [json_name = "api_version"];
+    string namespace = 3 [json_name = "namespace"];
+    string name = 4 [json_name = "name"];
+    string uid = 5 [json_name = "uid"];
+    string resource_version = 6 [json_name = "resource_version"];
+    bool exists = 7 [json_name = "exists"];
+}
+
+message KubernetesActionPodResult {
+    string namespace = 1 [json_name = "namespace"];
+    string name = 2 [json_name = "name"];
+    string action = 3 [json_name = "action"];
+    string reason = 4 [json_name = "reason"];
+}
+
+message KubernetesActionResponse {
+    uint64 cluster_id = 1 [json_name = "cluster_id"];
+    string action = 2 [json_name = "action"];
+    string kind = 3 [json_name = "kind"];
+    string api_version = 4 [json_name = "api_version"];
+    string namespace = 5 [json_name = "namespace"];
+    string name = 6 [json_name = "name"];
+    bool dry_run = 7 [json_name = "dry_run"];
+    bool applied = 8 [json_name = "applied"];
+    KubernetesActionPreflight preflight = 9 [json_name = "preflight"];
+    string result_resource_version = 10 [json_name = "result_resource_version"];
+    int64 started_at = 11 [json_name = "started_at"];
+    int64 ended_at = 12 [json_name = "ended_at"];
+    string message = 13 [json_name = "message"];
+    int32 evicted_pod_count = 14 [json_name = "evicted_pod_count"];
+    int32 deleted_pod_count = 15 [json_name = "deleted_pod_count"];
+    int32 skipped_pod_count = 16 [json_name = "skipped_pod_count"];
+    repeated KubernetesActionPodResult skipped_pods = 17 [json_name = "skipped_pods"];
 }

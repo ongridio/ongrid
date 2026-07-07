@@ -108,6 +108,33 @@ func TestEdgeDeviceLinkSoftDeleteAllowsReuse(t *testing.T) {
 	}
 }
 
+func TestEdgeDeviceHostLinkReplacesPreviousHost(t *testing.T) {
+	db := newDeviceTestDB(t)
+	repo := NewEdgeDeviceRepo(db)
+	ctx := context.Background()
+
+	if err := repo.Link(ctx, 1, 2, model.EdgeDeviceRelationHost); err != nil {
+		t.Fatalf("first host Link: %v", err)
+	}
+	if err := repo.Link(ctx, 1, 3, model.EdgeDeviceRelationHost); err != nil {
+		t.Fatalf("replace host Link: %v", err)
+	}
+	got, err := repo.LookupHostDevice(ctx, 1)
+	if err != nil {
+		t.Fatalf("LookupHostDevice: %v", err)
+	}
+	if got != 3 {
+		t.Fatalf("LookupHostDevice = %d, want latest device 3", got)
+	}
+	rows, err := repo.ListDevicesForEdge(ctx, 1)
+	if err != nil {
+		t.Fatalf("ListDevicesForEdge: %v", err)
+	}
+	if len(rows) != 1 || rows[0].DeviceID != 3 {
+		t.Fatalf("active host rows = %#v, want only device 3", rows)
+	}
+}
+
 func TestReconcileOfflineOrphans(t *testing.T) {
 	db := newDeviceTestDB(t)
 	// The device store Migrate creates devices + edge_devices; the reconcile

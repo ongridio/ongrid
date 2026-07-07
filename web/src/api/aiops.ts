@@ -17,6 +17,34 @@ export type TranslateQueryResp = {
   dialect: QueryDialect;
 };
 
+export type MutatingProposalDecision = 'pending' | 'approve' | 'reject' | string;
+
+export type MutatingProposal = {
+  id: string;
+  session_id: string;
+  message_id?: string;
+  tool_call_id?: string;
+  tool_name: string;
+  args_json: string;
+  tool_class: string;
+  reviewer_agent: string;
+  reviewer_task_id: string;
+  decision: MutatingProposalDecision;
+  decision_reason?: string;
+  operator_user_id: number;
+  approver_user_id?: number;
+  created_at: string;
+  decided_at?: string;
+  executed_at?: string;
+};
+
+export type ListMutatingProposalsResponse = {
+  items: MutatingProposal[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
 export function translateQuery(
   dialect: QueryDialect,
   prompt: string,
@@ -25,4 +53,19 @@ export function translateQuery(
   const body: Record<string, unknown> = { dialect, prompt };
   if (context && Object.keys(context).length > 0) body.context = context;
   return request<TranslateQueryResp>('POST', '/aiops/query-translate', body);
+}
+
+export function listMutatingProposals(params?: {
+  tool_name?: string;
+  decision?: string;
+  limit?: number;
+  offset?: number;
+}) {
+  const q = new URLSearchParams();
+  for (const [key, value] of Object.entries(params ?? {})) {
+    if (value === undefined || value === '') continue;
+    q.set(key, String(value));
+  }
+  const qs = q.toString();
+  return request<ListMutatingProposalsResponse>('GET', `/aiops/mutating-proposals${qs ? `?${qs}` : ''}`);
 }

@@ -5,6 +5,7 @@
 // Spec keys (manager UI Edge → Plugins → procmetrics → Spec):
 //
 //	listen_address : string  (default ":9256")
+//	procfs          : string  (optional, defaults to process-exporter's /proc)
 //	process_names  : []map   (process-exporter match config; default = group-by-comm catch-all)
 //
 // process_names is passed through verbatim to the rendered YAML so the
@@ -96,15 +97,23 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 
 func buildArgs(cfg plugins.PluginConfig, configFile string) []string {
 	listen := DefaultListenAddress
+	procfs := ""
 	if cfg.Spec != nil {
 		if v, ok := cfg.Spec["listen_address"].(string); ok && v != "" {
 			listen = v
 		}
+		if v, ok := cfg.Spec["procfs"].(string); ok && v != "" {
+			procfs = v
+		}
 	}
-	return []string{
+	args := []string{
 		"-web.listen-address=" + listen,
 		"-config.path=" + configFile,
 	}
+	if procfs != "" {
+		args = append(args, "-procfs="+procfs)
+	}
+	return args
 }
 
 func indentYAML(in []byte, prefix string) string {

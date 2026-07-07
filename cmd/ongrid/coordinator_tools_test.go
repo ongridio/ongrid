@@ -4,6 +4,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	aiopstools "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools"
 )
 
 // TestCoordinatorRosterHasCodeTools guards the regression where the read-code
@@ -22,6 +24,15 @@ func TestCoordinatorRosterHasCodeTools(t *testing.T) {
 		if !slices.Contains(coordinatorToolNames, want) {
 			t.Errorf("coordinator roster missing baseline tool %q", want)
 		}
+	}
+}
+
+func TestExecuteK8sActionIsChatOnlyReviewTool(t *testing.T) {
+	if !slices.Contains(coordinatorToolNames, aiopstools.ToolNameExecuteK8sAction) {
+		t.Fatalf("coordinator roster missing %q", aiopstools.ToolNameExecuteK8sAction)
+	}
+	if !isChatOnlyReviewTool(aiopstools.ToolNameExecuteK8sAction) {
+		t.Fatalf("%q should be excluded from flow paths without ReviewGate", aiopstools.ToolNameExecuteK8sAction)
 	}
 }
 
