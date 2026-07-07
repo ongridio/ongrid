@@ -14,7 +14,7 @@ Ongrid connects alerts, metrics, logs, traces, topology, host evidence, runbooks
 [![Slack](https://img.shields.io/badge/Slack-Join-4A154B?logo=slack&logoColor=white)](https://join.slack.com/t/ongrid-co/shared_invite/zt-400skx7hz-WU1nmF1XVYH4S3Q1NfWrbw)
 
 <p align="center">
-  <img src="docs/assets/readme/en-workflow-editor.png" alt="Ongrid workflow studio" width="920" />
+  <img src="docs/assets/demo.gif" alt="Ongrid product demo" width="920" />
 </p>
 
 <div align="center">
