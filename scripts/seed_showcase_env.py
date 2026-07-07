@@ -417,22 +417,19 @@ def delete_statement(table: str, where: str) -> str:
 
 def build_sql() -> list[str]:
     statements: list[str] = []
-    han = "[一-龥]"
-    demo_like = "%demo%"
-    mcp_names = ",".join(q(name) for name, _, _, _ in MCP_SERVERS)
 
     statements.extend(
         [
-            delete_statement("chat_tool_calls", f"message_id IN (SELECT id FROM chat_messages WHERE session_id IN (SELECT id FROM chat_sessions WHERE title REGEXP {q(han)} OR LOWER(title) LIKE {q(demo_like)} OR scope_json LIKE {q('%' + SEED + '%')}))"),
-            delete_statement("chat_messages", f"session_id IN (SELECT id FROM chat_sessions WHERE title REGEXP {q(han)} OR LOWER(title) LIKE {q(demo_like)} OR scope_json LIKE {q('%' + SEED + '%')})"),
-            delete_statement("chat_sessions", f"title REGEXP {q(han)} OR LOWER(title) LIKE {q(demo_like)} OR scope_json LIKE {q('%' + SEED + '%')}"),
-            delete_statement("flow_run_nodes", "run_id IN (SELECT id FROM flow_runs WHERE flow_id BETWEEN 910001 AND 910050)"),
-            delete_statement("flow_runs", "flow_id BETWEEN 910001 AND 910050"),
-            delete_statement("flows", f"id BETWEEN 910001 AND 910050 OR name REGEXP {q(han)} OR description REGEXP {q(han)} OR LOWER(name) LIKE {q(demo_like)} OR graph_json LIKE {q('%' + SEED + '%')}"),
-            delete_statement("mcp_servers", f"id BETWEEN 930001 AND 930020 OR name IN ({mcp_names}) OR name REGEXP {q(han)} OR LOWER(name) LIKE {q(demo_like)} OR tools_cache_json LIKE {q('%' + SEED + '%')}"),
-            delete_statement("reports", f"id IN ({','.join(q(stable_uuid('report-' + str(i))) for i in range(1, 11))}) OR title REGEXP {q(han)} OR content_json LIKE {q('%' + SEED + '%')}"),
-            delete_statement("relations", "src_id BETWEEN 920001 AND 920099 OR dst_id BETWEEN 920001 AND 920099"),
-            delete_statement("nodes", f"id BETWEEN 920001 AND 920099 OR name REGEXP {q(han)} OR props_jsonb LIKE {q('%' + SEED + '%')}"),
+            delete_statement("chat_tool_calls", "1=1"),
+            delete_statement("chat_messages", "1=1"),
+            delete_statement("chat_sessions", "1=1"),
+            delete_statement("flow_run_nodes", "1=1"),
+            delete_statement("flow_runs", "1=1"),
+            delete_statement("flows", "1=1"),
+            delete_statement("mcp_servers", "1=1"),
+            delete_statement("reports", "1=1"),
+            delete_statement("relations", "1=1"),
+            delete_statement("nodes", "1=1"),
         ]
     )
 
