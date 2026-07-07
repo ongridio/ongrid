@@ -18,7 +18,6 @@ import {
   EDGE_ROLE_LABELS,
   EDGE_ROLE_LABELS_EN,
   type Edge,
-  type EdgeStatus,
   type EdgeRole,
   type CreateEdgeResponse,
   type RotateSecretResponse,
@@ -33,7 +32,7 @@ import { listIncidents } from '@/api/alerts';
 import { getManagerVersion } from '@/api/version';
 import { usePermissions } from '@/store/me';
 import { notifyDevicesChanged } from '@/lib/events';
-import { buildOfflineAlertDeviceIDs, resolveDevicePresence } from '@/lib/deviceStatus';
+import { buildOfflineAlertDeviceIDs, resolveDevicePresence, type DevicePresenceState } from '@/lib/deviceStatus';
 import { useI18n } from '@/i18n/locale';
 
 // Sidebar headers that map to ?roles= filters. Empty string = "全部"; the
@@ -49,9 +48,11 @@ const ROLE_FILTER_TITLES: Record<string, [string, string]> = {
   unknown: ['未分类设备', 'Uncategorized devices'],
 };
 
-const STATUS_FILTERS: { value: '' | EdgeStatus; zh: string; en: string }[] = [
+const STATUS_FILTERS: { value: '' | DevicePresenceState; zh: string; en: string }[] = [
   { value: '', zh: '全部状态', en: 'All statuses' },
   { value: 'online', zh: '在线', en: 'Online' },
+  { value: 'heartbeat-stale', zh: '心跳超时', en: 'Heartbeat stale' },
+  { value: 'offline-alert', zh: '离线告警', en: 'Offline alert' },
   { value: 'offline', zh: '离线', en: 'Offline' },
   { value: 'unknown', zh: '未知', en: 'Unknown' },
 ];
@@ -87,7 +88,7 @@ export default function EdgesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'' | EdgeStatus>('');
+  const [statusFilter, setStatusFilter] = useState<'' | DevicePresenceState>('');
   const [agentFilter, setAgentFilter] = useState('');
   // managerVersion drives the Agent column's drift chip — fetched once
   // on mount; failures degrade silently to "no chip" rather than red
@@ -169,7 +170,7 @@ export default function EdgesPage() {
       } else if (rolesFilter) {
         if (!Array.isArray(e.roles) || !(e.roles as string[]).includes(rolesFilter)) return false;
       }
-      if (statusFilter && e.status !== statusFilter) return false;
+      if (statusFilter && resolveDevicePresence(e, offlineAlertDeviceIDs) !== statusFilter) return false;
       if (agentFilter === '__outdated') {
         if (!managerVersion || !e.agent_version || e.agent_version === managerVersion) return false;
       } else if (agentFilter === '__missing') {
@@ -190,7 +191,7 @@ export default function EdgesPage() {
         ...roleLabels,
       ].some((v) => String(v).toLowerCase().includes(q));
     });
-  }, [agentFilter, edges, managerVersion, query, rolesFilter, statusFilter]);
+  }, [agentFilter, edges, managerVersion, offlineAlertDeviceIDs, query, rolesFilter, statusFilter]);
 
   async function onCreate(name: string) {
     const created: CreateEdgeResponse = await createEdge({ name });
@@ -426,7 +427,7 @@ export default function EdgesPage() {
               label={tr('状态', 'Status')}
               value={statusFilter}
               options={STATUS_FILTERS.map((o) => ({ value: o.value, label: tr(o.zh, o.en) }))}
-              onChange={(v) => setStatusFilter(v as '' | EdgeStatus)}
+              onChange={(v) => setStatusFilter(v as '' | DevicePresenceState)}
             />
             <DeviceToolbarSelect
               label={tr('角色', 'Role')}
