@@ -73,6 +73,44 @@ export function upgradeEdgePackage(id: number, opts?: { arch?: string; version?:
   return request<UpgradePackageResponse>('POST', `/edges/${id}/upgrade-package`, opts ?? {});
 }
 
+// --- batch fleet operations ---------------------------------------
+// Each endpoint takes a list of edge ids and returns a per-id result
+// envelope (never a single failure — some edges may be offline). The
+// caller renders a "N succeeded / M failed" summary + the failing ids.
+export type BatchResultItem = {
+  id: number;
+  ok: boolean;
+  error?: string;
+  code?: string;
+  // upgrade-package only:
+  version?: string;
+  manifest_files?: number;
+  applied?: boolean;
+};
+
+export type BatchResponse = {
+  total: number;
+  succeeded: number;
+  failed: number;
+  results: BatchResultItem[];
+};
+
+// Batch one-button bundle upgrade. Manager resolves url+sha once from
+// the shared arch+version, then fans out fetch_package + apply_package.
+export function batchUpgradeEdgePackage(ids: number[], opts?: { arch?: string; version?: string }) {
+  return request<BatchResponse>('POST', '/edges/batch/upgrade-package', { ids, ...(opts ?? {}) });
+}
+
+// Batch custom upgrade — the same URL + sha256 dispatched to every id.
+export function batchUpgradeEdgeAgent(ids: number[], url: string, sha256: string) {
+  return request<BatchResponse>('POST', '/edges/batch/upgrade', { ids, url, sha256 });
+}
+
+// Batch soft-delete.
+export function batchDeleteEdges(ids: number[]) {
+  return request<BatchResponse>('POST', '/edges/batch/delete', { ids });
+}
+
 export type EdgeProcess = {
   pid: number;
   name: string;
