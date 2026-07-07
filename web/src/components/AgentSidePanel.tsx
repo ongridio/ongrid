@@ -4,6 +4,7 @@ import { Send, Loader2, X, ExternalLink, Bot } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/cn';
+import { isImeComposing } from '@/lib/keyboard';
 import { createSession, postMessage } from '@/api/chat';
 import { invalidateChatSessions } from '@/store/chatSessions';
 import { useI18n } from '@/i18n/locale';
@@ -127,6 +128,8 @@ export function AgentSidePanel({ open, onClose }: Props) {
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (isImeComposing(e)) return;
+
     if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
       e.preventDefault();
       void send();
