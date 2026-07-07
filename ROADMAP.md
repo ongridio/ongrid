@@ -1,6 +1,6 @@
 # Ongrid Roadmap
 
-_Last updated: 2026-06-06_
+_Last updated: 2026-06-06 · Chinese version: [`ROADMAP.zh-CN.md`](ROADMAP.zh-CN.md)_
 
 Working roadmap for the open-core Ongrid project. Merges user-driven
 ideas from the 2026-06-06 planning session with the historical backlog
@@ -229,7 +229,7 @@ across sections.
 - **F.4.1** `✓` Slack / Telegram / Lark two-way (ADR-021 / ADR-031)
 - **F.4.2** `□` DingTalk — completes the CN big three
 - **F.4.3** `□` Microsoft Teams — overseas enterprise
-- **F.4.4** `□` WeCom two-way
+- **F.4.4** `□` WeCom (企业微信) two-way
   - webhook-only today
   - bot mode needed for chat-driven actions
 
@@ -500,7 +500,7 @@ how it grows.
 - **I.12** `□` Compliance evidence pack
   - one-click export: audit log, access list, change history,
     incident timelines
-  - SOC2 / ISO 27001 / China MLPS friendly format
+  - SOC2 / ISO 27001 / 等保 friendly format
 - **I.13** `□` Per-org secrets vault
   - encrypted at rest, scoped to org
   - injected into SOP runtime via env
@@ -567,7 +567,7 @@ outage generator instead of a moat.
 Built on a shared scheduler primitive; sized for "agent watches over
 time" workloads rather than synchronous chat.
 
-- **L.1** `□` Inspection
+- **L.1** `□` Inspection (巡检)
   - scheduled (daily / weekly) sweeps over every edge
   - lightweight RCA: `top_load_anomaly`, `dep_health_check`, `cert_expiry_check`
   - matches auto-create incidents
