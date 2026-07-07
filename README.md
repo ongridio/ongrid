@@ -1,14 +1,19 @@
 # <img src="web/public/ongrid-logo.svg" alt="" width="40" align="absmiddle" style="vertical-align: middle;" /> Ongrid
 
-> **An ops AI that understands, finds the root cause, and fixes things.** *Monitoring, remote execution, knowledge base, specialist agents, Bash, files, and more skills — issue commands directly from Slack, Telegram, or Lark.*
+> **An ops AI Agent that understands your infrastructure, finds the root cause, and fixes it — right from Slack or Telegram.**
+
+*Metrics · logs · traces · topology blast-radius · root-cause correlation · remote execution · alert-driven auto-investigation · RAG knowledge & code search · specialist agents & skills.*
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/ongridio/ongrid)](https://goreportcard.com/report/github.com/ongridio/ongrid)
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Tech](https://img.shields.io/badge/Tech-Go%20%7C%20TypeScript%20%7C%20React-blue)](#)
+[![Release](https://img.shields.io/github/v/release/ongridio/ongrid?logo=github&label=release&color=2563eb)](https://github.com/ongridio/ongrid/releases/latest)
+[![Go](https://img.shields.io/github/go-mod/go-version/ongridio/ongrid?logo=go&logoColor=white&color=00ADD8)](go.mod)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg?logo=apache)](https://opensource.org/licenses/Apache-2.0)
+[![Stack](https://img.shields.io/badge/stack-Go%20%7C%20TypeScript%20%7C%20React-1e40af?logo=react&logoColor=white)](#features)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-22c55e.svg?logo=git&logoColor=white)](CONTRIBUTING.md)
+[![Telegram](https://img.shields.io/badge/Telegram-Join-26A5E4?logo=telegram&logoColor=white)](https://t.me/ongridai)
+[![Slack](https://img.shields.io/badge/Slack-Join-4A154B?logo=slack&logoColor=white)](https://join.slack.com/t/ongrid-co/shared_invite/zt-400skx7hz-WU1nmF1XVYH4S3Q1NfWrbw)
 
 English | [简体中文](./README_ZH.md) | [日本語](./README_JA.md) | [한국어](./README_KO.md) | [Español](./README_ES.md) | [Français](./README_FR.md) | [Deutsch](./README_DE.md) | [Português](./README_PT.md) | [Русский](./README_RU.md)
-
-[Features](#features) • [Install](#install) • [Integrations](#integrations) • [License](#license)
 
 ---
 
@@ -17,6 +22,12 @@ English | [简体中文](./README_ZH.md) | [日本語](./README_JA.md) | [한국
 </p>
 <p align="center"><sub><a href="https://github.com/ongridio/ongrid/releases/download/v0.7.169/Area2_hq.mp4">▶ Watch full demo in HD (MP4, 18 MB)</a></sub></p>
 
+<div align="center">
+
+[Features](#features) • [Install](#install) • [Integrations](#integrations) • [License](#license)
+
+</div>
+
 ## Features
 
 - 🤖 **Coordinator + Specialist agents** — coordinator dispatches to SRE / network / DB sub-agents
@@ -24,7 +35,7 @@ English | [简体中文](./README_ZH.md) | [日本語](./README_JA.md) | [한국
 - 🔍 **Root-cause RCA** — walks topology, correlates m/l/t, pins the "why" to a source-code line
 - 🔒 **Zero inbound ports** — edge dials out; no port 22 / 80 / 443 on hosts
 - 💻 **Browser SSH** — reverse-tunnel shell into any host; no keys, no jumpbox, all audited
-- 🐳 **Self-host in one command** — `docker compose up` brings up the full stack
+- 🐳 **Self-host in one command** — `install.sh` brings up the full stack
 - 📊 **Built-in observability** — Prometheus + Loki + Tempo + Grafana wired; the agent writes the queries
 - 🧠 **Bring your own model** — Anthropic / OpenAI / GLM / DeepSeek / Gemini / Kimi, hot routing
 - 💬 **Two-way IM channels** — Slack / Telegram / Larksuite / DingTalk / WeCom, per-channel locale
@@ -32,26 +43,32 @@ English | [简体中文](./README_ZH.md) | [日本語](./README_JA.md) | [한국
 
 ## Install
 
-Download the latest release, extract it, and run the installer (Ubuntu 22.04+, Debian 12+, RHEL/Rocky 9):
+Download the latest release for your server architecture (`linux-amd64` or `linux-arm64`), extract it, and run the installer (Ubuntu 22.04+, Debian 12+, RHEL/Rocky 9):
 
+Choose the command for your server architecture:
+
+**AMD64**
 ```bash
-# 1. Download latest release (Ubuntu 22.04+, Debian 12+, RHEL/Rocky 9)
-wget https://github.com/ongridio/ongrid/releases/download/v0.7.169/ongrid-v0.7.169-linux-amd64.tar.xz
-
-# 2. Extract
-tar -xf ongrid-v0.7.169-linux-amd64.tar.xz && cd ongrid-v0.7.169-linux-amd64
-
-# 3. Install
+wget https://github.com/ongridio/ongrid/releases/download/v0.9.0/ongrid-v0.9.0-linux-amd64.tar.xz
+tar -xf ongrid-v0.9.0-linux-amd64.tar.xz && cd ongrid-v0.9.0-linux-amd64
 sudo ./install.sh
 ```
 
-### Or run from source
+**ARM64**
+```bash
+wget https://github.com/ongridio/ongrid/releases/download/v0.9.0/ongrid-v0.9.0-linux-arm64.tar.xz
+tar -xf ongrid-v0.9.0-linux-arm64.tar.xz && cd ongrid-v0.9.0-linux-arm64
+sudo ./install.sh
+```
 
-Local dev: set the admin account + one model API key, then bring up the full stack.
+**🇨🇳 Mainland China** — if GitHub is slow, use the matching CDN mirror URL instead:
 
 ```bash
-cp deploy/.env.example deploy/.env
-make compose-up    # make compose-down to stop
+# AMD64
+wget https://ongrid.cloud/dl/ongrid-v0.9.0-linux-amd64.tar.xz
+
+# ARM64
+wget https://ongrid.cloud/dl/ongrid-v0.9.0-linux-arm64.tar.xz
 ```
 
 ## Product Tour
@@ -59,15 +76,15 @@ make compose-up    # make compose-down to stop
 ### Root Cause Analysis
 
 <p align="center">
-  <img src="docs/assets/readme-tour/rca-rootcause.png" alt="Root cause analysis" width="100%" />
+  <img src="docs/assets/readme-tour/user-20260707-rca-session.png" alt="Root cause analysis session" width="100%" />
 </p>
 
-Start from an alert or operator question, then pull together metrics, logs, traces, topology, host state, and change history in one incident workspace.
+Start from an operator question or alert, collect topology and device context, and produce an evidence-backed analysis with concrete next steps.
 
 ### Workflow Builder
 
 <p align="center">
-  <img src="docs/assets/readme-tour/workflow-editor.png" alt="Workflow builder" width="100%" />
+  <img src="docs/assets/readme-tour/user-20260707-workflow-editor.png" alt="Workflow builder" width="100%" />
 </p>
 
 Wire triggers, agents, tools, conditions, and notifications into repeatable automations that stay editable and reviewable.
@@ -75,15 +92,15 @@ Wire triggers, agents, tools, conditions, and notifications into repeatable auto
 ### Skills Catalog
 
 <p align="center">
-  <img src="docs/assets/readme-tour/skills-catalog.png" alt="Skills catalog" width="100%" />
+  <img src="docs/assets/readme-tour/user-20260707-skills-catalog.png" alt="Skills catalog" width="100%" />
 </p>
 
-Show the built-in skills your agents can call, with descriptions, scope, and a visible inventory for operators.
+Show the tools agents can call, with clear descriptions and a visible inventory for operators.
 
 ### MCP Servers
 
 <p align="center">
-  <img src="docs/assets/readme-tour/mcp-servers.png" alt="MCP servers" width="100%" />
+  <img src="docs/assets/readme-tour/user-20260707-mcp-servers.png" alt="MCP servers" width="100%" />
 </p>
 
 Register external MCP servers and expose their tools to chat agents and workflows with clear runtime and trust boundaries.
@@ -91,7 +108,7 @@ Register external MCP servers and expose their tools to chat agents and workflow
 ### Knowledge Vault
 
 <p align="center">
-  <img src="docs/assets/readme-tour/knowledge-vault.png" alt="Knowledge vault" width="100%" />
+  <img src="docs/assets/readme-tour/user-20260707-knowledge-vault.png" alt="Knowledge vault" width="100%" />
 </p>
 
 Index runbooks, notes, incident history, and repositories so both humans and agents can search the same operational context.
@@ -99,7 +116,7 @@ Index runbooks, notes, incident history, and repositories so both humans and age
 ### Artifacts Center
 
 <p align="center">
-  <img src="docs/assets/readme-tour/artifacts-pages.png" alt="Artifacts center" width="100%" />
+  <img src="docs/assets/readme-tour/user-20260707-artifacts-pages.png" alt="Artifacts center" width="100%" />
 </p>
 
 Keep generated pages and reports in one place, with private-by-default sharing and a clean handoff for review.
@@ -107,23 +124,23 @@ Keep generated pages and reports in one place, with private-by-default sharing a
 ### Monitoring
 
 <p align="center">
-  <img src="docs/assets/readme-tour/monitor.png" alt="Monitoring" width="100%" />
+  <img src="docs/assets/readme-tour/user-20260707-monitor.png" alt="Monitoring" width="100%" />
 </p>
 
-Use the built-in observability stack to inspect health, logs, traces, and alert state without leaving the product.
+Inspect fleet health, logs, traces, and alert state from the same workspace where the agent gathers evidence.
 
 ### Topology Map
 
 <p align="center">
-  <img src="docs/assets/readme-tour/topology-map.png" alt="Topology map" width="100%" />
+  <img src="docs/assets/readme-tour/user-20260707-topology-map.png" alt="Topology map" width="100%" />
 </p>
 
-Visualize dependencies and blast radius so an incident can be traced back through the affected service graph.
+Visualize dependencies and blast radius so incidents can be traced through the affected service graph.
 
 ### Approval and Write Gate
 
 <p align="center">
-  <img src="docs/assets/readme-tour/agent-write-gate.png" alt="Approval and write gate" width="100%" />
+  <img src="docs/assets/readme-tour/user-20260707-agent-write-gate.png" alt="Approval and write gate" width="100%" />
 </p>
 
 Keep risky actions behind approvals, with a visible policy boundary before anything changes production systems.
@@ -141,3 +158,12 @@ Drop-in for the observability, channel, and model stacks your team already uses.
 ## License
 
 Apache 2.0 — see [LICENSE](LICENSE).
+
+## Star History
+
+<a href="https://www.star-history.com/#ongridio/ongrid&amp;Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=ongridio/ongrid&amp;type=Date&amp;theme=dark" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=ongridio/ongrid&amp;type=Date" />
+  </picture>
+</a>
