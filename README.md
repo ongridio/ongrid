@@ -56,85 +56,77 @@ make compose-up    # make compose-down to stop
 
 ## Product Tour
 
-Ongrid is organized around the real SRE operating loop: detect, investigate, use governed tools, automate repeatable work, preserve outputs, and keep the surrounding knowledge and topology visible to humans.
-
-### 1. Evidence-backed RCA artifacts
+### Root Cause Analysis
 
 <p align="center">
-  <img src="docs/assets/readme/live/en-rca-artifact-view.png" alt="Ongrid RCA artifact" width="920" />
+  <img src="docs/assets/readme-tour/rca-rootcause.png" alt="Root cause analysis" width="100%" />
 </p>
 
-Agents turn an incident or operator question into a reviewable artifact with signal summary, blast radius, evidence, confidence, and the next approved step. The output is dark-theme, shareable, and useful for handoff rather than just another chat answer.
+Start from an alert or operator question, then pull together metrics, logs, traces, topology, host state, and change history in one incident workspace.
 
-### 2. Workflow studio for repeatable operations
+### Workflow Builder
 
 <p align="center">
-  <img src="docs/assets/readme/live/en-workflow-editor.png" alt="Ongrid workflow editor" width="920" />
+  <img src="docs/assets/readme-tour/workflow-editor.png" alt="Workflow builder" width="100%" />
 </p>
 
-Successful investigations can become editable workflows with alert, manual, or scheduled triggers; agent and tool nodes; conditions; notifications; and generated pages or reports.
+Wire triggers, agents, tools, conditions, and notifications into repeatable automations that stay editable and reviewable.
 
-### 3. Approval boundary for write actions
+### Skills Catalog
 
 <p align="center">
-  <img src="docs/assets/readme/en-agent-write-gate.png" alt="Ongrid approval gate" width="920" />
+  <img src="docs/assets/readme-tour/skills-catalog.png" alt="Skills catalog" width="100%" />
 </p>
 
-Ongrid keeps reasoning separate from execution. Agents can propose a restart, config change, command, or remediation step, but humans decide what actually runs.
+Show the built-in skills your agents can call, with descriptions, scope, and a visible inventory for operators.
 
-### 4. Tasks for one-off and recurring operations
+### MCP Servers
 
 <p align="center">
-  <img src="docs/assets/readme/en-tasks.png" alt="Ongrid unified tasks" width="920" />
+  <img src="docs/assets/readme-tour/mcp-servers.png" alt="MCP servers" width="100%" />
 </p>
 
-Scheduled reports, one-off investigations, and generated outputs share the same task surface. Operators can see what generated each report, when it runs next, and which artifacts are ready to review.
+Register external MCP servers and expose their tools to chat agents and workflows with clear runtime and trust boundaries.
 
-### 5. Artifacts center for durable outputs
+### Knowledge Vault
 
 <p align="center">
-  <img src="docs/assets/readme/live/en-artifacts-pages.png" alt="Ongrid artifacts center" width="920" />
+  <img src="docs/assets/readme-tour/knowledge-vault.png" alt="Knowledge vault" width="100%" />
 </p>
 
-Generated RCA pages, operational reports, daily briefs, and customer-ready summaries stay private by default. Operators can inspect, share, and reuse outputs without hunting through chat history.
+Index runbooks, notes, incident history, and repositories so both humans and agents can search the same operational context.
 
-### 6. Governed skills and external MCP tools
+### Artifacts Center
 
 <p align="center">
-  <img src="docs/assets/readme/live/en-skills-catalog.png" alt="Ongrid skills catalog" width="920" />
+  <img src="docs/assets/readme-tour/artifacts-pages.png" alt="Artifacts center" width="100%" />
 </p>
 
-The Skills catalog shows what the agent can call, where it runs, and its risk class. Built-in SRE tools cover observability, devices, incidents, knowledge, cloud actions, artifacts, and messaging.
+Keep generated pages and reports in one place, with private-by-default sharing and a clean handoff for review.
+
+### Monitoring
 
 <p align="center">
-  <img src="docs/assets/readme/live/en-mcp-inventory.png" alt="Ongrid MCP server inventory" width="920" />
+  <img src="docs/assets/readme-tour/monitor.png" alt="Monitoring" width="100%" />
 </p>
 
-External MCP servers bring Grafana, Prometheus, Loki, Tempo, Kubernetes, PagerDuty, GitHub, databases, Terraform, Slack, and internal platforms into the same governed tool inventory.
+Use the built-in observability stack to inspect health, logs, traces, and alert state without leaving the product.
 
-### 7. Observability and fleet context
+### Topology Map
 
 <p align="center">
-  <img src="docs/assets/readme/live/en-monitor.png" alt="Ongrid monitoring dashboard" width="920" />
+  <img src="docs/assets/readme-tour/topology-map.png" alt="Topology map" width="100%" />
 </p>
 
-Operators can inspect fleet CPU, memory, disk, network, logs, traces, and alert state in the same workspace where the agent performs evidence collection.
+Visualize dependencies and blast radius so an incident can be traced back through the affected service graph.
 
-### 8. Topology and blast-radius mapping
+### Approval and Write Gate
 
 <p align="center">
-  <img src="docs/assets/readme/live/en-topology-map.png" alt="Ongrid topology graph" width="920" />
+  <img src="docs/assets/readme-tour/agent-write-gate.png" alt="Approval and write gate" width="100%" />
 </p>
 
-Topology connects apps, services, clusters, devices, and failure domains. RCA workflows can explain affected systems and dependency paths instead of treating alerts as isolated metrics.
-
-### 9. Knowledge base and source context
-
-<p align="center">
-  <img src="docs/assets/readme/live/en-knowledge-vault.png" alt="Ongrid knowledge base" width="920" />
-</p>
-
-Runbooks, architecture notes, built-in diagnostics, incident templates, uploaded docs, and repositories become searchable context that both operators and agents can inspect.
+Keep risky actions behind approvals, with a visible policy boundary before anything changes production systems.
 
 ## Integrations
 
