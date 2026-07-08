@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/ongridio/ongrid/internal/edgeagent/cmdpolicy"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
@@ -30,8 +31,8 @@ func TestBashTool_Info(t *testing.T) {
 	if info.WhenToUse == "" {
 		t.Errorf("WhenToUse empty")
 	}
-	if !strings.Contains(info.WhenToUse, "read-only") {
-		t.Errorf("WhenToUse should advertise read-only: %q", info.WhenToUse)
+	if !strings.Contains(info.WhenToUse, "inline approval card") && !strings.Contains(info.WhenToUse, "确认卡") {
+		t.Errorf("WhenToUse should advertise mutating approval: %q", info.WhenToUse)
 	}
 	var schema map[string]any
 	if err := json.Unmarshal(info.Parameters, &schema); err != nil {
@@ -48,6 +49,81 @@ func TestBashTool_Info(t *testing.T) {
 	cmd, _ := props["cmd"].(map[string]any)
 	if cmd == nil || cmd["type"] != "string" {
 		t.Errorf("cmd should remain a SINGLE string (one cmd, many devices): %+v", cmd)
+	}
+}
+
+func TestBashTool_LegacyDeviceIDRunsReadOnly(t *testing.T) {
+	fc := &fakeCaller{
+		respBody: mustMarshal(tunnel.BashExecResponse{Allowed: true, Stdout: "ok"}),
+	}
+	tool := newBashTool(t, &fakeHostFilesResolver{mapping: map[uint64]uint64{1: 7}}, fc)
+	out, err := tool.InvokableRun(context.Background(), `{"device_id":1,"cmd":"df -h"}`)
+	if err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+	var req tunnel.BashExecRequest
+	if err := json.Unmarshal(fc.lastBody, &req); err != nil {
+		t.Fatalf("decode req: %v", err)
+	}
+	if req.Unrestricted {
+		t.Fatalf("read command should not run unrestricted")
+	}
+	var env BashBatchResponse
+	if err := json.Unmarshal([]byte(out), &env); err != nil {
+		t.Fatalf("decode out: %v", err)
+	}
+	if len(env.Results) != 1 || env.Results[0].DeviceID != 1 {
+		t.Fatalf("legacy device_id should normalize to one device result: %+v", env.Results)
+	}
+}
+
+type recHostBashProposer struct {
+	deviceIDs []uint64
+	command   string
+	called    bool
+}
+
+func (r *recHostBashProposer) ProposeAndAwait(_ context.Context, deviceIDs []uint64, command string, _ int, _, _ string, _ uint64) (string, error) {
+	r.called = true
+	r.deviceIDs = append([]uint64(nil), deviceIDs...)
+	r.command = command
+	return `{"status":"executed"}`, nil
+}
+
+func TestBashTool_MutatingCommandUsesApprovalInsteadOfDispatch(t *testing.T) {
+	fc := &fakeCaller{respBody: mustMarshal(tunnel.BashExecResponse{Allowed: true})}
+	prop := &recHostBashProposer{}
+	tool := &BashTool{caller: fc, resolver: &fakeHostFilesResolver{mapping: map[uint64]uint64{1: 7}}, proposer: prop}
+	ctx := basetool.WithHostWriteAllowed(context.Background(), true)
+	out, err := tool.InvokableRun(ctx, `{"device_ids":[1],"cmd":"rm /opt/ongrid/edge/edge-bundle-linux-amd64-v0.9.0.tar.gz"}`)
+	if err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+	if !prop.called {
+		t.Fatalf("mutating command should go through approval proposer")
+	}
+	if fc.lastName != "" {
+		t.Fatalf("mutating command must not dispatch before approval, dispatched %q", fc.lastName)
+	}
+	if !strings.Contains(out, "executed") {
+		t.Fatalf("expected proposer result, got %s", out)
+	}
+}
+
+func TestBashTool_ReadCommandWithShellSyntaxDoesNotUseApproval(t *testing.T) {
+	fc := &fakeCaller{respBody: mustMarshal(tunnel.BashExecResponse{Allowed: false, Reason: "unsupported shell operator"})}
+	prop := &recHostBashProposer{}
+	tool := &BashTool{caller: fc, resolver: &fakeHostFilesResolver{mapping: map[uint64]uint64{1: 7}}, proposer: prop}
+	ctx := basetool.WithHostWriteAllowed(context.Background(), true)
+	_, err := tool.InvokableRun(ctx, `{"device_ids":[1],"cmd":"docker system df 2>/dev/null && echo \"---\""}`)
+	if err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+	if prop.called {
+		t.Fatalf("read command with unsupported shell syntax should be handled by cmdpolicy, not approval")
+	}
+	if fc.lastName != tunnel.MethodBashExec {
+		t.Fatalf("expected direct bash dispatch, got %q", fc.lastName)
 	}
 }
 

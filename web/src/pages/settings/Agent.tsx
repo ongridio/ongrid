@@ -73,8 +73,8 @@ export default function SettingsAgent() {
         </p>
         <p className="mb-4 rounded-md border border-amber-600/40 bg-amber-100 px-3 py-2 text-[11px] leading-relaxed text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200/90">
           {tr(
-            '⚠️ 开启后，主机命令工具（host_bash）将以无限制方式在边端执行（绕过命令安全策略 cmdpolicy，等同 root，且自动执行无人工确认）。仅在你完全信任该环境时开启。',
-            '⚠️ When enabled, the host command tool (host_bash) runs unrestricted on the edge (bypassing the cmdpolicy command sandbox — effectively root, and auto-executed without per-command approval). Only enable in environments you fully trust.',
+            '⚠️ 开启后，主机命令工具（host_bash）可以发起边端写操作；读命令仍走只读 cmdpolicy，写命令会先弹出内置确认卡，批准后才以高权限在边端执行。仅在你完全信任该环境时开启。',
+            '⚠️ When enabled, host_bash may propose write actions on edge hosts; read commands still use the read-only cmdpolicy, while write commands show an inline approval card and only run with elevated privileges after approval. Only enable in environments you fully trust.',
           )}
         </p>
 

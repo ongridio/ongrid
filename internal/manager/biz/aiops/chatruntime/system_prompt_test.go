@@ -1,8 +1,11 @@
 package chatruntime
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 )
 
 func TestComposeSystemPrompt_Empty(t *testing.T) {
@@ -101,5 +104,43 @@ func TestComposeSystemPrompt_EmptyPromptBody(t *testing.T) {
 	// nil agentProfile ⇒ coordinator routing block precedes the skill header.
 	if got != coordinatorToolRouting+"\n\n[能力: empty]" {
 		t.Errorf("got %q", got)
+	}
+}
+
+func TestBuildToolCapabilityDigest_IncludesDynamicTools(t *testing.T) {
+	bag := []basetool.BaseTool{
+		&originTool{name: "query_devices", class: "read", origin: basetool.OriginBuiltin},
+		&originTool{name: "query_traceql", class: "read", origin: basetool.OriginBuiltin},
+		&originTool{name: "mcp__k8s__namespaces_list", class: "read", origin: basetool.OriginMCP},
+		&originTool{name: "skill__custom__foo", class: "read", origin: basetool.OriginSkill},
+		&originTool{name: "internal_big_tool", class: "read", origin: basetool.OriginBuiltin},
+	}
+	got := buildToolCapabilityDigest(bag)
+	for _, want := range []string{
+		"本轮可见能力",
+		"query_devices [builtin/read]",
+		"query_traceql [builtin/read]",
+		"mcp__k8s__namespaces_list [mcp/read]",
+		"skill__custom__foo [skill/read]",
+		"mcp/read=1",
+		"skill/read=1",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("capability digest missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "internal_big_tool [builtin/read]") {
+		t.Fatalf("digest should not list arbitrary builtin tools; got:\n%s", got)
+	}
+}
+
+func TestBuildToolCapabilityDigest_TruncatesLargeDynamicSets(t *testing.T) {
+	bag := make([]basetool.BaseTool, 0, maxCapabilityDigestTools+3)
+	for i := 0; i < maxCapabilityDigestTools+3; i++ {
+		bag = append(bag, &originTool{name: fmt.Sprintf("mcp__srv__tool_%02d", i), class: "read", origin: basetool.OriginMCP})
+	}
+	got := buildToolCapabilityDigest(bag)
+	if !strings.Contains(got, "more; use ToolSearch") {
+		t.Fatalf("digest should truncate and point to ToolSearch, got:\n%s", got)
 	}
 }

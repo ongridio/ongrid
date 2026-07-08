@@ -122,12 +122,12 @@ func TestQueryPromQLTool_LookbackClamp(t *testing.T) {
 	pq := &fakePromQuerier{resp: &promquery.InstantResult{ResultType: "matrix", Result: json.RawMessage("[]")}}
 	tool := NewQueryPromQLTool(pq, nil)
 
-	// 100h lookback should clamp to 24h.
-	if _, err := tool.InvokableRun(context.Background(), `{"expr":"up","lookback_seconds":360000}`); err != nil {
+	// 10d lookback should clamp to 7d.
+	if _, err := tool.InvokableRun(context.Background(), `{"expr":"up","lookback_seconds":864000}`); err != nil {
 		t.Fatalf("InvokableRun: %v", err)
 	}
 	span := pq.gotEnd.Sub(pq.gotStart)
-	if span < 23*time.Hour || span > 25*time.Hour {
-		t.Errorf("span = %v, want ~24h after clamp", span)
+	if span < 167*time.Hour || span > 169*time.Hour {
+		t.Errorf("span = %v, want ~7d after clamp", span)
 	}
 }

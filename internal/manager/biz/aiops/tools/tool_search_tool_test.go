@@ -110,6 +110,30 @@ func TestToolSearch_KeywordMatch(t *testing.T) {
 	}
 }
 
+func TestToolSearch_KeywordMatchUsesWhenToUse(t *testing.T) {
+	trace := &stubTool{
+		name:        "query_traceql",
+		description: "query Tempo spans",
+		whenToUse:   "When the user provides specific trace IDs or asks for span chains.",
+		class:       "read",
+		params:      `{"type":"object","properties":{"query":{"type":"string"}}}`,
+	}
+	bag := &stubBagProvider{all: []basetool.BaseTool{
+		newStub("query_knowledge", "search runbooks"),
+		trace,
+	}}
+	ts := NewToolSearchTool(bag, nil)
+
+	out, err := ts.InvokableRun(context.Background(), `{"query":"trace ids"}`)
+	if err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+	resp := decodeToolSearchResp(t, out)
+	if len(resp.Tools) != 1 || resp.Tools[0].Name != "query_traceql" {
+		t.Fatalf("trace-id capability should resolve to query_traceql, got %+v", resp.Tools)
+	}
+}
+
 // TestToolSearch_NoMatchReturnsEmpty confirms the empty case is a
 // well-formed empty array, not an error.
 func TestToolSearch_NoMatchReturnsEmpty(t *testing.T) {
@@ -154,11 +178,11 @@ func TestToolSearch_MaxResultsClamp(t *testing.T) {
 		args       string
 		wantAtMost int
 	}{
-		{"default-cap", `{"query":"file"}`, 5},                      // default 5
-		{"explicit-2", `{"query":"file","max_results":2}`, 2},       // explicit
-		{"clamp-high", `{"query":"file","max_results":99}`, 20},     // clamped to 20
-		{"clamp-zero", `{"query":"file","max_results":0}`, 5},       // 0 → default 5
-		{"clamp-negative", `{"query":"file","max_results":-3}`, 5},  // negative → default 5
+		{"default-cap", `{"query":"file"}`, 5},                     // default 5
+		{"explicit-2", `{"query":"file","max_results":2}`, 2},      // explicit
+		{"clamp-high", `{"query":"file","max_results":99}`, 20},    // clamped to 20
+		{"clamp-zero", `{"query":"file","max_results":0}`, 5},      // 0 → default 5
+		{"clamp-negative", `{"query":"file","max_results":-3}`, 5}, // negative → default 5
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

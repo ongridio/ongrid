@@ -249,11 +249,11 @@ type postMessageResp struct {
 }
 
 type messageDTO struct {
-	ID         string    `json:"id"`
-	Role       string    `json:"role"`
-	Content    string    `json:"content,omitempty"`
-	ToolCallID string    `json:"tool_call_id,omitempty"`
-	ToolName   string    `json:"tool_name,omitempty"`
+	ID         string `json:"id"`
+	Role       string `json:"role"`
+	Content    string `json:"content,omitempty"`
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	ToolName   string `json:"tool_name,omitempty"`
 	// Model carries the LLM model id that produced the message — only
 	// populated for role=assistant rows where the routing layer recorded
 	// it. Older rows return "" so the SPA can fall back to "default".
@@ -555,6 +555,7 @@ func eventPayload(sessionID string, e agent.Event) any {
 			"session_id":   sessionID,
 			"approval_id":  e.Approval.ApprovalID,
 			"tool_call_id": e.Approval.ToolCallID,
+			"kind":         e.Approval.Kind,
 			"command":      e.Approval.Command,
 		}
 		if len(e.Approval.Credentials) > 0 {
@@ -839,8 +840,8 @@ func toPostMessageResp(sessionID string, reply *agent.Reply) postMessageResp {
 	tcs := make([]toolCallDTO, 0, len(reply.ToolCalls))
 	for _, tc := range reply.ToolCalls {
 		dto := toolCallDTO{
-			Name:   tc.ToolName,
-			Status: tc.Status,
+			Name:     tc.ToolName,
+			Status:   tc.Status,
 			DeviceID: tc.DeviceID,
 		}
 		if tc.EndedAt != nil {

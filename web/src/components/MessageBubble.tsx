@@ -162,9 +162,9 @@ function ToolCallSummaryBlock({
   // Inline approval (HLD-017): a cloud_bash / MCP tool result that returned
   // pending_approval renders an in-conversation 批准/拒绝 card instead of a
   // plain result blob — the human confirms right here, no inbox detour.
-  const approvalID = pendingApprovalID(call.result);
-  if (approvalID) {
-    return <PendingApprovalCard approvalID={approvalID} command={argCommandText(call.arguments)} />;
+  const approval = pendingApproval(call.result);
+  if (approval) {
+    return <PendingApprovalCard approvalID={approval.id} kind={approval.kind} command={argCommandText(call.arguments)} />;
   }
   const configDraft = !isError ? asConfigDraft(call.result) : null;
   return (
@@ -459,14 +459,16 @@ function Dot({ delay }: { delay: number }) {
 
 // --- HLD-017 inline approval -------------------------------------------
 
-// pendingApprovalID returns the approval id when a tool result is the
-// cloud_bash "pending_approval" envelope, else "".
-function pendingApprovalID(result: unknown): string {
+// pendingApproval returns the approval metadata when a tool result is the
+// approval "pending_approval" envelope, else null.
+function pendingApproval(result: unknown): { id: string; kind: string } | null {
   if (result && typeof result === 'object') {
     const r = result as Record<string, unknown>;
-    if (r.status === 'pending_approval' && typeof r.approval_id === 'string') return r.approval_id;
+    if (r.status === 'pending_approval' && typeof r.approval_id === 'string') {
+      return { id: r.approval_id, kind: typeof r.kind === 'string' ? r.kind : 'cloud_bash' };
+    }
   }
-  return '';
+  return null;
 }
 
 function argCommandText(args: unknown): string {
@@ -480,13 +482,15 @@ function argCommandText(args: unknown): string {
 // PendingApprovalCard renders an in-conversation approve/reject prompt for a
 // proposed cloud_bash command. Approve runs the command (the backend executor
 // runs synchronously) and shows the result inline; reject discards it.
-function PendingApprovalCard({ approvalID, command }: { approvalID: string; command: string }) {
+function PendingApprovalCard({ approvalID, kind, command }: { approvalID: string; kind: string; command: string }) {
   const { tr } = useI18n();
   const [state, setState] = useState<'loading' | 'idle' | 'busy' | 'done' | 'rejected' | 'error' | 'stale'>('loading');
   const [resultText, setResultText] = useState('');
   const [errText, setErrText] = useState('');
   const [cmd, setCmd] = useState(command);
+  const [approvalKind, setApprovalKind] = useState(kind);
   const [creds, setCreds] = useState<string[]>([]);
+  const isHostBash = approvalKind === 'host_bash';
 
   // Reconcile with the authoritative server status on mount. When chat
   // history is reloaded, the persisted tool message carries only the result
@@ -501,6 +505,7 @@ function PendingApprovalCard({ approvalID, command }: { approvalID: string; comm
     getApproval(approvalID)
       .then((a) => {
         if (!alive) return;
+        setApprovalKind(a.kind || approvalKind);
         try {
           const p = JSON.parse(a.payload) as { command?: string; credentials?: string[] };
           if (!cmd && p.command) setCmd(p.command);
@@ -562,7 +567,11 @@ function PendingApprovalCard({ approvalID, command }: { approvalID: string; comm
     <div className="w-full overflow-hidden rounded-lg bg-zinc-900/30 text-xs ring-1 ring-zinc-800/80">
       <div className="flex items-center gap-2 border-b border-zinc-800/60 px-3 py-2">
         <ShieldAlert size={13} className="text-amber-500/90" />
-        <span className="font-medium text-zinc-200">{tr('需要你确认才能在云端执行', 'Needs your approval to run in the cloud')}</span>
+        <span className="font-medium text-zinc-200">
+          {isHostBash
+            ? tr('需要你确认才能在边端主机执行', 'Needs your approval to run on the edge host')
+            : tr('需要你确认才能在云端执行', 'Needs your approval to run in the cloud')}
+        </span>
       </div>
       <div className="px-3 pb-2.5">
         <pre className="mb-2 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-zinc-950 p-2 text-[11px] text-zinc-300">

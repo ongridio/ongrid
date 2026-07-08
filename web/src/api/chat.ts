@@ -229,6 +229,7 @@ export type ToolStreamEvent = {
 export type ApprovalPendingStreamEvent = {
   approval_id: string;
   tool_call_id?: string;
+  kind?: string;
   command?: string;
   credentials?: string[];
 };

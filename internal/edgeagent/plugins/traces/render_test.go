@@ -35,8 +35,9 @@ func TestRenderHappyPath(t *testing.T) {
 		"http:",
 		"endpoint: 0.0.0.0:4317",
 		"endpoint: 0.0.0.0:4318",
-		// Exporter URL pointing at manager public endpoint.
-		"endpoint: https://manager.example.com/v1/traces",
+		// Exporter URL points at the full manager public trace endpoint.
+		// Use traces_endpoint so otelcol does not append /v1/traces again.
+		"traces_endpoint: https://manager.example.com/v1/traces",
 		// Resource attribute injection: edge_id is the load-bearing label.
 		"key: device_id",
 		`value: "42"`,
@@ -54,6 +55,25 @@ func TestRenderHappyPath(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("rendered config missing %q\n--- full body ---\n%s", want, body)
 		}
+	}
+}
+
+func TestRenderUsesTraceSpecificEndpoint(t *testing.T) {
+	cfg := plugins.PluginConfig{
+		Enabled:  true,
+		EdgeID:   1,
+		Endpoint: "https://manager.example.com/v1/traces",
+	}
+	out, err := render(cfg)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	body := string(out)
+	if !strings.Contains(body, "traces_endpoint: https://manager.example.com/v1/traces") {
+		t.Fatalf("expected traces_endpoint, got:\n%s", body)
+	}
+	if strings.Contains(body, "\n    endpoint: https://manager.example.com/v1/traces") {
+		t.Fatalf("full trace URL must not be rendered as otlphttp.endpoint; otelcol would append /v1/traces again:\n%s", body)
 	}
 }
 

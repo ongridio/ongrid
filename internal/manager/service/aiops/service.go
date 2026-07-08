@@ -133,7 +133,7 @@ type Caller struct {
 func (c Caller) IsAdmin() bool { return c.Role == RoleAdmin }
 
 // IsViewer reports whether the caller is the read-only role
-//Used by mutating endpoints (create / send / ack / agent
+// Used by mutating endpoints (create / send / ack / agent
 // CRUD) to refuse the action before touching storage.
 func (c Caller) IsViewer() bool { return c.Role == RoleViewer }
 
@@ -464,6 +464,7 @@ func translateRuntimeEvent(ev chatruntime.Event) agent.Event {
 		out.Approval = &agent.ApprovalPendingEvent{
 			ApprovalID:  ev.Approval.ApprovalID,
 			ToolCallID:  ev.Approval.ToolCallID,
+			Kind:        ev.Approval.Kind,
 			Command:     ev.Approval.Command,
 			Credentials: ev.Approval.Credentials,
 		}

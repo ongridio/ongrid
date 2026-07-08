@@ -386,7 +386,29 @@ func (rt *Runtime) AppendToolBag(tools []basetool.BaseTool) {
 	if rt == nil || len(tools) == 0 {
 		return
 	}
-	rt.cfg.ToolBag = append(rt.cfg.ToolBag, tools...)
+	index := map[string]int{}
+	for i, t := range rt.cfg.ToolBag {
+		if t == nil {
+			continue
+		}
+		if info, err := t.Info(context.Background()); err == nil && info != nil {
+			index[info.Name] = i
+		}
+	}
+	for _, t := range tools {
+		if t == nil {
+			continue
+		}
+		info, err := t.Info(context.Background())
+		if err == nil && info != nil {
+			if i, ok := index[info.Name]; ok {
+				rt.cfg.ToolBag[i] = t
+				continue
+			}
+			index[info.Name] = len(rt.cfg.ToolBag)
+		}
+		rt.cfg.ToolBag = append(rt.cfg.ToolBag, t)
+	}
 }
 
 // AgentRegistry exposes the registry for narrow read-only callers
@@ -628,6 +650,9 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (*Reply, error) {
 		if catalog := buildAgentCatalog(rt.cfg.AgentRegistry); catalog != "" {
 			basePrompt = basePrompt + "\n\n" + catalog
 		}
+	}
+	if digest := buildToolCapabilityDigest(sessionToolBag); digest != "" {
+		basePrompt = basePrompt + "\n\n" + digest
 	}
 	systemPrompt := ComposeSystemPrompt(basePrompt, activeSkills, nil)
 

@@ -16,8 +16,9 @@ import (
 // is meant to ingest from local apps (host or sibling containers on the
 // docker bridge), not from the public internet.
 //
-// Exporters: a single OTLP HTTP exporter pointing at the manager
-// /v1/traces endpoint.
+// Exporters: a single OTLP HTTP exporter pointing at the manager /v1/traces
+// endpoint. Use traces_endpoint, not endpoint: otlphttp.endpoint is a base URL
+// and the collector appends /v1/traces for trace batches.
 //
 // Pipeline: receivers -> resourcedetection (light) -> resource (inject
 // device_id) -> batch -> exporter. We deliberately keep tail_sampling out of
@@ -59,7 +60,7 @@ processors:
 
 exporters:
   otlphttp/manager:
-    endpoint: {{ .Endpoint }}
+    traces_endpoint: {{ .Endpoint }}
     {{- if .AuthHeader }}
     headers:
       Authorization: "{{ .AuthHeader }}"

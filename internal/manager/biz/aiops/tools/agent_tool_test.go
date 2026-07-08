@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 )
 
 // fakeSpawner is an in-memory WorkerSpawner used by the AgentTool /
@@ -109,7 +111,8 @@ func TestAgentTool_Sync_HappyPath(t *testing.T) {
 	}
 	tool := NewAgentTool(sp, fakeSubagentRegistry{names: map[string]bool{"general-purpose": true}}, nil)
 
-	out, err := tool.InvokableRun(context.Background(),
+	ctx := basetool.WithSessionID(context.Background(), "parent-session-1")
+	out, err := tool.InvokableRun(ctx,
 		`{"description":"check disk","subagent_type":"general-purpose","prompt":"please check"}`)
 	if err != nil {
 		t.Fatalf("InvokableRun: %v", err)
@@ -129,6 +132,9 @@ func TestAgentTool_Sync_HappyPath(t *testing.T) {
 	}
 	if sp.lastSpawn.AgentName != "general-purpose" {
 		t.Errorf("forwarded agent name = %q", sp.lastSpawn.AgentName)
+	}
+	if sp.lastSpawn.ParentSession != "parent-session-1" {
+		t.Errorf("forwarded parent session = %q", sp.lastSpawn.ParentSession)
 	}
 	if sp.lastSpawn.Background {
 		t.Errorf("Background should default false")

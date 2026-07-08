@@ -363,6 +363,7 @@ export default function TracesPage() {
             </button>
             <GrafanaLinkButton
               onClick={onOpenGrafana}
+              label={tr('在 Grafana 中打开', 'Open in Grafana')}
               title={tr('跳到 Grafana Tempo Explore — 支持火焰图 / 服务图等高级分析', 'Jump to Grafana Tempo Explore — flame graph / service graph / etc.')}
             />
             <button

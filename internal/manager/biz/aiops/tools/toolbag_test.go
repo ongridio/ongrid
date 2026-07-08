@@ -255,7 +255,7 @@ func TestToolBag_AppendBucketsByTier(t *testing.T) {
 	beforeDeferred := len(bag.DeferredTools())
 
 	bag.Append(newStub("host_find_large_files", "")) // specialty
-	bag.Append(newStub("query_promql", ""))     // core
+	bag.Append(newStub("query_promql", ""))          // core
 
 	if got := len(bag.DeferredTools()); got != beforeDeferred+1 {
 		t.Errorf("expected +1 deferred, got %d (was %d)", got, beforeDeferred)
@@ -269,6 +269,29 @@ func TestToolBag_AppendBucketsByTier(t *testing.T) {
 				t.Errorf("query_promql should be core (full schema)")
 			}
 		}
+	}
+}
+
+func TestCoreToolNames_UsesRegistrationTier(t *testing.T) {
+	in := []basetool.BaseTool{
+		newStub("query_devices", ""),
+		newStub("query_traceql", ""),
+		newStub("query_knowledge", ""),
+		newStub("read_source", ""),
+		newStub("host_find_large_files", ""),
+		newStub("query_devices", "duplicate"),
+	}
+	got := CoreToolNames(in)
+	for _, want := range []string{"query_devices", "query_traceql", "query_knowledge", "read_source"} {
+		if !containsNameString(got, want) {
+			t.Errorf("CoreToolNames missing %q: %v", want, got)
+		}
+	}
+	if containsNameString(got, "host_find_large_files") {
+		t.Errorf("CoreToolNames should not include specialty tool: %v", got)
+	}
+	if countNameString(got, "query_devices") != 1 {
+		t.Errorf("CoreToolNames should de-duplicate query_devices, got %v", got)
 	}
 }
 
@@ -307,4 +330,23 @@ func containsToolName(t *testing.T, tools []basetool.BaseTool, name string) bool
 		}
 	}
 	return false
+}
+
+func containsNameString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func countNameString(values []string, want string) int {
+	count := 0
+	for _, value := range values {
+		if value == want {
+			count++
+		}
+	}
+	return count
 }

@@ -1,15 +1,15 @@
 // Package agent is the OpenAI tool-calling loop.
 //
 // The Run method:
-//   1. loads the session's recent history
-//   2. appends + persists the new user message
-//   3. loops at most cfg.MaxIterations times:
-//      - calls llm.Chat with history + tool schemas
-//      - persists the assistant message (+ any tool_calls issued)
-//      - if no tool calls, returns the Reply
-//      - otherwise executes each tool with a per-call timeout, persists each
-//        tool-result message, and continues the loop
-//   4. returns ErrMaxIterationsReached if the loop falls through
+//  1. loads the session's recent history
+//  2. appends + persists the new user message
+//  3. loops at most cfg.MaxIterations times:
+//     - calls llm.Chat with history + tool schemas
+//     - persists the assistant message (+ any tool_calls issued)
+//     - if no tool calls, returns the Reply
+//     - otherwise executes each tool with a per-call timeout, persists each
+//     tool-result message, and continues the loop
+//  4. returns ErrMaxIterationsReached if the loop falls through
 //
 // MaxIterations defaults to 30. Per-tool timeout defaults to 15s.
 package agent
@@ -110,6 +110,7 @@ type Event struct {
 type ApprovalPendingEvent struct {
 	ApprovalID  string
 	ToolCallID  string
+	Kind        string
 	Command     string
 	Credentials []string
 }
@@ -225,12 +226,12 @@ var legacyKernelMutatingTools = map[string]struct{}{
 
 // Agent wires the LLM client, tool registry, and session repo.
 type Agent struct {
-	llm       llm.Client
-	tools     *tools.Registry
-	sessions  biz.SessionRepo
-	cfg       Config
-	log       *slog.Logger
-	resolver  MentionResolver
+	llm      llm.Client
+	tools    *tools.Registry
+	sessions biz.SessionRepo
+	cfg      Config
+	log      *slog.Logger
+	resolver MentionResolver
 }
 
 // SetMentionResolver wires the @-mention hydrator. Optional — when
@@ -604,7 +605,7 @@ func (a *Agent) runInternal(ctx context.Context, sessionID string, userID uint64
 			toolEvt := ToolEvent{
 				ToolCallID: tcRow.ID,
 				Name:       tc.Name,
-				DeviceID:     tcRow.DeviceID,
+				DeviceID:   tcRow.DeviceID,
 				Status:     status,
 				StartedAt:  startedAt,
 				EndedAt:    &endedAt,
