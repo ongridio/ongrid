@@ -51,7 +51,6 @@ func TestTunnelConfigFetcherAppliesKubernetesLogsDefaults(t *testing.T) {
 	t.Setenv("ONGRID_K8S_NODE_NAME", "kind-worker")
 	t.Setenv("ONGRID_MANAGER_PUBLIC_URL", "https://manager.example.com/")
 	t.Setenv("ONGRID_K8S_ENROLL_TLS_INSECURE", "true")
-	t.Setenv("ONGRID_K8S_ENROLL_TLS_INSECURE", "true")
 
 	client := &fakeTunnelClient{resp: tunnel.GetPluginConfigsResponse{
 		EdgeID: 100,

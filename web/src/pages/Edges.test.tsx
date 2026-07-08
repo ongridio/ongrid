@@ -95,7 +95,7 @@ describe('EdgesPage', () => {
     );
   });
 
-  it('隐藏 Controller Edge，并把 controller runtime 标到所在 Node Edge', async () => {
+  it('隐藏 Controller Edge，并把 K8s Controller 标到所在 Node Edge', async () => {
     render(
       <MemoryRouter>
         <EdgesPage />
@@ -107,7 +107,6 @@ describe('EdgesPage', () => {
     expect(screen.queryByText('kind-controller')).not.toBeInTheDocument();
     expect(screen.getByText('K8s Node')).toBeInTheDocument();
     expect(screen.getByText('K8s Controller')).toBeInTheDocument();
-    expect(screen.queryByText('Controller Runtime')).not.toBeInTheDocument();
     expect(screen.getByText('kind-local')).toBeInTheDocument();
     expect(screen.getByText('bare-metal-1')).toBeInTheDocument();
     expect(screen.getByText('bm-1')).toBeInTheDocument();

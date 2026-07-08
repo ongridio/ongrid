@@ -18,7 +18,7 @@
 - manager 新增 bootstrap API：`POST /internal/k8s/enroll`，由 nginx 显式代理，使用 bootstrap bearer token 认证。
 - `ongrid-edge` 支持 Kubernetes bootstrap env，启动时先 enroll 获取独立 edge credentials，再连接 frontier tunnel。
 - `register_edge` 支持可选 `kubernetes` 信息；node 模式继续创建/关联 host Device，controller/serverless-controller 模式不创建 host Device。
-- 设备视图只展示实际 host/node Edge；controller edge 作为集群控制面接入身份保留，不在设备清单中单独成行。full-node 场景下 controller Pod 所在节点会在对应 K8s Node Edge 上标记 `Controller Runtime`。
+- 设备视图只展示实际 host/node Edge；controller edge 作为集群控制面接入身份保留，不在设备清单中单独成行。full-node 场景下 controller Pod 所在节点会在对应 K8s Node Edge 上标记 `K8s Controller`。
 - `ongrid-edge-controller` 已通过 Kubernetes ServiceAccount 定期 list Nodes/Workloads/Pods/Events，并通过 tunnel `push_k8s_inventory` 上报当前快照；新增可选 watch 事件触发 resync，默认开启，RBAC 不足时自动降级为周期 list。
 - manager 已入库 `k8s_nodes` / `k8s_workloads` / `k8s_pods` / `k8s_events` 当前快照；full-node 模式按集群范围清理本轮未出现的旧 Pod/Workload/Event，serverless/namespace 范围只清理对应 namespace。
 - controller 已上报 Kubernetes List `metadata.resourceVersion`、分资源 `resource_versions` 和 `collect_duration_ms`；watch 使用对应 `resourceVersion` 续接，收到 ADDED/MODIFIED/DELETED 事件后触发快照 resync；manager 已在 `k8s_clusters` 记录 `inventory_synced_at`、`inventory_resource_version`、`inventory_scope`、`inventory_sync_duration_ms`、`inventory_watch_lag_seconds`，API 和前端详情页已展示第一版同步水位/滞后信息。

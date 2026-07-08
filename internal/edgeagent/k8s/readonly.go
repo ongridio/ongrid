@@ -22,10 +22,10 @@ const (
 	maxPodLogSinceSeconds     = int64(24 * 3600)
 )
 
-// RegisterReadOnlyHandlers installs live Kubernetes controller handlers. The
-// name is kept for compatibility with the existing call site; write actions are
-// limited to execute_k8s_action and are gated manager-side before dispatch.
-func (p *InventoryPusher) RegisterReadOnlyHandlers() {
+// RegisterHandlers installs live Kubernetes controller handlers. Mutating
+// requests are limited to execute_k8s_action and are gated manager-side before
+// dispatch.
+func (p *InventoryPusher) RegisterHandlers() {
 	if p == nil || p.client == nil || p.api == nil {
 		return
 	}

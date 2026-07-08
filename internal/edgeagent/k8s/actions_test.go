@@ -11,7 +11,7 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
 
-func TestRegisterReadOnlyHandlersExecuteK8sActionRolloutRestart(t *testing.T) {
+func TestRegisterHandlersExecuteK8sActionRolloutRestart(t *testing.T) {
 	var patchSeen bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer test-token" {
@@ -57,7 +57,7 @@ func TestRegisterReadOnlyHandlersExecuteK8sActionRolloutRestart(t *testing.T) {
 			http:    srv.Client(),
 		},
 	}
-	p.RegisterReadOnlyHandlers()
+	p.RegisterHandlers()
 	h := fc.handlers[tunnel.MethodExecuteK8sAction]
 	if h == nil {
 		t.Fatalf("handler %q not registered", tunnel.MethodExecuteK8sAction)

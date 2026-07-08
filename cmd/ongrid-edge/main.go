@@ -195,7 +195,7 @@ func main() {
 		if err != nil {
 			log.Warn("k8s inventory disabled", slog.Any("err", err))
 		} else {
-			pusher.RegisterReadOnlyHandlers()
+			pusher.RegisterHandlers()
 			eg.Go(func() error { return pusher.Run(egCtx) })
 		}
 		metricsEndpoint := strings.TrimSpace(os.Getenv("ONGRID_K8S_METRICS_ENDPOINT"))

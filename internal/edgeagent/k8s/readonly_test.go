@@ -12,7 +12,7 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
 
-func TestRegisterReadOnlyHandlersDescribePod(t *testing.T) {
+func TestRegisterHandlersDescribePod(t *testing.T) {
 	var gotPaths []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPaths = append(gotPaths, r.URL.Path)
@@ -69,7 +69,7 @@ func TestRegisterReadOnlyHandlersDescribePod(t *testing.T) {
 			http:    srv.Client(),
 		},
 	}
-	p.RegisterReadOnlyHandlers()
+	p.RegisterHandlers()
 	h := fc.handlers[tunnel.MethodDescribeK8sResource]
 	if h == nil {
 		t.Fatalf("handler %q not registered", tunnel.MethodDescribeK8sResource)
@@ -135,7 +135,7 @@ func TestDescribeResourceRejectsDisallowedKind(t *testing.T) {
 	}
 }
 
-func TestRegisterReadOnlyHandlersQueryPodLogs(t *testing.T) {
+func TestRegisterHandlersQueryPodLogs(t *testing.T) {
 	var gotPath, gotContainer, gotTail, gotLimit, gotSince, gotPrevious, gotTimestamps string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
@@ -166,7 +166,7 @@ func TestRegisterReadOnlyHandlersQueryPodLogs(t *testing.T) {
 			http:    srv.Client(),
 		},
 	}
-	p.RegisterReadOnlyHandlers()
+	p.RegisterHandlers()
 	h := fc.handlers[tunnel.MethodQueryK8sLogs]
 	if h == nil {
 		t.Fatalf("handler %q not registered", tunnel.MethodQueryK8sLogs)
@@ -212,7 +212,7 @@ func TestQueryPodLogsRejectsWrongCluster(t *testing.T) {
 		info:   tunnel.KubernetesInfo{ClusterID: 7, Role: "controller"},
 		api:    &apiClient{baseURL: "http://127.0.0.1", token: "token", http: http.DefaultClient},
 	}
-	p.RegisterReadOnlyHandlers()
+	p.RegisterHandlers()
 	h := fc.handlers[tunnel.MethodQueryK8sLogs]
 	body, _ := json.Marshal(tunnel.KubernetesPodLogsRequest{
 		ClusterID: 8,

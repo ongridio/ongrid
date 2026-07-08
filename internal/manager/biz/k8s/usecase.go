@@ -114,8 +114,6 @@ type Config struct {
 	TunnelAddr        string
 	BootstrapTokenTTL time.Duration
 	ChartRef          string
-	// ChartPath is kept for older callers/tests; prefer ChartRef.
-	ChartPath string
 }
 
 type Usecase struct {
@@ -1277,9 +1275,6 @@ func (u *Usecase) installCommand(clusterID uint64, mode, token string) string {
 func installChartRef(cfg Config, publicURL string) string {
 	if chartRef := strings.TrimSpace(cfg.ChartRef); chartRef != "" {
 		return chartRef
-	}
-	if chartPath := strings.TrimSpace(cfg.ChartPath); chartPath != "" {
-		return chartPath
 	}
 	publicURL = strings.TrimRight(strings.TrimSpace(publicURL), "/")
 	if publicURL == "" {
