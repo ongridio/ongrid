@@ -1,7 +1,7 @@
 mode: full-node
 
 namespace:
-  create: true
+  create: false
   name: ongrid-system
 
 manager:

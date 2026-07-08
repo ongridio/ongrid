@@ -76,7 +76,8 @@ var QueryK8sLogsSchema = json.RawMessage(`{
   }
 }`)
 
-const queryK8sLogsWhenToUse = "Use when the user asks for recent Pod logs, CrashLoopBackOff output, or application stdout/stderr for one named Pod. " +
+const queryK8sLogsWhenToUse = "Use when the user asks for recent Pod logs, CrashLoopBackOff output, application stdout/stderr for one named Pod, or when Kubernetes fault triage cannot confirm the root cause from snapshot/events/describe alone. " +
+	"For CrashLoopBackOff, restart_count>0, liveness/readiness probe failures, or init-container failures after startup, sample bounded logs only when logs add material evidence or the user asks to verify pods/log access. " +
 	"This is a bounded live Kubernetes pods/log fallback; prefer query_logql for production log search and query_k8s_snapshot for counts/lists. " +
 	"Never use this for kubectl exec, Secret reads, arbitrary files, or high-volume log export."
 
@@ -119,6 +120,10 @@ type QueryK8sLogsArgs struct {
 
 type queryK8sLogsResponse struct {
 	Source           string                           `json:"source"`
+	Status           string                           `json:"status"`
+	ErrorKind        string                           `json:"error_kind,omitempty"`
+	Error            string                           `json:"error,omitempty"`
+	Advice           string                           `json:"advice,omitempty"`
 	ControllerEdgeID uint64                           `json:"controller_edge_id"`
 	Result           tunnel.KubernetesPodLogsResponse `json:"result"`
 }
@@ -155,6 +160,9 @@ func (t *QueryK8sLogsTool) InvokableRun(ctx context.Context, argsJSON string, _ 
 	}
 	respBody, err := t.caller.Call(callCtx, *cluster.ControllerEdgeID, tunnel.MethodQueryK8sLogs, body)
 	if err != nil {
+		if out, ok := k8sLogsUnavailableResponse(*cluster.ControllerEdgeID, req, err); ok {
+			return out, nil
+		}
 		return "", fmt.Errorf("%s: dispatch: %w", ToolNameQueryK8sLogs, err)
 	}
 	var resp tunnel.KubernetesPodLogsResponse
@@ -163,6 +171,7 @@ func (t *QueryK8sLogsTool) InvokableRun(ctx context.Context, argsJSON string, _ 
 	}
 	out, err := json.Marshal(queryK8sLogsResponse{
 		Source:           "kubernetes_pods_log",
+		Status:           "ok",
 		ControllerEdgeID: *cluster.ControllerEdgeID,
 		Result:           resp,
 	})
@@ -170,6 +179,47 @@ func (t *QueryK8sLogsTool) InvokableRun(ctx context.Context, argsJSON string, _ 
 		return "", fmt.Errorf("%s: marshal response: %w", ToolNameQueryK8sLogs, err)
 	}
 	return string(out), nil
+}
+
+func k8sLogsUnavailableResponse(controllerEdgeID uint64, req tunnel.KubernetesPodLogsRequest, err error) (string, bool) {
+	msg := strings.TrimSpace(err.Error())
+	lower := strings.ToLower(msg)
+	errorKind := ""
+	advice := ""
+	switch {
+	case strings.Contains(lower, "kubernetes api forbidden") || strings.Contains(lower, "pods/log") && strings.Contains(lower, "forbidden"):
+		errorKind = "rbac_forbidden"
+		advice = "controller ServiceAccount cannot read pods/log for this namespace; grant get on pods/log or use Loki/log gateway if available."
+	case strings.Contains(lower, "not found"):
+		errorKind = "not_found"
+		advice = "pod, namespace, or container was not found in the live Kubernetes API; refresh the snapshot before retrying."
+	default:
+		return "", false
+	}
+	out, marshalErr := json.Marshal(queryK8sLogsResponse{
+		Source:           "kubernetes_pods_log",
+		Status:           "unavailable",
+		ErrorKind:        errorKind,
+		Error:            msg,
+		Advice:           advice,
+		ControllerEdgeID: controllerEdgeID,
+		Result: tunnel.KubernetesPodLogsResponse{
+			ClusterID:    req.ClusterID,
+			Namespace:    req.Namespace,
+			Pod:          req.Pod,
+			Container:    req.Container,
+			Previous:     req.Previous,
+			SinceSeconds: req.SinceSeconds,
+			TailLines:    req.TailLines,
+			LimitBytes:   req.LimitBytes,
+			Timestamps:   req.Timestamps,
+			FetchedAt:    time.Now().Unix(),
+		},
+	})
+	if marshalErr != nil {
+		return "", false
+	}
+	return string(out), true
 }
 
 func normalizeQueryK8sLogsArgs(in QueryK8sLogsArgs) (tunnel.KubernetesPodLogsRequest, error) {

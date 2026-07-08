@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"testing"
 
@@ -63,6 +64,45 @@ func TestQueryK8sLogsToolCallsControllerEdge(t *testing.T) {
 	}
 	if got.Source != "kubernetes_pods_log" || got.ControllerEdgeID != 77 || got.Result.Logs != "hello world" || got.Result.LineCount != 1 {
 		t.Fatalf("unexpected output: %+v", got)
+	}
+}
+
+func TestQueryK8sLogsReturnsUnavailableForRBACForbidden(t *testing.T) {
+	fc := &fakeCaller{
+		respErr: errors.New("query_k8s_logs: get pod logs default/api-1: kubernetes api forbidden"),
+	}
+	tool := NewQueryK8sLogsTool(fc, newFakeK8sSnapshotReader(), slog.Default())
+
+	out, err := tool.InvokableRun(context.Background(), `{"cluster_id":1,"namespace":"default","pod":"api-1","previous":true}`)
+	if err != nil {
+		t.Fatalf("InvokableRun should return structured unavailable result: %v", err)
+	}
+
+	var got struct {
+		Source           string `json:"source"`
+		Status           string `json:"status"`
+		ErrorKind        string `json:"error_kind"`
+		Error            string `json:"error"`
+		Advice           string `json:"advice"`
+		ControllerEdgeID uint64 `json:"controller_edge_id"`
+		Result           struct {
+			ClusterID uint64 `json:"cluster_id"`
+			Namespace string `json:"namespace"`
+			Pod       string `json:"pod"`
+			Previous  bool   `json:"previous"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, out)
+	}
+	if got.Source != "kubernetes_pods_log" || got.Status != "unavailable" || got.ErrorKind != "rbac_forbidden" {
+		t.Fatalf("unexpected unavailable envelope: %+v", got)
+	}
+	if got.ControllerEdgeID != 77 || got.Result.ClusterID != 1 || got.Result.Namespace != "default" || got.Result.Pod != "api-1" || !got.Result.Previous {
+		t.Fatalf("unexpected identity in unavailable result: %+v", got)
+	}
+	if got.Error == "" || got.Advice == "" {
+		t.Fatalf("error/advice should be present: %+v", got)
 	}
 }
 

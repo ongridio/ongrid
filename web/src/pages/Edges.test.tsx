@@ -105,9 +105,9 @@ describe('EdgesPage', () => {
     expect(await screen.findAllByText('ongrid-k8s-control-plane')).toHaveLength(2);
     expect(screen.queryByText('k8s:kind-local:ongrid-k8s-control-plane')).not.toBeInTheDocument();
     expect(screen.queryByText('kind-controller')).not.toBeInTheDocument();
-    expect(screen.queryByText('K8s Controller')).not.toBeInTheDocument();
     expect(screen.getByText('K8s Node')).toBeInTheDocument();
-    expect(screen.getByText('Controller Runtime')).toBeInTheDocument();
+    expect(screen.getByText('K8s Controller')).toBeInTheDocument();
+    expect(screen.queryByText('Controller Runtime')).not.toBeInTheDocument();
     expect(screen.getByText('kind-local')).toBeInTheDocument();
     expect(screen.getByText('bare-metal-1')).toBeInTheDocument();
     expect(screen.getByText('bm-1')).toBeInTheDocument();

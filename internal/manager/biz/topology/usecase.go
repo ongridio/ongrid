@@ -437,6 +437,140 @@ func (u *Usecase) PruneKubernetesNodeMemberships(ctx context.Context, clusterNod
 	return nil
 }
 
+// DeleteKubernetesCluster removes topology rows owned by a deleted Kubernetes
+// cluster. It deletes every relation attached to the mirrored cluster node
+// first, then deletes the cluster node itself. Device nodes are preserved.
+func (u *Usecase) DeleteKubernetesCluster(ctx context.Context, clusterID uint64, currentNodeID *uint64) error {
+	if u.nodes == nil || u.relations == nil {
+		return errs.ErrNotWiredYet
+	}
+	if clusterID == 0 {
+		return fmt.Errorf("%w: cluster_id required", errs.ErrInvalid)
+	}
+	nodes, err := u.findOwnedKubernetesClusterNodes(ctx, clusterID, currentNodeID)
+	if err != nil {
+		return err
+	}
+	for _, n := range nodes {
+		rels, err := u.relations.List(ctx, RelationListFilter{SrcOrDstID: n.ID})
+		if err != nil {
+			return err
+		}
+		for _, rel := range rels {
+			if err := u.relations.Delete(ctx, rel.ID); err != nil {
+				return err
+			}
+		}
+		if err := u.nodes.Delete(ctx, n.ID); err != nil && !errors.Is(err, errs.ErrNotFound) {
+			return err
+		}
+		if u.log != nil {
+			u.log.Info("topology: removed kubernetes cluster node",
+				slog.Uint64("k8s_cluster_id", clusterID),
+				slog.Uint64("node_id", n.ID),
+				slog.Int("relations", len(rels)))
+		}
+	}
+	return nil
+}
+
+// PruneDeletedKubernetesClusters removes mirrored Kubernetes cluster nodes
+// whose source cluster no longer exists in the Kubernetes inventory. Device
+// nodes and manually created cluster nodes are preserved.
+func (u *Usecase) PruneDeletedKubernetesClusters(ctx context.Context, activeClusterIDs []uint64) error {
+	if u.nodes == nil || u.relations == nil {
+		return errs.ErrNotWiredYet
+	}
+	active := make(map[uint64]struct{}, len(activeClusterIDs))
+	for _, id := range activeClusterIDs {
+		if id != 0 {
+			active[id] = struct{}{}
+		}
+	}
+	type staleCluster struct {
+		clusterID uint64
+		nodeID    uint64
+	}
+	stale := make([]staleCluster, 0)
+	seen := map[uint64]struct{}{}
+	const pageSize = 200
+	for offset := 0; ; offset += pageSize {
+		rows, err := u.nodes.List(ctx, NodeListFilter{
+			Type:   string(model.NodeTypeCluster),
+			Limit:  pageSize,
+			Offset: offset,
+		})
+		if err != nil {
+			return err
+		}
+		for _, n := range rows {
+			if _, ok := seen[n.ID]; ok {
+				continue
+			}
+			clusterID, owned, validID := topologyKubernetesClusterProps(n.PropsJSON)
+			if !owned || !validID {
+				continue
+			}
+			if _, ok := active[clusterID]; ok {
+				continue
+			}
+			stale = append(stale, staleCluster{clusterID: clusterID, nodeID: n.ID})
+			seen[n.ID] = struct{}{}
+		}
+		if len(rows) < pageSize {
+			break
+		}
+	}
+	for _, item := range stale {
+		nodeID := item.nodeID
+		if err := u.DeleteKubernetesCluster(ctx, item.clusterID, &nodeID); err != nil {
+			return fmt.Errorf("delete stale k8s topology cluster %d: %w", item.clusterID, err)
+		}
+	}
+	return nil
+}
+
+func (u *Usecase) findOwnedKubernetesClusterNodes(ctx context.Context, clusterID uint64, currentNodeID *uint64) ([]*model.Node, error) {
+	out := make([]*model.Node, 0, 1)
+	seen := map[uint64]struct{}{}
+	if currentNodeID != nil && *currentNodeID != 0 {
+		n, err := u.nodes.Get(ctx, *currentNodeID)
+		if err == nil {
+			if n.Type == string(model.NodeTypeCluster) {
+				if match, owned := topologyPropsMatchKubernetesCluster(n.PropsJSON, clusterID); owned && match {
+					out = append(out, n)
+					seen[n.ID] = struct{}{}
+				}
+			}
+		} else if !errors.Is(err, errs.ErrNotFound) {
+			return nil, err
+		}
+	}
+	const pageSize = 200
+	for offset := 0; ; offset += pageSize {
+		rows, err := u.nodes.List(ctx, NodeListFilter{
+			Type:   string(model.NodeTypeCluster),
+			Limit:  pageSize,
+			Offset: offset,
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, n := range rows {
+			if _, ok := seen[n.ID]; ok {
+				continue
+			}
+			if match, owned := topologyPropsMatchKubernetesCluster(n.PropsJSON, clusterID); owned && match {
+				out = append(out, n)
+				seen[n.ID] = struct{}{}
+			}
+		}
+		if len(rows) < pageSize {
+			return out, nil
+		}
+	}
+}
+
 func kubernetesClusterPropsJSON(clusterID uint64, uid, mode, status string) (string, error) {
 	props := struct {
 		Source       string `json:"source"`
@@ -480,20 +614,25 @@ func kubernetesNodeMembershipPropsJSON(clusterID, deviceID uint64, nodeName, nod
 }
 
 func topologyPropsMatchKubernetesCluster(propsJSON string, clusterID uint64) (match bool, owned bool) {
+	id, owned, validID := topologyKubernetesClusterProps(propsJSON)
+	return owned && validID && id == clusterID, owned
+}
+
+func topologyKubernetesClusterProps(propsJSON string) (clusterID uint64, owned bool, validID bool) {
 	propsJSON = strings.TrimSpace(propsJSON)
 	if propsJSON == "" {
-		return false, false
+		return 0, false, false
 	}
 	var props map[string]any
 	if err := json.Unmarshal([]byte(propsJSON), &props); err != nil {
-		return false, false
+		return 0, false, false
 	}
 	source, _ := props["source"].(string)
 	if source != "kubernetes" {
-		return false, false
+		return 0, false, false
 	}
 	id, ok := jsonUint64(props["k8s_cluster_id"])
-	return ok && id == clusterID, true
+	return id, true, ok
 }
 
 func jsonUint64(v any) (uint64, bool) {

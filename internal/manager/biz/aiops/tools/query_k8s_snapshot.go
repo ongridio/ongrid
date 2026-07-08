@@ -16,7 +16,7 @@ import (
 const ToolNameQueryK8sSnapshot = "query_k8s_snapshot"
 
 const QueryK8sSnapshotDescription = "Query the manager's Kubernetes DB snapshot for cluster, node, workload, pod, and event inventory. " +
-	"Use this for counts, lists, status summaries, and K8s object correlation; it does not call the live Kubernetes API."
+	"Use this for counts, lists, status summaries, namespace fault triage, and K8s object correlation; it does not call the live Kubernetes API."
 
 var QueryK8sSnapshotSchema = json.RawMessage(`{
   "type": "object",
@@ -93,8 +93,9 @@ var QueryK8sSnapshotSchema = json.RawMessage(`{
 }`)
 
 const queryK8sSnapshotWhenToUse = "When the user asks Kubernetes inventory questions such as current pod count, abnormal pods, " +
-	"deployment readiness, cluster/node/workload lists, or related Events. This reads the manager DB snapshot by design. " +
-	"NOT for live describe/logs/exec/restart/scale/delete; use the live K8s/controller tools when those exist."
+	"deployment readiness, cluster/node/workload lists, namespace fault analysis, or related Events. For namespace fault triage, " +
+	"collect workloads, pods, and warning Events once, then use describe_k8s_resource only for ambiguous Pods and query_k8s_logs only for containers that actually start or restart. " +
+	"This reads the manager DB snapshot by design. NOT for live describe/logs/exec/restart/scale/delete; use the live K8s/controller tools when those exist."
 
 const queryK8sSnapshotCallTimeout = 10 * time.Second
 

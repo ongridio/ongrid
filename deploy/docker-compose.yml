@@ -113,6 +113,8 @@ services:
       # Public URL the manager hands out to edges as the data-plane
       # endpoint for plugin telemetry (ADR-014 / ADR-015).
       ONGRID_PUBLIC_URL: ${ONGRID_PUBLIC_URL:-}
+      ONGRID_TUNNEL_ADDR: ${ONGRID_TUNNEL_ADDR:-}
+      ONGRID_K8S_CHART_REF: ${ONGRID_K8S_CHART_REF:-}
       # Built-in host alert thresholds over push_host_metrics.
       ONGRID_ALERT_ENABLED: ${ONGRID_ALERT_ENABLED:-true}
       ONGRID_ALERT_COOLDOWN: ${ONGRID_ALERT_COOLDOWN:-10m}

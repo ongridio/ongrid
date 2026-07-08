@@ -31,6 +31,11 @@ type Config struct {
 	// push logs/traces).
 	PublicURL string
 
+	// K8sChartRef is the Helm chart reference shown in Kubernetes onboarding
+	// commands. Empty means derive a public chart URL from PublicURL.
+	// env: ONGRID_K8S_CHART_REF
+	K8sChartRef string
+
 	DB             DBConfig
 	JWT            JWTConfig
 	OpenAI         OpenAIConfig
@@ -363,6 +368,7 @@ func Load() (*Config, error) {
 		MetricsAddr: getEnv("ONGRID_METRICS_ADDR", ":9100"),
 		TunnelAddr:  getEnv("ONGRID_TUNNEL_ADDR", ":40012"),
 		PublicURL:   getEnv("ONGRID_PUBLIC_URL", ""),
+		K8sChartRef: getEnv("ONGRID_K8S_CHART_REF", ""),
 		Logs:        LogsConfig{URL: getEnv("ONGRID_LOG_QUERY_URL", "http://loki:3100")},
 		Traces:      TracesConfig{URL: getEnv("ONGRID_TRACE_QUERY_URL", "http://tempo:3200")},
 	}

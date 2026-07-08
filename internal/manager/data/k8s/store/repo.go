@@ -151,6 +151,38 @@ func (r *Repo) UpdateClusterTopologyNode(ctx context.Context, id, nodeID uint64)
 	return nil
 }
 
+func (r *Repo) ListClusterEdgeIDs(ctx context.Context, clusterID uint64) ([]uint64, error) {
+	var rows []struct {
+		EdgeID uint64 `gorm:"column:edge_id"`
+	}
+	if err := r.db.WithContext(ctx).Raw(`
+		SELECT edge_id
+		FROM (
+			SELECT controller_edge_id AS edge_id
+			FROM k8s_clusters
+			WHERE id = ? AND controller_edge_id IS NOT NULL AND controller_edge_id <> 0
+			UNION
+			SELECT edge_id
+			FROM k8s_nodes
+			WHERE cluster_id = ? AND edge_id IS NOT NULL AND edge_id <> 0
+			UNION
+			SELECT controller_edge_id AS edge_id
+			FROM k8s_installations
+			WHERE cluster_id = ? AND controller_edge_id IS NOT NULL AND controller_edge_id <> 0
+		) AS cluster_edges
+		ORDER BY edge_id ASC
+	`, clusterID, clusterID, clusterID).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]uint64, 0, len(rows))
+	for _, row := range rows {
+		if row.EdgeID != 0 {
+			out = append(out, row.EdgeID)
+		}
+	}
+	return out, nil
+}
+
 func (r *Repo) DeleteCluster(ctx context.Context, id uint64) error {
 	res := r.db.WithContext(ctx).Delete(&model.Cluster{}, id)
 	if res.Error != nil {

@@ -2,6 +2,7 @@ package k8s
 
 import (
 	"testing"
+	"time"
 
 	biz "github.com/ongridio/ongrid/internal/manager/biz/k8s"
 	model "github.com/ongridio/ongrid/internal/manager/model/k8s"
@@ -9,11 +10,15 @@ import (
 
 func TestClusterCapabilitiesFromModel(t *testing.T) {
 	edgeID := uint64(42)
+	now := time.Now().UTC()
 
 	fullNode := clusterCapabilitiesFromModel(&model.Cluster{
+		Status:                   model.ClusterStatusOnline,
 		Mode:                     model.ModeFullNode,
 		ControllerEdgeID:         &edgeID,
 		InventoryResourceVersion: "12345",
+		LastSeenAt:               &now,
+		InventorySyncedAt:        &now,
 	})
 	assertCapabilityStatus(t, fullNode, "inventory", capabilityStatusReady)
 	assertCapabilityStatus(t, fullNode, "node-metrics", capabilityStatusReady)
@@ -22,8 +27,10 @@ func TestClusterCapabilitiesFromModel(t *testing.T) {
 	assertCapabilityStatus(t, fullNode, "host-access", capabilityStatusDegraded)
 
 	serverless := clusterCapabilitiesFromModel(&model.Cluster{
+		Status:           model.ClusterStatusOnline,
 		Mode:             model.ModeServerless,
 		ControllerEdgeID: &edgeID,
+		LastSeenAt:       &now,
 	})
 	assertCapabilityStatus(t, serverless, "inventory", capabilityStatusDegraded)
 	assertCapabilityStatus(t, serverless, "node-metrics", capabilityStatusNotApplicable)
@@ -41,10 +48,14 @@ func TestClusterCapabilitiesFromModel(t *testing.T) {
 
 func TestClusterCapabilitiesUseNodeCoverage(t *testing.T) {
 	edgeID := uint64(42)
+	now := time.Now().UTC()
 	cluster := &model.Cluster{
+		Status:                   model.ClusterStatusOnline,
 		Mode:                     model.ModeFullNode,
 		ControllerEdgeID:         &edgeID,
 		InventoryResourceVersion: "12345",
+		LastSeenAt:               &now,
+		InventorySyncedAt:        &now,
 	}
 
 	partial := biz.NodeCoverage{ClusterID: 1, Total: 5, EdgeLinked: 3, DeviceLinked: 3}
@@ -64,6 +75,26 @@ func TestClusterCapabilitiesUseNodeCoverage(t *testing.T) {
 	if dto.NodeEdgeCoverage.Missing != 2 || dto.NodeEdgeCoverage.Percent != 60 {
 		t.Fatalf("node edge coverage = %+v, want missing=2 percent=60", dto.NodeEdgeCoverage)
 	}
+}
+
+func TestClusterDTOUsesEffectiveOfflineStatusForStaleOnlineCluster(t *testing.T) {
+	edgeID := uint64(42)
+	old := time.Now().UTC().Add(-(clusterOnlineTTL + time.Minute))
+	cluster := &model.Cluster{
+		Mode:                     model.ModeFullNode,
+		Status:                   model.ClusterStatusOnline,
+		ControllerEdgeID:         &edgeID,
+		InventoryResourceVersion: "12345",
+		LastSeenAt:               &old,
+		InventorySyncedAt:        &old,
+	}
+
+	dto := clusterDTOFromModel(cluster)
+	if dto.Status != model.ClusterStatusOffline {
+		t.Fatalf("dto status = %q, want %q", dto.Status, model.ClusterStatusOffline)
+	}
+	assertCapabilityStatus(t, dto.Capabilities, "inventory", capabilityStatusUnavailable)
+	assertCapabilityStatus(t, dto.Capabilities, "events", capabilityStatusUnavailable)
 }
 
 func assertCapabilityStatus(t *testing.T, items []clusterCapabilityDTO, key, want string) {

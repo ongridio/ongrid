@@ -19,6 +19,8 @@ import (
 
 const roleAdmin = "admin"
 
+const clusterOnlineTTL = 90 * time.Second
+
 type Service interface {
 	CreateCluster(ctx context.Context, in biz.CreateClusterInput) (*biz.ClusterRegistration, error)
 	ListClusters(ctx context.Context, f biz.ListClustersFilter) ([]*model.Cluster, error)
@@ -106,7 +108,12 @@ func (h *Handler) listClusters(w http.ResponseWriter, r *http.Request) {
 	}
 	dto := make([]clusterDTO, 0, len(items))
 	for _, item := range items {
-		dto = append(dto, clusterDTOFromModel(item))
+		coverage, err := h.svc.GetNodeCoverage(r.Context(), item.ID)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		dto = append(dto, clusterDTOFromModelWithCoverage(item, &coverage))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"items":  dto,
@@ -561,12 +568,13 @@ func clusterDTOFromModelWithCoverage(c *model.Cluster, coverage *biz.NodeCoverag
 	if c.UID != nil {
 		uid = *c.UID
 	}
+	status := clusterEffectiveStatus(c, time.Now().UTC())
 	return clusterDTO{
 		ID:                            c.ID,
 		Name:                          c.Name,
 		UID:                           uid,
 		Mode:                          c.Mode,
-		Status:                        c.Status,
+		Status:                        status,
 		Capabilities:                  clusterCapabilitiesFromModelWithCoverage(c, coverage),
 		NodeEdgeCoverage:              nodeEdgeCoverageDTOFromBiz(coverage),
 		ControllerEdgeID:              c.ControllerEdgeID,
@@ -586,6 +594,38 @@ func clusterDTOFromModelWithCoverage(c *model.Cluster, coverage *biz.NodeCoverag
 		CreatedAt:                     c.CreatedAt,
 		UpdatedAt:                     c.UpdatedAt,
 	}
+}
+
+func clusterEffectiveStatus(c *model.Cluster, now time.Time) string {
+	if c == nil {
+		return ""
+	}
+	status := strings.TrimSpace(c.Status)
+	if status != model.ClusterStatusOnline {
+		return status
+	}
+	last := clusterLastActivityAt(c)
+	if last == nil {
+		return model.ClusterStatusOffline
+	}
+	if now.Sub(last.UTC()) > clusterOnlineTTL {
+		return model.ClusterStatusOffline
+	}
+	return status
+}
+
+func clusterLastActivityAt(c *model.Cluster) *time.Time {
+	if c == nil {
+		return nil
+	}
+	var out *time.Time
+	if c.LastSeenAt != nil {
+		out = c.LastSeenAt
+	}
+	if c.InventorySyncedAt != nil && (out == nil || c.InventorySyncedAt.After(*out)) {
+		out = c.InventorySyncedAt
+	}
+	return out
 }
 
 func nodeEdgeCoverageDTOFromBiz(coverage *biz.NodeCoverage) *nodeEdgeCoverageDTO {
@@ -627,8 +667,9 @@ func clusterCapabilitiesFromModelWithCoverage(c *model.Cluster, coverage *biz.No
 	}
 	mode := strings.TrimSpace(c.Mode)
 	serverless := mode == model.ModeServerless
-	hasController := c.ControllerEdgeID != nil && *c.ControllerEdgeID != 0
-	hasInventory := strings.TrimSpace(c.InventoryResourceVersion) != ""
+	online := clusterEffectiveStatus(c, time.Now().UTC()) == model.ClusterStatusOnline
+	hasController := online && c.ControllerEdgeID != nil && *c.ControllerEdgeID != 0
+	hasInventory := online && strings.TrimSpace(c.InventoryResourceVersion) != ""
 
 	return []clusterCapabilityDTO{
 		{

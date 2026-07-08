@@ -161,6 +161,113 @@ func TestEnsureKubernetesNodeMembershipCreatesAndPrunes(t *testing.T) {
 	}
 }
 
+func TestDeleteKubernetesClusterRemovesOwnedNodeAndRelations(t *testing.T) {
+	uc := newUC(t)
+	ctx := context.Background()
+
+	clusterID, err := uc.EnsureKubernetesCluster(ctx, 7, nil, "prod", "", "full-node", "online")
+	if err != nil {
+		t.Fatalf("EnsureKubernetesCluster() error = %v", err)
+	}
+	dev, err := uc.CreateNode(ctx, string(model.NodeTypeDevice), "node-a", "")
+	if err != nil {
+		t.Fatalf("CreateNode(device) error = %v", err)
+	}
+	app, err := uc.CreateNode(ctx, string(model.NodeTypeApp), "checkout", "")
+	if err != nil {
+		t.Fatalf("CreateNode(app) error = %v", err)
+	}
+	manualCluster, err := uc.CreateNode(ctx, string(model.NodeTypeCluster), "manual-prod", "")
+	if err != nil {
+		t.Fatalf("CreateNode(manual cluster) error = %v", err)
+	}
+	if err := uc.EnsureKubernetesNodeMembership(ctx, clusterID, dev.ID, 7, 101, "node-a", "uid-a"); err != nil {
+		t.Fatalf("EnsureKubernetesNodeMembership() error = %v", err)
+	}
+	if _, err := uc.CreateRelation(ctx, app.ID, clusterID, model.RelDependsOn, ""); err != nil {
+		t.Fatalf("CreateRelation(app->cluster) error = %v", err)
+	}
+
+	if err := uc.DeleteKubernetesCluster(ctx, 7, &clusterID); err != nil {
+		t.Fatalf("DeleteKubernetesCluster() error = %v", err)
+	}
+	if _, err := uc.GetNode(ctx, clusterID); !errors.Is(err, errs.ErrNotFound) {
+		t.Fatalf("deleted k8s cluster node lookup error = %v, want ErrNotFound", err)
+	}
+	if _, err := uc.GetNode(ctx, dev.ID); err != nil {
+		t.Fatalf("device node should remain, got %v", err)
+	}
+	if _, err := uc.GetNode(ctx, app.ID); err != nil {
+		t.Fatalf("app node should remain, got %v", err)
+	}
+	if _, err := uc.GetNode(ctx, manualCluster.ID); err != nil {
+		t.Fatalf("manual cluster node should remain, got %v", err)
+	}
+	rels, total, err := uc.ListRelations(ctx, biz.RelationListFilter{SrcOrDstID: clusterID})
+	if err != nil {
+		t.Fatalf("ListRelations() error = %v", err)
+	}
+	if total != 0 || len(rels) != 0 {
+		t.Fatalf("relations after delete total=%d len=%d, want 0", total, len(rels))
+	}
+}
+
+func TestPruneDeletedKubernetesClustersRemovesOnlyStaleOwnedClusters(t *testing.T) {
+	uc := newUC(t)
+	ctx := context.Background()
+
+	activeCluster, err := uc.EnsureKubernetesCluster(ctx, 7, nil, "active", "", "full-node", "online")
+	if err != nil {
+		t.Fatalf("EnsureKubernetesCluster(active) error = %v", err)
+	}
+	staleCluster, err := uc.EnsureKubernetesCluster(ctx, 8, nil, "stale", "", "full-node", "offline")
+	if err != nil {
+		t.Fatalf("EnsureKubernetesCluster(stale) error = %v", err)
+	}
+	manualCluster, err := uc.CreateNode(ctx, string(model.NodeTypeCluster), "manual", "")
+	if err != nil {
+		t.Fatalf("CreateNode(manual cluster) error = %v", err)
+	}
+	dev, err := uc.CreateNode(ctx, string(model.NodeTypeDevice), "node-a", "")
+	if err != nil {
+		t.Fatalf("CreateNode(device) error = %v", err)
+	}
+	app, err := uc.CreateNode(ctx, string(model.NodeTypeApp), "checkout", "")
+	if err != nil {
+		t.Fatalf("CreateNode(app) error = %v", err)
+	}
+	if err := uc.EnsureKubernetesNodeMembership(ctx, staleCluster, dev.ID, 8, 101, "node-a", "uid-a"); err != nil {
+		t.Fatalf("EnsureKubernetesNodeMembership(stale) error = %v", err)
+	}
+	if _, err := uc.CreateRelation(ctx, app.ID, staleCluster, model.RelDependsOn, ""); err != nil {
+		t.Fatalf("CreateRelation(app->stale) error = %v", err)
+	}
+
+	if err := uc.PruneDeletedKubernetesClusters(ctx, []uint64{7}); err != nil {
+		t.Fatalf("PruneDeletedKubernetesClusters() error = %v", err)
+	}
+	if _, err := uc.GetNode(ctx, staleCluster); !errors.Is(err, errs.ErrNotFound) {
+		t.Fatalf("stale k8s cluster node lookup error = %v, want ErrNotFound", err)
+	}
+	for name, id := range map[string]uint64{
+		"active k8s cluster": activeCluster,
+		"manual cluster":     manualCluster.ID,
+		"device":             dev.ID,
+		"app":                app.ID,
+	} {
+		if _, err := uc.GetNode(ctx, id); err != nil {
+			t.Fatalf("%s should remain, got %v", name, err)
+		}
+	}
+	rels, total, err := uc.ListRelations(ctx, biz.RelationListFilter{SrcOrDstID: staleCluster})
+	if err != nil {
+		t.Fatalf("ListRelations(stale) error = %v", err)
+	}
+	if total != 0 || len(rels) != 0 {
+		t.Fatalf("stale relations after prune total=%d len=%d, want 0", total, len(rels))
+	}
+}
+
 func TestDeleteNodeForDeviceRemovesRelationsAndNode(t *testing.T) {
 	uc := newUC(t)
 	ctx := context.Background()

@@ -534,7 +534,7 @@ function EdgeAccessMeta({ attachments }: { attachments: K8sEdgeAttachment[] }) {
           {item.kind === 'k8s-node'
             ? tr('K8s Node', 'K8s node')
             : item.kind === 'k8s-controller-runtime'
-              ? tr('Controller Runtime', 'Controller runtime')
+              ? tr('K8s Controller', 'K8s controller')
               : item.clusterMode === 'serverless'
                 ? tr('Serverless Controller', 'Serverless controller')
                 : tr('K8s Controller', 'K8s controller')}

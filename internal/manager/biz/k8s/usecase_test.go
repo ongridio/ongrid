@@ -65,6 +65,68 @@ func TestUsecaseCreateClusterAndEnrollNode(t *testing.T) {
 	}
 }
 
+func TestInstallCommandDerivesExternalTunnelAddr(t *testing.T) {
+	uc := NewUsecase(newFakeRepo(), newFakeIssuer(), Config{
+		PublicURL:  "https://manager.example.com",
+		TunnelAddr: ":40012",
+	})
+	cmd := uc.installCommand(6, model.ModeFullNode, "token")
+	if !strings.Contains(cmd, "--set-string manager.publicURL='https://manager.example.com'") {
+		t.Fatalf("install command missing publicURL: %s", cmd)
+	}
+	if !strings.Contains(cmd, "--set namespace.create=false") {
+		t.Fatalf("install command should disable chart-managed Namespace when using --create-namespace: %s", cmd)
+	}
+	if !strings.Contains(cmd, "--set-string manager.tunnelAddr='manager.example.com:40012'") {
+		t.Fatalf("install command did not derive tunnelAddr from publicURL: %s", cmd)
+	}
+	if !strings.Contains(cmd, "--set-string manager.tlsInsecure=true") {
+		t.Fatalf("install command missing tlsInsecure for self-signed manager TLS: %s", cmd)
+	}
+	if !strings.Contains(cmd, "--insecure-skip-tls-verify") {
+		t.Fatalf("install command missing Helm chart TLS skip for manager-hosted HTTPS chart: %s", cmd)
+	}
+	if !strings.Contains(cmd, "'https://manager.example.com/edge/k8s/ongrid-edge.tgz'") {
+		t.Fatalf("install command should use manager-hosted chart URL: %s", cmd)
+	}
+}
+
+func TestInstallCommandUsesConfiguredChartRef(t *testing.T) {
+	uc := NewUsecase(newFakeRepo(), newFakeIssuer(), Config{
+		PublicURL: "https://manager.example.com",
+		ChartRef:  "oci://ghcr.io/ongridio/charts/ongrid-edge",
+	})
+	cmd := uc.installCommand(6, model.ModeFullNode, "token")
+	if !strings.Contains(cmd, "'oci://ghcr.io/ongridio/charts/ongrid-edge'") {
+		t.Fatalf("install command should use configured chart ref: %s", cmd)
+	}
+	if strings.Contains(cmd, "--insecure-skip-tls-verify") {
+		t.Fatalf("install command should not add HTTPS chart TLS flag for OCI chart refs: %s", cmd)
+	}
+}
+
+func TestInstallCommandKeepsPlaceholdersWhenExternalAddressUnknown(t *testing.T) {
+	uc := NewUsecase(newFakeRepo(), newFakeIssuer(), Config{
+		TunnelAddr: ":40012",
+	})
+	cmd := uc.installCommand(6, model.ModeFullNode, "token")
+	if !strings.Contains(cmd, "--set-string manager.publicURL='https://<manager>'") {
+		t.Fatalf("install command should keep publicURL placeholder: %s", cmd)
+	}
+	if !strings.Contains(cmd, "--set-string manager.tunnelAddr='<manager>:40012'") {
+		t.Fatalf("install command should keep tunnelAddr placeholder: %s", cmd)
+	}
+	if !strings.Contains(cmd, "--set-string manager.tlsInsecure=true") {
+		t.Fatalf("install command missing tlsInsecure for self-signed manager TLS: %s", cmd)
+	}
+	if !strings.Contains(cmd, "--insecure-skip-tls-verify") {
+		t.Fatalf("install command missing Helm chart TLS skip for placeholder HTTPS chart: %s", cmd)
+	}
+	if !strings.Contains(cmd, "'https://<manager>/edge/k8s/ongrid-edge.tgz'") {
+		t.Fatalf("install command should use placeholder chart URL: %s", cmd)
+	}
+}
+
 func TestUsecaseEnrollRejectsInvalidToken(t *testing.T) {
 	ctx := context.Background()
 	uc := NewUsecase(newFakeRepo(), newFakeIssuer(), Config{})
@@ -214,6 +276,134 @@ func TestUsecaseTopologyReconcilesKubernetesNodesIntoCluster(t *testing.T) {
 	}
 	if keep := mirror.prunes[len(mirror.prunes)-1].keep; len(keep) != 1 || keep[0] != deviceNodeID {
 		t.Fatalf("last prune keep = %v, want [%d]", keep, deviceNodeID)
+	}
+}
+
+func TestUsecaseDeleteClusterDeletesTopologyMirror(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	mirror := &fakeTopologyMirror{}
+	uc := NewUsecase(repo, newFakeIssuer(), Config{})
+	uc.SetTopologyMirror(mirror)
+	reg, err := uc.CreateCluster(ctx, CreateClusterInput{Name: "prod"})
+	if err != nil {
+		t.Fatalf("CreateCluster() error = %v", err)
+	}
+	clusterNodeID := fakeTopologyClusterNodeID(reg.Cluster.ID)
+
+	if err := uc.DeleteCluster(ctx, reg.Cluster.ID); err != nil {
+		t.Fatalf("DeleteCluster() error = %v", err)
+	}
+	if _, err := repo.GetCluster(ctx, reg.Cluster.ID); !errors.Is(err, errs.ErrNotFound) {
+		t.Fatalf("GetCluster(after delete) error = %v, want ErrNotFound", err)
+	}
+	if got := len(mirror.deletions); got != 1 {
+		t.Fatalf("topology deletions = %d, want 1", got)
+	}
+	if got := mirror.deletions[0]; got.clusterID != reg.Cluster.ID || got.currentNodeID == nil || *got.currentNodeID != clusterNodeID {
+		t.Fatalf("topology deletion = %#v, want cluster %d node %d", got, reg.Cluster.ID, clusterNodeID)
+	}
+}
+
+func TestUsecaseDeleteClusterDeletesAssociatedEdges(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	issuer := newFakeIssuer()
+	uc := NewUsecase(repo, issuer, Config{})
+	reg, err := uc.CreateCluster(ctx, CreateClusterInput{Name: "prod"})
+	if err != nil {
+		t.Fatalf("CreateCluster() error = %v", err)
+	}
+	controller, err := uc.Enroll(ctx, EnrollInput{
+		BootstrapToken: reg.BootstrapToken,
+		ClusterID:      reg.Cluster.ID,
+		Role:           model.RoleController,
+		NodeName:       "control-plane",
+		Namespace:      "ongrid-system",
+	})
+	if err != nil {
+		t.Fatalf("Enroll(controller) error = %v", err)
+	}
+	node, err := uc.Enroll(ctx, EnrollInput{
+		BootstrapToken: reg.BootstrapToken,
+		ClusterID:      reg.Cluster.ID,
+		Role:           model.RoleNode,
+		NodeName:       "node-a",
+		NodeUID:        "node-uid-a",
+	})
+	if err != nil {
+		t.Fatalf("Enroll(node) error = %v", err)
+	}
+
+	if err := uc.DeleteCluster(ctx, reg.Cluster.ID); err != nil {
+		t.Fatalf("DeleteCluster() error = %v", err)
+	}
+	want := map[uint64]bool{controller.EdgeID: true, node.EdgeID: true}
+	if len(issuer.deleted) != len(want) {
+		t.Fatalf("deleted edges = %v, want %v", issuer.deleted, want)
+	}
+	for _, got := range issuer.deleted {
+		if !want[got] {
+			t.Fatalf("unexpected deleted edge %d, want %v", got, want)
+		}
+	}
+}
+
+func TestUsecaseDeleteClusterIgnoresMissingAssociatedEdge(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	issuer := newFakeIssuer()
+	uc := NewUsecase(repo, issuer, Config{})
+	reg, err := uc.CreateCluster(ctx, CreateClusterInput{Name: "prod"})
+	if err != nil {
+		t.Fatalf("CreateCluster() error = %v", err)
+	}
+	controller, err := uc.Enroll(ctx, EnrollInput{
+		BootstrapToken: reg.BootstrapToken,
+		ClusterID:      reg.Cluster.ID,
+		Role:           model.RoleController,
+		NodeName:       "control-plane",
+	})
+	if err != nil {
+		t.Fatalf("Enroll(controller) error = %v", err)
+	}
+	delete(issuer.edges, controller.EdgeID)
+
+	if err := uc.DeleteCluster(ctx, reg.Cluster.ID); err != nil {
+		t.Fatalf("DeleteCluster() error = %v", err)
+	}
+	if _, err := repo.GetCluster(ctx, reg.Cluster.ID); !errors.Is(err, errs.ErrNotFound) {
+		t.Fatalf("GetCluster(after delete) error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestUsecaseReconcileTopologyPrunesDeletedClusters(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	mirror := &fakeTopologyMirror{}
+	uc := NewUsecase(repo, newFakeIssuer(), Config{})
+	uc.SetTopologyMirror(mirror)
+	active, err := uc.CreateCluster(ctx, CreateClusterInput{Name: "active"})
+	if err != nil {
+		t.Fatalf("CreateCluster(active) error = %v", err)
+	}
+	deleted, err := uc.CreateCluster(ctx, CreateClusterInput{Name: "deleted"})
+	if err != nil {
+		t.Fatalf("CreateCluster(deleted) error = %v", err)
+	}
+	if err := repo.DeleteCluster(ctx, deleted.Cluster.ID); err != nil {
+		t.Fatalf("repo.DeleteCluster(deleted) error = %v", err)
+	}
+
+	if err := uc.ReconcileTopology(ctx); err != nil {
+		t.Fatalf("ReconcileTopology() error = %v", err)
+	}
+	if got := len(mirror.deletedClusterPrunes); got != 1 {
+		t.Fatalf("deleted cluster prunes = %d, want 1", got)
+	}
+	keep := mirror.deletedClusterPrunes[0]
+	if len(keep) != 1 || keep[0] != active.Cluster.ID {
+		t.Fatalf("deleted cluster prune keep = %v, want [%d]", keep, active.Cluster.ID)
 	}
 }
 
@@ -520,6 +710,23 @@ func (r *fakeRepo) UpdateClusterTopologyNode(_ context.Context, id, nodeID uint6
 	return nil
 }
 
+func (r *fakeRepo) ListClusterEdgeIDs(_ context.Context, clusterID uint64) ([]uint64, error) {
+	c, ok := r.clusters[clusterID]
+	if !ok {
+		return nil, errs.ErrNotFound
+	}
+	var out []uint64
+	if c.ControllerEdgeID != nil {
+		out = append(out, *c.ControllerEdgeID)
+	}
+	for _, n := range r.nodes {
+		if n.ClusterID == clusterID && n.EdgeID != nil {
+			out = append(out, *n.EdgeID)
+		}
+	}
+	return uniqueNonZeroUint64(out), nil
+}
+
 func (r *fakeRepo) DeleteCluster(_ context.Context, id uint64) error {
 	if _, ok := r.clusters[id]; !ok {
 		return errs.ErrNotFound
@@ -799,9 +1006,11 @@ func namespaceLabel(namespace *string) string {
 }
 
 type fakeTopologyMirror struct {
-	clusters    []fakeTopologyCluster
-	memberships []fakeTopologyMembership
-	prunes      []fakeTopologyPrune
+	clusters             []fakeTopologyCluster
+	memberships          []fakeTopologyMembership
+	prunes               []fakeTopologyPrune
+	deletions            []fakeTopologyDeletion
+	deletedClusterPrunes [][]uint64
 }
 
 type fakeTopologyCluster struct {
@@ -826,6 +1035,11 @@ type fakeTopologyPrune struct {
 	clusterNodeID uint64
 	clusterID     uint64
 	keep          []uint64
+}
+
+type fakeTopologyDeletion struct {
+	clusterID     uint64
+	currentNodeID *uint64
 }
 
 func (m *fakeTopologyMirror) EnsureKubernetesCluster(_ context.Context, clusterID uint64, currentNodeID *uint64, name, uid, mode, status string) (uint64, error) {
@@ -858,14 +1072,31 @@ func (m *fakeTopologyMirror) PruneKubernetesNodeMemberships(_ context.Context, c
 	return nil
 }
 
+func (m *fakeTopologyMirror) DeleteKubernetesCluster(_ context.Context, clusterID uint64, currentNodeID *uint64) error {
+	var nodeID *uint64
+	if currentNodeID != nil {
+		cp := *currentNodeID
+		nodeID = &cp
+	}
+	m.deletions = append(m.deletions, fakeTopologyDeletion{clusterID: clusterID, currentNodeID: nodeID})
+	return nil
+}
+
+func (m *fakeTopologyMirror) PruneDeletedKubernetesClusters(_ context.Context, activeClusterIDs []uint64) error {
+	keep := append([]uint64(nil), activeClusterIDs...)
+	m.deletedClusterPrunes = append(m.deletedClusterPrunes, keep)
+	return nil
+}
+
 func fakeTopologyClusterNodeID(clusterID uint64) uint64 {
 	return 900 + clusterID
 }
 
 type fakeIssuer struct {
-	nextID uint64
-	rotate int
-	edges  map[uint64]string
+	nextID  uint64
+	rotate  int
+	edges   map[uint64]string
+	deleted []uint64
 }
 
 func newFakeIssuer() *fakeIssuer {
@@ -886,4 +1117,13 @@ func (i *fakeIssuer) RotateEdgeSecret(_ context.Context, edgeID uint64) (*EdgeCr
 	}
 	i.rotate++
 	return &EdgeCredential{EdgeID: edgeID, AccessKey: accessKey, SecretKey: "sk-rotate-" + strconv.Itoa(i.rotate)}, nil
+}
+
+func (i *fakeIssuer) DeleteEdge(_ context.Context, edgeID uint64) error {
+	if _, ok := i.edges[edgeID]; !ok {
+		return errs.ErrNotFound
+	}
+	delete(i.edges, edgeID)
+	i.deleted = append(i.deleted, edgeID)
+	return nil
 }

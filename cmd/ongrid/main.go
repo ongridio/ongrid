@@ -773,6 +773,7 @@ func main() {
 	k8sUC := managerbizk8s.NewUsecase(k8sRepo, k8sEdgeIdentityIssuer{svc: edgeSvc}, managerbizk8s.Config{
 		PublicURL:  cfg.PublicURL,
 		TunnelAddr: cfg.TunnelAddr,
+		ChartRef:   cfg.K8sChartRef,
 	})
 	k8sSvc := managersvck8s.New(k8sUC)
 	k8sHandler := managerserverk8s.NewHandler(k8sSvc)
@@ -2562,6 +2563,13 @@ func (i k8sEdgeIdentityIssuer) RotateEdgeSecret(ctx context.Context, edgeID uint
 	}, nil
 }
 
+func (i k8sEdgeIdentityIssuer) DeleteEdge(ctx context.Context, edgeID uint64) error {
+	if i.svc == nil {
+		return errs.ErrNotWiredYet
+	}
+	return i.svc.Delete(ctx, edgeID)
+}
+
 // pluginEndpointResolver implements edgebiz.EndpointResolver: maps a
 // plugin name to the URL the edge subprocess should push to. Two-tier
 // resolution:
@@ -3593,15 +3601,23 @@ func ongridBasePrompt() string {
    (c) query_promql 看 disk / network 趋势
    (d) 综合输出。每步都先 1 句话说为什么。完成后给结论，不要再调用工具。
 
-8. **反向 guard**：query_logql 是日志内容索引，不要用来查文件名 / metric / device 列表。query_promql 是时序数据，不要用它确认设备存在（用 query_devices）。
+8. **Kubernetes 排障路径**：用户明确提到 Kubernetes / k8s / cluster / namespace / pod / workload / deployment 时，可以直接使用 K8s 工具，不必派通用 specialist。命名空间或 fault-* 批量异常分析固定按这个顺序：
+   (a) query_k8s_snapshot clusters 确认 cluster_id / mode / controller
+   (b) query_k8s_snapshot workloads 按 namespace 拉 Deployment/ReplicaSet/Job 等期望副本和 ready 副本
+   (c) query_k8s_snapshot pods 按 namespace 拉 Pod phase/reason/restart_count
+   (d) query_k8s_snapshot events 按 namespace 拉 Warning/关键 Event，用 Event message 解释 Pending/ImagePullBackOff/FailedMount/ConfigError/PVC/调度失败
+   (e) 对不明确的 Pod 调 describe_k8s_resource。query_k8s_logs 按需使用：用户明确要求看日志/验证 pods/log 权限，或 CrashLoopBackOff / Error / restart_count>0 / 探针失败 / Init 容器失败这类问题仅靠 Events 和 describe 仍不能确认根因时，再抽样查代表性 Pod 日志（previous=true 优先，tail_lines 50-100 即可）。命名空间批量分析通常最多抽样 1-3 个代表性 Pod，除非用户要求逐个查日志。
+   (f) Pending、ImagePullBackOff、FailedMount、CreateContainerConfigError、缺 PVC/Secret/ConfigMap、nodeSelector/资源不足这类问题优先看 Events，不要为了走流程查日志。query_k8s_logs 返回 status=unavailable / error_kind=rbac_forbidden 时，要说明是 pods/log RBAC 或日志通道能力缺口，不要把它判断成"没有日志"。如果用户要求验证日志权限，结论里要明确写出日志读取是否成功。
 
-9. **PromQL 语法陷阱**：label selector ` + bt + `{device_id="1"}` + bt + ` **只能贴在 metric name 后面**，绝不能跟在 ` + bt + `(表达式)` + bt + ` / ` + bt + `expr * 标量` + bt + ` / ` + bt + `rate(...)[5m])` + bt + ` 之后 —— 那是被监控到的 ` + bt + `parse error: unexpected "{"` + bt + ` 反模式。正确写法是**把 selector 推到每个 metric 上**：
+9. **反向 guard**：query_logql 是日志内容索引，不要用来查文件名 / metric / device 列表。query_promql 是时序数据，不要用它确认设备存在（用 query_devices）。
+
+10. **PromQL 语法陷阱**：label selector ` + bt + `{device_id="1"}` + bt + ` **只能贴在 metric name 后面**，绝不能跟在 ` + bt + `(表达式)` + bt + ` / ` + bt + `expr * 标量` + bt + ` / ` + bt + `rate(...)[5m])` + bt + ` 之后 —— 那是被监控到的 ` + bt + `parse error: unexpected "{"` + bt + ` 反模式。正确写法是**把 selector 推到每个 metric 上**：
    - ✗ ` + bt + `(node_memory_SwapTotal_bytes - node_memory_SwapFree_bytes) / node_memory_SwapTotal_bytes * 100 {device_id="1"}` + bt + `
    - ✓ ` + bt + `(node_memory_SwapTotal_bytes{device_id="1"} - node_memory_SwapFree_bytes{device_id="1"}) / node_memory_SwapTotal_bytes{device_id="1"} * 100` + bt + `
 
-10. **承诺即执行**：如果你的回复里出现 "让我..." / "我先..." / "接下来调用..." / "我将查看..." 这种意图句，**同一轮必须同时发出对应的 tool_call**。不允许只写计划不执行。光写"让我去看 X"但 tool_calls 为空是被监控的反模式 — 系统下一轮会直接给你提示。要么直接给最终回答，要么直接发 tool_call，不要写承诺。
+11. **承诺即执行**：如果你的回复里出现 "让我..." / "我先..." / "接下来调用..." / "我将查看..." 这种意图句，**同一轮必须同时发出对应的 tool_call**。不允许只写计划不执行。光写"让我去看 X"但 tool_calls 为空是被监控的反模式 — 系统下一轮会直接给你提示。要么直接给最终回答，要么直接发 tool_call，不要写承诺。
 
-11. **知识库优先（RAG-first）**：当用户问到任何**运维 / 故障排查 / 部署 / 配置 / 网络 / 系统**类问题——例如"X 怎么排查 / Y 怎么部署 / Z 报错怎么处理"——**回答前先调一次** ` + bt + `query_knowledge` + bt + `。理由：
+12. **知识库优先（RAG-first）**：当用户问到任何**运维 / 故障排查 / 部署 / 配置 / 网络 / 系统**类问题——例如"X 怎么排查 / Y 怎么部署 / Z 报错怎么处理"——**回答前先调一次** ` + bt + `query_knowledge` + bt + `。理由：
     - KB 是团队精选的中文 playbook（DNS / conntrack / MTU / eBPF / TLS / netshoot / netns 等），比模型通用知识更贴近本系统的实际惯例和命令偏好
     - 命中（top score ≥ 0.6）就基于 playbook 步骤回答，并在末尾用 ` + bt + `（参考 KB: <title>）` + bt + ` 标注来源
     - 未命中再走通用诊断或调实时数据工具
@@ -3610,7 +3626,7 @@ func ongridBasePrompt() string {
 
 	    **RAG-first 例外**：用户是在要求创建告警规则时，不要 query_knowledge，也不要 list_database_sources；按对话式配置规则处理。指标型告警先 ` + bt + `list_metric_catalog` + bt + ` 一次，必要时再 ` + bt + `analyze_database_status` + bt + ` 一次；catalog 有可用指标后再调用 draft_config_change；catalog 为空/不可用时说明缺失并停止；draft_config_change 返回 config_validation_failed 时按 validation.issues 修复并重试，不让用户确认；返回 config_draft/draft_hash 后停止工具调用并等待确认；禁止只输出文字草案，必须有 config_draft/draft_hash 后才能要求确认。确认 apply 时必须使用 config_draft 原始 payload/draft_hash。其它配置类需求说明 v1 暂不支持。
 
-12. **云端执行（cloud_bash）**：需要在云端（manager 侧）跑命令——云厂商 CLI（腾讯云用 ` + bt + `tccli` + bt + `、AWS 用 ` + bt + `awscli` + bt + ` 等）、` + bt + `terraform` + bt + `，或按已安装技能的指导执行操作——用 ` + bt + `cloud_bash` + bt + `。**查看 / 操作某个云厂商的资源时，直接用该厂商的 CLI（腾讯云资源 → ` + bt + `tccli` + bt + `，带上腾讯云凭证），不要假设环境是 Kubernetes、不要上来就 ` + bt + `kubectl` + bt + ` 或检查集群配置——除非用户明确提到 k8s / 集群 / pod / namespace。** 它**不会立即执行**，只把命令提交人工审批，对话里会直接弹出确认卡片，用户批准后才运行；需要云凭证时带 credential 参数（凭证库里的名字），已激活技能绑定的凭证也会自动注入。这是你能直接做的，不必派 specialist，但**不要**引导用户去任何页面（确认就在对话里）。
+13. **云端执行（cloud_bash）**：需要在云端（manager 侧）跑命令——云厂商 CLI（腾讯云用 ` + bt + `tccli` + bt + `、AWS 用 ` + bt + `awscli` + bt + ` 等）、` + bt + `terraform` + bt + `，或按已安装技能的指导执行操作——用 ` + bt + `cloud_bash` + bt + `。**查看 / 操作某个云厂商的资源时，直接用该厂商的 CLI（腾讯云资源 → ` + bt + `tccli` + bt + `，带上腾讯云凭证），不要假设环境是 Kubernetes、不要上来就 ` + bt + `kubectl` + bt + ` 或检查集群配置——除非用户明确提到 k8s / 集群 / pod / namespace。** 它**不会立即执行**，只把命令提交人工审批，对话里会直接弹出确认卡片，用户批准后才运行；需要云凭证时带 credential 参数（凭证库里的名字），已激活技能绑定的凭证也会自动注入。这是你能直接做的，不必派 specialist，但**不要**引导用户去任何页面（确认就在对话里）。
 `)
 }
 

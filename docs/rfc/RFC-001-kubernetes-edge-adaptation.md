@@ -174,15 +174,18 @@ flowchart LR
 
 ### 2. Helm 安装
 
-新增 `deploy/kubernetes/ongrid-edge` Helm chart。用户执行：
+新增 `deploy/kubernetes/ongrid-edge` Helm chart，manager 会通过 `/edge/k8s/ongrid-edge.tgz` 提供可下载 chart。用户执行：
 
 ```bash
-helm upgrade --install ongrid-edge ./deploy/kubernetes/ongrid-edge \
+helm upgrade --install ongrid-edge https://<manager>/edge/k8s/ongrid-edge.tgz \
+  --insecure-skip-tls-verify \
   --namespace ongrid-system --create-namespace \
-  --set manager.publicURL=https://<manager> \
-  --set manager.tunnelAddr=<manager>:40012 \
-  --set enrollment.clusterID=<cluster_id> \
-  --set enrollment.bootstrapToken=<bootstrap_token>
+  --set namespace.create=false \
+  --set-string manager.publicURL=https://<manager> \
+  --set-string manager.tunnelAddr=<manager>:40012 \
+  --set-string manager.tlsInsecure=true \
+  --set-string enrollment.clusterID=<cluster_id> \
+  --set-string enrollment.bootstrapToken=<bootstrap_token>
 ```
 
 Helm 创建：
@@ -277,13 +280,17 @@ flowchart LR
 安装参数：
 
 ```bash
-helm upgrade --install ongrid-edge ./deploy/kubernetes/ongrid-edge \
+helm upgrade --install ongrid-edge https://<manager>/edge/k8s/ongrid-edge.tgz \
+  --insecure-skip-tls-verify \
   --namespace ongrid-system --create-namespace \
-  --set mode=serverless \
-  --set manager.publicURL=https://<manager> \
-  --set enrollment.clusterID=<cluster_id> \
-  --set enrollment.bootstrapToken=<bootstrap_token> \
-  --set rbac.scope=namespace
+  --set namespace.create=false \
+  --set-string mode=serverless \
+  --set-string manager.publicURL=https://<manager> \
+  --set-string manager.tunnelAddr=<manager>:40012 \
+  --set-string manager.tlsInsecure=true \
+  --set-string enrollment.clusterID=<cluster_id> \
+  --set-string enrollment.bootstrapToken=<bootstrap_token> \
+  --set-string rbac.scope=namespace
 ```
 
 serverless enroll：
@@ -643,6 +650,7 @@ serverless trace：
 `ongrid-edge-controller`：
 
 - get/list/watch 上述只读资源。
+- get pods/log：仅作为单 Pod 最近日志的小规模兜底；生产日志检索优先走 Loki、OTLP logs gateway 或云厂商日志导出。
 - events 只读。
 - 不允许 secrets。
 - full-node 可显式开启受限写动作 RBAC：`patch` apps workloads 用于 rollout restart/scale，`delete` pods 用于 delete pod，`create` pods/eviction 用于 evict/drain，`patch` nodes 用于 cordon/uncordon/drain。
@@ -652,7 +660,7 @@ serverless trace：
 serverless 最小 RBAC：
 
 - namespace scope 优先：只在目标 namespace 创建 Role/RoleBinding。
-- 允许 get/list/watch pods、deployments、statefulsets、daemonsets、replicasets、jobs、cronjobs、services、endpoints/endpointslices、events。
+- 允许 get/list/watch pods、deployments、statefulsets、daemonsets、replicasets、jobs、cronjobs、services、endpoints、events，并允许 get pods/log 作为有界日志兜底。
 - 如果要用 OTel `k8sattributes`，允许 watch pods。
 - 如果要用 kube-state-metrics，可由 chart 部署 namespace-scoped kube-state-metrics 或接入用户已有实例。
 - 不授予 nodes、nodes/proxy、nodes/metrics、secrets、pods/exec、pods/attach、pods/portforward，也不授予 pods delete、pods/eviction create 或 workload/node patch。

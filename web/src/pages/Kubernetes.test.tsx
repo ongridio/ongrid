@@ -237,6 +237,79 @@ describe('KubernetesPage', () => {
     expect(screen.getByText('ongrid-k8s-control-plane')).toBeInTheDocument();
   });
 
+  it('集群列表支持删除集群', async () => {
+    let items = [cluster];
+    let deletedID = '';
+    server.use(
+      http.get('/api/v1/k8s/clusters', () =>
+        HttpResponse.json({ items, total: items.length, limit: 100, offset: 0 }),
+      ),
+      http.delete('/api/v1/k8s/clusters/:id', ({ params }) => {
+        deletedID = String(params.id);
+        items = items.filter((item) => item.id !== Number(params.id));
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    render(
+      <MemoryRouter>
+        <KubernetesPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('kind-local')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '删除集群 kind-local' }));
+    expect(await screen.findByText('删除 Kubernetes 集群 kind-local')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '我已卸载，删除记录' }));
+
+    await waitFor(() => {
+      expect(deletedID).toBe('1');
+    });
+    expect(screen.queryByText('kind-local')).not.toBeInTheDocument();
+  });
+
+  it('接入命令在 localhost 页面不自动替换远端 manager 占位符', async () => {
+    let payload: { name?: string; uid?: string; mode?: string } | null = null;
+    server.use(
+      http.post('/api/v1/k8s/clusters', async ({ request }) => {
+        payload = await request.json() as { name?: string; uid?: string; mode?: string };
+        return HttpResponse.json({
+          cluster: {
+            ...cluster,
+            id: 4,
+            name: payload.name || 'kind-created',
+            uid: payload.uid || 'created-uid',
+            mode: payload.mode || 'full-node',
+            status: 'offline',
+            controller_edge_id: null,
+            controller_node_name: '',
+            controller_namespace: '',
+            controller_pod_name: '',
+          },
+          bootstrap_token: 'g-token',
+          install_command:
+            "helm upgrade --install ongrid-edge 'https://<manager>/edge/k8s/ongrid-edge.tgz' --insecure-skip-tls-verify --namespace ongrid-system --create-namespace --set namespace.create=false --set-string manager.publicURL='https://<manager>' --set-string manager.tunnelAddr='<manager>:40012' --set-string manager.tlsInsecure=true --set-string enrollment.clusterID=4 --set-string enrollment.bootstrapToken='g-token' --set-string mode='full-node'",
+        });
+      }),
+    );
+
+    render(
+      <MemoryRouter>
+        <KubernetesPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: '接入集群' }));
+    fireEvent.change(screen.getByLabelText('集群名称'), { target: { value: 'kind-created' } });
+    fireEvent.click(screen.getByRole('button', { name: '创建' }));
+
+    expect(await screen.findByText('Helm 安装命令')).toBeInTheDocument();
+    const command = screen.getByText(/helm upgrade --install ongrid-edge/);
+    expect(payload).toEqual({ name: 'kind-created', mode: 'full-node' });
+    expect(command).toHaveTextContent("manager.publicURL='https://<manager>'");
+    expect(command).toHaveTextContent("manager.tunnelAddr='<manager>:40012'");
+  });
+
   it('渲染集群详情里的 Pod 快照', async () => {
     render(
       <MemoryRouter initialEntries={['/kubernetes/1?tab=pods']}>
@@ -883,6 +956,54 @@ describe('KubernetesPage', () => {
     expect(screen.queryByText('更多')).not.toBeInTheDocument();
   });
 
+  it('初始化未接入集群展示待接入状态并隐藏资源排障入口', async () => {
+    const pendingCluster = {
+      ...cluster,
+      id: 99,
+      name: '椒子',
+      status: 'offline',
+      controller_edge_id: null,
+      controller_node_name: '',
+      controller_namespace: '',
+      controller_pod_name: '',
+      last_seen_at: null,
+      inventory_synced_at: null,
+      inventory_resource_version: '',
+      inventory_watch_lag_seconds: undefined,
+      inventory_sync_duration_ms: undefined,
+      capabilities: [
+        { key: 'inventory', status: 'unavailable' },
+        { key: 'events', status: 'unavailable' },
+      ],
+    };
+    server.use(
+      http.get('/api/v1/k8s/clusters/:id', () => HttpResponse.json(pendingCluster)),
+      http.get('/api/v1/k8s/clusters/:id/nodes', () => HttpResponse.json({ items: [], total: 0 })),
+      http.get('/api/v1/k8s/clusters/:id/workloads', () => HttpResponse.json({ items: [], total: 0, limit: 100, offset: 0 })),
+      http.get('/api/v1/k8s/clusters/:id/pods', () => HttpResponse.json({ items: [], total: 0, limit: 100, offset: 0 })),
+      http.get('/api/v1/k8s/clusters/:id/events', () => HttpResponse.json({ items: [], total: 0, limit: 100, offset: 0 })),
+      http.get('/api/v1/aiops/mutating-proposals', () => HttpResponse.json({ items: [], total: 0 })),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/kubernetes/99']}>
+        <Routes>
+          <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect((await screen.findAllByText('等待集群完成接入')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('待接入').length).toBeGreaterThan(0);
+    expect(screen.getByText('尚未收到 Controller 首次上报')).toBeInTheDocument();
+    expect(screen.queryByText('Critical')).not.toBeInTheDocument();
+    expect(screen.queryByText('异常线索')).not.toBeInTheDocument();
+    expect(screen.queryByText('写动作')).not.toBeInTheDocument();
+    expect(screen.queryByText('Node 资源视图')).not.toBeInTheDocument();
+    expect(screen.queryByText('能力状态')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Nodes\s+0$/ })).not.toBeInTheDocument();
+  });
+
   it('点击顶部资源分类后滚动到资源视图', async () => {
     render(
       <MemoryRouter initialEntries={['/kubernetes/1']}>
@@ -1328,7 +1449,7 @@ describe('KubernetesPage', () => {
     );
 
     render(
-      <MemoryRouter initialEntries={['/kubernetes/2?tab=workloads']}>
+      <MemoryRouter initialEntries={['/kubernetes/2?tab=nodes']}>
         <Routes>
           <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />
         </Routes>
@@ -1336,6 +1457,9 @@ describe('KubernetesPage', () => {
     );
 
     expect(await screen.findByText('Serverless 应用遥测')).toBeInTheDocument();
+    expect(await screen.findByText('Workload 资源视图')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Nodes\s+0$/ })).not.toBeInTheDocument();
+    expect(screen.queryByText('Node 资源视图')).not.toBeInTheDocument();
     expect(screen.queryByText('下一步')).not.toBeInTheDocument();
     expect(screen.getByText('当前快照未发现需要处置的异常')).toBeInTheDocument();
     expect(screen.queryByText('异常线索')).not.toBeInTheDocument();
@@ -1346,6 +1470,8 @@ describe('KubernetesPage', () => {
     expect(screen.getByText('只读接入边界')).toBeInTheDocument();
     expect(screen.getByText('只读接入')).toBeInTheDocument();
     expect(screen.getByText('写动作不可用')).toBeInTheDocument();
+    expect(screen.queryByText(/Node metrics/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Host access/)).not.toBeInTheDocument();
     expect(screen.queryByText('节点维护不可用')).not.toBeInTheDocument();
     expect(screen.queryByText('高风险写动作隐藏')).not.toBeInTheDocument();
     expect(screen.queryByText('delete pod')).not.toBeInTheDocument();

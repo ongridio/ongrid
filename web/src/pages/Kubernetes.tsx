@@ -21,6 +21,7 @@ import {
   Server,
   ShieldCheck,
   ShipWheel,
+  Trash2,
   Waypoints,
   type LucideIcon,
 } from 'lucide-react';
@@ -36,6 +37,7 @@ import { createSession } from '@/api/chat';
 import { createPrometheusLaunch } from '@/api/prometheus';
 import {
   createKubernetesCluster,
+  deleteKubernetesCluster,
   getKubernetesCluster,
   listKubernetesClusters,
   listKubernetesEvents,
@@ -64,6 +66,8 @@ const RESOURCE_SEARCH_DEBOUNCE_MS = 300;
 const SYNC_STALE_AFTER_MS = 5 * 60 * 1000;
 const WATCH_LAG_WARN_SECONDS = 60;
 const SYNC_DURATION_WARN_MS = 30_000;
+const K8S_EDGE_RELEASE_NAME = 'ongrid-edge';
+const K8S_EDGE_NAMESPACE = 'ongrid-system';
 
 type ResourceCountTab = 'nodes' | 'workloads' | 'pods' | 'events';
 type DetailTab = ResourceCountTab | 'namespaces' | 'actions';
@@ -78,6 +82,76 @@ const DETAIL_TABS: { key: DetailTab; zh: string; en: string }[] = [
   { key: 'actions', zh: 'Actions', en: 'Actions' },
 ];
 
+function detailTabsForCluster(cluster: KubernetesCluster | null) {
+  if (cluster?.mode !== 'serverless') return DETAIL_TABS;
+  return DETAIL_TABS.filter((tab) => tab.key !== 'nodes');
+}
+
+function snapshotResourceSummary(totals: ResourceTotals, serverless: boolean) {
+  const parts = serverless
+    ? [
+        `${formatNumber(totals.workloads)}w`,
+        `${formatNumber(totals.pods)}p`,
+        `${formatNumber(totals.events)}e`,
+      ]
+    : [
+        `${formatNumber(totals.nodes)}n`,
+        `${formatNumber(totals.workloads)}w`,
+        `${formatNumber(totals.pods)}p`,
+        `${formatNumber(totals.events)}e`,
+      ];
+  return parts.join(' / ');
+}
+
+function shellSingleQuote(value: string) {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function isLocalInstallHostname(hostname: string) {
+  const host = hostname.trim().toLowerCase().replace(/^\[|\]$/g, '');
+  return host === 'localhost' || host === '::1' || host === '0.0.0.0' || host === '127.0.0.1' || host.startsWith('127.');
+}
+
+function currentManagerInstallEndpoints() {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  const host = window.location.host || '<manager>';
+  const hostname = window.location.hostname || host.split(':')[0] || '<manager>';
+  if (!hostname || isLocalInstallHostname(hostname)) {
+    return null;
+  }
+  const origin = window.location.origin || `https://${host}`;
+  return { publicURL: origin, tunnelAddr: `${hostname}:40012` };
+}
+
+function localizeKubernetesInstallCommand(command: string) {
+  const endpoints = currentManagerInstallEndpoints();
+  if (!endpoints) return command;
+  const { publicURL, tunnelAddr } = endpoints;
+  return command
+    .replace(/'https:\/\/<manager>'/g, shellSingleQuote(publicURL))
+    .replace(/'<manager>:40012'/g, shellSingleQuote(tunnelAddr))
+    .replace(/https:\/\/<manager>/g, publicURL)
+    .replace(/<manager>:40012/g, tunnelAddr);
+}
+
+function kubernetesUninstallCommand(cluster: KubernetesCluster) {
+  const namespace = cluster.controller_namespace?.trim() || K8S_EDGE_NAMESPACE;
+  return [
+    `helm uninstall ${K8S_EDGE_RELEASE_NAME} --namespace ${shellSingleQuote(namespace)}`,
+    `kubectl delete namespace ${shellSingleQuote(namespace)} --ignore-not-found`,
+  ].join('\n');
+}
+
+function isKubernetesClusterRecentlyActive(cluster: KubernetesCluster) {
+  if (cluster.status === 'online') return true;
+  const syncTime = clusterSyncTime(cluster);
+  if (!syncTime) return false;
+  const syncedAt = Date.parse(syncTime);
+  return Number.isFinite(syncedAt) && Date.now() - syncedAt <= SYNC_STALE_AFTER_MS;
+}
+
 export default function KubernetesPage() {
   const { tr } = useI18n();
   const navigate = useNavigate();
@@ -88,6 +162,9 @@ export default function KubernetesPage() {
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [registration, setRegistration] = useState<KubernetesRegistration | null>(null);
+  const [uninstallCluster, setUninstallCluster] = useState<KubernetesCluster | null>(null);
+  const [deleteClusterTarget, setDeleteClusterTarget] = useState<KubernetesCluster | null>(null);
+  const [deletingClusterID, setDeletingClusterID] = useState<number | null>(null);
 
   const refresh = useCallback(async (opts?: { silent?: boolean }) => {
     if (opts?.silent) setRefreshing(true);
@@ -120,6 +197,20 @@ export default function KubernetesPage() {
     }
     return { online, serverless };
   }, [clusters]);
+
+  async function performDeleteCluster(cluster: KubernetesCluster) {
+    setDeletingClusterID(cluster.id);
+    try {
+      await deleteKubernetesCluster(cluster.id);
+      setClusters((items) => items.filter((item) => item.id !== cluster.id));
+      setDeleteClusterTarget(null);
+      await refresh({ silent: true });
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : (e as Error).message);
+    } finally {
+      setDeletingClusterID(null);
+    }
+  }
 
   return (
     <>
@@ -212,7 +303,7 @@ export default function KubernetesPage() {
                         <ClusterStatusChip status={cluster.status} />
                       </td>
                       <td className="whitespace-nowrap px-4 py-2.5">
-                        {cluster.controller_edge_id ? (
+                        {cluster.status === 'online' && cluster.controller_edge_id ? (
                           <ControllerStatus cluster={cluster} />
                         ) : (
                           <span className="text-zinc-500">—</span>
@@ -225,13 +316,38 @@ export default function KubernetesPage() {
                         {fullDateTime(cluster.bootstrap_token_expires_at)}
                       </td>
                       <td className="px-4 py-2.5 text-right" onClick={(ev) => ev.stopPropagation()}>
-                        <Link
-                          to={`/kubernetes/${cluster.id}`}
-                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
-                        >
-                          <ExternalLink size={13} />
-                          {tr('详情', 'Detail')}
-                        </Link>
+                        <div className="inline-flex items-center justify-end gap-1">
+                          <Link
+                            to={`/kubernetes/${cluster.id}`}
+                            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                          >
+                            <ExternalLink size={13} />
+                            {tr('详情', 'Detail')}
+                          </Link>
+                          {isAdmin && (
+                            <button
+                              type="button"
+                              aria-label={tr(`查看集群 ${cluster.name} 的卸载命令`, `View uninstall command for cluster ${cluster.name}`)}
+                              onClick={() => setUninstallCluster(cluster)}
+                              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                            >
+                              <Clipboard size={13} />
+                              {tr('卸载命令', 'Uninstall')}
+                            </button>
+                          )}
+                          {isAdmin && (
+                            <button
+                              type="button"
+                              aria-label={tr(`删除集群 ${cluster.name}`, `Delete cluster ${cluster.name}`)}
+                              disabled={deletingClusterID === cluster.id}
+                              onClick={() => setDeleteClusterTarget(cluster)}
+                              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-red-300 hover:bg-red-500/10 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              <Trash2 size={13} />
+                              {deletingClusterID === cluster.id ? tr('删除中…', 'Deleting…') : tr('删除', 'Delete')}
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -252,6 +368,13 @@ export default function KubernetesPage() {
         }}
       />
       <RegistrationModal data={registration} onClose={() => setRegistration(null)} />
+      <UninstallCommandModal cluster={uninstallCluster} onClose={() => setUninstallCluster(null)} />
+      <DeleteClusterModal
+        cluster={deleteClusterTarget}
+        deleting={deleteClusterTarget ? deletingClusterID === deleteClusterTarget.id : false}
+        onClose={() => setDeleteClusterTarget(null)}
+        onDelete={(cluster) => void performDeleteCluster(cluster)}
+      />
     </>
   );
 }
@@ -263,8 +386,12 @@ export function KubernetesClusterDetailPage() {
   const grafanaOrgId = useObservability((s) => s.grafanaOrgId);
   const { clusterId = '' } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = normalizeTab(searchParams.get('tab'));
+  const rawActiveTab = normalizeTab(searchParams.get('tab'));
   const [cluster, setCluster] = useState<KubernetesCluster | null>(null);
+  const serverless = cluster?.mode === 'serverless';
+  const activeTab = serverless && rawActiveTab === 'nodes' ? 'workloads' : rawActiveTab;
+  const detailTabs = useMemo(() => detailTabsForCluster(cluster), [cluster]);
+  const awaitingConnection = isClusterAwaitingConnection(cluster);
   const [nodes, setNodes] = useState<KubernetesNode[]>([]);
   const [workloads, setWorkloads] = useState<KubernetesWorkload[]>([]);
   const [pods, setPods] = useState<KubernetesPod[]>([]);
@@ -368,6 +495,11 @@ export function KubernetesClusterDetailPage() {
   }, [refresh]);
   usePoll(() => refresh({ silent: true }), POLL_INTERVAL_MS);
 
+  useEffect(() => {
+    if (!serverless || rawActiveTab !== 'nodes') return;
+    setSearchParams({ tab: 'workloads' }, { replace: true });
+  }, [rawActiveTab, serverless, setSearchParams]);
+
   const namespaces = useMemo(() => collectNamespaces(workloads, pods, events), [workloads, pods, events]);
   const actionTypeOptions = useMemo(() => collectActionTypes(actionProposals), [actionProposals]);
   const resourceFilters = useMemo(
@@ -454,7 +586,8 @@ export function KubernetesClusterDetailPage() {
     };
   }, [activeTab, activeTabSupportsServerFilter, clusterId, filterActive, resourceFilters, resourceFilterRetryNonce, resourceLimit]);
 
-  const filteredNodes = useMemo(() => filterNodes(nodes, localResourceFilters, cluster), [cluster, localResourceFilters, nodes]);
+  const visibleNodes = useMemo(() => (serverless ? [] : nodes), [nodes, serverless]);
+  const filteredNodes = useMemo(() => filterNodes(visibleNodes, localResourceFilters, cluster), [cluster, localResourceFilters, visibleNodes]);
   const locallyFilteredWorkloads = useMemo(() => filterWorkloads(workloads, localResourceFilters), [localResourceFilters, workloads]);
   const locallyFilteredPods = useMemo(() => filterPods(pods, localResourceFilters), [pods, localResourceFilters]);
   const locallyFilteredEvents = useMemo(() => filterEvents(events, localResourceFilters), [events, localResourceFilters]);
@@ -478,24 +611,25 @@ export function KubernetesClusterDetailPage() {
   const filteredActionProposals = useMemo(() => filterActionProposals(actionProposals, localResourceFilters), [actionProposals, localResourceFilters]);
   const resourceFilterHint = useMemo(() => resourceFilterSummary(localResourceFilters, activeTab, tr), [activeTab, localResourceFilters, tr]);
   const issueCounts = useMemo(
-    () => buildIssueCounts(nodes, pods, crashLoopTotal),
-    [nodes, pods, crashLoopTotal],
+    () => buildIssueCounts(visibleNodes, pods, crashLoopTotal),
+    [visibleNodes, pods, crashLoopTotal],
   );
   const edgeAccess = useMemo(() => {
-    if (totals.nodes <= 0) return null;
-    const linked = nodes.filter((n) => n.edge_id != null).length;
-    return { linked, total: totals.nodes, pct: Math.round((linked / totals.nodes) * 100) };
-  }, [nodes, totals.nodes]);
+    if (serverless || visibleNodes.length <= 0) return null;
+    const linked = visibleNodes.filter((n) => n.edge_id != null).length;
+    return { linked, total: visibleNodes.length, pct: Math.round((linked / visibleNodes.length) * 100) };
+  }, [serverless, visibleNodes]);
   const triageIssues = useMemo(
-    () => buildTriageIssues({ cluster, nodes, workloads, pods, crashLoopPods, warningEvents, edgeAccess, tr }),
-    [cluster, crashLoopPods, edgeAccess, nodes, pods, tr, warningEvents, workloads],
+    () => buildTriageIssues({ cluster, nodes: visibleNodes, workloads, pods, crashLoopPods, warningEvents, edgeAccess, tr }),
+    [cluster, crashLoopPods, edgeAccess, pods, tr, visibleNodes, warningEvents, workloads],
   );
   const writeActionRecommendations = useMemo(
-    () => buildWriteActionRecommendations({ nodes, workloads, pods, crashLoopPods, warningEvents, tr }),
-    [crashLoopPods, nodes, pods, tr, warningEvents, workloads],
+    () => buildWriteActionRecommendations({ nodes: visibleNodes, workloads, pods, crashLoopPods, warningEvents, tr }),
+    [crashLoopPods, pods, tr, visibleNodes, warningEvents, workloads],
   );
 
   const openResourceTab = useCallback((tab: DetailTab, opts?: { scroll?: boolean; resetFilters?: boolean }) => {
+    const nextTab = serverless && tab === 'nodes' ? 'workloads' : tab;
     if (opts?.resetFilters) {
       setResourceLimit(RESOURCE_PAGE_SIZE);
       setResourceQuery('');
@@ -505,13 +639,13 @@ export function KubernetesClusterDetailPage() {
       setResourceActionDecision('all');
       setResourceActionType('all');
     }
-    setSearchParams({ tab });
+    setSearchParams({ tab: nextTab });
     if (!opts?.scroll) return;
     const schedule = window.requestAnimationFrame ?? ((callback: FrameRequestCallback) => window.setTimeout(callback, 0));
     schedule(() => {
       resourceViewRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
     });
-  }, [setSearchParams]);
+  }, [serverless, setSearchParams]);
   const focusResourceIssue = useCallback((issue: K8sTriageIssue) => {
     const focus = resourceFocusForIssue(issue);
     setResourceLimit(RESOURCE_PAGE_SIZE);
@@ -624,10 +758,15 @@ export function KubernetesClusterDetailPage() {
   }
 
   const subtitle = cluster
-    ? tr(
-        `${cluster.mode} · ${cluster.status} · 最近同步 ${relativeTime(clusterSyncTime(cluster))}`,
-        `${cluster.mode} · ${cluster.status} · last sync ${relativeTime(clusterSyncTime(cluster))}`,
-      )
+    ? awaitingConnection
+      ? tr(
+          `${cluster.mode} · 待接入 · 最近同步 —`,
+          `${cluster.mode} · pending connection · last sync —`,
+        )
+      : tr(
+          `${cluster.mode} · ${cluster.status} · 最近同步 ${relativeTime(clusterSyncTime(cluster))}`,
+          `${cluster.mode} · ${cluster.status} · last sync ${relativeTime(clusterSyncTime(cluster))}`,
+        )
     : tr('加载中…', 'Loading…');
 
   return (
@@ -658,26 +797,28 @@ export function KubernetesClusterDetailPage() {
             </>
           }
           extra={
-            <div className="flex flex-wrap gap-2">
-              {DETAIL_TABS.map((tab) => (
-                <button
-                  key={tab.key}
-                  type="button"
-                  onClick={() => openResourceTab(tab.key, { scroll: true, resetFilters: true })}
-                  className={cn(
-                    'inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs',
-                    activeTab === tab.key
-                      ? 'bg-zinc-100 text-zinc-950'
-                      : 'border border-zinc-800 bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100',
-                  )}
-                >
-                  {tr(tab.zh, tab.en)}
-                  <span className="font-mono text-[11px] opacity-70">
-                    {formatNumber(detailTabCount(tab.key, totals, namespaces.length, actionProposalTotal))}
-                  </span>
-                </button>
-              ))}
-            </div>
+            awaitingConnection ? null : (
+              <div className="flex flex-wrap gap-2">
+                {detailTabs.map((tab) => (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    onClick={() => openResourceTab(tab.key, { scroll: true, resetFilters: true })}
+                    className={cn(
+                      'inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs',
+                      activeTab === tab.key
+                        ? 'bg-zinc-100 text-zinc-950'
+                        : 'border border-zinc-800 bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100',
+                    )}
+                  >
+                    {tr(tab.zh, tab.en)}
+                    <span className="font-mono text-[11px] opacity-70">
+                      {formatNumber(detailTabCount(tab.key, totals, namespaces.length, actionProposalTotal))}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )
           }
         />
 
@@ -700,182 +841,188 @@ export function KubernetesClusterDetailPage() {
             triageIssueTotal={triageIssues.length}
           />
 
-          <K8sOperationsOverview
-            cluster={cluster}
-            nodes={nodes}
-            crashLoopTotal={crashLoopTotal}
-            warningEventTotal={warningEventTotal}
-            edgeAccess={edgeAccess}
-            triageIssues={triageIssues}
-            writeActionRecommendations={writeActionRecommendations}
-            loading={loading}
-            isAdmin={isAdmin}
-            onOpenIssueResource={focusResourceIssue}
-          />
+          {awaitingConnection ? (
+            <K8sPendingConnectionPanel cluster={cluster} />
+          ) : (
+            <>
+              <K8sOperationsOverview
+                cluster={cluster}
+                nodes={visibleNodes}
+                crashLoopTotal={crashLoopTotal}
+                warningEventTotal={warningEventTotal}
+                edgeAccess={edgeAccess}
+                triageIssues={triageIssues}
+                writeActionRecommendations={writeActionRecommendations}
+                loading={loading}
+                isAdmin={isAdmin}
+                onOpenIssueResource={focusResourceIssue}
+              />
 
-          <K8sWriteActionsPanel
-            cluster={cluster}
-            nodes={nodes}
-            workloads={workloads}
-            pods={pods}
-            crashLoopPods={crashLoopPods}
-            recommendations={writeActionRecommendations}
-            actionProposalTotal={actionProposalTotal}
-            isAdmin={isAdmin}
-          />
+              <K8sWriteActionsPanel
+                cluster={cluster}
+                nodes={visibleNodes}
+                workloads={workloads}
+                pods={pods}
+                crashLoopPods={crashLoopPods}
+                recommendations={writeActionRecommendations}
+                actionProposalTotal={actionProposalTotal}
+                isAdmin={isAdmin}
+              />
 
-          <div ref={resourceViewRef} className="mt-4 scroll-mt-4 overflow-hidden rounded-xl border border-zinc-800/60 bg-zinc-900/40">
-            <ResourceViewHeader
-              activeTab={activeTab}
-              totals={totals}
-              nodes={nodes}
-              workloads={workloads}
-              pods={pods}
-              crashLoopPods={crashLoopPods}
-              crashLoopTotal={crashLoopTotal}
-              events={events}
-              warningEvents={warningEvents}
-              warningEventTotal={warningEventTotal}
-              namespaces={namespaces}
-              actionProposals={actionProposals}
-              actionProposalTotal={actionProposalTotal}
-              edgeAccess={edgeAccess}
-              onOpenTab={(tab) => openResourceTab(tab, { resetFilters: true })}
-            />
-            <ResourceFilterBar
-              activeTab={activeTab}
-              namespaces={namespaces}
-              query={resourceQuery}
-              namespace={resourceNamespace}
-              issueOnly={resourceIssueOnly}
-              actionDecision={resourceActionDecision}
-              actionType={resourceActionType}
-              actionTypes={actionTypeOptions}
-              filteredCount={detailTabLoadedCount(activeTab, filteredNodes, filteredWorkloads, filteredPods, filteredEvents, filteredNamespaceRows, filteredActionProposals)}
-              loadedCount={serverResourceActive ? detailTabLoadedCount(activeTab, filteredNodes, filteredWorkloads, filteredPods, filteredEvents, filteredNamespaceRows, filteredActionProposals) : detailTabLoadedCount(activeTab, nodes, workloads, pods, events, namespaceRows, actionProposals)}
-              totalCount={serverResourceActive || activeTabFilterActive ? detailTabFilteredTotal(activeTab, filteredNodes.length, filteredResourceTotals, filteredNamespaceRows.length, filteredActionProposals.length) : detailTabCount(activeTab, totals, namespaces.length, actionProposalTotal)}
-              loading={resourceSupportsServerFilter(activeTab) && (resourceFilterLoading || resourceQueryPending)}
-              onQueryChange={updateResourceQuery}
-              onNamespaceChange={updateResourceNamespace}
-              onIssueOnlyChange={updateResourceIssueOnly}
-              onActionDecisionChange={updateResourceActionDecision}
-              onActionTypeChange={updateResourceActionType}
-              onClear={clearResourceFilters}
-            />
-            {resourceFilterError && (
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-500/20 bg-amber-500/10 px-4 py-2 text-xs text-amber-300">
-                <span>
-                  {tr('服务端筛选失败，已回退到当前快照过滤：', 'Server-side filtering failed; falling back to the current snapshot: ')}
-                  {resourceFilterError}
-                </span>
-                <Button className="h-7 border-amber-500/30 bg-amber-500/10 text-amber-200 hover:bg-amber-500/15" onClick={retryResourceFilter}>
-                  <RefreshCw size={12} />
-                  {tr('重试', 'Retry')}
-                </Button>
+              <div ref={resourceViewRef} className="mt-4 scroll-mt-4 overflow-hidden rounded-xl border border-zinc-800/60 bg-zinc-900/40">
+                <ResourceViewHeader
+                  activeTab={activeTab}
+                  totals={totals}
+                  nodes={visibleNodes}
+                  workloads={workloads}
+                  pods={pods}
+                  crashLoopPods={crashLoopPods}
+                  crashLoopTotal={crashLoopTotal}
+                  events={events}
+                  warningEvents={warningEvents}
+                  warningEventTotal={warningEventTotal}
+                  namespaces={namespaces}
+                  actionProposals={actionProposals}
+                  actionProposalTotal={actionProposalTotal}
+                  edgeAccess={edgeAccess}
+                  onOpenTab={(tab) => openResourceTab(tab, { resetFilters: true })}
+                />
+                <ResourceFilterBar
+                  activeTab={activeTab}
+                  namespaces={namespaces}
+                  query={resourceQuery}
+                  namespace={resourceNamespace}
+                  issueOnly={resourceIssueOnly}
+                  actionDecision={resourceActionDecision}
+                  actionType={resourceActionType}
+                  actionTypes={actionTypeOptions}
+                  filteredCount={detailTabLoadedCount(activeTab, filteredNodes, filteredWorkloads, filteredPods, filteredEvents, filteredNamespaceRows, filteredActionProposals)}
+                  loadedCount={serverResourceActive ? detailTabLoadedCount(activeTab, filteredNodes, filteredWorkloads, filteredPods, filteredEvents, filteredNamespaceRows, filteredActionProposals) : detailTabLoadedCount(activeTab, visibleNodes, workloads, pods, events, namespaceRows, actionProposals)}
+                  totalCount={serverResourceActive || activeTabFilterActive ? detailTabFilteredTotal(activeTab, filteredNodes.length, filteredResourceTotals, filteredNamespaceRows.length, filteredActionProposals.length) : detailTabCount(activeTab, totals, namespaces.length, actionProposalTotal)}
+                  loading={resourceSupportsServerFilter(activeTab) && (resourceFilterLoading || resourceQueryPending)}
+                  onQueryChange={updateResourceQuery}
+                  onNamespaceChange={updateResourceNamespace}
+                  onIssueOnlyChange={updateResourceIssueOnly}
+                  onActionDecisionChange={updateResourceActionDecision}
+                  onActionTypeChange={updateResourceActionType}
+                  onClear={clearResourceFilters}
+                />
+                {resourceFilterError && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-500/20 bg-amber-500/10 px-4 py-2 text-xs text-amber-300">
+                    <span>
+                      {tr('服务端筛选失败，已回退到当前快照过滤：', 'Server-side filtering failed; falling back to the current snapshot: ')}
+                      {resourceFilterError}
+                    </span>
+                    <Button className="h-7 border-amber-500/30 bg-amber-500/10 text-amber-200 hover:bg-amber-500/15" onClick={retryResourceFilter}>
+                      <RefreshCw size={12} />
+                      {tr('重试', 'Retry')}
+                    </Button>
+                  </div>
+                )}
+                <div className="overflow-x-auto">
+                  {activeTab === 'nodes' && (
+                    <NodesTable
+                      items={filteredNodes}
+                      loading={loading}
+                      filtered={activeTabFilterActive}
+                      emptyHint={resourceFilterHint}
+                      onClearFilters={clearResourceFilters}
+                      actions={{
+                        onOpenLogs: openResourceLogs,
+                        onDescribe: (issue) => void startResourceChat(issue, 'describe'),
+                        onTrace: openResourceTraces,
+                        onAnalyze: (issue) => void startResourceChat(issue, 'analyze'),
+                      }}
+                    />
+                  )}
+                  {activeTab === 'workloads' && (
+                    <WorkloadsTable
+                      items={filteredWorkloads}
+                      loading={loading || resourceFilterLoading || resourceQueryPending}
+                      total={activeTabFilterActive ? filteredResourceTotals.workloads : totals.workloads}
+                      filtered={activeTabFilterActive}
+                      emptyHint={resourceFilterHint}
+                      onClearFilters={clearResourceFilters}
+                      onLoadMore={loadMoreResources}
+                      actions={{
+                        onOpenLogs: openResourceLogs,
+                        onDescribe: (issue) => void startResourceChat(issue, 'describe'),
+                        onTrace: openResourceTraces,
+                        onAnalyze: (issue) => void startResourceChat(issue, 'analyze'),
+                      }}
+                    />
+                  )}
+                  {activeTab === 'pods' && (
+                    <PodsTable
+                      items={filteredPods}
+                      loading={loading || resourceFilterLoading || resourceQueryPending}
+                      total={activeTabFilterActive ? filteredResourceTotals.pods : totals.pods}
+                      filtered={activeTabFilterActive}
+                      emptyHint={resourceFilterHint}
+                      onClearFilters={clearResourceFilters}
+                      onLoadMore={loadMoreResources}
+                      actions={{
+                        onOpenLogs: openResourceLogs,
+                        onDescribe: (issue) => void startResourceChat(issue, 'describe'),
+                        onTrace: openResourceTraces,
+                        onAnalyze: (issue) => void startResourceChat(issue, 'analyze'),
+                      }}
+                    />
+                  )}
+                  {activeTab === 'events' && (
+                    <EventsTable
+                      items={filteredEvents}
+                      loading={loading || resourceFilterLoading || resourceQueryPending}
+                      total={activeTabFilterActive ? filteredResourceTotals.events : totals.events}
+                      filtered={activeTabFilterActive}
+                      emptyHint={resourceFilterHint}
+                      onClearFilters={clearResourceFilters}
+                      onLoadMore={loadMoreResources}
+                      actions={{
+                        onOpenLogs: openResourceLogs,
+                        onDescribe: (issue) => void startResourceChat(issue, 'describe'),
+                        onTrace: openResourceTraces,
+                        onAnalyze: (issue) => void startResourceChat(issue, 'analyze'),
+                      }}
+                    />
+                  )}
+                  {activeTab === 'namespaces' && (
+                    <NamespacesTable
+                      rows={filteredNamespaceRows}
+                      loading={loading}
+                      filtered={activeTabFilterActive}
+                      emptyHint={resourceFilterHint}
+                      onClearFilters={clearResourceFilters}
+                      onOpenResource={openNamespaceResource}
+                    />
+                  )}
+                  {activeTab === 'actions' && (
+                    <K8sActionAudit
+                      proposals={filteredActionProposals}
+                      total={activeTabFilterActive ? filteredActionProposals.length : actionProposalTotal}
+                      loading={loading}
+                      error={actionAuditError}
+                      filtered={activeTabFilterActive}
+                      emptyHint={resourceFilterHint}
+                      onClearFilters={clearResourceFilters}
+                      embedded
+                    />
+                  )}
+                </div>
               </div>
-            )}
-            <div className="overflow-x-auto">
-              {activeTab === 'nodes' && (
-                <NodesTable
-                  items={filteredNodes}
-                  loading={loading}
-                  filtered={activeTabFilterActive}
-                  emptyHint={resourceFilterHint}
-                  onClearFilters={clearResourceFilters}
-                  actions={{
-                    onOpenLogs: openResourceLogs,
-                    onDescribe: (issue) => void startResourceChat(issue, 'describe'),
-                    onTrace: openResourceTraces,
-                    onAnalyze: (issue) => void startResourceChat(issue, 'analyze'),
-                  }}
-                />
-              )}
-              {activeTab === 'workloads' && (
-                <WorkloadsTable
-                  items={filteredWorkloads}
-                  loading={loading || resourceFilterLoading || resourceQueryPending}
-                  total={activeTabFilterActive ? filteredResourceTotals.workloads : totals.workloads}
-                  filtered={activeTabFilterActive}
-                  emptyHint={resourceFilterHint}
-                  onClearFilters={clearResourceFilters}
-                  onLoadMore={loadMoreResources}
-                  actions={{
-                    onOpenLogs: openResourceLogs,
-                    onDescribe: (issue) => void startResourceChat(issue, 'describe'),
-                    onTrace: openResourceTraces,
-                    onAnalyze: (issue) => void startResourceChat(issue, 'analyze'),
-                  }}
-                />
-              )}
-              {activeTab === 'pods' && (
-                <PodsTable
-                  items={filteredPods}
-                  loading={loading || resourceFilterLoading || resourceQueryPending}
-                  total={activeTabFilterActive ? filteredResourceTotals.pods : totals.pods}
-                  filtered={activeTabFilterActive}
-                  emptyHint={resourceFilterHint}
-                  onClearFilters={clearResourceFilters}
-                  onLoadMore={loadMoreResources}
-                  actions={{
-                    onOpenLogs: openResourceLogs,
-                    onDescribe: (issue) => void startResourceChat(issue, 'describe'),
-                    onTrace: openResourceTraces,
-                    onAnalyze: (issue) => void startResourceChat(issue, 'analyze'),
-                  }}
-                />
-              )}
-              {activeTab === 'events' && (
-                <EventsTable
-                  items={filteredEvents}
-                  loading={loading || resourceFilterLoading || resourceQueryPending}
-                  total={activeTabFilterActive ? filteredResourceTotals.events : totals.events}
-                  filtered={activeTabFilterActive}
-                  emptyHint={resourceFilterHint}
-                  onClearFilters={clearResourceFilters}
-                  onLoadMore={loadMoreResources}
-                  actions={{
-                    onOpenLogs: openResourceLogs,
-                    onDescribe: (issue) => void startResourceChat(issue, 'describe'),
-                    onTrace: openResourceTraces,
-                    onAnalyze: (issue) => void startResourceChat(issue, 'analyze'),
-                  }}
-                />
-              )}
-              {activeTab === 'namespaces' && (
-                <NamespacesTable
-                  rows={filteredNamespaceRows}
-                  loading={loading}
-                  filtered={activeTabFilterActive}
-                  emptyHint={resourceFilterHint}
-                  onClearFilters={clearResourceFilters}
-                  onOpenResource={openNamespaceResource}
-                />
-              )}
-              {activeTab === 'actions' && (
-                <K8sActionAudit
-                  proposals={filteredActionProposals}
-                  total={activeTabFilterActive ? filteredActionProposals.length : actionProposalTotal}
-                  loading={loading}
-                  error={actionAuditError}
-                  filtered={activeTabFilterActive}
-                  emptyHint={resourceFilterHint}
-                  onClearFilters={clearResourceFilters}
-                  embedded
-                />
-              )}
-            </div>
-          </div>
 
-          <K8sTelemetryDrilldowns
-            cluster={cluster}
-            namespaces={namespaces}
-          />
+              <K8sTelemetryDrilldowns
+                cluster={cluster}
+                namespaces={namespaces}
+              />
 
-          <ServerlessTelemetryDrilldowns
-            cluster={cluster}
-            workloads={workloads}
-            namespaces={namespaces}
-          />
+              <ServerlessTelemetryDrilldowns
+                cluster={cluster}
+                workloads={workloads}
+                namespaces={namespaces}
+              />
+            </>
+          )}
         </div>
       </main>
 
@@ -906,6 +1053,7 @@ function ClusterSummary({
   const { tr } = useI18n();
   const serverless = cluster?.mode === 'serverless';
   const effectiveEdgeAccess = edgeAccess ?? clusterNodeEdgeAccess(cluster);
+  const awaitingConnection = isClusterAwaitingConnection(cluster);
   const syncRisk = clusterSyncRisk(cluster, tr);
   const conclusion = clusterHealthConclusion(cluster, issueCounts, effectiveEdgeAccess, warningEventTotal, syncRisk, tr);
   const capabilities = buildClusterCapabilities({
@@ -932,7 +1080,9 @@ function ClusterSummary({
                       ? 'bg-red-500'
                       : conclusion.tone === 'warning'
                         ? 'bg-amber-500'
-                        : 'bg-emerald-500',
+                        : conclusion.tone === 'info'
+                          ? 'bg-sky-500'
+                          : 'bg-emerald-500',
                   )}
                 />
                 <span className="text-xs font-medium text-zinc-500">{tr('集群健康结论', 'Cluster health conclusion')}</span>
@@ -964,59 +1114,107 @@ function ClusterSummary({
             <HealthMetric
               label={tr('快照版本', 'Snapshot version')}
               value={cluster?.inventory_resource_version || '—'}
-              detail={`${formatNumber(totals.nodes)}n / ${formatNumber(totals.workloads)}w / ${formatNumber(totals.pods)}p / ${formatNumber(totals.events)}e`}
+              detail={snapshotResourceSummary(totals, serverless)}
               tone="default"
             />
           </div>
         </div>
         <div className="px-4 py-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-xs font-medium text-zinc-300">{tr('关键异常', 'Key issues')}</span>
-            <Chip tone={triageIssueTotal > 0 ? 'warning' : 'success'}>
-              {tr(
-                triageIssueTotal > 0
-                  ? `${formatNumber(triageIssueTotal)} 个待确认问题`
-                  : '无关键异常',
-                triageIssueTotal > 0
-                  ? `${formatNumber(triageIssueTotal)} issue(s) to review`
-                  : 'No key issue',
-              )}
-            </Chip>
-          </div>
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {visibleIssues.length > 0 ? (
-              visibleIssues.map((issue) => (
-                <IssueCountChip key={issue.label} label={issue.label} value={issue.value} tone={issue.tone} />
-              ))
-            ) : (
-              <span className="text-xs text-zinc-500">{tr('当前没有 CrashLoopBackOff / Pending / NotReady 等关键异常。', 'No CrashLoopBackOff / Pending / NotReady key issue in the current snapshot.')}</span>
-            )}
-          </div>
-          <div className="mt-4 border-t border-zinc-800/60 pt-3">
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <span className="text-xs font-medium text-zinc-300">{tr('能力状态', 'Capability status')}</span>
-              <Chip tone={capabilityGapCount > 0 ? 'warning' : 'success'}>
-                {capabilityGapCount > 0
-                  ? tr(`缺口 ${capabilityGapCount} 项`, `${capabilityGapCount} gap(s)`)
-                  : tr('覆盖完整', 'complete')}
-              </Chip>
+          {awaitingConnection ? (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-medium text-zinc-300">{tr('接入状态', 'Connection status')}</span>
+                <Chip tone="info">{tr('等待接入', 'Waiting')}</Chip>
+              </div>
+              <div className="rounded-lg border border-zinc-800/60 bg-zinc-950/30 px-3 py-3">
+                <div className="text-sm font-medium text-zinc-100">{tr('尚未收到 Controller 首次上报', 'No first controller report yet')}</div>
+                <div className="mt-1 text-xs leading-5 text-zinc-500">
+                  {tr('完成 Helm 安装后，Controller 会上报资源快照；在此之前不判断集群健康，也不展示资源排障入口。', 'After Helm installation, the controller reports the inventory snapshot. Until then, cluster health and triage resources stay hidden.')}
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                <Chip dense>{cluster?.mode || tr('接入模式未知', 'unknown mode')}</Chip>
+                <Chip dense>{tr(`Token 到期 ${relativeTime(cluster?.bootstrap_token_expires_at)}`, `token expires ${relativeTime(cluster?.bootstrap_token_expires_at)}`)}</Chip>
+                <Chip dense>{tr('可刷新状态', 'refreshable')}</Chip>
+              </div>
             </div>
-            <div className="flex flex-wrap gap-1.5 text-xs">
-              {capabilities.map((item) => (
-                <Chip key={item.key} dense tone={item.tone} title={item.detail}>
-                  {item.label} · {item.statusLabel}
+          ) : (
+            <>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-medium text-zinc-300">{tr('关键异常', 'Key issues')}</span>
+                <Chip tone={triageIssueTotal > 0 ? 'warning' : 'success'}>
+                  {tr(
+                    triageIssueTotal > 0
+                      ? `${formatNumber(triageIssueTotal)} 个待确认问题`
+                      : '无关键异常',
+                    triageIssueTotal > 0
+                      ? `${formatNumber(triageIssueTotal)} issue(s) to review`
+                      : 'No key issue',
+                  )}
                 </Chip>
-              ))}
-              {cluster?.inventory_scope && (
-                <Chip dense>
-                  {cluster.inventory_scope === 'namespace' && cluster.inventory_namespace
-                    ? `${cluster.inventory_scope}:${cluster.inventory_namespace}`
-                    : cluster.inventory_scope}
-                </Chip>
-              )}
-              <Chip dense>{tr(`命名空间 ${namespaces.length}`, `${namespaces.length} namespace(s)`)}</Chip>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {visibleIssues.length > 0 ? (
+                  visibleIssues.map((issue) => (
+                    <IssueCountChip key={issue.label} label={issue.label} value={issue.value} tone={issue.tone} />
+                  ))
+                ) : (
+                  <span className="text-xs text-zinc-500">{tr('当前没有 CrashLoopBackOff / Pending / NotReady 等关键异常。', 'No CrashLoopBackOff / Pending / NotReady key issue in the current snapshot.')}</span>
+                )}
+              </div>
+              <div className="mt-4 border-t border-zinc-800/60 pt-3">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs font-medium text-zinc-300">{tr('能力状态', 'Capability status')}</span>
+                  <Chip tone={capabilityGapCount > 0 ? 'warning' : 'success'}>
+                    {capabilityGapCount > 0
+                      ? tr(`缺口 ${capabilityGapCount} 项`, `${capabilityGapCount} gap(s)`)
+                      : tr('覆盖完整', 'complete')}
+                  </Chip>
+                </div>
+                <div className="flex flex-wrap gap-1.5 text-xs">
+                  {capabilities.map((item) => (
+                    <Chip key={item.key} dense tone={item.tone} title={item.detail}>
+                      {item.label} · {item.statusLabel}
+                    </Chip>
+                  ))}
+                  {cluster?.inventory_scope && (
+                    <Chip dense>
+                      {cluster.inventory_scope === 'namespace' && cluster.inventory_namespace
+                        ? `${cluster.inventory_scope}:${cluster.inventory_namespace}`
+                        : cluster.inventory_scope}
+                    </Chip>
+                  )}
+                  <Chip dense>{tr(`命名空间 ${namespaces.length}`, `${namespaces.length} namespace(s)`)}</Chip>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function K8sPendingConnectionPanel({ cluster }: { cluster: KubernetesCluster | null }) {
+  const { tr } = useI18n();
+  return (
+    <Card className="mt-4 p-0">
+      <div className="flex flex-wrap items-start justify-between gap-4 px-4 py-4">
+        <div className="flex min-w-0 gap-3">
+          <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-sky-500/20 bg-sky-500/10 text-sky-300">
+            <ShipWheel size={16} />
+          </div>
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-zinc-100">{tr('等待集群完成接入', 'Waiting for cluster connection')}</div>
+            <div className="mt-1 max-w-3xl text-xs leading-5 text-zinc-500">
+              {tr('当前还没有 Controller 或资源快照上报，因此不会展示 Critical、异常线索、写动作、资源表和可观测入口。完成 Helm 部署后，页面会自动切换到资源总览。', 'No controller report or inventory snapshot has arrived yet, so Critical status, issue signals, write actions, resource tables, and telemetry entry points are hidden. After the Helm deployment reports in, this page switches to the resource overview automatically.')}
             </div>
           </div>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          <Chip tone="info">{tr('待接入', 'Pending')}</Chip>
+          <Chip>{cluster?.mode || tr('未知模式', 'unknown mode')}</Chip>
+          <Chip>{tr(`Token ${relativeTime(cluster?.bootstrap_token_expires_at)} 到期`, `Token expires ${relativeTime(cluster?.bootstrap_token_expires_at)}`)}</Chip>
         </div>
       </div>
     </Card>
@@ -2837,7 +3035,7 @@ function ResourceFilterBar({
     || (showActionAuditFilters && actionType !== 'all');
   const issueLabel = resourceIssueOnlyLabel(activeTab, tr);
   return (
-    <div className="border-b border-zinc-800/60 bg-zinc-950/10 px-4 py-3">
+    <div className="border-b border-zinc-800/60 bg-zinc-900 px-4 py-3">
       <div className="flex flex-wrap items-center gap-2">
         <label className="relative min-w-[220px] flex-1 sm:max-w-sm">
           <Search size={13} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-zinc-500" />
@@ -3504,7 +3702,7 @@ function RegistrationModal({
     setCopied(false);
   }, [data?.bootstrap_token]);
   if (!data) return null;
-  const installCommand = data.install_command;
+  const installCommand = localizeKubernetesInstallCommand(data.install_command);
   async function copyInstallCommand() {
     await navigator.clipboard?.writeText(installCommand);
     setCopied(true);
@@ -3534,8 +3732,163 @@ function RegistrationModal({
             </Button>
           </div>
           <pre className="max-h-72 overflow-auto rounded-md border border-zinc-800 bg-zinc-950 p-3 text-[11px] leading-5 text-zinc-300">
-            {data.install_command}
+            {installCommand}
           </pre>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function UninstallCommandModal({
+  cluster,
+  onClose,
+}: {
+  cluster: KubernetesCluster | null;
+  onClose(): void;
+}) {
+  const { tr } = useI18n();
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    setCopied(false);
+  }, [cluster?.id]);
+  if (!cluster) return null;
+  const command = kubernetesUninstallCommand(cluster);
+  async function copyCommand() {
+    await navigator.clipboard?.writeText(command);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1200);
+  }
+  return (
+    <Modal open onClose={onClose} title={tr('Helm 卸载命令', 'Helm uninstall command')} size="lg">
+      <div className="space-y-3 text-xs">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-zinc-500">{tr('集群', 'Cluster')}</span>
+          <Chip tone="accent">{cluster.name}</Chip>
+          <ModeChip mode={cluster.mode} />
+          <ClusterStatusChip status={cluster.status} />
+        </div>
+        <div className="rounded-md border border-amber-500/20 bg-amber-500/10 px-2 py-1.5 text-amber-200">
+          {tr(
+            '先在目标 Kubernetes 集群执行卸载命令，确认资源清理后再删除 Ongrid 侧集群记录。',
+            'Run the uninstall command in the target Kubernetes cluster before deleting the Ongrid cluster record.',
+          )}
+        </div>
+        <div>
+          <div className="mb-1 flex items-center justify-between gap-2 text-zinc-500">
+            <span>{tr('卸载命令', 'Uninstall command')}</span>
+            <Button onClick={() => void copyCommand()}>
+              {copied ? <Check size={12} /> : <Clipboard size={12} />}
+              {copied ? tr('已复制', 'Copied') : tr('复制', 'Copy')}
+            </Button>
+          </div>
+          <pre className="max-h-72 overflow-auto rounded-md border border-zinc-800 bg-zinc-950 p-3 text-[11px] leading-5 text-zinc-300">
+            {command}
+          </pre>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function DeleteClusterModal({
+  cluster,
+  deleting,
+  onClose,
+  onDelete,
+}: {
+  cluster: KubernetesCluster | null;
+  deleting: boolean;
+  onClose(): void;
+  onDelete(cluster: KubernetesCluster): void;
+}) {
+  const { tr } = useI18n();
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    setCopied(false);
+  }, [cluster?.id]);
+  if (!cluster) return null;
+
+  const active = isKubernetesClusterRecentlyActive(cluster);
+  const command = kubernetesUninstallCommand(cluster);
+  async function copyCommand() {
+    await navigator.clipboard?.writeText(command);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1200);
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={tr(`删除 Kubernetes 集群 ${cluster.name}`, `Delete Kubernetes cluster ${cluster.name}`)}
+      size="lg"
+      footer={
+        <>
+          <Button onClick={onClose} disabled={deleting}>{tr('取消', 'Cancel')}</Button>
+          {active && (
+            <Button onClick={() => onDelete(cluster)} disabled={deleting}>
+              <Trash2 size={12} />
+              {deleting ? tr('删除中…', 'Deleting…') : tr('强制删除记录', 'Force delete record')}
+            </Button>
+          )}
+          <Button variant="danger" onClick={() => onDelete(cluster)} disabled={deleting}>
+            <Trash2 size={12} />
+            {deleting
+              ? tr('删除中…', 'Deleting…')
+              : active
+                ? tr('我已卸载，删除记录', 'Uninstalled, delete record')
+                : tr('确认删除', 'Delete')}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-3 text-xs">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-zinc-500">{tr('集群', 'Cluster')}</span>
+          <Chip tone="accent">{cluster.name}</Chip>
+          <ModeChip mode={cluster.mode} />
+          <ClusterStatusChip status={cluster.status} />
+          <Chip tone={active ? 'warning' : 'default'}>
+            {active ? tr('仍在上报', 'active') : tr('离线或陈旧', 'offline/stale')}
+          </Chip>
+        </div>
+
+        <div className={cn(
+          'rounded-md border px-3 py-2 leading-5',
+          active
+            ? 'border-amber-500/20 bg-amber-500/10 text-amber-200'
+            : 'border-zinc-800 bg-zinc-950/40 text-zinc-400',
+        )}>
+          {active
+            ? tr(
+                '该集群仍在线或最近有上报。建议先在目标 Kubernetes 集群执行卸载命令，否则集群内 controller / node edge 会继续运行并反复重试上报。',
+                'This cluster is online or recently reported. Run the uninstall command in the target Kubernetes cluster first, otherwise the controller / node edge will keep running and retrying reports.',
+              )
+            : tr(
+                '该集群当前离线或同步时间已陈旧，可以删除 Ongrid 侧记录；如果目标集群仍存在，建议先执行卸载命令清理组件。',
+                'This cluster is offline or stale, so deleting the Ongrid record is allowed. If the target cluster still exists, run the uninstall command first to clean up components.',
+              )}
+        </div>
+
+        <div>
+          <div className="mb-1 flex items-center justify-between gap-2 text-zinc-500">
+            <span>{tr('卸载命令', 'Uninstall command')}</span>
+            <Button onClick={() => void copyCommand()}>
+              {copied ? <Check size={12} /> : <Clipboard size={12} />}
+              {copied ? tr('已复制', 'Copied') : tr('复制', 'Copy')}
+            </Button>
+          </div>
+          <pre className="max-h-56 overflow-auto rounded-md border border-zinc-800 bg-zinc-950 p-3 text-[11px] leading-5 text-zinc-300">
+            {command}
+          </pre>
+        </div>
+
+        <div className="rounded-md border border-red-500/20 bg-red-500/10 px-3 py-2 leading-5 text-red-200">
+          {tr(
+            '删除记录会移除 Ongrid 侧集群、快照、接入 token 和拓扑镜像；它不会自动进入目标 Kubernetes 集群卸载 Helm release。',
+            'Deleting the record removes the Ongrid cluster, snapshots, enrollment token, and topology mirror. It does not uninstall the Helm release from the target Kubernetes cluster.',
+          )}
         </div>
       </div>
     </Modal>
@@ -3626,12 +3979,12 @@ type K8sIssueCounts = {
   total: number;
 };
 
-type K8sHealthTone = 'success' | 'warning' | 'danger';
+type K8sHealthTone = 'success' | 'warning' | 'danger' | 'info';
 type K8sSyncRisk = {
   reason: 'stale' | 'lagging' | 'slow';
   detail: string;
 };
-type K8sCapabilityStatus = 'ready' | 'query-ready' | 'degraded' | 'unavailable' | 'not-applicable';
+type K8sCapabilityStatus = 'ready' | 'query-ready' | 'degraded' | 'unavailable' | 'not-applicable' | 'pending';
 type K8sCapability = {
   key: string;
   label: string;
@@ -3652,6 +4005,14 @@ function clusterNodeEdgeAccess(cluster: KubernetesCluster | null) {
   };
 }
 
+function isClusterAwaitingConnection(cluster: KubernetesCluster | null) {
+  if (!cluster) return false;
+  return !cluster.controller_edge_id
+    && !cluster.inventory_resource_version
+    && !cluster.inventory_synced_at
+    && !cluster.last_seen_at;
+}
+
 function clusterHealthConclusion(
   cluster: KubernetesCluster | null,
   issueCounts: K8sIssueCounts,
@@ -3666,6 +4027,14 @@ function clusterHealthConclusion(
       label: tr('同步中', 'Syncing'),
       title: tr('正在加载集群健康状态', 'Loading cluster health'),
       description: tr('等待 controller 同步集群快照。', 'Waiting for the controller to sync the cluster snapshot.'),
+    };
+  }
+  if (isClusterAwaitingConnection(cluster)) {
+    return {
+      tone: 'info' as K8sHealthTone,
+      label: tr('待接入', 'Pending'),
+      title: tr('等待集群完成接入', 'Waiting for cluster connection'),
+      description: tr('尚未收到 Controller 首次上报或资源快照，当前不判断集群健康。', 'No first controller report or inventory snapshot has arrived yet, so cluster health is not evaluated.'),
     };
   }
   const missingAgents = cluster.mode === 'serverless' || !edgeAccess ? 0 : edgeAccess.total - edgeAccess.linked;
@@ -3728,38 +4097,22 @@ function buildClusterCapabilities({
   tr: (zh: string, en: string) => string;
 }): K8sCapability[] {
   const serverless = cluster?.mode === 'serverless';
+  if (isClusterAwaitingConnection(cluster)) {
+    return [
+      makeCapability({
+        key: 'connection',
+        label: tr('Connection', 'Connection'),
+        status: 'pending',
+        detail: tr('等待 Controller 首次上报', 'Waiting for the first controller report'),
+        tr,
+      }),
+    ];
+  }
   const hasController = Boolean(cluster?.controller_edge_id);
   const hasInventory = Boolean(cluster?.inventory_resource_version);
   const backendCapabilities = new Map((cluster?.capabilities ?? []).map((item) => [item.key, item]));
   const backendStatus = (key: string) => normalizeCapabilityStatus(backendCapabilities.get(key)?.status);
-  const localNodeMetricStatus: K8sCapabilityStatus = serverless
-    ? 'not-applicable'
-    : !edgeAccess || edgeAccess.total === 0
-      ? 'unavailable'
-      : edgeAccess.linked >= edgeAccess.total
-        ? 'ready'
-        : edgeAccess.linked > 0
-          ? 'degraded'
-          : 'unavailable';
-  const nodeMetricStatus = serverless
-    ? 'not-applicable'
-    : edgeAccess
-      ? localNodeMetricStatus
-      : backendStatus('node-metrics') ?? localNodeMetricStatus;
-  const localHostStatus: K8sCapabilityStatus = serverless
-    ? 'not-applicable'
-    : edgeAccess && edgeAccess.linked > 0
-      ? edgeAccess.linked >= edgeAccess.total
-        ? 'ready'
-        : 'degraded'
-      : 'unavailable';
-  const hostStatus = serverless
-    ? 'not-applicable'
-    : edgeAccess
-      ? localHostStatus
-      : backendStatus('host-access') ?? localHostStatus;
-
-  return [
+  const capabilities = [
     makeCapability({
       key: 'inventory',
       label: tr('Inventory', 'Inventory'),
@@ -3769,17 +4122,6 @@ function buildClusterCapabilities({
         : hasController
           ? tr('等待首轮资源快照', 'Waiting for first inventory snapshot')
           : tr('Controller 未接入', 'Controller is not connected'),
-      tr,
-    }),
-    makeCapability({
-      key: 'node-metrics',
-      label: tr('Node metrics', 'Node metrics'),
-      status: nodeMetricStatus,
-      detail: serverless
-        ? tr('serverless 不采集宿主机指标', 'Serverless does not collect host metrics')
-        : edgeAccess
-          ? tr(`Node Edge ${edgeAccess.linked}/${edgeAccess.total}`, `Node Edge ${edgeAccess.linked}/${edgeAccess.total}`)
-          : tr('等待 Node 快照', 'Waiting for node snapshot'),
       tr,
     }),
     makeCapability({
@@ -3798,15 +4140,48 @@ function buildClusterCapabilities({
         : tr('可按 cluster_id 打开 Prometheus / Loki / Tempo', 'Prometheus / Loki / Tempo queries are scoped by cluster_id'),
       tr,
     }),
+  ];
+
+  if (serverless) return capabilities;
+
+  const localNodeMetricStatus: K8sCapabilityStatus = !edgeAccess || edgeAccess.total === 0
+    ? 'unavailable'
+    : edgeAccess.linked >= edgeAccess.total
+      ? 'ready'
+      : edgeAccess.linked > 0
+        ? 'degraded'
+        : 'unavailable';
+  const nodeMetricStatus = edgeAccess
+    ? localNodeMetricStatus
+    : backendStatus('node-metrics') ?? localNodeMetricStatus;
+  const localHostStatus: K8sCapabilityStatus = edgeAccess && edgeAccess.linked > 0
+    ? edgeAccess.linked >= edgeAccess.total
+      ? 'ready'
+      : 'degraded'
+    : 'unavailable';
+  const hostStatus = edgeAccess
+    ? localHostStatus
+    : backendStatus('host-access') ?? localHostStatus;
+
+  return [
+    ...capabilities.slice(0, 1),
+    makeCapability({
+      key: 'node-metrics',
+      label: tr('Node metrics', 'Node metrics'),
+      status: nodeMetricStatus,
+      detail: edgeAccess
+        ? tr(`Node Edge ${edgeAccess.linked}/${edgeAccess.total}`, `Node Edge ${edgeAccess.linked}/${edgeAccess.total}`)
+        : tr('等待 Node 快照', 'Waiting for node snapshot'),
+      tr,
+    }),
+    ...capabilities.slice(1),
     makeCapability({
       key: 'host-access',
       label: tr('Host access', 'Host access'),
       status: hostStatus,
-      detail: serverless
-        ? tr('serverless 不暴露 host 操作能力', 'Serverless does not expose host operations')
-        : edgeAccess
-          ? tr(`可通过 ${edgeAccess.linked} 个 Node Edge 进入`, `Available through ${edgeAccess.linked} Node Edge instance(s)`)
-          : tr('等待 Node Edge 接入', 'Waiting for Node Edge enrollment'),
+      detail: edgeAccess
+        ? tr(`可通过 ${edgeAccess.linked} 个 Node Edge 进入`, `Available through ${edgeAccess.linked} Node Edge instance(s)`)
+        : tr('等待 Node Edge 接入', 'Waiting for Node Edge enrollment'),
       tr,
     }),
   ];
@@ -3819,6 +4194,7 @@ function normalizeCapabilityStatus(status: string | undefined): K8sCapabilitySta
     case 'degraded':
     case 'unavailable':
     case 'not-applicable':
+    case 'pending':
       return status;
     default:
       return null;
@@ -3861,6 +4237,8 @@ function capabilityStatusLabel(status: K8sCapabilityStatus, tr: (zh: string, en:
       return tr('unavailable', 'unavailable');
     case 'not-applicable':
       return 'n/a';
+    case 'pending':
+      return tr('pending', 'pending');
   }
 }
 
@@ -3875,6 +4253,7 @@ function capabilityStatusTone(status: K8sCapabilityStatus): K8sCapability['tone'
     case 'unavailable':
       return 'danger';
     case 'not-applicable':
+    case 'pending':
       return 'default';
   }
 }
@@ -4821,6 +5200,7 @@ function clusterSyncRisk(
   tr: (zh: string, en: string) => string,
 ): K8sSyncRisk | null {
   if (!cluster) return null;
+  if (isClusterAwaitingConnection(cluster)) return null;
   const syncTime = clusterSyncTime(cluster);
   if (!syncTime) {
     return {

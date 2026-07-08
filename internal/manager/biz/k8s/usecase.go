@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -32,6 +34,7 @@ type Repository interface {
 	UpdateClusterController(ctx context.Context, id uint64, in ClusterControllerRegistration) error
 	UpdateClusterInventorySync(ctx context.Context, id uint64, in ClusterInventorySync) error
 	UpdateClusterTopologyNode(ctx context.Context, id, nodeID uint64) error
+	ListClusterEdgeIDs(ctx context.Context, clusterID uint64) ([]uint64, error)
 	DeleteCluster(ctx context.Context, id uint64) error
 
 	GetNodeByClusterUID(ctx context.Context, clusterID uint64, nodeUID string) (*model.Node, error)
@@ -68,6 +71,13 @@ type EdgeIssuer interface {
 	RotateEdgeSecret(ctx context.Context, edgeID uint64) (*EdgeCredential, error)
 }
 
+// EdgeRemover is implemented by the edge bounded context. K8s owns deciding
+// which auto-created edge identities belong to a cluster; edge owns the actual
+// edge/device cleanup semantics.
+type EdgeRemover interface {
+	DeleteEdge(ctx context.Context, edgeID uint64) error
+}
+
 type EdgeCredential struct {
 	EdgeID    uint64
 	AccessKey string
@@ -81,6 +91,8 @@ type TopologyMirror interface {
 	EnsureKubernetesCluster(ctx context.Context, clusterID uint64, currentNodeID *uint64, name, uid, mode, status string) (uint64, error)
 	EnsureKubernetesNodeMembership(ctx context.Context, clusterNodeID, deviceNodeID, clusterID, deviceID uint64, nodeName, nodeUID string) error
 	PruneKubernetesNodeMemberships(ctx context.Context, clusterNodeID, clusterID uint64, keepDeviceNodeIDs []uint64) error
+	DeleteKubernetesCluster(ctx context.Context, clusterID uint64, currentNodeID *uint64) error
+	PruneDeletedKubernetesClusters(ctx context.Context, activeClusterIDs []uint64) error
 }
 
 type TopologyNodeLink struct {
@@ -101,27 +113,32 @@ type Config struct {
 	PublicURL         string
 	TunnelAddr        string
 	BootstrapTokenTTL time.Duration
-	ChartPath         string
+	ChartRef          string
+	// ChartPath is kept for older callers/tests; prefer ChartRef.
+	ChartPath string
 }
 
 type Usecase struct {
-	repo       Repository
-	edgeIssuer EdgeIssuer
-	topology   TopologyMirror
-	cfg        Config
+	repo        Repository
+	edgeIssuer  EdgeIssuer
+	edgeRemover EdgeRemover
+	topology    TopologyMirror
+	cfg         Config
 }
 
 func NewUsecase(repo Repository, edgeIssuer EdgeIssuer, cfg Config) *Usecase {
 	if cfg.BootstrapTokenTTL <= 0 {
 		cfg.BootstrapTokenTTL = defaultBootstrapTokenTTL
 	}
-	if cfg.ChartPath == "" {
-		cfg.ChartPath = "./deploy/kubernetes/ongrid-edge"
+	u := &Usecase{repo: repo, edgeIssuer: edgeIssuer, cfg: cfg}
+	if remover, ok := edgeIssuer.(EdgeRemover); ok {
+		u.edgeRemover = remover
 	}
-	return &Usecase{repo: repo, edgeIssuer: edgeIssuer, cfg: cfg}
+	return u
 }
 
 func (u *Usecase) SetTopologyMirror(m TopologyMirror) { u.topology = m }
+func (u *Usecase) SetEdgeRemover(r EdgeRemover)       { u.edgeRemover = r }
 
 func (u *Usecase) ReconcileTopology(ctx context.Context) error {
 	if u.topology == nil {
@@ -131,6 +148,7 @@ func (u *Usecase) ReconcileTopology(ctx context.Context) error {
 		return errs.ErrNotWiredYet
 	}
 	const pageSize = 200
+	activeClusterIDs := make([]uint64, 0, pageSize)
 	for offset := 0; ; offset += pageSize {
 		clusters, err := u.repo.ListClusters(ctx, ListClustersFilter{Limit: pageSize, Offset: offset})
 		if err != nil {
@@ -140,11 +158,15 @@ func (u *Usecase) ReconcileTopology(ctx context.Context) error {
 			if c == nil {
 				continue
 			}
+			activeClusterIDs = append(activeClusterIDs, c.ID)
 			if err := u.reconcileTopology(ctx, c.ID); err != nil {
 				return fmt.Errorf("reconcile k8s topology for cluster %d: %w", c.ID, err)
 			}
 		}
 		if len(clusters) < pageSize {
+			if err := u.topology.PruneDeletedKubernetesClusters(ctx, activeClusterIDs); err != nil {
+				return fmt.Errorf("prune deleted k8s topology clusters: %w", err)
+			}
 			return nil
 		}
 	}
@@ -475,7 +497,38 @@ func (u *Usecase) DeleteCluster(ctx context.Context, id uint64) error {
 	if u.repo == nil {
 		return errs.ErrNotWiredYet
 	}
-	return u.repo.DeleteCluster(ctx, id)
+	c, err := u.repo.GetCluster(ctx, id)
+	if err != nil {
+		return err
+	}
+	edgeIDs, err := u.repo.ListClusterEdgeIDs(ctx, id)
+	if err != nil {
+		return fmt.Errorf("list k8s cluster edges: %w", err)
+	}
+	if u.topology != nil {
+		if err := u.topology.DeleteKubernetesCluster(ctx, c.ID, c.NodeID); err != nil {
+			return fmt.Errorf("delete k8s topology for cluster %d: %w", c.ID, err)
+		}
+	}
+	if err := u.deleteClusterEdges(ctx, edgeIDs); err != nil {
+		return err
+	}
+	if err := u.repo.DeleteCluster(ctx, id); err != nil {
+		return fmt.Errorf("delete k8s cluster: %w", err)
+	}
+	return nil
+}
+
+func (u *Usecase) deleteClusterEdges(ctx context.Context, edgeIDs []uint64) error {
+	if u.edgeRemover == nil || len(edgeIDs) == 0 {
+		return nil
+	}
+	for _, edgeID := range uniqueNonZeroUint64(edgeIDs) {
+		if err := u.edgeRemover.DeleteEdge(ctx, edgeID); err != nil && !errors.Is(err, errs.ErrNotFound) {
+			return fmt.Errorf("delete k8s edge %d: %w", edgeID, err)
+		}
+	}
+	return nil
 }
 
 type EnrollInput struct {
@@ -1029,6 +1082,25 @@ func parseK8sTimestamp(raw string) *time.Time {
 	return &t
 }
 
+func uniqueNonZeroUint64(values []uint64) []uint64 {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[uint64]struct{}, len(values))
+	out := make([]uint64, 0, len(values))
+	for _, value := range values {
+		if value == 0 {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
 func (u *Usecase) enrollController(ctx context.Context, c *model.Cluster, role string, in EnrollInput, now time.Time) (*EnrollResult, error) {
 	var cred *EdgeCredential
 	var err error
@@ -1180,25 +1252,103 @@ func jsonText(v any, fallback string) string {
 }
 
 func (u *Usecase) installCommand(clusterID uint64, mode, token string) string {
-	publicURL := strings.TrimSpace(u.cfg.PublicURL)
+	publicURL, tunnelAddr := installEndpoints(u.cfg.PublicURL, u.cfg.TunnelAddr)
+	chartRef := installChartRef(u.cfg, publicURL)
+	args := []string{
+		"helm upgrade --install ongrid-edge",
+		shellQuote(chartRef),
+	}
+	if strings.HasPrefix(strings.ToLower(chartRef), "https://") {
+		args = append(args, "--insecure-skip-tls-verify")
+	}
+	args = append(args,
+		"--namespace ongrid-system --create-namespace",
+		"--set namespace.create=false",
+		"--set-string manager.publicURL="+shellQuote(publicURL),
+		"--set-string manager.tunnelAddr="+shellQuote(tunnelAddr),
+		"--set-string manager.tlsInsecure=true",
+		"--set-string enrollment.clusterID="+strconv.FormatUint(clusterID, 10),
+		"--set-string enrollment.bootstrapToken="+shellQuote(token),
+		"--set-string mode="+shellQuote(mode),
+	)
+	return strings.Join(args, " ")
+}
+
+func installChartRef(cfg Config, publicURL string) string {
+	if chartRef := strings.TrimSpace(cfg.ChartRef); chartRef != "" {
+		return chartRef
+	}
+	if chartPath := strings.TrimSpace(cfg.ChartPath); chartPath != "" {
+		return chartPath
+	}
+	publicURL = strings.TrimRight(strings.TrimSpace(publicURL), "/")
 	if publicURL == "" {
 		publicURL = "https://<manager>"
 	}
-	tunnelAddr := strings.TrimSpace(u.cfg.TunnelAddr)
-	if tunnelAddr == "" || strings.HasPrefix(tunnelAddr, ":") {
+	return publicURL + "/edge/k8s/ongrid-edge.tgz"
+}
+
+func installEndpoints(rawPublicURL, rawTunnelAddr string) (string, string) {
+	publicURL := strings.TrimSpace(rawPublicURL)
+	tunnelAddr := strings.TrimSpace(rawTunnelAddr)
+	publicHost := hostFromPublicURL(publicURL)
+	tunnelHost, tunnelPort := splitHostPortBestEffort(tunnelAddr)
+	if publicURL == "" && tunnelHost != "" {
+		publicURL = "https://" + tunnelHost
+		publicHost = tunnelHost
+	}
+	if publicURL == "" {
+		publicURL = "https://<manager>"
+	}
+	if tunnelPort == "" {
+		tunnelPort = "40012"
+	}
+	if tunnelHost == "" && publicHost != "" {
+		tunnelHost = publicHost
+	}
+	if tunnelHost == "" {
 		tunnelAddr = "<manager>:40012"
+	} else {
+		tunnelAddr = net.JoinHostPort(tunnelHost, tunnelPort)
 	}
-	args := []string{
-		"helm upgrade --install ongrid-edge",
-		shellQuote(u.cfg.ChartPath),
-		"--namespace ongrid-system --create-namespace",
-		"--set-string manager.publicURL=" + shellQuote(publicURL),
-		"--set-string manager.tunnelAddr=" + shellQuote(tunnelAddr),
-		"--set-string enrollment.clusterID=" + strconv.FormatUint(clusterID, 10),
-		"--set-string enrollment.bootstrapToken=" + shellQuote(token),
-		"--set-string mode=" + shellQuote(mode),
+	return publicURL, tunnelAddr
+}
+
+func hostFromPublicURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || strings.Contains(raw, "<manager>") {
+		return ""
 	}
-	return strings.Join(args, " ")
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(u.Hostname())
+}
+
+func splitHostPortBestEffort(raw string) (string, string) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || strings.Contains(raw, "<manager>") {
+		return "", ""
+	}
+	if strings.HasPrefix(raw, ":") {
+		return "", strings.TrimPrefix(raw, ":")
+	}
+	host, port, err := net.SplitHostPort(raw)
+	if err == nil {
+		return strings.Trim(host, "[]"), port
+	}
+	if strings.Count(raw, ":") == 0 {
+		return raw, ""
+	}
+	if strings.Count(raw, ":") > 1 {
+		return strings.Trim(raw, "[]"), ""
+	}
+	idx := strings.LastIndex(raw, ":")
+	if idx <= 0 || idx == len(raw)-1 {
+		return "", ""
+	}
+	return strings.Trim(raw[:idx], "[]"), raw[idx+1:]
 }
 
 func shellQuote(s string) string {
