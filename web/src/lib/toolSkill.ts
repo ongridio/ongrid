@@ -10,8 +10,8 @@
 //   - an MCP server: each server is its own group (tag "mcp");
 //   - a SKILL.md extension pack (category === "skill"): its own group (tag
 //     "ext").
-// Everything maps to a real group — "other" is a last-resort that should stay
-// empty in practice.
+// Everything maps to a real group. "other" is reserved for cross-cutting write
+// or specialty tools that do not belong to a read-oriented built-in group.
 
 export const SKILL_ORDER = ['observe', 'device', 'fleet', 'incident', 'knowledge', 'cloud', 'other'] as const;
 

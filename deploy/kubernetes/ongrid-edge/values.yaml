@@ -23,9 +23,6 @@ image:
     tag: ""
     pullPolicy: IfNotPresent
 
-rbac:
-  scope: cluster
-
 node:
   serviceAccountName: ""
   collectorMode: ""
