@@ -85,6 +85,47 @@ func TestClusterDTOUsesEffectiveOfflineStatusForStaleOnlineCluster(t *testing.T)
 	assertCapabilityStatus(t, dto.Capabilities, "events", capabilityStatusUnavailable)
 }
 
+func TestParseListPaginationBounds(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		raw      string
+		fallback int
+		want     int
+	}{
+		{name: "empty", raw: "", fallback: 50, want: 50},
+		{name: "bad", raw: "bad", fallback: 50, want: 50},
+		{name: "zero", raw: "0", fallback: 50, want: 50},
+		{name: "negative", raw: "-1", fallback: 50, want: 50},
+		{name: "normal", raw: "200", fallback: 50, want: 200},
+		{name: "clamp", raw: "999999", fallback: 50, want: maxListLimit},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := parseListLimit(tc.raw, tc.fallback); got != tc.want {
+				t.Fatalf("parseListLimit(%q) = %d, want %d", tc.raw, got, tc.want)
+			}
+		})
+	}
+
+	for _, tc := range []struct {
+		name string
+		raw  string
+		want int
+	}{
+		{name: "empty", raw: "", want: 0},
+		{name: "bad", raw: "bad", want: 0},
+		{name: "negative", raw: "-1", want: 0},
+		{name: "normal", raw: "20", want: 20},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := parseListOffset(tc.raw); got != tc.want {
+				t.Fatalf("parseListOffset(%q) = %d, want %d", tc.raw, got, tc.want)
+			}
+		})
+	}
+}
+
 func assertCapabilityStatus(t *testing.T, items []clusterCapabilityDTO, key, want string) {
 	t.Helper()
 	for _, item := range items {

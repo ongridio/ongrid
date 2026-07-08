@@ -19,6 +19,8 @@ import (
 
 const roleAdmin = "admin"
 
+const maxListLimit = 500
+
 type Service interface {
 	CreateCluster(ctx context.Context, in biz.CreateClusterInput) (*biz.ClusterRegistration, error)
 	ListClusters(ctx context.Context, f biz.ListClustersFilter) ([]*model.Cluster, error)
@@ -92,8 +94,8 @@ func (h *Handler) createCluster(w http.ResponseWriter, r *http.Request) {
 // @Router /api/v1/k8s/clusters [get]
 // @Success 200 {object} listClustersResponse
 func (h *Handler) listClusters(w http.ResponseWriter, r *http.Request) {
-	limit := parseIntDefault(r.URL.Query().Get("limit"), 50)
-	offset := parseIntDefault(r.URL.Query().Get("offset"), 0)
+	limit := parseListLimit(r.URL.Query().Get("limit"), 50)
+	offset := parseListOffset(r.URL.Query().Get("offset"))
 	filter := biz.ListClustersFilter{
 		Status: strings.TrimSpace(r.URL.Query().Get("status")),
 		Name:   strings.TrimSpace(r.URL.Query().Get("name")),
@@ -191,8 +193,8 @@ func (h *Handler) listWorkloads(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	limit := parseIntDefault(r.URL.Query().Get("limit"), 100)
-	offset := parseIntDefault(r.URL.Query().Get("offset"), 0)
+	limit := parseListLimit(r.URL.Query().Get("limit"), 100)
+	offset := parseListOffset(r.URL.Query().Get("offset"))
 	filter := biz.ListWorkloadsFilter{
 		ClusterID: id,
 		Namespace: strings.TrimSpace(r.URL.Query().Get("namespace")),
@@ -236,8 +238,8 @@ func (h *Handler) listPods(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	limit := parseIntDefault(r.URL.Query().Get("limit"), 100)
-	offset := parseIntDefault(r.URL.Query().Get("offset"), 0)
+	limit := parseListLimit(r.URL.Query().Get("limit"), 100)
+	offset := parseListOffset(r.URL.Query().Get("offset"))
 	filter := biz.ListPodsFilter{
 		ClusterID: id,
 		Namespace: strings.TrimSpace(r.URL.Query().Get("namespace")),
@@ -283,8 +285,8 @@ func (h *Handler) listEvents(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	limit := parseIntDefault(r.URL.Query().Get("limit"), 100)
-	offset := parseIntDefault(r.URL.Query().Get("offset"), 0)
+	limit := parseListLimit(r.URL.Query().Get("limit"), 100)
+	offset := parseListOffset(r.URL.Query().Get("offset"))
 	filter := biz.ListEventsFilter{
 		ClusterID:    id,
 		Namespace:    strings.TrimSpace(r.URL.Query().Get("namespace")),
@@ -840,13 +842,30 @@ func parseClusterID(r *http.Request) (uint64, error) {
 	return id, nil
 }
 
-func parseIntDefault(raw string, fallback int) int {
+func parseListLimit(raw string, fallback int) int {
 	if raw == "" {
 		return fallback
 	}
 	n, err := strconv.Atoi(raw)
 	if err != nil {
 		return fallback
+	}
+	if n <= 0 {
+		return fallback
+	}
+	if n > maxListLimit {
+		return maxListLimit
+	}
+	return n
+}
+
+func parseListOffset(raw string) int {
+	if raw == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		return 0
 	}
 	return n
 }
