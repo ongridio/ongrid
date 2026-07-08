@@ -122,8 +122,8 @@ func (i *Ingester) Push(ctx context.Context, deviceID uint64, source string, sam
 }
 
 // PushKubernetes writes cluster-scoped Kubernetes samples. Unlike host
-// samples, these intentionally do not carry device_id because controller and
-// serverless-controller edges are not host Devices.
+// samples, these intentionally do not carry device_id because controller
+// edges are not host Devices.
 func (i *Ingester) PushKubernetes(ctx context.Context, clusterID uint64, source string, samples []tunnel.PromSample) error {
 	if len(samples) == 0 {
 		return nil

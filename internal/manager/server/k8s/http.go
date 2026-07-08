@@ -19,11 +19,10 @@ import (
 
 const roleAdmin = "admin"
 
-const clusterOnlineTTL = 90 * time.Second
-
 type Service interface {
 	CreateCluster(ctx context.Context, in biz.CreateClusterInput) (*biz.ClusterRegistration, error)
 	ListClusters(ctx context.Context, f biz.ListClustersFilter) ([]*model.Cluster, error)
+	CountClusters(ctx context.Context, f biz.ListClustersFilter) (int64, error)
 	GetCluster(ctx context.Context, id uint64) (*model.Cluster, error)
 	ListNodes(ctx context.Context, clusterID uint64) ([]*model.Node, error)
 	CountNodes(ctx context.Context, clusterID uint64) (int64, error)
@@ -35,7 +34,7 @@ type Service interface {
 	ListEvents(ctx context.Context, f biz.ListEventsFilter) ([]*model.Event, error)
 	CountEvents(ctx context.Context, f biz.ListEventsFilter) (int64, error)
 	RotateBootstrapToken(ctx context.Context, id uint64) (*biz.ClusterRegistration, error)
-	DeleteCluster(ctx context.Context, id uint64) error
+	DeleteCluster(ctx context.Context, in biz.DeleteClusterInput) error
 	Enroll(ctx context.Context, in biz.EnrollInput) (*biz.EnrollResult, error)
 }
 
@@ -95,13 +94,22 @@ func (h *Handler) createCluster(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) listClusters(w http.ResponseWriter, r *http.Request) {
 	limit := parseIntDefault(r.URL.Query().Get("limit"), 50)
 	offset := parseIntDefault(r.URL.Query().Get("offset"), 0)
-	items, err := h.svc.ListClusters(r.Context(), biz.ListClustersFilter{
+	filter := biz.ListClustersFilter{
 		Status: strings.TrimSpace(r.URL.Query().Get("status")),
 		Name:   strings.TrimSpace(r.URL.Query().Get("name")),
 		Mode:   strings.TrimSpace(r.URL.Query().Get("mode")),
 		Limit:  limit,
 		Offset: offset,
-	})
+	}
+	items, err := h.svc.ListClusters(r.Context(), filter)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	countFilter := filter
+	countFilter.Limit = 0
+	countFilter.Offset = 0
+	total, err := h.svc.CountClusters(r.Context(), countFilter)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -117,7 +125,7 @@ func (h *Handler) listClusters(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"items":  dto,
-		"total":  len(dto),
+		"total":  total,
 		"limit":  limit,
 		"offset": offset,
 	})
@@ -340,7 +348,10 @@ func (h *Handler) deleteCluster(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	if err := h.svc.DeleteCluster(r.Context(), id); err != nil {
+	if err := h.svc.DeleteCluster(r.Context(), biz.DeleteClusterInput{
+		ID:    id,
+		Force: parseBoolDefault(r.URL.Query().Get("force"), false),
+	}); err != nil {
 		writeErr(w, err)
 		return
 	}
@@ -568,7 +579,7 @@ func clusterDTOFromModelWithCoverage(c *model.Cluster, coverage *biz.NodeCoverag
 	if c.UID != nil {
 		uid = *c.UID
 	}
-	status := clusterEffectiveStatus(c, time.Now().UTC())
+	status := biz.EffectiveClusterStatus(c, time.Now().UTC())
 	return clusterDTO{
 		ID:                            c.ID,
 		Name:                          c.Name,
@@ -594,38 +605,6 @@ func clusterDTOFromModelWithCoverage(c *model.Cluster, coverage *biz.NodeCoverag
 		CreatedAt:                     c.CreatedAt,
 		UpdatedAt:                     c.UpdatedAt,
 	}
-}
-
-func clusterEffectiveStatus(c *model.Cluster, now time.Time) string {
-	if c == nil {
-		return ""
-	}
-	status := strings.TrimSpace(c.Status)
-	if status != model.ClusterStatusOnline {
-		return status
-	}
-	last := clusterLastActivityAt(c)
-	if last == nil {
-		return model.ClusterStatusOffline
-	}
-	if now.Sub(last.UTC()) > clusterOnlineTTL {
-		return model.ClusterStatusOffline
-	}
-	return status
-}
-
-func clusterLastActivityAt(c *model.Cluster) *time.Time {
-	if c == nil {
-		return nil
-	}
-	var out *time.Time
-	if c.LastSeenAt != nil {
-		out = c.LastSeenAt
-	}
-	if c.InventorySyncedAt != nil && (out == nil || c.InventorySyncedAt.After(*out)) {
-		out = c.InventorySyncedAt
-	}
-	return out
 }
 
 func nodeEdgeCoverageDTOFromBiz(coverage *biz.NodeCoverage) *nodeEdgeCoverageDTO {
@@ -664,18 +643,22 @@ func clusterCapabilitiesFromModelWithCoverage(c *model.Cluster, coverage *biz.No
 	if c == nil {
 		return nil
 	}
-	mode := strings.TrimSpace(c.Mode)
-	serverless := mode == model.ModeServerless
-	online := clusterEffectiveStatus(c, time.Now().UTC()) == model.ClusterStatusOnline
+	online := biz.EffectiveClusterStatus(c, time.Now().UTC()) == model.ClusterStatusOnline
 	hasController := online && c.ControllerEdgeID != nil && *c.ControllerEdgeID != 0
 	hasInventory := online && strings.TrimSpace(c.InventoryResourceVersion) != ""
 
-	capabilities := []clusterCapabilityDTO{
+	return []clusterCapabilityDTO{
 		{
 			Key:    "inventory",
 			Label:  "Inventory",
 			Status: inventoryCapabilityStatus(hasController, hasInventory),
 			Reason: inventoryCapabilityReason(hasController, hasInventory),
+		},
+		{
+			Key:    "node-metrics",
+			Label:  "Node metrics",
+			Status: nodeMetricsCapabilityStatus(hasController, hasInventory, coverage),
+			Reason: nodeMetricsCapabilityReason(hasController, hasInventory, coverage),
 		},
 		{
 			Key:    "events",
@@ -687,22 +670,8 @@ func clusterCapabilitiesFromModelWithCoverage(c *model.Cluster, coverage *biz.No
 			Key:    "telemetry",
 			Label:  "Telemetry",
 			Status: telemetryCapabilityStatus(hasController),
-			Reason: telemetryCapabilityReason(serverless, hasController),
+			Reason: telemetryCapabilityReason(hasController),
 		},
-	}
-	if serverless {
-		return capabilities
-	}
-	return []clusterCapabilityDTO{
-		capabilities[0],
-		{
-			Key:    "node-metrics",
-			Label:  "Node metrics",
-			Status: nodeMetricsCapabilityStatus(hasController, hasInventory, coverage),
-			Reason: nodeMetricsCapabilityReason(hasController, hasInventory, coverage),
-		},
-		capabilities[1],
-		capabilities[2],
 		{
 			Key:    "host-access",
 			Label:  "Host access",
@@ -785,12 +754,9 @@ func telemetryCapabilityStatus(hasController bool) string {
 	return capabilityStatusUnavailable
 }
 
-func telemetryCapabilityReason(serverless, hasController bool) string {
+func telemetryCapabilityReason(hasController bool) string {
 	if !hasController {
 		return "controller is not connected"
-	}
-	if serverless {
-		return "queries are scoped by namespace and workload"
 	}
 	return "queries are scoped by cluster_id"
 }

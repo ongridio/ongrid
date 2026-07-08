@@ -84,39 +84,38 @@ func (c *apiClient) executeAction(ctx context.Context, req tunnel.KubernetesActi
 			Exists:          true,
 		},
 	}
-	if req.DryRun {
-		resp.EndedAt = time.Now().Unix()
-		resp.Message = "preflight passed; dry_run=true, no Kubernetes write applied"
-		return resp, nil
-	}
-
 	var resultRaw []byte
 	messageSuffix := ""
 	switch action {
 	case k8sActionRolloutRestart:
-		resultRaw, err = c.rolloutRestart(ctx, apiPath)
+		resultRaw, err = c.rolloutRestart(ctx, apiPath, expectedRV, req.DryRun)
 	case k8sActionScale:
-		resultRaw, err = c.scaleWorkload(ctx, apiPath, req.Replicas)
+		resultRaw, err = c.scaleWorkload(ctx, apiPath, req.Replicas, expectedRV, req.DryRun)
 	case k8sActionDeletePod:
-		resultRaw, err = c.deletePod(ctx, apiPath, uid, expectedRV, gracePeriod)
+		resultRaw, err = c.deletePod(ctx, apiPath, uid, expectedRV, gracePeriod, req.DryRun)
 	case k8sActionEvictPod:
-		resultRaw, err = c.evictPod(ctx, namespace, name, uid, gracePeriod)
+		resultRaw, err = c.evictPod(ctx, namespace, name, uid, expectedRV, gracePeriod, req.DryRun)
 	case k8sActionCordon:
-		resultRaw, err = c.patchNodeUnschedulable(ctx, apiPath, true)
+		resultRaw, err = c.patchNodeUnschedulable(ctx, apiPath, true, expectedRV, req.DryRun)
 	case k8sActionUncordon:
-		resultRaw, err = c.patchNodeUnschedulable(ctx, apiPath, false)
+		resultRaw, err = c.patchNodeUnschedulable(ctx, apiPath, false, expectedRV, req.DryRun)
 	case k8sActionDrain:
 		var summary drainSummary
 		opts, optErr := normalizeDrainOptions(req, gracePeriod)
 		if optErr != nil {
 			return nil, optErr
 		}
+		opts.nodeResourceVersion = expectedRV
 		resultRaw, summary, err = c.drainNode(ctx, apiPath, name, opts)
 		resp.EvictedPodCount = summary.evicted
 		resp.DeletedPodCount = summary.deleted
 		resp.SkippedPodCount = summary.skipped
 		resp.SkippedPods = summary.skippedPods
-		messageSuffix = fmt.Sprintf("; evicted %d pod(s), deleted %d pod(s), skipped %d pod(s)", summary.evicted, summary.deleted, summary.skipped)
+		if req.DryRun {
+			messageSuffix = fmt.Sprintf("; would evict %d pod(s), would delete %d pod(s), skipped %d pod(s)", summary.evicted, summary.deleted, summary.skipped)
+		} else {
+			messageSuffix = fmt.Sprintf("; evicted %d pod(s), deleted %d pod(s), skipped %d pod(s)", summary.evicted, summary.deleted, summary.skipped)
+		}
 	default:
 		err = fmt.Errorf("execute_k8s_action: unsupported action %q", req.Action)
 	}
@@ -128,9 +127,13 @@ func (c *apiClient) executeAction(ctx context.Context, req tunnel.KubernetesActi
 			resp.ResultResourceVersion = resultRV
 		}
 	}
-	resp.Applied = true
+	resp.Applied = !req.DryRun
 	resp.EndedAt = time.Now().Unix()
-	resp.Message = actionMessage(action, spec.kind, namespace, name)
+	if req.DryRun {
+		resp.Message = actionMessage(action, spec.kind, namespace, name) + " dry-run validated by Kubernetes API"
+	} else {
+		resp.Message = actionMessage(action, spec.kind, namespace, name)
+	}
 	if messageSuffix != "" {
 		resp.Message += messageSuffix
 	}
@@ -196,6 +199,7 @@ func normalizeDrainOptions(req tunnel.KubernetesActionRequest, gracePeriodSecond
 		deleteEmptyDirData: req.DeleteEmptyDirData,
 		force:              req.Force,
 		disableEviction:    req.DisableEviction,
+		dryRun:             req.DryRun,
 	}, nil
 }
 
@@ -260,7 +264,7 @@ func actionTarget(req tunnel.KubernetesActionRequest) (k8sDescribeSpec, string, 
 	return spec, namespace, name, nil
 }
 
-func (c *apiClient) rolloutRestart(ctx context.Context, apiPath string) ([]byte, error) {
+func (c *apiClient) rolloutRestart(ctx context.Context, apiPath, resourceVersion string, dryRun bool) ([]byte, error) {
 	patch := map[string]any{
 		"spec": map[string]any{
 			"template": map[string]any{
@@ -272,36 +276,38 @@ func (c *apiClient) rolloutRestart(ctx context.Context, apiPath string) ([]byte,
 			},
 		},
 	}
+	addResourceVersionPrecondition(patch, resourceVersion)
 	body, err := json.Marshal(patch)
 	if err != nil {
 		return nil, fmt.Errorf("execute_k8s_action: marshal rollout_restart patch: %w", err)
 	}
-	out, err := c.doRaw(ctx, http.MethodPatch, apiPath, kubernetesMergePatchContentType, body)
+	out, err := c.doRaw(ctx, http.MethodPatch, withDryRun(apiPath, dryRun), kubernetesMergePatchContentType, body)
 	if err != nil {
 		return nil, fmt.Errorf("execute_k8s_action: rollout_restart patch %s: %w", apiPath, err)
 	}
 	return out, nil
 }
 
-func (c *apiClient) scaleWorkload(ctx context.Context, apiPath string, replicas *int) ([]byte, error) {
+func (c *apiClient) scaleWorkload(ctx context.Context, apiPath string, replicas *int, resourceVersion string, dryRun bool) ([]byte, error) {
 	patch := map[string]any{"spec": map[string]int{"replicas": *replicas}}
+	addResourceVersionPrecondition(patch, resourceVersion)
 	body, err := json.Marshal(patch)
 	if err != nil {
 		return nil, fmt.Errorf("execute_k8s_action: marshal scale patch: %w", err)
 	}
-	out, err := c.doRaw(ctx, http.MethodPatch, apiPath, kubernetesMergePatchContentType, body)
+	out, err := c.doRaw(ctx, http.MethodPatch, withDryRun(apiPath, dryRun), kubernetesMergePatchContentType, body)
 	if err != nil {
 		return nil, fmt.Errorf("execute_k8s_action: scale patch %s: %w", apiPath, err)
 	}
 	return out, nil
 }
 
-func (c *apiClient) deletePod(ctx context.Context, apiPath, uid, resourceVersion string, gracePeriodSeconds *int) ([]byte, error) {
+func (c *apiClient) deletePod(ctx context.Context, apiPath, uid, resourceVersion string, gracePeriodSeconds *int, dryRun bool) ([]byte, error) {
 	body, err := deleteOptionsBody(uid, resourceVersion, gracePeriodSeconds)
 	if err != nil {
 		return nil, err
 	}
-	out, err := c.doRaw(ctx, http.MethodDelete, apiPath, kubernetesJSONContentType, body)
+	out, err := c.doRaw(ctx, http.MethodDelete, withDryRun(apiPath, dryRun), kubernetesJSONContentType, body)
 	if err != nil {
 		return nil, fmt.Errorf("execute_k8s_action: delete pod %s: %w", apiPath, err)
 	}
@@ -333,7 +339,15 @@ func deleteOptionsBody(uid, resourceVersion string, gracePeriodSeconds *int) ([]
 	return body, nil
 }
 
-func (c *apiClient) evictPod(ctx context.Context, namespace, name, uid string, gracePeriodSeconds *int) ([]byte, error) {
+func addResourceVersionPrecondition(patch map[string]any, resourceVersion string) {
+	resourceVersion = strings.TrimSpace(resourceVersion)
+	if resourceVersion == "" {
+		return
+	}
+	patch["metadata"] = map[string]string{"resourceVersion": resourceVersion}
+}
+
+func (c *apiClient) evictPod(ctx context.Context, namespace, name, uid, resourceVersion string, gracePeriodSeconds *int, dryRun bool) ([]byte, error) {
 	path := "/api/v1/namespaces/" + url.PathEscape(namespace) + "/pods/" + url.PathEscape(name) + "/eviction"
 	eviction := map[string]any{
 		"apiVersion": "policy/v1",
@@ -344,8 +358,15 @@ func (c *apiClient) evictPod(ctx context.Context, namespace, name, uid string, g
 		},
 	}
 	deleteOptions := map[string]any{}
+	preconditions := map[string]string{}
 	if strings.TrimSpace(uid) != "" {
-		deleteOptions["preconditions"] = map[string]string{"uid": uid}
+		preconditions["uid"] = uid
+	}
+	if strings.TrimSpace(resourceVersion) != "" {
+		preconditions["resourceVersion"] = resourceVersion
+	}
+	if len(preconditions) > 0 {
+		deleteOptions["preconditions"] = preconditions
 	}
 	if gracePeriodSeconds != nil {
 		deleteOptions["gracePeriodSeconds"] = *gracePeriodSeconds
@@ -357,20 +378,21 @@ func (c *apiClient) evictPod(ctx context.Context, namespace, name, uid string, g
 	if err != nil {
 		return nil, fmt.Errorf("execute_k8s_action: marshal eviction: %w", err)
 	}
-	out, err := c.doRaw(ctx, http.MethodPost, path, kubernetesJSONContentType, body)
+	out, err := c.doRaw(ctx, http.MethodPost, withDryRun(path, dryRun), kubernetesJSONContentType, body)
 	if err != nil {
 		return nil, fmt.Errorf("execute_k8s_action: evict pod %s/%s: %w", namespace, name, err)
 	}
 	return out, nil
 }
 
-func (c *apiClient) patchNodeUnschedulable(ctx context.Context, apiPath string, unschedulable bool) ([]byte, error) {
+func (c *apiClient) patchNodeUnschedulable(ctx context.Context, apiPath string, unschedulable bool, resourceVersion string, dryRun bool) ([]byte, error) {
 	patch := map[string]any{"spec": map[string]bool{"unschedulable": unschedulable}}
+	addResourceVersionPrecondition(patch, resourceVersion)
 	body, err := json.Marshal(patch)
 	if err != nil {
 		return nil, fmt.Errorf("execute_k8s_action: marshal node patch: %w", err)
 	}
-	out, err := c.doRaw(ctx, http.MethodPatch, apiPath, kubernetesMergePatchContentType, body)
+	out, err := c.doRaw(ctx, http.MethodPatch, withDryRun(apiPath, dryRun), kubernetesMergePatchContentType, body)
 	if err != nil {
 		return nil, fmt.Errorf("execute_k8s_action: node patch %s: %w", apiPath, err)
 	}
@@ -378,13 +400,15 @@ func (c *apiClient) patchNodeUnschedulable(ctx context.Context, apiPath string, 
 }
 
 type drainOptions struct {
-	gracePeriodSeconds *int
-	timeoutSeconds     int
-	retrySeconds       int
-	ignoreDaemonSets   bool
-	deleteEmptyDirData bool
-	force              bool
-	disableEviction    bool
+	gracePeriodSeconds  *int
+	timeoutSeconds      int
+	retrySeconds        int
+	ignoreDaemonSets    bool
+	deleteEmptyDirData  bool
+	force               bool
+	disableEviction     bool
+	dryRun              bool
+	nodeResourceVersion string
 }
 
 type drainSummary struct {
@@ -405,7 +429,7 @@ func (c *apiClient) drainNode(ctx context.Context, apiPath, nodeName string, opt
 			return nil, drainSummary{}, fmt.Errorf("execute_k8s_action: drain refused pod %s/%s: %s", pod.Metadata.Namespace, pod.Metadata.Name, decision.reason)
 		}
 	}
-	nodeRaw, err := c.patchNodeUnschedulable(ctx, apiPath, true)
+	nodeRaw, err := c.patchNodeUnschedulable(ctx, apiPath, true, opts.nodeResourceVersion, opts.dryRun)
 	if err != nil {
 		return nil, drainSummary{}, err
 	}
@@ -439,7 +463,7 @@ func (c *apiClient) drainNode(ctx context.Context, apiPath, nodeName string, opt
 			continue
 		}
 		if opts.disableEviction {
-			if _, err := c.deleteNamespacedPod(drainCtx, pod, opts.gracePeriodSeconds); err != nil {
+			if _, err := c.deleteNamespacedPod(drainCtx, pod, opts.gracePeriodSeconds, opts.dryRun); err != nil {
 				return nil, summary, err
 			}
 			summary.deleted++
@@ -495,7 +519,7 @@ func drainDecision(pod podItem, opts drainOptions) drainPodDecision {
 func (c *apiClient) evictPodWithRetry(ctx context.Context, pod podItem, opts drainOptions) ([]byte, error) {
 	retry := time.Duration(opts.retrySeconds) * time.Second
 	for {
-		out, err := c.evictPod(ctx, pod.Metadata.Namespace, pod.Metadata.Name, pod.Metadata.UID, opts.gracePeriodSeconds)
+		out, err := c.evictPod(ctx, pod.Metadata.Namespace, pod.Metadata.Name, pod.Metadata.UID, pod.Metadata.ResourceVersion, opts.gracePeriodSeconds, opts.dryRun)
 		if err == nil {
 			return out, nil
 		}
@@ -514,9 +538,9 @@ func (c *apiClient) evictPodWithRetry(ctx context.Context, pod podItem, opts dra
 	}
 }
 
-func (c *apiClient) deleteNamespacedPod(ctx context.Context, pod podItem, gracePeriodSeconds *int) ([]byte, error) {
+func (c *apiClient) deleteNamespacedPod(ctx context.Context, pod podItem, gracePeriodSeconds *int, dryRun bool) ([]byte, error) {
 	apiPath := "/api/v1/namespaces/" + url.PathEscape(pod.Metadata.Namespace) + "/pods/" + url.PathEscape(pod.Metadata.Name)
-	return c.deletePod(ctx, apiPath, pod.Metadata.UID, pod.Metadata.ResourceVersion, gracePeriodSeconds)
+	return c.deletePod(ctx, apiPath, pod.Metadata.UID, pod.Metadata.ResourceVersion, gracePeriodSeconds, dryRun)
 }
 
 func podHasEmptyDir(pod podItem) bool {
@@ -617,4 +641,15 @@ func (c *apiClient) doRaw(ctx context.Context, method, apiPath, contentType stri
 		return nil, err
 	}
 	return out, nil
+}
+
+func withDryRun(apiPath string, dryRun bool) string {
+	if !dryRun {
+		return apiPath
+	}
+	sep := "?"
+	if strings.Contains(apiPath, "?") {
+		sep = "&"
+	}
+	return apiPath + sep + "dryRun=All"
 }

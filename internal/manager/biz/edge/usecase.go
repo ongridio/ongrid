@@ -430,9 +430,9 @@ func (u *Usecase) HandleRegister(ctx context.Context, edgeID uint64, info tunnel
 }
 
 // ClearHostDeviceLink removes any host Device association from an edge.
-// Kubernetes controller and serverless-controller edges are not hosts, but
-// older buggy registrations may have created a host link. Calling this on each
-// controller register makes that boundary self-healing.
+// Kubernetes controller edges are not hosts, but older buggy registrations may
+// have created a host link. Calling this on each controller register makes that
+// boundary self-healing.
 func (u *Usecase) ClearHostDeviceLink(ctx context.Context, edgeID uint64) error {
 	if u.repo == nil {
 		return errs.ErrNotWiredYet

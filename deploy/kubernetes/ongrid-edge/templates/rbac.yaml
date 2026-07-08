@@ -1,4 +1,4 @@
-{{- if and (ne .Values.mode "serverless") (eq .Values.rbac.scope "cluster") }}
+{{- if eq .Values.rbac.scope "cluster" }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -26,44 +26,6 @@ subjects:
     namespace: {{ include "ongrid-edge.namespace" . }}
 ---
 {{- end }}
-{{- if eq .Values.mode "serverless" }}
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: {{ include "ongrid-edge.fullname" . }}-controller
-  namespace: {{ include "ongrid-edge.namespace" . }}
-  labels:
-    {{- include "ongrid-edge.labels" . | nindent 4 }}
-rules:
-  - apiGroups: [""]
-    resources: ["pods", "services", "endpoints", "events"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: [""]
-    resources: ["pods/log"]
-    verbs: ["get"]
-  - apiGroups: ["apps"]
-    resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: ["batch"]
-    resources: ["jobs", "cronjobs"]
-    verbs: ["get", "list", "watch"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: {{ include "ongrid-edge.fullname" . }}-controller
-  namespace: {{ include "ongrid-edge.namespace" . }}
-  labels:
-    {{- include "ongrid-edge.labels" . | nindent 4 }}
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: {{ include "ongrid-edge.fullname" . }}-controller
-subjects:
-  - kind: ServiceAccount
-    name: {{ include "ongrid-edge.controllerServiceAccount" . }}
-    namespace: {{ include "ongrid-edge.namespace" . }}
-{{- else }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -110,4 +72,3 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "ongrid-edge.controllerServiceAccount" . }}
     namespace: {{ include "ongrid-edge.namespace" . }}
-{{- end }}

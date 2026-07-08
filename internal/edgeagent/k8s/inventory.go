@@ -778,7 +778,7 @@ func isOptionalAPIError(err error) bool {
 }
 
 func isControllerRole(role string) bool {
-	return role == "controller" || role == "serverless-controller"
+	return role == "controller"
 }
 
 type apiClient struct {

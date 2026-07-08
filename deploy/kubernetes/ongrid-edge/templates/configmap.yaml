@@ -2,8 +2,8 @@
 {{- $appMetricsDiscovery := default dict $controllerMetrics.appDiscovery -}}
 {{- $controllerInventory := default dict .Values.controller.inventory -}}
 {{- $ksmEndpoint := include "ongrid-edge.k8sMetricsEndpoint" . -}}
-{{- if not (or (eq .Values.mode "full-node") (eq .Values.mode "serverless")) -}}
-{{- fail (printf "unsupported mode %q; supported modes are full-node and serverless" .Values.mode) -}}
+{{- if ne .Values.mode "full-node" -}}
+{{- fail (printf "unsupported mode %q; supported mode is full-node" .Values.mode) -}}
 {{- end -}}
 apiVersion: v1
 kind: ConfigMap

@@ -31,6 +31,31 @@ func TestQueryK8sSnapshotToolInfo(t *testing.T) {
 	}
 }
 
+func TestQueryK8sSnapshotUsesEffectiveClusterStatus(t *testing.T) {
+	reader := newFakeK8sSnapshotReader()
+	old := time.Now().UTC().Add(-(k8sbiz.ClusterOnlineTTL + time.Minute))
+	reader.clusters[0].LastSeenAt = &old
+	tool := NewQueryK8sSnapshotTool(reader, slog.Default())
+
+	out, err := tool.InvokableRun(context.Background(), `{"resource":"clusters","cluster_status":"offline"}`)
+	if err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+	var got struct {
+		Total    int64 `json:"total"`
+		Clusters []struct {
+			Name   string `json:"name"`
+			Status string `json:"status"`
+		} `json:"clusters"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, out)
+	}
+	if got.Total != 1 || len(got.Clusters) != 1 || got.Clusters[0].Name != "prod" || got.Clusters[0].Status != k8smodel.ClusterStatusOffline {
+		t.Fatalf("unexpected effective-status clusters: %+v", got)
+	}
+}
+
 func TestQueryK8sSnapshotAggregatesPodCountsFromDBSnapshot(t *testing.T) {
 	reader := newFakeK8sSnapshotReader()
 	tool := NewQueryK8sSnapshotTool(reader, slog.Default())
@@ -180,7 +205,7 @@ func newFakeK8sSnapshotReader() *fakeK8sSnapshotReader {
 	return &fakeK8sSnapshotReader{
 		clusters: []*k8smodel.Cluster{
 			{ID: 1, Name: "prod", Mode: k8smodel.ModeFullNode, Status: k8smodel.ClusterStatusOnline, ControllerEdgeID: &controllerEdgeID, LastSeenAt: &now},
-			{ID: 2, Name: "serverless", Mode: k8smodel.ModeServerless, Status: k8smodel.ClusterStatusOnline, LastSeenAt: &now},
+			{ID: 2, Name: "staging", Mode: k8smodel.ModeFullNode, Status: k8smodel.ClusterStatusOnline, LastSeenAt: &now},
 		},
 		nodes: []*k8smodel.Node{
 			{ClusterID: 1, NodeName: "node-a", NodeUID: "node-a-uid", LastSeenAt: &now},

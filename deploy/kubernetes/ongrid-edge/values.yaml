@@ -79,9 +79,7 @@ kubeStateMetrics:
       memory: 256Mi
 
 telemetryGateway:
-  # null means: enabled automatically in serverless mode, disabled otherwise.
-  # Set true to expose controller OTLP receiver in full-node,
-  # or false to disable it even in serverless mode.
+  # Set true to expose the controller OTLP receiver.
   enabled: null
   service:
     type: ClusterIP

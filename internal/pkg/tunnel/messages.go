@@ -252,8 +252,8 @@ type HostInfo struct {
 }
 
 // KubernetesInfo is optional context carried by Kubernetes-deployed edges.
-// Node mode still maps to a host Device; controller/serverless-controller
-// modes represent the cluster control plane and must not create host Devices.
+// Node mode still maps to a host Device; controller mode represents the
+// cluster control plane and must not create host Devices.
 type KubernetesInfo struct {
 	Mode        string `json:"mode,omitempty"`
 	ClusterID   uint64 `json:"cluster_id,omitempty"`
@@ -395,8 +395,8 @@ type PushPromSamplesResponse struct {
 
 // KubernetesInventoryRequest is the controller's current Kubernetes object
 // snapshot. Scope tells the manager whether omitted workload/pod objects are
-// absent from the whole cluster or only from Namespace, so stale snapshots can
-// be pruned without crossing a serverless controller's namespace boundary.
+// absent from the whole cluster or only from a Namespace, so stale snapshots
+// can be pruned without crossing the declared inventory boundary.
 type KubernetesInventoryRequest struct {
 	EdgeID               uint64                       `json:"edge_id,omitempty"`
 	ClusterID            uint64                       `json:"cluster_id"`

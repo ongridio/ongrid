@@ -55,16 +55,7 @@ func (r *Repo) GetClusterByControllerEdge(ctx context.Context, edgeID uint64) (*
 }
 
 func (r *Repo) ListClusters(ctx context.Context, f biz.ListClustersFilter) ([]*model.Cluster, error) {
-	tx := r.db.WithContext(ctx).Model(&model.Cluster{})
-	if f.Status != "" {
-		tx = tx.Where("status = ?", f.Status)
-	}
-	if f.Name != "" {
-		tx = tx.Where("name LIKE ?", "%"+f.Name+"%")
-	}
-	if f.Mode != "" {
-		tx = tx.Where("mode = ?", f.Mode)
-	}
+	tx := applyClusterFilters(r.db.WithContext(ctx).Model(&model.Cluster{}), f)
 	if f.Limit > 0 {
 		tx = tx.Limit(f.Limit)
 	}
@@ -76,6 +67,27 @@ func (r *Repo) ListClusters(ctx context.Context, f biz.ListClustersFilter) ([]*m
 		return nil, err
 	}
 	return out, nil
+}
+
+func (r *Repo) CountClusters(ctx context.Context, f biz.ListClustersFilter) (int64, error) {
+	var total int64
+	if err := applyClusterFilters(r.db.WithContext(ctx).Model(&model.Cluster{}), f).Count(&total).Error; err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
+func applyClusterFilters(tx *gorm.DB, f biz.ListClustersFilter) *gorm.DB {
+	if f.Status != "" {
+		tx = tx.Where("status = ?", f.Status)
+	}
+	if f.Name != "" {
+		tx = tx.Where("name LIKE ?", "%"+f.Name+"%")
+	}
+	if f.Mode != "" {
+		tx = tx.Where("mode = ?", f.Mode)
+	}
+	return tx
 }
 
 func (r *Repo) UpdateClusterToken(ctx context.Context, id uint64, tokenHash string, expiresAt *time.Time) error {
@@ -184,14 +196,27 @@ func (r *Repo) ListClusterEdgeIDs(ctx context.Context, clusterID uint64) ([]uint
 }
 
 func (r *Repo) DeleteCluster(ctx context.Context, id uint64) error {
-	res := r.db.WithContext(ctx).Delete(&model.Cluster{}, id)
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return errs.ErrNotFound
-	}
-	return nil
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, item := range []any{
+			&model.Node{},
+			&model.Workload{},
+			&model.Pod{},
+			&model.Event{},
+			&model.Installation{},
+		} {
+			if err := tx.Where("cluster_id = ?", id).Delete(item).Error; err != nil {
+				return err
+			}
+		}
+		res := tx.Delete(&model.Cluster{}, id)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return errs.ErrNotFound
+		}
+		return nil
+	})
 }
 
 func (r *Repo) GetNodeByClusterUID(ctx context.Context, clusterID uint64, nodeUID string) (*model.Node, error) {

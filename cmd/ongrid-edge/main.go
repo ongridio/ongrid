@@ -579,7 +579,7 @@ func defaultK8sRole(edgeMode string) string {
 
 func k8sCapabilities(role string) []string {
 	switch role {
-	case "controller", "serverless-controller":
+	case "controller":
 		return []string{"k8s_inventory"}
 	default:
 		return []string{"node_edge"}
@@ -591,7 +591,7 @@ func isK8sController(info *tunnel.KubernetesInfo) bool {
 		return false
 	}
 	switch strings.TrimSpace(info.Role) {
-	case "controller", "serverless-controller":
+	case "controller":
 		return true
 	default:
 		return false

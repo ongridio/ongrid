@@ -121,11 +121,30 @@ func TestExecuteK8sActionRejectsResourceVersionConflict(t *testing.T) {
 func TestExecuteK8sActionDryRunDoesNotMutate(t *testing.T) {
 	var writes int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			writes++
-			t.Fatalf("unexpected write method %s", r.Method)
+		if r.URL.Path != "/apis/apps/v1/namespaces/default/deployments/api" {
+			http.NotFound(w, r)
+			return
 		}
-		_, _ = w.Write([]byte(`{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"api","namespace":"default","uid":"deploy-uid","resourceVersion":"10"}}`))
+		switch r.Method {
+		case http.MethodGet:
+			_, _ = w.Write([]byte(`{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"api","namespace":"default","uid":"deploy-uid","resourceVersion":"10"}}`))
+		case http.MethodPatch:
+			writes++
+			if got := r.URL.Query().Get("dryRun"); got != "All" {
+				t.Fatalf("dryRun query = %q, want All", got)
+			}
+			var patch map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+				t.Fatalf("decode dry-run patch: %v", err)
+			}
+			spec := patch["spec"].(map[string]any)
+			if spec["replicas"] != float64(3) {
+				t.Fatalf("replicas patch = %#v, want 3", spec["replicas"])
+			}
+			_, _ = w.Write([]byte(`{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"api","namespace":"default","uid":"deploy-uid","resourceVersion":"10"}}`))
+		default:
+			t.Fatalf("unexpected method %s", r.Method)
+		}
 	}))
 	defer srv.Close()
 
@@ -142,11 +161,11 @@ func TestExecuteK8sActionDryRunDoesNotMutate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("executeAction: %v", err)
 	}
-	if resp.Applied || !resp.DryRun || resp.Preflight.ResourceVersion != "10" {
+	if resp.Applied || !resp.DryRun || resp.Preflight.ResourceVersion != "10" || resp.ResultResourceVersion != "10" {
 		t.Fatalf("unexpected dry-run response: %+v", resp)
 	}
-	if writes != 0 {
-		t.Fatalf("writes=%d want 0", writes)
+	if writes != 1 {
+		t.Fatalf("dry-run writes=%d want 1", writes)
 	}
 }
 

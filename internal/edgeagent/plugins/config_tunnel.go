@@ -311,7 +311,7 @@ func (t *TunnelConfigFetcher) isKubernetesTelemetryGatewayAgent() bool {
 	if !t.k8sGateway {
 		return false
 	}
-	return strings.EqualFold(t.k8sRole, "controller") || strings.EqualFold(t.k8sRole, "serverless-controller")
+	return strings.EqualFold(t.k8sRole, "controller")
 }
 
 func copySpec(in map[string]interface{}) map[string]interface{} {

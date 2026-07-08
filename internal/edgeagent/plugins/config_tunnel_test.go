@@ -183,8 +183,8 @@ func TestTunnelConfigFetcherKeepsReachableTracesEndpointAndExplicitAttrs(t *test
 }
 
 func TestTunnelConfigFetcherAppliesKubernetesGatewayTracesDefaults(t *testing.T) {
-	t.Setenv("ONGRID_K8S_ROLE", "serverless-controller")
-	t.Setenv("ONGRID_K8S_MODE", "serverless")
+	t.Setenv("ONGRID_K8S_ROLE", "controller")
+	t.Setenv("ONGRID_K8S_MODE", "full-node")
 	t.Setenv("ONGRID_K8S_CLUSTER_ID", "9")
 	t.Setenv("ONGRID_K8S_POD_NAMESPACE", "ongrid-system")
 	t.Setenv("ONGRID_K8S_TELEMETRY_GATEWAY_ENABLED", "true")

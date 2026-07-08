@@ -240,12 +240,14 @@ describe('KubernetesPage', () => {
   it('集群列表支持删除集群', async () => {
     let items = [cluster];
     let deletedID = '';
+    let deleteForce = '';
     server.use(
       http.get('/api/v1/k8s/clusters', () =>
         HttpResponse.json({ items, total: items.length, limit: 100, offset: 0 }),
       ),
-      http.delete('/api/v1/k8s/clusters/:id', ({ params }) => {
+      http.delete('/api/v1/k8s/clusters/:id', ({ params, request }) => {
         deletedID = String(params.id);
+        deleteForce = new URL(request.url).searchParams.get('force') || '';
         items = items.filter((item) => item.id !== Number(params.id));
         return new HttpResponse(null, { status: 204 });
       }),
@@ -264,6 +266,7 @@ describe('KubernetesPage', () => {
 
     await waitFor(() => {
       expect(deletedID).toBe('1');
+      expect(deleteForce).toBe('true');
     });
     expect(screen.queryByText('kind-local')).not.toBeInTheDocument();
   });
@@ -1360,248 +1363,4 @@ describe('KubernetesPage', () => {
     expect(screen.getByText('Warnings')).toBeInTheDocument();
   });
 
-  it('渲染 serverless 应用遥测聚合入口', async () => {
-    const serverlessCluster = {
-      ...cluster,
-      id: 2,
-      name: 'serverless-prod',
-      mode: 'serverless',
-      controller_edge_id: 4,
-    };
-    server.use(
-      http.get('/api/v1/k8s/clusters/:id', () => HttpResponse.json(serverlessCluster)),
-      http.get('/api/v1/k8s/clusters/:id/nodes', () => HttpResponse.json({ items: [], total: 0 })),
-      http.get('/api/v1/k8s/clusters/:id/workloads', () =>
-        HttpResponse.json({
-          items: [{
-            id: 22,
-            cluster_id: 2,
-            namespace: 'ongrid-serverless',
-            kind: 'Deployment',
-            name: 'checkout-api',
-            desired_replicas: 2,
-            ready_replicas: 2,
-            last_seen_at: '2026-06-29T10:00:00Z',
-          }],
-          total: 1,
-          limit: 100,
-          offset: 0,
-        }),
-      ),
-      http.get('/api/v1/k8s/clusters/:id/pods', ({ request }) => {
-        const url = new URL(request.url);
-        if (url.searchParams.get('reason') === 'CrashLoopBackOff') {
-          return HttpResponse.json({ items: [], total: 0, limit: 20, offset: 0 });
-        }
-        return HttpResponse.json({
-          items: [{
-            id: 33,
-            cluster_id: 2,
-            namespace: 'ongrid-serverless',
-            name: 'checkout-api-7d8f7b7c9d-abcde',
-            phase: 'Running',
-            owner_kind: 'ReplicaSet',
-            owner_name: 'checkout-api-7d8f7b7c9d',
-            restart_count: 0,
-            last_seen_at: '2026-06-29T10:00:00Z',
-          }],
-          total: 1,
-          limit: 100,
-          offset: 0,
-        });
-      }),
-      http.get('/api/v1/k8s/clusters/:id/events', () =>
-        HttpResponse.json({
-          items: [
-            {
-              id: 52,
-              cluster_id: 2,
-              namespace: 'ongrid-serverless',
-              name: 'created',
-              type: 'Normal',
-              reason: 'Created',
-              message: 'Created container checkout-api',
-              involved_kind: 'Pod',
-              involved_name: 'checkout-api-7d8f7b7c9d-abcde',
-              count: 1,
-              last_timestamp: '2026-06-29T10:00:00Z',
-              last_seen_at: '2026-06-29T10:00:00Z',
-            },
-            {
-              id: 53,
-              cluster_id: 2,
-              namespace: 'ongrid-serverless',
-              name: 'pulled',
-              type: 'Normal',
-              reason: 'Pulled',
-              message: 'Successfully pulled image',
-              involved_kind: 'Pod',
-              involved_name: 'checkout-api-7d8f7b7c9d-abcde',
-              count: 1,
-              last_timestamp: '2026-06-29T10:00:00Z',
-              last_seen_at: '2026-06-29T10:00:00Z',
-            },
-          ],
-          total: 2,
-        }),
-      ),
-      http.get('/api/v1/aiops/mutating-proposals', () => HttpResponse.json({ items: [], total: 0 })),
-    );
-
-    render(
-      <MemoryRouter initialEntries={['/kubernetes/2?tab=nodes']}>
-        <Routes>
-          <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    );
-
-    expect(await screen.findByText('Serverless 应用遥测')).toBeInTheDocument();
-    expect(screen.queryByText('可观测入口')).not.toBeInTheDocument();
-    expect(screen.getByText('资源范围')).toBeInTheDocument();
-    expect(screen.queryByText('Node agent 覆盖')).not.toBeInTheDocument();
-    expect(await screen.findByText('Workload 资源视图')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /^Nodes\s+0$/ })).not.toBeInTheDocument();
-    expect(screen.queryByText('Node 资源视图')).not.toBeInTheDocument();
-    expect(screen.queryByText('下一步')).not.toBeInTheDocument();
-    expect(screen.getByText('当前快照未发现需要处置的异常')).toBeInTheDocument();
-    expect(screen.queryByText('异常线索')).not.toBeInTheDocument();
-    expect(screen.queryByText('Created')).not.toBeInTheDocument();
-    expect(screen.queryByText('Pulled')).not.toBeInTheDocument();
-    expect(screen.queryByText('Warning 2')).not.toBeInTheDocument();
-    expect(screen.getByText('按 namespace / workload 聚合，不依赖 device_id')).toBeInTheDocument();
-    expect(screen.getByText('只读接入边界')).toBeInTheDocument();
-    expect(screen.getByText('只读接入')).toBeInTheDocument();
-    expect(screen.getByText('写动作不可用')).toBeInTheDocument();
-    expect(screen.queryByText(/Node metrics/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Host access/)).not.toBeInTheDocument();
-    expect(screen.queryByText('节点维护不可用')).not.toBeInTheDocument();
-    expect(screen.queryByText('高风险写动作隐藏')).not.toBeInTheDocument();
-    expect(screen.queryByText('delete pod')).not.toBeInTheDocument();
-    expect(screen.queryByText('cordon')).not.toBeInTheDocument();
-    expect(screen.queryByText('drain')).not.toBeInTheDocument();
-    expect(screen.getAllByText('checkout-api').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('按 workload 聚合').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Prometheus').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('打开图表').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('查询详情').length).toBeGreaterThan(0);
-    const metricQuery = screen.getByText('sum by (namespace, workload_kind, workload_name, service_name) (up{cluster_id="2",ongrid_source=~"k8s:(app-metrics|otlp-gateway-metrics)"})');
-    expect(metricQuery).not.toBeVisible();
-    const metricSummary = metricQuery.closest('details')?.querySelector('summary');
-    expect(metricSummary).toBeTruthy();
-    fireEvent.click(metricSummary!);
-    expect(metricQuery).toBeVisible();
-    expect(screen.getByText('{resource.cluster_id="2" && resource.k8s.namespace.name=~"ongrid-serverless"}')).not.toBeVisible();
-    expect(screen.getAllByText('链路').length).toBeGreaterThan(0);
-  });
-
-  it('serverless 异常 Pod 不展示写动作建议入口', async () => {
-    const serverlessCluster = {
-      ...cluster,
-      id: 2,
-      name: 'serverless-prod',
-      mode: 'serverless',
-      controller_edge_id: 4,
-    };
-    let sessionPayload: { title?: string; agent_id?: string } | null = null;
-    server.use(
-      http.get('/api/v1/k8s/clusters/:id', () => HttpResponse.json(serverlessCluster)),
-      http.get('/api/v1/k8s/clusters/:id/nodes', () => HttpResponse.json({ items: [], total: 0 })),
-      http.get('/api/v1/k8s/clusters/:id/workloads', () =>
-        HttpResponse.json({
-          items: [{
-            id: 22,
-            cluster_id: 2,
-            namespace: 'ongrid-serverless',
-            kind: 'Deployment',
-            name: 'checkout-api',
-            desired_replicas: 2,
-            ready_replicas: 1,
-            last_seen_at: '2026-06-29T10:00:00Z',
-          }],
-          total: 1,
-          limit: 100,
-          offset: 0,
-        }),
-      ),
-      http.get('/api/v1/k8s/clusters/:id/pods', ({ request }) => {
-        const url = new URL(request.url);
-        if (url.searchParams.get('reason') === 'CrashLoopBackOff') {
-          return HttpResponse.json({
-            items: [{
-              id: 34,
-              cluster_id: 2,
-              namespace: 'ongrid-serverless',
-              name: 'checkout-api-crash',
-              phase: 'Running',
-              owner_kind: 'Deployment',
-              owner_name: 'checkout-api',
-              restart_count: 6,
-              reason: 'CrashLoopBackOff',
-              last_seen_at: '2026-06-29T10:00:00Z',
-            }],
-            total: 1,
-            limit: 20,
-            offset: 0,
-          });
-        }
-        return HttpResponse.json({
-          items: [{
-            id: 34,
-            cluster_id: 2,
-            namespace: 'ongrid-serverless',
-            name: 'checkout-api-crash',
-            phase: 'Running',
-            owner_kind: 'Deployment',
-            owner_name: 'checkout-api',
-            restart_count: 6,
-            reason: 'CrashLoopBackOff',
-            last_seen_at: '2026-06-29T10:00:00Z',
-          }],
-          total: 1,
-          limit: 100,
-          offset: 0,
-        });
-      }),
-      http.get('/api/v1/k8s/clusters/:id/events', () => HttpResponse.json({ items: [], total: 0 })),
-      http.get('/api/v1/aiops/mutating-proposals', () => HttpResponse.json({ items: [], total: 0 })),
-      http.post('/api/v1/chat/sessions', async ({ request }) => {
-        sessionPayload = await request.json() as { title?: string; agent_id?: string };
-        return HttpResponse.json({
-          id: 'session-serverless-diagnose',
-          user_id: 1,
-          title: sessionPayload.title || 'serverless diagnose',
-          agent_id: sessionPayload.agent_id || 'default',
-          created_at: '2026-06-29T10:04:00Z',
-          updated_at: '2026-06-29T10:04:00Z',
-        });
-      }),
-    );
-
-    render(
-      <MemoryRouter initialEntries={['/kubernetes/2?tab=pods']}>
-        <Routes>
-          <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />
-          <Route path="/chat/:sessionId" element={<ChatStateProbe />} />
-        </Routes>
-      </MemoryRouter>,
-    );
-
-    expect((await screen.findAllByText('checkout-api-crash')).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('CrashLoopBackOff').length).toBeGreaterThan(0);
-    expect(screen.queryByText('建议动作')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '建议动作' })).not.toBeInTheDocument();
-    expect(screen.getByText('只读接入边界')).toBeInTheDocument();
-    expect(screen.queryByText('写动作')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getAllByRole('button', { name: 'AI 分析' })[0]);
-
-    await waitFor(() => {
-      expect(sessionPayload).toEqual({ title: 'diagnose checkout-api-crash', agent_id: 'default' });
-    });
-    expect(await screen.findByTestId('initial-prompt')).toHaveTextContent('serverless 接入');
-    expect(screen.getByTestId('initial-prompt')).toHaveTextContent('只做只读查询和诊断');
-    expect(screen.getByTestId('initial-prompt')).not.toHaveTextContent('dry-run');
-    expect(screen.getByTestId('initial-prompt')).not.toHaveTextContent('审批');
-  });
 });

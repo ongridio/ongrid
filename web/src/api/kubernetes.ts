@@ -19,7 +19,7 @@ export type KubernetesCluster = {
   id: number;
   name: string;
   uid?: string;
-  mode: 'full-node' | 'serverless' | string;
+  mode: 'full-node' | string;
   status: 'online' | 'offline' | 'degraded' | string;
   capabilities?: KubernetesCapability[];
   node_edge_coverage?: KubernetesNodeEdgeCoverage | null;
@@ -149,8 +149,9 @@ export function rotateKubernetesBootstrapToken(id: string | number) {
   return request<KubernetesRegistration>('POST', `/k8s/clusters/${encodeURIComponent(String(id))}/rotate-token`);
 }
 
-export function deleteKubernetesCluster(id: string | number) {
-  return request<void>('DELETE', `/k8s/clusters/${encodeURIComponent(String(id))}`);
+export function deleteKubernetesCluster(id: string | number, opts?: { force?: boolean }) {
+  const qs = buildQuery(opts);
+  return request<void>('DELETE', `/k8s/clusters/${encodeURIComponent(String(id))}${qs}`);
 }
 
 export function listKubernetesNodes(clusterID: string | number) {

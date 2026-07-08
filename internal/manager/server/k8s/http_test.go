@@ -26,18 +26,6 @@ func TestClusterCapabilitiesFromModel(t *testing.T) {
 	assertCapabilityStatus(t, fullNode, "telemetry", capabilityStatusQueryReady)
 	assertCapabilityStatus(t, fullNode, "host-access", capabilityStatusDegraded)
 
-	serverless := clusterCapabilitiesFromModel(&model.Cluster{
-		Status:           model.ClusterStatusOnline,
-		Mode:             model.ModeServerless,
-		ControllerEdgeID: &edgeID,
-		LastSeenAt:       &now,
-	})
-	assertCapabilityStatus(t, serverless, "inventory", capabilityStatusDegraded)
-	assertCapabilityStatus(t, serverless, "events", capabilityStatusReady)
-	assertCapabilityStatus(t, serverless, "telemetry", capabilityStatusQueryReady)
-	assertCapabilityAbsent(t, serverless, "node-metrics")
-	assertCapabilityAbsent(t, serverless, "host-access")
-
 	offline := clusterCapabilitiesFromModel(&model.Cluster{Mode: model.ModeFullNode})
 	assertCapabilityStatus(t, offline, "inventory", capabilityStatusUnavailable)
 	assertCapabilityStatus(t, offline, "node-metrics", capabilityStatusUnavailable)
@@ -79,7 +67,7 @@ func TestClusterCapabilitiesUseNodeCoverage(t *testing.T) {
 
 func TestClusterDTOUsesEffectiveOfflineStatusForStaleOnlineCluster(t *testing.T) {
 	edgeID := uint64(42)
-	old := time.Now().UTC().Add(-(clusterOnlineTTL + time.Minute))
+	old := time.Now().UTC().Add(-(biz.ClusterOnlineTTL + time.Minute))
 	cluster := &model.Cluster{
 		Mode:                     model.ModeFullNode,
 		Status:                   model.ClusterStatusOnline,
@@ -108,13 +96,4 @@ func assertCapabilityStatus(t *testing.T, items []clusterCapabilityDTO, key, wan
 		}
 	}
 	t.Fatalf("capability %q not found", key)
-}
-
-func assertCapabilityAbsent(t *testing.T, items []clusterCapabilityDTO, key string) {
-	t.Helper()
-	for _, item := range items {
-		if item.Key == key {
-			t.Fatalf("capability %q should be absent, got status %q", key, item.Status)
-		}
-	}
 }

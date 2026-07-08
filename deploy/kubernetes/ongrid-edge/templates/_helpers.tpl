@@ -39,8 +39,6 @@ ongrid.io/cluster-id: {{ .Values.enrollment.clusterID | quote }}
 {{- $gw := default dict .Values.telemetryGateway -}}
 {{- if kindIs "bool" $gw.enabled -}}
 {{- if $gw.enabled -}}true{{- else -}}false{{- end -}}
-{{- else if eq .Values.mode "serverless" -}}
-true
 {{- else -}}
 false
 {{- end -}}
@@ -77,8 +75,6 @@ false
 {{- $ksm := default dict .Values.kubeStateMetrics -}}
 {{- if $ksm.collectors -}}
 {{- join "," $ksm.collectors -}}
-{{- else if eq .Values.mode "serverless" -}}
-{{- "pods,deployments,statefulsets,daemonsets,replicasets,jobs,cronjobs,services" -}}
 {{- else -}}
 {{- "pods,deployments,statefulsets,daemonsets,replicasets,jobs,cronjobs,services,nodes,namespaces" -}}
 {{- end -}}

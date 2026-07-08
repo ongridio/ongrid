@@ -54,7 +54,7 @@ func TestAPIClientWatchDecodesEventsAndBookmarks(t *testing.T) {
 
 func TestInventoryPusherWatchSpecsNamespaceScopeExcludeNodes(t *testing.T) {
 	p := &InventoryPusher{
-		info: tunnel.KubernetesInfo{ClusterID: 7, Role: "serverless-controller", Namespace: "apps"},
+		info: tunnel.KubernetesInfo{ClusterID: 7, Role: "controller", Namespace: "apps"},
 		api:  &apiClient{namespace: "apps"},
 	}
 	specs := p.watchSpecs(&inventorySnapshot{

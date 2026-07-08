@@ -220,6 +220,111 @@ func TestRepo_ListEventsSupportsQueryAndIssueOnly(t *testing.T) {
 	}
 }
 
+func TestRepo_CountClustersIgnoresPagination(t *testing.T) {
+	db, repo := newTestRepo(t)
+	clusters := []*model.Cluster{
+		{Name: "prod-a", Mode: model.ModeFullNode, Status: model.ClusterStatusOffline},
+		{Name: "prod-b", Mode: model.ModeFullNode, Status: model.ClusterStatusOffline},
+	}
+	if err := db.Create(&clusters).Error; err != nil {
+		t.Fatalf("Create clusters: %v", err)
+	}
+
+	total, err := repo.CountClusters(context.Background(), biz.ListClustersFilter{Name: "prod", Limit: 1, Offset: 1})
+	if err != nil {
+		t.Fatalf("CountClusters: %v", err)
+	}
+	if total != 2 {
+		t.Fatalf("total=%d want 2", total)
+	}
+}
+
+func TestRepo_DeleteClusterDeletesSnapshots(t *testing.T) {
+	db, repo := newTestRepo(t)
+	now := time.Now()
+	cluster := &model.Cluster{Name: "prod", Mode: model.ModeFullNode, Status: model.ClusterStatusOffline}
+	if err := db.Create(cluster).Error; err != nil {
+		t.Fatalf("Create cluster: %v", err)
+	}
+	controllerEdgeID := uint64(10)
+	if err := db.Create(&model.Node{
+		ClusterID:       cluster.ID,
+		NodeName:        "node-a",
+		NodeUID:         "node-uid-a",
+		LabelsJSON:      "{}",
+		TaintsJSON:      "[]",
+		ConditionsJSON:  "[]",
+		CapacityJSON:    "{}",
+		AllocatableJSON: "{}",
+		LastSeenAt:      &now,
+	}).Error; err != nil {
+		t.Fatalf("Create node: %v", err)
+	}
+	if err := db.Create(&model.Workload{
+		ClusterID:       cluster.ID,
+		Kind:            "Deployment",
+		Namespace:       "default",
+		Name:            "api",
+		UID:             "workload-uid",
+		LabelsJSON:      "{}",
+		AnnotationsJSON: "{}",
+		ConditionsJSON:  "[]",
+		LastSeenAt:      &now,
+	}).Error; err != nil {
+		t.Fatalf("Create workload: %v", err)
+	}
+	if err := db.Create(&model.Pod{
+		ClusterID:  cluster.ID,
+		Namespace:  "default",
+		Name:       "api-1",
+		UID:        "pod-uid",
+		LastSeenAt: &now,
+	}).Error; err != nil {
+		t.Fatalf("Create pod: %v", err)
+	}
+	if err := db.Create(&model.Event{
+		ClusterID:  cluster.ID,
+		Namespace:  "default",
+		Name:       "event-a",
+		UID:        "event-uid",
+		LastSeenAt: &now,
+	}).Error; err != nil {
+		t.Fatalf("Create event: %v", err)
+	}
+	if err := db.Create(&model.Installation{
+		ClusterID:        cluster.ID,
+		Mode:             model.ModeFullNode,
+		ScopeType:        "cluster",
+		Namespace:        "",
+		ControllerEdgeID: &controllerEdgeID,
+		CapabilitiesJSON: "[]",
+		LastSeenAt:       &now,
+	}).Error; err != nil {
+		t.Fatalf("Create installation: %v", err)
+	}
+
+	if err := repo.DeleteCluster(context.Background(), cluster.ID); err != nil {
+		t.Fatalf("DeleteCluster: %v", err)
+	}
+	assertTableCount(t, db, &model.Cluster{}, "id = ?", cluster.ID, 0)
+	assertTableCount(t, db, &model.Node{}, "cluster_id = ?", cluster.ID, 0)
+	assertTableCount(t, db, &model.Workload{}, "cluster_id = ?", cluster.ID, 0)
+	assertTableCount(t, db, &model.Pod{}, "cluster_id = ?", cluster.ID, 0)
+	assertTableCount(t, db, &model.Event{}, "cluster_id = ?", cluster.ID, 0)
+	assertTableCount(t, db, &model.Installation{}, "cluster_id = ?", cluster.ID, 0)
+}
+
+func assertTableCount(t *testing.T, db *gorm.DB, model any, query string, arg any, want int64) {
+	t.Helper()
+	var got int64
+	if err := db.Model(model).Where(query, arg).Count(&got).Error; err != nil {
+		t.Fatalf("Count %T: %v", model, err)
+	}
+	if got != want {
+		t.Fatalf("Count %T = %d, want %d", model, got, want)
+	}
+}
+
 func newTestRepo(t *testing.T) (*gorm.DB, *Repo) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})

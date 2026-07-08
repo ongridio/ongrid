@@ -82,24 +82,17 @@ const DETAIL_TABS: { key: DetailTab; zh: string; en: string }[] = [
   { key: 'actions', zh: 'Actions', en: 'Actions' },
 ];
 
-function detailTabsForCluster(cluster: KubernetesCluster | null) {
-  if (cluster?.mode !== 'serverless') return DETAIL_TABS;
-  return DETAIL_TABS.filter((tab) => tab.key !== 'nodes');
+function detailTabsForCluster(_cluster: KubernetesCluster | null) {
+  return DETAIL_TABS;
 }
 
-function snapshotResourceSummary(totals: ResourceTotals, serverless: boolean) {
-  const parts = serverless
-    ? [
-        `${formatNumber(totals.workloads)}w`,
-        `${formatNumber(totals.pods)}p`,
-        `${formatNumber(totals.events)}e`,
-      ]
-    : [
-        `${formatNumber(totals.nodes)}n`,
-        `${formatNumber(totals.workloads)}w`,
-        `${formatNumber(totals.pods)}p`,
-        `${formatNumber(totals.events)}e`,
-      ];
+function snapshotResourceSummary(totals: ResourceTotals) {
+  const parts = [
+    `${formatNumber(totals.nodes)}n`,
+    `${formatNumber(totals.workloads)}w`,
+    `${formatNumber(totals.pods)}p`,
+    `${formatNumber(totals.events)}e`,
+  ];
   return parts.join(' / ');
 }
 
@@ -190,18 +183,16 @@ export default function KubernetesPage() {
 
   const counts = useMemo(() => {
     let online = 0;
-    let serverless = 0;
     for (const c of clusters) {
       if (c.status === 'online') online++;
-      if (c.mode === 'serverless') serverless++;
     }
-    return { online, serverless };
+    return { online };
   }, [clusters]);
 
-  async function performDeleteCluster(cluster: KubernetesCluster) {
+  async function performDeleteCluster(cluster: KubernetesCluster, force = false) {
     setDeletingClusterID(cluster.id);
     try {
-      await deleteKubernetesCluster(cluster.id);
+      await deleteKubernetesCluster(cluster.id, force ? { force: true } : undefined);
       setClusters((items) => items.filter((item) => item.id !== cluster.id));
       setDeleteClusterTarget(null);
       await refresh({ silent: true });
@@ -218,8 +209,8 @@ export default function KubernetesPage() {
         <PageHeader
           title={tr('Kubernetes 集群', 'Kubernetes clusters')}
           subtitle={tr(
-            `${formatNumber(clusters.length)} 个集群 · ${formatNumber(counts.online)} 个在线 · ${formatNumber(counts.serverless)} 个 serverless`,
-            `${formatNumber(clusters.length)} cluster(s) · ${formatNumber(counts.online)} online · ${formatNumber(counts.serverless)} serverless`,
+            `${formatNumber(clusters.length)} 个集群 · ${formatNumber(counts.online)} 个在线`,
+            `${formatNumber(clusters.length)} cluster(s) · ${formatNumber(counts.online)} online`,
           )}
           actions={
             <>
@@ -373,7 +364,7 @@ export default function KubernetesPage() {
         cluster={deleteClusterTarget}
         deleting={deleteClusterTarget ? deletingClusterID === deleteClusterTarget.id : false}
         onClose={() => setDeleteClusterTarget(null)}
-        onDelete={(cluster) => void performDeleteCluster(cluster)}
+        onDelete={(cluster, force) => void performDeleteCluster(cluster, force)}
       />
     </>
   );
@@ -388,8 +379,7 @@ export function KubernetesClusterDetailPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const rawActiveTab = normalizeTab(searchParams.get('tab'));
   const [cluster, setCluster] = useState<KubernetesCluster | null>(null);
-  const serverless = cluster?.mode === 'serverless';
-  const activeTab = serverless && rawActiveTab === 'nodes' ? 'workloads' : rawActiveTab;
+  const activeTab = rawActiveTab;
   const detailTabs = useMemo(() => detailTabsForCluster(cluster), [cluster]);
   const awaitingConnection = isClusterAwaitingConnection(cluster);
   const [nodes, setNodes] = useState<KubernetesNode[]>([]);
@@ -495,11 +485,6 @@ export function KubernetesClusterDetailPage() {
   }, [refresh]);
   usePoll(() => refresh({ silent: true }), POLL_INTERVAL_MS);
 
-  useEffect(() => {
-    if (!serverless || rawActiveTab !== 'nodes') return;
-    setSearchParams({ tab: 'workloads' }, { replace: true });
-  }, [rawActiveTab, serverless, setSearchParams]);
-
   const namespaces = useMemo(() => collectNamespaces(workloads, pods, events), [workloads, pods, events]);
   const actionTypeOptions = useMemo(() => collectActionTypes(actionProposals), [actionProposals]);
   const resourceFilters = useMemo(
@@ -586,7 +571,7 @@ export function KubernetesClusterDetailPage() {
     };
   }, [activeTab, activeTabSupportsServerFilter, clusterId, filterActive, resourceFilters, resourceFilterRetryNonce, resourceLimit]);
 
-  const visibleNodes = useMemo(() => (serverless ? [] : nodes), [nodes, serverless]);
+  const visibleNodes = nodes;
   const filteredNodes = useMemo(() => filterNodes(visibleNodes, localResourceFilters, cluster), [cluster, localResourceFilters, visibleNodes]);
   const locallyFilteredWorkloads = useMemo(() => filterWorkloads(workloads, localResourceFilters), [localResourceFilters, workloads]);
   const locallyFilteredPods = useMemo(() => filterPods(pods, localResourceFilters), [pods, localResourceFilters]);
@@ -615,10 +600,10 @@ export function KubernetesClusterDetailPage() {
     [visibleNodes, pods, crashLoopTotal],
   );
   const edgeAccess = useMemo(() => {
-    if (serverless || visibleNodes.length <= 0) return null;
+    if (visibleNodes.length <= 0) return null;
     const linked = visibleNodes.filter((n) => n.edge_id != null).length;
     return { linked, total: visibleNodes.length, pct: Math.round((linked / visibleNodes.length) * 100) };
-  }, [serverless, visibleNodes]);
+  }, [visibleNodes]);
   const triageIssues = useMemo(
     () => buildTriageIssues({ cluster, nodes: visibleNodes, workloads, pods, crashLoopPods, warningEvents, edgeAccess, tr }),
     [cluster, crashLoopPods, edgeAccess, pods, tr, visibleNodes, warningEvents, workloads],
@@ -629,7 +614,6 @@ export function KubernetesClusterDetailPage() {
   );
 
   const openResourceTab = useCallback((tab: DetailTab, opts?: { scroll?: boolean; resetFilters?: boolean }) => {
-    const nextTab = serverless && tab === 'nodes' ? 'workloads' : tab;
     if (opts?.resetFilters) {
       setResourceLimit(RESOURCE_PAGE_SIZE);
       setResourceQuery('');
@@ -639,13 +623,13 @@ export function KubernetesClusterDetailPage() {
       setResourceActionDecision('all');
       setResourceActionType('all');
     }
-    setSearchParams({ tab: nextTab });
+    setSearchParams({ tab });
     if (!opts?.scroll) return;
     const schedule = window.requestAnimationFrame ?? ((callback: FrameRequestCallback) => window.setTimeout(callback, 0));
     schedule(() => {
       resourceViewRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
     });
-  }, [serverless, setSearchParams]);
+  }, [setSearchParams]);
   const focusResourceIssue = useCallback((issue: K8sTriageIssue) => {
     const focus = resourceFocusForIssue(issue);
     setResourceLimit(RESOURCE_PAGE_SIZE);
@@ -1011,18 +995,10 @@ export function KubernetesClusterDetailPage() {
                 </div>
               </div>
 
-              {serverless ? (
-                <ServerlessTelemetryDrilldowns
-                  cluster={cluster}
-                  workloads={workloads}
-                  namespaces={namespaces}
-                />
-              ) : (
-                <K8sTelemetryDrilldowns
-                  cluster={cluster}
-                  namespaces={namespaces}
-                />
-              )}
+              <K8sTelemetryDrilldowns
+                cluster={cluster}
+                namespaces={namespaces}
+              />
             </>
           )}
         </div>
@@ -1053,7 +1029,6 @@ function ClusterSummary({
   triageIssueTotal: number;
 }) {
   const { tr } = useI18n();
-  const serverless = cluster?.mode === 'serverless';
   const effectiveEdgeAccess = edgeAccess ?? clusterNodeEdgeAccess(cluster);
   const awaitingConnection = isClusterAwaitingConnection(cluster);
   const syncRisk = clusterSyncRisk(cluster, tr);
@@ -1101,21 +1076,12 @@ function ClusterSummary({
               detail={cluster?.controller_node_name || cluster?.controller_pod_name || '—'}
               tone={cluster?.controller_edge_id ? 'success' : 'default'}
             />
-            {serverless ? (
-              <HealthMetric
-                label={tr('资源范围', 'Resource scope')}
-                value={cluster?.inventory_scope === 'namespace' ? tr('命名空间', 'Namespace') : tr('集群', 'Cluster')}
-                detail={cluster?.inventory_namespace || tr(`${formatNumber(namespaces.length)} 个 namespace`, `${formatNumber(namespaces.length)} namespace(s)`)}
-                tone="info"
-              />
-            ) : (
-              <HealthMetric
-                label={tr('Node agent 覆盖', 'Node agent coverage')}
-                value={effectiveEdgeAccess ? `${effectiveEdgeAccess.linked}/${effectiveEdgeAccess.total}` : '—'}
-                detail={effectiveEdgeAccess ? `${effectiveEdgeAccess.pct}% · ${tr('未覆盖', 'missing')} ${effectiveEdgeAccess.total - effectiveEdgeAccess.linked}` : tr('等待节点快照', 'waiting for node snapshot')}
-                tone={!effectiveEdgeAccess || effectiveEdgeAccess.linked < effectiveEdgeAccess.total ? 'warning' : 'success'}
-              />
-            )}
+            <HealthMetric
+              label={tr('Node agent 覆盖', 'Node agent coverage')}
+              value={effectiveEdgeAccess ? `${effectiveEdgeAccess.linked}/${effectiveEdgeAccess.total}` : '—'}
+              detail={effectiveEdgeAccess ? `${effectiveEdgeAccess.pct}% · ${tr('未覆盖', 'missing')} ${effectiveEdgeAccess.total - effectiveEdgeAccess.linked}` : tr('等待节点快照', 'waiting for node snapshot')}
+              tone={!effectiveEdgeAccess || effectiveEdgeAccess.linked < effectiveEdgeAccess.total ? 'warning' : 'success'}
+            />
             <HealthMetric
               label={tr('同步状态', 'Sync health')}
               value={relativeTime(clusterSyncTime(cluster))}
@@ -1125,7 +1091,7 @@ function ClusterSummary({
             <HealthMetric
               label={tr('快照版本', 'Snapshot version')}
               value={cluster?.inventory_resource_version || '—'}
-              detail={snapshotResourceSummary(totals, serverless)}
+              detail={snapshotResourceSummary(totals)}
               tone="default"
             />
           </div>
@@ -1372,10 +1338,9 @@ function K8sHealthQueue({
   const navigate = useNavigate();
   const grafanaOrgId = useObservability((s) => s.grafanaOrgId);
   const [writeBusy, setWriteBusy] = useState<string | null>(null);
-  const serverless = cluster?.mode === 'serverless';
   const writeEnabled = cluster?.mode === 'full-node';
   const queueWriteActionRecommendations = writeEnabled ? writeActionRecommendations : [];
-  const missingEdgeNodes = serverless ? 0 : nodes.filter((item) => item.edge_id == null).length;
+  const missingEdgeNodes = nodes.filter((item) => item.edge_id == null).length;
   const hasOpenIssues = triageIssues.length > 0;
   const headlineTone = crashLoopTotal > 0
     ? 'danger'
@@ -1477,11 +1442,9 @@ function K8sHealthQueue({
               {loading ? tr('加载排障信号中…', 'Loading triage signals…') : tr('暂无需要处置的异常', 'No actionable issue')}
             </div>
             <div className="mt-1 text-xs text-zinc-500">
-              {serverless
-                ? tr('serverless 模式会继续展示 Workload / Pod / Event 异常。', 'Serverless mode still surfaces workload, pod, and event issues.')
-                : edgeAccess
-                  ? tr(`Node agent 覆盖 ${edgeAccess.linked}/${edgeAccess.total}，未覆盖 ${missingEdgeNodes}`, `Node agent coverage ${edgeAccess.linked}/${edgeAccess.total}, missing ${missingEdgeNodes}`)
-                  : tr('等待资源快照完成后展示队列。', 'The queue appears after the snapshot is ready.')}
+              {edgeAccess
+                ? tr(`Node agent 覆盖 ${edgeAccess.linked}/${edgeAccess.total}，未覆盖 ${missingEdgeNodes}`, `Node agent coverage ${edgeAccess.linked}/${edgeAccess.total}, missing ${missingEdgeNodes}`)
+                : tr('等待资源快照完成后展示队列。', 'The queue appears after the snapshot is ready.')}
             </div>
           </div>
         ) : (
@@ -1880,240 +1843,6 @@ function K8sTelemetryDrilldowns({
   );
 }
 
-function ServerlessTelemetryDrilldowns({
-  cluster,
-  workloads,
-  namespaces,
-}: {
-  cluster: KubernetesCluster | null;
-  workloads: KubernetesWorkload[];
-  namespaces: string[];
-}) {
-  const { tr } = useI18n();
-  const grafanaOrgId = useObservability((s) => s.grafanaOrgId);
-  const [opening, setOpening] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const clusterID = cluster?.id ? String(cluster.id) : '';
-
-  const namespaceMatcher = useMemo(() => {
-    const cleaned = namespaces.map((ns) => ns.trim()).filter(Boolean);
-    if (cleaned.length === 0) return '.+';
-    return cleaned.slice(0, 20).map(escapeLabelRegex).join('|');
-  }, [namespaces]);
-
-  const workloadTargets = useMemo(() => {
-    return workloads
-      .filter((item) => item.namespace && item.name)
-      .slice()
-      .sort((a, b) => `${a.namespace}/${a.kind}/${a.name}`.localeCompare(`${b.namespace}/${b.kind}/${b.name}`))
-      .slice(0, 8);
-  }, [workloads]);
-
-  const aggregateMetricsExpr = useMemo(() => {
-    if (!clusterID) return '';
-    return `sum by (namespace, workload_kind, workload_name, service_name) (up{cluster_id="${clusterID}",ongrid_source=~"k8s:(app-metrics|otlp-gateway-metrics)"})`;
-  }, [clusterID]);
-  const aggregateLogsQuery = useMemo(() => {
-    if (!clusterID) return '';
-    return `{cluster_id="${clusterID}",namespace=~"${namespaceMatcher}"}`;
-  }, [clusterID, namespaceMatcher]);
-  const aggregateTraceQL = useMemo(() => {
-    if (!clusterID) return '';
-    return `{resource.cluster_id="${clusterID}" && resource.k8s.namespace.name=~"${namespaceMatcher}"}`;
-  }, [clusterID, namespaceMatcher]);
-
-  async function openMetrics(expr: string, key: string) {
-    if (!expr) return;
-    setOpening(key);
-    setError(null);
-    try {
-      const launch = await createPrometheusLaunch({
-        expr,
-        range_input: '1h',
-        step_input: '30s',
-      });
-      window.open(launch.url, '_blank', 'noopener,noreferrer');
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : (e as Error).message);
-    } finally {
-      setOpening(null);
-    }
-  }
-
-  async function openLogs(query: string, key: string) {
-    if (!query) return;
-    setOpening(key);
-    setError(null);
-    try {
-      const base = await fetchGrafanaRootURL();
-      const now = Date.now();
-      const url = buildExploreUrl({
-        base,
-        dsType: 'loki',
-        dsUid: 'ongrid-loki',
-        query: { expr: query, queryType: 'range' },
-        fromMs: now - 60 * 60 * 1000,
-        toMs: now,
-        orgId: grafanaOrgId,
-      });
-      await openObservabilityUrl(url);
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : (e as Error).message);
-    } finally {
-      setOpening(null);
-    }
-  }
-
-  async function openTraces(query: string, key: string) {
-    if (!query) return;
-    setOpening(key);
-    setError(null);
-    try {
-      const base = await fetchGrafanaRootURL();
-      const now = Date.now();
-      const url = buildExploreUrl({
-        base,
-        dsType: 'tempo',
-        dsUid: 'ongrid-tempo',
-        query: { query, queryType: 'traceql' },
-        fromMs: now - 60 * 60 * 1000,
-        toMs: now,
-        orgId: grafanaOrgId,
-      });
-      await openObservabilityUrl(url);
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : (e as Error).message);
-    } finally {
-      setOpening(null);
-    }
-  }
-
-  return (
-    <Card className="mt-4 p-0">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800/60 px-4 py-3">
-        <div className="min-w-0">
-          <div className="text-sm font-medium text-zinc-100">
-            {tr('Serverless 应用遥测', 'Serverless app telemetry')}
-          </div>
-          <div className="mt-0.5 truncate text-xs text-zinc-500">
-            {tr('按 namespace / workload 聚合，不依赖 device_id', 'Aggregated by namespace / workload without device_id')}
-          </div>
-        </div>
-        <Chip tone="info">{tr('3 个数据源', '3 data sources')}</Chip>
-      </div>
-      <div className="divide-y divide-zinc-800/60">
-        <TelemetryLinkCell
-          icon={BarChart3}
-          title={tr('应用指标聚合', 'App metrics rollup')}
-          source="Prometheus"
-          statusLabel={workloadTargets.length > 0 ? tr('按 workload 聚合', 'workload rollup') : tr('等待应用数据', 'waiting for app data')}
-          statusTone={workloadTargets.length > 0 ? 'info' : 'default'}
-          query={aggregateMetricsExpr || '—'}
-          loading={opening === 'aggregate-metrics'}
-          disabled={!clusterID}
-          onOpen={() => void openMetrics(aggregateMetricsExpr, 'aggregate-metrics')}
-        />
-        <TelemetryLinkCell
-          icon={FileText}
-          title={tr('应用日志聚合', 'App logs rollup')}
-          source="Loki"
-          statusLabel={workloadTargets.length > 0 ? tr('按 namespace 聚合', 'namespace rollup') : tr('等待应用数据', 'waiting for app data')}
-          statusTone={workloadTargets.length > 0 ? 'info' : 'default'}
-          query={aggregateLogsQuery || '—'}
-          loading={opening === 'aggregate-logs'}
-          disabled={!clusterID}
-          onOpen={() => void openLogs(aggregateLogsQuery, 'aggregate-logs')}
-        />
-        <TelemetryLinkCell
-          icon={Waypoints}
-          title={tr('应用链路聚合', 'App traces rollup')}
-          source="Tempo"
-          statusLabel={workloadTargets.length > 0 ? tr('按 workload 聚合', 'workload rollup') : tr('等待应用数据', 'waiting for app data')}
-          statusTone={workloadTargets.length > 0 ? 'info' : 'default'}
-          query={aggregateTraceQL || '—'}
-          loading={opening === 'aggregate-traces'}
-          disabled={!clusterID}
-          onOpen={() => void openTraces(aggregateTraceQL, 'aggregate-traces')}
-        />
-      </div>
-
-      <div className="border-t border-zinc-800/60">
-        <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
-          <div>
-            <div className="text-xs font-medium text-zinc-300">
-              {tr('Workload 快捷入口', 'Workload shortcuts')}
-            </div>
-            <div className="mt-0.5 text-[11px] text-zinc-500">
-              {tr(`显示前 ${workloadTargets.length} 个 workload`, `Showing first ${workloadTargets.length} workload(s)`)}
-            </div>
-          </div>
-          {workloadTargets.length > 0 && <Chip>{tr('最近快照', 'Latest snapshot')}</Chip>}
-        </div>
-        {workloadTargets.length === 0 ? (
-          <div className="px-4 pb-4 text-xs text-zinc-500">
-            {tr('暂无可用于聚合查询的 Workload 快照。', 'No workload snapshot available for telemetry rollup.')}
-          </div>
-        ) : (
-          <div className="divide-y divide-zinc-800/50">
-            {workloadTargets.map((workload) => {
-              const metricQuery = workloadMetricsExpr(clusterID, workload);
-              const logQuery = workloadLogsQuery(clusterID, workload);
-              const traceQuery = workloadTraceQL(clusterID, workload);
-              const key = `${workload.namespace}/${workload.kind}/${workload.name}`;
-              return (
-                <div key={workload.id || key} className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
-                  <div className="min-w-0">
-                    <div className="flex min-w-0 flex-wrap items-center gap-2">
-                      <Chip>{workload.namespace}</Chip>
-                      <Chip>{workload.kind}</Chip>
-                      <span className="min-w-0 truncate text-sm font-medium text-zinc-100">{workload.name}</span>
-                    </div>
-                    <div className="mt-1 font-mono text-[11px] text-zinc-500">
-                      {workload.ready_replicas}/{workload.desired_replicas} replicas
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      className="shrink-0"
-                      disabled={!clusterID || opening === `${key}:metrics`}
-                      onClick={() => void openMetrics(metricQuery, `${key}:metrics`)}
-                    >
-                      <BarChart3 size={12} />
-                      {tr('指标', 'Metrics')}
-                    </Button>
-                    <Button
-                      className="shrink-0"
-                      disabled={!clusterID || opening === `${key}:logs`}
-                      onClick={() => void openLogs(logQuery, `${key}:logs`)}
-                    >
-                      <FileText size={12} />
-                      {tr('日志', 'Logs')}
-                    </Button>
-                    <Button
-                      className="shrink-0"
-                      disabled={!clusterID || opening === `${key}:traces`}
-                      onClick={() => void openTraces(traceQuery, `${key}:traces`)}
-                    >
-                      <Waypoints size={12} />
-                      {tr('链路', 'Traces')}
-                    </Button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-      {error && (
-        <div className="border-t border-zinc-800/60 px-4 py-2 text-xs text-amber-300">
-          {tr('打开失败：', 'Open failed: ')}
-          {error}
-        </div>
-      )}
-    </Card>
-  );
-}
-
 function TelemetryLinkCell({
   icon: Icon,
   title,
@@ -2345,33 +2074,6 @@ function K8sWriteActionsPanel({
   const navigate = useNavigate();
   const [busy, setBusy] = useState<string | null>(null);
   const writeEnabled = cluster?.mode === 'full-node';
-
-  if (cluster?.mode === 'serverless') {
-    return (
-      <Card className="mt-4 p-0">
-        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-          <div className="flex min-w-0 items-center gap-2">
-            <ShieldCheck size={15} className="text-zinc-400" />
-            <div className="min-w-0">
-              <div className="text-sm font-medium text-zinc-100">{tr('只读接入边界', 'Read-only boundary')}</div>
-              <div className="mt-0.5 text-xs text-zinc-500">
-                {tr('serverless 模式不提供节点或 Pod 写动作；保留 describe、日志、事件和 AI 分析。', 'Serverless mode does not expose node or Pod write actions; describe, logs, events, and AI analysis stay available.')}
-              </div>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-1.5">
-            <Chip tone="info">{tr('只读接入', 'Read-only')}</Chip>
-            <Chip>describe</Chip>
-            <Chip>{tr('日志 / 事件', 'Logs / events')}</Chip>
-            <Chip>{tr('写动作不可用', 'Writes unavailable')}</Chip>
-            <Chip tone={actionProposalTotal > 0 ? 'success' : 'default'}>
-              {tr(`审计记录 ${formatNumber(actionProposalTotal)}`, `audit records ${formatNumber(actionProposalTotal)}`)}
-            </Chip>
-          </div>
-        </div>
-      </Card>
-    );
-  }
 
   async function startAction(spec: K8sWriteActionSpec, recommendedTarget?: string, evidence?: string) {
     if (!cluster || busy) return;
@@ -3614,7 +3316,6 @@ function CreateClusterModal({
   const { tr } = useI18n();
   const [name, setName] = useState('');
   const [uid, setUID] = useState('');
-  const [mode, setMode] = useState('full-node');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -3630,11 +3331,10 @@ function CreateClusterModal({
       const out = await createKubernetesCluster({
         name: trimmed,
         uid: uid.trim() || undefined,
-        mode,
+        mode: 'full-node',
       });
       setName('');
       setUID('');
-      setMode('full-node');
       onCreated(out);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : (e as Error).message);
@@ -3675,17 +3375,6 @@ function CreateClusterModal({
             className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-sm text-zinc-100 focus:border-zinc-600 focus:outline-none"
             placeholder={tr('可留空', 'Optional')}
           />
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-zinc-500">{tr('模式', 'Mode')}</span>
-          <select
-            value={mode}
-            onChange={(e) => setMode(e.target.value)}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100 focus:border-zinc-600 focus:outline-none"
-          >
-            <option value="full-node">full-node</option>
-            <option value="serverless">serverless</option>
-          </select>
         </label>
         {error && (
           <div className="rounded-md border border-red-500/30 bg-red-500/10 px-2 py-1.5 text-red-300">
@@ -3808,7 +3497,7 @@ function DeleteClusterModal({
   cluster: KubernetesCluster | null;
   deleting: boolean;
   onClose(): void;
-  onDelete(cluster: KubernetesCluster): void;
+  onDelete(cluster: KubernetesCluster, force: boolean): void;
 }) {
   const { tr } = useI18n();
   const [copied, setCopied] = useState(false);
@@ -3834,13 +3523,7 @@ function DeleteClusterModal({
       footer={
         <>
           <Button onClick={onClose} disabled={deleting}>{tr('取消', 'Cancel')}</Button>
-          {active && (
-            <Button onClick={() => onDelete(cluster)} disabled={deleting}>
-              <Trash2 size={12} />
-              {deleting ? tr('删除中…', 'Deleting…') : tr('强制删除记录', 'Force delete record')}
-            </Button>
-          )}
-          <Button variant="danger" onClick={() => onDelete(cluster)} disabled={deleting}>
+          <Button variant="danger" onClick={() => onDelete(cluster, active)} disabled={deleting}>
             <Trash2 size={12} />
             {deleting
               ? tr('删除中…', 'Deleting…')
@@ -3909,8 +3592,7 @@ function ClusterStatusChip({ status }: { status?: string }) {
 }
 
 function ModeChip({ mode }: { mode?: string }) {
-  const tone = mode === 'serverless' ? 'info' : 'accent';
-  return <Chip tone={tone}>{mode || 'full-node'}</Chip>;
+  return <Chip tone="accent">{mode || 'full-node'}</Chip>;
 }
 
 function ReplicaStatusChip({ ready, desired }: { ready: number; desired: number }) {
@@ -4045,7 +3727,7 @@ function clusterHealthConclusion(
       description: tr('尚未收到 Controller 首次上报或资源快照，当前不判断集群健康。', 'No first controller report or inventory snapshot has arrived yet, so cluster health is not evaluated.'),
     };
   }
-  const missingAgents = cluster.mode === 'serverless' || !edgeAccess ? 0 : edgeAccess.total - edgeAccess.linked;
+  const missingAgents = !edgeAccess ? 0 : edgeAccess.total - edgeAccess.linked;
   const criticalSignals = issueCounts.crashLoopBackOff + issueCounts.notReady + issueCounts.oomKilled;
   const warningSignals = issueCounts.pending + issueCounts.imagePullBackOff + warningEventTotal + missingAgents;
   if (cluster.status !== 'online') {
@@ -4068,20 +3750,14 @@ function clusterHealthConclusion(
     };
   }
   if (warningSignals > 0) {
-    const description = cluster.mode === 'serverless'
-      ? tr(
-          `当前有 ${formatNumber(warningSignals)} 个待确认问题，建议先确认 Events 和 Workload / Pod 状态。`,
-          `${formatNumber(warningSignals)} issue(s) to review. Check Events and Workload / Pod status first.`,
-        )
-      : tr(
-          `当前有 ${formatNumber(warningSignals)} 个待确认问题，建议先确认事件和 Node agent 覆盖。`,
-          `${formatNumber(warningSignals)} issue(s) to review. Check events and Node agent coverage first.`,
-        );
     return {
       tone: 'warning' as K8sHealthTone,
       label: tr('Degraded', 'Degraded'),
       title: tr('集群可用，但存在需要关注的信号', 'Cluster is available with signals to review'),
-      description,
+      description: tr(
+        `当前有 ${formatNumber(warningSignals)} 个待确认问题，建议先确认事件和 Node agent 覆盖。`,
+        `${formatNumber(warningSignals)} issue(s) to review. Check events and Node agent coverage first.`,
+      ),
     };
   }
   if (syncRisk) {
@@ -4118,7 +3794,6 @@ function buildClusterCapabilities({
   warningEventTotal: number;
   tr: (zh: string, en: string) => string;
 }): K8sCapability[] {
-  const serverless = cluster?.mode === 'serverless';
   if (isClusterAwaitingConnection(cluster)) {
     return [
       makeCapability({
@@ -4157,14 +3832,10 @@ function buildClusterCapabilities({
       key: 'telemetry',
       label: tr('Telemetry', 'Telemetry'),
       status: backendStatus('telemetry') ?? (hasController ? 'query-ready' : 'unavailable'),
-      detail: serverless
-        ? tr(`按 ${formatNumber(namespaceCount)} 个 namespace 聚合`, `Roll up by ${formatNumber(namespaceCount)} namespace(s)`)
-        : tr('可按 cluster_id 打开 Prometheus / Loki / Tempo', 'Prometheus / Loki / Tempo queries are scoped by cluster_id'),
+      detail: tr(`可按 cluster_id 打开 Prometheus / Loki / Tempo · ${formatNumber(namespaceCount)} 个 namespace`, `Prometheus / Loki / Tempo queries are scoped by cluster_id · ${formatNumber(namespaceCount)} namespace(s)`),
       tr,
     }),
   ];
-
-  if (serverless) return capabilities;
 
   const localNodeMetricStatus: K8sCapabilityStatus = !edgeAccess || edgeAccess.total === 0
     ? 'unavailable'
@@ -4488,7 +4159,7 @@ function resourceAPIParams(filters: ResourceFilters, limit = RESOURCE_PAGE_SIZE)
 function filterNodes(items: KubernetesNode[], filters: ResourceFilters, cluster: KubernetesCluster | null) {
   const query = normalizeFilterQuery(filters.query);
   return items.filter((item) => {
-    if (filters.issueOnly && !nodeHasIssue(item, cluster)) return false;
+    if (filters.issueOnly && !nodeHasIssue(item)) return false;
     return matchesQuery(query, item.node_name, item.node_uid, item.provider_id, item.kubelet_version, item.edge_id, item.device_id, nodeConditionLabels(item).join(' '));
   });
 }
@@ -4595,8 +4266,8 @@ function k8sActionTypeLabel(action: string, tr: (zh: string, en: string) => stri
   }
 }
 
-function nodeHasIssue(item: KubernetesNode, cluster: KubernetesCluster | null) {
-  return nodeConditionLabels(item).length > 0 || (cluster?.mode !== 'serverless' && item.edge_id == null);
+function nodeHasIssue(item: KubernetesNode) {
+  return nodeConditionLabels(item).length > 0 || item.edge_id == null;
 }
 
 function normalizeFilterQuery(value: string) {
@@ -4662,13 +4333,12 @@ function buildTriageIssues({
   edgeAccess: { linked: number; total: number; pct: number } | null;
   tr: (zh: string, en: string) => string;
 }) {
-  const serverless = cluster?.mode === 'serverless';
   const degradedWorkloads = workloads.filter((item) => item.desired_replicas > item.ready_replicas);
   const abnormalPods = buildAbnormalPods(pods, crashLoopPods);
   const nodeIssues = buildNodeIssues(nodes);
   const recentWarningEvents = sortEventsByRecent(dedupeEvents(warningEvents.filter(isWarningK8sEvent))).slice(0, 5);
   const syncRisk = clusterSyncRisk(cluster, tr);
-  const missingEdgeNodes = serverless ? 0 : nodes.filter((item) => item.edge_id == null).length;
+  const missingEdgeNodes = nodes.filter((item) => item.edge_id == null).length;
   const coverageIssue: K8sTriageIssue | null = missingEdgeNodes > 0
     ? {
         key: 'node-agent:coverage',
@@ -5056,12 +4726,6 @@ function analyzeIssuePrompt(
   issue: K8sTriageIssue,
   tr: (zh: string, en: string) => string,
 ) {
-  if (cluster.mode === 'serverless') {
-    return tr(
-      `请分析 Kubernetes 异常：cluster_id=${cluster.id}，cluster=${cluster.name}，对象=${issue.resourceKind || issue.kind}/${issue.name || issue.title}，namespace=${issue.namespace || 'default'}，原因=${issue.reason || issue.labels.join(',')}。请关联 snapshot、events、logs、traces，给出根因判断和处置建议。该集群为 serverless 接入，只做只读查询和诊断；不要发起 scale、restart、delete、patch、cordon、drain 等写动作。如需变更，只给出外部平台或应用侧处置建议。`,
-      `Analyze this Kubernetes issue: cluster_id=${cluster.id}, cluster=${cluster.name}, object=${issue.resourceKind || issue.kind}/${issue.name || issue.title}, namespace=${issue.namespace || 'default'}, reason=${issue.reason || issue.labels.join(',')}. Correlate snapshot, events, logs, and traces, then provide root cause and remediation. This cluster uses serverless access, so keep the workflow read-only; do not start scale, restart, delete, patch, cordon, or drain actions. If a change is needed, provide external platform or application-side guidance only.`,
-    );
-  }
   return tr(
     `请分析 Kubernetes 异常：cluster_id=${cluster.id}，cluster=${cluster.name}，对象=${issue.resourceKind || issue.kind}/${issue.name || issue.title}，namespace=${issue.namespace || 'default'}，原因=${issue.reason || issue.labels.join(',')}。请关联 snapshot、events、logs、traces，给出根因判断和处置建议。所有写动作必须先 dry-run 并走审批。`,
     `Analyze this Kubernetes issue: cluster_id=${cluster.id}, cluster=${cluster.name}, object=${issue.resourceKind || issue.kind}/${issue.name || issue.title}, namespace=${issue.namespace || 'default'}, reason=${issue.reason || issue.labels.join(',')}. Correlate snapshot, events, logs, and traces, then provide root cause and remediation. Any write action must dry-run first and go through approval.`,
@@ -5073,12 +4737,6 @@ function analyzeResourcePrompt(
   issue: K8sTriageIssue,
   tr: (zh: string, en: string) => string,
 ) {
-  if (cluster.mode === 'serverless') {
-    return tr(
-      `请分析 Kubernetes 资源状态：cluster_id=${cluster.id}，cluster=${cluster.name}，对象=${issue.resourceKind || issue.kind}/${issue.name || issue.title}，namespace=${issue.namespace || 'default'}，当前信号=${issue.labels.join(',')}。请优先关联 snapshot、events、logs、traces，给出健康判断和下一步排查建议。该集群为 serverless 接入，只做只读查询和诊断；不要发起 scale、restart、delete、patch、cordon、drain 等写动作。`,
-      `Analyze this Kubernetes resource state: cluster_id=${cluster.id}, cluster=${cluster.name}, object=${issue.resourceKind || issue.kind}/${issue.name || issue.title}, namespace=${issue.namespace || 'default'}, current signals=${issue.labels.join(',')}. Correlate snapshot, events, logs, and traces first, then provide health judgment and next triage steps. This cluster uses serverless access, so keep it read-only; do not start scale, restart, delete, patch, cordon, or drain actions.`,
-    );
-  }
   return tr(
     `请分析 Kubernetes 资源状态：cluster_id=${cluster.id}，cluster=${cluster.name}，对象=${issue.resourceKind || issue.kind}/${issue.name || issue.title}，namespace=${issue.namespace || 'default'}，当前信号=${issue.labels.join(',')}。请优先关联 snapshot、events、logs、traces，给出健康判断和下一步排查建议。如需写动作，必须先 dry-run 并走审批。`,
     `Analyze this Kubernetes resource state: cluster_id=${cluster.id}, cluster=${cluster.name}, object=${issue.resourceKind || issue.kind}/${issue.name || issue.title}, namespace=${issue.namespace || 'default'}, current signals=${issue.labels.join(',')}. Correlate snapshot, events, logs, and traces first, then provide health judgment and next triage steps. If a write action is needed, it must dry-run first and go through approval.`,
@@ -5312,67 +4970,6 @@ function escapeLabelRegex(value: string) {
 
 function escapeLabelValue(value: string) {
   return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-}
-
-function workloadMetricsExpr(clusterID: string, workload: KubernetesWorkload) {
-  if (!clusterID) return '';
-  const namespace = escapeLabelValue(workload.namespace);
-  const kindMatcher = workloadKindMatcher(workload.kind);
-  const nameMatcher = workloadNameMatcher(workload.kind, workload.name);
-  return `sum by (pod, workload_kind, workload_name, service_name) (up{cluster_id="${clusterID}",namespace="${namespace}",workload_kind=~"${kindMatcher}",workload_name=~"${nameMatcher}",ongrid_source="k8s:app-metrics"})`;
-}
-
-function workloadLogsQuery(clusterID: string, workload: KubernetesWorkload) {
-  if (!clusterID) return '';
-  const namespace = escapeLabelValue(workload.namespace);
-  const labelName = workloadLokiLabelName(workload.kind);
-  const workloadName = escapeLabelValue(workload.name);
-  if (!labelName) {
-    return `{cluster_id="${clusterID}",namespace="${namespace}",service_name=~"${escapeLabelRegex(workload.name)}"}`;
-  }
-  return `{cluster_id="${clusterID}",namespace="${namespace}",${labelName}="${workloadName}"}`;
-}
-
-function workloadTraceQL(clusterID: string, workload: KubernetesWorkload) {
-  if (!clusterID) return '';
-  const namespace = escapeLabelValue(workload.namespace);
-  const attrName = workloadTraceAttribute(workload.kind);
-  const workloadName = escapeLabelValue(workload.name);
-  if (!attrName) {
-    return `{resource.cluster_id="${clusterID}" && resource.k8s.namespace.name="${namespace}" && resource.service.name="${workloadName}"}`;
-  }
-  return `{resource.cluster_id="${clusterID}" && resource.k8s.namespace.name="${namespace}" && ${attrName}="${workloadName}"}`;
-}
-
-function workloadKindMatcher(kind: string) {
-  const cleaned = escapeLabelRegex(kind || '.+');
-  if (kind === 'Deployment') return 'Deployment|ReplicaSet';
-  if (kind === 'CronJob') return 'CronJob|Job';
-  return cleaned;
-}
-
-function workloadNameMatcher(kind: string, name: string) {
-  const cleaned = escapeLabelRegex(name);
-  if (kind === 'Deployment') return `${cleaned}(-[a-z0-9]+)?`;
-  if (kind === 'CronJob') return `${cleaned}(-[0-9]+)?`;
-  return cleaned;
-}
-
-function workloadLokiLabelName(kind: string) {
-  switch (kind) {
-    case 'Deployment':
-      return 'k8s_deployment_name';
-    case 'StatefulSet':
-      return 'k8s_statefulset_name';
-    case 'DaemonSet':
-      return 'k8s_daemonset_name';
-    case 'Job':
-      return 'k8s_job_name';
-    case 'CronJob':
-      return 'k8s_cronjob_name';
-    default:
-      return '';
-  }
 }
 
 function workloadTraceAttribute(kind: string) {

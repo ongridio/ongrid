@@ -585,7 +585,7 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 
 func isKubernetesControllerRole(role string) bool {
 	switch role {
-	case "controller", "serverless-controller":
+	case "controller":
 		return true
 	default:
 		return false

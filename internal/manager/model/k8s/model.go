@@ -12,12 +12,10 @@ const (
 	ClusterStatusOffline  = "offline"
 	ClusterStatusDegraded = "degraded"
 
-	ModeFullNode   = "full-node"
-	ModeServerless = "serverless"
+	ModeFullNode = "full-node"
 
-	RoleNode                 = "node"
-	RoleController           = "controller"
-	RoleServerlessController = "serverless-controller"
+	RoleNode       = "node"
+	RoleController = "controller"
 )
 
 // Cluster is one Kubernetes cluster registration in manager.

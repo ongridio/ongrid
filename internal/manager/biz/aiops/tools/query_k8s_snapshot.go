@@ -42,7 +42,7 @@ var QueryK8sSnapshotSchema = json.RawMessage(`{
     },
     "cluster_mode": {
       "type": "string",
-      "enum": ["full-node", "serverless"],
+      "enum": ["full-node"],
       "description": "Optional cluster mode filter."
     },
     "namespace": {
@@ -316,18 +316,17 @@ func (t *QueryK8sSnapshotTool) selectClusters(ctx context.Context, in QueryK8sSn
 		if err != nil {
 			return nil, fmt.Errorf("%s: get cluster %d: %w", ToolNameQueryK8sSnapshot, in.ClusterID, err)
 		}
-		return []*k8smodel.Cluster{c}, nil
+		return filterClustersByEffectiveStatus([]*k8smodel.Cluster{c}, in.ClusterStatus, time.Now().UTC()), nil
 	}
 	items, err := t.reader.ListClusters(ctx, k8sbiz.ListClustersFilter{
-		Name:   in.ClusterName,
-		Status: in.ClusterStatus,
-		Mode:   in.ClusterMode,
-		Limit:  100,
+		Name:  in.ClusterName,
+		Mode:  in.ClusterMode,
+		Limit: 100,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("%s: list clusters: %w", ToolNameQueryK8sSnapshot, err)
 	}
-	return items, nil
+	return filterClustersByEffectiveStatus(items, in.ClusterStatus, time.Now().UTC()), nil
 }
 
 func (t *QueryK8sSnapshotTool) querySummary(ctx context.Context, clusters []*k8smodel.Cluster, in QueryK8sSnapshotArgs, resp *k8sSnapshotResponse) (*k8sSnapshotResponse, error) {
@@ -350,7 +349,7 @@ func (t *QueryK8sSnapshotTool) querySummary(ctx context.Context, clusters []*k8s
 }
 
 func (t *QueryK8sSnapshotTool) countCluster(ctx context.Context, c *k8smodel.Cluster, in QueryK8sSnapshotArgs) (k8sClusterCountSnapshot, error) {
-	row := k8sClusterCountSnapshot{ClusterID: c.ID, Name: c.Name, Mode: c.Mode, Status: c.Status}
+	row := k8sClusterCountSnapshot{ClusterID: c.ID, Name: c.Name, Mode: c.Mode, Status: k8sSnapshotClusterStatus(c)}
 	nodes, err := t.reader.CountNodes(ctx, c.ID)
 	if err != nil {
 		return row, fmt.Errorf("%s: count nodes for cluster %d: %w", ToolNameQueryK8sSnapshot, c.ID, err)
@@ -404,7 +403,7 @@ func (t *QueryK8sSnapshotTool) queryNodes(ctx context.Context, clusters []*k8smo
 			ClusterID: c.ID,
 			Name:      c.Name,
 			Mode:      c.Mode,
-			Status:    c.Status,
+			Status:    k8sSnapshotClusterStatus(c),
 			Nodes:     total,
 			Total:     total,
 		})
@@ -448,7 +447,7 @@ func (t *QueryK8sSnapshotTool) queryWorkloads(ctx context.Context, clusters []*k
 			ClusterID: c.ID,
 			Name:      c.Name,
 			Mode:      c.Mode,
-			Status:    c.Status,
+			Status:    k8sSnapshotClusterStatus(c),
 			Workloads: total,
 			Total:     total,
 		})
@@ -490,7 +489,7 @@ func (t *QueryK8sSnapshotTool) queryPods(ctx context.Context, clusters []*k8smod
 			ClusterID: c.ID,
 			Name:      c.Name,
 			Mode:      c.Mode,
-			Status:    c.Status,
+			Status:    k8sSnapshotClusterStatus(c),
 			Pods:      total,
 			Total:     total,
 		})
@@ -539,7 +538,7 @@ func (t *QueryK8sSnapshotTool) queryEvents(ctx context.Context, clusters []*k8sm
 			ClusterID: c.ID,
 			Name:      c.Name,
 			Mode:      c.Mode,
-			Status:    c.Status,
+			Status:    k8sSnapshotClusterStatus(c),
 			Events:    total,
 			Total:     total,
 		})
@@ -627,11 +626,29 @@ func clusterSnapshotRow(c *k8smodel.Cluster) k8sClusterSnapshotRow {
 		Name:             c.Name,
 		UID:              c.UID,
 		Mode:             c.Mode,
-		Status:           c.Status,
+		Status:           k8sSnapshotClusterStatus(c),
 		ControllerEdgeID: c.ControllerEdgeID,
 		Version:          c.Version,
 		LastSeenAt:       c.LastSeenAt,
 	}
+}
+
+func k8sSnapshotClusterStatus(c *k8smodel.Cluster) string {
+	return k8sbiz.EffectiveClusterStatus(c, time.Now().UTC())
+}
+
+func filterClustersByEffectiveStatus(items []*k8smodel.Cluster, status string, now time.Time) []*k8smodel.Cluster {
+	status = strings.TrimSpace(status)
+	if status == "" {
+		return items
+	}
+	out := make([]*k8smodel.Cluster, 0, len(items))
+	for _, item := range items {
+		if k8sbiz.EffectiveClusterStatus(item, now) == status {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 func nodeSnapshotRow(n *k8smodel.Node) k8sNodeSnapshotRow {

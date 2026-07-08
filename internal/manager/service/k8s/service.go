@@ -11,6 +11,7 @@ import (
 type CreateClusterInput = biz.CreateClusterInput
 type ClusterRegistration = biz.ClusterRegistration
 type ListClustersFilter = biz.ListClustersFilter
+type DeleteClusterInput = biz.DeleteClusterInput
 type ListPodsFilter = biz.ListPodsFilter
 type ListWorkloadsFilter = biz.ListWorkloadsFilter
 type ListEventsFilter = biz.ListEventsFilter
@@ -32,6 +33,10 @@ func (s *Service) CreateCluster(ctx context.Context, in CreateClusterInput) (*Cl
 
 func (s *Service) ListClusters(ctx context.Context, f ListClustersFilter) ([]*model.Cluster, error) {
 	return s.uc.ListClusters(ctx, f)
+}
+
+func (s *Service) CountClusters(ctx context.Context, f ListClustersFilter) (int64, error) {
+	return s.uc.CountClusters(ctx, f)
 }
 
 func (s *Service) GetCluster(ctx context.Context, id uint64) (*model.Cluster, error) {
@@ -78,8 +83,8 @@ func (s *Service) RotateBootstrapToken(ctx context.Context, id uint64) (*Cluster
 	return s.uc.RotateBootstrapToken(ctx, id)
 }
 
-func (s *Service) DeleteCluster(ctx context.Context, id uint64) error {
-	return s.uc.DeleteCluster(ctx, id)
+func (s *Service) DeleteCluster(ctx context.Context, in DeleteClusterInput) error {
+	return s.uc.DeleteCluster(ctx, in)
 }
 
 func (s *Service) Enroll(ctx context.Context, in EnrollInput) (*EnrollResult, error) {

@@ -1,4 +1,3 @@
-{{- if ne .Values.mode "serverless" }}
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -20,9 +19,9 @@ spec:
         app.kubernetes.io/component: node
     spec:
       serviceAccountName: {{ include "ongrid-edge.nodeServiceAccount" . }}
-      hostPID: {{ eq .Values.mode "full-node" }}
+      hostPID: true
       {{- $supplementalGroups := .Values.podSecurity.supplementalGroups }}
-      {{- if and (eq .Values.mode "full-node") (not $supplementalGroups) }}
+      {{- if not $supplementalGroups }}
       {{- $supplementalGroups = list 0 }}
       {{- end }}
       securityContext:
@@ -85,15 +84,13 @@ spec:
                 fieldRef:
                   fieldPath: metadata.namespace
             - name: ONGRID_EDGE_COLLECTOR_MODE
-              value: {{ default (ternary "embedded" "off" (eq .Values.mode "full-node")) .Values.node.collectorMode | quote }}
-          {{- if eq .Values.mode "full-node" }}
+              value: {{ default "embedded" .Values.node.collectorMode | quote }}
             - name: HOST_PROC
               value: /host/proc
             - name: HOST_SYS
               value: /host/sys
             - name: HOST_ROOT
               value: /host/root
-          {{- end }}
           resources:
             {{- toYaml .Values.node.resources | nindent 12 }}
           securityContext:
@@ -104,7 +101,6 @@ spec:
           volumeMounts:
             - name: edge-state
               mountPath: /var/lib/ongrid-edge
-          {{- if eq .Values.mode "full-node" }}
             - name: host-proc
               mountPath: /host/proc
               readOnly: true
@@ -117,11 +113,9 @@ spec:
             - name: host-var-log
               mountPath: /host/var/log
               readOnly: true
-          {{- end }}
       volumes:
         - name: edge-state
           emptyDir: {}
-      {{- if eq .Values.mode "full-node" }}
         - name: host-proc
           hostPath:
             path: /proc
@@ -138,5 +132,3 @@ spec:
           hostPath:
             path: /var/log
             type: Directory
-      {{- end }}
-{{- end }}

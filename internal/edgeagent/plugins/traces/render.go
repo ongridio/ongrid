@@ -190,7 +190,7 @@ service:
 //	http_endpoint : string (default "127.0.0.1:4318")
 //	extra_attrs : map[string]string (extra resource attributes)
 //	tls_insecure_skip_verify : bool (default false; use only for local/self-signed HTTPS)
-//	omit_device_id : bool (default false; true for cluster/serverless gateway collectors)
+//	omit_device_id : bool (default false; true for cluster gateway collectors)
 //	enable_k8sattributes : bool (default false; true for Kubernetes gateway collectors)
 //	enable_logs : bool (default false; true for Kubernetes telemetry gateway)
 //	logs_endpoint : string (required when enable_logs=true; Loki push URL)

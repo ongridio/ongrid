@@ -30,6 +30,7 @@ type Repository interface {
 	GetCluster(ctx context.Context, id uint64) (*model.Cluster, error)
 	GetClusterByControllerEdge(ctx context.Context, edgeID uint64) (*model.Cluster, error)
 	ListClusters(ctx context.Context, f ListClustersFilter) ([]*model.Cluster, error)
+	CountClusters(ctx context.Context, f ListClustersFilter) (int64, error)
 	UpdateClusterToken(ctx context.Context, id uint64, tokenHash string, expiresAt *time.Time) error
 	UpdateClusterController(ctx context.Context, id uint64, in ClusterControllerRegistration) error
 	UpdateClusterInventorySync(ctx context.Context, id uint64, in ClusterInventorySync) error
@@ -178,6 +179,11 @@ type ListClustersFilter struct {
 	Offset int
 }
 
+type DeleteClusterInput struct {
+	ID    uint64
+	Force bool
+}
+
 type ListWorkloadsFilter struct {
 	ClusterID uint64
 	Namespace string
@@ -323,6 +329,13 @@ func (u *Usecase) ListClusters(ctx context.Context, f ListClustersFilter) ([]*mo
 		f.Offset = 0
 	}
 	return u.repo.ListClusters(ctx, f)
+}
+
+func (u *Usecase) CountClusters(ctx context.Context, f ListClustersFilter) (int64, error) {
+	if u.repo == nil {
+		return 0, errs.ErrNotWiredYet
+	}
+	return u.repo.CountClusters(ctx, f)
 }
 
 func (u *Usecase) GetCluster(ctx context.Context, id uint64) (*model.Cluster, error) {
@@ -491,15 +504,21 @@ func (u *Usecase) RotateBootstrapToken(ctx context.Context, id uint64) (*Cluster
 	}, nil
 }
 
-func (u *Usecase) DeleteCluster(ctx context.Context, id uint64) error {
+func (u *Usecase) DeleteCluster(ctx context.Context, in DeleteClusterInput) error {
 	if u.repo == nil {
 		return errs.ErrNotWiredYet
 	}
-	c, err := u.repo.GetCluster(ctx, id)
+	if in.ID == 0 {
+		return errs.ErrInvalid
+	}
+	c, err := u.repo.GetCluster(ctx, in.ID)
 	if err != nil {
 		return err
 	}
-	edgeIDs, err := u.repo.ListClusterEdgeIDs(ctx, id)
+	if !in.Force && EffectiveClusterStatus(c, time.Now().UTC()) == model.ClusterStatusOnline {
+		return fmt.Errorf("%w: k8s cluster %d is still reporting; uninstall the Helm release first or retry with force", errs.ErrConflict, c.ID)
+	}
+	edgeIDs, err := u.repo.ListClusterEdgeIDs(ctx, in.ID)
 	if err != nil {
 		return fmt.Errorf("list k8s cluster edges: %w", err)
 	}
@@ -511,7 +530,7 @@ func (u *Usecase) DeleteCluster(ctx context.Context, id uint64) error {
 	if err := u.deleteClusterEdges(ctx, edgeIDs); err != nil {
 		return err
 	}
-	if err := u.repo.DeleteCluster(ctx, id); err != nil {
+	if err := u.repo.DeleteCluster(ctx, in.ID); err != nil {
 		return fmt.Errorf("delete k8s cluster: %w", err)
 	}
 	return nil
@@ -569,8 +588,8 @@ func (u *Usecase) Enroll(ctx context.Context, in EnrollInput) (*EnrollResult, er
 	switch role {
 	case model.RoleNode:
 		return u.enrollNode(ctx, c, in, now)
-	case model.RoleController, model.RoleServerlessController:
-		return u.enrollController(ctx, c, role, in, now)
+	case model.RoleController:
+		return u.enrollController(ctx, c, in, now)
 	default:
 		return nil, errors.Join(errs.ErrInvalid, fmt.Errorf("unsupported k8s enroll role %q", in.Role))
 	}
@@ -614,7 +633,7 @@ func (u *Usecase) HandleRegister(ctx context.Context, edgeID uint64, deviceID *u
 			return err
 		}
 		return u.reconcileTopology(ctx, info.ClusterID)
-	case model.RoleController, model.RoleServerlessController:
+	case model.RoleController:
 		if err := u.repo.UpdateClusterController(ctx, info.ClusterID, ClusterControllerRegistration{
 			EdgeID:    edgeID,
 			LastSeen:  now,
@@ -627,9 +646,6 @@ func (u *Usecase) HandleRegister(ctx context.Context, edgeID uint64, deviceID *u
 		mode := strings.TrimSpace(info.Mode)
 		if mode == "" {
 			mode = model.ModeFullNode
-		}
-		if normalizeRole(info.Role) == model.RoleServerlessController {
-			mode = model.ModeServerless
 		}
 		scopeType := "cluster"
 		if strings.TrimSpace(info.Namespace) != "" {
@@ -684,7 +700,7 @@ func (u *Usecase) reconcileTopology(ctx context.Context, clusterID uint64) error
 	if c.UID != nil {
 		uid = strings.TrimSpace(*c.UID)
 	}
-	clusterNodeID, err := u.topology.EnsureKubernetesCluster(ctx, c.ID, c.NodeID, c.Name, uid, c.Mode, c.Status)
+	clusterNodeID, err := u.topology.EnsureKubernetesCluster(ctx, c.ID, c.NodeID, c.Name, uid, c.Mode, EffectiveClusterStatus(c, time.Now().UTC()))
 	if err != nil {
 		return err
 	}
@@ -1099,7 +1115,7 @@ func uniqueNonZeroUint64(values []uint64) []uint64 {
 	return out
 }
 
-func (u *Usecase) enrollController(ctx context.Context, c *model.Cluster, role string, in EnrollInput, now time.Time) (*EnrollResult, error) {
+func (u *Usecase) enrollController(ctx context.Context, c *model.Cluster, in EnrollInput, now time.Time) (*EnrollResult, error) {
 	var cred *EdgeCredential
 	var err error
 	if c.ControllerEdgeID == nil || *c.ControllerEdgeID == 0 {
@@ -1123,13 +1139,6 @@ func (u *Usecase) enrollController(ctx context.Context, c *model.Cluster, role s
 	}
 	mode := c.Mode
 	scopeType := "cluster"
-	if role == model.RoleServerlessController {
-		mode = model.ModeServerless
-		scopeType = "namespace"
-		if strings.TrimSpace(in.Namespace) == "" {
-			scopeType = "cluster"
-		}
-	}
 	capabilitiesJSON := mustJSON(in.Capabilities)
 	ts := now
 	if err := u.repo.UpsertInstallation(ctx, &model.Installation{
@@ -1143,7 +1152,7 @@ func (u *Usecase) enrollController(ctx context.Context, c *model.Cluster, role s
 	}); err != nil {
 		return nil, fmt.Errorf("upsert k8s installation: %w", err)
 	}
-	return u.enrollResult(c.ID, role, mode, cred), nil
+	return u.enrollResult(c.ID, model.RoleController, mode, cred), nil
 }
 
 func (u *Usecase) issueNodeCredential(ctx context.Context, c *model.Cluster, n *model.Node) (*EdgeCredential, error) {
@@ -1205,8 +1214,6 @@ func normalizeMode(mode string) (string, error) {
 	switch strings.TrimSpace(mode) {
 	case "", model.ModeFullNode:
 		return model.ModeFullNode, nil
-	case model.ModeServerless:
-		return model.ModeServerless, nil
 	default:
 		return "", errors.Join(errs.ErrInvalid, fmt.Errorf("unsupported k8s mode %q", mode))
 	}
@@ -1214,8 +1221,6 @@ func normalizeMode(mode string) (string, error) {
 
 func normalizeRole(role string) string {
 	switch strings.TrimSpace(role) {
-	case model.RoleServerlessController:
-		return model.RoleServerlessController
 	case model.RoleController:
 		return model.RoleController
 	case model.RoleNode:

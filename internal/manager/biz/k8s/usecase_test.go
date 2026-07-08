@@ -65,6 +65,16 @@ func TestUsecaseCreateClusterAndEnrollNode(t *testing.T) {
 	}
 }
 
+func TestUsecaseCreateClusterRejectsUnsupportedMode(t *testing.T) {
+	ctx := context.Background()
+	uc := NewUsecase(newFakeRepo(), newFakeIssuer(), Config{PublicURL: "https://manager.example", TunnelAddr: "manager.example:40012"})
+
+	_, err := uc.CreateCluster(ctx, CreateClusterInput{Name: "prod", Mode: "unsupported"})
+	if !errors.Is(err, errs.ErrInvalid) {
+		t.Fatalf("CreateCluster(unsupported) error = %v, want invalid input", err)
+	}
+}
+
 func TestInstallCommandDerivesExternalTunnelAddr(t *testing.T) {
 	uc := NewUsecase(newFakeRepo(), newFakeIssuer(), Config{
 		PublicURL:  "https://manager.example.com",
@@ -291,7 +301,7 @@ func TestUsecaseDeleteClusterDeletesTopologyMirror(t *testing.T) {
 	}
 	clusterNodeID := fakeTopologyClusterNodeID(reg.Cluster.ID)
 
-	if err := uc.DeleteCluster(ctx, reg.Cluster.ID); err != nil {
+	if err := uc.DeleteCluster(ctx, DeleteClusterInput{ID: reg.Cluster.ID}); err != nil {
 		t.Fatalf("DeleteCluster() error = %v", err)
 	}
 	if _, err := repo.GetCluster(ctx, reg.Cluster.ID); !errors.Is(err, errs.ErrNotFound) {
@@ -335,7 +345,7 @@ func TestUsecaseDeleteClusterDeletesAssociatedEdges(t *testing.T) {
 		t.Fatalf("Enroll(node) error = %v", err)
 	}
 
-	if err := uc.DeleteCluster(ctx, reg.Cluster.ID); err != nil {
+	if err := uc.DeleteCluster(ctx, DeleteClusterInput{ID: reg.Cluster.ID, Force: true}); err != nil {
 		t.Fatalf("DeleteCluster() error = %v", err)
 	}
 	want := map[uint64]bool{controller.EdgeID: true, node.EdgeID: true}
@@ -346,6 +356,31 @@ func TestUsecaseDeleteClusterDeletesAssociatedEdges(t *testing.T) {
 		if !want[got] {
 			t.Fatalf("unexpected deleted edge %d, want %v", got, want)
 		}
+	}
+}
+
+func TestUsecaseDeleteClusterRejectsActiveClusterWithoutForce(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	uc := NewUsecase(repo, newFakeIssuer(), Config{})
+	reg, err := uc.CreateCluster(ctx, CreateClusterInput{Name: "prod"})
+	if err != nil {
+		t.Fatalf("CreateCluster() error = %v", err)
+	}
+	if _, err := uc.Enroll(ctx, EnrollInput{
+		BootstrapToken: reg.BootstrapToken,
+		ClusterID:      reg.Cluster.ID,
+		Role:           model.RoleController,
+		NodeName:       "control-plane",
+	}); err != nil {
+		t.Fatalf("Enroll(controller) error = %v", err)
+	}
+
+	if err := uc.DeleteCluster(ctx, DeleteClusterInput{ID: reg.Cluster.ID}); !errors.Is(err, errs.ErrConflict) {
+		t.Fatalf("DeleteCluster(active) error = %v, want ErrConflict", err)
+	}
+	if _, err := repo.GetCluster(ctx, reg.Cluster.ID); err != nil {
+		t.Fatalf("active cluster should remain after rejected delete: %v", err)
 	}
 }
 
@@ -369,7 +404,7 @@ func TestUsecaseDeleteClusterIgnoresMissingAssociatedEdge(t *testing.T) {
 	}
 	delete(issuer.edges, controller.EdgeID)
 
-	if err := uc.DeleteCluster(ctx, reg.Cluster.ID); err != nil {
+	if err := uc.DeleteCluster(ctx, DeleteClusterInput{ID: reg.Cluster.ID, Force: true}); err != nil {
 		t.Fatalf("DeleteCluster() error = %v", err)
 	}
 	if _, err := repo.GetCluster(ctx, reg.Cluster.ID); !errors.Is(err, errs.ErrNotFound) {
@@ -657,6 +692,10 @@ func (r *fakeRepo) ListClusters(_ context.Context, _ ListClustersFilter) ([]*mod
 		out = append(out, &cp)
 	}
 	return out, nil
+}
+
+func (r *fakeRepo) CountClusters(context.Context, ListClustersFilter) (int64, error) {
+	return int64(len(r.clusters)), nil
 }
 
 func (r *fakeRepo) UpdateClusterToken(_ context.Context, id uint64, tokenHash string, expiresAt *time.Time) error {

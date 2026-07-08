@@ -175,11 +175,7 @@ func (p *MetricsPusher) discoverAndPushAppMetrics(ctx context.Context, edgeID ui
 	if p.api == nil {
 		return
 	}
-	namespace := ""
-	if strings.EqualFold(strings.TrimSpace(p.info.Mode), "serverless") {
-		namespace = firstMetricString(strings.TrimSpace(p.info.Namespace), p.api.namespace)
-	}
-	pods, err := p.api.listMetricPods(ctx, namespace)
+	pods, err := p.api.listMetricPods(ctx, "")
 	if err != nil {
 		p.log.Warn("k8s app metrics discovery failed", slog.Any("err", err))
 		return

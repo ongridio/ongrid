@@ -399,12 +399,8 @@ export function Sidebar() {
           <SidebarNavItem to="/knowledge/repos" icon={GitBranch} label={tr('代码仓库', 'Repos')} />
         </NavSection>
 
-        <SectionLabel>{tr('设备', 'Devices')}</SectionLabel>
-        <NavSection>
-          <SidebarNavItem to="/devices" icon={HardDrive} label={tr('设备', 'Devices')} />
-        </NavSection>
-
         <CollapsibleSection storageKey="resources" title={tr('基础设施', 'Infrastructure')} defaultOpen>
+          <SidebarNavItem to="/devices" icon={HardDrive} label={tr('设备', 'Devices')} />
           <SidebarNavItem to="/kubernetes" icon={ShipWheel} label="Kubernetes" />
           <SidebarNavItem to="/topology" icon={Share2} label={tr('拓扑', 'Topology')} />
         </CollapsibleSection>

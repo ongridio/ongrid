@@ -59,7 +59,7 @@ var ExecuteK8sActionSchema = json.RawMessage(`{
     },
     "dry_run": {
       "type": "boolean",
-      "description": "When true, only run live preflight and do not apply a Kubernetes write."
+      "description": "When true, ask the Kubernetes API to validate the write with dryRun=All without persisting it."
     },
     "grace_period_seconds": {
       "type": "integer",
