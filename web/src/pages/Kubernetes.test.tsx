@@ -347,6 +347,77 @@ describe('KubernetesPage', () => {
     expect(screen.getAllByText('查询详情').length).toBeGreaterThanOrEqual(3);
   });
 
+  it('已恢复的 Warning Event 不进入健康结论和异常线索', async () => {
+    server.use(
+      http.get('/api/v1/k8s/clusters/:id/pods', ({ request }) => {
+        const url = new URL(request.url);
+        if (url.searchParams.get('reason') === 'CrashLoopBackOff') {
+          return HttpResponse.json({ items: [], total: 0, limit: 20, offset: 0 });
+        }
+        return HttpResponse.json({
+          items: [{
+            id: 31,
+            cluster_id: 1,
+            namespace: 'ongrid-system',
+            name: 'ongrid-edge-controller-abc',
+            uid: 'pod-healthy',
+            node_name: 'ongrid-k8s-control-plane',
+            phase: 'Running',
+            owner_kind: 'Deployment',
+            owner_name: 'ongrid-edge-controller',
+            restart_count: 0,
+            reason: '',
+            last_seen_at: '2026-06-29T10:00:00Z',
+          }],
+          total: 1,
+          limit: 100,
+          offset: 0,
+        });
+      }),
+      http.get('/api/v1/k8s/clusters/:id/events', ({ request }) => {
+        const url = new URL(request.url);
+        if (url.searchParams.get('type') === 'Warning') {
+          return HttpResponse.json({
+            items: [{
+              id: 43,
+              cluster_id: 1,
+              namespace: 'ongrid-system',
+              name: 'recovered-readiness',
+              type: 'Warning',
+              reason: 'Unhealthy',
+              message: 'Readiness probe failed: HTTP probe failed with statuscode: 500',
+              involved_kind: 'Pod',
+              involved_namespace: 'ongrid-system',
+              involved_name: 'ongrid-edge-controller-abc',
+              involved_uid: 'pod-healthy',
+              count: 1,
+              last_timestamp: '2026-06-29T10:01:00Z',
+              last_seen_at: '2026-06-29T10:01:00Z',
+            }],
+            total: 1,
+            limit: 100,
+            offset: 0,
+          });
+        }
+        return HttpResponse.json({ items: [], total: 0, limit: 100, offset: 0 });
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/kubernetes/1?tab=pods']}>
+        <Routes>
+          <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('当前快照未发现需要处置的异常')).toBeInTheDocument();
+    expect(screen.queryByText('Warning Event 1')).not.toBeInTheDocument();
+    expect(screen.queryByText('1 个待确认问题')).not.toBeInTheDocument();
+    expect(screen.queryByText('Unhealthy')).not.toBeInTheDocument();
+    expect(screen.queryByText('Readiness probe failed: HTTP probe failed with statuscode: 500')).not.toBeInTheDocument();
+  });
+
   it('Pod 资源表支持加载更多快照结果', async () => {
     const podLimits: number[] = [];
     server.use(

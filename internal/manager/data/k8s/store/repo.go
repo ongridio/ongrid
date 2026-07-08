@@ -475,6 +475,57 @@ func (r *Repo) DeleteStaleEvents(ctx context.Context, clusterID uint64, namespac
 	return tx.Delete(&model.Event{}).Error
 }
 
+func (r *Repo) DeleteEventsBefore(ctx context.Context, cutoff time.Time, limit int) (int64, error) {
+	if limit <= 0 {
+		return 0, nil
+	}
+	ids, err := r.oldEventIDs(ctx, r.db.WithContext(ctx).Model(&model.Event{}).
+		Where(eventTimestampExpr()+" < ?", cutoff).
+		Order(eventTimestampExpr()+" ASC, id ASC").
+		Limit(limit),
+	)
+	if err != nil || len(ids) == 0 {
+		return 0, err
+	}
+	return r.deleteEventsByIDs(ctx, ids)
+}
+
+func (r *Repo) DeleteOldestEvents(ctx context.Context, clusterID uint64, keep, limit int) (int64, error) {
+	if keep < 0 || limit <= 0 {
+		return 0, nil
+	}
+	ids, err := r.oldEventIDs(ctx, r.db.WithContext(ctx).Model(&model.Event{}).
+		Where("cluster_id = ?", clusterID).
+		Order(eventTimestampExpr()+" DESC, id DESC").
+		Offset(keep).
+		Limit(limit),
+	)
+	if err != nil || len(ids) == 0 {
+		return 0, err
+	}
+	return r.deleteEventsByIDs(ctx, ids)
+}
+
+func (r *Repo) oldEventIDs(ctx context.Context, tx *gorm.DB) ([]uint64, error) {
+	var ids []uint64
+	if err := tx.WithContext(ctx).Pluck("id", &ids).Error; err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
+func (r *Repo) deleteEventsByIDs(ctx context.Context, ids []uint64) (int64, error) {
+	res := r.db.WithContext(ctx).Where("id IN ?", ids).Delete(&model.Event{})
+	if res.Error != nil {
+		return 0, res.Error
+	}
+	return res.RowsAffected, nil
+}
+
+func eventTimestampExpr() string {
+	return "COALESCE(last_timestamp, event_time, first_timestamp, last_seen_at, created_at)"
+}
+
 func (r *Repo) ListNodes(ctx context.Context, clusterID uint64) ([]*model.Node, error) {
 	var out []*model.Node
 	if err := r.db.WithContext(ctx).

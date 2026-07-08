@@ -439,12 +439,15 @@ export function KubernetesClusterDetailPage() {
       setPods(podsOut.items ?? []);
       setCrashLoopPods(crashLoopPodsOut.items ?? []);
       setEvents(eventsOut.items ?? []);
-      const warningItems = (warningEventsOut.items ?? []).filter(isWarningK8sEvent);
-      const warningTotal = (warningEventsOut.items ?? []).length === warningItems.length
-        ? warningEventsOut.total ?? warningItems.length
-        : warningItems.length;
+      const warningItems = filterActionableWarningEvents({
+        events: (warningEventsOut.items ?? []).filter(isWarningK8sEvent),
+        nodes: nodesOut.items ?? [],
+        workloads: workloadsOut.items ?? [],
+        pods: podsOut.items ?? [],
+        crashLoopPods: crashLoopPodsOut.items ?? [],
+      });
       setWarningEvents(warningItems);
-      setWarningEventTotal(warningTotal);
+      setWarningEventTotal(warningItems.length);
       setTotals({
         nodes: nodesOut.total ?? (nodesOut.items?.length ?? 0),
         workloads: workloadsOut.total ?? (workloadsOut.items?.length ?? 0),
@@ -4471,6 +4474,95 @@ function eventIssue(item: KubernetesEvent): K8sTriageIssue {
 
 function isWarningK8sEvent(item: KubernetesEvent) {
   return item.type?.toLowerCase() === 'warning';
+}
+
+function filterActionableWarningEvents({
+  events,
+  nodes,
+  workloads,
+  pods,
+  crashLoopPods,
+}: {
+  events: KubernetesEvent[];
+  nodes: KubernetesNode[];
+  workloads: KubernetesWorkload[];
+  pods: KubernetesPod[];
+  crashLoopPods: KubernetesPod[];
+}) {
+  const podSnapshots = mergePodsByIdentity([...pods, ...crashLoopPods]);
+  return events.filter((item) => isActionableWarningEvent(item, nodes, workloads, podSnapshots));
+}
+
+function isActionableWarningEvent(
+  item: KubernetesEvent,
+  nodes: KubernetesNode[],
+  workloads: KubernetesWorkload[],
+  pods: KubernetesPod[],
+) {
+  const kind = normalizeK8sKind(item.involved_kind);
+  if (kind === 'Pod') {
+    const pod = findEventPod(item, pods);
+    return pod ? isAbnormalPod(pod) : true;
+  }
+  if (kind === 'Node') {
+    const node = nodes.find((candidate) => candidate.node_name === item.involved_name);
+    return node ? nodeConditionLabels(node).length > 0 : true;
+  }
+  if (isWorkloadKind(kind)) {
+    const workload = workloads.find((candidate) =>
+      candidate.kind === kind
+      && candidate.namespace === eventResourceNamespace(item)
+      && candidate.name === item.involved_name,
+    );
+    return workload ? workload.desired_replicas > workload.ready_replicas : true;
+  }
+  return true;
+}
+
+function mergePodsByIdentity(items: KubernetesPod[]) {
+  const out: KubernetesPod[] = [];
+  const seen = new Set<string>();
+  for (const item of items) {
+    const key = item.uid || `${item.namespace || 'default'}/${item.name}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
+}
+
+function findEventPod(item: KubernetesEvent, pods: KubernetesPod[]) {
+  if (item.involved_uid) {
+    const byUID = pods.find((pod) => pod.uid === item.involved_uid);
+    if (byUID) return byUID;
+  }
+  const namespace = eventResourceNamespace(item);
+  return pods.find((pod) => (pod.namespace || 'default') === namespace && pod.name === item.involved_name) ?? null;
+}
+
+function eventResourceNamespace(item: KubernetesEvent) {
+  return item.involved_namespace || item.namespace || 'default';
+}
+
+function normalizeK8sKind(kind?: string) {
+  switch ((kind || '').toLowerCase()) {
+    case 'pod':
+      return 'Pod';
+    case 'node':
+      return 'Node';
+    case 'deployment':
+      return 'Deployment';
+    case 'statefulset':
+      return 'StatefulSet';
+    case 'daemonset':
+      return 'DaemonSet';
+    case 'job':
+      return 'Job';
+    case 'cronjob':
+      return 'CronJob';
+    default:
+      return kind || '';
+  }
 }
 
 function syncRiskIssue(

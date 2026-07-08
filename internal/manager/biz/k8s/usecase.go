@@ -20,8 +20,12 @@ import (
 )
 
 const (
-	defaultBootstrapTokenTTL = 90 * 24 * time.Hour
-	bootstrapTokenBytes      = 32
+	defaultBootstrapTokenTTL    = 90 * 24 * time.Hour
+	defaultEventRetention       = 24 * time.Hour
+	defaultEventMaxPerCluster   = 5000
+	defaultEventCleanupInterval = time.Hour
+	eventRetentionBatchLimit    = 1000
+	bootstrapTokenBytes         = 32
 )
 
 // Repository is the k8s bounded context persistence contract.
@@ -53,6 +57,8 @@ type Repository interface {
 	DeleteStaleWorkloads(ctx context.Context, clusterID uint64, namespace *string, olderThan time.Time) error
 	DeleteStalePods(ctx context.Context, clusterID uint64, namespace *string, olderThan time.Time) error
 	DeleteStaleEvents(ctx context.Context, clusterID uint64, namespace *string, olderThan time.Time) error
+	DeleteEventsBefore(ctx context.Context, cutoff time.Time, limit int) (int64, error)
+	DeleteOldestEvents(ctx context.Context, clusterID uint64, keep, limit int) (int64, error)
 	ListNodes(ctx context.Context, clusterID uint64) ([]*model.Node, error)
 	ListTopologyNodeLinks(ctx context.Context, clusterID uint64) ([]TopologyNodeLink, error)
 	CountNodes(ctx context.Context, clusterID uint64) (int64, error)
@@ -111,10 +117,13 @@ type NodeCoverage struct {
 }
 
 type Config struct {
-	PublicURL         string
-	TunnelAddr        string
-	BootstrapTokenTTL time.Duration
-	ChartRef          string
+	PublicURL            string
+	TunnelAddr           string
+	BootstrapTokenTTL    time.Duration
+	ChartRef             string
+	EventRetention       time.Duration
+	EventMaxPerCluster   int
+	EventCleanupInterval time.Duration
 }
 
 type Usecase struct {
@@ -129,6 +138,15 @@ func NewUsecase(repo Repository, edgeIssuer EdgeIssuer, cfg Config) *Usecase {
 	if cfg.BootstrapTokenTTL <= 0 {
 		cfg.BootstrapTokenTTL = defaultBootstrapTokenTTL
 	}
+	if cfg.EventRetention <= 0 {
+		cfg.EventRetention = defaultEventRetention
+	}
+	if cfg.EventMaxPerCluster <= 0 {
+		cfg.EventMaxPerCluster = defaultEventMaxPerCluster
+	}
+	if cfg.EventCleanupInterval <= 0 {
+		cfg.EventCleanupInterval = defaultEventCleanupInterval
+	}
 	u := &Usecase{repo: repo, edgeIssuer: edgeIssuer, cfg: cfg}
 	if remover, ok := edgeIssuer.(EdgeRemover); ok {
 		u.edgeRemover = remover
@@ -138,6 +156,70 @@ func NewUsecase(repo Repository, edgeIssuer EdgeIssuer, cfg Config) *Usecase {
 
 func (u *Usecase) SetTopologyMirror(m TopologyMirror) { u.topology = m }
 func (u *Usecase) SetEdgeRemover(r EdgeRemover)       { u.edgeRemover = r }
+
+func (u *Usecase) EventCleanupInterval() time.Duration {
+	if u == nil || u.cfg.EventCleanupInterval <= 0 {
+		return defaultEventCleanupInterval
+	}
+	return u.cfg.EventCleanupInterval
+}
+
+func (u *Usecase) CleanupEvents(ctx context.Context, now time.Time) (EventRetentionStats, error) {
+	var stats EventRetentionStats
+	if u.repo == nil {
+		return stats, errs.ErrNotWiredYet
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	if u.cfg.EventRetention > 0 {
+		cutoff := now.Add(-u.cfg.EventRetention)
+		for {
+			if err := ctx.Err(); err != nil {
+				return stats, err
+			}
+			n, err := u.repo.DeleteEventsBefore(ctx, cutoff, eventRetentionBatchLimit)
+			if err != nil {
+				return stats, fmt.Errorf("delete aged k8s events: %w", err)
+			}
+			stats.DeletedByTTL += n
+			if n == 0 {
+				break
+			}
+		}
+	}
+	if u.cfg.EventMaxPerCluster > 0 {
+		const pageSize = 200
+		for offset := 0; ; offset += pageSize {
+			clusters, err := u.repo.ListClusters(ctx, ListClustersFilter{Limit: pageSize, Offset: offset})
+			if err != nil {
+				return stats, fmt.Errorf("list k8s clusters for event retention: %w", err)
+			}
+			for _, c := range clusters {
+				if c == nil {
+					continue
+				}
+				for {
+					if err := ctx.Err(); err != nil {
+						return stats, err
+					}
+					n, err := u.repo.DeleteOldestEvents(ctx, c.ID, u.cfg.EventMaxPerCluster, eventRetentionBatchLimit)
+					if err != nil {
+						return stats, fmt.Errorf("delete old k8s events for cluster %d: %w", c.ID, err)
+					}
+					stats.DeletedByClusterLimit += n
+					if n == 0 {
+						break
+					}
+				}
+			}
+			if len(clusters) < pageSize {
+				break
+			}
+		}
+	}
+	return stats, nil
+}
 
 func (u *Usecase) ReconcileTopology(ctx context.Context) error {
 	if u.topology == nil {
@@ -237,6 +319,11 @@ type ClusterControllerRegistration struct {
 	NodeName  string
 	Namespace string
 	PodName   string
+}
+
+type EventRetentionStats struct {
+	DeletedByTTL          int64
+	DeletedByClusterLimit int64
 }
 
 type NodeRef struct {

@@ -771,9 +771,12 @@ func main() {
 	edgeSvc := managersvcedge.New(edgeUC, nil, log)
 	k8sRepo := managerk8sdata.NewRepo(db)
 	k8sUC := managerbizk8s.NewUsecase(k8sRepo, k8sEdgeIdentityIssuer{svc: edgeSvc}, managerbizk8s.Config{
-		PublicURL:  cfg.PublicURL,
-		TunnelAddr: cfg.TunnelAddr,
-		ChartRef:   cfg.K8sChartRef,
+		PublicURL:            cfg.PublicURL,
+		TunnelAddr:           cfg.TunnelAddr,
+		ChartRef:             cfg.K8sChartRef,
+		EventRetention:       cfg.K8sEventRetention,
+		EventMaxPerCluster:   cfg.K8sEventMaxPerCluster,
+		EventCleanupInterval: cfg.K8sEventCleanupInterval,
 	})
 	k8sSvc := managersvck8s.New(k8sUC)
 	k8sHandler := managerserverk8s.NewHandler(k8sSvc)
@@ -2381,6 +2384,7 @@ func main() {
 	// HLD-010: audit retention sweep — drops audit_logs rows older than
 	// auditRetentionDays once a day at 03:00. Disabled when retention=0.
 	eg.Go(func() error { return auditUC.RunRetention(egCtx, auditRetentionDays) })
+	eg.Go(func() error { return runK8sEventRetention(egCtx, k8sUC, log) })
 
 	// ADR-026: chatruntime worker session sampler — surfaces orphan
 	// worker accumulation as a gauge. The 161-orphan incident (v0.7.44)
@@ -4808,4 +4812,44 @@ var flowToolDescZhMap = map[string]string{
 
 func flowToolDescZh(name string) string {
 	return flowToolDescZhMap[name]
+}
+
+func runK8sEventRetention(ctx context.Context, uc *managerbizk8s.Usecase, log *slog.Logger) error {
+	if uc == nil {
+		return nil
+	}
+	interval := uc.EventCleanupInterval()
+	if interval <= 0 {
+		interval = time.Hour
+	}
+	run := func() {
+		stats, err := uc.CleanupEvents(ctx, time.Now().UTC())
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+			log.Warn("k8s event retention failed", slog.Any("err", err))
+			return
+		}
+		deleted := stats.DeletedByTTL + stats.DeletedByClusterLimit
+		if deleted > 0 {
+			log.Info(
+				"k8s event retention complete",
+				slog.Int64("deleted", deleted),
+				slog.Int64("deleted_by_ttl", stats.DeletedByTTL),
+				slog.Int64("deleted_by_cluster_limit", stats.DeletedByClusterLimit),
+			)
+		}
+	}
+	run()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			run()
+		}
+	}
 }

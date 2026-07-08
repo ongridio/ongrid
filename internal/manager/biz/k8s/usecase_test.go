@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"errors"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -635,6 +636,61 @@ func TestUsecaseInventoryAcceptsEvents(t *testing.T) {
 	}
 }
 
+func TestUsecaseCleanupEventsAppliesRetentionAndClusterCap(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+	repo := newFakeRepo()
+	repo.clusters[1] = &model.Cluster{ID: 1, Name: "prod-a", Mode: model.ModeFullNode, Status: model.ClusterStatusOnline}
+	repo.clusters[2] = &model.Cluster{ID: 2, Name: "prod-b", Mode: model.ModeFullNode, Status: model.ClusterStatusOnline}
+	event := func(clusterID uint64, uid string, ts time.Time) *model.Event {
+		return &model.Event{
+			ClusterID:     clusterID,
+			Namespace:     "default",
+			Name:          uid,
+			UID:           uid,
+			Type:          "Warning",
+			Reason:        "Unhealthy",
+			Message:       uid,
+			LastTimestamp: &ts,
+			LastSeenAt:    &now,
+		}
+	}
+	repo.events = []*model.Event{
+		event(1, "expired", now.Add(-48*time.Hour)),
+		event(1, "newest", now.Add(-1*time.Hour)),
+		event(1, "second-newest", now.Add(-2*time.Hour)),
+		event(1, "over-cap", now.Add(-3*time.Hour)),
+		event(2, "other-cluster", now.Add(-6*time.Hour)),
+	}
+	uc := NewUsecase(repo, newFakeIssuer(), Config{
+		EventRetention:       24 * time.Hour,
+		EventMaxPerCluster:   2,
+		EventCleanupInterval: time.Hour,
+	})
+
+	stats, err := uc.CleanupEvents(ctx, now)
+	if err != nil {
+		t.Fatalf("CleanupEvents() error = %v", err)
+	}
+	if stats.DeletedByTTL != 1 || stats.DeletedByClusterLimit != 1 {
+		t.Fatalf("CleanupEvents() stats = %+v, want ttl=1 cap=1", stats)
+	}
+	remaining := map[string]bool{}
+	for _, item := range repo.events {
+		remaining[item.UID] = true
+	}
+	for _, uid := range []string{"newest", "second-newest", "other-cluster"} {
+		if !remaining[uid] {
+			t.Fatalf("remaining events missing %s: %+v", uid, remaining)
+		}
+	}
+	for _, uid := range []string{"expired", "over-cap"} {
+		if remaining[uid] {
+			t.Fatalf("event %s should have been deleted: %+v", uid, remaining)
+		}
+	}
+}
+
 type fakeRepo struct {
 	nextClusterID uint64
 	nextNodeID    uint64
@@ -934,6 +990,66 @@ func (r *fakeRepo) DeleteStaleEvents(_ context.Context, _ uint64, namespace *str
 	return nil
 }
 
+func (r *fakeRepo) DeleteEventsBefore(_ context.Context, cutoff time.Time, limit int) (int64, error) {
+	if limit <= 0 {
+		return 0, nil
+	}
+	filtered := r.events[:0]
+	var deleted int64
+	for _, event := range r.events {
+		if deleted < int64(limit) && fakeEventTimestamp(event).Before(cutoff) {
+			deleted++
+			continue
+		}
+		filtered = append(filtered, event)
+	}
+	r.events = filtered
+	return deleted, nil
+}
+
+func (r *fakeRepo) DeleteOldestEvents(_ context.Context, clusterID uint64, keep, limit int) (int64, error) {
+	if keep < 0 || limit <= 0 {
+		return 0, nil
+	}
+	type eventRef struct {
+		index int
+		event *model.Event
+	}
+	clusterEvents := make([]eventRef, 0)
+	for i, event := range r.events {
+		if event.ClusterID == clusterID {
+			clusterEvents = append(clusterEvents, eventRef{index: i, event: event})
+		}
+	}
+	if len(clusterEvents) <= keep {
+		return 0, nil
+	}
+	sort.SliceStable(clusterEvents, func(i, j int) bool {
+		left := fakeEventTimestamp(clusterEvents[i].event)
+		right := fakeEventTimestamp(clusterEvents[j].event)
+		if !left.Equal(right) {
+			return left.After(right)
+		}
+		return clusterEvents[i].index < clusterEvents[j].index
+	})
+	deleteIndexes := map[int]struct{}{}
+	for i := keep; i < len(clusterEvents) && len(deleteIndexes) < limit; i++ {
+		deleteIndexes[clusterEvents[i].index] = struct{}{}
+	}
+	if len(deleteIndexes) == 0 {
+		return 0, nil
+	}
+	filtered := r.events[:0]
+	for i, event := range r.events {
+		if _, ok := deleteIndexes[i]; ok {
+			continue
+		}
+		filtered = append(filtered, event)
+	}
+	r.events = filtered
+	return int64(len(deleteIndexes)), nil
+}
+
 func (r *fakeRepo) ListNodes(_ context.Context, clusterID uint64) ([]*model.Node, error) {
 	out := make([]*model.Node, 0)
 	for _, n := range r.nodes {
@@ -1042,6 +1158,18 @@ func namespaceLabel(namespace *string) string {
 		return "cluster"
 	}
 	return *namespace
+}
+
+func fakeEventTimestamp(event *model.Event) time.Time {
+	if event == nil {
+		return time.Time{}
+	}
+	for _, ts := range []*time.Time{event.LastTimestamp, event.EventTime, event.FirstTimestamp, event.LastSeenAt} {
+		if ts != nil && !ts.IsZero() {
+			return *ts
+		}
+	}
+	return event.CreatedAt
 }
 
 type fakeTopologyMirror struct {

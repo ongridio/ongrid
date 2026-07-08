@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -218,6 +219,110 @@ func TestRepo_ListEventsSupportsQueryAndIssueOnly(t *testing.T) {
 	if total != 1 {
 		t.Fatalf("total=%d want 1", total)
 	}
+}
+
+func TestRepo_DeleteEventsBeforeUsesKubernetesEventTime(t *testing.T) {
+	db, repo := newTestRepo(t)
+	now := time.Now().UTC()
+	oldEventTime := now.Add(-48 * time.Hour)
+	recentEventTime := now.Add(-2 * time.Hour)
+	events := []*model.Event{
+		{
+			ClusterID:     1,
+			Namespace:     "kube-system",
+			Name:          "old-warning",
+			UID:           "event-old",
+			Type:          "Warning",
+			Reason:        "Unhealthy",
+			Message:       "readiness failed",
+			LastTimestamp: &oldEventTime,
+			LastSeenAt:    &now,
+		},
+		{
+			ClusterID:     1,
+			Namespace:     "kube-system",
+			Name:          "recent-warning",
+			UID:           "event-recent",
+			Type:          "Warning",
+			Reason:        "Unhealthy",
+			Message:       "recent readiness failed",
+			LastTimestamp: &recentEventTime,
+			LastSeenAt:    &now,
+		},
+		{
+			ClusterID:  1,
+			Namespace:  "default",
+			Name:       "last-seen-old",
+			UID:        "event-last-seen-old",
+			Type:       "Normal",
+			Reason:     "Started",
+			Message:    "old last seen",
+			LastSeenAt: &oldEventTime,
+		},
+	}
+	if err := db.Create(&events).Error; err != nil {
+		t.Fatalf("Create events: %v", err)
+	}
+
+	deleted, err := repo.DeleteEventsBefore(context.Background(), now.Add(-24*time.Hour), 100)
+	if err != nil {
+		t.Fatalf("DeleteEventsBefore: %v", err)
+	}
+	if deleted != 2 {
+		t.Fatalf("deleted=%d want 2", deleted)
+	}
+	assertTableCount(t, db, &model.Event{}, "uid = ?", "event-old", 0)
+	assertTableCount(t, db, &model.Event{}, "uid = ?", "event-last-seen-old", 0)
+	assertTableCount(t, db, &model.Event{}, "uid = ?", "event-recent", 1)
+}
+
+func TestRepo_DeleteOldestEventsKeepsNewestPerCluster(t *testing.T) {
+	db, repo := newTestRepo(t)
+	now := time.Now().UTC()
+	events := []*model.Event{}
+	for i := 0; i < 4; i++ {
+		ts := now.Add(-time.Duration(i) * time.Hour)
+		events = append(events, &model.Event{
+			ClusterID:     1,
+			Namespace:     "default",
+			Name:          fmt.Sprintf("event-a-%d", i),
+			UID:           fmt.Sprintf("event-a-%d", i),
+			Type:          "Warning",
+			Reason:        "Test",
+			Message:       "cluster 1 event",
+			LastTimestamp: &ts,
+			LastSeenAt:    &now,
+		})
+	}
+	oldOtherCluster := now.Add(-72 * time.Hour)
+	events = append(events, &model.Event{
+		ClusterID:     2,
+		Namespace:     "default",
+		Name:          "event-b-old",
+		UID:           "event-b-old",
+		Type:          "Warning",
+		Reason:        "Test",
+		Message:       "cluster 2 event",
+		LastTimestamp: &oldOtherCluster,
+		LastSeenAt:    &now,
+	})
+	if err := db.Create(&events).Error; err != nil {
+		t.Fatalf("Create events: %v", err)
+	}
+
+	deleted, err := repo.DeleteOldestEvents(context.Background(), 1, 2, 100)
+	if err != nil {
+		t.Fatalf("DeleteOldestEvents: %v", err)
+	}
+	if deleted != 2 {
+		t.Fatalf("deleted=%d want 2", deleted)
+	}
+	assertTableCount(t, db, &model.Event{}, "cluster_id = ?", uint64(1), 2)
+	assertTableCount(t, db, &model.Event{}, "cluster_id = ?", uint64(2), 1)
+	assertTableCount(t, db, &model.Event{}, "uid = ?", "event-a-0", 1)
+	assertTableCount(t, db, &model.Event{}, "uid = ?", "event-a-1", 1)
+	assertTableCount(t, db, &model.Event{}, "uid = ?", "event-a-2", 0)
+	assertTableCount(t, db, &model.Event{}, "uid = ?", "event-a-3", 0)
 }
 
 func TestRepo_CountClustersIgnoresPagination(t *testing.T) {
