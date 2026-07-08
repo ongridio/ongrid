@@ -34,8 +34,7 @@ enum KubernetesClusterStatus {
 enum KubernetesMode {
     KUBERNETES_MODE_UNSPECIFIED = 0;
     KUBERNETES_MODE_FULL_NODE = 1;
-    KUBERNETES_MODE_RESTRICTED_NODE = 2 [deprecated = true];
-    KUBERNETES_MODE_SERVERLESS = 3;
+    reserved 2, 3;
 }
 
 message KubernetesCapability {

@@ -189,10 +189,10 @@ export default function KubernetesPage() {
     return { online };
   }, [clusters]);
 
-  async function performDeleteCluster(cluster: KubernetesCluster, force = false) {
+  async function performDeleteCluster(cluster: KubernetesCluster) {
     setDeletingClusterID(cluster.id);
     try {
-      await deleteKubernetesCluster(cluster.id, force ? { force: true } : undefined);
+      await deleteKubernetesCluster(cluster.id);
       setClusters((items) => items.filter((item) => item.id !== cluster.id));
       setDeleteClusterTarget(null);
       await refresh({ silent: true });
@@ -364,7 +364,7 @@ export default function KubernetesPage() {
         cluster={deleteClusterTarget}
         deleting={deleteClusterTarget ? deletingClusterID === deleteClusterTarget.id : false}
         onClose={() => setDeleteClusterTarget(null)}
-        onDelete={(cluster, force) => void performDeleteCluster(cluster, force)}
+        onDelete={(cluster) => void performDeleteCluster(cluster)}
       />
     </>
   );
@@ -608,8 +608,8 @@ export function KubernetesClusterDetailPage() {
     return { linked, total: visibleNodes.length, pct: Math.round((linked / visibleNodes.length) * 100) };
   }, [visibleNodes]);
   const triageIssues = useMemo(
-    () => buildTriageIssues({ cluster, nodes: visibleNodes, workloads, pods, crashLoopPods, warningEvents, edgeAccess, tr }),
-    [cluster, crashLoopPods, edgeAccess, pods, tr, visibleNodes, warningEvents, workloads],
+    () => buildTriageIssues({ cluster, nodes: visibleNodes, workloads, pods, crashLoopPods, warningEvents, tr }),
+    [cluster, crashLoopPods, pods, tr, visibleNodes, warningEvents, workloads],
   );
   const writeActionRecommendations = useMemo(
     () => buildWriteActionRecommendations({ nodes: visibleNodes, workloads, pods, crashLoopPods, warningEvents, tr }),
@@ -821,7 +821,6 @@ export function KubernetesClusterDetailPage() {
             cluster={cluster}
             loading={loading}
             totals={totals}
-            edgeAccess={edgeAccess}
             namespaces={namespaces}
             issueCounts={issueCounts}
             warningEventTotal={warningEventTotal}
@@ -837,7 +836,6 @@ export function KubernetesClusterDetailPage() {
                 nodes={visibleNodes}
                 crashLoopTotal={crashLoopTotal}
                 warningEventTotal={warningEventTotal}
-                edgeAccess={edgeAccess}
                 triageIssues={triageIssues}
                 writeActionRecommendations={writeActionRecommendations}
                 loading={loading}
@@ -1016,7 +1014,6 @@ function ClusterSummary({
   cluster,
   loading,
   totals,
-  edgeAccess,
   namespaces,
   issueCounts,
   warningEventTotal,
@@ -1025,20 +1022,17 @@ function ClusterSummary({
   cluster: KubernetesCluster | null;
   loading: boolean;
   totals: ResourceTotals;
-  edgeAccess: { linked: number; total: number; pct: number } | null;
   namespaces: string[];
   issueCounts: K8sIssueCounts;
   warningEventTotal: number;
   triageIssueTotal: number;
 }) {
   const { tr } = useI18n();
-  const effectiveEdgeAccess = edgeAccess ?? clusterNodeEdgeAccess(cluster);
   const awaitingConnection = isClusterAwaitingConnection(cluster);
   const syncRisk = clusterSyncRisk(cluster, tr);
-  const conclusion = clusterHealthConclusion(cluster, issueCounts, effectiveEdgeAccess, warningEventTotal, syncRisk, tr);
+  const conclusion = clusterHealthConclusion(cluster, issueCounts, warningEventTotal, syncRisk, tr);
   const capabilities = buildClusterCapabilities({
     cluster,
-    edgeAccess: effectiveEdgeAccess,
     totals,
     namespaceCount: namespaces.length,
     warningEventTotal,
@@ -1080,10 +1074,10 @@ function ClusterSummary({
               tone={cluster?.controller_edge_id ? 'success' : 'default'}
             />
             <HealthMetric
-              label={tr('Node agent 覆盖', 'Node agent coverage')}
-              value={effectiveEdgeAccess ? `${effectiveEdgeAccess.linked}/${effectiveEdgeAccess.total}` : '—'}
-              detail={effectiveEdgeAccess ? `${effectiveEdgeAccess.pct}% · ${tr('未覆盖', 'missing')} ${effectiveEdgeAccess.total - effectiveEdgeAccess.linked}` : tr('等待节点快照', 'waiting for node snapshot')}
-              tone={!effectiveEdgeAccess || effectiveEdgeAccess.linked < effectiveEdgeAccess.total ? 'warning' : 'success'}
+              label={tr('资源规模', 'Resource scope')}
+              value={snapshotResourceSummary(totals)}
+              detail={tr(`${formatNumber(namespaces.length)} 个命名空间`, `${formatNumber(namespaces.length)} namespace(s)`)}
+              tone={cluster?.inventory_resource_version ? 'success' : 'default'}
             />
             <HealthMetric
               label={tr('同步状态', 'Sync health')}
@@ -1276,7 +1270,6 @@ function K8sOperationsOverview({
   nodes,
   crashLoopTotal,
   warningEventTotal,
-  edgeAccess,
   triageIssues,
   writeActionRecommendations,
   loading,
@@ -1287,7 +1280,6 @@ function K8sOperationsOverview({
   nodes: KubernetesNode[];
   crashLoopTotal: number;
   warningEventTotal: number;
-  edgeAccess: { linked: number; total: number; pct: number } | null;
   triageIssues: K8sTriageIssue[];
   writeActionRecommendations: K8sWriteActionRecommendation[];
   loading: boolean;
@@ -1303,7 +1295,6 @@ function K8sOperationsOverview({
         nodes={nodes}
         crashLoopTotal={crashLoopTotal}
         warningEventTotal={warningEventTotal}
-        edgeAccess={edgeAccess}
         triageIssues={triageIssues}
         writeActionRecommendations={writeActionRecommendations}
         loading={loading}
@@ -1319,7 +1310,6 @@ function K8sHealthQueue({
   nodes,
   crashLoopTotal,
   warningEventTotal,
-  edgeAccess,
   triageIssues,
   writeActionRecommendations,
   loading,
@@ -1330,7 +1320,6 @@ function K8sHealthQueue({
   nodes: KubernetesNode[];
   crashLoopTotal: number;
   warningEventTotal: number;
-  edgeAccess: { linked: number; total: number; pct: number } | null;
   triageIssues: K8sTriageIssue[];
   writeActionRecommendations: K8sWriteActionRecommendation[];
   loading: boolean;
@@ -1445,9 +1434,7 @@ function K8sHealthQueue({
               {loading ? tr('加载排障信号中…', 'Loading triage signals…') : tr('暂无需要处置的异常', 'No actionable issue')}
             </div>
             <div className="mt-1 text-xs text-zinc-500">
-              {edgeAccess
-                ? tr(`Node agent 覆盖 ${edgeAccess.linked}/${edgeAccess.total}，未覆盖 ${missingEdgeNodes}`, `Node agent coverage ${edgeAccess.linked}/${edgeAccess.total}, missing ${missingEdgeNodes}`)
-                : tr('等待资源快照完成后展示队列。', 'The queue appears after the snapshot is ready.')}
+              {tr('等待资源快照完成后展示队列。', 'The queue appears after the snapshot is ready.')}
             </div>
           </div>
         ) : (
@@ -3500,7 +3487,7 @@ function DeleteClusterModal({
   cluster: KubernetesCluster | null;
   deleting: boolean;
   onClose(): void;
-  onDelete(cluster: KubernetesCluster, force: boolean): void;
+  onDelete(cluster: KubernetesCluster): void;
 }) {
   const { tr } = useI18n();
   const [copied, setCopied] = useState(false);
@@ -3526,12 +3513,12 @@ function DeleteClusterModal({
       footer={
         <>
           <Button onClick={onClose} disabled={deleting}>{tr('取消', 'Cancel')}</Button>
-          <Button variant="danger" onClick={() => onDelete(cluster, active)} disabled={deleting}>
+          <Button variant="danger" onClick={() => onDelete(cluster)} disabled={deleting}>
             <Trash2 size={12} />
             {deleting
               ? tr('删除中…', 'Deleting…')
               : active
-                ? tr('我已卸载，删除记录', 'Uninstalled, delete record')
+                ? tr('确认已卸载，删除记录', 'Confirm uninstalled, delete record')
                 : tr('确认删除', 'Delete')}
           </Button>
         </>
@@ -3709,7 +3696,6 @@ function isClusterAwaitingConnection(cluster: KubernetesCluster | null) {
 function clusterHealthConclusion(
   cluster: KubernetesCluster | null,
   issueCounts: K8sIssueCounts,
-  edgeAccess: { linked: number; total: number; pct: number } | null,
   warningEventTotal: number,
   syncRisk: K8sSyncRisk | null,
   tr: (zh: string, en: string) => string,
@@ -3730,9 +3716,8 @@ function clusterHealthConclusion(
       description: tr('尚未收到 Controller 首次上报或资源快照，当前不判断集群健康。', 'No first controller report or inventory snapshot has arrived yet, so cluster health is not evaluated.'),
     };
   }
-  const missingAgents = !edgeAccess ? 0 : edgeAccess.total - edgeAccess.linked;
   const criticalSignals = issueCounts.crashLoopBackOff + issueCounts.notReady + issueCounts.oomKilled;
-  const warningSignals = issueCounts.pending + issueCounts.imagePullBackOff + warningEventTotal + missingAgents;
+  const warningSignals = issueCounts.pending + issueCounts.imagePullBackOff + warningEventTotal;
   if (cluster.status !== 'online') {
     return {
       tone: 'danger' as K8sHealthTone,
@@ -3758,8 +3743,8 @@ function clusterHealthConclusion(
       label: tr('Degraded', 'Degraded'),
       title: tr('集群可用，但存在需要关注的信号', 'Cluster is available with signals to review'),
       description: tr(
-        `当前有 ${formatNumber(warningSignals)} 个待确认问题，建议先确认事件和 Node agent 覆盖。`,
-        `${formatNumber(warningSignals)} issue(s) to review. Check events and Node agent coverage first.`,
+        `当前有 ${formatNumber(warningSignals)} 个待确认问题，建议先确认事件和资源状态。`,
+        `${formatNumber(warningSignals)} issue(s) to review. Check events and resource state first.`,
       ),
     };
   }
@@ -3778,20 +3763,18 @@ function clusterHealthConclusion(
     tone: 'success' as K8sHealthTone,
     label: tr('Healthy', 'Healthy'),
     title: tr('当前快照未发现需要处置的异常', 'No actionable issue in the current snapshot'),
-    description: tr('Controller、资源快照和节点接入状态正常，可以继续观察。', 'Controller, inventory snapshot, and node access look healthy. Continue observing.'),
+    description: tr('Controller、资源快照和事件信号正常，可以继续观察。', 'Controller, inventory snapshot, and event signals look healthy. Continue observing.'),
   };
 }
 
 function buildClusterCapabilities({
   cluster,
-  edgeAccess,
   totals,
   namespaceCount,
   warningEventTotal,
   tr,
 }: {
   cluster: KubernetesCluster | null;
-  edgeAccess: { linked: number; total: number; pct: number } | null;
   totals: ResourceTotals;
   namespaceCount: number;
   warningEventTotal: number;
@@ -3812,7 +3795,7 @@ function buildClusterCapabilities({
   const hasInventory = Boolean(cluster?.inventory_resource_version);
   const backendCapabilities = new Map((cluster?.capabilities ?? []).map((item) => [item.key, item]));
   const backendStatus = (key: string) => normalizeCapabilityStatus(backendCapabilities.get(key)?.status);
-  const capabilities = [
+  return [
     makeCapability({
       key: 'inventory',
       label: tr('Inventory', 'Inventory'),
@@ -3836,48 +3819,6 @@ function buildClusterCapabilities({
       label: tr('Telemetry', 'Telemetry'),
       status: backendStatus('telemetry') ?? (hasController ? 'query-ready' : 'unavailable'),
       detail: tr(`可按 cluster_id 打开 Prometheus / Loki / Tempo · ${formatNumber(namespaceCount)} 个 namespace`, `Prometheus / Loki / Tempo queries are scoped by cluster_id · ${formatNumber(namespaceCount)} namespace(s)`),
-      tr,
-    }),
-  ];
-
-  const localNodeMetricStatus: K8sCapabilityStatus = !edgeAccess || edgeAccess.total === 0
-    ? 'unavailable'
-    : edgeAccess.linked >= edgeAccess.total
-      ? 'ready'
-      : edgeAccess.linked > 0
-        ? 'degraded'
-        : 'unavailable';
-  const nodeMetricStatus = edgeAccess
-    ? localNodeMetricStatus
-    : backendStatus('node-metrics') ?? localNodeMetricStatus;
-  const localHostStatus: K8sCapabilityStatus = edgeAccess && edgeAccess.linked > 0
-    ? edgeAccess.linked >= edgeAccess.total
-      ? 'ready'
-      : 'degraded'
-    : 'unavailable';
-  const hostStatus = edgeAccess
-    ? localHostStatus
-    : backendStatus('host-access') ?? localHostStatus;
-
-  return [
-    ...capabilities.slice(0, 1),
-    makeCapability({
-      key: 'node-metrics',
-      label: tr('Node metrics', 'Node metrics'),
-      status: nodeMetricStatus,
-      detail: edgeAccess
-        ? tr(`Node Edge ${edgeAccess.linked}/${edgeAccess.total}`, `Node Edge ${edgeAccess.linked}/${edgeAccess.total}`)
-        : tr('等待 Node 快照', 'Waiting for node snapshot'),
-      tr,
-    }),
-    ...capabilities.slice(1),
-    makeCapability({
-      key: 'host-access',
-      label: tr('Host access', 'Host access'),
-      status: hostStatus,
-      detail: edgeAccess
-        ? tr(`可通过 ${edgeAccess.linked} 个 Node Edge 进入`, `Available through ${edgeAccess.linked} Node Edge instance(s)`)
-        : tr('等待 Node Edge 接入', 'Waiting for Node Edge enrollment'),
       tr,
     }),
   ];
@@ -4324,7 +4265,6 @@ function buildTriageIssues({
   pods,
   crashLoopPods,
   warningEvents,
-  edgeAccess,
   tr,
 }: {
   cluster: KubernetesCluster | null;
@@ -4333,7 +4273,6 @@ function buildTriageIssues({
   pods: KubernetesPod[];
   crashLoopPods: KubernetesPod[];
   warningEvents: KubernetesEvent[];
-  edgeAccess: { linked: number; total: number; pct: number } | null;
   tr: (zh: string, en: string) => string;
 }) {
   const degradedWorkloads = workloads.filter((item) => item.desired_replicas > item.ready_replicas);
@@ -4341,26 +4280,10 @@ function buildTriageIssues({
   const nodeIssues = buildNodeIssues(nodes);
   const recentWarningEvents = sortEventsByRecent(dedupeEvents(warningEvents.filter(isWarningK8sEvent))).slice(0, 5);
   const syncRisk = clusterSyncRisk(cluster, tr);
-  const missingEdgeNodes = nodes.filter((item) => item.edge_id == null).length;
-  const coverageIssue: K8sTriageIssue | null = missingEdgeNodes > 0
-    ? {
-        key: 'node-agent:coverage',
-        kind: 'node',
-        tone: 'warning',
-        title: tr('Node agent 覆盖缺口', 'Node agent coverage gap'),
-        subtitle: edgeAccess
-          ? tr(`已覆盖 ${edgeAccess.linked}/${edgeAccess.total}`, `${edgeAccess.linked}/${edgeAccess.total} covered`)
-          : tr('等待 Node 快照', 'Waiting for node snapshot'),
-        detail: tr(`${missingEdgeNodes} 个节点未绑定 Edge`, `${missingEdgeNodes} node(s) are not bound to Edge`),
-        labels: [tr('覆盖率', 'coverage'), `${edgeAccess?.pct ?? 0}%`],
-        tab: 'nodes',
-      }
-    : null;
   return sortTriageIssues(aggregateTriageIssues([
     ...degradedWorkloads.slice(0, 6).map((item) => workloadIssue(item, tr)),
     ...abnormalPods.slice(0, 6).map((item) => podIssue(item, tr)),
     ...nodeIssues.slice(0, 6),
-    ...(coverageIssue ? [coverageIssue] : []),
     ...(syncRisk ? [syncRiskIssue(syncRisk, tr)] : []),
     ...recentWarningEvents.map(eventIssue),
   ]));

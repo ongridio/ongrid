@@ -655,12 +655,6 @@ func clusterCapabilitiesFromModelWithCoverage(c *model.Cluster, coverage *biz.No
 			Reason: inventoryCapabilityReason(hasController, hasInventory),
 		},
 		{
-			Key:    "node-metrics",
-			Label:  "Node metrics",
-			Status: nodeMetricsCapabilityStatus(hasController, hasInventory, coverage),
-			Reason: nodeMetricsCapabilityReason(hasController, hasInventory, coverage),
-		},
-		{
 			Key:    "events",
 			Label:  "Events",
 			Status: eventsCapabilityStatus(hasController),
@@ -671,12 +665,6 @@ func clusterCapabilitiesFromModelWithCoverage(c *model.Cluster, coverage *biz.No
 			Label:  "Telemetry",
 			Status: telemetryCapabilityStatus(hasController),
 			Reason: telemetryCapabilityReason(hasController),
-		},
-		{
-			Key:    "host-access",
-			Label:  "Host access",
-			Status: hostAccessCapabilityStatus(hasController, hasInventory, coverage),
-			Reason: hostAccessCapabilityReason(hasController, hasInventory, coverage),
 		},
 	}
 }
@@ -700,36 +688,6 @@ func inventoryCapabilityReason(hasController, hasInventory bool) string {
 		return "waiting for the first inventory snapshot"
 	default:
 		return "controller is not connected"
-	}
-}
-
-func nodeMetricsCapabilityStatus(hasController, hasInventory bool, coverage *biz.NodeCoverage) string {
-	switch {
-	case !hasController:
-		return capabilityStatusUnavailable
-	case coverage != nil && coverage.Total > 0 && coverage.EdgeLinked >= coverage.Total:
-		return capabilityStatusReady
-	case coverage != nil && coverage.Total > 0 && coverage.EdgeLinked > 0:
-		return capabilityStatusDegraded
-	case coverage != nil && coverage.Total > 0:
-		return capabilityStatusUnavailable
-	case !hasInventory:
-		return capabilityStatusDegraded
-	default:
-		return capabilityStatusReady
-	}
-}
-
-func nodeMetricsCapabilityReason(hasController, hasInventory bool, coverage *biz.NodeCoverage) string {
-	switch {
-	case !hasController:
-		return "controller is not connected"
-	case coverage != nil && coverage.Total > 0:
-		return "node metrics follow node edge coverage"
-	case !hasInventory:
-		return "waiting for node inventory"
-	default:
-		return "node metrics are available after node edge coverage is loaded"
 	}
 }
 
@@ -759,36 +717,6 @@ func telemetryCapabilityReason(hasController bool) string {
 		return "controller is not connected"
 	}
 	return "queries are scoped by cluster_id"
-}
-
-func hostAccessCapabilityStatus(hasController, hasInventory bool, coverage *biz.NodeCoverage) string {
-	switch {
-	case !hasController:
-		return capabilityStatusUnavailable
-	case coverage != nil && coverage.Total > 0 && coverage.EdgeLinked >= coverage.Total:
-		return capabilityStatusReady
-	case coverage != nil && coverage.Total > 0 && coverage.EdgeLinked > 0:
-		return capabilityStatusDegraded
-	case coverage != nil && coverage.Total > 0:
-		return capabilityStatusUnavailable
-	case !hasInventory:
-		return capabilityStatusDegraded
-	default:
-		return capabilityStatusDegraded
-	}
-}
-
-func hostAccessCapabilityReason(hasController, hasInventory bool, coverage *biz.NodeCoverage) string {
-	switch {
-	case !hasController:
-		return "controller is not connected"
-	case coverage != nil && coverage.Total > 0:
-		return "host access follows node edge coverage"
-	case !hasInventory:
-		return "waiting for node inventory"
-	default:
-		return "host access depends on per-node edge coverage"
-	}
 }
 
 func nodeDTOFromModel(n *model.Node) nodeDTO {

@@ -111,13 +111,17 @@ processors:
 exporters:
   otlphttp/manager:
     endpoint: {{ .Endpoint }}
-    {{- if .TLSInsecureSkipVerify }}
-    tls:
-      insecure_skip_verify: true
-    {{- end }}
     {{- if .AuthHeader }}
     headers:
       Authorization: "{{ .AuthHeader }}"
+    {{- end }}
+    {{- if .TLSInsecureSkipVerify }}
+    tls:
+      # The standard install ships a self-signed manager cert
+      # (deploy/install/upgrade.sh), so otelcol's default cert verification
+      # fails the OTLP/HTTPS push. Skip verification by default; operators
+      # who plug in a real cert can set spec.tls_insecure_skip_verify=false.
+      insecure_skip_verify: true
     {{- end }}
     compression: gzip
     timeout: 30s
@@ -189,7 +193,10 @@ service:
 //	grpc_endpoint : string (default "127.0.0.1:4317")
 //	http_endpoint : string (default "127.0.0.1:4318")
 //	extra_attrs : map[string]string (extra resource attributes)
-//	tls_insecure_skip_verify : bool (default false; use only for local/self-signed HTTPS)
+//	tls_insecure_skip_verify : bool (default TRUE — skip cert verification
+//	                          on the OTLP/HTTPS push so the standard
+//	                          self-signed manager cert works; set false
+//	                          when a real cert is installed)
 //	omit_device_id : bool (default false; true for cluster gateway collectors)
 //	enable_k8sattributes : bool (default false; true for Kubernetes gateway collectors)
 //	enable_logs : bool (default false; true for Kubernetes telemetry gateway)
@@ -214,7 +221,6 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 	grpcEP := stringOr(cfg.Spec, "grpc_endpoint", "127.0.0.1:4317")
 	httpEP := stringOr(cfg.Spec, "http_endpoint", "127.0.0.1:4318")
 	extra := stringMap(cfg.Spec, "extra_attrs")
-	tlsInsecure := boolSpec(cfg.Spec, "tls_insecure_skip_verify")
 	k8sAttributes := boolSpec(cfg.Spec, "enable_k8sattributes")
 	logsEnabled := boolSpec(cfg.Spec, "enable_logs")
 	logsEndpoint := stringOr(cfg.Spec, "logs_endpoint", "")
@@ -225,6 +231,17 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 	metricsExportEndpoint := stringOr(cfg.Spec, "metrics_export_endpoint", "")
 	if metricsEnabled && metricsExportEndpoint == "" {
 		return nil, fmt.Errorf("traces plugin: metrics_export_endpoint required when enable_metrics=true")
+	}
+
+	// Default to skip-verify because the standard install ships a self-signed
+	// manager cert (deploy/install/upgrade.sh). Symmetric with the logs
+	// plugin. Operators who plug in a real cert set
+	// spec.tls_insecure_skip_verify=false.
+	tlsInsecure := true
+	if v, ok := cfg.Spec["tls_insecure_skip_verify"]; ok {
+		if b, ok := v.(bool); ok {
+			tlsInsecure = b
+		}
 	}
 
 	authHeader := ""

@@ -233,14 +233,16 @@ export default function EdgeDetailPage() {
           rangeInput: '6h',
           stepInput: '1m',
           title,
-          edgeId: edge?.id,
+          // device_id label, not edge.id (#96). expr above already uses
+          // device_id; keep var-device_id consistent with it.
+          deviceId: edge?.device_id ?? edge?.id,
         });
         setPromErr(null);
       } catch (err) {
         setPromErr((err as Error).message || tr('打开图表失败', 'Failed to open chart'));
       }
     },
-    [edge?.id],
+    [edge?.id, edge?.device_id],
   );
 
   const toggleSeries = (panel: PanelKey, key: string) => {

@@ -207,9 +207,9 @@ if (( local_edge_present )); then
         if [[ -x "$SCRIPT_DIR/edge/uninstall.sh" ]]; then
             bash "$SCRIPT_DIR/edge/uninstall.sh" 2>&1 | tail -5 || true
         else
-            systemctl stop ongrid-edge 2>/dev/null || true
-            systemctl disable ongrid-edge 2>/dev/null || true
-            rm -f /etc/systemd/system/ongrid-edge.service
+            systemctl stop ongrid-edge ongrid-edge-upgrade 2>/dev/null || true
+            systemctl disable ongrid-edge ongrid-edge-upgrade 2>/dev/null || true
+            rm -f /etc/systemd/system/ongrid-edge.service /etc/systemd/system/ongrid-edge-upgrade.service
             rm -f /usr/local/bin/ongrid-edge
             rm -rf /etc/ongrid-edge /var/lib/ongrid-edge /var/log/ongrid-edge
             systemctl daemon-reload

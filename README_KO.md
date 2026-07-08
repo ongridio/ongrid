@@ -20,7 +20,6 @@
 <p align="center">
   <img src="docs/assets/demo.gif" alt="Ongrid demo" width="100%" />
 </p>
-<p align="center"><sub><a href="https://github.com/ongridio/ongrid/releases/download/v0.7.169/Area2_hq.mp4">▶ 전체 HD 영상 보기 (MP4, 18 MB)</a></sub></p>
 
 <div align="center">
 
@@ -70,6 +69,92 @@ wget https://ongrid.cloud/dl/ongrid-v0.9.0-linux-amd64.tar.xz
 # ARM64
 wget https://ongrid.cloud/dl/ongrid-v0.9.0-linux-arm64.tar.xz
 ```
+
+## 제품 둘러보기
+
+### 근본 원인 분석
+
+<p align="center">
+  <img src="docs/assets/readme-tour/user-20260707-agent-write-gate.png" alt="근본 원인 분석" width="100%" />
+</p>
+
+알림이나 운영 질문에서 시작해 토폴로지, 장비, 메트릭, 로그, 변경 이력을 모아 근거 기반 분석을 만듭니다.
+
+### 워크플로 빌더
+
+<p align="center">
+  <img src="docs/assets/readme-tour/user-20260707-workflow-editor.png" alt="워크플로 빌더" width="100%" />
+</p>
+
+트리거, Agent, 도구, 조건, 알림을 재사용 가능한 자동화로 구성합니다.
+
+### 스킬 카탈로그
+
+<p align="center">
+  <img src="docs/assets/readme-tour/user-20260707-skills-catalog.png" alt="스킬 카탈로그" width="100%" />
+</p>
+
+Agent가 호출할 수 있는 도구와 설명을 운영자가 볼 수 있게 정리합니다.
+
+### MCP 서버
+
+<p align="center">
+  <img src="docs/assets/readme-tour/user-20260707-mcp-servers.png" alt="MCP 서버" width="100%" />
+</p>
+
+외부 MCP 서버를 등록해 도구를 동일한 관리 인벤토리에 연결합니다.
+
+### 지식 저장소
+
+<p align="center">
+  <img src="docs/assets/readme-tour/user-20260707-knowledge-vault.png" alt="지식 저장소" width="100%" />
+</p>
+
+런북, 사고 이력, 아키텍처 노트, 저장소를 검색 가능한 운영 컨텍스트로 만듭니다.
+
+### 아티팩트 센터
+
+<p align="center">
+  <img src="docs/assets/readme-tour/user-20260707-artifacts-pages.png" alt="아티팩트 센터" width="100%" />
+</p>
+
+생성된 페이지와 보고서를 한곳에 보관해 검토와 인계에 사용합니다.
+
+### 모니터링
+
+<p align="center">
+  <img src="docs/assets/readme-tour/user-20260707-monitor.png" alt="모니터링" width="100%" />
+</p>
+
+호스트 상태, 로그, 트레이스, 알림 상태를 같은 작업 공간에서 확인합니다.
+
+### 토폴로지 맵
+
+<p align="center">
+  <img src="docs/assets/readme-tour/user-20260707-topology-map.png" alt="토폴로지 맵" width="100%" />
+</p>
+
+의존성과 영향 범위를 시각화해 장애 전파 경로를 추적합니다.
+
+### 승인 및 쓰기 게이트
+
+<p align="center">
+  <img src="docs/assets/readme-tour/user-20260707-rca-session.png" alt="승인 및 쓰기 게이트" width="100%" />
+</p>
+
+위험한 작업은 승인과 정책 경계 안에서만 진행합니다.
+
+## 문서
+
+전체 제품 문서는 [ongrid.cloud](https://ongrid.cloud/docs/get-started/introduction) 에 있습니다.
+
+| 영역 | 시작하기 |
+|---|---|
+| **시작하기** | [Introduction](https://ongrid.cloud/docs/get-started/introduction) · [Quickstart](https://ongrid.cloud/docs/get-started/quickstart) · [Architecture](https://ongrid.cloud/docs/get-started/architecture) · [Concepts](https://ongrid.cloud/docs/get-started/concepts) |
+| **설치 및 운영** | [Server install](https://ongrid.cloud/docs/install/server) · [Edge install](https://ongrid.cloud/docs/install/edge) · [First boot](https://ongrid.cloud/docs/install/first-boot) · [Upgrade](https://ongrid.cloud/docs/install/upgrade) |
+| **기능** | [Alerts](https://ongrid.cloud/docs/capabilities/alerts) · [RCA](https://ongrid.cloud/docs/capabilities/rca) · [Monitoring](https://ongrid.cloud/docs/capabilities/monitoring) · [Logs](https://ongrid.cloud/docs/capabilities/logs) · [Traces](https://ongrid.cloud/docs/capabilities/traces) · [Knowledge](https://ongrid.cloud/docs/capabilities/knowledge) · [Skills](https://ongrid.cloud/docs/capabilities/skills) |
+| **Agent** | [Overview](https://ongrid.cloud/docs/agents/overview) · [Coordinator](https://ongrid.cloud/docs/agents/coordinator) · [Incident investigator](https://ongrid.cloud/docs/agents/incident-investigator) · [Specialists](https://ongrid.cloud/docs/agents/specialists) · [Reviewer](https://ongrid.cloud/docs/agents/reviewer) |
+| **참조** | [API](https://ongrid.cloud/docs/reference/api) · [CLI](https://ongrid.cloud/docs/reference/cli) · [Alert rules](https://ongrid.cloud/docs/reference/alert-rules) · [Skill manifest](https://ongrid.cloud/docs/reference/skill-manifest) · [Data plane](https://ongrid.cloud/docs/reference/data-plane) |
 
 ## 연동
 

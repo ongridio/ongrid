@@ -32,6 +32,7 @@ INSTALL_DIR="/usr/local/bin"
 ENV_DIR="/etc/ongrid-edge"
 ENV_FILE="${ENV_DIR}/ongrid-edge.env"
 SERVICE_FILE="/etc/systemd/system/ongrid-edge.service"
+UPGRADE_SERVICE_FILE="/etc/systemd/system/ongrid-edge-upgrade.service"
 LOG_DIR="/var/log/ongrid-edge"
 STATE_DIR="/var/lib/ongrid-edge"
 SERVICE_USER="ongrid-edge"
@@ -276,22 +277,44 @@ mkdir -p "$STATE_DIR"
 chown "$SERVICE_USER":"$SERVICE_GROUP" "$STATE_DIR"
 chmod 0755 "$STATE_DIR"
 
-# --- systemd unit ------------------------------------------------------------
+# --- systemd units -----------------------------------------------------------
+
+# ADR-024 privileged apply oneshot. Runs apply-pending-upgrade.sh as root
+# (no sandbox) before the agent, so it can write the root-owned binary paths
+# under /usr/local. ongrid-edge.service pulls it via Wants=, which re-runs it
+# on every Restart=always auto-restart (verified on systemd 219). This
+# replaces the old `ExecStartPre=-+...`: the `+` root-exec prefix is
+# unsupported on systemd < 231 and was silently ignored there, so upgrades
+# never applied on CentOS 7's systemd 219.
+cat > "$UPGRADE_SERVICE_FILE" <<'EOF'
+[Unit]
+Description=ongrid edge pending-upgrade apply (root, pre-start)
+Documentation=ADR-024
+Before=ongrid-edge.service
+After=local-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+ExecStart=/usr/local/lib/ongrid-edge/apply-pending-upgrade.sh
+EOF
 
 cat > "$SERVICE_FILE" <<'EOF'
 [Unit]
 Description=ongrid edge agent
 After=network-online.target
 Wants=network-online.target
+# ADR-024 remote upgrade: the privileged "apply staged bundle + rollback
+# check" step runs as the separate root oneshot ongrid-edge-upgrade.service
+# (this unit is sandboxed + non-root and cannot write /usr/local). Wants=
+# pulls it on every (re)start incl. Restart=always; After= guarantees the
+# swap lands before the agent execs.
+Wants=ongrid-edge-upgrade.service
+After=ongrid-edge-upgrade.service
 
 [Service]
 Type=simple
 EnvironmentFile=/etc/ongrid-edge/ongrid-edge.env
-# ADR-024 ExecStartPre — applies a staged whole-bundle upgrade then
-# rolls back on next boot if no healthy_marker landed. `+` runs as
-# root regardless of User=; `-` lets a missing/failing script exit 0
-# without blocking the unit so the pre-upgrade binary still starts.
-ExecStartPre=-+/usr/local/lib/ongrid-edge/apply-pending-upgrade.sh
 ExecStart=/usr/local/bin/ongrid-edge
 Restart=always
 RestartSec=5

@@ -159,7 +159,8 @@ func TestUsecaseEnrollRejectsInvalidToken(t *testing.T) {
 
 func TestUsecaseLookupControllerCluster(t *testing.T) {
 	ctx := context.Background()
-	uc := NewUsecase(newFakeRepo(), newFakeIssuer(), Config{})
+	repo := newFakeRepo()
+	uc := NewUsecase(repo, newFakeIssuer(), Config{})
 	reg, err := uc.CreateCluster(ctx, CreateClusterInput{Name: "prod"})
 	if err != nil {
 		t.Fatalf("CreateCluster() error = %v", err)
@@ -180,6 +181,9 @@ func TestUsecaseLookupControllerCluster(t *testing.T) {
 	}
 	if registered.ControllerNodeName != "node-a" || registered.ControllerNamespace != "ongrid-system" || registered.ControllerPodName != "ongrid-edge-controller-abc" {
 		t.Fatalf("controller runtime location = node:%q namespace:%q pod:%q", registered.ControllerNodeName, registered.ControllerNamespace, registered.ControllerPodName)
+	}
+	if repo.lastInstallation == nil || repo.lastInstallation.ScopeType != "cluster" {
+		t.Fatalf("installation scope = %+v, want cluster scope for full-node", repo.lastInstallation)
 	}
 
 	clusterID, err := uc.LookupControllerCluster(ctx, 41)
@@ -692,14 +696,15 @@ func TestUsecaseCleanupEventsAppliesRetentionAndClusterCap(t *testing.T) {
 }
 
 type fakeRepo struct {
-	nextClusterID uint64
-	nextNodeID    uint64
-	clusters      map[uint64]*model.Cluster
-	nodes         map[string]*model.Node
-	deviceNodeIDs map[uint64]uint64
-	pods          map[string]*model.Pod
-	events        []*model.Event
-	pruned        []string
+	nextClusterID    uint64
+	nextNodeID       uint64
+	clusters         map[uint64]*model.Cluster
+	nodes            map[string]*model.Node
+	deviceNodeIDs    map[uint64]uint64
+	pods             map[string]*model.Pod
+	events           []*model.Event
+	pruned           []string
+	lastInstallation *model.Installation
 }
 
 func newFakeRepo() *fakeRepo {
@@ -1136,7 +1141,11 @@ func (r *fakeRepo) CountEvents(ctx context.Context, f ListEventsFilter) (int64, 
 	return int64(len(items)), err
 }
 
-func (r *fakeRepo) UpsertInstallation(_ context.Context, _ *model.Installation) error {
+func (r *fakeRepo) UpsertInstallation(_ context.Context, item *model.Installation) error {
+	if item != nil {
+		cp := *item
+		r.lastInstallation = &cp
+	}
 	return nil
 }
 

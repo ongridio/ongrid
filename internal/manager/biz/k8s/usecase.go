@@ -730,19 +730,15 @@ func (u *Usecase) HandleRegister(ctx context.Context, edgeID uint64, deviceID *u
 		}); err != nil {
 			return err
 		}
-		mode := strings.TrimSpace(info.Mode)
-		if mode == "" {
-			mode = model.ModeFullNode
-		}
-		scopeType := "cluster"
-		if strings.TrimSpace(info.Namespace) != "" {
-			scopeType = "namespace"
+		mode, err := normalizeMode(info.Mode)
+		if err != nil {
+			return err
 		}
 		ts := now
 		if err := u.repo.UpsertInstallation(ctx, &model.Installation{
 			ClusterID:        info.ClusterID,
 			Mode:             mode,
-			ScopeType:        scopeType,
+			ScopeType:        "cluster",
 			Namespace:        strings.TrimSpace(info.Namespace),
 			ControllerEdgeID: &edgeID,
 			LastSeenAt:       &ts,

@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -109,6 +111,16 @@ type fakeSvc struct {
 	lastRotateID    uint64
 	lastRolesEdgeID uint64
 	lastRolesNames  []string
+
+	// batch-test instrumentation. mu guards the slices/maps because the
+	// batch runner invokes these methods from concurrent goroutines.
+	mu            sync.Mutex
+	deleteIDs     []uint64        // every id passed to Delete (batch-aware)
+	upgradeIDs    []uint64        // every id passed to UpgradeAgent
+	fetchIDs      []uint64        // every id passed to FetchPackage
+	deleteFailIDs map[uint64]bool // ids for which Delete returns ErrNotFound
+	applyAccepted bool            // ApplyPackage.Accepted to report
+	fetchManifest int             // FetchPackage.ManifestFiles to report
 }
 
 func (f *fakeSvc) Create(_ context.Context, _ string, createdBy *uint64) (*biz.CreateResult, error) {
@@ -124,7 +136,13 @@ func (f *fakeSvc) Get(_ context.Context, id uint64) (*model.Edge, error) {
 	return f.getResp, f.getErr
 }
 func (f *fakeSvc) Delete(_ context.Context, id uint64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.lastDeleteID = id
+	f.deleteIDs = append(f.deleteIDs, id)
+	if f.deleteFailIDs[id] {
+		return errs.ErrNotFound
+	}
 	return f.deleteErr
 }
 func (f *fakeSvc) RotateSecret(_ context.Context, id uint64) (string, error) {
@@ -136,14 +154,24 @@ func (f *fakeSvc) UpdateRoles(_ context.Context, id uint64, names []string) erro
 	f.lastRolesNames = names
 	return f.updateRolesErr
 }
-func (f *fakeSvc) UpgradeAgent(_ context.Context, _ uint64, _ string, _ string) (tunnel.AgentUpgradeResponse, error) {
+func (f *fakeSvc) UpgradeAgent(_ context.Context, id uint64, _ string, _ string) (tunnel.AgentUpgradeResponse, error) {
+	f.mu.Lock()
+	f.upgradeIDs = append(f.upgradeIDs, id)
+	f.mu.Unlock()
 	return tunnel.AgentUpgradeResponse{}, nil
 }
-func (f *fakeSvc) FetchPackage(_ context.Context, _ uint64, _ string, _ string, _ string) (tunnel.FetchPackageResponse, error) {
-	return tunnel.FetchPackageResponse{}, nil
+func (f *fakeSvc) FetchPackage(_ context.Context, id uint64, _ string, _ string, _ string) (tunnel.FetchPackageResponse, error) {
+	f.mu.Lock()
+	f.fetchIDs = append(f.fetchIDs, id)
+	mf := f.fetchManifest
+	f.mu.Unlock()
+	return tunnel.FetchPackageResponse{ManifestFiles: mf}, nil
 }
 func (f *fakeSvc) ApplyPackage(_ context.Context, _ uint64) (tunnel.ApplyPackageResponse, error) {
-	return tunnel.ApplyPackageResponse{}, nil
+	f.mu.Lock()
+	accepted := f.applyAccepted
+	f.mu.Unlock()
+	return tunnel.ApplyPackageResponse{Accepted: accepted}, nil
 }
 func (f *fakeSvc) GetProcessList(_ context.Context, _ uint64, _ uint32, _ string) (tunnel.GetProcessListResponse, error) {
 	return tunnel.GetProcessListResponse{}, nil
@@ -384,5 +412,174 @@ func TestRotateSecret_NonAdminForbidden(t *testing.T) {
 
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", w.Code)
+	}
+}
+
+// fakePkgResolver returns a fixed bundle triple so batch upgrade-package
+// tests don't need a real edge-bundles dir.
+type fakePkgResolver struct{}
+
+func (fakePkgResolver) ResolveBundle(_ string, _ string) (string, string, string, error) {
+	return "https://example/ongrid-edge", strings.Repeat("a", 64), "v9.9.9", nil
+}
+
+func postJSON(router http.Handler, path, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	return w
+}
+
+func TestBatchDelete_AdminHappyPath(t *testing.T) {
+	svc := &fakeSvc{}
+	h := NewHandler(svc, newFakeDeviceRepo(), nil)
+	router := buildRouter(h, tenantctx.Tenant{UserID: 1, Role: "admin"})
+
+	w := postJSON(router, "/v1/edges/batch/delete", `{"ids":[1,2,3]}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	var body batchResp
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Total != 3 || body.Succeeded != 3 || body.Failed != 0 {
+		t.Errorf("summary = %+v, want total=3 succeeded=3", body)
+	}
+	sort.Slice(svc.deleteIDs, func(i, j int) bool { return svc.deleteIDs[i] < svc.deleteIDs[j] })
+	if len(svc.deleteIDs) != 3 || svc.deleteIDs[0] != 1 || svc.deleteIDs[2] != 3 {
+		t.Errorf("deleteIDs = %v, want [1 2 3]", svc.deleteIDs)
+	}
+}
+
+func TestBatchDelete_PartialFailure(t *testing.T) {
+	svc := &fakeSvc{deleteFailIDs: map[uint64]bool{2: true}}
+	h := NewHandler(svc, newFakeDeviceRepo(), nil)
+	router := buildRouter(h, tenantctx.Tenant{UserID: 1, Role: "admin"})
+
+	w := postJSON(router, "/v1/edges/batch/delete", `{"ids":[1,2,3]}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	var body batchResp
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	if body.Succeeded != 2 || body.Failed != 1 {
+		t.Errorf("summary = %+v, want succeeded=2 failed=1", body)
+	}
+	for _, r := range body.Results {
+		if r.ID == 2 {
+			if r.OK || r.Code != "not-found" {
+				t.Errorf("id=2 result = %+v, want ok=false code=not-found", r)
+			}
+		}
+	}
+}
+
+func TestBatchDelete_Dedupes(t *testing.T) {
+	svc := &fakeSvc{}
+	h := NewHandler(svc, newFakeDeviceRepo(), nil)
+	router := buildRouter(h, tenantctx.Tenant{UserID: 1, Role: "admin"})
+
+	w := postJSON(router, "/v1/edges/batch/delete", `{"ids":[5,5,5]}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", w.Code, w.Body.String())
+	}
+	var body batchResp
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	if body.Total != 1 || len(svc.deleteIDs) != 1 {
+		t.Errorf("total=%d deleteIDs=%v, want a single deduped delete", body.Total, svc.deleteIDs)
+	}
+}
+
+func TestBatchDelete_EmptyIDsInvalid(t *testing.T) {
+	svc := &fakeSvc{}
+	h := NewHandler(svc, newFakeDeviceRepo(), nil)
+	router := buildRouter(h, tenantctx.Tenant{UserID: 1, Role: "admin"})
+
+	w := postJSON(router, "/v1/edges/batch/delete", `{"ids":[]}`)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestBatchDelete_NonAdminForbidden(t *testing.T) {
+	svc := &fakeSvc{}
+	h := NewHandler(svc, newFakeDeviceRepo(), nil)
+	router := buildRouter(h, tenantctx.Tenant{UserID: 1, Role: "user"})
+
+	w := postJSON(router, "/v1/edges/batch/delete", `{"ids":[1,2]}`)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", w.Code)
+	}
+	if len(svc.deleteIDs) != 0 {
+		t.Errorf("delete should not run for non-admin; got %v", svc.deleteIDs)
+	}
+}
+
+func TestBatchUpgradeAgent_HappyPath(t *testing.T) {
+	svc := &fakeSvc{}
+	h := NewHandler(svc, newFakeDeviceRepo(), nil)
+	router := buildRouter(h, tenantctx.Tenant{UserID: 1, Role: "admin"})
+
+	body := `{"ids":[1,2],"url":"https://example/edge","sha256":"` + strings.Repeat("a", 64) + `"}`
+	w := postJSON(router, "/v1/edges/batch/upgrade", body)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	var resp batchResp
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.Succeeded != 2 {
+		t.Errorf("succeeded = %d, want 2", resp.Succeeded)
+	}
+	if len(svc.upgradeIDs) != 2 {
+		t.Errorf("upgradeIDs = %v, want 2 calls", svc.upgradeIDs)
+	}
+}
+
+func TestBatchUpgradeAgent_MissingURLInvalid(t *testing.T) {
+	svc := &fakeSvc{}
+	h := NewHandler(svc, newFakeDeviceRepo(), nil)
+	router := buildRouter(h, tenantctx.Tenant{UserID: 1, Role: "admin"})
+
+	w := postJSON(router, "/v1/edges/batch/upgrade", `{"ids":[1],"url":"","sha256":""}`)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestBatchUpgradePackage_HappyPath(t *testing.T) {
+	svc := &fakeSvc{applyAccepted: true, fetchManifest: 7}
+	h := NewHandler(svc, newFakeDeviceRepo(), nil)
+	h.SetPackageResolver(fakePkgResolver{})
+	router := buildRouter(h, tenantctx.Tenant{UserID: 1, Role: "admin"})
+
+	w := postJSON(router, "/v1/edges/batch/upgrade-package", `{"ids":[1,2,3]}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	var resp batchResp
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.Succeeded != 3 || resp.Failed != 0 {
+		t.Errorf("summary = %+v, want succeeded=3", resp)
+	}
+	for _, r := range resp.Results {
+		if !r.Applied || r.Version != "v9.9.9" || r.ManifestFiles != 7 {
+			t.Errorf("result = %+v, want applied=true version=v9.9.9 manifest=7", r)
+		}
+	}
+}
+
+func TestBatchUpgradePackage_NotWired(t *testing.T) {
+	svc := &fakeSvc{}
+	h := NewHandler(svc, newFakeDeviceRepo(), nil) // no resolver
+	router := buildRouter(h, tenantctx.Tenant{UserID: 1, Role: "admin"})
+
+	w := postJSON(router, "/v1/edges/batch/upgrade-package", `{"ids":[1]}`)
+	if w.Code == http.StatusOK {
+		t.Fatalf("expected non-200 when resolver missing; body=%s", w.Body.String())
+	}
+	if len(svc.fetchIDs) != 0 {
+		t.Errorf("fetch should not run when resolver missing; got %v", svc.fetchIDs)
 	}
 }

@@ -262,11 +262,11 @@ describe('KubernetesPage', () => {
     expect(await screen.findByText('kind-local')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '删除集群 kind-local' }));
     expect(await screen.findByText('删除 Kubernetes 集群 kind-local')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '我已卸载，删除记录' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认已卸载，删除记录' }));
 
     await waitFor(() => {
       expect(deletedID).toBe('1');
-      expect(deleteForce).toBe('true');
+      expect(deleteForce).toBe('');
     });
     expect(screen.queryByText('kind-local')).not.toBeInTheDocument();
   });
@@ -328,7 +328,7 @@ describe('KubernetesPage', () => {
     expect(screen.getAllByText('1n / 1w / 1p / 1e').length).toBeGreaterThan(0);
     expect(screen.getByText('集群健康结论')).toBeInTheDocument();
     expect(screen.getByText('Controller')).toBeInTheDocument();
-    expect(screen.getByText('Node agent 覆盖')).toBeInTheDocument();
+    expect(screen.getByText('资源规模')).toBeInTheDocument();
     expect(screen.getByText('异常线索')).toBeInTheDocument();
     expect(screen.getByText('关键异常')).toBeInTheDocument();
     expect(screen.getByText('1 个待确认问题')).toBeInTheDocument();

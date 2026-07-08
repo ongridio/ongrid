@@ -20,7 +20,6 @@
 <p align="center">
   <img src="docs/assets/demo.gif" alt="Ongrid demo" width="100%" />
 </p>
-<p align="center"><sub><a href="https://github.com/ongridio/ongrid/releases/download/v0.7.169/Area2_hq.mp4">▶ フル動画 (HD) を見る (MP4, 18 MB)</a></sub></p>
 
 <div align="center">
 
@@ -70,6 +69,92 @@ wget https://ongrid.cloud/dl/ongrid-v0.9.0-linux-amd64.tar.xz
 # ARM64
 wget https://ongrid.cloud/dl/ongrid-v0.9.0-linux-arm64.tar.xz
 ```
+
+## 製品ツアー
+
+### 根本原因分析
+
+<p align="center">
+  <img src="docs/assets/readme-tour/user-20260707-agent-write-gate.png" alt="根本原因分析" width="100%" />
+</p>
+
+アラートや運用上の質問から開始し、トポロジー、デバイス、メトリクス、ログ、変更履歴を集めて、証拠に基づく分析を作成します。
+
+### ワークフロービルダー
+
+<p align="center">
+  <img src="docs/assets/readme-tour/user-20260707-workflow-editor.png" alt="ワークフロービルダー" width="100%" />
+</p>
+
+トリガー、Agent、ツール、条件、通知を再利用可能な自動化として構成します。
+
+### スキルカタログ
+
+<p align="center">
+  <img src="docs/assets/readme-tour/user-20260707-skills-catalog.png" alt="スキルカタログ" width="100%" />
+</p>
+
+Agent が呼び出せるツールと説明を一覧化し、運用者が能力範囲を把握できます。
+
+### MCP サーバー
+
+<p align="center">
+  <img src="docs/assets/readme-tour/user-20260707-mcp-servers.png" alt="MCP サーバー" width="100%" />
+</p>
+
+外部 MCP サーバーを登録し、ツールを同じ管理されたインベントリに接続します。
+
+### ナレッジベース
+
+<p align="center">
+  <img src="docs/assets/readme-tour/user-20260707-knowledge-vault.png" alt="ナレッジベース" width="100%" />
+</p>
+
+Runbook、インシデント履歴、設計メモ、リポジトリを検索可能な文脈にします。
+
+### 成果物センター
+
+<p align="center">
+  <img src="docs/assets/readme-tour/user-20260707-artifacts-pages.png" alt="成果物センター" width="100%" />
+</p>
+
+生成されたページやレポートを一か所に保存し、レビューと引き継ぎに使えます。
+
+### モニタリング
+
+<p align="center">
+  <img src="docs/assets/readme-tour/user-20260707-monitor.png" alt="モニタリング" width="100%" />
+</p>
+
+ホスト状態、ログ、トレース、アラートを同じ作業空間で確認できます。
+
+### トポロジーマップ
+
+<p align="center">
+  <img src="docs/assets/readme-tour/user-20260707-topology-map.png" alt="トポロジーマップ" width="100%" />
+</p>
+
+依存関係と影響範囲を可視化し、インシデントの波及を追跡します。
+
+### 承認と書き込みゲート
+
+<p align="center">
+  <img src="docs/assets/readme-tour/user-20260707-rca-session.png" alt="承認と書き込みゲート" width="100%" />
+</p>
+
+リスクの高い操作は承認とポリシー境界の内側で扱います。
+
+## ドキュメント
+
+製品ドキュメントは [ongrid.cloud](https://ongrid.cloud/docs/get-started/introduction) で公開されています。
+
+| 領域 | ここから開始 |
+|---|---|
+| **はじめに** | [Introduction](https://ongrid.cloud/docs/get-started/introduction) · [Quickstart](https://ongrid.cloud/docs/get-started/quickstart) · [Architecture](https://ongrid.cloud/docs/get-started/architecture) · [Concepts](https://ongrid.cloud/docs/get-started/concepts) |
+| **インストールと運用** | [Server install](https://ongrid.cloud/docs/install/server) · [Edge install](https://ongrid.cloud/docs/install/edge) · [First boot](https://ongrid.cloud/docs/install/first-boot) · [Upgrade](https://ongrid.cloud/docs/install/upgrade) |
+| **機能** | [Alerts](https://ongrid.cloud/docs/capabilities/alerts) · [RCA](https://ongrid.cloud/docs/capabilities/rca) · [Monitoring](https://ongrid.cloud/docs/capabilities/monitoring) · [Logs](https://ongrid.cloud/docs/capabilities/logs) · [Traces](https://ongrid.cloud/docs/capabilities/traces) · [Knowledge](https://ongrid.cloud/docs/capabilities/knowledge) · [Skills](https://ongrid.cloud/docs/capabilities/skills) |
+| **Agent** | [Overview](https://ongrid.cloud/docs/agents/overview) · [Coordinator](https://ongrid.cloud/docs/agents/coordinator) · [Incident investigator](https://ongrid.cloud/docs/agents/incident-investigator) · [Specialists](https://ongrid.cloud/docs/agents/specialists) · [Reviewer](https://ongrid.cloud/docs/agents/reviewer) |
+| **リファレンス** | [API](https://ongrid.cloud/docs/reference/api) · [CLI](https://ongrid.cloud/docs/reference/cli) · [Alert rules](https://ongrid.cloud/docs/reference/alert-rules) · [Skill manifest](https://ongrid.cloud/docs/reference/skill-manifest) · [Data plane](https://ongrid.cloud/docs/reference/data-plane) |
 
 ## インテグレーション
 

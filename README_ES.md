@@ -20,7 +20,6 @@
 <p align="center">
   <img src="docs/assets/demo.gif" alt="Ongrid demo" width="100%" />
 </p>
-<p align="center"><sub><a href="https://github.com/ongridio/ongrid/releases/download/v0.7.169/Area2_hq.mp4">▶ Ver demo completa en HD (MP4, 18 MB)</a></sub></p>
 
 <div align="center">
 
@@ -70,6 +69,92 @@ wget https://ongrid.cloud/dl/ongrid-v0.9.0-linux-amd64.tar.xz
 # ARM64
 wget https://ongrid.cloud/dl/ongrid-v0.9.0-linux-arm64.tar.xz
 ```
+
+## Recorrido del producto
+
+### Análisis de causa raíz
+
+<p align="center">
+  <img src="docs/assets/readme-tour/user-20260707-agent-write-gate.png" alt="Análisis de causa raíz" width="100%" />
+</p>
+
+Empieza desde una alerta o pregunta operativa y reúne topología, dispositivos, métricas, logs y cambios para generar un análisis con evidencias.
+
+### Constructor de workflows
+
+<p align="center">
+  <img src="docs/assets/readme-tour/user-20260707-workflow-editor.png" alt="Constructor de workflows" width="100%" />
+</p>
+
+Conecta disparadores, agentes, herramientas, condiciones y notificaciones en automatizaciones reutilizables.
+
+### Catálogo de skills
+
+<p align="center">
+  <img src="docs/assets/readme-tour/user-20260707-skills-catalog.png" alt="Catálogo de skills" width="100%" />
+</p>
+
+Muestra las herramientas que los agentes pueden llamar, con descripciones y límites claros.
+
+### Servidores MCP
+
+<p align="center">
+  <img src="docs/assets/readme-tour/user-20260707-mcp-servers.png" alt="Servidores MCP" width="100%" />
+</p>
+
+Registra servidores MCP externos y conecta sus herramientas al mismo inventario gobernado.
+
+### Base de conocimiento
+
+<p align="center">
+  <img src="docs/assets/readme-tour/user-20260707-knowledge-vault.png" alt="Base de conocimiento" width="100%" />
+</p>
+
+Indexa runbooks, historial de incidentes, notas de arquitectura y repositorios como contexto buscable.
+
+### Centro de artefactos
+
+<p align="center">
+  <img src="docs/assets/readme-tour/user-20260707-artifacts-pages.png" alt="Centro de artefactos" width="100%" />
+</p>
+
+Guarda páginas e informes generados en un centro privado por defecto para revisión y traspaso.
+
+### Monitorización
+
+<p align="center">
+  <img src="docs/assets/readme-tour/user-20260707-monitor.png" alt="Monitorización" width="100%" />
+</p>
+
+Inspecciona salud de flota, logs, trazas y alertas en el mismo espacio de trabajo.
+
+### Mapa de topología
+
+<p align="center">
+  <img src="docs/assets/readme-tour/user-20260707-topology-map.png" alt="Mapa de topología" width="100%" />
+</p>
+
+Visualiza dependencias y radio de impacto para seguir la propagación de incidentes.
+
+### Aprobación y puerta de escritura
+
+<p align="center">
+  <img src="docs/assets/readme-tour/user-20260707-rca-session.png" alt="Aprobación y puerta de escritura" width="100%" />
+</p>
+
+Mantén las acciones riesgosas detrás de aprobaciones y políticas visibles.
+
+## Documentación
+
+La documentación completa está disponible en [ongrid.cloud](https://ongrid.cloud/docs/get-started/introduction).
+
+| Área | Empieza aquí |
+|---|---|
+| **Primeros pasos** | [Introduction](https://ongrid.cloud/docs/get-started/introduction) · [Quickstart](https://ongrid.cloud/docs/get-started/quickstart) · [Architecture](https://ongrid.cloud/docs/get-started/architecture) · [Concepts](https://ongrid.cloud/docs/get-started/concepts) |
+| **Instalación y operación** | [Server install](https://ongrid.cloud/docs/install/server) · [Edge install](https://ongrid.cloud/docs/install/edge) · [First boot](https://ongrid.cloud/docs/install/first-boot) · [Upgrade](https://ongrid.cloud/docs/install/upgrade) |
+| **Capacidades** | [Alerts](https://ongrid.cloud/docs/capabilities/alerts) · [RCA](https://ongrid.cloud/docs/capabilities/rca) · [Monitoring](https://ongrid.cloud/docs/capabilities/monitoring) · [Logs](https://ongrid.cloud/docs/capabilities/logs) · [Traces](https://ongrid.cloud/docs/capabilities/traces) · [Knowledge](https://ongrid.cloud/docs/capabilities/knowledge) · [Skills](https://ongrid.cloud/docs/capabilities/skills) |
+| **Agentes** | [Overview](https://ongrid.cloud/docs/agents/overview) · [Coordinator](https://ongrid.cloud/docs/agents/coordinator) · [Incident investigator](https://ongrid.cloud/docs/agents/incident-investigator) · [Specialists](https://ongrid.cloud/docs/agents/specialists) · [Reviewer](https://ongrid.cloud/docs/agents/reviewer) |
+| **Referencia** | [API](https://ongrid.cloud/docs/reference/api) · [CLI](https://ongrid.cloud/docs/reference/cli) · [Alert rules](https://ongrid.cloud/docs/reference/alert-rules) · [Skill manifest](https://ongrid.cloud/docs/reference/skill-manifest) · [Data plane](https://ongrid.cloud/docs/reference/data-plane) |
 
 ## Integraciones
 
