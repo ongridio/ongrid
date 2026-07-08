@@ -1457,6 +1457,9 @@ describe('KubernetesPage', () => {
     );
 
     expect(await screen.findByText('Serverless 应用遥测')).toBeInTheDocument();
+    expect(screen.queryByText('可观测入口')).not.toBeInTheDocument();
+    expect(screen.getByText('资源范围')).toBeInTheDocument();
+    expect(screen.queryByText('Node agent 覆盖')).not.toBeInTheDocument();
     expect(await screen.findByText('Workload 资源视图')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Nodes\s+0$/ })).not.toBeInTheDocument();
     expect(screen.queryByText('Node 资源视图')).not.toBeInTheDocument();

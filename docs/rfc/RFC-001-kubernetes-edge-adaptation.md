@@ -519,7 +519,7 @@ serverless 模式下，`k8s_nodes` 可以为空；`k8s_pods.node_name` 允许为
 - 采集 kube-state-metrics，避免每个 Node 重复抓同一份集群指标。
 - 汇报集群级健康：API watch lag、resourceVersion、list/watch error、RBAC deny。
 
-第一阶段只读 watch：
+资源 watch 范围：
 
 - nodes
 - namespaces
@@ -694,7 +694,7 @@ NetworkPolicy：
 可选：
 
 - `push_k8s_events`：如果后续需要更高频的 Event 增量流，可拆成独立方法并写 MySQL 短保留或转 Loki。
-- `execute_k8s_readonly`：统一只读诊断入口，例如 describe pod、get events、top node。第一阶段不做写操作。
+- K8s 只读诊断走 `describe_k8s_resource` / `query_k8s_logs`；受控写动作走 `execute_k8s_action`，并通过 ReviewGate 与审批审计保护。
 
 ### 快照与实时查询策略
 
@@ -908,10 +908,10 @@ SLO 初版：
 - Loki 查询 `{cluster_id="...", namespace="..."}` 有日志。
 - kube-state-metrics 没有按 Node 重复采集。
 
-### Phase 3：Trace 与 AI 只读诊断
+### Phase 3：Trace 与 AI 诊断闭环
 
 - OTel cluster gateway 模式。
-- 完善 `query_k8s_snapshot`、`describe_k8s_resource`、`get_k8s_events` 只读工具。
+- 完善 `query_k8s_snapshot`（含 Events 查询）、`describe_k8s_resource`、`query_k8s_logs` 只读工具。
 - 新增 `execute_k8s_action` 第一版，只允许 controller 通过 Kubernetes RBAC 执行受限 K8s 写动作，已覆盖 rollout restart、scale、delete pod、evict pod、cordon、uncordon、drain；`drain` 已支持 grace period、PDB 429 retry interval、force、delete_emptydir_data、ignore-daemonsets、disable-eviction 和 timeout；聊天路径已接 ReviewGate 和 `chat_mutating_proposals` 审计，ClusterDetail 已提供 K8s 写动作审批审计查询面，并已完成脚本化 ToolCallingChatModel 与本地 DeepSeek 真实对话 dry-run 端到端验证。
 - AI 诊断在节点模式下能从 incident 关联 `device_id -> k8s node -> pod/workload/events/logs`；serverless 模式下从 `cluster_id/namespace/workload -> pods/events/logs/traces` 关联。
 

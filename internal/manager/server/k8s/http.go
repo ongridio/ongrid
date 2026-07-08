@@ -650,11 +650,10 @@ func nodeEdgeCoverageDTOFromBiz(coverage *biz.NodeCoverage) *nodeEdgeCoverageDTO
 }
 
 const (
-	capabilityStatusReady         = "ready"
-	capabilityStatusQueryReady    = "query-ready"
-	capabilityStatusDegraded      = "degraded"
-	capabilityStatusUnavailable   = "unavailable"
-	capabilityStatusNotApplicable = "not-applicable"
+	capabilityStatusReady       = "ready"
+	capabilityStatusQueryReady  = "query-ready"
+	capabilityStatusDegraded    = "degraded"
+	capabilityStatusUnavailable = "unavailable"
 )
 
 func clusterCapabilitiesFromModel(c *model.Cluster) []clusterCapabilityDTO {
@@ -671,18 +670,12 @@ func clusterCapabilitiesFromModelWithCoverage(c *model.Cluster, coverage *biz.No
 	hasController := online && c.ControllerEdgeID != nil && *c.ControllerEdgeID != 0
 	hasInventory := online && strings.TrimSpace(c.InventoryResourceVersion) != ""
 
-	return []clusterCapabilityDTO{
+	capabilities := []clusterCapabilityDTO{
 		{
 			Key:    "inventory",
 			Label:  "Inventory",
 			Status: inventoryCapabilityStatus(hasController, hasInventory),
 			Reason: inventoryCapabilityReason(hasController, hasInventory),
-		},
-		{
-			Key:    "node-metrics",
-			Label:  "Node metrics",
-			Status: nodeMetricsCapabilityStatus(serverless, hasController, hasInventory, coverage),
-			Reason: nodeMetricsCapabilityReason(serverless, hasController, hasInventory, coverage),
 		},
 		{
 			Key:    "events",
@@ -696,11 +689,25 @@ func clusterCapabilitiesFromModelWithCoverage(c *model.Cluster, coverage *biz.No
 			Status: telemetryCapabilityStatus(hasController),
 			Reason: telemetryCapabilityReason(serverless, hasController),
 		},
+	}
+	if serverless {
+		return capabilities
+	}
+	return []clusterCapabilityDTO{
+		capabilities[0],
+		{
+			Key:    "node-metrics",
+			Label:  "Node metrics",
+			Status: nodeMetricsCapabilityStatus(hasController, hasInventory, coverage),
+			Reason: nodeMetricsCapabilityReason(hasController, hasInventory, coverage),
+		},
+		capabilities[1],
+		capabilities[2],
 		{
 			Key:    "host-access",
 			Label:  "Host access",
-			Status: hostAccessCapabilityStatus(serverless, hasController, hasInventory, coverage),
-			Reason: hostAccessCapabilityReason(serverless, hasController, hasInventory, coverage),
+			Status: hostAccessCapabilityStatus(hasController, hasInventory, coverage),
+			Reason: hostAccessCapabilityReason(hasController, hasInventory, coverage),
 		},
 	}
 }
@@ -727,10 +734,8 @@ func inventoryCapabilityReason(hasController, hasInventory bool) string {
 	}
 }
 
-func nodeMetricsCapabilityStatus(serverless, hasController, hasInventory bool, coverage *biz.NodeCoverage) string {
+func nodeMetricsCapabilityStatus(hasController, hasInventory bool, coverage *biz.NodeCoverage) string {
 	switch {
-	case serverless:
-		return capabilityStatusNotApplicable
 	case !hasController:
 		return capabilityStatusUnavailable
 	case coverage != nil && coverage.Total > 0 && coverage.EdgeLinked >= coverage.Total:
@@ -746,10 +751,8 @@ func nodeMetricsCapabilityStatus(serverless, hasController, hasInventory bool, c
 	}
 }
 
-func nodeMetricsCapabilityReason(serverless, hasController, hasInventory bool, coverage *biz.NodeCoverage) string {
+func nodeMetricsCapabilityReason(hasController, hasInventory bool, coverage *biz.NodeCoverage) string {
 	switch {
-	case serverless:
-		return "serverless mode does not collect host metrics"
 	case !hasController:
 		return "controller is not connected"
 	case coverage != nil && coverage.Total > 0:
@@ -792,10 +795,8 @@ func telemetryCapabilityReason(serverless, hasController bool) string {
 	return "queries are scoped by cluster_id"
 }
 
-func hostAccessCapabilityStatus(serverless, hasController, hasInventory bool, coverage *biz.NodeCoverage) string {
+func hostAccessCapabilityStatus(hasController, hasInventory bool, coverage *biz.NodeCoverage) string {
 	switch {
-	case serverless:
-		return capabilityStatusNotApplicable
 	case !hasController:
 		return capabilityStatusUnavailable
 	case coverage != nil && coverage.Total > 0 && coverage.EdgeLinked >= coverage.Total:
@@ -811,10 +812,8 @@ func hostAccessCapabilityStatus(serverless, hasController, hasInventory bool, co
 	}
 }
 
-func hostAccessCapabilityReason(serverless, hasController, hasInventory bool, coverage *biz.NodeCoverage) string {
+func hostAccessCapabilityReason(hasController, hasInventory bool, coverage *biz.NodeCoverage) string {
 	switch {
-	case serverless:
-		return "serverless mode does not expose host operations"
 	case !hasController:
 		return "controller is not connected"
 	case coverage != nil && coverage.Total > 0:

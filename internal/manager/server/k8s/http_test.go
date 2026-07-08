@@ -33,10 +33,10 @@ func TestClusterCapabilitiesFromModel(t *testing.T) {
 		LastSeenAt:       &now,
 	})
 	assertCapabilityStatus(t, serverless, "inventory", capabilityStatusDegraded)
-	assertCapabilityStatus(t, serverless, "node-metrics", capabilityStatusNotApplicable)
 	assertCapabilityStatus(t, serverless, "events", capabilityStatusReady)
 	assertCapabilityStatus(t, serverless, "telemetry", capabilityStatusQueryReady)
-	assertCapabilityStatus(t, serverless, "host-access", capabilityStatusNotApplicable)
+	assertCapabilityAbsent(t, serverless, "node-metrics")
+	assertCapabilityAbsent(t, serverless, "host-access")
 
 	offline := clusterCapabilitiesFromModel(&model.Cluster{Mode: model.ModeFullNode})
 	assertCapabilityStatus(t, offline, "inventory", capabilityStatusUnavailable)
@@ -108,4 +108,13 @@ func assertCapabilityStatus(t *testing.T, items []clusterCapabilityDTO, key, wan
 		}
 	}
 	t.Fatalf("capability %q not found", key)
+}
+
+func assertCapabilityAbsent(t *testing.T, items []clusterCapabilityDTO, key string) {
+	t.Helper()
+	for _, item := range items {
+		if item.Key == key {
+			t.Fatalf("capability %q should be absent, got status %q", key, item.Status)
+		}
+	}
 }

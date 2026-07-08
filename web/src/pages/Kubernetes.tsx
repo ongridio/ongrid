@@ -1011,16 +1011,18 @@ export function KubernetesClusterDetailPage() {
                 </div>
               </div>
 
-              <K8sTelemetryDrilldowns
-                cluster={cluster}
-                namespaces={namespaces}
-              />
-
-              <ServerlessTelemetryDrilldowns
-                cluster={cluster}
-                workloads={workloads}
-                namespaces={namespaces}
-              />
+              {serverless ? (
+                <ServerlessTelemetryDrilldowns
+                  cluster={cluster}
+                  workloads={workloads}
+                  namespaces={namespaces}
+                />
+              ) : (
+                <K8sTelemetryDrilldowns
+                  cluster={cluster}
+                  namespaces={namespaces}
+                />
+              )}
             </>
           )}
         </div>
@@ -1099,12 +1101,21 @@ function ClusterSummary({
               detail={cluster?.controller_node_name || cluster?.controller_pod_name || '—'}
               tone={cluster?.controller_edge_id ? 'success' : 'default'}
             />
-            <HealthMetric
-              label={tr('Node agent 覆盖', 'Node agent coverage')}
-              value={serverless ? tr('不适用', 'n/a') : effectiveEdgeAccess ? `${effectiveEdgeAccess.linked}/${effectiveEdgeAccess.total}` : '—'}
-              detail={serverless ? tr('serverless 模式', 'serverless mode') : effectiveEdgeAccess ? `${effectiveEdgeAccess.pct}% · ${tr('未覆盖', 'missing')} ${effectiveEdgeAccess.total - effectiveEdgeAccess.linked}` : tr('等待节点快照', 'waiting for node snapshot')}
-              tone={serverless ? 'default' : !effectiveEdgeAccess || effectiveEdgeAccess.linked < effectiveEdgeAccess.total ? 'warning' : 'success'}
-            />
+            {serverless ? (
+              <HealthMetric
+                label={tr('资源范围', 'Resource scope')}
+                value={cluster?.inventory_scope === 'namespace' ? tr('命名空间', 'Namespace') : tr('集群', 'Cluster')}
+                detail={cluster?.inventory_namespace || tr(`${formatNumber(namespaces.length)} 个 namespace`, `${formatNumber(namespaces.length)} namespace(s)`)}
+                tone="info"
+              />
+            ) : (
+              <HealthMetric
+                label={tr('Node agent 覆盖', 'Node agent coverage')}
+                value={effectiveEdgeAccess ? `${effectiveEdgeAccess.linked}/${effectiveEdgeAccess.total}` : '—'}
+                detail={effectiveEdgeAccess ? `${effectiveEdgeAccess.pct}% · ${tr('未覆盖', 'missing')} ${effectiveEdgeAccess.total - effectiveEdgeAccess.linked}` : tr('等待节点快照', 'waiting for node snapshot')}
+                tone={!effectiveEdgeAccess || effectiveEdgeAccess.linked < effectiveEdgeAccess.total ? 'warning' : 'success'}
+              />
+            )}
             <HealthMetric
               label={tr('同步状态', 'Sync health')}
               value={relativeTime(clusterSyncTime(cluster))}
@@ -1883,7 +1894,6 @@ function ServerlessTelemetryDrilldowns({
   const [opening, setOpening] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const clusterID = cluster?.id ? String(cluster.id) : '';
-  const serverless = cluster?.mode === 'serverless';
 
   const namespaceMatcher = useMemo(() => {
     const cleaned = namespaces.map((ns) => ns.trim()).filter(Boolean);
@@ -1911,8 +1921,6 @@ function ServerlessTelemetryDrilldowns({
     if (!clusterID) return '';
     return `{resource.cluster_id="${clusterID}" && resource.k8s.namespace.name=~"${namespaceMatcher}"}`;
   }, [clusterID, namespaceMatcher]);
-
-  if (!serverless) return null;
 
   async function openMetrics(expr: string, key: string) {
     if (!expr) return;
@@ -3984,7 +3992,7 @@ type K8sSyncRisk = {
   reason: 'stale' | 'lagging' | 'slow';
   detail: string;
 };
-type K8sCapabilityStatus = 'ready' | 'query-ready' | 'degraded' | 'unavailable' | 'not-applicable' | 'pending';
+type K8sCapabilityStatus = 'ready' | 'query-ready' | 'degraded' | 'unavailable' | 'pending';
 type K8sCapability = {
   key: string;
   label: string;
@@ -4040,7 +4048,15 @@ function clusterHealthConclusion(
   const missingAgents = cluster.mode === 'serverless' || !edgeAccess ? 0 : edgeAccess.total - edgeAccess.linked;
   const criticalSignals = issueCounts.crashLoopBackOff + issueCounts.notReady + issueCounts.oomKilled;
   const warningSignals = issueCounts.pending + issueCounts.imagePullBackOff + warningEventTotal + missingAgents;
-  if (cluster.status !== 'online' || criticalSignals > 0) {
+  if (cluster.status !== 'online') {
+    return {
+      tone: 'danger' as K8sHealthTone,
+      label: tr('Critical', 'Critical'),
+      title: tr('集群当前离线', 'Cluster is offline'),
+      description: tr('最近未收到 Controller 或资源快照上报，先确认 Helm release 与边缘隧道状态。', 'No recent controller or inventory report was received. Check the Helm release and edge tunnel first.'),
+    };
+  }
+  if (criticalSignals > 0) {
     return {
       tone: 'danger' as K8sHealthTone,
       label: tr('Critical', 'Critical'),
@@ -4052,14 +4068,20 @@ function clusterHealthConclusion(
     };
   }
   if (warningSignals > 0) {
+    const description = cluster.mode === 'serverless'
+      ? tr(
+          `当前有 ${formatNumber(warningSignals)} 个待确认问题，建议先确认 Events 和 Workload / Pod 状态。`,
+          `${formatNumber(warningSignals)} issue(s) to review. Check Events and Workload / Pod status first.`,
+        )
+      : tr(
+          `当前有 ${formatNumber(warningSignals)} 个待确认问题，建议先确认事件和 Node agent 覆盖。`,
+          `${formatNumber(warningSignals)} issue(s) to review. Check events and Node agent coverage first.`,
+        );
     return {
       tone: 'warning' as K8sHealthTone,
       label: tr('Degraded', 'Degraded'),
       title: tr('集群可用，但存在需要关注的信号', 'Cluster is available with signals to review'),
-      description: tr(
-        `当前有 ${formatNumber(warningSignals)} 个待确认问题，建议先确认事件和 Node agent 覆盖。`,
-        `${formatNumber(warningSignals)} issue(s) to review. Check events and Node agent coverage first.`,
-      ),
+      description,
     };
   }
   if (syncRisk) {
@@ -4193,7 +4215,6 @@ function normalizeCapabilityStatus(status: string | undefined): K8sCapabilitySta
     case 'query-ready':
     case 'degraded':
     case 'unavailable':
-    case 'not-applicable':
     case 'pending':
       return status;
     default:
@@ -4235,8 +4256,6 @@ function capabilityStatusLabel(status: K8sCapabilityStatus, tr: (zh: string, en:
       return tr('degraded', 'degraded');
     case 'unavailable':
       return tr('unavailable', 'unavailable');
-    case 'not-applicable':
-      return 'n/a';
     case 'pending':
       return tr('pending', 'pending');
   }
@@ -4252,7 +4271,6 @@ function capabilityStatusTone(status: K8sCapabilityStatus): K8sCapability['tone'
       return 'warning';
     case 'unavailable':
       return 'danger';
-    case 'not-applicable':
     case 'pending':
       return 'default';
   }

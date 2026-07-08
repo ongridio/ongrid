@@ -3,7 +3,7 @@ import { request } from './client';
 export type KubernetesCapability = {
   key: string;
   label?: string;
-  status: 'ready' | 'query-ready' | 'degraded' | 'unavailable' | 'not-applicable' | string;
+  status: 'ready' | 'query-ready' | 'degraded' | 'unavailable' | 'pending' | string;
   reason?: string;
 };
 
