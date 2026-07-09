@@ -17,6 +17,7 @@ const ToolNameQueryPromQL = "query_promql"
 // process-list tools are too narrow.
 const QueryPromQLDescription = "Run a PromQL range query against the cluster's Prometheus. " +
 	"Use this when you need any host or container metric beyond the few host-level fields the basic tools return. " +
+	"For fleet or multi-device questions, write one vectorized PromQL expression with by(device_id, ...) / regex selectors / topk instead of one query per device or metric. " +
 	"Returns the raw Prom HTTP API response."
 
 // QueryPromQLSchema is the JSON Schema of the tool's argument object.
@@ -25,13 +26,13 @@ var QueryPromQLSchema = json.RawMessage(`{
   "properties": {
     "expr": {
       "type": "string",
-      "description": "PromQL expression. Example: \"avg by (edge_id) (rate(node_cpu_seconds_total{mode!=\\\"idle\\\"}[5m]))\"."
+      "description": "PromQL expression. Prefer one vectorized expression for multiple devices/labels. Example: \"avg by (device_id) (rate(node_cpu_seconds_total{mode!=\\\"idle\\\"}[5m]))\". For filesystem percent, combine numerator/denominator in one expression instead of separate used/size queries."
     },
     "lookback_seconds": {
       "type": "integer",
       "minimum": 60,
-      "maximum": 86400,
-      "description": "How far back to query in seconds (default 300 = 5 minutes; max 86400 = 24h)."
+      "maximum": 604800,
+      "description": "How far back to query in seconds (default 300 = 5 minutes; max 604800 = 7d). Use one 7d range query for weekly trends instead of repeating short lookbacks."
     }
   },
   "required": ["expr"]
@@ -47,12 +48,15 @@ type QueryPromQLArgs struct {
 // rationale as the other tool timeouts.
 const queryPromqlCallTimeout = 30 * time.Second
 
+const maxQueryPromQLLookbackSeconds = 7 * 24 * 3600
+
 // stepFor picks a sensible step size for a given lookback. The math
 // targets ~30 datapoints per range, capped at the Prom defaults.
 //   - <= 5min   -> 15s
 //   - <= 1h     -> 1m
 //   - <= 6h     -> 5m
 //   - <= 24h    -> 15m
+//   - <= 7d     -> 1h
 //   - else      -> 1h
 //
 // The model can override lookback but not step; that keeps the cost
@@ -91,8 +95,8 @@ func (r *Registry) executeQueryPromQL(ctx context.Context, args json.RawMessage)
 	if in.LookbackSeconds <= 0 {
 		in.LookbackSeconds = 300 // 5 min
 	}
-	if in.LookbackSeconds > 86400 {
-		in.LookbackSeconds = 86400 // 24h cap
+	if in.LookbackSeconds > maxQueryPromQLLookbackSeconds {
+		in.LookbackSeconds = maxQueryPromQLLookbackSeconds
 	}
 
 	end := time.Now()

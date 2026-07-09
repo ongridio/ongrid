@@ -17,10 +17,12 @@ import (
 // is meant to ingest from local apps (host or sibling containers on the
 // docker bridge), not from the public internet.
 //
-// Exporters: a single OTLP HTTP exporter pointing at the manager
-// /v1/traces endpoint. Kubernetes telemetry gateway mode can also enable Loki
-// and Prometheus exporters so the same collector accepts OTLP logs/metrics
-// while the edge controller keeps using manager-owned ingest paths.
+// Exporters: a single OTLP HTTP exporter pointing at the manager /v1/traces
+// endpoint. Use traces_endpoint, not endpoint: otlphttp.endpoint is a base URL
+// and the collector appends /v1/traces for trace batches.
+// Kubernetes telemetry gateway mode can also enable Loki and Prometheus
+// exporters so the same collector accepts OTLP logs/metrics while the edge
+// controller keeps using manager-owned ingest paths.
 //
 // Pipeline: receivers -> resourcedetection (light) -> resource (inject
 // device_id) -> batch -> exporter. We deliberately keep tail_sampling out of
@@ -110,7 +112,7 @@ processors:
 
 exporters:
   otlphttp/manager:
-    endpoint: {{ .Endpoint }}
+    traces_endpoint: {{ .Endpoint }}
     {{- if .AuthHeader }}
     headers:
       Authorization: "{{ .AuthHeader }}"
@@ -204,11 +206,9 @@ service:
 //	enable_metrics : bool (default false; true for Kubernetes telemetry gateway)
 //	metrics_export_endpoint : string (required when enable_metrics=true; local scrape endpoint)
 //
-// The Endpoint may be the manager's public OTLP HTTP root or write URL
-// (e.g. https://manager.example.com or https://manager.example.com/v1/traces).
-// otlphttp's `endpoint` is a base URL and appends /v1/traces for traces, so
-// render normalizes write URLs back to their base. Auth: when AuthUser is set
-// we emit HTTP Basic; otherwise AuthPass is used as a bearer token.
+// The Endpoint must be the manager's public OTLP HTTP write URL (e.g.
+// https://manager.example.com/v1/traces). Auth: when AuthUser is set we
+// emit HTTP Basic; otherwise AuthPass is used as a bearer token.
 func render(cfg plugins.PluginConfig) ([]byte, error) {
 	if cfg.Endpoint == "" {
 		return nil, fmt.Errorf("traces plugin: endpoint required")
@@ -261,7 +261,7 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 		"GRPCEndpoint":          grpcEP,
 		"HTTPEndpoint":          httpEP,
 		"ExtraAttrs":            extra,
-		"Endpoint":              normalizeOTLPHTTPBaseEndpoint(cfg.Endpoint),
+		"Endpoint":              strings.TrimRight(cfg.Endpoint, "/"),
 		"AuthHeader":            authHeader,
 		"TLSInsecureSkipVerify": tlsInsecure,
 		"K8sAttributesEnabled":  k8sAttributes,
@@ -280,14 +280,6 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 		return nil, fmt.Errorf("execute template: %w", err)
 	}
 	return buf.Bytes(), nil
-}
-
-func normalizeOTLPHTTPBaseEndpoint(endpoint string) string {
-	trimmed := strings.TrimRight(endpoint, "/")
-	if strings.HasSuffix(trimmed, "/v1/traces") {
-		return strings.TrimSuffix(trimmed, "/v1/traces")
-	}
-	return trimmed
 }
 
 func boolSpec(spec map[string]interface{}, key string) bool {

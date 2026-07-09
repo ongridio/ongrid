@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
+	"strings"
 	"time"
 
+	"github.com/cloudwego/eino/compose"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	devicebiz "github.com/ongridio/ongrid/internal/manager/biz/device"
 	edgebiz "github.com/ongridio/ongrid/internal/manager/biz/edge"
@@ -46,7 +49,7 @@ import (
 const ToolNameBash = "host_bash"
 
 // BashDescription is the one-line "what does this tool do" blurb.
-const BashDescription = "Run an allow-listed read-only shell command on a fleet of devices for diagnostic exploration. Sandboxed: pipes are supported, write operations are rejected at the edge. Same cmd is run on every listed device."
+const BashDescription = "Run a shell command on edge hosts. Read commands run through the edge read-only sandbox. Write commands are never executed directly: when agent writes are enabled they first show an inline approval card, then run only after approval."
 
 // bashWhenToUse — batch-first routing hint (N+15). Fleet semantics:
 // one cmd, many devices. List of allowed binaries is replicated here
@@ -67,7 +70,12 @@ ALLOWED:
   - Network probes: nc -z / curl --head / dig / ping (target host must be in operator allowlist)
   - Single command + pipes (e.g. | grep / | head / | wc)
 
-REJECTED at the edge (policy violation, the per-device result returns Allowed=false):
+WRITE OPS:
+  - rm / mv / cp / chmod / chown / dd / truncate and similar host mutations are not autonomous.
+  - If the admin write gate is enabled, host_bash queues an inline approval card and only runs the command after the user approves.
+  - If the write gate is disabled or approval is not wired, the command is not run.
+
+REJECTED at the edge for read-only execution (policy violation, the per-device result returns Allowed=false):
   - Write ops: rm / mv / cp / chmod / chown / dd / truncate
   - Service mutators: systemctl restart / start / stop  (use the host_restart_service tool instead)
   - Compound: ; && || $() <() heredocs / redirects > >> < / backticks
@@ -96,7 +104,7 @@ NOT FOR:
   - 不同命令在同一次调用（用户分多次调用 — 一次 host_bash 一条 cmd）
   - 不需要 fleet 视角的单设备查询：仍然走 host_bash，但 device_ids 给一个元素的数组
   - Service restart / mutating ops → 用 host_restart_service
-  - 写文件 → 不支持，也不打算给 LLM 自治权
+  - 写文件 / 删除文件 → 只能在用户明确要求时调用 host_bash 触发内置确认卡，禁止绕到 AgentTool
   - Trivial 单 fact 查询 → 优先 get_host_load / get_host_processes / host_find_large_files（结构化输出，token 更省）
   - "哪个目录占用最大" / "磁盘满了" / "du" 类问题 → 必须用 host_du_summary（结构化分级 + 内置 coverage check，bash 跑 du 容易只看 /var/* 之类窄路径就停，host_du_summary 的 coverage hint 会强制你扫到 80% 覆盖率才能收尾）
   - 单文件 size / mtime / owner → 用 host_stat_file（一次 batch 多文件）
@@ -115,10 +123,14 @@ var BashSchema = json.RawMessage(`{
       "maxItems": 16,
       "description": "设备 id 列表，一次最多 16 个。fleet 视角看同一条 cmd 在每台机器的输出。"
     },
-    "cmd": {"type": "string", "description": "**单条** read-only shell-like 命令，跑在每个 device_id 上。支持 pipes (|) 但不支持 redirects / ; && || $() <() heredocs / backticks。如果想跑两条不同命令，分两次调用。"},
+    "device_id": {
+      "type": "integer",
+      "description": "兼容旧参数：单台设备 id。优先使用 device_ids。"
+    },
+    "cmd": {"type": "string", "description": "**单条** shell-like 命令，跑在每个 device_id 上。读命令直接走只读 sandbox；写命令只在用户明确要求时触发内置确认卡，批准后才执行。支持 pipes (|)；读路径不支持 redirects / ; && || $() <() heredocs / backticks。如果想跑两条不同命令，分两次调用。"},
     "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 300, "description": "Optional per-device timeout override. Default 30s; max 300s. 共享给所有 device。"}
   },
-  "required": ["device_ids", "cmd"]
+  "required": ["cmd"]
 }`)
 
 // bashCallTimeout caps the manager → edge round-trip. The edge
@@ -133,8 +145,17 @@ const bashBatchTimeout = 120 * time.Second
 // bashBatchArgs is the typed form of BashSchema.
 type bashBatchArgs struct {
 	DeviceIDs      []uint64 `json:"device_ids"`
+	DeviceID       uint64   `json:"device_id"`
 	Cmd            string   `json:"cmd"`
 	TimeoutSeconds int      `json:"timeout_seconds"`
+}
+
+// HostBashProposer queues a mutating host_bash command for inline human
+// approval and returns the post-approval execution result. Implemented by the
+// cmd wiring over the approval inbox; kept as a local seam so tools does not
+// import the approval biz package.
+type HostBashProposer interface {
+	ProposeAndAwait(ctx context.Context, deviceIDs []uint64, command string, timeoutSeconds int, sessionID, toolCallID string, userID uint64) (string, error)
 }
 
 // BashResultEntry is one slot in the batch envelope. Cmd is NOT
@@ -168,18 +189,26 @@ type BashBatchResponse struct {
 type BashTool struct {
 	caller   Caller
 	resolver hostFilesDeviceResolver
+	proposer HostBashProposer
 	log      *slog.Logger
 }
 
 // NewBashTool builds a new BaseTool. Pass nil log to default to
 // slog.Default().
 func NewBashTool(c Caller, e *edgebiz.Usecase, d *devicebiz.Usecase, log *slog.Logger) *BashTool {
+	return NewBashToolWithProposer(c, e, d, nil, log)
+}
+
+// NewBashToolWithProposer builds host_bash with the optional mutating-command
+// approval seam wired.
+func NewBashToolWithProposer(c Caller, e *edgebiz.Usecase, d *devicebiz.Usecase, proposer HostBashProposer, log *slog.Logger) *BashTool {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &BashTool{
 		caller:   c,
 		resolver: deviceResolverAdapter{inner: NewDeviceResolver(d, e)},
+		proposer: proposer,
 		log:      log,
 	}
 }
@@ -201,7 +230,7 @@ func (t *BashTool) Info(_ context.Context) (*basetool.ToolInfo, error) {
 // failure at the batch level (success_count counts the entry as success
 // because the dispatch round-tripped cleanly). Only resolver / dispatch
 // errors set entry.Error; counts those as errors in the envelope.
-func (t *BashTool) singleBash(ctx context.Context, deviceID uint64, cmd string, timeout int) BashResultEntry {
+func (t *BashTool) singleBash(ctx context.Context, deviceID uint64, cmd string, timeout int, unrestricted bool) BashResultEntry {
 	entry := BashResultEntry{DeviceID: deviceID}
 	if deviceID == 0 {
 		entry.Error = "device_id must be > 0"
@@ -217,11 +246,7 @@ func (t *BashTool) singleBash(ctx context.Context, deviceID uint64, cmd string, 
 		return entry
 	}
 
-	// When the admin write gate is ON for this request, tell the edge to run
-	// the command unrestricted (cmdpolicy bypassed). Resolved once per chat
-	// turn by the runtime and propagated via ctx; absent → false (locked
-	// read-only), so e2e / non-chat callers stay on the safe path.
-	req := tunnel.BashExecRequest{Cmd: cmd, Timeout: timeout, Unrestricted: basetool.HostWriteAllowedFromContext(ctx)}
+	req := tunnel.BashExecRequest{Cmd: cmd, Timeout: timeout, Unrestricted: unrestricted}
 	body, err := json.Marshal(req)
 	if err != nil {
 		entry.Error = fmt.Sprintf("marshal req: %v", err)
@@ -249,14 +274,44 @@ func (t *BashTool) singleBash(ctx context.Context, deviceID uint64, cmd string, 
 	return entry
 }
 
+// RunApproved executes a command after an external approval decision. It is
+// intentionally separate from InvokableRun so the approval executor can run the
+// already-approved payload without recursively creating another proposal.
+func (t *BashTool) RunApproved(ctx context.Context, deviceIDs []uint64, cmd string, timeout int) (string, error) {
+	if t.caller == nil {
+		return "", fmt.Errorf("%s: tunnel caller not configured", ToolNameBash)
+	}
+	if err := validateBatchIDs("device_ids", deviceIDs); err != nil {
+		return "", fmt.Errorf("%s: %w", ToolNameBash, err)
+	}
+	if strings.TrimSpace(cmd) == "" {
+		return "", fmt.Errorf("%s: cmd required", ToolNameBash)
+	}
+	if timeout < 0 {
+		timeout = 0
+	}
+	if timeout > 300 {
+		timeout = 300
+	}
+	batchCtx, cancel := context.WithTimeout(ctx, bashBatchTimeout)
+	defer cancel()
+	results := runBatch(batchCtx, deviceIDs, func(ctx context.Context, id uint64) BashResultEntry {
+		return t.singleBash(ctx, id, cmd, timeout, true)
+	})
+	return marshalBashEnvelope(cmd, results)
+}
+
 // InvokableRun parses, validates, fans out, marshals envelope.
-func (t *BashTool) InvokableRun(ctx context.Context, argsJSON string, _ ...basetool.InvokeOption) (string, error) {
+func (t *BashTool) InvokableRun(ctx context.Context, argsJSON string, opts ...basetool.InvokeOption) (string, error) {
 	if t.caller == nil {
 		return "", fmt.Errorf("%s: tunnel caller not configured", ToolNameBash)
 	}
 	var in bashBatchArgs
 	if err := json.Unmarshal([]byte(argsJSON), &in); err != nil {
 		return "", fmt.Errorf("%s: bad args: %w", ToolNameBash, err)
+	}
+	if len(in.DeviceIDs) == 0 && in.DeviceID != 0 {
+		in.DeviceIDs = []uint64{in.DeviceID}
 	}
 	if err := validateBatchIDs("device_ids", in.DeviceIDs); err != nil {
 		return "", fmt.Errorf("%s: %w", ToolNameBash, err)
@@ -270,14 +325,28 @@ func (t *BashTool) InvokableRun(ctx context.Context, argsJSON string, _ ...baset
 	if in.TimeoutSeconds > 300 {
 		in.TimeoutSeconds = 300
 	}
+	if isHostBashWriteCommand(in.Cmd) {
+		if !basetool.HostWriteAllowedFromContext(ctx) {
+			return `{"status":"blocked","message":"Agent write actions are disabled; the host command was not run."}`, nil
+		}
+		if t.proposer == nil {
+			return "", fmt.Errorf("%s: approval inbox not wired for mutating command", ToolNameBash)
+		}
+		cfg := basetool.ResolveOptions(opts)
+		return t.proposer.ProposeAndAwait(ctx, in.DeviceIDs, in.Cmd, in.TimeoutSeconds, basetool.SessionIDFromContext(ctx), compose.GetToolCallID(ctx), cfg.UserID)
+	}
 
 	batchCtx, cancel := context.WithTimeout(ctx, bashBatchTimeout)
 	defer cancel()
 
 	results := runBatch(batchCtx, in.DeviceIDs, func(ctx context.Context, id uint64) BashResultEntry {
-		return t.singleBash(ctx, id, in.Cmd, in.TimeoutSeconds)
+		return t.singleBash(ctx, id, in.Cmd, in.TimeoutSeconds, false)
 	})
-	env := BashBatchResponse{Cmd: in.Cmd, Results: results}
+	return marshalBashEnvelope(in.Cmd, results)
+}
+
+func marshalBashEnvelope(cmd string, results []BashResultEntry) (string, error) {
+	env := BashBatchResponse{Cmd: cmd, Results: results}
 	for _, r := range results {
 		if r.Error != "" {
 			env.ErrorCount++
@@ -290,6 +359,33 @@ func (t *BashTool) InvokableRun(ctx context.Context, argsJSON string, _ ...baset
 		return "", fmt.Errorf("%s: marshal response: %w", ToolNameBash, err)
 	}
 	return string(out), nil
+}
+
+func isHostBashWriteCommand(cmd string) bool {
+	fields := strings.Fields(strings.TrimSpace(cmd))
+	if len(fields) == 0 {
+		return false
+	}
+	writeBins := []string{"rm", "mv", "cp", "chmod", "chown", "dd", "truncate", "tee", "mkdir", "rmdir", "touch", "ln"}
+	first := fields[0]
+	if first == "sudo" && len(fields) > 1 {
+		first = fields[1]
+	}
+	if slash := strings.LastIndex(first, "/"); slash >= 0 {
+		first = first[slash+1:]
+	}
+	if slices.Contains(writeBins, first) {
+		return true
+	}
+	if first == "systemctl" {
+		for _, f := range fields[1:] {
+			switch f {
+			case "start", "stop", "restart", "reload", "try-restart", "enable", "disable", "mask", "unmask", "kill", "reset-failed", "daemon-reload", "edit":
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // AppendBashTool registers the bash BaseTool onto the provided slice

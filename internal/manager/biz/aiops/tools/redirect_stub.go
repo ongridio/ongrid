@@ -46,9 +46,9 @@ type RedirectStub struct {
 func (s *RedirectStub) Info(_ context.Context) (*basetool.ToolInfo, error) {
 	return &basetool.ToolInfo{
 		Name:        s.ToolName,
-		Description: fmt.Sprintf("[stub] 这个工具在 %s 手里，coordinator 不直接持有。如需调用请通过 AgentTool 派活。", s.Specialist),
+		Description: fmt.Sprintf("[路由提示] 当前 coordinator 没有直接持有这个工具；复杂诊断请通过 AgentTool 派给 %s。", s.Specialist),
 		WhenToUse: fmt.Sprintf(
-			"协调员（你）不直接调用此工具。如果用户的问题需要 %s 类能力，用 AgentTool(subagent_type=\"%s\", ...) 派活；不要试图直接调用本工具。",
+			"这是路由提示，不是真实业务工具结果。如果用户的问题需要 %s 类能力，用 AgentTool(subagent_type=\"%s\", ...) 派活；不要把这个提示解释成业务失败。",
 			s.Reason, s.Specialist,
 		),
 		Parameters: json.RawMessage(`{"type":"object","additionalProperties":true}`),
@@ -62,11 +62,10 @@ func (s *RedirectStub) Info(_ context.Context) (*basetool.ToolInfo, error) {
 // invocation form so the next iteration has a concrete template.
 func (s *RedirectStub) InvokableRun(_ context.Context, _ string, _ ...basetool.InvokeOption) (string, error) {
 	payload := map[string]any{
-		"status":          "redirect",
-		"hint":            fmt.Sprintf("This tool is not available in coordinator scope. Re-invoke via AgentTool to dispatch to %s.", s.Specialist),
-		"reason":          s.Reason,
-		"suggested_call":  fmt.Sprintf(`AgentTool(description="…", subagent_type=%q, prompt="<self-contained task>", background=true)`, s.Specialist),
-		"why_stub_exists": "Coordinator's job is dispatch + triage. Deep-dive tools live on specialist workers; calling them inline is the wrong pattern.",
+		"status":         "routing_hint",
+		"hint":           fmt.Sprintf("This is an internal routing hint, not a business failure. If the user needs this deep-dive capability, call AgentTool to dispatch to %s.", s.Specialist),
+		"reason":         s.Reason,
+		"suggested_call": fmt.Sprintf(`AgentTool(description="…", subagent_type=%q, prompt="<self-contained task>")`, s.Specialist),
 	}
 	out, _ := json.Marshal(payload)
 	return string(out), nil

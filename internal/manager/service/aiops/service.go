@@ -511,6 +511,7 @@ func translateRuntimeEvent(ev chatruntime.Event) agent.Event {
 		out.Approval = &agent.ApprovalPendingEvent{
 			ApprovalID:  ev.Approval.ApprovalID,
 			ToolCallID:  ev.Approval.ToolCallID,
+			Kind:        ev.Approval.Kind,
 			Command:     ev.Approval.Command,
 			Credentials: ev.Approval.Credentials,
 		}

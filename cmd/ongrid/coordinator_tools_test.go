@@ -1,34 +1,94 @@
 package main
 
 import (
-	"slices"
+	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
 	aiopstools "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools"
+	aiopstoolsbase "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 )
 
-// TestCoordinatorRosterHasCodeTools guards the regression where the read-code
-// tools (HLD-012) were registered in the runtime toolbag but missing from the
-// chat coordinator's curated whitelist — so the coordinator told users it had
-// no way to read code. The coordinator can ONLY call tools in this list
-// (filterToolsForAgent enforces it), so the code tools must be present here.
-func TestCoordinatorRosterHasCodeTools(t *testing.T) {
-	for _, want := range []string{"list_repo_sources", "read_source", "grep_source"} {
-		if !slices.Contains(coordinatorToolNames, want) {
-			t.Errorf("coordinator roster missing code tool %q (have %v)", want, coordinatorToolNames)
+type coordinatorToolStub struct{ name string }
+
+func (s coordinatorToolStub) Info(context.Context) (*aiopstoolsbase.ToolInfo, error) {
+	return &aiopstoolsbase.ToolInfo{
+		Name:        s.name,
+		Description: s.name,
+		Parameters:  json.RawMessage(`{"type":"object"}`),
+		Class:       "read",
+	}, nil
+}
+
+func (s coordinatorToolStub) InvokableRun(context.Context, string, ...aiopstoolsbase.InvokeOption) (string, error) {
+	return `{"ok":true}`, nil
+}
+
+// TestCoordinatorRosterDerivesRegisteredCoreTools guards the regression where
+// registered core tools were present in the ToolBag but absent from the default
+// coordinator persona, so the coordinator could not discover them.
+func TestCoordinatorRosterDerivesRegisteredCoreTools(t *testing.T) {
+	registered := []aiopstoolsbase.BaseTool{
+		coordinatorToolStub{name: "query_devices"},
+		coordinatorToolStub{name: "query_traceql"},
+		coordinatorToolStub{name: "query_knowledge"},
+		coordinatorToolStub{name: "read_source"},
+		coordinatorToolStub{name: "query_promql"},
+		coordinatorToolStub{name: "query_k8s_snapshot"},
+		coordinatorToolStub{name: "describe_k8s_resource"},
+		coordinatorToolStub{name: "query_k8s_logs"},
+		coordinatorToolStub{name: aiopstools.ToolNameExecuteK8sAction},
+		coordinatorToolStub{name: "host_find_large_files"},
+	}
+	got := buildCoordinatorToolNames(registered)
+	for _, want := range []string{
+		"query_devices",
+		"query_traceql",
+		"query_knowledge",
+		"read_source",
+		"query_promql",
+		"query_k8s_snapshot",
+		"describe_k8s_resource",
+		"query_k8s_logs",
+		aiopstools.ToolNameExecuteK8sAction,
+	} {
+		if !containsString(got, want) {
+			t.Errorf("coordinator roster missing registered core tool %q (have %v)", want, got)
 		}
 	}
-	// The lookup/triage baseline must also stay (don't accidentally drop it).
-	for _, want := range []string{"query_knowledge", "query_devices", "list_database_sources", "analyze_database_status", "list_metric_catalog"} {
-		if !slices.Contains(coordinatorToolNames, want) {
-			t.Errorf("coordinator roster missing baseline tool %q", want)
+	if containsString(got, "host_find_large_files") {
+		t.Errorf("coordinator roster should not include non-core host file tool by registration alone: %v", got)
+	}
+	for _, want := range []string{"host_bash", "rank_edges", "find_outlier_edges", "cloud_bash", "install_skill"} {
+		if !containsString(got, want) {
+			t.Errorf("coordinator roster missing policy extra %q (have %v)", want, got)
+		}
+	}
+}
+
+func TestBasePromptAllowsLightweightCoordinatorReads(t *testing.T) {
+	prompt := ongridBasePrompt()
+	for _, want := range []string{"轻量只读查询", "rank_edges", "get_host_load", "get_host_processes", "已知文件删除", "host_bash"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("base prompt missing lightweight-read guidance %q", want)
+		}
+	}
+	for _, want := range []string{"ToolSearch", "实时对象或数据源标识", "先用对应注册工具", "不要先查 KB"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("base prompt missing registration/progressive routing guidance %q", want)
+		}
+	}
+	for _, bad := range []string{"单域也必须派", "只要用户的问题落入任一专家域", "所有工具都需要通过 AgentTool"} {
+		if strings.Contains(prompt, bad) {
+			t.Fatalf("base prompt still contains old dispatch-only guidance %q", bad)
 		}
 	}
 }
 
 func TestExecuteK8sActionIsChatOnlyReviewTool(t *testing.T) {
-	if !slices.Contains(coordinatorToolNames, aiopstools.ToolNameExecuteK8sAction) {
+	got := buildCoordinatorToolNames(nil)
+	if !containsString(got, aiopstools.ToolNameExecuteK8sAction) {
 		t.Fatalf("coordinator roster missing %q", aiopstools.ToolNameExecuteK8sAction)
 	}
 	if !isChatOnlyReviewTool(aiopstools.ToolNameExecuteK8sAction) {
@@ -67,4 +127,13 @@ func TestBasePromptRequiresMetricCatalogBeforeAlertDraft(t *testing.T) {
 	if !strings.Contains(prompt, "具体 rule kind 与表达式规范交给工具 schema 和后端 compiler") {
 		t.Fatalf("base prompt should delegate detailed alert semantics to schema/compiler")
 	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

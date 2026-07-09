@@ -123,7 +123,7 @@ export default function ChatThreadPage() {
         // HLD-021: a turn can be blocked server-side waiting on a human
         // approval. The live approve/reject card is driven by an SSE frame
         // that's gone after a refresh, so reconstruct it from the inbox —
-        // any still-pending cloud_bash approval for THIS session is rendered
+        // any still-pending command approval for THIS session is rendered
         // as a card again so the user can decide. Non-admins 403 here → []
         // (the inbox is admin-gated; the card just won't reappear for them).
         listApprovals('pending').catch(() => ({ items: [] as Approval[] })),
@@ -133,7 +133,7 @@ export default function ChatThreadPage() {
           if (!initial && submittingRef.current) return;
           const items = r.items ?? [];
           const pending = (ap.items ?? []).filter(
-            (a) => a.session_id === sessionId && a.kind === 'cloud_bash',
+            (a) => a.session_id === sessionId && (a.kind === 'cloud_bash' || a.kind === 'host_bash'),
           );
           const merged = pending.length
             ? [...items, ...pending.map(approvalCardMessage)]
@@ -330,10 +330,12 @@ export default function ChatThreadPage() {
             const blob = {
               status: 'pending_approval',
               approval_id: a.approval_id,
+              kind: a.kind ?? 'cloud_bash',
               command: a.command,
               credentials: a.credentials,
             };
             const args = a.command ? { command: a.command } : undefined;
+            const toolName = a.kind === 'host_bash' ? 'host_bash' : 'cloud_bash';
             setMessages((prev) => {
               const targetId = a.tool_call_id ? toolCardId(a.tool_call_id) : '';
               const idx = targetId ? prev.findIndex((m) => m.id === targetId) : -1;
@@ -344,7 +346,7 @@ export default function ChatThreadPage() {
                   ...m,
                   tool_call: {
                     id: a.tool_call_id,
-                    name: m.tool_call?.name ?? 'cloud_bash',
+                    name: m.tool_call?.name ?? toolName,
                     status: 'pending',
                     arguments: m.tool_call?.arguments ?? args,
                     result: blob,
@@ -362,7 +364,7 @@ export default function ChatThreadPage() {
                   kind: 'tool_card',
                   tool_call: {
                     id: a.tool_call_id,
-                    name: 'cloud_bash',
+                    name: toolName,
                     status: 'pending',
                     arguments: args,
                     result: blob,
@@ -461,7 +463,7 @@ export default function ChatThreadPage() {
     return `tool-card-${toolCallId}`;
   }
 
-  // approvalCardMessage rebuilds a pending cloud_bash approval (from the
+  // approvalCardMessage rebuilds a pending command approval (from the
   // inbox) into the same synthetic tool card the live SSE path renders, so a
   // user who refreshed mid-wait still sees approve/reject. PendingApprovalCard
   // self-reconciles via getApproval, so a since-decided one resolves cleanly.
@@ -481,15 +483,15 @@ export default function ChatThreadPage() {
       kind: 'tool_card',
       tool_call: {
         id: a.id,
-        name: 'cloud_bash',
+        name: a.kind === 'host_bash' ? 'host_bash' : 'cloud_bash',
         status: 'pending',
         arguments: command ? { command } : undefined,
-        result: { status: 'pending_approval', approval_id: a.id, command, credentials },
+        result: { status: 'pending_approval', approval_id: a.id, kind: a.kind, command, credentials },
       },
     };
   }
 
-  // True while a cloud_bash approval card is on screen awaiting the user's
+  // True while an approval card is on screen awaiting the user's
   // decision (its tool card still carries the synthetic pending_approval
   // blob). Once approved/rejected the blocked tool returns and tool_end
   // replaces the blob, so this flips back to false and the normal thinking

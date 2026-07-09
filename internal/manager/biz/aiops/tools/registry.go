@@ -115,6 +115,9 @@ type Registry struct {
 	// inbox. Set post-construction (cmd/main.go) via SetCloudBashProposer;
 	// nil → cloud_bash is NOT registered.
 	cloudBashProposer CloudBashProposer
+	// hostBashProposer wires mutating host_bash commands to the same inline
+	// approval flow. nil → host_bash remains read-only only.
+	hostBashProposer HostBashProposer
 
 	// imSender wires send_im_message to the channel store + notify router.
 	// Set post-construction (cmd/main.go); nil → send_im_message NOT registered.
@@ -135,6 +138,9 @@ type Registry struct {
 // SetCloudBashProposer wires the cloud_bash → approval-inbox seam. Call
 // after NewRegistry (cmd/main.go).
 func (r *Registry) SetCloudBashProposer(p CloudBashProposer) { r.cloudBashProposer = p }
+
+// SetHostBashProposer wires mutating host_bash commands to the approval inbox.
+func (r *Registry) SetHostBashProposer(p HostBashProposer) { r.hostBashProposer = p }
 
 // SetIMSender wires send_im_message → channel store + notify router.
 func (r *Registry) SetIMSender(s IMSender) { r.imSender = s }

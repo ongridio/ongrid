@@ -41,6 +41,8 @@ func NewQueryPromQLTool(p PromQuerier, log *slog.Logger) *QueryPromQLTool {
 const queryPromQLWhenToUse = "When the user asks about metric values, time-series trends, " +
 	"per-edge resource usage, or anything that boils down to a Prometheus range query. " +
 	"NOT for log content (use query_logql) or filesystem state (use host-level tools). " +
+	"For fleet / multi-device / multi-mountpoint questions, prefer one PromQL call with by(device_id, ...) " +
+	"or topk/ranking over repeated per-device queries. " +
 	"Prefer query_promql over the narrower get_host_load / get_process_list when the " +
 	"question spans more than one host or asks for derivatives / aggregates."
 
@@ -83,8 +85,8 @@ func (t *QueryPromQLTool) InvokableRun(ctx context.Context, argsJSON string, _ .
 	if in.LookbackSeconds <= 0 {
 		in.LookbackSeconds = 300
 	}
-	if in.LookbackSeconds > 86400 {
-		in.LookbackSeconds = 86400
+	if in.LookbackSeconds > maxQueryPromQLLookbackSeconds {
+		in.LookbackSeconds = maxQueryPromQLLookbackSeconds
 	}
 
 	end := time.Now()

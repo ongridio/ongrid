@@ -252,7 +252,7 @@ func TestAssembleMessages_MentionsAndReminderInline(t *testing.T) {
 	if !strings.Contains(reminder.Content, "web_search 已被关闭") {
 		t.Errorf("reminder missing web_search disabled note: %q", reminder.Content)
 	}
-	if !strings.Contains(reminder.Content, "历史里的 call_budget_exceeded") {
+	if !strings.Contains(reminder.Content, "call_budget_exceeded 只限制当前用户消息") {
 		t.Errorf("reminder missing per-turn budget reset note: %q", reminder.Content)
 	}
 	user := out[2]

@@ -209,13 +209,12 @@ func (r *Registry) BuildBaseTools() *ToolBag {
 		out = append(out, NewFindTopologyNodeTool(r.topologyGraph, r.log))
 	}
 
-	// 18: bash — generic read-only shell skill (cmdpolicy default
-	// preset enforced edge-side). Class="read"; gated on the same
-	// dependency triple as host_files / restart_service. Listed in
-	// toolbag.tierByName as specialty so its (large) when_to_use blob
-	// only ships unredacted once the LLM asks for it via ToolSearch.
+	// 18: bash — generic host shell skill. Read commands use the edge
+	// read-only cmdpolicy; mutating commands only run through the optional
+	// approval proposer. Class stays "read" so diagnostic bash remains
+	// visible when writes are disabled.
 	if r.caller != nil && r.edges != nil && r.devices != nil {
-		out = append(out, NewBashTool(r.caller, r.edges, r.devices, r.log))
+		out = append(out, NewBashToolWithProposer(r.caller, r.edges, r.devices, r.hostBashProposer, r.log))
 	}
 
 	// cloud_bash — manager-side command runner (sibling of host_bash). Gated

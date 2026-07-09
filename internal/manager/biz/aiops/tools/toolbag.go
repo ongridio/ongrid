@@ -64,6 +64,10 @@ var tierByName = map[string]string{
 	"query_k8s_snapshot":      "core",
 	"describe_k8s_resource":   "core",
 	"query_k8s_logs":          "core",
+	"query_knowledge":         "core",
+	"list_repo_sources":       "core",
+	"read_source":             "core",
+	"grep_source":             "core",
 	"query_devices":           "core",
 	"get_topology":            "core",
 	"query_incidents":         "core",
@@ -113,6 +117,37 @@ func toolTier(t basetool.BaseTool) string {
 		return tier
 	}
 	return "specialty"
+}
+
+// IsCoreToolName reports whether a registered tool name belongs to the
+// always-loaded core tier. Callers that need coarse routing policy should ask
+// this registry-owned table instead of maintaining their own stale copies.
+func IsCoreToolName(name string) bool {
+	return tierByName[name] == "core"
+}
+
+// CoreToolNames returns the names of tools that are registered in the core
+// tier, preserving the input order and de-duplicating by name. It intentionally
+// classifies by the registration tier even when the bag is below the deferral
+// threshold, so routing policy does not change with prompt-budget settings.
+func CoreToolNames(all []basetool.BaseTool) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(all))
+	for _, t := range all {
+		if t == nil {
+			continue
+		}
+		info, err := t.Info(context.Background())
+		if err != nil || info == nil || info.Name == "" {
+			continue
+		}
+		if !IsCoreToolName(info.Name) || seen[info.Name] {
+			continue
+		}
+		seen[info.Name] = true
+		out = append(out, info.Name)
+	}
+	return out
 }
 
 // ToolBag is the partitioned tool collection. core + deferred together
