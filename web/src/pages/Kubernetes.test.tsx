@@ -339,7 +339,10 @@ describe('KubernetesPage', () => {
     expect(command).toHaveTextContent("manager.publicURL='https://<manager>'");
     expect(command).toHaveTextContent("manager.tunnelAddr='<manager>:40012'");
     expect(screen.getByText('自签证书场景：先配置 insecure registry')).toBeInTheDocument();
-    expect(screen.getByText(/\/etc\/containerd\/certs\.d\/<manager>/)).toBeInTheDocument();
+    expect(screen.getByText(/REGISTRY='<manager>'/)).toBeInTheDocument();
+    expect(screen.getByText(/\/etc\/containerd\/certs\.d\/\$\{REGISTRY\}/)).toBeInTheDocument();
+    expect(screen.queryByText(/sudo awk/)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/config_path/).length).toBeGreaterThan(0);
   });
 
   it('渲染集群详情里的 Pod 快照', async () => {
@@ -427,23 +430,41 @@ describe('KubernetesPage', () => {
         const url = new URL(request.url);
         if (url.searchParams.get('type') === 'Warning') {
           return HttpResponse.json({
-            items: [{
-              id: 43,
-              cluster_id: 1,
-              namespace: 'ongrid-system',
-              name: 'recovered-readiness',
-              type: 'Warning',
-              reason: 'Unhealthy',
-              message: 'Readiness probe failed: HTTP probe failed with statuscode: 500',
-              involved_kind: 'Pod',
-              involved_namespace: 'ongrid-system',
-              involved_name: 'ongrid-edge-controller-abc',
-              involved_uid: 'pod-healthy',
-              count: 1,
-              last_timestamp: '2026-06-29T10:01:00Z',
-              last_seen_at: '2026-06-29T10:01:00Z',
-            }],
-            total: 1,
+            items: [
+              {
+                id: 43,
+                cluster_id: 1,
+                namespace: 'ongrid-system',
+                name: 'recovered-readiness',
+                type: 'Warning',
+                reason: 'Unhealthy',
+                message: 'Readiness probe failed: HTTP probe failed with statuscode: 500',
+                involved_kind: 'Pod',
+                involved_namespace: 'ongrid-system',
+                involved_name: 'ongrid-edge-controller-abc',
+                involved_uid: 'pod-healthy',
+                count: 1,
+                last_timestamp: '2026-06-29T10:01:00Z',
+                last_seen_at: '2026-06-29T10:01:00Z',
+              },
+              {
+                id: 44,
+                cluster_id: 1,
+                namespace: 'ongrid-system',
+                name: 'deleted-image-pull',
+                type: 'Warning',
+                reason: 'Failed',
+                message: 'Error: ImagePullBackOff',
+                involved_kind: 'Pod',
+                involved_namespace: 'ongrid-system',
+                involved_name: 'ongrid-edge-node-old',
+                involved_uid: 'pod-deleted',
+                count: 5,
+                last_timestamp: '2026-06-29T10:02:00Z',
+                last_seen_at: '2026-06-29T10:02:00Z',
+              },
+            ],
+            total: 2,
             limit: 100,
             offset: 0,
           });
@@ -465,6 +486,51 @@ describe('KubernetesPage', () => {
     expect(screen.queryByText('1 个待确认问题')).not.toBeInTheDocument();
     expect(screen.queryByText('Unhealthy')).not.toBeInTheDocument();
     expect(screen.queryByText('Readiness probe failed: HTTP probe failed with statuscode: 500')).not.toBeInTheDocument();
+  });
+
+  it('Agent 版本只统计节点 Edge，不把 Controller 纳入覆盖率', async () => {
+    server.use(
+      http.get('/api/v1/edges', () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: 3,
+              name: 'ongrid-edge-controller',
+              status: 'online',
+              roles: [],
+              access_key_id: 'ak-controller',
+              last_seen_at: '2026-06-29T10:00:00Z',
+              device_id: null,
+              agent_version: '',
+            },
+            {
+              id: 5,
+              name: 'k8s:kind-local:ongrid-k8s-control-plane',
+              status: 'online',
+              roles: [],
+              access_key_id: 'ak-node',
+              last_seen_at: '2026-06-29T10:00:00Z',
+              device_id: 17,
+              agent_version: 'v0.9.0',
+            },
+          ],
+          total: 2,
+        }),
+      ),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/kubernetes/1?tab=nodes']}>
+        <Routes>
+          <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Agent 版本')).toBeInTheDocument();
+    expect(screen.getAllByText('v0.9.0').length).toBeGreaterThan(0);
+    expect(screen.getByText('1 个 agent 一致')).toBeInTheDocument();
+    expect(screen.queryByText('已上报 1/2')).not.toBeInTheDocument();
   });
 
   it('Pod 资源表支持加载更多快照结果', async () => {

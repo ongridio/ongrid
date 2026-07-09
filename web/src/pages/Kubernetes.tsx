@@ -1010,7 +1010,7 @@ function ClusterSummary({
   });
   const capabilityGapCount = capabilities.filter((item) => item.gap).length;
   const visibleIssues = clusterVisibleIssueChips(issueCounts, warningEventTotal, syncRisk, tr);
-  const agentVersions = clusterAgentVersionSummary(cluster, nodes, edgeVersionsByID, tr);
+  const agentVersions = clusterAgentVersionSummary(nodes, edgeVersionsByID, tr);
   return (
     <Card className="p-0">
       <div className="grid gap-0 divide-y divide-zinc-800/60 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)] xl:divide-x xl:divide-y-0">
@@ -1211,9 +1211,8 @@ function buildEdgeVersionMap(edges: Edge[]) {
   return out;
 }
 
-function clusterAgentEdgeIDs(cluster: KubernetesCluster | null, nodes: KubernetesNode[]) {
+function clusterAgentEdgeIDs(nodes: KubernetesNode[]) {
   const ids = new Set<number>();
-  if (cluster?.controller_edge_id) ids.add(cluster.controller_edge_id);
   for (const node of nodes) {
     if (node.edge_id) ids.add(node.edge_id);
   }
@@ -1221,12 +1220,11 @@ function clusterAgentEdgeIDs(cluster: KubernetesCluster | null, nodes: Kubernete
 }
 
 function clusterAgentVersionSummary(
-  cluster: KubernetesCluster | null,
   nodes: KubernetesNode[],
   edgeVersionsByID: Record<number, string>,
   tr: (zh: string, en: string) => string,
 ): { value: string; detail: string; tone: 'success' | 'warning' | 'danger' | 'info' | 'default' } {
-  const ids = clusterAgentEdgeIDs(cluster, nodes);
+  const ids = clusterAgentEdgeIDs(nodes);
   if (ids.size === 0) {
     return {
       value: '—',
@@ -3482,18 +3480,22 @@ function managerRegistryHostFromCommand(command: string) {
 
 function containerdInsecureRegistryCommand(registryHost: string) {
   return [
-    `sudo mkdir -p /etc/containerd/certs.d/${registryHost}`,
-    `sudo tee /etc/containerd/certs.d/${registryHost}/hosts.toml >/dev/null <<'EOF'`,
-    `server = "https://${registryHost}"`,
+    `REGISTRY='${registryHost}'`,
+    'sudo mkdir -p "/etc/containerd/certs.d/${REGISTRY}"',
+    'sudo tee "/etc/containerd/certs.d/${REGISTRY}/hosts.toml" >/dev/null <<EOF',
+    'server = "https://${REGISTRY}"',
     '',
-    `[host."https://${registryHost}"]`,
+    '[host."https://${REGISTRY}"]',
     '  capabilities = ["pull", "resolve"]',
     '  skip_verify = true',
     'EOF',
     '',
-    '# 确认 /etc/containerd/config.toml 中启用了 registry config_path:',
-    '# [plugins."io.containerd.grpc.v1.cri".registry]',
-    '#   config_path = "/etc/containerd/certs.d"',
+    'sudo grep -q \'config_path = "/etc/containerd/certs.d"\' /etc/containerd/config.toml || sudo tee -a /etc/containerd/config.toml >/dev/null <<\'EOF\'',
+    '',
+    '[plugins."io.containerd.grpc.v1.cri".registry]',
+    '  config_path = "/etc/containerd/certs.d"',
+    'EOF',
+    '',
     'sudo systemctl restart containerd',
   ].join('\n');
 }
@@ -3525,8 +3527,8 @@ function RegistryTrustGuide({ installCommand }: { installCommand: string }) {
         </p>
         <p className="text-xs leading-5 text-amber-300">
           {tr(
-            '下面是已有节点的示例配置。生产环境建议通过节点池初始化、cloud-init、启动模板、MachineConfig 或运维系统统一下发，确保后续新增节点也带上同样配置。',
-            'The examples below are for existing nodes. In production, distribute the same settings through node-pool bootstrap, cloud-init, launch templates, MachineConfig, or your ops system so newly added nodes inherit them too.',
+            '下面是已有节点的示例配置。containerd 需要启用 certs.d 配置目录；命令会在缺失时补充 config_path。生产环境建议通过节点池初始化、cloud-init、启动模板、MachineConfig 或运维系统统一下发，确保后续新增节点也带上同样配置。',
+            'The examples below are for existing nodes. containerd must enable the certs.d config directory; the command adds config_path when it is missing. In production, distribute the same settings through node-pool bootstrap, cloud-init, launch templates, MachineConfig, or your ops system so newly added nodes inherit them too.',
           )}
         </p>
         <div>
@@ -4597,11 +4599,11 @@ function isActionableWarningEvent(
   const kind = normalizeK8sKind(item.involved_kind);
   if (kind === 'Pod') {
     const pod = findEventPod(item, pods);
-    return pod ? isAbnormalPod(pod) : true;
+    return pod ? isAbnormalPod(pod) : false;
   }
   if (kind === 'Node') {
     const node = nodes.find((candidate) => candidate.node_name === item.involved_name);
-    return node ? nodeConditionLabels(node).length > 0 : true;
+    return node ? nodeConditionLabels(node).length > 0 : false;
   }
   if (isWorkloadKind(kind)) {
     const workload = workloads.find((candidate) =>
@@ -4609,7 +4611,7 @@ function isActionableWarningEvent(
       && candidate.namespace === eventResourceNamespace(item)
       && candidate.name === item.involved_name,
     );
-    return workload ? workload.desired_replicas > workload.ready_replicas : true;
+    return workload ? workload.desired_replicas > workload.ready_replicas : false;
   }
   return true;
 }

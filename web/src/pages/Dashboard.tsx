@@ -22,6 +22,11 @@ import { ApiError, request } from '@/api/client';
 import { listEdges, promQueryRange, type Edge } from '@/api/edges';
 import { listSessions } from '@/api/chat';
 import { listIncidents, localizedRuleName, type Incident } from '@/api/alerts';
+import {
+  filterVisibleDeviceEdges,
+  loadK8sEdgeAttachments,
+  type K8sEdgeAttachmentMap,
+} from '@/pages/kubernetes/edgeAttachments';
 import { useI18n } from '@/i18n/locale';
 
 type UsageToday = {
@@ -71,8 +76,11 @@ export default function DashboardPage() {
 
     let nextEdges: Edge[] = [];
     try {
-      const r = await listEdges();
-      nextEdges = r.items ?? [];
+      const [r, k8sAttachments] = await Promise.all([
+        listEdges(),
+        loadK8sEdgeAttachments().catch((): K8sEdgeAttachmentMap => ({})),
+      ]);
+      nextEdges = filterVisibleDeviceEdges(r.items ?? [], k8sAttachments);
       nextEdges = [...nextEdges].sort((a, b) => {
         const ta = a.last_seen_at ? new Date(a.last_seen_at).getTime() : 0;
         const tb = b.last_seen_at ? new Date(b.last_seen_at).getTime() : 0;

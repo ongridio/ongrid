@@ -119,6 +119,7 @@ describe('EdgesPage', () => {
     expect(screen.getByText('bare-metal-1')).toBeInTheDocument();
     expect(screen.getByText('bm-1')).toBeInTheDocument();
     expect(screen.getByText('Host Edge')).toBeInTheDocument();
+    expect(screen.getByRole('table')).toHaveClass('w-full');
   });
 
   it('点击 K8s 托管设备行进入设备详情，Kubernetes 管理按钮仍进入集群页', async () => {
