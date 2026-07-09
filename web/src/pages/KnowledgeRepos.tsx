@@ -18,15 +18,20 @@ import { Modal } from '@/components/Modal';
 import {
   createRepo,
   createSSHIdentity,
+  createHTTPSCredential,
   deleteRepo,
   deleteSSHIdentity,
+  deleteHTTPSCredential,
   generateSSHIdentity,
   isBuiltinVault,
   listRepos,
   listSSHIdentities,
+  listHTTPSCredentials,
   syncRepo,
+  updateHTTPSCredential,
   type KnowledgeRepo,
   type SSHIdentity,
+  type HTTPSCredential,
 } from '@/api/knowledge';
 import { ApiError } from '@/api/client';
 import { useI18n } from '@/i18n/locale';
@@ -54,6 +59,19 @@ function gitErrorHint(raw: string, url: string, tr: (zh: string, en: string) => 
       'SSH host key 不匹配：服务器指纹与已存 known_hosts 不一致（中间人 / DNS 劫持 / 服务器换密钥）。请人工核对。',
       'SSH host key mismatch: the server fingerprint differs from the stored known_hosts (MITM / DNS hijack / server rekey). Verify manually.',
     );
+  if (low.includes('no https credential configured for host=')) {
+    const m = raw.match(/no HTTPS credential configured for host=([^;\s]*)/i);
+    const host = m?.[1] ?? '';
+    return host
+      ? tr(
+          `私有仓库需要凭证：尚未为 host=${host} 配置 HTTPS 凭证。请在上方『凭证 · HTTPS』卡片添加一条 hosts 匹配的凭证。`,
+          `This private repo needs a credential: no HTTPS credential configured for host=${host}. Add one with a matching host in the "Credentials · HTTPS" card above.`,
+        )
+      : tr(
+          '私有仓库需要凭证：尚未为该 host 配置 HTTPS 凭证。请在上方『凭证 · HTTPS』卡片添加一条 hosts 匹配的凭证。',
+          'This private repo needs a credential: no HTTPS credential configured for this host. Add one with a matching host in the "Credentials · HTTPS" card above.',
+        );
+  }
   if (low.includes('could not read username') || low.includes('authentication failed'))
     return tr(
       '凭证缺失或被拒：私有仓库需要 token / 凭证，或已配置的凭证无访问权。请在凭证里配置。',
@@ -181,6 +199,8 @@ export default function KnowledgeReposPage() {
             {err}
           </div>
         )}
+
+        <HTTPSCredentialsCard />
 
         <SSHIdentitiesCard />
 
@@ -375,6 +395,11 @@ function RepoCreator({ onClose, onCreated }: { onClose: () => void; onCreated: (
             {tr(
               'HTTPS（公开仓库）或 SSH（git@host:owner/repo）都行。SSH 私库需要先在上方"凭证 · SSH key"配一条 hosts 匹配的 key。不要把 token 嵌进 URL —— 会被 git argv / 日志 / DB 列泄漏。',
               'HTTPS (public) or SSH (git@host:owner/repo) both work. For SSH private repos, configure a matching SSH key in "Credentials · SSH key" above first. Do NOT embed tokens in the URL — they leak via git argv / logs / DB columns.',
+            )}
+            {' '}
+            {tr(
+              'HTTPS 私库需先在上方『凭证 · HTTPS』配一条 hosts 匹配的凭证；同样不要把 token 嵌进 URL。',
+              'For private HTTPS repos, configure a matching credential in "Credentials · HTTPS" above first; likewise never embed the token in the URL.',
             )}
           </div>
         </label>
@@ -817,6 +842,309 @@ function AddSSHIdentityModal({
             )}
           </div>
         )}
+        {err && (
+          <div className="rounded-md border border-red-500/40 bg-red-500/5 px-3 py-2 text-[11px] text-red-300">{err}</div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+// HTTPSCredentialsCard — manages stored HTTPS PAT credentials + the
+// host patterns they cover. Mirrors SSHIdentitiesCard; goes in the
+// same credentials section of the page so operators configure all
+// git auth in one spot.
+function HTTPSCredentialsCard() {
+  const { tr } = useI18n();
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState<HTTPSCredential[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<HTTPSCredential | null>(null);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setErr(null);
+    try {
+      const r = await listHTTPSCredentials();
+      setItems(r.items ?? []);
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : (e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (open) void refresh();
+  }, [open, refresh]);
+
+  const onDelete = async (id: number) => {
+    if (!window.confirm(tr('删除该 HTTPS 凭证？后续指向其 hosts 的仓库会同步失败。', 'Delete this HTTPS credential? Subsequent syncs to its hosts will fail.'))) return;
+    try {
+      await deleteHTTPSCredential(id);
+      await refresh();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : (e as Error).message);
+    }
+  };
+
+  return (
+    <section className="mb-4 rounded-xl border border-zinc-800 bg-zinc-900/40">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+      >
+        <div className="flex items-center gap-2 text-sm text-zinc-200">
+          <KeyRound size={14} className="text-zinc-400" />
+          {tr('凭证 · HTTPS', 'Credentials · HTTPS')}
+          <span className="text-[11px] text-zinc-500">
+            {items.length > 0
+              ? tr(`已配置 ${items.length} 条`, `${items.length} configured`)
+              : tr('未配置', 'None')}
+          </span>
+        </div>
+        <span className="text-[11px] text-zinc-500">{open ? tr('收起', 'Hide') : tr('展开', 'Show')}</span>
+      </button>
+      {open && (
+        <div className="space-y-3 border-t border-zinc-800/60 px-4 py-3">
+          {err && <div className="rounded-md border border-red-500/40 bg-red-500/5 px-3 py-2 text-[11px] text-red-300">{err}</div>}
+          {loading ? (
+            <div className="text-[11px] text-zinc-500">{tr('加载中…', 'Loading…')}</div>
+          ) : items.length === 0 ? (
+            <div className="text-[11px] text-zinc-500">
+              {tr(
+                '还没有 HTTPS 凭证。私有 HTTPS 仓库（https://gitlab.example.com/...）需要先在这里配置一条 hosts 匹配的凭证。',
+                'No HTTPS credentials yet. A private HTTPS repo (https://gitlab.example.com/...) needs a matching credential configured here first.',
+              )}
+            </div>
+          ) : (
+            <ul className="space-y-2">
+              {items.map((cred) => (
+                <li
+                  key={cred.id}
+                  className="flex items-start justify-between gap-3 rounded-md border border-zinc-800/60 bg-zinc-950/40 px-3 py-2"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm text-zinc-100">{cred.name}</span>
+                      <span className="font-mono text-[10px] text-zinc-500">{cred.username}</span>
+                      {cred.has_token ? (
+                        <span className="rounded-sm bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-300">
+                          {tr('已配置', 'configured')}
+                        </span>
+                      ) : (
+                        <span className="rounded-sm bg-zinc-700/60 px-1.5 py-0.5 text-[10px] text-zinc-400">
+                          {tr('未配置', 'none')}
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-zinc-500">
+                      hosts:{' '}
+                      {cred.hosts.length === 0 ? (
+                        <span className="text-red-300">{tr('未配置', 'none')}</span>
+                      ) : (
+                        cred.hosts.map((h, idx) => (
+                          <span key={h} className="font-mono text-zinc-300">
+                            {idx > 0 && ', '}
+                            {h}
+                          </span>
+                        ))
+                      )}
+                    </div>
+                    {cred.last_used_at && (
+                      <div className="mt-0.5 text-[10px] text-zinc-600">
+                        {tr(`上次使用 ${fullDateTime(cred.last_used_at)}`, `Last used ${fullDateTime(cred.last_used_at)}`)}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => { setEditing(cred); setAdding(true); }}
+                      className="inline-flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-[11px] text-zinc-300 hover:bg-zinc-800"
+                    >
+                      {tr('编辑', 'Edit')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void onDelete(cred.id)}
+                      className="inline-flex items-center gap-1 rounded-md border border-red-500/40 bg-red-500/10 px-2 py-1 text-[11px] text-red-300 hover:bg-red-500/20"
+                    >
+                      <Trash2 size={11} /> {tr('删除', 'Delete')}
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+          <button
+            type="button"
+            onClick={() => { setEditing(null); setAdding(true); }}
+            className="inline-flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800"
+          >
+            <Plus size={12} /> {tr('添加 HTTPS 凭证', 'Add HTTPS credential')}
+          </button>
+        </div>
+      )}
+      {adding && (
+        <AddHTTPSCredentialModal
+          editing={editing}
+          onClose={() => { setAdding(false); setEditing(null); }}
+          onSaved={() => {
+            setAdding(false);
+            setEditing(null);
+            void refresh();
+          }}
+        />
+      )}
+    </section>
+  );
+}
+
+// AddHTTPSCredentialModal — single-form modal for creating and editing
+// HTTPS PAT credentials. No generate/paste dual-mode (unlike SSH).
+// Token is write-only: type=password + autoComplete=off; editing mode
+// leaves token blank (no pre-fill — HTTPSCredential type has no token
+// field, so there is nothing to pre-fill).
+function AddHTTPSCredentialModal({
+  onClose,
+  onSaved,
+  editing,
+}: {
+  onClose: () => void;
+  onSaved: () => void;
+  editing?: HTTPSCredential | null;
+}) {
+  const { tr } = useI18n();
+  const [name, setName] = useState(editing?.name ?? '');
+  const [hosts, setHosts] = useState(editing?.hosts.join(', ') ?? '');
+  const [username, setUsername] = useState(editing?.username ?? 'oauth2');
+  // Token is never pre-filled — HTTPSCredential DTO has no token field.
+  // In edit mode, leaving blank means "keep existing token" (server semantics).
+  const [token, setToken] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const parseHostsInput = () =>
+    hosts.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
+
+  const isEditing = editing != null;
+
+  const canSubmit =
+    name.trim() &&
+    hosts.trim() &&
+    (isEditing || token.trim()) &&  // new: token required; edit: optional
+    !busy;
+
+  const submit = async () => {
+    if (!canSubmit) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const parsed = parseHostsInput();
+      const uname = username.trim() || 'oauth2';
+      if (isEditing) {
+        await updateHTTPSCredential(editing.id, {
+          name: name.trim(),
+          hosts: parsed,
+          username: uname,
+          token,  // empty string = keep existing (nil-means-keep on server)
+        });
+      } else {
+        await createHTTPSCredential({
+          name: name.trim(),
+          hosts: parsed,
+          username: uname,
+          token,
+        });
+      }
+      onSaved();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : (e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={isEditing ? tr('编辑 HTTPS 凭证', 'Edit HTTPS credential') : tr('添加 HTTPS 凭证', 'Add HTTPS credential')}
+      size="md"
+      footer={
+        <>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex items-center rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800"
+          >
+            {tr('取消', 'Cancel')}
+          </button>
+          <button
+            type="button"
+            disabled={!canSubmit}
+            onClick={() => void submit()}
+            className="inline-flex items-center gap-1 rounded-md bg-zinc-100 px-3 py-1.5 text-xs font-medium text-zinc-900 hover:bg-white disabled:opacity-40"
+          >
+            {busy ? tr('保存中…', 'Saving…') : tr('保存', 'Save')}
+          </button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <label className="block">
+          <span className="mb-1 block text-[11px] text-zinc-500">{tr('名称', 'Name')}</span>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={tr('如 gitlab-org、github-org', 'e.g. gitlab-org, github-org')}
+            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none"
+          />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-[11px] text-zinc-500">
+            {tr('hosts（空格 / 逗号分隔；支持通配 * ?）', 'hosts (space or comma separated; * ? globs supported)')}
+          </span>
+          <input
+            value={hosts}
+            onChange={(e) => setHosts(e.target.value)}
+            placeholder="gitlab.example.com github.com"
+            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none"
+          />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-[11px] text-zinc-500">
+            {tr('用户名（GitLab PAT 通常填 oauth2）', 'Username (GitLab PAT typically uses oauth2)')}
+          </span>
+          <input
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="oauth2"
+            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none"
+          />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-[11px] text-zinc-500">
+            {tr('Token（PAT）', 'Token (PAT)')}
+          </span>
+          <input
+            type="password"
+            autoComplete="off"
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            placeholder={isEditing ? tr('留空 = 不修改', 'Leave blank to keep existing') : tr('粘贴 Personal Access Token', 'Paste Personal Access Token')}
+            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none"
+          />
+          <span className="mt-1 block text-[11px] text-zinc-500">
+            {isEditing
+              ? tr('留空 = 不修改已存 token；填入新值 = 轮换。', 'Leave blank to keep the stored token; enter a new value to rotate.')
+              : tr('Personal Access Token（PAT），只写不读；保存后不回显。', 'Personal Access Token (PAT); write-only, never echoed back after save.')}
+          </span>
+        </label>
         {err && (
           <div className="rounded-md border border-red-500/40 bg-red-500/5 px-3 py-2 text-[11px] text-red-300">{err}</div>
         )}
