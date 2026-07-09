@@ -44,6 +44,33 @@ describe('KubernetesPage', () => {
       http.get('/api/v1/k8s/clusters', () =>
         HttpResponse.json({ items: [cluster], total: 1, limit: 100, offset: 0 }),
       ),
+      http.get('/api/v1/edges', () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: 3,
+              name: 'ongrid-edge-controller',
+              status: 'online',
+              roles: [],
+              access_key_id: 'ak-controller',
+              last_seen_at: '2026-06-29T10:00:00Z',
+              device_id: null,
+              agent_version: 'v0.9.0',
+            },
+            {
+              id: 5,
+              name: 'k8s:kind-local:ongrid-k8s-control-plane',
+              status: 'online',
+              roles: [],
+              access_key_id: 'ak-node',
+              last_seen_at: '2026-06-29T10:00:00Z',
+              device_id: 17,
+              agent_version: 'v0.9.0',
+            },
+          ],
+          total: 2,
+        }),
+      ),
       http.get('/api/v1/k8s/clusters/:id', () => HttpResponse.json(cluster)),
       http.get('/api/v1/k8s/clusters/:id/nodes', () =>
         HttpResponse.json({
@@ -328,7 +355,8 @@ describe('KubernetesPage', () => {
     expect(screen.getAllByText('1n / 1w / 1p / 1e').length).toBeGreaterThan(0);
     expect(screen.getByText('集群健康结论')).toBeInTheDocument();
     expect(screen.getByText('Controller')).toBeInTheDocument();
-    expect(screen.getByText('资源规模')).toBeInTheDocument();
+    expect(screen.getByText('Agent 版本')).toBeInTheDocument();
+    expect(screen.getByText('v0.9.0')).toBeInTheDocument();
     expect(screen.getByText('异常线索')).toBeInTheDocument();
     expect(screen.getByText('关键异常')).toBeInTheDocument();
     expect(screen.getByText('1 个待确认问题')).toBeInTheDocument();
@@ -345,6 +373,25 @@ describe('KubernetesPage', () => {
     expect(screen.getAllByText('Loki').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Tempo').length).toBeGreaterThan(0);
     expect(screen.getAllByText('查询详情').length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('集群详情提供 Helm 升级命令', async () => {
+    render(
+      <MemoryRouter initialEntries={['/kubernetes/1']}>
+        <Routes>
+          <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: '升级命令' }));
+
+    expect(screen.getByText('Helm 升级命令')).toBeInTheDocument();
+    const command = screen.getByText(/helm upgrade ongrid-edge/);
+    expect(command).toHaveTextContent("'https://<manager>/edge/k8s/ongrid-edge.tgz'");
+    expect(command).toHaveTextContent("--namespace 'ongrid-system'");
+    expect(command).toHaveTextContent('--reuse-values');
+    expect(command).toHaveTextContent("manager.tunnelAddr='<manager>:40012'");
   });
 
   it('已恢复的 Warning Event 不进入健康结论和异常线索', async () => {
@@ -1108,6 +1155,8 @@ describe('KubernetesPage', () => {
     expect((await screen.findAllByText('ongrid-k8s-control-plane')).length).toBeGreaterThan(0);
     expect(screen.getByText('Node Edge #5')).toBeInTheDocument();
     expect(screen.getByText('接入实例')).toBeInTheDocument();
+    expect(screen.getByText('Agent')).toBeInTheDocument();
+    expect(screen.getAllByText('v0.9.0').length).toBeGreaterThan(0);
   });
 
   it('Node 资源表行内提供排障入口并能发起资源分析', async () => {

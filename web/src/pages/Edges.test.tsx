@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -102,12 +102,18 @@ describe('EdgesPage', () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findAllByText('ongrid-k8s-control-plane')).toHaveLength(2);
+    const k8sNameCells = await screen.findAllByText('ongrid-k8s-control-plane');
+    expect(k8sNameCells).toHaveLength(2);
     expect(screen.queryByText('k8s:kind-local:ongrid-k8s-control-plane')).not.toBeInTheDocument();
     expect(screen.queryByText('kind-controller')).not.toBeInTheDocument();
     expect(screen.getByText('K8s Node')).toBeInTheDocument();
     expect(screen.getByText('K8s Controller')).toBeInTheDocument();
     expect(screen.getByText('kind-local')).toBeInTheDocument();
+    const k8sRow = k8sNameCells[0].closest('tr');
+    expect(k8sRow).not.toBeNull();
+    expect(within(k8sRow as HTMLTableRowElement).getByText('Kubernetes 管理')).toBeInTheDocument();
+    expect(within(k8sRow as HTMLTableRowElement).queryByText('终端')).not.toBeInTheDocument();
+    expect(within(k8sRow as HTMLTableRowElement).queryByLabelText(/选择/)).not.toBeInTheDocument();
     expect(screen.getByText('bare-metal-1')).toBeInTheDocument();
     expect(screen.getByText('bm-1')).toBeInTheDocument();
     expect(screen.getByText('Host Edge')).toBeInTheDocument();

@@ -59,6 +59,13 @@ function currentManagerInstallEndpoints() {
   return { publicURL: origin, tunnelAddr: `${hostname}:40012` };
 }
 
+function managerInstallEndpointsOrPlaceholders() {
+  return currentManagerInstallEndpoints() ?? {
+    publicURL: 'https://<manager>',
+    tunnelAddr: '<manager>:40012',
+  };
+}
+
 export function localizeKubernetesInstallCommand(command: string) {
   const endpoints = currentManagerInstallEndpoints();
   if (!endpoints) return command;
@@ -68,6 +75,27 @@ export function localizeKubernetesInstallCommand(command: string) {
     .replace(/'<manager>:40012'/g, shellSingleQuote(tunnelAddr))
     .replace(/https:\/\/<manager>/g, publicURL)
     .replace(/<manager>:40012/g, tunnelAddr);
+}
+
+export function kubernetesUpgradeCommand(cluster: KubernetesCluster) {
+  const namespace = cluster.controller_namespace?.trim() || K8S_EDGE_NAMESPACE;
+  const { publicURL, tunnelAddr } = managerInstallEndpointsOrPlaceholders();
+  const chartRef = `${publicURL.replace(/\/$/, '')}/edge/k8s/ongrid-edge.tgz`;
+  const args = [
+    `helm upgrade ${K8S_EDGE_RELEASE_NAME}`,
+    shellSingleQuote(chartRef),
+  ];
+  if (chartRef.toLowerCase().startsWith('https://')) {
+    args.push('--insecure-skip-tls-verify');
+  }
+  args.push(
+    `--namespace ${shellSingleQuote(namespace)}`,
+    '--reuse-values',
+    `--set-string manager.publicURL=${shellSingleQuote(publicURL)}`,
+    `--set-string manager.tunnelAddr=${shellSingleQuote(tunnelAddr)}`,
+    '--set-string manager.tlsInsecure=true',
+  );
+  return args.join(' ');
 }
 
 export function kubernetesUninstallCommand(cluster: KubernetesCluster) {

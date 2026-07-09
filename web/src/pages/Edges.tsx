@@ -236,11 +236,22 @@ export default function EdgesPage() {
     }
   }
 
-  const visibleEdgeIds = useMemo(() => new Set(visibleEdges.map((e) => e.id)), [visibleEdges]);
-  const selectedIds = useMemo(() => [...selected].filter((id) => visibleEdgeIds.has(id)), [selected, visibleEdgeIds]);
-  const allVisibleSelected = visibleEdges.length > 0 && visibleEdges.every((e) => selected.has(e.id));
+  const selectableVisibleEdges = useMemo(
+    () => visibleEdges.filter((edge) => !isK8sManagedEdge(k8sAttachments[edge.id] ?? [])),
+    [k8sAttachments, visibleEdges],
+  );
+  const visibleSelectableEdgeIds = useMemo(
+    () => new Set(selectableVisibleEdges.map((e) => e.id)),
+    [selectableVisibleEdges],
+  );
+  const selectedIds = useMemo(
+    () => [...selected].filter((id) => visibleSelectableEdgeIds.has(id)),
+    [selected, visibleSelectableEdgeIds],
+  );
+  const allVisibleSelected = selectableVisibleEdges.length > 0 && selectableVisibleEdges.every((e) => selected.has(e.id));
 
   const toggleOne = (id: number) => {
+    if (!visibleSelectableEdgeIds.has(id)) return;
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -250,14 +261,15 @@ export default function EdgesPage() {
   };
   const toggleAllVisible = () => {
     setSelected((prev) => {
-      if (visibleEdges.every((e) => prev.has(e.id))) {
+      if (selectableVisibleEdges.length === 0) return prev;
+      if (selectableVisibleEdges.every((e) => prev.has(e.id))) {
         // all selected → clear the visible ones
         const next = new Set(prev);
-        visibleEdges.forEach((e) => next.delete(e.id));
+        selectableVisibleEdges.forEach((e) => next.delete(e.id));
         return next;
       }
       const next = new Set(prev);
-      visibleEdges.forEach((e) => next.add(e.id));
+      selectableVisibleEdges.forEach((e) => next.add(e.id));
       return next;
     });
   };
@@ -415,6 +427,7 @@ export default function EdgesPage() {
                       aria-label={tr('全选', 'Select all')}
                       className="h-3.5 w-3.5 accent-accent"
                       checked={allVisibleSelected}
+                      disabled={selectableVisibleEdges.length === 0}
                       ref={(el) => {
                         if (el) el.indeterminate = selectedIds.length > 0 && !allVisibleSelected;
                       }}
@@ -457,12 +470,20 @@ export default function EdgesPage() {
                 ) : (
                   visibleEdges.map((e) => {
                     const attachments = k8sAttachments[e.id] ?? [];
+                    const managedByK8s = isK8sManagedEdge(attachments);
+                    const managedCluster = uniqueAttachmentClusters(attachments)[0];
                     const displayName = displayEdgeName(e, attachments);
                     return (
                       <tr
                         key={e.id}
                         className="cursor-pointer transition-colors hover:bg-zinc-900/40"
-                        onClick={() => navigate(`/edges/${encodeURIComponent(e.id)}`)}
+                        onClick={() => {
+                          if (managedByK8s && managedCluster) {
+                            navigate(`/kubernetes/${managedCluster.clusterId}`);
+                            return;
+                          }
+                          navigate(`/edges/${encodeURIComponent(e.id)}`);
+                        }}
                       >
                         {/* Identity columns are pinned `whitespace-nowrap`
                             — when the table is squeezed (sidebar + many
@@ -474,13 +495,22 @@ export default function EdgesPage() {
                           className="w-10 px-4 py-2.5"
                           onClick={(ev) => ev.stopPropagation()}
                         >
-                          <input
-                            type="checkbox"
-                            aria-label={tr(`选择 ${displayName || e.name}`, `Select ${displayName || e.name}`)}
-                            className="h-3.5 w-3.5 accent-accent"
-                            checked={selected.has(e.id)}
-                            onChange={() => toggleOne(e.id)}
-                          />
+                          {managedByK8s ? (
+                            <span
+                              title={tr('Kubernetes 托管设备不参与设备批量操作', 'Kubernetes-managed devices are excluded from device batch actions')}
+                              className="inline-flex h-3.5 w-3.5 items-center justify-center text-[10px] text-zinc-600"
+                            >
+                              —
+                            </span>
+                          ) : (
+                            <input
+                              type="checkbox"
+                              aria-label={tr(`选择 ${displayName || e.name}`, `Select ${displayName || e.name}`)}
+                              className="h-3.5 w-3.5 accent-accent"
+                              checked={selected.has(e.id)}
+                              onChange={() => toggleOne(e.id)}
+                            />
+                          )}
                         </td>
                         <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-zinc-400">
                           {e.id}
@@ -502,10 +532,13 @@ export default function EdgesPage() {
                           {extractIP(e.host_info) ?? '—'}
                         </td>
                         <td
-                          className="cursor-pointer whitespace-nowrap px-4 py-2.5"
-                          title={tr('点击分配角色', 'Click to assign roles')}
+                          className={cn('whitespace-nowrap px-4 py-2.5', !managedByK8s && 'cursor-pointer')}
+                          title={managedByK8s
+                            ? tr('Kubernetes 托管设备请在集群页管理', 'Manage Kubernetes-managed devices from the cluster page')
+                            : tr('点击分配角色', 'Click to assign roles')}
                           onClick={(ev) => {
                             ev.stopPropagation();
+                            if (managedByK8s) return;
                             setRolesEditTarget(e);
                           }}
                         >
@@ -529,24 +562,30 @@ export default function EdgesPage() {
                           className="whitespace-nowrap px-4 py-2.5 text-right"
                           onClick={(ev) => ev.stopPropagation()}
                         >
-                          <button
-                            type="button"
-                            onClick={() => void openServerChart(e)}
-                            title={tr(`在 Grafana 查看 ${displayName || e.name} 图表`, `View ${displayName || e.name} chart in Grafana`)}
-                            aria-label={tr(`在 Grafana 查看 ${displayName || e.name} 图表`, `View ${displayName || e.name} chart in Grafana`)}
-                            className="mr-1 inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
-                          >
-                            <ExternalLink size={14} />
-                            <span>{tr('查看图表', 'View chart')}</span>
-                          </button>
-                          <ShellButton edge={e} canMutate={canMutate} />
-                          <RowMenu
-                            onRotate={() => onRotate(e.id, e.name, e.access_key_id)}
-                            onDelete={() => onDelete(e.id, e.name)}
-                            onUpgrade={() => setUpgradeTarget(e)}
-                            onUpgradePackage={() => void onPackageUpgrade(e)}
-                            upgradePackageBusy={pkgUpgradingId === e.id}
-                          />
+                          {managedByK8s && managedCluster ? (
+                            <K8sManagedEdgeAction attachment={managedCluster} />
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => void openServerChart(e)}
+                                title={tr(`在 Grafana 查看 ${displayName || e.name} 图表`, `View ${displayName || e.name} chart in Grafana`)}
+                                aria-label={tr(`在 Grafana 查看 ${displayName || e.name} 图表`, `View ${displayName || e.name} chart in Grafana`)}
+                                className="mr-1 inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                              >
+                                <ExternalLink size={14} />
+                                <span>{tr('查看图表', 'View chart')}</span>
+                              </button>
+                              <ShellButton edge={e} canMutate={canMutate} />
+                              <RowMenu
+                                onRotate={() => onRotate(e.id, e.name, e.access_key_id)}
+                                onDelete={() => onDelete(e.id, e.name)}
+                                onUpgrade={() => setUpgradeTarget(e)}
+                                onUpgradePackage={() => void onPackageUpgrade(e)}
+                                upgradePackageBusy={pkgUpgradingId === e.id}
+                              />
+                            </>
+                          )}
                         </td>
                       </tr>
                     );
@@ -756,6 +795,24 @@ function uniqueAttachmentClusters(attachments: K8sEdgeAttachment[]): K8sEdgeAtta
     if (!out.has(item.clusterId)) out.set(item.clusterId, item);
   }
   return [...out.values()];
+}
+
+function isK8sManagedEdge(attachments: K8sEdgeAttachment[]) {
+  return attachments.some((item) => item.kind === 'k8s-node' || item.kind === 'k8s-controller-runtime');
+}
+
+function K8sManagedEdgeAction({ attachment }: { attachment: K8sEdgeAttachment }) {
+  const { tr } = useI18n();
+  return (
+    <Link
+      to={`/kubernetes/${attachment.clusterId}`}
+      title={tr(`在 Kubernetes 集群 ${attachment.clusterName} 管理`, `Manage from Kubernetes cluster ${attachment.clusterName}`)}
+      className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+    >
+      <ExternalLink size={14} />
+      <span>{tr('Kubernetes 管理', 'Kubernetes')}</span>
+    </Link>
+  );
 }
 
 function EdgeAccessPill({

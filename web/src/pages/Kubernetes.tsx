@@ -36,6 +36,10 @@ import {
 import { createSession } from '@/api/chat';
 import { createPrometheusLaunch } from '@/api/prometheus';
 import {
+  listEdges,
+  type Edge,
+} from '@/api/edges';
+import {
   createKubernetesCluster,
   deleteKubernetesCluster,
   getKubernetesCluster,
@@ -67,6 +71,7 @@ import {
   clusterSyncTime,
   detailTabsForCluster,
   isKubernetesClusterRecentlyActive,
+  kubernetesUpgradeCommand,
   kubernetesUninstallCommand,
   localizeKubernetesInstallCommand,
   snapshotResourceSummary,
@@ -86,6 +91,7 @@ export default function KubernetesPage() {
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [registration, setRegistration] = useState<KubernetesRegistration | null>(null);
+  const [upgradeCluster, setUpgradeCluster] = useState<KubernetesCluster | null>(null);
   const [uninstallCluster, setUninstallCluster] = useState<KubernetesCluster | null>(null);
   const [deleteClusterTarget, setDeleteClusterTarget] = useState<KubernetesCluster | null>(null);
   const [deletingClusterID, setDeletingClusterID] = useState<number | null>(null);
@@ -249,6 +255,17 @@ export default function KubernetesPage() {
                           {isAdmin && (
                             <button
                               type="button"
+                              aria-label={tr(`查看集群 ${cluster.name} 的升级命令`, `View upgrade command for cluster ${cluster.name}`)}
+                              onClick={() => setUpgradeCluster(cluster)}
+                              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                            >
+                              <RefreshCw size={13} />
+                              {tr('升级命令', 'Upgrade')}
+                            </button>
+                          )}
+                          {isAdmin && (
+                            <button
+                              type="button"
                               aria-label={tr(`查看集群 ${cluster.name} 的卸载命令`, `View uninstall command for cluster ${cluster.name}`)}
                               onClick={() => setUninstallCluster(cluster)}
                               className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
@@ -290,6 +307,7 @@ export default function KubernetesPage() {
         }}
       />
       <RegistrationModal data={registration} onClose={() => setRegistration(null)} />
+      <UpgradeCommandModal cluster={upgradeCluster} onClose={() => setUpgradeCluster(null)} />
       <UninstallCommandModal cluster={uninstallCluster} onClose={() => setUninstallCluster(null)} />
       <DeleteClusterModal
         cluster={deleteClusterTarget}
@@ -320,6 +338,7 @@ export function KubernetesClusterDetailPage() {
   const [events, setEvents] = useState<KubernetesEvent[]>([]);
   const [warningEvents, setWarningEvents] = useState<KubernetesEvent[]>([]);
   const [warningEventTotal, setWarningEventTotal] = useState(0);
+  const [edgeVersionsByID, setEdgeVersionsByID] = useState<Record<number, string>>({});
   const [actionProposals, setActionProposals] = useState<MutatingProposal[]>([]);
   const [actionProposalTotal, setActionProposalTotal] = useState(0);
   const [actionAuditError, setActionAuditError] = useState<string | null>(null);
@@ -329,6 +348,7 @@ export function KubernetesClusterDetailPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [registration, setRegistration] = useState<KubernetesRegistration | null>(null);
+  const [upgradeCluster, setUpgradeCluster] = useState<KubernetesCluster | null>(null);
   const resourceViewRef = useRef<HTMLDivElement | null>(null);
   const [resourceQuery, setResourceQuery] = useState('');
   const [appliedResourceQuery, setAppliedResourceQuery] = useState('');
@@ -354,7 +374,10 @@ export function KubernetesClusterDetailPage() {
             return null;
           })
         : Promise.resolve(null);
-      const [clusterOut, nodesOut, workloadsOut, podsOut, crashLoopPodsOut, eventsOut, warningEventsOut, auditOut] = await Promise.all([
+      const edgeVersionsPromise = listEdges()
+        .then((out) => buildEdgeVersionMap(out.items ?? []))
+        .catch(() => ({}));
+      const [clusterOut, nodesOut, workloadsOut, podsOut, crashLoopPodsOut, eventsOut, warningEventsOut, auditOut, edgeVersionMap] = await Promise.all([
         getKubernetesCluster(clusterId),
         listKubernetesNodes(clusterId),
         listKubernetesWorkloads(clusterId, { limit: RESOURCE_PAGE_SIZE }),
@@ -363,6 +386,7 @@ export function KubernetesClusterDetailPage() {
         listKubernetesEvents(clusterId, { limit: RESOURCE_PAGE_SIZE }),
         listKubernetesEvents(clusterId, { type: 'Warning', limit: 100 }),
         auditPromise,
+        edgeVersionsPromise,
       ]);
       setCluster(clusterOut);
       setNodes(nodesOut.items ?? []);
@@ -379,6 +403,7 @@ export function KubernetesClusterDetailPage() {
       });
       setWarningEvents(warningItems);
       setWarningEventTotal(warningItems.length);
+      setEdgeVersionsByID(edgeVersionMap);
       setTotals({
         nodes: nodesOut.total ?? (nodesOut.items?.length ?? 0),
         workloads: workloadsOut.total ?? (workloadsOut.items?.length ?? 0),
@@ -707,6 +732,12 @@ export function KubernetesClusterDetailPage() {
                 {tr('刷新', 'Refresh')}
               </Button>
               {isAdmin && cluster && (
+                <Button onClick={() => setUpgradeCluster(cluster)}>
+                  <RefreshCw size={12} />
+                  {tr('升级命令', 'Upgrade')}
+                </Button>
+              )}
+              {isAdmin && cluster && (
                 <Button onClick={() => void rotateToken()}>
                   <RotateCw size={12} />
                   {tr('轮换 Token', 'Rotate token')}
@@ -752,10 +783,12 @@ export function KubernetesClusterDetailPage() {
             cluster={cluster}
             loading={loading}
             totals={totals}
+            nodes={visibleNodes}
             namespaces={namespaces}
             issueCounts={issueCounts}
             warningEventTotal={warningEventTotal}
             triageIssueTotal={triageIssues.length}
+            edgeVersionsByID={edgeVersionsByID}
           />
 
           {awaitingConnection ? (
@@ -842,6 +875,7 @@ export function KubernetesClusterDetailPage() {
                       loading={loading}
                       filtered={activeTabFilterActive}
                       emptyHint={resourceFilterHint}
+                      edgeVersionsByID={edgeVersionsByID}
                       onClearFilters={clearResourceFilters}
                       actions={{
                         onOpenLogs: openResourceLogs,
@@ -937,6 +971,7 @@ export function KubernetesClusterDetailPage() {
       </main>
 
       <RegistrationModal data={registration} onClose={() => setRegistration(null)} />
+      <UpgradeCommandModal cluster={upgradeCluster} onClose={() => setUpgradeCluster(null)} />
     </>
   );
 }
@@ -945,18 +980,22 @@ function ClusterSummary({
   cluster,
   loading,
   totals,
+  nodes,
   namespaces,
   issueCounts,
   warningEventTotal,
   triageIssueTotal,
+  edgeVersionsByID,
 }: {
   cluster: KubernetesCluster | null;
   loading: boolean;
   totals: ResourceTotals;
+  nodes: KubernetesNode[];
   namespaces: string[];
   issueCounts: K8sIssueCounts;
   warningEventTotal: number;
   triageIssueTotal: number;
+  edgeVersionsByID: Record<number, string>;
 }) {
   const { tr } = useI18n();
   const awaitingConnection = isClusterAwaitingConnection(cluster);
@@ -971,6 +1010,7 @@ function ClusterSummary({
   });
   const capabilityGapCount = capabilities.filter((item) => item.gap).length;
   const visibleIssues = clusterVisibleIssueChips(issueCounts, warningEventTotal, syncRisk, tr);
+  const agentVersions = clusterAgentVersionSummary(cluster, nodes, edgeVersionsByID, tr);
   return (
     <Card className="p-0">
       <div className="grid gap-0 divide-y divide-zinc-800/60 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)] xl:divide-x xl:divide-y-0">
@@ -1005,10 +1045,10 @@ function ClusterSummary({
               tone={cluster?.controller_edge_id ? 'success' : 'default'}
             />
             <HealthMetric
-              label={tr('资源规模', 'Resource scope')}
-              value={snapshotResourceSummary(totals)}
-              detail={tr(`${formatNumber(namespaces.length)} 个命名空间`, `${formatNumber(namespaces.length)} namespace(s)`)}
-              tone={cluster?.inventory_resource_version ? 'success' : 'default'}
+              label={tr('Agent 版本', 'Agent version')}
+              value={agentVersions.value}
+              detail={agentVersions.detail}
+              tone={agentVersions.tone}
             />
             <HealthMetric
               label={tr('同步状态', 'Sync health')}
@@ -1160,6 +1200,70 @@ function HealthMetric({
       <div className="mt-0.5 truncate font-mono text-[11px] text-zinc-500">{detail || '—'}</div>
     </div>
   );
+}
+
+function buildEdgeVersionMap(edges: Edge[]) {
+  const out: Record<number, string> = {};
+  for (const edge of edges) {
+    const version = edge.agent_version?.trim();
+    if (edge.id && version) out[edge.id] = version;
+  }
+  return out;
+}
+
+function clusterAgentEdgeIDs(cluster: KubernetesCluster | null, nodes: KubernetesNode[]) {
+  const ids = new Set<number>();
+  if (cluster?.controller_edge_id) ids.add(cluster.controller_edge_id);
+  for (const node of nodes) {
+    if (node.edge_id) ids.add(node.edge_id);
+  }
+  return ids;
+}
+
+function clusterAgentVersionSummary(
+  cluster: KubernetesCluster | null,
+  nodes: KubernetesNode[],
+  edgeVersionsByID: Record<number, string>,
+  tr: (zh: string, en: string) => string,
+): { value: string; detail: string; tone: 'success' | 'warning' | 'danger' | 'info' | 'default' } {
+  const ids = clusterAgentEdgeIDs(cluster, nodes);
+  if (ids.size === 0) {
+    return {
+      value: '—',
+      detail: tr('等待 Edge 关联', 'waiting for edge links'),
+      tone: 'default',
+    };
+  }
+  const counts = new Map<string, number>();
+  for (const id of ids) {
+    const version = edgeVersionsByID[id]?.trim();
+    if (!version) continue;
+    counts.set(version, (counts.get(version) ?? 0) + 1);
+  }
+  const reported = [...counts.values()].reduce((sum, count) => sum + count, 0);
+  if (reported === 0) {
+    return {
+      value: tr('未上报', 'not reported'),
+      detail: tr(`${ids.size} 个 agent`, `${ids.size} agent(s)`),
+      tone: 'warning',
+    };
+  }
+  const versions = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  if (versions.length === 1) {
+    const [version] = versions[0];
+    return {
+      value: version,
+      detail: reported === ids.size
+        ? tr(`${ids.size} 个 agent 一致`, `${ids.size} agent(s) aligned`)
+        : tr(`已上报 ${reported}/${ids.size}`, `${reported}/${ids.size} reported`),
+      tone: reported === ids.size ? 'success' : 'info',
+    };
+  }
+  return {
+    value: tr('多版本', 'mixed'),
+    detail: versions.map(([version, count]) => `${version}x${count}`).join(' / '),
+    tone: 'warning',
+  };
 }
 
 function IssueCountChip({
@@ -2851,6 +2955,7 @@ function NodesTable({
   loading,
   filtered,
   emptyHint,
+  edgeVersionsByID,
   onClearFilters,
   actions,
 }: {
@@ -2858,11 +2963,12 @@ function NodesTable({
   loading: boolean;
   filtered?: boolean;
   emptyHint?: string;
+  edgeVersionsByID: Record<number, string>;
   onClearFilters?: () => void;
   actions?: ResourceRowActionHandlers;
 }) {
   const { tr } = useI18n();
-  if (loading && items.length === 0) return <LoadingRows colSpan={actions ? 8 : 7} />;
+  if (loading && items.length === 0) return <LoadingRows colSpan={actions ? 9 : 8} />;
   if (items.length === 0) {
     return (
       <FilteredResourceEmptyState
@@ -2875,13 +2981,14 @@ function NodesTable({
     );
   }
   return (
-    <table className="min-w-[1040px] w-full text-sm">
+    <table className="min-w-[1120px] w-full text-sm">
       <thead className="border-b border-zinc-800/60 bg-zinc-950/40 text-[11px] uppercase tracking-wider text-zinc-500">
         <tr>
           <th className="whitespace-nowrap px-4 py-2.5 text-left">Node</th>
           <th className="whitespace-nowrap px-4 py-2.5 text-left">Device</th>
           <th className="whitespace-nowrap px-4 py-2.5 text-left">{tr('接入实例', 'Access instance')}</th>
-          <th className="whitespace-nowrap px-4 py-2.5 text-left">{tr('版本', 'Version')}</th>
+          <th className="whitespace-nowrap px-4 py-2.5 text-left">Agent</th>
+          <th className="whitespace-nowrap px-4 py-2.5 text-left">Kubelet</th>
           <th className="whitespace-nowrap px-4 py-2.5 text-left">CPU</th>
           <th className="whitespace-nowrap px-4 py-2.5 text-left">{tr('内存', 'Memory')}</th>
           <th className="whitespace-nowrap px-4 py-2.5 text-left">{tr('最近同步', 'Last sync')}</th>
@@ -2906,6 +3013,9 @@ function NodesTable({
                 ) : (
                   <span className="text-zinc-500">—</span>
                 )}
+              </td>
+              <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-zinc-400">
+                {item.edge_id ? edgeVersionsByID[item.edge_id] || '—' : '—'}
               </td>
               <td className="whitespace-nowrap px-4 py-2.5 text-zinc-400">{item.kubelet_version || '—'}</td>
               <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-zinc-400">{resourceValue(item.capacity, 'cpu')}</td>
@@ -3395,6 +3505,57 @@ function UninstallCommandModal({
         <div>
           <div className="mb-1 flex items-center justify-between gap-2 text-zinc-500">
             <span>{tr('卸载命令', 'Uninstall command')}</span>
+            <Button onClick={() => void copyCommand()}>
+              {copied ? <Check size={12} /> : <Clipboard size={12} />}
+              {copied ? tr('已复制', 'Copied') : tr('复制', 'Copy')}
+            </Button>
+          </div>
+          <pre className="max-h-72 overflow-auto rounded-md border border-zinc-800 bg-zinc-950 p-3 text-[11px] leading-5 text-zinc-300">
+            {command}
+          </pre>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function UpgradeCommandModal({
+  cluster,
+  onClose,
+}: {
+  cluster: KubernetesCluster | null;
+  onClose(): void;
+}) {
+  const { tr } = useI18n();
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    setCopied(false);
+  }, [cluster?.id]);
+  if (!cluster) return null;
+  const command = kubernetesUpgradeCommand(cluster);
+  async function copyCommand() {
+    await navigator.clipboard?.writeText(command);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1200);
+  }
+  return (
+    <Modal open onClose={onClose} title={tr('Helm 升级命令', 'Helm upgrade command')} size="lg">
+      <div className="space-y-3 text-xs">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-zinc-500">{tr('集群', 'Cluster')}</span>
+          <Chip tone="accent">{cluster.name}</Chip>
+          <ModeChip mode={cluster.mode} />
+          <ClusterStatusChip status={cluster.status} />
+        </div>
+        <div className="rounded-md border border-sky-500/20 bg-sky-500/10 px-2 py-1.5 text-sky-200">
+          {tr(
+            '在目标 Kubernetes 集群执行该命令，会复用现有 Helm values 并同时滚动升级 Controller 与 Node Edge。',
+            'Run this in the target Kubernetes cluster. It reuses existing Helm values and rolls both Controller and Node Edge agents.',
+          )}
+        </div>
+        <div>
+          <div className="mb-1 flex items-center justify-between gap-2 text-zinc-500">
+            <span>{tr('升级命令', 'Upgrade command')}</span>
             <Button onClick={() => void copyCommand()}>
               {copied ? <Check size={12} /> : <Clipboard size={12} />}
               {copied ? tr('已复制', 'Copied') : tr('复制', 'Copy')}
