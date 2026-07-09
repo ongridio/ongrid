@@ -106,6 +106,21 @@ func (f fakeK8sRegistry) LookupControllerCluster(_ context.Context, _ uint64) (u
 	return f.clusterID, f.err
 }
 
+type fakeK8sInventoryIngester struct {
+	gotEdgeID    uint64
+	gotBodyEdge  uint64
+	gotClusterID uint64
+	calls        int
+}
+
+func (f *fakeK8sInventoryIngester) IngestInventory(_ context.Context, edgeID uint64, in tunnel.KubernetesInventoryRequest) (int, int, int, int, error) {
+	f.gotEdgeID = edgeID
+	f.gotBodyEdge = in.EdgeID
+	f.gotClusterID = in.ClusterID
+	f.calls++
+	return len(in.Nodes), len(in.Workloads), len(in.Pods), len(in.Events), nil
+}
+
 // installAndDispatch runs Install on a fakeService-backed Client, then
 // returns the registered RPC for `method`. Tests call it like a function.
 func installAndDispatch(t *testing.T, w Wiring) (*fakeService, geminio.RPC) {
@@ -257,6 +272,56 @@ func TestInstall_PushPromSamples_BindsCanonicalEdgeIDFromBody(t *testing.T) {
 	}
 	if pi.gotEdge != 2 {
 		t.Fatalf("edgeID = %d, want 2", pi.gotEdge)
+	}
+}
+
+func TestInstall_PushK8sInventory_IgnoresBodyEdgeID(t *testing.T) {
+	ki := &fakeK8sInventoryIngester{}
+	fs := newFakeService()
+	c := newWithService(fs, slog.Default())
+	w := Wiring{
+		EdgeAuthn:      &edgebiz.AccessKeyAuthenticator{},
+		EdgeUC:         &edgebiz.Usecase{},
+		MetricIngester: &fakeMetricIngester{},
+		DeviceResolver: &fakeDeviceResolver{},
+		K8sInventory:   ki,
+		Log:            slog.Default(),
+	}
+	if err := Install(context.Background(), c, w); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	c.bindEdgeTransport(1001, 42)
+
+	body, err := json.Marshal(tunnel.KubernetesInventoryRequest{
+		EdgeID:    7,
+		ClusterID: 3,
+		Nodes: []tunnel.KubernetesNodeSnapshot{{
+			Name: "node-a",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("marshal inventory: %v", err)
+	}
+	rpc, ok := fs.rpcs[tunnel.MethodPushK8sInventory]
+	if !ok {
+		t.Fatalf("push_k8s_inventory not registered")
+	}
+	rsp := &fakeResp{}
+	rpc(context.Background(), &fakeReq{data: body, clientID: 1001}, rsp)
+	if rsp.err != nil {
+		t.Fatalf("rpc returned error: %v", rsp.err)
+	}
+	if ki.calls != 1 {
+		t.Fatalf("ingest calls = %d, want 1", ki.calls)
+	}
+	if ki.gotEdgeID != 42 {
+		t.Fatalf("ingest edgeID = %d, want canonical edge 42", ki.gotEdgeID)
+	}
+	if ki.gotBodyEdge != 7 {
+		t.Fatalf("body edgeID capture = %d, want 7", ki.gotBodyEdge)
+	}
+	if ki.gotClusterID != 3 {
+		t.Fatalf("clusterID = %d, want 3", ki.gotClusterID)
 	}
 }
 

@@ -337,9 +337,13 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 			return nil, fmt.Errorf("push_k8s_inventory: decode: %w", err)
 		}
 		canonicalEdgeID := c.canonicalizeEdgeID(edgeID)
-		if in.EdgeID != 0 {
-			canonicalEdgeID = in.EdgeID
-			c.bindEdgeTransport(edgeID, canonicalEdgeID)
+		if in.EdgeID != 0 && canonicalEdgeID != 0 && in.EdgeID != canonicalEdgeID {
+			log.Warn("frontierbound: k8s inventory edge_id mismatch ignored",
+				slog.Uint64("body_edge_id", in.EdgeID),
+				slog.Uint64("edge_id", canonicalEdgeID),
+				slog.Uint64("transport_edge_id", edgeID),
+				slog.Uint64("cluster_id", in.ClusterID),
+			)
 		}
 		if canonicalEdgeID == 0 {
 			return json.Marshal(tunnel.KubernetesInventoryResponse{})

@@ -489,6 +489,16 @@ func ensureK8sEnrollment(ctx context.Context, cfg *config.Config, log *slog.Logg
 		Namespace:  strings.TrimSpace(os.Getenv("ONGRID_K8S_POD_NAMESPACE")),
 		PodName:    strings.TrimSpace(os.Getenv("ONGRID_K8S_POD_NAME")),
 	}
+	loaded, err := loadStoredK8sCredential(ctx, cfg, info, log)
+	if err != nil {
+		if bootstrapToken == "" {
+			return nil, err
+		}
+		log.Warn("load kubernetes edge credentials failed; falling back to bootstrap enrollment", slog.Any("err", err))
+	}
+	if loaded {
+		return info, nil
+	}
 	if bootstrapToken == "" {
 		return info, nil
 	}
@@ -557,6 +567,9 @@ func ensureK8sEnrollment(ctx context.Context, cfg *config.Config, log *slog.Logg
 	}
 	if out.Mode != "" {
 		info.Mode = out.Mode
+	}
+	if err := storeK8sCredential(ctx, info, out, cfg); err != nil {
+		return nil, fmt.Errorf("store kubernetes edge credentials: %w", err)
 	}
 	log.Info("kubernetes enrollment completed",
 		slog.Uint64("cluster_id", clusterID),

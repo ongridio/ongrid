@@ -59,6 +59,8 @@ spec:
                 secretKeyRef:
                   name: {{ include "ongrid-edge.fullname" . }}-bootstrap
                   key: bootstrap-token
+            - name: ONGRID_K8S_CREDENTIAL_SECRET
+              value: {{ include "ongrid-edge.credentialSecretName" . | quote }}
             - name: ONGRID_MANAGER_PUBLIC_URL
               valueFrom:
                 configMapKeyRef:

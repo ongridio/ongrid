@@ -35,6 +35,10 @@ ongrid.io/cluster-id: {{ .Values.enrollment.clusterID | quote }}
 {{- printf "%s-telemetry-gateway" (include "ongrid-edge.fullname" .) -}}
 {{- end -}}
 
+{{- define "ongrid-edge.credentialSecretName" -}}
+{{- printf "%s-credentials" (include "ongrid-edge.fullname" .) -}}
+{{- end -}}
+
 {{- define "ongrid-edge.telemetryGatewayEnabled" -}}
 {{- $gw := default dict .Values.telemetryGateway -}}
 {{- if kindIs "bool" $gw.enabled -}}
