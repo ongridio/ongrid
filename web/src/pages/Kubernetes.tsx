@@ -3478,11 +3478,26 @@ function managerRegistryHostFromCommand(command: string) {
   return matched?.[1] ?? '<manager>';
 }
 
+function runtimeConfigPrivilegePrelude() {
+  return [
+    'if [ "$(id -u)" -eq 0 ]; then',
+    "  SUDO=''",
+    'elif command -v sudo >/dev/null 2>&1; then',
+    "  SUDO='sudo'",
+    'else',
+    '  echo "root or sudo is required to configure the container runtime" >&2',
+    '  exit 1',
+    'fi',
+  ];
+}
+
 function containerdInsecureRegistryCommand(registryHost: string) {
   return [
     `REGISTRY='${registryHost}'`,
-    'sudo mkdir -p "/etc/containerd/certs.d/${REGISTRY}"',
-    'sudo tee "/etc/containerd/certs.d/${REGISTRY}/hosts.toml" >/dev/null <<EOF',
+    ...runtimeConfigPrivilegePrelude(),
+    '${SUDO} mkdir -p /etc/containerd',
+    '${SUDO} mkdir -p "/etc/containerd/certs.d/${REGISTRY}"',
+    '${SUDO} tee "/etc/containerd/certs.d/${REGISTRY}/hosts.toml" >/dev/null <<EOF',
     'server = "https://${REGISTRY}"',
     '',
     '[host."https://${REGISTRY}"]',
@@ -3490,29 +3505,66 @@ function containerdInsecureRegistryCommand(registryHost: string) {
     '  skip_verify = true',
     'EOF',
     '',
-    'sudo grep -q \'config_path = "/etc/containerd/certs.d"\' /etc/containerd/config.toml || sudo tee -a /etc/containerd/config.toml >/dev/null <<\'EOF\'',
+    '${SUDO} test -f /etc/containerd/config.toml || containerd config default | ${SUDO} tee /etc/containerd/config.toml >/dev/null',
+    '${SUDO} cp /etc/containerd/config.toml /etc/containerd/config.toml.bak.$(date +%s)',
+    'if ${SUDO} grep -q \'config_path = "/etc/containerd/certs.d"\' /etc/containerd/config.toml; then',
+    '  true',
+    'elif ${SUDO} grep -q \'^[[:space:]]*config_path[[:space:]]*=\' /etc/containerd/config.toml; then',
+    '  ${SUDO} sed -i \'s#^[[:space:]]*config_path[[:space:]]*=.*#  config_path = "/etc/containerd/certs.d"#\' /etc/containerd/config.toml',
+    'elif ${SUDO} grep -q \'^\\[plugins\\."io.containerd.grpc.v1.cri"\\.registry\\]\' /etc/containerd/config.toml; then',
+    '  ${SUDO} sed -i \'/^\\[plugins\\."io.containerd.grpc.v1.cri"\\.registry\\]/a\\  config_path = "/etc/containerd/certs.d"\' /etc/containerd/config.toml',
+    'else',
+    '  ${SUDO} tee -a /etc/containerd/config.toml >/dev/null <<\'EOF\'',
     '',
     '[plugins."io.containerd.grpc.v1.cri".registry]',
     '  config_path = "/etc/containerd/certs.d"',
     'EOF',
+    'fi',
     '',
-    'sudo systemctl restart containerd',
+    '${SUDO} systemctl restart containerd',
   ].join('\n');
 }
 
 function dockerInsecureRegistryCommand(registryHost: string) {
   return [
-    `# 将 ${registryHost} 合并进 /etc/docker/daemon.json`,
-    '{',
-    `  "insecure-registries": ["${registryHost}"]`,
-    '}',
-    'sudo systemctl restart docker',
+    `REGISTRY='${registryHost}'`,
+    ...runtimeConfigPrivilegePrelude(),
+    'command -v python3 >/dev/null 2>&1 || { echo "python3 is required to update /etc/docker/daemon.json" >&2; exit 1; }',
+    '${SUDO} mkdir -p /etc/docker',
+    '${SUDO} test ! -f /etc/docker/daemon.json || ${SUDO} cp /etc/docker/daemon.json /etc/docker/daemon.json.bak.$(date +%s)',
+    "${SUDO} env REGISTRY=\"${REGISTRY}\" python3 - <<'PY'",
+    'import json',
+    'import os',
+    'from pathlib import Path',
+    '',
+    "path = Path('/etc/docker/daemon.json')",
+    "registry = os.environ['REGISTRY']",
+    'data = {}',
+    'if path.exists() and path.read_text().strip():',
+    '    data = json.loads(path.read_text())',
+    "registries = data.setdefault('insecure-registries', [])",
+    'if registry not in registries:',
+    '    registries.append(registry)',
+    'path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\\n")',
+    'PY',
+    '',
+    '${SUDO} systemctl restart docker',
   ].join('\n');
 }
 
 function RegistryTrustGuide({ installCommand }: { installCommand: string }) {
   const { tr } = useI18n();
   const registryHost = managerRegistryHostFromCommand(installCommand);
+  const containerdCommand = useMemo(() => containerdInsecureRegistryCommand(registryHost), [registryHost]);
+  const dockerCommand = useMemo(() => dockerInsecureRegistryCommand(registryHost), [registryHost]);
+  const [copiedRuntime, setCopiedRuntime] = useState<'containerd' | 'docker' | null>(null);
+
+  async function copyRegistryCommand(runtime: 'containerd' | 'docker', command: string) {
+    await navigator.clipboard?.writeText(command);
+    setCopiedRuntime(runtime);
+    window.setTimeout(() => setCopiedRuntime(null), 1200);
+  }
+
   return (
     <details className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-amber-200" open>
       <summary className="cursor-pointer select-none text-sm font-medium text-zinc-100">
@@ -3527,20 +3579,32 @@ function RegistryTrustGuide({ installCommand }: { installCommand: string }) {
         </p>
         <p className="text-xs leading-5 text-amber-300">
           {tr(
-            '下面是已有节点的示例配置。containerd 需要启用 certs.d 配置目录；命令会在缺失时补充 config_path。生产环境建议通过节点池初始化、cloud-init、启动模板、MachineConfig 或运维系统统一下发，确保后续新增节点也带上同样配置。',
-            'The examples below are for existing nodes. containerd must enable the certs.d config directory; the command adds config_path when it is missing. In production, distribute the same settings through node-pool bootstrap, cloud-init, launch templates, MachineConfig, or your ops system so newly added nodes inherit them too.',
+            '下面是已有节点的示例配置，请按节点实际运行时选择 containerd 或 Docker Engine 一段执行。containerd 需要启用 certs.d 配置目录；命令会在缺失时补充 config_path。生产环境建议通过节点池初始化、cloud-init、启动模板、MachineConfig 或运维系统统一下发，确保后续新增节点也带上同样配置。',
+            'The examples below are for existing nodes. Run either the containerd or Docker Engine block based on the node runtime. containerd must enable the certs.d config directory; the command adds config_path when it is missing. In production, distribute the same settings through node-pool bootstrap, cloud-init, launch templates, MachineConfig, or your ops system so newly added nodes inherit them too.',
           )}
         </p>
         <div>
-          <div className="mb-1 text-amber-300">containerd</div>
+          <div className="mb-1 flex items-center justify-between gap-2 text-amber-300">
+            <span>containerd</span>
+            <Button onClick={() => void copyRegistryCommand('containerd', containerdCommand)}>
+              {copiedRuntime === 'containerd' ? <Check size={12} /> : <Clipboard size={12} />}
+              {copiedRuntime === 'containerd' ? tr('已复制', 'Copied') : tr('复制', 'Copy')}
+            </Button>
+          </div>
           <pre className="max-h-48 overflow-auto rounded-md border border-zinc-800 bg-zinc-900 p-2 text-[11px] leading-5 text-zinc-300">
-            {containerdInsecureRegistryCommand(registryHost)}
+            {containerdCommand}
           </pre>
         </div>
         <div>
-          <div className="mb-1 text-amber-300">Docker Engine</div>
+          <div className="mb-1 flex items-center justify-between gap-2 text-amber-300">
+            <span>Docker Engine</span>
+            <Button onClick={() => void copyRegistryCommand('docker', dockerCommand)}>
+              {copiedRuntime === 'docker' ? <Check size={12} /> : <Clipboard size={12} />}
+              {copiedRuntime === 'docker' ? tr('已复制', 'Copied') : tr('复制', 'Copy')}
+            </Button>
+          </div>
           <pre className="max-h-36 overflow-auto rounded-md border border-zinc-800 bg-zinc-900 p-2 text-[11px] leading-5 text-zinc-300">
-            {dockerInsecureRegistryCommand(registryHost)}
+            {dockerCommand}
           </pre>
         </div>
         <p className="text-xs leading-5 text-amber-300">

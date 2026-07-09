@@ -300,6 +300,11 @@ describe('KubernetesPage', () => {
 
   it('接入命令在 localhost 页面不自动替换远端 manager 占位符', async () => {
     let payload: { name?: string; uid?: string; mode?: string } | null = null;
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
     server.use(
       http.post('/api/v1/k8s/clusters', async ({ request }) => {
         payload = await request.json() as { name?: string; uid?: string; mode?: string };
@@ -339,10 +344,24 @@ describe('KubernetesPage', () => {
     expect(command).toHaveTextContent("manager.publicURL='https://<manager>'");
     expect(command).toHaveTextContent("manager.tunnelAddr='<manager>:40012'");
     expect(screen.getByText('自签证书场景：先配置 insecure registry')).toBeInTheDocument();
-    expect(screen.getByText(/REGISTRY='<manager>'/)).toBeInTheDocument();
+    expect(screen.getAllByText(/REGISTRY='<manager>'/).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText(/SUDO=''/).length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText(/\/etc\/containerd\/certs\.d\/\$\{REGISTRY\}/)).toBeInTheDocument();
     expect(screen.queryByText(/sudo awk/)).not.toBeInTheDocument();
     expect(screen.getAllByText(/config_path/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/python3 is required to update \/etc\/docker\/daemon\.json/)).toBeInTheDocument();
+    expect(screen.getByText(/\$\{SUDO\} env REGISTRY="\$\{REGISTRY\}" python3/)).toBeInTheDocument();
+    expect(screen.getByText(/insecure-registries/)).toBeInTheDocument();
+
+    const copyButtons = screen.getAllByRole('button', { name: '复制' });
+    fireEvent.click(copyButtons[1]);
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(expect.stringContaining('/etc/containerd/certs.d/${REGISTRY}'));
+    });
+    fireEvent.click(copyButtons[2]);
+    await waitFor(() => {
+      expect(writeText).toHaveBeenLastCalledWith(expect.stringContaining('insecure-registries'));
+    });
   });
 
   it('渲染集群详情里的 Pod 快照', async () => {
