@@ -455,6 +455,19 @@ func (u *Usecase) ClearHostDeviceLink(ctx context.Context, edgeID uint64) error 
 	}
 
 	for _, deviceID := range deviceIDs {
+		removed, handled, err := u.deleteDeviceIfLastEdge(ctx, edgeID, deviceID)
+		if err != nil {
+			return fmt.Errorf("delete stale controller device %d: %w", deviceID, err)
+		}
+		if handled {
+			if removed && u.log != nil {
+				u.log.Info("clear host device link: removed stale controller device",
+					slog.Uint64("edge_id", edgeID),
+					slog.Uint64("device_id", deviceID),
+				)
+			}
+			continue
+		}
 		if u.links != nil {
 			if err := u.links.Unlink(ctx, edgeID, deviceID, devicemodel.EdgeDeviceRelationHost); err != nil {
 				return fmt.Errorf("unlink edge<->device(host): %w", err)

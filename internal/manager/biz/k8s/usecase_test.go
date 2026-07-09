@@ -294,6 +294,46 @@ func TestUsecaseTopologyReconcilesKubernetesNodesIntoCluster(t *testing.T) {
 	}
 }
 
+func TestUsecaseTopologyBackfillsMissingDeviceNode(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	mirror := &fakeTopologyMirror{}
+	uc := NewUsecase(repo, newFakeIssuer(), Config{})
+	uc.SetTopologyMirror(mirror)
+	reg, err := uc.CreateCluster(ctx, CreateClusterInput{Name: "prod", UID: "cluster-uid"})
+	if err != nil {
+		t.Fatalf("CreateCluster() error = %v", err)
+	}
+
+	deviceID := uint64(17)
+	if err := uc.HandleRegister(ctx, 4, &deviceID, tunnel.KubernetesInfo{
+		ClusterID: reg.Cluster.ID,
+		Role:      model.RoleNode,
+		NodeName:  "node-a",
+		NodeUID:   "node-uid-a",
+	}); err != nil {
+		t.Fatalf("HandleRegister(node) error = %v", err)
+	}
+
+	deviceNodeID := fakeTopologyDeviceNodeID(deviceID)
+	if got := len(mirror.deviceNodes); got != 1 {
+		t.Fatalf("device nodes mirrored = %d, want 1", got)
+	}
+	if got := mirror.deviceNodes[0]; got.deviceID != deviceID || got.deviceName != "node-a" {
+		t.Fatalf("device node mirror = %#v", got)
+	}
+	if got := repo.deviceNodeIDs[deviceID]; got != deviceNodeID {
+		t.Fatalf("repo device node id = %d, want %d", got, deviceNodeID)
+	}
+	if got := len(mirror.memberships); got != 1 {
+		t.Fatalf("memberships = %d, want 1", got)
+	}
+	got := mirror.memberships[0]
+	if got.clusterNodeID != fakeTopologyClusterNodeID(reg.Cluster.ID) || got.deviceNodeID != deviceNodeID || got.deviceID != deviceID || got.nodeName != "node-a" {
+		t.Fatalf("membership = %#v", got)
+	}
+}
+
 func TestUsecaseDeleteClusterDeletesTopologyMirror(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeRepo()
@@ -810,6 +850,11 @@ func (r *fakeRepo) UpdateClusterTopologyNode(_ context.Context, id, nodeID uint6
 	return nil
 }
 
+func (r *fakeRepo) UpdateDeviceTopologyNode(_ context.Context, id, nodeID uint64) error {
+	r.deviceNodeIDs[id] = nodeID
+	return nil
+}
+
 func (r *fakeRepo) ListClusterEdgeIDs(_ context.Context, clusterID uint64) ([]uint64, error) {
 	c, ok := r.clusters[clusterID]
 	if !ok {
@@ -1078,6 +1123,7 @@ func (r *fakeRepo) ListTopologyNodeLinks(_ context.Context, clusterID uint64) ([
 			DeviceID: n.DeviceID,
 		}
 		if n.DeviceID != nil {
+			link.DeviceName = n.NodeName
 			if nodeID := r.deviceNodeIDs[*n.DeviceID]; nodeID != 0 {
 				link.DeviceNodeID = &nodeID
 			}
@@ -1183,6 +1229,7 @@ func fakeEventTimestamp(event *model.Event) time.Time {
 
 type fakeTopologyMirror struct {
 	clusters             []fakeTopologyCluster
+	deviceNodes          []fakeTopologyDeviceNode
 	memberships          []fakeTopologyMembership
 	prunes               []fakeTopologyPrune
 	deletions            []fakeTopologyDeletion
@@ -1196,6 +1243,11 @@ type fakeTopologyCluster struct {
 	uid           string
 	mode          string
 	status        string
+}
+
+type fakeTopologyDeviceNode struct {
+	deviceID   uint64
+	deviceName string
 }
 
 type fakeTopologyMembership struct {
@@ -1216,6 +1268,14 @@ type fakeTopologyPrune struct {
 type fakeTopologyDeletion struct {
 	clusterID     uint64
 	currentNodeID *uint64
+}
+
+func (m *fakeTopologyMirror) EnsureNodeForDevice(_ context.Context, deviceID uint64, deviceName string) (uint64, error) {
+	m.deviceNodes = append(m.deviceNodes, fakeTopologyDeviceNode{
+		deviceID:   deviceID,
+		deviceName: deviceName,
+	})
+	return fakeTopologyDeviceNodeID(deviceID), nil
 }
 
 func (m *fakeTopologyMirror) EnsureKubernetesCluster(_ context.Context, clusterID uint64, currentNodeID *uint64, name, uid, mode, status string) (uint64, error) {
@@ -1266,6 +1326,10 @@ func (m *fakeTopologyMirror) PruneDeletedKubernetesClusters(_ context.Context, a
 
 func fakeTopologyClusterNodeID(clusterID uint64) uint64 {
 	return 900 + clusterID
+}
+
+func fakeTopologyDeviceNodeID(deviceID uint64) uint64 {
+	return 1900 + deviceID
 }
 
 type fakeIssuer struct {

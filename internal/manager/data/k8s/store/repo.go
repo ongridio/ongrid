@@ -163,6 +163,25 @@ func (r *Repo) UpdateClusterTopologyNode(ctx context.Context, id, nodeID uint64)
 	return nil
 }
 
+func (r *Repo) UpdateDeviceTopologyNode(ctx context.Context, id, nodeID uint64) error {
+	res := r.db.WithContext(ctx).Table("devices").
+		Where("id = ? AND deleted_at IS NULL AND (node_id IS NULL OR node_id <> ?)", id, nodeID).
+		Update("node_id", nodeID)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		var exists int64
+		if err := r.db.WithContext(ctx).Table("devices").Where("id = ? AND deleted_at IS NULL", id).Count(&exists).Error; err != nil {
+			return err
+		}
+		if exists == 0 {
+			return errs.ErrNotFound
+		}
+	}
+	return nil
+}
+
 func (r *Repo) ListClusterEdgeIDs(ctx context.Context, clusterID uint64) ([]uint64, error) {
 	var rows []struct {
 		EdgeID uint64 `gorm:"column:edge_id"`
@@ -541,7 +560,7 @@ func (r *Repo) ListTopologyNodeLinks(ctx context.Context, clusterID uint64) ([]b
 	var out []biz.TopologyNodeLink
 	if err := r.db.WithContext(ctx).
 		Table("k8s_nodes AS kn").
-		Select("kn.node_name, kn.node_uid, kn.device_id, d.node_id AS device_node_id").
+		Select("kn.node_name, kn.node_uid, kn.device_id, d.name AS device_name, d.node_id AS device_node_id").
 		Joins("LEFT JOIN devices AS d ON d.id = kn.device_id AND d.deleted_at IS NULL").
 		Where("kn.cluster_id = ?", clusterID).
 		Order("kn.node_name ASC").

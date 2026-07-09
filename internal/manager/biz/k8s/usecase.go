@@ -39,6 +39,7 @@ type Repository interface {
 	UpdateClusterController(ctx context.Context, id uint64, in ClusterControllerRegistration) error
 	UpdateClusterInventorySync(ctx context.Context, id uint64, in ClusterInventorySync) error
 	UpdateClusterTopologyNode(ctx context.Context, id, nodeID uint64) error
+	UpdateDeviceTopologyNode(ctx context.Context, id, nodeID uint64) error
 	ListClusterEdgeIDs(ctx context.Context, clusterID uint64) ([]uint64, error)
 	DeleteCluster(ctx context.Context, id uint64) error
 
@@ -95,6 +96,7 @@ type EdgeCredential struct {
 // generic topology graph. It is defined in this package so k8s owns the
 // reconcile timing without depending on topology concrete types.
 type TopologyMirror interface {
+	EnsureNodeForDevice(ctx context.Context, deviceID uint64, deviceName string) (uint64, error)
 	EnsureKubernetesCluster(ctx context.Context, clusterID uint64, currentNodeID *uint64, name, uid, mode, status string) (uint64, error)
 	EnsureKubernetesNodeMembership(ctx context.Context, clusterNodeID, deviceNodeID, clusterID, deviceID uint64, nodeName, nodeUID string) error
 	PruneKubernetesNodeMemberships(ctx context.Context, clusterNodeID, clusterID uint64, keepDeviceNodeIDs []uint64) error
@@ -106,6 +108,7 @@ type TopologyNodeLink struct {
 	NodeName     string
 	NodeUID      string
 	DeviceID     *uint64
+	DeviceName   string
 	DeviceNodeID *uint64
 }
 
@@ -798,11 +801,32 @@ func (u *Usecase) reconcileTopology(ctx context.Context, clusterID uint64) error
 	}
 	keep := make([]uint64, 0, len(links))
 	for _, link := range links {
-		if link.DeviceID == nil || *link.DeviceID == 0 || link.DeviceNodeID == nil || *link.DeviceNodeID == 0 {
+		if link.DeviceID == nil || *link.DeviceID == 0 {
 			continue
 		}
-		deviceNodeID := *link.DeviceNodeID
-		if err := u.topology.EnsureKubernetesNodeMembership(ctx, clusterNodeID, deviceNodeID, c.ID, *link.DeviceID, link.NodeName, link.NodeUID); err != nil {
+		deviceID := *link.DeviceID
+		deviceNodeID := uint64(0)
+		if link.DeviceNodeID != nil {
+			deviceNodeID = *link.DeviceNodeID
+		}
+		if deviceNodeID == 0 {
+			deviceName := strings.TrimSpace(link.DeviceName)
+			if deviceName == "" {
+				deviceName = strings.TrimSpace(link.NodeName)
+			}
+			nodeID, err := u.topology.EnsureNodeForDevice(ctx, deviceID, deviceName)
+			if err != nil {
+				return fmt.Errorf("ensure topology node for k8s device %d: %w", deviceID, err)
+			}
+			if nodeID == 0 {
+				continue
+			}
+			if err := u.repo.UpdateDeviceTopologyNode(ctx, deviceID, nodeID); err != nil {
+				return fmt.Errorf("link k8s device topology node: %w", err)
+			}
+			deviceNodeID = nodeID
+		}
+		if err := u.topology.EnsureKubernetesNodeMembership(ctx, clusterNodeID, deviceNodeID, c.ID, deviceID, link.NodeName, link.NodeUID); err != nil {
 			return fmt.Errorf("ensure k8s node topology membership %q: %w", link.NodeName, err)
 		}
 		keep = append(keep, deviceNodeID)

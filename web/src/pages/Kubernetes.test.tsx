@@ -338,6 +338,8 @@ describe('KubernetesPage', () => {
     expect(payload).toEqual({ name: 'kind-created', mode: 'full-node' });
     expect(command).toHaveTextContent("manager.publicURL='https://<manager>'");
     expect(command).toHaveTextContent("manager.tunnelAddr='<manager>:40012'");
+    expect(screen.getByText('自签证书场景：先配置 insecure registry')).toBeInTheDocument();
+    expect(screen.getByText(/\/etc\/containerd\/certs\.d\/<manager>/)).toBeInTheDocument();
   });
 
   it('渲染集群详情里的 Pod 快照', async () => {

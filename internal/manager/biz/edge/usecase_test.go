@@ -692,12 +692,8 @@ func TestClearHostDeviceLinkRemovesControllerDeviceAssociation(t *testing.T) {
 	if _, err := links.LookupHostDevice(ctx, res.Edge.ID); !errors.Is(err, errs.ErrNotFound) {
 		t.Fatalf("LookupHostDevice after clear err = %v, want ErrNotFound", err)
 	}
-	dev, err := devices.Get(ctx, deviceID)
-	if err != nil {
-		t.Fatalf("Get device after clear: %v", err)
-	}
-	if dev.Online {
-		t.Fatalf("mistaken controller device should be marked offline")
+	if _, err := devices.Get(ctx, deviceID); !errors.Is(err, errs.ErrNotFound) {
+		t.Fatalf("Get device after clear err = %v, want ErrNotFound", err)
 	}
 }
 

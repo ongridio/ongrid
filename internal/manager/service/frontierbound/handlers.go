@@ -224,6 +224,9 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 			return nil, fmt.Errorf("register_edge: edge binding not ready")
 		}
 		if in.Kubernetes != nil && isKubernetesControllerRole(in.Kubernetes.Role) {
+			if err := w.EdgeUC.ClearHostDeviceLink(rpcCtx, canonicalEdgeID); err != nil {
+				return nil, fmt.Errorf("register_edge: k8s controller clear host link: %w", err)
+			}
 			if w.K8sRegistry != nil {
 				if err := w.K8sRegistry.HandleRegister(rpcCtx, canonicalEdgeID, nil, *in.Kubernetes); err != nil {
 					log.Error("frontierbound: k8s controller register",
@@ -233,9 +236,6 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 					)
 					return nil, fmt.Errorf("register_edge: k8s controller: %w", err)
 				}
-			}
-			if err := w.EdgeUC.ClearHostDeviceLink(rpcCtx, canonicalEdgeID); err != nil {
-				return nil, fmt.Errorf("register_edge: k8s controller clear host link: %w", err)
 			}
 			if err := w.EdgeUC.HandleHeartbeat(rpcCtx, canonicalEdgeID, time.Now().UTC()); err != nil {
 				return nil, fmt.Errorf("register_edge: k8s controller heartbeat: %w", err)

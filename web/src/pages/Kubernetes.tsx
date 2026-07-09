@@ -3465,12 +3465,90 @@ function RegistrationModal({
         </div>
         <div className="rounded-md border border-amber-500/20 bg-amber-500/10 px-2 py-1.5 text-amber-200">
           {tr(
-            'K8s Edge 镜像默认从 manager 内置镜像仓库拉取；如果 manager 使用自签证书，需要在 Kubernetes 节点信任该证书或配置 insecure registry。',
-            'K8s Edge images are pulled from the manager-hosted registry by default. If the manager uses a self-signed certificate, Kubernetes nodes must trust it or configure an insecure registry.',
+            'K8s Edge 镜像默认从 manager 内置镜像仓库拉取；下面的 Helm TLS 参数只处理 chart 下载和 Edge 访问 manager，不会替节点运行时信任镜像仓库。',
+            'K8s Edge images are pulled from the manager-hosted registry by default. The Helm TLS flags only cover chart download and Edge-to-manager traffic; they do not make node runtimes trust the image registry.',
           )}
         </div>
+        <RegistryTrustGuide installCommand={installCommand} />
       </div>
     </Modal>
+  );
+}
+
+function managerRegistryHostFromCommand(command: string) {
+  const matched = command.match(/https:\/\/([^/'"\s]+)\/edge\/k8s\/ongrid-edge\.tgz/);
+  return matched?.[1] ?? '<manager>';
+}
+
+function containerdInsecureRegistryCommand(registryHost: string) {
+  return [
+    `sudo mkdir -p /etc/containerd/certs.d/${registryHost}`,
+    `sudo tee /etc/containerd/certs.d/${registryHost}/hosts.toml >/dev/null <<'EOF'`,
+    `server = "https://${registryHost}"`,
+    '',
+    `[host."https://${registryHost}"]`,
+    '  capabilities = ["pull", "resolve"]',
+    '  skip_verify = true',
+    'EOF',
+    '',
+    '# 确认 /etc/containerd/config.toml 中启用了 registry config_path:',
+    '# [plugins."io.containerd.grpc.v1.cri".registry]',
+    '#   config_path = "/etc/containerd/certs.d"',
+    'sudo systemctl restart containerd',
+  ].join('\n');
+}
+
+function dockerInsecureRegistryCommand(registryHost: string) {
+  return [
+    `# 将 ${registryHost} 合并进 /etc/docker/daemon.json`,
+    '{',
+    `  "insecure-registries": ["${registryHost}"]`,
+    '}',
+    'sudo systemctl restart docker',
+  ].join('\n');
+}
+
+function RegistryTrustGuide({ installCommand }: { installCommand: string }) {
+  const { tr } = useI18n();
+  const registryHost = managerRegistryHostFromCommand(installCommand);
+  return (
+    <details className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-amber-200" open>
+      <summary className="cursor-pointer select-none text-sm font-medium text-zinc-100">
+        {tr('自签证书场景：先配置 insecure registry', 'Self-signed certificate: configure insecure registry first')}
+      </summary>
+      <div className="mt-2 space-y-3">
+        <p className="text-xs leading-5">
+          {tr(
+            `如果 manager 使用自签证书，节点运行时拉取 ${registryHost} 镜像时会先校验证书。imagePullSecrets 只能解决仓库认证，不能跳过证书校验；需要先让节点信任 Ongrid 证书，或按下面方式配置 insecure registry。`,
+            `If the manager uses a self-signed certificate, node runtimes verify the certificate before pulling images from ${registryHost}. imagePullSecrets only handle registry authentication and cannot bypass certificate verification; trust the Ongrid certificate first, or configure an insecure registry as below.`,
+          )}
+        </p>
+        <p className="text-xs leading-5 text-amber-300">
+          {tr(
+            '下面是已有节点的示例配置。生产环境建议通过节点池初始化、cloud-init、启动模板、MachineConfig 或运维系统统一下发，确保后续新增节点也带上同样配置。',
+            'The examples below are for existing nodes. In production, distribute the same settings through node-pool bootstrap, cloud-init, launch templates, MachineConfig, or your ops system so newly added nodes inherit them too.',
+          )}
+        </p>
+        <div>
+          <div className="mb-1 text-amber-300">containerd</div>
+          <pre className="max-h-48 overflow-auto rounded-md border border-zinc-800 bg-zinc-900 p-2 text-[11px] leading-5 text-zinc-300">
+            {containerdInsecureRegistryCommand(registryHost)}
+          </pre>
+        </div>
+        <div>
+          <div className="mb-1 text-amber-300">Docker Engine</div>
+          <pre className="max-h-36 overflow-auto rounded-md border border-zinc-800 bg-zinc-900 p-2 text-[11px] leading-5 text-zinc-300">
+            {dockerInsecureRegistryCommand(registryHost)}
+          </pre>
+        </div>
+        <p className="text-xs leading-5 text-amber-300">
+          {tr(
+            'K3s / RKE2 等发行版可以把等价配置写入 registries.yaml；托管云节点池通常需要放到节点启动脚本或节点池自定义配置里。',
+            'K3s / RKE2 can put equivalent settings in registries.yaml; managed cloud node pools usually need the settings in bootstrap scripts or node-pool custom configuration.',
+          )}
+        </p>
+      </div>
+    </details>
   );
 }
 
