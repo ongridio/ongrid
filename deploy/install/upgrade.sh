@@ -146,6 +146,65 @@ ensure_host_gateway_env() {
     log_warn "docker daemon does not support host-gateway; using ONGRID_HOST_GATEWAY=${gateway}"
 }
 
+env_file_value() {
+    local key="$1"
+    grep -E "^${key}=" "$ENV_FILE" 2>/dev/null | tail -n 1 | cut -d= -f2- || true
+}
+
+seed_k8s_edge_registry() {
+    local version="$1"
+    local tag="${version#v}"
+    local registry_port image_dir found tar registry_ref src candidate i
+    registry_port=$(env_file_value ONGRID_REGISTRY_PORT)
+    : "${registry_port:=5000}"
+    image_dir="$INSTALL_DIR/edge/k8s/images"
+    if [[ ! -d "$image_dir" ]]; then
+        log_warn "Kubernetes edge image dir not found; skip manager registry seed"
+        return
+    fi
+
+    found=0
+    while IFS= read -r -d '' tar; do
+        found=1
+        log_info "loading Kubernetes edge image $(basename "$tar")"
+        docker load -i "$tar"
+    done < <(find "$image_dir" -maxdepth 1 -type f -name 'ongrid-edge-*.tar' -print0 2>/dev/null || true)
+    if [[ "$found" -eq 0 ]]; then
+        log_warn "no Kubernetes edge image tar found under $image_dir; skip manager registry seed"
+        return
+    fi
+
+    log_info "starting local registry seed endpoint"
+    (cd "$INSTALL_DIR" && docker compose --env-file "$ENV_FILE" up -d registry)
+    for i in $(seq 1 30); do
+        if curl -fsS "http://127.0.0.1:${registry_port}/v2/" >/dev/null 2>&1; then
+            break
+        fi
+        if [[ "$i" -eq 30 ]]; then
+            log_error "local registry did not become ready on 127.0.0.1:${registry_port}"
+            return 1
+        fi
+        sleep 1
+    done
+
+    src=""
+    for candidate in "ongrid/ongrid-edge:${tag}" "ongrid-edge:${version}" "ongrid-edge:${tag}"; do
+        if docker image inspect "$candidate" >/dev/null 2>&1; then
+            src="$candidate"
+            break
+        fi
+    done
+    if [[ -z "$src" ]]; then
+        log_error "loaded Kubernetes edge image is missing expected tag for version ${version}"
+        return 1
+    fi
+
+    registry_ref="127.0.0.1:${registry_port}/ongrid/ongrid-edge:${tag}"
+    docker tag "$src" "$registry_ref"
+    docker push "$registry_ref"
+    log_info "seeded manager Kubernetes image registry: ${registry_ref}"
+}
+
 trap 'log_error "upgrade failed at line $LINENO"' ERR
 
 if [[ $EUID -ne 0 ]]; then
@@ -210,6 +269,7 @@ mkdir -p \
     "$ONGRID_DATA_DIR/tempo" \
     "$ONGRID_DATA_DIR/qdrant" \
     "$ONGRID_DATA_DIR/grafana" \
+    "$ONGRID_DATA_DIR/registry" \
     "$ONGRID_DATA_DIR/embeddings" \
     "$ONGRID_DATA_DIR/skills" \
     "$ONGRID_DATA_DIR/pages" \
@@ -448,6 +508,12 @@ if [[ -f "$SCRIPT_DIR/images/ongrid-web.tar" ]]; then
 else
     log_warn "images/ongrid-web.tar not found; assuming ongrid-web image already present"
 fi
+if [[ -f "$SCRIPT_DIR/images/registry.tar" ]]; then
+    log_info "loading registry image"
+    docker load -i "$SCRIPT_DIR/images/registry.tar"
+else
+    log_warn "images/registry.tar not found; assuming registry image already present"
+fi
 docker image inspect "ongrid:${NEW_VERSION}" >/dev/null 2>&1 || {
     log_error "ongrid:${NEW_VERSION} not present after docker load"
     exit 1
@@ -479,10 +545,13 @@ backfill_plain() {
 # v0.7.20+: Grafana admin pin needed for SA token bootstrap.
 backfill_plain  GRAFANA_ADMIN_USER     admin
 backfill_secret GRAFANA_ADMIN_PASSWORD 20
+backfill_plain  ONGRID_REGISTRY_PORT    5000
+backfill_plain  ONGRID_REGISTRY_IMAGE   registry:2.8.3
 ensure_tunnel_addr_env
 ensure_host_gateway_env
 
 chmod 600 "$ENV_FILE"
+seed_k8s_edge_registry "$NEW_VERSION"
 
 # Bring stack back up; gorm AutoMigrate handles schema diff.
 log_info "starting stack with new version"

@@ -81,7 +81,7 @@ describe('KubernetesPage', () => {
             node_uid: 'node-uid',
             edge_id: 5,
             device_id: 17,
-            capacity: { cpu: '8', memory: '16Gi' },
+            capacity: { cpu: '8', memory: '9203336Ki' },
             kubelet_version: 'v1.30.0',
             last_seen_at: '2026-06-29T10:00:00Z',
           }],
@@ -1156,6 +1156,7 @@ describe('KubernetesPage', () => {
     expect(screen.getByText('Node Edge #5')).toBeInTheDocument();
     expect(screen.getByText('接入实例')).toBeInTheDocument();
     expect(screen.getByText('Agent')).toBeInTheDocument();
+    expect(screen.getByText('8.8 GiB')).toBeInTheDocument();
     expect(screen.getAllByText('v0.9.0').length).toBeGreaterThan(0);
   });
 

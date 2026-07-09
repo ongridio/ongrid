@@ -477,13 +477,7 @@ export default function EdgesPage() {
                       <tr
                         key={e.id}
                         className="cursor-pointer transition-colors hover:bg-zinc-900/40"
-                        onClick={() => {
-                          if (managedByK8s && managedCluster) {
-                            navigate(`/kubernetes/${managedCluster.clusterId}`);
-                            return;
-                          }
-                          navigate(`/edges/${encodeURIComponent(e.id)}`);
-                        }}
+                        onClick={() => navigate(`/devices/${encodeURIComponent(e.id)}`)}
                       >
                         {/* Identity columns are pinned `whitespace-nowrap`
                             — when the table is squeezed (sidebar + many

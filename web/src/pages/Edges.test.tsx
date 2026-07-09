@@ -1,5 +1,7 @@
-import { render, screen, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { act } from 'react';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -118,4 +120,33 @@ describe('EdgesPage', () => {
     expect(screen.getByText('bm-1')).toBeInTheDocument();
     expect(screen.getByText('Host Edge')).toBeInTheDocument();
   });
+
+  it('点击 K8s 托管设备行进入设备详情，Kubernetes 管理按钮仍进入集群页', async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter initialEntries={['/devices']}>
+        <EdgesPage />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+
+    const k8sNameCells = await screen.findAllByText('ongrid-k8s-control-plane');
+    const k8sRow = k8sNameCells[0].closest('tr') as HTMLTableRowElement;
+    expect(k8sRow).not.toBeNull();
+
+    await act(async () => {
+      await user.click(k8sRow);
+    });
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/devices/5'));
+
+    await act(async () => {
+      await user.click(within(k8sRow).getByText('Kubernetes 管理'));
+    });
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/kubernetes/1'));
+  });
 });
+
+function LocationProbe() {
+  const location = useLocation();
+  return <div data-testid="location">{location.pathname}</div>;
+}

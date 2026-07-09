@@ -84,10 +84,21 @@ false
 {{- end -}}
 {{- end -}}
 
+{{- define "ongrid-edge.managerRegistryHost" -}}
+{{- $publicURL := required "manager.publicURL is required" .Values.manager.publicURL -}}
+{{- regexReplaceAll "^https?://([^/]+).*$" $publicURL "${1}" -}}
+{{- end -}}
+
+{{- define "ongrid-edge.defaultImageRepository" -}}
+{{- printf "%s/ongrid/ongrid-edge" (include "ongrid-edge.managerRegistryHost" .) -}}
+{{- end -}}
+
 {{- define "ongrid-edge.edgeImage" -}}
-{{- printf "%s:%s" .Values.image.edge.repository (default .Chart.AppVersion .Values.image.edge.tag) -}}
+{{- $repo := default (include "ongrid-edge.defaultImageRepository" .) .Values.image.edge.repository -}}
+{{- printf "%s:%s" $repo (default .Chart.AppVersion .Values.image.edge.tag) -}}
 {{- end -}}
 
 {{- define "ongrid-edge.controllerImage" -}}
-{{- printf "%s:%s" .Values.image.controller.repository (default .Chart.AppVersion .Values.image.controller.tag) -}}
+{{- $repo := default (include "ongrid-edge.defaultImageRepository" .) .Values.image.controller.repository -}}
+{{- printf "%s:%s" $repo (default .Chart.AppVersion .Values.image.controller.tag) -}}
 {{- end -}}

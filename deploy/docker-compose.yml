@@ -183,6 +183,19 @@ services:
     networks:
       - ongrid_net
 
+  registry:
+    image: ${ONGRID_REGISTRY_IMAGE:-registry:2.8.3}
+    container_name: ongrid-registry
+    restart: unless-stopped
+    environment:
+      REGISTRY_STORAGE_DELETE_ENABLED: "true"
+    volumes:
+      - registry_data:/var/lib/registry
+    ports:
+      - "127.0.0.1:${ONGRID_REGISTRY_PORT:-5000}:5000"
+    networks:
+      - ongrid_net
+
   # ADR-008: TLS termination + frontend SPA + /api reverse proxy. Same
   # shape as deploy/install/docker-compose.yml; suitable for local dev.
   nginx:
@@ -196,6 +209,8 @@ services:
     restart: unless-stopped
     depends_on:
       ongrid:
+        condition: service_started
+      registry:
         condition: service_started
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
@@ -395,6 +410,7 @@ volumes:
   qdrant_data:
   loki_data:
   tempo_data:
+  registry_data:
 
 networks:
   ongrid_net:

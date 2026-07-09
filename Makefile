@@ -27,6 +27,11 @@ EDGE_PLUGIN_ARCHES ?= linux-amd64
 STAGE       := dist/stage/ongrid-$(VERSION)-$(PACKAGE_TARGET)
 OUT         := dist/out
 PACKAGE_CLEAN ?= 1
+K8S_EDGE_IMAGE_PLATFORM ?= linux/amd64
+K8S_EDGE_IMAGE_TAG ?= $(patsubst v%,%,$(VERSION))
+K8S_EDGE_IMAGE_REPO ?= ongrid/ongrid-edge
+K8S_EDGE_IMAGE_REF ?= $(K8S_EDGE_IMAGE_REPO):$(K8S_EDGE_IMAGE_TAG)
+REGISTRY_IMAGE ?= registry:2.8.3
 
 DB_DSN     ?= root:root@tcp(127.0.0.1:3306)/ongrid?charset=utf8mb4&parseTime=true&loc=Local
 MIGRATIONS := db/migrations
@@ -241,6 +246,24 @@ docker-build-web: ## [release] 构建 ongrid-web:$(VERSION) 镜像（前端 SPA 
 		-t ongrid-web:$(VERSION) \
 		-f deploy/Dockerfile.web \
 		--load .
+
+.PHONY: docker-build-k8s-edge
+docker-build-k8s-edge: ## [release] 构建 Kubernetes 使用的 ongrid-edge 镜像（默认 linux/amd64）
+	docker buildx build \
+		--platform $(K8S_EDGE_IMAGE_PLATFORM) \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg PROMTAIL_VERSION=$(PROMTAIL_VERSION) \
+		--build-arg NODE_EXPORTER_VERSION=$(NODE_EXPORTER_VERSION) \
+		--build-arg PROCESS_EXPORTER_VERSION=$(PROCESS_EXPORTER_VERSION) \
+		--build-arg OTELCOL_VERSION=$(OTELCOL_VERSION) \
+		-t ongrid-edge:$(VERSION) \
+		-t $(K8S_EDGE_IMAGE_REF) \
+		-f deploy/Dockerfile.ongrid-edge \
+		--load .
+
+.PHONY: docker-pull-registry
+docker-pull-registry: ## [release] 拉取内置镜像仓库镜像
+	docker pull --platform $(PLATFORM) $(REGISTRY_IMAGE)
 
 # Frontier broker is upstream singchia/frontier (ADR-007). Docker Hub pull
 # is unreliable in some networks, so we build the image locally from the
@@ -510,11 +533,11 @@ check-release-target:
 # For offline RAG (ONGRID_EMBEDDING_PROVIDER=local) run
 # `make fetch-embedding-model` once before `make package`, otherwise
 # dist/package.sh warns and ships a tarball without the model.
-package: check-release-target fetch-promtail fetch-otelcol fetch-node-exporter fetch-process-exporter fetch-db-exporters build-edge-all docker-build docker-build-broker docker-build-web ## [release] 打单架构 release tarball 到 dist/out/（TARGET_ARCH 可覆盖）
+package: check-release-target fetch-promtail fetch-otelcol fetch-node-exporter fetch-process-exporter fetch-db-exporters build-edge-all docker-build docker-build-broker docker-build-web docker-build-k8s-edge docker-pull-registry ## [release] 打单架构 release tarball 到 dist/out/（TARGET_ARCH 可覆盖）
 	@if [ "$(PACKAGE_CLEAN)" = "1" ]; then rm -rf dist/stage dist/out; fi
 	@mkdir -p dist/stage dist/out
 	@$(MAKE) --no-print-directory build-edge-bundle
-	PACKAGE_TARGET="$(PACKAGE_TARGET)" DOCKER_PLATFORM="$(PLATFORM)" bash dist/package.sh "$(VERSION)" "$(STAGE)" "$(OUT)"
+	PACKAGE_TARGET="$(PACKAGE_TARGET)" DOCKER_PLATFORM="$(PLATFORM)" K8S_EDGE_IMAGE_PLATFORM="$(K8S_EDGE_IMAGE_PLATFORM)" K8S_EDGE_IMAGE_REPO="$(K8S_EDGE_IMAGE_REPO)" K8S_EDGE_IMAGE_TAG="$(K8S_EDGE_IMAGE_TAG)" REGISTRY_IMAGE="$(REGISTRY_IMAGE)" bash dist/package.sh "$(VERSION)" "$(STAGE)" "$(OUT)"
 	@echo ""
 	@echo "=== release artefact ==="
 	@ls -lh $(OUT)/ongrid-$(VERSION)-$(PACKAGE_TARGET).tar.xz

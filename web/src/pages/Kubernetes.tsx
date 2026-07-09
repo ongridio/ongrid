@@ -3019,7 +3019,7 @@ function NodesTable({
               </td>
               <td className="whitespace-nowrap px-4 py-2.5 text-zinc-400">{item.kubelet_version || '—'}</td>
               <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-zinc-400">{resourceValue(item.capacity, 'cpu')}</td>
-              <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-zinc-400">{resourceValue(item.capacity, 'memory')}</td>
+              <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-zinc-400">{formatKubernetesMemory(resourceValue(item.capacity, 'memory'))}</td>
               <td className="whitespace-nowrap px-4 py-2.5 text-zinc-400">{relativeTime(item.last_seen_at)}</td>
               {actions && (
                 <td className="whitespace-nowrap px-4 py-2.5 text-right">
@@ -3463,6 +3463,12 @@ function RegistrationModal({
             {installCommand}
           </pre>
         </div>
+        <div className="rounded-md border border-amber-500/20 bg-amber-500/10 px-2 py-1.5 text-amber-200">
+          {tr(
+            'K8s Edge 镜像默认从 manager 内置镜像仓库拉取；如果 manager 使用自签证书，需要在 Kubernetes 节点信任该证书或配置 insecure registry。',
+            'K8s Edge images are pulled from the manager-hosted registry by default. If the manager uses a self-signed certificate, Kubernetes nodes must trust it or configure an insecure registry.',
+          )}
+        </div>
       </div>
     </Modal>
   );
@@ -3549,8 +3555,8 @@ function UpgradeCommandModal({
         </div>
         <div className="rounded-md border border-sky-500/20 bg-sky-500/10 px-2 py-1.5 text-sky-200">
           {tr(
-            '在目标 Kubernetes 集群执行该命令，会复用现有 Helm values 并同时滚动升级 Controller 与 Node Edge。',
-            'Run this in the target Kubernetes cluster. It reuses existing Helm values and rolls both Controller and Node Edge agents.',
+            '在目标 Kubernetes 集群执行该命令，会复用现有 Helm values，并从 manager 内置镜像仓库拉取新版镜像后滚动升级 Controller 与 Node Edge。',
+            'Run this in the target Kubernetes cluster. It reuses existing Helm values, pulls the new image from the manager-hosted registry, and rolls both Controller and Node Edge agents.',
           )}
         </div>
         <div>
@@ -4973,6 +4979,36 @@ function latestEventForPod(pod: KubernetesPod, events: KubernetesEvent[]) {
 function resourceValue(values: Record<string, unknown> | undefined, key: string) {
   const v = values?.[key];
   return typeof v === 'string' || typeof v === 'number' ? String(v) : '—';
+}
+
+function formatKubernetesMemory(value: string) {
+  if (!value || value === '—') return '—';
+  const match = value.trim().match(/^([0-9]+(?:\.[0-9]+)?)([A-Za-z]*)$/);
+  if (!match) return value;
+  const n = Number(match[1]);
+  if (!Number.isFinite(n)) return value;
+  const unit = match[2] || '';
+  const bytesByUnit: Record<string, number> = {
+    Ki: 1024,
+    Mi: 1024 ** 2,
+    Gi: 1024 ** 3,
+    Ti: 1024 ** 4,
+    K: 1000,
+    M: 1000 ** 2,
+    G: 1000 ** 3,
+    T: 1000 ** 4,
+  };
+  const bytes = unit === '' ? n : n * (bytesByUnit[unit] ?? Number.NaN);
+  if (!Number.isFinite(bytes)) return value;
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+  let out = bytes;
+  let i = 0;
+  while (out >= 1024 && i < units.length - 1) {
+    out /= 1024;
+    i++;
+  }
+  const digits = out >= 10 || Number.isInteger(out) ? 0 : 1;
+  return `${out.toFixed(digits)} ${units[i]}`;
 }
 
 function escapeLabelRegex(value: string) {

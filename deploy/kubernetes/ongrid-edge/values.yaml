@@ -15,11 +15,11 @@ enrollment:
 
 image:
   edge:
-    repository: ghcr.io/ongridio/ongrid-edge
+    repository: ""
     tag: ""
     pullPolicy: IfNotPresent
   controller:
-    repository: ghcr.io/ongridio/ongrid-edge
+    repository: ""
     tag: ""
     pullPolicy: IfNotPresent
 
