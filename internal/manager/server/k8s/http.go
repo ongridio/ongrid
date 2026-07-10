@@ -534,8 +534,6 @@ type clusterDTO struct {
 	InventorySyncDurationMS       int64                  `json:"inventory_sync_duration_ms,omitempty"`
 	InventoryWatchLagSeconds      int64                  `json:"inventory_watch_lag_seconds,omitempty"`
 	InventorySyncedAt             *time.Time             `json:"inventory_synced_at,omitempty"`
-	BootstrapTokenExpiresAt       *time.Time             `json:"bootstrap_token_expires_at,omitempty"`
-	NodeBootstrapTokenExpiresAt   *time.Time             `json:"node_bootstrap_token_expires_at,omitempty"`
 	CreatedAt                     time.Time              `json:"created_at"`
 	UpdatedAt                     time.Time              `json:"updated_at"`
 	UpgradeCommand                string                 `json:"upgrade_command,omitempty"`
@@ -712,8 +710,6 @@ func clusterDTOFromModelWithCoverage(c *model.Cluster, coverage *biz.NodeCoverag
 		InventorySyncDurationMS:       c.InventorySyncDurationMS,
 		InventoryWatchLagSeconds:      c.InventoryWatchLagSeconds,
 		InventorySyncedAt:             c.InventorySyncedAt,
-		BootstrapTokenExpiresAt:       c.BootstrapTokenExpiresAt,
-		NodeBootstrapTokenExpiresAt:   c.NodeBootstrapTokenExpiresAt,
 		CreatedAt:                     c.CreatedAt,
 		UpdatedAt:                     c.UpdatedAt,
 	}

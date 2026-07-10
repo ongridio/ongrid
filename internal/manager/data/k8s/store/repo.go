@@ -90,12 +90,10 @@ func applyClusterFilters(tx *gorm.DB, f biz.ListClustersFilter) *gorm.DB {
 	return tx
 }
 
-func (r *Repo) UpdateClusterTokens(ctx context.Context, id uint64, controllerTokenHash, nodeTokenHash string, controllerExpiresAt, nodeExpiresAt *time.Time) error {
+func (r *Repo) UpdateClusterTokens(ctx context.Context, id uint64, controllerTokenHash, nodeTokenHash string) error {
 	res := r.db.WithContext(ctx).Model(&model.Cluster{}).Where("id = ?", id).Updates(map[string]any{
-		"bootstrap_token_hash":            controllerTokenHash,
-		"node_bootstrap_token_hash":       nodeTokenHash,
-		"bootstrap_token_expires_at":      controllerExpiresAt,
-		"node_bootstrap_token_expires_at": nodeExpiresAt,
+		"bootstrap_token_hash":      controllerTokenHash,
+		"node_bootstrap_token_hash": nodeTokenHash,
 	})
 	if res.Error != nil {
 		return res.Error
@@ -104,12 +102,6 @@ func (r *Repo) UpdateClusterTokens(ctx context.Context, id uint64, controllerTok
 		return errs.ErrNotFound
 	}
 	return nil
-}
-
-func (r *Repo) ClearControllerBootstrapToken(ctx context.Context, id uint64) error {
-	return r.db.WithContext(ctx).Model(&model.Cluster{}).
-		Where("id = ?", id).
-		UpdateColumn("bootstrap_token_hash", "").Error
 }
 
 func (r *Repo) UpdateClusterController(ctx context.Context, id uint64, in biz.ClusterControllerRegistration) error {

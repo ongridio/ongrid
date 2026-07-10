@@ -271,7 +271,7 @@ func TestUsecaseNodeTokenCannotEnrollController(t *testing.T) {
 	}
 }
 
-func TestUsecaseControllerEnrollmentCanRetryUntilRegister(t *testing.T) {
+func TestUsecaseControllerEnrollmentCanRetryAfterRegister(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeRepo()
 	issuer := newFakeIssuer()
@@ -304,8 +304,12 @@ func TestUsecaseControllerEnrollmentCanRetryUntilRegister(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("HandleRegister() error = %v", err)
 	}
-	if _, err := uc.Enroll(ctx, in); !errors.Is(err, errs.ErrUnauthorized) {
-		t.Fatalf("Enroll(after register) error = %v, want unauthorized", err)
+	third, err := uc.Enroll(ctx, in)
+	if err != nil {
+		t.Fatalf("Enroll(after register) error = %v", err)
+	}
+	if third.EdgeID != first.EdgeID || issuer.rotate != 2 {
+		t.Fatalf("enroll after register edge=%d rotates=%d, want edge=%d rotates=2", third.EdgeID, issuer.rotate, first.EdgeID)
 	}
 }
 
@@ -415,25 +419,39 @@ func TestUsecaseControllerEnrollmentCompensatesUnboundEdge(t *testing.T) {
 	}
 }
 
-func TestValidBootstrapTokenEnforcesRoleExpiry(t *testing.T) {
-	now := time.Now()
-	expired := now.Add(-time.Hour)
-	valid := now.Add(time.Hour)
-	c := &model.Cluster{
-		BootstrapTokenHash:          tokenDigest("controller"),
-		NodeBootstrapTokenHash:      tokenDigest("node"),
-		BootstrapTokenExpiresAt:     &expired,
-		NodeBootstrapTokenExpiresAt: &valid,
+func TestUsecaseBootstrapTokensRemainValidUntilRotation(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	uc := NewUsecase(repo, newFakeIssuer(), Config{})
+	reg, err := uc.CreateCluster(ctx, CreateClusterInput{Name: "prod"})
+	if err != nil {
+		t.Fatalf("CreateCluster() error = %v", err)
 	}
-	if validBootstrapToken("controller", c, model.RoleController) {
-		t.Fatal("expired controller token should be rejected")
+
+	cluster := repo.clusters[reg.Cluster.ID]
+	if !validBootstrapToken(reg.BootstrapToken, cluster, model.RoleController) {
+		t.Fatal("controller token should remain valid until manual rotation")
 	}
-	if !validBootstrapToken("node", c, model.RoleNode) {
-		t.Fatal("unexpired node token should be accepted")
+	if !validBootstrapToken(reg.NodeBootstrapToken, cluster, model.RoleNode) {
+		t.Fatal("node token should remain valid until manual rotation")
 	}
-	c.NodeBootstrapTokenExpiresAt = &expired
-	if validBootstrapToken("node", c, model.RoleNode) {
-		t.Fatal("expired node token should be rejected")
+
+	rotated, err := uc.RotateBootstrapToken(ctx, reg.Cluster.ID)
+	if err != nil {
+		t.Fatalf("RotateBootstrapToken() error = %v", err)
+	}
+	cluster = repo.clusters[reg.Cluster.ID]
+	if validBootstrapToken(reg.BootstrapToken, cluster, model.RoleController) {
+		t.Fatal("old controller token should be rejected after manual rotation")
+	}
+	if validBootstrapToken(reg.NodeBootstrapToken, cluster, model.RoleNode) {
+		t.Fatal("old node token should be rejected after manual rotation")
+	}
+	if !validBootstrapToken(rotated.BootstrapToken, cluster, model.RoleController) {
+		t.Fatal("rotated controller token should be accepted")
+	}
+	if !validBootstrapToken(rotated.NodeBootstrapToken, cluster, model.RoleNode) {
+		t.Fatal("rotated node token should be accepted")
 	}
 }
 
@@ -1380,24 +1398,13 @@ func (r *fakeRepo) CountClusters(context.Context, ListClustersFilter) (int64, er
 	return int64(len(r.clusters)), nil
 }
 
-func (r *fakeRepo) UpdateClusterTokens(_ context.Context, id uint64, controllerTokenHash, nodeTokenHash string, controllerExpiresAt, nodeExpiresAt *time.Time) error {
+func (r *fakeRepo) UpdateClusterTokens(_ context.Context, id uint64, controllerTokenHash, nodeTokenHash string) error {
 	c, ok := r.clusters[id]
 	if !ok {
 		return errs.ErrNotFound
 	}
 	c.BootstrapTokenHash = controllerTokenHash
 	c.NodeBootstrapTokenHash = nodeTokenHash
-	c.BootstrapTokenExpiresAt = controllerExpiresAt
-	c.NodeBootstrapTokenExpiresAt = nodeExpiresAt
-	return nil
-}
-
-func (r *fakeRepo) ClearControllerBootstrapToken(_ context.Context, id uint64) error {
-	c, ok := r.clusters[id]
-	if !ok {
-		return errs.ErrNotFound
-	}
-	c.BootstrapTokenHash = ""
 	return nil
 }
 

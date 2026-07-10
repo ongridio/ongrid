@@ -59,7 +59,7 @@ import {
 import { useI18n } from '@/i18n/locale';
 import { cn } from '@/lib/cn';
 import { buildExploreUrl, fetchGrafanaRootURL, openObservabilityUrl } from '@/lib/drilldown';
-import { formatNumber, fullDateTime, relativeTime } from '@/lib/format';
+import { formatNumber, relativeTime } from '@/lib/format';
 import { usePoll } from '@/lib/usePoll';
 import { useObservability } from '@/store/observability';
 import { usePermissions } from '@/store/me';
@@ -179,7 +179,7 @@ export default function KubernetesPage() {
           )}
 
           <div className="overflow-x-auto rounded-xl border border-zinc-800/60 bg-zinc-900/40">
-            <table className="min-w-[920px] w-full text-sm">
+            <table className="min-w-[820px] w-full text-sm">
               <thead className="border-b border-zinc-800/60 bg-zinc-950/40 text-[11px] uppercase tracking-wider text-zinc-500">
                 <tr>
                   <th className="whitespace-nowrap px-4 py-2.5 text-left">{tr('集群', 'Cluster')}</th>
@@ -187,20 +187,19 @@ export default function KubernetesPage() {
                   <th className="whitespace-nowrap px-4 py-2.5 text-left">{tr('状态', 'Status')}</th>
                   <th className="whitespace-nowrap px-4 py-2.5 text-left">{tr('Controller Edge', 'Controller edge')}</th>
                   <th className="whitespace-nowrap px-4 py-2.5 text-left">{tr('最近同步', 'Last sync')}</th>
-                  <th className="whitespace-nowrap px-4 py-2.5 text-left">{tr('Token 到期', 'Token expires')}</th>
                   <th className="px-4 py-2.5 text-right">{tr('操作', 'Actions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800/40">
                 {loading && clusters.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-10 text-center text-zinc-500">
+                    <td colSpan={6} className="px-4 py-10 text-center text-zinc-500">
                       {tr('加载中…', 'Loading…')}
                     </td>
                   </tr>
                 ) : clusters.length === 0 ? (
                   <tr>
-                    <td colSpan={7}>
+                    <td colSpan={6}>
                       <EmptyState
                         icon={ShipWheel}
                         title={tr('暂无 Kubernetes 集群', 'No Kubernetes clusters')}
@@ -244,9 +243,6 @@ export default function KubernetesPage() {
                       </td>
                       <td className="whitespace-nowrap px-4 py-2.5 text-zinc-400">
                         {relativeTime(clusterSyncTime(cluster))}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-2.5 text-zinc-400">
-                        {fullDateTime(cluster.node_bootstrap_token_expires_at ?? cluster.bootstrap_token_expires_at)}
                       </td>
                       <td className="px-4 py-2.5 text-right" onClick={(ev) => ev.stopPropagation()}>
                         <div className="inline-flex items-center justify-end gap-1">
@@ -1093,7 +1089,6 @@ function ClusterSummary({
               </div>
               <div className="flex flex-wrap gap-1.5">
                 <Chip dense>{cluster?.mode || tr('接入模式未知', 'unknown mode')}</Chip>
-                <Chip dense>{tr(`Node Token 到期 ${relativeTime(cluster?.node_bootstrap_token_expires_at ?? cluster?.bootstrap_token_expires_at)}`, `node token expires ${relativeTime(cluster?.node_bootstrap_token_expires_at ?? cluster?.bootstrap_token_expires_at)}`)}</Chip>
                 <Chip dense>{tr('可刷新状态', 'refreshable')}</Chip>
               </div>
             </div>
@@ -1173,7 +1168,6 @@ function K8sPendingConnectionPanel({ cluster }: { cluster: KubernetesCluster | n
         <div className="flex flex-wrap gap-1.5">
           <Chip tone="info">{tr('待接入', 'Pending')}</Chip>
           <Chip>{cluster?.mode || tr('未知模式', 'unknown mode')}</Chip>
-          <Chip>{tr(`Node Token ${relativeTime(cluster?.node_bootstrap_token_expires_at ?? cluster?.bootstrap_token_expires_at)} 到期`, `Node token expires ${relativeTime(cluster?.node_bootstrap_token_expires_at ?? cluster?.bootstrap_token_expires_at)}`)}</Chip>
         </div>
       </div>
     </Card>

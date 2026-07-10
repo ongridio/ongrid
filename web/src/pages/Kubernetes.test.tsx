@@ -25,7 +25,6 @@ const cluster = {
   inventory_synced_at: new Date(Date.now() - 30_000).toISOString(),
   inventory_watch_lag_seconds: 2,
   inventory_sync_duration_ms: 51,
-  bootstrap_token_expires_at: '2026-06-30T10:00:00Z',
   created_at: '2026-06-29T09:00:00Z',
   updated_at: '2026-06-29T10:00:00Z',
   upgrade_command: "helm upgrade ongrid-edge 'https://manager.example/edge/k8s/ongrid-edge.tgz' --insecure-skip-tls-verify --namespace 'ongrid-system' --reuse-values --set-string manager.publicURL='https://manager.example' --set-string manager.tunnelAddr='manager.example:40012' --set-string manager.tlsInsecure=true",

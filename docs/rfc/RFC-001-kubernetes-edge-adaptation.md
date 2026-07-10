@@ -60,7 +60,7 @@ flowchart LR
 
 ### 数据关系
 
-- `k8s_clusters` 保存集群注册、接入模式、controller edge、token 过期时间、最近同步水位和 watch lag。
+- `k8s_clusters` 保存集群注册、接入模式、controller edge、bootstrap token hash、最近同步水位和 watch lag。
 - `k8s_nodes` 保存当前 Node 快照，并通过 `edge_id` / `device_id` 关联节点 edge。
 - `k8s_workloads`、`k8s_pods` 保存当前资源快照，用于列表、详情、AI 快照查询和排障入口。
 - `k8s_events` 保存短期事件窗口，用于异常队列和 AI 诊断。
@@ -81,7 +81,7 @@ flowchart LR
 4. controller Deployment 启动后 enroll，作为集群控制面身份连接 tunnel。
 5. node DaemonSet 在每个 Node 上启动，每个 Pod 先用 Node Name enroll，换取独立 edge credentials；controller 快照到达后再合并 Kubernetes Node UID。
    - 节点凭据以 `0600` 文件保存在该节点宿主机 `/var/tmp`，Pod 滚动重建时复用，不使用所有节点共享的 Kubernetes Secret。
-   - controller bootstrap token 在过期前允许 enrollment 重试，并在 controller 首次成功建立 tunnel 后立即失效，避免响应丢失导致安装无法恢复；node bootstrap token 在管理员轮换 token 或删除集群前持续有效，以支持后续新增节点自动接入。
+   - controller 和 node bootstrap token 长期有效，首次注册不会消费；仅管理员手动轮换 token 或删除集群时失效，以支持 controller 重建和新增节点自动接入。
 6. manager 将 Node edge 关联为普通设备，并在设备列表展示 `K8s Node`、所属集群和可选 `K8s Controller` 标签。
 
 ## 数据同步
@@ -129,7 +129,7 @@ Kubernetes Event 是高 churn 数据，只保留短期诊断窗口：
 
 ### 集群列表
 
-- 展示集群名称、模式、状态、controller edge、最近同步、token 到期。
+- 展示集群名称、模式、状态、controller edge 和最近同步。
 - 提供接入命令、轮换 token、卸载命令和删除入口。
 - 删除集群前提示先执行卸载命令；删除只移除 manager 侧记录和该集群关联设备/拓扑数据，不负责远端 Helm 卸载。
 
@@ -199,5 +199,6 @@ kubectl delete namespace ongrid-system --ignore-not-found
 | 可选 kube-state-metrics 访问公网 | 离线环境启用后出现 ImagePullBackOff | 默认关闭；启用时必须显式提供集群可达的离线镜像仓库地址 |
 | Event 高 churn | MySQL 表膨胀 | 当前快照 prune + TTL + per-cluster cap |
 | controller edge 被当成设备 | 设备列表出现非主机对象 | controller 不创建 host Device，UI 不单独展示 controller edge |
+| 长期 bootstrap token 泄露 | 未授权 controller 重建或 node 接入 | 数据库仅保存 hash，安装命令按敏感信息管理；泄露后由管理员手动轮换，旧 token 立即失效 |
 | 未卸载直接删除集群 | 远端仍继续上报 | UI 提示卸载命令，删除后 token/cluster 记录失效，上报应被拒绝或无法关联 |
 | 自签名证书 | 目标集群无法拉 chart 或连 manager | 安装命令默认提供 Helm `--insecure-skip-tls-verify` 和 `manager.tlsInsecure=true` |

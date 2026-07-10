@@ -407,12 +407,12 @@ func TestRepo_CountClustersIgnoresPagination(t *testing.T) {
 	}
 }
 
-func TestRepo_NodeCoverageBatchAndControllerTokenClear(t *testing.T) {
+func TestRepo_NodeCoverageBatchAndTokenRotation(t *testing.T) {
 	db, repo := newTestRepo(t)
 	ctx := context.Background()
 	controllerEdgeID := uint64(30)
 	clusters := []*model.Cluster{
-		{Name: "prod-a", Mode: model.ModeFullNode, Status: model.ClusterStatusOffline, BootstrapTokenHash: "controller-hash", ControllerEdgeID: &controllerEdgeID, ControllerNodeName: "node-a"},
+		{Name: "prod-a", Mode: model.ModeFullNode, Status: model.ClusterStatusOffline, BootstrapTokenHash: "controller-hash", NodeBootstrapTokenHash: "node-hash", ControllerEdgeID: &controllerEdgeID, ControllerNodeName: "node-a"},
 		{Name: "prod-b", Mode: model.ModeFullNode, Status: model.ClusterStatusOffline},
 		{Name: "prod-c", Mode: model.ModeFullNode, Status: model.ClusterStatusOffline},
 	}
@@ -457,18 +457,15 @@ func TestRepo_NodeCoverageBatchAndControllerTokenClear(t *testing.T) {
 		t.Fatalf("second page = %+v total=%d, want final 2 of 4", attachments, total)
 	}
 
-	if err := repo.ClearControllerBootstrapToken(ctx, clusters[0].ID); err != nil {
-		t.Fatalf("ClearControllerBootstrapToken: %v", err)
+	if err := repo.UpdateClusterTokens(ctx, clusters[0].ID, "controller-hash-new", "node-hash-new"); err != nil {
+		t.Fatalf("UpdateClusterTokens: %v", err)
 	}
-	if err := repo.ClearControllerBootstrapToken(ctx, clusters[0].ID); err != nil {
-		t.Fatalf("ClearControllerBootstrapToken(retry): %v", err)
+	var rotated model.Cluster
+	if err := db.First(&rotated, clusters[0].ID).Error; err != nil {
+		t.Fatalf("Get rotated cluster: %v", err)
 	}
-	var cleared model.Cluster
-	if err := db.First(&cleared, clusters[0].ID).Error; err != nil {
-		t.Fatalf("Get cleared cluster: %v", err)
-	}
-	if cleared.BootstrapTokenHash != "" {
-		t.Fatalf("bootstrap token hash = %q, want empty", cleared.BootstrapTokenHash)
+	if rotated.BootstrapTokenHash != "controller-hash-new" || rotated.NodeBootstrapTokenHash != "node-hash-new" {
+		t.Fatalf("rotated token hashes = %q/%q", rotated.BootstrapTokenHash, rotated.NodeBootstrapTokenHash)
 	}
 }
 

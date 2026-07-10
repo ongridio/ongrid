@@ -28,8 +28,6 @@ type Cluster struct {
 
 	BootstrapTokenHash            string     `gorm:"size:512;not null;column:bootstrap_token_hash"`
 	NodeBootstrapTokenHash        string     `gorm:"size:512;not null;default:'';column:node_bootstrap_token_hash"`
-	BootstrapTokenExpiresAt       *time.Time `gorm:"column:bootstrap_token_expires_at"`
-	NodeBootstrapTokenExpiresAt   *time.Time `gorm:"column:node_bootstrap_token_expires_at"`
 	ControllerEdgeID              *uint64    `gorm:"column:controller_edge_id;index"`
 	ControllerNodeName            string     `gorm:"size:255;not null;default:'';column:controller_node_name"`
 	ControllerNamespace           string     `gorm:"size:255;not null;default:'';column:controller_namespace"`

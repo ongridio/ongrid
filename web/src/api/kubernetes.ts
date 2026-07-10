@@ -36,8 +36,6 @@ export type KubernetesCluster = {
   inventory_sync_duration_ms?: number;
   inventory_watch_lag_seconds?: number;
   inventory_synced_at?: string | null;
-  bootstrap_token_expires_at?: string | null;
-  node_bootstrap_token_expires_at?: string | null;
   created_at: string;
   updated_at: string;
   upgrade_command?: string;

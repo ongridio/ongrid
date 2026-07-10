@@ -24,7 +24,6 @@ import (
 )
 
 const (
-	defaultBootstrapTokenTTL    = 90 * 24 * time.Hour
 	defaultEventRetention       = 24 * time.Hour
 	defaultEventMaxPerCluster   = 5000
 	defaultEventCleanupInterval = time.Hour
@@ -39,8 +38,7 @@ type Repository interface {
 	GetClusterByControllerEdge(ctx context.Context, edgeID uint64) (*model.Cluster, error)
 	ListClusters(ctx context.Context, f ListClustersFilter) ([]*model.Cluster, error)
 	CountClusters(ctx context.Context, f ListClustersFilter) (int64, error)
-	UpdateClusterTokens(ctx context.Context, id uint64, controllerTokenHash, nodeTokenHash string, controllerExpiresAt, nodeExpiresAt *time.Time) error
-	ClearControllerBootstrapToken(ctx context.Context, id uint64) error
+	UpdateClusterTokens(ctx context.Context, id uint64, controllerTokenHash, nodeTokenHash string) error
 	UpdateClusterController(ctx context.Context, id uint64, in ClusterControllerRegistration) error
 	BindControllerEnrollment(ctx context.Context, id uint64, registration ClusterControllerRegistration, installation *model.Installation) error
 	UpdateClusterInventorySync(ctx context.Context, id uint64, in ClusterInventorySync) error
@@ -154,7 +152,6 @@ type ClusterHealthSummary struct {
 type Config struct {
 	PublicURL            string
 	TunnelAddr           string
-	BootstrapTokenTTL    time.Duration
 	ChartRef             string
 	EventRetention       time.Duration
 	EventMaxPerCluster   int
@@ -177,9 +174,6 @@ type enrollmentLock struct {
 }
 
 func NewUsecase(repo Repository, edgeIssuer EdgeIssuer, cfg Config) *Usecase {
-	if cfg.BootstrapTokenTTL <= 0 {
-		cfg.BootstrapTokenTTL = defaultBootstrapTokenTTL
-	}
 	if cfg.EventRetention <= 0 {
 		cfg.EventRetention = defaultEventRetention
 	}
@@ -429,11 +423,11 @@ func (u *Usecase) CreateCluster(ctx context.Context, in CreateClusterInput) (*Cl
 	if err != nil {
 		return nil, err
 	}
-	controllerToken, controllerHash, controllerExpiresAt, err := newBootstrapToken(u.cfg.BootstrapTokenTTL)
+	controllerToken, controllerHash, err := newBootstrapToken()
 	if err != nil {
 		return nil, err
 	}
-	nodeToken, nodeHash, nodeExpiresAt, err := newBootstrapToken(u.cfg.BootstrapTokenTTL)
+	nodeToken, nodeHash, err := newBootstrapToken()
 	if err != nil {
 		return nil, err
 	}
@@ -442,15 +436,13 @@ func (u *Usecase) CreateCluster(ctx context.Context, in CreateClusterInput) (*Cl
 		uid = &s
 	}
 	c := &model.Cluster{
-		Name:                        name,
-		UID:                         uid,
-		Mode:                        mode,
-		Status:                      model.ClusterStatusOffline,
-		BootstrapTokenHash:          controllerHash,
-		NodeBootstrapTokenHash:      nodeHash,
-		BootstrapTokenExpiresAt:     controllerExpiresAt,
-		NodeBootstrapTokenExpiresAt: nodeExpiresAt,
-		CreatedBy:                   in.CreatedBy,
+		Name:                   name,
+		UID:                    uid,
+		Mode:                   mode,
+		Status:                 model.ClusterStatusOffline,
+		BootstrapTokenHash:     controllerHash,
+		NodeBootstrapTokenHash: nodeHash,
+		CreatedBy:              in.CreatedBy,
 	}
 	if err := u.repo.CreateCluster(ctx, c); err != nil {
 		return nil, fmt.Errorf("create k8s cluster: %w", err)
@@ -900,21 +892,19 @@ func (u *Usecase) RotateBootstrapToken(ctx context.Context, id uint64) (*Cluster
 	if err != nil {
 		return nil, err
 	}
-	controllerToken, controllerHash, controllerExpiresAt, err := newBootstrapToken(u.cfg.BootstrapTokenTTL)
+	controllerToken, controllerHash, err := newBootstrapToken()
 	if err != nil {
 		return nil, err
 	}
-	nodeToken, nodeHash, nodeExpiresAt, err := newBootstrapToken(u.cfg.BootstrapTokenTTL)
+	nodeToken, nodeHash, err := newBootstrapToken()
 	if err != nil {
 		return nil, err
 	}
-	if err := u.repo.UpdateClusterTokens(ctx, id, controllerHash, nodeHash, controllerExpiresAt, nodeExpiresAt); err != nil {
+	if err := u.repo.UpdateClusterTokens(ctx, id, controllerHash, nodeHash); err != nil {
 		return nil, fmt.Errorf("rotate k8s bootstrap token: %w", err)
 	}
 	c.BootstrapTokenHash = controllerHash
 	c.NodeBootstrapTokenHash = nodeHash
-	c.BootstrapTokenExpiresAt = controllerExpiresAt
-	c.NodeBootstrapTokenExpiresAt = nodeExpiresAt
 	return &ClusterRegistration{
 		Cluster:            c,
 		BootstrapToken:     controllerToken,
@@ -1114,9 +1104,6 @@ func (u *Usecase) HandleRegister(ctx context.Context, edgeID uint64, deviceID *u
 			LastSeenAt:       &ts,
 		}); err != nil {
 			return err
-		}
-		if err := u.repo.ClearControllerBootstrapToken(ctx, info.ClusterID); err != nil {
-			return fmt.Errorf("consume k8s controller bootstrap token: %w", err)
 		}
 		return u.reconcileTopology(ctx, info.ClusterID)
 	default:
@@ -1745,13 +1732,6 @@ func validBootstrapToken(token string, c *model.Cluster, role string) bool {
 	if token == "" || c == nil {
 		return false
 	}
-	expiresAt := c.BootstrapTokenExpiresAt
-	if role == model.RoleNode {
-		expiresAt = c.NodeBootstrapTokenExpiresAt
-	}
-	if expiresAt != nil && time.Now().After(*expiresAt) {
-		return false
-	}
 	want := c.BootstrapTokenHash
 	if role == model.RoleNode {
 		want = c.NodeBootstrapTokenHash
@@ -1763,14 +1743,13 @@ func validBootstrapToken(token string, c *model.Cluster, role string) bool {
 	return len(got) == len(want) && subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
 }
 
-func newBootstrapToken(ttl time.Duration) (token string, hash string, expiresAt *time.Time, err error) {
+func newBootstrapToken() (token string, hash string, err error) {
 	token, err = randomURLSafe(bootstrapTokenBytes)
 	if err != nil {
-		return "", "", nil, fmt.Errorf("gen k8s bootstrap token: %w", err)
+		return "", "", fmt.Errorf("gen k8s bootstrap token: %w", err)
 	}
 	hash = tokenDigest(token)
-	exp := time.Now().Add(ttl)
-	return token, hash, &exp, nil
+	return token, hash, nil
 }
 
 func tokenDigest(token string) string {

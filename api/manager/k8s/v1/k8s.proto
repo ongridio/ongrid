@@ -62,7 +62,6 @@ message KubernetesCluster {
     uint64 controller_edge_id = 6 [json_name = "controller_edge_id"];
     string version = 7 [json_name = "version"];
     google.protobuf.Timestamp last_seen_at = 8 [json_name = "last_seen_at"];
-    google.protobuf.Timestamp bootstrap_token_expires_at = 9 [json_name = "bootstrap_token_expires_at"];
     google.protobuf.Timestamp created_at = 10 [json_name = "created_at"];
     google.protobuf.Timestamp updated_at = 11 [json_name = "updated_at"];
     string inventory_resource_version = 12 [json_name = "inventory_resource_version"];
@@ -78,7 +77,6 @@ message KubernetesCluster {
     string controller_namespace = 22 [json_name = "controller_namespace"];
     string controller_pod_name = 23 [json_name = "controller_pod_name"];
     string upgrade_command = 24 [json_name = "upgrade_command"];
-    google.protobuf.Timestamp node_bootstrap_token_expires_at = 25 [json_name = "node_bootstrap_token_expires_at"];
 }
 
 message CreateClusterRequest {
