@@ -169,12 +169,3 @@ Drop-in para os stacks de observabilidade, canais e modelos que sua equipe já u
 ## Licença
 
 Apache 2.0 — veja [LICENSE](LICENSE).
-
-## Histórico de estrelas
-
-<a href="https://www.star-history.com/#ongridio/ongrid&amp;Date">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=ongridio/ongrid&amp;type=Date&amp;theme=dark" />
-    <img alt="Gráfico do histórico de estrelas" src="https://api.star-history.com/svg?repos=ongridio/ongrid&amp;type=Date" />
-  </picture>
-</a>
