@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   CartesianGrid,
   Line,
@@ -42,7 +42,7 @@ import {
   type PluginRow,
 } from '@/api/integrations';
 import { ApiError } from '@/api/client';
-import { getDevice } from '@/api/devices';
+import { getDevice, listDeviceEdges, type Device } from '@/api/devices';
 import { NodeNeighbors } from '@/components/topology/NodeNeighbors';
 import { tr as trInline, useI18n } from '@/i18n/locale';
 
@@ -67,6 +67,25 @@ const SERIES_COLORS = [
   '#fb7185',
   '#facc15',
 ];
+
+function selectPreferredEdge(edges: Edge[]): Edge | null {
+  let selected: Edge | null = null;
+  for (const edge of edges) {
+    if (!selected || isBetterEdge(edge, selected)) selected = edge;
+  }
+  return selected;
+}
+
+function isBetterEdge(candidate: Edge, current: Edge): boolean {
+  if (candidate.status !== current.status) return candidate.status === 'online';
+  return edgeSeenAt(candidate) > edgeSeenAt(current);
+}
+
+function edgeSeenAt(edge: Edge): number {
+  if (!edge.last_seen_at) return 0;
+  const ts = Date.parse(edge.last_seen_at);
+  return Number.isFinite(ts) ? ts : 0;
+}
 
 // ChartRow is one bucket: {ts, tsLabel, <seriesKey>: number | null, ...}.
 type ChartRow = {
@@ -97,8 +116,11 @@ const EMPTY_PANEL: PanelData = { rows: [], series: [] };
 export default function EdgeDetailPage() {
   const { tr } = useI18n();
   const navigate = useNavigate();
+  const location = useLocation();
   const { edgeId = '' } = useParams<{ edgeId: string }>();
+  const isDeviceRoute = location.pathname.startsWith('/devices/');
 
+  const [device, setDevice] = useState<Device | null>(null);
   const [edge, setEdge] = useState<Edge | null>(null);
   const [edgeErr, setEdgeErr] = useState<string | null>(null);
 
@@ -119,31 +141,72 @@ export default function EdgeDetailPage() {
 
   const [tab, setTab] = useState<Tab>('metrics');
 
-  // Load edge once.
+  useEffect(() => {
+    const requested = new URLSearchParams(location.search).get('tab');
+    if (
+      requested === 'metrics' ||
+      requested === 'host' ||
+      requested === 'plugins' ||
+      requested === 'topology' ||
+      requested === 'meta'
+    ) {
+      setTab(requested);
+    }
+  }, [location.search]);
+
+  // Load the page identity. /devices/:id is canonical and resolves the
+  // preferred host edge for agent-specific tabs; /edges/:id stays as a
+  // compatibility route for old bookmarks.
   useEffect(() => {
     if (!edgeId) return;
     let cancelled = false;
-    getEdge(edgeId)
-      .then((e) => {
-        if (!cancelled) setEdge(e);
-      })
-      .catch((err) => {
-        if (!cancelled) setEdgeErr((err as Error).message || tr('加载失败', 'Load failed'));
-      });
+    setEdgeErr(null);
+    setEdge(null);
+    setDevice(null);
+    const load = async () => {
+      if (!isDeviceRoute) {
+        const e = await getEdge(edgeId);
+        if (cancelled) return;
+        setEdge(e);
+        if (e.device_id) {
+          try {
+            const d = await getDevice(e.device_id);
+            if (!cancelled) setDevice(d);
+          } catch {
+            // Edge detail can still render without the denormalized device row.
+          }
+        }
+        return;
+      }
+      const d = await getDevice(edgeId);
+      if (cancelled) return;
+      setDevice(d);
+      const links = await listDeviceEdges(edgeId);
+      if (cancelled) return;
+      const hostLinks = (links.items ?? []).filter((l) => l.type === 'host');
+      const edgeIDs = hostLinks.map((l) => l.edge_id);
+      const edges = await Promise.all(edgeIDs.map((id) => getEdge(id).catch(() => null)));
+      if (cancelled) return;
+      setEdge(selectPreferredEdge(edges.filter((e): e is Edge => Boolean(e))));
+    };
+    load().catch((err) => {
+      if (!cancelled) setEdgeErr((err as Error).message || tr('加载失败', 'Load failed'));
+    });
     return () => {
       cancelled = true;
     };
-  }, [edgeId]);
+  }, [edgeId, isDeviceRoute, tr]);
 
   const refreshMetrics = useCallback(async () => {
-    if (!edge?.id) return;
+    const deviceID = device?.id ?? edge?.device_id;
+    if (!deviceID) return;
     // Prom samples are labelled with the *host device_id* — set on
     // every scrape by the scrape_config (deploy/install/prometheus.yml)
     // and on every push by the metrics plugin's ingester. edge.id is
     // the manager-side row PK, NOT the Prom label. Edges with no
     // mapped device (waiting-for-host) have no host metrics, so we
     // skip rather than query with the wrong selector.
-    if (edge.device_id == null) {
+    if (!deviceID) {
       setMetricsErr(tr('该边端尚未绑定主机 device_id — 暂无主机指标', 'This edge has no host device_id yet — no host metrics'));
       return;
     }
@@ -159,7 +222,7 @@ export default function EdgeDetailPage() {
     // empty-match filter was silently dropping 100% of points and
     // leaving every panel blank for any device whose data only exists
     // via the new path. device_id alone is the right scope.
-    const labelSel = `device_id="${edge.device_id}"`;
+    const labelSel = `device_id="${deviceID}"`;
 
     const exprs: Record<PanelKey, { expr: string; nameLabel: string }> = {
       cpu: {
@@ -203,27 +266,28 @@ export default function EdgeDetailPage() {
     } catch (err) {
       setMetricsErr((err as Error).message || tr('加载指标失败', 'Failed to load metrics'));
     }
-  }, [edge?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [device?.id, edge?.device_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!edge?.id) return;
+    if (!device?.id && !edge?.device_id) return;
     void refreshMetrics();
-  }, [edge?.id, refreshMetrics]);
-  usePoll(refreshMetrics, REFRESH_MS, !!edge?.id);
+  }, [device?.id, edge?.device_id, refreshMetrics]);
+  usePoll(refreshMetrics, REFRESH_MS, Boolean(device?.id || edge?.device_id));
 
   const promExprs = useMemo(() => {
-    if (!edge?.id || edge.device_id == null) return null;
+    const deviceID = device?.id ?? edge?.device_id;
+    if (!deviceID) return null;
     // Same fix as above — drop the ongrid_source="" matcher because
     // every sample now carries ongrid_source="embedded"; the legacy
     // direct-scrape path is gone.
-    const labelSel = `device_id="${edge.device_id}"`;
+    const labelSel = `device_id="${deviceID}"`;
     return {
       cpu: `100 * (1 - rate(node_cpu_seconds_total{${labelSel},mode="idle"}[5m]))`,
       disk: `100 * (1 - node_filesystem_avail_bytes{${labelSel},fstype=~"ext4|xfs|btrfs|zfs|ext3|ext2|f2fs",device=~"(/dev/)?(vd|sd|xvd)[a-z]+[0-9]*|(/dev/)?nvme[0-9]+n[0-9]+(p[0-9]+)?"} / node_filesystem_size_bytes{${labelSel},fstype=~"ext4|xfs|btrfs|zfs|ext3|ext2|f2fs",device=~"(/dev/)?(vd|sd|xvd)[a-z]+[0-9]*|(/dev/)?nvme[0-9]+n[0-9]+(p[0-9]+)?"})`,
       netRx: `rate(node_network_receive_bytes_total{${labelSel}}[5m])`,
       netTx: `rate(node_network_transmit_bytes_total{${labelSel}}[5m])`,
     };
-  }, [edge?.id, edge?.device_id]);
+  }, [device?.id, edge?.device_id]);
 
   const openDrilldown = useCallback(
     async (expr: string, title: string) => {
@@ -235,14 +299,14 @@ export default function EdgeDetailPage() {
           title,
           // device_id label, not edge.id (#96). expr above already uses
           // device_id; keep var-device_id consistent with it.
-          deviceId: edge?.device_id ?? edge?.id,
+          deviceId: device?.id ?? edge?.device_id ?? undefined,
         });
         setPromErr(null);
       } catch (err) {
         setPromErr((err as Error).message || tr('打开图表失败', 'Failed to open chart'));
       }
     },
-    [edge?.id, edge?.device_id],
+    [device?.id, edge?.device_id, tr],
   );
 
   const toggleSeries = (panel: PanelKey, key: string) => {
@@ -253,6 +317,11 @@ export default function EdgeDetailPage() {
       return { ...prev, [panel]: nextSet };
     });
   };
+
+  const displayName = device?.name || device?.hostname || edge?.name || edgeId;
+  const status = device ? (device.online ? 'online' : 'offline') : edge?.status;
+  const lastSeen = device?.last_seen_at ?? edge?.last_seen_at;
+  const deviceID = device?.id ?? edge?.device_id ?? null;
 
   return (
     <main className="anim-fade flex flex-1 flex-col overflow-hidden">
@@ -269,13 +338,13 @@ export default function EdgeDetailPage() {
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <h1 className="truncate text-base font-semibold text-zinc-100">
-                  {edge?.name ?? edgeId}
+                  {displayName}
                 </h1>
-                {edge && <StatusPill status={edge.status} />}
+                {status && <StatusPill status={status} />}
               </div>
               <div className="mt-0.5 truncate text-[11px] text-zinc-500">
-                {edge?.last_seen_at
-                  ? tr(`最后心跳 ${relativeTime(edge.last_seen_at)}`, `Last seen ${relativeTime(edge.last_seen_at)}`)
+                {lastSeen
+                  ? tr(`最后心跳 ${relativeTime(lastSeen)}`, `Last seen ${relativeTime(lastSeen)}`)
                   : tr('设备 ID: ', 'Device ID: ') + edgeId}
               </div>
             </div>
@@ -379,26 +448,35 @@ export default function EdgeDetailPage() {
           {tab === 'host' && (
             <JsonCard
               title="host_info"
-              data={(edge?.host_info as Record<string, unknown> | null) ?? null}
+              data={device
+                ? {
+                    id: device.id,
+                    name: device.name,
+                    hostname: device.hostname,
+                    ip_address: device.ip_address,
+                    os: device.os,
+                    os_version: device.os_version,
+                    arch: device.arch,
+                    kernel_version: device.kernel_version,
+                    cpu_count: device.cpu_count,
+                    mem_total_bytes: device.mem_total_bytes,
+                    disk_total_bytes: device.disk_total_bytes,
+                  }
+                : ((edge?.host_info as Record<string, unknown> | null) ?? null)}
               empty={tr('暂无主机信息（设备未上报或字段暂未识别）', 'No host info (device has not reported, or field not recognized)')}
             />
           )}
 
           {tab === 'plugins' && edge && <PluginsTab edgeId={edge.id} />}
 
-          {tab === 'topology' && edge && <TopologyTab deviceID={edge.device_id ?? null} />}
+          {tab === 'topology' && <TopologyTab deviceID={deviceID} />}
 
-          {tab === 'meta' && edge && (
+          {tab === 'meta' && (
             <JsonCard
               title={tr('元数据', 'Metadata')}
               data={{
-                id: edge.id,
-                name: edge.name,
-                status: edge.status,
-                access_key_id: edge.access_key_id,
-                last_seen_at: edge.last_seen_at,
-                created_at: edge.created_at,
-                updated_at: edge.updated_at,
+                device,
+                host_edge: edge,
               }}
               empty={tr('加载中…', 'Loading…')}
             />
@@ -853,7 +931,7 @@ function PluginsTab({ edgeId }: { edgeId: number }) {
     } finally {
       setLoading(false);
     }
-  }, [edgeId]);
+  }, [edgeId, tr]);
 
   useEffect(() => {
     void fetchRows();

@@ -20,6 +20,28 @@ const QueryLogQLDescription = "Run a LogQL range query against Loki. " +
 	"Use this to investigate log patterns, error counts, or pipe into per-edge filters. " +
 	"Returns the raw Loki response (streams or matrix)."
 
+func parseLogQLTime(value string, fallback time.Time) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.EqualFold(value, "now") {
+		return fallback, nil
+	}
+	if rest, ok := strings.CutPrefix(strings.ToLower(value), "now-"); ok {
+		d, err := time.ParseDuration(rest)
+		if err != nil {
+			return time.Time{}, err
+		}
+		return time.Now().Add(-d), nil
+	}
+	if rest, ok := strings.CutPrefix(strings.ToLower(value), "now+"); ok {
+		d, err := time.ParseDuration(rest)
+		if err != nil {
+			return time.Time{}, err
+		}
+		return time.Now().Add(d), nil
+	}
+	return time.Parse(time.RFC3339, value)
+}
+
 // QueryLogQLSchema is the JSON Schema of the tool's argument object.
 var QueryLogQLSchema = json.RawMessage(`{
   "type": "object",
@@ -83,14 +105,14 @@ func (r *Registry) executeQueryLogQL(ctx context.Context, args json.RawMessage) 
 	end := time.Now()
 	start := end.Add(-time.Hour)
 	if in.End != "" {
-		t, err := time.Parse(time.RFC3339, in.End)
+		t, err := parseLogQLTime(in.End, end)
 		if err != nil {
 			return ExecuteResult{}, fmt.Errorf("query_logql: parse end: %w", err)
 		}
 		end = t
 	}
 	if in.Start != "" {
-		t, err := time.Parse(time.RFC3339, in.Start)
+		t, err := parseLogQLTime(in.Start, start)
 		if err != nil {
 			return ExecuteResult{}, fmt.Errorf("query_logql: parse start: %w", err)
 		}

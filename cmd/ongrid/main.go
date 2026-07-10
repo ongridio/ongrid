@@ -3056,6 +3056,7 @@ var coordinatorExtraToolNames = []string{
 	"host_bash",
 	"rank_edges",
 	"find_outlier_edges",
+	"query_alert_rules",
 	// Legacy / optional tools that are appended after the initial registry bag,
 	// or still live outside the BaseTool registry in some deployments.
 	"search_web",
@@ -3066,6 +3067,8 @@ var coordinatorExtraToolNames = []string{
 	"serve_page",
 	"send_im_message",
 }
+
+const defaultCoordinatorMaxTurns = 30
 
 func buildCoordinatorToolNames(registered []aiopstoolsbase.BaseTool) []string {
 	names := aiopstools.CoreToolNames(registered)
@@ -3285,12 +3288,12 @@ func buildAIOpsRuntime(
 		Description: "默认助理",
 		WhenToUse:   "首页发起的会话默认绑定它；适合任何运维 / 排查 / 知识库查询场景。",
 		Tools:       buildCoordinatorToolNames(bag.AllTools()),
-		// Coordinator's ReAct ceiling. 30 (the global default) lets
-		// a runaway LLM rack up 120+ tool calls per turn before the
-		// graph aborts; 10 is enough for "1-3 dispatches + 1
-		// synthesis" which is what the coordinator should actually
-		// be doing. Specialists set their own caps in agents/*.md.
-		MaxTurns: 10,
+		// Keep the coordinator ceiling aligned with the global ReAct
+		// budget. Loop prevention belongs in graph-level guards
+		// (identical-call memo, per-tool execution caps, AgentTool
+		// dedupe), not in a lower persona turn limit that can clip
+		// legitimate long investigations.
+		MaxTurns: defaultCoordinatorMaxTurns,
 		Source:   "builtin",
 	})
 
@@ -3399,9 +3402,12 @@ func ongridBasePrompt() string {
 
 ## 路由
 
-- 轻量只读查询直接查：` + bt + `query_devices/get_topology/query_incidents/get_edge_summary/get_host_load/get_host_processes/rank_edges/find_outlier_edges/query_knowledge/list_repo_sources/read_source/grep_source` + bt + `；工具名或参数不确定时先用 ` + bt + `ToolSearch` + bt + ` 按能力描述查找。
+- 工具能力以本轮可见能力（动态）和每个工具的 when_to_use / schema 为准；基础 prompt 只做路由原则。不要臆造不存在的工具，工具名或参数不确定时先用 ` + bt + `ToolSearch` + bt + ` 按能力描述查找。
+- 调工具前先分类：DIRECT_READ 只查一个明确数据面；DELEGATE 是根因、影响面、处置建议、综合体检、风险评估、优先级、报告、remediation plan、容量预测、噪音过滤、跨 metric+log+trace/change/topology/host 的关联。DELEGATE 第一工具必须是 ` + bt + `AgentTool` + bt + `，不要先自己查 ` + bt + `get_topology/query_promql/query_logql/host_bash` + bt + `。
+- 单一数据源查询由默认助理直接查，不派专家：metric/PromQL→` + bt + `query_promql` + bt + `，log/LogQL→` + bt + `query_logql` + bt + `，trace/span/trace_id/慢 trace/错误 trace/TraceQL→` + bt + `query_traceql` + bt + `，incident 列表→` + bt + `query_incidents` + bt + `，告警规则列表→` + bt + `query_alert_rules` + bt + `，change/release events/审计变更→` + bt + `query_change_events` + bt + `，代码仓库列表→` + bt + `list_repo_sources` + bt + `，源码搜索/grep/函数或报错串定位→` + bt + `grep_source` + bt + `，数据库健康/连接/慢查询/复制/metric coverage→` + bt + `analyze_database_status` + bt + `，数据库源清单→` + bt + `list_database_sources` + bt + `，指定 incident 明细→` + bt + `get_incident_detail/correlate_incident` + bt + `，设备/主机清单→` + bt + `query_devices` + bt + `，设备健康快照→` + bt + `get_edge_summary/get_host_load/get_host_processes` + bt + `。
+- ` + bt + `get_topology` + bt + ` 只查 fleet/deployment facts（规模、版本、Prom/Loki/Tempo/Grafana 配置）。不要为了确认某个数据源是否可用而先调它；对应 query 工具失败时再说明配置缺口。
 - 已知 edge 主机命令或已知文件删除：直接 ` + bt + `host_bash(device_ids=[...], cmd="...")` + bt + `；读命令走只读 sandbox，写命令自动弹内置确认卡。不要为已知删除再派 AgentTool。
-- 复杂诊断、根因、影响面、处置建议、跨域问题或预计超过 2-3 个工具步骤：用 ` + bt + `AgentTool` + bt + ` 派专家。worker 看不到本对话，prompt 必须自包含。
+- 复杂诊断、根因、影响面、处置建议、多数据源关联或预计超过 2-3 个工具步骤：第一步就用 ` + bt + `AgentTool` + bt + ` 派专家。不要把单一 metric/log/trace 查询误判成跨域任务，也不要把多数据源任务留给 coordinator 自己循环。worker 看不到本对话，prompt 必须自包含。
 - 专家选择：网络→` + bt + `specialist-network` + bt + `；磁盘/文件系统→` + bt + `specialist-disk` + bt + `；CPU/内存/load/进程→` + bt + `specialist-compute` + bt + `；SLO/趋势/优先级→` + bt + `specialist-sre` + bt + `；服务/systemctl/journalctl/部署→` + bt + `specialist-ops` + bt + `；明确 incident_id 端到端 RCA→` + bt + `incident-investigator` + bt + `。
 - 简单 topN / 快照 / 列表不要派 AgentTool；模糊“变慢/卡了”先要时间点、影响面、已采取动作。
 
@@ -3410,9 +3416,12 @@ func ongridBasePrompt() string {
 - 要么直接回答，要么立刻发 tool_call；写“我先/让我/接下来查看”时同轮必须调用工具。
 - 每次工具调用前用一句话说明目的。禁止空 content tool_call。
 - 同一工具同一参数禁止重复；拿到 3 个独立数据点或 4 轮工具后先给阶段结论；当前用户消息累计 8 个工具调用后必须回答。
+- ` + bt + `query_logql` + bt + ` 同一用户问题最多 2 次，` + bt + `query_traceql/host_bash` + bt + ` 最多各 3 次；达到上限后必须基于已有结果回答，不能换表达式继续试。工具返回 ` + bt + `call_budget_exceeded` + bt + ` 时，下一条 assistant message 必须是最终答复，禁止再发任何 tool_call。
 - 工具结果是事实；主要 cpu/mem/load/disk 正常时说“未发现明显异常”，不要硬翻日志/trace。
-- 优先结构化工具：快照用 ` + bt + `get_edge_summary/get_host_load/get_host_processes` + bt + `，fleet 排名用 ` + bt + `rank_edges` + bt + `，不要一上来手写 PromQL/LogQL。
-- ` + bt + `query_logql` + bt + ` 查日志内容，不查文件名/metric/device 列表；` + bt + `query_promql` + bt + ` 查时序，不确认设备存在。
+- 优先结构化工具：设备快照用 ` + bt + `get_edge_summary/get_host_load/get_host_processes` + bt + `，fleet 排名/离群用 ` + bt + `rank_edges/find_outlier_edges` + bt + `，文件体积/du/stat 用 host_files 专用工具；只有结构化工具不覆盖时才手写 PromQL/LogQL/TraceQL。
+- ` + bt + `query_logql` + bt + ` 查日志内容，不查文件名/metric/device 列表；OOM/killed/panic/error 这类关键词日志最多用 1-2 个宽查询表达式，不要按 label 反复试探。日志为空/标签不匹配时直接说明缺少可查询 label，不要转 ` + bt + `host_bash` + bt + `；` + bt + `query_promql` + bt + ` 查时序；` + bt + `query_traceql` + bt + ` 查链路/span/trace_id/慢调用/错误调用。不要为了确认数据源存在先查设备或拓扑；工具失败时再说明配置缺口。
+- 源码搜索问题不能只列仓库：用户说搜索/grep/定位函数/报错串时，最终必须调用 ` + bt + `grep_source` + bt + `；仓库 ref 不明确时优先用 ` + bt + `repo="ongrid"` + bt + `（匹配 ongrid 仓库 URL 子串），不要停在 ` + bt + `list_repo_sources` + bt + `。
+- 数据库健康/连接/慢查询/复制/错误摘要直接用 ` + bt + `analyze_database_status` + bt + `，不能只 ` + bt + `list_database_sources` + bt + `。变更事件/发布事件/审计变更是实时数据查询，禁止直接空答，必须调用 ` + bt + `query_change_events` + bt + `；用户说“最近 N 小时/天”但没给锚点时，省略 around_ts 或用当前时间，window_minutes 覆盖这个时间窗。
 - PromQL selector 只能贴在每个 metric 后：` + bt + `node_memory_SwapTotal_bytes{device_id="1"}` + bt + `；不能贴在表达式末尾。
 - 多设备/多挂载点 PromQL 必须用单个聚合表达式（` + bt + `sum/topk by(device_id,mountpoint,fstype)` + bt + `），不要按 device/metric/mountpoint 拆多次调用。
 

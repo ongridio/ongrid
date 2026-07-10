@@ -276,15 +276,15 @@ func TestEinoToolAdapter_PerToolCallCap(t *testing.T) {
 	}
 }
 
-func TestEinoToolAdapter_QueryPromQLHasLowerCallCap(t *testing.T) {
+func TestEinoToolAdapter_QueryPromQLUsesGenericCallCap(t *testing.T) {
 	t.Parallel()
 	inner := &fakeBaseTool{name: "query_promql", class: "read", runResp: `{"v":1}`}
 	a := &einoToolAdapter{inner: inner, memo: newToolMemo()}
 	ctx := context.Background()
 	limit := maxCallsForTool("query_promql")
 
-	if limit >= maxToolCallsPerRun {
-		t.Fatalf("query_promql limit = %d, want lower than generic %d", limit, maxToolCallsPerRun)
+	if limit != maxToolCallsPerRun {
+		t.Fatalf("query_promql limit = %d, want generic %d", limit, maxToolCallsPerRun)
 	}
 	for i := 0; i < limit; i++ {
 		out, _ := a.InvokableRun(ctx, fmt.Sprintf(`{"q":"m%d"}`, i))
@@ -301,6 +301,44 @@ func TestEinoToolAdapter_QueryPromQLHasLowerCallCap(t *testing.T) {
 	}
 	if got := inner.calls.Load(); got != int32(limit) {
 		t.Fatalf("query_promql executions = %d, want %d", got, limit)
+	}
+}
+
+func TestEinoToolAdapter_ReadToolsUseGenericCallCap(t *testing.T) {
+	t.Parallel()
+	for name, wantLimit := range map[string]int{
+		"AgentTool":             maxToolCallsPerRun,
+		"query_logql":           maxToolCallsPerRun,
+		"query_traceql":         maxToolCallsPerRun,
+		"host_bash":             maxToolCallsPerRun,
+		"host_du_summary":       maxToolCallsPerRun,
+		"host_find_large_files": maxToolCallsPerRun,
+	} {
+		name := name
+		wantLimit := wantLimit
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			limit := maxCallsForTool(name)
+			if limit != wantLimit {
+				t.Fatalf("%s limit = %d, want %d", name, limit, wantLimit)
+			}
+			inner := &fakeBaseTool{name: name, class: "read", runResp: `{"v":1}`}
+			a := &einoToolAdapter{inner: inner, memo: newToolMemo()}
+			ctx := context.Background()
+			for i := 0; i < limit; i++ {
+				out, _ := a.InvokableRun(ctx, fmt.Sprintf(`{"q":"m%d"}`, i))
+				if strings.Contains(out, "call_budget_exceeded") {
+					t.Fatalf("call %d should execute, got budget directive: %s", i, out)
+				}
+			}
+			out, _ := a.InvokableRun(ctx, `{"q":"over"}`)
+			if !strings.Contains(out, "call_budget_exceeded") || !strings.Contains(out, "final_answer_required") {
+				t.Fatalf("past %s cap should require final answer, got %q", name, out)
+			}
+			if got := inner.calls.Load(); got != int32(limit) {
+				t.Fatalf("%s executions = %d, want %d", name, got, limit)
+			}
+		})
 	}
 }
 
@@ -442,29 +480,27 @@ func TestEinoToolAdapter_DraftConfigChangeAllowsLogRuleWithoutMetricCatalog(t *t
 	}
 }
 
-func TestEinoToolAdapter_ListMetricCatalogAllowsOneRefinementBeforeCap(t *testing.T) {
+func TestEinoToolAdapter_ListMetricCatalogUsesGenericCallCap(t *testing.T) {
 	t.Parallel()
 	inner := &fakeBaseTool{name: "list_metric_catalog", class: "read", runResp: `{"status":"ok"}`}
 	a := &einoToolAdapter{inner: inner, memo: newToolMemo()}
 	ctx := context.Background()
 
-	out, _ := a.InvokableRun(ctx, `{"query":"mongo connection usage"}`)
-	if strings.Contains(out, "call_budget_exceeded") {
-		t.Fatalf("first metric catalog lookup should execute, got budget directive: %s", out)
+	for i := 0; i < maxToolCallsPerRun; i++ {
+		out, _ := a.InvokableRun(ctx, fmt.Sprintf(`{"query":"mongo metric lookup %d"}`, i))
+		if strings.Contains(out, "call_budget_exceeded") {
+			t.Fatalf("metric catalog lookup %d should execute, got budget directive: %s", i, out)
+		}
 	}
-	out, _ = a.InvokableRun(ctx, `{"query":"mongo conn_type values"}`)
-	if strings.Contains(out, "call_budget_exceeded") {
-		t.Fatalf("second metric catalog lookup should allow one refinement, got %q", out)
-	}
-	out, _ = a.InvokableRun(ctx, `{"query":"mongo all metrics"}`)
+	out, _ := a.InvokableRun(ctx, `{"query":"mongo all metrics over cap"}`)
 	if !strings.Contains(out, "call_budget_exceeded") {
-		t.Fatalf("third metric catalog lookup should be capped, got %q", out)
+		t.Fatalf("over-cap metric catalog lookup should be capped, got %q", out)
 	}
 	if !strings.Contains(out, `"scope":"current_user_turn"`) || !strings.Contains(out, "expires on the next user message") {
 		t.Fatalf("budget directive should be explicitly scoped to the current turn, got %q", out)
 	}
-	if got := inner.calls.Load(); got != 2 {
-		t.Fatalf("metric catalog executions = %d, want 2", got)
+	if got := inner.calls.Load(); got != maxToolCallsPerRun {
+		t.Fatalf("metric catalog executions = %d, want %d", got, maxToolCallsPerRun)
 	}
 }
 

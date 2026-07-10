@@ -89,7 +89,7 @@ const (
 // the cap the tool returns a "synthesize now" directive instead of running,
 // which forces the agent to answer from what it already gathered. Generous
 // enough that normal multi-step investigation isn't clipped.
-const maxToolCallsPerRun = 8
+const maxToolCallsPerRun = 30
 
 func maxCallsForTool(name string) int {
 	switch name {
@@ -98,10 +98,6 @@ func maxCallsForTool(name string) int {
 		// config_validation_failed remains retryable so the model can repair
 		// a draft in the same user turn.
 		return 1
-	case "list_metric_catalog":
-		return 2
-	case "query_promql":
-		return 3
 	default:
 		return maxToolCallsPerRun
 	}
@@ -199,21 +195,23 @@ func toolResultJSON(fields map[string]interface{}) string {
 // maxToolCallsPerRun. Shaped like a normal JSON tool result so the LLM reads
 // it as data and (re)directs to answering.
 func toolBudgetExceeded(name string, n int) string {
-	instruction := fmt.Sprintf("You have already called %q %d times in the current user turn — that is the per-tool limit for this turn only and it expires on the next user message. Do NOT call it again in this turn. Answer the user from the results you already gathered; if they're insufficient, state specifically what is missing and ask the user.", name, n)
+	instruction := fmt.Sprintf("TERMINAL TOOL BUDGET RESULT. You have already called %q %d times in the current user turn — that is the per-tool limit for this turn only and it expires on the next user message. Your NEXT assistant message MUST be the final answer. Do NOT call this tool again. Do NOT call any substitute tool just to continue the same line of investigation. Answer from the results already gathered; if they're insufficient, state exactly what signal is missing.", name, n)
 	if name == toolNameQueryPromQL {
-		instruction = fmt.Sprintf("You have already called %q %d times in the current user turn. Stop issuing one PromQL call per device/metric/mountpoint. Answer from gathered data, or replace the repeated probes with ONE aggregated PromQL expression using sum/topk and by(device_id, mountpoint, fstype) as appropriate.", name, n)
+		instruction = fmt.Sprintf("TERMINAL TOOL BUDGET RESULT. You have already called %q %d times in the current user turn. Stop issuing one PromQL call per device/metric/mountpoint. Your NEXT assistant message MUST be the final answer from gathered data; if the data is insufficient, say which single aggregated PromQL expression should be run next time using sum/topk and by(device_id, mountpoint, fstype). Do NOT call another tool in this turn.", name, n)
 	}
 	b, err := json.Marshal(struct {
 		Status      string `json:"status"`
 		Tool        string `json:"tool"`
 		Calls       int    `json:"calls"`
 		Scope       string `json:"scope"`
+		FinalAnswer bool   `json:"final_answer_required"`
 		Instruction string `json:"instruction"`
 	}{
 		Status:      "call_budget_exceeded",
 		Tool:        name,
 		Calls:       n,
 		Scope:       "current_user_turn",
+		FinalAnswer: true,
 		Instruction: instruction,
 	})
 	if err != nil {

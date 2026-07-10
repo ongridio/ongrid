@@ -121,6 +121,28 @@ func (r *fakeSessionRepo) UpdateToolCallResult(ctx context.Context, id, status s
 	tc.EndedAt = &endedAt
 	return nil
 }
+func (r *fakeSessionRepo) FinalizePendingToolCalls(ctx context.Context, sessionID string, resultJSON, errStr string, endedAt time.Time) (int64, error) {
+	if err := r.ctxErr(ctx); err != nil {
+		return 0, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.failUpdate {
+		return 0, errors.New("inject: finalize")
+	}
+	var n int64
+	for _, tc := range r.toolCalls {
+		if tc.Status != model.StatusPending {
+			continue
+		}
+		tc.Status = model.StatusError
+		tc.ResultJSON = &resultJSON
+		tc.Error = &errStr
+		tc.EndedAt = &endedAt
+		n++
+	}
+	return n, nil
+}
 func (r *fakeSessionRepo) SumTokensSince(context.Context, time.Time) (biz.TokenSums, error) {
 	return biz.TokenSums{}, nil
 }
@@ -462,6 +484,64 @@ func TestAutoheal_TwoOfFourMissing_StubsInserted(t *testing.T) {
 	}
 	if v := counterValue(t, reg, "ongrid_chat_tool_response_loss_total", "autoheal_stub", "host_bash"); v != 2 {
 		t.Errorf("autoheal counter = %v, want 2", v)
+	}
+}
+
+func TestAutoheal_StartedButMissingEndMarksToolCallError(t *testing.T) {
+	t.Parallel()
+	repo := newFakeSessionRepo()
+	h := NewPersistenceHandler(PersistenceDeps{SessionID: "s", Repo: repo})
+
+	assistantEndWithToolCalls(t, h, struct{ ID, Name string }{ID: "call_started", Name: "host_bash"})
+	ctx := WithToolCallID(context.Background(), "call_started")
+	h.OnStart(ctx, toolInfo("host_bash"), &einotool.CallbackInput{ArgumentsInJSON: `{}`})
+
+	h.FinalizeBatch(context.Background())
+
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	var found bool
+	for _, tc := range repo.toolCalls {
+		found = true
+		if tc.Status != model.StatusError {
+			t.Fatalf("autohealed started tool_call status = %q, want error", tc.Status)
+		}
+		if tc.Error == nil || !contains(*tc.Error, "autohealed") {
+			t.Fatalf("autohealed started tool_call error = %v", tc.Error)
+		}
+	}
+	if !found {
+		t.Fatalf("expected started tool_call row")
+	}
+}
+
+func TestFinalizeBatch_MarksPendingToolCallsWhenCallbackStateLost(t *testing.T) {
+	t.Parallel()
+	repo := newFakeSessionRepo()
+	h := NewPersistenceHandler(PersistenceDeps{SessionID: "s", Repo: repo})
+
+	if err := repo.CreateToolCall(context.Background(), &model.ToolCall{
+		MessageID:     "msg-1",
+		ToolName:      "host_du_summary",
+		ArgumentsJSON: `{}`,
+		Status:        model.StatusPending,
+		StartedAt:     time.Now().UTC(),
+		CreatedAt:     time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("CreateToolCall: %v", err)
+	}
+
+	h.FinalizeBatch(context.Background())
+
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	for _, tc := range repo.toolCalls {
+		if tc.Status != model.StatusError {
+			t.Fatalf("pending tool_call status = %q, want error", tc.Status)
+		}
+		if tc.Error == nil || !contains(*tc.Error, "autohealed") {
+			t.Fatalf("pending tool_call error = %v", tc.Error)
+		}
 	}
 }
 

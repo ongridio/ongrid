@@ -90,6 +90,11 @@ type Repo interface {
 	// callers should remove the junction first if they want a clean cut).
 	Delete(ctx context.Context, id uint64) error
 
+	// DeleteOfflineWithLinkedEdges deletes an offline device and the Edge
+	// identities linked to it in one transaction. It must reject online
+	// devices with ErrConflict so callers never remove a live host.
+	DeleteOfflineWithLinkedEdges(ctx context.Context, id uint64) error
+
 	// ReconcileOfflineOrphans flips online=true devices back to offline
 	// when none of their linked (non-deleted) edges is online. Heals
 	// orphan "ghost" devices — a device whose edge was deleted, or whose

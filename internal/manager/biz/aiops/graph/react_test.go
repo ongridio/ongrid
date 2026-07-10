@@ -207,6 +207,32 @@ func TestBuildReActGraph_RecoversFromToolError(t *testing.T) {
 	}
 }
 
+func TestBudgetStopModel_FinalizesAfterToolBudget(t *testing.T) {
+	t.Parallel()
+	inner := newScriptedChatModel(&schema.Message{
+		Role: schema.Assistant,
+		ToolCalls: []schema.ToolCall{{
+			ID:       "call_again",
+			Function: schema.FunctionCall{Name: "query_logql", Arguments: `{}`},
+		}},
+	})
+	wrapped := wrapBudgetStopModel(inner)
+	got, err := wrapped.Generate(context.Background(), []*schema.Message{
+		schema.UserMessage("查日志"),
+		schema.ToolMessage(`{"status":"call_budget_exceeded","tool":"query_logql","final_answer_required":true}`, "call_1", schema.WithToolName("query_logql")),
+		schema.UserMessage("<system-reminder>stop loops</system-reminder>"),
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if got.Role != schema.Assistant || len(got.ToolCalls) != 0 {
+		t.Fatalf("budget stop response = %+v, want assistant without tool calls", got)
+	}
+	if inner.st.generateCalls.Load() != 0 {
+		t.Fatalf("inner model was called %d time(s), want 0", inner.st.generateCalls.Load())
+	}
+}
+
 func TestBuildReActGraph_NilModelFails(t *testing.T) {
 	t.Parallel()
 	if _, err := BuildReActGraph(nil, nil, Config{}); err == nil {

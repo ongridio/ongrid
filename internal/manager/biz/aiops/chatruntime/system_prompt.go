@@ -85,6 +85,10 @@ func ComposeSystemPrompt(basePrompt string, activeSkills []*Skill, agentProfile 
 
 const maxCapabilityDigestTools = 12
 
+type capabilityDigestRow struct {
+	name, origin, class, desc string
+}
+
 // buildToolCapabilityDigest renders a compact, per-request inventory of the
 // tools that survived persona / role filtering. This is the dynamic
 // counterpart to the static base prompt: built-in routing rules stay small,
@@ -94,10 +98,7 @@ func buildToolCapabilityDigest(tools []basetool.BaseTool) string {
 	if len(tools) == 0 {
 		return ""
 	}
-	type row struct {
-		name, origin, class, desc string
-	}
-	rows := make([]row, 0, len(tools))
+	rows := make([]capabilityDigestRow, 0, len(tools))
 	counts := map[string]int{}
 	for _, t := range tools {
 		if t == nil {
@@ -119,7 +120,7 @@ func buildToolCapabilityDigest(tools []basetool.BaseTool) string {
 		if info.Origin == "" && !isDigestBuiltin(info.Name) {
 			continue
 		}
-		rows = append(rows, row{
+		rows = append(rows, capabilityDigestRow{
 			name:   info.Name,
 			origin: origin,
 			class:  class,
@@ -155,6 +156,18 @@ func buildToolCapabilityDigest(tools []basetool.BaseTool) string {
 		}
 		b.WriteString("\n")
 	}
+	if direct := directReadToolNames(rows); len(direct) > 0 {
+		b.WriteString("- direct_read_tools: ")
+		for i, name := range direct {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteString("`")
+			b.WriteString(name)
+			b.WriteString("`")
+		}
+		b.WriteString("\n")
+	}
 	limit := len(rows)
 	truncated := 0
 	if limit > maxCapabilityDigestTools {
@@ -182,6 +195,21 @@ func buildToolCapabilityDigest(tools []basetool.BaseTool) string {
 		b.WriteString(" more; use ToolSearch/select:<tool> if a schema is redacted or the exact tool is unclear.\n")
 	}
 	return strings.TrimSpace(b.String())
+}
+
+func directReadToolNames(rows []capabilityDigestRow) []string {
+	names := make([]string, 0, len(rows))
+	for _, r := range rows {
+		if r.origin != "builtin" || r.class != "read" {
+			continue
+		}
+		if !aiopstools.IsCoreToolName(r.name) {
+			continue
+		}
+		names = append(names, r.name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func isDigestBuiltin(name string) bool {

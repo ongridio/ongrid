@@ -84,6 +84,9 @@ func (d *fakeDeviceRepo) Delete(_ context.Context, id uint64) error {
 	delete(d.byID, id)
 	return nil
 }
+func (d *fakeDeviceRepo) DeleteOfflineWithLinkedEdges(ctx context.Context, id uint64) error {
+	return d.Delete(ctx, id)
+}
 
 // fakeSvc is an in-memory EdgeService for handler tests. Matches the real
 // Service's method signatures exactly; any drift will fail compile.

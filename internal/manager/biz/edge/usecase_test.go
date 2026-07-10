@@ -194,6 +194,10 @@ func (d *fakeDeviceRepo) Delete(_ context.Context, id uint64) error {
 	return nil
 }
 
+func (d *fakeDeviceRepo) DeleteOfflineWithLinkedEdges(ctx context.Context, id uint64) error {
+	return d.Delete(ctx, id)
+}
+
 func (d *fakeDeviceRepo) ReconcileOfflineOrphans(_ context.Context) (int64, error) {
 	return 0, nil
 }

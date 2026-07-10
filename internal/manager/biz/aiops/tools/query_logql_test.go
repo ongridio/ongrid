@@ -108,6 +108,20 @@ func TestQueryLogQL_ExplicitTimeWindow(t *testing.T) {
 	}
 }
 
+func TestQueryLogQL_RelativeNowWindow(t *testing.T) {
+	lq := &fakeLogQuerier{resp: &logquery.QueryRangeResult{ResultType: "streams", Result: json.RawMessage("[]")}}
+	uc := edgebiz.NewUsecase(newFakeEdgeRepo(), nil, nil, slog.Default())
+	reg := NewRegistry(&fakeCaller{}, uc, nil, nil, lq, nil, nil, slog.Default())
+
+	if _, err := reg.Invoke(context.Background(), ToolNameQueryLogQL, json.RawMessage(`{"query":"{a=\"b\"}","start":"now-2h","end":"now"}`)); err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	span := lq.got.End.Sub(lq.got.Start)
+	if span < 119*time.Minute || span > 121*time.Minute {
+		t.Errorf("relative span = %v, want ~2h", span)
+	}
+}
+
 func TestQueryLogQL_MissingQuery(t *testing.T) {
 	lq := &fakeLogQuerier{}
 	uc := edgebiz.NewUsecase(newFakeEdgeRepo(), nil, nil, slog.Default())

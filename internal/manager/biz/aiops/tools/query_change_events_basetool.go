@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
@@ -58,13 +59,13 @@ type QueryChangeEventsArgs struct {
 var QueryChangeEventsSchema = json.RawMessage(`{
   "type": "object",
   "properties": {
-    "around_ts": {"type": "string", "description": "锚点时间 RFC3339（通常用 incident 的 fired_at）；围绕它取前后窗口。"},
+    "around_ts": {"type": "string", "description": "可选锚点时间 RFC3339（通常用 incident 的 fired_at）；省略时默认当前时间，围绕它取前后窗口。"},
     "window_minutes": {"type": "integer", "minimum": 1, "maximum": 1440, "description": "半窗口分钟数（默认 30，即锚点前后各 30 分钟）。"},
     "resource_type": {"type": "string", "description": "可选，缩小到某类资源：rule/device/setting/channel/repo/skill/user/llm/grafana。"},
     "action": {"type": "string", "description": "可选，缩小到某动作：rule_update/setting_update/device_update/repo_sync/..."},
     "limit": {"type": "integer", "minimum": 1, "maximum": 200, "description": "返回条数上限（默认 50）。"}
   },
-  "required": ["around_ts"]
+  "required": []
 }`)
 
 type changeEventRow struct {
@@ -114,9 +115,13 @@ func (t *QueryChangeEventsTool) InvokableRun(ctx context.Context, argsJSON strin
 	if err := json.Unmarshal([]byte(argsJSON), &in); err != nil {
 		return "", fmt.Errorf("query_change_events: bad args: %w", err)
 	}
-	anchor, err := time.Parse(time.RFC3339, in.AroundTS)
-	if err != nil {
-		return "", fmt.Errorf("query_change_events: around_ts must be RFC3339 (got %q): %w", in.AroundTS, err)
+	anchor := time.Now().UTC()
+	if strings.TrimSpace(in.AroundTS) != "" {
+		parsed, err := time.Parse(time.RFC3339, in.AroundTS)
+		if err != nil {
+			return "", fmt.Errorf("query_change_events: around_ts must be RFC3339 (got %q): %w", in.AroundTS, err)
+		}
+		anchor = parsed
 	}
 	win := in.WindowMin
 	if win <= 0 {

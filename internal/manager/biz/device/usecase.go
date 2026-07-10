@@ -107,14 +107,15 @@ func (u *Usecase) UpdateNameDescription(ctx context.Context, id uint64, name, de
 	return u.repo.UpdateNameDescription(ctx, id, strings.TrimSpace(name), strings.TrimSpace(description))
 }
 
-// Delete soft-deletes a device. Junction rows are NOT auto-removed —
-// caller is responsible (the v1 UI doesn't expose device deletion yet
-// so this is a future hook).
+// Delete removes an offline device plus its linked Edge identities. Online
+// devices are rejected so a live host cannot lose its access key while it is
+// still connected. The repository owns the transaction because it touches
+// devices, edge_devices, and edges together.
 func (u *Usecase) Delete(ctx context.Context, id uint64) error {
 	if u.repo == nil {
 		return errs.ErrNotWiredYet
 	}
-	return u.repo.Delete(ctx, id)
+	return u.repo.DeleteOfflineWithLinkedEdges(ctx, id)
 }
 
 // LookupHostDevice resolves edge → host device_id. Returns 0,

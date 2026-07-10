@@ -381,6 +381,8 @@ func errCode(err error) string {
 		return "unauthorized"
 	case errors.Is(err, errs.ErrForbidden):
 		return "forbidden"
+	case errors.Is(err, errs.ErrConflict):
+		return "conflict"
 	case errors.Is(err, errs.ErrInvalid):
 		return "invalid"
 	case errors.Is(err, errs.ErrNotWiredYet):

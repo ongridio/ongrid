@@ -637,6 +637,7 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (*Reply, error) {
 			sessionToolBag = append(sessionToolBag, stub)
 		}
 	}
+	sessionToolBag = filterCoordinatorToolsForIntent(sessionToolBag, req.UserText, isCoordinator)
 	// AgentID="default" is the virtual top-level persona — same wiring
 	// as the no-agent coordinator (BasePrompt + full toolBag + agent
 	// catalog), but the session keeps "default" so the SPA shows the
@@ -1134,6 +1135,243 @@ func chatModelOpts(req *Request) []model.Option {
 		opts = append(opts, model.WithModel(m))
 	}
 	return opts
+}
+
+func filterCoordinatorToolsForIntent(bag []basetool.BaseTool, userText string, isCoordinator bool) []basetool.BaseTool {
+	if !isCoordinator || len(bag) == 0 {
+		return bag
+	}
+	low := strings.ToLower(userText)
+	knowledgeIntent := containsAny(low, "knowledge", "kb", "runbook", "playbook", "doc", "docs", "document") ||
+		strings.Contains(userText, "知识库") || strings.Contains(userText, "文档") || strings.Contains(userText, "手册")
+	metricIntent := containsAny(low, "metric", "promql", "prometheus", "cpu", "memory", "mem", "disk", "swap", "load") ||
+		strings.Contains(userText, "指标") || strings.Contains(userText, "使用率") || strings.Contains(userText, "磁盘") ||
+		strings.Contains(userText, "内存") || strings.Contains(userText, "负载")
+	metricCatalogIntent := containsAny(low, "metric catalog", "metrics catalog", "catalog") ||
+		strings.Contains(userText, "指标目录")
+	rankingIntent := containsAny(low, "rank", "ranking", "top ", "top5", "top 5", "outlier", "outliers") ||
+		strings.Contains(userText, "排序") || strings.Contains(userText, "离群") || strings.Contains(userText, "最高")
+	logIntent := containsTerm(low, "log", "logs") || strings.Contains(low, "logql") || strings.Contains(low, "loki") || strings.Contains(userText, "日志")
+	traceIntent := strings.Contains(low, "trace") || strings.Contains(low, "traceql") || strings.Contains(low, "span") || strings.Contains(userText, "链路")
+	sourceSearchIntent := containsAny(low, "grep", "search source", "search code", "find source", "find code", "function", "symbol", "stack trace", "error string") ||
+		strings.Contains(userText, "搜索") || strings.Contains(userText, "函数") || strings.Contains(userText, "报错串")
+	dbHealthIntent := containsAny(low, "database health", "db health", "mysql", "postgres", "postgresql", "redis", "mongodb", "mongo", "slow query", "connection pressure", "replication") ||
+		strings.Contains(userText, "数据库健康") || strings.Contains(userText, "慢查询") || strings.Contains(userText, "连接数") || strings.Contains(userText, "复制状态")
+	changeEventIntent := containsAny(low, "change event", "change events", "release event", "audit change", "what changed") ||
+		strings.Contains(userText, "变更事件") || strings.Contains(userText, "审计变更") || strings.Contains(userText, "谁改") || strings.Contains(userText, "改过")
+	alertRulesIntent := containsAny(low, "alert rule", "alert rules") || strings.Contains(userText, "告警规则")
+	incidentIntent := containsAny(low, "incident", "incidents") || strings.Contains(userText, "告警")
+	complexHint := complexCoordinatorHint(low, userText)
+	topologyIntent := strings.Contains(low, "topology") || strings.Contains(low, "fleet") || strings.Contains(low, "deployment") ||
+		strings.Contains(userText, "拓扑") || strings.Contains(userText, "规模") || strings.Contains(userText, "版本") || strings.Contains(userText, "部署")
+	if containsAny(low, "do not query topology", "don't query topology", "without topology", "not topology", "no topology") ||
+		strings.Contains(userText, "不要先查拓扑") || strings.Contains(userText, "不要查拓扑") ||
+		strings.Contains(userText, "不查拓扑") || strings.Contains(userText, "别查拓扑") || strings.Contains(userText, "无需拓扑") {
+		topologyIntent = false
+	}
+	hostIntent := strings.Contains(low, "host_bash") || strings.Contains(low, "journalctl") || strings.Contains(low, "systemctl") ||
+		strings.Contains(low, "dmesg") || strings.Contains(low, "device_id") || strings.Contains(userText, "主机") || strings.Contains(userText, "文件")
+	if !knowledgeIntent && !metricIntent && !logIntent && !traceIntent && !sourceSearchIntent && !dbHealthIntent && !changeEventIntent && !alertRulesIntent && !incidentIntent && !complexHint {
+		return bag
+	}
+	if knowledgeIntent && knowledgeLookupIntent(low, userText) {
+		return filterCoordinatorToolNames(bag, "query_knowledge")
+	}
+	if topologyIntent && topologyFactsIntent(low, userText) {
+		return filterCoordinatorToolNames(bag, "get_topology")
+	}
+	if metricCatalogIntent {
+		return filterCoordinatorToolNames(bag, "list_metric_catalog")
+	}
+	if complexHint || complexCoordinatorIntent(knowledgeIntent, metricIntent, logIntent, traceIntent, dbHealthIntent, changeEventIntent, incidentIntent, topologyIntent) {
+		return filterCoordinatorControlTools(bag)
+	}
+	if alertRulesIntent && !complexHint {
+		return filterCoordinatorToolNames(bag, "query_alert_rules")
+	}
+	if incidentIntent && incidentLookupIntent(low, userText) && !complexHint {
+		return filterCoordinatorToolNames(bag, "query_incidents")
+	}
+	out := make([]basetool.BaseTool, 0, len(bag))
+	for _, t := range bag {
+		if t == nil {
+			continue
+		}
+		info, err := t.Info(context.Background())
+		if err != nil || info == nil {
+			out = append(out, t)
+			continue
+		}
+		if knowledgeIntent {
+			if info.Name == "query_knowledge" {
+				out = append(out, t)
+			}
+			continue
+		}
+		if changeEventIntent {
+			if info.Name == "query_change_events" {
+				out = append(out, t)
+			}
+			continue
+		}
+		if sourceSearchIntent {
+			if info.Name == "grep_source" {
+				out = append(out, t)
+			}
+			continue
+		}
+		if dbHealthIntent {
+			if info.Name == "analyze_database_status" {
+				out = append(out, t)
+			}
+			continue
+		}
+		if metricIntent && !logIntent && !traceIntent && !topologyIntent && !hostIntent {
+			switch info.Name {
+			case "query_promql", "list_metric_catalog":
+				out = append(out, t)
+			case "rank_edges", "find_outlier_edges":
+				if rankingIntent {
+					out = append(out, t)
+				}
+			}
+			continue
+		}
+		if logIntent && !traceIntent && !topologyIntent && !hostIntent {
+			if info.Name == "query_logql" {
+				out = append(out, t)
+			}
+			continue
+		}
+		if traceIntent && !logIntent && !topologyIntent && !hostIntent {
+			if info.Name == "query_traceql" {
+				out = append(out, t)
+			}
+			continue
+		}
+		if !topologyIntent && info.Name == "get_topology" {
+			continue
+		}
+		if !hostIntent && info.Name == "host_bash" {
+			continue
+		}
+		if logIntent && !hostIntent {
+			switch info.Name {
+			case "query_devices", "query_edges", "get_edge_summary", "get_host_load", "get_host_processes", "rank_edges", "find_outlier_edges":
+				continue
+			}
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
+func filterCoordinatorToolNames(bag []basetool.BaseTool, names ...string) []basetool.BaseTool {
+	allowed := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		allowed[name] = struct{}{}
+	}
+	out := make([]basetool.BaseTool, 0, len(bag))
+	for _, t := range bag {
+		if t == nil {
+			continue
+		}
+		info, err := t.Info(context.Background())
+		if err != nil || info == nil {
+			out = append(out, t)
+			continue
+		}
+		if _, ok := allowed[info.Name]; ok {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+func filterCoordinatorControlTools(bag []basetool.BaseTool) []basetool.BaseTool {
+	out := make([]basetool.BaseTool, 0, len(bag))
+	for _, t := range bag {
+		if t == nil {
+			continue
+		}
+		info, err := t.Info(context.Background())
+		if err != nil || info == nil {
+			out = append(out, t)
+			continue
+		}
+		switch info.Name {
+		case "AgentTool", "SendMessage", "TaskStop", "ToolSearch":
+			out = append(out, t)
+		}
+	}
+	if len(out) > 0 {
+		return out
+	}
+	return bag
+}
+
+func knowledgeLookupIntent(low, original string) bool {
+	return containsAny(low, "is there", "any runbook", "any doc", "any docs", "list relevant", "search knowledge") ||
+		strings.Contains(original, "有没有") || strings.Contains(original, "列出") || strings.Contains(original, "最相关")
+}
+
+func topologyFactsIntent(low, original string) bool {
+	return containsAny(low, "fleet/deployment facts", "deployment facts", "fleet facts", "configuration", "configured") ||
+		strings.Contains(original, "配置") || strings.Contains(original, "版本") || strings.Contains(original, "规模")
+}
+
+func complexCoordinatorHint(low, original string) bool {
+	return containsAny(low,
+		"root cause", "rca", "correlate", "correlation", "blast radius", "impact", "priority",
+		"prioritize", "risk", "rollback", "remediation", "report", "handoff", "forecast",
+		"capacity", "noise", "forensics", "health check", "checkup", "evidence chain",
+		"draft", "spread path", "propagation path") ||
+		strings.Contains(original, "根因") || strings.Contains(original, "关联") || strings.Contains(original, "影响面") ||
+		strings.Contains(original, "优先级") || strings.Contains(original, "风险") || strings.Contains(original, "回滚") ||
+		strings.Contains(original, "处置") || strings.Contains(original, "修复") || strings.Contains(original, "报告") ||
+		strings.Contains(original, "交接") || strings.Contains(original, "容量") || strings.Contains(original, "噪音") ||
+		strings.Contains(original, "噪声") || strings.Contains(original, "草拟") || strings.Contains(original, "传播路径") ||
+		strings.Contains(original, "取证") || strings.Contains(original, "健康检查") || strings.Contains(original, "证据链") ||
+		strings.Contains(original, "排查") || strings.Contains(original, "综合判断") || strings.Contains(original, "判断")
+}
+
+func incidentLookupIntent(low, original string) bool {
+	return containsAny(low, "list", "open incidents", "critical incidents", "current incidents") ||
+		strings.Contains(original, "列出") || strings.Contains(original, "当前") || strings.Contains(original, "只要列表") || strings.Contains(original, "数量")
+}
+
+func complexCoordinatorIntent(intents ...bool) bool {
+	count := 0
+	for _, ok := range intents {
+		if ok {
+			count++
+		}
+	}
+	return count >= 3
+}
+
+func containsAny(s string, needles ...string) bool {
+	for _, needle := range needles {
+		if strings.Contains(s, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsTerm(s string, terms ...string) bool {
+	index := make(map[string]struct{}, len(terms))
+	for _, term := range terms {
+		index[term] = struct{}{}
+	}
+	for _, field := range strings.FieldsFunc(s, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_')
+	}) {
+		if _, ok := index[field]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // calcDynamicHints produces the per-turn hint bullets that get injected
