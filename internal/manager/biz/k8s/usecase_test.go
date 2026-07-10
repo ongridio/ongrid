@@ -11,6 +11,7 @@ import (
 
 	model "github.com/ongridio/ongrid/internal/manager/model/k8s"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
+	"github.com/ongridio/ongrid/internal/pkg/k8sredact"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
 
@@ -27,15 +28,15 @@ func TestUsecaseCreateClusterAndEnrollNode(t *testing.T) {
 	if reg.Cluster.ID == 0 {
 		t.Fatalf("CreateCluster() did not assign cluster id")
 	}
-	if reg.BootstrapToken == "" {
-		t.Fatalf("CreateCluster() did not return bootstrap token")
+	if reg.BootstrapToken == "" || reg.NodeBootstrapToken == "" || reg.BootstrapToken == reg.NodeBootstrapToken {
+		t.Fatalf("CreateCluster() did not return distinct controller/node bootstrap tokens")
 	}
 	if !strings.Contains(reg.InstallCommand, "--set-string enrollment.clusterID=1") {
 		t.Fatalf("install command missing cluster id: %s", reg.InstallCommand)
 	}
 
 	first, err := uc.Enroll(ctx, EnrollInput{
-		BootstrapToken: reg.BootstrapToken,
+		BootstrapToken: reg.NodeBootstrapToken,
 		ClusterID:      reg.Cluster.ID,
 		Role:           model.RoleNode,
 		NodeName:       "node-a",
@@ -49,7 +50,7 @@ func TestUsecaseCreateClusterAndEnrollNode(t *testing.T) {
 	}
 
 	second, err := uc.Enroll(ctx, EnrollInput{
-		BootstrapToken: reg.BootstrapToken,
+		BootstrapToken: reg.NodeBootstrapToken,
 		ClusterID:      reg.Cluster.ID,
 		Role:           model.RoleNode,
 		NodeName:       "node-a",
@@ -81,7 +82,7 @@ func TestInstallCommandDerivesExternalTunnelAddr(t *testing.T) {
 		PublicURL:  "https://manager.example.com",
 		TunnelAddr: ":40012",
 	})
-	cmd := uc.installCommand(6, model.ModeFullNode, "token")
+	cmd := uc.installCommand(6, model.ModeFullNode, "controller-token", "node-token")
 	if !strings.Contains(cmd, "--set-string manager.publicURL='https://manager.example.com'") {
 		t.Fatalf("install command missing publicURL: %s", cmd)
 	}
@@ -107,7 +108,7 @@ func TestInstallCommandUsesConfiguredChartRef(t *testing.T) {
 		PublicURL: "https://manager.example.com",
 		ChartRef:  "oci://ghcr.io/ongridio/charts/ongrid-edge",
 	})
-	cmd := uc.installCommand(6, model.ModeFullNode, "token")
+	cmd := uc.installCommand(6, model.ModeFullNode, "controller-token", "node-token")
 	if !strings.Contains(cmd, "'oci://ghcr.io/ongridio/charts/ongrid-edge'") {
 		t.Fatalf("install command should use configured chart ref: %s", cmd)
 	}
@@ -116,11 +117,31 @@ func TestInstallCommandUsesConfiguredChartRef(t *testing.T) {
 	}
 }
 
+func TestUpgradeCommandUsesManagerConfig(t *testing.T) {
+	uc := NewUsecase(newFakeRepo(), newFakeIssuer(), Config{
+		PublicURL:  "https://manager.example.com:8443",
+		TunnelAddr: "manager.example.com:40012",
+	})
+	command := uc.UpgradeCommand(&model.Cluster{ControllerNamespace: "ongrid-system"})
+	for _, want := range []string{
+		"helm upgrade ongrid-edge",
+		"'https://manager.example.com:8443/edge/k8s/ongrid-edge.tgz'",
+		"--namespace 'ongrid-system'",
+		"--reuse-values",
+		"manager.publicURL='https://manager.example.com:8443'",
+		"manager.tunnelAddr='manager.example.com:40012'",
+	} {
+		if !strings.Contains(command, want) {
+			t.Fatalf("UpgradeCommand() = %q, missing %q", command, want)
+		}
+	}
+}
+
 func TestInstallCommandKeepsPlaceholdersWhenExternalAddressUnknown(t *testing.T) {
 	uc := NewUsecase(newFakeRepo(), newFakeIssuer(), Config{
 		TunnelAddr: ":40012",
 	})
-	cmd := uc.installCommand(6, model.ModeFullNode, "token")
+	cmd := uc.installCommand(6, model.ModeFullNode, "controller-token", "node-token")
 	if !strings.Contains(cmd, "--set-string manager.publicURL='https://<manager>'") {
 		t.Fatalf("install command should keep publicURL placeholder: %s", cmd)
 	}
@@ -154,6 +175,45 @@ func TestUsecaseEnrollRejectsInvalidToken(t *testing.T) {
 	})
 	if !errors.Is(err, errs.ErrUnauthorized) {
 		t.Fatalf("Enroll() error = %v, want unauthorized", err)
+	}
+}
+
+func TestUsecaseNodeTokenCannotEnrollController(t *testing.T) {
+	ctx := context.Background()
+	uc := NewUsecase(newFakeRepo(), newFakeIssuer(), Config{})
+	reg, err := uc.CreateCluster(ctx, CreateClusterInput{Name: "prod"})
+	if err != nil {
+		t.Fatalf("CreateCluster() error = %v", err)
+	}
+	_, err = uc.Enroll(ctx, EnrollInput{
+		BootstrapToken: reg.NodeBootstrapToken,
+		ClusterID:      reg.Cluster.ID,
+		Role:           model.RoleController,
+		NodeName:       "worker-a",
+	})
+	if !errors.Is(err, errs.ErrUnauthorized) {
+		t.Fatalf("Enroll(controller with node token) error = %v, want unauthorized", err)
+	}
+}
+
+func TestUsecaseControllerTokenIsSingleUse(t *testing.T) {
+	ctx := context.Background()
+	uc := NewUsecase(newFakeRepo(), newFakeIssuer(), Config{})
+	reg, err := uc.CreateCluster(ctx, CreateClusterInput{Name: "prod"})
+	if err != nil {
+		t.Fatalf("CreateCluster() error = %v", err)
+	}
+	in := EnrollInput{
+		BootstrapToken: reg.BootstrapToken,
+		ClusterID:      reg.Cluster.ID,
+		Role:           model.RoleController,
+		Namespace:      "ongrid-system",
+	}
+	if _, err := uc.Enroll(ctx, in); err != nil {
+		t.Fatalf("Enroll(first) error = %v", err)
+	}
+	if _, err := uc.Enroll(ctx, in); !errors.Is(err, errs.ErrUnauthorized) {
+		t.Fatalf("Enroll(replay) error = %v, want unauthorized", err)
 	}
 }
 
@@ -380,7 +440,7 @@ func TestUsecaseDeleteClusterDeletesAssociatedEdges(t *testing.T) {
 		t.Fatalf("Enroll(controller) error = %v", err)
 	}
 	node, err := uc.Enroll(ctx, EnrollInput{
-		BootstrapToken: reg.BootstrapToken,
+		BootstrapToken: reg.NodeBootstrapToken,
 		ClusterID:      reg.Cluster.ID,
 		Role:           model.RoleNode,
 		NodeName:       "node-a",
@@ -606,6 +666,9 @@ func TestUsecaseInventoryUpdatesSyncMetadata(t *testing.T) {
 	if got.InventorySyncDurationMS != 123 || got.InventoryWatchLagSeconds != 0 || got.InventorySyncedAt == nil {
 		t.Fatalf("sync health = duration:%d lag:%d synced:%v", got.InventorySyncDurationMS, got.InventoryWatchLagSeconds, got.InventorySyncedAt)
 	}
+	if got.InventorySyncedAt.Before(time.Unix(collectedAt, 0).Add(5 * time.Second)) {
+		t.Fatalf("InventorySyncedAt = %v, must use manager receive time instead of edge timestamp", got.InventorySyncedAt)
+	}
 	if !strings.Contains(got.InventoryResourceVersionsJSON, `"pods:ongrid-system":"42"`) {
 		t.Fatalf("resource_versions_json = %s", got.InventoryResourceVersionsJSON)
 	}
@@ -638,6 +701,29 @@ func TestUsecaseInventoryUsesWatchObservedAtForLag(t *testing.T) {
 	}
 }
 
+func TestUsecaseClusterHealthUsesExactRepositoryCounts(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	uc := NewUsecase(repo, newFakeIssuer(), Config{})
+	reg, err := uc.CreateCluster(ctx, CreateClusterInput{Name: "prod"})
+	if err != nil {
+		t.Fatalf("CreateCluster() error = %v", err)
+	}
+	clusterID := reg.Cluster.ID
+	repo.pods[podKey(clusterID, "default", "pending", "pending-uid")] = &model.Pod{ClusterID: clusterID, Namespace: "default", Name: "pending", UID: "pending-uid", Phase: "Pending"}
+	repo.pods[podKey(clusterID, "default", "crash", "crash-uid")] = &model.Pod{ClusterID: clusterID, Namespace: "default", Name: "crash", UID: "crash-uid", Phase: "Running", Reason: "CrashLoopBackOff"}
+	repo.pods[podKey(clusterID, "default", "pull", "pull-uid")] = &model.Pod{ClusterID: clusterID, Namespace: "default", Name: "pull", UID: "pull-uid", Phase: "Pending", Reason: "ErrImagePull"}
+	repo.nodes[nodeKey(clusterID, "node-uid")] = &model.Node{ClusterID: clusterID, NodeName: "node-a", NodeUID: "node-uid", ConditionsJSON: `[{"type":"Ready","status":"False"}]`}
+
+	health, err := uc.GetClusterHealth(ctx, clusterID)
+	if err != nil {
+		t.Fatalf("GetClusterHealth() error = %v", err)
+	}
+	if health.PendingPods != 2 || health.CrashLoopBackOffPods != 1 || health.ImagePullBackOffPods != 1 || health.NotReadyNodes != 1 {
+		t.Fatalf("health = %+v", health)
+	}
+}
+
 func TestUsecaseInventoryAcceptsEvents(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeRepo()
@@ -656,7 +742,7 @@ func TestUsecaseInventoryAcceptsEvents(t *testing.T) {
 			UID:               "event-uid-a",
 			Type:              "Warning",
 			Reason:            "FailedScheduling",
-			Message:           "0/1 nodes are available",
+			Message:           "0/1 nodes are available; token=top-secret",
 			InvolvedKind:      "Pod",
 			InvolvedNamespace: "default",
 			InvolvedName:      "pod-a",
@@ -677,6 +763,27 @@ func TestUsecaseInventoryAcceptsEvents(t *testing.T) {
 	got := repo.events[0]
 	if got.Reason != "FailedScheduling" || got.InvolvedName != "pod-a" || got.LastTimestamp == nil {
 		t.Fatalf("event not normalized correctly: %#v", got)
+	}
+	if strings.Contains(got.Message, "top-secret") || !strings.Contains(got.Message, "[REDACTED]") {
+		t.Fatalf("event message not redacted: %q", got.Message)
+	}
+}
+
+func TestRedactInventoryMap(t *testing.T) {
+	in := map[string]string{
+		"app":                   "api",
+		"example.com/api-token": "top-secret",
+		"endpoint":              "https://user:password@example.com/api",
+	}
+	out := k8sredact.StringMap(in)
+	if out["app"] != "api" || out["example.com/api-token"] != "[REDACTED]" {
+		t.Fatalf("redacted inventory map = %#v", out)
+	}
+	if strings.Contains(out["endpoint"], "password") {
+		t.Fatalf("credential URL not redacted: %q", out["endpoint"])
+	}
+	if in["example.com/api-token"] != "top-secret" {
+		t.Fatal("redaction must not mutate the inventory request map")
 	}
 }
 
@@ -799,13 +906,38 @@ func (r *fakeRepo) CountClusters(context.Context, ListClustersFilter) (int64, er
 	return int64(len(r.clusters)), nil
 }
 
-func (r *fakeRepo) UpdateClusterToken(_ context.Context, id uint64, tokenHash string, expiresAt *time.Time) error {
+func (r *fakeRepo) UpdateClusterTokens(_ context.Context, id uint64, controllerTokenHash, nodeTokenHash string, expiresAt *time.Time) error {
 	c, ok := r.clusters[id]
 	if !ok {
 		return errs.ErrNotFound
 	}
-	c.BootstrapTokenHash = tokenHash
+	c.BootstrapTokenHash = controllerTokenHash
+	c.NodeBootstrapTokenHash = nodeTokenHash
 	c.BootstrapTokenExpiresAt = expiresAt
+	return nil
+}
+
+func (r *fakeRepo) ClaimControllerBootstrapToken(_ context.Context, id uint64, tokenHash string) (bool, error) {
+	c, ok := r.clusters[id]
+	if !ok {
+		return false, errs.ErrNotFound
+	}
+	if c.BootstrapTokenHash != tokenHash {
+		return false, nil
+	}
+	c.BootstrapTokenHash = ""
+	return true, nil
+}
+
+func (r *fakeRepo) RestoreControllerBootstrapToken(_ context.Context, id uint64, tokenHash string) error {
+	c, ok := r.clusters[id]
+	if !ok {
+		return errs.ErrNotFound
+	}
+	if c.BootstrapTokenHash != "" {
+		return errs.ErrConflict
+	}
+	c.BootstrapTokenHash = tokenHash
 	return nil
 }
 
@@ -870,6 +1002,20 @@ func (r *fakeRepo) ListClusterEdgeIDs(_ context.Context, clusterID uint64) ([]ui
 		}
 	}
 	return uniqueNonZeroUint64(out), nil
+}
+
+func (r *fakeRepo) GetClusterIDByEdgeID(_ context.Context, edgeID uint64) (uint64, error) {
+	for clusterID, c := range r.clusters {
+		if c.ControllerEdgeID != nil && *c.ControllerEdgeID == edgeID {
+			return clusterID, nil
+		}
+		for _, node := range r.nodes {
+			if node.ClusterID == clusterID && node.EdgeID != nil && *node.EdgeID == edgeID {
+				return clusterID, nil
+			}
+		}
+	}
+	return 0, errs.ErrNotFound
 }
 
 func (r *fakeRepo) DeleteCluster(_ context.Context, id uint64) error {
@@ -1155,6 +1301,66 @@ func (r *fakeRepo) GetNodeCoverage(ctx context.Context, clusterID uint64) (NodeC
 	return out, nil
 }
 
+func (r *fakeRepo) GetNodeCoverageByClusterIDs(ctx context.Context, clusterIDs []uint64) (map[uint64]NodeCoverage, error) {
+	out := make(map[uint64]NodeCoverage, len(clusterIDs))
+	for _, clusterID := range clusterIDs {
+		coverage, err := r.GetNodeCoverage(ctx, clusterID)
+		if err != nil {
+			return nil, err
+		}
+		out[clusterID] = coverage
+	}
+	return out, nil
+}
+
+func (r *fakeRepo) ListEdgeAttachments(_ context.Context, limit, offset int) ([]EdgeAttachment, int64, error) {
+	out := make([]EdgeAttachment, 0)
+	for _, cluster := range r.clusters {
+		if cluster.ControllerEdgeID != nil {
+			out = append(out, EdgeAttachment{
+				EdgeID:      *cluster.ControllerEdgeID,
+				ClusterID:   cluster.ID,
+				ClusterName: cluster.Name,
+				ClusterMode: cluster.Mode,
+				NodeName:    cluster.ControllerNodeName,
+				Kind:        "k8s-controller",
+			})
+		}
+		for _, node := range r.nodes {
+			if node.ClusterID != cluster.ID || node.EdgeID == nil {
+				continue
+			}
+			out = append(out, EdgeAttachment{
+				EdgeID:      *node.EdgeID,
+				ClusterID:   cluster.ID,
+				ClusterName: cluster.Name,
+				ClusterMode: cluster.Mode,
+				NodeName:    node.NodeName,
+				Kind:        "k8s-node",
+			})
+			if cluster.ControllerNodeName != "" && node.NodeName == cluster.ControllerNodeName {
+				out = append(out, EdgeAttachment{
+					EdgeID:      *node.EdgeID,
+					ClusterID:   cluster.ID,
+					ClusterName: cluster.Name,
+					ClusterMode: cluster.Mode,
+					NodeName:    node.NodeName,
+					Kind:        "k8s-controller-runtime",
+				})
+			}
+		}
+	}
+	total := int64(len(out))
+	if offset >= len(out) {
+		return []EdgeAttachment{}, total, nil
+	}
+	end := len(out)
+	if limit > 0 && offset+limit < end {
+		end = offset + limit
+	}
+	return out[offset:end], total, nil
+}
+
 func (r *fakeRepo) ListWorkloads(_ context.Context, _ ListWorkloadsFilter) ([]*model.Workload, error) {
 	return nil, nil
 }
@@ -1164,9 +1370,15 @@ func (r *fakeRepo) CountWorkloads(ctx context.Context, f ListWorkloadsFilter) (i
 	return int64(len(items)), err
 }
 
-func (r *fakeRepo) ListPods(_ context.Context, _ ListPodsFilter) ([]*model.Pod, error) {
+func (r *fakeRepo) ListPods(_ context.Context, f ListPodsFilter) ([]*model.Pod, error) {
 	out := make([]*model.Pod, 0, len(r.pods))
 	for _, item := range r.pods {
+		if item.ClusterID != f.ClusterID || (f.Phase != "" && item.Phase != f.Phase) || (f.Reason != "" && item.Reason != f.Reason) {
+			continue
+		}
+		if f.IssueOnly && item.Phase != "Pending" && item.Phase != "Failed" && item.Reason != "CrashLoopBackOff" && item.Reason != "OOMKilled" && item.Reason != "ImagePullBackOff" && item.Reason != "ErrImagePull" {
+			continue
+		}
 		cp := *item
 		out = append(out, &cp)
 	}

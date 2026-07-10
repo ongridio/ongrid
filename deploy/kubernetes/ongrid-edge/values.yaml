@@ -11,7 +11,8 @@ manager:
 
 enrollment:
   clusterID: ""
-  bootstrapToken: ""
+  controllerBootstrapToken: ""
+  nodeBootstrapToken: ""
 
 image:
   edge:
@@ -89,6 +90,3 @@ podSecurity:
   runAsGroup: 65532
   fsGroup: 65532
   supplementalGroups: []
-
-networkPolicy:
-  enabled: false

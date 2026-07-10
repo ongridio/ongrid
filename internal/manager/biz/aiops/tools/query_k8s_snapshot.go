@@ -11,6 +11,7 @@ import (
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	k8sbiz "github.com/ongridio/ongrid/internal/manager/biz/k8s"
 	k8smodel "github.com/ongridio/ongrid/internal/manager/model/k8s"
+	"github.com/ongridio/ongrid/internal/pkg/k8sredact"
 )
 
 const ToolNameQueryK8sSnapshot = "query_k8s_snapshot"
@@ -290,12 +291,14 @@ func (t *QueryK8sSnapshotTool) run(ctx context.Context, in QueryK8sSnapshotArgs)
 	case "summary":
 		return t.querySummary(ctx, clusters, in, resp)
 	case "clusters":
-		rows := make([]k8sClusterSnapshotRow, 0, len(clusters))
-		for _, c := range clusters {
+		resp.Total = int64(len(clusters))
+		start, end := pageBounds(len(clusters), in.Offset, in.Limit)
+		rows := make([]k8sClusterSnapshotRow, 0, end-start)
+		for _, c := range clusters[start:end] {
 			rows = append(rows, clusterSnapshotRow(c))
 		}
-		resp.Total = int64(len(rows))
 		resp.Clusters = rows
+		resp.Truncated = start > 0 || end < len(clusters)
 		return resp, nil
 	case "nodes":
 		return t.queryNodes(ctx, clusters, in, resp)
@@ -318,13 +321,22 @@ func (t *QueryK8sSnapshotTool) selectClusters(ctx context.Context, in QueryK8sSn
 		}
 		return filterClustersByEffectiveStatus([]*k8smodel.Cluster{c}, in.ClusterStatus, time.Now().UTC()), nil
 	}
-	items, err := t.reader.ListClusters(ctx, k8sbiz.ListClustersFilter{
-		Name:  in.ClusterName,
-		Mode:  in.ClusterMode,
-		Limit: 100,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("%s: list clusters: %w", ToolNameQueryK8sSnapshot, err)
+	const pageSize = 200
+	items := make([]*k8smodel.Cluster, 0, pageSize)
+	for offset := 0; ; offset += pageSize {
+		page, err := t.reader.ListClusters(ctx, k8sbiz.ListClustersFilter{
+			Name:   in.ClusterName,
+			Mode:   in.ClusterMode,
+			Limit:  pageSize,
+			Offset: offset,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("%s: list clusters: %w", ToolNameQueryK8sSnapshot, err)
+		}
+		items = append(items, page...)
+		if len(page) < pageSize {
+			break
+		}
 	}
 	return filterClustersByEffectiveStatus(items, in.ClusterStatus, time.Now().UTC()), nil
 }
@@ -332,12 +344,15 @@ func (t *QueryK8sSnapshotTool) selectClusters(ctx context.Context, in QueryK8sSn
 func (t *QueryK8sSnapshotTool) querySummary(ctx context.Context, clusters []*k8smodel.Cluster, in QueryK8sSnapshotArgs, resp *k8sSnapshotResponse) (*k8sSnapshotResponse, error) {
 	resp.PerCluster = make([]k8sClusterCountSnapshot, 0, len(clusters))
 	totals := &k8sClusterCountSnapshot{}
-	for _, c := range clusters {
+	start, end := pageBounds(len(clusters), in.Offset, in.Limit)
+	for i, c := range clusters {
 		row, err := t.countCluster(ctx, c, in)
 		if err != nil {
 			return nil, err
 		}
-		resp.PerCluster = append(resp.PerCluster, row)
+		if i >= start && i < end {
+			resp.PerCluster = append(resp.PerCluster, row)
+		}
 		totals.Nodes += row.Nodes
 		totals.Workloads += row.Workloads
 		totals.Pods += row.Pods
@@ -345,6 +360,7 @@ func (t *QueryK8sSnapshotTool) querySummary(ctx context.Context, clusters []*k8s
 	}
 	resp.Total = int64(len(clusters))
 	resp.Totals = totals
+	resp.Truncated = start > 0 || end < len(clusters)
 	return resp, nil
 }
 
@@ -367,6 +383,7 @@ func (t *QueryK8sSnapshotTool) countCluster(ctx context.Context, c *k8smodel.Clu
 		Namespace: in.Namespace,
 		NodeName:  in.NodeName,
 		Phase:     in.Phase,
+		Reason:    in.Reason,
 	})
 	if err != nil {
 		return row, fmt.Errorf("%s: count pods for cluster %d: %w", ToolNameQueryK8sSnapshot, c.ID, err)
@@ -387,6 +404,23 @@ func (t *QueryK8sSnapshotTool) countCluster(ctx context.Context, c *k8smodel.Clu
 	row.Pods = pods
 	row.Events = events
 	return row, nil
+}
+
+func pageBounds(total, offset, limit int) (int, int) {
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > total {
+		offset = total
+	}
+	if limit < 0 {
+		limit = 0
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	return offset, end
 }
 
 func (t *QueryK8sSnapshotTool) queryNodes(ctx context.Context, clusters []*k8smodel.Cluster, in QueryK8sSnapshotArgs, resp *k8sSnapshotResponse) (*k8sSnapshotResponse, error) {
@@ -701,7 +735,7 @@ func eventSnapshotRow(e *k8smodel.Event) k8sEventSnapshotRow {
 		UID:               e.UID,
 		Type:              e.Type,
 		Reason:            e.Reason,
-		Message:           e.Message,
+		Message:           k8sredact.Text(e.Message),
 		InvolvedKind:      e.InvolvedKind,
 		InvolvedNamespace: e.InvolvedNamespace,
 		InvolvedName:      e.InvolvedName,

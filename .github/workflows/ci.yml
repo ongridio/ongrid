@@ -42,4 +42,71 @@ jobs:
         run: go vet ./...
 
       - name: go test
-        run: go test ./...
+        run: go test -race ./...
+
+  web-test:
+    name: web test + build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: >-
+          npm test -- --run
+          src/pages/Kubernetes.test.tsx
+          src/pages/Edges.test.tsx
+          src/pages/Dashboard.test.tsx
+          src/pages/kubernetes/edgeAttachments.test.ts
+          src/pages/kubernetes/registryCommands.test.ts
+
+      - name: Build
+        run: npm run build
+
+  deployment-test:
+    name: deployment manifests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Check release scripts
+        run: bash -n dist/package.sh
+
+      - name: Lint and render Kubernetes chart
+        run: |
+          helm lint deploy/kubernetes/ongrid-edge \
+            --set-string manager.publicURL=https://manager.example:8443 \
+            --set-string manager.tunnelAddr=manager.example:40012 \
+            --set-string enrollment.clusterID=1 \
+            --set-string enrollment.controllerBootstrapToken=controller-token \
+            --set-string enrollment.nodeBootstrapToken=node-token
+          helm template ongrid-edge deploy/kubernetes/ongrid-edge \
+            --namespace ongrid-system \
+            --set-string manager.publicURL=https://manager.example:8443 \
+            --set-string manager.tunnelAddr=manager.example:40012 \
+            --set-string enrollment.clusterID=1 \
+            --set-string enrollment.controllerBootstrapToken=controller-token \
+            --set-string enrollment.nodeBootstrapToken=node-token \
+            >/tmp/ongrid-edge.yaml

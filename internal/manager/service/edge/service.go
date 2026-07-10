@@ -11,6 +11,7 @@ import (
 
 	biz "github.com/ongridio/ongrid/internal/manager/biz/edge"
 	model "github.com/ongridio/ongrid/internal/manager/model/edge"
+	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
 
@@ -22,12 +23,17 @@ type EdgeCaller interface {
 	Call(ctx context.Context, edgeID uint64, method string, body []byte) ([]byte, error)
 }
 
+type ManagedEdgeGuard interface {
+	ManagedClusterIDForEdge(ctx context.Context, edgeID uint64) (clusterID uint64, managed bool, err error)
+}
+
 // Service is the HTTP-facing shim over biz.Usecase. Keeps handlers
 // reasonably thin: validation + DTO translation in the HTTP layer, business
 // logic (key generation, hashing, soft-delete semantics) in biz.
 type Service struct {
 	uc     *biz.Usecase
 	caller EdgeCaller // nil disables UpgradeAgent (returns ErrNotWiredYet)
+	guard  ManagedEdgeGuard
 	log    *slog.Logger
 }
 
@@ -43,7 +49,8 @@ func New(uc *biz.Usecase, caller EdgeCaller, log *slog.Logger) *Service {
 // SetEdgeCaller back-fills the cloud→edge dispatcher after main has
 // built frontierbound.Client. Safe to call before any HTTP traffic
 // hits — wiring happens during startup before HTTP servers listen.
-func (s *Service) SetEdgeCaller(c EdgeCaller) { s.caller = c }
+func (s *Service) SetEdgeCaller(c EdgeCaller)             { s.caller = c }
+func (s *Service) SetManagedEdgeGuard(g ManagedEdgeGuard) { s.guard = g }
 
 // Create delegates to biz.Usecase.Create. The plaintext SecretKey in the
 // returned CreateResult must be echoed back to the caller ONCE; it is not
@@ -64,11 +71,25 @@ func (s *Service) Get(ctx context.Context, id uint64) (*model.Edge, error) {
 
 // Delete soft-deletes an edge.
 func (s *Service) Delete(ctx context.Context, id uint64) error {
+	if err := s.rejectManagedMutation(ctx, id); err != nil {
+		return err
+	}
+	return s.uc.Delete(ctx, id)
+}
+
+func (s *Service) DeleteManaged(ctx context.Context, id uint64) error {
 	return s.uc.Delete(ctx, id)
 }
 
 // RotateSecret generates + stores a new hash, returns plaintext ONCE.
 func (s *Service) RotateSecret(ctx context.Context, id uint64) (string, error) {
+	if err := s.rejectManagedMutation(ctx, id); err != nil {
+		return "", err
+	}
+	return s.uc.RotateSecret(ctx, id)
+}
+
+func (s *Service) RotateManagedSecret(ctx context.Context, id uint64) (string, error) {
 	return s.uc.RotateSecret(ctx, id)
 }
 
@@ -124,6 +145,9 @@ func (s *Service) GetProcessList(ctx context.Context, edgeID uint64, topN uint32
 // — most failures are tunnel-level "edge offline" or remote
 // validation errors (sha256 mismatch, bad URL).
 func (s *Service) UpgradeAgent(ctx context.Context, edgeID uint64, url, sha256 string) (tunnel.AgentUpgradeResponse, error) {
+	if err := s.rejectManagedMutation(ctx, edgeID); err != nil {
+		return tunnel.AgentUpgradeResponse{}, err
+	}
 	if s.caller == nil {
 		return tunnel.AgentUpgradeResponse{}, fmt.Errorf("upgrade not wired: no edge caller configured")
 	}
@@ -147,6 +171,9 @@ func (s *Service) UpgradeAgent(ctx context.Context, edgeID uint64, url, sha256 s
 // HTTP handler so admins click one button instead of typing a 64-char
 // hash.
 func (s *Service) FetchPackage(ctx context.Context, edgeID uint64, url, sha256, version string) (tunnel.FetchPackageResponse, error) {
+	if err := s.rejectManagedMutation(ctx, edgeID); err != nil {
+		return tunnel.FetchPackageResponse{}, err
+	}
 	if s.caller == nil {
 		return tunnel.FetchPackageResponse{}, fmt.Errorf("upgrade not wired: no edge caller configured")
 	}
@@ -166,6 +193,9 @@ func (s *Service) FetchPackage(ctx context.Context, edgeID uint64, url, sha256, 
 }
 
 func (s *Service) ApplyPackage(ctx context.Context, edgeID uint64) (tunnel.ApplyPackageResponse, error) {
+	if err := s.rejectManagedMutation(ctx, edgeID); err != nil {
+		return tunnel.ApplyPackageResponse{}, err
+	}
 	if s.caller == nil {
 		return tunnel.ApplyPackageResponse{}, fmt.Errorf("upgrade not wired: no edge caller configured")
 	}
@@ -182,4 +212,18 @@ func (s *Service) ApplyPackage(ctx context.Context, edgeID uint64) (tunnel.Apply
 		return tunnel.ApplyPackageResponse{}, fmt.Errorf("apply_package: unmarshal resp: %w", err)
 	}
 	return resp, nil
+}
+
+func (s *Service) rejectManagedMutation(ctx context.Context, edgeID uint64) error {
+	if s.guard == nil {
+		return nil
+	}
+	clusterID, managed, err := s.guard.ManagedClusterIDForEdge(ctx, edgeID)
+	if err != nil {
+		return fmt.Errorf("check managed edge: %w", err)
+	}
+	if managed {
+		return fmt.Errorf("kubernetes-managed edge belongs to cluster %d; use the Kubernetes cluster operation: %w", clusterID, errs.ErrConflict)
+	}
+	return nil
 }

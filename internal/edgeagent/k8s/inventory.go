@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/pkg/k8sredact"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
 
@@ -603,7 +604,7 @@ func (p *InventoryPusher) collect(ctx context.Context) (*inventorySnapshot, erro
 	}()
 
 	nodes, rv, err := p.api.listNodes(ctx)
-	if err != nil && !isOptionalAPIError(err) {
+	if err != nil {
 		return nil, err
 	}
 	recordResourceVersion(out.resourceVersions, "nodes", rv)
@@ -615,7 +616,7 @@ func (p *InventoryPusher) collect(ctx context.Context) (*inventorySnapshot, erro
 		out.namespace = ns
 		pods, rv, err = p.api.listPods(ctx, ns)
 	}
-	if err != nil && !isOptionalAPIError(err) {
+	if err != nil {
 		return nil, err
 	}
 	recordResourceVersion(out.resourceVersions, resourceVersionKey("pods", out.namespace), rv)
@@ -627,7 +628,7 @@ func (p *InventoryPusher) collect(ctx context.Context) (*inventorySnapshot, erro
 		out.namespace = ns
 		events, rv, err = p.api.listEvents(ctx, ns)
 	}
-	if err != nil && !isOptionalAPIError(err) {
+	if err != nil {
 		return nil, err
 	}
 	recordResourceVersion(out.resourceVersions, resourceVersionKey("events", out.namespace), rv)
@@ -639,7 +640,7 @@ func (p *InventoryPusher) collect(ctx context.Context) (*inventorySnapshot, erro
 		out.namespace = ns
 		workloads, workloadVersions, err = p.collectWorkloads(ctx, ns)
 	}
-	if err != nil && !isOptionalAPIError(err) {
+	if err != nil {
 		return nil, err
 	}
 	for key, rv := range workloadVersions {
@@ -654,19 +655,19 @@ func (c *apiClient) listEvents(ctx context.Context, namespace string) ([]tunnel.
 	if namespace != "" {
 		apiPath = "/api/v1/namespaces/" + url.PathEscape(namespace) + "/events"
 	}
-	var list eventList
-	if err := c.get(ctx, apiPath, &list); err != nil {
+	items, rv, err := listAllK8sItems[eventItem](ctx, c, apiPath)
+	if err != nil {
 		return nil, "", err
 	}
-	out := make([]tunnel.KubernetesEventSnapshot, 0, len(list.Items))
-	for _, item := range list.Items {
+	out := make([]tunnel.KubernetesEventSnapshot, 0, len(items))
+	for _, item := range items {
 		out = append(out, tunnel.KubernetesEventSnapshot{
 			Namespace:           item.Metadata.Namespace,
 			Name:                item.Metadata.Name,
 			UID:                 item.Metadata.UID,
 			Type:                item.Type,
 			Reason:              item.Reason,
-			Message:             item.Message,
+			Message:             k8sredact.Text(item.Message),
 			InvolvedKind:        item.InvolvedObject.Kind,
 			InvolvedNamespace:   item.InvolvedObject.Namespace,
 			InvolvedName:        item.InvolvedObject.Name,
@@ -682,7 +683,7 @@ func (c *apiClient) listEvents(ctx context.Context, namespace string) ([]tunnel.
 			EventTime:           item.EventTime,
 		})
 	}
-	return out, list.Metadata.ResourceVersion, nil
+	return out, rv, nil
 }
 
 func (p *InventoryPusher) collectWorkloads(ctx context.Context, namespace string) ([]tunnel.KubernetesWorkloadSnapshot, map[string]string, error) {
@@ -700,26 +701,16 @@ func (p *InventoryPusher) collectWorkloads(ctx context.Context, namespace string
 	}
 	var out []tunnel.KubernetesWorkloadSnapshot
 	versions := map[string]string{}
-	var firstErr error
 	for _, spec := range specs {
 		items, rv, err := p.api.listWorkloads(ctx, spec.group, spec.resource, spec.kind, namespace)
 		if err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
-			if errors.Is(err, errForbidden) {
-				continue
-			}
 			if errors.Is(err, errNotFound) {
 				continue
 			}
-			continue
+			return nil, nil, err
 		}
 		recordResourceVersion(versions, resourceVersionKey(spec.group+"/"+spec.resource, namespace), rv)
 		out = append(out, items...)
-	}
-	if len(out) == 0 && firstErr != nil {
-		return nil, nil, firstErr
 	}
 	return out, versions, nil
 }
@@ -828,17 +819,17 @@ func netJoinHostPort(host, port string) string {
 }
 
 func (c *apiClient) listNodes(ctx context.Context) ([]tunnel.KubernetesNodeSnapshot, string, error) {
-	var list nodeList
-	if err := c.get(ctx, "/api/v1/nodes", &list); err != nil {
+	items, rv, err := listAllK8sItems[nodeItem](ctx, c, "/api/v1/nodes")
+	if err != nil {
 		return nil, "", err
 	}
-	out := make([]tunnel.KubernetesNodeSnapshot, 0, len(list.Items))
-	for _, item := range list.Items {
+	out := make([]tunnel.KubernetesNodeSnapshot, 0, len(items))
+	for _, item := range items {
 		out = append(out, tunnel.KubernetesNodeSnapshot{
 			Name:           item.Metadata.Name,
 			UID:            item.Metadata.UID,
 			ProviderID:     item.Spec.ProviderID,
-			Labels:         item.Metadata.Labels,
+			Labels:         k8sredact.StringMap(item.Metadata.Labels),
 			Taints:         item.Spec.Taints,
 			Conditions:     conditionMaps(item.Status.Conditions),
 			Capacity:       item.Status.Capacity,
@@ -846,7 +837,7 @@ func (c *apiClient) listNodes(ctx context.Context) ([]tunnel.KubernetesNodeSnaps
 			KubeletVersion: item.Status.NodeInfo.KubeletVersion,
 		})
 	}
-	return out, list.Metadata.ResourceVersion, nil
+	return out, rv, nil
 }
 
 func (c *apiClient) listPods(ctx context.Context, namespace string) ([]tunnel.KubernetesPodSnapshot, string, error) {
@@ -854,12 +845,12 @@ func (c *apiClient) listPods(ctx context.Context, namespace string) ([]tunnel.Ku
 	if namespace != "" {
 		apiPath = "/api/v1/namespaces/" + url.PathEscape(namespace) + "/pods"
 	}
-	var list podList
-	if err := c.get(ctx, apiPath, &list); err != nil {
+	items, rv, err := listAllK8sItems[podItem](ctx, c, apiPath)
+	if err != nil {
 		return nil, "", err
 	}
-	out := make([]tunnel.KubernetesPodSnapshot, 0, len(list.Items))
-	for _, item := range list.Items {
+	out := make([]tunnel.KubernetesPodSnapshot, 0, len(items))
+	for _, item := range items {
 		ownerKind, ownerName := controllerOwner(item.Metadata.OwnerReferences)
 		out = append(out, tunnel.KubernetesPodSnapshot{
 			Namespace:    item.Metadata.Namespace,
@@ -873,7 +864,7 @@ func (c *apiClient) listPods(ctx context.Context, namespace string) ([]tunnel.Ku
 			Reason:       podReason(item.Status),
 		})
 	}
-	return out, list.Metadata.ResourceVersion, nil
+	return out, rv, nil
 }
 
 func (c *apiClient) listWorkloads(ctx context.Context, group, resource, kind, namespace string) ([]tunnel.KubernetesWorkloadSnapshot, string, error) {
@@ -881,12 +872,12 @@ func (c *apiClient) listWorkloads(ctx context.Context, group, resource, kind, na
 	if namespace != "" {
 		apiPath = "/apis/" + group + "/v1/namespaces/" + url.PathEscape(namespace) + "/" + resource
 	}
-	var list workloadList
-	if err := c.get(ctx, apiPath, &list); err != nil {
+	items, rv, err := listAllK8sItems[workloadItem](ctx, c, apiPath)
+	if err != nil {
 		return nil, "", err
 	}
-	out := make([]tunnel.KubernetesWorkloadSnapshot, 0, len(list.Items))
-	for _, item := range list.Items {
+	out := make([]tunnel.KubernetesWorkloadSnapshot, 0, len(items))
+	for _, item := range items {
 		out = append(out, tunnel.KubernetesWorkloadSnapshot{
 			Kind:            kind,
 			Namespace:       item.Metadata.Namespace,
@@ -894,12 +885,49 @@ func (c *apiClient) listWorkloads(ctx context.Context, group, resource, kind, na
 			UID:             item.Metadata.UID,
 			DesiredReplicas: desiredReplicas(kind, item),
 			ReadyReplicas:   readyReplicas(kind, item),
-			Labels:          item.Metadata.Labels,
-			Annotations:     item.Metadata.Annotations,
+			Labels:          k8sredact.StringMap(item.Metadata.Labels),
+			Annotations:     k8sredact.StringMap(item.Metadata.Annotations),
 			Conditions:      conditionMaps(item.Status.Conditions),
 		})
 	}
-	return out, list.Metadata.ResourceVersion, nil
+	return out, rv, nil
+}
+
+const k8sListPageSize = 500
+
+type k8sListPage[T any] struct {
+	Metadata listMeta `json:"metadata"`
+	Items    []T      `json:"items"`
+}
+
+func listAllK8sItems[T any](ctx context.Context, c *apiClient, apiPath string) ([]T, string, error) {
+	items := make([]T, 0, k8sListPageSize)
+	continueToken := ""
+	resourceVersion := ""
+	for {
+		parsed, err := url.Parse(apiPath)
+		if err != nil {
+			return nil, "", err
+		}
+		query := parsed.Query()
+		query.Set("limit", strconv.Itoa(k8sListPageSize))
+		if continueToken != "" {
+			query.Set("continue", continueToken)
+		}
+		parsed.RawQuery = query.Encode()
+		var page k8sListPage[T]
+		if err := c.get(ctx, parsed.String(), &page); err != nil {
+			return nil, "", err
+		}
+		items = append(items, page.Items...)
+		if resourceVersion == "" {
+			resourceVersion = page.Metadata.ResourceVersion
+		}
+		continueToken = page.Metadata.Continue
+		if continueToken == "" {
+			return items, resourceVersion, nil
+		}
+	}
 }
 
 func (c *apiClient) get(ctx context.Context, apiPath string, dst any) error {
@@ -1012,6 +1040,7 @@ type objectMeta struct {
 
 type listMeta struct {
 	ResourceVersion string `json:"resourceVersion"`
+	Continue        string `json:"continue"`
 }
 
 type ownerRef struct {

@@ -39,6 +39,7 @@ export type KubernetesCluster = {
   bootstrap_token_expires_at?: string | null;
   created_at: string;
   updated_at: string;
+  upgrade_command?: string;
 };
 
 export type KubernetesNode = {
@@ -116,7 +117,26 @@ export type KubernetesEvent = {
 export type KubernetesRegistration = {
   cluster: KubernetesCluster;
   bootstrap_token: string;
+  node_bootstrap_token: string;
   install_command: string;
+};
+
+export type KubernetesClusterHealth = {
+  degraded_workloads: number;
+  pending_pods: number;
+  crash_loop_back_off_pods: number;
+  oom_killed_pods: number;
+  image_pull_back_off_pods: number;
+  not_ready_nodes: number;
+};
+
+export type KubernetesEdgeAttachment = {
+  edge_id: number;
+  cluster_id: number;
+  cluster_name: string;
+  cluster_mode: string;
+  node_name?: string;
+  kind: 'k8s-controller' | 'k8s-controller-runtime' | 'k8s-node';
 };
 
 export type ListResponse<T> = {
@@ -139,6 +159,15 @@ export function listKubernetesClusters(params?: {
 
 export function getKubernetesCluster(id: string | number) {
   return request<KubernetesCluster>('GET', `/k8s/clusters/${encodeURIComponent(String(id))}`);
+}
+
+export function getKubernetesClusterHealth(id: string | number) {
+  return request<KubernetesClusterHealth>('GET', `/k8s/clusters/${encodeURIComponent(String(id))}/health`);
+}
+
+export function listKubernetesEdgeAttachments(params?: { limit?: number; offset?: number }) {
+  const qs = buildQuery(params);
+  return request<ListResponse<KubernetesEdgeAttachment>>('GET', `/k8s/edge-attachments${qs}`);
 }
 
 export function createKubernetesCluster(input: { name: string; uid?: string; mode?: string }) {

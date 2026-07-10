@@ -1,4 +1,4 @@
-import { listKubernetesClusters, listKubernetesNodes } from '@/api/kubernetes';
+import { listKubernetesEdgeAttachments } from '@/api/kubernetes';
 
 export type K8sEdgeAttachment = {
   kind: 'k8s-controller' | 'k8s-controller-runtime' | 'k8s-node';
@@ -11,49 +11,21 @@ export type K8sEdgeAttachment = {
 export type K8sEdgeAttachmentMap = Record<number, K8sEdgeAttachment[]>;
 
 export async function loadK8sEdgeAttachments(): Promise<K8sEdgeAttachmentMap> {
-  const clustersOut = await listKubernetesClusters({ limit: 100 });
-  const clusters = clustersOut.items ?? [];
+  const limit = 500;
   const out = new Map<number, K8sEdgeAttachment[]>();
-
-  for (const cluster of clusters) {
-    if (cluster.controller_edge_id) {
-      addK8sEdgeAttachment(out, cluster.controller_edge_id, {
-        kind: 'k8s-controller',
-        clusterId: cluster.id,
-        clusterName: cluster.name,
-        clusterMode: cluster.mode,
+  for (let offset = 0; ; offset += limit) {
+    const response = await listKubernetesEdgeAttachments({ limit, offset });
+    const items = response.items ?? [];
+    for (const item of items) {
+      addK8sEdgeAttachment(out, item.edge_id, {
+        kind: item.kind,
+        clusterId: item.cluster_id,
+        clusterName: item.cluster_name,
+        clusterMode: item.cluster_mode,
+        nodeName: item.node_name,
       });
     }
-  }
-
-  const nodeLoads = await Promise.allSettled(
-    clusters.map(async (cluster) => ({
-      cluster,
-      nodes: (await listKubernetesNodes(cluster.id)).items ?? [],
-    })),
-  );
-  for (const result of nodeLoads) {
-    if (result.status !== 'fulfilled') continue;
-    const controllerNodeName = result.value.cluster.controller_node_name?.trim();
-    for (const node of result.value.nodes) {
-      if (!node.edge_id) continue;
-      addK8sEdgeAttachment(out, node.edge_id, {
-        kind: 'k8s-node',
-        clusterId: result.value.cluster.id,
-        clusterName: result.value.cluster.name,
-        clusterMode: result.value.cluster.mode,
-        nodeName: node.node_name,
-      });
-      if (controllerNodeName && node.node_name === controllerNodeName) {
-        addK8sEdgeAttachment(out, node.edge_id, {
-          kind: 'k8s-controller-runtime',
-          clusterId: result.value.cluster.id,
-          clusterName: result.value.cluster.name,
-          clusterMode: result.value.cluster.mode,
-          nodeName: node.node_name,
-        });
-      }
-    }
+    if (items.length < limit || offset + items.length >= response.total) break;
   }
 
   return Object.fromEntries(out.entries());

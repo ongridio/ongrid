@@ -29,6 +29,10 @@ type Service interface {
 	ListNodes(ctx context.Context, clusterID uint64) ([]*model.Node, error)
 	CountNodes(ctx context.Context, clusterID uint64) (int64, error)
 	GetNodeCoverage(ctx context.Context, clusterID uint64) (biz.NodeCoverage, error)
+	GetNodeCoverageByClusterIDs(ctx context.Context, clusterIDs []uint64) (map[uint64]biz.NodeCoverage, error)
+	UpgradeCommand(cluster *model.Cluster) string
+	ListEdgeAttachments(ctx context.Context, limit, offset int) ([]biz.EdgeAttachment, int64, error)
+	GetClusterHealth(ctx context.Context, clusterID uint64) (biz.ClusterHealthSummary, error)
 	ListWorkloads(ctx context.Context, f biz.ListWorkloadsFilter) ([]*model.Workload, error)
 	CountWorkloads(ctx context.Context, f biz.ListWorkloadsFilter) (int64, error)
 	ListPods(ctx context.Context, f biz.ListPodsFilter) ([]*model.Pod, error)
@@ -41,23 +45,80 @@ type Service interface {
 }
 
 type Handler struct {
-	svc Service
+	svc         Service
+	enrollSlots chan struct{}
 }
 
 func NewHandler(s Service) *Handler {
-	return &Handler{svc: s}
+	return &Handler{svc: s, enrollSlots: make(chan struct{}, 64)}
 }
 
 func (h *Handler) RegisterProtected(r chi.Router) {
 	r.With(h.requireAdmin).Post("/v1/k8s/clusters", h.createCluster)
 	r.Get("/v1/k8s/clusters", h.listClusters)
+	r.Get("/v1/k8s/edge-attachments", h.listEdgeAttachments)
 	r.Get("/v1/k8s/clusters/{cluster_id}", h.getCluster)
+	r.Get("/v1/k8s/clusters/{cluster_id}/health", h.getClusterHealth)
 	r.Get("/v1/k8s/clusters/{cluster_id}/nodes", h.listNodes)
 	r.Get("/v1/k8s/clusters/{cluster_id}/workloads", h.listWorkloads)
 	r.Get("/v1/k8s/clusters/{cluster_id}/pods", h.listPods)
 	r.Get("/v1/k8s/clusters/{cluster_id}/events", h.listEvents)
 	r.With(h.requireAdmin).Post("/v1/k8s/clusters/{cluster_id}/rotate-token", h.rotateToken)
 	r.With(h.requireAdmin).Delete("/v1/k8s/clusters/{cluster_id}", h.deleteCluster)
+}
+
+// @Summary List Kubernetes-managed Edge attachments
+// @Router /api/v1/k8s/edge-attachments [get]
+// @Success 200 {object} listEdgeAttachmentsResponse
+func (h *Handler) listEdgeAttachments(w http.ResponseWriter, r *http.Request) {
+	limit := parseListLimit(r.URL.Query().Get("limit"), maxListLimit)
+	offset := parseListOffset(r.URL.Query().Get("offset"))
+	items, total, err := h.svc.ListEdgeAttachments(r.Context(), limit, offset)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	dto := make([]edgeAttachmentDTO, 0, len(items))
+	for _, item := range items {
+		dto = append(dto, edgeAttachmentDTO{
+			EdgeID:      item.EdgeID,
+			ClusterID:   item.ClusterID,
+			ClusterName: item.ClusterName,
+			ClusterMode: item.ClusterMode,
+			NodeName:    item.NodeName,
+			Kind:        item.Kind,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items":  dto,
+		"total":  total,
+		"limit":  limit,
+		"offset": offset,
+	})
+}
+
+// @Summary Get exact Kubernetes cluster health counters
+// @Router /api/v1/k8s/clusters/{cluster_id}/health [get]
+// @Success 200 {object} clusterHealthDTO
+func (h *Handler) getClusterHealth(w http.ResponseWriter, r *http.Request) {
+	id, err := parseClusterID(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	out, err := h.svc.GetClusterHealth(r.Context(), id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, clusterHealthDTO{
+		DegradedWorkloads:    out.DegradedWorkloads,
+		PendingPods:          out.PendingPods,
+		CrashLoopBackOffPods: out.CrashLoopBackOffPods,
+		OOMKilledPods:        out.OOMKilledPods,
+		ImagePullBackOffPods: out.ImagePullBackOffPods,
+		NotReadyNodes:        out.NotReadyNodes,
+	})
 }
 
 func (h *Handler) RegisterInternal(r chi.Router) {
@@ -116,14 +177,21 @@ func (h *Handler) listClusters(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	clusterIDs := make([]uint64, 0, len(items))
+	for _, item := range items {
+		clusterIDs = append(clusterIDs, item.ID)
+	}
+	coverageByCluster, err := h.svc.GetNodeCoverageByClusterIDs(r.Context(), clusterIDs)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
 	dto := make([]clusterDTO, 0, len(items))
 	for _, item := range items {
-		coverage, err := h.svc.GetNodeCoverage(r.Context(), item.ID)
-		if err != nil {
-			writeErr(w, err)
-			return
-		}
-		dto = append(dto, clusterDTOFromModelWithCoverage(item, &coverage))
+		coverage := coverageByCluster[item.ID]
+		clusterDTO := clusterDTOFromModelWithCoverage(item, &coverage)
+		clusterDTO.UpgradeCommand = h.svc.UpgradeCommand(item)
+		dto = append(dto, clusterDTO)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"items":  dto,
@@ -152,7 +220,9 @@ func (h *Handler) getCluster(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, clusterDTOFromModelWithCoverage(c, &coverage))
+	dto := clusterDTOFromModelWithCoverage(c, &coverage)
+	dto.UpgradeCommand = h.svc.UpgradeCommand(c)
+	writeJSON(w, http.StatusOK, dto)
 }
 
 // @Summary List Kubernetes nodes
@@ -364,6 +434,14 @@ func (h *Handler) deleteCluster(w http.ResponseWriter, r *http.Request) {
 // @Router /internal/k8s/enroll [post]
 // @Success 200 {object} enrollResponse
 func (h *Handler) enroll(w http.ResponseWriter, r *http.Request) {
+	select {
+	case h.enrollSlots <- struct{}{}:
+		defer func() { <-h.enrollSlots }()
+	default:
+		w.Header().Set("Retry-After", "1")
+		writeErr(w, errs.ErrTooManyAttempts)
+		return
+	}
 	token, ok := bearerToken(r.Header.Get("Authorization"))
 	if !ok {
 		writeErr(w, errs.ErrUnauthorized)
@@ -455,6 +533,7 @@ type clusterDTO struct {
 	BootstrapTokenExpiresAt       *time.Time             `json:"bootstrap_token_expires_at,omitempty"`
 	CreatedAt                     time.Time              `json:"created_at"`
 	UpdatedAt                     time.Time              `json:"updated_at"`
+	UpgradeCommand                string                 `json:"upgrade_command,omitempty"`
 }
 
 type clusterCapabilityDTO struct {
@@ -473,9 +552,33 @@ type nodeEdgeCoverageDTO struct {
 }
 
 type clusterRegistrationDTO struct {
-	Cluster        clusterDTO `json:"cluster"`
-	BootstrapToken string     `json:"bootstrap_token"`
-	InstallCommand string     `json:"install_command"`
+	Cluster            clusterDTO `json:"cluster"`
+	BootstrapToken     string     `json:"bootstrap_token"`
+	NodeBootstrapToken string     `json:"node_bootstrap_token"`
+	InstallCommand     string     `json:"install_command"`
+}
+
+type clusterHealthDTO struct {
+	DegradedWorkloads    int64 `json:"degraded_workloads"`
+	PendingPods          int64 `json:"pending_pods"`
+	CrashLoopBackOffPods int64 `json:"crash_loop_back_off_pods"`
+	OOMKilledPods        int64 `json:"oom_killed_pods"`
+	ImagePullBackOffPods int64 `json:"image_pull_back_off_pods"`
+	NotReadyNodes        int64 `json:"not_ready_nodes"`
+}
+
+type edgeAttachmentDTO struct {
+	EdgeID      uint64 `json:"edge_id"`
+	ClusterID   uint64 `json:"cluster_id"`
+	ClusterName string `json:"cluster_name"`
+	ClusterMode string `json:"cluster_mode"`
+	NodeName    string `json:"node_name,omitempty"`
+	Kind        string `json:"kind"`
+}
+
+type listEdgeAttachmentsResponse struct {
+	Items []edgeAttachmentDTO `json:"items"`
+	Total int                 `json:"total"`
 }
 
 type nodeDTO struct {
@@ -563,9 +666,10 @@ type enrollResponse struct {
 
 func registrationDTO(in *biz.ClusterRegistration) clusterRegistrationDTO {
 	return clusterRegistrationDTO{
-		Cluster:        clusterDTOFromModel(in.Cluster),
-		BootstrapToken: in.BootstrapToken,
-		InstallCommand: in.InstallCommand,
+		Cluster:            clusterDTOFromModel(in.Cluster),
+		BootstrapToken:     in.BootstrapToken,
+		NodeBootstrapToken: in.NodeBootstrapToken,
+		InstallCommand:     in.InstallCommand,
 	}
 }
 

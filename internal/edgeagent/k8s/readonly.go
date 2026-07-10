@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/pkg/k8sredact"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
 
@@ -186,7 +187,7 @@ func (c *apiClient) queryPodLogs(ctx context.Context, req tunnel.KubernetesPodLo
 	if len(body) > req.LimitBytes {
 		body = body[:req.LimitBytes]
 	}
-	logs := string(body)
+	logs := k8sredact.Text(string(body))
 	return &tunnel.KubernetesPodLogsResponse{
 		ClusterID:    req.ClusterID,
 		Namespace:    namespace,
@@ -270,6 +271,7 @@ func sanitizeK8sObject(raw []byte) (json.RawMessage, string, string, error) {
 		delete(metadata, "managedFields")
 		delete(metadata, "annotations")
 	}
+	obj = redactK8sValue(obj, "").(map[string]any)
 	uid := stringField(metadata, "uid")
 	rv := stringField(metadata, "resourceVersion")
 	out, err := json.Marshal(obj)
@@ -277,6 +279,33 @@ func sanitizeK8sObject(raw []byte) (json.RawMessage, string, string, error) {
 		return nil, "", "", err
 	}
 	return out, uid, rv, nil
+}
+
+func redactK8sValue(value any, key string) any {
+	if k8sredact.IsSensitiveKey(key) {
+		return "[REDACTED]"
+	}
+	switch typed := value.(type) {
+	case map[string]any:
+		if name, ok := typed["name"].(string); ok && k8sredact.IsSensitiveKey(name) {
+			if _, exists := typed["value"]; exists {
+				typed["value"] = "[REDACTED]"
+			}
+		}
+		for childKey, child := range typed {
+			typed[childKey] = redactK8sValue(child, childKey)
+		}
+		return typed
+	case []any:
+		for i, child := range typed {
+			typed[i] = redactK8sValue(child, key)
+		}
+		return typed
+	case string:
+		return k8sredact.Text(typed)
+	default:
+		return value
+	}
 }
 
 func stringField(m map[string]any, key string) string {
@@ -302,6 +331,7 @@ func (c *apiClient) relatedEvents(ctx context.Context, kind, namespace, name str
 		if namespace != "" && ev.InvolvedNamespace != "" && ev.InvolvedNamespace != namespace {
 			continue
 		}
+		ev.Message = k8sredact.Text(ev.Message)
 		out = append(out, ev)
 		if len(out) >= limit {
 			break

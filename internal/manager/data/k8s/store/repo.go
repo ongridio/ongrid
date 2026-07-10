@@ -90,9 +90,10 @@ func applyClusterFilters(tx *gorm.DB, f biz.ListClustersFilter) *gorm.DB {
 	return tx
 }
 
-func (r *Repo) UpdateClusterToken(ctx context.Context, id uint64, tokenHash string, expiresAt *time.Time) error {
+func (r *Repo) UpdateClusterTokens(ctx context.Context, id uint64, controllerTokenHash, nodeTokenHash string, expiresAt *time.Time) error {
 	res := r.db.WithContext(ctx).Model(&model.Cluster{}).Where("id = ?", id).Updates(map[string]any{
-		"bootstrap_token_hash":       tokenHash,
+		"bootstrap_token_hash":       controllerTokenHash,
+		"node_bootstrap_token_hash":  nodeTokenHash,
 		"bootstrap_token_expires_at": expiresAt,
 	})
 	if res.Error != nil {
@@ -100,6 +101,29 @@ func (r *Repo) UpdateClusterToken(ctx context.Context, id uint64, tokenHash stri
 	}
 	if res.RowsAffected == 0 {
 		return errs.ErrNotFound
+	}
+	return nil
+}
+
+func (r *Repo) ClaimControllerBootstrapToken(ctx context.Context, id uint64, tokenHash string) (bool, error) {
+	res := r.db.WithContext(ctx).Model(&model.Cluster{}).
+		Where("id = ? AND bootstrap_token_hash = ?", id, tokenHash).
+		UpdateColumn("bootstrap_token_hash", "")
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
+}
+
+func (r *Repo) RestoreControllerBootstrapToken(ctx context.Context, id uint64, tokenHash string) error {
+	res := r.db.WithContext(ctx).Model(&model.Cluster{}).
+		Where("id = ? AND bootstrap_token_hash = ''", id).
+		UpdateColumn("bootstrap_token_hash", tokenHash)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return errs.ErrConflict
 	}
 	return nil
 }
@@ -212,6 +236,33 @@ func (r *Repo) ListClusterEdgeIDs(ctx context.Context, clusterID uint64) ([]uint
 		}
 	}
 	return out, nil
+}
+
+func (r *Repo) GetClusterIDByEdgeID(ctx context.Context, edgeID uint64) (uint64, error) {
+	var row struct {
+		ClusterID uint64 `gorm:"column:cluster_id"`
+	}
+	err := r.db.WithContext(ctx).Raw(`
+		SELECT cluster_id
+		FROM (
+			SELECT id AS cluster_id, controller_edge_id AS edge_id
+			FROM k8s_clusters
+			WHERE deleted_at IS NULL
+			UNION ALL
+			SELECT cluster_id, edge_id FROM k8s_nodes
+			UNION ALL
+			SELECT cluster_id, controller_edge_id AS edge_id FROM k8s_installations
+		) AS managed_edges
+		WHERE edge_id = ?
+		LIMIT 1
+	`, edgeID).Scan(&row).Error
+	if err != nil {
+		return 0, err
+	}
+	if row.ClusterID == 0 {
+		return 0, errs.ErrNotFound
+	}
+	return row.ClusterID, nil
 }
 
 func (r *Repo) DeleteCluster(ctx context.Context, id uint64) error {
@@ -328,17 +379,17 @@ func (r *Repo) UpsertWorkloads(ctx context.Context, items []*model.Workload) err
 			{Name: "namespace"},
 			{Name: "name"},
 		},
-		DoUpdates: clause.Assignments(map[string]any{
-			"uid":              gorm.Expr("VALUES(uid)"),
-			"desired_replicas": gorm.Expr("VALUES(desired_replicas)"),
-			"ready_replicas":   gorm.Expr("VALUES(ready_replicas)"),
-			"labels_json":      gorm.Expr("VALUES(labels_json)"),
-			"annotations_json": gorm.Expr("VALUES(annotations_json)"),
-			"conditions_json":  gorm.Expr("VALUES(conditions_json)"),
-			"last_seen_at":     gorm.Expr("VALUES(last_seen_at)"),
-			"updated_at":       time.Now(),
+		DoUpdates: clause.AssignmentColumns([]string{
+			"uid",
+			"desired_replicas",
+			"ready_replicas",
+			"labels_json",
+			"annotations_json",
+			"conditions_json",
+			"last_seen_at",
+			"updated_at",
 		}),
-	}).Create(&items).Error
+	}).CreateInBatches(&items, 200).Error
 }
 
 func (r *Repo) UpsertPods(ctx context.Context, items []*model.Pod) error {
@@ -352,17 +403,17 @@ func (r *Repo) UpsertPods(ctx context.Context, items []*model.Pod) error {
 			{Name: "name"},
 			{Name: "uid"},
 		},
-		DoUpdates: clause.Assignments(map[string]any{
-			"node_name":     gorm.Expr("VALUES(node_name)"),
-			"phase":         gorm.Expr("VALUES(phase)"),
-			"owner_kind":    gorm.Expr("VALUES(owner_kind)"),
-			"owner_name":    gorm.Expr("VALUES(owner_name)"),
-			"restart_count": gorm.Expr("VALUES(restart_count)"),
-			"reason":        gorm.Expr("VALUES(reason)"),
-			"last_seen_at":  gorm.Expr("VALUES(last_seen_at)"),
-			"updated_at":    time.Now(),
+		DoUpdates: clause.AssignmentColumns([]string{
+			"node_name",
+			"phase",
+			"owner_kind",
+			"owner_name",
+			"restart_count",
+			"reason",
+			"last_seen_at",
+			"updated_at",
 		}),
-	}).Create(&items).Error
+	}).CreateInBatches(&items, 200).Error
 }
 
 func (r *Repo) UpsertEvents(ctx context.Context, items []*model.Event) error {
@@ -374,29 +425,29 @@ func (r *Repo) UpsertEvents(ctx context.Context, items []*model.Event) error {
 			{Name: "cluster_id"},
 			{Name: "uid"},
 		},
-		DoUpdates: clause.Assignments(map[string]any{
-			"namespace":            gorm.Expr("VALUES(namespace)"),
-			"name":                 gorm.Expr("VALUES(name)"),
-			"type":                 gorm.Expr("VALUES(type)"),
-			"reason":               gorm.Expr("VALUES(reason)"),
-			"message":              gorm.Expr("VALUES(message)"),
-			"involved_kind":        gorm.Expr("VALUES(involved_kind)"),
-			"involved_namespace":   gorm.Expr("VALUES(involved_namespace)"),
-			"involved_name":        gorm.Expr("VALUES(involved_name)"),
-			"involved_uid":         gorm.Expr("VALUES(involved_uid)"),
-			"source_component":     gorm.Expr("VALUES(source_component)"),
-			"source_host":          gorm.Expr("VALUES(source_host)"),
-			"reporting_controller": gorm.Expr("VALUES(reporting_controller)"),
-			"reporting_instance":   gorm.Expr("VALUES(reporting_instance)"),
-			"action":               gorm.Expr("VALUES(action)"),
-			"count":                gorm.Expr("VALUES(count)"),
-			"first_timestamp":      gorm.Expr("VALUES(first_timestamp)"),
-			"last_timestamp":       gorm.Expr("VALUES(last_timestamp)"),
-			"event_time":           gorm.Expr("VALUES(event_time)"),
-			"last_seen_at":         gorm.Expr("VALUES(last_seen_at)"),
-			"updated_at":           time.Now(),
+		DoUpdates: clause.AssignmentColumns([]string{
+			"namespace",
+			"name",
+			"type",
+			"reason",
+			"message",
+			"involved_kind",
+			"involved_namespace",
+			"involved_name",
+			"involved_uid",
+			"source_component",
+			"source_host",
+			"reporting_controller",
+			"reporting_instance",
+			"action",
+			"count",
+			"first_timestamp",
+			"last_timestamp",
+			"event_time",
+			"last_seen_at",
+			"updated_at",
 		}),
-	}).Create(&items).Error
+	}).CreateInBatches(&items, 200).Error
 }
 
 func (r *Repo) DeleteNodes(ctx context.Context, clusterID uint64, refs []biz.NodeRef) error {
@@ -595,6 +646,72 @@ func (r *Repo) GetNodeCoverage(ctx context.Context, clusterID uint64) (biz.NodeC
 		return biz.NodeCoverage{}, err
 	}
 	return out, nil
+}
+
+func (r *Repo) GetNodeCoverageByClusterIDs(ctx context.Context, clusterIDs []uint64) (map[uint64]biz.NodeCoverage, error) {
+	out := make(map[uint64]biz.NodeCoverage, len(clusterIDs))
+	if len(clusterIDs) == 0 {
+		return out, nil
+	}
+	var rows []biz.NodeCoverage
+	if err := r.db.WithContext(ctx).
+		Model(&model.Node{}).
+		Select(`
+			cluster_id,
+			COUNT(*) AS total,
+			COALESCE(SUM(CASE WHEN edge_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS edge_linked,
+			COALESCE(SUM(CASE WHEN device_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS device_linked
+		`).
+		Where("cluster_id IN ?", clusterIDs).
+		Group("cluster_id").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		out[row.ClusterID] = row
+	}
+	for _, clusterID := range clusterIDs {
+		if _, ok := out[clusterID]; !ok {
+			out[clusterID] = biz.NodeCoverage{ClusterID: clusterID}
+		}
+	}
+	return out, nil
+}
+
+const edgeAttachmentsQuery = `
+	SELECT edge_id, cluster_id, cluster_name, cluster_mode, node_name, kind
+	FROM (
+		SELECT c.controller_edge_id AS edge_id, c.id AS cluster_id, c.name AS cluster_name,
+			c.mode AS cluster_mode, c.controller_node_name AS node_name, 'k8s-controller' AS kind
+		FROM k8s_clusters c
+		WHERE c.delete_marker = 0 AND c.controller_edge_id IS NOT NULL AND c.controller_edge_id <> 0
+		UNION ALL
+		SELECT n.edge_id, c.id, c.name, c.mode, n.node_name, 'k8s-node'
+		FROM k8s_nodes n
+		JOIN k8s_clusters c ON c.id = n.cluster_id AND c.delete_marker = 0
+		WHERE n.edge_id IS NOT NULL AND n.edge_id <> 0
+		UNION ALL
+		SELECT n.edge_id, c.id, c.name, c.mode, n.node_name, 'k8s-controller-runtime'
+		FROM k8s_nodes n
+		JOIN k8s_clusters c ON c.id = n.cluster_id AND c.delete_marker = 0
+		WHERE n.edge_id IS NOT NULL AND n.edge_id <> 0
+			AND c.controller_node_name <> '' AND n.node_name = c.controller_node_name
+	) attachments`
+
+func (r *Repo) ListEdgeAttachments(ctx context.Context, limit, offset int) ([]biz.EdgeAttachment, int64, error) {
+	var total int64
+	if err := r.db.WithContext(ctx).Raw("SELECT COUNT(*) FROM (" + edgeAttachmentsQuery + ") counted").Scan(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var out []biz.EdgeAttachment
+	if err := r.db.WithContext(ctx).Raw(
+		edgeAttachmentsQuery+" ORDER BY cluster_id ASC, edge_id ASC, kind ASC LIMIT ? OFFSET ?",
+		limit,
+		offset,
+	).Scan(&out).Error; err != nil {
+		return nil, 0, err
+	}
+	return out, total, nil
 }
 
 func (r *Repo) ListWorkloads(ctx context.Context, f biz.ListWorkloadsFilter) ([]*model.Workload, error) {

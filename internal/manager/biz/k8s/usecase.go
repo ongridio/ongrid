@@ -3,7 +3,10 @@ package k8s
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,7 +18,7 @@ import (
 
 	model "github.com/ongridio/ongrid/internal/manager/model/k8s"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
-	"github.com/ongridio/ongrid/internal/pkg/passwd"
+	"github.com/ongridio/ongrid/internal/pkg/k8sredact"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
 
@@ -35,12 +38,15 @@ type Repository interface {
 	GetClusterByControllerEdge(ctx context.Context, edgeID uint64) (*model.Cluster, error)
 	ListClusters(ctx context.Context, f ListClustersFilter) ([]*model.Cluster, error)
 	CountClusters(ctx context.Context, f ListClustersFilter) (int64, error)
-	UpdateClusterToken(ctx context.Context, id uint64, tokenHash string, expiresAt *time.Time) error
+	UpdateClusterTokens(ctx context.Context, id uint64, controllerTokenHash, nodeTokenHash string, expiresAt *time.Time) error
+	ClaimControllerBootstrapToken(ctx context.Context, id uint64, tokenHash string) (bool, error)
+	RestoreControllerBootstrapToken(ctx context.Context, id uint64, tokenHash string) error
 	UpdateClusterController(ctx context.Context, id uint64, in ClusterControllerRegistration) error
 	UpdateClusterInventorySync(ctx context.Context, id uint64, in ClusterInventorySync) error
 	UpdateClusterTopologyNode(ctx context.Context, id, nodeID uint64) error
 	UpdateDeviceTopologyNode(ctx context.Context, id, nodeID uint64) error
 	ListClusterEdgeIDs(ctx context.Context, clusterID uint64) ([]uint64, error)
+	GetClusterIDByEdgeID(ctx context.Context, edgeID uint64) (uint64, error)
 	DeleteCluster(ctx context.Context, id uint64) error
 
 	GetNodeByClusterUID(ctx context.Context, clusterID uint64, nodeUID string) (*model.Node, error)
@@ -64,6 +70,8 @@ type Repository interface {
 	ListTopologyNodeLinks(ctx context.Context, clusterID uint64) ([]TopologyNodeLink, error)
 	CountNodes(ctx context.Context, clusterID uint64) (int64, error)
 	GetNodeCoverage(ctx context.Context, clusterID uint64) (NodeCoverage, error)
+	GetNodeCoverageByClusterIDs(ctx context.Context, clusterIDs []uint64) (map[uint64]NodeCoverage, error)
+	ListEdgeAttachments(ctx context.Context, limit, offset int) ([]EdgeAttachment, int64, error)
 	ListWorkloads(ctx context.Context, f ListWorkloadsFilter) ([]*model.Workload, error)
 	CountWorkloads(ctx context.Context, f ListWorkloadsFilter) (int64, error)
 	ListPods(ctx context.Context, f ListPodsFilter) ([]*model.Pod, error)
@@ -117,6 +125,24 @@ type NodeCoverage struct {
 	Total        int64
 	EdgeLinked   int64
 	DeviceLinked int64
+}
+
+type EdgeAttachment struct {
+	EdgeID      uint64
+	ClusterID   uint64
+	ClusterName string
+	ClusterMode string
+	NodeName    string
+	Kind        string
+}
+
+type ClusterHealthSummary struct {
+	DegradedWorkloads    int64
+	PendingPods          int64
+	CrashLoopBackOffPods int64
+	OOMKilledPods        int64
+	ImagePullBackOffPods int64
+	NotReadyNodes        int64
 }
 
 type Config struct {
@@ -361,9 +387,10 @@ type CreateClusterInput struct {
 }
 
 type ClusterRegistration struct {
-	Cluster        *model.Cluster
-	BootstrapToken string
-	InstallCommand string
+	Cluster            *model.Cluster
+	BootstrapToken     string
+	NodeBootstrapToken string
+	InstallCommand     string
 }
 
 func (u *Usecase) CreateCluster(ctx context.Context, in CreateClusterInput) (*ClusterRegistration, error) {
@@ -378,7 +405,11 @@ func (u *Usecase) CreateCluster(ctx context.Context, in CreateClusterInput) (*Cl
 	if err != nil {
 		return nil, err
 	}
-	token, hash, expiresAt, err := newBootstrapToken(u.cfg.BootstrapTokenTTL)
+	controllerToken, controllerHash, expiresAt, err := newBootstrapToken(u.cfg.BootstrapTokenTTL)
+	if err != nil {
+		return nil, err
+	}
+	nodeToken, nodeHash, _, err := newBootstrapToken(u.cfg.BootstrapTokenTTL)
 	if err != nil {
 		return nil, err
 	}
@@ -391,7 +422,8 @@ func (u *Usecase) CreateCluster(ctx context.Context, in CreateClusterInput) (*Cl
 		UID:                     uid,
 		Mode:                    mode,
 		Status:                  model.ClusterStatusOffline,
-		BootstrapTokenHash:      hash,
+		BootstrapTokenHash:      controllerHash,
+		NodeBootstrapTokenHash:  nodeHash,
 		BootstrapTokenExpiresAt: expiresAt,
 		CreatedBy:               in.CreatedBy,
 	}
@@ -399,12 +431,16 @@ func (u *Usecase) CreateCluster(ctx context.Context, in CreateClusterInput) (*Cl
 		return nil, fmt.Errorf("create k8s cluster: %w", err)
 	}
 	if err := u.reconcileTopology(ctx, c.ID); err != nil {
+		if cleanupErr := u.repo.DeleteCluster(ctx, c.ID); cleanupErr != nil {
+			return nil, errors.Join(fmt.Errorf("reconcile k8s topology: %w", err), fmt.Errorf("rollback k8s cluster: %w", cleanupErr))
+		}
 		return nil, fmt.Errorf("reconcile k8s topology: %w", err)
 	}
 	return &ClusterRegistration{
-		Cluster:        c,
-		BootstrapToken: token,
-		InstallCommand: u.installCommand(c.ID, mode, token),
+		Cluster:            c,
+		BootstrapToken:     controllerToken,
+		NodeBootstrapToken: nodeToken,
+		InstallCommand:     u.installCommand(c.ID, mode, controllerToken, nodeToken),
 	}, nil
 }
 
@@ -472,6 +508,24 @@ func (u *Usecase) GetNodeCoverage(ctx context.Context, clusterID uint64) (NodeCo
 		return NodeCoverage{}, err
 	}
 	return u.repo.GetNodeCoverage(ctx, clusterID)
+}
+
+func (u *Usecase) GetNodeCoverageByClusterIDs(ctx context.Context, clusterIDs []uint64) (map[uint64]NodeCoverage, error) {
+	if u.repo == nil {
+		return nil, errs.ErrNotWiredYet
+	}
+	clusterIDs = uniqueNonZeroUint64(clusterIDs)
+	if len(clusterIDs) == 0 {
+		return map[uint64]NodeCoverage{}, nil
+	}
+	return u.repo.GetNodeCoverageByClusterIDs(ctx, clusterIDs)
+}
+
+func (u *Usecase) ListEdgeAttachments(ctx context.Context, limit, offset int) ([]EdgeAttachment, int64, error) {
+	if u.repo == nil {
+		return nil, 0, errs.ErrNotWiredYet
+	}
+	return u.repo.ListEdgeAttachments(ctx, limit, offset)
 }
 
 func (u *Usecase) ListWorkloads(ctx context.Context, f ListWorkloadsFilter) ([]*model.Workload, error) {
@@ -570,6 +624,64 @@ func (u *Usecase) CountEvents(ctx context.Context, f ListEventsFilter) (int64, e
 	return u.repo.CountEvents(ctx, f)
 }
 
+func (u *Usecase) GetClusterHealth(ctx context.Context, clusterID uint64) (ClusterHealthSummary, error) {
+	var out ClusterHealthSummary
+	if u.repo == nil {
+		return out, errs.ErrNotWiredYet
+	}
+	if _, err := u.repo.GetCluster(ctx, clusterID); err != nil {
+		return out, err
+	}
+	var err error
+	if out.DegradedWorkloads, err = u.repo.CountWorkloads(ctx, ListWorkloadsFilter{ClusterID: clusterID, IssueOnly: true}); err != nil {
+		return out, err
+	}
+	if out.PendingPods, err = u.repo.CountPods(ctx, ListPodsFilter{ClusterID: clusterID, Phase: "Pending"}); err != nil {
+		return out, err
+	}
+	if out.CrashLoopBackOffPods, err = u.repo.CountPods(ctx, ListPodsFilter{ClusterID: clusterID, Reason: "CrashLoopBackOff"}); err != nil {
+		return out, err
+	}
+	if out.OOMKilledPods, err = u.repo.CountPods(ctx, ListPodsFilter{ClusterID: clusterID, Reason: "OOMKilled"}); err != nil {
+		return out, err
+	}
+	imagePullBackOff, err := u.repo.CountPods(ctx, ListPodsFilter{ClusterID: clusterID, Reason: "ImagePullBackOff"})
+	if err != nil {
+		return out, err
+	}
+	errImagePull, err := u.repo.CountPods(ctx, ListPodsFilter{ClusterID: clusterID, Reason: "ErrImagePull"})
+	if err != nil {
+		return out, err
+	}
+	out.ImagePullBackOffPods = imagePullBackOff + errImagePull
+	nodes, err := u.repo.ListNodes(ctx, clusterID)
+	if err != nil {
+		return out, err
+	}
+	for _, node := range nodes {
+		if node != nil && nodeIsNotReady(node.ConditionsJSON) {
+			out.NotReadyNodes++
+		}
+	}
+	return out, nil
+}
+
+func nodeIsNotReady(raw string) bool {
+	var conditions []struct {
+		Type   string `json:"type"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(raw), &conditions); err != nil {
+		return false
+	}
+	for _, condition := range conditions {
+		if condition.Type == "Ready" {
+			return condition.Status == "False" || condition.Status == "Unknown"
+		}
+	}
+	return false
+}
+
 func (u *Usecase) RotateBootstrapToken(ctx context.Context, id uint64) (*ClusterRegistration, error) {
 	if u.repo == nil {
 		return nil, errs.ErrNotWiredYet
@@ -578,19 +690,25 @@ func (u *Usecase) RotateBootstrapToken(ctx context.Context, id uint64) (*Cluster
 	if err != nil {
 		return nil, err
 	}
-	token, hash, expiresAt, err := newBootstrapToken(u.cfg.BootstrapTokenTTL)
+	controllerToken, controllerHash, expiresAt, err := newBootstrapToken(u.cfg.BootstrapTokenTTL)
 	if err != nil {
 		return nil, err
 	}
-	if err := u.repo.UpdateClusterToken(ctx, id, hash, expiresAt); err != nil {
+	nodeToken, nodeHash, _, err := newBootstrapToken(u.cfg.BootstrapTokenTTL)
+	if err != nil {
+		return nil, err
+	}
+	if err := u.repo.UpdateClusterTokens(ctx, id, controllerHash, nodeHash, expiresAt); err != nil {
 		return nil, fmt.Errorf("rotate k8s bootstrap token: %w", err)
 	}
-	c.BootstrapTokenHash = hash
+	c.BootstrapTokenHash = controllerHash
+	c.NodeBootstrapTokenHash = nodeHash
 	c.BootstrapTokenExpiresAt = expiresAt
 	return &ClusterRegistration{
-		Cluster:        c,
-		BootstrapToken: token,
-		InstallCommand: u.installCommand(c.ID, c.Mode, token),
+		Cluster:            c,
+		BootstrapToken:     controllerToken,
+		NodeBootstrapToken: nodeToken,
+		InstallCommand:     u.installCommand(c.ID, c.Mode, controllerToken, nodeToken),
 	}, nil
 }
 
@@ -670,16 +788,31 @@ func (u *Usecase) Enroll(ctx context.Context, in EnrollInput) (*EnrollResult, er
 	if err != nil {
 		return nil, err
 	}
-	if !validBootstrapToken(strings.TrimSpace(in.BootstrapToken), c) {
+	role := normalizeRole(in.Role)
+	if !validBootstrapToken(strings.TrimSpace(in.BootstrapToken), c, role) {
 		return nil, errs.ErrUnauthorized
 	}
-	role := normalizeRole(in.Role)
 	now := time.Now()
 	switch role {
 	case model.RoleNode:
 		return u.enrollNode(ctx, c, in, now)
 	case model.RoleController:
-		return u.enrollController(ctx, c, in, now)
+		tokenHash := tokenDigest(strings.TrimSpace(in.BootstrapToken))
+		claimed, err := u.repo.ClaimControllerBootstrapToken(ctx, c.ID, tokenHash)
+		if err != nil {
+			return nil, fmt.Errorf("claim k8s controller bootstrap token: %w", err)
+		}
+		if !claimed {
+			return nil, errs.ErrUnauthorized
+		}
+		out, err := u.enrollController(ctx, c, in, now)
+		if err == nil {
+			return out, nil
+		}
+		if restoreErr := u.repo.RestoreControllerBootstrapToken(ctx, c.ID, tokenHash); restoreErr != nil {
+			return nil, errors.Join(err, fmt.Errorf("restore k8s controller bootstrap token: %w", restoreErr))
+		}
+		return nil, err
 	default:
 		return nil, errors.Join(errs.ErrInvalid, fmt.Errorf("unsupported k8s enroll role %q", in.Role))
 	}
@@ -769,6 +902,23 @@ func (u *Usecase) LookupControllerCluster(ctx context.Context, edgeID uint64) (u
 		return 0, err
 	}
 	return c.ID, nil
+}
+
+func (u *Usecase) ManagedClusterIDForEdge(ctx context.Context, edgeID uint64) (uint64, bool, error) {
+	if u.repo == nil {
+		return 0, false, errs.ErrNotWiredYet
+	}
+	if edgeID == 0 {
+		return 0, false, errors.Join(errs.ErrInvalid, fmt.Errorf("edge_id is required"))
+	}
+	clusterID, err := u.repo.GetClusterIDByEdgeID(ctx, edgeID)
+	if errors.Is(err, errs.ErrNotFound) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return clusterID, true, nil
 }
 
 func (u *Usecase) reconcileTopology(ctx context.Context, clusterID uint64) error {
@@ -901,9 +1051,6 @@ func (u *Usecase) IngestInventory(ctx context.Context, edgeID uint64, in tunnel.
 	}
 	receivedAt := time.Now().UTC()
 	now := receivedAt
-	if in.Ts > 0 {
-		now = time.Unix(in.Ts, 0).UTC()
-	}
 	syncType := normalizeInventorySyncType(in.SyncType)
 	if syncType == inventorySyncDelta {
 		if err := u.deleteInventoryDeltas(ctx, in.ClusterID, in); err != nil {
@@ -927,7 +1074,7 @@ func (u *Usecase) IngestInventory(ctx context.Context, edgeID uint64, in tunnel.
 			NodeName:        name,
 			NodeUID:         uid,
 			ProviderID:      strings.TrimSpace(item.ProviderID),
-			LabelsJSON:      jsonText(item.Labels, "{}"),
+			LabelsJSON:      jsonText(k8sredact.StringMap(item.Labels), "{}"),
 			TaintsJSON:      jsonText(item.Taints, "[]"),
 			ConditionsJSON:  jsonText(item.Conditions, "[]"),
 			CapacityJSON:    jsonText(item.Capacity, "{}"),
@@ -965,8 +1112,8 @@ func (u *Usecase) IngestInventory(ctx context.Context, edgeID uint64, in tunnel.
 			UID:             strings.TrimSpace(item.UID),
 			DesiredReplicas: item.DesiredReplicas,
 			ReadyReplicas:   item.ReadyReplicas,
-			LabelsJSON:      jsonText(item.Labels, "{}"),
-			AnnotationsJSON: jsonText(item.Annotations, "{}"),
+			LabelsJSON:      jsonText(k8sredact.StringMap(item.Labels), "{}"),
+			AnnotationsJSON: jsonText(k8sredact.StringMap(item.Annotations), "{}"),
 			ConditionsJSON:  jsonText(item.Conditions, "[]"),
 			LastSeenAt:      &ts,
 		})
@@ -1016,7 +1163,7 @@ func (u *Usecase) IngestInventory(ctx context.Context, edgeID uint64, in tunnel.
 			UID:                 uid,
 			Type:                strings.TrimSpace(item.Type),
 			Reason:              strings.TrimSpace(item.Reason),
-			Message:             strings.TrimSpace(item.Message),
+			Message:             k8sredact.Text(strings.TrimSpace(item.Message)),
 			InvolvedKind:        strings.TrimSpace(item.InvolvedKind),
 			InvolvedNamespace:   strings.TrimSpace(item.InvolvedNamespace),
 			InvolvedName:        strings.TrimSpace(item.InvolvedName),
@@ -1286,14 +1433,22 @@ func (u *Usecase) enrollResult(clusterID uint64, role, mode string, cred *EdgeCr
 	}
 }
 
-func validBootstrapToken(token string, c *model.Cluster) bool {
-	if token == "" || c == nil || c.BootstrapTokenHash == "" {
+func validBootstrapToken(token string, c *model.Cluster, role string) bool {
+	if token == "" || c == nil {
 		return false
 	}
 	if c.BootstrapTokenExpiresAt != nil && time.Now().After(*c.BootstrapTokenExpiresAt) {
 		return false
 	}
-	return passwd.Verify(token, c.BootstrapTokenHash)
+	want := c.BootstrapTokenHash
+	if role == model.RoleNode {
+		want = c.NodeBootstrapTokenHash
+	}
+	if role != model.RoleNode && role != model.RoleController {
+		return false
+	}
+	got := tokenDigest(token)
+	return len(got) == len(want) && subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
 }
 
 func newBootstrapToken(ttl time.Duration) (token string, hash string, expiresAt *time.Time, err error) {
@@ -1301,12 +1456,14 @@ func newBootstrapToken(ttl time.Duration) (token string, hash string, expiresAt 
 	if err != nil {
 		return "", "", nil, fmt.Errorf("gen k8s bootstrap token: %w", err)
 	}
-	hash, err = passwd.Hash(token)
-	if err != nil {
-		return "", "", nil, fmt.Errorf("hash k8s bootstrap token: %w", err)
-	}
+	hash = tokenDigest(token)
 	exp := time.Now().Add(ttl)
 	return token, hash, &exp, nil
+}
+
+func tokenDigest(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
 }
 
 func randomURLSafe(n int) (string, error) {
@@ -1361,7 +1518,7 @@ func jsonText(v any, fallback string) string {
 	return string(b)
 }
 
-func (u *Usecase) installCommand(clusterID uint64, mode, token string) string {
+func (u *Usecase) installCommand(clusterID uint64, mode, controllerToken, nodeToken string) string {
 	publicURL, tunnelAddr := installEndpoints(u.cfg.PublicURL, u.cfg.TunnelAddr)
 	chartRef := installChartRef(u.cfg, publicURL)
 	args := []string{
@@ -1378,8 +1535,36 @@ func (u *Usecase) installCommand(clusterID uint64, mode, token string) string {
 		"--set-string manager.tunnelAddr="+shellQuote(tunnelAddr),
 		"--set-string manager.tlsInsecure=true",
 		"--set-string enrollment.clusterID="+strconv.FormatUint(clusterID, 10),
-		"--set-string enrollment.bootstrapToken="+shellQuote(token),
+		"--set-string enrollment.controllerBootstrapToken="+shellQuote(controllerToken),
+		"--set-string enrollment.nodeBootstrapToken="+shellQuote(nodeToken),
 		"--set-string mode="+shellQuote(mode),
+	)
+	return strings.Join(args, " ")
+}
+
+func (u *Usecase) UpgradeCommand(cluster *model.Cluster) string {
+	if cluster == nil {
+		return ""
+	}
+	publicURL, tunnelAddr := installEndpoints(u.cfg.PublicURL, u.cfg.TunnelAddr)
+	chartRef := installChartRef(u.cfg, publicURL)
+	namespace := strings.TrimSpace(cluster.ControllerNamespace)
+	if namespace == "" {
+		namespace = "ongrid-system"
+	}
+	args := []string{
+		"helm upgrade ongrid-edge",
+		shellQuote(chartRef),
+	}
+	if strings.HasPrefix(strings.ToLower(chartRef), "https://") {
+		args = append(args, "--insecure-skip-tls-verify")
+	}
+	args = append(args,
+		"--namespace "+shellQuote(namespace),
+		"--reuse-values",
+		"--set-string manager.publicURL="+shellQuote(publicURL),
+		"--set-string manager.tunnelAddr="+shellQuote(tunnelAddr),
+		"--set-string manager.tlsInsecure=true",
 	)
 	return strings.Join(args, " ")
 }

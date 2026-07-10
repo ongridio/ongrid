@@ -74,6 +74,69 @@ func TestRepo_ListPodsFiltersByReason(t *testing.T) {
 	}
 }
 
+func TestRepo_SnapshotUpsertsWorkOnSQLite(t *testing.T) {
+	_, repo := newTestRepo(t)
+	ctx := context.Background()
+	firstSeen := time.Now().UTC().Add(-time.Minute)
+	secondSeen := time.Now().UTC()
+
+	workload := &model.Workload{
+		ClusterID:       1,
+		Namespace:       "default",
+		Kind:            "Deployment",
+		Name:            "api",
+		UID:             "workload-v1",
+		DesiredReplicas: 1,
+		ReadyReplicas:   0,
+		LabelsJSON:      "{}",
+		AnnotationsJSON: "{}",
+		ConditionsJSON:  "[]",
+		LastSeenAt:      &firstSeen,
+	}
+	if err := repo.UpsertWorkloads(ctx, []*model.Workload{workload}); err != nil {
+		t.Fatalf("UpsertWorkloads(first): %v", err)
+	}
+	workload.UID = "workload-v2"
+	workload.ReadyReplicas = 1
+	workload.LastSeenAt = &secondSeen
+	if err := repo.UpsertWorkloads(ctx, []*model.Workload{workload}); err != nil {
+		t.Fatalf("UpsertWorkloads(second): %v", err)
+	}
+	workloads, err := repo.ListWorkloads(ctx, biz.ListWorkloadsFilter{ClusterID: 1})
+	if err != nil || len(workloads) != 1 || workloads[0].UID != "workload-v2" || workloads[0].ReadyReplicas != 1 {
+		t.Fatalf("workload upsert result=%+v err=%v", workloads, err)
+	}
+
+	pod := &model.Pod{ClusterID: 1, Namespace: "default", Name: "api-1", UID: "pod-1", Phase: "Pending", LastSeenAt: &firstSeen}
+	if err := repo.UpsertPods(ctx, []*model.Pod{pod}); err != nil {
+		t.Fatalf("UpsertPods(first): %v", err)
+	}
+	pod.Phase = "Running"
+	pod.LastSeenAt = &secondSeen
+	if err := repo.UpsertPods(ctx, []*model.Pod{pod}); err != nil {
+		t.Fatalf("UpsertPods(second): %v", err)
+	}
+	pods, err := repo.ListPods(ctx, biz.ListPodsFilter{ClusterID: 1})
+	if err != nil || len(pods) != 1 || pods[0].Phase != "Running" {
+		t.Fatalf("pod upsert result=%+v err=%v", pods, err)
+	}
+
+	event := &model.Event{ClusterID: 1, Namespace: "default", Name: "event-a", UID: "event-1", Type: "Warning", Count: 1, LastSeenAt: &firstSeen}
+	if err := repo.UpsertEvents(ctx, []*model.Event{event}); err != nil {
+		t.Fatalf("UpsertEvents(first): %v", err)
+	}
+	event.Count = 2
+	event.Message = "updated"
+	event.LastSeenAt = &secondSeen
+	if err := repo.UpsertEvents(ctx, []*model.Event{event}); err != nil {
+		t.Fatalf("UpsertEvents(second): %v", err)
+	}
+	events, err := repo.ListEvents(ctx, biz.ListEventsFilter{ClusterID: 1})
+	if err != nil || len(events) != 1 || events[0].Count != 2 || events[0].Message != "updated" {
+		t.Fatalf("event upsert result=%+v err=%v", events, err)
+	}
+}
+
 func TestRepo_ListWorkloadsSupportsQueryAndIssueOnly(t *testing.T) {
 	db, repo := newTestRepo(t)
 	now := time.Now()
@@ -341,6 +404,69 @@ func TestRepo_CountClustersIgnoresPagination(t *testing.T) {
 	}
 	if total != 2 {
 		t.Fatalf("total=%d want 2", total)
+	}
+}
+
+func TestRepo_NodeCoverageBatchAndControllerTokenClaim(t *testing.T) {
+	db, repo := newTestRepo(t)
+	ctx := context.Background()
+	controllerEdgeID := uint64(30)
+	clusters := []*model.Cluster{
+		{Name: "prod-a", Mode: model.ModeFullNode, Status: model.ClusterStatusOffline, BootstrapTokenHash: "controller-hash", ControllerEdgeID: &controllerEdgeID, ControllerNodeName: "node-a"},
+		{Name: "prod-b", Mode: model.ModeFullNode, Status: model.ClusterStatusOffline},
+		{Name: "prod-c", Mode: model.ModeFullNode, Status: model.ClusterStatusOffline},
+	}
+	if err := db.Create(&clusters).Error; err != nil {
+		t.Fatalf("Create clusters: %v", err)
+	}
+	edgeID := uint64(10)
+	deviceID := uint64(20)
+	nodes := []*model.Node{
+		{ClusterID: clusters[0].ID, NodeName: "node-a", NodeUID: "a", EdgeID: &edgeID, DeviceID: &deviceID},
+		{ClusterID: clusters[0].ID, NodeName: "node-b", NodeUID: "b"},
+		{ClusterID: clusters[1].ID, NodeName: "node-c", NodeUID: "c", EdgeID: &edgeID},
+	}
+	if err := db.Create(&nodes).Error; err != nil {
+		t.Fatalf("Create nodes: %v", err)
+	}
+	coverage, err := repo.GetNodeCoverageByClusterIDs(ctx, []uint64{clusters[0].ID, clusters[1].ID, clusters[2].ID})
+	if err != nil {
+		t.Fatalf("GetNodeCoverageByClusterIDs: %v", err)
+	}
+	if got := coverage[clusters[0].ID]; got.Total != 2 || got.EdgeLinked != 1 || got.DeviceLinked != 1 {
+		t.Fatalf("cluster 1 coverage = %+v", got)
+	}
+	if got := coverage[clusters[1].ID]; got.Total != 1 || got.EdgeLinked != 1 || got.DeviceLinked != 0 {
+		t.Fatalf("cluster 2 coverage = %+v", got)
+	}
+	if got := coverage[clusters[2].ID]; got.Total != 0 {
+		t.Fatalf("cluster 3 coverage = %+v", got)
+	}
+	attachments, total, err := repo.ListEdgeAttachments(ctx, 2, 0)
+	if err != nil {
+		t.Fatalf("ListEdgeAttachments: %v", err)
+	}
+	if total != 4 || len(attachments) != 2 {
+		t.Fatalf("attachments = %+v total=%d, want first 2 of 4", attachments, total)
+	}
+	attachments, total, err = repo.ListEdgeAttachments(ctx, 2, 2)
+	if err != nil {
+		t.Fatalf("ListEdgeAttachments(second page): %v", err)
+	}
+	if total != 4 || len(attachments) != 2 {
+		t.Fatalf("second page = %+v total=%d, want final 2 of 4", attachments, total)
+	}
+
+	claimed, err := repo.ClaimControllerBootstrapToken(ctx, clusters[0].ID, "controller-hash")
+	if err != nil || !claimed {
+		t.Fatalf("ClaimControllerBootstrapToken(first) claimed=%v err=%v", claimed, err)
+	}
+	claimed, err = repo.ClaimControllerBootstrapToken(ctx, clusters[0].ID, "controller-hash")
+	if err != nil || claimed {
+		t.Fatalf("ClaimControllerBootstrapToken(replay) claimed=%v err=%v", claimed, err)
+	}
+	if err := repo.RestoreControllerBootstrapToken(ctx, clusters[0].ID, "controller-hash"); err != nil {
+		t.Fatalf("RestoreControllerBootstrapToken: %v", err)
 	}
 }
 

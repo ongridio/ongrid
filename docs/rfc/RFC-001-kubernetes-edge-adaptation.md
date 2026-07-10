@@ -75,7 +75,8 @@ flowchart LR
    - `manager.tunnelAddr`
    - `manager.tlsInsecure`
    - `enrollment.clusterID`
-   - `enrollment.bootstrapToken`
+   - `enrollment.controllerBootstrapToken`
+   - `enrollment.nodeBootstrapToken`
    - `mode=full-node`
 4. controller Deployment 启动后 enroll，作为集群控制面身份连接 tunnel。
 5. node DaemonSet 在每个 Node 上启动，每个 Pod 用 Node UID enroll，换取独立 edge credentials。
@@ -161,7 +162,8 @@ helm upgrade --install ongrid-edge 'https://<manager>/edge/k8s/ongrid-edge.tgz' 
   --set-string manager.tunnelAddr='<manager>:40012' \
   --set-string manager.tlsInsecure=true \
   --set-string enrollment.clusterID='<cluster_id>' \
-  --set-string enrollment.bootstrapToken='<bootstrap_token>' \
+  --set-string enrollment.controllerBootstrapToken='<controller_bootstrap_token>' \
+  --set-string enrollment.nodeBootstrapToken='<node_bootstrap_token>' \
   --set-string mode='full-node'
 ```
 

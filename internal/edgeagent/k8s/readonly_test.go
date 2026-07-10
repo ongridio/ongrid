@@ -6,9 +6,11 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/pkg/k8sredact"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
 
@@ -21,7 +23,7 @@ func TestRegisterHandlersDescribePod(t *testing.T) {
 		}
 		switch r.URL.Path {
 		case "/api/v1/namespaces/default/pods/api-1":
-			_, _ = w.Write([]byte(`{
+			writeTestResponse(t, w, `{
 				"apiVersion":"v1",
 				"kind":"Pod",
 				"metadata":{
@@ -33,11 +35,11 @@ func TestRegisterHandlersDescribePod(t *testing.T) {
 					"managedFields":[{"manager":"kubectl"}],
 					"labels":{"app":"api"}
 				},
-				"spec":{"nodeName":"node-a"},
+				"spec":{"nodeName":"node-a","containers":[{"name":"api","env":[{"name":"API_TOKEN","value":"top-secret"}],"args":["--password=hunter2"]}]},
 				"status":{"phase":"Running"}
-			}`))
+			}`)
 		case "/api/v1/namespaces/default/events":
-			_, _ = w.Write([]byte(`{"items":[
+			writeTestResponse(t, w, `{"items":[
 				{
 					"metadata":{"name":"api-1.1","namespace":"default","uid":"event-1"},
 					"involvedObject":{"kind":"Pod","namespace":"default","name":"api-1","uid":"pod-uid"},
@@ -52,7 +54,7 @@ func TestRegisterHandlersDescribePod(t *testing.T) {
 					"reason":"BackOff",
 					"message":"ignored"
 				}
-			]}`))
+			]}`)
 		default:
 			http.NotFound(w, r)
 		}
@@ -111,6 +113,9 @@ func TestRegisterHandlersDescribePod(t *testing.T) {
 	if _, ok := meta["annotations"]; ok {
 		t.Fatalf("annotations should be removed: %s", resp.Object)
 	}
+	if strings.Contains(string(resp.Object), "top-secret") || strings.Contains(string(resp.Object), "hunter2") {
+		t.Fatalf("sensitive workload values should be redacted: %s", resp.Object)
+	}
 	wantPaths := []string{"/api/v1/namespaces/default/pods/api-1", "/api/v1/namespaces/default/events"}
 	if len(gotPaths) != len(wantPaths) {
 		t.Fatalf("paths=%v want %v", gotPaths, wantPaths)
@@ -135,6 +140,27 @@ func TestDescribeResourceRejectsDisallowedKind(t *testing.T) {
 	}
 }
 
+func TestRedactStringMap(t *testing.T) {
+	in := map[string]string{
+		"app":                   "api",
+		"example.com/api-token": "top-secret",
+		"endpoint":              "https://user:password@example.com/api",
+	}
+	out := k8sredact.StringMap(in)
+	if out["app"] != "api" {
+		t.Fatalf("ordinary label changed: %q", out["app"])
+	}
+	if out["example.com/api-token"] != "[REDACTED]" {
+		t.Fatalf("sensitive annotation not redacted: %q", out["example.com/api-token"])
+	}
+	if strings.Contains(out["endpoint"], "password") {
+		t.Fatalf("credential URL not redacted: %q", out["endpoint"])
+	}
+	if in["example.com/api-token"] != "top-secret" {
+		t.Fatal("redaction must not mutate the Kubernetes API response map")
+	}
+}
+
 func TestRegisterHandlersQueryPodLogs(t *testing.T) {
 	var gotPath, gotContainer, gotTail, gotLimit, gotSince, gotPrevious, gotTimestamps string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -152,7 +178,7 @@ func TestRegisterHandlersQueryPodLogs(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		_, _ = w.Write([]byte("2026-06-30T00:00:00Z booted\n2026-06-30T00:00:01Z ready\n"))
+		writeTestResponse(t, w, "2026-06-30T00:00:00Z token=top-secret\n2026-06-30T00:00:01Z ready\n")
 	}))
 	defer srv.Close()
 
@@ -203,6 +229,37 @@ func TestRegisterHandlersQueryPodLogs(t *testing.T) {
 	if resp.LineCount != 2 || resp.Bytes == 0 || resp.Logs == "" {
 		t.Fatalf("unexpected log payload: %+v", resp)
 	}
+	if strings.Contains(resp.Logs, "top-secret") || !strings.Contains(resp.Logs, "[REDACTED]") {
+		t.Fatalf("sensitive log value should be redacted: %q", resp.Logs)
+	}
+}
+
+func TestK8sListPaginationUsesContinueToken(t *testing.T) {
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if got := r.URL.Query().Get("limit"); got != "500" {
+			t.Fatalf("limit = %q, want 500", got)
+		}
+		if requests == 1 {
+			writeTestResponse(t, w, `{"metadata":{"resourceVersion":"42","continue":"next-page"},"items":[{"metadata":{"namespace":"default","name":"pod-a","uid":"a"}}]}`)
+			return
+		}
+		if got := r.URL.Query().Get("continue"); got != "next-page" {
+			t.Fatalf("continue = %q, want next-page", got)
+		}
+		writeTestResponse(t, w, `{"metadata":{"resourceVersion":"42"},"items":[{"metadata":{"namespace":"default","name":"pod-b","uid":"b"}}]}`)
+	}))
+	defer srv.Close()
+
+	api := &apiClient{baseURL: srv.URL, token: "token", http: srv.Client()}
+	pods, rv, err := api.listPods(context.Background(), "")
+	if err != nil {
+		t.Fatalf("listPods() error = %v", err)
+	}
+	if requests != 2 || rv != "42" || len(pods) != 2 || pods[1].Name != "pod-b" {
+		t.Fatalf("requests=%d rv=%q pods=%+v", requests, rv, pods)
+	}
 }
 
 func TestQueryPodLogsRejectsWrongCluster(t *testing.T) {
@@ -228,13 +285,13 @@ func TestInventoryPusherIncludesResourceVersions(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/nodes":
-			_, _ = w.Write([]byte(`{"metadata":{"resourceVersion":"100"},"items":[{"metadata":{"name":"node-a","uid":"node-uid-a"},"status":{"nodeInfo":{"kubeletVersion":"v1.34.0"}}}]}`))
+			writeTestResponse(t, w, `{"metadata":{"resourceVersion":"100"},"items":[{"metadata":{"name":"node-a","uid":"node-uid-a"},"status":{"nodeInfo":{"kubeletVersion":"v1.34.0"}}}]}`)
 		case "/api/v1/pods":
-			_, _ = w.Write([]byte(`{"metadata":{"resourceVersion":"101"},"items":[]}`))
+			writeTestResponse(t, w, `{"metadata":{"resourceVersion":"101"},"items":[]}`)
 		case "/api/v1/events":
-			_, _ = w.Write([]byte(`{"metadata":{"resourceVersion":"99"},"items":[]}`))
+			writeTestResponse(t, w, `{"metadata":{"resourceVersion":"99"},"items":[]}`)
 		case "/apis/apps/v1/deployments":
-			_, _ = w.Write([]byte(`{"metadata":{"resourceVersion":"102"},"items":[{"metadata":{"namespace":"default","name":"api","uid":"deploy-uid"}}]}`))
+			writeTestResponse(t, w, `{"metadata":{"resourceVersion":"102"},"items":[{"metadata":{"namespace":"default","name":"api","uid":"deploy-uid"}}]}`)
 		default:
 			http.NotFound(w, r)
 		}
@@ -281,15 +338,39 @@ func TestInventoryPusherIncludesResourceVersions(t *testing.T) {
 	}
 }
 
+func TestInventoryPusherRejectsPartialWorkloadSnapshot(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/nodes", "/api/v1/pods", "/api/v1/events":
+			writeTestResponse(t, w, `{"metadata":{"resourceVersion":"100"},"items":[]}`)
+		case "/apis/apps/v1/deployments":
+			http.Error(w, "temporary failure", http.StatusInternalServerError)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	p := &InventoryPusher{
+		client: &fakeTunnelClient{handlers: map[string]tunnel.Handler{}},
+		info:   tunnel.KubernetesInfo{ClusterID: 7, Role: "controller"},
+		api:    &apiClient{baseURL: srv.URL, token: "test-token", http: srv.Client()},
+		log:    slog.Default(),
+	}
+	if err := p.pushOnce(context.Background(), 55); err == nil {
+		t.Fatal("pushOnce() must reject a partial full snapshot")
+	}
+}
+
 func TestInventoryPusherIncludesWatchTriggerMetadata(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/nodes":
-			_, _ = w.Write([]byte(`{"metadata":{"resourceVersion":"100"},"items":[]}`))
+			writeTestResponse(t, w, `{"metadata":{"resourceVersion":"100"},"items":[]}`)
 		case "/api/v1/pods":
-			_, _ = w.Write([]byte(`{"metadata":{"resourceVersion":"101"},"items":[]}`))
+			writeTestResponse(t, w, `{"metadata":{"resourceVersion":"101"},"items":[]}`)
 		case "/api/v1/events":
-			_, _ = w.Write([]byte(`{"metadata":{"resourceVersion":"99"},"items":[]}`))
+			writeTestResponse(t, w, `{"metadata":{"resourceVersion":"99"},"items":[]}`)
 		default:
 			http.NotFound(w, r)
 		}
@@ -320,6 +401,13 @@ func TestInventoryPusherIncludesWatchTriggerMetadata(t *testing.T) {
 	}
 	if req.WatchTriggerReason != "pods:MODIFIED" {
 		t.Fatalf("WatchTriggerReason = %q, want pods:MODIFIED", req.WatchTriggerReason)
+	}
+}
+
+func writeTestResponse(t *testing.T, w http.ResponseWriter, body string) {
+	t.Helper()
+	if _, err := w.Write([]byte(body)); err != nil {
+		t.Fatalf("write test response: %v", err)
 	}
 }
 

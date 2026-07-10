@@ -28,6 +28,7 @@ const cluster = {
   bootstrap_token_expires_at: '2026-06-30T10:00:00Z',
   created_at: '2026-06-29T09:00:00Z',
   updated_at: '2026-06-29T10:00:00Z',
+  upgrade_command: "helm upgrade ongrid-edge 'https://manager.example/edge/k8s/ongrid-edge.tgz' --insecure-skip-tls-verify --namespace 'ongrid-system' --reuse-values --set-string manager.publicURL='https://manager.example' --set-string manager.tunnelAddr='manager.example:40012' --set-string manager.tlsInsecure=true",
 };
 
 function ChatStateProbe() {
@@ -72,6 +73,14 @@ describe('KubernetesPage', () => {
         }),
       ),
       http.get('/api/v1/k8s/clusters/:id', () => HttpResponse.json(cluster)),
+      http.get('/api/v1/k8s/clusters/:id/health', () => HttpResponse.json({
+        degraded_workloads: 0,
+        pending_pods: 0,
+        crash_loop_back_off_pods: 1,
+        oom_killed_pods: 0,
+        image_pull_back_off_pods: 0,
+        not_ready_nodes: 0,
+      })),
       http.get('/api/v1/k8s/clusters/:id/nodes', () =>
         HttpResponse.json({
           items: [{
@@ -322,8 +331,9 @@ describe('KubernetesPage', () => {
             controller_pod_name: '',
           },
           bootstrap_token: 'g-token',
+          node_bootstrap_token: 'n-token',
           install_command:
-            "helm upgrade --install ongrid-edge 'https://<manager>/edge/k8s/ongrid-edge.tgz' --insecure-skip-tls-verify --namespace ongrid-system --create-namespace --set namespace.create=false --set-string manager.publicURL='https://<manager>' --set-string manager.tunnelAddr='<manager>:40012' --set-string manager.tlsInsecure=true --set-string enrollment.clusterID=4 --set-string enrollment.bootstrapToken='g-token' --set-string mode='full-node'",
+            "helm upgrade --install ongrid-edge 'https://<manager>/edge/k8s/ongrid-edge.tgz' --insecure-skip-tls-verify --namespace ongrid-system --create-namespace --set namespace.create=false --set-string manager.publicURL='https://<manager>' --set-string manager.tunnelAddr='<manager>:40012' --set-string manager.tlsInsecure=true --set-string enrollment.clusterID=4 --set-string enrollment.controllerBootstrapToken='g-token' --set-string enrollment.nodeBootstrapToken='n-token' --set-string mode='full-node'",
         });
       }),
     );
@@ -412,14 +422,22 @@ describe('KubernetesPage', () => {
 
     expect(screen.getByText('Helm 升级命令')).toBeInTheDocument();
     const command = screen.getByText(/helm upgrade ongrid-edge/);
-    expect(command).toHaveTextContent("'https://<manager>/edge/k8s/ongrid-edge.tgz'");
+    expect(command).toHaveTextContent("'https://manager.example/edge/k8s/ongrid-edge.tgz'");
     expect(command).toHaveTextContent("--namespace 'ongrid-system'");
     expect(command).toHaveTextContent('--reuse-values');
-    expect(command).toHaveTextContent("manager.tunnelAddr='<manager>:40012'");
+    expect(command).toHaveTextContent("manager.tunnelAddr='manager.example:40012'");
   });
 
   it('已恢复的 Warning Event 不进入健康结论和异常线索', async () => {
     server.use(
+      http.get('/api/v1/k8s/clusters/:id/health', () => HttpResponse.json({
+        degraded_workloads: 0,
+        pending_pods: 0,
+        crash_loop_back_off_pods: 0,
+        oom_killed_pods: 0,
+        image_pull_back_off_pods: 0,
+        not_ready_nodes: 0,
+      })),
       http.get('/api/v1/k8s/clusters/:id/pods', ({ request }) => {
         const url = new URL(request.url);
         if (url.searchParams.get('reason') === 'CrashLoopBackOff') {
@@ -1119,6 +1137,14 @@ describe('KubernetesPage', () => {
     };
     server.use(
       http.get('/api/v1/k8s/clusters/:id', () => HttpResponse.json(staleCluster)),
+      http.get('/api/v1/k8s/clusters/:id/health', () => HttpResponse.json({
+        degraded_workloads: 0,
+        pending_pods: 0,
+        crash_loop_back_off_pods: 0,
+        oom_killed_pods: 0,
+        image_pull_back_off_pods: 0,
+        not_ready_nodes: 0,
+      })),
       http.get('/api/v1/k8s/clusters/:id/pods', ({ request }) => {
         const url = new URL(request.url);
         if (url.searchParams.get('reason') === 'CrashLoopBackOff') {
@@ -1409,7 +1435,7 @@ describe('KubernetesPage', () => {
     expect(screen.getAllByText('scale deployment').length).toBeGreaterThan(0);
     expect(screen.getAllByText('restart rollout').length).toBeGreaterThan(0);
     expect(screen.getAllByText('delete pod').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('apply patch').length).toBeGreaterThan(0);
+    expect(screen.queryByText('apply patch')).not.toBeInTheDocument();
     expect(await screen.findByText('K8s 写动作审计')).toBeInTheDocument();
     expect(screen.getByText('rollout_restart · default · Deployment/api')).toBeInTheDocument();
     expect(screen.getAllByText('已执行').length).toBeGreaterThan(0);

@@ -1,6 +1,9 @@
 {{- $controllerMetrics := default dict .Values.controller.metrics -}}
 {{- $k8sMetricsEndpoint := include "ongrid-edge.k8sMetricsEndpoint" . -}}
 {{- $telemetryGatewayEnabled := eq (include "ongrid-edge.telemetryGatewayEnabled" .) "true" -}}
+{{- if ne (int .Values.controller.replicas) 1 -}}
+{{- fail "controller.replicas must be 1 until controller leader election is implemented" -}}
+{{- end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -54,15 +57,15 @@ spec:
             - name: ONGRID_K8S_CLUSTER_ID
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "ongrid-edge.fullname" . }}-bootstrap
+                  name: {{ include "ongrid-edge.fullname" . }}-controller-bootstrap
                   key: cluster-id
             - name: ONGRID_K8S_BOOTSTRAP_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "ongrid-edge.fullname" . }}-bootstrap
+                  name: {{ include "ongrid-edge.fullname" . }}-controller-bootstrap
                   key: bootstrap-token
             - name: ONGRID_K8S_CREDENTIAL_SECRET
-              value: {{ include "ongrid-edge.credentialSecretName" . | quote }}
+              value: {{ include "ongrid-edge.controllerCredentialSecretName" . | quote }}
             - name: ONGRID_MANAGER_PUBLIC_URL
               valueFrom:
                 configMapKeyRef:

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   Activity,
@@ -6,11 +6,9 @@ import {
   ArrowLeft,
   BarChart3,
   Check,
-  CheckCircle2,
   Clipboard,
   ExternalLink,
   FileText,
-  Layers3,
   ListChecks,
   MoreHorizontal,
   Network,
@@ -43,6 +41,7 @@ import {
   createKubernetesCluster,
   deleteKubernetesCluster,
   getKubernetesCluster,
+  getKubernetesClusterHealth,
   listKubernetesClusters,
   listKubernetesEvents,
   listKubernetesNodes,
@@ -50,6 +49,7 @@ import {
   listKubernetesWorkloads,
   rotateKubernetesBootstrapToken,
   type KubernetesCluster,
+  type KubernetesClusterHealth,
   type KubernetesEvent,
   type KubernetesNode,
   type KubernetesPod,
@@ -73,13 +73,17 @@ import {
   isKubernetesClusterRecentlyActive,
   kubernetesUpgradeCommand,
   kubernetesUninstallCommand,
-  localizeKubernetesInstallCommand,
   snapshotResourceSummary,
   syncHealthText,
   type DetailTab,
   type K8sSyncRisk,
   type ResourceTotals,
 } from './kubernetes/model';
+import {
+  containerdInsecureRegistryCommand,
+  dockerInsecureRegistryCommand,
+  managerRegistryHostFromCommand,
+} from './kubernetes/registryCommands';
 
 export default function KubernetesPage() {
   const { tr } = useI18n();
@@ -344,6 +348,7 @@ export function KubernetesClusterDetailPage() {
   const [actionAuditError, setActionAuditError] = useState<string | null>(null);
   const [totals, setTotals] = useState<ResourceTotals>({ nodes: 0, workloads: 0, pods: 0, events: 0 });
   const [crashLoopTotal, setCrashLoopTotal] = useState(0);
+  const [healthSummary, setHealthSummary] = useState<KubernetesClusterHealth | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -377,8 +382,9 @@ export function KubernetesClusterDetailPage() {
       const edgeVersionsPromise = listEdges()
         .then((out) => buildEdgeVersionMap(out.items ?? []))
         .catch(() => ({}));
-      const [clusterOut, nodesOut, workloadsOut, podsOut, crashLoopPodsOut, eventsOut, warningEventsOut, auditOut, edgeVersionMap] = await Promise.all([
+      const [clusterOut, healthOut, nodesOut, workloadsOut, podsOut, crashLoopPodsOut, eventsOut, warningEventsOut, auditOut, edgeVersionMap] = await Promise.all([
         getKubernetesCluster(clusterId),
+        getKubernetesClusterHealth(clusterId),
         listKubernetesNodes(clusterId),
         listKubernetesWorkloads(clusterId, { limit: RESOURCE_PAGE_SIZE }),
         listKubernetesPods(clusterId, { limit: RESOURCE_PAGE_SIZE }),
@@ -389,6 +395,7 @@ export function KubernetesClusterDetailPage() {
         edgeVersionsPromise,
       ]);
       setCluster(clusterOut);
+      setHealthSummary(healthOut);
       setNodes(nodesOut.items ?? []);
       setWorkloads(workloadsOut.items ?? []);
       setPods(podsOut.items ?? []);
@@ -531,7 +538,7 @@ export function KubernetesClusterDetailPage() {
   }, [activeTab, activeTabSupportsServerFilter, clusterId, filterActive, resourceFilters, resourceFilterRetryNonce, resourceLimit]);
 
   const visibleNodes = nodes;
-  const filteredNodes = useMemo(() => filterNodes(visibleNodes, localResourceFilters, cluster), [cluster, localResourceFilters, visibleNodes]);
+  const filteredNodes = useMemo(() => filterNodes(visibleNodes, localResourceFilters), [localResourceFilters, visibleNodes]);
   const locallyFilteredWorkloads = useMemo(() => filterWorkloads(workloads, localResourceFilters), [localResourceFilters, workloads]);
   const locallyFilteredPods = useMemo(() => filterPods(pods, localResourceFilters), [pods, localResourceFilters]);
   const locallyFilteredEvents = useMemo(() => filterEvents(events, localResourceFilters), [events, localResourceFilters]);
@@ -555,8 +562,8 @@ export function KubernetesClusterDetailPage() {
   const filteredActionProposals = useMemo(() => filterActionProposals(actionProposals, localResourceFilters), [actionProposals, localResourceFilters]);
   const resourceFilterHint = useMemo(() => resourceFilterSummary(localResourceFilters, activeTab, tr), [activeTab, localResourceFilters, tr]);
   const issueCounts = useMemo(
-    () => buildIssueCounts(visibleNodes, pods, crashLoopTotal),
-    [visibleNodes, pods, crashLoopTotal],
+    () => buildIssueCounts(visibleNodes, pods, crashLoopTotal, healthSummary),
+    [visibleNodes, pods, crashLoopTotal, healthSummary],
   );
   const edgeAccess = useMemo(() => {
     if (visibleNodes.length <= 0) return null;
@@ -797,7 +804,6 @@ export function KubernetesClusterDetailPage() {
             <>
               <K8sOperationsOverview
                 cluster={cluster}
-                nodes={visibleNodes}
                 crashLoopTotal={crashLoopTotal}
                 warningEventTotal={warningEventTotal}
                 triageIssues={triageIssues}
@@ -1040,9 +1046,9 @@ function ClusterSummary({
           <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
             <HealthMetric
               label={tr('Controller', 'Controller')}
-              value={cluster?.controller_edge_id ? tr('运行中', 'running') : loading ? tr('加载中…', 'Loading…') : '—'}
+              value={cluster?.status === 'online' && cluster?.controller_edge_id ? tr('运行中', 'running') : loading ? tr('加载中…', 'Loading…') : '—'}
               detail={cluster?.controller_node_name || cluster?.controller_pod_name || '—'}
-              tone={cluster?.controller_edge_id ? 'success' : 'default'}
+              tone={cluster?.status === 'online' && cluster?.controller_edge_id ? 'success' : 'default'}
             />
             <HealthMetric
               label={tr('Agent 版本', 'Agent version')}
@@ -1300,7 +1306,6 @@ function clusterVisibleIssueChips(
 
 function K8sOperationsOverview({
   cluster,
-  nodes,
   crashLoopTotal,
   warningEventTotal,
   triageIssues,
@@ -1310,7 +1315,6 @@ function K8sOperationsOverview({
   onOpenIssueResource,
 }: {
   cluster: KubernetesCluster | null;
-  nodes: KubernetesNode[];
   crashLoopTotal: number;
   warningEventTotal: number;
   triageIssues: K8sTriageIssue[];
@@ -1325,7 +1329,6 @@ function K8sOperationsOverview({
     <div className="mt-4">
       <K8sHealthQueue
         cluster={cluster}
-        nodes={nodes}
         crashLoopTotal={crashLoopTotal}
         warningEventTotal={warningEventTotal}
         triageIssues={triageIssues}
@@ -1340,7 +1343,6 @@ function K8sOperationsOverview({
 
 function K8sHealthQueue({
   cluster,
-  nodes,
   crashLoopTotal,
   warningEventTotal,
   triageIssues,
@@ -1350,7 +1352,6 @@ function K8sHealthQueue({
   onOpenIssueResource,
 }: {
   cluster: KubernetesCluster | null;
-  nodes: KubernetesNode[];
   crashLoopTotal: number;
   warningEventTotal: number;
   triageIssues: K8sTriageIssue[];
@@ -1365,7 +1366,6 @@ function K8sHealthQueue({
   const [writeBusy, setWriteBusy] = useState<string | null>(null);
   const writeEnabled = cluster?.mode === 'full-node';
   const queueWriteActionRecommendations = writeEnabled ? writeActionRecommendations : [];
-  const missingEdgeNodes = nodes.filter((item) => item.edge_id == null).length;
   const hasOpenIssues = triageIssues.length > 0;
   const headlineTone = crashLoopTotal > 0
     ? 'danger'
@@ -1919,117 +1919,14 @@ function TelemetryLinkCell({
   );
 }
 
-function CrashLoopDiagnostics({
-  pods,
-  total,
-  warningEvents,
-  loading,
-  onOpenPods,
-}: {
-  pods: KubernetesPod[];
-  total: number;
-  warningEvents: KubernetesEvent[];
-  loading: boolean;
-  onOpenPods(): void;
-}) {
-  const { tr } = useI18n();
-  const visiblePods = pods.slice(0, 5);
-  const hasIssues = total > 0;
-
-  return (
-    <Card className="mt-4 p-0">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800/60 px-4 py-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <AlertTriangle size={15} className={hasIssues ? 'text-red-300' : 'text-zinc-500'} />
-          <div className="min-w-0">
-            <div className="text-sm font-medium text-zinc-100">CrashLoopBackOff</div>
-            <div className="mt-0.5 text-xs text-zinc-500">
-              {loading && pods.length === 0
-                ? tr('加载中…', 'Loading…')
-                : hasIssues
-                  ? tr(`${formatNumber(total)} 个异常 Pod`, `${formatNumber(total)} failing pod(s)`)
-                  : tr('当前未发现异常 Pod', 'No failing pods detected')}
-            </div>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Chip tone={hasIssues ? 'danger' : 'success'}>
-            {hasIssues ? tr('异常', 'Failing') : tr('正常', 'Clear')}
-          </Chip>
-          {hasIssues && (
-            <Button onClick={onOpenPods}>
-              <ExternalLink size={12} />
-              {tr('查看 Pods', 'Open Pods')}
-            </Button>
-          )}
-        </div>
-      </div>
-      {visiblePods.length > 0 ? (
-        <div className="divide-y divide-zinc-800/60">
-          {visiblePods.map((pod) => {
-            const event = latestEventForPod(pod, warningEvents);
-            return (
-              <div key={`${pod.namespace}/${pod.name}`} className="grid gap-3 px-4 py-3 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1.4fr)]">
-                <div className="min-w-0">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span className="h-2 w-2 shrink-0 rounded-full bg-red-500" />
-                    <span className="truncate font-mono text-xs text-zinc-100">{pod.name}</span>
-                  </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-zinc-500">
-                    <span>{pod.namespace}</span>
-                    <span>·</span>
-                    <span>{pod.node_name || '—'}</span>
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <Chip tone="danger">{pod.reason || 'CrashLoopBackOff'}</Chip>
-                  <Chip tone={pod.restart_count > 3 ? 'warning' : 'default'}>
-                    {tr(`${pod.restart_count} 次重启`, `${pod.restart_count} restart(s)`)}
-                  </Chip>
-                  {pod.owner_kind && pod.owner_name && (
-                    <Chip>{`${pod.owner_kind}/${pod.owner_name}`}</Chip>
-                  )}
-                </div>
-                <div className="min-w-0 text-xs">
-                  {event ? (
-                    <>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Chip tone="warning" dense>{event.reason || 'Warning'}</Chip>
-                        <span className="text-zinc-500">{relativeTime(event.last_timestamp ?? event.event_time)}</span>
-                        {event.count > 1 && <span className="font-mono text-[11px] text-zinc-500">x{event.count}</span>}
-                      </div>
-                      <div className="mt-1 truncate text-zinc-400">{event.message || '—'}</div>
-                    </>
-                  ) : (
-                    <span className="text-zinc-500">{tr('暂无关联 Warning Event', 'No related Warning Event')}</span>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-          {total > visiblePods.length && (
-            <div className="px-4 py-2 text-xs text-zinc-500">
-              {tr(`仅显示前 ${visiblePods.length} 个，共 ${total} 个`, `Showing first ${visiblePods.length} of ${total}`)}
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className="px-4 py-3 text-xs text-zinc-500">
-          {loading ? tr('加载中…', 'Loading…') : tr('没有 CrashLoopBackOff Pod 快照。', 'No CrashLoopBackOff pod snapshot.')}
-        </div>
-      )}
-    </Card>
-  );
-}
-
 type K8sWriteActionSpec = {
   key: string;
   zh: string;
   en: string;
-  target: 'workload' | 'node' | 'pod' | 'patch';
+  target: 'workload' | 'node' | 'pod';
   action: string;
   risk: 'safe' | 'medium' | 'high';
-  group: 'recovery' | 'node-maintenance' | 'advanced';
+  group: 'recovery' | 'node-maintenance';
 };
 
 type K8sWriteActionRecommendation = {
@@ -2048,13 +1945,11 @@ const K8S_WRITE_ACTIONS: K8sWriteActionSpec[] = [
   { key: 'cordon', zh: 'cordon', en: 'cordon', target: 'node', action: 'cordon', risk: 'medium', group: 'node-maintenance' },
   { key: 'uncordon', zh: 'uncordon', en: 'uncordon', target: 'node', action: 'uncordon', risk: 'safe', group: 'node-maintenance' },
   { key: 'drain', zh: 'drain', en: 'drain', target: 'node', action: 'drain', risk: 'high', group: 'node-maintenance' },
-  { key: 'apply-patch', zh: 'apply patch', en: 'apply patch', target: 'patch', action: 'apply_patch', risk: 'high', group: 'advanced' },
 ];
 
 const K8S_WRITE_ACTION_GROUPS: { key: K8sWriteActionSpec['group']; zh: string; en: string; hintZh: string; hintEn: string }[] = [
   { key: 'recovery', zh: '常用恢复动作', en: 'Recovery actions', hintZh: '面向 Workload / Pod 的快速恢复', hintEn: 'Fast recovery for workloads and pods' },
   { key: 'node-maintenance', zh: '节点维护动作', en: 'Node maintenance', hintZh: '隔离、恢复或迁移节点负载', hintEn: 'Isolate, restore, or evacuate node workloads' },
-  { key: 'advanced', zh: '高级变更', en: 'Advanced changes', hintZh: '需要明确 patch 范围和回滚方式', hintEn: 'Requires explicit patch scope and rollback path' },
 ];
 
 function writeActionSessionTitle(spec: K8sWriteActionSpec, cluster: KubernetesCluster) {
@@ -2548,15 +2443,6 @@ function defaultKindForK8sAction(action?: string): string {
     default:
       return 'Resource';
   }
-}
-
-function SummaryCell({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="min-h-[72px] px-4 py-3">
-      <div className="text-[11px] text-zinc-500">{label}</div>
-      <div className="mt-2 text-sm text-zinc-100">{children}</div>
-    </div>
-  );
 }
 
 function TopologyLinkButton() {
@@ -3428,7 +3314,7 @@ function RegistrationModal({
     setCopied(false);
   }, [data?.bootstrap_token]);
   if (!data) return null;
-  const installCommand = localizeKubernetesInstallCommand(data.install_command);
+  const installCommand = data.install_command;
   async function copyInstallCommand() {
     await navigator.clipboard?.writeText(installCommand);
     setCopied(true);
@@ -3444,9 +3330,15 @@ function RegistrationModal({
           <ClusterStatusChip status={data.cluster.status} />
         </div>
         <div>
-          <div className="mb-1 text-zinc-500">Bootstrap token</div>
+          <div className="mb-1 text-zinc-500">Controller bootstrap token</div>
           <div className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-[11px] text-zinc-300">
             {data.bootstrap_token}
+          </div>
+        </div>
+        <div>
+          <div className="mb-1 text-zinc-500">Node bootstrap token</div>
+          <div className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-[11px] text-zinc-300">
+            {data.node_bootstrap_token}
           </div>
         </div>
         <div>
@@ -3471,85 +3363,6 @@ function RegistrationModal({
       </div>
     </Modal>
   );
-}
-
-function managerRegistryHostFromCommand(command: string) {
-  const matched = command.match(/https:\/\/([^/'"\s]+)\/edge\/k8s\/ongrid-edge\.tgz/);
-  return matched?.[1] ?? '<manager>';
-}
-
-function runtimeConfigPrivilegePrelude() {
-  return [
-    'if [ "$(id -u)" -eq 0 ]; then',
-    "  SUDO=''",
-    'elif command -v sudo >/dev/null 2>&1; then',
-    "  SUDO='sudo'",
-    'else',
-    '  echo "root or sudo is required to configure the container runtime" >&2',
-    '  exit 1',
-    'fi',
-  ];
-}
-
-function containerdInsecureRegistryCommand(registryHost: string) {
-  return [
-    `REGISTRY='${registryHost}'`,
-    ...runtimeConfigPrivilegePrelude(),
-    '${SUDO} mkdir -p /etc/containerd',
-    '${SUDO} mkdir -p "/etc/containerd/certs.d/${REGISTRY}"',
-    '${SUDO} tee "/etc/containerd/certs.d/${REGISTRY}/hosts.toml" >/dev/null <<EOF',
-    'server = "https://${REGISTRY}"',
-    '',
-    '[host."https://${REGISTRY}"]',
-    '  capabilities = ["pull", "resolve"]',
-    '  skip_verify = true',
-    'EOF',
-    '',
-    '${SUDO} test -f /etc/containerd/config.toml || containerd config default | ${SUDO} tee /etc/containerd/config.toml >/dev/null',
-    '${SUDO} cp /etc/containerd/config.toml /etc/containerd/config.toml.bak.$(date +%s)',
-    'if ${SUDO} grep -q \'config_path = "/etc/containerd/certs.d"\' /etc/containerd/config.toml; then',
-    '  true',
-    'elif ${SUDO} grep -q \'^[[:space:]]*config_path[[:space:]]*=\' /etc/containerd/config.toml; then',
-    '  ${SUDO} sed -i \'s#^[[:space:]]*config_path[[:space:]]*=.*#  config_path = "/etc/containerd/certs.d"#\' /etc/containerd/config.toml',
-    'elif ${SUDO} grep -q \'^\\[plugins\\."io.containerd.grpc.v1.cri"\\.registry\\]\' /etc/containerd/config.toml; then',
-    '  ${SUDO} sed -i \'/^\\[plugins\\."io.containerd.grpc.v1.cri"\\.registry\\]/a\\  config_path = "/etc/containerd/certs.d"\' /etc/containerd/config.toml',
-    'else',
-    '  ${SUDO} tee -a /etc/containerd/config.toml >/dev/null <<\'EOF\'',
-    '',
-    '[plugins."io.containerd.grpc.v1.cri".registry]',
-    '  config_path = "/etc/containerd/certs.d"',
-    'EOF',
-    'fi',
-    '',
-    '${SUDO} systemctl restart containerd',
-  ].join('\n');
-}
-
-function dockerInsecureRegistryCommand(registryHost: string) {
-  return [
-    `REGISTRY='${registryHost}'`,
-    ...runtimeConfigPrivilegePrelude(),
-    'command -v python3 >/dev/null 2>&1 || { echo "python3 is required to update /etc/docker/daemon.json" >&2; exit 1; }',
-    '${SUDO} mkdir -p /etc/docker',
-    '${SUDO} test ! -f /etc/docker/daemon.json || ${SUDO} cp /etc/docker/daemon.json /etc/docker/daemon.json.bak.$(date +%s)',
-    "${SUDO} env REGISTRY=\"${REGISTRY}\" python3 - <<'PY'",
-    'import json',
-    'import os',
-    'from pathlib import Path',
-    '',
-    "path = Path('/etc/docker/daemon.json')",
-    "registry = os.environ['REGISTRY']",
-    'data = {}',
-    'if path.exists() and path.read_text().strip():',
-    '    data = json.loads(path.read_text())',
-    "registries = data.setdefault('insecure-registries', [])",
-    'if registry not in registries:',
-    '    registries.append(registry)',
-    'path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\\n")',
-    'PY',
-    '',
-    '${SUDO} systemctl restart docker',
-  ].join('\n');
 }
 
 function RegistryTrustGuide({ installCommand }: { installCommand: string }) {
@@ -3912,16 +3725,6 @@ type K8sCapability = {
   tone: 'default' | 'success' | 'warning' | 'danger' | 'info' | 'accent';
   gap: boolean;
 };
-
-function clusterNodeEdgeAccess(cluster: KubernetesCluster | null) {
-  const coverage = cluster?.node_edge_coverage;
-  if (!coverage || coverage.total <= 0) return null;
-  return {
-    linked: coverage.edge_linked,
-    total: coverage.total,
-    pct: coverage.percent,
-  };
-}
 
 function isClusterAwaitingConnection(cluster: KubernetesCluster | null) {
   if (!cluster) return false;
@@ -4338,7 +4141,7 @@ function resourceAPIParams(filters: ResourceFilters, limit = RESOURCE_PAGE_SIZE)
   };
 }
 
-function filterNodes(items: KubernetesNode[], filters: ResourceFilters, cluster: KubernetesCluster | null) {
+function filterNodes(items: KubernetesNode[], filters: ResourceFilters) {
   const query = normalizeFilterQuery(filters.query);
   return items.filter((item) => {
     if (filters.issueOnly && !nodeHasIssue(item)) return false;
@@ -4481,18 +4284,24 @@ function collectNamespaces(
   return [...set].sort();
 }
 
-function buildIssueCounts(nodes: KubernetesNode[], pods: KubernetesPod[], crashLoopTotal: number): K8sIssueCounts {
-  const pending = pods.filter((pod) => pod.phase === 'Pending').length;
-  const oomKilled = pods.filter((pod) => pod.reason === 'OOMKilled').length;
-  const imagePullBackOff = pods.filter((pod) => pod.reason === 'ImagePullBackOff' || pod.reason === 'ErrImagePull').length;
-  const notReady = nodes.filter((node) => isNodeNotReady(node)).length;
+function buildIssueCounts(
+  nodes: KubernetesNode[],
+  pods: KubernetesPod[],
+  crashLoopTotal: number,
+  health: KubernetesClusterHealth | null,
+): K8sIssueCounts {
+  const pending = health?.pending_pods ?? pods.filter((pod) => pod.phase === 'Pending').length;
+  const oomKilled = health?.oom_killed_pods ?? pods.filter((pod) => pod.reason === 'OOMKilled').length;
+  const imagePullBackOff = health?.image_pull_back_off_pods ?? pods.filter((pod) => pod.reason === 'ImagePullBackOff' || pod.reason === 'ErrImagePull').length;
+  const notReady = health?.not_ready_nodes ?? nodes.filter((node) => isNodeNotReady(node)).length;
+  const crashLoopBackOff = health?.crash_loop_back_off_pods ?? crashLoopTotal;
   return {
-    crashLoopBackOff: crashLoopTotal,
+    crashLoopBackOff,
     pending,
     notReady,
     oomKilled,
     imagePullBackOff,
-    total: crashLoopTotal + pending + notReady + oomKilled + imagePullBackOff,
+    total: crashLoopBackOff + pending + notReady + oomKilled + imagePullBackOff,
   };
 }
 

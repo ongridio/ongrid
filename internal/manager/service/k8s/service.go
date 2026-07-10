@@ -19,6 +19,8 @@ type EnrollInput = biz.EnrollInput
 type EnrollResult = biz.EnrollResult
 type InventoryResult = biz.InventoryResult
 type NodeCoverage = biz.NodeCoverage
+type ClusterHealthSummary = biz.ClusterHealthSummary
+type EdgeAttachment = biz.EdgeAttachment
 
 // Service is the manager/k8s service-layer shim over biz.Usecase.
 type Service struct {
@@ -53,6 +55,22 @@ func (s *Service) CountNodes(ctx context.Context, clusterID uint64) (int64, erro
 
 func (s *Service) GetNodeCoverage(ctx context.Context, clusterID uint64) (NodeCoverage, error) {
 	return s.uc.GetNodeCoverage(ctx, clusterID)
+}
+
+func (s *Service) GetNodeCoverageByClusterIDs(ctx context.Context, clusterIDs []uint64) (map[uint64]NodeCoverage, error) {
+	return s.uc.GetNodeCoverageByClusterIDs(ctx, clusterIDs)
+}
+
+func (s *Service) UpgradeCommand(cluster *model.Cluster) string {
+	return s.uc.UpgradeCommand(cluster)
+}
+
+func (s *Service) ListEdgeAttachments(ctx context.Context, limit, offset int) ([]EdgeAttachment, int64, error) {
+	return s.uc.ListEdgeAttachments(ctx, limit, offset)
+}
+
+func (s *Service) GetClusterHealth(ctx context.Context, clusterID uint64) (ClusterHealthSummary, error) {
+	return s.uc.GetClusterHealth(ctx, clusterID)
 }
 
 func (s *Service) ListWorkloads(ctx context.Context, f ListWorkloadsFilter) ([]*model.Workload, error) {
@@ -97,6 +115,10 @@ func (s *Service) HandleRegister(ctx context.Context, edgeID uint64, deviceID *u
 
 func (s *Service) LookupControllerCluster(ctx context.Context, edgeID uint64) (uint64, error) {
 	return s.uc.LookupControllerCluster(ctx, edgeID)
+}
+
+func (s *Service) ManagedClusterIDForEdge(ctx context.Context, edgeID uint64) (uint64, bool, error) {
+	return s.uc.ManagedClusterIDForEdge(ctx, edgeID)
 }
 
 func (s *Service) IngestInventory(ctx context.Context, edgeID uint64, in tunnel.KubernetesInventoryRequest) (int, int, int, int, error) {

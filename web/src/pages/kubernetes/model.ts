@@ -41,61 +41,8 @@ function shellSingleQuote(value: string) {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
-function isLocalInstallHostname(hostname: string) {
-  const host = hostname.trim().toLowerCase().replace(/^\[|\]$/g, '');
-  return host === 'localhost' || host === '::1' || host === '0.0.0.0' || host === '127.0.0.1' || host.startsWith('127.');
-}
-
-function currentManagerInstallEndpoints() {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-  const host = window.location.host || '<manager>';
-  const hostname = window.location.hostname || host.split(':')[0] || '<manager>';
-  if (!hostname || isLocalInstallHostname(hostname)) {
-    return null;
-  }
-  const origin = window.location.origin || `https://${host}`;
-  return { publicURL: origin, tunnelAddr: `${hostname}:40012` };
-}
-
-function managerInstallEndpointsOrPlaceholders() {
-  return currentManagerInstallEndpoints() ?? {
-    publicURL: 'https://<manager>',
-    tunnelAddr: '<manager>:40012',
-  };
-}
-
-export function localizeKubernetesInstallCommand(command: string) {
-  const endpoints = currentManagerInstallEndpoints();
-  if (!endpoints) return command;
-  const { publicURL, tunnelAddr } = endpoints;
-  return command
-    .replace(/'https:\/\/<manager>'/g, shellSingleQuote(publicURL))
-    .replace(/'<manager>:40012'/g, shellSingleQuote(tunnelAddr))
-    .replace(/https:\/\/<manager>/g, publicURL)
-    .replace(/<manager>:40012/g, tunnelAddr);
-}
-
 export function kubernetesUpgradeCommand(cluster: KubernetesCluster) {
-  const namespace = cluster.controller_namespace?.trim() || K8S_EDGE_NAMESPACE;
-  const { publicURL, tunnelAddr } = managerInstallEndpointsOrPlaceholders();
-  const chartRef = `${publicURL.replace(/\/$/, '')}/edge/k8s/ongrid-edge.tgz`;
-  const args = [
-    `helm upgrade ${K8S_EDGE_RELEASE_NAME}`,
-    shellSingleQuote(chartRef),
-  ];
-  if (chartRef.toLowerCase().startsWith('https://')) {
-    args.push('--insecure-skip-tls-verify');
-  }
-  args.push(
-    `--namespace ${shellSingleQuote(namespace)}`,
-    '--reuse-values',
-    `--set-string manager.publicURL=${shellSingleQuote(publicURL)}`,
-    `--set-string manager.tunnelAddr=${shellSingleQuote(tunnelAddr)}`,
-    '--set-string manager.tlsInsecure=true',
-  );
-  return args.join(' ');
+	return cluster.upgrade_command?.trim() || '';
 }
 
 export function kubernetesUninstallCommand(cluster: KubernetesCluster) {

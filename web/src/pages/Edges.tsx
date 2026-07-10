@@ -71,9 +71,9 @@ export default function EdgesPage() {
   })();
 
   const [edges, setEdges] = useState<Edge[]>([]);
-  const [k8sAttachments, setK8sAttachments] = useState<K8sEdgeAttachmentMap>({});
+  const [k8sAttachments, setK8sAttachments] = useState<K8sEdgeAttachmentMap | null>(null);
   const visibleEdges = useMemo(
-    () => filterVisibleDeviceEdges(edges, k8sAttachments),
+    () => k8sAttachments ? filterVisibleDeviceEdges(edges, k8sAttachments) : [],
     [edges, k8sAttachments],
   );
   const [loading, setLoading] = useState(true);
@@ -140,15 +140,16 @@ export default function EdgesPage() {
     } finally {
       setLoading(false);
     }
-  }, [rolesFilter]);
+  }, [rolesFilter, tr]);
 
   const refreshK8sAttachments = useCallback(async () => {
     try {
       setK8sAttachments(await loadK8sEdgeAttachments());
-    } catch {
-      setK8sAttachments({});
+    } catch (err) {
+      setK8sAttachments(null);
+      setError((err as Error).message || tr('无法确认 Kubernetes 托管状态，设备操作已暂时禁用', 'Unable to verify Kubernetes ownership; device operations are temporarily disabled'));
     }
-  }, []);
+  }, [tr]);
 
   useEffect(() => {
     void refresh();
@@ -231,7 +232,7 @@ export default function EdgesPage() {
   }
 
   const selectableVisibleEdges = useMemo(
-    () => visibleEdges.filter((edge) => !isK8sManagedEdge(k8sAttachments[edge.id] ?? [])),
+    () => k8sAttachments ? visibleEdges.filter((edge) => !isK8sManagedEdge(k8sAttachments[edge.id] ?? [])) : [],
     [k8sAttachments, visibleEdges],
   );
   const visibleSelectableEdgeIds = useMemo(
@@ -463,7 +464,7 @@ export default function EdgesPage() {
                   </tr>
                 ) : (
                   visibleEdges.map((e) => {
-                    const attachments = k8sAttachments[e.id] ?? [];
+                    const attachments = k8sAttachments?.[e.id] ?? [];
                     const managedByK8s = isK8sManagedEdge(attachments);
                     const managedCluster = uniqueAttachmentClusters(attachments)[0];
                     const displayName = displayEdgeName(e, attachments);
@@ -1372,7 +1373,7 @@ function RowMenu({
       </>,
       document.body,
     );
-  }, [onDelete, onRotate, open, position]);
+  }, [onDelete, onRotate, onUpgrade, onUpgradePackage, open, position, tr, upgradePackageBusy]);
 
   return (
     <div className="relative inline-block">

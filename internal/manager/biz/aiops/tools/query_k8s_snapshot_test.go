@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -168,6 +169,53 @@ func TestQueryK8sSnapshotSummaryReturnsTotals(t *testing.T) {
 	}
 	if got.Totals.Nodes != 1 || got.Totals.Workloads != 2 || got.Totals.Pods != 3 || got.Totals.Events != 1 {
 		t.Fatalf("unexpected totals: %+v", got.Totals)
+	}
+}
+
+func TestQueryK8sSnapshotSummaryAppliesPodReason(t *testing.T) {
+	reader := newFakeK8sSnapshotReader()
+	now := time.Now().UTC()
+	reader.pods = append(reader.pods, &k8smodel.Pod{ClusterID: 1, Namespace: "default", Name: "crash", UID: "crash", Reason: "CrashLoopBackOff", LastSeenAt: &now})
+	tool := NewQueryK8sSnapshotTool(reader, slog.Default())
+	out, err := tool.InvokableRun(context.Background(), `{"resource":"summary","reason":"CrashLoopBackOff"}`)
+	if err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+	var got struct {
+		Totals struct {
+			Pods int64 `json:"pods"`
+		} `json:"totals"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("decode output: %v", err)
+	}
+	if got.Totals.Pods != 1 {
+		t.Fatalf("pods=%d want 1", got.Totals.Pods)
+	}
+}
+
+func TestQueryK8sSnapshotPaginatesAllClusters(t *testing.T) {
+	reader := newFakeK8sSnapshotReader()
+	reader.clusters = make([]*k8smodel.Cluster, 205)
+	now := time.Now().UTC()
+	for i := range reader.clusters {
+		reader.clusters[i] = &k8smodel.Cluster{ID: uint64(i + 1), Name: fmt.Sprintf("cluster-%03d", i+1), Mode: k8smodel.ModeFullNode, Status: k8smodel.ClusterStatusOnline, LastSeenAt: &now}
+	}
+	tool := NewQueryK8sSnapshotTool(reader, slog.Default())
+	out, err := tool.InvokableRun(context.Background(), `{"resource":"clusters","offset":200,"limit":5}`)
+	if err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+	var got struct {
+		Total     int64                   `json:"total"`
+		Clusters  []k8sClusterSnapshotRow `json:"clusters"`
+		Truncated bool                    `json:"truncated"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("decode output: %v", err)
+	}
+	if got.Total != 205 || len(got.Clusters) != 5 || got.Clusters[0].Name != "cluster-201" || !got.Truncated {
+		t.Fatalf("unexpected paginated clusters: %+v", got)
 	}
 }
 

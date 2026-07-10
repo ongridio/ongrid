@@ -27,6 +27,7 @@ type Cluster struct {
 	Status string  `gorm:"size:16;not null;default:'offline';column:status;index:idx_k8s_clusters_status_seen,priority:1"`
 
 	BootstrapTokenHash            string     `gorm:"size:512;not null;column:bootstrap_token_hash"`
+	NodeBootstrapTokenHash        string     `gorm:"size:512;not null;default:'';column:node_bootstrap_token_hash"`
 	BootstrapTokenExpiresAt       *time.Time `gorm:"column:bootstrap_token_expires_at"`
 	ControllerEdgeID              *uint64    `gorm:"column:controller_edge_id;index"`
 	ControllerNodeName            string     `gorm:"size:255;not null;default:'';column:controller_node_name"`

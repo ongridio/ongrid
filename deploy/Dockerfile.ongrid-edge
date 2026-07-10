@@ -46,9 +46,11 @@ RUN apk add --no-cache ca-certificates curl unzip \
         *) echo "unsupported promtail arch: $arch" >&2; exit 1 ;; \
     esac; \
     mkdir -p /out; \
-    curl -fL --retry 3 --retry-all-errors --retry-delay 3 --connect-timeout 15 \
-        -o /tmp/promtail.zip \
-        "https://github.com/grafana/loki/releases/download/v${PROMTAIL_VERSION}/promtail-linux-${arch}.zip"; \
+    asset="promtail-linux-${arch}.zip"; \
+    base="https://github.com/grafana/loki/releases/download/v${PROMTAIL_VERSION}"; \
+    curl -fL --retry 3 --retry-all-errors --retry-delay 3 --connect-timeout 15 -o /tmp/promtail.zip "${base}/${asset}"; \
+    curl -fL --retry 3 --retry-all-errors --retry-delay 3 --connect-timeout 15 -o /tmp/SHA256SUMS "${base}/SHA256SUMS"; \
+    grep "  ${asset}$" /tmp/SHA256SUMS | sed "s#  ${asset}$#  /tmp/promtail.zip#" | sha256sum -c -; \
     unzip -p /tmp/promtail.zip > /out/promtail; \
     chmod 0755 /out/promtail; \
     rm -f /tmp/promtail.zip
@@ -68,9 +70,11 @@ RUN apk add --no-cache ca-certificates curl tar \
         *) echo "unsupported node_exporter arch: $arch" >&2; exit 1 ;; \
     esac; \
     mkdir -p /out; \
-    curl -fL --retry 3 --retry-all-errors --retry-delay 3 --connect-timeout 15 \
-        -o /tmp/node_exporter.tgz \
-        "https://github.com/prometheus/node_exporter/releases/download/v${NODE_EXPORTER_VERSION}/node_exporter-${NODE_EXPORTER_VERSION}.linux-${arch}.tar.gz"; \
+    asset="node_exporter-${NODE_EXPORTER_VERSION}.linux-${arch}.tar.gz"; \
+    base="https://github.com/prometheus/node_exporter/releases/download/v${NODE_EXPORTER_VERSION}"; \
+    curl -fL --retry 3 --retry-all-errors --retry-delay 3 --connect-timeout 15 -o /tmp/node_exporter.tgz "${base}/${asset}"; \
+    curl -fL --retry 3 --retry-all-errors --retry-delay 3 --connect-timeout 15 -o /tmp/sha256sums.txt "${base}/sha256sums.txt"; \
+    grep "  ${asset}$" /tmp/sha256sums.txt | sed "s#  ${asset}$#  /tmp/node_exporter.tgz#" | sha256sum -c -; \
     tar -xzf /tmp/node_exporter.tgz --strip-components=1 -C /out \
         "node_exporter-${NODE_EXPORTER_VERSION}.linux-${arch}/node_exporter"; \
     chmod 0755 /out/node_exporter; \
@@ -91,9 +95,11 @@ RUN apk add --no-cache ca-certificates curl tar \
         *) echo "unsupported process_exporter arch: $arch" >&2; exit 1 ;; \
     esac; \
     mkdir -p /out; \
-    curl -fL --retry 3 --retry-all-errors --retry-delay 3 --connect-timeout 15 \
-        -o /tmp/process_exporter.tgz \
-        "https://github.com/ncabatoff/process-exporter/releases/download/v${PROCESS_EXPORTER_VERSION}/process-exporter-${PROCESS_EXPORTER_VERSION}.linux-${arch}.tar.gz"; \
+    asset="process-exporter-${PROCESS_EXPORTER_VERSION}.linux-${arch}.tar.gz"; \
+    base="https://github.com/ncabatoff/process-exporter/releases/download/v${PROCESS_EXPORTER_VERSION}"; \
+    curl -fL --retry 3 --retry-all-errors --retry-delay 3 --connect-timeout 15 -o /tmp/process_exporter.tgz "${base}/${asset}"; \
+    curl -fL --retry 3 --retry-all-errors --retry-delay 3 --connect-timeout 15 -o /tmp/checksums.txt "${base}/checksums.txt"; \
+    grep "  ${asset}$" /tmp/checksums.txt | sed "s#  ${asset}$#  /tmp/process_exporter.tgz#" | sha256sum -c -; \
     tar -xzf /tmp/process_exporter.tgz --strip-components=1 -C /out \
         "process-exporter-${PROCESS_EXPORTER_VERSION}.linux-${arch}/process-exporter"; \
     mv /out/process-exporter /out/process_exporter; \
@@ -115,9 +121,11 @@ RUN apk add --no-cache ca-certificates curl tar \
         *) echo "unsupported otelcol-contrib arch: $arch" >&2; exit 1 ;; \
     esac; \
     mkdir -p /out; \
-    curl -fL --retry 3 --retry-all-errors --retry-delay 3 --connect-timeout 15 \
-        -o /tmp/otelcol-contrib.tgz \
-        "https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v${OTELCOL_VERSION}/otelcol-contrib_${OTELCOL_VERSION}_linux_${arch}.tar.gz"; \
+    asset="otelcol-contrib_${OTELCOL_VERSION}_linux_${arch}.tar.gz"; \
+    base="https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v${OTELCOL_VERSION}"; \
+    curl -fL --retry 3 --retry-all-errors --retry-delay 3 --connect-timeout 15 -o /tmp/otelcol-contrib.tgz "${base}/${asset}"; \
+    curl -fL --retry 3 --retry-all-errors --retry-delay 3 --connect-timeout 15 -o /tmp/checksums.txt "${base}/opentelemetry-collector-releases_otelcol-contrib_checksums.txt"; \
+    grep "  ${asset}$" /tmp/checksums.txt | sed "s#  ${asset}$#  /tmp/otelcol-contrib.tgz#" | sha256sum -c -; \
     tar -xzf /tmp/otelcol-contrib.tgz -C /out otelcol-contrib; \
     chmod 0755 /out/otelcol-contrib; \
     rm -f /tmp/otelcol-contrib.tgz

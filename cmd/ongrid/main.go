@@ -779,6 +779,7 @@ func main() {
 		EventCleanupInterval: cfg.K8sEventCleanupInterval,
 	})
 	k8sSvc := managersvck8s.New(k8sUC)
+	edgeSvc.SetManagedEdgeGuard(k8sSvc)
 	k8sHandler := managerserverk8s.NewHandler(k8sSvc)
 
 	// Plugin runtime config storage. UC notifier
@@ -2395,6 +2396,7 @@ func main() {
 	// auditRetentionDays once a day at 03:00. Disabled when retention=0.
 	eg.Go(func() error { return auditUC.RunRetention(egCtx, auditRetentionDays) })
 	eg.Go(func() error { return runK8sEventRetention(egCtx, k8sUC, log) })
+	eg.Go(func() error { return runK8sTopologyReconcile(egCtx, k8sUC, log) })
 
 	// ADR-026: chatruntime worker session sampler — surfaces orphan
 	// worker accumulation as a gauge. The 161-orphan incident (v0.7.44)
@@ -2566,7 +2568,7 @@ func (i k8sEdgeIdentityIssuer) RotateEdgeSecret(ctx context.Context, edgeID uint
 	if err != nil {
 		return nil, err
 	}
-	secret, err := i.svc.RotateSecret(ctx, edgeID)
+	secret, err := i.svc.RotateManagedSecret(ctx, edgeID)
 	if err != nil {
 		return nil, err
 	}
@@ -2581,7 +2583,7 @@ func (i k8sEdgeIdentityIssuer) DeleteEdge(ctx context.Context, edgeID uint64) er
 	if i.svc == nil {
 		return errs.ErrNotWiredYet
 	}
-	return i.svc.Delete(ctx, edgeID)
+	return i.svc.DeleteManaged(ctx, edgeID)
 }
 
 // pluginEndpointResolver implements edgebiz.EndpointResolver: maps a
@@ -4844,6 +4846,24 @@ func runK8sEventRetention(ctx context.Context, uc *managerbizk8s.Usecase, log *s
 			return nil
 		case <-ticker.C:
 			run()
+		}
+	}
+}
+
+func runK8sTopologyReconcile(ctx context.Context, uc *managerbizk8s.Usecase, log *slog.Logger) error {
+	if uc == nil {
+		return nil
+	}
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			if err := uc.ReconcileTopology(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				log.Warn("k8s topology reconcile failed", slog.Any("err", err))
+			}
 		}
 	}
 }

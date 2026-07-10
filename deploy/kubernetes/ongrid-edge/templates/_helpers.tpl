@@ -35,8 +35,12 @@ ongrid.io/cluster-id: {{ .Values.enrollment.clusterID | quote }}
 {{- printf "%s-telemetry-gateway" (include "ongrid-edge.fullname" .) -}}
 {{- end -}}
 
-{{- define "ongrid-edge.credentialSecretName" -}}
-{{- printf "%s-credentials" (include "ongrid-edge.fullname" .) -}}
+{{- define "ongrid-edge.controllerCredentialSecretName" -}}
+{{- printf "%s-controller-credentials" (include "ongrid-edge.fullname" .) -}}
+{{- end -}}
+
+{{- define "ongrid-edge.nodeCredentialSecretName" -}}
+{{- printf "%s-node-credentials" (include "ongrid-edge.fullname" .) -}}
 {{- end -}}
 
 {{- define "ongrid-edge.telemetryGatewayEnabled" -}}

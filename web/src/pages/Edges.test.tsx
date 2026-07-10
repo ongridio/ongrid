@@ -57,41 +57,14 @@ describe('EdgesPage', () => {
           total: 3,
         }),
       ),
-      http.get('/api/v1/k8s/clusters', () =>
+      http.get('/api/v1/k8s/edge-attachments', () =>
         HttpResponse.json({
-          items: [{
-            id: 1,
-            name: 'kind-local',
-            uid: 'kind-uid',
-            mode: 'full-node',
-            status: 'online',
-            controller_edge_id: 3,
-            controller_node_name: 'ongrid-k8s-control-plane',
-            controller_namespace: 'ongrid-system',
-            controller_pod_name: 'ongrid-edge-controller-abc',
-            bootstrap_token_expires_at: '2026-06-30T10:00:00Z',
-            created_at: '2026-06-29T09:00:00Z',
-            updated_at: '2026-06-29T10:00:00Z',
-          }],
-          total: 1,
-          limit: 100,
-          offset: 0,
-        }),
-      ),
-      http.get('/api/v1/k8s/clusters/:id/nodes', () =>
-        HttpResponse.json({
-          items: [{
-            id: 11,
-            cluster_id: 1,
-            node_name: 'ongrid-k8s-control-plane',
-            node_uid: 'node-uid',
-            edge_id: 5,
-            device_id: 17,
-            capacity: { cpu: '8', memory: '16Gi' },
-            kubelet_version: 'v1.30.0',
-            last_seen_at: '2026-06-29T10:00:00Z',
-          }],
-          total: 1,
+          items: [
+            { edge_id: 3, cluster_id: 1, cluster_name: 'kind-local', cluster_mode: 'full-node', node_name: 'ongrid-k8s-control-plane', kind: 'k8s-controller' },
+            { edge_id: 5, cluster_id: 1, cluster_name: 'kind-local', cluster_mode: 'full-node', node_name: 'ongrid-k8s-control-plane', kind: 'k8s-node' },
+            { edge_id: 5, cluster_id: 1, cluster_name: 'kind-local', cluster_mode: 'full-node', node_name: 'ongrid-k8s-control-plane', kind: 'k8s-controller-runtime' },
+          ],
+          total: 3,
         }),
       ),
     );
