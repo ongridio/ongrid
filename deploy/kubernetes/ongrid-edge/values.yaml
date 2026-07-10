@@ -46,6 +46,8 @@ controller:
   serviceAccountName: ""
   inventory:
     watch: true
+    # Periodic full reconciliation complements watch deltas and repairs drift.
+    fullSyncInterval: 10m
   metrics:
     enabled: false
     endpoint: ""
@@ -95,4 +97,5 @@ podSecurity:
   runAsUser: 65532
   runAsGroup: 65532
   fsGroup: 65532
+  # Configure explicitly only when host files require additional group access.
   supplementalGroups: []

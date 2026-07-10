@@ -39,7 +39,7 @@ type Repository interface {
 	GetClusterByControllerEdge(ctx context.Context, edgeID uint64) (*model.Cluster, error)
 	ListClusters(ctx context.Context, f ListClustersFilter) ([]*model.Cluster, error)
 	CountClusters(ctx context.Context, f ListClustersFilter) (int64, error)
-	UpdateClusterTokens(ctx context.Context, id uint64, controllerTokenHash, nodeTokenHash string, expiresAt *time.Time) error
+	UpdateClusterTokens(ctx context.Context, id uint64, controllerTokenHash, nodeTokenHash string, controllerExpiresAt, nodeExpiresAt *time.Time) error
 	ClearControllerBootstrapToken(ctx context.Context, id uint64) error
 	UpdateClusterController(ctx context.Context, id uint64, in ClusterControllerRegistration) error
 	BindControllerEnrollment(ctx context.Context, id uint64, registration ClusterControllerRegistration, installation *model.Installation) error
@@ -71,6 +71,8 @@ type Repository interface {
 	DeleteEventsBefore(ctx context.Context, cutoff time.Time, limit int) (int64, error)
 	DeleteOldestEvents(ctx context.Context, clusterID uint64, keep, limit int) (int64, error)
 	ListNodes(ctx context.Context, clusterID uint64) ([]*model.Node, error)
+	ListNodesPage(ctx context.Context, f ListNodesFilter) ([]*model.Node, error)
+	CountNodesPage(ctx context.Context, f ListNodesFilter) (int64, error)
 	ListTopologyNodeLinks(ctx context.Context, clusterID uint64) ([]TopologyNodeLink, error)
 	CountNodes(ctx context.Context, clusterID uint64) (int64, error)
 	GetNodeCoverage(ctx context.Context, clusterID uint64) (NodeCoverage, error)
@@ -310,6 +312,14 @@ type DeleteClusterInput struct {
 	Force bool
 }
 
+type ListNodesFilter struct {
+	ClusterID uint64
+	Query     string
+	IssueOnly bool
+	Limit     int
+	Offset    int
+}
+
 type ListWorkloadsFilter struct {
 	ClusterID uint64
 	Namespace string
@@ -419,11 +429,11 @@ func (u *Usecase) CreateCluster(ctx context.Context, in CreateClusterInput) (*Cl
 	if err != nil {
 		return nil, err
 	}
-	controllerToken, controllerHash, expiresAt, err := newBootstrapToken(u.cfg.BootstrapTokenTTL)
+	controllerToken, controllerHash, controllerExpiresAt, err := newBootstrapToken(u.cfg.BootstrapTokenTTL)
 	if err != nil {
 		return nil, err
 	}
-	nodeToken, nodeHash, _, err := newBootstrapToken(u.cfg.BootstrapTokenTTL)
+	nodeToken, nodeHash, nodeExpiresAt, err := newBootstrapToken(u.cfg.BootstrapTokenTTL)
 	if err != nil {
 		return nil, err
 	}
@@ -432,14 +442,15 @@ func (u *Usecase) CreateCluster(ctx context.Context, in CreateClusterInput) (*Cl
 		uid = &s
 	}
 	c := &model.Cluster{
-		Name:                    name,
-		UID:                     uid,
-		Mode:                    mode,
-		Status:                  model.ClusterStatusOffline,
-		BootstrapTokenHash:      controllerHash,
-		NodeBootstrapTokenHash:  nodeHash,
-		BootstrapTokenExpiresAt: expiresAt,
-		CreatedBy:               in.CreatedBy,
+		Name:                        name,
+		UID:                         uid,
+		Mode:                        mode,
+		Status:                      model.ClusterStatusOffline,
+		BootstrapTokenHash:          controllerHash,
+		NodeBootstrapTokenHash:      nodeHash,
+		BootstrapTokenExpiresAt:     controllerExpiresAt,
+		NodeBootstrapTokenExpiresAt: nodeExpiresAt,
+		CreatedBy:                   in.CreatedBy,
 	}
 	if err := u.repo.CreateCluster(ctx, c); err != nil {
 		return nil, fmt.Errorf("create k8s cluster: %w", err)
@@ -496,6 +507,56 @@ func (u *Usecase) ListNodes(ctx context.Context, clusterID uint64) ([]*model.Nod
 		return nil, err
 	}
 	return u.repo.ListNodes(ctx, clusterID)
+}
+
+func (u *Usecase) ListNodesPage(ctx context.Context, f ListNodesFilter) ([]*model.Node, int64, error) {
+	if u.repo == nil {
+		return nil, 0, errs.ErrNotWiredYet
+	}
+	if f.ClusterID == 0 {
+		return nil, 0, errors.Join(errs.ErrInvalid, fmt.Errorf("cluster_id is required"))
+	}
+	if f.Limit <= 0 || f.Limit > 500 {
+		f.Limit = 100
+	}
+	if f.Offset < 0 {
+		f.Offset = 0
+	}
+	if _, err := u.repo.GetCluster(ctx, f.ClusterID); err != nil {
+		return nil, 0, err
+	}
+	if !f.IssueOnly {
+		items, err := u.repo.ListNodesPage(ctx, f)
+		if err != nil {
+			return nil, 0, err
+		}
+		total, err := u.repo.CountNodesPage(ctx, f)
+		return items, total, err
+	}
+
+	query := f
+	query.IssueOnly = false
+	query.Limit = 0
+	query.Offset = 0
+	items, err := u.repo.ListNodesPage(ctx, query)
+	if err != nil {
+		return nil, 0, err
+	}
+	issues := make([]*model.Node, 0, len(items))
+	for _, item := range items {
+		if item != nil && (item.EdgeID == nil || nodeHasIssue(item.ConditionsJSON)) {
+			issues = append(issues, item)
+		}
+	}
+	total := int64(len(issues))
+	if f.Offset >= len(issues) {
+		return []*model.Node{}, total, nil
+	}
+	end := len(issues)
+	if f.Offset+f.Limit < end {
+		end = f.Offset + f.Limit
+	}
+	return issues[f.Offset:end], total, nil
 }
 
 func (u *Usecase) CountNodes(ctx context.Context, clusterID uint64) (int64, error) {
@@ -622,6 +683,9 @@ func (u *Usecase) ListEvents(ctx context.Context, f ListEventsFilter) ([]*model.
 	if _, err := u.repo.GetCluster(ctx, f.ClusterID); err != nil {
 		return nil, err
 	}
+	if f.IssueOnly {
+		return u.listActionableWarningEvents(ctx, f)
+	}
 	return u.repo.ListEvents(ctx, f)
 }
 
@@ -635,7 +699,116 @@ func (u *Usecase) CountEvents(ctx context.Context, f ListEventsFilter) (int64, e
 	if _, err := u.repo.GetCluster(ctx, f.ClusterID); err != nil {
 		return 0, err
 	}
+	if f.IssueOnly {
+		f.Limit = 0
+		f.Offset = 0
+		items, err := u.listActionableWarningEvents(ctx, f)
+		return int64(len(items)), err
+	}
 	return u.repo.CountEvents(ctx, f)
+}
+
+func (u *Usecase) listActionableWarningEvents(ctx context.Context, f ListEventsFilter) ([]*model.Event, error) {
+	query := f
+	query.Type = "Warning"
+	query.IssueOnly = false
+	query.Limit = 0
+	query.Offset = 0
+	events, err := u.repo.ListEvents(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	pods, err := u.repo.ListPods(ctx, ListPodsFilter{ClusterID: f.ClusterID, IssueOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	workloads, err := u.repo.ListWorkloads(ctx, ListWorkloadsFilter{ClusterID: f.ClusterID, IssueOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	nodes, err := u.repo.ListNodes(ctx, f.ClusterID)
+	if err != nil {
+		return nil, err
+	}
+
+	podsByUID := make(map[string]struct{}, len(pods))
+	podsByName := make(map[string]struct{}, len(pods))
+	for _, pod := range pods {
+		if pod == nil {
+			continue
+		}
+		if pod.UID != "" {
+			podsByUID[pod.UID] = struct{}{}
+		}
+		podsByName[namespacedResourceKey(pod.Namespace, pod.Name)] = struct{}{}
+	}
+	workloadKeys := make(map[string]struct{}, len(workloads))
+	for _, workload := range workloads {
+		if workload != nil {
+			workloadKeys[workloadResourceKey(workload.Kind, workload.Namespace, workload.Name)] = struct{}{}
+		}
+	}
+	nodeIssues := make(map[string]struct{}, len(nodes))
+	for _, node := range nodes {
+		if node != nil && nodeHasIssue(node.ConditionsJSON) {
+			nodeIssues[node.NodeName] = struct{}{}
+		}
+	}
+
+	actionable := make([]*model.Event, 0, len(events))
+	for _, event := range events {
+		if event != nil && actionableWarningEvent(event, podsByUID, podsByName, workloadKeys, nodeIssues) {
+			actionable = append(actionable, event)
+		}
+	}
+	if f.Offset >= len(actionable) {
+		return []*model.Event{}, nil
+	}
+	end := len(actionable)
+	if f.Limit > 0 && f.Offset+f.Limit < end {
+		end = f.Offset + f.Limit
+	}
+	return actionable[f.Offset:end], nil
+}
+
+func actionableWarningEvent(
+	event *model.Event,
+	podsByUID, podsByName, workloadKeys, nodeIssues map[string]struct{},
+) bool {
+	kind := strings.ToLower(strings.TrimSpace(event.InvolvedKind))
+	switch kind {
+	case "pod":
+		if event.InvolvedUID != "" {
+			if _, ok := podsByUID[event.InvolvedUID]; ok {
+				return true
+			}
+		}
+		_, ok := podsByName[namespacedResourceKey(eventResourceNamespace(event), event.InvolvedName)]
+		return ok
+	case "node":
+		_, ok := nodeIssues[event.InvolvedName]
+		return ok
+	case "deployment", "statefulset", "daemonset", "job", "cronjob":
+		_, ok := workloadKeys[workloadResourceKey(kind, eventResourceNamespace(event), event.InvolvedName)]
+		return ok
+	default:
+		return true
+	}
+}
+
+func eventResourceNamespace(event *model.Event) string {
+	if event.InvolvedNamespace != "" {
+		return event.InvolvedNamespace
+	}
+	return event.Namespace
+}
+
+func namespacedResourceKey(namespace, name string) string {
+	return strings.TrimSpace(namespace) + "\x00" + strings.TrimSpace(name)
+}
+
+func workloadResourceKey(kind, namespace, name string) string {
+	return strings.ToLower(strings.TrimSpace(kind)) + "\x00" + namespacedResourceKey(namespace, name)
 }
 
 func (u *Usecase) GetClusterHealth(ctx context.Context, clusterID uint64) (ClusterHealthSummary, error) {
@@ -696,6 +869,29 @@ func nodeIsNotReady(raw string) bool {
 	return false
 }
 
+func nodeHasIssue(raw string) bool {
+	var conditions []struct {
+		Type   string `json:"type"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(raw), &conditions); err != nil {
+		return false
+	}
+	for _, condition := range conditions {
+		switch condition.Type {
+		case "Ready":
+			if condition.Status == "False" || condition.Status == "Unknown" {
+				return true
+			}
+		case "DiskPressure", "MemoryPressure":
+			if condition.Status == "True" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (u *Usecase) RotateBootstrapToken(ctx context.Context, id uint64) (*ClusterRegistration, error) {
 	if u.repo == nil {
 		return nil, errs.ErrNotWiredYet
@@ -704,20 +900,21 @@ func (u *Usecase) RotateBootstrapToken(ctx context.Context, id uint64) (*Cluster
 	if err != nil {
 		return nil, err
 	}
-	controllerToken, controllerHash, expiresAt, err := newBootstrapToken(u.cfg.BootstrapTokenTTL)
+	controllerToken, controllerHash, controllerExpiresAt, err := newBootstrapToken(u.cfg.BootstrapTokenTTL)
 	if err != nil {
 		return nil, err
 	}
-	nodeToken, nodeHash, _, err := newBootstrapToken(u.cfg.BootstrapTokenTTL)
+	nodeToken, nodeHash, nodeExpiresAt, err := newBootstrapToken(u.cfg.BootstrapTokenTTL)
 	if err != nil {
 		return nil, err
 	}
-	if err := u.repo.UpdateClusterTokens(ctx, id, controllerHash, nodeHash, expiresAt); err != nil {
+	if err := u.repo.UpdateClusterTokens(ctx, id, controllerHash, nodeHash, controllerExpiresAt, nodeExpiresAt); err != nil {
 		return nil, fmt.Errorf("rotate k8s bootstrap token: %w", err)
 	}
 	c.BootstrapTokenHash = controllerHash
 	c.NodeBootstrapTokenHash = nodeHash
-	c.BootstrapTokenExpiresAt = expiresAt
+	c.BootstrapTokenExpiresAt = controllerExpiresAt
+	c.NodeBootstrapTokenExpiresAt = nodeExpiresAt
 	return &ClusterRegistration{
 		Cluster:            c,
 		BootstrapToken:     controllerToken,
@@ -744,16 +941,18 @@ func (u *Usecase) DeleteCluster(ctx context.Context, in DeleteClusterInput) erro
 	if err != nil {
 		return fmt.Errorf("list k8s cluster edges: %w", err)
 	}
-	if u.topology != nil {
-		if err := u.topology.DeleteKubernetesCluster(ctx, c.ID, c.NodeID); err != nil {
-			return fmt.Errorf("delete k8s topology for cluster %d: %w", c.ID, err)
-		}
-	}
 	if err := u.deleteClusterEdges(ctx, edgeIDs); err != nil {
 		return err
 	}
 	if err := u.repo.DeleteCluster(ctx, in.ID); err != nil {
 		return fmt.Errorf("delete k8s cluster: %w", err)
+	}
+	if u.topology != nil {
+		if err := u.topology.DeleteKubernetesCluster(ctx, c.ID, c.NodeID); err != nil {
+			// The periodic topology reconciler prunes this orphan after the
+			// authoritative cluster row has been deleted.
+			return fmt.Errorf("delete k8s topology for cluster %d: %w", c.ID, err)
+		}
 	}
 	return nil
 }
@@ -1546,7 +1745,11 @@ func validBootstrapToken(token string, c *model.Cluster, role string) bool {
 	if token == "" || c == nil {
 		return false
 	}
-	if role == model.RoleController && c.BootstrapTokenExpiresAt != nil && time.Now().After(*c.BootstrapTokenExpiresAt) {
+	expiresAt := c.BootstrapTokenExpiresAt
+	if role == model.RoleNode {
+		expiresAt = c.NodeBootstrapTokenExpiresAt
+	}
+	if expiresAt != nil && time.Now().After(*expiresAt) {
 		return false
 	}
 	want := c.BootstrapTokenHash

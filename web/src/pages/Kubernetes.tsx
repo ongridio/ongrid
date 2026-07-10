@@ -246,7 +246,7 @@ export default function KubernetesPage() {
                         {relativeTime(clusterSyncTime(cluster))}
                       </td>
                       <td className="whitespace-nowrap px-4 py-2.5 text-zinc-400">
-                        {fullDateTime(cluster.bootstrap_token_expires_at)}
+                        {fullDateTime(cluster.node_bootstrap_token_expires_at ?? cluster.bootstrap_token_expires_at)}
                       </td>
                       <td className="px-4 py-2.5 text-right" onClick={(ev) => ev.stopPropagation()}>
                         <div className="inline-flex items-center justify-end gap-1">
@@ -380,18 +380,20 @@ export function KubernetesClusterDetailPage() {
             return null;
           })
         : Promise.resolve(null);
-      const edgeVersionsPromise = listEdges()
-        .then((out) => buildEdgeVersionMap(out.items ?? []))
-        .catch(() => ({}));
+      const edgeVersionsPromise = opts?.silent
+        ? Promise.resolve(null)
+        : listEdges()
+          .then((out) => buildEdgeVersionMap(out.items ?? []))
+          .catch(() => ({}));
       const [clusterOut, healthOut, nodesOut, workloadsOut, podsOut, crashLoopPodsOut, eventsOut, warningEventsOut, auditOut, edgeVersionMap] = await Promise.all([
         getKubernetesCluster(clusterId),
         getKubernetesClusterHealth(clusterId),
-        listKubernetesNodes(clusterId),
+        listKubernetesNodes(clusterId, { limit: RESOURCE_PAGE_SIZE }),
         listKubernetesWorkloads(clusterId, { limit: RESOURCE_PAGE_SIZE }),
         listKubernetesPods(clusterId, { limit: RESOURCE_PAGE_SIZE }),
         listKubernetesPods(clusterId, { reason: 'CrashLoopBackOff', limit: 20 }),
         listKubernetesEvents(clusterId, { limit: RESOURCE_PAGE_SIZE }),
-        listKubernetesEvents(clusterId, { type: 'Warning', limit: 100 }),
+        listKubernetesEvents(clusterId, { issue_only: true, limit: 100 }),
         auditPromise,
         edgeVersionsPromise,
       ]);
@@ -402,16 +404,10 @@ export function KubernetesClusterDetailPage() {
       setPods(podsOut.items ?? []);
       setCrashLoopPods(crashLoopPodsOut.items ?? []);
       setEvents(eventsOut.items ?? []);
-      const warningItems = filterActionableWarningEvents({
-        events: (warningEventsOut.items ?? []).filter(isWarningK8sEvent),
-        nodes: nodesOut.items ?? [],
-        workloads: workloadsOut.items ?? [],
-        pods: podsOut.items ?? [],
-        crashLoopPods: crashLoopPodsOut.items ?? [],
-      });
+      const warningItems = (warningEventsOut.items ?? []).filter(isWarningK8sEvent);
       setWarningEvents(warningItems);
-      setWarningEventTotal(warningItems.length);
-      setEdgeVersionsByID(edgeVersionMap);
+      setWarningEventTotal(warningEventsOut.total ?? warningItems.length);
+      if (edgeVersionMap) setEdgeVersionsByID(edgeVersionMap);
       setTotals({
         nodes: nodesOut.total ?? (nodesOut.items?.length ?? 0),
         workloads: workloadsOut.total ?? (workloadsOut.items?.length ?? 0),
@@ -502,23 +498,29 @@ export function KubernetesClusterDetailPage() {
     let cancelled = false;
     const params = resourceAPIParams(resourceFilters, resourceLimit);
     setResourceFilterLoading(true);
-    const request = activeTab === 'workloads'
-      ? listKubernetesWorkloads(clusterId, params).then((out): ServerFilteredResources => ({
-          tab: 'workloads',
-          workloads: out.items ?? [],
-          workloadsTotal: out.total ?? (out.items?.length ?? 0),
+    const request = activeTab === 'nodes'
+      ? listKubernetesNodes(clusterId, params).then((out): ServerFilteredResources => ({
+          tab: 'nodes',
+          nodes: out.items ?? [],
+          nodesTotal: out.total ?? (out.items?.length ?? 0),
         }))
-      : activeTab === 'pods'
-        ? listKubernetesPods(clusterId, params).then((out): ServerFilteredResources => ({
-            tab: 'pods',
-            pods: out.items ?? [],
-            podsTotal: out.total ?? (out.items?.length ?? 0),
+      : activeTab === 'workloads'
+        ? listKubernetesWorkloads(clusterId, params).then((out): ServerFilteredResources => ({
+            tab: 'workloads',
+            workloads: out.items ?? [],
+            workloadsTotal: out.total ?? (out.items?.length ?? 0),
           }))
-        : listKubernetesEvents(clusterId, params).then((out): ServerFilteredResources => ({
-            tab: 'events',
-            events: out.items ?? [],
-            eventsTotal: out.total ?? (out.items?.length ?? 0),
-          }));
+        : activeTab === 'pods'
+          ? listKubernetesPods(clusterId, params).then((out): ServerFilteredResources => ({
+              tab: 'pods',
+              pods: out.items ?? [],
+              podsTotal: out.total ?? (out.items?.length ?? 0),
+            }))
+          : listKubernetesEvents(clusterId, params).then((out): ServerFilteredResources => ({
+              tab: 'events',
+              events: out.items ?? [],
+              eventsTotal: out.total ?? (out.items?.length ?? 0),
+            }));
     request
       .then((out) => {
         if (cancelled) return;
@@ -539,21 +541,24 @@ export function KubernetesClusterDetailPage() {
   }, [activeTab, activeTabSupportsServerFilter, clusterId, filterActive, resourceFilters, resourceFilterRetryNonce, resourceLimit]);
 
   const visibleNodes = nodes;
-  const filteredNodes = useMemo(() => filterNodes(visibleNodes, localResourceFilters), [localResourceFilters, visibleNodes]);
+  const locallyFilteredNodes = useMemo(() => filterNodes(visibleNodes, localResourceFilters), [localResourceFilters, visibleNodes]);
   const locallyFilteredWorkloads = useMemo(() => filterWorkloads(workloads, localResourceFilters), [localResourceFilters, workloads]);
   const locallyFilteredPods = useMemo(() => filterPods(pods, localResourceFilters), [pods, localResourceFilters]);
   const locallyFilteredEvents = useMemo(() => filterEvents(events, localResourceFilters), [events, localResourceFilters]);
   const serverResourceActive = Boolean(activeTabSupportsServerFilter && serverFilteredResources?.tab === activeTab && (filterActive || resourceLimit > RESOURCE_PAGE_SIZE));
+  const filteredNodes = serverResourceActive && activeTab === 'nodes' && serverFilteredResources?.nodes ? serverFilteredResources.nodes : locallyFilteredNodes;
   const filteredWorkloads = serverResourceActive && activeTab === 'workloads' && serverFilteredResources?.workloads ? serverFilteredResources.workloads : locallyFilteredWorkloads;
   const filteredPods = serverResourceActive && activeTab === 'pods' && serverFilteredResources?.pods ? serverFilteredResources.pods : locallyFilteredPods;
   const filteredEvents = serverResourceActive && activeTab === 'events' && serverFilteredResources?.events ? serverFilteredResources.events : locallyFilteredEvents;
   const filteredResourceTotals = serverResourceActive
     ? {
+        nodes: activeTab === 'nodes' ? (serverFilteredResources?.nodesTotal ?? filteredNodes.length) : locallyFilteredNodes.length,
         workloads: activeTab === 'workloads' ? (serverFilteredResources?.workloadsTotal ?? filteredWorkloads.length) : locallyFilteredWorkloads.length,
         pods: activeTab === 'pods' ? (serverFilteredResources?.podsTotal ?? filteredPods.length) : locallyFilteredPods.length,
         events: activeTab === 'events' ? (serverFilteredResources?.eventsTotal ?? filteredEvents.length) : locallyFilteredEvents.length,
       }
     : {
+        nodes: locallyFilteredNodes.length,
         workloads: locallyFilteredWorkloads.length,
         pods: locallyFilteredPods.length,
         events: locallyFilteredEvents.length,
@@ -567,10 +572,10 @@ export function KubernetesClusterDetailPage() {
     [visibleNodes, pods, crashLoopTotal, healthSummary],
   );
   const edgeAccess = useMemo(() => {
-    if (visibleNodes.length <= 0) return null;
-    const linked = visibleNodes.filter((n) => n.edge_id != null).length;
-    return { linked, total: visibleNodes.length, pct: Math.round((linked / visibleNodes.length) * 100) };
-  }, [visibleNodes]);
+    const coverage = cluster?.node_edge_coverage;
+    if (!coverage || coverage.total <= 0) return null;
+    return { linked: coverage.edge_linked, total: coverage.total, pct: coverage.percent };
+  }, [cluster?.node_edge_coverage]);
   const triageIssues = useMemo(
     () => buildTriageIssues({ cluster, nodes: visibleNodes, workloads, pods, crashLoopPods, warningEvents, tr }),
     [cluster, crashLoopPods, pods, tr, visibleNodes, warningEvents, workloads],
@@ -854,7 +859,7 @@ export function KubernetesClusterDetailPage() {
                   actionTypes={actionTypeOptions}
                   filteredCount={detailTabLoadedCount(activeTab, filteredNodes, filteredWorkloads, filteredPods, filteredEvents, filteredNamespaceRows, filteredActionProposals)}
                   loadedCount={serverResourceActive ? detailTabLoadedCount(activeTab, filteredNodes, filteredWorkloads, filteredPods, filteredEvents, filteredNamespaceRows, filteredActionProposals) : detailTabLoadedCount(activeTab, visibleNodes, workloads, pods, events, namespaceRows, actionProposals)}
-                  totalCount={serverResourceActive || activeTabFilterActive ? detailTabFilteredTotal(activeTab, filteredNodes.length, filteredResourceTotals, filteredNamespaceRows.length, filteredActionProposals.length) : detailTabCount(activeTab, totals, namespaces.length, actionProposalTotal)}
+                  totalCount={serverResourceActive || activeTabFilterActive ? detailTabFilteredTotal(activeTab, filteredResourceTotals.nodes, filteredResourceTotals, filteredNamespaceRows.length, filteredActionProposals.length) : detailTabCount(activeTab, totals, namespaces.length, actionProposalTotal)}
                   loading={resourceSupportsServerFilter(activeTab) && (resourceFilterLoading || resourceQueryPending)}
                   onQueryChange={updateResourceQuery}
                   onNamespaceChange={updateResourceNamespace}
@@ -879,11 +884,13 @@ export function KubernetesClusterDetailPage() {
                   {activeTab === 'nodes' && (
                     <NodesTable
                       items={filteredNodes}
-                      loading={loading}
+                      loading={loading || resourceFilterLoading || resourceQueryPending}
+                      total={activeTabFilterActive ? filteredResourceTotals.nodes : totals.nodes}
                       filtered={activeTabFilterActive}
                       emptyHint={resourceFilterHint}
                       edgeVersionsByID={edgeVersionsByID}
                       onClearFilters={clearResourceFilters}
+                      onLoadMore={loadMoreResources}
                       actions={{
                         onOpenLogs: openResourceLogs,
                         onDescribe: (issue) => void startResourceChat(issue, 'describe'),
@@ -1086,7 +1093,7 @@ function ClusterSummary({
               </div>
               <div className="flex flex-wrap gap-1.5">
                 <Chip dense>{cluster?.mode || tr('接入模式未知', 'unknown mode')}</Chip>
-                <Chip dense>{tr(`Token 到期 ${relativeTime(cluster?.bootstrap_token_expires_at)}`, `token expires ${relativeTime(cluster?.bootstrap_token_expires_at)}`)}</Chip>
+                <Chip dense>{tr(`Node Token 到期 ${relativeTime(cluster?.node_bootstrap_token_expires_at ?? cluster?.bootstrap_token_expires_at)}`, `node token expires ${relativeTime(cluster?.node_bootstrap_token_expires_at ?? cluster?.bootstrap_token_expires_at)}`)}</Chip>
                 <Chip dense>{tr('可刷新状态', 'refreshable')}</Chip>
               </div>
             </div>
@@ -1166,7 +1173,7 @@ function K8sPendingConnectionPanel({ cluster }: { cluster: KubernetesCluster | n
         <div className="flex flex-wrap gap-1.5">
           <Chip tone="info">{tr('待接入', 'Pending')}</Chip>
           <Chip>{cluster?.mode || tr('未知模式', 'unknown mode')}</Chip>
-          <Chip>{tr(`Token ${relativeTime(cluster?.bootstrap_token_expires_at)} 到期`, `Token expires ${relativeTime(cluster?.bootstrap_token_expires_at)}`)}</Chip>
+          <Chip>{tr(`Node Token ${relativeTime(cluster?.node_bootstrap_token_expires_at ?? cluster?.bootstrap_token_expires_at)} 到期`, `Node token expires ${relativeTime(cluster?.node_bootstrap_token_expires_at ?? cluster?.bootstrap_token_expires_at)}`)}</Chip>
         </div>
       </div>
     </Card>
@@ -2470,6 +2477,8 @@ const ACTION_DECISION_FILTERS: ActionDecisionFilter[] = ['all', 'pending', 'appr
 
 type ServerFilteredResources = {
   tab: DetailTab;
+  nodes?: KubernetesNode[];
+  nodesTotal?: number;
   workloads?: KubernetesWorkload[];
   workloadsTotal?: number;
   pods?: KubernetesPod[];
@@ -2803,18 +2812,22 @@ function ResourceRowActions({ issue, actions }: { issue: K8sTriageIssue; actions
 function NodesTable({
   items,
   loading,
+  total,
   filtered,
   emptyHint,
   edgeVersionsByID,
   onClearFilters,
+  onLoadMore,
   actions,
 }: {
   items: KubernetesNode[];
   loading: boolean;
+  total: number;
   filtered?: boolean;
   emptyHint?: string;
   edgeVersionsByID: Record<number, string>;
   onClearFilters?: () => void;
+  onLoadMore?: () => void;
   actions?: ResourceRowActionHandlers;
 }) {
   const { tr } = useI18n();
@@ -2831,7 +2844,9 @@ function NodesTable({
     );
   }
   return (
-    <table className="min-w-[1120px] w-full text-sm">
+    <>
+      <TableLimitNotice shown={items.length} total={total} loading={loading} filtered={filtered} onLoadMore={onLoadMore} />
+      <table className="min-w-[1120px] w-full text-sm">
       <thead className="border-b border-zinc-800/60 bg-zinc-950/40 text-[11px] uppercase tracking-wider text-zinc-500">
         <tr>
           <th className="whitespace-nowrap px-4 py-2.5 text-left">Node</th>
@@ -2880,7 +2895,8 @@ function NodesTable({
           );
         })}
       </tbody>
-    </table>
+      </table>
+    </>
   );
 }
 
@@ -3856,7 +3872,7 @@ function resourceFilterSummary(filters: ResourceFilters, tab: DetailTab, tr: (zh
 }
 
 function resourceSupportsServerFilter(tab: DetailTab) {
-  return tab === 'workloads' || tab === 'pods' || tab === 'events';
+  return tab === 'nodes' || tab === 'workloads' || tab === 'pods' || tab === 'events';
 }
 
 function resourceAPIParams(filters: ResourceFilters, limit = RESOURCE_PAGE_SIZE) {
@@ -4171,95 +4187,6 @@ function eventIssue(item: KubernetesEvent): K8sTriageIssue {
 
 function isWarningK8sEvent(item: KubernetesEvent) {
   return item.type?.toLowerCase() === 'warning';
-}
-
-function filterActionableWarningEvents({
-  events,
-  nodes,
-  workloads,
-  pods,
-  crashLoopPods,
-}: {
-  events: KubernetesEvent[];
-  nodes: KubernetesNode[];
-  workloads: KubernetesWorkload[];
-  pods: KubernetesPod[];
-  crashLoopPods: KubernetesPod[];
-}) {
-  const podSnapshots = mergePodsByIdentity([...pods, ...crashLoopPods]);
-  return events.filter((item) => isActionableWarningEvent(item, nodes, workloads, podSnapshots));
-}
-
-function isActionableWarningEvent(
-  item: KubernetesEvent,
-  nodes: KubernetesNode[],
-  workloads: KubernetesWorkload[],
-  pods: KubernetesPod[],
-) {
-  const kind = normalizeK8sKind(item.involved_kind);
-  if (kind === 'Pod') {
-    const pod = findEventPod(item, pods);
-    return pod ? isAbnormalPod(pod) : false;
-  }
-  if (kind === 'Node') {
-    const node = nodes.find((candidate) => candidate.node_name === item.involved_name);
-    return node ? nodeConditionLabels(node).length > 0 : false;
-  }
-  if (isWorkloadKind(kind)) {
-    const workload = workloads.find((candidate) =>
-      candidate.kind === kind
-      && candidate.namespace === eventResourceNamespace(item)
-      && candidate.name === item.involved_name,
-    );
-    return workload ? workload.desired_replicas > workload.ready_replicas : false;
-  }
-  return true;
-}
-
-function mergePodsByIdentity(items: KubernetesPod[]) {
-  const out: KubernetesPod[] = [];
-  const seen = new Set<string>();
-  for (const item of items) {
-    const key = item.uid || `${item.namespace || 'default'}/${item.name}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(item);
-  }
-  return out;
-}
-
-function findEventPod(item: KubernetesEvent, pods: KubernetesPod[]) {
-  if (item.involved_uid) {
-    const byUID = pods.find((pod) => pod.uid === item.involved_uid);
-    if (byUID) return byUID;
-  }
-  const namespace = eventResourceNamespace(item);
-  return pods.find((pod) => (pod.namespace || 'default') === namespace && pod.name === item.involved_name) ?? null;
-}
-
-function eventResourceNamespace(item: KubernetesEvent) {
-  return item.involved_namespace || item.namespace || 'default';
-}
-
-function normalizeK8sKind(kind?: string) {
-  switch ((kind || '').toLowerCase()) {
-    case 'pod':
-      return 'Pod';
-    case 'node':
-      return 'Node';
-    case 'deployment':
-      return 'Deployment';
-    case 'statefulset':
-      return 'StatefulSet';
-    case 'daemonset':
-      return 'DaemonSet';
-    case 'job':
-      return 'Job';
-    case 'cronjob':
-      return 'CronJob';
-    default:
-      return kind || '';
-  }
 }
 
 function syncRiskIssue(

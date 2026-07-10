@@ -14,6 +14,8 @@ metadata:
     app.kubernetes.io/component: controller
 spec:
   replicas: {{ .Values.controller.replicas }}
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "ongrid-edge.name" . }}
@@ -91,6 +93,11 @@ spec:
                 configMapKeyRef:
                   name: {{ include "ongrid-edge.fullname" . }}-config
                   key: k8s-inventory-watch
+            - name: ONGRID_K8S_INVENTORY_INTERVAL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-config
+                  key: k8s-inventory-full-sync-interval
             - name: ONGRID_K8S_APP_METRICS_DISCOVERY
               valueFrom:
                 configMapKeyRef:

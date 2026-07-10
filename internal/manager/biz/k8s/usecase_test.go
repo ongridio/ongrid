@@ -415,18 +415,63 @@ func TestUsecaseControllerEnrollmentCompensatesUnboundEdge(t *testing.T) {
 	}
 }
 
-func TestValidBootstrapTokenAllowsNodeExpansionAfterControllerTokenExpiry(t *testing.T) {
-	expired := time.Now().Add(-time.Hour)
+func TestValidBootstrapTokenEnforcesRoleExpiry(t *testing.T) {
+	now := time.Now()
+	expired := now.Add(-time.Hour)
+	valid := now.Add(time.Hour)
 	c := &model.Cluster{
-		BootstrapTokenHash:      tokenDigest("controller"),
-		NodeBootstrapTokenHash:  tokenDigest("node"),
-		BootstrapTokenExpiresAt: &expired,
+		BootstrapTokenHash:          tokenDigest("controller"),
+		NodeBootstrapTokenHash:      tokenDigest("node"),
+		BootstrapTokenExpiresAt:     &expired,
+		NodeBootstrapTokenExpiresAt: &valid,
 	}
 	if validBootstrapToken("controller", c, model.RoleController) {
 		t.Fatal("expired controller token should be rejected")
 	}
 	if !validBootstrapToken("node", c, model.RoleNode) {
-		t.Fatal("node token should remain valid for future node expansion")
+		t.Fatal("unexpired node token should be accepted")
+	}
+	c.NodeBootstrapTokenExpiresAt = &expired
+	if validBootstrapToken("node", c, model.RoleNode) {
+		t.Fatal("expired node token should be rejected")
+	}
+}
+
+func TestUsecaseListNodesPagePaginatesAndFiltersIssues(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	uc := NewUsecase(repo, newFakeIssuer(), Config{})
+	reg, err := uc.CreateCluster(ctx, CreateClusterInput{Name: "prod"})
+	if err != nil {
+		t.Fatalf("CreateCluster() error = %v", err)
+	}
+	edgeID := uint64(10)
+	repo.nodes[nodeKey(reg.Cluster.ID, "ready")] = &model.Node{
+		ClusterID: reg.Cluster.ID, NodeName: "ready", NodeUID: "ready", EdgeID: &edgeID,
+		ConditionsJSON: `[{"type":"Ready","status":"True"}]`,
+	}
+	repo.nodes[nodeKey(reg.Cluster.ID, "not-ready")] = &model.Node{
+		ClusterID: reg.Cluster.ID, NodeName: "not-ready", NodeUID: "not-ready", EdgeID: &edgeID,
+		ConditionsJSON: `[{"type":"Ready","status":"False"}]`,
+	}
+	repo.nodes[nodeKey(reg.Cluster.ID, "missing-edge")] = &model.Node{
+		ClusterID: reg.Cluster.ID, NodeName: "missing-edge", NodeUID: "missing-edge",
+		ConditionsJSON: `[{"type":"Ready","status":"True"}]`,
+	}
+
+	items, total, err := uc.ListNodesPage(ctx, ListNodesFilter{ClusterID: reg.Cluster.ID, Limit: 2})
+	if err != nil {
+		t.Fatalf("ListNodesPage() error = %v", err)
+	}
+	if len(items) != 2 || total != 3 {
+		t.Fatalf("ListNodesPage() = %d/%d, want 2/3", len(items), total)
+	}
+	issues, issueTotal, err := uc.ListNodesPage(ctx, ListNodesFilter{ClusterID: reg.Cluster.ID, IssueOnly: true, Limit: 100})
+	if err != nil {
+		t.Fatalf("ListNodesPage(issue) error = %v", err)
+	}
+	if len(issues) != 2 || issueTotal != 2 {
+		t.Fatalf("ListNodesPage(issue) = %d/%d, want 2/2", len(issues), issueTotal)
 	}
 }
 
@@ -732,6 +777,39 @@ func TestUsecaseDeleteClusterIgnoresMissingAssociatedEdge(t *testing.T) {
 	}
 	if _, err := repo.GetCluster(ctx, reg.Cluster.ID); !errors.Is(err, errs.ErrNotFound) {
 		t.Fatalf("GetCluster(after delete) error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestUsecaseDeleteClusterKeepsClusterAndTopologyWhenEdgeDeleteFails(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	issuer := newFakeIssuer()
+	mirror := &fakeTopologyMirror{}
+	uc := NewUsecase(repo, issuer, Config{})
+	uc.SetTopologyMirror(mirror)
+	reg, err := uc.CreateCluster(ctx, CreateClusterInput{Name: "prod"})
+	if err != nil {
+		t.Fatalf("CreateCluster() error = %v", err)
+	}
+	controller, err := uc.Enroll(ctx, EnrollInput{
+		BootstrapToken: reg.BootstrapToken,
+		ClusterID:      reg.Cluster.ID,
+		Role:           model.RoleController,
+		NodeName:       "control-plane",
+	})
+	if err != nil {
+		t.Fatalf("Enroll(controller) error = %v", err)
+	}
+	issuer.failDeleteEdgeID = controller.EdgeID
+
+	if err := uc.DeleteCluster(ctx, DeleteClusterInput{ID: reg.Cluster.ID, Force: true}); err == nil {
+		t.Fatal("DeleteCluster() error = nil, want edge delete failure")
+	}
+	if _, err := repo.GetCluster(ctx, reg.Cluster.ID); err != nil {
+		t.Fatalf("cluster should remain for retry: %v", err)
+	}
+	if got := len(mirror.deletions); got != 0 {
+		t.Fatalf("topology deletions = %d, want 0", got)
 	}
 }
 
@@ -1171,6 +1249,50 @@ func TestUsecaseCleanupEventsAppliesRetentionAndClusterCap(t *testing.T) {
 	}
 }
 
+func TestUsecaseListEventsIssueOnlyExcludesRecoveredWarnings(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	uc := NewUsecase(repo, newFakeIssuer(), Config{})
+	reg, err := uc.CreateCluster(ctx, CreateClusterInput{Name: "prod"})
+	if err != nil {
+		t.Fatalf("CreateCluster() error = %v", err)
+	}
+	repo.pods[podKey(reg.Cluster.ID, "default", "broken", "pod-broken")] = &model.Pod{
+		ClusterID: reg.Cluster.ID,
+		Namespace: "default",
+		Name:      "broken",
+		UID:       "pod-broken",
+		Phase:     "Failed",
+	}
+	repo.nodes[nodeKey(reg.Cluster.ID, "node-bad")] = &model.Node{
+		ClusterID:      reg.Cluster.ID,
+		NodeName:       "node-bad",
+		NodeUID:        "node-bad",
+		ConditionsJSON: `[{"type":"DiskPressure","status":"True"}]`,
+	}
+	repo.events = []*model.Event{
+		{ClusterID: reg.Cluster.ID, UID: "active-pod", Type: "Warning", InvolvedKind: "Pod", InvolvedNamespace: "default", InvolvedName: "broken", InvolvedUID: "pod-broken"},
+		{ClusterID: reg.Cluster.ID, UID: "recovered-pod", Type: "Warning", InvolvedKind: "Pod", InvolvedNamespace: "default", InvolvedName: "recovered", InvolvedUID: "pod-recovered"},
+		{ClusterID: reg.Cluster.ID, UID: "active-node", Type: "Warning", InvolvedKind: "Node", InvolvedName: "node-bad"},
+		{ClusterID: reg.Cluster.ID, UID: "unknown", Type: "Warning", InvolvedKind: "PersistentVolumeClaim", InvolvedNamespace: "default", InvolvedName: "data"},
+	}
+
+	items, err := uc.ListEvents(ctx, ListEventsFilter{ClusterID: reg.Cluster.ID, IssueOnly: true, Limit: 100})
+	if err != nil {
+		t.Fatalf("ListEvents(issue) error = %v", err)
+	}
+	if len(items) != 3 {
+		t.Fatalf("ListEvents(issue) count = %d, want 3", len(items))
+	}
+	total, err := uc.CountEvents(ctx, ListEventsFilter{ClusterID: reg.Cluster.ID, IssueOnly: true})
+	if err != nil {
+		t.Fatalf("CountEvents(issue) error = %v", err)
+	}
+	if total != 3 {
+		t.Fatalf("CountEvents(issue) = %d, want 3", total)
+	}
+}
+
 type fakeRepo struct {
 	nextClusterID      uint64
 	nextNodeID         uint64
@@ -1258,14 +1380,15 @@ func (r *fakeRepo) CountClusters(context.Context, ListClustersFilter) (int64, er
 	return int64(len(r.clusters)), nil
 }
 
-func (r *fakeRepo) UpdateClusterTokens(_ context.Context, id uint64, controllerTokenHash, nodeTokenHash string, expiresAt *time.Time) error {
+func (r *fakeRepo) UpdateClusterTokens(_ context.Context, id uint64, controllerTokenHash, nodeTokenHash string, controllerExpiresAt, nodeExpiresAt *time.Time) error {
 	c, ok := r.clusters[id]
 	if !ok {
 		return errs.ErrNotFound
 	}
 	c.BootstrapTokenHash = controllerTokenHash
 	c.NodeBootstrapTokenHash = nodeTokenHash
-	c.BootstrapTokenExpiresAt = expiresAt
+	c.BootstrapTokenExpiresAt = controllerExpiresAt
+	c.NodeBootstrapTokenExpiresAt = nodeExpiresAt
 	return nil
 }
 
@@ -1651,6 +1774,36 @@ func (r *fakeRepo) ListNodes(_ context.Context, clusterID uint64) ([]*model.Node
 	return out, nil
 }
 
+func (r *fakeRepo) ListNodesPage(ctx context.Context, f ListNodesFilter) ([]*model.Node, error) {
+	items, err := r.ListNodes(ctx, f.ClusterID)
+	if err != nil {
+		return nil, err
+	}
+	query := strings.ToLower(strings.TrimSpace(f.Query))
+	filtered := make([]*model.Node, 0, len(items))
+	for _, item := range items {
+		text := strings.ToLower(strings.Join([]string{item.NodeName, item.NodeUID, item.ProviderID, item.KubeletVersion}, " "))
+		if query == "" || strings.Contains(text, query) {
+			filtered = append(filtered, item)
+		}
+	}
+	if f.Offset >= len(filtered) {
+		return []*model.Node{}, nil
+	}
+	end := len(filtered)
+	if f.Limit > 0 && f.Offset+f.Limit < end {
+		end = f.Offset + f.Limit
+	}
+	return filtered[f.Offset:end], nil
+}
+
+func (r *fakeRepo) CountNodesPage(ctx context.Context, f ListNodesFilter) (int64, error) {
+	f.Limit = 0
+	f.Offset = 0
+	items, err := r.ListNodesPage(ctx, f)
+	return int64(len(items)), err
+}
+
 func (r *fakeRepo) ListTopologyNodeLinks(_ context.Context, clusterID uint64) ([]TopologyNodeLink, error) {
 	out := make([]TopologyNodeLink, 0)
 	for _, n := range r.nodes {
@@ -1784,8 +1937,29 @@ func (r *fakeRepo) CountPods(ctx context.Context, f ListPodsFilter) (int64, erro
 	return int64(len(items)), err
 }
 
-func (r *fakeRepo) ListEvents(_ context.Context, _ ListEventsFilter) ([]*model.Event, error) {
-	return nil, nil
+func (r *fakeRepo) ListEvents(_ context.Context, f ListEventsFilter) ([]*model.Event, error) {
+	out := make([]*model.Event, 0, len(r.events))
+	for _, item := range r.events {
+		if item.ClusterID != f.ClusterID || (f.Type != "" && item.Type != f.Type) || (f.Reason != "" && item.Reason != f.Reason) {
+			continue
+		}
+		if f.InvolvedKind != "" && item.InvolvedKind != f.InvolvedKind {
+			continue
+		}
+		if f.InvolvedName != "" && item.InvolvedName != f.InvolvedName {
+			continue
+		}
+		cp := *item
+		out = append(out, &cp)
+	}
+	if f.Offset >= len(out) {
+		return []*model.Event{}, nil
+	}
+	end := len(out)
+	if f.Limit > 0 && f.Offset+f.Limit < end {
+		end = f.Offset + f.Limit
+	}
+	return out[f.Offset:end], nil
 }
 
 func (r *fakeRepo) CountEvents(ctx context.Context, f ListEventsFilter) (int64, error) {
@@ -1939,10 +2113,11 @@ func fakeTopologyDeviceNodeID(deviceID uint64) uint64 {
 }
 
 type fakeIssuer struct {
-	nextID  uint64
-	rotate  int
-	edges   map[uint64]string
-	deleted []uint64
+	nextID           uint64
+	rotate           int
+	edges            map[uint64]string
+	deleted          []uint64
+	failDeleteEdgeID uint64
 }
 
 func newFakeIssuer() *fakeIssuer {
@@ -1966,6 +2141,9 @@ func (i *fakeIssuer) RotateEdgeSecret(_ context.Context, edgeID uint64) (*EdgeCr
 }
 
 func (i *fakeIssuer) DeleteEdge(_ context.Context, edgeID uint64) error {
+	if edgeID == i.failDeleteEdgeID {
+		return errors.New("delete edge failed")
+	}
 	if _, ok := i.edges[edgeID]; !ok {
 		return errs.ErrNotFound
 	}

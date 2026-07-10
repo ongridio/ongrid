@@ -17,6 +17,7 @@ data:
   manager-public-url: {{ required "manager.publicURL is required" .Values.manager.publicURL | quote }}
   manager-tunnel-addr: {{ required "manager.tunnelAddr is required" .Values.manager.tunnelAddr | quote }}
   k8s-inventory-watch: {{ default true $controllerInventory.watch | quote }}
+  k8s-inventory-full-sync-interval: {{ default "10m" $controllerInventory.fullSyncInterval | quote }}
   k8s-metrics-endpoint: {{ default "" $ksmEndpoint | quote }}
   k8s-metrics-interval: {{ default "30s" $controllerMetrics.interval | quote }}
   k8s-metrics-timeout: {{ default "5s" $controllerMetrics.timeout | quote }}

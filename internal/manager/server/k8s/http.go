@@ -26,8 +26,7 @@ type Service interface {
 	ListClusters(ctx context.Context, f biz.ListClustersFilter) ([]*model.Cluster, error)
 	CountClusters(ctx context.Context, f biz.ListClustersFilter) (int64, error)
 	GetCluster(ctx context.Context, id uint64) (*model.Cluster, error)
-	ListNodes(ctx context.Context, clusterID uint64) ([]*model.Node, error)
-	CountNodes(ctx context.Context, clusterID uint64) (int64, error)
+	ListNodesPage(ctx context.Context, f biz.ListNodesFilter) ([]*model.Node, int64, error)
 	GetNodeCoverage(ctx context.Context, clusterID uint64) (biz.NodeCoverage, error)
 	GetNodeCoverageByClusterIDs(ctx context.Context, clusterIDs []uint64) (map[uint64]biz.NodeCoverage, error)
 	UpgradeCommand(cluster *model.Cluster) string
@@ -234,12 +233,15 @@ func (h *Handler) listNodes(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	items, err := h.svc.ListNodes(r.Context(), id)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	total, err := h.svc.CountNodes(r.Context(), id)
+	limit := parseListLimit(r.URL.Query().Get("limit"), 100)
+	offset := parseListOffset(r.URL.Query().Get("offset"))
+	items, total, err := h.svc.ListNodesPage(r.Context(), biz.ListNodesFilter{
+		ClusterID: id,
+		Query:     strings.TrimSpace(r.URL.Query().Get("q")),
+		IssueOnly: parseBoolDefault(r.URL.Query().Get("issue_only"), false),
+		Limit:     limit,
+		Offset:    offset,
+	})
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -249,8 +251,10 @@ func (h *Handler) listNodes(w http.ResponseWriter, r *http.Request) {
 		dto = append(dto, nodeDTOFromModel(item))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"items": dto,
-		"total": total,
+		"items":  dto,
+		"total":  total,
+		"limit":  limit,
+		"offset": offset,
 	})
 }
 
@@ -531,6 +535,7 @@ type clusterDTO struct {
 	InventoryWatchLagSeconds      int64                  `json:"inventory_watch_lag_seconds,omitempty"`
 	InventorySyncedAt             *time.Time             `json:"inventory_synced_at,omitempty"`
 	BootstrapTokenExpiresAt       *time.Time             `json:"bootstrap_token_expires_at,omitempty"`
+	NodeBootstrapTokenExpiresAt   *time.Time             `json:"node_bootstrap_token_expires_at,omitempty"`
 	CreatedAt                     time.Time              `json:"created_at"`
 	UpdatedAt                     time.Time              `json:"updated_at"`
 	UpgradeCommand                string                 `json:"upgrade_command,omitempty"`
@@ -708,6 +713,7 @@ func clusterDTOFromModelWithCoverage(c *model.Cluster, coverage *biz.NodeCoverag
 		InventoryWatchLagSeconds:      c.InventoryWatchLagSeconds,
 		InventorySyncedAt:             c.InventorySyncedAt,
 		BootstrapTokenExpiresAt:       c.BootstrapTokenExpiresAt,
+		NodeBootstrapTokenExpiresAt:   c.NodeBootstrapTokenExpiresAt,
 		CreatedAt:                     c.CreatedAt,
 		UpdatedAt:                     c.UpdatedAt,
 	}

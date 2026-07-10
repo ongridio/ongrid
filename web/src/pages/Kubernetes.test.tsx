@@ -176,7 +176,7 @@ describe('KubernetesPage', () => {
       }),
       http.get('/api/v1/k8s/clusters/:id/events', ({ request }) => {
         const url = new URL(request.url);
-        if (url.searchParams.get('type') === 'Warning') {
+		if (url.searchParams.get('issue_only') === 'true') {
           return HttpResponse.json({
             items: [{
               id: 42,
@@ -458,46 +458,8 @@ describe('KubernetesPage', () => {
       }),
       http.get('/api/v1/k8s/clusters/:id/events', ({ request }) => {
         const url = new URL(request.url);
-        if (url.searchParams.get('type') === 'Warning') {
-          return HttpResponse.json({
-            items: [
-              {
-                id: 43,
-                cluster_id: 1,
-                namespace: 'ongrid-system',
-                name: 'recovered-readiness',
-                type: 'Warning',
-                reason: 'Unhealthy',
-                message: 'Readiness probe failed: HTTP probe failed with statuscode: 500',
-                involved_kind: 'Pod',
-                involved_namespace: 'ongrid-system',
-                involved_name: 'ongrid-edge-controller-abc',
-                involved_uid: 'pod-healthy',
-                count: 1,
-                last_timestamp: '2026-06-29T10:01:00Z',
-                last_seen_at: '2026-06-29T10:01:00Z',
-              },
-              {
-                id: 44,
-                cluster_id: 1,
-                namespace: 'ongrid-system',
-                name: 'deleted-image-pull',
-                type: 'Warning',
-                reason: 'Failed',
-                message: 'Error: ImagePullBackOff',
-                involved_kind: 'Pod',
-                involved_namespace: 'ongrid-system',
-                involved_name: 'ongrid-edge-node-old',
-                involved_uid: 'pod-deleted',
-                count: 5,
-                last_timestamp: '2026-06-29T10:02:00Z',
-                last_seen_at: '2026-06-29T10:02:00Z',
-              },
-            ],
-            total: 2,
-            limit: 100,
-            offset: 0,
-          });
+        if (url.searchParams.get('issue_only') === 'true') {
+          return HttpResponse.json({ items: [], total: 0, limit: 100, offset: 0 });
         }
         return HttpResponse.json({ items: [], total: 0, limit: 100, offset: 0 });
       }),
@@ -879,7 +841,7 @@ describe('KubernetesPage', () => {
     server.use(
       http.get('/api/v1/k8s/clusters/:id/events', ({ request }) => {
         const url = new URL(request.url);
-        if (url.searchParams.get('type') === 'Warning') {
+		if (url.searchParams.get('issue_only') === 'true') {
           return HttpResponse.json({ items: [warningEvent], total: 1, limit: 100, offset: 0 });
         }
         return HttpResponse.json({ items: [warningEvent, normalEvent], total: 2, limit: 100, offset: 0 });

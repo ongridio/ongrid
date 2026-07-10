@@ -90,11 +90,12 @@ func applyClusterFilters(tx *gorm.DB, f biz.ListClustersFilter) *gorm.DB {
 	return tx
 }
 
-func (r *Repo) UpdateClusterTokens(ctx context.Context, id uint64, controllerTokenHash, nodeTokenHash string, expiresAt *time.Time) error {
+func (r *Repo) UpdateClusterTokens(ctx context.Context, id uint64, controllerTokenHash, nodeTokenHash string, controllerExpiresAt, nodeExpiresAt *time.Time) error {
 	res := r.db.WithContext(ctx).Model(&model.Cluster{}).Where("id = ?", id).Updates(map[string]any{
-		"bootstrap_token_hash":       controllerTokenHash,
-		"node_bootstrap_token_hash":  nodeTokenHash,
-		"bootstrap_token_expires_at": expiresAt,
+		"bootstrap_token_hash":            controllerTokenHash,
+		"node_bootstrap_token_hash":       nodeTokenHash,
+		"bootstrap_token_expires_at":      controllerExpiresAt,
+		"node_bootstrap_token_expires_at": nodeExpiresAt,
 	})
 	if res.Error != nil {
 		return res.Error
@@ -666,6 +667,29 @@ func (r *Repo) ListNodes(ctx context.Context, clusterID uint64) ([]*model.Node, 
 	return out, nil
 }
 
+func (r *Repo) ListNodesPage(ctx context.Context, f biz.ListNodesFilter) ([]*model.Node, error) {
+	tx := applyNodeFilter(r.db.WithContext(ctx).Model(&model.Node{}), f)
+	if f.Limit > 0 {
+		tx = tx.Limit(f.Limit)
+	}
+	if f.Offset > 0 {
+		tx = tx.Offset(f.Offset)
+	}
+	var out []*model.Node
+	if err := tx.Order("node_name ASC").Find(&out).Error; err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (r *Repo) CountNodesPage(ctx context.Context, f biz.ListNodesFilter) (int64, error) {
+	var total int64
+	if err := applyNodeFilter(r.db.WithContext(ctx).Model(&model.Node{}), f).Count(&total).Error; err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
 func (r *Repo) ListTopologyNodeLinks(ctx context.Context, clusterID uint64) ([]biz.TopologyNodeLink, error) {
 	var out []biz.TopologyNodeLink
 	if err := r.db.WithContext(ctx).
@@ -875,6 +899,11 @@ func applyWorkloadFilter(tx *gorm.DB, f biz.ListWorkloadsFilter) *gorm.DB {
 	}
 	tx = applyLikeAny(tx, f.Query, []string{"namespace", "kind", "name", "uid"})
 	return tx
+}
+
+func applyNodeFilter(tx *gorm.DB, f biz.ListNodesFilter) *gorm.DB {
+	tx = tx.Where("cluster_id = ?", f.ClusterID)
+	return applyLikeAny(tx, f.Query, []string{"node_name", "node_uid", "provider_id", "kubelet_version"})
 }
 
 func applyPodFilter(tx *gorm.DB, f biz.ListPodsFilter) *gorm.DB {

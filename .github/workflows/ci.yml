@@ -119,3 +119,7 @@ jobs:
             --set-string enrollment.controllerBootstrapToken=controller-token \
             --set-string enrollment.nodeBootstrapToken=node-token \
             >/tmp/ongrid-edge.yaml
+          grep -q 'type: Recreate' /tmp/ongrid-edge.yaml
+          ! grep -q 'kubernetes.io/arch:' /tmp/ongrid-edge.yaml
+          grep -q 'k8s-inventory-full-sync-interval: "10m"' /tmp/ongrid-edge.yaml
+          ! grep -q 'supplementalGroups:' /tmp/ongrid-edge.yaml

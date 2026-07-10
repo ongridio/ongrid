@@ -12,6 +12,7 @@ type CreateClusterInput = biz.CreateClusterInput
 type ClusterRegistration = biz.ClusterRegistration
 type ListClustersFilter = biz.ListClustersFilter
 type DeleteClusterInput = biz.DeleteClusterInput
+type ListNodesFilter = biz.ListNodesFilter
 type ListPodsFilter = biz.ListPodsFilter
 type ListWorkloadsFilter = biz.ListWorkloadsFilter
 type ListEventsFilter = biz.ListEventsFilter
@@ -47,6 +48,10 @@ func (s *Service) GetCluster(ctx context.Context, id uint64) (*model.Cluster, er
 
 func (s *Service) ListNodes(ctx context.Context, clusterID uint64) ([]*model.Node, error) {
 	return s.uc.ListNodes(ctx, clusterID)
+}
+
+func (s *Service) ListNodesPage(ctx context.Context, f ListNodesFilter) ([]*model.Node, int64, error) {
+	return s.uc.ListNodesPage(ctx, f)
 }
 
 func (s *Service) CountNodes(ctx context.Context, clusterID uint64) (int64, error) {

@@ -26,9 +26,6 @@ spec:
       {{- end }}
       hostPID: true
       {{- $supplementalGroups := .Values.podSecurity.supplementalGroups }}
-      {{- if not $supplementalGroups }}
-      {{- $supplementalGroups = list 0 }}
-      {{- end }}
       securityContext:
         runAsNonRoot: {{ .Values.podSecurity.runAsNonRoot }}
         runAsUser: {{ .Values.podSecurity.runAsUser }}

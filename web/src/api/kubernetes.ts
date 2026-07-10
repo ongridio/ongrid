@@ -37,6 +37,7 @@ export type KubernetesCluster = {
   inventory_watch_lag_seconds?: number;
   inventory_synced_at?: string | null;
   bootstrap_token_expires_at?: string | null;
+  node_bootstrap_token_expires_at?: string | null;
   created_at: string;
   updated_at: string;
   upgrade_command?: string;
@@ -183,10 +184,14 @@ export function deleteKubernetesCluster(id: string | number, opts?: { force?: bo
   return request<void>('DELETE', `/k8s/clusters/${encodeURIComponent(String(id))}${qs}`);
 }
 
-export function listKubernetesNodes(clusterID: string | number) {
+export function listKubernetesNodes(
+  clusterID: string | number,
+  params?: { q?: string; issue_only?: boolean; limit?: number; offset?: number },
+) {
+  const qs = buildQuery(params);
   return request<ListResponse<KubernetesNode>>(
     'GET',
-    `/k8s/clusters/${encodeURIComponent(String(clusterID))}/nodes`,
+    `/k8s/clusters/${encodeURIComponent(String(clusterID))}/nodes${qs}`,
   );
 }
 

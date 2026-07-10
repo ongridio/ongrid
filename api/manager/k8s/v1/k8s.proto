@@ -78,6 +78,7 @@ message KubernetesCluster {
     string controller_namespace = 22 [json_name = "controller_namespace"];
     string controller_pod_name = 23 [json_name = "controller_pod_name"];
     string upgrade_command = 24 [json_name = "upgrade_command"];
+    google.protobuf.Timestamp node_bootstrap_token_expires_at = 25 [json_name = "node_bootstrap_token_expires_at"];
 }
 
 message CreateClusterRequest {
@@ -240,11 +241,17 @@ message KubernetesEvent {
 
 message ListNodesRequest {
     uint64 cluster_id = 1 [json_name = "cluster_id"];
+    int32 limit = 2 [json_name = "limit"];
+    int32 offset = 3 [json_name = "offset"];
+    string q = 4 [json_name = "q"];
+    bool issue_only = 5 [json_name = "issue_only"];
 }
 
 message ListNodesResponse {
     repeated KubernetesNode items = 1 [json_name = "items"];
     int32 total = 2 [json_name = "total"];
+    int32 limit = 3 [json_name = "limit"];
+    int32 offset = 4 [json_name = "offset"];
 }
 
 message ListWorkloadsRequest {

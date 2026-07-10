@@ -182,7 +182,7 @@ func main() {
 		UpgradeStageDir: stageDir,
 	}, log)
 	if isK8sController(k8sInfo) {
-		inventoryInterval := parseDurationEnv("ONGRID_K8S_INVENTORY_INTERVAL", 30*time.Second)
+		inventoryInterval := parseDurationEnv("ONGRID_K8S_INVENTORY_INTERVAL", 10*time.Minute)
 		inventoryWatch := parseBoolEnv("ONGRID_K8S_INVENTORY_WATCH", true)
 		pusher, err := edgek8s.NewInventoryPusher(
 			client,
