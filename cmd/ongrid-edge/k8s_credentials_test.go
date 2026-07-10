@@ -6,9 +6,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/ongridio/ongrid/internal/pkg/config"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
 
@@ -32,6 +35,45 @@ func TestK8sCredentialKey(t *testing.T) {
 	}
 	if !strings.HasPrefix(nodeA, "node-") {
 		t.Fatalf("node key = %q, want node-*", nodeA)
+	}
+}
+
+func TestK8sCredentialFileRoundTrip(t *testing.T) {
+	filePath := filepath.Join(t.TempDir(), "node-credential.json")
+	info := &tunnel.KubernetesInfo{ClusterID: 7, Role: "node", NodeName: "worker-a"}
+	cfg := &config.Config{Edge: config.EdgeConfig{CloudAddr: "manager:40012"}}
+	out := k8sEnrollResponse{EdgeID: 9, AccessKey: "access", SecretKey: "secret"}
+
+	if err := storeK8sCredentialFile(info, out, cfg, filePath); err != nil {
+		t.Fatalf("storeK8sCredentialFile: %v", err)
+	}
+	stat, err := os.Stat(filePath)
+	if err != nil {
+		t.Fatalf("stat credential file: %v", err)
+	}
+	if got := stat.Mode().Perm(); got != 0600 {
+		t.Fatalf("credential file mode = %o, want 600", got)
+	}
+
+	loadedCfg := &config.Config{}
+	loaded, err := loadStoredK8sCredentialFile(loadedCfg, info, filePath, nil)
+	if err != nil {
+		t.Fatalf("loadStoredK8sCredentialFile: %v", err)
+	}
+	if !loaded || loadedCfg.Edge.AccessKey != "access" || loadedCfg.Edge.SecretKey != "secret" || loadedCfg.Edge.CloudAddr != "manager:40012" {
+		t.Fatalf("loaded=%v cfg=%+v", loaded, loadedCfg.Edge)
+	}
+}
+
+func TestK8sCredentialFileRejectsDifferentNode(t *testing.T) {
+	filePath := filepath.Join(t.TempDir(), "node-credential.json")
+	info := &tunnel.KubernetesInfo{ClusterID: 7, Role: "node", NodeName: "worker-a"}
+	if err := storeK8sCredentialFile(info, k8sEnrollResponse{EdgeID: 9, AccessKey: "access", SecretKey: "secret"}, &config.Config{}, filePath); err != nil {
+		t.Fatalf("storeK8sCredentialFile: %v", err)
+	}
+	loaded, err := loadStoredK8sCredentialFile(&config.Config{}, &tunnel.KubernetesInfo{ClusterID: 7, Role: "node", NodeName: "worker-b"}, filePath, nil)
+	if err == nil || loaded {
+		t.Fatalf("loaded=%v err=%v, want node mismatch", loaded, err)
 	}
 }
 

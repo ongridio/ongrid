@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -16,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -49,6 +51,9 @@ type k8sSecretClient struct {
 }
 
 func loadStoredK8sCredential(ctx context.Context, cfg *config.Config, info *tunnel.KubernetesInfo, log *slog.Logger) (bool, error) {
+	if filePath := strings.TrimSpace(os.Getenv("ONGRID_K8S_CREDENTIAL_FILE")); filePath != "" {
+		return loadStoredK8sCredentialFile(cfg, info, filePath, log)
+	}
 	client, err := newK8sSecretClient(info)
 	if err != nil {
 		return false, err
@@ -92,6 +97,9 @@ func loadStoredK8sCredential(ctx context.Context, cfg *config.Config, info *tunn
 }
 
 func storeK8sCredential(ctx context.Context, info *tunnel.KubernetesInfo, out k8sEnrollResponse, cfg *config.Config) error {
+	if filePath := strings.TrimSpace(os.Getenv("ONGRID_K8S_CREDENTIAL_FILE")); filePath != "" {
+		return storeK8sCredentialFile(info, out, cfg, filePath)
+	}
 	client, err := newK8sSecretClient(info)
 	if err != nil {
 		return err
@@ -120,6 +128,103 @@ func storeK8sCredential(ctx context.Context, info *tunnel.KubernetesInfo, out k8
 		return fmt.Errorf("marshal k8s stored credential: %w", err)
 	}
 	return client.patchDataKey(ctx, k8sCredentialKey(info), payload)
+}
+
+func loadStoredK8sCredentialFile(cfg *config.Config, info *tunnel.KubernetesInfo, filePath string, log *slog.Logger) (bool, error) {
+	raw, err := os.ReadFile(filePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read k8s credential file: %w", err)
+	}
+	var stored k8sStoredCredential
+	if err := json.Unmarshal(raw, &stored); err != nil {
+		return false, fmt.Errorf("decode k8s credential file: %w", err)
+	}
+	if stored.ClusterID != info.ClusterID || stored.Role != info.Role || stored.NodeName != info.NodeName ||
+		(info.NodeUID != "" && stored.NodeUID != info.NodeUID) {
+		return false, fmt.Errorf("stored k8s credential does not match current cluster/role/node")
+	}
+	if stored.AccessKey == "" || stored.SecretKey == "" {
+		return false, fmt.Errorf("stored k8s credential is missing access key or secret key")
+	}
+	cfg.Edge.AccessKey = stored.AccessKey
+	cfg.Edge.SecretKey = stored.SecretKey
+	if cfg.Edge.CloudAddr == "" && stored.CloudAddr != "" {
+		cfg.Edge.CloudAddr = stored.CloudAddr
+	}
+	if log != nil {
+		log.Info("loaded kubernetes edge credentials",
+			slog.Uint64("cluster_id", info.ClusterID),
+			slog.Uint64("edge_id", stored.EdgeID),
+			slog.String("role", info.Role),
+			slog.String("file", filePath),
+		)
+	}
+	return true, nil
+}
+
+func storeK8sCredentialFile(info *tunnel.KubernetesInfo, out k8sEnrollResponse, cfg *config.Config, filePath string) error {
+	cloudAddr := out.CloudAddr
+	if cloudAddr == "" {
+		cloudAddr = cfg.Edge.CloudAddr
+	}
+	payload, err := json.Marshal(k8sStoredCredential{
+		ClusterID:        info.ClusterID,
+		Role:             info.Role,
+		NodeName:         info.NodeName,
+		NodeUID:          info.NodeUID,
+		EdgeID:           out.EdgeID,
+		AccessKey:        out.AccessKey,
+		SecretKey:        out.SecretKey,
+		CloudAddr:        cloudAddr,
+		ManagerPublicURL: out.ManagerPublicURL,
+		StoredAt:         time.Now().UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		return fmt.Errorf("marshal k8s stored credential: %w", err)
+	}
+	dir := filepath.Dir(filePath)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("create k8s credential directory: %w", err)
+	}
+	tmp, err := os.CreateTemp(dir, ".ongrid-credential-")
+	if err != nil {
+		return fmt.Errorf("create temporary k8s credential file: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer func() {
+		if tmpName != "" {
+			_ = os.Remove(tmpName) // Best-effort cleanup after a failed atomic write.
+		}
+	}()
+	if err := tmp.Chmod(0600); err != nil {
+		if closeErr := tmp.Close(); closeErr != nil {
+			return errors.Join(fmt.Errorf("chmod temporary k8s credential file: %w", err), fmt.Errorf("close temporary k8s credential file: %w", closeErr))
+		}
+		return fmt.Errorf("chmod temporary k8s credential file: %w", err)
+	}
+	if _, err := tmp.Write(payload); err != nil {
+		if closeErr := tmp.Close(); closeErr != nil {
+			return errors.Join(fmt.Errorf("write temporary k8s credential file: %w", err), fmt.Errorf("close temporary k8s credential file: %w", closeErr))
+		}
+		return fmt.Errorf("write temporary k8s credential file: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		if closeErr := tmp.Close(); closeErr != nil {
+			return errors.Join(fmt.Errorf("sync temporary k8s credential file: %w", err), fmt.Errorf("close temporary k8s credential file: %w", closeErr))
+		}
+		return fmt.Errorf("sync temporary k8s credential file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temporary k8s credential file: %w", err)
+	}
+	if err := os.Rename(tmpName, filePath); err != nil {
+		return fmt.Errorf("replace k8s credential file: %w", err)
+	}
+	tmpName = ""
+	return nil
 }
 
 func k8sCredentialKey(info *tunnel.KubernetesInfo) string {

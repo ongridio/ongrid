@@ -312,12 +312,14 @@ func (u *Usecase) EnsureKubernetesCluster(ctx context.Context, clusterID uint64,
 	if currentNodeID != nil && *currentNodeID != 0 {
 		n, err := u.nodes.Get(ctx, *currentNodeID)
 		if err == nil && n.Type == string(model.NodeTypeCluster) {
-			if n.Name != name || n.PropsJSON != propsJSON {
-				if err := u.nodes.Update(ctx, n.ID, name, propsJSON); err != nil {
-					return 0, err
+			if match, owned := topologyPropsMatchKubernetesCluster(n.PropsJSON, clusterID); owned && match {
+				if n.Name != name || n.PropsJSON != propsJSON {
+					if err := u.nodes.Update(ctx, n.ID, name, propsJSON); err != nil {
+						return 0, err
+					}
 				}
+				return n.ID, nil
 			}
-			return n.ID, nil
 		}
 		if err != nil && !errors.Is(err, errs.ErrNotFound) {
 			return 0, err
@@ -353,20 +355,16 @@ func (u *Usecase) findKubernetesClusterNode(ctx context.Context, clusterID uint6
 	if err != nil {
 		return nil, err
 	}
-	var fallback *model.Node
 	for _, n := range rows {
 		if !strings.EqualFold(n.Name, name) {
 			continue
 		}
-		match, owned := topologyPropsMatchKubernetesCluster(n.PropsJSON, clusterID)
+		match, _ := topologyPropsMatchKubernetesCluster(n.PropsJSON, clusterID)
 		if match {
 			return n, nil
 		}
-		if !owned && fallback == nil {
-			fallback = n
-		}
 	}
-	return fallback, nil
+	return nil, nil
 }
 
 // EnsureKubernetesNodeMembership mirrors one Kubernetes node's backing device

@@ -19,6 +19,9 @@ spec:
         app.kubernetes.io/component: node
     spec:
       serviceAccountName: {{ include "ongrid-edge.nodeServiceAccount" . }}
+      automountServiceAccountToken: false
+      nodeSelector:
+        kubernetes.io/arch: {{ .Values.image.architecture | quote }}
       hostPID: true
       {{- $supplementalGroups := .Values.podSecurity.supplementalGroups }}
       {{- if not $supplementalGroups }}
@@ -59,8 +62,8 @@ spec:
                 secretKeyRef:
                   name: {{ include "ongrid-edge.fullname" . }}-node-bootstrap
                   key: bootstrap-token
-            - name: ONGRID_K8S_CREDENTIAL_SECRET
-              value: {{ include "ongrid-edge.nodeCredentialSecretName" . | quote }}
+            - name: ONGRID_K8S_CREDENTIAL_FILE
+              value: {{ printf "/var/lib/ongrid-edge/persist/ongrid-edge-cluster-%v.json" .Values.enrollment.clusterID | quote }}
             - name: ONGRID_MANAGER_PUBLIC_URL
               valueFrom:
                 configMapKeyRef:
@@ -103,6 +106,8 @@ spec:
           volumeMounts:
             - name: edge-state
               mountPath: /var/lib/ongrid-edge
+            - name: edge-credential-state
+              mountPath: /var/lib/ongrid-edge/persist
             - name: host-proc
               mountPath: /host/proc
               readOnly: true
@@ -118,6 +123,10 @@ spec:
       volumes:
         - name: edge-state
           emptyDir: {}
+        - name: edge-credential-state
+          hostPath:
+            path: {{ .Values.node.credentialHostPath | quote }}
+            type: Directory
         - name: host-proc
           hostPath:
             path: /proc

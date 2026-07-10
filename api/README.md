@@ -12,6 +12,7 @@ api/
 ├── iam/v1/iam.proto                  ongrid.iam.v1
 ├── manager/
 │   ├── edge/v1/edge.proto            ongrid.manager.edge.v1
+│   ├── k8s/v1/k8s.proto              ongrid.manager.k8s.v1
 │   ├── metric/v1/metric.proto        ongrid.manager.metric.v1
 │   └── aiops/v1/aiops.proto          ongrid.manager.aiops.v1
 ├── tunnel/v1/tunnel.proto            ongrid.tunnel.v1 (geminio payloads, NOT gRPC)

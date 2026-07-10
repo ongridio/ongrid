@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
+	"github.com/ongridio/ongrid/internal/pkg/errs"
+	"github.com/ongridio/ongrid/internal/pkg/tenantctx"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
 
@@ -168,6 +170,10 @@ type executeK8sActionResponse struct {
 }
 
 func (t *ExecuteK8sActionTool) InvokableRun(ctx context.Context, argsJSON string, _ ...basetool.InvokeOption) (string, error) {
+	caller, ok := tenantctx.From(ctx)
+	if !ok || (caller.Role != "admin" && !caller.IsSuperuser) {
+		return "", fmt.Errorf("%w: admin role required to execute kubernetes actions", errs.ErrForbidden)
+	}
 	if t.caller == nil {
 		return "", fmt.Errorf("%s: tunnel caller not configured", ToolNameExecuteK8sAction)
 	}

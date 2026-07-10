@@ -1,6 +1,7 @@
 {{- $ksm := default dict .Values.kubeStateMetrics -}}
 {{- if default false $ksm.enabled }}
 {{- $image := default dict $ksm.image -}}
+{{- $imageRepository := required "kubeStateMetrics.image.repository is required when kubeStateMetrics.enabled=true; use an offline mirror reachable by the cluster" $image.repository -}}
 {{- $resources := default dict $ksm.resources -}}
 {{- $port := default 8080 $ksm.port -}}
 {{- $telemetryPort := default 8081 $ksm.telemetryPort -}}
@@ -91,6 +92,8 @@ spec:
         app.kubernetes.io/component: kube-state-metrics
     spec:
       serviceAccountName: {{ include "ongrid-edge.kubeStateMetricsServiceAccount" . }}
+      nodeSelector:
+        kubernetes.io/arch: {{ .Values.image.architecture | quote }}
       securityContext:
         runAsNonRoot: true
         runAsUser: {{ .Values.podSecurity.runAsUser }}
@@ -98,7 +101,7 @@ spec:
         fsGroup: {{ .Values.podSecurity.fsGroup }}
       containers:
         - name: kube-state-metrics
-          image: {{ printf "%s:%s" (default "registry.k8s.io/kube-state-metrics/kube-state-metrics" $image.repository) (default "v2.16.0" $image.tag) | quote }}
+          image: {{ printf "%s:%s" $imageRepository (default "v2.16.0" $image.tag) | quote }}
           imagePullPolicy: {{ default "IfNotPresent" $image.pullPolicy }}
           args:
             - --host=0.0.0.0

@@ -119,6 +119,37 @@ func TestEnsureKubernetesClusterUpsertsTopologyNode(t *testing.T) {
 	}
 }
 
+func TestEnsureKubernetesClusterDoesNotAdoptManualNodeWithSameName(t *testing.T) {
+	uc := newUC(t)
+	ctx := context.Background()
+	manual, err := uc.CreateNode(ctx, string(model.NodeTypeCluster), "prod", `{"owner":"operator"}`)
+	if err != nil {
+		t.Fatalf("CreateNode(manual) error = %v", err)
+	}
+
+	k8sNodeID, err := uc.EnsureKubernetesCluster(ctx, 42, &manual.ID, "prod", "uid-prod", "full-node", "online")
+	if err != nil {
+		t.Fatalf("EnsureKubernetesCluster() error = %v", err)
+	}
+	if k8sNodeID == manual.ID {
+		t.Fatalf("k8s cluster adopted manual topology node %d", manual.ID)
+	}
+	gotManual, err := uc.GetNode(ctx, manual.ID)
+	if err != nil {
+		t.Fatalf("GetNode(manual) error = %v", err)
+	}
+	if gotManual.PropsJSON != `{"owner":"operator"}` {
+		t.Fatalf("manual node props changed to %s", gotManual.PropsJSON)
+	}
+	gotK8s, err := uc.GetNode(ctx, k8sNodeID)
+	if err != nil {
+		t.Fatalf("GetNode(k8s) error = %v", err)
+	}
+	if !strings.Contains(gotK8s.PropsJSON, `"k8s_cluster_id":42`) {
+		t.Fatalf("k8s node props = %s", gotK8s.PropsJSON)
+	}
+}
+
 func TestEnsureKubernetesNodeMembershipCreatesAndPrunes(t *testing.T) {
 	uc := newUC(t)
 	ctx := context.Background()

@@ -26,36 +26,6 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "ongrid-edge.controllerServiceAccount" . }}
     namespace: {{ include "ongrid-edge.namespace" . }}
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: {{ include "ongrid-edge.fullname" . }}-node-credentials
-  namespace: {{ include "ongrid-edge.namespace" . }}
-  labels:
-    {{- include "ongrid-edge.labels" . | nindent 4 }}
-rules:
-  - apiGroups: [""]
-    resources: ["secrets"]
-    resourceNames: [{{ include "ongrid-edge.nodeCredentialSecretName" . | quote }}]
-    verbs: ["get", "patch", "update"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: {{ include "ongrid-edge.fullname" . }}-node-credentials
-  namespace: {{ include "ongrid-edge.namespace" . }}
-  labels:
-    {{- include "ongrid-edge.labels" . | nindent 4 }}
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: {{ include "ongrid-edge.fullname" . }}-node-credentials
-subjects:
-  - kind: ServiceAccount
-    name: {{ include "ongrid-edge.nodeServiceAccount" . }}
-    namespace: {{ include "ongrid-edge.namespace" . }}
----
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

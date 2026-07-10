@@ -79,7 +79,9 @@ flowchart LR
    - `enrollment.nodeBootstrapToken`
    - `mode=full-node`
 4. controller Deployment 启动后 enroll，作为集群控制面身份连接 tunnel。
-5. node DaemonSet 在每个 Node 上启动，每个 Pod 用 Node UID enroll，换取独立 edge credentials。
+5. node DaemonSet 在每个 Node 上启动，每个 Pod 先用 Node Name enroll，换取独立 edge credentials；controller 快照到达后再合并 Kubernetes Node UID。
+   - 节点凭据以 `0600` 文件保存在该节点宿主机 `/var/tmp`，Pod 滚动重建时复用，不使用所有节点共享的 Kubernetes Secret。
+   - controller bootstrap token 仍按过期时间且只能领取一次；node bootstrap token 在管理员轮换 token 或删除集群前持续有效，以支持后续新增节点自动接入。
 6. manager 将 Node edge 关联为普通设备，并在设备列表展示 `K8s Node`、所属集群和可选 `K8s Controller` 标签。
 
 ## 数据同步
@@ -176,7 +178,7 @@ kubectl delete namespace ongrid-system --ignore-not-found
 
 ## 验证清单
 
-- Helm chart 渲染包含 controller Deployment、node DaemonSet、ServiceAccount、ClusterRole、ClusterRoleBinding、Secret/ConfigMap。
+- Helm chart 渲染包含 controller Deployment、node DaemonSet、ServiceAccount、ClusterRole、ClusterRoleBinding、Controller Secret/ConfigMap；Node 不具备 Secret 读写权限。
 - controller ServiceAccount 可 list/watch Nodes/Workloads/Pods/Events，并可执行受支持的 K8s 写动作。
 - 每个 Node 都能 enroll 为独立 edge，设备列表自动出现 Node 设备。
 - 新增 Node 后 DaemonSet 自动启动并 enroll，新设备自动上报，不依赖一次性快照。
@@ -192,6 +194,9 @@ kubectl delete namespace ongrid-system --ignore-not-found
 | 风险 | 影响 | 缓解 |
 | --- | --- | --- |
 | DaemonSet 复用同一 edge 凭证 | 多节点互相覆盖在线状态和 `device_id` | 使用 bootstrap token 换取 per-node edge credentials |
+| Node Pod 读取共享凭据 Secret | 单节点失陷后可读取或覆盖其他节点密钥 | 每个节点只在宿主机本地持久化自己的 `0600` 凭据文件，并禁用 Node Pod 的 ServiceAccount token 自动挂载 |
+| 离线镜像架构不匹配 | arm64 节点无法启动当前内置镜像 | 当前 Chart 显式调度到 `kubernetes.io/arch=amd64`；支持 arm64 前需增加对应离线镜像包 |
+| 可选 kube-state-metrics 访问公网 | 离线环境启用后出现 ImagePullBackOff | 默认关闭；启用时必须显式提供集群可达的离线镜像仓库地址 |
 | Event 高 churn | MySQL 表膨胀 | 当前快照 prune + TTL + per-cluster cap |
 | controller edge 被当成设备 | 设备列表出现非主机对象 | controller 不创建 host Device，UI 不单独展示 controller edge |
 | 未卸载直接删除集群 | 远端仍继续上报 | UI 提示卸载命令，删除后 token/cluster 记录失效，上报应被拒绝或无法关联 |

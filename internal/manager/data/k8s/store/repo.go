@@ -146,9 +146,42 @@ func (r *Repo) UpdateClusterController(ctx context.Context, id uint64, in biz.Cl
 	return nil
 }
 
+func (r *Repo) BindControllerEnrollment(ctx context.Context, id uint64, registration biz.ClusterControllerRegistration, installation *model.Installation) error {
+	if installation == nil {
+		return errs.ErrInvalid
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&model.Cluster{}).Where("id = ?", id).Updates(map[string]any{
+			"controller_edge_id":   registration.EdgeID,
+			"controller_node_name": registration.NodeName,
+			"controller_namespace": registration.Namespace,
+			"controller_pod_name":  registration.PodName,
+			"last_seen_at":         registration.LastSeen,
+			"status":               model.ClusterStatusOnline,
+		})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return errs.ErrNotFound
+		}
+		return tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "cluster_id"}},
+			DoUpdates: clause.Assignments(map[string]any{
+				"mode":               installation.Mode,
+				"scope_type":         installation.ScopeType,
+				"namespace":          installation.Namespace,
+				"controller_edge_id": installation.ControllerEdgeID,
+				"capabilities_json":  installation.CapabilitiesJSON,
+				"last_seen_at":       installation.LastSeenAt,
+				"updated_at":         time.Now(),
+			}),
+		}).Create(installation).Error
+	})
+}
+
 func (r *Repo) UpdateClusterInventorySync(ctx context.Context, id uint64, in biz.ClusterInventorySync) error {
 	res := r.db.WithContext(ctx).Model(&model.Cluster{}).Where("id = ?", id).Updates(map[string]any{
-		"controller_edge_id":               in.ControllerEdgeID,
 		"last_seen_at":                     in.SyncedAt,
 		"status":                           model.ClusterStatusOnline,
 		"inventory_resource_version":       in.ResourceVersion,
@@ -294,6 +327,17 @@ func (r *Repo) GetNodeByClusterUID(ctx context.Context, clusterID uint64, nodeUI
 	if err := r.db.WithContext(ctx).
 		Where("cluster_id = ? AND node_uid = ?", clusterID, nodeUID).
 		First(&n).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errs.ErrNotFound
+		}
+		return nil, err
+	}
+	return &n, nil
+}
+
+func (r *Repo) GetNodeByEdgeID(ctx context.Context, edgeID uint64) (*model.Node, error) {
+	var n model.Node
+	if err := r.db.WithContext(ctx).Where("edge_id = ?", edgeID).First(&n).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errs.ErrNotFound
 		}

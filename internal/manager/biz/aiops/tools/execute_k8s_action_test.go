@@ -3,11 +3,14 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/pkg/errs"
+	"github.com/ongridio/ongrid/internal/pkg/tenantctx"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
 
@@ -25,6 +28,25 @@ func TestExecuteK8sActionToolInfoIsWrite(t *testing.T) {
 	}
 	if !strings.Contains(info.WhenToUse, "MUTATING") {
 		t.Fatalf("WhenToUse should identify mutating behavior: %s", info.WhenToUse)
+	}
+}
+
+func TestExecuteK8sActionToolRequiresAdmin(t *testing.T) {
+	tool := NewExecuteK8sActionTool(&fakeCaller{}, newFakeK8sSnapshotReader(), slog.Default())
+	args := `{"cluster_id":1,"action":"scale","kind":"Deployment","namespace":"default","name":"api","replicas":3}`
+
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+	}{
+		{name: "missing identity", ctx: context.Background()},
+		{name: "ordinary user", ctx: tenantctx.With(context.Background(), tenantctx.Tenant{UserID: 2, Role: "user"})},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := tool.InvokableRun(tc.ctx, args); !errors.Is(err, errs.ErrForbidden) {
+				t.Fatalf("InvokableRun() error = %v, want forbidden", err)
+			}
+		})
 	}
 }
 
@@ -52,7 +74,8 @@ func TestExecuteK8sActionToolCallsControllerEdge(t *testing.T) {
 	}
 	tool := NewExecuteK8sActionTool(fc, newFakeK8sSnapshotReader(), slog.Default())
 
-	out, err := tool.InvokableRun(context.Background(), `{"cluster_id":1,"action":"scale","kind":"Deployment","namespace":"default","name":"api","replicas":3,"expected_resource_version":"10","reason":"roll new capacity"}`)
+	ctx := tenantctx.With(context.Background(), tenantctx.Tenant{UserID: 1, Role: "admin"})
+	out, err := tool.InvokableRun(ctx, `{"cluster_id":1,"action":"scale","kind":"Deployment","namespace":"default","name":"api","replicas":3,"expected_resource_version":"10","reason":"roll new capacity"}`)
 	if err != nil {
 		t.Fatalf("InvokableRun: %v", err)
 	}

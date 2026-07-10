@@ -15,6 +15,8 @@ enrollment:
   nodeBootstrapToken: ""
 
 image:
+  # Offline release bundles currently contain a linux/amd64 image only.
+  architecture: amd64
   edge:
     repository: ""
     tag: ""
@@ -27,6 +29,7 @@ image:
 node:
   serviceAccountName: ""
   collectorMode: ""
+  credentialHostPath: /var/tmp
   tolerations:
     - operator: Exists
   resources:
@@ -62,7 +65,9 @@ kubeStateMetrics:
   enabled: false
   serviceAccountName: ""
   image:
-    repository: registry.k8s.io/kube-state-metrics/kube-state-metrics
+    # Optional image is not bundled in the offline release. Mirror it to a
+    # registry reachable by the cluster before enabling this component.
+    repository: ""
     tag: v2.16.0
     pullPolicy: IfNotPresent
   port: 8080

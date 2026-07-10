@@ -1,4 +1,7 @@
 {{- define "ongrid-edge.name" -}}
+{{- if ne (default "amd64" .Values.image.architecture) "amd64" -}}
+{{- fail "image.architecture must be amd64; this release bundles only linux/amd64 Kubernetes images" -}}
+{{- end -}}
 {{- .Chart.Name | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
@@ -37,10 +40,6 @@ ongrid.io/cluster-id: {{ .Values.enrollment.clusterID | quote }}
 
 {{- define "ongrid-edge.controllerCredentialSecretName" -}}
 {{- printf "%s-controller-credentials" (include "ongrid-edge.fullname" .) -}}
-{{- end -}}
-
-{{- define "ongrid-edge.nodeCredentialSecretName" -}}
-{{- printf "%s-node-credentials" (include "ongrid-edge.fullname" .) -}}
 {{- end -}}
 
 {{- define "ongrid-edge.telemetryGatewayEnabled" -}}
