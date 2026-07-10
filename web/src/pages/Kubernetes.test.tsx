@@ -37,6 +37,25 @@ function ChatStateProbe() {
   return <div data-testid="initial-prompt">{state?.initialPrompt || ''}</div>;
 }
 
+function renderKubernetesList() {
+  return render(
+    <MemoryRouter>
+      <KubernetesPage />
+    </MemoryRouter>,
+  );
+}
+
+function renderKubernetesDetail(initialEntry = '/kubernetes/1', includeChatRoute = false) {
+  return render(
+    <MemoryRouter initialEntries={[initialEntry]}>
+      <Routes>
+        <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />
+        {includeChatRoute && <Route path="/chat/:sessionId" element={<ChatStateProbe />} />}
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
 describe('KubernetesPage', () => {
   beforeEach(() => {
     localStorage.setItem('ongrid-locale', 'zh-CN');
@@ -260,11 +279,7 @@ describe('KubernetesPage', () => {
   });
 
   it('渲染集群列表和接入状态', async () => {
-    render(
-      <MemoryRouter>
-        <KubernetesPage />
-      </MemoryRouter>,
-    );
+    renderKubernetesList();
 
     expect(await screen.findByText('kind-local')).toBeInTheDocument();
     expect(screen.getByText('full-node')).toBeInTheDocument();
@@ -289,11 +304,7 @@ describe('KubernetesPage', () => {
       }),
     );
 
-    render(
-      <MemoryRouter>
-        <KubernetesPage />
-      </MemoryRouter>,
-    );
+    renderKubernetesList();
 
     expect(await screen.findByText('kind-local')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '删除集群 kind-local' }));
@@ -338,11 +349,7 @@ describe('KubernetesPage', () => {
       }),
     );
 
-    render(
-      <MemoryRouter>
-        <KubernetesPage />
-      </MemoryRouter>,
-    );
+    renderKubernetesList();
 
     fireEvent.click(await screen.findByRole('button', { name: '接入集群' }));
     fireEvent.change(screen.getByLabelText('集群名称'), { target: { value: 'kind-created' } });
@@ -375,13 +382,7 @@ describe('KubernetesPage', () => {
   });
 
   it('渲染集群详情里的 Pod 快照', async () => {
-    render(
-      <MemoryRouter initialEntries={['/kubernetes/1?tab=pods']}>
-        <Routes>
-          <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderKubernetesDetail('/kubernetes/1?tab=pods');
 
     expect(await screen.findByText('ongrid-edge-controller-abc')).toBeInTheDocument();
     expect(screen.getAllByText('ongrid-system').length).toBeGreaterThan(0);
@@ -410,13 +411,7 @@ describe('KubernetesPage', () => {
   });
 
   it('集群详情提供 Helm 升级命令', async () => {
-    render(
-      <MemoryRouter initialEntries={['/kubernetes/1']}>
-        <Routes>
-          <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderKubernetesDetail('/kubernetes/1');
 
     fireEvent.click(await screen.findByRole('button', { name: '升级命令' }));
 
@@ -510,13 +505,7 @@ describe('KubernetesPage', () => {
       }),
     );
 
-    render(
-      <MemoryRouter initialEntries={['/kubernetes/1?tab=pods']}>
-        <Routes>
-          <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderKubernetesDetail('/kubernetes/1?tab=pods');
 
     expect(await screen.findByText('当前快照未发现需要处置的异常')).toBeInTheDocument();
     expect(screen.queryByText('Warning Event 1')).not.toBeInTheDocument();
@@ -556,13 +545,7 @@ describe('KubernetesPage', () => {
       ),
     );
 
-    render(
-      <MemoryRouter initialEntries={['/kubernetes/1?tab=nodes']}>
-        <Routes>
-          <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderKubernetesDetail('/kubernetes/1?tab=nodes');
 
     expect(await screen.findByText('Agent 版本')).toBeInTheDocument();
     expect(screen.getAllByText('v0.9.0').length).toBeGreaterThan(0);
@@ -604,13 +587,7 @@ describe('KubernetesPage', () => {
       }),
     );
 
-    render(
-      <MemoryRouter initialEntries={['/kubernetes/1?tab=pods']}>
-        <Routes>
-          <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderKubernetesDetail('/kubernetes/1?tab=pods');
 
     expect(await screen.findByText('pod-001')).toBeInTheDocument();
     expect(screen.getByText('显示前 100 条，共 150 条')).toBeInTheDocument();
@@ -677,13 +654,7 @@ describe('KubernetesPage', () => {
       }),
     );
 
-    render(
-      <MemoryRouter initialEntries={['/kubernetes/1?tab=pods']}>
-        <Routes>
-          <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderKubernetesDetail('/kubernetes/1?tab=pods');
 
     expect(await screen.findByText('ongrid-edge-controller-abc')).toBeInTheDocument();
     fireEvent.change(screen.getByRole('textbox', { name: '搜索资源' }), { target: { value: 'api' } });
@@ -774,13 +745,7 @@ describe('KubernetesPage', () => {
       }),
     );
 
-    render(
-      <MemoryRouter initialEntries={['/kubernetes/1?tab=pods']}>
-        <Routes>
-          <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderKubernetesDetail('/kubernetes/1?tab=pods');
 
     expect(await screen.findByText('ongrid-edge-controller-abc')).toBeInTheDocument();
 
@@ -831,13 +796,7 @@ describe('KubernetesPage', () => {
       }),
     );
 
-    render(
-      <MemoryRouter initialEntries={['/kubernetes/1?tab=pods']}>
-        <Routes>
-          <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderKubernetesDetail('/kubernetes/1?tab=pods');
 
     expect(await screen.findByText('ongrid-edge-controller-abc')).toBeInTheDocument();
     fireEvent.change(screen.getByRole('textbox', { name: '搜索资源' }), { target: { value: 'missing' } });
@@ -866,14 +825,7 @@ describe('KubernetesPage', () => {
       }),
     );
 
-    render(
-      <MemoryRouter initialEntries={['/kubernetes/1?tab=pods']}>
-        <Routes>
-          <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />
-          <Route path="/chat/:sessionId" element={<ChatStateProbe />} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderKubernetesDetail('/kubernetes/1?tab=pods', true);
 
     const podCell = await screen.findByText('ongrid-edge-controller-abc');
     const row = podCell.closest('tr');
@@ -947,14 +899,7 @@ describe('KubernetesPage', () => {
       }),
     );
 
-    render(
-      <MemoryRouter initialEntries={['/kubernetes/1?tab=events']}>
-        <Routes>
-          <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />
-          <Route path="/chat/:sessionId" element={<ChatStateProbe />} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderKubernetesDetail('/kubernetes/1?tab=events', true);
 
     const warningObject = await screen.findByText('Pod/api-crash-abc');
     const warningRow = warningObject.closest('tr');
@@ -1031,13 +976,7 @@ describe('KubernetesPage', () => {
       }),
     );
 
-    render(
-      <MemoryRouter initialEntries={['/kubernetes/1?tab=pods']}>
-        <Routes>
-          <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderKubernetesDetail('/kubernetes/1?tab=pods');
 
     expect(await screen.findByText('ongrid-edge-controller-abc')).toBeInTheDocument();
     fireEvent.change(screen.getByRole('textbox', { name: '搜索资源' }), { target: { value: 'api' } });
@@ -1111,13 +1050,7 @@ describe('KubernetesPage', () => {
       }),
     );
 
-    render(
-      <MemoryRouter initialEntries={['/kubernetes/1?tab=nodes']}>
-        <Routes>
-          <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderKubernetesDetail('/kubernetes/1?tab=nodes');
 
     expect((await screen.findAllByText('ongrid-k8s-control-plane')).length).toBeGreaterThan(0);
     fireEvent.change(screen.getByRole('textbox', { name: '搜索资源' }), { target: { value: 'ongrid' } });
@@ -1171,13 +1104,7 @@ describe('KubernetesPage', () => {
       http.get('/api/v1/k8s/clusters/:id/events', () => HttpResponse.json({ items: [], total: 0, limit: 100, offset: 0 })),
     );
 
-    render(
-      <MemoryRouter initialEntries={['/kubernetes/1?tab=nodes']}>
-        <Routes>
-          <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderKubernetesDetail('/kubernetes/1?tab=nodes');
 
     expect(await screen.findByText('集群数据可信度需要确认')).toBeInTheDocument();
     expect(screen.queryByText('下一步')).not.toBeInTheDocument();
@@ -1219,13 +1146,7 @@ describe('KubernetesPage', () => {
       http.get('/api/v1/aiops/mutating-proposals', () => HttpResponse.json({ items: [], total: 0 })),
     );
 
-    render(
-      <MemoryRouter initialEntries={['/kubernetes/99']}>
-        <Routes>
-          <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderKubernetesDetail('/kubernetes/99');
 
     expect((await screen.findAllByText('等待集群完成接入')).length).toBeGreaterThan(0);
     expect(screen.getAllByText('待接入').length).toBeGreaterThan(0);
@@ -1239,13 +1160,7 @@ describe('KubernetesPage', () => {
   });
 
   it('点击顶部资源分类后滚动到资源视图', async () => {
-    render(
-      <MemoryRouter initialEntries={['/kubernetes/1']}>
-        <Routes>
-          <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderKubernetesDetail('/kubernetes/1');
 
     await screen.findByText('集群健康结论');
     const podTabs = screen.getAllByRole('button', { name: /Pods/ });
@@ -1257,13 +1172,7 @@ describe('KubernetesPage', () => {
   });
 
   it('在 Nodes 视图把 Node Edge 作为设备入口展示', async () => {
-    render(
-      <MemoryRouter initialEntries={['/kubernetes/1?tab=nodes']}>
-        <Routes>
-          <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderKubernetesDetail('/kubernetes/1?tab=nodes');
 
     expect((await screen.findAllByText('ongrid-k8s-control-plane')).length).toBeGreaterThan(0);
     expect(screen.getByText('Node Edge #5')).toBeInTheDocument();
@@ -1289,14 +1198,7 @@ describe('KubernetesPage', () => {
       }),
     );
 
-    render(
-      <MemoryRouter initialEntries={['/kubernetes/1?tab=nodes']}>
-        <Routes>
-          <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />
-          <Route path="/chat/:sessionId" element={<ChatStateProbe />} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderKubernetesDetail('/kubernetes/1?tab=nodes', true);
 
     const nodeCells = await screen.findAllByText('ongrid-k8s-control-plane');
     const row = nodeCells.map((cell) => cell.closest('tr')).find(Boolean);
@@ -1318,13 +1220,7 @@ describe('KubernetesPage', () => {
   });
 
   it('Namespace 行可以直接跳转到对应命名空间的资源视图', async () => {
-    render(
-      <MemoryRouter initialEntries={['/kubernetes/1?tab=namespaces']}>
-        <Routes>
-          <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderKubernetesDetail('/kubernetes/1?tab=namespaces');
 
     const namespaceCell = (await screen.findAllByText('ongrid-system'))
       .find((item) => item.closest('td'));
@@ -1342,13 +1238,7 @@ describe('KubernetesPage', () => {
   });
 
   it('渲染 CrashLoopBackOff 诊断区和关联 Warning Event', async () => {
-    render(
-      <MemoryRouter initialEntries={['/kubernetes/1?tab=pods']}>
-        <Routes>
-          <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderKubernetesDetail('/kubernetes/1?tab=pods');
 
     expect(await screen.findByText('api-crash-abc')).toBeInTheDocument();
     expect(screen.getAllByText('CrashLoopBackOff').length).toBeGreaterThan(0);
@@ -1392,14 +1282,7 @@ describe('KubernetesPage', () => {
       }),
     );
 
-    render(
-      <MemoryRouter initialEntries={['/kubernetes/1?tab=pods']}>
-        <Routes>
-          <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />
-          <Route path="/chat/:sessionId" element={<ChatStateProbe />} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderKubernetesDetail('/kubernetes/1?tab=pods', true);
 
     expect(await screen.findByText('api-crash-abc')).toBeInTheDocument();
     expect(screen.getAllByText('建议动作').length).toBeGreaterThan(0);
@@ -1417,13 +1300,7 @@ describe('KubernetesPage', () => {
   });
 
   it('渲染当前集群的 K8s 写动作审计记录', async () => {
-    render(
-      <MemoryRouter initialEntries={['/kubernetes/1?tab=actions']}>
-        <Routes>
-          <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderKubernetesDetail('/kubernetes/1?tab=actions');
 
     expect(await screen.findByText('写动作')).toBeInTheDocument();
     expect(screen.getByText('安全处置建议')).toBeInTheDocument();
@@ -1529,13 +1406,7 @@ describe('KubernetesPage', () => {
       }),
     );
 
-    render(
-      <MemoryRouter initialEntries={['/kubernetes/1?tab=actions']}>
-        <Routes>
-          <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderKubernetesDetail('/kubernetes/1?tab=actions');
 
     expect(await screen.findByText('rollout_restart · default · Deployment/api')).toBeInTheDocument();
     expect(screen.getByText('delete_pod · default · Pod/api-crash-abc')).toBeInTheDocument();
@@ -1564,13 +1435,7 @@ describe('KubernetesPage', () => {
   });
 
   it('Actions 资源筛选无结果时展示当前筛选条件', async () => {
-    render(
-      <MemoryRouter initialEntries={['/kubernetes/1?tab=actions']}>
-        <Routes>
-          <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderKubernetesDetail('/kubernetes/1?tab=actions');
 
     expect(await screen.findByText('rollout_restart · default · Deployment/api')).toBeInTheDocument();
     fireEvent.change(screen.getByRole('textbox', { name: '搜索资源' }), { target: { value: 'missing-action' } });
@@ -1584,13 +1449,7 @@ describe('KubernetesPage', () => {
   });
 
   it('渲染 Namespaces 资源页签', async () => {
-    render(
-      <MemoryRouter initialEntries={['/kubernetes/1?tab=namespaces']}>
-        <Routes>
-          <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderKubernetesDetail('/kubernetes/1?tab=namespaces');
 
     expect((await screen.findAllByText('Namespaces')).length).toBeGreaterThan(0);
     expect(screen.getAllByText('ongrid-system').length).toBeGreaterThan(0);

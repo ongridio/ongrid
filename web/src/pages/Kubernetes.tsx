@@ -804,7 +804,7 @@ export function KubernetesClusterDetailPage() {
             <K8sPendingConnectionPanel cluster={cluster} />
           ) : (
             <>
-              <K8sOperationsOverview
+              <K8sHealthQueue
                 cluster={cluster}
                 crashLoopTotal={crashLoopTotal}
                 warningEventTotal={warningEventTotal}
@@ -1306,43 +1306,6 @@ function clusterVisibleIssueChips(
   return items.filter((item) => item.value > 0);
 }
 
-function K8sOperationsOverview({
-  cluster,
-  crashLoopTotal,
-  warningEventTotal,
-  triageIssues,
-  writeActionRecommendations,
-  loading,
-  isAdmin,
-  onOpenIssueResource,
-}: {
-  cluster: KubernetesCluster | null;
-  crashLoopTotal: number;
-  warningEventTotal: number;
-  triageIssues: K8sTriageIssue[];
-  writeActionRecommendations: K8sWriteActionRecommendation[];
-  loading: boolean;
-  isAdmin: boolean;
-  onOpenIssueResource(issue: K8sTriageIssue): void;
-}) {
-  if (!loading && triageIssues.length === 0) return null;
-
-  return (
-    <div className="mt-4">
-      <K8sHealthQueue
-        cluster={cluster}
-        crashLoopTotal={crashLoopTotal}
-        warningEventTotal={warningEventTotal}
-        triageIssues={triageIssues}
-        writeActionRecommendations={writeActionRecommendations}
-        loading={loading}
-        isAdmin={isAdmin}
-        onOpenIssueResource={onOpenIssueResource}
-      />
-    </div>
-  );
-}
-
 function K8sHealthQueue({
   cluster,
   crashLoopTotal,
@@ -1437,8 +1400,10 @@ function K8sHealthQueue({
     }
   }
 
+  if (!loading && !hasOpenIssues) return null;
+
   return (
-    <Card className="p-0">
+    <Card className="mt-4 p-0">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800/60 px-4 py-3">
         <div className="flex min-w-0 items-center gap-2">
           <ListChecks size={15} className="text-zinc-400" />

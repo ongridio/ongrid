@@ -200,7 +200,6 @@ func NewUsecase(repo Repository, edgeIssuer EdgeIssuer, cfg Config) *Usecase {
 }
 
 func (u *Usecase) SetTopologyMirror(m TopologyMirror) { u.topology = m }
-func (u *Usecase) SetEdgeRemover(r EdgeRemover)       { u.edgeRemover = r }
 
 func (u *Usecase) EventCleanupInterval() time.Duration {
 	if u == nil || u.cfg.EventCleanupInterval <= 0 {

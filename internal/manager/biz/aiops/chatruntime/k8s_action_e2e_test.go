@@ -1,20 +1,16 @@
-package chatruntime_test
+package chatruntime
 
 import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"strings"
-	"sync"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	einomodel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 
-	aibiz "github.com/ongridio/ongrid/internal/manager/biz/aiops"
-	"github.com/ongridio/ongrid/internal/manager/biz/aiops/chatruntime"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/graph"
 	aiopstools "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
@@ -39,7 +35,7 @@ func TestRuntimeK8sActionToolCallPassesReviewGateAndController(t *testing.T) {
 		"dry_run":    true,
 		"reason":     "e2e chat smoke",
 	})
-	model := newE2EScriptedChatModel(
+	model := newScriptedChatModel(
 		&schema.Message{
 			Role: schema.Assistant,
 			ToolCalls: []schema.ToolCall{{
@@ -100,8 +96,8 @@ func TestRuntimeK8sActionToolCallPassesReviewGateAndController(t *testing.T) {
 	}))
 
 	sess := &aiopsmodel.Session{ID: "s-k8s", UserID: 42}
-	store := newE2ESessionStore(sess)
-	rt, err := chatruntime.NewRuntime(chatruntime.Config{
+	store := newMemSessions(sess)
+	rt, err := NewRuntime(Config{
 		Sessions:  store,
 		ChatModel: model,
 		ToolBag:   []basetool.BaseTool{k8sActionTool},
@@ -111,14 +107,14 @@ func TestRuntimeK8sActionToolCallPassesReviewGateAndController(t *testing.T) {
 		t.Fatalf("NewRuntime: %v", err)
 	}
 
-	var events []chatruntime.Event
+	var events []Event
 	ctx := tenantctx.With(context.Background(), tenantctx.Tenant{UserID: 42, Role: "admin"})
-	reply, err := rt.Handle(ctx, &chatruntime.Request{
+	reply, err := rt.Handle(ctx, &Request{
 		SessionID: sess.ID,
 		UserID:    sess.UserID,
 		Role:      "admin",
 		UserText:  "把 default/api Deployment 扩到 2 个副本，先 dry-run",
-		Emit: func(ev chatruntime.Event) {
+		Emit: func(ev Event) {
 			events = append(events, ev)
 		},
 	})
@@ -185,199 +181,10 @@ func TestRuntimeK8sActionToolCallPassesReviewGateAndController(t *testing.T) {
 	if tc.ResultJSON == nil || !containsAll(*tc.ResultJSON, `"source":"kubernetes_api"`, `"controller_edge_id":77`, `"dry_run":true`) {
 		t.Fatalf("tool result json = %v", tc.ResultJSON)
 	}
-	if !sawToolEvent(events, chatruntime.EventToolStart, aiopstools.ToolNameExecuteK8sAction) ||
-		!sawToolEvent(events, chatruntime.EventToolEnd, aiopstools.ToolNameExecuteK8sAction) {
+	if !sawToolEvent(events, EventToolStart, aiopstools.ToolNameExecuteK8sAction) ||
+		!sawToolEvent(events, EventToolEnd, aiopstools.ToolNameExecuteK8sAction) {
 		t.Fatalf("missing tool lifecycle events: %+v", events)
 	}
-}
-
-type e2eScriptedChatModel struct {
-	mu      sync.Mutex
-	replies []*schema.Message
-	idx     int
-	calls   atomic.Int32
-}
-
-func newE2EScriptedChatModel(replies ...*schema.Message) *e2eScriptedChatModel {
-	return &e2eScriptedChatModel{replies: replies}
-}
-
-func (s *e2eScriptedChatModel) Generate(_ context.Context, _ []*schema.Message, _ ...einomodel.Option) (*schema.Message, error) {
-	s.calls.Add(1)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if len(s.replies) == 0 {
-		return &schema.Message{Role: schema.Assistant, Content: "ok"}, nil
-	}
-	if s.idx < len(s.replies) {
-		out := s.replies[s.idx]
-		s.idx++
-		return out, nil
-	}
-	return s.replies[len(s.replies)-1], nil
-}
-
-func (s *e2eScriptedChatModel) Stream(ctx context.Context, input []*schema.Message, opts ...einomodel.Option) (*schema.StreamReader[*schema.Message], error) {
-	msg, err := s.Generate(ctx, input, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return schema.StreamReaderFromArray([]*schema.Message{msg}), nil
-}
-
-func (s *e2eScriptedChatModel) BindTools(_ []*schema.ToolInfo) error { return nil }
-
-func (s *e2eScriptedChatModel) WithTools(_ []*schema.ToolInfo) (einomodel.ToolCallingChatModel, error) {
-	return s, nil
-}
-
-type e2eSessionStore struct {
-	mu        sync.Mutex
-	sessions  map[string]*aiopsmodel.Session
-	messages  []*aiopsmodel.Message
-	toolCalls []*aiopsmodel.ToolCall
-	nextMsg   int
-	nextTool  int
-}
-
-var _ aibiz.SessionRepo = (*e2eSessionStore)(nil)
-
-func newE2ESessionStore(seed *aiopsmodel.Session) *e2eSessionStore {
-	store := &e2eSessionStore{sessions: map[string]*aiopsmodel.Session{}}
-	if seed != nil {
-		cp := *seed
-		store.sessions[seed.ID] = &cp
-	}
-	return store
-}
-
-func (s *e2eSessionStore) CreateSession(_ context.Context, sess *aiopsmodel.Session) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	cp := *sess
-	s.sessions[sess.ID] = &cp
-	return nil
-}
-
-func (s *e2eSessionStore) GetSession(_ context.Context, id string) (*aiopsmodel.Session, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	sess, ok := s.sessions[id]
-	if !ok {
-		return nil, errs.ErrNotFound
-	}
-	cp := *sess
-	return &cp, nil
-}
-
-func (s *e2eSessionStore) ListSessions(_ context.Context, userID uint64, _, _ int, _ *uint64) ([]*aiopsmodel.Session, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]*aiopsmodel.Session, 0)
-	for _, sess := range s.sessions {
-		if sess.UserID != userID {
-			continue
-		}
-		cp := *sess
-		out = append(out, &cp)
-	}
-	return out, nil
-}
-
-func (s *e2eSessionStore) ListByParent(_ context.Context, parentID string) ([]*aiopsmodel.Session, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]*aiopsmodel.Session, 0)
-	for _, sess := range s.sessions {
-		if sess.ParentSessionID == nil || *sess.ParentSessionID != parentID {
-			continue
-		}
-		cp := *sess
-		out = append(out, &cp)
-	}
-	return out, nil
-}
-
-func (s *e2eSessionStore) CloseSession(_ context.Context, id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if sess, ok := s.sessions[id]; ok {
-		now := time.Now().UTC()
-		sess.ClosedAt = &now
-	}
-	return nil
-}
-
-func (s *e2eSessionStore) RenameSession(_ context.Context, _, _ string) error { return nil }
-
-func (s *e2eSessionStore) DeleteSession(_ context.Context, id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.sessions, id)
-	return nil
-}
-
-func (s *e2eSessionStore) AppendMessage(_ context.Context, msg *aiopsmodel.Message) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	cp := *msg
-	if cp.ID == "" {
-		s.nextMsg++
-		cp.ID = "msg-e2e-" + itoa(s.nextMsg)
-	}
-	s.messages = append(s.messages, &cp)
-	msg.ID = cp.ID
-	return nil
-}
-
-func (s *e2eSessionStore) ListMessages(_ context.Context, sessionID string, _ int) ([]*aiopsmodel.Message, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]*aiopsmodel.Message, 0, len(s.messages))
-	for _, msg := range s.messages {
-		if msg.SessionID != sessionID {
-			continue
-		}
-		cp := *msg
-		if len(msg.ToolCalls) > 0 {
-			cp.ToolCalls = append([]aiopsmodel.ToolCall(nil), msg.ToolCalls...)
-		}
-		out = append(out, &cp)
-	}
-	return out, nil
-}
-
-func (s *e2eSessionStore) CreateToolCall(_ context.Context, tc *aiopsmodel.ToolCall) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	cp := *tc
-	if cp.ID == "" {
-		s.nextTool++
-		cp.ID = "tc-e2e-" + itoa(s.nextTool)
-	}
-	s.toolCalls = append(s.toolCalls, &cp)
-	tc.ID = cp.ID
-	return nil
-}
-
-func (s *e2eSessionStore) UpdateToolCallResult(_ context.Context, id string, status string, resultJSON, errStr *string, endedAt time.Time) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, tc := range s.toolCalls {
-		if tc.ID != id {
-			continue
-		}
-		tc.Status = status
-		tc.ResultJSON = resultJSON
-		tc.Error = errStr
-		tc.EndedAt = &endedAt
-		return nil
-	}
-	return nil
-}
-
-func (s *e2eSessionStore) SumTokensSince(_ context.Context, _ time.Time) (aibiz.TokenSums, error) {
-	return aibiz.TokenSums{}, nil
 }
 
 type e2eK8sActionCaller struct {
@@ -470,7 +277,7 @@ func (s *e2eProposalSink) Insert(_ context.Context, ev decorators.MutatingPropos
 	if s.executed == nil {
 		s.executed = map[string]bool{}
 	}
-	return "proposal-" + itoa(len(s.inserts)), nil
+	return "proposal-" + strconv.Itoa(len(s.inserts)), nil
 }
 
 func (s *e2eProposalSink) UpdateDecision(_ context.Context, id, decision string, _ string) error {
@@ -507,27 +314,11 @@ func containsAll(s string, wants ...string) bool {
 	return true
 }
 
-func contains(s, sub string) bool {
-	return strings.Contains(s, sub)
-}
-
-func sawToolEvent(events []chatruntime.Event, typ chatruntime.EventType, name string) bool {
+func sawToolEvent(events []Event, typ EventType, name string) bool {
 	for _, ev := range events {
 		if ev.Type == typ && ev.Tool != nil && ev.Tool.Name == name {
 			return true
 		}
 	}
 	return false
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	out := []byte{}
-	for n > 0 {
-		out = append([]byte{byte('0' + n%10)}, out...)
-		n /= 10
-	}
-	return string(out)
 }
