@@ -1,11 +1,11 @@
 // Package grafana orchestrates the manager-side Grafana auto-config flow
 // (PR-2). The biz layer bridges three things:
 //
-//   1. system_settings.{category=grafana} for the operator-supplied root
-//      URL + service-account token
-//   2. system_settings.{category=prom}.query_url so the auto-created
-//      datasource points at the same TSDB the manager is writing to
-//   3. embedded dashboard JSON shipped inside the manager binary
+//  1. system_settings.{category=grafana} for the operator-supplied root
+//     URL + service-account token
+//  2. system_settings.{category=prom}.query_url so the auto-created
+//     datasource points at the same TSDB the manager is writing to
+//  3. embedded dashboard JSON shipped inside the manager binary
 //
 // Two ops are exposed:
 //   - Test: build a Client from settings, hit /api/health
@@ -37,10 +37,15 @@ import (
 // them as keys for "is this already there?". Renaming them would create
 // duplicates instead of replacing.
 const (
-	folderUID    = "ongrid"
-	folderTitle  = "ongrid"
-	datasourceUID  = "ongrid-prometheus"
-	datasourceName = "ongrid-prometheus"
+	folderUID      = "ongrid"
+	folderTitle    = "ongrid"
+	datasourceUID  = promDatasourceUID
+	datasourceName = promDatasourceName
+
+	promDatasourceUID  = "ongrid-prometheus"
+	promDatasourceName = "ongrid-prometheus"
+	lokiDatasourceUID  = "ongrid-loki"
+	lokiDatasourceName = "ongrid-loki"
 )
 
 //go:embed dashboards/*.json
@@ -172,6 +177,7 @@ func (s *Service) BootstrapEmbedded(ctx context.Context, adminUser, adminPasswor
 type SyncResult struct {
 	Folder      string   `json:"folder"`
 	Datasource  string   `json:"datasource"`
+	Datasources []string `json:"datasources,omitempty"`
 	Dashboards  []string `json:"dashboards"` // titles synced
 }
 
@@ -216,8 +222,8 @@ func (s *Service) Sync(ctx context.Context) (*SyncResult, error) {
 	basicPass, _, _ := s.settings.Get(ctx, settingmodel.CategoryProm, settingmodel.KeyPromBasicPassword)
 
 	ds := pkggrafana.Datasource{
-		UID:    datasourceUID,
-		Name:   datasourceName,
+		UID:    promDatasourceUID,
+		Name:   promDatasourceName,
 		Type:   "prometheus",
 		URL:    promURL,
 		Access: "proxy",
@@ -235,7 +241,15 @@ func (s *Service) Sync(ctx context.Context) (*SyncResult, error) {
 		ds.SecureJSONData = map[string]string{"basicAuthPassword": basicPass}
 	}
 	if err := c.UpsertDatasource(ctx, ds); err != nil {
-		return nil, fmt.Errorf("upsert datasource: %w", err)
+		return nil, fmt.Errorf("upsert prometheus datasource: %w", err)
+	}
+
+	datasources := []string{promDatasourceName}
+	if lokiDS := s.lokiDatasource(ctx); lokiDS != nil {
+		if err := c.UpsertDatasource(ctx, *lokiDS); err != nil {
+			return nil, fmt.Errorf("upsert loki datasource: %w", err)
+		}
+		datasources = append(datasources, lokiDatasourceName)
 	}
 
 	titles, err := s.pushDashboards(ctx, c)
@@ -244,16 +258,47 @@ func (s *Service) Sync(ctx context.Context) (*SyncResult, error) {
 	}
 
 	res := &SyncResult{
-		Folder:     folderTitle,
-		Datasource: datasourceName,
-		Dashboards: titles,
+		Folder:      folderTitle,
+		Datasource:  promDatasourceName,
+		Datasources: datasources,
+		Dashboards:  titles,
 	}
 	s.log.Info("grafana sync done",
 		slog.String("folder", res.Folder),
-		slog.String("datasource", res.Datasource),
+		slog.Any("datasources", res.Datasources),
 		slog.Int("dashboards", len(res.Dashboards)),
 	)
 	return res, nil
+}
+
+func (s *Service) lokiDatasource(ctx context.Context) *pkggrafana.Datasource {
+	lokiURL, _, _ := s.settings.Get(ctx, settingmodel.CategoryLoki, settingmodel.KeyLokiURL)
+	lokiURL = strings.TrimRight(strings.TrimSpace(lokiURL), "/")
+	if lokiURL == "" {
+		return nil
+	}
+	ds := &pkggrafana.Datasource{
+		UID:    lokiDatasourceUID,
+		Name:   lokiDatasourceName,
+		Type:   "loki",
+		URL:    lokiURL,
+		Access: "proxy",
+		JSONData: map[string]any{
+			"timeout":  60,
+			"maxLines": 5000,
+		},
+	}
+	if tlsInsecure, _, _ := s.settings.Get(ctx, settingmodel.CategoryLoki, settingmodel.KeyLokiTLSInsecure); strings.EqualFold(strings.TrimSpace(tlsInsecure), "true") {
+		ds.JSONData["tlsSkipVerify"] = true
+	}
+	basicUser, _, _ := s.settings.Get(ctx, settingmodel.CategoryLoki, settingmodel.KeyLokiBasicUser)
+	basicPass, _, _ := s.settings.Get(ctx, settingmodel.CategoryLoki, settingmodel.KeyLokiBasicPassword)
+	if basicUser = strings.TrimSpace(basicUser); basicUser != "" {
+		ds.BasicAuth = true
+		ds.BasicAuthUser = basicUser
+		ds.SecureJSONData = map[string]string{"basicAuthPassword": basicPass}
+	}
+	return ds
 }
 
 // client builds a pkg/grafana.Client from settings; returns a friendly
@@ -473,14 +518,14 @@ func buildMonitorDashboardJSON(uid, title string, panels []*monitormodel.Panel) 
 		})
 	}
 	return map[string]any{
-		"uid":         uid,
-		"title":       title,
-		"description": "Auto-managed by ongrid. Edits in Grafana will be overwritten — change panels in the ongrid Monitor page.",
-		"tags":        []string{"ongrid", "managed"},
-		"editable":    true,
-		"timezone":    "",
+		"uid":           uid,
+		"title":         title,
+		"description":   "Auto-managed by ongrid. Edits in Grafana will be overwritten — change panels in the ongrid Monitor page.",
+		"tags":          []string{"ongrid", "managed"},
+		"editable":      true,
+		"timezone":      "",
 		"schemaVersion": 38,
-		"panels":      gPanels,
+		"panels":        gPanels,
 		"time": map[string]any{
 			"from": "now-1h",
 			"to":   "now",

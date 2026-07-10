@@ -14,7 +14,7 @@ datasources:
     # the grafana service compose env now; keep this a plain ${VAR}.
     url: ${ONGRID_LOG_URL}
     isDefault: false
-    editable: false
+    editable: true
     jsonData:
       timeout: 60
       maxLines: 5000

@@ -12,7 +12,7 @@ datasources:
     # (v0.7.40 fix). Default lives in the grafana service compose env.
     url: ${ONGRID_LOG_URL}
     isDefault: false
-    editable: false
+    editable: true
     jsonData:
       timeout: 60
       maxLines: 5000
