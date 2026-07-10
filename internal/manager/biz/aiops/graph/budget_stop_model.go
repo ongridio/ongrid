@@ -68,7 +68,13 @@ func latestTerminalToolBudget(messages []*schema.Message) (toolBudgetEnvelope, b
 	var zero toolBudgetEnvelope
 	for i := len(messages) - 1; i >= 0; i-- {
 		msg := messages[i]
-		if msg == nil || msg.Role != schema.Tool {
+		if msg == nil {
+			continue
+		}
+		if msg.Role == schema.User && !isSystemReminderMessage(msg.Content) {
+			return zero, false
+		}
+		if msg.Role != schema.Tool {
 			continue
 		}
 		var env toolBudgetEnvelope
@@ -80,6 +86,11 @@ func latestTerminalToolBudget(messages []*schema.Message) (toolBudgetEnvelope, b
 		}
 	}
 	return zero, false
+}
+
+func isSystemReminderMessage(content string) bool {
+	trimmed := strings.TrimSpace(strings.ToLower(content))
+	return strings.HasPrefix(trimmed, "<system-reminder>")
 }
 
 func wantsEnglishResponse(messages []*schema.Message) bool {

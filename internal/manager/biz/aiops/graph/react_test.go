@@ -233,6 +233,30 @@ func TestBudgetStopModel_FinalizesAfterToolBudget(t *testing.T) {
 	}
 }
 
+func TestBudgetStopModel_IgnoresPriorTurnToolBudget(t *testing.T) {
+	t.Parallel()
+	inner := newScriptedChatModel(&schema.Message{
+		Role:    schema.Assistant,
+		Content: "new turn answered",
+	})
+	wrapped := wrapBudgetStopModel(inner)
+	got, err := wrapped.Generate(context.Background(), []*schema.Message{
+		schema.UserMessage("查日志"),
+		schema.ToolMessage(`{"status":"call_budget_exceeded","tool":"query_logql","final_answer_required":true}`, "call_1", schema.WithToolName("query_logql")),
+		schema.UserMessage("改查最近 10 分钟 api-gateway"),
+		schema.UserMessage("<system-reminder>stop loops</system-reminder>"),
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if got.Role != schema.Assistant || got.Content != "new turn answered" {
+		t.Fatalf("budget stop response = %+v, want inner model response", got)
+	}
+	if inner.st.generateCalls.Load() != 1 {
+		t.Fatalf("inner model was called %d time(s), want 1", inner.st.generateCalls.Load())
+	}
+}
+
 func TestBuildReActGraph_NilModelFails(t *testing.T) {
 	t.Parallel()
 	if _, err := BuildReActGraph(nil, nil, Config{}); err == nil {
