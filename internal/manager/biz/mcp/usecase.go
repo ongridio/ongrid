@@ -41,11 +41,17 @@ type SecretResolver interface {
 	ResolveFields(ctx context.Context, name string) (map[string]string, error)
 }
 
+// ToolChangeHook is notified after MCP registrations or discovered tool
+// snapshots change. cmd/ongrid uses it to refresh the chat runtime toolbag
+// without restarting the manager.
+type ToolChangeHook func(ctx context.Context)
+
 // Usecase is the MCP-server-registration facade.
 type Usecase struct {
-	repo    Repo
-	secrets SecretResolver
-	log     *slog.Logger
+	repo           Repo
+	secrets        SecretResolver
+	log            *slog.Logger
+	onToolsChanged ToolChangeHook
 }
 
 // NewUsecase wires the repo, credential resolver, and logger.
@@ -54,6 +60,21 @@ func NewUsecase(repo Repo, secrets SecretResolver, log *slog.Logger) *Usecase {
 		log = slog.Default()
 	}
 	return &Usecase{repo: repo, secrets: secrets, log: log}
+}
+
+// SetToolChangeHook wires the optional hot-reload callback. nil clears it.
+func (u *Usecase) SetToolChangeHook(h ToolChangeHook) {
+	if u == nil {
+		return
+	}
+	u.onToolsChanged = h
+}
+
+func (u *Usecase) notifyToolsChanged(ctx context.Context) {
+	if u == nil || u.onToolsChanged == nil {
+		return
+	}
+	u.onToolsChanged(ctx)
 }
 
 // Create validates and stores a new server registration.
@@ -67,6 +88,7 @@ func (u *Usecase) Create(ctx context.Context, s *model.Server) (*model.Server, e
 	if err := u.repo.Create(ctx, s); err != nil {
 		return nil, err
 	}
+	u.notifyToolsChanged(ctx)
 	return s, nil
 }
 
@@ -78,11 +100,21 @@ func (u *Usecase) Update(ctx context.Context, id uint64, patch *model.Server) er
 	if err := normalizeAndValidate(patch); err != nil {
 		return err
 	}
-	return u.repo.Update(ctx, id, patch)
+	if err := u.repo.Update(ctx, id, patch); err != nil {
+		return err
+	}
+	u.notifyToolsChanged(ctx)
+	return nil
 }
 
 // Delete removes a server registration.
-func (u *Usecase) Delete(ctx context.Context, id uint64) error { return u.repo.Delete(ctx, id) }
+func (u *Usecase) Delete(ctx context.Context, id uint64) error {
+	if err := u.repo.Delete(ctx, id); err != nil {
+		return err
+	}
+	u.notifyToolsChanged(ctx)
+	return nil
+}
 
 // Get returns one server by id.
 func (u *Usecase) Get(ctx context.Context, id uint64) (*model.Server, error) {
@@ -195,6 +227,7 @@ func (u *Usecase) TestConnection(ctx context.Context, id uint64) ([]mcpclient.To
 		_ = u.repo.SetToolsCache(ctx, id, string(b))
 	}
 	_ = u.repo.SetStatus(ctx, id, "ok", "")
+	u.notifyToolsChanged(ctx)
 	return tools, nil
 }
 

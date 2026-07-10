@@ -94,7 +94,7 @@ func MCPToolClass(bareName string) string {
 			return "destructive"
 		}
 	}
-	for _, v := range []string{"list", "get", "read", "view", "describe", "log", "top", "stat", "status", "summary", "event", "watch", "search", "info", "query", "show", "fetch", "inspect", "config", "cat", "tail", "head"} {
+	for _, v := range []string{"list", "get", "mget", "read", "view", "describe", "log", "top", "stat", "status", "summary", "event", "watch", "search", "msearch", "query", "count", "info", "health", "indices", "mapping", "show", "fetch", "inspect", "config", "cat", "tail", "head"} {
 		if strings.Contains(n, v) {
 			return "read"
 		}

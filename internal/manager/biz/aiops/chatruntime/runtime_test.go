@@ -530,6 +530,26 @@ func TestRuntime_ToolCountAndNames(t *testing.T) {
 	}
 }
 
+func TestRuntimeReplaceToolsByOrigin(t *testing.T) {
+	t.Parallel()
+	rt := &Runtime{cfg: Config{ToolBag: []basetool.BaseTool{
+		&fakeTool{name: "query_promql", schema: `{"type":"object"}`},
+		&fakeTool{name: "mcp__old__search", schema: `{"type":"object"}`, origin: basetool.OriginMCP},
+	}}}
+
+	rt.ReplaceToolsByOrigin(basetool.OriginMCP, []basetool.BaseTool{
+		&fakeTool{name: "mcp__new__search", schema: `{"type":"object"}`, origin: basetool.OriginMCP},
+	})
+
+	names := rt.ToolNames(context.Background())
+	if len(names) != 2 {
+		t.Fatalf("names = %v", names)
+	}
+	if names[0] != "query_promql" || names[1] != "mcp__new__search" {
+		t.Fatalf("names = %v, want builtin + refreshed MCP", names)
+	}
+}
+
 // strPtr is a small helper for tool-message content/name pointer
 // fields in the test fixtures below. Inline helpers everywhere bloats
 // the test fixture noise and obscures the assertions.
@@ -807,6 +827,7 @@ func contains(s, sub string) bool {
 type fakeTool struct {
 	name   string
 	schema string
+	origin string
 }
 
 func (f *fakeTool) Info(_ context.Context) (*basetool.ToolInfo, error) {
@@ -815,6 +836,7 @@ func (f *fakeTool) Info(_ context.Context) (*basetool.ToolInfo, error) {
 		Description: "fake",
 		Parameters:  []byte(f.schema),
 		Class:       "read",
+		Origin:      f.origin,
 	}, nil
 }
 
