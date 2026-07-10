@@ -172,9 +172,10 @@ Apache 2.0 — see [LICENSE](LICENSE).
 
 ## Star History
 
-<a href="https://www.star-history.com/#ongridio/ongrid&amp;Date">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=ongridio/ongrid&amp;type=Date&amp;theme=dark" />
-    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=ongridio/ongrid&amp;type=Date" />
-  </picture>
+<a href="https://www.star-history.com/?repos=ongridio%2Fongrid&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=ongridio/ongrid&type=date&theme=dark&legend=top-left&sealed_token=VHSy5FON2jPDXDSE6XgZ1duQ2aWNlxPhpwre2mCGTiEoClJaoM_oblfchEFQGQdxhdhCXaX4FOsDaKyVjbdj7f0DVYbj-sf7VWKlI52co0YxSxXC5_0kctKzFtGWrJVGLApHX9YRVvFk15vOcmZI3Pi0vZycsCBEmrTZdbSqJ4yytOH5i4uzmqR2d5U7" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=ongridio/ongrid&type=date&legend=top-left&sealed_token=VHSy5FON2jPDXDSE6XgZ1duQ2aWNlxPhpwre2mCGTiEoClJaoM_oblfchEFQGQdxhdhCXaX4FOsDaKyVjbdj7f0DVYbj-sf7VWKlI52co0YxSxXC5_0kctKzFtGWrJVGLApHX9YRVvFk15vOcmZI3Pi0vZycsCBEmrTZdbSqJ4yytOH5i4uzmqR2d5U7" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=ongridio/ongrid&type=date&legend=top-left&sealed_token=VHSy5FON2jPDXDSE6XgZ1duQ2aWNlxPhpwre2mCGTiEoClJaoM_oblfchEFQGQdxhdhCXaX4FOsDaKyVjbdj7f0DVYbj-sf7VWKlI52co0YxSxXC5_0kctKzFtGWrJVGLApHX9YRVvFk15vOcmZI3Pi0vZycsCBEmrTZdbSqJ4yytOH5i4uzmqR2d5U7" />
+ </picture>
 </a>
