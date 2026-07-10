@@ -74,6 +74,39 @@ func TestFindOrCreateByFingerprintSoftDeleteAllowsReuse(t *testing.T) {
 	}
 }
 
+func TestFindOrCreateByFingerprintDoesNotInsertExistingLiveRow(t *testing.T) {
+	db := newDeviceTestDB(t)
+	var createCalls int
+	if err := db.Callback().Create().Before("gorm:create").Register("test:count_device_creates", func(tx *gorm.DB) {
+		if _, ok := tx.Statement.Dest.(*model.Device); ok {
+			createCalls++
+		}
+	}); err != nil {
+		t.Fatalf("register create callback: %v", err)
+	}
+	repo := NewRepo(db)
+	ctx := context.Background()
+
+	first, err := repo.FindOrCreateByFingerprint(ctx, sampleDevice("stable-host"))
+	if err != nil {
+		t.Fatalf("first FindOrCreateByFingerprint: %v", err)
+	}
+	if createCalls != 1 {
+		t.Fatalf("create calls after first register = %d, want 1", createCalls)
+	}
+
+	again, err := repo.FindOrCreateByFingerprint(ctx, sampleDevice("stable-host"))
+	if err != nil {
+		t.Fatalf("second FindOrCreateByFingerprint: %v", err)
+	}
+	if again.ID != first.ID {
+		t.Fatalf("second register returned id %d, want existing id %d", again.ID, first.ID)
+	}
+	if createCalls != 1 {
+		t.Fatalf("create calls after duplicate register = %d, want still 1", createCalls)
+	}
+}
+
 func TestEdgeDeviceLinkSoftDeleteAllowsReuse(t *testing.T) {
 	db := newDeviceTestDB(t)
 	repo := NewEdgeDeviceRepo(db)

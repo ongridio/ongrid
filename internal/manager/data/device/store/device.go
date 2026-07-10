@@ -6,10 +6,10 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
 	biz "github.com/ongridio/ongrid/internal/manager/biz/device"
 	model "github.com/ongridio/ongrid/internal/manager/model/device"
@@ -28,28 +28,49 @@ func NewRepo(db *gorm.DB) *Repo { return &Repo{db: db} }
 var _ biz.Repo = (*Repo)(nil)
 
 // FindOrCreateByFingerprint returns the existing row for seed.Fingerprint
-// or creates a fresh row populated from seed. Implementation uses an
-// ON CONFLICT DO NOTHING insert plus a follow-up select; this works on
-// both MySQL and SQLite without requiring database-level locking.
+// or creates a fresh row populated from seed. The read-first path avoids
+// burning MySQL AUTO_INCREMENT values on every duplicate register.
 func (r *Repo) FindOrCreateByFingerprint(ctx context.Context, seed *model.Device) (*model.Device, error) {
 	if seed == nil || seed.Fingerprint == "" {
 		return nil, errs.ErrInvalid
 	}
-	tx := r.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "fingerprint"}, {Name: "delete_marker"}},
-		DoNothing: true,
-	}).Create(seed)
-	if tx.Error != nil {
-		return nil, tx.Error
+	out, err := r.findLiveByFingerprint(ctx, seed.Fingerprint)
+	if err == nil {
+		return out, nil
 	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	if err := r.db.WithContext(ctx).Create(seed).Error; err != nil {
+		if isDuplicateKey(err) {
+			return r.findLiveByFingerprint(ctx, seed.Fingerprint)
+		}
+		return nil, err
+	}
+	return seed, nil
+}
+
+func (r *Repo) findLiveByFingerprint(ctx context.Context, fp string) (*model.Device, error) {
 	var out model.Device
-	if err := r.db.WithContext(ctx).Where("fingerprint = ?", seed.Fingerprint).First(&out).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("fingerprint = ? AND delete_marker = 0", fp).First(&out).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errs.ErrNotFound
+			return nil, gorm.ErrRecordNotFound
 		}
 		return nil, err
 	}
 	return &out, nil
+}
+
+func isDuplicateKey(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "UNIQUE") || strings.Contains(msg, "Duplicate") || strings.Contains(msg, "duplicate")
 }
 
 // RebindFingerprint moves a device from oldFP to newFP in place. See the
