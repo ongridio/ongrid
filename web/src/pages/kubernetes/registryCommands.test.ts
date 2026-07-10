@@ -1,11 +1,12 @@
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
 import {
-  containerdInsecureRegistryCommand,
-  dockerInsecureRegistryCommand,
   managerRegistryHostFromCommand,
+  registrySetupCommand,
 } from './registryCommands';
 
 describe('Kubernetes registry commands', () => {
@@ -14,12 +15,22 @@ describe('Kubernetes registry commands', () => {
     const registry = managerRegistryHostFromCommand(install);
     expect(registry).toBe('manager.example:8443');
 
-    for (const command of [
-      containerdInsecureRegistryCommand(registry),
-      dockerInsecureRegistryCommand(registry),
-    ]) {
-      const checked = spawnSync('bash', ['-n'], { input: command, encoding: 'utf8' });
-      expect(checked.status, checked.stderr).toBe(0);
-    }
+    const command = registrySetupCommand(registry);
+    expect(command).toBe(
+      "curl -kfsSL 'https://manager.example:8443/edge/k8s/registry-setup.sh' | " +
+        "bash -s -- --registry='manager.example:8443'",
+    );
+    const checked = spawnSync('bash', ['-n'], { input: command, encoding: 'utf8' });
+    expect(checked.status, checked.stderr).toBe(0);
+  });
+
+  it('ships an executable runtime auto-detection script', () => {
+    const script = readFileSync(resolve(process.cwd(), '../deploy/kubernetes/registry-setup.sh'), 'utf8');
+    const checked = spawnSync('bash', ['-n'], { input: script, encoding: 'utf8' });
+
+    expect(checked.status, checked.stderr).toBe(0);
+    expect(script).toContain('configure_k3s');
+    expect(script).toContain('configure_containerd');
+    expect(script).toContain('configure_docker');
   });
 });

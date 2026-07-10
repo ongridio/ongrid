@@ -1,6 +1,7 @@
 {{- define "ongrid-edge.name" -}}
-{{- if ne (default "amd64" .Values.image.architecture) "amd64" -}}
-{{- fail "image.architecture must be amd64; this release bundles only linux/amd64 Kubernetes images" -}}
+{{- $architecture := default "amd64" .Values.image.architecture -}}
+{{- if and (ne $architecture "amd64") (ne $architecture "arm64") -}}
+{{- fail "image.architecture must be amd64 or arm64" -}}
 {{- end -}}
 {{- .Chart.Name | trunc 63 | trimSuffix "-" -}}
 {{- end -}}

@@ -8,6 +8,10 @@ import { listSessions, type ChatSession } from '@/api/chat';
 import { request } from '@/api/client';
 import { useIncidentBadge } from '@/store/incidentBadge';
 import { useI18n } from '@/i18n/locale';
+import {
+  filterVisibleDeviceEdges,
+  loadK8sEdgeAttachments,
+} from '@/pages/kubernetes/edgeAttachments';
 
 type Tone = 'ok' | 'warn' | 'muted';
 
@@ -68,9 +72,12 @@ export function StatusRow() {
     async function tick() {
       // edges
       try {
-        const r = await listEdges();
+        const [r, k8sAttachments] = await Promise.all([
+          listEdges(),
+          loadK8sEdgeAttachments(),
+        ]);
         if (!cancelled) {
-          setEdges(r.items ?? []);
+          setEdges(filterVisibleDeviceEdges(r.items ?? [], k8sAttachments));
           setEdgesError(false);
         }
       } catch {

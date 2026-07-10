@@ -504,6 +504,8 @@ build-edge-bundle: ## [release] 打 ADR-024 edge upgrade bundle 到 dist/out/edg
 package-k8s-chart: ## [dev/release] 打 Kubernetes Helm chart 到 bin/k8s/ongrid-edge.tgz（nginx /edge/k8s/ 静态目录）
 	@mkdir -p bin/k8s
 	COPYFILE_DISABLE=1 tar -C deploy/kubernetes -czf bin/k8s/ongrid-edge.tgz ongrid-edge
+	@cp deploy/kubernetes/registry-setup.sh bin/k8s/registry-setup.sh
+	@chmod 755 bin/k8s/registry-setup.sh
 	@cp bin/k8s/ongrid-edge.tgz bin/ongrid-edge.tgz
 
 .PHONY: fetch-embedding-model

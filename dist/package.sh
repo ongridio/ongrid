@@ -424,6 +424,8 @@ if [[ -d "${REPO_ROOT}/deploy/kubernetes/ongrid-edge" ]]; then
 else
     warn "Kubernetes chart deploy/kubernetes/ongrid-edge missing; K8s onboarding command will require ONGRID_K8S_CHART_REF override"
 fi
+copy_opt "${REPO_ROOT}/deploy/kubernetes/registry-setup.sh" \
+         "${STAGE_DIR}/edge/k8s/registry-setup.sh" 755
 
 # --- edge binaries -----------------------------------------------------------
 # Edges are amd64-only in our deployments (the user's directive), so we ship a

@@ -77,9 +77,8 @@ import {
   type ResourceTotals,
 } from './kubernetes/model';
 import {
-  containerdInsecureRegistryCommand,
-  dockerInsecureRegistryCommand,
   managerRegistryHostFromCommand,
+  registrySetupCommand,
 } from './kubernetes/registryCommands';
 import {
   DeleteClusterModal,
@@ -3310,7 +3309,7 @@ function RegistrationModal({
         </div>
         <div>
           <div className="mb-1 flex items-center justify-between gap-2 text-zinc-500">
-            <span>{tr('安装命令', 'Install command')}</span>
+            <span>{tr('安装命令（执行一次）', 'Install command (run once)')}</span>
             <Button onClick={() => void copyInstallCommand()}>
               {copied ? <Check size={12} /> : <Clipboard size={12} />}
               {copied ? tr('已复制', 'Copied') : tr('复制', 'Copy')}
@@ -3319,12 +3318,6 @@ function RegistrationModal({
           <pre className="max-h-72 overflow-auto rounded-md border border-zinc-800 bg-zinc-950 p-3 text-[11px] leading-5 text-zinc-300">
             {installCommand}
           </pre>
-        </div>
-        <div className="rounded-md border border-amber-500/20 bg-amber-500/10 px-2 py-1.5 text-amber-200">
-          {tr(
-            'K8s Edge 镜像默认从 manager 内置镜像仓库拉取；下面的 Helm TLS 参数只处理 chart 下载和 Edge 访问 manager，不会替节点运行时信任镜像仓库。',
-            'K8s Edge images are pulled from the manager-hosted registry by default. The Helm TLS flags only cover chart download and Edge-to-manager traffic; they do not make node runtimes trust the image registry.',
-          )}
         </div>
         <RegistryTrustGuide installCommand={installCommand} />
       </div>
@@ -3335,66 +3328,33 @@ function RegistrationModal({
 function RegistryTrustGuide({ installCommand }: { installCommand: string }) {
   const { tr } = useI18n();
   const registryHost = managerRegistryHostFromCommand(installCommand);
-  const containerdCommand = useMemo(() => containerdInsecureRegistryCommand(registryHost), [registryHost]);
-  const dockerCommand = useMemo(() => dockerInsecureRegistryCommand(registryHost), [registryHost]);
-  const [copiedRuntime, setCopiedRuntime] = useState<'containerd' | 'docker' | null>(null);
+  const command = useMemo(() => registrySetupCommand(registryHost), [registryHost]);
+  const [copied, setCopied] = useState(false);
 
-  async function copyRegistryCommand(runtime: 'containerd' | 'docker', command: string) {
+  async function copyRegistryCommand() {
     await navigator.clipboard?.writeText(command);
-    setCopiedRuntime(runtime);
-    window.setTimeout(() => setCopiedRuntime(null), 1200);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1200);
   }
 
   return (
-    <details className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-amber-200" open>
-      <summary className="cursor-pointer select-none text-sm font-medium text-zinc-100">
-        {tr('自签证书场景：先配置 insecure registry', 'Self-signed certificate: configure insecure registry first')}
-      </summary>
-      <div className="mt-2 space-y-3">
-        <p className="text-xs leading-5">
+    <div className="rounded-md border border-zinc-800 bg-zinc-900/40 p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-xs text-zinc-400">
           {tr(
-            `如果 manager 使用自签证书，节点运行时拉取 ${registryHost} 镜像时会先校验证书。imagePullSecrets 只能解决仓库认证，不能跳过证书校验；需要先让节点信任 Ongrid 证书，或按下面方式配置 insecure registry。`,
-            `If the manager uses a self-signed certificate, node runtimes verify the certificate before pulling images from ${registryHost}. imagePullSecrets only handle registry authentication and cannot bypass certificate verification; trust the Ongrid certificate first, or configure an insecure registry as below.`,
+            '自签名证书需要配置 registry，请在 K8s 所有节点执行以下命令（支持 K3s、containerd、Docker）',
+            'Self-signed certificates require registry configuration. Run the following command on every K8s node (supports K3s, containerd, and Docker).',
           )}
-        </p>
-        <p className="text-xs leading-5 text-amber-300">
-          {tr(
-            '下面是已有节点的示例配置，请按节点实际运行时选择 containerd 或 Docker Engine 一段执行。containerd 需要启用 certs.d 配置目录；命令会在缺失时补充 config_path。生产环境建议通过节点池初始化、cloud-init、启动模板、MachineConfig 或运维系统统一下发，确保后续新增节点也带上同样配置。',
-            'The examples below are for existing nodes. Run either the containerd or Docker Engine block based on the node runtime. containerd must enable the certs.d config directory; the command adds config_path when it is missing. In production, distribute the same settings through node-pool bootstrap, cloud-init, launch templates, MachineConfig, or your ops system so newly added nodes inherit them too.',
-          )}
-        </p>
-        <div>
-          <div className="mb-1 flex items-center justify-between gap-2 text-amber-300">
-            <span>containerd</span>
-            <Button onClick={() => void copyRegistryCommand('containerd', containerdCommand)}>
-              {copiedRuntime === 'containerd' ? <Check size={12} /> : <Clipboard size={12} />}
-              {copiedRuntime === 'containerd' ? tr('已复制', 'Copied') : tr('复制', 'Copy')}
-            </Button>
-          </div>
-          <pre className="max-h-48 overflow-auto rounded-md border border-zinc-800 bg-zinc-900 p-2 text-[11px] leading-5 text-zinc-300">
-            {containerdCommand}
-          </pre>
-        </div>
-        <div>
-          <div className="mb-1 flex items-center justify-between gap-2 text-amber-300">
-            <span>Docker Engine</span>
-            <Button onClick={() => void copyRegistryCommand('docker', dockerCommand)}>
-              {copiedRuntime === 'docker' ? <Check size={12} /> : <Clipboard size={12} />}
-              {copiedRuntime === 'docker' ? tr('已复制', 'Copied') : tr('复制', 'Copy')}
-            </Button>
-          </div>
-          <pre className="max-h-36 overflow-auto rounded-md border border-zinc-800 bg-zinc-900 p-2 text-[11px] leading-5 text-zinc-300">
-            {dockerCommand}
-          </pre>
-        </div>
-        <p className="text-xs leading-5 text-amber-300">
-          {tr(
-            'K3s / RKE2 等发行版可以把等价配置写入 registries.yaml；托管云节点池通常需要放到节点启动脚本或节点池自定义配置里。',
-            'K3s / RKE2 can put equivalent settings in registries.yaml; managed cloud node pools usually need the settings in bootstrap scripts or node-pool custom configuration.',
-          )}
-        </p>
+        </span>
+        <Button onClick={() => void copyRegistryCommand()}>
+          {copied ? <Check size={12} /> : <Clipboard size={12} />}
+          {copied ? tr('已复制', 'Copied') : tr('复制', 'Copy')}
+        </Button>
       </div>
-    </details>
+      <pre className="overflow-x-auto rounded-md border border-zinc-800 bg-zinc-950 p-2 text-[11px] leading-5 text-zinc-300">
+        {command}
+      </pre>
+    </div>
   );
 }
 

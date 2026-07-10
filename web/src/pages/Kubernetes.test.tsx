@@ -360,24 +360,21 @@ describe('KubernetesPage', () => {
     expect(payload).toEqual({ name: 'kind-created', mode: 'full-node' });
     expect(command).toHaveTextContent("manager.publicURL='https://<manager>'");
     expect(command).toHaveTextContent("manager.tunnelAddr='<manager>:40012'");
-    expect(screen.getByText('自签证书场景：先配置 insecure registry')).toBeInTheDocument();
-    expect(screen.getAllByText(/REGISTRY='<manager>'/).length).toBeGreaterThanOrEqual(2);
-    expect(screen.getAllByText(/SUDO=''/).length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText(/\/etc\/containerd\/certs\.d\/\$\{REGISTRY\}/)).toBeInTheDocument();
-    expect(screen.queryByText(/sudo awk/)).not.toBeInTheDocument();
-    expect(screen.getAllByText(/config_path/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/python3 is required to update \/etc\/docker\/daemon\.json/)).toBeInTheDocument();
-    expect(screen.getByText(/\$\{SUDO\} env REGISTRY="\$\{REGISTRY\}" python3/)).toBeInTheDocument();
-    expect(screen.getByText(/insecure-registries/)).toBeInTheDocument();
+    expect(screen.getByText('安装命令（执行一次）')).toBeInTheDocument();
+    expect(
+      screen.getByText('自签名证书需要配置 registry，请在 K8s 所有节点执行以下命令（支持 K3s、containerd、Docker）'),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/\/edge\/k8s\/registry-setup\.sh/)).toBeInTheDocument();
+    expect(screen.getByText(/--registry='<manager>'/)).toBeInTheDocument();
+    expect(screen.queryByText(/config_path/)).not.toBeInTheDocument();
 
     const copyButtons = screen.getAllByRole('button', { name: '复制' });
     fireEvent.click(copyButtons[1]);
     await waitFor(() => {
-      expect(writeText).toHaveBeenCalledWith(expect.stringContaining('/etc/containerd/certs.d/${REGISTRY}'));
-    });
-    fireEvent.click(copyButtons[2]);
-    await waitFor(() => {
-      expect(writeText).toHaveBeenLastCalledWith(expect.stringContaining('insecure-registries'));
+      expect(writeText).toHaveBeenCalledWith(
+        "curl -kfsSL 'https://<manager>/edge/k8s/registry-setup.sh' | " +
+          "bash -s -- --registry='<manager>'",
+      );
     });
   });
 

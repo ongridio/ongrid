@@ -26,6 +26,7 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "ongrid-edge.controllerServiceAccount" . }}
     namespace: {{ include "ongrid-edge.namespace" . }}
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
