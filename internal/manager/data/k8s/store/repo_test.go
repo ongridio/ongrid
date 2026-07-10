@@ -407,7 +407,7 @@ func TestRepo_CountClustersIgnoresPagination(t *testing.T) {
 	}
 }
 
-func TestRepo_NodeCoverageBatchAndControllerTokenClaim(t *testing.T) {
+func TestRepo_NodeCoverageBatchAndControllerTokenClear(t *testing.T) {
 	db, repo := newTestRepo(t)
 	ctx := context.Background()
 	controllerEdgeID := uint64(30)
@@ -457,16 +457,48 @@ func TestRepo_NodeCoverageBatchAndControllerTokenClaim(t *testing.T) {
 		t.Fatalf("second page = %+v total=%d, want final 2 of 4", attachments, total)
 	}
 
-	claimed, err := repo.ClaimControllerBootstrapToken(ctx, clusters[0].ID, "controller-hash")
-	if err != nil || !claimed {
-		t.Fatalf("ClaimControllerBootstrapToken(first) claimed=%v err=%v", claimed, err)
+	if err := repo.ClearControllerBootstrapToken(ctx, clusters[0].ID); err != nil {
+		t.Fatalf("ClearControllerBootstrapToken: %v", err)
 	}
-	claimed, err = repo.ClaimControllerBootstrapToken(ctx, clusters[0].ID, "controller-hash")
-	if err != nil || claimed {
-		t.Fatalf("ClaimControllerBootstrapToken(replay) claimed=%v err=%v", claimed, err)
+	if err := repo.ClearControllerBootstrapToken(ctx, clusters[0].ID); err != nil {
+		t.Fatalf("ClearControllerBootstrapToken(retry): %v", err)
 	}
-	if err := repo.RestoreControllerBootstrapToken(ctx, clusters[0].ID, "controller-hash"); err != nil {
-		t.Fatalf("RestoreControllerBootstrapToken: %v", err)
+	var cleared model.Cluster
+	if err := db.First(&cleared, clusters[0].ID).Error; err != nil {
+		t.Fatalf("Get cleared cluster: %v", err)
+	}
+	if cleared.BootstrapTokenHash != "" {
+		t.Fatalf("bootstrap token hash = %q, want empty", cleared.BootstrapTokenHash)
+	}
+}
+
+func TestRepo_ListNodesForLifecycleCleanup(t *testing.T) {
+	db, repo := newTestRepo(t)
+	ctx := context.Background()
+	now := time.Now()
+	stale := now.Add(-time.Hour)
+	nodes := []*model.Node{
+		{ClusterID: 1, NodeName: "node-a", NodeUID: "uid-a", LastSeenAt: &stale},
+		{ClusterID: 1, NodeName: "node-b", NodeUID: "uid-b", LastSeenAt: &now},
+		{ClusterID: 2, NodeName: "node-a", NodeUID: "other", LastSeenAt: &stale},
+	}
+	if err := db.Create(&nodes).Error; err != nil {
+		t.Fatalf("Create nodes: %v", err)
+	}
+
+	matched, err := repo.ListNodesByRefs(ctx, 1, []biz.NodeRef{{UID: "uid-a"}, {Name: "node-b"}})
+	if err != nil {
+		t.Fatalf("ListNodesByRefs: %v", err)
+	}
+	if len(matched) != 2 {
+		t.Fatalf("matched nodes = %d, want 2", len(matched))
+	}
+	staleNodes, err := repo.ListStaleNodes(ctx, 1, now.Add(-time.Minute))
+	if err != nil {
+		t.Fatalf("ListStaleNodes: %v", err)
+	}
+	if len(staleNodes) != 1 || staleNodes[0].NodeUID != "uid-a" {
+		t.Fatalf("stale nodes = %+v, want uid-a", staleNodes)
 	}
 }
 

@@ -105,27 +105,10 @@ func (r *Repo) UpdateClusterTokens(ctx context.Context, id uint64, controllerTok
 	return nil
 }
 
-func (r *Repo) ClaimControllerBootstrapToken(ctx context.Context, id uint64, tokenHash string) (bool, error) {
-	res := r.db.WithContext(ctx).Model(&model.Cluster{}).
-		Where("id = ? AND bootstrap_token_hash = ?", id, tokenHash).
-		UpdateColumn("bootstrap_token_hash", "")
-	if res.Error != nil {
-		return false, res.Error
-	}
-	return res.RowsAffected == 1, nil
-}
-
-func (r *Repo) RestoreControllerBootstrapToken(ctx context.Context, id uint64, tokenHash string) error {
-	res := r.db.WithContext(ctx).Model(&model.Cluster{}).
-		Where("id = ? AND bootstrap_token_hash = ''", id).
-		UpdateColumn("bootstrap_token_hash", tokenHash)
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return errs.ErrConflict
-	}
-	return nil
+func (r *Repo) ClearControllerBootstrapToken(ctx context.Context, id uint64) error {
+	return r.db.WithContext(ctx).Model(&model.Cluster{}).
+		Where("id = ?", id).
+		UpdateColumn("bootstrap_token_hash", "").Error
 }
 
 func (r *Repo) UpdateClusterController(ctx context.Context, id uint64, in biz.ClusterControllerRegistration) error {
@@ -358,6 +341,38 @@ func (r *Repo) GetLinkedNodeByClusterName(ctx context.Context, clusterID uint64,
 		return nil, err
 	}
 	return &n, nil
+}
+
+func (r *Repo) ListNodesByRefs(ctx context.Context, clusterID uint64, refs []biz.NodeRef) ([]*model.Node, error) {
+	predicates := make([]string, 0, len(refs))
+	args := make([]any, 0, len(refs))
+	for _, ref := range refs {
+		switch {
+		case ref.UID != "":
+			predicates = append(predicates, "node_uid = ?")
+			args = append(args, ref.UID)
+		case ref.Name != "":
+			predicates = append(predicates, "node_name = ?")
+			args = append(args, ref.Name)
+		}
+	}
+	if len(predicates) == 0 {
+		return nil, nil
+	}
+	var nodes []*model.Node
+	err := r.db.WithContext(ctx).
+		Where("cluster_id = ?", clusterID).
+		Where("("+strings.Join(predicates, " OR ")+")", args...).
+		Find(&nodes).Error
+	return nodes, err
+}
+
+func (r *Repo) ListStaleNodes(ctx context.Context, clusterID uint64, olderThan time.Time) ([]*model.Node, error) {
+	var nodes []*model.Node
+	err := r.db.WithContext(ctx).
+		Where("cluster_id = ? AND (last_seen_at IS NULL OR last_seen_at < ?)", clusterID, olderThan).
+		Find(&nodes).Error
+	return nodes, err
 }
 
 func (r *Repo) UpsertNode(ctx context.Context, n *model.Node) error {

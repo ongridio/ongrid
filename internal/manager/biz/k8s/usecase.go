@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	model "github.com/ongridio/ongrid/internal/manager/model/k8s"
@@ -39,8 +40,7 @@ type Repository interface {
 	ListClusters(ctx context.Context, f ListClustersFilter) ([]*model.Cluster, error)
 	CountClusters(ctx context.Context, f ListClustersFilter) (int64, error)
 	UpdateClusterTokens(ctx context.Context, id uint64, controllerTokenHash, nodeTokenHash string, expiresAt *time.Time) error
-	ClaimControllerBootstrapToken(ctx context.Context, id uint64, tokenHash string) (bool, error)
-	RestoreControllerBootstrapToken(ctx context.Context, id uint64, tokenHash string) error
+	ClearControllerBootstrapToken(ctx context.Context, id uint64) error
 	UpdateClusterController(ctx context.Context, id uint64, in ClusterControllerRegistration) error
 	BindControllerEnrollment(ctx context.Context, id uint64, registration ClusterControllerRegistration, installation *model.Installation) error
 	UpdateClusterInventorySync(ctx context.Context, id uint64, in ClusterInventorySync) error
@@ -53,6 +53,8 @@ type Repository interface {
 	GetNodeByClusterUID(ctx context.Context, clusterID uint64, nodeUID string) (*model.Node, error)
 	GetNodeByEdgeID(ctx context.Context, edgeID uint64) (*model.Node, error)
 	GetLinkedNodeByClusterName(ctx context.Context, clusterID uint64, nodeName string) (*model.Node, error)
+	ListNodesByRefs(ctx context.Context, clusterID uint64, refs []NodeRef) ([]*model.Node, error)
+	ListStaleNodes(ctx context.Context, clusterID uint64, olderThan time.Time) ([]*model.Node, error)
 	UpsertNode(ctx context.Context, n *model.Node) error
 	DeleteDuplicateNodesByName(ctx context.Context, clusterID uint64, nodeName, keepUID string) error
 	UpdateNodeEdge(ctx context.Context, nodeID, edgeID uint64, deviceID *uint64, lastSeen time.Time) error
@@ -158,11 +160,18 @@ type Config struct {
 }
 
 type Usecase struct {
-	repo        Repository
-	edgeIssuer  EdgeIssuer
-	edgeRemover EdgeRemover
-	topology    TopologyMirror
-	cfg         Config
+	repo              Repository
+	edgeIssuer        EdgeIssuer
+	edgeRemover       EdgeRemover
+	topology          TopologyMirror
+	cfg               Config
+	enrollmentLocksMu sync.Mutex
+	enrollmentLocks   map[string]*enrollmentLock
+}
+
+type enrollmentLock struct {
+	mu    sync.Mutex
+	users int
 }
 
 func NewUsecase(repo Repository, edgeIssuer EdgeIssuer, cfg Config) *Usecase {
@@ -178,7 +187,12 @@ func NewUsecase(repo Repository, edgeIssuer EdgeIssuer, cfg Config) *Usecase {
 	if cfg.EventCleanupInterval <= 0 {
 		cfg.EventCleanupInterval = defaultEventCleanupInterval
 	}
-	u := &Usecase{repo: repo, edgeIssuer: edgeIssuer, cfg: cfg}
+	u := &Usecase{
+		repo:            repo,
+		edgeIssuer:      edgeIssuer,
+		cfg:             cfg,
+		enrollmentLocks: make(map[string]*enrollmentLock),
+	}
 	if remover, ok := edgeIssuer.(EdgeRemover); ok {
 		u.edgeRemover = remover
 	}
@@ -785,11 +799,14 @@ func (u *Usecase) Enroll(ctx context.Context, in EnrollInput) (*EnrollResult, er
 	if u.repo == nil || u.edgeIssuer == nil {
 		return nil, errs.ErrNotWiredYet
 	}
+	role := normalizeRole(in.Role)
+	unlock := u.lockEnrollment(in.ClusterID, role, in.NodeName)
+	defer unlock()
+
 	c, err := u.repo.GetCluster(ctx, in.ClusterID)
 	if err != nil {
 		return nil, err
 	}
-	role := normalizeRole(in.Role)
 	if !validBootstrapToken(strings.TrimSpace(in.BootstrapToken), c, role) {
 		return nil, errs.ErrUnauthorized
 	}
@@ -798,24 +815,36 @@ func (u *Usecase) Enroll(ctx context.Context, in EnrollInput) (*EnrollResult, er
 	case model.RoleNode:
 		return u.enrollNode(ctx, c, in, now)
 	case model.RoleController:
-		tokenHash := tokenDigest(strings.TrimSpace(in.BootstrapToken))
-		claimed, err := u.repo.ClaimControllerBootstrapToken(ctx, c.ID, tokenHash)
-		if err != nil {
-			return nil, fmt.Errorf("claim k8s controller bootstrap token: %w", err)
-		}
-		if !claimed {
-			return nil, errs.ErrUnauthorized
-		}
-		out, err := u.enrollController(ctx, c, in, now)
-		if err == nil {
-			return out, nil
-		}
-		if restoreErr := u.repo.RestoreControllerBootstrapToken(ctx, c.ID, tokenHash); restoreErr != nil {
-			return nil, errors.Join(err, fmt.Errorf("restore k8s controller bootstrap token: %w", restoreErr))
-		}
-		return nil, err
+		return u.enrollController(ctx, c, in, now)
 	default:
 		return nil, errors.Join(errs.ErrInvalid, fmt.Errorf("unsupported k8s enroll role %q", in.Role))
+	}
+}
+
+func (u *Usecase) lockEnrollment(clusterID uint64, role, nodeName string) func() {
+	key := strconv.FormatUint(clusterID, 10) + ":" + role
+	if role == model.RoleNode {
+		key += ":" + strings.TrimSpace(nodeName)
+	}
+
+	u.enrollmentLocksMu.Lock()
+	lock := u.enrollmentLocks[key]
+	if lock == nil {
+		lock = &enrollmentLock{}
+		u.enrollmentLocks[key] = lock
+	}
+	lock.users++
+	u.enrollmentLocksMu.Unlock()
+
+	lock.mu.Lock()
+	return func() {
+		lock.mu.Unlock()
+		u.enrollmentLocksMu.Lock()
+		lock.users--
+		if lock.users == 0 {
+			delete(u.enrollmentLocks, key)
+		}
+		u.enrollmentLocksMu.Unlock()
 	}
 }
 
@@ -887,6 +916,9 @@ func (u *Usecase) HandleRegister(ctx context.Context, edgeID uint64, deviceID *u
 			LastSeenAt:       &ts,
 		}); err != nil {
 			return err
+		}
+		if err := u.repo.ClearControllerBootstrapToken(ctx, info.ClusterID); err != nil {
+			return fmt.Errorf("consume k8s controller bootstrap token: %w", err)
 		}
 		return u.reconcileTopology(ctx, info.ClusterID)
 	default:
@@ -1021,10 +1053,6 @@ func (u *Usecase) enrollNode(ctx context.Context, c *model.Cluster, in EnrollInp
 	if err != nil {
 		return nil, err
 	}
-	if n.EdgeID != nil && *n.EdgeID != 0 {
-		return nil, errors.Join(errs.ErrConflict, fmt.Errorf("k8s node %q is already enrolled; restore its local credential file before restarting", nodeName))
-	}
-
 	cred, created, err := u.issueNodeCredential(ctx, c, n)
 	if err != nil {
 		return nil, err
@@ -1098,8 +1126,12 @@ func (u *Usecase) IngestInventory(ctx context.Context, edgeID uint64, in tunnel.
 	}
 	for _, n := range nodes {
 		if linked, err := u.repo.GetLinkedNodeByClusterName(ctx, n.ClusterID, n.NodeName); err == nil && linked.NodeUID != n.NodeUID {
-			n.EdgeID = linked.EdgeID
-			n.DeviceID = linked.DeviceID
+			if isPlaceholderNodeUID(linked.NodeUID, n.NodeName) {
+				n.EdgeID = linked.EdgeID
+				n.DeviceID = linked.DeviceID
+			} else if err := u.deleteManagedNodes(ctx, n.ClusterID, []*model.Node{linked}); err != nil {
+				return nil, fmt.Errorf("replace k8s node %q: %w", n.NodeName, err)
+			}
 		}
 		if err := u.repo.UpsertNode(ctx, n); err != nil {
 			return nil, fmt.Errorf("upsert k8s inventory node %q: %w", n.NodeName, err)
@@ -1199,6 +1231,15 @@ func (u *Usecase) IngestInventory(ctx context.Context, edgeID uint64, in tunnel.
 	if syncType == inventorySyncFull {
 		if namespace, ok := inventoryPruneNamespace(in); ok {
 			olderThan := now.Add(-time.Second)
+			if namespace == nil {
+				staleNodes, err := u.repo.ListStaleNodes(ctx, in.ClusterID, olderThan)
+				if err != nil {
+					return nil, fmt.Errorf("list stale k8s nodes: %w", err)
+				}
+				if err := u.deleteManagedNodes(ctx, in.ClusterID, staleNodes); err != nil {
+					return nil, fmt.Errorf("delete stale k8s nodes: %w", err)
+				}
+			}
 			if err := u.repo.DeleteStaleWorkloads(ctx, in.ClusterID, namespace, olderThan); err != nil {
 				return nil, fmt.Errorf("delete stale k8s workloads: %w", err)
 			}
@@ -1251,7 +1292,12 @@ func normalizeInventorySyncType(syncType string) string {
 
 func (u *Usecase) deleteInventoryDeltas(ctx context.Context, clusterID uint64, in tunnel.KubernetesInventoryRequest) error {
 	if len(in.DeletedNodes) > 0 {
-		if err := u.repo.DeleteNodes(ctx, clusterID, toNodeRefs(in.DeletedNodes)); err != nil {
+		refs := toNodeRefs(in.DeletedNodes)
+		nodes, err := u.repo.ListNodesByRefs(ctx, clusterID, refs)
+		if err != nil {
+			return fmt.Errorf("list deleted k8s inventory nodes: %w", err)
+		}
+		if err := u.deleteManagedNodes(ctx, clusterID, nodes); err != nil {
 			return fmt.Errorf("delete k8s inventory nodes: %w", err)
 		}
 	}
@@ -1271,6 +1317,34 @@ func (u *Usecase) deleteInventoryDeltas(ctx context.Context, clusterID uint64, i
 		}
 	}
 	return nil
+}
+
+func (u *Usecase) deleteManagedNodes(ctx context.Context, clusterID uint64, nodes []*model.Node) error {
+	if len(nodes) == 0 {
+		return nil
+	}
+	refs := make([]NodeRef, 0, len(nodes))
+	edgeIDs := make([]uint64, 0, len(nodes))
+	for _, node := range nodes {
+		if node == nil || node.ClusterID != clusterID {
+			continue
+		}
+		refs = append(refs, NodeRef{Name: node.NodeName, UID: node.NodeUID})
+		if node.EdgeID != nil {
+			edgeIDs = append(edgeIDs, *node.EdgeID)
+		}
+	}
+	if err := u.deleteClusterEdges(ctx, edgeIDs); err != nil {
+		return err
+	}
+	if len(refs) == 0 {
+		return nil
+	}
+	return u.repo.DeleteNodes(ctx, clusterID, refs)
+}
+
+func isPlaceholderNodeUID(uid, nodeName string) bool {
+	return strings.TrimSpace(uid) == "name:"+strings.TrimSpace(nodeName)
 }
 
 func toNodeRefs(in []tunnel.KubernetesNodeRef) []NodeRef {
@@ -1430,6 +1504,18 @@ func (u *Usecase) enrollController(ctx context.Context, c *model.Cluster, in Enr
 }
 
 func (u *Usecase) issueNodeCredential(ctx context.Context, c *model.Cluster, n *model.Node) (*EdgeCredential, bool, error) {
+	if n.EdgeID != nil && *n.EdgeID != 0 {
+		if n.DeviceID != nil && *n.DeviceID != 0 {
+			return nil, false, errors.Join(errs.ErrConflict, fmt.Errorf("k8s node %q is already registered", n.NodeName))
+		}
+		cred, err := u.edgeIssuer.RotateEdgeSecret(ctx, *n.EdgeID)
+		if err == nil {
+			return cred, false, nil
+		}
+		if !errors.Is(err, errs.ErrNotFound) {
+			return nil, false, fmt.Errorf("rotate k8s node edge secret: %w", err)
+		}
+	}
 	cred, err := u.edgeIssuer.CreateEdgeIdentity(ctx, edgeName(c.Name, n.NodeName), c.CreatedBy)
 	return cred, err == nil, err
 }
