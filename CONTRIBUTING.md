@@ -36,6 +36,8 @@ cd web && npm install && npm run build
 - **One logical change per PR.** Keep it focused.
 - **Conventional commit messages**: `feat(scope): …`, `fix(scope): …`,
   `docs(scope): …`, `chore(scope): …`.
+- **Confirm the contribution terms** by checking the required box in the PR
+  template. PRs cannot be merged while that check is missing.
 - **Link your commit email to your GitHub account** (Settings → Emails) so
   your commits are attributed to you in the contributors graph. If your
   author email isn't on your account, GitHub can't credit you.
@@ -48,10 +50,32 @@ cd web && npm install && npm run build
   `fix/tunnel-logs`) is preferred over committing to your fork's `main`.
 - A maintainer will review. Be patient and responsive to feedback.
 
-## License
+## License and contribution terms
 
-By contributing, you agree your contributions are licensed under the
-project's [Apache 2.0](LICENSE) license. No CLA required.
+The Ongrid community edition is licensed under the project's
+[AGPLv3](LICENSE) license.
+
+The Ongrid name, logo, domain names, and related brand assets are not licensed
+under AGPLv3. See [TRADEMARK.md](TRADEMARK.md) for brand usage rules.
+
+By submitting a pull request, patch, issue comment containing code, or any
+other contribution to this repository, you agree that:
+
+- your contribution may be distributed as part of the Ongrid community edition
+  under AGPLv3;
+- you retain the copyright to your contribution, but grant Ongrid a perpetual,
+  worldwide, non-exclusive, irrevocable, royalty-free, sublicensable license to
+  use, reproduce, modify, distribute, publicly perform, publicly display, and
+  create derivative works from your contribution;
+- Ongrid may use your contribution in open source, enterprise, hosted, SaaS,
+  and other commercial offerings;
+- you have the right to submit the contribution, and it does not include
+  third-party code, confidential material, credentials, or company-owned code
+  that you are not authorized to contribute.
+
+Maintainers may request an additional written contributor agreement for large
+changes, security-sensitive code, Agent execution logic, or company-sponsored
+contributions.
 
 ## Reporting bugs / security issues
 
