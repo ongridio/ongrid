@@ -15,6 +15,8 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
 
+const testClusterUID = "cluster-uid-test"
+
 func TestUsecaseCreateClusterAndEnrollNode(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeRepo()
@@ -38,6 +40,7 @@ func TestUsecaseCreateClusterAndEnrollNode(t *testing.T) {
 	first, err := uc.Enroll(ctx, EnrollInput{
 		BootstrapToken: reg.NodeBootstrapToken,
 		ClusterID:      reg.Cluster.ID,
+		ClusterUID:     testClusterUID,
 		Role:           model.RoleNode,
 		NodeName:       "node-a",
 		NodeUID:        "node-uid-a",
@@ -52,6 +55,7 @@ func TestUsecaseCreateClusterAndEnrollNode(t *testing.T) {
 	second, err := uc.Enroll(ctx, EnrollInput{
 		BootstrapToken: reg.NodeBootstrapToken,
 		ClusterID:      reg.Cluster.ID,
+		ClusterUID:     testClusterUID,
 		Role:           model.RoleNode,
 		NodeName:       "node-a",
 		NodeUID:        "node-uid-a",
@@ -75,6 +79,7 @@ func TestUsecaseConcurrentNodeEnrollmentUsesSingleIdentity(t *testing.T) {
 	in := EnrollInput{
 		BootstrapToken: reg.NodeBootstrapToken,
 		ClusterID:      reg.Cluster.ID,
+		ClusterUID:     testClusterUID,
 		Role:           model.RoleNode,
 		NodeName:       "node-a",
 		NodeUID:        "uid-a",
@@ -117,6 +122,7 @@ func TestUsecaseNodeEnrollmentCannotRotateRegisteredIdentity(t *testing.T) {
 	in := EnrollInput{
 		BootstrapToken: reg.NodeBootstrapToken,
 		ClusterID:      reg.Cluster.ID,
+		ClusterUID:     testClusterUID,
 		Role:           model.RoleNode,
 		NodeName:       "node-a",
 		NodeUID:        "uid-a",
@@ -127,10 +133,11 @@ func TestUsecaseNodeEnrollmentCannotRotateRegisteredIdentity(t *testing.T) {
 	}
 	deviceID := uint64(42)
 	if err := uc.HandleRegister(ctx, first.EdgeID, &deviceID, tunnel.KubernetesInfo{
-		ClusterID: reg.Cluster.ID,
-		Role:      model.RoleNode,
-		NodeName:  "node-a",
-		NodeUID:   "uid-a",
+		ClusterID:  reg.Cluster.ID,
+		ClusterUID: testClusterUID,
+		Role:       model.RoleNode,
+		NodeName:   "node-a",
+		NodeUID:    "uid-a",
 	}); err != nil {
 		t.Fatalf("HandleRegister() error = %v", err)
 	}
@@ -253,6 +260,57 @@ func TestUsecaseEnrollRejectsInvalidToken(t *testing.T) {
 	}
 }
 
+func TestUsecaseEnrollBindsAndRejectsDifferentClusterUID(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	issuer := newFakeIssuer()
+	uc := NewUsecase(repo, issuer, Config{})
+	reg, err := uc.CreateCluster(ctx, CreateClusterInput{Name: "prod"})
+	if err != nil {
+		t.Fatalf("CreateCluster() error = %v", err)
+	}
+	first, err := uc.Enroll(ctx, EnrollInput{
+		BootstrapToken: reg.NodeBootstrapToken,
+		ClusterID:      reg.Cluster.ID,
+		ClusterUID:     "physical-a",
+		Role:           model.RoleNode,
+		NodeName:       "node-a",
+		NodeUID:        "node-a-uid",
+	})
+	if err != nil {
+		t.Fatalf("Enroll(first cluster UID) error = %v", err)
+	}
+	cluster, err := repo.GetCluster(ctx, reg.Cluster.ID)
+	if err != nil {
+		t.Fatalf("GetCluster() error = %v", err)
+	}
+	if cluster.UID == nil || *cluster.UID != "physical-a" {
+		t.Fatalf("bound cluster UID = %v, want physical-a", cluster.UID)
+	}
+	_, err = uc.Enroll(ctx, EnrollInput{
+		BootstrapToken: reg.NodeBootstrapToken,
+		ClusterID:      reg.Cluster.ID,
+		ClusterUID:     "physical-b",
+		Role:           model.RoleNode,
+		NodeName:       "node-b",
+		NodeUID:        "node-b-uid",
+	})
+	if !errors.Is(err, errs.ErrConflict) {
+		t.Fatalf("Enroll(different cluster UID) error = %v, want conflict", err)
+	}
+	deviceID := uint64(42)
+	err = uc.HandleRegister(ctx, first.EdgeID, &deviceID, tunnel.KubernetesInfo{
+		ClusterID:  reg.Cluster.ID,
+		ClusterUID: "physical-b",
+		Role:       model.RoleNode,
+		NodeName:   "node-a",
+		NodeUID:    "node-a-uid",
+	})
+	if !errors.Is(err, errs.ErrForbidden) {
+		t.Fatalf("HandleRegister(different cluster UID) error = %v, want forbidden", err)
+	}
+}
+
 func TestUsecaseNodeTokenCannotEnrollController(t *testing.T) {
 	ctx := context.Background()
 	uc := NewUsecase(newFakeRepo(), newFakeIssuer(), Config{})
@@ -271,7 +329,7 @@ func TestUsecaseNodeTokenCannotEnrollController(t *testing.T) {
 	}
 }
 
-func TestUsecaseControllerEnrollmentCanRetryAfterRegister(t *testing.T) {
+func TestUsecaseControllerEnrollmentRequiresExplicitRecoveryAfterRegister(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeRepo()
 	issuer := newFakeIssuer()
@@ -283,6 +341,7 @@ func TestUsecaseControllerEnrollmentCanRetryAfterRegister(t *testing.T) {
 	in := EnrollInput{
 		BootstrapToken: reg.BootstrapToken,
 		ClusterID:      reg.Cluster.ID,
+		ClusterUID:     testClusterUID,
 		Role:           model.RoleController,
 		Namespace:      "ongrid-system",
 	}
@@ -298,18 +357,31 @@ func TestUsecaseControllerEnrollmentCanRetryAfterRegister(t *testing.T) {
 		t.Fatalf("retry edge=%d rotates=%d, want edge=%d rotates=1", second.EdgeID, issuer.rotate, first.EdgeID)
 	}
 	if err := uc.HandleRegister(ctx, second.EdgeID, nil, tunnel.KubernetesInfo{
-		ClusterID: reg.Cluster.ID,
-		Role:      model.RoleController,
-		Mode:      model.ModeFullNode,
+		ClusterID:  reg.Cluster.ID,
+		ClusterUID: testClusterUID,
+		Role:       model.RoleController,
+		Mode:       model.ModeFullNode,
+		PodName:    "controller-0",
 	}); err != nil {
 		t.Fatalf("HandleRegister() error = %v", err)
 	}
+	if _, err := uc.Enroll(ctx, in); !errors.Is(err, errs.ErrConflict) {
+		t.Fatalf("Enroll(after register) error = %v, want conflict", err)
+	}
+	if issuer.rotate != 1 {
+		t.Fatalf("secret rotations after blocked replay = %d, want 1", issuer.rotate)
+	}
+	rotated, err := uc.RotateBootstrapToken(ctx, reg.Cluster.ID)
+	if err != nil {
+		t.Fatalf("RotateBootstrapToken() error = %v", err)
+	}
+	in.BootstrapToken = rotated.BootstrapToken
 	third, err := uc.Enroll(ctx, in)
 	if err != nil {
-		t.Fatalf("Enroll(after register) error = %v", err)
+		t.Fatalf("Enroll(after explicit recovery) error = %v", err)
 	}
 	if third.EdgeID != first.EdgeID || issuer.rotate != 2 {
-		t.Fatalf("enroll after register edge=%d rotates=%d, want edge=%d rotates=2", third.EdgeID, issuer.rotate, first.EdgeID)
+		t.Fatalf("recovery edge=%d rotates=%d, want edge=%d rotates=2", third.EdgeID, issuer.rotate, first.EdgeID)
 	}
 }
 
@@ -324,11 +396,12 @@ func TestUsecaseLookupControllerCluster(t *testing.T) {
 	bindFakeController(t, repo, reg.Cluster.ID, 41)
 
 	if err := uc.HandleRegister(ctx, 41, nil, tunnel.KubernetesInfo{
-		ClusterID: reg.Cluster.ID,
-		Role:      model.RoleController,
-		NodeName:  "node-a",
-		Namespace: "ongrid-system",
-		PodName:   "ongrid-edge-controller-abc",
+		ClusterID:  reg.Cluster.ID,
+		ClusterUID: testClusterUID,
+		Role:       model.RoleController,
+		NodeName:   "node-a",
+		Namespace:  "ongrid-system",
+		PodName:    "ongrid-edge-controller-abc",
 	}); err != nil {
 		t.Fatalf("HandleRegister(controller) error = %v", err)
 	}
@@ -367,9 +440,12 @@ func TestUsecaseHandleRegisterRejectsUnboundKubernetesIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateCluster() error = %v", err)
 	}
+	if err := repo.BindClusterUID(ctx, reg.Cluster.ID, testClusterUID); err != nil {
+		t.Fatalf("BindClusterUID() error = %v", err)
+	}
 
 	for _, role := range []string{model.RoleController, model.RoleNode} {
-		err := uc.HandleRegister(ctx, 99, nil, tunnel.KubernetesInfo{ClusterID: reg.Cluster.ID, Role: role, NodeName: "node-a"})
+		err := uc.HandleRegister(ctx, 99, nil, tunnel.KubernetesInfo{ClusterID: reg.Cluster.ID, ClusterUID: testClusterUID, Role: role, NodeName: "node-a"})
 		if !errors.Is(err, errs.ErrForbidden) {
 			t.Fatalf("HandleRegister(%s) error = %v, want forbidden", role, err)
 		}
@@ -390,7 +466,7 @@ func TestUsecaseNodeEnrollmentCompensatesUnboundEdge(t *testing.T) {
 		t.Fatalf("CreateCluster() error = %v", err)
 	}
 
-	_, err = uc.Enroll(ctx, EnrollInput{BootstrapToken: reg.NodeBootstrapToken, ClusterID: reg.Cluster.ID, Role: model.RoleNode, NodeName: "node-a", NodeUID: "uid-a"})
+	_, err = uc.Enroll(ctx, EnrollInput{BootstrapToken: reg.NodeBootstrapToken, ClusterID: reg.Cluster.ID, ClusterUID: testClusterUID, Role: model.RoleNode, NodeName: "node-a", NodeUID: "uid-a"})
 	if err == nil {
 		t.Fatal("Enroll() error = nil, want link failure")
 	}
@@ -410,7 +486,7 @@ func TestUsecaseControllerEnrollmentCompensatesUnboundEdge(t *testing.T) {
 		t.Fatalf("CreateCluster() error = %v", err)
 	}
 
-	_, err = uc.Enroll(ctx, EnrollInput{BootstrapToken: reg.BootstrapToken, ClusterID: reg.Cluster.ID, Role: model.RoleController})
+	_, err = uc.Enroll(ctx, EnrollInput{BootstrapToken: reg.BootstrapToken, ClusterID: reg.Cluster.ID, ClusterUID: testClusterUID, Role: model.RoleController})
 	if err == nil {
 		t.Fatal("Enroll() error = nil, want bind failure")
 	}
@@ -506,9 +582,10 @@ func TestUsecaseInventoryMergesNodeUIDWithExistingNodeEdge(t *testing.T) {
 
 	deviceID := uint64(17)
 	if err := uc.HandleRegister(ctx, 4, &deviceID, tunnel.KubernetesInfo{
-		ClusterID: reg.Cluster.ID,
-		Role:      model.RoleNode,
-		NodeName:  "node-a",
+		ClusterID:  reg.Cluster.ID,
+		ClusterUID: testClusterUID,
+		Role:       model.RoleNode,
+		NodeName:   "node-a",
 	}); err != nil {
 		t.Fatalf("HandleRegister(node) error = %v", err)
 	}
@@ -553,6 +630,7 @@ func TestUsecaseInventoryReplacesSameNameNodeWithDifferentRealUID(t *testing.T) 
 	old, err := uc.Enroll(ctx, EnrollInput{
 		BootstrapToken: reg.NodeBootstrapToken,
 		ClusterID:      reg.Cluster.ID,
+		ClusterUID:     testClusterUID,
 		Role:           model.RoleNode,
 		NodeName:       "node-a",
 		NodeUID:        "uid-old",
@@ -592,7 +670,7 @@ func TestUsecaseTopologyReconcilesKubernetesNodesIntoCluster(t *testing.T) {
 	mirror := &fakeTopologyMirror{}
 	uc := NewUsecase(repo, newFakeIssuer(), Config{})
 	uc.SetTopologyMirror(mirror)
-	reg, err := uc.CreateCluster(ctx, CreateClusterInput{Name: "prod", UID: "cluster-uid"})
+	reg, err := uc.CreateCluster(ctx, CreateClusterInput{Name: "prod", UID: testClusterUID})
 	if err != nil {
 		t.Fatalf("CreateCluster() error = %v", err)
 	}
@@ -605,10 +683,11 @@ func TestUsecaseTopologyReconcilesKubernetesNodesIntoCluster(t *testing.T) {
 	repo.deviceNodeIDs[deviceID] = deviceNodeID
 	bindFakeNode(t, repo, reg.Cluster.ID, 4, "node-a", "node-uid-a")
 	if err := uc.HandleRegister(ctx, 4, &deviceID, tunnel.KubernetesInfo{
-		ClusterID: reg.Cluster.ID,
-		Role:      model.RoleNode,
-		NodeName:  "node-a",
-		NodeUID:   "node-uid-a",
+		ClusterID:  reg.Cluster.ID,
+		ClusterUID: testClusterUID,
+		Role:       model.RoleNode,
+		NodeName:   "node-a",
+		NodeUID:    "node-uid-a",
 	}); err != nil {
 		t.Fatalf("HandleRegister(node) error = %v", err)
 	}
@@ -640,7 +719,7 @@ func TestUsecaseTopologyBackfillsMissingDeviceNode(t *testing.T) {
 	mirror := &fakeTopologyMirror{}
 	uc := NewUsecase(repo, newFakeIssuer(), Config{})
 	uc.SetTopologyMirror(mirror)
-	reg, err := uc.CreateCluster(ctx, CreateClusterInput{Name: "prod", UID: "cluster-uid"})
+	reg, err := uc.CreateCluster(ctx, CreateClusterInput{Name: "prod", UID: testClusterUID})
 	if err != nil {
 		t.Fatalf("CreateCluster() error = %v", err)
 	}
@@ -648,10 +727,11 @@ func TestUsecaseTopologyBackfillsMissingDeviceNode(t *testing.T) {
 	deviceID := uint64(17)
 	bindFakeNode(t, repo, reg.Cluster.ID, 4, "node-a", "node-uid-a")
 	if err := uc.HandleRegister(ctx, 4, &deviceID, tunnel.KubernetesInfo{
-		ClusterID: reg.Cluster.ID,
-		Role:      model.RoleNode,
-		NodeName:  "node-a",
-		NodeUID:   "node-uid-a",
+		ClusterID:  reg.Cluster.ID,
+		ClusterUID: testClusterUID,
+		Role:       model.RoleNode,
+		NodeName:   "node-a",
+		NodeUID:    "node-uid-a",
 	}); err != nil {
 		t.Fatalf("HandleRegister(node) error = %v", err)
 	}
@@ -713,6 +793,7 @@ func TestUsecaseDeleteClusterDeletesAssociatedEdges(t *testing.T) {
 	controller, err := uc.Enroll(ctx, EnrollInput{
 		BootstrapToken: reg.BootstrapToken,
 		ClusterID:      reg.Cluster.ID,
+		ClusterUID:     testClusterUID,
 		Role:           model.RoleController,
 		NodeName:       "control-plane",
 		Namespace:      "ongrid-system",
@@ -723,6 +804,7 @@ func TestUsecaseDeleteClusterDeletesAssociatedEdges(t *testing.T) {
 	node, err := uc.Enroll(ctx, EnrollInput{
 		BootstrapToken: reg.NodeBootstrapToken,
 		ClusterID:      reg.Cluster.ID,
+		ClusterUID:     testClusterUID,
 		Role:           model.RoleNode,
 		NodeName:       "node-a",
 		NodeUID:        "node-uid-a",
@@ -756,6 +838,7 @@ func TestUsecaseDeleteClusterRejectsActiveClusterWithoutForce(t *testing.T) {
 	if _, err := uc.Enroll(ctx, EnrollInput{
 		BootstrapToken: reg.BootstrapToken,
 		ClusterID:      reg.Cluster.ID,
+		ClusterUID:     testClusterUID,
 		Role:           model.RoleController,
 		NodeName:       "control-plane",
 	}); err != nil {
@@ -782,6 +865,7 @@ func TestUsecaseDeleteClusterIgnoresMissingAssociatedEdge(t *testing.T) {
 	controller, err := uc.Enroll(ctx, EnrollInput{
 		BootstrapToken: reg.BootstrapToken,
 		ClusterID:      reg.Cluster.ID,
+		ClusterUID:     testClusterUID,
 		Role:           model.RoleController,
 		NodeName:       "control-plane",
 	})
@@ -812,6 +896,7 @@ func TestUsecaseDeleteClusterKeepsClusterAndTopologyWhenEdgeDeleteFails(t *testi
 	controller, err := uc.Enroll(ctx, EnrollInput{
 		BootstrapToken: reg.BootstrapToken,
 		ClusterID:      reg.Cluster.ID,
+		ClusterUID:     testClusterUID,
 		Role:           model.RoleController,
 		NodeName:       "control-plane",
 	})
@@ -898,6 +983,103 @@ func TestUsecaseInventoryPrunesOnlyDeclaredScope(t *testing.T) {
 	}
 }
 
+func TestUsecaseChunkedInventoryPrunesOnlyAfterFinalChunk(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	uc := NewUsecase(repo, newFakeIssuer(), Config{})
+	reg, err := uc.CreateCluster(ctx, CreateClusterInput{Name: "prod"})
+	if err != nil {
+		t.Fatalf("CreateCluster() error = %v", err)
+	}
+	bindFakeController(t, repo, reg.Cluster.ID, 99)
+
+	first := tunnel.KubernetesInventoryRequest{
+		ClusterID:  reg.Cluster.ID,
+		Scope:      "cluster",
+		SyncType:   inventorySyncFull,
+		SnapshotID: "snapshot-1",
+		ChunkIndex: 0,
+		ChunkCount: 2,
+		Nodes:      []tunnel.KubernetesNodeSnapshot{{Name: "node-a", UID: "uid-a"}},
+	}
+	if _, err := uc.IngestInventory(ctx, 99, first); err != nil {
+		t.Fatalf("IngestInventory(first chunk) error = %v", err)
+	}
+	if len(repo.pruned) != 0 {
+		t.Fatalf("pruned after first chunk = %v, want none", repo.pruned)
+	}
+	cluster, err := repo.GetCluster(ctx, reg.Cluster.ID)
+	if err != nil {
+		t.Fatalf("GetCluster(after first chunk) error = %v", err)
+	}
+	if cluster.InventorySyncedAt != nil {
+		t.Fatalf("InventorySyncedAt after first chunk = %v, want nil", cluster.InventorySyncedAt)
+	}
+
+	final := first
+	final.ChunkIndex = 1
+	final.Nodes = nil
+	final.Pods = []tunnel.KubernetesPodSnapshot{{Namespace: "default", Name: "api", UID: "pod-uid"}}
+	if _, err := uc.IngestInventory(ctx, 99, final); err != nil {
+		t.Fatalf("IngestInventory(final chunk) error = %v", err)
+	}
+	wantPruned := []string{"nodes:cluster", "workloads:cluster", "pods:cluster", "events:cluster"}
+	if strings.Join(repo.pruned, ",") != strings.Join(wantPruned, ",") {
+		t.Fatalf("pruned after final chunk = %v, want %v", repo.pruned, wantPruned)
+	}
+	cluster, err = repo.GetCluster(ctx, reg.Cluster.ID)
+	if err != nil {
+		t.Fatalf("GetCluster(after final chunk) error = %v", err)
+	}
+	if cluster.InventorySyncedAt == nil {
+		t.Fatal("InventorySyncedAt after final chunk = nil")
+	}
+}
+
+func TestUsecaseChunkedInventoryRejectsOutOfOrderChunk(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	uc := NewUsecase(repo, newFakeIssuer(), Config{})
+	reg, err := uc.CreateCluster(ctx, CreateClusterInput{Name: "prod"})
+	if err != nil {
+		t.Fatalf("CreateCluster() error = %v", err)
+	}
+	bindFakeController(t, repo, reg.Cluster.ID, 99)
+	_, err = uc.IngestInventory(ctx, 99, tunnel.KubernetesInventoryRequest{
+		ClusterID:  reg.Cluster.ID,
+		SyncType:   inventorySyncFull,
+		SnapshotID: "snapshot-1",
+		ChunkIndex: 1,
+		ChunkCount: 2,
+	})
+	if !errors.Is(err, errs.ErrConflict) {
+		t.Fatalf("IngestInventory(out of order) error = %v, want conflict", err)
+	}
+}
+
+func TestPrepareInventoryChunkUsesDatabaseSafeTimestampPrecision(t *testing.T) {
+	u := NewUsecase(newFakeRepo(), newFakeIssuer(), Config{})
+	receivedAt := time.Date(2026, time.July, 10, 10, 20, 30, 123456789, time.FixedZone("UTC+8", 8*60*60))
+
+	got, final, err := u.prepareInventoryChunk(tunnel.KubernetesInventoryRequest{
+		ClusterID:  1,
+		SyncType:   inventorySyncFull,
+		SnapshotID: "snapshot-precision",
+		ChunkIndex: 0,
+		ChunkCount: 2,
+	}, receivedAt)
+	if err != nil {
+		t.Fatalf("prepareInventoryChunk() error = %v", err)
+	}
+	if final {
+		t.Fatal("prepareInventoryChunk() final = true, want false")
+	}
+	want := receivedAt.UTC().Truncate(time.Millisecond)
+	if !got.Equal(want) || got.Nanosecond()%int(time.Millisecond) != 0 {
+		t.Fatalf("prepareInventoryChunk() timestamp = %s, want %s", got, want)
+	}
+}
+
 func TestUsecaseInventoryDeltaDeletesNodeIdentity(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeRepo()
@@ -911,6 +1093,7 @@ func TestUsecaseInventoryDeltaDeletesNodeIdentity(t *testing.T) {
 	node, err := uc.Enroll(ctx, EnrollInput{
 		BootstrapToken: reg.NodeBootstrapToken,
 		ClusterID:      reg.Cluster.ID,
+		ClusterUID:     testClusterUID,
 		Role:           model.RoleNode,
 		NodeName:       "node-a",
 		NodeUID:        "uid-a",
@@ -950,6 +1133,7 @@ func TestUsecaseFullInventoryPrunesStaleNodeIdentity(t *testing.T) {
 	node, err := uc.Enroll(ctx, EnrollInput{
 		BootstrapToken: reg.NodeBootstrapToken,
 		ClusterID:      reg.Cluster.ID,
+		ClusterUID:     testClusterUID,
 		Role:           model.RoleNode,
 		NodeName:       "node-a",
 		NodeUID:        "uid-a",
@@ -1331,11 +1515,19 @@ func bindFakeController(t *testing.T, repo *fakeRepo, clusterID, edgeID uint64) 
 	if !ok {
 		t.Fatalf("cluster %d not found", clusterID)
 	}
+	uid := testClusterUID
+	c.UID = &uid
 	c.ControllerEdgeID = &edgeID
 }
 
 func bindFakeNode(t *testing.T, repo *fakeRepo, clusterID, edgeID uint64, nodeName, nodeUID string) {
 	t.Helper()
+	c, ok := repo.clusters[clusterID]
+	if !ok {
+		t.Fatalf("cluster %d not found", clusterID)
+	}
+	uid := testClusterUID
+	c.UID = &uid
 	repo.nextNodeID++
 	repo.nodes[nodeKey(clusterID, nodeUID)] = &model.Node{
 		ID:        repo.nextNodeID,
@@ -1398,6 +1590,30 @@ func (r *fakeRepo) CountClusters(context.Context, ListClustersFilter) (int64, er
 	return int64(len(r.clusters)), nil
 }
 
+func (r *fakeRepo) BindClusterUID(_ context.Context, id uint64, uid string) error {
+	c, ok := r.clusters[id]
+	if !ok {
+		return errs.ErrNotFound
+	}
+	uid = strings.TrimSpace(uid)
+	if uid == "" {
+		return errs.ErrInvalid
+	}
+	if c.UID == nil || strings.TrimSpace(*c.UID) == "" {
+		for clusterID, existing := range r.clusters {
+			if clusterID != id && existing.UID != nil && strings.TrimSpace(*existing.UID) == uid {
+				return errs.ErrConflict
+			}
+		}
+		c.UID = &uid
+		return nil
+	}
+	if strings.TrimSpace(*c.UID) != uid {
+		return errs.ErrConflict
+	}
+	return nil
+}
+
 func (r *fakeRepo) UpdateClusterTokens(_ context.Context, id uint64, controllerTokenHash, nodeTokenHash string) error {
 	c, ok := r.clusters[id]
 	if !ok {
@@ -1405,6 +1621,7 @@ func (r *fakeRepo) UpdateClusterTokens(_ context.Context, id uint64, controllerT
 	}
 	c.BootstrapTokenHash = controllerTokenHash
 	c.NodeBootstrapTokenHash = nodeTokenHash
+	c.ControllerPodName = ""
 	return nil
 }
 

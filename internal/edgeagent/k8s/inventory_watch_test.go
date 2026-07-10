@@ -2,9 +2,11 @@ package k8s
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -146,4 +148,123 @@ func TestInventoryPusherPushDeltaUsesDeltaPayload(t *testing.T) {
 	if req.WatchEventObservedAt != 100 || req.WatchTriggerReason != "pods:ADDED" {
 		t.Fatalf("watch metadata = observed:%d reason:%q", req.WatchEventObservedAt, req.WatchTriggerReason)
 	}
+}
+
+func TestInventoryWatchAccumulatorKeepsFinalDelete(t *testing.T) {
+	accumulator := newInventoryWatchAccumulator()
+	upsert := newInventoryWatchTrigger("pods:MODIFIED", time.Unix(100, 0))
+	upsert.pods = []tunnel.KubernetesPodSnapshot{{Namespace: "default", Name: "api", UID: "pod-uid", Phase: "Running"}}
+	deleted := newInventoryWatchTrigger("pods:DELETED", time.Unix(101, 0))
+	deleted.deletedPods = []tunnel.KubernetesPodRef{{Namespace: "default", Name: "api", UID: "pod-uid"}}
+	accumulator.add(upsert)
+	accumulator.add(deleted)
+
+	select {
+	case <-accumulator.notifications():
+	case <-time.After(time.Second):
+		t.Fatal("watch accumulator did not signal pending changes")
+	}
+	got, ok := waitForWatchDebounce(context.Background(), accumulator, 0)
+	if !ok {
+		t.Fatal("waitForWatchDebounce() canceled")
+	}
+	if len(got.pods) != 0 || len(got.deletedPods) != 1 || got.deletedPods[0].UID != "pod-uid" {
+		t.Fatalf("final pod operations = upserts:%+v deletes:%+v, want one delete", got.pods, got.deletedPods)
+	}
+}
+
+func TestInventoryWatchAccumulatorDoesNotLoseBurst(t *testing.T) {
+	accumulator := newInventoryWatchAccumulator()
+	const total = 1000
+	for i := 0; i < total; i++ {
+		trigger := newInventoryWatchTrigger("pods:ADDED", time.Unix(int64(i+1), 0))
+		trigger.pods = []tunnel.KubernetesPodSnapshot{{
+			Namespace: "default",
+			Name:      fmt.Sprintf("pod-%d", i),
+			UID:       fmt.Sprintf("uid-%d", i),
+		}}
+		accumulator.add(trigger)
+	}
+	select {
+	case <-accumulator.notifications():
+	case <-time.After(time.Second):
+		t.Fatal("watch accumulator did not signal burst")
+	}
+	got, ok := waitForWatchDebounce(context.Background(), accumulator, 0)
+	if !ok {
+		t.Fatal("waitForWatchDebounce() canceled")
+	}
+	if len(got.pods) != total || got.count != total {
+		t.Fatalf("burst = pods:%d count:%d, want %d", len(got.pods), got.count, total)
+	}
+}
+
+func TestInventoryPusherStartsWatchAfterLaterFullSyncSucceeds(t *testing.T) {
+	watchStarted := make(chan struct{})
+	var watchOnce sync.Once
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("watch") == "1" {
+			watchOnce.Do(func() { close(watchStarted) })
+			return
+		}
+		writeTestResponse(t, w, `{"metadata":{"resourceVersion":"100"},"items":[]}`)
+	}))
+	defer srv.Close()
+
+	client := &flakyInventoryTunnelClient{failures: 1}
+	p := &InventoryPusher{
+		client:   client,
+		info:     tunnel.KubernetesInfo{ClusterID: 7, Role: "controller"},
+		edgeID:   func() uint64 { return 55 },
+		interval: 10 * time.Millisecond,
+		log:      slog.Default(),
+		api:      &apiClient{baseURL: srv.URL, token: "token", http: srv.Client()},
+		watch:    true,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- p.Run(ctx) }()
+	select {
+	case <-watchStarted:
+	case <-time.After(2 * time.Second):
+		cancel()
+		t.Fatal("watch did not start after the later full sync succeeded")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run() error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Run() did not stop after cancellation")
+	}
+	if client.callCount() < 2 {
+		t.Fatalf("inventory calls = %d, want initial failure and later success", client.callCount())
+	}
+}
+
+type flakyInventoryTunnelClient struct {
+	fakeTunnelClient
+	mu       sync.Mutex
+	failures int
+	calls    int
+}
+
+func (f *flakyInventoryTunnelClient) Call(ctx context.Context, method string, req any, resp any) error {
+	f.mu.Lock()
+	f.calls++
+	if f.failures > 0 {
+		f.failures--
+		f.mu.Unlock()
+		return fmt.Errorf("temporary inventory push failure")
+	}
+	f.mu.Unlock()
+	return f.fakeTunnelClient.Call(ctx, method, req, resp)
+}
+
+func (f *flakyInventoryTunnelClient) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
 }

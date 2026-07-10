@@ -411,6 +411,9 @@ type KubernetesInventoryRequest struct {
 	WatchEventObservedAt int64                        `json:"watch_event_observed_at,omitempty"`
 	WatchTriggerReason   string                       `json:"watch_trigger_reason,omitempty"`
 	SyncType             string                       `json:"sync_type,omitempty"`
+	SnapshotID           string                       `json:"snapshot_id,omitempty"`
+	ChunkIndex           int                          `json:"chunk_index,omitempty"`
+	ChunkCount           int                          `json:"chunk_count,omitempty"`
 	Nodes                []KubernetesNodeSnapshot     `json:"nodes,omitempty"`
 	Workloads            []KubernetesWorkloadSnapshot `json:"workloads,omitempty"`
 	Pods                 []KubernetesPodSnapshot      `json:"pods,omitempty"`

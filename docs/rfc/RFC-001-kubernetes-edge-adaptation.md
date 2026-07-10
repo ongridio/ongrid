@@ -78,10 +78,10 @@ flowchart LR
    - `enrollment.controllerBootstrapToken`
    - `enrollment.nodeBootstrapToken`
    - `mode=full-node`
-4. controller Deployment 启动后 enroll，作为集群控制面身份连接 tunnel。
-5. node DaemonSet 在每个 Node 上启动，每个 Pod 先用 Node Name enroll，换取独立 edge credentials；controller 快照到达后再合并 Kubernetes Node UID。
+4. controller Deployment 启动后读取 `kube-system` Namespace UID，manager 首次 enroll 时将其原子绑定为真实集群身份，再建立控制面 tunnel。
+5. node DaemonSet 在每个 Node 上启动，每个 Pod 使用只允许读取 `kube-system` Namespace 的 ServiceAccount 权限校验集群 UID，再用 Node Name enroll，换取独立 edge credentials；controller 快照到达后再合并 Kubernetes Node UID。
    - 节点凭据以 `0600` 文件保存在该节点宿主机 `/var/tmp`，Pod 滚动重建时复用，不使用所有节点共享的 Kubernetes Secret。
-   - controller 和 node bootstrap token 长期有效，首次注册不会消费；仅管理员手动轮换 token 或删除集群时失效，以支持 controller 重建和新增节点自动接入。
+   - controller 和 node bootstrap token 长期有效，仅管理员手动轮换 token 或删除集群时失效。已注册 controller 禁止重复 bootstrap 轮换最终凭据；普通 Pod 重建复用 Secret，凭据丢失时由管理员轮换 token 显式开放一次恢复接入。
 6. manager 将 Node edge 关联为普通设备，并在设备列表展示 `K8s Node`、所属集群和可选 `K8s Controller` 标签。
 
 ## 数据同步
@@ -89,7 +89,9 @@ flowchart LR
 - controller 默认开启 inventory watch。
 - 首次启动使用 full list seed 当前快照。
 - watch 事件触发 delta payload，只更新 upsert/delete 的对象。
+- watch burst 在 Edge 内按对象合并最终操作，通知 channel 只负责唤醒，不丢弃资源变更。
 - 普通周期快照用于兜底收敛。
+- full snapshot 按不超过 tunnel 单包上限的块顺序上传，manager 只在最后一块成功后执行 prune 和提交同步水位。
 - full sync 按集群范围清理本轮未出现的 Pod / Workload / Event。
 - delta sync 只应用显式 upsert/delete，不做范围 prune。
 - manager 记录 `inventory_resource_version`、`inventory_resource_versions_json`、`inventory_synced_at`、`inventory_sync_duration_ms`、`inventory_watch_lag_seconds`。
@@ -194,11 +196,13 @@ kubectl delete namespace ongrid-system --ignore-not-found
 | 风险 | 影响 | 缓解 |
 | --- | --- | --- |
 | DaemonSet 复用同一 edge 凭证 | 多节点互相覆盖在线状态和 `device_id` | 使用 bootstrap token 换取 per-node edge credentials |
-| Node Pod 读取共享凭据 Secret | 单节点失陷后可读取或覆盖其他节点密钥 | 每个节点只在宿主机本地持久化自己的 `0600` 凭据文件，并禁用 Node Pod 的 ServiceAccount token 自动挂载 |
+| Node Pod 读取共享凭据 Secret | 单节点失陷后可读取或覆盖其他节点密钥 | 每个节点只在宿主机本地持久化自己的 `0600` 凭据文件；ServiceAccount 仅允许读取 `kube-system` Namespace 以校验集群 UID |
 | 离线镜像架构不匹配 | arm64 节点无法启动当前内置镜像 | 当前 Chart 显式调度到 `kubernetes.io/arch=amd64`；支持 arm64 前需增加对应离线镜像包 |
 | 可选 kube-state-metrics 访问公网 | 离线环境启用后出现 ImagePullBackOff | 默认关闭；启用时必须显式提供集群可达的离线镜像仓库地址 |
 | Event 高 churn | MySQL 表膨胀 | 当前快照 prune + TTL + per-cluster cap |
 | controller edge 被当成设备 | 设备列表出现非主机对象 | controller 不创建 host Device，UI 不单独展示 controller edge |
-| 长期 bootstrap token 泄露 | 未授权 controller 重建或 node 接入 | 数据库仅保存 hash，安装命令按敏感信息管理；泄露后由管理员手动轮换，旧 token 立即失效 |
+| 长期 bootstrap token 泄露 | 未授权 controller 恢复或 node 接入 | 数据库仅保存 hash，安装命令按敏感信息管理；已注册 controller 拒绝重复 bootstrap，泄露后由管理员手动轮换，旧 token 立即失效 |
+| 同一安装命令用于不同物理集群 | 多个集群争用同一 controller 和快照 | 首次 enroll 绑定 `kube-system` Namespace UID，后续不一致的 enroll/register 直接拒绝 |
+| 大集群 full snapshot 超过 tunnel 单包限制 | 首次接入和周期收敛持续失败 | Edge 按大小分块上传，manager 校验 snapshot 顺序并只在最后一块执行 prune |
 | 未卸载直接删除集群 | 远端仍继续上报 | UI 提示卸载命令，删除后 token/cluster 记录失效，上报应被拒绝或无法关联 |
 | 自签名证书 | 目标集群无法拉 chart 或连 manager | 安装命令默认提供 Helm `--insecure-skip-tls-verify` 和 `manager.tlsInsecure=true` |

@@ -438,6 +438,7 @@ func buildCollector(ctx context.Context, cfg *config.Config, log *slog.Logger, e
 
 type k8sEnrollRequest struct {
 	ClusterID    uint64   `json:"cluster_id"`
+	ClusterUID   string   `json:"cluster_uid"`
 	Role         string   `json:"role"`
 	NodeName     string   `json:"node_name,omitempty"`
 	NodeUID      string   `json:"node_uid,omitempty"`
@@ -480,15 +481,21 @@ func ensureK8sEnrollment(ctx context.Context, cfg *config.Config, log *slog.Logg
 		role = defaultK8sRole(edgeMode)
 	}
 	info := &tunnel.KubernetesInfo{
-		Mode:       strings.TrimSpace(os.Getenv("ONGRID_K8S_MODE")),
-		ClusterID:  clusterID,
-		ClusterUID: strings.TrimSpace(os.Getenv("ONGRID_K8S_CLUSTER_UID")),
-		Role:       role,
-		NodeName:   strings.TrimSpace(os.Getenv("ONGRID_K8S_NODE_NAME")),
-		NodeUID:    strings.TrimSpace(os.Getenv("ONGRID_K8S_NODE_UID")),
-		Namespace:  strings.TrimSpace(os.Getenv("ONGRID_K8S_POD_NAMESPACE")),
-		PodName:    strings.TrimSpace(os.Getenv("ONGRID_K8S_POD_NAME")),
+		Mode:      strings.TrimSpace(os.Getenv("ONGRID_K8S_MODE")),
+		ClusterID: clusterID,
+		Role:      role,
+		NodeName:  strings.TrimSpace(os.Getenv("ONGRID_K8S_NODE_NAME")),
+		NodeUID:   strings.TrimSpace(os.Getenv("ONGRID_K8S_NODE_UID")),
+		Namespace: strings.TrimSpace(os.Getenv("ONGRID_K8S_POD_NAMESPACE")),
+		PodName:   strings.TrimSpace(os.Getenv("ONGRID_K8S_POD_NAME")),
 	}
+	identityCtx, cancelIdentity := context.WithTimeout(ctx, 10*time.Second)
+	clusterUID, err := edgek8s.DiscoverClusterUID(identityCtx)
+	cancelIdentity()
+	if err != nil {
+		return nil, fmt.Errorf("discover kubernetes cluster UID: %w", err)
+	}
+	info.ClusterUID = clusterUID
 	loaded, err := loadStoredK8sCredential(ctx, cfg, info, log)
 	if err != nil {
 		if bootstrapToken == "" {
@@ -512,6 +519,7 @@ func ensureK8sEnrollment(ctx context.Context, cfg *config.Config, log *slog.Logg
 	}
 	reqBody := k8sEnrollRequest{
 		ClusterID:    clusterID,
+		ClusterUID:   info.ClusterUID,
 		Role:         role,
 		NodeName:     info.NodeName,
 		NodeUID:      info.NodeUID,

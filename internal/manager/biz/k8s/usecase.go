@@ -38,6 +38,7 @@ type Repository interface {
 	GetClusterByControllerEdge(ctx context.Context, edgeID uint64) (*model.Cluster, error)
 	ListClusters(ctx context.Context, f ListClustersFilter) ([]*model.Cluster, error)
 	CountClusters(ctx context.Context, f ListClustersFilter) (int64, error)
+	BindClusterUID(ctx context.Context, id uint64, uid string) error
 	UpdateClusterTokens(ctx context.Context, id uint64, controllerTokenHash, nodeTokenHash string) error
 	UpdateClusterController(ctx context.Context, id uint64, in ClusterControllerRegistration) error
 	BindControllerEnrollment(ctx context.Context, id uint64, registration ClusterControllerRegistration, installation *model.Installation) error
@@ -159,13 +160,15 @@ type Config struct {
 }
 
 type Usecase struct {
-	repo              Repository
-	edgeIssuer        EdgeIssuer
-	edgeRemover       EdgeRemover
-	topology          TopologyMirror
-	cfg               Config
-	enrollmentLocksMu sync.Mutex
-	enrollmentLocks   map[string]*enrollmentLock
+	repo               Repository
+	edgeIssuer         EdgeIssuer
+	edgeRemover        EdgeRemover
+	topology           TopologyMirror
+	cfg                Config
+	enrollmentLocksMu  sync.Mutex
+	enrollmentLocks    map[string]*enrollmentLock
+	inventoryUploadsMu sync.Mutex
+	inventoryUploads   map[uint64]inventoryUploadState
 }
 
 type enrollmentLock struct {
@@ -184,10 +187,11 @@ func NewUsecase(repo Repository, edgeIssuer EdgeIssuer, cfg Config) *Usecase {
 		cfg.EventCleanupInterval = defaultEventCleanupInterval
 	}
 	u := &Usecase{
-		repo:            repo,
-		edgeIssuer:      edgeIssuer,
-		cfg:             cfg,
-		enrollmentLocks: make(map[string]*enrollmentLock),
+		repo:             repo,
+		edgeIssuer:       edgeIssuer,
+		cfg:              cfg,
+		enrollmentLocks:  make(map[string]*enrollmentLock),
+		inventoryUploads: make(map[uint64]inventoryUploadState),
 	}
 	if remover, ok := edgeIssuer.(EdgeRemover); ok {
 		u.edgeRemover = remover
@@ -905,6 +909,7 @@ func (u *Usecase) RotateBootstrapToken(ctx context.Context, id uint64) (*Cluster
 	}
 	c.BootstrapTokenHash = controllerHash
 	c.NodeBootstrapTokenHash = nodeHash
+	c.ControllerPodName = ""
 	return &ClusterRegistration{
 		Cluster:            c,
 		BootstrapToken:     controllerToken,
@@ -998,6 +1003,14 @@ func (u *Usecase) Enroll(ctx context.Context, in EnrollInput) (*EnrollResult, er
 	if !validBootstrapToken(strings.TrimSpace(in.BootstrapToken), c, role) {
 		return nil, errs.ErrUnauthorized
 	}
+	clusterUID := strings.TrimSpace(in.ClusterUID)
+	if clusterUID == "" {
+		return nil, errors.Join(errs.ErrInvalid, fmt.Errorf("cluster_uid is required"))
+	}
+	if err := u.repo.BindClusterUID(ctx, c.ID, clusterUID); err != nil {
+		return nil, fmt.Errorf("bind kubernetes cluster UID: %w", err)
+	}
+	c.UID = &clusterUID
 	now := time.Now()
 	switch role {
 	case model.RoleNode:
@@ -1047,6 +1060,13 @@ func (u *Usecase) HandleRegister(ctx context.Context, edgeID uint64, deviceID *u
 	if info.ClusterID == 0 {
 		return errors.Join(errs.ErrInvalid, fmt.Errorf("cluster_id is required"))
 	}
+	registeredCluster, err := u.repo.GetCluster(ctx, info.ClusterID)
+	if err != nil {
+		return err
+	}
+	if err := validateClusterUID(registeredCluster, info.ClusterUID); err != nil {
+		return err
+	}
 	now := time.Now()
 	switch normalizeRole(info.Role) {
 	case model.RoleNode:
@@ -1081,12 +1101,16 @@ func (u *Usecase) HandleRegister(ctx context.Context, edgeID uint64, deviceID *u
 		if cluster.ID != info.ClusterID {
 			return errors.Join(errs.ErrForbidden, fmt.Errorf("edge %d is not controller for cluster %d", edgeID, info.ClusterID))
 		}
+		podName := strings.TrimSpace(info.PodName)
+		if podName == "" {
+			return errors.Join(errs.ErrInvalid, fmt.Errorf("pod_name is required for a k8s controller"))
+		}
 		if err := u.repo.UpdateClusterController(ctx, info.ClusterID, ClusterControllerRegistration{
 			EdgeID:    edgeID,
 			LastSeen:  now,
 			NodeName:  strings.TrimSpace(info.NodeName),
 			Namespace: strings.TrimSpace(info.Namespace),
-			PodName:   strings.TrimSpace(info.PodName),
+			PodName:   podName,
 		}); err != nil {
 			return err
 		}
@@ -1109,6 +1133,20 @@ func (u *Usecase) HandleRegister(ctx context.Context, edgeID uint64, deviceID *u
 	default:
 		return errors.Join(errs.ErrInvalid, fmt.Errorf("unsupported k8s register role %q", info.Role))
 	}
+}
+
+func validateClusterUID(cluster *model.Cluster, got string) error {
+	got = strings.TrimSpace(got)
+	if got == "" {
+		return errors.Join(errs.ErrInvalid, fmt.Errorf("cluster_uid is required"))
+	}
+	if cluster == nil || cluster.UID == nil || strings.TrimSpace(*cluster.UID) == "" {
+		return errors.Join(errs.ErrForbidden, fmt.Errorf("kubernetes cluster UID is not bound"))
+	}
+	if strings.TrimSpace(*cluster.UID) != got {
+		return errors.Join(errs.ErrForbidden, fmt.Errorf("kubernetes cluster UID does not match cluster %d", cluster.ID))
+	}
+	return nil
 }
 
 func (u *Usecase) LookupControllerCluster(ctx context.Context, edgeID uint64) (uint64, error) {
@@ -1275,9 +1313,14 @@ func (u *Usecase) IngestInventory(ctx context.Context, edgeID uint64, in tunnel.
 	if c.ControllerEdgeID == nil || *c.ControllerEdgeID == 0 || *c.ControllerEdgeID != edgeID {
 		return nil, errors.Join(errs.ErrForbidden, fmt.Errorf("edge %d is not controller for cluster %d", edgeID, in.ClusterID))
 	}
+	unlock := u.lockEnrollment(in.ClusterID, "inventory", "")
+	defer unlock()
 	receivedAt := time.Now().UTC()
-	now := receivedAt
 	syncType := normalizeInventorySyncType(in.SyncType)
+	now, finalChunk, err := u.prepareInventoryChunk(in, receivedAt)
+	if err != nil {
+		return nil, err
+	}
 	if syncType == inventorySyncDelta {
 		if err := u.deleteInventoryDeltas(ctx, in.ClusterID, in); err != nil {
 			return nil, err
@@ -1413,9 +1456,24 @@ func (u *Usecase) IngestInventory(ctx context.Context, edgeID uint64, in tunnel.
 	if err := u.repo.UpsertEvents(ctx, events); err != nil {
 		return nil, fmt.Errorf("upsert k8s events: %w", err)
 	}
+	result := &InventoryResult{
+		AcceptedNodes:     len(nodes),
+		AcceptedWorkloads: len(workloads),
+		AcceptedPods:      len(pods),
+		AcceptedEvents:    len(events),
+	}
+	if !finalChunk {
+		if err := u.completeInventoryChunk(in); err != nil {
+			return nil, err
+		}
+		return result, nil
+	}
 	if syncType == inventorySyncFull {
 		if namespace, ok := inventoryPruneNamespace(in); ok {
-			olderThan := now.Add(-time.Second)
+			olderThan := now
+			if strings.TrimSpace(in.SnapshotID) == "" {
+				olderThan = now.Add(-time.Second)
+			}
 			if namespace == nil {
 				staleNodes, err := u.repo.ListStaleNodes(ctx, in.ClusterID, olderThan)
 				if err != nil {
@@ -1452,13 +1510,10 @@ func (u *Usecase) IngestInventory(ctx context.Context, edgeID uint64, in tunnel.
 			return nil, fmt.Errorf("reconcile k8s topology: %w", err)
 		}
 	}
-
-	return &InventoryResult{
-		AcceptedNodes:     len(nodes),
-		AcceptedWorkloads: len(workloads),
-		AcceptedPods:      len(pods),
-		AcceptedEvents:    len(events),
-	}, nil
+	if err := u.completeInventoryChunk(in); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 const (
@@ -1650,6 +1705,9 @@ func (u *Usecase) enrollController(ctx context.Context, c *model.Cluster, in Enr
 		cred, err = u.edgeIssuer.CreateEdgeIdentity(ctx, edgeName(c.Name, "controller"), c.CreatedBy)
 		created = err == nil
 	} else {
+		if strings.TrimSpace(c.ControllerPodName) != "" {
+			return nil, errors.Join(errs.ErrConflict, fmt.Errorf("k8s controller is already registered; rotate the bootstrap token to recover its credentials"))
+		}
 		cred, err = u.edgeIssuer.RotateEdgeSecret(ctx, *c.ControllerEdgeID)
 		if errors.Is(err, errs.ErrNotFound) {
 			cred, err = u.edgeIssuer.CreateEdgeIdentity(ctx, edgeName(c.Name, "controller"), c.CreatedBy)

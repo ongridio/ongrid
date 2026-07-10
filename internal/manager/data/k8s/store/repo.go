@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -77,6 +78,37 @@ func (r *Repo) CountClusters(ctx context.Context, f biz.ListClustersFilter) (int
 	return total, nil
 }
 
+func (r *Repo) BindClusterUID(ctx context.Context, id uint64, uid string) error {
+	uid = strings.TrimSpace(uid)
+	if id == 0 || uid == "" {
+		return errs.ErrInvalid
+	}
+	res := r.db.WithContext(ctx).Model(&model.Cluster{}).
+		Where("id = ? AND (uid IS NULL OR uid = '')", id).
+		Update("uid", uid)
+	if res.Error != nil {
+		if errors.Is(res.Error, gorm.ErrDuplicatedKey) || strings.Contains(strings.ToLower(res.Error.Error()), "duplicate") || strings.Contains(strings.ToLower(res.Error.Error()), "unique constraint") {
+			return fmt.Errorf("%w: kubernetes cluster UID is already bound", errs.ErrConflict)
+		}
+		return res.Error
+	}
+	if res.RowsAffected > 0 {
+		return nil
+	}
+
+	var current model.Cluster
+	if err := r.db.WithContext(ctx).Select("id", "uid").First(&current, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return errs.ErrNotFound
+		}
+		return err
+	}
+	if current.UID != nil && strings.TrimSpace(*current.UID) == uid {
+		return nil
+	}
+	return fmt.Errorf("%w: kubernetes cluster UID does not match the enrolled cluster", errs.ErrConflict)
+}
+
 func applyClusterFilters(tx *gorm.DB, f biz.ListClustersFilter) *gorm.DB {
 	if f.Status != "" {
 		tx = tx.Where("status = ?", f.Status)
@@ -94,6 +126,7 @@ func (r *Repo) UpdateClusterTokens(ctx context.Context, id uint64, controllerTok
 	res := r.db.WithContext(ctx).Model(&model.Cluster{}).Where("id = ?", id).Updates(map[string]any{
 		"bootstrap_token_hash":      controllerTokenHash,
 		"node_bootstrap_token_hash": nodeTokenHash,
+		"controller_pod_name":       "",
 	})
 	if res.Error != nil {
 		return res.Error

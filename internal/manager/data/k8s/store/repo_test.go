@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -11,7 +12,32 @@ import (
 
 	biz "github.com/ongridio/ongrid/internal/manager/biz/k8s"
 	model "github.com/ongridio/ongrid/internal/manager/model/k8s"
+	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
+
+func TestRepo_BindClusterUIDIsIdempotentAndExclusive(t *testing.T) {
+	db, repo := newTestRepo(t)
+	ctx := context.Background()
+	clusters := []*model.Cluster{
+		{Name: "prod-a", Mode: model.ModeFullNode, Status: model.ClusterStatusOffline},
+		{Name: "prod-b", Mode: model.ModeFullNode, Status: model.ClusterStatusOffline},
+	}
+	if err := db.Create(&clusters).Error; err != nil {
+		t.Fatalf("Create clusters: %v", err)
+	}
+	if err := repo.BindClusterUID(ctx, clusters[0].ID, "physical-a"); err != nil {
+		t.Fatalf("BindClusterUID(first): %v", err)
+	}
+	if err := repo.BindClusterUID(ctx, clusters[0].ID, "physical-a"); err != nil {
+		t.Fatalf("BindClusterUID(idempotent): %v", err)
+	}
+	if err := repo.BindClusterUID(ctx, clusters[0].ID, "physical-b"); !errors.Is(err, errs.ErrConflict) {
+		t.Fatalf("BindClusterUID(mismatch) error = %v, want conflict", err)
+	}
+	if err := repo.BindClusterUID(ctx, clusters[1].ID, "physical-a"); !errors.Is(err, errs.ErrConflict) {
+		t.Fatalf("BindClusterUID(duplicate) error = %v, want conflict", err)
+	}
+}
 
 func TestRepo_ListPodsFiltersByReason(t *testing.T) {
 	db, repo := newTestRepo(t)
@@ -412,7 +438,7 @@ func TestRepo_NodeCoverageBatchAndTokenRotation(t *testing.T) {
 	ctx := context.Background()
 	controllerEdgeID := uint64(30)
 	clusters := []*model.Cluster{
-		{Name: "prod-a", Mode: model.ModeFullNode, Status: model.ClusterStatusOffline, BootstrapTokenHash: "controller-hash", NodeBootstrapTokenHash: "node-hash", ControllerEdgeID: &controllerEdgeID, ControllerNodeName: "node-a"},
+		{Name: "prod-a", Mode: model.ModeFullNode, Status: model.ClusterStatusOffline, BootstrapTokenHash: "controller-hash", NodeBootstrapTokenHash: "node-hash", ControllerEdgeID: &controllerEdgeID, ControllerNodeName: "node-a", ControllerPodName: "controller-0"},
 		{Name: "prod-b", Mode: model.ModeFullNode, Status: model.ClusterStatusOffline},
 		{Name: "prod-c", Mode: model.ModeFullNode, Status: model.ClusterStatusOffline},
 	}
@@ -466,6 +492,9 @@ func TestRepo_NodeCoverageBatchAndTokenRotation(t *testing.T) {
 	}
 	if rotated.BootstrapTokenHash != "controller-hash-new" || rotated.NodeBootstrapTokenHash != "node-hash-new" {
 		t.Fatalf("rotated token hashes = %q/%q", rotated.BootstrapTokenHash, rotated.NodeBootstrapTokenHash)
+	}
+	if rotated.ControllerPodName != "" {
+		t.Fatalf("controller pod name after token rotation = %q, want recovery window", rotated.ControllerPodName)
 	}
 }
 

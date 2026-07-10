@@ -110,21 +110,28 @@ func (p *InventoryPusher) Run(ctx context.Context) error {
 	}
 
 	cache := newInventoryCache(snap)
-	watchTrigger := make(chan inventoryWatchTrigger, 1)
-	if p.watch && snap != nil {
-		go p.runWatchTriggers(ctx, snap, cache, watchTrigger)
+	watchTriggers := newInventoryWatchAccumulator()
+	var watchOnce sync.Once
+	startWatch := func(snapshot *inventorySnapshot) {
+		if !p.watch || snapshot == nil {
+			return
+		}
+		watchOnce.Do(func() {
+			go p.runWatchTriggers(ctx, snapshot, cache, watchTriggers)
+		})
 	}
+	startWatch(snap)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
-		case trigger := <-watchTrigger:
+		case <-watchTriggers.notifications():
 			id := p.edgeID()
 			if id == 0 {
 				continue
 			}
-			trigger, ok := waitForWatchDebounce(ctx, trigger, watchTrigger, defaultWatchDebounce)
+			trigger, ok := waitForWatchDebounce(ctx, watchTriggers, defaultWatchDebounce)
 			if !ok {
 				return nil
 			}
@@ -135,6 +142,7 @@ func (p *InventoryPusher) Run(ctx context.Context) error {
 				if err == nil {
 					snap = nextSnap
 					cache.reset(nextSnap)
+					startWatch(nextSnap)
 				}
 			} else {
 				err = p.pushDelta(ctx, id, snap, trigger)
@@ -158,6 +166,7 @@ func (p *InventoryPusher) Run(ctx context.Context) error {
 			}
 			snap = nextSnap
 			cache.reset(nextSnap)
+			startWatch(nextSnap)
 		}
 	}
 }
@@ -172,7 +181,7 @@ func (p *InventoryPusher) pushOnceWithSnapshot(ctx context.Context, edgeID uint6
 	if err != nil {
 		return nil, err
 	}
-	req := tunnel.KubernetesInventoryRequest{
+	base := tunnel.KubernetesInventoryRequest{
 		EdgeID:               edgeID,
 		ClusterID:            p.info.ClusterID,
 		Mode:                 p.info.Mode,
@@ -186,22 +195,31 @@ func (p *InventoryPusher) pushOnceWithSnapshot(ctx context.Context, edgeID uint6
 		WatchEventObservedAt: trigger.observedUnix(),
 		WatchTriggerReason:   trigger.reason,
 		SyncType:             inventorySyncFull,
-		Nodes:                snap.nodes,
-		Workloads:            snap.workloads,
-		Pods:                 snap.pods,
-		Events:               snap.events,
 	}
-	rctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-	var resp tunnel.KubernetesInventoryResponse
-	if err := p.client.Call(rctx, tunnel.MethodPushK8sInventory, req, &resp); err != nil {
+	chunks, err := buildInventorySnapshotChunks(base, snap)
+	if err != nil {
 		return nil, err
 	}
+	var accepted tunnel.KubernetesInventoryResponse
+	for _, req := range chunks {
+		rctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		var resp tunnel.KubernetesInventoryResponse
+		err := p.client.Call(rctx, tunnel.MethodPushK8sInventory, req, &resp)
+		cancel()
+		if err != nil {
+			return nil, fmt.Errorf("push kubernetes inventory chunk %d/%d: %w", req.ChunkIndex+1, req.ChunkCount, err)
+		}
+		accepted.AcceptedNodes += resp.AcceptedNodes
+		accepted.AcceptedWorkloads += resp.AcceptedWorkloads
+		accepted.AcceptedPods += resp.AcceptedPods
+		accepted.AcceptedEvents += resp.AcceptedEvents
+	}
 	p.log.Info("k8s inventory pushed",
-		slog.Int("nodes", resp.AcceptedNodes),
-		slog.Int("workloads", resp.AcceptedWorkloads),
-		slog.Int("pods", resp.AcceptedPods),
-		slog.Int("events", resp.AcceptedEvents),
+		slog.Int("nodes", accepted.AcceptedNodes),
+		slog.Int("workloads", accepted.AcceptedWorkloads),
+		slog.Int("pods", accepted.AcceptedPods),
+		slog.Int("events", accepted.AcceptedEvents),
+		slog.Int("chunks", len(chunks)),
 		slog.String("resource_version", snap.resourceVersion),
 		slog.Int64("collect_duration_ms", snap.collectDurationMS),
 	)
@@ -319,73 +337,6 @@ func (t inventoryWatchTrigger) isEmpty() bool {
 		len(t.deletedEvents) == 0
 }
 
-func mergeInventoryWatchTrigger(current, next inventoryWatchTrigger) inventoryWatchTrigger {
-	if current.reason == "" {
-		current.reason = strings.TrimSpace(next.reason)
-	}
-	if next.fullResync {
-		current.fullResync = true
-		current.syncType = inventorySyncFull
-	}
-	if current.observedAt.IsZero() || (!next.observedAt.IsZero() && next.observedAt.Before(current.observedAt)) {
-		current.observedAt = next.observedAt
-	}
-	current.resourceVersion = newerResourceVersion(current.resourceVersion, next.resourceVersion)
-	if current.resourceVersions == nil && len(next.resourceVersions) > 0 {
-		current.resourceVersions = map[string]string{}
-	}
-	for key, rv := range next.resourceVersions {
-		current.resourceVersions[key] = newerResourceVersion(current.resourceVersions[key], rv)
-	}
-	current.nodes = append(current.nodes, next.nodes...)
-	current.workloads = append(current.workloads, next.workloads...)
-	current.pods = append(current.pods, next.pods...)
-	current.events = append(current.events, next.events...)
-	current.deletedNodes = append(current.deletedNodes, next.deletedNodes...)
-	current.deletedWorkloads = append(current.deletedWorkloads, next.deletedWorkloads...)
-	current.deletedPods = append(current.deletedPods, next.deletedPods...)
-	current.deletedEvents = append(current.deletedEvents, next.deletedEvents...)
-	current.count += next.count
-	if current.count > 1 {
-		baseReason := strings.TrimSpace(strings.SplitN(current.reason, " batch=", 2)[0])
-		current.reason = baseReason + " batch=" + strconv.Itoa(current.count)
-	}
-	return current
-}
-
-func waitForWatchDebounce(ctx context.Context, first inventoryWatchTrigger, triggers <-chan inventoryWatchTrigger, delay time.Duration) (inventoryWatchTrigger, bool) {
-	if delay <= 0 {
-		return first, true
-	}
-	timer := time.NewTimer(delay)
-	defer func() {
-		if !timer.Stop() {
-			select {
-			case <-timer.C:
-			default:
-			}
-		}
-	}()
-	trigger := first
-	for {
-		select {
-		case <-ctx.Done():
-			return trigger, false
-		case next := <-triggers:
-			trigger = mergeInventoryWatchTrigger(trigger, next)
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
-			timer.Reset(delay)
-		case <-timer.C:
-			return trigger, true
-		}
-	}
-}
-
 type inventoryWatchSpec struct {
 	name            string
 	apiPath         string
@@ -394,7 +345,7 @@ type inventoryWatchSpec struct {
 	workloadKind    string
 }
 
-func (p *InventoryPusher) runWatchTriggers(ctx context.Context, snap *inventorySnapshot, cache *inventoryCache, trigger chan<- inventoryWatchTrigger) {
+func (p *InventoryPusher) runWatchTriggers(ctx context.Context, snap *inventorySnapshot, cache *inventoryCache, triggers *inventoryWatchAccumulator) {
 	defer func() {
 		if r := recover(); r != nil {
 			p.log.Error("k8s inventory watch panic recovered", slog.Any("panic", r))
@@ -419,13 +370,13 @@ func (p *InventoryPusher) runWatchTriggers(ctx context.Context, snap *inventoryS
 					)
 				}
 			}()
-			p.watchResourceLoop(ctx, spec, cache, trigger)
+			p.watchResourceLoop(ctx, spec, cache, triggers)
 		}()
 	}
 	wg.Wait()
 }
 
-func (p *InventoryPusher) watchResourceLoop(ctx context.Context, spec inventoryWatchSpec, cache *inventoryCache, trigger chan<- inventoryWatchTrigger) {
+func (p *InventoryPusher) watchResourceLoop(ctx context.Context, spec inventoryWatchSpec, cache *inventoryCache, triggers *inventoryWatchAccumulator) {
 	resourceVersion := strings.TrimSpace(spec.resourceVersion)
 	retry := defaultWatchRetry
 	for ctx.Err() == nil {
@@ -445,10 +396,7 @@ func (p *InventoryPusher) watchResourceLoop(ctx context.Context, spec inventoryW
 			if watchTrigger.isEmpty() {
 				return nil
 			}
-			select {
-			case trigger <- watchTrigger:
-			default:
-			}
+			triggers.add(watchTrigger)
 			return nil
 		})
 		if latest != "" {
@@ -468,10 +416,7 @@ func (p *InventoryPusher) watchResourceLoop(ctx context.Context, spec inventoryW
 		if errors.Is(err, errResourceExpired) {
 			resourceVersion = ""
 			retry = defaultWatchRetry
-			select {
-			case trigger <- newInventoryFullResyncTrigger(spec.name+":RESYNC", time.Now()):
-			default:
-			}
+			triggers.add(newInventoryFullResyncTrigger(spec.name+":RESYNC", time.Now()))
 		} else {
 			p.log.Warn("k8s inventory watch failed",
 				slog.String("resource", spec.name),
