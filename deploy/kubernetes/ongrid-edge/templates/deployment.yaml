@@ -26,8 +26,10 @@ spec:
         app.kubernetes.io/component: controller
     spec:
       serviceAccountName: {{ include "ongrid-edge.controllerServiceAccount" . }}
+      {{- with .Values.image.architecture }}
       nodeSelector:
-        kubernetes.io/arch: {{ .Values.image.architecture | quote }}
+        kubernetes.io/arch: {{ . | quote }}
+      {{- end }}
       securityContext:
         runAsNonRoot: {{ .Values.podSecurity.runAsNonRoot }}
         runAsUser: {{ .Values.podSecurity.runAsUser }}

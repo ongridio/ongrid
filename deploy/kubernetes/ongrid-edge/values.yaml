@@ -15,9 +15,9 @@ enrollment:
   nodeBootstrapToken: ""
 
 image:
-  # Offline releases bundle linux/amd64 by default. Set arm64 only when the
-  # manager registry contains a matching arm64 image for this chart version.
-  architecture: amd64
+  # Leave empty to let Kubernetes select nodes from the image manifest. Set
+  # amd64 or arm64 only when this release intentionally targets one architecture.
+  architecture: ""
   edge:
     repository: ""
     tag: ""

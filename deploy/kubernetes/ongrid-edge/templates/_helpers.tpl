@@ -1,7 +1,7 @@
 {{- define "ongrid-edge.name" -}}
-{{- $architecture := default "amd64" .Values.image.architecture -}}
-{{- if and (ne $architecture "amd64") (ne $architecture "arm64") -}}
-{{- fail "image.architecture must be amd64 or arm64" -}}
+{{- $architecture := default "" .Values.image.architecture -}}
+{{- if and $architecture (ne $architecture "amd64") (ne $architecture "arm64") -}}
+{{- fail "image.architecture must be empty, amd64, or arm64" -}}
 {{- end -}}
 {{- .Chart.Name | trunc 63 | trimSuffix "-" -}}
 {{- end -}}

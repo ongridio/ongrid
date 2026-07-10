@@ -20,8 +20,10 @@ spec:
     spec:
       serviceAccountName: {{ include "ongrid-edge.nodeServiceAccount" . }}
       automountServiceAccountToken: false
+      {{- with .Values.image.architecture }}
       nodeSelector:
-        kubernetes.io/arch: {{ .Values.image.architecture | quote }}
+        kubernetes.io/arch: {{ . | quote }}
+      {{- end }}
       hostPID: true
       {{- $supplementalGroups := .Values.podSecurity.supplementalGroups }}
       {{- if not $supplementalGroups }}

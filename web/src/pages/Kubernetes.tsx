@@ -3339,14 +3339,14 @@ function RegistryTrustGuide({ installCommand }: { installCommand: string }) {
 
   return (
     <div className="rounded-md border border-zinc-800 bg-zinc-900/40 p-3">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="text-xs text-zinc-400">
+      <div className="mb-2 flex items-start justify-between gap-2">
+        <span className="min-w-0 text-xs leading-5 text-zinc-400">
           {tr(
-            '自签名证书需要配置 registry，请在 K8s 所有节点执行以下命令（支持 K3s、containerd、Docker）',
-            'Self-signed certificates require registry configuration. Run the following command on every K8s node (supports K3s, containerd, and Docker).',
+            '自签名证书需要配置 registry。K3s、RKE2、containerd、Docker 请在所有节点执行；K3d 在宿主机执行一次。',
+            'Self-signed certificates require registry configuration. Run this on every K3s, RKE2, containerd, or Docker node; for K3d, run it once on the host.',
           )}
         </span>
-        <Button onClick={() => void copyRegistryCommand()}>
+        <Button className="shrink-0 whitespace-nowrap" onClick={() => void copyRegistryCommand()}>
           {copied ? <Check size={12} /> : <Clipboard size={12} />}
           {copied ? tr('已复制', 'Copied') : tr('复制', 'Copy')}
         </Button>

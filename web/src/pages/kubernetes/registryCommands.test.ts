@@ -29,7 +29,10 @@ describe('Kubernetes registry commands', () => {
     const checked = spawnSync('bash', ['-n'], { input: script, encoding: 'utf8' });
 
     expect(checked.status, checked.stderr).toBe(0);
-    expect(script).toContain('configure_k3s');
+    expect(script).toContain('configure_rancher_runtime');
+    expect(script).toContain('configure_k3d');
+    expect(script).toContain('rke2-server');
+    expect(script).toContain('/etc/rancher/rke2/registries.yaml');
     expect(script).toContain('configure_containerd');
     expect(script).toContain('configure_docker');
   });

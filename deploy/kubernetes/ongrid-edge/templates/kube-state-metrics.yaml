@@ -92,8 +92,10 @@ spec:
         app.kubernetes.io/component: kube-state-metrics
     spec:
       serviceAccountName: {{ include "ongrid-edge.kubeStateMetricsServiceAccount" . }}
+      {{- with .Values.image.architecture }}
       nodeSelector:
-        kubernetes.io/arch: {{ .Values.image.architecture | quote }}
+        kubernetes.io/arch: {{ . | quote }}
+      {{- end }}
       securityContext:
         runAsNonRoot: true
         runAsUser: {{ .Values.podSecurity.runAsUser }}

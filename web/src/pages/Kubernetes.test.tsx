@@ -362,13 +362,14 @@ describe('KubernetesPage', () => {
     expect(command).toHaveTextContent("manager.tunnelAddr='<manager>:40012'");
     expect(screen.getByText('安装命令（执行一次）')).toBeInTheDocument();
     expect(
-      screen.getByText('自签名证书需要配置 registry，请在 K8s 所有节点执行以下命令（支持 K3s、containerd、Docker）'),
+      screen.getByText('自签名证书需要配置 registry。K3s、RKE2、containerd、Docker 请在所有节点执行；K3d 在宿主机执行一次。'),
     ).toBeInTheDocument();
     expect(screen.getByText(/\/edge\/k8s\/registry-setup\.sh/)).toBeInTheDocument();
     expect(screen.getByText(/--registry='<manager>'/)).toBeInTheDocument();
     expect(screen.queryByText(/config_path/)).not.toBeInTheDocument();
 
     const copyButtons = screen.getAllByRole('button', { name: '复制' });
+    expect(copyButtons[1]).toHaveClass('shrink-0', 'whitespace-nowrap');
     fireEvent.click(copyButtons[1]);
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith(
