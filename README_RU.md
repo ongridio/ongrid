@@ -169,12 +169,3 @@ wget https://ongrid.cloud/dl/ongrid-v0.9.0-linux-arm64.tar.xz
 ## Лицензия
 
 Apache 2.0 — см. [LICENSE](LICENSE).
-
-## История звезд
-
-<a href="https://www.star-history.com/#ongridio/ongrid&amp;Date">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=ongridio/ongrid&amp;type=Date&amp;theme=dark" />
-    <img alt="График истории звезд" src="https://api.star-history.com/svg?repos=ongridio/ongrid&amp;type=Date" />
-  </picture>
-</a>

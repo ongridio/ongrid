@@ -170,15 +170,6 @@ wget https://ongrid.cloud/dl/ongrid-v0.9.0-linux-arm64.tar.xz
 
 Apache 2.0 — 见 [LICENSE](LICENSE)。
 
-## Star 趋势
-
-<a href="https://www.star-history.com/#ongridio/ongrid&amp;Date">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=ongridio/ongrid&amp;type=Date&amp;theme=dark" />
-    <img alt="Star 趋势图" src="https://api.star-history.com/svg?repos=ongridio/ongrid&amp;type=Date" />
-  </picture>
-</a>
-
 ## 加入群组
 
 <p align="center">
