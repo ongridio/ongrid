@@ -314,6 +314,105 @@ func TestTemperatureDefault(t *testing.T) {
 	}
 }
 
+// TestReasoningModelOmitsTemperature — a reasoning model (gpt-5.x) must NOT
+// carry a temperature: the SDK's omitempty drops the zero value so the
+// provider applies its fixed default (1) instead of 400-ing on 0.1.
+func TestReasoningModelOmitsTemperature(t *testing.T) {
+	var present bool
+	_, cfg := fakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		// Probe the raw body: a present key means we sent it, even if 0.
+		var probe map[string]json.RawMessage
+		_ = json.Unmarshal(raw, &probe)
+		_, present = probe["temperature"]
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(sampleChatResponse("ok", nil))
+	})
+	client := newTestClient(t, cfg, nil)
+	_, err := client.Chat(context.Background(), ChatReq{
+		Model:    "gpt-5.5",
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if present {
+		t.Errorf("temperature was sent for a reasoning model, want omitted")
+	}
+}
+
+// TestSamplingErrorTriggersRetry — a gateway alias the name heuristic misses
+// still recovers: the first attempt carries 0.1 and 400s, we strip sampling
+// params and retry, the second attempt succeeds, and the model is remembered
+// so the next call omits the param up front.
+func TestSamplingErrorTriggersRetry(t *testing.T) {
+	var calls int
+	var tempsSeen []float32
+	_, cfg := fakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		raw, _ := io.ReadAll(r.Body)
+		var body struct {
+			Temperature float32 `json:"temperature"`
+		}
+		_ = json.Unmarshal(raw, &body)
+		tempsSeen = append(tempsSeen, body.Temperature)
+		if body.Temperature != 0 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"message":"this model has beta-limitations, temperature, top_p and n are fixed at 1, while presence_penalty and frequency_penalty are fixed at 0","type":"invalid_request_error"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(sampleChatResponse("ok", nil))
+	})
+	client := newTestClient(t, cfg, nil)
+
+	// "sol-max" is not matched by isReasoningModel, so the first attempt
+	// sends 0.1 and gets rejected; the reactive path strips + retries.
+	_, err := client.Chat(context.Background(), ChatReq{
+		Model:    "sol-max",
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("server calls = %d, want 2 (initial 400 + retry)", calls)
+	}
+	if tempsSeen[0] == 0 || tempsSeen[1] != 0 {
+		t.Errorf("temps seen = %v, want [~0.1, 0]", tempsSeen)
+	}
+
+	// Second call for the same model must omit temperature up front (learned).
+	calls = 0
+	_, err = client.Chat(context.Background(), ChatReq{
+		Model:    "sol-max",
+		Messages: []Message{{Role: "user", Content: "hi again"}},
+	})
+	if err != nil {
+		t.Fatalf("Chat (learned): %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("server calls after learning = %d, want 1 (no failed round-trip)", calls)
+	}
+}
+
+// TestIsReasoningModel spot-checks the name heuristic.
+func TestIsReasoningModel(t *testing.T) {
+	reasoning := []string{"gpt-5", "gpt-5.5", "gpt-5.6-sol", "GPT-5-mini", "o1", "o1-mini", "o3-mini", "o4-mini", "deepseek-reasoner"}
+	for _, m := range reasoning {
+		if !isReasoningModel(m) {
+			t.Errorf("isReasoningModel(%q) = false, want true", m)
+		}
+	}
+	chat := []string{"gpt-4o", "gpt-4.1", "qwen3.7-max", "claude-3.5", "", "deepseek-chat"}
+	for _, m := range chat {
+		if isReasoningModel(m) {
+			t.Errorf("isReasoningModel(%q) = true, want false", m)
+		}
+	}
+}
+
 // TestToolResultMessageRoundTrip — a role=tool message carries ToolCallID.
 func TestToolResultMessageRoundTrip(t *testing.T) {
 	var gotToolCallID string
