@@ -41,6 +41,7 @@ type Repository interface {
 	BindClusterUID(ctx context.Context, id uint64, uid string) error
 	UpdateClusterTokens(ctx context.Context, id uint64, controllerTokenHash, nodeTokenHash string) error
 	UpdateClusterController(ctx context.Context, id uint64, in ClusterControllerRegistration) error
+	TouchClusterControllerHeartbeat(ctx context.Context, edgeID uint64, at time.Time) error
 	BindControllerEnrollment(ctx context.Context, id uint64, registration ClusterControllerRegistration, installation *model.Installation) error
 	UpdateClusterInventorySync(ctx context.Context, id uint64, in ClusterInventorySync) error
 	UpdateClusterTopologyNode(ctx context.Context, id, nodeID uint64) error
@@ -1164,6 +1165,18 @@ func (u *Usecase) LookupControllerCluster(ctx context.Context, edgeID uint64) (u
 		return 0, err
 	}
 	return c.ID, nil
+}
+
+// HandleControllerHeartbeat keeps cluster liveness aligned with the controller
+// tunnel heartbeat instead of the much slower inventory reconciliation cycle.
+func (u *Usecase) HandleControllerHeartbeat(ctx context.Context, edgeID uint64) error {
+	if u.repo == nil {
+		return errs.ErrNotWiredYet
+	}
+	if edgeID == 0 {
+		return errors.Join(errs.ErrInvalid, fmt.Errorf("edge_id is required"))
+	}
+	return u.repo.TouchClusterControllerHeartbeat(ctx, edgeID, time.Now().UTC())
 }
 
 func (u *Usecase) ManagedClusterIDForEdge(ctx context.Context, edgeID uint64) (uint64, bool, error) {

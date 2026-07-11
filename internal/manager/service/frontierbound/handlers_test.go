@@ -102,6 +102,10 @@ func (f fakeK8sRegistry) HandleRegister(_ context.Context, _ uint64, _ *uint64, 
 	return nil
 }
 
+func (f fakeK8sRegistry) HandleControllerHeartbeat(_ context.Context, _ uint64) error {
+	return nil
+}
+
 func (f fakeK8sRegistry) LookupControllerCluster(_ context.Context, _ uint64) (uint64, error) {
 	return f.clusterID, f.err
 }

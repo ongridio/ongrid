@@ -432,6 +432,36 @@ func TestUsecaseLookupControllerCluster(t *testing.T) {
 	}
 }
 
+func TestUsecaseHandleControllerHeartbeatRefreshesClusterLiveness(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	uc := NewUsecase(repo, newFakeIssuer(), Config{})
+	reg, err := uc.CreateCluster(ctx, CreateClusterInput{Name: "prod", Mode: model.ModeFullNode})
+	if err != nil {
+		t.Fatalf("CreateCluster() error = %v", err)
+	}
+	edgeID := uint64(41)
+	old := time.Now().UTC().Add(-time.Hour)
+	cluster := repo.clusters[reg.Cluster.ID]
+	cluster.ControllerEdgeID = &edgeID
+	cluster.LastSeenAt = &old
+	cluster.Status = model.ClusterStatusOffline
+
+	startedAt := time.Now().UTC()
+	if err := uc.HandleControllerHeartbeat(ctx, edgeID); err != nil {
+		t.Fatalf("HandleControllerHeartbeat() error = %v", err)
+	}
+	if cluster.Status != model.ClusterStatusOnline {
+		t.Fatalf("cluster status = %q, want online", cluster.Status)
+	}
+	if cluster.LastSeenAt == nil || cluster.LastSeenAt.Before(startedAt) {
+		t.Fatalf("cluster last_seen_at = %v, want >= %v", cluster.LastSeenAt, startedAt)
+	}
+	if err := uc.HandleControllerHeartbeat(ctx, 0); !errors.Is(err, errs.ErrInvalid) {
+		t.Fatalf("HandleControllerHeartbeat(0) error = %v, want invalid", err)
+	}
+}
+
 func TestUsecaseHandleRegisterRejectsUnboundKubernetesIdentity(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeRepo()
@@ -1636,6 +1666,16 @@ func (r *fakeRepo) UpdateClusterController(_ context.Context, id uint64, in Clus
 	c.ControllerPodName = in.PodName
 	c.LastSeenAt = &in.LastSeen
 	c.Status = model.ClusterStatusOnline
+	return nil
+}
+
+func (r *fakeRepo) TouchClusterControllerHeartbeat(_ context.Context, edgeID uint64, at time.Time) error {
+	for _, c := range r.clusters {
+		if c.ControllerEdgeID != nil && *c.ControllerEdgeID == edgeID {
+			c.LastSeenAt = &at
+			c.Status = model.ClusterStatusOnline
+		}
+	}
 	return nil
 }
 

@@ -39,6 +39,42 @@ func TestRepo_BindClusterUIDIsIdempotentAndExclusive(t *testing.T) {
 	}
 }
 
+func TestRepo_TouchClusterControllerHeartbeatUpdatesOnlyMatchingCluster(t *testing.T) {
+	db, repo := newTestRepo(t)
+	ctx := context.Background()
+	controllerEdgeID := uint64(41)
+	otherEdgeID := uint64(42)
+	old := time.Now().UTC().Add(-time.Hour)
+	clusters := []*model.Cluster{
+		{Name: "prod-a", Mode: model.ModeFullNode, Status: model.ClusterStatusOffline, ControllerEdgeID: &controllerEdgeID, LastSeenAt: &old},
+		{Name: "prod-b", Mode: model.ModeFullNode, Status: model.ClusterStatusOffline, ControllerEdgeID: &otherEdgeID, LastSeenAt: &old},
+	}
+	if err := db.Create(&clusters).Error; err != nil {
+		t.Fatalf("Create clusters: %v", err)
+	}
+
+	now := time.Now().UTC()
+	if err := repo.TouchClusterControllerHeartbeat(ctx, controllerEdgeID, now); err != nil {
+		t.Fatalf("TouchClusterControllerHeartbeat: %v", err)
+	}
+	var refreshed, untouched model.Cluster
+	if err := db.First(&refreshed, clusters[0].ID).Error; err != nil {
+		t.Fatalf("Get refreshed cluster: %v", err)
+	}
+	if err := db.First(&untouched, clusters[1].ID).Error; err != nil {
+		t.Fatalf("Get untouched cluster: %v", err)
+	}
+	if refreshed.Status != model.ClusterStatusOnline || refreshed.LastSeenAt == nil || refreshed.LastSeenAt.Before(now.Add(-time.Millisecond)) {
+		t.Fatalf("refreshed cluster = %+v, want online with current heartbeat", refreshed)
+	}
+	if untouched.Status != model.ClusterStatusOffline || untouched.LastSeenAt == nil || !untouched.LastSeenAt.Equal(old) {
+		t.Fatalf("untouched cluster = %+v, want original offline state", untouched)
+	}
+	if err := repo.TouchClusterControllerHeartbeat(ctx, 999, now); err != nil {
+		t.Fatalf("TouchClusterControllerHeartbeat(unbound): %v", err)
+	}
+}
+
 func TestRepo_ListPodsFiltersByReason(t *testing.T) {
 	db, repo := newTestRepo(t)
 	now := time.Now()

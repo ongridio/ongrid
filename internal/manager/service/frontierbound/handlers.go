@@ -42,6 +42,7 @@ type DeviceResolver interface {
 // Implemented by manager/service/k8s without importing that package here.
 type KubernetesRegistry interface {
 	HandleRegister(ctx context.Context, edgeID uint64, deviceID *uint64, info tunnel.KubernetesInfo) error
+	HandleControllerHeartbeat(ctx context.Context, edgeID uint64) error
 	LookupControllerCluster(ctx context.Context, edgeID uint64) (uint64, error)
 }
 
@@ -240,6 +241,7 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 			if err := w.EdgeUC.HandleHeartbeat(rpcCtx, canonicalEdgeID, time.Now().UTC()); err != nil {
 				return nil, fmt.Errorf("register_edge: k8s controller heartbeat: %w", err)
 			}
+			c.setKubernetesController(canonicalEdgeID, true)
 		} else {
 			if err := w.EdgeUC.HandleRegister(rpcCtx, canonicalEdgeID, in.HostInfo, in.AgentVersion); err != nil {
 				log.Error("frontierbound: HandleRegister",
@@ -260,6 +262,7 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 					return nil, fmt.Errorf("register_edge: k8s node: %w", err)
 				}
 			}
+			c.setKubernetesController(canonicalEdgeID, false)
 		}
 		c.bindEdgeTransport(edgeID, canonicalEdgeID)
 		out := tunnel.RegisterEdgeResponse{
@@ -293,6 +296,14 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 				slog.Any("err", err),
 			)
 			return nil, fmt.Errorf("heartbeat: %w", err)
+		}
+		if w.K8sRegistry != nil && c.isKubernetesController(canonicalEdgeID) {
+			if err := w.K8sRegistry.HandleControllerHeartbeat(rpcCtx, canonicalEdgeID); err != nil {
+				log.Warn("frontierbound: refresh k8s controller heartbeat",
+					slog.Uint64("edge_id", canonicalEdgeID),
+					slog.Any("err", err),
+				)
+			}
 		}
 		// Piggybacked plugin health (best-effort, in-memory only). Lets the
 		// UI show "logs: crashed — binary missing" instead of silent empty

@@ -356,12 +356,16 @@ func TestClient_Close(t *testing.T) {
 func TestClient_BindAndUnbindTransport(t *testing.T) {
 	c := newWithService(newFakeService(), slog.Default())
 	c.bindEdgeTransport(1001, 2)
+	c.setKubernetesController(2, true)
 
 	if got := c.canonicalizeEdgeID(1001); got != 2 {
 		t.Fatalf("canonicalizeEdgeID(1001) = %d, want 2", got)
 	}
 	if got := c.resolveTransportID(2); got != 1001 {
 		t.Fatalf("resolveTransportID(2) = %d, want 1001", got)
+	}
+	if !c.isKubernetesController(2) {
+		t.Fatal("edge 2 should be tracked as a Kubernetes controller")
 	}
 
 	c.unbindTransport(1001)
@@ -374,6 +378,9 @@ func TestClient_BindAndUnbindTransport(t *testing.T) {
 	}
 	if got := c.resolveTransportID(2); got != 2 {
 		t.Fatalf("resolveTransportID after unbind = %d, want 2", got)
+	}
+	if c.isKubernetesController(2) {
+		t.Fatal("unbound edge should not remain tracked as a Kubernetes controller")
 	}
 }
 

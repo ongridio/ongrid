@@ -155,6 +155,15 @@ func (r *Repo) UpdateClusterController(ctx context.Context, id uint64, in biz.Cl
 	return nil
 }
 
+func (r *Repo) TouchClusterControllerHeartbeat(ctx context.Context, edgeID uint64, at time.Time) error {
+	return r.db.WithContext(ctx).Model(&model.Cluster{}).
+		Where("controller_edge_id = ?", edgeID).
+		Updates(map[string]any{
+			"last_seen_at": at,
+			"status":       model.ClusterStatusOnline,
+		}).Error
+}
+
 func (r *Repo) BindControllerEnrollment(ctx context.Context, id uint64, registration biz.ClusterControllerRegistration, installation *model.Installation) error {
 	if installation == nil {
 		return errs.ErrInvalid

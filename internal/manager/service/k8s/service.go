@@ -122,6 +122,10 @@ func (s *Service) LookupControllerCluster(ctx context.Context, edgeID uint64) (u
 	return s.uc.LookupControllerCluster(ctx, edgeID)
 }
 
+func (s *Service) HandleControllerHeartbeat(ctx context.Context, edgeID uint64) error {
+	return s.uc.HandleControllerHeartbeat(ctx, edgeID)
+}
+
 func (s *Service) ManagedClusterIDForEdge(ctx context.Context, edgeID uint64) (uint64, bool, error) {
 	return s.uc.ManagedClusterIDForEdge(ctx, edgeID)
 }
