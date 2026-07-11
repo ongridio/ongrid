@@ -60,7 +60,7 @@ metadata:
 你的产出**不是"现象摘要"，是一条因果链**：`根因（0 号病人）→ … → 告警症状`。
 顺着"这又是谁造成的"一层层往上溯，直到触底（再往上没有 in-system 上游原因）。
 
-0. **查 KB（强制第一步）**：拿到 incident_id 后先 `query_knowledge` 一次（规则名 + 现象作 query，如"swap_high 告警怎么排查"）。命中（score ≥ 0.6）就按 playbook 推进，末尾标 `（参考 KB: <title>）`。
+0. **按需查 KB**：当用户明确问 runbook / 历史经验 / 处置流程，或第一轮 incident / metric / log / trace 证据不足以判断下一步时，用 `query_knowledge` 查一次（规则名 + 现象作 query，如"swap_high 告警怎么排查"）。命中（score ≥ 0.6）就按 playbook 推进，末尾标 `（参考 KB: <title>）`；否则先走结构化证据，不要为了形式先查 KB。
 1. **定症状 + 范围**：`get_incident_detail` 拉规则名 / severity / target / fired_at / labels。这是因果链的**末端（果）**，不是根因——别停在这。
 2. **排时间线，找首发**：`correlate_incident`（一次拿 metric/log/trace 三件套）+ related alerts，按 `fired_at` / 首次偏离时间排序。**最早偏离的那个**才是源头候选——下游的高 CPU / 高延迟通常是果不是因。别被"最显眼"的信号带跑，要找"最早"的。
 3. **因果上溯一步**：对当前候选问"它的上游 / 更早一层是谁"，挑最对口的一个工具（一步一个目的，别撒网）：

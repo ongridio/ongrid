@@ -71,6 +71,7 @@ var tierByName = map[string]string{
 	"query_devices":           "core",
 	"get_topology":            "core",
 	"query_incidents":         "core",
+	"query_change_events":     "core",
 	"get_edge_summary":        "core",
 	"correlate_incident":      "core",
 	"AgentTool":               "core",

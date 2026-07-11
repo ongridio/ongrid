@@ -1,0 +1,52 @@
+name: PR Checklist
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-checklist-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: required checklist
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Check PR checklist
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('fs');
+
+          const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
+          const body = event.pull_request?.body || '';
+          const required = 'I have read and agree to the project contribution guide in [CONTRIBUTING.md](CONTRIBUTING.md).';
+          const escaped = required.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const checked = new RegExp(`^- \\[[xX]\\] ${escaped}\\s*$`, 'm').test(body);
+          const author = event.pull_request?.user?.login;
+          const sender = event.sender?.login;
+
+          if (!checked) {
+            console.error('Missing required PR checklist item.');
+            console.error('');
+            console.error('The PR author must edit the PR description and check this item:');
+            console.error(`- [x] ${required}`);
+            process.exit(1);
+          }
+
+          if (event.action === 'edited' && author && sender && sender !== author) {
+            console.error('The required PR checklist item must be checked by the PR author.');
+            console.error(`PR author: ${author}`);
+            console.error(`Current editor: ${sender}`);
+            process.exit(1);
+          }
+
+          console.log('Required PR checklist item is checked.');
+          NODE

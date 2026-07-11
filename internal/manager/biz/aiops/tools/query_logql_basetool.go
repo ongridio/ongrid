@@ -63,14 +63,14 @@ func (t *QueryLogQLTool) InvokableRun(ctx context.Context, argsJSON string, _ ..
 	end := time.Now()
 	start := end.Add(-time.Hour)
 	if in.End != "" {
-		t, err := time.Parse(time.RFC3339, in.End)
+		t, err := parseLogQLTime(in.End, end)
 		if err != nil {
 			return "", fmt.Errorf("query_logql: parse end: %w", err)
 		}
 		end = t
 	}
 	if in.Start != "" {
-		t, err := time.Parse(time.RFC3339, in.Start)
+		t, err := parseLogQLTime(in.Start, start)
 		if err != nil {
 			return "", fmt.Errorf("query_logql: parse start: %w", err)
 		}

@@ -23,6 +23,7 @@ import {
   FileText,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
+import { isImeComposing } from '@/lib/keyboard';
 import type { IconType } from '@/lib/icon';
 import {
   searchMentions,
@@ -202,7 +203,6 @@ export function ChatInput({
       }
     }, 150);
     return () => clearTimeout(handle);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [popoverOpen, value]);
 
   function onTextareaChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
@@ -258,6 +258,8 @@ export function ChatInput({
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (isImeComposing(e)) return;
+
     // Popover navigation takes priority when open.
     if (popoverOpen && popoverItems.length > 0) {
       if (e.key === 'ArrowDown') {

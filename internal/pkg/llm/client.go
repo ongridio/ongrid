@@ -204,6 +204,16 @@ type openaiClient struct {
 	resolveMu  sync.Mutex
 	resolved   resolvedCreds
 	resolvedAt time.Time
+
+	// noSampling records models discovered at runtime to reject custom
+	// sampling params (temperature / top_p / n / penalties) — the OpenAI
+	// reasoning families (o-series, gpt-5.x) fix these at 1/0 and 400 on any
+	// other value. Seeded reactively from CreateChatCompletion's "params
+	// fixed at 1" rejection so every later call for that model proactively
+	// omits the params instead of eating a failed round-trip. Read alongside
+	// the isReasoningModel name heuristic. Keyed by the raw model string.
+	noSamplingMu sync.RWMutex
+	noSampling   map[string]bool
 }
 
 type sdkKey struct {
@@ -387,6 +397,22 @@ func (c *openaiClient) Chat(ctx context.Context, req ChatReq) (*ChatResp, error)
 	sdk := c.sdkFor(apiKey, baseURL)
 	start := time.Now()
 	sdkResp, err := sdk.CreateChatCompletion(callCtx, sdkReq)
+
+	// Reactive self-heal for reasoning models the name heuristic did not
+	// catch (custom gateway aliases like "gpt-5.6-sol"). These fix
+	// temperature/top_p/n at 1 and penalties at 0, and 400 on any other
+	// value. If that's what we hit AND we actually sent a sampling param,
+	// remember the model, strip the params, and retry once. Safe: this is
+	// still the single completion call — no tool has executed yet, so the
+	// no-retry-on-tools rule below does not apply.
+	if err != nil && isSamplingParamError(err) && hasCustomSampling(sdkReq) {
+		c.rememberNoSampling(model)
+		stripSamplingParams(&sdkReq)
+		c.log.Warn("llm: model rejects custom sampling params; retrying without them",
+			slog.String("model", model))
+		sdkResp, err = sdk.CreateChatCompletion(callCtx, sdkReq)
+	}
+
 	dur := time.Since(start)
 	c.metrics.requestSeconds.WithLabelValues(model).Observe(dur.Seconds())
 
@@ -449,9 +475,20 @@ func (c *openaiClient) Chat(ctx context.Context, req ChatReq) (*ChatResp, error)
 
 // toOpenAIReq translates the public ChatReq to the SDK request shape.
 func (c *openaiClient) toOpenAIReq(req ChatReq, model string) (openai.ChatCompletionRequest, error) {
+	// Reasoning models (o-series, gpt-5.x) fix temperature/top_p/n at 1 and
+	// 400 on any other value, so we must NOT send a temperature for them.
+	// A zero Temperature is dropped by the SDK's `omitempty` tag, letting the
+	// provider apply its fixed default. Every other (chat-completion) model
+	// keeps the deterministic 0.1 default the AIOps loop relies on.
+	//
+	// isReasoningModel is the fast path for known families; noSampling is the
+	// reactively-learned set for gateway aliases the heuristic missed.
 	temp := req.Temperature
-	if temp == 0 {
+	if temp == 0 && !isReasoningModel(model) && !c.modelRejectsSampling(model) {
 		temp = 0.1
+	}
+	if isReasoningModel(model) || c.modelRejectsSampling(model) {
+		temp = 0
 	}
 
 	msgs := make([]openai.ChatCompletionMessage, 0, len(req.Messages))
@@ -542,6 +579,100 @@ func fromOpenAIMessage(m openai.ChatCompletionMessage) (Message, error) {
 		}
 	}
 	return out, nil
+}
+
+// isReasoningModel reports whether model is an OpenAI-style reasoning model
+// that fixes its sampling params (temperature / top_p / n at 1, penalties at
+// 0) and rejects any override with a 400. Matched by name family so the
+// common cases skip a doomed round-trip; anything this misses is still caught
+// reactively by isSamplingParamError + the noSampling cache.
+//
+// Covered families:
+//   - OpenAI o-series: o1, o1-mini, o3, o3-mini, o4-mini, …
+//   - GPT-5 family: gpt-5, gpt-5.5, gpt-5-mini, gpt-5.6-sol, … (all reasoning)
+//   - Any name tagged "reasoner"/"reasoning" (e.g. deepseek-reasoner)
+func isReasoningModel(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	if m == "" {
+		return false
+	}
+	switch {
+	case m == "o1" || m == "o3" || m == "o4":
+		return true
+	case strings.HasPrefix(m, "o1-") || strings.HasPrefix(m, "o3-") || strings.HasPrefix(m, "o4-"):
+		return true
+	case strings.HasPrefix(m, "gpt-5"):
+		return true
+	case strings.Contains(m, "reasoner") || strings.Contains(m, "reasoning"):
+		return true
+	}
+	return false
+}
+
+// modelRejectsSampling reports whether we've reactively learned that model
+// 400s on custom sampling params. Complements the isReasoningModel heuristic.
+func (c *openaiClient) modelRejectsSampling(model string) bool {
+	if model == "" {
+		return false
+	}
+	c.noSamplingMu.RLock()
+	defer c.noSamplingMu.RUnlock()
+	return c.noSampling[model]
+}
+
+// rememberNoSampling records that model rejects custom sampling params so
+// later calls omit them up front.
+func (c *openaiClient) rememberNoSampling(model string) {
+	if model == "" {
+		return
+	}
+	c.noSamplingMu.Lock()
+	defer c.noSamplingMu.Unlock()
+	if c.noSampling == nil {
+		c.noSampling = make(map[string]bool)
+	}
+	c.noSampling[model] = true
+}
+
+// isSamplingParamError reports whether err is a provider 400 rejecting a
+// sampling param (temperature/top_p/n/penalties) as unsupported/fixed — the
+// signature of a reasoning model. Matched on message text because the shape
+// differs across the OpenAI-compatible gateways we front (dmxapi, Azure, …).
+func isSamplingParamError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if !strings.Contains(msg, "temperature") &&
+		!strings.Contains(msg, "top_p") &&
+		!strings.Contains(msg, "sampling") {
+		return false
+	}
+	return strings.Contains(msg, "fixed at 1") ||
+		strings.Contains(msg, "beta-limitations") ||
+		strings.Contains(msg, "only the default") ||
+		strings.Contains(msg, "does not support") ||
+		strings.Contains(msg, "unsupported value") ||
+		strings.Contains(msg, "unsupported_value")
+}
+
+// hasCustomSampling reports whether req carries any sampling param that a
+// reasoning model would reject. Guards the reactive retry so we only re-issue
+// when stripping the params can actually change the outcome.
+func hasCustomSampling(req openai.ChatCompletionRequest) bool {
+	return req.Temperature != 0 || req.TopP != 0 || req.N != 0 ||
+		req.PresencePenalty != 0 || req.FrequencyPenalty != 0
+}
+
+// stripSamplingParams zeroes every sampling param so the SDK's `omitempty`
+// tags drop them from the wire, letting a reasoning model apply its fixed
+// defaults.
+func stripSamplingParams(req *openai.ChatCompletionRequest) {
+	req.Temperature = 0
+	req.TopP = 0
+	req.N = 0
+	req.PresencePenalty = 0
+	req.FrequencyPenalty = 0
 }
 
 // estimatePromptTokens is a cheap pre-call estimate: ~4 chars per token is a

@@ -35,24 +35,10 @@ func TestCoordinatorRosterDerivesRegisteredCoreTools(t *testing.T) {
 		coordinatorToolStub{name: "query_knowledge"},
 		coordinatorToolStub{name: "read_source"},
 		coordinatorToolStub{name: "query_promql"},
-		coordinatorToolStub{name: "query_k8s_snapshot"},
-		coordinatorToolStub{name: "describe_k8s_resource"},
-		coordinatorToolStub{name: "query_k8s_logs"},
-		coordinatorToolStub{name: aiopstools.ToolNameExecuteK8sAction},
 		coordinatorToolStub{name: "host_find_large_files"},
 	}
 	got := buildCoordinatorToolNames(registered)
-	for _, want := range []string{
-		"query_devices",
-		"query_traceql",
-		"query_knowledge",
-		"read_source",
-		"query_promql",
-		"query_k8s_snapshot",
-		"describe_k8s_resource",
-		"query_k8s_logs",
-		aiopstools.ToolNameExecuteK8sAction,
-	} {
+	for _, want := range []string{"query_devices", "query_traceql", "query_knowledge", "read_source", "query_promql"} {
 		if !containsString(got, want) {
 			t.Errorf("coordinator roster missing registered core tool %q (have %v)", want, got)
 		}
@@ -60,7 +46,7 @@ func TestCoordinatorRosterDerivesRegisteredCoreTools(t *testing.T) {
 	if containsString(got, "host_find_large_files") {
 		t.Errorf("coordinator roster should not include non-core host file tool by registration alone: %v", got)
 	}
-	for _, want := range []string{"host_bash", "rank_edges", "find_outlier_edges", "cloud_bash", "install_skill"} {
+	for _, want := range []string{"host_bash", "rank_edges", "find_outlier_edges", "query_alert_rules", "cloud_bash", "install_skill"} {
 		if !containsString(got, want) {
 			t.Errorf("coordinator roster missing policy extra %q (have %v)", want, got)
 		}
@@ -69,7 +55,7 @@ func TestCoordinatorRosterDerivesRegisteredCoreTools(t *testing.T) {
 
 func TestBasePromptAllowsLightweightCoordinatorReads(t *testing.T) {
 	prompt := ongridBasePrompt()
-	for _, want := range []string{"轻量只读查询", "rank_edges", "get_host_load", "get_host_processes", "已知文件删除", "host_bash"} {
+	for _, want := range []string{"本轮可见能力", "when_to_use", "单一数据源查询", "已知文件删除", "host_bash", "query_traceql"} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("base prompt missing lightweight-read guidance %q", want)
 		}
@@ -83,6 +69,44 @@ func TestBasePromptAllowsLightweightCoordinatorReads(t *testing.T) {
 		if strings.Contains(prompt, bad) {
 			t.Fatalf("base prompt still contains old dispatch-only guidance %q", bad)
 		}
+	}
+}
+
+func TestBasePromptRoutesSimpleTraceQueriesDirectly(t *testing.T) {
+	prompt := ongridBasePrompt()
+	for _, want := range []string{
+		"调工具前先分类",
+		"trace/span/trace_id/慢 trace/错误 trace/TraceQL",
+		"query_traceql",
+		"query_alert_rules",
+		"query_change_events",
+		"grep_source",
+		"不要为了确认某个数据源是否可用",
+		"不要为了确认数据源存在先查设备或拓扑",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("base prompt missing trace direct-routing guidance %q", want)
+		}
+	}
+}
+
+func TestBasePromptRoutesComplexWorkToAgentToolFirst(t *testing.T) {
+	prompt := ongridBasePrompt()
+	for _, want := range []string{
+		"DELEGATE 第一工具必须是 `AgentTool`",
+		"根因、影响面、处置建议",
+		"综合体检、风险评估、优先级、报告、remediation plan",
+		"不要先自己查 `get_topology/query_promql/query_logql/host_bash`",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("base prompt missing complex delegation guidance %q", want)
+		}
+	}
+}
+
+func TestDefaultCoordinatorKeepsThirtyTurns(t *testing.T) {
+	if defaultCoordinatorMaxTurns != 30 {
+		t.Fatalf("default coordinator MaxTurns = %d, want 30", defaultCoordinatorMaxTurns)
 	}
 }
 

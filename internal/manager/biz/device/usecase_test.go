@@ -8,18 +8,14 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
 
-func TestDeleteCleansTopologyAndEdgeLinks(t *testing.T) {
+func TestDeleteCleansTopologyAndLinkedEdges(t *testing.T) {
 	ctx := context.Background()
 	nodeID := uint64(44)
 	repo := &fakeRepo{byID: map[uint64]*devicemodel.Device{
 		7: {ID: 7, Name: "node-a", NodeID: &nodeID},
 	}}
-	links := &fakeLinks{rows: []*devicemodel.EdgeDevice{
-		{EdgeID: 11, DeviceID: 7, Type: devicemodel.EdgeDeviceRelationHost},
-		{EdgeID: 12, DeviceID: 7, Type: devicemodel.EdgeDeviceRelationDiscovered},
-	}}
 	mirror := &fakeTopologyMirror{}
-	uc := NewUsecase(repo, links, nil)
+	uc := NewUsecase(repo, nil, nil)
 	uc.SetTopologyMirror(mirror)
 
 	if err := uc.Delete(ctx, 7); err != nil {
@@ -27,9 +23,6 @@ func TestDeleteCleansTopologyAndEdgeLinks(t *testing.T) {
 	}
 	if len(mirror.deleted) != 1 || mirror.deleted[0] != [2]uint64{7, 44} {
 		t.Fatalf("topology deletes = %#v, want device/node 7/44", mirror.deleted)
-	}
-	if len(links.unlinked) != 2 {
-		t.Fatalf("unlinked = %#v, want 2 links", links.unlinked)
 	}
 	if !repo.deleted[7] {
 		t.Fatalf("device was not deleted")
@@ -145,6 +138,10 @@ func (r *fakeRepo) Delete(_ context.Context, id uint64) error {
 	r.deleted[id] = true
 	delete(r.byID, id)
 	return nil
+}
+
+func (r *fakeRepo) DeleteOfflineWithLinkedEdges(ctx context.Context, id uint64) error {
+	return r.Delete(ctx, id)
 }
 
 func (r *fakeRepo) ReconcileOfflineOrphans(context.Context) (int64, error) { return 0, nil }

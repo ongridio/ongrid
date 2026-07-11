@@ -8,7 +8,7 @@ import { getManagerVersion } from '@/api/version';
 import { OngridLogo } from '@/components/OngridLogo';
 
 const GITHUB_URL = 'https://github.com/ongridio/ongrid';
-const LICENSE = 'Apache-2.0';
+const LICENSE = 'AGPL-3.0-only';
 const LICENSE_URL = 'https://github.com/ongridio/ongrid/blob/main/LICENSE';
 
 export default function About() {

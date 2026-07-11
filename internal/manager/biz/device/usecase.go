@@ -118,8 +118,10 @@ func (u *Usecase) UpdateNameDescription(ctx context.Context, id uint64, name, de
 	return u.repo.UpdateNameDescription(ctx, id, strings.TrimSpace(name), strings.TrimSpace(description))
 }
 
-// Delete soft-deletes a device and removes the device-owned topology node
-// plus edge junction rows so deleted devices cannot leak into topology views.
+// Delete removes an offline device plus its linked Edge identities. Online
+// devices are rejected so a live host cannot lose its access key while it is
+// still connected. The repository owns the database transaction; after it
+// commits, the device-owned topology node is removed as a separate subsystem.
 func (u *Usecase) Delete(ctx context.Context, id uint64) error {
 	if u.repo == nil {
 		return errs.ErrNotWiredYet
@@ -128,13 +130,13 @@ func (u *Usecase) Delete(ctx context.Context, id uint64) error {
 	if err != nil {
 		return err
 	}
+	if err := u.repo.DeleteOfflineWithLinkedEdges(ctx, id); err != nil {
+		return err
+	}
 	if err := u.deleteTopologyNode(ctx, d); err != nil {
 		return err
 	}
-	if err := u.unlinkDeviceEdges(ctx, id); err != nil {
-		return err
-	}
-	return u.repo.Delete(ctx, id)
+	return nil
 }
 
 type deletedTopologyDeviceLister interface {
@@ -189,6 +191,9 @@ func (u *Usecase) ReconcileOrphanDevices(ctx context.Context) (int, error) {
 	if !ok {
 		return 0, nil
 	}
+	if _, err := u.ReconcilePresence(ctx); err != nil {
+		return 0, err
+	}
 	rows, err := lister.ListWithoutLiveEdges(ctx, 5000)
 	if err != nil {
 		return 0, err
@@ -215,25 +220,6 @@ func (u *Usecase) deleteTopologyNode(ctx context.Context, d *model.Device) error
 	}
 	if err := u.topology.DeleteNodeForDevice(ctx, d.ID, *d.NodeID); err != nil && !errors.Is(err, errs.ErrNotFound) {
 		return fmt.Errorf("delete topology node for device %d: %w", d.ID, err)
-	}
-	return nil
-}
-
-func (u *Usecase) unlinkDeviceEdges(ctx context.Context, id uint64) error {
-	if u.links == nil {
-		return nil
-	}
-	rows, err := u.links.ListEdgesForDevice(ctx, id)
-	if err != nil {
-		return fmt.Errorf("list device edge links: %w", err)
-	}
-	for _, row := range rows {
-		if row == nil {
-			continue
-		}
-		if err := u.links.Unlink(ctx, row.EdgeID, row.DeviceID, row.Type); err != nil {
-			return fmt.Errorf("unlink device edge %d/%d: %w", row.EdgeID, row.DeviceID, err)
-		}
 	}
 	return nil
 }

@@ -129,6 +129,11 @@ func TestBuildToolCapabilityDigest_IncludesDynamicTools(t *testing.T) {
 			t.Fatalf("capability digest missing %q:\n%s", want, got)
 		}
 	}
+	if !strings.Contains(got, "direct_read_tools:") ||
+		!strings.Contains(got, "`query_devices`") ||
+		!strings.Contains(got, "`query_traceql`") {
+		t.Fatalf("capability digest should derive direct read tools from visible toolbag:\n%s", got)
+	}
 	if strings.Contains(got, "internal_big_tool [builtin/read]") {
 		t.Fatalf("digest should not list arbitrary builtin tools; got:\n%s", got)
 	}

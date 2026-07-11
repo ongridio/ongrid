@@ -571,25 +571,6 @@ func (rt *Runtime) runWorker(ctx context.Context, agentDef *Agent, sessID, userT
 		systemPrompt = systemPrompt + "\n\n" + digest
 	}
 
-	// KB-first prologue. Weak coordinator models (GLM-4 etc) don't
-	// reliably follow "rule 0 — query_knowledge before any other
-	// tool" written in the persona prompt; we observed specialists
-	// jumping straight to host_du_summary / query_promql. So when
-	// the persona declares query_knowledge in its Tools whitelist,
-	// we call it ONCE here with the user task as the query and
-	// prepend the top match (if score ≥ 0.6) to userText as
-	// explicit context. The worker LLM then sees the KB material as
-	// part of its input — no choice required.
-	//
-	// Cost: one extra qdrant query per worker spawn (~50ms typical),
-	// saves an entire ReAct turn when the rule would have been
-	// followed, and forces RAG-first behavior when it wouldn't have.
-	if hasTool(workerTools, "query_knowledge") {
-		if kbCtx := rt.prologueKBLookup(ctx, workerTools, userText); kbCtx != "" {
-			userText = kbCtx + "\n\n---\n\n用户原始任务：\n" + userText
-		}
-	}
-
 	cfg := rt.cfg.GraphCfg
 	if agentDef.MaxTurns > 0 {
 		cfg.MaxIterations = agentDef.MaxTurns

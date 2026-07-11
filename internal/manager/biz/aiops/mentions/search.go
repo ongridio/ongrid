@@ -329,7 +329,11 @@ func (s *Searcher) resolveOne(ctx context.Context, m Mention) string {
 		if d.Online {
 			online = "online"
 		}
-		return fmt.Sprintf("- device #%d %s (%s, hostname=%s)", d.ID, displayDeviceName(d), online, d.Hostname)
+		ipPart := ""
+		if d.IPAddress != "" {
+			ipPart = ", ip=" + d.IPAddress
+		}
+		return fmt.Sprintf("- device #%d %s (%s, hostname=%s%s)", d.ID, displayDeviceName(d), online, d.Hostname, ipPart)
 	case TypeIncident:
 		if s.alerts == nil {
 			break
@@ -380,11 +384,15 @@ func deviceToItem(d *devicemodel.Device) Item {
 	if len(roleNames) > 0 {
 		rolePart = " · " + strings.Join(roleNames, ",")
 	}
+	ipPart := ""
+	if d.IPAddress != "" {
+		ipPart = " · " + d.IPAddress
+	}
 	return Item{
 		Type:     TypeDevice,
 		ID:       fmt.Sprintf("%d", d.ID),
 		Label:    displayDeviceName(d),
-		Subtitle: online + rolePart,
+		Subtitle: online + rolePart + ipPart,
 	}
 }
 

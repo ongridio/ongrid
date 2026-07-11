@@ -17,13 +17,14 @@ import (
 // RolesUnknownOnly, when true, narrows to rows with roles == 0 (the
 // "未分类" bucket); it is mutually exclusive with RolesAny — set one or
 // the other, not both. Online filters by the live online flag.
-// Hostname / Name are substring matches.
+// Hostname / Name / IPAddress are substring matches.
 type ListFilter struct {
 	RolesAny         uint8
 	RolesUnknownOnly bool
 	Online           *bool
 	Hostname         string
 	Name             string
+	IPAddress        string
 	Limit            int
 	Offset           int
 }
@@ -89,6 +90,11 @@ type Repo interface {
 	// Delete soft-deletes a device (does NOT touch its junction rows;
 	// callers should remove the junction first if they want a clean cut).
 	Delete(ctx context.Context, id uint64) error
+
+	// DeleteOfflineWithLinkedEdges deletes an offline device and the Edge
+	// identities linked to it in one transaction. It must reject online
+	// devices with ErrConflict so callers never remove a live host.
+	DeleteOfflineWithLinkedEdges(ctx context.Context, id uint64) error
 
 	// ReconcileOfflineOrphans flips online=true devices back to offline
 	// when none of their linked (non-deleted) edges is online. Heals

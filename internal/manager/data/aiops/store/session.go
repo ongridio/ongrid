@@ -282,3 +282,30 @@ func (r *SessionRepo) UpdateToolCallResult(
 	}
 	return nil
 }
+
+// FinalizePendingToolCalls marks still-open tool-call rows in a finished
+// session as errors. PersistenceHandler already writes role=tool autoheal
+// stubs for replay correctness; this repo-level sweep keeps the audit/UI row
+// state terminal when a callback end event was lost after the row was created.
+func (r *SessionRepo) FinalizePendingToolCalls(ctx context.Context, sessionID string, resultJSON, errStr string, endedAt time.Time) (int64, error) {
+	if sessionID == "" {
+		return 0, errs.ErrInvalid
+	}
+	updates := map[string]any{
+		"status":      model.StatusError,
+		"ended_at":    endedAt,
+		"result_json": resultJSON,
+		"error":       errStr,
+	}
+	res := r.db.WithContext(ctx).
+		Model(&model.ToolCall{}).
+		Where("status = ?", model.StatusPending).
+		Where("message_id IN (?)",
+			r.db.Model(&model.Message{}).Select("id").Where("session_id = ?", sessionID),
+		).
+		Updates(updates)
+	if res.Error != nil {
+		return 0, res.Error
+	}
+	return res.RowsAffected, nil
+}

@@ -25,9 +25,9 @@ const ToolNameQueryEdges = "query_devices"
 // QueryEdgesDescription is the single-sentence description shown to the LLM.
 // Phrased to direct the model here whenever the question is about which
 // devices (machines) match a coarse status / role / freshness filter.
-const QueryEdgesDescription = "List ongrid-managed devices (hosts) filtered by role, online status, last-seen freshness or a name substring. " +
+const QueryEdgesDescription = "List ongrid-managed devices (hosts) filtered by role, online status, last-seen freshness, name substring, or IP address. " +
 	"Use this whenever the question is about which machines exist or which ones match a coarse attribute. " +
-	"Returns an array of {device_id, name, hostname, online, roles, last_seen_at}; use device_id (NOT edge_id) in any PromQL/LogQL/TraceQL you generate."
+	"Returns an array of {device_id, name, hostname, ip_address, online, roles, last_seen_at}; use device_id (NOT edge_id) in any PromQL/LogQL/TraceQL you generate."
 
 // QueryEdgesSchema is the JSON Schema of the tool's argument object.
 var QueryEdgesSchema = json.RawMessage(`{
@@ -52,6 +52,10 @@ var QueryEdgesSchema = json.RawMessage(`{
       "type": "string",
       "description": "Substring filter against device name (case-sensitive)."
     },
+    "ip_contains": {
+      "type": "string",
+      "description": "Substring filter against device IP address. Optional."
+    },
     "limit": {
       "type": "integer",
       "minimum": 1,
@@ -67,6 +71,7 @@ type QueryEdgesArgs struct {
 	Status                string `json:"status,omitempty"`
 	LastSeenWithinMinutes int    `json:"last_seen_within_minutes,omitempty"`
 	NameContains          string `json:"name_contains,omitempty"`
+	IPContains            string `json:"ip_contains,omitempty"`
 	Limit                 int    `json:"limit,omitempty"`
 }
 
@@ -78,6 +83,7 @@ type EdgeRow struct {
 	ID         uint64     `json:"device_id"`
 	Name       string     `json:"name"`
 	Hostname   string     `json:"hostname,omitempty"`
+	IPAddress  string     `json:"ip_address,omitempty"`
 	Online     bool       `json:"online"`
 	Roles      []string   `json:"roles"`
 	LastSeenAt *time.Time `json:"last_seen_at,omitempty"`
@@ -110,8 +116,9 @@ func (r *Registry) executeQueryEdges(ctx context.Context, args json.RawMessage) 
 	// (older test fixtures).
 	if r.devices != nil {
 		f := devicebiz.ListFilter{
-			Name:  in.NameContains,
-			Limit: in.Limit,
+			Name:      in.NameContains,
+			IPAddress: in.IPContains,
+			Limit:     in.Limit,
 		}
 		switch in.Status {
 		case "":
@@ -158,6 +165,7 @@ func (r *Registry) executeQueryEdges(ctx context.Context, args json.RawMessage) 
 				ID:         d.ID,
 				Name:       d.Name,
 				Hostname:   d.Hostname,
+				IPAddress:  d.IPAddress,
 				Online:     d.Online,
 				Roles:      devicemodel.DecodeRoles(d.Roles),
 				LastSeenAt: d.LastSeenAt,

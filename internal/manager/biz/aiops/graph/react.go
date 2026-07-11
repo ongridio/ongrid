@@ -84,6 +84,7 @@ func BuildReActGraph(
 		return nil, errors.New("graph: BuildReActGraph: model is required")
 	}
 	cfg = cfg.applyDefaults()
+	model = wrapBudgetStopModel(model)
 
 	// 1. Build the inner eino react agent. We pass our adapted tools
 	//    in via ToolsConfig.Tools — eino infers the schema by calling
@@ -268,34 +269,57 @@ func assembleMessages(in *Input) ([]*schema.Message, error) {
 // It covers tool-call narration explicitly because that's what drifts
 // back to Chinese first when the persona is Chinese.
 func languageDirective(locale string) string {
-	switch locale {
-	case "en-US":
+	switch normalizeLocale(locale) {
+	case "en":
 		return "Respond in English. Everything you write to the user — prose, explanations, headings, and the narration around every tool call — must be in English. Tool descriptions, knowledge-base snippets, persona text, and logs may be in Chinese; render their MEANING in English and never echo raw Chinese to the user. Translate domain terms to their English equivalents (e.g. \"0号病人\" → \"patient zero\", \"根因\" → \"root cause\", \"告警\" → \"alert\", \"巡检\" → \"inspection\"). Leave only proper nouns, identifiers, hostnames, file paths, code, and raw command output verbatim."
-	case "zh-CN":
+	case "zh":
 		return "用中文回复：你的所有叙述、解释、标题，以及每次工具调用前后的说明都必须用中文。工具描述、知识库片段、日志可能是英文，把含义用中文表达即可；标识符、主机名、文件路径、代码、命令原始输出保持原样。"
 	}
 	return ""
 }
 
 func reminderLanguageDirective(locale string) string {
-	switch locale {
-	case "en-US":
+	switch normalizeLocale(locale) {
+	case "en":
 		return "Respond in English; translate Chinese prompt/tool context by meaning, but keep identifiers/paths/commands verbatim."
-	case "zh-CN":
+	case "zh":
 		return "用中文回复；标识符、主机名、路径、代码和命令输出保持原样。"
 	}
 	return ""
+}
+
+func normalizeLocale(locale string) string {
+	l := strings.ToLower(strings.TrimSpace(locale))
+	l = strings.ReplaceAll(l, "_", "-")
+	switch {
+	case strings.HasPrefix(l, "en"):
+		return "en"
+	case strings.HasPrefix(l, "zh"):
+		return "zh"
+	default:
+		return ""
+	}
 }
 
 func buildSystemReminder(in *Input) string {
 	if in == nil {
 		return ""
 	}
-	lines := []string{
-		"- 同一工具失败两次后请换思路，不要重复调用",
-		"- device_id / alert_id 必须是数字 ID（@-mention 已经为你解析）",
-		"- 工具结果是事实，不要在没有数据时编造",
-		"- call_budget_exceeded 只限制当前用户消息；新消息可重新调用工具",
+	lines := []string{}
+	if normalizeLocale(in.Locale) == "en" {
+		lines = append(lines,
+			"- If the same tool fails twice, change approach instead of repeating it.",
+			"- device_id / alert_id must be numeric IDs (@-mentions have already been resolved).",
+			"- Tool results are facts; do not invent data when evidence is missing.",
+			"- call_budget_exceeded only applies to the current user turn; a new user message may call tools again.",
+		)
+	} else {
+		lines = append(lines,
+			"- 同一工具失败两次后请换思路，不要重复调用",
+			"- device_id / alert_id 必须是数字 ID（@-mention 已经为你解析）",
+			"- 工具结果是事实，不要在没有数据时编造",
+			"- call_budget_exceeded 只限制当前用户消息；新消息可重新调用工具",
+		)
 	}
 	// Re-assert the response language every turn (system prompt scrolls
 	// out of attention in long sessions). Prepended so it leads the block.

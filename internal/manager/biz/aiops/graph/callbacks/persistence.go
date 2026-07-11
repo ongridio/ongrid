@@ -54,6 +54,10 @@ type PersistenceDeps struct {
 
 const persistenceWriteTimeout = 5 * time.Second
 
+type pendingToolCallFinalizer interface {
+	FinalizePendingToolCalls(ctx context.Context, sessionID string, resultJSON, errStr string, endedAt time.Time) (int64, error)
+}
+
 func persistenceWriteContext(parent context.Context) (context.Context, context.CancelFunc) {
 	if parent == nil {
 		parent = context.Background()
@@ -583,6 +587,17 @@ func (h *PersistenceHandler) flushIncompleteBatch(ctx context.Context) {
 	}
 	for callID, tname := range missing {
 		body := `{"error":"tool response was not persisted (eino ToolsNode OnEnd loss); placeholder synthesised by manager to keep history envelope valid","autoheal":true}`
+		if entry, ok := h.popUnendedToolCall(callID); ok {
+			errText := "tool response was not persisted (eino ToolsNode OnEnd loss); autohealed by manager"
+			result := body
+			endedAt := time.Now().UTC()
+			writeCtx, cancel := persistenceWriteContext(ctx)
+			err := h.deps.Repo.UpdateToolCallResult(writeCtx, entry.rowID, model.StatusError, &result, &errText, endedAt)
+			cancel()
+			if err != nil {
+				h.recordErr("autoheal_tool_call_update", err)
+			}
+		}
 		cid := callID
 		tn := tname
 		row := &model.Message{
@@ -606,6 +621,22 @@ func (h *PersistenceHandler) flushIncompleteBatch(ctx context.Context) {
 	}
 }
 
+func (h *PersistenceHandler) popUnendedToolCall(llmCallID string) (toolCallEntry, bool) {
+	if h == nil || llmCallID == "" {
+		return toolCallEntry{}, false
+	}
+	h.toolCallsMu.Lock()
+	defer h.toolCallsMu.Unlock()
+	for key, entry := range h.toolCalls {
+		if entry.llmCallID != llmCallID {
+			continue
+		}
+		delete(h.toolCalls, key)
+		return entry, true
+	}
+	return toolCallEntry{}, false
+}
+
 // FinalizeBatch flushes any in-flight batch before the handler is
 // retired. Called from chatruntime after the graph invoke returns so
 // "user closed browser mid-batch" doesn't leave orphan tool_calls
@@ -615,6 +646,24 @@ func (h *PersistenceHandler) FinalizeBatch(ctx context.Context) {
 		return
 	}
 	h.flushIncompleteBatch(ctx)
+	h.finalizePendingToolCalls(ctx)
+}
+
+func (h *PersistenceHandler) finalizePendingToolCalls(ctx context.Context) {
+	if h == nil || h.deps.Repo == nil || h.deps.SessionID == "" {
+		return
+	}
+	finalizer, ok := h.deps.Repo.(pendingToolCallFinalizer)
+	if !ok {
+		return
+	}
+	body := `{"error":"tool response was not persisted before graph shutdown; marked failed by manager finalizer","autoheal":true}`
+	errText := "tool response was not persisted before graph shutdown; autohealed by manager"
+	writeCtx, cancel := persistenceWriteContext(ctx)
+	defer cancel()
+	if _, err := finalizer.FinalizePendingToolCalls(writeCtx, h.deps.SessionID, body, errText, time.Now().UTC()); err != nil {
+		h.recordErr("pending_tool_call_finalize", err)
+	}
 }
 
 type errBatchOverwrite struct {

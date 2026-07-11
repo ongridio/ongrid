@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -10,6 +11,7 @@ import (
 
 	model "github.com/ongridio/ongrid/internal/manager/model/device"
 	edgemodel "github.com/ongridio/ongrid/internal/manager/model/edge"
+	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
 
 func newDeviceTestDB(t *testing.T) *gorm.DB {
@@ -209,5 +211,113 @@ func TestReconcileOfflineOrphans(t *testing.T) {
 	}
 	if n2 != 0 {
 		t.Errorf("second reconcile flipped %d, want 0 (idempotent)", n2)
+	}
+}
+
+func TestDeleteOfflineWithLinkedEdgesRejectsOnlineDevice(t *testing.T) {
+	db := newDeviceTestDB(t)
+	if err := db.AutoMigrate(&edgemodel.Edge{}); err != nil {
+		t.Fatalf("AutoMigrate edges: %v", err)
+	}
+	repo := NewRepo(db)
+	ctx := context.Background()
+
+	dev, err := repo.FindOrCreateByFingerprint(ctx, sampleDevice("delete-online"))
+	if err != nil {
+		t.Fatalf("create device: %v", err)
+	}
+	if err := repo.MarkOnline(ctx, dev.ID); err != nil {
+		t.Fatalf("MarkOnline: %v", err)
+	}
+
+	err = repo.DeleteOfflineWithLinkedEdges(ctx, dev.ID)
+	if !errors.Is(err, errs.ErrConflict) {
+		t.Fatalf("DeleteOfflineWithLinkedEdges online err = %v, want ErrConflict", err)
+	}
+	if _, err := repo.Get(ctx, dev.ID); err != nil {
+		t.Fatalf("online device should still exist: %v", err)
+	}
+}
+
+func TestDeleteOfflineWithLinkedEdgesRejectsOnlineLinkedEdge(t *testing.T) {
+	db := newDeviceTestDB(t)
+	if err := db.AutoMigrate(&edgemodel.Edge{}); err != nil {
+		t.Fatalf("AutoMigrate edges: %v", err)
+	}
+	repo := NewRepo(db)
+	links := NewEdgeDeviceRepo(db)
+	ctx := context.Background()
+
+	dev, err := repo.FindOrCreateByFingerprint(ctx, sampleDevice("delete-stale-offline"))
+	if err != nil {
+		t.Fatalf("create device: %v", err)
+	}
+	edge := &edgemodel.Edge{AccessKeyID: "ak-delete-online-edge", SecretKeyHash: "secret-hash", Status: edgemodel.StatusOnline}
+	if err := db.Create(edge).Error; err != nil {
+		t.Fatalf("create edge: %v", err)
+	}
+	if err := links.Link(ctx, edge.ID, dev.ID, model.EdgeDeviceRelationHost); err != nil {
+		t.Fatalf("link edge: %v", err)
+	}
+
+	err = repo.DeleteOfflineWithLinkedEdges(ctx, dev.ID)
+	if !errors.Is(err, errs.ErrConflict) {
+		t.Fatalf("DeleteOfflineWithLinkedEdges linked online edge err = %v, want ErrConflict", err)
+	}
+	if _, err := repo.Get(ctx, dev.ID); err != nil {
+		t.Fatalf("device should still exist: %v", err)
+	}
+	var gotEdge edgemodel.Edge
+	if err := db.First(&gotEdge, edge.ID).Error; err != nil {
+		t.Fatalf("linked edge should still exist: %v", err)
+	}
+	if gotEdge.AccessKeyID != edge.AccessKeyID || gotEdge.SecretKeyHash != edge.SecretKeyHash {
+		t.Fatalf("linked edge credentials changed: access=%q secret=%q", gotEdge.AccessKeyID, gotEdge.SecretKeyHash)
+	}
+}
+
+func TestDeleteOfflineWithLinkedEdgesCleansEdgesAndCredentials(t *testing.T) {
+	db := newDeviceTestDB(t)
+	if err := db.AutoMigrate(&edgemodel.Edge{}); err != nil {
+		t.Fatalf("AutoMigrate edges: %v", err)
+	}
+	repo := NewRepo(db)
+	links := NewEdgeDeviceRepo(db)
+	ctx := context.Background()
+
+	dev, err := repo.FindOrCreateByFingerprint(ctx, sampleDevice("delete-offline"))
+	if err != nil {
+		t.Fatalf("create device: %v", err)
+	}
+	edge := &edgemodel.Edge{AccessKeyID: "ak-delete-offline", SecretKeyHash: "secret-hash", Status: edgemodel.StatusOffline}
+	if err := db.Create(edge).Error; err != nil {
+		t.Fatalf("create edge: %v", err)
+	}
+	if err := links.Link(ctx, edge.ID, dev.ID, model.EdgeDeviceRelationHost); err != nil {
+		t.Fatalf("link edge: %v", err)
+	}
+
+	if err := repo.DeleteOfflineWithLinkedEdges(ctx, dev.ID); err != nil {
+		t.Fatalf("DeleteOfflineWithLinkedEdges: %v", err)
+	}
+	if _, err := repo.Get(ctx, dev.ID); !errors.Is(err, errs.ErrNotFound) {
+		t.Fatalf("Get deleted device err = %v, want ErrNotFound", err)
+	}
+	if _, err := links.LookupEdgeForDevice(ctx, dev.ID, model.EdgeDeviceRelationHost); !errors.Is(err, errs.ErrNotFound) {
+		t.Fatalf("LookupEdgeForDevice after delete err = %v, want ErrNotFound", err)
+	}
+
+	var deletedEdge edgemodel.Edge
+	if err := db.Unscoped().First(&deletedEdge, edge.ID).Error; err != nil {
+		t.Fatalf("load unscoped edge: %v", err)
+	}
+	if deletedEdge.DeletedAt == nil {
+		t.Fatalf("linked edge was not soft-deleted")
+	}
+	if deletedEdge.AccessKeyID != "deleted-1" {
+		t.Fatalf("access key after cleanup = %q, want deleted-1", deletedEdge.AccessKeyID)
+	}
+	if deletedEdge.SecretKeyHash != "" {
+		t.Fatalf("secret hash after cleanup = %q, want empty", deletedEdge.SecretKeyHash)
 	}
 }
