@@ -73,6 +73,7 @@ func (r *fakeEdgeRepo) Count(_ context.Context) (int64, error)                  
 // and inspect the recorded last call.
 type fakeCaller struct {
 	mu       sync.Mutex
+	calls    int
 	lastID   uint64
 	lastName string
 	lastBody []byte
@@ -83,6 +84,7 @@ type fakeCaller struct {
 func (f *fakeCaller) Call(_ context.Context, edgeID uint64, method string, body []byte) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.calls++
 	f.lastID = edgeID
 	f.lastName = method
 	f.lastBody = append([]byte(nil), body...)

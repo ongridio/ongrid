@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/tenantctx"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
@@ -59,7 +60,7 @@ func TestExecuteK8sActionToolCallsControllerEdge(t *testing.T) {
 			APIVersion: "apps/v1",
 			Namespace:  "default",
 			Name:       "api",
-			Applied:    true,
+			DryRun:     true,
 			Preflight: tunnel.KubernetesActionPreflight{
 				Kind:            "Deployment",
 				APIVersion:      "apps/v1",
@@ -69,15 +70,60 @@ func TestExecuteK8sActionToolCallsControllerEdge(t *testing.T) {
 				ResourceVersion: "10",
 				Exists:          true,
 			},
-			ResultResourceVersion: "11",
 		}),
 	}
 	tool := NewExecuteK8sActionTool(fc, newFakeK8sSnapshotReader(), slog.Default())
 
 	ctx := tenantctx.With(context.Background(), tenantctx.Tenant{UserID: 1, Role: "admin"})
-	out, err := tool.InvokableRun(ctx, `{"cluster_id":1,"action":"scale","kind":"Deployment","namespace":"default","name":"api","replicas":3,"expected_resource_version":"10","reason":"roll new capacity"}`)
+	dryRunOut, err := tool.InvokableRun(ctx, `{"cluster_id":1,"action":"scale","kind":"Deployment","namespace":"default","name":"api","replicas":3,"dry_run":true,"reason":"roll new capacity"}`)
 	if err != nil {
-		t.Fatalf("InvokableRun: %v", err)
+		t.Fatalf("dry-run InvokableRun: %v", err)
+	}
+	var preflight executeK8sActionResponse
+	if err := json.Unmarshal([]byte(dryRunOut), &preflight); err != nil {
+		t.Fatalf("decode dry-run output: %v", err)
+	}
+	if preflight.PreflightToken == "" || preflight.ExpectedResourceVersion != "10" || preflight.PreflightExpiresAt == "" {
+		t.Fatalf("dry-run output missing preflight grant: %+v", preflight)
+	}
+	if fc.calls != 1 {
+		t.Fatalf("dry-run calls=%d want 1", fc.calls)
+	}
+
+	fc.respBody = mustMarshal(tunnel.KubernetesActionResponse{
+		ClusterID:  1,
+		Action:     "scale",
+		Kind:       "Deployment",
+		APIVersion: "apps/v1",
+		Namespace:  "default",
+		Name:       "api",
+		Applied:    true,
+		Preflight: tunnel.KubernetesActionPreflight{
+			Kind:            "Deployment",
+			APIVersion:      "apps/v1",
+			Namespace:       "default",
+			Name:            "api",
+			UID:             "deploy-uid",
+			ResourceVersion: "10",
+			Exists:          true,
+		},
+		ResultResourceVersion: "11",
+	})
+	replicas := 3
+	argsBody := mustMarshal(ExecuteK8sActionArgs{
+		ClusterID:               1,
+		Action:                  "scale",
+		Kind:                    "Deployment",
+		Namespace:               "default",
+		Name:                    "api",
+		Replicas:                &replicas,
+		ExpectedResourceVersion: preflight.ExpectedResourceVersion,
+		PreflightToken:          preflight.PreflightToken,
+		Reason:                  "roll new capacity",
+	})
+	out, err := tool.InvokableRun(ctx, string(argsBody))
+	if err != nil {
+		t.Fatalf("apply InvokableRun: %v", err)
 	}
 	if fc.lastID != 77 {
 		t.Fatalf("caller edge_id=%d want 77", fc.lastID)
@@ -92,7 +138,7 @@ func TestExecuteK8sActionToolCallsControllerEdge(t *testing.T) {
 	if sent.ClusterID != 1 || sent.Action != "scale" || sent.Kind != "Deployment" || sent.Namespace != "default" || sent.Name != "api" {
 		t.Fatalf("unexpected sent request: %+v", sent)
 	}
-	if sent.Replicas == nil || *sent.Replicas != 3 || sent.ExpectedResourceVersion != "10" || sent.Reason != "roll new capacity" {
+	if sent.Replicas == nil || *sent.Replicas != 3 || sent.ExpectedResourceVersion != "10" || sent.Reason != "roll new capacity" || sent.DryRun {
 		t.Fatalf("unexpected scale args: %+v", sent)
 	}
 
@@ -110,6 +156,77 @@ func TestExecuteK8sActionToolCallsControllerEdge(t *testing.T) {
 	}
 	if got.Source != "kubernetes_api" || got.ControllerEdgeID != 77 || got.Result.Action != "scale" || !got.Result.Applied || got.Result.ResultResourceVersion != "11" {
 		t.Fatalf("unexpected output: %+v", got)
+	}
+	if fc.calls != 2 {
+		t.Fatalf("calls=%d want 2", fc.calls)
+	}
+	if _, err := tool.InvokableRun(ctx, string(argsBody)); err == nil || !strings.Contains(err.Error(), "already used") {
+		t.Fatalf("reusing preflight token error=%v, want already used", err)
+	}
+	if fc.calls != 2 {
+		t.Fatalf("reused token reached controller: calls=%d want 2", fc.calls)
+	}
+}
+
+func TestExecuteK8sActionToolRejectsWriteWithoutPreflight(t *testing.T) {
+	fc := &fakeCaller{}
+	tool := NewExecuteK8sActionTool(fc, newFakeK8sSnapshotReader(), slog.Default())
+	ctx := tenantctx.With(context.Background(), tenantctx.Tenant{UserID: 1, Role: "admin"})
+
+	_, err := tool.InvokableRun(ctx, `{"cluster_id":1,"action":"scale","kind":"Deployment","namespace":"default","name":"api","replicas":3}`)
+	if err == nil || !strings.Contains(err.Error(), "preflight_token is required") {
+		t.Fatalf("InvokableRun error=%v, want preflight required", err)
+	}
+	if fc.calls != 0 {
+		t.Fatalf("write without preflight reached controller: calls=%d", fc.calls)
+	}
+}
+
+func TestExecuteK8sActionToolRejectsChangedParametersAfterPreflight(t *testing.T) {
+	fc := &fakeCaller{respBody: mustMarshal(tunnel.KubernetesActionResponse{
+		ClusterID: 1,
+		Action:    "scale",
+		Kind:      "Deployment",
+		Namespace: "default",
+		Name:      "api",
+		DryRun:    true,
+		Preflight: tunnel.KubernetesActionPreflight{
+			Kind:            "Deployment",
+			Namespace:       "default",
+			Name:            "api",
+			ResourceVersion: "10",
+			Exists:          true,
+		},
+	})}
+	tool := NewExecuteK8sActionTool(fc, newFakeK8sSnapshotReader(), slog.Default())
+	ctx := basetool.WithSessionID(
+		tenantctx.With(context.Background(), tenantctx.Tenant{UserID: 1, Role: "admin"}),
+		"session-a",
+	)
+	out, err := tool.InvokableRun(ctx, `{"cluster_id":1,"action":"scale","kind":"Deployment","namespace":"default","name":"api","replicas":3,"dry_run":true}`)
+	if err != nil {
+		t.Fatalf("dry-run InvokableRun: %v", err)
+	}
+	var preflight executeK8sActionResponse
+	if err := json.Unmarshal([]byte(out), &preflight); err != nil {
+		t.Fatalf("decode dry-run output: %v", err)
+	}
+	replicas := 4
+	changed := mustMarshal(ExecuteK8sActionArgs{
+		ClusterID:               1,
+		Action:                  "scale",
+		Kind:                    "Deployment",
+		Namespace:               "default",
+		Name:                    "api",
+		Replicas:                &replicas,
+		ExpectedResourceVersion: preflight.ExpectedResourceVersion,
+		PreflightToken:          preflight.PreflightToken,
+	})
+	if _, err := tool.InvokableRun(ctx, string(changed)); err == nil || !strings.Contains(err.Error(), "parameters changed") {
+		t.Fatalf("changed action error=%v, want parameters changed", err)
+	}
+	if fc.calls != 1 {
+		t.Fatalf("changed action reached controller: calls=%d want 1", fc.calls)
 	}
 }
 

@@ -2,10 +2,14 @@ package tools
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
@@ -17,7 +21,7 @@ import (
 const ToolNameExecuteK8sAction = "execute_k8s_action"
 
 const ExecuteK8sActionDescription = "Execute a small, audited Kubernetes write through the cluster controller edge. " +
-	"MUTATING — calls trigger reviewer approval before dispatch."
+	"MUTATING — calls trigger reviewer approval and require a successful dry-run preflight before dispatch."
 
 var ExecuteK8sActionSchema = json.RawMessage(`{
   "type": "object",
@@ -61,7 +65,11 @@ var ExecuteK8sActionSchema = json.RawMessage(`{
     },
     "dry_run": {
       "type": "boolean",
-      "description": "When true, ask the Kubernetes API to validate the write with dryRun=All without persisting it."
+      "description": "Set true first. A successful Kubernetes dryRun=All returns a short-lived preflight_token and expected_resource_version required by the real write."
+    },
+    "preflight_token": {
+      "type": "string",
+      "description": "One-time token returned by a matching dry-run. Required when dry_run is false."
     },
     "grace_period_seconds": {
       "type": "integer",
@@ -107,12 +115,14 @@ var ExecuteK8sActionSchema = json.RawMessage(`{
 
 const executeK8sActionWhenToUse = "Use ONLY when the user explicitly asks to mutate Kubernetes state: rollout restart a Deployment/StatefulSet/DaemonSet, " +
 	"scale a Deployment/StatefulSet, delete or evict one Pod, or cordon/uncordon/drain one Node. This tool is MUTATING and is approved by a reviewer before dispatch. " +
+	"Always call it first with dry_run=true, then repeat the same action with the returned preflight_token and expected_resource_version; the manager rejects direct writes, changed parameters, stale versions, and reused tokens. " +
 	"For drain, keep ignore_daemonsets=true by default, set delete_emptydir_data or force only when the user explicitly accepts that risk, and avoid disable_eviction unless bypassing PDB is explicitly requested. " +
 	"Always prefer describe_k8s_resource first when the target or resourceVersion is unclear. " +
 	"Never use this for kubectl exec, Secret reads, arbitrary patches, or host service restarts."
 
 const executeK8sActionCallTimeout = 30 * time.Second
 const (
+	executeK8sActionPreflightTTL  = 5 * time.Minute
 	defaultK8sDrainTimeoutSeconds = 120
 	maxK8sDrainTimeoutSeconds     = 600
 	defaultK8sDrainRetrySeconds   = 2
@@ -124,13 +134,28 @@ type ExecuteK8sActionTool struct {
 	caller Caller
 	reader K8sSnapshotReader
 	log    *slog.Logger
+
+	preflightMu sync.Mutex
+	preflights  map[string]executeK8sActionPreflightGrant
+}
+
+type executeK8sActionPreflightGrant struct {
+	Fingerprint [sha256.Size]byte
+	UserID      uint64
+	SessionID   string
+	ExpiresAt   time.Time
 }
 
 func NewExecuteK8sActionTool(caller Caller, reader K8sSnapshotReader, log *slog.Logger) *ExecuteK8sActionTool {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &ExecuteK8sActionTool{caller: caller, reader: reader, log: log}
+	return &ExecuteK8sActionTool{
+		caller:     caller,
+		reader:     reader,
+		log:        log,
+		preflights: make(map[string]executeK8sActionPreflightGrant),
+	}
 }
 
 func (t *ExecuteK8sActionTool) Info(_ context.Context) (*basetool.ToolInfo, error) {
@@ -153,6 +178,7 @@ type ExecuteK8sActionArgs struct {
 	Replicas                *int   `json:"replicas,omitempty"`
 	ExpectedResourceVersion string `json:"expected_resource_version,omitempty"`
 	DryRun                  bool   `json:"dry_run,omitempty"`
+	PreflightToken          string `json:"preflight_token,omitempty"`
 	Reason                  string `json:"reason,omitempty"`
 	GracePeriodSeconds      *int   `json:"grace_period_seconds,omitempty"`
 	DrainTimeoutSeconds     int    `json:"drain_timeout_seconds,omitempty"`
@@ -164,9 +190,12 @@ type ExecuteK8sActionArgs struct {
 }
 
 type executeK8sActionResponse struct {
-	Source           string                          `json:"source"`
-	ControllerEdgeID uint64                          `json:"controller_edge_id"`
-	Result           tunnel.KubernetesActionResponse `json:"result"`
+	Source                  string                          `json:"source"`
+	ControllerEdgeID        uint64                          `json:"controller_edge_id"`
+	Result                  tunnel.KubernetesActionResponse `json:"result"`
+	PreflightToken          string                          `json:"preflight_token,omitempty"`
+	PreflightExpiresAt      string                          `json:"preflight_expires_at,omitempty"`
+	ExpectedResourceVersion string                          `json:"expected_resource_version,omitempty"`
 }
 
 func (t *ExecuteK8sActionTool) InvokableRun(ctx context.Context, argsJSON string, _ ...basetool.InvokeOption) (string, error) {
@@ -187,6 +216,11 @@ func (t *ExecuteK8sActionTool) InvokableRun(ctx context.Context, argsJSON string
 	req, err := normalizeExecuteK8sActionArgs(in)
 	if err != nil {
 		return "", err
+	}
+	if !req.DryRun {
+		if err := t.consumePreflight(strings.TrimSpace(in.PreflightToken), req, caller.UserID, basetool.SessionIDFromContext(ctx)); err != nil {
+			return "", err
+		}
 	}
 
 	callCtx, cancel := context.WithTimeout(ctx, executeK8sActionTimeout(req))
@@ -211,15 +245,113 @@ func (t *ExecuteK8sActionTool) InvokableRun(ctx context.Context, argsJSON string
 	if err := json.Unmarshal(respBody, &resp); err != nil {
 		return "", fmt.Errorf("%s: decode response: %w", ToolNameExecuteK8sAction, err)
 	}
-	out, err := json.Marshal(executeK8sActionResponse{
+	if err := validateExecuteK8sActionResponse(req, resp); err != nil {
+		return "", err
+	}
+	result := executeK8sActionResponse{
 		Source:           "kubernetes_api",
 		ControllerEdgeID: *cluster.ControllerEdgeID,
 		Result:           resp,
-	})
+	}
+	if req.DryRun {
+		if !resp.DryRun || resp.Applied || !resp.Preflight.Exists || strings.TrimSpace(resp.Preflight.ResourceVersion) == "" {
+			return "", fmt.Errorf("%s: controller returned an invalid dry-run preflight", ToolNameExecuteK8sAction)
+		}
+		approved := req
+		approved.DryRun = false
+		approved.ExpectedResourceVersion = strings.TrimSpace(resp.Preflight.ResourceVersion)
+		token, expiresAt, err := t.issuePreflight(approved, caller.UserID, basetool.SessionIDFromContext(ctx))
+		if err != nil {
+			return "", err
+		}
+		result.PreflightToken = token
+		result.PreflightExpiresAt = expiresAt.UTC().Format(time.RFC3339)
+		result.ExpectedResourceVersion = approved.ExpectedResourceVersion
+	} else if resp.DryRun || !resp.Applied {
+		return "", fmt.Errorf("%s: controller did not confirm that the write was applied", ToolNameExecuteK8sAction)
+	}
+	out, err := json.Marshal(result)
 	if err != nil {
 		return "", fmt.Errorf("%s: marshal response: %w", ToolNameExecuteK8sAction, err)
 	}
 	return string(out), nil
+}
+
+func (t *ExecuteK8sActionTool) issuePreflight(req tunnel.KubernetesActionRequest, userID uint64, sessionID string) (string, time.Time, error) {
+	fingerprint, err := executeK8sActionFingerprint(req)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return "", time.Time{}, fmt.Errorf("%s: generate preflight token: %w", ToolNameExecuteK8sAction, err)
+	}
+	token := base64.RawURLEncoding.EncodeToString(tokenBytes)
+	now := time.Now()
+	expiresAt := now.Add(executeK8sActionPreflightTTL)
+
+	t.preflightMu.Lock()
+	defer t.preflightMu.Unlock()
+	t.deleteExpiredPreflightsLocked(now)
+	t.preflights[token] = executeK8sActionPreflightGrant{
+		Fingerprint: fingerprint,
+		UserID:      userID,
+		SessionID:   sessionID,
+		ExpiresAt:   expiresAt,
+	}
+	return token, expiresAt, nil
+}
+
+func (t *ExecuteK8sActionTool) consumePreflight(token string, req tunnel.KubernetesActionRequest, userID uint64, sessionID string) error {
+	if token == "" {
+		return fmt.Errorf("%s: preflight_token is required; run the same action with dry_run=true first", ToolNameExecuteK8sAction)
+	}
+	fingerprint, err := executeK8sActionFingerprint(req)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	t.preflightMu.Lock()
+	defer t.preflightMu.Unlock()
+	grant, ok := t.preflights[token]
+	delete(t.preflights, token)
+	t.deleteExpiredPreflightsLocked(now)
+	if !ok || !grant.ExpiresAt.After(now) {
+		return fmt.Errorf("%s: preflight_token is invalid, expired, or already used", ToolNameExecuteK8sAction)
+	}
+	if grant.UserID != userID || grant.SessionID != sessionID {
+		return fmt.Errorf("%s: preflight_token belongs to a different user or session", ToolNameExecuteK8sAction)
+	}
+	if grant.Fingerprint != fingerprint {
+		return fmt.Errorf("%s: action parameters changed after dry-run; run dry_run=true again", ToolNameExecuteK8sAction)
+	}
+	return nil
+}
+
+func (t *ExecuteK8sActionTool) deleteExpiredPreflightsLocked(now time.Time) {
+	for token, grant := range t.preflights {
+		if !grant.ExpiresAt.After(now) {
+			delete(t.preflights, token)
+		}
+	}
+}
+
+func executeK8sActionFingerprint(req tunnel.KubernetesActionRequest) ([sha256.Size]byte, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return [sha256.Size]byte{}, fmt.Errorf("%s: fingerprint request: %w", ToolNameExecuteK8sAction, err)
+	}
+	return sha256.Sum256(body), nil
+}
+
+func validateExecuteK8sActionResponse(req tunnel.KubernetesActionRequest, resp tunnel.KubernetesActionResponse) error {
+	if resp.ClusterID != req.ClusterID || resp.Action != req.Action || resp.Name != req.Name || resp.Namespace != req.Namespace {
+		return fmt.Errorf("%s: controller response target does not match the request", ToolNameExecuteK8sAction)
+	}
+	if resp.Preflight.Name != req.Name || resp.Preflight.Namespace != req.Namespace {
+		return fmt.Errorf("%s: controller preflight target does not match the request", ToolNameExecuteK8sAction)
+	}
+	return nil
 }
 
 func normalizeExecuteK8sActionArgs(in ExecuteK8sActionArgs) (tunnel.KubernetesActionRequest, error) {
