@@ -359,9 +359,13 @@ describe('KubernetesPage', () => {
     expect(payload).toEqual({ name: 'kind-created', mode: 'full-node' });
     expect(command).toHaveTextContent("manager.publicURL='https://<manager>'");
     expect(command).toHaveTextContent("manager.tunnelAddr='<manager>:40012'");
+    expect(command).toHaveTextContent("enrollment.controllerBootstrapToken='g-token'");
+    expect(command).toHaveTextContent("enrollment.nodeBootstrapToken='n-token'");
+    expect(screen.queryByText('Controller bootstrap token')).not.toBeInTheDocument();
+    expect(screen.queryByText('Node bootstrap token')).not.toBeInTheDocument();
     expect(screen.getByText('安装命令（执行一次）')).toBeInTheDocument();
     expect(
-      screen.getByText('自签名证书需要配置 registry。K3s、RKE2、containerd、Docker 请在所有节点执行；K3d 在宿主机执行一次。'),
+      screen.getByText('自签名证书需要在集群所有节点配置 registry（支持 K3s、RKE2、containerd、Docker）'),
     ).toBeInTheDocument();
     expect(screen.getByText(/\/edge\/k8s\/registry-setup\.sh/)).toBeInTheDocument();
     expect(screen.getByText(/--registry='<manager>'/)).toBeInTheDocument();

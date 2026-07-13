@@ -46,6 +46,8 @@ import {
 } from "@/api/edges";
 import { deleteDevice, listDevices, type Device } from "@/api/devices";
 import {
+  filterVisibleDeviceEdges,
+  isK8sControllerEdge,
   isK8sManagedEdge,
   loadK8sEdgeAttachments,
   uniqueAttachmentClusters,
@@ -169,11 +171,24 @@ export default function EdgesPage() {
         listEdges(),
         loadK8sEdgeAttachments(),
       ]);
-      const edgeByDeviceID = selectHostEdgesByDevice(edgeResp.items ?? []);
-      const items = (deviceResp.items ?? []).map((d) => ({
-        ...d,
-        hostEdge: edgeByDeviceID.get(d.id),
-      }));
+      const allEdges = edgeResp.items ?? [];
+      const edgeByDeviceID = selectHostEdgesByDevice(
+        filterVisibleDeviceEdges(allEdges, attachments),
+      );
+      const controllerDeviceIDs = new Set(
+        allEdges
+          .filter((edge) => isK8sControllerEdge(attachments[edge.id] ?? []))
+          .map((edge) => edge.device_id)
+          .filter((id): id is number => Boolean(id)),
+      );
+      const items = (deviceResp.items ?? [])
+        .map((d) => ({
+          ...d,
+          hostEdge: edgeByDeviceID.get(d.id),
+        }))
+        .filter(
+          (device) => device.hostEdge || !controllerDeviceIDs.has(device.id),
+        );
       setDevices(items);
       setK8sAttachments(attachments);
       // Drop any selected ids that no longer appear (deleted / filtered out)
@@ -550,11 +565,11 @@ export default function EdgesPage() {
             </div>
           )}
 
-          <div className="overflow-hidden rounded-xl border border-zinc-800/60 bg-zinc-900/40">
-            <table className="w-full text-sm">
+          <div className="overflow-x-auto rounded-xl border border-zinc-800/60 bg-zinc-900/40">
+            <table className="w-full min-w-[1260px] text-sm">
               <thead className="border-b border-zinc-800/60 bg-zinc-950/40 text-[11px] uppercase tracking-wider text-zinc-500">
                 <tr>
-                  <th className="w-10 px-4 py-2.5 text-left">
+                  <th className="px-2.5 py-2.5 text-left">
                     <input
                       type="checkbox"
                       aria-label={tr("全选", "Select all")}
@@ -568,26 +583,26 @@ export default function EdgesPage() {
                       onChange={toggleAllVisible}
                     />
                   </th>
-                  <th className="px-4 py-2.5 text-left">ID</th>
-                  <th className="px-4 py-2.5 text-left">
+                  <th className="px-2.5 py-2.5 text-left">ID</th>
+                  <th className="min-w-[360px] px-2.5 py-2.5 text-left">
                     {tr("名称", "Name")}
                   </th>
-                  <th className="px-4 py-2.5 text-left">
+                  <th className="min-w-[220px] px-2.5 py-2.5 text-left">
                     {tr("主机名", "Hostname")}
                   </th>
-                  <th className="px-4 py-2.5 text-left">IP</th>
-                  <th className="px-4 py-2.5 text-left">
+                  <th className="px-2.5 py-2.5 text-left">IP</th>
+                  <th className="px-2.5 py-2.5 text-left">
                     {tr("角色", "Roles")}
                   </th>
-                  <th className="px-4 py-2.5 text-left">
+                  <th className="px-2.5 py-2.5 text-left">
                     {tr("状态", "Status")}
                   </th>
-                  <th className="px-4 py-2.5 text-left">
+                  <th className="px-2.5 py-2.5 text-left">
                     {tr("最后心跳", "Last heartbeat")}
                   </th>
-                  <th className="px-4 py-2.5 text-left">Access Key</th>
-                  <th className="px-4 py-2.5 text-left">Edge</th>
-                  <th className="px-4 py-2.5 text-right">
+                  <th className="px-2.5 py-2.5 text-left">Access Key</th>
+                  <th className="px-2.5 py-2.5 text-left">Edge</th>
+                  <th className="sticky right-0 min-w-[176px] border-l border-zinc-800/60 bg-zinc-950 px-2.5 py-2.5 text-right">
                     {tr("操作", "Actions")}
                   </th>
                 </tr>
@@ -648,7 +663,7 @@ export default function EdgesPage() {
                           Heartbeat / access-key / agent are short and
                           formatted to a known width. */}
                         <td
-                          className="w-10 px-4 py-2.5"
+                          className="px-2.5 py-2.5"
                           onClick={(ev) => ev.stopPropagation()}
                         >
                           {managedByK8s ? (
@@ -674,10 +689,10 @@ export default function EdgesPage() {
                             />
                           )}
                         </td>
-                        <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-zinc-400">
+                        <td className="truncate whitespace-nowrap px-2.5 py-2.5 font-mono text-xs text-zinc-400">
                           {d.id}
                         </td>
-                        <td className="min-w-[300px] max-w-[440px] px-4 py-2.5 text-zinc-100">
+                        <td className="min-w-[360px] px-2.5 py-2.5 text-zinc-100">
                           <div className="flex min-w-0 items-center gap-1.5">
                             <span className="min-w-0 flex-1 truncate">
                               {displayName || (
@@ -689,17 +704,17 @@ export default function EdgesPage() {
                             <EdgeAccessMeta attachments={attachments} />
                           </div>
                         </td>
-                        <td className="whitespace-nowrap px-4 py-2.5 text-zinc-400">
+                        <td className="max-w-[260px] min-w-[220px] truncate whitespace-nowrap px-2.5 py-2.5 text-zinc-400">
                           {d.hostname ||
                             extractHostname(edge?.host_info) ||
                             "—"}
                         </td>
-                        <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-zinc-400">
+                        <td className="truncate whitespace-nowrap px-2.5 py-2.5 font-mono text-xs text-zinc-400">
                           {d.ip_address || extractIP(edge?.host_info) || "—"}
                         </td>
                         <td
                           className={cn(
-                            "whitespace-nowrap px-4 py-2.5",
+                            "whitespace-nowrap px-2.5 py-2.5",
                             !managedByK8s && "cursor-pointer",
                           )}
                           title={
@@ -718,15 +733,15 @@ export default function EdgesPage() {
                         >
                           <RoleChips roles={asEdgeRoles(d.roles)} />
                         </td>
-                        <td className="whitespace-nowrap px-4 py-2.5">
+                        <td className="whitespace-nowrap px-2.5 py-2.5">
                           <StatusPill
                             status={d.online ? "online" : "offline"}
                           />
                         </td>
-                        <td className="whitespace-nowrap px-4 py-2.5 text-zinc-400">
+                        <td className="truncate whitespace-nowrap px-2.5 py-2.5 text-zinc-400">
                           {d.last_seen_at ? relativeTime(d.last_seen_at) : "—"}
                         </td>
-                        <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-zinc-400">
+                        <td className="truncate whitespace-nowrap px-2.5 py-2.5 font-mono text-xs text-zinc-400">
                           {edge ? (
                             <span className="rounded bg-zinc-800/60 px-1.5 py-0.5">
                               {edge.access_key_id.slice(0, 8)}…
@@ -735,14 +750,14 @@ export default function EdgesPage() {
                             "—"
                           )}
                         </td>
-                        <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-zinc-400">
+                        <td className="truncate whitespace-nowrap px-2.5 py-2.5 font-mono text-xs text-zinc-400">
                           <AgentVersionCell
                             agentVersion={edge?.agent_version}
                             managerVersion={managerVersion}
                           />
                         </td>
                         <td
-                          className="whitespace-nowrap px-4 py-2.5 text-right"
+                          className="sticky right-0 min-w-[176px] whitespace-nowrap border-l border-zinc-800/60 bg-zinc-900 px-2.5 py-2.5 text-right"
                           onClick={(ev) => ev.stopPropagation()}
                         >
                           {managedByK8s && managedCluster ? (

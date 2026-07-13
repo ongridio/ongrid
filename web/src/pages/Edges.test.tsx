@@ -30,7 +30,7 @@ describe("EdgesPage", () => {
               access_key_id: "ak-controller",
               last_seen_at: "2026-06-29T10:00:00Z",
               host_info: { hostname: "controller-pod", ip_address: "10.0.0.3" },
-              device_id: null,
+              device_id: 3,
               agent_version: "dev",
             },
             {
@@ -66,6 +66,15 @@ describe("EdgesPage", () => {
         HttpResponse.json({
           items: [
             {
+              id: 3,
+              name: "kind-controller",
+              hostname: "controller-pod",
+              ip_address: "10.0.0.3",
+              roles: [],
+              online: true,
+              last_seen_at: "2026-06-29T10:00:00Z",
+            },
+            {
               id: 17,
               name: "k8s:kind-local:ongrid-k8s-control-plane",
               hostname: "ongrid-k8s-control-plane",
@@ -84,7 +93,7 @@ describe("EdgesPage", () => {
               last_seen_at: "2026-06-29T10:00:00Z",
             },
           ],
-          total: 2,
+          total: 3,
         }),
       ),
       http.get("/api/v1/k8s/edge-attachments", () =>
@@ -151,7 +160,7 @@ describe("EdgesPage", () => {
     expect(screen.getByText("bare-metal-1")).toBeInTheDocument();
     expect(screen.getByText("bm-1")).toBeInTheDocument();
     expect(screen.getByText("Host Edge")).toBeInTheDocument();
-    expect(screen.getByRole("table")).toHaveClass("w-full");
+    expect(screen.getByRole("table")).toHaveClass("w-full", "min-w-[1260px]");
   });
 
   it("点击 K8s 托管设备行进入设备详情，Kubernetes 管理按钮仍进入集群页", async () => {

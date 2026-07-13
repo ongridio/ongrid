@@ -14,7 +14,7 @@
 # Optional env:
 #   PACKAGE_TARGET  linux-amd64 (default) or linux-arm64
 #   DOCKER_PLATFORM linux/amd64 (default) or linux/arm64
-#   K8S_EDGE_IMAGE_PLATFORM package target platform by default
+#   K8S_EDGE_IMAGE_PLATFORM linux/amd64 by default
 #   K8S_EDGE_IMAGE_REPO ongrid/ongrid-edge by default
 #   K8S_EDGE_IMAGE_TAG VERSION without leading v by default
 #   REGISTRY_IMAGE registry:2.8.3 by default
@@ -61,7 +61,7 @@ esac
 TARGET_OS="${PACKAGE_TARGET%-*}"
 TARGET_ARCH="${PACKAGE_TARGET##*-}"
 DOCKER_PLATFORM="${DOCKER_PLATFORM:-${TARGET_OS}/${TARGET_ARCH}}"
-K8S_EDGE_IMAGE_PLATFORM="${K8S_EDGE_IMAGE_PLATFORM:-${TARGET_OS}/${TARGET_ARCH}}"
+K8S_EDGE_IMAGE_PLATFORM="${K8S_EDGE_IMAGE_PLATFORM:-linux/amd64}"
 K8S_EDGE_IMAGE_TARGET="${K8S_EDGE_IMAGE_PLATFORM//\//-}"
 K8S_EDGE_IMAGE_REPO="${K8S_EDGE_IMAGE_REPO:-ongrid/ongrid-edge}"
 K8S_EDGE_IMAGE_TAG="${K8S_EDGE_IMAGE_TAG:-${VERSION#v}}"

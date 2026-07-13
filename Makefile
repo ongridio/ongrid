@@ -27,7 +27,9 @@ EDGE_PLUGIN_ARCHES ?= linux-amd64
 STAGE       := dist/stage/ongrid-$(VERSION)-$(PACKAGE_TARGET)
 OUT         := dist/out
 PACKAGE_CLEAN ?= 1
-K8S_EDGE_IMAGE_PLATFORM ?= $(TARGET_OS)/$(TARGET_ARCH)
+# Kubernetes edge images target the predominantly amd64 cluster fleet,
+# independently of the manager package architecture.
+K8S_EDGE_IMAGE_PLATFORM ?= linux/amd64
 K8S_EDGE_IMAGE_TAG ?= $(patsubst v%,%,$(VERSION))
 K8S_EDGE_IMAGE_REPO ?= ongrid/ongrid-edge
 K8S_EDGE_IMAGE_REF ?= $(K8S_EDGE_IMAGE_REPO):$(K8S_EDGE_IMAGE_TAG)

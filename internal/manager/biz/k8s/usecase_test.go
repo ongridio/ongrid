@@ -505,6 +505,44 @@ func TestUsecaseNodeEnrollmentCompensatesUnboundEdge(t *testing.T) {
 	}
 }
 
+func TestUsecaseNodeEnrollmentReusesInventoryNodeUID(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	uc := NewUsecase(repo, newFakeIssuer(), Config{})
+	reg, err := uc.CreateCluster(ctx, CreateClusterInput{Name: "prod"})
+	if err != nil {
+		t.Fatalf("CreateCluster() error = %v", err)
+	}
+	if err := repo.UpsertNode(ctx, &model.Node{
+		ClusterID: reg.Cluster.ID,
+		NodeName:  "node-a",
+		NodeUID:   "inventory-node-uid",
+	}); err != nil {
+		t.Fatalf("seed inventory node: %v", err)
+	}
+
+	result, err := uc.Enroll(ctx, EnrollInput{
+		BootstrapToken: reg.NodeBootstrapToken,
+		ClusterID:      reg.Cluster.ID,
+		ClusterUID:     testClusterUID,
+		Role:           model.RoleNode,
+		NodeName:       "node-a",
+	})
+	if err != nil {
+		t.Fatalf("Enroll() error = %v", err)
+	}
+	node, err := repo.GetNodeByClusterUID(ctx, reg.Cluster.ID, "inventory-node-uid")
+	if err != nil {
+		t.Fatalf("GetNodeByClusterUID() error = %v", err)
+	}
+	if node.EdgeID == nil || *node.EdgeID != result.EdgeID {
+		t.Fatalf("inventory node edge = %v, want %d", node.EdgeID, result.EdgeID)
+	}
+	if _, err := repo.GetNodeByClusterUID(ctx, reg.Cluster.ID, "name:node-a"); !errors.Is(err, errs.ErrNotFound) {
+		t.Fatalf("placeholder node error = %v, want not found", err)
+	}
+}
+
 func TestUsecaseControllerEnrollmentCompensatesUnboundEdge(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeRepo()
@@ -1776,6 +1814,16 @@ func (r *fakeRepo) GetNodeByClusterUID(_ context.Context, clusterID uint64, node
 func (r *fakeRepo) GetNodeByEdgeID(_ context.Context, edgeID uint64) (*model.Node, error) {
 	for _, n := range r.nodes {
 		if n.EdgeID != nil && *n.EdgeID == edgeID {
+			cp := *n
+			return &cp, nil
+		}
+	}
+	return nil, errs.ErrNotFound
+}
+
+func (r *fakeRepo) GetNodeByClusterName(_ context.Context, clusterID uint64, nodeName string) (*model.Node, error) {
+	for _, n := range r.nodes {
+		if n.ClusterID == clusterID && n.NodeName == nodeName {
 			cp := *n
 			return &cp, nil
 		}

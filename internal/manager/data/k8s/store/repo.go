@@ -364,6 +364,20 @@ func (r *Repo) GetNodeByEdgeID(ctx context.Context, edgeID uint64) (*model.Node,
 	return &n, nil
 }
 
+func (r *Repo) GetNodeByClusterName(ctx context.Context, clusterID uint64, nodeName string) (*model.Node, error) {
+	var n model.Node
+	if err := r.db.WithContext(ctx).
+		Where("cluster_id = ? AND node_name = ?", clusterID, nodeName).
+		Order("id DESC").
+		First(&n).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errs.ErrNotFound
+		}
+		return nil, err
+	}
+	return &n, nil
+}
+
 func (r *Repo) GetLinkedNodeByClusterName(ctx context.Context, clusterID uint64, nodeName string) (*model.Node, error) {
 	var n model.Node
 	if err := r.db.WithContext(ctx).

@@ -1439,7 +1439,7 @@ function K8sHealthQueue({
           </div>
         ) : (
           <>
-            <div className="hidden grid-cols-[110px_minmax(0,1.1fr)_minmax(0,1.25fr)_auto] gap-3 bg-zinc-950/20 px-4 py-2 text-[11px] font-medium uppercase tracking-wide text-zinc-500 lg:grid">
+            <div className="hidden grid-cols-[88px_minmax(0,1.05fr)_minmax(0,1.2fr)_300px] gap-3 bg-zinc-950/20 px-4 py-2 text-[11px] font-medium uppercase tracking-wide text-zinc-500 lg:grid">
               <span>{tr('级别', 'Severity')}</span>
               <span>{tr('对象', 'Object')}</span>
               <span>{tr('证据', 'Evidence')}</span>
@@ -1559,7 +1559,7 @@ function TriageQueueRow({
   const canOpenTrace = issueSupportsTrace(issue);
   const hasMoreActions = canOpenLogs || canDescribe || canOpenTrace;
   return (
-    <div className="grid gap-3 px-4 py-3 lg:grid-cols-[110px_minmax(0,1.1fr)_minmax(0,1.25fr)_auto] lg:items-center">
+    <div className="grid gap-3 px-4 py-3 lg:grid-cols-[88px_minmax(0,1.05fr)_minmax(0,1.2fr)_300px] lg:items-start">
       <div className="flex items-center gap-2">
         <span
           className={cn(
@@ -1595,7 +1595,7 @@ function TriageQueueRow({
           </div>
         )}
       </div>
-      <div className="flex flex-wrap items-center gap-1.5 lg:justify-end">
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5 lg:justify-end">
         <Button variant="primary" className="px-2 py-1 text-[11px]" onClick={onAnalyze}>
           <Activity size={11} />
           {tr('AI 分析', 'AI analyze')}
@@ -3288,7 +3288,7 @@ function RegistrationModal({
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     setCopied(false);
-  }, [data?.bootstrap_token]);
+  }, [data?.install_command]);
   if (!data) return null;
   const installCommand = data.install_command;
   async function copyInstallCommand() {
@@ -3304,18 +3304,6 @@ function RegistrationModal({
           <Chip tone="accent">{data.cluster.name}</Chip>
           <ModeChip mode={data.cluster.mode} />
           <ClusterStatusChip status={data.cluster.status} />
-        </div>
-        <div>
-          <div className="mb-1 text-zinc-500">Controller bootstrap token</div>
-          <div className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-[11px] text-zinc-300">
-            {data.bootstrap_token}
-          </div>
-        </div>
-        <div>
-          <div className="mb-1 text-zinc-500">Node bootstrap token</div>
-          <div className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-[11px] text-zinc-300">
-            {data.node_bootstrap_token}
-          </div>
         </div>
         <div>
           <div className="mb-1 flex items-center justify-between gap-2 text-zinc-500">
@@ -3352,8 +3340,8 @@ function RegistryTrustGuide({ installCommand }: { installCommand: string }) {
       <div className="mb-2 flex items-start justify-between gap-2">
         <span className="min-w-0 text-xs leading-5 text-zinc-400">
           {tr(
-            '自签名证书需要配置 registry。K3s、RKE2、containerd、Docker 请在所有节点执行；K3d 在宿主机执行一次。',
-            'Self-signed certificates require registry configuration. Run this on every K3s, RKE2, containerd, or Docker node; for K3d, run it once on the host.',
+            '自签名证书需要在集群所有节点配置 registry（支持 K3s、RKE2、containerd、Docker）',
+            'Self-signed certificates require registry configuration on every cluster node (supports K3s, RKE2, containerd, and Docker).',
           )}
         </span>
         <Button className="shrink-0 whitespace-nowrap" onClick={() => void copyRegistryCommand()}>

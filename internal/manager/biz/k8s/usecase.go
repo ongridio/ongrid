@@ -52,6 +52,7 @@ type Repository interface {
 
 	GetNodeByClusterUID(ctx context.Context, clusterID uint64, nodeUID string) (*model.Node, error)
 	GetNodeByEdgeID(ctx context.Context, edgeID uint64) (*model.Node, error)
+	GetNodeByClusterName(ctx context.Context, clusterID uint64, nodeName string) (*model.Node, error)
 	GetLinkedNodeByClusterName(ctx context.Context, clusterID uint64, nodeName string) (*model.Node, error)
 	ListNodesByRefs(ctx context.Context, clusterID uint64, refs []NodeRef) ([]*model.Node, error)
 	ListStaleNodes(ctx context.Context, clusterID uint64, olderThan time.Time) ([]*model.Node, error)
@@ -1269,7 +1270,7 @@ func (u *Usecase) enrollNode(ctx context.Context, c *model.Cluster, in EnrollInp
 	}
 	nodeUID := strings.TrimSpace(in.NodeUID)
 	if nodeUID == "" {
-		if existing, err := u.repo.GetLinkedNodeByClusterName(ctx, c.ID, nodeName); err == nil && strings.TrimSpace(existing.NodeUID) != "" {
+		if existing, err := u.repo.GetNodeByClusterName(ctx, c.ID, nodeName); err == nil && strings.TrimSpace(existing.NodeUID) != "" {
 			nodeUID = existing.NodeUID
 		} else {
 			nodeUID = "name:" + nodeName

@@ -11,6 +11,7 @@ import (
 
 	model "github.com/ongridio/ongrid/internal/manager/model/device"
 	edgemodel "github.com/ongridio/ongrid/internal/manager/model/edge"
+	k8smodel "github.com/ongridio/ongrid/internal/manager/model/k8s"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
 
@@ -39,6 +40,165 @@ func sampleDevice(fingerprint string) *model.Device {
 		CPUCount:       2,
 		MemTotalBytes:  4096,
 		DiskTotalBytes: 8192,
+	}
+}
+
+func TestMigrateSkipsKubernetesControllerEdges(t *testing.T) {
+	db := openDeviceMigrationTestDB(t)
+	if err := db.AutoMigrate(&edgemodel.Edge{}, &k8smodel.Cluster{}); err != nil {
+		t.Fatalf("AutoMigrate dependencies: %v", err)
+	}
+	edge := &edgemodel.Edge{AccessKeyID: "controller-only", SecretKeyHash: "hash", Name: "k8s:cluster:controller"}
+	if err := db.Create(edge).Error; err != nil {
+		t.Fatalf("create controller edge: %v", err)
+	}
+	cluster := &k8smodel.Cluster{
+		Name:                   "cluster",
+		Mode:                   k8smodel.ModeFullNode,
+		BootstrapTokenHash:     "controller-token",
+		NodeBootstrapTokenHash: "node-token",
+		ControllerEdgeID:       &edge.ID,
+	}
+	if err := db.Create(cluster).Error; err != nil {
+		t.Fatalf("create cluster: %v", err)
+	}
+
+	if err := Migrate(db); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	assertControllerHasNoHostDevice(t, db, edge.ID)
+}
+
+func TestMigrateDetachesLegacyKubernetesControllerDevice(t *testing.T) {
+	db := openDeviceMigrationTestDB(t)
+	if err := db.AutoMigrate(&edgemodel.Edge{}); err != nil {
+		t.Fatalf("AutoMigrate edge: %v", err)
+	}
+	edge := &edgemodel.Edge{AccessKeyID: "legacy-controller", SecretKeyHash: "hash", Name: "k8s:legacy:controller"}
+	if err := db.Create(edge).Error; err != nil {
+		t.Fatalf("create controller edge: %v", err)
+	}
+	if err := Migrate(db); err != nil {
+		t.Fatalf("initial Migrate: %v", err)
+	}
+
+	if err := db.AutoMigrate(&k8smodel.Cluster{}); err != nil {
+		t.Fatalf("AutoMigrate cluster: %v", err)
+	}
+	cluster := &k8smodel.Cluster{
+		Name:                   "legacy-cluster",
+		Mode:                   k8smodel.ModeFullNode,
+		BootstrapTokenHash:     "controller-token",
+		NodeBootstrapTokenHash: "node-token",
+		ControllerEdgeID:       &edge.ID,
+	}
+	if err := db.Create(cluster).Error; err != nil {
+		t.Fatalf("create cluster: %v", err)
+	}
+
+	if err := Migrate(db); err != nil {
+		t.Fatalf("cleanup Migrate: %v", err)
+	}
+	if err := Migrate(db); err != nil {
+		t.Fatalf("idempotent Migrate: %v", err)
+	}
+	assertControllerHasNoHostDevice(t, db, edge.ID)
+}
+
+func TestMigratePreservesDeviceReferencedByNonControllerEdge(t *testing.T) {
+	db := openDeviceMigrationTestDB(t)
+	if err := db.AutoMigrate(&edgemodel.Edge{}, &k8smodel.Cluster{}, &model.Device{}, &model.EdgeDevice{}); err != nil {
+		t.Fatalf("AutoMigrate dependencies: %v", err)
+	}
+	device := sampleDevice("shared-host")
+	if err := db.Create(device).Error; err != nil {
+		t.Fatalf("create shared device: %v", err)
+	}
+	controller := &edgemodel.Edge{
+		AccessKeyID:   "shared-controller",
+		SecretKeyHash: "hash",
+		Name:          "k8s:shared:controller",
+		DeviceID:      &device.ID,
+	}
+	host := &edgemodel.Edge{
+		AccessKeyID:   "shared-host-edge",
+		SecretKeyHash: "hash",
+		Name:          "shared-host",
+		DeviceID:      &device.ID,
+	}
+	if err := db.Create(controller).Error; err != nil {
+		t.Fatalf("create controller edge: %v", err)
+	}
+	if err := db.Create(host).Error; err != nil {
+		t.Fatalf("create host edge: %v", err)
+	}
+	if err := db.Create(&model.EdgeDevice{
+		EdgeID: controller.ID, DeviceID: device.ID, Type: model.EdgeDeviceRelationHost,
+	}).Error; err != nil {
+		t.Fatalf("create stale controller link: %v", err)
+	}
+	cluster := &k8smodel.Cluster{
+		Name:                   "shared-cluster",
+		Mode:                   k8smodel.ModeFullNode,
+		BootstrapTokenHash:     "controller-token",
+		NodeBootstrapTokenHash: "node-token",
+		ControllerEdgeID:       &controller.ID,
+	}
+	if err := db.Create(cluster).Error; err != nil {
+		t.Fatalf("create cluster: %v", err)
+	}
+
+	if err := Migrate(db); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	var remaining model.Device
+	if err := db.First(&remaining, device.ID).Error; err != nil {
+		t.Fatalf("shared device was removed: %v", err)
+	}
+	var hostLinks int64
+	if err := db.Model(&model.EdgeDevice{}).
+		Where("edge_id = ? AND device_id = ? AND type = ?", host.ID, device.ID, model.EdgeDeviceRelationHost).
+		Count(&hostLinks).Error; err != nil {
+		t.Fatalf("count host links: %v", err)
+	}
+	if hostLinks != 1 {
+		t.Fatalf("non-controller host links = %d, want 1", hostLinks)
+	}
+}
+
+func openDeviceMigrationTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatalf("gorm.Open sqlite :memory:: %v", err)
+	}
+	return db
+}
+
+func assertControllerHasNoHostDevice(t *testing.T, db *gorm.DB, edgeID uint64) {
+	t.Helper()
+	var edge edgemodel.Edge
+	if err := db.First(&edge, edgeID).Error; err != nil {
+		t.Fatalf("load edge: %v", err)
+	}
+	if edge.DeviceID != nil {
+		t.Fatalf("controller edge device_id = %d, want nil", *edge.DeviceID)
+	}
+	var links int64
+	if err := db.Model(&model.EdgeDevice{}).
+		Where("edge_id = ? AND type = ?", edgeID, model.EdgeDeviceRelationHost).
+		Count(&links).Error; err != nil {
+		t.Fatalf("count host links: %v", err)
+	}
+	if links != 0 {
+		t.Fatalf("controller host links = %d, want 0", links)
+	}
+	var devices int64
+	if err := db.Model(&model.Device{}).Where("id = ?", edgeID).Count(&devices).Error; err != nil {
+		t.Fatalf("count controller devices: %v", err)
+	}
+	if devices != 0 {
+		t.Fatalf("controller devices = %d, want 0", devices)
 	}
 }
 
