@@ -75,7 +75,7 @@ scrape_configs:
       - cri: {}
       - regex:
           source: filename
-          expression: '^/host/var/log/pods/(?P<namespace>[^_]+)_(?P<pod>[^_]+)_(?P<pod_uid>[^/]+)/(?P<container>[^/]+)/[^/]+\.log$'
+          expression: '^/var/log/pods/(?P<namespace>[^_]+)_(?P<pod>[^_]+)_(?P<pod_uid>[^/]+)/(?P<container>[^/]+)/[^/]+\.log$'
       - labels:
           namespace:
           pod:
@@ -122,17 +122,17 @@ scrape_configs:
 // render builds promtail.yaml bytes from a PluginConfig. Spec keys:
 //
 //	mode : string (default "host"; "kubernetes" tails CRI pod logs under
-//	                /host/var/log/pods and emits namespace/pod/container labels)
+//	                /var/log/pods and emits namespace/pod/container labels)
 //	cluster_id : string|number (required when mode="kubernetes")
 //	node_name : string (optional when mode="kubernetes")
-//	pod_log_path : string (default /host/var/log/pods/*/*/*.log)
+//	pod_log_path : string (default /var/log/pods/*/*/*.log)
 //	enable_journald : bool (default TRUE — systemd-journald is universal on
 //	                          systemd hosts and self-rotating; set false to
 //	                          opt out, which falls back to syslog file tail)
 //	journald_units : []string (default all units when journald enabled)
 //	file_paths : []string (default empty; add app-specific log files here)
 //	extra_labels : map[string]string (allow-list policed by manager;
-const defaultKubernetesPodLogPath = "/host/var/log/pods/*/*/*.log"
+const defaultKubernetesPodLogPath = "/var/log/pods/*/*/*.log"
 
 func render(cfg plugins.PluginConfig) ([]byte, error) {
 	if cfg.Endpoint == "" {

@@ -76,7 +76,7 @@ func TestTunnelConfigFetcherAppliesKubernetesLogsDefaults(t *testing.T) {
 	assertSpecEqual(t, cfg.Spec, "mode", "kubernetes")
 	assertSpecEqual(t, cfg.Spec, "cluster_id", "9")
 	assertSpecEqual(t, cfg.Spec, "node_name", "kind-worker")
-	assertSpecEqual(t, cfg.Spec, "pod_log_path", "/host/var/log/pods/*/*/*.log")
+	assertSpecEqual(t, cfg.Spec, "pod_log_path", "/var/log/pods/*/*/*.log")
 	assertSpecEqual(t, cfg.Spec, "enable_journald", false)
 }
 
@@ -255,16 +255,16 @@ func TestTunnelConfigFetcherAppliesKubernetesHostMetricDefaults(t *testing.T) {
 	hostArgs := specStringSlice(t, got["hostmetrics"].Spec, "extra_args")
 	for _, want := range []string{
 		"--collector.cpu",
-		"--path.procfs=/host/proc",
-		"--path.sysfs=/host/sys",
-		"--path.rootfs=/host/root",
+		"--path.procfs=/proc",
+		"--path.sysfs=/sys",
+		"--path.rootfs=/",
 		"--collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run|var/lib/containerd/.+)($|/)",
 	} {
 		if !containsString(hostArgs, want) {
 			t.Fatalf("hostmetrics extra_args missing %q in %#v", want, hostArgs)
 		}
 	}
-	assertSpecEqual(t, got["procmetrics"].Spec, "procfs", "/host/proc")
+	assertSpecEqual(t, got["procmetrics"].Spec, "procfs", "/proc")
 }
 
 func TestTunnelConfigFetcherPreservesExplicitKubernetesHostMetricPaths(t *testing.T) {
@@ -298,7 +298,7 @@ func TestTunnelConfigFetcherPreservesExplicitKubernetesHostMetricPaths(t *testin
 	if !containsString(hostArgs, "--path.procfs=/custom/proc") {
 		t.Fatalf("explicit procfs arg missing in %#v", hostArgs)
 	}
-	if containsString(hostArgs, "--path.procfs=/host/proc") {
+	if containsString(hostArgs, "--path.procfs=/proc") {
 		t.Fatalf("default procfs should not override explicit arg: %#v", hostArgs)
 	}
 	assertSpecEqual(t, got["procmetrics"].Spec, "procfs", "/custom/proc")

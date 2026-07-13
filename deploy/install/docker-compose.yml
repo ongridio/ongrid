@@ -377,7 +377,7 @@ services:
   # host. Edges push to nginx /v1/traces with auth_request → manager
   # edgeauth (ADR-014 §决策第 1 条); manager Go is NOT on this byte stream.
   tempo:
-    image: grafana/tempo:2.5.0
+    image: grafana/tempo:2.10.0
     container_name: ongrid-tempo
     restart: unless-stopped
     command:

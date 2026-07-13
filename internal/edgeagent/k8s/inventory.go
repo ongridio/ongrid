@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,10 +29,7 @@ const (
 	maxWatchRetry            = 30 * time.Second
 	watchTimeoutSeconds      = 10
 
-	serviceAccountDir       = "/var/run/secrets/kubernetes.io/serviceaccount"
-	serviceAccountTokenFile = serviceAccountDir + "/token"
-	serviceAccountCAFile    = serviceAccountDir + "/ca.crt"
-	serviceAccountNSFile    = serviceAccountDir + "/namespace"
+	defaultServiceAccountDir = "/var/run/secrets/kubernetes.io/serviceaccount"
 
 	inventoryScopeCluster   = "cluster"
 	inventoryScopeNamespace = "namespace"
@@ -734,18 +732,22 @@ func newInClusterAPIClient() (*apiClient, error) {
 		}
 		base = "https://" + netJoinHostPort(host, port)
 	}
-	tokenBytes, err := os.ReadFile(serviceAccountTokenFile)
+	serviceAccountDir := strings.TrimSpace(os.Getenv("ONGRID_K8S_SERVICE_ACCOUNT_DIR"))
+	if serviceAccountDir == "" {
+		serviceAccountDir = defaultServiceAccountDir
+	}
+	tokenBytes, err := os.ReadFile(filepath.Join(serviceAccountDir, "token"))
 	if err != nil {
 		return nil, fmt.Errorf("read service account token: %w", err)
 	}
 	pool := x509.NewCertPool()
-	if ca, err := os.ReadFile(serviceAccountCAFile); err == nil {
+	if ca, err := os.ReadFile(filepath.Join(serviceAccountDir, "ca.crt")); err == nil {
 		pool.AppendCertsFromPEM(ca)
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pool}
 	namespace := ""
-	if b, err := os.ReadFile(serviceAccountNSFile); err == nil {
+	if b, err := os.ReadFile(filepath.Join(serviceAccountDir, "namespace")); err == nil {
 		namespace = strings.TrimSpace(string(b))
 	}
 	return &apiClient{

@@ -191,7 +191,7 @@ func (t *TunnelConfigFetcher) withKubernetesLogsDefaults(cfg PluginConfig) Plugi
 		spec["node_name"] = t.k8sNodeName
 	}
 	if _, ok := spec["pod_log_path"]; !ok {
-		spec["pod_log_path"] = "/host/var/log/pods/*/*/*.log"
+		spec["pod_log_path"] = "/var/log/pods/*/*/*.log"
 	}
 	if _, ok := spec["enable_journald"]; !ok {
 		spec["enable_journald"] = false
@@ -285,9 +285,9 @@ func (t *TunnelConfigFetcher) withKubernetesGatewayTracesDefaults(cfg PluginConf
 func withKubernetesHostMetricsDefaults(cfg PluginConfig) PluginConfig {
 	spec := copySpec(cfg.Spec)
 	spec["extra_args"] = appendMissingCLIArgs(spec["extra_args"], []string{
-		"--path.procfs=/host/proc",
-		"--path.sysfs=/host/sys",
-		"--path.rootfs=/host/root",
+		"--path.procfs=/proc",
+		"--path.sysfs=/sys",
+		"--path.rootfs=/",
 		"--collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run|var/lib/containerd/.+)($|/)",
 	})
 	cfg.Spec = spec
@@ -297,7 +297,7 @@ func withKubernetesHostMetricsDefaults(cfg PluginConfig) PluginConfig {
 func withKubernetesProcMetricsDefaults(cfg PluginConfig) PluginConfig {
 	spec := copySpec(cfg.Spec)
 	if _, ok := spec["procfs"]; !ok {
-		spec["procfs"] = "/host/proc"
+		spec["procfs"] = "/proc"
 	}
 	cfg.Spec = spec
 	return cfg

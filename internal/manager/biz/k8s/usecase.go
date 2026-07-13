@@ -1277,13 +1277,24 @@ func (u *Usecase) enrollNode(ctx context.Context, c *model.Cluster, in EnrollInp
 		}
 	}
 	ts := now
-	if err := u.repo.UpsertNode(ctx, &model.Node{
+	node := &model.Node{
 		ClusterID:  c.ID,
 		NodeName:   nodeName,
 		NodeUID:    nodeUID,
 		ProviderID: strings.TrimSpace(in.ProviderID),
 		LastSeenAt: &ts,
-	}); err != nil {
+	}
+	if existing, err := u.repo.GetNodeByClusterUID(ctx, c.ID, nodeUID); err == nil {
+		node = existing
+		node.NodeName = nodeName
+		if providerID := strings.TrimSpace(in.ProviderID); providerID != "" {
+			node.ProviderID = providerID
+		}
+		node.LastSeenAt = &ts
+	} else if !errors.Is(err, errs.ErrNotFound) {
+		return nil, fmt.Errorf("get existing k8s node: %w", err)
+	}
+	if err := u.repo.UpsertNode(ctx, node); err != nil {
 		return nil, fmt.Errorf("upsert k8s node: %w", err)
 	}
 	n, err := u.repo.GetNodeByClusterUID(ctx, c.ID, nodeUID)

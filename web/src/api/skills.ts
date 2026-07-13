@@ -294,13 +294,13 @@ export function localizedSkill(s: SkillSummary): SkillSummary {
 
 export function executeSkill(
   key: string,
-  // null = manager-scope skill (no device_id required)
+  // null = manager-scope skill (no edge_id required)
   edgeID: string | number | null,
   params: Record<string, unknown>,
 ) {
   const body: Record<string, unknown> = { params };
   if (edgeID !== null && edgeID !== '' && edgeID !== undefined) {
-    body.device_id = typeof edgeID === 'number' ? String(edgeID) : edgeID;
+    body.edge_id = typeof edgeID === 'number' ? String(edgeID) : edgeID;
   }
   return request<ExecuteResult>('POST', `/skills/${encodeURIComponent(key)}/execute`, body);
 }

@@ -514,9 +514,14 @@ func TestUsecaseNodeEnrollmentReusesInventoryNodeUID(t *testing.T) {
 		t.Fatalf("CreateCluster() error = %v", err)
 	}
 	if err := repo.UpsertNode(ctx, &model.Node{
-		ClusterID: reg.Cluster.ID,
-		NodeName:  "node-a",
-		NodeUID:   "inventory-node-uid",
+		ClusterID:       reg.Cluster.ID,
+		NodeName:        "node-a",
+		NodeUID:         "inventory-node-uid",
+		LabelsJSON:      `{"topology.kubernetes.io/zone":"test-a"}`,
+		ConditionsJSON:  `[{"type":"Ready","status":"True"}]`,
+		CapacityJSON:    `{"cpu":"8"}`,
+		AllocatableJSON: `{"cpu":"7"}`,
+		KubeletVersion:  "v1.34.9",
 	}); err != nil {
 		t.Fatalf("seed inventory node: %v", err)
 	}
@@ -537,6 +542,13 @@ func TestUsecaseNodeEnrollmentReusesInventoryNodeUID(t *testing.T) {
 	}
 	if node.EdgeID == nil || *node.EdgeID != result.EdgeID {
 		t.Fatalf("inventory node edge = %v, want %d", node.EdgeID, result.EdgeID)
+	}
+	if node.LabelsJSON != `{"topology.kubernetes.io/zone":"test-a"}` ||
+		node.ConditionsJSON != `[{"type":"Ready","status":"True"}]` ||
+		node.CapacityJSON != `{"cpu":"8"}` ||
+		node.AllocatableJSON != `{"cpu":"7"}` ||
+		node.KubeletVersion != "v1.34.9" {
+		t.Fatalf("inventory metadata was overwritten during enrollment: %#v", node)
 	}
 	if _, err := repo.GetNodeByClusterUID(ctx, reg.Cluster.ID, "name:node-a"); !errors.Is(err, errs.ErrNotFound) {
 		t.Fatalf("placeholder node error = %v, want not found", err)
@@ -1876,6 +1888,12 @@ func (r *fakeRepo) UpsertNode(_ context.Context, n *model.Node) error {
 	if existing, ok := r.nodes[key]; ok {
 		existing.NodeName = n.NodeName
 		existing.ProviderID = n.ProviderID
+		existing.LabelsJSON = n.LabelsJSON
+		existing.TaintsJSON = n.TaintsJSON
+		existing.ConditionsJSON = n.ConditionsJSON
+		existing.CapacityJSON = n.CapacityJSON
+		existing.AllocatableJSON = n.AllocatableJSON
+		existing.KubeletVersion = n.KubeletVersion
 		if n.EdgeID != nil {
 			existing.EdgeID = n.EdgeID
 		}

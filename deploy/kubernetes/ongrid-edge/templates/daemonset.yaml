@@ -25,22 +25,48 @@ spec:
         kubernetes.io/arch: {{ . | quote }}
       {{- end }}
       hostPID: true
-      {{- $supplementalGroups := .Values.podSecurity.supplementalGroups }}
-      securityContext:
-        runAsNonRoot: {{ .Values.podSecurity.runAsNonRoot }}
-        runAsUser: {{ .Values.podSecurity.runAsUser }}
-        runAsGroup: {{ .Values.podSecurity.runAsGroup }}
-        fsGroup: {{ .Values.podSecurity.fsGroup }}
-        {{- if $supplementalGroups }}
-        supplementalGroups:
-          {{- toYaml $supplementalGroups | nindent 10 }}
-        {{- end }}
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
       tolerations:
         {{- toYaml .Values.node.tolerations | nindent 8 }}
+      initContainers:
+        - name: install-host-runtime
+          image: {{ include "ongrid-edge.image" . | quote }}
+          imagePullPolicy: {{ default "IfNotPresent" .Values.image.pullPolicy }}
+          args:
+            - install-k8s-host-runtime
+            - /host/root
+            - {{ .Values.podSecurity.runAsUser | quote }}
+            - {{ .Values.podSecurity.runAsGroup | quote }}
+          resources:
+            requests:
+              cpu: 5m
+              memory: 8Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi
+          securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+            runAsGroup: 0
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+              add: ["CHOWN", "DAC_OVERRIDE", "FOWNER"]
+          volumeMounts:
+            - name: host-root
+              mountPath: /host/root
       containers:
         - name: edge-node
           image: {{ include "ongrid-edge.image" . | quote }}
           imagePullPolicy: {{ default "IfNotPresent" .Values.image.pullPolicy }}
+          workingDir: /
+          args:
+            - enter-k8s-host
+            - /proc/1/root
+            - {{ .Values.podSecurity.runAsUser | quote }}
+            - {{ .Values.podSecurity.runAsGroup | quote }}
           env:
             - name: ONGRID_EDGE_MODE
               value: k8s-node
@@ -62,7 +88,15 @@ spec:
                   name: {{ include "ongrid-edge.fullname" . }}-node-bootstrap
                   key: bootstrap-token
             - name: ONGRID_K8S_CREDENTIAL_FILE
-              value: {{ printf "/var/lib/ongrid-edge/persist/ongrid-edge-cluster-%v.json" .Values.enrollment.clusterID | quote }}
+              value: {{ printf "/var/lib/ongrid-edge/k8s-state/credentials/ongrid-edge-cluster-%v.json" .Values.enrollment.clusterID | quote }}
+            - name: ONGRID_K8S_SERVICE_ACCOUNT_DIR
+              value: /var/lib/ongrid-edge/k8s-runtime/serviceaccount
+            - name: ONGRID_EDGE_PLUGIN_BIN_DIR
+              value: /var/lib/ongrid-edge/k8s-runtime/plugins
+            - name: ONGRID_EDGE_PLUGIN_WORK_DIR
+              value: /var/lib/ongrid-edge/k8s-state/plugins
+            - name: ONGRID_EDGE_UPGRADE_STAGE_DIR
+              value: /var/lib/ongrid-edge/k8s-state/.upgrade
             - name: ONGRID_MANAGER_PUBLIC_URL
               valueFrom:
                 configMapKeyRef:
@@ -90,55 +124,24 @@ spec:
             - name: ONGRID_EDGE_COLLECTOR_MODE
               value: {{ default "embedded" .Values.node.collectorMode | quote }}
             - name: HOST_PROC
-              value: /host/proc
+              value: /proc
             - name: HOST_SYS
-              value: /host/sys
+              value: /sys
             - name: HOST_ROOT
-              value: /host/root
+              value: /
           resources:
             {{- toYaml .Values.node.resources | nindent 12 }}
           securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+            runAsGroup: 0
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
-          volumeMounts:
-            - name: edge-state
-              mountPath: /var/lib/ongrid-edge
-            - name: edge-credential-state
-              mountPath: /var/lib/ongrid-edge/persist
-            - name: host-proc
-              mountPath: /host/proc
-              readOnly: true
-            - name: host-sys
-              mountPath: /host/sys
-              readOnly: true
-            - name: host-root
-              mountPath: /host/root
-              readOnly: true
-            - name: host-var-log
-              mountPath: /host/var/log
-              readOnly: true
+              add: ["DAC_READ_SEARCH", "NET_ADMIN", "SETGID", "SETPCAP", "SETUID", "SYS_ADMIN", "SYS_CHROOT", "SYS_PTRACE"]
       volumes:
-        - name: edge-state
-          emptyDir: {}
-        - name: edge-credential-state
-          hostPath:
-            path: {{ .Values.node.credentialHostPath | quote }}
-            type: Directory
-        - name: host-proc
-          hostPath:
-            path: /proc
-            type: Directory
-        - name: host-sys
-          hostPath:
-            path: /sys
-            type: Directory
         - name: host-root
           hostPath:
             path: /
-            type: Directory
-        - name: host-var-log
-          hostPath:
-            path: /var/log
             type: Directory

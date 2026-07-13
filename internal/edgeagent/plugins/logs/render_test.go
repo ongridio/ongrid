@@ -172,12 +172,12 @@ func TestRenderKubernetesMode(t *testing.T) {
 		"- cri: {}",
 		`ongrid_source: "kubernetes:pod"`,
 		`job: "kubernetes-pods"`,
-		`__path__: "/host/var/log/pods/*/*/*.log"`,
+		`__path__: "/var/log/pods/*/*/*.log"`,
 		"source: filename",
 		"namespace:",
 		"pod:",
 		"container:",
-		`expression: '^/host/var/log/pods/(?P<namespace>[^_]+)_(?P<pod>[^_]+)_(?P<pod_uid>[^/]+)/(?P<container>[^/]+)/[^/]+\.log$'`,
+		`expression: '^/var/log/pods/(?P<namespace>[^_]+)_(?P<pod>[^_]+)_(?P<pod_uid>[^/]+)/(?P<container>[^/]+)/[^/]+\.log$'`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("rendered config missing %q\n--- full body ---\n%s", want, body)

@@ -62,6 +62,14 @@ var version = "dev"
 const edgeMetricsAddr = ":9101"
 
 func main() {
+	if handled, err := runK8sHostCommand(context.Background(), os.Args[1:]); handled {
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "kubernetes host runtime: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	// Print-and-exit flags before anything that can fail (config load,
 	// env access). install.sh and operators rely on `ongrid-edge --version`
 	// printing the build tag without starting the agent.
@@ -129,7 +137,7 @@ func main() {
 	// validate the sandbox (no allowed paths, missing find/du in PATH)
 	// is non-fatal: the edge boots without the host_files capability
 	// and operators see the warning in the journal.
-	if k8sInfo == nil {
+	if k8sInfo == nil || isK8sNode(k8sInfo) {
 		if err := edgehostfiles.Register(client, log); err != nil {
 			log.Warn("host_files register failed; capability disabled", slog.Any("err", err))
 		}
@@ -162,7 +170,7 @@ func main() {
 		// webshell. The edge has no SSH lib, no PTY, no session map.
 		edgewebshell.Register(client, log.With(slog.String("comp", "webshell")))
 	} else {
-		log.Info("kubernetes runtime: host mutation handlers disabled",
+		log.Info("kubernetes controller: host handlers disabled",
 			slog.String("role", k8sInfo.Role),
 			slog.Uint64("cluster_id", k8sInfo.ClusterID),
 		)
@@ -617,6 +625,13 @@ func isK8sController(info *tunnel.KubernetesInfo) bool {
 	default:
 		return false
 	}
+}
+
+func isK8sNode(info *tunnel.KubernetesInfo) bool {
+	if info == nil {
+		return false
+	}
+	return strings.TrimSpace(info.Role) == "node"
 }
 
 func parseDurationEnv(key string, fallback time.Duration) time.Duration {

@@ -25,7 +25,6 @@ image:
 node:
   serviceAccountName: ""
   collectorMode: ""
-  credentialHostPath: /var/tmp
   tolerations:
     - operator: Exists
   resources:

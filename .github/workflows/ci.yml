@@ -121,6 +121,13 @@ jobs:
             >/tmp/ongrid-edge.yaml
           grep -q 'type: Recreate' /tmp/ongrid-edge.yaml
           ! grep -q 'kubernetes.io/arch:' /tmp/ongrid-edge.yaml
-          test "$(grep -c 'image: "docker.cnb.cool/ongridio/ongrid-edge:0.9.0"' /tmp/ongrid-edge.yaml)" -eq 2
+          test "$(grep -c 'image: "docker.cnb.cool/ongridio/ongrid-edge:0.9.0"' /tmp/ongrid-edge.yaml)" -eq 3
           grep -q 'k8s-inventory-full-sync-interval: "10m"' /tmp/ongrid-edge.yaml
+          grep -q 'hostNetwork: true' /tmp/ongrid-edge.yaml
+          grep -q 'name: install-host-runtime' /tmp/ongrid-edge.yaml
+          grep -q -- '- install-k8s-host-runtime' /tmp/ongrid-edge.yaml
+          grep -q -- '- enter-k8s-host' /tmp/ongrid-edge.yaml
+          grep -q 'add: \["CHOWN", "DAC_OVERRIDE", "FOWNER"\]' /tmp/ongrid-edge.yaml
+          grep -q 'add: \["DAC_READ_SEARCH", "NET_ADMIN", "SETGID", "SETPCAP", "SETUID", "SYS_ADMIN", "SYS_CHROOT", "SYS_PTRACE"\]' /tmp/ongrid-edge.yaml
+          ! grep -q 'privileged: true' /tmp/ongrid-edge.yaml
           ! grep -q 'supplementalGroups:' /tmp/ongrid-edge.yaml

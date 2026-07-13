@@ -54,7 +54,7 @@ flowchart LR
 
 | 组件 | 代表对象 | 主要数据源 | 动作边界 |
 | --- | --- | --- | --- |
-| `ongrid-edge-node` | 单个 Node / host Device | 节点 OS、hostPath、进程、节点日志、node_exporter/process_exporter | 节点级诊断能力 |
+| `ongrid-edge-node` | 单个 Node / host Device | 节点 OS、文件系统、进程、网络、节点日志、node_exporter/process_exporter | 与原生服务器 Edge 一致的节点级诊断和受控动作能力 |
 | `ongrid-edge-controller` | 整个 K8s 集群 | Kubernetes API、Events、kube-state-metrics、应用 metrics | K8s API 写动作 |
 | manager | 集群与资源快照 | controller push、DB、Prometheus/Loki/Tempo | 查询、审批、审计、安装命令生成 |
 
@@ -81,7 +81,9 @@ flowchart LR
    - `mode=full-node`
 5. controller Deployment 启动后读取 `kube-system` Namespace UID，manager 首次 enroll 时将其原子绑定为真实集群身份，再建立控制面 tunnel。
 6. node DaemonSet 在每个 Node 上启动，每个 Pod 使用只允许读取 `kube-system` Namespace 的 ServiceAccount 权限校验集群 UID，再用 Node Name enroll，换取独立 edge credentials；controller 快照到达后再合并 Kubernetes Node UID。
-   - 节点凭据以 `0600` 文件保存在该节点宿主机 `/var/tmp`，Pod 滚动重建时复用，不使用所有节点共享的 Kubernetes Secret。
+   - 启动阶段将 Edge 和插件安装到宿主机 `/var/lib/ongrid-edge/k8s-runtime`，进入宿主机 mount/PID/network 环境后降为非 root UID，仅保留网络诊断所需的 `CAP_NET_ADMIN` 和读取 root-only Pod 日志所需的 `CAP_DAC_READ_SEARCH`。
+   - 节点凭据以 `0600` 文件保存在该节点宿主机 `/var/lib/ongrid-edge/k8s-state/credentials`，Pod 滚动重建时复用，不使用所有节点共享的 Kubernetes Secret。
+   - Node Edge 的文件、进程、网络、日志和 WebSSH 均作用于宿主机；controller 始终保持非 root 且不注册主机能力。
    - controller 和 node bootstrap token 长期有效，仅管理员手动轮换 token 或删除集群时失效。已注册 controller 禁止重复 bootstrap 轮换最终凭据；普通 Pod 重建复用 Secret，凭据丢失时由管理员轮换 token 显式开放一次恢复接入。
 6. manager 将 Node edge 关联为普通设备，并在设备列表展示 `K8s Node`、所属集群和可选 `K8s Controller` 标签。
 
@@ -184,6 +186,8 @@ kubectl delete namespace ongrid-system --ignore-not-found
 - Helm chart 渲染包含 controller Deployment、node DaemonSet、ServiceAccount、ClusterRole、ClusterRoleBinding、Controller Secret/ConfigMap；Node 不具备 Secret 读写权限。
 - controller ServiceAccount 可 list/watch Nodes/Workloads/Pods/Events，并可执行受支持的 K8s 写动作。
 - 每个 Node 都能 enroll 为独立 edge，设备列表自动出现 Node 设备。
+- Node Edge 最终进程以非 root UID 运行且只保留 `CAP_NET_ADMIN`、`CAP_DAC_READ_SEARCH`；启动阶段 capability 在进入宿主机后全部丢弃。
+- Node Edge 的主机文件、进程、网络和 WebSSH 结果与在节点直接安装 Edge 一致。
 - 新增 Node 后 DaemonSet 自动启动并 enroll，新设备自动上报，不依赖一次性快照。
 - 删除 Node 后 inventory delta 能清理 `k8s_nodes` 中的旧节点。
 - 删除集群时清理关联设备关系和拓扑数据。
@@ -198,6 +202,8 @@ kubectl delete namespace ongrid-system --ignore-not-found
 | --- | --- | --- |
 | DaemonSet 复用同一 edge 凭证 | 多节点互相覆盖在线状态和 `device_id` | 使用 bootstrap token 换取 per-node edge credentials |
 | Node Pod 读取共享凭据 Secret | 单节点失陷后可读取或覆盖其他节点密钥 | 每个节点只在宿主机本地持久化自己的 `0600` 凭据文件；ServiceAccount 仅允许读取 `kube-system` Namespace 以校验集群 UID |
+| Node 启动阶段需要进入宿主机 mount namespace | 启动进程短暂持有 `SYS_ADMIN`、`SYS_PTRACE` 等高权限 | 仅固定的内置 launcher 获得最小 capability；进入宿主机后立即降 UID、清空补充组和 capability bounding set，只保留 `NET_ADMIN`、`DAC_READ_SEARCH`，不使用 `privileged: true` |
+| Node Edge 需要与主机安装版一致地读取和修改宿主机文件 | launcher 通过 hostPID 的 `/proc/1/root` 进入节点真实根目录 | Controller 保持隔离；launcher 进入主机后立即以 UID/GID 65532 运行，写操作继续受 Edge 审批与审计链路约束 |
 | CNB 公共镜像仓库不可达 | Controller 和 Node Edge 出现 ImagePullBackOff | release 先发布并校验 amd64/arm64 多架构 manifest；受限环境通过 `image.repository` 覆盖为集群可达镜像仓库 |
 | 可选 kube-state-metrics 访问公网 | 离线环境启用后出现 ImagePullBackOff | 默认关闭；启用时必须显式提供集群可达的离线镜像仓库地址 |
 | Event 高 churn | MySQL 表膨胀 | 当前快照 prune + TTL + per-cluster cap |
