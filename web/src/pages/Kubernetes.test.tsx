@@ -364,21 +364,11 @@ describe('KubernetesPage', () => {
     expect(screen.queryByText('Controller bootstrap token')).not.toBeInTheDocument();
     expect(screen.queryByText('Node bootstrap token')).not.toBeInTheDocument();
     expect(screen.getByText('安装命令（执行一次）')).toBeInTheDocument();
-    expect(
-      screen.getByText('自签名证书需要在集群所有节点配置 registry（支持 K3s、RKE2、containerd、Docker）'),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/\/edge\/k8s\/registry-setup\.sh/)).toBeInTheDocument();
-    expect(screen.getByText(/--registry='<manager>'/)).toBeInTheDocument();
-    expect(screen.queryByText(/config_path/)).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: '复制' })).toHaveLength(1);
 
-    const copyButtons = screen.getAllByRole('button', { name: '复制' });
-    expect(copyButtons[1]).toHaveClass('shrink-0', 'whitespace-nowrap');
-    fireEvent.click(copyButtons[1]);
+    fireEvent.click(screen.getByRole('button', { name: '复制' }));
     await waitFor(() => {
-      expect(writeText).toHaveBeenCalledWith(
-        "curl -kfsSL 'https://<manager>/edge/k8s/registry-setup.sh' | " +
-          "bash -s -- --registry='<manager>'",
-      );
+      expect(writeText).toHaveBeenCalledWith(expect.stringContaining('helm upgrade --install ongrid-edge'));
     });
   });
 

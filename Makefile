@@ -27,13 +27,13 @@ EDGE_PLUGIN_ARCHES ?= linux-amd64
 STAGE       := dist/stage/ongrid-$(VERSION)-$(PACKAGE_TARGET)
 OUT         := dist/out
 PACKAGE_CLEAN ?= 1
-# Kubernetes edge images target the predominantly amd64 cluster fleet,
-# independently of the manager package architecture.
+# Local builds default to amd64. Release publishing produces one multi-arch
+# manifest independently of the manager package architecture.
 K8S_EDGE_IMAGE_PLATFORM ?= linux/amd64
+K8S_EDGE_IMAGE_PLATFORMS ?= linux/amd64,linux/arm64
 K8S_EDGE_IMAGE_TAG ?= $(patsubst v%,%,$(VERSION))
-K8S_EDGE_IMAGE_REPO ?= ongrid/ongrid-edge
+K8S_EDGE_IMAGE_REPO ?= docker.cnb.cool/ongridio/ongrid-edge
 K8S_EDGE_IMAGE_REF ?= $(K8S_EDGE_IMAGE_REPO):$(K8S_EDGE_IMAGE_TAG)
-REGISTRY_IMAGE ?= registry:2.8.3
 
 DB_DSN     ?= root:root@tcp(127.0.0.1:3306)/ongrid?charset=utf8mb4&parseTime=true&loc=Local
 MIGRATIONS := db/migrations
@@ -68,7 +68,7 @@ build-ongrid-edge: ## 构建边端 ongrid-edge
 # test
 # ----------------------------------------------------------------------------
 
-.PHONY: test test-race test-integration test-e2e test-e2e-live test-k8s-registry-setup
+.PHONY: test test-race test-integration test-e2e test-e2e-live
 test: ## 单元测试
 	go test ./...
 
@@ -83,9 +83,6 @@ test-e2e: ## E2E（默认 fakes，无外部凭证；catalog: docs/test/e2e-catal
 
 test-e2e-live: ## E2E live mode（用 tests/e2e/secrets.local.env 打通真实外部服务）
 	E2E_LIVE_ALL=1 go test -tags=e2e -count=1 -timeout=15m ./tests/e2e/...
-
-test-k8s-registry-setup: ## Docker 隔离验证 K3s/K3d/RKE2/containerd/Docker registry 配置
-	scripts/test-k8s-registry-setup.sh
 
 # ----------------------------------------------------------------------------
 # lint
@@ -254,8 +251,8 @@ docker-build-web: ## [release] 构建 ongrid-web:$(VERSION) 镜像（前端 SPA 
 		$(DOCKER_BUILD_WEB_CACHE_ARGS) \
 		--load .
 
-.PHONY: docker-build-k8s-edge
-docker-build-k8s-edge: ## [release] 构建 Kubernetes 使用的 ongrid-edge 镜像（默认 linux/amd64）
+.PHONY: docker-build-k8s-edge docker-push-k8s-edge k8s-edge-image-ref
+docker-build-k8s-edge: ## [dev] 构建本地 Kubernetes ongrid-edge 镜像（默认 linux/amd64）
 	docker buildx build \
 		--platform $(K8S_EDGE_IMAGE_PLATFORM) \
 		--build-arg VERSION=$(VERSION) \
@@ -268,9 +265,20 @@ docker-build-k8s-edge: ## [release] 构建 Kubernetes 使用的 ongrid-edge 镜�
 		-f deploy/Dockerfile.ongrid-edge \
 		--load .
 
-.PHONY: docker-pull-registry
-docker-pull-registry: ## [release] 拉取内置镜像仓库镜像
-	docker pull --platform $(PLATFORM) $(REGISTRY_IMAGE)
+docker-push-k8s-edge: ## [release] 发布 Kubernetes ongrid-edge 多架构镜像到 CNB
+	docker buildx build \
+		--platform $(K8S_EDGE_IMAGE_PLATFORMS) \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg PROMTAIL_VERSION=$(PROMTAIL_VERSION) \
+		--build-arg NODE_EXPORTER_VERSION=$(NODE_EXPORTER_VERSION) \
+		--build-arg PROCESS_EXPORTER_VERSION=$(PROCESS_EXPORTER_VERSION) \
+		--build-arg OTELCOL_VERSION=$(OTELCOL_VERSION) \
+		-t $(K8S_EDGE_IMAGE_REF) \
+		-f deploy/Dockerfile.ongrid-edge \
+		--push .
+
+k8s-edge-image-ref:
+	@printf '%s\n' "$(K8S_EDGE_IMAGE_REF)"
 
 # Frontier broker is upstream singchia/frontier (ADR-007). Docker Hub pull
 # is unreliable in some networks, so we build the image locally from the
@@ -511,9 +519,8 @@ build-edge-bundle: ## [release] 打 ADR-024 edge upgrade bundle 到 dist/out/edg
 .PHONY: package-k8s-chart
 package-k8s-chart: ## [dev/release] 打 Kubernetes Helm chart 到 bin/k8s/ongrid-edge.tgz（nginx /edge/k8s/ 静态目录）
 	@mkdir -p bin/k8s
+	@rm -f bin/k8s/registry-setup.sh
 	COPYFILE_DISABLE=1 tar -C deploy/kubernetes -czf bin/k8s/ongrid-edge.tgz ongrid-edge
-	@cp deploy/kubernetes/registry-setup.sh bin/k8s/registry-setup.sh
-	@chmod 755 bin/k8s/registry-setup.sh
 	@cp bin/k8s/ongrid-edge.tgz bin/ongrid-edge.tgz
 
 .PHONY: fetch-embedding-model
@@ -543,11 +550,11 @@ check-release-target:
 # For offline RAG (ONGRID_EMBEDDING_PROVIDER=local) run
 # `make fetch-embedding-model` once before `make package`, otherwise
 # dist/package.sh warns and ships a tarball without the model.
-package: check-release-target fetch-promtail fetch-otelcol fetch-node-exporter fetch-process-exporter fetch-db-exporters build-edge-all docker-build docker-build-broker docker-build-web docker-build-k8s-edge docker-pull-registry ## [release] 打单架构 release tarball 到 dist/out/（TARGET_ARCH 可覆盖）
+package: check-release-target fetch-promtail fetch-otelcol fetch-node-exporter fetch-process-exporter fetch-db-exporters build-edge-all docker-build docker-build-broker docker-build-web ## [release] 打单架构 release tarball 到 dist/out/（TARGET_ARCH 可覆盖）
 	@if [ "$(PACKAGE_CLEAN)" = "1" ]; then rm -rf dist/stage dist/out; fi
 	@mkdir -p dist/stage dist/out
 	@$(MAKE) --no-print-directory build-edge-bundle
-	PACKAGE_TARGET="$(PACKAGE_TARGET)" DOCKER_PLATFORM="$(PLATFORM)" K8S_EDGE_IMAGE_PLATFORM="$(K8S_EDGE_IMAGE_PLATFORM)" K8S_EDGE_IMAGE_REPO="$(K8S_EDGE_IMAGE_REPO)" K8S_EDGE_IMAGE_TAG="$(K8S_EDGE_IMAGE_TAG)" REGISTRY_IMAGE="$(REGISTRY_IMAGE)" bash dist/package.sh "$(VERSION)" "$(STAGE)" "$(OUT)"
+	PACKAGE_TARGET="$(PACKAGE_TARGET)" DOCKER_PLATFORM="$(PLATFORM)" K8S_EDGE_IMAGE_TAG="$(K8S_EDGE_IMAGE_TAG)" bash dist/package.sh "$(VERSION)" "$(STAGE)" "$(OUT)"
 	@echo ""
 	@echo "=== release artefact ==="
 	@ls -lh $(OUT)/ongrid-$(VERSION)-$(PACKAGE_TARGET).tar.xz

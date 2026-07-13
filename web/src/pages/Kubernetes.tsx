@@ -77,10 +77,6 @@ import {
   type ResourceTotals,
 } from './kubernetes/model';
 import {
-  managerRegistryHostFromCommand,
-  registrySetupCommand,
-} from './kubernetes/registryCommands';
-import {
   DeleteClusterModal,
   UninstallCommandModal,
   UpgradeCommandModal,
@@ -3317,42 +3313,8 @@ function RegistrationModal({
             {installCommand}
           </pre>
         </div>
-        <RegistryTrustGuide installCommand={installCommand} />
       </div>
     </Modal>
-  );
-}
-
-function RegistryTrustGuide({ installCommand }: { installCommand: string }) {
-  const { tr } = useI18n();
-  const registryHost = managerRegistryHostFromCommand(installCommand);
-  const command = useMemo(() => registrySetupCommand(registryHost), [registryHost]);
-  const [copied, setCopied] = useState(false);
-
-  async function copyRegistryCommand() {
-    await navigator.clipboard?.writeText(command);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1200);
-  }
-
-  return (
-    <div className="rounded-md border border-zinc-800 bg-zinc-900/40 p-3">
-      <div className="mb-2 flex items-start justify-between gap-2">
-        <span className="min-w-0 text-xs leading-5 text-zinc-400">
-          {tr(
-            '自签名证书需要在集群所有节点配置 registry（支持 K3s、RKE2、containerd、Docker）',
-            'Self-signed certificates require registry configuration on every cluster node (supports K3s, RKE2, containerd, and Docker).',
-          )}
-        </span>
-        <Button className="shrink-0 whitespace-nowrap" onClick={() => void copyRegistryCommand()}>
-          {copied ? <Check size={12} /> : <Clipboard size={12} />}
-          {copied ? tr('已复制', 'Copied') : tr('复制', 'Copy')}
-        </Button>
-      </div>
-      <pre className="overflow-x-auto rounded-md border border-zinc-800 bg-zinc-950 p-2 text-[11px] leading-5 text-zinc-300">
-        {command}
-      </pre>
-    </div>
   );
 }
 

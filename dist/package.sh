@@ -14,10 +14,7 @@
 # Optional env:
 #   PACKAGE_TARGET  linux-amd64 (default) or linux-arm64
 #   DOCKER_PLATFORM linux/amd64 (default) or linux/arm64
-#   K8S_EDGE_IMAGE_PLATFORM linux/amd64 by default
-#   K8S_EDGE_IMAGE_REPO ongrid/ongrid-edge by default
 #   K8S_EDGE_IMAGE_TAG VERSION without leading v by default
-#   REGISTRY_IMAGE registry:2.8.3 by default
 #
 # The script is tolerant of missing deploy/install/* files: it warns and
 # continues so the pipeline is testable before the on-target scripts land.
@@ -61,12 +58,7 @@ esac
 TARGET_OS="${PACKAGE_TARGET%-*}"
 TARGET_ARCH="${PACKAGE_TARGET##*-}"
 DOCKER_PLATFORM="${DOCKER_PLATFORM:-${TARGET_OS}/${TARGET_ARCH}}"
-K8S_EDGE_IMAGE_PLATFORM="${K8S_EDGE_IMAGE_PLATFORM:-linux/amd64}"
-K8S_EDGE_IMAGE_TARGET="${K8S_EDGE_IMAGE_PLATFORM//\//-}"
-K8S_EDGE_IMAGE_REPO="${K8S_EDGE_IMAGE_REPO:-ongrid/ongrid-edge}"
 K8S_EDGE_IMAGE_TAG="${K8S_EDGE_IMAGE_TAG:-${VERSION#v}}"
-K8S_EDGE_IMAGE_REF="${K8S_EDGE_IMAGE_REPO}:${K8S_EDGE_IMAGE_TAG}"
-REGISTRY_IMAGE="${REGISTRY_IMAGE:-registry:2.8.3}"
 
 PKG_NAME="ongrid-${VERSION}-${PACKAGE_TARGET}"
 TARBALL="${OUT_DIR}/${PKG_NAME}.tar.xz"
@@ -94,7 +86,6 @@ log "staging ${PKG_NAME} into ${STAGE_DIR}"
 mkdir -p "${STAGE_DIR}" \
          "${STAGE_DIR}/images" \
          "${STAGE_DIR}/edge" \
-         "${STAGE_DIR}/edge/k8s/images" \
          "${STAGE_DIR}/prometheus" \
          "${STAGE_DIR}/grafana/provisioning/datasources"
 
@@ -213,12 +204,6 @@ if ! docker image inspect "${FRONTIER_REF}" >/dev/null 2>&1; then
     die "docker image ${FRONTIER_REF} not found; run 'make docker-build-broker' first"
 fi
 docker save "${FRONTIER_REF}" -o "${STAGE_DIR}/images/frontier.tar"
-
-log "saving docker image ${REGISTRY_IMAGE} -> images/registry.tar"
-if ! docker image inspect "${REGISTRY_IMAGE}" >/dev/null 2>&1; then
-    die "docker image ${REGISTRY_IMAGE} not found; run 'make docker-pull-registry' first"
-fi
-docker save "${REGISTRY_IMAGE}" -o "${STAGE_DIR}/images/registry.tar"
 
 # --- raw manager + frontier binaries (for systemd mode) ---------------------
 # install-systemd.sh installs these to /usr/local/bin/ when --mode=systemd.
@@ -395,13 +380,7 @@ if ! docker image inspect "${WEB_REF}" >/dev/null 2>&1; then
 fi
 docker save "${WEB_REF}" -o "${STAGE_DIR}/images/ongrid-web.tar"
 
-log "saving Kubernetes edge image ${K8S_EDGE_IMAGE_REF} -> edge/k8s/images/ongrid-edge-${K8S_EDGE_IMAGE_TARGET}.tar"
-if ! docker image inspect "${K8S_EDGE_IMAGE_REF}" >/dev/null 2>&1; then
-    die "docker image ${K8S_EDGE_IMAGE_REF} not found; run 'make docker-build-k8s-edge' first"
-fi
-docker save "${K8S_EDGE_IMAGE_REF}" -o "${STAGE_DIR}/edge/k8s/images/ongrid-edge-${K8S_EDGE_IMAGE_TARGET}.tar"
-
-# --- edge binaries -----------------------------------------------------------
+# --- Kubernetes chart --------------------------------------------------------
 # Kubernetes Helm chart. nginx serves this from /edge/k8s/ongrid-edge.tgz so
 # the manager can generate onboarding commands that work on machines without
 # the Ongrid source tree. Keep the old /edge/ongrid-edge.tgz path for copied
@@ -424,8 +403,6 @@ if [[ -d "${REPO_ROOT}/deploy/kubernetes/ongrid-edge" ]]; then
 else
     warn "Kubernetes chart deploy/kubernetes/ongrid-edge missing; K8s onboarding command will require ONGRID_K8S_CHART_REF override"
 fi
-copy_opt "${REPO_ROOT}/deploy/kubernetes/registry-setup.sh" \
-         "${STAGE_DIR}/edge/k8s/registry-setup.sh" 755
 
 # --- edge binaries -----------------------------------------------------------
 # Edges are amd64-only in our deployments (the user's directive), so we ship a

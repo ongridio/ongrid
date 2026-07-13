@@ -103,8 +103,8 @@ export function UpgradeCommandModal({
         <ClusterIdentity cluster={cluster} />
         <div className="rounded-md border border-sky-500/20 bg-sky-500/10 px-2 py-1.5 text-sky-200">
           {tr(
-            '在目标 Kubernetes 集群执行该命令，会复用现有 Helm values，并从 manager 内置镜像仓库拉取新版镜像后滚动升级 Controller 与 Node Edge。',
-            'Run this in the target Kubernetes cluster. It reuses existing Helm values, pulls the new image from the manager-hosted registry, and rolls both Controller and Node Edge agents.',
+            '在目标 Kubernetes 集群执行该命令，会复用现有 Helm values，并从 CNB 公共镜像仓库拉取新版多架构镜像后滚动升级 Controller 与 Node Edge。',
+            'Run this in the target Kubernetes cluster. It reuses existing Helm values, pulls the new multi-arch image from the public CNB registry, and rolls both Controller and Node Edge agents.',
           )}
         </div>
         <CommandBlock label={tr('升级命令', 'Upgrade command')} command={kubernetesUpgradeCommand(cluster)} />

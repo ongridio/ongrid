@@ -18,14 +18,9 @@ image:
   # Leave empty to let Kubernetes select nodes from the image manifest. Set
   # amd64 or arm64 only when this release intentionally targets one architecture.
   architecture: ""
-  edge:
-    repository: ""
-    tag: ""
-    pullPolicy: IfNotPresent
-  controller:
-    repository: ""
-    tag: ""
-    pullPolicy: IfNotPresent
+  repository: docker.cnb.cool/ongridio/ongrid-edge
+  tag: ""
+  pullPolicy: IfNotPresent
 
 node:
   serviceAccountName: ""

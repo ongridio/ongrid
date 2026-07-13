@@ -39,8 +39,8 @@ spec:
         fsGroup: {{ .Values.podSecurity.fsGroup }}
       containers:
         - name: edge-controller
-          image: {{ include "ongrid-edge.controllerImage" . | quote }}
-          imagePullPolicy: {{ .Values.image.controller.pullPolicy }}
+          image: {{ include "ongrid-edge.image" . | quote }}
+          imagePullPolicy: {{ default "IfNotPresent" .Values.image.pullPolicy }}
           {{- if $telemetryGatewayEnabled }}
           ports:
             - name: otlp-grpc

@@ -39,8 +39,8 @@ spec:
         {{- toYaml .Values.node.tolerations | nindent 8 }}
       containers:
         - name: edge-node
-          image: {{ include "ongrid-edge.edgeImage" . | quote }}
-          imagePullPolicy: {{ .Values.image.edge.pullPolicy }}
+          image: {{ include "ongrid-edge.image" . | quote }}
+          imagePullPolicy: {{ default "IfNotPresent" .Values.image.pullPolicy }}
           env:
             - name: ONGRID_EDGE_MODE
               value: k8s-node

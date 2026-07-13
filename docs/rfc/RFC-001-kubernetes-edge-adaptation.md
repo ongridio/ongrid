@@ -70,7 +70,8 @@ flowchart LR
 
 1. 用户在 `/kubernetes` 创建集群，manager 生成集群记录和 bootstrap token。
 2. UI 根据当前 manager 访问地址生成远程 Helm 命令，chart 地址使用 `/edge/k8s/ongrid-edge.tgz`。
-3. 用户在目标集群执行 Helm 命令，传入：
+3. Chart 默认从 `docker.cnb.cool/ongridio/ongrid-edge:<appVersion>` 拉取 amd64/arm64 多架构镜像，也允许通过 `image.repository` 和 `image.tag` 覆盖。
+4. 用户在目标集群执行 Helm 命令，传入：
    - `manager.publicURL`
    - `manager.tunnelAddr`
    - `manager.tlsInsecure`
@@ -78,8 +79,8 @@ flowchart LR
    - `enrollment.controllerBootstrapToken`
    - `enrollment.nodeBootstrapToken`
    - `mode=full-node`
-4. controller Deployment 启动后读取 `kube-system` Namespace UID，manager 首次 enroll 时将其原子绑定为真实集群身份，再建立控制面 tunnel。
-5. node DaemonSet 在每个 Node 上启动，每个 Pod 使用只允许读取 `kube-system` Namespace 的 ServiceAccount 权限校验集群 UID，再用 Node Name enroll，换取独立 edge credentials；controller 快照到达后再合并 Kubernetes Node UID。
+5. controller Deployment 启动后读取 `kube-system` Namespace UID，manager 首次 enroll 时将其原子绑定为真实集群身份，再建立控制面 tunnel。
+6. node DaemonSet 在每个 Node 上启动，每个 Pod 使用只允许读取 `kube-system` Namespace 的 ServiceAccount 权限校验集群 UID，再用 Node Name enroll，换取独立 edge credentials；controller 快照到达后再合并 Kubernetes Node UID。
    - 节点凭据以 `0600` 文件保存在该节点宿主机 `/var/tmp`，Pod 滚动重建时复用，不使用所有节点共享的 Kubernetes Secret。
    - controller 和 node bootstrap token 长期有效，仅管理员手动轮换 token 或删除集群时失效。已注册 controller 禁止重复 bootstrap 轮换最终凭据；普通 Pod 重建复用 Secret，凭据丢失时由管理员轮换 token 显式开放一次恢复接入。
 6. manager 将 Node edge 关联为普通设备，并在设备列表展示 `K8s Node`、所属集群和可选 `K8s Controller` 标签。
@@ -197,7 +198,7 @@ kubectl delete namespace ongrid-system --ignore-not-found
 | --- | --- | --- |
 | DaemonSet 复用同一 edge 凭证 | 多节点互相覆盖在线状态和 `device_id` | 使用 bootstrap token 换取 per-node edge credentials |
 | Node Pod 读取共享凭据 Secret | 单节点失陷后可读取或覆盖其他节点密钥 | 每个节点只在宿主机本地持久化自己的 `0600` 凭据文件；ServiceAccount 仅允许读取 `kube-system` Namespace 以校验集群 UID |
-| 离线镜像架构不匹配 | arm64 节点无法启动当前内置镜像 | 当前 Chart 显式调度到 `kubernetes.io/arch=amd64`；支持 arm64 前需增加对应离线镜像包 |
+| CNB 公共镜像仓库不可达 | Controller 和 Node Edge 出现 ImagePullBackOff | release 先发布并校验 amd64/arm64 多架构 manifest；受限环境通过 `image.repository` 覆盖为集群可达镜像仓库 |
 | 可选 kube-state-metrics 访问公网 | 离线环境启用后出现 ImagePullBackOff | 默认关闭；启用时必须显式提供集群可达的离线镜像仓库地址 |
 | Event 高 churn | MySQL 表膨胀 | 当前快照 prune + TTL + per-cluster cap |
 | controller edge 被当成设备 | 设备列表出现非主机对象 | controller 不创建 host Device，UI 不单独展示 controller edge |
