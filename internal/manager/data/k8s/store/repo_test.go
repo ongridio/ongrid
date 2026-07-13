@@ -75,6 +75,78 @@ func TestRepo_TouchClusterControllerHeartbeatUpdatesOnlyMatchingCluster(t *testi
 	}
 }
 
+func TestRepo_BindControllerEnrollmentUpsertsInstallationOnSQLite(t *testing.T) {
+	db, repo := newTestRepo(t)
+	ctx := context.Background()
+	cluster := &model.Cluster{Name: "prod", Mode: model.ModeFullNode, Status: model.ClusterStatusOffline}
+	if err := db.Create(cluster).Error; err != nil {
+		t.Fatalf("Create cluster: %v", err)
+	}
+
+	firstSeen := time.Now().UTC().Add(-time.Minute)
+	firstEdgeID := uint64(41)
+	if err := repo.BindControllerEnrollment(ctx, cluster.ID, biz.ClusterControllerRegistration{
+		EdgeID:    firstEdgeID,
+		LastSeen:  firstSeen,
+		NodeName:  "node-a",
+		Namespace: "ongrid-system",
+		PodName:   "controller-a",
+	}, &model.Installation{
+		ClusterID:        cluster.ID,
+		Mode:             model.ModeFullNode,
+		ScopeType:        "cluster",
+		Namespace:        "",
+		ControllerEdgeID: &firstEdgeID,
+		CapabilitiesJSON: `["inventory"]`,
+		LastSeenAt:       &firstSeen,
+	}); err != nil {
+		t.Fatalf("BindControllerEnrollment(first): %v", err)
+	}
+
+	secondSeen := time.Now().UTC()
+	secondEdgeID := uint64(42)
+	if err := repo.BindControllerEnrollment(ctx, cluster.ID, biz.ClusterControllerRegistration{
+		EdgeID:    secondEdgeID,
+		LastSeen:  secondSeen,
+		NodeName:  "node-b",
+		Namespace: "ongrid-system",
+		PodName:   "controller-b",
+	}, &model.Installation{
+		ClusterID:        cluster.ID,
+		Mode:             model.ModeFullNode,
+		ScopeType:        "cluster",
+		Namespace:        "",
+		ControllerEdgeID: &secondEdgeID,
+		CapabilitiesJSON: `["inventory","events"]`,
+		LastSeenAt:       &secondSeen,
+	}); err != nil {
+		t.Fatalf("BindControllerEnrollment(second): %v", err)
+	}
+
+	var installations []model.Installation
+	if err := db.Where("cluster_id = ?", cluster.ID).Find(&installations).Error; err != nil {
+		t.Fatalf("List installations: %v", err)
+	}
+	if len(installations) != 1 {
+		t.Fatalf("installations = %d, want 1", len(installations))
+	}
+	installation := installations[0]
+	if installation.ControllerEdgeID == nil || *installation.ControllerEdgeID != secondEdgeID {
+		t.Fatalf("installation controller edge = %v, want %d", installation.ControllerEdgeID, secondEdgeID)
+	}
+	if installation.CapabilitiesJSON != `["inventory","events"]` {
+		t.Fatalf("installation capabilities = %s", installation.CapabilitiesJSON)
+	}
+
+	var updated model.Cluster
+	if err := db.First(&updated, cluster.ID).Error; err != nil {
+		t.Fatalf("Get cluster: %v", err)
+	}
+	if updated.ControllerEdgeID == nil || *updated.ControllerEdgeID != secondEdgeID || updated.ControllerNodeName != "node-b" {
+		t.Fatalf("updated cluster = %+v", updated)
+	}
+}
+
 func TestRepo_ListPodsFiltersByReason(t *testing.T) {
 	db, repo := newTestRepo(t)
 	now := time.Now()

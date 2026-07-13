@@ -184,7 +184,12 @@ func (r *Repo) BindControllerEnrollment(ctx context.Context, id uint64, registra
 			return errs.ErrNotFound
 		}
 		return tx.Clauses(clause.OnConflict{
-			Columns: []clause.Column{{Name: "cluster_id"}},
+			Columns: []clause.Column{
+				{Name: "cluster_id"},
+				{Name: "mode"},
+				{Name: "scope_type"},
+				{Name: "namespace"},
+			},
 			DoUpdates: clause.Assignments(map[string]any{
 				"mode":               installation.Mode,
 				"scope_type":         installation.ScopeType,
