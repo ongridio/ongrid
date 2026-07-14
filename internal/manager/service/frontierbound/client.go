@@ -55,7 +55,7 @@ type Client struct {
 	mu                sync.RWMutex
 	transportToEdgeID map[uint64]uint64
 	edgeIDToTransport map[uint64]uint64
-	k8sControllers    map[uint64]struct{}
+	k8sControllers    map[uint64]bool
 }
 
 // New dials the frontier broker and returns a ready Client.
@@ -86,7 +86,7 @@ func New(cfg Config, log *slog.Logger) (*Client, error) {
 		log:               log,
 		transportToEdgeID: make(map[uint64]uint64),
 		edgeIDToTransport: make(map[uint64]uint64),
-		k8sControllers:    make(map[uint64]struct{}),
+		k8sControllers:    make(map[uint64]bool),
 	}, nil
 }
 
@@ -100,7 +100,7 @@ func newWithService(svc service, log *slog.Logger) *Client {
 		log:               log,
 		transportToEdgeID: make(map[uint64]uint64),
 		edgeIDToTransport: make(map[uint64]uint64),
-		k8sControllers:    make(map[uint64]struct{}),
+		k8sControllers:    make(map[uint64]bool),
 	}
 }
 
@@ -125,7 +125,7 @@ func NewDisabled(log *slog.Logger) *Client {
 		log:               log,
 		transportToEdgeID: make(map[uint64]uint64),
 		edgeIDToTransport: make(map[uint64]uint64),
-		k8sControllers:    make(map[uint64]struct{}),
+		k8sControllers:    make(map[uint64]bool),
 	}
 }
 
@@ -290,18 +290,19 @@ func (c *Client) setKubernetesController(edgeID uint64, enabled bool) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if enabled {
-		c.k8sControllers[edgeID] = struct{}{}
-		return
-	}
-	delete(c.k8sControllers, edgeID)
+	c.k8sControllers[edgeID] = enabled
 }
 
 func (c *Client) isKubernetesController(edgeID uint64) bool {
+	isController, _ := c.kubernetesControllerState(edgeID)
+	return isController
+}
+
+func (c *Client) kubernetesControllerState(edgeID uint64) (isController, known bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	_, ok := c.k8sControllers[edgeID]
-	return ok
+	isController, known = c.k8sControllers[edgeID]
+	return isController, known
 }
 
 func (c *Client) canonicalizeEdgeID(edgeID uint64) uint64 {

@@ -382,6 +382,19 @@ func TestClient_BindAndUnbindTransport(t *testing.T) {
 	if c.isKubernetesController(2) {
 		t.Fatal("unbound edge should not remain tracked as a Kubernetes controller")
 	}
+	if _, known := c.kubernetesControllerState(2); known {
+		t.Fatal("unbound edge controller state should be unknown")
+	}
+}
+
+func TestClient_KubernetesControllerStateTracksKnownNonController(t *testing.T) {
+	c := newWithService(newFakeService(), slog.Default())
+	c.setKubernetesController(2, false)
+
+	isController, known := c.kubernetesControllerState(2)
+	if !known || isController {
+		t.Fatalf("controller state = (%v, %v), want (false, true)", isController, known)
+	}
 }
 
 // errInString reports whether substr appears in err.Error().

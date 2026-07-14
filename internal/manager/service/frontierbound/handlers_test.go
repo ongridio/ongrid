@@ -110,6 +110,94 @@ func (f fakeK8sRegistry) LookupControllerCluster(_ context.Context, _ uint64) (u
 	return f.clusterID, f.err
 }
 
+type trackingK8sRegistry struct {
+	clusterID      uint64
+	lookupErr      error
+	heartbeatErr   error
+	lookupCalls    int
+	heartbeatCalls int
+}
+
+func (f *trackingK8sRegistry) HandleRegister(_ context.Context, _ uint64, _ *uint64, _ tunnel.KubernetesInfo) error {
+	return nil
+}
+
+func (f *trackingK8sRegistry) HandleControllerHeartbeat(_ context.Context, _ uint64) error {
+	f.heartbeatCalls++
+	return f.heartbeatErr
+}
+
+func (f *trackingK8sRegistry) LookupControllerCluster(_ context.Context, _ uint64) (uint64, error) {
+	f.lookupCalls++
+	return f.clusterID, f.lookupErr
+}
+
+func TestRefreshKubernetesControllerHeartbeatRestoresRoleAfterRestart(t *testing.T) {
+	c := newWithService(newFakeService(), slog.Default())
+	reg := &trackingK8sRegistry{clusterID: 7}
+
+	for range 2 {
+		if err := refreshKubernetesControllerHeartbeat(context.Background(), c, reg, 41); err != nil {
+			t.Fatalf("refreshKubernetesControllerHeartbeat() error = %v", err)
+		}
+	}
+
+	if reg.lookupCalls != 1 {
+		t.Fatalf("LookupControllerCluster() calls = %d, want 1", reg.lookupCalls)
+	}
+	if reg.heartbeatCalls != 2 {
+		t.Fatalf("HandleControllerHeartbeat() calls = %d, want 2", reg.heartbeatCalls)
+	}
+	if isController, known := c.kubernetesControllerState(41); !known || !isController {
+		t.Fatalf("controller state = (%v, %v), want (true, true)", isController, known)
+	}
+}
+
+func TestRefreshKubernetesControllerHeartbeatCachesNonController(t *testing.T) {
+	c := newWithService(newFakeService(), slog.Default())
+	reg := &trackingK8sRegistry{}
+
+	for range 2 {
+		if err := refreshKubernetesControllerHeartbeat(context.Background(), c, reg, 42); err != nil {
+			t.Fatalf("refreshKubernetesControllerHeartbeat() error = %v", err)
+		}
+	}
+
+	if reg.lookupCalls != 1 {
+		t.Fatalf("LookupControllerCluster() calls = %d, want 1", reg.lookupCalls)
+	}
+	if reg.heartbeatCalls != 0 {
+		t.Fatalf("HandleControllerHeartbeat() calls = %d, want 0", reg.heartbeatCalls)
+	}
+	if isController, known := c.kubernetesControllerState(42); !known || isController {
+		t.Fatalf("controller state = (%v, %v), want (false, true)", isController, known)
+	}
+}
+
+func TestRefreshKubernetesControllerHeartbeatRetriesLookupAfterError(t *testing.T) {
+	c := newWithService(newFakeService(), slog.Default())
+	reg := &trackingK8sRegistry{lookupErr: errors.New("database unavailable")}
+
+	if err := refreshKubernetesControllerHeartbeat(context.Background(), c, reg, 43); err == nil {
+		t.Fatal("refreshKubernetesControllerHeartbeat() error = nil, want lookup error")
+	}
+	if _, known := c.kubernetesControllerState(43); known {
+		t.Fatal("failed lookup must not cache the controller role")
+	}
+
+	reg.lookupErr = nil
+	reg.clusterID = 7
+	if err := refreshKubernetesControllerHeartbeat(context.Background(), c, reg, 43); err != nil {
+		t.Fatalf("refreshKubernetesControllerHeartbeat() retry error = %v", err)
+	}
+	if reg.lookupCalls != 2 {
+		t.Fatalf("LookupControllerCluster() calls = %d, want 2", reg.lookupCalls)
+	}
+	if reg.heartbeatCalls != 1 {
+		t.Fatalf("HandleControllerHeartbeat() calls = %d, want 1", reg.heartbeatCalls)
+	}
+}
+
 type fakeK8sInventoryIngester struct {
 	gotEdgeID    uint64
 	gotBodyEdge  uint64

@@ -297,13 +297,11 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 			)
 			return nil, fmt.Errorf("heartbeat: %w", err)
 		}
-		if w.K8sRegistry != nil && c.isKubernetesController(canonicalEdgeID) {
-			if err := w.K8sRegistry.HandleControllerHeartbeat(rpcCtx, canonicalEdgeID); err != nil {
-				log.Warn("frontierbound: refresh k8s controller heartbeat",
-					slog.Uint64("edge_id", canonicalEdgeID),
-					slog.Any("err", err),
-				)
-			}
+		if err := refreshKubernetesControllerHeartbeat(rpcCtx, c, w.K8sRegistry, canonicalEdgeID); err != nil {
+			log.Warn("frontierbound: refresh k8s controller heartbeat",
+				slog.Uint64("edge_id", canonicalEdgeID),
+				slog.Any("err", err),
+			)
 		}
 		// Piggybacked plugin health (best-effort, in-memory only). Lets the
 		// UI show "logs: crashed — binary missing" instead of silent empty
@@ -672,6 +670,28 @@ func lookupK8sControllerCluster(ctx context.Context, reg KubernetesRegistry, edg
 		return 0
 	}
 	return clusterID
+}
+
+func refreshKubernetesControllerHeartbeat(ctx context.Context, c *Client, reg KubernetesRegistry, edgeID uint64) error {
+	if reg == nil || edgeID == 0 {
+		return nil
+	}
+	isController, known := c.kubernetesControllerState(edgeID)
+	if !known {
+		clusterID, err := reg.LookupControllerCluster(ctx, edgeID)
+		if err != nil {
+			return fmt.Errorf("lookup controller cluster: %w", err)
+		}
+		isController = clusterID != 0
+		c.setKubernetesController(edgeID, isController)
+	}
+	if !isController {
+		return nil
+	}
+	if err := reg.HandleControllerHeartbeat(ctx, edgeID); err != nil {
+		return fmt.Errorf("handle controller heartbeat: %w", err)
+	}
+	return nil
 }
 
 // unixOrZero converts a unix-seconds wire value to a UTC time, returning the
