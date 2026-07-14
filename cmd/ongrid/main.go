@@ -774,6 +774,7 @@ func main() {
 		PublicURL:            cfg.PublicURL,
 		TunnelAddr:           cfg.TunnelAddr,
 		ChartRef:             cfg.K8sChartRef,
+		ImageTag:             version,
 		EventRetention:       cfg.K8sEventRetention,
 		EventMaxPerCluster:   cfg.K8sEventMaxPerCluster,
 		EventCleanupInterval: cfg.K8sEventCleanupInterval,

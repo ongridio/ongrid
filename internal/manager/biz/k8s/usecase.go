@@ -156,6 +156,7 @@ type Config struct {
 	PublicURL            string
 	TunnelAddr           string
 	ChartRef             string
+	ImageTag             string
 	EventRetention       time.Duration
 	EventMaxPerCluster   int
 	EventCleanupInterval time.Duration
@@ -1940,6 +1941,9 @@ func (u *Usecase) UpgradeCommand(cluster *model.Cluster) string {
 		"--set-string manager.tunnelAddr="+shellQuote(tunnelAddr),
 		"--set-string manager.tlsInsecure=true",
 	)
+	if imageTag := strings.TrimSpace(u.cfg.ImageTag); imageTag != "" {
+		args = append(args, "--set-string image.tag="+shellQuote(imageTag))
+	}
 	return strings.Join(args, " ")
 }
 
