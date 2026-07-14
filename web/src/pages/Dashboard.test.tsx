@@ -10,6 +10,20 @@ describe('DashboardPage', () => {
   beforeEach(() => {
     localStorage.setItem('ongrid-locale', 'zh-CN');
     server.use(
+      http.get('/api/v1/devices', () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: 31,
+              name: 'ongrid-k8s-control-plane',
+              hostname: 'ongrid-k8s-control-plane',
+              online: true,
+              last_seen_at: '2026-06-29T10:00:00Z',
+            },
+          ],
+          total: 1,
+        }),
+      ),
       http.get('/api/v1/edges', () =>
         HttpResponse.json({
           items: [
@@ -35,8 +49,19 @@ describe('DashboardPage', () => {
               device_id: 31,
               agent_version: 'v0.9.0',
             },
+            {
+              id: 25,
+              name: 'created-but-not-installed',
+              status: 'offline',
+              roles: [],
+              access_key_id: 'ak-pending',
+              last_seen_at: null,
+              host_info: null,
+              device_id: null,
+              agent_version: null,
+            },
           ],
-          total: 2,
+          total: 3,
         }),
       ),
       http.get('/api/v1/k8s/edge-attachments', () =>
@@ -63,7 +88,7 @@ describe('DashboardPage', () => {
     );
   });
 
-  it('统计在线设备时不把 K8s Controller Edge 当作设备', async () => {
+  it('只统计已注册 Device，不计入 Controller 和未安装的 Edge', async () => {
     render(
       <MemoryRouter>
         <DashboardPage />

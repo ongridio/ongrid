@@ -29,13 +29,14 @@ import (
 // fresh edge produces both host- and process-level series via the
 // tunnel without any operator config.
 type specView struct {
-	URLs         []string
-	Interval     time.Duration
-	Timeout      time.Duration
-	TLSInsecure  bool
-	BearerToken  string
-	ExtraLabels  map[string]string
-	SourceLabel  string // value emitted on the wire as PushPromSamplesRequest.Source
+	URLs                      []string
+	Interval                  time.Duration
+	Timeout                   time.Duration
+	TLSInsecure               bool
+	BearerToken               string
+	ExtraLabels               map[string]string
+	SourceLabel               string // value emitted on the wire as PushPromSamplesRequest.Source
+	DedupeFilesystemsByDevice bool
 }
 
 // Defaults match the host/proc-metrics plugins' subprocesses
@@ -58,9 +59,10 @@ const (
 // (bad duration string, malformed URL); silently ignores unknown keys.
 //
 // Three target shapes accepted (first one set wins):
-//   target_urls: ["http://...", "http://..."]
-//   target_url: "http://..." (legacy single-URL form)
-//   <missing> → defaultURLs
+//
+//	target_urls: ["http://...", "http://..."]
+//	target_url: "http://..." (legacy single-URL form)
+//	<missing> → defaultURLs
 func parseSpec(spec map[string]interface{}) (specView, error) {
 	out := specView{
 		URLs:     append([]string(nil), defaultURLs...),
@@ -108,6 +110,7 @@ func parseSpec(spec map[string]interface{}) (specView, error) {
 	}
 	out.BearerToken = stringFrom(spec, "bearer_token")
 	out.ExtraLabels = stringMap(spec, "extra_labels")
+	out.DedupeFilesystemsByDevice = boolFrom(spec, "dedupe_filesystems_by_device")
 
 	// Prevent obvious misconfig: timeout must not exceed interval, else
 	// scrapes overlap themselves and hammer the target.
@@ -178,7 +181,63 @@ func scrapeOnce(ctx context.Context, spec specView, targetURL string) ([]tunnel.
 	// handles counter / gauge / histogram / summary fan-out plus
 	// extraLabels merge. We don't reimplement.
 	samples := collector.FlattenSamples(now, spec.SourceLabel, mfs, spec.ExtraLabels)
+	if spec.DedupeFilesystemsByDevice {
+		samples = dedupeFilesystemSamplesByDevice(samples)
+	}
 	return samples, spec.SourceLabel, nil
+}
+
+// dedupeFilesystemSamplesByDevice keeps one filesystem mountpoint per
+// physical block device. Container and VM runtimes frequently expose the
+// same /dev/... filesystem through many bind mounts, which otherwise
+// multiplies every node_filesystem_* series without adding capacity
+// information. Virtual devices such as tmpfs and virtiofs are preserved:
+// identical device labels there can still describe independent filesystems.
+func dedupeFilesystemSamplesByDevice(samples []tunnel.PromSample) []tunnel.PromSample {
+	preferred := make(map[string]string)
+	for _, sample := range samples {
+		if !strings.HasPrefix(sample.Name, "node_filesystem_") {
+			continue
+		}
+		device, mountpoint := sample.Labels["device"], sample.Labels["mountpoint"]
+		if !isPhysicalBlockDevice(device) || mountpoint == "" {
+			continue
+		}
+		if current, ok := preferred[device]; !ok || preferMountpoint(mountpoint, current) {
+			preferred[device] = mountpoint
+		}
+	}
+
+	out := samples[:0]
+	for _, sample := range samples {
+		if strings.HasPrefix(sample.Name, "node_filesystem_") {
+			device, mountpoint := sample.Labels["device"], sample.Labels["mountpoint"]
+			if isPhysicalBlockDevice(device) {
+				if want, ok := preferred[device]; ok && mountpoint != want {
+					continue
+				}
+			}
+		}
+		out = append(out, sample)
+	}
+	return out
+}
+
+func isPhysicalBlockDevice(device string) bool {
+	return strings.HasPrefix(device, "/dev/")
+}
+
+func preferMountpoint(candidate, current string) bool {
+	if candidate == "/" {
+		return current != "/"
+	}
+	if current == "/" {
+		return false
+	}
+	if len(candidate) != len(current) {
+		return len(candidate) < len(current)
+	}
+	return candidate < current
 }
 
 // newClient builds a per-scrape HTTP client. We don't pool per-target
@@ -232,6 +291,15 @@ func stringFrom(spec map[string]interface{}, key string) string {
 		return strings.TrimSpace(s)
 	}
 	return ""
+}
+
+func boolFrom(spec map[string]interface{}, key string) bool {
+	raw, ok := spec[key]
+	if !ok {
+		return false
+	}
+	value, _ := raw.(bool)
+	return value
 }
 
 // stringSlice extracts a []string from spec[key], tolerating both

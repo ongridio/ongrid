@@ -122,7 +122,7 @@ spec:
                 fieldRef:
                   fieldPath: metadata.namespace
             - name: ONGRID_EDGE_COLLECTOR_MODE
-              value: {{ default "embedded" .Values.node.collectorMode | quote }}
+              value: {{ .Values.node.collectorMode | quote }}
             - name: HOST_PROC
               value: /proc
             - name: HOST_SYS

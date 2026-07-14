@@ -24,7 +24,9 @@ image:
 
 node:
   serviceAccountName: ""
-  collectorMode: ""
+  # hostmetrics exposes node_exporter and the metrics plugin forwards it.
+  # Keep the legacy embedded periodic push off to avoid duplicate node_* series.
+  collectorMode: "off"
   tolerations:
     - operator: Exists
   resources:

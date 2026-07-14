@@ -20,6 +20,7 @@ import { formatNumber, relativeTime } from '@/lib/format';
 import { usePoll } from '@/lib/usePoll';
 import { ApiError, request } from '@/api/client';
 import { listEdges, promQueryRange, type Edge } from '@/api/edges';
+import { listDevices, type Device } from '@/api/devices';
 import { listSessions } from '@/api/chat';
 import { listIncidents, localizedRuleName, type Incident } from '@/api/alerts';
 import {
@@ -48,7 +49,7 @@ export default function DashboardPage() {
   const { tr } = useI18n();
   const navigate = useNavigate();
 
-  const [edges, setEdges] = useState<Edge[]>([]);
+  const [devices, setDevices] = useState<Device[]>([]);
   const [edgeRows, setEdgeRows] = useState<EdgeRow[]>([]);
   // onlineHistory is the per-hour count of distinct devices reporting
   // CPU samples in the trailing 5min. Drives the "Cluster posture"
@@ -76,17 +77,29 @@ export default function DashboardPage() {
 
     let nextEdges: Edge[] = [];
     try {
-      const [r, k8sAttachments] = await Promise.all([
+      const [deviceResponse, edgeResponse, k8sAttachments] = await Promise.all([
+        listDevices(),
         listEdges(),
         loadK8sEdgeAttachments().catch((): K8sEdgeAttachmentMap => ({})),
       ]);
-      nextEdges = filterVisibleDeviceEdges(r.items ?? [], k8sAttachments);
+      const nextDevices = deviceResponse.items ?? [];
+      const deviceIDs = new Set(nextDevices.map((device) => device.id));
+      setDevices(nextDevices);
+      nextEdges = filterVisibleDeviceEdges(edgeResponse.items ?? [], k8sAttachments);
       nextEdges = [...nextEdges].sort((a, b) => {
         const ta = a.last_seen_at ? new Date(a.last_seen_at).getTime() : 0;
         const tb = b.last_seen_at ? new Date(b.last_seen_at).getTime() : 0;
         return tb - ta;
       });
-      setEdges(nextEdges);
+      const selectedDeviceIDs = new Set<number>();
+      nextEdges = nextEdges.filter((edge) => {
+        const deviceID = edge.device_id;
+        if (deviceID == null || !deviceIDs.has(deviceID) || selectedDeviceIDs.has(deviceID)) {
+          return false;
+        }
+        selectedDeviceIDs.add(deviceID);
+        return true;
+      });
       setEdgesError(null);
     } catch (err) {
       setEdgesError((err as Error).message || tr('加载设备失败', 'Failed to load devices'));
@@ -254,7 +267,7 @@ export default function DashboardPage() {
       const bucketAvgs = (buckets: number[][]) =>
         buckets.map((b) => avg(b)).filter((v): v is number => v !== null);
 
-      const onlineNow = edges.filter((e) => e.status === 'online').length;
+      const onlineNow = devices.filter((device) => device.online === true).length;
       return {
         cpuAvg24h: avg(cpuVals),
         cpuTrend: bucketAvgs(cpuByBucket),
@@ -263,7 +276,7 @@ export default function DashboardPage() {
         onlineCount: onlineNow,
         onlineTrend: onlineHistory,
       };
-    }, [edgeRows, edges, onlineHistory]);
+    }, [edgeRows, devices, onlineHistory]);
 
   const tokenToday = usageToday?.total_tokens ?? null;
   const tokensAvailable = !usageError && tokenToday !== null;
@@ -335,8 +348,8 @@ export default function DashboardPage() {
           <div className="mb-8 grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
             <KpiCard
               label={tr('在线设备', 'Online devices')}
-              value={edges.length === 0 ? null : onlineCount}
-              suffix={edges.length > 0 ? ` / ${edges.length}` : undefined}
+              value={devices.length === 0 ? null : onlineCount}
+              suffix={devices.length > 0 ? ` / ${devices.length}` : undefined}
               loading={initialLoading}
               spark={onlineTrend}
               variant="plain"
@@ -407,12 +420,12 @@ export default function DashboardPage() {
                   onClick={() => navigate('/edges')}
                   className="text-[11px] text-zinc-500 hover:text-zinc-200"
                 >
-                  {tr(`${edges.length} 台 →`, `${edges.length} →`)}
+                  {tr(`${devices.length} 台 →`, `${devices.length} →`)}
                 </button>
               </div>
               <div className="flex-1">
                 <ClusterPosture
-                  edges={edges}
+                  devices={devices}
                   onlineCount={onlineCount}
                   onlineTrend={onlineTrend}
                   initialLoading={initialLoading}
@@ -481,7 +494,7 @@ function lastFinite(values: number[]): number | null {
 
 // ClusterTrend renders an inline SVG line chart with up to 3 series:
 // CPU avg, MEM avg, online-device count. CPU/MEM are 0-100 scale; online
-// is rescaled to 0-100 against (edges.length || 1). All series share the
+// is rescaled against its own peak. All series share the
 // same x grid — number of points dictated by the longest series.
 function ClusterTrend({
   cpu,
@@ -616,31 +629,31 @@ function ClusterTrend({
 // operators see "are we losing devices over the day" without leaving
 // this card.
 function ClusterPosture({
-  edges,
+  devices,
   onlineCount,
   onlineTrend,
   initialLoading,
 }: {
-  edges: Edge[];
+  devices: Device[];
   onlineCount: number;
   onlineTrend: number[];
   initialLoading?: boolean;
 }) {
   const { tr } = useI18n();
-  const total = edges.length;
+  const total = devices.length;
   const offline = Math.max(total - onlineCount, 0);
 
   const roles = useMemo(() => {
     const counts: Record<string, number> = {};
     const unknownKey = tr('未分类', 'Uncategorized');
-    for (const e of edges) {
-      const list = e.roles && e.roles.length > 0 ? e.roles : [unknownKey];
+    for (const device of devices) {
+      const list = device.roles && device.roles.length > 0 ? device.roles : [unknownKey];
       for (const r of list) {
         counts[r] = (counts[r] ?? 0) + 1;
       }
     }
     return Object.entries(counts).sort((a, b) => b[1] - a[1]);
-  }, [edges, tr]);
+  }, [devices, tr]);
 
   // Online-count chart range. We pin yMax = max(trend, total) so the
   // current count never visually exceeds total — and add a top buffer

@@ -602,7 +602,7 @@ export default function EdgesPage() {
                   </th>
                   <th className="px-2.5 py-2.5 text-left">Access Key</th>
                   <th className="px-2.5 py-2.5 text-left">Edge</th>
-                  <th className="sticky right-0 min-w-[176px] border-l border-zinc-800/60 bg-zinc-950 px-2.5 py-2.5 text-right">
+                  <th className="sticky right-0 min-w-[176px] border-l border-zinc-800/60 bg-zinc-950 px-2.5 py-2.5 text-left">
                     {tr("操作", "Actions")}
                   </th>
                 </tr>
@@ -641,8 +641,6 @@ export default function EdgesPage() {
                       ? (k8sAttachments?.[edge.id] ?? [])
                       : [];
                     const managedByK8s = isK8sManagedEdge(attachments);
-                    const managedCluster =
-                      uniqueAttachmentClusters(attachments)[0];
                     const displayName = managedByK8s
                       ? d.hostname ||
                         (edge ? displayEdgeName(edge, attachments) : "") ||
@@ -757,11 +755,11 @@ export default function EdgesPage() {
                           />
                         </td>
                         <td
-                          className="sticky right-0 min-w-[176px] whitespace-nowrap border-l border-zinc-800/60 bg-zinc-900 px-2.5 py-2.5 text-right"
+                          className="sticky right-0 min-w-[176px] whitespace-nowrap border-l border-zinc-800/60 bg-zinc-900 px-2.5 py-2.5 text-left"
                           onClick={(ev) => ev.stopPropagation()}
                         >
-                          {managedByK8s && managedCluster ? (
-                            <K8sManagedEdgeAction attachment={managedCluster} />
+                          {managedByK8s ? (
+                            <ShellButton device={d} canMutate={canMutate} />
                           ) : (
                             <>
                               <button
@@ -955,27 +953,6 @@ function EdgeAccessMeta({ attachments }: { attachments: K8sEdgeAttachment[] }) {
         </Link>
       ))}
     </div>
-  );
-}
-
-function K8sManagedEdgeAction({
-  attachment,
-}: {
-  attachment: K8sEdgeAttachment;
-}) {
-  const { tr } = useI18n();
-  return (
-    <Link
-      to={`/kubernetes/${attachment.clusterId}`}
-      title={tr(
-        `在 Kubernetes 集群 ${attachment.clusterName} 管理`,
-        `Manage from Kubernetes cluster ${attachment.clusterName}`,
-      )}
-      className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
-    >
-      <ExternalLink size={14} />
-      <span>{tr("Kubernetes 管理", "Kubernetes")}</span>
-    </Link>
   );
 }
 

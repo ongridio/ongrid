@@ -149,10 +149,16 @@ describe("EdgesPage", () => {
     const k8sRow = k8sNameCells[0].closest("tr");
     expect(k8sRow).not.toBeNull();
     expect(
-      within(k8sRow as HTMLTableRowElement).getByText("Kubernetes 管理"),
-    ).toBeInTheDocument();
+      within(k8sRow as HTMLTableRowElement).queryByText("Kubernetes 管理"),
+    ).not.toBeInTheDocument();
+    const terminalLink = within(k8sRow as HTMLTableRowElement).getByRole(
+      "link",
+      { name: /打开.*终端/ },
+    );
+    expect(terminalLink).toHaveAttribute("href", "/devices/17/shell");
+    expect(terminalLink).toHaveAttribute("target", "_blank");
     expect(
-      within(k8sRow as HTMLTableRowElement).queryByText("终端"),
+      within(k8sRow as HTMLTableRowElement).queryByText("查看图表"),
     ).not.toBeInTheDocument();
     expect(
       within(k8sRow as HTMLTableRowElement).queryByLabelText(/选择/),
@@ -163,7 +169,7 @@ describe("EdgesPage", () => {
     expect(screen.getByRole("table")).toHaveClass("w-full", "min-w-[1260px]");
   });
 
-  it("点击 K8s 托管设备行进入设备详情，Kubernetes 管理按钮仍进入集群页", async () => {
+  it("点击 K8s 托管设备行进入设备详情，操作列只保留 WebSSH", async () => {
     const user = userEvent.setup();
     render(
       <MemoryRouter initialEntries={["/devices"]}>
@@ -183,11 +189,16 @@ describe("EdgesPage", () => {
       expect(screen.getByTestId("location")).toHaveTextContent("/devices/17"),
     );
 
-    await act(async () => {
-      await user.click(within(k8sRow).getByText("Kubernetes 管理"));
-    });
+    expect(within(k8sRow).queryByText("Kubernetes 管理")).not.toBeInTheDocument();
+    expect(
+      within(k8sRow).getByRole("link", { name: /打开.*终端/ }),
+    ).toHaveAttribute("href", "/devices/17/shell");
+    expect(within(k8sRow).queryByText("查看图表")).not.toBeInTheDocument();
+    expect(
+      within(k8sRow).queryByRole("button", { name: /更多/ }),
+    ).not.toBeInTheDocument();
     await waitFor(() =>
-      expect(screen.getByTestId("location")).toHaveTextContent("/kubernetes/1"),
+      expect(screen.getByTestId("location")).toHaveTextContent("/devices/17"),
     );
   });
 });

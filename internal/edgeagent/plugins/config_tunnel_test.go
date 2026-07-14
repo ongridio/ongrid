@@ -237,6 +237,7 @@ func TestTunnelConfigFetcherAppliesKubernetesHostMetricDefaults(t *testing.T) {
 	client := &fakeTunnelClient{resp: tunnel.GetPluginConfigsResponse{
 		EdgeID: 42,
 		Configs: map[string]tunnel.GetPluginConfigsEntry{
+			"metrics": {Enabled: true},
 			"hostmetrics": {
 				Enabled: true,
 				Spec: map[string]interface{}{
@@ -246,7 +247,7 @@ func TestTunnelConfigFetcherAppliesKubernetesHostMetricDefaults(t *testing.T) {
 			"procmetrics": {Enabled: true},
 		},
 	}}
-	fetcher := NewTunnelConfigFetcher(client, []string{"hostmetrics", "procmetrics"})
+	fetcher := NewTunnelConfigFetcher(client, []string{"metrics", "hostmetrics", "procmetrics"})
 	got, err := fetcher.Fetch(context.Background())
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
@@ -265,6 +266,30 @@ func TestTunnelConfigFetcherAppliesKubernetesHostMetricDefaults(t *testing.T) {
 		}
 	}
 	assertSpecEqual(t, got["procmetrics"].Spec, "procfs", "/proc")
+	assertSpecEqual(t, got["metrics"].Spec, "dedupe_filesystems_by_device", true)
+}
+
+func TestTunnelConfigFetcherPreservesExplicitFilesystemDedupeSetting(t *testing.T) {
+	t.Setenv("ONGRID_K8S_ROLE", "node")
+	t.Setenv("ONGRID_K8S_MODE", "full-node")
+
+	client := &fakeTunnelClient{resp: tunnel.GetPluginConfigsResponse{
+		EdgeID: 42,
+		Configs: map[string]tunnel.GetPluginConfigsEntry{
+			"metrics": {
+				Enabled: true,
+				Spec: map[string]interface{}{
+					"dedupe_filesystems_by_device": false,
+				},
+			},
+		},
+	}}
+	fetcher := NewTunnelConfigFetcher(client, []string{"metrics"})
+	got, err := fetcher.Fetch(context.Background())
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	assertSpecEqual(t, got["metrics"].Spec, "dedupe_filesystems_by_device", false)
 }
 
 func TestTunnelConfigFetcherPreservesExplicitKubernetesHostMetricPaths(t *testing.T) {

@@ -31,7 +31,7 @@ PACKAGE_CLEAN ?= 1
 # manifest independently of the manager package architecture.
 K8S_EDGE_IMAGE_PLATFORM ?= linux/amd64
 K8S_EDGE_IMAGE_PLATFORMS ?= linux/amd64,linux/arm64
-K8S_EDGE_IMAGE_TAG ?= $(patsubst v%,%,$(VERSION))
+K8S_EDGE_IMAGE_TAG ?= $(VERSION)
 K8S_EDGE_IMAGE_REPO ?= docker.cnb.cool/ongridio/ongrid-edge
 K8S_EDGE_IMAGE_REF ?= $(K8S_EDGE_IMAGE_REPO):$(K8S_EDGE_IMAGE_TAG)
 
@@ -520,7 +520,7 @@ build-edge-bundle: ## [release] 打 ADR-024 edge upgrade bundle 到 dist/out/edg
 package-k8s-chart: ## [dev/release] 打 Kubernetes Helm chart 到 bin/k8s/ongrid-edge.tgz（nginx /edge/k8s/ 静态目录）
 	@mkdir -p bin/k8s
 	@rm -f bin/k8s/registry-setup.sh
-	COPYFILE_DISABLE=1 tar -C deploy/kubernetes -czf bin/k8s/ongrid-edge.tgz ongrid-edge
+	bash dist/package-k8s-chart.sh deploy/kubernetes/ongrid-edge bin/k8s/ongrid-edge.tgz $(VERSION) $(K8S_EDGE_IMAGE_TAG)
 	@cp bin/k8s/ongrid-edge.tgz bin/ongrid-edge.tgz
 
 .PHONY: fetch-embedding-model

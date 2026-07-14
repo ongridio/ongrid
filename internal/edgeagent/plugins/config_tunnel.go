@@ -161,6 +161,8 @@ func (t *TunnelConfigFetcher) withKubernetesDefaults(name string, cfg PluginConf
 		return t.withKubernetesLogsDefaults(cfg)
 	case "traces":
 		return t.withKubernetesTracesDefaults(cfg)
+	case "metrics":
+		return withKubernetesMetricsDefaults(cfg)
 	case "hostmetrics":
 		return withKubernetesHostMetricsDefaults(cfg)
 	case "procmetrics":
@@ -277,6 +279,15 @@ func (t *TunnelConfigFetcher) withKubernetesGatewayTracesDefaults(cfg PluginConf
 	}
 	if _, ok := spec["tls_insecure_skip_verify"]; !ok && t.k8sTLSInsecure {
 		spec["tls_insecure_skip_verify"] = true
+	}
+	cfg.Spec = spec
+	return cfg
+}
+
+func withKubernetesMetricsDefaults(cfg PluginConfig) PluginConfig {
+	spec := copySpec(cfg.Spec)
+	if _, ok := spec["dedupe_filesystems_by_device"]; !ok {
+		spec["dedupe_filesystems_by_device"] = true
 	}
 	cfg.Spec = spec
 	return cfg
