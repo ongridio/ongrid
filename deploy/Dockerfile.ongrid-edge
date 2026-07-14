@@ -14,6 +14,8 @@ ARG VERSION=dev
 FROM golang:1.25-alpine AS builder
 
 ARG VERSION
+ARG GOPROXY=https://proxy.golang.org,direct
+ENV GOPROXY=${GOPROXY}
 WORKDIR /app
 
 COPY go.mod go.sum ./
@@ -26,13 +28,35 @@ RUN CGO_ENABLED=0 GOOS=linux \
     -ldflags="-s -w -X main.version=${VERSION}" \
     -o /out/ongrid-edge ./cmd/ongrid-edge
 
-# ---------- Stage 2: runtime (distroless, nonroot) ----------
-FROM gcr.io/distroless/static-debian12:nonroot
+# ---------- Stage 2: runtime ----------
+FROM alpine:3.20
 
-COPY --from=builder /out/ongrid-edge /ongrid-edge
+ARG TARGETOS
+ARG TARGETARCH
+
+RUN apk add --no-cache ca-certificates coreutils findutils \
+    && addgroup -S ongrid-edge \
+    && adduser -S -D -H -G ongrid-edge ongrid-edge \
+    && mkdir -p /usr/local/lib/ongrid-edge /var/lib/ongrid-edge/plugins /var/log/ongrid-edge \
+    && ln -s /usr/local/bin/ongrid-edge /ongrid-edge \
+    && chown -R ongrid-edge:ongrid-edge /var/lib/ongrid-edge /var/log/ongrid-edge
+
+COPY --from=builder /out/ongrid-edge /usr/local/bin/ongrid-edge
+COPY bin/${TARGETOS}-${TARGETARCH}/node_exporter /usr/local/lib/ongrid-edge/node_exporter
+COPY bin/${TARGETOS}-${TARGETARCH}/process_exporter /usr/local/lib/ongrid-edge/process_exporter
+COPY bin/${TARGETOS}-${TARGETARCH}/promtail /usr/local/lib/ongrid-edge/promtail
+COPY bin/${TARGETOS}-${TARGETARCH}/otelcol-contrib /usr/local/lib/ongrid-edge/otelcol-contrib
+RUN chmod 0755 /usr/local/lib/ongrid-edge/node_exporter \
+    /usr/local/lib/ongrid-edge/process_exporter \
+    /usr/local/lib/ongrid-edge/promtail \
+    /usr/local/lib/ongrid-edge/otelcol-contrib
+
+ENV ONGRID_EDGE_PLUGIN_BIN_DIR=/usr/local/lib/ongrid-edge \
+    ONGRID_EDGE_PLUGIN_WORK_DIR=/var/lib/ongrid-edge/plugins \
+    ONGRID_EDGE_UPGRADE_STAGE_DIR=
 
 # Local /metrics only — edge dials cloud, no inbound service ports.
 EXPOSE 9101
 
-USER nonroot
-ENTRYPOINT ["/ongrid-edge"]
+USER ongrid-edge
+ENTRYPOINT ["/usr/local/bin/ongrid-edge"]

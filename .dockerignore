@@ -6,7 +6,13 @@ local/
 .cache/
 tmp/
 
-bin/
+bin/*
+!bin/linux-*/
+bin/linux-*/*
+!bin/linux-*/node_exporter
+!bin/linux-*/process_exporter
+!bin/linux-*/promtail
+!bin/linux-*/otelcol-contrib
 dist/stage/
 dist/out/
 
