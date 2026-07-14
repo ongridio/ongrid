@@ -57,6 +57,8 @@ go.work.sum
 web/dist/
 web/node_modules/
 web/tsconfig.tsbuildinfo
+/.playwright-cli/
+/output/playwright/
 
 # Local dev artifacts (deploy/)
 deploy/docker-compose.override.yml

@@ -1,5 +1,6 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import { http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -32,6 +33,7 @@ const installedItemURL = (id: string) =>
 
 beforeEach(() => {
   mockRole = 'admin';
+  localStorage.setItem('ongrid-locale', 'zh-CN');
 });
 
 afterEach(() => {
@@ -39,13 +41,31 @@ afterEach(() => {
 });
 
 describe('SettingsMarketplace', () => {
+  const renderMarketplace = () =>
+    render(
+      <MemoryRouter>
+        <SettingsMarketplace />
+      </MemoryRouter>,
+    );
+
+  const selectLocalPath = async () => {
+    await userEvent.click(screen.getByRole('button', { name: '本地路径' }));
+    return screen.getByPlaceholderText(/var\/lib\/ongrid\/uploads/);
+  };
+
+  beforeEach(() => {
+    server.use(
+      http.get('/api/v1/secrets', () => HttpResponse.json({ items: [] })),
+    );
+  });
+
   it('renders empty state when no packs installed', async () => {
     server.use(
       http.get(installedURL, () => HttpResponse.json({ items: [] })),
       http.get(registriesURL, () => HttpResponse.json({ items: registries })),
     );
 
-    render(<SettingsMarketplace />);
+    renderMarketplace();
 
     expect(
       await screen.findByText(/还没有安装任何包/),
@@ -59,7 +79,7 @@ describe('SettingsMarketplace', () => {
       http.get(registriesURL, () => HttpResponse.json({ items: registries })),
     );
 
-    render(<SettingsMarketplace />);
+    renderMarketplace();
 
     expect(await screen.findByText('已安装 (1)')).toBeInTheDocument();
     expect(screen.getByText('etcd-troubleshoot')).toBeInTheDocument();
@@ -91,12 +111,12 @@ describe('SettingsMarketplace', () => {
       }),
     );
 
-    render(<SettingsMarketplace />);
+    renderMarketplace();
 
     // Wait for the empty state to settle, then drive the install form.
     await screen.findByText(/还没有安装任何包/);
 
-    const pathInput = screen.getByPlaceholderText(/var\/lib\/ongrid\/uploads/);
+    const pathInput = await selectLocalPath();
     await userEvent.type(pathInput, '/var/lib/ongrid/uploads/etcd-troubleshoot');
 
     const installBtn = screen.getByRole('button', { name: /^安装$/ });
@@ -139,12 +159,12 @@ describe('SettingsMarketplace', () => {
       }),
     );
 
-    render(<SettingsMarketplace />);
+    renderMarketplace();
 
     await screen.findByText(/还没有安装任何包/);
 
     await userEvent.type(
-      screen.getByPlaceholderText(/var\/lib\/ongrid\/uploads/),
+      await selectLocalPath(),
       '/var/lib/ongrid/uploads/etcd-troubleshoot',
     );
     await userEvent.click(screen.getByRole('button', { name: /^安装$/ }));
@@ -176,11 +196,11 @@ describe('SettingsMarketplace', () => {
       ),
     );
 
-    render(<SettingsMarketplace />);
+    renderMarketplace();
 
     await screen.findByText(/还没有安装任何包/);
     await userEvent.type(
-      screen.getByPlaceholderText(/var\/lib\/ongrid\/uploads/),
+      await selectLocalPath(),
       '/var/lib/ongrid/uploads/etcd-troubleshoot',
     );
     await userEvent.click(screen.getByRole('button', { name: /^安装$/ }));
@@ -201,11 +221,11 @@ describe('SettingsMarketplace', () => {
       ),
     );
 
-    render(<SettingsMarketplace />);
+    renderMarketplace();
 
     await screen.findByText(/还没有安装任何包/);
     await userEvent.type(
-      screen.getByPlaceholderText(/var\/lib\/ongrid\/uploads/),
+      await selectLocalPath(),
       '/etc/passwd',
     );
     await userEvent.click(screen.getByRole('button', { name: /^安装$/ }));
@@ -221,7 +241,7 @@ describe('SettingsMarketplace', () => {
       http.get(registriesURL, () => HttpResponse.json({ items: registries })),
     );
 
-    render(<SettingsMarketplace />);
+    renderMarketplace();
 
     await screen.findByText(/还没有安装任何包/);
 
@@ -232,7 +252,7 @@ describe('SettingsMarketplace', () => {
     expect(installBtn).toHaveAttribute('title', '需要 admin 权限');
 
     // The local-path input is also disabled for non-admin viewers.
-    const pathInput = screen.getByPlaceholderText(/var\/lib\/ongrid\/uploads/);
+    const pathInput = await selectLocalPath();
     expect(pathInput).toBeDisabled();
 
     // And the helper line nudges them toward admin login.
