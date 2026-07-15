@@ -7,10 +7,15 @@ import (
 	"testing"
 	"time"
 
+	devicebiz "github.com/ongridio/ongrid/internal/manager/biz/device"
 	edgebiz "github.com/ongridio/ongrid/internal/manager/biz/edge"
 	model "github.com/ongridio/ongrid/internal/manager/model/alert"
+	devicemodel "github.com/ongridio/ongrid/internal/manager/model/device"
 	edgemodel "github.com/ongridio/ongrid/internal/manager/model/edge"
+	"github.com/ongridio/ongrid/internal/pkg/prom"
 	"github.com/ongridio/ongrid/internal/pkg/promquery"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 type fakeEdgeLister struct {
@@ -20,6 +25,15 @@ type fakeEdgeLister struct {
 
 func (f *fakeEdgeLister) List(_ context.Context, _ edgebiz.ListFilter) ([]*edgemodel.Edge, error) {
 	return f.edges, f.err
+}
+
+type fakeDeviceLister struct {
+	devices []*devicemodel.Device
+	err     error
+}
+
+func (f *fakeDeviceLister) List(_ context.Context, _ devicebiz.ListFilter) ([]*devicemodel.Device, error) {
+	return f.devices, f.err
 }
 
 type fakePromQuerier struct {
@@ -54,8 +68,8 @@ func newPipelineEvaluator(t *testing.T, repo *fakeRepo, notifier Notifier, rules
 }
 
 // TestPipelineEdgeOfflineMetricRawFiresAndResolves verifies the
-// replacement path for edge_offline alerts: a
-// metric_raw rule on the edge_last_seen_seconds_ago gauge fires when
+// replacement path for edge_offline alerts: a metric_raw rule using
+// device_last_seen_timestamp_seconds fires when
 // any edge crosses the threshold and resolves once the gauge drops
 // back below.
 func TestPipelineEdgeOfflineMetricRawFiresAndResolves(t *testing.T) {
@@ -72,7 +86,7 @@ func TestPipelineEdgeOfflineMetricRawFiresAndResolves(t *testing.T) {
 	})}
 	rules := NewStaticRulesProvider(WithMetricRawRules([]MetricRawRule{
 		{ID: 100, RuleKey: "edge_offline", Name: "Edge Offline", Severity: "critical",
-			ScopeType: "global", Expr: "edge_last_seen_seconds_ago > 90"},
+			ScopeType: "global", Expr: "time() - max by (device_id) (device_last_seen_timestamp_seconds) > 90"},
 	}))
 	clock := now
 	eval := newPipelineEvaluator(t, repo, notifier, rules, PipelineEvaluatorOpts{
@@ -105,6 +119,55 @@ func TestPipelineEdgeOfflineMetricRawFiresAndResolves(t *testing.T) {
 
 	if inc.Status != model.IncidentStatusResolved {
 		t.Errorf("after recovery status = %q, want resolved", inc.Status)
+	}
+}
+
+func TestPipelinePromQueryColdStartResolvesStaleDedupeKeys(t *testing.T) {
+	repo := newFakeRepo()
+	notifier := &fakeNotifier{}
+	now := time.Date(2026, 7, 2, 8, 0, 0, 0, time.UTC)
+
+	old := &model.Incident{
+		ID:        1,
+		Rule:      "device_offline",
+		Status:    model.IncidentStatusOpen,
+		DedupeKey: "pipeline:device_offline:device_id=23,device_name=node-old,instance=ongrid:9100,job=ongrid-manager",
+	}
+	current := &model.Incident{
+		ID:        2,
+		Rule:      "device_offline",
+		Status:    model.IncidentStatusOpen,
+		DedupeKey: "pipeline:device_offline:device_id=32",
+	}
+	repo.incidents[old.ID] = old
+	repo.incidents[current.ID] = current
+	repo.byDedupe[old.DedupeKey] = old
+	repo.byDedupe[current.DedupeKey] = current
+	repo.nextID = 2
+
+	prom := &fakePromQuerier{result: vectorSamples([]map[string]string{
+		{"device_id": "32"},
+	}, "153901")}
+	rules := NewStaticRulesProvider(WithMetricRawRules([]MetricRawRule{
+		{ID: 100, RuleKey: "device_offline", Name: "Device Offline", Severity: "critical",
+			ScopeType: "global", Expr: "time() - max by (device_id) (device_last_seen_timestamp_seconds) > 300"},
+	}))
+	eval := newPipelineEvaluator(t, repo, notifier, rules, PipelineEvaluatorOpts{
+		PromQuerier: prom,
+		Cooldown:    time.Minute,
+		Now:         func() time.Time { return now },
+	})
+
+	eval.EvaluateOnce(context.Background())
+
+	if old.Status != model.IncidentStatusResolved {
+		t.Fatalf("old dedupe status = %q, want resolved", old.Status)
+	}
+	if current.Status != model.IncidentStatusOpen {
+		t.Fatalf("current dedupe status = %q, want open", current.Status)
+	}
+	if current.EventCount != 1 {
+		t.Fatalf("current event_count = %d, want bumped by current firing", current.EventCount)
 	}
 }
 
@@ -178,7 +241,7 @@ func TestPipelinePromQueryErrorIsSafe(t *testing.T) {
 }
 
 // TestPipelineEdgeOfflineMultipleMetricRawRules confirms two metric_raw
-// rules with different thresholds against edge_last_seen_seconds_ago
+// rules with different thresholds against device_last_seen_timestamp_seconds
 // each create their own incident — the same multi-rule fan-out the
 // deleted edge_absence path supported.
 func TestPipelineEdgeOfflineMultipleMetricRawRules(t *testing.T) {
@@ -191,9 +254,9 @@ func TestPipelineEdgeOfflineMultipleMetricRawRules(t *testing.T) {
 	})}
 	rules := NewStaticRulesProvider(WithMetricRawRules([]MetricRawRule{
 		{ID: 100, RuleKey: "edge_offline", Name: "Edge Offline 90s", Severity: "warning",
-			ScopeType: "global", Expr: "edge_last_seen_seconds_ago > 90"},
+			ScopeType: "global", Expr: "time() - max by (device_id) (device_last_seen_timestamp_seconds) > 90"},
 		{ID: 101, RuleKey: "edge_offline_strict", Name: "Edge Offline 30s", Severity: "critical",
-			ScopeType: "global", Expr: "edge_last_seen_seconds_ago > 30"},
+			ScopeType: "global", Expr: "time() - max by (device_id) (device_last_seen_timestamp_seconds) > 30"},
 	}))
 	eval := newPipelineEvaluator(t, repo, notifier, rules, PipelineEvaluatorOpts{
 		EdgeLister:  &fakeEdgeLister{},
@@ -209,9 +272,46 @@ func TestPipelineEdgeOfflineMultipleMetricRawRules(t *testing.T) {
 	}
 }
 
+func TestRefreshDeviceStalenessPrefersDeviceLastSeen(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	prom.RegisterManagerMetrics(reg, nil)
+	now := time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)
+	deviceLastSeen := now.Add(-15 * time.Second)
+	edgeLastSeen := now.Add(-10 * time.Minute)
+	deviceID := uint64(25)
+	eval := NewPipelineEvaluator(PipelineEvaluatorOpts{
+		DeviceLister: &fakeDeviceLister{devices: []*devicemodel.Device{{
+			ID:         25,
+			Name:       "node-a",
+			Hostname:   "node-a",
+			LastSeenAt: &deviceLastSeen,
+			CreatedAt:  now.Add(-time.Hour),
+		}}},
+		EdgeLister: &fakeEdgeLister{edges: []*edgemodel.Edge{{
+			ID:         23,
+			Name:       "node-a",
+			DeviceID:   &deviceID,
+			LastSeenAt: &edgeLastSeen,
+			CreatedAt:  now.Add(-time.Hour),
+		}}},
+		Now: func() time.Time { return now },
+	})
+
+	eval.refreshDeviceStalenessGauge(context.Background(), now)
+
+	age := testutil.ToFloat64(prom.DeviceLastSeenSecondsAgo.WithLabelValues("25", "node-a"))
+	if age != 15 {
+		t.Fatalf("device_last_seen_seconds_ago = %v, want 15 from Device.LastSeenAt", age)
+	}
+	ts := testutil.ToFloat64(prom.DeviceLastSeenTimestampSeconds.WithLabelValues("25"))
+	if ts != float64(deviceLastSeen.Unix()) {
+		t.Fatalf("device_last_seen_timestamp_seconds = %v, want %v", ts, float64(deviceLastSeen.Unix()))
+	}
+}
+
 // vectorEdgeStaleness builds a Prom-style vector response keyed
-// "edge_id|edge_name" -> seconds-ago, mimicking the
-// edge_last_seen_seconds_ago gauge PipelineEvaluator publishes.
+// "device_id|device_name" -> seconds-ago, mimicking the result Prom returns
+// after filtering on time() - device_last_seen_timestamp_seconds.
 func vectorEdgeStaleness(samples map[string]string) *promquery.InstantResult {
 	type vEntry struct {
 		Metric map[string]string `json:"metric"`
@@ -232,11 +332,29 @@ func vectorEdgeStaleness(samples map[string]string) *promquery.InstantResult {
 		val, _ := json.Marshal(v)
 		entries = append(entries, vEntry{
 			Metric: map[string]string{
-				"__name__":  "edge_last_seen_seconds_ago",
+				"__name__":    "device_last_seen_timestamp_seconds",
 				"device_id":   edgeID,
-				"edge_name": edgeName,
+				"device_name": edgeName,
 			},
 			Value: []json.RawMessage{ts, val},
+		})
+	}
+	raw, _ := json.Marshal(entries)
+	return &promquery.InstantResult{ResultType: "vector", Result: raw}
+}
+
+func vectorSamples(samples []map[string]string, value string) *promquery.InstantResult {
+	type vEntry struct {
+		Metric map[string]string `json:"metric"`
+		Value  []json.RawMessage `json:"value"`
+	}
+	entries := make([]vEntry, 0, len(samples))
+	for _, labels := range samples {
+		ts, _ := json.Marshal(float64(time.Now().Unix()))
+		val, _ := json.Marshal(value)
+		entries = append(entries, vEntry{
+			Metric: labels,
+			Value:  []json.RawMessage{ts, val},
 		})
 	}
 	raw, _ := json.Marshal(entries)

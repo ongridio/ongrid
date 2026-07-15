@@ -71,11 +71,11 @@ func Migrate(db *gorm.DB) error {
 			// matches the seed rule; user-customised thresholds are
 			// not preserved (pre-launch — clean cut, the spec says).
 			fromKind:   "edge_absence",
-			conditions: `{"expr":"device_last_seen_seconds_ago > 90"}`,
+			conditions: `{"expr":"time() - max by (device_id) (device_last_seen_timestamp_seconds) > 90"}`,
 		},
 		{
 			fromKind:   "edge_offline",
-			conditions: `{"expr":"device_last_seen_seconds_ago > 90"}`,
+			conditions: `{"expr":"time() - max by (device_id) (device_last_seen_timestamp_seconds) > 90"}`,
 		},
 		{
 			fromKind:   "health_ingest",
@@ -171,6 +171,14 @@ func Migrate(db *gorm.DB) error {
 		return err
 	}
 
+	// Timestamp-based offline detection: the seconds_ago gauge is only
+	// refreshed on the evaluator tick and can be stale inside short Grafana
+	// windows. Rewrite existing built-in/custom rows that still use the old
+	// expression so alerting ages naturally between Prometheus scrapes.
+	if err := rewriteDeviceLastSeenExprs(db); err != nil {
+		return err
+	}
+
 	// expr-only collapse: rewrite metric_raw rows whose
 	// conditions_json still carries the legacy {expr, operator,
 	// threshold, for_seconds} shape into {expr: "<expr> <op> <thr>"}.
@@ -191,6 +199,47 @@ func Migrate(db *gorm.DB) error {
 		return err
 	}
 
+	return nil
+}
+
+func rewriteDeviceLastSeenExprs(db *gorm.DB) error {
+	type row struct {
+		ID             uint64
+		ConditionsJSON string `gorm:"column:conditions_json"`
+	}
+	var rows []row
+	if err := db.Table("alert_rules").
+		Select("id, conditions_json").
+		Where("kind = ?", model.RuleKindMetricRaw).
+		Where(
+			db.Where("conditions_json LIKE ?", "%device_last_seen_seconds_ago%").
+				Or("conditions_json LIKE ?", "%time() - device_last_seen_timestamp_seconds%"),
+		).
+		Find(&rows).Error; err != nil {
+		return fmt.Errorf("scan device last_seen rules: %w", err)
+	}
+	for _, r := range rows {
+		var raw map[string]any
+		if err := json.Unmarshal([]byte(r.ConditionsJSON), &raw); err != nil {
+			continue
+		}
+		expr, _ := raw["expr"].(string)
+		rewritten := strings.ReplaceAll(expr, "device_last_seen_seconds_ago", "time() - max by (device_id) (device_last_seen_timestamp_seconds)")
+		rewritten = strings.ReplaceAll(rewritten, "time() - device_last_seen_timestamp_seconds", "time() - max by (device_id) (device_last_seen_timestamp_seconds)")
+		if rewritten == expr {
+			continue
+		}
+		raw["expr"] = rewritten
+		blob, err := json.Marshal(raw)
+		if err != nil {
+			return fmt.Errorf("marshal device last_seen rule %d: %w", r.ID, err)
+		}
+		if err := db.Table("alert_rules").
+			Where("id = ?", r.ID).
+			Update("conditions_json", string(blob)).Error; err != nil {
+			return fmt.Errorf("update device last_seen rule %d: %w", r.ID, err)
+		}
+	}
 	return nil
 }
 
