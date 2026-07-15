@@ -23,6 +23,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/ongridio/ongrid/internal/manager/biz/imbridge/imformat"
 )
 
 // SecretFields is the parsed shape of ImApp.AppSecret for a slack provider.
@@ -172,10 +174,7 @@ func (c *Client) PostMessage(ctx context.Context, channel, text string) (string,
 		Channel string `json:"channel"`
 		TS      string `json:"ts"`
 	}
-	body := map[string]any{
-		"channel": channel,
-		"text":    text,
-	}
+	body := nativeMessageBody(channel, text)
 	if err := c.call(ctx, "chat.postMessage", c.botToken, body, &resp); err != nil {
 		return "", err
 	}
@@ -189,12 +188,30 @@ func (c *Client) PostMessage(ctx context.Context, channel, text string) (string,
 // silently accepts a no-op (same text) and returns ok=true, so we don't
 // need the Telegram "message is not modified" swallow.
 func (c *Client) UpdateMessage(ctx context.Context, channel, ts, text string) error {
-	body := map[string]any{
-		"channel": channel,
-		"ts":      ts,
-		"text":    text,
-	}
+	body := nativeMessageBody(channel, text)
+	body["ts"] = ts
 	return c.call(ctx, "chat.update", c.botToken, body, nil)
+}
+
+// nativeMessageBody uses Block Kit for the visible message and keeps a plain
+// top-level text fallback for notifications and clients that omit blocks.
+func nativeMessageBody(channel, markdown string) map[string]any {
+	sections := imformat.SlackSections(markdown)
+	blocks := make([]map[string]any, 0, len(sections))
+	for _, section := range sections {
+		blocks = append(blocks, map[string]any{
+			"type": "section",
+			"text": map[string]string{
+				"type": "mrkdwn",
+				"text": section,
+			},
+		})
+	}
+	return map[string]any{
+		"channel": channel,
+		"text":    imformat.PlainExcerpt(markdown, 4000),
+		"blocks":  blocks,
+	}
 }
 
 // OpenConnection asks Slack for a fresh Socket Mode WebSocket URL. The

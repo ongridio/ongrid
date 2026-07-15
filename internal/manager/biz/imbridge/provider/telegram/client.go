@@ -14,6 +14,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/ongridio/ongrid/internal/manager/biz/imbridge/imformat"
 )
 
 // maxCallRetries bounds retries on rate-limit (429) and transient server (5xx)
@@ -152,7 +154,7 @@ func (c *Client) GetUpdates(ctx context.Context, offset, timeoutSec int) ([]Upda
 
 // SendMessage posts text to chatID and returns the new message_id.
 func (c *Client) SendMessage(ctx context.Context, chatID, text string) (int, error) {
-	res, err := c.call(ctx, "sendMessage", map[string]any{"chat_id": chatID, "text": text})
+	res, err := c.call(ctx, "sendMessage", telegramMessageBody(chatID, text))
 	if err != nil {
 		return 0, err
 	}
@@ -172,15 +174,22 @@ func (c *Client) SendMessage(ctx context.Context, chatID, text string) (int, err
 // Telegram rejects it, so we swallow that specific error as success; any other
 // 400/error still propagates.
 func (c *Client) EditMessageText(ctx context.Context, chatID string, messageID int, text string) error {
-	_, err := c.call(ctx, "editMessageText", map[string]any{
-		"chat_id":    chatID,
-		"message_id": messageID,
-		"text":       text,
-	})
+	body := telegramMessageBody(chatID, text)
+	body["message_id"] = messageID
+	_, err := c.call(ctx, "editMessageText", body)
 	if err != nil && strings.Contains(err.Error(), "message is not modified") {
 		return nil
 	}
 	return err
+}
+
+func telegramMessageBody(chatID, markdown string) map[string]any {
+	return map[string]any{
+		"chat_id":              chatID,
+		"text":                 imformat.TelegramHTML(markdown),
+		"parse_mode":           "HTML",
+		"link_preview_options": map[string]bool{"is_disabled": true},
+	}
 }
 
 func truncate(b []byte, n int) string {

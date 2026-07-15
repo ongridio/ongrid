@@ -21,11 +21,13 @@ require (
 	github.com/sashabaranov/go-openai v1.41.2
 	github.com/shirou/gopsutil/v3 v3.23.6
 	github.com/singchia/geminio v1.2.3-rc.1
+	github.com/yuin/goldmark v1.8.2
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.68.0
 	go.opentelemetry.io/otel v1.43.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.43.0
 	go.opentelemetry.io/otel/sdk v1.43.0
 	golang.org/x/crypto v0.50.0
+	golang.org/x/net v0.52.0
 	golang.org/x/sync v0.20.0
 	golang.org/x/time v0.15.0
 	google.golang.org/protobuf v1.36.11
@@ -161,7 +163,6 @@ require (
 	github.com/singchia/frontier v1.2.3-rc.2
 	github.com/singchia/go-timer/v2 v2.2.1 // indirect
 	github.com/singchia/yafsm v1.0.1 // indirect
-	golang.org/x/net v0.52.0 // indirect
 	golang.org/x/sys v0.43.0 // indirect
 	golang.org/x/text v0.36.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260401024825-9d38bb4040a9 // indirect

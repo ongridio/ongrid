@@ -31,7 +31,7 @@ type Client struct {
 
 type Option func(*Client)
 
-func WithBaseURL(u string) Option { return func(c *Client) { c.baseURL = u } }
+func WithBaseURL(u string) Option          { return func(c *Client) { c.baseURL = u } }
 func WithHTTPClient(h *http.Client) Option { return func(c *Client) { c.http = h } }
 
 func NewClient(appID, appSecret string, opts ...Option) *Client {
@@ -93,7 +93,7 @@ func (c *Client) tenantAccessToken(ctx context.Context) (string, error) {
 	return c.tokValue, nil
 }
 
-// SendText posts a plain text message to a chat. receiveID is the
+// SendText posts a native rich-text message to a chat. receiveID is the
 // platform target — for Feishu it's the open_chat_id when targeting a
 // group, or open_id for a DM. receiveIDType selects how Feishu
 // resolves it (`chat_id` / `open_id`). Returns the new message_id so
@@ -103,13 +103,13 @@ func (c *Client) SendText(ctx context.Context, receiveID, receiveIDType, text st
 	if err != nil {
 		return "", err
 	}
-	contentJSON, err := json.Marshal(map[string]string{"text": text})
+	msgType, contentJSON, err := messageContent(text)
 	if err != nil {
 		return "", err
 	}
 	body, err := json.Marshal(map[string]string{
 		"receive_id": receiveID,
-		"msg_type":   "text",
+		"msg_type":   msgType,
 		"content":    string(contentJSON),
 	})
 	if err != nil {
@@ -144,7 +144,7 @@ func (c *Client) SendText(ctx context.Context, receiveID, receiveIDType, text st
 	return out.Data.MessageID, nil
 }
 
-// EditText patches an existing text message — used for progressive
+// EditText patches an existing rich-text message — used for progressive
 // streaming updates. messageID is the value returned by
 // SendText.
 func (c *Client) EditText(ctx context.Context, messageID, text string) error {
@@ -155,7 +155,7 @@ func (c *Client) EditText(ctx context.Context, messageID, text string) error {
 	if messageID == "" {
 		return errors.New("feishu: edit_text: messageID required")
 	}
-	contentJSON, err := json.Marshal(map[string]string{"text": text})
+	msgType, contentJSON, err := messageContent(text)
 	if err != nil {
 		return err
 	}
@@ -163,7 +163,7 @@ func (c *Client) EditText(ctx context.Context, messageID, text string) error {
 	// trips 99992402 (field validation failed) even though the docs
 	// page for "edit message" doesn't make that obvious.
 	body, err := json.Marshal(map[string]string{
-		"msg_type": "text",
+		"msg_type": msgType,
 		"content":  string(contentJSON),
 	})
 	if err != nil {
@@ -193,4 +193,31 @@ func (c *Client) EditText(ctx context.Context, messageID, text string) error {
 		return fmt.Errorf("feishu: edit_text: code=%d msg=%s", out.Code, out.Msg)
 	}
 	return nil
+}
+
+// messageContent uses Feishu's native post/md node. The platform supports
+// CommonMark 0.31 and GFM here, including tables, task lists and code blocks.
+// Both locale slots carry the same agent answer so Feishu and Lark clients do
+// not hide the message when their UI locale differs from the channel setting.
+func messageContent(markdown string) (string, []byte, error) {
+	paragraph := []map[string]string{{"tag": "md", "text": markdown}}
+	content := [][]map[string]string{paragraph}
+	rich, err := json.Marshal(map[string]any{
+		"zh_cn": map[string]any{"content": content},
+		"en_us": map[string]any{"content": content},
+	})
+	if err != nil {
+		return "", nil, err
+	}
+	// Feishu caps post messages at 30 KiB while text messages allow 150 KiB.
+	// JSON escaping and the duplicated locale entries add overhead, so retain
+	// the old text path when the native payload approaches the lower limit.
+	if len(rich) <= 28*1024 {
+		return "post", rich, nil
+	}
+	plain, err := json.Marshal(map[string]string{"text": markdown})
+	if err != nil {
+		return "", nil, err
+	}
+	return "text", plain, nil
 }

@@ -44,6 +44,9 @@ func TestSendMessageReturnsID(t *testing.T) {
 		if in["chat_id"] != "999" || in["text"] != "hi" {
 			t.Errorf("body = %v, want chat_id=999 text=hi", in)
 		}
+		if in["parse_mode"] != "HTML" {
+			t.Errorf("parse_mode = %v, want HTML", in["parse_mode"])
+		}
 		io.WriteString(w, `{"ok":true,"result":{"message_id":42}}`)
 	})
 	id, err := c.SendMessage(context.Background(), "999", "hi")
@@ -61,10 +64,30 @@ func TestEditMessageText(t *testing.T) {
 		if in["chat_id"] != "999" || in["message_id"].(float64) != 42 || in["text"] != "edited" {
 			t.Errorf("body = %v, want chat_id=999 message_id=42 text=edited", in)
 		}
+		if in["parse_mode"] != "HTML" {
+			t.Errorf("parse_mode = %v, want HTML", in["parse_mode"])
+		}
 		io.WriteString(w, `{"ok":true,"result":{}}`)
 	})
 	if err := c.EditMessageText(context.Background(), "999", 42, "edited"); err != nil {
 		t.Fatalf("EditMessageText err = %v", err)
+	}
+}
+
+func TestSendMessageConvertsGFMToTelegramHTML(t *testing.T) {
+	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		in := decode(t, r)
+		want := `<b>Root cause:</b> <a href="https://example.com/42">deploy</a>`
+		if in["text"] != want {
+			t.Errorf("text = %q, want %q", in["text"], want)
+		}
+		if in["parse_mode"] != "HTML" {
+			t.Errorf("parse_mode = %v", in["parse_mode"])
+		}
+		io.WriteString(w, `{"ok":true,"result":{"message_id":42}}`)
+	})
+	if _, err := c.SendMessage(context.Background(), "999", "**Root cause:** [deploy](https://example.com/42)"); err != nil {
+		t.Fatalf("SendMessage: %v", err)
 	}
 }
 

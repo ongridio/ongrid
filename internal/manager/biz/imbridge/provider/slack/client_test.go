@@ -93,6 +93,18 @@ func TestPostMessageReturnsTS(t *testing.T) {
 	if gotBody["channel"] != "C123" || gotBody["text"] != "hello" {
 		t.Errorf("body = %v", gotBody)
 	}
+	blocks, ok := gotBody["blocks"].([]any)
+	if !ok || len(blocks) != 1 {
+		t.Fatalf("blocks = %#v, want one Block Kit section", gotBody["blocks"])
+	}
+	block := blocks[0].(map[string]any)
+	if block["type"] != "section" {
+		t.Errorf("block type = %v", block["type"])
+	}
+	blockText := block["text"].(map[string]any)
+	if blockText["type"] != "mrkdwn" || blockText["text"] != "hello" {
+		t.Errorf("block text = %#v", blockText)
+	}
 }
 
 // TestUpdateMessageBody verifies chat.update reaches Slack with the
@@ -120,6 +132,33 @@ func TestUpdateMessageBody(t *testing.T) {
 	}
 	if gotBody["text"] != "still typing…" {
 		t.Errorf("text = %v", gotBody["text"])
+	}
+	if _, ok := gotBody["blocks"]; !ok {
+		t.Error("chat.update body missing Block Kit blocks")
+	}
+}
+
+func TestPostMessageConvertsGFMToSlackMrkdwn(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &gotBody)
+		_, _ = io.WriteString(w, `{"ok":true,"channel":"C123","ts":"1.0"}`)
+	}))
+	defer srv.Close()
+
+	c := NewClient("xapp-1-app", "xoxb-1-bot")
+	c.SetBaseURL(srv.URL)
+	if _, err := c.PostMessage(context.Background(), "C123", "**Root cause:** [deploy](https://example.com/42)"); err != nil {
+		t.Fatalf("PostMessage: %v", err)
+	}
+	if gotBody["text"] != "Root cause: deploy" {
+		t.Errorf("fallback text = %q", gotBody["text"])
+	}
+	blocks := gotBody["blocks"].([]any)
+	text := blocks[0].(map[string]any)["text"].(map[string]any)["text"]
+	if text != "*Root cause:* <https://example.com/42|deploy>" {
+		t.Errorf("mrkdwn = %q", text)
 	}
 }
 
