@@ -81,8 +81,9 @@ type Agent struct {
 	log       *slog.Logger
 
 	// edgeID is assigned by the cloud in the register_edge response.
-	edgeID uint64
-	mu     sync.RWMutex
+	edgeID     uint64
+	mu         sync.RWMutex
+	registerMu sync.Mutex
 
 	// upgradeRequested is closed by the agent_upgrade handler after a
 	// new binary is staged. Run() watches this channel and returns nil
@@ -349,6 +350,9 @@ func (a *Agent) registerHandlers() {
 
 // registerEdge performs the initial handshake RPC and stores the EdgeID.
 func (a *Agent) registerEdge(ctx context.Context) error {
+	a.registerMu.Lock()
+	defer a.registerMu.Unlock()
+
 	info, err := a.collector.HostInfo(ctx)
 	if err != nil {
 		a.log.Warn("agent: HostInfo collection failed", slog.Any("err", err))
@@ -394,12 +398,11 @@ func applyKubernetesHostIdentity(k8sInfo *tunnel.KubernetesInfo, host *tunnel.Ho
 }
 
 // heartbeatLoop sends one heartbeat every HeartbeatInterval until ctx
-// cancels. Errors are logged; transient ones (TCP/RPC blips) are
-// recovered by the tunnel layer transparently. When heartbeats fail
-// continuously for tunnelStuckThreshold ticks we treat the tunnel as
-// stuck (geminio RetryEnd silently giving up on TLS handshake / frontier
-// route never re-validating) and return errTunnelStuck so Agent.Run
-// unwinds and systemd respawns the process with a clean dial.
+// cancels. RetryEnd owns transport recovery, while temporary manager or
+// database failures stay on the existing connection and are retried here.
+// If the initial registration failed, the same loop retries it before
+// sending heartbeats so a transient startup dependency does not leave the
+// edge permanently at edge_id=0.
 func (a *Agent) heartbeatLoop(ctx context.Context) error {
 	t := time.NewTicker(a.cfg.HeartbeatInterval)
 	defer t.Stop()
@@ -409,6 +412,21 @@ func (a *Agent) heartbeatLoop(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-t.C:
+			if a.EdgeID() == 0 {
+				rctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+				err := a.registerEdge(rctx)
+				cancel()
+				if err != nil {
+					consecutiveFail++
+					a.log.Warn("agent: register_edge retry failed",
+						slog.Int("consecutive_fail", consecutiveFail),
+						slog.Any("err", err))
+					continue
+				}
+				a.writeHealthMarker()
+				consecutiveFail = 0
+			}
+
 			a.mu.RLock()
 			healthFn := a.pluginHealthFn
 			a.mu.RUnlock()
@@ -429,10 +447,22 @@ func (a *Agent) heartbeatLoop(ctx context.Context) error {
 				a.log.Warn("agent: heartbeat failed",
 					slog.Int("consecutive_fail", consecutiveFail),
 					slog.Any("err", err))
-				if consecutiveFail >= tunnelStuckThreshold {
-					a.log.Error("agent: tunnel stuck; exiting for systemd respawn",
-						slog.Int("consecutive_fail", consecutiveFail))
-					return errTunnelStuck
+				// A manager restart can lose its in-memory transport binding while
+				// Frontier keeps this connection alive. Re-registering is safe and
+				// authenticated, and repairs that state without restarting the pod.
+				rctx, rcancel := context.WithTimeout(ctx, 10*time.Second)
+				rerr := a.registerEdge(rctx)
+				rcancel()
+				if rerr != nil {
+					a.log.Warn("agent: re-register after heartbeat failure failed",
+						slog.Any("err", rerr))
+					if consecutiveFail >= tunnelStuckThreshold {
+						return fmt.Errorf("%w after %d heartbeat failures: %v",
+							errTunnelStuck, consecutiveFail, rerr)
+					}
+				} else {
+					a.writeHealthMarker()
+					consecutiveFail = 0
 				}
 				continue
 			}
@@ -441,17 +471,9 @@ func (a *Agent) heartbeatLoop(ctx context.Context) error {
 	}
 }
 
-// tunnelStuckThreshold = consecutive heartbeat failures before we declare
-// the tunnel stuck and exit. With HeartbeatInterval=30s and threshold=5,
-// the edge tolerates ~2.5min of network/manager wobble (TCP timeouts +
-// 2 normal retries) before bailing. Tuned for "manager restart cycle
-// completes within ~90s" vs "transient packet loss never lasts >60s".
 const tunnelStuckThreshold = 5
 
-// errTunnelStuck is the sentinel returned from heartbeatLoop when N
-// consecutive heartbeats failed. errgroup cancels siblings and Run
-// returns this error so systemd (Restart=always) respawns the process.
-var errTunnelStuck = errors.New("tunnel stuck: heartbeat failed N times")
+var errTunnelStuck = errors.New("tunnel stuck")
 
 // metricsLoop samples the collector every MetricsInterval and fans out
 // the result to the legacy push_host_metrics path and the new

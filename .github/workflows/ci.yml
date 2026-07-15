@@ -101,7 +101,7 @@ jobs:
         uses: azure/setup-helm@v4
 
       - name: Check release scripts
-        run: bash -n dist/package.sh dist/package-k8s-chart.sh
+        run: bash -n dist/package.sh dist/package-k8s-chart.sh deploy/install/install.sh deploy/install/upgrade.sh
 
       - name: Lint and render Kubernetes chart
         run: |
@@ -129,6 +129,7 @@ jobs:
           grep -q 'hostNetwork: true' /tmp/ongrid-edge.yaml
           grep -q 'name: install-host-runtime' /tmp/ongrid-edge.yaml
           grep -q -- '- install-k8s-host-runtime' /tmp/ongrid-edge.yaml
+          grep -A16 'name: install-host-runtime' /tmp/ongrid-edge.yaml | grep -q 'memory: 128Mi'
           grep -q -- '- enter-k8s-host' /tmp/ongrid-edge.yaml
           grep -A1 'name: ONGRID_EDGE_COLLECTOR_MODE' /tmp/ongrid-edge.yaml | grep -q 'value: "off"'
           grep -q 'add: \["CHOWN", "DAC_OVERRIDE", "FOWNER"\]' /tmp/ongrid-edge.yaml

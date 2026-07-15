@@ -51,10 +51,17 @@ type KubernetesInventoryIngester interface {
 	IngestInventory(ctx context.Context, edgeID uint64, in tunnel.KubernetesInventoryRequest) (acceptedNodes int, acceptedWorkloads int, acceptedPods int, acceptedEvents int, err error)
 }
 
+// EdgeAuthenticator is the credential surface needed by tunnel lifecycle and
+// register_edge. Declaring it at the consumer keeps reconnect recovery
+// testable without coupling Wiring to one concrete implementation.
+type EdgeAuthenticator interface {
+	Authenticate(ctx context.Context, accessKey, secretKey string) (tunnel.Session, error)
+}
+
 // Wiring is the set of biz dependencies the manager-side handlers need.
 // It is supplied by cmd/ongrid/main.go and consumed by Install.
 type Wiring struct {
-	EdgeAuthn      *edgebiz.AccessKeyAuthenticator
+	EdgeAuthn      EdgeAuthenticator
 	EdgeUC         *edgebiz.Usecase
 	MetricIngester metricbiz.IngestService
 	// PromIngester is optional — nil means Prom is disabled. When nil the
@@ -125,25 +132,31 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 		return fmt.Errorf("frontierbound: Install: MetricIngester is required")
 	}
 
+	authenticateEdge := func(authCtx context.Context, accessKey, secretKey string) (uint64, error) {
+		sess, err := w.EdgeAuthn.Authenticate(authCtx, accessKey, secretKey)
+		if err != nil {
+			// AccessKeyAuthenticator already collapses all failure paths to
+			// errs.ErrUnauthorized so we don't leak enumeration here.
+			log.Warn("frontierbound: edge authn failed", slog.Any("err", err))
+			return 0, err
+		}
+		return sess.EdgeID, nil
+	}
+
 	resolveEdgeID := func(meta []byte) (uint64, error) {
 		var m tunnel.Meta
 		if err := json.Unmarshal(meta, &m); err != nil {
 			log.Warn("frontierbound: GetEdgeID: bad meta", slog.Any("err", err))
 			return 0, fmt.Errorf("bad meta: %w", err)
 		}
-		sess, err := w.EdgeAuthn.Authenticate(ctx, m.AccessKey, m.SecretKey)
+		edgeID, err := authenticateEdge(ctx, m.AccessKey, m.SecretKey)
 		if err != nil {
-			// AccessKeyAuthenticator already collapses all failure paths
-			// to errs.ErrUnauthorized so we don't leak enumeration here.
-			log.Warn("frontierbound: GetEdgeID: authn failed",
-				slog.Any("err", err),
-			)
 			return 0, err
 		}
 		log.Info("frontierbound: GetEdgeID: authn ok",
-			slog.Uint64("edge_id", sess.EdgeID),
+			slog.Uint64("edge_id", edgeID),
 		)
-		return sess.EdgeID, nil
+		return edgeID, nil
 	}
 
 	// Lifecycle: GetEdgeID parses the edge's Meta JSON, runs access-key
@@ -157,7 +170,7 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 	if err := c.RegisterEdgeOnline(ctx, func(edgeID uint64, meta []byte, addr net.Addr) error {
 		canonicalEdgeID, err := resolveEdgeID(meta)
 		if err == nil {
-			c.bindEdgeTransport(edgeID, canonicalEdgeID)
+			c.bindEdgeTransportAt(edgeID, canonicalEdgeID, safeAddr(addr))
 		}
 		log.Info("frontierbound: edge online",
 			slog.Uint64("edge_id", canonicalEdgeID),
@@ -180,7 +193,13 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 		// before unbinding — we need the canonical id for the alert
 		// notifier and the unbind clears the mapping.
 		canonicalEdgeID := c.canonicalizeEdgeID(edgeID)
-		c.unbindTransport(edgeID)
+		if !c.unbindEdgeTransport(edgeID, canonicalEdgeID, safeAddr(addr)) {
+			log.Debug("frontierbound: stale or unknown edge offline ignored",
+				slog.Uint64("transport_edge_id", edgeID),
+				slog.String("addr", safeAddr(addr)),
+			)
+			return nil
+		}
 		log.Info("frontierbound: edge offline",
 			slog.Uint64("edge_id", canonicalEdgeID),
 			slog.Uint64("transport_edge_id", edgeID),
@@ -211,19 +230,17 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 		if err := json.Unmarshal(body, &in); err != nil {
 			return nil, fmt.Errorf("register_edge: decode: %w", err)
 		}
-		canonicalEdgeID := c.canonicalizeEdgeID(edgeID)
+		// Frontier authenticates the tunnel Meta during dial and appends that
+		// canonical edge ID to every forwarded RPC. Manager restarts lose only
+		// this process-local map while Frontier can keep the authenticated TCP
+		// connection alive, so rebuild the identity binding from req.ClientID().
+		// Do not trust the legacy credentials in this request body: current edges
+		// intentionally leave them empty and carry credentials only in Meta.
+		canonicalEdgeID := edgeID
 		if canonicalEdgeID == 0 {
-			// Transport→canonical binding not established yet (EdgeOnline's
-			// resolveEdgeID must land first). Registering with 0 makes
-			// HandleRegister(0) fail AND leaves the edge_devices host
-			// junction uncreated — after which every metric falls back to
-			// edge_id (issue #96 root cause). Fail loudly so the edge
-			// retries once the binding is ready, instead of silently
-			// mis-registering and poisoning the device_id labels.
-			log.Error("frontierbound: register_edge — no canonical edge id (transport binding not ready, retry)",
-				slog.Uint64("transport_edge_id", edgeID))
-			return nil, fmt.Errorf("register_edge: edge binding not ready")
+			return nil, fmt.Errorf("register_edge: authenticated edge id is missing")
 		}
+		c.bindEdgeTransport(edgeID, canonicalEdgeID)
 		if in.Kubernetes != nil && isKubernetesControllerRole(in.Kubernetes.Role) {
 			if err := w.EdgeUC.ClearHostDeviceLink(rpcCtx, canonicalEdgeID); err != nil {
 				return nil, fmt.Errorf("register_edge: k8s controller clear host link: %w", err)
@@ -281,9 +298,11 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 			return nil, fmt.Errorf("heartbeat: decode: %w", err)
 		}
 		canonicalEdgeID := c.canonicalizeEdgeID(edgeID)
-		if in.EdgeID != 0 {
-			canonicalEdgeID = in.EdgeID
-			c.bindEdgeTransport(edgeID, canonicalEdgeID)
+		if canonicalEdgeID == 0 {
+			return nil, fmt.Errorf("heartbeat: edge binding not ready; re-register required")
+		}
+		if in.EdgeID != 0 && in.EdgeID != canonicalEdgeID {
+			return nil, fmt.Errorf("heartbeat: edge id mismatch")
 		}
 		ts := time.Unix(in.Ts, 0).UTC()
 		if in.Ts == 0 {
@@ -396,9 +415,8 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 			return nil, fmt.Errorf("push_host_metrics: decode: %w", err)
 		}
 		canonicalEdgeID := c.canonicalizeEdgeID(edgeID)
-		if in.EdgeID != 0 {
-			canonicalEdgeID = in.EdgeID
-			c.bindEdgeTransport(edgeID, canonicalEdgeID)
+		if in.EdgeID != 0 && canonicalEdgeID != 0 && in.EdgeID != canonicalEdgeID {
+			return nil, fmt.Errorf("push_host_metrics: edge id mismatch")
 		}
 		if canonicalEdgeID == 0 {
 			// Edge hasn't completed register_edge yet (race on first
@@ -443,9 +461,8 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 			return nil, fmt.Errorf("push_prom_samples: decode: %w", err)
 		}
 		canonicalEdgeID := c.canonicalizeEdgeID(edgeID)
-		if in.EdgeID != 0 {
-			canonicalEdgeID = in.EdgeID
-			c.bindEdgeTransport(edgeID, canonicalEdgeID)
+		if in.EdgeID != 0 && canonicalEdgeID != 0 && in.EdgeID != canonicalEdgeID {
+			return nil, fmt.Errorf("push_prom_samples: edge id mismatch")
 		}
 		n := len(in.Samples)
 		if canonicalEdgeID == 0 {

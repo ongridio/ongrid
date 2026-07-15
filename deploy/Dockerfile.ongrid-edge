@@ -19,14 +19,19 @@ FROM golang:1.25-alpine AS builder
 
 ARG VERSION
 ARG TARGETARCH
+ARG GOPROXY=https://proxy.golang.org,direct
+ENV GOPROXY=${GOPROXY}
 WORKDIR /app
 
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH="${TARGETARCH:-$(go env GOARCH)}" \
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux GOARCH="${TARGETARCH:-$(go env GOARCH)}" \
     go build -trimpath \
     -ldflags="-s -w -X main.version=${VERSION}" \
     -o /out/ongrid-edge ./cmd/ongrid-edge
@@ -36,8 +41,8 @@ FROM alpine:3.20 AS promtail
 
 ARG PROMTAIL_VERSION
 ARG TARGETARCH
-RUN apk add --no-cache ca-certificates curl unzip \
-    && set -eux; \
+RUN set -eux; \
+    apk add --no-cache ca-certificates curl unzip; \
     arch="${TARGETARCH:-$(apk --print-arch)}"; \
     case "$arch" in \
         x86_64) arch=amd64 ;; \
@@ -60,8 +65,8 @@ FROM alpine:3.20 AS node-exporter
 
 ARG NODE_EXPORTER_VERSION
 ARG TARGETARCH
-RUN apk add --no-cache ca-certificates curl tar \
-    && set -eux; \
+RUN set -eux; \
+    apk add --no-cache ca-certificates curl tar; \
     arch="${TARGETARCH:-$(apk --print-arch)}"; \
     case "$arch" in \
         x86_64) arch=amd64 ;; \
@@ -85,8 +90,8 @@ FROM alpine:3.20 AS process-exporter
 
 ARG PROCESS_EXPORTER_VERSION
 ARG TARGETARCH
-RUN apk add --no-cache ca-certificates curl tar \
-    && set -eux; \
+RUN set -eux; \
+    apk add --no-cache ca-certificates curl tar; \
     arch="${TARGETARCH:-$(apk --print-arch)}"; \
     case "$arch" in \
         x86_64) arch=amd64 ;; \
@@ -111,8 +116,8 @@ FROM alpine:3.20 AS otelcol-contrib
 
 ARG OTELCOL_VERSION
 ARG TARGETARCH
-RUN apk add --no-cache ca-certificates curl tar \
-    && set -eux; \
+RUN set -eux; \
+    apk add --no-cache ca-certificates curl tar; \
     arch="${TARGETARCH:-$(apk --print-arch)}"; \
     case "$arch" in \
         x86_64) arch=amd64 ;; \

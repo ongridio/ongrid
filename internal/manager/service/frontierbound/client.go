@@ -55,6 +55,7 @@ type Client struct {
 	mu                sync.RWMutex
 	transportToEdgeID map[uint64]uint64
 	edgeIDToTransport map[uint64]uint64
+	transportAddrs    map[uint64]string
 	k8sControllers    map[uint64]bool
 }
 
@@ -86,6 +87,7 @@ func New(cfg Config, log *slog.Logger) (*Client, error) {
 		log:               log,
 		transportToEdgeID: make(map[uint64]uint64),
 		edgeIDToTransport: make(map[uint64]uint64),
+		transportAddrs:    make(map[uint64]string),
 		k8sControllers:    make(map[uint64]bool),
 	}, nil
 }
@@ -100,6 +102,7 @@ func newWithService(svc service, log *slog.Logger) *Client {
 		log:               log,
 		transportToEdgeID: make(map[uint64]uint64),
 		edgeIDToTransport: make(map[uint64]uint64),
+		transportAddrs:    make(map[uint64]string),
 		k8sControllers:    make(map[uint64]bool),
 	}
 }
@@ -125,6 +128,7 @@ func NewDisabled(log *slog.Logger) *Client {
 		log:               log,
 		transportToEdgeID: make(map[uint64]uint64),
 		edgeIDToTransport: make(map[uint64]uint64),
+		transportAddrs:    make(map[uint64]string),
 		k8sControllers:    make(map[uint64]bool),
 	}
 }
@@ -254,6 +258,10 @@ func (c *Client) Close() error {
 }
 
 func (c *Client) bindEdgeTransport(transportID, edgeID uint64) {
+	c.bindEdgeTransportAt(transportID, edgeID, "")
+}
+
+func (c *Client) bindEdgeTransportAt(transportID, edgeID uint64, addr string) {
 	if transportID == 0 || edgeID == 0 {
 		return
 	}
@@ -261,27 +269,57 @@ func (c *Client) bindEdgeTransport(transportID, edgeID uint64) {
 	defer c.mu.Unlock()
 	if prevEdgeID, ok := c.transportToEdgeID[transportID]; ok && prevEdgeID != edgeID {
 		delete(c.edgeIDToTransport, prevEdgeID)
+		delete(c.transportAddrs, transportID)
 	}
 	if prevTransportID, ok := c.edgeIDToTransport[edgeID]; ok && prevTransportID != transportID {
 		delete(c.transportToEdgeID, prevTransportID)
+		delete(c.transportAddrs, prevTransportID)
 	}
 	c.transportToEdgeID[transportID] = edgeID
 	c.edgeIDToTransport[edgeID] = transportID
+	if addr != "" {
+		c.transportAddrs[transportID] = addr
+	}
 }
 
 func (c *Client) unbindTransport(transportID uint64) {
+	c.unbindEdgeTransport(transportID, 0, "")
+}
+
+// unbindEdgeTransport removes only the currently active connection. Frontier
+// can deliver an old connection's offline event after a replacement connection
+// is already online; addr prevents that stale event from deleting the new
+// binding or marking the edge offline.
+func (c *Client) unbindEdgeTransport(transportID, canonicalEdgeID uint64, addr string) bool {
 	if transportID == 0 {
-		return
+		return false
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	edgeID, ok := c.transportToEdgeID[transportID]
-	if !ok {
-		return
+	mappedEdgeID, mapped := c.transportToEdgeID[transportID]
+	if mapped {
+		if canonicalEdgeID != 0 && canonicalEdgeID != mappedEdgeID {
+			return false
+		}
+		canonicalEdgeID = mappedEdgeID
+	}
+	if canonicalEdgeID == 0 {
+		return false
+	}
+	activeTransportID, active := c.edgeIDToTransport[canonicalEdgeID]
+	if active && activeTransportID != transportID {
+		return false
+	}
+	if activeAddr := c.transportAddrs[transportID]; activeAddr != "" && addr != "" && activeAddr != addr {
+		return false
 	}
 	delete(c.transportToEdgeID, transportID)
-	delete(c.edgeIDToTransport, edgeID)
-	delete(c.k8sControllers, edgeID)
+	delete(c.transportAddrs, transportID)
+	if active {
+		delete(c.edgeIDToTransport, canonicalEdgeID)
+	}
+	delete(c.k8sControllers, canonicalEdgeID)
+	return true
 }
 
 func (c *Client) setKubernetesController(edgeID uint64, enabled bool) {

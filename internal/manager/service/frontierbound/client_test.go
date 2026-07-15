@@ -387,6 +387,26 @@ func TestClient_BindAndUnbindTransport(t *testing.T) {
 	}
 }
 
+func TestClient_StaleOfflineDoesNotRemoveReplacementBinding(t *testing.T) {
+	c := newWithService(newFakeService(), slog.Default())
+	c.bindEdgeTransportAt(1001, 2, "10.0.0.1:10001")
+	c.bindEdgeTransportAt(1001, 2, "10.0.0.1:10002")
+
+	if c.unbindEdgeTransport(1001, 2, "10.0.0.1:10001") {
+		t.Fatal("stale offline event removed the replacement binding")
+	}
+	if got := c.canonicalizeEdgeID(1001); got != 2 {
+		t.Fatalf("canonicalizeEdgeID after stale offline = %d, want 2", got)
+	}
+
+	if !c.unbindEdgeTransport(1001, 2, "10.0.0.1:10002") {
+		t.Fatal("current offline event did not remove the active binding")
+	}
+	if got := c.canonicalizeEdgeID(1001); got != 0 {
+		t.Fatalf("canonicalizeEdgeID after current offline = %d, want 0", got)
+	}
+}
+
 func TestClient_KubernetesControllerStateTracksKnownNonController(t *testing.T) {
 	c := newWithService(newFakeService(), slog.Default())
 	c.setKubernetesController(2, false)

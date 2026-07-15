@@ -16,11 +16,11 @@ edgebound:
   listen:
     network: tcp
     addr: 0.0.0.0:40012
-  # When no idservice handler is registered, frontier allocates an edge id
-  # automatically. We don't run an idservice in ongrid (manager's GetEdgeID
-  # callback is registered on the dataplane SDK, not as a frontier service),
-  # so this stays true.
-  edgeid_alloc_when_no_idservice_on: true
+  # Ongrid's manager registers the GetEdgeID authentication RPC. Fail closed
+  # while that RPC is unavailable (for example during a restart), otherwise
+  # Frontier assigns an unauthenticated temporary ID that remains attached to
+  # the live edge connection after the manager recovers.
+  edgeid_alloc_when_no_idservice_on: false
 
 servicebound:
   listen:

@@ -58,7 +58,7 @@ web/dist/
 web/node_modules/
 web/tsconfig.tsbuildinfo
 /.playwright-cli/
-/output/playwright/
+/output/
 
 # Local dev artifacts (deploy/)
 deploy/docker-compose.override.yml

@@ -146,6 +146,39 @@ ensure_host_gateway_env() {
     log_warn "docker daemon does not support host-gateway; using ONGRID_HOST_GATEWAY=${gateway}"
 }
 
+preflight_runtime_images() {
+    local compose_file="$SCRIPT_DIR/docker-compose.yml"
+    [[ -f "$compose_file" ]] || {
+        log_error "upgrade package is missing docker-compose.yml"
+        return 1
+    }
+
+    local grafana_password images image
+    grafana_password=$(grep -E '^GRAFANA_ADMIN_PASSWORD=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
+    : "${grafana_password:=preflight-only}"
+    if ! images=$(GRAFANA_ADMIN_PASSWORD="$grafana_password" \
+        docker compose -f "$compose_file" --env-file "$ENV_FILE" config --images); then
+        log_error "new docker-compose.yml is invalid with the existing .env"
+        return 1
+    fi
+
+    while IFS= read -r image; do
+        [[ -n "$image" ]] || continue
+        case "$image" in
+            ongrid:*|ongrid-web:*) continue ;;
+        esac
+        if docker image inspect "$image" >/dev/null 2>&1; then
+            continue
+        fi
+        log_info "pulling required runtime image before stopping the old stack: $image"
+        if ! docker pull "$image"; then
+            log_error "required runtime image is unavailable: $image"
+            log_error "the existing stack was not stopped; fix registry access and retry"
+            return 1
+        fi
+    done <<<"$images"
+}
+
 trap 'log_error "upgrade failed at line $LINENO"' ERR
 
 if [[ $EUID -ne 0 ]]; then
@@ -181,6 +214,39 @@ log_info "new version: ${NEW_VERSION}"
 
 OLD_VERSION=$(grep -E '^ONGRID_VERSION=' "$ENV_FILE" | cut -d= -f2- | tr -d '[:space:]' || true)
 log_info "old version: ${OLD_VERSION:-unknown}"
+
+# Validate and load release-owned images before stopping the existing stack.
+# A corrupt package or unavailable upstream runtime image must not turn a
+# recoverable upgrade error into service downtime.
+if [[ -f "$SCRIPT_DIR/images/ongrid.tar" ]]; then
+    log_info "loading ongrid:${NEW_VERSION} image"
+    docker load -i "$SCRIPT_DIR/images/ongrid.tar"
+else
+    log_warn "images/ongrid.tar not found; assuming ongrid:${NEW_VERSION} already present"
+fi
+if [[ -f "$SCRIPT_DIR/images/frontier.tar" ]]; then
+    log_info "loading frontier broker image"
+    docker load -i "$SCRIPT_DIR/images/frontier.tar"
+else
+    log_warn "images/frontier.tar not found; assuming frontier image already present"
+fi
+if [[ -f "$SCRIPT_DIR/images/ongrid-web.tar" ]]; then
+    log_info "loading ongrid-web (frontend + nginx) image"
+    docker load -i "$SCRIPT_DIR/images/ongrid-web.tar"
+else
+    log_warn "images/ongrid-web.tar not found; assuming ongrid-web image already present"
+fi
+docker image inspect "ongrid:${NEW_VERSION}" >/dev/null 2>&1 || {
+    log_error "ongrid:${NEW_VERSION} not present after docker load"
+    log_error "the existing stack was not stopped; repair the upgrade package and retry"
+    exit 1
+}
+docker image inspect "ongrid-web:${NEW_VERSION}" >/dev/null 2>&1 || {
+    log_error "ongrid-web:${NEW_VERSION} not present after docker load"
+    log_error "the existing stack was not stopped; repair the upgrade package and retry"
+    exit 1
+}
+preflight_runtime_images
 
 # Stop stack first so legacy named volumes (if any) aren't being written
 # to during migration, and so bind-mount paths can be safely chowned.
@@ -427,31 +493,6 @@ if [[ -d "$SCRIPT_DIR/edge" ]]; then
         done
     fi
 fi
-
-# Load new ongrid (manager) and frontier (broker) images. Both ship in the
-# tarball (ADR-007); upstream Docker Hub pull is not relied upon.
-if [[ -f "$SCRIPT_DIR/images/ongrid.tar" ]]; then
-    log_info "loading ongrid:${NEW_VERSION} image"
-    docker load -i "$SCRIPT_DIR/images/ongrid.tar"
-else
-    log_warn "images/ongrid.tar not found; assuming ongrid:${NEW_VERSION} already present"
-fi
-if [[ -f "$SCRIPT_DIR/images/frontier.tar" ]]; then
-    log_info "loading frontier broker image"
-    docker load -i "$SCRIPT_DIR/images/frontier.tar"
-else
-    log_warn "images/frontier.tar not found; assuming frontier image already present"
-fi
-if [[ -f "$SCRIPT_DIR/images/ongrid-web.tar" ]]; then
-    log_info "loading ongrid-web (frontend + nginx) image"
-    docker load -i "$SCRIPT_DIR/images/ongrid-web.tar"
-else
-    log_warn "images/ongrid-web.tar not found; assuming ongrid-web image already present"
-fi
-docker image inspect "ongrid:${NEW_VERSION}" >/dev/null 2>&1 || {
-    log_error "ongrid:${NEW_VERSION} not present after docker load"
-    exit 1
-}
 
 # Bump ONGRID_VERSION in .env only.
 sed -i.bak -E "s|^ONGRID_VERSION=.*|ONGRID_VERSION=${NEW_VERSION}|" "$ENV_FILE"

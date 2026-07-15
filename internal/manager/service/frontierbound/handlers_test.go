@@ -57,6 +57,18 @@ func (f *fakeMetricIngester) Push(_ context.Context, _ uint64, _ []tunnel.HostMe
 	return nil
 }
 
+type fakeEdgeAuthenticator struct {
+	edgeID uint64
+	err    error
+}
+
+func (f fakeEdgeAuthenticator) Authenticate(_ context.Context, _, _ string) (tunnel.Session, error) {
+	if f.err != nil {
+		return tunnel.Session{}, f.err
+	}
+	return tunnel.Session{EdgeID: f.edgeID}, nil
+}
+
 // fakeDeviceResolver resolves edge_id -> device_id. By default it returns
 // the edge_id itself (1:1, simulating a present host junction) so push
 // tests reach the ingester. Set err (or id) to exercise the
@@ -215,7 +227,7 @@ func (f *fakeK8sInventoryIngester) IngestInventory(_ context.Context, edgeID uin
 
 // installAndDispatch runs Install on a fakeService-backed Client, then
 // returns the registered RPC for `method`. Tests call it like a function.
-func installAndDispatch(t *testing.T, w Wiring) (*fakeService, geminio.RPC) {
+func installAndDispatch(t *testing.T, w Wiring) (*fakeService, *Client, geminio.RPC) {
 	t.Helper()
 	fs := newFakeService()
 	c := newWithService(fs, slog.Default())
@@ -243,7 +255,64 @@ func installAndDispatch(t *testing.T, w Wiring) (*fakeService, geminio.RPC) {
 	if !ok {
 		t.Fatalf("push_prom_samples not registered")
 	}
-	return fs, rpc
+	return fs, c, rpc
+}
+
+func TestInstall_RegisterEdgeRepairsBindingFromAuthenticatedClientID(t *testing.T) {
+	fs := newFakeService()
+	c := newWithService(fs, slog.Default())
+	w := Wiring{
+		EdgeAuthn:      fakeEdgeAuthenticator{edgeID: 99},
+		EdgeUC:         &edgebiz.Usecase{},
+		MetricIngester: &fakeMetricIngester{},
+		Log:            slog.Default(),
+	}
+	if err := Install(context.Background(), c, w); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	body, err := json.Marshal(tunnel.RegisterEdgeRequest{
+		HostInfo: tunnel.HostInfo{Hostname: "node-a"},
+	})
+	if err != nil {
+		t.Fatalf("marshal register request: %v", err)
+	}
+	rsp := &fakeResp{}
+	fs.rpcs[tunnel.MethodRegisterEdge](context.Background(), &fakeReq{data: body, clientID: 42}, rsp)
+
+	// The zero-value Usecase intentionally fails after authentication. The
+	// transport binding must already be repaired before persistence runs.
+	if rsp.err == nil {
+		t.Fatal("register_edge unexpectedly succeeded with an unwired usecase")
+	}
+	if got := c.canonicalizeEdgeID(42); got != 42 {
+		t.Fatalf("canonicalizeEdgeID(42) = %d, want authenticated edge 42", got)
+	}
+}
+
+func TestInstall_RegisterEdgeRejectsMissingAuthenticatedClientID(t *testing.T) {
+	fs := newFakeService()
+	c := newWithService(fs, slog.Default())
+	w := Wiring{
+		EdgeAuthn:      fakeEdgeAuthenticator{edgeID: 42},
+		EdgeUC:         &edgebiz.Usecase{},
+		MetricIngester: &fakeMetricIngester{},
+		Log:            slog.Default(),
+	}
+	if err := Install(context.Background(), c, w); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	body, err := json.Marshal(tunnel.RegisterEdgeRequest{})
+	if err != nil {
+		t.Fatalf("marshal register request: %v", err)
+	}
+	rsp := &fakeResp{}
+	fs.rpcs[tunnel.MethodRegisterEdge](context.Background(), &fakeReq{data: body}, rsp)
+	if rsp.err == nil {
+		t.Fatal("register_edge accepted a missing authenticated client ID")
+	}
+	if got := c.canonicalizeEdgeID(42); got != 0 {
+		t.Fatalf("missing client ID created edge binding %d", got)
+	}
 }
 
 func TestInstall_GetPluginConfigs_UsesResolvedDeviceIDAsWireLabelID(t *testing.T) {
@@ -300,12 +369,9 @@ func TestInstall_GetPluginConfigs_UsesResolvedDeviceIDAsWireLabelID(t *testing.T
 
 func TestInstall_PushPromSamples_HappyPath(t *testing.T) {
 	pi := &fakePromIngester{}
-	_, rpc := installAndDispatch(t, Wiring{PromIngester: pi, Log: slog.Default()})
+	_, c, rpc := installAndDispatch(t, Wiring{PromIngester: pi, Log: slog.Default()})
+	c.bindEdgeTransport(42, 42)
 
-	// EdgeID in body establishes the canonical binding (mirrors the
-	// real edge agent flow after register_edge succeeds). Without this,
-	// canonicalizeEdgeID returns 0 and the handler correctly drops the
-	// request — see TestInstall_PushPromSamples_DropsBeforeRegister.
 	body, _ := json.Marshal(tunnel.PushPromSamplesRequest{
 		EdgeID: 42,
 		Source: "embedded:gopsutil",
@@ -344,9 +410,9 @@ func TestInstall_PushPromSamples_HappyPath(t *testing.T) {
 	}
 }
 
-func TestInstall_PushPromSamples_BindsCanonicalEdgeIDFromBody(t *testing.T) {
+func TestInstall_PushPromSamples_DoesNotTrustUnboundBodyEdgeID(t *testing.T) {
 	pi := &fakePromIngester{}
-	_, rpc := installAndDispatch(t, Wiring{PromIngester: pi, Log: slog.Default()})
+	_, _, rpc := installAndDispatch(t, Wiring{PromIngester: pi, Log: slog.Default()})
 
 	body, _ := json.Marshal(tunnel.PushPromSamplesRequest{
 		EdgeID: 2,
@@ -362,8 +428,8 @@ func TestInstall_PushPromSamples_BindsCanonicalEdgeIDFromBody(t *testing.T) {
 	if rsp.err != nil {
 		t.Fatalf("rpc returned error: %v", rsp.err)
 	}
-	if pi.gotEdge != 2 {
-		t.Fatalf("edgeID = %d, want 2", pi.gotEdge)
+	if pi.pushCnt != 0 {
+		t.Fatalf("unbound request reached ingester %d times", pi.pushCnt)
 	}
 }
 
@@ -419,11 +485,9 @@ func TestInstall_PushK8sInventory_IgnoresBodyEdgeID(t *testing.T) {
 
 func TestInstall_PushPromSamples_IngesterError(t *testing.T) {
 	pi := &fakePromIngester{wantErr: errors.New("prom down")}
-	_, rpc := installAndDispatch(t, Wiring{PromIngester: pi, Log: slog.Default()})
+	_, c, rpc := installAndDispatch(t, Wiring{PromIngester: pi, Log: slog.Default()})
+	c.bindEdgeTransport(1, 1)
 
-	// EdgeID in body so canonicalizeEdgeID resolves; otherwise the
-	// pre-register drop path short-circuits before reaching the
-	// ingester (see v0.7.39 fix for ghost edge_id label leak).
 	body, _ := json.Marshal(tunnel.PushPromSamplesRequest{
 		EdgeID:  1,
 		Source:  "embedded",
@@ -441,11 +505,12 @@ func TestInstall_PushPromSamples_IngesterError(t *testing.T) {
 // the device_id label). The ingester must not be called.
 func TestInstall_PushPromSamples_DropsWhenDeviceUnresolved(t *testing.T) {
 	pi := &fakePromIngester{}
-	_, rpc := installAndDispatch(t, Wiring{
+	_, c, rpc := installAndDispatch(t, Wiring{
 		PromIngester:   pi,
 		DeviceResolver: &fakeDeviceResolver{err: errors.New("no host junction")},
 		Log:            slog.Default(),
 	})
+	c.bindEdgeTransport(1, 5)
 	body, _ := json.Marshal(tunnel.PushPromSamplesRequest{
 		EdgeID:  5,
 		Source:  "embedded",
@@ -463,12 +528,13 @@ func TestInstall_PushPromSamples_DropsWhenDeviceUnresolved(t *testing.T) {
 
 func TestInstall_PushPromSamples_RoutesK8sControllerWithoutDeviceID(t *testing.T) {
 	pi := &fakePromIngester{}
-	_, rpc := installAndDispatch(t, Wiring{
+	_, c, rpc := installAndDispatch(t, Wiring{
 		PromIngester:   pi,
 		DeviceResolver: &fakeDeviceResolver{err: errors.New("no host junction")},
 		K8sRegistry:    fakeK8sRegistry{clusterID: 7},
 		Log:            slog.Default(),
 	})
+	c.bindEdgeTransport(41, 41)
 	body, _ := json.Marshal(tunnel.PushPromSamplesRequest{
 		EdgeID:  41,
 		Source:  "k8s:kube-state-metrics",
@@ -505,12 +571,13 @@ func TestInstall_PushPromSamples_RoutesK8sControllerWithoutDeviceID(t *testing.T
 
 func TestInstall_PushPromSamples_K8sSourceBypassesHostDeviceID(t *testing.T) {
 	pi := &fakePromIngester{}
-	_, rpc := installAndDispatch(t, Wiring{
+	_, c, rpc := installAndDispatch(t, Wiring{
 		PromIngester:   pi,
 		DeviceResolver: &fakeDeviceResolver{id: 3},
 		K8sRegistry:    fakeK8sRegistry{clusterID: 7},
 		Log:            slog.Default(),
 	})
+	c.bindEdgeTransport(41, 41)
 	body, _ := json.Marshal(tunnel.PushPromSamplesRequest{
 		EdgeID:  41,
 		Source:  "k8s:kube-state-metrics",
@@ -534,7 +601,7 @@ func TestInstall_PushPromSamples_K8sSourceBypassesHostDeviceID(t *testing.T) {
 
 func TestInstall_PushPromSamples_NilIngesterSilentlyAccepts(t *testing.T) {
 	// Wiring.PromIngester == nil => Prom disabled.
-	_, rpc := installAndDispatch(t, Wiring{PromIngester: nil, Log: slog.Default()})
+	_, _, rpc := installAndDispatch(t, Wiring{PromIngester: nil, Log: slog.Default()})
 
 	body, _ := json.Marshal(tunnel.PushPromSamplesRequest{
 		Source: "embedded",
@@ -559,7 +626,7 @@ func TestInstall_PushPromSamples_NilIngesterSilentlyAccepts(t *testing.T) {
 
 func TestInstall_PushPromSamples_BadBody(t *testing.T) {
 	pi := &fakePromIngester{}
-	_, rpc := installAndDispatch(t, Wiring{PromIngester: pi, Log: slog.Default()})
+	_, _, rpc := installAndDispatch(t, Wiring{PromIngester: pi, Log: slog.Default()})
 
 	rsp := &fakeResp{}
 	rpc(context.Background(), &fakeReq{data: []byte("not-json"), clientID: 1}, rsp)
