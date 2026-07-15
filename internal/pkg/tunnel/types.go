@@ -97,9 +97,8 @@ type Client interface {
 	// has fully reconnected (TCP + geminio + handlers re-primed).
 	// Multiple callbacks may be registered; they run sequentially.
 	// Used by the edge agent to re-issue register_edge so the cloud
-	// re-binds canonical edge_id on the new transport. Callbacks are
-	// invoked synchronously from the reconnect goroutine — they
-	// must not block on tunnel calls or they will deadlock.
+	// re-binds canonical edge_id on the new transport. Callbacks run
+	// asynchronously after the underlying reconnect lock is released.
 	OnReconnect(fn func())
 	// Close terminates the connection and stops further retries.
 	Close() error

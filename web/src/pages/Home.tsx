@@ -22,7 +22,7 @@ import { PromptCard } from '@/components/PromptCard';
 import { StatusRow } from '@/components/StatusRow';
 import { createSession, listModels, type LLMProvider } from '@/api/chat';
 import { setSetting, invalidateLLMRouter } from '@/api/settings';
-import { listEdges } from '@/api/edges';
+import { listDevices } from '@/api/devices';
 import { useI18n } from '@/i18n/locale';
 
 // Hero 标语 —— 全部走"助理向用户报到"语气：听候差遣 / 今天能做些什么 /
@@ -147,7 +147,7 @@ export default function HomePage() {
   const [draft, setDraft] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [edgeTotal, setEdgeTotal] = useState<number | null>(null);
+  const [deviceTotal, setDeviceTotal] = useState<number | null>(null);
   const [providers, setProviders] = useState<LLMProvider[]>([]);
   // Model selection lives in a persisted store (shared with ChatThread), so a
   // pick survives navigation + reload and the launched session inherits it.
@@ -167,13 +167,13 @@ export default function HomePage() {
 
   useEffect(() => {
     let cancelled = false;
-    listEdges()
+    listDevices()
       .then((r) => {
-        if (!cancelled) setEdgeTotal(r.total ?? r.items?.length ?? 0);
+        if (!cancelled) setDeviceTotal(r.total ?? r.items?.length ?? 0);
       })
       .catch(() => {
         // On failure, assume servers exist so we don't show the empty-state CTA on a transient error.
-        if (!cancelled) setEdgeTotal(null);
+        if (!cancelled) setDeviceTotal(null);
       });
     listModels()
       .then((cat) => {
@@ -244,7 +244,7 @@ export default function HomePage() {
     }
   }
 
-  const showEmptyState = edgeTotal === 0;
+  const showEmptyState = deviceTotal === 0;
 
   return (
     <main className="flex flex-1 flex-col overflow-hidden">

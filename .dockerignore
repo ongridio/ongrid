@@ -5,6 +5,7 @@
 local/
 .cache/
 tmp/
+output/
 
 bin/
 dist/stage/

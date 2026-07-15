@@ -1,0 +1,153 @@
+{{- $controllerMetrics := default dict .Values.controller.metrics -}}
+{{- $k8sMetricsEndpoint := include "ongrid-edge.k8sMetricsEndpoint" . -}}
+{{- $telemetryGatewayEnabled := eq (include "ongrid-edge.telemetryGatewayEnabled" .) "true" -}}
+{{- if ne (int .Values.controller.replicas) 1 -}}
+{{- fail "controller.replicas must be 1 until controller leader election is implemented" -}}
+{{- end -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ongrid-edge.fullname" . }}-controller
+  namespace: {{ include "ongrid-edge.namespace" . }}
+  labels:
+    {{- include "ongrid-edge.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+spec:
+  replicas: {{ .Values.controller.replicas }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "ongrid-edge.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: controller
+  template:
+    metadata:
+      labels:
+        {{- include "ongrid-edge.labels" . | nindent 8 }}
+        app.kubernetes.io/component: controller
+    spec:
+      serviceAccountName: {{ include "ongrid-edge.controllerServiceAccount" . }}
+      {{- with .Values.image.architecture }}
+      nodeSelector:
+        kubernetes.io/arch: {{ . | quote }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: {{ .Values.podSecurity.runAsNonRoot }}
+        runAsUser: {{ .Values.podSecurity.runAsUser }}
+        runAsGroup: {{ .Values.podSecurity.runAsGroup }}
+        fsGroup: {{ .Values.podSecurity.fsGroup }}
+      containers:
+        - name: edge-controller
+          image: {{ include "ongrid-edge.image" . | quote }}
+          imagePullPolicy: {{ default "IfNotPresent" .Values.image.pullPolicy }}
+          workingDir: /
+          {{- if $telemetryGatewayEnabled }}
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+              protocol: TCP
+            - name: otlp-http
+              containerPort: 4318
+              protocol: TCP
+          {{- end }}
+          env:
+            - name: ONGRID_EDGE_MODE
+              value: k8s-controller
+            - name: ONGRID_K8S_ROLE
+              value: "controller"
+            - name: ONGRID_K8S_MODE
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-config
+                  key: mode
+            - name: ONGRID_K8S_CLUSTER_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-controller-bootstrap
+                  key: cluster-id
+            - name: ONGRID_K8S_BOOTSTRAP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-controller-bootstrap
+                  key: bootstrap-token
+            - name: ONGRID_K8S_CREDENTIAL_SECRET
+              value: {{ include "ongrid-edge.controllerCredentialSecretName" . | quote }}
+            - name: ONGRID_MANAGER_PUBLIC_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-config
+                  key: manager-public-url
+            - name: ONGRID_EDGE_CLOUD_ADDR
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-config
+                  key: manager-tunnel-addr
+            - name: ONGRID_K8S_ENROLL_TLS_INSECURE
+              value: {{ .Values.manager.tlsInsecure | quote }}
+            {{- if $telemetryGatewayEnabled }}
+            - name: ONGRID_K8S_TELEMETRY_GATEWAY_ENABLED
+              value: "true"
+            {{- end }}
+            - name: ONGRID_K8S_INVENTORY_WATCH
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-config
+                  key: k8s-inventory-watch
+            - name: ONGRID_K8S_INVENTORY_INTERVAL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-config
+                  key: k8s-inventory-full-sync-interval
+            - name: ONGRID_K8S_APP_METRICS_DISCOVERY
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-config
+                  key: k8s-app-metrics-discovery
+            - name: ONGRID_K8S_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: ONGRID_K8S_POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: ONGRID_K8S_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            {{- if and (eq (include "ongrid-edge.k8sMetricsEnabled" .) "true") $k8sMetricsEndpoint }}
+            - name: ONGRID_K8S_METRICS_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-config
+                  key: k8s-metrics-endpoint
+            - name: ONGRID_K8S_METRICS_INTERVAL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-config
+                  key: k8s-metrics-interval
+            - name: ONGRID_K8S_METRICS_TIMEOUT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-config
+                  key: k8s-metrics-timeout
+            - name: ONGRID_K8S_METRICS_SAMPLE_LIMIT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-config
+                  key: k8s-metrics-sample-limit
+            {{- end }}
+          resources:
+            {{- toYaml .Values.controller.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: edge-state
+              mountPath: /var/lib/ongrid-edge
+      volumes:
+        - name: edge-state
+          emptyDir: {}

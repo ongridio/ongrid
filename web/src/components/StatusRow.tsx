@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Activity, AlertTriangle, MessageSquare, Coins, PowerOff } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import type { IconType } from '@/lib/icon';
-import { listEdges, type Edge } from '@/api/edges';
+import { listDevices, type Device } from '@/api/devices';
 import { listSessions, type ChatSession } from '@/api/chat';
 import { request } from '@/api/client';
 import { useIncidentBadge } from '@/store/incidentBadge';
@@ -50,8 +50,8 @@ function formatTokens(n: number): string {
 export function StatusRow() {
   const { tr } = useI18n();
   const navigate = useNavigate();
-  const [edges, setEdges] = useState<Edge[] | null>(null);
-  const [edgesError, setEdgesError] = useState(false);
+  const [devices, setDevices] = useState<Device[] | null>(null);
+  const [devicesError, setDevicesError] = useState(false);
   const [sessions, setSessions] = useState<ChatSession[] | null>(null);
   const [sessionsError, setSessionsError] = useState(false);
   const [usage, setUsage] = useState<UsageToday | null>(null);
@@ -66,17 +66,18 @@ export function StatusRow() {
     let cancelled = false;
 
     async function tick() {
-      // edges
+      // Only registered devices count here. A newly created Edge is an
+      // enrollment credential until its agent completes first registration.
       try {
-        const r = await listEdges();
+        const r = await listDevices();
         if (!cancelled) {
-          setEdges(r.items ?? []);
-          setEdgesError(false);
+          setDevices(r.items ?? []);
+          setDevicesError(false);
         }
       } catch {
         if (!cancelled) {
-          setEdgesError(true);
-          setEdges(null);
+          setDevicesError(true);
+          setDevices(null);
         }
       }
 
@@ -122,9 +123,9 @@ export function StatusRow() {
 
   const pills: PillState[] = [];
 
-  if (edges && !edgesError) {
-    const total = edges.length;
-    const online = edges.filter((e) => e.status === 'online').length;
+  if (devices && !devicesError) {
+    const total = devices.length;
+    const online = devices.filter((device) => device.online === true).length;
     const offline = total - online;
     if (total > 0) {
       pills.push({
@@ -187,7 +188,7 @@ export function StatusRow() {
   }
 
   // First-render shimmer: nothing fetched yet at all.
-  const initialLoading = edges === null && sessions === null;
+  const initialLoading = devices === null && sessions === null;
 
   if (initialLoading) {
     return (

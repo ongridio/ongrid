@@ -155,6 +155,11 @@ services:
       # plugin endpoints — edges can't push logs/traces. install.sh
       # populates from operator's domain at first run.
       ONGRID_PUBLIC_URL: ${ONGRID_PUBLIC_URL:-}
+      ONGRID_TUNNEL_ADDR: ${ONGRID_TUNNEL_ADDR:-}
+      ONGRID_K8S_CHART_REF: ${ONGRID_K8S_CHART_REF:-}
+      ONGRID_K8S_EVENT_RETENTION: ${ONGRID_K8S_EVENT_RETENTION:-24h}
+      ONGRID_K8S_EVENT_MAX_PER_CLUSTER: ${ONGRID_K8S_EVENT_MAX_PER_CLUSTER:-5000}
+      ONGRID_K8S_EVENT_CLEANUP_INTERVAL: ${ONGRID_K8S_EVENT_CLEANUP_INTERVAL:-1h}
       # Grafana first-boot seed: manager uses this URL to call Grafana
       # over the docker network. Admin overrides it in the UI for an
       # external Grafana. The /grafana sub-path matches GF_SERVER_SERVE_FROM_SUB_PATH.
@@ -372,7 +377,7 @@ services:
   # host. Edges push to nginx /v1/traces with auth_request → manager
   # edgeauth (ADR-014 §决策第 1 条); manager Go is NOT on this byte stream.
   tempo:
-    image: grafana/tempo:2.5.0
+    image: grafana/tempo:2.10.0
     container_name: ongrid-tempo
     restart: unless-stopped
     command:

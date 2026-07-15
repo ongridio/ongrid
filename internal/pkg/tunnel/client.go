@@ -18,6 +18,7 @@ import (
 
 	"github.com/singchia/geminio"
 	gclient "github.com/singchia/geminio/client"
+	"github.com/singchia/geminio/delegate"
 )
 
 // NewClient returns a Client backed by github.com/singchia/geminio. The
@@ -46,17 +47,35 @@ type geminioClient struct {
 	handlersMu sync.RWMutex
 	handlers   map[string]Handler
 
-	// reconnectCallbacks fire after a successful auto-reconnect (broker
-	// route invalidation -> redial). They let the agent re-register_edge
-	// without each Call site having to detect tunnel-layer errors.
+	// reconnectCallbacks fire after RetryEnd has restored a lost transport.
+	// They let the agent re-register_edge on the replacement connection.
 	reconnectMu        sync.Mutex
 	reconnectCallbacks []func()
-	reconnecting       atomic.Bool
+	reconnectRunMu     sync.Mutex
 
 	endPtr atomic.Pointer[geminio.End]
 
+	connMu            sync.Mutex
+	activeConn        net.Conn
+	activeGeneration  uint64
+	pendingConn       net.Conn
+	pendingGeneration uint64
+	nextGeneration    uint64
+
 	closeOnce sync.Once
 	closed    atomic.Bool
+}
+
+type retryDelegate struct {
+	*delegate.UnimplementedDelegate
+	client *geminioClient
+}
+
+func (d *retryDelegate) EndReOnline(_ delegate.ClientDescriber) {
+	d.client.promotePendingConnection()
+	// RetryEnd calls this while its reconnect lock is held. A callback may
+	// issue RPCs, so run it after the reinitialisation stack has unwound.
+	go d.client.fireReconnectCallbacks()
 }
 
 // Dial attempts to establish the connection, retrying with exponential
@@ -93,9 +112,14 @@ func (c *geminioClient) Dial(ctx context.Context) error {
 
 		opt := gclient.NewEndOptions()
 		opt.SetMeta(meta)
+		opt.SetDelegate(&retryDelegate{
+			UnimplementedDelegate: &delegate.UnimplementedDelegate{},
+			client:                c,
+		})
 
 		end, derr := gclient.NewRetryEndWithDialer(dialer, opt)
 		if derr == nil {
+			c.promotePendingConnection()
 			c.endPtr.Store(&end)
 			// Re-apply any previously registered handlers. Subsequent
 			// reconnects are handled inside geminio (RetryEnd memorizes
@@ -150,7 +174,11 @@ func (c *geminioClient) buildDialer() (gclient.Dialer, error) {
 	if caFile == "" {
 		d := &net.Dialer{Timeout: 10 * time.Second}
 		return func() (net.Conn, error) {
-			return d.Dial("tcp", addr)
+			conn, err := d.Dial("tcp", addr)
+			if err == nil {
+				c.trackConnection(conn)
+			}
+			return conn, err
 		}, nil
 	}
 	pem, err := os.ReadFile(caFile)
@@ -171,7 +199,9 @@ func (c *geminioClient) buildDialer() (gclient.Dialer, error) {
 		if err != nil {
 			return nil, err
 		}
-		return tls.Client(raw, tlsCfg), nil
+		conn := tls.Client(raw, tlsCfg)
+		c.trackConnection(conn)
+		return conn, nil
 	}, nil
 }
 
@@ -208,13 +238,9 @@ func (c *geminioClient) registerOn(end geminio.End, method string, h Handler) er
 	return end.Register(context.Background(), method, wrapper)
 }
 
-// Call invokes an RPC on the cloud side. Returns the network / remote
-// error as-is. When the error matches a frontier broker-route-invalidation
-// pattern (manager restart cleared the route table while edge's TCP
-// session is still alive), Call kicks off an async reconnect and fires
-// OnReconnect callbacks once the new End is up. The current call still
-// returns its error to the caller; the next periodic tick gets a healthy
-// tunnel.
+// Call invokes an RPC on the cloud side and returns network or remote
+// errors as-is. RetryEnd owns transport recovery; application errors must
+// not force a second connection while the current transport is still live.
 func (c *geminioClient) Call(ctx context.Context, method string, req, resp any) error {
 	end := c.loadEnd()
 	if end == nil {
@@ -224,13 +250,14 @@ func (c *geminioClient) Call(ctx context.Context, method string, req, resp any) 
 	if err != nil {
 		return fmt.Errorf("marshal %q req: %w", method, err)
 	}
+	connGeneration := c.connectionGeneration()
 	rsp, callErr := end.Call(ctx, method, end.NewRequest(body))
 	if callErr != nil {
-		c.maybeKickReconnect(callErr)
+		c.recycleBrokenRoute(method, callErr, connGeneration)
 		return fmt.Errorf("tunnel call %q: %w", method, callErr)
 	}
 	if rerr := rsp.Error(); rerr != nil {
-		c.maybeKickReconnect(rerr)
+		c.recycleBrokenRoute(method, rerr, connGeneration)
 		return fmt.Errorf("tunnel call %q: remote: %w", method, rerr)
 	}
 	if resp == nil {
@@ -242,10 +269,100 @@ func (c *geminioClient) Call(ctx context.Context, method string, req, resp any) 
 	return nil
 }
 
-// OnReconnect registers a callback fired after each successful tunnel
-// reconnect triggered by Call's error inspection. Safe for concurrent
-// registration; callbacks fire in registration order, sequentially,
-// from the reconnect goroutine.
+func (c *geminioClient) trackConnection(conn net.Conn) {
+	if conn == nil {
+		return
+	}
+	c.connMu.Lock()
+	if c.closed.Load() {
+		c.connMu.Unlock()
+		if err := conn.Close(); err != nil {
+			c.log.Debug("tunnel: close connection created after shutdown", slog.Any("err", err))
+		}
+		return
+	}
+	c.nextGeneration++
+	c.pendingConn = conn
+	c.pendingGeneration = c.nextGeneration
+	c.connMu.Unlock()
+}
+
+// promotePendingConnection is called only after RetryEnd has atomically
+// switched to the new underlying End. Until then RPCs keep the generation of
+// the old active connection and cannot accidentally recycle the new candidate.
+func (c *geminioClient) promotePendingConnection() {
+	c.connMu.Lock()
+	if c.pendingConn == nil {
+		c.connMu.Unlock()
+		return
+	}
+	conn := c.pendingConn
+	if c.closed.Load() {
+		c.pendingConn = nil
+		c.pendingGeneration = 0
+		c.connMu.Unlock()
+		if err := conn.Close(); err != nil {
+			c.log.Debug("tunnel: close pending connection after shutdown", slog.Any("err", err))
+		}
+		return
+	}
+	c.activeConn = conn
+	c.activeGeneration = c.pendingGeneration
+	c.pendingConn = nil
+	c.pendingGeneration = 0
+	c.connMu.Unlock()
+}
+
+func (c *geminioClient) connectionGeneration() uint64 {
+	c.connMu.Lock()
+	defer c.connMu.Unlock()
+	return c.activeGeneration
+}
+
+// recycleBrokenRoute closes only the connection that produced a permanent
+// Frontier routing error. RetryEnd observes the close and performs the single
+// serialized reconnect; this avoids the parallel-End race caused by manually
+// constructing a second RetryEnd while the first transport was still alive.
+func (c *geminioClient) recycleBrokenRoute(method string, err error, generation uint64) {
+	if !shouldRecycleBrokenRoute(method, err) || c.closed.Load() {
+		return
+	}
+	c.connMu.Lock()
+	if generation == 0 || generation != c.activeGeneration || c.activeConn == nil {
+		c.connMu.Unlock()
+		return
+	}
+	conn := c.activeConn
+	c.activeConn = nil
+	c.connMu.Unlock()
+
+	c.log.Warn("tunnel: frontier route is stale; recycling transport",
+		slog.String("method", method),
+		slog.Any("err", err),
+	)
+	if closeErr := conn.Close(); closeErr != nil {
+		c.log.Debug("tunnel: close stale transport", slog.Any("err", closeErr))
+	}
+}
+
+func shouldRecycleBrokenRoute(method string, err error) bool {
+	if err == nil || (method != MethodRegisterEdge && method != MethodHeartbeat) {
+		return false
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "no such rpc: "+method) || strings.Contains(msg, "mismatch clientID") {
+		return true
+	}
+	if method == MethodRegisterEdge {
+		return strings.Contains(msg, "register_edge: get edge: not found")
+	}
+	return strings.Contains(msg, "heartbeat: edge binding not ready; re-register required") ||
+		strings.Contains(msg, "heartbeat: edge id mismatch")
+}
+
+// OnReconnect registers a callback fired after RetryEnd restores a lost
+// transport and re-primes local handlers. Safe for concurrent registration;
+// callbacks fire in registration order and outside RetryEnd's reconnect lock.
 func (c *geminioClient) OnReconnect(fn func()) {
 	if fn == nil {
 		return
@@ -254,53 +371,13 @@ func (c *geminioClient) OnReconnect(fn func()) {
 	c.reconnectCallbacks = append(c.reconnectCallbacks, fn)
 	c.reconnectMu.Unlock()
 }
-
-// maybeKickReconnect inspects an RPC error and, if it matches a
-// broker-route-invalidation pattern, dispatches an async reconnect.
-// At most one reconnect goroutine runs at a time (gated by reconnecting
-// CAS); concurrent failures collapse to a single recovery attempt.
-func (c *geminioClient) maybeKickReconnect(err error) {
-	if err == nil || !shouldReconnect(err) {
-		return
-	}
-	if c.closed.Load() {
-		return
-	}
-	if !c.reconnecting.CompareAndSwap(false, true) {
-		return
-	}
-	go func() {
-		defer c.reconnecting.Store(false)
-		c.log.Warn("tunnel: broker reports route invalidation; reconnecting",
-			slog.String("reason", err.Error()),
-		)
-		// Independent ctx — caller's per-RPC ctx may already be cancelled.
-		// 90s ceiling matches the dial backoff cap (60s) plus margin.
-		rctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-		defer cancel()
-		if rerr := c.redial(rctx); rerr != nil {
-			c.log.Warn("tunnel: reconnect failed", slog.Any("err", rerr))
-			return
-		}
-		c.fireReconnectCallbacks()
-	}()
-}
-
-// redial closes the current end (if any) and re-runs Dial. Internal — the
-// public surface does not expose explicit reconnect; callers go through
-// OnReconnect callbacks for the after-reconnect hook.
-func (c *geminioClient) redial(ctx context.Context) error {
-	if c.closed.Load() {
-		return errors.New("tunnel: client closed")
-	}
-	if old := c.loadEnd(); old != nil {
-		_ = old.Close()
-		c.endPtr.Store(nil)
-	}
-	return c.Dial(ctx)
-}
-
 func (c *geminioClient) fireReconnectCallbacks() {
+	c.reconnectRunMu.Lock()
+	defer c.reconnectRunMu.Unlock()
+
+	if c.closed.Load() {
+		return
+	}
 	c.reconnectMu.Lock()
 	cbs := append([]func(){}, c.reconnectCallbacks...)
 	c.reconnectMu.Unlock()
@@ -321,15 +398,6 @@ func (c *geminioClient) fireReconnectCallbacks() {
 	}
 }
 
-// shouldReconnect returns true when the upstream error indicates frontier
-// has lost the route to a manager (post-manager-restart) and a fresh dial
-// is required. geminio's own RetryEnd handles TCP-level disconnects.
-func shouldReconnect(err error) bool {
-	msg := err.Error()
-	return strings.Contains(msg, "not found") ||
-		strings.Contains(msg, "mismatch clientID")
-}
-
 // Close terminates the connection and stops further reconnects.
 func (c *geminioClient) Close() error {
 	var closeErr error
@@ -337,6 +405,18 @@ func (c *geminioClient) Close() error {
 		c.closed.Store(true)
 		if end := c.loadEnd(); end != nil {
 			closeErr = end.Close()
+		}
+		c.connMu.Lock()
+		pending := c.pendingConn
+		c.pendingConn = nil
+		c.pendingGeneration = 0
+		c.activeConn = nil
+		c.activeGeneration = 0
+		c.connMu.Unlock()
+		if pending != nil {
+			if err := pending.Close(); err != nil {
+				c.log.Debug("tunnel: close pending connection", slog.Any("err", err))
+			}
 		}
 	})
 	return closeErr
@@ -375,4 +455,3 @@ func (c *geminioClient) loadEnd() geminio.End {
 	}
 	return *p
 }
-

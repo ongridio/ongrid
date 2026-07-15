@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -18,10 +19,12 @@ import (
 // fakeClient is a tunnel.Client stub for agent loop tests. It counts the
 // methods invoked on it; Dial always succeeds immediately.
 type fakeClient struct {
-	mu         sync.Mutex
-	handlers   map[string]tunnel.Handler
-	callCounts map[string]int32
-	lastReqs   map[string]any
+	mu           sync.Mutex
+	handlers     map[string]tunnel.Handler
+	callCounts   map[string]int32
+	lastReqs     map[string]any
+	callFailures map[string]int
+	callError    func(method string, count int32) error
 
 	onRegisterEdge func(req tunnel.RegisterEdgeRequest) tunnel.RegisterEdgeResponse
 
@@ -30,9 +33,10 @@ type fakeClient struct {
 
 func newFakeClient() *fakeClient {
 	return &fakeClient{
-		handlers:   map[string]tunnel.Handler{},
-		callCounts: map[string]int32{},
-		lastReqs:   map[string]any{},
+		handlers:     map[string]tunnel.Handler{},
+		callCounts:   map[string]int32{},
+		lastReqs:     map[string]any{},
+		callFailures: map[string]int{},
 	}
 }
 
@@ -47,8 +51,20 @@ func (f *fakeClient) RegisterHandler(method string, h tunnel.Handler) {
 func (f *fakeClient) Call(ctx context.Context, method string, req, resp any) error {
 	f.mu.Lock()
 	f.callCounts[method]++
+	count := f.callCounts[method]
 	f.lastReqs[method] = req
+	if f.callFailures[method] > 0 {
+		f.callFailures[method]--
+		f.mu.Unlock()
+		return fmt.Errorf("transient %s failure", method)
+	}
+	callError := f.callError
 	f.mu.Unlock()
+	if callError != nil {
+		if err := callError(method, count); err != nil {
+			return err
+		}
+	}
 
 	if method == tunnel.MethodRegisterEdge && resp != nil {
 		var rreq tunnel.RegisterEdgeRequest
@@ -66,6 +82,12 @@ func (f *fakeClient) Call(ctx context.Context, method string, req, resp any) err
 		return json.Unmarshal(b, resp)
 	}
 	return nil
+}
+
+func (f *fakeClient) failNext(method string, count int) {
+	f.mu.Lock()
+	f.callFailures[method] = count
+	f.mu.Unlock()
 }
 
 // OnReconnect is a no-op in the fake — these tests never trigger a
@@ -182,6 +204,95 @@ func TestAgent_RunBasics(t *testing.T) {
 	}
 	if !fc.closed.Load() {
 		t.Errorf("client.Close() was not called on shutdown")
+	}
+}
+
+func TestAgent_RetriesInitialRegistration(t *testing.T) {
+	fc := newFakeClient()
+	fc.failNext(tunnel.MethodRegisterEdge, 1)
+	a := biz.NewAgent(fc, &fakeCollector{}, biz.Config{
+		HeartbeatInterval: 20 * time.Millisecond,
+		MetricsInterval:   time.Second,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 160*time.Millisecond)
+	defer cancel()
+	if err := a.Run(ctx); err != nil {
+		t.Fatalf("Run returned err: %v", err)
+	}
+	if got := fc.countOf(tunnel.MethodRegisterEdge); got < 2 {
+		t.Fatalf("register_edge called %d times, want >=2", got)
+	}
+	if got := a.EdgeID(); got != 1 {
+		t.Fatalf("EdgeID()=%d want 1", got)
+	}
+	if got := fc.countOf(tunnel.MethodHeartbeat); got < 1 {
+		t.Fatalf("heartbeat called %d times, want >=1", got)
+	}
+}
+
+func TestAgent_HeartbeatFailuresDoNotRestartProcess(t *testing.T) {
+	fc := newFakeClient()
+	fc.failNext(tunnel.MethodHeartbeat, 100)
+	a := biz.NewAgent(fc, &fakeCollector{}, biz.Config{
+		HeartbeatInterval: 10 * time.Millisecond,
+		MetricsInterval:   time.Second,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- a.Run(ctx) }()
+
+	select {
+	case err := <-done:
+		t.Fatalf("Run exited during temporary heartbeat failures: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if got := fc.countOf(tunnel.MethodHeartbeat); got < 5 {
+		t.Fatalf("heartbeat called %d times, want >=5", got)
+	}
+	if got := fc.countOf(tunnel.MethodRegisterEdge); got < 2 {
+		t.Fatalf("register_edge called %d times, want recovery attempts after heartbeat failures", got)
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run returned err after cancel: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Run did not stop after cancel")
+	}
+}
+
+func TestAgent_PersistentHeartbeatAndRegistrationFailuresRestartProcess(t *testing.T) {
+	fc := newFakeClient()
+	fc.callError = func(method string, count int32) error {
+		switch {
+		case method == tunnel.MethodHeartbeat:
+			return fmt.Errorf("heartbeat unavailable")
+		case method == tunnel.MethodRegisterEdge && count > 1:
+			return fmt.Errorf("registration unavailable")
+		default:
+			return nil
+		}
+	}
+	a := biz.NewAgent(fc, &fakeCollector{}, biz.Config{
+		HeartbeatInterval: 10 * time.Millisecond,
+		MetricsInterval:   time.Second,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	err := a.Run(ctx)
+	if err == nil || !strings.Contains(err.Error(), "tunnel stuck") {
+		t.Fatalf("Run error = %v, want tunnel stuck", err)
+	}
+	if got := fc.countOf(tunnel.MethodHeartbeat); got < 5 {
+		t.Fatalf("heartbeat called %d times, want >=5", got)
+	}
+	if got := fc.countOf(tunnel.MethodRegisterEdge); got < 6 {
+		t.Fatalf("register_edge called %d times, want initial registration plus >=5 recovery attempts", got)
 	}
 }
 

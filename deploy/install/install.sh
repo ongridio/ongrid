@@ -99,6 +99,35 @@ set_env_value() {
     fi
 }
 
+host_from_url() {
+    local url="$1" hostport host
+    hostport="${url#*://}"
+    hostport="${hostport%%/*}"
+    if [[ "$hostport" == \[*\]* ]]; then
+        host="${hostport%%]*}"
+        host="${host}]"
+    else
+        host="${hostport%%:*}"
+    fi
+    printf '%s' "$host"
+}
+
+ensure_tunnel_addr_env() {
+    local configured public_url tunnel_port host
+    configured=$(grep -E '^ONGRID_TUNNEL_ADDR=' "$ENV_FILE" 2>/dev/null | tail -n 1 | cut -d= -f2- || true)
+    if [[ -n "$configured" ]]; then
+        return
+    fi
+    public_url=$(grep -E '^ONGRID_PUBLIC_URL=' "$ENV_FILE" 2>/dev/null | tail -n 1 | cut -d= -f2- || true)
+    tunnel_port=$(grep -E '^ONGRID_TUNNEL_PORT=' "$ENV_FILE" 2>/dev/null | tail -n 1 | cut -d= -f2- || true)
+    : "${tunnel_port:=40012}"
+    host=$(host_from_url "$public_url")
+    if [[ -n "$host" ]]; then
+        set_env_value ONGRID_TUNNEL_ADDR "${host}:${tunnel_port}"
+        log_info "ONGRID_TUNNEL_ADDR=${host}:${tunnel_port}"
+    fi
+}
+
 ensure_host_gateway_env() {
     local configured gateway
     configured=$(grep -E '^ONGRID_HOST_GATEWAY=' "$ENV_FILE" 2>/dev/null | tail -n 1 | cut -d= -f2- || true)
@@ -592,7 +621,6 @@ if [[ -f "$SCRIPT_DIR/images/ongrid-web.tar" ]]; then
 else
     log_warn "images/ongrid-web.tar not found; assuming ongrid-web image already present"
 fi
-
 # Resolve VERSION from VERSION file or .env.example (fallback)
 VERSION_FROM_FILE=""
 if [[ -f "$INSTALL_DIR/VERSION" ]]; then
@@ -767,6 +795,7 @@ the detected default, or type the correct address." \
     fill_blank ONGRID_PUBLIC_URL "$RESOLVED_PUBLIC_URL"
     log_info "ONGRID_PUBLIC_URL=${RESOLVED_PUBLIC_URL} (edit .env to change)"
 fi
+ensure_tunnel_addr_env
 
 # Bump ONGRID_VERSION to match VERSION file.
 sed -i.bak -E "s|^ONGRID_VERSION=.*|ONGRID_VERSION=${VERSION_FROM_FILE}|" "$ENV_FILE"

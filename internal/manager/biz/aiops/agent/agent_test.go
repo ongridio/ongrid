@@ -15,8 +15,8 @@ import (
 	biz "github.com/ongridio/ongrid/internal/manager/biz/aiops"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools"
 	edgebiz "github.com/ongridio/ongrid/internal/manager/biz/edge"
-	edgemodel "github.com/ongridio/ongrid/internal/manager/model/edge"
 	model "github.com/ongridio/ongrid/internal/manager/model/aiops"
+	edgemodel "github.com/ongridio/ongrid/internal/manager/model/edge"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/llm"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
@@ -282,11 +282,12 @@ func (r *fakeEdgeRepoAgent) UpdateStatus(_ context.Context, _ uint64, _ string, 
 func (r *fakeEdgeRepoAgent) UpdateRoles(_ context.Context, _ uint64, _ uint8) error {
 	return nil
 }
-func (r *fakeEdgeRepoAgent) UpdateName(_ context.Context, _ uint64, _ string) error    { return nil }
+func (r *fakeEdgeRepoAgent) UpdateName(_ context.Context, _ uint64, _ string) error      { return nil }
 func (r *fakeEdgeRepoAgent) SetDeviceID(_ context.Context, _ uint64, _ uint64) error     { return nil }
+func (r *fakeEdgeRepoAgent) ClearDeviceID(_ context.Context, _ uint64) error             { return nil }
 func (r *fakeEdgeRepoAgent) SetAgentVersion(_ context.Context, _ uint64, _ string) error { return nil }
 func (r *fakeEdgeRepoAgent) Delete(_ context.Context, _ uint64) error                    { return nil }
-func (r *fakeEdgeRepoAgent) Count(_ context.Context) (int64, error)                     { return 1, nil }
+func (r *fakeEdgeRepoAgent) Count(_ context.Context) (int64, error)                      { return 1, nil }
 
 // ----- tests -----
 

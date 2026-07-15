@@ -61,17 +61,19 @@ func (r *fakeEdgeRepo) UpdateSecretHash(_ context.Context, _ uint64, _ string) e
 func (r *fakeEdgeRepo) UpdateStatus(_ context.Context, _ uint64, _ string, _ time.Time) error {
 	return nil
 }
-func (r *fakeEdgeRepo) UpdateRoles(_ context.Context, _ uint64, _ uint8) error  { return nil }
-func (r *fakeEdgeRepo) UpdateName(_ context.Context, _ uint64, _ string) error  { return nil }
-func (r *fakeEdgeRepo) SetDeviceID(_ context.Context, _ uint64, _ uint64) error      { return nil }
-func (r *fakeEdgeRepo) SetAgentVersion(_ context.Context, _ uint64, _ string) error  { return nil }
-func (r *fakeEdgeRepo) Delete(_ context.Context, _ uint64) error                     { return nil }
-func (r *fakeEdgeRepo) Count(_ context.Context) (int64, error)                     { return int64(len(r.byID)), nil }
+func (r *fakeEdgeRepo) UpdateRoles(_ context.Context, _ uint64, _ uint8) error      { return nil }
+func (r *fakeEdgeRepo) UpdateName(_ context.Context, _ uint64, _ string) error      { return nil }
+func (r *fakeEdgeRepo) SetDeviceID(_ context.Context, _ uint64, _ uint64) error     { return nil }
+func (r *fakeEdgeRepo) ClearDeviceID(_ context.Context, _ uint64) error             { return nil }
+func (r *fakeEdgeRepo) SetAgentVersion(_ context.Context, _ uint64, _ string) error { return nil }
+func (r *fakeEdgeRepo) Delete(_ context.Context, _ uint64) error                    { return nil }
+func (r *fakeEdgeRepo) Count(_ context.Context) (int64, error)                      { return int64(len(r.byID)), nil }
 
 // fakeCaller mimics frontierbound.Client.Call. Tests preload resp / err
 // and inspect the recorded last call.
 type fakeCaller struct {
 	mu       sync.Mutex
+	calls    int
 	lastID   uint64
 	lastName string
 	lastBody []byte
@@ -82,6 +84,7 @@ type fakeCaller struct {
 func (f *fakeCaller) Call(_ context.Context, edgeID uint64, method string, body []byte) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.calls++
 	f.lastID = edgeID
 	f.lastName = method
 	f.lastBody = append([]byte(nil), body...)

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	aiopstools "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools"
 	aiopstoolsbase "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 )
 
@@ -106,6 +107,16 @@ func TestBasePromptRoutesComplexWorkToAgentToolFirst(t *testing.T) {
 func TestDefaultCoordinatorKeepsThirtyTurns(t *testing.T) {
 	if defaultCoordinatorMaxTurns != 30 {
 		t.Fatalf("default coordinator MaxTurns = %d, want 30", defaultCoordinatorMaxTurns)
+	}
+}
+
+func TestExecuteK8sActionIsChatOnlyReviewTool(t *testing.T) {
+	got := buildCoordinatorToolNames(nil)
+	if !containsString(got, aiopstools.ToolNameExecuteK8sAction) {
+		t.Fatalf("coordinator roster missing %q", aiopstools.ToolNameExecuteK8sAction)
+	}
+	if !isChatOnlyReviewTool(aiopstools.ToolNameExecuteK8sAction) {
+		t.Fatalf("%q should be excluded from flow paths without ReviewGate", aiopstools.ToolNameExecuteK8sAction)
 	}
 }
 

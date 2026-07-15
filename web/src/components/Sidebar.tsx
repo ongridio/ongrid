@@ -8,11 +8,7 @@ import {
   Home,
   HardDrive,
   LayoutDashboard,
-  Server,
-  Boxes,
   AppWindow,
-  Database,
-  Network,
   Bot,
   LogOut,
   Settings,
@@ -32,6 +28,7 @@ import {
   Trash2,
   Share2,
   Plug,
+  ShipWheel,
 } from 'lucide-react';
 import { Avatar } from './Avatar';
 import { AgentBadge } from './AgentBadge';
@@ -47,8 +44,6 @@ import { useIncidentBadge } from '@/store/incidentBadge';
 import { useMe, usePermissions } from '@/store/me';
 import { useChatSessions, invalidateChatSessions } from '@/store/chatSessions';
 import { deleteSession, renameSession, type ChatSession } from '@/api/chat';
-import { listEdges, type EdgeRole } from '@/api/edges';
-import { onDevicesChanged } from '@/lib/events';
 
 export function Sidebar() {
   const { sidebarCollapsed, toggleSidebar } = useUi();
@@ -73,35 +68,6 @@ export function Sidebar() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   // Version + upgrade check moved to Settings → About / Upgrade (the brand mark
   // stays clean), so the sidebar no longer fetches version here.
-
-  // Roles actually present in the user's fleet — drives which 设备 sub-
-  // items appear. We don't render a role link for a role with 0 devices,
-  // and we drop 未分类 entirely (zero edges = empty section). Initial
-  // listEdges() on mount + refetch on the cross-component devices-changed
-  // event so RolesEditorModal saves surface here within a tick instead of
-  // requiring a full page reload.
-  const [presentRoles, setPresentRoles] = useState<Set<EdgeRole>>(new Set());
-  useEffect(() => {
-    let cancelled = false;
-    const load = () => {
-      void listEdges()
-        .then((r) => {
-          if (cancelled) return;
-          const present = new Set<EdgeRole>();
-          for (const e of r.items ?? []) {
-            for (const role of e.roles ?? []) present.add(role as EdgeRole);
-          }
-          setPresentRoles(present);
-        })
-        .catch(() => {});
-    };
-    load();
-    const unsubscribe = onDevicesChanged(load);
-    return () => {
-      cancelled = true;
-      unsubscribe();
-    };
-  }, []);
 
   async function confirmDelete(target: ChatSession) {
     setDeletingId(target.id);
@@ -299,6 +265,13 @@ export function Sidebar() {
           <HardDrive size={16} />
         </Link>
         <Link
+          to="/kubernetes"
+          aria-label={tr('Kubernetes', 'Kubernetes')}
+          className="rounded-lg p-2 text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+        >
+          <ShipWheel size={16} />
+        </Link>
+        <Link
           to="/skills"
           aria-label={tr('技能', 'Skills')}
           className="rounded-lg p-2 text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
@@ -411,7 +384,7 @@ export function Sidebar() {
         </div>
 
         {/* AIOps 是主舞台 — Agent (运行) 与 知识库 / 代码仓库 (素材) 顶级并列，
-            观测数据 (设备 / 监控告警) 折叠在下方做数据源。 */}
+            观测数据放在下方做数据源。 */}
         <SectionLabel>Agent</SectionLabel>
         <NavSection>
           <SidebarNavItem to="/agents" icon={Bot} label={tr('助理', 'Assistants')} />
@@ -426,20 +399,9 @@ export function Sidebar() {
           <SidebarNavItem to="/knowledge/repos" icon={GitBranch} label={tr('代码仓库', 'Repos')} />
         </NavSection>
 
-        <CollapsibleSection storageKey="devices" title={tr('设备', 'Devices')} defaultOpen={false}>
-          <SidebarNavItem to="/devices" icon={HardDrive} label={tr('全部', 'All')} />
-          {presentRoles.has('server') && (
-            <SidebarNavItem to="/devices?roles=server" icon={Server} label={tr('服务器', 'Servers')} />
-          )}
-          {presentRoles.has('storage') && (
-            <SidebarNavItem to="/devices?roles=storage" icon={Boxes} label={tr('存储', 'Storage')} />
-          )}
-          {presentRoles.has('database') && (
-            <SidebarNavItem to="/devices?roles=database" icon={Database} label={tr('数据库', 'Databases')} />
-          )}
-          {presentRoles.has('network') && (
-            <SidebarNavItem to="/devices?roles=network" icon={Network} label={tr('网络设备', 'Network')} />
-          )}
+        <CollapsibleSection storageKey="resources" title={tr('基础设施', 'Infrastructure')} defaultOpen>
+          <SidebarNavItem to="/devices" icon={HardDrive} label={tr('设备', 'Devices')} />
+          <SidebarNavItem to="/kubernetes" icon={ShipWheel} label="Kubernetes" />
           <SidebarNavItem to="/topology" icon={Share2} label={tr('拓扑', 'Topology')} />
         </CollapsibleSection>
 
@@ -709,7 +671,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 // CollapsibleSection is the same SectionLabel + NavSection pair, but the
 // header is a button that toggles its children's visibility. State
 // persists in localStorage so users don't have to re-fold their AIOps-
-// supplemental sections (设备 / 监控告警) on every page load.
+// supplemental sections on every page load.
 //
 // Why we have this: ongrid is AIOps-first. The agent + context + chat
 // flows are the primary surface; observability + device management are
@@ -813,28 +775,24 @@ function SidebarNavItem({
     );
   }
 
-  // We need pathname AND query-string to participate in active detection,
-  // because items like "/edges?roles=server" share a pathname with
-  // "/edges" but should highlight independently. NavLink's default isActive
-  // ignores search; build our own.
+  // We need pathname AND query-string to participate in active detection when
+  // a sidebar item explicitly includes a query. Plain pathname items remain
+  // active across page-local filters like /devices?roles=server.
   const [targetPath, targetQuery] = to.split('?');
   const hasQuery = Boolean(targetQuery);
   const targetParams = hasQuery ? new URLSearchParams(targetQuery) : null;
-  const currentParams = new URLSearchParams(location.search);
   let isActive: boolean;
   if (location.pathname !== targetPath) {
     isActive = false;
   } else if (hasQuery) {
-    // sub-item: every key in `to` must match the current URL exactly,
-    // and current must not have extra "roles" filters that disagree.
+    const currentParams = new URLSearchParams(location.search);
+    // Every query key in `to` must match the current URL. Extra query keys on
+    // the current page are ignored so a filtered tab can still highlight.
     isActive = paramsEqualOnDefinedKeys(targetParams!, currentParams);
   } else if (exact) {
     isActive = location.pathname === targetPath;
   } else {
-    // pathname-only items — match unless one of the role sub-items would
-    // otherwise claim it. The "全部" entry uses this branch and lights up
-    // only when no role filter is present.
-    isActive = !currentParams.get('roles');
+    isActive = true;
   }
 
   return (
@@ -863,8 +821,8 @@ function SidebarNavItem({
 
 // paramsEqualOnDefinedKeys reports whether every key in `target` has the
 // same value in `current`. Extra keys on `current` are ignored. Used to
-// decide whether a sidebar sub-item with `?roles=server` should highlight
-// against a URL like `/edges?roles=server&status=online`.
+// decide whether a sidebar item with `?tab=reports` should highlight against
+// a URL like `/pages?tab=reports&status=open`.
 function paramsEqualOnDefinedKeys(target: URLSearchParams, current: URLSearchParams) {
   for (const [k, v] of target.entries()) {
     if (current.get(k) !== v) return false;

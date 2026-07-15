@@ -65,7 +65,7 @@ func TestIngester_Push_AddsCloudLabelsAndSorts(t *testing.T) {
 			Labels: map[string]string{
 				// Reserved keys must NOT clobber the cloud-controlled values.
 				"__name__":      "evil",
-				"device_id":       "evil",
+				"device_id":     "evil",
 				"ongrid_source": "evil",
 				"foo":           "bar",
 			},
@@ -167,6 +167,60 @@ func TestIngester_Push_NoSourceOmitsLabel(t *testing.T) {
 	m := labelMap(fw.last[0].Labels)
 	if _, ok := m["ongrid_source"]; ok {
 		t.Errorf("ongrid_source should be omitted when source==\"\": %v", m)
+	}
+}
+
+func TestIngester_PushKubernetes_AddsClusterLabelsAndDropsHostIdentity(t *testing.T) {
+	fw := &fakeWriter{}
+	ing := NewIngester(fw, slog.Default())
+	in := []tunnel.PromSample{
+		{
+			Name: "kube_pod_status_phase",
+			Labels: map[string]string{
+				"namespace":     "default",
+				"pod":           "api-123",
+				"phase":         "Running",
+				"cluster_id":    "evil",
+				"device_id":     "evil",
+				"edge_id":       "evil",
+				"ongrid_source": "evil",
+			},
+			Value: 1,
+			TsMs:  1700000000000,
+		},
+	}
+
+	if err := ing.PushKubernetes(context.Background(), 9, "k8s:kube-state-metrics", in); err != nil {
+		t.Fatalf("PushKubernetes: %v", err)
+	}
+	if len(fw.last) != 1 {
+		t.Fatalf("got %d samples, want 1", len(fw.last))
+	}
+	m := labelMap(fw.last[0].Labels)
+	if m["__name__"] != "kube_pod_status_phase" {
+		t.Errorf("__name__ = %q", m["__name__"])
+	}
+	if m["cluster_id"] != "9" {
+		t.Errorf("cluster_id = %q, want 9", m["cluster_id"])
+	}
+	if m["ongrid_source"] != "k8s:kube-state-metrics" {
+		t.Errorf("ongrid_source = %q", m["ongrid_source"])
+	}
+	if _, ok := m["device_id"]; ok {
+		t.Errorf("device_id must not be kept on cluster metrics: %v", m)
+	}
+	if _, ok := m["edge_id"]; ok {
+		t.Errorf("edge_id must not be kept on cluster metrics: %v", m)
+	}
+	if m["namespace"] != "default" || m["pod"] != "api-123" || m["phase"] != "Running" {
+		t.Errorf("k8s labels missing: %v", m)
+	}
+	names := make([]string, 0, len(fw.last[0].Labels))
+	for _, l := range fw.last[0].Labels {
+		names = append(names, l.Name)
+	}
+	if !sort.StringsAreSorted(names) {
+		t.Errorf("labels not sorted: %v", names)
 	}
 }
 

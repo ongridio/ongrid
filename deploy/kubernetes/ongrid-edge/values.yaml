@@ -1,0 +1,97 @@
+mode: full-node
+
+namespace:
+  create: false
+  name: ongrid-system
+
+manager:
+  publicURL: ""
+  tunnelAddr: ""
+  tlsInsecure: false
+
+enrollment:
+  clusterID: ""
+  controllerBootstrapToken: ""
+  nodeBootstrapToken: ""
+
+image:
+  # Leave empty to let Kubernetes select nodes from the image manifest. Set
+  # amd64 or arm64 only when this release intentionally targets one architecture.
+  architecture: ""
+  repository: docker.cnb.cool/ongridio/ongrid-edge
+  tag: ""
+  pullPolicy: IfNotPresent
+
+node:
+  serviceAccountName: ""
+  # hostmetrics exposes node_exporter and the metrics plugin forwards it.
+  # Keep the legacy embedded periodic push off to avoid duplicate node_* series.
+  collectorMode: "off"
+  tolerations:
+    - operator: Exists
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+controller:
+  replicas: 1
+  serviceAccountName: ""
+  inventory:
+    watch: true
+    # Periodic full reconciliation complements watch deltas and repairs drift.
+    fullSyncInterval: 10m
+  metrics:
+    enabled: false
+    endpoint: ""
+    interval: 30s
+    timeout: 5s
+    sampleLimit: 20000
+    appDiscovery:
+      enabled: false
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+kubeStateMetrics:
+  enabled: false
+  serviceAccountName: ""
+  image:
+    # Optional image is not bundled in the offline release. Mirror it to a
+    # registry reachable by the cluster before enabling this component.
+    repository: ""
+    tag: v2.16.0
+    pullPolicy: IfNotPresent
+  port: 8080
+  telemetryPort: 8081
+  collectors: []
+  resources:
+    requests:
+      cpu: 20m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+telemetryGateway:
+  # Set true to expose the controller OTLP receiver.
+  enabled: null
+  service:
+    type: ClusterIP
+    grpcPort: 4317
+    httpPort: 4318
+
+podSecurity:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  # Configure explicitly only when host files require additional group access.
+  supplementalGroups: []

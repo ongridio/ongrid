@@ -214,34 +214,32 @@ export default function EdgeDetailPage() {
     const from = new Date(to.getTime() - RANGE_MS);
     const fromIso = from.toISOString();
     const toIso = to.toISOString();
-    // Filter by host device_id only. The historical `ongrid_source=""`
-    // matcher used to exclude the "embedded-push" pipeline in favour of
-    // direct node_exporter scrapes — but the direct-scrape path was
-    // retired. Every sample now flows through the
-    // embedded push and carries `ongrid_source="embedded"`, so the
-    // empty-match filter was silently dropping 100% of points and
-    // leaving every panel blank for any device whose data only exists
-    // via the new path. device_id alone is the right scope.
+    // Scope by host device_id only. Source labels describe transport, not
+    // resource identity, and can temporarily coexist during an upgrade.
+    // Panel PromQL collapses transport-only dimensions where necessary.
     const labelSel = `device_id="${deviceID}"`;
 
     const exprs: Record<PanelKey, { expr: string; nameLabel: string }> = {
       cpu: {
-        // Per-core utilization: keep cpu label, average idle out and
-        // subtract from 100. We *don't* aggregate by device_id so each cpu
-        // stays its own series.
-        expr: `100 * (1 - rate(node_cpu_seconds_total{${labelSel},mode="idle"}[5m]))`,
+        // Keep one line per CPU core while collapsing scrape/source labels.
+        // During collector upgrades both transports can exist in the query
+        // range even though only one is still producing fresh samples.
+        expr: `100 * (1 - avg by (device_id, cpu) (rate(node_cpu_seconds_total{${labelSel},mode="idle"}[5m])))`,
         nameLabel: 'cpu',
       },
       disk: {
-        expr: `100 * (1 - node_filesystem_avail_bytes{${labelSel},fstype=~"ext4|xfs|btrfs|zfs|ext3|ext2|f2fs",device=~"(/dev/)?(vd|sd|xvd)[a-z]+[0-9]*|(/dev/)?nvme[0-9]+n[0-9]+(p[0-9]+)?"} / node_filesystem_size_bytes{${labelSel},fstype=~"ext4|xfs|btrfs|zfs|ext3|ext2|f2fs",device=~"(/dev/)?(vd|sd|xvd)[a-z]+[0-9]*|(/dev/)?nvme[0-9]+n[0-9]+(p[0-9]+)?"})`,
+        // A physical filesystem can be bind-mounted at many paths (notably
+        // on container hosts). Collapse mountpoint and source dimensions so
+        // each physical device contributes one worst-case utilization line.
+        expr: `100 * max by (device_id, device) ((node_filesystem_size_bytes{${labelSel},fstype=~"ext4|xfs|btrfs|zfs|ext3|ext2|f2fs",device=~"(/dev/)?(vd|sd|xvd)[a-z]+[0-9]*|(/dev/)?nvme[0-9]+n[0-9]+(p[0-9]+)?"} - node_filesystem_avail_bytes{${labelSel},fstype=~"ext4|xfs|btrfs|zfs|ext3|ext2|f2fs",device=~"(/dev/)?(vd|sd|xvd)[a-z]+[0-9]*|(/dev/)?nvme[0-9]+n[0-9]+(p[0-9]+)?"}) / node_filesystem_size_bytes{${labelSel},fstype=~"ext4|xfs|btrfs|zfs|ext3|ext2|f2fs",device=~"(/dev/)?(vd|sd|xvd)[a-z]+[0-9]*|(/dev/)?nvme[0-9]+n[0-9]+(p[0-9]+)?"})`,
         nameLabel: 'device',
       },
       netRx: {
-        expr: `rate(node_network_receive_bytes_total{${labelSel}}[5m])`,
+        expr: `max by (device_id, device) (rate(node_network_receive_bytes_total{${labelSel}}[5m]))`,
         nameLabel: 'device',
       },
       netTx: {
-        expr: `rate(node_network_transmit_bytes_total{${labelSel}}[5m])`,
+        expr: `max by (device_id, device) (rate(node_network_transmit_bytes_total{${labelSel}}[5m]))`,
         nameLabel: 'device',
       },
     };
@@ -277,15 +275,12 @@ export default function EdgeDetailPage() {
   const promExprs = useMemo(() => {
     const deviceID = device?.id ?? edge?.device_id;
     if (!deviceID) return null;
-    // Same fix as above — drop the ongrid_source="" matcher because
-    // every sample now carries ongrid_source="embedded"; the legacy
-    // direct-scrape path is gone.
     const labelSel = `device_id="${deviceID}"`;
     return {
-      cpu: `100 * (1 - rate(node_cpu_seconds_total{${labelSel},mode="idle"}[5m]))`,
-      disk: `100 * (1 - node_filesystem_avail_bytes{${labelSel},fstype=~"ext4|xfs|btrfs|zfs|ext3|ext2|f2fs",device=~"(/dev/)?(vd|sd|xvd)[a-z]+[0-9]*|(/dev/)?nvme[0-9]+n[0-9]+(p[0-9]+)?"} / node_filesystem_size_bytes{${labelSel},fstype=~"ext4|xfs|btrfs|zfs|ext3|ext2|f2fs",device=~"(/dev/)?(vd|sd|xvd)[a-z]+[0-9]*|(/dev/)?nvme[0-9]+n[0-9]+(p[0-9]+)?"})`,
-      netRx: `rate(node_network_receive_bytes_total{${labelSel}}[5m])`,
-      netTx: `rate(node_network_transmit_bytes_total{${labelSel}}[5m])`,
+      cpu: `100 * (1 - avg by (device_id, cpu) (rate(node_cpu_seconds_total{${labelSel},mode="idle"}[5m])))`,
+      disk: `100 * max by (device_id, device) ((node_filesystem_size_bytes{${labelSel},fstype=~"ext4|xfs|btrfs|zfs|ext3|ext2|f2fs",device=~"(/dev/)?(vd|sd|xvd)[a-z]+[0-9]*|(/dev/)?nvme[0-9]+n[0-9]+(p[0-9]+)?"} - node_filesystem_avail_bytes{${labelSel},fstype=~"ext4|xfs|btrfs|zfs|ext3|ext2|f2fs",device=~"(/dev/)?(vd|sd|xvd)[a-z]+[0-9]*|(/dev/)?nvme[0-9]+n[0-9]+(p[0-9]+)?"}) / node_filesystem_size_bytes{${labelSel},fstype=~"ext4|xfs|btrfs|zfs|ext3|ext2|f2fs",device=~"(/dev/)?(vd|sd|xvd)[a-z]+[0-9]*|(/dev/)?nvme[0-9]+n[0-9]+(p[0-9]+)?"})`,
+      netRx: `max by (device_id, device) (rate(node_network_receive_bytes_total{${labelSel}}[5m]))`,
+      netTx: `max by (device_id, device) (rate(node_network_transmit_bytes_total{${labelSel}}[5m]))`,
     };
   }, [device?.id, edge?.device_id]);
 
@@ -398,8 +393,8 @@ export default function EdgeDetailPage() {
               />
 
               <MultiLinePanel
-                title={tr('磁盘使用率（按挂载点）', 'Disk usage (per mountpoint)')}
-                subtitle={tr('最近 6 小时 · 1m 粒度 · 每条线 = 一个 mountpoint', 'Last 6h · 1m step · one line per mountpoint')}
+                title={tr('磁盘使用率（按物理设备）', 'Disk usage (by physical device)')}
+                subtitle={tr('最近 6 小时 · 1m 粒度 · 每条线 = 一个物理设备', 'Last 6h · 1m step · one line per physical device')}
                 icon={HardDrive}
                 panel={panels.disk}
                 hidden={hidden.disk}
@@ -408,7 +403,7 @@ export default function EdgeDetailPage() {
                 yDomain={[0, 100]}
                 onOpenDrilldown={
                   promExprs
-                    ? () => void openDrilldown(promExprs.disk, 'Disk usage per mountpoint')
+                    ? () => void openDrilldown(promExprs.disk, 'Disk usage by physical device')
                     : undefined
                 }
               />

@@ -114,7 +114,7 @@ type Metadata struct {
 	// scope existed targets an edge).
 	Scope Scope
 	// Category is a free-form group label for UI organization
-	// ("network" / "filesystem" / "process" / "diagnostic" / "kubernetes").
+	// ("network" / "filesystem" / "process" / "diagnostic" / "telemetry").
 	Category string
 	// Params declares the input schema. Generated as JSON Schema for
 	// LLM tools and as a form for the UI.

@@ -29,6 +29,13 @@ func (r *EdgeDeviceRepo) Link(ctx context.Context, edgeID, deviceID uint64, t mo
 	if edgeID == 0 || deviceID == 0 {
 		return errs.ErrInvalid
 	}
+	if t == model.EdgeDeviceRelationHost {
+		if err := r.db.WithContext(ctx).
+			Where("edge_id = ? AND type = ? AND device_id <> ?", edgeID, t, deviceID).
+			Delete(&model.EdgeDevice{}).Error; err != nil {
+			return err
+		}
+	}
 	row := model.EdgeDevice{EdgeID: edgeID, DeviceID: deviceID, Type: t}
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{
@@ -55,6 +62,7 @@ func (r *EdgeDeviceRepo) LookupHostDevice(ctx context.Context, edgeID uint64) (u
 	var row model.EdgeDevice
 	if err := r.db.WithContext(ctx).
 		Where("edge_id = ? AND type = ?", edgeID, model.EdgeDeviceRelationHost).
+		Order("id DESC").
 		First(&row).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return 0, errs.ErrNotFound

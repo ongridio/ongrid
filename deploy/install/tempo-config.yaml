@@ -26,7 +26,6 @@ compactor:
     compacted_block_retention: 1h
     compaction_window: 1h
     max_block_bytes: 100_000_000     # ~100 MB blocks
-    v2_in_buffer_bytes: 5_000_000
 
 # Spanmetrics + service-graph generators emit Prom metrics that the manager
 # evaluator reuses (trace_latency / trace_error_rate; ADR-013 §正面). The

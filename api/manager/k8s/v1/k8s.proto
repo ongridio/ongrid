@@ -1,0 +1,332 @@
+syntax = "proto3";
+
+package ongrid.manager.k8s.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/ongridio/ongrid/api/gen/manager/k8s/v1;k8sv1";
+
+// KubernetesService manages Kubernetes cluster enrollment into ongrid.
+service KubernetesService {
+    rpc CreateCluster(CreateClusterRequest) returns (CreateClusterResponse);
+    rpc ListClusters(ListClustersRequest) returns (ListClustersResponse);
+    rpc GetCluster(GetClusterRequest) returns (GetClusterResponse);
+    rpc GetClusterHealth(GetClusterHealthRequest) returns (GetClusterHealthResponse);
+    rpc ListEdgeAttachments(ListEdgeAttachmentsRequest) returns (ListEdgeAttachmentsResponse);
+    rpc ListNodes(ListNodesRequest) returns (ListNodesResponse);
+    rpc ListWorkloads(ListWorkloadsRequest) returns (ListWorkloadsResponse);
+    rpc ListPods(ListPodsRequest) returns (ListPodsResponse);
+    rpc ListEvents(ListEventsRequest) returns (ListEventsResponse);
+    rpc RotateBootstrapToken(RotateBootstrapTokenRequest) returns (RotateBootstrapTokenResponse);
+    rpc DeleteCluster(DeleteClusterRequest) returns (DeleteClusterResponse);
+
+    // Internal bootstrap API. It is authenticated with the one-time cluster
+    // bootstrap token instead of a user JWT.
+    rpc Enroll(EnrollRequest) returns (EnrollResponse);
+}
+
+enum KubernetesClusterStatus {
+    KUBERNETES_CLUSTER_STATUS_UNSPECIFIED = 0;
+    KUBERNETES_CLUSTER_STATUS_ONLINE = 1;
+    KUBERNETES_CLUSTER_STATUS_OFFLINE = 2;
+    KUBERNETES_CLUSTER_STATUS_DEGRADED = 3;
+}
+
+enum KubernetesMode {
+    KUBERNETES_MODE_UNSPECIFIED = 0;
+    KUBERNETES_MODE_FULL_NODE = 1;
+    reserved 2, 3;
+}
+
+message KubernetesCapability {
+    string key = 1 [json_name = "key"];
+    string label = 2 [json_name = "label"];
+    string status = 3 [json_name = "status"];
+    string reason = 4 [json_name = "reason"];
+}
+
+message KubernetesNodeEdgeCoverage {
+    int64 total = 1 [json_name = "total"];
+    int64 edge_linked = 2 [json_name = "edge_linked"];
+    int64 device_linked = 3 [json_name = "device_linked"];
+    int64 missing = 4 [json_name = "missing"];
+    int32 percent = 5 [json_name = "percent"];
+}
+
+message KubernetesCluster {
+    uint64 id = 1 [json_name = "id"];
+    string name = 2 [json_name = "name"];
+    string uid = 3 [json_name = "uid"];
+    string mode = 4 [json_name = "mode"];
+    string status = 5 [json_name = "status"];
+    uint64 controller_edge_id = 6 [json_name = "controller_edge_id"];
+    string version = 7 [json_name = "version"];
+    google.protobuf.Timestamp last_seen_at = 8 [json_name = "last_seen_at"];
+    google.protobuf.Timestamp created_at = 10 [json_name = "created_at"];
+    google.protobuf.Timestamp updated_at = 11 [json_name = "updated_at"];
+    string inventory_resource_version = 12 [json_name = "inventory_resource_version"];
+    string inventory_resource_versions_json = 13 [json_name = "inventory_resource_versions_json"];
+    string inventory_scope = 14 [json_name = "inventory_scope"];
+    string inventory_namespace = 15 [json_name = "inventory_namespace"];
+    int64 inventory_sync_duration_ms = 16 [json_name = "inventory_sync_duration_ms"];
+    int64 inventory_watch_lag_seconds = 17 [json_name = "inventory_watch_lag_seconds"];
+    google.protobuf.Timestamp inventory_synced_at = 18 [json_name = "inventory_synced_at"];
+    repeated KubernetesCapability capabilities = 19 [json_name = "capabilities"];
+    KubernetesNodeEdgeCoverage node_edge_coverage = 20 [json_name = "node_edge_coverage"];
+    string controller_node_name = 21 [json_name = "controller_node_name"];
+    string controller_namespace = 22 [json_name = "controller_namespace"];
+    string controller_pod_name = 23 [json_name = "controller_pod_name"];
+    string upgrade_command = 24 [json_name = "upgrade_command"];
+}
+
+message CreateClusterRequest {
+    string name = 1 [json_name = "name"];
+    string uid = 2 [json_name = "uid"];
+    string mode = 3 [json_name = "mode"];
+}
+
+message CreateClusterResponse {
+    KubernetesCluster cluster = 1 [json_name = "cluster"];
+    string bootstrap_token = 2 [json_name = "bootstrap_token"];
+    string install_command = 3 [json_name = "install_command"];
+    string node_bootstrap_token = 4 [json_name = "node_bootstrap_token"];
+}
+
+message ListClustersRequest {
+    string status = 1 [json_name = "status"];
+    string mode = 2 [json_name = "mode"];
+    string name = 3 [json_name = "name"];
+    int32 limit = 4 [json_name = "limit"];
+    int32 offset = 5 [json_name = "offset"];
+}
+
+message ListClustersResponse {
+    repeated KubernetesCluster items = 1 [json_name = "items"];
+    int32 total = 2 [json_name = "total"];
+    int32 limit = 3 [json_name = "limit"];
+    int32 offset = 4 [json_name = "offset"];
+}
+
+message GetClusterRequest {
+    uint64 id = 1 [json_name = "id"];
+}
+
+message GetClusterResponse {
+    KubernetesCluster cluster = 1 [json_name = "cluster"];
+}
+
+message GetClusterHealthRequest {
+    uint64 id = 1 [json_name = "id"];
+}
+
+message GetClusterHealthResponse {
+    int64 degraded_workloads = 1 [json_name = "degraded_workloads"];
+    int64 pending_pods = 2 [json_name = "pending_pods"];
+    int64 crash_loop_back_off_pods = 3 [json_name = "crash_loop_back_off_pods"];
+    int64 oom_killed_pods = 4 [json_name = "oom_killed_pods"];
+    int64 image_pull_back_off_pods = 5 [json_name = "image_pull_back_off_pods"];
+    int64 not_ready_nodes = 6 [json_name = "not_ready_nodes"];
+}
+
+message ListEdgeAttachmentsRequest {
+    int32 limit = 1 [json_name = "limit"];
+    int32 offset = 2 [json_name = "offset"];
+}
+
+message KubernetesEdgeAttachment {
+    uint64 edge_id = 1 [json_name = "edge_id"];
+    uint64 cluster_id = 2 [json_name = "cluster_id"];
+    string cluster_name = 3 [json_name = "cluster_name"];
+    string cluster_mode = 4 [json_name = "cluster_mode"];
+    string node_name = 5 [json_name = "node_name"];
+    string kind = 6 [json_name = "kind"];
+}
+
+message ListEdgeAttachmentsResponse {
+    repeated KubernetesEdgeAttachment items = 1 [json_name = "items"];
+    int32 total = 2 [json_name = "total"];
+}
+
+message RotateBootstrapTokenRequest {
+    uint64 id = 1 [json_name = "id"];
+}
+
+message RotateBootstrapTokenResponse {
+    KubernetesCluster cluster = 1 [json_name = "cluster"];
+    string bootstrap_token = 2 [json_name = "bootstrap_token"];
+    string install_command = 3 [json_name = "install_command"];
+    string node_bootstrap_token = 4 [json_name = "node_bootstrap_token"];
+}
+
+message DeleteClusterRequest {
+    uint64 id = 1 [json_name = "id"];
+    bool force = 2 [json_name = "force"];
+}
+
+message DeleteClusterResponse {}
+
+message KubernetesNode {
+    uint64 id = 1 [json_name = "id"];
+    uint64 cluster_id = 2 [json_name = "cluster_id"];
+    string node_name = 3 [json_name = "node_name"];
+    string node_uid = 4 [json_name = "node_uid"];
+    string provider_id = 5 [json_name = "provider_id"];
+    uint64 edge_id = 6 [json_name = "edge_id"];
+    uint64 device_id = 7 [json_name = "device_id"];
+    string labels_json = 8 [json_name = "labels_json"];
+    string taints_json = 9 [json_name = "taints_json"];
+    string conditions_json = 10 [json_name = "conditions_json"];
+    string capacity_json = 11 [json_name = "capacity_json"];
+    string allocatable_json = 12 [json_name = "allocatable_json"];
+    string kubelet_version = 13 [json_name = "kubelet_version"];
+    google.protobuf.Timestamp last_seen_at = 14 [json_name = "last_seen_at"];
+}
+
+message KubernetesWorkload {
+    uint64 id = 1 [json_name = "id"];
+    uint64 cluster_id = 2 [json_name = "cluster_id"];
+    string namespace = 3 [json_name = "namespace"];
+    string kind = 4 [json_name = "kind"];
+    string name = 5 [json_name = "name"];
+    string uid = 6 [json_name = "uid"];
+    int32 desired_replicas = 7 [json_name = "desired_replicas"];
+    int32 ready_replicas = 8 [json_name = "ready_replicas"];
+    string labels_json = 9 [json_name = "labels_json"];
+    string annotations_json = 10 [json_name = "annotations_json"];
+    string conditions_json = 11 [json_name = "conditions_json"];
+    google.protobuf.Timestamp last_seen_at = 12 [json_name = "last_seen_at"];
+}
+
+message KubernetesPod {
+    uint64 id = 1 [json_name = "id"];
+    uint64 cluster_id = 2 [json_name = "cluster_id"];
+    string namespace = 3 [json_name = "namespace"];
+    string name = 4 [json_name = "name"];
+    string uid = 5 [json_name = "uid"];
+    string node_name = 6 [json_name = "node_name"];
+    string phase = 7 [json_name = "phase"];
+    string owner_kind = 8 [json_name = "owner_kind"];
+    string owner_name = 9 [json_name = "owner_name"];
+    int32 restart_count = 10 [json_name = "restart_count"];
+    string reason = 11 [json_name = "reason"];
+    google.protobuf.Timestamp last_seen_at = 12 [json_name = "last_seen_at"];
+}
+
+message KubernetesEvent {
+    uint64 id = 1 [json_name = "id"];
+    uint64 cluster_id = 2 [json_name = "cluster_id"];
+    string namespace = 3 [json_name = "namespace"];
+    string name = 4 [json_name = "name"];
+    string uid = 5 [json_name = "uid"];
+    string type = 6 [json_name = "type"];
+    string reason = 7 [json_name = "reason"];
+    string message = 8 [json_name = "message"];
+    string involved_kind = 9 [json_name = "involved_kind"];
+    string involved_namespace = 10 [json_name = "involved_namespace"];
+    string involved_name = 11 [json_name = "involved_name"];
+    string involved_uid = 12 [json_name = "involved_uid"];
+    string source_component = 13 [json_name = "source_component"];
+    string source_host = 14 [json_name = "source_host"];
+    string reporting_controller = 15 [json_name = "reporting_controller"];
+    string reporting_instance = 16 [json_name = "reporting_instance"];
+    string action = 17 [json_name = "action"];
+    int32 count = 18 [json_name = "count"];
+    google.protobuf.Timestamp first_timestamp = 19 [json_name = "first_timestamp"];
+    google.protobuf.Timestamp last_timestamp = 20 [json_name = "last_timestamp"];
+    google.protobuf.Timestamp event_time = 21 [json_name = "event_time"];
+    google.protobuf.Timestamp last_seen_at = 22 [json_name = "last_seen_at"];
+}
+
+message ListNodesRequest {
+    uint64 cluster_id = 1 [json_name = "cluster_id"];
+    int32 limit = 2 [json_name = "limit"];
+    int32 offset = 3 [json_name = "offset"];
+    string q = 4 [json_name = "q"];
+    bool issue_only = 5 [json_name = "issue_only"];
+}
+
+message ListNodesResponse {
+    repeated KubernetesNode items = 1 [json_name = "items"];
+    int32 total = 2 [json_name = "total"];
+    int32 limit = 3 [json_name = "limit"];
+    int32 offset = 4 [json_name = "offset"];
+}
+
+message ListWorkloadsRequest {
+    uint64 cluster_id = 1 [json_name = "cluster_id"];
+    string namespace = 2 [json_name = "namespace"];
+    string kind = 3 [json_name = "kind"];
+    int32 limit = 4 [json_name = "limit"];
+    int32 offset = 5 [json_name = "offset"];
+    string q = 6 [json_name = "q"];
+    bool issue_only = 7 [json_name = "issue_only"];
+}
+
+message ListWorkloadsResponse {
+    repeated KubernetesWorkload items = 1 [json_name = "items"];
+    int32 total = 2 [json_name = "total"];
+    int32 limit = 3 [json_name = "limit"];
+    int32 offset = 4 [json_name = "offset"];
+}
+
+message ListPodsRequest {
+    uint64 cluster_id = 1 [json_name = "cluster_id"];
+    string namespace = 2 [json_name = "namespace"];
+    string node_name = 3 [json_name = "node_name"];
+    string phase = 4 [json_name = "phase"];
+    string reason = 5 [json_name = "reason"];
+    int32 limit = 6 [json_name = "limit"];
+    int32 offset = 7 [json_name = "offset"];
+    string q = 8 [json_name = "q"];
+    bool issue_only = 9 [json_name = "issue_only"];
+}
+
+message ListPodsResponse {
+    repeated KubernetesPod items = 1 [json_name = "items"];
+    int32 total = 2 [json_name = "total"];
+    int32 limit = 3 [json_name = "limit"];
+    int32 offset = 4 [json_name = "offset"];
+}
+
+message ListEventsRequest {
+    uint64 cluster_id = 1 [json_name = "cluster_id"];
+    string namespace = 2 [json_name = "namespace"];
+    string type = 3 [json_name = "type"];
+    string reason = 4 [json_name = "reason"];
+    string involved_kind = 5 [json_name = "involved_kind"];
+    string involved_name = 6 [json_name = "involved_name"];
+    int32 limit = 7 [json_name = "limit"];
+    int32 offset = 8 [json_name = "offset"];
+    string q = 9 [json_name = "q"];
+    bool issue_only = 10 [json_name = "issue_only"];
+}
+
+message ListEventsResponse {
+    repeated KubernetesEvent items = 1 [json_name = "items"];
+    int32 total = 2 [json_name = "total"];
+    int32 limit = 3 [json_name = "limit"];
+    int32 offset = 4 [json_name = "offset"];
+}
+
+message EnrollRequest {
+    uint64 cluster_id = 1 [json_name = "cluster_id"];
+    string cluster_uid = 2 [json_name = "cluster_uid"];
+    string role = 3 [json_name = "role"];
+    string node_name = 4 [json_name = "node_name"];
+    string node_uid = 5 [json_name = "node_uid"];
+    string provider_id = 6 [json_name = "provider_id"];
+    string namespace = 7 [json_name = "namespace"];
+    string agent_version = 8 [json_name = "agent_version"];
+    repeated string capabilities = 9 [json_name = "capabilities"];
+}
+
+message EnrollResponse {
+    uint64 cluster_id = 1 [json_name = "cluster_id"];
+    string role = 2 [json_name = "role"];
+    string mode = 3 [json_name = "mode"];
+    uint64 edge_id = 4 [json_name = "edge_id"];
+    string access_key = 5 [json_name = "access_key"];
+    string secret_key = 6 [json_name = "secret_key"];
+    string cloud_addr = 7 [json_name = "cloud_addr"];
+    string manager_public_url = 8 [json_name = "manager_public_url"];
+}

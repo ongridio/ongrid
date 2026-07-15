@@ -330,6 +330,17 @@ func (r *fakeRepo) SetDeviceID(_ context.Context, id, deviceID uint64) error {
 	return nil
 }
 
+func (r *fakeRepo) ClearDeviceID(_ context.Context, id uint64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	e, ok := r.byID[id]
+	if !ok || e.DeletedAt != nil {
+		return errs.ErrNotFound
+	}
+	e.DeviceID = nil
+	return nil
+}
+
 func (r *fakeRepo) SetAgentVersion(_ context.Context, id uint64, v string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -363,6 +374,83 @@ func (r *fakeRepo) Count(_ context.Context) (int64, error) {
 		}
 	}
 	return n, nil
+}
+
+type fakeEdgeDeviceRepo struct {
+	mu    sync.Mutex
+	links map[uint64]uint64
+}
+
+func newFakeEdgeDeviceRepo() *fakeEdgeDeviceRepo {
+	return &fakeEdgeDeviceRepo{links: map[uint64]uint64{}}
+}
+
+func (r *fakeEdgeDeviceRepo) Link(_ context.Context, edgeID, deviceID uint64, t devicemodel.EdgeDeviceRelationType) error {
+	if t != devicemodel.EdgeDeviceRelationHost {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.links[edgeID] = deviceID
+	return nil
+}
+
+func (r *fakeEdgeDeviceRepo) Unlink(_ context.Context, edgeID, deviceID uint64, t devicemodel.EdgeDeviceRelationType) error {
+	if t != devicemodel.EdgeDeviceRelationHost {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.links[edgeID] == deviceID {
+		delete(r.links, edgeID)
+	}
+	return nil
+}
+
+func (r *fakeEdgeDeviceRepo) LookupHostDevice(_ context.Context, edgeID uint64) (uint64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	deviceID, ok := r.links[edgeID]
+	if !ok {
+		return 0, errs.ErrNotFound
+	}
+	return deviceID, nil
+}
+
+func (r *fakeEdgeDeviceRepo) LookupEdgeForDevice(_ context.Context, deviceID uint64, t devicemodel.EdgeDeviceRelationType) (uint64, error) {
+	if t != devicemodel.EdgeDeviceRelationHost {
+		return 0, errs.ErrNotFound
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for edgeID, linkedDeviceID := range r.links {
+		if linkedDeviceID == deviceID {
+			return edgeID, nil
+		}
+	}
+	return 0, errs.ErrNotFound
+}
+
+func (r *fakeEdgeDeviceRepo) ListDevicesForEdge(_ context.Context, edgeID uint64) ([]*devicemodel.EdgeDevice, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	deviceID, ok := r.links[edgeID]
+	if !ok {
+		return nil, nil
+	}
+	return []*devicemodel.EdgeDevice{{EdgeID: edgeID, DeviceID: deviceID, Type: devicemodel.EdgeDeviceRelationHost}}, nil
+}
+
+func (r *fakeEdgeDeviceRepo) ListEdgesForDevice(_ context.Context, deviceID uint64) ([]*devicemodel.EdgeDevice, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*devicemodel.EdgeDevice
+	for edgeID, linkedDeviceID := range r.links {
+		if linkedDeviceID == deviceID {
+			out = append(out, &devicemodel.EdgeDevice{EdgeID: edgeID, DeviceID: deviceID, Type: devicemodel.EdgeDeviceRelationHost})
+		}
+	}
+	return out, nil
 }
 
 // --- tests ---
@@ -575,6 +663,137 @@ func TestHandleRegisterUpsertsDeviceAndLinksEdge(t *testing.T) {
 	}
 }
 
+func TestClearHostDeviceLinkRemovesControllerDeviceAssociation(t *testing.T) {
+	repo := newFakeRepo()
+	devices := newFakeDeviceRepo()
+	links := newFakeEdgeDeviceRepo()
+	uc := NewUsecase(repo, devices, links, nil)
+	ctx := context.Background()
+
+	res, err := uc.Create(ctx, "k8s-controller", nil)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := uc.HandleRegister(ctx, res.Edge.ID, tunnel.HostInfo{Hostname: "wrong-controller-host"}, ""); err != nil {
+		t.Fatalf("HandleRegister: %v", err)
+	}
+	registered, err := uc.Get(ctx, res.Edge.ID)
+	if err != nil || registered.DeviceID == nil {
+		t.Fatalf("precondition: edge should have mistaken device link, edge=%+v err=%v", registered, err)
+	}
+	deviceID := *registered.DeviceID
+
+	if err := uc.ClearHostDeviceLink(ctx, res.Edge.ID); err != nil {
+		t.Fatalf("ClearHostDeviceLink: %v", err)
+	}
+	after, err := uc.Get(ctx, res.Edge.ID)
+	if err != nil {
+		t.Fatalf("Get after clear: %v", err)
+	}
+	if after.DeviceID != nil {
+		t.Fatalf("DeviceID after clear = %v, want nil", *after.DeviceID)
+	}
+	if _, err := links.LookupHostDevice(ctx, res.Edge.ID); !errors.Is(err, errs.ErrNotFound) {
+		t.Fatalf("LookupHostDevice after clear err = %v, want ErrNotFound", err)
+	}
+	if _, err := devices.Get(ctx, deviceID); !errors.Is(err, errs.ErrNotFound) {
+		t.Fatalf("Get device after clear err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestDeleteRemovesLastDeviceTopologyAndLinks(t *testing.T) {
+	repo := newFakeRepo()
+	devices := newFakeDeviceRepo()
+	links := newFakeEdgeDeviceRepo()
+	mirror := &stubMirror{}
+	uc := NewUsecase(repo, devices, links, nil)
+	uc.SetNodeMirror(mirror)
+	ctx := context.Background()
+
+	res, err := uc.Create(ctx, "edge-delete-last", nil)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := uc.HandleRegister(ctx, res.Edge.ID, tunnel.HostInfo{Hostname: "delete-last-host"}, ""); err != nil {
+		t.Fatalf("HandleRegister: %v", err)
+	}
+	edge, err := uc.Get(ctx, res.Edge.ID)
+	if err != nil || edge.DeviceID == nil {
+		t.Fatalf("registered edge/device = %+v err=%v", edge, err)
+	}
+	deviceID := *edge.DeviceID
+	dev, err := devices.Get(ctx, deviceID)
+	if err != nil || dev.NodeID == nil {
+		t.Fatalf("registered device = %+v err=%v", dev, err)
+	}
+	nodeID := *dev.NodeID
+
+	if err := uc.Delete(ctx, res.Edge.ID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if _, err := uc.Get(ctx, res.Edge.ID); !errors.Is(err, errs.ErrNotFound) {
+		t.Fatalf("edge after delete err = %v, want ErrNotFound", err)
+	}
+	if _, err := devices.Get(ctx, deviceID); !errors.Is(err, errs.ErrNotFound) {
+		t.Fatalf("device after delete err = %v, want ErrNotFound", err)
+	}
+	if _, err := links.LookupHostDevice(ctx, res.Edge.ID); !errors.Is(err, errs.ErrNotFound) {
+		t.Fatalf("edge_device link after delete err = %v, want ErrNotFound", err)
+	}
+	if len(mirror.deletes) != 1 || mirror.deletes[0] != [2]uint64{deviceID, nodeID} {
+		t.Fatalf("mirror deletes = %#v, want device/node %d/%d", mirror.deletes, deviceID, nodeID)
+	}
+}
+
+func TestDeleteKeepsDeviceWhenAnotherLiveEdgeUsesIt(t *testing.T) {
+	repo := newFakeRepo()
+	devices := newFakeDeviceRepo()
+	links := newFakeEdgeDeviceRepo()
+	mirror := &stubMirror{}
+	uc := NewUsecase(repo, devices, links, nil)
+	uc.SetNodeMirror(mirror)
+	ctx := context.Background()
+
+	first, err := uc.Create(ctx, "edge-delete-shared-1", nil)
+	if err != nil {
+		t.Fatalf("Create first: %v", err)
+	}
+	if err := uc.HandleRegister(ctx, first.Edge.ID, tunnel.HostInfo{Hostname: "shared-host"}, ""); err != nil {
+		t.Fatalf("HandleRegister first: %v", err)
+	}
+	edge, err := uc.Get(ctx, first.Edge.ID)
+	if err != nil || edge.DeviceID == nil {
+		t.Fatalf("first edge/device = %+v err=%v", edge, err)
+	}
+	deviceID := *edge.DeviceID
+	second, err := uc.Create(ctx, "edge-delete-shared-2", nil)
+	if err != nil {
+		t.Fatalf("Create second: %v", err)
+	}
+	if err := repo.SetDeviceID(ctx, second.Edge.ID, deviceID); err != nil {
+		t.Fatalf("SetDeviceID second: %v", err)
+	}
+	if err := links.Link(ctx, second.Edge.ID, deviceID, devicemodel.EdgeDeviceRelationHost); err != nil {
+		t.Fatalf("Link second: %v", err)
+	}
+
+	if err := uc.Delete(ctx, first.Edge.ID); err != nil {
+		t.Fatalf("Delete first: %v", err)
+	}
+	if _, err := devices.Get(ctx, deviceID); err != nil {
+		t.Fatalf("device should remain, got %v", err)
+	}
+	if _, err := links.LookupHostDevice(ctx, first.Edge.ID); !errors.Is(err, errs.ErrNotFound) {
+		t.Fatalf("first link after delete err = %v, want ErrNotFound", err)
+	}
+	if got, err := links.LookupHostDevice(ctx, second.Edge.ID); err != nil || got != deviceID {
+		t.Fatalf("second link = %d err=%v, want %d", got, err, deviceID)
+	}
+	if len(mirror.deletes) != 0 {
+		t.Fatalf("mirror deletes = %#v, want none for shared device", mirror.deletes)
+	}
+}
+
 func TestHandleRegisterIsIdempotentForSameHost(t *testing.T) {
 	repo := newFakeRepo()
 	devices := newFakeDeviceRepo()
@@ -766,12 +985,18 @@ func TestAuthenticateWrongSecretFails(t *testing.T) {
 // deterministic node id (= device id + 1000) so tests can assert the
 // value got written to device.node_id.
 type stubMirror struct {
-	calls []uint64
+	calls   []uint64
+	deletes [][2]uint64
 }
 
 func (s *stubMirror) EnsureNodeForDevice(_ context.Context, deviceID uint64, _ string) (uint64, error) {
 	s.calls = append(s.calls, deviceID)
 	return deviceID + 1000, nil
+}
+
+func (s *stubMirror) DeleteNodeForDevice(_ context.Context, deviceID, nodeID uint64) error {
+	s.deletes = append(s.deletes, [2]uint64{deviceID, nodeID})
+	return nil
 }
 
 // TestHandleRegisterMirrorsDeviceToNode is the hook
