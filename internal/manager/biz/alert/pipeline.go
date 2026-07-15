@@ -10,8 +10,10 @@ import (
 	"sync"
 	"time"
 
+	devicebiz "github.com/ongridio/ongrid/internal/manager/biz/device"
 	edgebiz "github.com/ongridio/ongrid/internal/manager/biz/edge"
 	model "github.com/ongridio/ongrid/internal/manager/model/alert"
+	devicemodel "github.com/ongridio/ongrid/internal/manager/model/device"
 	edgemodel "github.com/ongridio/ongrid/internal/manager/model/edge"
 	"github.com/ongridio/ongrid/internal/pkg/logquery"
 	"github.com/ongridio/ongrid/internal/pkg/notify"
@@ -19,15 +21,17 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/promquery"
 )
 
+// DeviceLister enumerates registered devices. *devicebiz.Usecase satisfies it.
+// This is the canonical source for heartbeat staleness after the May 2026
+// Edge ↔ Device split: Device.LastSeenAt is the denormalised presence view
+// used by the UI and survives edge identity churn.
+type DeviceLister interface {
+	List(ctx context.Context, f devicebiz.ListFilter) ([]*devicemodel.Device, error)
+}
+
 // EdgeLister enumerates registered edges. *edgebiz.Usecase satisfies it.
-// Used by refreshDeviceStalenessGauge to expose
-// device_last_seen_seconds_ago to Prom — a metric_raw rule is the new
-// path for "host offline" alerts after the collapse.
-//
-// Post-split (May 2026): the staleness gauge is keyed by device_id, but
-// because the pre-launch backfill makes edge.id == host_device.id we
-// can keep listing edges and use their numeric id as the device_id
-// label without standing up a parallel device-lister surface.
+// Kept as a fallback for tests/older wiring that has not supplied a
+// DeviceLister yet.
 type EdgeLister interface {
 	List(ctx context.Context, f edgebiz.ListFilter) ([]*edgemodel.Edge, error)
 }
@@ -46,10 +50,9 @@ type LogQuerier interface {
 	QueryRange(ctx context.Context, opts logquery.QueryRangeOptions) (*logquery.QueryRangeResult, error)
 }
 
-// PipelineEvaluatorOpts wires the evaluator. EdgeLister keeps the
-// device_last_seen_seconds_ago gauge fresh; PromQuerier drives every
-// metric_* rule kind. Both are optional; when nil the corresponding
-// rule kinds are silently skipped each tick.
+// PipelineEvaluatorOpts wires the evaluator. DeviceLister keeps the heartbeat
+// gauges fresh; PromQuerier drives every metric_* rule kind. Both are optional;
+// when nil the corresponding rule kinds are silently skipped each tick.
 type PipelineEvaluatorOpts struct {
 	Usecase         *Usecase
 	Rules           RulesProvider
@@ -60,8 +63,9 @@ type PipelineEvaluatorOpts struct {
 	Cooldown        time.Duration
 	Interval        time.Duration
 
-	EdgeLister  EdgeLister
-	PromQuerier PromQuerier
+	DeviceLister DeviceLister
+	EdgeLister   EdgeLister
+	PromQuerier  PromQuerier
 
 	// LogQuerier is the Loki client used by Phase-B kinds log_match /
 	// log_volume. nil means those kinds are silently skipped each tick
@@ -89,9 +93,10 @@ type PipelineEvaluator struct {
 	cooldown  time.Duration
 	interval  time.Duration
 
-	edges EdgeLister
-	prom  PromQuerier
-	logq  LogQuerier
+	devices DeviceLister
+	edges   EdgeLister
+	prom    PromQuerier
+	logq    LogQuerier
 
 	// gaugeSnapshot is the previous tick's (device_id, device_name) set
 	// used by refreshDeviceStalenessGauge to garbage-collect series for
@@ -134,13 +139,14 @@ func NewPipelineEvaluator(opts PipelineEvaluatorOpts) *PipelineEvaluator {
 		resolver:  opts.Resolver,
 		inhibitor: opts.Inhibitor,
 		channels:  append([]string(nil), opts.DefaultChannels...),
-		cooldown: opts.Cooldown,
-		interval: opts.Interval,
-		edges:    opts.EdgeLister,
-		prom:     opts.PromQuerier,
-		logq:     opts.LogQuerier,
-		log:      opts.Log,
-		now:      opts.Now,
+		cooldown:  opts.Cooldown,
+		interval:  opts.Interval,
+		devices:   opts.DeviceLister,
+		edges:     opts.EdgeLister,
+		prom:      opts.PromQuerier,
+		logq:      opts.LogQuerier,
+		log:       opts.Log,
+		now:       opts.Now,
 	}
 }
 
@@ -169,14 +175,13 @@ func (e *PipelineEvaluator) EvaluateOnce(ctx context.Context) {
 
 func (e *PipelineEvaluator) evaluate(ctx context.Context) {
 	now := e.now()
-	if e.edges != nil {
-		// Refresh the device_last_seen_seconds_ago gauge first so any
-		// metric_raw rule scraped this cycle sees fresh values. After
-		// the collapse, this gauge + a metric_raw rule
-		// (`device_last_seen_seconds_ago > 90`) is the host-staleness
-		// signal — there is no special-case edge_absence evaluator
-		// any more. Detection delay = 30s ticker + 30s evaluator tick
-		// = up to 60s.
+	if e.devices != nil || e.edges != nil {
+		// Refresh the heartbeat compatibility gauges first so any
+		// metric_raw rule scraped this cycle sees fresh values. The
+		// canonical host-staleness signal now calculates age from the
+		// heartbeat timestamp:
+		//
+		//   time() - max by (device_id) (device_last_seen_timestamp_seconds) > 90
 		e.refreshDeviceStalenessGauge(ctx, now)
 	}
 	if e.prom != nil {
@@ -195,22 +200,71 @@ func (e *PipelineEvaluator) evaluate(ctx context.Context) {
 	}
 }
 
-// refreshDeviceStalenessGauge updates the device_last_seen_seconds_ago
-// Prom gauge with one series per registered device. Source-of-truth is
-// the host edge's last_seen_at column (which mirrors host presence
-// post-split because the pre-launch backfill keeps device.id == edge.id
-// for type=host junctions). Series for devices that fall out of
-// inventory are deleted so the metric_raw evaluator doesn't keep firing
-// on a removed device.
+// refreshDeviceStalenessGauge updates the device heartbeat Prom gauges with
+// one series per registered device. Source-of-truth is Device.LastSeenAt; the
+// edge view is only a fallback for older tests/wiring. Series for devices that
+// fall out of inventory are deleted so the metric_raw evaluator doesn't keep
+// firing on a removed device.
 //
-// Called every evaluator tick (30s default). Errors here are logged and
-// skipped — gauge staleness for one tick is preferable to a panic in
-// the alert loop.
+// Called every evaluator tick. Errors here are logged and skipped — gauge
+// staleness for one tick is preferable to a panic in the alert loop. Real-time
+// offline detection should use device_last_seen_timestamp_seconds, which is
+// also updated directly from the heartbeat path.
 func (e *PipelineEvaluator) refreshDeviceStalenessGauge(ctx context.Context, now time.Time) {
-	edges, err := e.edges.List(ctx, edgebiz.ListFilter{Limit: 1000})
+	current, ok := e.refreshDeviceGaugesFromDevices(ctx, now)
+	if !ok {
+		current = e.refreshDeviceGaugesFromEdges(ctx, now)
+	}
+	if current == nil {
+		return
+	}
+	e.gaugeMu.Lock()
+	prev := e.gaugeSnapshot
+	e.gaugeSnapshot = current
+	e.gaugeMu.Unlock()
+	for id, name := range prev {
+		if _, ok := current[id]; ok {
+			continue
+		}
+		prom.DeleteDeviceLastSeenSecondsAgo(id, name)
+		prom.DeleteDeviceLastSeenTimestampSeconds(id)
+	}
+}
+
+func (e *PipelineEvaluator) refreshDeviceGaugesFromDevices(ctx context.Context, now time.Time) (map[string]string, bool) {
+	if e.devices == nil {
+		return nil, false
+	}
+	devices, err := e.devices.List(ctx, devicebiz.ListFilter{Limit: 10000})
+	if err != nil {
+		e.log.Warn("alert: list devices for staleness gauge failed", slog.Any("err", err))
+		return nil, false
+	}
+	current := make(map[string]string, len(devices))
+	for _, device := range devices {
+		lastSeen := device.CreatedAt
+		if device.LastSeenAt != nil {
+			lastSeen = *device.LastSeenAt
+		}
+		name := device.Name
+		if name == "" {
+			name = device.Hostname
+		}
+		idStr := fmt.Sprintf("%d", device.ID)
+		setDeviceLastSeenGauges(idStr, name, lastSeen, now)
+		current[idStr] = name
+	}
+	return current, true
+}
+
+func (e *PipelineEvaluator) refreshDeviceGaugesFromEdges(ctx context.Context, now time.Time) map[string]string {
+	if e.edges == nil {
+		return nil
+	}
+	edges, err := e.edges.List(ctx, edgebiz.ListFilter{Limit: 10000})
 	if err != nil {
 		e.log.Warn("alert: list edges for staleness gauge failed", slog.Any("err", err))
-		return
+		return nil
 	}
 	// Re-build the per-tick view of which (device_id, device_name) tuples
 	// we still own. Anything in the previous snapshot but not in this
@@ -224,10 +278,6 @@ func (e *PipelineEvaluator) refreshDeviceStalenessGauge(ctx context.Context, now
 		} else {
 			lastSeen = edge.CreatedAt
 		}
-		secs := now.Sub(lastSeen).Seconds()
-		if secs < 0 {
-			secs = 0
-		}
 		// Numeric device_id: prefer Edge.DeviceID (the host device's id);
 		// fall back to edge.ID before the register flow has linked them
 		// (idempotent because the backfill makes the values match).
@@ -236,19 +286,19 @@ func (e *PipelineEvaluator) refreshDeviceStalenessGauge(ctx context.Context, now
 			deviceID = *edge.DeviceID
 		}
 		idStr := fmt.Sprintf("%d", deviceID)
-		prom.SetDeviceLastSeenSecondsAgo(idStr, edge.Name, secs)
+		setDeviceLastSeenGauges(idStr, edge.Name, lastSeen, now)
 		current[idStr] = edge.Name
 	}
-	e.gaugeMu.Lock()
-	prev := e.gaugeSnapshot
-	e.gaugeSnapshot = current
-	e.gaugeMu.Unlock()
-	for id, name := range prev {
-		if _, ok := current[id]; ok {
-			continue
-		}
-		prom.DeleteDeviceLastSeenSecondsAgo(id, name)
+	return current
+}
+
+func setDeviceLastSeenGauges(deviceID string, deviceName string, lastSeen time.Time, now time.Time) {
+	secs := now.Sub(lastSeen).Seconds()
+	if secs < 0 {
+		secs = 0
 	}
+	prom.SetDeviceLastSeenSecondsAgo(deviceID, deviceName, secs)
+	prom.SetDeviceLastSeenTimestampSeconds(deviceID, float64(lastSeen.Unix()))
 }
 
 // evaluatePromQuery runs every enabled metric_raw rule's expression.
@@ -373,9 +423,49 @@ func (e *PipelineEvaluator) evaluatePromQuery(ctx context.Context, now time.Time
 					slog.Any("err", err))
 			}
 		}
+		e.resolveRecoveredPromQueryIncidents(ctx, rule.RuleKey, fired, now)
 		e.firingSnapshot[rule.RuleKey] = fired
 		done()
 		_ = evalErr
+	}
+}
+
+// resolveRecoveredPromQueryIncidents closes active metric_raw incidents that no
+// longer appear in the current PromQL result, even when this evaluator process
+// did not observe their previous firing in memory. That matters after deploys
+// and after query label-shape changes: the old dedupe_key can remain open in
+// the DB while the current tick has already proven the predicate is clear.
+func (e *PipelineEvaluator) resolveRecoveredPromQueryIncidents(ctx context.Context, ruleKey string, fired map[string]struct{}, now time.Time) {
+	if e.uc == nil || ruleKey == "" {
+		return
+	}
+	for _, status := range []string{model.IncidentStatusOpen, model.IncidentStatusAcknowledged, model.IncidentStatusSilenced} {
+		incidents, err := e.uc.ListIncidents(ctx, IncidentFilter{
+			Status:  status,
+			RuleKey: ruleKey,
+			Limit:   10000,
+		})
+		if err != nil {
+			e.log.Warn("alert: list active prom_query incidents failed",
+				slog.String("rule", ruleKey),
+				slog.String("status", status),
+				slog.Any("err", err))
+			continue
+		}
+		for _, inc := range incidents {
+			if inc == nil || inc.DedupeKey == "" {
+				continue
+			}
+			if _, stillFiring := fired[inc.DedupeKey]; stillFiring {
+				continue
+			}
+			if _, err := e.uc.SystemResolveIncident(ctx, inc.DedupeKey, "prom condition cleared", now); err != nil {
+				e.log.Warn("alert: resolve recovered prom_query incident failed",
+					slog.String("rule", ruleKey),
+					slog.String("dedupe", inc.DedupeKey),
+					slog.Any("err", err))
+			}
+		}
 	}
 }
 
@@ -501,4 +591,3 @@ func compareFloat(v float64, op string, threshold float64) bool {
 	}
 	return false
 }
-

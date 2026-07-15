@@ -39,15 +39,12 @@ var (
 	//   result = ok | fail
 	PromWriteTotal *prometheus.CounterVec
 
-	// DeviceLastSeenSecondsAgo is the gauge form of device heartbeat
-	// staleness. One time-series per device, value = wall-clock seconds
-	// since the most recent last_seen_at observation. The gauge is
-	// refreshed by the alert manager's heartbeat ticker (~30s) so PromQL
-	// evaluators (the metric_raw replacement for edge_absence) can run
-	//
-	//   device_last_seen_seconds_ago > 90
-	//
-	// over the same heartbeat data the legacy edge_absence kind consumes.
+	// DeviceLastSeenSecondsAgo is the legacy gauge form of device
+	// heartbeat staleness. One time-series per device, value =
+	// wall-clock seconds since the most recent last_seen_at observation.
+	// The gauge is refreshed by the alert evaluator tick, so it is useful
+	// for compatibility panels but should not be used for real-time
+	// offline detection.
 	//
 	// Labels:
 	//   device_id = decimal id, stable
@@ -59,6 +56,17 @@ var (
 	// Edge ↔ Device entity split. Numerically the device_id label
 	// matches the legacy edge_id (the migration reuses the integer).
 	DeviceLastSeenSecondsAgo *prometheus.GaugeVec
+
+	// DeviceLastSeenTimestampSeconds is updated from the heartbeat path
+	// itself and stores the Unix timestamp of the latest device
+	// last_seen_at observation. Real-time PromQL should calculate age
+	// with:
+	//
+	//   time() - max by (device_id) (device_last_seen_timestamp_seconds)
+	//
+	// so the value ages naturally between scrapes and is not tied to the
+	// alert evaluator interval.
+	DeviceLastSeenTimestampSeconds *prometheus.GaugeVec
 
 	// AlertEventsTotal counts every CreateEvent the alert usecase writes.
 	// Replaces the special-case event_internal evaluator: any rule that
@@ -181,9 +189,16 @@ func RegisterManagerMetrics(reg *prometheus.Registry, log *slog.Logger) {
 	deviceAge := prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "device_last_seen_seconds_ago",
-			Help: "Wall-clock seconds since each device's last_seen_at; refreshed every alert evaluator tick. Renamed from edge_last_seen_seconds_ago in May 2026 (entity split).",
+			Help: "Wall-clock seconds since each device's last_seen_at; refreshed every alert evaluator tick for compatibility. Prefer time() - max by (device_id) (device_last_seen_timestamp_seconds) for real-time detection.",
 		},
 		[]string{"device_id", "device_name"},
+	)
+	deviceLastSeenTs := prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "device_last_seen_timestamp_seconds",
+			Help: "Unix timestamp seconds of each device's latest last_seen_at, labelled only by stable device_id so renamed devices do not leave duplicate live series.",
+		},
+		[]string{"device_id"},
 	)
 	events := prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -196,6 +211,7 @@ func RegisterManagerMetrics(reg *prometheus.Registry, log *slog.Logger) {
 	AlertEvaluatorLatency = registerOrExistingHistogramVec(registerer, latency, log)
 	PromWriteTotal = registerOrExistingCounterVec(registerer, writes, log)
 	DeviceLastSeenSecondsAgo = registerOrExistingGaugeVec(registerer, deviceAge, log)
+	DeviceLastSeenTimestampSeconds = registerOrExistingGaugeVecNamed(registerer, deviceLastSeenTs, log, "device_last_seen_timestamp_seconds")
 	AlertEventsTotal = registerOrExistingCounterVec2(registerer, events, log, "alert_events_total")
 
 	// ---- ADR-026 self-obs ------------------------------------------------
@@ -461,6 +477,10 @@ func registerOrExistingCounterVec2(reg prometheus.Registerer, c *prometheus.Coun
 }
 
 func registerOrExistingGaugeVec(reg prometheus.Registerer, c *prometheus.GaugeVec, log *slog.Logger) *prometheus.GaugeVec {
+	return registerOrExistingGaugeVecNamed(reg, c, log, "device_last_seen_seconds_ago")
+}
+
+func registerOrExistingGaugeVecNamed(reg prometheus.Registerer, c *prometheus.GaugeVec, log *slog.Logger, name string) *prometheus.GaugeVec {
 	err := reg.Register(c)
 	if err == nil {
 		return c
@@ -468,7 +488,7 @@ func registerOrExistingGaugeVec(reg prometheus.Registerer, c *prometheus.GaugeVe
 	var are prometheus.AlreadyRegisteredError
 	if errors.As(err, &are) {
 		if log != nil {
-			log.Warn("prom manager metrics: gauge already registered, reusing existing", slog.String("name", "device_last_seen_seconds_ago"))
+			log.Warn("prom manager metrics: gauge already registered, reusing existing", slog.String("name", name))
 		}
 		if existing, ok := are.ExistingCollector.(*prometheus.GaugeVec); ok {
 			return existing
@@ -503,12 +523,20 @@ func IncPromWrite(err error) {
 }
 
 // SetDeviceLastSeenSecondsAgo updates the gauge for one device.
-// Caller is the alert manager's heartbeat-staleness ticker (~30s).
 func SetDeviceLastSeenSecondsAgo(deviceID string, deviceName string, secondsAgo float64) {
 	if DeviceLastSeenSecondsAgo == nil {
 		return
 	}
 	DeviceLastSeenSecondsAgo.WithLabelValues(deviceID, deviceName).Set(secondsAgo)
+}
+
+// SetDeviceLastSeenTimestampSeconds updates the heartbeat timestamp gauge for
+// one device. lastSeen should be the source-of-truth last_seen_at value.
+func SetDeviceLastSeenTimestampSeconds(deviceID string, lastSeen float64) {
+	if DeviceLastSeenTimestampSeconds == nil {
+		return
+	}
+	DeviceLastSeenTimestampSeconds.WithLabelValues(deviceID).Set(lastSeen)
 }
 
 // DeleteDeviceLastSeenSecondsAgo drops the gauge series for a device that's
@@ -520,6 +548,15 @@ func DeleteDeviceLastSeenSecondsAgo(deviceID string, deviceName string) {
 		return
 	}
 	DeviceLastSeenSecondsAgo.DeleteLabelValues(deviceID, deviceName)
+}
+
+// DeleteDeviceLastSeenTimestampSeconds drops the timestamp series for a device
+// that's been removed from inventory.
+func DeleteDeviceLastSeenTimestampSeconds(deviceID string) {
+	if DeviceLastSeenTimestampSeconds == nil {
+		return
+	}
+	DeviceLastSeenTimestampSeconds.DeleteLabelValues(deviceID)
 }
 
 // IncAlertEvent records one alert_events row write.

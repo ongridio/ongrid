@@ -50,7 +50,7 @@ func (f *fakeNotifier) SendVia(_ context.Context, msg notify.Message, sender not
 
 // fakeRepo is an in-memory implementation of biz.Repo sufficient to drive
 // every alert test. Only the subset RecordFiring + maybeNotify touches is
-// implemented; ListIncidents et al. return empty.
+// implemented, plus the list path used by evaluator recovery sweeps.
 type fakeRepo struct {
 	now func() time.Time
 
@@ -213,8 +213,29 @@ func (r *fakeRepo) seedMetricRawRules(t *testing.T) {
 	}
 }
 
-func (r *fakeRepo) ListIncidents(context.Context, IncidentFilter) ([]*model.Incident, error) {
-	return nil, nil
+func (r *fakeRepo) ListIncidents(_ context.Context, f IncidentFilter) ([]*model.Incident, error) {
+	out := make([]*model.Incident, 0, len(r.incidents))
+	for _, inc := range r.incidents {
+		if f.Status != "" && inc.Status != f.Status {
+			continue
+		}
+		if f.Severity != "" && inc.Severity != f.Severity {
+			continue
+		}
+		if f.RuleKey != "" && inc.Rule != f.RuleKey {
+			continue
+		}
+		if f.DeviceID != nil {
+			if inc.DeviceID == nil || *inc.DeviceID != *f.DeviceID {
+				continue
+			}
+		}
+		out = append(out, inc)
+		if f.Limit > 0 && len(out) >= f.Limit {
+			break
+		}
+	}
+	return out, nil
 }
 
 func (r *fakeRepo) CountIncidents(context.Context, IncidentFilter) (int64, error) {
