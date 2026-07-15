@@ -163,13 +163,11 @@ func TestInstallCommandDerivesExternalTunnelAddr(t *testing.T) {
 	uc := NewUsecase(newFakeRepo(), newFakeIssuer(), Config{
 		PublicURL:  "https://manager.example.com",
 		TunnelAddr: ":40012",
+		ImageTag:   "v0.10.0",
 	})
 	cmd := uc.installCommand(6, model.ModeFullNode, "controller-token", "node-token")
 	if !strings.Contains(cmd, "--set-string manager.publicURL='https://manager.example.com'") {
 		t.Fatalf("install command missing publicURL: %s", cmd)
-	}
-	if !strings.Contains(cmd, "--set namespace.create=false") {
-		t.Fatalf("install command should disable chart-managed Namespace when using --create-namespace: %s", cmd)
 	}
 	if !strings.Contains(cmd, "--set-string manager.tunnelAddr='manager.example.com:40012'") {
 		t.Fatalf("install command did not derive tunnelAddr from publicURL: %s", cmd)
@@ -177,25 +175,25 @@ func TestInstallCommandDerivesExternalTunnelAddr(t *testing.T) {
 	if !strings.Contains(cmd, "--set-string manager.tlsInsecure=true") {
 		t.Fatalf("install command missing tlsInsecure for self-signed manager TLS: %s", cmd)
 	}
-	if !strings.Contains(cmd, "--insecure-skip-tls-verify") {
-		t.Fatalf("install command missing Helm chart TLS skip for manager-hosted HTTPS chart: %s", cmd)
+	if !strings.Contains(cmd, "'oci://helm.cnb.cool/ongridio/ongrid-edge'") {
+		t.Fatalf("install command should use the CNB OCI chart: %s", cmd)
 	}
-	if !strings.Contains(cmd, "'https://manager.example.com/edge/k8s/ongrid-edge.tgz'") {
-		t.Fatalf("install command should use manager-hosted chart URL: %s", cmd)
+	if !strings.Contains(cmd, "--version '0.10.0'") {
+		t.Fatalf("install command should pin the chart version: %s", cmd)
 	}
 }
 
-func TestInstallCommandUsesConfiguredChartRef(t *testing.T) {
+func TestInstallCommandOmitsChartVersionForDevBuild(t *testing.T) {
 	uc := NewUsecase(newFakeRepo(), newFakeIssuer(), Config{
 		PublicURL: "https://manager.example.com",
-		ChartRef:  "oci://ghcr.io/ongridio/charts/ongrid-edge",
+		ImageTag:  "dev",
 	})
 	cmd := uc.installCommand(6, model.ModeFullNode, "controller-token", "node-token")
-	if !strings.Contains(cmd, "'oci://ghcr.io/ongridio/charts/ongrid-edge'") {
-		t.Fatalf("install command should use configured chart ref: %s", cmd)
+	if !strings.Contains(cmd, "'oci://helm.cnb.cool/ongridio/ongrid-edge'") {
+		t.Fatalf("install command should use the CNB OCI chart: %s", cmd)
 	}
-	if strings.Contains(cmd, "--insecure-skip-tls-verify") {
-		t.Fatalf("install command should not add HTTPS chart TLS flag for OCI chart refs: %s", cmd)
+	if strings.Contains(cmd, "--version") {
+		t.Fatalf("development builds should not request a non-SemVer chart version: %s", cmd)
 	}
 }
 
@@ -208,7 +206,8 @@ func TestUpgradeCommandUsesManagerConfig(t *testing.T) {
 	command := uc.UpgradeCommand(&model.Cluster{ControllerNamespace: "ongrid-system"})
 	for _, want := range []string{
 		"helm upgrade ongrid-edge",
-		"'https://manager.example.com:8443/edge/k8s/ongrid-edge.tgz'",
+		"'oci://helm.cnb.cool/ongridio/ongrid-edge'",
+		"--version '0.9.1'",
 		"--namespace 'ongrid-system'",
 		"--reuse-values",
 		"manager.publicURL='https://manager.example.com:8443'",
@@ -224,6 +223,7 @@ func TestUpgradeCommandUsesManagerConfig(t *testing.T) {
 func TestInstallCommandKeepsPlaceholdersWhenExternalAddressUnknown(t *testing.T) {
 	uc := NewUsecase(newFakeRepo(), newFakeIssuer(), Config{
 		TunnelAddr: ":40012",
+		ImageTag:   "v0.10.0",
 	})
 	cmd := uc.installCommand(6, model.ModeFullNode, "controller-token", "node-token")
 	if !strings.Contains(cmd, "--set-string manager.publicURL='https://<manager>'") {
@@ -235,11 +235,31 @@ func TestInstallCommandKeepsPlaceholdersWhenExternalAddressUnknown(t *testing.T)
 	if !strings.Contains(cmd, "--set-string manager.tlsInsecure=true") {
 		t.Fatalf("install command missing tlsInsecure for self-signed manager TLS: %s", cmd)
 	}
-	if !strings.Contains(cmd, "--insecure-skip-tls-verify") {
-		t.Fatalf("install command missing Helm chart TLS skip for placeholder HTTPS chart: %s", cmd)
+	if !strings.Contains(cmd, "'oci://helm.cnb.cool/ongridio/ongrid-edge'") {
+		t.Fatalf("install command should use the CNB OCI chart: %s", cmd)
 	}
-	if !strings.Contains(cmd, "'https://<manager>/edge/k8s/ongrid-edge.tgz'") {
-		t.Fatalf("install command should use placeholder chart URL: %s", cmd)
+	if !strings.Contains(cmd, "--version '0.10.0'") {
+		t.Fatalf("install command should pin the chart version: %s", cmd)
+	}
+}
+
+func TestInstallChartVersion(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "release", input: "v0.10.0", want: "0.10.0"},
+		{name: "prerelease", input: "v0.11.0-rc.1", want: "0.11.0-rc.1"},
+		{name: "development", input: "dev", want: ""},
+		{name: "empty", input: "", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := installChartVersion(tt.input); got != tt.want {
+				t.Fatalf("installChartVersion(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
 	}
 }
 

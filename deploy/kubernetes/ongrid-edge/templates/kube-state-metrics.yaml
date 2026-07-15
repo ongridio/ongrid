@@ -9,7 +9,7 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: {{ include "ongrid-edge.kubeStateMetricsServiceAccount" . }}
-  namespace: {{ include "ongrid-edge.namespace" . }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "ongrid-edge.labels" . | nindent 4 }}
     app.kubernetes.io/component: kube-state-metrics
@@ -46,13 +46,13 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: {{ include "ongrid-edge.kubeStateMetricsServiceAccount" . }}
-    namespace: {{ include "ongrid-edge.namespace" . }}
+    namespace: {{ .Release.Namespace }}
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: {{ include "ongrid-edge.kubeStateMetricsName" . }}
-  namespace: {{ include "ongrid-edge.namespace" . }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "ongrid-edge.labels" . | nindent 4 }}
     app.kubernetes.io/component: kube-state-metrics
@@ -74,7 +74,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "ongrid-edge.kubeStateMetricsName" . }}
-  namespace: {{ include "ongrid-edge.namespace" . }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "ongrid-edge.labels" . | nindent 4 }}
     app.kubernetes.io/component: kube-state-metrics

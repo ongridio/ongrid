@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: {{ include "ongrid-edge.fullname" . }}-node
-  namespace: {{ include "ongrid-edge.namespace" . }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "ongrid-edge.labels" . | nindent 4 }}
     app.kubernetes.io/component: node

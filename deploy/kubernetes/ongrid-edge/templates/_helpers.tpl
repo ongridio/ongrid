@@ -10,10 +10,6 @@
 {{- printf "%s" (include "ongrid-edge.name" .) -}}
 {{- end -}}
 
-{{- define "ongrid-edge.namespace" -}}
-{{- default .Release.Namespace .Values.namespace.name -}}
-{{- end -}}
-
 {{- define "ongrid-edge.labels" -}}
 app.kubernetes.io/name: {{ include "ongrid-edge.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
@@ -69,7 +65,7 @@ true
 {{- define "ongrid-edge.kubeStateMetricsEndpoint" -}}
 {{- $ksm := default dict .Values.kubeStateMetrics -}}
 {{- $port := default 8080 $ksm.port -}}
-{{- printf "http://%s.%s.svc:%v/metrics" (include "ongrid-edge.kubeStateMetricsName" .) (include "ongrid-edge.namespace" .) $port -}}
+{{- printf "http://%s.%s.svc:%v/metrics" (include "ongrid-edge.kubeStateMetricsName" .) .Release.Namespace $port -}}
 {{- end -}}
 
 {{- define "ongrid-edge.k8sMetricsEndpoint" -}}

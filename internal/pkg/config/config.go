@@ -31,10 +31,6 @@ type Config struct {
 	// push logs/traces).
 	PublicURL string
 
-	// K8sChartRef is the Helm chart reference shown in Kubernetes onboarding
-	// commands. Empty means derive a public chart URL from PublicURL.
-	// env: ONGRID_K8S_CHART_REF
-	K8sChartRef string
 	// K8sEventRetention caps how long manager keeps Kubernetes Events in its
 	// local snapshot store. The event's Kubernetes timestamp is used before
 	// last_seen_at so old Events do not live forever just because the API still
@@ -381,7 +377,6 @@ func Load() (*Config, error) {
 		MetricsAddr:             getEnv("ONGRID_METRICS_ADDR", ":9100"),
 		TunnelAddr:              getEnv("ONGRID_TUNNEL_ADDR", ":40012"),
 		PublicURL:               getEnv("ONGRID_PUBLIC_URL", ""),
-		K8sChartRef:             getEnv("ONGRID_K8S_CHART_REF", ""),
 		K8sEventRetention:       getEnvDuration("ONGRID_K8S_EVENT_RETENTION", 24*time.Hour),
 		K8sEventMaxPerCluster:   getEnvInt("ONGRID_K8S_EVENT_MAX_PER_CLUSTER", 5000),
 		K8sEventCleanupInterval: getEnvDuration("ONGRID_K8S_EVENT_CLEANUP_INTERVAL", time.Hour),

@@ -1,9 +1,5 @@
 mode: full-node
 
-namespace:
-  create: false
-  name: ongrid-system
-
 manager:
   publicURL: ""
   tunnelAddr: ""

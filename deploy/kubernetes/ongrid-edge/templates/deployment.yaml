@@ -8,7 +8,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "ongrid-edge.fullname" . }}-controller
-  namespace: {{ include "ongrid-edge.namespace" . }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "ongrid-edge.labels" . | nindent 4 }}
     app.kubernetes.io/component: controller

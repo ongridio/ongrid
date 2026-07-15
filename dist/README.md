@@ -51,9 +51,14 @@ combos so users can run them directly on heterogeneous hosts.
    the change, then tag that commit with the same value:
    `git tag v0.1.1 && git push origin v0.1.1`.
 2. The `Release` GitHub Actions workflow runs on `v*.*.*` tag pushes and
-   executes `make package-all` to build both server packages. Use
+   publishes the multi-architecture Kubernetes Edge image and matching Helm
+   chart before building both server packages. The chart is published as an
+   OCI artifact at `oci://helm.cnb.cool/ongridio/ongrid-edge`; it is not copied
+   into the manager installation tarball. Use
    `make package TARGET_ARCH=arm64` locally only when you need a single ARM64
    package. The release build will:
+   - `docker-push-k8s-edge` — publish the amd64/arm64 Edge image to CNB
+   - `publish-k8s-chart` — package and publish the version-matched Helm chart
    - `build-edge-all`    — cross-compile ongrid-edge for 4 targets
    - `docker-build`      — build `ongrid:<VERSION>` image for `linux/<arch>`
    - stage everything under `dist/stage/ongrid-<VERSION>-linux-<arch>/`

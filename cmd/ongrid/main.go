@@ -773,7 +773,6 @@ func main() {
 	k8sUC := managerbizk8s.NewUsecase(k8sRepo, k8sEdgeIdentityIssuer{svc: edgeSvc}, managerbizk8s.Config{
 		PublicURL:            cfg.PublicURL,
 		TunnelAddr:           cfg.TunnelAddr,
-		ChartRef:             cfg.K8sChartRef,
 		ImageTag:             version,
 		EventRetention:       cfg.K8sEventRetention,
 		EventMaxPerCluster:   cfg.K8sEventMaxPerCluster,

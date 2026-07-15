@@ -69,7 +69,7 @@ flowchart LR
 ## 接入流程
 
 1. 用户在 `/kubernetes` 创建集群，manager 生成集群记录和 bootstrap token。
-2. UI 根据当前 manager 访问地址生成远程 Helm 命令，chart 地址使用 `/edge/k8s/ongrid-edge.tgz`。
+2. UI 生成远程 Helm 命令，固定从 CNB OCI 制品库 `oci://helm.cnb.cool/ongridio/ongrid-edge` 拉取与当前 Ongrid 版本一致的 chart；manager 不再分发本地 chart。
 3. Chart 默认从 `docker.cnb.cool/ongridio/ongrid-edge:<appVersion>` 拉取 amd64/arm64 多架构镜像，也允许通过 `image.repository` 和 `image.tag` 覆盖。
 4. 用户在目标集群执行 Helm 命令，传入：
    - `manager.publicURL`
@@ -160,11 +160,10 @@ Kubernetes Event 是高 churn 数据，只保留短期诊断窗口：
 安装命令示例：
 
 ```bash
-helm upgrade --install ongrid-edge 'https://<manager>/edge/k8s/ongrid-edge.tgz' \
-  --insecure-skip-tls-verify \
+helm upgrade --install ongrid-edge 'oci://helm.cnb.cool/ongridio/ongrid-edge' \
+  --version '<chart_version>' \
   --namespace ongrid-system \
   --create-namespace \
-  --set namespace.create=false \
   --set-string manager.publicURL='https://<manager>' \
   --set-string manager.tunnelAddr='<manager>:40012' \
   --set-string manager.tlsInsecure=true \

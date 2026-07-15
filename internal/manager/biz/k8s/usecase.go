@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,6 +30,7 @@ const (
 	defaultEventCleanupInterval = time.Hour
 	eventRetentionBatchLimit    = 1000
 	bootstrapTokenBytes         = 32
+	defaultK8sChartRef          = "oci://helm.cnb.cool/ongridio/ongrid-edge"
 )
 
 // Repository is the k8s bounded context persistence contract.
@@ -155,7 +157,6 @@ type ClusterHealthSummary struct {
 type Config struct {
 	PublicURL            string
 	TunnelAddr           string
-	ChartRef             string
 	ImageTag             string
 	EventRetention       time.Duration
 	EventMaxPerCluster   int
@@ -1895,17 +1896,15 @@ func jsonText(v any, fallback string) string {
 
 func (u *Usecase) installCommand(clusterID uint64, mode, controllerToken, nodeToken string) string {
 	publicURL, tunnelAddr := installEndpoints(u.cfg.PublicURL, u.cfg.TunnelAddr)
-	chartRef := installChartRef(u.cfg, publicURL)
 	args := []string{
 		"helm upgrade --install ongrid-edge",
-		shellQuote(chartRef),
+		shellQuote(defaultK8sChartRef),
 	}
-	if strings.HasPrefix(strings.ToLower(chartRef), "https://") {
-		args = append(args, "--insecure-skip-tls-verify")
+	if chartVersion := installChartVersion(u.cfg.ImageTag); chartVersion != "" {
+		args = append(args, "--version "+shellQuote(chartVersion))
 	}
 	args = append(args,
 		"--namespace ongrid-system --create-namespace",
-		"--set namespace.create=false",
 		"--set-string manager.publicURL="+shellQuote(publicURL),
 		"--set-string manager.tunnelAddr="+shellQuote(tunnelAddr),
 		"--set-string manager.tlsInsecure=true",
@@ -1922,17 +1921,16 @@ func (u *Usecase) UpgradeCommand(cluster *model.Cluster) string {
 		return ""
 	}
 	publicURL, tunnelAddr := installEndpoints(u.cfg.PublicURL, u.cfg.TunnelAddr)
-	chartRef := installChartRef(u.cfg, publicURL)
 	namespace := strings.TrimSpace(cluster.ControllerNamespace)
 	if namespace == "" {
 		namespace = "ongrid-system"
 	}
 	args := []string{
 		"helm upgrade ongrid-edge",
-		shellQuote(chartRef),
+		shellQuote(defaultK8sChartRef),
 	}
-	if strings.HasPrefix(strings.ToLower(chartRef), "https://") {
-		args = append(args, "--insecure-skip-tls-verify")
+	if chartVersion := installChartVersion(u.cfg.ImageTag); chartVersion != "" {
+		args = append(args, "--version "+shellQuote(chartVersion))
 	}
 	args = append(args,
 		"--namespace "+shellQuote(namespace),
@@ -1947,15 +1945,13 @@ func (u *Usecase) UpgradeCommand(cluster *model.Cluster) string {
 	return strings.Join(args, " ")
 }
 
-func installChartRef(cfg Config, publicURL string) string {
-	if chartRef := strings.TrimSpace(cfg.ChartRef); chartRef != "" {
-		return chartRef
+func installChartVersion(imageTag string) string {
+	version := strings.TrimPrefix(strings.TrimSpace(imageTag), "v")
+	matched, err := regexp.MatchString(`^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?$`, version)
+	if err != nil || !matched {
+		return ""
 	}
-	publicURL = strings.TrimRight(strings.TrimSpace(publicURL), "/")
-	if publicURL == "" {
-		publicURL = "https://<manager>"
-	}
-	return publicURL + "/edge/k8s/ongrid-edge.tgz"
+	return version
 }
 
 func installEndpoints(rawPublicURL, rawTunnelAddr string) (string, string) {

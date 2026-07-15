@@ -34,6 +34,12 @@ K8S_EDGE_IMAGE_PLATFORMS ?= linux/amd64,linux/arm64
 K8S_EDGE_IMAGE_TAG ?= $(VERSION)
 K8S_EDGE_IMAGE_REPO ?= docker.cnb.cool/ongridio/ongrid-edge
 K8S_EDGE_IMAGE_REF ?= $(K8S_EDGE_IMAGE_REPO):$(K8S_EDGE_IMAGE_TAG)
+K8S_CHART_VERSION ?= $(patsubst v%,%,$(VERSION))
+K8S_CHART_PACKAGE ?= $(BIN_DIR)/k8s/ongrid-edge.tgz
+K8S_CHART_REF ?= oci://helm.cnb.cool/ongridio/ongrid-edge
+K8S_CHART_PUSH_TARGET ?= oci://helm.cnb.cool/ongridio
+CNB_HELM_REGISTRY ?= helm.cnb.cool
+CNB_HELM_USERNAME ?= cnb
 
 DB_DSN     ?= root:root@tcp(127.0.0.1:3306)/ongrid?charset=utf8mb4&parseTime=true&loc=Local
 MIGRATIONS := db/migrations
@@ -516,12 +522,20 @@ build-edge-bundle: ## [release] 打 ADR-024 edge upgrade bundle 到 dist/out/edg
 		bash dist/build-edge-bundle.sh $(VERSION) $$arch $(OUT)/edge-bundles; \
 	done
 
-.PHONY: package-k8s-chart
-package-k8s-chart: ## [dev/release] 打 Kubernetes Helm chart 到 bin/k8s/ongrid-edge.tgz（nginx /edge/k8s/ 静态目录）
+.PHONY: package-k8s-chart publish-k8s-chart
+package-k8s-chart: ## [dev/release] 打 Kubernetes Helm chart 到 bin/k8s/ongrid-edge.tgz
 	@mkdir -p bin/k8s
 	@rm -f bin/k8s/registry-setup.sh
-	bash dist/package-k8s-chart.sh deploy/kubernetes/ongrid-edge bin/k8s/ongrid-edge.tgz $(VERSION) $(K8S_EDGE_IMAGE_TAG)
-	@cp bin/k8s/ongrid-edge.tgz bin/ongrid-edge.tgz
+	bash dist/package-k8s-chart.sh deploy/kubernetes/ongrid-edge $(K8S_CHART_PACKAGE) $(VERSION) $(K8S_EDGE_IMAGE_TAG)
+
+publish-k8s-chart: package-k8s-chart ## [release] 发布 Kubernetes Helm chart 到 CNB OCI 制品库
+	@command -v helm >/dev/null 2>&1 || { echo "helm is required" >&2; exit 1; }
+	@test -n "$$CNB_TOKEN" || { echo "CNB_TOKEN is required" >&2; exit 1; }
+	@printf '%s' "$$CNB_TOKEN" | helm registry login $(CNB_HELM_REGISTRY) \
+		--username $(CNB_HELM_USERNAME) \
+		--password-stdin
+	helm push $(K8S_CHART_PACKAGE) $(K8S_CHART_PUSH_TARGET)
+	helm show chart $(K8S_CHART_REF) --version $(K8S_CHART_VERSION) >/dev/null
 
 .PHONY: fetch-embedding-model
 fetch-embedding-model: ## [release] 预拉 BGE 离线嵌入模型到 .cache/（幂等；package 会把它打进 tarball）
@@ -554,7 +568,7 @@ package: check-release-target fetch-promtail fetch-otelcol fetch-node-exporter f
 	@if [ "$(PACKAGE_CLEAN)" = "1" ]; then rm -rf dist/stage dist/out; fi
 	@mkdir -p dist/stage dist/out
 	@$(MAKE) --no-print-directory build-edge-bundle
-	PACKAGE_TARGET="$(PACKAGE_TARGET)" DOCKER_PLATFORM="$(PLATFORM)" K8S_EDGE_IMAGE_TAG="$(K8S_EDGE_IMAGE_TAG)" bash dist/package.sh "$(VERSION)" "$(STAGE)" "$(OUT)"
+	PACKAGE_TARGET="$(PACKAGE_TARGET)" DOCKER_PLATFORM="$(PLATFORM)" bash dist/package.sh "$(VERSION)" "$(STAGE)" "$(OUT)"
 	@echo ""
 	@echo "=== release artefact ==="
 	@ls -lh $(OUT)/ongrid-$(VERSION)-$(PACKAGE_TARGET).tar.xz
