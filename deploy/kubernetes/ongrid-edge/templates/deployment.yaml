@@ -132,11 +132,26 @@ spec:
                 configMapKeyRef:
                   name: {{ include "ongrid-edge.fullname" . }}-config
                   key: k8s-metrics-timeout
+            - name: ONGRID_K8S_METRICS_PUSH_TIMEOUT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-config
+                  key: k8s-metrics-push-timeout
             - name: ONGRID_K8S_METRICS_SAMPLE_LIMIT
               valueFrom:
                 configMapKeyRef:
                   name: {{ include "ongrid-edge.fullname" . }}-config
                   key: k8s-metrics-sample-limit
+            - name: ONGRID_K8S_METRICS_BATCH_SAMPLE_LIMIT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-config
+                  key: k8s-metrics-batch-sample-limit
+            - name: ONGRID_K8S_METRICS_BATCH_BYTE_LIMIT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-config
+                  key: k8s-metrics-batch-byte-limit
             {{- end }}
           resources:
             {{- toYaml .Values.controller.resources | nindent 12 }}

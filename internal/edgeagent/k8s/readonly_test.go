@@ -415,6 +415,7 @@ type fakeTunnelClient struct {
 	handlers    map[string]tunnel.Handler
 	lastMethod  string
 	lastRequest any
+	requests    []any
 }
 
 func (f *fakeTunnelClient) Dial(context.Context) error { return nil }
@@ -426,6 +427,7 @@ func (f *fakeTunnelClient) RegisterHandler(method string, h tunnel.Handler) {
 func (f *fakeTunnelClient) Call(_ context.Context, method string, req any, resp any) error {
 	f.lastMethod = method
 	f.lastRequest = req
+	f.requests = append(f.requests, req)
 	if out, ok := resp.(*tunnel.KubernetesInventoryResponse); ok {
 		*out = tunnel.KubernetesInventoryResponse{}
 	}

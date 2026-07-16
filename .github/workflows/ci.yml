@@ -126,6 +126,16 @@ jobs:
           expected_image="image: \"${image_ref}\""
           test "$(grep -F -c "$expected_image" /tmp/ongrid-edge.yaml)" -eq 3
           grep -q 'k8s-inventory-full-sync-interval: "10m"' /tmp/ongrid-edge.yaml
+          grep -q 'k8s-metrics-timeout: "15s"' /tmp/ongrid-edge.yaml
+          grep -q 'k8s-metrics-push-timeout: "30s"' /tmp/ongrid-edge.yaml
+          grep -q 'k8s-metrics-sample-limit: "250000"' /tmp/ongrid-edge.yaml
+          grep -q 'k8s-metrics-batch-sample-limit: "10000"' /tmp/ongrid-edge.yaml
+          grep -q 'k8s-metrics-batch-byte-limit: "4194304"' /tmp/ongrid-edge.yaml
+          grep -q 'name: ONGRID_K8S_METRICS_TIMEOUT' /tmp/ongrid-edge.yaml
+          grep -q 'name: ONGRID_K8S_METRICS_PUSH_TIMEOUT' /tmp/ongrid-edge.yaml
+          grep -q 'name: ONGRID_K8S_METRICS_SAMPLE_LIMIT' /tmp/ongrid-edge.yaml
+          grep -q 'name: ONGRID_K8S_METRICS_BATCH_SAMPLE_LIMIT' /tmp/ongrid-edge.yaml
+          grep -q 'name: ONGRID_K8S_METRICS_BATCH_BYTE_LIMIT' /tmp/ongrid-edge.yaml
           grep -q 'hostNetwork: true' /tmp/ongrid-edge.yaml
           grep -q 'name: install-host-runtime' /tmp/ongrid-edge.yaml
           grep -q -- '- install-k8s-host-runtime' /tmp/ongrid-edge.yaml

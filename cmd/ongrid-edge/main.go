@@ -219,14 +219,18 @@ func main() {
 				*k8sInfo,
 				agent.EdgeID,
 				edgek8s.MetricsConfig{
-					Endpoint:        metricsEndpoint,
-					GatewayEndpoint: gatewayMetricsEndpoint,
-					Interval:        parseDurationEnv("ONGRID_K8S_METRICS_INTERVAL", 30*time.Second),
-					Timeout:         parseDurationEnv("ONGRID_K8S_METRICS_TIMEOUT", 5*time.Second),
-					SampleLimit:     parseIntEnv("ONGRID_K8S_METRICS_SAMPLE_LIMIT", 20000),
-					DiscoverApps:    appMetricsDiscovery,
+					Endpoint:         metricsEndpoint,
+					GatewayEndpoint:  gatewayMetricsEndpoint,
+					Interval:         parseDurationEnv("ONGRID_K8S_METRICS_INTERVAL", 30*time.Second),
+					Timeout:          parseDurationEnv("ONGRID_K8S_METRICS_TIMEOUT", 15*time.Second),
+					PushTimeout:      parseDurationEnv("ONGRID_K8S_METRICS_PUSH_TIMEOUT", 30*time.Second),
+					SampleLimit:      parseIntEnv("ONGRID_K8S_METRICS_SAMPLE_LIMIT", 250000),
+					BatchSampleLimit: parseIntEnv("ONGRID_K8S_METRICS_BATCH_SAMPLE_LIMIT", 10000),
+					BatchByteLimit:   parseIntEnv("ONGRID_K8S_METRICS_BATCH_BYTE_LIMIT", 4<<20),
+					DiscoverApps:     appMetricsDiscovery,
 				},
 				log.With(slog.String("comp", "k8s-metrics")),
+				edgek8s.WithMetricsRegisterer(reg),
 			)
 			if err != nil {
 				log.Warn("k8s metrics disabled", slog.Any("err", err))

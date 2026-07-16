@@ -14,33 +14,40 @@ import (
 )
 
 const (
-	defaultK8sMetricsInterval = 30 * time.Second
-	defaultK8sMetricsTimeout  = 5 * time.Second
-	defaultK8sMetricsLimit    = 20000
-	k8sMetricsSource          = "k8s:kube-state-metrics"
-	k8sAppMetricsSource       = "k8s:app-metrics"
-	k8sGatewayMetricsSource   = "k8s:otlp-gateway-metrics"
+	defaultK8sMetricsInterval         = 30 * time.Second
+	defaultK8sMetricsTimeout          = 15 * time.Second
+	defaultK8sMetricsPushTimeout      = 30 * time.Second
+	defaultK8sMetricsLimit            = 250000
+	defaultK8sMetricsBatchSampleLimit = 10000
+	defaultK8sMetricsBatchByteLimit   = 4 << 20
+	k8sMetricsSource                  = "k8s:kube-state-metrics"
+	k8sAppMetricsSource               = "k8s:app-metrics"
+	k8sGatewayMetricsSource           = "k8s:otlp-gateway-metrics"
 )
 
 type MetricsConfig struct {
-	Endpoint        string
-	GatewayEndpoint string
-	Interval        time.Duration
-	Timeout         time.Duration
-	SampleLimit     int
-	DiscoverApps    bool
+	Endpoint         string
+	GatewayEndpoint  string
+	Interval         time.Duration
+	Timeout          time.Duration
+	PushTimeout      time.Duration
+	SampleLimit      int
+	BatchSampleLimit int
+	BatchByteLimit   int
+	DiscoverApps     bool
 }
 
 type MetricsPusher struct {
-	client tunnel.Client
-	info   tunnel.KubernetesInfo
-	edgeID func() uint64
-	cfg    MetricsConfig
-	log    *slog.Logger
-	api    *apiClient
+	client  tunnel.Client
+	info    tunnel.KubernetesInfo
+	edgeID  func() uint64
+	cfg     MetricsConfig
+	log     *slog.Logger
+	api     *apiClient
+	metrics *metricsObserver
 }
 
-func NewMetricsPusher(client tunnel.Client, info tunnel.KubernetesInfo, edgeID func() uint64, cfg MetricsConfig, log *slog.Logger) (*MetricsPusher, error) {
+func NewMetricsPusher(client tunnel.Client, info tunnel.KubernetesInfo, edgeID func() uint64, cfg MetricsConfig, log *slog.Logger, opts ...MetricsPusherOption) (*MetricsPusher, error) {
 	if client == nil {
 		return nil, errors.New("k8s metrics: tunnel client is required")
 	}
@@ -79,8 +86,17 @@ func NewMetricsPusher(client tunnel.Client, info tunnel.KubernetesInfo, edgeID f
 	if cfg.Timeout > cfg.Interval {
 		cfg.Timeout = cfg.Interval
 	}
+	if cfg.PushTimeout <= 0 {
+		cfg.PushTimeout = defaultK8sMetricsPushTimeout
+	}
 	if cfg.SampleLimit <= 0 {
 		cfg.SampleLimit = defaultK8sMetricsLimit
+	}
+	if cfg.BatchSampleLimit <= 0 {
+		cfg.BatchSampleLimit = defaultK8sMetricsBatchSampleLimit
+	}
+	if cfg.BatchByteLimit <= 0 {
+		cfg.BatchByteLimit = defaultK8sMetricsBatchByteLimit
 	}
 	if edgeID == nil {
 		edgeID = func() uint64 { return 0 }
@@ -88,13 +104,24 @@ func NewMetricsPusher(client tunnel.Client, info tunnel.KubernetesInfo, edgeID f
 	if log == nil {
 		log = slog.Default()
 	}
+	var options metricsPusherOptions
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&options)
+		}
+	}
+	observer, err := newMetricsObserver(options.registerer)
+	if err != nil {
+		return nil, err
+	}
 	return &MetricsPusher{
-		client: client,
-		info:   info,
-		edgeID: edgeID,
-		cfg:    cfg,
-		log:    log,
-		api:    api,
+		client:  client,
+		info:    info,
+		edgeID:  edgeID,
+		cfg:     cfg,
+		log:     log,
+		api:     api,
+		metrics: observer,
 	}, nil
 }
 
@@ -144,31 +171,120 @@ func (p *MetricsPusher) scrapeAndPush(ctx context.Context, edgeID uint64) {
 }
 
 func (p *MetricsPusher) scrapeTargetAndPush(ctx context.Context, edgeID uint64, target metricscommon.Target, plugin, source string) {
+	batchSampleLimit := p.cfg.BatchSampleLimit
+	if batchSampleLimit <= 0 {
+		batchSampleLimit = defaultK8sMetricsBatchSampleLimit
+	}
+	batchByteLimit := p.cfg.BatchByteLimit
+	if batchByteLimit <= 0 {
+		batchByteLimit = defaultK8sMetricsBatchByteLimit
+	}
+	pushTimeout := p.cfg.PushTimeout
+	if pushTimeout <= 0 {
+		pushTimeout = defaultK8sMetricsPushTimeout
+	}
+	batcher, err := newMetricsBatcher(edgeID, source, batchSampleLimit, batchByteLimit, func(samples []tunnel.PromSample) error {
+		return p.pushWithTimeout(ctx, edgeID, source, samples, pushTimeout)
+	})
+	if err != nil {
+		p.log.Error("k8s metrics batcher initialization failed", slog.Any("err", err))
+		return
+	}
 	rctx, cancel := context.WithTimeout(ctx, p.cfg.Timeout)
 	defer cancel()
-	samples, err := metricscommon.Scrape(rctx, target)
+	stats, err := metricscommon.ScrapeIncremental(rctx, target, func(samples []tunnel.PromSample) error {
+		batcher.Add(samples...)
+		return nil
+	})
 	now := time.Now()
-	if err != nil {
-		up := metricscommon.ScrapeUpSample(now, plugin, target, false)
-		if pushErr := p.push(ctx, edgeID, source, []tunnel.PromSample{up}); pushErr != nil {
-			p.log.Warn("k8s metrics scrape up push failed", slog.Any("err", pushErr))
-		}
-		p.log.Warn("k8s metrics scrape failed", slog.String("endpoint", target.URL), slog.Any("err", err))
+	if !target.ReportScrapeStatus {
+		batcher.Add(metricscommon.ScrapeUpSample(now, plugin, target, err == nil))
+		batcher.Flush()
+		pushStats := batcher.Stats()
+		p.metrics.observeScrape(source, stats.Accepted, stats.LimitExceeded)
+		p.metrics.observePush(source, pushStats)
+		p.logScrapeOutcome(target, stats, pushStats, err)
 		return
 	}
-	samples = append(samples, metricscommon.ScrapeUpSample(now, plugin, target, true))
-	if err := p.push(ctx, edgeID, source, samples); err != nil {
-		p.log.Warn("k8s metrics push failed",
+
+	batcher.Flush()
+	dataStats := batcher.Stats()
+	p.metrics.observeScrape(source, stats.Accepted, stats.LimitExceeded)
+	p.metrics.observePush(source, dataStats)
+
+	partial := stats.LimitExceeded || dataStats.FailedBatches > 0 || dataStats.RejectedSamples > 0
+	if err != nil && stats.Accepted > 0 {
+		partial = true
+	}
+	statusSamples := scrapeStatusSamples(now, plugin, target, partial, dataStats.SuccessfulSamples, err == nil)
+	statusStats := p.pushStatus(ctx, edgeID, source, statusSamples, pushTimeout)
+	p.metrics.observePush(source, statusStats)
+
+	p.logScrapeOutcome(target, stats, dataStats, err)
+	if statusStats.FirstError != nil {
+		p.log.Warn("k8s metrics status push failed",
 			slog.String("endpoint", target.URL),
-			slog.Int("samples", len(samples)),
-			slog.Any("err", err),
+			slog.Any("err", statusStats.FirstError),
 		)
-		return
 	}
-	p.log.Debug("k8s metrics pushed",
-		slog.String("endpoint", target.URL),
-		slog.Int("samples", len(samples)),
-	)
+}
+
+func scrapeStatusSamples(now time.Time, plugin string, target metricscommon.Target, partial bool, accepted int, up bool) []tunnel.PromSample {
+	capacity := 1
+	if target.ReportScrapeStatus {
+		capacity += 2
+	}
+	samples := make([]tunnel.PromSample, 0, capacity)
+	if target.ReportScrapeStatus {
+		samples = append(samples, metricscommon.ScrapeStatusSamples(now, plugin, target, partial, accepted)...)
+	}
+	return append(samples, metricscommon.ScrapeUpSample(now, plugin, target, up))
+}
+
+func (p *MetricsPusher) pushStatus(ctx context.Context, edgeID uint64, source string, samples []tunnel.PromSample, timeout time.Duration) metricsBatchStats {
+	stats := metricsBatchStats{}
+	if err := p.pushWithTimeout(ctx, edgeID, source, samples, timeout); err != nil {
+		stats.FailedBatches = 1
+		stats.FailedSamples = len(samples)
+		stats.FirstError = err
+		return stats
+	}
+	stats.SuccessfulBatches = 1
+	stats.SuccessfulSamples = len(samples)
+	return stats
+}
+
+func (p *MetricsPusher) logScrapeOutcome(target metricscommon.Target, stats metricscommon.ScrapeStats, pushStats metricsBatchStats, scrapeErr error) {
+	if scrapeErr != nil {
+		p.log.Warn("k8s metrics scrape failed", slog.String("endpoint", target.URL), slog.Any("err", scrapeErr))
+	}
+	if stats.LimitExceeded {
+		p.log.Warn("k8s metrics sample limit exceeded; pushing bounded scrape",
+			slog.String("endpoint", target.URL),
+			slog.Int("observed_samples_at_least", stats.Observed),
+			slog.Int("sample_limit", target.SampleLimit),
+			slog.Int("accepted_samples", stats.Accepted),
+		)
+	}
+	if pushStats.FailedBatches > 0 || pushStats.RejectedSamples > 0 {
+		p.log.Warn("k8s metrics push partially failed",
+			slog.String("endpoint", target.URL),
+			slog.Int("successful_batches", pushStats.SuccessfulBatches),
+			slog.Int("failed_batches", pushStats.FailedBatches),
+			slog.Int("successful_samples", pushStats.SuccessfulSamples),
+			slog.Int("failed_samples", pushStats.FailedSamples),
+			slog.Int("rejected_samples", pushStats.RejectedSamples),
+			slog.Any("err", pushStats.FirstError),
+		)
+	}
+	if scrapeErr == nil && pushStats.FailedBatches == 0 && pushStats.RejectedSamples == 0 {
+		p.log.Debug("k8s metrics pushed",
+			slog.String("endpoint", target.URL),
+			slog.Int("observed_samples", stats.Observed),
+			slog.Int("pushed_samples", pushStats.SuccessfulSamples),
+			slog.Int("batches", pushStats.SuccessfulBatches),
+		)
+	}
 }
 
 func (p *MetricsPusher) discoverAndPushAppMetrics(ctx context.Context, edgeID uint64) {
@@ -192,8 +308,8 @@ func (p *MetricsPusher) discoverAndPushAppMetrics(ctx context.Context, edgeID ui
 	p.log.Debug("k8s app metrics discovery completed", slog.Int("targets", discovered))
 }
 
-func (p *MetricsPusher) push(ctx context.Context, edgeID uint64, source string, samples []tunnel.PromSample) error {
-	pctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+func (p *MetricsPusher) pushWithTimeout(ctx context.Context, edgeID uint64, source string, samples []tunnel.PromSample, timeout time.Duration) error {
+	pctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	var resp tunnel.PushPromSamplesResponse
 	if err := p.client.Call(pctx, tunnel.MethodPushPromSamples, tunnel.PushPromSamplesRequest{
@@ -203,20 +319,24 @@ func (p *MetricsPusher) push(ctx context.Context, edgeID uint64, source string, 
 	}, &resp); err != nil {
 		return fmt.Errorf("push_prom_samples: %w", err)
 	}
+	if resp.Accepted != len(samples) {
+		return fmt.Errorf("push_prom_samples: accepted %d of %d samples", resp.Accepted, len(samples))
+	}
 	return nil
 }
 
 func (p *MetricsPusher) kubeStateMetricsTarget() metricscommon.Target {
 	return metricscommon.Target{
-		ID:          "kube-state-metrics",
-		Name:        "kube-state-metrics",
-		URL:         p.cfg.Endpoint,
-		Enabled:     true,
-		Interval:    p.cfg.Interval,
-		Timeout:     p.cfg.Timeout,
-		SourceLabel: k8sMetricsSource,
-		SampleLimit: p.cfg.SampleLimit,
-		Kind:        "kubernetes",
+		ID:                 "kube-state-metrics",
+		Name:               "kube-state-metrics",
+		URL:                p.cfg.Endpoint,
+		Enabled:            true,
+		Interval:           p.cfg.Interval,
+		Timeout:            p.cfg.Timeout,
+		SourceLabel:        k8sMetricsSource,
+		SampleLimit:        p.cfg.SampleLimit,
+		Kind:               "kubernetes",
+		ReportScrapeStatus: true,
 		LabelDrop: []string{
 			"uid",
 			"pod_uid",
@@ -231,15 +351,16 @@ func (p *MetricsPusher) kubeStateMetricsTarget() metricscommon.Target {
 
 func (p *MetricsPusher) gatewayMetricsTarget() metricscommon.Target {
 	return metricscommon.Target{
-		ID:          "telemetry-gateway",
-		Name:        "telemetry-gateway",
-		URL:         p.cfg.GatewayEndpoint,
-		Enabled:     true,
-		Interval:    p.cfg.Interval,
-		Timeout:     p.cfg.Timeout,
-		SourceLabel: k8sGatewayMetricsSource,
-		SampleLimit: p.cfg.SampleLimit,
-		Kind:        "kubernetes-telemetry-gateway",
+		ID:                 "telemetry-gateway",
+		Name:               "telemetry-gateway",
+		URL:                p.cfg.GatewayEndpoint,
+		Enabled:            true,
+		Interval:           p.cfg.Interval,
+		Timeout:            p.cfg.Timeout,
+		SourceLabel:        k8sGatewayMetricsSource,
+		SampleLimit:        p.cfg.SampleLimit,
+		Kind:               "kubernetes-telemetry-gateway",
+		ReportScrapeStatus: true,
 		LabelDrop: []string{
 			"uid",
 			"pod_uid",

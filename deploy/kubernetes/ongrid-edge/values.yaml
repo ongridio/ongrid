@@ -44,8 +44,15 @@ controller:
     enabled: false
     endpoint: ""
     interval: 30s
-    timeout: 5s
-    sampleLimit: 20000
+    timeout: 15s
+    # Maximum duration of each tunnel batch push. Every batch, including the
+    # final scrape-status batch, receives a fresh timeout.
+    pushTimeout: 30s
+    # Bound total work per target while sending tunnel requests in smaller,
+    # conservatively sized batches.
+    sampleLimit: 250000
+    batchSampleLimit: 10000
+    batchByteLimit: 4194304
     appDiscovery:
       enabled: false
   resources:
