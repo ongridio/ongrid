@@ -98,24 +98,24 @@ func inboundFromCallback(appID string, data *chatbot.BotCallbackDataModel) (bizb
 	}, true
 }
 
-type textReplier interface {
-	SimpleReplyText(ctx context.Context, sessionWebhook string, content []byte) error
+type markdownReplier interface {
+	SimpleReplyMarkdown(ctx context.Context, sessionWebhook string, title, content []byte) error
 }
 
 // senderAdapter intentionally implements only bizbridge.Sender. DingTalk's
 // per-message session webhook cannot edit a prior message, so the bridge
-// buffers streamed output and invokes SendText once with the final answer.
+// buffers streamed output and invokes one native Markdown reply with the final answer.
 type senderAdapter struct {
 	webhook string
-	replier textReplier
+	replier markdownReplier
 }
 
 func (s senderAdapter) SendText(ctx context.Context, _, _ string, text string) (string, error) {
 	if s.webhook == "" {
 		return "", fmt.Errorf("dingtalk: session webhook required")
 	}
-	if err := s.replier.SimpleReplyText(ctx, s.webhook, []byte(text)); err != nil {
-		return "", fmt.Errorf("dingtalk reply text: %w", err)
+	if err := s.replier.SimpleReplyMarkdown(ctx, s.webhook, []byte("Ongrid"), []byte(text)); err != nil {
+		return "", fmt.Errorf("dingtalk reply markdown: %w", err)
 	}
 	return "sent", nil
 }

@@ -11,11 +11,13 @@ import (
 
 type fakeReplier struct {
 	webhook string
+	title   string
 	text    string
 }
 
-func (f *fakeReplier) SimpleReplyText(_ context.Context, webhook string, content []byte) error {
+func (f *fakeReplier) SimpleReplyMarkdown(_ context.Context, webhook string, title, content []byte) error {
 	f.webhook = webhook
+	f.title = string(title)
 	f.text = string(content)
 	return nil
 }
@@ -69,7 +71,7 @@ func TestSenderAdapter_SendText_UsesSessionWebhook(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SendText() error = %v", err)
 	}
-	if messageID == "" || replier.webhook != "https://example.invalid/session" || replier.text != "final answer" {
+	if messageID == "" || replier.webhook != "https://example.invalid/session" || replier.title != "Ongrid" || replier.text != "final answer" {
 		t.Fatalf("unexpected reply: message_id=%q webhook=%q text=%q", messageID, replier.webhook, replier.text)
 	}
 }
