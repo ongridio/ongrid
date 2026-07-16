@@ -19,7 +19,7 @@ PLATFORM    ?= $(TARGET_OS)/$(TARGET_ARCH)
 endif
 PACKAGE_TARGET := $(TARGET_OS)-$(TARGET_ARCH)
 # Edge plugin / agent binaries ship amd64-only by default (edges are amd64 in
-# our deployments) — independent of the manager's per-arch TARGET_ARCH. This is
+# our deployments) — independent of the server package's architecture label. This is
 # the big size lever: otelcol-contrib alone is ~290M per arch. Override to
 # "linux-amd64 linux-arm64" to fetch/bundle more edge arches. Kept in sync with
 # package.sh's EDGE_TARGETS (the staging side).
@@ -34,7 +34,6 @@ CLOUD_IMAGE_REPO ?= docker.cnb.cool/ongridio/ongrid
 CLOUD_MANAGER_IMAGE_REF ?= $(CLOUD_IMAGE_REPO):$(VERSION)
 CLOUD_WEB_IMAGE_REF ?= $(CLOUD_IMAGE_REPO)/ongrid-web:$(VERSION)
 FRONTIER_VERSION ?= v1.2.4
-CNB_FRONTIER_IMAGE_REF ?= $(CLOUD_IMAGE_REPO)/frontier:$(FRONTIER_VERSION)
 K8S_EDGE_IMAGE_PLATFORM ?= linux/amd64
 K8S_EDGE_IMAGE_PLATFORMS ?= linux/amd64,linux/arm64
 K8S_EDGE_IMAGE_TAG ?= $(VERSION)
@@ -196,8 +195,8 @@ run-ongrid-edge: ## 本地直接跑 ongrid-edge
 #
 # Pipeline (wired via `make package`):
 #   1. build-edge-all   — cross-compile ongrid-edge targets.
-#   2. dist/package.sh  — extract systemd binaries from the published CNB
-#                        images, stage files, then emit tar.xz + sha256.
+#   2. dist/package.sh  — stage Compose install files and Edge binaries,
+#                        then emit tar.xz + sha256.
 
 .PHONY: build-linux
 build-linux: ## [release] 交叉编译 ongrid linux/amd64
@@ -558,8 +557,7 @@ fetch-mongodb-exporter: ## [release] 下载 mongodb_exporter 到 bin/<os>-<arch>
 	done
 
 # package deps deliberately exclude `build-linux` and `build-web`:
-#   - dist/package.sh extracts the systemd manager binary and ONNX runtime
-#     from the already-published, architecture-matched CNB image.
+#   - the Compose installer pulls the published manager image at install time.
 #   - build-web produces web/dist/ which docker-build-web doesn't use
 #     either — the web Dockerfile runs its own `npm ci && npm run
 #     build` inside the builder stage. Removing the host-side npm pass
@@ -573,26 +571,29 @@ build-edge-bundle: ## [release] 打 ADR-024 edge upgrade bundle 到 dist/out/edg
 		bash dist/build-edge-bundle.sh $(VERSION) $$arch $(OUT)/edge-bundles; \
 	done
 
-.PHONY: package-k8s-chart publish-k8s-chart
+.PHONY: package-k8s-chart publish-k8s-chart test-publish-k8s-chart
 package-k8s-chart: ## [dev/release] 打 Kubernetes Helm chart 到 bin/k8s/ongrid-edge.tgz
 	@mkdir -p bin/k8s
 	@rm -f bin/k8s/registry-setup.sh
 	bash dist/package-k8s-chart.sh deploy/kubernetes/ongrid-edge $(K8S_CHART_PACKAGE) $(VERSION) $(K8S_EDGE_IMAGE_TAG)
 
 publish-k8s-chart: package-k8s-chart ## [release] 发布 Kubernetes Helm chart 到 CNB OCI 制品库
-	@command -v helm >/dev/null 2>&1 || { echo "helm is required" >&2; exit 1; }
-	@test -n "$$CNB_TOKEN" || { echo "CNB_TOKEN is required" >&2; exit 1; }
-	@printf '%s' "$$CNB_TOKEN" | helm registry login $(CNB_HELM_REGISTRY) \
-		--username $(CNB_HELM_USERNAME) \
-		--password-stdin
-	helm push $(K8S_CHART_PACKAGE) $(K8S_CHART_PUSH_TARGET)
-	helm show chart $(K8S_CHART_REF) --version $(K8S_CHART_VERSION) >/dev/null
+	bash scripts/publish-helm-chart.sh \
+		"$(K8S_CHART_REF)" \
+		"$(K8S_CHART_VERSION)" \
+		"$(K8S_CHART_PACKAGE)" \
+		"$(K8S_CHART_PUSH_TARGET)" \
+		"$(CNB_HELM_REGISTRY)" \
+		"$(CNB_HELM_USERNAME)"
+
+test-publish-k8s-chart: ## [test] 校验 Helm Chart 幂等发布
+	bash scripts/test-publish-helm-chart.sh
 
 .PHONY: fetch-embedding-model
 fetch-embedding-model: ## [release] 预拉 BGE 离线嵌入模型到 .cache/（幂等；package 会把它打进 tarball）
 	bash dist/fetch-embedding-model.sh
 
-.PHONY: check-release-target package package-all
+.PHONY: check-release-target package package-all test-release-package
 check-release-target:
 	@if [ "$(PLATFORM)" != "$(TARGET_OS)/$(TARGET_ARCH)" ]; then \
 		echo "PLATFORM=$(PLATFORM) does not match TARGET_OS/TARGET_ARCH=$(TARGET_OS)/$(TARGET_ARCH)"; \
@@ -604,11 +605,8 @@ check-release-target:
 		*) echo "unsupported PACKAGE_TARGET=$(PACKAGE_TARGET); expected linux-amd64 or linux-arm64"; exit 2 ;; \
 	esac
 
-# Order matters: fetch-* / build-edge-all populate bin/ → docker-* bake
-# the images → recipe-time we rebuild the edge bundle (because dist/out
-# gets wiped first) and only then dist/package.sh assembles the
-# release tarball that includes the bundle as a sibling of the per-arch
-# edge binaries (ADR-024).
+# Order matters: fetch-* / build-edge-all populate bin/, then package rebuilds
+# the Edge upgrade bundle and dist/package.sh assembles the release tarball.
 #
 # NB: fetch-embedding-model is intentionally NOT a dep — pulling the BGE
 # model is slow/brittle over CN networks, so it stays a one-off step.
@@ -619,9 +617,7 @@ package: check-release-target fetch-promtail fetch-otelcol fetch-node-exporter f
 	@if [ "$(PACKAGE_CLEAN)" = "1" ]; then rm -rf dist/stage dist/out; fi
 	@mkdir -p dist/stage dist/out
 	@$(MAKE) --no-print-directory build-edge-bundle
-	PACKAGE_TARGET="$(PACKAGE_TARGET)" DOCKER_PLATFORM="$(PLATFORM)" \
-		ONGRID_IMAGE_REF="$(CLOUD_MANAGER_IMAGE_REF)" \
-		FRONTIER_IMAGE_REF="$(CNB_FRONTIER_IMAGE_REF)" \
+	PACKAGE_TARGET="$(PACKAGE_TARGET)" \
 		bash dist/package.sh "$(VERSION)" "$(STAGE)" "$(OUT)"
 	@echo ""
 	@echo "=== release artefact ==="
@@ -641,6 +637,9 @@ package-all: ## [release] 打 amd64 + arm64 两个生产安装包到 dist/out/
 	@for f in $(OUT)/ongrid-$(VERSION)-linux-amd64.tar.xz.sha256 $(OUT)/ongrid-$(VERSION)-linux-arm64.tar.xz.sha256; do \
 		[ -f "$$f" ] && cat "$$f"; \
 	done
+
+test-release-package: ## [test] 校验发布包仅支持 Compose 且不含 Manager systemd 文件
+	bash scripts/test-compose-release-package.sh
 
 .PHONY: dist-clean
 dist-clean: ## [release] 清理 release 产物（dist/stage dist/out bin/<os>-*）

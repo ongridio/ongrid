@@ -211,65 +211,21 @@ read_with_countdown() {
 PROFILE_MONITORING=0
 NO_SEED=0
 FORCE=0
-MODE="compose"   # compose (default) | systemd
 
 usage() {
     cat <<EOF
 Usage: sudo ./install.sh [OPTIONS]
 
 Options:
-  --mode <compose|systemd>
-                         Install topology. compose (default) runs the full
-                         stack via docker-compose. systemd installs the
-                         manager + frontier + deps as native systemd units
-                         (no docker; see systemd/install-systemd.sh for the
-                         long-form trip report).
-  --profile monitoring   compose-only. Also start Prometheus
+  --profile monitoring   Also start Prometheus
                          (docker compose --profile monitoring).
-  --no-seed              compose-only. Skip the admin-bootstrap user notice.
-  --force                compose-only. Reinstall on top of existing
+  --no-seed              Skip the admin-bootstrap user notice.
+  --force                Reinstall on top of existing
                          (preserves .env / data volume).
-  --with-deps            systemd-only. Auto-install mariadb / nginx /
-                         grafana via apt/dnf and download pinned
-                         prom / loki / tempo / qdrant binaries from
-                         upstream releases with sha256 verify.
   -h, --help             Print this help.
 EOF
 }
 
-# Mode-pre-scan: spot --mode before the main parse loop so we can
-# strip it out and pass every remaining flag verbatim to the systemd
-# dispatcher. Without this, --with-deps (only known to install-systemd.sh)
-# would hit the compose-side parser's "unknown flag" arm and exit.
-PASSTHROUGH_ARGS=()
-i=0
-while [[ $i -lt $# ]]; do
-    arg="${@:i+1:1}"
-    case "$arg" in
-        --mode) MODE="${@:i+2:1}"; i=$((i+2)) ;;
-        --mode=*) MODE="${arg#*=}"; i=$((i+1)) ;;
-        *) PASSTHROUGH_ARGS+=("$arg"); i=$((i+1)) ;;
-    esac
-done
-
-case "$MODE" in
-    compose) ;;   # fall through to legacy parse + install
-    systemd)
-        if [[ ! -x "$SCRIPT_DIR/systemd/install-systemd.sh" ]]; then
-            log_error "systemd installer missing or not executable: $SCRIPT_DIR/systemd/install-systemd.sh"
-            exit 2
-        fi
-        log_info "dispatching to systemd installer"
-        exec bash "$SCRIPT_DIR/systemd/install-systemd.sh" "${PASSTHROUGH_ARGS[@]+"${PASSTHROUGH_ARGS[@]}"}"
-        ;;
-    *)
-        log_error "--mode must be one of: compose, systemd"
-        exit 2
-        ;;
-esac
-
-# -- compose-mode parse loop (only reached when MODE=compose) --
-set -- "${PASSTHROUGH_ARGS[@]+"${PASSTHROUGH_ARGS[@]}"}"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --profile)

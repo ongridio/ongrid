@@ -13,9 +13,8 @@
 #
 # Optional env:
 #   PACKAGE_TARGET  linux-amd64 (default) or linux-arm64
-#   DOCKER_PLATFORM linux/amd64 (default) or linux/arm64
-#   ONGRID_IMAGE_REF published manager image to extract for systemd mode
-#   FRONTIER_IMAGE_REF mirrored frontier image to extract for systemd mode
+#   EDGE_TARGETS    edge binary targets to bundle (default linux-amd64)
+#   ONGRID_BUNDLE_EMBEDDING_MODEL=0 omits the local embedding model
 #
 # The script is tolerant of missing deploy/install/* files: it warns and
 # continues so the pipeline is testable before the on-target scripts land.
@@ -56,10 +55,6 @@ case "$PACKAGE_TARGET" in
         ;;
 esac
 
-TARGET_OS="${PACKAGE_TARGET%-*}"
-TARGET_ARCH="${PACKAGE_TARGET##*-}"
-DOCKER_PLATFORM="${DOCKER_PLATFORM:-${TARGET_OS}/${TARGET_ARCH}}"
-
 PKG_NAME="ongrid-${VERSION}-${PACKAGE_TARGET}"
 TARBALL="${OUT_DIR}/${PKG_NAME}.tar.xz"
 SHAFILE="${TARBALL}.sha256"
@@ -69,11 +64,6 @@ log()  { printf '[pkg] %s\n' "$*"; }
 warn() { printf '[pkg] warn: %s\n' "$*" >&2; }
 die()  { printf '[pkg] error: %s\n' "$*" >&2; exit 1; }
 
-# --- docker presence check --------------------------------------------------
-if ! command -v docker >/dev/null 2>&1; then
-    die "docker not found in PATH — required to extract systemd binaries from the published images"
-fi
-
 # --- xz presence check ------------------------------------------------------
 # The release tarball is xz-compressed (see "tar it up" below).
 if ! command -v xz >/dev/null 2>&1; then
@@ -81,11 +71,10 @@ if ! command -v xz >/dev/null 2>&1; then
 fi
 
 # --- stage dir layout -------------------------------------------------------
-log "target ${PACKAGE_TARGET} (${DOCKER_PLATFORM})"
+log "target ${PACKAGE_TARGET}"
 log "staging ${PKG_NAME} into ${STAGE_DIR}"
 mkdir -p "${STAGE_DIR}" \
          "${STAGE_DIR}/edge" \
-         "${STAGE_DIR}/prometheus" \
          "${STAGE_DIR}/grafana/provisioning/datasources"
 
 # copy_opt <src> <dst> [chmod-mode]
@@ -121,26 +110,6 @@ copy_opt "${REPO_ROOT}/deploy/install/docker-compose.yml"  "${STAGE_DIR}/docker-
 copy_opt "${REPO_ROOT}/deploy/install/.env.example"        "${STAGE_DIR}/.env.example"
 copy_opt "${REPO_ROOT}/deploy/install/frontier.yaml"       "${STAGE_DIR}/frontier.yaml"
 
-# --- systemd mode (--mode=systemd dispatch target) --------------------------
-# Pure-systemd install path. Lives under systemd/ so a docker-only
-# operator never trips over it; install.sh dispatches into it when the
-# operator passes --mode=systemd. We ship the .service templates +
-# install-systemd.sh + uninstall-systemd.sh. The manager + frontier
-# binaries are bundled at bin/ (see bin section below).
-if [[ -d "${REPO_ROOT}/deploy/install/systemd" ]]; then
-    mkdir -p "${STAGE_DIR}/systemd"
-    cp -rf "${REPO_ROOT}/deploy/install/systemd/." "${STAGE_DIR}/systemd/"
-    chmod 755 "${STAGE_DIR}/systemd/install-systemd.sh" \
-              "${STAGE_DIR}/systemd/uninstall-systemd.sh" 2>/dev/null || true
-    log "  + systemd/"
-else
-    warn "${REPO_ROOT}/deploy/install/systemd missing; --mode=systemd will be unavailable"
-fi
-
-# --- manager + frontier binaries (for --mode=systemd) -----------------------
-# Bundled separately from the Compose runtime. They are extracted from the
-# exact architecture of the already-published CNB images below.
-
 # --- nginx config + certs scaffold (ADR-008) --------------------------------
 # nginx.conf is bind-mounted into the nginx container at runtime; certs/ is
 # populated by install.sh on first run (self-signed) or by the operator
@@ -151,13 +120,10 @@ mkdir -p "${STAGE_DIR}/certs"
 touch "${STAGE_DIR}/certs/.gitkeep"
 
 # --- prometheus config ------------------------------------------------------
-# ADR-009 staged the canonical prod prometheus.yml under deploy/install/.
-# The compose bind-mounts it flat at the install root. The legacy nested
-# copy under prometheus/ is preserved for installs predating the rename.
+# ADR-009 staged the canonical Compose prometheus.yml under deploy/install/.
+# The compose model bind-mounts it flat at the install root.
 copy_opt "${REPO_ROOT}/deploy/install/prometheus.yml" \
          "${STAGE_DIR}/prometheus.yml"
-copy_opt "${REPO_ROOT}/deploy/prometheus/prometheus.yml" \
-         "${STAGE_DIR}/prometheus/prometheus.yml"
 # ADR-026 self-obs alert rules — bind-mounted at /etc/prometheus/rules.yml.
 copy_opt "${REPO_ROOT}/deploy/install/prometheus-rules.yml" \
          "${STAGE_DIR}/prometheus-rules.yml"
@@ -184,161 +150,6 @@ else
     warn "${REPO_ROOT}/deploy/install/searxng missing; skipping"
 fi
 
-# --- raw manager + frontier binaries (for systemd mode) ---------------------
-# install-systemd.sh installs these to /usr/local/bin/ when --mode=systemd.
-# Pull and extract from the release images so the systemd and Compose modes
-# use the same binaries without embedding image tarballs in the package.
-ONGRID_IMAGE_REF="${ONGRID_IMAGE_REF:-docker.cnb.cool/ongridio/ongrid:${VERSION}}"
-FRONTIER_IMAGE_REF="${FRONTIER_IMAGE_REF:-docker.cnb.cool/ongridio/ongrid/frontier:v1.2.4}"
-
-pull_image_for_platform() {
-    local image="$1"
-    log "pulling ${image} for ${DOCKER_PLATFORM}"
-    docker pull --platform "${DOCKER_PLATFORM}" "${image}" >/dev/null \
-        || die "could not pull ${image} for ${DOCKER_PLATFORM}"
-}
-
-pull_image_for_platform "${ONGRID_IMAGE_REF}"
-pull_image_for_platform "${FRONTIER_IMAGE_REF}"
-
-mkdir -p "${STAGE_DIR}/bin"
-extract_bin_from_image() {
-    # extract_bin_from_image <image-ref> <dst> <candidate-path...>
-    # Tries each candidate-path inside the image until one succeeds.
-    # Returns 0 on success (and chmods 0755), 1 if every candidate failed.
-    local image="$1" dst="$2"; shift 2
-    local cid
-    cid=$(docker create --platform="$DOCKER_PLATFORM" "$image" 2>/dev/null) \
-        || cid=$(docker create "$image" 2>/dev/null)
-    if [[ -z "$cid" ]]; then
-        warn "could not create container for $image; skipping $(basename "$dst")"
-        return 1
-    fi
-    local rc=1 path
-    for path in "$@"; do
-        if docker cp "$cid:$path" "$dst" 2>/dev/null; then
-            chmod 0755 "$dst"
-            log "  + bin/$(basename "$dst") (from $image:$path)"
-            rc=0
-            break
-        fi
-    done
-    docker rm "$cid" >/dev/null 2>&1 || true
-    if [[ $rc -ne 0 ]]; then
-        warn "could not extract $(basename "$dst") from $image (tried: $*)"
-    fi
-    return $rc
-}
-extract_bin_from_image "${ONGRID_IMAGE_REF}" "${STAGE_DIR}/bin/ongrid" \
-    "/ongrid"
-extract_bin_from_image "${FRONTIER_IMAGE_REF}" "${STAGE_DIR}/bin/ongrid-frontier" \
-    "/usr/bin/frontier" "/usr/local/bin/frontier" "/frontier"
-
-# libonnxruntime.so for the local ONNX embedder (systemd mode). The ongrid
-# binary we just extracted is the CGO build that dlopens this .so at runtime
-# via ONNX_PATH — in compose mode it lives inside the image, but a systemd
-# host has nothing to load unless we ship it. install-deps.sh drops it into
-# /usr/lib + symlinks + ldconfig. Keep ONNXRUNTIME_VERSION in lockstep with
-# deploy/Dockerfile.ongrid.
-ONNXRUNTIME_VERSION="${ONNXRUNTIME_VERSION:-1.20.1}"
-extract_bin_from_image "${ONGRID_IMAGE_REF}" \
-    "${STAGE_DIR}/bin/libonnxruntime.so.${ONNXRUNTIME_VERSION}" \
-    "/usr/lib/libonnxruntime.so.${ONNXRUNTIME_VERSION}"
-
-# --- bundled upstream stack-dep binaries (offline systemd install) ----------
-# When ONGRID_BUNDLE_STACK_BINS=1 (default for release builds), download
-# pinned upstream releases on the build host and stuff them into
-# bin/stack-deps/. install-deps.sh prefers these via try_bundled() over
-# the runtime github fetch — so a fully-offline systemd install works
-# the second the operator extracts the tarball.
-#
-# Off-switch: ONGRID_BUNDLE_STACK_BINS=0 keeps the tarball lean
-# (~250 MB lighter) for builds that ship to operators with reliable
-# upstream connectivity.
-BUNDLE_STACK_BINS="${ONGRID_BUNDLE_STACK_BINS:-1}"
-if [[ "$BUNDLE_STACK_BINS" == "1" ]]; then
-    mkdir -p "${STAGE_DIR}/bin/stack-deps"
-    PROM_V=2.54.0; LOKI_V=3.4.0; TEMPO_V=2.5.0; QDRANT_V=1.11.3
-    case "$TARGET_ARCH" in
-        amd64)
-            PROM_ASSET="prometheus-${PROM_V}.linux-amd64.tar.gz"
-            PROM_EXTRACT_DIR="prometheus-${PROM_V}.linux-amd64"
-            PROM_SHA=465e1393a0cca9705598f6ffaf96ffa78d0347808ab21386b0c6aaec2cf7aa13
-            LOKI_ASSET="loki-linux-amd64.zip"
-            LOKI_BIN="loki-linux-amd64"
-            LOKI_SHA=fb07349f21cc86eec1162d81f90ad2706280cd731eabc5456ecd8e21a5df8404
-            TEMPO_ASSET="tempo_${TEMPO_V}_linux_amd64.tar.gz"
-            TEMPO_SHA=a708a86230fa43478e8a30174787a1171fbfdc33ad135ce1625769dbadc16e38
-            QDRANT_ASSET="qdrant-x86_64-unknown-linux-gnu.tar.gz"
-            QDRANT_SHA=4000a4924c118cc88296f879aad25bebb5869bb5baac7801bec8860a96396914
-            ;;
-        arm64)
-            PROM_ASSET="prometheus-${PROM_V}.linux-arm64.tar.gz"
-            PROM_EXTRACT_DIR="prometheus-${PROM_V}.linux-arm64"
-            PROM_SHA=ed50b67cb833a225ec2a53b487c6e20372b20e56dce226423fa8611c8aa50392
-            LOKI_ASSET="loki-linux-arm64.zip"
-            LOKI_BIN="loki-linux-arm64"
-            LOKI_SHA=0e5d9aa98ccfd7114c74e87201963fe70c0de0d051b8359dd7cafe37a9f2e492
-            TEMPO_ASSET="tempo_${TEMPO_V}_linux_arm64.tar.gz"
-            TEMPO_SHA=4c96c11e4950541fcc190be620bf8551e8b2bc645fee0883464ac8a9b363f8d6
-            QDRANT_ASSET="qdrant-aarch64-unknown-linux-musl.tar.gz"
-            QDRANT_SHA=e164496afa9e4cacdd5679be550f735320e51b2e74d6ce6fbcb0b8260ed4c7d3
-            ;;
-    esac
-    printf '%s\n' "$PACKAGE_TARGET" > "${STAGE_DIR}/bin/stack-deps/ARCH"
-    CACHE="${REPO_ROOT}/.cache/stack-deps"
-    mkdir -p "$CACHE"
-    download_and_verify() {
-        local name="$1" url="$2" sha="$3" out="$4"
-        if [[ -f "$out" ]] && [[ "$(shasum -a 256 "$out" | awk '{print $1}')" == "$sha" ]]; then
-            log "  · $name cached ok"
-            return 0
-        fi
-        log "  · fetching $name → $out"
-        curl -fsSL --max-time 600 -o "$out" "$url"
-        local actual
-        actual=$(shasum -a 256 "$out" | awk '{print $1}')
-        if [[ "$actual" != "$sha" ]]; then
-            warn "$name sha mismatch (expected $sha got $actual) — skipping bundle"
-            rm -f "$out"; return 1
-        fi
-    }
-    # prometheus
-    if download_and_verify prometheus \
-        "https://github.com/prometheus/prometheus/releases/download/v${PROM_V}/${PROM_ASSET}" \
-        "$PROM_SHA" "$CACHE/$PROM_ASSET"; then
-        tmp=$(mktemp -d) && tar -xzf "$CACHE/$PROM_ASSET" -C "$tmp" && \
-            install -m 0755 "$tmp/$PROM_EXTRACT_DIR/prometheus" "${STAGE_DIR}/bin/stack-deps/prometheus" && \
-            rm -rf "$tmp" && log "  + bin/stack-deps/prometheus"
-    fi
-    # loki
-    if download_and_verify loki \
-        "https://github.com/grafana/loki/releases/download/v${LOKI_V}/${LOKI_ASSET}" \
-        "$LOKI_SHA" "$CACHE/$LOKI_ASSET"; then
-        tmp=$(mktemp -d) && unzip -qo "$CACHE/$LOKI_ASSET" -d "$tmp" && \
-            install -m 0755 "$tmp/$LOKI_BIN" "${STAGE_DIR}/bin/stack-deps/loki" && \
-            rm -rf "$tmp" && log "  + bin/stack-deps/loki"
-    fi
-    # tempo
-    if download_and_verify tempo \
-        "https://github.com/grafana/tempo/releases/download/v${TEMPO_V}/${TEMPO_ASSET}" \
-        "$TEMPO_SHA" "$CACHE/$TEMPO_ASSET"; then
-        tmp=$(mktemp -d) && tar -xzf "$CACHE/$TEMPO_ASSET" -C "$tmp" && \
-            install -m 0755 "$tmp/tempo" "${STAGE_DIR}/bin/stack-deps/tempo" && \
-            rm -rf "$tmp" && log "  + bin/stack-deps/tempo"
-    fi
-    # qdrant
-    if download_and_verify qdrant \
-        "https://github.com/qdrant/qdrant/releases/download/v${QDRANT_V}/${QDRANT_ASSET}" \
-        "$QDRANT_SHA" "$CACHE/$QDRANT_ASSET"; then
-        tmp=$(mktemp -d) && tar -xzf "$CACHE/$QDRANT_ASSET" -C "$tmp" && \
-            install -m 0755 "$tmp/qdrant" "${STAGE_DIR}/bin/stack-deps/qdrant" && \
-            rm -rf "$tmp" && log "  + bin/stack-deps/qdrant"
-    fi
-else
-    log "stack-deps bundling off (ONGRID_BUNDLE_STACK_BINS=0)"
-fi
-
 # --- bundled local-embedding ONNX model (ADR-027 Phase-2 offline RAG) -------
 # Stage the fastembed-go BGE-small-zh-v1.5 cache so air-gapped installs
 # don't need HuggingFace reach to bring up the local embedder. The
@@ -363,12 +174,9 @@ if [[ "$BUNDLE_EMB" == "1" ]]; then
 fi
 
 # --- edge binaries -----------------------------------------------------------
-# Edges are amd64-only in our deployments (the user's directive), so we ship a
-# single edge arch regardless of the manager package's TARGET_ARCH (manager is
-# per-arch: separate amd64 / arm64 packages; edge plugins are not). This is the
-# big size win — otelcol-contrib alone is ~290M PER arch, so not shipping arm64
-# + darwin edge binaries cuts ~500M from the tarball. Override EDGE_TARGETS to
-# bundle more edge arches (e.g. "linux-amd64 linux-arm64").
+# Edges are amd64-only in our deployments, so both compatibility-named server
+# packages carry the same linux/amd64 Edge payload. Override EDGE_TARGETS to
+# bundle more Edge architectures when the deployment policy changes.
 EDGE_TARGETS="${EDGE_TARGETS:-linux-amd64}"
 for target in ${EDGE_TARGETS}; do
     src="${REPO_ROOT}/bin/${target}/ongrid-edge"
@@ -519,8 +327,8 @@ log "manifest:"
   | sort -z | xargs -0 -I{} bash -c 'printf "  %10d  %s\n" "$(wc -c < "{}")" "{}"' ) || true
 
 # --- tar it up --------------------------------------------------------------
-# xz -9e over gzip: the staged tree is almost entirely stripped Go binaries +
-# docker image tars, which xz packs ~35% tighter than gzip. `tar xf` on the
+# xz -9e over gzip: the staged tree is mostly stripped Edge/plugin binaries and
+# the optional embedding model, which xz packs tighter than gzip. `tar xf` on the
 # target auto-detects xz (xz-utils is ubiquitous on Linux), so the operator
 # extract command is unchanged. -T0 parallelises across cores; the slight
 # ratio cost vs single-thread is worth the faster release builds. We pipe

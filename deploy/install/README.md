@@ -8,20 +8,11 @@
 - Docker >= 24.0；Docker Compose v2（即 `docker compose` 子命令，不是旧版 `docker-compose`）。
 - 至少 2 GB 内存、10 GB 可用磁盘。
 - 以 root 身份或具备 sudo 权限的用户执行脚本。
-- 可访问 `docker.cnb.cool`；Compose 模式的 manager、Web 及全部静态运行依赖都从项目 CNB 仓库拉取，发布包不再携带镜像 tar。
+- 可访问 `docker.cnb.cool`；manager、Web 及全部静态运行依赖都从项目 CNB 仓库拉取，发布包不携带容器镜像或 Manager 原生二进制。
 
-## 两种安装形态
+## 安装形态
 
-| | `--mode=compose`（默认） | `--mode=systemd` |
-|---|---|---|
-| **运行底座** | docker / docker-compose | 系统原生 systemd 单元 |
-| **manager 进程** | `ongrid` 容器 | `ongrid.service`（`/usr/local/bin/ongrid`）|
-| **依赖** | 同一份 docker-compose 起 mysql / prom / loki / tempo / qdrant / nginx / grafana | mariadb-server / nginx / grafana 走 apt-dnf 包管；prom / loki / tempo / qdrant 安装为 systemd 单元 |
-| **何时选** | 默认推荐；开箱即用，少踩坑 | 禁 docker、合规要求、已有 systemd 运维栈 |
-| **包内容** | 不含容器镜像 tar；运行时从 CNB 拉取 | 包含 `bin/ongrid`、`bin/ongrid-frontier` 和离线 systemd 依赖 |
-| **卸载** | `uninstall.sh --purge` | `uninstall.sh --purge`（自动派发到 `systemd/uninstall-systemd.sh`）|
-
-systemd 形态详细看 `systemd/README.md`。
+Manager 仅支持 Docker Compose 部署。`install.sh` 拉取版本锁定的容器镜像并启动完整服务栈；`uninstall.sh` 只管理该 Compose 部署。Edge 仍按设备安装流程在目标 Linux 主机上作为 systemd 服务运行。
 
 ## 安装
 

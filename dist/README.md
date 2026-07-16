@@ -26,25 +26,21 @@ ongrid-v<VERSION>-linux-<arch>/
   upgrade.sh
   docker-compose.yml     (prod compose, from deploy/install/)
   .env.example
-  prometheus/
-    prometheus.yml       (from deploy/prometheus/)
-  bin/
-    ongrid               (systemd mode)
-    ongrid-frontier      (systemd mode)
+  prometheus.yml         (Compose scrape config)
+  embeddings/            (optional bundled local embedding model)
   edge/
     ongrid-edge-linux-amd64
-    ongrid-edge-linux-arm64
-    ongrid-edge-darwin-amd64
-    ongrid-edge-darwin-arm64
+    bundled plugin binaries
     install-edge.sh
-    ongrid-edge.yaml.example
+    ongrid-edge.env.example
     ongrid-edge.service
 ```
 
-Compose mode does not embed image tarballs. `install.sh` renders the production
+The package supports Compose installation only and does not embed image
+tarballs or Manager systemd binaries. `install.sh` renders the production
 Compose model, pulls every exact image from `docker.cnb.cool/ongridio/ongrid`,
-then runs `docker compose up -d`. Systemd binaries and Edge agents remain in
-the architecture-specific package.
+then runs `docker compose up -d`. Edge binaries remain bundled for device
+installation and one-button upgrades.
 
 ## Release flow
 
@@ -62,7 +58,7 @@ the architecture-specific package.
    - `verify-release-images` — verify both architectures exist on all three image manifests
    - `publish-k8s-chart` — package and publish the version-matched Helm chart
    - `build-edge-all`    — cross-compile ongrid-edge for 4 targets
-   - `package`           — extract systemd binaries from the published CNB images
+   - `package`           — stage Compose install assets and Edge binaries
    - stage everything under `dist/stage/ongrid-<VERSION>-linux-<arch>/`
    - emit the amd64/arm64 tarballs + sha256 files under `dist/out/`
 3. Ship the matching package, for example:
@@ -77,8 +73,7 @@ Linux or `shasum -a 256 -c` on macOS.
 
 ## Local dry-run
 
-Test the tarball without shipping after the matching manager image tag exists
-in CNB (or override `CLOUD_MANAGER_IMAGE_REF` when calling `make`):
+Test the tarball without shipping:
 
 ```
 make package
