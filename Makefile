@@ -46,6 +46,8 @@ K8S_CHART_REF ?= oci://helm.cnb.cool/ongridio/ongrid-edge
 K8S_CHART_PUSH_TARGET ?= oci://helm.cnb.cool/ongridio
 CNB_HELM_REGISTRY ?= helm.cnb.cool
 CNB_HELM_USERNAME ?= cnb
+RELEASE_MANIFEST_PLATFORM_FILTER ?= $(CURDIR)/scripts/release-manifest-platforms.jq
+RELEASE_IMAGE_PUBLISHER ?= $(CURDIR)/scripts/publish-release-image.sh
 
 DB_DSN     ?= root:root@tcp(127.0.0.1:3306)/ongrid?charset=utf8mb4&parseTime=true&loc=Local
 MIGRATIONS := db/migrations
@@ -263,16 +265,22 @@ docker-build-web: ## [release] 构建 ongrid-web:$(VERSION) 镜像（前端 SPA 
 		$(DOCKER_BUILD_WEB_CACHE_ARGS) \
 		--load .
 
-.PHONY: docker-push-cloud-images docker-push-release-images release-image-refs verify-release-images
+.PHONY: docker-push-cloud-images docker-push-release-images release-image-refs verify-release-images test-release-manifest-filter test-release-image-publish
 docker-push-cloud-images: ## [release] 发布 manager + Web 多架构镜像到 CNB
-	docker buildx build \
+	bash "$(RELEASE_IMAGE_PUBLISHER)" \
+		"$(CLOUD_MANAGER_IMAGE_REF)" \
+		"$(RELEASE_MANIFEST_PLATFORM_FILTER)" \
+		-- docker buildx build \
 		--platform $(CLOUD_IMAGE_PLATFORMS) \
 		--build-arg VERSION=$(VERSION) \
 		-t $(CLOUD_MANAGER_IMAGE_REF) \
 		-f deploy/Dockerfile.ongrid \
 		$(DOCKER_BUILD_CACHE_ARGS) \
 		--push .
-	docker buildx build \
+	bash "$(RELEASE_IMAGE_PUBLISHER)" \
+		"$(CLOUD_WEB_IMAGE_REF)" \
+		"$(RELEASE_MANIFEST_PLATFORM_FILTER)" \
+		-- docker buildx build \
 		--platform $(CLOUD_IMAGE_PLATFORMS) \
 		--build-arg VERSION=$(VERSION) \
 		-t $(CLOUD_WEB_IMAGE_REF) \
@@ -295,7 +303,10 @@ docker-build-k8s-edge: ## [dev] 构建本地 Kubernetes ongrid-edge 镜像（默
 		--load .
 
 docker-push-k8s-edge: ## [release] 发布 Kubernetes ongrid-edge 多架构镜像到 CNB
-	docker buildx build \
+	bash "$(RELEASE_IMAGE_PUBLISHER)" \
+		"$(K8S_EDGE_IMAGE_REF)" \
+		"$(RELEASE_MANIFEST_PLATFORM_FILTER)" \
+		-- docker buildx build \
 		--platform $(K8S_EDGE_IMAGE_PLATFORMS) \
 		--build-arg VERSION=$(VERSION) \
 		--build-arg PROMTAIL_VERSION=$(PROMTAIL_VERSION) \
@@ -316,12 +327,21 @@ release-image-refs: ## [release] 打印本次发布的项目自身镜像
 
 verify-release-images: ## [release] 校验项目自身镜像均包含 amd64 + arm64 manifest
 	@command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 1; }
-	@for image in $(CLOUD_MANAGER_IMAGE_REF) $(CLOUD_WEB_IMAGE_REF) $(K8S_EDGE_IMAGE_REF); do \
-		echo "[verify] $$image"; \
-		docker buildx imagetools inspect --raw "$$image" \
-			| jq -e '[.manifests[].platform | "\(.os)/\(.architecture)"] \
-				| index("linux/amd64") != null and index("linux/arm64") != null' >/dev/null; \
-	done
+	bash scripts/verify-release-images.sh \
+		"$(RELEASE_MANIFEST_PLATFORM_FILTER)" \
+		"$(CLOUD_MANAGER_IMAGE_REF)" \
+		"$(CLOUD_WEB_IMAGE_REF)" \
+		"$(K8S_EDGE_IMAGE_REF)"
+
+test-release-manifest-filter: ## [test] 校验 release manifest 架构过滤器
+	@command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 1; }
+	@printf '%s\n' '{"manifests":[{"platform":{"os":"linux","architecture":"amd64"}},{"platform":{"os":"linux","architecture":"arm64"}},{"platform":{"os":"unknown","architecture":"unknown"}}]}' \
+		| jq -e -f "$(RELEASE_MANIFEST_PLATFORM_FILTER)" >/dev/null
+	@! printf '%s\n' '{"manifests":[{"platform":{"os":"linux","architecture":"amd64"}}]}' \
+		| jq -e -f "$(RELEASE_MANIFEST_PLATFORM_FILTER)" >/dev/null
+
+test-release-image-publish: test-release-manifest-filter ## [test] 校验 release 镜像幂等发布
+	bash scripts/test-publish-release-image.sh
 
 .PHONY: verify-compose-images
 verify-compose-images: ## [test] 渲染并校验 Compose 运行镜像全部按预期指向 CNB
