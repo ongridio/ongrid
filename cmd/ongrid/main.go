@@ -2074,14 +2074,15 @@ func main() {
 		}
 		mcpCaller := mcpCallerShim{uc: mcpUC}
 		mcpProposer := mcpProposerShim{uc: approvalUC}
-		// Chat path: bolt enabled servers' tools onto the chat toolbag (boot
-		// snapshot; agent-initiated calls respect each server's trusted flag /
-		// approval). The FLOW path uses the LIVE flowMCPSource wired above, so
-		// it isn't touched here.
-		if servers, err := mcpUC.ListEnabled(rootCtx); err == nil {
+		loadChatMCPTools := func(ctx context.Context) []aiopstoolsbase.BaseTool {
+			servers, err := mcpUC.ListEnabled(ctx)
+			if err != nil {
+				log.Warn("mcp: list enabled servers failed", slog.Any("err", err))
+				return nil
+			}
 			var mcpTools []aiopstoolsbase.BaseTool
 			for _, srv := range servers {
-				connCtx, cancel := context.WithTimeout(rootCtx, 15*time.Second)
+				connCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 				cli, berr := mcpUC.BuildClient(connCtx, srv)
 				if berr == nil {
 					berr = cli.Initialize(connCtx)
@@ -2102,11 +2103,15 @@ func main() {
 				}
 				log.Info("mcp: server connected", slog.String("server", srv.Name), slog.Int("tools", len(mtools)), slog.Bool("trusted", srv.Trusted))
 			}
-			if len(mcpTools) > 0 {
-				chatRT.AppendToolBag(mcpTools)
-				log.Info("mcp tools bolted onto chat runtime bag", slog.Int("mcp_tool_count", len(mcpTools)), slog.Int("tool_count", chatRT.ToolCount()))
-			}
+			return mcpTools
 		}
+		reloadChatMCPTools := func(ctx context.Context) {
+			mcpTools := loadChatMCPTools(ctx)
+			chatRT.ReplaceToolsByOrigin(aiopstoolsbase.OriginMCP, mcpTools)
+			log.Info("mcp tools refreshed in chat runtime bag", slog.Int("mcp_tool_count", len(mcpTools)), slog.Int("tool_count", chatRT.ToolCount()))
+		}
+		mcpUC.SetToolChangeHook(reloadChatMCPTools)
+		reloadChatMCPTools(rootCtx)
 	}
 	if secretbox.KeyIsWeak() {
 		log.Warn("secret vault: ONGRID_SECRET_KEY unset — credentials encrypted with an INSECURE built-in key; set ONGRID_SECRET_KEY (32+ random chars) for real at-rest protection")

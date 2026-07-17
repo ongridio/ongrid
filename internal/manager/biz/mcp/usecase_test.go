@@ -143,6 +143,27 @@ func TestBuildClient_StdioUnsupported(t *testing.T) {
 	}
 }
 
+func TestUsecaseToolChangeHookOnRegistrationChanges(t *testing.T) {
+	ctx := context.Background()
+	u := NewUsecase(newFakeRepo(), fakeSecrets{}, nil)
+	calls := 0
+	u.SetToolChangeHook(func(context.Context) { calls++ })
+
+	s, err := u.Create(ctx, &model.Server{Name: "es", Transport: "http", Endpoint: "http://127.0.0.1:9900", Enabled: true})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := u.Update(ctx, s.ID, &model.Server{Name: "es", Transport: "http", Endpoint: "http://127.0.0.1:9901", Enabled: true}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if err := u.Delete(ctx, s.ID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if calls != 3 {
+		t.Fatalf("hook calls = %d, want 3", calls)
+	}
+}
+
 func TestCreate_Validation(t *testing.T) {
 	cases := []struct {
 		name    string

@@ -296,6 +296,8 @@ type Runtime struct {
 	workersMu sync.Mutex
 	workers   map[string]*Worker
 
+	toolMu sync.RWMutex
+
 	// bag is the unredacted ToolBag handle wired by SetToolBag. nil
 	// when the caller wires the runtime without calling SetToolBag —
 	// not all code paths need it (legacy callers only feed
@@ -386,6 +388,8 @@ func (rt *Runtime) AppendToolBag(tools []basetool.BaseTool) {
 	if rt == nil || len(tools) == 0 {
 		return
 	}
+	rt.toolMu.Lock()
+	defer rt.toolMu.Unlock()
 	index := map[string]int{}
 	for i, t := range rt.cfg.ToolBag {
 		if t == nil {
@@ -409,6 +413,30 @@ func (rt *Runtime) AppendToolBag(tools []basetool.BaseTool) {
 		}
 		rt.cfg.ToolBag = append(rt.cfg.ToolBag, t)
 	}
+}
+
+// ReplaceToolsByOrigin replaces all tools with the given runtime origin.
+// Used for hot-reloaded dynamic providers such as MCP servers: a server can
+// be renamed, disabled, or have its tool list changed, so append-only leaves
+// stale tool names visible to ToolSearch and the LLM.
+func (rt *Runtime) ReplaceToolsByOrigin(origin string, tools []basetool.BaseTool) {
+	if rt == nil || origin == "" {
+		return
+	}
+	rt.toolMu.Lock()
+	defer rt.toolMu.Unlock()
+	next := make([]basetool.BaseTool, 0, len(rt.cfg.ToolBag)+len(tools))
+	for _, t := range rt.cfg.ToolBag {
+		if t == nil {
+			continue
+		}
+		info, err := t.Info(context.Background())
+		if err == nil && info != nil && info.Origin == origin {
+			continue
+		}
+		next = append(next, t)
+	}
+	rt.cfg.ToolBag = append(next, tools...)
 }
 
 // AgentRegistry exposes the registry for narrow read-only callers
@@ -438,6 +466,8 @@ func (rt *Runtime) ToolCount() int {
 	if rt == nil {
 		return 0
 	}
+	rt.toolMu.RLock()
+	defer rt.toolMu.RUnlock()
 	return len(rt.cfg.ToolBag)
 }
 
@@ -448,8 +478,11 @@ func (rt *Runtime) ToolNames(ctx context.Context) []string {
 	if rt == nil {
 		return nil
 	}
-	out := make([]string, 0, len(rt.cfg.ToolBag))
-	for _, t := range rt.cfg.ToolBag {
+	rt.toolMu.RLock()
+	tools := append([]basetool.BaseTool(nil), rt.cfg.ToolBag...)
+	rt.toolMu.RUnlock()
+	out := make([]string, 0, len(tools))
+	for _, t := range tools {
 		if t == nil {
 			continue
 		}
@@ -555,7 +588,10 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (*Reply, error) {
 	// the coordinator path now honors it too. Stale agent ids fall back
 	// to the global default with a log line — never crash a session.
 	basePrompt := rt.cfg.BasePrompt
-	sessionToolBag := rt.cfg.ToolBag
+	rt.toolMu.RLock()
+	runtimeToolBag := append([]basetool.BaseTool(nil), rt.cfg.ToolBag...)
+	rt.toolMu.RUnlock()
+	sessionToolBag := runtimeToolBag
 	agentReminderForPersona := ""
 	// Coordinator iff session is pinned to "default" or has no
 	// AgentID at all. Specialist personas (= anything else in the
@@ -578,7 +614,7 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (*Reply, error) {
 	}
 	readOnly := viewerOnly || !writeEnabled
 	if readOnly {
-		sessionToolBag = filterToolsForAgentRole(rt.cfg.ToolBag, nil, isCoordinator, true)
+		sessionToolBag = filterToolsForAgentRole(runtimeToolBag, nil, isCoordinator, true)
 	}
 	// Resolve the active persona. Sessions with no AgentID still
 	// route through the "default" persona — that's where the curated
@@ -601,7 +637,7 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (*Reply, error) {
 			// reach for every deep-dive tool itself. The
 			// coordinatorOnlyTools (AgentTool/SendMessage/TaskStop)
 			// survive the strip via isCoordinator=true.
-			sessionToolBag = filterToolsForAgentRole(rt.cfg.ToolBag, persona, isCoordinator, readOnly)
+			sessionToolBag = filterToolsForAgentRole(runtimeToolBag, persona, isCoordinator, readOnly)
 			agentReminderForPersona = persona.CriticalReminder
 		} else if rt.log != nil && personaName != "default" {
 			rt.log.Info("chatruntime: session agent_id not in registry — using default",
