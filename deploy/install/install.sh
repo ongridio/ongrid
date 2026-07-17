@@ -99,6 +99,35 @@ set_env_value() {
     fi
 }
 
+host_from_url() {
+    local url="$1" hostport host
+    hostport="${url#*://}"
+    hostport="${hostport%%/*}"
+    if [[ "$hostport" == \[*\]* ]]; then
+        host="${hostport%%]*}"
+        host="${host}]"
+    else
+        host="${hostport%%:*}"
+    fi
+    printf '%s' "$host"
+}
+
+ensure_tunnel_addr_env() {
+    local configured public_url tunnel_port host
+    configured=$(grep -E '^ONGRID_TUNNEL_ADDR=' "$ENV_FILE" 2>/dev/null | tail -n 1 | cut -d= -f2- || true)
+    if [[ -n "$configured" ]]; then
+        return
+    fi
+    public_url=$(grep -E '^ONGRID_PUBLIC_URL=' "$ENV_FILE" 2>/dev/null | tail -n 1 | cut -d= -f2- || true)
+    tunnel_port=$(grep -E '^ONGRID_TUNNEL_PORT=' "$ENV_FILE" 2>/dev/null | tail -n 1 | cut -d= -f2- || true)
+    : "${tunnel_port:=40012}"
+    host=$(host_from_url "$public_url")
+    if [[ -n "$host" ]]; then
+        set_env_value ONGRID_TUNNEL_ADDR "${host}:${tunnel_port}"
+        log_info "ONGRID_TUNNEL_ADDR=${host}:${tunnel_port}"
+    fi
+}
+
 ensure_host_gateway_env() {
     local configured gateway
     configured=$(grep -E '^ONGRID_HOST_GATEWAY=' "$ENV_FILE" 2>/dev/null | tail -n 1 | cut -d= -f2- || true)
@@ -182,65 +211,21 @@ read_with_countdown() {
 PROFILE_MONITORING=0
 NO_SEED=0
 FORCE=0
-MODE="compose"   # compose (default) | systemd
 
 usage() {
     cat <<EOF
 Usage: sudo ./install.sh [OPTIONS]
 
 Options:
-  --mode <compose|systemd>
-                         Install topology. compose (default) runs the full
-                         stack via docker-compose. systemd installs the
-                         manager + frontier + deps as native systemd units
-                         (no docker; see systemd/install-systemd.sh for the
-                         long-form trip report).
-  --profile monitoring   compose-only. Also start Prometheus
+  --profile monitoring   Also start Prometheus
                          (docker compose --profile monitoring).
-  --no-seed              compose-only. Skip the admin-bootstrap user notice.
-  --force                compose-only. Reinstall on top of existing
+  --no-seed              Skip the admin-bootstrap user notice.
+  --force                Reinstall on top of existing
                          (preserves .env / data volume).
-  --with-deps            systemd-only. Auto-install mariadb / nginx /
-                         grafana via apt/dnf and download pinned
-                         prom / loki / tempo / qdrant binaries from
-                         upstream releases with sha256 verify.
   -h, --help             Print this help.
 EOF
 }
 
-# Mode-pre-scan: spot --mode before the main parse loop so we can
-# strip it out and pass every remaining flag verbatim to the systemd
-# dispatcher. Without this, --with-deps (only known to install-systemd.sh)
-# would hit the compose-side parser's "unknown flag" arm and exit.
-PASSTHROUGH_ARGS=()
-i=0
-while [[ $i -lt $# ]]; do
-    arg="${@:i+1:1}"
-    case "$arg" in
-        --mode) MODE="${@:i+2:1}"; i=$((i+2)) ;;
-        --mode=*) MODE="${arg#*=}"; i=$((i+1)) ;;
-        *) PASSTHROUGH_ARGS+=("$arg"); i=$((i+1)) ;;
-    esac
-done
-
-case "$MODE" in
-    compose) ;;   # fall through to legacy parse + install
-    systemd)
-        if [[ ! -x "$SCRIPT_DIR/systemd/install-systemd.sh" ]]; then
-            log_error "systemd installer missing or not executable: $SCRIPT_DIR/systemd/install-systemd.sh"
-            exit 2
-        fi
-        log_info "dispatching to systemd installer"
-        exec bash "$SCRIPT_DIR/systemd/install-systemd.sh" "${PASSTHROUGH_ARGS[@]+"${PASSTHROUGH_ARGS[@]}"}"
-        ;;
-    *)
-        log_error "--mode must be one of: compose, systemd"
-        exit 2
-        ;;
-esac
-
-# -- compose-mode parse loop (only reached when MODE=compose) --
-set -- "${PASSTHROUGH_ARGS[@]+"${PASSTHROUGH_ARGS[@]}"}"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --profile)
@@ -344,41 +329,6 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 
 docker info >/dev/null 2>&1 || { log_error "docker daemon not reachable (permission or not running)"; exit 1; }
-
-# ---------- CN mirror auto-config ----------
-# Probe Docker Hub once. If unreachable (the typical CN-network case), drop
-# a /etc/docker/daemon.json with a battery of well-known CN mirrors. We only
-# touch the file if it does not already specify registry-mirrors — operators
-# who configured their own mirrors get to keep them.
-log_info "checking Docker Hub reachability"
-if ! curl -sS --max-time 5 -o /dev/null https://registry-1.docker.io/v2/ 2>/dev/null; then
-    if [[ -f /etc/docker/daemon.json ]] && grep -q '"registry-mirrors"' /etc/docker/daemon.json; then
-        log_info "Docker Hub unreachable but /etc/docker/daemon.json already has registry-mirrors; leaving alone"
-    else
-        log_warn "Docker Hub unreachable — configuring CN registry mirrors in /etc/docker/daemon.json"
-        mkdir -p /etc/docker
-        if [[ -f /etc/docker/daemon.json ]]; then
-            cp /etc/docker/daemon.json "/etc/docker/daemon.json.bak.$(date +%s)"
-        fi
-        cat > /etc/docker/daemon.json <<'EOF'
-{
-  "registry-mirrors": [
-    "https://docker.1ms.run",
-    "https://docker.mirrors.ustc.edu.cn",
-    "https://hub.rat.dev",
-    "https://docker.m.daocloud.io"
-  ]
-}
-EOF
-        systemctl restart docker 2>/dev/null || true
-        # Wait up to 5s for the daemon to come back; otherwise the next
-        # `docker compose` call races and fails.
-        for _ in 1 2 3 4 5; do
-            docker info >/dev/null 2>&1 && break
-            sleep 1
-        done
-    fi
-fi
 
 docker compose version >/dev/null 2>&1 || { log_error "docker compose v2 not found (need the 'docker compose' subcommand)"; exit 1; }
 
@@ -570,29 +520,6 @@ if [[ ! -f "$INSTALL_DIR/certs/tls.crt" || ! -f "$INSTALL_DIR/certs/tls.key" ]];
     log_warn "self-signed cert: browsers will warn — replace with a real cert in $INSTALL_DIR/certs/ later"
 fi
 
-# ---------- load docker images ----------
-# Both ongrid (manager) and frontier (broker) images ship in the tarball.
-# Docker Hub pull is unreliable in some networks, so installers should not
-# depend on it. ADR-007 explains the upstream-frontier-shipped-locally choice.
-if [[ -f "$SCRIPT_DIR/images/ongrid.tar" ]]; then
-    log_info "loading ongrid image (docker load)"
-    docker load -i "$SCRIPT_DIR/images/ongrid.tar"
-else
-    log_warn "images/ongrid.tar not found; assuming image already present"
-fi
-if [[ -f "$SCRIPT_DIR/images/frontier.tar" ]]; then
-    log_info "loading frontier broker image (docker load)"
-    docker load -i "$SCRIPT_DIR/images/frontier.tar"
-else
-    log_warn "images/frontier.tar not found; assuming image already present"
-fi
-if [[ -f "$SCRIPT_DIR/images/ongrid-web.tar" ]]; then
-    log_info "loading ongrid-web (frontend + nginx) image (docker load)"
-    docker load -i "$SCRIPT_DIR/images/ongrid-web.tar"
-else
-    log_warn "images/ongrid-web.tar not found; assuming ongrid-web image already present"
-fi
-
 # Resolve VERSION from VERSION file or .env.example (fallback)
 VERSION_FROM_FILE=""
 if [[ -f "$INSTALL_DIR/VERSION" ]]; then
@@ -602,12 +529,6 @@ if [[ -z "$VERSION_FROM_FILE" ]]; then
     VERSION_FROM_FILE=$(grep -E '^ONGRID_VERSION=' "$SCRIPT_DIR/.env.example" | cut -d= -f2- | tr -d '[:space:]' || true)
 fi
 [[ -n "$VERSION_FROM_FILE" ]] || { log_error "cannot determine ongrid version"; exit 1; }
-
-if ! docker image inspect "ongrid:${VERSION_FROM_FILE}" >/dev/null 2>&1; then
-    log_error "docker image ongrid:${VERSION_FROM_FILE} not found after load"
-    exit 1
-fi
-log_info "ongrid:${VERSION_FROM_FILE} image ready"
 
 # ---------- secret generator ----------
 gen_secret() {
@@ -767,6 +688,7 @@ the detected default, or type the correct address." \
     fill_blank ONGRID_PUBLIC_URL "$RESOLVED_PUBLIC_URL"
     log_info "ONGRID_PUBLIC_URL=${RESOLVED_PUBLIC_URL} (edit .env to change)"
 fi
+ensure_tunnel_addr_env
 
 # Bump ONGRID_VERSION to match VERSION file.
 sed -i.bak -E "s|^ONGRID_VERSION=.*|ONGRID_VERSION=${VERSION_FROM_FILE}|" "$ENV_FILE"
@@ -795,6 +717,27 @@ COMPOSE_ARGS=(--env-file "$ENV_FILE")
 if [[ $PROFILE_MONITORING -eq 1 ]]; then
     COMPOSE_ARGS+=(--profile monitoring)
 fi
+
+# Pull every rendered image before starting anything. All production Compose
+# images live under docker.cnb.cool/ongridio/ongrid; rendering first also
+# validates the generated .env and any operator-provided override file.
+log_info "validating and pulling runtime images from CNB"
+if ! RUNTIME_IMAGES=$(
+    cd "$INSTALL_DIR"
+    docker compose "${COMPOSE_ARGS[@]}" config --images | sort -u
+); then
+    log_error "docker-compose configuration is invalid; no containers were started"
+    exit 1
+fi
+while IFS= read -r image; do
+    [[ -n "$image" ]] || continue
+    log_info "pulling $image"
+    if ! docker pull "$image"; then
+        log_error "required runtime image is unavailable: $image"
+        log_error "fix access to docker.cnb.cool and re-run sudo ./install.sh"
+        exit 1
+    fi
+done <<<"$RUNTIME_IMAGES"
 
 log_info "starting stack: docker compose ${COMPOSE_ARGS[*]} up -d"
 (

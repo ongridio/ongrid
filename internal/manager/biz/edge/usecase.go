@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -36,6 +37,7 @@ const (
 // a cycle through main.go's wiring graph).
 type NodeMirror interface {
 	EnsureNodeForDevice(ctx context.Context, deviceID uint64, deviceName string) (uint64, error)
+	DeleteNodeForDevice(ctx context.Context, deviceID, nodeID uint64) error
 }
 
 // Usecase is the manager/edge biz-layer facade.
@@ -205,24 +207,85 @@ func (u *Usecase) List(ctx context.Context, f ListFilter) ([]*model.Edge, error)
 	return u.repo.List(ctx, f)
 }
 
-// Delete soft-deletes an edge. The linked Device is marked offline first
-// so deleting an edge doesn't leave its host stuck "online" in the device
-// list / query_devices forever (the device row outlives the edge row; only
-// HandleOffline on a tunnel close used to flip it, so a hard delete left an
-// orphan that read as perpetually online).
+// Delete soft-deletes an edge. When this edge is the last live agent for its
+// host device, the device-owned topology node and device row are deleted too;
+// otherwise the device is only kept offline for the current edge transition.
 func (u *Usecase) Delete(ctx context.Context, id uint64) error {
 	if u.repo == nil {
 		return errs.ErrNotWiredYet
 	}
-	if u.devices != nil {
-		edge, err := u.repo.GetByID(ctx, id)
-		if err == nil && edge.DeviceID != nil {
+	edge, err := u.repo.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if u.devices != nil && edge.DeviceID != nil {
+		removed, handled, err := u.deleteDeviceIfLastEdge(ctx, id, *edge.DeviceID)
+		if err != nil {
+			return err
+		}
+		if !removed && !handled {
 			if derr := u.devices.MarkOffline(ctx, *edge.DeviceID); derr != nil && u.log != nil {
 				u.log.Warn("delete edge: device mark-offline failed", "edge_id", id, "device_id", *edge.DeviceID, "err", derr)
 			}
 		}
 	}
 	return u.repo.Delete(ctx, id)
+}
+
+func (u *Usecase) deleteDeviceIfLastEdge(ctx context.Context, edgeID, deviceID uint64) (removed bool, handled bool, err error) {
+	if u.links == nil {
+		return false, false, nil
+	}
+	links, err := u.links.ListEdgesForDevice(ctx, deviceID)
+	if err != nil {
+		return false, true, fmt.Errorf("list device edge links: %w", err)
+	}
+	for _, link := range links {
+		if link == nil || link.EdgeID == edgeID {
+			continue
+		}
+		if _, err := u.repo.GetByID(ctx, link.EdgeID); err == nil {
+			return false, true, u.unlinkCurrentEdgeDeviceLinks(ctx, edgeID, links)
+		} else if !errors.Is(err, errs.ErrNotFound) {
+			return false, true, err
+		}
+	}
+	dev, err := u.devices.Get(ctx, deviceID)
+	if err != nil {
+		if errors.Is(err, errs.ErrNotFound) {
+			return false, true, nil
+		}
+		return false, true, err
+	}
+	if u.mirror != nil && dev.NodeID != nil && *dev.NodeID != 0 {
+		if err := u.mirror.DeleteNodeForDevice(ctx, dev.ID, *dev.NodeID); err != nil && !errors.Is(err, errs.ErrNotFound) {
+			return false, true, fmt.Errorf("delete topology node for device %d: %w", dev.ID, err)
+		}
+	}
+	for _, link := range links {
+		if link == nil {
+			continue
+		}
+		if err := u.links.Unlink(ctx, link.EdgeID, link.DeviceID, link.Type); err != nil {
+			return false, true, fmt.Errorf("unlink device edge %d/%d: %w", link.EdgeID, link.DeviceID, err)
+		}
+	}
+	if err := u.devices.Delete(ctx, deviceID); err != nil {
+		return false, true, err
+	}
+	return true, true, nil
+}
+
+func (u *Usecase) unlinkCurrentEdgeDeviceLinks(ctx context.Context, edgeID uint64, links []*devicemodel.EdgeDevice) error {
+	for _, link := range links {
+		if link == nil || link.EdgeID != edgeID {
+			continue
+		}
+		if err := u.links.Unlink(ctx, link.EdgeID, link.DeviceID, link.Type); err != nil {
+			return fmt.Errorf("unlink device edge %d/%d: %w", link.EdgeID, link.DeviceID, err)
+		}
+	}
+	return nil
 }
 
 // RotateSecret generates a new SecretKey, replaces the stored hash, and
@@ -366,6 +429,68 @@ func (u *Usecase) HandleRegister(ctx context.Context, edgeID uint64, info tunnel
 	return nil
 }
 
+// ClearHostDeviceLink removes any host Device association from an edge.
+// Kubernetes controller edges are not hosts, but older buggy registrations may
+// have created a host link. Calling this on each controller register makes that
+// boundary self-healing.
+func (u *Usecase) ClearHostDeviceLink(ctx context.Context, edgeID uint64) error {
+	if u.repo == nil {
+		return errs.ErrNotWiredYet
+	}
+	edge, err := u.repo.GetByID(ctx, edgeID)
+	if err != nil {
+		return fmt.Errorf("get edge: %w", err)
+	}
+
+	var deviceIDs []uint64
+	if edge.DeviceID != nil && *edge.DeviceID != 0 {
+		deviceIDs = append(deviceIDs, *edge.DeviceID)
+	}
+	if u.links != nil {
+		if linked, err := u.links.LookupHostDevice(ctx, edgeID); err == nil && linked != 0 && !containsUint64(deviceIDs, linked) {
+			deviceIDs = append(deviceIDs, linked)
+		} else if err != nil && !errors.Is(err, errs.ErrNotFound) {
+			return fmt.Errorf("lookup host device link: %w", err)
+		}
+	}
+
+	for _, deviceID := range deviceIDs {
+		removed, handled, err := u.deleteDeviceIfLastEdge(ctx, edgeID, deviceID)
+		if err != nil {
+			return fmt.Errorf("delete stale controller device %d: %w", deviceID, err)
+		}
+		if handled {
+			if removed && u.log != nil {
+				u.log.Info("clear host device link: removed stale controller device",
+					slog.Uint64("edge_id", edgeID),
+					slog.Uint64("device_id", deviceID),
+				)
+			}
+			continue
+		}
+		if u.links != nil {
+			if err := u.links.Unlink(ctx, edgeID, deviceID, devicemodel.EdgeDeviceRelationHost); err != nil {
+				return fmt.Errorf("unlink edge<->device(host): %w", err)
+			}
+		}
+		if u.devices != nil {
+			if err := u.devices.MarkOffline(ctx, deviceID); err != nil && !errors.Is(err, errs.ErrNotFound) && u.log != nil {
+				u.log.Warn("clear host device link: mark device offline failed",
+					slog.Uint64("edge_id", edgeID),
+					slog.Uint64("device_id", deviceID),
+					slog.Any("err", err),
+				)
+			}
+		}
+	}
+	if edge.DeviceID != nil {
+		if err := u.repo.ClearDeviceID(ctx, edgeID); err != nil {
+			return fmt.Errorf("clear edge device_id: %w", err)
+		}
+	}
+	return nil
+}
+
 // deviceFingerprint derives the stable per-host id stored in
 // devices.fingerprint. Preference order:
 //
@@ -408,6 +533,15 @@ func deviceFingerprintLegacy(info tunnel.HostInfo) string {
 func hashFingerprint(seed string) string {
 	h := sha256.Sum256([]byte(seed))
 	return "fp_" + hex.EncodeToString(h[:16])
+}
+
+func containsUint64(values []uint64, want uint64) bool {
+	for _, v := range values {
+		if v == want {
+			return true
+		}
+	}
+	return false
 }
 
 // HandleHeartbeat bumps last_seen_at for an authenticated edge. status is

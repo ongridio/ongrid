@@ -159,6 +159,18 @@ func (r *Repo) SetDeviceID(ctx context.Context, edgeID, deviceID uint64) error {
 	return nil
 }
 
+// ClearDeviceID clears the edge row's host device pointer.
+func (r *Repo) ClearDeviceID(ctx context.Context, edgeID uint64) error {
+	res := r.db.WithContext(ctx).Model(&model.Edge{}).Where("id = ?", edgeID).Update("device_id", nil)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return errs.ErrNotFound
+	}
+	return nil
+}
+
 // SetAgentVersion records the agent's self-reported binary version on
 // register_edge. Caller filters empty values upstream so we don't blank
 // the column when a buggy build reports nothing.

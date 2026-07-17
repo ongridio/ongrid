@@ -193,14 +193,14 @@
 
 | # | 用例 | 关键断言点 | 优 | 实现 |
 |---|---|---|---|---|
-| P1 | 登录 → Dashboard | sidebar 出现, edge 数 > 0 | **P0** | |
-| P2 | /alerts → 点 incident → 详情 | summary/target/RCA panel 都渲染 | P1 | |
-| P3 | /edges → EdgeDetail plugin health tab | 每条 plugin 一行 state | P1 | |
-| P4 | /alert-rules → 创建 → 保存 → 列表 | "默认" 主勾 + Window chip | P1 | |
-| P5 | /settings/notifications → 新建 Slack → Test | 实际打 hook + 回显 | P1 | |
-| P6 | /settings/channels → 新建 Slack IM → connected | 状态变 connected | P1 | |
-| P7 | 中/EN 切 locale | SPA 文案切, Accept-Language 头变 | P1 | |
-| P8 | 告警 Summary truncate + hover | title 有全文 | P2 | |
+| P1 | 登录 → Dashboard | sidebar 出现并进入已认证工作台 | **P0** | ✅ `web/e2e/live-navigation.spec.ts` |
+| P2 | /alerts → 点 incident → 详情 | summary/target/RCA panel 都渲染 | P1 | ✅ `web/e2e/mocked-workflows.spec.ts` |
+| P3 | /devices → DeviceDetail plugin health tab | 每条 plugin 一行 state | P1 | ✅ `web/e2e/live-navigation.spec.ts` |
+| P4 | /alerts/rules → 创建 → 保存 → 列表 | "默认" 主勾 + Window chip | P1 | ✅ `web/e2e/mocked-workflows.spec.ts` |
+| P5 | /settings/notifications → 新建 Slack → Test | 创建与测试请求正确,UI 回显成功 | P1 | ✅ `web/e2e/mocked-workflows.spec.ts`(API stub) |
+| P6 | /settings/channels → 新建 Slack IM | enabled 状态和双 token 序列化正确 | P1 | ✅ `web/e2e/mocked-workflows.spec.ts`(API stub) |
+| P7 | 中/EN 切 locale | SPA 文案切,Accept-Language 头变,light/dark 生效 | P1 | ✅ `web/e2e/live-navigation.spec.ts` |
+| P8 | 告警 Summary truncate + hover | title 有全文 | P2 | ✅ `web/e2e/mocked-workflows.spec.ts` |
 
 ---
 
@@ -215,9 +215,13 @@
 
 > 已实现条目在 `tests/e2e/` 下有对应 `*_test.go`,catalog 这边的"实现"列写 ✅。
 >
-> 当前实现:**3 条**
+> 当前后端实现:**3 条**
 > - B1 登录链路 → `tests/e2e/auth_login_test.go`
 > - G3 Slack 通知富格式 → `tests/e2e/notify_slack_test.go`
 > - O1 sensitive reveal 权限 → `tests/e2e/settings_reveal_test.go`
 
-详见 `tests/e2e/README.md`。
+> 当前 SPA 实现:**8 条**
+> - P1-P8 → `web/e2e/live-navigation.spec.ts`、`web/e2e/mocked-workflows.spec.ts`
+> - 写操作通过浏览器侧 API stub 验证交互和请求体,不写入本地环境数据
+
+详见 `tests/e2e/README.md` 和 `web/e2e/README.md`。

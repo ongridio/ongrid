@@ -35,6 +35,15 @@ jobs:
           go-version: '1.25.x'
           cache: true
 
+      - name: Set up Buf
+        uses: bufbuild/buf-setup-action@v1
+
+      - name: buf lint
+        run: >-
+          buf lint
+          --config '{"version":"v2","lint":{"use":["STANDARD"],"except":["PACKAGE_DIRECTORY_MATCH"]}}'
+          api/manager/k8s/v1/k8s.proto
+
       - name: go build
         run: go build ./...
 
@@ -42,4 +51,113 @@ jobs:
         run: go vet ./...
 
       - name: go test
-        run: go test ./...
+        run: go test -race ./...
+
+  web-test:
+    name: web test + build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: >-
+          npm test -- --run
+          src/pages/Kubernetes.test.tsx
+          src/pages/Edges.test.tsx
+          src/pages/Dashboard.test.tsx
+          src/pages/kubernetes/edgeAttachments.test.ts
+          src/pages/kubernetes/registryCommands.test.ts
+
+      - name: Build
+        run: npm run build
+
+  deployment-test:
+    name: deployment manifests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Check release scripts
+        run: bash -n dist/package.sh dist/package-k8s-chart.sh deploy/install/install.sh deploy/install/upgrade.sh deploy/install/uninstall.sh scripts/verify-cnb-compose-images.sh scripts/verify-release-images.sh scripts/publish-release-image.sh scripts/test-publish-release-image.sh scripts/test-compose-release-package.sh scripts/publish-helm-chart.sh scripts/test-publish-helm-chart.sh
+
+      - name: Verify Compose image routing
+        run: make verify-compose-images
+
+      - name: Verify release image helpers
+        run: make test-release-image-publish
+
+      - name: Verify Helm Chart publish helper
+        run: make test-publish-k8s-chart
+
+      - name: Verify Compose-only release package
+        run: make test-release-package
+
+      - name: Lint and render Kubernetes chart
+        run: |
+          helm lint deploy/kubernetes/ongrid-edge \
+            --set-string manager.publicURL=https://manager.example:8443 \
+            --set-string manager.tunnelAddr=manager.example:40012 \
+            --set-string enrollment.clusterID=1 \
+            --set-string enrollment.controllerBootstrapToken=controller-token \
+            --set-string enrollment.nodeBootstrapToken=node-token
+          make package-k8s-chart
+          helm template ongrid-edge bin/k8s/ongrid-edge.tgz \
+            --namespace ongrid-system \
+            --set-string manager.publicURL=https://manager.example:8443 \
+            --set-string manager.tunnelAddr=manager.example:40012 \
+            --set-string enrollment.clusterID=1 \
+            --set-string enrollment.controllerBootstrapToken=controller-token \
+            --set-string enrollment.nodeBootstrapToken=node-token \
+            >/tmp/ongrid-edge.yaml
+          grep -q 'type: Recreate' /tmp/ongrid-edge.yaml
+          ! grep -q 'kubernetes.io/arch:' /tmp/ongrid-edge.yaml
+          image_ref="$(make --no-print-directory k8s-edge-image-ref)"
+          expected_image="image: \"${image_ref}\""
+          test "$(grep -F -c "$expected_image" /tmp/ongrid-edge.yaml)" -eq 3
+          grep -q 'k8s-inventory-full-sync-interval: "10m"' /tmp/ongrid-edge.yaml
+          grep -q 'k8s-metrics-timeout: "15s"' /tmp/ongrid-edge.yaml
+          grep -q 'k8s-metrics-push-timeout: "30s"' /tmp/ongrid-edge.yaml
+          grep -q 'k8s-metrics-sample-limit: "250000"' /tmp/ongrid-edge.yaml
+          grep -q 'k8s-metrics-batch-sample-limit: "10000"' /tmp/ongrid-edge.yaml
+          grep -q 'k8s-metrics-batch-byte-limit: "4194304"' /tmp/ongrid-edge.yaml
+          grep -q 'name: ONGRID_K8S_METRICS_TIMEOUT' /tmp/ongrid-edge.yaml
+          grep -q 'name: ONGRID_K8S_METRICS_PUSH_TIMEOUT' /tmp/ongrid-edge.yaml
+          grep -q 'name: ONGRID_K8S_METRICS_SAMPLE_LIMIT' /tmp/ongrid-edge.yaml
+          grep -q 'name: ONGRID_K8S_METRICS_BATCH_SAMPLE_LIMIT' /tmp/ongrid-edge.yaml
+          grep -q 'name: ONGRID_K8S_METRICS_BATCH_BYTE_LIMIT' /tmp/ongrid-edge.yaml
+          grep -q 'hostNetwork: true' /tmp/ongrid-edge.yaml
+          grep -q 'name: install-host-runtime' /tmp/ongrid-edge.yaml
+          grep -q -- '- install-k8s-host-runtime' /tmp/ongrid-edge.yaml
+          grep -A16 'name: install-host-runtime' /tmp/ongrid-edge.yaml | grep -q 'memory: 128Mi'
+          grep -q -- '- enter-k8s-host' /tmp/ongrid-edge.yaml
+          test "$(grep -F -c 'mountPath: /host/root' /tmp/ongrid-edge.yaml)" -eq 2
+          grep -q 'mountPropagation: HostToContainer' /tmp/ongrid-edge.yaml
+          grep -A1 'name: ONGRID_EDGE_COLLECTOR_MODE' /tmp/ongrid-edge.yaml | grep -q 'value: "off"'
+          grep -q 'add: \["CHOWN", "DAC_OVERRIDE", "FOWNER"\]' /tmp/ongrid-edge.yaml
+          grep -q 'add: \["DAC_READ_SEARCH", "NET_ADMIN", "SETGID", "SETPCAP", "SETUID", "SYS_CHROOT"\]' /tmp/ongrid-edge.yaml
+          ! grep -q 'SYS_ADMIN\|SYS_PTRACE' /tmp/ongrid-edge.yaml
+          ! grep -q 'privileged: true' /tmp/ongrid-edge.yaml
+          ! grep -q 'supplementalGroups:' /tmp/ongrid-edge.yaml

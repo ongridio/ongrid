@@ -20,7 +20,6 @@ trap 'log_error "uninstall failed at line $LINENO"' ERR
 
 PURGE=0
 ASSUME_YES=0
-MODE="auto"
 PURGE_EDGE=0
 
 usage() {
@@ -28,11 +27,6 @@ usage() {
 Usage: sudo ./uninstall.sh [OPTIONS]
 
 Options:
-  --mode <auto|compose|systemd>
-                  Pick the uninstall path. auto (default) detects from the
-                  filesystem: presence of /etc/systemd/system/ongrid.service
-                  implies systemd; presence of /opt/ongrid/docker-compose.yml
-                  implies compose. Specify explicitly when both exist.
   --purge         Also delete data + install dir / data dirs. DESTRUCTIVE.
   --purge-edge    On a host that also has an ongrid-edge daemon, run its
                   uninstaller too. Without this flag --purge only warns
@@ -41,15 +35,13 @@ Options:
   --yes           Skip the y/N confirmation prompt (only with --purge).
   -h, --help      Print this help.
 
-Without --purge, containers/units are stopped but data is preserved so a
+Without --purge, containers are stopped but data is preserved so a
 later install.sh resumes where you left off.
 EOF
 }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --mode) MODE="${2:-}"; shift 2 ;;
-        --mode=*) MODE="${1#*=}"; shift ;;
         --purge) PURGE=1; shift ;;
         --purge-edge) PURGE_EDGE=1; shift ;;
         --yes|-y) ASSUME_YES=1; shift ;;
@@ -57,59 +49,6 @@ while [[ $# -gt 0 ]]; do
         *) log_error "unknown flag: $1"; usage; exit 2 ;;
     esac
 done
-
-# -------- mode dispatch (must happen before we touch INSTALL_DIR) --------
-detect_install_mode() {
-    local has_systemd=0 has_compose=0
-    [[ -f /etc/systemd/system/ongrid.service ]] && has_systemd=1
-    [[ -f /opt/ongrid/docker-compose.yml ]]    && has_compose=1
-    if (( has_systemd && has_compose )); then
-        log_warn "both systemd and compose installs detected — pick one with --mode"
-        exit 2
-    elif (( has_systemd )); then echo systemd
-    elif (( has_compose )); then echo compose
-    else echo none
-    fi
-}
-if [[ "$MODE" == "auto" ]]; then
-    MODE=$(detect_install_mode)
-    log_info "auto-detected install mode: $MODE"
-fi
-case "$MODE" in
-    compose) ;;   # fall through to legacy uninstall
-    systemd)
-        if [[ ! -x "$SCRIPT_DIR/systemd/uninstall-systemd.sh" ]]; then
-            log_error "systemd uninstaller missing: $SCRIPT_DIR/systemd/uninstall-systemd.sh"
-            exit 2
-        fi
-        log_info "dispatching to systemd uninstaller"
-        purge_arg=()
-        (( PURGE ))      && purge_arg+=(--purge)
-        (( ASSUME_YES )) && purge_arg+=(--yes)
-        exec bash "$SCRIPT_DIR/systemd/uninstall-systemd.sh" "${purge_arg[@]}"
-        ;;
-    none)
-        if (( PURGE )); then
-            # An earlier uninstall (or partial install) may have left
-            # data dirs + service users behind even though the unit
-            # files are gone. Honour --purge by dispatching to the
-            # systemd cleaner — it no-ops for anything that's already
-            # gone but reaps leftover /var/lib/ongrid* + users.
-            log_warn "no live install detected — running systemd --purge anyway to clean stragglers"
-            if [[ -x "$SCRIPT_DIR/systemd/uninstall-systemd.sh" ]]; then
-                purge_arg=(--purge)
-                (( ASSUME_YES )) && purge_arg+=(--yes)
-                exec bash "$SCRIPT_DIR/systemd/uninstall-systemd.sh" "${purge_arg[@]}"
-            fi
-            log_error "no install detected and no systemd cleaner available"
-            exit 0
-        fi
-        log_warn "no ongrid install detected (no systemd unit, no compose file)"
-        exit 0
-        ;;
-    *)
-        log_error "--mode must be one of: auto, compose, systemd"; exit 2 ;;
-esac
 
 if [[ $EUID -ne 0 ]]; then
     log_warn "not running as root; re-executing via sudo"
@@ -186,8 +125,12 @@ log_info "removing $INSTALL_DIR"
 rm -rf "$INSTALL_DIR"
 
 if [[ -n "$VERSION_FROM_FILE" ]]; then
-    log_info "removing ongrid:${VERSION_FROM_FILE} image"
-    docker image rm "ongrid:${VERSION_FROM_FILE}" 2>/dev/null || true
+    for image in \
+        "docker.cnb.cool/ongridio/ongrid:${VERSION_FROM_FILE}" \
+        "docker.cnb.cool/ongridio/ongrid/ongrid-web:${VERSION_FROM_FILE}"; do
+        log_info "removing $image"
+        docker image rm "$image" 2>/dev/null || true
+    done
 fi
 
 # Co-resident edge daemon — when the operator installed ongrid-edge on

@@ -9,6 +9,8 @@ func TestLoadDefaults(t *testing.T) {
 	// Clear all ONGRID_* vars so we test defaults deterministically.
 	vars := []string{
 		"ONGRID_HTTP_ADDR", "ONGRID_METRICS_ADDR", "ONGRID_TUNNEL_ADDR",
+		"ONGRID_K8S_EVENT_RETENTION", "ONGRID_K8S_EVENT_MAX_PER_CLUSTER",
+		"ONGRID_K8S_EVENT_CLEANUP_INTERVAL",
 		"ONGRID_DB_DIALECT", "ONGRID_DB_DSN", "ONGRID_DB_PATH",
 		"ONGRID_JWT_SECRET", "ONGRID_JWT_ACCESS_TTL", "ONGRID_JWT_REFRESH_TTL",
 		"ONGRID_OPENAI_API_KEY", "ONGRID_OPENAI_MODEL", "ONGRID_OPENAI_BASE_URL",
@@ -42,6 +44,15 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if cfg.TunnelAddr != ":40012" {
 		t.Errorf("TunnelAddr default = %q, want :40012", cfg.TunnelAddr)
+	}
+	if cfg.K8sEventRetention != 24*time.Hour {
+		t.Errorf("K8sEventRetention default = %v, want 24h", cfg.K8sEventRetention)
+	}
+	if cfg.K8sEventMaxPerCluster != 5000 {
+		t.Errorf("K8sEventMaxPerCluster default = %d, want 5000", cfg.K8sEventMaxPerCluster)
+	}
+	if cfg.K8sEventCleanupInterval != time.Hour {
+		t.Errorf("K8sEventCleanupInterval default = %v, want 1h", cfg.K8sEventCleanupInterval)
 	}
 	if cfg.DB.Dialect != "mysql" {
 		t.Errorf("DB.Dialect default = %q, want mysql", cfg.DB.Dialect)
@@ -180,6 +191,26 @@ func TestLoadEdgeCollectorOverrides(t *testing.T) {
 	}
 	if cfg.Edge.CollectorInterval != 30*time.Second {
 		t.Errorf("Edge.CollectorInterval = %v", cfg.Edge.CollectorInterval)
+	}
+}
+
+func TestLoadK8sEventRetentionOverrides(t *testing.T) {
+	t.Setenv("ONGRID_K8S_EVENT_RETENTION", "48h")
+	t.Setenv("ONGRID_K8S_EVENT_MAX_PER_CLUSTER", "10000")
+	t.Setenv("ONGRID_K8S_EVENT_CLEANUP_INTERVAL", "30m")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.K8sEventRetention != 48*time.Hour {
+		t.Errorf("K8sEventRetention = %v, want 48h", cfg.K8sEventRetention)
+	}
+	if cfg.K8sEventMaxPerCluster != 10000 {
+		t.Errorf("K8sEventMaxPerCluster = %d, want 10000", cfg.K8sEventMaxPerCluster)
+	}
+	if cfg.K8sEventCleanupInterval != 30*time.Minute {
+		t.Errorf("K8sEventCleanupInterval = %v, want 30m", cfg.K8sEventCleanupInterval)
 	}
 }
 

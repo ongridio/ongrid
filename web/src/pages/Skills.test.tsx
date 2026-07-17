@@ -45,6 +45,9 @@ describe('SkillsPage', () => {
       http.get('/api/v1/skills', () =>
         HttpResponse.json({ items: skills, total: skills.length }),
       ),
+      http.get('/api/v1/flow-tools', () =>
+        HttpResponse.json({ items: [], total: 0 }),
+      ),
     );
   });
 

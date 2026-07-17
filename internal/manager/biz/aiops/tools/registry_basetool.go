@@ -118,6 +118,17 @@ func (r *Registry) BuildBaseTools() *ToolBag {
 		out = append(out, NewReadSourceTool(cb, r.log))
 		out = append(out, NewGrepSourceTool(cb, r.log))
 	}
+	// 5d: Kubernetes manager DB snapshot. This is deliberately DB-backed
+	// so homepage questions such as "当前有多少 Pod" do not fan out to the
+	// live Kubernetes API.
+	if r.k8sSnapshot != nil {
+		out = append(out, NewQueryK8sSnapshotTool(r.k8sSnapshot, r.log))
+		if r.caller != nil {
+			out = append(out, NewDescribeK8sResourceTool(r.caller, r.k8sSnapshot, r.log))
+			out = append(out, NewQueryK8sLogsTool(r.caller, r.k8sSnapshot, r.log))
+			out = append(out, NewExecuteK8sActionTool(r.caller, r.k8sSnapshot, r.log))
+		}
+	}
 	// 6-7: query_devices + get_topology gated on edges (matches
 	// NewRegistry — both need the edge usecase or device usecase).
 	if r.edges != nil || r.devices != nil {

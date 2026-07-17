@@ -46,6 +46,20 @@ type LogQuerier interface {
 	QueryRange(ctx context.Context, opts logquery.QueryRangeOptions) (*logquery.QueryRangeResult, error)
 }
 
+// DeviceIdentity is the alert package's narrow projection of device data.
+// Keeping this local avoids coupling the alert bounded context to device
+// persistence models.
+type DeviceIdentity struct {
+	Name      string
+	Hostname  string
+	IPAddress string
+}
+
+// DeviceIdentityResolver maps an incident device_id to human-readable
+// notification fields. Resolution is best-effort; incidents and dedupe keys
+// continue to use the stable numeric ID.
+type DeviceIdentityResolver func(ctx context.Context, deviceID uint64) (DeviceIdentity, error)
+
 // PipelineEvaluatorOpts wires the evaluator. EdgeLister keeps the
 // device_last_seen_seconds_ago gauge fresh; PromQuerier drives every
 // metric_* rule kind. Both are optional; when nil the corresponding
@@ -68,6 +82,8 @@ type PipelineEvaluatorOpts struct {
 	// (the cache still loads the rows so the UI can list them).
 	LogQuerier LogQuerier
 
+	DeviceIdentityResolver DeviceIdentityResolver
+
 	Log *slog.Logger
 	Now func() time.Time
 }
@@ -89,9 +105,10 @@ type PipelineEvaluator struct {
 	cooldown  time.Duration
 	interval  time.Duration
 
-	edges EdgeLister
-	prom  PromQuerier
-	logq  LogQuerier
+	edges          EdgeLister
+	prom           PromQuerier
+	logq           LogQuerier
+	deviceIdentity DeviceIdentityResolver
 
 	// gaugeSnapshot is the previous tick's (device_id, device_name) set
 	// used by refreshDeviceStalenessGauge to garbage-collect series for
@@ -128,19 +145,20 @@ func NewPipelineEvaluator(opts PipelineEvaluatorOpts) *PipelineEvaluator {
 		opts.Now = func() time.Time { return time.Now().UTC() }
 	}
 	return &PipelineEvaluator{
-		uc:        opts.Usecase,
-		rules:     opts.Rules,
-		notifier:  opts.Notifier,
-		resolver:  opts.Resolver,
-		inhibitor: opts.Inhibitor,
-		channels:  append([]string(nil), opts.DefaultChannels...),
-		cooldown: opts.Cooldown,
-		interval: opts.Interval,
-		edges:    opts.EdgeLister,
-		prom:     opts.PromQuerier,
-		logq:     opts.LogQuerier,
-		log:      opts.Log,
-		now:      opts.Now,
+		uc:             opts.Usecase,
+		rules:          opts.Rules,
+		notifier:       opts.Notifier,
+		resolver:       opts.Resolver,
+		inhibitor:      opts.Inhibitor,
+		channels:       append([]string(nil), opts.DefaultChannels...),
+		cooldown:       opts.Cooldown,
+		interval:       opts.Interval,
+		edges:          opts.EdgeLister,
+		prom:           opts.PromQuerier,
+		logq:           opts.LogQuerier,
+		deviceIdentity: opts.DeviceIdentityResolver,
+		log:            opts.Log,
+		now:            opts.Now,
 	}
 }
 
@@ -395,7 +413,24 @@ func (e *PipelineEvaluator) notify(ctx context.Context, res *FiringResult, summa
 		},
 	}
 	if res.Incident.DeviceID != nil {
-		msg.Labels["device_id"] = fmt.Sprintf("%d", *res.Incident.DeviceID)
+		deviceID := *res.Incident.DeviceID
+		msg.Labels["device_id"] = fmt.Sprintf("%d", deviceID)
+		if e.deviceIdentity != nil {
+			identity, err := e.deviceIdentity(ctx, deviceID)
+			if err != nil {
+				e.log.Warn("alert: resolve device identity for notification failed",
+					slog.Uint64("device_id", deviceID), slog.Any("err", err))
+			} else if display := deviceDisplay(identity); display != "" {
+				msg.Subject = strings.ReplaceAll(msg.Subject,
+					fmt.Sprintf("device_id=%d", deviceID), "device="+display)
+				if identity.Hostname != "" {
+					msg.Labels["device_hostname"] = identity.Hostname
+				}
+				if identity.IPAddress != "" {
+					msg.Labels["device_ip"] = identity.IPAddress
+				}
+			}
+		}
 	}
 	if msg.Severity == "" {
 		msg.Severity = notify.SeverityWarning
@@ -413,6 +448,22 @@ func (e *PipelineEvaluator) notify(ctx context.Context, res *FiringResult, summa
 	// usecase.go:51) — fires only on the isNew transition so reopens /
 	// follow-up notifies don't re-trigger. Pipeline doesn't need its
 	// own hook.
+}
+
+func deviceDisplay(identity DeviceIdentity) string {
+	host := strings.TrimSpace(identity.Hostname)
+	if host == "" {
+		host = strings.TrimSpace(identity.Name)
+	}
+	ip := strings.TrimSpace(identity.IPAddress)
+	switch {
+	case host != "" && ip != "":
+		return fmt.Sprintf("%s (%s)", host, ip)
+	case host != "":
+		return host
+	default:
+		return ip
+	}
 }
 
 // nonIdentityLabels are provenance/collector labels that must NOT split an
@@ -501,4 +552,3 @@ func compareFloat(v float64, op string, threshold float64) bool {
 	}
 	return false
 }
-

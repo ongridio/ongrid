@@ -172,6 +172,29 @@ func TestReviewGate_WriteClassApprove(t *testing.T) {
 	}
 }
 
+func TestReviewGate_ProposalSessionIDPrefersContext(t *testing.T) {
+	inner := &fakeTool{name: "host_restart_service", class: "write", result: `{"restarted":true}`}
+	spawner := &fakeReviewSpawner{
+		plannedRes: &ReviewSpawnResult{
+			TaskID: "agent-deadbeef",
+			Result: "Decision: approve\n\nchecked",
+		},
+	}
+	sink := &fakeProposalSink{}
+	wrapped := WithReviewGate(inner, spawner, ReviewGateConfig{Sink: sink})
+	ctx := basetool.WithSessionID(context.Background(), "chat-session-1")
+
+	if _, err := wrapped.InvokableRun(ctx, `{}`, basetool.WithUserID(42), basetool.WithTenant("tenant-42")); err != nil {
+		t.Fatalf("approved call should not error: %v", err)
+	}
+	if len(sink.inserts) != 1 {
+		t.Fatalf("expected one proposal insert, got %d", len(sink.inserts))
+	}
+	if got := sink.inserts[0].SessionID; got != "chat-session-1" {
+		t.Fatalf("SessionID = %q, want chat-session-1", got)
+	}
+}
+
 func TestReviewGate_ApplyConfigChangeAlertRuleCreateUsesDeterministicApproval(t *testing.T) {
 	inner := &fakeTool{name: "apply_config_change", class: "write", result: `{"status":"applied"}`}
 	spawner := &fakeReviewSpawner{plannedErr: errors.New("reviewer should not be spawned")}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -31,9 +32,11 @@ node_memory_MemAvailable_bytes 4.294967296e+09
 # HELP node_filesystem_size_bytes Filesystem size in bytes.
 # TYPE node_filesystem_size_bytes gauge
 node_filesystem_size_bytes{device="/dev/sda1",fstype="ext4",mountpoint="/"} 1.0e+11
+node_filesystem_size_bytes{device="/dev/sda1",fstype="ext4",mountpoint="/var/lib/runtime"} 1.0e+11
 # HELP node_filesystem_avail_bytes Filesystem space available to non-root users in bytes.
 # TYPE node_filesystem_avail_bytes gauge
 node_filesystem_avail_bytes{device="/dev/sda1",fstype="ext4",mountpoint="/"} 5.0e+10
+node_filesystem_avail_bytes{device="/dev/sda1",fstype="ext4",mountpoint="/var/lib/runtime"} 5.0e+10
 # HELP node_network_receive_bytes_total Network device statistic receive_bytes.
 # TYPE node_network_receive_bytes_total counter
 node_network_receive_bytes_total{device="eth0"} 1.234e+09
@@ -120,12 +123,13 @@ func TestParseSpec_Defaults(t *testing.T) {
 // TestParseSpec_Overrides: each spec key flows through.
 func TestParseSpec_Overrides(t *testing.T) {
 	got, err := parseSpec(map[string]interface{}{
-		"target_url":      "http://exporter.local:9101/m",
-		"scrape_interval": "30s",
-		"scrape_timeout":  "8s",
-		"tls_insecure":    true,
-		"bearer_token":    "tok-123",
-		"extra_labels":    map[string]interface{}{"env": "prod"},
+		"target_url":                   "http://exporter.local:9101/m",
+		"scrape_interval":              "30s",
+		"scrape_timeout":               "8s",
+		"tls_insecure":                 true,
+		"bearer_token":                 "tok-123",
+		"extra_labels":                 map[string]interface{}{"env": "prod"},
+		"dedupe_filesystems_by_device": true,
 	})
 	if err != nil {
 		t.Fatalf("parseSpec: %v", err)
@@ -148,8 +152,64 @@ func TestParseSpec_Overrides(t *testing.T) {
 	if got.ExtraLabels["env"] != "prod" {
 		t.Errorf("ExtraLabels missing env=prod: %v", got.ExtraLabels)
 	}
+	if !got.DedupeFilesystemsByDevice {
+		t.Errorf("DedupeFilesystemsByDevice should be true")
+	}
 	if got.SourceLabel != "" {
 		t.Errorf("SourceLabel = %q; want empty unless spec.source_label is set", got.SourceLabel)
+	}
+}
+
+func TestScrapeOnceDedupesFilesystemSamplesByDevice(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(nodeExporterFixture))
+	}))
+	defer srv.Close()
+
+	spec, err := parseSpec(map[string]interface{}{
+		"target_url":                   srv.URL,
+		"dedupe_filesystems_by_device": true,
+	})
+	if err != nil {
+		t.Fatalf("parseSpec: %v", err)
+	}
+	samples, _, err := scrapeOnce(context.Background(), spec, spec.URLs[0])
+	if err != nil {
+		t.Fatalf("scrapeOnce: %v", err)
+	}
+
+	filesystemSamples := 0
+	for _, sample := range samples {
+		if !strings.HasPrefix(sample.Name, "node_filesystem_") {
+			continue
+		}
+		filesystemSamples++
+		if sample.Labels["mountpoint"] != "/" {
+			t.Fatalf("filesystem sample kept mountpoint %q; want root", sample.Labels["mountpoint"])
+		}
+	}
+	if filesystemSamples != 2 {
+		t.Fatalf("filesystem samples = %d; want 2 metric families for one device", filesystemSamples)
+	}
+}
+
+func TestDedupeFilesystemSamplesUsesShortestMountpointWithoutRoot(t *testing.T) {
+	samples := []tunnel.PromSample{
+		{Name: "node_filesystem_size_bytes", Labels: map[string]string{"device": "/dev/vdb1", "mountpoint": "/var/lib/runtime"}},
+		{Name: "node_filesystem_size_bytes", Labels: map[string]string{"device": "/dev/vdb1", "mountpoint": "/data"}},
+		{Name: "node_filesystem_size_bytes", Labels: map[string]string{"device": "tmpfs", "mountpoint": "/tmp"}},
+		{Name: "node_filesystem_size_bytes", Labels: map[string]string{"device": "tmpfs", "mountpoint": "/run/secrets"}},
+		{Name: "other_metric", Labels: map[string]string{"device": "/dev/vdb1"}},
+	}
+	got := dedupeFilesystemSamplesByDevice(samples)
+	if len(got) != 4 {
+		t.Fatalf("samples = %d; want 4", len(got))
+	}
+	if got[0].Labels["mountpoint"] != "/data" {
+		t.Fatalf("mountpoint = %q; want /data", got[0].Labels["mountpoint"])
+	}
+	if got[1].Labels["mountpoint"] != "/tmp" || got[2].Labels["mountpoint"] != "/run/secrets" {
+		t.Fatalf("virtual filesystem mountpoints were not preserved: %#v", got)
 	}
 }
 
@@ -200,13 +260,13 @@ func TestScrapeOnce_HappyPath(t *testing.T) {
 		t.Errorf("source label = %q; want empty (default)", source)
 	}
 	wantNames := map[string]bool{
-		"node_cpu_seconds_total":              false,
-		"node_memory_MemTotal_bytes":          false,
-		"node_memory_MemAvailable_bytes":      false,
-		"node_filesystem_size_bytes":          false,
-		"node_filesystem_avail_bytes":         false,
-		"node_network_receive_bytes_total":    false,
-		"node_network_transmit_bytes_total":   false,
+		"node_cpu_seconds_total":            false,
+		"node_memory_MemTotal_bytes":        false,
+		"node_memory_MemAvailable_bytes":    false,
+		"node_filesystem_size_bytes":        false,
+		"node_filesystem_avail_bytes":       false,
+		"node_network_receive_bytes_total":  false,
+		"node_network_transmit_bytes_total": false,
 	}
 	for _, s := range samples {
 		if _, ok := wantNames[s.Name]; ok {

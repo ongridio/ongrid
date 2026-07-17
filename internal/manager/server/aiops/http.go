@@ -51,6 +51,7 @@ type AIOpsService interface {
 	PostMessageStreamWithOpts(ctx context.Context, caller svc.Caller, sessionID string, content string, emit agent.Emit, opts agent.RunOptions) (*agent.Reply, error)
 	StopSession(ctx context.Context, caller svc.Caller, sessionID string) (bool, error)
 	UsageToday(ctx context.Context) (*biz.DailyUsage, error)
+	ListMutatingProposals(ctx context.Context, caller svc.Caller, f biz.MutatingProposalFilter) ([]*model.MutatingProposal, int64, error)
 }
 
 // MentionSearcher is the narrow biz contract for @-mention search. Optional —
@@ -137,6 +138,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Delete("/v1/chat/sessions/{id}", h.closeSession)
 	r.Patch("/v1/chat/sessions/{id}", h.renameSession)
 	r.Get("/v1/usage/today", h.usageToday)
+	r.Get("/v1/aiops/mutating-proposals", h.listMutatingProposals)
 	r.Get("/v1/aiops/mentions/search", h.searchMentions)
 	r.Get("/v1/aiops/models", h.listModels)
 	r.Post("/v1/aiops/query-translate", h.queryTranslate)
@@ -272,6 +274,32 @@ type usageTodayDTO struct {
 	CompletionTokens int64  `json:"completion_tokens"`
 	TotalTokens      int64  `json:"total_tokens"`
 	Requests         int64  `json:"requests"`
+}
+
+type mutatingProposalDTO struct {
+	ID             string     `json:"id"`
+	SessionID      string     `json:"session_id"`
+	MessageID      *string    `json:"message_id,omitempty"`
+	ToolCallID     *string    `json:"tool_call_id,omitempty"`
+	ToolName       string     `json:"tool_name"`
+	ArgsJSON       string     `json:"args_json"`
+	ToolClass      string     `json:"tool_class"`
+	ReviewerAgent  string     `json:"reviewer_agent"`
+	ReviewerTaskID string     `json:"reviewer_task_id"`
+	Decision       string     `json:"decision"`
+	DecisionReason *string    `json:"decision_reason,omitempty"`
+	OperatorUserID uint64     `json:"operator_user_id"`
+	ApproverUserID *uint64    `json:"approver_user_id,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	DecidedAt      *time.Time `json:"decided_at,omitempty"`
+	ExecutedAt     *time.Time `json:"executed_at,omitempty"`
+}
+
+type listMutatingProposalsResp struct {
+	Items  []mutatingProposalDTO `json:"items"`
+	Total  int64                 `json:"total"`
+	Limit  int                   `json:"limit"`
+	Offset int                   `json:"offset"`
 }
 
 // --------- handlers ---------
@@ -704,6 +732,51 @@ func (h *Handler) usageToday(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// @Summary List AI mutating proposal audit rows
+// @Router /api/v1/aiops/mutating-proposals [get]
+// @Success 200 {object} listMutatingProposalsResp
+//
+// listMutatingProposals backs GET /v1/aiops/mutating-proposals. It is the
+// read-only audit surface for ReviewGate proposals; callers can filter by
+// tool_name (for example execute_k8s_action) and reviewer decision.
+func (h *Handler) listMutatingProposals(w http.ResponseWriter, r *http.Request) {
+	caller, ok := callerFromCtx(r.Context())
+	if !ok {
+		writeErr(w, errs.ErrUnauthorized)
+		return
+	}
+	q := r.URL.Query()
+	limit := parseOptionalInt(q.Get("limit"))
+	offset := parseOptionalInt(q.Get("offset"))
+	filter := biz.MutatingProposalFilter{
+		ToolName: strings.TrimSpace(q.Get("tool_name")),
+		Decision: strings.TrimSpace(q.Get("decision")),
+		Limit:    limit,
+		Offset:   offset,
+	}
+	items, total, err := h.svc.ListMutatingProposals(r.Context(), caller, filter)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	out := make([]mutatingProposalDTO, 0, len(items))
+	for _, item := range items {
+		out = append(out, toMutatingProposalDTO(item))
+	}
+	writeJSON(w, http.StatusOK, listMutatingProposalsResp{
+		Items:  out,
+		Total:  total,
+		Limit:  limit,
+		Offset: offset,
+	})
+}
+
 // searchMentions backs GET /v1/aiops/mentions/search?q=&type=&limit=
 // — used by the SPA chat input's @-popover. Auth-gated by the caller-
 // in-context check so anonymous probes get 401, matching the rest of
@@ -865,6 +938,30 @@ func toPostMessageResp(sessionID string, reply *agent.Reply) postMessageResp {
 	}
 }
 
+func toMutatingProposalDTO(p *model.MutatingProposal) mutatingProposalDTO {
+	if p == nil {
+		return mutatingProposalDTO{}
+	}
+	return mutatingProposalDTO{
+		ID:             p.ID,
+		SessionID:      p.SessionID,
+		MessageID:      p.MessageID,
+		ToolCallID:     p.ToolCallID,
+		ToolName:       p.ToolName,
+		ArgsJSON:       p.ArgsJSON,
+		ToolClass:      p.ToolClass,
+		ReviewerAgent:  p.ReviewerAgent,
+		ReviewerTaskID: p.ReviewerTaskID,
+		Decision:       p.Decision,
+		DecisionReason: p.DecisionReason,
+		OperatorUserID: p.OperatorUserID,
+		ApproverUserID: p.ApproverUserID,
+		CreatedAt:      p.CreatedAt,
+		DecidedAt:      p.DecidedAt,
+		ExecutedAt:     p.ExecutedAt,
+	}
+}
+
 // --------- helpers ---------
 
 func callerFromCtx(ctx context.Context) (svc.Caller, bool) {
@@ -881,6 +978,17 @@ func parseID(r *http.Request) (string, error) {
 		return "", errors.Join(errs.ErrInvalid, errors.New("invalid session id"))
 	}
 	return raw, nil
+}
+
+func parseOptionalInt(raw string) int {
+	if raw == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 func writeJSON(w http.ResponseWriter, code int, body any) {

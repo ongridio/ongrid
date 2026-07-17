@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -177,6 +178,63 @@ func TestPipelinePromQueryErrorIsSafe(t *testing.T) {
 	}
 }
 
+func TestPipelineNotification_ResolvesDeviceIDToHostnameAndIP(t *testing.T) {
+	repo := newFakeRepo()
+	notifier := &fakeNotifier{}
+	prom := &fakePromQuerier{result: vectorEdgeStaleness(map[string]string{
+		"2|edge-197": "91",
+	})}
+	rules := NewStaticRulesProvider(WithMetricRawRules([]MetricRawRule{
+		{ID: 201, RuleKey: "cpu_high_80", Name: "CPU High", Severity: "warning",
+			ScopeType: model.RuleScopeHost, Expr: "device_cpu_usage_percent > 80"},
+	}))
+	eval := newPipelineEvaluator(t, repo, notifier, rules, PipelineEvaluatorOpts{
+		PromQuerier: prom,
+		DeviceIdentityResolver: func(_ context.Context, deviceID uint64) (DeviceIdentity, error) {
+			if deviceID != 2 {
+				t.Fatalf("deviceID = %d, want 2", deviceID)
+			}
+			return DeviceIdentity{Hostname: "VM-4-8-ubuntu", IPAddress: "10.2.4.8"}, nil
+		},
+	})
+
+	eval.EvaluateOnce(context.Background())
+
+	if len(notifier.msgs) != 1 {
+		t.Fatalf("notifications = %d, want 1", len(notifier.msgs))
+	}
+	msg := notifier.msgs[0]
+	if strings.Contains(msg.Subject, "device_id=2") {
+		t.Fatalf("subject still exposes raw device id: %q", msg.Subject)
+	}
+	if !strings.Contains(msg.Subject, "device=VM-4-8-ubuntu (10.2.4.8)") {
+		t.Fatalf("subject = %q, want resolved device identity", msg.Subject)
+	}
+	if msg.Labels["device_id"] != "2" || msg.Labels["device_hostname"] != "VM-4-8-ubuntu" || msg.Labels["device_ip"] != "10.2.4.8" {
+		t.Fatalf("labels = %#v", msg.Labels)
+	}
+}
+
+func TestDeviceDisplay_UsesAvailableIdentityFields(t *testing.T) {
+	cases := []struct {
+		name     string
+		identity DeviceIdentity
+		want     string
+	}{
+		{name: "hostname and ip", identity: DeviceIdentity{Hostname: "host-a", IPAddress: "10.0.0.1"}, want: "host-a (10.0.0.1)"},
+		{name: "name fallback", identity: DeviceIdentity{Name: "gateway-a"}, want: "gateway-a"},
+		{name: "ip only", identity: DeviceIdentity{IPAddress: "10.0.0.2"}, want: "10.0.0.2"},
+		{name: "empty", identity: DeviceIdentity{}, want: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := deviceDisplay(tc.identity); got != tc.want {
+				t.Fatalf("deviceDisplay() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestPipelineEdgeOfflineMultipleMetricRawRules confirms two metric_raw
 // rules with different thresholds against edge_last_seen_seconds_ago
 // each create their own incident — the same multi-rule fan-out the
@@ -233,7 +291,7 @@ func vectorEdgeStaleness(samples map[string]string) *promquery.InstantResult {
 		entries = append(entries, vEntry{
 			Metric: map[string]string{
 				"__name__":  "edge_last_seen_seconds_ago",
-				"device_id":   edgeID,
+				"device_id": edgeID,
 				"edge_name": edgeName,
 			},
 			Value: []json.RawMessage{ts, val},

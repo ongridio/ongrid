@@ -31,6 +31,20 @@ type Config struct {
 	// push logs/traces).
 	PublicURL string
 
+	// K8sEventRetention caps how long manager keeps Kubernetes Events in its
+	// local snapshot store. The event's Kubernetes timestamp is used before
+	// last_seen_at so old Events do not live forever just because the API still
+	// returns them.
+	// env: ONGRID_K8S_EVENT_RETENTION; default 24h.
+	K8sEventRetention time.Duration
+	// K8sEventMaxPerCluster caps retained Kubernetes Events per cluster.
+	// env: ONGRID_K8S_EVENT_MAX_PER_CLUSTER; default 5000.
+	K8sEventMaxPerCluster int
+	// K8sEventCleanupInterval controls how often the manager applies the two
+	// Kubernetes Event retention guards.
+	// env: ONGRID_K8S_EVENT_CLEANUP_INTERVAL; default 1h.
+	K8sEventCleanupInterval time.Duration
+
 	DB             DBConfig
 	JWT            JWTConfig
 	OpenAI         OpenAIConfig
@@ -359,12 +373,15 @@ type EdgeConfig struct {
 // for future validation (e.g. required fields).
 func Load() (*Config, error) {
 	c := &Config{
-		HTTPAddr:    getEnv("ONGRID_HTTP_ADDR", ":8080"),
-		MetricsAddr: getEnv("ONGRID_METRICS_ADDR", ":9100"),
-		TunnelAddr:  getEnv("ONGRID_TUNNEL_ADDR", ":40012"),
-		PublicURL:   getEnv("ONGRID_PUBLIC_URL", ""),
-		Logs:        LogsConfig{URL: getEnv("ONGRID_LOG_QUERY_URL", "http://loki:3100")},
-		Traces:      TracesConfig{URL: getEnv("ONGRID_TRACE_QUERY_URL", "http://tempo:3200")},
+		HTTPAddr:                getEnv("ONGRID_HTTP_ADDR", ":8080"),
+		MetricsAddr:             getEnv("ONGRID_METRICS_ADDR", ":9100"),
+		TunnelAddr:              getEnv("ONGRID_TUNNEL_ADDR", ":40012"),
+		PublicURL:               getEnv("ONGRID_PUBLIC_URL", ""),
+		K8sEventRetention:       getEnvDuration("ONGRID_K8S_EVENT_RETENTION", 24*time.Hour),
+		K8sEventMaxPerCluster:   getEnvInt("ONGRID_K8S_EVENT_MAX_PER_CLUSTER", 5000),
+		K8sEventCleanupInterval: getEnvDuration("ONGRID_K8S_EVENT_CLEANUP_INTERVAL", time.Hour),
+		Logs:                    LogsConfig{URL: getEnv("ONGRID_LOG_QUERY_URL", "http://loki:3100")},
+		Traces:                  TracesConfig{URL: getEnv("ONGRID_TRACE_QUERY_URL", "http://tempo:3200")},
 	}
 
 	c.DB.Dialect = getEnv("ONGRID_DB_DIALECT", "mysql")

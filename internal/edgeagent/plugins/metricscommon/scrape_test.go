@@ -2,10 +2,15 @@ package metricscommon
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
 
 func TestScrapeAppliesLabelDropAndSampleLimit(t *testing.T) {
@@ -47,7 +52,7 @@ demo_total{query="select 1",service="api"} 7
 	}
 }
 
-func TestScrapeRejectsSampleLimitOverflow(t *testing.T) {
+func TestScrapeReturnsBoundedSamplesWithSampleLimitError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		_, _ = w.Write([]byte(`# HELP demo_total Demo counter.
@@ -58,7 +63,7 @@ demo_total{series="b"} 2
 	}))
 	t.Cleanup(srv.Close)
 
-	_, err := Scrape(context.Background(), Target{
+	samples, err := Scrape(context.Background(), Target{
 		ID:          "api",
 		URL:         srv.URL + "/metrics",
 		Timeout:     time.Second,
@@ -67,6 +72,59 @@ demo_total{series="b"} 2
 	})
 	if err == nil {
 		t.Fatal("Scrape() error = nil, want sample limit error")
+	}
+	var limitErr *SampleLimitError
+	if !errors.As(err, &limitErr) {
+		t.Fatalf("Scrape() error = %T %v, want *SampleLimitError", err, err)
+	}
+	if limitErr.Observed != 2 || limitErr.Limit != 1 {
+		t.Fatalf("SampleLimitError = %#v, want observed=2 limit=1", limitErr)
+	}
+	if len(samples) != 1 || samples[0].Labels["series"] != "a" {
+		t.Fatalf("samples = %#v, want first bounded sample", samples)
+	}
+}
+
+func TestScrapeIncrementalBoundsStreamedChunksAndStopsAtLimit(t *testing.T) {
+	var body strings.Builder
+	body.WriteString("# TYPE demo_value gauge\n")
+	for i := 0; i < 2501; i++ {
+		value := strconv.Itoa(i)
+		body.WriteString("demo_value{series=\"")
+		body.WriteString(value)
+		body.WriteString("\"} ")
+		body.WriteString(value)
+		body.WriteByte('\n')
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		if _, err := w.Write([]byte(body.String())); err != nil {
+			return
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	var chunks, accepted int
+	stats, err := ScrapeIncremental(context.Background(), Target{
+		URL:         srv.URL + "/metrics",
+		Timeout:     time.Second,
+		SampleLimit: 2200,
+	}, func(samples []tunnel.PromSample) error {
+		chunks++
+		accepted += len(samples)
+		if len(samples) > streamSampleChunkSize {
+			t.Fatalf("chunk samples = %d, exceeds %d", len(samples), streamSampleChunkSize)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("ScrapeIncremental() error = %v", err)
+	}
+	if chunks != 3 {
+		t.Fatalf("chunks = %d, want 3", chunks)
+	}
+	if stats.Observed != 2201 || stats.Accepted != 2200 || !stats.LimitExceeded || accepted != 2200 {
+		t.Fatalf("stats = %#v accepted=%d, want observed=2201 accepted=2200 limit exceeded", stats, accepted)
 	}
 }
 

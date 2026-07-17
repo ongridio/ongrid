@@ -1,0 +1,151 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "ongrid-edge.fullname" . }}-node
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ongrid-edge.labels" . | nindent 4 }}
+    app.kubernetes.io/component: node
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "ongrid-edge.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: node
+  template:
+    metadata:
+      labels:
+        {{- include "ongrid-edge.labels" . | nindent 8 }}
+        app.kubernetes.io/component: node
+    spec:
+      serviceAccountName: {{ include "ongrid-edge.nodeServiceAccount" . }}
+      automountServiceAccountToken: true
+      {{- with .Values.image.architecture }}
+      nodeSelector:
+        kubernetes.io/arch: {{ . | quote }}
+      {{- end }}
+      hostPID: true
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      tolerations:
+        {{- toYaml .Values.node.tolerations | nindent 8 }}
+      initContainers:
+        - name: install-host-runtime
+          image: {{ include "ongrid-edge.image" . | quote }}
+          imagePullPolicy: {{ default "IfNotPresent" .Values.image.pullPolicy }}
+          args:
+            - install-k8s-host-runtime
+            - /host/root
+            - {{ .Values.podSecurity.runAsUser | quote }}
+            - {{ .Values.podSecurity.runAsGroup | quote }}
+          resources:
+            requests:
+              cpu: 5m
+              memory: 32Mi
+            limits:
+              cpu: 50m
+              memory: 128Mi
+          securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+            runAsGroup: 0
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+              add: ["CHOWN", "DAC_OVERRIDE", "FOWNER"]
+          volumeMounts:
+            - name: host-root
+              mountPath: /host/root
+      containers:
+        - name: edge-node
+          image: {{ include "ongrid-edge.image" . | quote }}
+          imagePullPolicy: {{ default "IfNotPresent" .Values.image.pullPolicy }}
+          workingDir: /
+          args:
+            - enter-k8s-host
+            - /host/root
+            - {{ .Values.podSecurity.runAsUser | quote }}
+            - {{ .Values.podSecurity.runAsGroup | quote }}
+          env:
+            - name: ONGRID_EDGE_MODE
+              value: k8s-node
+            - name: ONGRID_K8S_ROLE
+              value: node
+            - name: ONGRID_K8S_MODE
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-config
+                  key: mode
+            - name: ONGRID_K8S_CLUSTER_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-node-bootstrap
+                  key: cluster-id
+            - name: ONGRID_K8S_BOOTSTRAP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-node-bootstrap
+                  key: bootstrap-token
+            - name: ONGRID_K8S_CREDENTIAL_FILE
+              value: {{ printf "/var/lib/ongrid-edge/k8s-state/credentials/ongrid-edge-cluster-%v.json" .Values.enrollment.clusterID | quote }}
+            - name: ONGRID_K8S_SERVICE_ACCOUNT_DIR
+              value: /var/lib/ongrid-edge/k8s-runtime/serviceaccount
+            - name: ONGRID_EDGE_PLUGIN_BIN_DIR
+              value: /var/lib/ongrid-edge/k8s-runtime/plugins
+            - name: ONGRID_EDGE_PLUGIN_WORK_DIR
+              value: /var/lib/ongrid-edge/k8s-state/plugins
+            - name: ONGRID_EDGE_UPGRADE_STAGE_DIR
+              value: /var/lib/ongrid-edge/k8s-state/.upgrade
+            - name: ONGRID_MANAGER_PUBLIC_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-config
+                  key: manager-public-url
+            - name: ONGRID_EDGE_CLOUD_ADDR
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-config
+                  key: manager-tunnel-addr
+            - name: ONGRID_K8S_ENROLL_TLS_INSECURE
+              value: {{ .Values.manager.tlsInsecure | quote }}
+            - name: ONGRID_K8S_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: ONGRID_K8S_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: ONGRID_K8S_POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: ONGRID_EDGE_COLLECTOR_MODE
+              value: {{ .Values.node.collectorMode | quote }}
+            - name: HOST_PROC
+              value: /proc
+            - name: HOST_SYS
+              value: /sys
+            - name: HOST_ROOT
+              value: /
+          resources:
+            {{- toYaml .Values.node.resources | nindent 12 }}
+          securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+            runAsGroup: 0
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+              add: ["DAC_READ_SEARCH", "NET_ADMIN", "SETGID", "SETPCAP", "SETUID", "SYS_CHROOT"]
+          volumeMounts:
+            - name: host-root
+              mountPath: /host/root
+              mountPropagation: HostToContainer
+      volumes:
+        - name: host-root
+          hostPath:
+            path: /
+            type: Directory

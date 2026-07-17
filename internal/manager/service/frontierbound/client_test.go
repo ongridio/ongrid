@@ -356,12 +356,16 @@ func TestClient_Close(t *testing.T) {
 func TestClient_BindAndUnbindTransport(t *testing.T) {
 	c := newWithService(newFakeService(), slog.Default())
 	c.bindEdgeTransport(1001, 2)
+	c.setKubernetesController(2, true)
 
 	if got := c.canonicalizeEdgeID(1001); got != 2 {
 		t.Fatalf("canonicalizeEdgeID(1001) = %d, want 2", got)
 	}
 	if got := c.resolveTransportID(2); got != 1001 {
 		t.Fatalf("resolveTransportID(2) = %d, want 1001", got)
+	}
+	if !c.isKubernetesController(2) {
+		t.Fatal("edge 2 should be tracked as a Kubernetes controller")
 	}
 
 	c.unbindTransport(1001)
@@ -374,6 +378,42 @@ func TestClient_BindAndUnbindTransport(t *testing.T) {
 	}
 	if got := c.resolveTransportID(2); got != 2 {
 		t.Fatalf("resolveTransportID after unbind = %d, want 2", got)
+	}
+	if c.isKubernetesController(2) {
+		t.Fatal("unbound edge should not remain tracked as a Kubernetes controller")
+	}
+	if _, known := c.kubernetesControllerState(2); known {
+		t.Fatal("unbound edge controller state should be unknown")
+	}
+}
+
+func TestClient_StaleOfflineDoesNotRemoveReplacementBinding(t *testing.T) {
+	c := newWithService(newFakeService(), slog.Default())
+	c.bindEdgeTransportAt(1001, 2, "10.0.0.1:10001")
+	c.bindEdgeTransportAt(1001, 2, "10.0.0.1:10002")
+
+	if c.unbindEdgeTransport(1001, 2, "10.0.0.1:10001") {
+		t.Fatal("stale offline event removed the replacement binding")
+	}
+	if got := c.canonicalizeEdgeID(1001); got != 2 {
+		t.Fatalf("canonicalizeEdgeID after stale offline = %d, want 2", got)
+	}
+
+	if !c.unbindEdgeTransport(1001, 2, "10.0.0.1:10002") {
+		t.Fatal("current offline event did not remove the active binding")
+	}
+	if got := c.canonicalizeEdgeID(1001); got != 0 {
+		t.Fatalf("canonicalizeEdgeID after current offline = %d, want 0", got)
+	}
+}
+
+func TestClient_KubernetesControllerStateTracksKnownNonController(t *testing.T) {
+	c := newWithService(newFakeService(), slog.Default())
+	c.setKubernetesController(2, false)
+
+	isController, known := c.kubernetesControllerState(2)
+	if !known || isController {
+		t.Fatalf("controller state = (%v, %v), want (false, true)", isController, known)
 	}
 }
 

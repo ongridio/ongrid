@@ -8,20 +8,11 @@
 - Docker >= 24.0；Docker Compose v2（即 `docker compose` 子命令，不是旧版 `docker-compose`）。
 - 至少 2 GB 内存、10 GB 可用磁盘。
 - 以 root 身份或具备 sudo 权限的用户执行脚本。
-- 可出公网访问 `docker.io`（如需拉取 MySQL、Prometheus 镜像；`prom/prometheus:v2.54.0` 由 docker compose 拉取，未随 tarball 发货）；`ongrid` 镜像已打包在发布包内，无需对外连接私有 registry。
+- 可访问 `docker.cnb.cool`；manager、Web 及全部静态运行依赖都从项目 CNB 仓库拉取，发布包不携带容器镜像或 Manager 原生二进制。
 
-## 两种安装形态
+## 安装形态
 
-| | `--mode=compose`（默认） | `--mode=systemd` |
-|---|---|---|
-| **运行底座** | docker / docker-compose | 系统原生 systemd 单元 |
-| **manager 进程** | `ongrid` 容器 | `ongrid.service`（`/usr/local/bin/ongrid`）|
-| **依赖** | 同一份 docker-compose 起 mysql / prom / loki / tempo / qdrant / nginx / grafana | mariadb-server / nginx / grafana 走 apt-dnf 包管；prom / loki / tempo / qdrant 安装为 systemd 单元 |
-| **何时选** | 默认推荐；开箱即用，少踩坑 | 禁 docker、合规要求、已有 systemd 运维栈 |
-| **包大小** | ~430M（docker images 占大头） | 同上 + ~15M 裸 binary（`bin/ongrid` + `bin/ongrid-frontier`） |
-| **卸载** | `uninstall.sh --purge` | `uninstall.sh --purge`（自动派发到 `systemd/uninstall-systemd.sh`）|
-
-systemd 形态详细看 `systemd/README.md`。
+Manager 仅支持 Docker Compose 部署。`install.sh` 拉取版本锁定的容器镜像并启动完整服务栈；`uninstall.sh` 只管理该 Compose 部署。Edge 仍按设备安装流程在目标 Linux 主机上作为 systemd 服务运行。
 
 ## 安装
 
@@ -58,8 +49,8 @@ sudo ./install.sh
 2. 创建 `/opt/ongrid/`（可通过 `ONGRID_INSTALL_DIR` 覆盖）。
 3. 拷贝 `docker-compose.yml`、`nginx.conf`、`prometheus.yml`、`grafana/`、`edge/`、`VERSION` 到安装目录。
 4. **生成自签 TLS 证书**（首次安装且 `certs/tls.crt` 不存在时）：通过临时 OpenSSL 配置生成 CN=ongrid、SAN 包含 `ongrid` / `localhost` / `127.0.0.1` 的 365 天证书，落到 `${INSTALL_DIR}/certs/`，私钥 `chmod 600`。脚本不交互，直接生成；末尾 banner 提示替换真证书。
-5. `docker load -i images/ongrid.tar`、`images/frontier.tar`、`images/ongrid-web.tar` 加载所有镜像。
-6. 若 `/opt/ongrid/.env` 不存在则从 `.env.example` 创建，并对空字段（`MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD`、`ONGRID_JWT_SECRET`、`ONGRID_ADMIN_PASSWORD`）生成随机值，文件权限置 `600`。
+5. 若 `/opt/ongrid/.env` 不存在则从 `.env.example` 创建，并对空字段（`MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD`、`ONGRID_JWT_SECRET`、`ONGRID_ADMIN_PASSWORD`）生成随机值，文件权限置 `600`。
+6. 先渲染 Compose 配置并从 `docker.cnb.cool/ongridio/ongrid` 拉取全部精确镜像；任一镜像不可用即停止，不启动半套服务。
 7. `docker compose up -d` 启动 MySQL + ongrid + frontier + nginx + prometheus（ADR-009）。
 8. 轮询 `https://localhost:${ONGRID_HTTP_PORT}/healthz`（nginx 透传到 manager，`-k` 跳过自签校验）最多 60 秒。
 9. 打印安装摘要，包括 **Web URL**、**API URL** 与 **管理员初始密码**（只显示一次，务必立即记录）。
@@ -86,12 +77,11 @@ sudo ./upgrade.sh
 
 升级脚本会：
 
-1. 先 `docker compose down`（保留命名卷，数据不丢）。
-2. 覆盖 `docker-compose.yml`、`nginx.conf`、`prometheus.yml`、`grafana/`、`edge/`、`VERSION`。
-3. **不触碰 `.env` 和 `certs/`**，运维之前的自定义配置 / 真证书全部保留。
-4. `docker load` 新镜像（`ongrid` / `frontier` / `ongrid-web`），修改 `.env` 中的 `ONGRID_VERSION`。
-5. `docker compose up -d` 启动新版。
-6. 轮询 `https://localhost:${ONGRID_HTTP_PORT}/healthz`（`-k` 跳过自签校验）最多 90 秒（库迁移可能稍慢）。
+1. 使用新版本号渲染 Compose，并从 CNB 拉取全部运行镜像；任一镜像失败时旧栈保持运行。
+2. `docker compose down`（保留数据），随后覆盖 `docker-compose.yml`、`nginx.conf`、`prometheus.yml`、`grafana/`、`edge/`、`VERSION`。
+3. **不覆盖 `.env` 和 `certs/`**；只把 `.env` 中的 `ONGRID_VERSION` 更新为新版本，并补齐新版本必需的缺省项。
+4. `docker compose up -d` 启动新版。
+5. 轮询 `https://localhost:${ONGRID_HTTP_PORT}/healthz`（`-k` 跳过自签校验）最多 90 秒（库迁移可能稍慢）。
 
 数据库 schema 由 gorm AutoMigrate 在 ongrid 启动时自动处理。
 
@@ -202,7 +192,7 @@ sudo ./upgrade.sh --migrate-volumes
 `upgrade.sh` 会：
 
 1. `docker compose down` 停掉旧栈；
-2. 对每个 legacy named volume `docker run --rm alpine cp -a` 到对应 bind path；
+2. 使用已拉取的新版 manager 镜像作为临时工具容器，对每个 legacy named volume 执行 `cp -a` 到对应 bind path；
 3. `chown` 到正确 uid；
 4. `docker compose up -d` 起新栈。
 
@@ -218,7 +208,9 @@ for v in ongrid_mysql_data:mysql prometheus_data:prometheus loki_data:loki tempo
     SRC="${v%%:*}"
     DST="${v##*:}"
     if [[ "$DST" == "ongrid" ]]; then DSTDIR=/var/log/ongrid; else DSTDIR=/var/lib/ongrid/$DST; fi
-    sudo docker run --rm -v "$SRC":/src:ro -v "$DSTDIR":/dst alpine sh -c 'cp -a /src/. /dst/'
+    MANAGER_IMAGE="docker.cnb.cool/ongridio/ongrid:$(grep '^ONGRID_VERSION=' /opt/ongrid/.env | cut -d= -f2-)"
+    sudo docker run --rm --user 0 --entrypoint sh \
+        -v "$SRC":/src:ro -v "$DSTDIR":/dst "$MANAGER_IMAGE" -c 'cp -a /src/. /dst/'
 done
 sudo docker compose -f /opt/ongrid/docker-compose.yml up -d
 ```
@@ -380,15 +372,6 @@ sudo docker compose -f /opt/ongrid/docker-compose.yml --env-file /opt/ongrid/.en
 ```bash
 sudo docker exec ongrid-prometheus wget -qO- \
     'http://localhost:9090/api/v1/query?query=up' | jq
-```
-
-**备份**：`prometheus_data` 是命名卷，备份姿势同 `ongrid_mysql_data`：
-
-```bash
-sudo docker run --rm \
-    -v prometheus_data:/data \
-    -v "$(pwd)":/out \
-    alpine sh -c 'tar czf /out/prometheus-$(date +%F).tar.gz -C /data .'
 ```
 
 `/opt/ongrid/prometheus.yml` 是 bind-mounted scrape config，改完跑 `docker compose restart prometheus` 或 `curl -XPOST http://prometheus:9090/-/reload`（`--web.enable-lifecycle` 已开）。

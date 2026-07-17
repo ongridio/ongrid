@@ -110,22 +110,70 @@ func (i *Ingester) Push(ctx context.Context, deviceID uint64, source string, sam
 		)
 		return nil
 	}
-	deviceIDStr := strconv.FormatUint(deviceID, 10)
+	fixedLabels := map[string]string{"device_id": strconv.FormatUint(deviceID, 10)}
+	if source != "" {
+		fixedLabels["ongrid_source"] = source
+	}
+	out := buildPromSamples(samples, fixedLabels, reservedHostLabels)
+	if err := i.write(ctx, "device_id", deviceID, source, out); err != nil {
+		return err
+	}
+	return nil
+}
+
+// PushKubernetes writes cluster-scoped Kubernetes samples. Unlike host
+// samples, these intentionally do not carry device_id because controller
+// edges are not host Devices.
+func (i *Ingester) PushKubernetes(ctx context.Context, clusterID uint64, source string, samples []tunnel.PromSample) error {
+	if len(samples) == 0 {
+		return nil
+	}
+	if i.w == nil {
+		i.log.Debug("promwrite: writer nil, dropping",
+			slog.Uint64("cluster_id", clusterID),
+			slog.Int("n", len(samples)),
+		)
+		return nil
+	}
+	fixedLabels := map[string]string{"cluster_id": strconv.FormatUint(clusterID, 10)}
+	if source != "" {
+		fixedLabels["ongrid_source"] = source
+	}
+	out := buildPromSamples(samples, fixedLabels, reservedKubernetesLabels)
+	if err := i.write(ctx, "cluster_id", clusterID, source, out); err != nil {
+		return err
+	}
+	return nil
+}
+
+var (
+	reservedHostLabels = map[string]struct{}{
+		"__name__":      {},
+		"device_id":     {},
+		"ongrid_source": {},
+	}
+	reservedKubernetesLabels = map[string]struct{}{
+		"__name__":      {},
+		"cluster_id":    {},
+		"device_id":     {},
+		"edge_id":       {},
+		"ongrid_source": {},
+	}
+)
+
+func buildPromSamples(samples []tunnel.PromSample, fixedLabels map[string]string, reserved map[string]struct{}) []pkgpromwrite.Sample {
 	out := make([]pkgpromwrite.Sample, 0, len(samples))
 	for _, s := range samples {
-		// Pre-size the label slice: input labels + 3 fixed (__name__,
-		// device_id, ongrid_source). Drop any user-provided label that
-		// collides with a reserved key — the cloud's value wins.
-		labels := make([]pkgpromwrite.Label, 0, len(s.Labels)+3)
+		labels := make([]pkgpromwrite.Label, 0, len(s.Labels)+1+len(fixedLabels))
 		labels = append(labels, pkgpromwrite.Label{Name: "__name__", Value: s.Name})
-		labels = append(labels, pkgpromwrite.Label{Name: "device_id", Value: deviceIDStr})
-		if source != "" {
-			labels = append(labels, pkgpromwrite.Label{Name: "ongrid_source", Value: source})
+		for k, v := range fixedLabels {
+			if v == "" {
+				continue
+			}
+			labels = append(labels, pkgpromwrite.Label{Name: k, Value: v})
 		}
 		for k, v := range s.Labels {
-			switch k {
-			case "__name__", "device_id", "ongrid_source":
-				// Reserved; cloud value wins. Skip.
+			if _, ok := reserved[k]; ok {
 				continue
 			}
 			labels = append(labels, pkgpromwrite.Label{Name: k, Value: v})
@@ -138,6 +186,10 @@ func (i *Ingester) Push(ctx context.Context, deviceID uint64, source string, sam
 			TsMs:   s.TsMs,
 		})
 	}
+	return out
+}
+
+func (i *Ingester) write(ctx context.Context, entityLabel string, entityID uint64, source string, out []pkgpromwrite.Sample) error {
 	if err := i.w.Write(ctx, out); err != nil {
 		i.recordFailure()
 		// Self-observability: prom_write_total{result=fail} agrees with the
@@ -145,7 +197,8 @@ func (i *Ingester) Push(ctx context.Context, deviceID uint64, source string, sam
 		// evaluator reads, so both surfaces report the same failure events.
 		prom.IncPromWrite(err)
 		i.log.Warn("promwrite: write failed",
-			slog.Uint64("device_id", deviceID),
+			slog.String("entity_label", entityLabel),
+			slog.Uint64("entity_id", entityID),
 			slog.String("source", source),
 			slog.Int("n", len(out)),
 			slog.Any("err", err),

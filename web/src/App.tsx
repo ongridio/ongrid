@@ -13,6 +13,10 @@ const DashboardPage = lazy(() => import('@/pages/Dashboard'));
 const MonitorPage = lazy(() => import('@/pages/Monitor'));
 const LogsPage = lazy(() => import('@/pages/Logs'));
 const TracesPage = lazy(() => import('@/pages/Traces'));
+const KubernetesPage = lazy(() => import('@/pages/Kubernetes'));
+const KubernetesClusterDetailPage = lazy(() =>
+  import('@/pages/Kubernetes').then((m) => ({ default: m.KubernetesClusterDetailPage })),
+);
 const AlertsPage = lazy(() => import('@/pages/Alerts'));
 const AlertRulesPage = lazy(() => import('@/pages/AlertRules'));
 const IncidentDetailPage = lazy(() => import('@/pages/IncidentDetail'));
@@ -105,6 +109,8 @@ export default function App() {
         <Route path="/monitor" element={<MonitorPage />} />
         <Route path="/logs" element={<LogsPage />} />
         <Route path="/traces" element={<TracesPage />} />
+        <Route path="/kubernetes" element={<KubernetesPage />} />
+        <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />
         <Route path="/alerts" element={<AlertsPage />} />
         <Route path="/alerts/rules" element={<AlertRulesPage />} />
         <Route path="/alerts/incidents/:id" element={<IncidentDetailPage />} />

@@ -94,6 +94,35 @@ set_env_value() {
     fi
 }
 
+host_from_url() {
+    local url="$1" hostport host
+    hostport="${url#*://}"
+    hostport="${hostport%%/*}"
+    if [[ "$hostport" == \[*\]* ]]; then
+        host="${hostport%%]*}"
+        host="${host}]"
+    else
+        host="${hostport%%:*}"
+    fi
+    printf '%s' "$host"
+}
+
+ensure_tunnel_addr_env() {
+    local configured public_url tunnel_port host
+    configured=$(grep -E '^ONGRID_TUNNEL_ADDR=' "$ENV_FILE" 2>/dev/null | tail -n 1 | cut -d= -f2- || true)
+    if [[ -n "$configured" ]]; then
+        return
+    fi
+    public_url=$(grep -E '^ONGRID_PUBLIC_URL=' "$ENV_FILE" 2>/dev/null | tail -n 1 | cut -d= -f2- || true)
+    tunnel_port=$(grep -E '^ONGRID_TUNNEL_PORT=' "$ENV_FILE" 2>/dev/null | tail -n 1 | cut -d= -f2- || true)
+    : "${tunnel_port:=40012}"
+    host=$(host_from_url "$public_url")
+    if [[ -n "$host" ]]; then
+        set_env_value ONGRID_TUNNEL_ADDR "${host}:${tunnel_port}"
+        log_info "ONGRID_TUNNEL_ADDR=${host}:${tunnel_port}"
+    fi
+}
+
 ensure_host_gateway_env() {
     local configured gateway
     configured=$(grep -E '^ONGRID_HOST_GATEWAY=' "$ENV_FILE" 2>/dev/null | tail -n 1 | cut -d= -f2- || true)
@@ -115,6 +144,37 @@ ensure_host_gateway_env() {
 
     set_env_value ONGRID_HOST_GATEWAY "$gateway"
     log_warn "docker daemon does not support host-gateway; using ONGRID_HOST_GATEWAY=${gateway}"
+}
+
+preflight_runtime_images() {
+    local compose_file="$SCRIPT_DIR/docker-compose.yml"
+    [[ -f "$compose_file" ]] || {
+        log_error "upgrade package is missing docker-compose.yml"
+        return 1
+    }
+
+    local grafana_password images image
+    local compose_args=(--project-directory "$INSTALL_DIR" -f "$compose_file")
+    if [[ -f "$INSTALL_DIR/docker-compose.override.yml" ]]; then
+        compose_args+=(-f "$INSTALL_DIR/docker-compose.override.yml")
+    fi
+    grafana_password=$(grep -E '^GRAFANA_ADMIN_PASSWORD=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
+    : "${grafana_password:=preflight-only}"
+    if ! images=$(ONGRID_VERSION="$NEW_VERSION" GRAFANA_ADMIN_PASSWORD="$grafana_password" \
+        docker compose "${compose_args[@]}" --env-file "$ENV_FILE" config --images | sort -u); then
+        log_error "new docker-compose.yml is invalid with the existing .env"
+        return 1
+    fi
+
+    while IFS= read -r image; do
+        [[ -n "$image" ]] || continue
+        log_info "pulling required runtime image before stopping the old stack: $image"
+        if ! docker pull "$image"; then
+            log_error "required runtime image is unavailable: $image"
+            log_error "the existing stack was not stopped; fix registry access and retry"
+            return 1
+        fi
+    done <<<"$images"
 }
 
 trap 'log_error "upgrade failed at line $LINENO"' ERR
@@ -149,9 +209,15 @@ if [[ -z "$NEW_VERSION" ]]; then
 fi
 [[ -n "$NEW_VERSION" ]] || { log_error "cannot determine new version"; exit 1; }
 log_info "new version: ${NEW_VERSION}"
+MIGRATION_HELPER_IMAGE="docker.cnb.cool/ongridio/ongrid:${NEW_VERSION}"
 
 OLD_VERSION=$(grep -E '^ONGRID_VERSION=' "$ENV_FILE" | cut -d= -f2- | tr -d '[:space:]' || true)
 log_info "old version: ${OLD_VERSION:-unknown}"
+
+# Validate the new Compose model and pull every exact image before stopping the
+# existing stack. Registry or manifest failures therefore leave the old version
+# running untouched.
+preflight_runtime_images
 
 # Stop stack first so legacy named volumes (if any) aren't being written
 # to during migration, and so bind-mount paths can be safely chowned.
@@ -275,7 +341,9 @@ if (( ${#LEGACY_FOUND[@]} > 0 )); then
         declare -A SRC_BY_DST=()
         for v in "${LEGACY_FOUND[@]}"; do
             d="${LEGACY_VOL_TO_DST[$v]}"
-            sz=$(docker run --rm -v "$v":/d:ro alpine du -sb /d 2>/dev/null | cut -f1)
+            sz=$(docker run --rm --user 0 --entrypoint sh \
+                -v "$v":/d:ro "$MIGRATION_HELPER_IMAGE" \
+                -c 'du -sb /d' 2>/dev/null | cut -f1)
             sz=${sz:-0}
             if [[ -z "${SIZE_BY_DST[$d]:-}" ]] || (( sz > ${SIZE_BY_DST[$d]} )); then
                 SIZE_BY_DST[$d]=$sz
@@ -285,16 +353,17 @@ if (( ${#LEGACY_FOUND[@]} > 0 )); then
         for dst in "${!SRC_BY_DST[@]}"; do
             v="${SRC_BY_DST[$dst]}"
             log_info "  $v (${SIZE_BY_DST[$dst]} bytes) → $dst"
-            # alpine + cp -a preserves perms. Skip if dst non-empty —
+            # The already-pulled manager image supplies cp/du, so volume
+            # migration does not depend on an extra helper image. Skip if dst non-empty —
             # operator probably ran migration before; don't clobber.
             if [[ -n "$(ls -A "$dst" 2>/dev/null)" ]]; then
                 log_warn "  $dst already populated; skipping ($v left intact for operator review)"
                 continue
             fi
-            docker run --rm \
+            docker run --rm --user 0 --entrypoint sh \
                 -v "$v":/src:ro \
                 -v "$dst":/dst \
-                alpine sh -c 'cp -a /src/. /dst/'
+                "$MIGRATION_HELPER_IMAGE" -c 'cp -a /src/. /dst/'
         done
         log_info "migration complete — legacy volumes preserved; remove with: docker volume rm ${LEGACY_FOUND[*]}"
     elif [[ -n "$NO_MIGRATE_VOLUMES" ]]; then
@@ -399,31 +468,6 @@ if [[ -d "$SCRIPT_DIR/edge" ]]; then
     fi
 fi
 
-# Load new ongrid (manager) and frontier (broker) images. Both ship in the
-# tarball (ADR-007); upstream Docker Hub pull is not relied upon.
-if [[ -f "$SCRIPT_DIR/images/ongrid.tar" ]]; then
-    log_info "loading ongrid:${NEW_VERSION} image"
-    docker load -i "$SCRIPT_DIR/images/ongrid.tar"
-else
-    log_warn "images/ongrid.tar not found; assuming ongrid:${NEW_VERSION} already present"
-fi
-if [[ -f "$SCRIPT_DIR/images/frontier.tar" ]]; then
-    log_info "loading frontier broker image"
-    docker load -i "$SCRIPT_DIR/images/frontier.tar"
-else
-    log_warn "images/frontier.tar not found; assuming frontier image already present"
-fi
-if [[ -f "$SCRIPT_DIR/images/ongrid-web.tar" ]]; then
-    log_info "loading ongrid-web (frontend + nginx) image"
-    docker load -i "$SCRIPT_DIR/images/ongrid-web.tar"
-else
-    log_warn "images/ongrid-web.tar not found; assuming ongrid-web image already present"
-fi
-docker image inspect "ongrid:${NEW_VERSION}" >/dev/null 2>&1 || {
-    log_error "ongrid:${NEW_VERSION} not present after docker load"
-    exit 1
-}
-
 # Bump ONGRID_VERSION in .env only.
 sed -i.bak -E "s|^ONGRID_VERSION=.*|ONGRID_VERSION=${NEW_VERSION}|" "$ENV_FILE"
 rm -f "${ENV_FILE}.bak"
@@ -450,6 +494,7 @@ backfill_plain() {
 # v0.7.20+: Grafana admin pin needed for SA token bootstrap.
 backfill_plain  GRAFANA_ADMIN_USER     admin
 backfill_secret GRAFANA_ADMIN_PASSWORD 20
+ensure_tunnel_addr_env
 ensure_host_gateway_env
 
 chmod 600 "$ENV_FILE"
@@ -514,7 +559,7 @@ fi
 # version bumps and have bitten today (2 disk-full incidents):
 #   1. /tmp/ongrid-vN-linux-<arch>/ — the extracted release tree
 #      (1+ GB per version, never reused after install)
-#   2. Loaded docker images from old versions (ongrid:vN, ongrid-web:vN)
+#   2. Pulled CNB images from old versions (manager + Web)
 #      — Docker keeps them forever; one set is ~500 MB
 #   3. The release tarball itself in $INSTALL_DIR (430 MB per version)
 #
@@ -534,16 +579,19 @@ if [[ $HEALTH_OK -eq 1 ]]; then
         log_info "  pruned /tmp/$(basename "$d")"
     done
 
-    # (2) Old docker images: keep only the version compose just brought
+    # (2) Old project images: keep only the version compose just brought
     # up. `docker image prune -af` would also remove cached build layers
     # for unrelated workloads; filter to ongrid* repos.
-    for repo in ongrid ongrid-web; do
+    for repo in \
+        docker.cnb.cool/ongridio/ongrid \
+        docker.cnb.cool/ongridio/ongrid/ongrid-web; do
         # List image refs matching <repo>:* and drop those that don't
         # match $NEW_VERSION. compose holds the running tag, so docker
         # won't actually delete an in-use image (it'll print "image is
         # being used by stopped container" warn and skip — harmless).
         docker images --format '{{.Repository}}:{{.Tag}}' \
-            | awk -v r="$repo" -v keep="${NEW_VERSION}" '$0 ~ "^"r":" && $0 != r":"keep' \
+            | awk -v prefix="$repo:" -v keep="$repo:${NEW_VERSION}" \
+                'index($0, prefix) == 1 && $0 != keep' \
             | xargs -r docker rmi 2>&1 | grep -v "image is being used" || true
     done
 

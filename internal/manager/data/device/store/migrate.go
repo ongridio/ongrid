@@ -49,7 +49,102 @@ func Migrate(db *gorm.DB) error {
 	if err := dbx.BackfillDeleteMarker(db, model.EdgeDevice{}.TableName()); err != nil {
 		return err
 	}
+	if err := detachKubernetesControllerHosts(db); err != nil {
+		return err
+	}
 	return backfillFromEdges(db)
+}
+
+// detachKubernetesControllerHosts removes host associations accidentally
+// created for controller-only edges. A Kubernetes controller is a cluster
+// access path, not a physical device; node edges remain untouched.
+func detachKubernetesControllerHosts(db *gorm.DB) error {
+	controllerEdgeIDs, err := kubernetesControllerEdgeIDs(db)
+	if err != nil {
+		return err
+	}
+	if len(controllerEdgeIDs) == 0 || !db.Migrator().HasTable("edges") {
+		return nil
+	}
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		var candidateDeviceIDs []uint64
+		if err := tx.Table("edges").
+			Where("id IN ? AND device_id IS NOT NULL", controllerEdgeIDs).
+			Pluck("device_id", &candidateDeviceIDs).Error; err != nil {
+			return fmt.Errorf("list kubernetes controller device pointers: %w", err)
+		}
+		var linkedDeviceIDs []uint64
+		if err := tx.Model(&model.EdgeDevice{}).
+			Where("edge_id IN ? AND type = ?", controllerEdgeIDs, model.EdgeDeviceRelationHost).
+			Distinct().Pluck("device_id", &linkedDeviceIDs).Error; err != nil {
+			return fmt.Errorf("list kubernetes controller host links: %w", err)
+		}
+		candidateDeviceIDs = appendUniqueUint64s(candidateDeviceIDs, linkedDeviceIDs...)
+
+		if err := tx.Where("edge_id IN ? AND type = ?", controllerEdgeIDs, model.EdgeDeviceRelationHost).
+			Delete(&model.EdgeDevice{}).Error; err != nil {
+			return fmt.Errorf("detach kubernetes controller host links: %w", err)
+		}
+		if err := tx.Table("edges").Where("id IN ?", controllerEdgeIDs).Update("device_id", nil).Error; err != nil {
+			return fmt.Errorf("clear kubernetes controller device pointers: %w", err)
+		}
+		for _, deviceID := range candidateDeviceIDs {
+			var remainingLinks int64
+			if err := tx.Model(&model.EdgeDevice{}).Where("device_id = ?", deviceID).Count(&remainingLinks).Error; err != nil {
+				return fmt.Errorf("count remaining device links for %d: %w", deviceID, err)
+			}
+			var remainingPointers int64
+			if err := tx.Table("edges").
+				Where("device_id = ? AND id NOT IN ? AND deleted_at IS NULL", deviceID, controllerEdgeIDs).
+				Count(&remainingPointers).Error; err != nil {
+				return fmt.Errorf("count remaining device pointers for %d: %w", deviceID, err)
+			}
+			if remainingLinks == 0 && remainingPointers == 0 {
+				if err := tx.Delete(&model.Device{}, deviceID).Error; err != nil {
+					return fmt.Errorf("delete orphan kubernetes controller device %d: %w", deviceID, err)
+				}
+			}
+		}
+		return nil
+	})
+}
+
+func appendUniqueUint64s(values []uint64, extra ...uint64) []uint64 {
+	seen := make(map[uint64]struct{}, len(values)+len(extra))
+	out := make([]uint64, 0, len(values)+len(extra))
+	for _, value := range append(values, extra...) {
+		if value == 0 {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func kubernetesControllerEdgeIDs(db *gorm.DB) ([]uint64, error) {
+	const table = "k8s_clusters"
+	if !db.Migrator().HasTable(table) || !db.Migrator().HasColumn(table, "controller_edge_id") {
+		return nil, nil
+	}
+
+	query := db.Table(table).
+		Where("controller_edge_id IS NOT NULL AND controller_edge_id <> 0")
+	if db.Migrator().HasColumn(table, "delete_marker") {
+		query = query.Where("delete_marker = 0")
+	} else if db.Migrator().HasColumn(table, "deleted_at") {
+		query = query.Where("deleted_at IS NULL")
+	}
+
+	var edgeIDs []uint64
+	if err := query.Distinct().Pluck("controller_edge_id", &edgeIDs).Error; err != nil {
+		return nil, fmt.Errorf("list kubernetes controller edges: %w", err)
+	}
+	return edgeIDs, nil
 }
 
 // edgeRow is a loose-typed view of the legacy `edges` row we need for
@@ -91,19 +186,26 @@ func backfillFromEdges(db *gorm.DB) error {
 	// before dropping it); subsequent runs do not. Branching here is
 	// dialect-agnostic; SQLite, MySQL and Postgres all error differently
 	// on a SELECT of a missing column.
+	controllerEdgeIDs, err := kubernetesControllerEdgeIDs(db)
+	if err != nil {
+		return err
+	}
+
 	rolesPresent := db.Migrator().HasColumn("edges", "roles")
 	var edges []edgeRow
+	query := db.Table("edges").Where("deleted_at IS NULL")
+	if len(controllerEdgeIDs) > 0 {
+		query = query.Where("id NOT IN ?", controllerEdgeIDs)
+	}
 	if rolesPresent {
-		if err := db.Table("edges").
+		if err := query.
 			Select("id, name, device_id, roles, last_seen_at, status").
-			Where("deleted_at IS NULL").
 			Find(&edges).Error; err != nil {
 			return fmt.Errorf("backfill: scan edges: %w", err)
 		}
 	} else {
-		if err := db.Table("edges").
+		if err := query.
 			Select("id, name, device_id, last_seen_at, status").
-			Where("deleted_at IS NULL").
 			Find(&edges).Error; err != nil {
 			return fmt.Errorf("backfill: scan edges (no roles): %w", err)
 		}

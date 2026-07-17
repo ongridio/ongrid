@@ -13,9 +13,66 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  image:
+    name: Publish release images and Helm chart
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          version="$(tr -d '[:space:]' < VERSION)"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ || "$version" != "$tag" ]]; then
+            echo "VERSION ($version) must match release tag ($tag)" >&2
+            exit 2
+          fi
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Log in to CNB registry
+        uses: docker/login-action@v3
+        with:
+          registry: docker.cnb.cool
+          username: cnb
+          password: ${{ secrets.CNB_TOKEN }}
+
+      - name: Publish project multi-arch images
+        shell: bash
+        run: |
+          set -euo pipefail
+          make docker-push-release-images
+
+      - name: Verify multi-arch manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          make verify-release-images
+
+      - name: Publish Helm chart
+        env:
+          CNB_TOKEN: ${{ secrets.CNB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          make publish-k8s-chart
+
   build:
     name: Build ${{ matrix.arch }} package
     runs-on: ${{ matrix.runner }}
+    needs: image
     timeout-minutes: 180
 
     strategy:
@@ -29,20 +86,11 @@ jobs:
             platform: linux/arm64
             runner: ubuntu-24.04-arm
 
-    env:
-      FRONTIER_VERSION: v1.2.4
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Set release paths
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "FRONTIER_SRC=${RUNNER_TEMP}/frontier" >> "$GITHUB_ENV"
 
       - name: Resolve tag
         id: tag
@@ -67,21 +115,12 @@ jobs:
           go-version: '1.25.x'
           cache: true
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
       - name: Install host tools
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends xz-utils unzip
-
-      - name: Checkout frontier
-        shell: bash
-        run: |
-          set -euo pipefail
-          git clone --depth 1 --branch "$FRONTIER_VERSION" https://github.com/singchia/frontier.git "$FRONTIER_SRC"
 
       - name: Fetch bundled embedding model
         shell: bash

@@ -12,7 +12,7 @@
 
 services:
   mysql:
-    image: mysql:8.0
+    image: docker.cnb.cool/ongridio/ongrid/mysql:8.0
     container_name: ongrid-mysql
     restart: unless-stopped
     environment:
@@ -113,6 +113,10 @@ services:
       # Public URL the manager hands out to edges as the data-plane
       # endpoint for plugin telemetry (ADR-014 / ADR-015).
       ONGRID_PUBLIC_URL: ${ONGRID_PUBLIC_URL:-}
+      ONGRID_TUNNEL_ADDR: ${ONGRID_TUNNEL_ADDR:-}
+      ONGRID_K8S_EVENT_RETENTION: ${ONGRID_K8S_EVENT_RETENTION:-24h}
+      ONGRID_K8S_EVENT_MAX_PER_CLUSTER: ${ONGRID_K8S_EVENT_MAX_PER_CLUSTER:-5000}
+      ONGRID_K8S_EVENT_CLEANUP_INTERVAL: ${ONGRID_K8S_EVENT_CLEANUP_INTERVAL:-1h}
       # Built-in host alert thresholds over push_host_metrics.
       ONGRID_ALERT_ENABLED: ${ONGRID_ALERT_ENABLED:-true}
       ONGRID_ALERT_COOLDOWN: ${ONGRID_ALERT_COOLDOWN:-10m}
@@ -204,10 +208,10 @@ services:
       - ongrid_net
 
   frontier:
-    # Upstream broker (ADR-007). No build stanza — image pulled from
-    # Docker Hub. Edge-bound port 40012 is exposed on host:40012 so the
-    # tunnel endpoint URL stays identical to pre-split deployments.
-    image: singchia/frontier:1.2.5
+    # Upstream broker (ADR-007), mirrored to the project CNB registry.
+    # Edge-bound port 40012 is exposed on host:40012 so the tunnel endpoint
+    # URL stays identical to pre-split deployments.
+    image: docker.cnb.cool/ongridio/ongrid/frontier:v1.2.4
     container_name: ongrid-frontier
     restart: unless-stopped
     volumes:
@@ -222,7 +226,7 @@ services:
   # query backend for the aiops query_promql tool). Dev publishes 9090 to
   # host so you can poke PromQL from the laptop browser; prod doesn't.
   prometheus:
-    image: prom/prometheus:v2.54.0
+    image: docker.cnb.cool/ongridio/ongrid/prometheus:v2.54.0
     container_name: ongrid-prometheus
     restart: unless-stopped
     depends_on:
@@ -255,7 +259,7 @@ services:
   # 3100 — public access flows through nginx /loki/api/v1/push with
   # auth_request → manager edgeauth (ADR-014 §决策).
   loki:
-    image: grafana/loki:3.4.0
+    image: docker.cnb.cool/ongridio/ongrid/loki:3.4.0
     container_name: ongrid-loki
     restart: unless-stopped
     command:
@@ -271,7 +275,7 @@ services:
   # through nginx /v1/traces with auth_request → manager edgeauth
   # (ADR-014 §决策第 1 条).
   tempo:
-    image: grafana/tempo:2.5.0
+    image: docker.cnb.cool/ongridio/ongrid/tempo:2.10.0
     container_name: ongrid-tempo
     restart: unless-stopped
     command:
@@ -290,7 +294,7 @@ services:
   # response. Zero API key, zero quota. Only docker-internal port 8080
   # — manager reaches it at http://searxng:8080/search?q=...&format=json.
   searxng:
-    image: searxng/searxng:latest
+    image: docker.cnb.cool/ongridio/ongrid/searxng:latest
     container_name: ongrid-searxng
     restart: unless-stopped
     environment:
@@ -302,7 +306,7 @@ services:
       - ongrid_net
 
   qdrant:
-    image: qdrant/qdrant:v1.11.3
+    image: docker.cnb.cool/ongridio/ongrid/qdrant:v1.11.3
     container_name: ongrid-qdrant
     restart: unless-stopped
     volumes:
@@ -311,7 +315,7 @@ services:
       - ongrid_net
 
   grafana:
-    image: grafana/grafana-oss:11.1.4
+    image: docker.cnb.cool/ongridio/ongrid/grafana-oss:11.1.4
     container_name: ongrid-grafana
     restart: unless-stopped
     depends_on:

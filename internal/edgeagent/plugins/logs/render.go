@@ -2,8 +2,10 @@ package logs
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"text/template"
 
@@ -56,11 +58,35 @@ clients:
     batchwait: 1s
     external_labels:
       device_id: "{{ .EdgeID }}"
+      {{- if .KubernetesMode }}
+      cluster_id: "{{ .ClusterID }}"
+      {{- if .NodeName }}
+      node: "{{ .NodeName }}"
+      {{- end }}
+      {{- end }}
       {{- range $k, $v := .ExtraLabels }}
       {{ $k }}: "{{ $v }}"
       {{- end }}
 
 scrape_configs:
+{{- if .KubernetesMode }}
+  - job_name: kubernetes-pods
+    pipeline_stages:
+      - cri: {}
+      - regex:
+          source: filename
+          expression: '^/var/log/pods/(?P<namespace>[^_]+)_(?P<pod>[^_]+)_(?P<pod_uid>[^/]+)/(?P<container>[^/]+)/[^/]+\.log$'
+      - labels:
+          namespace:
+          pod:
+          container:
+    static_configs:
+      - targets: [localhost]
+        labels:
+          ongrid_source: "kubernetes:pod"
+          job: "kubernetes-pods"
+          __path__: "{{ .PodLogPath }}"
+{{- else }}
 {{- if .EnableJournald }}
   - job_name: journald
     journal:
@@ -90,22 +116,46 @@ scrape_configs:
           job:           'file'
           __path__:      '{{ . }}'
 {{- end }}
+{{- end }}
 `
 
 // render builds promtail.yaml bytes from a PluginConfig. Spec keys:
 //
+//	mode : string (default "host"; "kubernetes" tails CRI pod logs under
+//	                /var/log/pods and emits namespace/pod/container labels)
+//	cluster_id : string|number (required when mode="kubernetes")
+//	node_name : string (optional when mode="kubernetes")
+//	pod_log_path : string (default /var/log/pods/*/*/*.log)
 //	enable_journald : bool (default TRUE — systemd-journald is universal on
 //	                          systemd hosts and self-rotating; set false to
 //	                          opt out, which falls back to syslog file tail)
 //	journald_units : []string (default all units when journald enabled)
 //	file_paths : []string (default empty; add app-specific log files here)
 //	extra_labels : map[string]string (allow-list policed by manager;
+const defaultKubernetesPodLogPath = "/var/log/pods/*/*/*.log"
+
 func render(cfg plugins.PluginConfig) ([]byte, error) {
 	if cfg.Endpoint == "" {
 		return nil, fmt.Errorf("logs plugin: endpoint required")
 	}
 	if cfg.EdgeID == 0 {
 		return nil, fmt.Errorf("logs plugin: device_id required (set ONGRID_EDGE_ID)")
+	}
+	spec := cfg.Spec
+	if spec == nil {
+		spec = map[string]interface{}{}
+	}
+
+	mode := strings.ToLower(strings.TrimSpace(stringSpec(spec, "mode")))
+	kubernetesMode := mode == "kubernetes"
+	clusterID := stringSpec(spec, "cluster_id")
+	nodeName := stringSpec(spec, "node_name")
+	podLogPath := stringSpec(spec, "pod_log_path")
+	if podLogPath == "" {
+		podLogPath = defaultKubernetesPodLogPath
+	}
+	if kubernetesMode && clusterID == "" {
+		return nil, fmt.Errorf("logs plugin: cluster_id required when mode=kubernetes")
 	}
 
 	// Journald is the universal default: systemd-journald is always running
@@ -115,8 +165,8 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 	// its systemd unit, so services are cleanly separable by the `unit`
 	// label. Operators opt out with spec.enable_journald=false, or add
 	// file_paths for app-specific log files (e.g. nginx access logs).
-	enableJournald := true
-	if v, ok := cfg.Spec["enable_journald"]; ok {
+	enableJournald := !kubernetesMode
+	if v, ok := spec["enable_journald"]; ok && !kubernetesMode {
 		if b, ok := v.(bool); ok {
 			enableJournald = b
 		}
@@ -125,23 +175,27 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 	// self-signed manager cert (deploy/install/upgrade.sh). Operators
 	// who plug in a real cert can set spec.tls_insecure_skip_verify=false.
 	tlsInsecure := true
-	if v, ok := cfg.Spec["tls_insecure_skip_verify"]; ok {
+	if v, ok := spec["tls_insecure_skip_verify"]; ok {
 		if b, ok := v.(bool); ok {
 			tlsInsecure = b
 		}
 	}
 
-	units := stringSlice(cfg.Spec, "journald_units")
-	filePaths := stringSlice(cfg.Spec, "file_paths")
+	units := stringSlice(spec, "journald_units")
+	filePaths := stringSlice(spec, "file_paths")
 	// Fallback only when the operator explicitly turned journald OFF and
 	// set no file paths: tail the universal syslog files so the plugin
 	// still emits at least one scrape job (a config with zero jobs = silent
 	// empty Loki, which reads as "RAG/logs broke"). With journald on by
 	// default this branch is normally skipped.
-	if len(filePaths) == 0 && !enableJournald {
+	if len(filePaths) == 0 && !enableJournald && !kubernetesMode {
 		filePaths = []string{"/var/log/syslog", "/var/log/messages"}
 	}
-	extra := stringMap(cfg.Spec, "extra_labels")
+	if kubernetesMode {
+		filePaths = nil
+		units = nil
+	}
+	extra := stringMap(spec, "extra_labels")
 
 	data := map[string]any{
 		"Endpoint":              cfg.Endpoint,
@@ -154,6 +208,10 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 		"JournaldUnitsRegex":    joinRegex(units),
 		"FilePaths":             filePaths,
 		"TLSInsecureSkipVerify": tlsInsecure,
+		"KubernetesMode":        kubernetesMode,
+		"ClusterID":             clusterID,
+		"NodeName":              nodeName,
+		"PodLogPath":            podLogPath,
 	}
 
 	tmpl, err := template.New("promtail").Funcs(template.FuncMap{
@@ -209,6 +267,39 @@ func stringMap(spec map[string]interface{}, key string) map[string]string {
 		return out
 	}
 	return nil
+}
+
+func stringSpec(spec map[string]interface{}, key string) string {
+	raw, ok := spec[key]
+	if !ok {
+		return ""
+	}
+	switch v := raw.(type) {
+	case string:
+		return v
+	case fmt.Stringer:
+		return v.String()
+	case json.Number:
+		return v.String()
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	case float32:
+		return strconv.FormatFloat(float64(v), 'f', -1, 32)
+	case int:
+		return fmt.Sprintf("%d", v)
+	case int64:
+		return fmt.Sprintf("%d", v)
+	case int32:
+		return fmt.Sprintf("%d", v)
+	case uint64:
+		return fmt.Sprintf("%d", v)
+	case uint:
+		return fmt.Sprintf("%d", v)
+	case uint32:
+		return fmt.Sprintf("%d", v)
+	default:
+		return ""
+	}
 }
 
 // joinRegex builds an OR-regex of the journald unit names (anchored to

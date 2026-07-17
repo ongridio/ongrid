@@ -10,7 +10,7 @@
 //   - group:   coarse grouping for display in the palette
 import { tr as trInline } from '@/i18n/locale';
 
-export type AppRouteGroup = '主页' | 'Agent' | '知识库' | '设备' | '监控告警' | '设置' | '用户管理';
+export type AppRouteGroup = '主页' | 'Agent' | '知识库' | '基础设施' | '监控告警' | '设置' | '用户管理';
 
 export type AppRoute = {
   path: string;
@@ -31,11 +31,11 @@ const ROUTE_DEFS: RouteDef[] = [
   { path: '/knowledge', zh: '知识库', en: 'Knowledge', keywords: ['knowledge', 'kb', 'docs', 'rag', 'zhishiku', 'upload'], group: '知识库' },
   { path: '/knowledge/repos', zh: '代码仓库', en: 'Code repos', keywords: ['repos', 'git', 'code', 'cangku'], group: '知识库' },
 
-  { path: '/devices', zh: '设备 / 全部', en: 'Devices / All', keywords: ['devices', 'edges', 'shebei'], group: '设备' },
-  { path: '/devices?roles=server', zh: '设备 / 服务器', en: 'Devices / Servers', keywords: ['server', 'host', 'fuwuqi'], group: '设备' },
-  { path: '/devices?roles=storage', zh: '设备 / 存储', en: 'Devices / Storage', keywords: ['storage', 'disk', 'cunchu'], group: '设备' },
-  { path: '/devices?roles=database', zh: '设备 / 数据库', en: 'Devices / Database', keywords: ['database', 'db', 'shujuku'], group: '设备' },
-  { path: '/devices?roles=network', zh: '设备 / 网络设备', en: 'Devices / Network', keywords: ['network', 'switch', 'router', 'wangluo'], group: '设备' },
+  { path: '/devices', zh: '设备 / 全部', en: 'Devices / All', keywords: ['devices', 'edges', 'shebei'], group: '基础设施' },
+  { path: '/devices?roles=server', zh: '设备 / 服务器', en: 'Devices / Servers', keywords: ['server', 'host', 'fuwuqi'], group: '基础设施' },
+  { path: '/devices?roles=storage', zh: '设备 / 存储', en: 'Devices / Storage', keywords: ['storage', 'disk', 'cunchu'], group: '基础设施' },
+  { path: '/devices?roles=database', zh: '设备 / 数据库', en: 'Devices / Database', keywords: ['database', 'db', 'shujuku'], group: '基础设施' },
+  { path: '/devices?roles=network', zh: '设备 / 网络设备', en: 'Devices / Network', keywords: ['network', 'switch', 'router', 'wangluo'], group: '基础设施' },
 
   { path: '/monitor', zh: '监控', en: 'Monitor', keywords: ['monitor', 'metrics', 'jiankong'], group: '监控告警' },
   { path: '/logs', zh: '日志', en: 'Logs', keywords: ['logs', 'rizhi'], group: '监控告警' },
@@ -51,7 +51,7 @@ const ROUTE_DEFS: RouteDef[] = [
 
   { path: '/admin/users', zh: '用户管理 / 用户', en: 'Admin / Users', keywords: ['users', 'yonghu', 'admin'], group: '用户管理' },
   { path: '/admin/orgs', zh: '用户管理 / 组织', en: 'Admin / Orgs', keywords: ['orgs', 'org', 'team', 'zuzhi'], group: '用户管理' },
-  { path: '/edges/shell-sessions', zh: '设备 / WebSSH 会话', en: 'Devices / WebSSH sessions', keywords: ['webssh', 'shell', 'sessions', 'huihua'], group: '设备' },
+  { path: '/edges/shell-sessions', zh: '设备 / WebSSH 会话', en: 'Devices / WebSSH sessions', keywords: ['webssh', 'shell', 'sessions', 'huihua'], group: '基础设施' },
 ];
 
 // APP_ROUTES: labels resolved per current locale via trInline (reads

@@ -7,6 +7,7 @@ import (
 
 	"gorm.io/gorm"
 
+	biz "github.com/ongridio/ongrid/internal/manager/biz/aiops"
 	model "github.com/ongridio/ongrid/internal/manager/model/aiops"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
@@ -29,6 +30,8 @@ type MutatingProposalRepo struct {
 func NewMutatingProposalRepo(db *gorm.DB) *MutatingProposalRepo {
 	return &MutatingProposalRepo{db: db}
 }
+
+var _ biz.MutatingProposalRepo = (*MutatingProposalRepo)(nil)
 
 // Insert writes a fresh proposal row in DecisionPending state. ID is
 // auto-filled by BeforeCreate when zero.
@@ -96,4 +99,41 @@ func (r *MutatingProposalRepo) Get(ctx context.Context, id string) (*model.Mutat
 		return nil, err
 	}
 	return &p, nil
+}
+
+// ListMutatingProposals returns reviewer audit rows newest first. The caller
+// owns limit normalization; a non-positive limit is treated as 100 for direct
+// repo tests and defensive production calls.
+func (r *MutatingProposalRepo) ListMutatingProposals(ctx context.Context, f biz.MutatingProposalFilter) ([]*model.MutatingProposal, error) {
+	if f.Limit <= 0 {
+		f.Limit = 100
+	}
+	tx := applyMutatingProposalFilter(r.db.WithContext(ctx).Model(&model.MutatingProposal{}), f)
+	if f.Offset > 0 {
+		tx = tx.Offset(f.Offset)
+	}
+	var out []*model.MutatingProposal
+	if err := tx.Order("created_at DESC").Limit(f.Limit).Find(&out).Error; err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (r *MutatingProposalRepo) CountMutatingProposals(ctx context.Context, f biz.MutatingProposalFilter) (int64, error) {
+	var total int64
+	tx := applyMutatingProposalFilter(r.db.WithContext(ctx).Model(&model.MutatingProposal{}), f)
+	if err := tx.Count(&total).Error; err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
+func applyMutatingProposalFilter(tx *gorm.DB, f biz.MutatingProposalFilter) *gorm.DB {
+	if f.ToolName != "" {
+		tx = tx.Where("tool_name = ?", f.ToolName)
+	}
+	if f.Decision != "" {
+		tx = tx.Where("decision = ?", f.Decision)
+	}
+	return tx
 }

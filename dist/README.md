@@ -1,8 +1,8 @@
 # dist/ — ongrid release pipeline
 
 This directory owns the **release/packaging** pipeline for ongrid. One command
-produces one artefact, ready to scp to any Linux box with docker + docker
-compose installed.
+produces one installation artefact; Compose runtime images are published and
+pulled separately from the project CNB registry.
 
 ## What `make package` produces
 
@@ -26,24 +26,21 @@ ongrid-v<VERSION>-linux-<arch>/
   upgrade.sh
   docker-compose.yml     (prod compose, from deploy/install/)
   .env.example
-  prometheus/
-    prometheus.yml       (from deploy/prometheus/)
-  images/
-    ongrid.tar           (docker save ongrid:<VERSION>)
+  prometheus.yml         (Compose scrape config)
+  embeddings/            (optional bundled local embedding model)
   edge/
     ongrid-edge-linux-amd64
-    ongrid-edge-linux-arm64
-    ongrid-edge-darwin-amd64
-    ongrid-edge-darwin-arm64
+    bundled plugin binaries
     install-edge.sh
-    ongrid-edge.yaml.example
+    ongrid-edge.env.example
     ongrid-edge.service
 ```
 
-The cloud service ships as a docker image tarball (`images/ongrid.tar`);
-`install.sh` runs `docker load -i images/ongrid.tar` and then
-`docker compose up -d`. Edge agents ship as static binaries for four OS/arch
-combos so users can run them directly on heterogeneous hosts.
+The package supports Compose installation only and does not embed image
+tarballs or Manager systemd binaries. `install.sh` renders the production
+Compose model, pulls every exact image from `docker.cnb.cool/ongridio/ongrid`,
+then runs `docker compose up -d`. Edge binaries remain bundled for device
+installation and one-button upgrades.
 
 ## Release flow
 
@@ -51,11 +48,17 @@ combos so users can run them directly on heterogeneous hosts.
    the change, then tag that commit with the same value:
    `git tag v0.1.1 && git push origin v0.1.1`.
 2. The `Release` GitHub Actions workflow runs on `v*.*.*` tag pushes and
-   executes `make package-all` to build both server packages. Use
+   publishes the multi-architecture manager, Web, and Kubernetes Edge images
+   plus the matching Helm chart before building both server packages. The chart is published as an
+   OCI artifact at `oci://helm.cnb.cool/ongridio/ongrid-edge`; it is not copied
+   into the manager installation tarball. Use
    `make package TARGET_ARCH=arm64` locally only when you need a single ARM64
    package. The release build will:
+   - `docker-push-release-images` — publish manager, Web, and Edge amd64/arm64 images to CNB
+   - `verify-release-images` — verify both architectures exist on all three image manifests
+   - `publish-k8s-chart` — package and publish the version-matched Helm chart
    - `build-edge-all`    — cross-compile ongrid-edge for 4 targets
-   - `docker-build`      — build `ongrid:<VERSION>` image for `linux/<arch>`
+   - `package`           — stage Compose install assets and Edge binaries
    - stage everything under `dist/stage/ongrid-<VERSION>-linux-<arch>/`
    - emit the amd64/arm64 tarballs + sha256 files under `dist/out/`
 3. Ship the matching package, for example:
@@ -95,5 +98,5 @@ ls -R
   `docker-compose.yml`. Owned by the install-agent.
 - `deploy/Dockerfile.*`, `deploy/docker-compose.yml` — build contexts and dev
   compose file.
-- Images are **never** pushed to a registry from this pipeline. The tarball
-  is the distribution channel.
+- Static third-party runtime images are mirrored out of band; this release
+  pipeline only pushes the project's manager, Web, and Edge images.

@@ -41,6 +41,10 @@ type Repo interface {
 	// Source of truth for the junction is the edge_devices table; this
 	// field is kept in sync as a convenience pointer.
 	SetDeviceID(ctx context.Context, edgeID, deviceID uint64) error
+	// ClearDeviceID removes the convenience host Device pointer. Used
+	// when a non-host edge role, such as Kubernetes controller, needs to
+	// self-heal an old mistaken host registration.
+	ClearDeviceID(ctx context.Context, edgeID uint64) error
 	// SetAgentVersion records the agent's self-reported binary version
 	// (semver-ish, e.g. "0.7.43"). Updated on register_edge whenever
 	// the value changes — empty inputs are filtered upstream.

@@ -75,6 +75,7 @@ type Service struct {
 	runtime     RuntimeHandler
 	kernel      Kernel
 	sessions    biz.SessionRepo
+	proposals   biz.MutatingProposalRepo
 	usage       *biz.UsageUsecase
 	log         *slog.Logger
 
@@ -123,6 +124,14 @@ func NewWithKernel(a *agent.Agent, runtime RuntimeHandler, kernel Kernel, sessio
 // log the resolved value at boot.
 func (s *Service) Kernel() Kernel { return s.kernel }
 
+// SetMutatingProposalRepo wires the ReviewGate proposal audit reader after
+// the repo has been constructed in cmd. It is optional so legacy tests and
+// deployments without graph ReviewGate keep starting; the HTTP endpoint fails
+// closed with ErrNotWiredYet until wired.
+func (s *Service) SetMutatingProposalRepo(repo biz.MutatingProposalRepo) {
+	s.proposals = repo
+}
+
 // Caller is the authenticated identity that invoked the HTTP request.
 type Caller struct {
 	UserID uint64
@@ -136,6 +145,44 @@ func (c Caller) IsAdmin() bool { return c.Role == RoleAdmin }
 // Used by mutating endpoints (create / send / ack / agent
 // CRUD) to refuse the action before touching storage.
 func (c Caller) IsViewer() bool { return c.Role == RoleViewer }
+
+// ListMutatingProposals returns global ReviewGate proposal audit rows.
+// This is admin-only because rows include raw tool arguments from all users.
+func (s *Service) ListMutatingProposals(ctx context.Context, caller Caller, f biz.MutatingProposalFilter) ([]*model.MutatingProposal, int64, error) {
+	if !caller.IsAdmin() {
+		return nil, 0, errs.ErrForbidden
+	}
+	if s.proposals == nil {
+		return nil, 0, errs.ErrNotWiredYet
+	}
+	f.ToolName = strings.TrimSpace(f.ToolName)
+	f.Decision = strings.TrimSpace(f.Decision)
+	if f.Decision != "" {
+		switch f.Decision {
+		case model.DecisionPending, model.DecisionApprove, model.DecisionReject:
+		default:
+			return nil, 0, fmt.Errorf("%w: unsupported proposal decision %q", errs.ErrInvalid, f.Decision)
+		}
+	}
+	if f.Limit <= 0 || f.Limit > 200 {
+		f.Limit = 50
+	}
+	if f.Offset < 0 {
+		f.Offset = 0
+	}
+	items, err := s.proposals.ListMutatingProposals(ctx, f)
+	if err != nil {
+		return nil, 0, fmt.Errorf("aiops service: list mutating proposals: %w", err)
+	}
+	countFilter := f
+	countFilter.Limit = 0
+	countFilter.Offset = 0
+	total, err := s.proposals.CountMutatingProposals(ctx, countFilter)
+	if err != nil {
+		return nil, 0, fmt.Errorf("aiops service: count mutating proposals: %w", err)
+	}
+	return items, total, nil
+}
 
 // CreateSessionInput bundles the optional fields CreateSession accepts so
 // the signature stays additive (callers don't break when a new field

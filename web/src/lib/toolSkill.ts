@@ -6,12 +6,12 @@
 // CATEGORY_ORDER concept anymore.
 //
 // A group is one of:
-//   - a curated built-in skill (6 of them), keyed by the tool's WIRE name;
+//   - a curated built-in skill (7 of them), keyed by the tool's WIRE name;
 //   - an MCP server: each server is its own group (tag "mcp");
 //   - a SKILL.md extension pack (category === "skill"): its own group (tag
 //     "ext").
-// Everything maps to a real group — "other" is a last-resort that should stay
-// empty in practice.
+// Everything maps to a real group. "other" is reserved for cross-cutting write
+// or specialty tools that do not belong to a read-oriented built-in group.
 
 export const SKILL_ORDER = ['observe', 'device', 'fleet', 'incident', 'knowledge', 'cloud', 'other'] as const;
 
@@ -36,7 +36,15 @@ export function toolGroupKey(wire: string, source?: string, category?: string): 
   }
   if (category === 'skill') return 'skill:' + wire; // a SKILL.md pack = its own group
   if (/^(get_)?host_/.test(wire) || wire.includes('restart_service')) return 'device';
-  if (/^query_(promql|logql|traceql)$/.test(wire) || wire === 'list_metric_catalog' || wire === 'list_database_sources' || wire === 'analyze_database_status') return 'observe';
+  if (
+    /^query_(promql|logql|traceql)$/.test(wire) ||
+    wire === 'list_metric_catalog' ||
+    wire === 'list_database_sources' ||
+    wire === 'analyze_database_status' ||
+    wire === 'query_k8s_snapshot' ||
+    wire === 'describe_k8s_resource' ||
+    wire === 'query_k8s_logs'
+  ) return 'observe';
   if (wire.includes('topology') || wire === 'query_devices' || wire === 'query_edges' || wire === 'rank_edges' || wire === 'find_outlier_edges' || wire === 'get_edge_summary') return 'fleet';
   if (wire.includes('incident') || wire.includes('alert') || wire === 'query_change_events') return 'incident';
   if (wire === 'query_knowledge' || wire === 'web_search' || wire.includes('source')) return 'knowledge';

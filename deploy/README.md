@@ -94,7 +94,7 @@ In production, set both to strong values in `.env` **before** the first
 | `localhost:3306`                | MySQL (user `ongrid`, pw `ongrid`, db `ongrid`) |
 
 Data lives in the `mysql_data` Docker volume. Back that volume up with
-`docker run --rm -v mysql_data:/src -v "$PWD":/dst alpine tar czf /dst/mysql.tgz -C /src .`
+`sudo tar czf mysql.tgz -C "$(docker volume inspect -f '{{.Mountpoint}}' mysql_data)" .`
 or the equivalent in your ops tooling.
 
 ## Switching to SQLite (local tinkering)
