@@ -246,6 +246,51 @@ export function deleteSSHIdentity(id: number) {
   return request<void>('DELETE', `/knowledge/ssh-identities/${id}`);
 }
 
+// ----- HTTPS credentials API -----
+//
+// One row = one stored HTTPS PAT credential + the host patterns it
+// covers + the username (e.g. "oauth2" for GitLab PAT). The token is
+// write-only; after creation/update the API only surfaces has_token
+// (bool). No token field in the type — token 只写不读，对齐后端 DTO.
+
+export type HTTPSCredential = {
+  id: number;
+  name: string;
+  hosts: string[];            // host glob patterns
+  username: string;           // e.g. "oauth2"
+  has_token: boolean;         // true = token is configured
+  last_used_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  // Note: no `token` field — token is write-only; never echoed back by the API.
+};
+
+export function listHTTPSCredentials() {
+  return request<{ items: HTTPSCredential[]; total: number }>('GET', '/knowledge/https-credentials');
+}
+
+export function createHTTPSCredential(input: {
+  name: string;
+  hosts: string[];
+  username: string;
+  token: string;
+}) {
+  return request<HTTPSCredential>('POST', '/knowledge/https-credentials', input);
+}
+
+export function updateHTTPSCredential(id: number, input: {
+  name: string;
+  hosts: string[];
+  username: string;
+  token: string;   // empty string = keep existing token (server nil-means-keep semantics)
+}) {
+  return request<HTTPSCredential>('PATCH', `/knowledge/https-credentials/${id}`, input);
+}
+
+export function deleteHTTPSCredential(id: number) {
+  return request<void>('DELETE', `/knowledge/https-credentials/${id}`);
+}
+
 // ----- i18n localizer for built-in seed content -----
 //
 // The 38 docs currently in qdrant (seeded 2026-05-09 from the network/
