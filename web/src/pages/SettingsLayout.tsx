@@ -46,7 +46,7 @@ const RAIL_ITEMS: RailItem[] = [
   // matches what the user sees in the sidebar; back-compat redirects from
   // the previous /communications and /bots paths live in App.tsx.
   { to: 'notifications', icon: Bell, labelZh: '通知', labelEn: 'Notifications', hintZh: '飞书 / 钉钉 / 企业微信 / Slack / Telegram / Webhook（告警推送）', hintEn: 'Slack / Telegram / Larksuite / DingTalk / WeCom / Webhook (alert delivery)' },
-  { to: 'channels', icon: MessagesSquare, labelZh: '渠道', labelEn: 'Channels', hintZh: '飞书 / 钉钉 / Telegram / Slack 双向多轮', hintEn: 'Slack / Telegram / Larksuite / DingTalk — two-way multi-turn' },
+  { to: 'channels', icon: MessagesSquare, labelZh: 'IM', labelEn: 'Channels', hintZh: '飞书 / 钉钉 / Telegram / Slack 双向多轮', hintEn: 'Slack / Telegram / Larksuite / DingTalk — two-way multi-turn' },
   { to: 'agent', icon: Bot, labelZh: '助理', labelEn: 'Agent', hintZh: 'AI 助理行为 — 写操作权限', hintEn: 'AI assistant behaviour — write-action gate' },
   { to: 'preferences', icon: Gauge, labelZh: '偏好', labelEn: 'Preferences', hintZh: '默认时间窗 / 自动刷新', hintEn: 'Default time window / auto-refresh' },
   { to: 'about', icon: Info, labelZh: '关于', labelEn: 'About', hintZh: '版本 / GitHub / 许可证', hintEn: 'Version / GitHub / license' },

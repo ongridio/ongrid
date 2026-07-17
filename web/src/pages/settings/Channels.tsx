@@ -101,7 +101,7 @@ export default function SettingsChannels() {
         <div className="rounded-lg border border-zinc-800/60 bg-zinc-900/30 px-4 py-3 text-[12px] text-zinc-400">
           <div className="mb-1 flex items-center gap-2 text-zinc-200">
             <MessagesSquare size={14} className="text-zinc-400" />
-            <span className="font-medium">{tr('渠道 — 双向 chat', 'Channels — two-way chat')}</span>
+            <span className="font-medium">{tr('IM — 双向聊天', 'Channels — two-way chat')}</span>
           </div>
           {tr(
             '配置飞书 / 钉钉 / Telegram / Slack 机器人，群里 @bot 或私聊就能开多轮会话。推荐 ',
@@ -138,9 +138,9 @@ export default function SettingsChannels() {
           </Card>
         ) : items.length === 0 ? (
           <EmptyState
-            title={tr('还没有渠道', 'No channels yet')}
+          title={tr('还没有 IM', 'No channels yet')}
             hint={tr(
-              '点上面"新建"配第一个渠道。stream 模式无需公网回调，最快上手。',
+              '点上面"新建"配置第一个 IM。stream 模式无需公网回调，最快上手。',
               'Click "New" above to configure your first channel. Stream mode requires no public webhook URL.',
             )}
           />
@@ -333,7 +333,7 @@ function IMAppEditor({
       open
       onClose={onClose}
       size="lg"
-      title={isCreate ? tr('新建渠道', 'New channel') : tr(`编辑 — ${target!.name}`, `Edit — ${target!.name}`)}
+      title={isCreate ? tr('新建 IM', 'New channel') : tr(`编辑 — ${target!.name}`, `Edit — ${target!.name}`)}
       footer={
         <>
           <button
@@ -515,7 +515,7 @@ function IMAppEditor({
         <Field
           label={tr('回复语言', 'Reply language')}
           hint={tr(
-            '渠道内 agent 回复的语言。"自动" 让模型镜像用户输入；选 中文 / English 会在每条消息后追加语言指令,覆盖 persona 默认语言。',
+            'IM 中 agent 回复的语言。"自动" 让模型镜像用户输入；选 中文 / English 会在每条消息后追加语言指令,覆盖 persona 默认语言。',
             'Language the agent replies in. "Auto" lets the model mirror the user; choosing 中文 / English appends a directive to every incoming message, overriding the persona\'s default.',
           )}
         >
@@ -556,7 +556,7 @@ function IMAppEditor({
             onChange={(e) => setEnabled(e.target.checked)}
             className="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-900"
           />
-          {tr('启用此渠道', 'Enable this channel')}
+          {tr('启用此 IM', 'Enable this channel')}
         </label>
 
         {mode === 'webhook' && (
