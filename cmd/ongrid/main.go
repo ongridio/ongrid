@@ -108,6 +108,7 @@ import (
 	managerbizapproval "github.com/ongridio/ongrid/internal/manager/biz/approval"
 	managerbizgrafana "github.com/ongridio/ongrid/internal/manager/biz/grafana"
 	managerbizimbridge "github.com/ongridio/ongrid/internal/manager/biz/imbridge"
+	managerbizimbridgedingtalk "github.com/ongridio/ongrid/internal/manager/biz/imbridge/provider/dingtalk"
 	managerbizimbridgefeishu "github.com/ongridio/ongrid/internal/manager/biz/imbridge/provider/feishu"
 	managerbizimbridgeslack "github.com/ongridio/ongrid/internal/manager/biz/imbridge/provider/slack"
 	managerbizimbridgetelegram "github.com/ongridio/ongrid/internal/manager/biz/imbridge/provider/telegram"
@@ -1425,11 +1426,10 @@ func main() {
 	// logs "no factory for provider — skipping" and the webhook path
 	// is still available as fallback.
 	imbridgeStreamSupervisor := managerbizimbridge.NewStreamSupervisor(imbridgeRepo, imbridgeSvc, log)
-	// Register the Feishu long-connection factory; DingTalk lands in
-	// Without registration the supervisor logs "no
-	// factory for provider — skipping" and the webhook path still
-	// works as fallback.
+	// Register long-connection providers. All connections dial out, so
+	// operators do not need to expose public webhook endpoints.
 	imbridgeStreamSupervisor.RegisterFactory("feishu", managerbizimbridgefeishu.NewStreamFactory(log))
+	imbridgeStreamSupervisor.RegisterFactory("dingtalk", managerbizimbridgedingtalk.NewStreamFactory(log))
 	// Telegram is stream-only (getUpdates long-poll, outbound → proxy-
 	// friendly behind GFW). Sender allowlist enforced in the provider
 	// (ADR-031).

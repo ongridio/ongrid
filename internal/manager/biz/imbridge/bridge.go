@@ -204,11 +204,16 @@ func (b *Bridge) HandleInbound(ctx context.Context, sender Sender, msg InboundMe
 		return nil
 	}
 
-	// 3. Placeholder for progressive editing.
-	placeholder, err := sender.SendText(ctx, msg.ChatID, msg.ReceiveIDType,
-		localizeReply(app.DefaultLocale, replyThinking))
-	if err != nil {
-		b.log.Warn("placeholder send failed; falling back to one-shot reply", slog.Any("err", err))
+	// 3. Send a placeholder only when the provider can edit it. Providers
+	//    backed by one-shot webhooks (DingTalk) buffer the stream and send
+	//    the final answer once, avoiding one message per chunk.
+	placeholder := ""
+	if _, ok := sender.(MessageEditor); ok {
+		placeholder, err = sender.SendText(ctx, msg.ChatID, msg.ReceiveIDType,
+			localizeReply(app.DefaultLocale, replyThinking))
+		if err != nil {
+			b.log.Warn("placeholder send failed; falling back to one-shot reply", slog.Any("err", err))
+		}
 	}
 
 	// 4. Run the agent with a throttled editor. Append a language directive
@@ -302,7 +307,6 @@ func parseSlashCommand(text string) slashCommand {
 	}
 	return cmdNone
 }
-
 
 func shortChatLabel(id string) string {
 	if len(id) <= 8 {

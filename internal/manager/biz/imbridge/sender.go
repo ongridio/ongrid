@@ -10,16 +10,17 @@ import (
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/agent"
 )
 
-// Sender is the platform-agnostic outbound surface. The provider
-// implementation (Feishu / DingTalk) wraps its own client to satisfy
-// it. The bridge layer never imports a specific provider package;
-// HTTP handlers construct the right Sender (with the app's
-// credentials) and pass it into HandleInbound.
+// Sender is the minimum platform-agnostic outbound surface. Providers
+// that can replace an existing message may also implement MessageEditor.
 type Sender interface {
-	// SendText creates a new text message in the target chat and
-	// returns the platform's message id. The bridge stores the id
-	// so progressive edits can update the same message.
+	// SendText creates a new text message in the target chat.
 	SendText(ctx context.Context, receiveID, receiveIDType, text string) (messageID string, err error)
+}
+
+// MessageEditor is implemented by providers such as Feishu, Telegram,
+// and Slack. DingTalk's session webhook only creates messages, so it
+// intentionally does not implement this interface.
+type MessageEditor interface {
 	// EditText replaces the body of a previously-sent text message.
 	EditText(ctx context.Context, messageID, text string) error
 }
@@ -32,6 +33,7 @@ type Sender interface {
 type streamEditor struct {
 	ctx           context.Context
 	sender        Sender
+	editor        MessageEditor
 	chatID        string
 	receiveIDType string
 	messageID     string // initially the placeholder id; "" if placeholder send failed
@@ -50,9 +52,11 @@ const (
 )
 
 func newStreamEditor(ctx context.Context, sender Sender, chatID, receiveIDType, placeholderMessageID, locale string, log *slog.Logger) *streamEditor {
+	editor, _ := sender.(MessageEditor)
 	return &streamEditor{
 		ctx:           ctx,
 		sender:        sender,
+		editor:        editor,
 		chatID:        chatID,
 		receiveIDType: receiveIDType,
 		messageID:     placeholderMessageID,
@@ -80,7 +84,7 @@ func (e *streamEditor) OnEvent(ev agent.Event) {
 		}
 		e.mu.Lock()
 		e.buf = text
-		shouldFlush := e.shouldFlushLocked()
+		shouldFlush := e.editor != nil && e.shouldFlushLocked()
 		e.mu.Unlock()
 		if shouldFlush {
 			e.flush()
@@ -129,7 +133,9 @@ func (e *streamEditor) flush() error {
 		return nil
 	}
 	if mid == "" {
-		// Placeholder failed earlier — do a one-shot send now.
+		// No placeholder exists. This is the normal path for providers
+		// without message editing and the fallback path after a failed
+		// placeholder send.
 		newID, err := e.sender.SendText(e.ctx, e.chatID, e.receiveIDType, buf)
 		if err != nil {
 			e.log.Warn("imbridge: fallback send failed", slog.Any("err", err))
@@ -140,7 +146,12 @@ func (e *streamEditor) flush() error {
 		e.mu.Unlock()
 		return nil
 	}
-	if err := e.sender.EditText(e.ctx, mid, buf); err != nil {
+	if e.editor == nil {
+		// A one-shot provider already sent its final response. EventDone
+		// and the bridge's final Flush may both arrive; do not duplicate it.
+		return nil
+	}
+	if err := e.editor.EditText(e.ctx, mid, buf); err != nil {
 		e.log.Warn("imbridge: edit failed", slog.String("message_id", mid), slog.Any("err", err))
 		return err
 	}
