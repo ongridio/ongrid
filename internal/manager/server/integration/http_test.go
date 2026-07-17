@@ -21,11 +21,18 @@ import (
 type stubGrafana struct {
 	test           func(ctx context.Context) error
 	sync           func(ctx context.Context) (*bizgrafana.SyncResult, error)
+	syncLoki       func(ctx context.Context) error
 	fetchDashboard func(ctx context.Context, uid string) ([]byte, error)
 }
 
-func (s stubGrafana) Test(ctx context.Context) error                        { return s.test(ctx) }
+func (s stubGrafana) Test(ctx context.Context) error                           { return s.test(ctx) }
 func (s stubGrafana) Sync(ctx context.Context) (*bizgrafana.SyncResult, error) { return s.sync(ctx) }
+func (s stubGrafana) SyncLoki(ctx context.Context) error {
+	if s.syncLoki == nil {
+		return nil
+	}
+	return s.syncLoki(ctx)
+}
 func (s stubGrafana) FetchDashboardJSON(ctx context.Context, uid string) ([]byte, error) {
 	return s.fetchDashboard(ctx, uid)
 }
@@ -135,5 +142,32 @@ func TestFetchDashboardMapsTransportErrorTo502(t *testing.T) {
 
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSyncLokiRequiresAdminAndInvokesService(t *testing.T) {
+	t.Parallel()
+	called := false
+	g := stubGrafana{
+		test: func(_ context.Context) error { return nil },
+		sync: func(_ context.Context) (*bizgrafana.SyncResult, error) { return nil, nil },
+		syncLoki: func(_ context.Context) error {
+			called = true
+			return nil
+		},
+		fetchDashboard: func(_ context.Context, _ string) ([]byte, error) { return nil, nil },
+	}
+	router := newRouter(NewHandler(g, nil, nil, nil, nil))
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/integrations/grafana/sync-loki", nil)
+	req = req.WithContext(tenantctx.With(context.Background(), tenantctx.Tenant{UserID: 7, Role: "admin"}))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !called {
+		t.Fatal("SyncLoki was not invoked")
 	}
 }

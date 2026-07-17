@@ -24,6 +24,7 @@ import (
 type GrafanaService interface {
 	Test(ctx context.Context) error
 	Sync(ctx context.Context) (*bizgrafana.SyncResult, error)
+	SyncLoki(ctx context.Context) error
 	FetchDashboardJSON(ctx context.Context, uid string) ([]byte, error)
 }
 
@@ -103,6 +104,7 @@ func (h *Handler) SetLLMRouter(r LLMRouterInvalidator) { h.llmRouter = r }
 //
 //	POST /v1/integrations/grafana/test           (admin)  — verify connectivity
 //	POST /v1/integrations/grafana/sync           (admin)  — push folder + datasource + dashboards
+//	POST /v1/integrations/grafana/sync-loki      (admin)  — push only the Loki datasource
 //	POST /v1/integrations/prom/test              (admin)  — run "up" PromQL probe
 //	GET  /v1/observability/dashboards/{uid}      (any auth user) — proxy Grafana dashboard JSON
 //
@@ -114,6 +116,7 @@ func (h *Handler) SetLLMRouter(r LLMRouterInvalidator) { h.llmRouter = r }
 func (h *Handler) Register(r chi.Router) {
 	r.Post("/v1/integrations/grafana/test", h.testGrafana)
 	r.Post("/v1/integrations/grafana/sync", h.syncGrafana)
+	r.Post("/v1/integrations/grafana/sync-loki", h.syncLoki)
 	r.Post("/v1/integrations/prom/test", h.testProm)
 	r.Post("/v1/integrations/loki/test", h.testLoki)
 	r.Post("/v1/integrations/tempo/test", h.testTempo)
@@ -193,6 +196,17 @@ func (h *Handler) syncGrafana(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+func (h *Handler) syncLoki(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	if err := h.grafana.SyncLoki(r.Context()); err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // testProm runs a tiny PromQL probe ("up") against the configured Prom

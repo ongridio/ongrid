@@ -246,7 +246,7 @@ func (s *Service) Sync(ctx context.Context) (*SyncResult, error) {
 
 	datasources := []string{promDatasourceName}
 	if lokiDS := s.lokiDatasource(ctx); lokiDS != nil {
-		if err := c.UpsertDatasource(ctx, *lokiDS); err != nil {
+		if err := s.syncLokiDatasource(ctx, c); err != nil {
 			return nil, fmt.Errorf("upsert loki datasource: %w", err)
 		}
 		datasources = append(datasources, lokiDatasourceName)
@@ -269,6 +269,24 @@ func (s *Service) Sync(ctx context.Context) (*SyncResult, error) {
 		slog.Int("dashboards", len(res.Dashboards)),
 	)
 	return res, nil
+}
+
+// SyncLoki updates only the managed Loki datasource. It is intentionally
+// separate from Sync so changing Loki settings does not rewrite dashboards.
+func (s *Service) SyncLoki(ctx context.Context) error {
+	c, err := s.client(ctx)
+	if err != nil {
+		return err
+	}
+	return s.syncLokiDatasource(ctx, c)
+}
+
+func (s *Service) syncLokiDatasource(ctx context.Context, c *pkggrafana.Client) error {
+	lokiDS := s.lokiDatasource(ctx)
+	if lokiDS == nil {
+		return errors.New("grafana: cannot sync Loki — loki.url is empty")
+	}
+	return c.UpsertDatasource(ctx, *lokiDS)
 }
 
 func (s *Service) lokiDatasource(ctx context.Context) *pkggrafana.Datasource {
