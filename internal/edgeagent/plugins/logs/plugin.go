@@ -27,7 +27,7 @@ const Name = "logs"
 func New(binDir, workDir string, log *slog.Logger) plugins.Plugin {
 	return plugins.NewSubprocess(plugins.SubprocessOpts{
 		Name:         Name,
-		Binary:       filepath.Join(binDir, "promtail"),
+		Binary:       filepath.Join(binDir, promtailBinaryName),
 		WorkDir:      filepath.Join(workDir, Name),
 		ConfigFile:   filepath.Join(workDir, Name, "promtail.yaml"),
 		ConfigRender: render,
