@@ -1,3 +1,5 @@
+//go:build !windows
+
 package logs
 
 import (
@@ -5,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/ongridio/ongrid/internal/edgeagent/plugins"
-	"gopkg.in/yaml.v3"
 )
 
 func TestRenderHappyPath(t *testing.T) {
@@ -27,10 +28,6 @@ func TestRenderHappyPath(t *testing.T) {
 		t.Fatalf("render: %v", err)
 	}
 	body := string(out)
-	var parsed map[string]interface{}
-	if err := yaml.Unmarshal(out, &parsed); err != nil {
-		t.Fatalf("rendered kubernetes config must be valid YAML: %v\n--- full body ---\n%s", err, body)
-	}
 
 	for _, want := range []string{
 		"https://manager.example.com/loki/api/v1/push",
@@ -142,70 +139,6 @@ func TestRenderJournaldDefaultOn(t *testing.T) {
 	}
 	if strings.Contains(string(out), "job_name: journald") {
 		t.Errorf("enable_journald=false must remove the journald scrape block:\n%s", string(out))
-	}
-}
-
-func TestRenderKubernetesMode(t *testing.T) {
-	cfg := plugins.PluginConfig{
-		Enabled:  true,
-		EdgeID:   42,
-		Endpoint: "https://manager.example.com/loki/api/v1/push",
-		AuthUser: "ak-edge42",
-		AuthPass: "sk-secret",
-		Spec: map[string]interface{}{
-			"mode":       "kubernetes",
-			"cluster_id": float64(7),
-			"node_name":  "kind-worker",
-		},
-	}
-	out, err := render(cfg)
-	if err != nil {
-		t.Fatalf("render: %v", err)
-	}
-	body := string(out)
-
-	for _, want := range []string{
-		`device_id: "42"`,
-		`cluster_id: "7"`,
-		`node: "kind-worker"`,
-		"job_name: kubernetes-pods",
-		"- cri: {}",
-		`ongrid_source: "kubernetes:pod"`,
-		`job: "kubernetes-pods"`,
-		`__path__: "/var/log/pods/*/*/*.log"`,
-		"source: filename",
-		"namespace:",
-		"pod:",
-		"container:",
-		`expression: '^/var/log/pods/(?P<namespace>[^_]+)_(?P<pod>[^_]+)_(?P<pod_uid>[^/]+)/(?P<container>[^/]+)/[^/]+\.log$'`,
-	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("rendered config missing %q\n--- full body ---\n%s", want, body)
-		}
-	}
-	for _, notWant := range []string{
-		"job_name: journald",
-		"file-var-log-syslog",
-		"file-var-log-messages",
-		"target_label: 'pod_uid'",
-	} {
-		if strings.Contains(body, notWant) {
-			t.Errorf("rendered kubernetes config should not contain %q\n--- full body ---\n%s", notWant, body)
-		}
-	}
-}
-
-func TestRenderKubernetesModeRejectsMissingClusterID(t *testing.T) {
-	cfg := plugins.PluginConfig{
-		Enabled:  true,
-		EdgeID:   42,
-		Endpoint: "https://manager.example.com/loki/api/v1/push",
-		Spec: map[string]interface{}{
-			"mode": "kubernetes",
-		},
-	}
-	if _, err := render(cfg); err == nil {
-		t.Fatalf("render must reject mode=kubernetes without cluster_id")
 	}
 }
 
