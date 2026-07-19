@@ -1,5 +1,4 @@
-// ipc_supervisor_test.go 测试 issue #21 supervisor 自升级 sentinel helper。
-//
+// ipc_supervisor_test.go 测试  supervisor 自升级 sentinel helper。
 // 覆盖 IsSupervisorUpgradePending / WriteSupervisorUpgradePending /
 // IsSupervisorUpgradeApplied / WriteSupervisorUpgradeApplied 四个 helper
 // + Path 函数。

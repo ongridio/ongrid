@@ -1,10 +1,7 @@
-// health.go 管理升级版本元数据文件 + 状态检测函数（ADR-033 U3，issue #23）。
-//
+// health.go 管理升级版本元数据文件 + 状态检测函数。
 // 所有文件名常量引用本包 ipc.go（单一真相源）。
-//
 // 健康判定：last_upgrade_ver == healthy_marker → 升级成功
 // rollback 触发：last_upgrade_ver 存在但 healthy_marker 不匹配 → 回滚
-//
 // AGENTS.md context.Context 例外：WriteUpgradeMeta / ClearPending / WriteRollbackDone
 // 操作本地文件系统（毫秒级），WriteUpgradeMeta 删 healthy_marker 是关键步骤
 // （不删 → watchdog 永不触发 rollback）。取消检查由编排层 Machine 入口完成。
@@ -43,7 +40,6 @@ func HasLastUpgrade(stageDir string) bool {
 
 // WriteUpgradeMeta 在 swap 完成后写入版本元数据，并删除旧 healthy_marker
 // 重新武装健康检查（对称 Linux apply_bundle 完成后 `rm -f "$HEALTHY_MARKER"`）。
-//
 // 删 healthy_marker 是关键步骤：如果不删，旧 marker 仍在 → IsUpgradeHealthy
 // 立刻返回 true → watchdog 永不触发 rollback。
 // 新 worker register_edge 成功后会写新的 healthy_marker。

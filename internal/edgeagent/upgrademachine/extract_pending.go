@@ -1,9 +1,8 @@
 // extract_pending.go — Windows 兼容层：解压 worker agent_upgrade RPC 下载的
 // pending tar.gz 到 incoming/。
-//
 // 背景：Linux edge 由 systemd ExecStartPre（apply-pending-upgrade.sh）完成
 // pending → incoming 解压；Windows 无对等机制，由 supervisor CheckPending
-// 调用本文件函数完成。#21 dogfood 2026-07-16 发现此缺失。
+// 调用本文件函数完成。  2026-07-16 发现此缺失。
 package upgrademachine
 
 import (
@@ -35,7 +34,6 @@ func HasPendingBundle(stageDir string) bool {
 
 // ExtractPendingBundle 解压 {stageDir}/pending（tar.gz）到 {stageDir}/incoming/，
 // 然后删除 pending + pending.sha256（防止重复解压触发 upgrade 死循环）。
-//
 // 调用方：Machine.CheckPending 在 IsPending 返回 false 但 HasPendingBundle
 // 返回 true 时调用（Windows supervisor 路径）。
 func ExtractPendingBundle(stageDir string) error {

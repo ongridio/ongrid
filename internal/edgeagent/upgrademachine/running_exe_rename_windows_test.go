@@ -1,19 +1,16 @@
-// running_exe_rename_windows_test.go — issue #21 Step 0 spike。
-//
+// running_exe_rename_windows_test.go —  Step 0 spike。
 // 实测 Windows 文件锁语义，决定 supervisor 自升级方案 A/B 走向：
 //   - 场景 1 + 2 通过 → 方案 A（进程内 rename-aside）可行
 //   - 都失败 → fallback 方案 B（detached cmd.exe helper）
-//
 // 决策依据（PLAN.md v3 "关键技术不确定性"）：
 //   - 观点 A：Windows Server 2003+ image loader 用 FILE_SHARE_READ | FILE_SHARE_DELETE
 //     → rename 运行中 .exe 成功
 //   - 观点 B：image loader 只 share READ → rename 失败 ERROR_SHARING_VIOLATION
-//
 // 5 场景表驱动测试（PLAN 附录 A）：
 //  1. 进程 B rename 进程 A 启动中的 .exe（方案 A step 1 核心验证）
 //  2. 进程 A 自己 rename 自己的 .exe（supervisor 进程内 self-swap 验证）
 //  3. replace 模式（new → 正在运行的 dest，诊断价值：验证直接 replace 是否可行）
-//  4. 恢复（.old → supervisor.exe，W2 brick 兜底验证）
+//  4. 恢复（.old → supervisor.exe， brick 兜底验证）
 //  5. MoveFileEx(MOVEFILE_DELAY_UNTIL_REBOOT) fallback（方案 D 可行性）
 
 //go:build windows
@@ -160,7 +157,7 @@ func scenarioReplaceRunningExe(t *testing.T, dummy string) {
 	t.Logf("→ 确认必须用 rename-aside 两步（step 1: dest→.old; step 2: .new→dest）")
 }
 
-// scenarioRestoreFromOld：模拟 W2 brick 兜底 — step 1 成功后，把 .old rename 回原路径。
+// scenarioRestoreFromOld：模拟  brick 兜底 — step 1 成功后，把 .old rename 回原路径。
 // 验证：进程 A 持有的 image 被 rename 到 .old 后，能否再次被 rename 回原路径。
 func scenarioRestoreFromOld(t *testing.T, dummy string) {
 	dir := t.TempDir()
@@ -185,14 +182,14 @@ func scenarioRestoreFromOld(t *testing.T, dummy string) {
 
 	// brick 兜底：.old → supervisor.exe（恢复）
 	if err := os.Rename(oldPath, exePath); err != nil {
-		t.Errorf("场景 4 失败（W2 brick 兜底不可行）：os.Rename(%s, %s) = %v",
+		t.Errorf("场景 4 失败：os.Rename(%s, %s) = %v",
 			oldPath, exePath, err)
 		return
 	}
 	if _, err := os.Stat(exePath); err != nil {
 		t.Errorf("场景 4 异常：恢复后 supervisor.exe 不存在（err=%v）", err)
 	}
-	t.Logf("场景 4 通过：进程持有的 .old 可以 rename 回原路径 → W2 brick 兜底可行")
+	t.Logf("场景 4 通过：进程持有的 .old 可以 rename 回原路径 →  brick 兜底可行")
 }
 
 // scenarioMoveFileDelayUntilReboot：调用 MoveFileExW + MOVEFILE_DELAY_UNTIL_REBOOT。

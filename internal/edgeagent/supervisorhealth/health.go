@@ -1,12 +1,10 @@
 // Package supervisorhealth 实现 supervisor.exe 与 worker.exe 之间的
-// health.json 文件 IPC（ADR-033 U3）。
-//
+// health.json 文件 IPC。
 // worker.exe 每 30s 写一次心跳到 health.json，supervisor.exe 读 + 超时判断。
 // 超过 HeartbeatTimeout（90s，3× 心跳间隔，给 GC/network jitter 留 margin）
-// 未刷新 → supervisor 视为 worker 卡死，触发回滚/重启（MVP-1 仅重启）。
-//
+// 未刷新 → supervisor 视为 worker 卡死，触发回滚/重启。
 // 此包故意保持纯 Go（无 Windows 专属依赖），测试可在 L1 Linux CI 跑
-// （ADR-035 Q7 C5 分层策略：L1 交叉编译秒级，L2 windows-latest 跑 Windows 专属）。
+//。
 package supervisorhealth
 
 import (
@@ -24,7 +22,7 @@ import (
 // 字段增删或语义变更时 +1，supervisor 读到不兼容版本应拒绝启动 worker。
 const HealthSchemaVersion = 1
 
-// HeartbeatInterval 是 worker.exe 写心跳的频率（ADR-033 U3 "30s 心跳"）。
+// HeartbeatInterval 是 worker.exe 写心跳的频率。
 const HeartbeatInterval = 30 * time.Second
 
 // HeartbeatTimeout 是 supervisor.exe 视为 worker 卡死的阈值。
@@ -42,13 +40,12 @@ const (
 	// StatusHealthy 表示 worker 正常运行。
 	StatusHealthy Status = "healthy"
 	// StatusDegraded 表示 worker 自报部分 skill 不可用（如 windows_exporter 挂了）。
-	// MVP-1 supervisor 不对 degraded 做特殊处理，仅记录。
+	//  supervisor 不对 degraded 做特殊处理，仅记录。
 	StatusDegraded Status = "degraded"
 )
 
 // Health 是 health.json 文件的 schema。worker 写，supervisor 读。
-//
-// 字段对齐 ADR-033 U3：worker_pid 用于 supervisor 检测 PID race（旧 worker
+// 字段对齐 ：worker_pid 用于 supervisor 检测 PID race（旧 worker
 // 崩溃后新 worker 复用 PID 槽位但 started_at 不同）；started_at 与
 // last_heartbeat 都是 RFC3339 纳秒精度。
 type Health struct {
@@ -120,7 +117,6 @@ func Read(path string) (Health, error) {
 
 // IsStale 判断心跳是否过期：now - LastHeartbeat > timeout。
 // 边界恰好等于 timeout 视为未过期（属于"最后的有效时刻"）。
-//
 // 错误的判断由调用方做（文件不存在 ≠ worker 卡死，可能是首次启动）。
 func IsStale(h Health, now time.Time, timeout time.Duration) bool {
 	return now.Sub(h.LastHeartbeat) > timeout

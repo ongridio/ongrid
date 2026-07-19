@@ -1,8 +1,7 @@
 // worker.go 实现 supervisor.exe 对 worker.exe 的启动 + 监控 + 心跳 watchdog
-// （ADR-033 U3）。MVP-1 仅做"崩溃重启 + 心跳超时 kill 重启"，bundle upgrade
-// 推 MVP-2。
-//
-// 健康感知走 health.json 文件 IPC（ADR-033 I2 / U3）：
+//。 仅做"崩溃重启 + 心跳超时 kill 重启"，bundle upgrade
+// 推。
+// 健康感知走 health.json 文件 IPC：
 //   - worker 每 30s 写一次心跳
 //   - supervisor 每 30s 读 + 判断超时（90s 阈值，3× 心跳间隔）
 //   - 超时 → kill worker → superviseWorker 外层循环重启
@@ -27,10 +26,9 @@ import (
 )
 
 // 部署路径常量统一在 internal/edgeagent/edgedirs 包，与 cmd/ongrid-edge
-// 共享（ADR-033 I2）。
-//
+// 共享。
 // 重启间隔是 worker 异常退出后的固定等待时间。
-// MVP-1 不做指数退避（YAGNI）；MVP-2 加资源限制 / 指数退避。
+//  不做指数退避； 加资源限制 / 指数退避。
 const (
 	restartDelay     = 5 * time.Second
 	workerKillTimeout = 10 * time.Second
@@ -68,8 +66,7 @@ func signalInterruptContext() (context.Context, context.CancelFunc) {
 
 // superviseWorker 是 supervisor 主循环：启动 worker → 监控 → 异常退出则等待
 // restartDelay 后重启。ctx 取消时优雅停止 worker 并返回 ctx.Err()。
-//
-// upgrade 集成（ADR-033 U3）：
+// upgrade 集成：
 //   - errUpgradeApplied → 跳过 restartDelay 立即重启 + 下一轮进入 upgrade watch
 //   - rollback.done sentinel 存在 → 跳过 upgrade watch（避免死循环）
 func superviseWorker(ctx context.Context, log *slog.Logger, m *upgrademachine.Machine) error {
@@ -84,8 +81,7 @@ func superviseWorker(ctx context.Context, log *slog.Logger, m *upgrademachine.Ma
 
 		if errors.Is(err, upgrademachine.ErrApplied) {
 			// swap 完成 → 检查是否需要 supervisor 自升级
-			//（#21：bundle 含 supervisor.exe 时 applyOne 写 pending sentinel）
-			if upgrademachine.IsSupervisorUpgradePending(edgedirs.StageDir) {
+						if upgrademachine.IsSupervisorUpgradePending(edgedirs.StageDir) {
 				log.Info("supervisor self-swap pending; triggering rename-aside")
 				swapErr := m.SupervisorSelfSwap()
 				if errors.Is(swapErr, upgrademachine.ErrSupervisorRestartSoon) {
@@ -130,10 +126,8 @@ func superviseWorker(ctx context.Context, log *slog.Logger, m *upgrademachine.Ma
 // runWorkerOnce 启动一次 worker.exe，阻塞等待其退出。
 // 退出原因有三：(1) worker 自己崩溃（Wait 返回 err）；(2) watchdog 发现心跳
 // 超时，cancel workerCtx → kill worker；(3) 父 ctx 取消（服务停止）。
-//
 // watchUpgrade=true 时，worker 启动后额外启动 upgrade watch goroutine
 // （180s 窗口确认 register_edge 成功）。watch 成功 → 继续监控；超时 → rollback。
-//
 // worker 退出后检测 pending upgrade（checkPendingUpgrade），有则 swap 并返回
 // errUpgradeApplied sentinel 让 superviseWorker 跳过 restartDelay。
 func runWorkerOnce(ctx context.Context, log *slog.Logger, watchUpgrade bool, m *upgrademachine.Machine) error {
@@ -146,7 +140,7 @@ func runWorkerOnce(ctx context.Context, log *slog.Logger, watchUpgrade bool, m *
 	cmd := exec.CommandContext(workerCtx, workerExe())
 	// worker stdout/stderr 重定向到轮转日志文件（supervisor.log 已有自己的 sink）。
 	// Windows Service 进程无 console，nil inherit = 丢弃；改用 append-only file
-	// 让 worker 的 slog 输出可观测（issue #20 dogfood 调试）。
+	// 让 worker 的 slog 输出可观测。
 	if workerStdout, err := openWorkerLog("worker-stdout.log"); err == nil {
 		cmd.Stdout = workerStdout
 		defer workerStdout.Close()
@@ -166,7 +160,7 @@ func runWorkerOnce(ctx context.Context, log *slog.Logger, watchUpgrade bool, m *
 	// （taskkill /T 先 send Ctrl-Break，再 workerKillTimeout 后强制 kill）。
 	cmd.Cancel = func() error {
 		// taskkill /T /F 等于 SIGKILL 整个进程树。
-		// MVP-1 不做优雅停止（worker 收到 TerminateProcess 直接退出，状态由
+		//  不做优雅停止（worker 收到 TerminateProcess 直接退出，状态由
 		// health.json + 启动时从 manager 重连 tunnel 恢复）。
 		return exec.Command("taskkill", "/T", "/F", "/PID", fmt.Sprint(cmd.Process.Pid)).Run()
 	}
@@ -253,7 +247,6 @@ func runWorkerOnce(ctx context.Context, log *slog.Logger, watchUpgrade bool, m *
 // watchHeartbeat 周期性读 health.json 判断 worker 心跳是否过期。
 // 发现过期 → 返回 error（触发外层 kill worker）。
 // workerCtx 取消时立即返回 nil（worker 已被外层 kill，不需要再报警）。
-//
 // startupGrace 是 worker 启动到首次写 health.json 的宽限时间（2× HeartbeatTimeout = 180s），
 // 超过此窗口 health.json 还未出现 → 视为 worker 启动失败。
 func watchHeartbeat(workerCtx context.Context, workerPID int, log *slog.Logger) error {

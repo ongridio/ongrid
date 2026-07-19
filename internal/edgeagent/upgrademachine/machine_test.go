@@ -1,12 +1,10 @@
-// machine_test.go 测试 Machine 深模块的编排逻辑（ADR-033 U3，issue #23）。
-//
+// machine_test.go 测试 Machine 深模块的编排逻辑。
 // 从 cmd/upgrade_windows_test.go 迁移，适配 Machine API：
 //   - applyAndSwap → Machine.Apply
 //   - maybeApplyOnBoot / maybeRollbackOnBoot → Machine.BootCheck
 //   - checkPendingUpgrade → Machine.CheckPending
 //   - watchUpgradeHealth → Machine.HealthCheck
 //   - rollbackAndMark → Machine.RollbackAndMark
-//
 // 纯 Go（无 Windows 专属依赖），在 Linux CI 可跑。
 
 package upgrademachine
@@ -120,9 +118,9 @@ func TestMachine_Apply_KillSkippedWhenPIDZero(t *testing.T) {
 }
 
 // TestKillManifestExes_SkipsSupervisorBinary 验证 KillManifestExes 不 kill
-// supervisor 自己。MANIFEST 包含 supervisor.exe 用于 rename-aside 自升级（#21），
+// supervisor 自己。MANIFEST 包含 supervisor.exe 用于 rename-aside 自升级，
 // 但 kill supervisor 进程会导致 SCM restart 死循环。
-// dogfood 2026-07-16 发现此 bug。
+//  2026-07-16 发现此 bug。
 func TestKillManifestExes_SkipsSupervisorBinary(t *testing.T) {
 	entries := []ManifestEntry{
 		{Dest: `C:\bin\` + WorkerBinaryName},
@@ -314,7 +312,7 @@ func TestMachine_BootCheck_RollbackDoneSkips(t *testing.T) {
 // --- Machine.CheckPending ---
 
 // TestMachine_BootCheck_ExtractsPendingBundle 验证 BootCheck 在 incoming/ 为空但
-// pending tar.gz 存在时自动解压再 apply（#21 code-review HIGH-1 回归防护）。
+// pending tar.gz 存在时自动解压再 apply。
 func TestMachine_BootCheck_ExtractsPendingBundle(t *testing.T) {
 	stageDir := t.TempDir()
 	destDir := t.TempDir()
@@ -348,7 +346,7 @@ func TestMachine_BootCheck_ExtractsPendingBundle(t *testing.T) {
 }
 
 // TestMachine_CheckPending_ExtractsPendingBundle 验证 CheckPending 在 incoming/ 为空但
-// pending tar.gz 存在时自动解压再 apply（#21 dogfood P3 回归防护）。
+// pending tar.gz 存在时自动解压再 apply。
 func TestMachine_CheckPending_ExtractsPendingBundle(t *testing.T) {
 	stageDir := t.TempDir()
 	destDir := t.TempDir()

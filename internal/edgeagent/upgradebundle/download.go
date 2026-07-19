@@ -1,8 +1,6 @@
-// download.go 实现 worker 侧的 bundle 下载 + sha256 校验 + 解压（ADR-033 U3 Phase 3）。
-//
+// download.go 实现 worker 侧的 bundle 下载 + sha256 校验 + 解压。
 // 对称 Linux 侧 biz/handleFetchPackage，但作为独立纯函数 API（不绑定 Agent 结构体），
 // 可被 Windows worker / 测试 / Phase 4 RPC handler 直接调用。
-//
 // 流程（all-or-nothing，任何步骤失败都清理残留）：
 //  1. 校验输入（URL 协议、sha256 格式）
 //  2. 清理旧残留（incoming/ + incoming.tar.gz）
@@ -11,7 +9,6 @@
 //  5. 解压 → incoming/（拒绝路径逃逸、symlink、超限）
 //  6. 删 tarball（只保留解压后的树）
 //  7. 验证 incoming/MANIFEST.txt（per-file sha256 all-or-nothing）
-//
 // 成功后 incoming/MANIFEST.txt 存在 = 触发器就绪，supervisor 检测到此文件 → swap。
 
 package upgradebundle
@@ -45,14 +42,11 @@ const bundleTarballName = "incoming.tar.gz"
 
 // DownloadBundle 从 downloadURL 下载 .tar.gz bundle，校验 sha256，解压到
 // stageDir/incoming/，并验证 MANIFEST.txt 中每个文件的 sha256。
-//
 // 返回 (下载字节数, manifest 文件数, error)。
 // 成功后 stageDir/incoming/MANIFEST.txt 存在（= pending upgrade 触发器）。
 // 任何步骤失败时清理所有残留文件（tarball + incoming/），不留半成品。
-//
 // ctx 用于请求级取消（RPC 超时、客户端断开）。内部用 downloadTimeout
 // 作为上限封顶，避免慢网络无限挂起。ctx.Done() 触发时 HTTP 请求中止。
-//
 // client 为 nil 时使用 http.DefaultClient。调用方可注入跳过 TLS 验证的
 // client（私有部署自签名 nginx 场景，对称 biz.bundleDownloadClient）。
 func DownloadBundle(ctx context.Context, client *http.Client, downloadURL, expectedSHA, stageDir string) (int64, int, error) {

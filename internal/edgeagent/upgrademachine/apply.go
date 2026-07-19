@@ -1,17 +1,14 @@
-// apply.go 实现 bundle swap 算法（ADR-033 U3，issue #23）。
-//
+// apply.go 实现 bundle swap 算法。
 // 对称 Linux apply-pending-upgrade.sh 的 bundle apply 模式：
 //  1. 预检：验证所有 src 的 sha256（all-or-nothing，半换比不换更糟）
 //  2. 对每条 entry：
 //     a. 如果 dest 存在 → copy(dest, dest.previous)（备份）
 //     b. copy(src, dest.new)（暂存到 dest 同目录，保证同卷原子 rename）
 //     c. rename(dest.new, dest)（原子替换）
-//
 // Windows 特殊考虑：
 //   - os.Rename 在同目录下是原子的（底层 MoveFileExW + MOVEFILE_REPLACE_EXISTING）
 //   - copy 到 dest.new 而非直接 rename src→dest，因为 incoming/ 和 dest 可能跨卷
 //   - 残留 dest.new（上次崩溃）在步骤 b 被覆盖，幂等
-//
 // AGENTS.md context.Context 例外：ApplyBundle 操作本地文件系统（秒级），
 // 是原子事务语义（all-or-nothing），中途取消比跑完更危险（半 swap 状态）。
 // 取消检查由编排层 Machine.Apply 在入口处完成（ctx.Err() guard），
@@ -34,11 +31,9 @@ type ApplyResult struct {
 }
 
 // ApplyBundle 执行 MANIFEST 中所有条目的 swap。
-//
 // 预检阶段（VerifyAll）失败时立即返回，不触碰任何 dest 文件。
 // swap 阶段中单条 entry 失败时记录错误并继续（best-effort，对称 Linux 行为）。
-//
-// stageDir 用于写 supervisor_upgrade.pending sentinel（issue #21）。
+// stageDir 用于写 supervisor_upgrade.pending sentinel。
 // 当 entry.Dest 是 supervisor.exe 时，只 stage .new + 写 sentinel，不 rename。
 func ApplyBundle(stageDir, incomingDir string, entries []ManifestEntry) (*ApplyResult, error) {
 	// 预检：所有 src 的 sha 必须验证通过
@@ -62,8 +57,7 @@ func isSupervisorBinary(dest string) bool {
 }
 
 // applyOne 执行单条 entry 的 swap：backup → stage → atomic rename。
-//
-// supervisor.exe special-case（issue #21）：运行中的 supervisor.exe 无法被
+// supervisor.exe special-case：运行中的 supervisor.exe 无法被
 // 原子 rename（image loader 持有 image section）。改为只 stage .new + 写
 // pending sentinel，让 Machine.SupervisorSelfSwap 后续做 rename-aside。
 func applyOne(stageDir, incomingDir string, e ManifestEntry, result *ApplyResult) error {

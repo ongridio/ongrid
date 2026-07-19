@@ -1,24 +1,19 @@
 // install_windows.go 实现 supervisor.exe --install / --uninstall 子命令
-// （ADR-037 A2 CR4 首次装机流程）。
-//
+//。
 // --install --token <X> --cloud-addr <X> --access-key <X> [--collector-mode off] [--plugin-bin-dir <P>] [--plugin-work-dir <P>]:
 //   1. DPAPI CryptProtectData(token) → secrets.enc
 //   2. 验证 CryptUnprotectData(secrets.enc) 能还原
 //   3. 清零明文 token 内存
 //   4. sc.exe create → 启动服务
 //   5. 写注册表 Environment MultiString（cloud_addr / access_key / collector_mode / plugin_*_dir）
-//
 // --uninstall:
 //   1. sc.exe stop + delete（注册表 Environment 字段随服务键一起清除）
 //   2. 删除 secrets.enc
-//
 // 安全：明文 token 仅在 CLI flag 时刻存在于内存，加密后立即清零。
 // 不写日志/临时文件。Go string 不可变（无法真正清零 argv），但 []byte 可以。
-//
-// 注：access_key 暂以明文存于 Environment（与 ADR-037 CR4 现状一致；CR4 仅要求 SECRET_KEY
-// 走 DPAPI，ACCESS_KEY 在现有 dogfood 服务中也是明文环境变量）。
-//
-// MVP-3 #18-1 深化：runInstall 从 66 行单体函数拆为 ≤30 行 orchestrator，
+// 注：access_key 暂以明文存于 Environment（与 R4 现状一致； 仅要求 SECRET_KEY
+// 走 DPAPI，ACCESS_KEY 在现有  服务中也是明文环境变量）。
+//  深化：runInstall 从 66 行单体函数拆为 ≤30 行 orchestrator，
 // 3 个正交关注点委托给 install 包接口（SecretStore / ServiceController / EnvWriter）。
 
 //go:build windows
@@ -96,12 +91,11 @@ func (o *installOptions) envPairs() []string {
 }
 
 // runInstall 执行 --install 流程，编排接口的调用顺序。
-//
-// 编排顺序（ADR-037 A2 CR4 + #21 supervisor 自升级加固）：
+// 编排顺序：
 //  1. SecretStore.Install — DPAPI 加密 + round-trip 验证（内部自清理）
 //  2. ServiceController.Create — sc.exe create（失败时回滚凭证）
-//  3. ServiceController.ConfigureDefenderExclusion — Add-MpPreference（W3，失败仅 warn）
-//  4. ServiceController.ConfigureRecovery — sc.exe failure（#21，失败仅 warn）
+//  3. ServiceController.ConfigureDefenderExclusion — Add-MpPreference
+//  4. ServiceController.ConfigureRecovery — sc.exe failure
 //  5. EnvWriter.Write — registry Environment（失败不回滚服务）
 //  6. ServiceController.Start — sc.exe start（失败仅告警，不报错）
 func runInstall(
@@ -138,13 +132,13 @@ func runInstall(
 		return fmt.Errorf("create service: %w", err)
 	}
 
-	// 3. Defender exclusion（#21 Step 7a W3 — 失败仅 warn，不阻断 install）
+	// 3. Defender exclusion
 	if err := sc.ConfigureDefenderExclusion(); err != nil {
 		log.Warn("failed to configure Windows Defender exclusion (non-fatal; AV may interfere with supervisor self-swap)",
 			slog.String("err", err.Error()))
 	}
 
-	// 4. SCM failure recovery（#21 Step 7 — 失败仅 warn，service.go samesession=false 依赖此配置）
+	// 4. SCM failure recovery
 	if err := sc.ConfigureRecovery(); err != nil {
 		log.Warn("failed to configure SCM failure recovery (non-fatal; supervisor won't auto-restart on crash)",
 			slog.String("err", err.Error()))

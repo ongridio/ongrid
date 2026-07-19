@@ -285,7 +285,7 @@ func (m *mockEnvWriter) Write(pairs []string) error {
 }
 
 // ---------------------------------------------------------------------------
-// runInstall orchestrator 测试（MVP-3 #18-1：4 错误路径 + happy path）
+// runInstall orchestrator 测试
 // ---------------------------------------------------------------------------
 
 // validInstallOptions 返回通过 Validate 的 installOptions。
@@ -423,10 +423,10 @@ func TestRunInstall_Success(t *testing.T) {
 		t.Error("service should be created")
 	}
 	if !sc.recoveryConfigured {
-		t.Error("SCM failure recovery should be configured (#21 Step 7)")
+		t.Error("SCM failure recovery should be configured")
 	}
 	if !sc.defenderConfigured {
-		t.Error("Defender exclusion should be configured (#21 Step 7a)")
+		t.Error("Defender exclusion should be configured")
 	}
 	if !sc.started {
 		t.Error("service should be started")
@@ -440,7 +440,7 @@ func TestRunInstall_Success(t *testing.T) {
 	}
 }
 
-// TestRunInstall_DefenderExclusionFailure_NonFatal 验证 Defender exclusion 失败不阻断 install（#21 Step 7a W3）。
+// TestRunInstall_DefenderExclusionFailure_NonFatal 验证 Defender exclusion 失败不阻断 install。
 func TestRunInstall_DefenderExclusionFailure_NonFatal(t *testing.T) {
 	ss := &mockSecretStore{}
 	sc := &mockServiceController{
@@ -462,7 +462,7 @@ func TestRunInstall_DefenderExclusionFailure_NonFatal(t *testing.T) {
 	}
 }
 
-// TestRunInstall_RecoveryFailure_NonFatal 验证 ConfigureRecovery 失败不阻断 install（#21 Step 7）。
+// TestRunInstall_RecoveryFailure_NonFatal 验证 ConfigureRecovery 失败不阻断 install。
 func TestRunInstall_RecoveryFailure_NonFatal(t *testing.T) {
 	ss := &mockSecretStore{}
 	sc := &mockServiceController{

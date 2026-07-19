@@ -1,6 +1,6 @@
 // sleeper_main.go 是测试辅助程序：启动后持续运行直到被 kill。
 // 用于模拟 windows_exporter.exe 等长期运行的 plugin 进程。
-// 通过持有自身 .exe 文件锁，模拟 issue #20 的核心场景：
+// 通过持有自身 .exe 文件锁，模拟  的核心场景：
 // worker 退出后 plugin 进程 orphaned → .exe 文件锁阻塞 rename。
 package main
 

@@ -1,6 +1,5 @@
-// bootcheck_supervisor_test.go 测试 issue #21 BootCheck 的 supervisor 自升级集成。
-//
-// 覆盖步骤 3（applied sentinel 清理）/ 4（brick recovery）/ 5（pending → W1 KillByImage → self-swap）。
+// bootcheck_supervisor_test.go 测试  BootCheck 的 supervisor 自升级集成。
+// 覆盖步骤 3（applied sentinel 清理）/ 4（brick recovery）/ 5（pending →  KillByImage → self-swap）。
 
 package upgrademachine
 
@@ -87,7 +86,7 @@ func TestBootCheck_NoBrickState_SupervisorExists(t *testing.T) {
 	}
 }
 
-// --- 步骤 5：pending sentinel → W1 KillByImage → self-swap ---
+// --- 步骤 5：pending sentinel →  KillByImage → self-swap ---
 
 func TestBootCheck_PendingSentinel_KillsWorkerBeforeSelfSwap(t *testing.T) {
 	dummy := buildDummy(t)
@@ -109,7 +108,7 @@ func TestBootCheck_PendingSentinel_KillsWorkerBeforeSelfSwap(t *testing.T) {
 		t.Fatalf("期望 ErrSupervisorRestartSoon，got %v", err)
 	}
 
-	// W1: KillByImage 应被调用，参数是 WorkerBinaryName
+	// : KillByImage 应被调用，参数是 WorkerBinaryName
 	if pc.killImageCalls.Load() != 1 {
 		t.Errorf("KillByImage 应被调用 1 次，got %d", pc.killImageCalls.Load())
 	}
@@ -159,9 +158,9 @@ func TestBootCheck_SelfSwapFails_RecordsLastError(t *testing.T) {
 		t.Errorf("冒烟失败应返回错误（lastErr）")
 	}
 
-	// W1: KillByImage 仍被调用（在 self-swap 之前）
+	// : KillByImage 仍被调用（在 self-swap 之前）
 	if pc.killImageCalls.Load() != 1 {
-		t.Errorf("KillByImage 应被调用（W1 在 self-swap 前），got %d", pc.killImageCalls.Load())
+		t.Errorf("KillByImage 应被调用，got %d", pc.killImageCalls.Load())
 	}
 
 	// supervisor.exe 应未被改动

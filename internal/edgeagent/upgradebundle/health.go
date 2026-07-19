@@ -1,6 +1,5 @@
-// health.go 实现 worker 侧的健康标记 + rollback sentinel 管理（ADR-033 U3 Phase 3）。
-//
-// 常量引用 upgrademachine 包（单一真相源，issue #23），消除跨包 drift。
+// health.go 实现 worker 侧的健康标记 + rollback sentinel 管理。
+// 常量引用 upgrademachine 包（单一真相源），消除跨包 drift。
 
 package upgradebundle
 
@@ -22,10 +21,8 @@ const HealthyMarkerFile = upgrademachine.HealthyMarkerFile
 const RollbackDoneFile = upgrademachine.RollbackDoneFile
 
 // WriteHealthyMarker 在 register_edge 成功后写 <stageDir>/healthy_marker。
-//
 // 内容 = version + "\n"。supervisor 的 Machine.HealthCheck 检测到此文件
 // 内容匹配 last_upgrade_ver 时判定升级成功。
-//
 // 空 version 时跳过（不报错）— 适配 dev 模式或未配 AgentVersion 的场景。
 // stageDir 不存在时自动创建。
 func WriteHealthyMarker(stageDir, version string) error {
@@ -44,11 +41,9 @@ func WriteHealthyMarker(stageDir, version string) error {
 }
 
 // DeleteRollbackSentinel 删除 <stageDir>/rollback.done sentinel 文件。
-//
 // manager 推送新 bundle 前必须调用此函数清理上次 rollback 留下的 sentinel，
 // 否则 supervisor 启动时检测到 rollback.done 存在会跳过 rollback 检查，
 // 导致 upgrade 流程死循环。
-//
 // 幂等：文件不存在时返回 nil（首次升级或已清理）。
 func DeleteRollbackSentinel(stageDir string) error {
 	path := filepath.Join(stageDir, RollbackDoneFile)

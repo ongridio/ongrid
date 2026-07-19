@@ -1,12 +1,9 @@
-// machine.go 实现升级状态机深模块（issue #23）。
-//
+// machine.go 实现升级状态机深模块。
 // Machine 将原先分散在 cmd/upgrade_windows.go 的编排逻辑（applyAndSwap、
 // maybeApplyOnBoot、maybeRollbackOnBoot、watchUpgradeHealth、rollbackAndMark、
 // checkPendingUpgrade）集中到一个类型中。
-//
 // supervisor 侧（cmd/）通过 NewMachine 创建实例，注入平台专属的 ProcessController，
 // 然后调用 4 个高层方法：BootCheck / Apply / HealthCheck / RollbackAndMark。
-//
 // 纯 Go（无 Windows 专属依赖），测试可在 Linux CI 跑。
 
 package upgrademachine
@@ -31,7 +28,6 @@ var ErrApplied = errors.New("upgrade applied; restart immediately")
 var ErrRolledBack = errors.New("upgrade rolled back after timeout")
 
 // ProcessController 抽象进程终止操作，供跨平台 DI。
-//
 // Windows 生产实现用 taskkill；测试传 mock。
 type ProcessController interface {
 	// KillTree 终止 pid 及其所有子进程（taskkill /T /F /PID）。
@@ -44,7 +40,6 @@ type ProcessController interface {
 }
 
 // Machine 是升级状态机深模块，封装 supervisor 侧的升级编排逻辑。
-//
 // 持有 stageDir（IPC 文件根）和 binDir（swap 目标目录），
 // 通过注入的 ProcessController 执行平台专属的进程终止。
 type Machine struct {
@@ -55,7 +50,6 @@ type Machine struct {
 }
 
 // NewMachine 创建升级状态机实例。
-//
 // 参数：
 //   - stageDir: IPC 文件根目录（incoming/、last_upgrade_ver 等在此下）
 //   - binDir: swap 目标目录（worker.exe、.previous 文件在此下）
@@ -71,16 +65,14 @@ func NewMachine(stageDir, binDir string, log *slog.Logger, pc ProcessController)
 }
 
 // BootCheck 是 supervisor 启动时的 boot hook，合并原 maybeRollbackOnBoot + maybeApplyOnBoot
-// + issue #21 supervisor 自升级收尾 / brick 恢复 / self-swap 触发。
-//
+// +  supervisor 自升级收尾 / brick 恢复 / self-swap 触发。
 // 执行顺序（不可反转）：
 //  1. 检测上次升级是否健康 → 不健康则 RollbackAndMark
 //  2. 检测残留 pending upgrade → 有则 Apply（boot 时无 worker，不 kill）
-//  3. supervisor_upgrade.applied sentinel → 清理 .old 备份 + 删 sentinel（#21）
-//  4. brick recovery（supervisor.exe 缺失 + .old 存在）→ rename .old 恢复（#21）
-//  5. supervisor_upgrade.pending sentinel → KillByImage 清 orphan worker（W1）
+//  3. supervisor_upgrade.applied sentinel → 清理 .old 备份 + 删 sentinel
+//  4. brick recovery（supervisor.exe 缺失 + .old 存在）→ rename .old 恢复
+//  5. supervisor_upgrade.pending sentinel → KillByImage 清 orphan worker
 //     → SupervisorSelfSwap → 返回 ErrSupervisorRestartSoon 让 SCM 重启
-//
 // 返回最后遇到的错误（如有）。返回 ErrSupervisorRestartSoon 时调用方（service.go）
 // 应返回 (false, 1) 让 SCM 按 recovery action 重启（exitCode=0 不触发 restart）。
 func (m *Machine) BootCheck(ctx context.Context) error {
@@ -104,7 +96,7 @@ func (m *Machine) BootCheck(ctx context.Context) error {
 
 	// 2. 残留 pending → apply（boot 时无 worker，PID 传 0）
 	// Windows 兼容：pending tar.gz 可能尚未解压（无 systemd ExecStartPre 对等机制），
-	// 与 CheckPending 对称处理（#21 dogfood code-review HIGH-1）。
+	// 与 CheckPending 对称处理。
 	if !IsPending(m.stageDir) && HasPendingBundle(m.stageDir) {
 		m.log.Info("upgrade: pending tar.gz detected on boot; extracting to incoming/")
 		if err := ExtractPendingBundle(m.stageDir); err != nil {
@@ -120,7 +112,7 @@ func (m *Machine) BootCheck(ctx context.Context) error {
 		}
 	}
 
-	// 3. supervisor_upgrade.applied → 清理 .old 备份 + 删 sentinel（#21 自升级收尾）
+	// 3. supervisor_upgrade.applied → 清理 .old 备份 + 删 sentinel
 	if IsSupervisorUpgradeApplied(m.stageDir) {
 		m.log.Info("supervisor self-swap: applied sentinel detected; cleaning .old backup")
 		oldPath := filepath.Join(m.binDir, SupervisorBinaryName+".old")
@@ -131,7 +123,7 @@ func (m *Machine) BootCheck(ctx context.Context) error {
 		_ = os.Remove(SupervisorUpgradeAppliedPath(m.stageDir))
 	}
 
-	// 4. brick recovery: supervisor.exe 缺失 + .old 存在 → rename 恢复（#21 最后防线）
+	// 4. brick recovery: supervisor.exe 缺失 + .old 存在 → rename 恢复
 	if m.isSupervisorBrickState() {
 		m.log.Warn("supervisor brick state: supervisor.exe missing + .old exists; restoring")
 		supervisorPath := filepath.Join(m.binDir, SupervisorBinaryName)
@@ -142,9 +134,9 @@ func (m *Machine) BootCheck(ctx context.Context) error {
 		}
 	}
 
-	// 5. supervisor self-swap: pending sentinel → KillByImage → SupervisorSelfSwap（#21 W1）
+	// 5. supervisor self-swap: pending sentinel → KillByImage → SupervisorSelfSwap
 	if IsSupervisorUpgradePending(m.stageDir) {
-		// W1: BootCheck 恢复路径可能存在 orphan worker，先清理（幂等）
+		// : BootCheck 恢复路径可能存在 orphan worker，先清理（幂等）
 		if m.pc != nil {
 			m.log.Warn("supervisor self-swap on boot: killing orphan worker first",
 				"image", WorkerBinaryName)
@@ -168,7 +160,7 @@ func (m *Machine) BootCheck(ctx context.Context) error {
 
 // isSupervisorBrickState 报告 supervisor brick 状态：supervisor.exe 缺失 + .old 存在。
 // 此状态发生在 SupervisorSelfSwap step 1 成功（supervisor.exe → .old）+ step 2 失败 +
-// W2 brick 兜底也失败 + SCM 重启后。BootCheck 步骤 4 尝试 rename .old 恢复。
+//  brick 兜底也失败 + SCM 重启后。BootCheck 步骤 4 尝试 rename .old 恢复。
 func (m *Machine) isSupervisorBrickState() bool {
 	supervisorPath := filepath.Join(m.binDir, SupervisorBinaryName)
 	oldPath := supervisorPath + ".old"
@@ -177,16 +169,14 @@ func (m *Machine) isSupervisorBrickState() bool {
 	return os.IsNotExist(supErr) && oldErr == nil
 }
 
-// Apply 编排 bundle swap 的完整顺序（ADR-033 U3）：
+// Apply 编排 bundle swap 的完整顺序：
 //  1. KillTree — 释放文件锁（worker 子进程可能持有 .exe 句柄）
 //  2. ParseManifest
 //  3. KillManifestExes — 杀孤儿子进程（windows_exporter 等）
 //  4. ApplyBundle — 原子 swap + .previous 备份
 //  5. WriteUpgradeMeta — 写版本元数据 + 删旧 healthy_marker
 //  6. ClearPending — 删 incoming/
-//
 // workerPID <= 0 时跳过 KillTree（boot 场景 worker 尚未启动）。
-//
 // ctx 遵循 AGENTS.md IO 函数约定；swap 操作不可中途取消（原子性要求），
 // ctx 仅用于启动前检查（boot hooks 调用方可在 swap 前取消）。
 func (m *Machine) Apply(ctx context.Context, workerPID int) error {
@@ -240,12 +230,10 @@ func (m *Machine) Apply(ctx context.Context, workerPID int) error {
 }
 
 // CheckPending 在 worker 退出后检查是否有 pending upgrade，有则 apply。
-//
 // 返回 ErrApplied 表示 swap 成功（调用方 superviseWorker 应跳过 restartDelay）。
 // 返回其他 error 表示 swap 失败（调用方按普通崩溃处理）。
 // 返回 nil 表示无 pending upgrade（调用方按普通崩溃重启）。
-//
-// Windows 兼容（#21 dogfood 2026-07-16）：worker agent_upgrade RPC 下载 bundle
+// Windows 兼容：worker agent_upgrade RPC 下载 bundle
 // 到 {stageDir}/pending（tar.gz），Linux 由 systemd ExecStartPre 脚本解压到
 // incoming/；Windows 无对等机制，这里自动检测 pending tar.gz 并解压。
 func (m *Machine) CheckPending(ctx context.Context, workerPID int) error {
@@ -273,12 +261,10 @@ func (m *Machine) CheckPending(ctx context.Context, workerPID int) error {
 }
 
 // HealthCheck 在新 worker 启动后监控 healthy_marker，确认升级成功。
-//
 // 此方法阻塞，直到以下之一发生：
 //   - IsUpgradeHealthy = true → CleanupPrevious → 返回 nil（成功）
 //   - timeout 到期 → RollbackAndMark → 返回 ErrRolledBack
 //   - workerCtx 取消（worker 提前退出或 supervisor 停止）→ 返回 workerCtx.Err()
-//
 // pollInterval 是轮询 IsUpgradeHealthy 的间隔（测试可传短值）。
 func (m *Machine) HealthCheck(ctx context.Context, timeout, pollInterval time.Duration) error {
 	timer := time.NewTimer(timeout)
@@ -327,7 +313,6 @@ func (m *Machine) RollbackAndMark() error {
 }
 
 // KillManifestExes 遍历 MANIFEST 条目，对每个 .exe dest 用 KillByImage 杀进程。
-//
 // 解决场景：worker 干净退出后子进程（windows_exporter.exe 等）被
 // orphaned（reparented to PID 1），KillTree 无法触达。
 // 这些孤儿进程持有 .exe 文件锁，导致 ApplyBundle 的 rename 失败。
@@ -343,7 +328,7 @@ func (m *Machine) KillManifestExes(entries []ManifestEntry) {
 			continue
 		}
 		// 跳过 supervisor 自己：supervisor binary 在 MANIFEST 里用于 rename-aside
-		// 自升级（#21），不能 kill 自己；SupervisorSelfSwap 在 superviseWorker
+		// 自升级，不能 kill 自己；SupervisorSelfSwap 在 superviseWorker
 		// 里单独处理。不跳过会导致 supervisor 自杀 → SCM restart 死循环。
 		if name == SupervisorBinaryName {
 			continue

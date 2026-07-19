@@ -1,12 +1,9 @@
-// rollback.go 实现 upgrade 失败时的 .previous 恢复逻辑（ADR-033 U3，issue #23）。
-//
+// rollback.go 实现 upgrade 失败时的 .previous 恢复逻辑。
 // 对称 Linux apply-pending-upgrade.sh 的 maybe_rollback() 函数：
 //   - 遍历指定目录（递归），找 *.previous 文件
 //   - rollback: rename(dest.previous, dest) 恢复旧版本
 //   - cleanup: delete *.previous（upgrade 确认健康后）
-//
 // rollback 是 best-effort：单文件失败不阻断其他文件恢复。
-//
 // AGENTS.md context.Context 例外：Rollback / CleanupPrevious 操作本地文件系统，
 // rollback 必须原子完成（半回滚 = 部分恢复 + 部分未恢复），中途取消不可接受。
 // 取消检查由编排层 Machine.RollbackAndMark / HealthCheck 入口完成。
@@ -22,7 +19,6 @@ import (
 )
 
 // Rollback 遍历 dirs（递归），将所有 *.previous 文件恢复到原路径。
-//
 // 例如：worker.exe.previous → worker.exe（原子 rename 替换当前版本）。
 // 返回成功恢复的文件数。目录不存在或无 .previous 文件时返回 (0, nil)。
 func Rollback(dirs []string) (int, error) {

@@ -1,5 +1,4 @@
-// rename_other.go 提供 renameWithAVRetry 的非 Windows stub（issue #21 W3）。
-//
+// rename_other.go 提供 renameWithAVRetry 的非 Windows stub。
 // Linux 上 bundle swap 无 AV 干扰（对称 dist/build-edge-bundle.sh Linux 版本），
 // isAVRetryable 永远 false，renameWithAVRetry 等价于单次 os.Rename。
 // 这让 machine.go 的 SupervisorSelfSwap 逻辑在 Linux CI 可测试（正常路径）。

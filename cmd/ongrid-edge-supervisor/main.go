@@ -1,16 +1,13 @@
 // Command ongrid-edge-supervisor 是 Windows 版 Edge Agent 的 supervisor 进程
-// （ADR-033 U3 父子进程架构）。
-//
-// MVP-1 职责（issue #4）：
+//。
+//  职责：
 //   - Windows Service 入口（golang.org/x/sys/windows/svc）
 //   - 启动 + 监控 worker.exe（cmd/ongrid-edge 编译产物）
 //   - 健康感知（health.json 文件 IPC，30s 心跳窗口）
-//
-// MVP-2（issue #9）：
+// ：
 //   - ✅ --install / --uninstall 子命令 + DPAPI 加密 token
 //   - ✅ token 90 天轮转检查（edge 端）
-//   - ❌ bundle upgrade staging + swap + rollback（MVP-3）
-//
+//   - ❌ bundle upgrade staging + swap + rollback
 // 整个包 //go:build windows（Linux 不编译，对称 cmdpolicy 的 //go:build linux）。
 // health 逻辑在 internal/edgeagent/supervisorhealth 包，跨平台可测。
 
@@ -35,7 +32,7 @@ const serviceName = "ongrid-edge"
 
 // version 是编译期版本号（Makefile -ldflags "-X main.version=v$(VERSION)" 注入）。
 // SupervisorSelfSwap.smokeTestVersion 跑 `supervisor.exe.new --version` 验证
-// binary 可执行 + 版本非空（W5 加固，防止坏 binary 进入 rename-aside）。
+// binary 可执行 + 版本非空。
 var version = "dev"
 
 func main() {
@@ -51,7 +48,7 @@ func main() {
 	}
 	log := slog.New(slog.NewJSONHandler(w, nil))
 
-	// --install / --uninstall 子命令（ADR-037 A2 CR4）
+	// --install / --uninstall 子命令
 	if len(os.Args) >= 2 {
 		switch os.Args[1] {
 		case "--install":

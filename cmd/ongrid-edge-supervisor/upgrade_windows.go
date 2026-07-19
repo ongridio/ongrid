@@ -1,6 +1,5 @@
 // upgrade_windows.go 定义 Windows 专属的进程控制器 + 升级超时常量
-// （ADR-033 U3，issue #23）。
-//
+//。
 // 升级编排逻辑（applyAndSwap、maybeApply/maybeRollback、watchUpgradeHealth、
 // rollbackAndMark、checkPendingUpgrade）已移至 upgrademachine.Machine。
 // 本文件仅保留 Windows 平台的 taskkill 实现和超时常量。
@@ -34,7 +33,6 @@ func (windowsProcessController) KillTree(pid int) error {
 }
 
 // KillByImage 用 taskkill /F /IM <name> 按镜像名杀进程。
-//
 // 解决场景：worker 干净退出后子进程（windows_exporter.exe 等）被
 // orphaned（reparented to PID 1），KillTree 无法触达。
 // 幂等：进程不存在时 taskkill 返回非零，调用方忽略。

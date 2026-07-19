@@ -1,17 +1,13 @@
-// apply_cycle_windows_test.go — issue #20 反馈循环测试（Windows-only）。
-//
-// 复现 issue #20 核心场景：worker 退出后 plugin 进程 orphaned → .exe 文件锁 →
+// apply_cycle_windows_test.go —  反馈循环测试（Windows-only）。
+// 复现  核心场景：worker 退出后 plugin 进程 orphaned → .exe 文件锁 →
 // ApplyBundle rename 失败（Access denied）。
-//
 // 本测试不模拟 orphaned 路径（PID 1 reparenting 是内核行为，无法用 Go 模拟），
 // 而是直接测试核心时序问题：
 //   1. 启动 plugin.exe（持有自身 .exe 文件锁）
 //   2. taskkill /F /IM plugin.exe（windowsProcessController.KillByImage）
 //   3. 立即 ApplyBundle rename plugin.exe
 //   4. 验证 rename 是否成功（若失败则 bug 复现）
-//
 // 如果 taskkill 返回后文件锁未及时释放（race condition），本测试会 Access denied。
-//
 // 这是 Phase 1 的 tight feedback loop：秒级、deterministic、agent-runnable。
 
 //go:build windows
@@ -75,10 +71,9 @@ func (realWindowsPC) KillByImage(name string) error {
 
 // copyFileExe / appendMarker / copyStream 已提取到 dummy_helper_test.go（跨平台共用）。
 
-// TestKillByImageReleaseTiming 是 issue #20 的核心反馈循环：
+// TestKillByImageReleaseTiming 是  的核心反馈循环：
 // KillByImage 返回后立即尝试 ApplyBundle rename .exe → 是否 Access denied。
-//
-// 失败（t.Errorf "BUG REPRODUCED"）= 文件锁未及时释放 = issue #20 根因确认。
+// 失败（t.Errorf "BUG REPRODUCED"）= 文件锁未及时释放 =  根因确认。
 // 成功 = 当前实现（KillManifestExes）在测试场景下工作正常。
 func TestKillByImageReleaseTiming(t *testing.T) {
 	sleeper := buildSleeper(t)
@@ -183,10 +178,9 @@ func shaFile(t *testing.T, path string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// TestKillByImageRelease_MultiCycle 是 issue #20 的核心验收测试：
+// TestKillByImageRelease_MultiCycle 是  的核心验收测试：
 // 连续 10 次升级循环，每次都启动 plugin.exe → KillByImage → rename。
 // 验收标准：所有循环成功，无残留进程。
-//
 // 若任一循环失败（Access denied）= bug 复现，记录循环号 + 错误。
 func TestKillByImageRelease_MultiCycle(t *testing.T) {
 	sleeper := buildSleeper(t)

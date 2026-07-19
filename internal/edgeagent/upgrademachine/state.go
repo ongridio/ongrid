@@ -1,5 +1,4 @@
-// state.go 定义升级状态机的 State 类型 + 状态检测函数（issue #23）。
-//
+// state.go 定义升级状态机的 State 类型 + 状态检测函数。
 // 状态机使原先分散在 7 文件中的隐式状态（通过文件存在性 + sentinel error 推断）
 // 变为显式的、可检测的、可文档化的类型。
 
@@ -50,11 +49,9 @@ func (s State) String() string {
 }
 
 // DetectState 根据 StageDir 下的文件状态推断当前升级状态。
-//
 // 这是一个公共观测函数，供调试、日志、测试断言使用。
 // Machine 内部编排逻辑使用更细粒度的检测函数（IsPending、IsUpgradeHealthy 等）
 // 而非 DetectState，因为编排需要区分具体条件（如 rollback.done vs pending 的优先级）。
-//
 // 检测优先级（互斥）：
 //  1. rollback.done 存在 → StateRolledBack
 //  2. incoming/MANIFEST.txt 存在 → StatePending

@@ -1,12 +1,10 @@
 // Package supervisorhealth 实现 supervisor.exe 与 worker.exe 之间的
-// health.json 文件 IPC（ADR-033 U3）。
-//
+// health.json 文件 IPC。
 // worker.exe 每 30s 写一次心跳到 health.json，supervisor.exe 读 + 超时判断。
 // 超过 HeartbeatTimeout（90s，3× 心跳间隔，给 GC/network jitter 留 margin）
-// 未刷新 → supervisor 视为 worker 卡死，触发回滚/重启（MVP-1 仅重启）。
-//
+// 未刷新 → supervisor 视为 worker 卡死，触发回滚/重启。
 // 此包故意保持纯 Go（无 Windows 专属依赖），测试可在 L1 Linux CI 跑
-// （ADR-035 Q7 C5 分层策略：L1 交叉编译秒级，L2 windows-latest 跑 Windows 专属）。
+//。
 package supervisorhealth
 
 import (

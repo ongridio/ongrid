@@ -1,5 +1,4 @@
-// manifest.go 实现 MANIFEST.txt 的解析 + per-file sha256 验证（issue #23）。
-//
+// manifest.go 实现 MANIFEST.txt 的解析 + per-file sha256 验证。
 // 从 upgradeapply/manifest.go 移入，消除 upgradeapply 和 upgradebundle 的重复解析。
 // upgradebundle/download.go 原有的 verifyManifest + fileSHA256 已删除，
 // 改用本包的 ParseManifest + VerifyAll。
@@ -18,7 +17,6 @@ import (
 )
 
 // ManifestEntry 是 MANIFEST.txt 中一行的结构化表示。
-//
 // 格式：`<sha256> <mode> <src> <dest>`
 //   - SHA256：src 文件的预期 sha256（小写 hex，64 字符）
 //   - Mode：文件权限（如 "0755"），apply 时设到新文件

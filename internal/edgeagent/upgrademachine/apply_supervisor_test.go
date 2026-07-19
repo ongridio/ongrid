@@ -1,5 +1,4 @@
-// apply_supervisor_test.go 测试 issue #21 applyOne 的 supervisor special-case。
-//
+// apply_supervisor_test.go 测试  applyOne 的 supervisor special-case。
 // supervisor dest 不能走标准 backup → stage → rename 路径（Windows 锁定
 // 运行中的 .exe）。applyOne 检测 supervisor dest → 只 stage .new + 写
 // pending sentinel，让 Machine.SupervisorSelfSwap 后续做 rename-aside。

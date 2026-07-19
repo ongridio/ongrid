@@ -1,9 +1,7 @@
-// ipc.go 定义升级状态机的所有文件系统 IPC 常量（单一真相源，issue #23）。
-//
+// ipc.go 定义升级状态机的所有文件系统 IPC 常量（单一真相源）。
 // 这些常量消除原先 upgradeapply / upgradebundle / cmd 三包各自的私有/导出定义 drift。
 // 任何包需要引用文件名时，import 本包的导出常量，而非重新定义。
-//
-// issue #21 supervisor 自升级 sentinel 常量也在此定义（保持单一真相源）。
+//  supervisor 自升级 sentinel 常量也在此定义（保持单一真相源）。
 
 package upgrademachine
 

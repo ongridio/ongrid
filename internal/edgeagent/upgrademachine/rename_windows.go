@@ -1,5 +1,4 @@
-// rename_windows.go 实现 renameWithAVRetry 的 Windows 专属逻辑（issue #21 W3）。
-//
+// rename_windows.go 实现 renameWithAVRetry 的 Windows 专属逻辑。
 // Windows Defender / 第三方 AV 实时扫描未签名 PE 文件时持 FILE_SHARE_READ
 // 句柄，期间 os.Rename 失败（ERROR_SHARING_VIOLATION = errno 0x20）。
 // renameWithAVRetry 重试 5 次 × 200ms = 1s，覆盖 99% AV 扫描窗口。
@@ -31,7 +30,6 @@ func isAVRetryable(err error) bool {
 }
 
 // renameWithAVRetry 对 os.Rename 做 AV 扫描瞬时失败的 retry。
-//
 // 5 次 × 200ms = 1s 总等待。非共享冲突错误立即返回（不重试）。
 func renameWithAVRetry(src, dst string, log *slog.Logger) error {
 	const maxRetry = 5

@@ -1,7 +1,6 @@
-// supervisor_selfswap_test.go 测试 issue #21 SupervisorSelfSwap + smokeTestVersion +
+// supervisor_selfswap_test.go 测试  SupervisorSelfSwap + smokeTestVersion +
 // ResetUpgradeIPC（跨平台可测部分，Linux CI 可跑）。
-//
-// Windows 专属场景（W2 brick 兜底 / W3 AV retry / 锁文件模拟）在
+// Windows 专属场景在
 // supervisor_self_swap_windows_test.go（Step 4 完成后补）。
 
 package upgrademachine
@@ -52,7 +51,7 @@ func TestSmokeTestVersion_BadBinary_CleansStageAndSentinel(t *testing.T) {
 		t.Fatal("smokeTestVersion 应失败（非可执行文件）")
 	}
 
-	// W5: 失败时清理 exePath + pending sentinel
+	// : 失败时清理 exePath + pending sentinel
 	if _, err := os.Stat(exePath); !os.IsNotExist(err) {
 		t.Errorf("exePath 应被清理（err=%v）", err)
 	}
