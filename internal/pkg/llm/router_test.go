@@ -8,14 +8,26 @@ import (
 
 // stubClient records the last ChatReq and returns a canned response.
 type stubClient struct {
-	id   string
-	last ChatReq
+	id    string
+	last  ChatReq
+	calls int
 }
 
 func (s *stubClient) Chat(_ context.Context, req ChatReq) (*ChatResp, error) {
+	s.calls++
 	s.last = req
 	c := "from-" + s.id
 	return &ChatResp{Assistant: Message{Role: "assistant", Content: c}}, nil
+}
+
+type stubProvidersResolver struct {
+	providers []ProviderConfig
+	def       string
+	err       error
+}
+
+func (s stubProvidersResolver) ResolveProviders(context.Context) ([]ProviderConfig, string, error) {
+	return s.providers, s.def, s.err
 }
 
 func TestMultiClient_RoutesByProvider(t *testing.T) {
@@ -111,5 +123,37 @@ func TestNewMultiClient_ExplicitDefault(t *testing.T) {
 	id, _ := mc.Default()
 	if id != "zhipu" {
 		t.Errorf("default = %q, want zhipu", id)
+	}
+}
+
+func TestMultiClient_EmptySuccessfulResolverDisablesStaticAndFallbackClients(t *testing.T) {
+	fallback := &stubClient{id: "fallback"}
+	mc := NewMultiClient([]ProviderConfig{
+		{ID: "openai", APIKey: "env-key", Model: "env-model"},
+	}, "openai", fallback)
+	mc.SetProvidersResolver(stubProvidersResolver{providers: []ProviderConfig{}})
+
+	if providers := mc.Providers(); len(providers) != 0 {
+		t.Fatalf("providers = %+v, want empty authoritative catalog", providers)
+	}
+	if _, err := mc.Chat(context.Background(), ChatReq{}); err == nil || err.Error() != "llm: no providers configured" {
+		t.Fatalf("Chat error = %v, want no providers configured", err)
+	}
+	if fallback.calls != 0 {
+		t.Fatalf("legacy fallback called %d times", fallback.calls)
+	}
+}
+
+func TestMultiClient_ResolverErrorStillUsesLegacyFallback(t *testing.T) {
+	fallback := &stubClient{id: "fallback"}
+	mc := NewMultiClient(nil, "", fallback)
+	mc.SetProvidersResolver(stubProvidersResolver{err: errors.New("database unavailable")})
+
+	resp, err := mc.Chat(context.Background(), ChatReq{})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if resp.Assistant.Content != "from-fallback" || fallback.calls != 1 {
+		t.Fatalf("fallback response = %+v calls=%d", resp, fallback.calls)
 	}
 }

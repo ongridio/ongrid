@@ -30,6 +30,7 @@ import (
 type Repo interface {
 	Get(ctx context.Context, category, key string) (*model.Setting, error)
 	Set(ctx context.Context, category, key, value string, sensitive bool) (*model.Setting, error)
+	SetBatch(ctx context.Context, settings []model.Setting) error
 	List(ctx context.Context, category string) ([]*model.Setting, error)
 	Delete(ctx context.Context, category, key string) error
 }
@@ -70,9 +71,9 @@ func New(repo Repo, log *slog.Logger) *Service {
 func cacheKey(cat, key string) string { return cat + "|" + key }
 
 // Get returns (value, found, error) for the (cat, key) pair. found=false
-// means there is no row in the DB — the empty string is intentionally not
-// distinguished from "row absent" because both should trigger the env
-// fallback in the LLM resolver.
+// means there is no row in the DB. An existing row whose value is empty still
+// returns found=true so callers can use an empty value as an explicit override
+// (for example, an empty LLM API key disables an env-configured provider).
 //
 // Cache hits short-circuit the DB call. errs.ErrNotFound from the repo is
 // treated as found=false, not an error.
@@ -119,6 +120,35 @@ func (s *Service) Set(ctx context.Context, category, key, value string, sensitiv
 		slog.String("category", category),
 		slog.String("key", key),
 		slog.Bool("sensitive", sensitive),
+	)
+	return nil
+}
+
+// SetBatch atomically upserts a related group of settings and invalidates their
+// cache entries only after the repository transaction commits. This keeps a
+// validated LLM provider tuple from becoming a partially persisted hybrid when
+// one field fails to write.
+func (s *Service) SetBatch(ctx context.Context, settings []model.Setting) error {
+	if len(settings) == 0 {
+		return fmt.Errorf("%w: at least one setting required", errs.ErrInvalid)
+	}
+	for i := range settings {
+		if settings[i].Category == "" || settings[i].Key == "" {
+			return fmt.Errorf("%w: category/key required", errs.ErrInvalid)
+		}
+	}
+	if err := s.repo.SetBatch(ctx, settings); err != nil {
+		return fmt.Errorf("set settings batch: %w", err)
+	}
+
+	s.mu.Lock()
+	for i := range settings {
+		delete(s.cache, cacheKey(settings[i].Category, settings[i].Key))
+	}
+	s.mu.Unlock()
+	s.log.Info("settings batch updated",
+		slog.Int("count", len(settings)),
+		slog.String("category", settings[0].Category),
 	)
 	return nil
 }

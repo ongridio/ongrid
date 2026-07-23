@@ -983,6 +983,7 @@ func main() {
 	webSearchProbe := managerbizsetting.NewWebSearchProbe(managerbizsetting.NewWebSearchResolver(settingSvc))
 	integrationHandler = managerserverintegration.NewHandler(grafanaSvc, promTester, lokiProbe, tempoProbe, webSearchProbe)
 	integrationHandler.SetLLMRouter(llmRouter)
+	integrationHandler.SetLLMProbe(managerbizsetting.NewLLMConfigurationService(llmEnvDefaults, settingSvc))
 
 	// Prom-backed metric read handler (PR-F replacement for the MySQL
 	// fast path). When prom is disabled the handler still installs but

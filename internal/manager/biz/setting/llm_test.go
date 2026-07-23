@@ -1,8 +1,11 @@
 package setting
 
 import (
+	"context"
 	"reflect"
 	"testing"
+
+	settingmodel "github.com/ongridio/ongrid/internal/manager/model/setting"
 )
 
 func TestDedupeStrings(t *testing.T) {
@@ -27,5 +30,38 @@ func TestDedupeStrings(t *testing.T) {
 				t.Errorf("dedupeStrings(%v) = %v, want %v", tc.in, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestLLMSettingsResolver_EmptyStoredAPIKeyOverridesEnvironment(t *testing.T) {
+	t.Parallel()
+
+	svc := New(newFakeRepo(), nil)
+	resolver := NewLLMSettingsResolver(svc, map[string]EnvProviderDefaults{
+		settingmodel.LLMProviderOpenAI: {
+			Label:  "OpenAI",
+			APIKey: "env-key",
+			Model:  "env-model",
+			Models: []string{"env-model"},
+		},
+	}, settingmodel.LLMProviderOpenAI)
+
+	providers, _, err := resolver.ResolveProviders(context.Background())
+	if err != nil {
+		t.Fatalf("ResolveProviders before override: %v", err)
+	}
+	if len(providers) != 1 || providers[0].ID != settingmodel.LLMProviderOpenAI {
+		t.Fatalf("providers before override = %+v", providers)
+	}
+
+	if err := svc.Set(context.Background(), settingmodel.CategoryLLM, settingmodel.KeyOpenAIAPIKey, "", true); err != nil {
+		t.Fatalf("Set empty override: %v", err)
+	}
+	providers, _, err = resolver.ResolveProviders(context.Background())
+	if err != nil {
+		t.Fatalf("ResolveProviders after override: %v", err)
+	}
+	if len(providers) != 0 {
+		t.Fatalf("empty stored key did not disable env provider: %+v", providers)
 	}
 }

@@ -54,18 +54,45 @@ func (r *Repo) Set(ctx context.Context, category, key, value string, sensitive b
 	}
 	// ON CONFLICT (category, key) DO UPDATE — works on both MySQL (via
 	// `INSERT ... ON DUPLICATE KEY UPDATE`) and SQLite via the gorm clause.
-	err := r.db.WithContext(ctx).
-		Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "category"}, {Name: "key"}},
-			DoUpdates: clause.AssignmentColumns([]string{"value", "sensitive", "updated_at"}),
-		}).
-		Create(&row).Error
+	err := upsertSetting(r.db.WithContext(ctx), &row)
 	if err != nil {
 		return nil, err
 	}
 	// row.ID may be zero on the update path for some drivers; reload to
 	// guarantee the caller gets the persisted timestamps.
 	return r.Get(ctx, category, key)
+}
+
+// SetBatch upserts every row in one database transaction. Either the complete
+// configuration tuple commits or none of it does.
+func (r *Repo) SetBatch(ctx context.Context, settings []model.Setting) error {
+	if len(settings) == 0 {
+		return fmt.Errorf("%w: at least one setting required", errs.ErrInvalid)
+	}
+	for i := range settings {
+		if settings[i].Category == "" || settings[i].Key == "" {
+			return fmt.Errorf("%w: category/key required", errs.ErrInvalid)
+		}
+	}
+	if err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for i := range settings {
+			row := settings[i]
+			if err := upsertSetting(tx, &row); err != nil {
+				return fmt.Errorf("upsert %s.%s: %w", row.Category, row.Key, err)
+			}
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("set settings transaction: %w", err)
+	}
+	return nil
+}
+
+func upsertSetting(db *gorm.DB, row *model.Setting) error {
+	return db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "category"}, {Name: "key"}},
+		DoUpdates: clause.AssignmentColumns([]string{"value", "sensitive", "updated_at"}),
+	}).Create(row).Error
 }
 
 // List returns all rows in a category ordered by key asc. Empty category
