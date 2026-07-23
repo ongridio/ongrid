@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"strings"
@@ -20,6 +21,7 @@ import (
 
 const (
 	LLMProbeCodeOK                  = "ok"
+	LLMProbeCodeDisabled            = "disabled"
 	LLMProbeCodeUnsupportedProvider = "unsupported-provider"
 	LLMProbeCodeMissingAPIKey       = "missing-api-key"
 	LLMProbeCodeMissingModel        = "missing-model"
@@ -47,16 +49,19 @@ const (
 	maxLLMAPIKeyBytes      = 16 << 10
 	maxLLMBaseURLBytes     = 2048
 	maxLLMModelBytes       = 256
+	maxLLMModels           = 32
 	maxLLMProbeDetailRunes = 240
 )
 
-// LLMProbeInput is an unpersisted provider draft supplied by an administrator.
-// APIKey must never be logged or copied into LLMProbeResult.
+// LLMProbeInput is a provider draft supplied by an administrator. APIKey may be
+// persisted only by LLMConfigurationService.Save; it must never be logged or
+// copied into LLMProbeResult.
 type LLMProbeInput struct {
-	Provider string `json:"provider"`
-	APIKey   string `json:"api_key"`
-	BaseURL  string `json:"base_url"`
-	Model    string `json:"model"`
+	Provider     string   `json:"provider"`
+	APIKey       string   `json:"api_key"`
+	BaseURL      string   `json:"base_url"`
+	DefaultModel string   `json:"default_model"`
+	Models       []string `json:"models"`
 }
 
 // LLMProbeResult is a stable, language-neutral validation result. The SPA maps
@@ -68,6 +73,8 @@ type LLMProbeResult struct {
 	Model     string `json:"model"`
 	Detail    string `json:"detail,omitempty"`
 	LatencyMS int64  `json:"latency_ms"`
+	Saved     bool   `json:"saved"`
+	Disabled  bool   `json:"disabled"`
 }
 
 type llmProbeCall func(context.Context, llm.Config) (*llm.ProbeResult, error)
@@ -93,76 +100,234 @@ func NewLLMConfigProbe(defaults map[string]EnvProviderDefaults) *LLMConfigProbe 
 	}
 }
 
-// Probe performs one bounded upstream call. Expected configuration and
-// upstream failures are returned as Valid=false rather than Go errors because
-// the validation itself completed successfully. A non-nil error means the
-// probe service is not wired and should map to an HTTP 5xx.
-func (p *LLMConfigProbe) Probe(ctx context.Context, in LLMProbeInput) (LLMProbeResult, error) {
-	provider := strings.ToLower(strings.TrimSpace(in.Provider))
-	modelName := strings.TrimSpace(in.Model)
-	result := LLMProbeResult{Code: LLMProbeCodeOK, Provider: provider, Model: modelName}
+type validatedLLMConfig struct {
+	provider         string
+	apiKey           string
+	storedBaseURL    string
+	effectiveBaseURL string
+	defaultModel     string
+	models           []string
+}
 
-	if p == nil || p.call == nil {
-		return result, fmt.Errorf("llm config probe not wired")
+// LLMConfigurationService binds the exact draft that was probed to the exact
+// tuple persisted by Service.SetBatch. This server-side boundary prevents a UI
+// or API client from validating one value and then saving a different one.
+type LLMConfigurationService struct {
+	probe    *LLMConfigProbe
+	settings *Service
+}
+
+// NewLLMConfigurationService builds the validation and persistence boundary.
+func NewLLMConfigurationService(defaults map[string]EnvProviderDefaults, settings *Service) *LLMConfigurationService {
+	return &LLMConfigurationService{
+		probe:    NewLLMConfigProbe(defaults),
+		settings: settings,
 	}
-	if !isKnownLLMProvider(provider) {
+}
+
+// Probe validates an unsaved provider draft without persisting it.
+func (s *LLMConfigurationService) Probe(ctx context.Context, in LLMProbeInput) (LLMProbeResult, error) {
+	if s == nil || s.probe == nil {
+		return LLMProbeResult{}, fmt.Errorf("llm configuration service not wired")
+	}
+	return s.probe.Probe(ctx, in)
+}
+
+// Save validates every exposed model and atomically persists the provider
+// tuple. An empty API key is a deliberate disable override and skips upstream
+// calls so a broken credential can always be removed.
+func (s *LLMConfigurationService) Save(ctx context.Context, in LLMProbeInput) (LLMProbeResult, error) {
+	if s == nil || s.probe == nil || s.settings == nil {
+		return LLMProbeResult{}, fmt.Errorf("llm configuration service not wired")
+	}
+	operational := strings.TrimSpace(in.APIKey) != ""
+	cfg, result, ok := s.probe.validateInput(in, operational)
+	if !ok {
+		return result, nil
+	}
+	if operational {
+		result = s.probe.probeValidated(ctx, cfg)
+		if !result.Valid {
+			return result, nil
+		}
+	} else {
+		cfg.apiKey = ""
+		result.Valid = true
+		result.Code = LLMProbeCodeDisabled
+		result.Disabled = true
+	}
+
+	keys, ok := providerKeysByID(cfg.provider)
+	if !ok {
+		result.Valid = false
 		result.Code = LLMProbeCodeUnsupportedProvider
 		return result, nil
 	}
-	if strings.TrimSpace(in.APIKey) == "" {
-		result.Code = LLMProbeCodeMissingAPIKey
+	modelsJSON, err := EncodeModelsList(cfg.models)
+	if err != nil {
+		return result, fmt.Errorf("encode llm models: %w", err)
+	}
+	if err := s.settings.SetBatch(ctx, []settingmodel.Setting{
+		{Category: settingmodel.CategoryLLM, Key: keys.apiKey, Value: cfg.apiKey, Sensitive: true},
+		{Category: settingmodel.CategoryLLM, Key: keys.baseURL, Value: cfg.storedBaseURL},
+		{Category: settingmodel.CategoryLLM, Key: keys.defaultModel, Value: cfg.defaultModel},
+		{Category: settingmodel.CategoryLLM, Key: keys.models, Value: modelsJSON},
+	}); err != nil {
+		return result, fmt.Errorf("save llm provider %s: %w", cfg.provider, err)
+	}
+	result.Saved = true
+	return result, nil
+}
+
+func providerKeysByID(provider string) (providerKeys, bool) {
+	for _, keys := range allProviderKeys() {
+		if keys.id == provider {
+			return keys, true
+		}
+	}
+	return providerKeys{}, false
+}
+
+// Probe performs one bounded validation across every model that would be
+// exposed after saving. Expected configuration and upstream failures are
+// returned as Valid=false rather than Go errors because validation completed.
+func (p *LLMConfigProbe) Probe(ctx context.Context, in LLMProbeInput) (LLMProbeResult, error) {
+	if p == nil || p.call == nil {
+		return LLMProbeResult{}, fmt.Errorf("llm config probe not wired")
+	}
+	cfg, result, ok := p.validateInput(in, true)
+	if !ok {
 		return result, nil
+	}
+	return p.probeValidated(ctx, cfg), nil
+}
+
+func (p *LLMConfigProbe) validateInput(in LLMProbeInput, operational bool) (validatedLLMConfig, LLMProbeResult, bool) {
+	provider := strings.ToLower(strings.TrimSpace(in.Provider))
+	defaultModel := strings.TrimSpace(in.DefaultModel)
+	result := LLMProbeResult{Code: LLMProbeCodeOK, Provider: provider, Model: defaultModel}
+	cfg := validatedLLMConfig{
+		provider:      provider,
+		apiKey:        in.APIKey,
+		storedBaseURL: strings.TrimSpace(in.BaseURL),
+		defaultModel:  defaultModel,
+	}
+
+	if !isKnownLLMProvider(provider) {
+		result.Code = LLMProbeCodeUnsupportedProvider
+		return cfg, result, false
+	}
+	if operational && strings.TrimSpace(in.APIKey) == "" {
+		result.Code = LLMProbeCodeMissingAPIKey
+		return cfg, result, false
 	}
 	if len(in.APIKey) > maxLLMAPIKeyBytes {
 		result.Code = LLMProbeCodeInvalidRequest
 		result.Detail = "api key is too long"
-		return result, nil
+		return cfg, result, false
 	}
-	if modelName == "" {
-		result.Code = LLMProbeCodeMissingModel
-		return result, nil
-	}
-	if len(modelName) > maxLLMModelBytes {
-		result.Code = LLMProbeCodeInvalidRequest
-		result.Detail = "model name is too long"
-		return result, nil
-	}
-
-	baseURL := strings.TrimSpace(in.BaseURL)
-	if baseURL == "" {
-		baseURL = strings.TrimSpace(p.defaults[provider].BaseURL)
-	}
-	if provider == settingmodel.LLMProviderCustom && baseURL == "" {
-		result.Code = LLMProbeCodeMissingBaseURL
-		return result, nil
-	}
-	if len(baseURL) > maxLLMBaseURLBytes {
+	if len(cfg.storedBaseURL) > maxLLMBaseURLBytes {
 		result.Code = LLMProbeCodeInvalidBaseURL
 		result.Detail = "base URL is too long"
-		return result, nil
+		return cfg, result, false
 	}
-	if baseURL != "" {
-		if err := validateLLMBaseURL(baseURL); err != nil {
-			result.Code = LLMProbeCodeInvalidBaseURL
-			result.Detail = sanitizeLLMProbeDetail(err.Error(), in.APIKey)
-			return result, nil
+
+	seen := make(map[string]struct{}, len(in.Models))
+	for _, rawModel := range in.Models {
+		modelName := strings.TrimSpace(rawModel)
+		if modelName == "" {
+			continue
+		}
+		if len(modelName) > maxLLMModelBytes {
+			result.Code = LLMProbeCodeInvalidRequest
+			result.Model = modelName
+			result.Detail = "model name is too long"
+			return cfg, result, false
+		}
+		if _, exists := seen[modelName]; exists {
+			continue
+		}
+		seen[modelName] = struct{}{}
+		cfg.models = append(cfg.models, modelName)
+		if len(cfg.models) > maxLLMModels {
+			result.Code = LLMProbeCodeInvalidRequest
+			result.Detail = "too many models"
+			return cfg, result, false
+		}
+	}
+	if !operational && cfg.defaultModel == "" && len(cfg.models) > 0 {
+		cfg.defaultModel = cfg.models[0]
+		result.Model = cfg.defaultModel
+	}
+	if len(cfg.defaultModel) > maxLLMModelBytes {
+		result.Code = LLMProbeCodeInvalidRequest
+		result.Detail = "default model name is too long"
+		return cfg, result, false
+	}
+	if operational {
+		if cfg.defaultModel == "" || len(cfg.models) == 0 {
+			result.Code = LLMProbeCodeMissingModel
+			return cfg, result, false
+		}
+		if !containsString(cfg.models, cfg.defaultModel) {
+			result.Code = LLMProbeCodeInvalidRequest
+			result.Detail = "default model must be included in models"
+			return cfg, result, false
 		}
 	}
 
-	startedAt := time.Now()
-	_, err := p.call(ctx, llm.Config{
-		APIKey:  in.APIKey,
-		Model:   modelName,
-		BaseURL: baseURL,
-		Timeout: p.timeout,
-	})
-	result.LatencyMS = time.Since(startedAt).Milliseconds()
-	if err == nil {
-		result.Valid = true
-		return result, nil
+	cfg.effectiveBaseURL = cfg.storedBaseURL
+	if cfg.effectiveBaseURL == "" {
+		cfg.effectiveBaseURL = strings.TrimSpace(p.defaults[provider].BaseURL)
 	}
-	result.Code, result.Detail = classifyLLMProbeError(err, in.APIKey)
-	return result, nil
+	if operational && provider == settingmodel.LLMProviderCustom && cfg.effectiveBaseURL == "" {
+		result.Code = LLMProbeCodeMissingBaseURL
+		return cfg, result, false
+	}
+	if operational && cfg.effectiveBaseURL != "" {
+		if err := validateLLMBaseURL(cfg.effectiveBaseURL); err != nil {
+			result.Code = LLMProbeCodeInvalidBaseURL
+			result.Detail = sanitizeLLMProbeDetail(err.Error(), in.APIKey)
+			return cfg, result, false
+		}
+	}
+	return cfg, result, true
+}
+
+func (p *LLMConfigProbe) probeValidated(ctx context.Context, cfg validatedLLMConfig) LLMProbeResult {
+	result := LLMProbeResult{
+		Code:     LLMProbeCodeOK,
+		Provider: cfg.provider,
+		Model:    cfg.defaultModel,
+	}
+	startedAt := time.Now()
+	probeCtx, cancel := context.WithTimeout(ctx, p.timeout)
+	defer cancel()
+
+	models := make([]string, 0, len(cfg.models))
+	models = append(models, cfg.defaultModel)
+	for _, modelName := range cfg.models {
+		if modelName != cfg.defaultModel {
+			models = append(models, modelName)
+		}
+	}
+	for _, modelName := range models {
+		_, err := p.call(probeCtx, llm.Config{
+			APIKey:  cfg.apiKey,
+			Model:   modelName,
+			BaseURL: cfg.effectiveBaseURL,
+			Timeout: p.timeout,
+		})
+		if err != nil {
+			result.Model = modelName
+			result.Code, result.Detail = classifyLLMProbeError(err, cfg.apiKey)
+			result.LatencyMS = time.Since(startedAt).Milliseconds()
+			return result
+		}
+	}
+	result.Valid = true
+	result.LatencyMS = time.Since(startedAt).Milliseconds()
+	return result
 }
 
 func isKnownLLMProvider(provider string) bool {
@@ -209,6 +374,9 @@ func classifyLLMProbeError(err error, apiKey string) (string, string) {
 	}
 	if errors.Is(err, llm.ErrNoAPIKey) {
 		return LLMProbeCodeMissingAPIKey, ""
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return LLMProbeCodeInvalidResponse, "provider returned an invalid chat completion response"
 	}
 
 	var dnsErr *net.DNSError

@@ -8,10 +8,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, Eye, EyeOff, Loader2, PlugZap, Plus, Save, Sparkles, Star, Trash2 } from 'lucide-react';
 import { ApiError } from '@/api/client';
 import {
-  invalidateLLMRouter,
   listSettings,
   revealSetting,
-  setSetting,
+  saveLLMConfiguration,
   testLLMConfiguration,
   type LLMConfigurationProbeResult,
   type SystemSetting,
@@ -208,7 +207,7 @@ export default function SettingsLLM() {
         <b>{tr('~60 秒内自动生效', 'within ~60 seconds')}</b>
         {tr('，保存时也会立刻让 manager 失效缓存（通常 1 秒内）。留空 API key = 该提供商不出现在聊天页下拉里。', ', and saving also instantly invalidates the manager cache (usually within 1 s). Leaving the API key blank hides the provider from the chat dropdown.')}
         <div className="mt-1 text-zinc-500">
-          {tr('测试配置会由 Manager 发起一次最小模型请求，可能消耗少量 token；非空配置保存前必须验证通过。', 'Testing is performed by the Manager with one minimal model request and may consume a few tokens; non-empty configurations must pass before saving.')}
+          {tr('测试配置会由 Manager 对列表中的每个模型发起一次最小请求，可能消耗少量 token；非空配置保存前必须全部验证通过。', 'The Manager tests every listed model with one minimal request, which may consume a few tokens; all models in a non-empty configuration must pass before saving.')}
         </div>
       </div>
       {providers.map((meta) => (
@@ -330,6 +329,7 @@ function LLMProviderCard({ meta }: { meta: LLMProviderMeta }) {
     form.api_key,
     form.base_url.trim(),
     form.default_model.trim(),
+    form.models.map((model) => model.trim()),
   ]);
 
   const testDraft = async (): Promise<LLMConfigurationProbeResult | null> => {
@@ -344,7 +344,8 @@ function LLMProviderCard({ meta }: { meta: LLMProviderMeta }) {
         provider: meta.id,
         api_key: draft.api_key,
         base_url: draft.base_url.trim(),
-        model: draft.default_model.trim(),
+        default_model: draft.default_model.trim(),
+        models: draft.models,
       });
       if (probeVersion.current !== requestVersion) return null;
       setProbe(result.valid
@@ -361,6 +362,8 @@ function LLMProviderCard({ meta }: { meta: LLMProviderMeta }) {
         model: draft.default_model.trim(),
         detail,
         latency_ms: 0,
+        saved: false,
+        disabled: false,
       };
       setProbe({ kind: 'error', signature, result });
       return null;
@@ -368,38 +371,48 @@ function LLMProviderCard({ meta }: { meta: LLMProviderMeta }) {
   };
 
   const submit = async () => {
+    const snapshot: LLMProviderForm = { ...draft, models: [...draft.models] };
+    const signature = signatureFor(snapshot);
+    const requestVersion = probeVersion.current + 1;
+    probeVersion.current = requestVersion;
     setSaving(true);
+    setSavedOk(false);
     setErr(null);
+    setProbe(snapshot.api_key.trim() === '' ? { kind: 'idle' } : { kind: 'testing', signature });
     try {
-      if (draft.api_key.trim() !== '') {
-        const signature = signatureFor(draft);
-        const alreadyValidated = probe.kind === 'ok' && probe.signature === signature;
-        if (!alreadyValidated) {
-          const result = await testDraft();
-          if (!result?.valid) return;
-        }
-      }
-      if (draft.api_key !== server.api_key) {
-        await setSetting('llm', meta.keyAPIKey, draft.api_key, true);
-      }
-      if (draft.base_url !== server.base_url) {
-        await setSetting('llm', meta.keyBaseURL, draft.base_url, false);
-      }
-      if (draft.default_model !== server.default_model) {
-        await setSetting('llm', meta.keyDefaultModel, draft.default_model, false);
-      }
-      if (JSON.stringify(draft.models) !== JSON.stringify(server.models)) {
-        await setSetting('llm', meta.keyModels, JSON.stringify(draft.models), false);
-      }
-      try {
-        await invalidateLLMRouter();
-      } catch {
-        /* router will TTL-rebuild within 60s */
+      const result = await saveLLMConfiguration({
+        provider: meta.id,
+        api_key: snapshot.api_key,
+        base_url: snapshot.base_url.trim(),
+        default_model: snapshot.default_model.trim(),
+        models: snapshot.models,
+      });
+      if (probeVersion.current !== requestVersion) return;
+      if (!result.valid || !result.saved) {
+        setProbe({ kind: 'error', signature, result });
+        return;
       }
       await refresh();
+      setProbe(result.disabled ? { kind: 'idle' } : { kind: 'ok', signature, result });
       setSavedOk(true);
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : (e as Error).message);
+      const detail = e instanceof ApiError ? e.message : (e as Error).message;
+      if (probeVersion.current === requestVersion) {
+        setProbe({
+          kind: 'error',
+          signature,
+          result: {
+            valid: false,
+            code: 'probe-request-failed',
+            provider: meta.id,
+            model: snapshot.default_model.trim(),
+            detail,
+            latency_ms: 0,
+            saved: false,
+            disabled: false,
+          },
+        });
+      }
     } finally {
       setSaving(false);
     }

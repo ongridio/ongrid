@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -115,5 +116,40 @@ func TestProbeChatCompletion_WhenResponseHasNoChoices_ReturnsError(t *testing.T)
 	})
 	if err == nil || !strings.Contains(err.Error(), "empty choices") {
 		t.Fatalf("err = %v, want empty choices error", err)
+	}
+}
+
+func TestProbeChatCompletion_WhenSuccessfulBodyIsEmptyOrTruncated_PreservesDecodeError(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		body string
+		want error
+	}{
+		{name: "empty", body: "", want: io.EOF},
+		{name: "truncated", body: `{"choices":[`, want: io.ErrUnexpectedEOF},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if _, err := w.Write([]byte(tc.body)); err != nil {
+					t.Errorf("write response: %v", err)
+				}
+			}))
+			t.Cleanup(srv.Close)
+
+			_, err := ProbeChatCompletion(context.Background(), Config{
+				APIKey:  "test-key",
+				Model:   "probe-model",
+				BaseURL: srv.URL,
+				Timeout: 2 * time.Second,
+			})
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("error = %v, want errors.Is(%v)", err, tc.want)
+			}
+		})
 	}
 }

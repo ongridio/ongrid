@@ -118,7 +118,8 @@ export type LLMConfigurationProbeInput = {
   provider: string;
   api_key: string;
   base_url: string;
-  model: string;
+  default_model: string;
+  models: string[];
 };
 
 export type LLMConfigurationProbeResult = {
@@ -128,6 +129,8 @@ export type LLMConfigurationProbeResult = {
   model: string;
   detail?: string;
   latency_ms: number;
+  saved: boolean;
+  disabled: boolean;
 };
 
 // testLLMConfiguration validates the current unsaved draft. The API key is
@@ -136,4 +139,13 @@ export function testLLMConfiguration(
   input: LLMConfigurationProbeInput,
 ): Promise<LLMConfigurationProbeResult> {
   return request<LLMConfigurationProbeResult>('POST', '/integrations/llm/test', input);
+}
+
+// saveLLMConfiguration asks the Manager to validate every exposed model and
+// atomically persist the exact same draft. Empty api_key is stored as an
+// explicit provider-disable override and does not call the upstream.
+export function saveLLMConfiguration(
+  input: LLMConfigurationProbeInput,
+): Promise<LLMConfigurationProbeResult> {
+  return request<LLMConfigurationProbeResult>('POST', '/integrations/llm/validate-and-save', input);
 }

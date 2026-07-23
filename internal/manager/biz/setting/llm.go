@@ -12,10 +12,9 @@ import (
 // LLMSettingsResolver shapes per-provider rows in system_settings.llm.*
 // into the llm.ProvidersResolver contract (multi-provider routing).
 //
-// Layering: env-seeded defaults (passed in at construction) form the
-// fallback; DB rows override per field. Empty DB rows fall through to
-// env, so a fresh deployment with the legacy openai_* triple still
-// works unchanged.
+// Layering: env-seeded defaults (passed in at construction) form the fallback;
+// DB rows override per field. A present empty API-key row is authoritative and
+// disables that provider, while an absent row still inherits the environment.
 //
 // Caching is the responsibility of the underlying setting.Service (60s
 // TTL) and the llm.MultiClient (60s TTL on top); LLMSettingsResolver
@@ -23,7 +22,8 @@ import (
 type LLMSettingsResolver struct {
 	svc *Service
 
-	// Env defaults — used when the matching DB row is absent / empty.
+	// Env defaults — used when the matching DB row is absent. Non-credential
+	// fields also keep their legacy empty-value fallback.
 	defaults map[string]EnvProviderDefaults
 
 	// envDefaultProvider is the env-seeded default provider id (e.g.
@@ -33,7 +33,7 @@ type LLMSettingsResolver struct {
 }
 
 // EnvProviderDefaults is the env-seeded fallback for one provider. The
-// router reads from these when the DB row is empty so existing
+// router reads from these when the DB row is absent so existing
 // deployments survive without an admin filling in the UI first.
 type EnvProviderDefaults struct {
 	Label   string   // "OpenAI" / "Anthropic" / "智谱 GLM" / "Gemini"
@@ -128,8 +128,8 @@ func allProviderKeys() []providerKeys {
 // underlying setting.Service caches for 60s as well). On a transient DB
 // error any single provider may fall back to its env defaults, but a
 // global error is rare — Get returns (val, found, err) and treats
-// "row absent" as found=false rather than err. Empty providers slice =
-// no provider configured at all (router falls back to fallback client).
+// "row absent" as found=false rather than err. An empty providers slice is an
+// authoritative no-provider catalog so explicit disable overrides are honored.
 func (r *LLMSettingsResolver) ResolveProviders(ctx context.Context) ([]llm.ProviderConfig, string, error) {
 	if r == nil || r.svc == nil {
 		return nil, "", nil
@@ -137,8 +137,8 @@ func (r *LLMSettingsResolver) ResolveProviders(ctx context.Context) ([]llm.Provi
 	out := make([]llm.ProviderConfig, 0, 4)
 	for _, pk := range allProviderKeys() {
 		def := r.defaults[pk.id]
-		apiKey, _, _ := r.svc.Get(ctx, model.CategoryLLM, pk.apiKey)
-		if strings.TrimSpace(apiKey) == "" {
+		apiKey, apiKeyFound, apiKeyErr := r.svc.Get(ctx, model.CategoryLLM, pk.apiKey)
+		if apiKeyErr != nil || !apiKeyFound {
 			apiKey = def.APIKey
 		}
 		if strings.TrimSpace(apiKey) == "" {

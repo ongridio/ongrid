@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -31,9 +32,10 @@ func TestLLMConfigProbe_WhenValid_UsesEffectiveConfiguration(t *testing.T) {
 	}
 
 	res, err := p.Probe(context.Background(), LLMProbeInput{
-		Provider: " DeepSeek ",
-		APIKey:   "secret-key",
-		Model:    " deepseek-chat ",
+		Provider:     " DeepSeek ",
+		APIKey:       "secret-key",
+		DefaultModel: " deepseek-chat ",
+		Models:       []string{" deepseek-chat "},
 	})
 	if err != nil {
 		t.Fatalf("Probe: %v", err)
@@ -57,14 +59,16 @@ func TestLLMConfigProbe_WhenInputInvalid_DoesNotCallProvider(t *testing.T) {
 		in   LLMProbeInput
 		code string
 	}{
-		{name: "unsupported provider", in: LLMProbeInput{Provider: "other", APIKey: "key", Model: "m"}, code: LLMProbeCodeUnsupportedProvider},
-		{name: "missing key", in: LLMProbeInput{Provider: "openai", Model: "m"}, code: LLMProbeCodeMissingAPIKey},
+		{name: "unsupported provider", in: LLMProbeInput{Provider: "other", APIKey: "key", DefaultModel: "m", Models: []string{"m"}}, code: LLMProbeCodeUnsupportedProvider},
+		{name: "missing key", in: LLMProbeInput{Provider: "openai", DefaultModel: "m", Models: []string{"m"}}, code: LLMProbeCodeMissingAPIKey},
 		{name: "missing model", in: LLMProbeInput{Provider: "openai", APIKey: "key"}, code: LLMProbeCodeMissingModel},
-		{name: "custom missing URL", in: LLMProbeInput{Provider: "custom", APIKey: "key", Model: "m"}, code: LLMProbeCodeMissingBaseURL},
-		{name: "unsupported scheme", in: LLMProbeInput{Provider: "custom", APIKey: "key", Model: "m", BaseURL: "file:///tmp/model"}, code: LLMProbeCodeInvalidBaseURL},
-		{name: "missing host", in: LLMProbeInput{Provider: "custom", APIKey: "key", Model: "m", BaseURL: "http:///v1"}, code: LLMProbeCodeInvalidBaseURL},
-		{name: "userinfo", in: LLMProbeInput{Provider: "custom", APIKey: "key", Model: "m", BaseURL: "https://user:pass@example.com/v1"}, code: LLMProbeCodeInvalidBaseURL},
-		{name: "query", in: LLMProbeInput{Provider: "custom", APIKey: "key", Model: "m", BaseURL: "https://example.com/v1?token=x"}, code: LLMProbeCodeInvalidBaseURL},
+		{name: "missing default model", in: LLMProbeInput{Provider: "openai", APIKey: "key", Models: []string{"m"}}, code: LLMProbeCodeMissingModel},
+		{name: "default outside list", in: LLMProbeInput{Provider: "openai", APIKey: "key", DefaultModel: "a", Models: []string{"b"}}, code: LLMProbeCodeInvalidRequest},
+		{name: "custom missing URL", in: LLMProbeInput{Provider: "custom", APIKey: "key", DefaultModel: "m", Models: []string{"m"}}, code: LLMProbeCodeMissingBaseURL},
+		{name: "unsupported scheme", in: LLMProbeInput{Provider: "custom", APIKey: "key", DefaultModel: "m", Models: []string{"m"}, BaseURL: "file:///tmp/model"}, code: LLMProbeCodeInvalidBaseURL},
+		{name: "missing host", in: LLMProbeInput{Provider: "custom", APIKey: "key", DefaultModel: "m", Models: []string{"m"}, BaseURL: "http:///v1"}, code: LLMProbeCodeInvalidBaseURL},
+		{name: "userinfo", in: LLMProbeInput{Provider: "custom", APIKey: "key", DefaultModel: "m", Models: []string{"m"}, BaseURL: "https://user:pass@example.com/v1"}, code: LLMProbeCodeInvalidBaseURL},
+		{name: "query", in: LLMProbeInput{Provider: "custom", APIKey: "key", DefaultModel: "m", Models: []string{"m"}, BaseURL: "https://example.com/v1?token=x"}, code: LLMProbeCodeInvalidBaseURL},
 	}
 
 	for _, tc := range cases {
@@ -108,6 +112,8 @@ func TestClassifyLLMProbeError_DistinguishesFailureReasons(t *testing.T) {
 		{name: "connection", err: &url.Error{Op: "Post", URL: "http://127.0.0.1:1", Err: &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}}, code: LLMProbeCodeConnection},
 		{name: "tls", err: &url.Error{Op: "Post", URL: "https://example.com", Err: x509.UnknownAuthorityError{}}, code: LLMProbeCodeTLS},
 		{name: "invalid response", err: errors.New("llm probe: empty choices in response"), code: LLMProbeCodeInvalidResponse},
+		{name: "empty successful body", err: io.EOF, code: LLMProbeCodeInvalidResponse},
+		{name: "truncated successful body", err: io.ErrUnexpectedEOF, code: LLMProbeCodeInvalidResponse},
 		{name: "unknown", err: errors.New("unexpected provider failure"), code: LLMProbeCodeUpstream},
 	}
 
@@ -145,15 +151,126 @@ func TestLLMConfigProbe_WhenProviderFails_ReturnsTypedResult(t *testing.T) {
 		return nil, apiError(http.StatusUnauthorized, "invalid_api_key", "bad key")
 	}
 	res, err := p.Probe(context.Background(), LLMProbeInput{
-		Provider: settingmodel.LLMProviderOpenAI,
-		APIKey:   "secret-key",
-		Model:    "gpt-test",
+		Provider:     settingmodel.LLMProviderOpenAI,
+		APIKey:       "secret-key",
+		DefaultModel: "gpt-test",
+		Models:       []string{"gpt-test"},
 	})
 	if err != nil {
 		t.Fatalf("Probe: %v", err)
 	}
 	if res.Valid || res.Code != LLMProbeCodeAuthentication {
 		t.Fatalf("result = %+v", res)
+	}
+}
+
+func TestLLMConfigurationService_SaveValidatesEveryModelBeforePersisting(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepo()
+	svc := NewLLMConfigurationService(nil, New(repo, nil))
+	var called []string
+	svc.probe.call = func(_ context.Context, cfg llm.Config) (*llm.ProbeResult, error) {
+		called = append(called, cfg.Model)
+		return &llm.ProbeResult{}, nil
+	}
+
+	result, err := svc.Save(context.Background(), LLMProbeInput{
+		Provider:     settingmodel.LLMProviderOpenAI,
+		APIKey:       "secret-key",
+		BaseURL:      "https://gateway.example/v1",
+		DefaultModel: "model-b",
+		Models:       []string{"model-a", "model-b", "model-c"},
+	})
+	if err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if !result.Valid || !result.Saved || result.Disabled {
+		t.Fatalf("result = %+v", result)
+	}
+	wantCalls := []string{"model-b", "model-a", "model-c"}
+	if fmt.Sprint(called) != fmt.Sprint(wantCalls) {
+		t.Fatalf("models probed = %v, want %v", called, wantCalls)
+	}
+
+	rows, err := repo.List(context.Background(), settingmodel.CategoryLLM)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(rows) != 4 {
+		t.Fatalf("persisted rows = %d, want 4", len(rows))
+	}
+	values := make(map[string]string, len(rows))
+	for _, row := range rows {
+		values[row.Key] = row.Value
+	}
+	if values[settingmodel.KeyOpenAIAPIKey] != "secret-key" ||
+		values[settingmodel.KeyOpenAIBaseURL] != "https://gateway.example/v1" ||
+		values[settingmodel.KeyOpenAIDefaultModel] != "model-b" ||
+		values[settingmodel.KeyOpenAIModels] != `["model-a","model-b","model-c"]` {
+		t.Fatalf("persisted values = %#v", values)
+	}
+}
+
+func TestLLMConfigurationService_SaveDoesNotPersistWhenAnyModelFails(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepo()
+	svc := NewLLMConfigurationService(nil, New(repo, nil))
+	svc.probe.call = func(_ context.Context, cfg llm.Config) (*llm.ProbeResult, error) {
+		if cfg.Model == "bad-model" {
+			return nil, apiError(http.StatusNotFound, "model_not_found", "model does not exist")
+		}
+		return &llm.ProbeResult{}, nil
+	}
+
+	result, err := svc.Save(context.Background(), LLMProbeInput{
+		Provider:     settingmodel.LLMProviderOpenAI,
+		APIKey:       "secret-key",
+		DefaultModel: "good-model",
+		Models:       []string{"good-model", "bad-model"},
+	})
+	if err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if result.Valid || result.Saved || result.Code != LLMProbeCodeModelNotFound || result.Model != "bad-model" {
+		t.Fatalf("result = %+v", result)
+	}
+	rows, err := repo.List(context.Background(), settingmodel.CategoryLLM)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("failed validation persisted rows: %+v", rows)
+	}
+}
+
+func TestLLMConfigurationService_SaveEmptyKeyCreatesDisableOverride(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepo()
+	svc := NewLLMConfigurationService(map[string]EnvProviderDefaults{
+		settingmodel.LLMProviderOpenAI: {APIKey: "env-key", Model: "env-model", Models: []string{"env-model"}},
+	}, New(repo, nil))
+	svc.probe.call = func(context.Context, llm.Config) (*llm.ProbeResult, error) {
+		t.Fatal("disabled provider must not be probed")
+		return nil, nil
+	}
+
+	result, err := svc.Save(context.Background(), LLMProbeInput{
+		Provider:     settingmodel.LLMProviderOpenAI,
+		DefaultModel: "env-model",
+		Models:       []string{"env-model"},
+	})
+	if err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if !result.Valid || !result.Saved || !result.Disabled || result.Code != LLMProbeCodeDisabled {
+		t.Fatalf("result = %+v", result)
+	}
+	key, found, err := svc.settings.Get(context.Background(), settingmodel.CategoryLLM, settingmodel.KeyOpenAIAPIKey)
+	if err != nil || !found || key != "" {
+		t.Fatalf("disabled key = (%q, %v, %v), want empty existing row", key, found, err)
 	}
 }
 

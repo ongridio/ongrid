@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
+	settingmodel "github.com/ongridio/ongrid/internal/manager/model/setting"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
 
@@ -115,5 +116,31 @@ func TestSettingRepoDelete(t *testing.T) {
 	}
 	if err := repo.Delete(ctx, "llm", "openai_model"); !errors.Is(err, errs.ErrNotFound) {
 		t.Fatalf("Delete missing row: want ErrNotFound, got %v", err)
+	}
+}
+
+func TestSettingRepoSetBatchRollsBackEveryRowOnFailure(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	if err := repo.db.Exec(`
+		CREATE TRIGGER fail_setting_batch
+		BEFORE INSERT ON system_settings
+		WHEN NEW.key = 'fail_key'
+		BEGIN
+			SELECT RAISE(ABORT, 'forced batch failure');
+		END;
+	`).Error; err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+
+	err := repo.SetBatch(ctx, []settingmodel.Setting{
+		{Category: "llm", Key: "first_key", Value: "first"},
+		{Category: "llm", Key: "fail_key", Value: "second"},
+	})
+	if err == nil {
+		t.Fatal("SetBatch unexpectedly succeeded")
+	}
+	if _, err := repo.Get(ctx, "llm", "first_key"); !errors.Is(err, errs.ErrNotFound) {
+		t.Fatalf("first row survived failed transaction: %v", err)
 	}
 }

@@ -53,6 +53,23 @@ func (r *fakeRepo) Set(_ context.Context, category, key, value string, sensitive
 	return row, nil
 }
 
+func (r *fakeRepo) SetBatch(_ context.Context, settings []model.Setting) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	next := make(map[string]*model.Setting, len(r.rows)+len(settings))
+	for key, row := range r.rows {
+		cp := *row
+		next[key] = &cp
+	}
+	for i := range settings {
+		row := settings[i]
+		row.UpdatedAt = time.Now()
+		next[r.key(row.Category, row.Key)] = &row
+	}
+	r.rows = next
+	return nil
+}
+
 func (r *fakeRepo) List(_ context.Context, category string) ([]*model.Setting, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

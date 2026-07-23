@@ -14,8 +14,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	bizaudit "github.com/ongridio/ongrid/internal/manager/biz/audit"
 	bizgrafana "github.com/ongridio/ongrid/internal/manager/biz/grafana"
 	bizsetting "github.com/ongridio/ongrid/internal/manager/biz/setting"
+	auditmodel "github.com/ongridio/ongrid/internal/manager/model/audit"
+	auditmw "github.com/ongridio/ongrid/internal/manager/server/middleware"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	pkggrafana "github.com/ongridio/ongrid/internal/pkg/grafana"
 	"github.com/ongridio/ongrid/internal/pkg/tenantctx"
@@ -84,6 +87,7 @@ type LLMRouterInvalidator interface {
 // returns stable, secret-free failure codes.
 type LLMConfigProbe interface {
 	Probe(ctx context.Context, in bizsetting.LLMProbeInput) (bizsetting.LLMProbeResult, error)
+	Save(ctx context.Context, in bizsetting.LLMProbeInput) (bizsetting.LLMProbeResult, error)
 }
 
 // Handler bundles the integration routes.
@@ -118,6 +122,8 @@ func (h *Handler) SetLLMProbe(p LLMConfigProbe) { h.llmProbe = p }
 //	POST /v1/integrations/grafana/test           (admin)  — verify connectivity
 //	POST /v1/integrations/grafana/sync           (admin)  — push folder + datasource + dashboards
 //	POST /v1/integrations/prom/test              (admin)  — run "up" PromQL probe
+//	POST /v1/integrations/llm/test               (admin)  — validate an unsaved provider tuple
+//	POST /v1/integrations/llm/validate-and-save  (admin)  — validate every model and atomically save
 //	GET  /v1/observability/dashboards/{uid}      (any auth user) — proxy Grafana dashboard JSON
 //
 // The dashboards proxy lives under /v1/observability rather than
@@ -133,6 +139,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Post("/v1/integrations/tempo/test", h.testTempo)
 	r.Post("/v1/integrations/websearch/test", h.testWebSearch)
 	r.Post("/v1/integrations/llm/test", h.testLLMConfiguration)
+	r.Post("/v1/integrations/llm/validate-and-save", h.validateAndSaveLLMConfiguration)
 	r.Post("/v1/integrations/llm/invalidate", h.invalidateLLM)
 	r.Get("/v1/observability/dashboards/{uid}", h.fetchDashboard)
 }
@@ -149,7 +156,7 @@ func (h *Handler) Register(r chi.Router) {
 // @Failure 401 {object} errorBody
 // @Failure 403 {object} errorBody
 // @Failure 503 {object} errorBody
-// @Router /v1/integrations/llm/test [post]
+// @Router /api/v1/integrations/llm/test [post]
 func (h *Handler) testLLMConfiguration(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAdmin(w, r) {
 		return
@@ -162,17 +169,8 @@ func (h *Handler) testLLMConfiguration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	const maxBodyBytes = 32 << 10
-	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	var in bizsetting.LLMProbeInput
-	if err := dec.Decode(&in); err != nil {
-		writeErr(w, errors.Join(errs.ErrInvalid, err))
-		return
-	}
-	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		writeErr(w, errors.Join(errs.ErrInvalid, errors.New("request body must contain one JSON object")))
+	in, ok := decodeLLMConfigurationRequest(w, r)
+	if !ok {
 		return
 	}
 
@@ -182,6 +180,77 @@ func (h *Handler) testLLMConfiguration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// validateAndSaveLLMConfiguration validates every model in one draft and
+// persists the same normalized tuple in one transaction.
+//
+// @Summary Validate and atomically save an LLM provider configuration
+// @Tags integrations
+// @Accept json
+// @Produce json
+// @Param request body bizsetting.LLMProbeInput true "LLM provider configuration"
+// @Success 200 {object} bizsetting.LLMProbeResult
+// @Failure 400 {object} errorBody
+// @Failure 401 {object} errorBody
+// @Failure 403 {object} errorBody
+// @Failure 503 {object} errorBody
+// @Router /api/v1/integrations/llm/validate-and-save [post]
+func (h *Handler) validateAndSaveLLMConfiguration(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	if h.llmProbe == nil {
+		writeJSON(w, http.StatusServiceUnavailable, errorBody{
+			Error: "llm configuration service not wired",
+			Code:  "llm-probe-disabled",
+		})
+		return
+	}
+	in, ok := decodeLLMConfigurationRequest(w, r)
+	if !ok {
+		return
+	}
+
+	result, err := h.llmProbe.Save(r.Context(), in)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if result.Saved {
+		if h.llmRouter != nil {
+			h.llmRouter.Invalidate()
+		}
+		auditmw.SetAuditEvent(r, bizaudit.Event{
+			Action:       auditmodel.ActionSettingUpdate,
+			ResourceType: auditmodel.ResourceSetting,
+			ResourceID:   "llm/" + result.Provider,
+			Status:       auditmodel.StatusSuccess,
+			Payload: map[string]any{
+				"provider":    result.Provider,
+				"disabled":    result.Disabled,
+				"model_count": len(in.Models),
+			},
+		})
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func decodeLLMConfigurationRequest(w http.ResponseWriter, r *http.Request) (bizsetting.LLMProbeInput, bool) {
+	const maxBodyBytes = 32 << 10
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	var in bizsetting.LLMProbeInput
+	if err := dec.Decode(&in); err != nil {
+		writeErr(w, errors.Join(errs.ErrInvalid, err))
+		return bizsetting.LLMProbeInput{}, false
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeErr(w, errors.Join(errs.ErrInvalid, errors.New("request body must contain one JSON object")))
+		return bizsetting.LLMProbeInput{}, false
+	}
+	return in, true
 }
 
 // invalidateLLM drops the LLM router's provider-catalog cache so admin

@@ -28,11 +28,23 @@ type stubGrafana struct {
 
 type stubLLMConfigProbe struct {
 	probe func(context.Context, bizsetting.LLMProbeInput) (bizsetting.LLMProbeResult, error)
+	save  func(context.Context, bizsetting.LLMProbeInput) (bizsetting.LLMProbeResult, error)
 }
 
 func (s stubLLMConfigProbe) Probe(ctx context.Context, in bizsetting.LLMProbeInput) (bizsetting.LLMProbeResult, error) {
 	return s.probe(ctx, in)
 }
+
+func (s stubLLMConfigProbe) Save(ctx context.Context, in bizsetting.LLMProbeInput) (bizsetting.LLMProbeResult, error) {
+	if s.save == nil {
+		return bizsetting.LLMProbeResult{}, errors.New("unexpected llm configuration save")
+	}
+	return s.save(ctx, in)
+}
+
+type stubLLMRouterInvalidator struct{ calls int }
+
+func (s *stubLLMRouterInvalidator) Invalidate() { s.calls++ }
 
 func (s stubGrafana) Test(ctx context.Context) error                           { return s.test(ctx) }
 func (s stubGrafana) Sync(ctx context.Context) (*bizgrafana.SyncResult, error) { return s.sync(ctx) }
@@ -161,12 +173,12 @@ func TestLLMConfigurationProbePassesDraftAndReturnsTypedResult(t *testing.T) {
 	h.SetLLMProbe(stubLLMConfigProbe{probe: func(_ context.Context, in bizsetting.LLMProbeInput) (bizsetting.LLMProbeResult, error) {
 		got = in
 		return bizsetting.LLMProbeResult{
-			Valid: true, Code: bizsetting.LLMProbeCodeOK, Provider: in.Provider, Model: in.Model, LatencyMS: 42,
+			Valid: true, Code: bizsetting.LLMProbeCodeOK, Provider: in.Provider, Model: in.DefaultModel, LatencyMS: 42,
 		}, nil
 	}})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/integrations/llm/test", strings.NewReader(`{
-		"provider":"deepseek","api_key":"secret-value","base_url":"https://api.example/v1","model":"deepseek-chat"
+		"provider":"deepseek","api_key":"secret-value","base_url":"https://api.example/v1","default_model":"deepseek-chat","models":["deepseek-chat","deepseek-reasoner"]
 	}`))
 	req = req.WithContext(tenantctx.With(context.Background(), tenantctx.Tenant{UserID: 7, Role: "admin"}))
 	rec := httptest.NewRecorder()
@@ -175,7 +187,7 @@ func TestLLMConfigurationProbePassesDraftAndReturnsTypedResult(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
 	}
-	if got.Provider != "deepseek" || got.APIKey != "secret-value" || got.Model != "deepseek-chat" {
+	if got.Provider != "deepseek" || got.APIKey != "secret-value" || got.DefaultModel != "deepseek-chat" || len(got.Models) != 2 {
 		t.Fatalf("probe input = %+v", got)
 	}
 	if strings.Contains(rec.Body.String(), "secret-value") {
@@ -200,11 +212,11 @@ func TestLLMConfigurationProbeReturnsValidationFailureAs200(t *testing.T) {
 	}
 	h := NewHandler(g, nil, nil, nil, nil)
 	h.SetLLMProbe(stubLLMConfigProbe{probe: func(_ context.Context, in bizsetting.LLMProbeInput) (bizsetting.LLMProbeResult, error) {
-		return bizsetting.LLMProbeResult{Code: bizsetting.LLMProbeCodeModelNotFound, Provider: in.Provider, Model: in.Model}, nil
+		return bizsetting.LLMProbeResult{Code: bizsetting.LLMProbeCodeModelNotFound, Provider: in.Provider, Model: in.DefaultModel}, nil
 	}})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/integrations/llm/test", strings.NewReader(`{
-		"provider":"openai","api_key":"bad-key","model":"missing-model"
+		"provider":"openai","api_key":"bad-key","default_model":"missing-model","models":["missing-model"]
 	}`))
 	req = req.WithContext(tenantctx.With(context.Background(), tenantctx.Tenant{UserID: 7, Role: "admin"}))
 	rec := httptest.NewRecorder()
@@ -233,7 +245,7 @@ func TestLLMConfigurationProbeRejectsUnknownJSONField(t *testing.T) {
 	}})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/integrations/llm/test", strings.NewReader(`{
-		"provider":"openai","api_key":"key","model":"gpt-test","unexpected":true
+		"provider":"openai","api_key":"key","default_model":"gpt-test","models":["gpt-test"],"unexpected":true
 	}`))
 	req = req.WithContext(tenantctx.With(context.Background(), tenantctx.Tenant{UserID: 7, Role: "admin"}))
 	rec := httptest.NewRecorder()
@@ -265,5 +277,52 @@ func TestLLMConfigurationProbeRequiresAdmin(t *testing.T) {
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestLLMConfigurationValidateAndSaveUsesOneDraftAndInvalidatesRouter(t *testing.T) {
+	t.Parallel()
+
+	g := stubGrafana{
+		test:           func(context.Context) error { return nil },
+		sync:           func(context.Context) (*bizgrafana.SyncResult, error) { return nil, nil },
+		fetchDashboard: func(context.Context, string) ([]byte, error) { return nil, nil },
+	}
+	var got bizsetting.LLMProbeInput
+	routerInvalidator := &stubLLMRouterInvalidator{}
+	h := NewHandler(g, nil, nil, nil, nil)
+	h.SetLLMRouter(routerInvalidator)
+	h.SetLLMProbe(stubLLMConfigProbe{
+		probe: func(context.Context, bizsetting.LLMProbeInput) (bizsetting.LLMProbeResult, error) {
+			return bizsetting.LLMProbeResult{}, errors.New("unexpected standalone probe")
+		},
+		save: func(_ context.Context, in bizsetting.LLMProbeInput) (bizsetting.LLMProbeResult, error) {
+			got = in
+			return bizsetting.LLMProbeResult{
+				Valid: true, Saved: true, Code: bizsetting.LLMProbeCodeOK,
+				Provider: in.Provider, Model: in.DefaultModel, LatencyMS: 31,
+			}, nil
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/integrations/llm/validate-and-save", strings.NewReader(`{
+		"provider":"openai","api_key":"secret-value","base_url":"https://api.example/v1",
+		"default_model":"model-a","models":["model-a","model-b"]
+	}`))
+	req = req.WithContext(tenantctx.With(context.Background(), tenantctx.Tenant{UserID: 7, Role: "admin"}))
+	rec := httptest.NewRecorder()
+	newRouter(h).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got.APIKey != "secret-value" || got.DefaultModel != "model-a" || len(got.Models) != 2 {
+		t.Fatalf("save input = %+v", got)
+	}
+	if routerInvalidator.calls != 1 {
+		t.Fatalf("router invalidations = %d, want 1", routerInvalidator.calls)
+	}
+	if strings.Contains(rec.Body.String(), "secret-value") || !strings.Contains(rec.Body.String(), `"saved":true`) {
+		t.Fatalf("response = %s", rec.Body.String())
 	}
 }

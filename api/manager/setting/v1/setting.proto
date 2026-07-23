@@ -2,14 +2,18 @@ syntax = "proto3";
 
 package ongrid.manager.setting.v1;
 
-option go_package = "github.com/singchia/ongrid/api/gen/manager/setting/v1;settingv1";
+option go_package = "github.com/ongridio/ongrid/api/gen/manager/setting/v1;settingv1";
 
 // SettingService 管理管理员可编辑的运行时配置。
 service SettingService {
     // ValidateLLMConfiguration 使用未落库的草稿配置发起最小模型请求，
     // 返回可机器识别的失败原因。HTTP 实现：
-    // POST /v1/integrations/llm/test。
+    // POST /api/v1/integrations/llm/test。
     rpc ValidateLLMConfiguration(ValidateLLMConfigurationRequest) returns (ValidateLLMConfigurationResponse);
+    // ValidateAndSaveLLMConfiguration 校验同一份草稿中的全部模型，并在
+    // 全部通过后原子保存；空 api_key 表示显式禁用该提供商。
+    // HTTP 实现：POST /api/v1/integrations/llm/validate-and-save。
+    rpc ValidateAndSaveLLMConfiguration(ValidateLLMConfigurationRequest) returns (ValidateLLMConfigurationResponse);
 }
 
 message ValidateLLMConfigurationRequest {
@@ -20,8 +24,10 @@ message ValidateLLMConfigurationRequest {
     string api_key = 2 [json_name = "api_key"];
     // 命名提供商留空时使用服务端默认端点；custom 必填。
     string base_url = 3 [json_name = "base_url"];
-    // model 是本次实际调用的模型名。
-    string model = 4 [json_name = "model"];
+    // default_model 是默认模型，必须包含在 models 中。
+    string default_model = 4 [json_name = "default_model"];
+    // models 是保存后会暴露给调用方的完整模型列表；校验会逐一实际调用。
+    repeated string models = 5 [json_name = "models"];
 }
 
 message ValidateLLMConfigurationResponse {
@@ -33,4 +39,8 @@ message ValidateLLMConfigurationResponse {
     // 上游返回的安全摘要；不得包含 API key 或完整响应体。
     string detail = 5 [json_name = "detail"];
     int64 latency_ms = 6 [json_name = "latency_ms"];
+    // saved 仅由 validate-and-save 返回，表示整组配置已原子落库。
+    bool saved = 7 [json_name = "saved"];
+    // disabled 表示空 api_key 已作为显式禁用覆盖落库。
+    bool disabled = 8 [json_name = "disabled"];
 }
