@@ -65,6 +65,31 @@ func TestK8sCredentialFileRoundTrip(t *testing.T) {
 	}
 }
 
+func TestControllerCredentialFileDoesNotContainTelemetryCredential(t *testing.T) {
+	filePath := filepath.Join(t.TempDir(), "controller-credential.json")
+	info := &tunnel.KubernetesInfo{ClusterID: 7, Role: "controller"}
+	out := k8sEnrollResponse{
+		EdgeID:    9,
+		AccessKey: "controller-access",
+		SecretKey: "controller-secret",
+		Telemetry: &k8sTelemetryConfig{
+			ClusterID: 7,
+			AccessKey: "kt_access",
+			SecretKey: "ks_secret",
+		},
+	}
+	if err := storeK8sCredentialFile(info, out, &config.Config{}, filePath); err != nil {
+		t.Fatalf("storeK8sCredentialFile: %v", err)
+	}
+	raw, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("read controller credential: %v", err)
+	}
+	if strings.Contains(string(raw), "kt_access") || strings.Contains(string(raw), "ks_secret") || strings.Contains(string(raw), "telemetry") {
+		t.Fatalf("controller credential contains telemetry data: %s", raw)
+	}
+}
+
 func TestK8sCredentialFileRejectsDifferentNode(t *testing.T) {
 	filePath := filepath.Join(t.TempDir(), "node-credential.json")
 	info := &tunnel.KubernetesInfo{ClusterID: 7, Role: "node", NodeName: "worker-a"}
@@ -74,6 +99,73 @@ func TestK8sCredentialFileRejectsDifferentNode(t *testing.T) {
 	loaded, err := loadStoredK8sCredentialFile(&config.Config{}, &tunnel.KubernetesInfo{ClusterID: 7, Role: "node", NodeName: "worker-b"}, filePath, nil)
 	if err == nil || loaded {
 		t.Fatalf("loaded=%v err=%v, want node mismatch", loaded, err)
+	}
+}
+
+func TestTelemetrySecretDataContainsOnlyPublishedDataPlaneFields(t *testing.T) {
+	in := k8sTelemetryConfig{
+		ClusterID:              7,
+		AccessKey:              "kt_access",
+		SecretKey:              "ks_secret",
+		TracesEndpoint:         "https://manager.example/v1/traces",
+		LogsEndpoint:           "https://manager.example/loki/api/v1/push",
+		RemoteWriteEndpoint:    "https://manager.example/prometheus/api/v1/write",
+		RemoteWriteBasicUser:   "kt_access",
+		RemoteWriteBasicPass:   "ks_secret",
+		RemoteWriteTLSInsecure: true,
+		RemoteWriteTLSCAPEM:    "test-ca",
+	}
+	got := telemetrySecretData(in)
+	wants := map[string]string{
+		"telemetry-cluster-id":                "7",
+		"telemetry-access-key":                "kt_access",
+		"telemetry-secret-key":                "ks_secret",
+		"telemetry-traces-endpoint":           "https://manager.example/v1/traces",
+		"telemetry-logs-endpoint":             "https://manager.example/loki/api/v1/push",
+		"telemetry-remote-write-endpoint":     "https://manager.example/prometheus/api/v1/write",
+		"telemetry-remote-write-basic-user":   "kt_access",
+		"telemetry-remote-write-basic-pass":   "ks_secret",
+		"telemetry-remote-write-tls-insecure": "true",
+		"telemetry-remote-write-ca.pem":       "test-ca",
+	}
+	for key, want := range wants {
+		if value := string(got[key]); value != want {
+			t.Fatalf("%s = %q, want %q", key, value, want)
+		}
+	}
+	if _, ok := got["controller"]; ok {
+		t.Fatal("telemetry Secret must not contain the controller credential document")
+	}
+}
+
+func TestApplyManagerTelemetryTLSIsOriginScoped(t *testing.T) {
+	t.Setenv("ONGRID_K8S_ENROLL_TLS_INSECURE", "true")
+	managerTarget := k8sTelemetryConfig{RemoteWriteEndpoint: "https://manager.example/prometheus/api/v1/write"}
+	applyManagerTelemetryTLS(&managerTarget, "https://manager.example")
+	if !managerTarget.RemoteWriteTLSInsecure {
+		t.Fatal("manager-origin remote_write did not inherit the explicit manager TLS setting")
+	}
+
+	externalTarget := k8sTelemetryConfig{RemoteWriteEndpoint: "https://metrics.example/api/v1/write"}
+	applyManagerTelemetryTLS(&externalTarget, "https://manager.example")
+	if externalTarget.RemoteWriteTLSInsecure {
+		t.Fatal("external remote_write must not inherit the manager TLS setting")
+	}
+}
+
+func TestDataContainsValuesRequiresProjectedEmptyKeys(t *testing.T) {
+	desired := map[string][]byte{
+		"endpoint": []byte("https://metrics.example/write"),
+		"bearer":   {},
+	}
+	if dataContainsValues(map[string][]byte{"endpoint": []byte("https://metrics.example/write")}, desired) {
+		t.Fatal("missing empty key must still trigger a Secret patch for volume projection")
+	}
+	if !dataContainsValues(map[string][]byte{
+		"endpoint": []byte("https://metrics.example/write"),
+		"bearer":   {},
+	}, desired) {
+		t.Fatal("matching Secret data was not recognized")
 	}
 }
 
@@ -130,5 +222,46 @@ func TestK8sSecretClientDataKeyRoundTrip(t *testing.T) {
 	}
 	if string(decoded) != `{"access_key":"new"}` {
 		t.Fatalf("patched credential = %q", string(decoded))
+	}
+}
+
+func TestRefreshK8sTelemetryConfigPreservesCurrentCredentialProof(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/internal/k8s/telemetry-config" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		user, pass, ok := r.BasicAuth()
+		if !ok || user != "controller-access" || pass != "controller-secret" {
+			t.Fatalf("controller auth = %q/%q, ok=%v", user, pass, ok)
+		}
+		var proof map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&proof); err != nil {
+			t.Fatalf("decode credential proof: %v", err)
+		}
+		if proof["access_key"] != "kt_current" || proof["secret_key"] != "ks_current" {
+			t.Fatalf("credential proof = %#v", proof)
+		}
+		if err := json.NewEncoder(w).Encode(k8sTelemetryConfig{
+			ClusterID:           7,
+			AccessKey:           proof["access_key"],
+			SecretKey:           proof["secret_key"],
+			TracesEndpoint:      "https://manager.example/v1/traces",
+			LogsEndpoint:        "https://manager.example/loki/api/v1/push",
+			RemoteWriteEndpoint: "https://manager.example/prometheus/api/v1/write",
+		}); err != nil {
+			t.Fatalf("encode telemetry config: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	out, err := refreshK8sTelemetryConfig(context.Background(), &config.Config{Edge: config.EdgeConfig{
+		AccessKey: "controller-access",
+		SecretKey: "controller-secret",
+	}}, server.URL, "kt_current", "ks_current")
+	if err != nil {
+		t.Fatalf("refreshK8sTelemetryConfig: %v", err)
+	}
+	if out.AccessKey != "kt_current" || out.SecretKey != "ks_current" {
+		t.Fatalf("refreshed credential = %#v", out)
 	}
 }

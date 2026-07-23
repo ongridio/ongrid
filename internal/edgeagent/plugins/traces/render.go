@@ -40,6 +40,12 @@ receivers:
         endpoint: {{ .HTTPEndpoint }}
 
 processors:
+{{- if .BoundedPipelines }}
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: {{ .MemoryLimitMiB }}
+    spike_limit_mib: {{ .MemorySpikeMiB }}
+{{- end }}
 {{- if .K8sAttributesEnabled }}
   # Enrich gateway spans with Kubernetes resource attributes using the
   # controller ServiceAccount. Keep metadata bounded to stable ownership
@@ -105,10 +111,25 @@ processors:
         action: upsert
 {{- end }}
 
+{{- if .BoundedPipelines }}
+  batch/traces:
+    send_batch_size: {{ .BatchSendSize }}
+    timeout: 1s
+    send_batch_max_size: {{ .BatchMaxSize }}
+  batch/logs:
+    send_batch_size: {{ .BatchSendSize }}
+    timeout: 1s
+    send_batch_max_size: {{ .BatchMaxSize }}
+  batch/metrics:
+    send_batch_size: {{ .BatchSendSize }}
+    timeout: 1s
+    send_batch_max_size: {{ .BatchMaxSize }}
+{{- else }}
   batch:
     send_batch_size: 8192
     timeout: 5s
     send_batch_max_size: 16384
+{{- end }}
 
 exporters:
   otlphttp/manager:
@@ -130,7 +151,7 @@ exporters:
     sending_queue:
       enabled: true
       num_consumers: 4
-      queue_size: 1024
+      queue_size: {{ .QueueSize }}
     retry_on_failure:
       enabled: true
       initial_interval: 1s
@@ -152,12 +173,55 @@ exporters:
       job: true
       instance: false
       level: true
+    {{- if .BoundedPipelines }}
+    sending_queue:
+      enabled: true
+      num_consumers: 4
+      queue_size: {{ .QueueSize }}
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 30s
+      max_elapsed_time: 5m
+    {{- end }}
 {{- end }}
 {{- if .MetricsEnabled }}
+{{- if .MetricsRemoteWriteEnabled }}
+  prometheusremotewrite/manager:
+    endpoint: {{ .MetricsRemoteWriteEndpoint }}
+    {{- if .MetricsAuthHeader }}
+    headers:
+      Authorization: "{{ .MetricsAuthHeader }}"
+    {{- end }}
+    {{- if or .MetricsTLSInsecure .MetricsCAFile }}
+    tls:
+      {{- if .MetricsTLSInsecure }}
+      insecure_skip_verify: true
+      {{- end }}
+      {{- if .MetricsCAFile }}
+      ca_file: {{ .MetricsCAFile }}
+      {{- end }}
+    {{- end }}
+    resource_to_telemetry_conversion:
+      enabled: true
+    # prometheusremotewrite has its own queue implementation and rejects
+    # exporterhelper's generic sending_queue key.
+    remote_write_queue:
+      enabled: true
+      # Keep one consumer so samples for a series remain ordered.
+      num_consumers: 1
+      queue_size: {{ .QueueSize }}
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 30s
+      max_elapsed_time: 5m
+{{- else }}
   prometheus/gateway:
     endpoint: {{ .MetricsExportEndpoint }}
     resource_to_telemetry_conversion:
       enabled: true
+{{- end }}
 {{- end }}
 
 extensions:
@@ -170,23 +234,23 @@ service:
     logs:
       level: info
     metrics:
-      address: 127.0.0.1:8888
+      address: {{ .CollectorMetricsEndpoint }}
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [{{ if .K8sAttributesEnabled }}k8sattributes, {{ end }}resource/device, batch]
+      processors: [{{ if .BoundedPipelines }}memory_limiter, {{ end }}{{ if .K8sAttributesEnabled }}k8sattributes, {{ end }}resource/device, {{ if .BoundedPipelines }}batch/traces{{ else }}batch{{ end }}]
       exporters: [otlphttp/manager]
 {{- if .LogsEnabled }}
     logs:
       receivers: [otlp]
-      processors: [{{ if .K8sAttributesEnabled }}k8sattributes, {{ end }}resource/device, resource/loki_labels, batch]
+      processors: [{{ if .BoundedPipelines }}memory_limiter, {{ end }}{{ if .K8sAttributesEnabled }}k8sattributes, {{ end }}resource/device, resource/loki_labels, {{ if .BoundedPipelines }}batch/logs{{ else }}batch{{ end }}]
       exporters: [loki/manager]
 {{- end }}
 {{- if .MetricsEnabled }}
     metrics:
       receivers: [otlp]
-      processors: [{{ if .K8sAttributesEnabled }}k8sattributes, {{ end }}resource/device, batch]
-      exporters: [prometheus/gateway]
+      processors: [{{ if .BoundedPipelines }}memory_limiter, {{ end }}{{ if .K8sAttributesEnabled }}k8sattributes, {{ end }}resource/device, {{ if .BoundedPipelines }}batch/metrics{{ else }}batch{{ end }}]
+      exporters: [{{ if .MetricsRemoteWriteEnabled }}prometheusremotewrite/manager{{ else }}prometheus/gateway{{ end }}]
 {{- end }}
 `
 
@@ -229,8 +293,28 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 	}
 	metricsEnabled := boolSpec(cfg.Spec, "enable_metrics")
 	metricsExportEndpoint := stringOr(cfg.Spec, "metrics_export_endpoint", "")
-	if metricsEnabled && metricsExportEndpoint == "" {
+	metricsRemoteWriteEndpoint := stringOr(cfg.Spec, "metrics_remote_write_endpoint", "")
+	metricsRemoteWriteEnabled := metricsRemoteWriteEndpoint != ""
+	if metricsEnabled && metricsExportEndpoint == "" && !metricsRemoteWriteEnabled {
 		return nil, fmt.Errorf("traces plugin: metrics_export_endpoint required when enable_metrics=true")
+	}
+	boundedPipelines := boolSpec(cfg.Spec, "bounded_pipelines")
+	memoryLimitMiB := intSpec(cfg.Spec, "memory_limit_mib", 384)
+	memorySpikeMiB := intSpec(cfg.Spec, "memory_spike_limit_mib", 96)
+	batchSendSize := intSpec(cfg.Spec, "batch_send_size", 2048)
+	batchMaxSize := intSpec(cfg.Spec, "batch_max_size", 4096)
+	queueSize := 1024
+	if boundedPipelines {
+		queueSize = intSpec(cfg.Spec, "queue_size", 512)
+	}
+	if boundedPipelines && (memoryLimitMiB <= 0 || memorySpikeMiB <= 0 || memorySpikeMiB >= memoryLimitMiB) {
+		return nil, fmt.Errorf("traces plugin: memory limiter requires 0 < spike_limit_mib < memory_limit_mib")
+	}
+	if boundedPipelines && (batchSendSize <= 0 || batchMaxSize < batchSendSize || batchMaxSize > 4096) {
+		return nil, fmt.Errorf("traces plugin: bounded batch requires 0 < send size <= max size <= 4096")
+	}
+	if boundedPipelines && (queueSize <= 0 || queueSize > 4096) {
+		return nil, fmt.Errorf("traces plugin: bounded queue_size must be between 1 and 4096")
 	}
 
 	// Default to skip-verify because the standard install ships a self-signed
@@ -252,23 +336,40 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 			authHeader = "Bearer " + cfg.AuthPass
 		}
 	}
+	metricsAuthHeader := authHeaderFromValues(
+		stringOr(cfg.Spec, "metrics_remote_write_auth_user", ""),
+		stringOr(cfg.Spec, "metrics_remote_write_auth_pass", ""),
+		stringOr(cfg.Spec, "metrics_remote_write_bearer", ""),
+	)
 
 	// text/template ranges over maps in key-sorted order (Go 1.12+), so
 	// passing the raw map yields stable rendered output across runs.
 	data := map[string]any{
-		"EdgeID":                cfg.EdgeID,
-		"EmitDeviceID":          !omitDeviceID,
-		"GRPCEndpoint":          grpcEP,
-		"HTTPEndpoint":          httpEP,
-		"ExtraAttrs":            extra,
-		"Endpoint":              strings.TrimRight(cfg.Endpoint, "/"),
-		"AuthHeader":            authHeader,
-		"TLSInsecureSkipVerify": tlsInsecure,
-		"K8sAttributesEnabled":  k8sAttributes,
-		"LogsEnabled":           logsEnabled,
-		"LogsEndpoint":          logsEndpoint,
-		"MetricsEnabled":        metricsEnabled,
-		"MetricsExportEndpoint": metricsExportEndpoint,
+		"EdgeID":                     cfg.EdgeID,
+		"EmitDeviceID":               !omitDeviceID,
+		"GRPCEndpoint":               grpcEP,
+		"HTTPEndpoint":               httpEP,
+		"ExtraAttrs":                 extra,
+		"Endpoint":                   strings.TrimRight(cfg.Endpoint, "/"),
+		"AuthHeader":                 authHeader,
+		"TLSInsecureSkipVerify":      tlsInsecure,
+		"K8sAttributesEnabled":       k8sAttributes,
+		"LogsEnabled":                logsEnabled,
+		"LogsEndpoint":               logsEndpoint,
+		"MetricsEnabled":             metricsEnabled,
+		"MetricsExportEndpoint":      metricsExportEndpoint,
+		"MetricsRemoteWriteEnabled":  metricsRemoteWriteEnabled,
+		"MetricsRemoteWriteEndpoint": metricsRemoteWriteEndpoint,
+		"MetricsAuthHeader":          metricsAuthHeader,
+		"MetricsTLSInsecure":         boolSpec(cfg.Spec, "metrics_remote_write_tls_insecure"),
+		"MetricsCAFile":              stringOr(cfg.Spec, "metrics_remote_write_ca_file", ""),
+		"BoundedPipelines":           boundedPipelines,
+		"MemoryLimitMiB":             memoryLimitMiB,
+		"MemorySpikeMiB":             memorySpikeMiB,
+		"BatchSendSize":              batchSendSize,
+		"BatchMaxSize":               batchMaxSize,
+		"QueueSize":                  queueSize,
+		"CollectorMetricsEndpoint":   stringOr(cfg.Spec, "collector_metrics_endpoint", "127.0.0.1:8888"),
 	}
 
 	tmpl, err := template.New("otelcol").Parse(otelcolTemplate)
@@ -328,4 +429,31 @@ func stringMap(spec map[string]interface{}, key string) map[string]string {
 // basicAuth encodes user:pass in base64 for the Authorization header.
 func basicAuth(user, pass string) string {
 	return base64.StdEncoding.EncodeToString([]byte(user + ":" + pass))
+}
+
+func authHeaderFromValues(user, pass, bearer string) string {
+	if bearer != "" {
+		return "Bearer " + bearer
+	}
+	if user != "" && pass != "" {
+		return "Basic " + basicAuth(user, pass)
+	}
+	return ""
+}
+
+func intSpec(spec map[string]interface{}, key string, fallback int) int {
+	raw, ok := spec[key]
+	if !ok {
+		return fallback
+	}
+	switch value := raw.(type) {
+	case int:
+		return value
+	case int64:
+		return int(value)
+	case float64:
+		return int(value)
+	default:
+		return fallback
+	}
 }

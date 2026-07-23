@@ -21,6 +21,7 @@ func Migrate(db *gorm.DB) error {
 		&model.Pod{},
 		&model.Event{},
 		&model.Installation{},
+		&model.TelemetryCredential{},
 	); err != nil {
 		return err
 	}

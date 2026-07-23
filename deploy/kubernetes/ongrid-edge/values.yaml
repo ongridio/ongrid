@@ -83,10 +83,74 @@ kubeStateMetrics:
       cpu: 200m
       memory: 256Mi
 
+telemetryConfig:
+  # Controller republishes endpoint/auth/TLS changes to the projected Secret;
+  # Gateway and Scraper then hot-reload without a rollout.
+  refreshInterval: 1m
+
+kubernetesMetrics:
+  # Compatibility default for the first rollout. Switch to scraper only after
+  # the telemetry Secret is populated.
+  mode: controller
+  # Set false for the stop-old/start-new cutover step. While false, neither the
+  # Controller nor the standalone Scraper reads kube-state-metrics.
+  enabled: true
+  # First phase is intentionally single-active; values other than 1 fail
+  # template validation when mode=scraper.
+  replicas: 1
+  serviceAccountName: ""
+  endpoint: ""
+  interval: 30s
+  timeout: 15s
+  pushTimeout: 30s
+  sampleLimit: 250000
+  batchSampleLimit: 10000
+  batchByteLimit: 4194304
+  maxRetries: 3
+  retryBackoff: 500ms
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
 telemetryGateway:
   # Expose the controller OTLP receiver by default so instrumented workloads
   # can export cluster-scoped traces, logs, and metrics without extra Helm flags.
   enabled: true
+  # embedded preserves the old controller-hosted Collector for rollout and
+  # rollback. deployment creates an isolated, horizontally scalable gateway.
+  mode: embedded
+  replicas: 2
+  serviceAccountName: ""
+  reloadInterval: 10s
+  memoryLimiter:
+    limitMiB: 768
+    spikeLimitMiB: 128
+  batch:
+    sendSize: 2048
+    maxSize: 4096
+  queueSize: 512
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 60
+    # Scale before memory_limiter's 640Mi soft limit (768Mi - 128Mi spike).
+    targetMemoryAverageValue: 600Mi
+    scaleDownStabilizationWindowSeconds: 300
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
   service:
     type: ClusterIP
     grpcPort: 4317

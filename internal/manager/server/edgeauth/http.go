@@ -2,11 +2,10 @@
 // `auth_request` module calls before proxying telemetry data plane
 // requests to downstream backends (Loki, Tempo, ...).
 //
-// The endpoint validates the Authorization header (Basic auth, where
-// username = edge access key, password = edge secret key) by reusing
-// edge.AccessKeyAuthenticator — the same code that authenticates tunnel
-// handshakes. So data plane HTTPS and tunnel both gate on identical
-// credentials; revoking an edge revokes both paths simultaneously.
+// The endpoint validates the Authorization header (Basic auth) through a
+// wiring-provided authenticator. The manager exposes separate edge-only,
+// telemetry-only, and compatibility endpoints so nginx can enforce the
+// credential scope required by each exact data-plane route.
 //
 // This endpoint is mounted on the public mux (no JWT auth) because nginx
 // itself is the only legitimate caller, and it lives behind the local
@@ -27,11 +26,15 @@ import (
 )
 
 // Authenticator is the narrow contract this handler needs. The concrete
-// implementation lives in cmd/ongrid wiring, adapting
-// *edge.AccessKeyAuthenticator (which returns tunnel.Session) to this
-// signature so we don't drag the tunnel package into the HTTP handler.
+// implementation lives in cmd/ongrid wiring so this package does not depend
+// on either the edge identity or Kubernetes telemetry credential domain.
 type Authenticator interface {
-	AuthenticateEdge(ctx context.Context, accessKey, secretKey string) (edgeID uint64, err error)
+	AuthenticateDataPlane(ctx context.Context, accessKey, secretKey string) (Identity, error)
+}
+
+type Identity struct {
+	EdgeID    uint64
+	ClusterID uint64
 }
 
 // Handler exposes /internal/auth/dataplane-verify.
@@ -52,7 +55,13 @@ func NewHandler(authn Authenticator, log *slog.Logger) *Handler {
 // whether to gate by network policy (typically yes — only nginx should
 // reach this).
 func (h *Handler) Register(r chi.Router) {
-	r.Get("/internal/auth/dataplane-verify", h.verify)
+	h.RegisterAt(r, "/internal/auth/dataplane-verify")
+}
+
+// RegisterAt mounts the same verifier at a narrower internal path. Wiring
+// uses this for edge-only and telemetry-only nginx auth_request endpoints.
+func (h *Handler) RegisterAt(r chi.Router, path string) {
+	r.Get(path, h.verify)
 }
 
 func (h *Handler) verify(w http.ResponseWriter, r *http.Request) {
@@ -63,10 +72,10 @@ func (h *Handler) verify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	edgeID, err := h.authn.AuthenticateEdge(r.Context(), user, pass)
+	identity, err := h.authn.AuthenticateDataPlane(r.Context(), user, pass)
 	if err != nil {
 		if errors.Is(err, errs.ErrUnauthorized) {
-			h.log.Debug("dataplane auth rejected", slog.String("user", user))
+			h.log.Debug("dataplane auth rejected")
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -78,7 +87,12 @@ func (h *Handler) verify(w http.ResponseWriter, r *http.Request) {
 	// Surface edge_id back to nginx so it can pass through to downstream
 	// (e.g. inject as a forced label header into Loki). nginx reads via
 	// `auth_request_set $edge_id $upstream_http_x_edge_id;`.
-	w.Header().Set("X-Edge-Id", uintToA(edgeID))
+	if identity.EdgeID != 0 {
+		w.Header().Set("X-Edge-Id", uintToA(identity.EdgeID))
+	}
+	if identity.ClusterID != 0 {
+		w.Header().Set("X-Cluster-Id", uintToA(identity.ClusterID))
+	}
 	w.WriteHeader(http.StatusOK)
 }
 

@@ -1,0 +1,162 @@
+{{- $enabled := eq (include "ongrid-edge.telemetryGatewayEnabled" .) "true" -}}
+{{- $mode := include "ongrid-edge.telemetryGatewayMode" . -}}
+{{- if and $enabled (eq $mode "deployment") }}
+{{- $gw := default dict .Values.telemetryGateway -}}
+{{- $autoscaling := default dict $gw.autoscaling -}}
+{{- $memoryLimiter := default dict $gw.memoryLimiter -}}
+{{- $batch := default dict $gw.batch -}}
+{{- $replicas := int (default 2 $gw.replicas) -}}
+{{- $limitMiB := int (default 768 $memoryLimiter.limitMiB) -}}
+{{- $spikeMiB := int (default 128 $memoryLimiter.spikeLimitMiB) -}}
+{{- $sendSize := int (default 2048 $batch.sendSize) -}}
+{{- $maxSize := int (default 4096 $batch.maxSize) -}}
+{{- $queueSize := int (default 512 $gw.queueSize) -}}
+{{- $containerMemory := required "telemetryGateway.resources.limits.memory is required" $gw.resources.limits.memory -}}
+{{- $containerLimitMiB := int (include "ongrid-edge.memoryQuantityMiB" $containerMemory) -}}
+{{- if and (not (default false $autoscaling.enabled)) (lt $replicas 2) -}}
+{{- fail "telemetryGateway.replicas must be at least 2 when autoscaling is disabled" -}}
+{{- end -}}
+{{- if or (le $spikeMiB 0) (le $limitMiB $spikeMiB) -}}
+{{- fail "telemetryGateway.memoryLimiter requires 0 < spikeLimitMiB < limitMiB" -}}
+{{- end -}}
+{{- if gt (mul $limitMiB 100) (mul $containerLimitMiB 80) -}}
+{{- fail "telemetryGateway.memoryLimiter.limitMiB must be at most 80% of the container memory limit" -}}
+{{- end -}}
+{{- if or (le $sendSize 0) (lt $maxSize $sendSize) (gt $maxSize 4096) -}}
+{{- fail "telemetryGateway.batch requires 0 < sendSize <= maxSize <= 4096" -}}
+{{- end -}}
+{{- if or (le $queueSize 0) (gt $queueSize 4096) -}}
+{{- fail "telemetryGateway.queueSize must be between 1 and 4096" -}}
+{{- end -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ongrid-edge.telemetryGatewayName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ongrid-edge.labels" . | nindent 4 }}
+    app.kubernetes.io/component: telemetry-gateway
+spec:
+  {{- if not (default false $autoscaling.enabled) }}
+  replicas: {{ $replicas }}
+  {{- end }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "ongrid-edge.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: telemetry-gateway
+  template:
+    metadata:
+      labels:
+        {{- include "ongrid-edge.labels" . | nindent 8 }}
+        app.kubernetes.io/component: telemetry-gateway
+    spec:
+      serviceAccountName: {{ include "ongrid-edge.telemetryGatewayServiceAccount" . }}
+      terminationGracePeriodSeconds: 30
+      {{- with .Values.image.architecture }}
+      nodeSelector:
+        kubernetes.io/arch: {{ . | quote }}
+      {{- end }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "ongrid-edge.name" . }}
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/component: telemetry-gateway
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "ongrid-edge.name" . }}
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/component: telemetry-gateway
+      securityContext:
+        runAsNonRoot: {{ .Values.podSecurity.runAsNonRoot }}
+        runAsUser: {{ .Values.podSecurity.runAsUser }}
+        runAsGroup: {{ .Values.podSecurity.runAsGroup }}
+        fsGroup: {{ .Values.podSecurity.fsGroup }}
+      containers:
+        - name: telemetry-gateway
+          image: {{ include "ongrid-edge.image" . | quote }}
+          imagePullPolicy: {{ default "IfNotPresent" .Values.image.pullPolicy }}
+          workingDir: /
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+              protocol: TCP
+            - name: otlp-http
+              containerPort: 4318
+              protocol: TCP
+            - name: otel-metrics
+              containerPort: 8888
+              protocol: TCP
+            - name: diagnostics
+              containerPort: 9101
+              protocol: TCP
+          env:
+            - name: ONGRID_EDGE_MODE
+              value: k8s-telemetry-gateway
+            - name: ONGRID_K8S_TELEMETRY_SECRET_DIR
+              value: /var/run/ongrid-telemetry
+            - name: ONGRID_K8S_TELEMETRY_RELOAD_INTERVAL
+              value: {{ default "10s" $gw.reloadInterval | quote }}
+            - name: ONGRID_K8S_ENROLL_TLS_INSECURE
+              value: {{ .Values.manager.tlsInsecure | quote }}
+            - name: ONGRID_K8S_GATEWAY_MEMORY_LIMIT_MIB
+              value: {{ $limitMiB | quote }}
+            - name: ONGRID_K8S_GATEWAY_MEMORY_SPIKE_LIMIT_MIB
+              value: {{ $spikeMiB | quote }}
+            - name: ONGRID_K8S_GATEWAY_BATCH_SIZE
+              value: {{ $sendSize | quote }}
+            - name: ONGRID_K8S_GATEWAY_BATCH_MAX_SIZE
+              value: {{ $maxSize | quote }}
+            - name: ONGRID_K8S_GATEWAY_QUEUE_SIZE
+              value: {{ $queueSize | quote }}
+            - name: ONGRID_K8S_POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: diagnostics
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: diagnostics
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 2
+          resources:
+            {{- toYaml $gw.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: edge-state
+              mountPath: /var/lib/ongrid-edge
+            - name: telemetry-credentials
+              mountPath: /var/run/ongrid-telemetry
+              readOnly: true
+      volumes:
+        - name: edge-state
+          emptyDir: {}
+        - name: telemetry-credentials
+          secret:
+            secretName: {{ include "ongrid-edge.telemetryCredentialSecretName" . }}
+{{- end }}

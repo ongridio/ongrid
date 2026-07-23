@@ -404,6 +404,11 @@ func main() {
 	// exists yet, so previous admin edits survive restarts.
 	settingRepo := managersettingdata.NewRepo(db)
 	settingSvc := managerbizsetting.New(settingRepo, log.With(slog.String("comp", "setting")))
+	queryFallback := cfg.Prom.URL
+	if cfg.Prom.QueryURL != "" {
+		queryFallback = cfg.Prom.QueryURL
+	}
+	promResolver := managerbizsetting.NewPromResolver(settingSvc, queryFallback, cfg.Prom.RemoteWriteURL)
 
 	// HLD-010 audit log — append-only "who did what" trail. Built early
 	// so the auth middleware factory below can capture login attempts.
@@ -779,7 +784,13 @@ func main() {
 		EventMaxPerCluster:   cfg.K8sEventMaxPerCluster,
 		EventCleanupInterval: cfg.K8sEventCleanupInterval,
 	})
+	k8sUC.SetRemoteWriteResolver(k8sRemoteWriteResolver{
+		resolver:  promResolver,
+		prom:      cfg.Prom,
+		publicURL: cfg.PublicURL,
+	})
 	k8sSvc := managersvck8s.New(k8sUC)
+	telemetryAuthn := managerbizk8s.NewTelemetryAuthenticator(k8sRepo)
 	edgeSvc.SetManagedEdgeGuard(k8sSvc)
 	k8sHandler := managerserverk8s.NewHandler(k8sSvc)
 
@@ -848,14 +859,16 @@ func main() {
 		log.Warn("k8s: topology reconcile on boot failed", slog.Any("err", err))
 	}
 
-	// Data plane auth verify — nginx auth_request
-	// calls this endpoint to validate edge basic-auth before proxy_pass'ing
-	// /loki/api/v1/push to internal Loki. Reuses the same edge credentials
-	// that gate tunnel handshakes (edgeAuthn).
-	edgeAuthHandler := managerserveredgeauth.NewHandler(
-		edgeAuthAdapter{authn: edgeAuthn},
+	// Data plane auth verify — nginx auth_request calls the compatibility
+	// endpoint for Loki/Tempo and exact scope endpoints for controller config
+	// and Prometheus remote_write. Telemetry credentials never enter the
+	// tunnel authenticator.
+	dataPlaneAuthHandler := managerserveredgeauth.NewHandler(
+		dataPlaneAuthAdapter{edge: edgeAuthn, telemetry: telemetryAuthn},
 		log,
 	)
+	edgeOnlyAuthHandler := managerserveredgeauth.NewHandler(edgeOnlyAuthAdapter{authn: edgeAuthn}, log)
+	telemetryOnlyAuthHandler := managerserveredgeauth.NewHandler(telemetryOnlyAuthAdapter{authn: telemetryAuthn}, log)
 
 	// PR-F: MySQL fast path commented out — single source of truth is now
 	// cloud Prometheus. Edges still emit push_host_metrics for backward
@@ -931,12 +944,6 @@ func main() {
 		// when the DB rows are absent. UI saves take effect within ~5s
 		// without a manager restart — the prom clients re-resolve on each
 		// request and the round-tripper has its own 5s cache.
-		queryFallback := cfg.Prom.URL
-		if cfg.Prom.QueryURL != "" {
-			queryFallback = cfg.Prom.QueryURL
-		}
-		promResolver := managerbizsetting.NewPromResolver(settingSvc, queryFallback, cfg.Prom.RemoteWriteURL)
-
 		promHTTPClient, herr := promauth.BuildClient(
 			promauth.TLSConfig{
 				Insecure: cfg.Prom.TLSInsecure,
@@ -2216,7 +2223,9 @@ func main() {
 	// Data plane auth verify lives outside /api so nginx can reach it
 	// without JWT. Network policy (docker-internal only) is the gate;
 	// nginx must NOT proxy_pass external traffic to /internal/auth/*.
-	edgeAuthHandler.Register(mux)
+	dataPlaneAuthHandler.Register(mux)
+	edgeOnlyAuthHandler.RegisterAt(mux, "/internal/auth/edge-verify")
+	telemetryOnlyAuthHandler.RegisterAt(mux, "/internal/auth/telemetry-verify")
 	k8sHandler.RegisterInternal(mux)
 
 	// All BC HTTP lives under /api. Public iam routes (login / refresh)
@@ -2697,16 +2706,115 @@ func isEdgeReachableURL(raw string) bool {
 // returns tunnel.Session) to the narrower edgeauth.Authenticator
 // interface (which only needs the edge_id). Lives at the wiring site so
 // edgeauth doesn't import the tunnel package.
-type edgeAuthAdapter struct {
+type dataPlaneAuthAdapter struct {
+	edge      *managerbizedge.AccessKeyAuthenticator
+	telemetry *managerbizk8s.TelemetryAuthenticator
+}
+
+type edgeOnlyAuthAdapter struct {
 	authn *managerbizedge.AccessKeyAuthenticator
 }
 
-func (a edgeAuthAdapter) AuthenticateEdge(ctx context.Context, accessKey, secretKey string) (uint64, error) {
+func (a edgeOnlyAuthAdapter) AuthenticateDataPlane(ctx context.Context, accessKey, secretKey string) (managerserveredgeauth.Identity, error) {
 	sess, err := a.authn.Authenticate(ctx, accessKey, secretKey)
 	if err != nil {
-		return 0, err
+		return managerserveredgeauth.Identity{}, err
 	}
-	return sess.EdgeID, nil
+	return managerserveredgeauth.Identity{EdgeID: sess.EdgeID}, nil
+}
+
+type telemetryOnlyAuthAdapter struct {
+	authn *managerbizk8s.TelemetryAuthenticator
+}
+
+func (a telemetryOnlyAuthAdapter) AuthenticateDataPlane(ctx context.Context, accessKey, secretKey string) (managerserveredgeauth.Identity, error) {
+	clusterID, err := a.authn.Authenticate(ctx, accessKey, secretKey)
+	if err != nil {
+		return managerserveredgeauth.Identity{}, err
+	}
+	return managerserveredgeauth.Identity{ClusterID: clusterID}, nil
+}
+
+type k8sRemoteWriteResolver struct {
+	resolver  *managerbizsetting.PromResolver
+	prom      config.PromConfig
+	publicURL string
+}
+
+func (r k8sRemoteWriteResolver) ResolveRemoteWrite(ctx context.Context) (managerbizk8s.RemoteWriteTarget, error) {
+	if !r.prom.Enabled || r.resolver == nil {
+		return managerbizk8s.RemoteWriteTarget{}, nil
+	}
+	writeURL, err := r.resolver.ResolveWriteURL(ctx)
+	if err != nil {
+		return managerbizk8s.RemoteWriteTarget{}, err
+	}
+	if isEmbeddedPrometheusURL(writeURL) {
+		base := strings.TrimRight(strings.TrimSpace(r.publicURL), "/")
+		if base == "" {
+			return managerbizk8s.RemoteWriteTarget{}, nil
+		}
+		return managerbizk8s.RemoteWriteTarget{
+			Endpoint:               base + "/prometheus/api/v1/write",
+			UseTelemetryCredential: true,
+		}, nil
+	}
+	authConfig, err := r.resolver.Resolve(ctx)
+	if err != nil {
+		return managerbizk8s.RemoteWriteTarget{}, err
+	}
+	var caPEM string
+	if path := strings.TrimSpace(r.prom.TLSCAPath); path != "" {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return managerbizk8s.RemoteWriteTarget{}, fmt.Errorf("read prometheus TLS CA: %w", err)
+		}
+		caPEM = string(raw)
+	}
+	return managerbizk8s.RemoteWriteTarget{
+		Endpoint:      writeURL,
+		BearerToken:   authConfig.BearerToken,
+		BasicUser:     authConfig.BasicUser,
+		BasicPassword: authConfig.BasicPassword,
+		TLSInsecure:   r.prom.TLSInsecure,
+		TLSCAPEM:      caPEM,
+	}, nil
+}
+
+func isEmbeddedPrometheusURL(raw string) bool {
+	u, err := neturl.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(u.Hostname(), "prometheus")
+}
+
+func (a dataPlaneAuthAdapter) AuthenticateDataPlane(ctx context.Context, accessKey, secretKey string) (managerserveredgeauth.Identity, error) {
+	telemetryFirst := strings.HasPrefix(accessKey, "kt_")
+	if telemetryFirst {
+		clusterID, err := a.telemetry.Authenticate(ctx, accessKey, secretKey)
+		if err == nil {
+			return managerserveredgeauth.Identity{ClusterID: clusterID}, nil
+		}
+		if !errors.Is(err, errs.ErrUnauthorized) {
+			return managerserveredgeauth.Identity{}, err
+		}
+	}
+	sess, err := a.edge.Authenticate(ctx, accessKey, secretKey)
+	if err == nil {
+		return managerserveredgeauth.Identity{EdgeID: sess.EdgeID}, nil
+	}
+	if !errors.Is(err, errs.ErrUnauthorized) {
+		return managerserveredgeauth.Identity{}, err
+	}
+	if telemetryFirst {
+		return managerserveredgeauth.Identity{}, errs.ErrUnauthorized
+	}
+	clusterID, err := a.telemetry.Authenticate(ctx, accessKey, secretKey)
+	if err != nil {
+		return managerserveredgeauth.Identity{}, err
+	}
+	return managerserveredgeauth.Identity{ClusterID: clusterID}, nil
 }
 
 // Resolve implements llm.Resolver. Empty fields tell the LLM client to

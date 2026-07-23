@@ -1,0 +1,160 @@
+{{- $mode := include "ongrid-edge.kubernetesMetricsMode" . -}}
+{{- $enabled := eq (include "ongrid-edge.kubernetesMetricsEnabled" .) "true" -}}
+{{- if and $enabled (eq $mode "scraper") }}
+{{- $metrics := default dict .Values.kubernetesMetrics -}}
+{{- $endpoint := include "ongrid-edge.kubernetesMetricsEndpoint" . -}}
+{{- if ne (int (default 1 $metrics.replicas)) 1 -}}
+{{- fail "kubernetesMetrics.replicas must be 1 until scraper leader election or target sharding is implemented" -}}
+{{- end -}}
+{{- if or (lt (int (default 3 $metrics.maxRetries)) 1) (gt (int (default 3 $metrics.maxRetries)) 10) -}}
+{{- fail "kubernetesMetrics.maxRetries must be between 1 and 10" -}}
+{{- end -}}
+{{- if not $endpoint -}}
+{{- fail "kubernetesMetrics.mode=scraper requires kubernetesMetrics.endpoint or kubeStateMetrics.enabled=true" -}}
+{{- end -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ongrid-edge.fullname" . }}-metrics-scraper
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ongrid-edge.labels" . | nindent 4 }}
+    app.kubernetes.io/component: metrics-scraper
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "ongrid-edge.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: metrics-scraper
+  template:
+    metadata:
+      labels:
+        {{- include "ongrid-edge.labels" . | nindent 8 }}
+        app.kubernetes.io/component: metrics-scraper
+    spec:
+      serviceAccountName: {{ include "ongrid-edge.metricsScraperServiceAccount" . }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      {{- with .Values.image.architecture }}
+      nodeSelector:
+        kubernetes.io/arch: {{ . | quote }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: {{ .Values.podSecurity.runAsNonRoot }}
+        runAsUser: {{ .Values.podSecurity.runAsUser }}
+        runAsGroup: {{ .Values.podSecurity.runAsGroup }}
+        fsGroup: {{ .Values.podSecurity.fsGroup }}
+      containers:
+        - name: metrics-scraper
+          image: {{ include "ongrid-edge.image" . | quote }}
+          imagePullPolicy: {{ default "IfNotPresent" .Values.image.pullPolicy }}
+          workingDir: /
+          ports:
+            - name: diagnostics
+              containerPort: 9101
+              protocol: TCP
+          env:
+            - name: ONGRID_EDGE_MODE
+              value: k8s-metrics-scraper
+            - name: ONGRID_K8S_TELEMETRY_SECRET_DIR
+              value: /var/run/ongrid-telemetry
+            - name: ONGRID_K8S_METRICS_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-config
+                  key: k8s-metrics-endpoint
+            - name: ONGRID_K8S_METRICS_INTERVAL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-config
+                  key: k8s-metrics-interval
+            - name: ONGRID_K8S_METRICS_TIMEOUT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-config
+                  key: k8s-metrics-timeout
+            - name: ONGRID_K8S_METRICS_PUSH_TIMEOUT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-config
+                  key: k8s-metrics-push-timeout
+            - name: ONGRID_K8S_METRICS_SAMPLE_LIMIT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-config
+                  key: k8s-metrics-sample-limit
+            - name: ONGRID_K8S_METRICS_BATCH_SAMPLE_LIMIT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-config
+                  key: k8s-metrics-batch-sample-limit
+            - name: ONGRID_K8S_METRICS_BATCH_BYTE_LIMIT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-config
+                  key: k8s-metrics-batch-byte-limit
+            - name: ONGRID_K8S_METRICS_MAX_RETRIES
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-config
+                  key: k8s-metrics-max-retries
+            - name: ONGRID_K8S_METRICS_RETRY_BACKOFF
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "ongrid-edge.fullname" . }}-config
+                  key: k8s-metrics-retry-backoff
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: diagnostics
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 2
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: diagnostics
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 60
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: diagnostics
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 2
+          resources:
+            {{- toYaml $metrics.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: telemetry-credentials
+              mountPath: /var/run/ongrid-telemetry
+              readOnly: true
+      volumes:
+        - name: telemetry-credentials
+          secret:
+            secretName: {{ include "ongrid-edge.telemetryCredentialSecretName" . }}
+            items:
+              - key: telemetry-cluster-id
+                path: telemetry-cluster-id
+              - key: telemetry-remote-write-endpoint
+                path: telemetry-remote-write-endpoint
+              - key: telemetry-remote-write-bearer
+                path: telemetry-remote-write-bearer
+              - key: telemetry-remote-write-basic-user
+                path: telemetry-remote-write-basic-user
+              - key: telemetry-remote-write-basic-pass
+                path: telemetry-remote-write-basic-pass
+              - key: telemetry-remote-write-tls-insecure
+                path: telemetry-remote-write-tls-insecure
+              - key: telemetry-remote-write-ca.pem
+                path: telemetry-remote-write-ca.pem
+{{- end }}

@@ -1,12 +1,73 @@
 package k8s
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	biz "github.com/ongridio/ongrid/internal/manager/biz/k8s"
 	model "github.com/ongridio/ongrid/internal/manager/model/k8s"
 )
+
+type telemetryRefreshService struct {
+	Service
+	controllerEdgeID uint64
+	proof            biz.TelemetryCredentialProof
+	out              *biz.TelemetryConfig
+	err              error
+}
+
+func (s *telemetryRefreshService) RefreshTelemetryConfig(_ context.Context, controllerEdgeID uint64, proof biz.TelemetryCredentialProof) (*biz.TelemetryConfig, error) {
+	s.controllerEdgeID = controllerEdgeID
+	s.proof = proof
+	return s.out, s.err
+}
+
+func TestRefreshTelemetryConfigUsesAuthenticatedControllerIdentity(t *testing.T) {
+	svc := &telemetryRefreshService{out: &biz.TelemetryConfig{
+		ClusterID:           7,
+		AccessKey:           "kt_access",
+		SecretKey:           "ks_secret",
+		RemoteWriteEndpoint: "https://manager.example/prometheus/api/v1/write",
+	}}
+	h := NewHandler(svc)
+	req := httptest.NewRequest(http.MethodPost, "/internal/k8s/telemetry-config", bytes.NewBufferString(`{"access_key":"kt_current","secret_key":"ks_current"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Edge-Id", "41")
+	resp := httptest.NewRecorder()
+
+	h.refreshTelemetryConfig(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", resp.Code, resp.Body.String())
+	}
+	if svc.controllerEdgeID != 41 {
+		t.Fatalf("controller edge id = %d, want 41", svc.controllerEdgeID)
+	}
+	if svc.proof.AccessKey != "kt_current" || svc.proof.SecretKey != "ks_current" {
+		t.Fatalf("credential proof = %#v", svc.proof)
+	}
+	var got telemetryConfigResponse
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.ClusterID != 7 || got.AccessKey != "kt_access" || got.SecretKey != "ks_secret" {
+		t.Fatalf("response = %#v", got)
+	}
+}
+
+func TestRefreshTelemetryConfigRejectsMissingAuthenticatedIdentity(t *testing.T) {
+	h := NewHandler(&telemetryRefreshService{})
+	resp := httptest.NewRecorder()
+	h.refreshTelemetryConfig(resp, httptest.NewRequest(http.MethodPost, "/internal/k8s/telemetry-config", nil))
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", resp.Code)
+	}
+}
 
 func TestClusterCapabilitiesFromModel(t *testing.T) {
 	edgeID := uint64(42)

@@ -1,6 +1,7 @@
 {{- if eq (include "ongrid-edge.telemetryGatewayEnabled" .) "true" }}
 {{- $gw := default dict .Values.telemetryGateway -}}
 {{- $svc := default dict $gw.service -}}
+{{- $mode := include "ongrid-edge.telemetryGatewayMode" . -}}
 apiVersion: v1
 kind: Service
 metadata:
@@ -14,7 +15,7 @@ spec:
   selector:
     app.kubernetes.io/name: {{ include "ongrid-edge.name" . }}
     app.kubernetes.io/instance: {{ .Release.Name }}
-    app.kubernetes.io/component: controller
+    app.kubernetes.io/component: {{ ternary "telemetry-gateway" "controller" (eq $mode "deployment") }}
   ports:
     - name: otlp-grpc
       port: {{ default 4317 $svc.grpcPort }}

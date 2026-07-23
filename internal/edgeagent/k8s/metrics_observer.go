@@ -2,6 +2,7 @@ package k8s
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -17,6 +18,8 @@ type metricsObserver struct {
 	scrapeLimitExceeded *prometheus.CounterVec
 	pushBatches         *prometheus.CounterVec
 	pushSamples         *prometheus.CounterVec
+	lastSuccess         *prometheus.GaugeVec
+	scrapeDuration      *prometheus.HistogramVec
 }
 
 type metricsPusherOptions struct {
@@ -49,23 +52,48 @@ func newMetricsObserver(reg prometheus.Registerer) (*metricsObserver, error) {
 	}, []string{"source"})
 	observer.pushBatches = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "ongrid_edge_k8s_metrics_push_batches_total",
-		Help: "Kubernetes metrics batches sent through the edge tunnel, partitioned by result.",
+		Help: "Kubernetes metrics batches sent to the configured data-plane sink, partitioned by result.",
 	}, []string{"source", "result"})
 	observer.pushSamples = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "ongrid_edge_k8s_metrics_push_samples_total",
-		Help: "Kubernetes metrics samples sent through the edge tunnel, partitioned by result.",
+		Help: "Kubernetes metrics samples sent to the configured data-plane sink, partitioned by result.",
 	}, []string{"source", "result"})
+	observer.lastSuccess = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "ongrid_edge_k8s_metrics_last_success_timestamp_seconds",
+		Help: "Unix timestamp of the last complete Kubernetes metrics scrape and data-plane write.",
+	}, []string{"source"})
+	observer.scrapeDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "ongrid_edge_k8s_metrics_scrape_duration_seconds",
+		Help:    "End-to-end duration of a Kubernetes metrics scrape and data-plane write.",
+		Buckets: []float64{0.1, 0.25, 0.5, 1, 2.5, 5, 10, 15, 30},
+	}, []string{"source"})
 	for _, collector := range []prometheus.Collector{
 		observer.scrapeSamples,
 		observer.scrapeLimitExceeded,
 		observer.pushBatches,
 		observer.pushSamples,
+		observer.lastSuccess,
+		observer.scrapeDuration,
 	} {
 		if err := reg.Register(collector); err != nil {
 			return nil, fmt.Errorf("register k8s metrics observer: %w", err)
 		}
 	}
 	return observer, nil
+}
+
+func (o *metricsObserver) observeCycle(source string, startedAt, completedAt time.Time, success bool) {
+	if o == nil || o.lastSuccess == nil || o.scrapeDuration == nil {
+		return
+	}
+	duration := completedAt.Sub(startedAt)
+	if duration < 0 {
+		duration = 0
+	}
+	o.scrapeDuration.WithLabelValues(source).Observe(duration.Seconds())
+	if success {
+		o.lastSuccess.WithLabelValues(source).Set(float64(completedAt.Unix()))
+	}
 }
 
 func (o *metricsObserver) observeScrape(source string, accepted int, limitExceeded bool) {

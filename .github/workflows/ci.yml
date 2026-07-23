@@ -101,7 +101,7 @@ jobs:
         uses: azure/setup-helm@v4
 
       - name: Check release scripts
-        run: bash -n dist/package.sh dist/package-k8s-chart.sh deploy/install/install.sh deploy/install/upgrade.sh deploy/install/uninstall.sh scripts/verify-cnb-compose-images.sh scripts/verify-release-images.sh scripts/publish-release-image.sh scripts/test-publish-release-image.sh scripts/test-compose-release-package.sh scripts/publish-helm-chart.sh scripts/test-publish-helm-chart.sh
+        run: bash -n dist/package.sh dist/package-k8s-chart.sh deploy/install/install.sh deploy/install/upgrade.sh deploy/install/uninstall.sh scripts/verify-cnb-compose-images.sh scripts/verify-release-images.sh scripts/publish-release-image.sh scripts/test-publish-release-image.sh scripts/test-compose-release-package.sh scripts/publish-helm-chart.sh scripts/test-publish-helm-chart.sh scripts/test-k8s-chart.sh
 
       - name: Verify Compose image routing
         run: make verify-compose-images
@@ -116,48 +116,4 @@ jobs:
         run: make test-release-package
 
       - name: Lint and render Kubernetes chart
-        run: |
-          helm lint deploy/kubernetes/ongrid-edge \
-            --set-string manager.publicURL=https://manager.example:8443 \
-            --set-string manager.tunnelAddr=manager.example:40012 \
-            --set-string enrollment.clusterID=1 \
-            --set-string enrollment.controllerBootstrapToken=controller-token \
-            --set-string enrollment.nodeBootstrapToken=node-token
-          make package-k8s-chart
-          helm template ongrid-edge bin/k8s/ongrid-edge.tgz \
-            --namespace ongrid-system \
-            --set-string manager.publicURL=https://manager.example:8443 \
-            --set-string manager.tunnelAddr=manager.example:40012 \
-            --set-string enrollment.clusterID=1 \
-            --set-string enrollment.controllerBootstrapToken=controller-token \
-            --set-string enrollment.nodeBootstrapToken=node-token \
-            >/tmp/ongrid-edge.yaml
-          grep -q 'type: Recreate' /tmp/ongrid-edge.yaml
-          ! grep -q 'kubernetes.io/arch:' /tmp/ongrid-edge.yaml
-          image_ref="$(make --no-print-directory k8s-edge-image-ref)"
-          expected_image="image: \"${image_ref}\""
-          test "$(grep -F -c "$expected_image" /tmp/ongrid-edge.yaml)" -eq 3
-          grep -q 'k8s-inventory-full-sync-interval: "10m"' /tmp/ongrid-edge.yaml
-          grep -q 'k8s-metrics-timeout: "15s"' /tmp/ongrid-edge.yaml
-          grep -q 'k8s-metrics-push-timeout: "30s"' /tmp/ongrid-edge.yaml
-          grep -q 'k8s-metrics-sample-limit: "250000"' /tmp/ongrid-edge.yaml
-          grep -q 'k8s-metrics-batch-sample-limit: "10000"' /tmp/ongrid-edge.yaml
-          grep -q 'k8s-metrics-batch-byte-limit: "4194304"' /tmp/ongrid-edge.yaml
-          grep -q 'name: ONGRID_K8S_METRICS_TIMEOUT' /tmp/ongrid-edge.yaml
-          grep -q 'name: ONGRID_K8S_METRICS_PUSH_TIMEOUT' /tmp/ongrid-edge.yaml
-          grep -q 'name: ONGRID_K8S_METRICS_SAMPLE_LIMIT' /tmp/ongrid-edge.yaml
-          grep -q 'name: ONGRID_K8S_METRICS_BATCH_SAMPLE_LIMIT' /tmp/ongrid-edge.yaml
-          grep -q 'name: ONGRID_K8S_METRICS_BATCH_BYTE_LIMIT' /tmp/ongrid-edge.yaml
-          grep -q 'hostNetwork: true' /tmp/ongrid-edge.yaml
-          grep -q 'name: install-host-runtime' /tmp/ongrid-edge.yaml
-          grep -q -- '- install-k8s-host-runtime' /tmp/ongrid-edge.yaml
-          grep -A16 'name: install-host-runtime' /tmp/ongrid-edge.yaml | grep -q 'memory: 128Mi'
-          grep -q -- '- enter-k8s-host' /tmp/ongrid-edge.yaml
-          test "$(grep -F -c 'mountPath: /host/root' /tmp/ongrid-edge.yaml)" -eq 2
-          grep -q 'mountPropagation: HostToContainer' /tmp/ongrid-edge.yaml
-          grep -A1 'name: ONGRID_EDGE_COLLECTOR_MODE' /tmp/ongrid-edge.yaml | grep -q 'value: "off"'
-          grep -q 'add: \["CHOWN", "DAC_OVERRIDE", "FOWNER"\]' /tmp/ongrid-edge.yaml
-          grep -q 'add: \["DAC_READ_SEARCH", "NET_ADMIN", "SETGID", "SETPCAP", "SETUID", "SYS_CHROOT"\]' /tmp/ongrid-edge.yaml
-          ! grep -q 'SYS_ADMIN\|SYS_PTRACE' /tmp/ongrid-edge.yaml
-          ! grep -q 'privileged: true' /tmp/ongrid-edge.yaml
-          ! grep -q 'supplementalGroups:' /tmp/ongrid-edge.yaml
+        run: make test-k8s-chart

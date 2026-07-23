@@ -1,11 +1,63 @@
 package traces
 
 import (
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ongridio/ongrid/internal/edgeagent/plugins"
 )
+
+// TestRenderedStandaloneConfigAcceptedByCollector is an opt-in compatibility
+// check against the exact bundled otelcol-contrib version. Compatibility jobs
+// may set ONGRID_TEST_OTELCOL_BINARY; ordinary unit-test runs skip it.
+func TestRenderedStandaloneConfigAcceptedByCollector(t *testing.T) {
+	binary := strings.TrimSpace(os.Getenv("ONGRID_TEST_OTELCOL_BINARY"))
+	if binary == "" {
+		t.Skip("ONGRID_TEST_OTELCOL_BINARY is not set")
+	}
+	raw, err := render(plugins.PluginConfig{
+		Enabled:  true,
+		Endpoint: "https://manager.example.com/v1/traces",
+		AuthUser: "kt_access",
+		AuthPass: "ks_secret",
+		Spec: map[string]interface{}{
+			"omit_device_id":                    true,
+			"enable_k8sattributes":              true,
+			"enable_logs":                       true,
+			"enable_metrics":                    true,
+			"logs_endpoint":                     "https://manager.example.com/loki/api/v1/push",
+			"metrics_remote_write_endpoint":     "https://manager.example.com/prometheus/api/v1/write",
+			"metrics_remote_write_auth_user":    "kt_access",
+			"metrics_remote_write_auth_pass":    "ks_secret",
+			"metrics_remote_write_tls_insecure": true,
+			"bounded_pipelines":                 true,
+			"memory_limit_mib":                  384,
+			"memory_spike_limit_mib":            96,
+			"batch_send_size":                   2048,
+			"batch_max_size":                    4096,
+			"queue_size":                        512,
+		},
+	})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	configPath := filepath.Join(t.TempDir(), "otelcol.yaml")
+	if err := os.WriteFile(configPath, raw, 0600); err != nil {
+		t.Fatalf("write rendered config: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, binary, "validate", "--config="+configPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("otelcol-contrib rejected rendered config: %v\n%s", err, output)
+	}
+}
 
 func TestRenderHappyPath(t *testing.T) {
 	cfg := plugins.PluginConfig{
@@ -228,6 +280,65 @@ func TestRenderOmitDeviceIDForGateway(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("rendered gateway config missing %q\n--- full body ---\n%s", want, body)
 		}
+	}
+}
+
+func TestRenderStandaloneGatewayUsesBoundedRemoteWritePipelines(t *testing.T) {
+	cfg := plugins.PluginConfig{
+		Enabled:  true,
+		Endpoint: "https://manager.example.com/v1/traces",
+		AuthUser: "kt_access",
+		AuthPass: "ks_secret",
+		Spec: map[string]interface{}{
+			"omit_device_id":                    true,
+			"enable_k8sattributes":              true,
+			"enable_logs":                       true,
+			"enable_metrics":                    true,
+			"logs_endpoint":                     "https://manager.example.com/loki/api/v1/push",
+			"metrics_remote_write_endpoint":     "https://manager.example.com/prometheus/api/v1/write",
+			"metrics_remote_write_auth_user":    "kt_access",
+			"metrics_remote_write_auth_pass":    "ks_secret",
+			"metrics_remote_write_tls_insecure": true,
+			"bounded_pipelines":                 true,
+			"memory_limit_mib":                  384,
+			"memory_spike_limit_mib":            96,
+			"batch_send_size":                   2048,
+			"batch_max_size":                    4096,
+			"queue_size":                        512,
+			"collector_metrics_endpoint":        "0.0.0.0:8888",
+		},
+	}
+	out, err := render(cfg)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	body := string(out)
+	for _, want := range []string{
+		"memory_limiter:",
+		"limit_mib: 384",
+		"spike_limit_mib: 96",
+		"batch/traces:",
+		"batch/logs:",
+		"batch/metrics:",
+		"send_batch_max_size: 4096",
+		"timeout: 1s",
+		"queue_size: 512",
+		"prometheusremotewrite/manager:",
+		"endpoint: https://manager.example.com/prometheus/api/v1/write",
+		"remote_write_queue:",
+		"num_consumers: 1",
+		"exporters: [prometheusremotewrite/manager]",
+		"processors: [memory_limiter, k8sattributes, resource/device, batch/traces]",
+		"processors: [memory_limiter, k8sattributes, resource/device, resource/loki_labels, batch/logs]",
+		"processors: [memory_limiter, k8sattributes, resource/device, batch/metrics]",
+		"address: 0.0.0.0:8888",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("rendered standalone gateway config missing %q\n--- full body ---\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "prometheus/gateway:") {
+		t.Fatalf("standalone gateway must not retain the in-memory scrape exporter:\n%s", body)
 	}
 }
 

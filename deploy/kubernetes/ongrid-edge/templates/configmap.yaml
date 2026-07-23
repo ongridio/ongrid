@@ -1,7 +1,13 @@
 {{- $controllerMetrics := default dict .Values.controller.metrics -}}
+{{- $standaloneMetrics := default dict .Values.kubernetesMetrics -}}
+{{- $metricsConfig := $controllerMetrics -}}
+{{- $metricsEndpoint := include "ongrid-edge.k8sMetricsEndpoint" . -}}
+{{- if eq (include "ongrid-edge.kubernetesMetricsMode" .) "scraper" -}}
+{{- $metricsConfig = $standaloneMetrics -}}
+{{- $metricsEndpoint = include "ongrid-edge.kubernetesMetricsEndpoint" . -}}
+{{- end -}}
 {{- $appMetricsDiscovery := default dict $controllerMetrics.appDiscovery -}}
 {{- $controllerInventory := default dict .Values.controller.inventory -}}
-{{- $ksmEndpoint := include "ongrid-edge.k8sMetricsEndpoint" . -}}
 {{- if ne .Values.mode "full-node" -}}
 {{- fail (printf "unsupported mode %q; supported mode is full-node" .Values.mode) -}}
 {{- end -}}
@@ -18,11 +24,13 @@ data:
   manager-tunnel-addr: {{ required "manager.tunnelAddr is required" .Values.manager.tunnelAddr | quote }}
   k8s-inventory-watch: {{ default true $controllerInventory.watch | quote }}
   k8s-inventory-full-sync-interval: {{ default "10m" $controllerInventory.fullSyncInterval | quote }}
-  k8s-metrics-endpoint: {{ default "" $ksmEndpoint | quote }}
-  k8s-metrics-interval: {{ default "30s" $controllerMetrics.interval | quote }}
-  k8s-metrics-timeout: {{ default "15s" $controllerMetrics.timeout | quote }}
-  k8s-metrics-push-timeout: {{ default "30s" $controllerMetrics.pushTimeout | quote }}
-  k8s-metrics-sample-limit: {{ default 250000 $controllerMetrics.sampleLimit | int | quote }}
-  k8s-metrics-batch-sample-limit: {{ default 10000 $controllerMetrics.batchSampleLimit | int | quote }}
-  k8s-metrics-batch-byte-limit: {{ default 4194304 $controllerMetrics.batchByteLimit | int | quote }}
+  k8s-metrics-endpoint: {{ default "" $metricsEndpoint | quote }}
+  k8s-metrics-interval: {{ default "30s" $metricsConfig.interval | quote }}
+  k8s-metrics-timeout: {{ default "15s" $metricsConfig.timeout | quote }}
+  k8s-metrics-push-timeout: {{ default "30s" $metricsConfig.pushTimeout | quote }}
+  k8s-metrics-sample-limit: {{ default 250000 $metricsConfig.sampleLimit | int | quote }}
+  k8s-metrics-batch-sample-limit: {{ default 10000 $metricsConfig.batchSampleLimit | int | quote }}
+  k8s-metrics-batch-byte-limit: {{ default 4194304 $metricsConfig.batchByteLimit | int | quote }}
+  k8s-metrics-max-retries: {{ default 3 $standaloneMetrics.maxRetries | int | quote }}
+  k8s-metrics-retry-backoff: {{ default "500ms" $standaloneMetrics.retryBackoff | quote }}
   k8s-app-metrics-discovery: {{ default false $appMetricsDiscovery.enabled | quote }}

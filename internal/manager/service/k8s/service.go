@@ -114,6 +114,10 @@ func (s *Service) Enroll(ctx context.Context, in EnrollInput) (*EnrollResult, er
 	return s.uc.Enroll(ctx, in)
 }
 
+func (s *Service) RefreshTelemetryConfig(ctx context.Context, controllerEdgeID uint64, proof biz.TelemetryCredentialProof) (*biz.TelemetryConfig, error) {
+	return s.uc.RefreshTelemetryConfig(ctx, controllerEdgeID, proof)
+}
+
 func (s *Service) HandleRegister(ctx context.Context, edgeID uint64, deviceID *uint64, info tunnel.KubernetesInfo) error {
 	return s.uc.HandleRegister(ctx, edgeID, deviceID, info)
 }

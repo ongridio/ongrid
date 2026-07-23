@@ -1,6 +1,11 @@
 {{- $controllerMetrics := default dict .Values.controller.metrics -}}
+{{- $telemetryConfig := default dict .Values.telemetryConfig -}}
 {{- $k8sMetricsEndpoint := include "ongrid-edge.k8sMetricsEndpoint" . -}}
 {{- $telemetryGatewayEnabled := eq (include "ongrid-edge.telemetryGatewayEnabled" .) "true" -}}
+{{- $telemetryGatewayEmbedded := and $telemetryGatewayEnabled (eq (include "ongrid-edge.telemetryGatewayMode" .) "embedded") -}}
+{{- $kubernetesMetricsEnabled := eq (include "ongrid-edge.kubernetesMetricsEnabled" .) "true" -}}
+{{- $controllerMetricsMode := and $kubernetesMetricsEnabled (eq (include "ongrid-edge.kubernetesMetricsMode" .) "controller") -}}
+{{- $telemetryDataPlaneRequired := or (and $telemetryGatewayEnabled (eq (include "ongrid-edge.telemetryGatewayMode" .) "deployment")) (and $kubernetesMetricsEnabled (eq (include "ongrid-edge.kubernetesMetricsMode" .) "scraper")) -}}
 {{- if ne (int .Values.controller.replicas) 1 -}}
 {{- fail "controller.replicas must be 1 until controller leader election is implemented" -}}
 {{- end -}}
@@ -42,7 +47,7 @@ spec:
           image: {{ include "ongrid-edge.image" . | quote }}
           imagePullPolicy: {{ default "IfNotPresent" .Values.image.pullPolicy }}
           workingDir: /
-          {{- if $telemetryGatewayEnabled }}
+          {{- if $telemetryGatewayEmbedded }}
           ports:
             - name: otlp-grpc
               containerPort: 4317
@@ -73,6 +78,12 @@ spec:
                   key: bootstrap-token
             - name: ONGRID_K8S_CREDENTIAL_SECRET
               value: {{ include "ongrid-edge.controllerCredentialSecretName" . | quote }}
+            - name: ONGRID_K8S_TELEMETRY_SECRET
+              value: {{ include "ongrid-edge.telemetryCredentialSecretName" . | quote }}
+            - name: ONGRID_K8S_TELEMETRY_REQUIRED
+              value: {{ $telemetryDataPlaneRequired | quote }}
+            - name: ONGRID_K8S_TELEMETRY_CONFIG_REFRESH_INTERVAL
+              value: {{ default "1m" $telemetryConfig.refreshInterval | quote }}
             - name: ONGRID_MANAGER_PUBLIC_URL
               valueFrom:
                 configMapKeyRef:
@@ -85,7 +96,7 @@ spec:
                   key: manager-tunnel-addr
             - name: ONGRID_K8S_ENROLL_TLS_INSECURE
               value: {{ .Values.manager.tlsInsecure | quote }}
-            {{- if $telemetryGatewayEnabled }}
+            {{- if $telemetryGatewayEmbedded }}
             - name: ONGRID_K8S_TELEMETRY_GATEWAY_ENABLED
               value: "true"
             {{- end }}
@@ -100,10 +111,14 @@ spec:
                   name: {{ include "ongrid-edge.fullname" . }}-config
                   key: k8s-inventory-full-sync-interval
             - name: ONGRID_K8S_APP_METRICS_DISCOVERY
+              {{- if $controllerMetricsMode }}
               valueFrom:
                 configMapKeyRef:
                   name: {{ include "ongrid-edge.fullname" . }}-config
                   key: k8s-app-metrics-discovery
+              {{- else }}
+              value: "false"
+              {{- end }}
             - name: ONGRID_K8S_POD_NAME
               valueFrom:
                 fieldRef:

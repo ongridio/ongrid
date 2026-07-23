@@ -164,8 +164,8 @@ func (r *Repo) TouchClusterControllerHeartbeat(ctx context.Context, edgeID uint6
 		}).Error
 }
 
-func (r *Repo) BindControllerEnrollment(ctx context.Context, id uint64, registration biz.ClusterControllerRegistration, installation *model.Installation) error {
-	if installation == nil {
+func (r *Repo) BindControllerEnrollment(ctx context.Context, id uint64, registration biz.ClusterControllerRegistration, installation *model.Installation, telemetryCredential *model.TelemetryCredential) error {
+	if installation == nil || telemetryCredential == nil || installation.ClusterID != id || telemetryCredential.ClusterID != id {
 		return errs.ErrInvalid
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -183,7 +183,7 @@ func (r *Repo) BindControllerEnrollment(ctx context.Context, id uint64, registra
 		if res.RowsAffected == 0 {
 			return errs.ErrNotFound
 		}
-		return tx.Clauses(clause.OnConflict{
+		if err := tx.Clauses(clause.OnConflict{
 			Columns: []clause.Column{
 				{Name: "cluster_id"},
 				{Name: "mode"},
@@ -199,8 +199,43 @@ func (r *Repo) BindControllerEnrollment(ctx context.Context, id uint64, registra
 				"last_seen_at":       installation.LastSeenAt,
 				"updated_at":         time.Now(),
 			}),
-		}).Create(installation).Error
+		}).Create(installation).Error; err != nil {
+			return err
+		}
+		return tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "cluster_id"}},
+			DoUpdates: clause.Assignments(map[string]any{
+				"access_key_id":   telemetryCredential.AccessKeyID,
+				"secret_key_hash": telemetryCredential.SecretKeyHash,
+				"updated_at":      time.Now(),
+			}),
+		}).Create(telemetryCredential).Error
 	})
+}
+
+func (r *Repo) GetTelemetryCredentialByAccessKey(ctx context.Context, accessKey string) (*model.TelemetryCredential, error) {
+	var credential model.TelemetryCredential
+	if err := r.db.WithContext(ctx).Where("access_key_id = ?", accessKey).First(&credential).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errs.ErrNotFound
+		}
+		return nil, err
+	}
+	return &credential, nil
+}
+
+func (r *Repo) UpsertTelemetryCredential(ctx context.Context, credential *model.TelemetryCredential) error {
+	if credential == nil || credential.ClusterID == 0 || credential.AccessKeyID == "" || credential.SecretKeyHash == "" {
+		return errs.ErrInvalid
+	}
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "cluster_id"}},
+		DoUpdates: clause.Assignments(map[string]any{
+			"access_key_id":   credential.AccessKeyID,
+			"secret_key_hash": credential.SecretKeyHash,
+			"updated_at":      time.Now(),
+		}),
+	}).Create(credential).Error
 }
 
 func (r *Repo) UpdateClusterInventorySync(ctx context.Context, id uint64, in biz.ClusterInventorySync) error {
@@ -329,6 +364,7 @@ func (r *Repo) DeleteCluster(ctx context.Context, id uint64) error {
 			&model.Pod{},
 			&model.Event{},
 			&model.Installation{},
+			&model.TelemetryCredential{},
 		} {
 			if err := tx.Where("cluster_id = ?", id).Delete(item).Error; err != nil {
 				return err

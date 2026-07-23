@@ -1,0 +1,73 @@
+{{- $enabled := eq (include "ongrid-edge.telemetryGatewayEnabled" .) "true" -}}
+{{- $mode := include "ongrid-edge.telemetryGatewayMode" . -}}
+{{- if and $enabled (eq $mode "deployment") }}
+{{- $gw := default dict .Values.telemetryGateway -}}
+{{- $pdb := default dict $gw.podDisruptionBudget -}}
+{{- $autoscaling := default dict $gw.autoscaling -}}
+{{- $memoryLimiter := default dict $gw.memoryLimiter -}}
+{{- if or (not (hasKey $pdb "enabled")) $pdb.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "ongrid-edge.telemetryGatewayName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ongrid-edge.labels" . | nindent 4 }}
+    app.kubernetes.io/component: telemetry-gateway
+spec:
+  minAvailable: {{ default 1 $pdb.minAvailable }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "ongrid-edge.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: telemetry-gateway
+{{- end }}
+{{- if default false $autoscaling.enabled }}
+---
+{{- $minReplicas := int (default 2 $autoscaling.minReplicas) -}}
+{{- $maxReplicas := int (default 10 $autoscaling.maxReplicas) -}}
+{{- $targetMemory := default "600Mi" $autoscaling.targetMemoryAverageValue -}}
+{{- $targetMemoryMiB := int (include "ongrid-edge.memoryQuantityMiB" $targetMemory) -}}
+{{- $softLimitMiB := sub (int (default 768 $memoryLimiter.limitMiB)) (int (default 128 $memoryLimiter.spikeLimitMiB)) -}}
+{{- if lt $minReplicas 2 -}}
+{{- fail "telemetryGateway.autoscaling.minReplicas must be at least 2" -}}
+{{- end -}}
+{{- if lt $maxReplicas $minReplicas -}}
+{{- fail "telemetryGateway.autoscaling.maxReplicas must be greater than or equal to minReplicas" -}}
+{{- end -}}
+{{- if ge $targetMemoryMiB $softLimitMiB -}}
+{{- fail "telemetryGateway.autoscaling.targetMemoryAverageValue must be below the memory_limiter soft limit" -}}
+{{- end -}}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "ongrid-edge.telemetryGatewayName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ongrid-edge.labels" . | nindent 4 }}
+    app.kubernetes.io/component: telemetry-gateway
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "ongrid-edge.telemetryGatewayName" . }}
+  minReplicas: {{ $minReplicas }}
+  maxReplicas: {{ $maxReplicas }}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: {{ default 300 $autoscaling.scaleDownStabilizationWindowSeconds }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ default 60 $autoscaling.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: AverageValue
+          averageValue: {{ $targetMemory }}
+{{- end }}
+{{- end }}

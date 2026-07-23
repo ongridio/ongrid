@@ -99,6 +99,10 @@ func TestRepo_BindControllerEnrollmentUpsertsInstallationOnSQLite(t *testing.T) 
 		ControllerEdgeID: &firstEdgeID,
 		CapabilitiesJSON: `["inventory"]`,
 		LastSeenAt:       &firstSeen,
+	}, &model.TelemetryCredential{
+		ClusterID:     cluster.ID,
+		AccessKeyID:   "kt_first",
+		SecretKeyHash: "first-hash",
 	}); err != nil {
 		t.Fatalf("BindControllerEnrollment(first): %v", err)
 	}
@@ -119,6 +123,10 @@ func TestRepo_BindControllerEnrollmentUpsertsInstallationOnSQLite(t *testing.T) 
 		ControllerEdgeID: &secondEdgeID,
 		CapabilitiesJSON: `["inventory","events"]`,
 		LastSeenAt:       &secondSeen,
+	}, &model.TelemetryCredential{
+		ClusterID:     cluster.ID,
+		AccessKeyID:   "kt_second",
+		SecretKeyHash: "second-hash",
 	}); err != nil {
 		t.Fatalf("BindControllerEnrollment(second): %v", err)
 	}
@@ -136,6 +144,13 @@ func TestRepo_BindControllerEnrollmentUpsertsInstallationOnSQLite(t *testing.T) 
 	}
 	if installation.CapabilitiesJSON != `["inventory","events"]` {
 		t.Fatalf("installation capabilities = %s", installation.CapabilitiesJSON)
+	}
+	credential, err := repo.GetTelemetryCredentialByAccessKey(ctx, "kt_second")
+	if err != nil {
+		t.Fatalf("GetTelemetryCredentialByAccessKey: %v", err)
+	}
+	if credential.ClusterID != cluster.ID || credential.SecretKeyHash != "second-hash" {
+		t.Fatalf("telemetry credential = %+v", credential)
 	}
 
 	var updated model.Cluster
@@ -699,6 +714,13 @@ func TestRepo_DeleteClusterDeletesSnapshots(t *testing.T) {
 	}).Error; err != nil {
 		t.Fatalf("Create installation: %v", err)
 	}
+	if err := db.Create(&model.TelemetryCredential{
+		ClusterID:     cluster.ID,
+		AccessKeyID:   "kt_cluster",
+		SecretKeyHash: "secret-hash",
+	}).Error; err != nil {
+		t.Fatalf("Create telemetry credential: %v", err)
+	}
 
 	if err := repo.DeleteCluster(context.Background(), cluster.ID); err != nil {
 		t.Fatalf("DeleteCluster: %v", err)
@@ -709,6 +731,7 @@ func TestRepo_DeleteClusterDeletesSnapshots(t *testing.T) {
 	assertTableCount(t, db, &model.Pod{}, "cluster_id = ?", cluster.ID, 0)
 	assertTableCount(t, db, &model.Event{}, "cluster_id = ?", cluster.ID, 0)
 	assertTableCount(t, db, &model.Installation{}, "cluster_id = ?", cluster.ID, 0)
+	assertTableCount(t, db, &model.TelemetryCredential{}, "cluster_id = ?", cluster.ID, 0)
 }
 
 func assertTableCount(t *testing.T, db *gorm.DB, model any, query string, arg any, want int64) {

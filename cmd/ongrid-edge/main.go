@@ -102,6 +102,14 @@ func main() {
 
 	rootCtx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
+	if handled, err := runK8sDataPlaneMode(rootCtx, strings.TrimSpace(os.Getenv("ONGRID_EDGE_MODE")), log); handled {
+		if err != nil && !errors.Is(err, context.Canceled) {
+			log.Error("kubernetes data plane stopped with error", slog.Any("err", err))
+			os.Exit(1)
+		}
+		log.Info("kubernetes data plane shutdown complete")
+		return
+	}
 
 	k8sInfo, err := ensureK8sEnrollment(rootCtx, cfg, log)
 	if err != nil {
@@ -120,6 +128,9 @@ func main() {
 	})
 
 	eg, egCtx := errgroup.WithContext(rootCtx)
+	if isK8sController(k8sInfo) && strings.TrimSpace(os.Getenv("ONGRID_K8S_TELEMETRY_SECRET")) != "" {
+		eg.Go(func() error { return runK8sTelemetryConfigSync(egCtx, cfg, k8sInfo, log) })
+	}
 
 	// Build the collector based on configured mode.
 	collector, scraperRunner, err := buildCollector(egCtx, cfg, log, eg)
@@ -461,14 +472,29 @@ type k8sEnrollRequest struct {
 }
 
 type k8sEnrollResponse struct {
-	ClusterID        uint64 `json:"cluster_id"`
-	Role             string `json:"role"`
-	Mode             string `json:"mode"`
-	EdgeID           uint64 `json:"edge_id"`
-	AccessKey        string `json:"access_key"`
-	SecretKey        string `json:"secret_key"`
-	CloudAddr        string `json:"cloud_addr,omitempty"`
-	ManagerPublicURL string `json:"manager_public_url,omitempty"`
+	ClusterID        uint64              `json:"cluster_id"`
+	Role             string              `json:"role"`
+	Mode             string              `json:"mode"`
+	EdgeID           uint64              `json:"edge_id"`
+	AccessKey        string              `json:"access_key"`
+	SecretKey        string              `json:"secret_key"`
+	CloudAddr        string              `json:"cloud_addr,omitempty"`
+	ManagerPublicURL string              `json:"manager_public_url,omitempty"`
+	Telemetry        *k8sTelemetryConfig `json:"telemetry,omitempty"`
+}
+
+type k8sTelemetryConfig struct {
+	ClusterID              uint64 `json:"cluster_id"`
+	AccessKey              string `json:"access_key"`
+	SecretKey              string `json:"secret_key"`
+	TracesEndpoint         string `json:"traces_endpoint,omitempty"`
+	LogsEndpoint           string `json:"logs_endpoint,omitempty"`
+	RemoteWriteEndpoint    string `json:"remote_write_endpoint,omitempty"`
+	RemoteWriteBearer      string `json:"remote_write_bearer,omitempty"`
+	RemoteWriteBasicUser   string `json:"remote_write_basic_user,omitempty"`
+	RemoteWriteBasicPass   string `json:"remote_write_basic_pass,omitempty"`
+	RemoteWriteTLSInsecure bool   `json:"remote_write_tls_insecure,omitempty"`
+	RemoteWriteTLSCAPEM    string `json:"remote_write_tls_ca_pem,omitempty"`
 }
 
 func ensureK8sEnrollment(ctx context.Context, cfg *config.Config, log *slog.Logger) (*tunnel.KubernetesInfo, error) {
@@ -516,6 +542,15 @@ func ensureK8sEnrollment(ctx context.Context, cfg *config.Config, log *slog.Logg
 		log.Warn("load kubernetes edge credentials failed; falling back to bootstrap enrollment", slog.Any("err", err))
 	}
 	if loaded {
+		if isK8sController(info) && strings.TrimSpace(os.Getenv("ONGRID_K8S_TELEMETRY_SECRET")) != "" {
+			refreshErr := refreshAndStoreK8sTelemetryConfig(ctx, cfg, info)
+			if refreshErr != nil {
+				if parseBoolEnv("ONGRID_K8S_TELEMETRY_REQUIRED", false) {
+					return nil, fmt.Errorf("refresh required kubernetes telemetry config: %w", refreshErr)
+				}
+				log.Warn("refresh kubernetes telemetry config failed; control plane will continue", slog.Any("err", refreshErr))
+			}
+		}
 		return info, nil
 	}
 	if bootstrapToken == "" {
@@ -555,12 +590,7 @@ func ensureK8sEnrollment(ctx context.Context, cfg *config.Config, log *slog.Logg
 	}
 	req.Header.Set("Authorization", "Bearer "+bootstrapToken)
 	req.Header.Set("Content-Type", "application/json")
-	hc := &http.Client{Timeout: 30 * time.Second}
-	if strings.EqualFold(os.Getenv("ONGRID_K8S_ENROLL_TLS_INSECURE"), "true") {
-		transport := http.DefaultTransport.(*http.Transport).Clone()
-		transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true}
-		hc.Transport = transport
-	}
+	hc := k8sManagerHTTPClient()
 	resp, err := hc.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("k8s enroll request: %w", err)
@@ -597,6 +627,99 @@ func ensureK8sEnrollment(ctx context.Context, cfg *config.Config, log *slog.Logg
 		slog.String("role", info.Role),
 	)
 	return info, nil
+}
+
+func refreshK8sTelemetryConfig(ctx context.Context, cfg *config.Config, managerURL, currentAccessKey, currentSecretKey string) (*k8sTelemetryConfig, error) {
+	if managerURL == "" {
+		return nil, fmt.Errorf("manager public URL is required")
+	}
+	endpoint, err := url.JoinPath(managerURL, "/internal/k8s/telemetry-config")
+	if err != nil {
+		return nil, fmt.Errorf("build k8s telemetry config URL: %w", err)
+	}
+	payload, err := json.Marshal(map[string]string{
+		"access_key": currentAccessKey,
+		"secret_key": currentSecretKey,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal k8s telemetry config request: %w", err)
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return nil, fmt.Errorf("new k8s telemetry config request: %w", err)
+	}
+	req.SetBasicAuth(cfg.Edge.AccessKey, cfg.Edge.SecretKey)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := k8sManagerHTTPClient().Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("k8s telemetry config request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		if readErr != nil {
+			return nil, errors.Join(
+				fmt.Errorf("k8s telemetry config failed: status=%d", resp.StatusCode),
+				fmt.Errorf("read k8s telemetry config error response: %w", readErr),
+			)
+		}
+		return nil, fmt.Errorf("k8s telemetry config failed: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var out k8sTelemetryConfig
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("decode k8s telemetry config: %w", err)
+	}
+	if out.ClusterID == 0 || out.AccessKey == "" || out.SecretKey == "" {
+		return nil, fmt.Errorf("k8s telemetry config response is incomplete")
+	}
+	applyManagerTelemetryTLS(&out, managerURL)
+	return &out, nil
+}
+
+func refreshAndStoreK8sTelemetryConfig(ctx context.Context, cfg *config.Config, info *tunnel.KubernetesInfo) error {
+	accessKey, secretKey, _, err := loadK8sTelemetryCredential(ctx, info)
+	if err != nil {
+		return err
+	}
+	managerURL := strings.TrimRight(envOr("ONGRID_MANAGER_PUBLIC_URL", cfg.PublicURL), "/")
+	telemetry, err := refreshK8sTelemetryConfig(ctx, cfg, managerURL, accessKey, secretKey)
+	if err != nil {
+		return err
+	}
+	if err := storeK8sTelemetryConfig(ctx, info, *telemetry); err != nil {
+		return fmt.Errorf("store kubernetes telemetry config: %w", err)
+	}
+	return nil
+}
+
+func runK8sTelemetryConfigSync(ctx context.Context, cfg *config.Config, info *tunnel.KubernetesInfo, log *slog.Logger) error {
+	interval := parseDurationEnv("ONGRID_K8S_TELEMETRY_CONFIG_REFRESH_INTERVAL", time.Minute)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			if err := refreshAndStoreK8sTelemetryConfig(ctx, cfg, info); err != nil {
+				log.Warn("refresh kubernetes telemetry config failed; keeping previous Secret data", slog.Any("err", err))
+				continue
+			}
+			log.Debug("kubernetes telemetry config refreshed")
+		}
+	}
+}
+
+func k8sManagerHTTPClient() *http.Client {
+	hc := &http.Client{Timeout: 30 * time.Second}
+	if strings.EqualFold(os.Getenv("ONGRID_K8S_ENROLL_TLS_INSECURE"), "true") {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true}
+		hc.Transport = transport
+	}
+	return hc
 }
 
 func defaultK8sRole(edgeMode string) string {

@@ -8,7 +8,9 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: ["secrets"]
-    resourceNames: [{{ include "ongrid-edge.controllerCredentialSecretName" . | quote }}]
+    resourceNames:
+      - {{ include "ongrid-edge.controllerCredentialSecretName" . | quote }}
+      - {{ include "ongrid-edge.telemetryCredentialSecretName" . | quote }}
     verbs: ["get", "patch", "update"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -26,6 +28,36 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "ongrid-edge.controllerServiceAccount" . }}
     namespace: {{ .Release.Namespace }}
+{{- if and (eq (include "ongrid-edge.telemetryGatewayEnabled" .) "true") (eq (include "ongrid-edge.telemetryGatewayMode" .) "deployment") }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "ongrid-edge.fullname" . }}-telemetry-gateway
+  labels:
+    {{- include "ongrid-edge.labels" . | nindent 4 }}
+    app.kubernetes.io/component: telemetry-gateway
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "namespaces", "nodes"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "ongrid-edge.fullname" . }}-telemetry-gateway
+  labels:
+    {{- include "ongrid-edge.labels" . | nindent 4 }}
+    app.kubernetes.io/component: telemetry-gateway
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "ongrid-edge.fullname" . }}-telemetry-gateway
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "ongrid-edge.telemetryGatewayServiceAccount" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole

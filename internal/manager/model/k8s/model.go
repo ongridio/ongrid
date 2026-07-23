@@ -169,3 +169,18 @@ type Installation struct {
 }
 
 func (Installation) TableName() string { return "k8s_installations" }
+
+// TelemetryCredential is the cluster-scoped, write-only identity used by
+// Kubernetes telemetry data-plane workloads. It is deliberately separate
+// from Edge credentials: the tunnel authenticator only reads the edges table,
+// so this credential cannot establish a controller tunnel or execute actions.
+type TelemetryCredential struct {
+	ClusterID     uint64 `gorm:"primaryKey;column:cluster_id"`
+	AccessKeyID   string `gorm:"size:128;not null;uniqueIndex:idx_k8s_telemetry_credentials_access_key;column:access_key_id"`
+	SecretKeyHash string `gorm:"size:512;not null;column:secret_key_hash"`
+
+	CreatedAt time.Time `gorm:"column:created_at"`
+	UpdatedAt time.Time `gorm:"column:updated_at"`
+}
+
+func (TelemetryCredential) TableName() string { return "k8s_telemetry_credentials" }

@@ -571,7 +571,7 @@ build-edge-bundle: ## [release] 打 ADR-024 edge upgrade bundle 到 dist/out/edg
 		bash dist/build-edge-bundle.sh $(VERSION) $$arch $(OUT)/edge-bundles; \
 	done
 
-.PHONY: package-k8s-chart publish-k8s-chart test-publish-k8s-chart
+.PHONY: package-k8s-chart publish-k8s-chart test-k8s-chart test-publish-k8s-chart
 package-k8s-chart: ## [dev/release] 打 Kubernetes Helm chart 到 bin/k8s/ongrid-edge.tgz
 	@mkdir -p bin/k8s
 	@rm -f bin/k8s/registry-setup.sh
@@ -585,6 +585,9 @@ publish-k8s-chart: package-k8s-chart ## [release] 发布 Kubernetes Helm chart �
 		"$(K8S_CHART_PUSH_TARGET)" \
 		"$(CNB_HELM_REGISTRY)" \
 		"$(CNB_HELM_USERNAME)"
+
+test-k8s-chart: package-k8s-chart ## [test] 校验 Kubernetes Helm Chart 的兼容、拆分、暂停与非法配置
+	bash scripts/test-k8s-chart.sh deploy/kubernetes/ongrid-edge $(K8S_CHART_PACKAGE) $(K8S_EDGE_IMAGE_REF)
 
 test-publish-k8s-chart: ## [test] 校验 Helm Chart 幂等发布
 	bash scripts/test-publish-helm-chart.sh

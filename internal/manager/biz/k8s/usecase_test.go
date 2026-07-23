@@ -12,6 +12,7 @@ import (
 	model "github.com/ongridio/ongrid/internal/manager/model/k8s"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/k8sredact"
+	"github.com/ongridio/ongrid/internal/pkg/passwd"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
 
@@ -405,6 +406,156 @@ func TestUsecaseControllerEnrollmentRequiresExplicitRecoveryAfterRegister(t *tes
 	if third.EdgeID != first.EdgeID || issuer.rotate != 2 {
 		t.Fatalf("recovery edge=%d rotates=%d, want edge=%d rotates=2", third.EdgeID, issuer.rotate, first.EdgeID)
 	}
+}
+
+func TestUsecaseControllerEnrollmentIssuesSeparateTelemetryCredential(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	uc := NewUsecase(repo, newFakeIssuer(), Config{
+		PublicURL:  "https://manager.example",
+		TunnelAddr: "manager.example:40012",
+	})
+	reg, err := uc.CreateCluster(ctx, CreateClusterInput{Name: "prod"})
+	if err != nil {
+		t.Fatalf("CreateCluster() error = %v", err)
+	}
+	out, err := uc.Enroll(ctx, EnrollInput{
+		BootstrapToken: reg.BootstrapToken,
+		ClusterID:      reg.Cluster.ID,
+		ClusterUID:     testClusterUID,
+		Role:           model.RoleController,
+		Namespace:      "ongrid-system",
+	})
+	if err != nil {
+		t.Fatalf("Enroll() error = %v", err)
+	}
+	if out.Telemetry == nil {
+		t.Fatal("Enroll() telemetry config is nil")
+	}
+	if !strings.HasPrefix(out.Telemetry.AccessKey, "kt_") || !strings.HasPrefix(out.Telemetry.SecretKey, "ks_") {
+		t.Fatalf("telemetry credential has unexpected shape: %#v", out.Telemetry)
+	}
+	if out.Telemetry.AccessKey == out.AccessKey || out.Telemetry.SecretKey == out.SecretKey {
+		t.Fatal("telemetry credential must not reuse controller credential")
+	}
+	if out.Telemetry.TracesEndpoint != "https://manager.example/v1/traces" ||
+		out.Telemetry.LogsEndpoint != "https://manager.example/loki/api/v1/push" ||
+		out.Telemetry.RemoteWriteEndpoint != "https://manager.example/prometheus/api/v1/write" {
+		t.Fatalf("unexpected telemetry endpoints: %#v", out.Telemetry)
+	}
+	if out.Telemetry.RemoteWriteBasicUser != out.Telemetry.AccessKey || out.Telemetry.RemoteWriteBasicPass != out.Telemetry.SecretKey {
+		t.Fatal("manager proxy must use the telemetry credential")
+	}
+	if repo.telemetryCredential == nil || repo.telemetryCredential.SecretKeyHash == out.Telemetry.SecretKey ||
+		!passwd.Verify(out.Telemetry.SecretKey, repo.telemetryCredential.SecretKeyHash) {
+		t.Fatal("telemetry secret must be persisted only as a verifiable hash")
+	}
+}
+
+func TestUsecaseControllerEnrollmentPublishesResolvedExternalRemoteWrite(t *testing.T) {
+	ctx := context.Background()
+	uc := NewUsecase(newFakeRepo(), newFakeIssuer(), Config{PublicURL: "https://manager.example"})
+	uc.SetRemoteWriteResolver(staticRemoteWriteResolver{target: RemoteWriteTarget{
+		Endpoint:    "https://metrics.example/write",
+		BearerToken: "backend-token",
+		TLSInsecure: true,
+		TLSCAPEM:    "test-ca",
+	}})
+	reg, err := uc.CreateCluster(ctx, CreateClusterInput{Name: "prod"})
+	if err != nil {
+		t.Fatalf("CreateCluster() error = %v", err)
+	}
+	out, err := uc.Enroll(ctx, EnrollInput{
+		BootstrapToken: reg.BootstrapToken,
+		ClusterID:      reg.Cluster.ID,
+		ClusterUID:     testClusterUID,
+		Role:           model.RoleController,
+	})
+	if err != nil {
+		t.Fatalf("Enroll() error = %v", err)
+	}
+	if out.Telemetry.RemoteWriteEndpoint != "https://metrics.example/write" ||
+		out.Telemetry.RemoteWriteBearer != "backend-token" ||
+		!out.Telemetry.RemoteWriteTLSInsecure || out.Telemetry.RemoteWriteTLSCAPEM != "test-ca" {
+		t.Fatalf("unexpected remote write config: %#v", out.Telemetry)
+	}
+}
+
+func TestUsecaseRefreshTelemetryConfigRotatesOnlyDataPlaneCredential(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	uc := NewUsecase(repo, newFakeIssuer(), Config{PublicURL: "https://manager.example"})
+	reg, err := uc.CreateCluster(ctx, CreateClusterInput{Name: "prod"})
+	if err != nil {
+		t.Fatalf("CreateCluster() error = %v", err)
+	}
+	bindFakeController(t, repo, reg.Cluster.ID, 41)
+	repo.telemetryCredential = &model.TelemetryCredential{
+		ClusterID:     reg.Cluster.ID,
+		AccessKeyID:   "kt_old",
+		SecretKeyHash: "old-hash",
+	}
+
+	out, err := uc.RefreshTelemetryConfig(ctx, 41, TelemetryCredentialProof{})
+	if err != nil {
+		t.Fatalf("RefreshTelemetryConfig() error = %v", err)
+	}
+	if out.ClusterID != reg.Cluster.ID || !strings.HasPrefix(out.AccessKey, "kt_") || !strings.HasPrefix(out.SecretKey, "ks_") {
+		t.Fatalf("refreshed config = %#v", out)
+	}
+	if out.AccessKey == "kt_old" || repo.telemetryCredential == nil || repo.telemetryCredential.AccessKeyID != out.AccessKey {
+		t.Fatalf("credential was not rotated: out=%#v stored=%#v", out, repo.telemetryCredential)
+	}
+	if !passwd.Verify(out.SecretKey, repo.telemetryCredential.SecretKeyHash) {
+		t.Fatal("rotated secret does not match persisted hash")
+	}
+	if _, err := uc.RefreshTelemetryConfig(ctx, 99, TelemetryCredentialProof{}); !errors.Is(err, errs.ErrNotFound) {
+		t.Fatalf("RefreshTelemetryConfig(non-controller) error = %v, want not found", err)
+	}
+}
+
+func TestUsecaseRefreshTelemetryConfigPreservesValidCredential(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	uc := NewUsecase(repo, newFakeIssuer(), Config{PublicURL: "https://manager.example"})
+	reg, err := uc.CreateCluster(ctx, CreateClusterInput{Name: "prod"})
+	if err != nil {
+		t.Fatalf("CreateCluster() error = %v", err)
+	}
+	bindFakeController(t, repo, reg.Cluster.ID, 41)
+	secret := "ks_existing"
+	hash, err := passwd.Hash(secret)
+	if err != nil {
+		t.Fatalf("hash telemetry secret: %v", err)
+	}
+	repo.telemetryCredential = &model.TelemetryCredential{
+		ClusterID:     reg.Cluster.ID,
+		AccessKeyID:   "kt_existing",
+		SecretKeyHash: hash,
+	}
+
+	out, err := uc.RefreshTelemetryConfig(ctx, 41, TelemetryCredentialProof{
+		AccessKey: "kt_existing",
+		SecretKey: secret,
+	})
+	if err != nil {
+		t.Fatalf("RefreshTelemetryConfig() error = %v", err)
+	}
+	if out.AccessKey != "kt_existing" || out.SecretKey != secret {
+		t.Fatalf("valid credential was rotated: %#v", out)
+	}
+	if repo.telemetryCredential.AccessKeyID != "kt_existing" || repo.telemetryCredential.SecretKeyHash != hash {
+		t.Fatalf("stored credential changed: %#v", repo.telemetryCredential)
+	}
+}
+
+type staticRemoteWriteResolver struct {
+	target RemoteWriteTarget
+	err    error
+}
+
+func (r staticRemoteWriteResolver) ResolveRemoteWrite(context.Context) (RemoteWriteTarget, error) {
+	return r.target, r.err
 }
 
 func TestUsecaseLookupControllerCluster(t *testing.T) {
@@ -1598,17 +1749,18 @@ func TestUsecaseListEventsIssueOnlyExcludesRecoveredWarnings(t *testing.T) {
 }
 
 type fakeRepo struct {
-	nextClusterID      uint64
-	nextNodeID         uint64
-	clusters           map[uint64]*model.Cluster
-	nodes              map[string]*model.Node
-	deviceNodeIDs      map[uint64]uint64
-	pods               map[string]*model.Pod
-	events             []*model.Event
-	pruned             []string
-	lastInstallation   *model.Installation
-	failUpdateNodeEdge bool
-	failBindController bool
+	nextClusterID       uint64
+	nextNodeID          uint64
+	clusters            map[uint64]*model.Cluster
+	nodes               map[string]*model.Node
+	deviceNodeIDs       map[uint64]uint64
+	pods                map[string]*model.Pod
+	events              []*model.Event
+	pruned              []string
+	lastInstallation    *model.Installation
+	telemetryCredential *model.TelemetryCredential
+	failUpdateNodeEdge  bool
+	failBindController  bool
 }
 
 func bindFakeController(t *testing.T, repo *fakeRepo, clusterID, edgeID uint64) {
@@ -1751,18 +1903,37 @@ func (r *fakeRepo) TouchClusterControllerHeartbeat(_ context.Context, edgeID uin
 	return nil
 }
 
-func (r *fakeRepo) BindControllerEnrollment(ctx context.Context, id uint64, registration ClusterControllerRegistration, installation *model.Installation) error {
+func (r *fakeRepo) BindControllerEnrollment(ctx context.Context, id uint64, registration ClusterControllerRegistration, installation *model.Installation, telemetryCredential *model.TelemetryCredential) error {
 	if r.failBindController {
 		return errors.New("bind controller failed")
 	}
 	if err := r.UpdateClusterController(ctx, id, registration); err != nil {
 		return err
 	}
-	if installation == nil {
+	if installation == nil || telemetryCredential == nil {
 		return errs.ErrInvalid
 	}
 	cp := *installation
 	r.lastInstallation = &cp
+	credentialCopy := *telemetryCredential
+	r.telemetryCredential = &credentialCopy
+	return nil
+}
+
+func (r *fakeRepo) GetTelemetryCredentialByAccessKey(_ context.Context, accessKey string) (*model.TelemetryCredential, error) {
+	if r.telemetryCredential == nil || r.telemetryCredential.AccessKeyID != accessKey {
+		return nil, errs.ErrNotFound
+	}
+	cp := *r.telemetryCredential
+	return &cp, nil
+}
+
+func (r *fakeRepo) UpsertTelemetryCredential(_ context.Context, credential *model.TelemetryCredential) error {
+	if credential == nil {
+		return errs.ErrInvalid
+	}
+	cp := *credential
+	r.telemetryCredential = &cp
 	return nil
 }
 

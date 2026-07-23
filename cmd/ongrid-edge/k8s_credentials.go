@@ -18,6 +18,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -127,7 +128,72 @@ func storeK8sCredential(ctx context.Context, info *tunnel.KubernetesInfo, out k8
 	if err != nil {
 		return fmt.Errorf("marshal k8s stored credential: %w", err)
 	}
+	if info.Role == "controller" && out.Telemetry != nil {
+		if out.Telemetry.ClusterID != info.ClusterID || out.Telemetry.AccessKey == "" || out.Telemetry.SecretKey == "" {
+			return fmt.Errorf("kubernetes telemetry credential does not match controller cluster")
+		}
+		telemetry := *out.Telemetry
+		applyManagerTelemetryTLS(&telemetry, out.ManagerPublicURL)
+		telemetryClient := *client
+		if secretName := strings.TrimSpace(os.Getenv("ONGRID_K8S_TELEMETRY_SECRET")); secretName != "" {
+			telemetryClient.secretName = secretName
+		}
+		if err := telemetryClient.patchDataKeys(ctx, telemetrySecretData(telemetry)); err != nil {
+			return err
+		}
+	}
 	return client.patchDataKey(ctx, k8sCredentialKey(info), payload)
+}
+
+func storeK8sTelemetryConfig(ctx context.Context, info *tunnel.KubernetesInfo, telemetry k8sTelemetryConfig) error {
+	if info == nil || info.Role != "controller" || telemetry.ClusterID != info.ClusterID || telemetry.AccessKey == "" || telemetry.SecretKey == "" {
+		return fmt.Errorf("invalid kubernetes telemetry configuration")
+	}
+	client, err := newK8sSecretClient(info)
+	if err != nil {
+		return err
+	}
+	if client == nil {
+		return fmt.Errorf("kubernetes credential secret client is unavailable")
+	}
+	if secretName := strings.TrimSpace(os.Getenv("ONGRID_K8S_TELEMETRY_SECRET")); secretName != "" {
+		client.secretName = secretName
+	}
+	desired := telemetrySecretData(telemetry)
+	current, found, err := client.getData(ctx)
+	if err != nil {
+		return err
+	}
+	if found && dataContainsValues(current, desired) {
+		return nil
+	}
+	return client.patchDataKeys(ctx, desired)
+}
+
+func loadK8sTelemetryCredential(ctx context.Context, info *tunnel.KubernetesInfo) (string, string, bool, error) {
+	if info == nil || info.Role != "controller" {
+		return "", "", false, fmt.Errorf("invalid kubernetes controller identity")
+	}
+	client, err := newK8sSecretClient(info)
+	if err != nil {
+		return "", "", false, err
+	}
+	if client == nil {
+		return "", "", false, fmt.Errorf("kubernetes credential secret client is unavailable")
+	}
+	if secretName := strings.TrimSpace(os.Getenv("ONGRID_K8S_TELEMETRY_SECRET")); secretName != "" {
+		client.secretName = secretName
+	}
+	data, found, err := client.getData(ctx)
+	if err != nil {
+		return "", "", false, err
+	}
+	accessKey := data["telemetry-access-key"]
+	secretKey := data["telemetry-secret-key"]
+	if !found || len(accessKey) == 0 || len(secretKey) == 0 {
+		return "", "", false, nil
+	}
+	return strings.TrimSpace(string(accessKey)), strings.TrimSpace(string(secretKey)), true, nil
 }
 
 func loadStoredK8sCredentialFile(cfg *config.Config, info *tunnel.KubernetesInfo, filePath string, log *slog.Logger) (bool, error) {
@@ -296,6 +362,18 @@ func newK8sSecretClient(info *tunnel.KubernetesInfo) (*k8sSecretClient, error) {
 }
 
 func (c *k8sSecretClient) getDataKey(ctx context.Context, key string) ([]byte, bool, error) {
+	data, found, err := c.getData(ctx)
+	if err != nil || !found {
+		return nil, false, err
+	}
+	raw, ok := data[key]
+	if !ok || len(raw) == 0 {
+		return nil, false, nil
+	}
+	return raw, true, nil
+}
+
+func (c *k8sSecretClient) getData(ctx context.Context) (map[string][]byte, bool, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.secretURL(), nil)
 	if err != nil {
 		return nil, false, fmt.Errorf("new k8s secret get request: %w", err)
@@ -319,22 +397,28 @@ func (c *k8sSecretClient) getDataKey(ctx context.Context, key string) ([]byte, b
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, false, fmt.Errorf("decode k8s credential secret: %w", err)
 	}
-	encoded, ok := out.Data[key]
-	if !ok || encoded == "" {
-		return nil, false, nil
+	data := make(map[string][]byte, len(out.Data))
+	for key, encoded := range out.Data {
+		raw, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			return nil, false, fmt.Errorf("decode k8s credential data %q: %w", key, err)
+		}
+		data[key] = raw
 	}
-	raw, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil {
-		return nil, false, fmt.Errorf("decode k8s credential data %q: %w", key, err)
-	}
-	return raw, true, nil
+	return data, true, nil
 }
 
 func (c *k8sSecretClient) patchDataKey(ctx context.Context, key string, raw []byte) error {
+	return c.patchDataKeys(ctx, map[string][]byte{key: raw})
+}
+
+func (c *k8sSecretClient) patchDataKeys(ctx context.Context, values map[string][]byte) error {
+	encoded := make(map[string]string, len(values))
+	for key, raw := range values {
+		encoded[key] = base64.StdEncoding.EncodeToString(raw)
+	}
 	patch := map[string]map[string]string{
-		"data": {
-			key: base64.StdEncoding.EncodeToString(raw),
-		},
+		"data": encoded,
 	}
 	payload, err := json.Marshal(patch)
 	if err != nil {
@@ -356,6 +440,49 @@ func (c *k8sSecretClient) patchDataKey(ctx context.Context, key string, raw []by
 		return fmt.Errorf("patch k8s credential secret failed: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return nil
+}
+
+func telemetrySecretData(in k8sTelemetryConfig) map[string][]byte {
+	return map[string][]byte{
+		"telemetry-cluster-id":                []byte(strconv.FormatUint(in.ClusterID, 10)),
+		"telemetry-access-key":                []byte(in.AccessKey),
+		"telemetry-secret-key":                []byte(in.SecretKey),
+		"telemetry-traces-endpoint":           []byte(in.TracesEndpoint),
+		"telemetry-logs-endpoint":             []byte(in.LogsEndpoint),
+		"telemetry-remote-write-endpoint":     []byte(in.RemoteWriteEndpoint),
+		"telemetry-remote-write-bearer":       []byte(in.RemoteWriteBearer),
+		"telemetry-remote-write-basic-user":   []byte(in.RemoteWriteBasicUser),
+		"telemetry-remote-write-basic-pass":   []byte(in.RemoteWriteBasicPass),
+		"telemetry-remote-write-tls-insecure": []byte(strconv.FormatBool(in.RemoteWriteTLSInsecure)),
+		"telemetry-remote-write-ca.pem":       []byte(in.RemoteWriteTLSCAPEM),
+	}
+}
+
+func dataContainsValues(current, desired map[string][]byte) bool {
+	for key, want := range desired {
+		got, ok := current[key]
+		if !ok || !bytes.Equal(got, want) {
+			return false
+		}
+	}
+	return true
+}
+
+// applyManagerTelemetryTLS carries the controller's explicit trust choice to
+// remote_write only when that endpoint is served by the same Manager origin.
+// An external backend keeps the TLS policy resolved by Manager.
+func applyManagerTelemetryTLS(in *k8sTelemetryConfig, managerURL string) {
+	if in == nil || !parseBoolEnv("ONGRID_K8S_ENROLL_TLS_INSECURE", false) {
+		return
+	}
+	manager, managerErr := url.Parse(strings.TrimSpace(managerURL))
+	target, targetErr := url.Parse(strings.TrimSpace(in.RemoteWriteEndpoint))
+	if managerErr != nil || targetErr != nil || manager.Scheme == "" || manager.Host == "" {
+		return
+	}
+	if strings.EqualFold(manager.Scheme, target.Scheme) && strings.EqualFold(manager.Host, target.Host) {
+		in.RemoteWriteTLSInsecure = true
+	}
 }
 
 func (c *k8sSecretClient) secretURL() string {
