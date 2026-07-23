@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package ongrid.manager.setting.v1;
+
+option go_package = "github.com/singchia/ongrid/api/gen/manager/setting/v1;settingv1";
+
+// SettingService 管理管理员可编辑的运行时配置。
+service SettingService {
+    // ValidateLLMConfiguration 使用未落库的草稿配置发起最小模型请求，
+    // 返回可机器识别的失败原因。HTTP 实现：
+    // POST /v1/integrations/llm/test。
+    rpc ValidateLLMConfiguration(ValidateLLMConfigurationRequest) returns (ValidateLLMConfigurationResponse);
+}
+
+message ValidateLLMConfigurationRequest {
+    // provider 是稳定提供商 ID：openai / anthropic / zhipu / gemini /
+    // deepseek / kimi / custom。
+    string provider = 1 [json_name = "provider"];
+    // api_key 只用于本次探测，不写数据库、不写日志。
+    string api_key = 2 [json_name = "api_key"];
+    // 命名提供商留空时使用服务端默认端点；custom 必填。
+    string base_url = 3 [json_name = "base_url"];
+    // model 是本次实际调用的模型名。
+    string model = 4 [json_name = "model"];
+}
+
+message ValidateLLMConfigurationResponse {
+    bool valid = 1 [json_name = "valid"];
+    // 稳定错误码；成功为 ok。前端按 code 映射本地化文案。
+    string code = 2 [json_name = "code"];
+    string provider = 3 [json_name = "provider"];
+    string model = 4 [json_name = "model"];
+    // 上游返回的安全摘要；不得包含 API key 或完整响应体。
+    string detail = 5 [json_name = "detail"];
+    int64 latency_ms = 6 [json_name = "latency_ms"];
+}

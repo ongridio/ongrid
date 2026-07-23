@@ -6,11 +6,13 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
 
 	bizgrafana "github.com/ongridio/ongrid/internal/manager/biz/grafana"
+	bizsetting "github.com/ongridio/ongrid/internal/manager/biz/setting"
 	pkggrafana "github.com/ongridio/ongrid/internal/pkg/grafana"
 	"github.com/ongridio/ongrid/internal/pkg/tenantctx"
 )
@@ -24,7 +26,15 @@ type stubGrafana struct {
 	fetchDashboard func(ctx context.Context, uid string) ([]byte, error)
 }
 
-func (s stubGrafana) Test(ctx context.Context) error                        { return s.test(ctx) }
+type stubLLMConfigProbe struct {
+	probe func(context.Context, bizsetting.LLMProbeInput) (bizsetting.LLMProbeResult, error)
+}
+
+func (s stubLLMConfigProbe) Probe(ctx context.Context, in bizsetting.LLMProbeInput) (bizsetting.LLMProbeResult, error) {
+	return s.probe(ctx, in)
+}
+
+func (s stubGrafana) Test(ctx context.Context) error                           { return s.test(ctx) }
 func (s stubGrafana) Sync(ctx context.Context) (*bizgrafana.SyncResult, error) { return s.sync(ctx) }
 func (s stubGrafana) FetchDashboardJSON(ctx context.Context, uid string) ([]byte, error) {
 	return s.fetchDashboard(ctx, uid)
@@ -134,6 +144,126 @@ func TestFetchDashboardMapsTransportErrorTo502(t *testing.T) {
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestLLMConfigurationProbePassesDraftAndReturnsTypedResult(t *testing.T) {
+	t.Parallel()
+
+	g := stubGrafana{
+		test:           func(context.Context) error { return nil },
+		sync:           func(context.Context) (*bizgrafana.SyncResult, error) { return nil, nil },
+		fetchDashboard: func(context.Context, string) ([]byte, error) { return nil, nil },
+	}
+	var got bizsetting.LLMProbeInput
+	h := NewHandler(g, nil, nil, nil, nil)
+	h.SetLLMProbe(stubLLMConfigProbe{probe: func(_ context.Context, in bizsetting.LLMProbeInput) (bizsetting.LLMProbeResult, error) {
+		got = in
+		return bizsetting.LLMProbeResult{
+			Valid: true, Code: bizsetting.LLMProbeCodeOK, Provider: in.Provider, Model: in.Model, LatencyMS: 42,
+		}, nil
+	}})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/integrations/llm/test", strings.NewReader(`{
+		"provider":"deepseek","api_key":"secret-value","base_url":"https://api.example/v1","model":"deepseek-chat"
+	}`))
+	req = req.WithContext(tenantctx.With(context.Background(), tenantctx.Tenant{UserID: 7, Role: "admin"}))
+	rec := httptest.NewRecorder()
+	newRouter(h).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got.Provider != "deepseek" || got.APIKey != "secret-value" || got.Model != "deepseek-chat" {
+		t.Fatalf("probe input = %+v", got)
+	}
+	if strings.Contains(rec.Body.String(), "secret-value") {
+		t.Fatalf("response leaked API key: %s", rec.Body.String())
+	}
+	var result bizsetting.LLMProbeResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !result.Valid || result.Code != bizsetting.LLMProbeCodeOK || result.LatencyMS != 42 {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestLLMConfigurationProbeReturnsValidationFailureAs200(t *testing.T) {
+	t.Parallel()
+
+	g := stubGrafana{
+		test:           func(context.Context) error { return nil },
+		sync:           func(context.Context) (*bizgrafana.SyncResult, error) { return nil, nil },
+		fetchDashboard: func(context.Context, string) ([]byte, error) { return nil, nil },
+	}
+	h := NewHandler(g, nil, nil, nil, nil)
+	h.SetLLMProbe(stubLLMConfigProbe{probe: func(_ context.Context, in bizsetting.LLMProbeInput) (bizsetting.LLMProbeResult, error) {
+		return bizsetting.LLMProbeResult{Code: bizsetting.LLMProbeCodeModelNotFound, Provider: in.Provider, Model: in.Model}, nil
+	}})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/integrations/llm/test", strings.NewReader(`{
+		"provider":"openai","api_key":"bad-key","model":"missing-model"
+	}`))
+	req = req.WithContext(tenantctx.With(context.Background(), tenantctx.Tenant{UserID: 7, Role: "admin"}))
+	rec := httptest.NewRecorder()
+	newRouter(h).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"code":"model-not-found"`) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+}
+
+func TestLLMConfigurationProbeRejectsUnknownJSONField(t *testing.T) {
+	t.Parallel()
+
+	g := stubGrafana{
+		test:           func(context.Context) error { return nil },
+		sync:           func(context.Context) (*bizgrafana.SyncResult, error) { return nil, nil },
+		fetchDashboard: func(context.Context, string) ([]byte, error) { return nil, nil },
+	}
+	h := NewHandler(g, nil, nil, nil, nil)
+	h.SetLLMProbe(stubLLMConfigProbe{probe: func(context.Context, bizsetting.LLMProbeInput) (bizsetting.LLMProbeResult, error) {
+		t.Fatal("probe must not be called")
+		return bizsetting.LLMProbeResult{}, nil
+	}})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/integrations/llm/test", strings.NewReader(`{
+		"provider":"openai","api_key":"key","model":"gpt-test","unexpected":true
+	}`))
+	req = req.WithContext(tenantctx.With(context.Background(), tenantctx.Tenant{UserID: 7, Role: "admin"}))
+	rec := httptest.NewRecorder()
+	newRouter(h).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestLLMConfigurationProbeRequiresAdmin(t *testing.T) {
+	t.Parallel()
+
+	g := stubGrafana{
+		test:           func(context.Context) error { return nil },
+		sync:           func(context.Context) (*bizgrafana.SyncResult, error) { return nil, nil },
+		fetchDashboard: func(context.Context, string) ([]byte, error) { return nil, nil },
+	}
+	h := NewHandler(g, nil, nil, nil, nil)
+	h.SetLLMProbe(stubLLMConfigProbe{probe: func(context.Context, bizsetting.LLMProbeInput) (bizsetting.LLMProbeResult, error) {
+		t.Fatal("probe must not be called")
+		return bizsetting.LLMProbeResult{}, nil
+	}})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/integrations/llm/test", strings.NewReader(`{}`))
+	req = req.WithContext(tenantctx.With(context.Background(), tenantctx.Tenant{UserID: 7, Role: "user"}))
+	rec := httptest.NewRecorder()
+	newRouter(h).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
 	}
 }

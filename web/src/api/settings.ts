@@ -113,3 +113,27 @@ export function testWebSearchConnection(): Promise<WebSearchProbeResult> {
 export function invalidateLLMRouter(): Promise<{ status: string }> {
   return request<{ status: string }>('POST', '/integrations/llm/invalidate');
 }
+
+export type LLMConfigurationProbeInput = {
+  provider: string;
+  api_key: string;
+  base_url: string;
+  model: string;
+};
+
+export type LLMConfigurationProbeResult = {
+  valid: boolean;
+  code: string;
+  provider: string;
+  model: string;
+  detail?: string;
+  latency_ms: number;
+};
+
+// testLLMConfiguration validates the current unsaved draft. The API key is
+// used only for this request; the manager does not persist or echo it.
+export function testLLMConfiguration(
+  input: LLMConfigurationProbeInput,
+): Promise<LLMConfigurationProbeResult> {
+  return request<LLMConfigurationProbeResult>('POST', '/integrations/llm/test', input);
+}

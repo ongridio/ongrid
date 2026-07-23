@@ -8,12 +8,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	bizgrafana "github.com/ongridio/ongrid/internal/manager/biz/grafana"
+	bizsetting "github.com/ongridio/ongrid/internal/manager/biz/setting"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	pkggrafana "github.com/ongridio/ongrid/internal/pkg/grafana"
 	"github.com/ongridio/ongrid/internal/pkg/tenantctx"
@@ -77,6 +79,13 @@ type LLMRouterInvalidator interface {
 	Invalidate()
 }
 
+// LLMConfigProbe validates an unsaved provider draft. The concrete
+// biz/setting implementation performs one minimal upstream completion and
+// returns stable, secret-free failure codes.
+type LLMConfigProbe interface {
+	Probe(ctx context.Context, in bizsetting.LLMProbeInput) (bizsetting.LLMProbeResult, error)
+}
+
 // Handler bundles the integration routes.
 type Handler struct {
 	grafana   GrafanaService
@@ -85,6 +94,7 @@ type Handler struct {
 	tempo     URLProbe
 	webSearch WebSearchProbe
 	llmRouter LLMRouterInvalidator
+	llmProbe  LLMConfigProbe
 }
 
 // NewHandler builds the handler. prom may be nil when ONGRID_PROM_ENABLED=false;
@@ -98,6 +108,10 @@ func NewHandler(grafana GrafanaService, prom PromQuerier, loki URLProbe, tempo U
 // Optional — without it the /v1/integrations/llm/invalidate endpoint 503s,
 // admin saves still take effect within the router's 60s TTL.
 func (h *Handler) SetLLMRouter(r LLMRouterInvalidator) { h.llmRouter = r }
+
+// SetLLMProbe wires draft validation without widening NewHandler's existing
+// integration dependencies.
+func (h *Handler) SetLLMProbe(p LLMConfigProbe) { h.llmProbe = p }
 
 // Register attaches routes:
 //
@@ -118,8 +132,56 @@ func (h *Handler) Register(r chi.Router) {
 	r.Post("/v1/integrations/loki/test", h.testLoki)
 	r.Post("/v1/integrations/tempo/test", h.testTempo)
 	r.Post("/v1/integrations/websearch/test", h.testWebSearch)
+	r.Post("/v1/integrations/llm/test", h.testLLMConfiguration)
 	r.Post("/v1/integrations/llm/invalidate", h.invalidateLLM)
 	r.Get("/v1/observability/dashboards/{uid}", h.fetchDashboard)
+}
+
+// testLLMConfiguration validates one unsaved provider draft.
+//
+// @Summary Validate an unsaved LLM provider configuration
+// @Tags integrations
+// @Accept json
+// @Produce json
+// @Param request body bizsetting.LLMProbeInput true "LLM provider draft"
+// @Success 200 {object} bizsetting.LLMProbeResult
+// @Failure 400 {object} errorBody
+// @Failure 401 {object} errorBody
+// @Failure 403 {object} errorBody
+// @Failure 503 {object} errorBody
+// @Router /v1/integrations/llm/test [post]
+func (h *Handler) testLLMConfiguration(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	if h.llmProbe == nil {
+		writeJSON(w, http.StatusServiceUnavailable, errorBody{
+			Error: "llm configuration probe not wired",
+			Code:  "llm-probe-disabled",
+		})
+		return
+	}
+
+	const maxBodyBytes = 32 << 10
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	var in bizsetting.LLMProbeInput
+	if err := dec.Decode(&in); err != nil {
+		writeErr(w, errors.Join(errs.ErrInvalid, err))
+		return
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeErr(w, errors.Join(errs.ErrInvalid, errors.New("request body must contain one JSON object")))
+		return
+	}
+
+	result, err := h.llmProbe.Probe(r.Context(), in)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 // invalidateLLM drops the LLM router's provider-catalog cache so admin
