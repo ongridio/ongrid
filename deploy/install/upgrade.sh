@@ -18,6 +18,18 @@ log_info()  { printf '%s[INFO]%s %s\n'  "$C_GREEN"  "$C_RESET" "$*"; }
 log_warn()  { printf '%s[WARN]%s %s\n'  "$C_YELLOW" "$C_RESET" "$*"; }
 log_error() { printf '%s[ERROR]%s %s\n' "$C_RED"    "$C_RESET" "$*" >&2; }
 
+usage() {
+    cat <<'EOF'
+Usage: sudo ./upgrade.sh [options]
+
+Options:
+  --migrate-volumes       Copy legacy Docker named volumes into host bind mounts
+  --no-migrate-volumes    Leave legacy named volumes untouched
+  --repair-permissions    Recursively repair data ownership (slow; recovery only)
+  -h, --help              Show this help
+EOF
+}
+
 PUBLIC_URL_LIB="$SCRIPT_DIR/public-url.sh"
 if [[ ! -r "$PUBLIC_URL_LIB" ]]; then
     log_error "upgrade package is missing public-url.sh"
@@ -25,6 +37,14 @@ if [[ ! -r "$PUBLIC_URL_LIB" ]]; then
 fi
 # shellcheck source=public-url.sh
 source "$PUBLIC_URL_LIB"
+
+DATA_PERMISSIONS_LIB="$SCRIPT_DIR/data-permissions.sh"
+if [[ ! -r "$DATA_PERMISSIONS_LIB" ]]; then
+    log_error "upgrade package is missing data-permissions.sh"
+    exit 1
+fi
+# shellcheck source=data-permissions.sh
+source "$DATA_PERMISSIONS_LIB"
 
 generate_self_signed_tls_cert() {
     local cert_dir="$1"
@@ -187,9 +207,33 @@ preflight_runtime_images() {
 
 trap 'log_error "upgrade failed at line $LINENO"' ERR
 
+UPGRADE_ARGS=("$@")
+MIGRATE_VOLUMES="${MIGRATE_VOLUMES:-}"
+NO_MIGRATE_VOLUMES="${NO_MIGRATE_VOLUMES:-}"
+REPAIR_PERMISSIONS_RAW="${REPAIR_PERMISSIONS:-}"
+while (( $# > 0 )); do
+    case "$1" in
+        --migrate-volumes) MIGRATE_VOLUMES=1 ;;
+        --no-migrate-volumes) NO_MIGRATE_VOLUMES=1 ;;
+        --repair-permissions) REPAIR_PERMISSIONS_RAW=1 ;;
+        -h|--help) usage; exit 0 ;;
+        *) log_error "unknown flag: $1"; usage; exit 2 ;;
+    esac
+    shift
+done
+if ! REPAIR_PERMISSIONS=$(ongrid_normalize_boolean "$REPAIR_PERMISSIONS_RAW"); then
+    log_error "invalid REPAIR_PERMISSIONS value: ${REPAIR_PERMISSIONS_RAW}"
+    log_error "expected one of: 1/true/yes/on or 0/false/no/off"
+    exit 2
+fi
+if [[ -n "$MIGRATE_VOLUMES" && -n "$NO_MIGRATE_VOLUMES" ]]; then
+    log_error "--migrate-volumes and --no-migrate-volumes are mutually exclusive"
+    exit 2
+fi
+
 if [[ $EUID -ne 0 ]]; then
     log_warn "not running as root; re-executing via sudo"
-    exec sudo -E bash "$0" "$@"
+    exec sudo -E bash "$0" "${UPGRADE_ARGS[@]}"
 fi
 
 command -v docker >/dev/null 2>&1 || { log_error "docker CLI not found"; exit 1; }
@@ -237,65 +281,17 @@ fi
 # running untouched.
 preflight_runtime_images
 
-# Stop stack first so legacy named volumes (if any) aren't being written
-# to during migration, and so bind-mount paths can be safely chowned.
-log_info "stopping stack"
-(
-    cd "$INSTALL_DIR"
-    # No explicit -f so docker-compose.override.yml (if present) auto-loads.
-    # Naming -f docker-compose.yml disables override discovery, which silently
-    # dropped operator env overrides (the 2026-05-19 ONGRID_INVESTIGATOR_ENABLED
-    # regression where the structured RCA investigator was unwired after every
-    # upgrade and only the legacy investigator ran).
-    docker compose --env-file .env down || true
-)
-
 # ---------- host data dirs (bind-mount targets) ----------
-# Same shape as install.sh — every upgrade re-asserts dir ownership in
-# case the operator deleted/renamed a dir or the image uid changed.
+# Prepare mount-point directories while the current stack is still available.
+# This is deliberately non-recursive: existing descendants were written by the
+# same container UIDs, while walking large Loki/Tempo trees can take minutes.
 ONGRID_DATA_DIR="${ONGRID_DATA_DIR:-/var/lib/ongrid}"
 ONGRID_LOG_DIR="${ONGRID_LOG_DIR:-/var/log/ongrid}"
 log_info "data dir: $ONGRID_DATA_DIR  (override via ONGRID_DATA_DIR)"
 log_info "log dir:  $ONGRID_LOG_DIR  (override via ONGRID_LOG_DIR)"
-
-mkdir -p \
-    "$ONGRID_DATA_DIR/mysql" \
-    "$ONGRID_DATA_DIR/prometheus" \
-    "$ONGRID_DATA_DIR/loki" \
-    "$ONGRID_DATA_DIR/tempo" \
-    "$ONGRID_DATA_DIR/qdrant" \
-    "$ONGRID_DATA_DIR/grafana" \
-    "$ONGRID_DATA_DIR/embeddings" \
-    "$ONGRID_DATA_DIR/skills" \
-    "$ONGRID_DATA_DIR/pages" \
-    "$ONGRID_DATA_DIR/workspace" \
-    "$ONGRID_DATA_DIR/tools" \
-    "$ONGRID_LOG_DIR"
-
-# Embedding model cache (ADR-027 Phase-2). Same staging logic as
-# install.sh so the bundled BGE model lands on the host the first
-# time an upgrade includes it. Idempotent — skip if already there.
-chown -R 65532:65532 "$ONGRID_DATA_DIR/embeddings" 2>/dev/null || true
-chmod -R 0755 "$ONGRID_DATA_DIR/embeddings" 2>/dev/null || true
-# HLD-017 marketplace skills dir must be writable by the manager (uid 65532),
-# else pack install fails with "permission denied" moving staging → install.
-chown -R 65532:65532 "$ONGRID_DATA_DIR/skills" 2>/dev/null || true
-# Manager-written runtime dirs (uid 65532), bind-mounted into the container.
-# An upgrade from a pre-existing install may predate these dirs, so create +
-# chown here too: serve_page (pages), cloud_bash scratch (workspace) +
-# installed tools (tools). Without it docker creates them root-owned → the
-# nonroot manager hits "mkdir page dir: permission denied".
-chown -R 65532:65532 "$ONGRID_DATA_DIR/pages" 2>/dev/null || true
-chown -R 65532:65532 "$ONGRID_DATA_DIR/workspace" 2>/dev/null || true
-chown -R 65532:65532 "$ONGRID_DATA_DIR/tools" 2>/dev/null || true
-if [[ -d "$SCRIPT_DIR/embeddings/fast-bge-small-zh-v1.5" ]]; then
-    target="$ONGRID_DATA_DIR/embeddings/fast-bge-small-zh-v1.5"
-    if [[ ! -f "$target/model_optimized.onnx" ]]; then
-        log_info "staging bundled embedding model → $target"
-        mkdir -p "$target"
-        cp -rf "$SCRIPT_DIR/embeddings/fast-bge-small-zh-v1.5/." "$target/"
-        chown -R 65532:65532 "$target"
-    fi
+if ! ongrid_prepare_data_directories "$ONGRID_DATA_DIR" "$ONGRID_LOG_DIR"; then
+    log_error "data directory permissions are not usable; the existing stack was not stopped"
+    exit 1
 fi
 
 # Detect legacy docker named volumes from pre-bind-mount installs. If
@@ -338,14 +334,45 @@ for v in "${!LEGACY_VOL_TO_DST[@]}"; do
     fi
 done
 
-MIGRATE_VOLUMES="${MIGRATE_VOLUMES:-}"
-NO_MIGRATE_VOLUMES="${NO_MIGRATE_VOLUMES:-}"
-for arg in "$@"; do
-    case "$arg" in
-        --migrate-volumes) MIGRATE_VOLUMES=1 ;;
-        --no-migrate-volumes) NO_MIGRATE_VOLUMES=1 ;;
-    esac
-done
+if (( ${#LEGACY_FOUND[@]} > 0 )) && [[ -z "$MIGRATE_VOLUMES" && -z "$NO_MIGRATE_VOLUMES" ]]; then
+    log_error "legacy docker named volumes detected: ${LEGACY_FOUND[*]}"
+    log_error "v0.7.45+ uses host bind mounts. Pick one:"
+    log_error "  - re-run with --migrate-volumes to auto-copy data into $ONGRID_DATA_DIR"
+    log_error "  - re-run with --no-migrate-volumes if you'll migrate by hand (see README '数据卷迁移')"
+    log_error "the existing stack was not stopped"
+    exit 1
+fi
+
+if (( REPAIR_PERMISSIONS == 1 )); then
+    log_warn "recursive permission repair requested; large data directories may take a long time"
+fi
+
+# All failure-prone validation above runs while the old stack remains online.
+# Stop only when migration/repair decisions are complete. No explicit -f so an
+# operator's docker-compose.override.yml continues to auto-load.
+log_info "stopping stack"
+if ! (
+    cd "$INSTALL_DIR"
+    docker compose --env-file .env down
+); then
+    log_error "failed to stop the existing stack"
+    if ! ongrid_restore_existing_stack "$INSTALL_DIR"; then
+        log_error "automatic recovery failed"
+    fi
+    exit 1
+fi
+
+# Embedding model cache (ADR-027 Phase-2). Only a newly staged, bounded model
+# tree is recursively chowned; accumulated service data is never traversed here.
+if [[ -d "$SCRIPT_DIR/embeddings/fast-bge-small-zh-v1.5" ]]; then
+    target="$ONGRID_DATA_DIR/embeddings/fast-bge-small-zh-v1.5"
+    if [[ ! -f "$target/model_optimized.onnx" ]]; then
+        log_info "staging bundled embedding model → $target"
+        mkdir -p "$target"
+        cp -rf "$SCRIPT_DIR/embeddings/fast-bge-small-zh-v1.5/." "$target/"
+        chown -R 65532:65532 "$target"
+    fi
+fi
 
 if (( ${#LEGACY_FOUND[@]} > 0 )); then
     if [[ -n "$MIGRATE_VOLUMES" ]]; then
@@ -387,23 +414,23 @@ if (( ${#LEGACY_FOUND[@]} > 0 )); then
     elif [[ -n "$NO_MIGRATE_VOLUMES" ]]; then
         log_warn "legacy volumes left as-is (--no-migrate-volumes): ${LEGACY_FOUND[*]}"
         log_warn "new stack will start with empty data; you MUST migrate manually before users see it"
-    else
-        log_error "legacy docker named volumes detected: ${LEGACY_FOUND[*]}"
-        log_error "v0.7.45+ uses host bind mounts. Pick one:"
-        log_error "  - re-run with --migrate-volumes to auto-copy data into $ONGRID_DATA_DIR"
-        log_error "  - re-run with --no-migrate-volumes if you'll migrate by hand (see README '数据卷迁移')"
-        exit 1
     fi
 fi
 
-# uids must match what the upstream images run as — re-chown every
-# upgrade so a tampered/renamed dir still works.
-chown -R 999:999       "$ONGRID_DATA_DIR/mysql"      2>/dev/null || true
-chown -R 65534:65534   "$ONGRID_DATA_DIR/prometheus" 2>/dev/null || true
-chown -R 10001:10001   "$ONGRID_DATA_DIR/loki"       2>/dev/null || true
-chown -R 10001:10001   "$ONGRID_DATA_DIR/tempo"      2>/dev/null || true
-chown -R 472:472       "$ONGRID_DATA_DIR/grafana"    2>/dev/null || true
-chmod 755 "$ONGRID_DATA_DIR" "$ONGRID_LOG_DIR"
+# cp -a may reapply source-directory metadata during a legacy migration, so
+# reassert only the mount-point owners in constant time. Full-tree repair is an
+# explicit recovery action and never part of a normal upgrade.
+if ! ongrid_prepare_data_directories_or_restore \
+    "$ONGRID_DATA_DIR" "$ONGRID_LOG_DIR" "$INSTALL_DIR"; then
+    exit 1
+fi
+if (( REPAIR_PERMISSIONS == 1 )); then
+    log_warn "repairing data ownership recursively"
+fi
+if ! ongrid_repair_data_permissions_or_restore \
+    "$REPAIR_PERMISSIONS" "$ONGRID_DATA_DIR" "$INSTALL_DIR"; then
+    exit 1
+fi
 
 export ONGRID_DATA_DIR ONGRID_LOG_DIR
 
@@ -485,6 +512,20 @@ if [[ -d "$SCRIPT_DIR/edge" ]]; then
         done
     fi
 fi
+
+# Same rationale as install.sh: these config files are bind-mounted into
+# containers running as non-root (frontier, loki, tempo, prometheus, nginx).
+# cp preserves the source mode, so under a 077 umask the refreshed copies land
+# unreadable and the stack fails to start after upgrade. Normalize to 0644;
+# the .env with credentials stays 0600.
+chmod 644 \
+    "$INSTALL_DIR/docker-compose.yml" \
+    "$INSTALL_DIR"/prometheus*.yml \
+    "$INSTALL_DIR"/loki-config.yaml \
+    "$INSTALL_DIR"/tempo-config.yaml \
+    "$INSTALL_DIR"/frontier.yaml \
+    "$INSTALL_DIR"/nginx.conf \
+    2>/dev/null || true
 
 # Bump ONGRID_VERSION in .env only.
 sed -i.bak -E "s|^ONGRID_VERSION=.*|ONGRID_VERSION=${NEW_VERSION}|" "$ENV_FILE"
