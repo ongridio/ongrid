@@ -344,6 +344,9 @@ docker compose version >/dev/null 2>&1 || { log_error "docker compose v2 not fou
 INSTALL_DIR="${ONGRID_INSTALL_DIR:-/opt/ongrid}"
 log_info "install dir: $INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
+# Under a 077 root umask mkdir -p creates 0750; containers bind-mount paths
+# below this dir and run as non-root, so the dir itself must stay traversable.
+chmod 755 "$INSTALL_DIR"
 
 # ---------- copy assets ----------
 log_info "copying assets into $INSTALL_DIR"
@@ -416,6 +419,21 @@ if [[ -d "$SCRIPT_DIR/edge" ]]; then
         done
     fi
 fi
+
+# Config files are bind-mounted into containers that run as non-root users
+# (frontier, loki, tempo, prometheus, nginx). cp preserves the source mode,
+# so on a host where root's umask is 077 the copies land as 0600/0640 and the
+# containers fail to start with "permission denied". Normalize them to 0644 —
+# none of these files contain secrets (the .env with credentials is handled
+# separately and stays 0600).
+chmod 644 \
+    "$INSTALL_DIR/docker-compose.yml" \
+    "$INSTALL_DIR"/prometheus*.yml \
+    "$INSTALL_DIR"/loki-config.yaml \
+    "$INSTALL_DIR"/tempo-config.yaml \
+    "$INSTALL_DIR"/frontier.yaml \
+    "$INSTALL_DIR"/nginx.conf \
+    2>/dev/null || true
 
 # ---------- host data dirs (bind-mount targets) ----------
 # All stateful services bind-mount to host paths instead of docker named
