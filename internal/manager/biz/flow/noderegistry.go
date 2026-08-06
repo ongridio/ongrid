@@ -152,11 +152,11 @@ func registerBuiltins() {
 	})
 	RegisterNode(&NodeSpec{
 		Type: NodeNotify, Kind: KindAction, Category: "action",
-		LabelZh: "通知", LabelEn: "Notify",
+		LabelZh: "发送通知", LabelEn: "Send notification",
 		ConfigFields: []ConfigFieldSpec{
-			{Key: "channel_ids", LabelZh: "渠道 ID（JSON 数组）", LabelEn: "Channel ids (JSON array)", Kind: "json", Placeholder: "[1]"},
-			{Key: "title", LabelZh: "标题", LabelEn: "Title", Kind: "text"},
-			{Key: "message", LabelZh: "内容（支持 {{…}}）", LabelEn: "Message ({{…}} templates)", Kind: "textarea"},
+			{Key: "channel_ids", LabelZh: "通知渠道 ID（JSON 数组；设置 → 通知）", LabelEn: "Notification channel IDs (JSON array; Settings → Notifications)", Kind: "json", Placeholder: "[1]"},
+			{Key: "title", LabelZh: "通知标题", LabelEn: "Notification title", Kind: "text"},
+			{Key: "message", LabelZh: "通知内容（支持 {{…}}）", LabelEn: "Notification message ({{…}} templates)", Kind: "textarea"},
 		},
 		OutputShape: []string{"sent", "channels"},
 		Execute:     execNotify,

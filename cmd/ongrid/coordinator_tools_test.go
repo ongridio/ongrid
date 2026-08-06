@@ -113,13 +113,22 @@ func TestDefaultCoordinatorKeepsThirtyTurns(t *testing.T) {
 	}
 }
 
-func TestExecuteK8sActionIsChatOnlyReviewTool(t *testing.T) {
+func TestExecuteK8sActionIsExcludedFromWorkflowToolPalette(t *testing.T) {
 	got := buildCoordinatorToolNames(nil)
 	if !containsString(got, aiopstools.ToolNameExecuteK8sAction) {
 		t.Fatalf("coordinator roster missing %q", aiopstools.ToolNameExecuteK8sAction)
 	}
-	if !isChatOnlyReviewTool(aiopstools.ToolNameExecuteK8sAction) {
+	if !isFlowRuntimeUnsupportedTool(aiopstools.ToolNameExecuteK8sAction) {
 		t.Fatalf("%q should be excluded from flow paths without ReviewGate", aiopstools.ToolNameExecuteK8sAction)
+	}
+}
+
+func TestSendIMMessageIsExcludedFromWorkflowToolPalette(t *testing.T) {
+	if !isWorkflowPaletteExcludedTool(aiopstools.ToolNameSendIMMessage) {
+		t.Fatalf("%q must be excluded from workflow paths; workflows use the dedicated notify node", aiopstools.ToolNameSendIMMessage)
+	}
+	if isFlowRuntimeUnsupportedTool(aiopstools.ToolNameSendIMMessage) {
+		t.Fatalf("%q must remain runnable for saved workflows", aiopstools.ToolNameSendIMMessage)
 	}
 }
 

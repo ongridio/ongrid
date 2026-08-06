@@ -19,7 +19,7 @@ ongrid 工作流把「触发器 → 节点」连成可视化自动化：定时 /
 | Agent | 派一个子 Agent 自主多轮推理 + 调工具，回写结论 |
 | 条件（Condition） | 按表达式分流 true / false |
 | 转换（Transform） | 字段胶水：把上游输出整形成下游入参 |
-| 通知（Notify） | 推送到飞书 / 钉钉 / 企业微信 / Slack / Telegram / Webhook |
+| 发送通知（Send notification） | 通过**设置 → 通知**中配置的单向通知渠道推送到飞书 / 钉钉 / 企业微信 / Slack / Telegram / Webhook；双向 IM 机器人仅处理会话，不作为工作流投递目标 |
 
 ---
 
