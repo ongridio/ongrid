@@ -13,15 +13,16 @@ import (
 // ToolNameSendIMMessage is the wire name.
 const ToolNameSendIMMessage = "send_im_message"
 
-// IMChannel is one configured outbound channel (设置→渠道), narrowed to what
-// the tool needs to resolve + report it.
+// IMChannel is one configured outbound notification channel (设置→通知),
+// narrowed to what the tool needs to resolve + report it. The name remains
+// for wire compatibility with the legacy send_im_message tool.
 type IMChannel struct {
 	ID   uint64
 	Name string
 	Kind string
 }
 
-// IMSender is the seam to the channel store + notify router. Implemented in
+// IMSender is the seam to the notification-channel store + notify router. Implemented in
 // cmd/main.go over the alert channel repo + notify.Router (same
 // BuildSenderFromChannel path the alert notifier / flow notify node use), so
 // this package stays decoupled from the data layer.
@@ -30,8 +31,8 @@ type IMSender interface {
 	SendIM(ctx context.Context, channelID uint64, title, text string) error
 }
 
-// SendIMMessageTool lets the assistant proactively push a message to a
-// configured IM channel (Feishu / DingTalk / Slack / Telegram / WeCom).
+// SendIMMessageTool lets the assistant proactively push a message through a
+// configured notification channel. It does not target a two-way IM session.
 type SendIMMessageTool struct {
 	sender IMSender
 	log    *slog.Logger
@@ -48,22 +49,22 @@ func NewSendIMMessageTool(s IMSender, log *slog.Logger) *SendIMMessageTool {
 var sendIMMessageSchema = json.RawMessage(`{
   "type": "object",
   "properties": {
-    "channel": { "type": "string", "description": "目标渠道名——设置→渠道里配好的飞书 / 钉钉 / Slack / Telegram 等渠道的名字。" },
+    "channel": { "type": "string", "description": "目标通知渠道名——设置→通知中配置的飞书 / 钉钉 / Slack / Telegram 等渠道名称；不是双向 IM 机器人。" },
     "text": { "type": "string", "description": "要发送的正文（纯文本，可带换行）。" },
     "title": { "type": "string", "description": "可选标题 / 主题。" }
   },
   "required": ["channel", "text"]
 }`)
 
-const sendIMMessageWhenToUse = "用户要把某个结论 / 通知主动发到飞书、钉钉等群里时用（比如\"把这段诊断发到运维群\"）。" +
-	"channel 传渠道名（设置→渠道里配的）。不确定有哪些渠道时，先随便填一个调一次——报错里会列出所有可用渠道名，再据此重发。"
+const sendIMMessageWhenToUse = "用户要把某个结论 / 通知主动推送到飞书、钉钉等群里时用（比如\"把这段诊断发到运维群\"）。" +
+	"channel 传“设置→通知”中配置的通知渠道名；它不是双向 IM 机器人。"
 
 // Info — Class=write: it sends a real message (side-effecting, viewers can't
 // use it) but it is not destructive.
 func (t *SendIMMessageTool) Info(_ context.Context) (*basetool.ToolInfo, error) {
 	return &basetool.ToolInfo{
 		Name:        ToolNameSendIMMessage,
-		Description: "Send a message to a configured IM channel (Feishu / DingTalk / Slack / Telegram / WeCom). Pass the channel NAME from 设置→渠道.",
+		Description: "Send a message through a configured notification channel (Feishu / DingTalk / Slack / Telegram / WeCom). Pass the channel name from Settings → Notifications; this does not target a two-way IM bot.",
 		WhenToUse:   sendIMMessageWhenToUse,
 		Parameters:  sendIMMessageSchema,
 		Class:       "write",
@@ -107,7 +108,7 @@ func (t *SendIMMessageTool) InvokableRun(ctx context.Context, argsJSON string, _
 			names = append(names, c.Name)
 		}
 		if len(names) == 0 {
-			return "", fmt.Errorf("send_im_message: no channels configured. Add one under 设置→渠道 first")
+			return "", fmt.Errorf("send_im_message: no notification channels configured. Add one under Settings → Notifications first")
 		}
 		return "", fmt.Errorf("send_im_message: channel %q not found. Available channels: %s", in.Channel, strings.Join(names, ", "))
 	}

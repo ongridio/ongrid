@@ -4229,7 +4229,7 @@ func (s *flowToolInvoker) mergeBag(bag *aiopstools.ToolBag) {
 		if err != nil || info == nil || info.Name == "" {
 			continue
 		}
-		if isChatOnlyReviewTool(info.Name) {
+		if isFlowRuntimeUnsupportedTool(info.Name) {
 			continue
 		}
 		if _, exists := s.tools[info.Name]; exists {
@@ -4857,14 +4857,14 @@ func (c flowToolCatalog) ListTools() []managerbizflow.ToolMeta {
 		if err != nil || info == nil || info.Name == "" {
 			continue
 		}
-		// Control-plane tools don't belong in a workflow tool node:
+		// Control-plane and chat-only tools don't belong in a workflow tool node:
 		// AgentTool overlaps the dedicated `agent` node, SendMessage /
 		// TaskStop steer a live coordinator session, ToolSearch is an
 		// LLM-only schema-fetch affordance. Hide them from the palette.
 		if isControlPlaneTool(info.Name) {
 			continue
 		}
-		if isChatOnlyReviewTool(info.Name) {
+		if isWorkflowPaletteExcludedTool(info.Name) {
 			continue
 		}
 		// cloud_bash blocks on synchronous human approval (HLD-021); an
@@ -4910,13 +4910,22 @@ func isControlPlaneTool(name string) bool {
 	return false
 }
 
-func isChatOnlyReviewTool(name string) bool {
+// isFlowRuntimeUnsupportedTool identifies tools that cannot execute in a
+// workflow because they need an approval model the engine does not have yet.
+func isFlowRuntimeUnsupportedTool(name string) bool {
 	switch name {
 	case aiopstools.ToolNameExecuteK8sAction:
 		return true
 	default:
 		return false
 	}
+}
+
+// isWorkflowPaletteExcludedTool identifies tools that must not be offered as
+// new generic workflow nodes. The legacy send_im_message tool remains runtime
+// compatible for saved graphs, but new alert workflows must use notify.
+func isWorkflowPaletteExcludedTool(name string) bool {
+	return isFlowRuntimeUnsupportedTool(name) || name == aiopstools.ToolNameSendIMMessage
 }
 
 // categorizeFlowTool buckets a tool name into a palette group. Explicit
