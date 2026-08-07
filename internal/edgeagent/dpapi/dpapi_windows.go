@@ -1,12 +1,12 @@
 //go:build windows
 
 // Package dpapi 提供 DPAPI（Data Protection API）加密/解密功能，
-// 用于保护 broker token 等敏感凭证（ADR-037 A2 CR4）。
+// 用于保护 broker token 等敏感凭证。
 //
 // DPAPI scope：CRYPTPROTECT_LOCAL_MACHINE（绑定机器 + SystemCredential scope）。
 //   - LocalSystem 和 NetworkService 都能解密（同为 System 身份）
 //   - 拷贝到其他机器无法解密（防横向移动）
-//   - 不防本机 System 服务被攻破（威胁模型见 ADR-037）
+//   - 不防本机 System 服务被攻破（本机 System 已被攻破等价于全失陷）
 //
 // 使用 golang.org/x/sys/windows 的高层 CryptProtectData/CryptUnprotectData 包装，
 // 无需 raw syscall。

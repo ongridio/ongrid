@@ -2,13 +2,12 @@
 
 package edgedirs
 
-// Windows 部署目录约定（ADR-033 I2）。
+// Windows 部署目录约定。
 //
 //   - binary → C:\Program Files\ongrid-edge\bin\
 //   - data   → C:\ProgramData\ongrid-edge\
 //
-// ProgramData 是 Windows Service 标准数据目录，NetworkService 可写
-// （ADR-036 P4 默认服务账户）。
+// ProgramData 是 Windows Service 标准数据目录，NetworkService 可写。
 const (
 	BinDir       = `C:\Program Files\ongrid-edge\bin`
 	DataDir      = `C:\ProgramData\ongrid-edge`
@@ -16,8 +15,7 @@ const (
 	StageDir     = `C:\ProgramData\ongrid-edge\upgrade`
 )
 
-// HealthFile 是 worker.exe 与 supervisor.exe 之间的 health.json IPC 文件
-// 路径（ADR-033 U3）。
+// HealthFile 是 worker.exe 与 supervisor.exe 之间的 health.json IPC 文件路径。
 const HealthFile = DataDir + `\health.json`
 
 // WorkerBinary 是 worker.exe 在 BinDir 下的文件名。

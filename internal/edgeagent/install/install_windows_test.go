@@ -104,7 +104,7 @@ func TestWindowsSecretStore_Install_WrongTokenRoundTrip(t *testing.T) {
 	// 所以只要第二次 Install 不报错就说明覆盖成功
 }
 
-// --- Rotate tests (#16 D4 tmp→rename) ---
+// --- Rotate tests ---
 
 // TestWindowsSecretStore_Rotate_ReplacesToken 验证 Rotate 原子替换文件内容。
 func TestWindowsSecretStore_Rotate_ReplacesToken(t *testing.T) {

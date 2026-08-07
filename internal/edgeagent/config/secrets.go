@@ -1,5 +1,5 @@
 // Package config 提供 edge agent 的运行时配置加载逻辑，
-// 包括 DPAPI 加密的 secrets.enc 读取（ADR-037 A2 CR4）。
+// 包括 DPAPI 加密的 secrets.enc 读取。
 package config
 
 import (

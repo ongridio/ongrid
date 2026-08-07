@@ -15,8 +15,8 @@ import (
 // LookupId fails (common in scratch containers without /etc/passwd).
 //
 // Windows uses ACL/SID for ownership (fundamentally different from
-// uid/gid); see owner_windows.go for the MVP-1 stub that returns
-// empty strings.
+// uid/gid); see owner_windows.go for the stub that returns
+// empty strings until a Windows skill needs this data.
 func fileOwner(fi os.FileInfo) (owner, group string) {
 	if st, ok := fi.Sys().(*syscall.Stat_t); ok {
 		if u, err := user.LookupId(strconv.FormatUint(uint64(st.Uid), 10)); err == nil {

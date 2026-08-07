@@ -34,7 +34,7 @@ func (sc *SCServiceController) Create(binPath string) error {
 	return nil
 }
 
-// ConfigureRecovery 配置 SCM failure recovery action（#21 Step 7）。
+// ConfigureRecovery 配置 SCM failure recovery action。
 // reset=86400（24h window），actions=restart/60000×3（3 次 retry，60s 延迟）。
 // service.go Execute 返回 (false, 1)（samesession=false + 非 0 exitCode）时 SCM 按此配置重启。
 // 3 次/24h 上限后停止，等价于"立即停止"行为。
@@ -49,8 +49,8 @@ func (sc *SCServiceController) ConfigureRecovery() error {
 	return nil
 }
 
-// ConfigureDefenderExclusion 为 ongrid 目录添加 Windows Defender exclusion
-//（#21 Step 7a，W3 加固）。仅在 Windows Server with Defender 时生效；
+// ConfigureDefenderExclusion 为 ongrid 目录添加 Windows Defender exclusion。
+// 仅在 Windows Server with Defender 时生效；
 // 第三方 AV 或 Defender 已禁用时返回 error，调用方仅 warn 不阻断。
 //
 // 参数格式：PowerShell Add-MpPreference 的 -ExclusionPath 接受字符串数组，

@@ -1,7 +1,6 @@
 // Package install 提供 Windows edge agent 的安装/卸载抽象。
 //
-// 将 runInstall 的 3 个正交关注点拆为独立接口（ADR-037 A2 CR4,
-// MVP-3 #18-1 深化 pass）：
+// 将 runInstall 的 3 个正交关注点拆为独立接口：
 //
 //   - SecretStore: DPAPI 加密的凭证文件（secrets.enc）
 //   - ServiceController: Windows Service 生命周期（sc.exe 包装）

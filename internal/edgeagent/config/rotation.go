@@ -2,7 +2,7 @@ package config
 
 import "time"
 
-// token 轮转周期常量（ADR-037 A2 CR4）。
+// token 轮转周期常量。
 const (
 	defaultRotationDays = 90
 	minRotationDays     = 30

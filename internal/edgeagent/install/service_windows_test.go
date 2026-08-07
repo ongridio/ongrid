@@ -9,7 +9,7 @@ import (
 
 // TestBuildDefenderExclusionCmd_SingleParamName 验证 -ExclusionPath 参数名只出现一次。
 // 回归防护：旧代码用 `-ExclusionPath A -ExclusionPath B` 会导致 PowerShell
-// ParameterAlreadyBound 错误（#21 dogfood 2026-07-16 发现）。
+// ParameterAlreadyBound 错误。
 func TestBuildDefenderExclusionCmd_SingleParamName(t *testing.T) {
 	cmd := buildDefenderExclusionCmd(`C:\bin`, `C:\data`)
 	if count := strings.Count(cmd, "-ExclusionPath"); count != 1 {
