@@ -84,10 +84,25 @@ func (sc *SCServiceController) Start() error {
 	return nil
 }
 
-// Stop 停止服务（sc.exe stop），忽略"服务未运行"错误。
+// Stop 停止服务（sc.exe stop），仅忽略"服务未启动/不存在"预期错误。
+// 其他错误（权限不足、SCM 不可达、命令缺失等）返回给调用方处理。
+//
+// sc.exe exit codes（Windows SDK）：
+//   - 0 = SUCCESS
+//   - 1060 = ERROR_SERVICE_DOES_NOT_EXIST（服务未注册）
+//   - 1062 = ERROR_SERVICE_NOT_ACTIVE（服务未启动）
 func (sc *SCServiceController) Stop() error {
 	cmd := exec.Command("sc.exe", "stop", sc.name)
-	_ = cmd.Run() // 忽略所有错误（服务可能未运行）
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			code := exitErr.ExitCode()
+			if code == 1060 || code == 1062 {
+				return nil
+			}
+		}
+		return fmt.Errorf("sc.exe stop: %w (output: %s)", err, out)
+	}
 	return nil
 }
 
