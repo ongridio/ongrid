@@ -743,7 +743,10 @@ func main() {
 	// per-request Provider override flows through; absent that, behaviour
 	// matches the legacy single-provider path (router falls back to
 	// openaiClient when no providers are configured).
-	llmClient := llm.Client(llmRouter)
+	// Apply the live assistant timeout outside provider routing so every
+	// configured provider gets the same default deadline. Explicit callers
+	// (workflows/tools) keep their narrower or specialised deadlines.
+	llmClient := llm.WithDefaultTimeout(llmRouter, settingSvc.AgentLLMTimeout)
 
 	// manager/edge biz + service + server.
 	edgeRepo := manageredgedata.NewRepo(db)
@@ -1685,8 +1688,9 @@ func main() {
 			managerreportdata.NewFactsCollector(db, reportProm),
 			reportRT,
 			managerbizreport.GeneratorConfig{
-				DefaultLocale: firstNonEmpty(os.Getenv("ONGRID_DEFAULT_LOCALE"), "en"),
-				PublicURL:     cfg.PublicURL,
+				DefaultLocale:   firstNonEmpty(os.Getenv("ONGRID_DEFAULT_LOCALE"), "en"),
+				PublicURL:       cfg.PublicURL,
+				TimeoutProvider: settingSvc.AgentLLMTimeout,
 			},
 			log,
 		).

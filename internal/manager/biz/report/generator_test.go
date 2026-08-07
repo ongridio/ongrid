@@ -77,6 +77,28 @@ func newGenTestRepo(rpt *model.Report) *fakeRepo {
 	return r
 }
 
+func TestGeneratorTimeoutUsesLiveProvider(t *testing.T) {
+	ctx := context.Background()
+	gen := NewWorkerGenerator(
+		newGenTestRepo(pendingReport()),
+		fakeFacts{facts: sampleFacts()},
+		&fakeSpawner{},
+		GeneratorConfig{
+			Timeout:         time.Minute,
+			TimeoutProvider: func(context.Context) time.Duration { return 5 * time.Minute },
+		},
+		nil,
+	)
+	if got := gen.timeout(ctx); got != 5*time.Minute {
+		t.Fatalf("timeout() = %s, want 5m", got)
+	}
+
+	gen.cfg.TimeoutProvider = func(context.Context) time.Duration { return 0 }
+	if got := gen.timeout(ctx); got != time.Minute {
+		t.Fatalf("timeout() fallback = %s, want 1m", got)
+	}
+}
+
 func TestGenerator_HappyPath_OverwritesNumbersFromFacts(t *testing.T) {
 	rpt := pendingReport()
 	repo := newGenTestRepo(rpt)

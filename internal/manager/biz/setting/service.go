@@ -111,6 +111,11 @@ func (s *Service) Set(ctx context.Context, category, key, value string, sensitiv
 	if category == "" || key == "" {
 		return fmt.Errorf("%w: category/key required", errs.ErrInvalid)
 	}
+	if category == model.CategoryAgent {
+		if err := validateAgentSetting(key, value); err != nil {
+			return err
+		}
+	}
 	if _, err := s.repo.Set(ctx, category, key, value, sensitive); err != nil {
 		return err
 	}
@@ -136,6 +141,11 @@ func (s *Service) SetBatch(ctx context.Context, settings []model.Setting) error 
 	for i := range settings {
 		if settings[i].Category == "" || settings[i].Key == "" {
 			return fmt.Errorf("%w: category/key required", errs.ErrInvalid)
+		}
+		if settings[i].Category == model.CategoryAgent {
+			if err := validateAgentSetting(settings[i].Key, settings[i].Value); err != nil {
+				return err
+			}
 		}
 	}
 	if err := s.repo.SetBatch(ctx, settings); err != nil {

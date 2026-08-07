@@ -159,6 +159,62 @@ func TestNetworkDiscoveryEnabled(t *testing.T) {
 	}
 }
 
+func TestAgentLLMTimeout(t *testing.T) {
+	ctx := context.Background()
+	for _, test := range []struct {
+		name  string
+		value string
+		set   bool
+		want  time.Duration
+	}{
+		{name: "unset defaults to 120 seconds", want: defaultAgentLLMTimeout},
+		{name: "minimum accepted", value: "30", set: true, want: 30 * time.Second},
+		{name: "maximum accepted", value: "900", set: true, want: 15 * time.Minute},
+		{name: "malformed falls back", value: "slow", set: true, want: defaultAgentLLMTimeout},
+		{name: "out of range falls back", value: "901", set: true, want: defaultAgentLLMTimeout},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repo := newFakeRepo()
+			if test.set {
+				if _, err := repo.Set(ctx, model.CategoryAgent, model.KeyAgentLLMTimeoutSeconds, test.value, false); err != nil {
+					t.Fatalf("seed setting: %v", err)
+				}
+			}
+			if got := New(repo, nil).AgentLLMTimeout(ctx); got != test.want {
+				t.Fatalf("AgentLLMTimeout() = %s, want %s", got, test.want)
+			}
+		})
+	}
+}
+
+func TestServiceSetValidatesAgentLLMTimeout(t *testing.T) {
+	svc := New(newFakeRepo(), nil)
+	ctx := context.Background()
+	for _, value := range []string{"", "29", "901", "not-a-number"} {
+		if err := svc.Set(ctx, model.CategoryAgent, model.KeyAgentLLMTimeoutSeconds, value, false); !errors.Is(err, errs.ErrInvalid) {
+			t.Errorf("Set(%q) error = %v, want errs.ErrInvalid", value, err)
+		}
+	}
+	if err := svc.Set(ctx, model.CategoryAgent, model.KeyAgentLLMTimeoutSeconds, "300", false); err != nil {
+		t.Fatalf("Set(valid timeout): %v", err)
+	}
+	if got := svc.AgentLLMTimeout(ctx); got != 5*time.Minute {
+		t.Fatalf("AgentLLMTimeout() = %s, want 5m", got)
+	}
+}
+
+func TestServiceSetBatchValidatesAgentLLMTimeout(t *testing.T) {
+	svc := New(newFakeRepo(), nil)
+	err := svc.SetBatch(context.Background(), []model.Setting{{
+		Category: model.CategoryAgent,
+		Key:      model.KeyAgentLLMTimeoutSeconds,
+		Value:    "901",
+	}})
+	if !errors.Is(err, errs.ErrInvalid) {
+		t.Fatalf("SetBatch(invalid timeout) error = %v, want errs.ErrInvalid", err)
+	}
+}
+
 func TestServiceSetInvalidatesCache(t *testing.T) {
 	repo := newFakeRepo()
 	if _, err := repo.Set(context.Background(), "llm", "openai_model", "gpt-4o", false); err != nil {

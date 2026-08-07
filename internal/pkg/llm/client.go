@@ -47,7 +47,7 @@ const defaultTimeout = 120 * time.Second
 //
 // BaseURL is optional and lets us point at Azure / Fireworks / a local vLLM
 // without reshaping the interface. Timeout applies when the caller's ctx has
-// no deadline; default is 30s.
+// no deadline; default is 120s.
 type Config struct {
 	APIKey  string
 	Model   string
@@ -125,6 +125,39 @@ type BudgetChecker interface {
 // Client is the LLM client surface consumed by the AIOps agent.
 type Client interface {
 	Chat(ctx context.Context, req ChatReq) (*ChatResp, error)
+}
+
+// TimeoutProvider returns the current default LLM request timeout. It is used
+// only when the caller did not already establish a deadline; explicit workflow
+// and tool deadlines remain authoritative.
+type TimeoutProvider func(ctx context.Context) time.Duration
+
+// WithDefaultTimeout wraps a client with a runtime-configurable default
+// deadline. The wrapper is deliberately outside provider routing, so one
+// setting applies equally to every configured OpenAI-compatible provider.
+func WithDefaultTimeout(inner Client, provider TimeoutProvider) Client {
+	if inner == nil || provider == nil {
+		return inner
+	}
+	return timeoutClient{inner: inner, provider: provider}
+}
+
+type timeoutClient struct {
+	inner    Client
+	provider TimeoutProvider
+}
+
+func (c timeoutClient) Chat(ctx context.Context, req ChatReq) (*ChatResp, error) {
+	if _, hasDeadline := ctx.Deadline(); hasDeadline {
+		return c.inner.Chat(ctx, req)
+	}
+	timeout := c.provider(ctx)
+	if timeout <= 0 {
+		timeout = defaultTimeout
+	}
+	callCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	return c.inner.Chat(callCtx, req)
 }
 
 // Resolver supplies the LLM credentials at call time. The seam exists so

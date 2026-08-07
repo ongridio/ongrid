@@ -29,6 +29,10 @@ type GeneratorConfig struct {
 	// Timeout caps a single report generation. 0 → 120s (the project-
 	// wide LLM timeout floor).
 	Timeout time.Duration
+	// TimeoutProvider optionally resolves the live assistant timeout for each
+	// report. A configured positive value overrides Timeout without requiring a
+	// manager restart.
+	TimeoutProvider func(context.Context) time.Duration
 	// DefaultLocale is used when a report has no owner-locale signal
 	// (scheduled reports run headless — there's no Accept-Language).
 	// Empty → "en" per feedback_ai_output_locale (auto-triggered LLM
@@ -125,7 +129,7 @@ func (g *workerGenerator) Generate(ctx context.Context, reportID string) {
 }
 
 func (g *workerGenerator) generate(ctx context.Context, rpt *model.Report) error {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), g.cfg.Timeout)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), g.timeout(ctx))
 	defer cancel()
 
 	period := Period{Start: rpt.PeriodStart, End: rpt.PeriodEnd}
@@ -204,6 +208,15 @@ func (g *workerGenerator) generate(ctx context.Context, rpt *model.Report) error
 	// fatal to the (already-persisted) ready report.
 	g.deliver(ctx, rpt)
 	return nil
+}
+
+func (g *workerGenerator) timeout(ctx context.Context) time.Duration {
+	if g.cfg.TimeoutProvider != nil {
+		if timeout := g.cfg.TimeoutProvider(ctx); timeout > 0 {
+			return timeout
+		}
+	}
+	return g.cfg.Timeout
 }
 
 // deliver pushes a ready report to the schedule's channels and records

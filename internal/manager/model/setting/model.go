@@ -59,6 +59,10 @@ const (
 	// tools. Only "true" enables write tools; unset / any other value keeps the
 	// agent read-only (only Class=="read" tools exposed to the LLM).
 	KeyAgentWriteEnabled = "write_enabled"
+	// KeyAgentLLMTimeoutSeconds bounds an assistant LLM request and report
+	// generation in seconds. The typed setting accessor owns its default and
+	// range validation so callers cannot accidentally accept an unbounded value.
+	KeyAgentLLMTimeoutSeconds = "llm_timeout_seconds"
 )
 
 // (CategoryGit + KeyGitGitHubToken removed HTTPS git

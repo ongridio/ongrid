@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
 
 // stubClient records the last ChatReq and returns a canned response.
@@ -18,6 +19,48 @@ func (s *stubClient) Chat(_ context.Context, req ChatReq) (*ChatResp, error) {
 	s.last = req
 	c := "from-" + s.id
 	return &ChatResp{Assistant: Message{Role: "assistant", Content: c}}, nil
+}
+
+type deadlineClient struct {
+	hasDeadline bool
+	deadline    time.Time
+}
+
+func (c *deadlineClient) Chat(ctx context.Context, _ ChatReq) (*ChatResp, error) {
+	c.deadline, c.hasDeadline = ctx.Deadline()
+	return &ChatResp{Assistant: Message{Role: "assistant"}}, nil
+}
+
+func TestWithDefaultTimeoutAddsConfiguredDeadline(t *testing.T) {
+	inner := &deadlineClient{}
+	client := WithDefaultTimeout(inner, func(context.Context) time.Duration { return 2 * time.Second })
+	before := time.Now()
+	if _, err := client.Chat(context.Background(), ChatReq{}); err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if !inner.hasDeadline {
+		t.Fatal("wrapped request has no deadline")
+	}
+	if got := inner.deadline.Sub(before); got < 1900*time.Millisecond || got > 2100*time.Millisecond {
+		t.Fatalf("deadline delta = %s, want about 2s", got)
+	}
+}
+
+func TestWithDefaultTimeoutPreservesExistingDeadline(t *testing.T) {
+	inner := &deadlineClient{}
+	client := WithDefaultTimeout(inner, func(context.Context) time.Duration { return time.Second })
+	want := time.Now().Add(5 * time.Second).Round(0)
+	ctx, cancel := context.WithDeadline(context.Background(), want)
+	defer cancel()
+	if _, err := client.Chat(ctx, ChatReq{}); err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if !inner.hasDeadline {
+		t.Fatal("request has no deadline")
+	}
+	if !inner.deadline.Equal(want) {
+		t.Fatalf("deadline = %s, want existing deadline %s", inner.deadline, want)
+	}
 }
 
 type stubProvidersResolver struct {

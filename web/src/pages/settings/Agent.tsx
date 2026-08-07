@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Bot, Loader2, ShieldCheck } from 'lucide-react';
+import { Bot, Clock3, Loader2, ShieldCheck } from 'lucide-react';
 import { listSettings, setSetting } from '@/api/settings';
 import { useI18n } from '@/i18n/locale';
 import { cn } from '@/lib/cn';
 
-// SettingsAgent — admin controls for AI-agent behaviour. Today it hosts a
-// single gate: whether the assistant may use write/mutating tools. The whole
+// SettingsAgent — admin controls for AI-agent behaviour. It hosts the
+// write-action gate and the assistant LLM request timeout. The whole
 // /settings area is already admin-only (SettingsLayout gates on isAdmin), so no
 // extra role check is needed here.
 //
@@ -14,20 +14,29 @@ import { cn } from '@/lib/cn';
 // server (fail-safe default), so we treat a missing row as OFF.
 const CATEGORY = 'agent';
 const KEY = 'write_enabled';
+const LLM_TIMEOUT_KEY = 'llm_timeout_seconds';
+const DEFAULT_LLM_TIMEOUT_SECONDS = 120;
+const MIN_LLM_TIMEOUT_SECONDS = 30;
+const MAX_LLM_TIMEOUT_SECONDS = 900;
 
 export default function SettingsAgent() {
   const { tr } = useI18n();
   const [writeEnabled, setWriteEnabled] = useState(false);
+  const [llmTimeoutSeconds, setLLMTimeoutSeconds] = useState(String(DEFAULT_LLM_TIMEOUT_SECONDS));
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingTimeout, setSavingTimeout] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
       const res = await listSettings(CATEGORY);
       const row = res.items.find((i) => i.key === KEY);
+      const timeoutRow = res.items.find((i) => i.key === LLM_TIMEOUT_KEY);
       // Missing row → server default is DISABLED (fail-safe).
       setWriteEnabled(row ? row.value === 'true' : false);
+      // Missing timeout row → server and UI both use the stable 120s default.
+      setLLMTimeoutSeconds(timeoutRow?.value || String(DEFAULT_LLM_TIMEOUT_SECONDS));
       setErr(null);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -58,8 +67,32 @@ export default function SettingsAgent() {
     [],
   );
 
+  const onSaveTimeout = useCallback(async () => {
+    const seconds = Number(llmTimeoutSeconds);
+    if (!Number.isInteger(seconds) || seconds < MIN_LLM_TIMEOUT_SECONDS || seconds > MAX_LLM_TIMEOUT_SECONDS) {
+      setErr(
+        tr(
+          `超时时间必须是 ${MIN_LLM_TIMEOUT_SECONDS} 到 ${MAX_LLM_TIMEOUT_SECONDS} 的整数秒数。`,
+          `Timeout must be a whole number between ${MIN_LLM_TIMEOUT_SECONDS} and ${MAX_LLM_TIMEOUT_SECONDS} seconds.`,
+        ),
+      );
+      return;
+    }
+    setSavingTimeout(true);
+    setErr(null);
+    try {
+      await setSetting(CATEGORY, LLM_TIMEOUT_KEY, String(seconds), false);
+      setLLMTimeoutSeconds(String(seconds));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingTimeout(false);
+    }
+  }, [llmTimeoutSeconds, tr]);
+
   return (
     <div className="space-y-4">
+      {err && <div className="text-xs text-red-400">{err}</div>}
       <section className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
         <div className="mb-3 flex items-center gap-2">
           <ShieldCheck size={14} className="text-zinc-400" />
@@ -117,13 +150,58 @@ export default function SettingsAgent() {
             </button>
           </div>
         )}
-
-        {err && <div className="mt-3 text-xs text-red-400">{err}</div>}
-
         <p className="mt-4 text-[11px] leading-relaxed text-zinc-600">
           {tr(
             '提示：改动立即生效，对所有用户的新对话轮次生效，无需重启。已在进行中的工具调用不受影响。',
             'Note: takes effect immediately on the next chat turn for every user, no restart needed. Tool calls already in flight are unaffected.',
+          )}
+        </p>
+      </section>
+
+      <section className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
+        <div className="mb-3 flex items-center gap-2">
+          <Clock3 size={14} className="text-zinc-400" />
+          <h2 className="text-sm font-medium text-zinc-100">{tr('LLM 超时', 'LLM timeout')}</h2>
+        </div>
+        <p className="mb-4 text-xs leading-relaxed text-zinc-500">
+          {tr(
+            '设置助理单次 LLM 请求的最长等待时间，也用作巡检报告的总生成窗口。默认 120 秒；工作流和工具的专用超时不受影响。',
+            'Sets the longest wait for one assistant LLM request and the total inspection-report generation window. Defaults to 120 seconds; workflow and tool-specific timeouts are unchanged.',
+          )}
+        </p>
+        {loading ? (
+          <div className="flex h-10 items-center text-xs text-zinc-500">
+            <Loader2 size={13} className="mr-2 animate-spin" /> {tr('加载中…', 'Loading…')}
+          </div>
+        ) : (
+          <div className="flex items-end gap-3">
+            <label htmlFor="agent-llm-timeout-seconds" className="block">
+              <span className="mb-1.5 block text-[11px] font-medium text-zinc-400">{tr('超时秒数', 'Timeout seconds')}</span>
+              <input
+                id="agent-llm-timeout-seconds"
+                type="number"
+                min={MIN_LLM_TIMEOUT_SECONDS}
+                max={MAX_LLM_TIMEOUT_SECONDS}
+                step={1}
+                value={llmTimeoutSeconds}
+                onChange={(event) => setLLMTimeoutSeconds(event.target.value)}
+                className="h-10 w-36 rounded-md border border-zinc-700 bg-zinc-950 px-3 text-sm text-zinc-100 outline-none transition focus:border-indigo-500"
+              />
+            </label>
+            <button
+              type="button"
+              disabled={savingTimeout}
+              onClick={() => void onSaveTimeout()}
+              className="h-10 rounded-md bg-indigo-600 px-3 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:opacity-50"
+            >
+              {savingTimeout ? tr('保存中…', 'Saving…') : tr('保存', 'Save')}
+            </button>
+          </div>
+        )}
+        <p className="mt-3 text-[11px] text-zinc-600">
+          {tr(
+            `允许范围 ${MIN_LLM_TIMEOUT_SECONDS}–${MAX_LLM_TIMEOUT_SECONDS} 秒；保存后对新任务立即生效。`,
+            `Allowed range: ${MIN_LLM_TIMEOUT_SECONDS}–${MAX_LLM_TIMEOUT_SECONDS} seconds; applies to new work immediately after saving.`,
           )}
         </p>
       </section>
