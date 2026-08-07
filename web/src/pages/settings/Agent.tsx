@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Bot, Clock3, Loader2, ShieldCheck } from 'lucide-react';
+import { Bot, Clock3, Loader2, Save, ShieldCheck } from 'lucide-react';
 import { listSettings, setSetting } from '@/api/settings';
+import { Button } from '@/components/ui';
 import { useI18n } from '@/i18n/locale';
 import { cn } from '@/lib/cn';
 
@@ -161,12 +162,12 @@ export default function SettingsAgent() {
       <section className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
         <div className="mb-3 flex items-center gap-2">
           <Clock3 size={14} className="text-zinc-400" />
-          <h2 className="text-sm font-medium text-zinc-100">{tr('LLM 超时', 'LLM timeout')}</h2>
+          <h2 className="text-sm font-medium text-zinc-100">{tr('LLM 请求超时', 'LLM request timeout')}</h2>
         </div>
         <p className="mb-4 text-xs leading-relaxed text-zinc-500">
           {tr(
-            '设置助理单次 LLM 请求的最长等待时间，也用作巡检报告的总生成窗口。默认 120 秒；工作流和工具的专用超时不受影响。',
-            'Sets the longest wait for one assistant LLM request and the total inspection-report generation window. Defaults to 120 seconds; workflow and tool-specific timeouts are unchanged.',
+            '设置助理单次 LLM 请求的最长等待时间，也用作巡检报告的总生成窗口。默认 120 秒；工作流和工具的专用超时保持不变。',
+            'Sets the longest wait for one assistant LLM request and the total inspection-report generation window. Defaults to 120 seconds; workflow and tool-specific timeouts stay unchanged.',
           )}
         </p>
         {loading ? (
@@ -174,9 +175,19 @@ export default function SettingsAgent() {
             <Loader2 size={13} className="mr-2 animate-spin" /> {tr('加载中…', 'Loading…')}
           </div>
         ) : (
-          <div className="flex items-end gap-3">
-            <label htmlFor="agent-llm-timeout-seconds" className="block">
-              <span className="mb-1.5 block text-[11px] font-medium text-zinc-400">{tr('超时秒数', 'Timeout seconds')}</span>
+          <div className="flex items-center justify-between gap-4 rounded-lg border border-zinc-800 bg-zinc-950/40 px-4 py-3">
+            <div className="min-w-0">
+              <div className="text-[13px] font-medium text-zinc-200">
+                {tr('助理默认超时', 'Assistant default timeout')}
+              </div>
+              <div className="mt-0.5 text-[11px] text-zinc-500">
+                {tr('保存后仅影响新发起的 LLM 请求', 'Applies to newly started LLM requests after saving')}
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <label htmlFor="agent-llm-timeout-seconds" className="sr-only">
+                {tr('超时秒数', 'Timeout seconds')}
+              </label>
               <input
                 id="agent-llm-timeout-seconds"
                 type="number"
@@ -185,17 +196,19 @@ export default function SettingsAgent() {
                 step={1}
                 value={llmTimeoutSeconds}
                 onChange={(event) => setLLMTimeoutSeconds(event.target.value)}
-                className="h-10 w-36 rounded-md border border-zinc-700 bg-zinc-950 px-3 text-sm text-zinc-100 outline-none transition focus:border-indigo-500"
+                className="h-8 w-20 rounded-md border border-zinc-700 bg-zinc-950 px-2 text-right font-mono text-sm text-zinc-100 outline-none transition focus:border-accent"
               />
-            </label>
-            <button
-              type="button"
-              disabled={savingTimeout}
-              onClick={() => void onSaveTimeout()}
-              className="h-10 rounded-md bg-indigo-600 px-3 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:opacity-50"
-            >
-              {savingTimeout ? tr('保存中…', 'Saving…') : tr('保存', 'Save')}
-            </button>
+              <span className="text-xs text-zinc-500">{tr('秒', 'sec')}</span>
+              <Button
+                variant="primary"
+                disabled={savingTimeout}
+                onClick={() => void onSaveTimeout()}
+                className="h-8"
+              >
+                <Save size={13} />
+                {savingTimeout ? tr('保存中…', 'Saving…') : tr('保存', 'Save')}
+              </Button>
+            </div>
           </div>
         )}
         <p className="mt-3 text-[11px] text-zinc-600">
