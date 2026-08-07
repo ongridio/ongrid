@@ -175,19 +175,11 @@ export default function SettingsAgent() {
             <Loader2 size={13} className="mr-2 animate-spin" /> {tr('加载中…', 'Loading…')}
           </div>
         ) : (
-          <div className="flex items-center justify-between gap-4 rounded-lg border border-zinc-800 bg-zinc-950/40 px-4 py-3">
-            <div className="min-w-0">
-              <div className="text-[13px] font-medium text-zinc-200">
-                {tr('助理默认超时', 'Assistant default timeout')}
-              </div>
-              <div className="mt-0.5 text-[11px] text-zinc-500">
-                {tr('保存后仅影响新发起的 LLM 请求', 'Applies to newly started LLM requests after saving')}
-              </div>
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              <label htmlFor="agent-llm-timeout-seconds" className="sr-only">
-                {tr('超时秒数', 'Timeout seconds')}
-              </label>
+          <>
+            <label htmlFor="agent-llm-timeout-seconds" className="mb-1.5 block text-sm text-zinc-300">
+              {tr('超时秒数', 'Timeout seconds')}
+            </label>
+            <div className="flex items-center gap-2">
               <input
                 id="agent-llm-timeout-seconds"
                 type="number"
@@ -196,20 +188,24 @@ export default function SettingsAgent() {
                 step={1}
                 value={llmTimeoutSeconds}
                 onChange={(event) => setLLMTimeoutSeconds(event.target.value)}
-                className="h-8 w-20 rounded-md border border-zinc-700 bg-zinc-950 px-2 text-right font-mono text-sm text-zinc-100 outline-none transition focus:border-accent"
+                className="h-10 w-48 rounded-md border border-zinc-700 bg-zinc-950 px-3 font-mono text-sm text-zinc-100 outline-none transition focus:border-zinc-600"
               />
-              <span className="text-xs text-zinc-500">{tr('秒', 'sec')}</span>
+              <span className="text-sm text-zinc-500">{tr('秒', 'seconds')}</span>
+            </div>
+            <div className="mt-4 flex items-center gap-3">
               <Button
-                variant="primary"
+                variant="subtle"
                 disabled={savingTimeout}
                 onClick={() => void onSaveTimeout()}
-                className="h-8"
               >
-                <Save size={13} />
+                <Save size={14} />
                 {savingTimeout ? tr('保存中…', 'Saving…') : tr('保存', 'Save')}
               </Button>
+              <span className="text-xs text-zinc-500">
+                {tr('保存后仅影响新发起的 LLM 请求', 'Applies to newly started LLM requests after saving')}
+              </span>
             </div>
-          </div>
+          </>
         )}
         <p className="mt-3 text-[11px] text-zinc-600">
           {tr(
