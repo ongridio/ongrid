@@ -95,14 +95,12 @@ copy_opt() {
     fi
 }
 
-# --- VERSION file -----------------------------------------------------------
-if [ -f "${REPO_ROOT}/VERSION" ]; then
-    cp "${REPO_ROOT}/VERSION" "${STAGE_DIR}/VERSION"
-    log "  + VERSION"
-else
-    printf '%s\n' "${VERSION}" > "${STAGE_DIR}/VERSION"
-    warn "repo VERSION missing; synthesized from arg"
-fi
+# --- release version --------------------------------------------------------
+# The package argument is the release identity. Do not copy the repository
+# VERSION file here: release automation may provide VERSION on the command
+# line, and upgrade.sh reads the staged .env.example to choose the image tag.
+printf '%s\n' "${VERSION}" > "${STAGE_DIR}/VERSION"
+log "  + VERSION (${VERSION})"
 
 # --- top-level install-time assets (owned by parallel agent) ----------------
 copy_opt "${REPO_ROOT}/deploy/install/README.md"           "${STAGE_DIR}/README.md"
@@ -113,6 +111,10 @@ copy_opt "${REPO_ROOT}/deploy/install/public-url.sh"       "${STAGE_DIR}/public-
 copy_opt "${REPO_ROOT}/deploy/install/data-permissions.sh"  "${STAGE_DIR}/data-permissions.sh"  644
 copy_opt "${REPO_ROOT}/deploy/install/docker-compose.yml"  "${STAGE_DIR}/docker-compose.yml"
 copy_opt "${REPO_ROOT}/deploy/install/.env.example"        "${STAGE_DIR}/.env.example"
+if [[ -f "${STAGE_DIR}/.env.example" ]]; then
+    sed -i.bak -E "s|^ONGRID_VERSION=.*|ONGRID_VERSION=${VERSION}|" "${STAGE_DIR}/.env.example"
+    rm -f "${STAGE_DIR}/.env.example.bak"
+fi
 copy_opt "${REPO_ROOT}/deploy/install/frontier.yaml"       "${STAGE_DIR}/frontier.yaml"
 
 # --- nginx config + certs scaffold (ADR-008) --------------------------------

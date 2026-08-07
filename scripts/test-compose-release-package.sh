@@ -86,6 +86,8 @@ for arch in amd64 arm64; do
   extract_dir="$tmp_dir/extracted-$arch"
   mkdir -p "$extract_dir"
   tar -xf "$archive" -C "$extract_dir"
+  grep -Fqx 'vtest' "$extract_dir/$package_root/VERSION"
+  grep -Fqx 'ONGRID_VERSION=vtest' "$extract_dir/$package_root/.env.example"
   grep -Fxq 'ONGRID_EDGE_DEPS_TAG=edge-deps-test' \
     "$extract_dir/$package_root/edge/edge-artifacts.env"
   grep -Fxq 'ONGRID_EDGE_TARGETS=linux-amd64 linux-arm64' \
