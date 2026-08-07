@@ -43,13 +43,11 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"os/user"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -686,21 +684,8 @@ func runStatOnePath(_ context.Context, sb *SandboxConfig, path string) tunnel.St
 		typ = "dir"
 	}
 
-	// Owner/group via syscall.Stat_t — works on Linux + Darwin;
-	// `sys, ok := li.Sys().(*syscall.Stat_t)` is the canonical idiom.
-	var owner, group string
-	if st, ok := li.Sys().(*syscall.Stat_t); ok {
-		if u, err := user.LookupId(strconv.FormatUint(uint64(st.Uid), 10)); err == nil {
-			owner = u.Username
-		} else {
-			owner = strconv.FormatUint(uint64(st.Uid), 10)
-		}
-		if g, err := user.LookupGroupId(strconv.FormatUint(uint64(st.Gid), 10)); err == nil {
-			group = g.Name
-		} else {
-			group = strconv.FormatUint(uint64(st.Gid), 10)
-		}
-	}
+	// Owner/group — resolved per-GOOS in owner_{unix,windows}.go.
+	owner, group := fileOwner(li)
 
 	// Atime is OS-specific in syscall.Stat_t. fileTimes() resolves it
 	// per-GOOS so the handler stays portable.
