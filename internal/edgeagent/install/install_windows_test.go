@@ -8,8 +8,14 @@ import (
 	"testing"
 )
 
+// 这个测试文件验证 DPAPI round-trip 逻辑（加密 → 写文件 → 读回 → 解密 → 比较）。
+// ACL 行为（icacls apply/verify）在 acl_windows_test.go 单独验证，需要 Administrator
+// 身份（生产 supervisor 以 SYSTEM 跑，测试环境普通用户跑不动）。
+// 所有测试用 withNoopACL 跳过 ACL apply/verify，专注 round-trip 正确性。
+
 // TestWindowsSecretStore_Install_CreatesValidFile 验证 Install 创建合法 DPAPI 加密文件 + round-trip。
 func TestWindowsSecretStore_Install_CreatesValidFile(t *testing.T) {
+	withNoopACL(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "secrets.enc")
 	token := []byte("ed_bk_test_token_abc123")
@@ -31,6 +37,7 @@ func TestWindowsSecretStore_Install_CreatesValidFile(t *testing.T) {
 
 // TestWindowsSecretStore_Install_OverwritesExisting 验证写入覆盖已有文件。
 func TestWindowsSecretStore_Install_OverwritesExisting(t *testing.T) {
+	withNoopACL(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "secrets.enc")
 	ss := NewSecretStore(path)
@@ -51,6 +58,7 @@ func TestWindowsSecretStore_Install_OverwritesExisting(t *testing.T) {
 
 // TestWindowsSecretStore_Remove_DeletesFile 验证 Remove 删除文件。
 func TestWindowsSecretStore_Remove_DeletesFile(t *testing.T) {
+	withNoopACL(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "secrets.enc")
 	ss := NewSecretStore(path)
@@ -79,6 +87,7 @@ func TestWindowsSecretStore_Remove_NonExistentNoError(t *testing.T) {
 
 // TestWindowsSecretStore_Install_WrongTokenRoundTrip 验证不同 token 产生不同密文。
 func TestWindowsSecretStore_Install_WrongTokenRoundTrip(t *testing.T) {
+	withNoopACL(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "secrets.enc")
 	ss := NewSecretStore(path)
@@ -99,6 +108,7 @@ func TestWindowsSecretStore_Install_WrongTokenRoundTrip(t *testing.T) {
 
 // TestWindowsSecretStore_Rotate_ReplacesToken 验证 Rotate 原子替换文件内容。
 func TestWindowsSecretStore_Rotate_ReplacesToken(t *testing.T) {
+	withNoopACL(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "secrets.enc")
 	token1 := []byte("original-cred-value")
@@ -140,6 +150,7 @@ func TestWindowsSecretStore_Rotate_ReplacesToken(t *testing.T) {
 // TestWindowsSecretStore_Rotate_OnNonExistentFile 验证 Rotate 对不存在的文件也能工作
 // （os.Rename 会创建目标文件）。
 func TestWindowsSecretStore_Rotate_OnNonExistentFile(t *testing.T) {
+	withNoopACL(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "secrets.enc")
 

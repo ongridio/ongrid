@@ -16,19 +16,29 @@ type WindowsSecretStore struct {
 	path string
 }
 
+// 包级 var 间接调用 ACL 函数，便于测试 mock（生产环境 supervisor 以 SYSTEM 身份
+// 运行，普通用户测试无法通过 ApplySecretACL 后的 WriteFile；用 var 间接让测试
+// 替换为 noop，ACL 行为在 acl_windows_test.go 单独验证）。
+var (
+	applySecretACLFn  = ApplySecretACL
+	verifySecretACLFn = VerifySecretACL
+)
+
 // NewSecretStore 创建 Windows DPAPI SecretStore。
 // secretsPath 是 secrets.enc 的完整路径。
 func NewSecretStore(secretsPath string) SecretStore {
 	return &WindowsSecretStore{path: secretsPath}
 }
 
-// Install 加密 token 并写入 secrets.enc，含 round-trip 验证。
+// Install 加密 token 并写入 secrets.enc，含 round-trip 验证 + ACL 应用。
 //
 // 流程：
 //  1. dpapi.Protect(token) → 加密
 //  2. os.WriteFile(path, encrypted, 0600)
 //  3. 读回 + dpapi.Unprotect → 验证 round-trip
-//  4. 验证失败时删除文件（保持调用前状态）
+//  4. ApplySecretACL → 限制 SYSTEM + Administrators 可读
+//  5. VerifySecretACL → 读 ACL 回来验证
+//  6. 任何步骤失败时删除文件（保持调用前状态）
 //
 // token 的 []byte 副本清零由调用方负责（defer zeroBytes）。
 func (s *WindowsSecretStore) Install(token []byte) error {
@@ -54,6 +64,15 @@ func (s *WindowsSecretStore) Install(token []byte) error {
 		_ = os.Remove(s.path)
 		return fmt.Errorf("secrets.enc round-trip mismatch")
 	}
+	// ACL 应用 + 验证（DPAPI 不替代文件 ACL）
+	if err := applySecretACLFn(s.path); err != nil {
+		_ = os.Remove(s.path)
+		return fmt.Errorf("apply ACL: %w", err)
+	}
+	if err := verifySecretACLFn(s.path); err != nil {
+		_ = os.Remove(s.path)
+		return fmt.Errorf("verify ACL: %w", err)
+	}
 	return nil
 }
 
@@ -71,8 +90,10 @@ func (s *WindowsSecretStore) Remove() error {
 //  1. dpapi.Protect(newToken) → 加密
 //  2. 写入 tmp 文件（path + ".tmp"）
 //  3. round-trip 验证 tmp 文件
-//  4. os.Rename(tmp, path) — Windows 上 ReplaceFile/os.Rename 是原子操作
-//  5. 验证失败或任何错误 → 删除 tmp，旧文件不受影响
+//  4. ApplySecretACL + VerifySecretACL on tmp（先限制 tmp 权限）
+//  5. os.Rename(tmp, path) — Windows 上 ReplaceFile/os.Rename 是原子操作
+//       rename 时 ACL 随文件迁移（不继承目标目录）
+//  6. 验证失败或任何错误 → 删除 tmp，旧文件不受影响
 //
 // 轮转过程中进程崩溃：tmp 文件残留，secrets.enc 保持旧内容不受影响。
 func (s *WindowsSecretStore) Rotate(token []byte) error {
@@ -99,10 +120,19 @@ func (s *WindowsSecretStore) Rotate(token []byte) error {
 		_ = os.Remove(tmpPath) // best-effort: 清理 tmp，错误由 return 暴露
 		return fmt.Errorf("tmp secrets round-trip mismatch")
 	}
+	// 先对 tmp 应用 ACL（rename 时 ACL 随文件迁移）
+	if err := applySecretACLFn(tmpPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("apply ACL on tmp: %w", err)
+	}
 	// 原子替换：os.Rename 在 Windows 上等价于 MoveFileEx(MOVEFILE_REPLACE_EXISTING)
 	if err := os.Rename(tmpPath, s.path); err != nil {
 		_ = os.Remove(tmpPath) // best-effort: 清理 tmp，错误由 return 暴露
 		return fmt.Errorf("rename tmp to secrets.enc: %w", err)
+	}
+	// rename 后再 verify（防 GPO / AV 干扰）
+	if err := verifySecretACLFn(s.path); err != nil {
+		return fmt.Errorf("verify ACL after rotate: %w", err)
 	}
 	return nil
 }
