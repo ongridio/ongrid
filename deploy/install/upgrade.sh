@@ -587,6 +587,20 @@ if [[ -n "$EDGE_STAGE_DIR" ]]; then
     EDGE_STAGE_DIR=""
 fi
 
+# Same rationale as install.sh: these config files are bind-mounted into
+# containers running as non-root (frontier, loki, tempo, prometheus, nginx).
+# cp preserves the source mode, so under a 077 umask the refreshed copies land
+# unreadable and the stack fails to start after upgrade. Normalize to 0644;
+# the .env with credentials stays 0600.
+chmod 644 \
+    "$INSTALL_DIR/docker-compose.yml" \
+    "$INSTALL_DIR"/prometheus*.yml \
+    "$INSTALL_DIR"/loki-config.yaml \
+    "$INSTALL_DIR"/tempo-config.yaml \
+    "$INSTALL_DIR"/frontier.yaml \
+    "$INSTALL_DIR"/nginx.conf \
+    2>/dev/null || true
+
 # Bump ONGRID_VERSION in .env only.
 sed -i.bak -E "s|^ONGRID_VERSION=.*|ONGRID_VERSION=${NEW_VERSION}|" "$ENV_FILE"
 rm -f "${ENV_FILE}.bak"
