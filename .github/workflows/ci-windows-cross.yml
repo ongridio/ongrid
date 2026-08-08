@@ -1,0 +1,68 @@
+name: CI Windows Cross-Build
+
+# Windows 交叉编译 + vet gate。覆盖 edgeagent Windows 子包
+# （dpapi / edgedirs / install / config），配合 ci.yml 形成双平台覆盖。
+#
+# Linux runner 上通过 GOOS=windows 交叉编译，不启动 Windows VM。
+# 涉及 Windows SCM / DPAPI 实际行为的集成测试需要 windows-latest runner，
+# 将在 supervisor PR 落地后补充。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'internal/edgeagent/**'
+      - 'cmd/ongrid-edge*/**'
+      - '.github/workflows/ci-windows-cross.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-win-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-cross-build:
+    name: GOOS=windows build + vet
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: go build (GOOS=windows)
+        env:
+          GOOS: windows
+          GOARCH: amd64
+        # 只编译 PR1 scope 的 4 个 Windows 子包
+        run: go build ./internal/edgeagent/dpapi/... ./internal/edgeagent/edgedirs/... ./internal/edgeagent/install/... ./internal/edgeagent/config/...
+
+      - name: go vet (GOOS=windows)
+        env:
+          GOOS: windows
+          GOARCH: amd64
+        run: |
+          # vet 只跑 Windows 子包（避免 Linux-only 文件的误报）
+          go vet ./internal/edgeagent/dpapi/... ./internal/edgeagent/edgedirs/... ./internal/edgeagent/install/... ./internal/edgeagent/config/...
+
+      - name: go test (GOOS=windows, no-cgo)
+        env:
+          GOOS: windows
+          GOARCH: amd64
+        # 注：Linux runner 上可以 GOOS=windows go test 编译 Windows test binary，
+        # 但 wine 层不稳定。这里只编译测试 binary（go test -c -o /dev/null），
+        # 不实际执行；实际执行留给后续 windows-latest runner job（PR2 落地后加）。
+        run: |
+          for pkg in ./internal/edgeagent/dpapi/... ./internal/edgeagent/edgedirs/... ./internal/edgeagent/install/... ./internal/edgeagent/config/...; do
+            echo "compile test binary: $pkg"
+            go test -c -o /dev/null "$pkg"
+          done
