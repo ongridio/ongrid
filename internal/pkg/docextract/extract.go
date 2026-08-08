@@ -37,9 +37,9 @@ func Extract(filename string, data []byte) (string, error) {
 		}
 		return string(data), nil
 	case ".pdf":
-		return extractPDF(data)
+		return pdf2md(data)
 	case ".docx":
-		return extractDOCX(data)
+		return docx2md(data)
 	default:
 		return "", fmt.Errorf("unsupported file type %q (allowed: .md, .txt, .pdf, .docx)", filepath.Ext(filename))
 	}

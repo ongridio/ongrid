@@ -322,7 +322,8 @@ func (h *Handler) uploadDoc(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, errors.Join(errs.ErrInvalid, fmt.Errorf("file exceeds %d MiB", maxUploadBytes>>20)))
 		return
 	}
-	// Extract plain text per file type (md/txt passthrough; pdf/docx parsed).
+	// Extract Markdown/text per file type. PDF conversion retains headings
+	// inferred from its font sizes inside docextract.
 	text, err := docextract.Extract(name, body)
 	if err != nil {
 		writeErr(w, errors.Join(errs.ErrInvalid, err))
