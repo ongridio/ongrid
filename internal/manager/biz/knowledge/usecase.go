@@ -55,6 +55,15 @@ type RepoStore interface {
 	UpdateSSHIdentity(ctx context.Context, id uint64, name, hostsJSON, knownHosts string) error
 	TouchSSHIdentityUsage(ctx context.Context, id uint64) error
 	DeleteSSHIdentity(ctx context.Context, id uint64) error
+
+	// HTTPS credentials — per-host PAT/username pairs for private HTTPS
+	// git repos. Mirrors the SSH identity slot in the same layer.
+	ListHTTPSCredentials(ctx context.Context) ([]*model.HTTPSCredential, error)
+	GetHTTPSCredential(ctx context.Context, id uint64) (*model.HTTPSCredential, error)
+	CreateHTTPSCredential(ctx context.Context, c *model.HTTPSCredential) error
+	UpdateHTTPSCredential(ctx context.Context, id uint64, name, hostsJSON, username string, token *string) error
+	TouchHTTPSCredentialUsage(ctx context.Context, id uint64) error
+	DeleteHTTPSCredential(ctx context.Context, id uint64) error
 }
 
 // QdrantClient is the narrow qdrant surface. *qdrantx.Client satisfies
@@ -980,7 +989,13 @@ func (u *Usecase) Sync(ctx context.Context, id uint64) (*model.Repository, error
 				// KnowledgeRepos.tsx) so the message follows the UI locale.
 				// Storing a Chinese annotation here made English-mode show
 				// Chinese (the stored string is fixed at sync time).
-				return u.recordSyncFailure(ctx, repo, fmt.Errorf("git clone failed: %v\n%s", err, strings.TrimSpace(out)))
+				//
+				// httpsNoCredHint appends a locale-neutral English suffix
+				// carrying host=<host> when this is a private HTTPS clone with
+				// no credential configured (AUTH-04). It stays English so the
+				// SPA can still localize; last_sync_error now names the host
+				// the operator must configure.
+				return u.recordSyncFailure(ctx, repo, fmt.Errorf("git clone failed: %v\n%s%s", err, strings.TrimSpace(out), httpsNoCredHint(repo.URL, gitEnv, out)))
 			}
 		}
 	}
@@ -2046,19 +2061,37 @@ func repoChunkPoint(repoID uint64, url string, chunkIndex, chunkTotal int, vec [
 //     a 0600 temp file and produce a GIT_SSH_COMMAND env line that
 //     pins -i + IdentitiesOnly so the key picked is the only one
 //     tried (avoids accidental fallback to the container's ~/.ssh).
-//   - anything else (https / http) → no auth env; git tries anonymous.
-//     Right for public repos like ongridio/vault. Private HTTPS repos
-//     will fail until P3 wires the credential.helper-based
-//     per-host token table.
+//   - anything else (https / http) → look up an HTTPS credential
+//     matching the URL host; on hit, write a temporary GIT_ASKPASS
+//     script (owner-only 0o700) that feeds username/token to git.
+//     No credential match → anonymous (public repos still work).
 //
-// The cleanup func deletes any temp files (keyfile + known_hosts for
-// SSH) and is always safe to call, even on the no-auth path.
+// The cleanup func deletes any temp files and is always safe to call,
+// even on the no-auth path.
 func (u *Usecase) buildGitAuthEnv(ctx context.Context, repoURL string) ([]string, func(), error) {
 	noop := func() {}
 
 	if !isSSHURL(repoURL) {
-		// HTTPS / http → anonymous. P3 will introduce credential.helper.
-		return nil, noop, nil
+		// HTTPS / http → look up per-host HTTPS credential.
+		host := extractHTTPSHost(repoURL)
+		if host == "" {
+			return nil, noop, nil
+		}
+		cred, err := u.pickHTTPSCredentialForHost(ctx, host)
+		if err != nil {
+			return nil, noop, fmt.Errorf("https credential lookup: %w", err)
+		}
+		if cred == nil {
+			// No credential matched → anonymous; public repos still work.
+			return nil, noop, nil
+		}
+		env, cleanup, err := buildHTTPSEnv(cred)
+		if err != nil {
+			return nil, noop, err
+		}
+		// Best-effort usage timestamp; never fails the clone.
+		_ = u.repo.TouchHTTPSCredentialUsage(ctx, cred.ID)
+		return env, cleanup, nil
 	}
 
 	host := extractSSHHost(repoURL)
@@ -2079,6 +2112,61 @@ func (u *Usecase) buildGitAuthEnv(ctx context.Context, repoURL string) ([]string
 	}
 	// Best-effort usage timestamp; never fails the clone.
 	_ = u.repo.TouchSSHIdentityUsage(ctx, identity.ID)
+	return env, cleanup, nil
+}
+
+// buildHTTPSEnv writes a temporary GIT_ASKPASS shell script that feeds
+// username/token to git for HTTPS private-repo authentication. The script
+// reads the token from the $GIT_PASSWORD environment variable at runtime —
+// the token is never embedded in the script body (T-04-01: prevents leakage
+// via script read-access or ps/cmdline inspection).
+//
+// Permission decision (LOCKED): the script is set to 0o700 (owner rwx,
+// group/other=0). git executes GIT_ASKPASS directly via execve — the binary
+// must have the owner execute bit. A pure 0o600 (no execute bit) would cause
+// git to report "permission denied" and fail authentication. 0o700 retains
+// the "no other user can read or write the token channel" isolation intent
+// while satisfying git's execve requirement.
+//
+// Returns env (GIT_ASKPASS + GIT_USERNAME + GIT_PASSWORD) + cleanup that
+// removes the temp script.
+func buildHTTPSEnv(cred *model.HTTPSCredential) ([]string, func(), error) {
+	noop := func() {}
+
+	// The askpass script reads the token from $GIT_PASSWORD at runtime.
+	// It does NOT contain the token value — see T-04-01.
+	const scriptBody = "#!/bin/sh\ncase \"$1\" in\n  *Username*) printf '%s' \"$GIT_USERNAME\" ;;\n  *) printf '%s' \"$GIT_PASSWORD\" ;;\nesac\n"
+
+	f, err := os.CreateTemp("", "ongrid-askpass-*.sh")
+	if err != nil {
+		return nil, noop, fmt.Errorf("write askpass tempfile: %w", err)
+	}
+	if _, err := f.WriteString(scriptBody); err != nil {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+		return nil, noop, fmt.Errorf("write askpass script: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(f.Name())
+		return nil, noop, fmt.Errorf("close askpass script: %w", err)
+	}
+	// 0o700: owner rwx, group/other=0. git execve-s GIT_ASKPASS directly;
+	// execute bit is required. See doc comment above for full rationale.
+	if err := os.Chmod(f.Name(), 0o700); err != nil {
+		_ = os.Remove(f.Name())
+		return nil, noop, fmt.Errorf("chmod askpass script: %w", err)
+	}
+
+	cleanup := func() { _ = os.Remove(f.Name()) }
+
+	// Token goes into GIT_PASSWORD env var only — never into argv or the
+	// script body (T-04-01). GIT_USERNAME is also passed via env so the
+	// askpass script can echo it without hardcoding.
+	env := []string{
+		"GIT_ASKPASS=" + f.Name(),
+		"GIT_USERNAME=" + cred.Username,
+		"GIT_PASSWORD=" + cred.Token,
+	}
 	return env, cleanup, nil
 }
 
@@ -2188,9 +2276,12 @@ func annotateGitError(gitOutput, repoURL string, hasAuth bool) string {
 	// HTTPS / generic auth signatures.
 	case strings.Contains(low, "could not read username") ||
 		(strings.Contains(low, "authentication failed") && !hasAuth):
-		return fmt.Sprintf("私库需要凭证，但当前未配置 host=%s 的 token。请到「代码仓库 → 凭证」配置。原始输出：%s", host, gitOutput)
+		// No credential configured for this host — direct the operator to
+		// set up an HTTPS credential (AUTH-04).
+		return fmt.Sprintf("私库需要凭证，但当前未为 host=%s 配置 HTTPS 凭证。请到「代码仓库 → HTTPS 凭证」添加一条 hosts 包含 %s 的凭证。原始输出：%s", host, host, gitOutput)
 	case strings.Contains(low, "authentication failed") && hasAuth:
-		return fmt.Sprintf("host=%s 拒绝了已配置的凭证。请检查：(1) token 未过期 (2) scope 充足 (3) 对该仓库有访问权。原始输出：%s", host, gitOutput)
+		// Credential was injected but rejected — token may be expired / revoked.
+		return fmt.Sprintf("host=%s 拒绝了已配置的 HTTPS 凭证。请检查：(1) token 未过期 (2) scope 充足（需 read_repository 权限）(3) 对该仓库有访问权。原始输出：%s", host, gitOutput)
 	case strings.Contains(low, "repository not found"):
 		return fmt.Sprintf("找不到该仓库。检查 URL 拼写（大小写敏感）；若是私库，确认凭证对该 host=%s 有访问权。原始输出：%s", host, gitOutput)
 	case strings.Contains(low, "rate limit") || strings.Contains(low, "api rate limit exceeded"):
@@ -2208,6 +2299,35 @@ func annotateGitError(gitOutput, repoURL string, hasAuth bool) string {
 	default:
 		return gitOutput
 	}
+}
+
+// httpsNoCredHint returns a locale-neutral English suffix to append to the
+// raw git error stored in last_sync_error when a private HTTPS clone failed
+// with no credential configured for its host. Kept English (NOT localized)
+// so the SPA's gitErrorHint can still classify + localize per UI locale,
+// while last_sync_error carries the specific host the operator must
+// configure (AUTH-04 / Phase 1 SC5). Returns "" when this is not a
+// missing-HTTPS-credential case: an SSH URL, a run where a credential was
+// already injected (GIT_ASKPASS present), or a non-auth failure.
+func httpsNoCredHint(repoURL string, gitEnv []string, gitOutput string) string {
+	if isSSHURL(repoURL) {
+		return ""
+	}
+	for _, e := range gitEnv {
+		if strings.HasPrefix(e, "GIT_ASKPASS=") {
+			return "" // a credential was injected — this is not a missing-cred case
+		}
+	}
+	low := strings.ToLower(gitOutput)
+	if !strings.Contains(low, "could not read username") &&
+		!strings.Contains(low, "authentication failed") {
+		return ""
+	}
+	host := extractHTTPSHost(repoURL)
+	if host == "" {
+		host = extractDisplayHost(repoURL)
+	}
+	return fmt.Sprintf("\nno HTTPS credential configured for host=%s; add one under Knowledge > HTTPS credentials", host)
 }
 
 // extractDisplayHost pulls the host name out of a git URL for display

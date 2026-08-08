@@ -69,6 +69,12 @@ type Service interface {
 	GenerateSSHIdentity(ctx context.Context, in biz.GenerateSSHIdentityInput) (*model.SSHIdentity, error)
 	UpdateSSHIdentity(ctx context.Context, id uint64, in biz.UpdateSSHIdentityInput) (*model.SSHIdentity, error)
 	DeleteSSHIdentity(ctx context.Context, id uint64) error
+
+	// HTTPS credentials.
+	ListHTTPSCredentials(ctx context.Context) ([]*model.HTTPSCredential, error)
+	CreateHTTPSCredential(ctx context.Context, in biz.CreateHTTPSCredentialInput) (*model.HTTPSCredential, error)
+	UpdateHTTPSCredential(ctx context.Context, id uint64, in biz.UpdateHTTPSCredentialInput) (*model.HTTPSCredential, error)
+	DeleteHTTPSCredential(ctx context.Context, id uint64) error
 }
 
 // AuthzMW is the narrow casbin middleware contract. Optional — when
@@ -134,6 +140,12 @@ func (h *Handler) Register(r chi.Router) {
 	r.With(h.writeMW("knowledge:repo")).Post("/v1/knowledge/ssh-identities/generate", h.generateSSHIdentity)
 	r.With(h.writeMW("knowledge:repo")).Patch("/v1/knowledge/ssh-identities/{id}", h.updateSSHIdentity)
 	r.With(h.deleteMW("knowledge:repo")).Delete("/v1/knowledge/ssh-identities/{id}", h.deleteSSHIdentity)
+	// HTTPS credentials — PAT-based auth for private HTTPS repos.
+	// No /generate endpoint: PATs are generated on the provider side (GitLab/GitHub).
+	r.Get("/v1/knowledge/https-credentials", h.listHTTPSCredentials)
+	r.With(h.writeMW("knowledge:repo")).Post("/v1/knowledge/https-credentials", h.createHTTPSCredential)
+	r.With(h.writeMW("knowledge:repo")).Patch("/v1/knowledge/https-credentials/{id}", h.updateHTTPSCredential)
+	r.With(h.deleteMW("knowledge:repo")).Delete("/v1/knowledge/https-credentials/{id}", h.deleteHTTPSCredential)
 }
 
 // --- DTOs ---

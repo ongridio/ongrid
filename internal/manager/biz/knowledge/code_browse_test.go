@@ -40,6 +40,20 @@ func (f *fakeRepoStore) UpdateSSHIdentity(context.Context, uint64, string, strin
 }
 func (f *fakeRepoStore) TouchSSHIdentityUsage(context.Context, uint64) error { return nil }
 func (f *fakeRepoStore) DeleteSSHIdentity(context.Context, uint64) error     { return nil }
+func (f *fakeRepoStore) ListHTTPSCredentials(context.Context) ([]*model.HTTPSCredential, error) {
+	return nil, nil
+}
+func (f *fakeRepoStore) GetHTTPSCredential(context.Context, uint64) (*model.HTTPSCredential, error) {
+	return nil, errs.ErrNotFound
+}
+func (f *fakeRepoStore) CreateHTTPSCredential(context.Context, *model.HTTPSCredential) error {
+	return nil
+}
+func (f *fakeRepoStore) UpdateHTTPSCredential(context.Context, uint64, string, string, string, *string) error {
+	return nil
+}
+func (f *fakeRepoStore) TouchHTTPSCredentialUsage(context.Context, uint64) error { return nil }
+func (f *fakeRepoStore) DeleteHTTPSCredential(context.Context, uint64) error     { return nil }
 
 // newCodeBrowseUC builds a Usecase whose repo #1 clone is a real git repo at
 // cloneDir/1 seeded with sample files. Returns the uc + repo URL.
