@@ -86,7 +86,8 @@ func genSystemPrompt(tools []ToolMeta) string {
 {"name":"<简短工作流名>","description":"<一句话说明>","graph":{"nodes":[...],"edges":[...]}}
 
 ## 图规则
-- nodes: [{"id":"<短id>","type":"<节点类型>","name":"<简短中文名>","config":{...}}]，edges: [{"id":"<短id>","source":"<id>","target":"<id>","sourcePort":"<可选>"}]
+- nodes: [{"id":"<短id>","type":"<节点类型>","name":"<简短中文名>","config":{...}}]，edges: [{"id":"<短id>","source":"<id>","target":"<id>","sourcePort":"<仅 condition 节点使用>"}]
+- 只有 condition 节点可以写 "sourcePort"（值为 "true" 或 "false"）；其他节点的边必须省略 sourcePort，程序会默认连到 "next" 端口。写错端口（例如给普通节点写 "false"）会导致整张图校验失败。
 - 每个节点都要给一个简短、能一眼看懂的 name（如「拉取设备摘要」「分析风险」「生成HTML」「托管网页」），它会显示在画布和运行记录里——不要省略，也不要只用单字母 id 当名字。
 - 必须有且仅有一个触发器节点做起点（默认 trigger.manual）。
 - 节点间用边连，下游用 {{nodes.<上游id>.output.<字段>}} 引用上游输出（写在 config 的字符串值里）。
