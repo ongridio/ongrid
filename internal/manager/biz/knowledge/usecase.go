@@ -29,11 +29,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
-	markdownsplitter "github.com/cloudwego/eino-ext/components/document/transformer/splitter/markdown"
-	"github.com/cloudwego/eino-ext/components/document/transformer/splitter/recursive"
-	"github.com/cloudwego/eino/schema"
 	model "github.com/ongridio/ongrid/internal/manager/model/knowledge"
 	"github.com/ongridio/ongrid/internal/pkg/embedding"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
@@ -174,7 +170,7 @@ func New(ctx context.Context, repo RepoStore, vec QdrantClient, embed embedding.
 
 // CreateManualDocInput is the form-shaped input for /knowledge POST.
 type CreateManualDocInput struct {
-	Title string
+	Title   string
 	// TitleEN is an optional English label shown when the operator's
 	// locale is en-US. Empty = UI falls back to Title.
 	TitleEN string
@@ -277,25 +273,6 @@ func (u *Usecase) UploadDoc(ctx context.Context, in UploadDocInput) (*model.Doc,
 // docs, and a vault re-sync never touches these (its delete is scoped to
 // source_type=vault). Returns the logical doc (head chunk id).
 func (u *Usecase) ingestUpload(ctx context.Context, d model.Doc) (*model.Doc, error) {
-	parts := make([]string, 0)
-
-	ext := strings.ToLower(filepath.Ext(d.URL))
-	switch ext {
-	case ".md", ".markdown", ".docx", ".pdf":
-		chunks, err := splitMarkdown(ctx, d.Content)
-		if err != nil {
-			return nil, fmt.Errorf("knowledge: split markdown: %w", err)
-		}
-		parts = chunks
-	default:
-		parts = splitForChunks(d.Content)
-	}
-	if len(parts) == 0 {
-		return nil, fmt.Errorf("%w: empty file", errs.ErrInvalid)
-	}
-
-	// Split before deleting the previous version: a malformed replacement must
-	// not erase the already-indexed upload.
 	if err := u.vec.DeleteByFilter(ctx, CollectionName, map[string]any{
 		"source_type": model.SourceUpload,
 		"url":         d.URL,
@@ -303,6 +280,7 @@ func (u *Usecase) ingestUpload(ctx context.Context, d model.Doc) (*model.Doc, er
 		return nil, fmt.Errorf("knowledge: clear prior upload: %w", err)
 	}
 
+	parts := splitForChunks(d.Content)
 	const batch = 32
 	for i := 0; i < len(parts); i += batch {
 		end := i + batch
@@ -1619,8 +1597,8 @@ func isTransientGitErr(combinedOutput string) bool {
 		"i/o timeout",
 		"operation timed out",
 		"broken pipe",
-		"timeout, server", // ssh ServerAlive teardown
-		"client_loop",     // ssh "client_loop: send disconnect: ..."
+		"timeout, server",     // ssh ServerAlive teardown
+		"client_loop",         // ssh "client_loop: send disconnect: ..."
 	}
 	for _, p := range patterns {
 		if strings.Contains(s, p) {
@@ -1641,9 +1619,9 @@ func isTransientGitErr(combinedOutput string) bool {
 // future "code repo" mode lands (HLD TBD), it'll widen the allow-list
 // behind an explicit kind=code flag.
 var indexableExts = map[string]bool{
-	".md":  true,
-	".txt": true,
-	".rst": true,
+	".md":   true,
+	".txt":  true,
+	".rst":  true,
 }
 
 // skipDirNames are directories that scanRepoFiles drops without
@@ -1696,10 +1674,6 @@ const (
 	// chunk boundaries so a sentence isn't bisected at the cut.
 	chunkChars   = 2500
 	chunkOverlap = 250
-	// shortMarkdownSectionChars is the largest heading section worth
-	// attaching to an adjacent section. Standalone title-sized chunks add
-	// little retrieval context and unnecessarily consume an embedding.
-	shortMarkdownSectionChars = 500
 	// maxChunksPerFile prevents one pathologically large file from
 	// monopolising the embed budget. With chunkChars=2500 and overlap=250,
 	// stride is 2250 chars/chunk → 256 chunks ≈ 560 KB of content; the
@@ -2007,134 +1981,6 @@ func splitForChunks(content string) []string {
 		}
 	}
 	return chunks
-}
-
-type markdownChunk struct {
-	content          string
-	hasHeading       bool
-	isHeadingSection bool
-}
-
-func splitMarkdown(ctx context.Context, content string) ([]string, error) {
-	headerSplitter, err := markdownsplitter.NewHeaderSplitter(ctx, &markdownsplitter.HeaderConfig{
-		Headers: map[string]string{
-			"#": "h1", "##": "h2", "###": "h3",
-			"####": "h4", "#####": "h5", "######": "h6",
-		},
-		TrimHeaders: true,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("knowledge: create markdown header splitter: %w", err)
-	}
-	sections, err := headerSplitter.Transform(ctx, []*schema.Document{{Content: content}})
-	if err != nil {
-		return nil, fmt.Errorf("knowledge: split markdown headers: %w", err)
-	}
-
-	chunks := make([]markdownChunk, 0, len(sections))
-	for _, section := range sections {
-		if len(chunks) >= maxChunksPerFile {
-			break
-		}
-		prefix := markdownHeadingPrefix(section.MetaData)
-		body := strings.TrimSpace(section.Content)
-		if prefix == "" && body == "" {
-			continue
-		}
-		if body == "" {
-			chunks = append(chunks, markdownChunk{content: prefix, hasHeading: prefix != "", isHeadingSection: prefix != ""})
-			continue
-		}
-
-		bodyLimit := chunkChars
-		if prefix != "" {
-			bodyLimit -= utf8.RuneCountInString(prefix) + 2
-			if bodyLimit < 1 {
-				bodyLimit = 1
-			}
-		}
-		overlap := chunkOverlap
-		if overlap >= bodyLimit {
-			overlap = bodyLimit / 10
-		}
-		bodySplitter, err := recursive.NewSplitter(ctx, &recursive.Config{
-			ChunkSize:   bodyLimit,
-			OverlapSize: overlap,
-			Separators:  []string{"\n\n", "\n", "。", ".", "?", "!", " ", ""},
-			LenFunc:     utf8.RuneCountInString,
-			KeepType:    recursive.KeepTypeEnd,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("knowledge: create markdown body splitter: %w", err)
-		}
-		parts, err := bodySplitter.Transform(ctx, []*schema.Document{{Content: body}})
-		if err != nil {
-			return nil, fmt.Errorf("knowledge: split markdown body: %w", err)
-		}
-		for _, part := range parts {
-			if len(chunks) >= maxChunksPerFile {
-				break
-			}
-			partContent := strings.TrimSpace(part.Content)
-			if partContent == "" {
-				continue
-			}
-			if prefix != "" {
-				partContent = prefix + "\n\n" + partContent
-			}
-			chunks = append(chunks, markdownChunk{
-				content:          partContent,
-				hasHeading:       prefix != "",
-				isHeadingSection: prefix != "" && len(parts) == 1,
-			})
-		}
-	}
-	chunks = mergeShortMarkdownChunks(chunks)
-	result := make([]string, len(chunks))
-	for i, chunk := range chunks {
-		result[i] = chunk.content
-	}
-	return result, nil
-}
-
-// mergeShortMarkdownChunks folds short heading sections into the following
-// chunk when it fits. A trailing short section has no following context, so it
-// is folded into its predecessor. The chunk cap remains strict because it is
-// also the maximum safe embedding input size.
-func mergeShortMarkdownChunks(chunks []markdownChunk) []markdownChunk {
-	for i := 0; i+1 < len(chunks); {
-		if !isShortMarkdownHeadingChunk(chunks[i]) || utf8.RuneCountInString(chunks[i].content)+2+utf8.RuneCountInString(chunks[i+1].content) > chunkChars {
-			i++
-			continue
-		}
-		chunks[i+1].content = chunks[i].content + "\n\n" + chunks[i+1].content
-		chunks[i+1].hasHeading = chunks[i+1].hasHeading || chunks[i].hasHeading
-		chunks[i+1].isHeadingSection = false
-		chunks = append(chunks[:i], chunks[i+1:]...)
-	}
-
-	last := len(chunks) - 1
-	if last > 0 && isShortMarkdownHeadingChunk(chunks[last]) && utf8.RuneCountInString(chunks[last-1].content)+2+utf8.RuneCountInString(chunks[last].content) <= chunkChars {
-		chunks[last-1].content += "\n\n" + chunks[last].content
-		return chunks[:last]
-	}
-	return chunks
-}
-
-func isShortMarkdownHeadingChunk(chunk markdownChunk) bool {
-	return chunk.hasHeading && chunk.isHeadingSection && utf8.RuneCountInString(chunk.content) <= shortMarkdownSectionChars
-}
-
-func markdownHeadingPrefix(metadata map[string]any) string {
-	headings := make([]string, 0, 6)
-	for level := 1; level <= 6; level++ {
-		value, ok := metadata["h"+strconv.Itoa(level)].(string)
-		if !ok || strings.TrimSpace(value) == "" {
-			continue
-		}
-		headings = append(headings, strings.Repeat("#", level)+" "+strings.TrimSpace(value))
-	}
-	return strings.Join(headings, "\n")
 }
 
 // repoDocPoint builds the qdrantx.Point from a doc + its embedding.

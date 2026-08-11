@@ -7,8 +7,6 @@ require (
 	github.com/casbin/casbin/v2 v2.103.0
 	github.com/casbin/gorm-adapter/v3 v3.32.0
 	github.com/cloudwego/eino v0.8.7
-	github.com/cloudwego/eino-ext/components/document/transformer/splitter/markdown v0.0.0-20260724103301-c9a5dc923462
-	github.com/cloudwego/eino-ext/components/document/transformer/splitter/recursive v0.0.0-20260724103301-c9a5dc923462
 	github.com/eino-contrib/jsonschema v1.0.3
 	github.com/glebarez/sqlite v1.11.0
 	github.com/go-chi/chi/v5 v5.1.0
@@ -17,7 +15,6 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/larksuite/oapi-sdk-go/v3 v3.5.4
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
-	github.com/mattn/go-runewidth v0.0.15
 	github.com/open-dingtalk/dingtalk-stream-sdk-go v0.9.1
 	github.com/prometheus/client_golang v1.20.5
 	github.com/prometheus/client_model v0.6.1
