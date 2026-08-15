@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,6 +75,12 @@ type Config struct {
 
 	// AgentVersion is reported on register_edge (optional).
 	AgentVersion string
+
+	// CloudAddr is the manager/frontier address the tunnel dials. It is
+	// only used in unreachable-class WARN logs so operators can tell
+	// "network down, process alive" from "process dead" without digging
+	// through config files.
+	CloudAddr string
 
 	// Kubernetes is set when this edge is deployed by the Kubernetes chart.
 	Kubernetes *tunnel.KubernetesInfo
@@ -480,6 +487,12 @@ func applyKubernetesHostIdentity(k8sInfo *tunnel.KubernetesInfo, host *tunnel.Ho
 // If the initial registration failed, the same loop retries it before
 // sending heartbeats so a transient startup dependency does not leave the
 // edge permanently at edge_id=0.
+//
+// Failures are classified: unreachable-class errors (DNS / dial failures)
+// keep the process alive and retry on the next tick; only stuck-class
+// failures (network reachable but the tunnel keeps failing) count toward
+// tunnelStuckThreshold, after which the process exits so the service
+// manager can restart it.
 func (a *Agent) heartbeatLoop(ctx context.Context) error {
 	t := time.NewTicker(a.cfg.HeartbeatInterval)
 	defer t.Stop()
@@ -520,6 +533,18 @@ func (a *Agent) heartbeatLoop(ctx context.Context) error {
 				}, nil)
 			cancel()
 			if err != nil {
+				// A network-unreachable failure (DNS resolution or TCP dial
+				// failure) is not evidence of a stuck tunnel: stay alive and
+				// retry on the next tick, mirroring the unlimited retry of
+				// the initial dial path. Counting it toward the stuck
+				// threshold turns a DNS outage into a restart storm under
+				// service managers that honor exit(1) with fast restarts.
+				if isUnreachableError(err) {
+					a.log.Warn("agent: heartbeat failed, cloud unreachable; staying alive",
+						slog.String("cloud_addr", a.cfg.CloudAddr),
+						slog.Any("err", err))
+					continue
+				}
 				consecutiveFail++
 				a.log.Warn("agent: heartbeat failed",
 					slog.Int("consecutive_fail", consecutiveFail),
@@ -531,6 +556,15 @@ func (a *Agent) heartbeatLoop(ctx context.Context) error {
 				rerr := a.registerEdge(rctx)
 				rcancel()
 				if rerr != nil {
+					// Classify re-register failures the same way: when the
+					// network itself is unreachable, exiting gains nothing —
+					// the restarted process would fail the same dial.
+					if isUnreachableError(rerr) {
+						a.log.Warn("agent: re-register failed, cloud unreachable; staying alive",
+							slog.String("cloud_addr", a.cfg.CloudAddr),
+							slog.Any("err", rerr))
+						continue
+					}
 					a.log.Warn("agent: re-register after heartbeat failure failed",
 						slog.Any("err", rerr))
 					if consecutiveFail >= tunnelStuckThreshold {
@@ -551,6 +585,24 @@ func (a *Agent) heartbeatLoop(ctx context.Context) error {
 const tunnelStuckThreshold = 5
 
 var errTunnelStuck = errors.New("tunnel stuck")
+
+// isUnreachableError reports whether err comes from the network stack
+// failing to *reach* the cloud (DNS resolution or TCP dial failure)
+// rather than "network reachable but the tunnel is stuck". The custom
+// dialer returns the original dial error and the tunnel client passes it
+// through unwrapped (Call → reinit → getEnd → NewEndWithDialer), so
+// errors.As classification is reliable without string matching. Only
+// dial-stage OpErrors count as unreachable: read/write/accept errors
+// imply a connection that was established and then broke, which is
+// stuck-class evidence.
+func isUnreachableError(err error) bool {
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return true
+	}
+	var opErr *net.OpError
+	return errors.As(err, &opErr) && opErr.Op == "dial"
+}
 
 // metricsLoop samples the collector every MetricsInterval and fans out
 // the result to the legacy push_host_metrics path and the new
