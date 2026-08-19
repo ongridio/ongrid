@@ -29,6 +29,7 @@ import (
 type GrafanaService interface {
 	Test(ctx context.Context) error
 	Sync(ctx context.Context) (*bizgrafana.SyncResult, error)
+	SyncLoki(ctx context.Context) error
 	FetchDashboardJSON(ctx context.Context, uid string) ([]byte, error)
 }
 
@@ -122,6 +123,7 @@ func (h *Handler) SetLLMProbe(p LLMConfigProbe) { h.llmProbe = p }
 //
 //	POST /v1/integrations/grafana/test           (admin)  — verify connectivity
 //	POST /v1/integrations/grafana/sync           (admin)  — push folder + datasource + dashboards
+//	POST /v1/integrations/grafana/sync-loki      (admin)  — push only the Loki datasource
 //	POST /v1/integrations/prom/test              (admin)  — run "up" PromQL probe
 //	POST /v1/integrations/llm/test               (admin)  — validate an unsaved provider tuple
 //	POST /v1/integrations/llm/validate-and-save  (admin)  — validate every model and atomically save
@@ -135,6 +137,7 @@ func (h *Handler) SetLLMProbe(p LLMConfigProbe) { h.llmProbe = p }
 func (h *Handler) Register(r chi.Router) {
 	r.Post("/v1/integrations/grafana/test", h.testGrafana)
 	r.Post("/v1/integrations/grafana/sync", h.syncGrafana)
+	r.Post("/v1/integrations/grafana/sync-loki", h.syncLoki)
 	r.Post("/v1/integrations/prom/test", h.testProm)
 	r.Post("/v1/integrations/loki/test", h.testLoki)
 	r.Post("/v1/integrations/tempo/test", h.testTempo)
@@ -325,6 +328,28 @@ func (h *Handler) syncGrafana(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+// syncLoki updates the Grafana Loki datasource after loki.* settings are
+// saved, without rewriting dashboards or the Prometheus datasource.
+//
+// @Summary Sync Grafana Loki datasource
+// @Tags integrations
+// @Produce json
+// @Success 200 {object} map[string]string
+// @Failure 401 {object} errorBody
+// @Failure 403 {object} errorBody
+// @Failure 502 {object} errorBody
+// @Router /api/v1/integrations/grafana/sync-loki [post]
+func (h *Handler) syncLoki(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	if err := h.grafana.SyncLoki(r.Context()); err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // testProm runs a tiny PromQL probe ("up") against the configured Prom

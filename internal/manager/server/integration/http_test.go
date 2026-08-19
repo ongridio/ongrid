@@ -23,6 +23,7 @@ import (
 type stubGrafana struct {
 	test           func(ctx context.Context) error
 	sync           func(ctx context.Context) (*bizgrafana.SyncResult, error)
+	syncLoki       func(ctx context.Context) error
 	fetchDashboard func(ctx context.Context, uid string) ([]byte, error)
 }
 
@@ -48,6 +49,12 @@ func (s *stubLLMRouterInvalidator) Invalidate() { s.calls++ }
 
 func (s stubGrafana) Test(ctx context.Context) error                           { return s.test(ctx) }
 func (s stubGrafana) Sync(ctx context.Context) (*bizgrafana.SyncResult, error) { return s.sync(ctx) }
+func (s stubGrafana) SyncLoki(ctx context.Context) error {
+	if s.syncLoki == nil {
+		return nil
+	}
+	return s.syncLoki(ctx)
+}
 func (s stubGrafana) FetchDashboardJSON(ctx context.Context, uid string) ([]byte, error) {
 	return s.fetchDashboard(ctx, uid)
 }
@@ -157,6 +164,45 @@ func TestFetchDashboardMapsTransportErrorTo502(t *testing.T) {
 
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSyncLokiRequiresAdminAndInvokesService(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name       string
+		role       string
+		wantStatus int
+		wantCalled bool
+	}{
+		{name: "admin", role: "admin", wantStatus: http.StatusOK, wantCalled: true},
+		{name: "non-admin", role: "member", wantStatus: http.StatusForbidden, wantCalled: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			g := stubGrafana{
+				test: func(_ context.Context) error { return nil },
+				sync: func(_ context.Context) (*bizgrafana.SyncResult, error) { return nil, nil },
+				syncLoki: func(_ context.Context) error {
+					called = true
+					return nil
+				},
+				fetchDashboard: func(_ context.Context, _ string) ([]byte, error) { return nil, nil },
+			}
+			router := newRouter(NewHandler(g, nil, nil, nil, nil))
+
+			req := httptest.NewRequest(http.MethodPost, "/v1/integrations/grafana/sync-loki", nil)
+			req = req.WithContext(tenantctx.With(context.Background(), tenantctx.Tenant{UserID: 7, Role: tc.role}))
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status = %d body=%s, want %d", rec.Code, rec.Body.String(), tc.wantStatus)
+			}
+			if called != tc.wantCalled {
+				t.Fatalf("SyncLoki called = %v, want %v", called, tc.wantCalled)
+			}
+		})
 	}
 }
 

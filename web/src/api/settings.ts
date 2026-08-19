@@ -70,6 +70,10 @@ export function syncGrafana(): Promise<GrafanaSyncResult> {
   return request<GrafanaSyncResult>('POST', '/integrations/grafana/sync');
 }
 
+export function syncLokiDatasource(): Promise<{ status: string }> {
+  return request<{ status: string }>('POST', '/integrations/grafana/sync-loki');
+}
+
 // testPromConnection runs a tiny "up" PromQL probe via the manager. Used
 // by the Prom integration card to validate URL + Bearer/Basic before the
 // user trusts that the wiring is good.

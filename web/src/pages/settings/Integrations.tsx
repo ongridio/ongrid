@@ -33,6 +33,7 @@ import {
   revealSetting,
   testGrafanaConnection,
   syncGrafana,
+  syncLokiDatasource,
   testPromConnection,
   testLokiConnection,
   testTempoConnection,
@@ -839,6 +840,7 @@ function LokiCard() {
   const [saving, setSaving] = useState(false);
   const [savedOk, setSavedOk] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [grafanaSyncWarning, setGrafanaSyncWarning] = useState<string | null>(null);
   const [probe, setProbe] = useState<
     | { kind: 'idle' }
     | { kind: 'testing' }
@@ -889,11 +891,13 @@ function LokiCard() {
   const dirty = LOKI_KEYS.some((k) => draft[k] !== server[k]);
   const update = (k: keyof LokiForm, v: string) => {
     setSavedOk(false);
+    setGrafanaSyncWarning(null);
     setDraft((cur) => ({ ...cur, [k]: v }));
   };
   const submit = async () => {
     setSaving(true);
     setErr(null);
+    setGrafanaSyncWarning(null);
     try {
       for (const k of LOKI_KEYS) {
         if (draft[k] === server[k]) continue;
@@ -901,6 +905,17 @@ function LokiCard() {
       }
       await refresh();
       setSavedOk(true);
+      try {
+        await syncLokiDatasource();
+      } catch (e) {
+        const msg = e instanceof ApiError ? e.message : (e as Error).message;
+        setGrafanaSyncWarning(
+          tr(
+            `Loki 已保存，但 Grafana 数据源同步失败：${msg}`,
+            `Loki was saved, but the Grafana datasource sync failed: ${msg}`
+          )
+        );
+      }
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : (e as Error).message);
     } finally {
@@ -1001,6 +1016,7 @@ function LokiCard() {
           <span>{tr('在 Grafana 中查看日志', 'Open logs in Grafana')}</span>
         </button>
         {err && <span className="break-all text-xs text-red-400">{err}</span>}
+        {grafanaSyncWarning && <span className="break-all text-xs text-amber-400">{grafanaSyncWarning}</span>}
       </div>
       <ProbeLine probe={probe} okLabel={tr('✓ Loki 可达，/ready 返回成功', '✓ Loki reachable, /ready returned success')} />
     </Card>
