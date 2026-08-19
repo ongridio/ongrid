@@ -104,7 +104,9 @@ func (u *Usecase) UpdateSchedule(ctx context.Context, s *model.ReportSchedule, n
 	if err != nil {
 		return err
 	}
-	s.NextFireAt = &next
+	// UTC storage convention — see CreateSchedule.
+	utc := next.UTC()
+	s.NextFireAt = &utc
 	return u.repo.UpdateSchedule(ctx, s)
 }
 
@@ -127,7 +129,9 @@ func (u *Usecase) SetScheduleEnabled(ctx context.Context, id uint64, enabled boo
 		if err != nil {
 			return nil, err
 		}
-		s.NextFireAt = &next
+		// UTC storage convention — see CreateSchedule.
+		utc := next.UTC()
+		s.NextFireAt = &utc
 	}
 	if err := u.repo.UpdateSchedule(ctx, s); err != nil {
 		return nil, err
