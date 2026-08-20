@@ -1,0 +1,33 @@
+[Unit]
+Description=Tempo (ongrid trace store)
+Documentation=https://grafana.com/docs/tempo/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ongrid-tempo
+Group=ongrid-tempo
+ExecStart=/usr/local/bin/tempo \
+  -config.file=/etc/ongrid/tempo-config.yaml
+KillMode=mixed
+TimeoutStopSec=30s
+Restart=always
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ongrid-tempo
+
+NoNewPrivileges=true
+ProtectSystem=true
+ProtectHome=true
+PrivateTmp=true
+# : tempo-config.yaml storage.trace.{local,wal}.path=/var/tempo/...
+# （install-deps.sh 创建并 chown ongrid-tempo:ongrid-tempo 0750）。ProtectSystem=true
+# 下必须显式加入 ReadWritePaths。不再用 StateDirectory=ongrid-tempo，
+# 因为数据不在 /var/lib/ongrid-tempo（避免创建无用空目录）。
+ReadWritePaths=/var/tempo
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

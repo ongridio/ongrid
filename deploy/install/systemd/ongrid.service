@@ -1,0 +1,80 @@
+[Unit]
+Description=ongrid AIOps manager
+Documentation=https://github.com/ongridio/ongrid
+# We rely on mariadb + prometheus + loki + tempo + qdrant being up first.
+# All four units ship with this bundle; binding them as Wants= keeps the
+# manager up even if (say) loki is briefly down (logs degrade, manager
+# stays serving alerts/incidents), while After= sequences the boot so we
+# don't burn a hot reconnect loop in normal startup.
+# frontier broker unit 也加入 After=，确保 manager
+# 启动前 frontier 已被 systemd 拉起，避免反向拨号在 frontier 尚未 LISTEN
+# 时失败进 restart 循环。Wants= 不加 frontier（软依赖拖累 + frontier fail
+# 应由 wait-for-deps.sh 10 分钟超时处理）。
+After=network-online.target mariadb.service prometheus.service loki.service tempo.service qdrant.service ongrid-frontier.service
+Wants=network-online.target mariadb.service prometheus.service loki.service tempo.service qdrant.service
+StartLimitInterval=60s
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=ongrid
+Group=ongrid
+EnvironmentFile=/etc/ongrid/ongrid.env
+WorkingDirectory=/var/lib/ongrid
+ExecStart=/usr/local/bin/ongrid
+ExecReload=/bin/kill -HUP $MAINPID
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30s
+Restart=always
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ongrid
+
+# systemd 模式默认 ONGRID_HTTP_ADDR=:8080（>1024），不需要
+# CAP_NET_BIND_SERVICE。若 operator 改绑 <1024 端口，请在此恢复
+# AmbientCapabilities=CAP_NET_BIND_SERVICE +
+# CapabilityBoundingSet=CAP_NET_BIND_SERVICE。NoNewPrivileges=true
+# 保持默认安全策略（CAP_NET_BIND_SERVICE 作为 AmbientCapability
+# 在 NoNewPrivileges=true 下仍生效，systemd 240+）。
+NoNewPrivileges=true
+
+# Filesystem isolation. ProtectSystem=true marks /usr /boot /etc
+# read-only for the unit; ReadWritePaths re-grants the dirs we
+# legitimately need. StateDirectory= makes systemd create
+# /var/lib/ongrid at start (mode 0755, owned by User=Group=). Same for
+# LogsDirectory=/var/log/ongrid.
+StateDirectory=ongrid
+StateDirectoryMode=0755
+LogsDirectory=ongrid
+LogsDirectoryMode=0755
+ReadWritePaths=/var/lib/ongrid /var/log/ongrid
+ProtectSystem=true
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RestrictNamespaces=false
+RemoveIPC=true
+
+# Resource limits. Manager process is the orchestrator + HTTP API +
+# worker spawner; needs file handles for SSE streams + DB conns + LLM
+# HTTP pool.
+LimitNOFILE=65536
+LimitNPROC=32768
+MemoryMax=4G
+CPUQuota=400%
+
+Environment=GOMAXPROCS=auto
+Environment=GOGC=100
+# Local ONNX embedder: the manager dlopens libonnxruntime.so from
+# this path. install-deps.sh drops the .so at /usr/lib. ProtectSystem=true
+# keeps /usr read-only but still readable, so the dlopen succeeds.
+Environment=ONNX_PATH=/usr/lib/libonnxruntime.so
+
+[Install]
+WantedBy=multi-user.target
