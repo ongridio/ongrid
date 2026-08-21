@@ -3,10 +3,14 @@ package plugins
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
+	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
@@ -26,13 +30,14 @@ type TunnelConfigFetcher struct {
 	knownPlugins []string
 	fallback     *EnvConfigFetcher
 
-	// Auth + edge_id materialised from env once at construction so
+	// Auth + an optional explicit host device_id are materialised from env
+	// once at construction so
 	// every Fetch doesn't re-read os.Getenv. ConfigFetcher contract
 	// allows mutation of returned PluginConfigs each call so this is
 	// safe: we copy values into each PluginConfig per Fetch call.
 	authUser string
 	authPass string
-	edgeID   uint64
+	deviceID uint64
 
 	k8sRole          string
 	k8sMode          string
@@ -42,6 +47,11 @@ type TunnelConfigFetcher struct {
 	k8sTLSInsecure   bool
 	k8sGateway       bool
 	managerPublicURL string
+	secretBaseDir    string
+	log              *slog.Logger
+
+	cacheMu sync.RWMutex
+	last    map[string]PluginConfig
 }
 
 // NewTunnelConfigFetcher builds a fetcher that fronts a tunnel.Client
@@ -60,13 +70,20 @@ func NewTunnelConfigFetcher(client tunnel.Client, knownPlugins []string) *Tunnel
 // needed for Kubernetes enrollment, where access/secret are returned at
 // runtime rather than pre-populated in process env.
 func NewTunnelConfigFetcherWithCredentials(client tunnel.Client, knownPlugins []string, accessKey, secretKey string) *TunnelConfigFetcher {
+	secretBaseDir := strings.TrimSpace(os.Getenv("ONGRID_EDGE_SECRET_DIR"))
+	if secretBaseDir == "" {
+		secretBaseDir = "/var/lib/ongrid-edge/secrets"
+		if runtime.GOOS == "windows" {
+			secretBaseDir = `C:\ProgramData\ongrid-edge\secrets`
+		}
+	}
 	return &TunnelConfigFetcher{
 		client:           client,
 		knownPlugins:     append([]string(nil), knownPlugins...),
 		fallback:         NewEnvConfigFetcher(knownPlugins),
 		authUser:         firstNonEmpty(os.Getenv("ONGRID_EDGE_PLUGIN_DATAPLANE_USER"), os.Getenv("ONGRID_EDGE_ACCESS_KEY"), accessKey),
 		authPass:         firstNonEmpty(os.Getenv("ONGRID_EDGE_PLUGIN_DATAPLANE_PASS"), os.Getenv("ONGRID_EDGE_SECRET_KEY"), secretKey),
-		edgeID:           envUint("ONGRID_EDGE_ID"),
+		deviceID:         envUint("ONGRID_EDGE_DEVICE_ID"),
 		k8sRole:          os.Getenv("ONGRID_K8S_ROLE"),
 		k8sMode:          os.Getenv("ONGRID_K8S_MODE"),
 		k8sClusterID:     envUint("ONGRID_K8S_CLUSTER_ID"),
@@ -75,6 +92,8 @@ func NewTunnelConfigFetcherWithCredentials(client tunnel.Client, knownPlugins []
 		k8sTLSInsecure:   envBool("ONGRID_K8S_ENROLL_TLS_INSECURE"),
 		k8sGateway:       envBool("ONGRID_K8S_TELEMETRY_GATEWAY_ENABLED"),
 		managerPublicURL: os.Getenv("ONGRID_MANAGER_PUBLIC_URL"),
+		secretBaseDir:    secretBaseDir,
+		log:              slog.Default().With(slog.String("comp", "plugin-config-fetcher")),
 	}
 }
 
@@ -92,6 +111,9 @@ func (t *TunnelConfigFetcher) Fetch(ctx context.Context) (map[string]PluginConfi
 	}
 	var resp tunnel.GetPluginConfigsResponse
 	if err := t.client.Call(ctx, tunnel.MethodGetPluginConfigs, struct{}{}, &resp); err != nil {
+		if cached := t.cachedSnapshot(); cached != nil {
+			return cached, nil
+		}
 		// Don't surface the error — supervisor would log "config fetch
 		// failed; keeping previous state" and never recover until the
 		// next reload. Falling back to env keeps things alive at the
@@ -99,6 +121,15 @@ func (t *TunnelConfigFetcher) Fetch(ctx context.Context) (map[string]PluginConfi
 		envSnap, fallbackErr := t.fallback.Fetch(ctx)
 		if fallbackErr != nil {
 			return nil, fallbackErr
+		}
+		if t.deviceID == 0 {
+			// A cold-start fallback knows only the tunnel Edge identity. Never
+			// persist it as device_id; the supervisor will keep/retry the last
+			// working config, or fail closed until Manager resolves the host link.
+			for name, cfg := range envSnap {
+				cfg.EdgeID = 0
+				envSnap[name] = cfg
+			}
 		}
 		return t.applyKubernetesDefaults(envSnap), nil
 	}
@@ -108,12 +139,15 @@ func (t *TunnelConfigFetcher) Fetch(ctx context.Context) (map[string]PluginConfi
 	for _, n := range t.knownPlugins {
 		known[n] = true
 	}
-	// Edge ID source of truth: env > tunnel response. Env wins because
-	// the operator may run a single edge against multiple managers in
-	// dev — the env's ID is what's baked into Loki labels regardless.
-	edgeID := t.edgeID
-	if edgeID == 0 {
-		edgeID = resp.EdgeID
+	// Despite the legacy wire name, resp.EdgeID is the host device_id that
+	// Manager resolved from edge_devices(type=host). Never replace it with
+	// ONGRID_EDGE_ID: edge and device are independent identities and using
+	// the tunnel-side edge id would create immutable telemetry with a bogus
+	// device_id label. ONGRID_EDGE_DEVICE_ID is an explicit dev/offline
+	// escape hatch only; production snapshots always use Manager's value.
+	deviceID := resp.EdgeID
+	if deviceID == 0 {
+		deviceID = t.deviceID
 	}
 	for name, entry := range resp.Configs {
 		if !known[name] {
@@ -121,7 +155,7 @@ func (t *TunnelConfigFetcher) Fetch(ctx context.Context) (map[string]PluginConfi
 		}
 		out[name] = t.withKubernetesDefaults(name, PluginConfig{
 			Enabled:  entry.Enabled,
-			EdgeID:   edgeID,
+			EdgeID:   deviceID,
 			Endpoint: entry.Endpoint,
 			AuthUser: t.authUser,
 			AuthPass: t.authPass,
@@ -132,10 +166,47 @@ func (t *TunnelConfigFetcher) Fetch(ctx context.Context) (map[string]PluginConfi
 	// stops them if they were running.
 	for _, name := range t.knownPlugins {
 		if _, ok := out[name]; !ok {
-			out[name] = t.withKubernetesDefaults(name, PluginConfig{Enabled: false, EdgeID: edgeID})
+			out[name] = t.withKubernetesDefaults(name, PluginConfig{Enabled: false, EdgeID: deviceID})
 		}
 	}
+	logsCfg, ok := out["logs"]
+	if ok {
+		materialized, err := t.materializeLogsRuntime(ctx, logsCfg)
+		if err != nil {
+			materializeErr := fmt.Errorf("materialize logs runtime: %w", err)
+			if reportErr := t.ReportPluginConfigApplied(ctx, "logs", logsCfg, err); reportErr != nil {
+				return nil, errors.Join(materializeErr, fmt.Errorf("report logs config failure: %w", reportErr))
+			}
+			return nil, materializeErr
+		}
+		out["logs"] = materialized
+	}
+	t.storeSnapshot(out)
 	return out, nil
+}
+
+func (t *TunnelConfigFetcher) cachedSnapshot() map[string]PluginConfig {
+	t.cacheMu.RLock()
+	defer t.cacheMu.RUnlock()
+	if t.last == nil {
+		return nil
+	}
+	return clonePluginSnapshot(t.last)
+}
+
+func (t *TunnelConfigFetcher) storeSnapshot(snapshot map[string]PluginConfig) {
+	t.cacheMu.Lock()
+	defer t.cacheMu.Unlock()
+	t.last = clonePluginSnapshot(snapshot)
+}
+
+func clonePluginSnapshot(snapshot map[string]PluginConfig) map[string]PluginConfig {
+	out := make(map[string]PluginConfig, len(snapshot))
+	for name, cfg := range snapshot {
+		cfg.Spec = copySpec(cfg.Spec)
+		out[name] = cfg
+	}
+	return out
 }
 
 func (t *TunnelConfigFetcher) applyKubernetesDefaults(in map[string]PluginConfig) map[string]PluginConfig {
@@ -198,6 +269,13 @@ func (t *TunnelConfigFetcher) withKubernetesLogsDefaults(cfg PluginConfig) Plugi
 	if _, ok := spec["enable_journald"]; !ok {
 		spec["enable_journald"] = false
 	}
+	// Node-local CRI logs already carry namespace, Pod UID/name, container,
+	// restart count, and node metadata from the container parser and the
+	// Downward API. Do not let a stale Manager spec make every Node Agent use
+	// cluster-wide Kubernetes API permissions for k8sattributes enrichment.
+	// Central telemetry gateway collectors retain their separate, explicit
+	// k8sattributes configuration and ServiceAccount.
+	spec["enable_k8sattributes"] = false
 	cfg.Spec = spec
 	return cfg
 }
@@ -417,7 +495,7 @@ func (t *TunnelConfigFetcher) MarshalJSON() ([]byte, error) {
 		KnownPlugins []string `json:"known_plugins"`
 		EdgeID       uint64   `json:"edge_id"`
 		HasClient    bool     `json:"has_client"`
-	}{t.knownPlugins, t.edgeID, t.client != nil})
+	}{t.knownPlugins, t.deviceID, t.client != nil})
 }
 
 // AssertKnown is a tiny sanity helper for tests / debug tooling. Returns

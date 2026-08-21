@@ -29,12 +29,14 @@ const Name = "traces"
 // The returned *plugins.SubprocessPlugin satisfies plugins.Plugin and is
 // registered with the Supervisor by ongrid-edge main.
 func New(binDir, workDir string, log *slog.Logger) plugins.Plugin {
+	binary := filepath.Join(binDir, "otelcol-contrib")
 	return plugins.NewSubprocess(plugins.SubprocessOpts{
-		Name:         Name,
-		Binary:       filepath.Join(binDir, "otelcol-contrib"),
-		WorkDir:      filepath.Join(workDir, Name),
-		ConfigFile:   filepath.Join(workDir, Name, "otelcol.yaml"),
-		ConfigRender: render,
+		Name:            Name,
+		Binary:          binary,
+		WorkDir:         filepath.Join(workDir, Name),
+		ConfigFile:      filepath.Join(workDir, Name, "otelcol.yaml"),
+		ConfigRender:    render,
+		ConfigValidator: plugins.OTelConfigValidator(binary),
 		Args: func(_ plugins.PluginConfig, configFile string) []string {
 			// otelcol-contrib uses --config=... (also accepts repeated flags
 			// for layered configs; we only need a single rendered file).

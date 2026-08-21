@@ -14,11 +14,13 @@ const (
 	installK8sHostRuntimeCommand = "install-k8s-host-runtime"
 	enterK8sHostCommand          = "enter-k8s-host"
 
-	k8sHostRuntimeDir        = "/var/lib/ongrid-edge/k8s-runtime"
-	k8sHostEdgeBinary        = k8sHostRuntimeDir + "/ongrid-edge"
-	k8sHostPluginDir         = k8sHostRuntimeDir + "/plugins"
-	k8sHostServiceAccountDir = k8sHostRuntimeDir + "/serviceaccount"
-	k8sHostStateDir          = "/var/lib/ongrid-edge/k8s-state"
+	k8sHostRuntimeDir               = "/var/lib/ongrid-edge/k8s-runtime"
+	k8sHostEdgeBinary               = k8sHostRuntimeDir + "/ongrid-edge"
+	k8sHostPluginDir                = k8sHostRuntimeDir + "/plugins"
+	k8sHostServiceAccountDir        = k8sHostRuntimeDir + "/serviceaccount"
+	legacyK8sHostServiceAccountLink = "/run/secrets/kubernetes.io/serviceaccount"
+	k8sHostStateDir                 = "/var/lib/ongrid-edge/k8s-state"
+	k8sHostSecretDir                = k8sHostStateDir + "/secrets"
 
 	containerPluginDir         = "/usr/local/lib/ongrid-edge"
 	containerServiceAccountDir = "/var/run/secrets/kubernetes.io/serviceaccount"
@@ -120,6 +122,7 @@ func installK8sHostRuntime(ctx context.Context, paths k8sHostInstallPaths) error
 		stateDir,
 		filepath.Join(stateDir, "credentials"),
 		filepath.Join(stateDir, "plugins"),
+		hostPath(paths.hostRoot, k8sHostSecretDir),
 		filepath.Join(stateDir, ".upgrade"),
 	} {
 		if err := ensureOwnedDirectory(dir, paths.uid, paths.gid, 0750); err != nil {
@@ -141,6 +144,34 @@ func installK8sHostRuntime(ctx context.Context, paths k8sHostInstallPaths) error
 		if err := os.Chown(dst, paths.uid, paths.gid); err != nil {
 			return fmt.Errorf("set service account %s owner: %w", name, err)
 		}
+	}
+	if err := removeLegacyK8sHostServiceAccountLink(paths.hostRoot); err != nil {
+		return err
+	}
+	return nil
+}
+
+func removeLegacyK8sHostServiceAccountLink(hostRoot string) error {
+	linkPath := hostPath(hostRoot, legacyK8sHostServiceAccountLink)
+	info, err := os.Lstat(linkPath)
+	switch {
+	case err == nil:
+		if info.Mode()&os.ModeSymlink == 0 {
+			return nil
+		}
+		target, err := os.Readlink(linkPath)
+		if err != nil {
+			return fmt.Errorf("read legacy service account link: %w", err)
+		}
+		if target != k8sHostServiceAccountDir {
+			return nil
+		}
+		if err := os.Remove(linkPath); err != nil {
+			return fmt.Errorf("remove legacy service account link: %w", err)
+		}
+		return nil
+	case !os.IsNotExist(err):
+		return fmt.Errorf("inspect legacy service account link: %w", err)
 	}
 	return nil
 }

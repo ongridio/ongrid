@@ -1,6 +1,6 @@
-// evaluators_phaseB.go contains the Phase-B evaluators —
-// log_match / log_volume against Loki, trace_latency / trace_error_rate
-// against Prom (spanmetrics).
+// evaluators_phaseB.go contains the Phase-B evaluators — backend-neutral
+// log_search, legacy log_match / log_volume against Loki, and
+// trace_latency / trace_error_rate against Prom (spanmetrics).
 //
 // All four follow the metric_raw recovery pattern: track which dedupe
 // keys fired this tick per rule, and resolve any incident from the
@@ -24,6 +24,74 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/logquery"
 	"github.com/ongridio/ongrid/internal/pkg/notify"
 )
+
+// evaluateLogSearch runs the backend-neutral count contract. The configured
+// Searcher is the Manager query planner, so the same rule works on built-in
+// Loki, external Elasticsearch, and a cutover window spanning both.
+func (e *PipelineEvaluator) evaluateLogSearch(ctx context.Context, now time.Time) {
+	rules := e.rules.LogSearchRules()
+	if len(rules) == 0 {
+		return
+	}
+	for _, rule := range rules {
+		var evalErr error
+		done := observeEval(model.RuleKindLogSearch, &evalErr)
+		req := rule.Query
+		req.Start = now.Add(-rule.Window)
+		req.End = now
+		req.Cursor = ""
+		req.Limit = 1
+		req.Direction = logquery.SortBackward
+		count, err := e.logSearcher.Count(ctx, req)
+		if err != nil {
+			e.log.Warn("alert: structured log count failed",
+				slog.String("rule", rule.RuleKey),
+				slog.Any("err", err))
+			evalErr = err
+			done()
+			continue
+		}
+
+		fired := make(map[string]struct{}, 1)
+		value := float64(count)
+		if compareFloat(value, rule.Operator, rule.Threshold) {
+			dedupeKey := fmt.Sprintf("pipeline:%s:structured-log", rule.RuleKey)
+			fired[dedupeKey] = struct{}{}
+			summary := fmt.Sprintf("%s: log count %d %s %g in %s",
+				rule.RuleKey, count, rule.Operator, rule.Threshold, rule.WindowText)
+			threshold := rule.Threshold
+			input := FiringInput{
+				ScopeType:  effectiveScope(rule.ScopeType, model.RuleKindLogSearch),
+				Scope:      effectiveScope(rule.ScopeType, model.RuleKindLogSearch),
+				Rule:       rule.RuleKey,
+				RuleName:   rule.Name,
+				Severity:   ruleSev(rule.Severity, notify.SeverityWarning),
+				DedupeKey:  dedupeKey,
+				OccurredAt: now,
+				Title:      summary,
+				Summary:    summary,
+				RunbookURL: rule.RunbookURL,
+				Value:      &value,
+				Threshold:  &threshold,
+				Labels: mergeLabels(rule.Labels, nil, map[string]string{
+					"rule":       rule.RuleKey,
+					"trigger":    "ticker",
+					"log_window": rule.WindowText,
+				}),
+			}
+			res, err := e.uc.RecordFiring(ctx, input)
+			if err != nil {
+				e.log.Warn("alert: record firing log_search failed",
+					slog.String("rule", rule.RuleKey),
+					slog.Any("err", err))
+			} else {
+				e.notify(ctx, res, summary, input.ScopeType, now)
+			}
+		}
+		e.sweepRecovery(ctx, rule.RuleKey, fired, "structured log condition cleared", now)
+		done()
+	}
+}
 
 // evaluateLogMatch runs every enabled log_match rule's count_over_time
 // query and fires for each label-set whose count satisfies operator+threshold.

@@ -107,19 +107,21 @@ Per-tenant overrides go in `overrides.yaml`. The two limits that produce
 "runs fine until..." pages: `max_streams_per_user` (label drift) and
 `max_query_length` (someone runs a 30-day query).
 
-## Promtail / Alloy / Vector — the agents
+## OTel Collector / Alloy / Vector — the agents
 
 Loki itself doesn't read log files; an agent does. Options:
 
-- **Promtail** — Loki's first-party agent; simple; nearing maintenance
-  mode in favor of Alloy
+- **OpenTelemetry Collector Contrib** — vendor-neutral receivers,
+  processors, persistent queues, and OTLP/Elasticsearch exporters
 - **Grafana Alloy** — replaces Promtail; superset that also handles
   metrics and traces
 - **Vector / Fluent Bit** — third-party; richer transform pipeline,
   multi-sink
 
-Ongrid edge: subprocess promtail bundled as a plugin (see ADR-015 /
-PR-C1). Data plane goes nginx → loki direct, not through the tunnel.
+Ongrid edge runs a bundled `otelcol-contrib` subprocess as the `logs`
+plugin. For built-in Loki the data plane is Edge → nginx OTLP endpoint
+→ Loki; for an external backend it is Edge → Elasticsearch directly.
+Log payloads never traverse the control tunnel or Manager Go process.
 
 ## Operational signals
 

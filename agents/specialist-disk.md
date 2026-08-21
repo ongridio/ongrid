@@ -12,7 +12,7 @@ when_to_use: |
   不适合我：
     • 网络问题（用 specialist-network）
     • 进程 / cpu / mem 问题（让 coordinator 直接用 host_processes）
-    • 业务逻辑日志解读（用 query_logql）
+    • 业务逻辑日志解读（用 search_logs）
 capabilities:
   - id: disk_diagnosis
     description: Diagnose filesystem capacity, inode exhaustion, large directories, and files.

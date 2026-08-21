@@ -56,6 +56,34 @@ func TestCompileDraft_NormalizesLogQueryIntoEvaluatorFields(t *testing.T) {
 	}
 }
 
+func TestCompileDraft_NormalizesBackendNeutralLogSearch(t *testing.T) {
+	got, err := CompileDraft(CompileInput{
+		Action: "create",
+		Rule: RuleConfigInput{
+			Kind:      "log_search",
+			ScopeType: "host",
+			Spec: map[string]interface{}{
+				"keywords":  []interface{}{"error", "panic"},
+				"window":    "10m",
+				"threshold": 2,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CompileDraft: %v", err)
+	}
+	if got.Rule.Kind != "log_search" || got.Rule.ScopeType != "global" {
+		t.Fatalf("rule = %#v", got.Rule)
+	}
+	keywords, ok := got.Rule.Spec["keywords"].(map[string]interface{})
+	if !ok || keywords["mode"] != "any" {
+		t.Fatalf("keywords = %#v", got.Rule.Spec["keywords"])
+	}
+	if got.Rule.Spec["operator"] != ">=" || got.Rule.Spec["window"] != "10m" {
+		t.Fatalf("spec = %#v", got.Rule.Spec)
+	}
+}
+
 func TestCompileDraft_RecommendsHostScopeForHostForecast(t *testing.T) {
 	got, err := CompileDraft(CompileInput{
 		Action:      "create",

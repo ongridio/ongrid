@@ -14,10 +14,10 @@ fail() {
 
 components=(
     node_exporter process_exporter mysqld_exporter postgres_exporter
-    redis_exporter mongodb_exporter promtail otelcol-contrib
+    redis_exporter mongodb_exporter otelcol-contrib
 )
-deps_tag=edge-deps-layout1-p1-o2-n3-pr4-my5-pg6-r7-m8
-next_deps_tag=edge-deps-layout1-p11-o12-n13-pr14-my15-pg16-r17-m18
+deps_tag=edge-deps-layout2-o2-n3-pr4-my5-pg6-r7-m8
+next_deps_tag=edge-deps-layout2-o12-n13-pr14-my15-pg16-r17-m18
 bin_root="$tmp_dir/bin"
 mkdir -p "$bin_root/linux-amd64"
 for component in "${components[@]}"; do
@@ -27,7 +27,7 @@ printf 'ongrid-edge payload\n' > "$bin_root/linux-amd64/ongrid-edge"
 
 attachments="$tmp_dir/attachments"
 EDGE_BIN_ROOT="$bin_root" \
-PROMTAIL_VERSION=1 OTELCOL_VERSION=2 NODE_EXPORTER_VERSION=3 \
+OTELCOL_VERSION=2 NODE_EXPORTER_VERSION=3 \
 PROCESS_EXPORTER_VERSION=4 MYSQLD_EXPORTER_VERSION=5 \
 POSTGRES_EXPORTER_VERSION=6 REDIS_EXPORTER_VERSION=7 \
 MONGODB_EXPORTER_VERSION=8 \
@@ -40,7 +40,7 @@ EDGE_BIN_ROOT="$bin_root" \
 rebuilt_attachments="$tmp_dir/attachments-rebuilt"
 sleep 2
 EDGE_BIN_ROOT="$bin_root" \
-PROMTAIL_VERSION=1 OTELCOL_VERSION=2 NODE_EXPORTER_VERSION=3 \
+OTELCOL_VERSION=2 NODE_EXPORTER_VERSION=3 \
 PROCESS_EXPORTER_VERSION=4 MYSQLD_EXPORTER_VERSION=5 \
 POSTGRES_EXPORTER_VERSION=6 REDIS_EXPORTER_VERSION=7 \
 MONGODB_EXPORTER_VERSION=8 \
@@ -160,7 +160,7 @@ for component in "${components[@]}"; do
 done
 next_attachments="$tmp_dir/attachments-next"
 EDGE_BIN_ROOT="$bin_root" \
-PROMTAIL_VERSION=11 OTELCOL_VERSION=12 NODE_EXPORTER_VERSION=13 \
+OTELCOL_VERSION=12 NODE_EXPORTER_VERSION=13 \
 PROCESS_EXPORTER_VERSION=14 MYSQLD_EXPORTER_VERSION=15 \
 POSTGRES_EXPORTER_VERSION=16 REDIS_EXPORTER_VERSION=17 \
 MONGODB_EXPORTER_VERSION=18 \

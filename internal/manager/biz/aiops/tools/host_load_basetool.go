@@ -95,7 +95,7 @@ var GetHostLoadBatchSchema = json.RawMessage(`{
 const getHostLoadWhenToUse = "对一组设备一次性抓 cpu/mem/load 实时值。**优先一次给多个 device_id** " +
 	"做横向对比（'哪台 cpu 最高'）；单设备调用是反模式（fleet 问题应该一次性给所有 id）。" +
 	"NOT for: 历史趋势（用 query_promql）/ 进程清单（用 get_process_list）/ " +
-	"日志（用 query_logql）/ 单设备深查（用 host_bash）。"
+	"日志（用 search_logs）/ 单设备深查（用 host_bash）。"
 
 // Info — pure metadata. Class=read because get_host_load only observes.
 func (t *GetHostLoadTool) Info(_ context.Context) (*basetool.ToolInfo, error) {

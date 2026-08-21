@@ -519,8 +519,8 @@ var draftConfigChangeSchema = json.RawMessage(`{
         "rule_key": {"type": "string", "description": "Required for create. Lower snake case."},
         "kind": {
           "type": "string",
-          "enum": ["metric_threshold", "metric_raw", "metric_anomaly", "metric_forecast", "metric_burn_rate", "log_match", "log_volume", "trace_latency", "trace_error_rate"],
-          "description": "Choose the existing alert creation mode. metric_threshold is only for host closed-set metrics. metric_raw is for arbitrary PromQL predicates, database metrics, custommetrics, and any exact collected metric name."
+          "enum": ["metric_threshold", "metric_raw", "metric_anomaly", "metric_forecast", "metric_burn_rate", "log_search", "log_match", "log_volume", "trace_latency", "trace_error_rate"],
+          "description": "Choose the existing alert creation mode. Use log_search for new log alerts because it is backend-neutral; log_match and log_volume are legacy Loki-only compatibility kinds. metric_threshold is only for host closed-set metrics. metric_raw is for arbitrary PromQL predicates, database metrics, custommetrics, and any exact collected metric name."
         },
         "name": {"type": "string"},
         "scope_type": {"type": "string", "enum": ["global", "host", "monitoring_pipeline"], "description": "Use host when the alert should be associated with a specific machine or device-collected instance, such as CPU, memory, disk/filesystem, load, network, system/journald logs, database/Redis/MongoDB metrics, or when the final PromQL/LogQL result keeps a device_id label. Use global only for service, SLO, trace, or intentionally aggregated fleet-wide rules where no single host/device should own the incident."},
@@ -537,7 +537,7 @@ var draftConfigChangeSchema = json.RawMessage(`{
 	        "spec": {
 	          "type": "object",
 	          "additionalProperties": true,
-	          "description": "Kind-specific spec. metric_raw accepts expr/promql/query as a full boolean PromQL predicate, or metric plus operator and threshold for one exact Prometheus metric. Use metric names and label keys from list_metric_catalog when available. Only scope selectors when the user explicitly asked for that source/device/job/service/instance; mark that with source_explicit=true. Other kinds use their natural fields: metric_anomaly, metric_forecast, metric_burn_rate, log_match, log_volume, trace_latency, trace_error_rate."
+	          "description": "Kind-specific spec. log_search uses keywords={include:[],exclude:[],mode:any|all|phrase}, scope={device_ids,cluster_ids,namespaces,workloads,pods,containers,service_names,source_ids,levels,files}, optional allowlisted filters, window, operator, and threshold. Never generate LogQL or Elasticsearch DSL for log_search. metric_raw accepts expr/promql/query as a full boolean PromQL predicate, or metric plus operator and threshold for one exact Prometheus metric. Use metric names and label keys from list_metric_catalog when available. Only scope selectors when the user explicitly asked for that source/device/job/service/instance; mark that with source_explicit=true. Other kinds use their natural fields: metric_anomaly, metric_forecast, metric_burn_rate, legacy log_match/log_volume, trace_latency, trace_error_rate."
 	        },
         "labels": {"type": "object", "additionalProperties": {"type": "string"}},
         "runbook_url": {"type": "string"},

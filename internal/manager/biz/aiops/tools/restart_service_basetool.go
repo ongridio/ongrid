@@ -76,7 +76,7 @@ const RestartServiceDescription = "Restart an allow-listed systemd service on a 
 // guidance here is the first.
 const restartServiceWhenToUse = "Use ONLY when the user explicitly asks to restart one of the allow-listed " +
 	"services (nginx / redis / prometheus / loki / tempo / grafana / mysql / ongrid). " +
-	"DO NOT proactively suggest restart — diagnose first with query_logql / get_edge_summary. " +
+	"DO NOT proactively suggest restart — diagnose first with search_logs / get_edge_summary. " +
 	"This tool is MUTATING: the call spawns a reviewer worker (SOP gating); " +
 	"on reject, do NOT retry — convey the reviewer's reason to the user verbatim and let them decide."
 

@@ -1,6 +1,6 @@
 // Package metrics is the edge-side `metrics` plugin.
 //
-// Unlike the `logs` (promtail) and `traces` (otelcol) plugins, this one
+// Unlike the `logs` and `traces` (otelcol) plugins, this one
 // runs in-process inside ongrid-edge. It periodically scrapes a local
 // HTTP /metrics endpoint (default: node_exporter on localhost:9100),
 // parses the Prometheus text format, and pushes the open-set samples to

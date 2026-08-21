@@ -7,7 +7,7 @@ applies_to: [manager]
 
 # Loki Ingestion Backpressure / 429s & Missing Logs
 
-Use when logs stop showing up in Grafana, the shipper (promtail/agent)
+Use when logs stop showing up in Grafana, the Edge OTel logs collector
 logs `429 Too Many Requests` or `entry out of order`, or Loki memory
 grows. Loki pushes back with 429 when a tenant/stream exceeds its rate or
 when stream cardinality explodes. **Distinguish rate-limit (429) from
@@ -23,9 +23,10 @@ ordering/timestamp rejections from a real ingester problem.**
 ## Step 1 — Where is it failing: shipper or Loki
 
 ```bash
-# Shipper side (promtail): is it being throttled?
-journalctl -u promtail -n 60 2>/dev/null | grep -iE '429|out of order|error'
-#   or docker/k8s logs of the promtail/agent
+# Edge logs subprocess: is the OTel exporter being throttled?
+tail -n 100 /var/lib/ongrid-edge/plugins/logs/logs.log 2>/dev/null | grep -iE '429|out of order|error|sending_queue'
+# Supervisor/config failures are recorded by the parent service.
+journalctl -u ongrid-edge -n 100 2>/dev/null | grep -iE 'logs|otelcol|error'
 # Loki side: distributor/ingester health + discards
 curl -sS http://<loki>:3100/metrics | grep -E 'loki_discarded_samples_total|loki_request_duration'
 ```

@@ -221,7 +221,7 @@ services:
     volumes:
       # Manager process logs (slog json output). Bind-mounted so operators
       # can `tail -f /var/log/ongrid/*.log` directly without docker exec
-      # and so log shipping (promtail / vector / fluent-bit) can scrape
+      # and so log shipping (OpenTelemetry Collector / Vector / Fluent Bit) can scrape
       # from the host without needing the docker socket. Override
       # ONGRID_LOG_DIR to point at a separate log filesystem.
       - ${ONGRID_LOG_DIR:-/var/log/ongrid}:/var/log/ongrid

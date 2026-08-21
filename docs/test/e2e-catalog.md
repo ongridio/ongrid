@@ -61,7 +61,7 @@
 | D3 | hostmetrics → Prom | 等 1 个 scrape | `node_uname_info{device_id="N"}` 有 | **P0** | |
 | D4 | procmetrics → Prom | 同上 | `namedprocess_namegroup_*{device_id="N"}` 有 | **P0** | |
 | D5 | traces plugin → Tempo | edge 跑产生 span 的进程 | Tempo `/api/search` 能查到 | P1 | |
-| D6 | plugin health 心跳上报 → UI | 杀掉 promtail | EdgeDetail 显 logs=crashed + last_error | **P0** | |
+| D6 | plugin health 心跳上报 → UI | 杀掉 logs otelcol-contrib | EdgeDetail 显 logs=crashed + last_error | **P0** | |
 | D7 | plugin config 改 → edge SIGHUP 重载 | `PUT /v1/edges/{id}/plugins/logs` | subprocess 拿到新 yaml,不重启 agent | P1 | |
 | D8 | plugin self-check 失败上报 | 删 plugin 二进制 | install-edge.sh 红字、agent 上报 crashed | P1 | |
 

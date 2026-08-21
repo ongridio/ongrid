@@ -9,10 +9,9 @@
 #   (e.g. `curl localhost:9101/metrics`). Production deployments can ignore it.
 
 ARG VERSION=dev
-ARG PROMTAIL_VERSION=3.4.0
 ARG NODE_EXPORTER_VERSION=1.8.2
 ARG PROCESS_EXPORTER_VERSION=0.8.4
-ARG OTELCOL_VERSION=0.118.0
+ARG OTELCOL_VERSION=0.157.0
 
 # ---------- Stage 1: builder ----------
 # The edge binary is pure Go, so cross-compile on the native build platform.
@@ -37,33 +36,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     -ldflags="-s -w -X main.version=${VERSION}" \
     -o /out/ongrid-edge ./cmd/ongrid-edge
 
-# ---------- Stage 2: bundled logs plugin ----------
-# Download target-specific assets on the native build platform; none of these
-# stages executes the downloaded binaries.
-FROM --platform=$BUILDPLATFORM alpine:3.20 AS promtail
-
-ARG PROMTAIL_VERSION
-ARG TARGETARCH
-RUN set -eux; \
-    apk add --no-cache ca-certificates curl unzip; \
-    arch="${TARGETARCH:-$(apk --print-arch)}"; \
-    case "$arch" in \
-        x86_64) arch=amd64 ;; \
-        aarch64) arch=arm64 ;; \
-        amd64|arm64) ;; \
-        *) echo "unsupported promtail arch: $arch" >&2; exit 1 ;; \
-    esac; \
-    mkdir -p /out; \
-    asset="promtail-linux-${arch}.zip"; \
-    base="https://github.com/grafana/loki/releases/download/v${PROMTAIL_VERSION}"; \
-    curl -fL --retry 3 --retry-all-errors --retry-delay 3 --connect-timeout 15 -o /tmp/promtail.zip "${base}/${asset}"; \
-    curl -fL --retry 3 --retry-all-errors --retry-delay 3 --connect-timeout 15 -o /tmp/SHA256SUMS "${base}/SHA256SUMS"; \
-    awk -v asset="${asset}" '$2 == asset { print $1 "  /tmp/promtail.zip" }' /tmp/SHA256SUMS | sha256sum -c -; \
-    unzip -p /tmp/promtail.zip > /out/promtail; \
-    chmod 0755 /out/promtail; \
-    rm -f /tmp/promtail.zip
-
-# ---------- Stage 3: bundled host metrics plugin ----------
+# ---------- Stage 2: bundled host metrics plugin ----------
 FROM --platform=$BUILDPLATFORM alpine:3.20 AS node-exporter
 
 ARG NODE_EXPORTER_VERSION
@@ -88,7 +61,7 @@ RUN set -eux; \
     chmod 0755 /out/node_exporter; \
     rm -f /tmp/node_exporter.tgz
 
-# ---------- Stage 4: bundled process metrics plugin ----------
+# ---------- Stage 3: bundled process metrics plugin ----------
 FROM --platform=$BUILDPLATFORM alpine:3.20 AS process-exporter
 
 ARG PROCESS_EXPORTER_VERSION
@@ -114,7 +87,7 @@ RUN set -eux; \
     chmod 0755 /out/process_exporter; \
     rm -f /tmp/process_exporter.tgz
 
-# ---------- Stage 5: bundled traces plugin ----------
+# ---------- Stage 4: bundled OpenTelemetry logs/traces plugin ----------
 FROM --platform=$BUILDPLATFORM alpine:3.20 AS otelcol-contrib
 
 ARG OTELCOL_VERSION
@@ -138,13 +111,10 @@ RUN set -eux; \
     chmod 0755 /out/otelcol-contrib; \
     rm -f /tmp/otelcol-contrib.tgz
 
-# ---------- Stage 6: runtime (distroless, nonroot) ----------
-# promtail is distributed as a dynamically linked Linux binary, so the
-# final image needs the base distroless runtime rather than static.
+# ---------- Stage 5: runtime (distroless, nonroot) ----------
 FROM gcr.io/distroless/base-debian12:nonroot
 
 COPY --from=builder /out/ongrid-edge /ongrid-edge
-COPY --from=promtail /out/promtail /usr/local/lib/ongrid-edge/promtail
 COPY --from=node-exporter /out/node_exporter /usr/local/lib/ongrid-edge/node_exporter
 COPY --from=process-exporter /out/process_exporter /usr/local/lib/ongrid-edge/process_exporter
 COPY --from=otelcol-contrib /out/otelcol-contrib /usr/local/lib/ongrid-edge/otelcol-contrib

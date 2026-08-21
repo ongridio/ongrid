@@ -17,7 +17,7 @@ SERVICE_FILE="/etc/systemd/system/ongrid-edge.service"
 UPGRADE_SERVICE_FILE="/etc/systemd/system/ongrid-edge-upgrade.service"
 LOG_DIR="/var/log/ongrid-edge"
 SERVICE_USER="ongrid-edge"
-# Wholesale plugin dirs: bundled binaries (promtail, node_exporter,
+# Wholesale plugin dirs: bundled binaries (otelcol-contrib, node_exporter,
 # process_exporter, ...) and plugin work state (configs + textfile
 # producer outputs + .upgrade stage). Both are agent-owned; leaving
 # either behind makes reinstall non-deterministic.
@@ -42,8 +42,8 @@ systemctl disable ongrid-edge ongrid-edge-upgrade ongrid-node-exporter ongrid-pr
 
 # Defensive: if systemd never actually managed the agent (manual
 # install, broken unit file, etc.), kill the supervisor and any
-# subprocess plugins by binary path. Matches every plugin (promtail,
-# otelcol-contrib, node_exporter, process_exporter, ...) without
+# subprocess plugins by binary path. Matches every plugin (otelcol-contrib,
+# node_exporter, process_exporter, ...) without
 # enumerating them.
 pkill -9 -f '/usr/local/bin/ongrid-edge|/usr/local/lib/ongrid-edge/' 2>/dev/null || true
 

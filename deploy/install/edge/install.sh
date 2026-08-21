@@ -234,8 +234,8 @@ rm -f "$TMP_HOOK"
 
 # --- bundled plugin binaries (ADR-015) --------------------------------------
 #
-# The agent's plugin supervisor runs promtail (logs), node_exporter
-# (hostmetrics), process_exporter (procmetrics), otelcol-contrib (traces),
+# The agent's plugin supervisor runs otelcol-contrib (logs/traces), node_exporter
+# (hostmetrics), process_exporter (procmetrics),
 # and database exporters (databasemetrics)
 # as subprocesses, expecting them under ${APPLY_HOOK_DIR}. The old curl-pipe
 # installer fetched ONLY the agent binary, so every edge enrolled via the UI
@@ -258,7 +258,7 @@ fetch_plugin_bin() {
     fi
     rm -f "$tmp"
 }
-for pbin in promtail node_exporter process_exporter otelcol-contrib mysqld_exporter postgres_exporter redis_exporter mongodb_exporter; do
+for pbin in node_exporter process_exporter otelcol-contrib mysqld_exporter postgres_exporter redis_exporter mongodb_exporter; do
     fetch_plugin_bin "$pbin"
 done
 
@@ -269,7 +269,7 @@ if ! id -u "$SERVICE_USER" >/dev/null 2>&1; then
     useradd --system --no-create-home --shell /usr/sbin/nologin "$SERVICE_USER"
 fi
 
-# Grant log-read group membership so the logs plugin (promtail) can read
+# Grant log-read group membership so the logs Collector can read
 # /var/log/* (root:adm 640) and the journal (systemd-journal). Idempotent.
 # Re-asserted on every root start by apply-pending-upgrade.sh, so bundle
 # upgrades that skip this installer don't silently lose it.
@@ -470,7 +470,7 @@ printf '\n'
 echo
 echo "${C_BOLD}${C_CYAN}--- self-check ---${C_RESET}"
 SELFCHECK_FAIL=0
-for tool in promtail otelcol-contrib node_exporter process_exporter mysqld_exporter postgres_exporter redis_exporter mongodb_exporter; do
+for tool in otelcol-contrib node_exporter process_exporter mysqld_exporter postgres_exporter redis_exporter mongodb_exporter; do
     if [[ -x "${APPLY_HOOK_DIR}/${tool}" ]]; then
         log_ok "plugin binary present: ${tool}"
     else

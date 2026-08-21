@@ -15,7 +15,7 @@ tools:
   - get_incident_detail
   - get_edge_summary
   - query_promql
-  - query_logql
+  - search_logs
 
 disallowed_tools:
   - "*_skill"                    # 通配，禁止任何 skill 执行
@@ -64,7 +64,7 @@ metadata:
    - 找不到明确 SOP / 回滚路径 → 直接 reject："no SOP or rollback path for action <X>"
 2. **查目标设备状态**（用 `get_edge_summary(device_id)`）
    - 设备 offline / 已经在重启循环 / 上次 mutating 操作 < 5 分钟内 → reject
-3. **查并行操作**（用 `query_logql` 在最近 10 分钟内 grep `audit:` 同 target 的 mutating 记录）
+3. **查并行操作**（用 `search_logs` 在最近 10 分钟内检索 `audit:` 和同 target 的 mutating 记录）
    - 有并行 → reject："并行操作检测到，等 X 完成"
 4. **查关联告警**（用 `get_incident_detail` 看 reason 引用的 incident，确认 reason 站得住）
    - reason 跟告警内容明显冲突 → reject + reviewer 觉得 operator 误判

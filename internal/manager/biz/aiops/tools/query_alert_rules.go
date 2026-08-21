@@ -25,7 +25,7 @@ var QueryAlertRulesSchema = json.RawMessage(`{
   "properties": {
     "kind": {
       "type": "string",
-      "description": "Filter by rule kind (metric_threshold | metric_anomaly | metric_forecast | metric_burn_rate | metric_raw | log_match | log_volume | trace_latency | trace_error_rate)."
+      "description": "Filter by rule kind (metric_threshold | metric_anomaly | metric_forecast | metric_burn_rate | metric_raw | log_search | log_match | log_volume | trace_latency | trace_error_rate)."
     },
     "enabled": {
       "type": "boolean",

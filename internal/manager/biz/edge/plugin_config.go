@@ -48,6 +48,14 @@ type EndpointResolver interface {
 	Endpoint(ctx context.Context, plugin string) string
 }
 
+// PluginRuntimeOverlayProvider supplies manager-owned, non-sensitive runtime
+// settings that must not be editable through a per-edge plugin row. The log
+// backend service uses it to project the selected backend generation into the
+// existing logs plugin snapshot while keeping the control channel unchanged.
+type PluginRuntimeOverlayProvider interface {
+	PluginRuntimeOverlay(ctx context.Context, edgeID uint64, plugin string) (map[string]interface{}, error)
+}
+
 // PluginConfigUC is the use-case for managing per-edge plugin configs.
 //
 // Two consumers:
@@ -63,6 +71,7 @@ type PluginConfigUC struct {
 	notifier     EdgeReloadNotifier
 	secretWriter DatabaseMetricsSecretWriter
 	resolver     EndpointResolver
+	runtime      PluginRuntimeOverlayProvider
 	log          *slog.Logger
 }
 
@@ -104,6 +113,27 @@ func (uc *PluginConfigUC) SetDatabaseMetricsSecretWriter(w DatabaseMetricsSecret
 	uc.secretWriter = w
 }
 
+// SetRuntimeOverlayProvider injects manager-owned plugin runtime overlays.
+func (uc *PluginConfigUC) SetRuntimeOverlayProvider(provider PluginRuntimeOverlayProvider) {
+	uc.runtime = provider
+}
+
+// IsEnabled resolves the effective plugin policy for one Edge. An explicit
+// row wins; otherwise the same default used by ListForUI/FetchForEdge applies.
+func (uc *PluginConfigUC) IsEnabled(ctx context.Context, edgeID uint64, plugin string) (bool, error) {
+	if edgeID == 0 || !model.IsKnownPluginName(plugin) {
+		return false, errs.ErrInvalid
+	}
+	row, err := uc.repo.Get(ctx, edgeID, plugin)
+	if errors.Is(err, errs.ErrNotFound) {
+		return pluginDefaultEnabled[plugin], nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return row.Enabled, nil
+}
+
 // PluginRow is the UI/HTTP-friendly view of one plugin row.
 type PluginRow struct {
 	PluginName string                 `json:"plugin_name"`
@@ -131,7 +161,7 @@ type PluginRow struct {
 //     worked for an edge co-resident with the manager.
 //   - custommetrics / databasemetrics — operator configured metric
 //     sub-plugins. They stay disabled until targets/sources are set.
-//   - logs / traces — promtail / otelcol subprocesses pushing direct
+//   - logs / traces — otelcol-contrib subprocesses pushing direct
 //     to manager nginx via publicURL.
 //
 // Stay off:
@@ -305,6 +335,15 @@ func (uc *PluginConfigUC) FetchForEdge(ctx context.Context, edgeID uint64) (*Wir
 			cfg.Enabled = r.Enabled
 			cfg.Spec = decodeSpec(r.SpecJSON)
 		}
+		if uc.runtime != nil {
+			overlay, overlayErr := uc.runtime.PluginRuntimeOverlay(ctx, edgeID, name)
+			if overlayErr != nil {
+				return nil, fmt.Errorf("resolve %s runtime overlay: %w", name, overlayErr)
+			}
+			if len(overlay) > 0 {
+				cfg.Spec = mergeRuntimeOverlay(cfg.Spec, overlay)
+			}
+		}
 		if cfg.Enabled {
 			enabledNames = append(enabledNames, name)
 		}
@@ -316,6 +355,17 @@ func (uc *PluginConfigUC) FetchForEdge(ctx context.Context, edgeID uint64) (*Wir
 		slog.Int("configs_out", len(out.Configs)),
 		slog.Any("enabled", enabledNames))
 	return out, nil
+}
+
+func mergeRuntimeOverlay(spec, overlay map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(spec)+len(overlay))
+	for key, value := range spec {
+		out[key] = value
+	}
+	for key, value := range overlay {
+		out[key] = value
+	}
+	return out
 }
 
 // CountByPlugin proxies to the repo (UI Integrations cards).

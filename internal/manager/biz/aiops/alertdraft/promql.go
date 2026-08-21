@@ -339,7 +339,7 @@ func defaultAlertScope(kind string) string {
 	switch strings.TrimSpace(kind) {
 	case "metric_threshold", "metric_anomaly", "metric_forecast":
 		return "host"
-	case "metric_raw", "metric_burn_rate", "log_match", "log_volume", "trace_latency", "trace_error_rate":
+	case "metric_raw", "metric_burn_rate", "log_search", "log_match", "log_volume", "trace_latency", "trace_error_rate":
 		return "global"
 	default:
 		return ""

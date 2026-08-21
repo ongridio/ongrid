@@ -2,7 +2,7 @@
 name: host_bash
 description: 设备上跑只读 shell 命令做诊断探索（沙箱化 / read-only policy）
 when_to_use: |
-  当结构化工具（host_load / host_processes / host_find_large_files / query_logql / query_promql）
+  当结构化工具（host_load / host_processes / host_find_large_files / search_logs / query_promql）
   不够用、需要灵活的 shell 一行 / pipe 时使用。**只读**：写操作（rm / mv / chmod / systemctl restart 等）
   会被边端 cmdpolicy 沙箱拒掉。
 

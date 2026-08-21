@@ -23,7 +23,10 @@ spec:
         app.kubernetes.io/component: node
     spec:
       serviceAccountName: {{ include "ongrid-edge.nodeServiceAccount" . }}
-      automountServiceAccountToken: true
+      # The node Agent chroots into /host/root before it starts the Collector.
+      # Disable the implicit mount and project the same rotating credentials
+      # explicitly below so they can also be mounted inside that chroot.
+      automountServiceAccountToken: false
       {{- with .Values.image.architecture }}
       nodeSelector:
         kubernetes.io/arch: {{ . | quote }}
@@ -61,6 +64,9 @@ spec:
           volumeMounts:
             - name: host-root
               mountPath: /host/root
+            - name: node-service-account
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
       containers:
         - name: edge-node
           image: {{ include "ongrid-edge.image" . | quote }}
@@ -99,6 +105,8 @@ spec:
               value: /var/lib/ongrid-edge/k8s-runtime/plugins
             - name: ONGRID_EDGE_PLUGIN_WORK_DIR
               value: /var/lib/ongrid-edge/k8s-state/plugins
+            - name: ONGRID_EDGE_SECRET_DIR
+              value: /var/lib/ongrid-edge/k8s-state/secrets
             - name: ONGRID_EDGE_UPGRADE_STAGE_DIR
               value: /var/lib/ongrid-edge/k8s-state/.upgrade
             - name: ONGRID_MANAGER_PUBLIC_URL
@@ -148,8 +156,32 @@ spec:
             - name: host-root
               mountPath: /host/root
               mountPropagation: HostToContainer
+            # enter-k8s-host chroots into /host/root. Mount the projected
+            # credentials below that root so the Agent's Kubernetes client
+            # can use them while following kubelet token rotation. The
+            # node-local logs Collector does not access the Kubernetes API.
+            - name: node-service-account
+              mountPath: /host/root/var/lib/ongrid-edge/k8s-runtime/serviceaccount
+              readOnly: true
       volumes:
         - name: host-root
           hostPath:
             path: /
             type: Directory
+        - name: node-service-account
+          projected:
+            defaultMode: 0444
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 3600
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - key: ca.crt
+                      path: ca.crt
+              - downwardAPI:
+                  items:
+                    - path: namespace
+                      fieldRef:
+                        fieldPath: metadata.namespace

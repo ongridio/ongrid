@@ -2,6 +2,9 @@ package grafana
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -9,6 +12,7 @@ import (
 	settingbiz "github.com/ongridio/ongrid/internal/manager/biz/setting"
 	settingmodel "github.com/ongridio/ongrid/internal/manager/model/setting"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
+	pkggrafana "github.com/ongridio/ongrid/internal/pkg/grafana"
 )
 
 type fakeSettingRepo struct {
@@ -130,5 +134,120 @@ func TestLokiDatasourceEmptyURLSkipsSync(t *testing.T) {
 	settings := settingbiz.New(newFakeSettingRepo(), nil)
 	if ds := New(settings, false, nil).lokiDatasource(context.Background()); ds != nil {
 		t.Fatalf("loki datasource = %#v, want nil", ds)
+	}
+}
+
+func TestElasticsearchDatasourceUsesReadOnlyQuerySettings(t *testing.T) {
+	t.Parallel()
+	ds, err := elasticsearchDatasource(pkggrafana.ElasticsearchDatasourceConfig{
+		URL:          "https://es.example.com:9200/",
+		IndexPattern: "logs-ongrid.*.otel-prod",
+		APIKey:       "query-only-key",
+		CAPEM:        "test-ca",
+		TLSInsecure:  true,
+	})
+	if err != nil {
+		t.Fatalf("elasticsearchDatasource: %v", err)
+	}
+	if ds.UID != esDatasourceUID || ds.Name != esDatasourceName || ds.Type != "elasticsearch" {
+		t.Fatalf("identity = (%s,%s,%s)", ds.UID, ds.Name, ds.Type)
+	}
+	if ds.URL != "https://es.example.com:9200" || ds.Access != "proxy" {
+		t.Fatalf("endpoint = %q access=%q", ds.URL, ds.Access)
+	}
+	for key, want := range map[string]any{
+		"index":             "logs-ongrid.*.otel-prod",
+		"timeField":         "@timestamp",
+		"logMessageField":   "body.text",
+		"logLevelField":     "resource.attributes.level",
+		"httpHeaderName1":   "Authorization",
+		"tlsSkipVerify":     true,
+		"tlsAuthWithCACert": true,
+	} {
+		if got := ds.JSONData[key]; got != want {
+			t.Fatalf("jsonData[%q] = %#v, want %#v", key, got, want)
+		}
+	}
+	if got := ds.SecureJSONData["httpHeaderValue1"]; got != "ApiKey query-only-key" {
+		t.Fatalf("query authorization = %q", got)
+	}
+	if got := ds.SecureJSONData["tlsCACert"]; got != "test-ca" {
+		t.Fatalf("tls CA = %q", got)
+	}
+}
+
+func TestElasticsearchDatasourceRejectsIncompleteConfig(t *testing.T) {
+	t.Parallel()
+	valid := pkggrafana.ElasticsearchDatasourceConfig{
+		URL:          "https://es.example.com:9200",
+		IndexPattern: "logs-ongrid.*.otel-prod",
+		APIKey:       "query-only-key",
+	}
+	tests := []struct {
+		name   string
+		mutate func(*pkggrafana.ElasticsearchDatasourceConfig)
+	}{
+		{name: "url", mutate: func(config *pkggrafana.ElasticsearchDatasourceConfig) { config.URL = "" }},
+		{name: "index", mutate: func(config *pkggrafana.ElasticsearchDatasourceConfig) { config.IndexPattern = "" }},
+		{name: "api key", mutate: func(config *pkggrafana.ElasticsearchDatasourceConfig) { config.APIKey = "" }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := valid
+			tt.mutate(&config)
+			if _, err := elasticsearchDatasource(config); err == nil {
+				t.Fatal("elasticsearchDatasource error = nil")
+			}
+		})
+	}
+}
+
+func TestSyncLogsDatasourceCreatesActiveElasticsearchDatasource(t *testing.T) {
+	t.Parallel()
+	var created pkggrafana.Datasource
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer grafana-token" {
+			t.Errorf("Authorization = %q", got)
+		}
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/datasources/uid/"+esDatasourceUID:
+			http.Error(w, "not found", http.StatusNotFound)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/datasources":
+			if err := json.NewDecoder(r.Body).Decode(&created); err != nil {
+				t.Errorf("decode datasource: %v", err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":1}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	ctx := context.Background()
+	settings := settingbiz.New(newFakeSettingRepo(), nil)
+	if err := settings.Set(ctx, settingmodel.CategoryGrafana, settingmodel.KeyGrafanaRootURL, server.URL, false); err != nil {
+		t.Fatalf("set Grafana URL: %v", err)
+	}
+	if err := settings.Set(ctx, settingmodel.CategoryGrafana, settingmodel.KeyGrafanaSAToken, "grafana-token", true); err != nil {
+		t.Fatalf("set Grafana token: %v", err)
+	}
+	config := pkggrafana.ElasticsearchDatasourceConfig{
+		URL:          "https://es.example.com:9200",
+		IndexPattern: "logs-ongrid.*.otel-prod",
+		APIKey:       "query-only-key",
+	}
+	svc := New(settings, false, nil)
+	svc.SetLogsDatasourceProvider(func(context.Context) (*pkggrafana.ElasticsearchDatasourceConfig, error) {
+		return &config, nil
+	})
+	if err := svc.SyncLogsDatasource(ctx); err != nil {
+		t.Fatalf("SyncLogsDatasource: %v", err)
+	}
+	if created.UID != esDatasourceUID || created.Type != "elasticsearch" {
+		t.Fatalf("created datasource = %+v", created)
+	}
+	if got := created.SecureJSONData["httpHeaderValue1"]; got != "ApiKey query-only-key" {
+		t.Fatalf("created query authorization = %q", got)
 	}
 }

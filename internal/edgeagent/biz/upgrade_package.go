@@ -46,10 +46,9 @@ var bundleDownloadClient = &http.Client{
 const bundleDirName = "incoming"
 
 // maxBundleBytes caps the tarball we'll accept (decompressed + on the
-// wire). otelcol-contrib alone is ~300 MB extracted, plus promtail
-// (~110 MB), node_exporter (~20 MB), process_exporter (~11 MB),
-// ongrid-edge (~14 MB) — current bundle extracts to ~460 MB. 1 GB cap
-// keeps headroom for a second otel-class binary or a beefier promtail
+// wire). otelcol-contrib is the largest component, plus node_exporter,
+// process_exporter, database exporters and ongrid-edge. The 1 GB cap
+// keeps headroom for Collector/exporter growth
 // without re-tuning every release.
 const maxBundleBytes = 1024 * 1024 * 1024
 

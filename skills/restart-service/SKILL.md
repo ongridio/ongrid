@@ -9,7 +9,7 @@ when_to_use: |
   收到 reject 时**直接告知用户原因，不要重试**。
 
   不要主动建议重启 — 让用户先要求。常见的"我猜重启就好了"是诊断不深入的信号，
-  应该先用 query_logql / query_promql / get_edge_summary 把根因摸清楚再让用户决定。
+  应该先用 search_logs / query_promql / get_edge_summary 把根因摸清楚再让用户决定。
 
   允许列表（白名单）：nginx / redis / prometheus / loki / tempo / grafana / mysql / ongrid
   其他 service 直接拒绝（也不走 reviewer）。
@@ -65,7 +65,7 @@ approve → 真正调用边端 systemctl restart
 reject  → 返回 reject 理由给你，**不要重试，转告用户**
 ```
 
-reviewer 自己会用 `get_edge_summary` / `query_logql` / `get_incident_detail` 看 SOP /
+reviewer 自己会用 `get_edge_summary` / `search_logs` / `get_incident_detail` 看 SOP /
 并行操作 / 上次 mutating 时间 / 关联告警再决议；你不需要重复这些查询。
 
 ## 不要做的事

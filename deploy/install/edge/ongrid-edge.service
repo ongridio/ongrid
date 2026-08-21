@@ -30,9 +30,9 @@ ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 # Plugin runtime (ADR-015) writes rendered configs + subprocess logs +
-# promtail positions cursor here; subprocess plugins also need write
+# Collector checkpoints and persistent queues live here; subprocess plugins need write
 # access to their own state files. /run/ongrid-edge is not enough — we
-# need persistent state across restarts (promtail positions etc.).
+# need persistent state across restarts (filelog/journald checkpoints, queues).
 #
 # StateDirectory= makes systemd create /var/lib/ongrid-edge at start and
 # implicitly adds it to the ReadWritePaths whitelist. Without this,

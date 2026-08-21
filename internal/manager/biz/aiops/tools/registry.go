@@ -25,6 +25,7 @@ import (
 	topologybiz "github.com/ongridio/ongrid/internal/manager/biz/topology"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/llm"
+	"github.com/ongridio/ongrid/internal/pkg/logquery"
 )
 
 // Caller is the narrow seam this package needs from the frontierbound SDK
@@ -71,6 +72,7 @@ type Registry struct {
 	alertUC    AlertUsecase
 	promQuery  PromQuerier
 	logQuery   LogQuerier
+	logSearch  logquery.Searcher
 	traceQuery TraceQuerier
 	// knowledge is the user-curated knowledge base + git repo searcher.
 	// nil-safe — when nil the query_knowledge tool isn't registered.
@@ -267,6 +269,21 @@ func (r *Registry) SetPluginConfigLister(p PluginConfigLister) {
 // the graph BaseTool registry. The legacy closure-style registry does not
 // expose these mutating flows.
 func (r *Registry) SetConfigManager(m ConfigManager) { r.configManager = m }
+
+// SetLogSearcher wires the backend-neutral log tool. The legacy query_logql
+// tool remains registered when Loki is available for compatibility, while
+// search_logs follows the active Loki/Elasticsearch query planner.
+func (r *Registry) SetLogSearcher(search logquery.Searcher) {
+	r.logSearch = search
+	if search == nil {
+		delete(r.tools, ToolNameSearchLogs)
+		return
+	}
+	r.Register(Tool{
+		Name: ToolNameSearchLogs, Description: SearchLogsDescription,
+		Schema: SearchLogsSchema, Execute: r.executeSearchLogs,
+	})
+}
 
 // SetPacketCaptureCreator wires capture_pcap into the BaseTool registry.
 func (r *Registry) SetPacketCaptureCreator(p PacketCaptureCreator) { r.packetCapture = p }

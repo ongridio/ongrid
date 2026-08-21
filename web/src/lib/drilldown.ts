@@ -200,13 +200,13 @@ export function hasGrafanaDrilldownConfig(): boolean {
 // `datasource` is an OBJECT { type, uid } — the bare-string form also
 // stopped resolving in v11.
 //
-// dsType is "loki" | "tempo" | "prometheus"; dsUid is the provisioned
-// uid (ongrid-loki / ongrid-tempo / ongrid-prometheus). query carries
+// dsType is "loki" | "tempo" | "prometheus" | "elasticsearch"; dsUid is
+// the managed datasource uid. query carries
 // the per-engine fields (expr+queryType for loki/prom, query+queryType
 // for tempo) — we pass it through verbatim so callers keep control.
 export function buildExploreUrl(opts: {
   base: string;
-  dsType: 'loki' | 'tempo' | 'prometheus';
+  dsType: 'loki' | 'tempo' | 'prometheus' | 'elasticsearch';
   dsUid: string;
   query: Record<string, unknown>;
   // Absolute ms epoch (number) OR a Grafana relative expr ("now-1h").

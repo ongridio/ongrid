@@ -71,7 +71,7 @@ var GetIncidentDetailBatchSchema = json.RawMessage(`{
 const getIncidentDetailWhenToUse = "一次给多个 incident_id 拿全量行 + 时间线（firing → ack → resolve / notification_sent / failed）。" +
 	"LLM 经常关联多个 alert，一次拉一组比逐个调省 4-8 轮。" +
 	"NOT for: 列 incidents（用 query_incidents）/ 关联诊断（用 correlate_incident）/ " +
-	"ad-hoc metric/log 查询（用 query_promql / query_logql）。"
+	"ad-hoc metric/log 查询（用 query_promql / search_logs）。"
 
 // Info returns metadata. Class=read.
 func (t *GetIncidentDetailTool) Info(_ context.Context) (*basetool.ToolInfo, error) {

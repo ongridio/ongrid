@@ -19,7 +19,7 @@ command -v xz >/dev/null 2>&1 || { echo "xz is required" >&2; exit 1; }
 
 deps=(
     node_exporter process_exporter mysqld_exporter postgres_exporter
-    redis_exporter mongodb_exporter promtail otelcol-contrib
+    redis_exporter mongodb_exporter otelcol-contrib
 )
 
 mkdir -p "$OUT_DIR"
@@ -39,7 +39,6 @@ for target in "$@"; do
 
     case "$MODE" in
         deps)
-            : "${PROMTAIL_VERSION:?PROMTAIL_VERSION is required}"
             : "${OTELCOL_VERSION:?OTELCOL_VERSION is required}"
             : "${NODE_EXPORTER_VERSION:?NODE_EXPORTER_VERSION is required}"
             : "${PROCESS_EXPORTER_VERSION:?PROCESS_EXPORTER_VERSION is required}"
@@ -57,8 +56,7 @@ for target in "$@"; do
             done
             printf '%s\n' "$target" > "$stage/TARGET"
             cat > "$stage/DEPENDENCIES" <<EOF
-layout=1
-promtail=${PROMTAIL_VERSION}
+layout=2
 otelcol-contrib=${OTELCOL_VERSION}
 node_exporter=${NODE_EXPORTER_VERSION}
 process_exporter=${PROCESS_EXPORTER_VERSION}

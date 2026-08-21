@@ -78,7 +78,7 @@ var QueryK8sLogsSchema = json.RawMessage(`{
 
 const queryK8sLogsWhenToUse = "Use when the user asks for recent Pod logs, CrashLoopBackOff output, application stdout/stderr for one named Pod, or when Kubernetes fault triage cannot confirm the root cause from snapshot/events/describe alone. " +
 	"For CrashLoopBackOff, restart_count>0, liveness/readiness probe failures, or init-container failures after startup, sample bounded logs only when logs add material evidence or the user asks to verify pods/log access. " +
-	"This is a bounded live Kubernetes pods/log fallback; prefer query_logql for production log search and query_k8s_snapshot for counts/lists. " +
+	"This is a bounded live Kubernetes pods/log fallback; prefer search_logs for production log search and query_k8s_snapshot for counts/lists. " +
 	"Never use this for kubectl exec, Secret reads, arbitrary files, or high-volume log export."
 
 const queryK8sLogsCallTimeout = 20 * time.Second

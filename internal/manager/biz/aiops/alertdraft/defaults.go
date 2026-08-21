@@ -94,6 +94,8 @@ func suggestedAlertRuleKeyFromSpec(in RuleConfigInput) string {
 		}
 	case "metric_burn_rate":
 		return "slo_burn_rate"
+	case "log_search":
+		return "log_search"
 	case "log_match":
 		return "log_match"
 	case "log_volume":
@@ -209,6 +211,8 @@ func suggestedAlertRuleNameFromSpec(in RuleConfigInput) string {
 		return "Metric forecast alert"
 	case "metric_burn_rate":
 		return "SLO burn rate alert"
+	case "log_search":
+		return "Structured log search alert"
 	case "log_match":
 		return "Log match alert"
 	case "log_volume":

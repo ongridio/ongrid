@@ -311,7 +311,7 @@ func buildSystemReminder(in *Input) string {
 			"- If the same tool fails twice, change approach instead of repeating it.",
 			"- device_id / alert_id must be numeric IDs (@-mentions have already been resolved).",
 			"- For logs or traces on a named device without a numeric device_id, call query_devices once first, then pass device_id to the query tool. Do not guess hostname/instance labels.",
-			"- For a device-scoped LogQL query, start with {} plus the requested line filter. After it returns matching lines, summarize instead of enumerating speculative labels.",
+			"- For device-scoped logs, prefer search_logs with device_ids and keywords; do not invent backend labels or DSL. Summarize once matching lines return.",
 			"- Tool results are facts; do not invent data when evidence is missing.",
 			"- call_budget_exceeded only applies to the current user turn; a new user message may call tools again.",
 		)
@@ -320,7 +320,7 @@ func buildSystemReminder(in *Input) string {
 			"- 同一工具失败两次后请换思路，不要重复调用",
 			"- device_id / alert_id 必须是数字 ID（@-mention 已经为你解析）",
 			"- 按名称查询设备日志或链路时，若没有数字 device_id，先调用一次 query_devices，再把 device_id 传给查询工具；不要猜 hostname/instance 标签",
-			"- 设备范围的 LogQL 查询先使用 {} 加所需行过滤；已有命中日志后直接总结，不要继续枚举猜测性标签",
+			"- 设备日志优先用 search_logs 传 device_ids 与关键词；不要猜后端标签或 DSL，已有命中后直接总结",
 			"- 工具结果是事实，不要在没有数据时编造",
 			"- call_budget_exceeded 只限制当前用户消息；新消息可重新调用工具",
 		)

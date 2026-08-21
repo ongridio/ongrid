@@ -59,6 +59,7 @@ export function revealSetting(category: string, key: string): Promise<{ value: s
 export type GrafanaSyncResult = {
   folder: string;
   datasource: string;
+  datasources?: string[];
   dashboards: string[];
 };
 

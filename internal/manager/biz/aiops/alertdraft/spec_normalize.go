@@ -28,6 +28,8 @@ func normalizeAlertScopeType(scopeType, kind string) string {
 func normalizeAlertScopeForKind(scopeType, kind string) string {
 	scope := strings.TrimSpace(scopeType)
 	switch strings.TrimSpace(kind) {
+	case "log_search":
+		return "global"
 	case "log_match", "log_volume", "trace_latency", "trace_error_rate", "metric_burn_rate":
 		if scope == "monitoring_pipeline" {
 			return "global"
@@ -42,7 +44,7 @@ func normalizeAlertRuleKind(kind string) string {
 	k = strings.ReplaceAll(k, " ", "_")
 	switch k {
 	case "", "metric_threshold", "metric_raw", "metric_anomaly", "metric_forecast", "metric_burn_rate",
-		"log_match", "log_volume", "trace_latency", "trace_error_rate":
+		"log_search", "log_match", "log_volume", "trace_latency", "trace_error_rate":
 		return k
 	case "threshold", "host_threshold", "host_metric", "host_metric_threshold":
 		return "metric_threshold"
@@ -54,7 +56,9 @@ func normalizeAlertRuleKind(kind string) string {
 		return "metric_forecast"
 	case "burn_rate", "slo_burn_rate":
 		return "metric_burn_rate"
-	case "log", "log_regex", "log_error", "log_keyword":
+	case "log_error", "log_keyword":
+		return "log_search"
+	case "log", "log_regex":
 		return "log_match"
 	case "log_rate", "log_count", "log_spike":
 		return "log_volume"
@@ -76,6 +80,8 @@ func inferAlertRuleKind(in RuleConfigInput) string {
 		return ""
 	}
 	switch {
+	case hasAnySpecKey(spec, "keywords", "include_keywords", "exclude_keywords", "filters"):
+		return "log_search"
 	case hasAnySpecKey(spec, "stream_selector") && hasAnySpecKey(spec, "ratio_op", "ratio_threshold"):
 		return "log_volume"
 	case hasAnySpecKey(spec, "stream_selector", "line_filter", "filter", "regex", "pattern"):
@@ -138,6 +144,8 @@ func normalizeAlertRuleSpec(in RuleConfigInput) RuleConfigInput {
 				map[string]interface{}{"window": "6h", "multiplier": 6},
 			}
 		}
+	case "log_search":
+		normalizeStructuredLogSearchSpec(in.Spec)
 	case "log_match":
 		normalizeLogQuerySpec(in.Spec)
 		if v, ok := firstSpecString(in.Spec, "filter", "regex", "pattern", "line_regex"); ok && strings.TrimSpace(alertSpecStringValue(in.Spec["line_filter"])) == "" {
@@ -201,6 +209,39 @@ func normalizeAlertRuleSpec(in RuleConfigInput) RuleConfigInput {
 		in = normalizeSpecMetricCondition(in)
 	}
 	return in
+}
+
+func normalizeStructuredLogSearchSpec(spec map[string]interface{}) {
+	if spec == nil {
+		return
+	}
+	setSpecDefaultString(spec, "window", "5m")
+	setSpecDefaultString(spec, "operator", ">=")
+	spec["operator"] = normalizeAlertOperator(alertSpecStringValue(spec["operator"]))
+	setSpecDefaultNumber(spec, "threshold", 1)
+
+	// Accept a few natural draft aliases, but always emit the backend's
+	// stable nested keyword contract.
+	if _, ok := spec["keywords"].(map[string]interface{}); !ok {
+		var include []interface{}
+		switch raw := spec["keywords"].(type) {
+		case string:
+			if strings.TrimSpace(raw) != "" {
+				include = []interface{}{strings.TrimSpace(raw)}
+			}
+		case []interface{}:
+			include = raw
+		}
+		if len(include) == 0 {
+			if value, ok := firstSpecString(spec, "keyword", "line_filter", "filter"); ok {
+				include = []interface{}{value}
+			}
+		}
+		spec["keywords"] = map[string]interface{}{"include": include, "mode": "any"}
+	}
+	if _, ok := spec["scope"].(map[string]interface{}); !ok {
+		spec["scope"] = map[string]interface{}{}
+	}
 }
 
 func normalizeLogQuerySpec(spec map[string]interface{}) {

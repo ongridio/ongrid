@@ -117,6 +117,45 @@ func TestAssignEnrollmentDeviceIsIdempotentAndRejectsAutomaticMove(t *testing.T)
 	}
 }
 
+func TestResolveDeviceCluster(t *testing.T) {
+	uc := newUC(t)
+	ctx := context.Background()
+	device, err := uc.CreateNode(ctx, string(model.NodeTypeDevice), "host-a", "")
+	if err != nil {
+		t.Fatalf("CreateNode(device): %v", err)
+	}
+	service, err := uc.CreateNode(ctx, string(model.NodeTypeService), "orders", "")
+	if err != nil {
+		t.Fatalf("CreateNode(service): %v", err)
+	}
+	cluster, err := uc.CreateNode(ctx, string(model.NodeTypeCluster), "edge-fleet-a", "")
+	if err != nil {
+		t.Fatalf("CreateNode(cluster): %v", err)
+	}
+
+	id, name, err := uc.ResolveDeviceCluster(ctx, device.ID)
+	if err != nil || id != 0 || name != "" {
+		t.Fatalf("unbound ResolveDeviceCluster = (%d, %q, %v), want empty", id, name, err)
+	}
+	if _, err := uc.CreateRelation(ctx, device.ID, service.ID, model.RelMemberOf, ""); err != nil {
+		t.Fatalf("CreateRelation(service membership): %v", err)
+	}
+	id, name, err = uc.ResolveDeviceCluster(ctx, device.ID)
+	if err != nil || id != 0 || name != "" {
+		t.Fatalf("non-cluster ResolveDeviceCluster = (%d, %q, %v), want empty", id, name, err)
+	}
+	if _, err := uc.CreateRelation(ctx, device.ID, cluster.ID, model.RelMemberOf, ""); err != nil {
+		t.Fatalf("CreateRelation(cluster membership): %v", err)
+	}
+	id, name, err = uc.ResolveDeviceCluster(ctx, device.ID)
+	if err != nil {
+		t.Fatalf("ResolveDeviceCluster: %v", err)
+	}
+	if id != cluster.ID || name != cluster.Name {
+		t.Fatalf("ResolveDeviceCluster = (%d, %q), want (%d, %q)", id, name, cluster.ID, cluster.Name)
+	}
+}
+
 func TestDeviceClusterMembershipIsExclusiveAndKubernetesOwned(t *testing.T) {
 	uc := newUC(t)
 	ctx := context.Background()

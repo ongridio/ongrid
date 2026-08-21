@@ -33,7 +33,7 @@ const queryIncidentsWhenToUse = "When the user wants to LIST recent alert incide
 	"'show open incidents on edge X'. " +
 	"NOT for a specific incident's timeline (use get_incident_detail). " +
 	"NOT for the full diagnostic bundle (use correlate_incident with a specific incident_id). " +
-	"NOT for raw metric/log/trace queries (use query_promql / query_logql / query_traceql)."
+	"NOT for raw metric/log/trace queries (use query_promql / search_logs / query_traceql)."
 
 // Info returns metadata. Class=read.
 func (t *QueryIncidentsTool) Info(_ context.Context) (*basetool.ToolInfo, error) {

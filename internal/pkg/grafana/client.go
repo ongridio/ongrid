@@ -84,20 +84,32 @@ func (c *Client) Health(ctx context.Context) error {
 }
 
 // Datasource is the minimal shape we send for upsert. UID is required so
-// dashboards can refer to the datasource by stable id. Type is "prometheus".
-// JSONData carries timeInterval / httpMethod / etc. (free-form per Grafana).
-// SecureJSONData carries credentials Grafana stores encrypted.
+// dashboards can refer to the datasource by stable id. JSONData carries
+// plugin-specific settings and SecureJSONData carries credentials Grafana
+// stores encrypted.
 type Datasource struct {
-	UID            string                 `json:"uid"`
-	Name           string                 `json:"name"`
-	Type           string                 `json:"type"`
-	URL            string                 `json:"url"`
-	Access         string                 `json:"access"`     // "proxy"
-	IsDefault      bool                   `json:"isDefault,omitempty"`
-	BasicAuth      bool                   `json:"basicAuth,omitempty"`
-	BasicAuthUser  string                 `json:"basicAuthUser,omitempty"`
-	JSONData       map[string]any         `json:"jsonData,omitempty"`
-	SecureJSONData map[string]string      `json:"secureJsonData,omitempty"`
+	UID            string            `json:"uid"`
+	Name           string            `json:"name"`
+	Type           string            `json:"type"`
+	URL            string            `json:"url"`
+	Access         string            `json:"access"` // "proxy"
+	IsDefault      bool              `json:"isDefault,omitempty"`
+	BasicAuth      bool              `json:"basicAuth,omitempty"`
+	BasicAuthUser  string            `json:"basicAuthUser,omitempty"`
+	JSONData       map[string]any    `json:"jsonData,omitempty"`
+	SecureJSONData map[string]string `json:"secureJsonData,omitempty"`
+}
+
+// ElasticsearchDatasourceConfig is the secret-bearing, in-process contract
+// between the logs control plane and Grafana integration. APIKey must always
+// be the read-only query credential; it is never persisted in a Grafana
+// datasource's ordinary jsonData.
+type ElasticsearchDatasourceConfig struct {
+	URL          string
+	IndexPattern string
+	APIKey       string
+	CAPEM        string
+	TLSInsecure  bool
 }
 
 // UpsertDatasource creates or replaces by UID. Grafana doesn't have a

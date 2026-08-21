@@ -39,7 +39,7 @@ func TestModelNormalizeKindAliases(t *testing.T) {
 }
 
 func TestModelKindCategoryGates(t *testing.T) {
-	for _, kind := range []string{"log_match", "log_volume", "trace_latency", "trace_error_rate"} {
+	for _, kind := range []string{"log_search", "log_match", "log_volume", "trace_latency", "trace_error_rate"} {
 		if !model.IsKnownKind(kind) {
 			t.Errorf("%s should be known", kind)
 		}

@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"encoding/base64"
 	"fmt"
+	"net"
+	"net/url"
+	"strconv"
 	"strings"
 	"text/template"
 
@@ -158,8 +161,8 @@ exporters:
       max_interval: 30s
       max_elapsed_time: 5m
 {{- if .LogsEnabled }}
-  loki/manager:
-    endpoint: {{ .LogsEndpoint }}
+  otlphttp/loki_manager:
+    logs_endpoint: {{ .LogsEndpoint }}
     {{- if .LogsTLSInsecureSkipVerify }}
     tls:
       insecure_skip_verify: true
@@ -168,11 +171,6 @@ exporters:
     headers:
       Authorization: "{{ .LogsAuthHeader }}"
     {{- end }}
-    default_labels_enabled:
-      exporter: false
-      job: true
-      instance: false
-      level: true
     {{- if .BoundedPipelines }}
     sending_queue:
       enabled: true
@@ -234,7 +232,15 @@ service:
     logs:
       level: info
     metrics:
-      address: {{ .CollectorMetricsEndpoint }}
+      level: normal
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: {{ .CollectorMetricsHost }}
+                port: {{ .CollectorMetricsPort }}
+                without_type_suffix: true
+                without_units: true
   pipelines:
     traces:
       receivers: [otlp]
@@ -244,7 +250,7 @@ service:
     logs:
       receivers: [otlp]
       processors: [{{ if .BoundedPipelines }}memory_limiter, {{ end }}{{ if .K8sAttributesEnabled }}k8sattributes, {{ end }}resource/device, resource/loki_labels, {{ if .BoundedPipelines }}batch/logs{{ else }}batch{{ end }}]
-      exporters: [loki/manager]
+      exporters: [otlphttp/loki_manager]
 {{- end }}
 {{- if .MetricsEnabled }}
     metrics:
@@ -293,6 +299,13 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 	logsEndpoint := stringOr(cfg.Spec, "logs_endpoint", "")
 	if logsEnabled && logsEndpoint == "" {
 		return nil, fmt.Errorf("traces plugin: logs_endpoint required when enable_logs=true")
+	}
+	if logsEnabled {
+		var err error
+		logsEndpoint, err = lokiOTLPLogsEndpoint(logsEndpoint)
+		if err != nil {
+			return nil, err
+		}
 	}
 	metricsEnabled := boolSpec(cfg.Spec, "enable_metrics")
 	metricsExportEndpoint := stringOr(cfg.Spec, "metrics_export_endpoint", "")
@@ -358,6 +371,12 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 		stringOr(cfg.Spec, "metrics_remote_write_auth_pass", ""),
 		stringOr(cfg.Spec, "metrics_remote_write_bearer", ""),
 	)
+	collectorMetricsHost, collectorMetricsPort, err := collectorMetricsAddress(
+		stringOr(cfg.Spec, "collector_metrics_endpoint", "127.0.0.1:8888"),
+	)
+	if err != nil {
+		return nil, err
+	}
 
 	// text/template ranges over maps in key-sorted order (Go 1.12+), so
 	// passing the raw map yields stable rendered output across runs.
@@ -388,7 +407,8 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 		"BatchSendSize":              batchSendSize,
 		"BatchMaxSize":               batchMaxSize,
 		"QueueSize":                  queueSize,
-		"CollectorMetricsEndpoint":   stringOr(cfg.Spec, "collector_metrics_endpoint", "127.0.0.1:8888"),
+		"CollectorMetricsHost":       collectorMetricsHost,
+		"CollectorMetricsPort":       collectorMetricsPort,
 	}
 
 	tmpl, err := template.New("otelcol").Parse(otelcolTemplate)
@@ -400,6 +420,37 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 		return nil, fmt.Errorf("execute template: %w", err)
 	}
 	return buf.Bytes(), nil
+}
+
+func lokiOTLPLogsEndpoint(raw string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Host == "" || parsed.User != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") {
+		return "", fmt.Errorf("traces plugin: valid Loki endpoint required")
+	}
+	path := strings.TrimRight(parsed.Path, "/")
+	switch {
+	case strings.HasSuffix(path, "/loki/api/v1/push"):
+		path = strings.TrimSuffix(path, "/loki/api/v1/push") + "/loki/otlp/v1/logs"
+	case strings.HasSuffix(path, "/otlp/v1/logs"):
+	case strings.HasSuffix(path, "/otlp"):
+		path += "/v1/logs"
+	default:
+		path += "/otlp/v1/logs"
+	}
+	parsed.Path, parsed.RawPath, parsed.RawQuery, parsed.Fragment = path, "", "", ""
+	return parsed.String(), nil
+}
+
+func collectorMetricsAddress(raw string) (string, int, error) {
+	host, portText, err := net.SplitHostPort(strings.TrimSpace(raw))
+	if err != nil || host == "" {
+		return "", 0, fmt.Errorf("traces plugin: invalid collector_metrics_endpoint")
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil || port < 1 || port > 65535 {
+		return "", 0, fmt.Errorf("traces plugin: invalid collector_metrics_endpoint")
+	}
+	return host, port, nil
 }
 
 func boolSpec(spec map[string]interface{}, key string) bool {

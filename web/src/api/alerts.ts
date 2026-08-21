@@ -177,6 +177,7 @@ export type RuleKind =
   | 'metric_forecast'
   | 'metric_burn_rate'
   | 'metric_raw'
+  | 'log_search'
   | 'log_match'
   | 'log_volume'
   | 'trace_latency'
@@ -219,8 +220,9 @@ const KIND_LABEL_EN: Record<RuleKind, { label: string; hint: string }> = {
   metric_forecast: { label: 'Metric · Forecast', hint: 'Predict when the metric crosses the threshold in the next N minutes.' },
   metric_burn_rate: { label: 'Metric · Burn rate', hint: 'SLO error-budget multi-window multi-rate.' },
   metric_raw: { label: 'Metric · Raw PromQL', hint: 'Write your own PromQL expression.' },
-  log_match: { label: 'Log · Pattern match', hint: 'LogQL regex hit count over threshold.' },
-  log_volume: { label: 'Log · Volume change', hint: 'Log volume ratio against the previous window.' },
+  log_search: { label: 'Log · Structured search', hint: 'Backend-neutral keyword and field filters; works with Loki or Elasticsearch.' },
+  log_match: { label: 'Log · Pattern match (Loki legacy)', hint: 'Legacy LogQL rule; migrate it before switching to Elasticsearch.' },
+  log_volume: { label: 'Log · Volume change (Loki legacy)', hint: 'Legacy LogQL rule; migrate it before switching to Elasticsearch.' },
   trace_latency: { label: 'Trace · Latency', hint: 'p50 / p95 / p99 latency over threshold.' },
   trace_error_rate: { label: 'Trace · Error rate', hint: 'span.status=error ratio over threshold.' },
 };
@@ -236,10 +238,12 @@ const RULE_KIND_DEFS: Array<RuleKindMeta & { _zh: { label: string; hint: string 
     label: '', hint: '', _zh: { label: '指标 · 燃烧率', hint: 'SLO error budget 多窗多倍率' } },
   { kind: 'metric_raw',        source: 'metric', trigger: 'raw',        scopes: ['global', 'host'],
     label: '', hint: '', _zh: { label: '指标 · 原生 PromQL', hint: '自己写 PromQL 表达式' } },
+  { kind: 'log_search',        source: 'log',    trigger: 'match',      scopes: ['global'],
+    label: '', hint: '', _zh: { label: '日志 · 结构化搜索', hint: '关键词 + 字段过滤，Loki / Elasticsearch 共用' } },
   { kind: 'log_match',         source: 'log',    trigger: 'match',      scopes: ['global', 'host'],
-    label: '', hint: '', _zh: { label: '日志 · 模式匹配', hint: 'LogQL 正则命中条数过阈值' } },
+    label: '', hint: '', _zh: { label: '日志 · 模式匹配（Loki 兼容）', hint: '旧 LogQL 正则规则，切换 Elasticsearch 前需迁移' } },
   { kind: 'log_volume',        source: 'log',    trigger: 'threshold',  scopes: ['global', 'host'],
-    label: '', hint: '', _zh: { label: '日志 · 总量异变', hint: '日志量同/上一窗口比异常' } },
+    label: '', hint: '', _zh: { label: '日志 · 总量异变（Loki 兼容）', hint: '旧 LogQL 规则，切换 Elasticsearch 前需迁移' } },
   { kind: 'trace_latency',     source: 'trace',  trigger: 'threshold',  scopes: ['global'],
     label: '', hint: '', _zh: { label: '链路 · 延迟阈值', hint: 'p50 / p95 / p99 延迟跨阈值' } },
   { kind: 'trace_error_rate',  source: 'trace',  trigger: 'threshold',  scopes: ['global'],

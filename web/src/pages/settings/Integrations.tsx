@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Activity,
   Check,
@@ -15,10 +16,7 @@ import {
   FileText,
   GitBranch,
   Search,
-  Sparkles,
-  Trash2,
-  Plus,
-  Star,
+  RefreshCw,
 } from 'lucide-react';
 import {
   openMetricDrilldown,
@@ -38,15 +36,26 @@ import {
   testLokiConnection,
   testTempoConnection,
   testWebSearchConnection,
-  invalidateLLMRouter,
   type SystemSetting,
   type GrafanaSyncResult,
-  type WebSearchProbeResult,
 } from '@/api/settings';
-import { ProviderIcon } from '@/components/icons/Provider';
+import {
+  currentLogBackend,
+  getLogBackend,
+  getLogBackendConnectionCheck,
+  selectLogBackend,
+  selectLokiLogBackend,
+  saveLogBackend,
+  startLogBackendConnectionCheck,
+  testLogBackend,
+  type LogBackend,
+  type LogBackendConnectionCheck,
+  type LogBackendKind,
+  type SaveLogBackendInput,
+} from '@/api/logs';
 import { getPluginCounts } from '@/api/integrations';
 import { ApiError } from '@/api/client';
-import { Button, Card, Chip } from '@/components/ui';
+import { Button, Card } from '@/components/ui';
 import { cn } from '@/lib/cn';
 import { useI18n } from '@/i18n/locale';
 
@@ -64,11 +73,25 @@ import { useI18n } from '@/i18n/locale';
 // hostname with a dot or IP is treated as customer-supplied and
 // edges push directly there.
 export default function SettingsIntegrations() {
+  const [searchParams] = useSearchParams();
+  const focusLogs = searchParams.get('focus') === 'logs';
+  const logsSectionRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!focusLogs) return;
+    const frame = window.requestAnimationFrame(() => {
+      logsSectionRef.current?.scrollIntoView({ block: 'start' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusLogs]);
+
   return (
     <div className="space-y-5">
       <PrometheusCard />
       <GrafanaCard />
-      <LokiCard />
+      <div ref={logsSectionRef} id="logs-integration" className="scroll-mt-5">
+        <LogsIntegrationCard />
+      </div>
       <TempoCard />
       <WebSearchCard />
     </div>
@@ -327,6 +350,7 @@ function PromField({
   sensitive,
   revealed,
   onToggleReveal,
+  disabled,
 }: {
   label: string;
   hint?: string;
@@ -338,6 +362,7 @@ function PromField({
   // across re-renders) and provides a toggle. Default = hidden (●●●●).
   revealed?: boolean;
   onToggleReveal?: () => void;
+  disabled?: boolean;
 }) {
   const inputType = sensitive ? (revealed ? 'text' : 'password') : 'text';
   return (
@@ -356,8 +381,9 @@ function PromField({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
+          disabled={disabled}
           className={cn(
-            'w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none',
+            'w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none disabled:cursor-not-allowed disabled:opacity-45',
             sensitive && 'pr-9'
           )}
           autoComplete="off"
@@ -509,11 +535,10 @@ function GrafanaCard() {
       </div>
       <p className="mb-4 text-[11px] text-zinc-500">
         {tr(
-          '填 Grafana 根地址 + Service Account Token，「测试」验通，「同步」自动把 ',
-          'Fill in the Grafana root URL + Service Account Token. "Test" verifies the connection; "Sync" pushes ',
+          '填 Grafana 根地址 + Service Account Token，「测试」验通，「同步」自动把托管数据源和默认 dashboard 推到 Grafana 的 ',
+          'Fill in the Grafana root URL + Service Account Token. "Test" verifies the connection; "Sync" pushes managed datasources and default dashboards into the Grafana ',
         )}
-        <code className="mx-1 font-mono text-zinc-400">ongrid-prometheus</code>
-        {tr(' 数据源和默认 dashboard 推到 Grafana 的 ', ' datasource and default dashboards into the Grafana ')}<code className="mx-1 font-mono text-zinc-400">ongrid</code>
+        <code className="mx-1 font-mono text-zinc-400">ongrid</code>
         {tr(' 文件夹。跳转过去仍然由用户在 Grafana 那边登录（Ongrid 不代登录）。', ' folder. Jumping to Grafana still requires the user to sign in there (Ongrid does not impersonate).')}
       </p>
 
@@ -584,7 +609,7 @@ function GrafanaCard() {
           className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-700/60 bg-emerald-900/20 px-3 py-1.5 text-sm text-emerald-300 transition-colors hover:bg-emerald-900/40 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {status.kind === 'syncing' ? <Loader2 size={14} className="animate-spin" /> : <Cloud size={14} />}
-          <span>{tr('同步 dashboard', 'Sync dashboard')}</span>
+          <span>{tr('同步 Grafana', 'Sync Grafana')}</span>
         </button>
         <button
           type="button"
@@ -704,7 +729,7 @@ function StatusLine({ status, dirty }: { status: SyncStatus; dirty: boolean }) {
         <p className="mt-3 text-xs text-emerald-400">
           {tr('✓ 已同步到文件夹 ', '✓ Synced to folder ')}
           <code className="font-mono">{status.res.folder}</code>{tr(' · 数据源 ', ' · datasource ')}
-          <code className="font-mono">{status.res.datasource}</code>{tr(` · ${status.res.dashboards.length} 个 dashboard`, ` · ${status.res.dashboards.length} dashboard(s)`)}
+          <code className="font-mono">{(status.res.datasources?.length ? status.res.datasources : [status.res.datasource]).join(', ')}</code>{tr(` · ${status.res.dashboards.length} 个 dashboard`, ` · ${status.res.dashboards.length} dashboard(s)`)}
           {status.res.dashboards.length > 0 && (
             <span className="text-zinc-500">{tr('：', ': ')}{status.res.dashboards.join(tr('、', ', '))}</span>
           )}
@@ -717,14 +742,14 @@ function StatusLine({ status, dirty }: { status: SyncStatus; dirty: boolean }) {
   }
 }
 
-// ---------- Loki / Tempo cards (read-only status, jump to Grafana) ----
+// ---------- Loki / Elasticsearch / Tempo Grafana Explore links ----
 
 // useGrafanaExploreLink builds a Grafana Explore deep-link for one of
 // the built-in datasources. It mirrors lib/drilldown.ts's behaviour:
 //   1. Pull root_url from system_settings.grafana
 //   2. Reject docker-internal hosts (loki:3100 / grafana:3000) the
 //      browser can't reach — fall back to same-origin /grafana.
-//   3. Build /explore?left={"datasource":...,"queries":[{"expr":...}]}
+//   3. Build Grafana 11's /explore?schemaVersion=1&panes=... URL.
 // Returns null while the root URL is still being fetched so the button
 // renders disabled rather than pointing at the wrong place.
 function useGrafanaExploreLink(datasource: string, expr: string): string | null {
@@ -753,16 +778,22 @@ function useGrafanaExploreLink(datasource: string, expr: string): string | null 
     };
   }, []);
   if (!root) return null;
-  // datasource string is the provisioned uid (ongrid-loki / ongrid-tempo
-  // / ongrid-prometheus); derive the engine type from it for the v11
+  // datasource string is the managed uid (ongrid-loki / ongrid-tempo /
+  // ongrid-prometheus / ongrid-elasticsearch); derive the engine type for the v11
   // panes schema.
   const dsType = datasource.includes('tempo')
     ? 'tempo'
     : datasource.includes('loki')
       ? 'loki'
-      : 'prometheus';
+      : datasource.includes('elasticsearch')
+        ? 'elasticsearch'
+        : 'prometheus';
   const query =
-    dsType === 'tempo' ? { query: expr, queryType: 'traceql' } : { expr };
+    dsType === 'tempo'
+      ? { query: expr, queryType: 'traceql' }
+      : dsType === 'elasticsearch'
+        ? { query: expr, metrics: [{ id: '1', type: 'logs' }] }
+        : { expr };
   return buildExploreUrl({
     base: root,
     dsType,
@@ -808,6 +839,476 @@ function usePluginCount(name: string): number | null | 'err' {
   return count;
 }
 
+type ElasticsearchLogsForm = {
+  name: string;
+  writeEndpoints: string;
+  queryEndpoint: string;
+  writeAPIKey: string;
+  queryAPIKey: string;
+  reuseWriteAPIKey: boolean;
+  writeCredentialRef: string;
+  queryCredentialRef: string;
+  tlsInsecure: boolean;
+};
+
+const defaultElasticsearchDataset = 'ongrid.system';
+const defaultElasticsearchNamespace = 'default';
+
+const emptyElasticsearchLogsForm: ElasticsearchLogsForm = {
+  name: 'external-elasticsearch',
+  writeEndpoints: '',
+  queryEndpoint: '',
+  writeAPIKey: '',
+  queryAPIKey: '',
+  reuseWriteAPIKey: false,
+  writeCredentialRef: '',
+  queryCredentialRef: '',
+  tlsInsecure: false,
+};
+
+function integrationError(error: unknown): string {
+  return error instanceof ApiError ? error.message : (error as Error).message;
+}
+
+function backendToForm(backend: LogBackend): ElasticsearchLogsForm {
+  return {
+    name: backend.name,
+    writeEndpoints: backend.write_endpoints.join('\n'),
+    queryEndpoint: backend.query_endpoint,
+    writeAPIKey: '',
+    queryAPIKey: '',
+    reuseWriteAPIKey: false,
+    writeCredentialRef: backend.write_credential_ref,
+    queryCredentialRef: backend.query_credential_ref,
+    tlsInsecure: backend.tls_insecure,
+  };
+}
+
+function LogsIntegrationCard() {
+  const { tr } = useI18n();
+  const [backend, setBackend] = useState<LogBackend | null>(null);
+  const [selected, setSelected] = useState<LogBackendKind>('loki');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const current = currentLogBackend(backend);
+  const exploreUrl = useGrafanaExploreLink(
+    selected === 'elasticsearch' ? 'ongrid-elasticsearch' : 'ongrid-loki',
+    selected === 'elasticsearch' ? '*' : '{ongrid_source=~".+"}',
+  );
+
+  const refresh = useCallback(async (initial = false) => {
+    try {
+      const value = await getLogBackend();
+      setBackend(value);
+      if (initial) setSelected(currentLogBackend(value));
+      setError(null);
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 404) {
+        setBackend(null);
+        if (initial) setSelected('loki');
+        setError(null);
+      } else {
+        setError(integrationError(cause));
+      }
+    } finally {
+      if (initial) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void refresh(true); }, [refresh]);
+
+  const backendLabel = current === 'elasticsearch' ? 'Elasticsearch' : 'Loki';
+  const options: Array<{ kind: LogBackendKind; title: string; description: string; configured: boolean }> = [
+    {
+      kind: 'loki',
+      title: 'Loki',
+      description: tr('内置或外部 Loki', 'Built-in or external Loki'),
+      configured: true,
+    },
+    {
+      kind: 'elasticsearch',
+      title: 'Elasticsearch',
+      description: tr('外部全文检索后端', 'External full-text backend'),
+      configured: backend != null,
+    },
+  ];
+
+  return (
+    <Card className="overflow-hidden p-0">
+      <div className="border-b border-zinc-800 px-5 py-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <FileText size={15} className="text-zinc-400" />
+              <h2 className="text-sm font-medium text-zinc-100">{tr('日志集成', 'Logs integration')}</h2>
+              {!loading && <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-300">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                {tr(`当前使用 ${backendLabel}`, `Using ${backendLabel}`)}
+              </span>}
+            </div>
+            <p className="mt-2 max-w-4xl text-[11px] leading-5 text-zinc-500">
+              {tr('Loki 与 Elasticsearch 互斥运行，只区分当前选中和未选中。选择 Elasticsearch 时会先验证 Manager 连接与权限；设备同步情况通过独立检查查看，不影响后端选择。旧后端数据不会自动合并查询或迁移。', 'Loki and Elasticsearch are mutually exclusive and are either selected or unselected. Manager connectivity and privileges are validated before selecting Elasticsearch. Device convergence is checked separately and never changes the selection. Data in the previous backend is neither merged nor migrated automatically.')}
+            </p>
+          </div>
+          {loading && <span className="inline-flex items-center gap-2 text-xs text-zinc-500"><Loader2 size={13} className="animate-spin" />{tr('读取当前后端…', 'Reading selected backend…')}</span>}
+        </div>
+
+        <div className="mt-4 grid max-w-2xl grid-cols-2 gap-1 rounded-lg border border-zinc-800 bg-zinc-950 p-1" role="tablist" aria-label={tr('日志后端', 'Log backend')}>
+          {options.map((option) => {
+            const active = selected === option.kind;
+            const inUse = current === option.kind;
+            return (
+              <button
+                key={option.kind}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setSelected(option.kind)}
+                className={cn(
+                  'flex min-w-0 items-center justify-between gap-3 rounded-md px-3 py-2.5 text-left transition-colors',
+                  active ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+                )}
+              >
+                <span className="min-w-0">
+                  <span className="block text-xs font-medium">{option.title}</span>
+                  <span className="mt-0.5 block truncate text-[10px] text-zinc-500">{option.description}</span>
+                </span>
+                <span className={cn('shrink-0 text-[10px]', inUse ? 'text-emerald-400' : option.configured ? 'text-zinc-500' : 'text-zinc-600')}>
+                  {inUse ? tr('当前使用', 'In use') : option.configured ? tr('已配置', 'Configured') : tr('未配置', 'Not configured')}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        {error && <p className="mt-3 text-xs text-red-400">{error}</p>}
+      </div>
+
+      <div className="p-5" role="tabpanel">
+        {selected === 'elasticsearch' ? (
+          <ElasticsearchLogsCard current={current === 'elasticsearch'} exploreUrl={exploreUrl} onBackendChange={setBackend} />
+        ) : (
+          <LokiCard current={current === 'loki'} backend={backend} exploreUrl={exploreUrl} onBackendChange={setBackend} />
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function ConnectionCheckProgress({ value, error }: { value: LogBackendConnectionCheck | null; error: string | null }) {
+  const { tr } = useI18n();
+  if (!value && !error) return null;
+  if (!value) return <p className="mt-3 break-all text-xs text-red-400">✗ {error}</p>;
+
+  const complete = value.all_online_verified;
+  const stillChecking = !complete && value.pending > 0;
+  const ratio = value.online > 0 ? Math.min(1, value.verified / value.online) : 0;
+  const statusLabel = complete
+    ? tr('在线设备已全部验证', 'All online devices verified')
+    : value.online === 0
+      ? tr('暂无在线设备可验证', 'No online devices to verify')
+      : value.failed > 0 && !stillChecking
+        ? tr('部分设备验证失败', 'Some devices failed verification')
+        : tr('正在验证在线设备', 'Verifying online devices');
+
+  return (
+    <div className="mt-3 overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2.5" role="status" aria-live="polite">
+      <div className="flex items-center justify-between gap-4">
+        <span className={cn('inline-flex min-w-0 items-center gap-2 text-xs', complete ? 'text-emerald-400' : value.failed > 0 ? 'text-amber-400' : 'text-zinc-400')}>
+          {stillChecking ? <Loader2 size={13} className="shrink-0 animate-spin motion-reduce:animate-none" /> : <Check size={13} className="shrink-0" />}
+          <span className="truncate">{statusLabel}</span>
+        </span>
+        <span className="shrink-0 text-xs font-semibold tabular-nums text-zinc-200">
+          {tr(`在线设备验证 ${value.verified}/${value.online}`, `Online devices verified ${value.verified}/${value.online}`)}
+        </span>
+      </div>
+      <div
+        className="mt-2 h-1 overflow-hidden rounded-full bg-zinc-800"
+        role="progressbar"
+        aria-label={tr('在线设备验证进度', 'Online device verification progress')}
+        aria-valuemin={0}
+        aria-valuemax={value.online}
+        aria-valuenow={value.verified}
+      >
+        <span
+          className={cn('block h-full w-full origin-left transform rounded-full transition-transform duration-500 ease-[cubic-bezier(0.25,1,0.5,1)] motion-reduce:transition-none', complete ? 'bg-emerald-500' : value.failed > 0 ? 'bg-amber-500' : 'bg-sky-500')}
+          style={{ transform: `scaleX(${ratio})` }}
+        />
+      </div>
+      {error && <p className="mt-2 break-all text-[11px] text-red-400">✗ {error}</p>}
+    </div>
+  );
+}
+
+function ElasticsearchLogsCard({ current, exploreUrl, onBackendChange }: { current: boolean; exploreUrl: string | null; onBackendChange: (backend: LogBackend) => void }) {
+  const { tr } = useI18n();
+  const [backend, setBackend] = useState<LogBackend | null>(null);
+  const [form, setForm] = useState<ElasticsearchLogsForm>(emptyElasticsearchLogsForm);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [connectionCheck, setConnectionCheck] = useState<LogBackendConnectionCheck | null>(null);
+  const [connectionCheckError, setConnectionCheckError] = useState<string | null>(null);
+  const [revealedKeys, setRevealedKeys] = useState({ write: false, query: false });
+
+  const refresh = useCallback(async (showLoading = true) => {
+    if (showLoading) setLoading(true);
+    try {
+      try {
+        const value = await getLogBackend();
+        setBackend(value);
+        setForm(backendToForm(value));
+        setDirty(false);
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) {
+          setBackend(null);
+          setForm(emptyElasticsearchLogsForm);
+          setDirty(false);
+        } else {
+          throw error;
+        }
+      }
+    } catch (error) {
+      setMessage({ ok: false, text: error instanceof ApiError ? error.message : (error as Error).message });
+    } finally {
+      if (showLoading) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void refresh(); }, [refresh]);
+
+  useEffect(() => {
+    if (backend) onBackendChange(backend);
+  }, [backend, onBackendChange]);
+
+  useEffect(() => {
+    setConnectionCheck(null);
+    setConnectionCheckError(null);
+  }, [backend?.id, backend?.generation]);
+
+  useEffect(() => {
+    if (!backend || !connectionCheck || connectionCheck.backend_id !== backend.id || connectionCheck.pending === 0) return;
+    const timer = window.setInterval(() => {
+      void getLogBackendConnectionCheck(backend.id)
+        .then((value) => {
+          setConnectionCheck(value);
+          setConnectionCheckError(null);
+        })
+        .catch((error) => setConnectionCheckError(integrationError(error)));
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [backend, connectionCheck]);
+
+  const update = <K extends keyof ElasticsearchLogsForm>(key: K, value: ElasticsearchLogsForm[K]) => {
+    setMessage(null);
+    setDirty(true);
+    setForm((current) => ({ ...current, [key]: value }));
+  };
+
+  const saveInput = (): SaveLogBackendInput | null => {
+    const endpoints = form.writeEndpoints.split(/[\n,]+/).map((value) => value.trim()).filter(Boolean);
+    const writeAPIKey = form.writeAPIKey.trim();
+    const queryAPIKey = form.queryAPIKey.trim();
+    if (!writeAPIKey && !form.writeCredentialRef) {
+      setMessage({ ok: false, text: tr('请直接粘贴 ES 写入 API Key。', 'Paste an ES write API key.') });
+      return null;
+    }
+    if (!form.reuseWriteAPIKey && !queryAPIKey && !form.queryCredentialRef) {
+      setMessage({ ok: false, text: tr('请粘贴只读查询 API Key，或明确勾选复用写入 Key。', 'Paste a read-only query API key or explicitly reuse the write key.') });
+      return null;
+    }
+    if (!form.reuseWriteAPIKey && !writeAPIKey && !queryAPIKey && form.writeCredentialRef === form.queryCredentialRef) {
+      setMessage({ ok: false, text: tr('写入 API Key 和只读查询 API Key 必须是两个不同凭证。', 'Write and read-only query API keys must use different credentials.') });
+      return null;
+    }
+    return {
+      name: form.name.trim(),
+      write_endpoints: endpoints,
+      query_endpoint: form.queryEndpoint.trim(),
+      dataset: backend?.dataset.trim() || defaultElasticsearchDataset,
+      namespace: backend?.namespace.trim() || defaultElasticsearchNamespace,
+      write_credential_ref: form.writeCredentialRef || undefined,
+      query_credential_ref: form.queryCredentialRef || undefined,
+      write_api_key: writeAPIKey || undefined,
+      query_api_key: form.reuseWriteAPIKey ? undefined : queryAPIKey || undefined,
+      reuse_write_api_key: form.reuseWriteAPIKey || undefined,
+      preserve_ca: Boolean(backend?.has_custom_ca),
+      kibana_url: backend?.kibana_url || undefined,
+      tls_insecure: form.tlsInsecure,
+    };
+  };
+
+  const save = async () => {
+    const input = saveInput();
+    if (!input) return;
+    setBusy('save');
+    setMessage(null);
+    try {
+      const value = await saveLogBackend(input);
+      setBackend(value);
+      setForm(backendToForm(value));
+      setDirty(false);
+      setRevealedKeys({ write: false, query: false });
+      setMessage({ ok: true, text: tr('配置已保存；点击“设为当前”后切换日志链路。', 'Configuration saved. Select it to switch the log pipeline.') });
+    } catch (error) {
+      setMessage({ ok: false, text: integrationError(error) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const selectElasticsearch = async () => {
+	if (!backend || dirty || backend.status !== 'unselected') return;
+	setBusy('select');
+    setMessage(null);
+    try {
+      const value = await selectLogBackend(backend.id);
+      setBackend(value);
+      setConnectionCheck(null);
+      setConnectionCheckError(null);
+      setMessage({
+        ok: true,
+        text: tr(
+          'Elasticsearch 已设为当前日志后端；可点击“检查设备连接”核对各 Edge 是否同步并写入当前版本。',
+          'Elasticsearch is now selected. Check device connections to verify that each edge synced and wrote to the current generation.',
+        ),
+      });
+    } catch (error) {
+      setMessage({ ok: false, text: integrationError(error) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const checkDeviceConnections = async () => {
+    if (!backend || !current || backend.status !== 'selected' || dirty) return;
+    setBusy('connections');
+    setConnectionCheckError(null);
+    try {
+      const value = await startLogBackendConnectionCheck(backend.id);
+      setConnectionCheck(value);
+    } catch (error) {
+      setConnectionCheckError(integrationError(error));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const testElasticsearch = async () => {
+    if (!backend || dirty) return;
+    setBusy('test');
+    setMessage(null);
+    try {
+      const result = await testLogBackend(backend.id);
+      const version = result.detected_version
+        ? tr(`（Elasticsearch ${result.detected_version}）`, ` (Elasticsearch ${result.detected_version})`)
+        : '';
+      setMessage({
+        ok: true,
+        text: tr(
+          `连接测试通过；查询/写入端点及 API Key 权限有效${version}。`,
+          `Connection test passed. Query/write endpoints and API key privileges are valid${version}.`,
+        ),
+      });
+    } catch (error) {
+      setMessage({ ok: false, text: integrationError(error) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const canEdit = true;
+  const editingCurrent = current && backend?.status === 'selected';
+  const canSave = canEdit && dirty;
+  const canTest = backend != null && !dirty;
+  const canSelect = backend != null && !dirty && backend.status === 'unselected';
+  const canCheckConnections = backend != null && current && backend.status === 'selected' && !dirty;
+
+  return (
+    <section aria-label={tr('Elasticsearch 日志后端配置', 'Elasticsearch log backend configuration')}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <Database size={14} className="text-sky-400" />
+            <h3 className="text-sm font-medium text-zinc-100">{tr('Elasticsearch 配置', 'Elasticsearch configuration')}</h3>
+            {current && <span className="text-[10px] text-emerald-400">{tr('当前选中', 'Selected')}</span>}
+          </div>
+          <p className="mt-2 max-w-4xl text-[11px] leading-5 text-zinc-500">
+            {tr('Edge 上的 otelcol-contrib 直接写入这些 endpoint，日志正文不经过 Manager。设为当前后，日志中心只查询 Elasticsearch；Loki 数据不会同时展示。', 'otelcol-contrib on each edge writes directly to these endpoints; log bytes never pass through Manager. Once selected, Log Center queries Elasticsearch only and does not display Loki data alongside it.')}
+          </p>
+        </div>
+      </div>
+
+      {loading ? <div className="flex h-36 items-center justify-center text-sm text-zinc-500"><Loader2 size={14} className="mr-2 animate-spin" />{tr('加载中…', 'Loading…')}</div> : (
+        <>
+          <fieldset disabled={!canEdit || busy !== null} className="mt-5 grid grid-cols-1 gap-4 disabled:opacity-65 md:grid-cols-2">
+            <PromField label={tr('写入 endpoints（每行一个）', 'Write endpoints (one per line)')} hint={tr('仅允许根路径；生产环境要求 HTTPS。', 'Root URLs only; HTTPS is required in production.')} value={form.writeEndpoints} onChange={(value) => update('writeEndpoints', value)} placeholder="https://es-data-1.example.com:9200" />
+            <PromField label={tr('Manager 查询 endpoint', 'Manager query endpoint')} hint={tr('必须可从 Manager 网络访问。', 'Must be reachable from the Manager network.')} value={form.queryEndpoint} onChange={(value) => update('queryEndpoint', value)} placeholder="https://es-query.example.com:9200" />
+            <PromField
+              label={tr('ES 写入 Encoded API Key', 'ES write Encoded API Key')}
+              hint={tr('在 Elasticsearch 中创建后直接粘贴 encoded 值；已保存时留空即保持原 Key。', 'Paste the encoded value created in Elasticsearch; leave blank after saving to keep the current key.')}
+              value={form.writeAPIKey}
+              onChange={(value) => update('writeAPIKey', value)}
+              placeholder={backend ? tr('已安全保存；留空保持不变', 'Stored securely; leave blank to keep') : 'ZXlKaGJHY2lPaUpJVXpJMU5pSjkuLi4='}
+              sensitive
+              revealed={revealedKeys.write}
+              onToggleReveal={() => setRevealedKeys((current) => ({ ...current, write: !current.write }))}
+            />
+            <PromField
+              label={tr('ES 只读查询 Encoded API Key', 'ES read-only query Encoded API Key')}
+              hint={form.reuseWriteAPIKey
+                ? tr('将复制写入 Key 到独立的查询凭证引用；仅建议用于兼容测试。', 'The write key will be copied into a separate query credential reference; use this only for compatibility testing.')
+                : tr('建议仅授予目标 data stream 的读取、字段与聚合权限。', 'Grant only read, field, and aggregation access to the target data stream.')}
+              value={form.queryAPIKey}
+              onChange={(value) => update('queryAPIKey', value)}
+              placeholder={backend ? tr('已安全保存；留空保持不变', 'Stored securely; leave blank to keep') : 'ZXlKaGJHY2lPaUpJVXpJMU5pSjkuLi4='}
+              sensitive
+              revealed={revealedKeys.query}
+              onToggleReveal={() => setRevealedKeys((current) => ({ ...current, query: !current.query }))}
+              disabled={form.reuseWriteAPIKey}
+            />
+            <label className="flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2.5 text-xs text-zinc-300 md:col-span-2">
+              <input type="checkbox" checked={form.reuseWriteAPIKey} onChange={(event) => update('reuseWriteAPIKey', event.target.checked)} className="mt-0.5 accent-amber-500" />
+              <span><span className="block text-amber-300">{tr('兼容模式：查询复用写入 Key', 'Compatibility mode: reuse the write key for queries')}</span><span className="mt-0.5 block text-[11px] leading-5 text-zinc-500">{tr('可以只配置一个 Key，但它必须同时具备写入和查询权限；生产环境仍推荐两个最小权限 Key。', 'This allows a single key, but it must have both write and query privileges; two least-privilege keys remain recommended for production.')}</span></span>
+            </label>
+            <label className="flex items-center gap-2 text-xs text-zinc-300 md:col-span-2"><input type="checkbox" checked={form.tlsInsecure} onChange={(event) => update('tlsInsecure', event.target.checked)} className="accent-amber-500" />{tr('兼容测试：允许 HTTP / 跳过 TLS 校验', 'Compatibility testing: allow HTTP / skip TLS verification')}</label>
+          </fieldset>
+
+          {editingCurrent && <p className="mt-3 text-[11px] leading-5 text-zinc-500">{tr('保存不会影响当前日志链路；点击“设为当前”会在 Manager 连接与权限测试通过后切换，设备同步可另行检查。', 'Saving does not affect the current log pipeline. Selecting switches after Manager connectivity and privilege checks; device convergence can be checked separately.')}</p>}
+
+          <div className="mt-2 text-[11px] leading-5 text-zinc-500">{tr('API Key 是只写字段：Manager 接收后立即放入加密凭证库，读取后端配置时不会回显；Edge 只通过专用密钥通道取得写 Key。', 'API keys are write-only: Manager immediately stores them in the encrypted credential vault and never echoes them when reading backend configuration; Edge receives only the write key through the dedicated secret channel.')}</div>
+
+          <div className="mt-5 flex flex-wrap items-end gap-3 border-t border-zinc-800/70 pt-4">
+            <Button onClick={() => void save()} disabled={!canSave || busy !== null} variant="primary">{busy === 'save' ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}<span>{tr('保存', 'Save')}</span></Button>
+            <Button onClick={() => void testElasticsearch()} disabled={!canTest || busy !== null} variant="ghost">{busy === 'test' ? <Loader2 size={14} className="animate-spin" /> : <PlugZap size={14} />}<span>{tr('测试连接', 'Test connection')}</span></Button>
+            <Button onClick={() => void selectElasticsearch()} disabled={!canSelect || busy !== null} variant="primary">{busy === 'select' ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}<span>{tr('设为当前', 'Select')}</span></Button>
+            <Button onClick={() => void checkDeviceConnections()} disabled={!canCheckConnections || busy !== null} variant="ghost">{busy === 'connections' ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}<span>{tr('检查设备连接', 'Check device connections')}</span></Button>
+            <button
+              type="button"
+              disabled={!current || !exploreUrl}
+              onClick={() => current && exploreUrl && void openObservabilityUrl(exploreUrl)}
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm transition-colors',
+                current && exploreUrl
+                  ? 'border-zinc-700 text-zinc-200 hover:border-zinc-500 hover:bg-zinc-800'
+                  : 'cursor-not-allowed border-zinc-800 text-zinc-600'
+              )}
+            >
+              <ExternalLink size={14} />
+              <span>{tr('在 Grafana 中查看日志', 'Open logs in Grafana')}</span>
+            </button>
+          </div>
+
+          {message && <p className={cn('mt-3 break-all text-xs', message.ok ? 'text-emerald-400' : 'text-red-400')}>{message.ok ? '✓ ' : '✗ '}{message.text}</p>}
+
+          <ConnectionCheckProgress value={connectionCheck} error={connectionCheckError} />
+
+        </>
+      )}
+    </section>
+  );
+}
+
 // LokiCard mirrors PrometheusCard. Admin fills in URL + optional basic
 // auth + TLS-skip; the manager seeds the URL on first boot from the
 // ONGRID_LOG_URL env var (default http://loki:3100, the docker-
@@ -826,21 +1327,21 @@ const LOKI_KEYS: (keyof LokiForm)[] = ['url', 'basic_user', 'basic_password', 't
 const LOKI_SENSITIVE: Set<keyof LokiForm> = new Set(['basic_password']);
 const emptyLokiForm: LokiForm = { url: '', basic_user: '', basic_password: '', tls_insecure: '' };
 
-function LokiCard() {
+function LokiCard({ current, backend, exploreUrl, onBackendChange }: { current: boolean; backend: LogBackend | null; exploreUrl: string | null; onBackendChange: (backend: LogBackend) => void }) {
   const { tr } = useI18n();
-  const count = usePluginCount('logs');
-  const exploreUrl = useGrafanaExploreLink(
-    'ongrid-loki',
-    '{ongrid_source=~"journald:.+|file:.+"}'
-  );
   const [server, setServer] = useState<LokiForm>(emptyLokiForm);
   const [draft, setDraft] = useState<LokiForm>(emptyLokiForm);
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [switching, setSwitching] = useState(false);
+  const [switchMessage, setSwitchMessage] = useState<string | null>(null);
   const [savedOk, setSavedOk] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [grafanaSyncWarning, setGrafanaSyncWarning] = useState<string | null>(null);
+  const [checkingConnections, setCheckingConnections] = useState(false);
+  const [connectionCheck, setConnectionCheck] = useState<LogBackendConnectionCheck | null>(null);
+  const [connectionCheckError, setConnectionCheckError] = useState<string | null>(null);
   const [probe, setProbe] = useState<
     | { kind: 'idle' }
     | { kind: 'testing' }
@@ -888,6 +1389,25 @@ function LokiCard() {
     void refresh();
   }, [refresh]);
 
+  useEffect(() => {
+    if (current) return;
+    setConnectionCheck(null);
+    setConnectionCheckError(null);
+  }, [current]);
+
+  useEffect(() => {
+    if (!current || !connectionCheck || connectionCheck.backend !== 'loki' || connectionCheck.pending === 0) return;
+    const timer = window.setInterval(() => {
+      void getLogBackendConnectionCheck()
+        .then((value) => {
+          setConnectionCheck(value);
+          setConnectionCheckError(null);
+        })
+        .catch((error) => setConnectionCheckError(integrationError(error)));
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [current, connectionCheck]);
+
   const dirty = LOKI_KEYS.some((k) => draft[k] !== server[k]);
   const update = (k: keyof LokiForm, v: string) => {
     setSavedOk(false);
@@ -932,19 +1452,45 @@ function LokiCard() {
     }
   };
 
+  const switchToLoki = async () => {
+    if (!backend) return;
+    setSwitching(true);
+    setSwitchMessage(null);
+    try {
+      const value = await selectLokiLogBackend();
+      onBackendChange(value);
+      setSwitchMessage(tr('Loki 已设为当前日志后端；可点击“检查设备连接”验证在线设备。', 'Loki is now selected. Check device connections separately to verify online devices.'));
+    } catch (cause) {
+      setErr(integrationError(cause));
+    } finally {
+      setSwitching(false);
+    }
+  };
+
+  const checkDeviceConnections = async () => {
+    if (!current || dirty) return;
+    setCheckingConnections(true);
+    setConnectionCheckError(null);
+    try {
+      const value = await startLogBackendConnectionCheck();
+      setConnectionCheck(value);
+    } catch (cause) {
+      setConnectionCheckError(integrationError(cause));
+    } finally {
+      setCheckingConnections(false);
+    }
+  };
+
   return (
-    <Card className="p-5">
+    <section aria-label={tr('Loki 日志后端配置', 'Loki log backend configuration')}>
       <div className="mb-3 flex items-center gap-2">
         <FileText size={14} className="text-zinc-400" />
-        <h2 className="text-sm font-medium text-zinc-100">{tr('Loki 集成（日志）', 'Loki integration (logs)')}</h2>
+        <h3 className="text-sm font-medium text-zinc-100">{tr('Loki 配置', 'Loki configuration')}</h3>
+        {current && <span className="text-[10px] text-emerald-400">{tr('当前选中', 'Selected')}</span>}
       </div>
       <p className="mb-4 text-[11px] text-zinc-500">
-        {tr('填外部 Loki / VictoriaLogs URL 后，边端 ', 'Set an external Loki / VictoriaLogs URL and the edge ')}<code className="font-mono text-zinc-400">logs</code>{tr(' plugin 会直接推到这里，Grafana ', ' plugin pushes there directly; the Grafana ')}<code className="font-mono text-zinc-400">ongrid-loki</code>{tr(' 数据源也走这里。留空 / 留默认 = 走内置 docker-compose 的 ', ' datasource also points here. Empty / default = use the bundled docker-compose ')}<code className="font-mono text-zinc-400">loki</code>{tr(' 容器，边端通过 manager nginx ', ' container; edges write through manager nginx ')}<code className="font-mono text-zinc-400">/loki/api/v1/push</code>{tr(' 反向写入。', ' as a reverse-write path.')}
+        {tr('可使用内置 Loki，也可以填写外部 Loki / VictoriaLogs URL。设为当前后，Edge 只写入 Loki，日志中心也只查询 Loki；Elasticsearch 中的数据不会同时展示。', 'Use the built-in Loki or configure an external Loki / VictoriaLogs URL. Once selected, Edge writes only to Loki and Log Center queries only Loki; Elasticsearch data is not displayed alongside it.')}
       </p>
-
-      <div className="mb-4 space-y-2 text-[12px] text-zinc-300">
-        <PluginCountLine label="logs plugin" count={count} />
-      </div>
 
       {loading ? (
         <div className="flex h-32 items-center justify-center text-sm text-zinc-500">
@@ -991,7 +1537,7 @@ function LokiCard() {
       <div className="mt-5 flex flex-wrap items-center gap-3">
         <Button onClick={submit} disabled={!dirty || saving} variant="primary">
           {savedOk && !dirty ? <Check size={14} /> : <Save size={14} />}
-          <span>{saving ? tr('保存中…', 'Saving…') : savedOk && !dirty ? tr('已保存', 'Saved') : tr('保存', 'Save')}</span>
+          <span>{saving ? tr('保存中…', 'Saving…') : tr('保存', 'Save')}</span>
         </Button>
         <Button
           onClick={probeLoki}
@@ -1000,6 +1546,14 @@ function LokiCard() {
         >
           {probe.kind === 'testing' ? <Loader2 size={14} className="animate-spin" /> : <PlugZap size={14} />}
           <span>{tr('测试连接', 'Test connection')}</span>
+        </Button>
+        <Button onClick={() => void switchToLoki()} disabled={current || !backend || switching || dirty || probe.kind === 'testing'} variant="primary">
+          {switching ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+          <span>{tr('设为当前', 'Select')}</span>
+        </Button>
+        <Button onClick={() => void checkDeviceConnections()} disabled={!current || dirty || loading || saving || switching || checkingConnections || probe.kind === 'testing'} variant="ghost">
+          {checkingConnections ? <Loader2 size={14} className="animate-spin motion-reduce:animate-none" /> : <RefreshCw size={14} />}
+          <span>{tr('检查设备连接', 'Check device connections')}</span>
         </Button>
         <button
           type="button"
@@ -1018,8 +1572,10 @@ function LokiCard() {
         {err && <span className="break-all text-xs text-red-400">{err}</span>}
         {grafanaSyncWarning && <span className="break-all text-xs text-amber-400">{grafanaSyncWarning}</span>}
       </div>
+      {switchMessage && <p className="mt-3 text-xs text-emerald-400">✓ {switchMessage}</p>}
+      <ConnectionCheckProgress value={connectionCheck} error={connectionCheckError} />
       <ProbeLine probe={probe} okLabel={tr('✓ Loki 可达，/ready 返回成功', '✓ Loki reachable, /ready returned success')} />
-    </Card>
+    </section>
   );
 }
 

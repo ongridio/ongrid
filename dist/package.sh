@@ -196,7 +196,7 @@ for target in ${EDGE_TARGETS}; do
 done
 if [[ "$BUNDLE_EDGE_ASSETS" == "1" ]]; then
 required_edge_components=(
-    ongrid-edge promtail otelcol-contrib node_exporter process_exporter
+    ongrid-edge otelcol-contrib node_exporter process_exporter
     mysqld_exporter postgres_exporter redis_exporter mongodb_exporter
 )
 for target in ${EDGE_TARGETS}; do
@@ -219,24 +219,8 @@ for target in ${EDGE_TARGETS}; do
 done
 
 # --- bundled plugin binaries (ADR-015) --------------------------------------
-# promtail (logs plugin) ships next to ongrid-edge so install-edge.sh can
-# install it under /usr/local/lib/ongrid-edge/promtail.
-for target in ${EDGE_TARGETS}; do
-    src="${EDGE_BIN_ROOT}/${target}/promtail"
-    dst="${STAGE_DIR}/edge/promtail-${target}"
-    if [ -f "$src" ]; then
-        cp "$src" "$dst"
-        chmod 755 "$dst"
-        log "  + edge/promtail-${target}"
-    else
-        warn "promtail binary ${src} missing; logs plugin won't work on ${target}. Run 'make fetch-promtail'."
-    fi
-done
-
-# otelcol-contrib (traces plugin, ADR-013) ships next to ongrid-edge so
+# otelcol-contrib (logs and traces plugins) ships next to ongrid-edge so
 # install-edge.sh can install it under /usr/local/lib/ongrid-edge/otelcol-contrib.
-# Linux-only: upstream doesn't publish darwin builds in the contrib stream;
-# darwin edges will see the traces plugin disabled (warned by install-edge.sh).
 for target in ${EDGE_TARGETS}; do
     src="${EDGE_BIN_ROOT}/${target}/otelcol-contrib"
     dst="${STAGE_DIR}/edge/otelcol-contrib-${target}"
@@ -245,7 +229,7 @@ for target in ${EDGE_TARGETS}; do
         chmod 755 "$dst"
         log "  + edge/otelcol-contrib-${target}"
     else
-        warn "otelcol-contrib binary ${src} missing; traces plugin won't work on ${target}. Run 'make fetch-otelcol'."
+        warn "otelcol-contrib binary ${src} missing; logs and traces plugins won't work on ${target}. Run 'make fetch-otelcol'."
     fi
 done
 

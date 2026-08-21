@@ -162,7 +162,7 @@ func newEdgeIdentity(name string, createdBy *uint64) (*model.Edge, string, strin
 // can always toggle in the Plugins UI as a backstop.
 //
 // Spec JSON shape mirrors what each plugin's defaults expect:
-//   - logs:        promtail tails /var/log/*. job=node-syslog by default.
+//   - logs:        otelcol-contrib tails journald/files and writes direct.
 //   - traces:      otelcol-contrib OTLP receiver on :4318, exporter
 //     points at the manager's /v1/traces (resolved by the
 //     PluginConfigUC's EndpointResolver, so spec stays empty).

@@ -48,6 +48,13 @@ const (
 	// this only during a user-initiated save; the normal plugin config
 	// snapshot still carries only non-secret metadata.
 	MethodWriteDatabaseMetricsSecret = "write_database_metrics_secret"
+	// MethodGetPluginSecret is edge → manager. It returns exactly one
+	// manager-owned secret slot for the authenticated edge and requested
+	// generation. Credential names and arbitrary file paths are never accepted.
+	MethodGetPluginSecret = "get_plugin_secret"
+	// MethodReportPluginConfigApplied is edge → manager. It acknowledges
+	// whether a manager-owned plugin generation was validated and applied.
+	MethodReportPluginConfigApplied = "report_plugin_config_applied"
 
 	// WebSSH (manager → edge): edge agent acts as an SSH client into
 	// the host's local sshd. Each browser session is identified by a
@@ -164,6 +171,9 @@ type ShellExitResponse struct{}
 // MethodGetPluginConfigs. Mirrors biz/edge.WireSnapshot — duplicated
 // here to keep internal/pkg/tunnel free of biz imports.
 type GetPluginConfigsResponse struct {
+	// EdgeID is a legacy wire name. Manager writes the resolved host
+	// device_id here because plugin configs bake it into telemetry labels;
+	// the authenticated tunnel session remains the source of Edge identity.
 	EdgeID  uint64                           `json:"edge_id"`
 	Configs map[string]GetPluginConfigsEntry `json:"configs"`
 }
@@ -197,6 +207,36 @@ type WriteDatabaseMetricsSecretsRequest struct {
 // WriteDatabaseMetricsSecretResponse acknowledges that the edge wrote the
 // requested credential file.
 type WriteDatabaseMetricsSecretResponse struct {
+	OK bool `json:"ok"`
+}
+
+// GetPluginSecretRequest selects a fixed product-owned secret slot. The
+// manager resolves the actual encrypted credential reference from its active
+// backend state; the edge cannot name a vault entry.
+type GetPluginSecretRequest struct {
+	Plugin     string `json:"plugin"`
+	Slot       string `json:"slot"`
+	Generation uint64 `json:"generation"`
+}
+
+// GetPluginSecretResponse is sensitive in transit and must never be logged or
+// persisted by the manager tunnel layer. SHA256 lets the edge verify an atomic
+// materialization without echoing Content in its acknowledgement.
+type GetPluginSecretResponse struct {
+	Generation uint64 `json:"generation"`
+	Content    string `json:"content"`
+	SHA256     string `json:"sha256"`
+}
+
+type ReportPluginConfigAppliedRequest struct {
+	Plugin     string `json:"plugin"`
+	Generation uint64 `json:"generation"`
+	Applied    bool   `json:"applied"`
+	ErrorClass string `json:"error_class,omitempty"`
+	ProbeID    string `json:"probe_id,omitempty"`
+}
+
+type ReportPluginConfigAppliedResponse struct {
 	OK bool `json:"ok"`
 }
 

@@ -244,12 +244,13 @@ func (r *Registry) executeCorrelateIncident(ctx context.Context, args json.RawMe
 		bundle.Skipped["metric_panel"] = "prom query client not configured"
 	}
 
-	// Log panel — needs Loki + edge_id (so we can scope the query).
-	if r.logQuery != nil {
+	// Log panel follows the backend-neutral planner when available and falls
+	// back to legacy Loki only for old deployments.
+	if r.logSearch != nil || r.logQuery != nil {
 		if inc.DeviceID != nil {
 			entries, err := r.queryLogPanel(callCtx, *inc.DeviceID, wStart, wEnd)
 			if err != nil {
-				bundle.Skipped["log_panel"] = "loki query failed: " + err.Error()
+				bundle.Skipped["log_panel"] = "log query failed: " + err.Error()
 			} else {
 				bundle.LogPanel = entries
 			}
@@ -434,6 +435,9 @@ func seriesMagnitude(s metricSeries) float64 {
 // edge's stream. Direction=backward gives the LLM the most recent samples
 // first, which is what an operator would scroll to anyway.
 func (r *Registry) queryLogPanel(ctx context.Context, edgeID uint64, start, end time.Time) ([]logEntry, error) {
+	if r.logSearch != nil {
+		return queryStructuredIncidentLogs(ctx, r.logSearch, edgeID, start, end)
+	}
 	q := fmt.Sprintf(`{edge_id="%d"} |~ "(?i)error|panic|oom|fatal|fail"`, edgeID)
 	res, err := r.logQuery.QueryRange(ctx, logquery.QueryRangeOptions{
 		Query:     q,
@@ -470,6 +474,36 @@ func (r *Registry) queryLogPanel(ctx context.Context, edgeID uint64, start, end 
 	})
 	if len(entries) > 50 {
 		entries = entries[:50]
+	}
+	return entries, nil
+}
+
+func queryStructuredIncidentLogs(ctx context.Context, search logquery.Searcher, deviceID uint64, start, end time.Time) ([]logEntry, error) {
+	result, err := search.Search(ctx, logquery.SearchRequest{
+		Start: start, End: end, Limit: 50, Direction: logquery.SortBackward,
+		Scope: logquery.Scope{DeviceIDs: []uint64{deviceID}},
+		Keywords: logquery.Keywords{
+			Include: []string{"error", "panic", "oom", "fatal", "fail"},
+			Mode:    logquery.MatchAny,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
+		return nil, nil
+	}
+	entries := make([]logEntry, 0, len(result.Records))
+	for _, record := range result.Records {
+		labels := make(map[string]string, len(record.ResourceAttributes)+len(record.Attributes)+1)
+		for key, value := range record.ResourceAttributes {
+			labels[key] = value
+		}
+		for key, value := range record.Attributes {
+			labels[key] = value
+		}
+		labels["backend"] = record.Backend
+		entries = append(entries, logEntry{Timestamp: record.Timestamp, Line: truncateLine(record.Message, 200), Labels: labels})
 	}
 	return entries, nil
 }

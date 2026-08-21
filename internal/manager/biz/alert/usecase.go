@@ -986,6 +986,24 @@ func buildConditionsJSON(kind string, in RuleInput) (string, error) {
 			return "", fmt.Errorf("marshal metric_burn_rate spec: %w", err)
 		}
 		return string(blob), nil
+	case model.RuleKindLogSearch:
+		blob, err := json.Marshal(in.Spec)
+		if err != nil {
+			return "", fmt.Errorf("marshal log_search spec: %w", err)
+		}
+		var spec logSearchSpec
+		if err := json.Unmarshal(blob, &spec); err != nil {
+			return "", fmt.Errorf("%w: decode log_search spec: %v", errs.ErrInvalid, err)
+		}
+		spec, _, err = normalizeLogSearchSpec(spec)
+		if err != nil {
+			return "", fmt.Errorf("%w: invalid log_search spec: %v", errs.ErrInvalid, err)
+		}
+		blob, err = json.Marshal(spec)
+		if err != nil {
+			return "", fmt.Errorf("marshal normalized log_search spec: %w", err)
+		}
+		return string(blob), nil
 	case model.RuleKindLogMatch, model.RuleKindLogVolume,
 		model.RuleKindTraceLatency, model.RuleKindTraceErrorRate:
 		// Persist whatever the caller passed in verbatim so the UI can
@@ -1006,14 +1024,16 @@ func buildConditionsJSON(kind string, in RuleInput) (string, error) {
 // readonly badge. Kinds with multiple entries let the user choose.
 //
 //   - metric_threshold : per-host evaluator → host only
-//   - metric_burn_rate / trace_* : fleet/service aggregate → global only
+//   - metric_burn_rate / log_search / trace_* : aggregate → global only
 //   - metric_anomaly / metric_forecast / metric_raw / log_match / log_volume :
 //     PromQL/LogQL controls aggregation, user picks host vs global
+//   - log_search : backend-neutral aggregate count, global only
 func allowedScopesForKind(kind string) []string {
 	switch kind {
 	case model.RuleKindMetricThreshold:
 		return []string{model.RuleScopeHost}
-	case model.RuleKindMetricBurnRate, model.RuleKindTraceLatency, model.RuleKindTraceErrorRate:
+	case model.RuleKindMetricBurnRate, model.RuleKindLogSearch,
+		model.RuleKindTraceLatency, model.RuleKindTraceErrorRate:
 		return []string{model.RuleScopeGlobal}
 	case model.RuleKindMetricRaw:
 		return []string{model.RuleScopeGlobal, model.RuleScopeHost}

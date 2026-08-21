@@ -21,7 +21,7 @@ const (
 
 const capturePCAPDescription = "Start a bounded packet capture session on one or more host devices. Use repeat_count to create multiple capture members for each target in the same session. The tool returns a durable, cancelable operation as soon as every member is accepted by its edge; it does not wait for packets to finish. If the session is still collecting, present the operation/session id and detail link instead of treating zero PCAPs as a final analysis. Captures are audited and must be explicitly requested by the operator."
 
-const capturePCAPWhenToUse = "Use only when the user explicitly asks to capture packets or diagnose live network traffic on a specific host device/interface. Do not use for normal metric/log/trace questions. Prefer query_logql/query_traceql/query_promql first unless the user asks for raw packets. After a successful start, do not immediately call get_packet_capture_session for final conclusions unless the user explicitly asks for current status or provides an already-completed pcap-session id."
+const capturePCAPWhenToUse = "Use only when the user explicitly asks to capture packets or diagnose live network traffic on a specific host device/interface. Do not use for normal metric/log/trace questions. Prefer search_logs/query_traceql/query_promql first unless the user asks for raw packets. After a successful start, do not immediately call get_packet_capture_session for final conclusions unless the user explicitly asks for current status or provides an already-completed pcap-session id."
 
 var CapturePCAPSchema = json.RawMessage(`{
   "type": "object",

@@ -33,6 +33,53 @@ func TestCompileLogMatch_Defaults(t *testing.T) {
 	}
 }
 
+func TestCompileLogSearchAndEvaluateThroughStructuredCounter(t *testing.T) {
+	spec, _ := json.Marshal(map[string]any{
+		"keywords": map[string]any{
+			"include": []string{"error", "panic"},
+			"mode":    "any",
+		},
+		"scope":     map[string]any{"namespaces": []string{"production"}},
+		"window":    "10m",
+		"operator":  ">=",
+		"threshold": 3,
+	})
+	compiled, err := compileLogSearchRule(&model.Rule{
+		ID: 7, RuleKey: "production_errors", Name: "Production errors",
+		Kind: model.RuleKindLogSearch, ScopeType: model.RuleScopeGlobal,
+		Severity: "warning", ConditionsJSON: string(spec),
+	})
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if compiled.Window != 10*time.Minute || compiled.Query.Keywords.Mode != logquery.MatchAny {
+		t.Fatalf("compiled rule = %#v", compiled)
+	}
+
+	repo := newFakeRepo()
+	searcher := &scriptedStructuredLogSearcher{count: 4}
+	now := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC)
+	eval := newPipelineEvaluator(t, repo, &fakeNotifier{},
+		NewStaticRulesProvider(WithLogSearchRules([]LogSearchRule{compiled})),
+		PipelineEvaluatorOpts{
+			LogSearcher: searcher,
+			Cooldown:    time.Minute,
+			Now:         func() time.Time { return now },
+		})
+	eval.EvaluateOnce(context.Background())
+	if len(repo.incidents) != 1 {
+		t.Fatalf("incidents = %d, want 1", len(repo.incidents))
+	}
+	if !searcher.request.Start.Equal(now.Add(-10*time.Minute)) || !searcher.request.End.Equal(now) {
+		t.Fatalf("count range = %s..%s", searcher.request.Start, searcher.request.End)
+	}
+	for _, incident := range repo.incidents {
+		if incident.Value == nil || *incident.Value != 4 {
+			t.Fatalf("incident value = %v, want 4", incident.Value)
+		}
+	}
+}
+
 func TestCompileLogMatch_Errors(t *testing.T) {
 	for _, c := range []struct {
 		name, spec string
@@ -172,6 +219,32 @@ func TestBuildLogMatchQuery(t *testing.T) {
 type scriptedLogRange struct {
 	result *logquery.QueryRangeResult
 	err    error
+}
+
+type scriptedStructuredLogSearcher struct {
+	count   uint64
+	request logquery.SearchRequest
+}
+
+func (*scriptedStructuredLogSearcher) Search(context.Context, logquery.SearchRequest) (*logquery.SearchResult, error) {
+	return &logquery.SearchResult{}, nil
+}
+
+func (s *scriptedStructuredLogSearcher) Count(_ context.Context, req logquery.SearchRequest) (uint64, error) {
+	s.request = req
+	return s.count, nil
+}
+
+func (*scriptedStructuredLogSearcher) Fields(context.Context, time.Time, time.Time, logquery.Scope) ([]logquery.Field, error) {
+	return logquery.AllowedFields(), nil
+}
+
+func (*scriptedStructuredLogSearcher) FieldValues(context.Context, logquery.FieldValuesRequest) ([]string, error) {
+	return nil, nil
+}
+
+func (*scriptedStructuredLogSearcher) Histogram(context.Context, logquery.SearchRequest, time.Duration) ([]logquery.HistogramBucket, error) {
+	return nil, nil
 }
 
 func (s *scriptedLogRange) QueryRange(_ context.Context, _ logquery.QueryRangeOptions) (*logquery.QueryRangeResult, error) {

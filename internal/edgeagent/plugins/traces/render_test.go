@@ -253,11 +253,11 @@ func TestRenderUsesIndependentTraceAndLogAuthAndTLS(t *testing.T) {
 		!strings.Contains(body, "Authorization: \"Basic bG9raS11c2VyOmxva2ktcGFzcw==\"") {
 		t.Fatalf("independent auth headers missing:\n%s", body)
 	}
-	start := strings.Index(body, "loki/manager:")
+	start := strings.Index(body, "otlphttp/loki_manager:")
 	if start < 0 {
 		t.Fatalf("Loki exporter missing:\n%s", body)
 	}
-	end := strings.Index(body[start:], "default_labels_enabled:")
+	end := strings.Index(body[start:], "\nextensions:")
 	if end < 0 {
 		t.Fatalf("Loki exporter missing:\n%s", body)
 	}
@@ -301,10 +301,10 @@ func TestRenderOmitDeviceIDForGateway(t *testing.T) {
 		"k8s.deployment.name",
 		"key: loki.resource.labels",
 		"resource/loki_labels:",
-		"endpoint: https://manager.example.com/loki/api/v1/push",
-		"loki/manager:",
+		"logs_endpoint: https://manager.example.com/loki/otlp/v1/logs",
+		"otlphttp/loki_manager:",
 		"logs:",
-		"exporters: [loki/manager]",
+		"exporters: [otlphttp/loki_manager]",
 		"prometheus/gateway:",
 		"endpoint: 127.0.0.1:9464",
 		"resource_to_telemetry_conversion:",
@@ -369,7 +369,8 @@ func TestRenderStandaloneGatewayUsesBoundedRemoteWritePipelines(t *testing.T) {
 		"processors: [memory_limiter, k8sattributes, resource/device, batch/traces]",
 		"processors: [memory_limiter, k8sattributes, resource/device, resource/loki_labels, batch/logs]",
 		"processors: [memory_limiter, k8sattributes, resource/device, batch/metrics]",
-		"address: 0.0.0.0:8888",
+		"host: 0.0.0.0",
+		"port: 8888",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("rendered standalone gateway config missing %q\n--- full body ---\n%s", want, body)
@@ -377,6 +378,24 @@ func TestRenderStandaloneGatewayUsesBoundedRemoteWritePipelines(t *testing.T) {
 	}
 	if strings.Contains(body, "prometheus/gateway:") {
 		t.Fatalf("standalone gateway must not retain the in-memory scrape exporter:\n%s", body)
+	}
+}
+
+func TestLokiOTLPLogsEndpointSupportsDirectAndManagerTargets(t *testing.T) {
+	tests := map[string]string{
+		"https://manager.example.com/loki/api/v1/push":  "https://manager.example.com/loki/otlp/v1/logs",
+		"https://manager.example.com/loki/otlp/v1/logs": "https://manager.example.com/loki/otlp/v1/logs",
+		"https://loki.example.com/otlp/v1/logs":         "https://loki.example.com/otlp/v1/logs",
+		"https://loki.example.com/prefix":               "https://loki.example.com/prefix/otlp/v1/logs",
+	}
+	for input, want := range tests {
+		got, err := lokiOTLPLogsEndpoint(input)
+		if err != nil {
+			t.Fatalf("lokiOTLPLogsEndpoint(%q): %v", input, err)
+		}
+		if got != want {
+			t.Fatalf("lokiOTLPLogsEndpoint(%q) = %q, want %q", input, got, want)
+		}
 	}
 }
 

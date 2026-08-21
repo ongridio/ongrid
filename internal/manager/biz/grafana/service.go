@@ -9,9 +9,10 @@
 //
 // Three ops are exposed:
 //   - Test: build a Client from settings, hit /api/health
-//   - Sync: ensure the ongrid folder, upsert the prom datasource, push
-//     every embedded dashboard with overwrite=true
+//   - Sync: ensure the ongrid folder, upsert Prometheus plus the configured
+//     log datasources, push every embedded dashboard with overwrite=true
 //   - SyncLoki: update only the managed Loki datasource after settings change
+//   - SyncLogsDatasource: reconcile the datasource for the active log backend
 package grafana
 
 import (
@@ -25,6 +26,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	settingbiz "github.com/ongridio/ongrid/internal/manager/biz/setting"
@@ -47,6 +49,8 @@ const (
 	promDatasourceName = "ongrid-prometheus"
 	lokiDatasourceUID  = "ongrid-loki"
 	lokiDatasourceName = "ongrid-loki"
+	esDatasourceUID    = "ongrid-elasticsearch"
+	esDatasourceName   = "ongrid-elasticsearch"
 )
 
 //go:embed dashboards/*.json
@@ -59,6 +63,9 @@ type Service struct {
 	tlsInsecure        bool   // skip cert verify when calling Grafana
 	panelDashboardUID  string // Monitor-page mirror dashboard uid (HLD-monitor-panels)
 	panelDashboardName string // human title shown in Grafana
+
+	logsProviderMu sync.RWMutex
+	logsProvider   func(context.Context) (*pkggrafana.ElasticsearchDatasourceConfig, error)
 }
 
 // New builds the service. tlsInsecure mirrors cfg.Grafana.TLSInsecure —
@@ -86,6 +93,15 @@ func (s *Service) SetPanelDashboardUID(uid string) {
 		return
 	}
 	s.panelDashboardUID = uid
+}
+
+// SetLogsDatasourceProvider wires the active Elasticsearch generation into
+// full Grafana sync without coupling the Grafana bounded context to logs. A
+// nil result means Loki is the active log backend.
+func (s *Service) SetLogsDatasourceProvider(provider func(context.Context) (*pkggrafana.ElasticsearchDatasourceConfig, error)) {
+	s.logsProviderMu.Lock()
+	defer s.logsProviderMu.Unlock()
+	s.logsProvider = provider
 }
 
 // httpClient builds the *http.Client used by both bootstrap and the
@@ -252,6 +268,16 @@ func (s *Service) Sync(ctx context.Context) (*SyncResult, error) {
 		}
 		datasources = append(datasources, lokiDatasourceName)
 	}
+	activeES, err := s.activeElasticsearchDatasource(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("resolve active Elasticsearch datasource: %w", err)
+	}
+	if activeES != nil {
+		if err := s.syncElasticsearchDatasource(ctx, c, *activeES); err != nil {
+			return nil, fmt.Errorf("upsert Elasticsearch datasource: %w", err)
+		}
+		datasources = append(datasources, esDatasourceName)
+	}
 
 	titles, err := s.pushDashboards(ctx, c)
 	if err != nil {
@@ -280,6 +306,90 @@ func (s *Service) SyncLoki(ctx context.Context) error {
 		return err
 	}
 	return s.syncLokiDatasource(ctx, c)
+}
+
+// SyncLogsDatasource reconciles the currently authoritative log backend. It
+// is used at startup so an Elasticsearch generation activated before a Manager
+// upgrade is added to Grafana without requiring another backend cutover.
+func (s *Service) SyncLogsDatasource(ctx context.Context) error {
+	activeES, err := s.activeElasticsearchDatasource(ctx)
+	if err != nil {
+		return fmt.Errorf("resolve active Elasticsearch datasource: %w", err)
+	}
+	if activeES != nil {
+		return s.SyncElasticsearch(ctx, *activeES)
+	}
+	return s.SyncLoki(ctx)
+}
+
+// SyncElasticsearch updates only the managed Elasticsearch datasource. It is
+// used after a verified log-backend cutover and deliberately receives the
+// read-only query credential rather than the Edge write credential.
+func (s *Service) SyncElasticsearch(ctx context.Context, config pkggrafana.ElasticsearchDatasourceConfig) error {
+	c, err := s.client(ctx)
+	if err != nil {
+		return err
+	}
+	return s.syncElasticsearchDatasource(ctx, c, config)
+}
+
+func (s *Service) activeElasticsearchDatasource(ctx context.Context) (*pkggrafana.ElasticsearchDatasourceConfig, error) {
+	s.logsProviderMu.RLock()
+	provider := s.logsProvider
+	s.logsProviderMu.RUnlock()
+	if provider == nil {
+		return nil, nil
+	}
+	return provider(ctx)
+}
+
+func (s *Service) syncElasticsearchDatasource(ctx context.Context, c *pkggrafana.Client, config pkggrafana.ElasticsearchDatasourceConfig) error {
+	ds, err := elasticsearchDatasource(config)
+	if err != nil {
+		return err
+	}
+	return c.UpsertDatasource(ctx, ds)
+}
+
+func elasticsearchDatasource(config pkggrafana.ElasticsearchDatasourceConfig) (pkggrafana.Datasource, error) {
+	config.URL = strings.TrimRight(strings.TrimSpace(config.URL), "/")
+	config.IndexPattern = strings.TrimSpace(config.IndexPattern)
+	config.APIKey = strings.TrimSpace(config.APIKey)
+	config.CAPEM = strings.TrimSpace(config.CAPEM)
+	if config.URL == "" {
+		return pkggrafana.Datasource{}, errors.New("grafana: cannot sync Elasticsearch datasource: URL is empty")
+	}
+	if config.IndexPattern == "" {
+		return pkggrafana.Datasource{}, errors.New("grafana: cannot sync Elasticsearch datasource: index pattern is empty")
+	}
+	if config.APIKey == "" {
+		return pkggrafana.Datasource{}, errors.New("grafana: cannot sync Elasticsearch datasource: query API key is empty")
+	}
+	ds := pkggrafana.Datasource{
+		UID:    esDatasourceUID,
+		Name:   esDatasourceName,
+		Type:   "elasticsearch",
+		URL:    config.URL,
+		Access: "proxy",
+		JSONData: map[string]any{
+			"index":           config.IndexPattern,
+			"timeField":       "@timestamp",
+			"logMessageField": "body.text",
+			"logLevelField":   "resource.attributes.level",
+			"httpHeaderName1": "Authorization",
+		},
+		SecureJSONData: map[string]string{
+			"httpHeaderValue1": "ApiKey " + config.APIKey,
+		},
+	}
+	if config.TLSInsecure {
+		ds.JSONData["tlsSkipVerify"] = true
+	}
+	if config.CAPEM != "" {
+		ds.JSONData["tlsAuthWithCACert"] = true
+		ds.SecureJSONData["tlsCACert"] = config.CAPEM
+	}
+	return ds, nil
 }
 
 func (s *Service) syncLokiDatasource(ctx context.Context, c *pkggrafana.Client) error {

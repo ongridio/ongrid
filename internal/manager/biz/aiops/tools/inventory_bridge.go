@@ -190,7 +190,7 @@ func classifyToolCategory(name string) string {
 		"query_alert_rules", "query_incidents", "get_incident_detail",
 		"rank_edges", "find_outlier_edges", "correlate_incident":
 		return "diagnostic"
-	case "query_promql", "list_metric_catalog", "query_logql", "query_traceql",
+	case "query_promql", "list_metric_catalog", "search_logs", "query_logql", "query_traceql",
 		"query_k8s_snapshot", "describe_k8s_resource", "query_k8s_logs":
 		return "telemetry"
 	case "agent", "send_message", "task_stop", "tool_search":

@@ -14,7 +14,7 @@ when_to_use: |
 capabilities:
   - id: incident_root_cause
     description: Correlate incident, metric, log, trace, topology, and change evidence into a causal analysis.
-    tools: [get_incident_detail, correlate_incident, query_promql, query_logql, query_traceql, query_change_events, expand_topology]
+    tools: [get_incident_detail, correlate_incident, query_promql, search_logs, query_traceql, query_change_events, expand_topology]
     max_tool_calls: 18
 can_delegate: true
 
@@ -25,7 +25,7 @@ tools:
   - correlate_incident
   - query_change_events
   - query_promql
-  - query_logql
+  - search_logs
   - query_traceql
   - get_edge_summary
   - query_alert_rules
@@ -74,7 +74,7 @@ metadata:
    - 改了什么 → `query_change_events`（around_ts=fired_at）查症状前后有没有人改过规则 / 配置 / 设备——**产品侧变更常常就是 0 号病人**（注意它看不到主机外部改动）
    - 依赖上游 → `expand_topology` 顺边往**上游**走（不是只看 blast-radius 往下）/ `find_topology_node`
    - 调用链 → `query_traceql` 跟 caller→callee、找最慢 span 的**发起方**
-   - 首条错误 → `query_logql` 按 device_id grep，找 fired_at **之前**的第一条 ERROR/PANIC/OOM
+   - 首条错误 → `search_logs` 按 device_id 和关键词检索，找 fired_at **之前**的第一条 ERROR/PANIC/OOM
    - 谁先偏离 → `query_promql` 看"哪个指标在它之前先动"
 4. **递归上溯**：把上游候选当新的当前点，回第 3 步继续。直到：
    - **触底** → 再往上没有 in-system 上游（定位到某进程 / 某次变更 / 某外部依赖）= 0 号病人；

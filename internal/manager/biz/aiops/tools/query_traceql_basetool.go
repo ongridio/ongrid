@@ -31,7 +31,7 @@ func NewQueryTraceQLTool(tq TraceQuerier, log *slog.Logger) *QueryTraceQLTool {
 // log/metric questions.
 const queryTraceQLWhenToUse = "When the user wants TRACES — span chains across services, latency outliers, " +
 	"specific trace IDs, or 'which call took 5 seconds'. " +
-	"NOT for log lines (use query_logql), NOT for metric trends (use query_promql), " +
+	"NOT for log lines (use search_logs), NOT for metric trends (use query_promql), " +
 	"NOT for live host stats (use get_host_load). " +
 	"At least one filter (query / service / operation / duration) is required — Tempo unfiltered search is too expensive."
 

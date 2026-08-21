@@ -9,7 +9,7 @@ when_to_use: |
     • "为什么磁盘满了"
 
   明确不要用于：
-    • 查日志内容 → 用 query_logql
+    • 查日志内容 → 用 search_logs
     • 查 metric / Prom 看磁盘用率 → 用 query_promql（拿宏观数；具体哪些文件用 host_files）
     • 查进程在写哪些 fd → 用 get_host_processes（看 IO 列）
 

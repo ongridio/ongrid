@@ -113,7 +113,7 @@ download_verified() {
 
 deps=(
     node_exporter process_exporter mysqld_exporter postgres_exporter
-    redis_exporter mongodb_exporter promtail otelcol-contrib
+    redis_exporter mongodb_exporter otelcol-contrib
 )
 
 for target in "${TARGETS[@]}"; do

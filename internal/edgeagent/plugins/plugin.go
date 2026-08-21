@@ -1,8 +1,8 @@
 // Package plugins is the edge-side plugin runtime.
 //
 // A plugin is a logical capability the edge can turn on/off independently:
-// metrics (built-in), logs (subprocess promtail), traces (subprocess
-// otelcol; PR-D), profiles (future). The Supervisor manages plugin
+// metrics (built-in), logs/traces (subprocess otelcol-contrib), profiles
+// (future). The Supervisor manages plugin
 // lifecycle: configuring, starting, watching, restarting on crash, and
 // reporting health back to manager.
 //
@@ -19,7 +19,7 @@ import (
 // these in lifecycle order: Configure → Start → (HealthSnapshot)* → Stop.
 //
 // In-process plugins (e.g. metrics) run as a goroutine inside ongrid-edge.
-// Subprocess plugins (e.g. logs/promtail, traces/otelcol) wrap a child
+// Subprocess plugins (e.g. logs/traces via otelcol-contrib) wrap a child
 // process via SubprocessPlugin. From the Supervisor's view both are
 // uniform.
 type Plugin interface {
@@ -60,8 +60,10 @@ type Plugin interface {
 // where the subprocess pushes telemetry, and which token authenticates it
 // at manager nginx.
 type PluginConfig struct {
-	Enabled  bool                   `json:"enabled"`
-	EdgeID   uint64                 `json:"edge_id"`             // baked into label set
+	Enabled bool `json:"enabled"`
+	// EdgeID is a legacy field name. Its value is the Manager-resolved host
+	// device_id baked into telemetry labels, not the tunnel-side edge id.
+	EdgeID   uint64                 `json:"edge_id"`
 	Endpoint string                 `json:"endpoint,omitempty"`  // data plane URL (https://manager/loki/api/v1/push, etc.)
 	AuthUser string                 `json:"auth_user,omitempty"` // basic-auth username (= edge access key)
 	AuthPass string                 `json:"auth_pass,omitempty"` // basic-auth password (= edge secret key) or bearer token if AuthUser empty
@@ -115,4 +117,18 @@ type ConfigFetcher interface {
 	// Plugins absent from the map are treated as disabled. Called at
 	// supervisor startup and on reload signals.
 	Fetch(ctx context.Context) (map[string]PluginConfig, error)
+}
+
+// ConfigApplyReporter is optionally implemented by a tunnel-backed fetcher.
+// It acknowledges only control-plane generation state; telemetry bytes still
+// flow directly from the plugin subprocess to the configured backend.
+type ConfigApplyReporter interface {
+	ReportPluginConfigApplied(ctx context.Context, plugin string, cfg PluginConfig, applyErr error) error
+}
+
+// ReadyPlugin is optionally implemented by subprocess plugins whose Start is
+// asynchronous. Supervisor waits for this gate before reporting an applied
+// rollout generation to Manager.
+type ReadyPlugin interface {
+	WaitReady(ctx context.Context) error
 }

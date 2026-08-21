@@ -78,6 +78,23 @@ type fakeDatabaseSecretWriter struct {
 	err   error
 }
 
+func TestPluginConfigIsEnabledUsesExplicitRowThenDefault(t *testing.T) {
+	repo := newFakePluginConfigRepo()
+	uc := NewPluginConfigUC(repo, nil, fakeEndpointResolver{}, nil)
+
+	enabled, err := uc.IsEnabled(context.Background(), 7, model.PluginNameLogs)
+	if err != nil || !enabled {
+		t.Fatalf("default logs enabled = %v, err=%v", enabled, err)
+	}
+	repo.rows[model.PluginNameLogs] = &model.PluginConfig{
+		EdgeID: 7, PluginName: model.PluginNameLogs, Enabled: false,
+	}
+	enabled, err = uc.IsEnabled(context.Background(), 7, model.PluginNameLogs)
+	if err != nil || enabled {
+		t.Fatalf("explicit logs enabled = %v, err=%v", enabled, err)
+	}
+}
+
 func (w *fakeDatabaseSecretWriter) WriteDatabaseMetricsSecrets(_ context.Context, _ uint64, reqs []tunnel.WriteDatabaseMetricsSecretRequest) error {
 	w.calls++
 	w.reqs = append(w.reqs, reqs...)

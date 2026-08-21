@@ -41,7 +41,7 @@ type Supervisor struct {
 	mu      sync.Mutex
 	plugins map[string]Plugin
 	current map[string]PluginConfig // last applied config per plugin
-	running map[string]bool          // last known started state
+	running map[string]bool         // last known started state
 
 	reloadSignal chan struct{}
 }
@@ -201,6 +201,7 @@ func (s *Supervisor) reconcile(ctx context.Context) {
 				if err := p.Configure(desCfg); err != nil {
 					s.log.Warn("plugin configure failed",
 						slog.String("plugin", name), slog.Any("err", err))
+					s.reportConfigApplied(ctx, name, desCfg, err)
 					continue
 				}
 			}
@@ -218,14 +219,38 @@ func (s *Supervisor) reconcile(ctx context.Context) {
 				if err := p.Start(ctx); err != nil {
 					s.log.Warn("plugin start failed",
 						slog.String("plugin", name), slog.Any("err", err))
+					s.reportConfigApplied(ctx, name, desCfg, err)
 					continue
 				}
 				s.mu.Lock()
 				s.running[name] = true
 				s.current[name] = desCfg
 				s.mu.Unlock()
+
+				var readyErr error
+				if ready, ok := p.(ReadyPlugin); ok {
+					readyCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+					readyErr = ready.WaitReady(readyCtx)
+					cancel()
+					if readyErr != nil {
+						s.log.Warn("plugin readiness failed", slog.String("plugin", name), slog.Any("err", readyErr))
+					}
+				}
+				s.reportConfigApplied(ctx, name, desCfg, readyErr)
 			}
 		}
+	}
+}
+
+func (s *Supervisor) reportConfigApplied(ctx context.Context, name string, cfg PluginConfig, applyErr error) {
+	reporter, ok := s.fetcher.(ConfigApplyReporter)
+	if !ok {
+		return
+	}
+	reportCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
+	defer cancel()
+	if err := reporter.ReportPluginConfigApplied(reportCtx, name, cfg, applyErr); err != nil {
+		s.log.Warn("plugin config acknowledgement failed", slog.String("plugin", name), slog.Any("err", err))
 	}
 }
 

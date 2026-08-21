@@ -43,7 +43,7 @@ K8S_EDGE_IMAGE_REF ?= $(K8S_EDGE_IMAGE_REPO):$(K8S_EDGE_IMAGE_TAG)
 # dependencies use an immutable tag derived from every upstream version and
 # are uploaded only once; the small self-developed binary follows VERSION.
 EDGE_ATTACHMENT_TARGETS ?= linux-amd64 linux-arm64
-EDGE_DEPS_TAG ?= edge-deps-layout1-p$(PROMTAIL_VERSION)-o$(OTELCOL_VERSION)-n$(NODE_EXPORTER_VERSION)-pr$(PROCESS_EXPORTER_VERSION)-my$(MYSQLD_EXPORTER_VERSION)-pg$(POSTGRES_EXPORTER_VERSION)-r$(REDIS_EXPORTER_VERSION)-m$(MONGODB_EXPORTER_VERSION)
+EDGE_DEPS_TAG ?= edge-deps-layout2-o$(OTELCOL_VERSION)-n$(NODE_EXPORTER_VERSION)-pr$(PROCESS_EXPORTER_VERSION)-my$(MYSQLD_EXPORTER_VERSION)-pg$(POSTGRES_EXPORTER_VERSION)-r$(REDIS_EXPORTER_VERSION)-m$(MONGODB_EXPORTER_VERSION)
 EDGE_ATTACHMENTS_OUT ?= $(OUT)/edge-attachments
 CNB_RELEASE_BASE_URL ?= https://cnb.cool/ongridio/ongrid-edge/-/releases/download
 CNB_REPO_SLUG ?= ongridio/ongrid-edge
@@ -147,7 +147,7 @@ proto: ## [api] 重新生成 proto（优先 buf，回退 protoc + protoc-gen-go/
 			--go_out=gen --go_opt=paths=source_relative \
 			--go-grpc_out=gen --go-grpc_opt=paths=source_relative \
 			--go-grpc_opt=require_unimplemented_servers=true \
-			frontierbound/v1/frontierbound.proto; \
+			$$(find . -name '*.proto' -not -path './gen/*' -print); \
 	fi
 
 # ----------------------------------------------------------------------------
@@ -174,7 +174,6 @@ docker-ongrid: ## 构建 ongrid 镜像
 docker-ongrid-edge: ## 构建 ongrid-edge 镜像
 	docker build \
 		--build-arg VERSION=$(VERSION) \
-		--build-arg PROMTAIL_VERSION=$(PROMTAIL_VERSION) \
 		--build-arg NODE_EXPORTER_VERSION=$(NODE_EXPORTER_VERSION) \
 		--build-arg PROCESS_EXPORTER_VERSION=$(PROCESS_EXPORTER_VERSION) \
 		--build-arg OTELCOL_VERSION=$(OTELCOL_VERSION) \
@@ -339,7 +338,6 @@ docker-build-k8s-edge: ## [dev] 构建本地 Kubernetes ongrid-edge 镜像（默
 	docker buildx build \
 		--platform $(K8S_EDGE_IMAGE_PLATFORM) \
 		--build-arg VERSION=$(VERSION) \
-		--build-arg PROMTAIL_VERSION=$(PROMTAIL_VERSION) \
 		--build-arg NODE_EXPORTER_VERSION=$(NODE_EXPORTER_VERSION) \
 		--build-arg PROCESS_EXPORTER_VERSION=$(PROCESS_EXPORTER_VERSION) \
 		--build-arg OTELCOL_VERSION=$(OTELCOL_VERSION) \
@@ -355,7 +353,6 @@ docker-push-k8s-edge: ## [release] 发布 Kubernetes ongrid-edge 多架构镜像
 		-- docker buildx build \
 		--platform $(K8S_EDGE_IMAGE_PLATFORMS) \
 		--build-arg VERSION=$(VERSION) \
-		--build-arg PROMTAIL_VERSION=$(PROMTAIL_VERSION) \
 		--build-arg NODE_EXPORTER_VERSION=$(NODE_EXPORTER_VERSION) \
 		--build-arg PROCESS_EXPORTER_VERSION=$(PROCESS_EXPORTER_VERSION) \
 		--build-arg OTELCOL_VERSION=$(OTELCOL_VERSION) \
@@ -414,38 +411,14 @@ docker-build-broker: ## [dev] 从上游源码本地构建 singchia/frontier:$(FR
 			--load $(FRONTIER_SRC); \
 	fi
 
-# Promtail bundle (ADR-012 / ADR-015 logs plugin).
-# Cached under bin/<os>-<arch>/promtail to avoid re-downloading on every build.
-PROMTAIL_VERSION ?= 3.4.0
 FETCH_CURL_FLAGS ?= -fL --retry 3 --retry-all-errors --retry-delay 3 --connect-timeout 15 --speed-time 60 --speed-limit 1024 --show-error
 
-.PHONY: fetch-promtail
-fetch-promtail: ## [release] 下载 promtail 到 bin/<os>-<arch>/promtail (Grafana 只发 linux 版本)
-	@for target in $(EDGE_PLUGIN_ARCHES); do \
-		dest=$(BIN_DIR)/$$target/promtail; \
-		if [ -f $$dest ]; then \
-			echo "[promtail] $$dest already present — skip"; \
-			continue; \
-		fi; \
-		mkdir -p $(BIN_DIR)/$$target; \
-		os=$${target%-*}; arch=$${target##*-}; \
-		zip=/tmp/promtail-$$os-$$arch.zip; \
-		url=https://github.com/grafana/loki/releases/download/v$(PROMTAIL_VERSION)/promtail-$$os-$$arch.zip; \
-		echo "[promtail] downloading $$url"; \
-		curl $(FETCH_CURL_FLAGS) -o $$zip $$url || { echo "promtail download failed for $$target"; exit 1; }; \
-		unzip -p $$zip > $$dest; \
-		chmod +x $$dest; \
-		rm -f $$zip; \
-		echo "[promtail] staged $$dest"; \
-	done
-	@echo "[promtail] note: Grafana doesn't ship darwin binaries — edge on macOS hosts will see logs plugin disabled (warned by install-edge.sh)"
-
-# OpenTelemetry Collector contrib bundle (ADR-013 / ADR-015 traces plugin).
+# OpenTelemetry Collector contrib bundle (logs and traces plugins).
 # Cached under bin/<os>-<arch>/otelcol-contrib. Note: contrib build is
 # ~200MB uncompressed per platform — operators wanting a slimmer agent can
 # swap in a custom OCB build (otel-collector-builder); we ship contrib so
 # default install works without forcing users to compile their own.
-OTELCOL_VERSION ?= 0.118.0
+OTELCOL_VERSION ?= 0.157.0
 
 .PHONY: fetch-otelcol
 fetch-otelcol: ## [release] 下载 otelcol-contrib 到 bin/<os>-<arch>/otelcol-contrib (linux-only)
@@ -457,13 +430,20 @@ fetch-otelcol: ## [release] 下载 otelcol-contrib 到 bin/<os>-<arch>/otelcol-c
 		fi; \
 		mkdir -p $(BIN_DIR)/$$target; \
 		os=$${target%-*}; arch=$${target##*-}; \
-		tgz=/tmp/otelcol-contrib-$$os-$$arch.tar.gz; \
-		url=https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v$(OTELCOL_VERSION)/otelcol-contrib_$(OTELCOL_VERSION)_$${os}_$${arch}.tar.gz; \
+		asset=otelcol-contrib_$(OTELCOL_VERSION)_$${os}_$${arch}.tar.gz; \
+		base=https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v$(OTELCOL_VERSION); \
+		tmpdir=$$(mktemp -d); tgz=$$tmpdir/$$asset; checksums=$$tmpdir/checksums.txt; \
+		url=$$base/$$asset; \
 		echo "[otelcol] downloading $$url"; \
-		curl $(FETCH_CURL_FLAGS) -o $$tgz $$url || { echo "otelcol-contrib download failed for $$target"; exit 1; }; \
-		tar -xzf $$tgz -C $(BIN_DIR)/$$target otelcol-contrib || { echo "extract failed for $$target"; exit 1; }; \
+		curl $(FETCH_CURL_FLAGS) -o $$tgz $$url || { rm -rf $$tmpdir; echo "otelcol-contrib download failed for $$target"; exit 1; }; \
+		curl $(FETCH_CURL_FLAGS) -o $$checksums $$base/opentelemetry-collector-releases_otelcol-contrib_checksums.txt || { rm -rf $$tmpdir; echo "otelcol-contrib checksums download failed"; exit 1; }; \
+		expected=$$(awk -v asset="$$asset" '$$2 == asset || $$2 == "*" asset { print $$1; exit }' $$checksums); \
+		test -n "$$expected" || { rm -rf $$tmpdir; echo "otelcol-contrib checksum missing for $$asset"; exit 1; }; \
+		if command -v sha256sum >/dev/null 2>&1; then actual=$$(sha256sum $$tgz | awk '{print $$1}'); else actual=$$(shasum -a 256 $$tgz | awk '{print $$1}'); fi; \
+		test "$$actual" = "$$expected" || { rm -rf $$tmpdir; echo "otelcol-contrib checksum mismatch for $$asset"; exit 1; }; \
+		tar -xzf $$tgz -C $(BIN_DIR)/$$target otelcol-contrib || { rm -rf $$tmpdir; echo "extract failed for $$target"; exit 1; }; \
 		chmod +x $$dest; \
-		rm -f $$tgz; \
+		rm -rf $$tmpdir; \
 		echo "[otelcol] staged $$dest"; \
 	done
 	@echo "[otelcol] note: contrib distro is ~200MB per platform; operators wanting smaller agent can build a custom OCB collector and drop it under /usr/local/lib/ongrid-edge/otelcol-contrib"
@@ -692,8 +672,7 @@ verify-edge-version-release: ## [release] 校验当前 VERSION 的 Edge Release 
 	@echo "verified immutable Edge release $(VERSION)"
 
 build-edge-deps-attachments: EDGE_PLUGIN_ARCHES := $(EDGE_ATTACHMENT_TARGETS)
-build-edge-deps-attachments: fetch-promtail fetch-otelcol fetch-node-exporter fetch-process-exporter fetch-db-exporters ## [release] 构建一次性公共 Edge 依赖附件
-	PROMTAIL_VERSION="$(PROMTAIL_VERSION)" \
+build-edge-deps-attachments: fetch-otelcol fetch-node-exporter fetch-process-exporter fetch-db-exporters ## [release] 构建一次性公共 Edge 依赖附件
 	OTELCOL_VERSION="$(OTELCOL_VERSION)" \
 	NODE_EXPORTER_VERSION="$(NODE_EXPORTER_VERSION)" \
 	PROCESS_EXPORTER_VERSION="$(PROCESS_EXPORTER_VERSION)" \
@@ -772,7 +751,7 @@ package: check-release-target ## [release] 打兼容命名的单架构安装包�
 	@if [ "$(ONGRID_BUNDLE_EDGE_ASSETS)" = "1" ]; then \
 		$(MAKE) --no-print-directory \
 			$(addprefix build-edge-,$(PACKAGE_EDGE_TARGETS)) \
-			fetch-promtail fetch-otelcol fetch-node-exporter fetch-process-exporter fetch-db-exporters \
+			fetch-otelcol fetch-node-exporter fetch-process-exporter fetch-db-exporters \
 			EDGE_PLUGIN_ARCHES="$(PACKAGE_EDGE_TARGETS)"; \
 	fi
 	PACKAGE_TARGET="$(PACKAGE_TARGET)" \

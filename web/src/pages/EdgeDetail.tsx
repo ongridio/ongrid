@@ -1251,7 +1251,7 @@ const PLUGIN_META: Record<
   logs: {
     label: 'logs',
     pill: 'bg-emerald-500/10 text-emerald-300 ring-emerald-500/30',
-    getHint: () => trInline('subprocess promtail，scrape journald / 文件 / k8s 容器日志', 'subprocess promtail — scrapes journald / files / k8s container logs'),
+    getHint: () => trInline('subprocess otelcol-contrib，采集 journald / 文件 / k8s 容器日志', 'subprocess otelcol-contrib — collects journald / files / k8s container logs'),
   },
   traces: {
     label: 'traces',
@@ -1430,8 +1430,8 @@ function PluginsTab({ edgeId }: { edgeId: number }) {
     <div className="space-y-4">
       <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 px-4 py-3 text-[12px] text-zinc-400">
         {tr(
-          'ongrid-edge 按 plugin runtime 模型组织能力。manager 推下来的 enabled + spec 由边端 supervisor 渲染成 plugin 原生 yaml（promtail.yaml / otelcol.yaml）后启停 subprocess。状态来自边端心跳上报的 health snapshot：running / crashed / starting / stopped，crashed 时展示原因（如二进制缺失）与重启次数；边端离线或旧版本未上报时按 enabled 推断。',
-          'ongrid-edge organizes capabilities under the plugin runtime model. enabled + spec pushed from manager are rendered by the edge supervisor into the plugin\'s native yaml (promtail.yaml / otelcol.yaml) and the subprocess is started/stopped. Status comes from the edge\'s heartbeat health snapshot: running / crashed / starting / stopped — crashed shows the reason (e.g. missing binary) and restart count; falls back to inferring from enabled when the edge is offline or runs an older agent.',
+          'ongrid-edge 按 plugin runtime 模型组织能力。manager 推下来的 enabled + spec 由边端 supervisor 渲染成 Collector 或 exporter 配置后启停 subprocess。日志和链路统一使用 otelcol-contrib。状态来自边端心跳上报的 health snapshot：running / crashed / starting / stopped，crashed 时展示原因（如二进制缺失）与重启次数；边端离线或旧版本未上报时按 enabled 推断。',
+          'ongrid-edge organizes capabilities under the plugin runtime model. enabled + spec pushed from manager are rendered into Collector or exporter configuration before the subprocess is started/stopped. Logs and traces share otelcol-contrib. Status comes from the edge heartbeat health snapshot: running / crashed / starting / stopped — crashed shows the reason (e.g. missing binary) and restart count; falls back to inferring from enabled when the edge is offline or runs an older agent.',
         )}
       </div>
 
@@ -4200,8 +4200,8 @@ function LogsSpecForm({
         values={filePaths}
         onChange={(next) => onChange({ ...draft, file_paths: next })}
         hint={tr(
-          '应用专属日志文件的 tail glob（promtail __path__）。系统日志默认走下方 journald，不必在此填 /var/log/syslog；这里留给 nginx access、应用自有日志文件等。',
-          'Tail glob for app-specific log files (promtail __path__). System logs come from journald (on by default below) — no need to add /var/log/syslog here; use this for nginx access logs, app log files, etc.',
+          '应用专属日志文件的 filelog include glob。系统日志默认走下方 journald，不必在此填 /var/log/syslog；这里留给 nginx access、应用自有日志文件等。',
+          'filelog include glob for app-specific logs. System logs come from journald (on by default below) — no need to add /var/log/syslog here; use this for nginx access logs, app log files, etc.',
         )}
       />
       <label className="flex items-start gap-2 rounded-md border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-300">

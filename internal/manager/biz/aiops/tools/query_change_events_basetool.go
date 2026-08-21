@@ -43,7 +43,7 @@ const QueryChangeEventsDescription = "查询 audit log 里某时间窗内的「�
 const queryChangeEventsWhenToUse = "RCA 溯源时查「告警时间附近有没有人改过配置 / 规则 / 设置」——把变更当 0 号病人候选。" +
 	"典型：用 incident 的 fired_at 作 around_ts，看前后 ±30 分钟有没有 rule_update / setting_update / device_update。" +
 	"返回空也是有效发现（这段时间没有产品侧变更）。" +
-	"NOT for：主机上的外部变更（audit 看不到）/ 指标趋势（query_promql）/ 日志（query_logql）。"
+	"NOT for：主机上的外部变更（audit 看不到）/ 指标趋势（query_promql）/ 日志（search_logs）。"
 
 // QueryChangeEventsArgs is the typed arg schema. The window is centred on
 // around_ts (usually the incident's fired_at).

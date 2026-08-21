@@ -75,7 +75,7 @@ fi
 edge_bin_root="$tmp_dir/edge-bin"
 mkdir -p "$edge_bin_root/linux-amd64"
 for binary in \
-  ongrid-edge promtail otelcol-contrib node_exporter process_exporter \
+  ongrid-edge otelcol-contrib node_exporter process_exporter \
   mysqld_exporter postgres_exporter redis_exporter mongodb_exporter; do
   printf '%s test payload\n' "$binary" >"$edge_bin_root/linux-amd64/$binary"
 done
@@ -205,7 +205,7 @@ tar -xf "$offline_archive" -C "$tmp_dir/offline-extracted"
 grep -Fxq 'ONGRID_EDGE_TARGETS=linux-amd64' \
   "$tmp_dir/offline-extracted/ongrid-vtest-linux-amd64/edge/edge-artifacts.env"
 for binary in \
-  ongrid-edge promtail otelcol-contrib node_exporter process_exporter \
+  ongrid-edge otelcol-contrib node_exporter process_exporter \
   mysqld_exporter postgres_exporter redis_exporter mongodb_exporter; do
   grep -Fxq "ongrid-vtest-linux-amd64/edge/${binary}-linux-amd64" \
     "$tmp_dir/offline-archive.list" \

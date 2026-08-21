@@ -1,8 +1,8 @@
 // Package logs is the edge-side `logs` plugin.
 //
-// It wraps a Promtail subprocess: ongrid-edge writes a Promtail config
-// derived from the manager-pushed PluginConfig, spawns promtail, and
-// lets Promtail push directly to manager nginx /loki/api/v1/push.
+// It wraps an otelcol-contrib subprocess: ongrid-edge writes a validated
+// Collector config derived from manager-pushed PluginConfig and lets the
+// Collector write directly to built-in Loki or external Elasticsearch.
 // ongrid-edge does not touch the log byte stream.
 package logs
 
@@ -18,26 +18,23 @@ import (
 const Name = "logs"
 
 // New constructs the logs plugin. binDir is where ongrid-edge looks for
-// the bundled promtail binary (typically /opt/ongrid-edge/bin); workDir
-// is where rendered config + promtail positions + subprocess log live
+// the bundled otelcol-contrib binary; workDir is where rendered config,
+// persistent receiver checkpoints/export queues, and subprocess logs live
 // (typically /var/lib/ongrid-edge/plugins).
 //
 // The returned *plugins.SubprocessPlugin satisfies plugins.Plugin and is
 // registered with the Supervisor by ongrid-edge main.
 func New(binDir, workDir string, log *slog.Logger) plugins.Plugin {
+	binary := filepath.Join(binDir, "otelcol-contrib")
 	return plugins.NewSubprocess(plugins.SubprocessOpts{
-		Name:         Name,
-		Binary:       filepath.Join(binDir, "promtail"),
-		WorkDir:      filepath.Join(workDir, Name),
-		ConfigFile:   filepath.Join(workDir, Name, "promtail.yaml"),
-		ConfigRender: render,
+		Name:            Name,
+		Binary:          binary,
+		WorkDir:         filepath.Join(workDir, Name),
+		ConfigFile:      filepath.Join(workDir, Name, "otelcol.yaml"),
+		ConfigRender:    render,
+		ConfigValidator: plugins.OTelConfigValidator(binary),
 		Args: func(_ plugins.PluginConfig, configFile string) []string {
-			return []string{
-				"-config.file=" + configFile,
-				// Promtail's positions file lives next to the config so
-				// re-creates of the workdir don't lose journald cursor.
-				"-positions.file=" + filepath.Join(filepath.Dir(configFile), "positions.yaml"),
-			}
+			return []string{"--config=" + configFile}
 		},
 		Log: log,
 	})

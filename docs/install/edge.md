@@ -48,10 +48,10 @@ make build-edge-linux-amd64
 
 # 2. Fetch the exporter/collector bundles the edge plugins rely on.
 #    The edge ships metrics/logs/traces via node_exporter, process_exporter,
-#    promtail and otelcol — these are NOT produced by `go build`. Without
+#    otelcol-contrib — these are NOT produced by `go build`. Without
 #    them the edge installs fine but has no data source: Monitor panels stay
 #    empty, and there are no logs or traces.
-make fetch-node-exporter fetch-process-exporter fetch-promtail fetch-otelcol
+make fetch-node-exporter fetch-process-exporter fetch-otelcol
 
 # 3. Stage so nginx serves the edge binary at /edge/ongrid-edge-linux-amd64
 cp bin/linux-amd64/ongrid-edge bin/ongrid-edge-linux-amd64

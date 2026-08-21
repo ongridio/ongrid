@@ -42,6 +42,35 @@ message HostMetricPoint {
 }
 
 // ============================================================
+// edge → cloud: manager-owned plugin secret and apply acknowledgement
+// geminio methods: "get_plugin_secret", "report_plugin_config_applied"
+// ============================================================
+
+message GetPluginSecretRequest {
+    string plugin = 1 [json_name = "plugin"];
+    string slot = 2 [json_name = "slot"];
+    uint64 generation = 3 [json_name = "generation"];
+}
+
+message GetPluginSecretResponse {
+    uint64 generation = 1 [json_name = "generation"];
+    string content = 2 [json_name = "content"];
+    string sha256 = 3 [json_name = "sha256"];
+}
+
+message ReportPluginConfigAppliedRequest {
+    string plugin = 1 [json_name = "plugin"];
+    uint64 generation = 2 [json_name = "generation"];
+    bool applied = 3 [json_name = "applied"];
+    string error_class = 4 [json_name = "error_class"];
+    string probe_id = 5 [json_name = "probe_id"];
+}
+
+message ReportPluginConfigAppliedResponse {
+    bool ok = 1 [json_name = "ok"];
+}
+
+// ============================================================
 // edge → cloud：首次注册 / 重连
 // geminio method: "register_edge"
 // ============================================================

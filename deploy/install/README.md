@@ -172,7 +172,7 @@ v0.7.45 起所有有状态服务（MySQL / Prometheus / Loki / Tempo / qdrant / 
 ├── qdrant/       # 向量 collection (root)
 └── grafana/      # Grafana SQLite + plugins (uid 472)
 
-/var/log/ongrid/  # manager slog 输出，可被宿主机 promtail / vector / fluent-bit 直接抓取
+/var/log/ongrid/  # manager slog 输出，可被宿主机 Collector / Vector / Fluent Bit 直接抓取
 ```
 
 `install.sh` 会在首次安装时初始化目录权限；`upgrade.sh` 只修正挂载点目录本身，不递归扫描已有 MySQL、Prometheus、Loki、Tempo 或 Grafana 数据。生产环境推荐：

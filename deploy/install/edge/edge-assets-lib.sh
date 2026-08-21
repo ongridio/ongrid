@@ -91,7 +91,7 @@ ongrid_validate_embedded_edge_assets() {
     local edge_dir=$1 raw_targets=$2 target component
     local targets=() components=(
         ongrid-edge node_exporter process_exporter mysqld_exporter postgres_exporter
-        redis_exporter mongodb_exporter promtail otelcol-contrib
+        redis_exporter mongodb_exporter otelcol-contrib
     )
     read -r -a targets <<<"$raw_targets"
     for target in "${targets[@]}"; do

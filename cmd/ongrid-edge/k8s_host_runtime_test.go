@@ -51,6 +51,13 @@ func TestInstallK8sHostRuntime(t *testing.T) {
 	}
 
 	hostRoot := t.TempDir()
+	legacyLink := hostPath(hostRoot, legacyK8sHostServiceAccountLink)
+	if err := os.MkdirAll(filepath.Dir(legacyLink), 0755); err != nil {
+		t.Fatalf("mkdir legacy service account parent: %v", err)
+	}
+	if err := os.Symlink(k8sHostServiceAccountDir, legacyLink); err != nil {
+		t.Fatalf("create legacy service account link: %v", err)
+	}
 	err := installK8sHostRuntime(context.Background(), k8sHostInstallPaths{
 		hostRoot:             hostRoot,
 		edgeSource:           edgeSource,
@@ -66,10 +73,14 @@ func TestInstallK8sHostRuntime(t *testing.T) {
 	assertFileContents(t, hostPath(hostRoot, k8sHostEdgeBinary), "edge")
 	assertFileContents(t, filepath.Join(hostPath(hostRoot, k8sHostPluginDir), "node_exporter"), "plugin")
 	assertFileContents(t, filepath.Join(hostPath(hostRoot, k8sHostServiceAccountDir), "token"), "token")
+	if _, err := os.Lstat(legacyLink); !os.IsNotExist(err) {
+		t.Fatalf("legacy service account link still exists: %v", err)
+	}
 	for _, path := range []string{
 		hostPath(hostRoot, k8sHostStateDir),
 		filepath.Join(hostPath(hostRoot, k8sHostStateDir), "credentials"),
 		filepath.Join(hostPath(hostRoot, k8sHostStateDir), "plugins"),
+		hostPath(hostRoot, k8sHostSecretDir),
 	} {
 		info, err := os.Stat(path)
 		if err != nil {
@@ -78,6 +89,20 @@ func TestInstallK8sHostRuntime(t *testing.T) {
 		if got := info.Mode().Perm(); got != 0750 {
 			t.Fatalf("%s mode = %o, want 750", path, got)
 		}
+	}
+}
+
+func TestRemoveLegacyK8sHostServiceAccountLinkPreservesExistingPath(t *testing.T) {
+	hostRoot := t.TempDir()
+	linkPath := hostPath(hostRoot, legacyK8sHostServiceAccountLink)
+	if err := os.MkdirAll(linkPath, 0755); err != nil {
+		t.Fatalf("mkdir existing service account path: %v", err)
+	}
+	if err := removeLegacyK8sHostServiceAccountLink(hostRoot); err != nil {
+		t.Fatalf("removeLegacyK8sHostServiceAccountLink() error = %v", err)
+	}
+	if info, err := os.Stat(linkPath); err != nil || !info.IsDir() {
+		t.Fatalf("existing service account path was changed: info=%v err=%v", info, err)
 	}
 }
 

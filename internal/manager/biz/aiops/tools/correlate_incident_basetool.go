@@ -33,10 +33,15 @@ type CorrelateIncidentTool struct {
 	alertUC    AlertUsecase
 	promQuery  PromQuerier
 	logQuery   LogQuerier
+	logSearch  logquery.Searcher
 	traceQuery TraceQuerier
 	edges      *edgebiz.Usecase
 	devices    *devicebiz.Usecase
 	log        *slog.Logger
+}
+
+func (t *CorrelateIncidentTool) SetLogSearcher(search logquery.Searcher) {
+	t.logSearch = search
 }
 
 // NewCorrelateIncidentTool builds the BaseTool variant.
@@ -111,7 +116,7 @@ var CorrelateIncidentBatchSchema = json.RawMessage(`{
 // correlateIncidentWhenToUse — batch-first routing hint (N+15).
 const correlateIncidentWhenToUse = "对一组 incident_id 各跑完整 metric+log+trace+edge 关联诊断。" +
 	"**典型 2-4 个一次**（每个内部已经 3 路并发）。**别一次给 16 个**——成本爆炸。" +
-	"NOT for: 单纯查 incident 字段（用 get_incident_detail）/ 没 incident_id 的自由查（用 query_promql / query_logql）/ " +
+	"NOT for: 单纯查 incident 字段（用 get_incident_detail）/ 没 incident_id 的自由查（用 query_promql / search_logs）/ " +
 	"列 incidents（用 query_incidents）。"
 
 // Info returns metadata. Class=read.
@@ -192,11 +197,11 @@ func (t *CorrelateIncidentTool) singleCorrelate(ctx context.Context, incidentID 
 		bundle.Skipped["metric_panel"] = "prom query client not configured"
 	}
 
-	if t.logQuery != nil {
+	if t.logSearch != nil || t.logQuery != nil {
 		if inc.DeviceID != nil {
 			entries, err := t.queryLogPanel(callCtx, *inc.DeviceID, wStart, wEnd)
 			if err != nil {
-				bundle.Skipped["log_panel"] = "loki query failed: " + err.Error()
+				bundle.Skipped["log_panel"] = "log query failed: " + err.Error()
 			} else {
 				bundle.LogPanel = entries
 			}
@@ -312,6 +317,9 @@ func (t *CorrelateIncidentTool) queryMetricPanel(ctx context.Context, expr strin
 
 // queryLogPanel mirrors Registry.queryLogPanel.
 func (t *CorrelateIncidentTool) queryLogPanel(ctx context.Context, edgeID uint64, start, end time.Time) ([]logEntry, error) {
+	if t.logSearch != nil {
+		return queryStructuredIncidentLogs(ctx, t.logSearch, edgeID, start, end)
+	}
 	q := fmt.Sprintf(`{edge_id="%d"} |~ "(?i)error|panic|oom|fatal|fail"`, edgeID)
 	res, err := t.logQuery.QueryRange(ctx, logquery.QueryRangeOptions{
 		Query:     q,

@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-// SubprocessPlugin wraps a child binary (promtail, otelcol, parca-agent,
+// SubprocessPlugin wraps a child binary (otelcol, parca-agent,
 // etc.) so each Plugin only writes its config-render function and binary
 // path; lifecycle, crash backoff, and stdout/stderr capture are shared.
 //
@@ -32,10 +32,11 @@ import (
 type SubprocessPlugin struct {
 	// Static (set by concrete plugin constructor).
 	name         string
-	binary       string                                             // /opt/ongrid-edge/bin/promtail
+	binary       string                                             // /opt/ongrid-edge/bin/otelcol-contrib
 	workDir      string                                             // /var/lib/ongrid-edge/plugins/logs
-	configFile   string                                             // workDir/promtail.yaml
-	configRender func(PluginConfig) ([]byte, error)                 // PluginConfig -> promtail.yaml bytes (nil = no config file written)
+	configFile   string                                             // workDir/otelcol.yaml
+	configRender func(PluginConfig) ([]byte, error)                 // PluginConfig -> config bytes (nil = no config file written)
+	configValid  func(context.Context, string) error                // validates a staged config before atomic replacement
 	args         func(cfg PluginConfig, configFile string) []string // PluginConfig + path -> CLI argv
 	log          *slog.Logger
 
@@ -47,6 +48,39 @@ type SubprocessPlugin struct {
 	health      PluginHealth
 	wantRunning bool // set by Start, cleared by Stop
 	stoppedCh   chan struct{}
+}
+
+// WaitReady waits until the subprocess has remained running long enough to
+// exclude immediate startup/configuration failures. Collector configuration
+// has already passed its native validate command before this point.
+func (s *SubprocessPlugin) WaitReady(ctx context.Context) error {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	var stableSince time.Time
+	for {
+		health := s.HealthSnapshot()
+		switch health.State {
+		case StateRunning:
+			if stableSince.IsZero() {
+				stableSince = time.Now()
+			}
+			if time.Since(stableSince) >= time.Second {
+				return nil
+			}
+		case StateCrashed:
+			if health.LastError != "" {
+				return fmt.Errorf("subprocess failed readiness: %s", health.LastError)
+			}
+			return errors.New("subprocess failed readiness")
+		default:
+			stableSince = time.Time{}
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 // SubprocessOpts is the constructor argument for NewSubprocess. Concrete
@@ -61,6 +95,10 @@ type SubprocessOpts struct {
 	// plugins like hostmetrics (node_exporter, no config file) leave this
 	// nil and put everything into Args via PluginConfig.
 	ConfigRender func(PluginConfig) ([]byte, error)
+	// ConfigValidator validates the staged config path before it replaces the
+	// last-known-good file. Implementations must not include config contents or
+	// child output in returned errors because rendered files may contain auth.
+	ConfigValidator func(context.Context, string) error
 	// Args builds the subprocess argv from the plugin's current
 	// PluginConfig + the rendered config path. Receiving the cfg lets
 	// config-file-less plugins encode spec into CLI flags.
@@ -85,6 +123,7 @@ func NewSubprocess(opts SubprocessOpts) *SubprocessPlugin {
 		workDir:      opts.WorkDir,
 		configFile:   configFile,
 		configRender: opts.ConfigRender,
+		configValid:  opts.ConfigValidator,
 		args:         opts.Args,
 		log:          opts.Log.With(slog.String("plugin", opts.Name)),
 		health: PluginHealth{
@@ -113,12 +152,56 @@ func (s *SubprocessPlugin) Configure(cfg PluginConfig) error {
 		if err != nil {
 			return fmt.Errorf("render config: %w", err)
 		}
-		if err := os.WriteFile(s.configFile, body, 0o600); err != nil {
-			return fmt.Errorf("write config %s: %w", s.configFile, err)
+		if err := s.stageValidateAndReplace(body); err != nil {
+			return err
 		}
 	}
 	s.cfg = cfg
 	s.log.Debug("configure ok", slog.String("config_file", s.configFile))
+	return nil
+}
+
+func (s *SubprocessPlugin) stageValidateAndReplace(body []byte) error {
+	tmp, err := os.CreateTemp(s.workDir, "."+filepath.Base(s.configFile)+"-*")
+	if err != nil {
+		return fmt.Errorf("stage config: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("chmod staged config: %w", err)
+	}
+	if _, err := tmp.Write(body); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write staged config: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("sync staged config: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close staged config: %w", err)
+	}
+	if s.configValid != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		err = s.configValid(ctx, tmpPath)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("validate staged config: %w", err)
+		}
+	}
+	if err := os.Rename(tmpPath, s.configFile); err != nil {
+		return fmt.Errorf("replace config %s: %w", s.configFile, err)
+	}
+	directory, err := os.Open(s.workDir)
+	if err != nil {
+		return fmt.Errorf("open config directory: %w", err)
+	}
+	defer directory.Close()
+	if err := directory.Sync(); err != nil && !errors.Is(err, syscall.EINVAL) {
+		return fmt.Errorf("sync config directory: %w", err)
+	}
 	return nil
 }
 

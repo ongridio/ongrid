@@ -54,7 +54,7 @@ log() { logger -t ongrid-edge-upgrade "$*"; }
 # ----- Pre-start: ensure log-read group membership -------------------------
 #
 # install-edge.sh adds ongrid-edge to adm + systemd-journal so the logs
-# plugin (promtail) can read /var/log/* (root:adm 640) and the journal.
+# logs Collector can read /var/log/* (root:adm 640) and the journal.
 # Bundle upgrades (ADR-024) DON'T re-run install-edge.sh, so a box that was
 # installed before that grant — or one whose groups got dropped — would
 # silently ship empty logs forever. Re-assert membership here: this hook

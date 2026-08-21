@@ -17,7 +17,7 @@ when_to_use: |
 capabilities:
   - id: sre_assessment
     description: Assess incidents, observability signals, SLO risk, and fleet outliers.
-    tools: [query_incidents, get_incident_detail, correlate_incident, query_promql, query_logql, rank_edges, find_outlier_edges]
+    tools: [query_incidents, get_incident_detail, correlate_incident, query_promql, search_logs, rank_edges, find_outlier_edges]
     max_tool_calls: 12
 can_delegate: true
 tools:
@@ -27,7 +27,7 @@ tools:
   - get_incident_detail
   - get_edge_summary
   - query_promql
-  - query_logql
+  - search_logs
   - find_outlier_edges
   - rank_edges
   - get_host_load
@@ -50,7 +50,7 @@ max_turns: 15
 
 ## 工作方式
 
-**工具预算**：一次任务最多 1 次 `query_incidents`、1 次 `get_edge_summary`、最多 3 次 `query_promql`、最多 2 次 `query_logql`、最多 1 次 `query_knowledge`。达到预算后必须基于已有证据输出优先级/风险，不要再换表达式继续试。
+**工具预算**：一次任务最多 1 次 `query_incidents`、1 次 `get_edge_summary`、最多 3 次 `query_promql`、最多 2 次 `search_logs`、最多 1 次 `query_knowledge`。达到预算后必须基于已有证据输出优先级/风险，不要再换表达式继续试。
 
 1. **先看 incident 列表 + 趋势，不要先看单机指标**：
    - 入口先 `query_incidents(status="open")`（拿现有告警优先级 + severity）

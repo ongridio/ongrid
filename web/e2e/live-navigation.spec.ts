@@ -57,7 +57,7 @@ test.describe('live frontend interaction', () => {
     for (const plugin of ['metrics', 'logs', 'traces', 'profiles']) {
       await expect(page.getByText(plugin, { exact: true }).first()).toBeVisible();
     }
-    await expect(page.getByText(/subprocess promtail/)).toBeVisible();
+    await expect(page.getByText(/subprocess otelcol-contrib/)).toBeVisible();
   });
 
   test('Kubernetes cluster detail switches every resource view', async ({ page }) => {

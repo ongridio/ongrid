@@ -93,8 +93,14 @@ grep -q 'name: install-host-runtime' "$tmp_dir/default.yaml"
 grep -q -- '- install-k8s-host-runtime' "$tmp_dir/default.yaml"
 grep -A16 'name: install-host-runtime' "$tmp_dir/default.yaml" | grep -q 'memory: 128Mi'
 grep -q -- '- enter-k8s-host' "$tmp_dir/default.yaml"
-test "$(grep -F -c 'mountPath: /host/root' "$tmp_dir/default.yaml")" -eq 2
+test "$(grep -E -c '^[[:space:]]+mountPath: /host/root$' "$tmp_dir/default-node.yaml")" -eq 2
 grep -q 'mountPropagation: HostToContainer' "$tmp_dir/default.yaml"
+grep -q 'automountServiceAccountToken: false' "$tmp_dir/default-node.yaml"
+grep -q 'mountPath: /host/root/var/lib/ongrid-edge/k8s-runtime/serviceaccount' "$tmp_dir/default-node.yaml"
+! grep -q 'mountPath: /host/root/var/run/secrets/kubernetes.io/serviceaccount' "$tmp_dir/default-node.yaml"
+grep -q 'expirationSeconds: 3600' "$tmp_dir/default-node.yaml"
+grep -q 'defaultMode: 0444' "$tmp_dir/default-node.yaml"
+grep -A1 'name: ONGRID_EDGE_SECRET_DIR' "$tmp_dir/default-node.yaml" | grep -q 'value: /var/lib/ongrid-edge/k8s-state/secrets'
 grep -A1 'name: ONGRID_EDGE_COLLECTOR_MODE' "$tmp_dir/default.yaml" | grep -q 'value: "off"'
 grep -q 'add: \["CHOWN", "DAC_OVERRIDE", "FOWNER"\]' "$tmp_dir/default.yaml"
 grep -q 'add: \["DAC_READ_SEARCH", "NET_ADMIN", "SETGID", "SETPCAP", "SETUID", "SYS_CHROOT"\]' "$tmp_dir/default.yaml"

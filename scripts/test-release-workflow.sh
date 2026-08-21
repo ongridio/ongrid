@@ -105,7 +105,7 @@ grep -Eq '^RELEASE_IMAGE_DIGEST_DIR \?= dist/release-digests$' "$makefile" \
     || { echo "Makefile manager digest directory does not match the workflow artifacts" >&2; exit 1; }
 grep -Fq 'FROM --platform=$BUILDPLATFORM node:20-alpine AS builder' "$repo_root/deploy/Dockerfile.web" \
     || { echo "Web builder still runs once per emulated target architecture" >&2; exit 1; }
-[[ $(grep -Fc 'FROM --platform=$BUILDPLATFORM' "$repo_root/deploy/Dockerfile.ongrid-edge") -eq 5 ]] \
+[[ $(grep -Fc 'FROM --platform=$BUILDPLATFORM' "$repo_root/deploy/Dockerfile.ongrid-edge") -eq 4 ]] \
     || { echo "Edge build/download stages are not all pinned to the native build platform" >&2; exit 1; }
 
 if grep -Fq 'cnbcool/attachments:latest' "$makefile"; then

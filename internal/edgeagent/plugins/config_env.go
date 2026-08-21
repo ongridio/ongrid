@@ -26,9 +26,11 @@ import (
 // scripts). This means operators only have to set ENABLED + ENDPOINT for
 // the common case of "data plane reuses tunnel credentials".
 //
-// Plus a global edge identifier (baked into labels):
+// Plus a global host-device identifier (baked into labels). The legacy
+// ONGRID_EDGE_ID fallback is retained for standalone/dev deployments only;
+// tunnel-managed deployments receive the canonical device_id from Manager.
 //
-//	ONGRID_EDGE_ID = "42"
+//	ONGRID_EDGE_DEVICE_ID = "42"
 type EnvConfigFetcher struct {
 	knownPlugins []string
 }
@@ -45,13 +47,16 @@ func NewEnvConfigFetcher(knownPlugins []string) *EnvConfigFetcher {
 // previously enabled).
 func (e *EnvConfigFetcher) Fetch(_ context.Context) (map[string]PluginConfig, error) {
 	out := make(map[string]PluginConfig, len(e.knownPlugins))
-	edgeID := envUint("ONGRID_EDGE_ID")
+	deviceID := envUint("ONGRID_EDGE_DEVICE_ID")
+	if deviceID == 0 {
+		deviceID = envUint("ONGRID_EDGE_ID")
+	}
 
 	for _, name := range e.knownPlugins {
 		prefix := "ONGRID_EDGE_PLUGIN_" + strings.ToUpper(name) + "_"
 		cfg := PluginConfig{
 			Enabled:  envBool(prefix + "ENABLED"),
-			EdgeID:   edgeID,
+			EdgeID:   deviceID,
 			Endpoint: os.Getenv(prefix + "ENDPOINT"),
 			AuthUser: firstNonEmpty(os.Getenv(prefix+"AUTH_USER"), os.Getenv("ONGRID_EDGE_ACCESS_KEY")),
 			AuthPass: firstNonEmpty(os.Getenv(prefix+"AUTH_PASS"), os.Getenv("ONGRID_EDGE_SECRET_KEY")),

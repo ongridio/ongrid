@@ -11,6 +11,7 @@ import (
 	"time"
 
 	model "github.com/ongridio/ongrid/internal/manager/model/alert"
+	"github.com/ongridio/ongrid/internal/pkg/logquery"
 )
 
 // effectiveScope returns the rule's stored scope_type, defaulting per
@@ -88,6 +89,24 @@ type MetricForecastRule struct {
 	Operator       string  // ">", ">=", "<", "<=", "==", "!="
 	Threshold      float64 // value to compare predicted point against
 	ForSeconds     int
+}
+
+// LogSearchRule is the compiled, backend-neutral log alert. Query contains
+// only the stable product search contract; Start/End are filled by the
+// evaluator for each tick. No LogQL or Elasticsearch DSL is persisted.
+type LogSearchRule struct {
+	ID         uint64
+	RuleKey    string
+	Name       string
+	Severity   string
+	ScopeType  string
+	RunbookURL string
+	Labels     map[string]string
+	Query      logquery.SearchRequest
+	Window     time.Duration
+	WindowText string
+	Operator   string
+	Threshold  float64
 }
 
 // LogMatchRule is the compiled form of a kind=log_match rule (
@@ -208,6 +227,7 @@ type RulesProvider interface {
 	MetricAnomalyRules() []MetricAnomalyRule
 	MetricForecastRules() []MetricForecastRule
 	MetricBurnRateRules() []MetricBurnRateRule
+	LogSearchRules() []LogSearchRule
 	LogMatchRules() []LogMatchRule
 	LogVolumeRules() []LogVolumeRule
 	TraceLatencyRules() []TraceLatencyRule
@@ -221,6 +241,7 @@ type rulesSnapshot struct {
 	metricAnomaly  []MetricAnomalyRule
 	metricForecast []MetricForecastRule
 	metricBurnRate []MetricBurnRateRule
+	logSearch      []LogSearchRule
 	logMatch       []LogMatchRule
 	logVolume      []LogVolumeRule
 	traceLatency   []TraceLatencyRule
@@ -268,6 +289,11 @@ func WithMetricBurnRateRules(rs []MetricBurnRateRule) StaticOption {
 	return func(s *rulesSnapshot) { s.metricBurnRate = append([]MetricBurnRateRule(nil), rs...) }
 }
 
+// WithLogSearchRules attaches backend-neutral log rules to the static provider.
+func WithLogSearchRules(rs []LogSearchRule) StaticOption {
+	return func(s *rulesSnapshot) { s.logSearch = append([]LogSearchRule(nil), rs...) }
+}
+
 func (s *StaticRulesProvider) MetricRawRules() []MetricRawRule         { return s.snap.metricRaw }
 func (s *StaticRulesProvider) MetricAnomalyRules() []MetricAnomalyRule { return s.snap.metricAnomaly }
 func (s *StaticRulesProvider) MetricForecastRules() []MetricForecastRule {
@@ -276,6 +302,7 @@ func (s *StaticRulesProvider) MetricForecastRules() []MetricForecastRule {
 func (s *StaticRulesProvider) MetricBurnRateRules() []MetricBurnRateRule {
 	return s.snap.metricBurnRate
 }
+func (s *StaticRulesProvider) LogSearchRules() []LogSearchRule { return s.snap.logSearch }
 func (s *StaticRulesProvider) LogMatchRules() []LogMatchRule   { return s.snap.logMatch }
 func (s *StaticRulesProvider) LogVolumeRules() []LogVolumeRule { return s.snap.logVolume }
 func (s *StaticRulesProvider) TraceLatencyRules() []TraceLatencyRule {
@@ -343,6 +370,7 @@ func (c *CachedRulesProvider) MetricForecastRules() []MetricForecastRule {
 func (c *CachedRulesProvider) MetricBurnRateRules() []MetricBurnRateRule {
 	return c.load().metricBurnRate
 }
+func (c *CachedRulesProvider) LogSearchRules() []LogSearchRule { return c.load().logSearch }
 func (c *CachedRulesProvider) LogMatchRules() []LogMatchRule   { return c.load().logMatch }
 func (c *CachedRulesProvider) LogVolumeRules() []LogVolumeRule { return c.load().logVolume }
 func (c *CachedRulesProvider) TraceLatencyRules() []TraceLatencyRule {
@@ -403,6 +431,16 @@ func (c *CachedRulesProvider) Refresh(ctx context.Context) error {
 				continue
 			}
 			snap.metricBurnRate = append(snap.metricBurnRate, br)
+		case model.RuleKindLogSearch:
+			lr, err := compileLogSearchRule(row)
+			if err != nil {
+				c.log.Warn("alert: log_search compile failed",
+					slog.Uint64("rule_id", row.ID),
+					slog.String("rule_key", row.RuleKey),
+					slog.Any("err", err))
+				continue
+			}
+			snap.logSearch = append(snap.logSearch, lr)
 		case model.RuleKindLogMatch:
 			lm, err := compileLogMatchRule(row)
 			if err != nil {
@@ -712,6 +750,18 @@ func validHostOperator(op string) bool {
 // compile funcs
 // ----------------------------------------------------------------------------
 
+// logSearchSpec deliberately mirrors only the stable product query model.
+// Start/end/cursor/limit are runtime concerns and cannot be persisted in a
+// rule, which prevents both backend DSL injection and stale time ranges.
+type logSearchSpec struct {
+	Keywords  logquery.Keywords      `json:"keywords,omitempty"`
+	Scope     logquery.Scope         `json:"scope,omitempty"`
+	Filters   []logquery.FieldFilter `json:"filters,omitempty"`
+	Window    string                 `json:"window"`
+	Operator  string                 `json:"operator"`
+	Threshold *float64               `json:"threshold"`
+}
+
 type logMatchSpec struct {
 	StreamSelector string  `json:"stream_selector"`
 	LineFilter     string  `json:"line_filter"`
@@ -741,6 +791,87 @@ type traceErrorRateSpec struct {
 	Window       string  `json:"window"`
 	Operator     string  `json:"operator"`
 	ThresholdPct float64 `json:"threshold_pct"`
+}
+
+func normalizeLogSearchSpec(spec logSearchSpec) (logSearchSpec, time.Duration, error) {
+	spec.Window = strings.TrimSpace(spec.Window)
+	if spec.Window == "" {
+		spec.Window = "5m"
+	}
+	window, err := time.ParseDuration(spec.Window)
+	if err != nil || window <= 0 {
+		return logSearchSpec{}, 0, fmt.Errorf("window %q must be a positive duration", spec.Window)
+	}
+	if window > logquery.MaxSearchWindow {
+		return logSearchSpec{}, 0, fmt.Errorf("window exceeds %s", logquery.MaxSearchWindow)
+	}
+	spec.Operator = strings.TrimSpace(spec.Operator)
+	if spec.Operator == "" {
+		spec.Operator = ">="
+	}
+	if !validHostOperator(spec.Operator) {
+		return logSearchSpec{}, 0, fmt.Errorf("operator %q invalid", spec.Operator)
+	}
+	if spec.Threshold == nil {
+		value := float64(1)
+		spec.Threshold = &value
+	}
+	if *spec.Threshold < 0 {
+		return logSearchSpec{}, 0, fmt.Errorf("threshold must be non-negative")
+	}
+
+	// Run the same allowlists and limits used by the Logs HTTP API. The
+	// placeholder times are discarded after validation.
+	start := time.Unix(1, 0).UTC()
+	req := logquery.SearchRequest{
+		Start:     start,
+		End:       start.Add(window),
+		Scope:     spec.Scope,
+		Keywords:  spec.Keywords,
+		Filters:   append([]logquery.FieldFilter(nil), spec.Filters...),
+		Limit:     1,
+		Direction: logquery.SortBackward,
+	}
+	if err := req.NormalizeAndValidate(); err != nil {
+		return logSearchSpec{}, 0, err
+	}
+	spec.Keywords = req.Keywords
+	spec.Scope = req.Scope
+	spec.Filters = req.Filters
+	return spec, window, nil
+}
+
+func compileLogSearchRule(r *model.Rule) (LogSearchRule, error) {
+	if r.RuleKey == "" {
+		return LogSearchRule{}, fmt.Errorf("rule_key empty")
+	}
+	var spec logSearchSpec
+	if err := json.Unmarshal([]byte(r.ConditionsJSON), &spec); err != nil {
+		return LogSearchRule{}, fmt.Errorf("decode conditions: %w", err)
+	}
+	spec, window, err := normalizeLogSearchSpec(spec)
+	if err != nil {
+		return LogSearchRule{}, err
+	}
+	out := LogSearchRule{
+		ID:         r.ID,
+		RuleKey:    r.RuleKey,
+		Name:       r.Name,
+		Severity:   r.Severity,
+		ScopeType:  effectiveScope(r.ScopeType, r.Kind),
+		Query:      logquery.SearchRequest{Scope: spec.Scope, Keywords: spec.Keywords, Filters: spec.Filters},
+		Window:     window,
+		WindowText: spec.Window,
+		Operator:   spec.Operator,
+		Threshold:  *spec.Threshold,
+	}
+	if r.RunbookURL != nil {
+		out.RunbookURL = *r.RunbookURL
+	}
+	if r.LabelsJSON != nil && *r.LabelsJSON != "" {
+		_ = json.Unmarshal([]byte(*r.LabelsJSON), &out.Labels)
+	}
+	return out, nil
 }
 
 func compileLogMatchRule(r *model.Rule) (LogMatchRule, error) {

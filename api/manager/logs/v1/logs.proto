@@ -1,0 +1,296 @@
+syntax = "proto3";
+
+package ongrid.manager.logs.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/ongridio/ongrid/api/gen/manager/logs/v1;logsv1";
+
+// LogsService provides backend-neutral log search and external backend control.
+// REST handlers are hand-written under internal/manager/server/logs.
+service LogsService {
+  rpc SearchLogs(SearchLogsRequest) returns (SearchLogsResponse);
+  rpc GetLogFields(GetLogFieldsRequest) returns (GetLogFieldsResponse);
+  rpc GetLogFieldValues(GetLogFieldValuesRequest) returns (GetLogFieldValuesResponse);
+  rpc GetLogHistogram(GetLogHistogramRequest) returns (GetLogHistogramResponse);
+  rpc GetLogContext(GetLogContextRequest) returns (GetLogContextResponse);
+  rpc GetLogBackend(GetLogBackendRequest) returns (GetLogBackendResponse);
+  rpc PutLogBackend(PutLogBackendRequest) returns (PutLogBackendResponse);
+  rpc TestLogBackend(TestLogBackendRequest) returns (TestLogBackendResponse);
+  rpc SelectLogBackend(SelectLogBackendRequest) returns (SelectLogBackendResponse);
+  rpc StartLogBackendConnectionCheck(StartLogBackendConnectionCheckRequest) returns (LogBackendConnectionCheckResponse);
+  rpc GetLogBackendConnectionCheck(GetLogBackendConnectionCheckRequest) returns (LogBackendConnectionCheckResponse);
+  rpc SelectLoki(SelectLokiRequest) returns (SelectLokiResponse);
+}
+
+enum LogMatchMode {
+  LOG_MATCH_MODE_UNSPECIFIED = 0;
+  LOG_MATCH_MODE_ANY = 1;
+  LOG_MATCH_MODE_ALL = 2;
+  LOG_MATCH_MODE_PHRASE = 3;
+}
+
+enum LogSortDirection {
+  LOG_SORT_DIRECTION_UNSPECIFIED = 0;
+  LOG_SORT_DIRECTION_BACKWARD = 1;
+  LOG_SORT_DIRECTION_FORWARD = 2;
+}
+
+enum LogFilterOperator {
+  LOG_FILTER_OPERATOR_UNSPECIFIED = 0;
+  LOG_FILTER_OPERATOR_EQUAL = 1;
+  LOG_FILTER_OPERATOR_NOT_EQUAL = 2;
+  LOG_FILTER_OPERATOR_IN = 3;
+  LOG_FILTER_OPERATOR_EXISTS = 4;
+}
+
+message LogScope {
+  repeated uint64 device_ids = 1;
+  repeated string cluster_ids = 2;
+  repeated string namespaces = 3;
+  repeated string workloads = 4;
+  repeated string pods = 5;
+  repeated string containers = 6;
+  repeated string service_names = 7;
+  repeated string source_ids = 8;
+  repeated string levels = 9;
+  repeated string files = 10;
+}
+
+message LogKeywords {
+  repeated string include = 1;
+  repeated string exclude = 2;
+  LogMatchMode mode = 3;
+}
+
+message LogFieldFilter {
+  string field = 1;
+  LogFilterOperator operator = 2;
+  repeated string values = 3;
+}
+
+message SearchLogsRequest {
+  google.protobuf.Timestamp start = 1;
+  google.protobuf.Timestamp end = 2;
+  LogScope scope = 3;
+  LogKeywords keywords = 4;
+  repeated LogFieldFilter filters = 5;
+  uint32 limit = 6;
+  string page_token = 7;
+  LogSortDirection direction = 8;
+}
+
+message LogRecord {
+  string id = 1;
+  google.protobuf.Timestamp timestamp = 2;
+  string message = 3;
+  string severity_text = 4;
+  int32 severity_number = 5;
+  string backend = 6;
+  map<string, string> attributes = 7;
+  map<string, string> resource_attributes = 8;
+  string trace_id = 9;
+  string span_id = 10;
+}
+
+message SearchLogsResponse {
+  int32 code = 1;
+  string message = 2;
+  repeated LogRecord data = 3;
+  string next_page_token = 4;
+  bool has_more = 5;
+  int64 took_ms = 6;
+  repeated string backends = 7;
+}
+
+message GetLogFieldsRequest {
+  google.protobuf.Timestamp start = 1;
+  google.protobuf.Timestamp end = 2;
+  LogScope scope = 3;
+}
+
+message LogField {
+  string name = 1;
+  string type = 2;
+  bool searchable = 3;
+  bool aggregatable = 4;
+}
+
+message GetLogFieldsResponse {
+  int32 code = 1;
+  string message = 2;
+  repeated LogField data = 3;
+}
+
+message GetLogFieldValuesRequest {
+  string field = 1;
+  google.protobuf.Timestamp start = 2;
+  google.protobuf.Timestamp end = 3;
+  LogScope scope = 4;
+  uint32 limit = 5;
+}
+
+message GetLogFieldValuesResponse {
+  int32 code = 1;
+  string message = 2;
+  repeated string data = 3;
+}
+
+message GetLogHistogramRequest {
+  SearchLogsRequest search = 1;
+  string interval = 2;
+}
+
+message LogHistogramBucket {
+  google.protobuf.Timestamp start = 1;
+  uint64 count = 2;
+}
+
+message GetLogHistogramResponse {
+  int32 code = 1;
+  string message = 2;
+  repeated LogHistogramBucket data = 3;
+}
+
+message GetLogContextRequest {
+  string record_id = 1;
+  google.protobuf.Timestamp timestamp = 2;
+  LogScope scope = 3;
+  uint32 before = 4;
+  uint32 after = 5;
+  string backend = 6;
+}
+
+message GetLogContextResponse {
+  int32 code = 1;
+  string message = 2;
+  repeated LogRecord data = 3;
+}
+
+enum LogBackendType {
+  LOG_BACKEND_TYPE_UNSPECIFIED = 0;
+  LOG_BACKEND_TYPE_BUILTIN_LOKI = 1;
+  LOG_BACKEND_TYPE_EXTERNAL_ELASTICSEARCH = 2;
+}
+
+enum LogBackendStatus {
+  LOG_BACKEND_STATUS_UNSPECIFIED = 0;
+  LOG_BACKEND_STATUS_UNSELECTED = 1;
+  LOG_BACKEND_STATUS_SELECTED = 2;
+}
+
+message LogBackend {
+  uint64 id = 1;
+  string name = 2;
+  LogBackendType type = 3;
+  LogBackendStatus status = 4;
+  uint64 generation = 5;
+  repeated string write_endpoints = 6;
+  string query_endpoint = 7;
+  string data_stream_namespace = 8;
+  string write_credential_name = 9;
+  string read_credential_name = 10;
+  string ca_credential_name = 11;
+  string kibana_url = 12;
+  bool tls_insecure = 13;
+}
+
+message GetLogBackendRequest {}
+
+message GetLogBackendResponse {
+  int32 code = 1;
+  string message = 2;
+  LogBackend data = 3;
+}
+
+message PutLogBackendRequest {
+  string name = 1;
+  repeated string write_endpoints = 2;
+  string query_endpoint = 3;
+  string data_stream_namespace = 4;
+  string write_credential_name = 5;
+  string read_credential_name = 6;
+  string ca_credential_name = 7;
+  string kibana_url = 8;
+  bool tls_insecure = 9;
+}
+
+message PutLogBackendResponse {
+  int32 code = 1;
+  string message = 2;
+  LogBackend data = 3;
+}
+
+message TestLogBackendRequest {
+  optional uint64 edge_id = 1;
+}
+
+message TestLogBackendResponse {
+  int32 code = 1;
+  string message = 2;
+  bool manager_read_ok = 3;
+  bool edge_write_ok = 4;
+  string version = 5;
+  string probe_id = 6;
+}
+
+message SelectLogBackendRequest {}
+
+message SelectLogBackendResponse {
+  int32 code = 1;
+  string message = 2;
+  LogBackend data = 3;
+}
+
+enum LogBackendConnectionStatus {
+  LOG_BACKEND_CONNECTION_STATUS_UNSPECIFIED = 0;
+  LOG_BACKEND_CONNECTION_STATUS_NOT_CHECKED = 1;
+  LOG_BACKEND_CONNECTION_STATUS_PENDING = 2;
+  LOG_BACKEND_CONNECTION_STATUS_VERIFIED = 3;
+  LOG_BACKEND_CONNECTION_STATUS_FAILED = 4;
+  LOG_BACKEND_CONNECTION_STATUS_OFFLINE = 5;
+}
+
+message LogBackendEdgeConnection {
+  uint64 edge_id = 1;
+  string edge_name = 2;
+  bool online = 3;
+  LogBackendConnectionStatus status = 4;
+  uint64 desired_generation = 5;
+  uint64 applied_generation = 6;
+  google.protobuf.Timestamp last_checked_at = 7;
+  string last_error = 8;
+}
+
+message StartLogBackendConnectionCheckRequest {}
+
+message GetLogBackendConnectionCheckRequest {}
+
+message LogBackendConnectionCheck {
+  uint64 backend_id = 1;
+  string backend = 2;
+  uint64 generation = 3;
+  google.protobuf.Timestamp observed_at = 4;
+  uint32 total = 5;
+  uint32 online = 6;
+  uint32 verified = 7;
+  uint32 pending = 8;
+  uint32 failed = 9;
+  uint32 offline = 10;
+  bool all_online_verified = 11;
+  repeated LogBackendEdgeConnection edges = 12;
+}
+
+message LogBackendConnectionCheckResponse {
+  int32 code = 1;
+  string message = 2;
+  LogBackendConnectionCheck data = 3;
+}
+
+message SelectLokiRequest {}
+
+message SelectLokiResponse {
+  int32 code = 1;
+  string message = 2;
+  LogBackend data = 3;
+}

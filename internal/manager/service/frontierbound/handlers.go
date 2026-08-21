@@ -10,6 +10,7 @@ import (
 	"time"
 
 	edgebiz "github.com/ongridio/ongrid/internal/manager/biz/edge"
+	bizlogs "github.com/ongridio/ongrid/internal/manager/biz/logs"
 	metricbiz "github.com/ongridio/ongrid/internal/manager/biz/metric"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
@@ -80,6 +81,10 @@ type Wiring struct {
 	// MethodGetPluginConfigs so edges can pull their plugin config
 	// snapshot via tunnel.
 	PluginConfigUC PluginConfigFetcher
+	// PluginSecrets is optional during rolling upgrades. New edges use it to
+	// pull a fixed manager-owned secret slot only after authenticating their
+	// tunnel session, then acknowledge configuration application.
+	PluginSecrets PluginSecretProvider
 	// WebshellRouter routes edge-to-manager shell_output / shell_exit
 	// pushes to the live WebSocket bridge for that session. Optional —
 	// when nil the two handlers don't install and webshell is disabled.
@@ -107,6 +112,11 @@ type WebshellRouter interface {
 // the edge biz PluginConfigUC. *edgebiz.PluginConfigUC satisfies it.
 type PluginConfigFetcher interface {
 	FetchForEdge(ctx context.Context, edgeID uint64) (*edgebiz.WireSnapshot, error)
+}
+
+type PluginSecretProvider interface {
+	PluginSecretForEdge(ctx context.Context, edgeID uint64, plugin, slot string, generation uint64) (*bizlogs.PluginSecret, error)
+	MarkApplied(ctx context.Context, edgeID, generation uint64, probeID, applyErr string) error
 }
 
 // Install registers all manager-side reverse-call handlers and the three
@@ -606,6 +616,63 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 			return json.Marshal(out)
 		}); err != nil {
 			return fmt.Errorf("frontierbound: register %q: %w", tunnel.MethodGetPluginConfigs, err)
+		}
+	}
+
+	if w.PluginSecrets != nil {
+		if err := c.Register(ctx, tunnel.MethodGetPluginSecret, func(rpcCtx context.Context, edgeID uint64, body []byte) ([]byte, error) {
+			if len(body) > 16<<10 {
+				return nil, fmt.Errorf("get_plugin_secret: request too large")
+			}
+			var in tunnel.GetPluginSecretRequest
+			if err := json.Unmarshal(body, &in); err != nil {
+				return nil, fmt.Errorf("get_plugin_secret: decode: %w", err)
+			}
+			canonicalEdgeID := c.canonicalizeEdgeID(edgeID)
+			if canonicalEdgeID == 0 {
+				return nil, fmt.Errorf("get_plugin_secret: edge binding not ready")
+			}
+			secret, err := w.PluginSecrets.PluginSecretForEdge(rpcCtx, canonicalEdgeID, in.Plugin, in.Slot, in.Generation)
+			if err != nil {
+				return nil, fmt.Errorf("get_plugin_secret: %w", err)
+			}
+			return json.Marshal(tunnel.GetPluginSecretResponse{
+				Generation: secret.Generation,
+				Content:    secret.Content,
+				SHA256:     secret.SHA256,
+			})
+		}); err != nil {
+			return fmt.Errorf("frontierbound: register %q: %w", tunnel.MethodGetPluginSecret, err)
+		}
+
+		if err := c.Register(ctx, tunnel.MethodReportPluginConfigApplied, func(rpcCtx context.Context, edgeID uint64, body []byte) ([]byte, error) {
+			if len(body) > 16<<10 {
+				return nil, fmt.Errorf("report_plugin_config_applied: request too large")
+			}
+			var in tunnel.ReportPluginConfigAppliedRequest
+			if err := json.Unmarshal(body, &in); err != nil {
+				return nil, fmt.Errorf("report_plugin_config_applied: decode: %w", err)
+			}
+			if in.Plugin != "logs" {
+				return nil, fmt.Errorf("report_plugin_config_applied: unsupported plugin")
+			}
+			canonicalEdgeID := c.canonicalizeEdgeID(edgeID)
+			if canonicalEdgeID == 0 {
+				return nil, fmt.Errorf("report_plugin_config_applied: edge binding not ready")
+			}
+			applyErr := ""
+			if !in.Applied {
+				applyErr = in.ErrorClass
+				if strings.TrimSpace(applyErr) == "" {
+					applyErr = "configuration rejected"
+				}
+			}
+			if err := w.PluginSecrets.MarkApplied(rpcCtx, canonicalEdgeID, in.Generation, in.ProbeID, applyErr); err != nil {
+				return nil, fmt.Errorf("report_plugin_config_applied: %w", err)
+			}
+			return json.Marshal(tunnel.ReportPluginConfigAppliedResponse{OK: true})
+		}); err != nil {
+			return fmt.Errorf("frontierbound: register %q: %w", tunnel.MethodReportPluginConfigApplied, err)
 		}
 	}
 

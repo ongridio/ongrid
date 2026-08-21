@@ -71,7 +71,7 @@ embedded="$tmp_dir/embedded"
 mkdir -p "$embedded"
 components=(
     ongrid-edge node_exporter process_exporter mysqld_exporter postgres_exporter
-    redis_exporter mongodb_exporter promtail otelcol-contrib
+    redis_exporter mongodb_exporter otelcol-contrib
 )
 for target in linux-amd64 linux-arm64; do
     for component in "${components[@]}"; do
@@ -80,7 +80,7 @@ for target in linux-amd64 linux-arm64; do
 done
 ongrid_validate_embedded_edge_assets "$embedded" 'linux-amd64 linux-arm64' \
     || fail "a complete embedded dual-architecture package was rejected"
-rm "$embedded/promtail-linux-arm64"
+rm "$embedded/otelcol-contrib-linux-arm64"
 if ongrid_validate_embedded_edge_assets "$embedded" 'linux-amd64 linux-arm64' \
     >/dev/null 2>&1; then
     fail "an incomplete embedded package was accepted"

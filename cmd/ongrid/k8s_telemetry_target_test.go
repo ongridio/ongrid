@@ -42,7 +42,7 @@ func TestPluginEndpointResolverPublishesExternalSignalSettings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve logs: %v", err)
 	}
-	if logs.Endpoint != "https://loki.example/loki/api/v1/push" || logs.BasicUser != "loki-user" || logs.BasicPassword != "loki-pass" || !logs.TLSInsecure || logs.UseTelemetryCredential {
+	if logs.Endpoint != "https://loki.example/otlp/v1/logs" || logs.BasicUser != "loki-user" || logs.BasicPassword != "loki-pass" || !logs.TLSInsecure || logs.UseTelemetryCredential {
 		t.Fatalf("logs target = %#v", logs)
 	}
 	traces, err := resolver.ResolveTelemetryTarget(context.Background(), "traces")
@@ -69,7 +69,7 @@ func TestPluginEndpointResolverFallsBackToManagerForInternalSeeds(t *testing.T) 
 	if err != nil {
 		t.Fatalf("resolve traces: %v", err)
 	}
-	if logs.Endpoint != "https://manager.example/loki/api/v1/push" || !logs.UseTelemetryCredential {
+	if logs.Endpoint != "https://manager.example/loki/otlp/v1/logs" || !logs.UseTelemetryCredential {
 		t.Fatalf("logs target = %#v", logs)
 	}
 	if traces.Endpoint != "https://manager.example/v1/traces" || !traces.UseTelemetryCredential {

@@ -32,8 +32,6 @@ import {
   RULE_KINDS,
   SIGNAL_SOURCES,
   TRIGGER_MODES,
-  SCOPE_LABEL,
-  SCOPE_HINT,
   createRule,
   deleteRule,
   listChannels,
@@ -53,7 +51,7 @@ import {
   type RulePreviewResp,
   type SignalSource,
 } from '@/api/alerts';
-import { RULE_PRESETS, RULE_PRESET_GROUPS, localizedPresetGroup, type RulePreset, type RulePresetGroup } from '@/lib/rule_presets';
+import { RULE_PRESETS, RULE_PRESET_GROUPS, localizedPresetGroup, type RulePreset } from '@/lib/rule_presets';
 import { tr as trInline, useI18n } from '@/i18n/locale';
 import { usePermissions } from '@/store/me';
 
@@ -612,6 +610,14 @@ function summarizeRule(rule: Rule): string {
       const burns = (rule.spec?.burns as Array<{ window: string; multiplier: number }> | undefined) ?? [];
       const tail = burns.map((b) => `${b.window}×${b.multiplier}`).join(' & ');
       return `SLO ${slo}% burn: ${tail || '—'}`;
+    }
+    case 'log_search': {
+      const keywords = (rule.spec?.keywords as { include?: string[] } | undefined)?.include ?? [];
+      const op = (rule.spec?.operator as string) ?? '>=';
+      const threshold = rule.spec?.threshold ?? 1;
+      const window = (rule.spec?.window as string) ?? '5m';
+      const query = keywords.length > 0 ? keywords.join(' | ') : trInline('全部日志', 'all logs');
+      return `${query} · count[${window}] ${op} ${threshold}`;
     }
     case 'log_match': {
       const sel = (rule.spec?.stream_selector as string) ?? '{}';
@@ -1486,6 +1492,123 @@ function KindSpecificFields({
           </div>
           <div className="mt-2 text-[11px] text-zinc-500">
             {tr('参考：Google SRE Workbook page 1h×14.4 + 6h×6（fast page），ticket 5m×1 + 30m×1（slow burn）。', 'Reference: Google SRE Workbook — page 1h×14.4 + 6h×6 (fast page), ticket 5m×1 + 30m×1 (slow burn).')}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (form.kind === 'log_search') {
+    const keywords = (form.spec?.keywords as Record<string, unknown> | undefined) ?? {};
+    const scope = (form.spec?.scope as Record<string, unknown> | undefined) ?? {};
+    const csvValue = (value: unknown) => Array.isArray(value) ? value.join(', ') : '';
+    const parseCSV = (value: string) => value.split(',').map((item) => item.trim()).filter(Boolean);
+    const updateKeywords = (patch: Record<string, unknown>) =>
+      setSpec({ keywords: { ...keywords, ...patch } });
+    const updateScope = (key: string, value: string, numeric = false) => {
+      const items = parseCSV(value);
+      setSpec({
+        scope: {
+          ...scope,
+          [key]: numeric
+            ? items.map((item) => Number(item)).filter((item) => Number.isInteger(item) && item > 0)
+            : items,
+        },
+      });
+    };
+    const scopeFields: Array<{ key: string; label: string; placeholder: string; numeric?: boolean }> = [
+      { key: 'device_ids', label: 'device_id', placeholder: '12, 42', numeric: true },
+      { key: 'cluster_ids', label: 'cluster_id', placeholder: 'prod-shanghai' },
+      { key: 'namespaces', label: 'namespace', placeholder: 'production, kube-system' },
+      { key: 'workloads', label: 'workload', placeholder: 'api-server' },
+      { key: 'pods', label: 'pod', placeholder: 'api-server-7c9d...' },
+      { key: 'containers', label: 'container', placeholder: 'api' },
+      { key: 'service_names', label: 'service.name', placeholder: 'checkout' },
+      { key: 'levels', label: 'level', placeholder: 'ERROR, WARN' },
+      { key: 'source_ids', label: 'source', placeholder: 'journald, kubernetes' },
+      { key: 'files', label: 'file', placeholder: '/var/log/app.log' },
+    ];
+    return (
+      <div className="space-y-3">
+        <div className="rounded-md border border-sky-500/20 bg-sky-500/5 px-3 py-2 text-[11px] text-sky-200/80">
+          {tr(
+            '这是推荐的后端无关规则：保存的是关键词和字段过滤，不是 LogQL 或 Elasticsearch DSL。切换日志后端时规则无需重写。',
+            'Recommended backend-neutral rule: it stores keywords and field filters, never LogQL or Elasticsearch DSL, so backend cutovers require no rewrite.',
+          )}
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label={tr('包含关键词（逗号分隔）', 'Include keywords (comma-separated)')}>
+            <input
+              value={csvValue(keywords.include)}
+              onChange={(e) => updateKeywords({ include: parseCSV(e.target.value) })}
+              placeholder="error, panic, connection refused"
+              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            />
+          </Field>
+          <Field label={tr('排除关键词（逗号分隔）', 'Exclude keywords (comma-separated)')}>
+            <input
+              value={csvValue(keywords.exclude)}
+              onChange={(e) => updateKeywords({ exclude: parseCSV(e.target.value) })}
+              placeholder="healthcheck, probe"
+              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            />
+          </Field>
+        </div>
+        <div className="grid grid-cols-4 gap-3">
+          <Field label={tr('关键词匹配', 'Keyword match')}>
+            <select
+              value={(keywords.mode as string) ?? 'any'}
+              onChange={(e) => updateKeywords({ mode: e.target.value })}
+              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            >
+              <option value="any">{tr('任意一个', 'Any')}</option>
+              <option value="all">{tr('全部包含', 'All')}</option>
+              <option value="phrase">{tr('完整短语', 'Exact phrase')}</option>
+            </select>
+          </Field>
+          <Field label={tr('统计窗口', 'Count window')}>
+            <input
+              value={(form.spec?.window as string) ?? '5m'}
+              onChange={(e) => setSpec({ window: e.target.value })}
+              placeholder="5m"
+              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            />
+          </Field>
+          <Field label={tr('比较符', 'Operator')}>
+            <select
+              value={(form.spec?.operator as string) ?? '>='}
+              onChange={(e) => setSpec({ operator: e.target.value })}
+              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            >
+              {OPERATORS.map((op) => <option key={op} value={op}>{op}</option>)}
+            </select>
+          </Field>
+          <Field label={tr('命中条数阈值', 'Hit count threshold')}>
+            <input
+              type="number"
+              min={0}
+              value={(form.spec?.threshold as number) ?? 1}
+              onChange={(e) => setSpec({ threshold: Number(e.target.value) })}
+              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            />
+          </Field>
+        </div>
+        <div>
+          <div className="mb-1.5 text-xs text-zinc-500">
+            {tr('范围过滤（可选，每项逗号分隔）', 'Scope filters (optional, comma-separated)')}
+          </div>
+          <div className="grid grid-cols-2 gap-2 lg:grid-cols-3">
+            {scopeFields.map((field) => (
+              <label key={field.key} className="block">
+                <span className="mb-1 block font-mono text-[10px] text-zinc-500">{field.label}</span>
+                <input
+                  value={csvValue(scope[field.key])}
+                  onChange={(e) => updateScope(field.key, e.target.value, field.numeric)}
+                  placeholder={field.placeholder}
+                  className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                />
+              </label>
+            ))}
           </div>
         </div>
       </div>

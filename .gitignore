@@ -57,6 +57,7 @@ go.work.sum
 web/dist/
 web/node_modules/
 web/tsconfig.tsbuildinfo
+api/gen/
 /.playwright-cli/
 /output/
 

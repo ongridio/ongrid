@@ -36,7 +36,6 @@ ENTRIES=(
   "postgres_exporter        0755 /usr/local/lib/ongrid-edge/postgres_exporter        postgres_exporter-${ARCH}"
   "redis_exporter           0755 /usr/local/lib/ongrid-edge/redis_exporter           redis_exporter-${ARCH}"
   "mongodb_exporter         0755 /usr/local/lib/ongrid-edge/mongodb_exporter         mongodb_exporter-${ARCH}"
-  "promtail                 0755 /usr/local/lib/ongrid-edge/promtail                 promtail-${ARCH}"
   "otelcol-contrib          0755 /usr/local/lib/ongrid-edge/otelcol-contrib          otelcol-contrib-${ARCH}"
   "apply-pending-upgrade.sh 0755 /usr/local/lib/ongrid-edge/apply-pending-upgrade.sh apply-pending-upgrade.sh"
 )

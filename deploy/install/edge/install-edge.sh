@@ -25,7 +25,7 @@ trap 'log_error "install-edge failed at line $LINENO"' ERR
 SERVICE_USER=ongrid-edge
 SERVICE_GROUP=ongrid-edge
 BIN_DEST=/usr/local/bin/ongrid-edge
-PLUGIN_BIN_DIR=/usr/local/lib/ongrid-edge   # bundled plugin binaries (promtail, etc.)
+PLUGIN_BIN_DIR=/usr/local/lib/ongrid-edge   # bundled plugin binaries (otelcol-contrib, exporters)
 STATE_DIR=/var/lib/ongrid-edge               # agent state root (StateDirectory=)
 PLUGIN_WORK_DIR="${STATE_DIR}/plugins"       # rendered plugin configs + subprocess logs
 CONFIG_DIR=/etc/ongrid-edge
@@ -130,9 +130,9 @@ if ! id "$SERVICE_USER" >/dev/null 2>&1; then
     log_info "creating system user $SERVICE_USER"
     useradd --system --no-create-home --shell /usr/sbin/nologin "$SERVICE_USER" || true
 fi
-# Grant read access to standard log dirs so promtail (logs plugin) can
+# Grant read access to standard log dirs so the logs Collector can
 # tail /var/log/syslog, auth.log, etc. These files are typically
-# root:adm 640. systemd-journal lets promtail journal-source read
+# root:adm 640. systemd-journal lets the journald receiver read
 # /var/log/journal/. Both groups are membership-only — no privilege
 # escalation. Idempotent: usermod is a no-op if already a member.
 # lldpd exposes its read-only control socket to the _lldpd group. Add the
@@ -149,7 +149,7 @@ log_info "installing binary to $BIN_DEST"
 install -m 0755 -o root -g root "$BIN_SRC" "$BIN_DEST"
 
 # ---------- install bundled plugin binaries (ADR-015) ----------
-# promtail (logs plugin), otelcol-contrib (traces plugin; future), etc.
+# otelcol-contrib runs both logs and traces pipelines.
 # Per-platform variant lives under SCRIPT_DIR with the same -OS-ARCH suffix
 # as the main edge binary.
 mkdir -p "$PLUGIN_BIN_DIR"
@@ -167,14 +167,6 @@ chmod 0755 "$STATE_DIR"
 mkdir -p "$PLUGIN_WORK_DIR"
 chown "$SERVICE_USER":"$SERVICE_GROUP" "$PLUGIN_WORK_DIR" 2>/dev/null || true
 chmod 750 "$PLUGIN_WORK_DIR"
-
-PROMTAIL_SRC="${SCRIPT_DIR}/promtail-${OS}-${ARCH}"
-if [[ -f "$PROMTAIL_SRC" ]]; then
-    log_info "installing promtail to ${PLUGIN_BIN_DIR}/promtail"
-    install -m 0755 -o root -g root "$PROMTAIL_SRC" "${PLUGIN_BIN_DIR}/promtail"
-else
-    log_warn "promtail-${OS}-${ARCH} not bundled; logs plugin will fail to start until present"
-fi
 
 # C11 Phase-B / ADR-024 remote upgrade hook — `apply-pending-upgrade.sh`
 # runs as root via the ongrid-edge-upgrade.service oneshot (installed
@@ -196,15 +188,13 @@ mkdir -p /var/lib/ongrid-edge/.upgrade
 chown -R "$SERVICE_USER":"$SERVICE_GROUP" /var/lib/ongrid-edge/.upgrade
 chmod 0750 /var/lib/ongrid-edge/.upgrade
 
-# otelcol-contrib (traces plugin, ADR-013). Upstream doesn't ship darwin
-# builds in the contrib stream — traces plugin stays disabled on darwin
-# edges until an operator drops in a custom OCB build.
+# otelcol-contrib (logs and traces plugins).
 OTELCOL_SRC="${SCRIPT_DIR}/otelcol-contrib-${OS}-${ARCH}"
 if [[ -f "$OTELCOL_SRC" ]]; then
     log_info "installing otelcol-contrib to ${PLUGIN_BIN_DIR}/otelcol-contrib"
     install -m 0755 -o root -g root "$OTELCOL_SRC" "${PLUGIN_BIN_DIR}/otelcol-contrib"
 else
-    log_warn "otelcol-contrib-${OS}-${ARCH} not bundled; traces plugin will fail to start until present"
+    log_warn "otelcol-contrib-${OS}-${ARCH} not bundled; logs and traces plugins will fail to start until present"
 fi
 
 # node_exporter + process_exporter — bundled exporter binaries used by
@@ -314,7 +304,7 @@ echo "${C_BOLD}${C_CYAN}--- self-check ---${C_RESET}"
 SELFCHECK_FAIL=0
 
 # 1) plugin binaries present + executable
-for tool in promtail otelcol-contrib node_exporter process_exporter mysqld_exporter postgres_exporter redis_exporter mongodb_exporter; do
+for tool in otelcol-contrib node_exporter process_exporter mysqld_exporter postgres_exporter redis_exporter mongodb_exporter; do
     if [[ -x "${PLUGIN_BIN_DIR}/${tool}" ]]; then
         log_info "plugin binary present: ${tool}"
     else

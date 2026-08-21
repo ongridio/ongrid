@@ -434,6 +434,58 @@ func (u *Usecase) ValidateEnrollmentCluster(ctx context.Context, clusterNodeID u
 	return nil
 }
 
+// ResolveDeviceCluster returns the generic topology cluster currently owning a
+// device node. Cluster membership is optional, so an unbound device returns a
+// zero id and empty name without an error. The relation repository enforces a
+// single device --member_of--> cluster edge; the defensive conflict check
+// prevents ambiguous telemetry labels if legacy data violates that invariant.
+func (u *Usecase) ResolveDeviceCluster(ctx context.Context, deviceNodeID uint64) (uint64, string, error) {
+	if u.nodes == nil || u.relations == nil {
+		return 0, "", errs.ErrNotWiredYet
+	}
+	if deviceNodeID == 0 {
+		return 0, "", fmt.Errorf("%w: device_node_id required", errs.ErrInvalid)
+	}
+	relations, err := u.relations.List(ctx, RelationListFilter{
+		SrcID: deviceNodeID,
+		Type:  model.RelMemberOf,
+	})
+	if err != nil {
+		return 0, "", err
+	}
+	if len(relations) == 0 {
+		return 0, "", nil
+	}
+	destinationIDs := make([]uint64, 0, len(relations))
+	for _, relation := range relations {
+		if relation != nil && relation.DstID != 0 {
+			destinationIDs = append(destinationIDs, relation.DstID)
+		}
+	}
+	if len(destinationIDs) == 0 {
+		return 0, "", nil
+	}
+	nodes, err := u.nodes.GetMany(ctx, destinationIDs)
+	if err != nil {
+		return 0, "", err
+	}
+	var cluster *model.Node
+	for _, destinationID := range destinationIDs {
+		node := nodes[destinationID]
+		if node == nil || node.Type != string(model.NodeTypeCluster) {
+			continue
+		}
+		if cluster != nil && cluster.ID != node.ID {
+			return 0, "", fmt.Errorf("%w: device node %d belongs to multiple clusters", errs.ErrConflict, deviceNodeID)
+		}
+		cluster = node
+	}
+	if cluster == nil {
+		return 0, "", nil
+	}
+	return cluster.ID, cluster.Name, nil
+}
+
 // ValidateUpgradeCluster verifies that every requested device node is a
 // current member of the same operator-managed device cluster. This prevents a
 // caller from attaching an arbitrary Edge rollout to an unrelated cluster's

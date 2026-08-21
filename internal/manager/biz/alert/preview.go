@@ -87,9 +87,10 @@ type PreviewLogQuerier interface {
 // nil dep makes the corresponding kind return a skipped_reason instead
 // of crashing.
 type PreviewDeps struct {
-	Prom PreviewPromQuerier
-	Log  PreviewLogQuerier
-	Now  func() time.Time
+	Prom   PreviewPromQuerier
+	Log    PreviewLogQuerier
+	Search logquery.Searcher
+	Now    func() time.Time
 }
 
 // PreviewRule is the read-only side-channel for the rule editor's
@@ -139,6 +140,8 @@ func PreviewRule(ctx context.Context, in PreviewInput, deps PreviewDeps) (*Previ
 		return previewMetricBurnRate(ctx, row, start, now, deps)
 	case model.RuleKindMetricRaw:
 		return previewMetricRaw(ctx, row, start, now, deps)
+	case model.RuleKindLogSearch:
+		return previewLogSearch(ctx, row, start, now, deps)
 	case model.RuleKindLogMatch:
 		return previewLogMatch(ctx, row, start, now, deps)
 	case model.RuleKindLogVolume:
@@ -149,6 +152,64 @@ func PreviewRule(ctx context.Context, in PreviewInput, deps PreviewDeps) (*Previ
 		return previewTraceErrorRate(ctx, row, start, now, deps)
 	}
 	return &PreviewResult{SkippedReason: "kind not supported by preview"}, nil
+}
+
+func previewLogSearch(ctx context.Context, row *model.Rule, start, end time.Time, deps PreviewDeps) (*PreviewResult, error) {
+	if deps.Search == nil {
+		return &PreviewResult{SkippedReason: "日志搜索后端未配置 — 无法试算 log_search"}, nil
+	}
+	rule, err := compileLogSearchRule(row)
+	if err != nil {
+		return &PreviewResult{SkippedReason: "请补全规则字段：" + err.Error()}, nil
+	}
+	req := rule.Query
+	req.Start, req.End = start, end
+	req.Limit = 1
+	req.Direction = logquery.SortBackward
+	buckets, err := deps.Search.Histogram(ctx, req, rule.Window)
+	if err != nil {
+		return nil, fmt.Errorf("preview structured log histogram: %w", err)
+	}
+	sort.Slice(buckets, func(i, j int) bool { return buckets[i].Start.Before(buckets[j].Start) })
+	threshold := rule.Threshold
+	out := &PreviewResult{Threshold: &threshold}
+	points := make([]PreviewSeriesPoint, 0, len(buckets))
+	for _, bucket := range buckets {
+		value := float64(bucket.Count)
+		points = append(points, PreviewSeriesPoint{Timestamp: bucket.Start, Value: value})
+		if !compareFloat(value, rule.Operator, rule.Threshold) {
+			continue
+		}
+		out.FireCount++
+		if out.FirstFireAt == nil {
+			ts := bucket.Start
+			out.FirstFireAt = &ts
+		}
+		ts := bucket.Start
+		out.LastFireAt = &ts
+		out.Samples = append(out.Samples, PreviewSample{
+			Timestamp: bucket.Start,
+			Value:     value,
+			Summary: fmt.Sprintf("%s: log count %d %s %g in %s",
+				rule.RuleKey, bucket.Count, rule.Operator, rule.Threshold, rule.WindowText),
+		})
+	}
+	if len(points) > maxPreviewSeriesPoints {
+		step := (len(points) + maxPreviewSeriesPoints - 1) / maxPreviewSeriesPoints
+		downsampled := make([]PreviewSeriesPoint, 0, maxPreviewSeriesPoints)
+		for i := 0; i < len(points); i += step {
+			downsampled = append(downsampled, points[i])
+		}
+		points = downsampled
+	}
+	out.Series = points
+	if len(out.Samples) > 5 {
+		out.Samples = append([]PreviewSample(nil), out.Samples[len(out.Samples)-5:]...)
+	}
+	for left, right := 0, len(out.Samples)-1; left < right; left, right = left+1, right-1 {
+		out.Samples[left], out.Samples[right] = out.Samples[right], out.Samples[left]
+	}
+	return out, nil
 }
 
 func normalizePreviewLookbackSeconds(lookback int) int {
