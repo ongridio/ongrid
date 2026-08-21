@@ -87,6 +87,42 @@ type SSHIdentity struct {
 // TableName pins the table name.
 func (SSHIdentity) TableName() string { return "ssh_identities" }
 
+// HTTPSCredential is a stored username + Personal Access Token used to
+// authenticate HTTPS git clones. One row per "logical credential" (e.g.
+// one for git.example.com, a separate one for git.acme.com, etc.).
+//
+// Lookup at clone time: pickHTTPSCredential(parsedHost) → match host
+// against `HostsJSON` (JSON array, supports glob like "git.acme.*");
+// on hit a temporary GIT_ASKPASS script is materialised with the
+// username / token and injected into the git subprocess env.
+//
+// Token is sensitive: it is stored plaintext (consistent with
+// ssh_identities.private_key) but MUST NOT be returned in GET/List
+// responses. Callers use the non-persistent HasToken field instead.
+//
+// MySQL TEXT columns cannot carry a DEFAULT clause (Error 1101) —
+// so Token has no DB-level default; biz layer always supplies the value
+// on insert and uses *string / nil semantics on update (nil = do not
+// overwrite existing token, non-nil = rotate to new value).
+type HTTPSCredential struct {
+	ID         uint64     `gorm:"primaryKey;autoIncrement"`
+	Name       string     `gorm:"size:128;not null;uniqueIndex:uk_https_cred_name"`
+	HostsJSON  string     `gorm:"type:text;not null;column:hosts"` // JSON array of host glob patterns
+	Username   string     `gorm:"size:128;not null;default:oauth2"`
+	Token      string     `gorm:"type:text;column:token"` // sensitive; no DB default (MySQL TEXT restriction)
+	LastUsedAt *time.Time `gorm:"column:last_used_at"`
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+
+	// HasToken is NOT persisted (gorm:"-"). It is set by the biz layer to
+	// indicate whether a token is currently configured, so handlers can
+	// return has_token:true/false without leaking the plaintext value.
+	HasToken bool `gorm:"-"`
+}
+
+// TableName pins the table name.
+func (HTTPSCredential) TableName() string { return "https_credentials" }
+
 // Doc is one indexable document. Manual ones are user-pasted markdown;
 // repo ones are markdown / config / code files imported from a synced
 // repository. The canonical store is qdrant (vector search). MySQL
