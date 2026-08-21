@@ -344,6 +344,10 @@ cat > "$UPGRADE_SERVICE_FILE" <<'EOF'
 [Unit]
 Description=ongrid edge pending-upgrade apply (root, pre-start)
 Documentation=file:///usr/local/lib/ongrid-edge/apply-pending-upgrade.sh
+# The online installer can continue when this optional script cannot be
+# downloaded. Skip this unit in that case so the agent does not leave a
+# persistent failed unit on every start.
+ConditionPathIsExecutable=/usr/local/lib/ongrid-edge/apply-pending-upgrade.sh
 Before=ongrid-edge.service
 After=local-fs.target
 
