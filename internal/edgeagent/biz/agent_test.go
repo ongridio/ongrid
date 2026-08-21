@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -340,6 +341,185 @@ func TestAgent_PersistentHeartbeatAndRegistrationFailuresRestartProcess(t *testi
 	}
 	if got := fc.countOf(tunnel.MethodRegisterEdge); got < 6 {
 		t.Fatalf("register_edge called %d times, want initial registration plus >=5 recovery attempts", got)
+	}
+}
+
+// --- heartbeat failure classification: unreachable vs stuck ---
+//
+// Real net-stack error values are injected through the fakeClient; the
+// production path wraps them once with %w, which errors.As unwraps the
+// same way as the bare values used here.
+
+func dnsUnreachableErr() error {
+	return &net.OpError{
+		Op:  "dial",
+		Net: "tcp",
+		Err: &net.DNSError{Err: "no such host", Name: "cloud.example.com", IsNotFound: true},
+	}
+}
+
+func dialRefusedErr() error {
+	return &net.OpError{Op: "dial", Net: "tcp", Err: fmt.Errorf("connect: connection refused")}
+}
+
+// connWriteErr mimics a failure on an established connection: a
+// read/write-stage OpError is stuck-class evidence, not unreachable.
+func connWriteErr() error {
+	return &net.OpError{Op: "write", Net: "tcp", Err: fmt.Errorf("connection reset by peer")}
+}
+
+// errScript consumes errs in call order; once exhausted it keeps
+// returning tail (nil = success).
+type errScript struct {
+	errs []error
+	tail error
+}
+
+func (s *errScript) next(count int32) error {
+	if int(count) <= len(s.errs) {
+		return s.errs[count-1]
+	}
+	return s.tail
+}
+
+// TestAgent_HeartbeatErrorClassification verifies how the heartbeat loop
+// classifies failures: unreachable-class errors (DNS / dial failures)
+// are not counted and the process stays alive; stuck-class failures keep
+// counting toward the 5-failure exit. Only externally observable
+// behavior is asserted: exit / heartbeat call count / WARN log output.
+func TestAgent_HeartbeatErrorClassification(t *testing.T) {
+	stuckErr := fmt.Errorf("heartbeat unavailable")
+	tests := []struct {
+		name           string
+		heartbeat      errScript
+		register       error // persistent re-register failure (nil = success; the initial registration always succeeds)
+		runFor         time.Duration
+		wantStuck      bool
+		wantHbExact    int32 // exact heartbeat call count when wantStuck
+		wantHbMin      int32
+		wantLogContain string
+	}{
+		{
+			name:           "dns failure stays alive, not counted",
+			heartbeat:      errScript{tail: dnsUnreachableErr()},
+			runFor:         250 * time.Millisecond,
+			wantHbMin:      7,
+			wantLogContain: "unreachable",
+		},
+		{
+			name:           "dial failure stays alive, not counted",
+			heartbeat:      errScript{tail: dialRefusedErr()},
+			runFor:         250 * time.Millisecond,
+			wantHbMin:      7,
+			wantLogContain: "unreachable",
+		},
+		{
+			name:      "stuck-class failures still exit (regression)",
+			heartbeat: errScript{tail: stuckErr},
+			register:  stuckErr,
+			runFor:    time.Second,
+			wantStuck: true,
+		},
+		{
+			name:      "write-stage OpError counts as stuck, not unreachable",
+			heartbeat: errScript{tail: connWriteErr()},
+			register:  stuckErr,
+			runFor:    time.Second,
+			wantStuck: true,
+		},
+		{
+			name:      "recovery after unreachable resets and continues",
+			heartbeat: errScript{errs: []error{dnsUnreachableErr(), dnsUnreachableErr(), dnsUnreachableErr()}},
+			runFor:    250 * time.Millisecond,
+			wantHbMin: 6,
+		},
+		{
+			name: "mixed sequence counts only stuck-class failures",
+			heartbeat: errScript{
+				errs: []error{
+					dnsUnreachableErr(), dnsUnreachableErr(), dnsUnreachableErr(),
+					stuckErr, stuckErr, stuckErr, stuckErr, stuckErr,
+				},
+				tail: stuckErr,
+			},
+			register:    stuckErr,
+			runFor:      time.Second,
+			wantStuck:   true,
+			wantHbExact: 8,
+		},
+		{
+			name:           "stuck heartbeat + unreachable re-register stays alive",
+			heartbeat:      errScript{tail: stuckErr},
+			register:       dnsUnreachableErr(),
+			runFor:         250 * time.Millisecond,
+			wantHbMin:      7,
+			wantLogContain: "unreachable",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fc := newFakeClient()
+			register := tt.register
+			fc.callError = func(method string, count int32) error {
+				switch method {
+				case tunnel.MethodHeartbeat:
+					return tt.heartbeat.next(count)
+				case tunnel.MethodRegisterEdge:
+					// count==1 is the initial registration at Run startup,
+					// which must succeed so EdgeID != 0 and the heartbeat
+					// loop reaches the code under test.
+					if register != nil && count > 1 {
+						return register
+					}
+				}
+				return nil
+			}
+			logBuf := &strings.Builder{}
+			a := biz.NewAgent(fc, &fakeCollector{}, biz.Config{
+				HeartbeatInterval: 10 * time.Millisecond,
+				MetricsInterval:   time.Second,
+				CloudAddr:         "cloud.example.com:443",
+			}, slog.New(slog.NewTextHandler(logBuf, nil)))
+
+			ctx, cancel := context.WithTimeout(context.Background(), tt.runFor+2*time.Second)
+			defer cancel()
+			done := make(chan error, 1)
+			go func() { done <- a.Run(ctx) }()
+			var exitErr error
+			select {
+			case exitErr = <-done:
+			case <-time.After(tt.runFor):
+			}
+			if tt.wantStuck {
+				if exitErr == nil || !strings.Contains(exitErr.Error(), "tunnel stuck") {
+					t.Fatalf("Run error = %v, want tunnel stuck", exitErr)
+				}
+				if tt.wantHbExact > 0 {
+					if got := fc.countOf(tunnel.MethodHeartbeat); got != tt.wantHbExact {
+						t.Fatalf("heartbeat calls = %d, want exactly %d (unreachable failures must not count)", got, tt.wantHbExact)
+					}
+				}
+				return
+			}
+			if exitErr != nil {
+				t.Fatalf("Run exited early: %v", exitErr)
+			}
+			// Stop the agent and wait for Run to return before reading
+			// the log buffer or call counters: the heartbeat goroutine
+			// writes both, and strings.Builder is not thread-safe.
+			cancel()
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				t.Fatal("Run did not stop after cancel")
+			}
+			if got := fc.countOf(tunnel.MethodHeartbeat); got < tt.wantHbMin {
+				t.Fatalf("heartbeat calls = %d, want >= %d", got, tt.wantHbMin)
+			}
+			if tt.wantLogContain != "" && !strings.Contains(logBuf.String(), tt.wantLogContain) {
+				t.Fatalf("logs missing %q; got:\n%s", tt.wantLogContain, logBuf.String())
+			}
+		})
 	}
 }
 
