@@ -11,7 +11,7 @@ sources=(
 )
 
 for source in "${sources[@]}"; do
-    rg -Fqx "$condition" "$source" >/dev/null \
+    grep -Fqx "$condition" "$source" \
         || { echo "missing upgrade-hook condition: $source" >&2; exit 1; }
 done
 
