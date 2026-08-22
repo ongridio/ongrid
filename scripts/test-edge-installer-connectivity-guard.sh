@@ -8,7 +8,7 @@ INSTALLERS=(
 )
 
 for installer in "${INSTALLERS[@]}"; do
-    if rg -n '/dev/tcp|bash[[:space:]]+-c.*exec[[:space:]]+[0-9]+<>' "$installer"; then
+    if grep -En '/dev/tcp|bash[[:space:]]+-c.*exec[[:space:]]+[0-9]+<>' "$installer"; then
         echo "edge installer must not use shell TCP redirection: $installer" >&2
         exit 1
     fi
