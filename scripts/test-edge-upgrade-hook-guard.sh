@@ -15,7 +15,7 @@ for source in "${sources[@]}"; do
         || { echo "missing upgrade-hook condition: $source" >&2; exit 1; }
 done
 
-if command -v systemd-analyze >/dev/null 2>&1; then
+if command -v systemd-analyze >/dev/null 2>&1 && [[ -x "$hook" ]]; then
     systemd-analyze verify "$unit"
 fi
 
