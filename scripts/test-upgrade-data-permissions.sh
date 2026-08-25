@@ -230,6 +230,26 @@ grep -Fqx "$install_dir|docker compose --env-file .env up -d" "$docker_log" \
 chown_should_fail=0
 stat_owner_state=expected
 
+health_statuses="$tmp_dir/health-statuses"
+printf 'starting\nunhealthy\nhealthy\n' >"$health_statuses"
+docker() {
+    local status
+    status=$(sed -n '1p' "$health_statuses")
+    sed '1d' "$health_statuses" >"$health_statuses.next"
+    mv "$health_statuses.next" "$health_statuses"
+    printf '%s\n' "$status"
+}
+sleep() { :; }
+ongrid_wait_for_container_healthy ongrid-mysql 3 0 \
+    || fail "container recovery was rejected before the final healthy state"
+
+printf 'starting\nunhealthy\n' >"$health_statuses"
+if ongrid_wait_for_container_healthy ongrid-mysql 2 0 2>"$tmp_dir/health-error.log"; then
+    fail "container health wait accepted a permanently unhealthy container"
+fi
+grep -Fq 'last status: unhealthy' "$tmp_dir/health-error.log" \
+    || fail "container health timeout did not report the final state"
+
 grep -Fq -- '--repair-permissions' "$upgrade_script" \
     || fail "upgrade.sh does not expose the explicit repair flag"
 grep -Fq 'REPAIR_PERMISSIONS=$(ongrid_normalize_boolean "$REPAIR_PERMISSIONS_RAW")' "$upgrade_script" \
@@ -255,6 +275,10 @@ grep -Fq 'docker compose --env-file .env up -d --force-recreate ongrid nginx' "$
     || fail "manual Edge rollback does not recreate containers with Edge bind mounts"
 grep -Fq 'trap - ERR' "$upgrade_script" \
     || fail "upgrade.sh health failure can trigger a partial automatic Edge-only rollback"
+grep -Fq 'docker compose --env-file .env up -d mysql' "$upgrade_script" \
+    || fail "upgrade.sh does not start MySQL separately"
+grep -Fq 'ongrid_wait_for_container_healthy ongrid-mysql 150 2' "$upgrade_script" \
+    || fail "upgrade.sh does not wait for MySQL recovery"
 grep -Fq 'for d in /tmp/ongrid-v*-linux /tmp/ongrid-v*-linux-*; do' "$upgrade_script" \
     || fail "upgrade.sh does not prune both universal and legacy extracted release directories"
 grep -Fq '"$INSTALL_DIR"/ongrid-v*-linux.tar.xz' "$upgrade_script" \

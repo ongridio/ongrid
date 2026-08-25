@@ -171,6 +171,23 @@ ongrid_repair_data_permissions_if_enabled() {
     esac
 }
 
+ongrid_wait_for_container_healthy() {
+    local container="$1" attempts="${2:-150}" interval="${3:-2}"
+    local status="" i
+
+    for ((i = 1; i <= attempts; i++)); do
+        status=$(docker inspect --format \
+            '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
+            "$container" 2>/dev/null || true)
+        [[ "$status" == healthy ]] && return 0
+        (( i < attempts )) && sleep "$interval"
+    done
+
+    printf '[ERROR] container %s did not become healthy (last status: %s)\n' \
+        "$container" "${status:-unknown}" >&2
+    return 1
+}
+
 ongrid_restore_existing_stack() {
     local install_dir="$1"
 

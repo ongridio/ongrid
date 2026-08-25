@@ -690,8 +690,18 @@ chmod 600 "$ENV_FILE"
 # config files created under a restrictive umask stay 0640 until chmod'd here.
 ongrid_normalize_shared_asset_modes "$INSTALL_DIR"
 
-# Bring stack back up; gorm AutoMigrate handles schema diff.
-log_info "starting stack with new version"
+# MySQL can restart once while InnoDB resizes redo logs after an image upgrade.
+# Start it separately so Compose does not treat that recovery as a failed stack.
+log_info "starting MySQL with new version"
+(
+    cd "$INSTALL_DIR"
+    docker compose --env-file .env up -d mysql
+)
+log_info "waiting for MySQL to become healthy (up to 5m)"
+ongrid_wait_for_container_healthy ongrid-mysql 150 2
+
+# Bring the remaining stack up; gorm AutoMigrate handles schema diff.
+log_info "starting remaining stack with new version"
 (
     cd "$INSTALL_DIR"
     docker compose --env-file .env up -d
