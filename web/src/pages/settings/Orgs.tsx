@@ -249,8 +249,10 @@ export default function SettingsOrgs() {
   const changeRole = async (m: OrgMember, role: OrgRole) => {
     if (selectedId == null || m.role === role) return;
     try {
-      const next = await setOrgMemberRole(selectedId, m.user_id, role);
-      setMembers((cur) => cur.map((x) => (x.user_id === m.user_id ? next : x)));
+      await setOrgMemberRole(selectedId, m.user_id, role);
+      // PATCH returns 204, so retain the row's identity/email fields and
+      // update only the role after the server confirms the mutation.
+      setMembers((cur) => cur.map((x) => (x.user_id === m.user_id ? { ...x, role } : x)));
       setToast({ kind: 'ok', text: `${m.email} → ${ROLE_LABEL[role]}` });
     } catch (e) {
       setToast({ kind: 'err', text: errMsg(e) });

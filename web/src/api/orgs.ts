@@ -84,8 +84,10 @@ export function setOrgMemberRole(
   orgId: number,
   userId: number,
   role: OrgRole
-): Promise<OrgMember> {
-  return request<OrgMember>('PATCH', `/orgs/${orgId}/members/${userId}`, { role });
+): Promise<void> {
+  // The manager intentionally returns 204 after a successful role update;
+  // there is no response body to decode into an OrgMember.
+  return request<void>('PATCH', `/orgs/${orgId}/members/${userId}`, { role });
 }
 
 export function removeOrgMember(orgId: number, userId: number): Promise<void> {
