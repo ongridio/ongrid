@@ -102,6 +102,7 @@ grep -q 'expirationSeconds: 3600' "$tmp_dir/default-node.yaml"
 grep -q 'defaultMode: 0444' "$tmp_dir/default-node.yaml"
 grep -A1 'name: ONGRID_EDGE_SECRET_DIR' "$tmp_dir/default-node.yaml" | grep -q 'value: /var/lib/ongrid-edge/k8s-state/secrets'
 grep -A1 'name: ONGRID_EDGE_COLLECTOR_MODE' "$tmp_dir/default.yaml" | grep -q 'value: "off"'
+grep -A1 'name: ONGRID_EDGE_METRICS_ADDR' "$tmp_dir/default-node.yaml" | grep -q 'value: ":9101"'
 grep -q 'add: \["CHOWN", "DAC_OVERRIDE", "FOWNER"\]' "$tmp_dir/default.yaml"
 grep -q 'add: \["DAC_READ_SEARCH", "NET_ADMIN", "SETGID", "SETPCAP", "SETUID", "SYS_CHROOT"\]' "$tmp_dir/default.yaml"
 ! grep -q 'SYS_ADMIN\|SYS_PTRACE' "$tmp_dir/default.yaml"
@@ -190,6 +191,15 @@ extract_source 'ongrid-edge/templates/metrics-scraper-deployment.yaml' "$tmp_dir
 test "$(awk '/checksum\/config:/ {print $2}' "$tmp_dir/default-controller.yaml")" = "$(awk '/checksum\/config:/ {print $2}' "$tmp_dir/metrics-config-controller.yaml")"
 test "$(awk '/checksum\/config:/ {print $2}' "$tmp_dir/default-node.yaml")" = "$(awk '/checksum\/config:/ {print $2}' "$tmp_dir/metrics-config-node.yaml")"
 test "$(awk '/checksum\/config:/ {print $2}' "$tmp_dir/default-scraper.yaml")" != "$(awk '/checksum\/config:/ {print $2}' "$tmp_dir/metrics-config-scraper.yaml")"
+
+# The node agent shares the host network, so operators must be able to move
+# its diagnostics listener away from an existing host-level edge agent.
+helm template node-metrics-address "$chart_package" "${common_args[@]}" \
+  --set-string node.metricsAddr=:19101 \
+  >"$tmp_dir/node-metrics-address.yaml"
+extract_source 'ongrid-edge/templates/daemonset.yaml' "$tmp_dir/node-metrics-address.yaml" "$tmp_dir/node-metrics-address-node.yaml"
+grep -A1 'name: ONGRID_EDGE_METRICS_ADDR' "$tmp_dir/node-metrics-address-node.yaml" | grep -q 'value: ":19101"'
+test "$(awk '/checksum\/config:/ {print $2}' "$tmp_dir/default-node.yaml")" != "$(awk '/checksum\/config:/ {print $2}' "$tmp_dir/node-metrics-address-node.yaml")"
 
 helm template upgrade "$chart_package" "${common_args[@]}" --is-upgrade >"$tmp_dir/upgrade.yaml"
 grep -q '# Source: ongrid-edge/templates/upgrade-preflight.yaml' "$tmp_dir/upgrade.yaml"

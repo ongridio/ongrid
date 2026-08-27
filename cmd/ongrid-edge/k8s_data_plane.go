@@ -148,7 +148,7 @@ func runDataPlaneDiagnostics(ctx context.Context, registry *prometheus.Registry,
 			log.Debug("write data-plane readiness response", slog.Any("err", err))
 		}
 	})
-	addr := envOr("ONGRID_EDGE_METRICS_ADDR", edgeMetricsAddr)
+	addr := edgeMetricsListenAddr()
 	return httpserver.New(addr, router, log.With(slog.String("listener", "data-plane-diagnostics"))).Start(ctx)
 }
 

@@ -20,6 +20,9 @@ image:
 
 node:
   serviceAccountName: ""
+  # The Node DaemonSet uses hostNetwork. Set a different listener when the
+  # host already has another ongrid-edge process using the default :9101.
+  metricsAddr: ":9101"
   # hostmetrics exposes node_exporter and the metrics plugin forwards it.
   # Keep the legacy embedded periodic push off to avoid duplicate node_* series.
   collectorMode: "off"
