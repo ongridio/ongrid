@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import SettingsIntegrations from './Integrations';
+import { listSettings, setSetting } from '@/api/settings';
 import {
   getLogBackend,
   getLogBackendConnectionCheck,
@@ -99,6 +100,37 @@ describe('SettingsIntegrations log backend presentation', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it('saves self-signed TLS switches for Prometheus and Grafana', async () => {
+    vi.mocked(listSettings).mockImplementation(async (category?: string) => ({
+      items: category === 'prom'
+        ? [{ category: 'prom', key: 'query_url', value: 'https://prom.example', sensitive: false, updated_at: '' }]
+        : category === 'grafana'
+          ? [
+              { category: 'grafana', key: 'root_url', value: 'https://grafana.example', sensitive: false, updated_at: '' },
+              { category: 'grafana', key: 'sa_token', value: '', sensitive: true, updated_at: '' },
+            ]
+          : [],
+      total: 0,
+    }));
+
+    render(
+      <MemoryRouter initialEntries={['/settings/integrations']}>
+        <SettingsIntegrations />
+      </MemoryRouter>,
+    );
+
+    const user = userEvent.setup();
+    const prometheus = (await screen.findByRole('heading', { name: 'Prometheus 集成' })).closest('section')!;
+    await act(async () => user.click(within(prometheus).getByRole('checkbox', { name: '跳过 TLS 校验（自签证书时勾选）' })));
+    await act(async () => user.click(within(prometheus).getByRole('button', { name: '保存' })));
+    await waitFor(() => expect(setSetting).toHaveBeenCalledWith('prom', 'tls_insecure', 'true', false));
+
+    const grafana = screen.getByRole('heading', { name: 'Grafana 集成' }).closest('section')!;
+    await act(async () => user.click(within(grafana).getByRole('checkbox', { name: '跳过 TLS 校验（自签证书时勾选）' })));
+    await act(async () => user.click(within(grafana).getByRole('button', { name: '保存' })));
+    await waitFor(() => expect(setSetting).toHaveBeenCalledWith('grafana', 'tls_insecure', 'true', false));
   });
 
   it('places built-in storage limits under each integration advanced section', async () => {

@@ -3,6 +3,10 @@ package main
 import (
 	"context"
 	"testing"
+
+	managerbizsetting "github.com/ongridio/ongrid/internal/manager/biz/setting"
+	"github.com/ongridio/ongrid/internal/pkg/config"
+	"github.com/ongridio/ongrid/internal/pkg/promauth"
 )
 
 type staticTelemetryBackendResolver struct {
@@ -88,5 +92,22 @@ func TestPluginEndpointResolverFallsBackToManagerForInternalSeeds(t *testing.T) 
 	}
 	if traces.Endpoint != "https://manager.example/v1/traces" || !traces.UseTelemetryCredential {
 		t.Fatalf("traces target = %#v", traces)
+	}
+}
+
+func TestK8sRemoteWriteResolverPublishesPrometheusTLSSettings(t *testing.T) {
+	promResolver := managerbizsetting.NewPromResolver(nil, "https://prom.example", "https://prom.example/api/v1/write", promauth.TLSConfig{
+		Insecure: true,
+		CAPEM:    "test-ca",
+	})
+	target, err := (k8sRemoteWriteResolver{
+		resolver: promResolver,
+		prom:     config.PromConfig{Enabled: true},
+	}).ResolveRemoteWrite(context.Background())
+	if err != nil {
+		t.Fatalf("resolve remote write: %v", err)
+	}
+	if target.Endpoint != "https://prom.example/api/v1/write" || !target.TLSInsecure || target.TLSCAPEM != "test-ca" {
+		t.Fatalf("remote write target = %#v", target)
 	}
 }

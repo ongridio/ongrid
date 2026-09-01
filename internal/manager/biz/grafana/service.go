@@ -60,7 +60,7 @@ var dashboardsFS embed.FS
 type Service struct {
 	settings           *settingbiz.Service
 	log                *slog.Logger
-	tlsInsecure        bool   // skip cert verify when calling Grafana
+	tlsInsecure        bool   // env fallback for skip cert verify when calling Grafana
 	panelDashboardUID  string // Monitor-page mirror dashboard uid (HLD-monitor-panels)
 	panelDashboardName string // human title shown in Grafana
 
@@ -107,8 +107,14 @@ func (s *Service) SetLogsDatasourceProvider(provider func(context.Context) (*pkg
 // httpClient builds the *http.Client used by both bootstrap and the
 // Test/Sync paths. Single source of truth for TLS handling on the
 // Grafana side; pkg/grafana.New(c.baseURL, c.token, hc) accepts it.
-func (s *Service) httpClient() *http.Client {
-	if !s.tlsInsecure {
+func (s *Service) httpClient(ctx context.Context) *http.Client {
+	tlsInsecure := s.tlsInsecure
+	if s.settings != nil {
+		if value, found, err := s.settings.Get(ctx, settingmodel.CategoryGrafana, settingmodel.KeyGrafanaTLSInsecure); err == nil && found {
+			tlsInsecure = strings.EqualFold(strings.TrimSpace(value), "true")
+		}
+	}
+	if !tlsInsecure {
 		return nil // pkg/grafana uses a 15s default
 	}
 	return &http.Client{
@@ -156,7 +162,7 @@ func (s *Service) BootstrapEmbedded(ctx context.Context, adminUser, adminPasswor
 		return
 	}
 
-	c := pkggrafana.NewWithBasicAuth(rootURL, adminUser, adminPassword, s.httpClient())
+	c := pkggrafana.NewWithBasicAuth(rootURL, adminUser, adminPassword, s.httpClient(ctx))
 	if err := c.Health(ctx); err != nil {
 		// Grafana not up yet, or admin creds wrong, or DNS fails. Don't
 		// crash startup — operator can still configure manually via UI.
@@ -230,33 +236,7 @@ func (s *Service) Sync(ctx context.Context) (*SyncResult, error) {
 		return nil, fmt.Errorf("ensure folder: %w", err)
 	}
 
-	// Forward the ongrid-side prom credentials into Grafana's encrypted
-	// secureJsonData so the user's external Grafana can actually query
-	// the same TSDB ongrid is writing to. Bearer wins over Basic; if
-	// neither is set, datasource is anonymous.
-	bearer, _, _ := s.settings.Get(ctx, settingmodel.CategoryProm, settingmodel.KeyPromBearerToken)
-	basicUser, _, _ := s.settings.Get(ctx, settingmodel.CategoryProm, settingmodel.KeyPromBasicUser)
-	basicPass, _, _ := s.settings.Get(ctx, settingmodel.CategoryProm, settingmodel.KeyPromBasicPassword)
-
-	ds := pkggrafana.Datasource{
-		UID:    promDatasourceUID,
-		Name:   promDatasourceName,
-		Type:   "prometheus",
-		URL:    promURL,
-		Access: "proxy",
-		JSONData: map[string]any{
-			"httpMethod":   "POST",
-			"timeInterval": "30s",
-		},
-	}
-	if bearer = strings.TrimSpace(bearer); bearer != "" {
-		ds.JSONData["httpHeaderName1"] = "Authorization"
-		ds.SecureJSONData = map[string]string{"httpHeaderValue1": "Bearer " + bearer}
-	} else if basicUser = strings.TrimSpace(basicUser); basicUser != "" {
-		ds.BasicAuth = true
-		ds.BasicAuthUser = basicUser
-		ds.SecureJSONData = map[string]string{"basicAuthPassword": basicPass}
-	}
+	ds := s.prometheusDatasource(ctx, promURL)
 	if err := c.UpsertDatasource(ctx, ds); err != nil {
 		return nil, fmt.Errorf("upsert prometheus datasource: %w", err)
 	}
@@ -430,6 +410,42 @@ func (s *Service) lokiDatasource(ctx context.Context) *pkggrafana.Datasource {
 	return ds
 }
 
+func (s *Service) prometheusDatasource(ctx context.Context, promURL string) pkggrafana.Datasource {
+	ds := pkggrafana.Datasource{
+		UID:    promDatasourceUID,
+		Name:   promDatasourceName,
+		Type:   "prometheus",
+		URL:    strings.TrimSpace(promURL),
+		Access: "proxy",
+		JSONData: map[string]any{
+			"httpMethod":   "POST",
+			"timeInterval": "30s",
+		},
+	}
+	bearer, _, _ := s.settings.Get(ctx, settingmodel.CategoryProm, settingmodel.KeyPromBearerToken)
+	basicUser, _, _ := s.settings.Get(ctx, settingmodel.CategoryProm, settingmodel.KeyPromBasicUser)
+	basicPass, _, _ := s.settings.Get(ctx, settingmodel.CategoryProm, settingmodel.KeyPromBasicPassword)
+	if bearer = strings.TrimSpace(bearer); bearer != "" {
+		ds.JSONData["httpHeaderName1"] = "Authorization"
+		ds.SecureJSONData = map[string]string{"httpHeaderValue1": "Bearer " + bearer}
+	} else if basicUser = strings.TrimSpace(basicUser); basicUser != "" {
+		ds.BasicAuth = true
+		ds.BasicAuthUser = basicUser
+		ds.SecureJSONData = map[string]string{"basicAuthPassword": basicPass}
+	}
+	if tlsInsecure, _, _ := s.settings.Get(ctx, settingmodel.CategoryProm, settingmodel.KeyPromTLSInsecure); strings.EqualFold(strings.TrimSpace(tlsInsecure), "true") {
+		ds.JSONData["tlsSkipVerify"] = true
+	}
+	if caPEM, _, _ := s.settings.Get(ctx, settingmodel.CategoryProm, settingmodel.KeyPromTLSCAPEM); strings.TrimSpace(caPEM) != "" {
+		ds.JSONData["tlsAuthWithCACert"] = true
+		if ds.SecureJSONData == nil {
+			ds.SecureJSONData = make(map[string]string)
+		}
+		ds.SecureJSONData["tlsCACert"] = strings.TrimSpace(caPEM)
+	}
+	return ds
+}
+
 // client builds a pkg/grafana.Client from settings; returns a friendly
 // error if config is incomplete.
 //
@@ -456,7 +472,7 @@ func (s *Service) client(ctx context.Context) (*pkggrafana.Client, error) {
 	if token == "" {
 		return nil, errors.New("grafana: sa_token / api_key empty (create a Grafana service account and paste its token, or paste an api_key for external Grafana)")
 	}
-	return pkggrafana.New(root, token, s.httpClient()), nil
+	return pkggrafana.New(root, token, s.httpClient(ctx)), nil
 }
 
 // FetchDashboardJSON returns the raw `{ dashboard, meta }` envelope for

@@ -2,9 +2,8 @@
 // promquery clients to talk to a Prometheus-compatible TSDB. It centralises
 // two concerns:
 //
-//   - TLS: optional skip-verify and / or a custom root CA. These are
-//     resolved at construction time; changing TLS material requires
-//     restarting the manager (the http.Transport is built once).
+//   - TLS: optional skip-verify and / or a custom root CA. A Resolver that
+//     also implements TLSResolver can update these settings at runtime.
 //
 //   - Auth: Bearer / Basic credentials. These are resolved per-request via
 //     a Resolver so admin edits to system_settings take effect within the
@@ -58,6 +57,13 @@ type Resolver interface {
 	Resolve(ctx context.Context) (Config, error)
 }
 
+// TLSResolver returns the current dialer-level TLS settings. BuildClient
+// detects this optional interface so existing static resolvers keep their
+// original behaviour.
+type TLSResolver interface {
+	ResolveTLS(ctx context.Context) (TLSConfig, error)
+}
+
 // staticResolver is the trivial Resolver — always returns the same config.
 // Useful for tests and as a fallback when system_settings is empty.
 type staticResolver struct{ cfg Config }
@@ -78,28 +84,55 @@ const authTTL = 5 * time.Second
 //
 // timeout caps the total round-trip. resolver may be nil — pass-through.
 func BuildClient(tlsCfg TLSConfig, resolver Resolver, timeout time.Duration) (*http.Client, error) {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-
-	if tlsCfg.Insecure || tlsCfg.CAPath != "" || tlsCfg.CAPEM != "" {
-		t := &tls.Config{MinVersion: tls.VersionTLS12}
-		if tlsCfg.Insecure {
-			t.InsecureSkipVerify = true
-		}
-		if tlsCfg.CAPath != "" || tlsCfg.CAPEM != "" {
-			pool, err := buildPool(tlsCfg)
-			if err != nil {
-				return nil, err
-			}
-			t.RootCAs = pool
-		}
-		transport.TLSClientConfig = t
+	transport, err := buildTransport(tlsCfg)
+	if err != nil {
+		return nil, err
 	}
 
 	var rt http.RoundTripper = transport
+	if tlsResolver, ok := resolver.(TLSResolver); ok {
+		rt = &tlsRoundTripper{resolver: tlsResolver, cachedConfig: tlsCfg, cached: transport}
+	}
 	if resolver != nil {
-		rt = &authRoundTripper{base: transport, resolver: resolver}
+		rt = &authRoundTripper{base: rt, resolver: resolver}
 	}
 	return &http.Client{Transport: rt, Timeout: timeout}, nil
+}
+
+type tlsRoundTripper struct {
+	resolver TLSResolver
+
+	mu           sync.Mutex
+	cachedConfig TLSConfig
+	cached       *http.Transport
+}
+
+func (t *tlsRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	cfg, err := t.resolver.ResolveTLS(req.Context())
+	if err != nil {
+		return nil, fmt.Errorf("promauth: resolve TLS config: %w", err)
+	}
+	transport, err := t.transport(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return transport.RoundTrip(req)
+}
+
+func (t *tlsRoundTripper) transport(cfg TLSConfig) (*http.Transport, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if cfg == t.cachedConfig {
+		return t.cached, nil
+	}
+	next, err := buildTransport(cfg)
+	if err != nil {
+		return nil, err
+	}
+	t.cached.CloseIdleConnections()
+	t.cachedConfig = cfg
+	t.cached = next
+	return next, nil
 }
 
 // authRoundTripper decorates an http.RoundTripper with auth headers
@@ -165,4 +198,21 @@ func buildPool(tlsCfg TLSConfig) (*x509.CertPool, error) {
 		}
 	}
 	return pool, nil
+}
+
+func buildTransport(tlsCfg TLSConfig) (*http.Transport, error) {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	if !tlsCfg.Insecure && tlsCfg.CAPath == "" && tlsCfg.CAPEM == "" {
+		return transport, nil
+	}
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: tlsCfg.Insecure}
+	if tlsCfg.CAPath != "" || tlsCfg.CAPEM != "" {
+		pool, err := buildPool(tlsCfg)
+		if err != nil {
+			return nil, err
+		}
+		tlsConfig.RootCAs = pool
+	}
+	transport.TLSClientConfig = tlsConfig
+	return transport, nil
 }

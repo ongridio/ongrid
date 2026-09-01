@@ -17,6 +17,7 @@ type stubResolver struct {
 	mu    sync.Mutex
 	calls int32
 	cfg   Config
+	tls   TLSConfig
 	err   error
 }
 
@@ -25,6 +26,12 @@ func (s *stubResolver) Resolve(_ context.Context) (Config, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.cfg, s.err
+}
+
+func (s *stubResolver) ResolveTLS(_ context.Context) (TLSConfig, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.tls, s.err
 }
 
 func TestBuildClientInjectsBearerHeader(t *testing.T) {
@@ -134,4 +141,31 @@ func TestNilResolverPassesThrough(t *testing.T) {
 	if h := <-got; h != "" {
 		t.Fatalf("expected no auth header, got %q", h)
 	}
+}
+
+func TestBuildClientReloadsTLSConfig(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	res := &stubResolver{}
+	hc, err := BuildClient(TLSConfig{}, res, 5*time.Second)
+	if err != nil {
+		t.Fatalf("BuildClient: %v", err)
+	}
+	if _, err := hc.Get(srv.URL); err == nil {
+		t.Fatal("self-signed server unexpectedly passed with TLS verification enabled")
+	}
+
+	res.mu.Lock()
+	res.tls.Insecure = true
+	res.mu.Unlock()
+	resp, err := hc.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("get after enabling TLS skip verify: %v", err)
+	}
+	resp.Body.Close()
 }
