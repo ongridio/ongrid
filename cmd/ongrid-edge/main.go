@@ -57,9 +57,13 @@ import (
 // version is overwritten at build time via -ldflags.
 var version = "dev"
 
-// edgeMetricsAddr is the local debug /metrics port for edge. Kept separate
-// from cloud metrics (:9100) so both can run on the same dev host.
+// edgeMetricsAddr is the default local debug /metrics listener for edge. Kept
+// separate from cloud metrics (:9100) so both can run on the same dev host.
 const edgeMetricsAddr = ":9101"
+
+func edgeMetricsListenAddr() string {
+	return envOr("ONGRID_EDGE_METRICS_ADDR", edgeMetricsAddr)
+}
 
 func main() {
 	if handled, err := runK8sHostCommand(context.Background(), os.Args[1:]); handled {
@@ -290,7 +294,7 @@ func main() {
 	metricsMux.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	})
-	metricsServer := httpserver.New(edgeMetricsAddr, metricsMux, log.With(slog.String("listener", "metrics")))
+	metricsServer := httpserver.New(edgeMetricsListenAddr(), metricsMux, log.With(slog.String("listener", "metrics")))
 
 	eg.Go(func() error { return metricsServer.Start(egCtx) })
 	// When agent.Run returns (clean ctx cancel OR upgrade

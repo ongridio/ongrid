@@ -1,4 +1,4 @@
-{{- $nodeConfigChecksum := printf "%s\n%s\n%s" .Values.mode .Values.manager.publicURL .Values.manager.tunnelAddr | sha256sum -}}
+{{- $nodeConfigChecksum := printf "%s\n%s\n%s\n%s" .Values.mode .Values.manager.publicURL .Values.manager.tunnelAddr .Values.node.metricsAddr | sha256sum -}}
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -135,6 +135,8 @@ spec:
                   fieldPath: metadata.namespace
             - name: ONGRID_EDGE_COLLECTOR_MODE
               value: {{ .Values.node.collectorMode | quote }}
+            - name: ONGRID_EDGE_METRICS_ADDR
+              value: {{ .Values.node.metricsAddr | quote }}
             - name: HOST_PROC
               value: /proc
             - name: HOST_SYS

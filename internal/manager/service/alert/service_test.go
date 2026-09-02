@@ -395,9 +395,10 @@ func (f *fakeNotifier) Send(_ context.Context, msg notify.Message, channels ...s
 	return f.err
 }
 
+// These tests use the default HTTP client because BuildSenderFromChannel is
+// intentionally exercised as wired; httptest.Server.Close closes the shared
+// default transport, so running them in parallel can interrupt the other test.
 func TestServiceTestChannelHappyPath(t *testing.T) {
-	t.Parallel()
-
 	// TestChannel now builds a typed sender from the channel + POSTs directly
 	// (bypassing the global notify master switch), so point the endpoint at a
 	// real test server; a 200 means the delivery link works.
@@ -420,8 +421,6 @@ func TestServiceTestChannelHappyPath(t *testing.T) {
 }
 
 func TestServiceTestChannelReportsFailure(t *testing.T) {
-	t.Parallel()
-
 	// Real upstream failure (503) must surface as accepted=false with detail —
 	// not a silent no-op and not "channel not configured".
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
