@@ -26,6 +26,11 @@ import (
 // Returns "" when no physical NIC can be found (e.g. exotic netns setups);
 // the caller keeps HostID as the fallback fingerprint so such hosts still
 // register. All components are sorted so the value is stable across reboots.
+//
+// Note the NIC filter in isPhysicalNIC is load-bearing, not cosmetic: K8s
+// CNI host-side veths (Calico cali*, Cilium lxc*) all carry placeholder MACs
+// and sort before eth0 by name, so unfiltered they would occupy the
+// first-two slots and hash every node of a cluster to one fingerprint.
 func hardwareFingerprint() string {
 	macs := physicalMACs()
 	if len(macs) == 0 {
@@ -48,14 +53,28 @@ func physicalMACs() []string {
 	if err != nil {
 		return nil
 	}
+	return selectMACs(ifaces)
+}
+
+// selectMACs implements the physicalMACs policy over a given interface list
+// (split out for testability): keep physical NICs, drop duplicate MACs (a
+// bond/bridge and its slaves share one address — one card must not occupy
+// both slots), sort by interface name, cap at two.
+func selectMACs(ifaces []net.Interface) []string {
 	type ni struct{ name, mac string }
 	list := make([]ni, 0, len(ifaces))
+	seen := make(map[string]struct{}, len(ifaces))
 	for i := range ifaces {
 		iface := ifaces[i]
 		if !isPhysicalNIC(&iface) {
 			continue
 		}
-		list = append(list, ni{name: iface.Name, mac: iface.HardwareAddr.String()})
+		mac := iface.HardwareAddr.String()
+		if _, dup := seen[mac]; dup {
+			continue
+		}
+		seen[mac] = struct{}{}
+		list = append(list, ni{name: iface.Name, mac: mac})
 	}
 	if len(list) == 0 {
 		return nil
@@ -73,7 +92,9 @@ func physicalMACs() []string {
 
 // isPhysicalNIC reports whether iface looks like a real NIC worth keying the
 // fingerprint on — excludes loopback, point-to-point (VPN/tunnel), MAC-less,
-// and name-matched virtual interfaces (docker/veth/bridge/tun/tap/…).
+// name-matched virtual interfaces (docker/veth/bridge/tun/tap/…), CNI
+// host-side veths (Calico cali*, Cilium lxc*, Weave weave*), and placeholder
+// MACs that are identical across hosts.
 func isPhysicalNIC(iface *net.Interface) bool {
 	if iface.Flags&net.FlagLoopback != 0 {
 		return false
@@ -84,6 +105,19 @@ func isPhysicalNIC(iface *net.Interface) bool {
 	if len(iface.HardwareAddr) == 0 {
 		return false
 	}
+	// Placeholder addresses shared by many hosts must never key the
+	// fingerprint, or every such host hashes to the same value:
+	//   ee:ee:ee:ee:ee:ee — Calico hardcodes it on every host-side cali*
+	//     veth; since "cali" sorts before "eth0", unfiltered it occupies the
+	//     first-two slots and collapses all Calico nodes onto one
+	//     fingerprint. This MAC check also catches any future CNI whose
+	//     name prefix the list below misses.
+	//   00:00:00:00:00:00 — uninitialized NIC; its 6-byte length slips past
+	//     the empty check above.
+	switch iface.HardwareAddr.String() {
+	case "ee:ee:ee:ee:ee:ee", "00:00:00:00:00:00":
+		return false
+	}
 	name := strings.ToLower(iface.Name)
 	// Linux uses prefixes; other platforms ship the same virtual NICs under
 	// vendor names. One combined keyword list covers both well enough for a
@@ -92,6 +126,7 @@ func isPhysicalNIC(iface *net.Interface) bool {
 		"docker", "veth", "cni", "flannel", "virbr", "br-", "tun", "tap",
 		"vmnet", "vboxnet", "vmware", "hyper-v", "vbox", "wsl", "vpn",
 		"utun", "bridge", "awdl", "anpi", "isatap", "teredo", "kube",
+		"cali", "lxc", "weave",
 	}
 	for _, v := range virtual {
 		if strings.HasPrefix(name, v) || strings.Contains(name, v) {
