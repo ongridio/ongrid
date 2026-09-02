@@ -62,7 +62,7 @@ import BuiltInStorageAdvanced from './Advanced';
 
 // Settings → 集成. Four cards, all backend-driven, parallel naming:
 //   - Prometheus 集成   → system_settings.prom; manager reads on every
-//     remote_write / PromQL call (auth ~5s TTL, URLs at restart)
+//     remote_write / PromQL call (auth ~5s TTL, URL/TLS live)
 //   - Grafana 集成      → system_settings.grafana; "测试" + "同步"
 //   - Loki 集成 (日志)  → system_settings.loki; the URL feeds both
 //     edge-side push (logs plugin) and Grafana datasource
@@ -107,6 +107,7 @@ type PromForm = {
   bearer_token: string;
   basic_user: string;
   basic_password: string;
+  tls_insecure: string;
 };
 
 const PROM_KEYS: (keyof PromForm)[] = [
@@ -115,6 +116,7 @@ const PROM_KEYS: (keyof PromForm)[] = [
   'bearer_token',
   'basic_user',
   'basic_password',
+  'tls_insecure',
 ];
 
 const PROM_SENSITIVE: Set<keyof PromForm> = new Set(['bearer_token', 'basic_password']);
@@ -125,6 +127,7 @@ const emptyPromForm: PromForm = {
   bearer_token: '',
   basic_user: '',
   basic_password: '',
+  tls_insecure: '',
 };
 
 function PrometheusCard() {
@@ -297,6 +300,15 @@ function PrometheusCard() {
             onChange={(v) => update('basic_password', v)}
             placeholder={tr('（留空 = 不用 Basic）', '(empty = no Basic)')}
           />
+          <label className="flex items-center gap-2 text-xs text-zinc-300">
+            <input
+              type="checkbox"
+              checked={draft.tls_insecure === 'true'}
+              onChange={(e) => update('tls_insecure', e.target.checked ? 'true' : 'false')}
+              className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-900 accent-emerald-500"
+            />
+            {tr('跳过 TLS 校验（自签证书时勾选）', 'Skip TLS verification (check this for self-signed certs)')}
+          </label>
         </div>
       )}
 
@@ -414,10 +426,11 @@ type GrafanaForm = {
   sa_token: string;
   api_key: string;
   org_id: string;
+  tls_insecure: string;
 };
-const GRAFANA_KEYS: (keyof GrafanaForm)[] = ['root_url', 'sa_token', 'api_key', 'org_id'];
+const GRAFANA_KEYS: (keyof GrafanaForm)[] = ['root_url', 'sa_token', 'api_key', 'org_id', 'tls_insecure'];
 const GRAFANA_SENSITIVE: Set<keyof GrafanaForm> = new Set(['sa_token', 'api_key']);
-const emptyGrafanaForm: GrafanaForm = { root_url: '', sa_token: '', api_key: '', org_id: '' };
+const emptyGrafanaForm: GrafanaForm = { root_url: '', sa_token: '', api_key: '', org_id: '', tls_insecure: '' };
 
 type SyncStatus =
   | { kind: 'idle' }
@@ -588,6 +601,15 @@ function GrafanaCard() {
             onChange={(v) => update('org_id', v)}
             placeholder="1"
           />
+          <label className="flex items-center gap-2 text-xs text-zinc-300">
+            <input
+              type="checkbox"
+              checked={draft.tls_insecure === 'true'}
+              onChange={(e) => update('tls_insecure', e.target.checked ? 'true' : 'false')}
+              className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-900 accent-emerald-500"
+            />
+            {tr('跳过 TLS 校验（自签证书时勾选）', 'Skip TLS verification (check this for self-signed certs)')}
+          </label>
         </div>
       )}
 

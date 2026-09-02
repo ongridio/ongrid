@@ -8,10 +8,11 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/promauth"
 )
 
-// PromResolver implements three resolver interfaces against the
+// PromResolver implements four resolver interfaces against the
 // system_settings table:
 //
-//   - promauth.Resolver       (Bearer / Basic)
+//   - promauth.Resolver         (Bearer / Basic)
+//   - promauth.TLSResolver      (TLS verification / custom CA)
 //   - promwrite.EndpointResolver (full remote_write URL with fallback)
 //   - promquery.BaseURLResolver  (PromQL API root with fallback)
 //
@@ -24,18 +25,20 @@ import (
 // row is missing or empty. This way a fresh install with nothing in the
 // DB still talks to the embedded Prometheus.
 type PromResolver struct {
-	svc               *Service
-	fallbackQueryURL  string
-	fallbackWriteURL  string
+	svc              *Service
+	fallbackQueryURL string
+	fallbackWriteURL string
+	fallbackTLS      promauth.TLSConfig
 }
 
-// NewPromResolver wires the resolver. svc must be non-nil. fallback*URL
-// are taken from cfg.Prom.URL and cfg.Prom.RemoteWriteURL respectively.
-func NewPromResolver(svc *Service, fallbackQueryURL, fallbackWriteURL string) *PromResolver {
+// NewPromResolver wires the resolver. svc must be non-nil. The fallback
+// values come from cfg.Prom and remain available when settings rows are absent.
+func NewPromResolver(svc *Service, fallbackQueryURL, fallbackWriteURL string, fallbackTLS promauth.TLSConfig) *PromResolver {
 	return &PromResolver{
 		svc:              svc,
 		fallbackQueryURL: strings.TrimRight(fallbackQueryURL, "/"),
 		fallbackWriteURL: fallbackWriteURL,
+		fallbackTLS:      fallbackTLS,
 	}
 }
 
@@ -58,6 +61,27 @@ func (r *PromResolver) Resolve(ctx context.Context) (promauth.Config, error) {
 		BasicUser:     r.get(ctx, model.KeyPromBasicUser),
 		BasicPassword: r.get(ctx, model.KeyPromBasicPassword),
 	}, nil
+}
+
+// ResolveTLS implements promauth.TLSResolver. Stored values override the
+// env-derived startup defaults and are read through the settings cache, which
+// is invalidated immediately after a UI save.
+func (r *PromResolver) ResolveTLS(ctx context.Context) (promauth.TLSConfig, error) {
+	cfg := r.fallbackTLS
+	if r.svc == nil {
+		return cfg, nil
+	}
+	if value, found, err := r.svc.Get(ctx, model.CategoryProm, model.KeyPromTLSInsecure); err != nil {
+		return cfg, err
+	} else if found {
+		cfg.Insecure = strings.EqualFold(strings.TrimSpace(value), "true")
+	}
+	if value, found, err := r.svc.Get(ctx, model.CategoryProm, model.KeyPromTLSCAPEM); err != nil {
+		return cfg, err
+	} else if found {
+		cfg.CAPEM = strings.TrimSpace(value)
+	}
+	return cfg, nil
 }
 
 // ResolveBaseURL implements promquery.BaseURLResolver. Falls back to

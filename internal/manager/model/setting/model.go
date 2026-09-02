@@ -171,9 +171,8 @@ const (
 	LLMProviderCustom    = "custom"
 )
 
-// Well-known keys under CategoryProm. internal/pkg/promauth reads bearer/
-// basic on every request via the Resolver; URLs are read at startup (env
-// seed → DB) and changes require a manager restart.
+// Well-known keys under CategoryProm. Manager-side clients resolve these
+// settings at request time so UI edits do not require a restart.
 const (
 	KeyPromQueryURL       = "query_url"
 	KeyPromRemoteWriteURL = "remote_write_url"
@@ -202,6 +201,7 @@ const (
 	KeyGrafanaSAToken = "sa_token" // sensitive — Grafana service-account token
 	KeyGrafanaAPIKey  = "api_key"  // sensitive — alternative bearer for external Grafana
 	KeyGrafanaOrgID   = "org_id"
+	KeyGrafanaTLSInsecure = "tls_insecure"
 )
 
 // Well-known keys under CategoryLoki. The PluginConfigUC reads these on

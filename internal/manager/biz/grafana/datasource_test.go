@@ -137,6 +137,35 @@ func TestLokiDatasourceEmptyURLSkipsSync(t *testing.T) {
 	}
 }
 
+func TestPrometheusDatasourceUsesTLSSettings(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	settings := settingbiz.New(newFakeSettingRepo(), nil)
+	for key, value := range map[string]string{
+		settingmodel.KeyPromBearerToken: "prom-token",
+		settingmodel.KeyPromTLSInsecure: "true",
+		settingmodel.KeyPromTLSCAPEM:    "test-ca",
+	} {
+		if err := settings.Set(ctx, settingmodel.CategoryProm, key, value, key == settingmodel.KeyPromBearerToken); err != nil {
+			t.Fatalf("set %s: %v", key, err)
+		}
+	}
+
+	ds := New(settings, false, nil).prometheusDatasource(ctx, "https://prom.example.com")
+	if got := ds.JSONData["tlsSkipVerify"]; got != true {
+		t.Fatalf("tlsSkipVerify = %v", got)
+	}
+	if got := ds.JSONData["tlsAuthWithCACert"]; got != true {
+		t.Fatalf("tlsAuthWithCACert = %v", got)
+	}
+	if got := ds.SecureJSONData["tlsCACert"]; got != "test-ca" {
+		t.Fatalf("tlsCACert = %q", got)
+	}
+	if got := ds.SecureJSONData["httpHeaderValue1"]; got != "Bearer prom-token" {
+		t.Fatalf("authorization = %q", got)
+	}
+}
+
 func TestElasticsearchDatasourceUsesReadOnlyQuerySettings(t *testing.T) {
 	t.Parallel()
 	ds, err := elasticsearchDatasource(pkggrafana.ElasticsearchDatasourceConfig{
@@ -249,5 +278,36 @@ func TestSyncLogsDatasourceCreatesActiveElasticsearchDatasource(t *testing.T) {
 	}
 	if got := created.SecureJSONData["httpHeaderValue1"]; got != "ApiKey query-only-key" {
 		t.Fatalf("created query authorization = %q", got)
+	}
+}
+
+func TestConnectionReloadsTLSInsecureSetting(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"database":"ok"}`))
+	}))
+	defer server.Close()
+
+	ctx := context.Background()
+	settings := settingbiz.New(newFakeSettingRepo(), nil)
+	for key, value := range map[string]string{
+		settingmodel.KeyGrafanaRootURL:     server.URL,
+		settingmodel.KeyGrafanaSAToken:     "grafana-token",
+		settingmodel.KeyGrafanaTLSInsecure: "false",
+	} {
+		if err := settings.Set(ctx, settingmodel.CategoryGrafana, key, value, key == settingmodel.KeyGrafanaSAToken); err != nil {
+			t.Fatalf("set %s: %v", key, err)
+		}
+	}
+
+	svc := New(settings, false, nil)
+	if err := svc.Test(ctx); err == nil {
+		t.Fatal("self-signed Grafana unexpectedly passed with TLS verification enabled")
+	}
+	if err := settings.Set(ctx, settingmodel.CategoryGrafana, settingmodel.KeyGrafanaTLSInsecure, "true", false); err != nil {
+		t.Fatalf("enable TLS skip verify: %v", err)
+	}
+	if err := svc.Test(ctx); err != nil {
+		t.Fatalf("test after enabling TLS skip verify: %v", err)
 	}
 }

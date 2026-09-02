@@ -449,7 +449,10 @@ func main() {
 	if cfg.Prom.QueryURL != "" {
 		queryFallback = cfg.Prom.QueryURL
 	}
-	promResolver := managerbizsetting.NewPromResolver(settingSvc, queryFallback, cfg.Prom.RemoteWriteURL)
+	promResolver := managerbizsetting.NewPromResolver(settingSvc, queryFallback, cfg.Prom.RemoteWriteURL, promauth.TLSConfig{
+		Insecure: cfg.Prom.TLSInsecure,
+		CAPath:   cfg.Prom.TLSCAPath,
+	})
 
 	// HLD-010 audit log — append-only "who did what" trail. Built early
 	// so the auth middleware factory below can capture login attempts.
@@ -487,6 +490,7 @@ func main() {
 	}{
 		{settingmodel.KeyPromQueryURL, cfg.Prom.QueryURL, false},
 		{settingmodel.KeyPromRemoteWriteURL, cfg.Prom.RemoteWriteURL, false},
+		{settingmodel.KeyPromTLSInsecure, strconv.FormatBool(cfg.Prom.TLSInsecure), false},
 	} {
 		if err := settingSvc.SetIfAbsent(rootCtx, settingmodel.CategoryProm, seed.key, seed.val, seed.sensitive); err != nil {
 			log.Warn("seed prom setting", slog.String("key", seed.key), slog.Any("err", err))
@@ -499,6 +503,9 @@ func main() {
 	// across restarts.
 	if err := settingSvc.SetIfAbsent(rootCtx, settingmodel.CategoryGrafana, settingmodel.KeyGrafanaRootURL, cfg.Grafana.InternalRootURL, false); err != nil {
 		log.Warn("seed grafana root_url", slog.Any("err", err))
+	}
+	if err := settingSvc.SetIfAbsent(rootCtx, settingmodel.CategoryGrafana, settingmodel.KeyGrafanaTLSInsecure, strconv.FormatBool(cfg.Grafana.TLSInsecure), false); err != nil {
+		log.Warn("seed grafana tls_insecure", slog.Any("err", err))
 	}
 	// Loki / Tempo seeds. Mirrors the Prom seed pattern — first-boot
 	// only, admin edits in UI persist across restarts. The URL is the
@@ -1104,7 +1111,7 @@ func main() {
 			slog.String("query_fallback", queryFallback),
 			slog.String("write_fallback", cfg.Prom.RemoteWriteURL),
 			slog.Bool("tls_insecure", cfg.Prom.TLSInsecure),
-			slog.String("note", "URLs hot-reload from system_settings within ~5s; TLS still requires restart"),
+			slog.String("note", "URLs, auth and TLS hot-reload from system_settings"),
 		)
 	} else {
 		log.Warn("prom disabled — push_prom_samples will be silently dropped, query_promql tool not registered, /v1/edges/{id}/metrics returns 501")
@@ -3228,20 +3235,27 @@ func (r k8sRemoteWriteResolver) ResolveRemoteWrite(ctx context.Context) (manager
 	if err != nil {
 		return managerbizk8s.RemoteWriteTarget{}, err
 	}
-	var caPEM string
-	if path := strings.TrimSpace(r.prom.TLSCAPath); path != "" {
+	tlsConfig, err := r.resolver.ResolveTLS(ctx)
+	if err != nil {
+		return managerbizk8s.RemoteWriteTarget{}, err
+	}
+	caPEM := strings.TrimSpace(tlsConfig.CAPEM)
+	if path := strings.TrimSpace(tlsConfig.CAPath); path != "" {
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			return managerbizk8s.RemoteWriteTarget{}, fmt.Errorf("read prometheus TLS CA: %w", err)
 		}
-		caPEM = string(raw)
+		if caPEM != "" {
+			caPEM += "\n"
+		}
+		caPEM += string(raw)
 	}
 	return managerbizk8s.RemoteWriteTarget{
 		Endpoint:      writeURL,
 		BearerToken:   authConfig.BearerToken,
 		BasicUser:     authConfig.BasicUser,
 		BasicPassword: authConfig.BasicPassword,
-		TLSInsecure:   r.prom.TLSInsecure,
+		TLSInsecure:   tlsConfig.Insecure,
 		TLSCAPEM:      caPEM,
 	}, nil
 }
