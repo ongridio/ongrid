@@ -26,6 +26,11 @@ import { usePermissions } from '@/store/me';
 import { useModelSelection } from '@/store/modelSelection';
 import { useI18n } from '@/i18n/locale';
 import { buildConfigDraftConfirmMessage, configDraftApplyTool } from '@/lib/configDraftConfirmation';
+import {
+  getChatTurnController,
+  registerChatTurnController,
+  unregisterChatTurnController,
+} from '@/lib/chatTurnRegistry';
 
 type LocationState = { initialPrompt?: string } | null;
 
@@ -115,13 +120,12 @@ export default function ChatThreadPage() {
   useEffect(() => { submittingRef.current = submitting; }, [submitting]);
 
   useEffect(() => {
-    // Detach from the previous browser stream without stopping its server-side
-    // turn. The persisted result will be available when that session is opened.
     activeSessionRef.current = sessionId;
-    abortRef.current?.abort();
-    abortRef.current = null;
-    submittingRef.current = false;
-    setSubmitting(false);
+    const controller = getChatTurnController(sessionId);
+    abortRef.current = controller;
+    const sessionSubmitting = controller !== null;
+    submittingRef.current = sessionSubmitting;
+    setSubmitting(sessionSubmitting);
     setError(null);
     setMessages([]);
     setLoading(true);
@@ -248,6 +252,7 @@ export default function ChatThreadPage() {
     setSubmitting(true);
     const ac = new AbortController();
     abortRef.current = ac;
+    registerChatTurnController(turnSessionID, ac);
     let expectedToolSeen = !opts.expectedTool;
     let expectedToolFailed = false;
 
@@ -443,6 +448,7 @@ export default function ChatThreadPage() {
       ]);
       return false;
     } finally {
+      unregisterChatTurnController(turnSessionID, ac);
       if (activeSessionRef.current === turnSessionID) {
         submittingRef.current = false;
         setSubmitting(false);
