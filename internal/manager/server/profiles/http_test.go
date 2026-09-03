@@ -25,12 +25,12 @@ func TestFlamegraphBuildsSafePyroscopeQuery(t *testing.T) {
 	router := chi.NewRouter()
 	handler.Register(router)
 	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/profiles/flamegraph?service=orders-api%22%7D&kind=heap&range=15m", nil))
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/profiles/flamegraph?device_id=42&service=orders-api%22%7D&kind=heap&range=15m", nil))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	if gotQuery != `space:inuse_space:bytes:space:bytes{service_name="orders-api\"}",profile_type="heap"}` {
+	if gotQuery != `space:inuse_space:bytes:space:bytes{device_id="42",service_name="orders-api\"}",profile_type="heap"}` {
 		t.Fatalf("query=%q", gotQuery)
 	}
 	if !strings.Contains(rec.Body.String(), `"numTicks":4`) {
@@ -46,8 +46,18 @@ func TestFlamegraphRejectsUnsupportedKind(t *testing.T) {
 	router := chi.NewRouter()
 	NewHandler("http://pyroscope.invalid").Register(router)
 	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/profiles/flamegraph?service=orders-api&kind=unknown", nil))
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/profiles/flamegraph?device_id=42&service=orders-api&kind=unknown", nil))
 	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestFlamegraphRequiresDeviceID(t *testing.T) {
+	router := chi.NewRouter()
+	NewHandler("http://pyroscope.invalid").Register(router)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/profiles/flamegraph?service=orders-api&kind=heap", nil))
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "device_id") {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
@@ -63,12 +73,31 @@ func TestDownloadReturnsPprofAttachment(t *testing.T) {
 	router := chi.NewRouter()
 	handler.Register(router)
 	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/profiles/download?service=orders-api&kind=cpu&range=1h", nil))
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/profiles/download?device_id=42&service=orders-api&kind=cpu&range=1h", nil))
 
 	if rec.Code != http.StatusOK || gotFormat != "pprof" || rec.Body.String() != "pprof-data" {
 		t.Fatalf("status=%d format=%q body=%q", rec.Code, gotFormat, rec.Body.String())
 	}
 	if got := rec.Header().Get("Content-Disposition"); got != `attachment; filename="profile.pprof"` {
 		t.Fatalf("content-disposition=%q", got)
+	}
+}
+
+func TestDownloadRejectsOversizedBackendResponse(t *testing.T) {
+	handler := NewHandler("http://pyroscope.test")
+	handler.client.Transport = roundTripper(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(strings.Repeat("x", maxResponseBytes+1))),
+		}, nil
+	})
+
+	router := chi.NewRouter()
+	handler.Register(router)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/profiles/download?device_id=42&service=orders-api&kind=cpu&range=1h", nil))
+
+	if rec.Code != http.StatusBadGateway || !strings.Contains(rec.Body.String(), "exceeds 16 MiB") {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
 	}
 }

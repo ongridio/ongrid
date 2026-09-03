@@ -7,7 +7,7 @@ Let an operator sample an application's exposed profiling endpoint from **Tools*
 ## Scope
 
 - CPU, `heap`, `allocs`, `goroutine`, `mutex`, and `block` from a pprof-compatible HTTP endpoint through the official Collector pprof receiver.
-- Target selection: one Edge plus service name, scheme, IP/host, port, and path. Go-compatible Ongrid Edge defaults are prefilled but editable.
+- Target selection: one Edge plus one pprof URL (scheme, IP/host, port, and path). The service label is derived from the URL; Ongrid Edge defaults are prefilled but editable.
 - Transport and storage: authenticated OTLP/HTTP Profiles ingress, Collector gateway, Pyroscope storage, Grafana data source.
 
 ## Constraints

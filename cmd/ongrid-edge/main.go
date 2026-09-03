@@ -63,9 +63,9 @@ var version = "dev"
 // from cloud metrics (:9100) so both can run on the same dev host.
 const edgeMetricsAddr = ":9101"
 
-// Keep runtime profiles local to the Edge host. If an application already
-// owns :6060, its pprof endpoint takes precedence and the agent keeps running.
-const edgePprofAddr = "127.0.0.1:6060"
+// Keep the Edge's own runtime profiles local and off the conventional :6060
+// application port so the default target cannot silently profile another app.
+const edgePprofAddr = "127.0.0.1:16060"
 
 func main() {
 	if handled, err := runK8sHostCommand(context.Background(), os.Args[1:]); handled {

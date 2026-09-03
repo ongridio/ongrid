@@ -221,7 +221,7 @@ export default function DailyToolsPage() {
     title: '',
   });
   const [profile, setProfile] = useState<ProfileForm>({
-    kind: 'heap', url: 'http://127.0.0.1:6060/debug/pprof/heap', duration_seconds: '30',
+    kind: 'heap', url: 'http://127.0.0.1:16060/debug/pprof/heap', duration_seconds: '30',
   });
   const [profilePlugin, setProfilePlugin] = useState<PluginRow | null>(null);
   const [profileSaving, setProfileSaving] = useState(false);
@@ -474,7 +474,7 @@ export default function DailyToolsPage() {
   }
 
   async function startProfile() {
-    if (selectedEdges.length !== 1 || profileSaving) return;
+    if (selectedEdges.length !== 1 || !selectedEdges[0].device_id || profileSaving) return;
     const requestedAt = Date.now();
     profileStartRequestedAtRef.current = requestedAt;
     setProfileSaving(true);
@@ -722,7 +722,7 @@ export default function DailyToolsPage() {
   }
 
   const canRun = active === 'profile'
-    ? selectedEdges.length === 1 && profileCanStart(profile) && !profileSaving && !profileSessionActive
+    ? selectedEdges.length === 1 && Boolean(selectedEdges[0].device_id) && profileCanStart(profile) && !profileSaving && !profileSessionActive
     : selectedEdges.length > 0 && toolInputReady(active, { ping, dns, tcp, http, capture });
   return (
     <main className="anim-fade flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
@@ -1134,10 +1134,12 @@ function ProfilingPanel({
   const [viewerLoading, setViewerLoading] = useState(false);
   const [viewerError, setViewerError] = useState('');
   const [downloading, setDownloading] = useState(false);
+  const viewerRetryTimersRef = useRef<number[]>([]);
+  const deviceID = edge?.device_id ?? 0;
   const expired = profileSessionExpired(plugin, nowMs);
   const serviceName = profileServiceName(value.url);
   const completionKey = plugin?.enabled && expired
-    ? `${stringValue(plugin.spec?.expires_at, '')}:${value.kind}:${serviceName}`
+    ? `${stringValue(plugin.spec?.expires_at, '')}:${deviceID}:${value.kind}:${serviceName}`
     : '';
   const lastCompletionRef = useRef('');
   useEffect(() => {
@@ -1145,11 +1147,19 @@ function ProfilingPanel({
     lastCompletionRef.current = completionKey;
     setViewerOpen(true);
     setViewerRefresh((current) => current + 1);
-    const timers = [2000, 5000, 10000].map((delay) => window.setTimeout(() => setViewerRefresh((current) => current + 1), delay));
-    return () => timers.forEach((timer) => window.clearTimeout(timer));
+    viewerRetryTimersRef.current = [2000, 5000, 10000].map((delay) => window.setTimeout(() => setViewerRefresh((current) => current + 1), delay));
+    return () => {
+      viewerRetryTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+      viewerRetryTimersRef.current = [];
+    };
   }, [completionKey]);
   useEffect(() => {
     if (!viewerOpen) return undefined;
+    if (deviceID === 0) {
+      setViewerProfile(null);
+      setViewerError(tr('该 Edge 未关联 device_id，无法查询分析结果。', 'This Edge has no linked device_id, so profile results cannot be queried.'));
+      return undefined;
+    }
     const service = profileServiceName(value.url);
     if (!service) {
       setViewerProfile(null);
@@ -1158,11 +1168,18 @@ function ProfilingPanel({
     }
     const controller = new AbortController();
     let active = true;
-    const params = new URLSearchParams({ service, kind: value.kind, range: '15m' });
+    const params = new URLSearchParams({ device_id: String(deviceID), service, kind: value.kind, range: '15m' });
     setViewerLoading(true);
     setViewerError('');
     void request<FlamebearerProfile>('GET', `/profiles/flamegraph?${params.toString()}`, undefined, { signal: controller.signal })
-      .then((profile) => { if (active) setViewerProfile(profile); })
+      .then((profile) => {
+        if (!active) return;
+        setViewerProfile(profile);
+        if (profile.flamebearer.numTicks > 0) {
+          viewerRetryTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+          viewerRetryTimersRef.current = [];
+        }
+      })
       .catch((err) => {
         if (active && (err as Error).name !== 'AbortError') {
           setViewerProfile(null);
@@ -1174,14 +1191,14 @@ function ProfilingPanel({
       active = false;
       controller.abort();
     };
-  }, [tr, value.kind, value.url, viewerOpen, viewerRefresh]);
+  }, [deviceID, tr, value.kind, value.url, viewerOpen, viewerRefresh]);
   const downloadProfile = async () => {
     const service = profileServiceName(value.url);
-    if (!service || downloading) return;
+    if (!deviceID || !service || downloading) return;
     setDownloading(true);
     setViewerError('');
     try {
-      const params = new URLSearchParams({ service, kind: value.kind, range: '15m' });
+      const params = new URLSearchParams({ device_id: String(deviceID), service, kind: value.kind, range: '15m' });
       const token = getToken();
       const response = await fetch(`/api/v1/profiles/download?${params.toString()}`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
       if (!response.ok) throw new Error((await response.text()).trim() || `HTTP ${response.status}`);
@@ -1236,7 +1253,7 @@ function ProfilingPanel({
         <div className="flex items-center gap-2">
           <Chip tone={!plugin?.enabled || expired ? 'default' : failed ? 'danger' : state === 'running' ? 'success' : 'info'}>{statusLabel}</Chip>
           {activeSession ? <Button onClick={onStop} disabled={saving}><Square size={13} />{tr('停止采样', 'Stop sampling')}</Button> : null}
-          <Button onClick={() => void downloadProfile()} disabled={!serviceName || downloading}>
+          <Button onClick={() => void downloadProfile()} disabled={!deviceID || !serviceName || downloading}>
             {downloading ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
             {tr('下载数据', 'Download')}
           </Button>
@@ -1267,7 +1284,7 @@ function ProfilingPanel({
             label={tr('采集 URL', 'Profile URL')}
             value={value.url}
             onChange={(url) => onChange({ ...value, url })}
-            placeholder="http://127.0.0.1:6060/debug/pprof/heap"
+            placeholder="http://127.0.0.1:16060/debug/pprof/heap"
             className="w-full"
             disabled={activeSession}
           />
@@ -1298,6 +1315,7 @@ function ProfilingPanel({
           </div>
         ) : null}
       </div>
+      {!deviceID ? <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-300">{tr('该 Edge 未关联 device_id，暂时无法采样。', 'This Edge has no linked device_id and cannot be profiled yet.')}</div> : null}
       {viewerOpen ? (
         <NativeFlamegraph
           profile={viewerProfile}
@@ -2068,7 +2086,7 @@ function profileURLForDuration(rawURL: string, duration: string) {
 function profileServiceName(rawURL: string) {
   const parsed = parsedProfileURL(rawURL);
   if (!parsed) return '';
-  if (parsed.hostname === '127.0.0.1' && (parsed.port === '' || parsed.port === '6060')) return 'ongrid-edge';
+  if (parsed.hostname === '127.0.0.1' && parsed.port === '16060') return 'ongrid-edge';
   return parsed.host;
 }
 

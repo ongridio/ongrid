@@ -61,6 +61,11 @@ func (h *Handler) render(w http.ResponseWriter, r *http.Request, format string) 
 		writeError(w, http.StatusBadRequest, "service is required and must not exceed 256 characters")
 		return
 	}
+	deviceID, err := strconv.ParseUint(strings.TrimSpace(r.URL.Query().Get("device_id")), 10, 64)
+	if err != nil || deviceID == 0 {
+		writeError(w, http.StatusBadRequest, "device_id must be a positive integer")
+		return
+	}
 	profileKind := r.URL.Query().Get("kind")
 	profileType, ok := profileTypes[profileKind]
 	if !ok {
@@ -77,7 +82,7 @@ func (h *Handler) render(w http.ResponseWriter, r *http.Request, format string) 
 	}
 
 	params := url.Values{}
-	params.Set("query", profileType+"{service_name="+strconv.Quote(service)+",profile_type="+strconv.Quote(profileKind)+"}")
+	params.Set("query", profileType+"{device_id="+strconv.Quote(strconv.FormatUint(deviceID, 10))+",service_name="+strconv.Quote(service)+",profile_type="+strconv.Quote(profileKind)+"}")
 	params.Set("from", "now-"+lookback)
 	params.Set("until", "now")
 	params.Set("maxNodes", "4096")
@@ -101,12 +106,25 @@ func (h *Handler) render(w http.ResponseWriter, r *http.Request, format string) 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		if err != nil {
+			writeError(w, http.StatusBadGateway, resp.Status)
+			return
+		}
 		message := strings.TrimSpace(string(body))
 		if message == "" {
 			message = resp.Status
 		}
 		writeError(w, http.StatusBadGateway, message)
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	if err != nil {
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("read profiles backend response: %v", err))
+		return
+	}
+	if len(body) > maxResponseBytes {
+		writeError(w, http.StatusBadGateway, "profiles backend response exceeds 16 MiB")
 		return
 	}
 
@@ -119,11 +137,15 @@ func (h *Handler) render(w http.ResponseWriter, r *http.Request, format string) 
 		w.Header().Set("Content-Type", "application/json")
 	}
 	w.WriteHeader(http.StatusOK)
-	_, _ = io.Copy(w, io.LimitReader(resp.Body, maxResponseBytes))
+	if _, err := w.Write(body); err != nil {
+		return
+	}
 }
 
 func writeError(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_, _ = fmt.Fprintf(w, `{"error":%s}`, strconv.Quote(message))
+	if _, err := fmt.Fprintf(w, `{"error":%s}`, strconv.Quote(message)); err != nil {
+		return
+	}
 }

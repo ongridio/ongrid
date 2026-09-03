@@ -206,7 +206,6 @@ for target in ${EDGE_TARGETS}; do
             || die "offline Edge package requires regular non-empty ${src}"
     done
 done
-
 for target in ${EDGE_TARGETS}; do
     src="${EDGE_BIN_ROOT}/${target}/ongrid-edge"
     dst="${STAGE_DIR}/edge/ongrid-edge-${target}"

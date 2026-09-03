@@ -56,7 +56,7 @@ for target in "$@"; do
             done
             printf '%s\n' "$target" > "$stage/TARGET"
             cat > "$stage/DEPENDENCIES" <<EOF
-layout=4
+layout=2
 otelcol-contrib=${OTELCOL_VERSION}
 node_exporter=${NODE_EXPORTER_VERSION}
 process_exporter=${PROCESS_EXPORTER_VERSION}

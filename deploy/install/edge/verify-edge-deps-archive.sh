@@ -128,7 +128,6 @@ redis_exporter=$(metadata_value redis_exporter) || die "DEPENDENCIES has invalid
 mongodb_exporter=$(metadata_value mongodb_exporter) || die "DEPENDENCIES has invalid mongodb_exporter metadata"
 release_tag=$(metadata_value release_tag) || die "DEPENDENCIES has invalid release_tag metadata"
 
-
 computed_tag="edge-deps-layout${layout}-o${otelcol}-n${node_exporter}-pr${process_exporter}-my${mysqld_exporter}-pg${postgres_exporter}-r${redis_exporter}-m${mongodb_exporter}"
 [[ "$release_tag" == "$EXPECTED_TAG" ]] \
     || die "dependency archive release tag does not match $EXPECTED_TAG"

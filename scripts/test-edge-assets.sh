@@ -16,8 +16,8 @@ components=(
     node_exporter process_exporter mysqld_exporter postgres_exporter
     redis_exporter mongodb_exporter otelcol-contrib
 )
-deps_tag=edge-deps-layout4-o2-n3-pr4-my5-pg6-r7-m8
-next_deps_tag=edge-deps-layout4-o12-n13-pr14-my15-pg16-r17-m18
+deps_tag=edge-deps-layout2-o2-n3-pr4-my5-pg6-r7-m8
+next_deps_tag=edge-deps-layout2-o12-n13-pr14-my15-pg16-r17-m18
 bin_root="$tmp_dir/bin"
 mkdir -p "$bin_root/linux-amd64"
 for component in "${components[@]}"; do

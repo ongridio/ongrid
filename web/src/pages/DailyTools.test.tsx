@@ -444,6 +444,7 @@ describe('DailyToolsPage', () => {
     let saved: { enabled?: boolean; spec?: Record<string, unknown> } = {};
     let readsAfterStart = 0;
     let downloaded = false;
+    let flamegraphCalls = 0;
     const flamegraphResponse = {
       flamebearer: {
         names: ['total', 'ongrid-edge.main', 'db.query'],
@@ -474,7 +475,9 @@ describe('DailyToolsPage', () => {
         });
       }),
       http.get('/api/v1/profiles/flamegraph', ({ request }) => {
+        flamegraphCalls++;
         const url = new URL(request.url);
+        expect(url.searchParams.get('device_id')).toBe('11');
         expect(url.searchParams.get('service')).toBe('ongrid-edge');
         expect(url.searchParams.get('kind')).toBe('heap');
         expect(url.searchParams.get('range')).toBe('15m');
@@ -482,6 +485,7 @@ describe('DailyToolsPage', () => {
       }),
       http.get('/api/v1/profiles/download', ({ request }) => {
         const url = new URL(request.url);
+        expect(url.searchParams.get('device_id')).toBe('11');
         expect(url.searchParams.get('service')).toBe('ongrid-edge');
         expect(url.searchParams.get('kind')).toBe('heap');
         expect(url.searchParams.get('range')).toBe('15m');
@@ -501,14 +505,14 @@ describe('DailyToolsPage', () => {
     expect(profileType).toHaveValue('heap');
     expect(screen.queryByRole('combobox', { name: '分析进程' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('service.name')).not.toBeInTheDocument();
-    expect(screen.getByLabelText('采集 URL')).toHaveValue('http://127.0.0.1:6060/debug/pprof/heap');
+    expect(screen.getByLabelText('采集 URL')).toHaveValue('http://127.0.0.1:16060/debug/pprof/heap');
     expect(screen.getByText(/默认采集当前 Edge 的 ongrid-edge/)).toBeInTheDocument();
 
     await userEvent.selectOptions(profileType, 'cpu');
     expect(screen.queryByRole('combobox', { name: '分析进程' })).not.toBeInTheDocument();
-    expect(screen.getByLabelText('采集 URL')).toHaveValue('http://127.0.0.1:6060/debug/pprof/profile?seconds=30');
+    expect(screen.getByLabelText('采集 URL')).toHaveValue('http://127.0.0.1:16060/debug/pprof/profile?seconds=30');
     await userEvent.selectOptions(screen.getByRole('combobox', { name: '采样时长' }), '60');
-    expect(screen.getByLabelText('采集 URL')).toHaveValue('http://127.0.0.1:6060/debug/pprof/profile?seconds=60');
+    expect(screen.getByLabelText('采集 URL')).toHaveValue('http://127.0.0.1:16060/debug/pprof/profile?seconds=60');
     await userEvent.selectOptions(profileType, 'heap');
     await userEvent.selectOptions(screen.getByRole('combobox', { name: '采样时长' }), '30');
 
@@ -521,7 +525,7 @@ describe('DailyToolsPage', () => {
       mode: 'pprof',
       duration_seconds: 30,
       runtime_target: {
-        url: 'http://127.0.0.1:6060/debug/pprof/heap',
+        url: 'http://127.0.0.1:16060/debug/pprof/heap',
         profile_type: 'heap',
         service_name: 'ongrid-edge',
         collection_interval_seconds: 10,
@@ -537,6 +541,8 @@ describe('DailyToolsPage', () => {
 
     const viewer = await screen.findByRole('region', { name: '应用性能分析图' }, { timeout: 3000 });
     const frame = await within(viewer).findByRole('button', { name: /ongrid-edge\.main/ });
+    await new Promise((resolve) => setTimeout(resolve, 2200));
+    expect(flamegraphCalls).toBe(1);
     expect(frame).not.toHaveAttribute('title');
     await userEvent.hover(frame);
     expect(within(viewer).getByRole('tooltip')).toHaveTextContent('ongrid-edge.main');
@@ -573,5 +579,5 @@ describe('DailyToolsPage', () => {
     expect(viewer).toHaveClass('fixed', 'inset-0');
     expect(within(viewer).getByRole('button', { name: '退出全屏' })).toBeInTheDocument();
     expect(within(viewer).queryByTitle('应用性能火焰图')).not.toBeInTheDocument();
-  });
+  }, 10_000);
 });

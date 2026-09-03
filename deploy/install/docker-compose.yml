@@ -154,6 +154,7 @@ services:
       ONGRID_PROM_URL: ${ONGRID_PROM_URL:-http://prometheus:9090/prometheus}
       ONGRID_PROM_REMOTE_WRITE_URL: ${ONGRID_PROM_REMOTE_WRITE_URL:-}
       ONGRID_PROM_QUERY_URL: ${ONGRID_PROM_QUERY_URL:-http://prometheus:9090/prometheus}
+      ONGRID_PROFILE_QUERY_URL: ${ONGRID_PROFILE_QUERY_URL:-http://pyroscope:4040}
       ONGRID_PROM_TLS_INSECURE: ${ONGRID_PROM_TLS_INSECURE:-false}
       ONGRID_PROM_TLS_CA_FILE: ${ONGRID_PROM_TLS_CA_FILE:-}
       # Public URL the manager hands out to edges as the data-plane

@@ -43,7 +43,7 @@ K8S_EDGE_IMAGE_REF ?= $(K8S_EDGE_IMAGE_REPO):$(K8S_EDGE_IMAGE_TAG)
 # dependencies use an immutable tag derived from every upstream version and
 # are uploaded only once; the small self-developed binary follows VERSION.
 EDGE_ATTACHMENT_TARGETS ?= linux-amd64 linux-arm64
-EDGE_DEPS_TAG ?= edge-deps-layout4-o$(OTELCOL_VERSION)-n$(NODE_EXPORTER_VERSION)-pr$(PROCESS_EXPORTER_VERSION)-my$(MYSQLD_EXPORTER_VERSION)-pg$(POSTGRES_EXPORTER_VERSION)-r$(REDIS_EXPORTER_VERSION)-m$(MONGODB_EXPORTER_VERSION)
+EDGE_DEPS_TAG ?= edge-deps-layout2-o$(OTELCOL_VERSION)-n$(NODE_EXPORTER_VERSION)-pr$(PROCESS_EXPORTER_VERSION)-my$(MYSQLD_EXPORTER_VERSION)-pg$(POSTGRES_EXPORTER_VERSION)-r$(REDIS_EXPORTER_VERSION)-m$(MONGODB_EXPORTER_VERSION)
 EDGE_ATTACHMENTS_OUT ?= $(OUT)/edge-attachments
 CNB_RELEASE_BASE_URL ?= https://cnb.cool/ongridio/ongrid-edge/-/releases/download
 CNB_REPO_SLUG ?= ongridio/ongrid-edge
