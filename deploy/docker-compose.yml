@@ -203,6 +203,8 @@ services:
     depends_on:
       ongrid:
         condition: service_started
+      profiles-gateway:
+        condition: service_started
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./certs:/etc/nginx/certs:ro
@@ -303,6 +305,39 @@ services:
     networks:
       - ongrid_net
 
+  # OpenTelemetry Profiles is still alpha, so keep the gateway and backend
+  # versions pinned. Edge collectors send OTLP/HTTP through authenticated nginx;
+  # this collector forwards the profiles signal to Pyroscope over OTLP/gRPC.
+  profiles-gateway:
+    image: otel/opentelemetry-collector-contrib:0.157.0
+    container_name: ongrid-profiles-gateway
+    restart: unless-stopped
+    command:
+      - --config=/etc/otelcol/profiles-gateway.yaml
+      - --feature-gates=service.profilesSupport
+    volumes:
+      - ./install/profiles-gateway.yaml:/etc/otelcol/profiles-gateway.yaml:ro
+    depends_on:
+      - pyroscope
+    networks:
+      - ongrid_net
+
+  pyroscope:
+    image: grafana/pyroscope:1.21.1
+    container_name: ongrid-pyroscope
+    restart: unless-stopped
+    command:
+      - -self-profiling.disable-push=true
+      - -config.file=/etc/pyroscope.yaml
+    tmpfs:
+      - /data:rw,nosuid,nodev,size=1g,uid=10001,gid=10001,mode=0750
+      - /data-metastore:rw,nosuid,nodev,size=128m,uid=10001,gid=10001,mode=0750
+      - /data-compactor:rw,nosuid,nodev,size=256m,uid=10001,gid=10001,mode=0750
+    volumes:
+      - ./install/pyroscope-config.yaml:/etc/pyroscope.yaml:ro
+    networks:
+      - ongrid_net
+
   # SearXNG (default backend for the manager-scoped web_search skill).
   # Self-hosted meta-search aggregator — fans out queries to Bing /
   # DuckDuckGo / Brave / Baidu / Sogou and returns a normalised JSON
@@ -337,6 +372,7 @@ services:
       - prometheus
       - loki
       - tempo
+      - pyroscope
     environment:
       GF_SERVER_ROOT_URL: ${ONGRID_GRAFANA_ROOT_URL:-%(protocol)s://%(domain)s/grafana/}
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"
@@ -358,6 +394,7 @@ services:
       GF_USERS_DEFAULT_LANGUAGE: en-US
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_INSTALL_PLUGINS: grafana-pyroscope-app
       # iframe embedding for ongrid /monitor solo-mode panels. Default
       # Grafana sets X-Frame-Options=deny + frame-ancestors=none which
       # blocks our iframes. We're same-origin (under /grafana on the
@@ -369,6 +406,7 @@ services:
       # here so the provisioning yamls can use plain ${VAR}.
       ONGRID_LOG_URL: ${ONGRID_LOG_URL:-http://loki:3100}
       ONGRID_TRACE_QUERY_URL: ${ONGRID_TRACE_QUERY_URL:-http://tempo:3200}
+      ONGRID_PROFILE_QUERY_URL: ${ONGRID_PROFILE_QUERY_URL:-http://pyroscope:4040}
     ports:
       - "${GRAFANA_PORT:-3000}:3000"
     volumes:

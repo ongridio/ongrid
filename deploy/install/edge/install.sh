@@ -234,7 +234,7 @@ rm -f "$TMP_HOOK"
 
 # --- bundled plugin binaries (ADR-015) --------------------------------------
 #
-# The agent's plugin supervisor runs otelcol-contrib (logs/traces), node_exporter
+# The agent's plugin supervisor runs otelcol-contrib (logs/traces/profiles), node_exporter
 # (hostmetrics), process_exporter (procmetrics),
 # and database exporters (databasemetrics)
 # as subprocesses, expecting them under ${APPLY_HOOK_DIR}. The old curl-pipe

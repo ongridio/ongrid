@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	_ "net/http/pprof"
 	"net/url"
 	"os"
 	"os/signal"
@@ -41,6 +42,7 @@ import (
 	edgepluginlogs "github.com/ongridio/ongrid/internal/edgeagent/plugins/logs"
 	edgepluginmetrics "github.com/ongridio/ongrid/internal/edgeagent/plugins/metrics"
 	edgepluginprocmetrics "github.com/ongridio/ongrid/internal/edgeagent/plugins/procmetrics"
+	edgepluginprofiles "github.com/ongridio/ongrid/internal/edgeagent/plugins/profiles"
 	edgeplugintraces "github.com/ongridio/ongrid/internal/edgeagent/plugins/traces"
 	edgesvc "github.com/ongridio/ongrid/internal/edgeagent/service"
 	edgestreamrouter "github.com/ongridio/ongrid/internal/edgeagent/streamrouter"
@@ -60,6 +62,10 @@ var version = "dev"
 // edgeMetricsAddr is the local debug /metrics port for edge. Kept separate
 // from cloud metrics (:9100) so both can run on the same dev host.
 const edgeMetricsAddr = ":9101"
+
+// Keep runtime profiles local to the Edge host. If an application already
+// owns :6060, its pprof endpoint takes precedence and the agent keeps running.
+const edgePprofAddr = "127.0.0.1:6060"
 
 func main() {
 	if handled, err := runK8sHostCommand(context.Background(), os.Args[1:]); handled {
@@ -293,6 +299,13 @@ func main() {
 	metricsServer := httpserver.New(edgeMetricsAddr, metricsMux, log.With(slog.String("listener", "metrics")))
 
 	eg.Go(func() error { return metricsServer.Start(egCtx) })
+	pprofServer := httpserver.New(edgePprofAddr, http.DefaultServeMux, log.With(slog.String("listener", "pprof")))
+	eg.Go(func() error {
+		if err := pprofServer.Start(egCtx); err != nil {
+			log.Warn("pprof server disabled", slog.Any("err", err))
+		}
+		return nil
+	})
 	// When agent.Run returns (clean ctx cancel OR upgrade
 	// swap), cancel rootCtx so every other goroutine — plugin
 	// supervisor, scraper, metrics http server — unwinds and the
@@ -336,6 +349,7 @@ func main() {
 				// disabled until manager pushes a PluginConfig with enabled=true
 				// + Endpoint set to the manager public /v1/traces URL.
 				edgeplugintraces.New(pluginBinDir, pluginWorkDir, pluginLog),
+				edgepluginprofiles.New(pluginBinDir, pluginWorkDir, pluginLog),
 				// metrics plugin: in-process scraper that polls a
 				// local /metrics endpoint (default node_exporter on
 				// 127.0.0.1:9100) and pushes via the existing push_prom_samples

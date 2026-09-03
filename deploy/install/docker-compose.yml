@@ -307,6 +307,8 @@ services:
     depends_on:
       ongrid:
         condition: service_started
+      profiles-gateway:
+        condition: service_started
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - ./certs:/etc/nginx/certs:ro
@@ -438,6 +440,42 @@ services:
         max-size: 50m
         max-file: "5"
 
+  profiles-gateway:
+    image: otel/opentelemetry-collector-contrib:0.157.0
+    container_name: ongrid-profiles-gateway
+    restart: unless-stopped
+    command:
+      - --config=/etc/otelcol/profiles-gateway.yaml
+      - --feature-gates=service.profilesSupport
+    volumes:
+      - ./profiles-gateway.yaml:/etc/otelcol/profiles-gateway.yaml:ro
+    depends_on:
+      - pyroscope
+    logging:
+      driver: json-file
+      options:
+        max-size: 50m
+        max-file: "5"
+
+  pyroscope:
+    image: grafana/pyroscope:1.21.1
+    container_name: ongrid-pyroscope
+    restart: unless-stopped
+    command:
+      - -self-profiling.disable-push=true
+      - -config.file=/etc/pyroscope.yaml
+    tmpfs:
+      - /data:rw,nosuid,nodev,size=1g,uid=10001,gid=10001,mode=0750
+      - /data-metastore:rw,nosuid,nodev,size=128m,uid=10001,gid=10001,mode=0750
+      - /data-compactor:rw,nosuid,nodev,size=256m,uid=10001,gid=10001,mode=0750
+    volumes:
+      - ./pyroscope-config.yaml:/etc/pyroscope.yaml:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: 50m
+        max-file: "5"
+
   # qdrant — vector store for the knowledge base / RAG. One container,
   # HTTP API only (port 6333). Persistent volume keeps collections
   # across restarts. Manager reaches it at http://qdrant:6333; no
@@ -488,6 +526,7 @@ services:
       - prometheus
       - loki
       - tempo
+      - pyroscope
     environment:
       GF_SERVER_ROOT_URL: ${ONGRID_GRAFANA_ROOT_URL:-%(protocol)s://%(domain)s/grafana/}
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"
@@ -512,6 +551,7 @@ services:
       GF_USERS_DEFAULT_LANGUAGE: en-US
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_INSTALL_PLUGINS: grafana-pyroscope-app
       # Datasource provisioning URLs (loki / tempo). Set as env so the
       # provisioning yamls can use plain ${VAR} interpolation —
       # Grafana doesn't support shell-style ${VAR:-default} (v0.7.40
@@ -519,6 +559,7 @@ services:
       # /grafana/explore with "unsupported protocol scheme").
       ONGRID_LOG_URL: ${ONGRID_LOG_URL:-http://loki:3100}
       ONGRID_TRACE_QUERY_URL: ${ONGRID_TRACE_QUERY_URL:-http://tempo:3200}
+      ONGRID_PROFILE_QUERY_URL: ${ONGRID_PROFILE_QUERY_URL:-http://pyroscope:4040}
     volumes:
       # Grafana SQLite + provisioning state on host. Grafana runs as uid
       # 472; chowned by install.sh. For production externalisation,

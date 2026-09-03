@@ -93,6 +93,13 @@ func TestPluginEndpointResolverFallsBackToManagerForInternalSeeds(t *testing.T) 
 	if traces.Endpoint != "https://manager.example/v1/traces" || !traces.UseTelemetryCredential {
 		t.Fatalf("traces target = %#v", traces)
 	}
+	profiles, err := resolver.ResolveTelemetryTarget(context.Background(), "profiles")
+	if err != nil {
+		t.Fatalf("resolve profiles: %v", err)
+	}
+	if profiles.Endpoint != "https://manager.example/v1development/profiles" || !profiles.UseTelemetryCredential {
+		t.Fatalf("profiles target = %#v", profiles)
+	}
 }
 
 func TestK8sRemoteWriteResolverPublishesPrometheusTLSSettings(t *testing.T) {

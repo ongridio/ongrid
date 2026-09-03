@@ -367,6 +367,33 @@ func TestInstall_GetPluginConfigs_UsesResolvedDeviceIDAsWireLabelID(t *testing.T
 	}
 }
 
+func TestInstall_ReportProfilesReadinessUpdatesPluginHealth(t *testing.T) {
+	fs := newFakeService()
+	c := newWithService(fs, slog.Default())
+	edgeUC := &edgebiz.Usecase{}
+	if err := Install(context.Background(), c, Wiring{
+		EdgeAuthn:      &edgebiz.AccessKeyAuthenticator{},
+		EdgeUC:         edgeUC,
+		MetricIngester: &fakeMetricIngester{},
+	}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	c.bindEdgeTransport(777, 42)
+	body, err := json.Marshal(tunnel.ReportPluginConfigAppliedRequest{Plugin: "profiles", Applied: true})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	rsp := &fakeResp{}
+	fs.rpcs[tunnel.MethodReportPluginConfigApplied](context.Background(), &fakeReq{clientID: 777, data: body}, rsp)
+	if rsp.err != nil {
+		t.Fatalf("rpc returned error: %v", rsp.err)
+	}
+	health := edgeUC.PluginHealth(42)
+	if len(health) != 1 || health[0].Name != "profiles" || health[0].State != "running" {
+		t.Fatalf("plugin health = %+v", health)
+	}
+}
+
 func TestInstall_PushPromSamples_HappyPath(t *testing.T) {
 	pi := &fakePromIngester{}
 	_, c, rpc := installAndDispatch(t, Wiring{PromIngester: pi, Log: slog.Default()})
