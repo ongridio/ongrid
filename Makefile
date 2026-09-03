@@ -33,11 +33,6 @@ CLOUD_IMAGE_PLATFORMS ?= linux/amd64,linux/arm64
 CLOUD_IMAGE_REPO ?= docker.cnb.cool/ongridio/ongrid
 CLOUD_MANAGER_IMAGE_REF ?= $(CLOUD_IMAGE_REPO):$(VERSION)
 CLOUD_WEB_IMAGE_REF ?= $(CLOUD_IMAGE_REPO)/ongrid-web:$(VERSION)
-PROFILES_GATEWAY_IMAGE_REF ?= $(CLOUD_IMAGE_REPO)/opentelemetry-collector-contrib:$(OTELCOL_VERSION)
-PROFILES_GATEWAY_UPSTREAM_IMAGE_REF ?= otel/opentelemetry-collector-contrib:$(OTELCOL_VERSION)
-PYROSCOPE_VERSION ?= 1.21.1
-PYROSCOPE_IMAGE_REF ?= $(CLOUD_IMAGE_REPO)/pyroscope:$(PYROSCOPE_VERSION)
-PYROSCOPE_UPSTREAM_IMAGE_REF ?= grafana/pyroscope:$(PYROSCOPE_VERSION)
 FRONTIER_VERSION ?= v1.2.4
 K8S_EDGE_IMAGE_PLATFORM ?= linux/amd64
 K8S_EDGE_IMAGE_PLATFORMS ?= linux/amd64,linux/arm64
@@ -338,21 +333,6 @@ docker-push-cloud-web: ## [release] 发布 Web 多架构镜像到 CNB
 
 docker-push-cloud-images: docker-push-cloud-manager docker-push-cloud-web ## [release] 发布 manager + Web 多架构镜像到 CNB
 
-.PHONY: docker-push-profile-runtime-images
-docker-push-profile-runtime-images: ## [release] 将 Profiles 运行镜像复制到 CNB
-	bash "$(RELEASE_IMAGE_PUBLISHER)" \
-		"$(PROFILES_GATEWAY_IMAGE_REF)" \
-		"$(RELEASE_MANIFEST_PLATFORM_FILTER)" \
-		-- docker buildx imagetools create \
-		--tag "$(PROFILES_GATEWAY_IMAGE_REF)" \
-		"$(PROFILES_GATEWAY_UPSTREAM_IMAGE_REF)"
-	bash "$(RELEASE_IMAGE_PUBLISHER)" \
-		"$(PYROSCOPE_IMAGE_REF)" \
-		"$(RELEASE_MANIFEST_PLATFORM_FILTER)" \
-		-- docker buildx imagetools create \
-		--tag "$(PYROSCOPE_IMAGE_REF)" \
-		"$(PYROSCOPE_UPSTREAM_IMAGE_REF)"
-
 .PHONY: docker-build-k8s-edge docker-push-k8s-edge k8s-edge-image-ref
 docker-build-k8s-edge: ## [dev] 构建本地 Kubernetes ongrid-edge 镜像（默认 linux/amd64）
 	docker buildx build \
@@ -383,20 +363,18 @@ docker-push-k8s-edge: ## [release] 发布 Kubernetes ongrid-edge 多架构镜像
 k8s-edge-image-ref:
 	@printf '%s\n' "$(K8S_EDGE_IMAGE_REF)"
 
-docker-push-release-images: docker-push-cloud-images docker-push-k8s-edge docker-push-profile-runtime-images ## [release] 发布全部多架构镜像
+docker-push-release-images: docker-push-cloud-images docker-push-k8s-edge ## [release] 发布全部项目自身多架构镜像
 
-release-image-refs: ## [release] 打印本次发布的镜像
-	@printf '%s\n' "$(CLOUD_MANAGER_IMAGE_REF)" "$(CLOUD_WEB_IMAGE_REF)" "$(K8S_EDGE_IMAGE_REF)" "$(PROFILES_GATEWAY_IMAGE_REF)" "$(PYROSCOPE_IMAGE_REF)"
+release-image-refs: ## [release] 打印本次发布的项目自身镜像
+	@printf '%s\n' "$(CLOUD_MANAGER_IMAGE_REF)" "$(CLOUD_WEB_IMAGE_REF)" "$(K8S_EDGE_IMAGE_REF)"
 
-verify-release-images: ## [release] 校验发布镜像均包含 amd64 + arm64 manifest
+verify-release-images: ## [release] 校验项目自身镜像均包含 amd64 + arm64 manifest
 	@command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 1; }
 	bash scripts/verify-release-images.sh \
 		"$(RELEASE_MANIFEST_PLATFORM_FILTER)" \
 		"$(CLOUD_MANAGER_IMAGE_REF)" \
 		"$(CLOUD_WEB_IMAGE_REF)" \
-		"$(K8S_EDGE_IMAGE_REF)" \
-		"$(PROFILES_GATEWAY_IMAGE_REF)" \
-		"$(PYROSCOPE_IMAGE_REF)"
+		"$(K8S_EDGE_IMAGE_REF)"
 
 test-release-manifest-filter: ## [test] 校验 release manifest 架构过滤器
 	@command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 1; }

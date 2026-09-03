@@ -54,12 +54,12 @@ installer downloads checksum-verified third-party dependencies and the current
    `v0.14.0-rc.1`; it is marked as a prerelease on GitHub and CNB. Publish
    `v0.14.0` after validation instead of deleting the candidate artifacts.
 2. The `Release` GitHub Actions workflow runs on `v*.*.*` tag pushes and
-   publishes the multi-architecture manager, Web, Kubernetes Edge, and pinned
-   Profiles runtime images plus the matching Helm chart before building the universal server package. The chart is published as an
+   publishes the multi-architecture manager, Web, and Kubernetes Edge images
+   plus the matching Helm chart before building the universal server package. The chart is published as an
    OCI artifact at `oci://helm.cnb.cool/ongridio/ongrid-edge`; it is not copied
    into the manager installation tarball. The release build will:
-   - `docker-push-release-images` — publish manager, Web, Edge, and Profiles runtime amd64/arm64 images to CNB
-   - `verify-release-images` — verify both architectures exist on every release image manifest
+   - `docker-push-release-images` — publish manager, Web, and Edge amd64/arm64 images to CNB
+   - `verify-release-images` — verify both architectures exist on all three image manifests
    - `publish-k8s-chart` — package and publish the version-matched Helm chart
    - `package` — stage the thin Compose install assets without Edge binaries
    - stage everything under `dist/stage/ongrid-<VERSION>-linux/`

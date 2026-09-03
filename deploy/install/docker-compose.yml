@@ -442,9 +442,11 @@ services:
         max-file: "5"
 
   profiles-gateway:
-    image: docker.cnb.cool/ongridio/ongrid/opentelemetry-collector-contrib:0.157.0
+    image: docker.cnb.cool/ongridio/ongrid-edge:${ONGRID_VERSION}
     container_name: ongrid-profiles-gateway
     restart: unless-stopped
+    entrypoint:
+      - /usr/local/lib/ongrid-edge/otelcol-contrib
     command:
       - --config=/etc/otelcol/profiles-gateway.yaml
       - --feature-gates=service.profilesSupport
