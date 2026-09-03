@@ -51,6 +51,8 @@ raise "manager digest download must merge both matrix artifacts" unless download
 raise "manager digest download path must match the Make digest directory" unless download.fetch("with").fetch("path") == "dist/release-digests"
 merge = image.fetch("steps").find { |step| step["name"] == "Merge manager multi-arch manifest" }
 raise "manager manifest merge must call its Make target" unless merge&.fetch("run")&.include?("make docker-merge-cloud-manager")
+profiles = image.fetch("steps").find { |step| step["name"] == "Publish Profiles runtime mirrors" }
+raise "Profiles runtime mirrors must be published through Make" unless profiles&.fetch("run")&.include?("make docker-push-profile-runtime-images")
 verify = image.fetch("steps").find { |step| step["name"] == "Verify multi-arch manifests" }
 raise "release images must be verified after manifest merge" unless verify&.fetch("run")&.include?("make verify-release-images")
 helm = image.fetch("steps").find { |step| step["name"] == "Publish Helm chart" }

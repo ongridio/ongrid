@@ -442,7 +442,7 @@ services:
         max-file: "5"
 
   profiles-gateway:
-    image: otel/opentelemetry-collector-contrib:0.157.0
+    image: docker.cnb.cool/ongridio/ongrid/opentelemetry-collector-contrib:0.157.0
     container_name: ongrid-profiles-gateway
     restart: unless-stopped
     command:
@@ -459,7 +459,7 @@ services:
         max-file: "5"
 
   pyroscope:
-    image: grafana/pyroscope:1.21.1
+    image: docker.cnb.cool/ongridio/ongrid/pyroscope:1.21.1
     container_name: ongrid-pyroscope
     restart: unless-stopped
     command:

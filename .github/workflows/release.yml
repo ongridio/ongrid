@@ -195,6 +195,12 @@ jobs:
           set -euo pipefail
           make docker-merge-cloud-manager
 
+      - name: Publish Profiles runtime mirrors
+        shell: bash
+        run: |
+          set -euo pipefail
+          make docker-push-profile-runtime-images
+
       - name: Verify multi-arch manifests
         shell: bash
         run: |

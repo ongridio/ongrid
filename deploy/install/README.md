@@ -8,7 +8,7 @@
 - Docker >= 24.0；Docker Compose v2（即 `docker compose` 子命令，不是旧版 `docker-compose`）。
 - 至少 2 GB 内存、10 GB 可用磁盘。
 - 以 root 身份或具备 sudo 权限的用户执行脚本。
-- 可访问 `docker.cnb.cool` 和 `cnb.cool`；manager、Web 镜像从 CNB 制品库拉取，Edge 安装制品从 CNB Release 附件直链下载。发布包不携带容器镜像、Manager 原生二进制或大型 Edge 二进制。
+- 可访问 `docker.cnb.cool` 和 `cnb.cool`；所有容器运行镜像从 CNB 制品库拉取，Edge 安装制品从 CNB Release 附件直链下载。发布包不携带容器镜像、Manager 原生二进制或大型 Edge 二进制。
 
 ## 安装形态
 
