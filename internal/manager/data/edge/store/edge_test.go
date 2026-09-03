@@ -135,6 +135,58 @@ func TestSQLiteRoundTrip(t *testing.T) {
 	}
 }
 
+func TestMarkStaleOfflineOnlyUpdatesStaleOnlineEdges(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	cutoff := time.Date(2026, 9, 3, 9, 0, 0, 0, time.UTC)
+
+	create := func(name, accessKey, status string, lastSeen *time.Time) *model.Edge {
+		t.Helper()
+		edge := &model.Edge{
+			Name:          name,
+			AccessKeyID:   accessKey,
+			SecretKeyHash: "hash",
+			Status:        status,
+			LastSeenAt:    lastSeen,
+		}
+		if err := repo.Create(ctx, edge); err != nil {
+			t.Fatalf("Create(%s): %v", name, err)
+		}
+		return edge
+	}
+
+	staleAt := cutoff.Add(-time.Second)
+	freshAt := cutoff.Add(time.Second)
+	stale := create("stale", "ak-stale", model.StatusOnline, &staleAt)
+	fresh := create("fresh", "ak-fresh", model.StatusOnline, &freshAt)
+	missing := create("missing", "ak-missing", model.StatusOnline, nil)
+	alreadyOffline := create("offline", "ak-offline", model.StatusOffline, &staleAt)
+
+	n, err := repo.MarkStaleOffline(ctx, cutoff)
+	if err != nil {
+		t.Fatalf("MarkStaleOffline: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("MarkStaleOffline updated %d edges, want 1", n)
+	}
+
+	wants := map[uint64]string{
+		stale.ID:          model.StatusOffline,
+		fresh.ID:          model.StatusOnline,
+		missing.ID:        model.StatusOnline,
+		alreadyOffline.ID: model.StatusOffline,
+	}
+	for id, want := range wants {
+		got, getErr := repo.GetByID(ctx, id)
+		if getErr != nil {
+			t.Fatalf("GetByID(%d): %v", id, getErr)
+		}
+		if got.Status != want {
+			t.Errorf("edge %d status = %q, want %q", id, got.Status, want)
+		}
+	}
+}
+
 func TestSQLiteSetAgentVersion(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()

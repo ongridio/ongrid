@@ -842,29 +842,12 @@ func main() {
 	deviceUC.SetNetworkDiscovery(networkDiscoveryUC)
 	edgeUC := managerbizedge.NewUsecase(edgeRepo, deviceRepo, edgeDeviceRepo, log)
 
-	// Boot backfill: heal "stale online" edge rows. A manager crash or any
-	// pre-PR-(edge-status-fix) deployment could leave edge.status="online"
-	// even though last_seen_at is hours old (frontier closed the session
-	// without us writing the column). Force them offline once at startup
-	// based on the same threshold the alert pipeline uses.
-	{
-		threshold := cfg.Alert.EdgeOfflineThreshold
-		if threshold <= 0 {
-			threshold = 90 * time.Second
-		}
-		cutoff := time.Now().Add(-threshold)
-		res := db.Exec(
-			"UPDATE edges SET status = ?, updated_at = ? WHERE deleted_at IS NULL AND status = ? AND last_seen_at IS NOT NULL AND last_seen_at < ?",
-			"offline", time.Now(), "online", cutoff,
-		)
-		if res.Error != nil {
-			log.Warn("edge: stale-online backfill failed", slog.Any("err", res.Error))
-		} else if res.RowsAffected > 0 {
-			log.Info("edge: backfilled stale online edges to offline",
-				slog.Int64("rows", res.RowsAffected),
-				slog.Duration("threshold", threshold),
-			)
-		}
+	edgeOfflineThreshold := cfg.Alert.EdgeOfflineThreshold
+	if edgeOfflineThreshold <= 0 {
+		edgeOfflineThreshold = 90 * time.Second
+	}
+	if _, err := edgeUC.ReconcileStaleOnline(rootCtx, time.Now().UTC().Add(-edgeOfflineThreshold)); err != nil {
+		log.Warn("edge presence reconcile (boot) failed", slog.Any("err", err))
 	}
 
 	// Boot backfill: heal orphaned investigation reports. An RCA worker only
@@ -2850,18 +2833,23 @@ func main() {
 		})
 	}
 
-	// Device presence reconciler: per-event MarkOnline/MarkOffline can't
+	// Edge/device presence reconciler: per-event MarkOnline/MarkOffline can't
 	// flip a device offline when its edge no longer exists (hard delete) or
 	// re-registered under a new fingerprint, and a manager restart while an
-	// edge is offline leaves the denormalised flag stale. This sweep flips
-	// online devices back offline when no linked edge is online — healing
-	// orphan "ghost" devices that otherwise read as perpetually online in
-	// the device list / query_devices. Runs once at boot, then every 60s
-	// (same cadence as edge offline detection). See #145.
+	// edge is offline leaves the denormalised flag stale. Frontier can also
+	// miss a final disconnect event after an abrupt host deletion, so mark
+	// stale edge rows offline before syncing device presence. Runs once at
+	// boot, then every 60s. See #145.
 	eg.Go(func() error {
-		if _, err := deviceUC.ReconcilePresence(egCtx); err != nil {
-			log.Warn("device presence reconcile (boot) failed", slog.Any("err", err))
+		reconcilePresence := func() {
+			if _, err := edgeUC.ReconcileStaleOnline(egCtx, time.Now().UTC().Add(-edgeOfflineThreshold)); err != nil {
+				log.Warn("edge presence reconcile failed", slog.Any("err", err))
+			}
+			if _, err := deviceUC.ReconcilePresence(egCtx); err != nil {
+				log.Warn("device presence reconcile failed", slog.Any("err", err))
+			}
 		}
+		reconcilePresence()
 		t := time.NewTicker(60 * time.Second)
 		defer t.Stop()
 		for {
@@ -2869,9 +2857,7 @@ func main() {
 			case <-egCtx.Done():
 				return nil
 			case <-t.C:
-				if _, err := deviceUC.ReconcilePresence(egCtx); err != nil {
-					log.Warn("device presence reconcile failed", slog.Any("err", err))
-				}
+				reconcilePresence()
 			}
 		}
 	})

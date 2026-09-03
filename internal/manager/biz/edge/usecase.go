@@ -610,6 +610,22 @@ func (u *Usecase) HandleHeartbeat(ctx context.Context, edgeID uint64, ts time.Ti
 	return nil
 }
 
+// ReconcileStaleOnline heals online state when Frontier misses a transport
+// close event, for example after a VM or host is force-deleted.
+func (u *Usecase) ReconcileStaleOnline(ctx context.Context, cutoff time.Time) (int64, error) {
+	if u.repo == nil {
+		return 0, errs.ErrNotWiredYet
+	}
+	n, err := u.repo.MarkStaleOffline(ctx, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	if n > 0 && u.log != nil {
+		u.log.Info("edge presence reconcile: flipped stale edges offline", "count", n)
+	}
+	return n, nil
+}
+
 // HandleOffline flips an edge's status to offline. Called from the
 // frontierbound EdgeOffline lifecycle callback when the tunnel session
 // closes (graceful disconnect or transport drop). last_seen_at is bumped

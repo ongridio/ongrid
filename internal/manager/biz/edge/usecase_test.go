@@ -307,6 +307,19 @@ func (r *fakeRepo) UpdateStatus(_ context.Context, id uint64, status string, las
 	return nil
 }
 
+func (r *fakeRepo) MarkStaleOffline(_ context.Context, cutoff time.Time) (int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var n int64
+	for _, edge := range r.byID {
+		if edge.DeletedAt == nil && edge.Status == model.StatusOnline && edge.LastSeenAt != nil && edge.LastSeenAt.Before(cutoff) {
+			edge.Status = model.StatusOffline
+			n++
+		}
+	}
+	return n, nil
+}
+
 func (r *fakeRepo) MarkRegistered(_ context.Context, id uint64, registeredAt time.Time) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
