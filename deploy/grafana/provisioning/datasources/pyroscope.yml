@@ -1,0 +1,10 @@
+apiVersion: 1
+
+datasources:
+  - name: ongrid-pyroscope
+    uid: ongrid-pyroscope
+    type: grafana-pyroscope-datasource
+    access: proxy
+    url: ${ONGRID_PROFILE_QUERY_URL}
+    isDefault: false
+    editable: false

@@ -197,11 +197,24 @@ func (t *TunnelConfigFetcher) fetchAndMaterializeLokiAuthorization(ctx context.C
 	return authPath, nil
 }
 
-// ReportPluginConfigApplied implements ConfigApplyReporter. Only a connection
-// check carrying a Manager-issued probe id is acknowledged; ordinary selected
-// backend snapshots do not create control-plane noise.
+// ReportPluginConfigApplied implements ConfigApplyReporter. Profiles report
+// readiness immediately; logs only report Manager-issued connection probes.
 func (t *TunnelConfigFetcher) ReportPluginConfigApplied(ctx context.Context, plugin string, cfg PluginConfig, applyErr error) error {
-	if t.client == nil || plugin != "logs" {
+	if t.client == nil || (plugin != "logs" && plugin != "profiles") {
+		return nil
+	}
+	if plugin == "profiles" {
+		request := tunnel.ReportPluginConfigAppliedRequest{Plugin: plugin, Applied: applyErr == nil}
+		if applyErr != nil {
+			request.ErrorClass = configApplyErrorClass(applyErr)
+		}
+		var response tunnel.ReportPluginConfigAppliedResponse
+		if err := t.client.Call(ctx, tunnel.MethodReportPluginConfigApplied, request, &response); err != nil {
+			return fmt.Errorf("report profiles readiness: %w", err)
+		}
+		if !response.OK {
+			return errors.New("manager rejected profiles readiness")
+		}
 		return nil
 	}
 	probeID := configString(cfg.Spec, "log_probe_id")

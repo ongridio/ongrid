@@ -175,6 +175,7 @@ import (
 	managerservermonitor "github.com/ongridio/ongrid/internal/manager/server/monitor"
 	managerserveroperatorrun "github.com/ongridio/ongrid/internal/manager/server/operatorrun"
 	managerserverpacketcapture "github.com/ongridio/ongrid/internal/manager/server/packetcapture"
+	managerserverprofiles "github.com/ongridio/ongrid/internal/manager/server/profiles"
 	managerserverprom "github.com/ongridio/ongrid/internal/manager/server/prometheus"
 	managerserverreport "github.com/ongridio/ongrid/internal/manager/server/report"
 	managerserversecret "github.com/ongridio/ongrid/internal/manager/server/secret"
@@ -1202,6 +1203,7 @@ func main() {
 		// Tempo disabled — handler installs but every route returns 503.
 		tracesHandler = managerservertraces.NewHandler(nil)
 	}
+	profilesHandler := managerserverprofiles.NewHandler(cfg.Profiles.URL)
 
 	// Frontierbound service-end SDK: opens a long-lived service connection
 	// to the upstream frontier broker (a separate docker container) and
@@ -2678,6 +2680,7 @@ func main() {
 			monitorHandler.Register(protected)
 			logsHandler.Register(protected)
 			tracesHandler.Register(protected)
+			profilesHandler.Register(protected)
 			aiopsHandler.Register(protected)
 			alertHandler.Register(protected)
 			systemHealthHandler.Register(protected)
@@ -3126,6 +3129,14 @@ func (r pluginEndpointResolver) ResolveTelemetryTarget(ctx context.Context, sign
 		}
 		return managerbizk8s.TelemetryTarget{
 			Endpoint:               strings.TrimRight(r.publicURL, "/") + "/v1/traces",
+			UseTelemetryCredential: true,
+		}, nil
+	case "profiles":
+		if r.publicURL == "" {
+			return managerbizk8s.TelemetryTarget{}, nil
+		}
+		return managerbizk8s.TelemetryTarget{
+			Endpoint:               strings.TrimRight(r.publicURL, "/") + "/v1development/profiles",
 			UseTelemetryCredential: true,
 		}, nil
 	}

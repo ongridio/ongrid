@@ -149,7 +149,7 @@ log_info "installing binary to $BIN_DEST"
 install -m 0755 -o root -g root "$BIN_SRC" "$BIN_DEST"
 
 # ---------- install bundled plugin binaries (ADR-015) ----------
-# otelcol-contrib runs both logs and traces pipelines.
+# otelcol-contrib runs logs, traces, and profiles pipelines.
 # Per-platform variant lives under SCRIPT_DIR with the same -OS-ARCH suffix
 # as the main edge binary.
 mkdir -p "$PLUGIN_BIN_DIR"
@@ -188,13 +188,13 @@ mkdir -p /var/lib/ongrid-edge/.upgrade
 chown -R "$SERVICE_USER":"$SERVICE_GROUP" /var/lib/ongrid-edge/.upgrade
 chmod 0750 /var/lib/ongrid-edge/.upgrade
 
-# otelcol-contrib (logs and traces plugins).
+# otelcol-contrib (logs, traces, and application profiles plugins).
 OTELCOL_SRC="${SCRIPT_DIR}/otelcol-contrib-${OS}-${ARCH}"
 if [[ -f "$OTELCOL_SRC" ]]; then
     log_info "installing otelcol-contrib to ${PLUGIN_BIN_DIR}/otelcol-contrib"
     install -m 0755 -o root -g root "$OTELCOL_SRC" "${PLUGIN_BIN_DIR}/otelcol-contrib"
 else
-    log_warn "otelcol-contrib-${OS}-${ARCH} not bundled; logs and traces plugins will fail to start until present"
+    log_warn "otelcol-contrib-${OS}-${ARCH} not bundled; logs, traces, and profiles plugins will fail to start until present"
 fi
 
 # node_exporter + process_exporter — bundled exporter binaries used by

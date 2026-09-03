@@ -219,7 +219,7 @@ for target in ${EDGE_TARGETS}; do
 done
 
 # --- bundled plugin binaries (ADR-015) --------------------------------------
-# otelcol-contrib (logs and traces plugins) ships next to ongrid-edge so
+# otelcol-contrib (logs, traces, and profiles plugins) ships next to ongrid-edge so
 # install-edge.sh can install it under /usr/local/lib/ongrid-edge/otelcol-contrib.
 for target in ${EDGE_TARGETS}; do
     src="${EDGE_BIN_ROOT}/${target}/otelcol-contrib"
@@ -229,7 +229,7 @@ for target in ${EDGE_TARGETS}; do
         chmod 755 "$dst"
         log "  + edge/otelcol-contrib-${target}"
     else
-        warn "otelcol-contrib binary ${src} missing; logs and traces plugins won't work on ${target}. Run 'make fetch-otelcol'."
+        warn "otelcol-contrib binary ${src} missing; logs, traces, and profiles plugins won't work on ${target}. Run 'make fetch-otelcol'."
     fi
 done
 
@@ -299,6 +299,10 @@ copy_opt "${REPO_ROOT}/deploy/install/loki-config.yaml" \
 # --- tempo config (ADR-013) -------------------------------------------------
 copy_opt "${REPO_ROOT}/deploy/install/tempo-config.yaml" \
          "${STAGE_DIR}/tempo-config.yaml"
+copy_opt "${REPO_ROOT}/deploy/install/profiles-gateway.yaml" \
+         "${STAGE_DIR}/profiles-gateway.yaml"
+copy_opt "${REPO_ROOT}/deploy/install/pyroscope-config.yaml" \
+         "${STAGE_DIR}/pyroscope-config.yaml"
 
 # --- edge install assets ----------------------------------------------------
 # install.sh is the curl-pipe network installer; nginx serves it at

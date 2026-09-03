@@ -27,6 +27,12 @@ vi.mock('@/components/XTerminal', async () => {
   };
 });
 
+vi.stubGlobal('ResizeObserver', class ResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+});
+
 const edges = [
   { id: 1, name: 'edge-001', status: 'online', roles: [], access_key_id: 'ak-1', last_seen_at: null, device_id: 11 },
   { id: 2, name: 'edge-002', status: 'online', roles: [], access_key_id: 'ak-2', last_seen_at: null, device_id: 12 },
@@ -433,4 +439,145 @@ describe('DailyToolsPage', () => {
     expect(screen.queryByRole('button', { name: '停止' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: '打开数据包' })).toHaveAttribute('href', '/artifacts/packet-sessions/pcap-session-empty');
   });
+
+  it('通过 otelcol-contrib pprof receiver 采集应用 profiling 并自动展示', async () => {
+    let saved: { enabled?: boolean; spec?: Record<string, unknown> } = {};
+    let readsAfterStart = 0;
+    let downloaded = false;
+    let flamegraphCalls = 0;
+    const flamegraphResponse = {
+      flamebearer: {
+        names: ['total', 'ongrid-edge.main', 'db.query'],
+        levels: [[0, 100, 0, 0], [0, 100, 35, 1], [0, 65, 65, 2]],
+        numTicks: 100,
+        maxSelf: 65,
+      },
+      metadata: { format: 'single' as const, units: 'samples' },
+    };
+    server.use(
+      http.get('/api/v1/edges/1/plugins', () => HttpResponse.json({ items: [{
+        plugin_name: 'profiles',
+        enabled: saved.enabled === true,
+        spec: saved.spec ?? {},
+        ...(saved.enabled ? { health: readsAfterStart++ === 0
+          ? { state: 'crashed', reported_at: new Date(Date.now() - 60_000).toISOString() }
+          : { state: 'running', started_at: new Date(Date.now() - 2000).toISOString(), reported_at: new Date().toISOString() } } : {}),
+      }] })),
+      http.put('/api/v1/edges/1/plugins/profiles', async ({ request }) => {
+        saved = await request.json() as typeof saved;
+        if (saved.enabled && saved.spec) saved.spec = { ...saved.spec, expires_at: new Date(Date.now() + 1500).toISOString() };
+        readsAfterStart = 0;
+        return HttpResponse.json({
+          plugin_name: 'profiles',
+          enabled: saved.enabled,
+          spec: saved.spec,
+          health: { state: 'crashed', reported_at: new Date(Date.now() - 60_000).toISOString() },
+        });
+      }),
+      http.get('/api/v1/profiles/flamegraph', ({ request }) => {
+        flamegraphCalls++;
+        const url = new URL(request.url);
+        expect(url.searchParams.get('device_id')).toBe('11');
+        expect(url.searchParams.get('service')).toBe('ongrid-edge');
+        expect(url.searchParams.get('kind')).toBe('heap');
+        expect(url.searchParams.get('range')).toBe('15m');
+        return HttpResponse.json(flamegraphResponse);
+      }),
+      http.get('/api/v1/profiles/download', ({ request }) => {
+        const url = new URL(request.url);
+        expect(url.searchParams.get('device_id')).toBe('11');
+        expect(url.searchParams.get('service')).toBe('ongrid-edge');
+        expect(url.searchParams.get('kind')).toBe('heap');
+        expect(url.searchParams.get('range')).toBe('15m');
+        downloaded = true;
+        return new HttpResponse(new Uint8Array([1, 2, 3]), { headers: { 'Content-Type': 'application/octet-stream' } });
+      }),
+    );
+
+    render(<MemoryRouter><DailyToolsPage /></MemoryRouter>);
+    const toolSelect = screen.getByRole('combobox', { name: '工具' });
+    expect(within(toolSelect).getByRole('option', { name: 'Ping' })).toBeInTheDocument();
+    expect(within(toolSelect).queryByRole('option', { name: '应用性能分析' })).not.toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: '工具类型' }), 'performance');
+    expect(within(toolSelect).getByRole('option', { name: '应用性能分析' })).toBeInTheDocument();
+    await selectEdge();
+    const profileType = await screen.findByRole('combobox', { name: '分析类型' });
+    expect(profileType).toHaveValue('heap');
+    expect(screen.queryByRole('combobox', { name: '分析进程' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('service.name')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('采集 URL')).toHaveValue('http://127.0.0.1:16060/debug/pprof/heap');
+    expect(screen.getByText(/默认采集当前 Edge 的 ongrid-edge/)).toBeInTheDocument();
+
+    await userEvent.selectOptions(profileType, 'cpu');
+    expect(screen.queryByRole('combobox', { name: '分析进程' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('采集 URL')).toHaveValue('http://127.0.0.1:16060/debug/pprof/profile?seconds=30');
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: '采样时长' }), '60');
+    expect(screen.getByLabelText('采集 URL')).toHaveValue('http://127.0.0.1:16060/debug/pprof/profile?seconds=60');
+    await userEvent.selectOptions(profileType, 'heap');
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: '采样时长' }), '30');
+
+    expect(screen.queryByLabelText('采样频率（Hz）')).not.toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: '采样时长' })).toHaveValue('30');
+    await userEvent.click(screen.getByRole('button', { name: '开始采样' }));
+    await waitFor(() => expect(saved.enabled).toBe(true));
+    await waitFor(() => expect(screen.getAllByText('采样中')).not.toHaveLength(0), { timeout: 3000 });
+    expect(saved.spec).toMatchObject({
+      mode: 'pprof',
+      duration_seconds: 30,
+      runtime_target: {
+        url: 'http://127.0.0.1:16060/debug/pprof/heap',
+        profile_type: 'heap',
+        service_name: 'ongrid-edge',
+        collection_interval_seconds: 10,
+      },
+    });
+
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:profile') });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+    const clickDownload = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    await userEvent.click(screen.getByRole('button', { name: '下载数据' }));
+    await waitFor(() => expect(downloaded).toBe(true));
+    clickDownload.mockRestore();
+
+    const viewer = await screen.findByRole('region', { name: '应用性能分析图' }, { timeout: 3000 });
+    const frame = await within(viewer).findByRole('button', { name: /ongrid-edge\.main/ });
+    await new Promise((resolve) => setTimeout(resolve, 2200));
+    expect(flamegraphCalls).toBe(1);
+    expect(frame).not.toHaveAttribute('title');
+    await userEvent.hover(frame);
+    expect(within(viewer).getByRole('tooltip')).toHaveTextContent('ongrid-edge.main');
+    expect(within(viewer).getByRole('tooltip')).toHaveTextContent('Total: 100 samples (100%)');
+    expect(within(viewer).getByRole('tooltip')).toHaveTextContent('Self: 35 samples');
+    await userEvent.unhover(frame);
+    expect(within(viewer).queryByRole('tooltip')).not.toBeInTheDocument();
+    let refreshStarted!: () => void;
+    let releaseRefresh!: () => void;
+    const refreshRequest = new Promise<void>((resolve) => { refreshStarted = resolve; });
+    const refreshResponse = new Promise<void>((resolve) => { releaseRefresh = resolve; });
+    server.use(http.get('/api/v1/profiles/flamegraph', async () => {
+      refreshStarted();
+      await refreshResponse;
+      return HttpResponse.json(flamegraphResponse);
+    }));
+    await userEvent.click(within(viewer).getByRole('button', { name: '刷新' }));
+    await refreshRequest;
+    expect(frame).toBeInTheDocument();
+    await act(async () => releaseRefresh());
+    await waitFor(() => expect(within(viewer).getByRole('button', { name: '刷新' })).toBeEnabled());
+    expect(within(viewer).queryByRole('combobox', { name: '火焰图时间范围' })).not.toBeInTheDocument();
+    expect(within(viewer).getByRole('button', { name: '火焰图' })).toHaveAttribute('aria-pressed', 'true');
+    await userEvent.click(within(viewer).getByRole('button', { name: '冰柱图' }));
+    expect(within(viewer).getByRole('button', { name: '冰柱图' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(viewer).getByRole('group', { name: '冰柱图视图' })).toHaveClass('flex-col');
+    expect(within(viewer).getByRole('button', { name: '调用图' })).toBeInTheDocument();
+    await userEvent.click(within(viewer).getByRole('button', { name: '调用图' }));
+    expect(within(viewer).getByRole('button', { name: '调用图' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(viewer).getByText('展示最热 3 个函数，连线宽度表示累计占用')).toBeInTheDocument();
+    expect(within(viewer).getByText('Self 35 samples (35.00%)')).toBeInTheDocument();
+    expect(within(viewer).getAllByText('Total 100 samples (100%)')).not.toHaveLength(0);
+    await userEvent.click(within(viewer).getByRole('button', { name: '全屏' }));
+    expect(viewer).toHaveClass('fixed', 'inset-0');
+    expect(within(viewer).getByRole('button', { name: '退出全屏' })).toBeInTheDocument();
+    expect(within(viewer).queryByTitle('应用性能火焰图')).not.toBeInTheDocument();
+  }, 10_000);
 });

@@ -54,6 +54,33 @@ func (u *Usecase) RecordPluginHealth(edgeID uint64, items []PluginHealth) {
 	u.pluginHealth[edgeID] = items
 }
 
+// RecordPluginHealthUpdate merges one immediate plugin status into the last
+// heartbeat snapshot without discarding the other plugins.
+func (u *Usecase) RecordPluginHealthUpdate(edgeID uint64, item PluginHealth) {
+	if edgeID == 0 || item.Name == "" {
+		return
+	}
+	now := time.Now().UTC()
+	item.ReportedAt = now
+	if item.UpdatedAt.IsZero() {
+		item.UpdatedAt = now
+	}
+	u.phMu.Lock()
+	defer u.phMu.Unlock()
+	if u.pluginHealth == nil {
+		u.pluginHealth = make(map[uint64][]PluginHealth)
+	}
+	items := u.pluginHealth[edgeID]
+	for i := range items {
+		if items[i].Name == item.Name {
+			items[i] = item
+			u.pluginHealth[edgeID] = items
+			return
+		}
+	}
+	u.pluginHealth[edgeID] = append(items, item)
+}
+
 // PluginHealth returns the last-reported plugin health for one edge, or nil
 // if none has arrived yet (edge offline / pre-introduction agent / just
 // restarted manager).

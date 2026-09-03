@@ -58,6 +58,7 @@ type Config struct {
 	Alert          AlertConfig
 	Logs           LogsConfig
 	Traces         TracesConfig
+	Profiles       ProfilesConfig
 	PacketCapture  PacketCaptureConfig
 	Skills         SkillsConfig
 }
@@ -99,6 +100,11 @@ type TracesConfig struct {
 	// /api/search, /api/traces/<id>, and /api/search/tag/<tag>/values.
 	// env: ONGRID_TRACE_QUERY_URL; defaults from docker-compose env
 	// block to http://tempo:3200.
+	URL string
+}
+
+// ProfilesConfig wires the manager-side Pyroscope query proxy.
+type ProfilesConfig struct {
 	URL string
 }
 
@@ -458,6 +464,7 @@ func Load() (*Config, error) {
 		K8sEventCleanupInterval: getEnvDuration("ONGRID_K8S_EVENT_CLEANUP_INTERVAL", time.Hour),
 		Logs:                    LogsConfig{URL: getOptionalURL("ONGRID_LOG_QUERY_URL", "http://loki:3100")},
 		Traces:                  TracesConfig{URL: getOptionalURL("ONGRID_TRACE_QUERY_URL", "http://tempo:3200")},
+		Profiles:                ProfilesConfig{URL: getOptionalURL("ONGRID_PROFILE_QUERY_URL", "http://pyroscope:4040")},
 		PacketCapture: PacketCaptureConfig{
 			RawDir:                      getEnv("ONGRID_PACKET_CAPTURE_RAW_DIR", ""),
 			ParserURL:                   getEnv("ONGRID_PACKET_PARSER_URL", ""),

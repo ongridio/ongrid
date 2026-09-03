@@ -644,36 +644,52 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 		}); err != nil {
 			return fmt.Errorf("frontierbound: register %q: %w", tunnel.MethodGetPluginSecret, err)
 		}
+	}
 
-		if err := c.Register(ctx, tunnel.MethodReportPluginConfigApplied, func(rpcCtx context.Context, edgeID uint64, body []byte) ([]byte, error) {
-			if len(body) > 16<<10 {
-				return nil, fmt.Errorf("report_plugin_config_applied: request too large")
-			}
-			var in tunnel.ReportPluginConfigAppliedRequest
-			if err := json.Unmarshal(body, &in); err != nil {
-				return nil, fmt.Errorf("report_plugin_config_applied: decode: %w", err)
-			}
-			if in.Plugin != "logs" {
-				return nil, fmt.Errorf("report_plugin_config_applied: unsupported plugin")
-			}
-			canonicalEdgeID := c.canonicalizeEdgeID(edgeID)
-			if canonicalEdgeID == 0 {
-				return nil, fmt.Errorf("report_plugin_config_applied: edge binding not ready")
-			}
-			applyErr := ""
+	if err := c.Register(ctx, tunnel.MethodReportPluginConfigApplied, func(rpcCtx context.Context, edgeID uint64, body []byte) ([]byte, error) {
+		if len(body) > 16<<10 {
+			return nil, fmt.Errorf("report_plugin_config_applied: request too large")
+		}
+		var in tunnel.ReportPluginConfigAppliedRequest
+		if err := json.Unmarshal(body, &in); err != nil {
+			return nil, fmt.Errorf("report_plugin_config_applied: decode: %w", err)
+		}
+		if in.Plugin != "logs" && in.Plugin != "profiles" {
+			return nil, fmt.Errorf("report_plugin_config_applied: unsupported plugin")
+		}
+		canonicalEdgeID := c.canonicalizeEdgeID(edgeID)
+		if canonicalEdgeID == 0 {
+			return nil, fmt.Errorf("report_plugin_config_applied: edge binding not ready")
+		}
+		if in.Plugin == "profiles" {
+			state := "running"
+			lastError := ""
 			if !in.Applied {
-				applyErr = in.ErrorClass
-				if strings.TrimSpace(applyErr) == "" {
-					applyErr = "configuration rejected"
+				state = "crashed"
+				lastError = strings.TrimSpace(in.ErrorClass)
+				if lastError == "" {
+					lastError = "configuration rejected"
 				}
 			}
-			if err := w.PluginSecrets.MarkApplied(rpcCtx, canonicalEdgeID, in.Generation, in.ProbeID, applyErr); err != nil {
-				return nil, fmt.Errorf("report_plugin_config_applied: %w", err)
-			}
+			w.EdgeUC.RecordPluginHealthUpdate(canonicalEdgeID, edgebiz.PluginHealth{Name: "profiles", State: state, LastError: lastError})
 			return json.Marshal(tunnel.ReportPluginConfigAppliedResponse{OK: true})
-		}); err != nil {
-			return fmt.Errorf("frontierbound: register %q: %w", tunnel.MethodReportPluginConfigApplied, err)
 		}
+		if w.PluginSecrets == nil {
+			return nil, fmt.Errorf("report_plugin_config_applied: plugin secrets unavailable")
+		}
+		applyErr := ""
+		if !in.Applied {
+			applyErr = strings.TrimSpace(in.ErrorClass)
+			if applyErr == "" {
+				applyErr = "configuration rejected"
+			}
+		}
+		if err := w.PluginSecrets.MarkApplied(rpcCtx, canonicalEdgeID, in.Generation, in.ProbeID, applyErr); err != nil {
+			return nil, fmt.Errorf("report_plugin_config_applied: %w", err)
+		}
+		return json.Marshal(tunnel.ReportPluginConfigAppliedResponse{OK: true})
+	}); err != nil {
+		return fmt.Errorf("frontierbound: register %q: %w", tunnel.MethodReportPluginConfigApplied, err)
 	}
 
 	// shell_output / shell_exit: edge-to-manager pushes for the WebSSH

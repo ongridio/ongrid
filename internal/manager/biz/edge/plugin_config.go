@@ -165,7 +165,8 @@ type PluginRow struct {
 //     to manager nginx via publicURL.
 //
 // Stay off:
-//   - profiles — pyroscope agent isn't in the default install bundle.
+//   - profiles — continuous profiling is operator-triggered and has measurable
+//     host overhead even though the collectors ship in the install bundle.
 //
 // Explicit operator opt-out is preserved: Set writes a row with
 // Enabled=false, which beats this default (the table lookup wins
@@ -235,6 +236,13 @@ func (uc *PluginConfigUC) Set(ctx context.Context, edgeID uint64, plugin string,
 	case model.PluginNameCustomMetrics:
 		if err := validateCustomMetricsSpec(in.Spec); err != nil {
 			return nil, err
+		}
+	case model.PluginNameProfiles:
+		if err := validateProfilesSpec(in.Spec); err != nil {
+			return nil, err
+		}
+		if in.Enabled {
+			in.Spec = startProfilesSession(in.Spec)
 		}
 	case model.PluginNameDatabaseMetrics:
 		spec, secretReqs, err := uc.prepareDatabaseMetricsSpec(in.Spec)

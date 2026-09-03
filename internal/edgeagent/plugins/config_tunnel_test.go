@@ -655,6 +655,18 @@ func TestTunnelConfigFetcherMaterializesExternalLokiSecret(t *testing.T) {
 	}
 }
 
+func TestTunnelConfigFetcherReportsProfilesReadiness(t *testing.T) {
+	client := &fakeTunnelClient{}
+	fetcher := NewTunnelConfigFetcher(client, []string{"profiles"})
+
+	if err := fetcher.ReportPluginConfigApplied(t.Context(), "profiles", PluginConfig{}, nil); err != nil {
+		t.Fatalf("ReportPluginConfigApplied: %v", err)
+	}
+	if client.reportReq == nil || client.reportReq.Plugin != "profiles" || !client.reportReq.Applied {
+		t.Fatalf("report request = %+v", client.reportReq)
+	}
+}
+
 func TestTunnelConfigFetcherRejectsLokiAuthorizationWithNewline(t *testing.T) {
 	secret := "Basic dXNlcjpwYXNz\n"
 	digest := sha256.Sum256([]byte(secret))

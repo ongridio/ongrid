@@ -1,8 +1,7 @@
 // Package plugins is the edge-side plugin runtime.
 //
 // A plugin is a logical capability the edge can turn on/off independently:
-// metrics (built-in), logs/traces (subprocess otelcol-contrib), profiles
-// (future). The Supervisor manages plugin
+// metrics (built-in), logs/traces/profiles (subprocess collectors). The Supervisor manages plugin
 // lifecycle: configuring, starting, watching, restarting on crash, and
 // reporting health back to manager.
 //

@@ -388,7 +388,7 @@ test-release-image-publish: test-release-manifest-filter ## [test] 校验 releas
 	bash scripts/test-release-image-platform-publish.sh
 
 .PHONY: verify-compose-images
-verify-compose-images: ## [test] 渲染并校验 Compose 运行镜像全部按预期指向 CNB
+verify-compose-images: ## [test] 校验正式安装使用 CNB、开发环境使用固定镜像
 	bash scripts/verify-cnb-compose-images.sh
 
 # Optional local-dev fallback for rebuilding the upstream Frontier broker.
@@ -413,7 +413,7 @@ docker-build-broker: ## [dev] 从上游源码本地构建 singchia/frontier:$(FR
 
 FETCH_CURL_FLAGS ?= -fL --retry 3 --retry-all-errors --retry-delay 3 --connect-timeout 15 --speed-time 60 --speed-limit 1024 --show-error
 
-# OpenTelemetry Collector contrib bundle (logs and traces plugins).
+# OpenTelemetry Collector contrib bundle (logs, traces, and profiles plugins).
 # Cached under bin/<os>-<arch>/otelcol-contrib. Note: contrib build is
 # ~200MB uncompressed per platform — operators wanting a slimmer agent can
 # swap in a custom OCB build (otel-collector-builder); we ship contrib so
