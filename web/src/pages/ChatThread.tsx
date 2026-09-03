@@ -26,6 +26,11 @@ import { usePermissions } from '@/store/me';
 import { useModelSelection } from '@/store/modelSelection';
 import { useI18n } from '@/i18n/locale';
 import { buildConfigDraftConfirmMessage, configDraftApplyTool } from '@/lib/configDraftConfirmation';
+import {
+  getChatTurnController,
+  registerChatTurnController,
+  unregisterChatTurnController,
+} from '@/lib/chatTurnRegistry';
 
 type LocationState = { initialPrompt?: string } | null;
 
@@ -50,6 +55,9 @@ export default function ChatThreadPage() {
   // abortRef holds the in-flight turn's AbortController so Esc can cancel the
   // stream client-side (instant UI) alongside the server-side stop call.
   const abortRef = useRef<AbortController | null>(null);
+  // React Router reuses this page between /chat/:sessionId routes. Keep the
+  // visible session explicit so callbacks from an older stream cannot mutate it.
+  const activeSessionRef = useRef(sessionId);
   // stickToBottomRef tracks whether new messages should auto-scroll the
   // viewport down. Default true (fresh thread starts at bottom); flips
   // to false when the user manually scrolls up to read older context,
@@ -110,6 +118,20 @@ export default function ChatThreadPage() {
   // in-progress reply being streamed into `messages` from `send()`.
   const submittingRef = useRef(false);
   useEffect(() => { submittingRef.current = submitting; }, [submitting]);
+
+  useEffect(() => {
+    activeSessionRef.current = sessionId;
+    const controller = getChatTurnController(sessionId);
+    abortRef.current = controller;
+    const sessionSubmitting = controller !== null;
+    submittingRef.current = sessionSubmitting;
+    setSubmitting(sessionSubmitting);
+    setError(null);
+    setMessages([]);
+    setLoading(true);
+    sentInitialRef.current = false;
+    stickToBottomRef.current = true;
+  }, [sessionId]);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -225,10 +247,12 @@ export default function ChatThreadPage() {
     opts: { expectedTool?: string; displayContent?: string } = {},
   ): Promise<boolean> {
     if (!sessionId || !content.trim()) return false;
+    const turnSessionID = sessionId;
     setError(null);
     setSubmitting(true);
     const ac = new AbortController();
     abortRef.current = ac;
+    registerChatTurnController(turnSessionID, ac);
     let expectedToolSeen = !opts.expectedTool;
     let expectedToolFailed = false;
 
@@ -249,6 +273,7 @@ export default function ChatThreadPage() {
         content,
         {
           onAssistant: (e) => {
+            if (activeSessionRef.current !== turnSessionID) return;
             // Tool-only turn (no text, agent is just dispatching tools);
             // suppress the bubble entirely.
             if (!e.content || e.content.length === 0) return;
@@ -279,6 +304,7 @@ export default function ChatThreadPage() {
             });
           },
           onToolStart: (t) => {
+            if (activeSessionRef.current !== turnSessionID) return;
             const card: ChatMessage = {
               id: toolCardId(t.tool_call_id),
               role: 'tool',
@@ -295,6 +321,7 @@ export default function ChatThreadPage() {
             setMessages((prev) => [...prev, card]);
           },
           onToolEnd: (t) => {
+            if (activeSessionRef.current !== turnSessionID) return;
             if (opts.expectedTool && t.name === opts.expectedTool) {
               expectedToolSeen = true;
               expectedToolFailed = !!t.error || t.status === 'error' || t.status === 'timeout';
@@ -324,6 +351,7 @@ export default function ChatThreadPage() {
             );
           },
           onApprovalPending: (a) => {
+            if (activeSessionRef.current !== turnSessionID) return;
             // HLD-021: a confirmation-gated tool is blocking on a human
             // decision. Drive
             // the inline approve/reject card from this live frame by stamping
@@ -381,9 +409,11 @@ export default function ChatThreadPage() {
             });
           },
           onDone: () => {
+            if (activeSessionRef.current !== turnSessionID) return;
             invalidateChatSessions();
           },
           onError: (err) => {
+            if (activeSessionRef.current !== turnSessionID) return;
             throw err;
           },
         },
@@ -404,6 +434,7 @@ export default function ChatThreadPage() {
       if (ac.signal.aborted || (err as Error).name === 'AbortError') {
         return false;
       }
+      if (activeSessionRef.current !== turnSessionID) return false;
       const msg = (err as Error).message || tr('请求失败', 'Request failed');
       setError(msg);
       setMessages((prev) => [
@@ -417,7 +448,11 @@ export default function ChatThreadPage() {
       ]);
       return false;
     } finally {
-      setSubmitting(false);
+      unregisterChatTurnController(turnSessionID, ac);
+      if (activeSessionRef.current === turnSessionID) {
+        submittingRef.current = false;
+        setSubmitting(false);
+      }
       if (abortRef.current === ac) abortRef.current = null;
     }
   }
