@@ -26,12 +26,12 @@ docker.cnb.cool/ongridio/ongrid/frontier:v1.2.4
 docker.cnb.cool/ongridio/ongrid/grafana-oss:11.1.4
 docker.cnb.cool/ongridio/ongrid/loki:3.4.0
 docker.cnb.cool/ongridio/ongrid/mysql:8.0
+docker.cnb.cool/ongridio/ongrid/opentelemetry-collector-contrib:0.157.0
 docker.cnb.cool/ongridio/ongrid/prometheus:v2.54.0
 docker.cnb.cool/ongridio/ongrid/pyroscope:1.21.1
 docker.cnb.cool/ongridio/ongrid/qdrant:v1.11.3
 docker.cnb.cool/ongridio/ongrid/searxng:latest
 docker.cnb.cool/ongridio/ongrid/tempo:2.10.0
-docker.cnb.cool/ongridio/ongrid-edge:v9.9.9
 docker.cnb.cool/ongridio/pcap-parser:v0.12.0@sha256:5b117be302e61cfa1a964ac8649580185cb41868369471001c10d372ac4e9b5a
 EOF
 sort -o "$tmp_dir/install.expected" "$tmp_dir/install.expected"
