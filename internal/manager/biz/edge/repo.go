@@ -33,6 +33,7 @@ type Repo interface {
 	List(ctx context.Context, f ListFilter) ([]*model.Edge, error)
 	UpdateSecretHash(ctx context.Context, id uint64, hash string) error
 	UpdateStatus(ctx context.Context, id uint64, status string, lastSeen time.Time) error
+	MarkStaleOffline(ctx context.Context, cutoff time.Time) (int64, error)
 	// MarkRegistered records a completed register_edge handshake. The
 	// timestamp changes only on registration, not on heartbeat, so upgrade
 	// orchestration can distinguish a newly started agent session.
