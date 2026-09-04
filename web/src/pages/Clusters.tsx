@@ -420,7 +420,7 @@ function ClusterRow({
                 event.stopPropagation();
                 onDelete();
               }}
-              className="inline-flex items-center gap-1 rounded-md bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-600"
+              className="inline-flex items-center gap-1 rounded-md bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-400 dark:disabled:bg-zinc-800 dark:disabled:text-zinc-600"
             >
               <Trash2 size={12} />
               {deleting ? tr("删除中…", "Deleting…") : tr("删除", "Delete")}
