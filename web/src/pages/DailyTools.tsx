@@ -1778,6 +1778,7 @@ function RunConsole({ title, status, logs, compact }: { title: string; status: R
         <XTerminal
           attachRef={attachTerm}
           readOnly
+          followAppTheme
           fontSize={11}
           scrollback={1000}
           className="rounded-md"
