@@ -226,15 +226,63 @@ func buildRouter(h *Handler, t tenantctx.Tenant) http.Handler {
 }
 
 func TestKnownArch(t *testing.T) {
-	for _, arch := range []string{"linux-amd64", "linux-arm64"} {
+	for _, arch := range []string{"linux-amd64", "linux-arm64", "windows-amd64"} {
 		if !knownArch(arch) {
 			t.Fatalf("knownArch(%q) = false, want true", arch)
 		}
 	}
-	for _, arch := range []string{"darwin-amd64", "darwin-arm64", "linux-arm"} {
+	for _, arch := range []string{"darwin-amd64", "darwin-arm64", "linux-arm", "windows-arm64"} {
 		if knownArch(arch) {
 			t.Fatalf("knownArch(%q) = true, want false", arch)
 		}
+	}
+}
+
+func TestPackageArchForEdge(t *testing.T) {
+	const edgeID = 10
+	devID := uint64(2148)
+	newHandler := func(osName, arch string) *Handler {
+		devPtr := devID
+		svc := &fakeSvc{getResp: &model.Edge{ID: edgeID, DeviceID: &devPtr}}
+		devices := newFakeDeviceRepo(&devicemodel.Device{ID: devID, OS: osName, Arch: arch})
+		return NewHandler(svc, devices, nil)
+	}
+
+	cases := []struct {
+		name    string
+		osName  string
+		arch    string
+		want    string
+		wantErr bool
+	}{
+		{"linux amd64", "linux", "amd64", "linux-amd64", false},
+		{"legacy empty OS treated as linux", "", "amd64", "linux-amd64", false},
+		{"linux x86_64", "linux", "x86_64", "linux-amd64", false},
+		{"linux arm64", "linux", "aarch64", "linux-arm64", false},
+		{"windows amd64", "windows", "amd64", "windows-amd64", false},
+		{"windows os-prefixed arch", "windows", "windows-amd64", "windows-amd64", false},
+		{"windows cli-style arch", "windows", "x64", "windows-amd64", false},
+		{"windows arm64 rejected", "windows", "arm64", "", true},
+		{"unsupported OS rejected", "darwin", "amd64", "", true},
+		{"missing arch rejected", "linux", "", "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHandler(tc.osName, tc.arch)
+			got, err := h.packageArchForEdge(context.Background(), edgeID)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("packageArchForEdge(os=%q, arch=%q) = %q, want error", tc.osName, tc.arch, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("packageArchForEdge(os=%q, arch=%q) error = %v", tc.osName, tc.arch, err)
+			}
+			if got != tc.want {
+				t.Fatalf("packageArchForEdge(os=%q, arch=%q) = %q, want %q", tc.osName, tc.arch, got, tc.want)
+			}
+		})
 	}
 }
 
