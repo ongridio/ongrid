@@ -28,6 +28,7 @@ import {
 } from 'recharts';
 import { Modal } from '@/components/Modal';
 import { cn } from '@/lib/cn';
+import { chartTooltipLabelStyle, chartTooltipStyle } from '@/lib/chartTheme';
 import {
   CREATABLE_RULE_KINDS,
   RULE_KINDS,
@@ -1142,8 +1143,8 @@ function PreviewChart({ result }: { result: RulePreviewResp }) {
           <Tooltip
             labelFormatter={(v) => fmtTick(Number(v))}
             formatter={(v: number) => [fmtY(v), result.unit ? tr(`值 (${result.unit})`, `Value (${result.unit})`) : tr('值', 'Value')]}
-            contentStyle={{ background: '#0b0b0e', border: '1px solid #27272a', fontSize: 11 }}
-            labelStyle={{ color: '#a1a1aa' }}
+            contentStyle={chartTooltipStyle}
+            labelStyle={chartTooltipLabelStyle}
           />
           {fireSpans.map((s, i) => (
             <ReferenceArea

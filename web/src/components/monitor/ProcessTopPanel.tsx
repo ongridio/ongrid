@@ -24,6 +24,7 @@ import { Cpu, Loader2, MemoryStick } from 'lucide-react';
 import { queryRange, type PromMatrixSeries } from '@/api/prom';
 import { ApiError } from '@/api/client';
 import { cn } from '@/lib/cn';
+import { chartTooltipStyle } from '@/lib/chartTheme';
 import { useI18n } from '@/i18n/locale';
 
 const TOP_N = 8; // 同屏可读上限；再多线就糊
@@ -191,12 +192,7 @@ export function ProcessTopPanel({
                   width={56}
                 />
                 <Tooltip
-                  contentStyle={{
-                    background: 'rgb(24 24 27)',
-                    border: '1px solid rgb(63 63 70)',
-                    borderRadius: 6,
-                    fontSize: 11,
-                  }}
+                  contentStyle={chartTooltipStyle}
                   formatter={(v: number) => `${v.toFixed(1)} ${unit}`}
                 />
                 <Legend wrapperStyle={{ fontSize: 10 }} />
