@@ -173,6 +173,10 @@ export function testLogBackend(id: number) {
   return request<APIEnvelope<LogBackendTestResult>>('POST', `/logs/backend/${id}/test`).then((r) => r.data);
 }
 
+export function testLogBackendDraft(input: SaveLogBackendInput) {
+  return request<APIEnvelope<LogBackendTestResult>>('POST', '/logs/backend/test', input).then((r) => r.data);
+}
+
 export function selectLogBackend(id: number) {
   return request<APIEnvelope<LogBackend>>('POST', `/logs/backend/${id}/select`).then((r) => r.data);
 }

@@ -10,7 +10,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -27,16 +26,16 @@ import (
 // GrafanaService is the narrow surface the handler depends on. *bizgrafana.Service
 // satisfies it structurally.
 type GrafanaService interface {
-	Test(ctx context.Context) error
+	TestConfiguration(ctx context.Context, in bizgrafana.ProbeInput) error
 	Sync(ctx context.Context) (*bizgrafana.SyncResult, error)
 	SyncLoki(ctx context.Context) error
 	FetchDashboardJSON(ctx context.Context, uid string) ([]byte, error)
 }
 
-// PromQuerier is the narrow surface used to exercise the configured
-// Prometheus on the test endpoint. *promquery.Client satisfies it.
-type PromQuerier interface {
-	Query(ctx context.Context, expr string, ts time.Time) (any, error)
+// PromConfigProbe validates an unsaved query/write configuration without
+// changing the active backend.
+type PromConfigProbe interface {
+	Probe(ctx context.Context, in bizsetting.PromProbeInput) error
 }
 
 // URLProbe is the narrow surface for the Loki / Tempo test endpoints.
@@ -45,25 +44,7 @@ type PromQuerier interface {
 // GET /ready; Tempo: GET /ready or empty OTLP/HTTP export, depending on
 // the configured URL shape). Returning nil = ok.
 type URLProbe interface {
-	Probe(ctx context.Context) error
-}
-
-// promQueryAdapter bridges *promquery.Client (which returns
-// *InstantResult) into the looser PromQuerier shape so the handler
-// doesn't need to import that concrete return type.
-type promQueryAdapter struct {
-	q func(ctx context.Context, expr string, ts time.Time) error
-}
-
-func (a promQueryAdapter) Query(ctx context.Context, expr string, ts time.Time) (any, error) {
-	return nil, a.q(ctx, expr, ts)
-}
-
-// AdaptPromQuerier wraps a function in the PromQuerier shape. cmd/ongrid
-// uses it to inject promquery.Client without leaking that type into the
-// handler package.
-func AdaptPromQuerier(q func(ctx context.Context, expr string, ts time.Time) error) PromQuerier {
-	return promQueryAdapter{q: q}
+	ProbeConfiguration(ctx context.Context, in bizsetting.TelemetryProbeInput) error
 }
 
 // WebSearchProbe is the narrow surface for the web_search test endpoint.
@@ -72,7 +53,7 @@ func AdaptPromQuerier(q func(ctx context.Context, expr string, ts time.Time) err
 // reports the provider name + a sample title back to the SPA so the
 // operator sees a tangible signal that the wiring works.
 type WebSearchProbe interface {
-	Probe(ctx context.Context) (provider, sample string, err error)
+	ProbeConfiguration(ctx context.Context, in bizsetting.WebSearchProbeInput) (provider, sample string, err error)
 }
 
 // LLMRouterInvalidator drops the in-process LLM provider catalog cache
@@ -95,7 +76,7 @@ type LLMConfigProbe interface {
 // Handler bundles the integration routes.
 type Handler struct {
 	grafana   GrafanaService
-	prom      PromQuerier
+	prom      PromConfigProbe
 	loki      URLProbe
 	tempo     URLProbe
 	webSearch WebSearchProbe
@@ -106,7 +87,7 @@ type Handler struct {
 // NewHandler builds the handler. prom may be nil when ONGRID_PROM_ENABLED=false;
 // the test route then 503s instead of crashing. loki/tempo/webSearch probes
 // are optional — when nil the corresponding /test endpoint 503s.
-func NewHandler(grafana GrafanaService, prom PromQuerier, loki URLProbe, tempo URLProbe, webSearch WebSearchProbe) *Handler {
+func NewHandler(grafana GrafanaService, prom PromConfigProbe, loki URLProbe, tempo URLProbe, webSearch WebSearchProbe) *Handler {
 	return &Handler{grafana: grafana, prom: prom, loki: loki, tempo: tempo, webSearch: webSearch}
 }
 
@@ -311,7 +292,11 @@ func (h *Handler) testGrafana(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAdmin(w, r) {
 		return
 	}
-	if err := h.grafana.Test(r.Context()); err != nil {
+	in, ok := decodeDraft[bizgrafana.ProbeInput](w, r)
+	if !ok {
+		return
+	}
+	if err := h.grafana.TestConfiguration(r.Context(), in); err != nil {
 		writeErr(w, err)
 		return
 	}
@@ -352,10 +337,21 @@ func (h *Handler) syncLoki(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// testProm runs a tiny PromQL probe ("up") against the configured Prom
-// using the admin-supplied auth + URL. Success means the URL is
-// reachable, the auth header is accepted, and the TSDB returns a valid
-// PromQL response.
+// testProm validates an unsaved draft with a PromQL query and an empty
+// remote_write request. No configuration or metric is persisted.
+//
+// @Summary Validate an unsaved Prometheus-compatible backend configuration
+// @Tags integrations
+// @Accept json
+// @Produce json
+// @Param request body bizsetting.PromProbeInput true "Prometheus backend draft"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} errorBody
+// @Failure 401 {object} errorBody
+// @Failure 403 {object} errorBody
+// @Failure 502 {object} errorBody
+// @Failure 503 {object} errorBody
+// @Router /api/v1/integrations/prom/test [post]
 func (h *Handler) testProm(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAdmin(w, r) {
 		return
@@ -367,11 +363,34 @@ func (h *Handler) testProm(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if _, err := h.prom.Query(r.Context(), "up", time.Now()); err != nil {
+	in, ok := decodeDraft[bizsetting.PromProbeInput](w, r)
+	if !ok {
+		return
+	}
+	if err := h.prom.Probe(r.Context(), in); err != nil {
 		writeErr(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func decodeDraft[T any](w http.ResponseWriter, r *http.Request) (T, bool) {
+	const maxBodyBytes = 64 << 10
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	var in T
+	if err := dec.Decode(&in); err != nil {
+		writeErr(w, errors.Join(errs.ErrInvalid, err))
+		var zero T
+		return zero, false
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeErr(w, errors.Join(errs.ErrInvalid, errors.New("request body must contain one JSON object")))
+		var zero T
+		return zero, false
+	}
+	return in, true
 }
 
 // testLoki runs a /ready probe against the configured Loki URL. Loki
@@ -387,7 +406,11 @@ func (h *Handler) testLoki(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if err := h.loki.Probe(r.Context()); err != nil {
+	in, ok := decodeDraft[bizsetting.TelemetryProbeInput](w, r)
+	if !ok {
+		return
+	}
+	if err := h.loki.ProbeConfiguration(r.Context(), in); err != nil {
 		writeErr(w, err)
 		return
 	}
@@ -410,7 +433,11 @@ func (h *Handler) testWebSearch(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	provider, sample, err := h.webSearch.Probe(r.Context())
+	in, ok := decodeDraft[bizsetting.WebSearchProbeInput](w, r)
+	if !ok {
+		return
+	}
+	provider, sample, err := h.webSearch.ProbeConfiguration(r.Context(), in)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -435,7 +462,11 @@ func (h *Handler) testTempo(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if err := h.tempo.Probe(r.Context()); err != nil {
+	in, ok := decodeDraft[bizsetting.TelemetryProbeInput](w, r)
+	if !ok {
+		return
+	}
+	if err := h.tempo.ProbeConfiguration(r.Context(), in); err != nil {
 		writeErr(w, err)
 		return
 	}

@@ -127,8 +127,8 @@ export default function SecretsPage() {
           </button>
         </div>
         {tr(
-          '凭据库。选一个类型（腾讯云 / AWS / GitHub …）会自动列出该填的字段，并自带"注入到哪些环境变量"的规则；技能 / 外部 MCP 用上这份凭据时按类型规则注入。类型选"自定义"则自由填字段，按同名环境变量注入。字段值只写不读，AES 加密落库（设 ONGRID_SECRET_KEY）。',
-          'Credential vault. Pick a type (Tencent Cloud / AWS / GitHub …) and it lists the right fields plus a built-in "which env vars to inject" rule; skills / external MCP that use this credential inject by that rule. Pick "Custom" to enter free-form fields injected as same-named env vars. Values are write-only and AES-encrypted at rest (set ONGRID_SECRET_KEY).'
+          '凭据库。选一个类型（腾讯云 / AWS / GitHub …）会自动列出该填的字段，并自带"注入到哪些环境变量"的规则；技能 / 外部 MCP 用上这份凭据时按类型规则注入。类型选"自定义"则自由填字段，按同名环境变量注入。字段值只写不读，使用现有系统密钥进行 AES 加密后落库。',
+          'Credential vault. Pick a type (Tencent Cloud / AWS / GitHub …) and it lists the right fields plus a built-in "which env vars to inject" rule; skills / external MCP that use this credential inject by that rule. Pick "Custom" to enter free-form fields injected as same-named env vars. Values are write-only and AES-encrypted at rest with the existing system secret.'
         )}
       </div>
 

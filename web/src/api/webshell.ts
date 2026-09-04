@@ -6,20 +6,14 @@
 //   GET    /api/v1/webshell/sessions                     (audit list)
 //   DELETE /api/v1/webshell/sessions/{id}                (admin kill)
 //
-// Auth: the manager auth.Middleware reads `Authorization: Bearer <jwt>`,
-// falling back to `?token=<jwt>` for native browser WebSockets — confirmed
-// by reading internal/pkg/auth/middleware.go:extractBearer. So we just
-// append the token as a query string. We still negotiate the
-// `ongrid.shell.v1` subprotocol because the gorilla server-side upgrader
-// declares it; without a matching client subprotocol the server upgrade
-// still succeeds (gorilla treats subprotocol as optional), but echoing it
-// back keeps things tidy and lets the server log a stable name.
+// Auth: an authenticated REST call first mints a one-time 30-second ticket;
+// only that capability appears in the WebSocket URL. SSH passwords never
+// travel in WebSocket frames and JWTs never appear in query strings.
 //
 // The caller is responsible for setting `binaryType = 'arraybuffer'`,
 // sending the first `ShellOpen` text frame, and tearing down on close.
 
 import { request } from './client';
-import { getToken } from '@/store/auth';
 
 export type OpenShellParams = {
   // Optional WS path override (defaults to same-origin /api/v1).
@@ -30,11 +24,11 @@ const SUBPROTOCOL = 'ongrid.shell.v1';
 
 export function openShellSocket(
   deviceId: number | string,
-  token: string,
+  ticket: string,
   params: OpenShellParams = {},
 ): WebSocket {
   const id = encodeURIComponent(String(deviceId));
-  const qs = new URLSearchParams({ token }).toString();
+  const qs = new URLSearchParams({ ticket }).toString();
 
   let url: string;
   if (params.baseUrl) {
@@ -51,17 +45,11 @@ export function openShellSocket(
   return ws;
 }
 
-// ShellOpen is the first text frame the browser must send post-upgrade.
-// `ssh_host` defaults to "127.0.0.1:22" when empty — the edge agent runs
-// on the device's host network so localhost loops back to the OS sshd.
 export type ShellOpenFrame = {
   type: 'open';
   cols: number;
   rows: number;
   term: string;
-  ssh_user: string;
-  ssh_pass: string;
-  ssh_host?: string;
 };
 
 export type ShellResizeFrame = {
@@ -80,11 +68,14 @@ export type ShellControlFrameOut =
   | ShellCloseFrame;
 
 // ShellControlFrameIn is what the manager pushes back over text frames.
-// `ready` confirms the SSH session is up; `auth_error` / `exit` are
-// terminal — the UI should print and let the WS close naturally.
+// `ready` confirms the SSH session is up; `auth_error` is retryable and
+// top-level SSH `exit` leaves the terminal page.
 export type ShellControlFrameIn =
   | { type: 'ready' }
   | { type: 'auth_error'; message: string }
+  | { type: 'credential_save_error'; message: string }
+  | { type: 'host_key_unknown'; fingerprint: string }
+  | { type: 'host_key_changed'; fingerprint: string; expected: string }
   | { type: 'exit'; exit_code: number; message?: string };
 
 export function sendControl(ws: WebSocket, frame: ShellControlFrameOut): void {
@@ -106,6 +97,7 @@ export type WebshellTerminatedBy =
   | 'disconnect'
   | 'admin_kill'
   | 'ssh_auth_fail'
+  | 'ssh_host_key'
   | 'ssh_exit'
   | 'device_offline';
 
@@ -113,6 +105,7 @@ export type ShellSession = {
   id: string;
   ongrid_user_id: number;
   ssh_user: string;
+  ssh_port?: number;
   device_id: number;
   edge_id: number;
   started_at: string;
@@ -137,45 +130,35 @@ export function killShellSession(id: string): Promise<void> {
   return request<void>('DELETE', `/webshell/sessions/${encodeURIComponent(id)}`);
 }
 
-// probeShellPreflight — issue a plain GET against the same WS path so we
-// can surface the HTTP status (429 / 503 / 403) before the WS upgrade
-// errors out. Browsers don't expose upgrade-time HTTP status to JS, so a
-// GET probe is the cheapest way to translate "WS closed 1006 immediately"
-// into a meaningful error. Returns { status, message } on success; null
-// when the probe itself fails (e.g. network).
-//
-// Backend GET on the WS path without an Upgrade header returns
-// http.Error(...) with status 400 ("Bad Request" — gorilla rejects),
-// after the auth + concurrency checks have already run. So 429/503/403
-// are returned authoritatively before the upgrade test.
-export async function probeShellPreflight(
-  deviceId: number | string,
-): Promise<{ status: number; message: string } | null> {
-  const id = encodeURIComponent(String(deviceId));
-  try {
-    const res = await fetch(`/api/v1/devices/${id}/shell`, {
-      method: 'GET',
-      headers: {
-        Accept: 'text/plain',
-        // Reuse the same bearer the WS uses; can't set headers on
-        // native WebSocket so this is the only place auth is in a
-        // header rather than ?token=.
-        ...buildAuthHeader(),
-      },
-    });
-    let message = '';
-    try {
-      message = (await res.text()).trim();
-    } catch {
-      /* noop */
-    }
-    return { status: res.status, message };
-  } catch {
-    return null;
-  }
+export type ShellCredential = {
+  id: number;
+  ssh_user: string;
+  ssh_port: number;
+  last_used_at?: string;
+  created_at: string;
+};
+
+export type ShellTicketInput = {
+  credential_id?: number;
+  ssh_user?: string;
+  ssh_pass?: string;
+  ssh_port?: number;
+  save_credential?: boolean;
+  accept_host_key?: string;
+};
+
+export function createShellTicket(deviceId: number | string, input: ShellTicketInput) {
+  return request<{ ticket: string; expires_at: string }>('POST', `/devices/${encodeURIComponent(String(deviceId))}/shell/tickets`, input);
 }
 
-function buildAuthHeader(): Record<string, string> {
-  const t = getToken();
-  return t ? { Authorization: `Bearer ${t}` } : {};
+export function listShellCredentials(deviceId: number | string) {
+  return request<{ items: ShellCredential[] }>('GET', `/devices/${encodeURIComponent(String(deviceId))}/shell/credentials`);
+}
+
+export function deleteShellCredential(deviceId: number | string, credentialId: number) {
+  return request<void>('DELETE', `/devices/${encodeURIComponent(String(deviceId))}/shell/credentials/${credentialId}`);
+}
+
+export function resetShellKnownHost(deviceId: number | string, port: number) {
+  return request<void>('DELETE', `/devices/${encodeURIComponent(String(deviceId))}/shell/known-hosts/${port}`);
 }

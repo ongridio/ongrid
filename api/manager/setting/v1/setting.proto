@@ -11,6 +11,22 @@ service SettingService {
     // HTTP implementation:
     // POST /api/v1/system-settings/observability/{service}/apply.
     rpc ApplyBuiltInObservabilityLimits(ApplyBuiltInObservabilityLimitsRequest) returns (ApplyBuiltInObservabilityLimitsResponse);
+    // ValidatePrometheusConfiguration 使用未落库的查询、写入与认证配置，
+    // 分别执行 PromQL 和空 remote_write 探针，不保存配置或指标。
+    // HTTP 实现：POST /api/v1/integrations/prom/test。
+    rpc ValidatePrometheusConfiguration(ValidatePrometheusConfigurationRequest) returns (ValidatePrometheusConfigurationResponse);
+    // ValidateGrafanaConfiguration 使用未落库的地址和凭证检查 Grafana。
+    // HTTP 实现：POST /api/v1/integrations/grafana/test。
+    rpc ValidateGrafanaConfiguration(ValidateGrafanaConfigurationRequest) returns (ValidateGrafanaConfigurationResponse);
+    // ValidateLokiConfiguration 使用未落库的 URL 和认证检查 /ready。
+    // HTTP 实现：POST /api/v1/integrations/loki/test。
+    rpc ValidateLokiConfiguration(ValidateLokiConfigurationRequest) returns (ValidateLokiConfigurationResponse);
+    // ValidateTempoConfiguration 使用未落库的 URL 和认证检查查询或 OTLP 入口。
+    // HTTP 实现：POST /api/v1/integrations/tempo/test。
+    rpc ValidateTempoConfiguration(ValidateTempoConfigurationRequest) returns (ValidateTempoConfigurationResponse);
+    // ValidateWebSearchConfiguration 使用未落库的 provider 配置执行最小查询。
+    // HTTP 实现：POST /api/v1/integrations/websearch/test。
+    rpc ValidateWebSearchConfiguration(ValidateWebSearchConfigurationRequest) returns (ValidateWebSearchConfigurationResponse);
     // ValidateLLMConfiguration 使用未落库的草稿配置发起最小模型请求，
     // 返回可机器识别的失败原因。HTTP 实现：
     // POST /api/v1/integrations/llm/test。
@@ -30,6 +46,66 @@ message ApplyBuiltInObservabilityLimitsRequest {
 
 message ApplyBuiltInObservabilityLimitsResponse {
     string status = 1 [json_name = "status"];
+}
+
+message ValidatePrometheusConfigurationRequest {
+    string query_url = 1 [json_name = "query_url"];
+    string remote_write_url = 2 [json_name = "remote_write_url"];
+    string bearer_token = 3 [json_name = "bearer_token"];
+    string basic_user = 4 [json_name = "basic_user"];
+    string basic_password = 5 [json_name = "basic_password"];
+    bool tls_insecure = 6 [json_name = "tls_insecure"];
+}
+
+message ValidatePrometheusConfigurationResponse {
+    string status = 1 [json_name = "status"];
+}
+
+message ValidateGrafanaConfigurationRequest {
+    string root_url = 1 [json_name = "root_url"];
+    string sa_token = 2 [json_name = "sa_token"];
+    string api_key = 3 [json_name = "api_key"];
+    string org_id = 4 [json_name = "org_id"];
+    bool tls_insecure = 5 [json_name = "tls_insecure"];
+}
+
+message ValidateGrafanaConfigurationResponse {
+    string status = 1 [json_name = "status"];
+}
+
+message ValidateLokiConfigurationRequest {
+    string url = 1 [json_name = "url"];
+    string basic_user = 2 [json_name = "basic_user"];
+    string basic_password = 3 [json_name = "basic_password"];
+    bool tls_insecure = 4 [json_name = "tls_insecure"];
+}
+
+message ValidateLokiConfigurationResponse {
+    string status = 1 [json_name = "status"];
+}
+
+message ValidateTempoConfigurationRequest {
+    string url = 1 [json_name = "url"];
+    string basic_user = 2 [json_name = "basic_user"];
+    string basic_password = 3 [json_name = "basic_password"];
+    bool tls_insecure = 4 [json_name = "tls_insecure"];
+}
+
+message ValidateTempoConfigurationResponse {
+    string status = 1 [json_name = "status"];
+}
+
+message ValidateWebSearchConfigurationRequest {
+    string provider = 1 [json_name = "provider"];
+    string searxng_url = 2 [json_name = "searxng_url"];
+    string tavily_api_key = 3 [json_name = "tavily_api_key"];
+    string brave_api_key = 4 [json_name = "brave_api_key"];
+}
+
+message ValidateWebSearchConfigurationResponse {
+    string status = 1 [json_name = "status"];
+    string provider = 2 [json_name = "provider"];
+    string sample = 3 [json_name = "sample"];
 }
 
 message ValidateLLMConfigurationRequest {

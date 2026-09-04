@@ -16,11 +16,17 @@ import (
 
 type stubBackendService struct {
 	saved        *bizlogs.SaveInput
+	draftTested  *bizlogs.SaveInput
 	tested       bool
 	selected     bool
 	lokiSelected bool
 	checks       int
 	checkIDs     []uint64
+}
+
+func (s *stubBackendService) TestDraft(_ context.Context, input bizlogs.SaveInput) (*bizlogs.BackendTestResult, error) {
+	s.draftTested = &input
+	return &bizlogs.BackendTestResult{Status: "ok", DetectedVersion: "8.16.3"}, nil
 }
 
 func (s *stubBackendService) Test(context.Context, uint64) (*bizlogs.BackendTestResult, error) {
@@ -163,6 +169,26 @@ func TestTestBackendCallsServiceWithoutApply(t *testing.T) {
 	}
 	if !svc.tested || svc.selected {
 		t.Fatalf("tested=%v selected=%v", svc.tested, svc.selected)
+	}
+}
+
+func TestTestBackendDraftCallsServiceWithoutSaving(t *testing.T) {
+	svc := &stubBackendService{}
+	router := backendTestRouter(NewHandlerWithServices(nil, nil, svc))
+	req := adminBackendRequest(http.MethodPost, "/v1/logs/backend/test", []byte(`{
+		"write_endpoints":["https://draft-es.example"],
+		"query_endpoint":"https://draft-es-query.example",
+		"dataset":"ongrid.system",
+		"namespace":"draft"
+	}`))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if svc.draftTested == nil || svc.draftTested.QueryEndpoint != "https://draft-es-query.example" || svc.saved != nil {
+		t.Fatalf("draft=%+v saved=%+v", svc.draftTested, svc.saved)
 	}
 }
 

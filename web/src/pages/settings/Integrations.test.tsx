@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import SettingsIntegrations from './Integrations';
-import { listSettings, setSetting } from '@/api/settings';
+import { listSettings, revealSetting, setSetting, testGrafanaConnection, testPromConnection } from '@/api/settings';
 import {
   getLogBackend,
   getLogBackendConnectionCheck,
@@ -13,6 +13,7 @@ import {
   selectLokiLogBackend,
   startLogBackendConnectionCheck,
   testLogBackend,
+  testLogBackendDraft,
   type LogBackend,
   type LogBackendConnectionCheck,
 } from '@/api/logs';
@@ -41,6 +42,7 @@ vi.mock('@/api/logs', async (importOriginal) => {
     selectLokiLogBackend: vi.fn(),
     startLogBackendConnectionCheck: vi.fn(),
     testLogBackend: vi.fn(),
+    testLogBackendDraft: vi.fn(),
   };
 });
 
@@ -91,6 +93,11 @@ describe('SettingsIntegrations log backend presentation', () => {
       detected_version: '8.16.3',
       tested_at: '2026-08-21T00:00:00Z',
     });
+    vi.mocked(testLogBackendDraft).mockResolvedValue({
+      status: 'ok',
+      detected_version: '8.16.3',
+      tested_at: '2026-08-21T00:00:00Z',
+    });
     localStorage.setItem('ongrid-locale', 'zh-CN');
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
       configurable: true,
@@ -103,13 +110,14 @@ describe('SettingsIntegrations log backend presentation', () => {
   });
 
   it('saves self-signed TLS switches for Prometheus and Grafana', async () => {
+    vi.mocked(revealSetting).mockResolvedValue({ value: 'glsa_test' });
     vi.mocked(listSettings).mockImplementation(async (category?: string) => ({
       items: category === 'prom'
         ? [{ category: 'prom', key: 'query_url', value: 'https://prom.example', sensitive: false, updated_at: '' }]
         : category === 'grafana'
           ? [
               { category: 'grafana', key: 'root_url', value: 'https://grafana.example', sensitive: false, updated_at: '' },
-              { category: 'grafana', key: 'sa_token', value: '', sensitive: true, updated_at: '' },
+              { category: 'grafana', key: 'sa_token', value: 'configured', sensitive: true, updated_at: '' },
             ]
           : [],
       total: 0,
@@ -124,13 +132,92 @@ describe('SettingsIntegrations log backend presentation', () => {
     const user = userEvent.setup();
     const prometheus = (await screen.findByRole('heading', { name: 'Prometheus 集成' })).closest('section')!;
     await act(async () => user.click(within(prometheus).getByRole('checkbox', { name: '跳过 TLS 校验（自签证书时勾选）' })));
+    await act(async () => user.click(within(prometheus).getByRole('button', { name: '测试连接' })));
+    await waitFor(() => expect(within(prometheus).getByRole('button', { name: '保存' })).toBeEnabled());
     await act(async () => user.click(within(prometheus).getByRole('button', { name: '保存' })));
     await waitFor(() => expect(setSetting).toHaveBeenCalledWith('prom', 'tls_insecure', 'true', false));
 
     const grafana = screen.getByRole('heading', { name: 'Grafana 集成' }).closest('section')!;
     await act(async () => user.click(within(grafana).getByRole('checkbox', { name: '跳过 TLS 校验（自签证书时勾选）' })));
+    await act(async () => user.click(within(grafana).getByRole('button', { name: '测试连接' })));
+    await waitFor(() => expect(within(grafana).getByRole('button', { name: '保存' })).toBeEnabled());
+    expect(testGrafanaConnection).toHaveBeenCalledWith(expect.objectContaining({
+      root_url: 'https://grafana.example',
+      tls_insecure: true,
+    }));
     await act(async () => user.click(within(grafana).getByRole('button', { name: '保存' })));
     await waitFor(() => expect(setSetting).toHaveBeenCalledWith('grafana', 'tls_insecure', 'true', false));
+  });
+
+  it('matches the VictoriaMetrics cluster remote write URL from the query URL', async () => {
+    vi.mocked(listSettings).mockImplementation(async (category?: string) => ({
+      items: category === 'prom'
+        ? [{ category: 'prom', key: 'query_url', value: 'http://host.docker.internal:8481/select/0/prometheus', sensitive: false, updated_at: '' }]
+        : [],
+      total: 0,
+    }));
+
+    render(
+      <MemoryRouter initialEntries={['/settings/integrations']}>
+        <SettingsIntegrations />
+      </MemoryRouter>,
+    );
+
+    const prometheus = (await screen.findByRole('heading', { name: 'Prometheus 集成' })).closest('section')!;
+    expect(within(prometheus).getByRole('textbox', { name: /^Remote Write URL/ })).toHaveValue(
+      'http://host.docker.internal:8480/insert/0/prometheus/api/v1/write',
+    );
+
+    fireEvent.change(within(prometheus).getByRole('textbox', { name: /^Query URL/ }), {
+      target: { value: 'http://host.docker.internal:8481/select/42/prometheus' },
+    });
+    expect(within(prometheus).getByRole('textbox', { name: /^Remote Write URL/ })).toHaveValue(
+      'http://host.docker.internal:8480/insert/42/prometheus/api/v1/write',
+    );
+  });
+
+  it('tests the unsaved Prometheus draft before enabling save', async () => {
+    vi.mocked(listSettings).mockImplementation(async (category?: string) => ({
+      items: category === 'prom'
+        ? [{ category: 'prom', key: 'query_url', value: 'http://prom.example', sensitive: false, updated_at: '' }]
+        : [],
+      total: 0,
+    }));
+    vi.mocked(testPromConnection).mockRejectedValueOnce(new Error('connection refused'));
+
+    render(
+      <MemoryRouter initialEntries={['/settings/integrations']}>
+        <SettingsIntegrations />
+      </MemoryRouter>,
+    );
+
+    const user = userEvent.setup();
+    const prometheus = (await screen.findByRole('heading', { name: 'Prometheus 集成' })).closest('section')!;
+    const query = within(prometheus).getByRole('textbox', { name: /^Query URL/ });
+    const save = within(prometheus).getByRole('button', { name: '保存' });
+    const test = within(prometheus).getByRole('button', { name: '测试连接' });
+
+    fireEvent.change(query, { target: { value: 'http://vm.example/select/0/prometheus' } });
+    expect(save).toBeDisabled();
+    expect(test).toBeEnabled();
+
+    await user.click(test);
+    expect(await within(prometheus).findByText(/connection refused/)).toBeVisible();
+    expect(save).toBeDisabled();
+    expect(setSetting).not.toHaveBeenCalled();
+
+    vi.mocked(testPromConnection).mockResolvedValueOnce({ status: 'ok' });
+    await user.click(test);
+    await waitFor(() => expect(save).toBeEnabled());
+    expect(testPromConnection).toHaveBeenLastCalledWith(expect.objectContaining({
+      query_url: 'http://vm.example/select/0/prometheus',
+      remote_write_url: 'http://vm.example/insert/0/prometheus/api/v1/write',
+    }));
+
+    fireEvent.change(within(prometheus).getByRole('textbox', { name: /^Basic User/ }), {
+      target: { value: 'changed-after-test' },
+    });
+    expect(save).toBeDisabled();
   });
 
   it('places built-in storage limits under each integration advanced section', async () => {
@@ -213,6 +300,8 @@ describe('SettingsIntegrations log backend presentation', () => {
     const elasticsearch = await screen.findByRole('region', { name: 'Elasticsearch 日志后端配置' });
     const queryEndpoint = within(elasticsearch).getByRole('textbox', { name: /Manager 查询 endpoint/ });
     fireEvent.change(queryEndpoint, { target: { value: 'https://es-query.example.com:9200' } });
+    await act(async () => user.click(within(elasticsearch).getByRole('button', { name: '测试连接' })));
+    await waitFor(() => expect(within(elasticsearch).getByRole('button', { name: '保存' })).toBeEnabled());
     await act(async () => user.click(within(elasticsearch).getByRole('button', { name: '保存' })));
 
     await waitFor(() => expect(saveLogBackend).toHaveBeenCalledOnce());
@@ -447,7 +536,9 @@ describe('SettingsIntegrations log backend presentation', () => {
     const elasticsearch = await screen.findByRole('region', { name: 'Elasticsearch 日志后端配置' });
     await act(async () => user.click(within(elasticsearch).getByRole('button', { name: '测试连接' })));
 
-    await waitFor(() => expect(testLogBackend).toHaveBeenCalledWith(7));
+    await waitFor(() => expect(testLogBackendDraft).toHaveBeenCalledWith(expect.objectContaining({
+      query_endpoint: 'https://es.example.com:9200',
+    })));
     expect(selectLogBackend).not.toHaveBeenCalled();
     expect(screen.getByText(/连接测试通过；查询\/写入端点及 API Key 权限有效（Elasticsearch 8\.16\.3）/)).toBeVisible();
   });
@@ -461,7 +552,7 @@ describe('SettingsIntegrations log backend presentation', () => {
       </MemoryRouter>,
     );
 
-    const allExpected = ['保存', '测试连接', '设为当前', '检查设备连接', '在 Grafana 中查看日志'];
+    const allExpected = ['测试连接', '保存', '设为当前', '检查设备连接', '在 Grafana 中查看日志'];
     const actionOrder = (region: HTMLElement) => within(region)
       .getAllByRole('button')
       .map((button) => button.textContent?.trim() ?? '')

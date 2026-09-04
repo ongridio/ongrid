@@ -2,6 +2,8 @@ package setting
 
 import (
 	"context"
+	"net"
+	"net/url"
 	"strings"
 
 	model "github.com/ongridio/ongrid/internal/manager/model/setting"
@@ -94,11 +96,14 @@ func (r *PromResolver) ResolveBaseURL(ctx context.Context) (string, error) {
 }
 
 // ResolveWriteURL implements promwrite.EndpointResolver. Returns the
-// admin-configured remote_write_url if set; otherwise composes
-// query_url + /api/v1/write to mirror the original New() semantics.
+// admin-configured remote_write_url if set; otherwise derives it from the
+// configured query URL before falling back to the env-derived endpoint.
 func (r *PromResolver) ResolveWriteURL(ctx context.Context) (string, error) {
 	if v := r.get(ctx, model.KeyPromRemoteWriteURL); v != "" {
 		return v, nil
+	}
+	if v := r.get(ctx, model.KeyPromQueryURL); v != "" {
+		return promRemoteWriteURL(v), nil
 	}
 	if r.fallbackWriteURL != "" {
 		return r.fallbackWriteURL, nil
@@ -110,5 +115,26 @@ func (r *PromResolver) ResolveWriteURL(ctx context.Context) (string, error) {
 	if base == "" {
 		return "", nil
 	}
-	return base + "/api/v1/write", nil
+	return promRemoteWriteURL(base), nil
+}
+
+func promRemoteWriteURL(queryURL string) string {
+	base := strings.TrimRight(strings.TrimSpace(queryURL), "/")
+	u, err := url.Parse(base)
+	if err != nil {
+		return base + "/api/v1/write"
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) != 3 || parts[0] != "select" || parts[1] == "" || parts[2] != "prometheus" {
+		return base + "/api/v1/write"
+	}
+
+	u.Path = "/insert/" + parts[1] + "/prometheus/api/v1/write"
+	u.RawPath = ""
+	u.RawQuery = ""
+	u.Fragment = ""
+	if u.Port() == "8481" {
+		u.Host = net.JoinHostPort(u.Hostname(), "8480")
+	}
+	return u.String()
 }

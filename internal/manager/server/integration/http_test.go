@@ -22,6 +22,7 @@ import (
 // loudly instead of silently passing.
 type stubGrafana struct {
 	test           func(ctx context.Context) error
+	probe          func(ctx context.Context, in bizgrafana.ProbeInput) error
 	sync           func(ctx context.Context) (*bizgrafana.SyncResult, error)
 	syncLoki       func(ctx context.Context) error
 	fetchDashboard func(ctx context.Context, uid string) ([]byte, error)
@@ -30,6 +31,30 @@ type stubGrafana struct {
 type stubLLMConfigProbe struct {
 	probe func(context.Context, bizsetting.LLMProbeInput) (bizsetting.LLMProbeResult, error)
 	save  func(context.Context, bizsetting.LLMProbeInput) (bizsetting.LLMProbeResult, error)
+}
+
+type stubPromConfigProbe struct {
+	probe func(context.Context, bizsetting.PromProbeInput) error
+}
+
+type stubURLConfigProbe struct {
+	probe func(context.Context, bizsetting.TelemetryProbeInput) error
+}
+
+type stubWebSearchConfigProbe struct {
+	probe func(context.Context, bizsetting.WebSearchProbeInput) (string, string, error)
+}
+
+func (s stubPromConfigProbe) Probe(ctx context.Context, in bizsetting.PromProbeInput) error {
+	return s.probe(ctx, in)
+}
+
+func (s stubURLConfigProbe) ProbeConfiguration(ctx context.Context, in bizsetting.TelemetryProbeInput) error {
+	return s.probe(ctx, in)
+}
+
+func (s stubWebSearchConfigProbe) ProbeConfiguration(ctx context.Context, in bizsetting.WebSearchProbeInput) (string, string, error) {
+	return s.probe(ctx, in)
 }
 
 func (s stubLLMConfigProbe) Probe(ctx context.Context, in bizsetting.LLMProbeInput) (bizsetting.LLMProbeResult, error) {
@@ -47,7 +72,12 @@ type stubLLMRouterInvalidator struct{ calls int }
 
 func (s *stubLLMRouterInvalidator) Invalidate() { s.calls++ }
 
-func (s stubGrafana) Test(ctx context.Context) error                           { return s.test(ctx) }
+func (s stubGrafana) TestConfiguration(ctx context.Context, in bizgrafana.ProbeInput) error {
+	if s.probe != nil {
+		return s.probe(ctx, in)
+	}
+	return s.test(ctx)
+}
 func (s stubGrafana) Sync(ctx context.Context) (*bizgrafana.SyncResult, error) { return s.sync(ctx) }
 func (s stubGrafana) SyncLoki(ctx context.Context) error {
 	if s.syncLoki == nil {
@@ -63,6 +93,79 @@ func newRouter(h *Handler) http.Handler {
 	r := chi.NewRouter()
 	h.Register(r)
 	return r
+}
+
+func TestPromConfigurationProbeUsesUnsavedDraft(t *testing.T) {
+	t.Parallel()
+	g := stubGrafana{
+		test:           func(context.Context) error { return nil },
+		sync:           func(context.Context) (*bizgrafana.SyncResult, error) { return nil, nil },
+		fetchDashboard: func(context.Context, string) ([]byte, error) { return nil, nil },
+	}
+	var got bizsetting.PromProbeInput
+	h := NewHandler(g, stubPromConfigProbe{probe: func(_ context.Context, in bizsetting.PromProbeInput) error {
+		got = in
+		return nil
+	}}, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/integrations/prom/test", strings.NewReader(`{
+		"query_url":"https://vm.example/select/0/prometheus",
+		"remote_write_url":"https://vm.example/insert/0/prometheus/api/v1/write",
+		"bearer_token":"secret","tls_insecure":true
+	}`))
+	req = req.WithContext(tenantctx.With(context.Background(), tenantctx.Tenant{UserID: 7, Role: "admin"}))
+	rec := httptest.NewRecorder()
+	newRouter(h).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got.QueryURL != "https://vm.example/select/0/prometheus" || got.BearerToken != "secret" || !got.TLSInsecure {
+		t.Fatalf("probe input = %+v", got)
+	}
+}
+
+func TestExternalIntegrationProbesUseUnsavedDrafts(t *testing.T) {
+	t.Parallel()
+	var grafanaDraft bizgrafana.ProbeInput
+	var lokiDraft, tempoDraft bizsetting.TelemetryProbeInput
+	var webSearchDraft bizsetting.WebSearchProbeInput
+	h := NewHandler(
+		stubGrafana{
+			probe:          func(_ context.Context, in bizgrafana.ProbeInput) error { grafanaDraft = in; return nil },
+			sync:           func(context.Context) (*bizgrafana.SyncResult, error) { return nil, nil },
+			fetchDashboard: func(context.Context, string) ([]byte, error) { return nil, nil },
+		},
+		nil,
+		stubURLConfigProbe{probe: func(_ context.Context, in bizsetting.TelemetryProbeInput) error { lokiDraft = in; return nil }},
+		stubURLConfigProbe{probe: func(_ context.Context, in bizsetting.TelemetryProbeInput) error { tempoDraft = in; return nil }},
+		stubWebSearchConfigProbe{probe: func(_ context.Context, in bizsetting.WebSearchProbeInput) (string, string, error) {
+			webSearchDraft = in
+			return in.Provider, "sample", nil
+		}},
+	)
+
+	for _, tc := range []struct{ path, body string }{
+		{"/v1/integrations/grafana/test", `{"root_url":"https://grafana.draft","sa_token":"token","tls_insecure":true}`},
+		{"/v1/integrations/loki/test", `{"url":"https://loki.draft","basic_user":"loki-user"}`},
+		{"/v1/integrations/tempo/test", `{"url":"https://tempo.draft/v1/traces","basic_user":"tempo-user"}`},
+		{"/v1/integrations/websearch/test", `{"provider":"brave","brave_api_key":"draft-key"}`},
+	} {
+		req := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.body))
+		req = req.WithContext(tenantctx.With(context.Background(), tenantctx.Tenant{UserID: 7, Role: "admin"}))
+		rec := httptest.NewRecorder()
+		newRouter(h).ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d body=%s", tc.path, rec.Code, rec.Body.String())
+		}
+	}
+
+	if grafanaDraft.RootURL != "https://grafana.draft" || !grafanaDraft.TLSInsecure ||
+		lokiDraft.URL != "https://loki.draft" || lokiDraft.BasicUser != "loki-user" ||
+		tempoDraft.URL != "https://tempo.draft/v1/traces" || tempoDraft.BasicUser != "tempo-user" ||
+		webSearchDraft.Provider != "brave" || webSearchDraft.BraveAPIKey != "draft-key" {
+		t.Fatalf("drafts not forwarded: grafana=%+v loki=%+v tempo=%+v websearch=%+v", grafanaDraft, lokiDraft, tempoDraft, webSearchDraft)
+	}
 }
 
 func TestFetchDashboardPassesUIDAndReturnsRawJSON(t *testing.T) {

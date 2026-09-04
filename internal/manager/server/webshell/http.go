@@ -1,6 +1,6 @@
 // Package webshell wires the WebSSH HTTP route. Manager opens a
-// frontier stream into the edge (Meta = {"target":"127.0.0.1:22"}),
-// wraps the stream with golang.org/x/crypto/ssh.NewClientConn, runs
+// frontier stream into the edge, carries the port in the SSH client
+// identification, wraps it with golang.org/x/crypto/ssh.NewClientConn, runs
 // PTY + Shell, and pumps stdin/stdout to the browser WebSocket.
 //
 // Edge agent is a dumb byte forwarder — see internal/edgeagent/
@@ -12,6 +12,8 @@ package webshell
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +21,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,13 +33,14 @@ import (
 	"github.com/gorilla/websocket"
 	"golang.org/x/crypto/ssh"
 
-	bizwebshell "github.com/ongridio/ongrid/internal/manager/biz/webshell"
 	devicebiz "github.com/ongridio/ongrid/internal/manager/biz/device"
 	edgebiz "github.com/ongridio/ongrid/internal/manager/biz/edge"
+	bizwebshell "github.com/ongridio/ongrid/internal/manager/biz/webshell"
 	edgemodel "github.com/ongridio/ongrid/internal/manager/model/edge"
 	wsmodel "github.com/ongridio/ongrid/internal/manager/model/webshell"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/tenantctx"
+	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
 
 // AuthzMW is the narrow casbin middleware contract.
@@ -59,15 +63,19 @@ type Handler struct {
 	streamer Streamer
 	router   *bizwebshell.Router
 	audit    bizwebshell.Recorder
+	access   *bizwebshell.Access
 	devices  DeviceRepo
 	edges    edgebiz.Repo
 	authz    AuthzMW
 	log      *slog.Logger
 	upgrader websocket.Upgrader
+	mu       sync.Mutex
+	tickets  map[string]shellTicket
+	failures map[string]authFailures
 }
 
 // NewHandler builds the HTTP handler.
-func NewHandler(streamer Streamer, router *bizwebshell.Router, audit bizwebshell.Recorder,
+func NewHandler(streamer Streamer, router *bizwebshell.Router, audit bizwebshell.Recorder, access *bizwebshell.Access,
 	devices DeviceRepo, edges edgebiz.Repo, log *slog.Logger,
 ) *Handler {
 	if log == nil {
@@ -77,6 +85,7 @@ func NewHandler(streamer Streamer, router *bizwebshell.Router, audit bizwebshell
 		streamer: streamer,
 		router:   router,
 		audit:    audit,
+		access:   access,
 		devices:  devices,
 		edges:    edges,
 		log:      log,
@@ -84,8 +93,10 @@ func NewHandler(streamer Streamer, router *bizwebshell.Router, audit bizwebshell
 			ReadBufferSize:  4096,
 			WriteBufferSize: 16384,
 			Subprotocols:    []string{"ongrid.shell.v1"},
-			CheckOrigin:     func(r *http.Request) bool { return true },
+			CheckOrigin:     sameOrigin,
 		},
+		tickets:  make(map[string]shellTicket),
+		failures: make(map[string]authFailures),
 	}
 }
 
@@ -103,6 +114,12 @@ const MaxSessionsPerDevice = 5
 // input frames. Resize / close control frames count as input.
 const IdleTimeout = 15 * time.Minute
 
+const (
+	ticketTTL         = 30 * time.Second
+	authFailureWindow = 10 * time.Minute
+	maxAuthFailures   = 5
+)
+
 // Register attaches the route + the audit-list endpoint on the
 // (auth-wrapped) chi router.
 func (h *Handler) Register(r chi.Router) {
@@ -110,7 +127,10 @@ func (h *Handler) Register(r chi.Router) {
 	if h.authz != nil {
 		mw = h.authz.Require("device:shell", "exec")
 	}
-	r.With(mw).Get("/v1/devices/{device_id}/shell", h.openShell)
+	r.With(mw).Post("/v1/devices/{device_id}/shell/tickets", h.issueTicket)
+	r.With(mw).Get("/v1/devices/{device_id}/shell/credentials", h.listCredentials)
+	r.With(mw).Delete("/v1/devices/{device_id}/shell/credentials/{credential_id}", h.deleteCredential)
+	r.With(mw).Delete("/v1/devices/{device_id}/shell/known-hosts/{port}", h.deleteKnownHost)
 
 	listMW := passthrough
 	if h.authz != nil {
@@ -124,23 +144,40 @@ func (h *Handler) Register(r chi.Router) {
 	r.With(killMW).Delete("/v1/webshell/sessions/{id}", h.killSession)
 }
 
-func passthrough(next http.Handler) http.Handler { return next }
-
-// streamMeta is what we put in the frontier stream's Meta blob so
-// the edge knows where to forward bytes.
-type streamMeta struct {
-	Target string `json:"target"`
+// RegisterPublic attaches the ticket-authenticated WebSocket endpoint. The
+// short-lived ticket is the only credential accepted here; JWTs in query
+// strings and SSH passwords in WebSocket frames are intentionally rejected.
+func (h *Handler) RegisterPublic(r chi.Router) {
+	r.Get("/v1/devices/{device_id}/shell", h.openShell)
 }
+
+func passthrough(next http.Handler) http.Handler { return next }
 
 // openMsg is the first text frame the browser sends.
 type openMsg struct {
-	Type    string `json:"type"` // "open"
-	Cols    uint16 `json:"cols"`
-	Rows    uint16 `json:"rows"`
-	Term    string `json:"term,omitempty"`
-	SSHHost string `json:"ssh_host,omitempty"` // future: jumpbox; today ignored (always 127.0.0.1:22)
-	SSHUser string `json:"ssh_user"`
-	SSHPass string `json:"ssh_pass"`
+	Type string `json:"type"` // "open"
+	Cols uint16 `json:"cols"`
+	Rows uint16 `json:"rows"`
+	Term string `json:"term,omitempty"`
+}
+
+type shellTicket struct {
+	UserID          uint64
+	DeviceID        uint64
+	EdgeID          uint64
+	SSHUser         string
+	Password        string
+	Port            uint16
+	CredentialID    *uint64
+	SaveCredential  bool
+	AcceptedHostKey string
+	ClientIP        string
+	ExpiresAt       time.Time
+}
+
+type authFailures struct {
+	Count   int
+	ResetAt time.Time
 }
 
 // ctlMsg is any subsequent text-frame control message.
@@ -150,46 +187,171 @@ type ctlMsg struct {
 	Rows uint16 `json:"rows,omitempty"`
 }
 
-// openShell is the WS upgrade handler.
-func (h *Handler) openShell(w http.ResponseWriter, r *http.Request) {
+// issueTicket mints a one-time WebSocket capability after bearer auth.
+// @Summary Create a one-time WebSSH connection ticket
+// @Router /v1/devices/{device_id}/shell/tickets [post]
+// @Success 200 {object} map[string]any
+func (h *Handler) issueTicket(w http.ResponseWriter, r *http.Request) {
 	tenant, ok := tenantctx.From(r.Context())
 	if !ok {
 		writeErr(w, errs.ErrUnauthorized)
 		return
 	}
-	deviceID, err := strconv.ParseUint(chi.URLParam(r, "device_id"), 10, 64)
+	deviceID, err := parseUintParam(r, "device_id")
 	if err != nil {
-		writeErr(w, errors.Join(errs.ErrInvalid, err))
+		writeErr(w, err)
 		return
 	}
-
-	// Find an online edge bound to this device.
-	edges, err := h.edges.List(r.Context(), edgebiz.ListFilter{Limit: 1000})
+	if h.tooManyAuthFailures(tenant.UserID, deviceID, clientIP(r)) {
+		http.Error(w, "too many failed SSH logins; retry later", http.StatusTooManyRequests)
+		return
+	}
+	edge, err := h.onlineEdge(r.Context(), deviceID)
 	if err != nil {
-		writeErr(w, fmt.Errorf("list edges: %w", err))
+		writeErr(w, err)
 		return
 	}
-	var edge *edgemodel.Edge
-	for _, e := range edges {
-		if e.DeviceID != nil && *e.DeviceID == deviceID && e.Status == edgemodel.StatusOnline {
-			edge = e
-			break
-		}
-	}
-	if edge == nil {
-		http.Error(w, "device offline or unknown", http.StatusServiceUnavailable)
-		return
-	}
-
-	// Concurrency limits.
 	if n := h.router.CountByUser(tenant.UserID); n >= MaxSessionsPerUser {
-		http.Error(w, fmt.Sprintf("too many open shells (%d / %d) for this user", n, MaxSessionsPerUser),
-			http.StatusTooManyRequests)
+		http.Error(w, fmt.Sprintf("too many open shells (%d / %d) for this user", n, MaxSessionsPerUser), http.StatusTooManyRequests)
 		return
 	}
 	if n := h.router.CountByDevice(deviceID); n >= MaxSessionsPerDevice {
-		http.Error(w, fmt.Sprintf("too many open shells (%d / %d) on this device", n, MaxSessionsPerDevice),
-			http.StatusTooManyRequests)
+		http.Error(w, fmt.Sprintf("too many open shells (%d / %d) on this device", n, MaxSessionsPerDevice), http.StatusTooManyRequests)
+		return
+	}
+	var in struct {
+		CredentialID   uint64 `json:"credential_id"`
+		SSHUser        string `json:"ssh_user"`
+		SSHPass        string `json:"ssh_pass"`
+		SSHPort        uint16 `json:"ssh_port"`
+		SaveCredential bool   `json:"save_credential"`
+		AcceptHostKey  string `json:"accept_host_key"`
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&in); err != nil {
+		writeErr(w, errors.Join(errs.ErrInvalid, err))
+		return
+	}
+	var credentialID *uint64
+	if in.CredentialID != 0 {
+		if in.SSHUser != "" || in.SSHPass != "" || in.SSHPort != 0 || in.SaveCredential {
+			writeErr(w, fmt.Errorf("%w: credential_id cannot be combined with manual login fields", errs.ErrInvalid))
+			return
+		}
+		credential, err := h.access.ResolveCredential(r.Context(), in.CredentialID, tenant.UserID, deviceID)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		in.SSHUser, in.SSHPass, in.SSHPort = credential.SSHUser, credential.Password, credential.SSHPort
+		credentialID = &credential.ID
+	}
+	in.SSHUser = strings.TrimSpace(in.SSHUser)
+	if in.SSHPort == 0 {
+		in.SSHPort = 22
+	}
+	if in.SSHUser == "" || len(in.SSHUser) > 64 || in.SSHPass == "" || len(in.SSHPass) > 4096 || len(in.AcceptHostKey) > 128 {
+		writeErr(w, fmt.Errorf("%w: invalid SSH login", errs.ErrInvalid))
+		return
+	}
+	token, expiresAt, err := h.mintTicket(shellTicket{
+		UserID: tenant.UserID, DeviceID: deviceID, EdgeID: edge.ID,
+		SSHUser: in.SSHUser, Password: in.SSHPass, Port: in.SSHPort,
+		CredentialID: credentialID, SaveCredential: in.SaveCredential, AcceptedHostKey: in.AcceptHostKey,
+		ClientIP: clientIP(r),
+	})
+	in.SSHPass = ""
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]any{"ticket": token, "expires_at": expiresAt.Format(time.RFC3339)})
+}
+
+// listCredentials returns redacted personal login metadata.
+// @Summary List personal WebSSH credentials
+// @Router /v1/devices/{device_id}/shell/credentials [get]
+// @Success 200 {object} map[string]any
+func (h *Handler) listCredentials(w http.ResponseWriter, r *http.Request) {
+	tenant, deviceID, ok := callerAndDevice(w, r)
+	if !ok {
+		return
+	}
+	items, err := h.access.ListCredentials(r.Context(), tenant.UserID, deviceID)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+// deleteCredential removes only the caller's own device-bound login.
+// @Summary Delete a personal WebSSH credential
+// @Router /v1/devices/{device_id}/shell/credentials/{credential_id} [delete]
+// @Success 204
+func (h *Handler) deleteCredential(w http.ResponseWriter, r *http.Request) {
+	tenant, deviceID, ok := callerAndDevice(w, r)
+	if !ok {
+		return
+	}
+	id, err := parseUintParam(r, "credential_id")
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if err := h.access.DeleteCredential(r.Context(), id, tenant.UserID, deviceID); err != nil {
+		writeErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// deleteKnownHost explicitly resets the caller's pinned key for one port.
+// @Summary Reset a personal WebSSH host-key pin
+// @Router /v1/devices/{device_id}/shell/known-hosts/{port} [delete]
+// @Success 204
+func (h *Handler) deleteKnownHost(w http.ResponseWriter, r *http.Request) {
+	tenant, deviceID, ok := callerAndDevice(w, r)
+	if !ok {
+		return
+	}
+	port, err := parseUintParam(r, "port")
+	if err != nil || port == 0 || port > 65535 {
+		writeErr(w, errs.ErrInvalid)
+		return
+	}
+	if err := h.access.DeleteKnownHost(r.Context(), tenant.UserID, deviceID, uint16(port)); err != nil {
+		writeErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// openShell is the WS upgrade handler.
+func (h *Handler) openShell(w http.ResponseWriter, r *http.Request) {
+	if !sameOrigin(r) {
+		http.Error(w, "websocket origin not allowed", http.StatusForbidden)
+		return
+	}
+	deviceID, err := parseUintParam(r, "device_id")
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	ticket, ok := h.consumeTicket(r.URL.Query().Get("ticket"), deviceID, clientIP(r))
+	if !ok {
+		http.Error(w, "invalid or expired shell ticket", http.StatusUnauthorized)
+		return
+	}
+	defer func() { ticket.Password = "" }()
+	if n := h.router.CountByUser(ticket.UserID); n >= MaxSessionsPerUser {
+		http.Error(w, fmt.Sprintf("too many open shells (%d / %d) for this user", n, MaxSessionsPerUser), http.StatusTooManyRequests)
+		return
+	}
+	if n := h.router.CountByDevice(deviceID); n >= MaxSessionsPerDevice {
+		http.Error(w, fmt.Sprintf("too many open shells (%d / %d) on this device", n, MaxSessionsPerDevice), http.StatusTooManyRequests)
 		return
 	}
 
@@ -213,10 +375,6 @@ func (h *Handler) openShell(w http.ResponseWriter, r *http.Request) {
 		br.closeWith(websocket.CloseProtocolError, "bad open frame")
 		return
 	}
-	if openFrame.SSHUser == "" || openFrame.SSHPass == "" {
-		br.closeWith(websocket.CloseProtocolError, "ssh_user / ssh_pass required")
-		return
-	}
 	cols, rows := openFrame.Cols, openFrame.Rows
 	if cols == 0 {
 		cols = 80
@@ -234,10 +392,12 @@ func (h *Handler) openShell(w http.ResponseWriter, r *http.Request) {
 	startedAt := time.Now().UTC()
 	if err := h.audit.Open(r.Context(), &wsmodel.Session{
 		ID:           sid,
-		OngridUserID: tenant.UserID,
-		SSHUser:      openFrame.SSHUser,
+		OngridUserID: ticket.UserID,
+		SSHUser:      ticket.SSHUser,
+		SSHPort:      ticket.Port,
+		CredentialID: ticket.CredentialID,
 		DeviceID:     deviceID,
-		EdgeID:       edge.ID,
+		EdgeID:       ticket.EdgeID,
 		ClientIP:     clientIP(r),
 		StartedAt:    startedAt,
 	}); err != nil {
@@ -246,19 +406,14 @@ func (h *Handler) openShell(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.router.Register(sid, br, bizwebshell.ActiveSession{
-		SessionID:    sid,
-		OngridUserID: tenant.UserID,
-		SSHUser:      openFrame.SSHUser,
-		DeviceID:     deviceID,
-		EdgeID:       edge.ID,
-		StartedAt:    startedAt,
-		LastInputAt:  startedAt,
+		SessionID: sid, OngridUserID: ticket.UserID, SSHUser: ticket.SSHUser,
+		SSHPort: ticket.Port, DeviceID: deviceID, EdgeID: ticket.EdgeID,
+		StartedAt: startedAt, LastInputAt: startedAt,
 	})
 	defer h.router.Unregister(sid)
 
-	// Open frontier stream to the edge with target meta.
 	streamCtx, cancelStreamOpen := context.WithTimeout(r.Context(), 10*time.Second)
-	stream, err := h.streamer.OpenStream(streamCtx, edge.ID)
+	stream, err := h.streamer.OpenStream(streamCtx, ticket.EdgeID)
 	cancelStreamOpen()
 	if err != nil {
 		h.closeAudit(sid, br, 0, wsmodel.TerminatedByDisconnect)
@@ -266,35 +421,63 @@ func (h *Handler) openShell(w http.ResponseWriter, r *http.Request) {
 		br.closeWith(websocket.CloseInternalServerErr, "open stream")
 		return
 	}
-	// We can't set Meta on the manager-opened stream via the current
-	// frontierbound surface (geminio.OpenStreamOptions exists but we
-	// don't expose it yet). For now the edge always defaults to
-	// 127.0.0.1:22 when Meta is empty — OK for Phase 1. Phase 2
-	// thread Meta through when we add jumpbox support.
-	_ = streamMeta{Target: "127.0.0.1:22"} // documentation only
-
-	// Wrap stream with SSH client conn.
+	var hostKeyErr *bizwebshell.HostKeyError
+	observedFingerprint := ""
+	password := ticket.Password
+	ticket.Password = ""
+	defer func() { password = "" }()
 	sshCfg := &ssh.ClientConfig{
-		User:            openFrame.SSHUser,
-		Auth:            []ssh.AuthMethod{ssh.Password(openFrame.SSHPass)},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // localhost-only path
-		Timeout:         10 * time.Second,
+		User:          ticket.SSHUser,
+		Auth:          []ssh.AuthMethod{ssh.Password(password)},
+		Timeout:       10 * time.Second,
+		ClientVersion: tunnel.WebshellSSHClientVersion(ticket.Port),
+		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
+			observedFingerprint = ssh.FingerprintSHA256(key)
+			err := h.access.VerifyHostKey(r.Context(), ticket.UserID, deviceID, ticket.Port, observedFingerprint, ticket.AcceptedHostKey)
+			if errors.As(err, &hostKeyErr) {
+				return hostKeyErr
+			}
+			return err
+		},
 	}
-	openFrame.SSHPass = "" // wipe asap
-
-	sshConn, sshChans, sshReqs, sshErr := ssh.NewClientConn(rwcAdapter{rwc: stream}, "127.0.0.1:22", sshCfg)
+	sshAddress := net.JoinHostPort("127.0.0.1", strconv.Itoa(int(ticket.Port)))
+	sshConn, sshChans, sshReqs, sshErr := ssh.NewClientConn(rwcAdapter{rwc: stream}, sshAddress, sshCfg)
+	if observedFingerprint != "" {
+		if err := h.audit.SetHostFingerprint(r.Context(), sid, observedFingerprint); err != nil {
+			h.log.Warn("webshell: audit host fingerprint", slog.String("session_id", sid), slog.Any("err", err))
+		}
+	}
 	if sshErr != nil {
 		_ = stream.Close()
+		if hostKeyErr != nil {
+			payload := map[string]any{"type": "host_key_" + hostKeyErr.Kind, "fingerprint": hostKeyErr.Actual}
+			if hostKeyErr.Expected != "" {
+				payload["expected"] = hostKeyErr.Expected
+			}
+			br.sendText(payload)
+			h.closeAudit(sid, br, 0, wsmodel.TerminatedBySSHHostKey)
+			br.closeWith(websocket.CloseNormalClosure, "ssh host key")
+			return
+		}
 		failMsg := sshErr.Error()
-		// Map common cases to friendlier messages.
 		if strings.Contains(failMsg, "unable to authenticate") {
 			failMsg = "用户名或密码错误"
+			h.recordAuthFailure(ticket.UserID, deviceID, ticket.ClientIP)
+		} else if strings.Contains(failMsg, "target") && strings.Contains(failMsg, "not allowed") {
+			failMsg = fmt.Sprintf("该 Edge 暂不支持 SSH 端口 %d，请升级 Edge 后重试", ticket.Port)
 		}
 		br.sendText(map[string]any{"type": "auth_error", "message": failMsg})
 		h.closeAudit(sid, br, 0, wsmodel.TerminatedBySSHAuthFail)
 		br.closeWith(websocket.CloseNormalClosure, "ssh auth")
 		return
 	}
+	h.clearAuthFailures(ticket.UserID, deviceID, ticket.ClientIP)
+	if ticket.SaveCredential {
+		if _, err := h.access.CreateCredential(r.Context(), ticket.UserID, deviceID, ticket.SSHUser, password, ticket.Port); err != nil {
+			br.sendText(map[string]any{"type": "credential_save_error", "message": err.Error()})
+		}
+	}
+	password = ""
 	sshClient := ssh.NewClient(sshConn, sshChans, sshReqs)
 	defer sshClient.Close()
 
@@ -345,7 +528,7 @@ func (h *Handler) openShell(w http.ResponseWriter, r *http.Request) {
 	go pumpReaderToBridge(br, stdout, h.router, sid)
 	go pumpReaderToBridge(br, stderr, h.router, sid)
 	go h.pumpBrowserToSSH(r.Context(), sid, br, stdin, sess, pumpDone)
-	go waitSSH(sess, pumpDone)
+	go waitSSH(sess, br, pumpDone)
 	if IdleTimeout > 0 {
 		go h.idleWatchdog(r.Context(), sid, br, pumpDone)
 	}
@@ -381,13 +564,13 @@ func pumpReaderToBridge(br *bridge, r io.Reader, router *bizwebshell.Router, sid
 	}
 }
 
-func waitSSH(sess *ssh.Session, done chan<- terminationCause) {
+func waitSSH(sess *ssh.Session, br *bridge, done chan<- terminationCause) {
 	exitErr := sess.Wait()
 	code := 0
 	if ee := (*ssh.ExitError)(nil); errors.As(exitErr, &ee) {
 		code = ee.ExitStatus()
 	}
-	_ = code // captured by router via Audit; not strictly needed here
+	br.OnExit(code, "")
 	select {
 	case done <- terminationCause(wsmodel.TerminatedBySSHExit):
 	default:
@@ -503,6 +686,7 @@ func (h *Handler) listSessions(w http.ResponseWriter, r *http.Request) {
 		ID           string  `json:"id"`
 		OngridUserID uint64  `json:"ongrid_user_id"`
 		SSHUser      string  `json:"ssh_user"`
+		SSHPort      uint16  `json:"ssh_port"`
 		DeviceID     uint64  `json:"device_id"`
 		EdgeID       uint64  `json:"edge_id"`
 		StartedAt    string  `json:"started_at"`
@@ -521,6 +705,7 @@ func (h *Handler) listSessions(w http.ResponseWriter, r *http.Request) {
 			ID:           s.SessionID,
 			OngridUserID: s.OngridUserID,
 			SSHUser:      s.SSHUser,
+			SSHPort:      s.SSHPort,
 			DeviceID:     s.DeviceID,
 			EdgeID:       s.EdgeID,
 			StartedAt:    s.StartedAt.UTC().Format(time.RFC3339),
@@ -541,6 +726,7 @@ func (h *Handler) listSessions(w http.ResponseWriter, r *http.Request) {
 			ID:           s.ID,
 			OngridUserID: s.OngridUserID,
 			SSHUser:      s.SSHUser,
+			SSHPort:      s.SSHPort,
 			DeviceID:     s.DeviceID,
 			EdgeID:       s.EdgeID,
 			StartedAt:    s.StartedAt.UTC().Format(time.RFC3339),
@@ -580,11 +766,11 @@ type rwcAdapter struct {
 	rwc io.ReadWriteCloser
 }
 
-func (a rwcAdapter) Read(p []byte) (int, error)  { return a.rwc.Read(p) }
-func (a rwcAdapter) Write(p []byte) (int, error) { return a.rwc.Write(p) }
-func (a rwcAdapter) Close() error                { return a.rwc.Close() }
-func (a rwcAdapter) LocalAddr() net.Addr             { return noopAddr{} }
-func (a rwcAdapter) RemoteAddr() net.Addr            { return noopAddr{} }
+func (a rwcAdapter) Read(p []byte) (int, error)       { return a.rwc.Read(p) }
+func (a rwcAdapter) Write(p []byte) (int, error)      { return a.rwc.Write(p) }
+func (a rwcAdapter) Close() error                     { return a.rwc.Close() }
+func (a rwcAdapter) LocalAddr() net.Addr              { return noopAddr{} }
+func (a rwcAdapter) RemoteAddr() net.Addr             { return noopAddr{} }
 func (a rwcAdapter) SetDeadline(time.Time) error      { return nil }
 func (a rwcAdapter) SetReadDeadline(time.Time) error  { return nil }
 func (a rwcAdapter) SetWriteDeadline(time.Time) error { return nil }
@@ -675,7 +861,135 @@ func clientIP(r *http.Request) string {
 		}
 		return strings.TrimSpace(v)
 	}
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
 	return r.RemoteAddr
+}
+
+func sameOrigin(r *http.Request) bool {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return false
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
+		return false
+	}
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if forwarded := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Proto"), ",")[0]); forwarded == "http" || forwarded == "https" {
+		scheme = forwarded
+	}
+	return strings.EqualFold(u.Scheme, scheme) && strings.EqualFold(u.Host, r.Host)
+}
+
+func callerAndDevice(w http.ResponseWriter, r *http.Request) (tenantctx.Tenant, uint64, bool) {
+	tenant, ok := tenantctx.From(r.Context())
+	if !ok {
+		writeErr(w, errs.ErrUnauthorized)
+		return tenantctx.Tenant{}, 0, false
+	}
+	deviceID, err := parseUintParam(r, "device_id")
+	if err != nil {
+		writeErr(w, err)
+		return tenantctx.Tenant{}, 0, false
+	}
+	return tenant, deviceID, true
+}
+
+func parseUintParam(r *http.Request, name string) (uint64, error) {
+	v, err := strconv.ParseUint(chi.URLParam(r, name), 10, 64)
+	if err != nil || v == 0 {
+		return 0, errors.Join(errs.ErrInvalid, err)
+	}
+	return v, nil
+}
+
+func (h *Handler) onlineEdge(ctx context.Context, deviceID uint64) (*edgemodel.Edge, error) {
+	edges, err := h.edges.List(ctx, edgebiz.ListFilter{Limit: 1000})
+	if err != nil {
+		return nil, fmt.Errorf("list edges: %w", err)
+	}
+	for _, edge := range edges {
+		if edge.DeviceID != nil && *edge.DeviceID == deviceID && edge.Status == edgemodel.StatusOnline {
+			return edge, nil
+		}
+	}
+	return nil, fmt.Errorf("%w: device offline or unknown", errs.ErrEdgeOffline)
+}
+
+func (h *Handler) mintTicket(ticket shellTicket) (string, time.Time, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", time.Time{}, fmt.Errorf("create shell ticket: %w", err)
+	}
+	token := base64.RawURLEncoding.EncodeToString(raw)
+	ticket.ExpiresAt = time.Now().UTC().Add(ticketTTL)
+	h.mu.Lock()
+	h.tickets[token] = ticket
+	h.mu.Unlock()
+	time.AfterFunc(ticketTTL, func() {
+		h.mu.Lock()
+		delete(h.tickets, token)
+		h.mu.Unlock()
+	})
+	return token, ticket.ExpiresAt, nil
+}
+
+func (h *Handler) consumeTicket(token string, deviceID uint64, ip string) (shellTicket, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	ticket, ok := h.tickets[token]
+	delete(h.tickets, token)
+	if !ok || token == "" || time.Now().After(ticket.ExpiresAt) || ticket.DeviceID != deviceID || ticket.ClientIP != ip {
+		return shellTicket{}, false
+	}
+	return ticket, true
+}
+
+func failureKey(userID, deviceID uint64, ip string) string {
+	return fmt.Sprintf("%d:%d:%s", userID, deviceID, ip)
+}
+
+func (h *Handler) tooManyAuthFailures(userID, deviceID uint64, ip string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	key, now := failureKey(userID, deviceID, ip), time.Now()
+	failure, ok := h.failures[key]
+	if !ok || now.After(failure.ResetAt) {
+		delete(h.failures, key)
+		return false
+	}
+	return failure.Count >= maxAuthFailures
+}
+
+func (h *Handler) recordAuthFailure(userID, deviceID uint64, ip string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	key, now := failureKey(userID, deviceID, ip), time.Now()
+	failure := h.failures[key]
+	if now.After(failure.ResetAt) {
+		failure = authFailures{ResetAt: now.Add(authFailureWindow)}
+	}
+	failure.Count++
+	h.failures[key] = failure
+}
+
+func (h *Handler) clearAuthFailures(userID, deviceID uint64, ip string) {
+	h.mu.Lock()
+	delete(h.failures, failureKey(userID, deviceID, ip))
+	h.mu.Unlock()
+}
+
+func writeJSON(w http.ResponseWriter, status int, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if body != nil {
+		_ = json.NewEncoder(w).Encode(body)
+	}
 }
 
 func writeErr(w http.ResponseWriter, err error) {

@@ -17,6 +17,8 @@ service LogsService {
   rpc GetLogContext(GetLogContextRequest) returns (GetLogContextResponse);
   rpc GetLogBackend(GetLogBackendRequest) returns (GetLogBackendResponse);
   rpc PutLogBackend(PutLogBackendRequest) returns (PutLogBackendResponse);
+  // Validates an unsaved Elasticsearch draft without persisting credentials or backend state.
+  rpc ValidateLogBackendDraft(PutLogBackendRequest) returns (TestLogBackendResponse);
   rpc TestLogBackend(TestLogBackendRequest) returns (TestLogBackendResponse);
   rpc SelectLogBackend(SelectLogBackendRequest) returns (SelectLogBackendResponse);
   rpc StartLogBackendConnectionCheck(StartLogBackendConnectionCheckRequest) returns (LogBackendConnectionCheckResponse);

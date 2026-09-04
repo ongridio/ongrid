@@ -2,44 +2,58 @@
 //
 // Flow:
 //   1. Page mounts → fetch device metadata (hostname for the modal title)
-//      and pop the Connect modal. localStorage may pre-fill the os user.
+//      and pop the Connect modal with any server-side saved accounts.
 //   2. User submits the modal → open WS, send first `open` frame with
 //      cols/rows from the freshly-fitted xterm.
 //   3. Manager replies with `ready` (SSH up) → terminal becomes interactive.
 //      Binary frames are stdout; binary user input is wrapped to stdin.
-//   4. `auth_error` / `exit` / WS close → write a red banner, gate the
-//      reconnect button. The user can hit `重连` to re-show the modal.
+//   4. `auth_error` / WS close → write a banner and allow reconnect;
+//      top-level SSH `exit` → leave the terminal page.
 //
 // Security:
-//   - Password lives only in component state; never logged, never stored.
-//   - Only the os username (opt-in) is persisted to localStorage.
+//   - Manual passwords live only in component state and the ticket request.
+//   - Saved passwords are encrypted server-side and never returned to the UI.
 //   - onbeforeunload sends a polite `{type:"close"}` so the manager can
 //     finalize the audit row without waiting for TCP timeout.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Power, RotateCw, Terminal as TerminalIcon } from 'lucide-react';
+import {
+  ChevronLeft,
+  KeyRound,
+  Plus,
+  Power,
+  RotateCw,
+  Shield,
+  ShieldCheck,
+  Terminal as TerminalIcon,
+  Trash2,
+  UserRound,
+} from 'lucide-react';
 import { Modal } from '@/components/Modal';
 import { Button } from '@/components/ui/Button';
 import { XTerminal, type XTerminalApi } from '@/components/XTerminal';
 import { getEdge, listEdges, type Edge } from '@/api/edges';
 import {
+  createShellTicket,
+  deleteShellCredential,
+  listShellCredentials,
   openShellSocket,
-  probeShellPreflight,
+  resetShellKnownHost,
   sendControl,
+  type ShellCredential,
   type ShellControlFrameIn,
 } from '@/api/webshell';
-import { getToken } from '@/store/auth';
 import { usePermissions } from '@/store/me';
-import { tr as trInline, useI18n } from '@/i18n/locale';
+import { useI18n } from '@/i18n/locale';
 import { Card, EmptyState, PageHeader } from '@/components/ui';
-import { Shield } from 'lucide-react';
 
 type ConnectInputs = {
   user: string;
   password: string;
   port: number;
-  remember: boolean;
+  credentialId?: number;
+  saveCredential?: boolean;
 };
 
 type ConnState =
@@ -47,12 +61,6 @@ type ConnState =
   | { kind: 'connecting' }
   | { kind: 'open' }
   | { kind: 'closed'; reason?: string };
-
-const REMEMBER_USER_KEY_PREFIX = 'webshell.last_user.';
-
-function rememberUserKey(deviceId: string) {
-  return `${REMEMBER_USER_KEY_PREFIX}${deviceId}`;
-}
 
 // ANSI red wrapper for inline error messages. xterm renders the escape
 // sequence so we don't need a separate DOM element for status lines.
@@ -71,8 +79,6 @@ export default function DeviceShellPage() {
   // happens — backend rejects too (skill execute / shell open both
   // require non-viewer), but stopping at the page boundary keeps the
   // user from staring at a half-loaded terminal that 403s on connect.
-  const { deviceId = '' } = useParams<{ deviceId: string }>();
-  const navigate = useNavigate();
   if (!canMutate) {
     return (
       <main className="anim-fade flex flex-1 flex-col overflow-hidden p-6">
@@ -88,10 +94,19 @@ export default function DeviceShellPage() {
     );
   }
 
+  return <DeviceShell />;
+}
+
+export function DeviceShell() {
+  const { tr } = useI18n();
+  const { deviceId = '' } = useParams<{ deviceId: string }>();
+  const navigate = useNavigate();
+
   const [edge, setEdge] = useState<Edge | null>(null);
   const [edgeError, setEdgeError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(true);
   const [conn, setConn] = useState<ConnState>({ kind: 'idle' });
+  const [connectionError, setConnectionError] = useState<string | null>(null);
 
   // The terminal API + ws live on refs — they're side-effectful and
   // outliving any single render is the whole point of this page.
@@ -104,6 +119,7 @@ export default function DeviceShellPage() {
   // Track whether we sent the close frame — onbeforeunload + manual close
   // should never double-fire.
   const closedSentRef = useRef(false);
+  const openConnectionRef = useRef<(inputs: ConnectInputs, acceptHostKey?: string) => Promise<void>>(async () => {});
 
   // Fetch device metadata for the title. The route param is the device_id
   // (Prom label). Manager does not yet expose GET /devices/{id}, so we
@@ -139,7 +155,7 @@ export default function DeviceShellPage() {
     return () => {
       cancelled = true;
     };
-  }, [deviceId]);
+  }, [deviceId, tr]);
 
   const tabTitle = useMemo(() => {
     if (!edge) return `Shell · ${deviceId}`;
@@ -187,6 +203,12 @@ export default function DeviceShellPage() {
     }
   }, [sendCloseOnce]);
 
+  const closeTerminalPage = useCallback(() => {
+    teardown();
+    window.close();
+    if (!window.closed) navigate('/devices', { replace: true });
+  }, [navigate, teardown]);
+
   // beforeunload: best-effort polite close. We can't await the close
   // frame; gorilla writes it on the next read tick.
   useEffect(() => {
@@ -212,56 +234,53 @@ export default function DeviceShellPage() {
   // openConnection: wire WS handshake to the open frame. Called from the
   // modal Connect button.
   const openConnection = useCallback(
-    async (inputs: ConnectInputs) => {
-      const token = getToken();
-      if (!token) {
-        writeBanner(ansiRed(tr('未登录或登录已过期，请重新登录', 'Not logged in or session expired; please log in again')));
-        setModalOpen(true);
-        return;
-      }
+    async (inputs: ConnectInputs, acceptHostKey = '') => {
       // Tear down any previous socket (e.g. user hit "重连").
       teardown();
       closedSentRef.current = false;
 
       setConn({ kind: 'connecting' });
+      setConnectionError(null);
 
-      // Pre-flight HTTP probe so 429 / 503 / 403 can be surfaced with
-      // a real Chinese message — browsers don't expose upgrade-time
-      // HTTP status to JS, only WS code 1006. If the probe returns a
-      // non-OK status we abort before opening the socket.
-      const probe = await probeShellPreflight(deviceId);
-      if (probe) {
-        const fatal = explainPreflight(probe.status, probe.message);
-        if (fatal) {
-          writeBanner(ansiRed(fatal));
-          setConn({ kind: 'closed', reason: 'preflight' });
-          setModalOpen(true);
-          return;
-        }
+      let ticket: string;
+      try {
+        const issued = await createShellTicket(deviceId, inputs.credentialId
+          ? { credential_id: inputs.credentialId, accept_host_key: acceptHostKey || undefined }
+          : {
+            ssh_user: inputs.user,
+            ssh_pass: inputs.password,
+            ssh_port: inputs.port,
+            save_credential: inputs.saveCredential,
+            accept_host_key: acceptHostKey || undefined,
+          });
+        ticket = issued.ticket;
+      } catch (err) {
+        inputs.password = '';
+        const message = (err as Error).message || tr('创建终端连接失败', 'Failed to create terminal connection');
+        writeBanner(ansiRed(message));
+        setConnectionError(message);
+        setConn({ kind: 'closed', reason: 'ticket' });
+        setModalOpen(true);
+        return;
       }
 
-      const ws = openShellSocket(deviceId, token);
+      const ws = openShellSocket(deviceId, ticket);
       wsRef.current = ws;
       const encoder = new TextEncoder();
 
       ws.onopen = () => {
+        if (wsRef.current !== ws) return;
         const { cols, rows } = sizeRef.current;
-        const sshHost = inputs.port && inputs.port !== 22 ? `127.0.0.1:${inputs.port}` : '';
         sendControl(ws, {
           type: 'open',
           cols,
           rows,
           term: 'xterm-256color',
-          ssh_user: inputs.user,
-          ssh_pass: inputs.password,
-          ssh_host: sshHost,
         });
-        // We deliberately do NOT clear inputs.password from the closure —
-        // it's already only in stack memory + the WS frame buffer. Once
-        // ws.send returns, the only reference is the GCable closure.
       };
 
       ws.onmessage = (ev) => {
+        if (wsRef.current !== ws) return;
         // Binary == stdout/stderr. xterm handles it directly.
         if (ev.data instanceof ArrayBuffer) {
           termRef.current?.write(new Uint8Array(ev.data));
@@ -276,50 +295,78 @@ export default function DeviceShellPage() {
         }
         if (!frame || typeof frame.type !== 'string') return;
         switch (frame.type) {
-          case 'ready':
+          case 'ready': {
+            inputs.password = '';
             setConn({ kind: 'open' });
             writeBanner(ansiDim(tr(`-- SSH 已连接 (${inputs.user}@${edge?.name ?? deviceId}) --`, `-- SSH connected (${inputs.user}@${edge?.name ?? deviceId}) --`)));
             break;
-          case 'auth_error':
-            writeBanner(ansiRed(tr(`SSH 认证失败：${frame.message || '用户名或密码错误'}`, `SSH auth failed: ${frame.message || 'invalid username or password'}`)));
+          }
+          case 'credential_save_error':
+            writeBanner(ansiRed(tr(
+              `SSH 已连接，但保存账户失败：${frame.message}`,
+              `SSH connected, but saving the account failed: ${frame.message}`,
+            )));
+            break;
+          case 'auth_error': {
+            inputs.password = '';
+            const message = tr(
+              `SSH 认证失败：${frame.message || '用户名或密码错误'}`,
+              `SSH auth failed: ${frame.message || 'invalid username or password'}`,
+            );
+            writeBanner(ansiRed(message));
+            setConnectionError(message);
             setConn({ kind: 'closed', reason: 'auth' });
             // Re-open the modal so the user can retry without leaving.
             setModalOpen(true);
             break;
-          case 'exit': {
-            const code = frame.exit_code ?? 0;
-            const tail = frame.message ? `: ${frame.message}` : '';
-            writeBanner(
-              code === 0
-                ? ansiDim(tr(`-- 会话已结束 (exit code 0)${tail} --`, `-- Session ended (exit code 0)${tail} --`))
-                : ansiRed(tr(`-- 会话已结束 (exit code ${code})${tail} --`, `-- Session ended (exit code ${code})${tail} --`)),
+          }
+          case 'host_key_unknown':
+            if (confirm(tr(
+              `首次连接此 SSH 服务。确认信任主机指纹？\n${frame.fingerprint}`,
+              `First connection to this SSH service. Trust this host key?\n${frame.fingerprint}`,
+            ))) {
+              teardown();
+              void openConnectionRef.current(inputs, frame.fingerprint);
+            } else {
+              inputs.password = '';
+              setConnectionError(tr('未信任 SSH 主机指纹，连接已取消', 'SSH host key was not trusted; connection cancelled'));
+              setConn({ kind: 'closed', reason: 'host-key' });
+              setModalOpen(true);
+            }
+            break;
+          case 'host_key_changed': {
+            inputs.password = '';
+            const message = tr(
+              `SSH 主机指纹已变化，已阻止连接。原指纹：${frame.expected}，当前：${frame.fingerprint}`,
+              `SSH host key changed; connection blocked. Expected: ${frame.expected}, actual: ${frame.fingerprint}`,
             );
-            setConn({ kind: 'closed', reason: 'exit' });
+            writeBanner(ansiRed(message));
+            setConnectionError(message);
+            setConn({ kind: 'closed', reason: 'host-key' });
+            setModalOpen(true);
             break;
           }
+          case 'exit':
+            inputs.password = '';
+            closeTerminalPage();
+            break;
         }
       };
 
       ws.onerror = () => {
-        writeBanner(ansiRed(tr('WebSocket 连接错误', 'WebSocket connection error')));
+        if (wsRef.current !== ws) return;
+        const message = tr('WebSocket 连接错误', 'WebSocket connection error');
+        writeBanner(ansiRed(message));
+        setConnectionError(message);
       };
 
       ws.onclose = (ev) => {
-        // 1006 = abnormal close (no close frame); usually means the
-        // upgrade failed (auth, route, network) or the server cut the
-        // socket without a close frame. Run the post-mortem probe to
-        // see if the manager has a real HTTP status to report.
+        if (wsRef.current !== ws) return;
+        inputs.password = '';
         if (!closedSentRef.current && ev.code === 1006) {
-          writeBanner(ansiRed(tr('连接异常断开', 'Connection dropped unexpectedly')));
-          // Best-effort post-mortem: hit GET on the same path; if the
-          // manager replies with 429 / 503 / 403 we now know what went
-          // wrong and can retell the user. Probe is fire-and-forget so
-          // we don't block the close handler.
-          void probeShellPreflight(deviceId).then((p) => {
-            if (!p) return;
-            const detail = explainPreflight(p.status, p.message);
-            if (detail) writeBanner(ansiRed(detail));
-          });
+          const message = tr('连接异常断开', 'Connection dropped unexpectedly');
+          writeBanner(ansiRed(message));
+          setConnectionError(message);
           setModalOpen(true);
         } else if (ev.code !== 1000 && ev.code !== 1005) {
           writeBanner(
@@ -340,8 +387,9 @@ export default function DeviceShellPage() {
         ws.send(encoder.encode(data));
       };
     },
-    [deviceId, edge, teardown, writeBanner],
+    [closeTerminalPage, deviceId, edge, teardown, tr, writeBanner],
   );
+  openConnectionRef.current = openConnection;
 
   // Wire xterm onData → ws via a ref-based pump so we don't have to
   // re-mount the terminal when the socket changes (reconnect).
@@ -363,34 +411,14 @@ export default function DeviceShellPage() {
     termRef.current = api;
   }, []);
 
-  // Modal submit handler. Persists the username choice and kicks off the
-  // WS handshake; password is dropped on the floor after this returns.
+  // Modal submit handler. Password is dropped on the floor after this returns.
   const handleConnect = useCallback(
     (inputs: ConnectInputs) => {
-      if (inputs.remember) {
-        try {
-          localStorage.setItem(rememberUserKey(deviceId), inputs.user);
-        } catch {
-          /* private mode / quota — non-fatal */
-        }
-      } else {
-        try {
-          localStorage.removeItem(rememberUserKey(deviceId));
-        } catch {
-          /* noop */
-        }
-      }
       setModalOpen(false);
       openConnection(inputs);
     },
-    [deviceId, openConnection],
+    [openConnection],
   );
-
-  const handleManualClose = useCallback(() => {
-    if (!confirm(tr('确定要关闭终端会话？', 'Close this terminal session?'))) return;
-    teardown();
-    navigate('/devices');
-  }, [navigate, teardown]);
 
   const handleReconnect = useCallback(() => {
     teardown();
@@ -447,7 +475,7 @@ export default function DeviceShellPage() {
           </Button>
           <Button
             variant="ghost"
-            onClick={handleManualClose}
+            onClick={closeTerminalPage}
             aria-label={tr('关闭终端', 'Close terminal')}
           >
             <Power size={12} />
@@ -468,6 +496,7 @@ export default function DeviceShellPage() {
         open={modalOpen}
         deviceId={deviceId}
         title={tr(`连接到 ${hostname}`, `Connect to ${hostname}`)}
+        connectionError={connectionError}
         onCancel={() => {
           // If we never connected, leave the page; otherwise just hide
           // the modal (terminal is still useful for reading prior output).
@@ -485,45 +514,73 @@ export default function DeviceShellPage() {
 
 // ConnectModal collects ssh user / password / port. We keep it inline so
 // the password lifetime is bounded by this component's mount window.
-function ConnectModal({
+export function ConnectModal({
   open,
   deviceId,
   title,
+  connectionError,
   onSubmit,
   onCancel,
 }: {
   open: boolean;
   deviceId: string;
   title: string;
+  connectionError?: string | null;
   onSubmit(inputs: ConnectInputs): void;
   onCancel(): void;
 }) {
   const { tr } = useI18n();
-  const [user, setUser] = useState('');
+  const [user, setUser] = useState('root');
   const [password, setPassword] = useState('');
   const [port, setPort] = useState<string>('22');
-  const [remember, setRemember] = useState(true);
-  const [advanced, setAdvanced] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [credentials, setCredentials] = useState<ShellCredential[]>([]);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [saveCredential, setSaveCredential] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-  // Pre-fill the username from localStorage on first open. We don't
-  // depend on `deviceId` for the lifetime — the hook re-runs when the
-  // modal toggles open so reconnects keep the user remembered.
   useEffect(() => {
     if (!open) return;
+    let cancelled = false;
     setErr(null);
+    setUser('root');
     setPassword('');
-    try {
-      const last = localStorage.getItem(rememberUserKey(deviceId));
-      if (last) setUser(last);
-    } catch {
-      /* noop */
-    }
+    setSelected(null);
+    setLoading(true);
+    void listShellCredentials(deviceId)
+      .then((result) => {
+        if (cancelled) return;
+        const items = result.items ?? [];
+        setCredentials(items);
+        setSelected(items[0] ? String(items[0].id) : 'new');
+      })
+      .catch((cause) => {
+        if (cancelled) return;
+        setCredentials([]);
+        setSelected('new');
+        setErr((cause as Error).message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [open, deviceId]);
 
   if (!open) return null;
 
   const submit = () => {
+    if (selected && selected !== 'new') {
+      const credential = credentials.find((item) => String(item.id) === selected);
+      if (!credential) {
+        setErr(tr('保存的凭据不存在，请刷新后重试', 'Saved credential no longer exists; refresh and retry'));
+        return;
+      }
+      onSubmit({ user: credential.ssh_user, password: '', port: credential.ssh_port, credentialId: credential.id });
+      return;
+    }
     const u = user.trim();
     if (!u) {
       setErr(tr('请输入 OS 用户名', 'Please enter the OS username'));
@@ -538,7 +595,35 @@ function ConnectModal({
       setErr(tr('端口必须在 1-65535 之间', 'Port must be between 1 and 65535'));
       return;
     }
-    onSubmit({ user: u, password, port: p, remember });
+    onSubmit({ user: u, password, port: p, saveCredential });
+    setPassword('');
+  };
+
+  const removeCredential = async (credential: ShellCredential) => {
+    if (!confirm(tr(`删除账户“${credential.ssh_user}”？`, `Delete account “${credential.ssh_user}”?`))) return;
+    setBusy(true);
+    try {
+      await deleteShellCredential(deviceId, credential.id);
+      const next = credentials.filter((item) => item.id !== credential.id);
+      setCredentials(next);
+      setSelected(next[0] ? String(next[0].id) : 'new');
+    } catch (cause) {
+      setErr((cause as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const resetKnownHost = async (sshPort: number) => {
+    if (!confirm(tr(`重置端口 ${sshPort} 的主机指纹信任？`, `Reset trusted host key for port ${sshPort}?`))) return;
+    setBusy(true);
+    try {
+      await resetShellKnownHost(deviceId, sshPort);
+    } catch (cause) {
+      setErr((cause as Error).message);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -552,93 +637,182 @@ function ConnectModal({
           <Button variant="ghost" onClick={onCancel}>
             {tr('取消', 'Cancel')}
           </Button>
-          <Button variant="primary" onClick={submit}>
-            {tr('连接', 'Connect')}
+          <Button variant="primary" onClick={() => void submit()} disabled={busy || loading || !selected}>
+            {busy ? tr('连接中…', 'Connecting…') : tr('连接', 'Connect')}
           </Button>
         </>
       }
     >
       <div className="space-y-3">
-        <div>
-          <label htmlFor="webssh-user" className="mb-1 block text-[11px] text-zinc-500">
-            {tr('OS 用户', 'OS user')}
-          </label>
-          <input
-            id="webssh-user"
-            autoFocus
-            autoComplete="username"
-            value={user}
-            onChange={(e) => setUser(e.target.value)}
-            placeholder="root"
-            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') submit();
-            }}
-          />
-        </div>
-        <div>
-          <label htmlFor="webssh-pass" className="mb-1 block text-[11px] text-zinc-500">
-            {tr('密码', 'Password')}
-          </label>
-          <input
-            id="webssh-pass"
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') submit();
-            }}
-          />
-        </div>
-        <div>
-          <button
-            type="button"
-            onClick={() => setAdvanced((v) => !v)}
-            className="text-[11px] text-zinc-500 hover:text-zinc-300"
-          >
-            {advanced ? tr('收起高级', 'Hide advanced') : tr('高级选项 ▸', 'Advanced ▸')}
-          </button>
-          {advanced && (
-            <div className="mt-2">
-              <label htmlFor="webssh-port" className="mb-1 block text-[11px] text-zinc-500">
-                {tr('SSH 端口', 'SSH port')}
+        {loading && (
+          <div className="py-8 text-center text-xs text-zinc-500">
+            {tr('正在加载已保存账户…', 'Loading saved accounts…')}
+          </div>
+        )}
+
+        {!loading && selected !== 'new' && (
+          <>
+            <div className="flex items-center gap-2 text-[11px] font-medium text-zinc-500">
+              <KeyRound size={13} />
+              {tr('已保存账户', 'Saved accounts')}
+            </div>
+            <div role="radiogroup" aria-label={tr('已保存账户', 'Saved accounts')} className="space-y-2">
+              {credentials.map((credential) => {
+                const checked = selected === String(credential.id);
+                return (
+                  <div
+                    key={credential.id}
+                    className={`flex items-center rounded-lg border transition-colors ${checked ? 'border-indigo-500/50 bg-indigo-500/10' : 'border-zinc-800 bg-zinc-950 hover:border-zinc-700'}`}
+                  >
+                    <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 px-3 py-2.5">
+                      <input
+                        type="radio"
+                        name="webssh-account"
+                        value={credential.id}
+                        checked={checked}
+                        onChange={() => setSelected(String(credential.id))}
+                        className="h-3.5 w-3.5 accent-indigo-500"
+                      />
+                      <UserRound size={16} className="shrink-0 text-zinc-500" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-xs font-medium text-zinc-100">{credential.ssh_user}</span>
+                        <span className="mt-0.5 block text-[11px] text-zinc-500">127.0.0.1 · {tr('端口', 'Port')} {credential.ssh_port}</span>
+                      </span>
+                    </label>
+                    <div className="flex items-center gap-0.5 pr-2">
+                      <button
+                        type="button"
+                        onClick={() => void resetKnownHost(credential.ssh_port)}
+                        disabled={busy}
+                        aria-label={tr(`重置 ${credential.ssh_user} 的主机信任`, `Reset host trust for ${credential.ssh_user}`)}
+                        title={tr('重置主机信任', 'Reset host trust')}
+                        className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-40"
+                      >
+                        <ShieldCheck size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void removeCredential(credential)}
+                        disabled={busy}
+                        aria-label={tr(`删除 ${credential.ssh_user}`, `Delete ${credential.ssh_user}`)}
+                        title={tr('删除账户', 'Delete account')}
+                        className="rounded-md p-1.5 text-zinc-500 hover:bg-red-500/10 hover:text-red-400 disabled:opacity-40"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setSelected('new');
+                setUser('root');
+                setPassword('');
+                setPort('22');
+                setSaveCredential(false);
+                setErr(null);
+              }}
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-zinc-700 px-3 py-2.5 text-xs font-medium text-zinc-400 transition-colors hover:border-zinc-600 hover:bg-zinc-800 hover:text-zinc-100"
+            >
+              <Plus size={14} />
+              {tr('新增账户', 'Add account')}
+            </button>
+          </>
+        )}
+
+        {!loading && selected === 'new' && (
+          <>
+            {credentials.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSelected(String(credentials[0].id));
+                  setErr(null);
+                }}
+                className="flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-200"
+              >
+                <ChevronLeft size={13} />
+                {tr('返回已保存账户', 'Back to saved accounts')}
+              </button>
+            )}
+            <div className="flex items-center gap-2 text-[11px] font-medium text-zinc-500">
+              <Plus size={13} />
+              {tr('新增账户', 'Add account')}
+            </div>
+            <div className="grid grid-cols-[minmax(0,1fr)_96px] gap-3">
+              <div>
+                <label htmlFor="webssh-user" className="mb-1 block text-[11px] text-zinc-500">
+                  {tr('OS 用户', 'OS user')}
+                </label>
+                <input
+                  id="webssh-user"
+                  autoFocus
+                  autoComplete="off"
+                  value={user}
+                  onChange={(e) => setUser(e.target.value)}
+                  className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-2 text-xs text-zinc-100 focus:border-indigo-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label htmlFor="webssh-port" className="mb-1 block text-[11px] text-zinc-500">
+                  {tr('SSH 端口', 'SSH port')}
+                </label>
+                <input
+                  id="webssh-port"
+                  inputMode="numeric"
+                  value={port}
+                  onChange={(e) => setPort(e.target.value.replace(/[^0-9]/g, ''))}
+                  placeholder="22"
+                  className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-2 text-xs text-zinc-100 focus:border-indigo-500 focus:outline-none"
+                />
+              </div>
+            </div>
+            <div>
+              <label htmlFor="webssh-pass" className="mb-1 block text-[11px] text-zinc-500">
+                {tr('密码', 'Password')}
               </label>
               <input
-                id="webssh-port"
-                inputMode="numeric"
-                value={port}
-                onChange={(e) => setPort(e.target.value.replace(/[^0-9]/g, ''))}
-                placeholder="22"
-                className="w-32 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                id="webssh-pass"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-2 text-xs text-zinc-100 focus:border-indigo-500 focus:outline-none"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void submit();
+                }}
               />
-              <p className="mt-1 text-[11px] text-zinc-600">
-                {tr('默认走设备本地 sshd（127.0.0.1:22）。改端口仅在本机另起 sshd 时有用。', "Defaults to the device's local sshd (127.0.0.1:22). Change only if you've started another sshd on a different port.")}
-              </p>
             </div>
-          )}
-        </div>
-        <label className="flex cursor-pointer items-center gap-2 text-xs text-zinc-300">
-          <input
-            type="checkbox"
-            checked={remember}
-            onChange={(e) => setRemember(e.target.checked)}
-            className="h-3.5 w-3.5 accent-zinc-300"
-          />
-          {tr('记住此用户名（仅本浏览器，不保存密码）', 'Remember this username (this browser only; password is never stored)')}
-        </label>
-        {err && (
+            <label className="flex cursor-pointer items-center gap-2 text-xs text-zinc-300">
+              <input
+                type="checkbox"
+                checked={saveCredential}
+                onChange={(e) => setSaveCredential(e.target.checked)}
+                className="h-3.5 w-3.5 accent-indigo-500"
+              />
+              {tr('保存此账户，下次可直接登录', 'Save this account for one-click login next time')}
+            </label>
+            <p className="text-[11px] leading-4 text-zinc-600">
+              {tr('连接目标固定为设备本机 127.0.0.1，可使用任意有效 SSH 端口。', 'Connections target device loopback 127.0.0.1 and may use any valid SSH port.')}
+            </p>
+          </>
+        )}
+        {(err || connectionError) && (
           <div
             role="alert"
             className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-300"
           >
-            {err}
+            {err || connectionError}
           </div>
         )}
-        <p className="text-[11px] text-zinc-600">
-          {tr('提示：密码不会被写入浏览器存储；关闭弹窗或刷新页面后立即丢弃。', 'Note: the password is never persisted in browser storage; it is discarded as soon as the dialog closes or the page reloads.')}
-        </p>
+        {!loading && selected !== 'new' && (
+          <p className="text-[11px] leading-4 text-zinc-600">
+            {tr('保存的密码由 Manager 加密，仅对你的 Ongrid 账号和当前设备可用。', 'Saved passwords are encrypted by Manager and available only to your Ongrid account on this device.')}
+          </p>
+        )}
       </div>
     </Modal>
   );
@@ -665,35 +839,6 @@ function extractHostname(hostInfo: Edge['host_info']): string | null {
     }
   }
   return null;
-}
-
-// explainPreflight maps a probe HTTP status to a Chinese error string.
-// Returns null when the status is fine (200/400-from-WS-upgrade-attempt
-// without an Upgrade header — that's the "all good" signal).
-//
-// Status mapping:
-//   429 → "并发会话过多（每用户最多 5 / 每设备最多 5）"
-//   503 → "设备离线"
-//   403 → "权限不足，请联系管理员"
-//   401 → "未登录或登录已过期，请重新登录"
-//   404 → "设备不存在或未上线"
-//   500+ → "服务端错误"
-function explainPreflight(status: number, _message: string): string | null {
-  switch (status) {
-    case 429:
-      return trInline('并发会话过多（每用户最多 5 / 每设备最多 5）', 'Too many concurrent sessions (per user max 5 / per device max 5)');
-    case 503:
-      return trInline('设备离线', 'Device offline');
-    case 403:
-      return trInline('权限不足，请联系管理员', 'Insufficient permission; contact an admin');
-    case 401:
-      return trInline('未登录或登录已过期，请重新登录', 'Not logged in or session expired; please log in again');
-    case 404:
-      return trInline('设备不存在或未上线', 'Device not found or offline');
-    default:
-      if (status >= 500) return trInline('服务端错误，请稍后重试', 'Server error; please retry shortly');
-      return null;
-  }
 }
 
 function safeParse(s: string): Record<string, unknown> | null {

@@ -58,6 +58,7 @@ type Handler struct {
 type BackendService interface {
 	Get(ctx context.Context) (*bizlogs.BackendView, error)
 	Save(ctx context.Context, input bizlogs.SaveInput) (*bizlogs.BackendView, error)
+	TestDraft(ctx context.Context, input bizlogs.SaveInput) (*bizlogs.BackendTestResult, error)
 	Test(ctx context.Context, id uint64) (*bizlogs.BackendTestResult, error)
 	Select(ctx context.Context, id uint64) (*bizlogs.BackendView, error)
 	SelectLoki(ctx context.Context) (*bizlogs.BackendView, error)
@@ -106,6 +107,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Post("/v1/logs/context", h.contextLogs)
 	r.Get("/v1/logs/backend", h.getBackend)
 	r.Put("/v1/logs/backend", h.putBackend)
+	r.Post("/v1/logs/backend/test", h.testBackendDraft)
 	r.Post("/v1/logs/backend/{id}/test", h.testBackend)
 	r.Post("/v1/logs/backend/loki/select", h.selectLoki)
 	r.Post("/v1/logs/backend/{id}/select", h.selectBackend)
@@ -116,6 +118,28 @@ func (h *Handler) Register(r chi.Router) {
 	r.Get("/v1/logs/query_range", h.queryRange)
 	r.Get("/v1/logs/labels", h.labels)
 	r.Get("/v1/logs/labels/{name}/values", h.labelValues)
+}
+
+// testBackendDraft validates an unsaved Elasticsearch configuration.
+func (h *Handler) testBackendDraft(w http.ResponseWriter, r *http.Request) {
+	if !requireBackendAdmin(w, r) {
+		return
+	}
+	if h.backend == nil {
+		writeAPIErr(w, http.StatusServiceUnavailable, "LOG_BACKEND_DISABLED", "log backend management disabled")
+		return
+	}
+	var input bizlogs.SaveInput
+	if err := decodeJSONBody(r, &input); err != nil {
+		writeAPIErr(w, http.StatusBadRequest, "LOG_BACKEND_INVALID", "invalid log backend request")
+		return
+	}
+	out, err := h.backend.TestDraft(r.Context(), input)
+	if err != nil {
+		writeBackendError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, apiEnvelope{Code: http.StatusOK, Message: "success", Data: out})
 }
 
 // getBackend godoc
