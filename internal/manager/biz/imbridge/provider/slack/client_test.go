@@ -208,6 +208,29 @@ func TestOpenConnectionUsesAppToken(t *testing.T) {
 	}
 }
 
+func TestProbeValidatesBotAndAppTokens(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path+" "+r.Header.Get("Authorization"))
+		if r.URL.Path == "/apps.connections.open" {
+			_, _ = io.WriteString(w, `{"ok":true,"url":"wss://example.invalid/ticket"}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"ok":true}`)
+	}))
+	defer srv.Close()
+
+	c := NewClient("xapp-1-app", "xoxb-1-bot")
+	c.SetBaseURL(srv.URL)
+	if err := c.Probe(context.Background()); err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	want := []string{"/auth.test Bearer xoxb-1-bot", "/apps.connections.open Bearer xapp-1-app"}
+	if strings.Join(paths, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("requests = %v, want %v", paths, want)
+	}
+}
+
 // TestStripMentions covers the Slack mention markup we have to rewrite
 // before handing the text to the agent. The agent prompt is plain text
 // — leaving raw `<@U…>` in would have the model echo it back literally.

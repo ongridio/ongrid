@@ -1,7 +1,7 @@
 import { render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
-import { ModelIcon, ProviderIcon } from './Provider';
+import { CommunicationProviderIcon, ModelIcon, ProviderIcon } from './Provider';
 
 describe('ProviderIcon', () => {
   it.each([
@@ -14,5 +14,18 @@ describe('ProviderIcon', () => {
 
     const modelView = render(<ModelIcon provider="custom" model={model} />);
     expect(modelView.container.querySelector(`[fill="${color}"]`)).toBeInTheDocument();
+  });
+});
+
+describe('CommunicationProviderIcon', () => {
+  it.each([
+    ['feishu', '#00D6B9'],
+    ['dingtalk', '#0089FF'],
+    ['wecom', '#07C160'],
+    ['slack', '#E01E5A'],
+    ['telegram', '#229ED9'],
+  ])('renders the %s brand mark', (provider, color) => {
+    const view = render(<CommunicationProviderIcon provider={provider} />);
+    expect(view.container.querySelector(`svg[data-brand="${provider}"] [fill="${color}"]`)).toBeInTheDocument();
   });
 });

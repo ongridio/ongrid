@@ -33,6 +33,17 @@ func NewStreamClient(app *model.ImApp, bridge *bizbridge.Bridge, log *slog.Logge
 	}
 }
 
+// Probe validates the app credentials and obtains a stream endpoint without dialing it.
+func Probe(ctx context.Context, appID, appSecret string, opts ...client.ClientOption) error {
+	opts = append([]client.ClientOption{client.WithAppCredential(
+		client.NewAppCredentialConfig(appID, appSecret),
+	)}, opts...)
+	if _, err := client.NewStreamClient(opts...).GetConnectionEndpoint(ctx); err != nil {
+		return fmt.Errorf("dingtalk credentials: %w", err)
+	}
+	return nil
+}
+
 func (c *StreamClient) ProviderName() string { return model.ProviderDingTalk }
 
 // Run starts the SDK connection and blocks until the supervisor cancels it.

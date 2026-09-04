@@ -135,6 +135,28 @@ func TestAPIErrorSurfacesCode(t *testing.T) {
 	}
 }
 
+func TestProbeUsesGetMe(t *testing.T) {
+	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/getMe") {
+			t.Fatalf("path = %s, want .../getMe", r.URL.Path)
+		}
+		_, _ = io.WriteString(w, `{"ok":true,"result":{"id":1,"is_bot":true}}`)
+	})
+	if err := c.Probe(context.Background()); err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+}
+
+func TestProbeRedactsTokenFromErrors(t *testing.T) {
+	c := testClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `bad response containing 123:ABC`)
+	})
+	err := c.Probe(context.Background())
+	if err == nil || strings.Contains(err.Error(), "123:ABC") {
+		t.Fatalf("Probe error leaked bot token: %v", err)
+	}
+}
+
 // TestSenderAdapter covers the bizbridge.Sender contract: SendText returns
 // the platform message id as a decimal string, and EditText routes it back
 // to editMessageText with the bound chatID.

@@ -9,18 +9,23 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
-	bizbridge "github.com/ongridio/ongrid/internal/manager/biz/imbridge"
-	"github.com/ongridio/ongrid/internal/manager/biz/imbridge/provider/feishu"
 	iammodel "github.com/ongridio/ongrid/internal/iam/model"
+	bizbridge "github.com/ongridio/ongrid/internal/manager/biz/imbridge"
+	"github.com/ongridio/ongrid/internal/manager/biz/imbridge/provider/dingtalk"
+	"github.com/ongridio/ongrid/internal/manager/biz/imbridge/provider/feishu"
+	"github.com/ongridio/ongrid/internal/manager/biz/imbridge/provider/slack"
+	"github.com/ongridio/ongrid/internal/manager/biz/imbridge/provider/telegram"
 	model "github.com/ongridio/ongrid/internal/manager/model/imbridge"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/tenantctx"
-	"log/slog"
 )
 
 // requireAdmin gates all /v1/im/apps routes — IM app config is
@@ -77,6 +82,7 @@ func (h *Handler) RegisterProtected(r chi.Router) {
 	r.Get("/v1/im/apps/{id}", h.getApp)
 	r.Put("/v1/im/apps/{id}", h.updateApp)
 	r.Delete("/v1/im/apps/{id}", h.deleteApp)
+	r.Post("/v1/im/apps/{id}/test", h.testApp)
 	r.Post("/v1/im/apps/{id}/reveal", h.revealAppSecret)
 }
 
@@ -453,6 +459,60 @@ func (h *Handler) deleteApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+type appTestResult struct {
+	Accepted  bool   `json:"accepted"`
+	Message   string `json:"message,omitempty"`
+	LatencyMS int64  `json:"latency_ms"`
+}
+
+// testApp verifies stored credentials against the provider without sending a message.
+func (h *Handler) testApp(w http.ResponseWriter, r *http.Request) {
+	if !requireAdmin(w, r) {
+		return
+	}
+	id, ok := parseIDFromURL(r)
+	if !ok {
+		http.Error(w, "bad id", http.StatusBadRequest)
+		return
+	}
+	app, err := h.uc.GetApp(r.Context(), id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	started := time.Now()
+	err = probeApp(ctx, app)
+	out := appTestResult{Accepted: err == nil, LatencyMS: time.Since(started).Milliseconds()}
+	if err != nil {
+		out.Message = err.Error()
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func probeApp(ctx context.Context, app *model.ImApp) error {
+	if app == nil {
+		return fmt.Errorf("%w: IM app required", errs.ErrInvalid)
+	}
+	switch app.Provider {
+	case model.ProviderFeishu:
+		return feishu.NewClient(app.AppID, app.AppSecret).Probe(ctx)
+	case model.ProviderDingTalk:
+		return dingtalk.Probe(ctx, app.AppID, app.AppSecret)
+	case model.ProviderTelegram:
+		return telegram.NewClient(app.AppSecret).Probe(ctx)
+	case model.ProviderSlack:
+		client, err := slack.NewClientFromSecret(app.AppSecret)
+		if err != nil {
+			return err
+		}
+		return client.Probe(ctx)
+	default:
+		return fmt.Errorf("%w: unsupported IM provider %q", errs.ErrInvalid, app.Provider)
+	}
 }
 
 // revealAppSecret returns the cleartext app_secret. Mirrors the

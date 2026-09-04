@@ -101,3 +101,17 @@ func TestClient_SendAndEditUseNativePostPayload(t *testing.T) {
 		}
 	}
 }
+
+func TestClientProbeValidatesCredentialsWithoutSending(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/open-apis/auth/v3/tenant_access_token/internal" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		_, _ = io.WriteString(w, `{"code":0,"msg":"ok","tenant_access_token":"token","expire":7200}`)
+	}))
+	defer srv.Close()
+
+	if err := NewClient("app", "secret", WithBaseURL(srv.URL), WithHTTPClient(srv.Client())).Probe(context.Background()); err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+}

@@ -110,6 +110,17 @@ func NewClientFromSecret(rawSecret string) (*Client, error) {
 // code uses the default.
 func (c *Client) SetBaseURL(u string) { c.base = strings.TrimRight(u, "/") }
 
+// Probe validates both tokens required by Socket Mode without sending a message.
+func (c *Client) Probe(ctx context.Context) error {
+	if err := c.call(ctx, "auth.test", c.botToken, struct{}{}, nil); err != nil {
+		return fmt.Errorf("slack bot token: %w", err)
+	}
+	if _, err := c.OpenConnection(ctx); err != nil {
+		return fmt.Errorf("slack app token: %w", err)
+	}
+	return nil
+}
+
 // apiResp is the common envelope for every Slack Web API call. ok=false
 // always carries an Error message; we surface it so the caller sees the
 // real Slack reason (e.g. "channel_not_found", "invalid_auth") rather

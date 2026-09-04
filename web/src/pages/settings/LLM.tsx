@@ -17,6 +17,7 @@ import {
 } from '@/api/settings';
 import { Button, Card, Chip } from '@/components/ui';
 import { ProviderIcon } from '@/components/icons/Provider';
+import { SettingsProviderPicker } from '@/components/SettingsProviderPicker';
 import { cn } from '@/lib/cn';
 import { useI18n } from '@/i18n/locale';
 
@@ -269,9 +270,17 @@ export default function SettingsLLM() {
       ) : (
         <>
           {availableProviders.length > 0 && (
-            <ProviderPicker
-              providers={availableProviders}
-              onAdd={(id) => setVisibleProviderIDs((current) => [...current, id])}
+            <SettingsProviderPicker
+              testId="llm-provider-picker"
+              label={tr('添加模型供应商', 'Add model provider')}
+              summary={tr(`${availableProviders.length} 个可选`, `${availableProviders.length} available`)}
+              options={availableProviders.map((meta) => ({
+                id: meta.id,
+                icon: <ProviderIcon provider={meta.id} size={18} />,
+                label: tr(meta.label, meta.labelEn ?? meta.label),
+                description: tr(meta.hintZh, meta.hintEn),
+              }))}
+              onSelect={(id) => setVisibleProviderIDs((current) => [...current, id])}
             />
           )}
           {visibleProviders.map((meta) => (
@@ -287,46 +296,6 @@ function providerConfigured(items: SystemSetting[], meta: LLMProviderMeta): bool
   const hasAPIKey = items.some((item) => item.key === meta.keyAPIKey && (item.value ?? '').trim() !== '');
   const hasBaseURL = items.some((item) => item.key === meta.keyBaseURL && (item.value ?? '').trim() !== '');
   return hasAPIKey && (!meta.custom || hasBaseURL);
-}
-
-function ProviderPicker({
-  providers,
-  onAdd,
-}: {
-  providers: LLMProviderMeta[];
-  onAdd(id: LLMProviderID): void;
-}) {
-  const { tr } = useI18n();
-  return (
-    <Card className="p-0" data-testid="llm-provider-picker">
-      <details>
-        <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm font-medium text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500 [&::-webkit-details-marker]:hidden">
-          <Plus size={15} />
-          <span>{tr('添加模型供应商', 'Add model provider')}</span>
-          <span className="ml-auto text-xs font-normal text-zinc-500">
-            {tr(`${providers.length} 个可选`, `${providers.length} available`)}
-          </span>
-        </summary>
-        <div className="divide-y divide-zinc-800/60 border-t border-zinc-800/60">
-          {providers.map((meta) => (
-            <button
-              key={meta.id}
-              type="button"
-              onClick={() => onAdd(meta.id)}
-              className="flex min-h-11 w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-zinc-800/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500"
-            >
-              <ProviderIcon provider={meta.id} size={18} />
-              <span className="min-w-0">
-                <span className="block text-sm text-zinc-200">{tr(meta.label, meta.labelEn ?? meta.label)}</span>
-                <span className="block truncate text-[11px] text-zinc-500">{tr(meta.hintZh, meta.hintEn)}</span>
-              </span>
-              <Plus size={14} className="ml-auto shrink-0 text-zinc-500" />
-            </button>
-          ))}
-        </div>
-      </details>
-    </Card>
-  );
 }
 
 function LLMProviderCard({ meta, initialSettings }: { meta: LLMProviderMeta; initialSettings: SystemSetting[] }) {

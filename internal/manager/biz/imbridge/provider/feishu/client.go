@@ -47,6 +47,12 @@ func NewClient(appID, appSecret string, opts ...Option) *Client {
 	return c
 }
 
+// Probe validates the app credentials without sending a message.
+func (c *Client) Probe(ctx context.Context) error {
+	_, err := c.tenantAccessToken(ctx)
+	return err
+}
+
 // tenantAccessToken returns a cached tenant_access_token, refreshing
 // when it's within 200s of expiry. Per Feishu docs the token is good
 // for up to 7200s; we refresh proactively to avoid the 401 round-trip
