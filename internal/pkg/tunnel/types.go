@@ -94,10 +94,9 @@ type Client interface {
 	// to/from the sshd socket. The stream is a net.Conn-shaped
 	// io.ReadWriteCloser (geminio.Stream embeds Raw = net.Conn).
 	//
-	// Stream.Meta() carries the manager-supplied target descriptor
-	// (today: JSON {"target":"127.0.0.1:22"}). Edge dispatchers
-	// decode it before dialing the local socket — keeps the tunnel
-	// layer generic.
+	// Stream.Meta() is transport-local metadata. Frontier v1.2.4 does not
+	// relay it across the service-to-edge bridge, so routed protocols must
+	// carry required information in their byte stream.
 	//
 	// Returns an error when the underlying connection is not yet
 	// dialed or has terminated.

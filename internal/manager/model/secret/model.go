@@ -8,7 +8,8 @@
 // owns the injection mapping, the binding owns the choice.
 //
 // At-rest: the field map is JSON-encoded then sealed by pkg/secretbox
-// (AES-256-GCM, key from ONGRID_SECRET_KEY) before it touches the DB, so a
+// (AES-256-GCM, key from optional ONGRID_SECRET_KEY or the persisted JWT
+// secret) before it touches the DB, so a
 // DB dump alone never yields plaintext (cf. n8n's encryption posture).
 package secret
 

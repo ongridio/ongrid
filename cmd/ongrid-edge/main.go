@@ -201,9 +201,9 @@ func main() {
 		operatorLog := log.With(slog.String("comp", "operator"))
 		edgeoperator.Register(client, operatorLog)
 
-		// WebSSH: edge is a stream port-forwarder. Manager opens a
-		// frontier stream with Meta describing the target (sshd at
-		// 127.0.0.1:22), edge io.Copy's bytes both ways. SSH client
+		// WebSSH: edge is a stream port-forwarder. Manager carries the
+		// allowed loopback port in the SSH identification line, then edge
+		// io.Copy's bytes both ways. SSH client
 		// lives entirely on the manager — see internal/manager/server/
 		// webshell. The edge has no SSH lib, no PTY, no session map.
 		webshellLog := log.With(slog.String("comp", "webshell"))

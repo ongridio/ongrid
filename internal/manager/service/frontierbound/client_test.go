@@ -304,6 +304,13 @@ func TestClient_OpenStreamWithMeta_UsesEmbeddedEndOptions(t *testing.T) {
 	}
 }
 
+func TestClient_OpenStreamWithMeta_FailsClosedWithoutMetadataSupport(t *testing.T) {
+	c := newWithService(newFakeService(), slog.Default())
+	if _, err := c.OpenStreamWithMeta(context.Background(), 2, []byte(`{"kind":"webshell"}`)); err == nil {
+		t.Fatal("OpenStreamWithMeta silently dropped required metadata")
+	}
+}
+
 func TestClient_Call_RemoteError(t *testing.T) {
 	fs := newFakeService()
 	fs.respErr = errors.New("edge said no")

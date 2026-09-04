@@ -38,6 +38,7 @@ type ActiveSession struct {
 	SessionID    string
 	OngridUserID uint64
 	SSHUser      string
+	SSHPort      uint16
 	DeviceID     uint64
 	EdgeID       uint64
 	StartedAt    time.Time
@@ -206,6 +207,7 @@ func (r *Router) StdoutBytes(sid string) uint64 {
 // satisfies it via the small adapter in cmd/ongrid wiring.
 type Recorder interface {
 	Open(ctx context.Context, s *wsmodel.Session) error
+	SetHostFingerprint(ctx context.Context, sessionID, fingerprint string) error
 	Close(ctx context.Context, sessionID string, endedAt time.Time, bytesIn, bytesOut uint64, exitCode int, terminatedBy string) error
 	List(ctx context.Context, limit int) ([]*wsmodel.Session, error)
 }

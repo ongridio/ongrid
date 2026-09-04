@@ -1238,6 +1238,7 @@ func main() {
 	// pushes through the live router.
 	webshellRouter := managerwebshellbiz.NewRouter()
 	webshellAuditRepo := managerwebshelldata.NewRepo(db)
+	webshellAccess := managerwebshellbiz.NewAccess(webshellAuditRepo)
 	operatorRunSvc := managerbizoperatorrun.New(fbClient, log.With(slog.String("comp", "operator-run")))
 
 	if err := managersvcfb.Install(rootCtx, fbClient, managersvcfb.Wiring{
@@ -1288,6 +1289,7 @@ func main() {
 		webshellStreamerAdapter{c: fbClient},
 		webshellRouter,
 		webshellAuditAdapter{repo: webshellAuditRepo},
+		webshellAccess,
 		deviceRepo,
 		edgeRepo,
 		log.With(slog.String("comp", "webshell")),
@@ -2446,7 +2448,7 @@ func main() {
 	}
 
 	if secretbox.KeyIsWeak() {
-		log.Warn("secret vault: ONGRID_SECRET_KEY unset — credentials encrypted with an INSECURE built-in key; set ONGRID_SECRET_KEY (32+ random chars) for real at-rest protection")
+		log.Warn("secret vault: no strong ONGRID_SECRET_KEY or ONGRID_JWT_SECRET; credentials use the local-development fallback key")
 	}
 	log.Info("marketplace wired",
 		slog.Bool("dev_mode", mpDevMode),
@@ -2563,6 +2565,7 @@ func main() {
 	// chi.Router.Group.
 	mux.Route("/api", func(api chi.Router) {
 		iamHandler.RegisterPublic(api)
+		webshellHandler.RegisterPublic(api)
 		promProxyHandler.RegisterPublic(api)
 		// IM webhooks live OUTSIDE the bearer group — Feishu / DingTalk
 		// can't carry our manager JWT. Auth comes from the platform
@@ -4368,6 +4371,10 @@ type webshellAuditAdapter struct {
 
 func (a webshellAuditAdapter) Open(ctx context.Context, s *wsmodel.Session) error {
 	return a.repo.Insert(ctx, s)
+}
+
+func (a webshellAuditAdapter) SetHostFingerprint(ctx context.Context, sessionID, fingerprint string) error {
+	return a.repo.SetHostFingerprint(ctx, sessionID, fingerprint)
 }
 
 func (a webshellAuditAdapter) Close(ctx context.Context, sessionID string, endedAt time.Time, bytesIn, bytesOut uint64, exitCode int, terminatedBy string) error {
