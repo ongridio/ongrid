@@ -4,6 +4,7 @@ package store
 import (
 	"context"
 	"errors"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -13,7 +14,70 @@ import (
 
 // Migrate runs AutoMigrate for the webshell_sessions table.
 func Migrate(db *gorm.DB) error {
-	return db.AutoMigrate(&webshell.Session{})
+	return db.AutoMigrate(&webshell.Session{}, &webshell.Credential{}, &webshell.KnownHost{})
+}
+
+func (r *Repo) CreateCredential(ctx context.Context, credential *webshell.Credential) error {
+	return r.db.WithContext(ctx).Create(credential).Error
+}
+
+func (r *Repo) ListCredentials(ctx context.Context, userID, deviceID uint64) ([]*webshell.Credential, error) {
+	var out []*webshell.Credential
+	err := r.db.WithContext(ctx).
+		Where("ongrid_user_id = ? AND device_id = ?", userID, deviceID).
+		Order("label asc").Find(&out).Error
+	return out, err
+}
+
+func (r *Repo) GetCredential(ctx context.Context, id, userID, deviceID uint64) (*webshell.Credential, error) {
+	var out webshell.Credential
+	err := r.db.WithContext(ctx).
+		Where("id = ? AND ongrid_user_id = ? AND device_id = ?", id, userID, deviceID).
+		First(&out).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, errs.ErrNotFound
+	}
+	return &out, err
+}
+
+func (r *Repo) DeleteCredential(ctx context.Context, id, userID, deviceID uint64) error {
+	res := r.db.WithContext(ctx).
+		Where("id = ? AND ongrid_user_id = ? AND device_id = ?", id, userID, deviceID).
+		Delete(&webshell.Credential{})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return errs.ErrNotFound
+	}
+	return nil
+}
+
+func (r *Repo) MarkCredentialUsed(ctx context.Context, id, userID, deviceID uint64, at time.Time) error {
+	return r.db.WithContext(ctx).Model(&webshell.Credential{}).
+		Where("id = ? AND ongrid_user_id = ? AND device_id = ?", id, userID, deviceID).
+		Update("last_used_at", at).Error
+}
+
+func (r *Repo) GetKnownHost(ctx context.Context, userID, deviceID uint64, port uint16) (*webshell.KnownHost, error) {
+	var out webshell.KnownHost
+	err := r.db.WithContext(ctx).
+		Where("ongrid_user_id = ? AND device_id = ? AND ssh_port = ?", userID, deviceID, port).
+		First(&out).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, errs.ErrNotFound
+	}
+	return &out, err
+}
+
+func (r *Repo) CreateKnownHost(ctx context.Context, host *webshell.KnownHost) error {
+	return r.db.WithContext(ctx).Create(host).Error
+}
+
+func (r *Repo) DeleteKnownHost(ctx context.Context, userID, deviceID uint64, port uint16) error {
+	return r.db.WithContext(ctx).
+		Where("ongrid_user_id = ? AND device_id = ? AND ssh_port = ?", userID, deviceID, port).
+		Delete(&webshell.KnownHost{}).Error
 }
 
 // Repo is the GORM-backed audit repo.
@@ -46,6 +110,11 @@ func (r *Repo) Close(ctx context.Context, id string, in CloseInput) error {
 		return errs.ErrNotFound
 	}
 	return nil
+}
+
+func (r *Repo) SetHostFingerprint(ctx context.Context, id, fingerprint string) error {
+	return r.db.WithContext(ctx).Model(&webshell.Session{}).
+		Where("id = ?", id).Update("host_fingerprint", fingerprint).Error
 }
 
 // CloseInput bundles the terminal counters.

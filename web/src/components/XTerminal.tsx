@@ -13,6 +13,7 @@ import { useEffect, useRef } from 'react';
 import { Terminal, type ITheme } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import { WebLinksAddon } from 'xterm-addon-web-links';
+import { useThemeMode, type ResolvedTheme } from '@/store/mode';
 import 'xterm/css/xterm.css';
 
 export type XTerminalApi = {
@@ -38,6 +39,7 @@ type Props = {
   className?: string;
   fontSize?: number;
   scrollback?: number;
+  followAppTheme?: boolean;
 };
 
 // Theme tuned to the rest of the app: zinc-950 background, zinc-100 text,
@@ -67,15 +69,45 @@ const THEME: ITheme = {
   brightWhite: '#fafafa',
 };
 
-export function XTerminal({ onData, onResize, attachRef, readOnly = false, className = '', fontSize = 13, scrollback = 5000 }: Props) {
+const LIGHT_THEME: ITheme = {
+  background: '#ffffff',
+  foreground: '#27272a',
+  cursor: '#4f46e5',
+  cursorAccent: '#ffffff',
+  selectionBackground: '#c7d2feaa',
+  black: '#18181b',
+  red: '#b91c1c',
+  green: '#047857',
+  yellow: '#a16207',
+  blue: '#1d4ed8',
+  magenta: '#7e22ce',
+  cyan: '#0e7490',
+  white: '#3f3f46',
+  brightBlack: '#71717a',
+  brightRed: '#dc2626',
+  brightGreen: '#059669',
+  brightYellow: '#ca8a04',
+  brightBlue: '#2563eb',
+  brightMagenta: '#9333ea',
+  brightCyan: '#0891b2',
+  brightWhite: '#18181b',
+};
+
+function terminalTheme(theme: ResolvedTheme): ITheme {
+  return theme === 'light' ? LIGHT_THEME : THEME;
+}
+
+export function XTerminal({ onData, onResize, attachRef, readOnly = false, className = '', fontSize = 13, scrollback = 5000, followAppTheme = false }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const terminalRef = useRef<Terminal | null>(null);
+  const { resolved } = useThemeMode();
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
 
     const term = new Terminal({
-      theme: THEME,
+      theme: followAppTheme ? terminalTheme(resolved) : THEME,
       // Match Apple Terminal / iTerm defaults — JetBrains Mono is the
       // closest the host stylesheet ships, fall back to ui-monospace.
       fontFamily:
@@ -97,6 +129,7 @@ export function XTerminal({ onData, onResize, attachRef, readOnly = false, class
     term.loadAddon(linksAddon);
 
     term.open(el);
+    terminalRef.current = term;
     // Initial fit must happen after open() lays out the DOM.
     try {
       fitAddon.fit();
@@ -162,6 +195,7 @@ export function XTerminal({ onData, onResize, attachRef, readOnly = false, class
     if (!readOnly) term.focus();
 
     return () => {
+      terminalRef.current = null;
       ro.disconnect();
       dataDisposable?.dispose();
       resizeDisposable.dispose();
@@ -172,10 +206,15 @@ export function XTerminal({ onData, onResize, attachRef, readOnly = false, class
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (!followAppTheme || !terminalRef.current) return;
+    terminalRef.current.options.theme = terminalTheme(resolved);
+  }, [followAppTheme, resolved]);
+
   return (
     <div
       ref={containerRef}
-      className={`h-full w-full bg-zinc-950 ${className}`}
+      className={`h-full w-full ${followAppTheme ? 'bg-zinc-900' : 'bg-zinc-950'} ${className}`}
       // xterm injects its own focusable element; this wrapper doesn't
       // need a tabindex.
     />

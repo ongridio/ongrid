@@ -25,3 +25,20 @@ func TestPromResolverTLSSettingOverridesFallback(t *testing.T) {
 		t.Fatalf("stored TLS config = %#v, %v", cfg, err)
 	}
 }
+
+func TestPromResolverDerivesVictoriaMetricsClusterWriteURL(t *testing.T) {
+	ctx := context.Background()
+	settings := New(newFakeRepo(), nil)
+	resolver := NewPromResolver(settings, "", "http://prometheus:9090/api/v1/write", promauth.TLSConfig{})
+
+	if err := settings.Set(ctx, model.CategoryProm, model.KeyPromQueryURL, "http://host.docker.internal:8481/select/0/prometheus", false); err != nil {
+		t.Fatalf("set query URL: %v", err)
+	}
+	got, err := resolver.ResolveWriteURL(ctx)
+	if err != nil {
+		t.Fatalf("resolve write URL: %v", err)
+	}
+	if want := "http://host.docker.internal:8480/insert/0/prometheus/api/v1/write"; got != want {
+		t.Fatalf("write URL = %q, want %q", got, want)
+	}
+}

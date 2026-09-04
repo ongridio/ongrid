@@ -161,6 +161,7 @@ type fakeServer struct {
 	gotEncoding    string
 	gotVersion     string
 	gotSamples     []decodedSample
+	requests       int
 	status         int
 }
 
@@ -177,6 +178,7 @@ func newFakeServer(t *testing.T) (*httptest.Server, *fakeServer) {
 		fs.gotContentType = r.Header.Get("Content-Type")
 		fs.gotEncoding = r.Header.Get("Content-Encoding")
 		fs.gotVersion = r.Header.Get("X-Prometheus-Remote-Write-Version")
+		fs.requests++
 		raw, err := io.ReadAll(r.Body)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
@@ -265,7 +267,7 @@ func TestClient_Write_RoundTrip(t *testing.T) {
 }
 
 func TestClient_Write_Empty(t *testing.T) {
-	srv, _ := newFakeServer(t)
+	srv, fs := newFakeServer(t)
 	defer srv.Close()
 	c := New(srv.URL, slog.Default())
 	if err := c.Write(context.Background(), nil); err != nil {
@@ -273,6 +275,21 @@ func TestClient_Write_Empty(t *testing.T) {
 	}
 	if err := c.Write(context.Background(), []Sample{}); err != nil {
 		t.Errorf("empty samples should be no-op, got %v", err)
+	}
+	if fs.requests != 0 {
+		t.Fatalf("empty Write requests = %d, want 0", fs.requests)
+	}
+}
+
+func TestClient_Probe_SendsEmptyWriteRequest(t *testing.T) {
+	srv, fs := newFakeServer(t)
+	defer srv.Close()
+	c := New(srv.URL, slog.Default())
+	if err := c.Probe(context.Background()); err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if fs.requests != 1 || len(fs.gotSamples) != 0 {
+		t.Fatalf("requests = %d, samples = %d, want 1 empty request", fs.requests, len(fs.gotSamples))
 	}
 }
 

@@ -266,11 +266,7 @@ func (c *Client) OpenStreamWithMeta(ctx context.Context, edgeID uint64, meta []b
 		}
 		return s, nil
 	}
-	s, err := c.svc.OpenStream(ctx, transportID)
-	if err != nil {
-		return nil, fmt.Errorf("frontierbound: open stream edge=%d transport=%d: %w", edgeID, transportID, err)
-	}
-	return s, nil
+	return nil, fmt.Errorf("frontierbound: stream metadata unsupported by current transport")
 }
 
 type rawStreamOpener interface {
@@ -290,6 +286,12 @@ func embeddedStreamOpener(svc service) (rawStreamOpener, bool) {
 		return nil, false
 	}
 	opener, ok := field.Interface().(rawStreamOpener)
+	if ok {
+		value := reflect.ValueOf(opener)
+		if value.Kind() == reflect.Pointer && value.IsNil() {
+			return nil, false
+		}
+	}
 	return opener, ok
 }
 

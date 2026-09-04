@@ -175,6 +175,7 @@ import (
 	managerservermonitor "github.com/ongridio/ongrid/internal/manager/server/monitor"
 	managerserveroperatorrun "github.com/ongridio/ongrid/internal/manager/server/operatorrun"
 	managerserverpacketcapture "github.com/ongridio/ongrid/internal/manager/server/packetcapture"
+	managerserverprofiles "github.com/ongridio/ongrid/internal/manager/server/profiles"
 	managerserverprom "github.com/ongridio/ongrid/internal/manager/server/prometheus"
 	managerserverreport "github.com/ongridio/ongrid/internal/manager/server/report"
 	managerserversecret "github.com/ongridio/ongrid/internal/manager/server/secret"
@@ -550,8 +551,6 @@ func main() {
 	monitorRepo := managermonitordata.NewRepo(db)
 	monitorSvc := managerbizmonitor.New(monitorRepo, grafanaSvc, log.With(slog.String("comp", "monitor")))
 	monitorHandler := managerservermonitor.NewHandler(monitorSvc)
-	// promTester is wired below if cfg.Prom.Enabled — left nil for the
-	// disabled case so the integration handler can 503 cleanly.
 	var integrationHandler *managerserverintegration.Handler
 
 	// Embedded-Grafana SA bootstrap. Runs in a goroutine because:
@@ -841,29 +840,12 @@ func main() {
 	deviceUC.SetNetworkDiscovery(networkDiscoveryUC)
 	edgeUC := managerbizedge.NewUsecase(edgeRepo, deviceRepo, edgeDeviceRepo, log)
 
-	// Boot backfill: heal "stale online" edge rows. A manager crash or any
-	// pre-PR-(edge-status-fix) deployment could leave edge.status="online"
-	// even though last_seen_at is hours old (frontier closed the session
-	// without us writing the column). Force them offline once at startup
-	// based on the same threshold the alert pipeline uses.
-	{
-		threshold := cfg.Alert.EdgeOfflineThreshold
-		if threshold <= 0 {
-			threshold = 90 * time.Second
-		}
-		cutoff := time.Now().Add(-threshold)
-		res := db.Exec(
-			"UPDATE edges SET status = ?, updated_at = ? WHERE deleted_at IS NULL AND status = ? AND last_seen_at IS NOT NULL AND last_seen_at < ?",
-			"offline", time.Now(), "online", cutoff,
-		)
-		if res.Error != nil {
-			log.Warn("edge: stale-online backfill failed", slog.Any("err", res.Error))
-		} else if res.RowsAffected > 0 {
-			log.Info("edge: backfilled stale online edges to offline",
-				slog.Int64("rows", res.RowsAffected),
-				slog.Duration("threshold", threshold),
-			)
-		}
+	edgeOfflineThreshold := cfg.Alert.EdgeOfflineThreshold
+	if edgeOfflineThreshold <= 0 {
+		edgeOfflineThreshold = 90 * time.Second
+	}
+	if _, err := edgeUC.ReconcileStaleOnline(rootCtx, time.Now().UTC().Add(-edgeOfflineThreshold)); err != nil {
+		log.Warn("edge presence reconcile (boot) failed", slog.Any("err", err))
 	}
 
 	// Boot backfill: heal orphaned investigation reports. An RCA worker only
@@ -1117,14 +1099,13 @@ func main() {
 		log.Warn("prom disabled — push_prom_samples will be silently dropped, query_promql tool not registered, /v1/edges/{id}/metrics returns 501")
 	}
 
-	// Build the integration handler now that we know whether prom is wired.
-	// promTester is nil when disabled; the handler 503s cleanly in that case.
-	var promTester managerserverintegration.PromQuerier
+	// Build the integration handler now that we know whether Prometheus is
+	// enabled. The probe uses the unsaved UI draft and never mutates settings.
+	var promProbe managerserverintegration.PromConfigProbe
+	var promTester managersvcsystemhealth.PromQuerier
 	if promQueryClient != nil {
-		promTester = managerserverintegration.AdaptPromQuerier(func(ctx context.Context, expr string, ts time.Time) error {
-			_, err := promQueryClient.Query(ctx, expr, ts)
-			return err
-		})
+		promProbe = managerbizsetting.NewPromConfigurationProbe(log.With(slog.String("comp", "prom-config-probe")))
+		promTester = healthPromQuerier{promQueryClient}
 	}
 	// Loki / Tempo URL probes — back the Integrations "测试连接" buttons.
 	// Loki checks /ready; Tempo checks either a query URL or an explicit
@@ -1136,7 +1117,7 @@ func main() {
 	// Web search probe — same WebSearchResolver the skill uses, so a
 	// passing probe means the skill itself will work.
 	webSearchProbe := managerbizsetting.NewWebSearchProbe(managerbizsetting.NewWebSearchResolver(settingSvc))
-	integrationHandler = managerserverintegration.NewHandler(grafanaSvc, promTester, lokiProbe, tempoIngestProbe, webSearchProbe)
+	integrationHandler = managerserverintegration.NewHandler(grafanaSvc, promProbe, lokiProbe, tempoIngestProbe, webSearchProbe)
 	integrationHandler.SetLLMRouter(llmRouter)
 	integrationHandler.SetLLMProbe(managerbizsetting.NewLLMConfigurationService(llmEnvDefaults, settingSvc))
 
@@ -1202,6 +1183,7 @@ func main() {
 		// Tempo disabled — handler installs but every route returns 503.
 		tracesHandler = managerservertraces.NewHandler(nil)
 	}
+	profilesHandler := managerserverprofiles.NewHandler(cfg.Profiles.URL)
 
 	// Frontierbound service-end SDK: opens a long-lived service connection
 	// to the upstream frontier broker (a separate docker container) and
@@ -1253,6 +1235,7 @@ func main() {
 	// pushes through the live router.
 	webshellRouter := managerwebshellbiz.NewRouter()
 	webshellAuditRepo := managerwebshelldata.NewRepo(db)
+	webshellAccess := managerwebshellbiz.NewAccess(webshellAuditRepo)
 	operatorRunSvc := managerbizoperatorrun.New(fbClient, log.With(slog.String("comp", "operator-run")))
 
 	if err := managersvcfb.Install(rootCtx, fbClient, managersvcfb.Wiring{
@@ -1303,6 +1286,7 @@ func main() {
 		webshellStreamerAdapter{c: fbClient},
 		webshellRouter,
 		webshellAuditAdapter{repo: webshellAuditRepo},
+		webshellAccess,
 		deviceRepo,
 		edgeRepo,
 		log.With(slog.String("comp", "webshell")),
@@ -2461,7 +2445,7 @@ func main() {
 	}
 
 	if secretbox.KeyIsWeak() {
-		log.Warn("secret vault: ONGRID_SECRET_KEY unset — credentials encrypted with an INSECURE built-in key; set ONGRID_SECRET_KEY (32+ random chars) for real at-rest protection")
+		log.Warn("secret vault: no strong ONGRID_SECRET_KEY or ONGRID_JWT_SECRET; credentials use the local-development fallback key")
 	}
 	log.Info("marketplace wired",
 		slog.Bool("dev_mode", mpDevMode),
@@ -2578,6 +2562,7 @@ func main() {
 	// chi.Router.Group.
 	mux.Route("/api", func(api chi.Router) {
 		iamHandler.RegisterPublic(api)
+		webshellHandler.RegisterPublic(api)
 		promProxyHandler.RegisterPublic(api)
 		// IM webhooks live OUTSIDE the bearer group — Feishu / DingTalk
 		// can't carry our manager JWT. Auth comes from the platform
@@ -2678,6 +2663,7 @@ func main() {
 			monitorHandler.Register(protected)
 			logsHandler.Register(protected)
 			tracesHandler.Register(protected)
+			profilesHandler.Register(protected)
 			aiopsHandler.Register(protected)
 			alertHandler.Register(protected)
 			systemHealthHandler.Register(protected)
@@ -2847,18 +2833,23 @@ func main() {
 		})
 	}
 
-	// Device presence reconciler: per-event MarkOnline/MarkOffline can't
+	// Edge/device presence reconciler: per-event MarkOnline/MarkOffline can't
 	// flip a device offline when its edge no longer exists (hard delete) or
 	// re-registered under a new fingerprint, and a manager restart while an
-	// edge is offline leaves the denormalised flag stale. This sweep flips
-	// online devices back offline when no linked edge is online — healing
-	// orphan "ghost" devices that otherwise read as perpetually online in
-	// the device list / query_devices. Runs once at boot, then every 60s
-	// (same cadence as edge offline detection). See #145.
+	// edge is offline leaves the denormalised flag stale. Frontier can also
+	// miss a final disconnect event after an abrupt host deletion, so mark
+	// stale edge rows offline before syncing device presence. Runs once at
+	// boot, then every 60s. See #145.
 	eg.Go(func() error {
-		if _, err := deviceUC.ReconcilePresence(egCtx); err != nil {
-			log.Warn("device presence reconcile (boot) failed", slog.Any("err", err))
+		reconcilePresence := func() {
+			if _, err := edgeUC.ReconcileStaleOnline(egCtx, time.Now().UTC().Add(-edgeOfflineThreshold)); err != nil {
+				log.Warn("edge presence reconcile failed", slog.Any("err", err))
+			}
+			if _, err := deviceUC.ReconcilePresence(egCtx); err != nil {
+				log.Warn("device presence reconcile failed", slog.Any("err", err))
+			}
 		}
+		reconcilePresence()
 		t := time.NewTicker(60 * time.Second)
 		defer t.Stop()
 		for {
@@ -2866,9 +2857,7 @@ func main() {
 			case <-egCtx.Done():
 				return nil
 			case <-t.C:
-				if _, err := deviceUC.ReconcilePresence(egCtx); err != nil {
-					log.Warn("device presence reconcile failed", slog.Any("err", err))
-				}
+				reconcilePresence()
 			}
 		}
 	})
@@ -3126,6 +3115,14 @@ func (r pluginEndpointResolver) ResolveTelemetryTarget(ctx context.Context, sign
 		}
 		return managerbizk8s.TelemetryTarget{
 			Endpoint:               strings.TrimRight(r.publicURL, "/") + "/v1/traces",
+			UseTelemetryCredential: true,
+		}, nil
+	case "profiles":
+		if r.publicURL == "" {
+			return managerbizk8s.TelemetryTarget{}, nil
+		}
+		return managerbizk8s.TelemetryTarget{
+			Endpoint:               strings.TrimRight(r.publicURL, "/") + "/v1development/profiles",
 			UseTelemetryCredential: true,
 		}, nil
 	}
@@ -4351,6 +4348,12 @@ type hostDeviceResolverAdapter struct {
 	repo *managerdevicedata.EdgeDeviceRepo
 }
 
+type healthPromQuerier struct{ client *pkgpromquery.Client }
+
+func (q healthPromQuerier) Query(ctx context.Context, expr string, ts time.Time) (any, error) {
+	return q.client.Query(ctx, expr, ts)
+}
+
 func (a hostDeviceResolverAdapter) ResolveHostDeviceID(ctx context.Context, edgeID uint64) (uint64, error) {
 	return a.repo.LookupHostDevice(ctx, edgeID)
 }
@@ -4371,6 +4374,10 @@ type webshellAuditAdapter struct {
 
 func (a webshellAuditAdapter) Open(ctx context.Context, s *wsmodel.Session) error {
 	return a.repo.Insert(ctx, s)
+}
+
+func (a webshellAuditAdapter) SetHostFingerprint(ctx context.Context, sessionID, fingerprint string) error {
+	return a.repo.SetHostFingerprint(ctx, sessionID, fingerprint)
 }
 
 func (a webshellAuditAdapter) Close(ctx context.Context, sessionID string, endedAt time.Time, bytesIn, bytesOut uint64, exitCode int, terminatedBy string) error {

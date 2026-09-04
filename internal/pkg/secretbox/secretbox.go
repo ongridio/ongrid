@@ -1,7 +1,7 @@
 // Package secretbox is the at-rest encryption used by the credential vault
-// (HLD-017). AES-256-GCM, key derived from ONGRID_SECRET_KEY. Mirrors
-// n8n's posture (encryption key lives OUTSIDE the DB, in the environment)
-// so a DB dump alone never yields plaintext credentials.
+// (HLD-017). AES-256-GCM, key derived from ONGRID_SECRET_KEY or, when it
+// is unset, the already-persisted ONGRID_JWT_SECRET. Either source lives
+// outside the DB, so a DB dump alone never yields plaintext credentials.
 //
 // Ciphertext wire format: "v1:" + base64(nonce || ciphertext+tag). The
 // version prefix lets us rotate the scheme later without ambiguity.
@@ -25,26 +25,34 @@ const prefix = "v1:"
 var (
 	keyOnce sync.Once
 	keyVal  [32]byte
-	keyWeak bool // true when ONGRID_SECRET_KEY was unset (derived fallback)
+	keyWeak bool // true only when neither configured secret is usable
 )
 
-// loadKey derives the 32-byte AES key from ONGRID_SECRET_KEY (sha256 of the
-// env value). When the env is unset it falls back to a fixed-salt derived
-// key so the vault still works out of the box — but KeyIsWeak() reports it
-// so the boot path can warn the operator to set a real key.
+const legacyFallback = "ongrid-insecure-default-secret-key-set-ONGRID_SECRET_KEY"
+
+// loadKey derives the 32-byte AES key from the configured secret source.
 func loadKey() {
 	keyOnce.Do(func() {
-		env := strings.TrimSpace(os.Getenv("ONGRID_SECRET_KEY"))
-		if env == "" {
-			keyWeak = true
-			env = "ongrid-insecure-default-secret-key-set-ONGRID_SECRET_KEY"
-		}
-		keyVal = sha256.Sum256([]byte(env))
+		keyVal, keyWeak = deriveKey(os.Getenv("ONGRID_SECRET_KEY"), os.Getenv("ONGRID_JWT_SECRET"))
 	})
 }
 
-// KeyIsWeak reports whether the encryption key is the insecure built-in
-// fallback (ONGRID_SECRET_KEY unset). main.go logs a warning when true.
+// deriveKey keeps ONGRID_SECRET_KEY as the preferred independent key. A normal
+// install already has a random, persisted JWT secret, so use a domain-separated
+// derivative when no dedicated vault key was configured. The fixed fallback is
+// retained only for local/dev compatibility.
+func deriveKey(secret, jwt string) ([32]byte, bool) {
+	if secret = strings.TrimSpace(secret); secret != "" {
+		return sha256.Sum256([]byte(secret)), false
+	}
+	jwt = strings.TrimSpace(jwt)
+	if jwt != "" && jwt != "dev-insecure-secret-change-me" && jwt != "change-me-to-a-long-random-string" {
+		return sha256.Sum256([]byte("ongrid-secretbox-v1:" + jwt)), false
+	}
+	return sha256.Sum256([]byte(legacyFallback)), true
+}
+
+// KeyIsWeak reports whether neither a dedicated nor a real JWT secret exists.
 func KeyIsWeak() bool {
 	loadKey()
 	return keyWeak
@@ -103,7 +111,28 @@ func Decrypt(enc string) (string, error) {
 	nonce, ct := raw[:gcm.NonceSize()], raw[gcm.NonceSize():]
 	out, err := gcm.Open(nil, nonce, ct, nil)
 	if err != nil {
-		return "", fmt.Errorf("secretbox: open (wrong ONGRID_SECRET_KEY?): %w", err)
+		// Rows written before JWT-derived fallback support used the fixed key.
+		// Read them without forcing an operator migration; all new writes use the
+		// stronger derived key when a real JWT secret is available.
+		jwtKey, jwtWeak := deriveKey("", os.Getenv("ONGRID_JWT_SECRET"))
+		legacy := sha256.Sum256([]byte(legacyFallback))
+		for _, candidate := range [][32]byte{jwtKey, legacy} {
+			if (candidate == jwtKey && jwtWeak) || candidate == keyVal {
+				continue
+			}
+			candidateBlock, blockErr := aes.NewCipher(candidate[:])
+			if blockErr != nil {
+				continue
+			}
+			candidateGCM, gcmErr := cipher.NewGCM(candidateBlock)
+			if gcmErr != nil {
+				continue
+			}
+			if candidateOut, openErr := candidateGCM.Open(nil, nonce, ct, nil); openErr == nil {
+				return string(candidateOut), nil
+			}
+		}
+		return "", fmt.Errorf("secretbox: open (wrong encryption key?): %w", err)
 	}
 	return string(out), nil
 }

@@ -606,6 +606,11 @@ fi
 if [[ -f "$SCRIPT_DIR/tempo-config.yaml" ]]; then
     cp -f "$SCRIPT_DIR/tempo-config.yaml" "$INSTALL_DIR/tempo-config.yaml"
 fi
+for cfg in profiles-gateway.yaml pyroscope-config.yaml; do
+    if [[ -f "$SCRIPT_DIR/$cfg" ]]; then
+        cp -f "$SCRIPT_DIR/$cfg" "$INSTALL_DIR/$cfg"
+    fi
+done
 # searxng/settings.yml — bind-mounted into searxng container. Refresh on
 # every upgrade so any config tweak (rate limiter / engines) ships with
 # the new version.

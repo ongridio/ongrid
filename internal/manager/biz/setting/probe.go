@@ -28,6 +28,13 @@ type LokiURLProbe struct {
 	timeout  time.Duration
 }
 
+type TelemetryProbeInput struct {
+	URL           string `json:"url"`
+	BasicUser     string `json:"basic_user"`
+	BasicPassword string `json:"basic_password"`
+	TLSInsecure   bool   `json:"tls_insecure"`
+}
+
 // NewLokiURLProbe wires a probe against the resolver. resolver must be
 // non-nil; the probe Probe() returns ErrInvalid otherwise.
 func NewLokiURLProbe(r *LokiResolver) *LokiURLProbe {
@@ -39,13 +46,24 @@ func (p *LokiURLProbe) Probe(ctx context.Context) error {
 	if p == nil || p.resolver == nil {
 		return fmt.Errorf("loki probe not wired")
 	}
-	u := p.resolver.URL(ctx)
+	user, pass := p.resolver.Auth(ctx)
+	return p.ProbeConfiguration(ctx, TelemetryProbeInput{
+		URL: p.resolver.URL(ctx), BasicUser: user, BasicPassword: pass, TLSInsecure: p.resolver.TLSInsecure(ctx),
+	})
+}
+
+func (p *LokiURLProbe) ProbeConfiguration(ctx context.Context, in TelemetryProbeInput) error {
+	if p == nil {
+		return fmt.Errorf("loki probe not wired")
+	}
+	u := strings.TrimRight(strings.TrimSpace(in.URL), "/")
 	if u == "" {
 		return fmt.Errorf("loki url is empty")
 	}
-	user, pass := p.resolver.Auth(ctx)
-	tlsInsecure := p.resolver.TLSInsecure(ctx)
-	return probeReadyEndpoint(ctx, u+"/ready", user, pass, tlsInsecure, p.timeout)
+	if err := validateLLMBaseURL(u); err != nil {
+		return fmt.Errorf("loki url: %w", err)
+	}
+	return probeReadyEndpoint(ctx, u+"/ready", in.BasicUser, in.BasicPassword, in.TLSInsecure, p.timeout)
 }
 
 // TempoURLProbe verifies the configured Tempo integration URL. Explicit
@@ -68,16 +86,27 @@ func (p *TempoURLProbe) Probe(ctx context.Context) error {
 	if p == nil || p.resolver == nil {
 		return fmt.Errorf("tempo probe not wired")
 	}
-	u := p.resolver.URL(ctx)
+	user, pass := p.resolver.Auth(ctx)
+	return p.ProbeConfiguration(ctx, TelemetryProbeInput{
+		URL: p.resolver.URL(ctx), BasicUser: user, BasicPassword: pass, TLSInsecure: p.resolver.TLSInsecure(ctx),
+	})
+}
+
+func (p *TempoURLProbe) ProbeConfiguration(ctx context.Context, in TelemetryProbeInput) error {
+	if p == nil {
+		return fmt.Errorf("tempo probe not wired")
+	}
+	u := strings.TrimRight(strings.TrimSpace(in.URL), "/")
 	if u == "" {
 		return fmt.Errorf("tempo url is empty")
 	}
-	user, pass := p.resolver.Auth(ctx)
-	tlsInsecure := p.resolver.TLSInsecure(ctx)
-	if strings.HasSuffix(u, "/v1/traces") {
-		return probeOTLPHTTPTraceEndpoint(ctx, u, user, pass, tlsInsecure, p.timeout)
+	if err := validateLLMBaseURL(u); err != nil {
+		return fmt.Errorf("tempo url: %w", err)
 	}
-	return probeReadyEndpoint(ctx, u+"/ready", user, pass, tlsInsecure, p.timeout)
+	if strings.HasSuffix(u, "/v1/traces") {
+		return probeOTLPHTTPTraceEndpoint(ctx, u, in.BasicUser, in.BasicPassword, in.TLSInsecure, p.timeout)
+	}
+	return probeReadyEndpoint(ctx, u+"/ready", in.BasicUser, in.BasicPassword, in.TLSInsecure, p.timeout)
 }
 
 // TempoReadinessProbe checks the manager-side Tempo query API. This URL is
@@ -122,6 +151,13 @@ type WebSearchProbe struct {
 	timeout  time.Duration
 }
 
+type WebSearchProbeInput struct {
+	Provider     string `json:"provider"`
+	SearxngURL   string `json:"searxng_url"`
+	TavilyAPIKey string `json:"tavily_api_key"`
+	BraveAPIKey  string `json:"brave_api_key"`
+}
+
 // NewWebSearchProbe builds the probe. resolver must be non-nil; the
 // probe Probe() returns an error otherwise.
 func NewWebSearchProbe(r *WebSearchResolver) *WebSearchProbe {
@@ -135,26 +171,38 @@ func (p *WebSearchProbe) Probe(ctx context.Context) (string, string, error) {
 	if p == nil || p.resolver == nil {
 		return "", "", fmt.Errorf("web_search probe not wired")
 	}
-	provider := p.resolver.Provider(ctx)
+	return p.ProbeConfiguration(ctx, WebSearchProbeInput{
+		Provider: p.resolver.Provider(ctx), SearxngURL: p.resolver.SearxngURL(ctx),
+		TavilyAPIKey: p.resolver.TavilyAPIKey(ctx), BraveAPIKey: p.resolver.BraveAPIKey(ctx),
+	})
+}
+
+func (p *WebSearchProbe) ProbeConfiguration(ctx context.Context, in WebSearchProbeInput) (string, string, error) {
+	if p == nil {
+		return "", "", fmt.Errorf("web_search probe not wired")
+	}
+	provider := strings.ToLower(strings.TrimSpace(in.Provider))
 	cctx, cancel := context.WithTimeout(ctx, p.timeout)
 	defer cancel()
 	switch provider {
 	case model.ProviderSearxng:
-		return p.probeSearxng(cctx)
+		return p.probeSearxng(cctx, in.SearxngURL)
 	case model.ProviderTavily:
-		return p.probeTavily(cctx)
+		return p.probeTavily(cctx, in.TavilyAPIKey)
 	case model.ProviderBrave:
-		return p.probeBrave(cctx)
+		return p.probeBrave(cctx, in.BraveAPIKey)
 	default:
-		// Defensive — resolver normalises this. Treat unknown as searxng.
-		return p.probeSearxng(cctx)
+		return "", "", fmt.Errorf("unsupported web search provider %q", in.Provider)
 	}
 }
 
-func (p *WebSearchProbe) probeSearxng(ctx context.Context) (string, string, error) {
-	base := strings.TrimRight(p.resolver.SearxngURL(ctx), "/")
+func (p *WebSearchProbe) probeSearxng(ctx context.Context, rawURL string) (string, string, error) {
+	base := strings.TrimRight(strings.TrimSpace(rawURL), "/")
 	if base == "" {
 		base = model.DefaultSearxngURL
+	}
+	if err := validateLLMBaseURL(base); err != nil {
+		return model.ProviderSearxng, "", fmt.Errorf("searxng url: %w", err)
 	}
 	q := url.Values{}
 	q.Set("q", "ongrid web search probe")
@@ -194,8 +242,8 @@ func (p *WebSearchProbe) probeSearxng(ctx context.Context) (string, string, erro
 	return model.ProviderSearxng, sample, nil
 }
 
-func (p *WebSearchProbe) probeTavily(ctx context.Context) (string, string, error) {
-	apiKey := p.resolver.TavilyAPIKey(ctx)
+func (p *WebSearchProbe) probeTavily(ctx context.Context, rawAPIKey string) (string, string, error) {
+	apiKey := strings.TrimSpace(rawAPIKey)
 	if apiKey == "" {
 		return model.ProviderTavily, "", fmt.Errorf("tavily api key not configured")
 	}
@@ -236,8 +284,8 @@ func (p *WebSearchProbe) probeTavily(ctx context.Context) (string, string, error
 	return model.ProviderTavily, sample, nil
 }
 
-func (p *WebSearchProbe) probeBrave(ctx context.Context) (string, string, error) {
-	apiKey := p.resolver.BraveAPIKey(ctx)
+func (p *WebSearchProbe) probeBrave(ctx context.Context, rawAPIKey string) (string, string, error) {
+	apiKey := strings.TrimSpace(rawAPIKey)
 	if apiKey == "" {
 		return model.ProviderBrave, "", fmt.Errorf("brave api key not configured")
 	}

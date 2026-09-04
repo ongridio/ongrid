@@ -1,6 +1,6 @@
 // Package webshell turns the edge agent into a generic stream port-
-// forwarder. Manager opens a frontier stream into the edge with a
-// Meta blob describing the target (today: `{"target":"127.0.0.1:22"}`);
+// forwarder. Manager carries the loopback SSH port in the SSH client
+// identification line because Frontier does not relay stream Meta;
 // the edge dials that local TCP socket and io.Copy's bytes both ways.
 //
 // SSH lives entirely on the manager side now: manager wraps the
@@ -10,24 +10,20 @@
 // edge tiny and lets the manager be the sole owner of webshell
 // policy / audit / concurrency / kick-out logic.
 //
-// Wire shape (manager → edge stream Meta):
-//
-//	{"target": "127.0.0.1:22"}        # default WebSSH path
-//	{"target": "10.0.0.5:22"}         # future: jumpbox / sidecar SSH
-//
-// Targets are validated against a small allowlist (just localhost +
-// loopback ports today) so the manager can't aim the edge at
-// arbitrary intranet hosts via a forged Meta. Phase 2 may widen this
-// behind a per-edge config setting.
+// Targets are restricted to device loopback so forged metadata cannot aim the
+// edge at arbitrary intranet hosts. Any valid TCP port may be used.
 package webshell
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -84,34 +80,17 @@ type streamMeta struct {
 	Target string `json:"target"`
 }
 
-// allowedTargets restricts which addresses the edge will dial when
-// the manager opens a stream. Today the only sane target is the
-// host's local sshd; we hardcode 127.0.0.1:22. Phase 2 may widen
-// behind /etc/ongrid-edge/webshell.yaml.
-//
-// The localhost narrow scope is the security boundary — without it
-// a compromised manager could pivot the edge to any reachable IP.
-var allowedTargets = map[string]bool{
-	"127.0.0.1:22": true,
-	"localhost:22": true,
-}
-
 func handleStream(stream tunnel.StreamConn, log *slog.Logger) {
 	defer stream.Close()
-	var m streamMeta
-	if raw := stream.Meta(); len(raw) > 0 {
-		if err := json.Unmarshal(raw, &m); err != nil {
-			writeStreamError(stream, fmt.Sprintf("bad meta: %v", err))
-			return
-		}
+	target, routedStream, err := resolveTarget(stream)
+	if err != nil {
+		writeStreamError(stream, err.Error())
+		return
 	}
-	target := strings.TrimSpace(m.Target)
-	if target == "" {
-		target = "127.0.0.1:22"
-	}
-	if !allowedTargets[target] {
+	stream = routedStream
+	if err := validateTarget(target); err != nil {
 		writeStreamError(stream, fmt.Sprintf("target %q not allowed", target))
-		log.Warn("webshell: rejected target", slog.String("target", target))
+		log.Warn("webshell: rejected target", slog.String("target", target), slog.Any("err", err))
 		return
 	}
 
@@ -139,6 +118,60 @@ func handleStream(stream tunnel.StreamConn, log *slog.Logger) {
 	_ = conn.Close()
 	_ = stream.Close()
 	<-errs
+}
+
+func resolveTarget(stream tunnel.StreamConn) (string, tunnel.StreamConn, error) {
+	var m streamMeta
+	if raw := stream.Meta(); len(raw) > 0 {
+		if err := json.Unmarshal(raw, &m); err != nil {
+			return "", stream, fmt.Errorf("bad meta: %w", err)
+		}
+	}
+	target := strings.TrimSpace(m.Target)
+	if target != "" {
+		return target, stream, nil
+	}
+
+	// Frontier v1.2.4 does not copy stream Meta across its service-to-edge
+	// bridge. SSH writes its identification line first, so carry the requested
+	// loopback port there and replay the line unchanged to sshd.
+	reader := bufio.NewReaderSize(stream, 257)
+	line, err := reader.ReadSlice('\n')
+	if err != nil {
+		return "", stream, fmt.Errorf("read SSH identification: %w", err)
+	}
+	replay := &replayStream{
+		StreamConn: stream,
+		reader:     io.MultiReader(bytes.NewReader(bytes.Clone(line)), reader),
+	}
+	port, ok := tunnel.ParseWebshellSSHClientVersion(string(line))
+	if !ok {
+		return "127.0.0.1:22", replay, nil
+	}
+	return net.JoinHostPort("127.0.0.1", strconv.Itoa(int(port))), replay, nil
+}
+
+type replayStream struct {
+	tunnel.StreamConn
+	reader io.Reader
+}
+
+func (s *replayStream) Read(p []byte) (int, error) {
+	return s.reader.Read(p)
+}
+
+// validateTarget fixes the host to device loopback and accepts any valid TCP
+// port. The manager never gets access to other services on the device network.
+func validateTarget(target string) error {
+	host, rawPort, err := net.SplitHostPort(target)
+	if err != nil || host != "127.0.0.1" {
+		return errors.New("only 127.0.0.1 targets are allowed")
+	}
+	port, err := strconv.ParseUint(rawPort, 10, 16)
+	if err != nil || port == 0 {
+		return errors.New("invalid port")
+	}
+	return nil
 }
 
 // writeStreamError sends a brief plain-text error to the stream so

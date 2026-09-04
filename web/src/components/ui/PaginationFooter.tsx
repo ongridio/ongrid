@@ -43,7 +43,7 @@ export function PaginationFooter({
 
   return (
     <div className={cn(
-      'sticky bottom-0 z-10 mt-2 flex items-center justify-end gap-2 border-t border-zinc-800/60 bg-zinc-950/95 py-3 text-xs text-zinc-400 backdrop-blur',
+      'sticky bottom-0 z-10 mt-2 flex items-center justify-end gap-2 border-t border-zinc-800/60 bg-zinc-950 py-3 text-xs text-zinc-400',
       className,
     )}>
       <span className="mr-2 text-zinc-600">{rangeLabel}</span>

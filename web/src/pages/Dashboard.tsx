@@ -15,6 +15,7 @@ import {
 import { StatusPill } from '@/components/StatusPill';
 import { Sparkline } from '@/components/Sparkline';
 import { cn } from '@/lib/cn';
+import { chartTooltipStyle } from '@/lib/chartTheme';
 import { openMetricDrilldown } from '@/lib/drilldown';
 import { formatNumber, relativeTime } from '@/lib/format';
 import { usePoll } from '@/lib/usePoll';
@@ -709,12 +710,7 @@ function ClusterPosture({
                 <XAxis dataKey="t" hide />
                 <YAxis domain={[0, onlineMax]} hide />
                 <Tooltip
-                  contentStyle={{
-                    background: 'rgb(24 24 27)',
-                    border: '1px solid rgb(63 63 70)',
-                    borderRadius: 6,
-                    fontSize: 11,
-                  }}
+                  contentStyle={chartTooltipStyle}
                   formatter={(v: number) => [`${v}`, tr('在线', 'Online')]}
                   labelFormatter={(idx: number) => {
                     // 24 hourly buckets — last one is "now". Render
@@ -916,12 +912,7 @@ function AlertSeverityCard({
                   ))}
                 </Pie>
                 <Tooltip
-                  contentStyle={{
-                    background: 'rgb(24 24 27)',
-                    border: '1px solid rgb(63 63 70)',
-                    borderRadius: 6,
-                    fontSize: 11,
-                  }}
+                  contentStyle={chartTooltipStyle}
                   formatter={(v: number) => `${v}`}
                 />
               </PieChart>
@@ -1030,12 +1021,7 @@ function NoisyRulesCard({
               />
               <Tooltip
                 cursor={{ fill: 'rgba(120, 120, 140, 0.12)' }}
-                contentStyle={{
-                  background: 'rgb(24 24 27)',
-                  border: '1px solid rgb(63 63 70)',
-                  borderRadius: 6,
-                  fontSize: 11,
-                }}
+                contentStyle={chartTooltipStyle}
                 formatter={(v: number) => [`${v}`, tr('incident 数', 'incidents')]}
               />
               <Bar dataKey="count" radius={[0, 4, 4, 0]} isAnimationActive={false} cursor="pointer">

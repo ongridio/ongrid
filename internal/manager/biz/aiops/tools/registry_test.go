@@ -61,6 +61,9 @@ func (r *fakeEdgeRepo) UpdateSecretHash(_ context.Context, _ uint64, _ string) e
 func (r *fakeEdgeRepo) UpdateStatus(_ context.Context, _ uint64, _ string, _ time.Time) error {
 	return nil
 }
+func (r *fakeEdgeRepo) MarkStaleOffline(_ context.Context, _ time.Time) (int64, error) {
+	return 0, nil
+}
 func (r *fakeEdgeRepo) MarkRegistered(_ context.Context, _ uint64, _ time.Time) error {
 	return nil
 }

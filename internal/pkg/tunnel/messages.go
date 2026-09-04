@@ -53,7 +53,7 @@ const (
 	// generation. Credential names and arbitrary file paths are never accepted.
 	MethodGetPluginSecret = "get_plugin_secret"
 	// MethodReportPluginConfigApplied is edge → manager. It acknowledges
-	// whether a manager-owned plugin generation was validated and applied.
+	// whether a plugin configuration was validated and applied.
 	MethodReportPluginConfigApplied = "report_plugin_config_applied"
 
 	// WebSSH (manager → edge): edge agent acts as an SSH client into

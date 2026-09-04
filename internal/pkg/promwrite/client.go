@@ -129,13 +129,6 @@ func (c *Client) Write(ctx context.Context, samples []Sample) error {
 	if len(samples) == 0 {
 		return nil
 	}
-	url, rerr := c.endpoint.ResolveWriteURL(ctx)
-	if rerr != nil {
-		return fmt.Errorf("promwrite: resolve endpoint: %w", rerr)
-	}
-	if url == "" {
-		return errors.New("promwrite: write endpoint is empty")
-	}
 
 	// Each Sample becomes its own TimeSeries (one sample per series). This
 	// is wire-equivalent to grouping by label hash and saves the manager
@@ -145,7 +138,24 @@ func (c *Client) Write(ctx context.Context, samples []Sample) error {
 		ts := encodeTimeSeries(s.Labels, []sampleEntry{{value: s.Value, tsMs: s.TsMs}})
 		seriesPayloads = append(seriesPayloads, ts)
 	}
-	raw := encodeWriteRequest(seriesPayloads)
+	return c.post(ctx, encodeWriteRequest(seriesPayloads), len(samples))
+}
+
+// Probe sends an empty, valid WriteRequest. Compatible receivers return
+// 200/204 while storing no series, so callers can verify URL/auth/TLS safely.
+func (c *Client) Probe(ctx context.Context) error {
+	return c.post(ctx, encodeWriteRequest(nil), 0)
+}
+
+func (c *Client) post(ctx context.Context, raw []byte, sampleCount int) error {
+	url, rerr := c.endpoint.ResolveWriteURL(ctx)
+	if rerr != nil {
+		return fmt.Errorf("promwrite: resolve endpoint: %w", rerr)
+	}
+	if url == "" {
+		return errors.New("promwrite: write endpoint is empty")
+	}
+
 	compressed := snappy.Encode(nil, raw)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(compressed))
@@ -171,7 +181,7 @@ func (c *Client) Write(ctx context.Context, samples []Sample) error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 	c.log.WarnContext(ctx, "promwrite: non-2xx",
 		slog.Int("status", resp.StatusCode),
-		slog.Int("samples", len(samples)),
+		slog.Int("samples", sampleCount),
 		slog.String("body", string(body)),
 	)
 	return fmt.Errorf("promwrite: %s returned %d: %s", url, resp.StatusCode, string(body))

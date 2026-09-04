@@ -1,0 +1,12 @@
+limits:
+  # Profiles are temporary troubleshooting data, not long-term observability data.
+  compactor_blocks_retention_period: 1h
+  ingestion_relabeling_rules:
+    - action: labelmap
+      regex: ^process.executable.name$
+      replacement: service_name
+
+compactor:
+  compaction_interval: 5m
+  cleanup_interval: 5m
+  deletion_delay: 5m

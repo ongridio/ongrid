@@ -1261,7 +1261,7 @@ const PLUGIN_META: Record<
   profiles: {
     label: 'profiles',
     pill: 'bg-amber-500/10 text-amber-300 ring-amber-500/30',
-    getHint: () => trInline('subprocess parca-agent，eBPF profiling（未来）', 'subprocess parca-agent — eBPF profiling (future)'),
+    getHint: () => trInline('OpenTelemetry pprof 应用性能分析（从工具页启动）', 'OpenTelemetry pprof application profiling (start from Tools)'),
   },
   hostmetrics: {
     label: 'hostmetrics',

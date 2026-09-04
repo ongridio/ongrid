@@ -12,9 +12,10 @@ import (
 // output is discarded deliberately: Collector diagnostics can echo exporter
 // headers and other rendered values. Operators receive a stable error class,
 // while the previous config remains untouched.
-func OTelConfigValidator(binary string) func(context.Context, string) error {
+func OTelConfigValidator(binary string, extraArgs ...string) func(context.Context, string) error {
 	return func(ctx context.Context, configPath string) error {
-		cmd := exec.CommandContext(ctx, binary, "validate", "--config="+configPath)
+		args := append([]string{"validate", "--config=" + configPath}, extraArgs...)
+		cmd := exec.CommandContext(ctx, binary, args...)
 		cmd.Stdout = io.Discard
 		cmd.Stderr = io.Discard
 		if err := cmd.Run(); err != nil {

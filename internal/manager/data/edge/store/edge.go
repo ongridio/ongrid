@@ -147,6 +147,18 @@ func (r *Repo) UpdateStatus(ctx context.Context, id uint64, status string, lastS
 	return nil
 }
 
+// MarkStaleOffline flips online edges whose last heartbeat predates cutoff.
+// The conditional update is atomic with concurrent heartbeat writes.
+func (r *Repo) MarkStaleOffline(ctx context.Context, cutoff time.Time) (int64, error) {
+	res := r.db.WithContext(ctx).Model(&model.Edge{}).
+		Where("status = ? AND last_seen_at IS NOT NULL AND last_seen_at < ?", model.StatusOnline, cutoff).
+		Update("status", model.StatusOffline)
+	if res.Error != nil {
+		return 0, res.Error
+	}
+	return res.RowsAffected, nil
+}
+
 // MarkRegistered records the completion of register_edge and marks the edge
 // online. Heartbeats intentionally use UpdateStatus instead so this timestamp
 // remains a stable session-generation marker.

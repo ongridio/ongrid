@@ -52,6 +52,7 @@ import { listNodes, type TopologyNode } from '@/api/topology';
 import { onDevicesChanged } from '@/lib/events';
 import { Button, RoleSelect } from '@/components/ui';
 import { cn } from '@/lib/cn';
+import { chartTooltipItemStyle, chartTooltipLabelStyle, chartTooltipStyle } from '@/lib/chartTheme';
 import { useI18n } from '@/i18n/locale';
 
 const RANGE_PRESETS = [
@@ -944,7 +945,7 @@ export default function LogsPage() {
                   <CartesianGrid stroke="#52525b" strokeOpacity={0.28} vertical={false} />
                   <XAxis dataKey="label" minTickGap={48} tick={{ fill: '#71717a', fontSize: 10 }} tickLine={false} axisLine={{ stroke: '#3f3f46' }} />
                   <YAxis allowDecimals={false} width={44} tick={{ fill: '#71717a', fontSize: 10 }} tickLine={false} axisLine={false} />
-                  <Tooltip cursor={{ fill: '#6366f1', opacity: 0.08 }} formatter={(value) => [Number(value).toLocaleString(), tr('日志数', 'Logs')]} contentStyle={{ backgroundColor: '#18181b', border: '1px solid #3f3f46', borderRadius: 6, fontSize: 11 }} labelStyle={{ color: '#a1a1aa' }} itemStyle={{ color: '#e4e4e7' }} />
+                  <Tooltip cursor={{ fill: '#6366f1', opacity: 0.08 }} formatter={(value) => [Number(value).toLocaleString(), tr('日志数', 'Logs')]} contentStyle={chartTooltipStyle} labelStyle={chartTooltipLabelStyle} itemStyle={chartTooltipItemStyle} />
                   <Bar dataKey="count" fill="#6366f1" radius={[2, 2, 0, 0]} minPointSize={2} />
                 </BarChart>
               </ResponsiveContainer>

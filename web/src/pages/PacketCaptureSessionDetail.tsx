@@ -85,7 +85,7 @@ export default function PacketCaptureSessionDetailPage() {
                 <Metric label={tr('成员数据包', 'Member artifacts')} value={`${readyCount}/${captureCount}`} />
                 <Metric label={tr('关联流', 'Correlated flows')} value={String(analysis?.summary.flow_count ?? 0)} />
                 <Metric label={tr('已解析事件', 'Parsed events')} value={String(analysis?.summary.event_count ?? 0)} />
-                <div className="bg-zinc-900/90 p-4">
+                <div className="bg-zinc-900 p-4">
                   <Button onClick={() => void analyzeWithAI()} disabled={analyzing} className="h-8">
                     <Sparkles size={13} /> {tr('AI 分析', 'AI analysis')}
                   </Button>
@@ -113,7 +113,7 @@ export default function PacketCaptureSessionDetailPage() {
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="bg-zinc-900/90 p-4">
+    <div className="bg-zinc-900 p-4">
       <div className="text-[11px] text-zinc-500">{label}</div>
       <div className="mt-1 text-lg font-medium text-zinc-100">{value}</div>
     </div>

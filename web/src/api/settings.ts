@@ -74,8 +74,16 @@ export type GrafanaSyncResult = {
   dashboards: string[];
 };
 
-export function testGrafanaConnection(): Promise<{ status: string }> {
-  return request<{ status: string }>('POST', '/integrations/grafana/test');
+export type GrafanaConfigurationProbeInput = {
+  root_url: string;
+  sa_token: string;
+  api_key: string;
+  org_id: string;
+  tls_insecure: boolean;
+};
+
+export function testGrafanaConnection(input: GrafanaConfigurationProbeInput): Promise<{ status: string }> {
+  return request<{ status: string }>('POST', '/integrations/grafana/test', input);
 }
 
 export function syncGrafana(): Promise<GrafanaSyncResult> {
@@ -86,23 +94,39 @@ export function syncLokiDatasource(): Promise<{ status: string }> {
   return request<{ status: string }>('POST', '/integrations/grafana/sync-loki');
 }
 
-// testPromConnection runs a tiny "up" PromQL probe via the manager. Used
-// by the Prom integration card to validate URL + Bearer/Basic before the
-// user trusts that the wiring is good.
-export function testPromConnection(): Promise<{ status: string }> {
-  return request<{ status: string }>('POST', '/integrations/prom/test');
+export type PromConfigurationProbeInput = {
+  query_url: string;
+  remote_write_url: string;
+  bearer_token: string;
+  basic_user: string;
+  basic_password: string;
+  tls_insecure: boolean;
+};
+
+// testPromConnection validates the unsaved query and remote_write draft.
+// The manager uses credentials only for this request and stores no settings
+// or metric samples.
+export function testPromConnection(input: PromConfigurationProbeInput): Promise<{ status: string }> {
+  return request<{ status: string }>('POST', '/integrations/prom/test', input);
 }
 
 // testLokiConnection / testTempoConnection proxy through the manager so
-// auth + TLS-skip + URL come from system_settings rather than the browser.
+// auth + TLS-skip + URL come from the current unsaved browser draft.
 // Loki checks GET /ready; Tempo checks /ready for a query URL or sends an
 // empty OTLP/HTTP export when the configured URL ends in /v1/traces.
-export function testLokiConnection(): Promise<{ status: string }> {
-  return request<{ status: string }>('POST', '/integrations/loki/test');
+export type TelemetryConfigurationProbeInput = {
+  url: string;
+  basic_user: string;
+  basic_password: string;
+  tls_insecure: boolean;
+};
+
+export function testLokiConnection(input: TelemetryConfigurationProbeInput): Promise<{ status: string }> {
+  return request<{ status: string }>('POST', '/integrations/loki/test', input);
 }
 
-export function testTempoConnection(): Promise<{ status: string }> {
-  return request<{ status: string }>('POST', '/integrations/tempo/test');
+export function testTempoConnection(input: TelemetryConfigurationProbeInput): Promise<{ status: string }> {
+  return request<{ status: string }>('POST', '/integrations/tempo/test', input);
 }
 
 // WebSearchProbeResult is what the manager returns when the user clicks
@@ -117,8 +141,15 @@ export type WebSearchProbeResult = {
   sample: string;
 };
 
-export function testWebSearchConnection(): Promise<WebSearchProbeResult> {
-  return request<WebSearchProbeResult>('POST', '/integrations/websearch/test');
+export type WebSearchConfigurationProbeInput = {
+  provider: string;
+  searxng_url: string;
+  tavily_api_key: string;
+  brave_api_key: string;
+};
+
+export function testWebSearchConnection(input: WebSearchConfigurationProbeInput): Promise<WebSearchProbeResult> {
+  return request<WebSearchProbeResult>('POST', '/integrations/websearch/test', input);
 }
 
 // invalidateLLMRouter nudges the manager's in-process LLM provider

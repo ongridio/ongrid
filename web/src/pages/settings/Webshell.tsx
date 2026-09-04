@@ -44,6 +44,7 @@ const TERMINATED_LABELS: Record<string, { zh: string; en: string; tone: Tone }> 
   disconnect: { zh: '连接断开', en: 'Disconnected', tone: 'warning' },
   admin_kill: { zh: '管理员强制', en: 'Admin kill', tone: 'danger' },
   ssh_auth_fail: { zh: 'SSH 认证失败', en: 'SSH auth failed', tone: 'warning' },
+  ssh_host_key: { zh: 'SSH 指纹校验失败', en: 'SSH host key rejected', tone: 'warning' },
   ssh_exit: { zh: '退出', en: 'Exited', tone: 'default' },
   device_offline: { zh: '设备离线', en: 'Device offline', tone: 'warning' },
 };
@@ -181,7 +182,7 @@ export default function SettingsWebshell() {
       ).toLowerCase();
       return haystack.includes(q);
     });
-  }, [items, statusFilter, search, userMap, edgeMap]);
+  }, [items, statusFilter, search, userMap, edgeMap, tr]);
 
   const handleKill = useCallback(
     async (s: ShellSession) => {
@@ -209,7 +210,7 @@ export default function SettingsWebshell() {
         setKillBusy(null);
       }
     },
-    [refresh],
+    [refresh, tr],
   );
 
   const filterChip = (key: StatusFilter, label: string, n: number) => (
@@ -421,7 +422,9 @@ function SessionTable({
                   <div className="text-zinc-100">{deviceLabel}</div>
                   <div className="font-mono text-[11px] text-zinc-500">device #{s.device_id}</div>
                 </td>
-                <td className="px-4 py-2.5 font-mono text-[12px] text-zinc-300">{s.ssh_user}</td>
+                <td className="px-4 py-2.5 font-mono text-[12px] text-zinc-300">
+                  {s.ssh_user}:{s.ssh_port || 22}
+                </td>
                 <td className="px-4 py-2.5 text-zinc-300">
                   {duration}
                   <span className="text-[11px] text-zinc-600">{exitInfo}</span>

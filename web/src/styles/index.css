@@ -139,7 +139,8 @@ html.light .bg-zinc-950\/40,
 html.light .bg-zinc-950\/60,
 html.light .bg-zinc-950\/70,
 html.light .bg-zinc-950\/80       { background-color: rgb(var(--bg) / 0.5); }
-html.light .bg-zinc-700\/40       { background-color: rgb(241 245 249); }
+html.light .bg-zinc-700\/40,
+html.light .bg-zinc-700\/50       { background-color: rgb(241 245 249); }
 html.light .bg-zinc-900\/30,
 html.light .bg-zinc-900\/40,
 html.light .bg-zinc-900\/50,
@@ -147,6 +148,7 @@ html.light .bg-zinc-900\/60,
 html.light .bg-zinc-900\/70,
 html.light .bg-zinc-900\/80       { background-color: rgb(var(--card-soft)); }
 html.light .bg-zinc-800\/40,
+html.light .bg-zinc-800\/70,
 html.light .bg-zinc-800\/60,
 html.light .bg-zinc-800\/80       { background-color: rgb(226 232 240 / 0.7); }
 
@@ -201,12 +203,17 @@ html.light .placeholder\:text-zinc-600::placeholder { color: rgb(var(--text-fain
 
 /* hover: variants that flip the same way */
 html.light .hover\:bg-zinc-800:hover       { background-color: rgb(226 232 240); }
+html.light .hover\:bg-zinc-600\/30:hover,
+html.light .hover\:bg-zinc-800\/30:hover   { background-color: rgb(226 232 240 / 0.4); }
 html.light .hover\:bg-zinc-800\/40:hover   { background-color: rgb(226 232 240 / 0.5); }
-html.light .hover\:bg-zinc-800\/60:hover   { background-color: rgb(226 232 240 / 0.7); }
+html.light .hover\:bg-zinc-800\/60:hover,
+html.light .hover\:bg-zinc-800\/70:hover,
+html.light .hover\:bg-zinc-800\/80:hover   { background-color: rgb(226 232 240 / 0.7); }
 html.light .hover\:bg-zinc-900:hover       { background-color: rgb(241 245 249); }  /* slate-100 */
 html.light .hover\:bg-zinc-900\/30:hover,
 html.light .hover\:bg-zinc-900\/40:hover   { background-color: rgb(241 245 249 / 0.7); }
-html.light .hover\:bg-zinc-900\/60:hover   { background-color: rgb(248 250 252); }
+html.light .hover\:bg-zinc-900\/60:hover,
+html.light .hover\:bg-zinc-900\/70:hover   { background-color: rgb(248 250 252); }
 html.light .hover\:bg-zinc-700:hover       { background-color: rgb(203 213 225); }
 html.light .hover\:bg-red-900\/30:hover    { background-color: rgb(254 226 226); }
 html.light .hover\:text-zinc-100:hover     { color: rgb(var(--text)); }

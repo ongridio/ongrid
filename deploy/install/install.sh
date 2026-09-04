@@ -506,6 +506,11 @@ fi
 if [[ -f "$SCRIPT_DIR/tempo-config.yaml" ]]; then
     cp -f "$SCRIPT_DIR/tempo-config.yaml" "$INSTALL_DIR/tempo-config.yaml"
 fi
+for cfg in profiles-gateway.yaml pyroscope-config.yaml; do
+    if [[ -f "$SCRIPT_DIR/$cfg" ]]; then
+        cp -f "$SCRIPT_DIR/$cfg" "$INSTALL_DIR/$cfg"
+    fi
+done
 if [[ -d "$SCRIPT_DIR/grafana" ]]; then
     mkdir -p "$INSTALL_DIR/grafana"
     cp -rf "$SCRIPT_DIR/grafana/." "$INSTALL_DIR/grafana/"
