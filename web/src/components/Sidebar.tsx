@@ -24,21 +24,24 @@ import {
   Hammer,
   BookOpen,
   GitBranch,
-  ChevronDown,
+  ChevronUp,
   ChevronRight,
   Pencil,
   Trash2,
   Share2,
   Plug,
   ShipWheel,
-  Boxes,
+  Layers3,
   Network,
   PinOff,
   Settings2,
+  ListChecks,
 } from 'lucide-react';
 import { Avatar } from './Avatar';
 import { AgentBadge } from './AgentBadge';
 import { OngridLogo } from './OngridLogo';
+import { Modal } from './Modal';
+import { Button } from './ui';
 import { useI18n } from '@/i18n/locale';
 import { useThemeMode } from '@/store/mode';
 import { Sun, Moon, Monitor, Languages } from 'lucide-react';
@@ -82,6 +85,7 @@ export function Sidebar() {
   // the collapsed icon-rail. Polled by useIncidentBadge in Layout.
   const incidentOpen = useIncidentBadge((s) => s.openCount);
   const [showAllSessions, setShowAllSessions] = useState(false);
+  const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ChatSession | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 	const [upgradeHiddenResources, setUpgradeHiddenResources] = useState<string[]>([]);
@@ -116,10 +120,15 @@ export function Sidebar() {
       setDeleteTarget(null);
     }
   }
+
+  function handleBatchDeleted(ids: string[]) {
+    invalidateChatSessions();
+    if (ids.some((id) => location.pathname === `/chat/${id}`)) navigate('/');
+  }
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
 
-  const visibleSessions = showAllSessions ? sessions.slice(0, 10) : sessions.slice(0, 5);
+  const visibleSessions = showAllSessions ? sessions : sessions.slice(0, 5);
   const hasMoreSessions = sessions.length > 5;
 
   useEffect(() => {
@@ -300,7 +309,7 @@ export function Sidebar() {
           aria-label={tr('集群', 'Clusters')}
           className="rounded-lg p-2 text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
         >
-          <Boxes size={16} />
+          <Layers3 size={16} />
         </Link>
         <Link
           to="/kubernetes"
@@ -427,7 +436,7 @@ export function Sidebar() {
           storageKey="agent"
           title="Agent"
           defaultOpen
-		  initialHiddenKeys={upgradeHiddenResources}
+          initialHiddenKeys={upgradeHiddenResources}
           items={[
             { key: 'assistants', to: '/agents', icon: Bot, label: tr('助理', 'Assistants') },
             { key: 'workflows', to: '/workflows', icon: Route, label: tr('工作流', 'Workflows') },
@@ -452,7 +461,7 @@ export function Sidebar() {
           defaultOpen
           items={[
             { key: 'devices', to: '/devices', icon: HardDrive, label: tr('设备', 'Devices'), exactQuery: true },
-            { key: 'clusters', to: '/clusters', icon: Boxes, label: tr('集群', 'Clusters') },
+            { key: 'clusters', to: '/clusters', icon: Layers3, label: tr('集群', 'Clusters') },
             { key: 'network-devices', to: '/devices?roles=network', icon: Network, label: tr('网络设备', 'Network devices') },
             { key: 'kubernetes', to: '/kubernetes', icon: ShipWheel, iconSize: 16, label: 'Kubernetes' },
             { key: 'topology', to: '/topology', icon: Share2, label: tr('拓扑', 'Topology') },
@@ -482,7 +491,20 @@ export function Sidebar() {
           ]}
         />
 
-        <SectionLabel>{tr('会话', 'Sessions')}</SectionLabel>
+        <div className="mt-5 flex items-center justify-between px-2 pb-1.5">
+          <div className="text-[13px] font-semibold text-zinc-300">{tr('会话', 'Sessions')}</div>
+          {sessions.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setBatchDeleteOpen(true)}
+              aria-label={tr('批量删除会话', 'Delete multiple sessions')}
+              className="flex items-center gap-1 rounded px-1.5 py-1 text-[11px] font-medium text-zinc-500 hover:bg-zinc-800/60 hover:text-zinc-200"
+            >
+              <ListChecks size={12} />
+              <span>{tr('批量删除', 'Batch delete')}</span>
+            </button>
+          ) : null}
+        </div>
         <div className="ml-2 space-y-0.5">
           {sessions.length === 0 ? (
             <div className="px-2 py-1.5 text-[12px] text-zinc-600">{tr('暂无会话', 'No sessions yet')}</div>
@@ -502,8 +524,8 @@ export function Sidebar() {
               onClick={() => setShowAllSessions((v) => !v)}
               className="flex items-center gap-1 rounded-md px-2 py-1.5 text-[12px] text-zinc-500 transition-colors hover:bg-zinc-800/60 hover:text-zinc-200"
             >
-              {showAllSessions ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-              <span>{showAllSessions ? tr('收起', 'Collapse') : tr(`展开剩余 ${Math.min(sessions.length, 10) - 5} 条`, `Show ${Math.min(sessions.length, 10) - 5} more`)}</span>
+              {showAllSessions ? <ChevronUp size={14} /> : <ChevronRight size={14} />}
+              <span>{showAllSessions ? tr('收起', 'Collapse') : tr(`展开剩余 ${sessions.length - 5} 条`, `Show ${sessions.length - 5} more`)}</span>
             </button>
           ) : null}
         </div>
@@ -528,6 +550,12 @@ export function Sidebar() {
           onConfirm={() => void confirmDelete(deleteTarget)}
         />
       )}
+      <BatchDeleteSessionsModal
+        open={batchDeleteOpen}
+        sessions={sessions}
+        onClose={() => setBatchDeleteOpen(false)}
+        onDeleted={handleBatchDeleted}
+      />
     </aside>
   );
 }
@@ -721,11 +749,110 @@ function DeleteSessionModal({
   );
 }
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
+function BatchDeleteSessionsModal({
+  open,
+  sessions,
+  onClose,
+  onDeleted,
+}: {
+  open: boolean;
+  sessions: ChatSession[];
+  onClose: () => void;
+  onDeleted: (ids: string[]) => void;
+}) {
+  const { tr } = useI18n();
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setSelected(new Set());
+    setError(null);
+  }, [open]);
+
+  const allSelected = sessions.length > 0 && selected.size === sessions.length;
+  const close = () => {
+    if (!deleting) onClose();
+  };
+  const toggle = (id: string) => {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const confirm = async () => {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    setDeleting(true);
+    setError(null);
+    const results = await Promise.allSettled(ids.map(deleteSession));
+    const succeeded = ids.filter((_, index) => results[index].status === 'fulfilled');
+    const failed = ids.filter((_, index) => results[index].status === 'rejected');
+    if (succeeded.length > 0) onDeleted(succeeded);
+    if (failed.length === 0) onClose();
+    else {
+      setSelected(new Set(failed));
+      setError(tr(
+        `${succeeded.length} 条已删除，${failed.length} 条失败，请重试。`,
+        `${succeeded.length} deleted; ${failed.length} failed. Try again.`,
+      ));
+    }
+    setDeleting(false);
+  };
+
   return (
-    <div className="mt-5 px-2 pb-1.5 text-[13px] font-semibold text-zinc-300">
-      {children}
-    </div>
+    <Modal
+      open={open}
+      onClose={close}
+      title={tr('批量删除会话', 'Delete multiple sessions')}
+      footer={(
+        <>
+          <Button onClick={close} disabled={deleting}>{tr('取消', 'Cancel')}</Button>
+          <Button variant="danger" onClick={() => void confirm()} disabled={deleting || selected.size === 0}>
+            <Trash2 size={13} />
+            {deleting
+              ? tr('删除中…', 'Deleting…')
+              : tr(`删除 ${selected.size} 条`, `Delete ${selected.size}`)}
+          </Button>
+        </>
+      )}
+    >
+      <p className="text-[13px] leading-5 text-zinc-400">
+        {tr('所选会话的消息和工具调用记录会被一并删除，且无法恢复。', 'Messages and tool-call records in selected sessions will be permanently deleted.')}
+      </p>
+      <label className="mt-3 flex cursor-pointer items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950/30 px-3 py-2 text-[13px] text-zinc-300">
+        <input
+          type="checkbox"
+          aria-label={tr('全选会话', 'Select all sessions')}
+          checked={allSelected}
+          onChange={() => setSelected(allSelected ? new Set() : new Set(sessions.map((session) => session.id)))}
+          className="accent-red-500"
+        />
+        <span className="flex-1">{tr('全选', 'Select all')}</span>
+        <span className="text-[11px] text-zinc-500">{selected.size}/{sessions.length}</span>
+      </label>
+      <div className="mt-2 max-h-80 divide-y divide-zinc-800 overflow-y-auto rounded-lg border border-zinc-800">
+        {sessions.map((session, index) => {
+          const title = session.title || tr(`会话 ${index + 1}`, `Session ${index + 1}`);
+          return (
+            <label key={session.id} className={cn('flex cursor-pointer items-center gap-2 px-3 py-2.5 transition-colors', selected.has(session.id) ? 'bg-zinc-800/60' : 'hover:bg-zinc-800/40')}>
+              <input
+                type="checkbox"
+                aria-label={tr(`选择会话 ${title}`, `Select session ${title}`)}
+                checked={selected.has(session.id)}
+                onChange={() => toggle(session.id)}
+                className="accent-red-500"
+              />
+              <span className="min-w-0 flex-1 truncate text-[13px] text-zinc-300" title={title}>{title}</span>
+            </label>
+          );
+        })}
+      </div>
+      {error ? <p role="alert" className="mt-3 text-[12px] text-red-400">{error}</p> : null}
+    </Modal>
   );
 }
 
