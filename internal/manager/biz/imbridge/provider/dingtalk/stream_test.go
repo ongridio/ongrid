@@ -2,9 +2,13 @@ package dingtalk
 
 import (
 	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/open-dingtalk/dingtalk-stream-sdk-go/chatbot"
+	"github.com/open-dingtalk/dingtalk-stream-sdk-go/client"
 
 	model "github.com/ongridio/ongrid/internal/manager/model/imbridge"
 )
@@ -79,5 +83,19 @@ func TestSenderAdapter_SendText_UsesSessionWebhook(t *testing.T) {
 func TestNewStreamFactory_WhenCredentialsMissing_ReturnsError(t *testing.T) {
 	if _, err := NewStreamFactory(nil)(&model.ImApp{}, nil); err == nil {
 		t.Fatal("expected missing credentials error")
+	}
+}
+
+func TestProbeGetsStreamEndpoint(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1.0/gateway/connections/open" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		_, _ = io.WriteString(w, `{"endpoint":"wss://example.invalid","ticket":"ticket"}`)
+	}))
+	defer srv.Close()
+
+	if err := Probe(context.Background(), "app", "secret", client.WithOpenApiHost(srv.URL)); err != nil {
+		t.Fatalf("Probe: %v", err)
 	}
 }

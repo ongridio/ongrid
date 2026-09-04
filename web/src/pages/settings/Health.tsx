@@ -8,12 +8,10 @@ import {
   CheckCircle2,
   Clock3,
   Database,
-  GitBranch,
   Loader2,
   RefreshCw,
   Server,
   ShieldAlert,
-  ShieldCheck,
   Wifi,
   XCircle,
 } from 'lucide-react';
@@ -74,12 +72,10 @@ const GROUP_META: Record<string, { labelZh: string; labelEn: string; icon: IconT
   core: { labelZh: '核心服务', labelEn: 'Core services', icon: Server },
   observability: { labelZh: '可观测性', labelEn: 'Observability', icon: Activity },
   data: { labelZh: '数据组件', labelEn: 'Data components', icon: Database },
-  automation: { labelZh: '自动化', labelEn: 'Automation', icon: ShieldCheck },
-  edge: { labelZh: '边缘接入', labelEn: 'Edge access', icon: GitBranch },
   ai: { labelZh: 'AI 能力', labelEn: 'AI capabilities', icon: Bot },
 };
 
-const GROUP_ORDER = ['core', 'observability', 'data', 'automation', 'edge', 'ai'];
+const GROUP_ORDER = ['core', 'observability', 'data', 'ai'];
 
 const CHECK_LABELS: Record<string, { zh: string; en: string }> = {
   manager_api: { zh: 'Manager API', en: 'Manager API' },
@@ -90,8 +86,6 @@ const CHECK_LABELS: Record<string, { zh: string; en: string }> = {
   tempo: { zh: 'Tempo 链路', en: 'Tempo traces' },
   qdrant: { zh: 'Qdrant 向量库', en: 'Qdrant vector DB' },
   frontier: { zh: 'Frontier 隧道', en: 'Frontier tunnel' },
-  alert_engine: { zh: '告警引擎', en: 'Alert engine' },
-  edges: { zh: '边缘接入状态', en: 'Edge access state' },
   llm: { zh: 'LLM 模型', en: 'LLM provider' },
   embedding: { zh: 'Embedding 模型', en: 'Embedding provider' },
 };
@@ -101,16 +95,7 @@ const DETAIL_LABELS: Record<string, { zh: string; en: string }> = {
   collection: { zh: '集合', en: 'Collection' },
   default_provider: { zh: '默认模型源', en: 'Default provider' },
   enabled: { zh: '已启用', en: 'Enabled' },
-  enabled_rules: { zh: '启用规则', en: 'Enabled rules' },
-  evaluator_interval_seconds: { zh: '评估间隔', en: 'Evaluation interval' },
-  limit: { zh: '采样上限', en: 'Sample limit' },
-  notify_cooldown_seconds: { zh: '通知冷却', en: 'Notify cooldown' },
-  offline: { zh: '离线', en: 'Offline' },
-  online: { zh: '在线', en: 'Online' },
-  open_incidents: { zh: '未关闭事件', en: 'Open incidents' },
   providers: { zh: '模型源', en: 'Providers' },
-  rules: { zh: '规则', en: 'Rules' },
-  sampled: { zh: '采样数', en: 'Sampled' },
   version: { zh: '版本', en: 'Version' },
 };
 

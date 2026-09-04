@@ -50,6 +50,20 @@ func NewClient(token string) *Client {
 	return &Client{token: token, hc: &http.Client{}, base: "https://api.telegram.org"}
 }
 
+// Probe validates the bot token without sending a message.
+func (c *Client) Probe(ctx context.Context) error {
+	_, err := c.call(ctx, "getMe", struct{}{})
+	if err == nil {
+		return nil
+	}
+	// The token is part of Telegram's request URL and may appear in transport errors.
+	detail := err.Error()
+	if c.token != "" {
+		detail = strings.ReplaceAll(detail, c.token, "[redacted]")
+	}
+	return fmt.Errorf("telegram credentials: %s", detail)
+}
+
 func (c *Client) endpoint(method string) string {
 	return c.base + "/bot" + c.token + "/" + method
 }

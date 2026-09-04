@@ -1,74 +1,78 @@
 // Channels — two-way IM bot admin. CRUD for Larksuite / DingTalk /
-// Telegram / Slack bot registrations. Each row drives one long-connection
-// (stream mode) or one webhook endpoint that the platform calls. List view
-// is table-shaped (consistent with the Users / Edges page); the
-// create / edit form is a Modal. Note: this page was previously called
+// Telegram / Slack bot registrations. Each item drives one long-connection
+// (stream mode) or one webhook endpoint that the platform calls. Configured
+// bots are grouped by provider; the create / edit form is a Modal. Note: this page was previously called
 // "IMApps"/"Bots"; the URL+labels were unified to "Channels" to match
 // the two-way semantic and pair with Settings → Notifications (one-way
 // alert delivery).
 
-import { useCallback, useEffect, useState } from 'react';
-import { Plus, RefreshCw, Loader2, Pencil, Trash2, Eye, EyeOff, MessagesSquare, MessageSquareShare, Send, Slack } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Plus, Loader2, Pencil, Trash2, Eye, EyeOff, MessagesSquare } from 'lucide-react';
 import { ApiError } from '@/api/client';
 import {
   createIMApp,
   deleteIMApp,
   listIMApps,
   revealIMAppSecret,
+  testIMApp,
   updateIMApp,
   type IMApp,
   type IMAppPayload,
+  type IMAppTestResult,
   type IMMode,
   type IMProvider,
 } from '@/api/imbridge';
-import { Button, Card, Chip, EmptyState } from '@/components/ui';
+import { SettingsProviderPicker } from '@/components/SettingsProviderPicker';
+import { Button, Card, Chip } from '@/components/ui';
 import { Modal } from '@/components/Modal';
-import { cn } from '@/lib/cn';
+import { CommunicationProviderIcon } from '@/components/icons/Provider';
 import { useI18n } from '@/i18n/locale';
 
-const PROVIDER_META: Record<IMProvider, { labelZh: string; labelEn: string; icon: typeof MessageSquareShare; hintZh: string; hintEn: string }> = {
+const PROVIDER_META: Record<IMProvider, { labelZh: string; labelEn: string; hintZh: string; hintEn: string }> = {
   feishu: {
     labelZh: '飞书',
     labelEn: 'Larksuite',
-    icon: MessageSquareShare,
     hintZh: '飞书开放平台应用。建议走 stream 模式（长连接）— manager 主动 dial 出去，无需公网回调。',
     hintEn: 'Larksuite Open Platform app. Stream mode is the default — manager dials out, no public webhook URL required.',
   },
   dingtalk: {
     labelZh: '钉钉',
     labelEn: 'DingTalk',
-    icon: Send,
-    hintZh: '钉钉企业内部应用（落地，stream 实现 in progress）。',
-    hintEn: 'DingTalk enterprise app (in progress — stream impl pending).',
+    hintZh: '钉钉企业内部应用，支持 stream 长连接。',
+    hintEn: 'DingTalk enterprise app with stream connection support.',
   },
   telegram: {
     labelZh: 'Telegram',
     labelEn: 'Telegram',
-    icon: Send,
     hintZh: 'Telegram bot：app_id 填 bot 用户名，app_secret 填 BotFather 的 token。仅 stream 模式（getUpdates 长轮询，出站走代理）。⚠ bot 公开可搜，必须填 allow_from 白名单，否则任何人都能直接和 agent 对话。',
     hintEn: 'Telegram bot: app_id = bot username, app_secret = the BotFather token. Stream-only (getUpdates long-poll, outbound via proxy). ⚠ the bot is publicly searchable — allow_from is REQUIRED, otherwise anyone could talk to the agent.',
   },
   slack: {
     labelZh: 'Slack',
     labelEn: 'Slack',
-    icon: Slack,
     hintZh: 'Slack 应用（Socket Mode）：app_id 填 workspace team_id（如 T0123ABC）；需要两个 token — app_token (xapp-) 用于 WebSocket，bot_token (xoxb-) 用于 chat.postMessage。仅 stream 模式（出站 WebSocket，无需公网入口）。⚠ workspace 成员默认都能 @bot 对话，必须填 allow_from 白名单（Slack user id，如 UABC123）。',
     hintEn: 'Slack app (Socket Mode): app_id = the workspace team_id (e.g. T0123ABC); needs TWO tokens — app_token (xapp-) for the WebSocket and bot_token (xoxb-) for chat.postMessage. Stream-only (outbound WebSocket, no public ingress). ⚠ every workspace member can talk to the bot by default — allow_from (Slack user ids like UABC123) is REQUIRED.',
   },
 };
 
+const IM_PROVIDERS: IMProvider[] = ['feishu', 'dingtalk', 'telegram', 'slack'];
+
+type IMEditorState =
+  | { mode: 'create'; provider: IMProvider }
+  | { mode: 'edit'; app: IMApp };
+
 export default function SettingsChannels() {
   const { tr } = useI18n();
   const [items, setItems] = useState<IMApp[]>([]);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [editing, setEditing] = useState<IMApp | 'create' | null>(null);
+  const [editor, setEditor] = useState<IMEditorState | null>(null);
   const [deleting, setDeleting] = useState<IMApp | null>(null);
+  const [testingID, setTestingID] = useState<number | null>(null);
+  const [testResult, setTestResult] = useState<{ id: number; result: IMAppTestResult } | null>(null);
 
   const fetchAll = useCallback(async (silent = false) => {
-    if (silent) setRefreshing(true);
-    else setLoading(true);
+    if (!silent) setLoading(true);
     try {
       const r = await listIMApps();
       setItems(r.items ?? []);
@@ -76,8 +80,7 @@ export default function SettingsChannels() {
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : (e as Error).message);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
@@ -86,17 +89,37 @@ export default function SettingsChannels() {
   }, [fetchAll]);
 
   const onSaved = async () => {
-    setEditing(null);
+    setEditor(null);
     await fetchAll(true);
   };
 
+  const grouped = useMemo(() => {
+    const groups = new Map<IMProvider, IMApp[]>();
+    for (const app of items) {
+      const apps = groups.get(app.provider) ?? [];
+      apps.push(app);
+      groups.set(app.provider, apps);
+    }
+    return groups;
+  }, [items]);
+
+  const configuredProviders = IM_PROVIDERS.filter((provider) => grouped.has(provider));
+
+  const handleTest = useCallback(async (app: IMApp) => {
+    setTestingID(app.id);
+    setTestResult(null);
+    try {
+      setTestResult({ id: app.id, result: await testIMApp(app.id) });
+    } catch (e) {
+      const message = e instanceof ApiError ? e.message : (e as Error).message;
+      setTestResult({ id: app.id, result: { accepted: false, message, latency_ms: 0 } });
+    } finally {
+      setTestingID(null);
+    }
+  }, []);
+
   return (
     <>
-      {/* Same shell as /settings/llm and /settings/notifications:
-          intro panel up top describing what this page does, then a
-          right-aligned toolbar + table (or EmptyState) below. The
-          surrounding SettingsLayout already provides the page-level
-          header — we render content only. */}
       <div className="space-y-4">
         <div className="rounded-lg border border-zinc-800/60 bg-zinc-900/30 px-4 py-3 text-[12px] text-zinc-400">
           <div className="mb-1 flex items-center gap-2 text-zinc-200">
@@ -120,95 +143,53 @@ export default function SettingsChannels() {
           </div>
         )}
 
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <Button onClick={() => fetchAll(true)} disabled={refreshing || loading} variant="ghost">
-            <RefreshCw size={12} className={cn(refreshing && 'animate-spin')} />
-            {tr('刷新', 'Refresh')}
-          </Button>
-          <Button variant="primary" onClick={() => setEditing('create')}>
-            <Plus size={12} /> {tr('新建', 'New')}
-          </Button>
-        </div>
-
         {loading ? (
           <Card className="p-5">
             <div className="flex h-32 items-center justify-center text-sm text-zinc-500">
               <Loader2 size={14} className="mr-2 animate-spin" /> {tr('加载中…', 'Loading…')}
             </div>
           </Card>
-        ) : items.length === 0 ? (
-          <EmptyState
-          title={tr('还没有 IM', 'No channels yet')}
-            hint={tr(
-              '点上面"新建"配置第一个 IM。stream 模式无需公网回调，最快上手。',
-              'Click "New" above to configure your first channel. Stream mode requires no public webhook URL.',
-            )}
-          />
         ) : (
-          <Card className="overflow-hidden p-0">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-zinc-800/60 text-left text-[11px] uppercase tracking-wide text-zinc-500">
-                  <th className="px-4 py-2.5 font-medium">{tr('平台', 'Provider')}</th>
-                  <th className="px-4 py-2.5 font-medium">{tr('名称', 'Name')}</th>
-                  <th className="px-4 py-2.5 font-medium">app_id</th>
-                  <th className="px-4 py-2.5 font-medium">{tr('模式', 'Mode')}</th>
-                  <th className="px-4 py-2.5 font-medium">{tr('状态', 'Status')}</th>
-                  <th className="px-4 py-2.5 font-medium">{tr('操作', 'Actions')}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-800/40">
-                {items.map((a) => {
-                  const meta = PROVIDER_META[a.provider];
-                  const Icon = meta?.icon ?? MessageSquareShare;
-                  return (
-                    <tr key={a.id} className="hover:bg-zinc-900/40">
-                      <td className="whitespace-nowrap px-4 py-2.5">
-                        <div className="flex items-center gap-2">
-                          <span className="rounded-md bg-slate-100 p-1 text-slate-600 dark:bg-zinc-800/70 dark:text-zinc-300">
-                            <Icon size={12} />
-                          </span>
-                          <span className="text-zinc-100">{tr(meta?.labelZh ?? a.provider, meta?.labelEn ?? a.provider)}</span>
-                        </div>
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-2.5 text-zinc-100">{a.name}</td>
-                      <td className="whitespace-nowrap px-4 py-2.5 font-mono text-[12px] text-zinc-300">{a.app_id}</td>
-                      <td className="whitespace-nowrap px-4 py-2.5">
-                        <Chip tone={a.mode === 'stream' ? 'success' : 'warning'}>{a.mode}</Chip>
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-2.5">
-                        <Chip tone={a.enabled ? 'success' : 'default'}>
-                          {a.enabled ? tr('已启用', 'Enabled') : tr('已停用', 'Disabled')}
-                        </Chip>
-                        {!a.has_secret && (
-                          <Chip tone="warning" className="ml-1">
-                            {tr('缺凭证', 'No secret')}
-                          </Chip>
-                        )}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-2.5">
-                        <div className="flex items-center gap-1">
-                          <Button onClick={() => setEditing(a)} title={tr('编辑', 'Edit')}>
-                            <Pencil size={11} /> {tr('编辑', 'Edit')}
-                          </Button>
-                          <Button onClick={() => setDeleting(a)} variant="danger" title={tr('删除', 'Delete')}>
-                            <Trash2 size={11} /> {tr('删除', 'Delete')}
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </Card>
+          <>
+            <SettingsProviderPicker
+              testId="im-provider-picker"
+              label={tr('添加 IM 平台', 'Add IM platform')}
+              summary={tr(`${IM_PROVIDERS.length} 种可选`, `${IM_PROVIDERS.length} available`)}
+              options={IM_PROVIDERS.map((provider) => {
+                const meta = PROVIDER_META[provider];
+                const count = grouped.get(provider)?.length ?? 0;
+                return {
+                  id: provider,
+                  icon: <CommunicationProviderIcon provider={provider} size={18} />,
+                  label: tr(meta.labelZh, meta.labelEn),
+                  description: tr(meta.hintZh, meta.hintEn),
+                  meta: count > 0 ? tr(`已配置 ${count} 个`, `${count} configured`) : tr('未配置', 'Not configured'),
+                };
+              })}
+              onSelect={(provider) => setEditor({ mode: 'create', provider })}
+            />
+            {configuredProviders.map((provider) => (
+              <IMProviderCard
+                key={provider}
+                provider={provider}
+                apps={grouped.get(provider) ?? []}
+                testingID={testingID}
+                testResult={testResult}
+                onAdd={() => setEditor({ mode: 'create', provider })}
+                onTest={handleTest}
+                onEdit={(app) => setEditor({ mode: 'edit', app })}
+                onDelete={setDeleting}
+              />
+            ))}
+          </>
         )}
       </div>
 
-      {editing && (
+      {editor && (
         <IMAppEditor
-          target={editing === 'create' ? null : editing}
-          onClose={() => setEditing(null)}
+          target={editor.mode === 'edit' ? editor.app : null}
+          provider={editor.mode === 'edit' ? editor.app.provider : editor.provider}
+          onClose={() => setEditor(null)}
           onSaved={onSaved}
         />
       )}
@@ -226,19 +207,105 @@ export default function SettingsChannels() {
   );
 }
 
+function IMProviderCard({
+  provider,
+  apps,
+  testingID,
+  testResult,
+  onAdd,
+  onTest,
+  onEdit,
+  onDelete,
+}: {
+  provider: IMProvider;
+  apps: IMApp[];
+  testingID: number | null;
+  testResult: { id: number; result: IMAppTestResult } | null;
+  onAdd(): void;
+  onTest(app: IMApp): void;
+  onEdit(app: IMApp): void;
+  onDelete(app: IMApp): void;
+}) {
+  const { tr } = useI18n();
+  const meta = PROVIDER_META[provider];
+
+  return (
+    <Card className="p-5" data-testid={`im-provider-${provider}`}>
+      <div className="mb-3 flex items-center gap-2">
+        <CommunicationProviderIcon provider={provider} size={14} />
+        <h2 className="text-sm font-medium text-zinc-100">{tr(meta.labelZh, meta.labelEn)}</h2>
+        <Chip>{tr(`${apps.length} 个`, `${apps.length} configured`)}</Chip>
+      </div>
+      <p className="mb-4 text-[11px] text-zinc-500">{tr(meta.hintZh, meta.hintEn)}</p>
+
+      <ul className="divide-y divide-zinc-800/60 overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/40">
+        {apps.map((app) => (
+          <li key={app.id} className={`px-4 py-2.5 ${app.enabled ? '' : 'opacity-60'}`}>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-medium text-zinc-100">{app.name}</span>
+                  <Chip tone={app.enabled ? 'success' : 'default'}>
+                    {app.enabled ? tr('已启用', 'Enabled') : tr('已停用', 'Disabled')}
+                  </Chip>
+                  <Chip tone={app.mode === 'stream' ? 'info' : 'warning'}>{app.mode}</Chip>
+                  {!app.has_secret && <Chip tone="warning">{tr('缺凭证', 'No secret')}</Chip>}
+                </div>
+                <div className="mt-1 truncate font-mono text-[11px] text-zinc-500">{app.app_id}</div>
+                {testResult?.id === app.id && (
+                  <div className={`mt-1.5 text-[11px] ${testResult.result.accepted ? 'text-emerald-400' : 'text-red-300'}`}>
+                    {testResult.result.accepted
+                      ? tr(`凭证有效 · ${testResult.result.latency_ms} ms`, `Credentials valid · ${testResult.result.latency_ms} ms`)
+                      : tr(`测试失败：${testResult.result.message ?? '未知错误'}`, `Test failed: ${testResult.result.message ?? 'unknown error'}`)}
+                  </div>
+                )}
+              </div>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <Button onClick={() => onTest(app)} disabled={testingID === app.id || !app.has_secret} variant="ghost">
+                  {testingID === app.id ? tr('测试中…', 'Testing…') : tr('测试', 'Test')}
+                </Button>
+                <Button onClick={() => onEdit(app)} variant="ghost">
+                  <Pencil size={11} /> {tr('编辑', 'Edit')}
+                </Button>
+                <Button
+                  onClick={() => onDelete(app)}
+                  variant="dangerGhost"
+                  className="px-2"
+                  aria-label={tr('删除', 'Delete')}
+                  title={tr('删除', 'Delete')}
+                >
+                  <Trash2 size={12} />
+                </Button>
+              </div>
+            </div>
+          </li>
+        ))}
+      </ul>
+
+      <div className="mt-4">
+        <Button onClick={onAdd} variant="ghost">
+          <Plus size={14} />
+          {tr(`再添加一个${meta.labelZh}机器人`, `Add another ${meta.labelEn} bot`)}
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
 function IMAppEditor({
   target,
+  provider,
   onClose,
   onSaved,
 }: {
   target: IMApp | null;
+  provider: IMProvider;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const { tr } = useI18n();
   const isCreate = target === null;
 
-  const [provider, setProvider] = useState<IMProvider>(target?.provider ?? 'feishu');
   const [mode, setMode] = useState<IMMode>(target?.mode ?? 'stream');
   const [name, setName] = useState(target?.name ?? '');
   const [appID, setAppID] = useState(target?.app_id ?? '');
@@ -333,7 +400,7 @@ function IMAppEditor({
       open
       onClose={onClose}
       size="lg"
-      title={isCreate ? tr('新建 IM', 'New channel') : tr(`编辑 — ${target!.name}`, `Edit — ${target!.name}`)}
+      title={isCreate ? tr(`新建${meta.labelZh}机器人`, `New ${meta.labelEn} bot`) : tr(`编辑 — ${target!.name}`, `Edit — ${target!.name}`)}
       footer={
         <>
           <button
@@ -359,26 +426,12 @@ function IMAppEditor({
           <div className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">{err}</div>
         )}
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <Field label={tr('平台', 'Provider')}>
-            <select
-              value={provider}
-              onChange={(e) => {
-                const p = e.target.value as IMProvider;
-                setProvider(p);
-                if (p === 'telegram' || p === 'slack') setMode('stream'); // both stream-only
-              }}
-              disabled={!isCreate}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none disabled:opacity-50"
-            >
-              {/* locale-aware: drop the other-language label so ZH sees
-                  "飞书" and EN sees "Larksuite". Telegram / Slack don't
-                  have a Chinese name so they render the same either way. */}
-              <option value="feishu">{tr('飞书', 'Larksuite')}</option>
-              <option value="dingtalk">{tr('钉钉', 'DingTalk')}</option>
-              <option value="telegram">Telegram</option>
-              <option value="slack">Slack</option>
-            </select>
+            <div className="flex min-h-8 items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 text-xs text-zinc-200">
+              <CommunicationProviderIcon provider={provider} size={14} />
+              <span>{tr(meta.labelZh, meta.labelEn)}</span>
+            </div>
           </Field>
           <Field label={tr('模式', 'Mode')} hint={mode === 'stream'
             ? tr('manager 主动 dial 长连接，无需公网回调。推荐。', 'Manager dials out via long connection — recommended.')

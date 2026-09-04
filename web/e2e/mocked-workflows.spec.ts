@@ -216,14 +216,15 @@ test.describe('deterministic frontend workflows', () => {
     });
 
     await page.goto('/settings/notifications');
-    const slackCard = page.getByRole('heading', { name: 'Slack' }).locator('xpath=ancestor::section');
-    await slackCard.getByRole('button', { name: 'New' }).click();
+    await page.getByText('Add notification channel', { exact: true }).click();
+    await page.getByTestId('notification-provider-picker').getByRole('button', { name: /Slack/ }).click();
     const dialog = page.getByRole('dialog');
     await expect(dialog.getByRole('heading', { name: 'New Slack channel' })).toBeVisible();
     await dialog.getByLabel('Name').fill('e2e-slack-alerts');
     await dialog.getByLabel('Endpoint URL').fill('https://hooks.slack.test/services/e2e');
     await dialog.getByRole('button', { name: 'Save' }).click();
 
+    const slackCard = page.getByTestId('notification-provider-slack');
     await expect(slackCard.getByText('e2e-slack-alerts')).toBeVisible();
     await slackCard.getByRole('button', { name: 'Test' }).click();
     await expect(page.getByText('Test message sent to e2e-slack-alerts')).toBeVisible();
@@ -242,6 +243,7 @@ test.describe('deterministic frontend workflows', () => {
     const assertNoPageErrors = trackPageErrors(page);
     const apps: Array<Record<string, unknown>> = [];
     let createBody: Record<string, unknown> | null = null;
+    let testCalls = 0;
 
     await page.route('**/api/v1/im/apps**', async (route) => {
       const request = route.request();
@@ -264,13 +266,19 @@ test.describe('deterministic frontend workflows', () => {
         await route.fulfill({ status: 201, json: created });
         return;
       }
+      if (url.pathname === '/api/v1/im/apps/301/test' && request.method() === 'POST') {
+        testCalls += 1;
+        await route.fulfill({ json: { accepted: true, latency_ms: 23 } });
+        return;
+      }
       await route.fallback();
     });
 
     await page.goto('/settings/channels');
-    await page.getByRole('button', { name: 'New' }).click();
+    await page.getByText('Add IM platform', { exact: true }).click();
+    await page.getByTestId('im-provider-picker').getByRole('button', { name: /Slack/ }).click();
     const dialog = page.getByRole('dialog');
-    await dialog.getByLabel('Provider').selectOption('slack');
+    await expect(dialog.getByRole('heading', { name: 'New Slack bot' })).toBeVisible();
     await dialog.getByLabel('Name (display only)').fill('e2e-slack-bot');
     await dialog.getByLabel('app_id').fill('T0E2ETEST');
     await dialog.getByLabel('app_token').fill('xapp-e2e-placeholder');
@@ -278,10 +286,12 @@ test.describe('deterministic frontend workflows', () => {
     await dialog.getByLabel('allow_from (sender allowlist)').fill('U0E2ETEST');
     await dialog.getByRole('button', { name: 'Save' }).click();
 
-    const row = page.getByRole('row').filter({ hasText: 'e2e-slack-bot' });
-    await expect(row).toContainText('Slack');
-    await expect(row).toContainText('stream');
-    await expect(row).toContainText('Enabled');
+    const slackCard = page.getByTestId('im-provider-slack');
+    await expect(slackCard).toContainText('e2e-slack-bot');
+    await expect(slackCard).toContainText('stream');
+    await expect(slackCard).toContainText('Enabled');
+    await slackCard.getByRole('button', { name: 'Test' }).click();
+    await expect(slackCard.getByText('Credentials valid · 23 ms')).toBeVisible();
     const serialized = JSON.parse(String(createBody?.app_secret));
     expect(serialized).toEqual({
       app_token: 'xapp-e2e-placeholder',
@@ -295,6 +305,7 @@ test.describe('deterministic frontend workflows', () => {
       allow_from: 'U0E2ETEST',
       enabled: true,
     });
+    expect(testCalls).toBe(1);
     assertNoPageErrors();
   });
 });

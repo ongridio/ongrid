@@ -9,14 +9,13 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	alertsvc "github.com/ongridio/ongrid/internal/manager/service/alert"
 	healthsvc "github.com/ongridio/ongrid/internal/manager/service/systemhealth"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/tenantctx"
 )
 
 type HealthService interface {
-	Check(ctx context.Context, caller alertsvc.Caller) (*healthsvc.Report, error)
+	Check(ctx context.Context) (*healthsvc.Report, error)
 }
 
 type Handler struct {
@@ -33,15 +32,14 @@ func (h *Handler) Register(r chi.Router) {
 }
 
 func (h *Handler) check(w http.ResponseWriter, r *http.Request) {
-	caller, ok := requireAdmin(w, r)
-	if !ok {
+	if !requireAdmin(w, r) {
 		return
 	}
 	if h.svc == nil {
 		writeErr(w, errs.ErrNotWiredYet)
 		return
 	}
-	report, err := h.svc.Check(r.Context(), caller)
+	report, err := h.svc.Check(r.Context())
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -49,17 +47,17 @@ func (h *Handler) check(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, report)
 }
 
-func requireAdmin(w http.ResponseWriter, r *http.Request) (alertsvc.Caller, bool) {
+func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	t, ok := tenantctx.From(r.Context())
 	if !ok {
 		writeErr(w, errs.ErrUnauthorized)
-		return alertsvc.Caller{}, false
+		return false
 	}
 	if t.Role != "admin" {
 		writeErr(w, errs.ErrForbidden)
-		return alertsvc.Caller{}, false
+		return false
 	}
-	return alertsvc.Caller{UserID: t.UserID, Role: t.Role}, true
+	return true
 }
 
 type errorBody struct {

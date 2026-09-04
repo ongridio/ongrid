@@ -51,6 +51,12 @@ export type IMAppListResp = {
   total: number;
 };
 
+export type IMAppTestResult = {
+  accepted: boolean;
+  message?: string;
+  latency_ms: number;
+};
+
 export function listIMApps(provider?: IMProvider): Promise<IMAppListResp> {
   const qs = provider ? `?provider=${encodeURIComponent(provider)}` : '';
   return request<IMAppListResp>('GET', `/im/apps${qs}`);
@@ -70,6 +76,10 @@ export function updateIMApp(id: number, payload: IMAppPayload): Promise<IMApp> {
 
 export function deleteIMApp(id: number): Promise<void> {
   return request<void>('DELETE', `/im/apps/${id}`);
+}
+
+export function testIMApp(id: number): Promise<IMAppTestResult> {
+  return request<IMAppTestResult>('POST', `/im/apps/${id}/test`);
 }
 
 export function revealIMAppSecret(id: number): Promise<{ app_secret: string }> {

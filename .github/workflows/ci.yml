@@ -89,6 +89,8 @@ jobs:
           src/pages/Dashboard.test.tsx
           src/pages/settings/Upgrade.test.tsx
           src/pages/settings/LLM.test.tsx
+          src/pages/settings/CommunicationProviders.test.tsx
+          src/components/icons/Provider.test.tsx
           src/pages/kubernetes/edgeAttachments.test.ts
           src/pages/kubernetes/registryCommands.test.ts
 

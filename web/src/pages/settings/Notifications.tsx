@@ -2,15 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Bell,
   Loader2,
-  MessageCircle,
-  MessageSquareShare,
-  Send,
   Webhook,
-  Slack,
   Plus,
+  Pencil,
   Trash2,
 } from 'lucide-react';
 import { Modal } from '@/components/Modal';
+import { SettingsProviderPicker } from '@/components/SettingsProviderPicker';
 import { Button, Card, Chip } from '@/components/ui';
 import { cn } from '@/lib/cn';
 import {
@@ -24,10 +22,10 @@ import {
   type ChannelTestResult,
 } from '@/api/alerts';
 import { ApiError } from '@/api/client';
-import type { IconType } from '@/lib/icon';
+import { CommunicationProviderIcon } from '@/components/icons/Provider';
 import { useI18n } from '@/i18n/locale';
 
-// One IM type ↔ one card. Order = display order on the page.
+// One notification type ↔ one card. Order = display order on the page.
 //
 // The legacy "log" channel type was removed in 2026-05: manager
 // stdout is ephemeral and the alert_events table already records
@@ -41,7 +39,6 @@ type TypeMeta = {
   group: 'cn' | 'intl' | 'generic';
   labelZh: string;
   labelEn: string;
-  icon: IconType;
   hintZh: string;
   hintEn: string;
   endpointPlaceholder: string;
@@ -53,7 +50,6 @@ const TYPE_CARDS: TypeMeta[] = [
     group: 'cn',
     labelZh: '飞书',
     labelEn: 'Larksuite',
-    icon: MessageSquareShare,
     hintZh: '飞书自定义机器人 webhook，支持签名校验。',
     hintEn: 'Larksuite custom-bot webhook; supports signature verification.',
     endpointPlaceholder: 'https://open.feishu.cn/open-apis/bot/v2/hook/xxxx',
@@ -63,7 +59,6 @@ const TYPE_CARDS: TypeMeta[] = [
     group: 'cn',
     labelZh: '钉钉',
     labelEn: 'DingTalk',
-    icon: Send,
     hintZh: '钉钉自定义机器人 webhook，支持加签 secret。',
     hintEn: 'DingTalk custom-bot webhook; supports signature secret.',
     endpointPlaceholder: 'https://oapi.dingtalk.com/robot/send?access_token=xxxx',
@@ -73,7 +68,6 @@ const TYPE_CARDS: TypeMeta[] = [
     group: 'cn',
     labelZh: '企业微信',
     labelEn: 'WeCom',
-    icon: MessageCircle,
     hintZh: '企业微信群机器人 webhook（key 在 URL 里）。',
     hintEn: 'WeCom group-bot webhook (key embedded in the URL).',
     endpointPlaceholder: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxx',
@@ -83,7 +77,6 @@ const TYPE_CARDS: TypeMeta[] = [
     group: 'intl',
     labelZh: 'Slack',
     labelEn: 'Slack',
-    icon: Slack,
     hintZh: 'Slack incoming webhook（用于工作区频道）。',
     hintEn: 'Slack incoming webhook (for workspace channels).',
     endpointPlaceholder: 'https://hooks.slack.com/services/Txxx/Bxxx/xxx',
@@ -93,7 +86,6 @@ const TYPE_CARDS: TypeMeta[] = [
     group: 'intl',
     labelZh: 'Telegram',
     labelEn: 'Telegram',
-    icon: Send,
     hintZh: 'Telegram bot sendMessage 接口；endpoint 填 https://api.telegram.org/bot<token>/sendMessage，secret 字段填 Chat ID。',
     hintEn: 'Telegram bot sendMessage API; endpoint = https://api.telegram.org/bot<token>/sendMessage, put the Chat ID in the secret field.',
     endpointPlaceholder: 'https://api.telegram.org/bot<token>/sendMessage',
@@ -103,7 +95,6 @@ const TYPE_CARDS: TypeMeta[] = [
     group: 'generic',
     labelZh: 'Webhook',
     labelEn: 'Webhook',
-    icon: Webhook,
     hintZh: '通用 JSON webhook；secret 设置后会附 X-Ongrid-Signature。',
     hintEn: 'Generic JSON webhook; if a secret is set the request carries X-Ongrid-Signature.',
     endpointPlaceholder: 'https://example.com/ingest',
@@ -121,6 +112,12 @@ const GROUP_RANK: Record<string, Record<TypeMeta['group'], number>> = {
 function orderCardsByLocale(locale: string): TypeMeta[] {
   const rank = GROUP_RANK[locale] ?? GROUP_RANK['zh-CN'];
   return [...TYPE_CARDS].sort((a, b) => rank[a.group] - rank[b.group]);
+}
+
+function ChannelTypeIcon({ type, size }: { type: ChannelType; size: number }) {
+  return type === 'webhook'
+    ? <Webhook size={size} className="text-zinc-400" />
+    : <CommunicationProviderIcon provider={type} size={size} />;
 }
 
 type Toast = { kind: 'ok' | 'err'; text: string } | null;
@@ -181,7 +178,7 @@ export default function SettingsNotifications() {
     } finally {
       setTestingId(null);
     }
-  }, []);
+  }, [tr]);
 
   const grouped = useMemo(() => {
     const m = new Map<string, Channel[]>();
@@ -192,6 +189,7 @@ export default function SettingsNotifications() {
     }
     return m;
   }, [items]);
+  const configuredCards = orderedCards.filter((meta) => grouped.has(meta.type));
 
   return (
     <>
@@ -230,19 +228,37 @@ export default function SettingsNotifications() {
             </div>
           </Card>
         ) : (
-          orderedCards.map((meta) => (
-            <TypeCard
-              key={meta.type}
-              meta={meta}
-              channels={grouped.get(meta.type) ?? []}
-              testingId={testingId}
-              testResult={testResult}
-              onAdd={() => setEditing({ mode: 'create', type: meta.type })}
-              onTest={(ch) => handleTest(ch)}
-              onEdit={(ch) => setEditing({ mode: 'edit', type: ch.type as ChannelType, channel: ch })}
-              onDelete={(ch) => setConfirmDelete(ch)}
+          <>
+            <SettingsProviderPicker
+              testId="notification-provider-picker"
+              label={tr('添加通知渠道', 'Add notification channel')}
+              summary={tr(`${orderedCards.length} 种可选`, `${orderedCards.length} available`)}
+              options={orderedCards.map((meta) => {
+                const count = grouped.get(meta.type)?.length ?? 0;
+                return {
+                  id: meta.type,
+                  icon: <ChannelTypeIcon type={meta.type} size={18} />,
+                  label: tr(meta.labelZh, meta.labelEn),
+                  description: tr(meta.hintZh, meta.hintEn),
+                  meta: count > 0 ? tr(`已配置 ${count} 个`, `${count} configured`) : tr('未配置', 'Not configured'),
+                };
+              })}
+              onSelect={(type) => setEditing({ mode: 'create', type })}
             />
-          ))
+            {configuredCards.map((meta) => (
+              <TypeCard
+                key={meta.type}
+                meta={meta}
+                channels={grouped.get(meta.type) ?? []}
+                testingId={testingId}
+                testResult={testResult}
+                onAdd={() => setEditing({ mode: 'create', type: meta.type })}
+                onTest={(ch) => handleTest(ch)}
+                onEdit={(ch) => setEditing({ mode: 'edit', type: ch.type as ChannelType, channel: ch })}
+                onDelete={(ch) => setConfirmDelete(ch)}
+              />
+            ))}
+          </>
         )}
       </div>
 
@@ -333,77 +349,68 @@ function TypeCard({
   onDelete(ch: Channel): void;
 }) {
   const { tr } = useI18n();
-  const Icon = meta.icon;
   return (
-    <Card className="p-5">
+    <Card className="p-5" data-testid={`notification-provider-${meta.type}`}>
       <div className="mb-3 flex items-center gap-2">
-        <Icon size={14} className="text-zinc-400" />
+        <ChannelTypeIcon type={meta.type} size={14} />
         <h2 className="text-sm font-medium text-zinc-100">{tr(meta.labelZh, meta.labelEn)}</h2>
+        <Chip>{tr(`${channels.length} 个`, `${channels.length} configured`)}</Chip>
       </div>
       <p className="mb-4 text-[11px] text-zinc-500">{tr(meta.hintZh, meta.hintEn)}</p>
 
-      {channels.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-zinc-800 bg-zinc-950/30 px-4 py-6 text-center text-[11px] text-zinc-500">
-          {tr(`还没有 ${meta.labelZh} 渠道。`, `No ${meta.labelEn} channels yet.`)}
-        </div>
-      ) : (
-        <ul className="divide-y divide-zinc-800/60 overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/40">
-          {channels.map((ch) => (
-            <li key={ch.id} className={cn('px-4 py-2.5', !ch.enabled && 'opacity-60')}>
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-medium text-zinc-100">{ch.name}</span>
-                    <Chip tone={ch.enabled ? 'success' : 'default'}>
-                      {ch.enabled ? 'enabled' : 'disabled'}
-                    </Chip>
+      <ul className="divide-y divide-zinc-800/60 overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/40">
+        {channels.map((ch) => (
+          <li key={ch.id} className={cn('px-4 py-2.5', !ch.enabled && 'opacity-60')}>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-medium text-zinc-100">{ch.name}</span>
+                  <Chip tone={ch.enabled ? 'success' : 'default'}>
+                    {ch.enabled ? tr('已启用', 'Enabled') : tr('已停用', 'Disabled')}
+                  </Chip>
+                </div>
+                {ch.endpoint && (
+                  <div className="mt-1 truncate font-mono text-[11px] text-zinc-500">
+                    {ch.endpoint}
                   </div>
-                  {ch.endpoint && (
-                    <div className="mt-1 truncate font-mono text-[11px] text-zinc-500">
-                      {ch.endpoint}
-                    </div>
-                  )}
-                  {testResult?.id === ch.id && !testResult.result.accepted && testResult.result.message && (
-                    <div className="mt-1.5 rounded border border-red-500/40 bg-red-500/5 px-2 py-1 text-[11px] text-red-300">
-                      {tr('投递失败：', 'Delivery failed: ')}{testResult.result.message}
-                    </div>
-                  )}
-                </div>
-                <div className="flex shrink-0 gap-1.5">
-                  <Button
-                    onClick={() => onTest(ch)}
-                    disabled={testingId === ch.id}
-                    variant="ghost"
-                  >
-                    {testingId === ch.id ? tr('投递中…', 'Sending…') : tr('测试', 'Test')}
-                  </Button>
-                  <Button onClick={() => onEdit(ch)} variant="ghost">
-                    {tr('编辑', 'Edit')}
-                  </Button>
-                  <Button
-                    onClick={() => onDelete(ch)}
-                    aria-label={tr('删除', 'Delete')}
-                    variant="danger"
-                  >
-                    <Trash2 size={11} />
-                  </Button>
-                </div>
+                )}
+                {testResult?.id === ch.id && !testResult.result.accepted && testResult.result.message && (
+                  <div className="mt-1.5 rounded border border-red-500/40 bg-red-500/5 px-2 py-1 text-[11px] text-red-300">
+                    {tr('投递失败：', 'Delivery failed: ')}{testResult.result.message}
+                  </div>
+                )}
               </div>
-            </li>
-          ))}
-        </ul>
-      )}
+              <div className="flex shrink-0 items-center gap-1.5">
+                <Button
+                  onClick={() => onTest(ch)}
+                  disabled={testingId === ch.id}
+                  variant="ghost"
+                >
+                  {testingId === ch.id ? tr('投递中…', 'Sending…') : tr('测试', 'Test')}
+                </Button>
+                <Button onClick={() => onEdit(ch)} variant="ghost">
+                  <Pencil size={11} /> {tr('编辑', 'Edit')}
+                </Button>
+                <Button
+                  onClick={() => onDelete(ch)}
+                  aria-label={tr('删除', 'Delete')}
+                  title={tr('删除', 'Delete')}
+                  variant="dangerGhost"
+                  className="px-2"
+                >
+                  <Trash2 size={12} />
+                </Button>
+              </div>
+            </div>
+          </li>
+        ))}
+      </ul>
 
-      <div className="mt-5 flex flex-wrap items-center gap-3">
-        <Button onClick={onAdd} variant="primary">
+      <div className="mt-4">
+        <Button onClick={onAdd} variant="ghost">
           <Plus size={14} />
-          <span>{tr('新建', 'New')}</span>
+          <span>{tr(`再添加一个${meta.labelZh}渠道`, `Add another ${meta.labelEn} channel`)}</span>
         </Button>
-        <span className="text-xs text-zinc-500">
-          {channels.length === 0
-            ? tr('未配置', 'Not configured')
-            : tr(`已配置 ${channels.length} 个渠道`, `${channels.length} channel(s) configured`)}
-        </span>
       </div>
     </Card>
   );
@@ -422,7 +429,7 @@ function ChannelEditorModal({
   onClose(): void;
   onSaved(): void;
 }) {
-  const { tr, locale } = useI18n();
+  const { tr } = useI18n();
   const [form, setForm] = useState<ChannelInput>(() => ({
     name: channel?.name ?? '',
     type: channel?.type ?? presetType ?? 'webhook',
@@ -442,6 +449,7 @@ function ChannelEditorModal({
     const m = TYPE_CARDS.find((t) => t.type === form.type);
     return m ? tr(m.labelZh, m.labelEn) : form.type;
   })();
+  const typeMeta = TYPE_CARDS.find((t) => t.type === form.type);
 
   const submit = async () => {
     if (!form.name.trim()) {
@@ -496,18 +504,10 @@ function ChannelEditorModal({
           />
         </Field>
         <Field label={tr('类型', 'Type')}>
-          <select
-            value={form.type}
-            onChange={(e) => setForm({ ...form, type: e.target.value })}
-            disabled={mode === 'edit'}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none disabled:opacity-60"
-          >
-            {orderCardsByLocale(locale).map((t) => (
-              <option key={t.type} value={t.type}>
-                {tr(t.labelZh, t.labelEn)} ({t.type})
-              </option>
-            ))}
-          </select>
+          <div className="flex min-h-8 items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 text-xs text-zinc-200">
+            {typeMeta ? <ChannelTypeIcon type={typeMeta.type} size={14} /> : null}
+            <span>{typeLabel}</span>
+          </div>
         </Field>
         <Field label="Endpoint URL">
           <input
