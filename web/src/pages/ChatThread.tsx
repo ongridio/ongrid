@@ -83,9 +83,10 @@ export default function ChatThreadPage() {
   // initial prompt and every later turn use storeModel; only when the user
   // hasn't picked do we fall back to the live catalog default.
   const storeModel = useModelSelection((s) => s.selected);
-  const setStoreModel = useModelSelection((s) => s.setSelected);
+  const sessionModel = useModelSelection((s) => s.sessionSelections[sessionId]);
+  const setSessionModel = useModelSelection((s) => s.setSessionSelected);
   const [catalogDefault, setCatalogDefault] = useState<ModelSelection | null>(null);
-  const selectedModel = storeModel ?? catalogDefault;
+  const selectedModel = sessionModel ?? storeModel ?? catalogDefault;
   // Web-search toggle is per-thread (not per-message): once a user
   // enables it for a topic, every follow-up turn until they disable it
   // also exposes the skill. Defaults ON because SearXNG (default provider)
@@ -109,6 +110,15 @@ export default function ChatThreadPage() {
       cancelled = true;
     };
   }, []);
+
+  // Freeze the inherited Home/catalog selection into this session on first
+  // open. Later model changes only update this session, so switching threads
+  // restores each thread's own provider + model instead of the last global
+  // choice.
+  useEffect(() => {
+    if (!sessionId || sessionModel || !selectedModel) return;
+    setSessionModel(sessionId, selectedModel);
+  }, [selectedModel, sessionId, sessionModel, setSessionModel]);
 
   // Initial load + idle refresh.
   // The session is shared with the IM bridge (Feishu / DingTalk), so
@@ -663,7 +673,7 @@ export default function ChatThreadPage() {
               placeholder={tr('继续聊…  Shift+Enter 换行', 'Continue the conversation… Shift+Enter for newline')}
               providers={providers}
               selectedModel={selectedModel}
-              onModelChange={setStoreModel}
+              onModelChange={(model) => setSessionModel(sessionId, model)}
               webSearchEnabled={webSearchEnabled}
               onWebSearchToggle={setWebSearchEnabled}
             />
