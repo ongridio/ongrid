@@ -1,0 +1,23 @@
+# nginx 80 端口站点入口（Debian 标准布局）。
+# ---------------------------------------------------------------------------
+# install-systemd.sh cp 本文件到 /etc/nginx/sites-available/，并 ln 到
+# sites-enabled/ongrid。与 nginx-ongrid.conf（conf.d 模式）功能等价，
+# Debian 默认 nginx.conf 含 include sites-enabled/*，优先走此路径。
+#
+# server_name _ 接受所有 Host 头（内网部署无 DNS 解析，operator 用 IP
+# 或 hosts 文件访问）。proxy_pass 用 127.0.0.1（不写具体 IP）。
+# ---------------------------------------------------------------------------
+
+server {
+    listen 80 default_server;
+    server_name _;
+    client_max_body_size 50m;
+
+    # 子路径规则（manager + grafana + prometheus + loki + tempo）
+    include /etc/nginx/snippets/ongrid-locations.conf;
+}
+
+# To enable TLS, uncomment the 443 server block in nginx-ongrid.conf and
+# replace this file. 证书准备：
+#   sudo install -d -m 0750 -o root -g ongrid /etc/ongrid/certs
+#   sudo cp tls.crt tls.key /etc/ongrid/certs/

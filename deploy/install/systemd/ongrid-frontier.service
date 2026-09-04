@@ -1,0 +1,57 @@
+[Unit]
+Description=ongrid frontier (edge tunnel multiplexer)
+Documentation=https://github.com/singchia/frontier
+After=network-online.target
+Wants=network-online.target
+StartLimitInterval=60s
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=ongrid
+Group=ongrid
+# 去掉前导 -，让 /etc/ongrid/frontier-auth.env 缺失时启动直接失败。
+# 该文件由 install-deps.sh step 3b 和 install-systemd.sh 兜底
+# 生成，正常部署路径下必存在。文件缺失说明部署跳了关键步骤，应 fail-loud
+# 而非静默启动（token 缺失只在 manager 拨号时才暴露，故障表现滞后）。
+# frontier v1.2.4 本身不读这个变量（校验在 manager/edge 侧），但保留
+# EnvironmentFile= 让变量在进程上下文中可见，未来 frontier 升级支持
+# token 校验时可立即消费。
+EnvironmentFile=/etc/ongrid/frontier-auth.env
+WorkingDirectory=/var/lib/ongrid
+ExecStart=/usr/local/bin/ongrid-frontier --config /etc/ongrid/frontier.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=20s
+Restart=always
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ongrid-frontier
+
+NoNewPrivileges=true
+ProtectSystem=true
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RestrictNamespaces=false
+RemoveIPC=true
+StateDirectory=ongrid
+LogsDirectory=ongrid
+ReadWritePaths=/var/lib/ongrid /var/log/ongrid
+
+LimitNOFILE=65536
+LimitNPROC=32768
+MemoryMax=2G
+CPUQuota=200%
+
+Environment=GOMAXPROCS=auto
+Environment=GOGC=100
+
+[Install]
+WantedBy=multi-user.target
