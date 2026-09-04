@@ -551,8 +551,6 @@ func main() {
 	monitorRepo := managermonitordata.NewRepo(db)
 	monitorSvc := managerbizmonitor.New(monitorRepo, grafanaSvc, log.With(slog.String("comp", "monitor")))
 	monitorHandler := managerservermonitor.NewHandler(monitorSvc)
-	// promTester is wired below if cfg.Prom.Enabled — left nil for the
-	// disabled case so the integration handler can 503 cleanly.
 	var integrationHandler *managerserverintegration.Handler
 
 	// Embedded-Grafana SA bootstrap. Runs in a goroutine because:
@@ -1101,14 +1099,13 @@ func main() {
 		log.Warn("prom disabled — push_prom_samples will be silently dropped, query_promql tool not registered, /v1/edges/{id}/metrics returns 501")
 	}
 
-	// Build the integration handler now that we know whether prom is wired.
-	// promTester is nil when disabled; the handler 503s cleanly in that case.
-	var promTester managerserverintegration.PromQuerier
+	// Build the integration handler now that we know whether Prometheus is
+	// enabled. The probe uses the unsaved UI draft and never mutates settings.
+	var promProbe managerserverintegration.PromConfigProbe
+	var promTester managersvcsystemhealth.PromQuerier
 	if promQueryClient != nil {
-		promTester = managerserverintegration.AdaptPromQuerier(func(ctx context.Context, expr string, ts time.Time) error {
-			_, err := promQueryClient.Query(ctx, expr, ts)
-			return err
-		})
+		promProbe = managerbizsetting.NewPromConfigurationProbe(log.With(slog.String("comp", "prom-config-probe")))
+		promTester = healthPromQuerier{promQueryClient}
 	}
 	// Loki / Tempo URL probes — back the Integrations "测试连接" buttons.
 	// Loki checks /ready; Tempo checks either a query URL or an explicit
@@ -1120,7 +1117,7 @@ func main() {
 	// Web search probe — same WebSearchResolver the skill uses, so a
 	// passing probe means the skill itself will work.
 	webSearchProbe := managerbizsetting.NewWebSearchProbe(managerbizsetting.NewWebSearchResolver(settingSvc))
-	integrationHandler = managerserverintegration.NewHandler(grafanaSvc, promTester, lokiProbe, tempoIngestProbe, webSearchProbe)
+	integrationHandler = managerserverintegration.NewHandler(grafanaSvc, promProbe, lokiProbe, tempoIngestProbe, webSearchProbe)
 	integrationHandler.SetLLMRouter(llmRouter)
 	integrationHandler.SetLLMProbe(managerbizsetting.NewLLMConfigurationService(llmEnvDefaults, settingSvc))
 
@@ -4349,6 +4346,12 @@ func (b *logsPluginReloadBroadcaster) NotifyLogsBackendChanged(ctx context.Conte
 
 type hostDeviceResolverAdapter struct {
 	repo *managerdevicedata.EdgeDeviceRepo
+}
+
+type healthPromQuerier struct{ client *pkgpromquery.Client }
+
+func (q healthPromQuerier) Query(ctx context.Context, expr string, ts time.Time) (any, error) {
+	return q.client.Query(ctx, expr, ts)
 }
 
 func (a hostDeviceResolverAdapter) ResolveHostDeviceID(ctx context.Context, edgeID uint64) (uint64, error) {

@@ -470,6 +470,70 @@ func (s *Service) Test(ctx context.Context, id uint64) (*BackendTestResult, erro
 	}, nil
 }
 
+// TestDraft validates endpoints and credentials without storing either one.
+func (s *Service) TestDraft(ctx context.Context, input SaveInput) (*BackendTestResult, error) {
+	s.operationMu.Lock()
+	defer s.operationMu.Unlock()
+
+	normalized, err := normalizeSaveInput(input)
+	if err != nil {
+		return nil, err
+	}
+	previous, loadErr := s.repo.LatestBackend(ctx)
+	if loadErr != nil && !errors.Is(loadErr, errs.ErrNotFound) {
+		return nil, loadErr
+	}
+	writeRef, queryRef := normalized.WriteCredentialRef, normalized.QueryCredentialRef
+	if loadErr == nil {
+		if writeRef == "" {
+			writeRef = previous.WriteCredentialRef
+		}
+		if queryRef == "" {
+			queryRef = previous.QueryCredentialRef
+		}
+	}
+	writeKey := normalized.WriteAPIKey
+	if writeKey == "" {
+		if writeRef == "" {
+			return nil, fmt.Errorf("%w: write API key or credential ref is required", errs.ErrInvalid)
+		}
+		writeKey, err = s.apiKey(ctx, writeRef)
+		if err != nil {
+			return nil, fmt.Errorf("%w: invalid write credential", errs.ErrInvalid)
+		}
+	}
+	queryKey := normalized.QueryAPIKey
+	if queryKey == "" {
+		if queryRef == "" {
+			return nil, fmt.Errorf("%w: query API key or credential ref is required", errs.ErrInvalid)
+		}
+		queryKey, err = s.apiKey(ctx, queryRef)
+		if err != nil {
+			return nil, fmt.Errorf("%w: invalid query credential", errs.ErrInvalid)
+		}
+	}
+	if subtle.ConstantTimeCompare([]byte(writeKey), []byte(queryKey)) == 1 {
+		return nil, fmt.Errorf("%w: write and query API keys must differ", errs.ErrInvalid)
+	}
+	endpointsJSON, err := json.Marshal(normalized.WriteEndpoints)
+	if err != nil {
+		return nil, err
+	}
+	caPEM := normalized.CAPEM
+	if normalized.PreserveCA && caPEM == "" && loadErr == nil {
+		caPEM = previous.CAPEM
+	}
+	backend := &model.Backend{
+		WriteEndpointsJSON: string(endpointsJSON), QueryEndpoint: normalized.QueryEndpoint,
+		IndexPattern: indexPattern(normalized.Namespace), CAPEM: caPEM, TLSInsecure: normalized.TLSInsecure,
+	}
+	version, err := s.probeBackendWithKeys(ctx, backend, writeKey, queryKey)
+	if err != nil {
+		return nil, err
+	}
+	return &BackendTestResult{Status: "ok", DetectedVersion: version, TestedAt: time.Now().UTC()}, nil
+}
+
 func (s *Service) Select(ctx context.Context, id uint64) (*BackendView, error) {
 	s.operationMu.Lock()
 	defer s.operationMu.Unlock()
@@ -1413,6 +1477,14 @@ func (s *Service) probeBackend(ctx context.Context, backend *model.Backend) (str
 	if err != nil {
 		return "", err
 	}
+	writeKey, err := s.apiKey(ctx, backend.WriteCredentialRef)
+	if err != nil {
+		return "", err
+	}
+	return s.probeBackendWithKeys(ctx, backend, writeKey, queryKey)
+}
+
+func (s *Service) probeBackendWithKeys(ctx context.Context, backend *model.Backend, writeKey, queryKey string) (string, error) {
 	queryClient, err := s.newESClient(backend.QueryEndpoint, backend.IndexPattern, queryKey, backend)
 	if err != nil {
 		return "", err
@@ -1426,10 +1498,6 @@ func (s *Service) probeBackend(ctx context.Context, backend *model.Backend) (str
 	}
 	if queryInfo.ClusterUUID == "" {
 		return "", errors.New("Elasticsearch query probe: cluster UUID is missing")
-	}
-	writeKey, err := s.apiKey(ctx, backend.WriteCredentialRef)
-	if err != nil {
-		return "", err
 	}
 	endpoints, err := decodeEndpoints(backend.WriteEndpointsJSON)
 	if err != nil {

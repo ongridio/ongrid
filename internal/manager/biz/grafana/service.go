@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -66,6 +67,14 @@ type Service struct {
 
 	logsProviderMu sync.RWMutex
 	logsProvider   func(context.Context) (*pkggrafana.ElasticsearchDatasourceConfig, error)
+}
+
+type ProbeInput struct {
+	RootURL     string `json:"root_url"`
+	SAToken     string `json:"sa_token"`
+	APIKey      string `json:"api_key"`
+	OrgID       string `json:"org_id"`
+	TLSInsecure bool   `json:"tls_insecure"`
 }
 
 // New builds the service. tlsInsecure mirrors cfg.Grafana.TLSInsecure —
@@ -114,6 +123,10 @@ func (s *Service) httpClient(ctx context.Context) *http.Client {
 			tlsInsecure = strings.EqualFold(strings.TrimSpace(value), "true")
 		}
 	}
+	return grafanaHTTPClient(tlsInsecure)
+}
+
+func grafanaHTTPClient(tlsInsecure bool) *http.Client {
 	if !tlsInsecure {
 		return nil // pkg/grafana uses a 15s default
 	}
@@ -213,6 +226,23 @@ func (s *Service) Test(ctx context.Context) error {
 		return err
 	}
 	return c.Health(ctx)
+}
+
+// TestConfiguration checks an unsaved draft without mutating settings.
+func (s *Service) TestConfiguration(ctx context.Context, in ProbeInput) error {
+	root := strings.TrimSpace(in.RootURL)
+	u, err := url.ParseRequestURI(root)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return errors.New("grafana: root_url must be an absolute http(s) URL")
+	}
+	token := strings.TrimSpace(in.SAToken)
+	if token == "" {
+		token = strings.TrimSpace(in.APIKey)
+	}
+	if token == "" {
+		return errors.New("grafana: sa_token / api_key is empty")
+	}
+	return pkggrafana.New(root, token, grafanaHTTPClient(in.TLSInsecure)).Health(ctx)
 }
 
 // Sync runs the full bootstrap flow.

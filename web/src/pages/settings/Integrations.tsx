@@ -47,7 +47,7 @@ import {
   selectLokiLogBackend,
   saveLogBackend,
   startLogBackendConnectionCheck,
-  testLogBackend,
+  testLogBackendDraft,
   type LogBackend,
   type LogBackendConnectionCheck,
   type LogBackendKind,
@@ -130,6 +130,23 @@ const emptyPromForm: PromForm = {
   tls_insecure: '',
 };
 
+function promRemoteWriteURL(queryURL: string): string {
+  const base = queryURL.trim().replace(/\/+$/, '');
+  if (!base) return '';
+  try {
+    const url = new URL(base);
+    const match = url.pathname.match(/^\/select\/([^/]+)\/prometheus\/?$/);
+    if (!match) return `${base}/api/v1/write`;
+    url.pathname = `/insert/${match[1]}/prometheus/api/v1/write`;
+    url.search = '';
+    url.hash = '';
+    if (url.port === '8481') url.port = '8480';
+    return url.toString();
+  } catch {
+    return `${base}/api/v1/write`;
+  }
+}
+
 function PrometheusCard() {
   const { tr } = useI18n();
   // Both sensitive and non-sensitive fields land in draft as cleartext.
@@ -145,6 +162,7 @@ function PrometheusCard() {
   const [saving, setSaving] = useState(false);
   const [savedOk, setSavedOk] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const probeRequest = useRef(0);
   // Probe state — separate from form state so saving doesn't reset the
   // last known test outcome and probe failures don't make the form look
   // dirty.
@@ -156,6 +174,8 @@ function PrometheusCard() {
   >({ kind: 'idle' });
 
   const refresh = useCallback(async () => {
+    probeRequest.current += 1;
+    setProbe({ kind: 'idle' });
     setLoading(true);
     setErr(null);
     try {
@@ -181,8 +201,12 @@ function PrometheusCard() {
             }
           })
       );
-      setServer(next);
-      setDraft(next);
+      const effective = {
+        ...next,
+        remote_write_url: next.remote_write_url || promRemoteWriteURL(next.query_url),
+      };
+      setServer(effective);
+      setDraft(effective);
       setRevealed({});
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : (e as Error).message);
@@ -199,11 +223,28 @@ function PrometheusCard() {
   const dirty = PROM_KEYS.some((k) => draft[k] !== server[k]);
 
   const update = (k: keyof PromForm, v: string) => {
+    probeRequest.current += 1;
+    setProbe({ kind: 'idle' });
     setSavedOk(false);
     setDraft((cur) => ({ ...cur, [k]: v }));
   };
 
+  const updateQueryURL = (value: string) => {
+    probeRequest.current += 1;
+    setProbe({ kind: 'idle' });
+    setSavedOk(false);
+    setDraft((current) => ({
+      ...current,
+      query_url: value,
+      remote_write_url:
+        current.remote_write_url === '' || current.remote_write_url === promRemoteWriteURL(current.query_url)
+          ? promRemoteWriteURL(value)
+          : current.remote_write_url,
+    }));
+  };
+
   const submit = async () => {
+    if (probe.kind !== 'ok') return;
     setSaving(true);
     setErr(null);
     try {
@@ -221,11 +262,21 @@ function PrometheusCard() {
   };
 
   const probeProm = async () => {
+    const requestID = ++probeRequest.current;
     setProbe({ kind: 'testing' });
     try {
-      await testPromConnection();
+      await testPromConnection({
+        query_url: draft.query_url,
+        remote_write_url: draft.remote_write_url,
+        bearer_token: draft.bearer_token,
+        basic_user: draft.basic_user,
+        basic_password: draft.basic_password,
+        tls_insecure: draft.tls_insecure === 'true',
+      });
+      if (requestID !== probeRequest.current) return;
       setProbe({ kind: 'ok' });
     } catch (e) {
+      if (requestID !== probeRequest.current) return;
       setProbe({ kind: 'error', msg: e instanceof ApiError ? e.message : (e as Error).message });
     }
   };
@@ -265,12 +316,12 @@ function PrometheusCard() {
             label="Query URL"
             hint={tr('PromQL 查询根，例 http://prom:9090 或 https://vm.example.com', 'PromQL query root, e.g. http://prom:9090 or https://vm.example.com')}
             value={draft.query_url}
-            onChange={(v) => update('query_url', v)}
+            onChange={updateQueryURL}
             placeholder="http://prometheus:9090/prometheus"
           />
           <PromField
             label="Remote Write URL"
-            hint={tr('留空则取 Query URL + /api/v1/write', 'Empty = Query URL + /api/v1/write')}
+            hint={tr('根据 Query URL 自动匹配；VictoriaMetrics 集群会使用 /insert/.../api/v1/write', 'Auto-matched from Query URL; VictoriaMetrics clusters use /insert/.../api/v1/write')}
             value={draft.remote_write_url}
             onChange={(v) => update('remote_write_url', v)}
             placeholder="https://vm.example.com/api/v1/write"
@@ -313,20 +364,24 @@ function PrometheusCard() {
       )}
 
       <div className="mt-5 flex flex-wrap items-center gap-3">
-        <Button onClick={submit} disabled={!dirty || saving} variant="primary">
-          {savedOk && !dirty ? <Check size={14} /> : <Save size={14} />}
-          <span>{saving ? tr('保存中…', 'Saving…') : savedOk && !dirty ? tr('已保存', 'Saved') : tr('保存', 'Save')}</span>
-        </Button>
         <Button
           onClick={probeProm}
-          disabled={probe.kind === 'testing' || dirty || server.query_url.trim() === ''}
+          disabled={probe.kind === 'testing' || draft.query_url.trim() === ''}
           variant="ghost"
         >
           {probe.kind === 'testing' ? <Loader2 size={14} className="animate-spin" /> : <PlugZap size={14} />}
           <span>{tr('测试连接', 'Test connection')}</span>
         </Button>
+        <Button onClick={submit} disabled={!dirty || saving || probe.kind !== 'ok'} variant="primary">
+          {savedOk && !dirty ? <Check size={14} /> : <Save size={14} />}
+          <span>{saving ? tr('保存中…', 'Saving…') : savedOk && !dirty ? tr('已保存', 'Saved') : tr('保存', 'Save')}</span>
+        </Button>
         <span className="text-xs text-zinc-500">
-          {dirty ? tr('有未保存修改', 'Unsaved changes') : tr('保存后 ~5 秒内自动生效（无需重启）', 'Takes effect within ~5 s of saving (no restart needed)')}
+          {dirty
+            ? probe.kind === 'ok'
+              ? tr('测试通过，可以保存', 'Test passed; ready to save')
+              : tr('请先测试连接，通过后才能保存', 'Test the connection before saving')
+            : tr('保存后 ~5 秒内自动生效（无需重启）', 'Takes effect within ~5 s of saving (no restart needed)')}
         </span>
         {err && <span className="text-xs text-red-400">{err}</span>}
       </div>
@@ -347,7 +402,7 @@ function PromProbeLine({
   const { tr } = useI18n();
   switch (probe.kind) {
     case 'ok':
-      return <p className="mt-3 text-xs text-emerald-400">{tr('✓ Prom 可达，PromQL 探针 (up) 返回成功', '✓ Prom reachable, PromQL probe (up) returned success')}</p>;
+      return <p className="mt-3 text-xs text-emerald-400">{tr('✓ PromQL 查询与 Remote Write 写入入口均可用', '✓ PromQL query and Remote Write endpoint are both reachable')}</p>;
     case 'error':
       return <p className="mt-3 break-all text-xs text-red-400">✗ {probe.msg}</p>;
     default:
@@ -452,8 +507,11 @@ function GrafanaCard() {
   const [saving, setSaving] = useState(false);
   const [savedOk, setSavedOk] = useState(false);
   const [status, setStatus] = useState<SyncStatus>({ kind: 'idle' });
+  const probeRequest = useRef(0);
 
   const refresh = useCallback(async () => {
+    probeRequest.current += 1;
+    setStatus({ kind: 'idle' });
     setLoading(true);
     try {
       const r = await listSettings('grafana');
@@ -493,11 +551,14 @@ function GrafanaCard() {
   const dirty = GRAFANA_KEYS.some((k) => draft[k] !== server[k]);
 
   const update = (k: keyof GrafanaForm, v: string) => {
+    probeRequest.current += 1;
+    setStatus({ kind: 'idle' });
     setSavedOk(false);
     setDraft((cur) => ({ ...cur, [k]: v }));
   };
 
   const save = async () => {
+    if (status.kind !== 'tested-ok') return;
     setSaving(true);
     setStatus({ kind: 'idle' });
     try {
@@ -519,11 +580,20 @@ function GrafanaCard() {
   };
 
   const test = async () => {
+    const requestID = ++probeRequest.current;
     setStatus({ kind: 'testing' });
     try {
-      await testGrafanaConnection();
+      await testGrafanaConnection({
+        root_url: draft.root_url,
+        sa_token: draft.sa_token,
+        api_key: draft.api_key,
+        org_id: draft.org_id,
+        tls_insecure: draft.tls_insecure === 'true',
+      });
+      if (requestID !== probeRequest.current) return;
       setStatus({ kind: 'tested-ok' });
     } catch (e) {
+      if (requestID !== probeRequest.current) return;
       setStatus({ kind: 'error', msg: e instanceof ApiError ? e.message : (e as Error).message });
     }
   };
@@ -614,17 +684,17 @@ function GrafanaCard() {
       )}
 
       <div className="mt-5 flex flex-wrap items-center gap-3">
-        <Button onClick={save} disabled={!dirty || saving} variant="primary">
-          {savedOk && !dirty ? <Check size={14} /> : <Save size={14} />}
-          <span>{saving ? tr('保存中…', 'Saving…') : savedOk && !dirty ? tr('已保存', 'Saved') : tr('保存', 'Save')}</span>
-        </Button>
         <Button
           onClick={test}
-          disabled={status.kind === 'testing' || dirty || !canTestSync(server)}
+          disabled={status.kind === 'testing' || !canTestSync(draft)}
           variant="ghost"
         >
           {status.kind === 'testing' ? <Loader2 size={14} className="animate-spin" /> : <PlugZap size={14} />}
           <span>{tr('测试连接', 'Test connection')}</span>
+        </Button>
+        <Button onClick={save} disabled={!dirty || saving || status.kind !== 'tested-ok'} variant="primary">
+          {savedOk && !dirty ? <Check size={14} /> : <Save size={14} />}
+          <span>{saving ? tr('保存中…', 'Saving…') : savedOk && !dirty ? tr('已保存', 'Saved') : tr('保存', 'Save')}</span>
         </Button>
         <button
           type="button"
@@ -743,7 +813,9 @@ function canTestSync(form: GrafanaForm): boolean {
 function StatusLine({ status, dirty }: { status: SyncStatus; dirty: boolean }) {
   const { tr } = useI18n();
   if (dirty) {
-    return <p className="mt-3 text-xs text-zinc-500">{tr('有未保存修改，先保存才能测试 / 同步', 'Unsaved changes — save first to test / sync')}</p>;
+    if (status.kind === 'tested-ok') return <p className="mt-3 text-xs text-emerald-400">{tr('✓ 测试通过，可以保存', '✓ Test passed; ready to save')}</p>;
+    if (status.kind === 'error') return <p className="mt-3 break-all text-xs text-red-400">✗ {status.msg}</p>;
+    return <p className="mt-3 text-xs text-zinc-500">{tr('请先测试连接，通过后才能保存', 'Test the connection before saving')}</p>;
   }
   switch (status.kind) {
     case 'tested-ok':
@@ -1067,6 +1139,7 @@ function ElasticsearchLogsCard({ current, exploreUrl, onBackendChange }: { curre
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [validated, setValidated] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [connectionCheck, setConnectionCheck] = useState<LogBackendConnectionCheck | null>(null);
   const [connectionCheckError, setConnectionCheckError] = useState<string | null>(null);
@@ -1080,11 +1153,13 @@ function ElasticsearchLogsCard({ current, exploreUrl, onBackendChange }: { curre
         setBackend(value);
         setForm(backendToForm(value));
         setDirty(false);
+        setValidated(false);
       } catch (error) {
         if (error instanceof ApiError && error.status === 404) {
           setBackend(null);
           setForm(emptyElasticsearchLogsForm);
           setDirty(false);
+          setValidated(false);
         } else {
           throw error;
         }
@@ -1123,6 +1198,7 @@ function ElasticsearchLogsCard({ current, exploreUrl, onBackendChange }: { curre
   const update = <K extends keyof ElasticsearchLogsForm>(key: K, value: ElasticsearchLogsForm[K]) => {
     setMessage(null);
     setDirty(true);
+    setValidated(false);
     setForm((current) => ({ ...current, [key]: value }));
   };
 
@@ -1159,6 +1235,7 @@ function ElasticsearchLogsCard({ current, exploreUrl, onBackendChange }: { curre
   };
 
   const save = async () => {
+    if (!validated) return;
     const input = saveInput();
     if (!input) return;
     setBusy('save');
@@ -1168,6 +1245,7 @@ function ElasticsearchLogsCard({ current, exploreUrl, onBackendChange }: { curre
       setBackend(value);
       setForm(backendToForm(value));
       setDirty(false);
+      setValidated(false);
       setRevealedKeys({ write: false, query: false });
       setMessage({ ok: true, text: tr('配置已保存；点击“设为当前”后切换日志链路。', 'Configuration saved. Select it to switch the log pipeline.') });
     } catch (error) {
@@ -1215,11 +1293,13 @@ function ElasticsearchLogsCard({ current, exploreUrl, onBackendChange }: { curre
   };
 
   const testElasticsearch = async () => {
-    if (!backend || dirty) return;
+    const input = saveInput();
+    if (!input) return;
     setBusy('test');
+    setValidated(false);
     setMessage(null);
     try {
-      const result = await testLogBackend(backend.id);
+      const result = await testLogBackendDraft(input);
       const version = result.detected_version
         ? tr(`（Elasticsearch ${result.detected_version}）`, ` (Elasticsearch ${result.detected_version})`)
         : '';
@@ -1230,7 +1310,9 @@ function ElasticsearchLogsCard({ current, exploreUrl, onBackendChange }: { curre
           `Connection test passed. Query/write endpoints and API key privileges are valid${version}.`,
         ),
       });
+      setValidated(true);
     } catch (error) {
+      setValidated(false);
       setMessage({ ok: false, text: integrationError(error) });
     } finally {
       setBusy(null);
@@ -1239,8 +1321,8 @@ function ElasticsearchLogsCard({ current, exploreUrl, onBackendChange }: { curre
 
   const canEdit = true;
   const editingCurrent = current && backend?.status === 'selected';
-  const canSave = canEdit && dirty;
-  const canTest = backend != null && !dirty;
+  const canSave = canEdit && dirty && validated;
+  const canTest = true;
   const canSelect = backend != null && !dirty && backend.status === 'unselected';
   const canCheckConnections = backend != null && current && backend.status === 'selected' && !dirty;
 
@@ -1292,8 +1374,9 @@ function ElasticsearchLogsCard({ current, exploreUrl, onBackendChange }: { curre
           <div className="mt-2 text-[11px] leading-5 text-zinc-500">{tr('API Key 是只写字段：Manager 接收后立即放入加密凭证库，读取后端配置时不会回显；Edge 只通过专用密钥通道取得写 Key。', 'API keys are write-only: Manager immediately stores them in the encrypted credential vault and never echoes them when reading backend configuration; Edge receives only the write key through the dedicated secret channel.')}</div>
 
           <div className="mt-5 flex flex-wrap items-end gap-3 border-t border-zinc-800/70 pt-4">
-            <Button onClick={() => void save()} disabled={!canSave || busy !== null} variant="primary">{busy === 'save' ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}<span>{tr('保存', 'Save')}</span></Button>
             <Button onClick={() => void testElasticsearch()} disabled={!canTest || busy !== null} variant="ghost">{busy === 'test' ? <Loader2 size={14} className="animate-spin" /> : <PlugZap size={14} />}<span>{tr('测试连接', 'Test connection')}</span></Button>
+            <Button onClick={() => void save()} disabled={!canSave || busy !== null} variant="primary">{busy === 'save' ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}<span>{tr('保存', 'Save')}</span></Button>
+            {dirty && <span className="text-xs text-zinc-500">{validated ? tr('测试通过，可以保存', 'Test passed; ready to save') : tr('请先测试连接，通过后才能保存', 'Test the connection before saving')}</span>}
             <Button onClick={() => void selectElasticsearch()} disabled={!canSelect || busy !== null} variant="primary">{busy === 'select' ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}<span>{tr('设为当前', 'Select')}</span></Button>
             <Button onClick={() => void checkDeviceConnections()} disabled={!canCheckConnections || busy !== null} variant="ghost">{busy === 'connections' ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}<span>{tr('检查设备连接', 'Check device connections')}</span></Button>
             <button
@@ -1361,8 +1444,11 @@ function LokiCard({ current, backend, exploreUrl, onBackendChange }: { current: 
     | { kind: 'ok' }
     | { kind: 'error'; msg: string }
   >({ kind: 'idle' });
+  const probeRequest = useRef(0);
 
   const refresh = useCallback(async () => {
+    probeRequest.current += 1;
+    setProbe({ kind: 'idle' });
     setLoading(true);
     setErr(null);
     try {
@@ -1423,11 +1509,14 @@ function LokiCard({ current, backend, exploreUrl, onBackendChange }: { current: 
 
   const dirty = LOKI_KEYS.some((k) => draft[k] !== server[k]);
   const update = (k: keyof LokiForm, v: string) => {
+    probeRequest.current += 1;
+    setProbe({ kind: 'idle' });
     setSavedOk(false);
     setGrafanaSyncWarning(null);
     setDraft((cur) => ({ ...cur, [k]: v }));
   };
   const submit = async () => {
+    if (probe.kind !== 'ok') return;
     setSaving(true);
     setErr(null);
     setGrafanaSyncWarning(null);
@@ -1456,11 +1545,19 @@ function LokiCard({ current, backend, exploreUrl, onBackendChange }: { current: 
     }
   };
   const probeLoki = async () => {
+    const requestID = ++probeRequest.current;
     setProbe({ kind: 'testing' });
     try {
-      await testLokiConnection();
+      await testLokiConnection({
+        url: draft.url,
+        basic_user: draft.basic_user,
+        basic_password: draft.basic_password,
+        tls_insecure: draft.tls_insecure === 'true',
+      });
+      if (requestID !== probeRequest.current) return;
       setProbe({ kind: 'ok' });
     } catch (e) {
+      if (requestID !== probeRequest.current) return;
       setProbe({ kind: 'error', msg: e instanceof ApiError ? e.message : (e as Error).message });
     }
   };
@@ -1548,17 +1645,17 @@ function LokiCard({ current, backend, exploreUrl, onBackendChange }: { current: 
       )}
 
       <div className="mt-5 flex flex-wrap items-center gap-3">
-        <Button onClick={submit} disabled={!dirty || saving} variant="primary">
-          {savedOk && !dirty ? <Check size={14} /> : <Save size={14} />}
-          <span>{saving ? tr('保存中…', 'Saving…') : tr('保存', 'Save')}</span>
-        </Button>
         <Button
           onClick={probeLoki}
-          disabled={probe.kind === 'testing' || dirty}
+          disabled={probe.kind === 'testing' || draft.url.trim() === ''}
           variant="ghost"
         >
           {probe.kind === 'testing' ? <Loader2 size={14} className="animate-spin" /> : <PlugZap size={14} />}
           <span>{tr('测试连接', 'Test connection')}</span>
+        </Button>
+        <Button onClick={submit} disabled={!dirty || saving || probe.kind !== 'ok'} variant="primary">
+          {savedOk && !dirty ? <Check size={14} /> : <Save size={14} />}
+          <span>{saving ? tr('保存中…', 'Saving…') : tr('保存', 'Save')}</span>
         </Button>
         <Button onClick={() => void switchToLoki()} disabled={current || !backend || switching || dirty || probe.kind === 'testing'} variant="primary">
           {switching ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
@@ -1584,6 +1681,7 @@ function LokiCard({ current, backend, exploreUrl, onBackendChange }: { current: 
         </button>
         {err && <span className="break-all text-xs text-red-400">{err}</span>}
         {grafanaSyncWarning && <span className="break-all text-xs text-amber-400">{grafanaSyncWarning}</span>}
+        {dirty && <span className="text-xs text-zinc-500">{probe.kind === 'ok' ? tr('测试通过，可以保存', 'Test passed; ready to save') : tr('请先测试连接，通过后才能保存', 'Test the connection before saving')}</span>}
       </div>
       {switchMessage && <p className="mt-3 text-xs text-emerald-400">✓ {switchMessage}</p>}
       <ConnectionCheckProgress value={connectionCheck} error={connectionCheckError} />
@@ -1625,8 +1723,11 @@ function TempoCard() {
     | { kind: 'ok' }
     | { kind: 'error'; msg: string }
   >({ kind: 'idle' });
+  const probeRequest = useRef(0);
 
   const refresh = useCallback(async () => {
+    probeRequest.current += 1;
+    setProbe({ kind: 'idle' });
     setLoading(true);
     setErr(null);
     try {
@@ -1668,10 +1769,13 @@ function TempoCard() {
 
   const dirty = TEMPO_KEYS.some((k) => draft[k] !== server[k]);
   const update = (k: keyof TempoForm, v: string) => {
+    probeRequest.current += 1;
+    setProbe({ kind: 'idle' });
     setSavedOk(false);
     setDraft((cur) => ({ ...cur, [k]: v }));
   };
   const submit = async () => {
+    if (probe.kind !== 'ok') return;
     setSaving(true);
     setErr(null);
     try {
@@ -1688,11 +1792,19 @@ function TempoCard() {
     }
   };
   const probeTempo = async () => {
+    const requestID = ++probeRequest.current;
     setProbe({ kind: 'testing' });
     try {
-      await testTempoConnection();
+      await testTempoConnection({
+        url: draft.url,
+        basic_user: draft.basic_user,
+        basic_password: draft.basic_password,
+        tls_insecure: draft.tls_insecure === 'true',
+      });
+      if (requestID !== probeRequest.current) return;
       setProbe({ kind: 'ok' });
     } catch (e) {
+      if (requestID !== probeRequest.current) return;
       setProbe({ kind: 'error', msg: e instanceof ApiError ? e.message : (e as Error).message });
     }
   };
@@ -1754,17 +1866,17 @@ function TempoCard() {
       )}
 
       <div className="mt-5 flex flex-wrap items-center gap-3">
-        <Button onClick={submit} disabled={!dirty || saving} variant="primary">
-          {savedOk && !dirty ? <Check size={14} /> : <Save size={14} />}
-          <span>{saving ? tr('保存中…', 'Saving…') : savedOk && !dirty ? tr('已保存', 'Saved') : tr('保存', 'Save')}</span>
-        </Button>
         <Button
           onClick={probeTempo}
-          disabled={probe.kind === 'testing' || dirty}
+          disabled={probe.kind === 'testing' || draft.url.trim() === ''}
           variant="ghost"
         >
           {probe.kind === 'testing' ? <Loader2 size={14} className="animate-spin" /> : <PlugZap size={14} />}
           <span>{tr('测试连接', 'Test connection')}</span>
+        </Button>
+        <Button onClick={submit} disabled={!dirty || saving || probe.kind !== 'ok'} variant="primary">
+          {savedOk && !dirty ? <Check size={14} /> : <Save size={14} />}
+          <span>{saving ? tr('保存中…', 'Saving…') : savedOk && !dirty ? tr('已保存', 'Saved') : tr('保存', 'Save')}</span>
         </Button>
         <button
           type="button"
@@ -1780,6 +1892,7 @@ function TempoCard() {
           <ExternalLink size={14} />
           <span>{tr('在 Grafana 中查看链路', 'Open traces in Grafana')}</span>
         </button>
+        {dirty && <span className="text-xs text-zinc-500">{probe.kind === 'ok' ? tr('测试通过，可以保存', 'Test passed; ready to save') : tr('请先测试连接，通过后才能保存', 'Test the connection before saving')}</span>}
         {err && <span className="break-all text-xs text-red-400">{err}</span>}
       </div>
       <ProbeLine probe={probe} okLabel={tr('✓ Tempo 连接测试成功', '✓ Tempo connection test succeeded')} />
@@ -1833,8 +1946,7 @@ function PluginCountLine({ label, count }: { label: string; count: number | null
 //
 // Per-provider fields are shown contextually so the form doesn't ask
 // the operator for irrelevant credentials. The 测试连接 button issues
-// a 1-result probe to whatever's currently selected & saved server-side
-// (so save first, then test — same discipline as Loki/Tempo cards).
+// a 1-result probe to the unsaved draft before the save button is enabled.
 
 type WebSearchForm = {
   provider: string; // "searxng" | "tavily" | "brave"
@@ -1875,8 +1987,11 @@ function WebSearchCard() {
     | { kind: 'ok'; provider: string; sample: string }
     | { kind: 'error'; msg: string }
   >({ kind: 'idle' });
+  const probeRequest = useRef(0);
 
   const refresh = useCallback(async () => {
+    probeRequest.current += 1;
+    setProbe({ kind: 'idle' });
     setLoading(true);
     setErr(null);
     try {
@@ -1922,11 +2037,14 @@ function WebSearchCard() {
 
   const dirty = WEBSEARCH_KEYS.some((k) => draft[k] !== server[k]);
   const update = (k: keyof WebSearchForm, v: string) => {
+    probeRequest.current += 1;
+    setProbe({ kind: 'idle' });
     setSavedOk(false);
     setDraft((cur) => ({ ...cur, [k]: v }));
   };
 
   const submit = async () => {
+    if (probe.kind !== 'ok') return;
     setSaving(true);
     setErr(null);
     try {
@@ -1944,11 +2062,14 @@ function WebSearchCard() {
   };
 
   const probeWebSearch = async () => {
+    const requestID = ++probeRequest.current;
     setProbe({ kind: 'testing' });
     try {
-      const r = await testWebSearchConnection();
+      const r = await testWebSearchConnection(draft);
+      if (requestID !== probeRequest.current) return;
       setProbe({ kind: 'ok', provider: r.provider, sample: r.sample });
     } catch (e) {
+      if (requestID !== probeRequest.current) return;
       setProbe({ kind: 'error', msg: e instanceof ApiError ? e.message : (e as Error).message });
     }
   };
@@ -1956,7 +2077,7 @@ function WebSearchCard() {
   // Status hint at the bottom of the card. Encodes the provider-specific
   // "ok / missing key" verdict the same way the skill itself decides.
   const statusHint = (() => {
-    if (dirty) return tr('有未保存修改', 'Unsaved changes');
+    if (dirty) return probe.kind === 'ok' ? tr('测试通过，可以保存', 'Test passed; ready to save') : tr('请先测试连接，通过后才能保存', 'Test the connection before saving');
     switch (server.provider) {
       case 'searxng':
         return tr(`已选 SearXNG · ${server.searxng_url || 'http://searxng:8080'}`, `Using SearXNG · ${server.searxng_url || 'http://searxng:8080'}`);
@@ -2086,17 +2207,17 @@ function WebSearchCard() {
       )}
 
       <div className="mt-5 flex flex-wrap items-center gap-3">
-        <Button onClick={submit} disabled={!dirty || saving} variant="primary">
-          {savedOk && !dirty ? <Check size={14} /> : <Save size={14} />}
-          <span>{saving ? tr('保存中…', 'Saving…') : savedOk && !dirty ? tr('已保存', 'Saved') : tr('保存', 'Save')}</span>
-        </Button>
         <Button
           onClick={probeWebSearch}
-          disabled={probe.kind === 'testing' || dirty}
+          disabled={probe.kind === 'testing'}
           variant="ghost"
         >
           {probe.kind === 'testing' ? <Loader2 size={14} className="animate-spin" /> : <PlugZap size={14} />}
           <span>{tr('测试连接', 'Test connection')}</span>
+        </Button>
+        <Button onClick={submit} disabled={!dirty || saving || probe.kind !== 'ok'} variant="primary">
+          {savedOk && !dirty ? <Check size={14} /> : <Save size={14} />}
+          <span>{saving ? tr('保存中…', 'Saving…') : savedOk && !dirty ? tr('已保存', 'Saved') : tr('保存', 'Save')}</span>
         </Button>
         <span className="text-xs text-zinc-500">{statusHint}</span>
         {err && <span className="break-all text-xs text-red-400">{err}</span>}
