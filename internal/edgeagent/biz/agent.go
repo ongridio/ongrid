@@ -77,6 +77,12 @@ type Config struct {
 	// AgentVersion is reported on register_edge (optional).
 	AgentVersion string
 
+	// CloudAddr is the manager/frontier address the tunnel dials. It is
+	// only used in unreachable-class WARN logs so operators can tell
+	// "network down, process alive" from "process dead" without digging
+	// through config files.
+	CloudAddr string
+
 	// Kubernetes is set when this edge is deployed by the Kubernetes chart.
 	Kubernetes *tunnel.KubernetesInfo
 
@@ -533,6 +539,12 @@ func applyKubernetesHostIdentity(k8sInfo *tunnel.KubernetesInfo, host *tunnel.Ho
 // If the initial registration failed, the same loop retries it before
 // sending heartbeats so a transient startup dependency does not leave the
 // edge permanently at edge_id=0.
+//
+// Failures are classified by the tunnel's typed errors: unreachable-class
+// failures keep the process alive, retry on the next tick, and reset the
+// stuck streak; only stuck-class failures (network reachable but the
+// tunnel keeps failing) count toward tunnelStuckThreshold, after which
+// the process exits so the service manager can restart it.
 func (a *Agent) heartbeatLoop(ctx context.Context) error {
 	t := time.NewTicker(a.cfg.HeartbeatInterval)
 	defer t.Stop()
@@ -547,6 +559,17 @@ func (a *Agent) heartbeatLoop(ctx context.Context) error {
 				err := a.registerEdge(rctx)
 				cancel()
 				if err != nil {
+					if isUnreachableError(err) {
+						// Same verdict as the heartbeat path: an
+						// unreachable cloud is not stuck-tunnel evidence,
+						// so it neither counts nor keeps an old streak
+						// alive.
+						consecutiveFail = 0
+						a.log.Warn("agent: register_edge retry failed, cloud unreachable; staying alive",
+							slog.String("cloud_addr", a.cfg.CloudAddr),
+							slog.Any("err", err))
+						continue
+					}
 					consecutiveFail++
 					a.log.Warn("agent: register_edge retry failed",
 						slog.Int("consecutive_fail", consecutiveFail),
@@ -573,6 +596,22 @@ func (a *Agent) heartbeatLoop(ctx context.Context) error {
 				}, nil)
 			cancel()
 			if err != nil {
+				// A network-unreachable failure (DNS, dial, or a red
+				// reachability probe) is not evidence of a stuck tunnel:
+				// stay alive and retry on the next tick, mirroring the
+				// unlimited retry of the initial dial path. It also
+				// resets the stuck streak: counting across an unreachable
+				// gap turns a DNS outage into a restart storm. The cost
+				// is that a flapping network can postpone the exit
+				// indefinitely; manager-side device_offline alerting
+				// covers that residual.
+				if isUnreachableError(err) {
+					consecutiveFail = 0
+					a.log.Warn("agent: heartbeat failed, cloud unreachable; staying alive",
+						slog.String("cloud_addr", a.cfg.CloudAddr),
+						slog.Any("err", err))
+					continue
+				}
 				consecutiveFail++
 				a.log.Warn("agent: heartbeat failed",
 					slog.Int("consecutive_fail", consecutiveFail),
@@ -584,6 +623,17 @@ func (a *Agent) heartbeatLoop(ctx context.Context) error {
 				rerr := a.registerEdge(rctx)
 				rcancel()
 				if rerr != nil {
+					// Classify re-register failures the same way: when the
+					// network itself is unreachable, exiting gains nothing —
+					// the restarted process would fail the same dial. The
+					// streak resets for the same reason as above.
+					if isUnreachableError(rerr) {
+						consecutiveFail = 0
+						a.log.Warn("agent: re-register failed, cloud unreachable; staying alive",
+							slog.String("cloud_addr", a.cfg.CloudAddr),
+							slog.Any("err", rerr))
+						continue
+					}
 					a.log.Warn("agent: re-register after heartbeat failure failed",
 						slog.Any("err", rerr))
 					if consecutiveFail >= tunnelStuckThreshold {
@@ -604,6 +654,17 @@ func (a *Agent) heartbeatLoop(ctx context.Context) error {
 const tunnelStuckThreshold = 5
 
 var errTunnelStuck = errors.New("tunnel stuck")
+
+// isUnreachableError reports whether err carries the tunnel's own
+// unreachable verdict. The tunnel Call exit is the single
+// classification point: it inspects the net error shapes (DNS / dial
+// failures, red reachability probes) and wraps them with
+// tunnel.ErrCloudUnreachable, so this layer only matches the sentinel
+// and stays independent of the underlying error forms the transport
+// may evolve to produce.
+func isUnreachableError(err error) bool {
+	return errors.Is(err, tunnel.ErrCloudUnreachable)
+}
 
 // metricsLoop samples the collector every MetricsInterval and fans out
 // the result to the legacy push_host_metrics path and the new
