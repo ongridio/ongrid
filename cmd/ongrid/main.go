@@ -1995,9 +1995,6 @@ func main() {
 		PromEnabled:         cfg.Prom.Enabled,
 		LogsEnabled:         cfg.Logs.URL != "",
 		TracesEnabled:       cfg.Traces.URL != "",
-		AlertEnabled:        cfg.Alert.Enabled,
-		EvaluatorInterval:   cfg.Alert.EvaluatorInterval,
-		NotifyCooldown:      cfg.Alert.Cooldown,
 		FrontierAddr:        cfg.FrontierClient.Addr,
 		FrontierDisabled:    cfg.FrontierClient.Disabled,
 		LLMConfigured:       cfg.OpenAI.APIKey != "",
@@ -2005,15 +2002,12 @@ func main() {
 		QdrantURL:           qdrantURL,
 		QdrantCollection:    managerbizknowledge.CollectionName,
 	}, managersvcsystemhealth.Dependencies{
-		DB:        healthDB,
-		Prom:      promTester,
-		Grafana:   grafanaSvc,
-		Loki:      lokiProbe,
-		Tempo:     tempoReadinessProbe,
-		Rules:     alertSvc,
-		Incidents: alertSvc,
-		Edges:     edgeSvc,
-		LLM:       llmSettingsResolver,
+		DB:      healthDB,
+		Prom:    promTester,
+		Grafana: grafanaSvc,
+		Loki:    lokiProbe,
+		Tempo:   tempoReadinessProbe,
+		LLM:     llmSettingsResolver,
 	})
 	systemHealthHandler := managerserversystemhealth.NewHandler(systemHealthSvc)
 	systemUpgradeSvc := managersvcsystemupgrade.New(managersvcsystemupgrade.Config{

@@ -10,9 +10,6 @@ import (
 	"strings"
 	"time"
 
-	edgebiz "github.com/ongridio/ongrid/internal/manager/biz/edge"
-	edgemodel "github.com/ongridio/ongrid/internal/manager/model/edge"
-	alertsvc "github.com/ongridio/ongrid/internal/manager/service/alert"
 	"github.com/ongridio/ongrid/internal/pkg/llm"
 )
 
@@ -65,33 +62,18 @@ type GrafanaTester interface {
 	Test(ctx context.Context) error
 }
 
-type RuleLister interface {
-	ListRules(ctx context.Context, caller alertsvc.Caller, scopeType string) ([]*alertsvc.Rule, error)
-}
-
-type IncidentCounter interface {
-	CountIncidents(ctx context.Context, caller alertsvc.Caller, in alertsvc.IncidentFilter) (int64, error)
-}
-
-type EdgeLister interface {
-	List(ctx context.Context, f edgebiz.ListFilter) ([]*edgemodel.Edge, error)
-}
-
 type LLMProviderResolver interface {
 	ResolveProviders(ctx context.Context) ([]llm.ProviderConfig, string, error)
 }
 
 type Dependencies struct {
-	DB        DBPinger
-	Prom      PromQuerier
-	Grafana   GrafanaTester
-	Loki      URLProbe
-	Tempo     URLProbe
-	Rules     RuleLister
-	Incidents IncidentCounter
-	Edges     EdgeLister
-	LLM       LLMProviderResolver
-	HTTP      *http.Client
+	DB      DBPinger
+	Prom    PromQuerier
+	Grafana GrafanaTester
+	Loki    URLProbe
+	Tempo   URLProbe
+	LLM     LLMProviderResolver
+	HTTP    *http.Client
 }
 
 type Config struct {
@@ -100,9 +82,6 @@ type Config struct {
 	PromEnabled         bool
 	LogsEnabled         bool
 	TracesEnabled       bool
-	AlertEnabled        bool
-	EvaluatorInterval   time.Duration
-	NotifyCooldown      time.Duration
 	FrontierAddr        string
 	FrontierDisabled    bool
 	LLMConfigured       bool
@@ -129,7 +108,7 @@ func New(cfg Config, deps Dependencies) *Service {
 	return &Service{cfg: cfg, deps: deps}
 }
 
-func (s *Service) Check(ctx context.Context, caller alertsvc.Caller) (*Report, error) {
+func (s *Service) Check(ctx context.Context) (*Report, error) {
 	checks := []Check{
 		s.checkManager(ctx),
 		s.checkDatabase(ctx),
@@ -139,8 +118,6 @@ func (s *Service) Check(ctx context.Context, caller alertsvc.Caller) (*Report, e
 		s.checkTempo(ctx),
 		s.checkQdrant(ctx),
 		s.checkFrontier(ctx),
-		s.checkAlerts(ctx, caller),
-		s.checkEdges(ctx),
 		s.checkLLM(ctx),
 		s.checkEmbedding(ctx),
 	}
@@ -268,88 +245,7 @@ func (s *Service) checkFrontier(ctx context.Context) Check {
 		if s.cfg.FrontierDisabled {
 			return StatusDegraded, "frontier client is disabled", details
 		}
-		return StatusOK, "frontier client is enabled; edge online state is checked separately", details
-	})
-}
-
-func (s *Service) checkAlerts(ctx context.Context, caller alertsvc.Caller) Check {
-	return s.probe(ctx, "alert_engine", "automation", "Alert engine", func(ctx context.Context) (Status, string, map[string]any) {
-		if !s.cfg.AlertEnabled {
-			return StatusDegraded, "alert evaluator is disabled", map[string]any{"enabled": false}
-		}
-		if s.deps.Rules == nil || s.deps.Incidents == nil {
-			return StatusDegraded, "alert service is not fully wired", nil
-		}
-		rules, err := s.deps.Rules.ListRules(ctx, caller, "")
-		if err != nil {
-			return StatusFailed, "alert rules check failed: " + err.Error(), nil
-		}
-		enabled := 0
-		for _, r := range rules {
-			if r != nil && r.Enabled {
-				enabled++
-			}
-		}
-		open, err := s.deps.Incidents.CountIncidents(ctx, caller, alertsvc.IncidentFilter{Status: "open"})
-		if err != nil {
-			return StatusFailed, "open incident count failed: " + err.Error(), nil
-		}
-		details := map[string]any{
-			"rules":                      len(rules),
-			"enabled_rules":              enabled,
-			"open_incidents":             open,
-			"evaluator_interval_seconds": int(s.cfg.EvaluatorInterval.Seconds()),
-			"notify_cooldown_seconds":    int(s.cfg.NotifyCooldown.Seconds()),
-		}
-		switch {
-		case len(rules) == 0:
-			return StatusDegraded, "alert engine is enabled but has no rules", details
-		case open > 0:
-			return StatusDegraded, fmt.Sprintf("%d open incident(s) need attention", open), details
-		default:
-			return StatusOK, "alert rules loaded and no open incident exists", details
-		}
-	})
-}
-
-func (s *Service) checkEdges(ctx context.Context) Check {
-	return s.probe(ctx, "edges", "edge", "Edge agents", func(ctx context.Context) (Status, string, map[string]any) {
-		if s.deps.Edges == nil {
-			return StatusDegraded, "edge service is not wired", nil
-		}
-		edges, err := s.deps.Edges.List(ctx, edgebiz.ListFilter{Limit: 1000})
-		if err != nil {
-			return StatusFailed, "edge list check failed: " + err.Error(), nil
-		}
-		online := 0
-		offline := 0
-		for _, e := range edges {
-			if e == nil {
-				continue
-			}
-			switch e.Status {
-			case edgemodel.StatusOnline:
-				online++
-			case edgemodel.StatusOffline:
-				offline++
-			}
-		}
-		details := map[string]any{
-			"sampled": len(edges),
-			"online":  online,
-			"offline": offline,
-			"limit":   1000,
-		}
-		switch {
-		case len(edges) == 0:
-			return StatusOK, "no edge agent is registered; edge access is ready", details
-		case online == 0:
-			return StatusFailed, "all sampled edge agents are offline", details
-		case offline > 0:
-			return StatusDegraded, fmt.Sprintf("%d sampled edge agent(s) are offline", offline), details
-		default:
-			return StatusOK, "sampled edge agents are online", details
-		}
+		return StatusOK, "frontier client is enabled", details
 	})
 }
 

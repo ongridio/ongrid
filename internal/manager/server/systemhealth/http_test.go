@@ -10,21 +10,18 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	alertsvc "github.com/ongridio/ongrid/internal/manager/service/alert"
 	healthsvc "github.com/ongridio/ongrid/internal/manager/service/systemhealth"
 	"github.com/ongridio/ongrid/internal/pkg/tenantctx"
 )
 
 type stubHealth struct {
 	called bool
-	caller alertsvc.Caller
 	report *healthsvc.Report
 	err    error
 }
 
-func (s *stubHealth) Check(_ context.Context, caller alertsvc.Caller) (*healthsvc.Report, error) {
+func (s *stubHealth) Check(context.Context) (*healthsvc.Report, error) {
 	s.called = true
-	s.caller = caller
 	if s.report != nil || s.err != nil {
 		return s.report, s.err
 	}
@@ -74,8 +71,8 @@ func TestCheckReturnsReport(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
 	}
-	if !svc.called || svc.caller.UserID != 1 || svc.caller.Role != "admin" {
-		t.Fatalf("caller = %+v called=%v", svc.caller, svc.called)
+	if !svc.called {
+		t.Fatal("service was not called")
 	}
 	var report healthsvc.Report
 	if err := json.Unmarshal(rec.Body.Bytes(), &report); err != nil {
