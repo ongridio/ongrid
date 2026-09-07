@@ -52,7 +52,6 @@ import { useUi } from '@/store/ui';
 import { useIncidentBadge } from '@/store/incidentBadge';
 import { useMe, usePermissions } from '@/store/me';
 import { useChatSessions, invalidateChatSessions } from '@/store/chatSessions';
-import { useModelSelection } from '@/store/modelSelection';
 import { deleteSession, renameSession, type ChatSession } from '@/api/chat';
 import { listSettings } from '@/api/settings';
 
@@ -109,7 +108,6 @@ export function Sidebar() {
     setDeletingId(target.id);
     try {
       await deleteSession(target.id);
-      useModelSelection.getState().clearSessionSelected(target.id);
       invalidateChatSessions();
       // If the user is currently viewing the deleted session, bounce to
       // /chat (the new-session entry point) so they're not stuck on a

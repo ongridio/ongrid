@@ -45,6 +45,7 @@ type AIOpsService interface {
 	CloseSession(ctx context.Context, caller svc.Caller, sessionID string) error
 	DeleteSession(ctx context.Context, caller svc.Caller, sessionID string) error
 	RenameSession(ctx context.Context, caller svc.Caller, sessionID string, title string) error
+	UpdateSessionModel(ctx context.Context, caller svc.Caller, sessionID string, provider string, model string) error
 	PostMessage(ctx context.Context, caller svc.Caller, sessionID string, content string) (*agent.Reply, error)
 	PostMessageWithOpts(ctx context.Context, caller svc.Caller, sessionID string, content string, opts agent.RunOptions) (*agent.Reply, error)
 	PostMessageStream(ctx context.Context, caller svc.Caller, sessionID string, content string, emit agent.Emit) (*agent.Reply, error)
@@ -149,7 +150,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Post("/v1/chat/sessions/{id}/stop", h.stopSession)
 	r.Get("/v1/chat/sessions/{id}/messages", h.listMessages)
 	r.Delete("/v1/chat/sessions/{id}", h.closeSession)
-	r.Patch("/v1/chat/sessions/{id}", h.renameSession)
+	r.Patch("/v1/chat/sessions/{id}", h.updateSession)
 	r.Get("/v1/usage/today", h.usageToday)
 	r.Get("/v1/aiops/mutating-proposals", h.listMutatingProposals)
 	r.Get("/v1/aiops/mentions/search", h.searchMentions)
@@ -299,8 +300,10 @@ func operationArtifactDTOs(items []*model.OperationArtifact) []operationArtifact
 }
 
 type createSessionReq struct {
-	Title string   `json:"title"`
-	Scope []string `json:"scope,omitempty"`
+	Title    string   `json:"title"`
+	Scope    []string `json:"scope,omitempty"`
+	Provider string   `json:"provider,omitempty"`
+	Model    string   `json:"model,omitempty"`
 	// RelatedIncidentID links the session back to an alert incident.
 	// Set by the IncidentDetail "深入诊断" button so the per-incident
 	// agent-timeline panel can list this session under the incident.
@@ -318,6 +321,8 @@ type sessionDTO struct {
 	Scope             []string   `json:"scope,omitempty"`
 	RelatedIncidentID *uint64    `json:"related_incident_id,omitempty"`
 	AgentID           *string    `json:"agent_id,omitempty"`
+	Provider          *string    `json:"provider,omitempty"`
+	Model             *string    `json:"model,omitempty"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
 	ClosedAt          *time.Time `json:"closed_at,omitempty"`
@@ -461,6 +466,8 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 		Scope:             req.Scope,
 		RelatedIncidentID: req.RelatedIncidentID,
 		AgentID:           req.AgentID,
+		Provider:          req.Provider,
+		Model:             req.Model,
 	})
 	if err != nil {
 		writeErr(w, err)
@@ -822,14 +829,19 @@ func (h *Handler) closeSession(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-type renameSessionReq struct {
-	Title string `json:"title"`
+type updateSessionReq struct {
+	Title    *string `json:"title,omitempty"`
+	Provider *string `json:"provider,omitempty"`
+	Model    *string `json:"model,omitempty"`
 }
 
-// renameSession handles PATCH /v1/chat/sessions/{id} — body is
-// {"title": "..."}. Empty / whitespace-only titles 400; non-owners
-// 404 (mirroring the rest of the session ownership story).
-func (h *Handler) renameSession(w http.ResponseWriter, r *http.Request) {
+// @Summary Update chat session title or model route
+// @Router /api/v1/chat/sessions/{id} [patch]
+// @Success 204
+//
+// updateSession handles PATCH /v1/chat/sessions/{id}. Provider and model are
+// updated as a pair; non-owners receive 404.
+func (h *Handler) updateSession(w http.ResponseWriter, r *http.Request) {
 	caller, ok := callerFromCtx(r.Context())
 	if !ok {
 		writeErr(w, errs.ErrUnauthorized)
@@ -840,14 +852,30 @@ func (h *Handler) renameSession(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	var req renameSessionReq
+	var req updateSessionReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, errors.Join(errs.ErrInvalid, err))
 		return
 	}
-	if err := h.svc.RenameSession(r.Context(), caller, id, req.Title); err != nil {
-		writeErr(w, err)
+	if req.Title == nil && req.Provider == nil && req.Model == nil {
+		writeErr(w, fmt.Errorf("%w: no session fields supplied", errs.ErrInvalid))
 		return
+	}
+	if req.Title != nil {
+		if err := h.svc.RenameSession(r.Context(), caller, id, *req.Title); err != nil {
+			writeErr(w, err)
+			return
+		}
+	}
+	if req.Provider != nil || req.Model != nil {
+		if req.Provider == nil || req.Model == nil {
+			writeErr(w, fmt.Errorf("%w: provider and model must be supplied together", errs.ErrInvalid))
+			return
+		}
+		if err := h.svc.UpdateSessionModel(r.Context(), caller, id, *req.Provider, *req.Model); err != nil {
+			writeErr(w, err)
+			return
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -1006,6 +1034,8 @@ func toSessionDTO(s *model.Session) sessionDTO {
 		Title:             s.Title,
 		RelatedIncidentID: s.RelatedIncidentID,
 		AgentID:           s.AgentID,
+		Provider:          s.Provider,
+		Model:             s.Model,
 		CreatedAt:         s.CreatedAt,
 		UpdatedAt:         s.UpdatedAt,
 		ClosedAt:          s.ClosedAt,

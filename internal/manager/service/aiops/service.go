@@ -193,6 +193,8 @@ type CreateSessionInput struct {
 	Title             string
 	Scope             []string
 	RelatedIncidentID *uint64
+	Provider          string
+	Model             string
 	// AgentID pins the session to a chatruntime persona (general-purpose
 	// / incident-investigator / reviewer / user-defined). The persona's
 	// SystemPrompt + filtered ToolBag take effect on every Handle() call
@@ -208,6 +210,10 @@ func (s *Service) CreateSession(ctx context.Context, caller Caller, in CreateSes
 	if title == "" {
 		title = "Untitled"
 	}
+	provider, selectedModel := strings.TrimSpace(in.Provider), strings.TrimSpace(in.Model)
+	if (provider == "") != (selectedModel == "") {
+		return nil, fmt.Errorf("%w: provider and model must be supplied together", errs.ErrInvalid)
+	}
 	sess := &model.Session{
 		UserID:            caller.UserID,
 		Title:             title,
@@ -220,6 +226,10 @@ func (s *Service) CreateSession(ctx context.Context, caller Caller, in CreateSes
 	if in.AgentID != "" {
 		ag := in.AgentID
 		sess.AgentID = &ag
+	}
+	if provider != "" {
+		sess.Provider = &provider
+		sess.Model = &selectedModel
 	}
 	if len(in.Scope) > 0 {
 		b, err := json.Marshal(in.Scope)
@@ -301,6 +311,21 @@ func (s *Service) RenameSession(ctx context.Context, caller Caller, sessionID st
 	return s.sessions.RenameSession(ctx, sessionID, title)
 }
 
+// UpdateSessionModel changes the persisted LLM route for one owned session.
+// Provider/model form a pair; accepting only one would create an ambiguous
+// route and could send a model slug to the wrong upstream.
+func (s *Service) UpdateSessionModel(ctx context.Context, caller Caller, sessionID string, provider string, selectedModel string) error {
+	if _, err := s.GetSession(ctx, caller, sessionID); err != nil {
+		return err
+	}
+	provider = strings.TrimSpace(provider)
+	selectedModel = strings.TrimSpace(selectedModel)
+	if (provider == "") != (selectedModel == "") {
+		return fmt.Errorf("%w: provider and model must be supplied together", errs.ErrInvalid)
+	}
+	return s.sessions.UpdateSessionModel(ctx, sessionID, provider, selectedModel)
+}
+
 // PostMessage runs one user turn through the agent and returns the final
 // assistant Reply. This is a blocking call — the full OpenAI loop plus any
 // tunnel dispatches complete before returning. The agent itself re-checks
@@ -344,6 +369,10 @@ func (s *Service) runWithKernel(ctx context.Context, caller Caller, sessionID st
 	if err != nil {
 		return nil, err
 	}
+	// Per-request overrides win; otherwise use the durable session route.
+	// Empty legacy session fields deliberately fall through to the router's
+	// deployment-wide default.
+	opts = resolveSessionRunOptions(sess, opts)
 
 	// HLD-021: detach the chat turn from the HTTP request lifecycle. A turn now
 	// routinely blocks for minutes inside cloud_bash waiting on a human
@@ -377,6 +406,19 @@ func (s *Service) runWithKernel(ctx context.Context, caller Caller, sessionID st
 		return nil, errs.ErrNotWiredYet
 	}
 	return s.legacyAgent.RunStreamWithOpts(ctx, sessionID, sess.UserID, content, emit, opts)
+}
+
+func resolveSessionRunOptions(sess *model.Session, opts agent.RunOptions) agent.RunOptions {
+	if sess == nil {
+		return opts
+	}
+	if strings.TrimSpace(opts.Provider) == "" && sess.Provider != nil {
+		opts.Provider = strings.TrimSpace(*sess.Provider)
+	}
+	if strings.TrimSpace(opts.Model) == "" && sess.Model != nil {
+		opts.Model = strings.TrimSpace(*sess.Model)
+	}
+	return opts
 }
 
 // registerCancel records the in-flight turn's cancel under its session id. If

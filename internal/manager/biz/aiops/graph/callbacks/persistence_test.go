@@ -52,6 +52,9 @@ func (r *fakeSessionRepo) ListByParent(context.Context, string) ([]*model.Sessio
 	return nil, errs.ErrNotWiredYet
 }
 func (r *fakeSessionRepo) RenameSession(context.Context, string, string) error { return nil }
+func (r *fakeSessionRepo) UpdateSessionModel(context.Context, string, string, string) error {
+	return nil
+}
 func (r *fakeSessionRepo) CloseSession(context.Context, string) error {
 	return errs.ErrNotWiredYet
 }

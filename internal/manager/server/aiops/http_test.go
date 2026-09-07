@@ -44,9 +44,13 @@ type fakeService struct {
 	proposalsErr   error
 	lastProposalF  biz.MutatingProposalFilter
 
-	lastCaller    svc.Caller
-	lastPostCt    string
-	lastCreateTtl string
+	lastCaller         svc.Caller
+	lastPostCt         string
+	lastCreateTtl      string
+	lastCreateProvider string
+	lastCreateModel    string
+	lastUpdateProvider string
+	lastUpdateModel    string
 }
 
 type fakeOperationReader struct {
@@ -72,6 +76,8 @@ func (f *fakeOperationReader) ListArtifacts(_ context.Context, _ string) ([]*mod
 func (f *fakeService) CreateSession(_ context.Context, c svc.Caller, in svc.CreateSessionInput) (*model.Session, error) {
 	f.lastCaller = c
 	f.lastCreateTtl = in.Title
+	f.lastCreateProvider = in.Provider
+	f.lastCreateModel = in.Model
 	return f.createResp, f.createErr
 }
 func (f *fakeService) ListSessions(_ context.Context, c svc.Caller, _, _ int, _ *uint64) ([]*model.Session, error) {
@@ -97,6 +103,12 @@ func (f *fakeService) StopSession(_ context.Context, c svc.Caller, _ string) (bo
 func (f *fakeService) RenameSession(_ context.Context, c svc.Caller, _, _ string) error {
 	f.lastCaller = c
 	return f.closeErr
+}
+
+func (f *fakeService) UpdateSessionModel(_ context.Context, _ svc.Caller, _, provider, selectedModel string) error {
+	f.lastUpdateProvider = provider
+	f.lastUpdateModel = selectedModel
+	return nil
 }
 func (f *fakeService) PostMessage(_ context.Context, c svc.Caller, _ string, content string) (*agent.Reply, error) {
 	f.lastCaller = c
@@ -145,13 +157,14 @@ func buildRouter(h *Handler, tenant tenantctx.Tenant) http.Handler {
 }
 
 func TestCreateSessionHappyPath(t *testing.T) {
+	provider, selectedModel := "custom", "qwen"
 	f := &fakeService{
-		createResp: &model.Session{ID: "9", UserID: 1, Title: "hi", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()},
+		createResp: &model.Session{ID: "9", UserID: 1, Title: "hi", Provider: &provider, Model: &selectedModel, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()},
 	}
 	h := NewHandler(f)
 	r := buildRouter(h, tenantctx.Tenant{UserID: 1, Role: "user"})
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/sessions", strings.NewReader(`{"title":"hi"}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/sessions", strings.NewReader(`{"title":"hi","provider":"custom","model":"qwen"}`))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -165,8 +178,29 @@ func TestCreateSessionHappyPath(t *testing.T) {
 	if out.ID != "9" || out.Title != "hi" {
 		t.Errorf("body = %+v", out)
 	}
+	if out.Provider == nil || *out.Provider != provider || out.Model == nil || *out.Model != selectedModel {
+		t.Errorf("model route = %v/%v", out.Provider, out.Model)
+	}
+	if f.lastCreateProvider != provider || f.lastCreateModel != selectedModel {
+		t.Errorf("create input route = %q/%q", f.lastCreateProvider, f.lastCreateModel)
+	}
 	if f.lastCaller.UserID != 1 || f.lastCaller.Role != "user" {
 		t.Errorf("caller = %+v", f.lastCaller)
+	}
+}
+
+func TestUpdateSessionModel(t *testing.T) {
+	f := &fakeService{}
+	h := NewHandler(f)
+	r := buildRouter(h, tenantctx.Tenant{UserID: 1, Role: "user"})
+	req := httptest.NewRequest(http.MethodPatch, "/v1/chat/sessions/session-1", strings.NewReader(`{"provider":"deepseek","model":"deepseek-chat"}`))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("code = %d, body = %s", w.Code, w.Body.String())
+	}
+	if f.lastUpdateProvider != "deepseek" || f.lastUpdateModel != "deepseek-chat" {
+		t.Fatalf("update route = %q/%q", f.lastUpdateProvider, f.lastUpdateModel)
 	}
 }
 

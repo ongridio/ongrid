@@ -94,9 +94,10 @@ func (m *memSessions) ListSessions(_ context.Context, _ uint64, _, _ int, _ *uin
 func (m *memSessions) ListByParent(_ context.Context, _ string) ([]*model.Session, error) {
 	return nil, nil
 }
-func (m *memSessions) CloseSession(_ context.Context, _ string) error     { return nil }
-func (m *memSessions) RenameSession(_ context.Context, _, _ string) error { return nil }
-func (m *memSessions) DeleteSession(_ context.Context, _ string) error    { return nil }
+func (m *memSessions) CloseSession(_ context.Context, _ string) error             { return nil }
+func (m *memSessions) RenameSession(_ context.Context, _, _ string) error         { return nil }
+func (m *memSessions) UpdateSessionModel(_ context.Context, _, _, _ string) error { return nil }
+func (m *memSessions) DeleteSession(_ context.Context, _ string) error            { return nil }
 func (m *memSessions) AppendMessage(_ context.Context, _ *model.Message) error {
 	return nil
 }

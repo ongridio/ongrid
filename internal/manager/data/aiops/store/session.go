@@ -129,6 +129,29 @@ func (r *SessionRepo) RenameSession(ctx context.Context, id string, title string
 	return nil
 }
 
+// UpdateSessionModel stores the conversation's model route as one atomic
+// update so readers never observe a provider from one selection and a model
+// from another.
+func (r *SessionRepo) UpdateSessionModel(ctx context.Context, id string, provider string, selectedModel string) error {
+	now := time.Now().UTC()
+	updates := map[string]any{"updated_at": now}
+	if provider == "" && selectedModel == "" {
+		updates["provider"] = nil
+		updates["model"] = nil
+	} else {
+		updates["provider"] = provider
+		updates["model"] = selectedModel
+	}
+	res := r.db.WithContext(ctx).Model(&model.Session{}).Where("id = ?", id).Updates(updates)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return errs.ErrNotFound
+	}
+	return nil
+}
+
 // DeleteSession permanently removes the session and every row that
 // hangs off it (messages, tool_calls). Used by the UI's "delete chat"
 // action; soft-close (CloseSession) is kept for callers that want to

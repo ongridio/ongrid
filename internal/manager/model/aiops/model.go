@@ -51,6 +51,11 @@ type Session struct {
 	UserID    uint64  `gorm:"index;not null;column:user_id"`
 	Title     string  `gorm:"size:256;not null"`
 	ScopeJSON *string `gorm:"type:text;column:scope_json"`
+	// Provider and Model pin the default LLM route for this conversation.
+	// Both are nullable so sessions created before this feature continue to
+	// inherit the deployment-wide default.
+	Provider *string `gorm:"size:128;column:provider"`
+	Model    *string `gorm:"size:255;column:model"`
 	// RootSessionID identifies the user or system task that owns this
 	// transcript. Top-level sessions point at themselves after creation;
 	// work sessions retain the same root while parent_session_id captures

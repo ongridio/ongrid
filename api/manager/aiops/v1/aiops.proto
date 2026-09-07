@@ -16,6 +16,10 @@ service AiopsService {
     // ListChatSessions 返回当前 user（或 org 下有权限的）对话列表。
     rpc ListChatSessions(ListChatSessionsRequest) returns (ListChatSessionsResponse);
 
+    // UpdateChatSession updates mutable conversation metadata, including the
+    // durable provider/model selection.
+    rpc UpdateChatSession(UpdateChatSessionRequest) returns (UpdateChatSessionResponse);
+
     // PostMessage 发送一条用户消息，阻塞等待 agent 收敛到最终答复；
     // 返回 assistant 终答 + 中间 tool_call 轨迹 + token 用量。
     rpc PostMessage(PostMessageRequest) returns (PostMessageResponse);
@@ -49,6 +53,8 @@ message ChatSession {
     repeated uint64 scope_edge_ids = 5 [json_name = "scope_edge_ids"];
     google.protobuf.Timestamp created_at = 6 [json_name = "created_at"];
     google.protobuf.Timestamp updated_at = 7 [json_name = "updated_at"];
+    string provider = 8 [json_name = "provider"];
+    string model = 9 [json_name = "model"];
 }
 
 // ToolCall 一次 LLM 发起的工具调用（OpenAI tool_calls 的投影）。
@@ -94,6 +100,8 @@ message CreateChatSessionRequest {
     string title = 1 [json_name = "title"];
     // scope: 空 = org 内全部 edge。
     repeated uint64 scope_edge_ids = 2 [json_name = "scope_edge_ids"];
+    string provider = 3 [json_name = "provider"];
+    string model = 4 [json_name = "model"];
 }
 
 message CreateChatSessionResponse {
@@ -110,9 +118,22 @@ message ListChatSessionsResponse {
     int32 total = 2 [json_name = "total"];
 }
 
+message UpdateChatSessionRequest {
+    uint64 session_id = 1 [json_name = "session_id"];
+    optional string title = 2 [json_name = "title"];
+    optional string provider = 3 [json_name = "provider"];
+    optional string model = 4 [json_name = "model"];
+}
+
+message UpdateChatSessionResponse {
+    ChatSession session = 1 [json_name = "session"];
+}
+
 message PostMessageRequest {
     uint64 session_id = 1 [json_name = "session_id"];
     string text = 2 [json_name = "text"];
+    string provider = 3 [json_name = "provider"];
+    string model = 4 [json_name = "model"];
 }
 
 message PostMessageResponse {

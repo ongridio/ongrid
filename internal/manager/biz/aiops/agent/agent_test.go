@@ -92,7 +92,8 @@ func (r *fakeRepo) ListByParent(_ context.Context, parentID string) ([]*model.Se
 	}
 	return out, nil
 }
-func (r *fakeRepo) RenameSession(_ context.Context, _, _ string) error { return nil }
+func (r *fakeRepo) RenameSession(_ context.Context, _, _ string) error         { return nil }
+func (r *fakeRepo) UpdateSessionModel(_ context.Context, _, _, _ string) error { return nil }
 func (r *fakeRepo) CloseSession(_ context.Context, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

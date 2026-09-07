@@ -16,6 +16,7 @@ import {
   listModels,
   stopSession,
   streamMessage,
+  updateSessionModel,
   type ChatMessage,
   type LLMProvider,
   type Mention,
@@ -23,7 +24,6 @@ import {
 import { listApprovals, type Approval } from '@/api/approvals';
 import { invalidateChatSessions, useChatSessions } from '@/store/chatSessions';
 import { usePermissions } from '@/store/me';
-import { useModelSelection } from '@/store/modelSelection';
 import { useI18n } from '@/i18n/locale';
 import { buildConfigDraftConfirmMessage, configDraftApplyTool } from '@/lib/configDraftConfirmation';
 import {
@@ -79,14 +79,14 @@ export default function ChatThreadPage() {
   // "session-level state"). Empty providers → ChatInput hides the
   // selector entirely.
   const [providers, setProviders] = useState<LLMProvider[]>([]);
-  // Shared, persisted model selection (also used by Home). The auto-sent
-  // initial prompt and every later turn use storeModel; only when the user
-  // hasn't picked do we fall back to the live catalog default.
-  const storeModel = useModelSelection((s) => s.selected);
-  const sessionModel = useModelSelection((s) => s.sessionSelections[sessionId]);
-  const setSessionModel = useModelSelection((s) => s.setSessionSelected);
+  // The backend session is authoritative. Legacy sessions with no persisted
+  // route use the live server catalog default.
   const [catalogDefault, setCatalogDefault] = useState<ModelSelection | null>(null);
-  const selectedModel = sessionModel ?? storeModel ?? catalogDefault;
+  const persistedSessionModel = sessionMeta?.provider && sessionMeta?.model
+    ? { provider: sessionMeta.provider, model: sessionMeta.model }
+    : null;
+  const [pendingSessionModel, setPendingSessionModel] = useState<ModelSelection | null>(null);
+  const selectedModel = pendingSessionModel ?? persistedSessionModel ?? catalogDefault;
   // Web-search toggle is per-thread (not per-message): once a user
   // enables it for a topic, every follow-up turn until they disable it
   // also exposes the skill. Defaults ON because SearXNG (default provider)
@@ -111,14 +111,27 @@ export default function ChatThreadPage() {
     };
   }, []);
 
-  // Freeze the inherited Home/catalog selection into this session on first
-  // open. Later model changes only update this session, so switching threads
-  // restores each thread's own provider + model instead of the last global
-  // choice.
   useEffect(() => {
-    if (!sessionId || sessionModel || !selectedModel) return;
-    setSessionModel(sessionId, selectedModel);
-  }, [selectedModel, sessionId, sessionModel, setSessionModel]);
+    setPendingSessionModel(null);
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!pendingSessionModel || !persistedSessionModel) return;
+    if (pendingSessionModel.provider === persistedSessionModel.provider && pendingSessionModel.model === persistedSessionModel.model) {
+      setPendingSessionModel(null);
+    }
+  }, [pendingSessionModel, persistedSessionModel]);
+
+  async function handleSessionModelChange(selection: ModelSelection) {
+    setPendingSessionModel(selection);
+    try {
+      await updateSessionModel(sessionId, selection.provider, selection.model);
+      invalidateChatSessions();
+    } catch (err) {
+      setPendingSessionModel(null);
+      setError((err as Error).message || tr('保存会话模型失败', 'Failed to save session model'));
+    }
+  }
 
   // Initial load + idle refresh.
   // The session is shared with the IM bridge (Feishu / DingTalk), so
@@ -673,7 +686,7 @@ export default function ChatThreadPage() {
               placeholder={tr('继续聊…  Shift+Enter 换行', 'Continue the conversation… Shift+Enter for newline')}
               providers={providers}
               selectedModel={selectedModel}
-              onModelChange={(model) => setSessionModel(sessionId, model)}
+              onModelChange={(model) => void handleSessionModelChange(model)}
               webSearchEnabled={webSearchEnabled}
               onWebSearchToggle={setWebSearchEnabled}
             />

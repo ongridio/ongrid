@@ -232,11 +232,16 @@ export default function HomePage() {
       // Bind home-launched sessions to the virtual "default" persona —
       // shows the 默认 badge in sidebar/agents and uses the unrestricted
       // coordinator-equivalent toolBag on the backend.
-      const session = await createSession({ title, agent_id: 'default' });
+      const session = await createSession({
+        title,
+        agent_id: 'default',
+        provider: selectedModel?.provider,
+        model: selectedModel?.model,
+      });
       // Don't post here — ChatThread takes the initialPrompt and runs it
       // through the SSE streamMessage path so the user sees tool cards and
-      // the assistant reply incrementally. The picked model rides the shared
-      // store (useModelSelection), so the launched session inherits it.
+      // the assistant reply incrementally. The picked model is already stored
+      // on the new session, so every browser inherits the same route.
       navigate(`/chat/${session.id}`, { state: { initialPrompt: content } });
     } catch (err) {
       setError((err as Error).message || tr('创建会话失败', 'Failed to create session'));

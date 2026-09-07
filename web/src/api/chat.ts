@@ -45,6 +45,8 @@ export type ChatSession = {
   title: string;
   related_incident_id?: number | null;
   agent_id?: string | null;
+  provider?: string | null;
+  model?: string | null;
   created_at?: string;
   updated_at?: string;
   closed_at?: string | null;
@@ -82,6 +84,8 @@ export function createSession(input: {
   scope?: string[];
   related_incident_id?: number;
   agent_id?: string;
+  provider?: string;
+  model?: string;
 }) {
   return request<ChatSession>('POST', '/chat/sessions', input);
 }
@@ -92,6 +96,10 @@ export function renameSession(sessionId: string, title: string) {
     `/chat/sessions/${encodeURIComponent(sessionId)}`,
     { title },
   );
+}
+
+export function updateSessionModel(sessionId: string, provider: string, model: string) {
+  return request<void>('PATCH', `/chat/sessions/${encodeURIComponent(sessionId)}`, { provider, model });
 }
 
 // stopSession interrupts the session's in-flight turn server-side (the SPA

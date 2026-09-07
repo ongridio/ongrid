@@ -33,10 +33,11 @@ func (f *fakeRepo) ListSessions(context.Context, uint64, int, int, *uint64) ([]*
 func (f *fakeRepo) ListByParent(context.Context, string) ([]*model.Session, error) {
 	return nil, nil
 }
-func (f *fakeRepo) CloseSession(context.Context, string) error                { return nil }
-func (f *fakeRepo) RenameSession(context.Context, string, string) error      { return nil }
-func (f *fakeRepo) DeleteSession(context.Context, string) error               { return nil }
-func (f *fakeRepo) AppendMessage(context.Context, *model.Message) error       { return nil }
+func (f *fakeRepo) CloseSession(context.Context, string) error                       { return nil }
+func (f *fakeRepo) RenameSession(context.Context, string, string) error              { return nil }
+func (f *fakeRepo) UpdateSessionModel(context.Context, string, string, string) error { return nil }
+func (f *fakeRepo) DeleteSession(context.Context, string) error                      { return nil }
+func (f *fakeRepo) AppendMessage(context.Context, *model.Message) error              { return nil }
 func (f *fakeRepo) ListMessages(context.Context, string, int) ([]*model.Message, error) {
 	return nil, nil
 }
