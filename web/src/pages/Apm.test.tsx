@@ -187,14 +187,14 @@ describe('Application performance', () => {
             total: 72,
             page: 1,
             page_size: 25,
-            environments: ['production', 'staging'],
-            service_namespaces: ['trade'],
+            environments: ['', 'production', 'staging'],
+            service_namespaces: ['', 'trade'],
           },
         });
       }),
     );
     render(
-      <MemoryRouter initialEntries={[`/apm?${period}`]}>
+      <MemoryRouter initialEntries={[`/apm?${period}&environment=&service_namespace=`]}>
         <ApmPage />
       </MemoryRouter>,
     );
@@ -202,10 +202,14 @@ describe('Application performance', () => {
     expect(screen.getByText('服务 · 72')).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'staging' })).toBeInTheDocument();
     expect(screen.queryByText('估算样本请求数')).not.toBeInTheDocument();
+    expect(screen.queryByText('应用指标 · 独立于 Trace 采样')).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: '未设置' })).not.toBeInTheDocument();
+    expect(requested?.searchParams.has('environment')).toBe(false);
+    expect(requested?.searchParams.has('service_namespace')).toBe(false);
     fireEvent.change(screen.getByLabelText('环境'), {
-      target: { value: JSON.stringify('') },
+      target: { value: 'staging' },
     });
-    await waitFor(() => expect(requested?.searchParams.get('environment')).toBe(''));
+    await waitFor(() => expect(requested?.searchParams.get('environment')).toBe('staging'));
     fireEvent.change(screen.getByLabelText('时间范围'), {
       target: { value: '15m' },
     });
@@ -215,7 +219,9 @@ describe('Application performance', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '刷新' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: '刷新' }));
     await waitFor(() => expect(requested!.searchParams.get('end')).not.toBe(oldEnd));
-    expect(requested?.searchParams.get('environment')).toBe('');
+    expect(requested?.searchParams.get('environment')).toBe('staging');
+    fireEvent.change(screen.getByLabelText('环境'), { target: { value: '' } });
+    await waitFor(() => expect(requested?.searchParams.has('environment')).toBe(false));
   });
   it('lists both protocols once per service, sorts through headers and opens the selected protocol', async () => {
     let listURL: URL | undefined;

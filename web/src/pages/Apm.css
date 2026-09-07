@@ -1,0 +1,51 @@
+/* Keep native selection, keyboard navigation and the unsupported-browser fallback. */
+@supports (appearance: base-select) {
+  .apm-page select,
+  .apm-page select::picker(select) {
+    appearance: base-select;
+  }
+
+  .apm-page select {
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .apm-page select:focus-visible {
+    box-shadow: 0 0 0 2px rgb(var(--text-muted) / 0.4);
+  }
+
+  .apm-page select::picker-icon {
+    color: rgb(var(--text-faint));
+  }
+
+  .apm-page select::picker(select) {
+    margin-top: 4px;
+    padding: 4px;
+    border: 1px solid rgb(var(--border));
+    border-radius: 8px;
+    background: rgb(var(--card));
+    color: rgb(var(--text));
+    box-shadow: 0 4px 12px rgb(0 0 0 / 0.12);
+    max-height: 20rem;
+    max-width: min(24rem, calc(100vw - 2rem));
+    overflow: auto;
+  }
+
+  .apm-page select option {
+    min-height: 32px;
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    overflow-wrap: anywhere;
+  }
+
+  .apm-page select option:hover,
+  .apm-page select option:focus,
+  .apm-page select option:checked {
+    background: rgb(var(--text) / 0.06);
+  }
+
+  .apm-page select option::checkmark {
+    color: rgb(var(--text-muted));
+  }
+}

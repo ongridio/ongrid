@@ -29,6 +29,7 @@ import { Onboarding } from '@/components/apm/Onboarding';
 import { chartTooltipStyle, chartTooltipLabelStyle } from '@/lib/chartTheme';
 import { useI18n } from '@/i18n/locale';
 import { usePermissions } from '@/store/me';
+import './Apm.css';
 
 const input = 'h-9 rounded-md border border-zinc-800 bg-zinc-950 px-2 text-xs text-zinc-100';
 const periods = [
@@ -123,14 +124,19 @@ export default function ApmPage() {
     setParams(next);
   };
   useEffect(() => {
-    if (params.has('start') && params.has('end')) return;
     const next = new URLSearchParams(params);
-    const now = Date.now();
-    next.set('range', '1h');
-    next.set('start', new Date(now - 3600000).toISOString());
-    next.set('end', new Date(now).toISOString());
-    setParams(next, { replace: true });
-  }, [params, setParams]);
+    if (!params.has('start') || !params.has('end')) {
+      const now = Date.now();
+      next.set('range', '1h');
+      next.set('start', new Date(now - 3600000).toISOString());
+      next.set('end', new Date(now).toISOString());
+    }
+    if (!detail && tab === 'services') {
+      for (const key of ['environment', 'service_namespace'])
+        if (next.get(key) === '') next.delete(key);
+    }
+    if (next.toString() !== params.toString()) setParams(next, { replace: true });
+  }, [params, setParams, detail, tab]);
   useEffect(() => {
     const p = new URLSearchParams(query);
     setLoading(false);
@@ -327,7 +333,7 @@ export default function ApmPage() {
     );
   };
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+    <div className="apm-page flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <PageHeader
         title={
           detail ? (
@@ -354,6 +360,16 @@ export default function ApmPage() {
         className="!py-3 [&>div:first-child]:flex-wrap [&>div:first-child>div:last-child]:shrink [&_h1]:break-all"
         actions={
           <>
+            <span role="status" className="text-xs text-zinc-500">
+              {loading
+                ? tr('正在更新…', 'Updating…')
+                : current?.updated
+                  ? tr(
+                      `更新于 ${new Date(current.updated).toLocaleTimeString()}`,
+                      `Updated ${new Date(current.updated).toLocaleTimeString()}`,
+                    )
+                  : ''}
+            </span>
             <div className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2">
               <Clock size={13} className="text-zinc-500" />
               <select
@@ -403,26 +419,22 @@ export default function ApmPage() {
                           : tr('业务命名空间', 'Service namespace')
                       }
                       className={`${input} max-w-52`}
-                      value={params.has(key) ? JSON.stringify(params.get(key)) : 'all'}
-                      onChange={(e) =>
-                        set(
-                          key,
-                          e.target.value === 'all' ? null : (JSON.parse(e.target.value) as string),
-                        )
-                      }
+                      value={params.get(key) || ''}
+                      onChange={(e) => set(key, e.target.value || null)}
                     >
-                      <option value="all">{label}</option>
+                      <option value="">{label}</option>
                       {[
                         ...new Set([
-                          '',
                           ...(options || []),
                           ...(params.has(key) ? [params.get(key)!] : []),
                         ]),
-                      ].map((value) => (
-                        <option key={value} value={JSON.stringify(value)}>
-                          {value || unset}
-                        </option>
-                      ))}
+                      ]
+                        .filter(Boolean)
+                        .map((value) => (
+                          <option key={value} value={value}>
+                            {value}
+                          </option>
+                        ))}
                     </select>
                   ))}
 
@@ -486,37 +498,6 @@ export default function ApmPage() {
         </nav>
       )}
       <main ref={main} className="flex-1 space-y-3 overflow-auto px-6 py-4">
-        <div className="flex min-h-6 flex-wrap items-center justify-between gap-2 text-xs text-zinc-500">
-          <details>
-            <summary className="w-fit cursor-pointer">
-              {traceMetrics
-                ? tr('Trace 样本 · 采样覆盖率未知', 'Trace samples · Sampling coverage unknown')
-                : tr(
-                    '应用指标 · 独立于 Trace 采样',
-                    'Application metrics · Independent of trace sampling',
-                  )}
-              {params.get('metric_format') === 'legacy' && !traceMetrics
-                ? tr(' · 旧版格式', ' · Legacy format')
-                : ''}
-            </summary>
-            <p className="mt-2 max-w-3xl leading-relaxed">
-              {tr(
-                '数值按所选时段汇总，趋势使用至少 5 分钟滚动窗口。链路和依赖依靠 Trace 样本；未观测到样本不等于应用没有请求。',
-                'Values summarize the selected range; trends use rolling windows of at least 5 minutes. Traces and dependencies rely on trace samples; no samples does not mean no application requests.',
-              )}
-            </p>
-          </details>
-          <span role="status">
-            {loading
-              ? tr('正在更新…', 'Updating…')
-              : current?.updated
-                ? tr(
-                    `更新于 ${new Date(current.updated).toLocaleTimeString()}`,
-                    `Updated ${new Date(current.updated).toLocaleTimeString()}`,
-                  )
-                : ''}
-          </span>
-        </div>
         {detail && tab === 'overview' && (
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
