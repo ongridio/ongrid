@@ -53,3 +53,20 @@ func TestRenderRuntimeRejectsUnsafeURL(t *testing.T) {
 		t.Fatalf("err=%v, want credential rejection", err)
 	}
 }
+
+func TestProfileServiceIdentityAttributes(t *testing.T) {
+	cfg := plugins.PluginConfig{EdgeID: 42, Endpoint: "https://manager.example/v1development/profiles", Spec: map[string]any{"runtime_target": map[string]any{"url": "http://127.0.0.1:6060/debug/pprof/heap", "profile_type": "heap", "service_name": "orders", "environment": "production", "service_namespace": "trade", "instance_id": "pod-1"}}}
+	body, err := renderRuntime(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"service.namespace", "trade", "deployment.environment.name", "production", "service.instance.id", "pod-1"} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("missing %s: %s", want, body)
+		}
+	}
+	cfg.Spec["runtime_target"].(map[string]any)["instance_id"] = "bad\nvalue"
+	if _, err := renderRuntime(cfg); err == nil {
+		t.Fatal("invalid identity accepted")
+	}
+}

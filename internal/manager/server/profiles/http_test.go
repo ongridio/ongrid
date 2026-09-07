@@ -101,3 +101,27 @@ func TestDownloadRejectsOversizedBackendResponse(t *testing.T) {
 		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
 	}
 }
+
+func TestProfileAbsoluteTimeAndInstanceScope(t *testing.T) {
+	handler := NewHandler("http://pyroscope.test")
+	handler.client.Transport = roundTripper(func(r *http.Request) (*http.Response, error) {
+		q := r.URL.Query()
+		if q.Get("from") != "1788739200" || q.Get("until") != "1788742800" || !strings.Contains(q.Get("query"), `deployment_environment_name="production",service_namespace="trade",service_instance_id="pod-1"`) {
+			t.Fatalf("incorrect profile query: %s", r.URL)
+		}
+		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+	})
+	router := chi.NewRouter()
+	handler.Register(router)
+	base := "/v1/profiles/flamegraph?device_id=42&service=orders&kind=heap&environment=production&service_namespace=trade&instance_id=pod-1"
+	for _, tc := range []struct {
+		query  string
+		status int
+	}{{"&start=2026-09-07T00:00:00Z&end=2026-09-07T01:00:00Z", 200}, {"&start=2026-09-07T00:00:00Z", 400}, {"&start=2026-09-07T00:00:00Z&end=2026-10-07T01:00:00Z", 400}} {
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, base+tc.query, nil))
+		if w.Code != tc.status {
+			t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+		}
+	}
+}

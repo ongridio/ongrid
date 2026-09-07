@@ -1,0 +1,23 @@
+syntax = "proto3";
+package ongrid.manager.profiles.v1;
+option go_package = "github.com/ongridio/ongrid/api/gen/manager/profiles/v1;profilesv1";
+// Existing /profiles/flamegraph and /profiles/download GET parameters.
+message ProfileQuery {
+  uint64 device_id = 1;
+  string service = 2;
+  string kind = 3;
+  string range = 4;
+  // Optional paired RFC3339 timestamps override range; at most seven days.
+  string start = 5;
+  string end = 6;
+  optional string environment = 7;
+  optional string service_namespace = 8;
+  optional string instance_id = 9;
+}
+// Additive keys accepted by the existing profiles plugin runtime_target spec.
+message RuntimeTargetIdentity {
+  string service_name = 1;
+  string service_namespace = 2;
+  string environment = 3;
+  string instance_id = 4;
+}

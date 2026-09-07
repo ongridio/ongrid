@@ -1,0 +1,41 @@
+# Isolated acceptance stack. Uses the same Tempo / Prometheus versions as install.
+services:
+  prometheus:
+    image: prom/prometheus:v2.54.0
+    command: [--config.file=/etc/prometheus/prometheus.yml, --web.enable-remote-write-receiver, --web.route-prefix=/prometheus]
+    ports: ["127.0.0.1:19090:9090"]
+    volumes: ["./prometheus.yaml:/etc/prometheus/prometheus.yml:ro"]
+  tempo:
+    image: grafana/tempo:2.10.0
+    user: "10001:10001"
+    tmpfs: ["/var/tempo:mode=1777"]
+    command: ["-config.file=/etc/tempo.yaml", "-config.expand-env=true"]
+    ports: ["127.0.0.1:13200:3200", "127.0.0.1:14318:4318"]
+    volumes: ["../../deploy/install/tempo-config.yaml:/etc/tempo.yaml:ro"]
+  loki:
+    image: grafana/loki:3.4.0
+    profiles: [logs]
+    user: "10001:10001"
+    tmpfs: ["/loki:mode=1777"]
+    command: ["-config.file=/etc/loki.yaml", "-config.expand-env=true"]
+    ports: ["127.0.0.1:13100:3100"]
+    volumes: ["../../deploy/install/loki-config.yaml:/etc/loki.yaml:ro"]
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.16.3
+    profiles: [logs]
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports: ["127.0.0.1:19200:9200"]
+  pyroscope:
+    image: grafana/pyroscope:1.21.1
+    profiles: [profiles]
+    command: ["-config.file=/etc/pyroscope.yaml"]
+    ports: ["127.0.0.1:14040:4040"]
+    volumes: ["../../deploy/install/pyroscope-config.yaml:/etc/pyroscope.yaml:ro"]
+  profiles-gateway:
+    image: otel/opentelemetry-collector-contrib:0.157.0
+    profiles: [profiles]
+    command: ["--config=/etc/profiles.yaml", "--feature-gates=service.profilesSupport"]
+    volumes: ["../../deploy/install/profiles-gateway.yaml:/etc/profiles.yaml:ro"]

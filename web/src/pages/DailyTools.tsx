@@ -1,3 +1,5 @@
+import { useSearchParams } from 'react-router-dom';
+import { absoluteWindow } from '@/lib/telemetryContext';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
@@ -147,6 +149,10 @@ type CaptureForm = {
 };
 type ProfileKind = 'cpu' | 'heap' | 'allocs' | 'goroutine' | 'mutex' | 'block';
 type ProfileForm = {
+  service_name?: string;
+  service_namespace?: string;
+  environment?: string;
+  instance_id?: string;
   kind: ProfileKind;
   url: string;
   duration_seconds: string;
@@ -188,12 +194,14 @@ type StoredRunHistory = {
 
 export default function DailyToolsPage() {
   const { tr } = useI18n();
+  const [searchParams] = useSearchParams();
+  const linkedDevice = searchParams.get('device_id');
   const [edges, setEdges] = useState<Edge[]>([]);
   const [edgesLoading, setEdgesLoading] = useState(true);
   const [edgesErr, setEdgesErr] = useState('');
   const [selectedEdgeIDs, setSelectedEdgeIDs] = useState<number[]>([]);
   const [edgeQuery, setEdgeQuery] = useState('');
-  const [active, setActive] = useState<ToolKey>('ping');
+  const [active, setActive] = useState<ToolKey>(searchParams.get('tool') === 'profile' ? 'profile' : 'ping');
   const [netnsOptions, setNetnsOptions] = useState<string[]>([]);
   const [netnsLoading, setNetnsLoading] = useState(false);
   const [netnsErr, setNetnsErr] = useState('');
@@ -221,7 +229,8 @@ export default function DailyToolsPage() {
     title: '',
   });
   const [profile, setProfile] = useState<ProfileForm>({
-    kind: 'heap', url: 'http://127.0.0.1:16060/debug/pprof/heap', duration_seconds: '30',
+    kind: 'heap', url: searchParams.has('service_name') ? '' : 'http://127.0.0.1:16060/debug/pprof/heap', duration_seconds: '30',
+    service_name: searchParams.get('service_name') || '', service_namespace: searchParams.get('service_namespace') ?? undefined, environment: searchParams.get('environment') ?? undefined, instance_id: searchParams.get('instance_id') || undefined,
   });
   const [profilePlugin, setProfilePlugin] = useState<PluginRow | null>(null);
   const [profileSaving, setProfileSaving] = useState(false);
@@ -237,6 +246,7 @@ export default function DailyToolsPage() {
       setEdges(items);
       setEdgesErr('');
       setSelectedEdgeIDs((current) => {
+        if (current.length === 0 && linkedDevice) { const edge = items.find(e => String(e.device_id) === linkedDevice); if (edge) return [edge.id]; }
         return current.filter((id) => items.some((edge) => edge.id === id));
       });
     } catch (err) {
@@ -244,7 +254,7 @@ export default function DailyToolsPage() {
     } finally {
       setEdgesLoading(false);
     }
-  }, []);
+  }, [linkedDevice]);
 
   useEffect(() => {
     void loadEdges();
@@ -371,12 +381,12 @@ export default function DailyToolsPage() {
       if (!alive) return;
       const row = (plugins.items ?? []).find((item) => item.plugin_name === 'profiles') ?? null;
       setProfilePlugin(row);
-      setProfile((current) => row?.spec?.mode ? profileFormFromSpec(row.spec, current) : current);
+      setProfile((current) => row?.spec?.mode && !searchParams.has('service_name') ? profileFormFromSpec(row.spec, current) : current);
     }).catch((err) => {
       if (alive) setProfileErr(err instanceof ApiError ? err.message : (err as Error).message);
     });
     return () => { alive = false; };
-  }, [active, selectedEdges]);
+  }, [active, selectedEdges, searchParams]);
 
   function patchRunResult(runID: string, edgeID: number, patch: Partial<ProbeResult>) {
     setRuns((prev) => prev.map((run) => run.id === runID ? {
@@ -1137,7 +1147,10 @@ function ProfilingPanel({
   const viewerRetryTimersRef = useRef<number[]>([]);
   const deviceID = edge?.device_id ?? 0;
   const expired = profileSessionExpired(plugin, nowMs);
-  const serviceName = profileServiceName(value.url);
+  const serviceName = value.service_name || profileServiceName(value.url);
+  const [linkedParams] = useSearchParams();
+  const [historical, setHistorical] = useState(false);
+  const linkedTime = useMemo(() => absoluteWindow(linkedParams), [linkedParams]);
   const completionKey = plugin?.enabled && expired
     ? `${stringValue(plugin.spec?.expires_at, '')}:${deviceID}:${value.kind}:${serviceName}`
     : '';
@@ -1160,7 +1173,7 @@ function ProfilingPanel({
       setViewerError(tr('该 Edge 未关联 device_id，无法查询分析结果。', 'This Edge has no linked device_id, so profile results cannot be queried.'));
       return undefined;
     }
-    const service = profileServiceName(value.url);
+    const service = value.service_name || profileServiceName(value.url);
     if (!service) {
       setViewerProfile(null);
       setViewerError(tr('请填写有效的采集 URL。', 'Enter a valid profile URL.'));
@@ -1169,6 +1182,8 @@ function ProfilingPanel({
     const controller = new AbortController();
     let active = true;
     const params = new URLSearchParams({ device_id: String(deviceID), service, kind: value.kind, range: '15m' });
+    for (const key of ['environment', 'service_namespace', 'instance_id'] as const) { if (value[key] != null) params.set(key, value[key]!); }
+    if (historical && linkedTime) { params.set('start', linkedTime.start); params.set('end', linkedTime.end); }
     setViewerLoading(true);
     setViewerError('');
     void request<FlamebearerProfile>('GET', `/profiles/flamegraph?${params.toString()}`, undefined, { signal: controller.signal })
@@ -1191,14 +1206,16 @@ function ProfilingPanel({
       active = false;
       controller.abort();
     };
-  }, [deviceID, tr, value.kind, value.url, viewerOpen, viewerRefresh]);
+  }, [deviceID, tr, value, historical, linkedTime, viewerOpen, viewerRefresh]);
   const downloadProfile = async () => {
-    const service = profileServiceName(value.url);
+    const service = value.service_name || profileServiceName(value.url);
     if (!deviceID || !service || downloading) return;
     setDownloading(true);
     setViewerError('');
     try {
       const params = new URLSearchParams({ device_id: String(deviceID), service, kind: value.kind, range: '15m' });
+      for (const key of ['environment', 'service_namespace', 'instance_id'] as const) { if (value[key] != null) params.set(key, value[key]!); }
+      if (historical && linkedTime) { params.set('start', linkedTime.start); params.set('end', linkedTime.end); }
       const token = getToken();
       const response = await fetch(`/api/v1/profiles/download?${params.toString()}`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
       if (!response.ok) throw new Error((await response.text()).trim() || `HTTP ${response.status}`);
@@ -1241,6 +1258,8 @@ function ProfilingPanel({
         : '';
   return (
     <Card className={cn(viewerOpen && 'flex h-full min-h-0 flex-col')}>
+      {value.service_name && <p className="mb-3 text-xs text-zinc-500">{tr('关联服务：', 'Linked service: ')}{value.service_name} · {value.environment || '∅'} / {value.service_namespace || '∅'} · {value.instance_id || '∅'}</p>}
+      {linkedTime && <label className="mb-3 flex gap-2 text-xs"><input type="checkbox" checked={historical} onChange={e => { setHistorical(e.target.checked); setViewerOpen(true); }} />{tr('查询跳转时的历史区间（新采集不在该区间）', 'Query the linked historical window (new captures are outside it)')}</label>}
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-zinc-800/60 pb-4">
         <div className="flex min-w-0 items-start gap-3">
           <div className="mt-0.5 rounded-lg border border-indigo-500/20 bg-indigo-500/10 p-2 text-indigo-300"><Flame size={18} /></div>
@@ -1288,7 +1307,7 @@ function ProfilingPanel({
             className="w-full"
             disabled={activeSession}
           />
-          <p className="mt-2 text-xs leading-5 text-zinc-500">{tr('默认采集当前 Edge 的 ongrid-edge；如需分析其他应用，请填写该应用开放的 pprof URL。', 'By default this profiles ongrid-edge on the selected Edge. To analyze another application, enter its exposed pprof URL.')}</p>
+          <p className="mt-2 text-xs leading-5 text-zinc-500">{value.service_name ? tr('填写该实例真实的 pprof URL；请确认当前 Edge 可以访问该端点。', 'Enter the actual pprof URL for this instance and confirm it is reachable from the selected Edge.') : tr('默认采集当前 Edge 的 ongrid-edge；如需分析其他应用，请填写该应用开放的 pprof URL。', 'By default this profiles ongrid-edge on the selected Edge. To analyze another application, enter its exposed pprof URL.')}</p>
         </div>
         <label className="block space-y-1">
           <span className="text-[11px] text-zinc-400">{tr('采样时长', 'Sampling duration')}</span>
@@ -2100,7 +2119,8 @@ function profileSpec(form: ProfileForm): Record<string, unknown> {
     runtime_target: {
       url: form.url.trim(),
       profile_type: form.kind,
-      service_name: profileServiceName(form.url),
+      service_name: form.service_name || profileServiceName(form.url),
+      service_namespace: form.service_namespace, environment: form.environment, instance_id: form.instance_id,
       collection_interval_seconds: form.kind === 'cpu' ? duration_seconds : 10,
       tls_insecure_skip_verify: false,
     },
@@ -2122,6 +2142,10 @@ function profileFormFromSpec(spec: Record<string, unknown>, current: ProfileForm
     ...current,
     kind,
     url: rawURL || current.url,
+    service_name: typeof target.service_name === 'string' ? target.service_name : undefined,
+    service_namespace: typeof target.service_namespace === 'string' ? target.service_namespace : undefined,
+    environment: typeof target.environment === 'string' ? target.environment : undefined,
+    instance_id: typeof target.instance_id === 'string' ? target.instance_id : undefined,
     duration_seconds: stringValue(spec.duration_seconds, current.duration_seconds),
   };
 }

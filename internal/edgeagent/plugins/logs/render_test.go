@@ -63,7 +63,7 @@ func TestRenderedConfigsAcceptedByCollector(t *testing.T) {
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			output, err := exec.CommandContext(ctx, binary, "validate", "--config="+configPath).CombinedOutput()
+			output, err := exec.CommandContext(ctx, binary, "validate", "--config="+configPath, "--feature-gates=transform.flatten.logs").CombinedOutput()
 			if err != nil {
 				t.Fatalf("otelcol-contrib rejected config: %v\n%s", err, output)
 			}

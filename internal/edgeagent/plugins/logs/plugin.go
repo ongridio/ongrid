@@ -32,9 +32,9 @@ func New(binDir, workDir string, log *slog.Logger) plugins.Plugin {
 		WorkDir:         filepath.Join(workDir, Name),
 		ConfigFile:      filepath.Join(workDir, Name, "otelcol.yaml"),
 		ConfigRender:    render,
-		ConfigValidator: plugins.OTelConfigValidator(binary),
+		ConfigValidator: plugins.OTelConfigValidator(binary, "--feature-gates=transform.flatten.logs"),
 		Args: func(_ plugins.PluginConfig, configFile string) []string {
-			return []string{"--config=" + configFile}
+			return []string{"--config=" + configFile, "--feature-gates=transform.flatten.logs"}
 		},
 		Log: log,
 	})

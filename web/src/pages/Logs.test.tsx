@@ -649,3 +649,14 @@ describe('LogsPage', () => {
     expect(draggedDuration).toBeLessThan(60 * 60_000);
   });
 });
+
+it('APM 关联保留绝对时间、完整身份和精确 Trace ID', async () => {
+  let body: Record<string, unknown> | undefined;
+  server.use(http.post('/api/v1/logs/search', async ({ request }) => { body = await request.json() as Record<string, unknown>; return HttpResponse.json({ data: { records: [], has_more: false, backends: ['loki'], took_ms: 1 } }); }));
+  render(<MemoryRouter initialEntries={['/logs?start=2026-09-07T00:00:00Z&end=2026-09-07T01:00:00Z&service_name=orders&service_namespace=trade&environment=&trace_id=1234567890abcdef1234567890abcdef']}><LogsPage /></MemoryRouter>);
+  await waitFor(() => expect(body).toBeDefined());
+  expect(body?.start).toBe('2026-09-07T00:00:00.000Z');
+  expect(body?.end).toBe('2026-09-07T01:00:00.000Z');
+  expect(body?.filters).toContainEqual({ field: 'environment', operator: 'eq', values: [''] });
+  expect(body?.filters).toContainEqual({ field: 'trace_id', operator: 'eq', values: ['1234567890abcdef1234567890abcdef'] });
+});

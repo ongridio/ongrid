@@ -1,0 +1,320 @@
+package apm
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/ongridio/ongrid/internal/pkg/errs"
+	"github.com/ongridio/ongrid/internal/pkg/logquery"
+	"github.com/ongridio/ongrid/internal/pkg/promquery"
+	"github.com/ongridio/ongrid/internal/pkg/tracequery"
+)
+
+type PromQuerier interface {
+	Query(context.Context, string, time.Time) (*promquery.InstantResult, error)
+	QueryRange(context.Context, string, time.Time, time.Time, time.Duration) (*promquery.InstantResult, error)
+}
+
+type TraceQuerier interface {
+	SearchTraces(context.Context, tracequery.SearchOptions) (*tracequery.SearchResult, error)
+	GetTrace(context.Context, string) (*tracequery.TraceResult, error)
+}
+
+type LogCounter interface {
+	Count(context.Context, logquery.SearchRequest) (uint64, error)
+}
+
+type Service struct {
+	prom   PromQuerier
+	traces TraceQuerier
+	logs   LogCounter
+}
+
+func New(prom PromQuerier, traces TraceQuerier, logs LogCounter) *Service {
+	return &Service{prom: prom, traces: traces, logs: logs}
+}
+
+func (s *Service) List(ctx context.Context, q Query, operations bool) (*ListResult, error) {
+	if err := q.Validate(operations); err != nil {
+		return nil, err
+	}
+	rows, err := s.summaries(ctx, q, operations)
+	if err != nil {
+		return nil, err
+	}
+	envs, namespaces := map[string]bool{}, map[string]bool{}
+	filtered := make([]Summary, 0, len(rows))
+	for _, row := range rows {
+		envs[row.Identity.Environment], namespaces[row.Identity.ServiceNamespace] = true, true
+		name := row.Identity.ServiceName
+		if operations {
+			name = row.Operation
+		}
+		if strings.Contains(strings.ToLower(name), strings.ToLower(q.Search)) {
+			filtered = append(filtered, row)
+		}
+	}
+	return &ListResult{
+		Items: pageRows(sortedSummaries(filtered, q), q), Total: len(filtered), Page: q.Page, PageSize: q.PageSize,
+		Metadata: metadata(q), Environments: sortedKeys(envs), ServiceNamespaces: sortedKeys(namespaces),
+	}, nil
+}
+
+func sortedKeys(values map[string]bool) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func (s *Service) summaries(ctx context.Context, q Query, operations bool) ([]Summary, error) {
+	group := identityLabels
+	if operations {
+		group += ",span_name"
+	}
+	window := q.End.Sub(q.Start)
+	exprs := metricExpressions(q, window, group)
+	// Retain identities with a single sample even when rate() cannot be
+	// calculated yet. They are "insufficient_samples", never a healthy zero.
+	exprs["present"] = fmt.Sprintf("sum by (%s) (count_over_time(traces_spanmetrics_calls_total%s[%s]))", group, q.selector(), promDuration(window))
+	series, err := s.instant(ctx, combineExpressions(exprs), q.End)
+	if err != nil {
+		return nil, err
+	}
+	type key struct {
+		Identity
+		Operation string
+	}
+	rows := map[key]*Summary{}
+	for _, item := range series {
+		id := identityFromLabels(item.Metric)
+		k := key{id, item.Metric["span_name"]}
+		if rows[k] == nil {
+			rows[k] = &Summary{Identity: id, Operation: k.Operation}
+		}
+		value, err := sampleValue(item.Value)
+		if err != nil {
+			return nil, err
+		}
+		rows[k].set(item.Metric["apm_stat"], value)
+	}
+	if len(rows) > 5000 {
+		return nil, fmt.Errorf("%w: narrow the APM service or operation scope", errs.ErrBudgetExceeded)
+	}
+	out := make([]Summary, 0, len(rows))
+	for _, row := range rows {
+		row.finish(window)
+		out = append(out, *row)
+	}
+	return out, nil
+}
+
+type Point struct {
+	Timestamp float64  `json:"timestamp"`
+	RPS       *float64 `json:"rps"`
+	ErrorRate *float64 `json:"error_rate"`
+	P50Ms     *float64 `json:"p50_ms"`
+	P95Ms     *float64 `json:"p95_ms"`
+	P99Ms     *float64 `json:"p99_ms"`
+}
+
+type Overview struct {
+	Summary  Summary  `json:"summary"`
+	Points   []Point  `json:"points"`
+	Metadata Metadata `json:"metadata"`
+}
+
+func (s *Service) Overview(ctx context.Context, q Query) (*Overview, error) {
+	if err := q.Validate(true); err != nil {
+		return nil, err
+	}
+	rows, err := s.summaries(ctx, q, false)
+	if err != nil {
+		return nil, err
+	}
+	out := &Overview{Summary: Summary{Identity: q.Identity(), DataStatus: "no_data"}, Points: []Point{}, Metadata: metadata(q)}
+	if len(rows) == 0 {
+		return out, nil
+	}
+	out.Summary = rows[0]
+	step := max(30*time.Second, time.Duration((q.End.Sub(q.Start).Seconds()+239)/240)*time.Second)
+	window := max(5*time.Minute, 4*step)
+	result, err := s.prom.QueryRange(ctx, combineExpressions(metricExpressions(q, window, identityLabels)), q.Start, q.End, step)
+	if err != nil {
+		return nil, fmt.Errorf("apm: query trend: %w", err)
+	}
+	series, err := decodeSeries(result, "matrix")
+	if err != nil {
+		return nil, err
+	}
+	points := map[float64]*Point{}
+	for _, item := range series {
+		if len(item.Values) > 1000 {
+			return nil, fmt.Errorf("apm: trend exceeded sample limit")
+		}
+		for _, pair := range item.Values {
+			value, err := sampleValue(pair)
+			if err != nil {
+				return nil, err
+			}
+			var ts float64
+			if err := json.Unmarshal(pair[0], &ts); err != nil {
+				return nil, fmt.Errorf("apm: decode sample time: %w", err)
+			}
+			if points[ts] == nil {
+				points[ts] = &Point{Timestamp: ts}
+			}
+			p := points[ts]
+			switch item.Metric["apm_stat"] {
+			case "rps":
+				p.RPS = value
+			case "error_rate":
+				p.ErrorRate = value
+			case "p50_ms":
+				p.P50Ms = value
+			case "p95_ms":
+				p.P95Ms = value
+			case "p99_ms":
+				p.P99Ms = value
+			}
+		}
+	}
+	for _, p := range points {
+		if p.RPS == nil || *p.RPS == 0 {
+			p.ErrorRate, p.P50Ms, p.P95Ms, p.P99Ms = nil, nil, nil, nil
+		}
+		out.Points = append(out.Points, *p)
+	}
+	sort.Slice(out.Points, func(i, j int) bool { return out.Points[i].Timestamp < out.Points[j].Timestamp })
+	return out, nil
+}
+
+func (s *Service) instant(ctx context.Context, expr string, at time.Time) ([]promSeries, error) {
+	if s.prom == nil {
+		return nil, fmt.Errorf("%w: prometheus disabled", errs.ErrNotWiredYet)
+	}
+	result, err := s.prom.Query(ctx, expr, at)
+	if err != nil {
+		return nil, fmt.Errorf("apm: query metrics: %w", err)
+	}
+	return decodeSeries(result, "vector")
+}
+
+type Dependency struct {
+	Client         Identity `json:"client"`
+	Server         Identity `json:"server"`
+	ConnectionType string   `json:"connection_type"`
+	RPS            *float64 `json:"rps"`
+	ErrorRate      *float64 `json:"error_rate"`
+	P95Ms          *float64 `json:"p95_ms"`
+}
+
+type Dependencies struct {
+	Items     []Dependency `json:"items"`
+	Metadata  Metadata     `json:"metadata"`
+	Truncated bool         `json:"truncated"`
+}
+
+func (s *Service) Dependencies(ctx context.Context, q Query) (*Dependencies, error) {
+	if err := q.Validate(true); err != nil {
+		return nil, err
+	}
+	group := "client,server,client_service_namespace,server_service_namespace,client_deployment_environment_name,server_deployment_environment_name,connection_type"
+	rate := func(metric string, histogram bool) string {
+		parts := []string{}
+		for _, side := range []string{"client", "server"} {
+			selector := fmt.Sprintf(`{%s=%q,%s_service_namespace=%q,%s_deployment_environment_name=%q}`, side, q.ServiceName, side, *q.ServiceNamespace, side, *q.Environment)
+			labels := group
+			if histogram {
+				labels += ",le"
+			}
+			parts = append(parts, fmt.Sprintf("sum by (%s) (rate(%s%s[%s]))", labels, metric, selector, promDuration(q.End.Sub(q.Start))))
+		}
+		// Self-edges matching both sides are deduplicated by PromQL's or.
+		return "(" + strings.Join(parts, " or ") + ")"
+	}
+	calls := rate("traces_service_graph_request_total", false)
+	errors := rate("traces_service_graph_request_failed_total", false)
+	expr := combineExpressions(map[string]string{
+		"rps":        calls,
+		"error_rate": fmt.Sprintf("100 * ((%s or on (%s) (0 * %s)) / (%s > 0))", errors, group, calls, calls),
+		"p95_ms":     "1000 * histogram_quantile(0.95, " + rate("traces_service_graph_request_client_seconds_bucket", true) + ")",
+	})
+	series, err := s.instant(ctx, expr, q.End)
+	if err != nil {
+		return nil, err
+	}
+	type key struct {
+		client, server Identity
+		kind           string
+	}
+	rows := map[key]*Dependency{}
+	for _, item := range series {
+		l := item.Metric
+		k := key{Identity{l["client"], l["client_service_namespace"], l["client_deployment_environment_name"]}, Identity{l["server"], l["server_service_namespace"], l["server_deployment_environment_name"]}, l["connection_type"]}
+		if rows[k] == nil {
+			rows[k] = &Dependency{Client: k.client, Server: k.server, ConnectionType: k.kind}
+		}
+		value, err := sampleValue(item.Value)
+		if err != nil {
+			return nil, err
+		}
+		switch l["apm_stat"] {
+		case "rps":
+			rows[k].RPS = value
+		case "error_rate":
+			rows[k].ErrorRate = value
+		case "p95_ms":
+			rows[k].P95Ms = value
+		}
+	}
+	out := &Dependencies{Items: []Dependency{}, Metadata: metadata(q), Truncated: len(rows) > 200}
+	for _, row := range rows {
+		out.Items = append(out.Items, *row)
+	}
+	sort.Slice(out.Items, func(i, j int) bool {
+		a, b := out.Items[i], out.Items[j]
+		if a.RPS != nil && b.RPS != nil && *a.RPS != *b.RPS {
+			return *a.RPS > *b.RPS
+		}
+		return fmt.Sprint(a.Client, a.Server, a.ConnectionType) < fmt.Sprint(b.Client, b.Server, b.ConnectionType)
+	})
+	out.Items = out.Items[:min(len(out.Items), 200)]
+	return out, nil
+}
+
+type AlertTemplate struct {
+	Expr        string `json:"expr"`
+	Metric      string `json:"metric"`
+	RunbookPath string `json:"runbook_path"`
+}
+
+func BuildAlertTemplate(q Query, metric string, threshold, minRequests float64, forSeconds int) (*AlertTemplate, error) {
+	if err := q.Validate(true); err != nil {
+		return nil, err
+	}
+	if (metric != "error_rate" && metric != "p95_ms") || !(threshold > 0 && threshold <= 3_600_000) || !(minRequests >= 1 && minRequests <= 1e9) || forSeconds < 0 || forSeconds > 1800 || forSeconds%30 != 0 {
+		return nil, fmt.Errorf("%w: invalid APM alert metric, threshold, minimum requests or duration", errs.ErrInvalid)
+	}
+	if metric == "error_rate" && threshold > 100 {
+		return nil, fmt.Errorf("%w: error rate must not exceed 100", errs.ErrInvalid)
+	}
+	window := 5 * time.Minute
+	exprs := metricExpressions(q, window, identityLabels)
+	predicate := fmt.Sprintf("(%s > %s) and on (%s) ((%s * 300) >= %s)", exprs[metric], strconv.FormatFloat(threshold, 'f', -1, 64), identityLabels, exprs["rps"], strconv.FormatFloat(minRequests, 'f', -1, 64))
+	if forSeconds > 0 {
+		// Count the predicate at each 30s evaluation, so a missing/healthy
+		// evaluation resets the dwell window instead of min_over_time
+		// silently ignoring absent (false) samples. Count a constant subquery
+		// for coverage: Prometheus versions differ in left-boundary inclusion.
+		predicate = fmt.Sprintf("(%s) and on (%s) (count_over_time((%s)[%ds:30s]) == scalar(count_over_time((vector(1))[%ds:30s])))", predicate, identityLabels, predicate, forSeconds, forSeconds)
+	}
+	return &AlertTemplate{Expr: predicate, Metric: metric, RunbookPath: "docs/runbooks/apm-service-performance.md"}, nil
+}

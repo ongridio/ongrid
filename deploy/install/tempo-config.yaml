@@ -46,8 +46,14 @@ metrics_generator:
         - service.name
         - span.kind
         - status.code
+        - service.namespace
+        - deployment.environment.name
     service_graphs:
       max_items: 10000
+      enable_client_server_prefix: true
+      dimensions:
+        - service.namespace
+        - deployment.environment.name
 
 storage:
   trace:

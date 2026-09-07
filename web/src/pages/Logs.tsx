@@ -46,6 +46,7 @@ import {
   type LogScope,
   type LogSearchRequest,
 } from '@/api/logs';
+import { absoluteWindow, correlationFilters, logTraceLink, localDateTime } from '@/lib/telemetryContext';
 import { ApiError } from '@/api/client';
 import { listEdges, type Edge, type EdgeRole } from '@/api/edges';
 import { listNodes, type TopologyNode } from '@/api/topology';
@@ -286,9 +287,11 @@ function topologyNodeLabel(node: TopologyNode): string {
 
 export default function LogsPage() {
   const { tr } = useI18n();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const requestedRange = searchParams.get('range') || '';
-  const initialRange = RANGE_PRESETS.some((item) => item.value === requestedRange && item.value !== 'custom')
+  const linkedWindow = absoluteWindow(searchParams);
+  const linkedFilters = useMemo(() => correlationFilters(searchParams), [searchParams]);
+  const initialRange = linkedWindow ? 'custom' : RANGE_PRESETS.some((item) => item.value === requestedRange && item.value !== 'custom')
     ? requestedRange
     : '1h';
   const initialScope: ScopeDraft = {
@@ -301,8 +304,8 @@ export default function LogsPage() {
     nodes: searchParams.get('node')?.trim() || '',
   };
   const [range, setRange] = useState(initialRange);
-  const [customStart, setCustomStart] = useState('');
-  const [customEnd, setCustomEnd] = useState('');
+  const [customStart, setCustomStart] = useState(localDateTime(linkedWindow?.start || ''));
+  const [customEnd, setCustomEnd] = useState(localDateTime(linkedWindow?.end || ''));
   const [query, setQuery] = useState('');
   const [committedQuery, setCommittedQuery] = useState('');
   const [exclude, setExclude] = useState('');
@@ -428,6 +431,7 @@ export default function LogsPage() {
       start: timeWindow.start,
       end: timeWindow.end,
       scope: buildScope(committedScope),
+      filters: linkedFilters,
       keywords: {
         include: keywordValues(committedQuery, committedMode),
         exclude: keywordValues(committedExclude, 'any'),
@@ -436,7 +440,7 @@ export default function LogsPage() {
       limit: PAGE_LIMIT,
       direction: 'backward',
     };
-  }, [buildScope, committedExclude, committedMode, committedQuery, committedScope, resolveWindow]);
+  }, [buildScope, committedExclude, committedMode, committedQuery, committedScope, resolveWindow, linkedFilters]);
 
   const replaceNextCursor = useCallback((cursor: string) => {
     nextCursorRef.current = cursor;
@@ -974,6 +978,10 @@ export default function LogsPage() {
         </div>
       </section>
 
+      {linkedFilters.length > 0 && <div className="flex flex-wrap items-center gap-3 border-b border-zinc-800 px-6 py-2 text-xs text-zinc-500">
+        <span>{tr('关联筛选：', 'Correlation filters: ')}{linkedFilters.map(f => `${f.field}=${f.values?.[0] || '∅'}`).join(' · ')}</span>
+        <Button onClick={() => { const next = new URLSearchParams(searchParams); for (const filter of linkedFilters) next.delete(filter.field); setSearchParams(next); }}>{tr('清除关联筛选', 'Clear correlation filters')}</Button>
+      </div>}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {showFieldPanel && <FieldPanel fields={displayFields} visibleFields={visibleFields} search={fieldSearch} onSearch={setFieldSearch} onToggle={toggleDisplayField} tr={tr} />}
         <section ref={resultScrollRef} className="min-w-0 flex-1 overflow-y-auto bg-zinc-950/20">
@@ -1075,7 +1083,7 @@ function LogRow({ index, record, visibleFields, deviceLabels, clusterLabels, wra
       <span className="flex items-start gap-2 whitespace-nowrap tabular-nums text-zinc-600"><span className={cn('mt-1 h-1.5 w-1.5 shrink-0 rounded-full', color)} />{formatLogDateTime(timestamp)}</span>
       <span className={cn('text-zinc-200', wrap ? 'min-w-0 whitespace-pre-wrap break-words' : 'whitespace-nowrap pr-4')}>
         {fieldValues.map((item) => <Tag key={item.field} label={DISPLAY_FIELD_LABELS[item.field]?.zh ?? item.field} value={item.value} tone={item.field === 'level' ? level : ''} />)}
-        <span>{record.message}</span>
+        <RecordTraceLink record={record} /><span>{record.message}</span>
       </span>
     </div>
   );
@@ -1099,7 +1107,7 @@ function LogTable({ records, visibleFields, deviceLabels, clusterLabels, wrap, d
               <td className={cn('px-3 text-right text-zinc-700', dense ? 'py-1' : 'py-2')}>{index + 1}</td>
               <td className={cn('whitespace-nowrap px-3 tabular-nums text-zinc-600', dense ? 'py-1' : 'py-2')}>{formatLogDateTime(new Date(record.timestamp))}</td>
               {visibleFields.map((field) => <td key={field} className={cn('px-3', dense ? 'py-1' : 'py-2', wrap ? 'max-w-48 break-words' : 'whitespace-nowrap')}>{displayFieldValue(record, field, deviceLabels, clusterLabels) || '—'}</td>)}
-              <td className={cn('px-3 text-zinc-200', dense ? 'py-1' : 'py-2', wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-nowrap')}>{record.message}</td>
+              <td className={cn('px-3 text-zinc-200', dense ? 'py-1' : 'py-2', wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-nowrap')}><RecordTraceLink record={record} />{record.message}</td>
             </tr>
           ))}
         </tbody>
@@ -1111,4 +1119,11 @@ function LogTable({ records, visibleFields, deviceLabels, clusterLabels, wrap, d
 function Tag({ label, value, tone = '' }: { label: string; value: string; tone?: string }) {
   const semantic = /fatal|error|critical|panic/.test(tone) ? 'border-red-500/30 bg-red-500/10 text-red-400' : /warn/.test(tone) ? 'border-amber-500/30 bg-amber-500/10 text-amber-400' : 'border-zinc-800 bg-zinc-900 text-zinc-500';
   return <span className={cn('mr-1 inline-flex rounded border px-1 py-px align-baseline text-[9px]', semantic)}><span className="mr-0.5 opacity-60">{label}:</span>{value}</span>;
+}
+
+function RecordTraceLink({ record }: { record: LogRecord }) {
+  const [params] = useSearchParams();
+  const { tr } = useI18n();
+  const link = logTraceLink(record, params);
+  return link ? <Link className="mr-2 underline" to={link} aria-label={tr('打开链路', 'Open trace')}>{record.trace_id?.slice(0, 12)}…</Link> : null;
 }

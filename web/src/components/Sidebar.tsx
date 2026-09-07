@@ -474,6 +474,7 @@ export function Sidebar() {
           defaultOpen={false}
           items={[
             { key: 'monitor', to: '/monitor', icon: ChartLine, label: tr('监控', 'Monitor') },
+            { key: 'apm', to: '/apm', icon: ChartLine, label: tr('应用性能', 'Application performance') },
             { key: 'logs', to: '/logs', icon: FileText, label: tr('日志', 'Logs') },
             { key: 'traces', to: '/traces', icon: Waypoints, label: tr('链路', 'Traces') },
             { key: 'alerts', to: '/alerts', icon: Siren, label: tr('告警', 'Alerts'), badge: incidentOpen },

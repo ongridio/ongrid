@@ -81,6 +81,7 @@ import (
 	iamserver "github.com/ongridio/ongrid/internal/iam/server"
 	iamservice "github.com/ongridio/ongrid/internal/iam/service"
 
+	managerbizapm "github.com/ongridio/ongrid/internal/manager/biz/apm"
 	managerbizdevice "github.com/ongridio/ongrid/internal/manager/biz/device"
 	managerbizedge "github.com/ongridio/ongrid/internal/manager/biz/edge"
 	managerbizk8s "github.com/ongridio/ongrid/internal/manager/biz/k8s"
@@ -160,6 +161,7 @@ import (
 	managermodelmcp "github.com/ongridio/ongrid/internal/manager/model/mcp"
 	managerserveraiops "github.com/ongridio/ongrid/internal/manager/server/aiops"
 	managerserveralert "github.com/ongridio/ongrid/internal/manager/server/alert"
+	managerserverapm "github.com/ongridio/ongrid/internal/manager/server/apm"
 	managerserverapproval "github.com/ongridio/ongrid/internal/manager/server/approval"
 	managerserveraudit "github.com/ongridio/ongrid/internal/manager/server/audit"
 	managerserverdevice "github.com/ongridio/ongrid/internal/manager/server/device"
@@ -1184,6 +1186,15 @@ func main() {
 		tracesHandler = managerservertraces.NewHandler(nil)
 	}
 	profilesHandler := managerserverprofiles.NewHandler(cfg.Profiles.URL)
+	var apmProm managerbizapm.PromQuerier
+	if promQueryClient != nil {
+		apmProm = promQueryClient
+	}
+	var apmTraces managerbizapm.TraceQuerier
+	if cfg.Traces.URL != "" {
+		apmTraces = pkgtracequery.New(cfg.Traces.URL, log.With(slog.String("comp", "apm-traces")))
+	}
+	apmHandler := managerserverapm.NewHandler(managerbizapm.New(apmProm, apmTraces, logsBackendSvc), log)
 
 	// Frontierbound service-end SDK: opens a long-lived service connection
 	// to the upstream frontier broker (a separate docker container) and
@@ -2657,6 +2668,7 @@ func main() {
 			monitorHandler.Register(protected)
 			logsHandler.Register(protected)
 			tracesHandler.Register(protected)
+			apmHandler.Register(protected)
 			profilesHandler.Register(protected)
 			aiopsHandler.Register(protected)
 			alertHandler.Register(protected)

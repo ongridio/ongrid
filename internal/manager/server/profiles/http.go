@@ -43,10 +43,16 @@ func (h *Handler) Register(r chi.Router) {
 	r.Get("/v1/profiles/download", h.download)
 }
 
+// @Summary Query a profile flamegraph
+// @Router /api/v1/profiles/flamegraph [get]
+// @Success 200 {object} object
 func (h *Handler) flamegraph(w http.ResponseWriter, r *http.Request) {
 	h.render(w, r, "")
 }
 
+// @Summary Download a pprof profile
+// @Router /api/v1/profiles/download [get]
+// @Success 200 {file} binary
 func (h *Handler) download(w http.ResponseWriter, r *http.Request) {
 	h.render(w, r, "pprof")
 }
@@ -82,9 +88,30 @@ func (h *Handler) render(w http.ResponseWriter, r *http.Request, format string) 
 	}
 
 	params := url.Values{}
-	params.Set("query", profileType+"{device_id="+strconv.Quote(strconv.FormatUint(deviceID, 10))+",service_name="+strconv.Quote(service)+",profile_type="+strconv.Quote(profileKind)+"}")
+	selector := profileType + "{device_id=" + strconv.Quote(strconv.FormatUint(deviceID, 10)) + ",service_name=" + strconv.Quote(service) + ",profile_type=" + strconv.Quote(profileKind) + "}"
 	params.Set("from", "now-"+lookback)
 	params.Set("until", "now")
+	for _, field := range []struct{ param, label string }{{"environment", "deployment_environment_name"}, {"service_namespace", "service_namespace"}, {"instance_id", "service_instance_id"}} {
+		if r.URL.Query().Has(field.param) {
+			value := r.URL.Query().Get(field.param)
+			if len(value) > 256 || strings.ContainsAny(value, "\n\r\x00") {
+				writeError(w, http.StatusBadRequest, "invalid profile identity")
+				return
+			}
+			selector = strings.TrimSuffix(selector, "}") + "," + field.label + "=" + strconv.Quote(value) + "}"
+		}
+	}
+	if r.URL.Query().Has("start") || r.URL.Query().Has("end") {
+		start, startErr := time.Parse(time.RFC3339Nano, r.URL.Query().Get("start"))
+		end, endErr := time.Parse(time.RFC3339Nano, r.URL.Query().Get("end"))
+		if startErr != nil || endErr != nil || !end.After(start) || end.Sub(start) > 7*24*time.Hour {
+			writeError(w, http.StatusBadRequest, "start and end must define a positive range of at most seven days")
+			return
+		}
+		params.Set("from", strconv.FormatInt(start.Unix(), 10))
+		params.Set("until", strconv.FormatInt(end.Unix(), 10))
+	}
+	params.Set("query", selector)
 	params.Set("maxNodes", "4096")
 	if format != "" {
 		params.Set("format", format)

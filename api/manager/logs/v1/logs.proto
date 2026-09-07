@@ -69,6 +69,7 @@ message LogKeywords {
   LogMatchMode mode = 3;
 }
 
+// service_namespace and environment support eq "" to match unset attributes.
 message LogFieldFilter {
   string field = 1;
   LogFilterOperator operator = 2;

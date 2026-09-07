@@ -49,6 +49,14 @@ func renderRuntime(cfg plugins.PluginConfig) ([]byte, error) {
 		serviceName = parsed.Hostname()
 	}
 	attributes := resourceAttributes(cfg.EdgeID, profileType, serviceName)
+	for _, field := range []struct{ param, attr string }{{"environment", "deployment.environment.name"}, {"service_namespace", "service.namespace"}, {"instance_id", "service.instance.id"}} {
+		if value := mapString(target, field.param); value != "" {
+			if len(value) > 256 || strings.ContainsAny(value, "\n\r\x00") {
+				return nil, fmt.Errorf("profiles plugin: invalid %s", field.param)
+			}
+			attributes = append(attributes, map[string]any{"key": field.attr, "value": value, "action": "upsert"})
+		}
+	}
 	if pid := mapInt(target, "process_pid", 0); pid > 0 {
 		attributes = append(attributes, map[string]any{"key": "process.pid", "value": pid, "action": "upsert"})
 	}

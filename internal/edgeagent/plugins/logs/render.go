@@ -148,7 +148,23 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	guardStatements := append(levelDetectionStatements(),
+	// Promote only the canonical structured correlation fields. File/CRI bodies
+	// may be JSON; unrelated fields and platform-owned device/cluster IDs are
+	// never copied from application payloads into resource identity.
+	correlationStatements := []string{
+		`merge_maps(log.cache, ParseJSON(log.body), "upsert") where IsString(log.body) and IsMatch(log.body, "^\\s*\\{")`,
+		`set(log.trace_id, TraceID(log.attributes["trace_id"])) where IsString(log.attributes["trace_id"]) and IsMatch(log.attributes["trace_id"], "^[a-fA-F0-9]{32}$") and IsEmpty(log.trace_id)`,
+		`set(log.span_id, SpanID(log.attributes["span_id"])) where IsString(log.attributes["span_id"]) and IsMatch(log.attributes["span_id"], "^[a-fA-F0-9]{16}$") and IsEmpty(log.span_id)`,
+		`set(log.trace_id, TraceID(log.cache["trace_id"])) where IsString(log.cache["trace_id"]) and IsMatch(log.cache["trace_id"], "^[a-fA-F0-9]{32}$") and IsEmpty(log.trace_id)`,
+		`set(log.span_id, SpanID(log.cache["span_id"])) where IsString(log.cache["span_id"]) and IsMatch(log.cache["span_id"], "^[a-fA-F0-9]{16}$") and IsEmpty(log.span_id)`,
+	}
+	for _, attribute := range []string{"service.name", "service.namespace", "deployment.environment.name", "deployment.environment"} {
+		correlationStatements = append(correlationStatements,
+			fmt.Sprintf(`set(resource.attributes[%q], log.attributes[%q]) where resource.attributes[%q] == nil and IsString(log.attributes[%q]) and Len(log.attributes[%q]) <= 256`, attribute, attribute, attribute, attribute, attribute),
+			fmt.Sprintf(`set(resource.attributes[%q], log.cache[%q]) where resource.attributes[%q] == nil and IsString(log.cache[%q]) and Len(log.cache[%q]) <= 256`, attribute, attribute, attribute, attribute, attribute))
+	}
+	guardStatements := append(correlationStatements, levelDetectionStatements()...)
+	guardStatements = append(guardStatements,
 		fmt.Sprintf(`replace_pattern(log.body, %s, "$1=<redacted>") where IsString(log.body)`, strconv.Quote(sensitiveBodyPattern)),
 		fmt.Sprintf(`delete_matching_keys(log.attributes, %s)`, strconv.Quote(sensitiveAttributeKeyPattern)),
 		fmt.Sprintf(`delete_matching_keys(resource.attributes, %s)`, strconv.Quote(sensitiveAttributeKeyPattern)),
@@ -158,6 +174,7 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 	)
 	// Preserve stable product dimensions for both supported backends.
 	guardStatements = append(guardStatements,
+		`set(resource.attributes["deployment.environment.name"], resource.attributes["deployment.environment"]) where resource.attributes["deployment.environment.name"] == nil and resource.attributes["deployment.environment"] != nil`,
 		`set(log.attributes["level"], log.severity_text)`,
 		`set(resource.attributes["filename"], log.attributes["log.file.path"]) where log.attributes["log.file.path"] != nil`,
 		`set(resource.attributes["unit"], log.attributes["systemd.unit"]) where log.attributes["systemd.unit"] != nil`,
@@ -178,7 +195,9 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 		},
 		"resource/common": map[string]interface{}{"attributes": resourceActions},
 		"transform/guard": map[string]interface{}{
-			"error_mode": "silent", "log_statements": guardStatements,
+			// Each application log gets its own resource before promotion, so
+			// mixed service/environment records in a file cannot contaminate one another.
+			"flatten_data": true, "error_mode": "silent", "log_statements": guardStatements,
 		},
 	}
 	baseProcessorIDs := []string{"memory_limiter/logs"}

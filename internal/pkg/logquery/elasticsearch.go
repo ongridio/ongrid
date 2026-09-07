@@ -646,6 +646,9 @@ func buildElasticsearchQueryWithStart(req SearchRequest, startOperator string) (
 			switch filter.Operator {
 			case FilterEqual:
 				clause = map[string]any{"term": map[string]any{def.ElasticsearchPath: filter.Values[0]}}
+				if filter.Values[0] == "" {
+					clause = map[string]any{"bool": map[string]any{"minimum_should_match": 1, "should": []any{clause, map[string]any{"bool": map[string]any{"must_not": []any{map[string]any{"exists": map[string]any{"field": def.ElasticsearchPath}}}}}}}}
+				}
 			case FilterIn:
 				clause = map[string]any{"terms": map[string]any{def.ElasticsearchPath: filter.Values}}
 			case FilterExists:
@@ -732,7 +735,7 @@ func decodeElasticsearchRecord(id string, raw json.RawMessage) (Record, error) {
 	resources := make(map[string]string)
 	for _, logical := range []string{
 		"device_id", "cluster_id", "namespace", "workload", "pod", "container",
-		"node", "service_name", "source_id", "file", "unit",
+		"node", "service_name", "service_namespace", "environment", "source_id", "file", "unit",
 	} {
 		def, _ := LookupField(logical)
 		name := strings.TrimPrefix(def.ElasticsearchPath, "resource.attributes.")

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle,
   ChevronRight,
@@ -21,6 +21,7 @@ import {
   type TempoTraceSummary,
   type TraceGetResponse,
 } from '@/api/traces';
+import { absoluteWindow, canonicalTraceID } from '@/lib/telemetryContext';
 import { ApiError } from '@/api/client';
 import { openObservabilityUrl, buildExploreUrl } from '@/lib/drilldown';
 import { GrafanaLinkButton } from '@/components/GrafanaLinkButton';
@@ -147,20 +148,25 @@ function normalizeRow(t: TempoTraceSummary): TraceRow {
 export default function TracesPage() {
   const { tr } = useI18n();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const absolute = absoluteWindow(searchParams);
+  const initialQuery = searchParams.get('q') || DEFAULT_TRACEQL;
+  const absoluteStart = absolute?.start;
+  const absoluteEnd = absolute?.end;
   const { traceId: routeTraceId = '' } = useParams<{ traceId?: string }>();
-  const [range, setRange] = useState(DEFAULT_RANGE);
+  const [range, setRange] = useState(absolute ? 'custom' : DEFAULT_RANGE);
   const [serviceFilter, setServiceFilter] = useState('');
   const [operationFilter, setOperationFilter] = useState('');
   const [peerFilter, setPeerFilter] = useState('');
   const [scope, setScope] = useState<TraceScope>('business');
-  const [traceQL, setTraceQL] = useState(DEFAULT_TRACEQL);
+  const [traceQL, setTraceQL] = useState(initialQuery);
   const [submitted, setSubmitted] = useState({
-    range: DEFAULT_RANGE,
+    range: absolute ? 'custom' : DEFAULT_RANGE,
     service: '',
     operation: '',
     peer: '',
     scope: 'business' as TraceScope,
-    traceQL: DEFAULT_TRACEQL,
+    traceQL: initialQuery,
   });
   // Auto-query on page load with the default filters (range=1h, no
   // service/operation/TraceQL). Matches the Logs page convention —
@@ -183,6 +189,7 @@ export default function TracesPage() {
   const [selectedTrace, setSelectedTrace] = useState<TraceGetResponse | null>(null);
   const [selectedTraceLoading, setSelectedTraceLoading] = useState(false);
   const [selectedTraceErr, setSelectedTraceErr] = useState<string | null>(null);
+  const lastWindow = useRef<{ start: string; end: string } | null>(null);
   const requestSeq = useRef(0);
   const detailRequestSeq = useRef(0);
 
@@ -197,8 +204,8 @@ export default function TracesPage() {
   const closeTrace = useCallback(() => {
     resetTrace();
     setTraceIdInput('');
-    navigate('/traces', { replace: true });
-  }, [navigate, resetTrace]);
+    navigate(`/traces?${searchParams}`, { replace: true });
+  }, [navigate, resetTrace, searchParams]);
 
   const loadTrace = useCallback(async (row: TraceRow) => {
     const seq = ++detailRequestSeq.current;
@@ -219,8 +226,15 @@ export default function TracesPage() {
   }, []);
 
   const openTrace = useCallback((row: TraceRow) => {
-    navigate(`/traces/${encodeURIComponent(row.traceId)}`);
-  }, [navigate]);
+    const next = new URLSearchParams(searchParams);
+    const query = traceSearchQuery(submitted.traceQL, submitted.service, submitted.operation, submitted.peer, submitted.scope);
+    next.set('q', query);
+    if (lastWindow.current) { next.set('start', lastWindow.current.start); next.set('end', lastWindow.current.end); }
+    if (searchParams.get('q') && query !== traceSearchQuery(searchParams.get('q')!, '', '', '', 'all')) {
+      for (const key of ['service_name', 'service_namespace', 'environment', 'operation']) next.delete(key);
+    }
+    navigate(`/traces/${encodeURIComponent(row.traceId)}?${next}`);
+  }, [navigate, searchParams, submitted]);
 
   useEffect(() => {
     const id = routeTraceId.trim();
@@ -254,8 +268,8 @@ export default function TracesPage() {
     try {
       const now = new Date();
       const startMs = now.getTime() - rangeToMs(submitted.range);
-      const start = new Date(startMs).toISOString();
-      const end = now.toISOString();
+      const start = submitted.range === 'custom' && absoluteStart ? absoluteStart : new Date(startMs).toISOString();
+      const end = submitted.range === 'custom' && absoluteEnd ? absoluteEnd : now.toISOString();
       const resp = await searchTraces({
         q: traceSearchQuery(submitted.traceQL, submitted.service, submitted.operation, submitted.peer, submitted.scope),
         start,
@@ -263,6 +277,7 @@ export default function TracesPage() {
         limit: PAGE_LIMIT,
       });
       if (seq !== requestSeq.current) return;
+      lastWindow.current = { start, end };
       const incoming = (resp.traces ?? []).map(normalizeRow);
       // Newest first by start time — Tempo usually returns this order
       // already but be defensive.
@@ -275,7 +290,7 @@ export default function TracesPage() {
     } finally {
       if (seq === requestSeq.current) setLoading(false);
     }
-  }, [submitted.range, submitted.service, submitted.operation, submitted.peer, submitted.scope, submitted.traceQL]);
+  }, [submitted.range, submitted.service, submitted.operation, submitted.peer, submitted.scope, submitted.traceQL, absoluteStart, absoluteEnd]);
 
   useEffect(() => {
     if (!hasSearched) return;
@@ -459,6 +474,7 @@ export default function TracesPage() {
               <label className="block w-32 shrink-0">
                 <span className="mb-1 block text-[11px] text-zinc-500"><Clock size={10} className="-mt-0.5 mr-1 inline" />{tr('时间范围', 'Time range')}</span>
                 <select value={range} onChange={(event) => setRange(event.target.value)} className={INPUT_BASE}>
+                  {absolute && <option value="custom">{tr('关联时间范围', 'Linked time window')}</option>}
                   {RANGE_PRESETS.map((option) => <option key={option.value} value={option.value}>{tr(option.labelZh, option.labelEn)}</option>)}
                 </select>
               </label>
@@ -547,6 +563,7 @@ export default function TracesPage() {
                 <Button onClick={() => void loadTrace(selectedRow)}>{tr('重试', 'Retry')}</Button>
               </div>
             )}
+            {selectedRow && <Link className="mb-3 inline-block text-xs underline" to={`/logs?${(() => { const p = new URLSearchParams(searchParams); p.set('trace_id', canonicalTraceID(selectedRow.traceId) || selectedRow.traceId); if (!absoluteWindow(p)) { const ts = selectedRow.startMs || Date.now(); p.set('start', new Date(ts - 300000).toISOString()); p.set('end', new Date(ts + Math.max(300000, selectedRow.durationMs)).toISOString()); } return p; })()}`}>{tr('查看同请求日志', 'View request logs')}</Link>}
             {selectedTrace && !selectedTraceLoading && !selectedTraceErr && (
               <TraceWaterfall
                 trace={selectedTrace}

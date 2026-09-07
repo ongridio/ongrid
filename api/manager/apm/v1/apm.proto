@@ -1,0 +1,133 @@
+syntax = "proto3";
+
+package ongrid.manager.apm.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/ongridio/ongrid/api/gen/manager/apm/v1;apmv1";
+
+// Authenticated REST routes under /api/v1/apm; no telemetry ingestion here.
+service APMService {
+  rpc ListServices(ListServicesRequest) returns (ListServicesResponse);
+  rpc GetOverview(GetOverviewRequest) returns (GetOverviewResponse);
+  rpc ListOperations(ListOperationsRequest) returns (ListOperationsResponse);
+  rpc GetDependencies(GetDependenciesRequest) returns (GetDependenciesResponse);
+  rpc GetDiagnostics(GetDiagnosticsRequest) returns (GetDiagnosticsResponse);
+  rpc GetRuntime(GetRuntimeRequest) returns (GetRuntimeResponse);
+  rpc GetAlertTemplate(GetAlertTemplateRequest) returns (GetAlertTemplateResponse);
+}
+
+message ServiceIdentity {
+  string service_name = 1;
+  string service_namespace = 2;
+  string environment = 3;
+}
+
+message Query {
+  google.protobuf.Timestamp start = 1;
+  google.protobuf.Timestamp end = 2;
+  // Missing means all, present empty means missing/empty resource attribute.
+  optional string environment = 3;
+  optional string service_namespace = 4;
+  string service_name = 5;
+  string operation = 6;
+  // server (default) or consumer. The two populations are never added together.
+  string span_kind = 7;
+  uint32 page = 8;
+  uint32 page_size = 9;
+  string sort = 10;
+  string search = 11;
+}
+
+message Summary {
+  ServiceIdentity identity = 1;
+  string operation = 2;
+  optional double rps = 3;
+  optional double error_rate = 4;
+  optional double p50_ms = 5;
+  optional double p95_ms = 6;
+  optional double p99_ms = 7;
+  optional double requests = 8;
+  string data_status = 9;
+}
+
+message QueryMetadata {
+  google.protobuf.Timestamp start = 1;
+  google.protobuf.Timestamp end = 2;
+  string metric_source = 3;
+  string sampling = 4;
+  string span_kind = 5;
+}
+
+message ListServicesRequest { Query query = 1; }
+message ListServicesData {
+  repeated Summary items = 1;
+  uint32 total = 2;
+  uint32 page = 3;
+  uint32 page_size = 4;
+  QueryMetadata metadata = 5;
+  repeated string environments = 6;
+  repeated string service_namespaces = 7;
+}
+message ListServicesResponse { int32 code = 1; string message = 2; ListServicesData data = 3; }
+
+message Point {
+  double timestamp = 1;
+  optional double rps = 2;
+  optional double error_rate = 3;
+  optional double p50_ms = 4;
+  optional double p95_ms = 5;
+  optional double p99_ms = 6;
+}
+message GetOverviewRequest { Query query = 1; }
+message GetOverviewData { Summary summary = 1; repeated Point points = 2; QueryMetadata metadata = 3; }
+message GetOverviewResponse { int32 code = 1; string message = 2; GetOverviewData data = 3; }
+
+message ListOperationsRequest { Query query = 1; }
+message ListOperationsData { repeated Summary items = 1; uint32 total = 2; QueryMetadata metadata = 3; uint32 page = 4; uint32 page_size = 5; }
+message ListOperationsResponse { int32 code = 1; string message = 2; ListOperationsData data = 3; }
+
+message Dependency {
+  ServiceIdentity client = 1;
+  ServiceIdentity server = 2;
+  string connection_type = 3;
+  optional double rps = 4;
+  optional double error_rate = 5;
+  optional double p95_ms = 6;
+}
+message GetDependenciesRequest { Query query = 1; }
+message GetDependenciesData { repeated Dependency items = 1; QueryMetadata metadata = 2; bool truncated = 3; }
+message GetDependenciesResponse { int32 code = 1; string message = 2; GetDependenciesData data = 3; }
+
+message DiagnosticCheck { string key = 1; string status = 2; string detail = 3; }
+message ObservedInstance {
+  string instance_id = 1;
+  string device_id = 2;
+  string cluster_id = 3;
+  string pod = 4;
+  string version = 5;
+}
+message GetDiagnosticsRequest { Query query = 1; }
+message GetDiagnosticsData {
+  repeated DiagnosticCheck checks = 1;
+  repeated ObservedInstance instances = 2;
+  repeated string trace_ids = 3;
+  uint32 sampled_traces = 4;
+  QueryMetadata metadata = 5;
+}
+message GetDiagnosticsResponse { int32 code = 1; string message = 2; GetDiagnosticsData data = 3; }
+
+message RuntimeMetric { string name = 1; string unit = 2; string instance_id = 3; optional double value = 4; }
+message GetRuntimeRequest { Query query = 1; }
+message GetRuntimeData { repeated RuntimeMetric items = 1; QueryMetadata metadata = 2; }
+message GetRuntimeResponse { int32 code = 1; string message = 2; GetRuntimeData data = 3; }
+
+message GetAlertTemplateRequest {
+  Query query = 1;
+  string metric = 2;
+  double threshold = 3;
+  double min_requests = 4;
+  uint32 for_seconds = 5;
+}
+message GetAlertTemplateData { string expr = 1; string metric = 2; string runbook_path = 3; }
+message GetAlertTemplateResponse { int32 code = 1; string message = 2; GetAlertTemplateData data = 3; }

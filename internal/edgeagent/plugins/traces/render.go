@@ -83,6 +83,9 @@ processors:
   # to set them.
   resource/device:
     attributes:
+      - key: deployment.environment.name
+        from_attribute: deployment.environment
+        action: insert
 {{- if .EmitDeviceID }}
       - key: device_id
         value: "{{ .EdgeID }}"
@@ -110,7 +113,7 @@ processors:
         from_attribute: k8s.node.name
         action: upsert
       - key: loki.resource.labels
-        value: "cluster_id,namespace,pod,node,ongrid_source,telemetry_gateway,gateway_namespace,service.name,k8s.deployment.name,k8s.statefulset.name,k8s.daemonset.name,k8s.job.name,k8s.cronjob.name"
+        value: "cluster_id,namespace,pod,node,ongrid_source,telemetry_gateway,gateway_namespace,service.name,service.namespace,deployment.environment.name,k8s.deployment.name,k8s.statefulset.name,k8s.daemonset.name,k8s.job.name,k8s.cronjob.name"
         action: upsert
 {{- end }}
 
