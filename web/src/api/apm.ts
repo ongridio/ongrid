@@ -1,6 +1,10 @@
 import { request } from './client';
 
-export type ServiceIdentity = { service_name: string; service_namespace: string; environment: string };
+export type ServiceIdentity = {
+  service_name: string;
+  service_namespace: string;
+  environment: string;
+};
 export type ApmSummary = {
   identity: ServiceIdentity;
   operation?: string;
@@ -30,7 +34,10 @@ export type ApmList = {
 export type ApmOverview = {
   metadata: ApmMetadata;
   summary: ApmSummary;
-  points: ({ timestamp: number } & Pick<ApmSummary, 'rps' | 'error_rate' | 'p50_ms' | 'p95_ms' | 'p99_ms'>)[];
+  points: ({ timestamp: number } & Pick<
+    ApmSummary,
+    'rps' | 'error_rate' | 'p50_ms' | 'p95_ms' | 'p99_ms'
+  >)[];
 };
 export type ApmDependency = {
   client: ServiceIdentity;
@@ -43,7 +50,13 @@ export type ApmDependency = {
 export type ApmDependencies = { items: ApmDependency[]; truncated: boolean };
 export type ApmDiagnostics = {
   checks: { key: string; status: string; detail: string }[];
-  instances: { instance_id: string; device_id: string; cluster_id: string; pod: string; version: string }[];
+  instances: {
+    instance_id: string;
+    device_id: string;
+    cluster_id: string;
+    pod: string;
+    version: string;
+  }[];
   trace_ids: string[];
   sampled_traces: number;
 };
@@ -65,13 +78,20 @@ export function queryApm<K extends keyof Endpoints>(
   params: URLSearchParams,
   signal?: AbortSignal,
 ) {
-  return request<{ data: Endpoints[K] }>('GET', `/apm/${endpoint}?${params}`, undefined, { signal }).then(
-    (r) => r.data,
-  );
+  const query = new URLSearchParams(params);
+  query.delete('list_query');
+  return request<{ data: Endpoints[K] }>('GET', `/apm/${endpoint}?${query}`, undefined, {
+    signal,
+  }).then((r) => r.data);
 }
 
 export function serviceParams(params: URLSearchParams, identity: ServiceIdentity) {
   const next = new URLSearchParams(params);
+  if (!params.has('service_name')) {
+    const list = new URLSearchParams(params);
+    list.delete('list_query');
+    next.set('list_query', list.toString());
+  }
   for (const [key, value] of Object.entries(identity)) next.set(key, value);
   for (const key of ['page', 'search', 'operation', 'tab']) next.delete(key);
   return next;

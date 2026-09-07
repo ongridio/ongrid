@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowRight, Clock, RefreshCw, Search, SlidersHorizontal } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { ArrowRight, ArrowUpRight, Clock, RefreshCw, SlidersHorizontal } from 'lucide-react';
 import {
   CartesianGrid,
   Line,
@@ -23,6 +23,8 @@ import {
 } from '@/api/apm';
 import { Button, Card, EmptyState, PageHeader, PaginationFooter } from '@/components/ui';
 import { Dependencies } from '@/components/apm/Dependencies';
+import { SearchInput } from '@/components/apm/SearchInput';
+import { ServiceSwitcher } from '@/components/apm/ServiceSwitcher';
 import { Onboarding } from '@/components/apm/Onboarding';
 import { chartTooltipStyle, chartTooltipLabelStyle } from '@/lib/chartTheme';
 import { useI18n } from '@/i18n/locale';
@@ -40,21 +42,27 @@ const number = (value: number | null | undefined, unit = '') =>
     ? '—'
     : `${value.toLocaleString(undefined, value !== 0 && Math.abs(value) < 0.01 ? { maximumSignificantDigits: 2 } : { maximumFractionDigits: 2 })}${unit}`;
 
+type Panels = {
+  list?: ApmList;
+  operations?: ApmList;
+  overview?: ApmOverview;
+  dependencies?: ApmDependencies;
+  diagnostics?: ApmDiagnostics;
+  runtime?: ApmRuntime;
+};
+
 export default function ApmPage() {
   const { tr } = useI18n();
   const { isAdmin } = usePermissions();
   const navigate = useNavigate();
+  const location = useLocation();
+  const main = useRef<HTMLElement>(null);
+  const restoredScroll = useRef('');
   const [params, setParams] = useSearchParams();
   const [refresh, setRefresh] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [list, setList] = useState<ApmList>();
-  const [operations, setOperations] = useState<ApmList>();
   const [advanced, setAdvanced] = useState(false);
-  const [overview, setOverview] = useState<ApmOverview>();
-  const [dependencies, setDependencies] = useState<ApmDependencies>();
-  const [diagnostics, setDiagnostics] = useState<ApmDiagnostics>();
-  const [runtime, setRuntime] = useState<ApmRuntime>();
   const [latency, setLatency] = useState<'p50_ms' | 'p95_ms' | 'p99_ms'>('p95_ms');
   const [metric, setMetric] = useState('error_rate');
   const [threshold, setThreshold] = useState('5');
@@ -72,17 +80,37 @@ export default function ApmPage() {
         : requestedTab;
   const period = params.get('range') || 'custom';
   const query = params.toString();
-  const set = (key: string, value: string | null) => {
-    const next = new URLSearchParams(params);
-    if (value === null) next.delete(key);
-    else next.set(key, value);
-    if (['metric_source', 'protocol', 'metric_format'].includes(key)) {
-      next.delete('operation');
-      next.delete('span_kind');
-    }
-    if (key !== 'page') next.delete('page');
-    setParams(next);
-  };
+  const operation = params.get('operation');
+  const context = new URLSearchParams(params);
+  context.delete('list_query');
+  // Relative refresh advances time within the same view; a changed identity,
+  // protocol, filter or absolute window must never display the previous result.
+  if (period !== 'custom') {
+    context.delete('start');
+    context.delete('end');
+  }
+  const scope = context.toString();
+  const [results, setResults] = useState<Panels & { scope: string; updated?: number }>({
+    scope: '',
+  });
+  const current = results.scope === scope ? results : undefined;
+  const { list, operations, overview, dependencies, diagnostics, runtime } = current || {};
+
+  const set = useCallback(
+    (key: string, value: string | null) => {
+      const next = new URLSearchParams(params);
+      if (value === null) next.delete(key);
+      else next.set(key, value);
+      if (['metric_source', 'protocol', 'metric_format'].includes(key)) {
+        next.delete('operation');
+        next.delete('span_kind');
+      }
+      if (key !== 'page') next.delete('page');
+      setParams(next, { replace: key === 'search' });
+    },
+    [params, setParams],
+  );
+  const changeSearch = useCallback((value: string) => set('search', value), [set]);
   const pickPeriod = (value: string) => {
     const next = new URLSearchParams(params);
     next.set('range', value);
@@ -108,53 +136,70 @@ export default function ApmPage() {
     const p = new URLSearchParams(query);
     setLoading(false);
     setError('');
-    setList(undefined);
-    setOverview(undefined);
-    setOperations(undefined);
-    setDependencies(undefined);
-    setDiagnostics(undefined);
-    setRuntime(undefined);
+    setResults((previous) => (previous.scope === scope ? previous : { scope }));
     if (!p.has('start') || !p.has('end') || tab === 'alerts' || (!detail && tab === 'onboarding'))
       return;
     const controller = new AbortController();
     setLoading(true);
     // Each panel keeps its successful result if another source is unavailable.
     const tasks: Promise<void>[] = [];
-    const fetchPanel = <T,>(task: Promise<T>, save: (data: T) => void) => {
+    let failed = false;
+    const fetchPanel = <K extends keyof Panels>(
+      task: Promise<NonNullable<Panels[K]>>,
+      panel: K,
+    ) => {
       tasks.push(
         task
           .then((data) => {
-            if (!controller.signal.aborted) save(data);
+            if (!controller.signal.aborted)
+              setResults((previous) => ({
+                ...(previous.scope === scope ? previous : { scope }),
+                [panel]: data,
+              }));
           })
           .catch((e: Error) => {
+            failed = true;
             if (!controller.signal.aborted)
               setError((previous) => [previous, e.message].filter(Boolean).join(' · '));
           }),
       );
     };
-    if (!detail) fetchPanel(queryApm('services', p, controller.signal), setList);
+    if (!detail) fetchPanel(queryApm('services', p, controller.signal), 'list');
     else if (tab === 'overview') {
-      fetchPanel(queryApm('overview', p, controller.signal), setOverview);
+      fetchPanel(queryApm('overview', p, controller.signal), 'overview');
       const top = new URLSearchParams(p);
       top.set('sort', 'p95_ms');
       top.set('page', '1');
       top.set('page_size', '5');
-      fetchPanel(queryApm('operations', top, controller.signal), setOperations);
-      fetchPanel(queryApm('dependencies', p, controller.signal), setDependencies);
+      if (!p.has('operation')) {
+        fetchPanel(queryApm('operations', top, controller.signal), 'operations');
+        fetchPanel(queryApm('dependencies', p, controller.signal), 'dependencies');
+      }
     } else if (tab === 'operations')
-      fetchPanel(queryApm('operations', p, controller.signal), setList);
+      fetchPanel(queryApm('operations', p, controller.signal), 'list');
     else if (tab === 'dependencies')
-      fetchPanel(queryApm('dependencies', p, controller.signal), setDependencies);
+      fetchPanel(queryApm('dependencies', p, controller.signal), 'dependencies');
     else if (tab === 'instances') {
-      fetchPanel(queryApm('diagnostics', p, controller.signal), setDiagnostics);
-      fetchPanel(queryApm('runtime', p, controller.signal), setRuntime);
+      fetchPanel(queryApm('diagnostics', p, controller.signal), 'diagnostics');
+      fetchPanel(queryApm('runtime', p, controller.signal), 'runtime');
     } else if (tab === 'onboarding')
-      fetchPanel(queryApm('diagnostics', p, controller.signal), setDiagnostics);
+      fetchPanel(queryApm('diagnostics', p, controller.signal), 'diagnostics');
     Promise.all(tasks).finally(() => {
-      if (!controller.signal.aborted) setLoading(false);
+      if (!controller.signal.aborted) {
+        setLoading(false);
+        if (!failed && tasks.length)
+          setResults((previous) => ({ ...previous, updated: Date.now() }));
+      }
     });
     return () => controller.abort();
-  }, [query, tab, detail, refresh]);
+  }, [query, tab, detail, refresh, scope]);
+  useEffect(() => {
+    if (detail && tab !== 'operations') { restoredScroll.current = ''; return; }
+    if (!list || !main.current || restoredScroll.current === query) return;
+    restoredScroll.current = query;
+    const saved = location.state?.[detail ? 'apmOperations' : 'apmList'];
+    main.current.scrollTop = saved?.query === query ? saved.scroll : 0;
+  }, [list, detail, tab, query, location.state]);
   const unset = tr('未设置', 'Unset');
   const status = (s: string) =>
     ({
@@ -170,18 +215,23 @@ export default function ApmPage() {
   const tabs = [
     ['overview', tr('概览', 'Overview')],
     ['operations', tr('接口', 'Operations')],
-    ['traces', tr('调用链', 'Traces')],
     ['dependencies', tr('依赖', 'Dependencies')],
     ['instances', tr('实例', 'Instances')],
   ];
   const viewLink = (view: string) => {
+    if (view === 'operations' && operation && location.state?.apmOperations)
+      return `/apm/service?${location.state.apmOperations.query}`;
     const next = new URLSearchParams(params);
     next.set('tab', view);
     next.delete('page');
+    next.delete('operation');
+    next.delete('search');
     return `/apm/service?${next}`;
   };
-  const back = new URLSearchParams(params);
-  for (const key of ['service_name', 'operation', 'tab', 'page', 'sort']) back.delete(key);
+  const back = new URLSearchParams(params.get('list_query') || params);
+  if (!params.has('list_query'))
+    for (const key of ['service_name', 'operation', 'tab', 'page', 'sort', 'search']) back.delete(key);
+  back.delete('list_query');
   async function createAlert() {
     setCreating(true);
     setError('');
@@ -213,15 +263,46 @@ export default function ApmPage() {
   const filtersButton = (
     <Button className="h-9" aria-expanded={advanced} onClick={() => setAdvanced(!advanced)}>
       <SlidersHorizontal size={13} />
-      {tr('高级筛选', 'Advanced filters')}
+      {tr('更多', 'More')}
       {params.get('span_kind') === 'consumer' && <span>· {tr('消息消费', 'Consumer')}</span>}
     </Button>
+  );
+  const protocolSwitch = !traceMetrics && (
+    <div
+      role="group"
+      aria-label={tr('请求协议', 'Request protocol')}
+      className="inline-flex shrink-0 rounded-md border border-zinc-800 bg-zinc-950 p-0.5"
+    >
+      {['http', 'rpc'].map((value) => (
+        <button
+          key={value}
+          type="button"
+          aria-pressed={(params.get('protocol') || 'http') === value}
+          onClick={() => set('protocol', value)}
+          className={`rounded px-3 py-1 text-xs font-medium ${(params.get('protocol') || 'http') === value ? 'bg-indigo-600 text-white' : 'text-zinc-500 hover:text-zinc-100'}`}
+        >
+          {value.toUpperCase()}
+        </button>
+      ))}
+    </div>
   );
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <PageHeader
-        title={detail ? params.get('service_name') : tr('应用性能', 'Application performance')}
-        leading={detail && <Link to={`/apm?${back}`}>← {tr('服务列表', 'Services')}</Link>}
+        title={
+          detail ? (
+            <ServiceSwitcher params={params} navigationState={location.state} />
+          ) : (
+            tr('应用性能', 'Application performance')
+          )
+        }
+        leading={
+          detail && (
+            <Link state={location.state} to={`/apm?${back}`}>
+              ← {tr('服务列表', 'Services')}
+            </Link>
+          )
+        }
         subtitle={
           detail
             ? `${params.get('environment') || unset} / ${params.get('service_namespace') || unset}`
@@ -230,10 +311,9 @@ export default function ApmPage() {
                 'Explore service requests, traces, logs and instances',
               )
         }
-        className="[&>div:first-child]:flex-wrap [&>div:first-child>div:last-child]:shrink [&_h1]:break-all"
+        className="!py-3 [&>div:first-child]:flex-wrap [&>div:first-child>div:last-child]:shrink [&_h1]:break-all"
         actions={
           <>
-            {detail && filtersButton}
             <div className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2">
               <Clock size={13} className="text-zinc-500" />
               <select
@@ -258,214 +338,284 @@ export default function ApmPage() {
               <RefreshCw size={13} />
               {tr('刷新', 'Refresh')}
             </Button>
-            {detail && (
-              <Button
-                className="h-9"
-                disabled={traceMetrics}
-                title={
-                  traceMetrics
-                    ? tr('请求告警需使用应用指标', 'Request alerts require application metrics')
-                    : undefined
-                }
-                aria-pressed={tab === 'alerts'}
-                onClick={() => set('tab', tab === 'alerts' ? 'overview' : 'alerts')}
-              >
-                {tr('创建告警', 'Create alert')}
-              </Button>
-            )}
-            <Button
-              className="h-9"
-              aria-pressed={tab === 'onboarding'}
-              onClick={() =>
-                set('tab', tab === 'onboarding' ? (detail ? 'overview' : 'services') : 'onboarding')
-              }
-            >
-              {tr('接入管理', 'Instrumentation')}
-            </Button>
+            {filtersButton}
           </>
         }
         extra={
-          <div className="flex flex-wrap items-center gap-3">
-            <select
-              aria-label={tr('指标来源', 'Metric source')}
-              className={input}
-              value={params.get('metric_source') || 'application_metrics'}
-              onChange={(e) => set('metric_source', e.target.value)}
-            >
-              <option value="application_metrics">{tr('应用指标', 'Application metrics')}</option>
-              <option value="tempo_spanmetrics">{tr('Trace 样本', 'Trace samples')}</option>
-            </select>
-            {!traceMetrics && (
-              <select
-                aria-label={tr('请求协议', 'Request protocol')}
-                className={input}
-                value={params.get('protocol') || 'http'}
-                onChange={(e) => set('protocol', e.target.value)}
-              >
-                <option value="http">HTTP</option>
-                <option value="rpc">RPC</option>
-              </select>
-            )}
-
-            {!detail && tab === 'services' && (
-              <>
-                <label className="relative min-w-48 flex-1">
-                  <Search size={14} className="absolute left-3 top-2.5 text-zinc-500" />
-                  <input
-                    aria-label={tr('服务搜索', 'Search services')}
-                    className={`${input} w-full pl-9`}
-                    placeholder={tr('搜索服务名称…', 'Search services…')}
-                    value={params.get('search') || ''}
-                    onChange={(e) => set('search', e.target.value)}
-                  />
-                </label>
-                {(
-                  [
-                    ['environment', tr('全部环境', 'All environments'), list?.environments],
-                    [
-                      'service_namespace',
-                      tr('全部命名空间', 'All namespaces'),
-                      list?.service_namespaces,
-                    ],
-                  ] as const
-                ).map(([key, label, options]) => (
+          ((!detail && tab === 'services') || advanced || period === 'custom') && (
+            <div className="flex flex-wrap items-center gap-3">
+              {advanced && (
+                <>
                   <select
-                    key={key}
-                    aria-label={
-                      key === 'environment'
-                        ? tr('环境', 'Environment')
-                        : tr('业务命名空间', 'Service namespace')
-                    }
-                    className={`${input} max-w-52`}
-                    value={params.has(key) ? JSON.stringify(params.get(key)) : 'all'}
-                    onChange={(e) =>
+                    aria-label={tr('指标来源', 'Metric source')}
+                    className={input}
+                    value={params.get('metric_source') || 'application_metrics'}
+                    onChange={(e) => set('metric_source', e.target.value)}
+                  >
+                    <option value="application_metrics">
+                      {tr('应用指标', 'Application metrics')}
+                    </option>
+                    <option value="tempo_spanmetrics">{tr('Trace 样本', 'Trace samples')}</option>
+                  </select>
+                  {detail && (
+                    <Button
+                      className="h-9"
+                      disabled={traceMetrics}
+                      title={
+                        traceMetrics
+                          ? tr(
+                              '请求告警需使用应用指标',
+                              'Request alerts require application metrics',
+                            )
+                          : undefined
+                      }
+                      aria-pressed={tab === 'alerts'}
+                      onClick={() => set('tab', tab === 'alerts' ? 'overview' : 'alerts')}
+                    >
+                      {tr('创建告警', 'Create alert')}
+                    </Button>
+                  )}
+                  <Button
+                    className="h-9"
+                    aria-pressed={tab === 'onboarding'}
+                    onClick={() =>
                       set(
-                        key,
-                        e.target.value === 'all' ? null : (JSON.parse(e.target.value) as string),
+                        'tab',
+                        tab === 'onboarding' ? (detail ? 'overview' : 'services') : 'onboarding',
                       )
                     }
                   >
-                    <option value="all">{label}</option>
-                    {[
-                      ...new Set([
-                        '',
-                        ...(options || []),
-                        ...(params.has(key) ? [params.get(key)!] : []),
-                      ]),
-                    ].map((value) => (
-                      <option key={value} value={JSON.stringify(value)}>
-                        {value || unset}
-                      </option>
-                    ))}
-                  </select>
-                ))}
-              </>
-            )}
-            {!detail && filtersButton}
-            {advanced && traceMetrics && (
-              <label className="flex items-center gap-2 text-xs text-zinc-500">
-                {tr('入口类型', 'Entry type')}
-                <select
-                  className={input}
-                  value={params.get('span_kind') || 'server'}
-                  onChange={(e) => set('span_kind', e.target.value)}
-                >
-                  <option value="server">{tr('HTTP / RPC 服务', 'HTTP / RPC server')}</option>
-                  <option value="consumer">{tr('消息消费', 'Message consumer')}</option>
-                </select>
-              </label>
-            )}
-            {advanced && !traceMetrics && (
-              <label className="flex items-center gap-2 text-xs text-zinc-500">
-                {tr('指标格式', 'Metric format')}
-                <select
-                  className={input}
-                  value={params.get('metric_format') || 'otel'}
-                  onChange={(e) => set('metric_format', e.target.value)}
-                >
-                  <option value="otel">{tr('当前 OTel 约定', 'Current OTel conventions')}</option>
-                  <option value="legacy">{tr('旧版 HTTP / gRPC', 'Legacy HTTP / gRPC')}</option>
-                </select>
-              </label>
-            )}
-            {period === 'custom' &&
-              ['start', 'end'].map((key) => (
-                <label
-                  key={key}
-                  className="flex flex-wrap items-center gap-2 text-xs text-zinc-500"
-                >
-                  {key === 'start' ? tr('开始时间', 'Start time') : tr('结束时间', 'End time')}
-                  <input
-                    type="datetime-local"
-                    step="1"
-                    className={input}
-                    value={localDateTime(params.get(key) || '')}
-                    onChange={(e) => {
-                      if (e.target.value) set(key, new Date(e.target.value).toISOString());
-                    }}
+                    {tr('接入管理', 'Instrumentation')}
+                  </Button>
+                </>
+              )}
+              {!detail && protocolSwitch}
+
+              {!detail && tab === 'services' && (
+                <>
+                  <SearchInput
+                    value={params.get('search') || ''}
+                    onChange={changeSearch}
+                    label={tr('搜索服务名称…', 'Search services…')}
                   />
+                  {(
+                    [
+                      ['environment', tr('全部环境', 'All environments'), list?.environments],
+                      [
+                        'service_namespace',
+                        tr('全部命名空间', 'All namespaces'),
+                        list?.service_namespaces,
+                      ],
+                    ] as const
+                  ).map(([key, label, options]) => (
+                    <select
+                      key={key}
+                      aria-label={
+                        key === 'environment'
+                          ? tr('环境', 'Environment')
+                          : tr('业务命名空间', 'Service namespace')
+                      }
+                      className={`${input} max-w-52`}
+                      value={params.has(key) ? JSON.stringify(params.get(key)) : 'all'}
+                      onChange={(e) =>
+                        set(
+                          key,
+                          e.target.value === 'all' ? null : (JSON.parse(e.target.value) as string),
+                        )
+                      }
+                    >
+                      <option value="all">{label}</option>
+                      {[
+                        ...new Set([
+                          '',
+                          ...(options || []),
+                          ...(params.has(key) ? [params.get(key)!] : []),
+                        ]),
+                      ].map((value) => (
+                        <option key={value} value={JSON.stringify(value)}>
+                          {value || unset}
+                        </option>
+                      ))}
+                    </select>
+                  ))}
+                </>
+              )}
+              {advanced && traceMetrics && (
+                <label className="flex items-center gap-2 text-xs text-zinc-500">
+                  {tr('入口类型', 'Entry type')}
+                  <select
+                    className={input}
+                    value={params.get('span_kind') || 'server'}
+                    onChange={(e) => set('span_kind', e.target.value)}
+                  >
+                    <option value="server">{tr('HTTP / RPC 服务', 'HTTP / RPC server')}</option>
+                    <option value="consumer">{tr('消息消费', 'Message consumer')}</option>
+                  </select>
                 </label>
-              ))}
-          </div>
+              )}
+              {advanced && !traceMetrics && (
+                <label className="flex items-center gap-2 text-xs text-zinc-500">
+                  {tr('指标格式', 'Metric format')}
+                  <select
+                    className={input}
+                    value={params.get('metric_format') || 'otel'}
+                    onChange={(e) => set('metric_format', e.target.value)}
+                  >
+                    <option value="otel">{tr('当前 OTel 约定', 'Current OTel conventions')}</option>
+                    <option value="legacy">{tr('旧版 HTTP / gRPC', 'Legacy HTTP / gRPC')}</option>
+                  </select>
+                </label>
+              )}
+              {period === 'custom' &&
+                ['start', 'end'].map((key) => (
+                  <label
+                    key={key}
+                    className="flex flex-wrap items-center gap-2 text-xs text-zinc-500"
+                  >
+                    {key === 'start' ? tr('开始时间', 'Start time') : tr('结束时间', 'End time')}
+                    <input
+                      type="datetime-local"
+                      step="1"
+                      className={input}
+                      value={localDateTime(params.get(key) || '')}
+                      onChange={(e) => {
+                        if (e.target.value) set(key, new Date(e.target.value).toISOString());
+                      }}
+                    />
+                  </label>
+                ))}
+            </div>
+          )
         }
       />
       {detail && (
         <nav
           aria-label={tr('应用性能视图', 'APM views')}
-          className="flex shrink-0 flex-wrap gap-5 border-b border-zinc-800 px-6"
+          className="flex shrink-0 flex-wrap items-center gap-x-5 border-b border-zinc-800 px-6"
         >
           {tabs.map(([key, label]) => (
             <Link
               key={key}
-              to={key === 'traces' ? traceLink(params) : viewLink(key)}
-              className={`border-b-2 py-3 text-xs ${tab === key ? 'border-indigo-500 font-medium text-zinc-100' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}
-              aria-current={tab === key ? 'page' : undefined}
+              state={location.state}
+              to={viewLink(key)}
+              className={`border-b-2 py-3 text-xs ${(operation ? 'operations' : tab) === key ? 'border-indigo-500 font-medium text-zinc-100' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}
+              aria-current={(operation ? 'operations' : tab) === key ? 'page' : undefined}
             >
               {label}
             </Link>
           ))}
+          <div className="ml-auto py-1.5">{protocolSwitch}</div>
         </nav>
       )}
-      <main className="flex-1 space-y-4 overflow-auto p-6">
-        <details className="text-xs text-zinc-500">
-          <summary className="w-fit cursor-pointer">
-            {traceMetrics
-              ? tr(
-                  'Trace 样本指标 · 采样覆盖率未知',
-                  'Trace sample metrics · Sampling coverage unknown',
-                )
-              : tr(
-                  '应用请求指标 · 独立于 Trace 采样',
-                  'Application request metrics · Independent of trace sampling',
-                )}
-          </summary>
-          <p className="mt-2 max-w-3xl leading-relaxed">
-            {traceMetrics
-              ? tr(
-                  '指标来自 Tempo 接收的入口 Span，不代表已确认的全量业务请求；无数据不等于服务宕机。趋势使用至少 5 分钟滚动窗口，摘要使用所选时间范围。',
-                  'Metrics reflect entry spans received by Tempo, not confirmed total business traffic. No data does not imply downtime. Trends use a rolling window of at least 5 minutes; summaries use the selected range.',
-                )
-              : tr(
-                  '请求速率、错误率和延迟来自应用 SDK 的 HTTP / RPC 服务端指标。需要启用 Metrics 导出；无指标时不会用 Trace 样本替代。链路与依赖仍受 Trace 采样影响。',
-                  'Request rate, errors and latency come from application SDK HTTP / RPC server metrics. Enable Metrics export; missing metrics are never replaced with trace samples. Traces and dependencies still depend on trace sampling.',
-                )}
-          </p>
-        </details>
+      <main ref={main} className="flex-1 space-y-3 overflow-auto px-6 py-4">
+        <div className="flex min-h-6 flex-wrap items-center justify-between gap-2 text-xs text-zinc-500">
+          <details>
+            <summary className="w-fit cursor-pointer">
+              {traceMetrics
+                ? tr('Trace 样本 · 采样覆盖率未知', 'Trace samples · Sampling coverage unknown')
+                : tr(
+                    '应用指标 · 独立于 Trace 采样',
+                    'Application metrics · Independent of trace sampling',
+                  )}
+              {params.get('metric_format') === 'legacy' && !traceMetrics
+                ? tr(' · 旧版格式', ' · Legacy format')
+                : ''}
+            </summary>
+            <p className="mt-2 max-w-3xl leading-relaxed">
+              {tr(
+                '数值按所选时段汇总，趋势使用至少 5 分钟滚动窗口。链路和依赖依靠 Trace 样本；未观测到样本不等于应用没有请求。',
+                'Values summarize the selected range; trends use rolling windows of at least 5 minutes. Traces and dependencies rely on trace samples; no samples does not mean no application requests.',
+              )}
+            </p>
+          </details>
+          <span role="status">
+            {loading
+              ? tr('正在更新…', 'Updating…')
+              : current?.updated
+                ? tr(
+                    `更新于 ${new Date(current.updated).toLocaleTimeString()}`,
+                    `Updated ${new Date(current.updated).toLocaleTimeString()}`,
+                  )
+                : ''}
+          </span>
+        </div>
+        {detail && tab === 'overview' && (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              {operation ? (
+                <>
+                  <Link
+                    state={location.state}
+                    className="text-xs text-zinc-500 hover:underline"
+                    to={viewLink('operations')}
+                  >
+                    ← {tr('全部接口', 'All operations')}
+                  </Link>
+                  <h2 className="mt-1 break-all text-sm font-semibold">{operation}</h2>
+                </>
+              ) : (
+                <h2 className="text-sm font-medium">{tr('服务指标', 'Service metrics')}</h2>
+              )}
+              <p className="mt-1 text-xs text-zinc-500">
+                {tr('趋势使用至少 5 分钟滚动窗口', 'Trends use rolling windows of at least 5 minutes')}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-4 text-sm">
+              <Link
+                className="inline-flex items-center gap-1 text-zinc-500 hover:text-indigo-500"
+                to={traceLink(params)}
+              >
+                {tr('查看链路', 'View traces')}
+                <ArrowUpRight size={13} />
+              </Link>
+              <Link
+                className="text-zinc-500 hover:text-indigo-500"
+                to={traceLink(params, 'duration > 1s')}
+              >
+                {tr('慢链路 (>1s)', 'Slow traces (>1s)')}
+              </Link>
+              <Link
+                className="text-zinc-500 hover:text-indigo-500"
+                to={traceLink(params, 'status = error')}
+              >
+                {tr('错误链路', 'Error traces')}
+              </Link>
+              <Link
+                className="inline-flex items-center gap-1 text-zinc-500 hover:text-indigo-500"
+                to={`/logs?${params}`}
+              >
+                {tr('服务日志', 'Service logs')}
+                <ArrowUpRight size={13} />
+              </Link>
+            </div>
+          </div>
+        )}
         {error && (
           <Card role="alert" className="text-sm text-red-500">
-            {tr('查询失败：', 'Query failed: ')}
+            {current?.updated
+              ? tr('更新失败，保留上次结果：', 'Update failed; retaining previous results: ')
+              : tr('查询失败：', 'Query failed: ')}
             {error}
           </Card>
         )}
-        {loading && (
-          <p role="status" className="text-xs text-zinc-500">
-            {tr('查询中…', 'Loading…')}
-          </p>
+        {loading && !list && !overview && !dependencies && !diagnostics && !runtime && (
+          <Card className="flex min-h-64 items-center justify-center text-sm text-zinc-500">
+            {tr('正在加载当前范围的数据…', 'Loading data for the current scope…')}
+          </Card>
         )}
         {tab === 'onboarding' && <Onboarding />}
+        {detail && tab === 'operations' && (
+          <div className="max-w-sm">
+            <SearchInput
+              value={params.get('search') || ''}
+              onChange={changeSearch}
+              label={tr('搜索接口…', 'Search operations…')}
+            />
+          </div>
+        )}
         {list && (
           <Card>
-            <div className="mb-3 flex justify-between text-xs">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3 text-sm">
               <h2 className="self-center text-sm font-medium">
                 {detail
                   ? tr(`接口 · ${list.total}`, `Operations · ${list.total}`)
@@ -516,7 +666,7 @@ export default function ApmPage() {
               />
             ) : (
               <div className="overflow-auto">
-                <table className="w-full whitespace-nowrap text-left text-xs">
+                <table className="w-full text-left text-sm">
                   <thead className="text-zinc-500">
                     <tr>
                       {[
@@ -528,13 +678,13 @@ export default function ApmPage() {
                         'P95 (ms)',
                         tr('数据状态', 'Data status'),
                       ].map((v) => (
-                        <th className="p-3" key={v}>
+                        <th className="p-3 [&:nth-child(n+2):nth-child(-n+4)]:text-right" key={v}>
                           {v}
                         </th>
                       ))}
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-zinc-800">
+                  <tbody className="divide-y divide-[rgb(var(--border))]">
                     {list.items.map((row) => {
                       const p = serviceParams(params, row.identity);
                       if (row.operation) p.set('operation', row.operation);
@@ -543,7 +693,28 @@ export default function ApmPage() {
                           <td className="p-3">
                             <Link
                               className="font-medium underline"
-                              to={detail ? traceLink(p) : `/apm/service?${p}`}
+                              state={location.state}
+                              to={`/apm/service?${p}`}
+                              onClick={(event) => {
+                                if (
+                                  event.button !== 0 ||
+                                  event.metaKey ||
+                                  event.ctrlKey ||
+                                  event.shiftKey ||
+                                  event.altKey
+                                )
+                                  return;
+                                event.preventDefault();
+                                const state = {
+                                  ...location.state,
+                                  [detail ? 'apmOperations' : 'apmList']: {
+                                    query,
+                                    scroll: main.current?.scrollTop || 0,
+                                  },
+                                };
+                                navigate(`${location.pathname}?${query}`, { replace: true, state });
+                                navigate(`/apm/service?${p}`, { state });
+                              }}
                             >
                               {detail ? row.operation : row.identity.service_name}
                             </Link>
@@ -554,15 +725,13 @@ export default function ApmPage() {
                               </div>
                             )}
                           </td>
-                          <td>{number(row.rps)}</td>
+                          <td className="px-3 text-right tabular-nums">{number(row.rps)}</td>
                           <td
-                            className={
-                              row.error_rate != null && row.error_rate > 0 ? 'text-red-500' : ''
-                            }
+                            className={`px-3 text-right tabular-nums ${row.error_rate != null && row.error_rate > 0 ? 'text-red-500' : ''}`}
                           >
                             {number(row.error_rate, '%')}
                           </td>
-                          <td>{number(row.p95_ms)}</td>
+                          <td className="px-3 text-right tabular-nums">{number(row.p95_ms)}</td>
                           <td className="text-zinc-500">
                             <span
                               className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full ${row.data_status === 'observed' ? 'bg-zinc-500' : 'bg-amber-500'}`}
@@ -587,18 +756,18 @@ export default function ApmPage() {
         )}
         {overview && (
           <>
-            <div className="grid gap-4 lg:grid-cols-3">
+            <Card className="grid gap-4 lg:grid-cols-3 lg:divide-x lg:divide-[rgb(var(--border))]">
               {[
                 ['rps', tr('请求速率', 'Request rate')],
                 ['error_rate', tr('错误率', 'Error rate')],
                 [latency, tr('延迟', 'Latency')],
               ].map(([key, title]) => (
-                <Card key={key}>
-                  <h2 className="text-xs text-zinc-500">
+                <section key={key} className="min-w-0 lg:pl-3 first:lg:pl-0">
+                  <h2 className="text-sm text-zinc-400">
                     {key === latency ? (
                       <select
                         aria-label={tr('延迟分位数', 'Latency percentile')}
-                        className="max-w-full bg-transparent text-xs text-zinc-500"
+                        className="max-w-full bg-transparent text-sm text-zinc-400"
                         value={latency}
                         onChange={(e) => setLatency(e.target.value as typeof latency)}
                       >
@@ -610,23 +779,28 @@ export default function ApmPage() {
                       title
                     )}
                   </h2>
-                  <div className="mb-5 mt-2 text-2xl font-semibold tabular-nums">
+                  <div className="mb-1 mt-1 text-2xl font-semibold tabular-nums">
                     {number(overview.summary[key as 'rps' | 'error_rate' | typeof latency])}
                     <span className="ml-1 text-xs font-normal text-zinc-500">
                       {key === 'rps' ? 'req/s' : key === 'error_rate' ? '%' : 'ms'}
                     </span>
                   </div>
-                  <div className="h-40">
+                  <p className="mb-2 text-xs text-zinc-500">
+                    {key === 'rps'
+                      ? tr('所选时段平均速率', 'Average rate in selected range')
+                      : tr('所选时段汇总', 'Selected range summary')}
+                  </p>
+                  <div className="h-28">
                     <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={overview.points}>
+                      <LineChart data={overview.points} syncId="apm-red">
                         <CartesianGrid stroke="rgb(var(--border))" strokeDasharray="3 3" />
                         <XAxis
                           dataKey="timestamp"
                           tickFormatter={(v) => new Date(v * 1000).toLocaleTimeString()}
-                          tick={{ fontSize: 10 }}
+                          tick={{ fontSize: 11 }}
                           minTickGap={45}
                         />
-                        <YAxis width={45} tick={{ fontSize: 10 }} />
+                        <YAxis width={45} tick={{ fontSize: 11 }} />
                         <Tooltip
                           contentStyle={chartTooltipStyle}
                           labelStyle={chartTooltipLabelStyle}
@@ -645,25 +819,26 @@ export default function ApmPage() {
                       </LineChart>
                     </ResponsiveContainer>
                   </div>
-                </Card>
+                </section>
               ))}
-            </div>
+            </Card>
           </>
         )}
-        {detail && tab === 'overview' && (
+        {detail && tab === 'overview' && !operation && (
           <>
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+            <div className="space-y-3">
               <Card className="min-w-0">
-                <div className="mb-4 flex items-center justify-between gap-3">
+                <div className="mb-2 flex items-center justify-between gap-3">
                   <h2 className="text-sm font-medium">{tr('重点接口', 'Key operations')}</h2>
                   <Link
                     className="inline-flex items-center gap-1 text-xs text-zinc-500"
+                    state={location.state}
                     to={viewLink('operations')}
                   >
                     {tr('全部接口', 'All operations')} <ArrowRight size={12} />
                   </Link>
                 </div>
-                <p className="mb-3 text-xs text-zinc-500">
+                <p className="mb-2 text-xs text-zinc-500">
                   {tr('按 P95 延迟排序，最多展示 5 项', 'Top 5 operations by P95 latency')}
                 </p>
                 {!operations && !loading && (
@@ -674,35 +849,42 @@ export default function ApmPage() {
                 {operations &&
                   (operations.items.length ? (
                     <div className="overflow-auto">
-                      <table className="w-full whitespace-nowrap text-left text-xs">
+                      <table className="w-full text-left text-sm">
                         <thead className="text-zinc-500">
                           <tr>
                             <th className="py-2 font-normal">{tr('接口', 'Operation')}</th>
-                            <th className="px-3 font-normal">RPS</th>
-                            <th className="px-3 font-normal">{tr('错误率', 'Error rate')}</th>
-                            <th className="pl-3 font-normal">P95 (ms)</th>
+                            <th className="px-3 text-right font-normal">RPS</th>
+                            <th className="px-3 text-right font-normal">
+                              {tr('错误率', 'Error rate')}
+                            </th>
+                            <th className="pl-3 text-right font-normal">P95 (ms)</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-zinc-800">
+                        <tbody className="divide-y divide-[rgb(var(--border))]">
                           {operations.items.map((row) => {
                             const scope = serviceParams(params, row.identity);
                             if (row.operation) scope.set('operation', row.operation);
                             return (
                               <tr key={row.operation}>
-                                <td className="max-w-64 truncate py-3">
+                                <td className="max-w-64 break-words py-2.5">
                                   <Link
                                     title={row.operation}
-                                    className="font-medium hover:underline"
-                                    to={traceLink(scope)}
+                                    className="font-medium hover:text-indigo-500 hover:underline"
+                                    state={{ ...location.state, apmOperations: undefined }}
+                                    to={`/apm/service?${scope}`}
                                   >
                                     {row.operation}
                                   </Link>
                                 </td>
-                                <td className="px-3">{number(row.rps)}</td>
-                                <td className={`px-3 ${row.error_rate ? 'text-red-500' : ''}`}>
+                                <td className="px-3 text-right tabular-nums">{number(row.rps)}</td>
+                                <td
+                                  className={`px-3 text-right tabular-nums ${row.error_rate ? 'text-red-500' : ''}`}
+                                >
                                   {number(row.error_rate, '%')}
                                 </td>
-                                <td className="pl-3">{number(row.p95_ms)}</td>
+                                <td className="pl-3 text-right tabular-nums">
+                                  {number(row.p95_ms)}
+                                </td>
                               </tr>
                             );
                           })}
@@ -715,115 +897,115 @@ export default function ApmPage() {
                     />
                   ))}
               </Card>
-              <Card className="min-w-0">
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <h2 className="text-sm font-medium">
-                    {tr('上下游依赖', 'Service dependencies')}
-                  </h2>
+              {dependencies?.items.length ? (
+                <Card className="min-w-0">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <h2 className="text-sm font-medium">
+                      {tr('上下游依赖', 'Service dependencies')}
+                    </h2>
+                    <Link
+                      className="inline-flex items-center gap-1 text-xs text-zinc-500"
+                      state={location.state}
+                      to={viewLink('dependencies')}
+                    >
+                      {tr('查看拓扑', 'View map')} <ArrowRight size={12} />
+                    </Link>
+                  </div>
+                  <p className="mb-2 text-xs text-zinc-500">
+                    {tr(
+                      '所有入口类型 · 按观测流量排列',
+                      'All entry types · Ordered by observed traffic',
+                    )}
+                  </p>
+                  {!dependencies && !loading && (
+                    <p className="py-6 text-xs text-zinc-500">
+                      {tr('依赖查询不可用，请重试。', 'Dependencies unavailable. Please retry.')}
+                    </p>
+                  )}
+                  {dependencies &&
+                    (dependencies.items.length ? (
+                      <div className="divide-y divide-[rgb(var(--border))]">
+                        {dependencies.items.slice(0, 5).map((edge, i) => {
+                          const outgoing = Object.entries(edge.client).every(
+                            ([key, value]) => value === (params.get(key) || ''),
+                          );
+                          const peer = outgoing ? edge.server : edge.client;
+                          const external = outgoing
+                            ? edge.connection_type === 'database'
+                            : edge.connection_type === 'virtual_node';
+                          return (
+                            <div
+                              key={i}
+                              className="flex items-center justify-between gap-3 py-3 text-xs"
+                            >
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="shrink-0 text-zinc-500">
+                                    {outgoing ? tr('下游', 'Downstream') : tr('上游', 'Upstream')}
+                                  </span>
+                                  {external ? (
+                                    <span className="truncate">{peer.service_name}</span>
+                                  ) : (
+                                    <Link
+                                      title={peer.service_name}
+                                      className="truncate font-medium hover:underline"
+                                      state={location.state}
+                                      to={`/apm/service?${serviceParams(params, peer)}`}
+                                    >
+                                      {peer.service_name}
+                                    </Link>
+                                  )}
+                                </div>
+                                <p className="mt-1 truncate text-zinc-500">
+                                  {external
+                                    ? tr('推断的外部依赖', 'Inferred external dependency')
+                                    : `${peer.environment || unset} / ${peer.service_namespace || unset}`}
+                                </p>
+                              </div>
+                              <span className="shrink-0 tabular-nums text-zinc-500">
+                                {number(edge.rps)} req/s
+                              </span>
+                            </div>
+                          );
+                        })}
+                        {(dependencies.items.length > 5 || dependencies.truncated) && (
+                          <p className="pt-3 text-xs text-zinc-500">
+                            {tr(
+                              '仅展示流量最高的 5 条关系',
+                              'Showing up to 5 busiest dependencies',
+                            )}
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <EmptyState
+                        title={tr(
+                          '当前时间段未观测到依赖',
+                          'No dependencies observed in this window',
+                        )}
+                      />
+                    ))}
+                </Card>
+              ) : (
+                <div className="flex flex-wrap items-center justify-between gap-2 px-1 py-2 text-sm text-zinc-500">
+                  <span>
+                    {!dependencies && !loading
+                      ? tr('依赖查询不可用', 'Dependency query unavailable')
+                      : tr(
+                          '当前范围未观测到 Trace 依赖',
+                          'No trace dependencies observed in this scope',
+                        )}
+                  </span>
                   <Link
-                    className="inline-flex items-center gap-1 text-xs text-zinc-500"
+                    state={location.state}
+                    className="hover:underline"
                     to={viewLink('dependencies')}
                   >
-                    {tr('查看拓扑', 'View map')} <ArrowRight size={12} />
+                    {tr('查看依赖', 'View dependencies')} →
                   </Link>
                 </div>
-                <p className="mb-3 text-xs text-zinc-500">
-                  {tr(
-                    '所有入口类型 · 按观测流量排列',
-                    'All entry types · Ordered by observed traffic',
-                  )}
-                </p>
-                {!dependencies && !loading && (
-                  <p className="py-6 text-xs text-zinc-500">
-                    {tr('依赖查询不可用，请重试。', 'Dependencies unavailable. Please retry.')}
-                  </p>
-                )}
-                {dependencies &&
-                  (dependencies.items.length ? (
-                    <div className="divide-y divide-zinc-800">
-                      {dependencies.items.slice(0, 5).map((edge, i) => {
-                        const outgoing = Object.entries(edge.client).every(
-                          ([key, value]) => value === (params.get(key) || ''),
-                        );
-                        const peer = outgoing ? edge.server : edge.client;
-                        const external = outgoing
-                          ? edge.connection_type === 'database'
-                          : edge.connection_type === 'virtual_node';
-                        return (
-                          <div
-                            key={i}
-                            className="flex items-center justify-between gap-3 py-3 text-xs"
-                          >
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className="shrink-0 text-zinc-500">
-                                  {outgoing ? tr('下游', 'Downstream') : tr('上游', 'Upstream')}
-                                </span>
-                                {external ? (
-                                  <span className="truncate">{peer.service_name}</span>
-                                ) : (
-                                  <Link
-                                    title={peer.service_name}
-                                    className="truncate font-medium hover:underline"
-                                    to={`/apm/service?${serviceParams(params, peer)}`}
-                                  >
-                                    {peer.service_name}
-                                  </Link>
-                                )}
-                              </div>
-                              <p className="mt-1 truncate text-zinc-500">
-                                {external
-                                  ? tr('推断的外部依赖', 'Inferred external dependency')
-                                  : `${peer.environment || unset} / ${peer.service_namespace || unset}`}
-                              </p>
-                            </div>
-                            <span className="shrink-0 tabular-nums text-zinc-500">
-                              {number(edge.rps)} req/s
-                            </span>
-                          </div>
-                        );
-                      })}
-                      {(dependencies.items.length > 5 || dependencies.truncated) && (
-                        <p className="pt-3 text-xs text-zinc-500">
-                          {tr('仅展示流量最高的 5 条关系', 'Showing up to 5 busiest dependencies')}
-                        </p>
-                      )}
-                    </div>
-                  ) : (
-                    <EmptyState
-                      title={tr(
-                        '当前时间段未观测到依赖',
-                        'No dependencies observed in this window',
-                      )}
-                    />
-                  ))}
-              </Card>
+              )}
             </div>
-            <Card className="flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <h2 className="text-sm font-medium">{tr('排查请求', 'Investigate requests')}</h2>
-                <p className="mt-1 text-xs text-zinc-500">
-                  {tr(
-                    '沿用当前服务和时间范围，查看链路并关联同请求日志。',
-                    'Keep this service and time window when opening traces and correlated logs.',
-                  )}
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-4 text-xs">
-                <Link
-                  className="inline-flex items-center gap-1 hover:underline"
-                  to={traceLink(params, 'duration > 1s')}
-                >
-                  {tr('慢请求 (>1s)', 'Slow requests (>1s)')} <ArrowRight size={12} />
-                </Link>
-                <Link
-                  className="inline-flex items-center gap-1 hover:underline"
-                  to={traceLink(params, 'status = error')}
-                >
-                  {tr('错误请求', 'Errored requests')} <ArrowRight size={12} />
-                </Link>
-              </div>
-            </Card>
           </>
         )}
         {dependencies && tab === 'dependencies' && (
@@ -844,7 +1026,7 @@ export default function ApmPage() {
                     `Inspected ${diagnostics.sampled_traces} representative traces. These are sample observations, not a root-cause or sampling-coverage determination.`,
                   )}
                 </p>
-                <div className="divide-y divide-zinc-800">
+                <div className="divide-y divide-[rgb(var(--border))]">
                   {diagnostics.checks.map((check) => (
                     <div key={check.key} className="flex justify-between gap-4 py-3 text-xs">
                       <span>
@@ -894,7 +1076,7 @@ export default function ApmPage() {
                     title={tr('样本缺少实例关联字段', 'Samples have no instance identity')}
                   />
                 ) : (
-                  <div className="divide-y divide-zinc-800">
+                  <div className="divide-y divide-[rgb(var(--border))]">
                     {diagnostics.instances.map((instance, i) => (
                       <div
                         key={i}
@@ -930,7 +1112,7 @@ export default function ApmPage() {
         {runtime && (
           <Card>
             <h2 className="mb-3 text-sm font-medium">{tr('运行时指标', 'Runtime metrics')}</h2>
-            <p className="mb-3 text-xs text-zinc-500">
+            <p className="mb-2 text-xs text-zinc-500">
               {tr(
                 '应用已导出的运行时指标，取结束时间前 5 分钟内的最近值；需配置服务身份标签。',
                 'Runtime gauges exported by the application, using the latest value within 5 minutes of the end time; service identity labels are required.',
@@ -949,13 +1131,13 @@ export default function ApmPage() {
                       tr('实例', 'Instance'),
                       tr('数值 / 单位', 'Value / unit'),
                     ].map((v) => (
-                      <th className="p-3" key={v}>
+                      <th className="p-3 [&:nth-child(n+2):nth-child(-n+4)]:text-right" key={v}>
                         {v}
                       </th>
                     ))}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-zinc-800">
+                <tbody className="divide-y divide-[rgb(var(--border))]">
                   {runtime.items.map((row, i) => (
                     <tr key={i}>
                       <td className="p-3">{row.name}</td>
