@@ -15,9 +15,11 @@ import (
 )
 
 const (
+	defaultPodListLimit       = 50
 	defaultPodLogTailLines    = 100
 	defaultPodLogLimitBytes   = 16 * 1024
 	defaultPodLogSinceSeconds = int64(3600)
+	maxPodListLimit           = 100
 	maxPodLogTailLines        = 500
 	maxPodLogLimitBytes       = 64 * 1024
 	maxPodLogSinceSeconds     = int64(24 * 3600)
@@ -30,6 +32,24 @@ func (p *InventoryPusher) RegisterHandlers() {
 	if p == nil || p.client == nil || p.api == nil {
 		return
 	}
+	p.client.RegisterHandler(tunnel.MethodListK8sPods,
+		func(ctx context.Context, _ tunnel.Session, _ string, body []byte) ([]byte, error) {
+			var req tunnel.KubernetesListPodsRequest
+			if len(body) > 0 {
+				if err := json.Unmarshal(body, &req); err != nil {
+					return nil, fmt.Errorf("list_k8s_pods: decode: %w", err)
+				}
+			}
+			if req.ClusterID != 0 && req.ClusterID != p.info.ClusterID {
+				return nil, fmt.Errorf("list_k8s_pods: cluster_id %d does not match controller cluster_id %d", req.ClusterID, p.info.ClusterID)
+			}
+			req.ClusterID = p.info.ClusterID
+			resp, err := p.api.listPodsLive(ctx, req)
+			if err != nil {
+				return nil, err
+			}
+			return json.Marshal(resp)
+		})
 	p.client.RegisterHandler(tunnel.MethodDescribeK8sResource,
 		func(ctx context.Context, _ tunnel.Session, _ string, body []byte) ([]byte, error) {
 			var req tunnel.KubernetesDescribeResourceRequest
@@ -84,6 +104,66 @@ func (p *InventoryPusher) RegisterHandlers() {
 			}
 			return json.Marshal(resp)
 		})
+}
+
+func (c *apiClient) listPodsLive(ctx context.Context, req tunnel.KubernetesListPodsRequest) (*tunnel.KubernetesListPodsResponse, error) {
+	namespace := strings.TrimSpace(req.Namespace)
+	limit := req.Limit
+	if limit <= 0 {
+		limit = defaultPodListLimit
+	}
+	if limit > maxPodListLimit {
+		limit = maxPodListLimit
+	}
+	apiPath := "/api/v1/pods"
+	if namespace != "" {
+		apiPath = "/api/v1/namespaces/" + url.PathEscape(namespace) + "/pods"
+	}
+	q := url.Values{}
+	q.Set("limit", strconv.Itoa(limit))
+	if selector := strings.TrimSpace(req.LabelSelector); selector != "" {
+		q.Set("labelSelector", selector)
+	}
+	if token := strings.TrimSpace(req.Continue); token != "" {
+		q.Set("continue", token)
+	}
+	raw, err := c.getRaw(ctx, apiPath+"?"+q.Encode())
+	if err != nil {
+		return nil, fmt.Errorf("list_k8s_pods: get pods: %w", err)
+	}
+	var list struct {
+		Metadata struct {
+			Continue string `json:"continue"`
+		} `json:"metadata"`
+		Items []struct {
+			Metadata struct {
+				Namespace string `json:"namespace"`
+				Name      string `json:"name"`
+			} `json:"metadata"`
+			Spec struct {
+				NodeName string `json:"nodeName"`
+			} `json:"spec"`
+			Status struct {
+				Phase             string `json:"phase"`
+				Reason            string `json:"reason"`
+				ContainerStatuses []struct {
+					RestartCount int `json:"restartCount"`
+				} `json:"containerStatuses"`
+			} `json:"status"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &list); err != nil {
+		return nil, fmt.Errorf("list_k8s_pods: decode Kubernetes response: %w", err)
+	}
+	pods := make([]tunnel.KubernetesPodSummary, 0, len(list.Items))
+	for _, item := range list.Items {
+		restarts := 0
+		for _, status := range item.Status.ContainerStatuses {
+			restarts += status.RestartCount
+		}
+		pods = append(pods, tunnel.KubernetesPodSummary{Namespace: item.Metadata.Namespace, Name: item.Metadata.Name, NodeName: item.Spec.NodeName, Phase: item.Status.Phase, Reason: item.Status.Reason, RestartCount: restarts})
+	}
+	return &tunnel.KubernetesListPodsResponse{ClusterID: req.ClusterID, Namespace: namespace, Pods: pods, Continue: list.Metadata.Continue, FetchedAt: time.Now().Unix()}, nil
 }
 
 func (c *apiClient) describeResource(ctx context.Context, req tunnel.KubernetesDescribeResourceRequest) (*tunnel.KubernetesDescribeResourceResponse, error) {

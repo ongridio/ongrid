@@ -127,6 +127,38 @@ func TestRegisterHandlersDescribePod(t *testing.T) {
 	}
 }
 
+func TestRegisterHandlersListPods(t *testing.T) {
+	var gotPath, gotLimit, gotSelector, gotContinue string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotLimit = r.URL.Path, r.URL.Query().Get("limit")
+		gotSelector, gotContinue = r.URL.Query().Get("labelSelector"), r.URL.Query().Get("continue")
+		writeTestResponse(t, w, `{"metadata":{"continue":"next"},"items":[{"metadata":{"namespace":"default","name":"api-1"},"spec":{"nodeName":"node-a"},"status":{"phase":"Running","containerStatuses":[{"restartCount":2},{"restartCount":1}]}}]}`)
+	}))
+	defer srv.Close()
+	fc := &fakeTunnelClient{handlers: map[string]tunnel.Handler{}}
+	p := &InventoryPusher{client: fc, info: tunnel.KubernetesInfo{ClusterID: 7, Role: "controller"}, api: &apiClient{baseURL: srv.URL, token: "test-token", http: srv.Client()}}
+	p.RegisterHandlers()
+	h := fc.handlers[tunnel.MethodListK8sPods]
+	if h == nil {
+		t.Fatalf("handler %q not registered", tunnel.MethodListK8sPods)
+	}
+	body, _ := json.Marshal(tunnel.KubernetesListPodsRequest{ClusterID: 7, Namespace: "default", LabelSelector: "app=api", Limit: 999, Continue: "old"})
+	out, err := h(context.Background(), tunnel.Session{}, tunnel.MethodListK8sPods, body)
+	if err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if gotPath != "/api/v1/namespaces/default/pods" || gotLimit != "100" || gotSelector != "app=api" || gotContinue != "old" {
+		t.Fatalf("unexpected request path=%q limit=%q selector=%q continue=%q", gotPath, gotLimit, gotSelector, gotContinue)
+	}
+	var resp tunnel.KubernetesListPodsResponse
+	if err := json.Unmarshal(out, &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Continue != "next" || len(resp.Pods) != 1 || resp.Pods[0].RestartCount != 3 || resp.Pods[0].NodeName != "node-a" {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
 func TestDescribeResourceRejectsDisallowedKind(t *testing.T) {
 	api := &apiClient{baseURL: "http://127.0.0.1", token: "token", http: http.DefaultClient}
 	_, err := api.describeResource(context.Background(), tunnel.KubernetesDescribeResourceRequest{

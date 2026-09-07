@@ -25,6 +25,7 @@ const (
 	MethodPushNetworkDiscovery = "push_network_discovery"
 	MethodProbeNetworkSNMP     = "probe_network_snmp"
 	MethodPushK8sInventory     = "push_k8s_inventory"
+	MethodListK8sPods          = "list_k8s_pods"
 	MethodDescribeK8sResource  = "describe_k8s_resource"
 	MethodQueryK8sLogs         = "query_k8s_logs"
 	MethodExecuteK8sAction     = "execute_k8s_action"
@@ -650,6 +651,39 @@ type KubernetesInventoryResponse struct {
 	AcceptedWorkloads int `json:"accepted_workloads"`
 	AcceptedPods      int `json:"accepted_pods"`
 	AcceptedEvents    int `json:"accepted_events"`
+}
+
+// ---------------------------------------------------------------------
+// list_k8s_pods (cloud -> edge controller)
+// ---------------------------------------------------------------------
+
+// KubernetesListPodsRequest asks the cluster controller for a bounded, live
+// Pod list. It deliberately exposes only namespace and label filtering.
+type KubernetesListPodsRequest struct {
+	ClusterID     uint64 `json:"cluster_id"`
+	Namespace     string `json:"namespace,omitempty"`
+	LabelSelector string `json:"label_selector,omitempty"`
+	Limit         int    `json:"limit,omitempty"`
+	Continue      string `json:"continue,omitempty"`
+}
+
+// KubernetesPodSummary is a deliberately small, non-sensitive view of a Pod.
+// Full live objects remain available through describe_k8s_resource.
+type KubernetesPodSummary struct {
+	Namespace    string `json:"namespace"`
+	Name         string `json:"name"`
+	NodeName     string `json:"node_name,omitempty"`
+	Phase        string `json:"phase,omitempty"`
+	Reason       string `json:"reason,omitempty"`
+	RestartCount int    `json:"restart_count,omitempty"`
+}
+
+type KubernetesListPodsResponse struct {
+	ClusterID uint64                 `json:"cluster_id"`
+	Namespace string                 `json:"namespace,omitempty"`
+	Pods      []KubernetesPodSummary `json:"pods"`
+	Continue  string                 `json:"continue,omitempty"`
+	FetchedAt int64                  `json:"fetched_at"`
 }
 
 // ---------------------------------------------------------------------
