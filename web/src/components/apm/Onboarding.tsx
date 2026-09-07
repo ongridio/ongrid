@@ -92,8 +92,8 @@ export function Onboarding() {
       {error && <p role="alert">{error}</p>}
       <p className="text-xs text-zinc-500">
         {tr(
-          '先安装对应的官方埋点组件，再启动应用并发送真实请求。配置生成不代表接入成功：返回服务列表，进入“接入诊断”检查 Trace、指标和日志关联。采样覆盖率需要单独核验。',
-          'Install the official instrumentation first, then start the application and send real requests. Configuration alone does not confirm ingestion: use service diagnostics to inspect traces, metrics and log correlation. Verify sampling coverage separately.',
+          '先安装对应的官方埋点组件，再启动应用并发送真实请求。配置生成不代表接入成功：从服务列表打开服务，在“接入管理”中检查 Trace、指标和日志关联。采样覆盖率需要单独核验。',
+          'Install the official instrumentation first, then start the application and send real requests. Configuration alone does not confirm ingestion: open a service and use Instrumentation to inspect traces, metrics and log correlation. Verify sampling coverage separately.',
         )}
       </p>
       <div className="flex flex-wrap gap-4 text-xs underline">

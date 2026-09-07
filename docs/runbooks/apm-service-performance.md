@@ -6,7 +6,7 @@
 
 先启用本机 Edge 的 Trace 接收，或在 Kubernetes 安装 Telemetry Gateway。主机同进程网络可用 `http://127.0.0.1:4318/v1/traces`；Docker 使用容器可达地址，K8s 使用网关 Service 的实际 DNS。不要向业务应用分发 Manager/Edge 管理密钥。
 
-在「接入说明」填写语言、目标地址、服务、业务命名空间和环境，复制配置。应用身份为 `(environment, service.namespace, service.name)`；service.namespace 不等同于 K8s namespace。缺失属性会进入“未设置”。接收端将旧 deployment.environment 补为 deployment.environment.name，已有规范属性优先。身份保持稳定，路由使用 `/orders/{id}`，不要使用带参数的原始 URL、用户 ID 或 SQL 作为指标标签。
+在「接入管理」填写语言、目标地址、服务、业务命名空间和环境，复制配置。应用身份为 `(environment, service.namespace, service.name)`；service.namespace 不等同于 K8s namespace。缺失属性会进入“未设置”。接收端将旧 deployment.environment 补为 deployment.environment.name，已有规范属性优先。身份保持稳定，路由使用 `/orders/{id}`，不要使用带参数的原始 URL、用户 ID 或 SQL 作为指标标签。
 
 - Java：下载官方 [Java Agent](https://opentelemetry.io/docs/zero-code/java/agent/)，将其路径传给 `-javaagent`。
 - Node.js：安装 `@opentelemetry/api` 和 `@opentelemetry/auto-instrumentations-node`，在框架加载前注册。页面命令针对 CommonJS；ESM 按[官方指引](https://github.com/open-telemetry/opentelemetry-js/blob/main/doc/esm-support.md)使用 loader。
@@ -65,6 +65,8 @@ OTLP 日志使用标准 trace_id/span_id；文件或 CRI 日志可写单行 JSON
 **K8s 网关现有 OTLP 日志出口是 Loki 通道。选择 Elasticsearch 不会自动改变它。** ES 场景使用已有 Node Agent 的容器/文件日志采集（按当前日志后端下发的配置写 ES），应用保留 `OTEL_LOGS_EXPORTER=none`，避免写入与查询分离。已有官方 OTel ES 直写管道也可复用，但必须核验该服务身份和 trace_id 确实写到当前查询索引。
 
 ## 4. 验收和数据语义
+
+服务列表提供环境、命名空间及时间范围筛选；入口类型在高级筛选中。打开服务后，概览集中展示 RED、重点接口与上下游；延迟默认 P95，可切换 P50/P99。调用链沿用绝对时间与完整服务身份；运行时与按需 pprof 在「实例」，接入诊断在「接入管理」，请求告警由顶部「创建告警」进入原规则编辑器。
 
 发送真实成功、失败、慢请求，然后在服务列表选取覆盖请求的时间段。指标生成存在延迟，至少两个 counter 采集点后才能计算 rate。服务列表只发现窗口内存在指标的服务。
 
