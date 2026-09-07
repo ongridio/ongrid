@@ -1,8 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { serviceParams, serviceTraceQL, traceLink } from './apm';
+import { queryApm, serviceParams, serviceTraceQL, traceLink } from './apm';
+import { http, HttpResponse } from 'msw';
+import { server } from '@/test/msw-server';
 import { absoluteWindow, correlationFilters, logTraceLink, canonicalTraceID } from '@/lib/telemetryContext';
 
 describe('APM correlation', () => {
+  it('keeps trace-sample service discovery valid after visiting an all-protocol service', async () => {
+    let received: URL | undefined;
+    server.use(http.get('/api/v1/apm/services', ({ request }) => {
+      received = new URL(request.url);
+      return HttpResponse.json({ data: { items: [] } });
+    }));
+    await queryApm('services', new URLSearchParams({
+      metric_source: 'tempo_spanmetrics', protocol: 'all', span_kind: 'consumer',
+    }));
+    expect(received?.searchParams.get('protocol')).toBe('http');
+    expect(received?.searchParams.get('span_kind')).toBe('consumer');
+    expect(received?.searchParams.get('metric_source')).toBe('tempo_spanmetrics');
+  });
   const params = new URLSearchParams({
     start: '2026-09-07T00:00:00Z',
     end: '2026-09-07T01:00:00Z',
@@ -21,7 +36,10 @@ describe('APM correlation', () => {
     expect(next.has('page')).toBe(false);
     expect(next.get('start')).toBe(params.get('start'));
     expect(next.get('environment')).toBe('staging');
-    expect(serviceTraceQL(params)).toContain('resource.service.name = "orders\\\"}"');
+    expect(next.get('protocol')).toBe('all');
+    expect(serviceTraceQL(next)).not.toContain('span.http');
+    expect(serviceTraceQL(next)).not.toContain('span.rpc');
+    expect(serviceTraceQL(params)).toContain(String.raw`resource.service.name = "orders\"}"`);
     expect(serviceTraceQL(params)).toContain('resource.deployment.environment.name = nil');
     expect(serviceTraceQL(params)).toContain('kind = server');
     expect(new URL(traceLink(params), 'http://localhost').searchParams.get('environment')).toBe('');

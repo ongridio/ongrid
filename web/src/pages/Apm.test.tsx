@@ -92,7 +92,9 @@ describe('Application performance', () => {
     let requestURL: URL | undefined;
     server.use(
       http.get('/api/v1/apm/diagnostics', () =>
-        HttpResponse.json({ data: { checks: [], instances: [], trace_ids: [], sampled_traces: 0 } }),
+        HttpResponse.json({
+          data: { checks: [], instances: [], trace_ids: [], sampled_traces: 0 },
+        }),
       ),
       http.get('/api/v1/apm/operations', ({ request }) => {
         requestURL = new URL(request.url);
@@ -156,14 +158,15 @@ describe('Application performance', () => {
         <ApmPage />
       </MemoryRouter>,
     );
-    const operation = await screen.findByRole('link', { name: 'POST /orders' });
+    const httpPanel = within(screen.getByRole('region', { name: 'HTTP' }));
+    const operation = await httpPanel.findByRole('link', { name: 'POST /orders' });
     expect(await screen.findByRole('alert')).toHaveTextContent('dependency timeout');
-    expect(screen.getByText('P95 延迟')).toBeInTheDocument();
-    expect(screen.getAllByText('200')).toHaveLength(2);
-    fireEvent.change(screen.getByLabelText('延迟分位数'), {
+    expect(httpPanel.getByText('P95 延迟')).toBeInTheDocument();
+    expect(httpPanel.getAllByText('200')).toHaveLength(2);
+    fireEvent.change(httpPanel.getByLabelText('延迟分位数'), {
       target: { value: 'p99_ms' },
     });
-    expect(screen.getByText('220')).toBeInTheDocument();
+    expect(httpPanel.getByText('220')).toBeInTheDocument();
     expect(urls.every((url) => url.searchParams.get('service_namespace') === 'trade')).toBe(true);
     expect(
       urls.find((url) => url.pathname.endsWith('/operations'))?.searchParams.get('page_size'),
@@ -223,9 +226,9 @@ describe('Application performance', () => {
     fireEvent.change(screen.getByLabelText('环境'), { target: { value: '' } });
     await waitFor(() => expect(requested?.searchParams.has('environment')).toBe(false));
   });
-  it('lists both protocols once per service, sorts through headers and opens the selected protocol', async () => {
+  it('shows one aggregate service row and both protocol sections without a switch', async () => {
     let listURL: URL | undefined;
-    let overviewURL: URL | undefined;
+    const overviewURLs: URL[] = [];
     const protocols = [
       {
         protocol: 'http',
@@ -262,7 +265,7 @@ describe('Application performance', () => {
         });
       }),
       http.get('/api/v1/apm/overview', ({ request }) => {
-        overviewURL = new URL(request.url);
+        overviewURLs.push(new URL(request.url));
         return HttpResponse.json({ data: { summary: row, points: [] } });
       }),
       http.get('/api/v1/apm/operations', () =>
@@ -282,7 +285,10 @@ describe('Application performance', () => {
     expect(listURL?.searchParams.get('protocol')).toBe('all');
     expect(screen.getAllByRole('link', { name: 'orders' })).toHaveLength(1);
     expect(screen.getByRole('link', { name: 'rpc-only' })).toBeInTheDocument();
-    expect(screen.getAllByRole('link', { name: 'RPC' })).toHaveLength(2);
+    expect(screen.queryByRole('columnheader', { name: '协议' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'RPC' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('row')).toHaveLength(3);
+    expect(screen.getByText('800')).toBeInTheDocument();
     expect(screen.queryByRole('group', { name: '请求协议' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '更多' })).not.toBeInTheDocument();
     expect(screen.queryByRole('combobox', { name: '排序' })).not.toBeInTheDocument();
@@ -293,17 +299,26 @@ describe('Application performance', () => {
     expect(
       namespace.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: '按P95 (ms)排序' }));
+    fireEvent.click(screen.getByRole('button', { name: '按最高 P95 (ms)排序' }));
     await waitFor(() => expect(listURL?.searchParams.get('sort')).toBe('p95_ms'));
     await screen.findByRole('link', { name: 'orders' });
-    expect(screen.getByRole('columnheader', { name: 'P95 (ms)' })).toHaveAttribute(
+    expect(screen.getByRole('columnheader', { name: '最高 P95 (ms)' })).toHaveAttribute(
       'aria-sort',
       'descending',
     );
-    fireEvent.click(screen.getAllByRole('link', { name: 'RPC' })[0]);
-    await waitFor(() => expect(overviewURL?.searchParams.get('protocol')).toBe('rpc'));
-    expect(overviewURL?.searchParams.get('service_name')).toBe('orders');
-    expect(screen.getByRole('button', { name: 'RPC' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('link', { name: 'orders' }));
+    await waitFor(() =>
+      expect(overviewURLs.map((url) => url.searchParams.get('protocol')).sort()).toEqual([
+        'http',
+        'rpc',
+      ]),
+    );
+    expect(overviewURLs.every((url) => url.searchParams.get('service_name') === 'orders')).toBe(
+      true,
+    );
+    expect(screen.getByRole('region', { name: 'HTTP' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'RPC' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'RPC' })).not.toBeInTheDocument();
   });
 
   it('debounces search and restores list filters, page and scroll after visiting a service', async () => {
@@ -414,7 +429,11 @@ describe('Application performance', () => {
         <ApmPage />
       </MemoryRouter>,
     );
-    fireEvent.click(await screen.findByRole('link', { name: 'POST /orders' }));
+    fireEvent.click(
+      await within(screen.getByRole('region', { name: 'HTTP' })).findByRole('link', {
+        name: 'POST /orders',
+      }),
+    );
     await waitFor(() => expect(overviewURL?.searchParams.get('operation')).toBe('POST /orders'));
     expect(overviewURL?.searchParams.get('environment')).toBe('production');
     expect(overviewURL?.searchParams.get('start')).toBe('2026-09-07T00:00:00Z');
@@ -424,14 +443,15 @@ describe('Application performance', () => {
       expect.stringContaining('/traces?'),
     );
     fireEvent.click(screen.getByRole('link', { name: '← 全部接口' }));
-    await screen.findByRole('link', { name: 'POST /orders' });
+    const httpPanel = within(screen.getByRole('region', { name: 'HTTP' }));
+    await httpPanel.findByRole('link', { name: 'POST /orders' });
     expect(screen.getByRole('textbox', { name: '搜索接口…' })).toHaveValue('POST');
-    expect(screen.getByRole('columnheader', { name: 'P95 (ms)' })).toHaveAttribute(
+    expect(httpPanel.getByRole('columnheader', { name: 'P95 (ms)' })).toHaveAttribute(
       'aria-sort',
       'descending',
     );
   });
-  it('switches same-name services by their full identity while keeping the time and protocol', async () => {
+  it('switches same-name services by their full identity while keeping the time and showing all protocols', async () => {
     server.use(
       http.get('/api/v1/apm/overview', () =>
         HttpResponse.json({ data: { summary: row, points: [] } }),
@@ -489,10 +509,136 @@ describe('Application performance', () => {
     const next = new URL(link.getAttribute('href')!, 'http://localhost');
     expect(next.searchParams.get('environment')).toBe('staging');
     expect(next.searchParams.get('service_namespace')).toBe('');
-    expect(next.searchParams.get('protocol')).toBe('http');
+    expect(next.searchParams.get('protocol')).toBe('all');
     expect(next.searchParams.get('end')).toBe('2026-09-07T01:00:00Z');
     fireEvent.click(link);
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(screen.getByText('staging / 未设置')).toBeInTheDocument();
+  });
+  it('paginates and sorts protocol operations independently without losing scroll or identity', async () => {
+    const latest = new Map<string, URL>();
+    server.use(
+      http.get('/api/v1/apm/operations', ({ request }) => {
+        const url = new URL(request.url);
+        const protocol = url.searchParams.get('protocol')!;
+        latest.set(protocol, url);
+        return HttpResponse.json({
+          data: {
+            items: [{ ...row, operation: protocol === 'rpc' ? 'trade.Orders/Get' : 'GET /orders' }],
+            total: 80,
+            page: Number(url.searchParams.get('page')),
+            page_size: 25,
+          },
+        });
+      }),
+    );
+    render(
+      <MemoryRouter
+        initialEntries={[
+          `/apm/service?${period}&service_name=orders&environment=production&service_namespace=trade&tab=operations`,
+        ]}
+      >
+        <ApmPage />
+      </MemoryRouter>,
+    );
+    const httpPanel = () => within(screen.getByRole('region', { name: 'HTTP' }));
+    const rpcPanel = () => within(screen.getByRole('region', { name: 'RPC' }));
+    await rpcPanel().findByRole('link', { name: 'trade.Orders/Get' });
+    const main = screen.getByRole('main');
+    main.scrollTop = 240;
+    fireEvent.click(rpcPanel().getByRole('button', { name: '下一页' }));
+    await waitFor(() => expect(latest.get('rpc')?.searchParams.get('page')).toBe('2'));
+    await rpcPanel().findByRole('link', { name: 'trade.Orders/Get' });
+    expect(latest.get('http')?.searchParams.get('page')).toBe('1');
+    await waitFor(() => expect(main.scrollTop).toBe(240));
+    fireEvent.click(httpPanel().getByRole('button', { name: '按错误率排序' }));
+    await waitFor(() => expect(latest.get('http')?.searchParams.get('sort')).toBe('error_rate'));
+    await rpcPanel().findByRole('link', { name: 'trade.Orders/Get' });
+    expect(latest.get('rpc')?.searchParams.get('sort')).toBe('rps');
+    expect(latest.get('rpc')?.searchParams.get('page')).toBe('2');
+    const target = new URL(
+      rpcPanel().getByRole('link', { name: 'trade.Orders/Get' }).getAttribute('href')!,
+      'http://localhost',
+    );
+    expect(target.searchParams.get('protocol')).toBe('rpc');
+    expect(target.searchParams.get('operation')).toBe('trade.Orders/Get');
+    expect(target.searchParams.get('environment')).toBe('production');
+    expect(target.searchParams.get('start')).toBe('2026-09-07T00:00:00Z');
+  });
+  it('keeps successful protocol metrics visible when the other protocol query fails', async () => {
+    server.use(
+      http.get('/api/v1/apm/overview', ({ request }) =>
+        new URL(request.url).searchParams.get('protocol') === 'rpc'
+          ? HttpResponse.json({ message: 'RPC metrics unavailable' }, { status: 502 })
+          : HttpResponse.json({ data: { summary: { ...row, p95_ms: 800 }, points: [] } }),
+      ),
+      http.get('/api/v1/apm/operations', () =>
+        HttpResponse.json({ data: { items: [], total: 0, page: 1, page_size: 5 } }),
+      ),
+      http.get('/api/v1/apm/dependencies', () => HttpResponse.json({ data: { items: [] } })),
+    );
+    render(
+      <MemoryRouter
+        initialEntries={[
+          `/apm/service?${period}&service_name=orders&environment=production&service_namespace=trade`,
+        ]}
+      >
+        <ApmPage />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByRole('alert')).toHaveTextContent('RPC: RPC metrics unavailable');
+    expect(
+      within(screen.getByRole('region', { name: 'HTTP' })).getByText('800'),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByRole('region', { name: 'RPC' })).queryByText('800'),
+    ).not.toBeInTheDocument();
+    const traceURL = new URL(
+      screen.getByRole('link', { name: '查看链路' }).getAttribute('href')!,
+      'http://localhost',
+    );
+    expect(traceURL.searchParams.get('q')).not.toContain('span.http');
+    expect(traceURL.searchParams.get('q')).not.toContain('span.rpc');
+  });
+  it('includes RPC-only sampled instances and deduplicates instances shared by both protocols', async () => {
+    const protocols = new Set<string>();
+    const shared = {
+      instance_id: 'shared-instance',
+      device_id: '',
+      cluster_id: '',
+      pod: '',
+      version: '',
+    };
+    server.use(
+      http.get('/api/v1/apm/diagnostics', ({ request }) => {
+        const protocol = new URL(request.url).searchParams.get('protocol')!;
+        protocols.add(protocol);
+        return HttpResponse.json({
+          data: {
+            checks: [{ key: 'metrics', status: 'observed', detail: '' }],
+            instances:
+              protocol === 'rpc' ? [shared, { ...shared, instance_id: 'rpc-instance' }] : [shared],
+            trace_ids: [],
+            sampled_traces: 0,
+          },
+        });
+      }),
+      http.get('/api/v1/apm/runtime', () => HttpResponse.json({ data: { items: [] } })),
+    );
+    render(
+      <MemoryRouter
+        initialEntries={[
+          `/apm/service?${period}&service_name=orders&environment=production&service_namespace=trade&tab=instances`,
+        ]}
+      >
+        <ApmPage />
+      </MemoryRouter>,
+    );
+    await screen.findByText(/rpc-instance/);
+    expect(screen.getAllByText(/shared-instance/)).toHaveLength(1);
+    expect([...protocols].sort()).toEqual(['http', 'rpc']);
+    fireEvent.click(screen.getByRole('button', { name: '接入管理' }));
+    expect(await screen.findByRole('heading', { name: 'HTTP · 接入诊断' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'RPC · 接入诊断' })).toBeInTheDocument();
   });
 });

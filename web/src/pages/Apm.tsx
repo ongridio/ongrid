@@ -47,8 +47,12 @@ type Panels = {
   list?: ApmList;
   operations?: ApmList;
   overview?: ApmOverview;
+  rpcOverview?: ApmOverview;
+  rpcOperations?: ApmList;
+  rpcList?: ApmList;
   dependencies?: ApmDependencies;
   diagnostics?: ApmDiagnostics;
+  rpcDiagnostics?: ApmDiagnostics;
   runtime?: ApmRuntime;
 };
 
@@ -81,6 +85,8 @@ export default function ApmPage() {
   const period = params.get('range') || 'custom';
   const query = params.toString();
   const operation = params.get('operation');
+  const combined = detail && !traceMetrics && !operation;
+  const activeProtocol = params.get('protocol') === 'rpc' ? 'rpc' : 'http';
   const context = new URLSearchParams(params);
   context.delete('list_query');
   // Relative refresh advances time within the same view; a changed identity,
@@ -94,7 +100,20 @@ export default function ApmPage() {
     scope: '',
   });
   const current = results.scope === scope ? results : undefined;
-  const { list, operations, overview, dependencies, diagnostics, runtime } = current || {};
+  const { list, overview, dependencies, diagnostics, runtime } = current || {};
+  const diagnosticPanels = combined
+    ? [
+        { protocol: 'http', data: diagnostics },
+        { protocol: 'rpc', data: current?.rpcDiagnostics },
+      ]
+    : [{ protocol: activeProtocol, data: diagnostics }];
+  const instances = [
+    ...new Map(
+      diagnosticPanels
+        .flatMap(({ data }) => data?.instances || [])
+        .map((instance) => [JSON.stringify(instance), instance]),
+    ).values(),
+  ];
 
   const set = useCallback(
     (key: string, value: string | null) => {
@@ -105,10 +124,22 @@ export default function ApmPage() {
         next.delete('operation');
         next.delete('span_kind');
       }
-      if (key !== 'page') next.delete('page');
-      setParams(next, { replace: key === 'search' });
+      if (key.endsWith('_sort')) next.delete(key.replace('_sort', '_page'));
+      else if (!key.endsWith('page')) {
+        for (const page of ['page', 'http_page', 'rpc_page']) next.delete(page);
+      }
+      setParams(next, {
+        replace: key === 'search',
+        state:
+          detail && /^(http|rpc)_(page|sort)$/.test(key)
+            ? {
+                ...location.state,
+                apmOperations: { query: next.toString(), scroll: main.current?.scrollTop || 0 },
+              }
+            : location.state,
+      });
     },
-    [params, setParams],
+    [params, setParams, detail, location.state],
   );
   const changeSearch = useCallback((value: string) => set('search', value), [set]);
   const pickPeriod = (value: string) => {
@@ -120,7 +151,7 @@ export default function ApmPage() {
       next.set('start', new Date(now - duration).toISOString());
       next.set('end', new Date(now).toISOString());
     }
-    next.delete('page');
+    for (const page of ['page', 'http_page', 'rpc_page']) next.delete(page);
     setParams(next);
   };
   useEffect(() => {
@@ -139,6 +170,7 @@ export default function ApmPage() {
   }, [params, setParams, detail, tab]);
   useEffect(() => {
     const p = new URLSearchParams(query);
+    if (combined || p.get('protocol') === 'all') p.set('protocol', 'http');
     setLoading(false);
     setError('');
     setResults((previous) => (previous.scope === scope ? previous : { scope }));
@@ -152,6 +184,7 @@ export default function ApmPage() {
     const fetchPanel = <K extends keyof Panels>(
       task: Promise<NonNullable<Panels[K]>>,
       panel: K,
+      protocol?: string,
     ) => {
       tasks.push(
         task
@@ -165,30 +198,62 @@ export default function ApmPage() {
           .catch((e: Error) => {
             failed = true;
             if (!controller.signal.aborted)
-              setError((previous) => [previous, e.message].filter(Boolean).join(' · '));
+              setError((previous) =>
+                [previous, protocol ? `${protocol.toUpperCase()}: ${e.message}` : e.message]
+                  .filter(Boolean)
+                  .join(' · '),
+              );
           }),
       );
     };
     if (!detail) fetchPanel(queryApm('services', p, controller.signal), 'list');
-    else if (tab === 'overview') {
-      fetchPanel(queryApm('overview', p, controller.signal), 'overview');
-      const top = new URLSearchParams(p);
-      top.set('sort', 'p95_ms');
-      top.set('page', '1');
-      top.set('page_size', '5');
-      if (!p.has('operation')) {
-        fetchPanel(queryApm('operations', top, controller.signal), 'operations');
-        fetchPanel(queryApm('dependencies', p, controller.signal), 'dependencies');
+    else if (tab === 'overview' || tab === 'operations') {
+      for (const protocol of combined ? ['http', 'rpc'] : [activeProtocol]) {
+        const scoped = new URLSearchParams(p);
+        scoped.set('protocol', protocol);
+        const rpc = combined && protocol === 'rpc';
+        if (tab === 'overview') {
+          fetchPanel(
+            queryApm('overview', scoped, controller.signal),
+            rpc ? 'rpcOverview' : 'overview',
+            protocol,
+          );
+          if (!operation) {
+            scoped.set('sort', 'p95_ms');
+            scoped.set('page', '1');
+            scoped.set('page_size', '5');
+            fetchPanel(
+              queryApm('operations', scoped, controller.signal),
+              rpc ? 'rpcOperations' : 'operations',
+              protocol,
+            );
+          }
+        } else {
+          scoped.set('page', p.get(`${protocol}_page`) || p.get('page') || '1');
+          scoped.set('sort', p.get(`${protocol}_sort`) || p.get('sort') || 'rps');
+          fetchPanel(
+            queryApm('operations', scoped, controller.signal),
+            rpc ? 'rpcList' : 'list',
+            protocol,
+          );
+        }
       }
-    } else if (tab === 'operations')
-      fetchPanel(queryApm('operations', p, controller.signal), 'list');
-    else if (tab === 'dependencies')
+      if (tab === 'overview' && !operation)
+        fetchPanel(queryApm('dependencies', p, controller.signal), 'dependencies');
+    } else if (tab === 'dependencies')
       fetchPanel(queryApm('dependencies', p, controller.signal), 'dependencies');
-    else if (tab === 'instances') {
-      fetchPanel(queryApm('diagnostics', p, controller.signal), 'diagnostics');
-      fetchPanel(queryApm('runtime', p, controller.signal), 'runtime');
-    } else if (tab === 'onboarding')
-      fetchPanel(queryApm('diagnostics', p, controller.signal), 'diagnostics');
+    else if (tab === 'instances' || tab === 'onboarding') {
+      for (const protocol of combined ? ['http', 'rpc'] : [activeProtocol]) {
+        const scoped = new URLSearchParams(p);
+        scoped.set('protocol', protocol);
+        fetchPanel(
+          queryApm('diagnostics', scoped, controller.signal),
+          combined && protocol === 'rpc' ? 'rpcDiagnostics' : 'diagnostics',
+          protocol,
+        );
+      }
+      if (tab === 'instances') fetchPanel(queryApm('runtime', p, controller.signal), 'runtime');
+    }
     Promise.all(tasks).finally(() => {
       if (!controller.signal.aborted) {
         setLoading(false);
@@ -197,17 +262,17 @@ export default function ApmPage() {
       }
     });
     return () => controller.abort();
-  }, [query, tab, detail, refresh, scope]);
+  }, [query, tab, detail, refresh, scope, combined, activeProtocol, operation]);
   useEffect(() => {
     if (detail && tab !== 'operations') {
       restoredScroll.current = '';
       return;
     }
-    if (!list || !main.current || restoredScroll.current === query) return;
+    if (!(list || current?.rpcList) || !main.current || restoredScroll.current === query) return;
     restoredScroll.current = query;
     const saved = location.state?.[detail ? 'apmOperations' : 'apmList'];
     main.current.scrollTop = saved?.query === query ? saved.scroll : 0;
-  }, [list, detail, tab, query, location.state]);
+  }, [list, current?.rpcList, detail, tab, query, location.state]);
   const unset = tr('未设置', 'Unset');
   const status = (s: string) =>
     ({
@@ -236,16 +301,19 @@ export default function ApmPage() {
     next.delete('search');
     return `/apm/service?${next}`;
   };
+  const traceParams = new URLSearchParams(params);
+  if (combined) traceParams.set('protocol', 'all');
   const back = new URLSearchParams(params.get('list_query') || params);
   if (!params.has('list_query'))
     for (const key of ['service_name', 'operation', 'tab', 'page', 'sort', 'search'])
       back.delete(key);
   back.delete('list_query');
-  async function createAlert() {
+  async function createAlert(protocol: string) {
     setCreating(true);
     setError('');
     try {
       const p = new URLSearchParams(params);
+      p.set('protocol', protocol);
       p.set('metric', metric);
       p.set('threshold', threshold);
       p.set('min_requests', minimum);
@@ -269,25 +337,6 @@ export default function ApmPage() {
       setCreating(false);
     }
   }
-  const protocolSwitch = !traceMetrics && (
-    <div
-      role="group"
-      aria-label={tr('请求协议', 'Request protocol')}
-      className="inline-flex shrink-0 rounded-md border border-zinc-800 bg-zinc-950 p-0.5"
-    >
-      {['http', 'rpc'].map((value) => (
-        <button
-          key={value}
-          type="button"
-          aria-pressed={(params.get('protocol') || 'http') === value}
-          onClick={() => set('protocol', value)}
-          className={`rounded px-3 py-1 text-xs font-medium ${(params.get('protocol') || 'http') === value ? 'bg-indigo-600 text-white' : 'text-zinc-500 hover:text-zinc-100'}`}
-        >
-          {value.toUpperCase()}
-        </button>
-      ))}
-    </div>
-  );
   const openService = (event: MouseEvent<HTMLAnchorElement>, to: string) => {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
       return;
@@ -302,15 +351,16 @@ export default function ApmPage() {
     navigate(`${location.pathname}?${query}`, { replace: true, state });
     navigate(to, { state });
   };
-  const sortHeading = (key: string, label: string, numeric = false) => {
-    const active = (params.get('sort') || 'rps') === key;
+  const sortHeading = (key: string, label: string, numeric = false, protocol = '') => {
+    const sortKey = detail && protocol ? `${protocol}_sort` : 'sort';
+    const active = (params.get(sortKey) || params.get('sort') || 'rps') === key;
     const hint =
       !detail && !traceMetrics
         ? (
             {
               rps: tr('按服务总请求速率排序', 'Sort by total service request rate'),
               error_rate: tr('按服务整体错误率排序', 'Sort by overall service error rate'),
-              p95_ms: tr('按各协议中最高 P95 排序', 'Sort by the highest protocol P95'),
+              p95_ms: tr('按服务入口的最高 P95 排序', 'Sort by the highest entry-point P95'),
             } as Record<string, string>
           )[key]
         : undefined;
@@ -322,7 +372,7 @@ export default function ApmPage() {
         <button
           type="button"
           title={hint}
-          onClick={() => set('sort', key)}
+          onClick={() => set(sortKey, key)}
           aria-label={tr(`按${label}排序`, `Sort by ${label}`)}
           className={`inline-flex items-center gap-1 rounded py-0.5 hover:text-zinc-100 ${active ? 'font-medium text-zinc-100' : ''}`}
         >
@@ -493,7 +543,6 @@ export default function ApmPage() {
             >
               {tr('接入管理', 'Instrumentation')}
             </button>
-            {protocolSwitch}
           </div>
         </nav>
       )}
@@ -534,20 +583,20 @@ export default function ApmPage() {
               )}
               <Link
                 className="inline-flex items-center gap-1 text-zinc-500 hover:text-indigo-500"
-                to={traceLink(params)}
+                to={traceLink(traceParams)}
               >
                 {tr('查看链路', 'View traces')}
                 <ArrowUpRight size={13} />
               </Link>
               <Link
                 className="text-zinc-500 hover:text-indigo-500"
-                to={traceLink(params, 'duration > 1s')}
+                to={traceLink(traceParams, 'duration > 1s')}
               >
                 {tr('慢链路 (>1s)', 'Slow traces (>1s)')}
               </Link>
               <Link
                 className="text-zinc-500 hover:text-indigo-500"
-                to={traceLink(params, 'status = error')}
+                to={traceLink(traceParams, 'status = error')}
               >
                 {tr('错误链路', 'Error traces')}
               </Link>
@@ -569,11 +618,19 @@ export default function ApmPage() {
             {error}
           </Card>
         )}
-        {loading && !list && !overview && !dependencies && !diagnostics && !runtime && (
-          <Card className="flex min-h-64 items-center justify-center text-sm text-zinc-500">
-            {tr('正在加载当前范围的数据…', 'Loading data for the current scope…')}
-          </Card>
-        )}
+        {loading &&
+          !list &&
+          !overview &&
+          !current?.rpcList &&
+          !current?.rpcOverview &&
+          !dependencies &&
+          !diagnostics &&
+          !current?.rpcDiagnostics &&
+          !runtime && (
+            <Card className="flex min-h-64 items-center justify-center text-sm text-zinc-500">
+              {tr('正在加载当前范围的数据…', 'Loading data for the current scope…')}
+            </Card>
+          )}
         {tab === 'onboarding' && (
           <>
             <div className="flex flex-wrap items-center gap-3">
@@ -635,97 +692,121 @@ export default function ApmPage() {
             />
           </div>
         )}
-        {list && (
-          <Card className="!p-0 overflow-hidden">
-            <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-              <h2 className="text-sm font-medium">
-                {detail
-                  ? tr(`接口 · ${list.total}`, `Operations · ${list.total}`)
-                  : tr(`服务 · ${list.total}`, `Services · ${list.total}`)}
-              </h2>
-              {!detail && (
-                <button
-                  type="button"
-                  className="text-xs text-zinc-500 hover:text-zinc-100"
-                  onClick={() => set('tab', 'onboarding')}
-                >
-                  {tr('接入管理', 'Instrumentation')}
-                </button>
+        {(['services', 'overview', 'operations'].includes(tab)
+          ? combined
+            ? ['http', 'rpc']
+            : [detail ? activeProtocol : '']
+          : []
+        ).map((protocol) => {
+          const rpc = combined && protocol === 'rpc';
+          const overview = rpc ? current?.rpcOverview : current?.overview;
+          const operations = rpc ? current?.rpcOperations : current?.operations;
+          const list = rpc ? current?.rpcList : current?.list;
+          return (
+            <section
+              key={protocol}
+              aria-label={detail && !traceMetrics ? protocol.toUpperCase() : undefined}
+              className="space-y-3"
+            >
+              {detail && !traceMetrics && (tab === 'overview' || tab === 'operations') && (
+                <h2 className="text-sm font-semibold">{protocol.toUpperCase()}</h2>
               )}
-            </div>
-            {list.items.length === 0 ? (
-              <EmptyState
-                title={tr(
-                  '当前范围未观测到服务请求指标',
-                  'No request metrics observed in this scope',
-                )}
-                hint={tr(
-                  '检查 Metrics 导出、指标格式和时间范围。',
-                  'Check Metrics export, metric format and time range.',
-                )}
-                action={
-                  <Button onClick={() => set('tab', 'onboarding')}>
-                    {tr('接入应用', 'Instrument application')}
-                  </Button>
-                }
-              />
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[760px] table-fixed text-left text-sm">
-                  <colgroup>
-                    {(!detail
-                      ? ['26%', '12%', '12%', '8%', '10%', '10%', '11%', '11%']
-                      : ['45%', '14%', '14%', '14%', '13%']
-                    ).map((width, i) => (
-                      <col key={i} style={{ width }} />
-                    ))}
-                  </colgroup>
-                  <thead className="border-y border-[rgb(var(--border))] bg-zinc-900/40 text-xs text-zinc-500">
-                    <tr>
-                      {sortHeading(
-                        'name',
-                        detail ? tr('接口', 'Operation') : tr('服务', 'Service'),
-                      )}
-                      {!detail && (
-                        <>
-                          <th className="px-3 py-3 font-normal">{tr('环境', 'Environment')}</th>
-                          <th className="px-3 py-3 font-normal">{tr('命名空间', 'Namespace')}</th>
-                          <th className="px-3 py-3 font-normal">{tr('协议', 'Protocol')}</th>
-                        </>
-                      )}
-                      {sortHeading('rps', 'RPS', true)}
-                      {sortHeading('error_rate', tr('错误率', 'Error rate'), true)}
-                      {sortHeading('p95_ms', 'P95 (ms)', true)}
-                      <th className="px-4 py-3 font-normal">{tr('数据状态', 'Data status')}</th>
-                    </tr>
-                  </thead>
-                  {list.items.map((row) => {
-                    const protocols =
-                      !detail && row.protocols?.length
-                        ? row.protocols
-                        : [
-                            {
-                              ...row,
-                              protocol: traceMetrics ? '' : params.get('protocol') || 'http',
-                            },
-                          ];
-                    const target = serviceParams(
-                      params,
-                      row.identity,
-                      !detail ? protocols[0].protocol : undefined,
-                    );
-                    if (row.operation) target.set('operation', row.operation);
-                    const to = `/apm/service?${target}`;
-                    return (
-                      <tbody
-                        key={JSON.stringify([row.identity, row.operation])}
-                        className="border-b border-[rgb(var(--border))] last:border-0 hover:bg-zinc-900/40"
+              {list && (
+                <Card className="!p-0 overflow-hidden">
+                  <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+                    <h2 className="text-sm font-medium">
+                      {detail
+                        ? tr(`接口 · ${list.total}`, `Operations · ${list.total}`)
+                        : tr(`服务 · ${list.total}`, `Services · ${list.total}`)}
+                    </h2>
+                    {!detail && (
+                      <button
+                        type="button"
+                        className="text-xs text-zinc-500 hover:text-zinc-100"
+                        onClick={() => set('tab', 'onboarding')}
                       >
-                        {protocols.map((metrics, i) => (
-                          <tr key={metrics.protocol}>
-                            {i === 0 && (
+                        {tr('接入管理', 'Instrumentation')}
+                      </button>
+                    )}
+                  </div>
+                  {list.items.length === 0 ? (
+                    <EmptyState
+                      title={tr(
+                        '当前范围未观测到服务请求指标',
+                        'No request metrics observed in this scope',
+                      )}
+                      hint={tr(
+                        '检查 Metrics 导出、指标格式和时间范围。',
+                        'Check Metrics export, metric format and time range.',
+                      )}
+                      action={
+                        <Button onClick={() => set('tab', 'onboarding')}>
+                          {tr('接入应用', 'Instrument application')}
+                        </Button>
+                      }
+                    />
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[760px] table-fixed text-left text-sm">
+                        <colgroup>
+                          {(!detail
+                            ? ['28%', '13%', '13%', '11%', '11%', '12%', '12%']
+                            : ['45%', '14%', '14%', '14%', '13%']
+                          ).map((width, i) => (
+                            <col key={i} style={{ width }} />
+                          ))}
+                        </colgroup>
+                        <thead className="border-y border-[rgb(var(--border))] bg-zinc-900/40 text-xs text-zinc-500">
+                          <tr>
+                            {sortHeading(
+                              'name',
+                              detail ? tr('接口', 'Operation') : tr('服务', 'Service'),
+                              false,
+                              protocol,
+                            )}
+                            {!detail && (
                               <>
-                                <td rowSpan={protocols.length} className="px-4 py-4 align-top">
+                                <th className="px-3 py-3 font-normal">
+                                  {tr('环境', 'Environment')}
+                                </th>
+                                <th className="px-3 py-3 font-normal">
+                                  {tr('命名空间', 'Namespace')}
+                                </th>
+                              </>
+                            )}
+                            {sortHeading('rps', 'RPS', true, protocol)}
+                            {sortHeading('error_rate', tr('错误率', 'Error rate'), true, protocol)}
+                            {sortHeading(
+                              'p95_ms',
+                              detail ? 'P95 (ms)' : tr('最高 P95 (ms)', 'Max P95 (ms)'),
+                              true,
+                              protocol,
+                            )}
+                            <th className="px-4 py-3 font-normal">
+                              {tr('数据状态', 'Data status')}
+                            </th>
+                          </tr>
+                        </thead>
+                        {list.items.map((row) => {
+                          const target = serviceParams(
+                            params,
+                            row.identity,
+                            detail ? protocol : undefined,
+                          );
+                          const p95 = row.protocols?.length
+                            ? row.protocols.every((item) => item.p95_ms != null)
+                              ? Math.max(...row.protocols.map((item) => item.p95_ms!))
+                              : null
+                            : row.p95_ms;
+                          if (row.operation) target.set('operation', row.operation);
+                          const to = `/apm/service?${target}`;
+                          return (
+                            <tbody
+                              key={JSON.stringify([row.identity, row.operation])}
+                              className="border-b border-[rgb(var(--border))] last:border-0 hover:bg-zinc-900/40"
+                            >
+                              <tr>
+                                <td className="px-4 py-4 align-top">
                                   <Link
                                     className="break-words font-medium text-zinc-100 hover:text-indigo-500 hover:underline"
                                     state={location.state}
@@ -738,14 +819,12 @@ export default function ApmPage() {
                                 {!detail && (
                                   <>
                                     <td
-                                      rowSpan={protocols.length}
                                       className="truncate px-3 py-4 align-top text-zinc-400"
                                       title={row.identity.environment || unset}
                                     >
                                       {row.identity.environment || unset}
                                     </td>
                                     <td
-                                      rowSpan={protocols.length}
                                       className="truncate px-3 py-4 align-top text-zinc-400"
                                       title={row.identity.service_namespace || unset}
                                     >
@@ -753,211 +832,199 @@ export default function ApmPage() {
                                     </td>
                                   </>
                                 )}
-                              </>
-                            )}
-                            {!detail && (
-                              <td className="px-3 py-3 text-xs text-zinc-400">
-                                {metrics.protocol ? (
-                                  <Link
-                                    state={location.state}
-                                    className="rounded border border-[rgb(var(--border))] px-1.5 py-0.5 hover:text-indigo-500"
-                                    to={`/apm/service?${serviceParams(params, row.identity, metrics.protocol)}`}
-                                    onClick={(event) =>
-                                      openService(
-                                        event,
-                                        `/apm/service?${serviceParams(params, row.identity, metrics.protocol)}`,
-                                      )
-                                    }
-                                  >
-                                    {metrics.protocol.toUpperCase()}
-                                  </Link>
-                                ) : (
-                                  '—'
-                                )}
-                              </td>
-                            )}
-                            <td className="px-3 py-3 text-right tabular-nums">
-                              {number(metrics.rps)}
-                            </td>
-                            <td
-                              className={`px-3 py-3 text-right tabular-nums ${metrics.error_rate != null && metrics.error_rate > 0 ? 'text-red-500' : 'text-zinc-400'}`}
-                            >
-                              {number(metrics.error_rate, '%')}
-                            </td>
-                            <td className="px-3 py-3 text-right tabular-nums">
-                              {number(metrics.p95_ms)}
-                            </td>
-                            <td className="px-4 py-3 text-xs text-zinc-500">
-                              <span
-                                className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full ${metrics.data_status === 'observed' ? 'bg-zinc-500' : 'bg-amber-500'}`}
-                              />
-                              {status(metrics.data_status)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    );
-                  })}
-                </table>
-              </div>
-            )}
-            <div className="px-4">
-              <PaginationFooter
-                page={list.page - 1}
-                pageSize={list.page_size}
-                shown={list.items.length}
-                total={list.total}
-                onPageChange={(p) => set('page', String(p + 1))}
-              />
-            </div>
-          </Card>
-        )}
-        {overview && (
-          <>
-            <Card className="grid gap-4 lg:grid-cols-3 lg:divide-x lg:divide-[rgb(var(--border))]">
-              {[
-                ['rps', tr('请求速率', 'Request rate')],
-                ['error_rate', tr('错误率', 'Error rate')],
-                [latency, tr('延迟', 'Latency')],
-              ].map(([key, title]) => (
-                <section key={key} className="min-w-0 lg:pl-3 first:lg:pl-0">
-                  <h2 className="text-sm text-zinc-400">
-                    {key === latency ? (
-                      <select
-                        aria-label={tr('延迟分位数', 'Latency percentile')}
-                        className="max-w-full bg-transparent text-sm text-zinc-400"
-                        value={latency}
-                        onChange={(e) => setLatency(e.target.value as typeof latency)}
-                      >
-                        <option value="p95_ms">{tr('P95 延迟', 'P95 latency')}</option>
-                        <option value="p50_ms">{tr('P50 延迟', 'P50 latency')}</option>
-                        <option value="p99_ms">{tr('P99 延迟', 'P99 latency')}</option>
-                      </select>
-                    ) : (
-                      title
-                    )}
-                  </h2>
-                  <div className="mb-1 mt-1 text-2xl font-semibold tabular-nums">
-                    {number(overview.summary[key as 'rps' | 'error_rate' | typeof latency])}
-                    <span className="ml-1 text-xs font-normal text-zinc-500">
-                      {key === 'rps' ? 'req/s' : key === 'error_rate' ? '%' : 'ms'}
-                    </span>
-                  </div>
-                  <p className="mb-2 text-xs text-zinc-500">
-                    {key === 'rps'
-                      ? tr('所选时段平均速率', 'Average rate in selected range')
-                      : tr('所选时段汇总', 'Selected range summary')}
-                  </p>
-                  <div className="h-28">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={overview.points} syncId="apm-red">
-                        <CartesianGrid stroke="rgb(var(--border))" strokeDasharray="3 3" />
-                        <XAxis
-                          dataKey="timestamp"
-                          tickFormatter={(v) => new Date(v * 1000).toLocaleTimeString()}
-                          tick={{ fontSize: 11 }}
-                          minTickGap={45}
-                        />
-                        <YAxis width={45} tick={{ fontSize: 11 }} />
-                        <Tooltip
-                          contentStyle={chartTooltipStyle}
-                          labelStyle={chartTooltipLabelStyle}
-                          labelFormatter={(v) => new Date(Number(v) * 1000).toLocaleString()}
-                        />
-                        {
-                          <Line
-                            name={title}
-                            dataKey={key}
-                            stroke={key === 'error_rate' ? '#ef4444' : '#6366f1'}
-                            dot={false}
-                            isAnimationActive={false}
-                            connectNulls={false}
-                          />
-                        }
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                </section>
-              ))}
-            </Card>
-          </>
-        )}
-        {detail && tab === 'overview' && !operation && (
-          <>
-            <div className="space-y-3">
-              <Card className="min-w-0">
-                <div className="mb-2 flex items-center justify-between gap-3">
-                  <h2 className="text-sm font-medium">{tr('重点接口', 'Key operations')}</h2>
-                  <Link
-                    className="inline-flex items-center gap-1 text-xs text-zinc-500"
-                    state={location.state}
-                    to={viewLink('operations')}
-                  >
-                    {tr('全部接口', 'All operations')} <ArrowRight size={12} />
-                  </Link>
-                </div>
-                <p className="mb-2 text-xs text-zinc-500">
-                  {tr('按 P95 延迟排序，最多展示 5 项', 'Top 5 operations by P95 latency')}
-                </p>
-                {!operations && !loading && (
-                  <p className="py-6 text-xs text-zinc-500">
-                    {tr('接口查询不可用，请重试。', 'Operations unavailable. Please retry.')}
-                  </p>
-                )}
-                {operations &&
-                  (operations.items.length ? (
-                    <div className="overflow-auto">
-                      <table className="w-full text-left text-sm">
-                        <thead className="text-zinc-500">
-                          <tr>
-                            <th className="py-2 font-normal">{tr('接口', 'Operation')}</th>
-                            <th className="px-3 text-right font-normal">RPS</th>
-                            <th className="px-3 text-right font-normal">
-                              {tr('错误率', 'Error rate')}
-                            </th>
-                            <th className="pl-3 text-right font-normal">P95 (ms)</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-[rgb(var(--border))]">
-                          {operations.items.map((row) => {
-                            const scope = serviceParams(params, row.identity);
-                            if (row.operation) scope.set('operation', row.operation);
-                            return (
-                              <tr key={row.operation}>
-                                <td className="max-w-64 break-words py-2.5">
-                                  <Link
-                                    title={row.operation}
-                                    className="font-medium hover:text-indigo-500 hover:underline"
-                                    state={{
-                                      ...location.state,
-                                      apmOperations: undefined,
-                                    }}
-                                    to={`/apm/service?${scope}`}
-                                  >
-                                    {row.operation}
-                                  </Link>
+                                <td className="px-3 py-3 text-right tabular-nums">
+                                  {number(row.rps)}
                                 </td>
-                                <td className="px-3 text-right tabular-nums">{number(row.rps)}</td>
                                 <td
-                                  className={`px-3 text-right tabular-nums ${row.error_rate ? 'text-red-500' : ''}`}
+                                  className={`px-3 py-3 text-right tabular-nums ${row.error_rate != null && row.error_rate > 0 ? 'text-red-500' : 'text-zinc-400'}`}
                                 >
                                   {number(row.error_rate, '%')}
                                 </td>
-                                <td className="pl-3 text-right tabular-nums">
-                                  {number(row.p95_ms)}
+                                <td className="px-3 py-3 text-right tabular-nums">{number(p95)}</td>
+                                <td className="px-4 py-3 text-xs text-zinc-500">
+                                  <span
+                                    className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full ${row.data_status === 'observed' ? 'bg-zinc-500' : 'bg-amber-500'}`}
+                                  />
+                                  {status(row.data_status)}
                                 </td>
                               </tr>
-                            );
-                          })}
-                        </tbody>
+                            </tbody>
+                          );
+                        })}
                       </table>
                     </div>
-                  ) : (
-                    <EmptyState
-                      title={tr('当前范围未观测到接口', 'No operations observed in this window')}
+                  )}
+                  <div className="px-4">
+                    <PaginationFooter
+                      page={list.page - 1}
+                      pageSize={list.page_size}
+                      shown={list.items.length}
+                      total={list.total}
+                      onPageChange={(p) => set(detail ? `${protocol}_page` : 'page', String(p + 1))}
                     />
-                  ))}
-              </Card>
+                  </div>
+                </Card>
+              )}
+              {overview && (
+                <>
+                  <Card className="grid gap-4 lg:grid-cols-3 lg:divide-x lg:divide-[rgb(var(--border))]">
+                    {[
+                      ['rps', tr('请求速率', 'Request rate')],
+                      ['error_rate', tr('错误率', 'Error rate')],
+                      [latency, tr('延迟', 'Latency')],
+                    ].map(([key, title]) => (
+                      <section key={key} className="min-w-0 lg:pl-3 first:lg:pl-0">
+                        <h2 className="text-sm text-zinc-400">
+                          {key === latency ? (
+                            <select
+                              aria-label={tr('延迟分位数', 'Latency percentile')}
+                              className="max-w-full bg-transparent text-sm text-zinc-400"
+                              value={latency}
+                              onChange={(e) => setLatency(e.target.value as typeof latency)}
+                            >
+                              <option value="p95_ms">{tr('P95 延迟', 'P95 latency')}</option>
+                              <option value="p50_ms">{tr('P50 延迟', 'P50 latency')}</option>
+                              <option value="p99_ms">{tr('P99 延迟', 'P99 latency')}</option>
+                            </select>
+                          ) : (
+                            title
+                          )}
+                        </h2>
+                        <div className="mb-1 mt-1 text-2xl font-semibold tabular-nums">
+                          {number(overview.summary[key as 'rps' | 'error_rate' | typeof latency])}
+                          <span className="ml-1 text-xs font-normal text-zinc-500">
+                            {key === 'rps' ? 'req/s' : key === 'error_rate' ? '%' : 'ms'}
+                          </span>
+                        </div>
+                        <p className="mb-2 text-xs text-zinc-500">
+                          {key === 'rps'
+                            ? tr('所选时段平均速率', 'Average rate in selected range')
+                            : tr('所选时段汇总', 'Selected range summary')}
+                        </p>
+                        <div className="h-28">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <LineChart data={overview.points} syncId="apm-red">
+                              <CartesianGrid stroke="rgb(var(--border))" strokeDasharray="3 3" />
+                              <XAxis
+                                dataKey="timestamp"
+                                tickFormatter={(v) => new Date(v * 1000).toLocaleTimeString()}
+                                tick={{ fontSize: 11 }}
+                                minTickGap={45}
+                              />
+                              <YAxis width={45} tick={{ fontSize: 11 }} />
+                              <Tooltip
+                                contentStyle={chartTooltipStyle}
+                                labelStyle={chartTooltipLabelStyle}
+                                labelFormatter={(v) => new Date(Number(v) * 1000).toLocaleString()}
+                              />
+                              {
+                                <Line
+                                  name={title}
+                                  dataKey={key}
+                                  stroke={key === 'error_rate' ? '#ef4444' : '#6366f1'}
+                                  dot={false}
+                                  isAnimationActive={false}
+                                  connectNulls={false}
+                                />
+                              }
+                            </LineChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </section>
+                    ))}
+                  </Card>
+                </>
+              )}
+              {detail && tab === 'overview' && !operation && (
+                <>
+                  <div className="space-y-3">
+                    <Card className="min-w-0">
+                      <div className="mb-2 flex items-center justify-between gap-3">
+                        <h2 className="text-sm font-medium">{tr('重点接口', 'Key operations')}</h2>
+                        <Link
+                          className="inline-flex items-center gap-1 text-xs text-zinc-500"
+                          state={location.state}
+                          to={viewLink('operations')}
+                        >
+                          {tr('全部接口', 'All operations')} <ArrowRight size={12} />
+                        </Link>
+                      </div>
+                      <p className="mb-2 text-xs text-zinc-500">
+                        {tr('按 P95 延迟排序，最多展示 5 项', 'Top 5 operations by P95 latency')}
+                      </p>
+                      {!operations && !loading && (
+                        <p className="py-6 text-xs text-zinc-500">
+                          {tr('接口查询不可用，请重试。', 'Operations unavailable. Please retry.')}
+                        </p>
+                      )}
+                      {operations &&
+                        (operations.items.length ? (
+                          <div className="overflow-auto">
+                            <table className="w-full text-left text-sm">
+                              <thead className="text-zinc-500">
+                                <tr>
+                                  <th className="py-2 font-normal">{tr('接口', 'Operation')}</th>
+                                  <th className="px-3 text-right font-normal">RPS</th>
+                                  <th className="px-3 text-right font-normal">
+                                    {tr('错误率', 'Error rate')}
+                                  </th>
+                                  <th className="pl-3 text-right font-normal">P95 (ms)</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-[rgb(var(--border))]">
+                                {operations.items.map((row) => {
+                                  const scope = serviceParams(params, row.identity, protocol);
+                                  if (row.operation) scope.set('operation', row.operation);
+                                  return (
+                                    <tr key={row.operation}>
+                                      <td className="max-w-64 break-words py-2.5">
+                                        <Link
+                                          title={row.operation}
+                                          className="font-medium hover:text-indigo-500 hover:underline"
+                                          state={{
+                                            ...location.state,
+                                            apmOperations: undefined,
+                                          }}
+                                          to={`/apm/service?${scope}`}
+                                        >
+                                          {row.operation}
+                                        </Link>
+                                      </td>
+                                      <td className="px-3 text-right tabular-nums">
+                                        {number(row.rps)}
+                                      </td>
+                                      <td
+                                        className={`px-3 text-right tabular-nums ${row.error_rate ? 'text-red-500' : ''}`}
+                                      >
+                                        {number(row.error_rate, '%')}
+                                      </td>
+                                      <td className="pl-3 text-right tabular-nums">
+                                        {number(row.p95_ms)}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : (
+                          <EmptyState
+                            title={tr(
+                              '当前范围未观测到接口',
+                              'No operations observed in this window',
+                            )}
+                          />
+                        ))}
+                    </Card>
+                  </div>
+                </>
+              )}
+            </section>
+          );
+        })}
+        {detail && tab === 'overview' && !operation && (
+          <>
+            <div className="space-y-3">
               {dependencies?.items.length ? (
                 <Card className="min-w-0">
                   <div className="mb-2 flex items-center justify-between gap-3">
@@ -1074,71 +1141,78 @@ export default function ApmPage() {
             <Dependencies data={dependencies} params={params} />
           </Card>
         )}
-        {diagnostics && (
+        {(diagnostics || current?.rpcDiagnostics) && (
           <>
-            {tab === 'onboarding' && (
-              <Card>
-                <h2 className="mb-3 text-sm font-medium">
-                  {tr('接入诊断', 'Instrumentation diagnostics')}
-                </h2>
-                <p className="mb-4 text-xs text-zinc-500">
-                  {tr(
-                    `检查 ${diagnostics.sampled_traces} 条代表性链路。仅反映样本，不自动认定根因或采样比例。`,
-                    `Inspected ${diagnostics.sampled_traces} representative traces. These are sample observations, not a root-cause or sampling-coverage determination.`,
-                  )}
-                </p>
-                <div className="divide-y divide-[rgb(var(--border))]">
-                  {diagnostics.checks.map((check) => (
-                    <div key={check.key} className="flex justify-between gap-4 py-3 text-xs">
-                      <span>
-                        {{
-                          metrics: tr('请求指标', 'Request metrics'),
-                          sampling: tr('Trace 采样覆盖率', 'Trace sampling coverage'),
-                          traces: tr('链路接收', 'Trace ingestion'),
-                          resource_identity: tr('服务身份', 'Service identity'),
-                          downstream: tr('下游埋点', 'Downstream instrumentation'),
-                          context: tr('父子上下文', 'Parent context'),
-                          logs: tr('样本请求日志', 'Sample request logs'),
-                        }[check.key] || check.key}
-                      </span>
-                      <span
-                        className={
-                          check.status === 'unavailable' || check.status === 'incomplete'
-                            ? 'text-amber-500'
-                            : 'text-zinc-500'
-                        }
-                      >
-                        {status(check.status)}
-                      </span>
+            {tab === 'onboarding' &&
+              diagnosticPanels.map(({ protocol, data: diagnostics }) => {
+                if (!diagnostics) return null;
+                const scoped = new URLSearchParams(params);
+                scoped.set('protocol', protocol);
+                return (
+                  <Card key={protocol}>
+                    <h2 className="mb-3 text-sm font-medium">
+                      {!traceMetrics && `${protocol.toUpperCase()} · `}
+                      {tr('接入诊断', 'Instrumentation diagnostics')}
+                    </h2>
+                    <p className="mb-4 text-xs text-zinc-500">
+                      {tr(
+                        `检查 ${diagnostics.sampled_traces} 条代表性链路。仅反映样本，不自动认定根因或采样比例。`,
+                        `Inspected ${diagnostics.sampled_traces} representative traces. These are sample observations, not a root-cause or sampling-coverage determination.`,
+                      )}
+                    </p>
+                    <div className="divide-y divide-[rgb(var(--border))]">
+                      {diagnostics.checks.map((check) => (
+                        <div key={check.key} className="flex justify-between gap-4 py-3 text-xs">
+                          <span>
+                            {{
+                              metrics: tr('请求指标', 'Request metrics'),
+                              sampling: tr('Trace 采样覆盖率', 'Trace sampling coverage'),
+                              traces: tr('链路接收', 'Trace ingestion'),
+                              resource_identity: tr('服务身份', 'Service identity'),
+                              downstream: tr('下游埋点', 'Downstream instrumentation'),
+                              context: tr('父子上下文', 'Parent context'),
+                              logs: tr('样本请求日志', 'Sample request logs'),
+                            }[check.key] || check.key}
+                          </span>
+                          <span
+                            className={
+                              check.status === 'unavailable' || check.status === 'incomplete'
+                                ? 'text-amber-500'
+                                : 'text-zinc-500'
+                            }
+                          >
+                            {status(check.status)}
+                          </span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-                <div className="mt-4 flex flex-wrap gap-4 text-xs underline">
-                  {diagnostics.trace_ids.map((id) => (
-                    <span key={id}>
-                      <Link to={traceLink(params, undefined, id)}>{id.slice(0, 12)}…</Link> ·{' '}
-                      <Link
-                        to={`/logs?${new URLSearchParams({ start: params.get('start')!, end: params.get('end')!, trace_id: id, service_name: params.get('service_name')!, environment: params.get('environment') || '', service_namespace: params.get('service_namespace') || '' })}`}
-                      >
-                        {tr('同请求日志', 'Request logs')}
-                      </Link>
-                    </span>
-                  ))}
-                </div>
-              </Card>
-            )}
+                    <div className="mt-4 flex flex-wrap gap-4 text-xs underline">
+                      {diagnostics.trace_ids.map((id) => (
+                        <span key={id}>
+                          <Link to={traceLink(scoped, undefined, id)}>{id.slice(0, 12)}…</Link> ·{' '}
+                          <Link
+                            to={`/logs?${new URLSearchParams({ start: params.get('start')!, end: params.get('end')!, trace_id: id, service_name: params.get('service_name')!, environment: params.get('environment') || '', service_namespace: params.get('service_namespace') || '' })}`}
+                          >
+                            {tr('同请求日志', 'Request logs')}
+                          </Link>
+                        </span>
+                      ))}
+                    </div>
+                  </Card>
+                );
+              })}
             {tab === 'instances' && (
               <Card>
                 <h2 className="text-sm font-medium">
                   {tr('样本关联实例', 'Instances in sampled traces')}
                 </h2>
-                {diagnostics.instances.length === 0 ? (
+                {instances.length === 0 ? (
                   <EmptyState
                     title={tr('样本缺少实例关联字段', 'Samples have no instance identity')}
                   />
                 ) : (
                   <div className="divide-y divide-[rgb(var(--border))]">
-                    {diagnostics.instances.map((instance, i) => (
+                    {instances.map((instance, i) => (
                       <div
                         key={i}
                         className="flex flex-wrap items-center justify-between gap-3 py-3 text-xs"
@@ -1264,9 +1338,20 @@ export default function ApmPage() {
                 </label>
               ))}
             </div>
-            <Button disabled={creating || !isAdmin} onClick={createAlert}>
-              {tr('在规则编辑器中预览', 'Preview in rule editor')}
-            </Button>
+            <div className="flex gap-3">
+              {(combined ? ['http', 'rpc'] : [activeProtocol]).map((protocol) => (
+                <Button
+                  key={protocol}
+                  disabled={creating || !isAdmin}
+                  onClick={() => createAlert(protocol)}
+                >
+                  {tr(
+                    `预览 ${protocol.toUpperCase()} 规则`,
+                    `Preview ${protocol.toUpperCase()} rule`,
+                  )}
+                </Button>
+              ))}
+            </div>
             {!isAdmin && (
               <p className="text-xs text-zinc-500">
                 {tr('只有管理员可创建规则。', 'Only admins can create rules.')}

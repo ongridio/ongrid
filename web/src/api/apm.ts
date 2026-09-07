@@ -95,9 +95,10 @@ export function queryApm<K extends keyof Endpoints>(
   signal?: AbortSignal,
 ) {
   const query = new URLSearchParams(params);
-  query.delete('list_query');
-  if (endpoint === 'services' && query.get('metric_source') !== 'tempo_spanmetrics')
-    query.set('protocol', 'all');
+  for (const key of ['list_query', 'http_page', 'rpc_page', 'http_sort', 'rpc_sort'])
+    query.delete(key);
+  if (endpoint === 'services')
+    query.set('protocol', query.get('metric_source') === 'tempo_spanmetrics' ? 'http' : 'all');
   return request<{ data: Endpoints[K] }>('GET', `/apm/${endpoint}?${query}`, undefined, {
     signal,
   }).then((r) => r.data);
@@ -115,9 +116,18 @@ export function serviceParams(
     next.set('list_query', list.toString());
   }
   for (const [key, value] of Object.entries(identity)) next.set(key, value);
-  for (const key of ['page', 'search', 'operation', 'tab']) next.delete(key);
-  if (protocol) next.set('protocol', protocol);
-  else if (next.get('protocol') === 'all') next.delete('protocol');
+  for (const key of [
+    'page',
+    'http_page',
+    'rpc_page',
+    'http_sort',
+    'rpc_sort',
+    'search',
+    'operation',
+    'tab',
+  ])
+    next.delete(key);
+  next.set('protocol', protocol || 'all');
   return next;
 }
 
@@ -143,7 +153,7 @@ export function serviceTraceQL(params: URLSearchParams, extra?: string) {
         `(span.rpc.method = ${JSON.stringify(operation)} || (span.rpc.service = ${JSON.stringify(service)} && span.rpc.method = ${JSON.stringify(method || '')}))`,
       );
     }
-  } else {
+  } else if (params.get('protocol') !== 'all') {
     clauses.push('(span.http.request.method != nil || span.http.method != nil)');
     if (operation) {
       const split = operation.indexOf(' ');
