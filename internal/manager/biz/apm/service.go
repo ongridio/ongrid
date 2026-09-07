@@ -75,6 +75,9 @@ func sortedKeys(values map[string]bool) []string {
 }
 
 func (s *Service) summaries(ctx context.Context, q Query, operations bool) ([]Summary, error) {
+	if q.Protocol == "all" {
+		return s.protocolSummaries(ctx, q)
+	}
 	group := identityLabels
 	if operations {
 		group += ",span_name"
@@ -111,6 +114,62 @@ func (s *Service) summaries(ctx context.Context, q Query, operations bool) ([]Su
 	out := make([]Summary, 0, len(rows))
 	for _, row := range rows {
 		row.finish(window)
+		out = append(out, *row)
+	}
+	return out, nil
+}
+
+// Keep histogram populations separate: HTTP and RPC can use different bucket
+// boundaries. Only additive request rates and request-weighted errors combine.
+func (s *Service) protocolSummaries(ctx context.Context, q Query) ([]Summary, error) {
+	grouped := map[Identity]*Summary{}
+	for _, protocol := range []string{"http", "rpc"} {
+		part := q
+		part.Protocol = protocol
+		rows, err := s.summaries(ctx, part, false)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			if grouped[row.Identity] == nil {
+				grouped[row.Identity] = &Summary{Identity: row.Identity}
+			}
+			service := grouped[row.Identity]
+			service.Protocols = append(service.Protocols, ProtocolMetrics{
+				Protocol: protocol, RPS: row.RPS, ErrorRate: row.ErrorRate,
+				P95Ms: row.P95Ms, DataStatus: row.DataStatus,
+			})
+		}
+	}
+	if len(grouped) > 5000 {
+		return nil, fmt.Errorf("%w: narrow the APM service scope", errs.ErrBudgetExceeded)
+	}
+	out := make([]Summary, 0, len(grouped))
+	for _, row := range grouped {
+		rate, errors := 0.0, 0.0
+		completeRate, completeErrors := true, true
+		for _, protocol := range row.Protocols {
+			if protocol.RPS == nil {
+				completeRate = false
+				continue
+			}
+			rate += *protocol.RPS
+			if *protocol.RPS > 0 {
+				if protocol.ErrorRate == nil {
+					completeErrors = false
+				} else {
+					errors += *protocol.RPS * *protocol.ErrorRate / 100
+				}
+			}
+		}
+		if completeRate {
+			row.RPS = &rate
+			if rate > 0 && completeErrors {
+				ratio := 100 * errors / rate
+				row.ErrorRate = &ratio
+			}
+		}
+		row.finish(q.End.Sub(q.Start))
 		out = append(out, *row)
 	}
 	return out, nil

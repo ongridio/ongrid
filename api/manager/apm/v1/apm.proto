@@ -35,11 +35,13 @@ message Query {
   string span_kind = 7;
   uint32 page = 8;
   uint32 page_size = 9;
+  // rps (total), error_rate (request-weighted), p95_ms (highest protocol P95), name.
   string sort = 10;
   string search = 11;
   // application_metrics (default) or tempo_spanmetrics. Never silently mixed.
   string metric_source = 12;
-  // http (default) or rpc for application metrics; traces retain span_kind.
+  // http (default) or rpc; services also accept all to group both protocols.
+  // Protocol-specific percentiles remain separate. Traces retain span_kind.
   string protocol = 13;
   // otel (default) or legacy. Query one metric family to avoid dual-export double counting.
   string metric_format = 14;
@@ -55,6 +57,17 @@ message Summary {
   optional double p99_ms = 7;
   optional double requests = 8;
   string data_status = 9;
+  // Populated for protocol=all services. Top-level RPS and error rate cover all
+  // observed protocols; percentiles are only exposed per protocol.
+  repeated ProtocolMetrics protocols = 10;
+}
+
+message ProtocolMetrics {
+  string protocol = 1;
+  optional double rps = 2;
+  optional double error_rate = 3;
+  optional double p95_ms = 4;
+  string data_status = 5;
 }
 
 message QueryMetadata {

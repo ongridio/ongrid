@@ -238,3 +238,85 @@ func TestApplicationMetricSchemas(t *testing.T) {
 		t.Fatal("allowed request alert over sampled spans")
 	}
 }
+
+type protocolProm struct {
+	fakeProm
+	results map[string]string
+	rpcErr  error
+}
+
+func (p *protocolProm) Query(ctx context.Context, expr string, at time.Time) (*promquery.InstantResult, error) {
+	protocol := "http"
+	if strings.Contains(expr, "rpc_server_call_duration_seconds") {
+		protocol = "rpc"
+		if p.rpcErr != nil {
+			return nil, p.rpcErr
+		}
+	}
+	p.result = p.results[protocol]
+	return p.fakeProm.Query(ctx, expr, at)
+}
+
+func TestServicesGroupProtocolsBeforeSortingAndPagination(t *testing.T) {
+	p := &protocolProm{results: map[string]string{
+		"http": `[
+ {"metric":{"service":"orders","service_namespace":"trade","deployment_environment_name":"production","apm_stat":"rps"},"value":[1600,"10"]},
+ {"metric":{"service":"orders","service_namespace":"trade","deployment_environment_name":"production","apm_stat":"error_rate"},"value":[1600,"10"]},
+ {"metric":{"service":"orders","service_namespace":"trade","deployment_environment_name":"production","apm_stat":"p95_ms"},"value":[1600,"900"]},
+ {"metric":{"service":"orders","service_namespace":"trade","deployment_environment_name":"staging","apm_stat":"rps"},"value":[1600,"1"]}
+ ]`,
+		"rpc": `[
+ {"metric":{"service":"orders","service_namespace":"trade","deployment_environment_name":"production","apm_stat":"rps"},"value":[1600,"90"]},
+ {"metric":{"service":"orders","service_namespace":"trade","deployment_environment_name":"production","apm_stat":"error_rate"},"value":[1600,"0"]},
+ {"metric":{"service":"orders","service_namespace":"trade","deployment_environment_name":"production","apm_stat":"p95_ms"},"value":[1600,"10"]},
+ {"metric":{"service":"rpc-only","service_namespace":"trade","deployment_environment_name":"production","apm_stat":"rps"},"value":[1600,"2"]},
+ {"metric":{"service":"rpc-only","service_namespace":"trade","deployment_environment_name":"production","apm_stat":"error_rate"},"value":[1600,"50"]},
+ {"metric":{"service":"rpc-only","service_namespace":"trade","deployment_environment_name":"production","apm_stat":"p95_ms"},"value":[1600,"20"]}
+ ]`,
+	}}
+	q := testQuery()
+	q.MetricSource, q.Protocol = "application_metrics", "all"
+	q.ServiceName, q.Environment, q.ServiceNamespace = "", nil, nil
+	q.PageSize = 1
+	svc := New(p, nil, nil)
+	list, err := svc.List(t.Context(), q, false)
+	if err != nil || list.Total != 3 || len(list.Items) != 1 || p.calls != 2 {
+		t.Fatalf("grouping/pagination: %+v, calls=%d, err=%v", list, p.calls, err)
+	}
+	row := list.Items[0]
+	if row.Identity.Environment != "production" || len(row.Protocols) != 2 || *row.RPS != 100 || *row.ErrorRate != 1 || row.P95Ms != nil {
+		t.Fatalf("weighted service metrics or identity wrong: %+v", row)
+	}
+	if row.Protocols[0].Protocol != "http" || *row.Protocols[0].P95Ms != 900 || row.Protocols[1].Protocol != "rpc" || *row.Protocols[1].P95Ms != 10 {
+		t.Fatalf("protocol percentiles were combined: %+v", row.Protocols)
+	}
+	q.Page = 2
+	list, err = svc.List(t.Context(), q, false)
+	if err != nil || list.Items[0].Identity.ServiceName != "rpc-only" || list.Items[0].Protocols[0].Protocol != "rpc" {
+		t.Fatalf("RPC-only service missing: %+v %v", list, err)
+	}
+	q.Page, q.Sort = 1, "p95_ms"
+	list, err = svc.List(t.Context(), q, false)
+	if err != nil || list.Items[0].Identity.Environment != "production" || list.Items[0].Identity.ServiceName != "orders" {
+		t.Fatalf("slowest protocol sorting: %+v %v", list, err)
+	}
+	q.Sort = "error_rate"
+	list, err = svc.List(t.Context(), q, false)
+	if err != nil || list.Items[0].Identity.ServiceName != "rpc-only" {
+		t.Fatalf("overall error sorting: %+v %v", list, err)
+	}
+	p.results["rpc"] = `[{"metric":{"service":"orders","service_namespace":"trade","deployment_environment_name":"production","apm_stat":"present"},"value":[1600,"1"]}]`
+	q.Search, q.Sort = "orders", "name"
+	list, err = svc.List(t.Context(), q, false)
+	if err != nil || list.Items[0].RPS != nil || list.Items[0].DataStatus != "insufficient_samples" || list.Items[0].Protocols[0].RPS == nil {
+		t.Fatalf("partial samples presented as complete: %+v %v", list, err)
+	}
+	p.rpcErr = errors.New("RPC metrics unavailable")
+	if _, err := svc.List(t.Context(), q, false); err == nil {
+		t.Fatal("protocol query failure silently hid services")
+	}
+	q.ServiceName, q.Environment, q.ServiceNamespace = "orders", new(string), new(string)
+	if err := q.Validate(true); err == nil {
+		t.Fatal("detail accepted all protocols without a valid combined histogram")
+	}
+}

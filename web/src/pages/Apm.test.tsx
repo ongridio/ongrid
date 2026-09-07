@@ -70,7 +70,6 @@ describe('Application performance', () => {
     expect(urls[0].searchParams.get('start')).toBe('2026-09-07T00:00:00Z');
     expect(screen.getByText('样本不足')).toBeInTheDocument();
     expect(screen.getByText('0.0004')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '更多' }));
     fireEvent.click(screen.getByRole('button', { name: '接入管理' }));
     expect(await screen.findByText('应用接入')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'orders' })).not.toBeInTheDocument();
@@ -92,6 +91,9 @@ describe('Application performance', () => {
   it('requests operations with full identity and isolates consumers', async () => {
     let requestURL: URL | undefined;
     server.use(
+      http.get('/api/v1/apm/diagnostics', () =>
+        HttpResponse.json({ data: { checks: [], instances: [], trace_ids: [], sampled_traces: 0 } }),
+      ),
       http.get('/api/v1/apm/operations', ({ request }) => {
         requestURL = new URL(request.url);
         return HttpResponse.json({
@@ -114,10 +116,11 @@ describe('Application performance', () => {
       </MemoryRouter>,
     );
     await screen.findByRole('link', { name: 'consume' });
-    fireEvent.click(screen.getByRole('button', { name: '更多' }));
+    fireEvent.click(screen.getByRole('button', { name: '接入管理' }));
     fireEvent.change(screen.getByLabelText('入口类型'), {
       target: { value: 'consumer' },
     });
+    fireEvent.click(screen.getByRole('link', { name: '接口' }));
     await waitFor(() => expect(requestURL?.searchParams.get('span_kind')).toBe('consumer'));
     expect(requestURL?.searchParams.has('environment')).toBe(true);
     expect(requestURL?.searchParams.get('environment')).toBe('');
@@ -157,7 +160,9 @@ describe('Application performance', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('dependency timeout');
     expect(screen.getByText('P95 延迟')).toBeInTheDocument();
     expect(screen.getAllByText('200')).toHaveLength(2);
-    fireEvent.change(screen.getByLabelText('延迟分位数'), { target: { value: 'p99_ms' } });
+    fireEvent.change(screen.getByLabelText('延迟分位数'), {
+      target: { value: 'p99_ms' },
+    });
     expect(screen.getByText('220')).toBeInTheDocument();
     expect(urls.every((url) => url.searchParams.get('service_namespace') === 'trade')).toBe(true);
     expect(
@@ -212,21 +217,87 @@ describe('Application performance', () => {
     await waitFor(() => expect(requested!.searchParams.get('end')).not.toBe(oldEnd));
     expect(requested?.searchParams.get('environment')).toBe('');
   });
-  it('defaults to native metrics and keeps RPC and sampled views explicit', async () => {
-    let latest: URL | undefined;
-    server.use(http.get('/api/v1/apm/services', ({ request }) => {
-      latest = new URL(request.url);
-      return HttpResponse.json({ data: { items: [], total: 0, page: 1, page_size: 25 } });
-    }));
-    render(<MemoryRouter initialEntries={[`/apm?${period}`]}><ApmPage /></MemoryRouter>);
-    await screen.findByText('当前范围未观测到服务请求指标');
-    fireEvent.click(screen.getByRole('button', { name: '更多' }));
-    expect(screen.getByLabelText('指标来源')).toHaveValue('application_metrics');
-    fireEvent.click(screen.getByRole('button', { name: 'RPC' }));
-    await waitFor(() => expect(latest?.searchParams.get('protocol')).toBe('rpc'));
-    fireEvent.click(screen.getByRole('button', { name: '查看 Trace 样本' }));
-    await waitFor(() => expect(latest?.searchParams.get('metric_source')).toBe('tempo_spanmetrics'));
-    expect(screen.queryByLabelText('请求协议')).not.toBeInTheDocument();
+  it('lists both protocols once per service, sorts through headers and opens the selected protocol', async () => {
+    let listURL: URL | undefined;
+    let overviewURL: URL | undefined;
+    const protocols = [
+      {
+        protocol: 'http',
+        rps: 2,
+        error_rate: 10,
+        p95_ms: 800,
+        data_status: 'observed',
+      },
+      {
+        protocol: 'rpc',
+        rps: 18,
+        error_rate: 0,
+        p95_ms: 12,
+        data_status: 'observed',
+      },
+    ];
+    server.use(
+      http.get('/api/v1/apm/services', ({ request }) => {
+        listURL = new URL(request.url);
+        return HttpResponse.json({
+          data: {
+            items: [
+              { ...row, protocols },
+              {
+                ...row,
+                identity: { ...row.identity, service_name: 'rpc-only' },
+                protocols: [protocols[1]],
+              },
+            ],
+            total: 2,
+            page: 1,
+            page_size: 25,
+          },
+        });
+      }),
+      http.get('/api/v1/apm/overview', ({ request }) => {
+        overviewURL = new URL(request.url);
+        return HttpResponse.json({ data: { summary: row, points: [] } });
+      }),
+      http.get('/api/v1/apm/operations', () =>
+        HttpResponse.json({
+          data: { items: [], total: 0, page: 1, page_size: 5 },
+        }),
+      ),
+      http.get('/api/v1/apm/dependencies', () => HttpResponse.json({ data: { items: [] } })),
+    );
+    // Old bookmarks must no longer hide RPC-only services.
+    render(
+      <MemoryRouter initialEntries={[`/apm?${period}&protocol=http`]}>
+        <ApmPage />
+      </MemoryRouter>,
+    );
+    await screen.findByRole('link', { name: 'orders' });
+    expect(listURL?.searchParams.get('protocol')).toBe('all');
+    expect(screen.getAllByRole('link', { name: 'orders' })).toHaveLength(1);
+    expect(screen.getByRole('link', { name: 'rpc-only' })).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: 'RPC' })).toHaveLength(2);
+    expect(screen.queryByRole('group', { name: '请求协议' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '更多' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: '排序' })).not.toBeInTheDocument();
+    const env = screen.getByLabelText('环境');
+    const namespace = screen.getByLabelText('业务命名空间');
+    const search = screen.getByRole('textbox', { name: '搜索服务名称…' });
+    expect(env.compareDocumentPosition(namespace) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      namespace.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '按P95 (ms)排序' }));
+    await waitFor(() => expect(listURL?.searchParams.get('sort')).toBe('p95_ms'));
+    await screen.findByRole('link', { name: 'orders' });
+    expect(screen.getByRole('columnheader', { name: 'P95 (ms)' })).toHaveAttribute(
+      'aria-sort',
+      'descending',
+    );
+    fireEvent.click(screen.getAllByRole('link', { name: 'RPC' })[0]);
+    await waitFor(() => expect(overviewURL?.searchParams.get('protocol')).toBe('rpc'));
+    expect(overviewURL?.searchParams.get('service_name')).toBe('orders');
+    expect(screen.getByRole('button', { name: 'RPC' })).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('debounces search and restores list filters, page and scroll after visiting a service', async () => {
@@ -234,13 +305,25 @@ describe('Application performance', () => {
     server.use(
       http.get('/api/v1/apm/services', ({ request }) => {
         urls.push(new URL(request.url));
-        return HttpResponse.json({ data: { items: [row], total: 80, page: 3, page_size: 25 } });
+        return HttpResponse.json({
+          data: { items: [row], total: 80, page: 3, page_size: 25 },
+        });
       }),
-      http.get('/api/v1/apm/overview', () => HttpResponse.json({ data: { summary: row, points: [] } })),
-      http.get('/api/v1/apm/operations', () => HttpResponse.json({ data: { items: [], total: 0, page: 1, page_size: 5 } })),
+      http.get('/api/v1/apm/overview', () =>
+        HttpResponse.json({ data: { summary: row, points: [] } }),
+      ),
+      http.get('/api/v1/apm/operations', () =>
+        HttpResponse.json({
+          data: { items: [], total: 0, page: 1, page_size: 5 },
+        }),
+      ),
       http.get('/api/v1/apm/dependencies', () => HttpResponse.json({ data: { items: [] } })),
     );
-    render(<MemoryRouter initialEntries={[`/apm?${period}&search=ord&sort=p95_ms&page=3`]}><ApmPage /></MemoryRouter>);
+    render(
+      <MemoryRouter initialEntries={[`/apm?${period}&search=ord&sort=p95_ms&page=3`]}>
+        <ApmPage />
+      </MemoryRouter>,
+    );
     await screen.findByRole('link', { name: 'orders' });
     const search = screen.getByRole('textbox', { name: '搜索服务名称…' });
     fireEvent.change(search, { target: { value: 'orde' } });
@@ -266,18 +349,28 @@ describe('Application performance', () => {
     await waitFor(() => expect(main.scrollTop).toBe(230));
     expect(screen.getByRole('textbox', { name: '搜索服务名称…' })).toHaveValue('orders');
   });
-  it('retains rows during a refresh failure and immediately clears them when protocol changes', async () => {
+  it('retains rows during a refresh failure and immediately clears them when the time scope changes', async () => {
     let resolve!: () => void;
     let pending = false;
-    const gate = new Promise<void>((done) => { resolve = done; });
-    server.use(http.get('/api/v1/apm/services', async () => {
-      if (pending) {
-        await gate;
-        return HttpResponse.json({ message: 'temporarily unavailable' }, { status: 502 });
-      }
-      return HttpResponse.json({ data: { items: [row], total: 1, page: 1, page_size: 25 } });
-    }));
-    render(<MemoryRouter initialEntries={[`/apm?${period}`]}><ApmPage /></MemoryRouter>);
+    const gate = new Promise<void>((done) => {
+      resolve = done;
+    });
+    server.use(
+      http.get('/api/v1/apm/services', async () => {
+        if (pending) {
+          await gate;
+          return HttpResponse.json({ message: 'temporarily unavailable' }, { status: 502 });
+        }
+        return HttpResponse.json({
+          data: { items: [row], total: 1, page: 1, page_size: 25 },
+        });
+      }),
+    );
+    render(
+      <MemoryRouter initialEntries={[`/apm?${period}`]}>
+        <ApmPage />
+      </MemoryRouter>,
+    );
     await screen.findByRole('link', { name: 'orders' });
     await waitFor(() => expect(screen.getByRole('button', { name: '刷新' })).toBeEnabled());
     pending = true;
@@ -286,50 +379,114 @@ describe('Application performance', () => {
     await act(async () => resolve());
     expect(await screen.findByRole('alert')).toHaveTextContent('保留上次结果');
     expect(screen.getByRole('link', { name: 'orders' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'RPC' }));
+    fireEvent.change(screen.getByLabelText('时间范围'), {
+      target: { value: '15m' },
+    });
     expect(screen.queryByRole('link', { name: 'orders' })).not.toBeInTheDocument();
   });
   it('opens scoped operation metrics and restores the operation query and pagination', async () => {
     let overviewURL: URL | undefined;
     server.use(
-      http.get('/api/v1/apm/operations', () => HttpResponse.json({ data: { items: [{ ...row, operation: 'POST /orders' }], total: 80, page: 3, page_size: 25 } })),
+      http.get('/api/v1/apm/operations', () =>
+        HttpResponse.json({
+          data: {
+            items: [{ ...row, operation: 'POST /orders' }],
+            total: 80,
+            page: 3,
+            page_size: 25,
+          },
+        }),
+      ),
       http.get('/api/v1/apm/overview', ({ request }) => {
         overviewURL = new URL(request.url);
         return HttpResponse.json({ data: { summary: row, points: [] } });
       }),
     );
     const query = `${period}&service_name=orders&environment=production&service_namespace=trade&tab=operations&search=POST&sort=p95_ms&page=3`;
-    render(<MemoryRouter initialEntries={[`/apm/service?${query}`]}><ApmPage /></MemoryRouter>);
+    render(
+      <MemoryRouter initialEntries={[`/apm/service?${query}`]}>
+        <ApmPage />
+      </MemoryRouter>,
+    );
     fireEvent.click(await screen.findByRole('link', { name: 'POST /orders' }));
     await waitFor(() => expect(overviewURL?.searchParams.get('operation')).toBe('POST /orders'));
     expect(overviewURL?.searchParams.get('environment')).toBe('production');
     expect(overviewURL?.searchParams.get('start')).toBe('2026-09-07T00:00:00Z');
     expect(screen.getByRole('heading', { name: 'POST /orders' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '查看链路' })).toHaveAttribute('href', expect.stringContaining('/traces?'));
+    expect(screen.getByRole('link', { name: '查看链路' })).toHaveAttribute(
+      'href',
+      expect.stringContaining('/traces?'),
+    );
     fireEvent.click(screen.getByRole('link', { name: '← 全部接口' }));
     await screen.findByRole('link', { name: 'POST /orders' });
     expect(screen.getByRole('textbox', { name: '搜索接口…' })).toHaveValue('POST');
-    expect(screen.getByRole('combobox', { name: '排序' })).toHaveValue('p95_ms');
+    expect(screen.getByRole('columnheader', { name: 'P95 (ms)' })).toHaveAttribute(
+      'aria-sort',
+      'descending',
+    );
   });
   it('switches same-name services by their full identity while keeping the time and protocol', async () => {
     server.use(
-      http.get('/api/v1/apm/overview', () => HttpResponse.json({ data: { summary: row, points: [] } })),
-      http.get('/api/v1/apm/operations', () => HttpResponse.json({ data: { items: [], total: 0, page: 1, page_size: 5 } })),
+      http.get('/api/v1/apm/overview', () =>
+        HttpResponse.json({ data: { summary: row, points: [] } }),
+      ),
+      http.get('/api/v1/apm/operations', () =>
+        HttpResponse.json({
+          data: { items: [], total: 0, page: 1, page_size: 5 },
+        }),
+      ),
       http.get('/api/v1/apm/dependencies', () => HttpResponse.json({ data: { items: [] } })),
-      http.get('/api/v1/apm/services', () => HttpResponse.json({ data: { items: [row, { ...row, identity: { ...row.identity, environment: 'staging', service_namespace: '' } }], total: 2, page: 1, page_size: 25 } })),
+      http.get('/api/v1/apm/services', () =>
+        HttpResponse.json({
+          data: {
+            items: [
+              row,
+              {
+                ...row,
+                identity: {
+                  ...row.identity,
+                  environment: 'staging',
+                  service_namespace: '',
+                },
+                protocols: [
+                  {
+                    protocol: 'http',
+                    rps: 2,
+                    error_rate: 0,
+                    p95_ms: 200,
+                    data_status: 'observed',
+                  },
+                ],
+              },
+            ],
+            total: 2,
+            page: 1,
+            page_size: 25,
+          },
+        }),
+      ),
     );
-    render(<MemoryRouter initialEntries={[`/apm/service?${period}&service_name=orders&environment=production&service_namespace=trade&protocol=rpc`]}><ApmPage /></MemoryRouter>);
+    render(
+      <MemoryRouter
+        initialEntries={[
+          `/apm/service?${period}&service_name=orders&environment=production&service_namespace=trade&protocol=rpc`,
+        ]}
+      >
+        <ApmPage />
+      </MemoryRouter>,
+    );
     fireEvent.click(screen.getByRole('button', { name: '切换服务' }));
     const dialog = screen.getByRole('dialog', { name: '选择服务' });
-    const link = await within(dialog).findByRole('link', { name: 'orders staging / 未设置' });
+    const link = await within(dialog).findByRole('link', {
+      name: 'orders staging / 未设置',
+    });
     const next = new URL(link.getAttribute('href')!, 'http://localhost');
     expect(next.searchParams.get('environment')).toBe('staging');
     expect(next.searchParams.get('service_namespace')).toBe('');
-    expect(next.searchParams.get('protocol')).toBe('rpc');
+    expect(next.searchParams.get('protocol')).toBe('http');
     expect(next.searchParams.get('end')).toBe('2026-09-07T01:00:00Z');
     fireEvent.click(link);
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(screen.getByText('staging / 未设置')).toBeInTheDocument();
   });
-
 });

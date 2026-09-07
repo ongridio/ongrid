@@ -15,6 +15,13 @@ export type ApmSummary = {
   p99_ms: number | null;
   requests: number | null;
   data_status: string;
+  protocols?: {
+    protocol: string;
+    rps: number | null;
+    error_rate: number | null;
+    p95_ms: number | null;
+    data_status: string;
+  }[];
 };
 export type ApmMetadata = {
   metric_source: string;
@@ -61,9 +68,18 @@ export type ApmDiagnostics = {
   sampled_traces: number;
 };
 export type ApmRuntime = {
-  items: { name: string; unit: string; instance_id: string; value: number | null }[];
+  items: {
+    name: string;
+    unit: string;
+    instance_id: string;
+    value: number | null;
+  }[];
 };
-export type ApmAlertTemplate = { expr: string; metric: string; runbook_path: string };
+export type ApmAlertTemplate = {
+  expr: string;
+  metric: string;
+  runbook_path: string;
+};
 type Endpoints = {
   services: ApmList;
   overview: ApmOverview;
@@ -80,12 +96,18 @@ export function queryApm<K extends keyof Endpoints>(
 ) {
   const query = new URLSearchParams(params);
   query.delete('list_query');
+  if (endpoint === 'services' && query.get('metric_source') !== 'tempo_spanmetrics')
+    query.set('protocol', 'all');
   return request<{ data: Endpoints[K] }>('GET', `/apm/${endpoint}?${query}`, undefined, {
     signal,
   }).then((r) => r.data);
 }
 
-export function serviceParams(params: URLSearchParams, identity: ServiceIdentity) {
+export function serviceParams(
+  params: URLSearchParams,
+  identity: ServiceIdentity,
+  protocol?: string,
+) {
   const next = new URLSearchParams(params);
   if (!params.has('service_name')) {
     const list = new URLSearchParams(params);
@@ -94,6 +116,8 @@ export function serviceParams(params: URLSearchParams, identity: ServiceIdentity
   }
   for (const [key, value] of Object.entries(identity)) next.set(key, value);
   for (const key of ['page', 'search', 'operation', 'tab']) next.delete(key);
+  if (protocol) next.set('protocol', protocol);
+  else if (next.get('protocol') === 'all') next.delete('protocol');
   return next;
 }
 

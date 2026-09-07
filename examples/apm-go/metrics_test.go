@@ -204,4 +204,17 @@ func TestExampleMetricsWithoutTraces(t *testing.T) {
 		}
 		t.Logf("%s/%s: 12 SDK calls, zero spans; Prometheus error rate %.2f%%, P95 %.3fms", tc.protocol, tc.format, *row.ErrorRate, *row.P95Ms)
 	}
+	all, err := svc.List(ctx, apm.Query{Start: start, End: time.Now(), ServiceName: "apm-sdk-test", Environment: &env, ServiceNamespace: &ns, Protocol: "all"}, false)
+	if err != nil || all.Total != 1 || len(all.Items) != 1 || len(all.Items[0].Protocols) != 2 {
+		t.Fatalf("one dual-protocol service expected: %+v %v", all, err)
+	}
+	combined := all.Items[0]
+	if combined.RPS == nil || combined.ErrorRate == nil || math.Abs(*combined.ErrorRate-25) > 0.01 || combined.P95Ms != nil {
+		t.Fatalf("combined rates or uncombined percentiles wrong: %+v", combined)
+	}
+	if math.Abs(*combined.RPS-*combined.Protocols[0].RPS-*combined.Protocols[1].RPS) > 0.00001 {
+		t.Fatalf("protocol rates do not sum to service rate: %+v", combined)
+	}
+	t.Log("Both native protocols appear under one service; old/current RPC dual export is counted once, and P95 remains per protocol")
+
 }

@@ -57,8 +57,11 @@ func (q *Query) Validate(serviceRequired bool) error {
 	if q.Protocol == "" {
 		q.Protocol = "http"
 	}
-	if q.Protocol != "http" && q.Protocol != "rpc" {
-		return fmt.Errorf("%w: protocol must be http or rpc", errs.ErrInvalid)
+	if q.Protocol != "http" && q.Protocol != "rpc" && q.Protocol != "all" {
+		return fmt.Errorf("%w: protocol must be http, rpc or all", errs.ErrInvalid)
+	}
+	if q.Protocol == "all" && (serviceRequired || q.MetricSource != "application_metrics" || q.Operation != "") {
+		return fmt.Errorf("%w: all protocols is only supported by the application services list", errs.ErrInvalid)
 	}
 	if q.MetricFormat == "" {
 		q.MetricFormat = "otel"
@@ -158,16 +161,25 @@ func combineExpressions(exprs map[string]string) string {
 	return strings.Join(parts, " or ")
 }
 
-type Summary struct {
-	Identity   Identity `json:"identity"`
-	Operation  string   `json:"operation,omitempty"`
+type ProtocolMetrics struct {
+	Protocol   string   `json:"protocol"`
 	RPS        *float64 `json:"rps"`
 	ErrorRate  *float64 `json:"error_rate"`
-	P50Ms      *float64 `json:"p50_ms"`
 	P95Ms      *float64 `json:"p95_ms"`
-	P99Ms      *float64 `json:"p99_ms"`
-	Requests   *float64 `json:"requests"`
 	DataStatus string   `json:"data_status"`
+}
+
+type Summary struct {
+	Identity   Identity          `json:"identity"`
+	Operation  string            `json:"operation,omitempty"`
+	RPS        *float64          `json:"rps"`
+	ErrorRate  *float64          `json:"error_rate"`
+	P50Ms      *float64          `json:"p50_ms"`
+	P95Ms      *float64          `json:"p95_ms"`
+	P99Ms      *float64          `json:"p99_ms"`
+	Requests   *float64          `json:"requests"`
+	DataStatus string            `json:"data_status"`
+	Protocols  []ProtocolMetrics `json:"protocols,omitempty"`
 }
 
 type Metadata struct {
@@ -277,7 +289,15 @@ func sortedSummaries(rows []Summary, q Query) []Summary {
 				case "error_rate":
 					return row.ErrorRate
 				case "p95_ms":
-					return row.P95Ms
+					// A cross-protocol percentile cannot be reconstructed from quantiles.
+					// Sort grouped services by their slowest protocol, without calling it a combined P95.
+					value := row.P95Ms
+					for _, protocol := range row.Protocols {
+						if protocol.P95Ms != nil && (value == nil || *protocol.P95Ms > *value) {
+							value = protocol.P95Ms
+						}
+					}
+					return value
 				default:
 					return row.RPS
 				}

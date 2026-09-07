@@ -104,11 +104,11 @@ export function ServiceSwitcher({
             ) : result.items.length === 0 ? (
               <p className="py-3 text-zinc-500">{tr('未找到服务', 'No services found')}</p>
             ) : (
-              result.items.map(({ identity }) => (
+              result.items.map(({ identity, protocols }) => (
                 <Link
                   key={JSON.stringify(identity)}
                   state={navigationState}
-                  to={`/apm/service?${serviceParams(params, identity)}`}
+                  to={`/apm/service?${serviceParams(params, identity, protocols?.find((item) => item.protocol === params.get('protocol'))?.protocol || protocols?.[0]?.protocol)}`}
                   className="block rounded px-2 py-2 hover:bg-zinc-900 focus:bg-zinc-900"
                 >
                   <span className="block truncate font-medium">{identity.service_name}</span>
