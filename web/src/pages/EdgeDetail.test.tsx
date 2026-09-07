@@ -236,3 +236,30 @@ describe('findNearestTooltipEntry', () => {
     );
   });
 });
+
+describe('EdgeDetailPage SkyWalking receiver', () => {
+  it.each([
+    ['zh-CN', {}, '127.0.0.1:11800', '编辑配置', '默认监听 localhost'],
+    ['en-US', { grpc_endpoint: '0.0.0.0:4317' }, '0.0.0.0:11800', 'Edit config', 'Listens on localhost by default'],
+    ['zh-CN', { skywalking_grpc_endpoint: '127.0.0.1:21800' }, '127.0.0.1:21800', '编辑配置', '默认监听 localhost'],
+  ] as const)('shows the receiver address for %s %j with both protocol toggles', async (locale, spec, endpoint, edit, hint) => {
+    localStorage.setItem('ongrid-locale', locale);
+    server.use(
+      http.get('/api/v1/edges/42', () => HttpResponse.json({ id: 42, name: 'skywalking-edge', status: 'online', roles: [] })),
+      http.get('/api/v1/edges/42/plugins', () => HttpResponse.json({ items: [{ plugin_name: 'traces', enabled: true, spec }] })),
+    );
+    render(
+      <MemoryRouter initialEntries={['/edges/42?tab=plugins']}>
+        <Routes><Route path="/edges/:edgeId" element={<EdgeDetailPage />} /></Routes>
+      </MemoryRouter>,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: edit }));
+    expect(await screen.findByTitle(endpoint)).toBeInTheDocument();
+    expect(screen.getAllByText(new RegExp(hint))).toHaveLength(2);
+    expect(screen.getAllByRole('checkbox')).toHaveLength(4);
+    const swHTTP = screen.getAllByRole('checkbox')[3];
+    expect(swHTTP).toBeChecked();
+    fireEvent.click(swHTTP);
+    expect(swHTTP).not.toBeChecked();
+  });
+});

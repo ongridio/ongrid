@@ -461,7 +461,7 @@ export default function TracesPage() {
               </label>
               <label className="block min-w-44 flex-1">
                 <span className="mb-1 block text-[11px] text-zinc-500"><SearchIcon size={10} className="-mt-0.5 mr-1 inline" />trace_id</span>
-                <input value={traceIdInput} onChange={(event) => setTraceIdInput(event.target.value)} placeholder={tr('粘贴 ID 直接打开', 'Paste an ID to open')} className={cn(INPUT_BASE, 'font-mono')} />
+                <input value={traceIdInput} onChange={(event) => setTraceIdInput(event.target.value)} placeholder={tr('粘贴 OTLP 或 SkyWalking ID', 'Paste OTLP or SkyWalking ID')} className={cn(INPUT_BASE, 'font-mono')} />
               </label>
               <div className="flex h-[34px] items-center gap-1.5 self-end">
                 {TRACES_QUICK_CHIPS.map((chip) => (

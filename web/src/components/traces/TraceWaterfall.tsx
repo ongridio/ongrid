@@ -91,6 +91,10 @@ export function TraceWaterfall({ trace, traceId, fallbackService, fallbackName }
   const root = model.roots[0] ?? model.spans[0];
   const service = root?.service || fallbackService || '-';
   const name = root?.name || fallbackName || tr('未命名 trace', 'Unnamed trace');
+  const skywalkingId = model.spans
+    .map((span) => span.resourceAttributes.find((attr) => attr.key === 'sw8.trace_id')?.value?.stringValue)
+    .find(Boolean);
+
 
   if (model.spans.length === 0) {
     return (
@@ -133,6 +137,13 @@ export function TraceWaterfall({ trace, traceId, fallbackService, fallbackName }
             <span>·</span>
             <span className="font-mono" title={traceId}>{shortId(traceId)}</span>
             <CopyValueButton value={traceId} label={tr('复制 trace_id', 'Copy trace_id')} />
+            {skywalkingId && skywalkingId !== traceId && (
+              <>
+                <span>· SkyWalking</span>
+                <span className="font-mono" title={skywalkingId}>{shortId(skywalkingId)}</span>
+                <CopyValueButton value={skywalkingId} label={tr('复制 SkyWalking trace ID', 'Copy SkyWalking trace ID')} />
+              </>
+            )}
           </div>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-1.5">
@@ -298,8 +309,8 @@ function SpanDetails({ span, traceStartMs }: { span: TraceSpanNode; traceStartMs
       </div>
 
       {span.statusMessage && (
-        <div className="flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
-          <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+        <div className={cn('flex items-start gap-2 rounded-md border px-3 py-2 text-xs', isErrorStatus(span.statusCode) ? 'border-red-500/30 bg-red-500/10 text-red-300' : 'border-zinc-800/60 text-zinc-400')}>
+          {isErrorStatus(span.statusCode) && <AlertTriangle size={12} className="mt-0.5 shrink-0" />}
           <span className="break-words">{span.statusMessage}</span>
         </div>
       )}

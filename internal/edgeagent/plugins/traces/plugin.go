@@ -3,7 +3,7 @@
 // It wraps an OpenTelemetry Collector (otelcol-contrib) subprocess:
 // ongrid-edge writes an otelcol config derived from the manager-pushed
 // PluginConfig, spawns otelcol-contrib, and lets it accept OTLP gRPC/HTTP
-// from local applications and push directly to manager nginx /v1/traces.
+// and SkyWalking gRPC/HTTP from local applications and push directly to manager nginx /v1/traces.
 // ongrid-edge does not touch the trace byte stream.
 //
 // Plugin name "traces" is plural — OTel signal naming convention

@@ -47,6 +47,10 @@ extract_source 'ongrid-edge/templates/daemonset.yaml' "$tmp_dir/default.yaml" "$
 extract_source 'ongrid-edge/templates/metrics-scraper-deployment.yaml' "$tmp_dir/default.yaml" "$tmp_dir/default-scraper.yaml"
 extract_source 'ongrid-edge/templates/telemetry-gateway-deployment.yaml' "$tmp_dir/default.yaml" "$tmp_dir/default-gateway.yaml"
 extract_source 'ongrid-edge/templates/telemetry-gateway-service.yaml' "$tmp_dir/default.yaml" "$tmp_dir/default-gateway-service.yaml"
+grep -q 'containerPort: 12800' "$tmp_dir/default-gateway.yaml"
+grep -q 'containerPort: 11800' "$tmp_dir/default-gateway.yaml"
+grep -q 'targetPort: skywalking-grpc' "$tmp_dir/default-gateway-service.yaml"
+grep -q 'port: 11800' "$tmp_dir/default-gateway-service.yaml"
 grep -q 'type: Recreate' "$tmp_dir/default.yaml"
 ! grep -q 'kubernetes.io/arch:' "$tmp_dir/default.yaml"
 if [[ -n "$expected_image" ]]; then
@@ -118,12 +122,16 @@ extract_source 'ongrid-edge/templates/deployment.yaml' "$tmp_dir/compatibility.y
 ! grep -q '# Source: ongrid-edge/templates/metrics-scraper-deployment.yaml' "$tmp_dir/compatibility.yaml"
 grep -q 'ONGRID_K8S_METRICS_ENDPOINT' "$tmp_dir/compatibility-controller.yaml"
 grep -q 'containerPort: 4317' "$tmp_dir/compatibility-controller.yaml"
+grep -q 'containerPort: 11800' "$tmp_dir/compatibility-controller.yaml"
 grep -q 'ongrid.io/telemetry-backend: "true"' "$tmp_dir/compatibility-controller.yaml"
 
 helm template split "$chart_package" "${common_args[@]}" \
+  --set telemetryGateway.service.skywalkingGrpcPort=21800 \
   --set telemetryGateway.mode=deployment \
   --set kubernetesMetrics.mode=scraper \
   >"$tmp_dir/split.yaml"
+grep -q 'port: 21800' "$tmp_dir/split.yaml"
+grep -q 'containerPort: 11800' "$tmp_dir/split.yaml"
 extract_source 'ongrid-edge/templates/deployment.yaml' "$tmp_dir/split.yaml" "$tmp_dir/split-controller.yaml"
 extract_source 'ongrid-edge/templates/metrics-scraper-deployment.yaml' "$tmp_dir/split.yaml" "$tmp_dir/scraper.yaml"
 grep -q '# Source: ongrid-edge/templates/telemetry-gateway-deployment.yaml' "$tmp_dir/split.yaml"

@@ -851,7 +851,7 @@ export default function EdgesPage() {
                 "min-w-full text-xs",
                 compactNetworkTable
                   ? "w-full min-w-[1120px] table-fixed"
-                  : "w-[1637px] table-fixed",
+                  : "w-max table-auto",
               )}
             >
               {compactNetworkTable ? (
@@ -1123,12 +1123,7 @@ export default function EdgesPage() {
                           navigate(`/devices/${encodeURIComponent(d.id)}`)
                         }
                       >
-                        {/* Identity columns are pinned `whitespace-nowrap`
-                          — when the table is squeezed (sidebar + many
-                          columns) we'd rather let the action column
-                          wrap than have a name break across lines.
-                          Heartbeat / access-key / agent are short and
-                          formatted to a known width. */}
+
                         <td
                           className="px-2.5 py-2.5"
                           onClick={(ev) => ev.stopPropagation()}

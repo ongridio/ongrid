@@ -2,6 +2,8 @@ package tracequery
 
 import (
 	"context"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,8 +11,11 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 
 	oteltracing "github.com/ongridio/ongrid/internal/pkg/tracing"
 )
@@ -187,7 +192,7 @@ func (c *Client) TagValues(ctx context.Context, tag string) ([]string, error) {
 	return env.TagValues, nil
 }
 
-// GetTrace fetches a single trace by ID.
+// GetTrace accepts an OTLP ID or an original SkyWalking ID.
 func (c *Client) GetTrace(ctx context.Context, traceID string) (*TraceResult, error) {
 	if traceID == "" {
 		return nil, errors.New("tracequery: traceID is empty")
@@ -195,7 +200,7 @@ func (c *Client) GetTrace(ctx context.Context, traceID string) (*TraceResult, er
 	// /api/traces/<id> — id is path-encoded; Tempo accepts hex or
 	// 0x-prefixed forms. We don't validate format here so callers can
 	// surface Tempo's own 4xx error message verbatim.
-	path := "/api/traces/" + url.PathEscape(traceID)
+	path := "/api/traces/" + url.PathEscape(tempoTraceID(traceID))
 	body, err := c.do(ctx, path, nil)
 	if err != nil {
 		return nil, err
@@ -252,4 +257,39 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
+}
+
+// tempoTraceID applies the bundled Collector's SkyWalking-to-OTLP mapping so
+// logs' original IDs can use direct lookup without a time-bounded attribute scan.
+// See collector-contrib/pkg/translator/skywalking/skywalkingproto_to_traces.go.
+// The real Collector integration test guards this mapping on dependency upgrades.
+func tempoTraceID(id string) string {
+	if len(id) == 36 {
+		if parsed, err := uuid.Parse(id); err == nil {
+			return hex.EncodeToString(parsed[:])
+		}
+	}
+	// The Collector treats IDs up to 36 characters as UUIDs, not Java IDs.
+	if len(id) <= 36 {
+		return id
+	}
+	parts := strings.SplitN(id, ".", 3)
+	if len(parts) != 3 || len(parts[0]) != 32 {
+		return id
+	}
+	mapped, err := hex.DecodeString(parts[0])
+	if err != nil {
+		return id
+	}
+	thread, err := strconv.ParseUint(parts[1], 10, 63)
+	if err != nil {
+		return id
+	}
+	sequence, err := strconv.ParseUint(parts[2], 10, 63)
+	if err != nil {
+		return id
+	}
+	binary.LittleEndian.PutUint32(mapped[4:8], binary.LittleEndian.Uint32(mapped[4:8])^uint32(thread))
+	binary.LittleEndian.PutUint64(mapped[8:], binary.LittleEndian.Uint64(mapped[8:])^sequence)
+	return hex.EncodeToString(mapped)
 }

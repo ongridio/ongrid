@@ -1,0 +1,49 @@
+name: Collector compatibility
+on:
+  pull_request:
+    paths:
+      - Makefile
+      - dist/build-otelcol.sh
+      - dist/patches/**
+      - deploy/Dockerfile.ongrid-edge
+      - internal/edgeagent/plugins/traces/**
+      - internal/pkg/tracequery/**
+      - .github/workflows/collector-compat.yml
+  push:
+    branches: [main]
+    paths:
+      - Makefile
+      - dist/build-otelcol.sh
+      - dist/patches/**
+      - deploy/Dockerfile.ongrid-edge
+      - internal/edgeagent/plugins/traces/**
+      - internal/pkg/tracequery/**
+      - .github/workflows/collector-compat.yml
+permissions:
+  contents: read
+jobs:
+  collector:
+    name: SkyWalking real Collector + bind isolation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.x'
+          cache: true
+      - name: Build patched official distribution
+        run: make fetch-otelcol EDGE_PLUGIN_ARCHES=linux-amd64
+      - name: Fetch unpatched Collector for upgrade compatibility
+        run: |
+          base=https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.157.0
+          curl -fsSL --retry 3 "$base/otelcol-contrib_0.157.0_linux_amd64.tar.gz" -o /tmp/otelcol-legacy.tgz
+          curl -fsSL --retry 3 "$base/opentelemetry-collector-releases_otelcol-contrib_checksums.txt" -o /tmp/otelcol-checksums.txt
+          awk '$2 == "otelcol-contrib_0.157.0_linux_amd64.tar.gz" {print $1 "  /tmp/otelcol-legacy.tgz"}' /tmp/otelcol-checksums.txt | sha256sum -c -
+          mkdir -p /tmp/otelcol-legacy
+          tar -xzf /tmp/otelcol-legacy.tgz -C /tmp/otelcol-legacy otelcol-contrib
+      - name: Verify reception, ID conversion and network isolation
+        env:
+          ONGRID_TEST_LEGACY_OTELCOL_BINARY: /tmp/otelcol-legacy/otelcol-contrib
+          ONGRID_TEST_OTELCOL_BINARY: ${{ github.workspace }}/bin/linux-amd64/otelcol-contrib
+        run: go test -race ./internal/pkg/tracequery ./internal/edgeagent/plugins/traces

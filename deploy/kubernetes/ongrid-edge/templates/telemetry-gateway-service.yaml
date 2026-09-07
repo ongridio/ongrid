@@ -23,6 +23,14 @@ spec:
       port: {{ default 4317 $svc.grpcPort }}
       targetPort: otlp-grpc
       protocol: TCP
+    - name: skywalking-grpc
+      port: {{ default 11800 $svc.skywalkingGrpcPort }}
+      targetPort: skywalking-grpc
+      protocol: TCP
+    - name: skywalking-http
+      port: {{ default 12800 $svc.skywalkingHttpPort }}
+      targetPort: skywalking-http
+      protocol: TCP
     - name: otlp-http
       port: {{ default 4318 $svc.httpPort }}
       targetPort: otlp-http

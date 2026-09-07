@@ -1,0 +1,28 @@
+--- a/skywalking_receiver.go
++++ b/skywalking_receiver.go
+@@ -90,11 +90,10 @@
+ }
+ 
+ func (sr *swReceiver) collectorGRPCAddr() string {
+-	var port int
+ 	if sr.config != nil {
+-		port = sr.config.CollectorGRPCPort
++		return sr.config.CollectorGRPCServerSettings.NetAddr.Endpoint
+ 	}
+-	return fmt.Sprintf(":%d", port)
++	return ":0"
+ }
+ 
+ func (sr *swReceiver) collectorGRPCEnabled() bool {
+--- a/config.go
++++ b/config.go
+@@ -27,6 +27,9 @@
+ // Config defines configuration for skywalking receiver.
+ type Config struct {
+ 	Protocols `mapstructure:"protocols"`
++	// RequireGRPCBindHost is a capability marker for Ongrid's bind-host fix.
++	// Older upstream binaries reject this field instead of opening all interfaces.
++	RequireGRPCBindHost bool `mapstructure:"require_grpc_bind_host"`
+ 	// prevent unkeyed literal initialization
+ 	_ struct{}
+ }
