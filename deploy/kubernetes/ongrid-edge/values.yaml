@@ -176,6 +176,7 @@ telemetryGateway:
   service:
     type: ClusterIP
     grpcPort: 4317
+    skywalkingGrpcPort: 11800
     httpPort: 4318
 
 podSecurity:

@@ -1256,7 +1256,7 @@ const PLUGIN_META: Record<
   traces: {
     label: 'traces',
     pill: 'bg-violet-500/10 text-violet-300 ring-violet-500/30',
-    getHint: () => 'subprocess otelcol-contrib, OTLP gRPC :4317 / HTTP :4318',
+    getHint: () => 'OTLP gRPC :4317 / HTTP :4318 · SkyWalking gRPC :11800',
   },
   profiles: {
     label: 'profiles',
@@ -4306,6 +4306,10 @@ function TracesSpecForm({
   const samplingRate =
     typeof draft.sampling_rate === 'number' ? draft.sampling_rate : 1.0;
   const receivers = (draft.receivers ?? {}) as Record<string, unknown>;
+  const grpcEndpoint = typeof draft.grpc_endpoint === 'string' && draft.grpc_endpoint
+    ? draft.grpc_endpoint : '127.0.0.1:4317';
+  const skywalkingEndpoint = typeof draft.skywalking_grpc_endpoint === 'string'
+    ? draft.skywalking_grpc_endpoint.trim() : grpcEndpoint.replace(/:[^:]*$/, ':11800');
   const grpcEnabled = receivers.grpc !== false; // default on
   const httpEnabled = receivers.http !== false; // default on
 
@@ -4366,8 +4370,18 @@ function TracesSpecForm({
           </label>
         </div>
         <div className="mt-1 text-[11px] text-zinc-500">
-          {tr('监听 localhost / docker bridge；应用 SDK 直接 export 到 edge:4317。', 'Listens on localhost / docker bridge; app SDKs export directly to edge:4317.')}
+          {tr('默认监听 localhost；远程应用需要配置可达的监听地址。', 'Listens on localhost by default; remote apps require a reachable bind address.')}
         </div>
+      </div>
+
+      <div className="text-xs text-zinc-400">
+        <div>SkyWalking gRPC · {tr('监听地址', 'Listen address')} <code className="font-mono text-zinc-300">{skywalkingEndpoint}</code></div>
+        <p className="mt-1 text-[11px] text-zinc-500">
+          {tr(
+            '升级 edge 后，随 Trace 采集自动开启，无需单独配置。将 SkyWalking Java agent（8.9.0+）的 collector.backend_service 指向该地址；远程应用请使用可达的 edge 地址。',
+            'After upgrading edge, enabled automatically with Trace collection. Point SkyWalking Java agent (8.9.0+) collector.backend_service to this address; remote apps must use a reachable edge address.',
+          )}
+        </p>
       </div>
     </div>
   );

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -85,8 +86,9 @@ func TestRenderHappyPath(t *testing.T) {
 		"otlp:",
 		"grpc:",
 		"http:",
-		"endpoint: 0.0.0.0:4317",
-		"endpoint: 0.0.0.0:4318",
+		`endpoint: "0.0.0.0:4317"`,
+		`endpoint: "0.0.0.0:4318"`,
+		`endpoint: "0.0.0.0:11800"`,
 		// Exporter URL points at the full manager public trace endpoint.
 		// Use traces_endpoint so otelcol does not append /v1/traces again.
 		"traces_endpoint: https://manager.example.com/v1/traces",
@@ -100,7 +102,7 @@ func TestRenderHappyPath(t *testing.T) {
 		// otlphttp/manager.
 		"pipelines:",
 		"traces:",
-		"receivers: [otlp]",
+		"receivers: [otlp, skywalking]",
 		"processors: [resource/device, batch]",
 		"exporters: [otlphttp/manager]",
 	} {
@@ -142,10 +144,10 @@ func TestRenderDefaultEndpoints(t *testing.T) {
 	body := string(out)
 	// Defaults bind to localhost so the receiver isn't accidentally
 	// reachable from the public network on multi-homed hosts.
-	if !strings.Contains(body, "endpoint: 127.0.0.1:4317") {
+	if !strings.Contains(body, `endpoint: "127.0.0.1:4317"`) {
 		t.Errorf("default gRPC endpoint missing: %s", body)
 	}
-	if !strings.Contains(body, "endpoint: 127.0.0.1:4318") {
+	if !strings.Contains(body, `endpoint: "127.0.0.1:4318"`) {
 		t.Errorf("default HTTP endpoint missing: %s", body)
 	}
 }
@@ -294,8 +296,8 @@ func TestRenderOmitDeviceIDForGateway(t *testing.T) {
 		t.Fatalf("gateway config must not inject device_id:\n%s", body)
 	}
 	for _, want := range []string{
-		"endpoint: 0.0.0.0:4317",
-		"endpoint: 0.0.0.0:4318",
+		`endpoint: "0.0.0.0:4317"`,
+		`endpoint: "0.0.0.0:4318"`,
 		"k8sattributes:",
 		"auth_type: serviceAccount",
 		"k8s.namespace.name",
@@ -481,5 +483,45 @@ func TestRenderRejectsMissingEdgeID(t *testing.T) {
 	cfg := plugins.PluginConfig{Enabled: true, Endpoint: "https://x/v1/traces"}
 	if _, err := render(cfg); err == nil {
 		t.Errorf("render must reject missing edge_id")
+	}
+}
+
+func TestRenderSkyWalkingEndpoints(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		spec map[string]interface{}
+		want string
+	}{
+		{"default", nil, "127.0.0.1:11800"},
+		{"gateway", map[string]interface{}{"grpc_endpoint": "0.0.0.0:4317"}, "0.0.0.0:11800"},
+		{"ipv6", map[string]interface{}{"grpc_endpoint": "[::1]:4317"}, "[::1]:11800"},
+		{"override", map[string]interface{}{"skywalking_grpc_endpoint": "127.0.0.1:21800"}, "127.0.0.1:21800"},
+		{"invalid", map[string]interface{}{"skywalking_grpc_endpoint": "http://localhost:11800"}, ""},
+		{"empty", map[string]interface{}{"skywalking_grpc_endpoint": ""}, ""},
+		{"wrong type", map[string]interface{}{"skywalking_grpc_endpoint": 11800}, ""},
+		{"zero port", map[string]interface{}{"skywalking_grpc_endpoint": "localhost:0"}, ""},
+		{"overflow", map[string]interface{}{"skywalking_grpc_endpoint": "localhost:65536"}, ""},
+		{"grpc conflict", map[string]interface{}{"skywalking_grpc_endpoint": "127.0.0.1:4317"}, ""},
+		{"http conflict", map[string]interface{}{"skywalking_grpc_endpoint": "127.0.0.1:4318"}, ""},
+		{"default conflict", map[string]interface{}{"grpc_endpoint": "127.0.0.1:11800"}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := render(plugins.PluginConfig{EdgeID: 42, Endpoint: "https://manager.example.com/v1/traces", Spec: tc.spec})
+			if tc.want == "" {
+				if err == nil {
+					t.Fatal("expected invalid listener to be rejected")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(out), "skywalking:\n    protocols:\n      grpc:\n        endpoint: "+strconv.Quote(tc.want)) {
+				t.Fatalf("SkyWalking listener missing: %s", out)
+			}
+			if !strings.Contains(string(out), "receivers: [otlp, skywalking]") {
+				t.Fatal("SkyWalking must share the existing traces pipeline")
+			}
+		})
 	}
 }

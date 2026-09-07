@@ -15,10 +15,9 @@ import (
 
 // otelcolTemplate is the OTel Collector config we render per edge.
 //
-// Receivers: OTLP gRPC + HTTP, bound to docker bridge / localhost addresses
-// the application can reach. We intentionally do NOT bind 0.0.0.0 — the edge
-// is meant to ingest from local apps (host or sibling containers on the
-// docker bridge), not from the public internet.
+// Receivers: OTLP gRPC + HTTP and SkyWalking gRPC. SkyWalking inherits the
+// OTLP gRPC bind host, keeping standalone edges on localhost and Kubernetes
+// gateways on their configured interface.
 //
 // Exporters: a single OTLP HTTP exporter pointing at the manager /v1/traces
 // endpoint. Use traces_endpoint, not endpoint: otlphttp.endpoint is a base URL
@@ -38,9 +37,13 @@ receivers:
   otlp:
     protocols:
       grpc:
-        endpoint: {{ .GRPCEndpoint }}
+        endpoint: {{ printf "%q" .GRPCEndpoint }}
       http:
-        endpoint: {{ .HTTPEndpoint }}
+        endpoint: {{ printf "%q" .HTTPEndpoint }}
+  skywalking:
+    protocols:
+      grpc:
+        endpoint: {{ printf "%q" .SkyWalkingGRPCEndpoint }}
 
 processors:
 {{- if .BoundedPipelines }}
@@ -245,7 +248,7 @@ service:
                 without_units: true
   pipelines:
     traces:
-      receivers: [otlp]
+      receivers: [otlp, skywalking]
       processors: [{{ if .BoundedPipelines }}memory_limiter, {{ end }}{{ if .K8sAttributesEnabled }}k8sattributes, {{ end }}resource/device, {{ if .BoundedPipelines }}batch/traces{{ else }}batch{{ end }}]
       exporters: [otlphttp/manager]
 {{- if .LogsEnabled }}
@@ -266,6 +269,7 @@ service:
 //
 //	grpc_endpoint : string (default "127.0.0.1:4317")
 //	http_endpoint : string (default "127.0.0.1:4318")
+//	skywalking_grpc_endpoint : string (default OTLP gRPC host with port 11800)
 //	extra_attrs : map[string]string (extra resource attributes)
 //	tls_insecure_skip_verify : bool (default TRUE — skip cert verification
 //	                          on the OTLP/HTTPS push so the standard
@@ -295,6 +299,10 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 
 	grpcEP := stringOr(cfg.Spec, "grpc_endpoint", "127.0.0.1:4317")
 	httpEP := stringOr(cfg.Spec, "http_endpoint", "127.0.0.1:4318")
+	skywalkingEP, err := skywalkingEndpoint(cfg.Spec, grpcEP, httpEP)
+	if err != nil {
+		return nil, err
+	}
 	extra := stringMap(cfg.Spec, "extra_attrs")
 	k8sAttributes := boolSpec(cfg.Spec, "enable_k8sattributes")
 	logsEnabled := boolSpec(cfg.Spec, "enable_logs")
@@ -387,6 +395,7 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 		"EmitDeviceID":               !omitDeviceID,
 		"GRPCEndpoint":               grpcEP,
 		"HTTPEndpoint":               httpEP,
+		"SkyWalkingGRPCEndpoint":     skywalkingEP,
 		"ExtraAttrs":                 extra,
 		"Endpoint":                   strings.TrimRight(cfg.Endpoint, "/"),
 		"AuthHeader":                 authHeader,
@@ -528,4 +537,32 @@ func intSpec(spec map[string]interface{}, key string, fallback int) int {
 	default:
 		return fallback
 	}
+}
+
+// skywalkingEndpoint keeps the existing listener scope unless explicitly overridden.
+func skywalkingEndpoint(spec map[string]interface{}, grpcEP, httpEP string) (string, error) {
+	host, _, err := net.SplitHostPort(grpcEP)
+	if err != nil {
+		return "", fmt.Errorf("traces plugin: invalid grpc_endpoint: %w", err)
+	}
+	endpoint := net.JoinHostPort(host, "11800")
+	if raw, ok := spec["skywalking_grpc_endpoint"]; ok {
+		value, ok := raw.(string)
+		if !ok || strings.TrimSpace(value) == "" {
+			return "", fmt.Errorf("traces plugin: skywalking_grpc_endpoint must be a non-empty host:port string")
+		}
+		endpoint = strings.TrimSpace(value)
+	}
+	_, port, err := net.SplitHostPort(endpoint)
+	if err != nil {
+		return "", fmt.Errorf("traces plugin: invalid skywalking_grpc_endpoint: %w", err)
+	}
+	portNumber, err := strconv.Atoi(port)
+	if err != nil || portNumber < 1 || portNumber > 65535 || strings.ContainsAny(endpoint, "\r\n\t ") {
+		return "", fmt.Errorf("traces plugin: skywalking_grpc_endpoint requires host:port with port between 1 and 65535")
+	}
+	if endpoint == grpcEP || endpoint == httpEP {
+		return "", fmt.Errorf("traces plugin: skywalking_grpc_endpoint conflicts with an OTLP listener; use a separate port")
+	}
+	return endpoint, nil
 }

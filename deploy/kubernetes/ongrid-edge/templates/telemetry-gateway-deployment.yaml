@@ -94,6 +94,9 @@ spec:
             - name: otlp-grpc
               containerPort: 4317
               protocol: TCP
+            - name: skywalking-grpc
+              containerPort: 11800
+              protocol: TCP
             - name: otlp-http
               containerPort: 4318
               protocol: TCP

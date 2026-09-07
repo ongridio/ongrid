@@ -236,3 +236,26 @@ describe('findNearestTooltipEntry', () => {
     );
   });
 });
+
+describe('EdgeDetailPage SkyWalking receiver', () => {
+  it.each([
+    ['zh-CN', {}, '127.0.0.1:11800', '编辑配置', '随 Trace 采集自动开启'],
+    ['en-US', { grpc_endpoint: '0.0.0.0:4317' }, '0.0.0.0:11800', 'Edit config', 'enabled automatically with Trace collection'],
+    ['zh-CN', { skywalking_grpc_endpoint: '127.0.0.1:21800' }, '127.0.0.1:21800', '编辑配置', '随 Trace 采集自动开启'],
+  ] as const)('shows the receiver address for %s %j without another toggle', async (locale, spec, endpoint, edit, hint) => {
+    localStorage.setItem('ongrid-locale', locale);
+    server.use(
+      http.get('/api/v1/edges/42', () => HttpResponse.json({ id: 42, name: 'skywalking-edge', status: 'online', roles: [] })),
+      http.get('/api/v1/edges/42/plugins', () => HttpResponse.json({ items: [{ plugin_name: 'traces', enabled: true, spec }] })),
+    );
+    render(
+      <MemoryRouter initialEntries={['/edges/42?tab=plugins']}>
+        <Routes><Route path="/edges/:edgeId" element={<EdgeDetailPage />} /></Routes>
+      </MemoryRouter>,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: edit }));
+    expect(await screen.findByText(endpoint)).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(hint))).toBeInTheDocument();
+    expect(screen.getAllByRole('checkbox')).toHaveLength(2); // Existing OTLP controls only.
+  });
+});
