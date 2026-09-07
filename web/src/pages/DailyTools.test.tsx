@@ -524,11 +524,13 @@ describe('DailyToolsPage', () => {
     expect(saved.spec).toMatchObject({
       mode: 'pprof',
       duration_seconds: 30,
+      tls_insecure_skip_verify: true,
       runtime_target: {
         url: 'http://127.0.0.1:16060/debug/pprof/heap',
         profile_type: 'heap',
         service_name: 'ongrid-edge',
         collection_interval_seconds: 10,
+        tls_insecure_skip_verify: false,
       },
     });
 

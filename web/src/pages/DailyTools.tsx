@@ -2096,7 +2096,7 @@ function profileSpec(form: ProfileForm): Record<string, unknown> {
   return {
     mode: 'pprof',
     duration_seconds,
-    tls_insecure_skip_verify: false,
+    tls_insecure_skip_verify: true,
     runtime_target: {
       url: form.url.trim(),
       profile_type: form.kind,
