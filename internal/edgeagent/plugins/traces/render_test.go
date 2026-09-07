@@ -516,7 +516,7 @@ func TestRenderSkyWalkingEndpoints(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(string(out), "skywalking:\n    protocols:\n      grpc:\n        endpoint: "+strconv.Quote(tc.want)) {
+			if !strings.Contains(string(out), "skywalking:\n    require_grpc_bind_host: true\n    protocols:\n      grpc:\n        endpoint: "+strconv.Quote(tc.want)) {
 				t.Fatalf("SkyWalking listener missing: %s", out)
 			}
 			if !strings.Contains(string(out), "receivers: [otlp, skywalking]") {
@@ -554,5 +554,35 @@ func TestReceiverSwitches(t *testing.T) {
 				t.Fatalf("unexpected receivers: %s", out)
 			}
 		})
+	}
+}
+
+// Older dependencies must reject default-on gRPC rather than silently bind '*'.
+func TestLegacyCollectorRejectsSkyWalkingGRPC(t *testing.T) {
+	binary := os.Getenv("ONGRID_TEST_LEGACY_OTELCOL_BINARY")
+	if binary == "" {
+		t.Skip("ONGRID_TEST_LEGACY_OTELCOL_BINARY is not set")
+	}
+	for _, enabled := range []bool{true, false} {
+		raw, err := render(plugins.PluginConfig{EdgeID: 42, Endpoint: "http://localhost:4318/v1/traces", Spec: map[string]interface{}{
+			"skywalking_receivers": map[string]interface{}{"grpc": enabled},
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(t.TempDir(), "otelcol.yaml")
+		if err := os.WriteFile(path, raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		out, err := exec.CommandContext(ctx, binary, "validate", "--config="+path).CombinedOutput()
+		cancel()
+		if enabled {
+			if err == nil || !strings.Contains(string(out), "require_grpc_bind_host") {
+				t.Fatalf("legacy gRPC did not fail closed: %v %s", err, out)
+			}
+		} else if err != nil {
+			t.Fatalf("legacy HTTP-only configuration rejected: %v %s", err, out)
+		}
 	}
 }

@@ -136,6 +136,32 @@ func TestSkyWalkingCollectorForwarding(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	require.NoError(t, resp.Body.Close())
 
+	// A localhost endpoint must not become a wildcard listener. Use the
+	// machine's other IPv4 address so the pre-fix Collector fails this check.
+	addresses, err := net.InterfaceAddrs()
+	require.NoError(t, err)
+	checked := false
+	for _, address := range addresses {
+		network, ok := address.(*net.IPNet)
+		if !ok || network.IP.IsLoopback() || network.IP.To4() == nil {
+			continue
+		}
+		for _, endpoint := range []string{swEP, swHTTP} {
+			_, port, err := net.SplitHostPort(endpoint)
+			require.NoError(t, err)
+			external, err := net.DialTimeout("tcp", net.JoinHostPort(network.IP.String(), port), time.Second)
+			if external != nil {
+				require.NoError(t, external.Close())
+			}
+			require.Error(t, err, "localhost receiver unexpectedly reachable through %s", network.IP)
+		}
+		checked = true
+		break
+	}
+	if !checked {
+		t.Log("no non-loopback IPv4 interface; network-isolation check unavailable")
+	}
+
 	// OTLP must still work concurrently through the same processing/export path.
 	otlp, err := grpc.NewClient(grpcEP, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)

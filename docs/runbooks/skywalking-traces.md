@@ -5,7 +5,7 @@
 ## 接入
 
 1. 升级包含本功能的 edge，确认 `traces` 插件处于运行状态。只升级 manager 不会改变旧 edge 的接收能力。
-2. SkyWalking gRPC 配置默认继承 OTLP gRPC 的监听 IP，端口为 `11800`；HTTP 继承 OTLP HTTP 的监听 IP，端口为 `12800`。**合并阻塞：Collector 0.157.0 的 gRPC 实现只使用端口，实际监听所有网卡，未遵守配置的 IP；修复依赖或加入有效隔离前不能按 localhost-only 能力发布。** HTTP 遵守监听 IP。Kubernetes Chart 提供两个 Service 端口。
+2. SkyWalking gRPC 配置默认继承 OTLP gRPC 的监听 IP，端口为 `11800`；HTTP 继承 OTLP HTTP 的监听 IP，端口为 `12800`。发行包使用 `0.157.0-ongrid.1`，修正上游 gRPC 丢弃监听 IP 的问题；gRPC 和 HTTP 均遵守监听 IP。Kubernetes Chart 提供两个 Service 端口。
 3. 将 SkyWalking Java agent 的 `collector.backend_service`（环境变量 `SW_AGENT_COLLECTOR_BACKEND_SERVICES`）设置为应用可达的 `host:11800`，按应用的发布流程重启以加载配置。
 4. 发起一笔业务请求，在平台 Trace 页面按服务名和时间范围查询。
 
@@ -13,7 +13,7 @@
 
 ## 高级配置和排错
 
-- HTTP 默认 localhost 只允许本机应用接入。gRPC 存在上述监听范围问题，不能依赖 endpoint 的 IP 限制来源。
+- 两种协议默认 localhost，只允许本机应用接入；远程应用需配置可达的监听地址，并按网络策略限制来源。
 - 如端口被占用，可在已有插件 JSON 配置中设置 `skywalking_grpc_endpoint`，例如 `"127.0.0.1:21800"`。应用上报地址需同步修改；Kubernetes 自定义 Service 对外端口用 `telemetryGateway.service.skywalkingGrpcPort`，其容器目标端口仍为 `11800`。
 - SkyWalking 和 OTLP 不能监听同一 IP、同一 TCP 端口。无效配置在渲染/校验阶段拒绝；其他进程占用端口时，Collector 启动失败，具体绑定错误见插件工作目录的 `traces/traces.log`。
 - 不要手改生成的 `otelcol.yaml`：配置下发会重新生成它。
@@ -36,3 +36,11 @@ make test-k8s-chart
 
 SkyWalking 接收器分别支持 gRPC `11800` 和 HTTP `12800`（`POST /v3/segments`，SkyWalking JSON）。插件面板与 OTLP 一样提供两个开关，默认均开启。`skywalking_receivers.grpc/http` 与 `receivers.grpc/http` 设置为 false 可关闭对应协议；至少保留一个 Trace 接收协议，日志/指标管道需要保留 OTLP。
 HTTP 地址通过 `skywalking_http_endpoint` 设置，默认继承 OTLP HTTP 的监听 IP。Kubernetes Service 端口通过 `telemetryGateway.service.skywalkingHttpPort` 设置。
+
+## Collector 监听修复与升级
+
+上游 0.157.0 的 SkyWalking gRPC 接收器忽略 endpoint 的主机部分。`make fetch-otelcol` 从固定且经 SHA256 校验的官方发行版源码构建完整 contrib 组件清单，应用 `dist/patches/skywalking-grpc-bind.patch`，得到 `0.157.0-ongrid.1`。HTTP 实现未修改。
+
+gRPC 配置包含 `require_grpc_bind_host: true` 能力标记。旧上游二进制会在配置校验阶段拒绝此字段，避免只升级 Edge 后意外打开全网卡监听。升级时应同时安装新版 Collector 依赖附件；新版依赖标签包含 `0.157.0-ongrid.1`，旧二进制缓存不会被复用。Kubernetes 镜像和完整升级包使用同一构建入口。
+
+真实 Collector 测试同时验证本机 gRPC/HTTP 上报成功，以及非 loopback 地址无法连接两种协议端口。CI 对相关改动构建修补版并运行该测试。待上游正式修复后，应先通过此测试再移除补丁及能力标记。

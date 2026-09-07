@@ -48,6 +48,9 @@ receivers:
 {{- end }}
 {{- if .SkyWalkingEnabled }}
   skywalking:
+{{- if .SkyWalkingGRPCEnabled }}
+    require_grpc_bind_host: true
+{{- end }}
     protocols:
 {{- if .SkyWalkingGRPCEnabled }}
       grpc:

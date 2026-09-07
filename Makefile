@@ -418,35 +418,13 @@ FETCH_CURL_FLAGS ?= -fL --retry 3 --retry-all-errors --retry-delay 3 --connect-t
 # ~200MB uncompressed per platform — operators wanting a slimmer agent can
 # swap in a custom OCB build (otel-collector-builder); we ship contrib so
 # default install works without forcing users to compile their own.
-OTELCOL_VERSION ?= 0.157.0
+OTELCOL_VERSION ?= 0.157.0-ongrid.1
 
 .PHONY: fetch-otelcol
-fetch-otelcol: ## [release] 下载 otelcol-contrib 到 bin/<os>-<arch>/otelcol-contrib (linux-only)
+fetch-otelcol: ## [release] 构建带 SkyWalking 监听修复的官方 contrib 发行版
 	@for target in $(EDGE_PLUGIN_ARCHES); do \
-		dest=$(BIN_DIR)/$$target/otelcol-contrib; \
-		if [ -f $$dest ]; then \
-			echo "[otelcol] $$dest already present — skip"; \
-			continue; \
-		fi; \
-		mkdir -p $(BIN_DIR)/$$target; \
-		os=$${target%-*}; arch=$${target##*-}; \
-		asset=otelcol-contrib_$(OTELCOL_VERSION)_$${os}_$${arch}.tar.gz; \
-		base=https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v$(OTELCOL_VERSION); \
-		tmpdir=$$(mktemp -d); tgz=$$tmpdir/$$asset; checksums=$$tmpdir/checksums.txt; \
-		url=$$base/$$asset; \
-		echo "[otelcol] downloading $$url"; \
-		curl $(FETCH_CURL_FLAGS) -o $$tgz $$url || { rm -rf $$tmpdir; echo "otelcol-contrib download failed for $$target"; exit 1; }; \
-		curl $(FETCH_CURL_FLAGS) -o $$checksums $$base/opentelemetry-collector-releases_otelcol-contrib_checksums.txt || { rm -rf $$tmpdir; echo "otelcol-contrib checksums download failed"; exit 1; }; \
-		expected=$$(awk -v asset="$$asset" '$$2 == asset || $$2 == "*" asset { print $$1; exit }' $$checksums); \
-		test -n "$$expected" || { rm -rf $$tmpdir; echo "otelcol-contrib checksum missing for $$asset"; exit 1; }; \
-		if command -v sha256sum >/dev/null 2>&1; then actual=$$(sha256sum $$tgz | awk '{print $$1}'); else actual=$$(shasum -a 256 $$tgz | awk '{print $$1}'); fi; \
-		test "$$actual" = "$$expected" || { rm -rf $$tmpdir; echo "otelcol-contrib checksum mismatch for $$asset"; exit 1; }; \
-		tar -xzf $$tgz -C $(BIN_DIR)/$$target otelcol-contrib || { rm -rf $$tmpdir; echo "extract failed for $$target"; exit 1; }; \
-		chmod +x $$dest; \
-		rm -rf $$tmpdir; \
-		echo "[otelcol] staged $$dest"; \
+		bash dist/build-otelcol.sh "$(OTELCOL_VERSION)" "$$target" "$(BIN_DIR)/$$target/otelcol-contrib" || exit $$?; \
 	done
-	@echo "[otelcol] note: contrib distro is ~200MB per platform; operators wanting smaller agent can build a custom OCB collector and drop it under /usr/local/lib/ongrid-edge/otelcol-contrib"
 
 # node_exporter — host metric source bundled with the edge package
 # (CPU / memory / disk / network / load). Without this, install-edge
