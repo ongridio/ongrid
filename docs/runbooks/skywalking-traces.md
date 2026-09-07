@@ -31,3 +31,8 @@ make test-k8s-chart
 ```
 
 真实 Collector 测试使用 SkyWalking v3 gRPC 报文，验证转换后的 span、父子关系、服务名、设备归属、原有 OTLP 接收，以及原始 SkyWalking ID 查询与实际转换结果的一致性。它不替代实际 Java agent 与已部署平台的联调。
+
+## 协议开关
+
+SkyWalking 接收器分别支持 gRPC `11800` 和 HTTP `12800`（`POST /v3/segments`，SkyWalking JSON）。插件面板与 OTLP 一样提供两个开关，默认均开启。`skywalking_receivers.grpc/http` 与 `receivers.grpc/http` 设置为 false 可关闭对应协议；至少保留一个 Trace 接收协议，日志/指标管道需要保留 OTLP。
+HTTP 地址通过 `skywalking_http_endpoint` 设置，默认继承 OTLP HTTP 的监听 IP。Kubernetes Service 端口通过 `telemetryGateway.service.skywalkingHttpPort` 设置。

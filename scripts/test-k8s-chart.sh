@@ -47,6 +47,7 @@ extract_source 'ongrid-edge/templates/daemonset.yaml' "$tmp_dir/default.yaml" "$
 extract_source 'ongrid-edge/templates/metrics-scraper-deployment.yaml' "$tmp_dir/default.yaml" "$tmp_dir/default-scraper.yaml"
 extract_source 'ongrid-edge/templates/telemetry-gateway-deployment.yaml' "$tmp_dir/default.yaml" "$tmp_dir/default-gateway.yaml"
 extract_source 'ongrid-edge/templates/telemetry-gateway-service.yaml' "$tmp_dir/default.yaml" "$tmp_dir/default-gateway-service.yaml"
+grep -q 'containerPort: 12800' "$tmp_dir/default-gateway.yaml"
 grep -q 'containerPort: 11800' "$tmp_dir/default-gateway.yaml"
 grep -q 'targetPort: skywalking-grpc' "$tmp_dir/default-gateway-service.yaml"
 grep -q 'port: 11800' "$tmp_dir/default-gateway-service.yaml"

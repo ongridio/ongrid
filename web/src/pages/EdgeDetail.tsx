@@ -1256,7 +1256,7 @@ const PLUGIN_META: Record<
   traces: {
     label: 'traces',
     pill: 'bg-violet-500/10 text-violet-300 ring-violet-500/30',
-    getHint: () => 'OTLP gRPC :4317 / HTTP :4318 · SkyWalking gRPC :11800',
+    getHint: () => 'OTLP gRPC :4317 / HTTP :4318 · SkyWalking gRPC :11800 / HTTP :12800',
   },
   profiles: {
     label: 'profiles',
@@ -4308,8 +4308,13 @@ function TracesSpecForm({
   const receivers = (draft.receivers ?? {}) as Record<string, unknown>;
   const grpcEndpoint = typeof draft.grpc_endpoint === 'string' && draft.grpc_endpoint
     ? draft.grpc_endpoint : '127.0.0.1:4317';
+  const skywalkingReceivers = (draft.skywalking_receivers ?? {}) as Record<string, unknown>;
   const skywalkingEndpoint = typeof draft.skywalking_grpc_endpoint === 'string'
     ? draft.skywalking_grpc_endpoint.trim() : grpcEndpoint.replace(/:[^:]*$/, ':11800');
+  const httpEndpoint = typeof draft.http_endpoint === 'string' ? draft.http_endpoint : '127.0.0.1:4318';
+  const skywalkingHTTPEndpoint = typeof draft.skywalking_http_endpoint === 'string'
+    ? draft.skywalking_http_endpoint.trim() : httpEndpoint.replace(/:[^:]*$/, ':12800');
+
   const grpcEnabled = receivers.grpc !== false; // default on
   const httpEnabled = receivers.http !== false; // default on
 
@@ -4374,14 +4379,27 @@ function TracesSpecForm({
         </div>
       </div>
 
-      <div className="text-xs text-zinc-400">
-        <div>SkyWalking gRPC · {tr('监听地址', 'Listen address')} <code className="font-mono text-zinc-300">{skywalkingEndpoint}</code></div>
-        <p className="mt-1 text-[11px] text-zinc-500">
-          {tr(
-            '升级 edge 后，随 Trace 采集自动开启，无需单独配置。将 SkyWalking Java agent（8.9.0+）的 collector.backend_service 指向该地址；远程应用请使用可达的 edge 地址。',
-            'After upgrading edge, enabled automatically with Trace collection. Point SkyWalking Java agent (8.9.0+) collector.backend_service to this address; remote apps must use a reachable edge address.',
-          )}
-        </p>
+      <div>
+        <span className="mb-1 block text-xs text-zinc-400">SkyWalking receivers</span>
+        <div className="space-y-1.5">
+          {(['grpc', 'http'] as const).map((protocol) => (
+            <label key={protocol} className="flex items-center gap-2 text-[12px] text-zinc-300">
+              <input
+                type="checkbox"
+                checked={skywalkingReceivers[protocol] !== false}
+                onChange={(e) => onChange({ ...draft, skywalking_receivers: { ...skywalkingReceivers, [protocol]: e.target.checked } })}
+                className="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-900"
+              />
+              {protocol === 'grpc' ? 'gRPC' : 'HTTP'}
+              <span className="font-mono text-[11px] text-zinc-500" title={protocol === 'grpc' ? skywalkingEndpoint : skywalkingHTTPEndpoint}>
+                :{(protocol === 'grpc' ? skywalkingEndpoint : skywalkingHTTPEndpoint).split(':').pop()}
+              </span>
+            </label>
+          ))}
+        </div>
+        <div className="mt-1 text-[11px] text-zinc-500">
+          {tr('默认监听 localhost；远程应用需要配置可达的监听地址。', 'Listens on localhost by default; remote apps require a reachable bind address.')}
+        </div>
       </div>
     </div>
   );

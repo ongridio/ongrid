@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -67,12 +68,12 @@ func TestSkyWalkingCollectorForwarding(t *testing.T) {
 		w.Header().Set("Content-Type", "application/x-protobuf")
 	}))
 	t.Cleanup(sink.Close)
-	grpcEP, httpEP, swEP := freeTraceEndpoint(t), freeTraceEndpoint(t), freeTraceEndpoint(t)
+	grpcEP, httpEP, swEP, swHTTP := freeTraceEndpoint(t), freeTraceEndpoint(t), freeTraceEndpoint(t), freeTraceEndpoint(t)
 	raw, err := render(plugins.PluginConfig{
 		EdgeID: 42, Endpoint: sink.URL + "/v1/traces", AuthPass: "test-token",
 		Spec: map[string]interface{}{
 			"grpc_endpoint": grpcEP, "http_endpoint": httpEP,
-			"skywalking_grpc_endpoint": swEP, "collector_metrics_endpoint": freeTraceEndpoint(t),
+			"skywalking_grpc_endpoint": swEP, "skywalking_http_endpoint": swHTTP, "collector_metrics_endpoint": freeTraceEndpoint(t),
 		},
 	})
 	require.NoError(t, err)
@@ -129,6 +130,12 @@ func TestSkyWalkingCollectorForwarding(t *testing.T) {
 	var response []byte
 	require.NoError(t, stream.RecvMsg(&response))
 
+	body := fmt.Sprintf(`{"traceId":%q,"traceSegmentId":"0123456789abcdef0123456789abcdef.2.17887680000000002","service":"skywalking-test-service","serviceInstance":"test-instance","spans":[{"spanId":0,"parentSpanId":-1,"startTime":%d,"endTime":%d,"operationName":"skywalking-http-test","spanType":0,"spanLayer":3}]}`, originalID, start, start+15)
+	resp, err := http.Post("http://"+swHTTP+"/v3/segments", "application/json", strings.NewReader("["+body+"]"))
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.NoError(t, resp.Body.Close())
+
 	// OTLP must still work concurrently through the same processing/export path.
 	otlp, err := grpc.NewClient(grpcEP, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
@@ -142,7 +149,7 @@ func TestSkyWalkingCollectorForwarding(t *testing.T) {
 	require.NoError(t, err)
 
 	spans := map[string]*tracepb.Span{}
-	for len(spans) < 3 {
+	for len(spans) < 4 {
 		select {
 		case batch := <-batches:
 			for _, resource := range batch.ResourceSpans {
@@ -169,6 +176,7 @@ func TestSkyWalkingCollectorForwarding(t *testing.T) {
 	require.NotNil(t, parent)
 	require.NotNil(t, childSpan)
 	require.NotNil(t, spans["otlp-still-works"])
+	require.NotNil(t, spans["skywalking-http-test"])
 	require.Equal(t, tracepb.Span_SPAN_KIND_SERVER, parent.Kind)
 	require.Equal(t, tracepb.Status_STATUS_CODE_ERROR, parent.Status.Code)
 	require.Equal(t, uint64(20_000_000), parent.EndTimeUnixNano-parent.StartTimeUnixNano)

@@ -525,3 +525,34 @@ func TestRenderSkyWalkingEndpoints(t *testing.T) {
 		})
 	}
 }
+
+func TestReceiverSwitches(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		spec         map[string]interface{}
+		want, absent string
+		invalid      bool
+	}{
+		{"HTTP only", map[string]interface{}{"receivers": map[string]interface{}{"grpc": false, "http": false}, "skywalking_receivers": map[string]interface{}{"grpc": false}}, "receivers: [skywalking]", "grpc:", false},
+		{"OTLP only", map[string]interface{}{"skywalking_receivers": map[string]interface{}{"grpc": false, "http": false}}, "receivers: [otlp]", "skywalking:", false},
+		{"all off", map[string]interface{}{"receivers": map[string]interface{}{"grpc": false, "http": false}, "skywalking_receivers": map[string]interface{}{"grpc": false, "http": false}}, "", "", true},
+		{"HTTP conflict", map[string]interface{}{"skywalking_http_endpoint": "127.0.0.1:11800"}, "", "", true},
+		{"HTTP custom", map[string]interface{}{"skywalking_http_endpoint": "127.0.0.1:22800"}, `endpoint: "127.0.0.1:22800"`, "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := render(plugins.PluginConfig{EdgeID: 42, Endpoint: "http://manager/v1/traces", Spec: tc.spec})
+			if tc.invalid {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(out), tc.want) || (tc.absent != "" && strings.Contains(string(out), tc.absent)) {
+				t.Fatalf("unexpected receivers: %s", out)
+			}
+		})
+	}
+}
