@@ -3,6 +3,7 @@ package traces
 import (
 	"compress/gzip"
 	"context"
+	"encoding/hex"
 	"io"
 	"net"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/ongridio/ongrid/internal/edgeagent/plugins"
+	"github.com/ongridio/ongrid/internal/pkg/tracequery"
 	"github.com/stretchr/testify/require"
 	collectortrace "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
@@ -116,7 +118,8 @@ func TestSkyWalkingCollectorForwarding(t *testing.T) {
 	child = append(child, swInt(4, start+10)...)
 	child = append(child, swString(6, "child-operation")...)
 	child = append(child, swInt(8, 2)...)
-	segment := append(swString(1, "0123456789abcdef0123456789abcdef.1.17887680000000001"), swString(2, "0123456789abcdef0123456789abcdef.1.17887680000000002")...)
+	const originalID = "0123456789abcdef0123456789abcdef.1.17887680000000001"
+	segment := append(swString(1, originalID), swString(2, "0123456789abcdef0123456789abcdef.1.17887680000000002")...)
 	segment = append(segment, swString(3, string(root))...)
 	segment = append(segment, swString(3, string(child))...)
 	segment = append(segment, swString(4, "skywalking-test-service")...)
@@ -152,6 +155,7 @@ func TestSkyWalkingCollectorForwarding(t *testing.T) {
 					for _, span := range scope.Spans {
 						if span.Name != "otlp-still-works" {
 							require.Equal(t, "skywalking-test-service", attrs["service.name"])
+							require.Equal(t, originalID, attrs["sw8.trace_id"])
 						}
 						spans[span.Name] = span
 					}
@@ -173,6 +177,24 @@ func TestSkyWalkingCollectorForwarding(t *testing.T) {
 	require.Empty(t, parent.ParentSpanId)
 	require.Equal(t, parent.TraceId, childSpan.TraceId)
 	require.Equal(t, parent.SpanId, childSpan.ParentSpanId)
+
+	// Verify query normalization against the actual Collector output, not a
+	// second copy of its conversion algorithm. Original-ID lookup stays direct.
+	query := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/traces/"+hex.EncodeToString(parent.TraceId) {
+			t.Errorf("original ID resolved to %s, actual Collector ID is %x", r.URL.Path, parent.TraceId)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := w.Write([]byte(`{"batches":[]}`)); err != nil {
+			t.Error(err)
+		}
+	}))
+	t.Cleanup(query.Close)
+	_, err = tracequery.New(query.URL, nil).GetTrace(ctx, originalID)
+	require.NoError(t, err)
+
 }
 
 func freeTraceEndpoint(t *testing.T) string {

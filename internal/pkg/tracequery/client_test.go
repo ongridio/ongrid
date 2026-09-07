@@ -104,3 +104,31 @@ func TestClient_GetTrace_EmptyID(t *testing.T) {
 		t.Errorf("expected error for empty traceID")
 	}
 }
+
+func TestClient_GetTraceOriginalSkyWalkingID(t *testing.T) {
+	for _, tc := range []struct{ name, input, want string }{
+		{"java", "00000000000000000000000000000000.1.1000", "0000000001000000e803000000000000"},
+		{"uuid", "de5980b8-fce3-4a37-aab9-b4ac3af7eedd", "de5980b8fce34a37aab9b4ac3af7eedd"},
+		{"otlp", "abc123", "abc123"},
+		{"otlp prefixed", "0xabc123", "0xabc123"},
+		{"bad thread", "00000000000000000000000000000000.bad.1000", "00000000000000000000000000000000.bad.1000"},
+		{"bad uuid", "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz.1.1000", "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz.1.1000"},
+		{"overflow", "00000000000000000000000000000000.1.9223372036854775808", "00000000000000000000000000000000.1.9223372036854775808"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/traces/"+tc.want || r.URL.RawQuery != "" {
+					t.Errorf("lookup = %s, want direct ID lookup %s", r.URL, tc.want)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				if _, err := w.Write([]byte(`{"batches":[]}`)); err != nil {
+					t.Error(err)
+				}
+			}))
+			defer srv.Close()
+			if _, err := New(srv.URL, nil).GetTrace(context.Background(), tc.input); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

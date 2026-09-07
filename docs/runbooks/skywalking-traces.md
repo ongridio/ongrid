@@ -17,7 +17,7 @@
 - 如端口被占用，可在已有插件 JSON 配置中设置 `skywalking_grpc_endpoint`，例如 `"127.0.0.1:21800"`。应用上报地址需同步修改；Kubernetes 自定义 Service 对外端口用 `telemetryGateway.service.skywalkingGrpcPort`，其容器目标端口仍为 `11800`。
 - SkyWalking 和 OTLP 不能监听同一 IP、同一 TCP 端口。无效配置在渲染/校验阶段拒绝；其他进程占用端口时，Collector 启动失败，具体绑定错误见插件工作目录的 `traces/traces.log`。
 - 不要手改生成的 `otelcol.yaml`：配置下发会重新生成它。
-- SkyWalking trace ID 会经上游转换器映射为 OTLP trace ID，不能假设原始 ID 可直接用于平台的 trace ID 精确查询；先按服务名定位。
+- 平台的 trace ID 输入框可直接粘贴日志中的原始 SkyWalking ID，无需先按服务名查找。查询端自动按 Collector 的规则转换并直查 Tempo，不受列表筛选时间窗限制（数据仍须在存储保留期内）。原始 ID 同时保存在 `sw8.trace_id`，详情页支持查看和复制；已有 OTLP ID 仍可照常使用。
 
 ## 回滚
 
@@ -30,4 +30,4 @@ ONGRID_TEST_OTELCOL_BINARY=/absolute/path/to/otelcol-contrib go test -race ./int
 make test-k8s-chart
 ```
 
-真实 Collector 测试使用 SkyWalking v3 gRPC 报文，验证转换后的 span、父子关系、服务名、设备归属和原有 OTLP 接收。它不替代实际 Java agent 与已部署平台的联调。
+真实 Collector 测试使用 SkyWalking v3 gRPC 报文，验证转换后的 span、父子关系、服务名、设备归属、原有 OTLP 接收，以及原始 SkyWalking ID 查询与实际转换结果的一致性。它不替代实际 Java agent 与已部署平台的联调。

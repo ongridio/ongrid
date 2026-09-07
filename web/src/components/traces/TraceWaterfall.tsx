@@ -91,6 +91,10 @@ export function TraceWaterfall({ trace, traceId, fallbackService, fallbackName }
   const root = model.roots[0] ?? model.spans[0];
   const service = root?.service || fallbackService || '-';
   const name = root?.name || fallbackName || tr('未命名 trace', 'Unnamed trace');
+  const skywalkingId = model.spans
+    .map((span) => span.resourceAttributes.find((attr) => attr.key === 'sw8.trace_id')?.value?.stringValue)
+    .find(Boolean);
+
 
   if (model.spans.length === 0) {
     return (
@@ -133,6 +137,13 @@ export function TraceWaterfall({ trace, traceId, fallbackService, fallbackName }
             <span>·</span>
             <span className="font-mono" title={traceId}>{shortId(traceId)}</span>
             <CopyValueButton value={traceId} label={tr('复制 trace_id', 'Copy trace_id')} />
+            {skywalkingId && skywalkingId !== traceId && (
+              <>
+                <span>· SkyWalking</span>
+                <span className="font-mono" title={skywalkingId}>{shortId(skywalkingId)}</span>
+                <CopyValueButton value={skywalkingId} label={tr('复制 SkyWalking trace ID', 'Copy SkyWalking trace ID')} />
+              </>
+            )}
           </div>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-1.5">
