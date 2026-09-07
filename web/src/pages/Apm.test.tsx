@@ -106,7 +106,7 @@ describe('Application performance', () => {
     render(
       <MemoryRouter
         initialEntries={[
-          `/apm/service?${period}&service_name=orders&environment=&service_namespace=trade&tab=operations`,
+          `/apm/service?${period}&service_name=orders&environment=&service_namespace=trade&tab=operations&metric_source=tempo_spanmetrics`,
         ]}
       >
         <ApmPage />
@@ -163,7 +163,7 @@ describe('Application performance', () => {
       urls.find((url) => url.pathname.endsWith('/operations'))?.searchParams.get('page_size'),
     ).toBe('5');
     const linked = new URL(operation.getAttribute('href')!, 'http://localhost');
-    expect(linked.searchParams.get('q')).toContain('name = "POST /orders"');
+    expect(linked.searchParams.get('q')).toContain('span.http.route = "/orders"');
     expect(linked.searchParams.get('start')).toBe('2026-09-07T00:00:00Z');
     expect(linked.searchParams.get('environment')).toBe('production');
     expect(screen.queryByRole('link', { name: '运行时指标' })).not.toBeInTheDocument();
@@ -210,4 +210,20 @@ describe('Application performance', () => {
     await waitFor(() => expect(requested!.searchParams.get('end')).not.toBe(oldEnd));
     expect(requested?.searchParams.get('environment')).toBe('');
   });
+  it('defaults to native metrics and keeps RPC and sampled views explicit', async () => {
+    let latest: URL | undefined;
+    server.use(http.get('/api/v1/apm/services', ({ request }) => {
+      latest = new URL(request.url);
+      return HttpResponse.json({ data: { items: [], total: 0, page: 1, page_size: 25 } });
+    }));
+    render(<MemoryRouter initialEntries={[`/apm?${period}`]}><ApmPage /></MemoryRouter>);
+    await screen.findByText('当前范围未观测到服务请求指标');
+    expect(screen.getByLabelText('指标来源')).toHaveValue('application_metrics');
+    fireEvent.change(screen.getByLabelText('请求协议'), { target: { value: 'rpc' } });
+    await waitFor(() => expect(latest?.searchParams.get('protocol')).toBe('rpc'));
+    fireEvent.click(screen.getByRole('button', { name: '查看 Trace 样本' }));
+    await waitFor(() => expect(latest?.searchParams.get('metric_source')).toBe('tempo_spanmetrics'));
+    expect(screen.queryByLabelText('请求协议')).not.toBeInTheDocument();
+  });
+
 });

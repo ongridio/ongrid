@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -82,6 +83,9 @@ func parseSpec(spec map[string]interface{}) (specView, error) {
 		out.URLs = urls
 	} else if v := stringFrom(spec, "target_url"); v != "" {
 		out.URLs = []string{v}
+	}
+	if v := stringFrom(spec, "application_metrics_url"); v != "" && !slices.Contains(out.URLs, v) {
+		out.URLs = append(out.URLs, v)
 	}
 	if v := stringFrom(spec, "scrape_interval"); v != "" {
 		d, err := time.ParseDuration(v)

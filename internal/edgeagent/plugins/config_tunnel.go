@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/url"
 	"os"
 	"runtime"
@@ -181,6 +182,7 @@ func (t *TunnelConfigFetcher) Fetch(ctx context.Context) (map[string]PluginConfi
 		}
 		out["logs"] = materialized
 	}
+	out = t.withApplicationMetricsDefaults(out)
 	t.storeSnapshot(out)
 	return out, nil
 }
@@ -214,6 +216,36 @@ func (t *TunnelConfigFetcher) applyKubernetesDefaults(in map[string]PluginConfig
 	for name, cfg := range in {
 		out[name] = t.withKubernetesDefaults(name, cfg)
 	}
+	return t.withApplicationMetricsDefaults(out)
+}
+
+// Hosts forward application metrics over the existing authenticated metrics tunnel.
+// Kubernetes gateways already remote-write through their cluster credentials.
+func (t *TunnelConfigFetcher) withApplicationMetricsDefaults(out map[string]PluginConfig) map[string]PluginConfig {
+	traces, metrics := out["traces"], out["metrics"]
+	if t.k8sRole != "" || !traces.Enabled || !metrics.Enabled {
+		return out
+	}
+	spec := copySpec(traces.Spec)
+	if enabled, present := spec["enable_metrics"]; present && enabled != true {
+		return out
+	}
+	if endpoint, _ := spec["metrics_remote_write_endpoint"].(string); endpoint != "" {
+		return out
+	}
+	endpoint, _ := spec["metrics_export_endpoint"].(string)
+	if endpoint == "" {
+		endpoint = "127.0.0.1:9464"
+	}
+	host, _, err := net.SplitHostPort(endpoint)
+	if err != nil || (host != "localhost" && !net.ParseIP(host).IsLoopback()) {
+		return out
+	}
+	spec["enable_metrics"], spec["metrics_export_endpoint"] = true, endpoint
+	traces.Spec = spec
+	metrics.Spec = copySpec(metrics.Spec)
+	metrics.Spec["application_metrics_url"] = "http://" + endpoint + "/metrics"
+	out["traces"], out["metrics"] = traces, metrics
 	return out
 }
 

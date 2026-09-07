@@ -5,6 +5,12 @@ services:
     command: [--config.file=/etc/prometheus/prometheus.yml, --web.enable-remote-write-receiver, --web.route-prefix=/prometheus]
     ports: ["127.0.0.1:19090:9090"]
     volumes: ["./prometheus.yaml:/etc/prometheus/prometheus.yml:ro"]
+  metrics-collector:
+    profiles: [metrics]
+    image: otel/opentelemetry-collector-contrib:0.157.0
+    command: ["--config=/etc/collector.yaml"]
+    ports: ["127.0.0.1:14319:4318"]
+    volumes: ["${APM_TEST_COLLECTOR_CONFIG:-/tmp/ongrid-apm-collector.yaml}:/etc/collector.yaml:ro"]
   tempo:
     image: grafana/tempo:2.10.0
     user: "10001:10001"

@@ -83,7 +83,7 @@ func (s *Service) summaries(ctx context.Context, q Query, operations bool) ([]Su
 	exprs := metricExpressions(q, window, group)
 	// Retain identities with a single sample even when rate() cannot be
 	// calculated yet. They are "insufficient_samples", never a healthy zero.
-	exprs["present"] = fmt.Sprintf("sum by (%s) (count_over_time(traces_spanmetrics_calls_total%s[%s]))", group, q.selector(), promDuration(window))
+	exprs["present"] = q.aggregate("count_over_time", q.counter(), window, group)
 	series, err := s.instant(ctx, combineExpressions(exprs), q.End)
 	if err != nil {
 		return nil, err
@@ -276,6 +276,7 @@ func (s *Service) Dependencies(ctx context.Context, q Query) (*Dependencies, err
 		}
 	}
 	out := &Dependencies{Items: []Dependency{}, Metadata: metadata(q), Truncated: len(rows) > 200}
+	out.Metadata.MetricSource, out.Metadata.Sampling = "tempo_service_graphs", "unknown"
 	for _, row := range rows {
 		out.Items = append(out.Items, *row)
 	}
@@ -299,6 +300,9 @@ type AlertTemplate struct {
 func BuildAlertTemplate(q Query, metric string, threshold, minRequests float64, forSeconds int) (*AlertTemplate, error) {
 	if err := q.Validate(true); err != nil {
 		return nil, err
+	}
+	if q.MetricSource != "application_metrics" {
+		return nil, fmt.Errorf("%w: request alerts require application metrics; trace samples are not a full request population", errs.ErrInvalid)
 	}
 	if (metric != "error_rate" && metric != "p95_ms") || !(threshold > 0 && threshold <= 3_600_000) || !(minRequests >= 1 && minRequests <= 1e9) || forSeconds < 0 || forSeconds > 1800 || forSeconds%30 != 0 {
 		return nil, fmt.Errorf("%w: invalid APM alert metric, threshold, minimum requests or duration", errs.ErrInvalid)

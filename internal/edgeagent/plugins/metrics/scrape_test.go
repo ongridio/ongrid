@@ -458,3 +458,15 @@ func TestPlugin_StartIsIdempotent(t *testing.T) {
 		t.Fatalf("Stop: %v", err)
 	}
 }
+
+func TestApplicationMetricsScrapeTarget(t *testing.T) {
+	target := "http://127.0.0.1:9464/metrics"
+	defaults, err := parseSpec(map[string]any{"application_metrics_url": target})
+	if err != nil || len(defaults.URLs) != 3 || defaults.URLs[2] != target {
+		t.Fatalf("defaults=%+v %v", defaults, err)
+	}
+	custom, err := parseSpec(map[string]any{"target_urls": []string{target}, "application_metrics_url": target})
+	if err != nil || len(custom.URLs) != 1 {
+		t.Fatalf("duplicated custom target %+v %v", custom, err)
+	}
+}

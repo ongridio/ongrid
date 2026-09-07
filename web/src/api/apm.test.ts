@@ -49,4 +49,19 @@ describe('APM correlation', () => {
     expect(canonicalTraceID('3')).toBe('00000000000000000000000000000003');
     expect(canonicalTraceID('0')).toBe('');
   });
+  it('links native HTTP/RPC operations through attributes and keeps sampled span names separate', () => {
+    const p = new URLSearchParams(params);
+    p.set('operation', 'POST /orders/{id}');
+    expect(serviceTraceQL(p)).toContain('span.http.route = "/orders/{id}"');
+    expect(serviceTraceQL(p)).not.toContain(' && name =');
+    p.set('protocol', 'rpc');
+    p.set('operation', 'trade.Orders/Get');
+    expect(serviceTraceQL(p)).toContain('span.rpc.method = "trade.Orders/Get"');
+    expect(serviceTraceQL(p)).toContain('span.rpc.service = "trade.Orders"');
+    expect(serviceTraceQL(p)).not.toContain('span.http');
+    p.set('metric_source', 'tempo_spanmetrics');
+    expect(serviceTraceQL(p)).toContain('name = "trade.Orders/Get"');
+    expect(serviceTraceQL(p)).not.toContain('span.rpc');
+  });
+
 });

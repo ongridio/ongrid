@@ -37,6 +37,12 @@ message Query {
   uint32 page_size = 9;
   string sort = 10;
   string search = 11;
+  // application_metrics (default) or tempo_spanmetrics. Never silently mixed.
+  string metric_source = 12;
+  // http (default) or rpc for application metrics; traces retain span_kind.
+  string protocol = 13;
+  // otel (default) or legacy. Query one metric family to avoid dual-export double counting.
+  string metric_format = 14;
 }
 
 message Summary {
@@ -57,6 +63,8 @@ message QueryMetadata {
   string metric_source = 3;
   string sampling = 4;
   string span_kind = 5;
+  string protocol = 6;
+  string metric_format = 7;
 }
 
 message ListServicesRequest { Query query = 1; }

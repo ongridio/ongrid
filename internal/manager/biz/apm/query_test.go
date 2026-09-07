@@ -37,7 +37,7 @@ func (p *fakeProm) QueryRange(_ context.Context, expr string, _, _ time.Time, _ 
 }
 func testQuery() Query {
 	env, ns := "production", "trade"
-	return Query{Start: time.Unix(1000, 0), End: time.Unix(1600, 0), Environment: &env, ServiceNamespace: &ns, ServiceName: "orders"}
+	return Query{Start: time.Unix(1000, 0), End: time.Unix(1600, 0), Environment: &env, ServiceNamespace: &ns, ServiceName: "orders", MetricSource: "tempo_spanmetrics", Protocol: "http", MetricFormat: "otel"}
 }
 
 func TestQueryBoundariesAndEscaping(t *testing.T) {
@@ -121,6 +121,7 @@ func TestListIdentityNullsAndBoundedQueryCount(t *testing.T) {
 
 func TestAlertDefinitionUsesRequestSemantics(t *testing.T) {
 	q := testQuery()
+	q.MetricSource = "application_metrics"
 	q.Operation = `GET /orders/{id}`
 	q.SpanKind = "server"
 	for _, metric := range []string{"error_rate", "p95_ms"} {
@@ -128,7 +129,7 @@ func TestAlertDefinitionUsesRequestSemantics(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, want := range []string{metricExpressions(q, 5*time.Minute, identityLabels)[metric], `span_kind="SPAN_KIND_SERVER"`, `span_name="GET /orders/{id}"`, `count_over_time`, `[120s:30s]`, `== scalar(count_over_time((vector(1))[120s:30s]))`, `* 300) >= 100`} {
+		for _, want := range []string{metricExpressions(q, 5*time.Minute, identityLabels)[metric], `http_server_request_duration_seconds_count`, `http_route="/orders/{id}"`, `count_over_time`, `[120s:30s]`, `== scalar(count_over_time((vector(1))[120s:30s]))`, `* 300) >= 100`} {
 			if !strings.Contains(template.Expr, want) {
 				t.Fatalf("missing %s in %s", want, template.Expr)
 			}
@@ -164,6 +165,7 @@ func TestAlertDwellPromtool(t *testing.T) {
 	}
 	q := testQuery()
 	q.SpanKind = "server"
+	q.MetricSource = "application_metrics"
 	template, err := BuildAlertTemplate(q, "error_rate", 5, 1, 120)
 	if err != nil {
 		t.Fatal(err)
@@ -191,5 +193,48 @@ func TestAlertDwellPromtool(t *testing.T) {
 	output, err := exec.CommandContext(t.Context(), binary, "test", "rules", file).CombinedOutput()
 	if err != nil {
 		t.Fatalf("promtool: %v\n%s\n%s", err, output, raw)
+	}
+}
+
+func TestApplicationMetricSchemas(t *testing.T) {
+	for _, tc := range []struct {
+		protocol, format, histogram, operation, attribute string
+		multiplier                                        float64
+	}{
+		{"http", "otel", "http_server_request_duration_seconds", "GET /orders/{id}", "span.http.route", 1000},
+		{"http", "legacy", "http_server_duration_milliseconds", "GET /orders/{id}", "span.http.route", 1},
+		{"rpc", "otel", "rpc_server_call_duration_seconds", "trade.Orders/Get", "span.rpc.method", 1000},
+		{"rpc", "legacy", "rpc_server_duration_milliseconds", "trade.Orders/Get", "span.rpc.method", 1},
+	} {
+		q := testQuery()
+		q.MetricSource = ""
+		q.Protocol = tc.protocol
+		q.MetricFormat = tc.format
+		q.Operation = tc.operation
+		if err := q.Validate(true); err != nil {
+			t.Fatal(err)
+		}
+		if q.histogram() != tc.histogram || q.latencyMultiplier() != tc.multiplier || metadata(q).Sampling != "independent_of_trace_sampling" {
+			t.Fatalf("schema %+v", q)
+		}
+		expression := combineExpressions(metricExpressions(q, time.Minute, identityLabels+",span_name"))
+		if strings.Contains(expression, "traces_spanmetrics") || !strings.Contains(expression, tc.histogram) || !strings.Contains(expression, `service_name="orders"`) {
+			t.Fatal(expression)
+		}
+		if !strings.Contains(TraceQL(q), tc.attribute) || strings.Contains(TraceQL(q), " && name =") || !strings.Contains(TraceQL(q), "kind = server") {
+			t.Fatal(TraceQL(q))
+		}
+	}
+	for _, mutate := range []func(*Query){func(q *Query) { q.Protocol = "sql" }, func(q *Query) { q.MetricFormat = "auto" }, func(q *Query) { q.SpanKind = "consumer" }, func(q *Query) { q.MetricSource = "mixed" }} {
+		q := testQuery()
+		q.MetricSource = "application_metrics"
+		mutate(&q)
+		if err := q.Validate(true); err == nil {
+			t.Fatalf("invalid accepted %+v", q)
+		}
+	}
+	q := testQuery()
+	if _, err := BuildAlertTemplate(q, "error_rate", 5, 100, 120); err == nil {
+		t.Fatal("allowed request alert over sampled spans")
 	}
 }

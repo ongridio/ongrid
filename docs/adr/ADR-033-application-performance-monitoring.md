@@ -6,7 +6,11 @@ Status: Accepted — 用户确认方案并授权实现，2026-09-07。
 
 复用应用侧 OpenTelemetry SDK/Agent，经现有 Collector 写入 Tempo、Prometheus 和当前日志后端。APM 以 `(environment, service.namespace, service.name)` 为服务视图身份，实例单独关联。Manager 聚合查询，前端新增「监控告警 → 应用性能」。
 
-Tempo 2.10 的 spanmetrics 是首期请求观测数据源，默认统计 SERVER，CONSUMER 单独选择；指标来源和未知采样覆盖率明确显示。应用原生请求指标与 Trace 采样解耦属于接入建议，不将多个来源重复相加。服务关系使用已有 service-graphs 的双端维度。
+2026-09-07 修订：用户确认将请求监控与 Trace 采样解耦，并要求支持 RPC。APM 默认查询应用原生 HTTP/RPC 请求指标，服务关系继续使用 Tempo service-graphs。Trace 派生指标保留为明确选择的样本视图，禁止静默回退或与应用指标相加，请求级告警只使用应用指标。
+
+应用复用官方 OTel SDK/Agent，HTTP 采用 `http.server.request.duration`（秒），RPC 采用 `rpc.server.call.duration`（秒）。兼容模式分别查询旧 `http.server.duration` / `rpc.server.duration`（毫秒；旧 RPC 错误口径限 gRPC），整次查询只选一个指标版本，避免双发重复计数。切换兼容模式是显式操作，不对不同桶边界或单位的直方图混合求分位数。错误使用 error.type，兼容 HTTP 5xx 和 gRPC 非 OK 状态码，原始序列先并集去重再聚合。要求资源属性进入 Prometheus 标签，接口使用路由模板或 RPC 完整方法名。
+
+主机复用 traces 插件的 OTLP 接收器和本机 Prometheus exporter，再由现有 metrics 插件通过已鉴权 tunnel 上报；Kubernetes 复用现有 Telemetry Gateway 的 Metrics remote_write。保持默认监听 loopback，不新增公开写入口或向业务应用下发管理凭据。
 
 ## 理由与影响
 

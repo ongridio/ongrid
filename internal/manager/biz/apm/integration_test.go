@@ -90,7 +90,7 @@ func TestOTLPIntegration(t *testing.T) {
 			t.Fatal(ctx.Err())
 		}
 	}
-	q := Query{Start: start, End: time.Now(), ServiceName: "apm-test-orders", Environment: &prod, ServiceNamespace: &ns}
+	q := Query{MetricSource: "tempo_spanmetrics", Start: start, End: time.Now(), ServiceName: "apm-test-orders", Environment: &prod, ServiceNamespace: &ns}
 	if err := q.Validate(true); err != nil {
 		t.Fatal(err)
 	}
@@ -187,6 +187,7 @@ func TestOTLPIntegration(t *testing.T) {
 		t.Fatalf("consumer %v %v", consumers, err)
 	}
 	q.SpanKind = "server"
+	q.MetricSource = "application_metrics"
 	for _, metric := range []string{"error_rate", "p95_ms"} {
 		for _, dwell := range []int{0, 30, 120} {
 			template, err := BuildAlertTemplate(q, metric, 1, 1, dwell)

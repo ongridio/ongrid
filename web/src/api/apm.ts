@@ -12,7 +12,14 @@ export type ApmSummary = {
   requests: number | null;
   data_status: string;
 };
+export type ApmMetadata = {
+  metric_source: string;
+  sampling: string;
+  protocol: string;
+  metric_format: string;
+};
 export type ApmList = {
+  metadata: ApmMetadata;
   items: ApmSummary[];
   total: number;
   page: number;
@@ -21,6 +28,7 @@ export type ApmList = {
   service_namespaces: string[];
 };
 export type ApmOverview = {
+  metadata: ApmMetadata;
   summary: ApmSummary;
   points: ({ timestamp: number } & Pick<ApmSummary, 'rps' | 'error_rate' | 'p50_ms' | 'p95_ms' | 'p99_ms'>)[];
 };
@@ -80,7 +88,29 @@ export function serviceTraceQL(params: URLSearchParams, extra?: string) {
     const clause = `resource.${attribute} = ${JSON.stringify(value)}`;
     clauses.push(value === '' ? `(${clause} || resource.${attribute} = nil)` : clause);
   }
-  if (params.get('operation')) clauses.push('name = ' + JSON.stringify(params.get('operation')));
+  const operation = params.get('operation');
+  if (params.get('metric_source') === 'tempo_spanmetrics') {
+    if (operation) clauses.push('name = ' + JSON.stringify(operation));
+  } else if (params.get('protocol') === 'rpc') {
+    clauses.push('(span.rpc.system.name != nil || span.rpc.system != nil)');
+    if (operation) {
+      const [service, method] = operation.split('/');
+      clauses.push(
+        `(span.rpc.method = ${JSON.stringify(operation)} || (span.rpc.service = ${JSON.stringify(service)} && span.rpc.method = ${JSON.stringify(method || '')}))`,
+      );
+    }
+  } else {
+    clauses.push('(span.http.request.method != nil || span.http.method != nil)');
+    if (operation) {
+      const split = operation.indexOf(' ');
+      const method = split < 0 ? operation : operation.slice(0, split);
+      const route = split < 0 ? '' : operation.slice(split + 1);
+      clauses.push(
+        `(span.http.request.method = ${JSON.stringify(method)} || span.http.method = ${JSON.stringify(method)})`,
+      );
+      if (route) clauses.push('span.http.route = ' + JSON.stringify(route));
+    }
+  }
   clauses.push(`kind = ${params.get('span_kind') === 'consumer' ? 'consumer' : 'server'}`);
   if (extra) clauses.push(extra);
   return `{ ${clauses.join(' && ')} }`;

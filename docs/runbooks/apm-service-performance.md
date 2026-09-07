@@ -4,7 +4,7 @@
 
 ## 1. 接入应用
 
-先启用本机 Edge 的 Trace 接收，或在 Kubernetes 安装 Telemetry Gateway。主机同进程网络可用 `http://127.0.0.1:4318/v1/traces`；Docker 使用容器可达地址，K8s 使用网关 Service 的实际 DNS。不要向业务应用分发 Manager/Edge 管理密钥。
+先启用本机 Edge 的 traces 和 metrics 插件，或在 Kubernetes 安装 Telemetry Gateway。主机的 Collector 在 `127.0.0.1:9464` 暴露应用指标，由 metrics 插件经认证隧道上报；显式关闭的插件不会被自动开启。OTLP 基础地址可用 `http://127.0.0.1:4318`；Docker 使用容器可达地址，K8s 使用网关 Service 的实际 DNS。不要向业务应用分发 Manager/Edge 管理密钥。
 
 在「接入管理」填写语言、目标地址、服务、业务命名空间和环境，复制配置。应用身份为 `(environment, service.namespace, service.name)`；service.namespace 不等同于 K8s namespace。缺失属性会进入“未设置”。接收端将旧 deployment.environment 补为 deployment.environment.name，已有规范属性优先。身份保持稳定，路由使用 `/orders/{id}`，不要使用带参数的原始 URL、用户 ID 或 SQL 作为指标标签。
 
@@ -18,8 +18,15 @@ Go 示例，从仓库根目录执行：
 ```bash
 export OTEL_SERVICE_NAME=apm-go-example
 export OTEL_RESOURCE_ATTRIBUTES='service.namespace=trade,deployment.environment.name=development'
-export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://127.0.0.1:4318/v1/traces
-export OTEL_METRICS_EXPORTER=none
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+export OTEL_METRICS_EXPORTER=otlp
+export OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=cumulative
+export OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION=explicit_bucket_histogram
+export OTEL_SEMCONV_STABILITY_OPT_IN=http,rpc
+export OTEL_METRIC_EXPORT_INTERVAL=5000
+# 示例支持 0..1；0 会关闭本地根 Span 采样，Metrics 继续记录。
+export OTEL_TRACES_SAMPLER_ARG=0
 export OTEL_LOGS_EXPORTER=none
 go run ./examples/apm-go
 # 另一个终端：
@@ -28,7 +35,7 @@ curl 'http://127.0.0.1:18080/orders/42?fail=1'
 curl 'http://127.0.0.1:18080/orders/42?slow=1'
 ```
 
-示例将 JSON 日志写到标准输出。环境示例固定为 development/trade；在业务应用中应让日志和 Trace 使用同一资源配置。默认 ParentBased 采样会尊重上游 sampled 标志；即使本服务 AlwaysSample，也不能据此确认全链路无采样。配置只开启 Trace，不假设 Logs/Metrics 已启用。
+示例将 JSON 日志写到标准输出。环境示例固定为 development/trade；在业务应用中应让日志和 Trace 使用同一资源配置。默认 ParentBased 采样会尊重上游 sampled 标志；即使本服务 AlwaysSample，也不能据此确认全链路无采样。示例同时初始化 TracerProvider、MeterProvider 和官方 HTTP/gRPC instrumentation；仅设置环境变量不能替代 Go SDK 初始化。gRPC 标准 Health 服务监听 `127.0.0.1:18081`，空 service 的 Check 成功，未知 service 返回 NotFound。Logs 仍走现有文件采集。
 
 ## 2. 已有埋点 / 双目标迁移
 
@@ -48,7 +55,7 @@ service:
       exporters: [otlphttp/existing, otlphttp/ongrid]
 ```
 
-这是合并到已有配置的片段，需保留 receivers/processors 及原鉴权。各 exporter 使用独立队列/重试；迁移完成删除旧出口。发送给 Ongrid 的分支必须在会丢弃数据的采样之前，否则 APM 只能显示抽样口径。不要额外开启第二套 spanmetrics 再与 Tempo 的指标相加。
+这是合并到已有配置的片段，需保留 receivers/processors 及原鉴权。各 exporter 使用独立队列/重试；迁移完成删除旧出口。另外为 Metrics pipeline 配置 Ongrid OTLP 出口，携带相同资源属性。主 RED 来自应用 Metrics，Trace 分支可独立采样；依赖图和 Trace 样本视图仍受采样影响。不要将重复出口或新旧两套指标相加。
 
 ## 3. 日志关联
 
@@ -66,16 +73,27 @@ OTLP 日志使用标准 trace_id/span_id；文件或 CRI 日志可写单行 JSON
 
 ## 4. 验收和数据语义
 
-服务列表提供环境、命名空间及时间范围筛选；入口类型在高级筛选中。打开服务后，概览集中展示 RED、重点接口与上下游；延迟默认 P95，可切换 P50/P99。调用链沿用绝对时间与完整服务身份；运行时与按需 pprof 在「实例」，接入诊断在「接入管理」，请求告警由顶部「创建告警」进入原规则编辑器。
+服务列表默认选择「应用指标」和 HTTP，可切换 RPC；高级筛选可选旧版 HTTP/gRPC 指标格式。Trace 样本视图单独选择 SERVER/CONSUMER。打开服务后，概览集中展示 RED、重点接口与上下游；延迟默认 P95，可切换 P50/P99。调用链沿用绝对时间与完整服务身份；运行时与按需 pprof 在「实例」，接入诊断在「接入管理」，请求告警由顶部「创建告警」进入原规则编辑器。
 
 发送真实成功、失败、慢请求，然后在服务列表选取覆盖请求的时间段。指标生成存在延迟，至少两个 counter 采集点后才能计算 rate。服务列表只发现窗口内存在指标的服务。
 
-- 请求只统计 SERVER；CONSUMER 通过入口类型单独查看。CLIENT/INTERNAL 不重复纳入入口请求。
-- 错误率为 ERROR Span / 入口 Span；非业务成功率。没有错误序列但有请求时为 0%，无请求时为 `—`。
-- P50/P95/P99 合并直方图后计算，单位 ms；不是各实例分位数平均。样本请求数由 rate × 窗口估算，原始 counter 才用于固定样本精确计数验收。
-- 概览摘要使用整个所选窗口；趋势使用至少 5 分钟滚动窗口。采样覆盖率显示“未知”，不能把观测请求当成已确认的业务总量。
+- 应用指标只统计 HTTP/RPC 服务端完成的请求，客户端/内部 Span 不重复纳入。RPC 流式调用以整个调用完成计数，不是每条消息计数。
+- 应用错误率：`error.type` 非空，或 HTTP 5xx；gRPC 另支持非 OK 的 `rpc.response.status_code`，旧版支持非零 `rpc.grpc.status_code`。同一序列先去重再聚合。其他 RPC 协议依赖 SDK 正确设置 `error.type`。这不是自定义业务成功率。没有错误序列但有请求时为 0%，无请求时为 `—`。
+- P50/P95/P99 合并直方图后计算，单位 ms；不是各实例分位数平均。请求数由 rate × 窗口估算，原始 counter 才用于固定样本精确计数验收。
+- 概览摘要使用整个所选窗口；趋势使用至少 5 分钟滚动窗口。应用指标独立于 Trace 采样，但必须核验所有实例埋点和 Metrics 导出是否完整。Trace 样本视图显示采样覆盖率未知，不用于新建请求级告警。
 - 依赖图包含 Tempo 观测边和虚拟外部调用方；丢失配对/采样会形成缺边。它不会覆盖业务拓扑。
 - 接入诊断最多抽查 3 条 Trace，核对资源、上下游、缺失父 Span 和第一条样本日志；它是抽样检查，不是自动根因结论。
+
+指标契约（Collector 的资源转标签必须开启，使用 cumulative explicit-bucket histogram）：
+
+| 协议 / 格式 | Prometheus 直方图基名 | 单位 | 接口标签 |
+|---|---|---|---|
+| HTTP / 当前 | `http_server_request_duration_seconds` | 秒 | `http_request_method` + `http_route` |
+| RPC / 当前 | `rpc_server_call_duration_seconds` | 秒 | `rpc_method`，完整 `Service/Method` |
+| HTTP / 旧版 | `http_server_duration_milliseconds` | 毫秒 | `http_method` + `http_route` |
+| gRPC / 旧版 | `rpc_server_duration_milliseconds` | 毫秒 | `rpc_service` + `rpc_method` |
+
+四种格式分别查询 `_count` 和 `_bucket`。必需资源标签为 `service_name`，环境与命名空间使用 `deployment_environment_name`、`service_namespace`。不混合协议或新旧格式，不回退到 Trace 指标。不同语言版本可能尚未实现当前 RPC 约定，需检查实际导出名称；任意自定义 RPC 指标不能直接套用。
 
 自动化验收：
 
@@ -97,11 +115,11 @@ cd web && npm test -- src/api/apm.test.ts src/pages/Apm.test.tsx src/pages/Logs.
 
 ## 6. 告警处理
 
-服务详情 → 请求告警：错误率或 P95，5 分钟窗口，配置最少样本请求数及持续时间。进入现有规则编辑器预览，填写稳定 rule_key，确认全局作用域、通知策略和本 Runbook 后保存。表达式与服务概览复用同一生成函数，持续窗口按 30 秒取样；缺失/未满足的点不能算作持续触发。旧 Trace 告警保持原口径。
+服务详情 → 请求告警：错误率或 P95，5 分钟窗口，配置最少请求数及持续时间。进入现有规则编辑器预览，填写稳定 rule_key，确认全局作用域、通知策略和本 Runbook 后保存。表达式与服务概览复用同一生成函数，持续窗口按 30 秒取样；缺失/未满足的点不能算作持续触发。旧 Trace 告警保持原口径。
 
 收到告警后：
 
-1. 确认对应环境/命名空间和请求量，检查采样、Collector 丢弃/导出失败、Tempo metrics-generator 和 Prometheus remote_write。
+1. 确认对应环境/命名空间和请求量，检查 SDK Metrics、Collector 丢弃/导出失败、本机 metrics 插件或 Gateway remote_write。Trace 样本模式再检查采样和 Tempo metrics-generator。
 2. 从接口排行打开慢/错误 Trace，检查下游跨度、父子传播及发布版本；从相同 ID 查询日志。
 3. 有实例证据时检查应用运行时指标，再按需采集 pprof。不要按服务同名猜设备。
 4. 查询后端不可用时先恢复遥测链路；“无数据”不能说明业务已经恢复。需要遥测断流告警时单独配置现有采集链路告警。

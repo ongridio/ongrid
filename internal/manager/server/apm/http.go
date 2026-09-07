@@ -134,7 +134,7 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request, detail bool, fn 
 
 func parseQuery(r *http.Request) (biz.Query, error) {
 	values := r.URL.Query()
-	q := biz.Query{ServiceName: values.Get("service_name"), Operation: values.Get("operation"), SpanKind: values.Get("span_kind"), Sort: values.Get("sort"), Search: values.Get("search")}
+	q := biz.Query{MetricSource: values.Get("metric_source"), Protocol: values.Get("protocol"), MetricFormat: values.Get("metric_format"), ServiceName: values.Get("service_name"), Operation: values.Get("operation"), SpanKind: values.Get("span_kind"), Sort: values.Get("sort"), Search: values.Get("search")}
 	var err error
 	q.Start, err = time.Parse(time.RFC3339Nano, values.Get("start"))
 	if err != nil {

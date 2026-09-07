@@ -25,14 +25,15 @@ type Identity struct {
 }
 
 type Query struct {
-	Start, End       time.Time
-	Environment      *string
-	ServiceNamespace *string
-	ServiceName      string
-	Operation        string
-	SpanKind         string
-	Page, PageSize   int
-	Sort, Search     string
+	Start, End                           time.Time
+	Environment                          *string
+	ServiceNamespace                     *string
+	ServiceName                          string
+	Operation                            string
+	SpanKind                             string
+	Page, PageSize                       int
+	Sort, Search                         string
+	MetricSource, Protocol, MetricFormat string
 }
 
 func (q *Query) Validate(serviceRequired bool) error {
@@ -46,6 +47,27 @@ func (q *Query) Validate(serviceRequired bool) error {
 	}
 	if serviceRequired && (q.ServiceName == "" || q.Environment == nil || q.ServiceNamespace == nil) {
 		return fmt.Errorf("%w: service_name, environment and service_namespace are required (empty scope values select unset attributes)", errs.ErrInvalid)
+	}
+	if q.MetricSource == "" {
+		q.MetricSource = "application_metrics"
+	}
+	if q.MetricSource != "application_metrics" && q.MetricSource != "tempo_spanmetrics" {
+		return fmt.Errorf("%w: metric_source must be application_metrics or tempo_spanmetrics", errs.ErrInvalid)
+	}
+	if q.Protocol == "" {
+		q.Protocol = "http"
+	}
+	if q.Protocol != "http" && q.Protocol != "rpc" {
+		return fmt.Errorf("%w: protocol must be http or rpc", errs.ErrInvalid)
+	}
+	if q.MetricFormat == "" {
+		q.MetricFormat = "otel"
+	}
+	if q.MetricFormat != "otel" && q.MetricFormat != "legacy" {
+		return fmt.Errorf("%w: metric_format must be otel or legacy", errs.ErrInvalid)
+	}
+	if q.MetricSource == "application_metrics" && q.SpanKind != "" && q.SpanKind != "server" {
+		return fmt.Errorf("%w: application request metrics only support server requests", errs.ErrInvalid)
 	}
 	if q.SpanKind == "" {
 		q.SpanKind = "server"
@@ -104,20 +126,20 @@ func (q Query) selector(extra ...string) string {
 func promDuration(d time.Duration) string { return strconv.FormatInt(int64(d/time.Second), 10) + "s" }
 
 func requestRate(q Query, window time.Duration, group string, extra ...string) string {
-	return fmt.Sprintf("sum by (%s) (rate(traces_spanmetrics_calls_total%s[%s]))", group, q.selector(extra...), promDuration(window))
+	return q.aggregate("rate", q.counter(), window, group, extra...)
 }
 
 // metricExpressions is shared by summaries, charts and alert templates. All
-// errors are technical span errors, and null ratios represent no requests.
+// errors follow the selected schema; null ratios represent no requests.
 func metricExpressions(q Query, window time.Duration, group string) map[string]string {
 	rate := requestRate(q, window, group)
-	errors := requestRate(q, window, group, `status_code="STATUS_CODE_ERROR"`)
+	errors := q.errorRate(window, group)
 	out := map[string]string{
 		"rps":        rate,
 		"error_rate": fmt.Sprintf("100 * ((%s or on (%s) (0 * %s)) / (%s > 0))", errors, group, rate, rate),
 	}
 	for key, quantile := range map[string]string{"p50_ms": "0.5", "p95_ms": "0.95", "p99_ms": "0.99"} {
-		out[key] = fmt.Sprintf("1000 * histogram_quantile(%s, sum by (%s,le) (rate(traces_spanmetrics_latency_bucket%s[%s])))", quantile, group, q.selector(), promDuration(window))
+		out[key] = fmt.Sprintf("%g * histogram_quantile(%s, %s)", q.latencyMultiplier(), quantile, q.aggregate("rate", q.histogram()+"_bucket", window, group+",le"))
 	}
 	return out
 }
@@ -154,10 +176,16 @@ type Metadata struct {
 	MetricSource string    `json:"metric_source"`
 	Sampling     string    `json:"sampling"`
 	SpanKind     string    `json:"span_kind"`
+	Protocol     string    `json:"protocol"`
+	MetricFormat string    `json:"metric_format"`
 }
 
 func metadata(q Query) Metadata {
-	return Metadata{q.Start, q.End, "tempo_spanmetrics", "unknown", q.SpanKind}
+	sampling := "independent_of_trace_sampling"
+	if q.MetricSource == "tempo_spanmetrics" {
+		sampling = "unknown"
+	}
+	return Metadata{q.Start, q.End, q.MetricSource, sampling, q.SpanKind, q.Protocol, q.MetricFormat}
 }
 
 type ListResult struct {
@@ -294,8 +322,26 @@ func TraceQL(q Query) string {
 		}
 		clauses = append(clauses, clause)
 	}
-	if q.Operation != "" {
-		clauses = append(clauses, "name = "+strconv.Quote(q.Operation))
+	clauses = append(clauses, "kind = "+q.SpanKind)
+	if q.MetricSource == "tempo_spanmetrics" {
+		if q.Operation != "" {
+			clauses = append(clauses, "name = "+strconv.Quote(q.Operation))
+		}
+	} else if q.Protocol == "rpc" {
+		clauses = append(clauses, `(span.rpc.system.name != nil || span.rpc.system != nil)`)
+		if q.Operation != "" {
+			service, method, _ := strings.Cut(q.Operation, "/")
+			clauses = append(clauses, "(span.rpc.method = "+strconv.Quote(q.Operation)+" || (span.rpc.service = "+strconv.Quote(service)+" && span.rpc.method = "+strconv.Quote(method)+"))")
+		}
+	} else {
+		clauses = append(clauses, `(span.http.request.method != nil || span.http.method != nil)`)
+		if q.Operation != "" {
+			method, route, _ := strings.Cut(q.Operation, " ")
+			clauses = append(clauses, "(span.http.request.method = "+strconv.Quote(method)+" || span.http.method = "+strconv.Quote(method)+")")
+			if route != "" {
+				clauses = append(clauses, "span.http.route = "+strconv.Quote(route))
+			}
+		}
 	}
 	return "{ " + strings.Join(clauses, " && ") + " }"
 }

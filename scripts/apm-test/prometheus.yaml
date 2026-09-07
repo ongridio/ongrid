@@ -1,3 +1,7 @@
 global:
   scrape_interval: 5s
-scrape_configs: []
+scrape_configs:
+  - job_name: application-metrics
+    scrape_interval: 1s
+    static_configs:
+      - targets: ['metrics-collector:9464']

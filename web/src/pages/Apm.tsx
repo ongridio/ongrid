@@ -61,6 +61,7 @@ export default function ApmPage() {
   const [minimum, setMinimum] = useState('100');
   const [dwell, setDwell] = useState('120');
   const [creating, setCreating] = useState(false);
+  const traceMetrics = params.get('metric_source') === 'tempo_spanmetrics';
   const detail = params.has('service_name');
   const requestedTab = params.get('tab') || (detail ? 'overview' : 'services');
   const tab =
@@ -75,6 +76,10 @@ export default function ApmPage() {
     const next = new URLSearchParams(params);
     if (value === null) next.delete(key);
     else next.set(key, value);
+    if (['metric_source', 'protocol', 'metric_format'].includes(key)) {
+      next.delete('operation');
+      next.delete('span_kind');
+    }
     if (key !== 'page') next.delete('page');
     setParams(next);
   };
@@ -256,6 +261,12 @@ export default function ApmPage() {
             {detail && (
               <Button
                 className="h-9"
+                disabled={traceMetrics}
+                title={
+                  traceMetrics
+                    ? tr('请求告警需使用应用指标', 'Request alerts require application metrics')
+                    : undefined
+                }
                 aria-pressed={tab === 'alerts'}
                 onClick={() => set('tab', tab === 'alerts' ? 'overview' : 'alerts')}
               >
@@ -274,96 +285,128 @@ export default function ApmPage() {
           </>
         }
         extra={
-          (!detail || advanced || period === 'custom') && (
-            <div className="flex flex-wrap items-center gap-3">
-              {!detail && tab === 'services' && (
-                <>
-                  <label className="relative min-w-48 flex-1">
-                    <Search size={14} className="absolute left-3 top-2.5 text-zinc-500" />
-                    <input
-                      aria-label={tr('服务搜索', 'Search services')}
-                      className={`${input} w-full pl-9`}
-                      placeholder={tr('搜索服务名称…', 'Search services…')}
-                      value={params.get('search') || ''}
-                      onChange={(e) => set('search', e.target.value)}
-                    />
-                  </label>
-                  {(
-                    [
-                      ['environment', tr('全部环境', 'All environments'), list?.environments],
-                      [
-                        'service_namespace',
-                        tr('全部命名空间', 'All namespaces'),
-                        list?.service_namespaces,
-                      ],
-                    ] as const
-                  ).map(([key, label, options]) => (
-                    <select
-                      key={key}
-                      aria-label={
-                        key === 'environment'
-                          ? tr('环境', 'Environment')
-                          : tr('业务命名空间', 'Service namespace')
-                      }
-                      className={`${input} max-w-52`}
-                      value={params.has(key) ? JSON.stringify(params.get(key)) : 'all'}
-                      onChange={(e) =>
-                        set(
-                          key,
-                          e.target.value === 'all' ? null : (JSON.parse(e.target.value) as string),
-                        )
-                      }
-                    >
-                      <option value="all">{label}</option>
-                      {[
-                        ...new Set([
-                          '',
-                          ...(options || []),
-                          ...(params.has(key) ? [params.get(key)!] : []),
-                        ]),
-                      ].map((value) => (
-                        <option key={value} value={JSON.stringify(value)}>
-                          {value || unset}
-                        </option>
-                      ))}
-                    </select>
-                  ))}
-                </>
-              )}
-              {!detail && filtersButton}
-              {advanced && (
-                <label className="flex items-center gap-2 text-xs text-zinc-500">
-                  {tr('入口类型', 'Entry type')}
-                  <select
-                    className={input}
-                    value={params.get('span_kind') || 'server'}
-                    onChange={(e) => set('span_kind', e.target.value)}
-                  >
-                    <option value="server">{tr('HTTP / RPC 服务', 'HTTP / RPC server')}</option>
-                    <option value="consumer">{tr('消息消费', 'Message consumer')}</option>
-                  </select>
+          <div className="flex flex-wrap items-center gap-3">
+            <select
+              aria-label={tr('指标来源', 'Metric source')}
+              className={input}
+              value={params.get('metric_source') || 'application_metrics'}
+              onChange={(e) => set('metric_source', e.target.value)}
+            >
+              <option value="application_metrics">{tr('应用指标', 'Application metrics')}</option>
+              <option value="tempo_spanmetrics">{tr('Trace 样本', 'Trace samples')}</option>
+            </select>
+            {!traceMetrics && (
+              <select
+                aria-label={tr('请求协议', 'Request protocol')}
+                className={input}
+                value={params.get('protocol') || 'http'}
+                onChange={(e) => set('protocol', e.target.value)}
+              >
+                <option value="http">HTTP</option>
+                <option value="rpc">RPC</option>
+              </select>
+            )}
+
+            {!detail && tab === 'services' && (
+              <>
+                <label className="relative min-w-48 flex-1">
+                  <Search size={14} className="absolute left-3 top-2.5 text-zinc-500" />
+                  <input
+                    aria-label={tr('服务搜索', 'Search services')}
+                    className={`${input} w-full pl-9`}
+                    placeholder={tr('搜索服务名称…', 'Search services…')}
+                    value={params.get('search') || ''}
+                    onChange={(e) => set('search', e.target.value)}
+                  />
                 </label>
-              )}
-              {period === 'custom' &&
-                ['start', 'end'].map((key) => (
-                  <label
+                {(
+                  [
+                    ['environment', tr('全部环境', 'All environments'), list?.environments],
+                    [
+                      'service_namespace',
+                      tr('全部命名空间', 'All namespaces'),
+                      list?.service_namespaces,
+                    ],
+                  ] as const
+                ).map(([key, label, options]) => (
+                  <select
                     key={key}
-                    className="flex flex-wrap items-center gap-2 text-xs text-zinc-500"
+                    aria-label={
+                      key === 'environment'
+                        ? tr('环境', 'Environment')
+                        : tr('业务命名空间', 'Service namespace')
+                    }
+                    className={`${input} max-w-52`}
+                    value={params.has(key) ? JSON.stringify(params.get(key)) : 'all'}
+                    onChange={(e) =>
+                      set(
+                        key,
+                        e.target.value === 'all' ? null : (JSON.parse(e.target.value) as string),
+                      )
+                    }
                   >
-                    {key === 'start' ? tr('开始时间', 'Start time') : tr('结束时间', 'End time')}
-                    <input
-                      type="datetime-local"
-                      step="1"
-                      className={input}
-                      value={localDateTime(params.get(key) || '')}
-                      onChange={(e) => {
-                        if (e.target.value) set(key, new Date(e.target.value).toISOString());
-                      }}
-                    />
-                  </label>
+                    <option value="all">{label}</option>
+                    {[
+                      ...new Set([
+                        '',
+                        ...(options || []),
+                        ...(params.has(key) ? [params.get(key)!] : []),
+                      ]),
+                    ].map((value) => (
+                      <option key={value} value={JSON.stringify(value)}>
+                        {value || unset}
+                      </option>
+                    ))}
+                  </select>
                 ))}
-            </div>
-          )
+              </>
+            )}
+            {!detail && filtersButton}
+            {advanced && traceMetrics && (
+              <label className="flex items-center gap-2 text-xs text-zinc-500">
+                {tr('入口类型', 'Entry type')}
+                <select
+                  className={input}
+                  value={params.get('span_kind') || 'server'}
+                  onChange={(e) => set('span_kind', e.target.value)}
+                >
+                  <option value="server">{tr('HTTP / RPC 服务', 'HTTP / RPC server')}</option>
+                  <option value="consumer">{tr('消息消费', 'Message consumer')}</option>
+                </select>
+              </label>
+            )}
+            {advanced && !traceMetrics && (
+              <label className="flex items-center gap-2 text-xs text-zinc-500">
+                {tr('指标格式', 'Metric format')}
+                <select
+                  className={input}
+                  value={params.get('metric_format') || 'otel'}
+                  onChange={(e) => set('metric_format', e.target.value)}
+                >
+                  <option value="otel">{tr('当前 OTel 约定', 'Current OTel conventions')}</option>
+                  <option value="legacy">{tr('旧版 HTTP / gRPC', 'Legacy HTTP / gRPC')}</option>
+                </select>
+              </label>
+            )}
+            {period === 'custom' &&
+              ['start', 'end'].map((key) => (
+                <label
+                  key={key}
+                  className="flex flex-wrap items-center gap-2 text-xs text-zinc-500"
+                >
+                  {key === 'start' ? tr('开始时间', 'Start time') : tr('结束时间', 'End time')}
+                  <input
+                    type="datetime-local"
+                    step="1"
+                    className={input}
+                    value={localDateTime(params.get(key) || '')}
+                    onChange={(e) => {
+                      if (e.target.value) set(key, new Date(e.target.value).toISOString());
+                    }}
+                  />
+                </label>
+              ))}
+          </div>
         }
       />
       {detail && (
@@ -386,16 +429,26 @@ export default function ApmPage() {
       <main className="flex-1 space-y-4 overflow-auto p-6">
         <details className="text-xs text-zinc-500">
           <summary className="w-fit cursor-pointer">
-            {tr(
-              '基于已接收的入口请求 · 采样覆盖率未知',
-              'Based on received entry requests · Sampling coverage unknown',
-            )}
+            {traceMetrics
+              ? tr(
+                  'Trace 样本指标 · 采样覆盖率未知',
+                  'Trace sample metrics · Sampling coverage unknown',
+                )
+              : tr(
+                  '应用请求指标 · 独立于 Trace 采样',
+                  'Application request metrics · Independent of trace sampling',
+                )}
           </summary>
           <p className="mt-2 max-w-3xl leading-relaxed">
-            {tr(
-              '指标来自 Tempo 接收的入口 Span，不代表已确认的全量业务请求；无数据不等于服务宕机。趋势使用至少 5 分钟滚动窗口，摘要使用所选时间范围。',
-              'Metrics reflect entry spans received by Tempo, not confirmed total business traffic. No data does not imply downtime. Trends use a rolling window of at least 5 minutes; summaries use the selected range.',
-            )}
+            {traceMetrics
+              ? tr(
+                  '指标来自 Tempo 接收的入口 Span，不代表已确认的全量业务请求；无数据不等于服务宕机。趋势使用至少 5 分钟滚动窗口，摘要使用所选时间范围。',
+                  'Metrics reflect entry spans received by Tempo, not confirmed total business traffic. No data does not imply downtime. Trends use a rolling window of at least 5 minutes; summaries use the selected range.',
+                )
+              : tr(
+                  '请求速率、错误率和延迟来自应用 SDK 的 HTTP / RPC 服务端指标。需要启用 Metrics 导出；无指标时不会用 Trace 样本替代。链路与依赖仍受 Trace 采样影响。',
+                  'Request rate, errors and latency come from application SDK HTTP / RPC server metrics. Enable Metrics export; missing metrics are never replaced with trace samples. Traces and dependencies still depend on trace sampling.',
+                )}
           </p>
         </details>
         {error && (
@@ -445,13 +498,20 @@ export default function ApmPage() {
                   'No request metrics observed in this scope',
                 )}
                 hint={tr(
-                  '检查接入、时间范围和指标生成状态。',
-                  'Check instrumentation, time range and metric generation.',
+                  '检查 Metrics 导出、协议、指标格式和时间范围。',
+                  'Check Metrics export, protocol, metric format and time range.',
                 )}
                 action={
-                  <Button onClick={() => set('tab', 'onboarding')}>
-                    {tr('接入应用', 'Instrument application')}
-                  </Button>
+                  <div className="flex justify-center gap-2">
+                    <Button onClick={() => set('tab', 'onboarding')}>
+                      {tr('接入应用', 'Instrument application')}
+                    </Button>
+                    {!traceMetrics && (
+                      <Button onClick={() => set('metric_source', 'tempo_spanmetrics')}>
+                        {tr('查看 Trace 样本', 'View trace samples')}
+                      </Button>
+                    )}
+                  </div>
                 }
               />
             ) : (
@@ -790,7 +850,7 @@ export default function ApmPage() {
                       <span>
                         {{
                           metrics: tr('请求指标', 'Request metrics'),
-                          sampling: tr('采样覆盖率', 'Sampling coverage'),
+                          sampling: tr('Trace 采样覆盖率', 'Trace sampling coverage'),
                           traces: tr('链路接收', 'Trace ingestion'),
                           resource_identity: tr('服务身份', 'Service identity'),
                           downstream: tr('下游埋点', 'Downstream instrumentation'),
@@ -910,7 +970,15 @@ export default function ApmPage() {
             )}
           </Card>
         )}
-        {tab === 'alerts' && (
+        {tab === 'alerts' && traceMetrics && (
+          <Card>
+            {tr(
+              '切换到应用指标后创建请求级告警。',
+              'Switch to application metrics to create request alerts.',
+            )}
+          </Card>
+        )}
+        {tab === 'alerts' && !traceMetrics && (
           <Card className="space-y-4">
             <h2 className="text-sm font-medium">
               {tr('请求级告警模板', 'Request-level alert template')}
@@ -938,7 +1006,7 @@ export default function ApmPage() {
               </label>
               {[
                 [tr('阈值', 'Threshold'), threshold, setThreshold],
-                [tr('最少样本请求数', 'Minimum sample requests'), minimum, setMinimum],
+                [tr('最少请求数', 'Minimum requests'), minimum, setMinimum],
                 [tr('持续秒数（30 的倍数）', 'Duration (multiples of 30s)'), dwell, setDwell],
               ].map(([label, value, setter]) => (
                 <label key={String(label)} className="grid gap-1 text-xs">

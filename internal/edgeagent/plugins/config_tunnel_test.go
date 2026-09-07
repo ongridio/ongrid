@@ -917,3 +917,28 @@ func containsString(values []string, want string) bool {
 	}
 	return false
 }
+
+func TestHostApplicationMetricsDefaults(t *testing.T) {
+	fetcher := &TunnelConfigFetcher{}
+	snapshot := map[string]PluginConfig{"traces": {Enabled: true}, "metrics": {Enabled: true, Spec: map[string]any{"target_url": "http://127.0.0.1:9102/metrics"}}}
+	out := fetcher.applyKubernetesDefaults(snapshot)
+	if out["traces"].Spec["enable_metrics"] != true || out["metrics"].Spec["application_metrics_url"] != "http://127.0.0.1:9464/metrics" || out["metrics"].Spec["target_url"] != snapshot["metrics"].Spec["target_url"] {
+		t.Fatalf("defaults=%+v", out)
+	}
+	if snapshot["traces"].Spec != nil {
+		t.Fatal("mutated input")
+	}
+	for _, tc := range []struct {
+		role    string
+		enabled bool
+		spec    map[string]any
+	}{
+		{"", false, nil}, {"node", true, nil}, {"", true, map[string]any{"enable_metrics": false}}, {"", true, map[string]any{"metrics_remote_write_endpoint": "https://prom.example/write"}}, {"", true, map[string]any{"metrics_export_endpoint": "0.0.0.0:9464"}},
+	} {
+		fetcher.k8sRole = tc.role
+		out := fetcher.withApplicationMetricsDefaults(map[string]PluginConfig{"traces": {Enabled: tc.enabled, Spec: tc.spec}, "metrics": {Enabled: true}})
+		if out["metrics"].Spec["application_metrics_url"] != nil {
+			t.Fatalf("overrode disabled/custom/Kubernetes config %+v", tc)
+		}
+	}
+}

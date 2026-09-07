@@ -5,7 +5,7 @@ import { Button, Card } from '@/components/ui';
 export function Onboarding() {
   const { tr } = useI18n();
   const [language, setLanguage] = useState('java');
-  const [endpoint, setEndpoint] = useState('http://127.0.0.1:4318/v1/traces');
+  const [endpoint, setEndpoint] = useState('http://127.0.0.1:4318');
   const [service, setService] = useState('order-api');
   const [namespace, setNamespace] = useState('trade');
   const [environment, setEnvironment] = useState('production');
@@ -25,10 +25,14 @@ export function Onboarding() {
   const config = [
     `export OTEL_SERVICE_NAME=${quote(service)}`,
     `export OTEL_RESOURCE_ATTRIBUTES=${quote(`service.namespace=${namespace},deployment.environment.name=${environment}`)}`,
-    `export OTEL_EXPORTER_OTLP_TRACES_PROTOCOL='http/protobuf'`,
-    `export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=${quote(endpoint)}`,
+    `export OTEL_EXPORTER_OTLP_PROTOCOL='http/protobuf'`,
+    `export OTEL_EXPORTER_OTLP_ENDPOINT=${quote(endpoint.replace(/\/$/, ''))}`,
+    `export OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE='cumulative'`,
+    `export OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION='explicit_bucket_histogram'`,
+    `export OTEL_SEMCONV_STABILITY_OPT_IN='http,rpc'`,
+    `export OTEL_TRACES_EXPORTER='otlp'`,
     `export OTEL_PROPAGATORS='tracecontext,baggage'`,
-    `export OTEL_METRICS_EXPORTER='none'`,
+    `export OTEL_METRICS_EXPORTER='otlp'`,
     `export OTEL_LOGS_EXPORTER='none'`,
     commands[language],
   ].join('\n');
@@ -37,8 +41,8 @@ export function Onboarding() {
       <h2 className="text-sm font-semibold">{tr('应用接入', 'Instrument an application')}</h2>
       <p className="text-xs text-zinc-500">
         {tr(
-          '使用官方 SDK 或自动埋点包。主机选择已启用的本机 Edge 接收端；Docker 使用容器可达地址；Kubernetes 使用已部署 Telemetry Gateway 的 Service 地址。',
-          'Use the official SDK or instrumentation package. On hosts, use the enabled local Edge receiver; in Docker, use a container-reachable address; in Kubernetes, use the deployed Telemetry Gateway Service.',
+          '启用官方 HTTP / RPC 埋点和 Metrics 导出。主机需启用 Edge 的 traces 与 metrics 插件；Docker 使用容器可达地址；Kubernetes 使用 Telemetry Gateway Service 地址。',
+          'Enable official HTTP / RPC instrumentation and Metrics export. Hosts require the Edge traces and metrics plugins; Docker needs a container-reachable address; Kubernetes uses the Telemetry Gateway Service.',
         )}
       </p>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -51,7 +55,7 @@ export function Onboarding() {
           </select>
         </label>
         {[
-          [tr('Trace 接收地址', 'Trace endpoint'), endpoint, setEndpoint],
+          [tr('OTLP 基础地址', 'OTLP base endpoint'), endpoint, setEndpoint],
           [tr('服务名', 'Service name'), service, setService],
           [tr('业务命名空间', 'Service namespace'), namespace, setNamespace],
           [tr('环境', 'Environment'), environment, setEnvironment],
@@ -74,6 +78,12 @@ export function Onboarding() {
           )}
         </p>
       )}
+      <p className="text-xs text-zinc-500">
+        {tr(
+          'HTTP 使用路由模板，RPC 使用服务/方法名，避免将请求 ID 放进指标。旧版 SDK 可在高级筛选中切换指标格式；具体支持取决于语言和埋点版本。Go 还需在代码中初始化 MeterProvider。',
+          'Use HTTP route templates and RPC service/method names, never request IDs. Select legacy metrics in advanced filters for older SDKs; support depends on language and instrumentation version. Go also requires a MeterProvider in code.',
+        )}
+      </p>
       <pre className="overflow-auto rounded-lg bg-zinc-950 p-4 text-xs">{config}</pre>
       <Button
         disabled={!valid}
