@@ -64,3 +64,16 @@ it('shows and copies the original SkyWalking ID when opened by an OTLP ID', asyn
   await act(async () => { await user.click(screen.getByRole('button', { name: 'Copy SkyWalking trace ID' })); });
   expect(copy).toHaveBeenCalledWith(originalID);
 });
+
+it.each([
+  ['STATUS_CODE_OK', 'SUCCESS', false],
+  ['STATUS_CODE_ERROR', 'request failed', true],
+  [0, 'status detail', false],
+] as const)('styles status messages by status code %s', (code, message, error) => {
+  render(createElement(TraceWaterfall, { traceId: 'trace', trace: { resourceSpans: [{ scopeSpans: [{ spans: [{
+    spanId: 'root', name: 'operation', startTimeUnixNano: '1000000000', endTimeUnixNano: '1020000000', status: { code, message },
+  }] }] }] } }));
+  const banner = screen.getByText(message).parentElement!;
+  expect(banner.classList.contains('text-red-300')).toBe(error);
+  expect(Boolean(banner.querySelector('svg'))).toBe(error);
+});
