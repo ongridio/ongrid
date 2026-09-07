@@ -234,6 +234,7 @@ func main() {
 		NetworkDiscoveryEnabled:  parseBoolEnv("ONGRID_NETWORK_DISCOVERY_ENABLED", true),
 		NetworkDiscoveryInterval: parseDurationEnv("ONGRID_NETWORK_DISCOVERY_INTERVAL", time.Minute),
 		AgentVersion:             version,
+		CloudAddr:                cfg.Edge.CloudAddr,
 		Kubernetes:               k8sInfo,
 		UpgradeStageDir:          stageDir,
 		PacketCaptureDir:         envOr("ONGRID_PACKET_CAPTURE_DIR", "/var/lib/ongrid-edge/pcap"),
