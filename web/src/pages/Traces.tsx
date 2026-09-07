@@ -31,6 +31,7 @@ import {
   traceSearchQuery,
   traceSummaryDurationMs,
   type TraceScope,
+  type TraceQuickFilter,
 } from '@/components/traces/traceSummary';
 import { Button, PageHeader } from '@/components/ui';
 import { useObservability } from '@/store/observability';
@@ -83,29 +84,21 @@ const PAGE_LIMIT = 100;
 // Logs page convention; see hasSearched init below).
 const DEFAULT_TRACEQL = '';
 
-// Quick-chip presets — one click fills + submits. Empty value means
-// "no TraceQL — fall through to service+operation facets" (今天默认行为).
-const TRACES_QUICK_CHIPS: { labelZh: string; labelEn: string; query: string; titleZh: string; titleEn: string }[] = [
+// 快捷条件与普通筛选叠加；高级 TraceQL 仍单独覆盖查询。
+const TRACES_QUICK_CHIPS: { labelZh: string; labelEn: string; query: TraceQuickFilter; titleZh: string; titleEn: string }[] = [
   {
     labelZh: '出错的 trace',
     labelEn: 'Errored traces',
-    query: '{ span:status = error }',
+    query: 'span:status = error',
     titleZh: '只看 status=error 的 trace',
     titleEn: 'Show only status=error traces',
   },
   {
     labelZh: '超过 1s',
     labelEn: 'Over 1s',
-    query: '{ trace:duration > 1s }',
+    query: 'trace:duration > 1s',
     titleZh: '总时长 > 1 秒的慢 trace',
     titleEn: 'Slow traces with total duration > 1s',
-  },
-  {
-    labelZh: '全部',
-    labelEn: 'All',
-    query: '',
-    titleZh: '清空 TraceQL — 走 service / operation 选择器',
-    titleEn: 'Clear TraceQL — fall through to service / operation selectors',
   },
 ];
 
@@ -154,6 +147,7 @@ export default function TracesPage() {
   const [peerFilter, setPeerFilter] = useState('');
   const [scope, setScope] = useState<TraceScope>('business');
   const [traceQL, setTraceQL] = useState(DEFAULT_TRACEQL);
+  const [quickFilter, setQuickFilter] = useState<TraceQuickFilter>('');
   const [submitted, setSubmitted] = useState({
     range: DEFAULT_RANGE,
     service: '',
@@ -161,6 +155,7 @@ export default function TracesPage() {
     peer: '',
     scope: 'business' as TraceScope,
     traceQL: DEFAULT_TRACEQL,
+    quickFilter,
   });
   // Auto-query on page load with the default filters (range=1h, no
   // service/operation/TraceQL). Matches the Logs page convention —
@@ -257,7 +252,7 @@ export default function TracesPage() {
       const start = new Date(startMs).toISOString();
       const end = now.toISOString();
       const resp = await searchTraces({
-        q: traceSearchQuery(submitted.traceQL, submitted.service, submitted.operation, submitted.peer, submitted.scope),
+        q: traceSearchQuery(submitted.traceQL, submitted.service, submitted.operation, submitted.peer, submitted.scope, submitted.quickFilter),
         start,
         end,
         limit: PAGE_LIMIT,
@@ -275,7 +270,7 @@ export default function TracesPage() {
     } finally {
       if (seq === requestSeq.current) setLoading(false);
     }
-  }, [submitted.range, submitted.service, submitted.operation, submitted.peer, submitted.scope, submitted.traceQL]);
+  }, [submitted.range, submitted.service, submitted.operation, submitted.peer, submitted.scope, submitted.traceQL, submitted.quickFilter]);
 
   useEffect(() => {
     if (!hasSearched) return;
@@ -297,6 +292,7 @@ export default function TracesPage() {
       peer: peerFilter,
       scope,
       traceQL,
+      quickFilter,
     });
     setHasSearched(true);
     void fetchTraces();
@@ -351,6 +347,7 @@ export default function TracesPage() {
       peer: peerFilter,
       scope,
       traceQL,
+      quickFilter,
     });
     setHasSearched(true);
   };
@@ -366,7 +363,7 @@ export default function TracesPage() {
     setScope(nextScope);
     if (traceIdInput.trim()) return;
     closeTrace();
-    setSubmitted({ range, service: svc, operation: op, peer, scope: nextScope, traceQL });
+    setSubmitted({ range, service: svc, operation: op, peer, scope: nextScope, traceQL, quickFilter });
     setHasSearched(true);
   };
 
@@ -379,7 +376,7 @@ export default function TracesPage() {
   const onOpenGrafana = useCallback(() => {
     const base =
       (grafanaBaseUrl || '').replace(/\/+$/, '') || `${window.location.origin}/grafana`;
-    const expr = traceSearchQuery(traceQL, serviceFilter, operationFilter, peerFilter, scope);
+    const expr = traceSearchQuery(traceQL, serviceFilter, operationFilter, peerFilter, scope, quickFilter);
     const now = Date.now();
     const from = now - rangeToMs(range);
     const url = buildExploreUrl({
@@ -392,7 +389,7 @@ export default function TracesPage() {
       orgId: grafanaOrgId,
     });
     void openObservabilityUrl(url);
-  }, [grafanaBaseUrl, grafanaOrgId, range, serviceFilter, operationFilter, peerFilter, scope, traceQL]);
+  }, [grafanaBaseUrl, grafanaOrgId, range, serviceFilter, operationFilter, peerFilter, scope, traceQL, quickFilter]);
 
   return (
     <main className="anim-fade flex flex-1 flex-col overflow-hidden">
@@ -475,13 +472,15 @@ export default function TracesPage() {
                     onClick={() => {
                       closeTrace();
                       setTraceIdInput('');
-                      setTraceQL(chip.query);
-                      setSubmitted({ range, service: serviceFilter, operation: operationFilter, peer: peerFilter, scope, traceQL: chip.query });
+                      setTraceQL('');
+                      const nextQuickFilter = !submitted.traceQL.trim() && submitted.quickFilter === chip.query ? '' : chip.query;
+                      setQuickFilter(nextQuickFilter);
+                      setSubmitted({ range, service: serviceFilter, operation: operationFilter, peer: peerFilter, scope, traceQL: '', quickFilter: nextQuickFilter });
                       setHasSearched(true);
                     }}
                     className={cn(
                       'rounded-full border px-2 py-0.5 text-[11px]',
-                      submitted.traceQL === chip.query
+                      !submitted.traceQL.trim() && submitted.quickFilter === chip.query
                         ? 'border-indigo-500/60 bg-indigo-500/15 text-indigo-200'
                         : 'border-zinc-800 bg-zinc-900 text-zinc-300 hover:border-zinc-600 hover:bg-zinc-800',
                     )}
@@ -490,6 +489,20 @@ export default function TracesPage() {
                   </button>
                 ))}
               </div>
+              <Button onClick={() => {
+                closeTrace();
+                setRange(DEFAULT_RANGE);
+                setServiceFilter('');
+                setOperationFilter('');
+                setPeerFilter('');
+                setScope('all');
+                setTraceQL('');
+                setQuickFilter('');
+                setSubmitted({ range: DEFAULT_RANGE, service: '', operation: '', peer: '', scope: 'all', traceQL: '', quickFilter: '' });
+                setHasSearched(true);
+              }}>
+                {tr('重置', 'Reset')}
+              </Button>
               <Button onClick={() => setAdvancedOpen((value) => !value)} aria-expanded={advancedOpen}>
                 <Braces size={12} /> TraceQL <ChevronRight size={11} className={cn('transition-transform', advancedOpen && 'rotate-90')} />
               </Button>
