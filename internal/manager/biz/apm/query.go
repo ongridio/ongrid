@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -180,6 +181,7 @@ type Summary struct {
 	Requests   *float64          `json:"requests"`
 	DataStatus string            `json:"data_status"`
 	Protocols  []ProtocolMetrics `json:"protocols,omitempty"`
+	Languages  []string          `json:"languages,omitempty"`
 }
 
 type Metadata struct {
@@ -268,6 +270,8 @@ func (s *Summary) set(key string, value *float64) {
 }
 
 func (s *Summary) finish(window time.Duration) {
+	slices.Sort(s.Languages)
+	s.Languages = slices.Compact(s.Languages)
 	s.DataStatus = "insufficient_samples"
 	if s.RPS == nil {
 		return

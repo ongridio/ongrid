@@ -260,12 +260,16 @@ func (p *protocolProm) Query(ctx context.Context, expr string, at time.Time) (*p
 func TestServicesGroupProtocolsBeforeSortingAndPagination(t *testing.T) {
 	p := &protocolProm{results: map[string]string{
 		"http": `[
+ {"metric":{"service":"orders","service_namespace":"trade","deployment_environment_name":"production","apm_stat":"present","telemetry_sdk_language":"go"},"value":[1600,"1"]},
+ {"metric":{"service":"orders","service_namespace":"trade","deployment_environment_name":"staging","apm_stat":"present","telemetry_sdk_language":"python"},"value":[1600,"1"]},
  {"metric":{"service":"orders","service_namespace":"trade","deployment_environment_name":"production","apm_stat":"rps"},"value":[1600,"10"]},
  {"metric":{"service":"orders","service_namespace":"trade","deployment_environment_name":"production","apm_stat":"error_rate"},"value":[1600,"10"]},
  {"metric":{"service":"orders","service_namespace":"trade","deployment_environment_name":"production","apm_stat":"p95_ms"},"value":[1600,"900"]},
  {"metric":{"service":"orders","service_namespace":"trade","deployment_environment_name":"staging","apm_stat":"rps"},"value":[1600,"1"]}
  ]`,
 		"rpc": `[
+ {"metric":{"service":"orders","service_namespace":"trade","deployment_environment_name":"production","apm_stat":"present","telemetry_sdk_language":"java"},"value":[1600,"1"]},
+ {"metric":{"service":"orders","service_namespace":"trade","deployment_environment_name":"production","apm_stat":"present","telemetry_sdk_language":"go"},"value":[1600,"1"]},
  {"metric":{"service":"orders","service_namespace":"trade","deployment_environment_name":"production","apm_stat":"rps"},"value":[1600,"90"]},
  {"metric":{"service":"orders","service_namespace":"trade","deployment_environment_name":"production","apm_stat":"error_rate"},"value":[1600,"0"]},
  {"metric":{"service":"orders","service_namespace":"trade","deployment_environment_name":"production","apm_stat":"p95_ms"},"value":[1600,"10"]},
@@ -284,6 +288,9 @@ func TestServicesGroupProtocolsBeforeSortingAndPagination(t *testing.T) {
 		t.Fatalf("grouping/pagination: %+v, calls=%d, err=%v", list, p.calls, err)
 	}
 	row := list.Items[0]
+	if strings.Join(row.Languages, ",") != "go,java" {
+		t.Fatalf("languages not scoped/deduplicated across protocols: %+v", row)
+	}
 	if row.Identity.Environment != "production" || len(row.Protocols) != 2 || *row.RPS != 100 || *row.ErrorRate != 1 || row.P95Ms != nil {
 		t.Fatalf("weighted service metrics or identity wrong: %+v", row)
 	}

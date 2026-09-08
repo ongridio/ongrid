@@ -26,7 +26,7 @@ import {
   type ApmDiagnostics,
   type ApmRuntime,
 } from '@/api/apm';
-import { Button, Card, EmptyState, PageHeader, PaginationFooter } from '@/components/ui';
+import { Button, Card, Chip, EmptyState, PageHeader, PaginationFooter } from '@/components/ui';
 import { Dependencies } from '@/components/apm/Dependencies';
 import { SearchInput } from '@/components/apm/SearchInput';
 import { ServiceSwitcher } from '@/components/apm/ServiceSwitcher';
@@ -37,6 +37,10 @@ import { usePermissions } from '@/store/me';
 import './Apm.css';
 
 const input = "";
+const languageLabels: Record<string, string> = {
+  go: 'Go', java: 'Java', nodejs: 'Node.js', webjs: 'JavaScript', javascript: 'JavaScript', python: 'Python',
+  dotnet: '.NET', cpp: 'C++', ruby: 'Ruby', php: 'PHP', rust: 'Rust', swift: 'Swift',
+};
 const periods = [
   ['15m', 900000, '最近 15 分钟', 'Last 15 minutes'],
   ['1h', 3600000, '最近 1 小时', 'Last hour'],
@@ -812,6 +816,13 @@ export default function ApmPage() {
                                   >
                                     {detail ? row.operation : row.identity.service_name}
                                   </Link>
+                                  {!detail && (
+                                    <Chip className="ml-2" title={tr('编程语言', 'Programming language')}>
+                                      {row.languages?.length
+                                        ? row.languages.map((language) => languageLabels[language] || language).join(' / ')
+                                        : tr('未知', 'Unknown')}
+                                    </Chip>
+                                  )}
                                 </td>
                                 {!detail && (
                                   <>

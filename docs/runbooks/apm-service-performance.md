@@ -79,6 +79,8 @@ OTLP 日志使用标准 trace_id/span_id；文件或 CRI 日志可写单行 JSON
 
 发送真实成功、失败、慢请求，然后在服务列表选取覆盖请求的时间段。指标生成存在延迟，至少两个 counter 采集点后才能计算 rate。服务列表只发现窗口内存在指标的服务。
 
+服务名旁显示请求指标中的 `telemetry.sdk.language`（Prometheus 标签 `telemetry_sdk_language`），例如 Go、Java、Node.js、Python。同一服务跨 HTTP/RPC 观测到的语言去重展示，不改变服务身份或 RED 聚合；未上报此属性时显示“未知”，不会按服务名推断语言。
+
 - 应用指标只统计 HTTP/RPC 服务端完成的请求，客户端/内部 Span 不重复纳入。RPC 流式调用以整个调用完成计数，不是每条消息计数。
 - 应用错误率：`error.type` 非空，或 HTTP 5xx；gRPC 另支持非 OK 的 `rpc.response.status_code`，旧版支持非零 `rpc.grpc.status_code`。同一序列先去重再聚合。其他 RPC 协议依赖 SDK 正确设置 `error.type`。这不是自定义业务成功率。没有错误序列但有请求时为 0%，无请求时为 `—`。
 - P50/P95/P99 在所选协议内合并兼容直方图后计算，单位 ms；不是各实例分位数平均。请求数由 rate × 窗口估算，原始 counter 才用于固定样本精确计数验收。

@@ -86,7 +86,8 @@ func (s *Service) summaries(ctx context.Context, q Query, operations bool) ([]Su
 	exprs := metricExpressions(q, window, group)
 	// Retain identities with a single sample even when rate() cannot be
 	// calculated yet. They are "insufficient_samples", never a healthy zero.
-	exprs["present"] = q.aggregate("count_over_time", q.counter(), window, group)
+	// Retain SDK language only for discovery; RED still aggregates all languages.
+	exprs["present"] = q.aggregate("count_over_time", q.counter(), window, group+",telemetry_sdk_language")
 	series, err := s.instant(ctx, combineExpressions(exprs), q.End)
 	if err != nil {
 		return nil, err
@@ -107,6 +108,9 @@ func (s *Service) summaries(ctx context.Context, q Query, operations bool) ([]Su
 			return nil, err
 		}
 		rows[k].set(item.Metric["apm_stat"], value)
+		if language := item.Metric["telemetry_sdk_language"]; item.Metric["apm_stat"] == "present" && language != "" {
+			rows[k].Languages = append(rows[k].Languages, language)
+		}
 	}
 	if len(rows) > 5000 {
 		return nil, fmt.Errorf("%w: narrow the APM service or operation scope", errs.ErrBudgetExceeded)
@@ -135,6 +139,7 @@ func (s *Service) protocolSummaries(ctx context.Context, q Query) ([]Summary, er
 				grouped[row.Identity] = &Summary{Identity: row.Identity}
 			}
 			service := grouped[row.Identity]
+			service.Languages = append(service.Languages, row.Languages...)
 			service.Protocols = append(service.Protocols, ProtocolMetrics{
 				Protocol: protocol, RPS: row.RPS, ErrorRate: row.ErrorRate,
 				P95Ms: row.P95Ms, DataStatus: row.DataStatus,

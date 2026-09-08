@@ -60,6 +60,8 @@ message Summary {
   // Populated for protocol=all services. Top-level RPS and error rate cover all
   // observed protocols; percentiles are only exposed per protocol.
   repeated ProtocolMetrics protocols = 10;
+  // Distinct telemetry.sdk.language values observed in request metrics.
+  repeated string languages = 11;
 }
 
 message ProtocolMetrics {

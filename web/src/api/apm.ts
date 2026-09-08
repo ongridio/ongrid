@@ -8,6 +8,7 @@ export type ServiceIdentity = {
 export type ApmSummary = {
   identity: ServiceIdentity;
   operation?: string;
+  languages?: string[];
   rps: number | null;
   error_rate: number | null;
   p50_ms: number | null;
