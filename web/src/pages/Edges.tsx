@@ -854,8 +854,8 @@ export default function EdgesPage() {
               className={cn(
                 "min-w-full text-xs",
                 compactNetworkTable
-                  ? "w-full min-w-[1120px] table-fixed"
-                  : "w-[1727px] table-fixed",
+                  ? "w-full min-w-[1200px] table-fixed"
+                  : "w-[1767px] table-fixed",
               )}
             >
               {compactNetworkTable ? (
@@ -869,7 +869,7 @@ export default function EdgesPage() {
                   <col style={{ width: 105 }} />
                   <col style={{ width: 130 }} />
                   <col style={{ width: 95 }} />
-                  <col style={{ width: 160 }} />
+                  <col style={{ width: 240 }} />
                 </colgroup>
               ) : (
                 <colgroup>
@@ -884,7 +884,7 @@ export default function EdgesPage() {
                   <col className="w-[110px]" />
                   <col className="w-[110px]" />
                   <col className="w-[145px]" />
-                  <col className="w-[280px]" />
+                  <col className="w-[320px]" />
                 </colgroup>
               )}
               <thead className="device-list-table__header border-b border-zinc-800/60 bg-zinc-950/40 text-[11px] uppercase tracking-wider text-zinc-500">
