@@ -1,0 +1,20 @@
+{
+  "name": "ongrid/apm-php-example",
+  "type": "project",
+  "require": {
+    "php": "^8.4",
+    "open-telemetry/sdk": "1.15.0",
+    "open-telemetry/exporter-otlp": "1.4.0",
+    "open-telemetry/opentelemetry-auto-slim": "1.5.0",
+    "slim/slim": "4.15.3",
+    "nyholm/psr7": "1.8.2",
+    "guzzlehttp/guzzle": "7.15.5",
+    "react/http": "1.11.0",
+    "react/socket": "1.17.0"
+  },
+  "config": {
+    "allow-plugins": {
+      "php-http/discovery": false
+    }
+  }
+}

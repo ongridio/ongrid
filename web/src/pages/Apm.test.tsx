@@ -6,6 +6,7 @@ import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { server } from '@/test/msw-server';
 import ApmPage from './Apm';
+import { Onboarding } from '@/components/apm/Onboarding';
 
 vi.mock('@/components/apm/Dependencies', () => ({ Dependencies: () => null }));
 vi.mock('recharts', () => ({
@@ -639,5 +640,26 @@ describe('Application performance', () => {
     fireEvent.click(screen.getByRole('button', { name: '接入管理' }));
     expect(await screen.findByRole('heading', { name: 'HTTP · 接入诊断' })).toBeInTheDocument();
     expect(await screen.findByRole('heading', { name: 'RPC · 接入诊断' })).toBeInTheDocument();
+  });
+});
+
+
+describe('Official language onboarding', () => {
+  it('provides nine languages and states metrics boundaries', async () => {
+    localStorage.setItem('ongrid-locale', 'zh-CN');
+    render(<Onboarding />);
+    for (const [label, command] of [
+      ['Java', 'java -javaagent:'], ['Node.js', 'node --require'], ['Python', 'opentelemetry-instrument'],
+      ['Go', 'official OTel Go SDK'], ['C# / .NET', 'dotnet App.dll'], ['PHP', 'php app.php'],
+      ['C++', './app'], ['Rust', './target/release/ongrid-apm-rust-example'], ['Ruby', 'bundle exec ruby app.rb'],
+    ]) {
+      await selectOption(screen.getByRole('combobox', { name: '语言' }), label);
+      expect(document.querySelector('pre')).toHaveTextContent(command);
+      expect(document.querySelector('pre')).toHaveTextContent('service.namespace=trade,deployment.environment.name=production');
+    }
+    expect(document.querySelector('pre')).toHaveTextContent('OTEL_METRICS_EXPORTER=none');
+    expect(screen.getByText(/官方指标 SDK 尚未稳定/)).toBeInTheDocument();
+    await selectOption(screen.getByRole('combobox', { name: '语言' }), 'PHP');
+    expect(screen.getByText(/长驻 worker/)).toBeInTheDocument();
   });
 });

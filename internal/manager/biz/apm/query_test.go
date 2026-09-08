@@ -253,7 +253,13 @@ func (p *protocolProm) Query(ctx context.Context, expr string, at time.Time) (*p
 			return nil, p.rpcErr
 		}
 	}
+	if strings.Contains(expr, "traces_spanmetrics_calls_total") {
+		protocol = "traces"
+	}
 	p.result = p.results[protocol]
+	if p.result == "" {
+		p.result = "[]"
+	}
 	return p.fakeProm.Query(ctx, expr, at)
 }
 
@@ -284,7 +290,7 @@ func TestServicesGroupProtocolsBeforeSortingAndPagination(t *testing.T) {
 	q.PageSize = 1
 	svc := New(p, nil, nil)
 	list, err := svc.List(t.Context(), q, false)
-	if err != nil || list.Total != 3 || len(list.Items) != 1 || p.calls != 2 {
+	if err != nil || list.Total != 3 || len(list.Items) != 1 || p.calls != 3 {
 		t.Fatalf("grouping/pagination: %+v, calls=%d, err=%v", list, p.calls, err)
 	}
 	row := list.Items[0]
@@ -325,5 +331,35 @@ func TestServicesGroupProtocolsBeforeSortingAndPagination(t *testing.T) {
 	q.ServiceName, q.Environment, q.ServiceNamespace = "orders", new(string), new(string)
 	if err := q.Validate(true); err == nil {
 		t.Fatal("detail accepted all protocols without a valid combined histogram")
+	}
+}
+
+func TestTraceOnlyDiscoveryPreservesNativeMetricsAndIdentity(t *testing.T) {
+	p := &protocolProm{results: map[string]string{
+		"http": `[{"metric":{"service":"orders","service_namespace":"trade","deployment_environment_name":"production","apm_stat":"rps"},"value":[1600,"10"]}]`,
+		"traces": `[
+ {"metric":{"service":"orders","service_namespace":"trade","deployment_environment_name":"production","telemetry_sdk_language":"java"},"value":[1600,"5"]},
+ {"metric":{"service":"orders","service_namespace":"trade","deployment_environment_name":"staging","telemetry_sdk_language":"ruby"},"value":[1600,"5"]},
+ {"metric":{"service":"zero","service_namespace":"trade","deployment_environment_name":"staging"},"value":[1600,"0"]}
+ ]`,
+	}}
+	q := testQuery()
+	q.MetricSource, q.Protocol, q.ServiceName = "application_metrics", "all", ""
+	q.Environment, q.ServiceNamespace = nil, nil
+	list, err := New(p, nil, nil).List(t.Context(), q, false)
+	if err != nil || list.Total != 2 {
+		t.Fatalf("discovery: %+v %v", list, err)
+	}
+	for _, row := range list.Items {
+		if row.Identity.Environment == "production" {
+			if row.RPS == nil || *row.RPS != 10 || strings.Join(row.Languages, ",") != "java" {
+				t.Fatalf("native metrics changed: %+v", row)
+			}
+		} else if row.DataStatus != "traces_only" || row.RPS != nil || row.ErrorRate != nil || row.P95Ms != nil || row.Requests != nil || strings.Join(row.Languages, ",") != "ruby" {
+			t.Fatalf("sampled spans presented as request metrics: %+v", row)
+		}
+	}
+	if !strings.Contains(p.expr, `span_kind="SPAN_KIND_SERVER"`) {
+		t.Fatalf("discovery includes non-server spans: %s", p.expr)
 	}
 }

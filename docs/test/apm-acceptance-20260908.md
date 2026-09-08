@@ -65,3 +65,27 @@ VERSION=dev docker compose -p ongrid-native-deps \
 ```
 
 回滚后重新检查健康接口与 HTTPS 页面。这里只更新本地开发环境，未发布生产版本。
+
+## 九语言接入扩展（2026-09-08）
+
+新增 C# / .NET、PHP、C++、Rust、Ruby，复用官方 SDK 与现有 Edge → Prometheus / Tempo / Elasticsearch。Linux ARM64 镜像构建、锁定依赖和实际运行均验证；新增五语言当前只验收 HTTP，原四语言继续保留 gRPC 示例。详细能力边界见 [示例说明](../../examples/apm-languages/README.md)。
+
+执行 `scripts/apm-test/run-more-languages.sh`，隔离栈使用正式 Edge Collector 配置生成器。每种语言分别运行开启/关闭 Trace 采样的实例，每实例 40 次业务 HTTP 请求，包含 10 次 500、10 次约 80ms 慢请求；共 400 次。等待全部已采样请求进入 Tempo 后清理测试容器与卷。
+
+| 语言 / 官方 SDK | 原生请求计数（开 / 关采样） | 原生错误计数（开 / 关） | Trace 数（开 / 关） | JSON 日志关联 |
+| --- | --- | --- | --- | --- |
+| .NET 1.18.0 | 40 / 40 | 10 / 10 | 41 / 0 | 通过 |
+| PHP 1.15.0 | 40 / 40 | 10 / 10 | 41 / 0 | 通过 |
+| C++ 1.28.0 | 40 / 40 | 10 / 10 | 40 / 0 | 通过 |
+| Rust 0.32.0（Beta） | 40 / 40 | 10 / 10 | 40 / 0 | 通过 |
+| Ruby 1.13.0 | 无指标 | 无指标 | 41 / 0 | 通过 |
+
+额外 1 条 Trace 来自自动埋点框架的健康探测。正式 APM 查询适配器验证四种新指标语言的 HTTP 接口、约 25% 错误率、Histogram 分位数和 sampled/unsampled 两个实例；Ruby 验证仅 Trace 服务发现、语言属性及空 RED。计数严格精确断言；短时 `rate()` 受初次导出边界影响，适配器错误率允许 5 个百分点偏差。输出位于 `output/apm-acceptance/more-languages.json`。
+
+C++ 运行镜像包含官方 `libopentelemetry_proto.so`；周期与超时使用 SDK 原生环境配置，超时必须小于导出周期。Ruby 在加载 Sinatra 后安装官方 instrumentation。修正均经实际启动与遥测验收，不以编译成功代替接入成功。
+
+本地 Ubuntu Edge 持续运行九服务和低频流量发生器，业务身份为 `development / apm-demo`。现场再执行 90 次 HTTP、40 次 gRPC 检查通过；Prometheus 中八种语言 HTTP 请求速率均大于零。浏览器实际验证新增五语言的服务日志 → 对应 Trace → 同请求日志，完整身份和设备 650 均一致；Ruby RED 保持空值。接入页提供九语言选项；明暗主题已实看，Rust 图标增加背景保证对比度。截图与关联快照保存在 `output/apm-demo/`。
+
+后端 `go test -race ./internal/manager/biz/apm`、前端 APM/API 18 项测试及生产构建通过。本轮未重新执行旧语言开销/容量压测，不能据此增加新的性能承诺。
+
+本地更新使用 `ongrid:dev-apm-more-languages` 与 `ongrid-web:dev-apm-more-languages`，Tempo 增加 `telemetry.sdk.language` span-metrics 维度；原日志来源继续保留，新来源经 Manager 配置下发。回滚应用可将 `ongrid:rollback-before-apm-more-languages`、`ongrid-web:rollback-before-apm-more-languages` 标记回 `:dev` 并按原 Compose 项目重建对应服务。新增服务的停止与日志来源移除方式见示例说明；保留历史观测数据。

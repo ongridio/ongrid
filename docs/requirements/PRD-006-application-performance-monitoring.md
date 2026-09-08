@@ -87,3 +87,7 @@
 新增官方 Java/Node/Python 真实 HTTP/gRPC 应用与一条 `make test-apm-acceptance` 验收入口，覆盖采样关闭、指标实例发现、真实请求日志经现有 Collector 写 ES、告警持久化/本地通知/恢复和容量/SDK 开销测试。实例不再只来自 Trace 抽样；通知保留应用身份。Node/Python 官方 gRPC 原生指标支持边界在接入页明确展示。
 
 范围、证据与仍需业务试点确认的项目见 [验收记录](../test/apm-acceptance-20260908.md)，规模与开销见 [压测记录](../ops/loadtest-20260908.md)。历史“未压测”描述仅对应 2026-09-07 当日状态；本轮仍不等同于生产业务验收。
+
+### 2026-09-08 扩展官方语言接入
+
+接入向导和持续 Edge 示例扩展为 Go、Java、Node.js、Python、C# / .NET、PHP、C++、Rust、Ruby。新增示例使用官方 SDK/框架埋点与标准 OTLP；PHP/C++/Rust 通过官方 Metrics API 测量实际请求，Rust 标注 Beta，Ruby 仅提供 Trace 与日志关联。服务列表发现只有 SERVER Trace 的服务并显示“仅 Trace · 无请求指标”，RED 保持空值；不推断全量请求统计。新增五语言必须验证开/关采样、真实请求计数、Trace/日志关联、完整服务身份和本地持续运行。证据见同日验收记录与 `examples/apm-languages/README.md`。

@@ -79,7 +79,7 @@ OTLP 日志使用标准 trace_id/span_id；文件或 CRI 日志可写单行 JSON
 
 发送真实成功、失败、慢请求，然后在服务列表选取覆盖请求的时间段。指标生成存在延迟，至少两个 counter 采集点后才能计算 rate。服务列表只发现窗口内存在指标的服务。
 
-服务名旁显示请求指标中的 `telemetry.sdk.language`（Prometheus 标签 `telemetry_sdk_language`），例如 Go、Java、Node.js、Python。同一服务跨 HTTP/RPC 观测到的语言去重展示，不改变服务身份或 RED 聚合；未上报此属性时显示“未知”，不会按服务名推断语言。
+服务名旁显示请求指标或 Trace 指标中的 `telemetry.sdk.language`（Prometheus 标签 `telemetry_sdk_language`），例如 Go、Java、Node.js、Python。同一服务跨 HTTP/RPC 观测到的语言去重展示，不改变服务身份或 RED 聚合；未上报此属性时显示“未知”，不会按服务名推断语言。
 
 - 应用指标只统计 HTTP/RPC 服务端完成的请求，客户端/内部 Span 不重复纳入。RPC 流式调用以整个调用完成计数，不是每条消息计数。
 - 应用错误率：`error.type` 非空，或 HTTP 5xx；gRPC 另支持非 OK 的 `rpc.response.status_code`，旧版支持非零 `rpc.grpc.status_code`。同一序列先去重再聚合。其他 RPC 协议依赖 SDK 正确设置 `error.type`。这不是自定义业务成功率。没有错误序列但有请求时为 0%，无请求时为 `—`。
@@ -107,8 +107,17 @@ OTLP 日志使用标准 trace_id/span_id；文件或 CRI 日志可写单行 JSON
 | Java Agent 2.31.1 | 支持 | 支持 | 支持 |
 | Node auto-instrumentations 0.80.0 / grpc instrumentation 0.222.0 | 支持 | 官方自动埋点未提供 | 支持 |
 | Python distro / instrumentation 0.65b0 / SDK 1.44.0 | 支持 | 官方自动埋点未提供 | 支持 |
+| .NET SDK / ASP.NET Core instrumentation 1.18.0 | 支持 | 本示例未验证 | HTTP 支持 |
+| PHP SDK 1.15.0 / Slim instrumentation 1.5.0 | 官方 Metrics API 显式记录 | 本示例未验证 | HTTP 支持 |
+| C++ SDK 1.28.0 | 官方 Metrics API 显式记录 | 本示例未验证 | HTTP 支持 |
+| Rust SDK 0.32.0（Beta） | 官方 Metrics API 显式记录 | 本示例未验证 | HTTP 支持 |
+| Ruby SDK 1.13.0 / Sinatra instrumentation 0.30.0 | 未提供 | 未提供 | HTTP 支持 |
 
-Node.js/Python 的 gRPC 请求可用显式 Trace 样本视图排查；不能把样本计数当作全量请求指标或建立新的请求级告警。样例与锁定依赖在 `examples/apm-languages`，使用官方自动埋点，无自研探针或手工拼造语言请求指标。
+Node.js/Python 的 gRPC 请求可用显式 Trace 样本视图排查；不能把样本计数当作全量请求指标或建立新的请求级告警。样例与锁定依赖在 `examples/apm-languages`，使用官方 SDK/自动埋点，无自研探针或手工拼造 OTLP 数据。PHP 使用长驻 worker 保持累计计数；普通 PHP-FPM 需另行设计指标聚合，不能直接照搬。C++/Rust 需在请求处理处初始化并调用官方 SDK，环境变量本身不会自动埋点。
+
+Ruby 的官方指标 SDK 尚未稳定。服务列表通过 SERVER Span 指标发现此类服务，显示“仅 Trace · 无请求指标”，所有 RED 值保持空值；不把 Span 计数作为全量请求指标。发现需 Tempo span-metrics 处理器，语言图标需配置 `telemetry.sdk.language` 维度。若未启用该处理器，仍可直接在链路页面查询。请求级告警应先接入真实业务指标。
+
+新增五语言示例、能力边界、持续运行与隔离验收命令见 [示例说明](../../examples/apm-languages/README.md)。`scripts/apm-test/run-more-languages.sh` 检查开启/关闭采样实例各 40 个真实请求、25% 错误、慢请求、Histogram、Trace/JSON 日志关联与正式 APM 查询适配器。
 
 自动化验收：
 

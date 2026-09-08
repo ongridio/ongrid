@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -47,6 +48,12 @@ func (s *Service) List(ctx context.Context, q Query, operations bool) (*ListResu
 	if err != nil {
 		return nil, err
 	}
+	if !operations && q.Protocol == "all" && q.MetricSource == "application_metrics" {
+		rows, err = s.appendTraceServices(ctx, q, rows)
+		if err != nil {
+			return nil, err
+		}
+	}
 	envs, namespaces := map[string]bool{}, map[string]bool{}
 	filtered := make([]Summary, 0, len(rows))
 	for _, row := range rows {
@@ -63,6 +70,47 @@ func (s *Service) List(ctx context.Context, q Query, operations bool) (*ListResu
 		Items: pageRows(sortedSummaries(filtered, q), q), Total: len(filtered), Page: q.Page, PageSize: q.PageSize,
 		Metadata: metadata(q), Environments: sortedKeys(envs), ServiceNamespaces: sortedKeys(namespaces),
 	}, nil
+}
+
+// Discover trace-only services without using sampled spans as request metrics.
+// The additional query is bounded and independent of the service count.
+func (s *Service) appendTraceServices(ctx context.Context, q Query, rows []Summary) ([]Summary, error) {
+	expr := fmt.Sprintf("sum by (%s,telemetry_sdk_language) (count_over_time(traces_spanmetrics_calls_total%s[%s]))", identityLabels, q.selector(), promDuration(q.End.Sub(q.Start)))
+	series, err := s.instant(ctx, expr, q.End)
+	if err != nil {
+		return nil, err
+	}
+	indices := make(map[Identity]int, len(rows))
+	for i := range rows {
+		indices[rows[i].Identity] = i
+	}
+	for _, item := range series {
+		value, err := sampleValue(item.Value)
+		if err != nil {
+			return nil, err
+		}
+		if value == nil || *value <= 0 {
+			continue
+		}
+		id := identityFromLabels(item.Metric)
+		i, exists := indices[id]
+		if !exists {
+			if len(rows) >= 5000 {
+				return nil, fmt.Errorf("%w: narrow the APM service scope", errs.ErrBudgetExceeded)
+			}
+			i = len(rows)
+			indices[id] = i
+			rows = append(rows, Summary{Identity: id, DataStatus: "traces_only"})
+		}
+		if language := item.Metric["telemetry_sdk_language"]; language != "" {
+			rows[i].Languages = append(rows[i].Languages, language)
+		}
+	}
+	for i := range rows {
+		sort.Strings(rows[i].Languages)
+		rows[i].Languages = slices.Compact(rows[i].Languages)
+	}
+	return rows, nil
 }
 
 func sortedKeys(values map[string]bool) []string {

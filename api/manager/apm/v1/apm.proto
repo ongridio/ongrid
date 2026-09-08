@@ -56,11 +56,13 @@ message Summary {
   optional double p95_ms = 6;
   optional double p99_ms = 7;
   optional double requests = 8;
+  // traces_only means the service was observed in server spans but no native
+  // request metrics were observed. Request rates and latencies remain absent.
   string data_status = 9;
   // Populated for protocol=all services. Top-level RPS and error rate cover all
   // observed protocols; percentiles are only exposed per protocol.
   repeated ProtocolMetrics protocols = 10;
-  // Distinct telemetry.sdk.language values observed in request metrics.
+  // Distinct telemetry.sdk.language values observed in request metrics or traces.
   repeated string languages = 11;
 }
 

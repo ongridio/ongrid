@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.20)
+project(ongrid_apm_cpp_example LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+find_package(opentelemetry-cpp CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
+add_executable(app main.cc)
+target_link_libraries(app PRIVATE opentelemetry-cpp::otlp_http_exporter opentelemetry-cpp::otlp_http_metric_exporter nlohmann_json::nlohmann_json cpp-httplib)

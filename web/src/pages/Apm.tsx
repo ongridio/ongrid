@@ -290,6 +290,7 @@ export default function ApmPage() {
   const status = (s: string) =>
     ({
       observed: tr('已观测', 'Observed'),
+      traces_only: tr('仅 Trace · 无请求指标', 'Traces only · No request metrics'),
       no_data: tr('无数据', 'No data'),
       no_requests: tr('无请求', 'No requests'),
       insufficient_samples: tr('样本不足', 'Insufficient samples'),
@@ -826,7 +827,7 @@ export default function ApmPage() {
                                         ? row.languages.map((language, index) => (
                                           <span key={language} className="inline-flex items-center gap-1">
                                             {index > 0 && <span className="mx-1">/</span>}
-                                            {languageIcons[language] && <img src={`/icons/languages/${languageIcons[language]}.svg`} alt="" aria-hidden="true" width={14} height={14} className="h-3.5 w-3.5 shrink-0" />}
+                                            {languageIcons[language] && <img src={`/icons/languages/${languageIcons[language]}.svg`} alt="" aria-hidden="true" width={14} height={14} className={`h-3.5 w-3.5 shrink-0${language === 'rust' ? ' rounded-full bg-white' : ''}`} />}
                                             {languageLabels[language] || language}
                                           </span>
                                         ))

@@ -85,6 +85,73 @@ services:
       RPC_PORT: "18087"
       OTEL_SERVICE_NAME: apm-demo-python
       OTEL_RESOURCE_ATTRIBUTES: service.namespace=apm-demo,deployment.environment.name=development,service.instance.id=ubuntu-python-1
+  dotnet:
+    <<: *app
+    image: ongrid-apm-demo-dotnet:local
+    build:
+      context: ../..
+      dockerfile: examples/apm-languages/Dockerfile
+      target: dotnet
+    environment:
+      <<: *env
+      APP_LANGUAGE: dotnet
+      HTTP_PORT: "18088"
+      OTEL_SERVICE_NAME: apm-demo-dotnet
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=apm-demo,deployment.environment.name=development,service.instance.id=ubuntu-dotnet-1
+  php:
+    <<: *app
+    image: ongrid-apm-demo-php:local
+    build:
+      context: ../..
+      dockerfile: examples/apm-languages/Dockerfile
+      target: php
+    environment:
+      <<: *env
+      APP_LANGUAGE: php
+      HTTP_PORT: "18090"
+      OTEL_SERVICE_NAME: apm-demo-php
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=apm-demo,deployment.environment.name=development,service.instance.id=ubuntu-php-1
+  cpp:
+    <<: *app
+    image: ongrid-apm-demo-cpp:local
+    build:
+      context: ../..
+      dockerfile: examples/apm-languages/Dockerfile
+      target: cpp
+    environment:
+      <<: *env
+      APP_LANGUAGE: cpp
+      OTEL_METRIC_EXPORT_TIMEOUT: "1000"
+      HTTP_PORT: "18092"
+      OTEL_SERVICE_NAME: apm-demo-cpp
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=apm-demo,deployment.environment.name=development,service.instance.id=ubuntu-cpp-1
+  rust:
+    <<: *app
+    image: ongrid-apm-demo-rust:local
+    build:
+      context: ../..
+      dockerfile: examples/apm-languages/Dockerfile
+      target: rust
+    environment:
+      <<: *env
+      APP_LANGUAGE: rust
+      HTTP_PORT: "18094"
+      OTEL_SERVICE_NAME: apm-demo-rust
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=apm-demo,deployment.environment.name=development,service.instance.id=ubuntu-rust-1
+  ruby:
+    <<: *app
+    image: ongrid-apm-demo-ruby:local
+    build:
+      context: ../..
+      dockerfile: examples/apm-languages/Dockerfile
+      target: ruby
+    environment:
+      <<: *env
+      APP_LANGUAGE: ruby
+      HTTP_PORT: "18096"
+      OTEL_SERVICE_NAME: apm-demo-ruby
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=apm-demo,deployment.environment.name=development,service.instance.id=ubuntu-ruby-1
+      OTEL_METRICS_EXPORTER: none
   traffic:
     <<: *app
     image: ongrid-apm-demo-python:local

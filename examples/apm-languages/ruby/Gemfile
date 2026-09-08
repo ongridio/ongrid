@@ -1,0 +1,7 @@
+source 'https://rubygems.org'
+gem 'opentelemetry-sdk', '1.13.0'
+gem 'opentelemetry-exporter-otlp', '0.35.1'
+gem 'opentelemetry-instrumentation-sinatra', '0.30.0'
+gem 'sinatra', '4.2.1'
+gem 'rackup', '2.3.1'
+gem 'webrick', '1.9.2'

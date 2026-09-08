@@ -1,0 +1,12 @@
+[package]
+name = "ongrid-apm-rust-example"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+opentelemetry = { version = "=0.32.0", default-features = false, features = ["trace", "metrics"] }
+opentelemetry_sdk = { version = "=0.32.0", default-features = false, features = ["trace", "metrics"] }
+opentelemetry-otlp = { version = "=0.32.0", default-features = false, features = ["trace", "metrics", "http-proto", "reqwest-blocking-client"] }
+serde_json = "1"
+tiny_http = "0.12"

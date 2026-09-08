@@ -23,6 +23,11 @@ export function Onboarding() {
     node: 'node --require @opentelemetry/auto-instrumentations-node/register app.js',
     python: 'opentelemetry-instrument python app.py',
     go: '# Initialize the official OTel Go SDK and HTTP/gRPC instrumentation.\n# See docs/runbooks/apm-service-performance.md for the runnable example.',
+    dotnet: '# Register the official OTel SDK, ASP.NET Core instrumentation and OTLP exporters in Program.cs.\ndotnet App.dll',
+    php: 'export OTEL_PHP_AUTOLOAD_ENABLED=true\n# Install the OTel extension, SDK, OTLP exporter and framework instrumentation.\nphp app.php',
+    cpp: '# Initialize official opentelemetry-cpp providers and instrument application requests.\nexport OTEL_TRACES_SAMPLER=always_on\n./app',
+    rust: '# Initialize official OTel Rust providers and instrument application requests.\n./target/release/ongrid-apm-rust-example',
+    ruby: '# Configure the official OTel Ruby SDK and framework instrumentation before starting.\nexport OTEL_METRICS_EXPORTER=none\nbundle exec ruby app.rb',
   };
   const config = [
     `export OTEL_SERVICE_NAME=${quote(service)}`,
@@ -50,9 +55,9 @@ export function Onboarding() {
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <Label className="flex flex-col gap-1 text-xs">
           {tr('语言', 'Language')}
-          <Select className="w-full" value={language} onValueChange={(selectedValue) => setLanguage(selectedValue)}>
-            {['java', 'node', 'python', 'go'].map((v) => (
-              <option key={v}>{v}</option>
+          <Select aria-label={tr('语言', 'Language')} className="w-full" value={language} onValueChange={(selectedValue) => setLanguage(selectedValue)}>
+            {Object.entries({ java: 'Java', node: 'Node.js', python: 'Python', go: 'Go', dotnet: 'C# / .NET', php: 'PHP', cpp: 'C++', rust: 'Rust', ruby: 'Ruby' }).map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
             ))}
           </Select>
         </Label>
@@ -94,6 +99,24 @@ export function Onboarding() {
           )}
         </p>
       )}
+      {language === 'dotnet' && (
+        <p className="text-xs text-zinc-500">{tr(
+          '示例使用官方 ASP.NET Core 埋点生成 HTTP 指标和 Trace。先安装 OpenTelemetry.Extensions.Hosting、OpenTelemetry.Instrumentation.AspNetCore 和 OpenTelemetry.Exporter.OpenTelemetryProtocol，并注册 TracerProvider 与 MeterProvider；仅配置环境变量不会启用埋点。',
+          'The example uses official ASP.NET Core instrumentation for HTTP metrics and traces. Install OpenTelemetry.Extensions.Hosting, OpenTelemetry.Instrumentation.AspNetCore and OpenTelemetry.Exporter.OpenTelemetryProtocol, then register TracerProvider and MeterProvider; environment variables alone do not enable instrumentation.',
+        )}</p>
+      )}
+      {['php', 'cpp', 'rust'].includes(language) && (
+        <p className="text-xs text-zinc-500">{tr(
+          '示例通过官方 Metrics API 记录真实请求耗时；接收端不会自动为业务代码补齐请求指标。PHP 示例使用长驻 worker 保持计数连续，Slim 自动埋点负责 Trace；C++ / Rust 需要在应用中接入 SDK。Rust SDK 当前为 Beta。请参考仓库 examples/apm-languages 中对应语言示例。',
+          'Examples measure real requests through the official Metrics API; the receiver does not add missing instrumentation. PHP uses a long-lived worker for cumulative counters and Slim auto-instrumentation for traces. C++ / Rust require SDK integration in the application. The Rust SDK is currently Beta. See the language examples in examples/apm-languages.',
+        )}</p>
+      )}
+      {language === 'ruby' && (
+        <p className="text-xs text-zinc-500">{tr(
+          'Ruby 示例使用官方 Sinatra 自动埋点，提供 Trace 与 JSON 日志关联。官方指标 SDK 尚未稳定，不提供全量请求指标；服务列表标记为“仅 Trace”，请求级告警需要先接入独立的请求指标。',
+          'The Ruby example uses official Sinatra instrumentation for traces and correlated JSON logs. Its metrics SDK is not yet stable, so full request metrics are unavailable. Services are marked Traces only; request-level alerts require independent request metrics first.',
+        )}</p>
+      )}
       <pre className="overflow-auto rounded-lg bg-zinc-950 p-4 text-xs">{config}</pre>
       <Button
         disabled={!valid}
@@ -122,6 +145,11 @@ export function Onboarding() {
           ['Node.js', 'https://opentelemetry.io/docs/zero-code/js/'],
           ['Python', 'https://opentelemetry.io/docs/zero-code/python/'],
           ['Go', 'https://opentelemetry.io/docs/languages/go/instrumentation/'],
+          ['C# / .NET', 'https://opentelemetry.io/docs/languages/dotnet/instrumentation/'],
+          ['PHP', 'https://opentelemetry.io/docs/zero-code/php/'],
+          ['C++', 'https://opentelemetry.io/docs/languages/cpp/instrumentation/'],
+          ['Rust', 'https://opentelemetry.io/docs/languages/rust/getting-started/'],
+          ['Ruby', 'https://opentelemetry.io/docs/languages/ruby/getting-started/'],
         ].map(([name, url]) => (
           <a key={name} href={url} target="_blank" rel="noreferrer">
             {name}
