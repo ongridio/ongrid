@@ -353,6 +353,10 @@ describe('Application performance', () => {
     expect(listURL?.searchParams.get('protocol')).toBe('all');
     expect(screen.getAllByRole('link', { name: 'orders' })).toHaveLength(1);
     expect(screen.getByRole('link', { name: 'rpc-only' })).toBeInTheDocument();
+    const mixedLatency = within(screen.getByRole('link', { name: 'orders' }).closest('tr')!).getAllByRole('cell')[5];
+    expect(mixedLatency).toHaveTextContent('HTTP800RPC12');
+    const rpcLatency = within(screen.getByRole('link', { name: 'rpc-only' }).closest('tr')!).getAllByRole('cell')[5];
+    expect(rpcLatency).toHaveTextContent('HTTP—RPC12');
     expect(screen.queryByRole('columnheader', { name: '协议' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'RPC' })).not.toBeInTheDocument();
     expect(screen.getAllByRole('row')).toHaveLength(3);

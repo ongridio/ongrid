@@ -757,11 +757,6 @@ export default function ApmPage() {
                             row.identity,
                             detail ? protocol : undefined,
                           );
-                          const p95 = row.protocols?.length
-                            ? row.protocols.every((item) => item.p95_ms != null)
-                              ? Math.max(...row.protocols.map((item) => item.p95_ms!))
-                              : null
-                            : row.p95_ms;
                           if (row.operation) {
                             target.set('operation', row.operation);
                             if (row.metric_source === 'tempo_spanmetrics') target.set('metric_source', row.metric_source);
@@ -820,7 +815,19 @@ export default function ApmPage() {
                                 >
                                   {number(row.error_rate, '%')}
                                 </td>
-                                <td className="px-3 py-3 text-right tabular-nums">{number(p95)}</td>
+                                <td className="px-3 py-3 text-right tabular-nums">
+                                  {detail ? number(row.p95_ms) : (
+                                    <div className="inline-grid grid-cols-[auto_auto] gap-x-3 gap-y-1 text-xs">
+                                      {(['http', 'rpc'] as const).map((protocol) => (
+                                        <div key={protocol} className="contents">
+                                          <span className="text-left text-zinc-500">{protocol.toUpperCase()}</span>
+                                          <span>{number(row.protocols?.find((item) => item.protocol === protocol)?.p95_ms
+                                            ?? (protocol === 'http' && row.metric_source === 'tempo_spanmetrics' ? row.p95_ms : null))}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </td>
                                 <td className="px-4 py-3 text-xs text-zinc-500">
                                   <span
                                     className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full ${row.data_status === 'observed' ? 'bg-zinc-500' : 'bg-amber-500'}`}
