@@ -15,6 +15,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { usePoll } from '@/lib/usePoll';
 import { localDateTime } from '@/lib/telemetryContext';
 import {
   queryApm,
@@ -76,6 +77,7 @@ export default function ApmPage() {
   const location = useLocation();
   const main = useRef<HTMLElement>(null);
   const restoredScroll = useRef('');
+  const initialWindow = useRef(true);
   const [params, setParams] = useSearchParams();
   const [refresh, setRefresh] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -155,7 +157,7 @@ export default function ApmPage() {
     [params, setParams, detail, location.state],
   );
   const changeSearch = useCallback((value: string) => set('search', value), [set]);
-  const pickPeriod = (value: string) => {
+  const pickPeriod = (value: string, automatic = false) => {
     const next = new URLSearchParams(params);
     next.set('range', value);
     const duration = periods.find(([key]) => key === value)?.[1];
@@ -164,17 +166,23 @@ export default function ApmPage() {
       next.set('start', new Date(now - duration).toISOString());
       next.set('end', new Date(now).toISOString());
     }
-    for (const page of ['page', 'http_page', 'rpc_page']) next.delete(page);
-    setParams(next);
+    if (!automatic)
+      for (const page of ['page', 'http_page', 'rpc_page']) next.delete(page);
+    setParams(next, { replace: automatic, state: location.state });
   };
+  usePoll(() => {
+    if (!loading) pickPeriod(period, true);
+  }, 30_000, periods.some(([key]) => key === period) && tab !== 'onboarding' && tab !== 'alerts');
   useEffect(() => {
     const next = new URLSearchParams(params);
-    if (!params.has('start') || !params.has('end')) {
+    const duration = periods.find(([key]) => key === params.get('range'))?.[1];
+    if (!params.has('start') || !params.has('end') || (initialWindow.current && duration)) {
       const now = Date.now();
-      next.set('range', '1h');
-      next.set('start', new Date(now - 3600000).toISOString());
+      next.set('range', duration ? params.get('range')! : '1h');
+      next.set('start', new Date(now - (duration || 3600000)).toISOString());
       next.set('end', new Date(now).toISOString());
     }
+    initialWindow.current = false;
     if (!detail && tab === 'services') {
       for (const key of ['environment', 'service_namespace'])
         if (next.get(key) === '') next.delete(key);
@@ -281,11 +289,11 @@ export default function ApmPage() {
       restoredScroll.current = '';
       return;
     }
-    if (!(list || current?.rpcList) || !main.current || restoredScroll.current === query) return;
-    restoredScroll.current = query;
+    if (!(list || current?.rpcList) || !main.current || restoredScroll.current === scope) return;
+    restoredScroll.current = scope;
     const saved = location.state?.[detail ? 'apmOperations' : 'apmList'];
     main.current.scrollTop = saved?.query === query ? saved.scroll : 0;
-  }, [list, current?.rpcList, detail, tab, query, location.state]);
+  }, [list, current?.rpcList, detail, tab, query, scope, location.state]);
   const unset = tr('未设置', 'Unset');
   const status = (s: string) =>
     ({

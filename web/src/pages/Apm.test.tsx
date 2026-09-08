@@ -185,7 +185,7 @@ describe('Application performance', () => {
     expect(screen.queryByRole('link', { name: '运行时指标' })).not.toBeInTheDocument();
     expect(screen.getByRole('tab', { name: '实例' })).toBeInTheDocument();
   });
-  it('uses server facets and moves relative windows forward only on refresh', async () => {
+  it('uses server facets and moves relative windows forward on manual refresh', async () => {
     let requested: URL | undefined;
     server.use(
       http.get('/api/v1/apm/services', ({ request }) => {
@@ -228,6 +228,53 @@ describe('Application performance', () => {
     expect(requested?.searchParams.get('environment')).toBe('staging');
     await selectOption(screen.getByRole('combobox', { name: '环境' }), '全部环境');
     await waitFor(() => expect(requested?.searchParams.has('environment')).toBe(false));
+  });
+  it.each(['1h', 'custom'])('keeps %s windows correct during polling and tab return', async (range) => {
+    const urls: URL[] = [];
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-09-08T10:00:00Z'));
+    const interval = vi.spyOn(window, 'setInterval');
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    server.use(http.get('/api/v1/apm/services', ({ request }) => {
+      urls.push(new URL(request.url));
+      return HttpResponse.json({ data: { items: [row], total: 72, page: 2, page_size: 25 } });
+    }));
+    const view = render(<MemoryRouter initialEntries={[
+      `/apm?${period}&range=${range}&page=2&environment=production&service_namespace=trade`,
+    ]}><ApmPage /></MemoryRouter>);
+    try {
+      await screen.findByRole('link', { name: 'orders' });
+      await waitFor(() => expect(screen.getByRole('button', { name: '刷新' })).toBeEnabled());
+      const poll = interval.mock.calls.find(([, delay]) => delay === 30_000)?.[0] as (() => void) | undefined;
+      if (range === '1h') {
+        expect(urls.at(-1)?.searchParams.get('end')).toBe('2026-09-08T10:00:00.000Z');
+        expect(poll).toBeTypeOf('function');
+        clock.mockReturnValue(Date.parse('2026-09-08T10:00:30Z'));
+        act(() => poll!());
+        await waitFor(() => expect(urls.at(-1)?.searchParams.get('end')).toBe('2026-09-08T10:00:30.000Z'));
+        await waitFor(() => expect(screen.getByRole('button', { name: '刷新' })).toBeEnabled());
+        visibility.mockReturnValue('hidden');
+        const count = urls.length;
+        act(() => poll!());
+        expect(urls).toHaveLength(count);
+        clock.mockReturnValue(Date.parse('2026-09-08T10:01:00Z'));
+        visibility.mockReturnValue('visible');
+        fireEvent(document, new Event('visibilitychange'));
+        await waitFor(() => expect(urls.at(-1)?.searchParams.get('end')).toBe('2026-09-08T10:01:00.000Z'));
+        expect(urls.at(-1)?.searchParams.get('start')).toBe('2026-09-08T09:01:00.000Z');
+      } else {
+        expect(poll).toBeUndefined();
+        fireEvent(document, new Event('visibilitychange'));
+        expect(urls.at(-1)?.searchParams.get('end')).toBe('2026-09-07T01:00:00Z');
+      }
+      expect(urls.at(-1)?.searchParams.get('page')).toBe('2');
+      expect(urls.at(-1)?.searchParams.get('environment')).toBe('production');
+      expect(urls.at(-1)?.searchParams.get('service_namespace')).toBe('trade');
+    } finally {
+      view.unmount();
+      clock.mockRestore();
+      interval.mockRestore();
+      visibility.mockRestore();
+    }
   });
   it('shows one aggregate service row and both protocol sections without a switch', async () => {
     let listURL: URL | undefined;
