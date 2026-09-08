@@ -1,0 +1,57 @@
+# Ongrid dogfooding SRE 标准告警规则模板
+#
+# 锁定的 4 条 SRE 标准规则：HighCpuUsage / DiskSpaceLow / ServiceDown / ProcessRestart
+# 噪声过滤策略：for: 5m + severity warning+（观察期仅 critical 触发 RCA，warning 仅记 dashboard）
+#
+# operator 部署步骤（operator 手动执行）：
+# 注意：Ongrid 使用内置 PipelineEvaluator（直接 scrape Prometheus），不是 alertmanager webhook 模式。
+# 本文件是标准 SRE 告警规则参考模板（可选部署）。Ongrid 内置评估器（cpu_high / mem_high /
+#   device_offline / scrape_down）已覆盖等价功能，此文件仅作为告警规则扩展参考。
+#
+# 如需部署到 Prometheus（与 Ongrid 内置评估器并行，systemd 套件布局）：
+#   1. cp deploy/install/systemd/ongrid-dogfood-alerts.yml /etc/ongrid/prometheus/ongrid-dogfood.yml
+#   2. 将 rule_files 追加进 /etc/ongrid/prometheus/prometheus.yml 的 rule_files 列表
+#   3. chown root:ongrid-prometheus /etc/ongrid/prometheus/ongrid-dogfood.yml && chmod 640 /etc/ongrid/prometheus/ongrid-dogfood.yml
+#   4. systemctl reload prometheus
+#   5. 验证规则加载：curl http://127.0.0.1:9090/api/v1/rules | grep ongrid-dogfood（应返回 4 条规则）
+#
+# 观察期噪声过滤建议：
+#   - severity=critical 触发 RCA worker（ServiceDown / DiskSpaceLow）
+#   - severity=warning 仅记 dashboard，不触发 RCA（HighCpuUsage / ProcessRestart）
+#   - Ongrid alert ingress 的 severity 过滤配置在 manager 启动参数或 env（既有功能）
+#   - 运行稳定后评估噪声比例，决定是否放宽到 warning 也触发 RCA
+groups:
+- name: ongrid-dogfood
+  rules:
+  - alert: HighCpuUsage
+    expr: (1 - avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))) * 100 > 80
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "CPU 使用率 > 80% 持续 5m"
+      description: "dogfooding SRE 标准规则：CPU 高负载，severity=warning（观察期仅记 dashboard 不触发 RCA）"
+  - alert: DiskSpaceLow
+    expr: node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|nsfs|autofs"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|nsfs|autofs"} < 0.1
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: "磁盘可用空间 < 10%"
+      description: "dogfooding SRE 标准规则：磁盘空间不足，severity=critical（触发 RCA worker）"
+  - alert: ServiceDown
+    # 限定关键服务 job（operator 根据实际 Prometheus job 名称调整）
+    expr: up{job=~"ongrid|node_exporter|frontier"} == 0
+    for: 2m
+    labels:
+      severity: critical
+    annotations:
+      summary: "服务 down 持续 2m"
+      description: "dogfooding SRE 标准规则：Prometheus target 不可达，severity=critical（触发 RCA worker）"
+  - alert: ProcessRestart
+    expr: changes(process_start_time_seconds[5m]) > 0
+    labels:
+      severity: warning
+    annotations:
+      summary: "进程 5m 内重启"
+      description: "dogfooding SRE 标准规则：进程频繁重启，severity=warning（观察期仅记 dashboard 不触发 RCA）"

@@ -1,0 +1,16 @@
+# Grafana [server] section 片段。
+# ---------------------------------------------------------------------------
+# 供 install-systemd.sh 合并到 /etc/grafana/grafana.ini [server] section：
+#   - 如 grafana.ini 已有 [server] section → 用 sed 追加缺失行
+#   - 如 grafana.ini 无 [server] section → append 整个 section
+# 幂等：合并前先 grep 检查是否已存在 sub_path 设置。
+#
+# 与 install-deps.sh 写入的 grafana-server.service.d/10-ongrid.conf
+# GF_SERVER_* 环境变量行为等价，本片段走 grafana.ini 文件路径（非 systemd
+# drop-in），供 fresh host 首次 install 时用（distro grafana 默认无 sub_path
+# 设置）。
+# ---------------------------------------------------------------------------
+
+[server]
+serve_from_sub_path = true
+root_url = %(protocol)s://%(domain)s/grafana/
