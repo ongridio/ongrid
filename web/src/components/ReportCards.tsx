@@ -1,3 +1,5 @@
+import { Button } from '@/components/ui';
+import { Hint } from '@/components/ui/Tooltip';
 // ReportCards — the reusable report-artifact grid. Used by the 产物 page's
 // 报告 tab (all reports, filterable) and the 任务 detail (one schedule's
 // reports, scoped by scheduleId). Each card is a scaled-down live thumbnail of
@@ -147,7 +149,7 @@ function FilterGroup({
       <span className="text-zinc-500">{label}</span>
       <div className="flex gap-1">
         {options.map((o) => (
-          <button
+          <Button variant="plain" size="sm"
             key={o.key}
             type="button"
             onClick={() => onChange(o.key)}
@@ -157,7 +159,7 @@ function FilterGroup({
             )}
           >
             {tr(o.zh, o.en)}
-          </button>
+          </Button>
         ))}
       </div>
     </div>
@@ -282,17 +284,17 @@ export function ReportCards({
                   if (!m) return null;
                   const sid = Number(m[1]);
                   return (
-                    <button
+                    <Hint content={tr('查看所属任务', 'View owning task')}><Button variant="outline" size="sm"
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
                         navigate(`/tasks/${sid}`);
                       }}
-                      title={tr('查看所属任务', 'View owning task')}
-                      className="inline-flex w-fit items-center gap-1 rounded border border-zinc-700/60 bg-zinc-800/40 px-1.5 py-0.5 text-[10px] text-zinc-400 transition-colors hover:border-indigo-500/40 hover:text-indigo-300"
+
+                      className="inline-flex w-fit items-center gap-1 px-1.5 py-0.5 transition-colors"
                     >
                       <CalendarClock size={10} /> {taskNames[sid] || tr('任务', 'Task')}
-                    </button>
+                    </Button></Hint>
                   );
                 })()}
                 <div className="line-clamp-2 text-[13px] leading-relaxed text-zinc-200">

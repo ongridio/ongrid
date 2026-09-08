@@ -1,3 +1,4 @@
+import { Button } from '@/components/ui/Button';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Activity, AlertTriangle, MessageSquare, Coins, PowerOff } from 'lucide-react';
@@ -234,7 +235,7 @@ function Pill({
   const isOk = tone === 'ok';
   const isWarn = tone === 'warn';
   return (
-    <button
+    <Button variant="outline" size="sm"
       type="button"
       onClick={onClick}
       className={cn(
@@ -250,6 +251,6 @@ function Pill({
       {isWarn && <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />}
       <Icon size={12} className="opacity-80" />
       <span>{label}</span>
-    </button>
+    </Button>
   );
 }

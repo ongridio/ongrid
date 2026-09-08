@@ -1,3 +1,6 @@
+import { Input, Label } from '@/components/ui';
+import { Hint } from '@/components/ui/Tooltip';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Boxes,
@@ -297,15 +300,15 @@ function PackRow({
   return (
     <li className="px-3 py-2.5">
       <div className="flex flex-wrap items-center gap-2">
-        <button
+        <Button variant="subtle" size="sm"
           type="button"
           onClick={onToggle}
           aria-expanded={expanded}
           aria-label={expanded ? tr('收起详情', 'Collapse details') : tr('展开详情', 'Expand details')}
-          className="rounded p-0.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+          className="p-0.5"
         >
           {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-        </button>
+        </Button>
         <Package size={13} className="text-zinc-500" />
         <span className="font-mono text-sm text-zinc-100">{pack.pack_id}</span>
         {pack.version && (
@@ -320,15 +323,15 @@ function PackRow({
           <Button onClick={onToggle} variant="ghost">
             {expanded ? tr('收起', 'Collapse') : tr('详情', 'Details')}
           </Button>
-          <Button
+          <Hint content={isAdmin ? tr('卸载该包', 'Uninstall this pack') : tr('需要 admin 权限', 'Admin permission required')}><Button
             onClick={() => setConfirming(true)}
             disabled={!isAdmin}
-            title={isAdmin ? tr('卸载该包', 'Uninstall this pack') : tr('需要 admin 权限', 'Admin permission required')}
+
             variant="danger"
           >
             <Trash2 size={11} />
             {tr('卸载', 'Uninstall')}
-          </Button>
+          </Button></Hint>
         </div>
       </div>
 
@@ -500,7 +503,7 @@ function InstallCard({
   );
 
   return (
-    <Card className="p-5">
+    <Tabs value={tab} onValueChange={setTab} className="contents"><Card className="p-5">
       <div className="mb-3 flex items-center gap-2">
         <PackagePlus size={14} className="text-zinc-400" />
         <h2 className="text-sm font-medium text-zinc-100">{tr('安装新包', 'Install new pack')}</h2>
@@ -515,31 +518,25 @@ function InstallCard({
         )}
       </p>
 
-      <div className="mb-3 flex flex-wrap gap-1.5">
+      <TabsList className="mb-3 flex flex-wrap gap-1.5">
         {TABS.map((t) => {
           const Icon = t.icon;
-          const active = tab === t.key;
           return (
-            <button
+            <TabsTrigger
               key={t.key}
-              type="button"
-              onClick={() => setTab(t.key)}
-              aria-pressed={active}
-              className={cn(
-                'inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs transition-colors',
-                active
-                  ? 'border-zinc-600 bg-zinc-800 text-zinc-100'
-                  : 'border-zinc-800 bg-zinc-950/40 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200',
-              )}
+
+              value={t.key}
+
+
             >
               <Icon size={11} />
               {tr(t.labelZh, t.labelEn)}
-            </button>
+            </TabsTrigger>
           );
         })}
-      </div>
+      </TabsList>
 
-      <div className="rounded-md border border-zinc-800 bg-zinc-950/40 px-3 py-3">
+      <TabsContent value={tab} className="contents"><div className="rounded-md border border-zinc-800 bg-zinc-950/40 px-3 py-3">
         {tab === 'upload' && (
           <Field
             label={tr('技能压缩包', 'Skill archive')}
@@ -548,12 +545,12 @@ function InstallCard({
               'Upload a .zip / .tar.gz from your browser (containing SKILL.md or .claude-plugin/plugin.json); the server extracts and installs it.',
             )}
           >
-            <input
+            <Input variant="inset"
               type="file"
               accept=".zip,.tar.gz,.tgz,.tar"
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
               disabled={!isAdmin || installing}
-              className="block w-full text-xs text-zinc-300 file:mr-3 file:rounded-md file:border-0 file:bg-zinc-800 file:px-3 file:py-1.5 file:text-zinc-200 hover:file:bg-zinc-700 disabled:opacity-50"
+              className="block w-full file:mr-3 file:rounded-md file:border-0 file:bg-zinc-800 file:px-3 file:py-1.5 file:text-zinc-200 hover:file:bg-zinc-700"
             />
             {file && (
               <div className="mt-1.5 text-[11px] text-zinc-400">
@@ -571,7 +568,7 @@ function InstallCard({
               'Directory on the manager host that an admin has already scp\'d / extracted, e.g. /var/lib/ongrid/uploads/etcd-tools',
             )}
           >
-            <input
+            <Input
               type="text"
               value={path}
               onChange={(e) => setPath(e.target.value)}
@@ -584,7 +581,7 @@ function InstallCard({
 
         {tab === 'tarball' && (
           <Field label="Tarball URL" hint={tr('HTTP(S) 直链，扩展名 .tgz / .tar.gz', 'Direct HTTP(S) link, extension .tgz / .tar.gz')}>
-            <input
+            <Input
               type="text"
               value={tarballURL}
               onChange={(e) => setTarballURL(e.target.value)}
@@ -598,7 +595,7 @@ function InstallCard({
         {tab === 'git' && (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_180px]">
             <Field label="Git URL" hint={tr('git clone --depth=1 拉取，支持 https / git+ssh', 'git clone --depth=1; supports https / git+ssh')}>
-              <input
+              <Input
                 type="text"
                 value={gitURL}
                 onChange={(e) => setGitURL(e.target.value)}
@@ -608,7 +605,7 @@ function InstallCard({
               />
             </Field>
             <Field label="Ref" hint={tr('branch / tag / commit；留空 = HEAD', 'branch / tag / commit; empty = HEAD')}>
-              <input
+              <Input
                 type="text"
                 value={gitRef}
                 onChange={(e) => setGitRef(e.target.value)}
@@ -621,10 +618,10 @@ function InstallCard({
         )}
 
         <div className="mt-4 flex items-center gap-3">
-          <Button
+          <Hint content={!isAdmin ? tr('需要 admin 权限', 'Admin permission required') : undefined}><Button
             onClick={submit}
             disabled={!canSubmit || !isAdmin}
-            title={!isAdmin ? tr('需要 admin 权限', 'Admin permission required') : undefined}
+
             variant="primary"
           >
             {installing ? (
@@ -633,13 +630,13 @@ function InstallCard({
               <PlugZap size={13} />
             )}
             <span>{installing ? tr('安装中…', 'Installing…') : tr('安装', 'Install')}</span>
-          </Button>
+          </Button></Hint>
           <span className="text-[11px] text-zinc-500">
             {tr('安装成功后会弹出 Capability 摘要，确认或回滚由你决定', 'A Capability summary opens after install — confirm or roll back')}
           </span>
         </div>
-      </div>
-    </Card>
+      </div></TabsContent>
+    </Card></Tabs>
   );
 }
 
@@ -653,16 +650,16 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <label className="block">
+    <Label className="block">
       <span className="mb-1 block text-[11px] text-zinc-400">{label}</span>
       {children}
       {hint && <span className="mt-1 block text-[11px] text-zinc-500">{hint}</span>}
-    </label>
+    </Label>
   );
 }
 
 const inputClass =
-  'w-full rounded-md border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
+  "w-full";
 
 // ---------- confirm modal ----------------------------------------------------
 

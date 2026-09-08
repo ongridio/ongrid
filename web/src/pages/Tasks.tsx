@@ -1,3 +1,7 @@
+import { Input, Label, Textarea } from '@/components/ui';
+import { useDialogs } from '@/components/ui/useDialogs';
+import { Hint } from '@/components/ui/Tooltip';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/DropdownMenu';
 // Tasks — the 任务 page. A "任务" is a report schedule (日报 / 周报 / 月报): it
 // runs on a cron and produces report artifacts. The list view manages the
 // schedules (create / edit / toggle / run-now / delete); the detail view
@@ -51,6 +55,7 @@ export default function TasksPage() {
 // ---------------------------------------------------------------- list
 
 function TaskList() {
+  const { confirmAction, dialog } = useDialogs();
   const { tr } = useI18n();
   const navigate = useNavigate();
   const { canMutate } = usePermissions();
@@ -95,16 +100,16 @@ function TaskList() {
   );
   const onDelete = useCallback(
     async (task: UnifiedTask) => {
-      if (!window.confirm(tr('删除这个任务？', 'Delete this task?'))) return;
+      if (!(await confirmAction(tr('删除这个任务？', 'Delete this task?')))) return;
       if (task.kind === 'oneoff') await deleteTask(task.id);
       else if (task.schedule_id != null) await deleteSchedule(task.schedule_id);
       void load();
     },
-    [load, tr],
+    [confirmAction, load, tr],
   );
 
   return (
-    <main className="anim-fade flex flex-1 flex-col overflow-hidden">
+    <>{dialog}<main className="anim-fade flex flex-1 flex-col overflow-hidden">
       <header className="app-header border-b border-zinc-800/60 px-6 py-4">
         <div className="flex items-center justify-between gap-4">
           <div>
@@ -114,19 +119,11 @@ function TaskList() {
             </p>
           </div>
           {canMutate && (
-            <div className="relative">
-              <Button
-                variant="primary"
-                onClick={() => setMenuOpen((v) => !v)}
-              >
-                <Plus size={12} /> {tr('新建任务', 'New task')} <ChevronDown size={12} className="opacity-70" />
-              </Button>
-              {menuOpen && (
-                <>
-                  <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} aria-hidden />
-                  <div className="absolute right-0 z-20 mt-1 w-52 overflow-hidden rounded-md border border-zinc-700 bg-zinc-900 py-1 shadow-xl">
-                    <button
-                      type="button"
+            <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+              <DropdownMenuTrigger render={<Button variant="primary" />}><Plus size={12} />{tr('新建任务', 'New task')}<ChevronDown size={12} /></DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-52">
+                    <DropdownMenuItem
+
                       onClick={() => {
                         setMenuOpen(false);
                         setOneoffOpen(true);
@@ -138,9 +135,9 @@ function TaskList() {
                         <span className="block text-xs text-zinc-100">{tr('立即生成（一次性）', 'Run now (one-shot)')}</span>
                         <span className="block text-[11px] text-zinc-500">{tr('马上生成一份报告，不排期', 'Generate a report now, no schedule')}</span>
                       </span>
-                    </button>
-                    <button
-                      type="button"
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+
                       onClick={() => {
                         setMenuOpen(false);
                         setCreating(true);
@@ -152,11 +149,9 @@ function TaskList() {
                         <span className="block text-xs text-zinc-100">{tr('定时任务', 'Scheduled task')}</span>
                         <span className="block text-[11px] text-zinc-500">{tr('按日报 / 周报 / 月报周期自动生成', 'Auto-generate on a daily / weekly / monthly cadence')}</span>
                       </span>
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
+                    </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
         </div>
       </header>
@@ -289,7 +284,7 @@ function TaskList() {
           />
         )}
       </div>
-    </main>
+    </main></>
   );
 }
 
@@ -364,14 +359,14 @@ function TaskDetail({ id }: { id: string }) {
             )}
           </div>
           {canMutate && task && (
-            <button
+            <Button variant="plain" size="sm"
               type="button"
               onClick={() => void onRun()}
               disabled={running}
-              className="inline-flex items-center gap-1.5 rounded-md border border-indigo-600 bg-indigo-600/20 px-2.5 py-1.5 text-xs text-indigo-200 hover:bg-indigo-600/30 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-indigo-600 bg-indigo-600/20 text-indigo-200 hover:bg-indigo-600/30"
             >
               {running ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} {oneoff ? tr('再次生成', 'Generate again') : tr('立即生成', 'Run now')}
-            </button>
+            </Button>
           )}
         </div>
       </header>
@@ -409,14 +404,14 @@ function reportActionError(e: unknown, tr: (zh: string, en: string) => string): 
 
 function IconBtn({ children, title, onClick, danger }: { children: ReactNode; title: string; onClick(): void; danger?: boolean }) {
   return (
-    <button
+    <Hint content={title}><Button variant="dangerGhost" size="sm"
       type="button"
-      title={title}
+
       onClick={onClick}
       className={cn('rounded p-1.5 text-zinc-400 hover:bg-zinc-800', danger ? 'hover:text-red-300' : 'hover:text-zinc-200')}
     >
       {children}
-    </button>
+    </Button></Hint>
   );
 }
 
@@ -449,17 +444,17 @@ function OneoffForm({ onClose, onCreated }: { onClose(): void; onCreated(task: U
       title={tr('立即生成（一次性）', 'Run now (one-shot)')}
       footer={
         <>
-          <button type="button" onClick={onClose} className="rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800">
+          <Button variant="outline" size="sm" type="button" onClick={onClose} className="px-3 py-1.5">
             {tr('取消', 'Cancel')}
-          </button>
-          <button
+          </Button>
+          <Button variant="plain" size="sm"
             type="button"
             onClick={() => void create()}
             disabled={creating}
-            className="inline-flex items-center gap-1.5 rounded-md border border-indigo-600 bg-indigo-600/20 px-3 py-1.5 text-xs text-indigo-200 hover:bg-indigo-600/30 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-indigo-600 bg-indigo-600/20 text-indigo-200 hover:bg-indigo-600/30"
           >
             {creating ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />} {tr('生成', 'Generate')}
-          </button>
+          </Button>
         </>
       }
     >
@@ -470,7 +465,7 @@ function OneoffForm({ onClose, onCreated }: { onClose(): void; onCreated(task: U
         <Field label={tr('周期', 'Cadence')}>
           <div className="flex gap-1.5">
             {KINDS.filter((k) => k.key !== 'custom').map((k) => (
-              <button
+              <Button variant="plain" size="sm"
                 key={k.key}
                 type="button"
                 onClick={() => setKind(k.key)}
@@ -480,12 +475,12 @@ function OneoffForm({ onClose, onCreated }: { onClose(): void; onCreated(task: U
                 )}
               >
                 {tr(k.zh, k.en)}
-              </button>
+              </Button>
             ))}
           </div>
         </Field>
         <Field label={tr('名称（可选）', 'Name (optional)')}>
-          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={tr('如：临时巡检报告', 'e.g. Ad-hoc inspection report')} className={inputCls} />
+          <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={tr('如：临时巡检报告', 'e.g. Ad-hoc inspection report')} className={inputCls} />
         </Field>
         {err && <div className="rounded border border-red-700/40 bg-red-900/20 px-2 py-1 text-[11px] text-red-200">{err}</div>}
       </div>
@@ -496,14 +491,14 @@ function OneoffForm({ onClose, onCreated }: { onClose(): void; onCreated(task: U
 // ---- schedule create/edit form (moved from ReportSchedules) ----
 
 const inputCls =
-  'w-full rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none';
+  "w-full";
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label className="block">
+    <Label className="block">
       <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-zinc-400">{label}</span>
       {children}
-    </label>
+    </Label>
   );
 }
 
@@ -558,29 +553,29 @@ function ScheduleForm({
       title={initial ? tr('编辑任务', 'Edit task') : tr('新建任务', 'New task')}
       footer={
         <>
-          <button type="button" onClick={onClose} className="rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800">
+          <Button variant="outline" size="sm" type="button" onClick={onClose} className="px-3 py-1.5">
             {tr('取消', 'Cancel')}
-          </button>
-          <button
+          </Button>
+          <Button variant="plain" size="sm"
             type="button"
             onClick={() => void save()}
             disabled={saving}
-            className="rounded-md border border-indigo-600 bg-indigo-600/20 px-3 py-1.5 text-xs text-indigo-200 hover:bg-indigo-600/30 disabled:opacity-50"
+            className="px-3 py-1.5 border border-indigo-600 bg-indigo-600/20 text-indigo-200 hover:bg-indigo-600/30"
           >
             {tr('保存', 'Save')}
-          </button>
+          </Button>
         </>
       }
     >
       <div className="space-y-3">
         <Field label={tr('名称', 'Name')}>
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder={tr('如：运维周报', 'e.g. Weekly ops report')} className={inputCls} />
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={tr('如：运维周报', 'e.g. Weekly ops report')} className={inputCls} />
         </Field>
 
         <Field label={tr('周期', 'Cadence')}>
           <div className="flex gap-1.5">
             {KINDS.map((k) => (
-              <button
+              <Button variant="plain" size="sm"
                 key={k.key}
                 type="button"
                 onClick={() => setKind(k.key)}
@@ -590,19 +585,19 @@ function ScheduleForm({
                 )}
               >
                 {tr(k.zh, k.en)}
-              </button>
+              </Button>
             ))}
           </div>
         </Field>
 
         {kind === 'custom' && (
           <Field label={tr('Cron 表达式（5 段）', 'Cron (5-field)')}>
-            <input value={cron} onChange={(e) => setCron(e.target.value)} placeholder="0 9 * * 1" className={cn(inputCls, 'font-mono')} />
+            <Input value={cron} onChange={(e) => setCron(e.target.value)} placeholder="0 9 * * 1" className={cn(inputCls, "font-mono")} />
           </Field>
         )}
 
         <Field label={tr('时区', 'Timezone')}>
-          <input value={tz} onChange={(e) => setTz(e.target.value)} className={cn(inputCls, 'font-mono')} />
+          <Input value={tz} onChange={(e) => setTz(e.target.value)} className={cn(inputCls, "font-mono")} />
         </Field>
 
         <Field label={tr('投递渠道', 'Delivery channels')}>
@@ -613,7 +608,7 @@ function ScheduleForm({
               {channels.map((c) => {
                 const on = chanIDs.includes(c.id);
                 return (
-                  <button
+                  <Button variant="plain" size="sm"
                     key={c.id}
                     type="button"
                     onClick={() => setChanIDs((prev) => (on ? prev.filter((x) => x !== c.id) : [...prev, c.id]))}
@@ -623,7 +618,7 @@ function ScheduleForm({
                     )}
                   >
                     {c.name} <span className="text-zinc-600">({c.type})</span>
-                  </button>
+                  </Button>
                 );
               })}
             </div>
@@ -631,12 +626,12 @@ function ScheduleForm({
         </Field>
 
         <Field label={tr('额外要求（可选）', 'Extra instructions (optional)')}>
-          <textarea
+          <Textarea
             value={promptOverride}
             onChange={(e) => setPromptOverride(e.target.value)}
             rows={2}
             placeholder={tr('如：重点关注数据库相关的风险', 'e.g. focus on database-related risks')}
-            className={cn(inputCls, 'resize-y')}
+            className={cn(inputCls, "resize-y")}
           />
         </Field>
 

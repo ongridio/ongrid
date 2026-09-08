@@ -1,3 +1,4 @@
+import { Hint } from '@/components/ui/Tooltip';
 import { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -221,9 +222,9 @@ function ToolCallSummaryBlock({
         <Wrench size={12} className="text-zinc-500" />
         <span className="font-medium text-zinc-200">{call.name}</span>
         {hint && (
-          <span className="truncate text-[11px] text-zinc-500" title={hint}>
+          <Hint content={hint}><span className="truncate text-[11px] text-zinc-500" >
             {hint}
-          </span>
+          </span></Hint>
         )}
         {typeof call.device_id === 'number' && (
           <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">
@@ -425,7 +426,7 @@ export function OperationCard({ operation, onTerminal }: { operation: OperationC
               {summary && (
                 <>
                   <span className="text-zinc-700">/</span>
-                  <span className="min-w-[120px] max-w-full truncate text-zinc-400" title={summary}>{summary}</span>
+                  <Hint content={summary}><span className="min-w-[120px] max-w-full truncate text-zinc-400" >{summary}</span></Hint>
                 </>
               )}
             </div>
@@ -437,17 +438,17 @@ export function OperationCard({ operation, onTerminal }: { operation: OperationC
           {detailURL && (
             <a
               href={detailURL}
-              className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 text-xs font-medium text-zinc-300 transition-colors hover:border-zinc-600 hover:bg-zinc-800 hover:text-zinc-100"
+              className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 text-xs font-medium text-zinc-300 transition-colors hover:border-zinc-600 hover:bg-zinc-800 hover:text-zinc-100"
             >
               <ExternalLink size={13} />
               {operation.kind === 'packet_capture_session' ? tr('打开会话', 'Open session') : tr('打开产物', 'Open artifact')}
             </a>
           )}
           {visibleCancel && (
-            <button
+            <Button variant="plain"
               type="button"
               className={cn(
-                'inline-flex h-8 items-center justify-center gap-1.5 rounded-md border px-2.5 text-xs font-medium transition-colors',
+                'inline-flex h-9 items-center justify-center gap-1.5 rounded-md border px-2.5 text-xs font-medium transition-colors',
                 canCancel
                   ? 'border-red-500/30 bg-zinc-900 text-red-300 hover:border-red-500/50 hover:bg-red-500/10'
                   : 'border-zinc-800 bg-zinc-900 text-zinc-600',
@@ -470,7 +471,7 @@ export function OperationCard({ operation, onTerminal }: { operation: OperationC
                 : visibleCancel.kind === 'cancel'
                   ? tr('停止', 'Stop')
                   : visibleCancel.label}
-            </button>
+            </Button>
           )}
           {enabledActions.filter((action) => action.kind !== 'cancel').map((action) => (
             <Button key={action.kind} variant="ghost" disabled={cancelling || !operation.id} onClick={async () => {
@@ -676,7 +677,7 @@ function ConfigDraftCard({
 
   return (
     <div className="border-t border-zinc-800/80 bg-zinc-950/30 px-3 py-3">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
 			{proposal && <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] font-medium text-zinc-300">{tr('提案', 'Proposal')}</span>}
@@ -1026,22 +1027,22 @@ function PendingApprovalCard({ approvalID, kind, toolName, command }: { approval
         )}
         {state === 'idle' && (
           <div className="flex gap-2">
-            <button
+            <Button variant="outline" size="sm"
               type="button"
               onClick={() => void approve()}
-              className="inline-flex items-center gap-1 rounded-md border border-emerald-700 bg-emerald-950/40 px-2.5 py-1 text-emerald-300 hover:bg-emerald-900/40"
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-emerald-300"
             >
               <Check size={12} />
               {tr('批准并执行', 'Approve & run')}
-            </button>
-            <button
+            </Button>
+            <Button variant="dangerGhost" size="sm"
               type="button"
               onClick={() => void reject()}
-              className="inline-flex items-center gap-1 rounded-md border border-zinc-700 px-2.5 py-1 text-zinc-400 hover:border-red-800 hover:text-red-400"
+              className="inline-flex items-center gap-1 px-2.5 py-1"
             >
               <X size={12} />
               {tr('拒绝', 'Reject')}
-            </button>
+            </Button>
           </div>
         )}
         {state === 'busy' && <div className="flex items-center gap-1.5 text-zinc-400"><Loader2 size={12} className="animate-spin" />{tr('执行中…', 'Running…')}</div>}

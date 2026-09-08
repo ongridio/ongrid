@@ -1,3 +1,4 @@
+import { Label, Input } from '@/components/ui';
 import { useState } from 'react';
 import { Check, ChevronDown, ChevronRight, Loader2, Save } from 'lucide-react';
 import { applyObservabilityLimits, listSettings } from '@/api/settings';
@@ -100,15 +101,15 @@ export default function BuiltInStorageAdvanced({ service }: { service: Service }
 
   return (
     <div className="mt-5 border-t border-zinc-800 pt-4">
-      <button
+      <Button variant="subtle" size="sm"
         type="button"
         aria-expanded={open}
         onClick={toggle}
-        className="flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-300"
+        className="flex items-center gap-1"
       >
         {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         <span>{tr('高级配置：内置存储限制', 'Advanced: built-in storage limits')}</span>
-      </button>
+      </Button>
 
       {open && (
         <div className="mt-3 border-l border-zinc-800 pl-4">
@@ -183,10 +184,10 @@ function NumberField({
   onChange: (value: string) => void;
 }) {
   return (
-    <label className="block text-xs text-zinc-400">
+    <Label className="block text-xs text-zinc-400">
       <span className="mb-1.5 block">{label}</span>
       <div className="flex items-center rounded-md border border-zinc-700 bg-zinc-950 focus-within:border-indigo-500/70">
-        <input
+        <Input variant="inset"
           type="number"
           aria-label={ariaLabel}
           min={1}
@@ -194,11 +195,11 @@ function NumberField({
           step={1}
           value={value}
           onChange={(event) => onChange(event.target.value)}
-          className="min-w-0 flex-1 bg-transparent px-3 py-2 text-sm text-zinc-100 outline-none"
+          className="min-w-0 flex-1 px-3 py-2 outline-none"
         />
         <span className="border-l border-zinc-800 px-3 text-[11px] text-zinc-500">{suffix}</span>
       </div>
-    </label>
+    </Label>
   );
 }
 

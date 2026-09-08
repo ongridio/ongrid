@@ -1,5 +1,9 @@
+import { Input, Label } from '@/components/ui';
+import { Hint } from '@/components/ui/Tooltip';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/DropdownMenu';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/Popover';
+import { Checkbox } from '@/components/ui/Checkbox';
 import { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { NavLink, Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   Bell,
@@ -126,29 +130,9 @@ export function Sidebar() {
     if (ids.some((id) => location.pathname === `/chat/${id}`)) navigate('/');
   }
   const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const userMenuRef = useRef<HTMLDivElement | null>(null);
 
   const visibleSessions = showAllSessions ? sessions : sessions.slice(0, 5);
   const hasMoreSessions = sessions.length > 5;
-
-  useEffect(() => {
-    if (!userMenuOpen) return;
-    function onDocClick(e: MouseEvent) {
-      if (!userMenuRef.current) return;
-      if (!userMenuRef.current.contains(e.target as Node)) {
-        setUserMenuOpen(false);
-      }
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') setUserMenuOpen(false);
-    }
-    document.addEventListener('mousedown', onDocClick);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDocClick);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [userMenuOpen]);
 
   const handleLogout = () => {
     setUserMenuOpen(false);
@@ -167,15 +151,7 @@ export function Sidebar() {
     themePref === 'system' ? Monitor : themeMode === 'dark' ? Moon : Sun;
 
   const renderUserMenuPanel = (variant: 'expanded' | 'collapsed') => (
-    <div
-      role="menu"
-      className={cn(
-        'anim-scale absolute z-50 w-56 rounded-lg bg-zinc-900 p-1 shadow-lg ring-1 ring-zinc-800',
-        variant === 'expanded'
-          ? 'left-3 top-full mt-1 origin-top-left'
-          : 'bottom-full left-1/2 mb-2 -translate-x-1/2 origin-bottom'
-      )}
-    >
+    <DropdownMenuContent side={variant === 'expanded' ? 'bottom' : 'right'} className="w-56">
       <div className="px-3 py-2">
         <div className="truncate text-[13px] font-semibold text-zinc-100">
           {displayName}
@@ -192,10 +168,10 @@ export function Sidebar() {
       <div className="my-1 h-px bg-zinc-800" />
       {/* Language toggle — zh-CN ↔ en-US. tr() updates everywhere
           immediately because components subscribe via useI18n(). */}
-      <button
-        type="button"
-        role="menuitemradio"
-        aria-checked={locale === 'en-US'}
+      <DropdownMenuItem
+
+
+
         onClick={toggleLocale}
         className="flex w-full items-center justify-between gap-2 rounded-md px-3 py-1.5 text-[13px] text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
       >
@@ -206,11 +182,11 @@ export function Sidebar() {
         <span className="text-[11px] text-zinc-500">
           {locale === 'zh-CN' ? '中 / EN' : 'EN / 中'}
         </span>
-      </button>
+      </DropdownMenuItem>
       {/* Theme — cycle through system / light / dark */}
-      <button
-        type="button"
-        role="menuitem"
+      <DropdownMenuItem
+
+
         onClick={cycleTheme}
         className="flex w-full items-center justify-between gap-2 rounded-md px-3 py-1.5 text-[13px] text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
       >
@@ -219,18 +195,18 @@ export function Sidebar() {
           <span>{tr('主题', 'Theme')}</span>
         </span>
         <span className="text-[11px] text-zinc-500">{themeLabel}</span>
-      </button>
+      </DropdownMenuItem>
       <div className="my-1 h-px bg-zinc-800" />
-      <button
-        type="button"
-        role="menuitem"
+      <DropdownMenuItem
+
+
         onClick={handleLogout}
         className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-[13px] text-zinc-300 hover:bg-zinc-800 hover:text-red-400"
       >
         <LogOut size={14} />
         <span>{tr('退出登录', 'Log out')}</span>
-      </button>
-    </div>
+      </DropdownMenuItem>
+    </DropdownMenuContent>
   );
 
   // Refresh on mount and on every route change. Route changes happen when
@@ -245,23 +221,23 @@ export function Sidebar() {
       <aside className="flex h-full min-h-0 w-14 shrink-0 flex-col items-center gap-2 overflow-hidden border-r border-zinc-800/60 bg-zinc-900 py-3">
         {/* Brand mark + expand toggle: logo doubles as the expand
             affordance — saves a row in the narrow column. */}
-        <button
+        <Hint content={tr('Ongrid · 点击展开', 'Ongrid · click to expand')}><Button variant="subtle" size="sm"
           type="button"
           onClick={toggleSidebar}
           aria-label={tr('展开侧边栏', 'Expand sidebar')}
-          title={tr('Ongrid · 点击展开', 'Ongrid · click to expand')}
-          className="rounded-lg p-1 hover:bg-zinc-800/60"
+
+          className="p-1"
         >
           <OngridLogo size={34} />
-        </button>
-        <button
+        </Button></Hint>
+        <Button variant="subtle" size="sm"
           type="button"
           onClick={toggleSidebar}
           aria-label={tr('展开侧边栏', 'Expand sidebar')}
-          className="rounded-lg p-2 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+          className="p-2"
         >
           <PanelLeftOpen size={16} />
-        </button>
+        </Button>
         <Link
           to="/"
           aria-label={tr('首页', 'Home')}
@@ -283,10 +259,10 @@ export function Sidebar() {
         >
           <ChartLine size={16} />
         </Link>
-        <Link
+        <Hint content={incidentOpen > 0 ? tr(`${incidentOpen} 个未确认告警`, `${incidentOpen} open alert(s)`) : tr('告警', 'Alerts')}><Link
           to="/alerts"
           aria-label={incidentOpen > 0 ? tr(`告警（${incidentOpen} 未确认）`, `Alerts (${incidentOpen} open)`) : tr('告警', 'Alerts')}
-          title={incidentOpen > 0 ? tr(`${incidentOpen} 个未确认告警`, `${incidentOpen} open alert(s)`) : tr('告警', 'Alerts')}
+
           className="relative rounded-lg p-2 text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
         >
           <Siren size={16} />
@@ -296,7 +272,7 @@ export function Sidebar() {
               aria-hidden
             />
           )}
-        </Link>
+        </Link></Hint>
         <Link
           to="/devices"
           aria-label={tr('设备', 'Devices')}
@@ -333,19 +309,16 @@ export function Sidebar() {
           >
             <Settings size={16} />
           </Link>
-          <div ref={userMenuRef} className="relative">
-            <button
-              type="button"
-              onClick={() => setUserMenuOpen((v) => !v)}
-              aria-label={tr('用户菜单', 'User menu')}
+          <DropdownMenu open={userMenuOpen} onOpenChange={setUserMenuOpen}>
+            <DropdownMenuTrigger aria-label={tr('用户菜单', 'User menu')}
               aria-haspopup="menu"
               aria-expanded={userMenuOpen}
               className="rounded-full ring-1 ring-transparent transition hover:ring-zinc-700 focus:outline-none focus:ring-zinc-600"
             >
               <Avatar email={email} size={28} />
-            </button>
-            {userMenuOpen ? renderUserMenuPanel('collapsed') : null}
-          </div>
+            </DropdownMenuTrigger>
+            {renderUserMenuPanel('collapsed')}
+          </DropdownMenu>
         </div>
       </aside>
     );
@@ -371,11 +344,9 @@ export function Sidebar() {
       </div>
 
       {/* user / collapse / bell */}
-      <div ref={userMenuRef} className="relative flex items-center gap-2 px-3 py-3">
-        <button
-          type="button"
-          onClick={() => setUserMenuOpen((v) => !v)}
-          aria-label={tr('用户菜单', 'User menu')}
+      <DropdownMenu open={userMenuOpen} onOpenChange={setUserMenuOpen}>
+      <div className="relative flex items-center gap-2 px-3 py-3">
+        <DropdownMenuTrigger aria-label={tr('用户菜单', 'User menu')}
           aria-haspopup="menu"
           aria-expanded={userMenuOpen}
           className="flex min-w-0 flex-1 items-center gap-2 rounded-lg p-1 text-left transition hover:bg-zinc-800/60 focus:outline-none focus:ring-1 focus:ring-zinc-700"
@@ -387,24 +358,25 @@ export function Sidebar() {
             </div>
             <div className="truncate text-[11px] text-zinc-500">{tr('AIOps 工作台', 'AIOps Workbench')}</div>
           </div>
-        </button>
-        <button
+        </DropdownMenuTrigger>
+        <Button variant="subtle" size="sm"
           type="button"
           onClick={toggleSidebar}
           aria-label={tr('折叠侧边栏', 'Collapse sidebar')}
-          className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+          className="p-1.5"
         >
           <PanelLeftClose size={15} />
-        </button>
-        <button
+        </Button>
+        <Button variant="subtle" size="sm"
           type="button"
           aria-label={tr('通知', 'Notifications')}
-          className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+          className="p-1.5"
         >
           <Bell size={15} />
-        </button>
-        {userMenuOpen ? renderUserMenuPanel('expanded') : null}
+        </Button>
+        {renderUserMenuPanel('expanded')}
       </div>
+      </DropdownMenu>
 
       {/* search — opens the command palette (⌘P). The visual is still
           a search-input lookalike so users get the affordance, but the
@@ -494,15 +466,15 @@ export function Sidebar() {
         <div className="mt-5 flex items-center justify-between px-2 pb-1.5">
           <div className="text-[13px] font-semibold text-zinc-300">{tr('会话', 'Sessions')}</div>
           {sessions.length > 0 ? (
-            <button
+            <Button variant="subtle" size="sm"
               type="button"
               onClick={() => setBatchDeleteOpen(true)}
               aria-label={tr('批量删除会话', 'Delete multiple sessions')}
-              className="flex items-center gap-1 rounded px-1.5 py-1 text-[11px] font-medium text-zinc-500 hover:bg-zinc-800/60 hover:text-zinc-200"
+              className="flex items-center gap-1 px-1.5 py-1 font-medium"
             >
               <ListChecks size={12} />
               <span>{tr('批量删除', 'Batch delete')}</span>
-            </button>
+            </Button>
           ) : null}
         </div>
         <div className="ml-2 space-y-0.5">
@@ -519,14 +491,14 @@ export function Sidebar() {
             ))
           )}
           {hasMoreSessions ? (
-            <button
+            <Button variant="subtle" size="sm"
               type="button"
               onClick={() => setShowAllSessions((v) => !v)}
-              className="flex items-center gap-1 rounded-md px-2 py-1.5 text-[12px] text-zinc-500 transition-colors hover:bg-zinc-800/60 hover:text-zinc-200"
+              className="flex items-center gap-1 px-2 py-1.5 transition-colors"
             >
               {showAllSessions ? <ChevronUp size={14} /> : <ChevronRight size={14} />}
               <span>{showAllSessions ? tr('收起', 'Collapse') : tr(`展开剩余 ${sessions.length - 5} 条`, `Show ${sessions.length - 5} more`)}</span>
-            </button>
+            </Button>
           ) : null}
         </div>
       </nav>
@@ -618,7 +590,7 @@ function SessionRow({
     return (
       <div className="group relative">
         <div className="flex items-center gap-1.5 rounded-md bg-zinc-800/80 py-1 pl-2 pr-7">
-          <input
+          <Input variant="inset"
             ref={inputRef}
             value={draft}
             disabled={saving}
@@ -633,7 +605,7 @@ function SessionRow({
                 cancelRename();
               }
             }}
-            className="w-full bg-transparent text-[13px] text-zinc-100 outline-none placeholder:text-zinc-600"
+            className="w-full outline-none"
             placeholder={fallbackTitle}
             maxLength={256}
           />
@@ -644,9 +616,9 @@ function SessionRow({
 
   return (
     <div className="group relative">
-      <NavLink
+      <Hint content={displayTitle}><NavLink
         to={`/chat/${session.id}`}
-        title={displayTitle}
+
         onDoubleClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -662,11 +634,11 @@ function SessionRow({
       >
         <span className="truncate">{displayTitle}</span>
         <AgentBadge agentId={session.agent_id} />
-      </NavLink>
-      <button
+      </NavLink></Hint>
+      <Hint content={tr('双击会话名也可重命名', 'Double-click the title to rename')}><Button variant="subtle" size="sm"
         type="button"
         aria-label={tr('重命名会话', 'Rename session')}
-        title={tr('双击会话名也可重命名', 'Double-click the title to rename')}
+
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -678,8 +650,8 @@ function SessionRow({
         )}
       >
         <Pencil size={12} />
-      </button>
-      <button
+      </Button></Hint>
+      <Button variant="dangerGhost" size="sm"
         type="button"
         aria-label={tr('删除会话', 'Delete session')}
         onClick={(e) => {
@@ -693,7 +665,7 @@ function SessionRow({
         )}
       >
         <Trash2 size={12} />
-      </button>
+      </Button>
     </div>
   );
 }
@@ -711,41 +683,30 @@ function DeleteSessionModal({
 }) {
   const { tr } = useI18n();
   return (
-    <div
-      role="dialog"
-      aria-modal
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
-      onClick={onCancel}
-    >
-      <div
-        className="w-full max-w-sm rounded-xl border border-zinc-800 bg-zinc-900 p-5 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="text-sm font-medium text-zinc-100">{tr('删除会话', 'Delete session')}</div>
+    <Modal open onClose={onCancel} title={tr('删除会话', 'Delete session')} size="sm">
         <div className="mt-2 text-[13px] text-zinc-400">
           {tr('确定要删除会话 ', 'Delete session ')}<span className="text-zinc-100">{target.title || tr('未命名会话', 'Untitled session')}</span>
           {tr(' 吗？此操作会一并删除所有消息和工具调用记录，无法恢复。', '? All messages and tool-call records will be removed and cannot be recovered.')}
         </div>
         <div className="mt-5 flex justify-end gap-2">
-          <button
+          <Button variant="outline" size="sm"
             type="button"
             onClick={onCancel}
             disabled={deleting}
-            className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+            className="px-3 py-1.5"
           >
             {tr('取消', 'Cancel')}
-          </button>
-          <button
+          </Button>
+          <Button variant="danger" size="sm"
             type="button"
             onClick={onConfirm}
             disabled={deleting}
-            className="rounded-md bg-red-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-400 disabled:opacity-50"
+            className="px-3 py-1.5 font-medium"
           >
             {deleting ? tr('删除中…', 'Deleting…') : tr('删除', 'Delete')}
-          </button>
+          </Button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -823,31 +784,31 @@ function BatchDeleteSessionsModal({
       <p className="text-[13px] leading-5 text-zinc-400">
         {tr('所选会话的消息和工具调用记录会被一并删除，且无法恢复。', 'Messages and tool-call records in selected sessions will be permanently deleted.')}
       </p>
-      <label className="mt-3 flex cursor-pointer items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950/30 px-3 py-2 text-[13px] text-zinc-300">
-        <input
-          type="checkbox"
+      <Label className="mt-3 flex cursor-pointer items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950/30 px-3 py-2 text-[13px] text-zinc-300">
+        <Checkbox
+
           aria-label={tr('全选会话', 'Select all sessions')}
           checked={allSelected}
-          onChange={() => setSelected(allSelected ? new Set() : new Set(sessions.map((session) => session.id)))}
-          className="accent-red-500"
+          onCheckedChange={() => setSelected(allSelected ? new Set() : new Set(sessions.map((session) => session.id)))}
+
         />
         <span className="flex-1">{tr('全选', 'Select all')}</span>
         <span className="text-[11px] text-zinc-500">{selected.size}/{sessions.length}</span>
-      </label>
+      </Label>
       <div className="mt-2 max-h-80 divide-y divide-zinc-800 overflow-y-auto rounded-lg border border-zinc-800">
         {sessions.map((session, index) => {
           const title = session.title || tr(`会话 ${index + 1}`, `Session ${index + 1}`);
           return (
-            <label key={session.id} className={cn('flex cursor-pointer items-center gap-2 px-3 py-2.5 transition-colors', selected.has(session.id) ? 'bg-zinc-800/60' : 'hover:bg-zinc-800/40')}>
-              <input
-                type="checkbox"
+            <Label key={session.id} className={cn('flex cursor-pointer items-center gap-2 px-3 py-2.5 transition-colors', selected.has(session.id) ? 'bg-zinc-800/60' : 'hover:bg-zinc-800/40')}>
+              <Checkbox
+
                 aria-label={tr(`选择会话 ${title}`, `Select session ${title}`)}
                 checked={selected.has(session.id)}
-                onChange={() => toggle(session.id)}
-                className="accent-red-500"
+                onCheckedChange={() => toggle(session.id)}
+
               />
-              <span className="min-w-0 flex-1 truncate text-[13px] text-zinc-300" title={title}>{title}</span>
-            </label>
+              <Hint content={title}><span className="min-w-0 flex-1 truncate text-[13px] text-zinc-300" >{title}</span></Hint>
+            </Label>
           );
         })}
       </div>
@@ -879,11 +840,7 @@ function CollapsibleSection({
 }) {
   const { tr } = useI18n();
   const location = useLocation();
-  const manageRef = useRef<HTMLDivElement | null>(null);
-  const manageMenuRef = useRef<HTMLDivElement | null>(null);
-  const manageButtonRef = useRef<HTMLButtonElement | null>(null);
   const [manageOpen, setManageOpen] = useState(false);
-  const [managePosition, setManagePosition] = useState({ top: 0, left: 0 });
   const [open, setOpen] = useState(() => {
     try {
       const raw = localStorage.getItem(`sidebar.section.${storageKey}`);
@@ -940,43 +897,6 @@ function CollapsibleSection({
     if (hasActiveItem) setOpen(true);
   }, [hasActiveItem]);
 
-  const updateManagePosition = () => {
-    const rect = manageButtonRef.current?.getBoundingClientRect();
-    if (rect) setManagePosition({ top: rect.top, left: rect.right + 8 });
-  };
-
-  useEffect(() => {
-    if (!manageOpen) return;
-    const closeOnOutside = (event: MouseEvent) => {
-      const target = event.target as Node;
-      if (!manageRef.current?.contains(target) && !manageMenuRef.current?.contains(target)) {
-        setManageOpen(false);
-      }
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setManageOpen(false);
-    };
-    document.addEventListener('mousedown', closeOnOutside);
-    document.addEventListener('keydown', closeOnEscape);
-    window.addEventListener('resize', updateManagePosition);
-    window.addEventListener('scroll', updateManagePosition, true);
-    return () => {
-      document.removeEventListener('mousedown', closeOnOutside);
-      document.removeEventListener('keydown', closeOnEscape);
-      window.removeEventListener('resize', updateManagePosition);
-      window.removeEventListener('scroll', updateManagePosition, true);
-    };
-  }, [manageOpen]);
-
-  const toggleManage = () => {
-    if (manageOpen) {
-      setManageOpen(false);
-      return;
-    }
-    updateManagePosition();
-    setManageOpen(true);
-  };
-
   const toggle = () => {
     setOpen((prev) => {
       const next = !prev;
@@ -1008,7 +928,6 @@ function CollapsibleSection({
   return (
     <div>
       <div
-        ref={manageRef}
         className="group/section relative mt-5 flex items-center px-2 pb-1.5"
       >
         <button
@@ -1020,65 +939,54 @@ function CollapsibleSection({
           {title}
         </button>
         <div className="pointer-events-none flex items-center gap-0.5 opacity-0 transition-opacity group-hover/section:pointer-events-auto group-hover/section:opacity-100 group-focus-within/section:pointer-events-auto group-focus-within/section:opacity-100">
-          <button
-            ref={manageButtonRef}
+          <Popover open={manageOpen} onOpenChange={setManageOpen}>
+          <Hint content={tr('管理菜单', 'Manage menu')}><PopoverTrigger
             type="button"
-            onClick={toggleManage}
             aria-label={tr(`管理${title}菜单`, `Manage ${title} menu`)}
             aria-expanded={manageOpen}
-            title={tr('管理菜单', 'Manage menu')}
+
             className={cn(
               'rounded p-1 text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300',
               hiddenKeys.length > 0 && 'text-zinc-400',
             )}
           >
             <Settings2 size={12} />
-          </button>
-          <button
+          </PopoverTrigger></Hint>
+            <PopoverContent side="right" className="w-52" aria-label={tr(`${title}菜单项`, `${title} menu items`)}>
+                <div className="px-2 py-1 text-[11px] font-medium text-zinc-500">
+                  {tr('显示的菜单', 'Visible items')}
+                </div>
+                {items.map((item) => (
+                  <Label
+                    key={item.key}
+                    className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12px] text-zinc-300 hover:bg-zinc-800"
+                  >
+                    <Checkbox
+
+                      checked={!hiddenKeys.includes(item.key)}
+                      onCheckedChange={(checkedValue) => setItemVisible(item.key, checkedValue)}
+                      className="h-3.5 w-3.5"
+                    />
+                    <item.icon size={13} className="shrink-0 text-zinc-500" />
+                    <span className="truncate">{item.label}</span>
+                  </Label>
+                ))}            </PopoverContent>
+          </Popover>
+          <Hint content={open ? tr('折叠', 'Collapse') : tr('展开', 'Expand')}><Button variant="subtle" size="sm"
             type="button"
             onClick={toggle}
             aria-label={open ? tr(`折叠${title}`, `Collapse ${title}`) : tr(`展开${title}`, `Expand ${title}`)}
-            title={open ? tr('折叠', 'Collapse') : tr('展开', 'Expand')}
-            className="rounded p-1 text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300"
+
+            className="p-1"
           >
             <ChevronRight
               size={11}
               className={cn('transition-transform duration-150', open && 'rotate-90')}
             />
-          </button>
+          </Button></Hint>
         </div>
 
-        {manageOpen
-          ? createPortal(
-              <div
-                ref={manageMenuRef}
-                role="menu"
-                aria-label={tr(`${title}菜单项`, `${title} menu items`)}
-                style={{ top: managePosition.top, left: managePosition.left }}
-                className="anim-scale fixed z-50 w-52 rounded-lg bg-zinc-900 p-1.5 shadow-lg ring-1 ring-zinc-800"
-              >
-                <div className="px-2 py-1 text-[11px] font-medium text-zinc-500">
-                  {tr('显示的菜单', 'Visible items')}
-                </div>
-                {items.map((item) => (
-                  <label
-                    key={item.key}
-                    className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12px] text-zinc-300 hover:bg-zinc-800"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={!hiddenKeys.includes(item.key)}
-                      onChange={(event) => setItemVisible(item.key, event.target.checked)}
-                      className="h-3.5 w-3.5 accent-indigo-600"
-                    />
-                    <item.icon size={13} className="shrink-0 text-zinc-500" />
-                    <span className="truncate">{item.label}</span>
-                  </label>
-                ))}
-              </div>,
-              document.body,
-            )
-          : null}
+
       </div>
       {open ? (
         <div className="space-y-0.5">
@@ -1094,15 +1002,15 @@ function CollapsibleSection({
                 badge={item.badge}
                 reserveTrailingAction
               />
-              <button
+              <Hint content={tr('从侧栏取消固定', 'Unpin from sidebar')}><Button variant="subtle" size="sm"
                 type="button"
                 onClick={() => setItemVisible(item.key, false)}
                 aria-label={tr(`从侧栏取消固定${item.label}`, `Unpin ${item.label} from sidebar`)}
-                title={tr('从侧栏取消固定', 'Unpin from sidebar')}
-                className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 rounded p-1 text-zinc-600 opacity-0 transition-opacity hover:bg-zinc-700 hover:text-zinc-200 group-hover/item:pointer-events-auto group-hover/item:opacity-100 group-focus-within/item:pointer-events-auto group-focus-within/item:opacity-100"
+
+                className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 p-1 opacity-0 transition-opacity group-hover/item:pointer-events-auto group-hover/item:opacity-100 group-focus-within/item:pointer-events-auto group-focus-within/item:opacity-100"
               >
                 <PinOff size={12} />
-              </button>
+              </Button></Hint>
             </div>
           ))}
         </div>

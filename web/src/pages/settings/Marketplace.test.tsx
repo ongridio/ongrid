@@ -49,7 +49,7 @@ describe('SettingsMarketplace', () => {
     );
 
   const selectLocalPath = async () => {
-    await userEvent.click(screen.getByRole('button', { name: '本地路径' }));
+    await userEvent.click(screen.getByRole('tab', { name: '本地路径' }));
     return screen.getByPlaceholderText(/var\/lib\/ongrid\/uploads/);
   };
 
@@ -249,7 +249,8 @@ describe('SettingsMarketplace', () => {
     // because !isAdmin gates submit independently of canSubmit.
     const installBtn = screen.getByRole('button', { name: /^安装$/ });
     expect(installBtn).toBeDisabled();
-    expect(installBtn).toHaveAttribute('title', '需要 admin 权限');
+    await userEvent.hover(installBtn.parentElement!);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('需要 admin 权限');
 
     // The local-path input is also disabled for non-admin viewers.
     const pathInput = await selectLocalPath();

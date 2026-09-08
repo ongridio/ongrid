@@ -1,3 +1,7 @@
+import { Label, Input, Textarea } from '@/components/ui';
+import { Hint } from '@/components/ui/Tooltip';
+import { Switch } from '@/components/ui/Switch';
+import { Select } from '@/components/ui/Select';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
@@ -41,7 +45,7 @@ import { useI18n } from '@/i18n/locale';
 // Button / Chip / EmptyState, zinc palette, tr() for every string).
 
 const inputClass =
-  'w-full rounded-md border border-zinc-800 bg-zinc-950/60 px-2.5 py-1.5 text-[13px] text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
+  "w-full";
 
 const NONE = '__none__';
 
@@ -195,17 +199,17 @@ export default function McpPage() {
       {servers.length > 0 && (
         <div className="border-b border-zinc-800 px-6 py-3">
           <div className="flex flex-wrap items-center gap-3">
-            <label className="relative block w-64">
+            <Label className="relative block w-64">
               <span className="sr-only">{tr('搜索', 'Search')}</span>
               <Search size={12} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
-              <input
+              <Input
                 type="search"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder={tr('搜索服务（名称 / 端点）…', 'Search servers (name / endpoint)…')}
-                className="w-full rounded-md border border-zinc-800 bg-zinc-950/40 py-1.5 pl-8 pr-2 text-xs text-zinc-200 placeholder:text-zinc-500 focus:border-zinc-600 focus:outline-none"
+                className="w-full pl-8 pr-2"
               />
-            </label>
+            </Label>
             <span className="ml-auto text-xs text-zinc-500">
               {tr(`${servers.length} 个 · 匹配 ${shownServers.length}`, `${servers.length} total · ${shownServers.length} matched`)}
             </span>
@@ -351,39 +355,41 @@ function ServerRow({
 
   return (
     <Card className="p-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <Server size={14} className="text-zinc-500" />
-        <span className="font-mono text-sm text-zinc-100">{server.name}</span>
-        <Chip className="font-mono">{server.transport}</Chip>
-        <StatusChip status={server.status} />
-        {server.trusted && (
-          <Chip tone="warning">
-            <ShieldCheck size={10} />
-            {tr('免审', 'trusted')}
-          </Chip>
-        )}
-        {!server.enabled && <Chip tone="default">{tr('已停用', 'disabled')}</Chip>}
-        {toolCount > 0 && (
-          <Chip tone="info">{tr(`${toolCount} 个工具`, `${toolCount} tool${toolCount === 1 ? '' : 's'}`)}</Chip>
-        )}
-
-        <div className="ml-auto flex items-center gap-1.5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <Server size={14} className="text-zinc-500" />
+            <span className="font-mono text-sm text-zinc-100">{server.name}</span>
+            <Chip className="font-mono">{server.transport}</Chip>
+            <StatusChip status={server.status} />
+            {server.trusted && (
+              <Chip tone="warning">
+                <ShieldCheck size={10} />
+                {tr('免审', 'trusted')}
+              </Chip>
+            )}
+            {!server.enabled && <Chip tone="default">{tr('已停用', 'disabled')}</Chip>}
+            {toolCount > 0 && (
+              <Chip tone="info">{tr(`${toolCount} 个工具`, `${toolCount} tool${toolCount === 1 ? '' : 's'}`)}</Chip>
+            )}
+          </div>
+          <div className="mt-2 break-all font-mono text-[11px] text-zinc-500">{server.endpoint || '—'}</div>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5">
           <Button onClick={onTest} disabled={test?.loading} variant="ghost">
             {test?.loading ? <Loader2 size={11} className="animate-spin" /> : <PlugZap size={11} />}
             {tr('测试连接', 'Test')}
           </Button>
-          <Button onClick={onEdit} disabled={!isAdmin} variant="ghost" title={isAdmin ? undefined : tr('需要 admin 权限', 'Admin permission required')}>
+          <Hint content={isAdmin ? undefined : tr('需要 admin 权限', 'Admin permission required')}><Button onClick={onEdit} disabled={!isAdmin} variant="ghost" >
             <Pencil size={11} />
             {tr('编辑', 'Edit')}
-          </Button>
-          <Button onClick={onDelete} disabled={!isAdmin} variant="danger" title={isAdmin ? undefined : tr('需要 admin 权限', 'Admin permission required')}>
+          </Button></Hint>
+          <Hint content={isAdmin ? undefined : tr('需要 admin 权限', 'Admin permission required')}><Button onClick={onDelete} disabled={!isAdmin} variant="danger" >
             <Trash2 size={11} />
             {tr('删除', 'Delete')}
-          </Button>
+          </Button></Hint>
         </div>
       </div>
-
-      <div className="mt-2 break-all font-mono text-[11px] text-zinc-500">{server.endpoint || '—'}</div>
 
       {server.status === 'error' && server.last_error && (
         <div className="mt-2 rounded-md border border-red-900/50 bg-red-950/30 px-3 py-2 text-[11px] text-red-400">
@@ -404,13 +410,13 @@ function ServerRow({
           </div>
           <div className="flex flex-wrap gap-1.5">
             {probedTools.map((t) => (
-              <span
-                key={t.name}
+              <Hint key={t.name} content={t.description}><span
+
                 className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-[11px] text-zinc-300"
-                title={t.description}
+
               >
                 mcp__{server.name}__{t.name}
-              </span>
+              </span></Hint>
             ))}
           </div>
         </div>
@@ -488,35 +494,35 @@ function ServerEditor({
             'Unique label, also the tool prefix: this server\'s tools are exposed as mcp__<name>__*',
           )}
         >
-          <input
+          <Input
             type="text"
             value={input.name}
             onChange={(e) => onChange({ name: e.target.value })}
             placeholder="github"
-            className={cn(inputClass, 'font-mono')}
+            className={cn(inputClass, "font-mono")}
           />
         </Field>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-[160px_1fr]">
           <Field label={tr('传输方式', 'Transport')} hint={tr('当前仅支持 http', 'Only http supported for now')}>
-            <select
+            <Select label={tr('传输方式', 'Transport')}
               value={input.transport}
-              onChange={(e) => onChange({ transport: e.target.value === 'stdio' ? 'stdio' : 'http' })}
-              className={inputClass}
+              onValueChange={(selectedValue) => onChange({ transport: selectedValue === 'stdio' ? 'stdio' : 'http' })}
+              className="w-full"
             >
               <option value="http">http</option>
               <option value="stdio" disabled>
                 stdio ({tr('暂不支持', 'not yet')})
               </option>
-            </select>
+            </Select>
           </Field>
           <Field label={tr('端点 URL', 'Endpoint URL')} hint={tr('Streamable HTTP MCP 端点', 'Streamable HTTP MCP endpoint')}>
-            <input
+            <Input
               type="text"
               value={input.endpoint}
               onChange={(e) => onChange({ endpoint: e.target.value })}
               placeholder="https://mcp.example.com/sse"
-              className={cn(inputClass, 'font-mono')}
+              className={cn(inputClass, "font-mono")}
             />
           </Field>
         </div>
@@ -525,10 +531,10 @@ function ServerEditor({
           label={tr('凭证', 'Credential')}
           hint={tr('用于填充 header 模板里的 {{字段}}；选「（无）」表示不注入认证', 'Fills the {{field}} placeholders in the header template; pick "(none)" for no auth injection')}
         >
-          <select
+          <Select label={tr('凭证', 'Credential')}
             value={input.credential || NONE}
-            onChange={(e) => onChange({ credential: e.target.value === NONE ? '' : e.target.value })}
-            className={inputClass}
+            onValueChange={(selectedValue) => onChange({ credential: selectedValue === NONE ? '' : selectedValue })}
+            className="w-full"
           >
             <option value={NONE}>{tr('（无）', '(none)')}</option>
             {secrets.map((s) => (
@@ -536,7 +542,7 @@ function ServerEditor({
                 {s.name}
               </option>
             ))}
-          </select>
+          </Select>
         </Field>
 
         <Field
@@ -546,12 +552,12 @@ function ServerEditor({
             'JSON map; {{field}} placeholders are filled from the selected credential\'s fields.',
           )}
         >
-          <textarea
+          <Textarea
             value={input.header_template}
             onChange={(e) => onChange({ header_template: e.target.value })}
             placeholder={'{"Authorization":"Bearer {{token}}"}'}
             rows={3}
-            className={cn(inputClass, 'font-mono')}
+            className={cn(inputClass, "font-mono")}
           />
         </Field>
 
@@ -579,37 +585,16 @@ function ServerEditor({
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
-    <label className="block">
+    <Label className="block">
       <span className="mb-1 block text-[11px] text-zinc-400">{label}</span>
       {children}
       {hint && <span className="mt-1 block text-[11px] text-zinc-500">{hint}</span>}
-    </label>
+    </Label>
   );
 }
 
 function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
-    <button
-      type="button"
-      onClick={() => onChange(!checked)}
-      role="switch"
-      aria-checked={checked}
-      className="flex w-full items-center justify-between gap-3 rounded-md border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-sm text-zinc-200 hover:border-zinc-700"
-    >
-      <span>{label}</span>
-      <span
-        className={cn(
-          'relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors',
-          checked ? 'bg-accent' : 'bg-zinc-700',
-        )}
-      >
-        <span
-          className={cn(
-            'inline-block h-4 w-4 transform rounded-full bg-white transition-transform',
-            checked ? 'translate-x-4' : 'translate-x-0.5',
-          )}
-        />
-      </span>
-    </button>
+    <Label className="flex w-full items-center justify-between gap-3 rounded-md border border-border px-3 py-2 text-sm text-text"><span>{label}</span><Switch checked={checked} onCheckedChange={onChange} aria-label={label} /></Label>
   );
 }

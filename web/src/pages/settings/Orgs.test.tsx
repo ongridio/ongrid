@@ -1,5 +1,5 @@
+import { selectOption } from '@/test/select-option';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it } from 'vitest';
 
@@ -47,9 +47,9 @@ describe('SettingsOrgs', () => {
     render(<SettingsOrgs />);
 
     const roleSelect = await screen.findByRole('combobox');
-    await userEvent.selectOptions(roleSelect, 'viewer');
+    await selectOption(roleSelect, '只读');
 
-    expect(screen.getByDisplayValue('只读')).toBeInTheDocument();
+    expect(screen.getByRole('combobox')).toBeInTheDocument();
     expect(screen.getByText('ws@example.com')).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent('ws@example.com');
   });

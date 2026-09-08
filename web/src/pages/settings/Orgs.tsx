@@ -1,3 +1,6 @@
+import { Input, Textarea, Label } from '@/components/ui';
+import { Hint } from '@/components/ui/Tooltip';
+import { Select } from '@/components/ui/Select';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Building2,
@@ -40,22 +43,7 @@ import { tr as trInline, useI18n } from '@/i18n/locale';
 const DEFAULT_ORG_NAME = '默认组织';
 const ROLE_OPTIONS: OrgRole[] = ['org_admin', 'member', 'viewer'];
 
-const ROLE_TONE: Record<OrgRole, 'info' | 'default' | 'accent'> = {
-  org_admin: 'info',
-  member: 'default',
-  // 设计稿写 viewer = subtle；项目 Chip 没有 subtle 档，用 default 但视觉再淡一点不必要——
-  // 直接 default，用户区分度足够。如果以后非要拉开，可以加 'subtle' tone。
-  viewer: 'default',
-};
 
-// Role-tinted styling for the inline editable <select> in the member
-// list. Mirrors what Chip tone="info" / default would render, so the
-// row reads as a status pill while still being editable.
-const ROLE_SELECT_CLASS: Record<OrgRole, string> = {
-  org_admin: 'border-sky-500/40 bg-sky-500/10 text-sky-300',
-  member: 'border-zinc-700 bg-zinc-800/60 text-zinc-300',
-  viewer: 'border-zinc-700 bg-zinc-800/60 text-zinc-400',
-};
 
 const ROLE_LABEL_ZH: Record<OrgRole, string> = {
   org_admin: '组织管理员',
@@ -307,11 +295,11 @@ export default function SettingsOrgs() {
         <Card className="p-3">
           <div className="mb-2 flex items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-950/60 px-2">
             <Search size={12} className="text-zinc-500" />
-            <input
+            <Input variant="inset"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={tr('搜索组织', 'Search organizations')}
-              className="flex-1 bg-transparent py-1.5 text-xs text-zinc-100 placeholder:text-zinc-600 focus:outline-none"
+              className="flex-1 py-1.5"
             />
           </div>
 
@@ -399,15 +387,15 @@ export default function SettingsOrgs() {
                     <Pencil size={11} />
                     {tr('编辑', 'Edit')}
                   </Button>
-                  <Button
+                  <Hint content={isDefaultOrg(selected) ? tr('默认组织不能删除', 'The default org cannot be deleted') : tr('删除组织', 'Delete org')}><Button
                     variant="danger"
                     onClick={() => setDelOrg(selected)}
                     disabled={isDefaultOrg(selected)}
-                    title={isDefaultOrg(selected) ? tr('默认组织不能删除', 'The default org cannot be deleted') : tr('删除组织', 'Delete org')}
+
                   >
                     <Trash2 size={11} />
                     {tr('删除', 'Delete')}
-                  </Button>
+                  </Button></Hint>
                 </div>
               </div>
 
@@ -564,25 +552,17 @@ function MemberTable({
               </td>
               <td className="px-4 py-2.5 font-mono text-[12px] text-zinc-300">{m.email}</td>
               <td className="px-4 py-2.5">
-                {/* Single editable role control — the standalone Chip
-                    that previously sat next to the select was just a
-                    duplicate read-out. Native <select> styled to match
-                    the chip tone so it still reads as a status pill at
-                    a glance. */}
-                <select
+                <Select label={tr('成员角色', 'Member role')}
                   value={m.role}
-                  onChange={(e) => onRoleChange(m, e.target.value as OrgRole)}
-                  className={cn(
-                    'rounded-md border px-2 py-1 text-xs focus:outline-none',
-                    ROLE_SELECT_CLASS[m.role],
-                  )}
+                  onValueChange={(selectedValue) => onRoleChange(m, selectedValue as OrgRole)}
+                  className="w-auto"
                 >
                   {ROLE_OPTIONS.map((r) => (
                     <option key={r} value={r} className="bg-zinc-900 text-zinc-100">
                       {ROLE_LABEL[r]}
                     </option>
                   ))}
-                </select>
+                </Select>
               </td>
               <td className="px-3 py-2.5 text-right">
                 <Button variant="danger" onClick={() => onRemove(m)} className="whitespace-nowrap">
@@ -729,24 +709,24 @@ function CreateOrgModal({
     >
       <div className="space-y-3">
         <Field label={tr('组织名', 'Org name')} required>
-          <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
+          <Input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
         </Field>
         <Field label={tr('父组织', 'Parent org')} required hint={tr('所有新建组织必须挂在默认组织或其子组织之下', 'Every new org must hang under the default org or one of its descendants')}>
-          <select
-            className={inputClass}
+          <Select label={tr('父组织', 'Parent org')}
+            className="w-full"
             value={parentId}
-            onChange={(e) => setParentId(e.target.value)}
+            onValueChange={(selectedValue) => setParentId(selectedValue)}
           >
             {flat.map((o) => (
               <option key={o.id} value={String(o.id)}>
                 {o.label}
               </option>
             ))}
-          </select>
+          </Select>
         </Field>
         <Field label={tr('描述', 'Description')}>
-          <textarea
-            className={cn(inputClass, 'min-h-[72px] resize-y')}
+          <Textarea
+            className={cn(inputClass, "min-h-[72px] resize-y")}
             value={desc}
             onChange={(e) => setDesc(e.target.value)}
           />
@@ -838,7 +818,7 @@ function EditOrgModal({
     >
       <div className="space-y-3">
         <Field label={tr('组织名', 'Org name')} required hint={isDefault ? tr('默认组织名称建议保持不变', 'Recommended to keep the default org name unchanged') : undefined}>
-          <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
+          <Input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
         </Field>
         <Field
           label={tr('父组织', 'Parent org')}
@@ -848,11 +828,11 @@ function EditOrgModal({
               : tr('所有组织必须挂在默认组织或其子组织下；自身和后代已自动排除', 'All orgs must hang under the default org or one of its descendants; self and descendants are excluded automatically')
           }
         >
-          <select
-            className={inputClass}
+          <Select label={tr('父组织', 'Parent org')}
+            className="w-full"
             value={parentId}
             disabled={target?.name === DEFAULT_ORG_NAME}
-            onChange={(e) => setParentId(e.target.value)}
+            onValueChange={(selectedValue) => setParentId(selectedValue)}
           >
             {target?.name === DEFAULT_ORG_NAME && (
               <option value="">{tr('（根组织）', '(root org)')}</option>
@@ -862,11 +842,11 @@ function EditOrgModal({
                 {o.label}
               </option>
             ))}
-          </select>
+          </Select>
         </Field>
         <Field label={tr('描述', 'Description')}>
-          <textarea
-            className={cn(inputClass, 'min-h-[72px] resize-y')}
+          <Textarea
+            className={cn(inputClass, "min-h-[72px] resize-y")}
             value={desc}
             onChange={(e) => setDesc(e.target.value)}
           />
@@ -978,11 +958,11 @@ function AddMemberModal({
       <div className="space-y-3">
         <div className="flex items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-950/60 px-2">
           <Search size={12} className="text-zinc-500" />
-          <input
+          <Input variant="inset"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={tr('搜索用户（姓名 / 邮箱）', 'Search users (name / email)')}
-            className="flex-1 bg-transparent py-1.5 text-xs text-zinc-100 placeholder:text-zinc-600 focus:outline-none"
+            className="flex-1 py-1.5"
           />
         </div>
 
@@ -1025,17 +1005,17 @@ function AddMemberModal({
         </div>
 
         <Field label={tr('角色', 'Role')}>
-          <select
-            className={inputClass}
+          <Select label={tr('角色', 'Role')}
+            className="w-full"
             value={role}
-            onChange={(e) => setRole(e.target.value as OrgRole)}
+            onValueChange={(selectedValue) => setRole(selectedValue as OrgRole)}
           >
             {ROLE_OPTIONS.map((r) => (
               <option key={r} value={r}>
                 {ROLE_LABEL[r]}
               </option>
             ))}
-          </select>
+          </Select>
         </Field>
 
         {err && (
@@ -1062,19 +1042,19 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <label className="block">
+    <Label className="block">
       <span className="mb-1 block text-[11px] text-zinc-400">
         {label}
         {required && <span className="ml-0.5 text-red-400">*</span>}
       </span>
       {children}
       {hint && <span className="mt-1 block text-[11px] text-zinc-500">{hint}</span>}
-    </label>
+    </Label>
   );
 }
 
 const inputClass =
-  'w-full rounded-md border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
+  "w-full";
 
 function errMsg(e: unknown): string {
   if (e instanceof ApiError) return e.message;

@@ -1,3 +1,6 @@
+import { Label, Input, Textarea } from '@/components/ui';
+import { Hint } from '@/components/ui/Tooltip';
+import { Checkbox } from '@/components/ui/Checkbox';
 // Agents page (Phase 1 inventory + Phase 3 user-defined CRUD).
 //
 // What's here:
@@ -130,17 +133,17 @@ export default function AgentsPage() {
       />
 
       <div className="border-b border-zinc-800/60 px-6 py-2.5">
-        <label className="relative block w-72">
+        <Label className="relative block w-72">
           <span className="sr-only">{tr('搜索', 'Search')}</span>
           <Search size={12} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
-          <input
+          <Input
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={tr('搜索 name / description', 'Search name / description')}
-            className="w-full rounded-md border border-zinc-800/60 bg-zinc-950/40 py-1.5 pl-8 pr-2 text-xs text-zinc-200 placeholder:text-zinc-500 focus:border-zinc-600 focus:outline-none"
+            className="w-full pl-8 pr-2"
           />
-        </label>
+        </Label>
       </div>
 
       <div className="flex-1 overflow-y-auto px-6 py-6">
@@ -305,15 +308,15 @@ function AgentCard({
 
   return (
     <Card className="flex cursor-pointer flex-col transition-colors hover:bg-zinc-800/40" onClick={onView}>
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0 flex items-center gap-2">
           <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-indigo-500/20 text-indigo-300 ring-1 ring-inset ring-indigo-500/40">
             <Bot size={14} />
           </span>
           <div className="min-w-0">
-            <div className="truncate text-sm font-medium text-zinc-100" title={agent.name}>
+            <Hint content={agent.name}><div className="truncate text-sm font-medium text-zinc-100" >
               {displayName}
-            </div>
+            </div></Hint>
             <div className="mt-0.5 flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-zinc-500">
               <span className="font-mono normal-case tracking-normal text-zinc-600">
                 {agent.name}
@@ -325,44 +328,44 @@ function AgentCard({
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {isUser && (
-            <button
+            <Hint content={tr('编辑', 'Edit')}><Button variant="subtle" size="sm"
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 onEdit();
               }}
-              title={tr('编辑', 'Edit')}
-              className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+
+              className="p-1"
             >
               <Pencil size={11} />
-            </button>
+            </Button></Hint>
           )}
           {canDelete && (
-            <button
+            <Hint content={isUser ? tr('删除', 'Delete') : tr('从助理列表中移除（重启后内置 persona 会自动加载回来）', 'Remove from the list (built-in personas reload automatically on restart)')}><Button variant="dangerGhost" size="sm"
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 onDelete();
               }}
-              title={isUser ? tr('删除', 'Delete') : tr('从助理列表中移除（重启后内置 persona 会自动加载回来）', 'Remove from the list (built-in personas reload automatically on restart)')}
-              className="rounded p-1 text-zinc-500 hover:bg-red-900/30 hover:text-red-300"
+
+              className="p-1"
             >
               <Trash2 size={11} />
-            </button>
+            </Button></Hint>
           )}
-          <button
+          <Hint content={tr('用此助理开新会话', 'Start a new session with this assistant')}><Button variant="plain" size="sm"
             type="button"
             onClick={(e) => {
               e.stopPropagation();
               void onUse();
             }}
             disabled={busy}
-            title={tr('用此助理开新会话', 'Start a new session with this assistant')}
-            className="ml-1 inline-flex items-center gap-1 rounded-md border border-indigo-500/40 bg-indigo-500/10 px-2 py-1 text-[11px] text-indigo-200 hover:bg-indigo-500/20 disabled:opacity-50"
+
+            className="ml-1 inline-flex items-center gap-1 px-2 py-1 border border-indigo-500/40 bg-indigo-500/10 text-indigo-200 hover:bg-indigo-500/20"
           >
             <MessageSquarePlus size={11} />
             {busy ? tr('创建中…', 'Creating…') : tr('使用此助理', 'Use this')}
-          </button>
+          </Button></Hint>
         </div>
       </div>
       {err && <div className="mt-2 text-[11px] text-red-300">{err}</div>}
@@ -441,39 +444,39 @@ function AgentDetailModal({
       title={displayName}
       footer={
         <>
-          <button
+          <Button variant="outline" size="sm"
             type="button"
             onClick={onClose}
-            className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+            className="px-3 py-1.5"
           >
             {tr('关闭', 'Close')}
-          </button>
+          </Button>
           {isUser ? (
-            <button
+            <Button variant="outline" size="sm"
               type="button"
               onClick={onEdit}
-              className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5"
             >
               <Pencil size={11} /> {tr('编辑', 'Edit')}
-            </button>
+            </Button>
           ) : (
-            <button
+            <Hint content={tr('内置 / 预置助理定义在代码 / agents/*.md，不可直接改；复制一份为自定义助理后即可编辑', 'Built-in / preset assistants are defined in code / agents/*.md and cannot be edited directly; copy into a custom assistant to edit')}><Button variant="outline" size="sm"
               type="button"
               onClick={onFork}
-              title={tr('内置 / 预置助理定义在代码 / agents/*.md，不可直接改；复制一份为自定义助理后即可编辑', 'Built-in / preset assistants are defined in code / agents/*.md and cannot be edited directly; copy into a custom assistant to edit')}
-              className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800"
+
+              className="inline-flex items-center gap-1.5 px-3 py-1.5"
             >
               <Copy size={11} /> {tr('复制为自定义助理', 'Copy as custom')}
-            </button>
+            </Button></Hint>
           )}
-          <button
+          <Button variant="primary" size="sm"
             type="button"
             onClick={() => void onUse()}
             disabled={busy}
-            className="inline-flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent/90 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 font-medium text-accent-fg"
           >
             <MessageSquarePlus size={11} /> {busy ? tr('创建中…', 'Creating…') : tr('使用此助理', 'Use this')}
-          </button>
+          </Button>
         </>
       }
     >
@@ -687,14 +690,14 @@ function AgentEditor({
       }
       footer={
         <>
-          <button
+          <Button variant="outline" size="sm"
             type="button"
             onClick={onClose}
-            className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+            className="px-3 py-1.5"
           >
             {tr('取消', 'Cancel')}
-          </button>
-          <button
+          </Button>
+          <Button variant="primary" size="sm"
             type="button"
             onClick={() => void submit()}
             disabled={
@@ -703,10 +706,10 @@ function AgentEditor({
               description.trim() === '' ||
               systemPrompt.trim() === ''
             }
-            className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent/90 disabled:opacity-50"
+            className="px-3 py-1.5 font-medium text-accent-fg"
           >
             {submitting ? tr('保存中…', 'Saving…') : tr('保存', 'Save')}
-          </button>
+          </Button>
         </>
       }
     >
@@ -718,13 +721,13 @@ function AgentEditor({
         )}
 
         <Field label={tr('名称', 'Name')} required>
-          <input
+          <Input
             type="text"
             value={name}
             disabled={mode === 'edit'}
             onChange={(e) => setName(e.target.value)}
             placeholder={tr('lower_snake 或 kebab-case，例如 my_db_assistant', 'lower_snake or kebab-case, e.g. my_db_assistant')}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 disabled:opacity-50 focus:border-zinc-600 focus:outline-none"
+            className="w-full font-mono"
             maxLength={64}
           />
           <div className="mt-1 text-[11px] text-zinc-500">
@@ -733,31 +736,31 @@ function AgentEditor({
         </Field>
 
         <Field label={tr('描述', 'Description')} required>
-          <input
+          <Input
             type="text"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder={tr('一句话说清这个助理擅长什么', 'One sentence on what this assistant is good at')}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full"
             maxLength={512}
           />
         </Field>
 
         <Field label={tr('何时使用', 'When to use')}>
-          <textarea
+          <Textarea
             value={whenToUse}
             onChange={(e) => setWhenToUse(e.target.value)}
             placeholder={tr('给 coordinator 的判断线索：什么场景把任务派给这个助理', 'Hint for the coordinator: when to delegate to this assistant')}
-            className="h-20 w-full resize-y rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="h-20 w-full resize-y"
           />
         </Field>
 
         <Field label={tr('系统提示', 'System prompt')} required>
-          <textarea
+          <Textarea
             value={systemPrompt}
             onChange={(e) => setSystemPrompt(e.target.value)}
             placeholder={tr('你是 X 专家，遇到 Y 类问题先做 Z...', 'You are an X expert; when seeing a Y problem, first do Z...')}
-            className="h-32 w-full resize-y rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="h-32 w-full resize-y font-mono"
           />
         </Field>
 
@@ -771,19 +774,19 @@ function AgentEditor({
             <div className="max-h-48 overflow-y-auto rounded-md border border-zinc-800 bg-zinc-950/40 p-2">
               <div className="grid grid-cols-2 gap-1">
                 {toolOptions.map((tool) => (
-                  <label
-                    key={tool.key}
-                    title={tool.description}
+                  <Hint key={tool.key} content={tool.description}><Label
+
+
                     className="flex min-w-0 items-center gap-1.5 rounded px-1.5 py-1 text-[11px] hover:bg-zinc-900/60"
                   >
-                    <input
-                      type="checkbox"
+                    <Checkbox
+
                       checked={allowedTools.includes(tool.key)}
-                      onChange={() => toggleTool(tool.key)}
-                      className="h-3 w-3 accent-indigo-500"
+                      onCheckedChange={() => toggleTool(tool.key)}
+                      className="h-3 w-3"
                     />
                     <span className="truncate font-mono">{tool.key}</span>
-                  </label>
+                  </Label></Hint>
                 ))}
               </div>
             </div>
@@ -795,23 +798,23 @@ function AgentEditor({
 
         <div className="grid grid-cols-2 gap-3">
           <Field label={tr('模型', 'Model')}>
-            <input
+            <Input
               type="text"
               value={model}
               onChange={(e) => setModel(e.target.value)}
               placeholder={tr('留空 = 继承', 'Empty = inherit')}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              className="w-full"
             />
           </Field>
           <Field label={tr('最大轮数', 'Max turns')}>
-            <input
+            <Input
               type="number"
               value={maxTurns || ''}
               onChange={(e) => setMaxTurns(parseInt(e.target.value, 10) || 0)}
               placeholder={tr('留空 = 继承', 'Empty = inherit')}
               min={0}
               max={100}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              className="w-full"
             />
           </Field>
         </div>
@@ -853,13 +856,13 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <label className="block">
+    <Label className="block">
       <div className="mb-1 text-[11px] font-medium uppercase tracking-wider text-zinc-400">
         {label}
         {required && <span className="ml-0.5 text-red-400">*</span>}
       </div>
       {children}
-    </label>
+    </Label>
   );
 }
 
@@ -896,21 +899,21 @@ function DeleteAgentDialog({
       title={tr(`删除助理 ${agent.name}`, `Delete assistant ${agent.name}`)}
       footer={
         <>
-          <button
+          <Button variant="outline" size="sm"
             type="button"
             onClick={onClose}
-            className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+            className="px-3 py-1.5"
           >
             {tr('取消', 'Cancel')}
-          </button>
-          <button
+          </Button>
+          <Button variant="danger" size="sm"
             type="button"
             onClick={() => void submit()}
             disabled={submitting}
-            className="rounded-md bg-red-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-600 disabled:opacity-50"
+            className="px-3 py-1.5 font-medium"
           >
             {submitting ? tr('删除中…', 'Deleting…') : tr('删除', 'Delete')}
-          </button>
+          </Button>
         </>
       }
     >

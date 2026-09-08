@@ -1,3 +1,5 @@
+import { Button } from '@/components/ui';
+import { useDialogs } from '@/components/ui/useDialogs';
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, Download, RefreshCw, Share2, Trash2 } from 'lucide-react';
@@ -10,6 +12,7 @@ import { ReportContentView } from '@/components/ReportContent';
 import { deleteReport, getReport, shareReport, type ReportDetail } from '@/api/reports';
 
 export default function ReportDetailPage() {
+  const { confirmAction, dialog } = useDialogs();
   const { id = '' } = useParams();
   const { tr } = useI18n();
   const { canMutate } = usePermissions();
@@ -40,10 +43,10 @@ export default function ReportDetailPage() {
   }, [id]);
 
   const onDelete = useCallback(async () => {
-    if (!window.confirm(tr('删除这份报告？', 'Delete this report?'))) return;
+    if (!(await confirmAction(tr('删除这份报告？', 'Delete this report?')))) return;
     await deleteReport(id);
     window.location.href = '/pages?tab=reports';
-  }, [id, tr]);
+  }, [confirmAction, id, tr]);
 
   if (loading) {
     return (
@@ -58,7 +61,7 @@ export default function ReportDetailPage() {
   }
 
   return (
-    <main className="report-print-area anim-fade flex flex-1 flex-col overflow-hidden">
+    <>{dialog}<main className="report-print-area anim-fade flex flex-1 flex-col overflow-hidden">
       <header className="app-header border-b border-zinc-800/60 px-6 py-4">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0 flex-1">
@@ -76,31 +79,31 @@ export default function ReportDetailPage() {
           </div>
           <div className="flex shrink-0 items-center gap-2 print:hidden">
             {report.status === 'ready' && (
-              <button
+              <Button variant="outline" size="sm"
                 type="button"
                 onClick={() => window.print()}
-                className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5"
               >
                 <Download size={12} /> {tr('导出 PDF', 'Export PDF')}
-              </button>
+              </Button>
             )}
             {canMutate && report.status === 'ready' && (
-              <button
+              <Button variant="outline" size="sm"
                 type="button"
                 onClick={() => void onShare()}
-                className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5"
               >
                 <Share2 size={12} /> {tr('分享', 'Share')}
-              </button>
+              </Button>
             )}
             {canMutate && (
-              <button
+              <Button variant="dangerGhost" size="sm"
                 type="button"
                 onClick={() => void onDelete()}
-                className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-400 hover:border-red-500/50 hover:text-red-300"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5"
               >
                 <Trash2 size={12} /> {tr('删除', 'Delete')}
-              </button>
+              </Button>
             )}
           </div>
         </div>
@@ -151,6 +154,6 @@ export default function ReportDetailPage() {
           )}
         </div>
       </div>
-    </main>
+    </main></>
   );
 }

@@ -1,3 +1,8 @@
+import { Label, Input, Textarea, Slider } from '@/components/ui';
+import { Hint } from '@/components/ui/Tooltip';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
+import { Select } from '@/components/ui/Select';
+import { Checkbox } from '@/components/ui/Checkbox';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
@@ -376,17 +381,17 @@ export default function EdgeDetailPage() {
   }
 
   return (
-    <main className="anim-fade flex flex-1 flex-col overflow-hidden">
+    <Tabs value={tab} onValueChange={setTab} className="contents"><main className="anim-fade flex flex-1 flex-col overflow-hidden">
         <header className="app-header flex items-center justify-between border-b border-zinc-800 px-6 py-4">
           <div className="flex min-w-0 items-center gap-3">
-            <button
+            <Button variant="subtle" size="sm"
               type="button"
               onClick={() => navigate('/edges')}
               aria-label={tr('返回设备列表', 'Back to device list')}
-              className="rounded-md p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+              className="p-1.5"
             >
               <ChevronLeft size={16} />
-            </button>
+            </Button>
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <h1 className="truncate text-base font-semibold text-zinc-100">
@@ -404,15 +409,15 @@ export default function EdgeDetailPage() {
         </header>
 
         {/* tabs */}
-        <div className="flex items-center gap-1 border-b border-zinc-800 px-6">
-          <TabBtn active={tab === 'metrics'} onClick={() => setTab('metrics')} label={tr('指标', 'Metrics')} />
-          <TabBtn active={tab === 'host'} onClick={() => setTab('host')} label={tr('主机信息', 'Host info')} />
-          <TabBtn active={tab === 'plugins'} onClick={() => setTab('plugins')} label={tr('插件', 'Plugins')} />
-          <TabBtn active={tab === 'topology'} onClick={() => setTab('topology')} label={tr('拓扑', 'Topology')} />
-          <TabBtn active={tab === 'meta'} onClick={() => setTab('meta')} label={tr('元数据', 'Metadata')} />
-        </div>
+        <TabsList className="flex items-center gap-1 border-b border-zinc-800 px-6">
+          <TabsTrigger value={'metrics'}>{tr('指标', 'Metrics')}</TabsTrigger>
+          <TabsTrigger value={'host'}>{tr('主机信息', 'Host info')}</TabsTrigger>
+          <TabsTrigger value={'plugins'}>{tr('插件', 'Plugins')}</TabsTrigger>
+          <TabsTrigger value={'topology'}>{tr('拓扑', 'Topology')}</TabsTrigger>
+          <TabsTrigger value={'meta'}>{tr('元数据', 'Metadata')}</TabsTrigger>
+        </TabsList>
 
-        <div className="flex-1 overflow-y-auto px-6 py-5">
+        <TabsContent value={tab} className="contents"><div className="flex-1 overflow-y-auto px-6 py-5">
           {edgeErr && (
             <div
               role="alert"
@@ -533,8 +538,8 @@ export default function EdgeDetailPage() {
               empty={tr('加载中…', 'Loading…')}
             />
           )}
-        </div>
-      </main>
+        </div></TabsContent>
+      </main></Tabs>
   );
 }
 
@@ -620,17 +625,17 @@ function NetworkDevicePage({
   };
 
   return (
-    <main className="anim-fade flex min-w-0 flex-1 flex-col overflow-hidden">
+    <Tabs value={tab} onValueChange={selectTab} className="contents"><main className="anim-fade flex min-w-0 flex-1 flex-col overflow-hidden">
       <header className="app-header flex items-center justify-between border-b border-zinc-800 px-6 py-4">
         <div className="flex min-w-0 items-center gap-3">
-          <button
+          <Button variant="subtle" size="sm"
             type="button"
             onClick={onBack}
             aria-label={tr('返回设备列表', 'Back to device list')}
-            className="rounded-md p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+            className="p-1.5"
           >
             <ChevronLeft size={16} />
-          </button>
+          </Button>
           <span className="rounded-md border border-sky-500/20 bg-sky-500/10 p-2 text-sky-400">
             <Network size={16} />
           </span>
@@ -656,14 +661,14 @@ function NetworkDevicePage({
         </div>
       </header>
 
-      <div className="flex items-center gap-1 border-b border-zinc-800 px-6">
-        <TabBtn active={tab === 'overview'} onClick={() => selectTab('overview')} label={tr('概览', 'Overview')} />
-        <TabBtn active={tab === 'interfaces'} onClick={() => selectTab('interfaces')} label={tr('接口', 'Interfaces')} />
-        <TabBtn active={tab === 'topology'} onClick={() => selectTab('topology')} label={tr('拓扑', 'Topology')} />
-        <TabBtn active={tab === 'meta'} onClick={() => selectTab('meta')} label={tr('元数据', 'Metadata')} />
-      </div>
+      <TabsList className="flex items-center gap-1 border-b border-zinc-800 px-6">
+        <TabsTrigger value={'overview'}>{tr('概览', 'Overview')}</TabsTrigger>
+        <TabsTrigger value={'interfaces'}>{tr('接口', 'Interfaces')}</TabsTrigger>
+        <TabsTrigger value={'topology'}>{tr('拓扑', 'Topology')}</TabsTrigger>
+        <TabsTrigger value={'meta'}>{tr('元数据', 'Metadata')}</TabsTrigger>
+      </TabsList>
 
-      <div className="flex-1 overflow-y-auto px-6 py-5">
+      <TabsContent value={tab} className="contents"><div className="flex-1 overflow-y-auto px-6 py-5">
         {error && (
           <div role="alert" className="mb-4 rounded-md border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-300">
             {error}
@@ -691,7 +696,7 @@ function NetworkDevicePage({
             <section className="overflow-hidden rounded-lg border border-zinc-800/60 bg-zinc-900/40">
               <div className="flex items-center justify-between border-b border-zinc-800/60 px-4 py-3">
                 <h2 className="text-sm font-medium text-zinc-100">{tr('SNMP 轮询', 'SNMP polling')}</h2>
-                {isAdmin && <button type="button" onClick={() => void openPolling()} className="text-xs text-indigo-300 hover:text-indigo-200">{tr('配置', 'Configure')}</button>}
+                {isAdmin && <Button variant="subtle" size="sm" type="button" onClick={() => void openPolling()} className="text-indigo-300">{tr('配置', 'Configure')}</Button>}
               </div>
               <dl className="grid grid-cols-1 divide-y divide-zinc-800/50 md:grid-cols-3 md:divide-y-0">
                 <NetworkDetailField label={tr('状态', 'Status')} value={detail?.poll_enabled ? tr('已启用', 'Enabled') : tr('未启用', 'Disabled')} />
@@ -738,13 +743,13 @@ function NetworkDevicePage({
       <Modal open={pollingOpen} onClose={() => setPollingOpen(false)} title={tr('配置 SNMP 轮询', 'Configure SNMP polling')} size="sm" footer={<><Button onClick={() => setPollingOpen(false)}>{tr('取消', 'Cancel')}</Button><Button variant="primary" disabled={pollBusy} onClick={() => void savePolling()}>{pollBusy ? tr('保存中…', 'Saving…') : tr('保存', 'Save')}</Button></>}>
         <div className="space-y-4 text-xs">
           {pollError && <div role="alert" className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-red-300">{pollError}</div>}
-          <label className="flex items-center gap-2 text-zinc-300"><input type="checkbox" checked={pollEnabled} onChange={(event) => setPollEnabled(event.target.checked)} />{tr('启用定时采集', 'Enable scheduled collection')}</label>
-          <label className="block text-zinc-400">{tr('SNMP 凭证', 'SNMP credential')}<select disabled={!pollEnabled} value={credentialName} onChange={(event) => setCredentialName(event.target.value)} className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-2.5 py-2 text-zinc-100"><option value="">{tr('选择设置中的 SNMP 凭证', 'Select an SNMP credential')}</option>{secrets.map((secret) => <option key={secret.id} value={secret.name}>{secret.name}</option>)}</select></label>
-          <label className="block text-zinc-400">{tr('轮询间隔（秒）', 'Polling interval (seconds)')}<input type="number" min={30} max={86400} value={pollInterval} onChange={(event) => setPollInterval(Number(event.target.value))} disabled={!pollEnabled} className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-2.5 py-2 font-mono text-zinc-100" /></label>
+          <Label className="flex items-center gap-2 text-zinc-300"><Checkbox  checked={pollEnabled} onCheckedChange={(checkedValue) => setPollEnabled(checkedValue)} />{tr('启用定时采集', 'Enable scheduled collection')}</Label>
+          <Label className="block text-zinc-400">{tr('SNMP 凭证', 'SNMP credential')}<Select disabled={!pollEnabled} value={credentialName} onValueChange={(selectedValue) => setCredentialName(selectedValue)} className="mt-1 w-full"><option value="">{tr('选择设置中的 SNMP 凭证', 'Select an SNMP credential')}</option>{secrets.map((secret) => <option key={secret.id} value={secret.name}>{secret.name}</option>)}</Select></Label>
+          <Label className="block text-zinc-400">{tr('轮询间隔（秒）', 'Polling interval (seconds)')}<Input type="number" min={30} max={86400} value={pollInterval} onChange={(event) => setPollInterval(Number(event.target.value))} disabled={!pollEnabled} className="mt-1 w-full font-mono" /></Label>
           {pollEnabled && secrets.length === 0 && <p className="text-zinc-500">{tr('先在 设置 → Secrets 创建 SNMP 凭证。', 'Create an SNMP credential in Settings → Secrets first.')}</p>}
         </div>
-      </Modal>
-    </main>
+      </Modal></TabsContent>
+    </main></Tabs>
   );
 }
 
@@ -907,31 +912,7 @@ function matrixToPanel(
   return { rows, series };
 }
 
-function TabBtn({
-  active,
-  onClick,
-  label,
-}: {
-  active: boolean;
-  onClick(): void;
-  label: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={cn(
-        'border-b-2 px-3 py-2.5 text-sm transition-colors',
-        active
-          ? 'border-zinc-100 text-zinc-100'
-          : 'border-transparent text-zinc-400 hover:text-zinc-200',
-      )}
-    >
-      {label}
-    </button>
-  );
-}
+
 
 function MultiLinePanel({
   title,
@@ -978,14 +959,14 @@ function MultiLinePanel({
           </div>
         </div>
         {onOpenDrilldown && (
-          <button
+          <Button variant="outline" size="sm"
             type="button"
             onClick={onOpenDrilldown}
-            className="inline-flex shrink-0 items-center gap-1 rounded-md border border-zinc-700 px-2 py-1 text-[11px] text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-zinc-800 hover:text-zinc-100"
+            className="inline-flex shrink-0 items-center gap-1 px-2 py-1 transition-colors"
           >
             <ExternalLink size={12} />
             <span>{tr('查看图表', 'View chart')}</span>
-          </button>
+          </Button>
         )}
       </div>
 
@@ -1057,15 +1038,15 @@ function MultiLinePanel({
             const isSelected = s.key === selectedSeriesKey;
             const stateLabel = isSelected ? tr('已选中', 'Selected') : tr('正常', 'Normal');
             return (
-              <button
-                key={s.key}
+              <Hint key={s.key} content={tr(
+                  '点击只看此序列；再次点击恢复全部',
+                  'Click to show only this series; click again to restore all',
+                )}><Button variant="plain" size="sm"
+
                 type="button"
                 aria-label={`${s.label} · ${stateLabel}`}
                 aria-pressed={isSelected}
-                title={tr(
-                  '点击只看此序列；再次点击恢复全部',
-                  'Click to show only this series; click again to restore all',
-                )}
+
                 onClick={() => onToggle(s.key)}
                 className={cn(
                   'inline-flex items-center gap-1.5 rounded-md border px-1.5 py-0.5 text-[11px] transition-colors',
@@ -1079,7 +1060,7 @@ function MultiLinePanel({
                   style={{ backgroundColor: s.color }}
                 />
                 <span className="font-mono">{s.label}</span>
-              </button>
+              </Button></Hint>
             );
           })}
         </div>
@@ -1584,15 +1565,15 @@ function PluginCard({
                 : meta.hint}
             </div>
             {!isMetricsBuiltin && health?.last_error && (
-              <div
+              <Hint content={health.last_error}><div
                 className="mt-0.5 truncate text-[11px] text-rose-400"
-                title={health.last_error}
+
               >
                 {health.last_error}
                 {health.restart_count
                   ? tr(` · 重启 ${health.restart_count} 次`, ` · ${health.restart_count} restarts`)
                   : ''}
-              </div>
+              </div></Hint>
             )}
           </div>
         </div>
@@ -1602,7 +1583,7 @@ function PluginCard({
               always on
             </span>
           ) : (
-            <button
+            <Button variant="subtle" size="sm"
               type="button"
               onClick={() => void toggle()}
               className={cn(
@@ -1613,16 +1594,16 @@ function PluginCard({
               )}
             >
               {row.enabled ? 'enabled' : 'disabled'}
-            </button>
+            </Button>
           )}
           {/* The expand chevron is also shown for metrics when it has
               child collectors, so
               operators can reach those without an Edit-config target. */}
           {(!isMetricsBuiltin || children.length > 0) && (
-            <button
+            <Button variant="outline" size="sm"
               type="button"
               onClick={onToggleExpand}
-              className="inline-flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-[11px] text-zinc-200 hover:bg-zinc-800"
+              className="inline-flex items-center gap-1 px-2 py-1"
             >
               {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
               <span>
@@ -1630,7 +1611,7 @@ function PluginCard({
                   ? tr(`子插件（${children.length}）`, `Sub-plugins (${children.length})`)
                   : tr('编辑配置', 'Edit config')}
               </span>
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -1722,7 +1703,7 @@ function PluginSubCard({
           >
             {stateLabel}
           </span>
-          <button
+          <Button variant="subtle" size="sm"
             type="button"
             onClick={() => void toggle()}
             className={cn(
@@ -1733,27 +1714,27 @@ function PluginSubCard({
             )}
           >
             {row.enabled ? 'enabled' : 'disabled'}
-          </button>
-          <button
+          </Button>
+          <Button variant="outline" size="sm"
             type="button"
             onClick={() => setEditing((v) => !v)}
-            className="inline-flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-200 hover:bg-zinc-800"
+            className="inline-flex items-center gap-1 px-2 py-0.5"
           >
             {editing ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
             <span>{tr('配置', 'Config')}</span>
-          </button>
+          </Button>
         </div>
       </div>
       {health?.last_error && (
-        <div
+        <Hint content={health.last_error}><div
           className="border-t border-zinc-800 px-3 py-2 text-[11px] text-rose-400"
-          title={health.last_error}
+
         >
           {health.last_error}
           {health.restart_count
             ? tr(` · 重启 ${health.restart_count} 次`, ` · ${health.restart_count} restarts`)
             : ''}
-        </div>
+        </div></Hint>
       )}
       {editing && (
         <div className="border-t border-zinc-800 px-3 py-3">
@@ -1827,9 +1808,9 @@ function SourceConfigRow({
           </div>
           {subtitle && <div className="mt-0.5 truncate text-[11px] text-zinc-500">{subtitle}</div>}
           {health?.last_error && (
-            <div className="mt-0.5 truncate text-[11px] text-rose-400" title={health.last_error}>
+            <Hint content={health.last_error}><div className="mt-0.5 truncate text-[11px] text-rose-400" >
               {health.last_error}
-            </div>
+            </div></Hint>
           )}
         </div>
       </button>
@@ -1843,15 +1824,15 @@ function SourceConfigRow({
           </div>
         )}
         {onRemove && (
-          <button
+          <Hint content={tr('移除采集源', 'Remove source')}><Button variant="plain" size="sm"
             type="button"
             onClick={onRemove}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-red-500/30 bg-red-500/10 text-red-300 shadow-sm hover:border-red-500/40 hover:bg-red-500/15 hover:text-red-200 focus:outline-none focus:ring-2 focus:ring-red-500/30"
+            className="inline-flex h-8 w-8 items-center justify-center border border-red-500/30 bg-red-500/10 text-red-300 hover:border-red-500/40 hover:bg-red-500/15 hover:text-red-200"
             aria-label={tr('移除采集源', 'Remove source')}
-            title={tr('移除采集源', 'Remove source')}
+
           >
             <Trash2 size={15} />
-          </button>
+          </Button></Hint>
         )}
       </div>
     </div>
@@ -1973,7 +1954,7 @@ function PluginSpecEditor({
         </div>
         {supportsForm && allowJSON && (
           <div className="inline-flex rounded-md border border-zinc-800 bg-zinc-950 p-0.5 text-[11px]">
-            <button
+            <Button variant="subtle" size="sm"
               type="button"
               onClick={() => setMode('form')}
               className={cn(
@@ -1982,8 +1963,8 @@ function PluginSpecEditor({
               )}
             >
               {tr('表单', 'Form')}
-            </button>
-            <button
+            </Button>
+            <Button variant="subtle" size="sm"
               type="button"
               onClick={() => {
                 // When jumping into JSON mode, snapshot the current form
@@ -1997,7 +1978,7 @@ function PluginSpecEditor({
               )}
             >
               JSON
-            </button>
+            </Button>
           </div>
         )}
       </div>
@@ -2016,7 +1997,7 @@ function PluginSpecEditor({
       )}
       {mode === 'json' && (
         <div>
-          <textarea
+          <Textarea
             value={jsonText}
             onChange={(e) => {
               setJsonText(e.target.value);
@@ -2025,22 +2006,22 @@ function PluginSpecEditor({
             }}
             spellCheck={false}
             rows={10}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 font-mono text-[11px] text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full font-mono"
           />
           {jsonErr && <div className="mt-1 text-[11px] text-red-400">{jsonErr}</div>}
         </div>
       )}
 
       <div className="flex items-center gap-3">
-        <button
+        <Button variant="primary" size="sm"
           type="button"
           onClick={() => void submit()}
           disabled={saving}
-          className="inline-flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent/90 disabled:opacity-50"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 font-medium text-accent-fg"
         >
           {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
           <span>{saving ? tr('保存中…', 'Saving…') : tr('保存', 'Save')}</span>
-        </button>
+        </Button>
         <span className="text-[11px] text-zinc-500">
           {tr('保存后通过 tunnel 推到 edge，supervisor diff 后 reload subprocess', 'On save, pushed to the edge via tunnel; the supervisor diffs and reloads the subprocess')}
         </span>
@@ -2078,13 +2059,13 @@ function StringListField({
     <div>
       <div className="mb-1 flex items-center justify-between">
         <span className="text-xs text-zinc-400">{label}</span>
-        <button
+        <Button variant="subtle" size="sm"
           type="button"
           onClick={() => onChange([...values, ''])}
-          className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-200"
+          className="inline-flex items-center gap-1"
         >
           <Plus size={11} /> {tr('添加', 'Add')}
-        </button>
+        </Button>
       </div>
       {values.length === 0 && (
         <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-[11px] text-zinc-500">
@@ -2094,22 +2075,22 @@ function StringListField({
       <div className="space-y-1.5">
         {values.map((v, i) => (
           <div key={i} className="flex items-center gap-2">
-            <input
+            <Input
               value={v}
               onChange={(e) =>
                 onChange(values.map((x, idx) => (idx === i ? e.target.value : x)))
               }
               placeholder={placeholder}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 font-mono text-[11px] text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              className="w-full font-mono"
             />
-            <button
+            <Button variant="dangerGhost" size="sm"
               type="button"
               onClick={() => onChange(values.filter((_, idx) => idx !== i))}
-              className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-red-400"
+              className="p-1"
               aria-label={tr('移除', 'Remove')}
             >
               <Trash2 size={11} />
-            </button>
+            </Button>
           </div>
         ))}
       </div>
@@ -2160,13 +2141,13 @@ function StringMapField({
     <div>
       <div className="mb-1 flex items-center justify-between">
         <span className="text-xs text-zinc-400">{label}</span>
-        <button
+        <Button variant="subtle" size="sm"
           type="button"
           onClick={() => onChange({ ...values, '': '' })}
-          className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-200"
+          className="inline-flex items-center gap-1"
         >
           <Plus size={11} /> {tr('添加 label', 'Add label')}
-        </button>
+        </Button>
       </div>
       {entries.length === 0 && (
         <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-[11px] text-zinc-500">
@@ -2176,7 +2157,7 @@ function StringMapField({
       <div className="space-y-1.5">
         {entries.map(([k, v]) => (
           <div key={k} className="flex items-center gap-2">
-            <input
+            <Input
               value={k}
               onChange={(e) => {
                 const nextKey = e.target.value;
@@ -2188,27 +2169,27 @@ function StringMapField({
                 onChange(next);
               }}
               placeholder="service"
-              className="w-32 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 font-mono text-[11px] text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              className="w-32 font-mono"
             />
             <span className="text-[11px] text-zinc-500">=</span>
-            <input
+            <Input
               value={v}
               onChange={(e) => onChange({ ...values, [k]: e.target.value })}
               placeholder="api"
-              className="flex-1 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 font-mono text-[11px] text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              className="flex-1 font-mono"
             />
-            <button
+            <Button variant="dangerGhost" size="sm"
               type="button"
               onClick={() => {
                 const next = { ...values };
                 delete next[k];
                 onChange(next);
               }}
-              className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-red-400"
+              className="p-1"
               aria-label={tr('移除 label', 'Remove label')}
             >
               <Trash2 size={11} />
-            </button>
+            </Button>
           </div>
         ))}
       </div>
@@ -2267,13 +2248,13 @@ function CustomMetricsSpecForm({
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div className="text-xs text-zinc-400">{tr('自定义采集源', 'Custom scrape sources')}</div>
-        <button
+        <Button variant="outline" size="sm"
           type="button"
           onClick={addTarget}
-          className="inline-flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-[11px] text-zinc-200 hover:bg-zinc-800"
+          className="inline-flex items-center gap-1 px-2 py-1"
         >
           <Plus size={11} /> {tr('添加新配置', 'Add config')}
-        </button>
+        </Button>
       </div>
       {targets.length === 0 && (
         <div className="rounded-md border border-dashed border-zinc-800 px-3 py-3 text-[11px] text-zinc-500">
@@ -2357,15 +2338,15 @@ function CustomTargetEditor({
   return (
     <div className="rounded-md border border-zinc-800 bg-zinc-950/40 p-3">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <label className="flex items-center gap-2 text-[12px] text-zinc-300">
-          <input
-            type="checkbox"
+        <Label className="flex items-center gap-2 text-[12px] text-zinc-300">
+          <Checkbox
+
             checked={enabled}
-            onChange={(e) => setField('enabled', e.target.checked)}
-            className="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-900"
+            onCheckedChange={(checkedValue) => setField('enabled', checkedValue)}
+            className="h-3.5 w-3.5"
           />
           {tr('启用', 'Enabled')}
-        </label>
+        </Label>
       </div>
       <div className="grid gap-3 md:grid-cols-2">
         <SpecInput label="id" value={id} placeholder="service-api" onChange={(v) => setField('id', v)} />
@@ -2428,12 +2409,12 @@ function CustomTargetEditor({
           </div>
         </div>
         <div className="grid gap-3 md:grid-cols-2">
-          <label>
+          <Label>
             <span className="mb-1 block text-xs text-zinc-400">resource.category</span>
-            <select
+            <Select
               value={selectedResourceCategory}
-              onChange={(e) => setResourceCategory(e.target.value)}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 font-mono text-[11px] text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              onValueChange={(selectedValue) => setResourceCategory(selectedValue)}
+              className="w-full font-mono"
             >
               <option value="">{tr('不分类', 'Unclassified')}</option>
               {RESOURCE_CATEGORY_OPTIONS.map((option) => (
@@ -2441,15 +2422,15 @@ function CustomTargetEditor({
                   {option.label}
                 </option>
               ))}
-            </select>
-          </label>
+            </Select>
+          </Label>
           {selectedResourceCategory === 'database' && (
-            <label>
+            <Label>
               <span className="mb-1 block text-xs text-zinc-400">resource.type</span>
-              <select
+              <Select
                 value={selectedDBType}
-                onChange={(e) => setDatabaseType(e.target.value)}
-                className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 font-mono text-[11px] text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                onValueChange={(selectedValue) => setDatabaseType(selectedValue)}
+                className="w-full font-mono"
               >
                 <option value="">{tr('选择数据库类型', 'Select database type')}</option>
                 {DB_TYPE_OPTIONS.map((option) => (
@@ -2457,8 +2438,8 @@ function CustomTargetEditor({
                     {option.id}
                   </option>
                 ))}
-              </select>
-            </label>
+              </Select>
+            </Label>
           )}
         </div>
       </div>
@@ -3318,17 +3299,17 @@ function DatabaseMetricsSpecForm({
             {tr('在这里填写连接信息；保存时通过 tunnel 一次性下发给 edge 写入本机 secret，manager 不保存明文密码。', 'Fill connection info here. On save it is sent once through the tunnel so the edge writes a local secret; the manager does not store plaintext passwords.')}
           </div>
         </div>
-        <button
+        <Button variant="outline" size="sm"
           type="button"
           onClick={() => {
             setChoosingType((v) => !v);
             setOpenIndex(null);
           }}
-          className="inline-flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-[11px] text-zinc-200 hover:bg-zinc-800"
+          className="inline-flex items-center gap-1 px-2 py-1"
         >
           {choosingType ? <ChevronDown size={11} /> : <Plus size={11} />}
           {choosingType ? tr('收起类型', 'Hide types') : tr('添加新配置', 'Add config')}
-        </button>
+        </Button>
       </div>
       {choosingType && (
         <div className="rounded-md border border-zinc-800 bg-zinc-950/40 p-3">
@@ -3454,30 +3435,30 @@ function DatabaseSourceEditor({
   return (
     <div className="space-y-4 rounded-md border border-zinc-800 bg-zinc-950/40 p-4">
       <SpecSection title={tr('基础配置', 'Basic config')}>
-        <label className="flex items-center gap-2 text-[12px] text-zinc-300">
-          <input
-            type="checkbox"
+        <Label className="flex items-center gap-2 text-[12px] text-zinc-300">
+          <Checkbox
+
             checked={enabled}
-            onChange={(e) => setField('enabled', e.target.checked)}
-            className="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-900"
+            onCheckedChange={(checkedValue) => setField('enabled', checkedValue)}
+            className="h-3.5 w-3.5"
           />
           {tr('启用', 'Enabled')}
-        </label>
+        </Label>
         <div className="grid gap-3 md:grid-cols-3">
           <SpecInput label="id" value={id} placeholder="mysql-prod" onChange={(v) => setField('id', v)} />
           <SpecInput label="name" value={name} placeholder="mysql-prod" onChange={(v) => setField('name', v)} />
           <div>
-            <label className="mb-1 block text-xs text-zinc-400">db_type</label>
-            <select
+            <Label className="mb-1 block text-xs text-zinc-400">db_type</Label>
+            <Select label="db_type"
               value={dbType}
-              onChange={(e) => setDBType(e.target.value)}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 font-mono text-[11px] text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              onValueChange={(selectedValue) => setDBType(selectedValue)}
+              className="w-full font-mono"
             >
               <option value="mysql">mysql</option>
               <option value="postgresql">postgresql</option>
               <option value="redis">redis</option>
               <option value="mongodb">mongodb</option>
-            </select>
+            </Select>
           </div>
         </div>
         <div className="grid gap-3 md:grid-cols-2">
@@ -3526,13 +3507,13 @@ function DatabaseSourceEditor({
             <div className="mt-1 text-[11px] text-amber-200/80">
               {tr('点击后重新填写 host / port / TLS 等信息；密码仍只用于保存，不会回显。', 'Refill host / port / TLS fields; the password is still used only for saving and is not shown.')}
             </div>
-            <button
+            <Button variant="outline" size="sm"
               type="button"
               onClick={() => setCredentials(credentialTemplate)}
-              className="mt-2 inline-flex items-center gap-1 rounded-md border border-amber-500/40 px-2 py-1 text-[11px] text-amber-100 hover:bg-amber-500/10"
+              className="mt-2 inline-flex items-center gap-1 px-2 py-1 text-amber-100"
             >
               <Plus size={11} /> {tr('重新填写连接信息', 'Refill connection info')}
-            </button>
+            </Button>
           </div>
         )}
       </SpecSection>
@@ -3849,12 +3830,12 @@ function ExporterBooleanGrid({
   return (
     <div className="grid gap-2 md:grid-cols-2">
       {options.map((option) => (
-        <label key={option.id} className="flex gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 hover:border-zinc-700">
-          <input
-            type="checkbox"
+        <Label key={option.id} className="flex gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 hover:border-zinc-700">
+          <Checkbox
+
             checked={exporterBool(exporter, option.id, option.defaultValue)}
-            onChange={(e) => onChange(option.id, e.target.checked)}
-            className="mt-0.5 h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-900"
+            onCheckedChange={(checkedValue) => onChange(option.id, checkedValue)}
+            className="mt-0.5 h-3.5 w-3.5"
           />
           <span className="min-w-0">
             <span className="flex flex-wrap items-center gap-1.5">
@@ -3867,7 +3848,7 @@ function ExporterBooleanGrid({
             </span>
             <span className="mt-1 block text-[10px] leading-4 text-zinc-500">{tr(option.hintZh, option.hintEn)}</span>
           </span>
-        </label>
+        </Label>
       ))}
     </div>
   );
@@ -3900,24 +3881,24 @@ function ExporterCollectorField({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-[11px] text-zinc-500">{emptyHint}</div>
         <div className="flex items-center gap-2">
-          <button type="button" onClick={() => onChange([...defaultValues])} className="rounded-md border border-zinc-700 px-2 py-1 text-[11px] text-zinc-300 hover:bg-zinc-900">
+          <Button variant="outline" size="sm" type="button" onClick={() => onChange([...defaultValues])} className="px-2 py-1">
             {tr('恢复默认', 'Reset default')}
-          </button>
-          <button type="button" onClick={() => onChange([])} className="rounded-md border border-zinc-700 px-2 py-1 text-[11px] text-zinc-300 hover:bg-zinc-900">
+          </Button>
+          <Button variant="outline" size="sm" type="button" onClick={() => onChange([])} className="px-2 py-1">
             {tr('清空', 'Clear')}
-          </button>
+          </Button>
         </div>
       </div>
       <div className="grid gap-2 md:grid-cols-2">
         {options.map((option) => {
           const checked = selected.has(option.id);
           return (
-            <label key={option.id} className="flex gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 hover:border-zinc-700">
-              <input
-                type="checkbox"
+            <Label key={option.id} className="flex gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 hover:border-zinc-700">
+              <Checkbox
+
                 checked={checked}
-                onChange={(e) => toggle(option.id, e.target.checked)}
-                className="mt-0.5 h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-900"
+                onCheckedChange={(checkedValue) => toggle(option.id, checkedValue)}
+                className="mt-0.5 h-3.5 w-3.5"
               />
               <span className="min-w-0">
                 <span className="flex flex-wrap items-center gap-1.5">
@@ -3930,7 +3911,7 @@ function ExporterCollectorField({
                 </span>
                 <span className="mt-1 block text-[10px] leading-4 text-zinc-500">{tr(option.hintZh, option.hintEn)}</span>
               </span>
-            </label>
+            </Label>
           );
         })}
       </div>
@@ -4028,20 +4009,20 @@ function DatabaseCredentialsEditor({
           onChange={(v) => setCredential('database', v)}
         />
         {dbType === 'postgresql' && (
-          <label>
+          <Label>
             <span className="mb-1 block text-xs text-zinc-400">sslmode</span>
-            <select
+            <Select
               value={POSTGRES_SSLMODE_OPTIONS.includes(value('sslmode') as (typeof POSTGRES_SSLMODE_OPTIONS)[number]) ? value('sslmode') : 'disable'}
-              onChange={(e) => setPostgresSSLMode(e.target.value)}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 font-mono text-[11px] text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              onValueChange={(selectedValue) => setPostgresSSLMode(selectedValue)}
+              className="w-full font-mono"
             >
               {POSTGRES_SSLMODE_OPTIONS.map((mode) => (
                 <option key={mode} value={mode}>
                   {mode}
                 </option>
               ))}
-            </select>
-          </label>
+            </Select>
+          </Label>
         )}
         {dbType === 'mongodb' && (
           <SpecInput label="auth_source" value={value('auth_source')} placeholder="admin" onChange={(v) => setCredential('auth_source', v)} />
@@ -4049,24 +4030,24 @@ function DatabaseCredentialsEditor({
       </div>
       <div className="mt-3 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2">
         <div className="flex flex-wrap items-center gap-4">
-          <label className="flex items-center gap-2 text-[12px] text-zinc-300">
-            <input
-              type="checkbox"
+          <Label className="flex items-center gap-2 text-[12px] text-zinc-300">
+            <Checkbox
+
               checked={tlsEnabled}
-              onChange={(e) => setCredentialBool('tls_enabled', e.target.checked)}
-              className="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-900"
+              onCheckedChange={(checkedValue) => setCredentialBool('tls_enabled', checkedValue)}
+              className="h-3.5 w-3.5"
             />
             TLS / SSL
-          </label>
-          <label className="flex items-center gap-2 text-[12px] text-zinc-300">
-            <input
-              type="checkbox"
+          </Label>
+          <Label className="flex items-center gap-2 text-[12px] text-zinc-300">
+            <Checkbox
+
               checked={skipVerify}
-              onChange={(e) => setCredentialBool('tls_skip_verify', e.target.checked)}
-              className="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-900"
+              onCheckedChange={(checkedValue) => setCredentialBool('tls_skip_verify', checkedValue)}
+              className="h-3.5 w-3.5"
             />
             {tr('跳过证书校验', 'Skip verification')}
-          </label>
+          </Label>
         </div>
         {showTLSFiles && (
           <>
@@ -4126,17 +4107,17 @@ function SpecInput({
   onChange(value: string): void;
 }) {
   return (
-    <label>
+    <Label>
       <span className="mb-1 block text-xs text-zinc-400">{label}</span>
-      <input
+      <Input
         type={type}
         value={value}
         placeholder={placeholder}
         autoComplete={type === 'password' ? 'new-password' : undefined}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 font-mono text-[11px] text-zinc-100 focus:border-zinc-600 focus:outline-none"
+        className="w-full font-mono"
       />
-    </label>
+    </Label>
   );
 }
 
@@ -4150,16 +4131,16 @@ function SpecNumberInput({
   onChange(value: number): void;
 }) {
   return (
-    <label>
+    <Label>
       <span className="mb-1 block text-xs text-zinc-400">{label}</span>
-      <input
+      <Input
         type="number"
         min={0}
         value={Number.isFinite(value) ? value : 0}
         onChange={(e) => onChange(Number(e.target.value || 0))}
-        className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 font-mono text-[11px] text-zinc-100 focus:border-zinc-600 focus:outline-none"
+        className="w-full font-mono"
       />
-    </label>
+    </Label>
   );
 }
 
@@ -4204,12 +4185,12 @@ function LogsSpecForm({
           'filelog include glob for app-specific logs. System logs come from journald (on by default below) — no need to add /var/log/syslog here; use this for nginx access logs, app log files, etc.',
         )}
       />
-      <label className="flex items-start gap-2 rounded-md border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-300">
-        <input
-          type="checkbox"
+      <Label className="flex items-start gap-2 rounded-md border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-300">
+        <Checkbox
+
           checked={enableJournald}
-          onChange={(e) => setEnableJournald(e.target.checked)}
-          className="mt-0.5 h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-900 accent-emerald-500"
+          onCheckedChange={(checkedValue) => setEnableJournald(checkedValue)}
+          className="mt-0.5 h-3.5 w-3.5"
         />
         <span>
           <span className="block font-medium text-zinc-100">{tr('采集 journald (systemd 单元日志) — 默认开', 'Collect journald (systemd unit logs) — on by default')}</span>
@@ -4217,7 +4198,7 @@ function LogsSpecForm({
             {tr('默认日志源:每条按 unit 标签区分服务,自带轮转,systemd 系普遍可用。关掉则回退 tail /var/log/syslog。', 'Default log source: each entry is tagged by `unit` so services are separable, self-rotating, available on all systemd hosts. Turn off to fall back to tailing /var/log/syslog.')}
           </span>
         </span>
-      </label>
+      </Label>
       {enableJournald && (
         <StringListField
           label="journald_units"
@@ -4230,13 +4211,13 @@ function LogsSpecForm({
       <div>
         <div className="mb-1 flex items-center justify-between">
           <span className="text-xs text-zinc-400">extra_labels</span>
-          <button
+          <Button variant="subtle" size="sm"
             type="button"
             onClick={() => setLabels({ ...extraLabels, '': '' })}
-            className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-200"
+            className="inline-flex items-center gap-1"
           >
             <Plus size={11} /> {tr('添加 label', 'Add label')}
-          </button>
+          </Button>
         </div>
         {labelEntries.length === 0 && (
           <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-[11px] text-zinc-500">
@@ -4246,7 +4227,7 @@ function LogsSpecForm({
         <div className="space-y-1.5">
           {labelEntries.map(([k, v]) => (
             <div key={k} className="flex items-center gap-2">
-              <input
+              <Input
                 value={k}
                 onChange={(e) => {
                   const nextKey = e.target.value;
@@ -4258,27 +4239,27 @@ function LogsSpecForm({
                   setLabels(next);
                 }}
                 placeholder="service"
-                className="w-32 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 font-mono text-[11px] text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                className="w-32 font-mono"
               />
               <span className="text-[11px] text-zinc-500">=</span>
-              <input
+              <Input
                 value={v}
                 onChange={(e) => setLabels({ ...extraLabels, [k]: e.target.value })}
                 placeholder="myapp"
-                className="flex-1 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 font-mono text-[11px] text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                className="flex-1 font-mono"
               />
-              <button
+              <Button variant="dangerGhost" size="sm"
                 type="button"
                 onClick={() => {
                   const next = { ...extraLabels };
                   delete next[k];
                   setLabels(next);
                 }}
-                className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-red-400"
+                className="p-1"
                 aria-label={tr('移除 label', 'Remove label')}
               >
                 <Trash2 size={11} />
-              </button>
+              </Button>
             </div>
           ))}
         </div>
@@ -4320,8 +4301,8 @@ function TracesSpecForm({
       <div>
         <span className="mb-1 block text-xs text-zinc-400">{tr('sampling_rate（head sampling）', 'sampling_rate (head sampling)')}</span>
         <div className="flex items-center gap-3">
-          <input
-            type="range"
+          <Slider
+
             min={0}
             max={1}
             step={0.05}
@@ -4346,24 +4327,24 @@ function TracesSpecForm({
       <div>
         <span className="mb-1 block text-xs text-zinc-400">OTLP receivers</span>
         <div className="space-y-1.5">
-          <label className="flex items-center gap-2 text-[12px] text-zinc-300">
-            <input
-              type="checkbox"
+          <Label className="flex items-center gap-2 text-[12px] text-zinc-300">
+            <Checkbox
+
               checked={grpcEnabled}
-              onChange={(e) => setReceiver('grpc', e.target.checked)}
-              className="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-900"
+              onCheckedChange={(checkedValue) => setReceiver('grpc', checkedValue)}
+              className="h-3.5 w-3.5"
             />
             gRPC <span className="font-mono text-[11px] text-zinc-500">:4317</span>
-          </label>
-          <label className="flex items-center gap-2 text-[12px] text-zinc-300">
-            <input
-              type="checkbox"
+          </Label>
+          <Label className="flex items-center gap-2 text-[12px] text-zinc-300">
+            <Checkbox
+
               checked={httpEnabled}
-              onChange={(e) => setReceiver('http', e.target.checked)}
-              className="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-900"
+              onCheckedChange={(checkedValue) => setReceiver('http', checkedValue)}
+              className="h-3.5 w-3.5"
             />
             HTTP <span className="font-mono text-[11px] text-zinc-500">:4318</span>
-          </label>
+          </Label>
         </div>
         <div className="mt-1 text-[11px] text-zinc-500">
           {tr('监听 localhost / docker bridge；应用 SDK 直接 export 到 edge:4317。', 'Listens on localhost / docker bridge; app SDKs export directly to edge:4317.')}

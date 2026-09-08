@@ -1,3 +1,8 @@
+import { Label, Input } from '@/components/ui';
+import { Hint as TooltipHint } from '@/components/ui/Tooltip';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
+import { Checkbox } from '@/components/ui/Checkbox';
+import { Combobox } from '@base-ui/react/combobox';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
@@ -14,6 +19,7 @@ import '@xyflow/react/dist/style.css';
 import dagre from '@dagrejs/dagre';
 import {
   Activity,
+  Check,
   ChevronDown,
   Copy,
   Download,
@@ -57,7 +63,7 @@ import {
 } from '@/api/packetCaptures';
 import { ApiError, request } from '@/api/client';
 import { XTerminal, type XTerminalApi } from '@/components/XTerminal';
-import { Button, Card, Chip, EmptyState, PageHeader } from '@/components/ui';
+import { Button, Card, Chip, EmptyState, PageHeader, Select } from '@/components/ui';
 import { cn } from '@/lib/cn';
 import { useI18n } from '@/i18n/locale';
 import { useThemeMode } from '@/store/mode';
@@ -739,29 +745,34 @@ export default function DailyToolsPage() {
                 query={edgeQuery}
                 loading={edgesLoading}
                 onQuery={setEdgeQuery}
-                onToggle={(id) => setSelectedEdgeIDs((current) => active === 'profile' ? (current.includes(id) ? [] : [id]) : (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]))}
-                onClear={() => setSelectedEdgeIDs([])}
+                multiple={active !== 'profile'}
+                onChange={setSelectedEdgeIDs}
               />
-              <label className="block w-40 shrink-0">
-                <span className="mb-1 block text-[11px] text-zinc-500">{tr('工具类型', 'Tool type')}</span>
-                <select
+              <Label className="w-56 shrink-0 space-y-1">
+                <span className="block text-[11px] leading-4 text-zinc-400">{tr('工具类型', 'Tool type')}</span>
+                <Select className="w-full"
+                  label={tr('工具类型', 'Tool type')}
                   value={activeCategory}
-                  onChange={(event) => {
-                    const category = event.target.value as ToolCategory;
+                  onValueChange={(next) => {
+                    const category = next as ToolCategory;
+                    if (category === 'performance') setSelectedEdgeIDs((current) => current.slice(0, 1));
                     setActive(TOOLS.find((item) => item.category === category)?.key ?? 'ping');
                   }}
-                  className={inputClassName}
-                >
-                  <option value="network">{tr('网络诊断', 'Network diagnostics')}</option>
-                  <option value="performance">{tr('性能分析', 'Performance analysis')}</option>
-                </select>
-              </label>
-              <label className="block w-40 shrink-0">
-                <span className="mb-1 block text-[11px] text-zinc-500">{tr('工具', 'Tool')}</span>
-                <select value={active} onChange={(event) => setActive(event.target.value as ToolKey)} className={inputClassName}>
-                  {TOOLS.filter((item) => item.category === activeCategory).map((item) => <option key={item.key} value={item.key}>{tr(item.zh, item.en)}</option>)}
-                </select>
-              </label>
+                  options={[
+                    { value: 'network', label: tr('网络诊断', 'Network diagnostics') },
+                    { value: 'performance', label: tr('性能分析', 'Performance analysis') },
+                  ]}
+                />
+              </Label>
+              <Label className="w-64 shrink-0 space-y-1">
+                <span className="block text-[11px] leading-4 text-zinc-400">{tr('工具', 'Tool')}</span>
+                <Select className="w-full"
+                  label={tr('工具', 'Tool')}
+                  value={active}
+                  onValueChange={(next) => setActive(next as ToolKey)}
+                  options={TOOLS.filter((item) => item.category === activeCategory).map((item) => ({ value: item.key, label: tr(item.zh, item.en) }))}
+                />
+              </Label>
               {active !== 'profile' ? <AdvancedFields
                 value={advanced}
                 options={netnsOptions}
@@ -776,14 +787,14 @@ export default function DailyToolsPage() {
                 {active === 'http' && <HTTPFields value={http} onChange={setHTTP} />}
                 {active === 'capture' && <CaptureFields value={capture} selectedEdges={selectedEdges} onChange={setCapture} />}
               </div>
-              {active !== 'profile' ? <button
+              {active !== 'profile' ? <Button variant="primary" size="sm"
                 type="submit"
                 disabled={!canRun}
-                className="ml-auto inline-flex h-9 shrink-0 items-center gap-1.5 self-end rounded-md bg-accent px-3 text-xs font-medium text-accent-fg hover:bg-accent/90 disabled:opacity-50"
+                className="ml-auto inline-flex h-9 shrink-0 items-center gap-1.5 self-end px-3 font-medium text-accent-fg"
               >
                 <Play size={12} fill="currentColor" />
                 {active === 'capture' ? tr('开始', 'Start') : tr('执行', 'Run')}
-              </button> : null}
+              </Button> : null}
             </div>
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               <span className="text-xs text-zinc-500">{tr(`${selectedEdges.length} 台 Edge · ${activeTool.zh}`, `${selectedEdges.length} Edge(s) · ${activeTool.en}`)}</span>
@@ -910,18 +921,20 @@ function HTTPFields({ value, onChange }: { value: HTTPForm; onChange(value: HTTP
   return (
     <FieldGrid>
       <TextField className="w-96" label="URL" value={value.url} onChange={(url) => onChange({ ...value, url })} placeholder="https://example.com/health" />
-      <label className="w-28 shrink-0 space-y-1">
-        <span className="text-xs text-zinc-400">{tr('方法', 'Method')}</span>
-        <select value={value.method} onChange={(event) => onChange({ ...value, method: event.target.value as HTTPForm['method'] })} className={inputClassName}>
-          <option value="HEAD">HEAD</option>
-          <option value="GET">GET</option>
-        </select>
-      </label>
+      <Label className="w-28 shrink-0 space-y-1">
+        <span className="block text-[11px] leading-4 text-zinc-400">{tr('方法', 'Method')}</span>
+        <Select className="w-full"
+          label={tr('方法', 'Method')}
+          value={value.method}
+          onValueChange={(next) => onChange({ ...value, method: next as HTTPForm['method'] })}
+          options={['HEAD', 'GET'].map((method) => ({ value: method, label: method }))}
+        />
+      </Label>
       <NumberField label={tr('超时（毫秒）', 'Timeout (ms)')} value={value.timeout_ms} onChange={(timeout_ms) => onChange({ ...value, timeout_ms })} min={100} max={30000} />
-      <label className="flex h-9 shrink-0 items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 text-[12px] text-zinc-300">
-        <input type="checkbox" checked={value.skip_tls} onChange={(event) => onChange({ ...value, skip_tls: event.target.checked })} className="h-4 w-4 accent-indigo-600" />
+      <Label className="flex h-9 shrink-0 items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 text-[12px] text-zinc-300">
+        <Checkbox  checked={value.skip_tls} onCheckedChange={(checkedValue) => onChange({ ...value, skip_tls: checkedValue })} className="h-4 w-4" />
         {tr('跳过 TLS 检测', 'Skip TLS verify')}
-      </label>
+      </Label>
     </FieldGrid>
   );
 }
@@ -941,18 +954,19 @@ function AdvancedFields({
 }) {
   const { tr } = useI18n();
   return (
-    <label className="w-48 shrink-0 space-y-1">
+    <Label className="w-48 shrink-0 space-y-1">
       <span className="block text-[11px] leading-4 text-zinc-400">{tr('网络命名空间', 'Net namespace')}</span>
-      <select
+      <Select className="w-full"
+        label={tr('网络命名空间', 'Net namespace')}
         value={value.namespace}
         disabled={disabled || loading}
-        onChange={(event) => onChange({ ...value, namespace: event.target.value })}
-        className={cn(inputClassName, (disabled || loading) && 'text-zinc-500')}
-      >
-        <option value="">{loading ? tr('加载中...', 'Loading...') : tr('Host 网络', 'Host network')}</option>
-        {options.map((item) => <option key={item} value={item}>{item}</option>)}
-      </select>
-    </label>
+        onValueChange={(namespace) => onChange({ ...value, namespace })}
+        options={[
+          { value: '', label: loading ? tr('加载中...', 'Loading...') : tr('Host 网络', 'Host network') },
+          ...options.map((item) => ({ value: item, label: item })),
+        ]}
+      />
+    </Label>
   );
 }
 
@@ -962,22 +976,20 @@ function EdgePicker({
   selectedIDs,
   query,
   loading,
+  multiple,
   onQuery,
-  onToggle,
-  onClear,
+  onChange,
 }: {
   edges: Edge[];
   allEdges: Edge[];
   selectedIDs: number[];
   query: string;
   loading: boolean;
+  multiple: boolean;
   onQuery(value: string): void;
-  onToggle(id: number): void;
-  onClear(): void;
+  onChange(ids: number[]): void;
 }) {
   const { tr } = useI18n();
-  const [open, setOpen] = useState(false);
-  const boxRef = useRef<HTMLDivElement | null>(null);
   const selected = new Set(selectedIDs);
   const selectedEdges = allEdges.filter((edge) => selected.has(edge.id));
   const label = selectedEdges.length === 0
@@ -985,96 +997,63 @@ function EdgePicker({
     : selectedEdges.length === 1
       ? edgeLabel(selectedEdges[0])
       : tr(`${selectedEdges.length} 台 Edge`, `${selectedEdges.length} Edges`);
-  useEffect(() => {
-    if (!open) return undefined;
-    const onPointerDown = (event: PointerEvent) => {
-      if (!boxRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
   return (
-    <div ref={boxRef} className="relative w-80 min-w-[240px] max-w-full shrink-0 space-y-1">
+    <div className="w-80 min-w-[240px] max-w-full shrink-0 space-y-1">
       <span className="block text-[11px] leading-4 text-zinc-400">{tr('执行目标', 'Execution target')}</span>
-      <button
-        type="button"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-        className={cn(inputClassName, 'flex items-center justify-between gap-2 text-left')}
+      <Combobox.Root
+        multiple={multiple}
+        items={allEdges}
+        filteredItems={edges}
+        filter={null}
+        value={multiple ? selectedEdges : selectedEdges[0] ?? null}
+        onValueChange={(next) => onChange((Array.isArray(next) ? next : next ? [next] : []).map((edge) => edge.id))}
+        itemToStringLabel={edgeLabel}
+        itemToStringValue={(edge) => String(edge.id)}
+        isItemEqualToValue={(a, b) => a.id === b.id}
+        inputValue={query}
+        onInputValueChange={onQuery}
+        autoHighlight
       >
-        <span className={cn('min-w-0 truncate', selectedEdges.length === 0 ? 'text-zinc-500' : 'text-zinc-100')}>{label}</span>
-        <ChevronDown size={14} className="shrink-0 text-zinc-500" />
-      </button>
-      {open ? (
-        <div className="absolute left-0 top-full z-30 mt-1 w-full overflow-hidden rounded-md border border-zinc-800 bg-zinc-950 shadow-xl">
-          <div className="border-b border-zinc-800/60 bg-zinc-900/30 p-2">
-            <div className="relative">
-              <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
-              <input
-                value={query}
-                onChange={(event) => onQuery(event.target.value)}
-                aria-label={tr('搜索 Edge', 'Search Edge')}
-                placeholder={tr('按名称、主机名或 ID 筛选', 'Filter by name, host, or ID')}
-                className={cn(inputClassName, 'h-8 bg-zinc-950/70 pr-8 pl-8 text-[11px]')}
-                autoFocus
-              />
-              {query ? (
-                <button
-                  type="button"
-                  onClick={() => onQuery('')}
-                  aria-label={tr('清空搜索', 'Clear search')}
-                  className="absolute right-1.5 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200"
-                >
-                  <X size={13} />
-                </button>
-              ) : null}
-            </div>
-            {selectedIDs.length > 0 ? (
-              <button
-                type="button"
-                onClick={onClear}
-                className="mt-2 text-[11px] text-zinc-500 hover:text-zinc-300"
-              >
-                {tr('清空已选', 'Clear selected')}
-              </button>
-            ) : null}
-          </div>
-          <div role="listbox" className="max-h-56 overflow-auto">
-            {loading ? (
-              <div className="flex items-center gap-2 px-3 py-2 text-[12px] text-zinc-500"><Loader2 size={12} className="animate-spin" />{tr('加载 Edge...', 'Loading Edges...')}</div>
-            ) : edges.length === 0 ? (
-              <div className="px-3 py-2 text-[12px] text-zinc-500">{tr('没有可选 Edge', 'No Edge available')}</div>
-            ) : (
-              <div className="divide-y divide-zinc-800/60">
-                {edges.map((edge) => (
-                  <label key={edge.id} className="flex cursor-pointer items-center gap-2 px-3 py-2 text-[12px] hover:bg-zinc-900/60">
-                    <input
-                      type="checkbox"
-                      checked={selected.has(edge.id)}
-                      onChange={() => onToggle(edge.id)}
-                      aria-label={tr(`选择 ${edgeLabel(edge)}`, `Select ${edgeLabel(edge)}`)}
-                      className="h-4 w-4 accent-indigo-600"
-                    />
+        <Combobox.Trigger className="og-select-trigger" aria-label={label}>
+          <span className={cn('min-w-0 flex-1 truncate text-left', selectedEdges.length === 0 && 'text-text-faint')}>{label}</span>
+          <ChevronDown size={14} className="shrink-0 text-text-faint" aria-hidden="true" />
+        </Combobox.Trigger>
+        <Combobox.Portal>
+          <Combobox.Positioner sideOffset={4} align="start" className="og-select-positioner">
+            <Combobox.Popup className="og-select-popup" aria-label={tr('执行目标', 'Execution target')}>
+              <div className="og-select-search">
+                <Search size={14} className="shrink-0 text-text-faint" aria-hidden="true" />
+                <Combobox.Input
+                  aria-label={tr('搜索 Edge', 'Search Edge')}
+                  placeholder={tr('按名称、主机名或 ID 筛选', 'Filter by name, host, or ID')}
+                />
+                {query && <Button variant="subtle" size="sm" type="button" onClick={() => onQuery('')} aria-label={tr('清空搜索', 'Clear search')} className="p-1"><X size={13} /></Button>}
+              </div>
+              {selectedIDs.length > 0 && (
+                <div className="flex items-center justify-between px-3 py-1.5 text-[11px] text-text-muted">
+                  <span>{tr(`已选 ${selectedIDs.length} 台`, `${selectedIDs.length} selected`)}</span>
+                  <Button variant="subtle" size="sm" type="button" onClick={() => onChange([])} className="px-1 py-0.5">{tr('清空已选', 'Clear selected')}</Button>
+                </div>
+              )}
+              {loading
+                ? <div role="status" className="flex items-center gap-2 px-3 py-4 text-xs text-text-muted"><Loader2 size={12} className="animate-spin" />{tr('加载 Edge...', 'Loading Edges...')}</div>
+                : <Combobox.Empty><div className="px-3 py-5 text-center text-xs text-text-muted">{tr('没有可选 Edge', 'No Edge available')}</div></Combobox.Empty>}
+              <Combobox.List className="og-select-list" aria-label={tr('Edge 列表', 'Edges')} aria-busy={loading}>
+                {(edge: Edge) => (
+                  <Combobox.Item key={edge.id} value={edge} className="og-select-item" aria-label={tr(`选择 ${edgeLabel(edge)}`, `Select ${edgeLabel(edge)}`)}>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-zinc-200">{edgeLabel(edge)}</span>
-                      <span className="block truncate text-[11px] text-zinc-500">{edgeMetaLine(edge)}</span>
+                      <TooltipHint content={edgeLabel(edge)}><span className="block truncate" >{edgeLabel(edge)}</span></TooltipHint>
+                      <span className="block truncate text-[11px] text-text-faint">{edgeMetaLine(edge)}</span>
                     </span>
                     <EdgeStatus edge={edge} />
-                  </label>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      ) : null}
+                    <Combobox.ItemIndicator className="absolute right-2"><Check size={14} aria-hidden="true" /></Combobox.ItemIndicator>
+                  </Combobox.Item>
+                )}
+              </Combobox.List>
+            </Combobox.Popup>
+          </Combobox.Positioner>
+        </Combobox.Portal>
+      </Combobox.Root>
     </div>
   );
 }
@@ -1087,10 +1066,10 @@ function CaptureFields({ value, selectedEdges, onChange }: { value: CaptureForm;
       <FieldGrid>
         <div className="flex shrink-0 items-end gap-2">
           <TextField className="w-28" label={tr('网卡', 'Interface')} value={value.interface_name} onChange={(interface_name) => onChange({ ...value, interface_name })} placeholder="eth0" />
-          <label className="flex h-9 items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 text-[12px] text-zinc-300">
-            <input type="checkbox" checked={value.promiscuous} onChange={(event) => onChange({ ...value, promiscuous: event.target.checked })} className="h-4 w-4 accent-indigo-600" />
+          <Label className="flex h-9 items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 text-[12px] text-zinc-300">
+            <Checkbox  checked={value.promiscuous} onCheckedChange={(checkedValue) => onChange({ ...value, promiscuous: checkedValue })} className="h-4 w-4" />
             {tr('混杂模式', 'Promiscuous mode')}
-          </label>
+          </Label>
         </div>
         <NumberField className="w-28" label={tr('时长（秒）', 'Duration (sec)')} value={value.duration_seconds} onChange={(duration_seconds) => onChange({ ...value, duration_seconds })} min={1} max={300} />
         <TextField className="w-64" label="BPF filter" value={value.filter} onChange={(filter) => onChange({ ...value, filter })} placeholder="tcp port 443" />
@@ -1265,20 +1244,26 @@ function ProfilingPanel({
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(10rem,0.7fr)_minmax(24rem,2.4fr)_minmax(10rem,0.7fr)_auto] lg:items-start">
-        <label className="block space-y-1">
+        <Label className="block space-y-1">
           <span className="text-[11px] text-zinc-400">{tr('分析类型', 'Profile type')}</span>
-          <select value={value.kind} onChange={(event) => {
-            const kind = event.target.value as ProfileKind;
-            onChange({ ...value, kind, url: profileURLForKind(value.url, kind, value.duration_seconds) });
-          }} disabled={activeSession} className={inputClassName}>
-            <option value="cpu">CPU · pprof</option>
-            <option value="heap">Heap · pprof</option>
-            <option value="allocs">Allocations · pprof</option>
-            <option value="goroutine">Goroutine · pprof</option>
-            <option value="mutex">Mutex · pprof</option>
-            <option value="block">Block · pprof</option>
-          </select>
-        </label>
+          <Select className="w-full"
+            label={tr('分析类型', 'Profile type')}
+            value={value.kind}
+            onValueChange={(next) => {
+              const kind = next as ProfileKind;
+              onChange({ ...value, kind, url: profileURLForKind(value.url, kind, value.duration_seconds) });
+            }}
+            disabled={activeSession}
+            options={[
+              { value: 'cpu', label: 'CPU · pprof' },
+              { value: 'heap', label: 'Heap · pprof' },
+              { value: 'allocs', label: 'Allocations · pprof' },
+              { value: 'goroutine', label: 'Goroutine · pprof' },
+              { value: 'mutex', label: 'Mutex · pprof' },
+              { value: 'block', label: 'Block · pprof' },
+            ]}
+          />
+        </Label>
         <div className="min-w-0">
           <TextField
             label={tr('采集 URL', 'Profile URL')}
@@ -1290,22 +1275,25 @@ function ProfilingPanel({
           />
           <p className="mt-2 text-xs leading-5 text-zinc-500">{tr('默认采集当前 Edge 的 ongrid-edge；如需分析其他应用，请填写该应用开放的 pprof URL。', 'By default this profiles ongrid-edge on the selected Edge. To analyze another application, enter its exposed pprof URL.')}</p>
         </div>
-        <label className="block space-y-1">
+        <Label className="block space-y-1">
           <span className="text-[11px] text-zinc-400">{tr('采样时长', 'Sampling duration')}</span>
-          <select aria-label={tr('采样时长', 'Sampling duration')} value={value.duration_seconds} onChange={(event) => {
-            const duration_seconds = event.target.value;
-            onChange({
+          <Select className="w-full"
+            label={tr('采样时长', 'Sampling duration')}
+            value={value.duration_seconds}
+            onValueChange={(duration_seconds) => onChange({
               ...value,
               duration_seconds,
               url: value.kind === 'cpu' ? profileURLForDuration(value.url, duration_seconds) : value.url,
-            });
-          }} disabled={activeSession} className={inputClassName}>
-            <option value="15">{tr('15 秒', '15 seconds')}</option>
-            <option value="30">{tr('30 秒（推荐）', '30 seconds (recommended)')}</option>
-            <option value="60">{tr('1 分钟', '1 minute')}</option>
-            <option value="300">{tr('5 分钟', '5 minutes')}</option>
-          </select>
-        </label>
+            })}
+            disabled={activeSession}
+            options={[
+              { value: '15', label: tr('15 秒', '15 seconds') },
+              { value: '30', label: tr('30 秒（推荐）', '30 seconds (recommended)') },
+              { value: '60', label: tr('1 分钟', '1 minute') },
+              { value: '300', label: tr('5 分钟', '5 minutes') },
+            ]}
+          />
+        </Label>
         {!activeSession ? (
           <div className="lg:pt-5">
             <Button className="h-9 w-full justify-center lg:w-auto" variant="primary" onClick={onStart} disabled={!canStart}>
@@ -1379,30 +1367,30 @@ function NativeFlamegraph({ profile, loading, error, service, onRefresh }: {
   };
 
   return (
-    <section role="region" aria-label={tr('应用性能分析图', 'Application performance views')} className={cn('flex min-h-0 flex-col overflow-hidden', isFullscreen ? 'fixed inset-0 z-[100] h-screen bg-zinc-950' : 'mt-4 flex-1 rounded-xl border border-zinc-800/70 bg-zinc-950/60')}>
+    <Tabs value={view} onValueChange={setView} className="contents"><section role="region" aria-label={tr('应用性能分析图', 'Application performance views')} className={cn('flex min-h-0 flex-col overflow-hidden', isFullscreen ? 'fixed inset-0 z-[100] h-screen bg-zinc-950' : 'mt-4 flex-1 rounded-xl border border-zinc-800/70 bg-zinc-950/60')}>
       <div className="flex flex-wrap items-center gap-2 border-b border-zinc-800/70 px-4 py-3">
         <div className="mr-auto min-w-0">
           <div className="flex items-center gap-2 text-sm font-medium text-zinc-100"><Flame size={15} className="text-orange-400" />{view === 'flame' ? tr('火焰图', 'Flamegraph') : view === 'icicle' ? tr('冰柱图', 'Icicle graph') : tr('调用图', 'Call graph')}</div>
           <p className="mt-0.5 truncate text-[11px] text-zinc-500">{service || '-'} · {tr('点击栈帧可聚焦，数据由 Pyroscope 临时聚合。', 'Click a frame to focus. Data is aggregated temporarily by Pyroscope.')}</p>
         </div>
-        <div role="group" aria-label={tr('图表样式', 'Graph style')} className="flex h-8 items-center rounded-md border border-zinc-800 bg-zinc-900 p-0.5">
-          <button type="button" aria-pressed={view === 'flame'} onClick={() => setView('flame')} className={cn('h-7 rounded px-2 text-xs transition-colors', view === 'flame' ? 'bg-indigo-500/10 text-indigo-400' : 'text-zinc-500 hover:text-zinc-300')}>{tr('火焰图', 'Flame')}</button>
-          <button type="button" aria-pressed={view === 'icicle'} onClick={() => setView('icicle')} className={cn('h-7 rounded px-2 text-xs transition-colors', view === 'icicle' ? 'bg-indigo-500/10 text-indigo-400' : 'text-zinc-500 hover:text-zinc-300')}>{tr('冰柱图', 'Icicle')}</button>
-          <button type="button" aria-pressed={view === 'callgraph'} onClick={() => setView('callgraph')} className={cn('h-7 rounded px-2 text-xs transition-colors', view === 'callgraph' ? 'bg-indigo-500/10 text-indigo-400' : 'text-zinc-500 hover:text-zinc-300')}>{tr('调用图', 'Call graph')}</button>
-        </div>
-        <label className="relative block w-52">
-          <Search size={13} className="pointer-events-none absolute left-2.5 top-2.5 text-zinc-600" />
-          <input aria-label={tr('搜索栈帧', 'Search stack frames')} value={search} onChange={(event) => setSearch(event.target.value)} placeholder={tr('搜索函数', 'Search functions')} className={cn(inputClassName, 'h-8 pl-8 py-1')} />
-        </label>
+        <TabsList  aria-label={tr('图表样式', 'Graph style')} className="flex h-8 items-center rounded-md border border-zinc-800 bg-zinc-900 p-0.5">
+          <TabsTrigger   value={'flame'} >{tr('火焰图', 'Flame')}</TabsTrigger>
+          <TabsTrigger   value={'icicle'} >{tr('冰柱图', 'Icicle')}</TabsTrigger>
+          <TabsTrigger   value={'callgraph'} >{tr('调用图', 'Call graph')}</TabsTrigger>
+        </TabsList>
+        <Label className="relative block w-52">
+          <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-600" />
+          <Input aria-label={tr('搜索栈帧', 'Search stack frames')} value={search} onChange={(event) => setSearch(event.target.value)} placeholder={tr('搜索函数', 'Search functions')} className={cn(inputClassName, "pl-8")} />
+        </Label>
         {focus ? <Button onClick={() => setFocus(null)}>{tr('重置缩放', 'Reset zoom')}</Button> : null}
         <Button onClick={onRefresh} disabled={loading}><RefreshCw size={13} className={cn(loading && 'animate-spin')} />{tr('刷新', 'Refresh')}</Button>
-        <Button onClick={toggleFullscreen} aria-pressed={isFullscreen} title={isFullscreen ? tr('退出全屏', 'Exit fullscreen') : tr('全屏查看分析图', 'View analysis fullscreen')}>
+        <TooltipHint content={isFullscreen ? tr('退出全屏', 'Exit fullscreen') : tr('全屏查看分析图', 'View analysis fullscreen')}><Button onClick={toggleFullscreen} aria-pressed={isFullscreen} >
           {isFullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
           {isFullscreen ? tr('退出全屏', 'Exit fullscreen') : tr('全屏', 'Fullscreen')}
-        </Button>
+        </Button></TooltipHint>
       </div>
 
-      {error ? <div role="alert" className="m-4 rounded-lg border border-red-500/30 bg-red-500/5 px-3 py-3 text-xs text-red-300">{error}</div> : null}
+      <TabsContent value={view} className="contents">{error ? <div role="alert" className="m-4 rounded-lg border border-red-500/30 bg-red-500/5 px-3 py-3 text-xs text-red-300">{error}</div> : null}
       {!error && loading && nodes.length === 0 ? <div className="flex min-h-72 flex-1 items-center justify-center gap-2 text-xs text-zinc-500"><Loader2 size={15} className="animate-spin" />{tr('正在查询 Profile...', 'Querying profiles...')}</div> : null}
       {!error && !loading && nodes.length === 0 ? <div className="flex flex-1 items-center justify-center py-16"><EmptyState icon={Flame} title={tr('没有 Profile 数据', 'No profile data')} hint={tr('确认应用端点可访问且本次采样已完成。', 'Confirm the application endpoint is reachable and sampling has completed.')} /></div> : null}
       {nodes.length > 0 ? (
@@ -1469,8 +1457,8 @@ function NativeFlamegraph({ profile, loading, error, service, onRefresh }: {
             <span>Self: <strong className="font-medium text-zinc-100">{formatProfileValue(tooltip.node.self, profile?.metadata.units)}</strong></span>
           </div>
         </div>
-      ) : null}
-    </section>
+      ) : null}</TabsContent>
+    </section></Tabs>
   );
 }
 
@@ -1640,9 +1628,9 @@ function RunPanel({ run, nowMs, onInspect, onCancel, onClose }: { run: ToolRun; 
         <div className="flex items-center gap-2">
           {run.status === 'running' ? <Button onClick={() => onCancel(run)}><Square size={13} />{tr('停止', 'Stop')}</Button> : null}
           <Button onClick={() => void copyText(formatRun(run))}><Copy size={13} />{tr('复制结果', 'Copy')}</Button>
-          <button type="button" onClick={() => onClose(run.id)} aria-label={tr('关闭', 'Close')} className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-zinc-800 text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200">
+          <Button variant="outline" size="icon" type="button" onClick={() => onClose(run.id)} aria-label={tr('关闭', 'Close')}>
             <X size={13} />
-          </button>
+          </Button>
         </div>
       </div>
       <div className="overflow-x-auto">
@@ -1844,23 +1832,23 @@ function FieldGrid({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
-const inputClassName = 'h-9 w-full rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-0 text-[12px] leading-5 text-zinc-100 outline-none focus:border-zinc-600';
+const inputClassName = "w-full leading-5 outline-none";
 
 function TextField({ label, value, onChange, placeholder, className, disabled }: { label: ReactNode; value: string; onChange(value: string): void; placeholder?: string; className?: string; disabled?: boolean }) {
   return (
-    <label className={cn('w-72 shrink-0 space-y-1', className)}>
+    <Label className={cn('w-72 shrink-0 space-y-1', className)}>
       <span className="text-[11px] leading-4 text-zinc-400">{label}</span>
-      <input value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} disabled={disabled} className={cn(inputClassName, 'font-mono')} />
-    </label>
+      <Input value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} disabled={disabled} className={cn(inputClassName, "font-mono")} />
+    </Label>
   );
 }
 
 function NumberField({ label, value, onChange, min, max, className, disabled }: { label: ReactNode; value: string; onChange(value: string): void; min: number; max: number; className?: string; disabled?: boolean }) {
   return (
-    <label className={cn('w-36 shrink-0 space-y-1', className)}>
+    <Label className={cn('w-36 shrink-0 space-y-1', className)}>
       <span className="text-[11px] leading-4 text-zinc-400">{label}</span>
-      <input type="number" min={min} max={max} value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} className={cn(inputClassName, 'font-mono')} />
-    </label>
+      <Input type="number" min={min} max={max} value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} className={cn(inputClassName, "font-mono")} />
+    </Label>
   );
 }
 

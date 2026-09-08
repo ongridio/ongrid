@@ -1,3 +1,4 @@
+import { Button } from '@/components/ui/Button';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Activity,
@@ -151,15 +152,15 @@ export default function SettingsHealth() {
               <span>{checkedAt}</span>
             </div>
           </div>
-          <button
+          <Button variant="plain" size="sm"
             type="button"
             onClick={() => void run(true)}
             disabled={loading}
-            className="inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-indigo-600 bg-indigo-600/20 px-3 py-1.5 text-xs font-medium text-indigo-200 hover:bg-indigo-600/30 disabled:opacity-50 sm:w-auto"
+            className="inline-flex w-full items-center justify-center gap-1.5 px-3 py-1.5 font-medium sm:w-auto border border-indigo-600 bg-indigo-600/20 text-indigo-200 hover:bg-indigo-600/30"
           >
             {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
             {loading ? tr('检查中', 'Checking') : tr('一键检查', 'Run check')}
-          </button>
+          </Button>
         </div>
         {err && (
           <div className="mt-3 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">

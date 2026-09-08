@@ -1,3 +1,9 @@
+import { CommunicationProviderIcon } from '@/components/icons/Provider';
+import { Button, Input, Label, Textarea } from '@/components/ui';
+import { useDialogs } from '@/components/ui/useDialogs';
+import { Hint } from '@/components/ui/Tooltip';
+import { Select } from '@/components/ui/Select';
+import { Checkbox } from '@/components/ui/Checkbox';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
@@ -10,10 +16,6 @@ import {
   Power,
   Lock,
   Webhook,
-  MessageSquareShare,
-  Send,
-  MessageCircle,
-  Slack,
 } from 'lucide-react';
 import {
   CartesianGrid,
@@ -117,16 +119,16 @@ function PromqlWindowChips({ expr }: { expr: string }) {
     <div className="flex flex-wrap items-center gap-1 text-[11px] text-zinc-500">
       ⏱ {tr('表达式里的窗口:', 'Windows in this expression:')}
       {windows.map((w) => (
-        <span
-          key={w}
-          className="inline-flex items-center rounded bg-sky-500/10 px-1.5 py-0.5 text-sky-200 ring-1 ring-inset ring-sky-500/30"
-          title={tr(
+        <Hint key={w} content={tr(
             `PromQL 的 [${w}] —— 在该函数(rate/increase/avg_over_time 等)调用里回看 ${w} 长度的数据。要改窗口直接改上方表达式。`,
             `PromQL [${w}] window — the enclosing rate/increase/avg_over_time call looks back ${w}. To change it, edit the expression above.`,
-          )}
+          )}><span
+
+          className="inline-flex items-center rounded bg-sky-500/10 px-1.5 py-0.5 text-sky-200 ring-1 ring-inset ring-sky-500/30"
+
         >
           [{w}]
-        </span>
+        </span></Hint>
       ))}
     </div>
   );
@@ -185,6 +187,7 @@ function findKindMeta(kind: RuleKind | string): RuleKindMeta | undefined {
 }
 
 export default function AlertRulesPage() {
+  const { alertAction, dialog } = useDialogs();
   const { tr } = useI18n();
   const { isAdmin } = usePermissions();
   // alert rules are platform config — only admin mutates.
@@ -249,7 +252,7 @@ export default function AlertRulesPage() {
   }, [items]);
 
   return (
-    <>
+    <>{dialog}<>
       <main className="anim-fade flex flex-1 flex-col overflow-hidden">
         <header className="app-header border-b border-zinc-800/60 px-6 py-4">
           <div className="flex items-center justify-between gap-4">
@@ -272,49 +275,49 @@ export default function AlertRulesPage() {
                   {tr(`自定义 ${stats.total - stats.builtin}`, `${stats.total - stats.builtin} custom`)}
                 </span>
                 {runtime && runtime.evaluator_interval_seconds > 0 && (
-                  <span
-                    className="ml-1 inline-flex items-center gap-1 rounded bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-medium text-sky-200 ring-1 ring-inset ring-sky-500/30"
-                    title={tr(
+                  <Hint content={tr(
                       `evaluator 每 ${humanDur(runtime.evaluator_interval_seconds)} 跑一次全量规则;通知 cooldown ${humanDur(runtime.notify_cooldown_seconds)}。出厂默认 5min / 10min,可由 ONGRID_ALERT_EVAL_INTERVAL / ONGRID_ALERT_COOLDOWN 覆盖。`,
                       `Evaluator runs every ${humanDur(runtime.evaluator_interval_seconds)}; notification cooldown ${humanDur(runtime.notify_cooldown_seconds)}. Factory defaults 5min / 10min, override via ONGRID_ALERT_EVAL_INTERVAL / ONGRID_ALERT_COOLDOWN.`,
-                    )}
+                    )}><span
+                    className="ml-1 inline-flex items-center gap-1 rounded bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-medium text-sky-200 ring-1 ring-inset ring-sky-500/30"
+
                   >
                     ⏱ {tr(
                       `每 ${humanDur(runtime.evaluator_interval_seconds)} 评估 · 通知 cooldown ${humanDur(runtime.notify_cooldown_seconds)}`,
                       `Eval ${humanDur(runtime.evaluator_interval_seconds)} · Notify cd ${humanDur(runtime.notify_cooldown_seconds)}`,
                     )}
-                  </span>
+                  </span></Hint>
                 )}
               </p>
             </div>
             <div className="flex gap-2">
-              <button
+              <Button variant="outline" size="sm"
                 type="button"
                 onClick={() => fetchRules(true)}
                 disabled={loading || refreshing}
-                className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5"
               >
                 <RefreshCw size={12} className={cn(refreshing && 'animate-spin')} />
                 {tr('刷新', 'Refresh')}
-              </button>
-              <button
+              </Button>
+              <Hint content={adminTip ?? tr('从预设规则挑一条快速创建', 'Pick a preset to scaffold a rule quickly')}><Button variant="outline" size="sm"
                 type="button"
                 onClick={() => setShowPresets(true)}
                 disabled={!isAdmin}
-                className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800 disabled:opacity-40"
-                title={adminTip ?? tr('从预设规则挑一条快速创建', 'Pick a preset to scaffold a rule quickly')}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5"
+
               >
                 📋 {tr('从预设挑', 'From preset')}
-              </button>
-              <button
+              </Button></Hint>
+              <Hint content={adminTip}><Button variant="primary" size="sm"
                 type="button"
                 onClick={() => setEditing({ mode: 'create' })}
                 disabled={!isAdmin}
-                title={adminTip}
-                className="inline-flex items-center gap-1.5 rounded-md bg-accent px-2.5 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent/90 disabled:opacity-40"
+
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 font-medium text-accent-fg"
               >
                 <Plus size={12} /> {tr('新建规则', 'New rule')}
-              </button>
+              </Button></Hint>
             </div>
           </div>
         </header>
@@ -330,15 +333,15 @@ export default function AlertRulesPage() {
           ) : items.length === 0 ? (
             <div className="flex h-60 flex-col items-center justify-center gap-2">
               <div className="text-sm text-zinc-500">{tr('还没有规则', 'No rules yet')}</div>
-              <button
+              <Hint content={adminTip}><Button variant="primary" size="sm"
                 type="button"
                 onClick={() => setEditing({ mode: 'create' })}
                 disabled={!isAdmin}
-                title={adminTip}
-                className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent/90 disabled:opacity-40"
+
+                className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 font-medium text-accent-fg"
               >
                 <Plus size={12} /> {tr('创建第一条规则', 'Create your first rule')}
-              </button>
+              </Button></Hint>
             </div>
           ) : (
             <table className="w-full text-sm">
@@ -368,7 +371,7 @@ export default function AlertRulesPage() {
                         await setRuleEnabled(rule.id, next);
                         fetchRules(true);
                       } catch (e) {
-                        alert(e instanceof ApiError ? e.message : (e as Error).message);
+                        (await alertAction(e instanceof ApiError ? e.message : (e as Error).message));
                       }
                     }}
                   />
@@ -413,14 +416,14 @@ export default function AlertRulesPage() {
           title={tr('删除规则', 'Delete rule')}
           footer={
             <>
-              <button
+              <Button variant="outline" size="sm"
                 type="button"
                 onClick={() => setConfirmDelete(null)}
-                className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+                className="px-3 py-1.5"
               >
                 {tr('取消', 'Cancel')}
-              </button>
-              <button
+              </Button>
+              <Button variant="danger" size="sm"
                 type="button"
                 onClick={async () => {
                   try {
@@ -428,13 +431,13 @@ export default function AlertRulesPage() {
                     setConfirmDelete(null);
                     fetchRules(true);
                   } catch (e) {
-                    alert(e instanceof ApiError ? e.message : (e as Error).message);
+                    (await alertAction(e instanceof ApiError ? e.message : (e as Error).message));
                   }
                 }}
-                className="rounded-md bg-red-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-400"
+                className="px-3 py-1.5 font-medium"
               >
                 {tr('删除', 'Delete')}
-              </button>
+              </Button>
             </>
           }
         >
@@ -445,7 +448,7 @@ export default function AlertRulesPage() {
           </div>
         </Modal>
       )}
-    </>
+    </></>
   );
 }
 
@@ -497,12 +500,12 @@ function RuleRow({
               {desc.sourceLabel}
             </span>
           )}
-          <span
-            title={rule.kind}
+          <Hint content={rule.kind}><span
+
             className="rounded-md bg-zinc-800/80 px-1.5 py-0.5 text-[11px] font-medium text-zinc-200 ring-1 ring-inset ring-zinc-700"
           >
             {desc.triggerLabel}
-          </span>
+          </span></Hint>
         </div>
       </td>
       <td className="py-2.5">
@@ -530,11 +533,11 @@ function RuleRow({
         <code className="text-[11px]">{summarizeRule(rule)}</code>
       </td>
       <td className="py-2.5">
-        <button
+        <Hint content={viewerTip}><Button variant="subtle" size="sm"
           type="button"
           onClick={() => onToggle(!rule.enabled)}
           disabled={!canMutate}
-          title={viewerTip}
+
           className={cn(
             'inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium ring-1 ring-inset transition-colors disabled:opacity-40',
             rule.enabled
@@ -544,24 +547,24 @@ function RuleRow({
         >
           <Power size={10} />
           {rule.enabled ? 'enabled' : 'disabled'}
-        </button>
+        </Button></Hint>
       </td>
       <td className="px-6 py-2.5 text-right">
         <div className="inline-flex gap-1.5">
-          <button
+          <Hint content={viewerTip}><Button variant="outline" size="sm"
             type="button"
             onClick={onEdit}
             disabled={!canMutate}
-            title={viewerTip}
-            className="rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-[11px] text-zinc-200 hover:bg-zinc-800 disabled:opacity-40"
+
+            className="px-2 py-1"
           >
             {tr('编辑', 'Edit')}
-          </button>
-          <button
+          </Button></Hint>
+          <Hint content={!canMutate ? viewerTip : (isBuiltin ? tr('内置规则不可删除', 'Built-in rules cannot be deleted') : tr('删除规则', 'Delete rule'))}><Button variant="dangerGhost" size="sm"
             type="button"
             onClick={onDelete}
             disabled={isBuiltin || !canMutate}
-            title={!canMutate ? viewerTip : (isBuiltin ? tr('内置规则不可删除', 'Built-in rules cannot be deleted') : tr('删除规则', 'Delete rule'))}
+
             className={cn(
               'rounded-md border px-2 py-1 text-[11px]',
               isBuiltin
@@ -570,7 +573,7 @@ function RuleRow({
             )}
           >
             <Trash2 size={11} />
-          </button>
+          </Button></Hint>
         </div>
       </td>
     </tr>
@@ -796,21 +799,21 @@ function RuleEditorModalInner({
       title={mode === 'create' ? tr('新建告警规则', 'New alert rule') : tr(`编辑：${rule?.rule_key}`, `Edit: ${rule?.rule_key}`)}
       footer={
         <>
-          <button
+          <Button variant="outline" size="sm"
             type="button"
             onClick={onClose}
-            className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+            className="px-3 py-1.5"
           >
             {tr('取消', 'Cancel')}
-          </button>
-          <button
+          </Button>
+          <Button variant="primary" size="sm"
             type="button"
             onClick={submit}
             disabled={submitting}
-            className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent/90 disabled:opacity-50"
+            className="px-3 py-1.5 font-medium text-accent-fg"
           >
             {submitting ? tr('保存中…', 'Saving…') : tr('保存', 'Save')}
-          </button>
+          </Button>
         </>
       }
     >
@@ -826,12 +829,12 @@ function RuleEditorModalInner({
           <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950/40 px-3 py-2">
             <span className="whitespace-nowrap text-[11px] text-zinc-500">{tr('来源', 'Source')}</span>
             {isBuiltin ? (
-              <span
+              <Hint content={tr('内置规则：rule_key / 类型 / 范围已锁定', 'Built-in rule: rule_key / type / scope are locked')}><span
                 className="inline-flex items-center gap-1 whitespace-nowrap rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium text-amber-200 ring-1 ring-inset ring-amber-500/30"
-                title={tr('内置规则：rule_key / 类型 / 范围已锁定', 'Built-in rule: rule_key / type / scope are locked')}
+
               >
                 <Lock size={10} /> {tr('内置', 'Built-in')}
-              </span>
+              </span></Hint>
             ) : (
               <span className="inline-flex items-center whitespace-nowrap rounded-md bg-zinc-800 px-1.5 py-0.5 text-[11px] font-medium text-zinc-300 ring-1 ring-inset ring-zinc-700">
                 {tr('自定义', 'Custom')}
@@ -863,35 +866,35 @@ function RuleEditorModalInner({
 
           <div className="grid grid-cols-2 gap-3">
             <Field label={<><span className="text-red-400">*</span> rule_key (lower_snake)</>}>
-              <input
+              <Input
                 value={form.rule_key}
                 disabled={mode === 'edit'}
                 onChange={(e) => setForm({ ...form, rule_key: e.target.value })}
                 placeholder="cpu_high"
-                className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 disabled:opacity-50 focus:border-zinc-600 focus:outline-none"
+                className="w-full font-mono"
               />
             </Field>
             <Field label={<><span className="text-red-400">*</span> {tr('名称', 'Name')}</>}>
-              <input
+              <Input
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
                 placeholder={tr('CPU 高负载', 'CPU under load')}
-                className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                className="w-full"
               />
             </Field>
           </div>
           {/* "Enable this rule" lives at the top — it's the first thing
               operators reach for ("do I want this on?") not the last
               thing after they configure routing. */}
-          <label className="mt-3 inline-flex items-center gap-2 text-xs text-zinc-300">
-            <input
-              type="checkbox"
+          <Label className="mt-3 inline-flex items-center gap-2 text-xs text-zinc-300">
+            <Checkbox
+
               checked={form.enabled}
-              onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
-              className="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-900"
+              onCheckedChange={(checkedValue) => setForm({ ...form, enabled: checkedValue })}
+              className="h-3.5 w-3.5"
             />
             {tr('启用此规则', 'Enable this rule')}
-          </label>
+          </Label>
         </Section>
 
         {/* —————————————————— Step 2: 规则类型 —————————————————— */}
@@ -904,14 +907,14 @@ function RuleEditorModalInner({
           {form.kind === 'metric_threshold' && (
             <div className="mb-3">
               <Field label={tr('多条件组合', 'Combine conditions')}>
-                <select
+                <Select label={tr('多条件组合', 'Combine conditions')}
                   value={form.join_mode}
-                  onChange={(e) => setForm({ ...form, join_mode: e.target.value as 'all' | 'any' })}
-                  className="w-full max-w-xs rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                  onValueChange={(selectedValue) => setForm({ ...form, join_mode: selectedValue as 'all' | 'any' })}
+                  className="w-full max-w-xs"
                 >
                   <option value="all">{tr('全部满足（AND）', 'All match (AND)')}</option>
                   <option value="any">{tr('任一满足（OR）', 'Any match (OR)')}</option>
-                </select>
+                </Select>
               </Field>
             </div>
           )}
@@ -921,11 +924,11 @@ function RuleEditorModalInner({
           <div className="mt-3 border-t border-zinc-800/60 pt-3">
             <div className="mb-2 flex items-center justify-between">
               <span className="text-[11px] text-zinc-500">{tr('过去 24h 查询预览', 'Last 24h preview')}</span>
-              <button
+              <Button variant="outline" size="sm"
                 type="button"
                 onClick={runPreview}
                 disabled={previewing}
-                className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1 text-[11px] text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1"
               >
                 {previewing ? (
                   <>
@@ -935,7 +938,7 @@ function RuleEditorModalInner({
                 ) : (
                   <>{previewResult || previewErr ? tr('重新查询', 'Re-run') : tr('查询', 'Run')}</>
                 )}
-              </button>
+              </Button>
             </div>
             <PreviewPanel result={previewResult} error={previewErr} />
           </div>
@@ -952,7 +955,7 @@ function RuleEditorModalInner({
               ] as const).map((s) => {
                 const active = form.severity === s.code;
                 return (
-                  <button
+                  <Button variant="subtle" size="sm"
                     key={s.code}
                     type="button"
                     onClick={() => setForm({ ...form, severity: s.code })}
@@ -964,7 +967,7 @@ function RuleEditorModalInner({
                     )}
                   >
                     {s.label}
-                  </button>
+                  </Button>
                 );
               })}
             </div>
@@ -1197,7 +1200,7 @@ function KindSpecificFields({
       <div>
         <div className="mb-1.5 flex items-center justify-between">
           <span className="text-xs text-zinc-500">{tr('条件', 'Conditions')}</span>
-          <button
+          <Button variant="subtle" size="sm"
             type="button"
             onClick={() =>
               setForm({
@@ -1208,40 +1211,40 @@ function KindSpecificFields({
                 ],
               })
             }
-            className="text-[11px] text-zinc-400 hover:text-zinc-200"
+            className=""
           >
             + {tr('添加条件', 'Add condition')}
-          </button>
+          </Button>
         </div>
         <div className="space-y-2">
           {(form.conditions ?? []).map((c, i) => (
             <div key={i} className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950/40 px-2 py-1.5">
-              <select
+              <Select label={tr('指标', 'Metric')}
                 value={c.metric}
-                onChange={(e) => setCond(i, { metric: e.target.value })}
-                className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                onValueChange={(selectedValue) => setCond(i, { metric: selectedValue })}
+
               >
                 {HOST_METRICS.map((m) => (
                   <option key={m} value={m}>{m}</option>
                 ))}
-              </select>
-              <select
+              </Select>
+              <Select label={tr('比较符', 'Operator')}
                 value={c.operator}
-                onChange={(e) => setCond(i, { operator: e.target.value as RuleCondition['operator'] })}
-                className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                onValueChange={(selectedValue) => setCond(i, { operator: selectedValue as RuleCondition['operator'] })}
+
               >
                 {OPERATORS.map((op) => (
                   <option key={op} value={op}>{op}</option>
                 ))}
-              </select>
-              <input
+              </Select>
+              <Input
                 type="number"
                 value={c.threshold}
                 onChange={(e) => setCond(i, { threshold: parseFloat(e.target.value) })}
-                className="w-24 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                className="w-24"
               />
               {(form.conditions?.length ?? 0) > 1 && (
-                <button
+                <Button variant="dangerGhost" size="sm"
                   type="button"
                   onClick={() =>
                     setForm({
@@ -1249,11 +1252,11 @@ function KindSpecificFields({
                       conditions: (form.conditions ?? []).filter((_, idx) => idx !== i),
                     })
                   }
-                  className="ml-auto text-zinc-500 hover:text-red-400"
+                  className="ml-auto"
                   aria-label={tr('移除条件', 'Remove condition')}
                 >
                   <Trash2 size={12} />
-                </button>
+                </Button>
               )}
             </div>
           ))}
@@ -1272,7 +1275,7 @@ function KindSpecificFields({
     return (
       <div className="space-y-3">
         <Field label={tr('PromQL 表达式（含比较，如 `up == 0` / `cpu_pct > 90`）', 'PromQL expression (with comparison, e.g. `up == 0` / `cpu_pct > 90`)')}>
-          <textarea
+          <Textarea
             value={(form.spec?.expr as string) ?? ''}
             onChange={(e) => setSpec({ expr: e.target.value })}
             placeholder={tr(
@@ -1280,7 +1283,7 @@ function KindSpecificFields({
               'up{job="ongrid-manager"} == 0\nor\n100 * (1 - avg by (device_id) (rate(node_cpu_seconds_total{mode="idle"}[5m]))) > 90',
             )}
             rows={4}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full font-mono"
           />
         </Field>
         <div className="text-[11px] text-zinc-500">
@@ -1296,52 +1299,52 @@ function KindSpecificFields({
       <div className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
           <Field label={tr('指标', 'Metric')}>
-            <select
+            <Select label={tr('指标', 'Metric')}
               value={(form.spec?.metric as string) ?? 'cpu_pct'}
-              onChange={(e) => setSpec({ metric: e.target.value })}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              onValueChange={(selectedValue) => setSpec({ metric: selectedValue })}
+              className="w-full"
             >
               {HOST_METRICS.map((m) => (
                 <option key={m} value={m}>{m}</option>
               ))}
-            </select>
+            </Select>
           </Field>
           <Field label={tr('算法', 'Algorithm')}>
-            <select
+            <Select label={tr('算法', 'Algorithm')}
               value={(form.spec?.method as string) ?? 'zscore'}
-              onChange={(e) => setSpec({ method: e.target.value })}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              onValueChange={(selectedValue) => setSpec({ method: selectedValue })}
+              className="w-full"
             >
               <option value="zscore">{tr('z-score（均值 ± n×σ）', 'z-score (mean ± n×σ)')}</option>
               <option value="mad">{tr('MAD（中位数 ± n×MAD）', 'MAD (median ± n×MAD)')}</option>
-            </select>
+            </Select>
           </Field>
         </div>
         <div className="grid grid-cols-3 gap-3">
           <Field label={tr('基线窗口', 'Baseline window')}>
-            <input
+            <Input
               value={(form.spec?.baseline_window as string) ?? '1h'}
               onChange={(e) => setSpec({ baseline_window: e.target.value })}
               placeholder="1h"
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              className="w-full font-mono"
             />
           </Field>
           <Field label={tr('采样步长', 'Sample step')}>
-            <input
+            <Input
               value={(form.spec?.baseline_step as string) ?? '5m'}
               onChange={(e) => setSpec({ baseline_step: e.target.value })}
               placeholder="5m"
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              className="w-full font-mono"
             />
           </Field>
           <Field label={tr('偏离倍数', 'Deviation factor')}>
-            <input
+            <Input
               type="number"
               step="0.1"
               min={0}
               value={(form.spec?.deviation as number) ?? 3}
               onChange={(e) => setSpec({ deviation: parseFloat(e.target.value) || 3 })}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              className="w-full"
             />
           </Field>
         </div>
@@ -1357,53 +1360,53 @@ function KindSpecificFields({
       <div className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
           <Field label={tr('指标', 'Metric')}>
-            <select
+            <Select label={tr('指标', 'Metric')}
               value={(form.spec?.metric as string) ?? 'disk_avail_bytes'}
-              onChange={(e) => setSpec({ metric: e.target.value })}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              onValueChange={(selectedValue) => setSpec({ metric: selectedValue })}
+              className="w-full"
             >
               {[...HOST_METRICS, 'disk_avail_bytes'].map((m) => (
                 <option key={m} value={m}>{m}</option>
               ))}
-            </select>
+            </Select>
           </Field>
           <Field label={tr('拟合窗口（历史）', 'Fit window (history)')}>
-            <input
+            <Input
               value={(form.spec?.fit_window as string) ?? '1h'}
               onChange={(e) => setSpec({ fit_window: e.target.value })}
               placeholder="1h"
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              className="w-full font-mono"
             />
           </Field>
         </div>
         <div className="grid grid-cols-3 gap-3">
           <Field label={tr('预测窗口（秒）', 'Forecast window (seconds)')}>
-            <input
+            <Input
               type="number"
               min={60}
               value={(form.spec?.predict_seconds as number) ?? 21600}
               onChange={(e) => setSpec({ predict_seconds: parseInt(e.target.value, 10) || 0 })}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              className="w-full"
             />
           </Field>
           <Field label={tr('比较符', 'Operator')}>
-            <select
+            <Select label={tr('比较符', 'Operator')}
               value={(form.spec?.operator as string) ?? '<='}
-              onChange={(e) => setSpec({ operator: e.target.value })}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              onValueChange={(selectedValue) => setSpec({ operator: selectedValue })}
+              className="w-full"
             >
               {OPERATORS.map((op) => (
                 <option key={op} value={op}>{op}</option>
               ))}
-            </select>
+            </Select>
           </Field>
           <Field label={tr('阈值', 'Threshold')}>
-            <input
+            <Input
               type="number"
               step="any"
               value={(form.spec?.threshold as number) ?? 0}
               onChange={(e) => setSpec({ threshold: parseFloat(e.target.value) })}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              className="w-full"
             />
           </Field>
         </div>
@@ -1427,49 +1430,49 @@ function KindSpecificFields({
       <div className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
           <Field label={tr('SLI 表达式（含 $window）', 'SLI expression (uses $window)')}>
-            <input
+            <Input
               value={(form.spec?.sli as string) ?? ''}
               onChange={(e) => setSpec({ sli: e.target.value })}
               placeholder='sum(rate(http_requests_total{code!~"5.."}[$window])) / sum(rate(http_requests_total[$window]))'
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-[11px] text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              className="w-full font-mono"
             />
           </Field>
           <Field label={tr('SLO（%）', 'SLO (%)')}>
-            <input
+            <Input
               type="number"
               step="0.001"
               min={50}
               max={100}
               value={(form.spec?.slo as number) ?? 99.9}
               onChange={(e) => setSpec({ slo: parseFloat(e.target.value) || 99.9 })}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              className="w-full"
             />
           </Field>
         </div>
         <div>
           <div className="mb-1.5 flex items-center justify-between">
             <span className="text-xs text-zinc-500">{tr('燃烧窗口（多窗多倍率，全部满足才触发）', 'Burn windows (multi-window multi-rate; all must match to fire)')}</span>
-            <button
+            <Button variant="subtle" size="sm"
               type="button"
               onClick={() => setBurns([...burns, { window: '5m', multiplier: 1 }])}
-              className="text-[11px] text-zinc-400 hover:text-zinc-200"
+              className=""
             >
               + {tr('添加窗口', 'Add window')}
-            </button>
+            </Button>
           </div>
           <div className="space-y-2">
             {burns.map((b, i) => (
               <div key={i} className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950/40 px-2 py-1.5">
-                <input
+                <Input
                   value={b.window}
                   onChange={(e) =>
                     setBurns(burns.map((x, idx) => (idx === i ? { ...x, window: e.target.value } : x)))
                   }
                   placeholder="1h"
-                  className="w-24 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 font-mono text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                  className="w-24 font-mono"
                 />
                 <span className="text-xs text-zinc-500">×</span>
-                <input
+                <Input
                   type="number"
                   step="0.1"
                   min={0}
@@ -1477,17 +1480,17 @@ function KindSpecificFields({
                   onChange={(e) =>
                     setBurns(burns.map((x, idx) => (idx === i ? { ...x, multiplier: parseFloat(e.target.value) || 0 } : x)))
                   }
-                  className="w-24 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                  className="w-24"
                 />
                 {burns.length > 1 && (
-                  <button
+                  <Button variant="dangerGhost" size="sm"
                     type="button"
                     onClick={() => setBurns(burns.filter((_, idx) => idx !== i))}
-                    className="ml-auto text-zinc-500 hover:text-red-400"
+                    className="ml-auto"
                     aria-label={tr('移除窗口', 'Remove window')}
                   >
                     <Trash2 size={12} />
-                  </button>
+                  </Button>
                 )}
               </div>
             ))}
@@ -1532,7 +1535,7 @@ function KindSpecificFields({
     ];
     return (
       <div className="space-y-3">
-        <div className="rounded-md border border-sky-500/20 bg-sky-500/5 px-3 py-2 text-[11px] text-sky-200/80">
+        <div className="rounded-md border border-sky-500/20 bg-sky-500/5 px-3 py-2 text-[11px] text-sky-200">
           {tr(
             '这是推荐的后端无关规则：保存的是关键词和字段过滤，不是 LogQL 或 Elasticsearch DSL。切换日志后端时规则无需重写。',
             'Recommended backend-neutral rule: it stores keywords and field filters, never LogQL or Elasticsearch DSL, so backend cutovers require no rewrite.',
@@ -1540,58 +1543,58 @@ function KindSpecificFields({
         </div>
         <div className="grid grid-cols-2 gap-3">
           <Field label={tr('包含关键词（逗号分隔）', 'Include keywords (comma-separated)')}>
-            <input
+            <Input
               value={csvValue(keywords.include)}
               onChange={(e) => updateKeywords({ include: parseCSV(e.target.value) })}
               placeholder="error, panic, connection refused"
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              className="w-full"
             />
           </Field>
           <Field label={tr('排除关键词（逗号分隔）', 'Exclude keywords (comma-separated)')}>
-            <input
+            <Input
               value={csvValue(keywords.exclude)}
               onChange={(e) => updateKeywords({ exclude: parseCSV(e.target.value) })}
               placeholder="healthcheck, probe"
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              className="w-full"
             />
           </Field>
         </div>
         <div className="grid grid-cols-4 gap-3">
           <Field label={tr('关键词匹配', 'Keyword match')}>
-            <select
+            <Select label={tr('关键词匹配', 'Keyword match')}
               value={(keywords.mode as string) ?? 'any'}
-              onChange={(e) => updateKeywords({ mode: e.target.value })}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              onValueChange={(selectedValue) => updateKeywords({ mode: selectedValue })}
+              className="w-full"
             >
               <option value="any">{tr('任意一个', 'Any')}</option>
               <option value="all">{tr('全部包含', 'All')}</option>
               <option value="phrase">{tr('完整短语', 'Exact phrase')}</option>
-            </select>
+            </Select>
           </Field>
           <Field label={tr('统计窗口', 'Count window')}>
-            <input
+            <Input
               value={(form.spec?.window as string) ?? '5m'}
               onChange={(e) => setSpec({ window: e.target.value })}
               placeholder="5m"
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              className="w-full font-mono"
             />
           </Field>
           <Field label={tr('比较符', 'Operator')}>
-            <select
+            <Select label={tr('比较符', 'Operator')}
               value={(form.spec?.operator as string) ?? '>='}
-              onChange={(e) => setSpec({ operator: e.target.value })}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              onValueChange={(selectedValue) => setSpec({ operator: selectedValue })}
+              className="w-full"
             >
               {OPERATORS.map((op) => <option key={op} value={op}>{op}</option>)}
-            </select>
+            </Select>
           </Field>
           <Field label={tr('命中条数阈值', 'Hit count threshold')}>
-            <input
+            <Input
               type="number"
               min={0}
               value={(form.spec?.threshold as number) ?? 1}
               onChange={(e) => setSpec({ threshold: Number(e.target.value) })}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              className="w-full"
             />
           </Field>
         </div>
@@ -1601,15 +1604,15 @@ function KindSpecificFields({
           </div>
           <div className="grid grid-cols-2 gap-2 lg:grid-cols-3">
             {scopeFields.map((field) => (
-              <label key={field.key} className="block">
+              <Label key={field.key} className="block">
                 <span className="mb-1 block font-mono text-[10px] text-zinc-500">{field.label}</span>
-                <input
+                <Input
                   value={csvValue(scope[field.key])}
                   onChange={(e) => updateScope(field.key, e.target.value, field.numeric)}
                   placeholder={field.placeholder}
-                  className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                  className="w-full"
                 />
-              </label>
+              </Label>
             ))}
           </div>
         </div>
@@ -1621,48 +1624,48 @@ function KindSpecificFields({
     return (
       <div className="space-y-3">
         <Field label="stream_selector（LogQL label match）">
-          <input
+          <Input
             value={(form.spec?.stream_selector as string) ?? '{ongrid_source=~"journald(:.*)?"}'}
             onChange={(e) => setSpec({ stream_selector: e.target.value })}
             placeholder='{device_id="123",ongrid_source=~"journald(:.*)?"}'
-            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full font-mono"
           />
         </Field>
         <Field label={tr('line_filter（正则；不带 |~，evaluator 自动加）', 'line_filter (regex; no |~, the evaluator adds it)')}>
-          <input
+          <Input
             value={(form.spec?.line_filter as string) ?? ''}
             onChange={(e) => setSpec({ line_filter: e.target.value })}
             placeholder="(?i)error|panic|oom"
-            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full font-mono"
           />
         </Field>
         <div className="grid grid-cols-3 gap-3">
           <Field label={tr('窗口', 'Window')}>
-            <input
+            <Input
               value={(form.spec?.window as string) ?? '5m'}
               onChange={(e) => setSpec({ window: e.target.value })}
               placeholder="5m"
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              className="w-full font-mono"
             />
           </Field>
           <Field label={tr('比较符', 'Operator')}>
-            <select
+            <Select label={tr('比较符', 'Operator')}
               value={(form.spec?.operator as string) ?? '>='}
-              onChange={(e) => setSpec({ operator: e.target.value })}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              onValueChange={(selectedValue) => setSpec({ operator: selectedValue })}
+              className="w-full"
             >
               {OPERATORS.map((op) => (
                 <option key={op} value={op}>{op}</option>
               ))}
-            </select>
+            </Select>
           </Field>
           <Field label={tr('命中条数阈值', 'Hit count threshold')}>
-            <input
+            <Input
               type="number"
               min={0}
               value={(form.spec?.threshold as number) ?? 1}
               onChange={(e) => setSpec({ threshold: parseFloat(e.target.value) })}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              className="w-full"
             />
           </Field>
         </div>
@@ -1677,41 +1680,41 @@ function KindSpecificFields({
     return (
       <div className="space-y-3">
         <Field label="stream_selector">
-          <input
+          <Input
             value={(form.spec?.stream_selector as string) ?? '{ongrid_source=~".+"}'}
             onChange={(e) => setSpec({ stream_selector: e.target.value })}
             placeholder='{device_id="123"}'
-            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full font-mono"
           />
         </Field>
         <div className="grid grid-cols-3 gap-3">
           <Field label={tr('窗口', 'Window')}>
-            <input
+            <Input
               value={(form.spec?.window as string) ?? '5m'}
               onChange={(e) => setSpec({ window: e.target.value })}
               placeholder="5m"
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              className="w-full font-mono"
             />
           </Field>
           <Field label={tr('比较符', 'Operator')}>
-            <select
+            <Select label={tr('比较符', 'Operator')}
               value={(form.spec?.ratio_op as string) ?? '>='}
-              onChange={(e) => setSpec({ ratio_op: e.target.value })}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              onValueChange={(selectedValue) => setSpec({ ratio_op: selectedValue })}
+              className="w-full"
             >
               {OPERATORS.map((op) => (
                 <option key={op} value={op}>{op}</option>
               ))}
-            </select>
+            </Select>
           </Field>
           <Field label={tr('比值阈值', 'Ratio threshold')}>
-            <input
+            <Input
               type="number"
               step="0.1"
               min={0}
               value={(form.spec?.ratio_threshold as number) ?? 2}
               onChange={(e) => setSpec({ ratio_threshold: parseFloat(e.target.value) })}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              className="w-full"
             />
           </Field>
         </div>
@@ -1727,49 +1730,49 @@ function KindSpecificFields({
       <div className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
           <Field label="service">
-            <input
+            <Input
               value={(form.spec?.service as string) ?? ''}
               onChange={(e) => setSpec({ service: e.target.value })}
               placeholder="my-api"
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              className="w-full font-mono"
             />
           </Field>
           <Field label={tr('operation（可选）', 'operation (optional)')}>
-            <input
+            <Input
               value={(form.spec?.operation as string) ?? ''}
               onChange={(e) => setSpec({ operation: e.target.value })}
               placeholder="POST /v1/orders"
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              className="w-full font-mono"
             />
           </Field>
         </div>
         <div className="grid grid-cols-3 gap-3">
           <Field label={tr('分位', 'Quantile')}>
-            <select
+            <Select label={tr('分位', 'Quantile')}
               value={(form.spec?.quantile as string) ?? 'p95'}
-              onChange={(e) => setSpec({ quantile: e.target.value })}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              onValueChange={(selectedValue) => setSpec({ quantile: selectedValue })}
+              className="w-full"
             >
               <option value="p50">p50</option>
               <option value="p95">p95</option>
               <option value="p99">p99</option>
-            </select>
+            </Select>
           </Field>
           <Field label={tr('窗口', 'Window')}>
-            <input
+            <Input
               value={(form.spec?.window as string) ?? '5m'}
               onChange={(e) => setSpec({ window: e.target.value })}
               placeholder="5m"
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              className="w-full font-mono"
             />
           </Field>
           <Field label={tr('阈值（毫秒）', 'Threshold (ms)')}>
-            <input
+            <Input
               type="number"
               min={0}
               value={(form.spec?.threshold_ms as number) ?? 500}
               onChange={(e) => setSpec({ threshold_ms: parseFloat(e.target.value) })}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              className="w-full"
             />
           </Field>
         </div>
@@ -1787,42 +1790,42 @@ function KindSpecificFields({
     return (
       <div className="space-y-3">
         <Field label="service">
-          <input
+          <Input
             value={(form.spec?.service as string) ?? ''}
             onChange={(e) => setSpec({ service: e.target.value })}
             placeholder="my-api"
-            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full font-mono"
           />
         </Field>
         <div className="grid grid-cols-3 gap-3">
           <Field label={tr('窗口', 'Window')}>
-            <input
+            <Input
               value={(form.spec?.window as string) ?? '5m'}
               onChange={(e) => setSpec({ window: e.target.value })}
               placeholder="5m"
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              className="w-full font-mono"
             />
           </Field>
           <Field label={tr('比较符', 'Operator')}>
-            <select
+            <Select label={tr('比较符', 'Operator')}
               value={(form.spec?.operator as string) ?? '>='}
-              onChange={(e) => setSpec({ operator: e.target.value })}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              onValueChange={(selectedValue) => setSpec({ operator: selectedValue })}
+              className="w-full"
             >
               {OPERATORS.map((op) => (
                 <option key={op} value={op}>{op}</option>
               ))}
-            </select>
+            </Select>
           </Field>
           <Field label={tr('错误率阈值（%）', 'Error-rate threshold (%)')}>
-            <input
+            <Input
               type="number"
               step="0.1"
               min={0}
               max={100}
               value={(form.spec?.threshold_pct as number) ?? 1}
               onChange={(e) => setSpec({ threshold_pct: parseFloat(e.target.value) })}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              className="w-full"
             />
           </Field>
         </div>
@@ -1864,8 +1867,8 @@ function KindPicker({
           {SIGNAL_SOURCES.map((s) => {
             const active = currentSource === s.code;
             return (
-              <button
-                key={s.code}
+              <Hint key={s.code} content={s.label}><Button variant="outline" size="sm"
+
                 type="button"
                 disabled={disabled}
                 onClick={() => {
@@ -1880,10 +1883,10 @@ function KindPicker({
                     : 'border-zinc-800 bg-zinc-950 text-zinc-300 hover:bg-zinc-900',
                   disabled && 'cursor-not-allowed opacity-50'
                 )}
-                title={s.label}
+
               >
                 {s.label}
-              </button>
+              </Button></Hint>
             );
           })}
         </div>
@@ -1955,14 +1958,7 @@ const CHANNEL_TYPE_LABEL_EN: Record<string, string> = {
 // Order: 飞书 → 企业微信 → 钉钉 → Slack → Telegram → Webhook (IM-first,
 // generic last). `log` is intentionally absent — that channel type was
 // removed in 2026-05.
-const CHANNEL_TYPE_ORDER: Array<{ type: string; icon: typeof Webhook }> = [
-  { type: 'feishu', icon: MessageSquareShare },
-  { type: 'wecom', icon: MessageCircle },
-  { type: 'dingtalk', icon: Send },
-  { type: 'slack', icon: Slack },
-  { type: 'telegram', icon: Send },
-  { type: 'webhook', icon: Webhook },
-];
+const CHANNEL_TYPE_ORDER = ['feishu', 'wecom', 'dingtalk', 'slack', 'telegram', 'webhook'];
 
 // ChannelsField presents one row per channel TYPE (not per instance) —
 // inspired by Tencent Cloud Monitor's 通知方式 panel. Selected ids still
@@ -2073,12 +2069,12 @@ function ChannelsField({
               : 'border-zinc-800 bg-zinc-950/40',
           )}
         >
-          <label className="flex cursor-pointer items-center gap-2 text-xs">
-            <input
-              type="checkbox"
+          <Label className="flex cursor-pointer items-center gap-2 text-xs">
+            <Checkbox
+
               checked={isDefault}
-              onChange={toggleDefault}
-              className="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-900"
+              onCheckedChange={toggleDefault}
+              className="h-3.5 w-3.5"
             />
             <span className={cn('font-medium', isDefault ? 'text-accent' : 'text-zinc-300')}>
               {tr('默认', 'Default')}
@@ -2089,7 +2085,7 @@ function ChannelsField({
                 '(fire to every enabled channel whose severity floor matches)',
               )}
             </span>
-          </label>
+          </Label>
           {isDefault && (
             <div className="mt-1.5 flex flex-wrap gap-1 pl-5">
               {fallbackChannels.length === 0 ? (
@@ -2101,17 +2097,17 @@ function ChannelsField({
                 </span>
               ) : (
                 fallbackChannels.map((c) => (
-                  <span
-                    key={c.id}
-                    className="inline-flex items-center gap-1 rounded border border-accent/30 bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent"
-                    title={tr(
+                  <Hint key={c.id} content={tr(
                       `当前默认会命中:${c.name} (${c.type})`,
                       `Currently fires to ${c.name} (${c.type})`,
-                    )}
+                    )}><span
+
+                    className="inline-flex items-center gap-1 rounded border border-accent/30 bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent"
+
                   >
                     {c.name}
                     <span className="opacity-60">· {c.type}</span>
-                  </span>
+                  </span></Hint>
                 ))
               )}
             </div>
@@ -2139,7 +2135,7 @@ function ChannelsField({
             off auto-fills selectedIds with every enabled channel — the
             current visual state stays put, but it's now editable. */}
         <div className="space-y-1.5">
-        {CHANNEL_TYPE_ORDER.map(({ type, icon: Icon }) => {
+        {CHANNEL_TYPE_ORDER.map((type) => {
           const instances = byType[type] ?? [];
           const total = instances.length;
           // While master "default" is on, render every per-type row as
@@ -2167,17 +2163,7 @@ function ChannelsField({
             >
               <div className="flex items-center gap-2 px-2.5 py-2 text-xs">
                 {/* Header checkbox — bulk-toggle every instance of this type. */}
-                <input
-                  type="checkbox"
-                  checked={headerChecked}
-                  ref={(el) => {
-                    // visually distinguish partial selections.
-                    if (el) el.indeterminate = headerIndeterminate;
-                  }}
-                  disabled={rowDisabled || noInstances || enabledCount === 0}
-                  onChange={() => !rowDisabled && toggleType(type)}
-                  className="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-900 disabled:opacity-60"
-                  title={
+                <Hint content={
                     rowDisabled
                       ? tr('当前为默认模式 — 取消上方"默认"勾选才能单独选择', 'Default mode is on — uncheck "Default" above to pick individually')
                       : noInstances
@@ -2185,14 +2171,18 @@ function ChannelsField({
                       : enabledCount === 0
                       ? tr('该类型下所有实例均已停用', 'All instances of this type are disabled')
                       : tr('勾选 = 通知所有该类型的已启用实例', 'Check to notify every enabled instance of this type')
-                  }
-                />
-                <Icon
-                  className={cn(
-                    'h-4 w-4 shrink-0',
-                    noInstances ? 'text-zinc-600' : 'text-zinc-300',
-                  )}
-                />
+                  }><Checkbox
+
+                  checked={headerChecked}
+                  indeterminate={headerIndeterminate}
+                  disabled={rowDisabled || noInstances || enabledCount === 0}
+                  onCheckedChange={() => !rowDisabled && toggleType(type)}
+                  className="h-3.5 w-3.5"
+
+                /></Hint>
+                {type === 'webhook'
+                  ? <Webhook size={16} className="shrink-0 text-zinc-400" />
+                  : <CommunicationProviderIcon provider={type} size={16} className="shrink-0" />}
                 <span
                   className={cn(
                     'font-medium',
@@ -2224,11 +2214,11 @@ function ChannelsField({
                         <span className="text-zinc-500">{tr(`${total} 个实例`, `${total} instance(s)`)}</span>
                       )}
                       {total > 0 && (
-                        <button
+                        <Hint content={isOpen ? tr('收起实例选择', 'Hide instance selection') : tr('展开选择具体实例', 'Expand to pick specific instances')}><Button variant="outline" size="sm"
                           type="button"
                           onClick={() => setExpanded((m) => ({ ...m, [type]: !isOpen }))}
-                          className="inline-flex items-center gap-0.5 rounded border border-zinc-700 bg-zinc-900/80 px-1.5 py-0.5 text-zinc-300 hover:border-zinc-600 hover:text-zinc-100"
-                          title={isOpen ? tr('收起实例选择', 'Hide instance selection') : tr('展开选择具体实例', 'Expand to pick specific instances')}
+                          className="inline-flex items-center gap-0.5 px-1.5 py-0.5"
+
                         >
                           {isOpen ? (
                             <ChevronDown className="h-3 w-3" />
@@ -2236,7 +2226,7 @@ function ChannelsField({
                             <ChevronRight className="h-3 w-3" />
                           )}
                           {tr('选择实例', 'Select instances')}
-                        </button>
+                        </Button></Hint>
                       )}
                     </>
                   )}
@@ -2249,16 +2239,16 @@ function ChannelsField({
               {!noInstances && selectedCount > 0 && !isOpen && (
                 <div className="flex flex-wrap items-center gap-1 px-2.5 pb-2">
                   {selectedHere.map((c) => (
-                    <button
-                      key={c.id}
+                    <Hint key={c.id} content={tr('点击取消该实例', 'Click to remove this instance')}><Button variant="plain" size="sm"
+
                       type="button"
                       onClick={() => toggleInstance(c.id)}
-                      className="inline-flex items-center gap-1 rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 text-[10px] text-zinc-100 hover:border-accent hover:bg-accent/20"
-                      title={tr('点击取消该实例', 'Click to remove this instance')}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 border border-accent/40 bg-accent/10 text-zinc-100 hover:border-accent hover:bg-accent/20"
+
                     >
                       <span className={cn(!c.enabled && 'line-through opacity-60')}>{c.name}</span>
                       <span className="text-zinc-400">×</span>
-                    </button>
+                    </Button></Hint>
                   ))}
                 </div>
               )}
@@ -2278,8 +2268,14 @@ function ChannelsField({
                       const disabled = !c.enabled;
                       const lockedByMaster = isDefault;
                       return (
-                        <label
-                          key={c.id}
+                        <Hint key={c.id} content={
+                            disabled
+                              ? tr('该实例已停用，去 设置→通信通道 启用', 'Instance disabled — enable it under Settings → Notifications')
+                              : lockedByMaster
+                              ? tr('当前为默认模式 — 取消上方"默认"勾选才能单独取消', 'Default mode is on — uncheck "Default" above to untick this individually')
+                              : undefined
+                          }><Label
+
                           className={cn(
                             'flex items-center gap-2 rounded px-1.5 py-1 text-[11px] transition',
                             disabled
@@ -2290,20 +2286,14 @@ function ChannelsField({
                               ? 'cursor-pointer bg-accent/10'
                               : 'cursor-pointer hover:bg-zinc-900',
                           )}
-                          title={
-                            disabled
-                              ? tr('该实例已停用，去 设置→通信通道 启用', 'Instance disabled — enable it under Settings → Notifications')
-                              : lockedByMaster
-                              ? tr('当前为默认模式 — 取消上方"默认"勾选才能单独取消', 'Default mode is on — uncheck "Default" above to untick this individually')
-                              : undefined
-                          }
+
                         >
-                          <input
-                            type="checkbox"
+                          <Checkbox
+
                             checked={checked && !disabled}
                             disabled={disabled || lockedByMaster}
-                            onChange={() => !disabled && !lockedByMaster && toggleInstance(c.id)}
-                            className="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-900 disabled:opacity-60"
+                            onCheckedChange={() => !disabled && !lockedByMaster && toggleInstance(c.id)}
+                            className="h-3.5 w-3.5"
                           />
                           <span
                             className={cn(
@@ -2319,16 +2309,16 @@ function ChannelsField({
                             </span>
                           )}
                           {c.endpoint && (
-                            <span
+                            <Hint content={c.endpoint}><span
                               className="ml-auto truncate font-mono text-[10px] text-zinc-500"
-                              title={c.endpoint}
+
                             >
                               {c.endpoint.length > 40
                                 ? c.endpoint.slice(0, 40) + '…'
                                 : c.endpoint}
-                            </span>
+                            </span></Hint>
                           )}
-                        </label>
+                        </Label></Hint>
                       );
                     })}
                   </div>
@@ -2428,35 +2418,35 @@ function SendPolicyField({
             : 'border-zinc-800 bg-zinc-950/40',
         )}
       >
-        <label className="inline-flex items-center gap-1.5">
+        <Label className="inline-flex items-center gap-1.5">
           <span className="text-[11px] text-zinc-500">{tr('窗口', 'Window')}</span>
-          <select
+          <Select
             value={windowSeconds}
-            onChange={(e) => setWindow(Number(e.target.value))}
-            className="rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-100 focus:border-accent focus:outline-none"
+            onValueChange={(selectedValue) => setWindow(Number(selectedValue))}
+
           >
             {WINDOW_OPTIONS.map((o) => (
               <option key={o.sec} value={o.sec}>
                 {o.label}
               </option>
             ))}
-          </select>
-        </label>
-        <label className={cn('inline-flex items-center gap-1.5', windowSeconds === 0 && 'opacity-50')}>
+          </Select>
+        </Label>
+        <Label className={cn('inline-flex items-center gap-1.5', windowSeconds === 0 && 'opacity-50')}>
           <span className="text-[11px] text-zinc-500">{tr('触发次数', 'Fire count')}</span>
-          <select
+          <Select
             value={minFires}
-            onChange={(e) => setThreshold(Number(e.target.value))}
+            onValueChange={(selectedValue) => setThreshold(Number(selectedValue))}
             disabled={windowSeconds === 0}
-            className="rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-100 focus:border-accent focus:outline-none disabled:cursor-not-allowed"
+
           >
             {THRESHOLD_OPTIONS.map((n) => (
               <option key={n} value={n}>
                 {n === 0 ? tr('1 次', '1 fire') : tr(`≥ ${n} 次`, `≥ ${n} fires`)}
               </option>
             ))}
-          </select>
-        </label>
+          </Select>
+        </Label>
         <span className="ml-auto text-[11px] text-zinc-500">{summary}</span>
       </div>
     </Field>
@@ -2465,11 +2455,11 @@ function SendPolicyField({
 
 function Field({ label, hint, children }: { label: React.ReactNode; hint?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <label className="block">
+    <Label className="block">
       <span className="mb-1 block text-xs text-zinc-500">{label}</span>
       {children}
       {hint && <span className="mt-1 block text-[10px] text-zinc-500">{hint}</span>}
-    </label>
+    </Label>
   );
 }
 
@@ -2496,13 +2486,13 @@ function PresetPickerModal({
       size="lg"
       title={tr('📋 从预设挑一条规则', '📋 Pick a rule from preset')}
       footer={
-        <button
+        <Button variant="outline" size="sm"
           type="button"
           onClick={onClose}
-          className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+          className="px-3 py-1.5"
         >
           {tr('关闭', 'Close')}
-        </button>
+        </Button>
       }
     >
       <div className="flex max-h-[70vh] flex-col gap-3 text-sm">

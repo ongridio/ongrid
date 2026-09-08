@@ -1,3 +1,5 @@
+import { Button, Label, Textarea } from '@/components/ui';
+import { Hint } from '@/components/ui/Tooltip';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { AlertTriangle, CheckCircle2, ListTodo, RefreshCw, Siren, X } from 'lucide-react';
@@ -150,12 +152,12 @@ export default function AlertsPage() {
               <h1 className="flex items-center gap-2 text-base font-semibold text-zinc-100">
                 {tr('告警', 'Alerts')}
                 {globalOpen > 0 && (
-                  <span
+                  <Hint content={tr('全局未确认告警数 — 跟侧边栏红点同源', 'Global unacknowledged count — same source as the sidebar badge')}><span
                     className="inline-flex items-center rounded-full bg-red-500/90 px-2 py-0.5 text-[11px] font-medium text-white"
-                    title={tr('全局未确认告警数 — 跟侧边栏红点同源', 'Global unacknowledged count — same source as the sidebar badge')}
+
                   >
                     {globalOpen} {tr('未确认', 'open')}
-                  </span>
+                  </span></Hint>
                 )}
               </h1>
               <p className="mt-0.5 text-xs text-zinc-500">
@@ -172,15 +174,15 @@ export default function AlertsPage() {
               >
                 <ListTodo size={12} /> {tr('规则配置', 'Rule config')}
               </Link>
-              <button
+              <Button variant="outline" size="sm"
                 type="button"
                 onClick={() => fetchIncidents()}
                 disabled={loading || refreshing}
-                className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5"
               >
                 <RefreshCw size={12} className={cn(refreshing && 'animate-spin')} />
                 {tr('刷新', 'Refresh')}
-              </button>
+              </Button>
             </div>
           </div>
         </header>
@@ -348,7 +350,7 @@ function IncidentRow({
           hover — summaries can be long (full PromQL + label set) and the
           truncate cuts mid-expression. */}
       <td className="w-full max-w-0 px-4 py-2.5 text-zinc-300">
-        <div className="truncate" title={incident.summary}>{incident.summary}</div>
+        <Hint content={incident.summary}><div className="truncate" >{incident.summary}</div></Hint>
       </td>
       <td className="whitespace-nowrap px-4 py-2.5 text-zinc-400">
         {/* Target stays simple: the device (name + id). Detail lives in the
@@ -367,24 +369,24 @@ function IncidentRow({
       <td className="px-4 py-2.5 text-zinc-400">{incident.event_count}</td>
       <td className="px-4 py-2.5 text-right">
         <div className="inline-flex gap-1.5">
-          <button
+          <Hint content={viewerTip}><Button variant="outline" size="sm"
             type="button"
             onClick={onAck}
             disabled={!canAck}
-            title={viewerTip}
-            className="rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-[11px] text-zinc-200 hover:bg-zinc-800 disabled:opacity-40"
+
+            className="px-2 py-1"
           >
             {ackBusy ? tr('处理中…', 'Working…') : 'Ack'}
-          </button>
-          <button
+          </Button></Hint>
+          <Hint content={viewerTip}><Button variant="outline" size="sm"
             type="button"
             onClick={onResolve}
             disabled={!canResolve}
-            title={viewerTip}
-            className="rounded-md border border-emerald-700/60 bg-emerald-900/20 px-2 py-1 text-[11px] text-emerald-300 hover:bg-emerald-900/40 disabled:opacity-40"
+
+            className="px-2 py-1 text-emerald-300"
           >
             Resolve
-          </button>
+          </Button></Hint>
         </div>
       </td>
     </tr>
@@ -425,21 +427,21 @@ function ResolveDialog({
       title={tr('解决告警', 'Resolve alert')}
       footer={
         <>
-          <button
+          <Button variant="outline" size="sm"
             type="button"
             onClick={onClose}
-            className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+            className="px-3 py-1.5"
           >
             {tr('取消', 'Cancel')}
-          </button>
-          <button
+          </Button>
+          <Button variant="primary" size="sm"
             type="button"
             onClick={submit}
             disabled={submitting}
-            className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent/90 disabled:opacity-50"
+            className="px-3 py-1.5 font-medium text-accent-fg"
           >
             {submitting ? tr('提交中…', 'Submitting…') : tr('解决', 'Resolve')}
-          </button>
+          </Button>
         </>
       }
     >
@@ -448,16 +450,16 @@ function ResolveDialog({
           <div className="text-zinc-200">{incident.summary || incident.rule_key}</div>
           <div className="mt-1 text-[11px] text-zinc-500">incident #{incident.id}</div>
         </div>
-        <label className="block text-xs text-zinc-400">
+        <Label className="block text-xs text-zinc-400">
           <span className="mb-1 block">{tr('备注（可选，进入 incident 时间线）', 'Note (optional; recorded in the incident timeline)')}</span>
-          <textarea
+          <Textarea
             value={note}
             onChange={(e) => setNote(e.target.value)}
             rows={3}
             placeholder={tr('例：服务已重启，指标恢复', 'e.g. service restarted, metrics back to normal')}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none"
+            className="w-full"
           />
-        </label>
+        </Label>
         {err && <div className="text-xs text-red-400">{err}</div>}
       </div>
     </Modal>
@@ -480,7 +482,7 @@ function FilterGroup({
       <span className="text-zinc-500">{label}</span>
       <div className="flex gap-1">
         {options.map((opt) => (
-          <button
+          <Button variant="outline" size="sm"
             key={opt.key || '_all'}
             type="button"
             onClick={() => onChange(opt.key)}
@@ -492,7 +494,7 @@ function FilterGroup({
             )}
           >
             {opt.label}
-          </button>
+          </Button>
         ))}
       </div>
     </div>

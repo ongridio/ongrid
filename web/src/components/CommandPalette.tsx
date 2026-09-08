@@ -1,3 +1,5 @@
+import { Input } from '@/components/ui';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/Dialog';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, MessageSquare, Compass } from 'lucide-react';
@@ -21,8 +23,7 @@ type Props = {
 //    at 5 rows.
 //  - Keyboard model: ↑/↓ moves the active row across the flat result
 //    list (routes first, sessions second), Enter activates, Esc closes.
-//  - We don't tab-trap; the palette is short-lived and clicking outside
-//    closes it.
+//  - Dialog owns focus containment, Escape, and restoring the trigger focus.
 export function CommandPalette({ open, onClose }: Props) {
   const { tr } = useI18n();
   const navigate = useNavigate();
@@ -46,20 +47,8 @@ export function CommandPalette({ open, onClose }: Props) {
       .catch(() => {
         if (!cancelled) setRecent([]);
       });
-    // Focus the input after mount so the user can type immediately.
-    setTimeout(() => inputRef.current?.focus(), 0);
     return () => {
       cancelled = true;
-    };
-  }, [open]);
-
-  // Lock body scroll while open.
-  useEffect(() => {
-    if (!open) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = prev;
     };
   }, [open]);
 
@@ -126,9 +115,7 @@ export function CommandPalette({ open, onClose }: Props) {
       e.preventDefault();
       const item = flat[activeIndex];
       if (item) activate(item);
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      onClose();
+
     }
   }
 
@@ -138,21 +125,12 @@ export function CommandPalette({ open, onClose }: Props) {
   const sessionStart = routeMatches.length;
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={tr('命令面板', 'Command palette')}
-      className="fixed inset-0 z-[60] flex items-start justify-center px-4 pt-24"
-    >
-      <div
-        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-        onClick={onClose}
-        aria-hidden
-      />
-      <div className="anim-scale relative w-full max-w-xl overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900 shadow-2xl">
+    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
+      <DialogContent initialFocus={inputRef} className="max-w-xl overflow-hidden" aria-label={tr('命令面板', 'Command palette')}>
+        <DialogTitle className="sr-only">{tr('命令面板', 'Command palette')}</DialogTitle>
         <div className="flex items-center gap-2 border-b border-zinc-800 px-4 py-3">
           <Search size={14} className="text-zinc-500" />
-          <input
+          <Input variant="inset"
             ref={inputRef}
             value={query}
             onChange={(e) => {
@@ -162,7 +140,7 @@ export function CommandPalette({ open, onClose }: Props) {
             onKeyDown={onKeyDown}
             placeholder={tr('跳转到… 搜索路由、会话', 'Go to… search routes, sessions')}
             aria-label={tr('搜索', 'Search')}
-            className="flex-1 bg-transparent text-[14px] text-zinc-100 placeholder:text-zinc-500 focus:outline-none"
+            className="flex-1"
           />
           <kbd className="hidden rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-500 sm:inline">
             Esc
@@ -219,8 +197,8 @@ export function CommandPalette({ open, onClose }: Props) {
           <span>{tr('↑↓ 切换 · Enter 跳转 · Esc 关闭', '↑↓ navigate · Enter open · Esc close')}</span>
           <span>⌘P / Ctrl+P</span>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

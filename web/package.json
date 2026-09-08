@@ -15,6 +15,7 @@
     "typecheck": "tsc -b --noEmit"
   },
   "dependencies": {
+    "@base-ui/react": "^1.8.0",
     "@dagrejs/dagre": "^3.0.0",
     "@xyflow/react": "^12.10.2",
     "lucide-react": "^0.460.0",

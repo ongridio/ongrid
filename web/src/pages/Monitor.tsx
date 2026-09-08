@@ -1,3 +1,8 @@
+import { FilterField } from '@/components/ui/FilterField';
+import { Button } from '@/components/ui';
+import { useDialogs } from '@/components/ui/useDialogs';
+import { Hint } from '@/components/ui/Tooltip';
+import { Select } from '@/components/ui/Select';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePoll } from '@/lib/usePoll';
 import { Clock, RefreshCw, Plus } from 'lucide-react';
@@ -274,6 +279,7 @@ function buildMonitorPanels(): GrafanaPanel[] {
 // returned at the cluster sizes we run.
 
 export default function MonitorPage() {
+  const { confirmAction, alertAction, dialog } = useDialogs();
   const { tr, locale } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
   const range = searchParams.get('range') || DEFAULT_RANGE;
@@ -441,23 +447,23 @@ export default function MonitorPage() {
   }, []);
 
   const handleDeletePanel = useCallback(
-    (p: MonitorPanel) => {
-      if (!window.confirm(tr(
+    async (p: MonitorPanel) => {
+      if (!(await confirmAction(tr(
         `确认删除面板 “${p.title}”？同步会从 Grafana ongrid-monitor 仪表盘移除。`,
         `Delete panel “${p.title}”? It will also be removed from the Grafana ongrid-monitor dashboard.`,
-      ))) {
+      )))) {
         return;
       }
       void deleteMonitorPanel(p.id)
         .then(() => reloadUserPanels())
-        .catch((err) => {
-          window.alert(tr(
+        .catch(async (err) => {
+          (await alertAction(tr(
             `删除失败: ${(err as Error)?.message ?? '未知错误'}`,
             `Delete failed: ${(err as Error)?.message ?? 'unknown error'}`,
-          ));
+          )));
         });
     },
-    [reloadUserPanels],
+    [alertAction, confirmAction, reloadUserPanels, tr],
   );
 
   const handleSubmitPanel = useCallback(
@@ -487,7 +493,7 @@ export default function MonitorPage() {
   );
 
   return (
-    <main className="anim-fade flex flex-1 flex-col overflow-hidden">
+    <>{dialog}<main className="anim-fade flex flex-1 flex-col overflow-hidden">
       <header className="app-header border-b border-zinc-800/60 px-6 py-4">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -503,30 +509,28 @@ export default function MonitorPage() {
             {/* Canonical header action order across 监控/日志/链路:
                 添加面板 → 实时 → 在 Grafana 中打开 → 刷新.
                 Monitor has no 实时 toggle (auto-refresh selector covers it). */}
-            <button
+            <Hint content={tr('新建自定义面板（PromQL，自动同步到 Grafana）', 'Create a custom panel (PromQL, auto-synced to Grafana)')}><Button variant="primary"
               type="button"
               onClick={handleAddPanel}
-              title={tr('新建自定义面板（PromQL，自动同步到 Grafana）', 'Create a custom panel (PromQL, auto-synced to Grafana)')}
-              className="inline-flex items-center gap-1.5 rounded-md bg-accent px-2.5 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent/90"
+
             >
               <Plus size={12} />
               <span>{tr('添加面板', 'Add panel')}</span>
-            </button>
+            </Button></Hint>
             <GrafanaLinkButton
               onClick={handleOpenInGrafana}
               label={tr('在 Grafana 中打开', 'Open in Grafana')}
               title={tr('打开完整的 Grafana 仪表盘 — 支持自定义面板 / 时间范围 / 变量', 'Open the full Grafana dashboard — custom panels, time range, variables')}
               disabled={!grafanaBase}
             />
-            <button
+            <Hint content={tr('刷新所有图表', 'Refresh all charts')}><Button variant="outline"
               type="button"
               onClick={handleRefresh}
-              title={tr('刷新所有图表', 'Refresh all charts')}
-              className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+
             >
               <RefreshCw size={12} />
               <span>{tr('刷新', 'Refresh')}</span>
-            </button>
+            </Button></Hint>
           </div>
         </div>
 
@@ -647,7 +651,7 @@ export default function MonitorPage() {
         onClose={() => setModalOpen(false)}
         onSubmit={handleSubmitPanel}
       />
-    </main>
+    </main></>
   );
 }
 
@@ -665,21 +669,8 @@ function ToolbarSelect({
   options: { value: string; label: string }[];
   onChange(value: string): void;
 }) {
-  return (
-    <label className="inline-flex items-center gap-1 rounded-md border border-zinc-800/60 bg-zinc-950/40 pl-2 pr-1 py-1 text-zinc-300 hover:border-zinc-700">
-      {icon && <span className="text-zinc-500">{icon}</span>}
-      <span className="text-[11px] text-zinc-500">{label}</span>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="appearance-none border-none bg-transparent pl-1 pr-4 text-[12px] text-zinc-100 focus:outline-none"
-      >
-        {options.map((o) => (
-          <option key={o.value} value={o.value} className="bg-zinc-900">
-            {o.label}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
+  return <FilterField label={<>{icon}{label}</>} className="max-w-sm">
+    <Select value={value} onValueChange={onChange} options={options} label={label} />
+  </FilterField>;
+
 }

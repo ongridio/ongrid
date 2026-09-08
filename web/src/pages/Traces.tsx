@@ -1,3 +1,6 @@
+import { FilterField } from '@/components/ui/FilterField';
+import { Label, Input } from '@/components/ui';
+import { Hint } from '@/components/ui/Tooltip';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
@@ -33,7 +36,7 @@ import {
   type TraceScope,
   type TraceQuickFilter,
 } from '@/components/traces/traceSummary';
-import { Button, PageHeader } from '@/components/ui';
+import { Button, PageHeader, Select } from '@/components/ui';
 import { useObservability } from '@/store/observability';
 import { cn } from '@/lib/cn';
 import { fullDateTime } from '@/lib/format';
@@ -52,12 +55,12 @@ const RANGE_PRESETS: { value: string; labelZh: string; labelEn: string }[] = [
 ];
 const DEFAULT_RANGE = '1h';
 
-// Shared className for every <input> / <select> inside the filter
+// Shared className for text inputs inside the filter
 // rows, so widths come from per-control wrappers but height /
 // padding / border stay identical across the strip. Caller can
 // extend with `cn(INPUT_BASE, 'font-mono')` for code-shaped values.
 const INPUT_BASE =
-  'h-[34px] w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none';
+  "w-full";
 
 function rangeToMs(range: string): number {
   const m = /^(\d+)([smhdw])$/.exec(range.trim());
@@ -394,20 +397,21 @@ export default function TracesPage() {
   return (
     <main className="anim-fade flex flex-1 flex-col overflow-hidden">
       <PageHeader
+        className="[&>div:first-child]:flex-wrap [&>div:first-child>div:first-child]:min-w-48 [&>div:first-child>div:last-child]:shrink"
         title={tr('链路', 'Traces')}
         subtitle={selectedRow
           ? tr('正在查看单条 trace 的调用树与时间轴', 'Inspecting the span tree and timeline for one trace')
           : tr(`Tempo 链路 · ${rows.length} 条结果`, `Tempo traces · ${rows.length} results`)}
         actions={(
           <>
-            <Button
+            <Hint content={live ? tr('停止 5 秒自动刷新', 'Stop auto-refresh (5 s)') : tr('每 5 秒自动刷新', 'Auto-refresh every 5 s')}><Button
               onClick={() => setLive((value) => !value)}
-              title={live ? tr('停止 5 秒自动刷新', 'Stop auto-refresh (5 s)') : tr('每 5 秒自动刷新', 'Auto-refresh every 5 s')}
+
               className={cn(live && 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300')}
             >
               {live ? <Pause size={12} /> : <Play size={12} />}
               {live ? tr('实时中', 'Live') : tr('实时', 'Live')}
-            </Button>
+            </Button></Hint>
             <GrafanaLinkButton
               onClick={onOpenGrafana}
               label={tr('在 Grafana 中打开', 'Open in Grafana')}
@@ -424,51 +428,65 @@ export default function TracesPage() {
         extra={(
           <form onSubmit={submit} className="space-y-2">
             <div className="flex flex-wrap items-end gap-2">
-              <label className="block w-44 shrink-0">
-                <span className="mb-1 block text-[11px] text-zinc-500"><Filter size={10} className="-mt-0.5 mr-1 inline" />service.name</span>
-                <select value={serviceFilter} onChange={(event) => pickFacets(event.target.value, operationFilter, peerFilter)} className={INPUT_BASE}>
-                  <option value="">{tr('全部', 'All')}</option>
-                  {serviceOptions.map((value) => <option key={value} value={value}>{value}</option>)}
-                </select>
-              </label>
-              <label className="block w-44 shrink-0">
-                <span className="mb-1 block text-[11px] text-zinc-500"><Filter size={10} className="-mt-0.5 mr-1 inline" />operation</span>
-                <select value={operationFilter} onChange={(event) => pickFacets(serviceFilter, event.target.value, peerFilter)} className={cn(INPUT_BASE, 'font-mono')}>
-                  <option value="">{tr('全部', 'All')}</option>
-                  {operationOptions.map((value) => <option key={value} value={value}>{value}</option>)}
-                </select>
-              </label>
-              <label className="block w-36 shrink-0">
-                <span className="mb-1 block text-[11px] text-zinc-500"><Filter size={10} className="-mt-0.5 mr-1 inline" />peer.service</span>
-                <select value={peerFilter} onChange={(event) => pickFacets(serviceFilter, operationFilter, event.target.value)} className={INPUT_BASE}>
-                  <option value="">{tr('全部依赖', 'All peers')}</option>
-                  {peerOptions.map((value) => <option key={value} value={value}>{value}</option>)}
-                </select>
-              </label>
-              <label className="block w-28 shrink-0">
-                <span className="mb-1 block text-[11px] text-zinc-500">{tr('请求类型', 'Traffic')}</span>
-                <select value={scope} onChange={(event) => pickFacets(serviceFilter, operationFilter, peerFilter, event.target.value as TraceScope)} className={INPUT_BASE}>
-                  <option value="business">{tr('业务请求', 'Business')}</option>
-                  <option value="internal">{tr('内部请求', 'Internal')}</option>
-                  <option value="all">{tr('全部请求', 'All')}</option>
-                </select>
-              </label>
-              <label className="block w-32 shrink-0">
-                <span className="mb-1 block text-[11px] text-zinc-500"><Clock size={10} className="-mt-0.5 mr-1 inline" />{tr('时间范围', 'Time range')}</span>
-                <select value={range} onChange={(event) => setRange(event.target.value)} className={INPUT_BASE}>
-                  {RANGE_PRESETS.map((option) => <option key={option.value} value={option.value}>{tr(option.labelZh, option.labelEn)}</option>)}
-                </select>
-              </label>
-              <label className="block min-w-44 flex-1">
-                <span className="mb-1 block text-[11px] text-zinc-500"><SearchIcon size={10} className="-mt-0.5 mr-1 inline" />trace_id</span>
-                <input value={traceIdInput} onChange={(event) => setTraceIdInput(event.target.value)} placeholder={tr('粘贴 ID 直接打开', 'Paste an ID to open')} className={cn(INPUT_BASE, 'font-mono')} />
-              </label>
+              <FilterField label={<><Filter size={10} />service.name</>} className="w-56 shrink-0">
+                <Select
+                  searchable
+                  label="service.name"
+                  value={serviceFilter}
+                  onValueChange={(next) => pickFacets(next, operationFilter, peerFilter)}
+                  options={[{ value: '', label: tr('全部', 'All') }, ...serviceOptions.map((value) => ({ value, label: value }))]}
+                />
+              </FilterField>
+              <FilterField label={<><Filter size={10} />operation</>} className="w-56 shrink-0">
+                <Select
+                  searchable
+                  label="operation"
+                  value={operationFilter}
+                  onValueChange={(next) => pickFacets(serviceFilter, next, peerFilter)}
+                  options={[{ value: '', label: tr('全部', 'All') }, ...operationOptions.map((value) => ({ value, label: value }))]}
+                  className="font-mono"
+                />
+              </FilterField>
+              <FilterField label={<><Filter size={10} />peer.service</>} className="w-52 shrink-0">
+                <Select
+                  searchable
+                  label="peer.service"
+                  value={peerFilter}
+                  onValueChange={(next) => pickFacets(serviceFilter, operationFilter, next)}
+                  options={[{ value: '', label: tr('全部依赖', 'All peers') }, ...peerOptions.map((value) => ({ value, label: value }))]}
+                />
+              </FilterField>
+              <FilterField label={tr('请求类型', 'Traffic')} className="w-44 shrink-0">
+                <Select
+                  label={tr('请求类型', 'Traffic')}
+                  value={scope}
+                  onValueChange={(next) => pickFacets(serviceFilter, operationFilter, peerFilter, next as TraceScope)}
+                  options={[
+                    { value: 'business', label: tr('业务请求', 'Business') },
+                    { value: 'internal', label: tr('内部请求', 'Internal') },
+                    { value: 'all', label: tr('全部请求', 'All') },
+                  ]}
+                />
+              </FilterField>
+              <FilterField label={<><Clock size={10} />{tr('时间范围', 'Time range')}</>} className="w-52 shrink-0">
+                <Select
+                  label={tr('时间范围', 'Time range')}
+                  value={range}
+                  onValueChange={setRange}
+                  options={[
+                    ...RANGE_PRESETS.map((option) => ({ value: option.value, label: tr(option.labelZh, option.labelEn) })),
+                  ]}
+                />
+              </FilterField>
+              <FilterField label={<><SearchIcon size={10} />trace_id</>} className="min-w-64 flex-1">
+                <Input aria-label="trace_id" value={traceIdInput} onChange={(event) => setTraceIdInput(event.target.value)} placeholder={tr('粘贴 ID 直接打开', 'Paste an ID to open')} className={cn(INPUT_BASE, "font-mono")} />
+              </FilterField>
               <div className="flex h-[34px] items-center gap-1.5 self-end">
                 {TRACES_QUICK_CHIPS.map((chip) => (
-                  <button
-                    key={chip.labelEn}
+                  <Hint key={chip.labelEn} content={tr(chip.titleZh, chip.titleEn)}><Button variant="plain" size="sm"
+
                     type="button"
-                    title={tr(chip.titleZh, chip.titleEn)}
+
                     onClick={() => {
                       closeTrace();
                       setTraceIdInput('');
@@ -486,7 +504,7 @@ export default function TracesPage() {
                     )}
                   >
                     {tr(chip.labelZh, chip.labelEn)}
-                  </button>
+                  </Button></Hint>
                 ))}
               </div>
               <Button onClick={() => {
@@ -512,14 +530,14 @@ export default function TracesPage() {
               </Button>
             </div>
             {advancedOpen && (
-              <label className={cn('block max-w-3xl', traceIdInput.trim() && 'opacity-50')}>
+              <Label className={cn('block max-w-3xl', traceIdInput.trim() && 'opacity-50')}>
                 <span className="mb-1 block text-[11px] text-zinc-500">{tr('TraceQL（非空时覆盖上方所有筛选）', 'TraceQL (overrides all filters above when set)')}</span>
                 <div className="flex items-center gap-1.5">
-                  <input
+                  <Input
                     value={traceQL}
                     onChange={(event) => setTraceQL(event.target.value)}
                     placeholder={'{ resource.service.name="my-api" && duration > 200ms }'}
-                    className={cn(INPUT_BASE, 'font-mono')}
+                    className={cn(INPUT_BASE, "font-mono")}
                   />
                   <NLQueryHelper
                     dialect="traceql"
@@ -527,7 +545,7 @@ export default function TracesPage() {
                     onAccept={setTraceQL}
                   />
                 </div>
-              </label>
+              </Label>
             )}
             {!err && hasSearched && rows.length >= PAGE_LIMIT && (
               <p className="text-[11px] text-amber-400">
@@ -593,18 +611,18 @@ export default function TracesPage() {
               )}
             </div>
             <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
-              <button
+              <Button variant="outline" size="sm"
                 type="button"
                 onClick={() => {
                   setRange('24h');
                   setSubmitted((s) => ({ ...s, range: '24h' }));
                 }}
-                className="rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-[11px] text-zinc-300 hover:bg-zinc-800"
+                className="px-2 py-1"
               >
                 {tr('扩大到 24 小时', 'Widen to 24 h')}
-              </button>
+              </Button>
               {(serviceFilter || operationFilter || peerFilter || scope !== 'business') && (
-                <button
+                <Button variant="outline" size="sm"
                   type="button"
                   onClick={() => {
                     setServiceFilter('');
@@ -613,22 +631,22 @@ export default function TracesPage() {
                     setScope('business');
                     setSubmitted((s) => ({ ...s, service: '', operation: '', peer: '', scope: 'business' }));
                   }}
-                  className="rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-[11px] text-zinc-300 hover:bg-zinc-800"
+                  className="px-2 py-1"
                 >
                   {tr('恢复业务请求筛选', 'Reset business filters')}
-                </button>
+                </Button>
               )}
               {traceQL.trim() && (
-                <button
+                <Button variant="outline" size="sm"
                   type="button"
                   onClick={() => {
                     setTraceQL('');
                     setSubmitted((s) => ({ ...s, traceQL: '' }));
                   }}
-                  className="rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-[11px] text-zinc-300 hover:bg-zinc-800"
+                  className="px-2 py-1"
                 >
                   {tr('清空 TraceQL', 'Clear TraceQL')}
-                </button>
+                </Button>
               )}
             </div>
           </div>
@@ -662,15 +680,15 @@ export default function TracesPage() {
                     className="cursor-pointer bg-zinc-900/20 hover:bg-zinc-900/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500"
                   >
                     <td className="min-w-64 px-3 py-2.5">
-                      <span className="block truncate font-mono text-zinc-200" title={row.rootName}>{row.rootName || '-'}</span>
-                      <span className="mt-0.5 block truncate text-[10px] text-zinc-500" title={row.service}>{row.service || '-'}</span>
+                      <Hint content={row.rootName}><span className="block truncate font-mono text-zinc-200" >{row.rootName || '-'}</span></Hint>
+                      <Hint content={row.service}><span className="mt-0.5 block truncate text-[10px] text-zinc-500" >{row.service || '-'}</span></Hint>
                     </td>
                     <td className="px-2 py-2.5 text-right font-mono text-zinc-200">{formatTraceSummaryDuration(row.durationMs)}</td>
                     <td className="px-2 py-2.5 text-right text-zinc-300">{row.spanCount || '-'}</td>
                     <td className="whitespace-nowrap px-2 py-2.5 text-zinc-400">{row.startMs ? fullDateTime(row.startMs) : '-'}</td>
                     <td className="px-2 py-2.5 font-mono text-zinc-400">
                       <span className="inline-flex items-center gap-1">
-                        <span title={row.traceId}>{shortId(row.traceId)}</span>
+                        <Hint content={row.traceId}><span >{shortId(row.traceId)}</span></Hint>
                         <CopyButton value={row.traceId} />
                       </span>
                     </td>
@@ -690,7 +708,7 @@ function CopyButton({ value }: { value: string }) {
   const { tr } = useI18n();
   const [copied, setCopied] = useState(false);
   return (
-    <button
+    <Hint content={copied ? tr('已复制', 'Copied') : tr('复制 trace_id', 'Copy trace_id')}><Button variant="subtle" size="sm"
       type="button"
       onClick={(e) => {
         e.stopPropagation();
@@ -699,11 +717,11 @@ function CopyButton({ value }: { value: string }) {
           setTimeout(() => setCopied(false), 1200);
         });
       }}
-      className="text-zinc-500 hover:text-zinc-200"
-      title={copied ? tr('已复制', 'Copied') : tr('复制 trace_id', 'Copy trace_id')}
+      className=""
+
     >
       <Copy size={10} />
-    </button>
+    </Button></Hint>
   );
 }
 

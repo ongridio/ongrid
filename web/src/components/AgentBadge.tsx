@@ -1,3 +1,4 @@
+import { Hint } from '@/components/ui/Tooltip';
 // AgentBadge renders the persona pinned to a chat session. Single
 // source of truth for the visual treatment so /agents page, sidebar
 // session list, and ChatThread header all stay aligned.
@@ -59,12 +60,12 @@ export function AgentBadge({
       : 'px-1 py-0.5 text-[10px]';
   const iconSize = size === 'sm' ? 11 : 9;
   return (
-    <span
-      title={tr(`此会话固定使用 ${label}（${agentId}）`, `This session is pinned to ${label} (${agentId})`)}
+    <Hint content={tr(`此会话固定使用 ${label}（${agentId}）`, `This session is pinned to ${label} (${agentId})`)}><span
+
       className={cn(base, sizeCls, className)}
     >
       <Bot size={iconSize} />
       {label}
-    </span>
+    </span></Hint>
   );
 }

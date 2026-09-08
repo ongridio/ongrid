@@ -1,3 +1,4 @@
+import { Input, Label } from '@/components/ui';
 // LLM 模型配置页 — 每个 provider 一张子卡，含 API key / Base URL /
 // 模型列表 / 默认模型。改完保存自动让 manager 失效缓存（≤1 秒生效）。
 //
@@ -569,38 +570,38 @@ function LLMProviderCard({ meta, initialSettings }: { meta: LLMProviderMeta; ini
                 {tr(`还没添加模型 — 在下面输入框里加一个，例 ${meta.modelPlaceholder}`, `No models yet — add one in the input below, e.g. ${meta.modelPlaceholder}`)}
               </p>
             ) : (
-              <ul className="space-y-1">
+              <ul className="divide-y divide-zinc-800/60">
                 {draft.models.map((m) => {
                   const isDefault = draft.default_model === m;
                   return (
                     <li
                       key={m}
-                      className="flex items-center gap-2 rounded border border-zinc-800 bg-zinc-950/40 px-2.5 py-1.5 text-[12px]"
+                      className="flex items-center gap-2 py-2 text-[12px]"
                     >
-                      <code className="font-mono text-zinc-100">{m}</code>
+                      <code className="min-w-0 break-all font-mono text-zinc-100">{m}</code>
                       {isDefault && (
                         <span className="inline-flex items-center gap-0.5 rounded border border-emerald-700/60 bg-emerald-900/20 px-1 text-[10px] text-emerald-300">
                           <Star size={9} /> {tr('默认', 'Default')}
                         </span>
                       )}
-                      <span className="ml-auto flex items-center gap-1">
+                      <span className="ml-auto flex shrink-0 items-center gap-1">
                         {!isDefault && (
-                          <button
+                          <Button variant="subtle" size="sm"
                             type="button"
                             onClick={() => setDefault(m)}
-                            className="rounded px-1.5 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                            className="px-1.5 py-0.5"
                           >
                             {tr('设为默认', 'Set default')}
-                          </button>
+                          </Button>
                         )}
-                        <button
+                        <Button variant="dangerGhost" size="sm"
                           type="button"
                           onClick={() => removeModel(m)}
                           aria-label={tr(`移除 ${m}`, `Remove ${m}`)}
-                          className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-red-300"
+                          className="p-1"
                         >
                           <Trash2 size={11} />
-                        </button>
+                        </Button>
                       </span>
                     </li>
                   );
@@ -608,7 +609,7 @@ function LLMProviderCard({ meta, initialSettings }: { meta: LLMProviderMeta; ini
               </ul>
             )}
             <div className="mt-2 flex items-center gap-2">
-              <input
+              <Input
                 type="text"
                 value={newModel}
                 onChange={(e) => setNewModel(e.target.value)}
@@ -619,17 +620,17 @@ function LLMProviderCard({ meta, initialSettings }: { meta: LLMProviderMeta; ini
                   }
                 }}
                 placeholder={tr(`新增模型，例 ${meta.modelPlaceholder}`, `Add a model, e.g. ${meta.modelPlaceholder}`)}
-                className="flex-1 rounded-md border border-zinc-800 bg-zinc-950/40 px-2.5 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none"
+                className="flex-1"
               />
-              <button
+              <Button variant="outline" size="sm"
                 type="button"
                 onClick={addModel}
                 disabled={newModel.trim() === ''}
-                className="inline-flex items-center gap-1 rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-200 hover:border-zinc-500 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex items-center gap-1 px-2.5 py-1.5"
               >
                 <Plus size={12} />
                 {tr('添加', 'Add')}
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -738,7 +739,7 @@ function FieldRow({
 }) {
   const inputType = sensitive ? (revealed ? 'text' : 'password') : 'text';
   return (
-    <label className="block">
+    <Label className="block">
       <span className="mb-1 flex items-center gap-1.5 text-xs text-zinc-400">
         {label}
         {sensitive && (
@@ -748,30 +749,30 @@ function FieldRow({
         )}
       </span>
       <div className="relative">
-        <input
+        <Input
           type={inputType}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
           className={cn(
-            'w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none',
-            sensitive && 'pr-9',
+            "w-full",
+            sensitive && "bg-transparent pr-9 shadow-none",
           )}
           autoComplete="off"
         />
         {sensitive && onToggleReveal && (
-          <button
+          <Button variant="subtle" size="sm"
             type="button"
             onClick={onToggleReveal}
             tabIndex={-1}
             aria-label={revealed ? 'Hide' : 'Show'}
-            className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+            className="absolute right-2 top-1/2 -translate-y-1/2 p-1"
           >
             {revealed ? <EyeOff size={14} /> : <Eye size={14} />}
-          </button>
+          </Button>
         )}
       </div>
       {hint && <span className="mt-1 block text-[11px] text-zinc-500">{hint}</span>}
-    </label>
+    </Label>
   );
 }

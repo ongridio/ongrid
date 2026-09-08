@@ -1,4 +1,5 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { selectOption } from '@/test/select-option';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { http, HttpResponse } from 'msw';
@@ -28,23 +29,23 @@ describe('SettingsAgent LLM timeout', () => {
       }),
     );
 
-    await act(async () => {
+
       render(
         <MemoryRouter>
           <SettingsAgent />
         </MemoryRouter>,
       );
-    });
+
 
     const input = await screen.findByRole('spinbutton', { name: 'Timeout seconds' });
     expect(input).toHaveValue(120);
 
     const user = userEvent.setup();
-    await act(async () => {
+
       await user.clear(input);
       await user.type(input, '300');
       await user.click(screen.getByRole('button', { name: 'Save' }));
-    });
+
 
     await waitFor(() => expect(saved).toEqual({ value: '300', sensitive: false }));
   });
@@ -59,21 +60,21 @@ describe('SettingsAgent LLM timeout', () => {
       }),
     );
 
-    await act(async () => {
+
       render(
         <MemoryRouter>
           <SettingsAgent />
         </MemoryRouter>,
       );
-    });
+
 
     const input = await screen.findByRole('spinbutton', { name: 'Timeout seconds' });
     const user = userEvent.setup();
-    await act(async () => {
+
       await user.clear(input);
       await user.type(input, '29');
       await user.click(screen.getByRole('button', { name: 'Save' }));
-    });
+
 
     expect(await screen.findByText(/Timeout must be a whole number/)).toBeInTheDocument();
     expect(calls).toBe(0);
@@ -106,22 +107,22 @@ describe('SettingsAgent output language', () => {
       }),
     );
 
-    await act(async () => {
+
       render(
         <MemoryRouter>
           <SettingsAgent />
         </MemoryRouter>,
       );
-    });
+
 
     const select = await screen.findByRole('combobox', { name: 'Output language' });
-    expect(select).toHaveValue('en');
+    expect(select).toHaveTextContent('English');
 
     const user = userEvent.setup();
-    await act(async () => {
-      await user.selectOptions(select, 'zh');
+
+      await selectOption(select, '中文');
       await user.click(screen.getByRole('button', { name: 'Save language' }));
-    });
+
 
     await waitFor(() => expect(saved).toEqual({ value: 'zh', sensitive: false }));
   });

@@ -1,3 +1,6 @@
+import { Input } from '@/components/ui';
+import { useDialogs } from '@/components/ui/useDialogs';
+import { Hint } from '@/components/ui/Tooltip';
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
@@ -186,13 +189,13 @@ export default function ClustersPage() {
             <div className="relative max-w-sm">
               <Search
                 size={14}
-                className="absolute left-2.5 top-2 text-zinc-500"
+                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500"
               />
-              <input
+              <Input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder={tr("搜索集群名称", "Search clusters")}
-                className="w-full rounded-md border border-zinc-800 bg-zinc-950 py-1.5 pl-8 pr-3 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none"
+                className="w-full pl-8 pr-3"
               />
             </div>
           }
@@ -408,23 +411,23 @@ function ClusterRow({
             {tr("管理", "Manage")}
           </Link>
           {isAdmin && (
-            <button
+            <Hint content={deleteBlockedReason}><Button variant="danger" size="sm"
               type="button"
               aria-label={tr(
                 `删除集群 ${summary.cluster.name}`,
                 `Delete cluster ${summary.cluster.name}`,
               )}
-              title={deleteBlockedReason}
+
               disabled={Boolean(deleteBlockedReason) || deleting}
               onClick={(event) => {
                 event.stopPropagation();
                 onDelete();
               }}
-              className="inline-flex items-center gap-1 rounded-md bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-400 dark:disabled:bg-zinc-800 dark:disabled:text-zinc-600"
+              className="inline-flex items-center gap-1 px-2 py-1 font-medium disabled:bg-zinc-200 disabled:text-zinc-400 dark:disabled:bg-zinc-800 dark:disabled:text-zinc-600"
             >
               <Trash2 size={12} />
               {deleting ? tr("删除中…", "Deleting…") : tr("删除", "Delete")}
-            </button>
+            </Button></Hint>
           )}
         </div>
       </td>
@@ -458,6 +461,7 @@ function clusterDeleteBlockedReason(
 }
 
 export function DeviceClusterDetailPage() {
+  const { confirmAction, dialog } = useDialogs();
   const { tr } = useI18n();
   const { isAdmin } = usePermissions();
   const navigate = useNavigate();
@@ -655,12 +659,10 @@ export function DeviceClusterDetailPage() {
 
   async function deleteProfile(profile: EdgeEnrollmentProfile) {
     if (
-      !confirm(
-        tr(
+      !(await confirmAction(tr(
           `删除安装批次“${profile.name}”？该安装命令会立即失效，已安装设备不会被删除。`,
           `Delete installation batch “${profile.name}”? Its installation command will stop working immediately. Installed devices will not be deleted.`,
-        ),
-      )
+        )))
     ) {
       return;
     }
@@ -776,7 +778,7 @@ export function DeviceClusterDetailPage() {
   }
 
   return (
-    <>
+    <>{dialog}<>
       <main className="anim-fade flex min-w-0 flex-1 flex-col overflow-hidden">
         <PageHeader
           leading={
@@ -813,29 +815,29 @@ export function DeviceClusterDetailPage() {
                     <KeyRound size={13} />
                     {tr("批量安装", "Batch install")}
                   </Button>
-                  <Button
-                    variant="primary"
-                    disabled={devices.length === 0}
-                    title={
+                  <Hint content={
                       devices.length === 0
                         ? tr("集群中还没有设备", "The cluster has no devices")
                         : undefined
-                    }
+                    }><Button
+                    variant="primary"
+                    disabled={devices.length === 0}
+
                     onClick={() => setUpgradeOpen(true)}
                   >
                     <PackageOpen size={13} />
                     {tr("批量升级", "Batch upgrade")}
-                  </Button>
-                  <Button
+                  </Button></Hint>
+                  <Hint content={deleteBlockedReason}><Button
                     variant="danger"
                     aria-label={tr("删除集群", "Delete cluster")}
                     disabled={Boolean(deleteBlockedReason)}
-                    title={deleteBlockedReason}
+
                     onClick={() => setDeleteOpen(true)}
                   >
                     <Trash2 size={13} />
                     {tr("删除", "Delete")}
-                  </Button>
+                  </Button></Hint>
                 </>
               )}
             </>
@@ -1002,7 +1004,7 @@ export function DeviceClusterDetailPage() {
                             </td>
                             {isAdmin && (
                               <td className="px-4 py-3 text-right">
-                                <button
+                                <Button variant="plain" size="sm"
                                   type="button"
                                   disabled={
                                     !relation ||
@@ -1011,13 +1013,13 @@ export function DeviceClusterDetailPage() {
                                   onClick={() =>
                                     relation && void removeMember(relation)
                                   }
-                                  className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-400 hover:bg-red-500/10 hover:text-red-300 disabled:opacity-40"
+                                  className="inline-flex items-center gap-1 px-2 py-1 text-zinc-400 hover:bg-red-500/10 hover:text-red-300"
                                 >
                                   <X size={12} />
                                   {removingRelationID === relation?.id
                                     ? tr("移除中…", "Removing…")
                                     : tr("移除", "Remove")}
-                                </button>
+                                </Button>
                               </td>
                             )}
                           </tr>
@@ -1044,14 +1046,14 @@ export function DeviceClusterDetailPage() {
                     </p>
                   </div>
                   {isAdmin && (
-                    <button
+                    <Button variant="subtle" size="sm"
                       type="button"
                       aria-label={tr("新建安装批次", "New installation batch")}
                       onClick={() => setEnrollmentOpen(true)}
-                      className="rounded-md p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+                      className="p-1.5"
                     >
                       <Plus size={14} />
-                    </button>
+                    </Button>
                   )}
                 </div>
                 {profiles.length === 0 ? (
@@ -1077,12 +1079,12 @@ export function DeviceClusterDetailPage() {
                           <ProfileStatus status={profile.status} />
                         </div>
                         <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-zinc-600">
-                          <span title={fullDateTime(profile.expires_at)}>
+                          <Hint content={fullDateTime(profile.expires_at)}><span >
                             {tr("到期", "Expires")}{" "}
                             {fullDateTime(profile.expires_at)}
-                          </span>
+                          </span></Hint>
                           {isAdmin && (
-                            <button
+                            <Button variant="dangerGhost" size="sm"
                               type="button"
                               aria-label={tr(
                                 `删除安装批次 ${profile.name}`,
@@ -1090,12 +1092,12 @@ export function DeviceClusterDetailPage() {
                               )}
                               disabled={deletingProfileID === profile.id}
                               onClick={() => void deleteProfile(profile)}
-                              className="text-zinc-500 hover:text-red-300 disabled:opacity-40"
+                              className=""
                             >
                               {deletingProfileID === profile.id
                                 ? tr("删除中…", "Deleting…")
                                 : tr("删除", "Delete")}
-                            </button>
+                            </Button>
                           )}
                         </div>
                       </div>
@@ -1161,7 +1163,7 @@ export function DeviceClusterDetailPage() {
         onClose={() => setDeleteOpen(false)}
         onDelete={() => void performDelete()}
       />
-    </>
+    </></>
   );
 }
 
@@ -1275,13 +1277,13 @@ function ErrorBanner({
       className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-300"
     >
       <span>{message}</span>
-      <button
+      <Button variant="dangerGhost" size="sm"
         type="button"
         onClick={onRetry}
-        className="shrink-0 underline underline-offset-2 hover:text-red-200"
+        className="shrink-0 underline underline-offset-2"
       >
         {tr("重试", "Retry")}
-      </button>
+      </Button>
     </div>
   );
 }

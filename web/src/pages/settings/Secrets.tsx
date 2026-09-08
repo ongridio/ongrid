@@ -1,3 +1,6 @@
+import { Button, Input, Label } from '@/components/ui';
+import { Hint } from '@/components/ui/Tooltip';
+import { Select } from '@/components/ui/Select';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Lock, Plus, Trash2, RefreshCw, X } from 'lucide-react';
 import {
@@ -117,14 +120,14 @@ export default function SecretsPage() {
         <div className="mb-1 flex items-center gap-2 text-zinc-200">
           <Lock size={14} className="text-zinc-400" />
           <span className="font-medium">{tr('凭证 — 凭据库', 'Credentials — vault')}</span>
-          <button
+          <Button variant="outline" size="sm"
             type="button"
             onClick={() => void load()}
-            className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-zinc-700 px-2 py-1 text-[11px] text-zinc-300 hover:bg-zinc-800"
+            className="ml-auto inline-flex items-center gap-1.5 px-2 py-1"
           >
             <RefreshCw size={12} />
             {tr('刷新', 'Refresh')}
-          </button>
+          </Button>
         </div>
         {tr(
           '凭据库。选一个类型（腾讯云 / AWS / GitHub …）会自动列出该填的字段，并自带"注入到哪些环境变量"的规则；技能 / 外部 MCP 用上这份凭据时按类型规则注入。类型选"自定义"则自由填字段，按同名环境变量注入。字段值只写不读，使用现有系统密钥进行 AES 加密后落库。',
@@ -140,31 +143,31 @@ export default function SecretsPage() {
       <div className="space-y-3 rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
         <div className="text-[12px] font-medium text-zinc-300">{tr('新增凭据', 'Add credential')}</div>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-          <input
+          <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder={tr('名称（如 tencent-prod）', 'Name (e.g. tencent-prod)')}
-            className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 font-mono text-[12px] text-zinc-200 outline-none focus:border-zinc-600"
+            className="font-mono outline-none"
           />
-          <select
+          <Select label={tr('凭证类型', 'Credential type')}
             value={typeName}
-            onChange={(e) => {
-              setTypeName(e.target.value);
+            onValueChange={(selectedValue) => {
+              setTypeName(selectedValue);
               setTypedVals({});
             }}
-            className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-[12px] text-zinc-200 outline-none focus:border-zinc-600"
+
           >
             {types.map((t) => (
               <option key={t.name} value={t.name}>
                 {t.label}
               </option>
             ))}
-          </select>
-          <input
+          </Select>
+          <Input
             value={desc}
             onChange={(e) => setDesc(e.target.value)}
             placeholder={tr('备注（可选）', 'Description (optional)')}
-            className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-[12px] text-zinc-200 outline-none focus:border-zinc-600"
+            className="outline-none"
           />
         </div>
 
@@ -173,14 +176,14 @@ export default function SecretsPage() {
           <div className="space-y-1.5">
             {selectedType.fields.map((f) => (
               <div key={f.key} className="flex items-center gap-2">
-                <label className="w-40 shrink-0 text-[12px] text-zinc-400">{f.label}</label>
-                <input
+                <Label className="w-40 shrink-0 text-[12px] text-zinc-400">{f.label}</Label>
+                <Input
                   value={typedVals[f.key] ?? ''}
                   onChange={(e) => setTypedVals((v) => ({ ...v, [f.key]: e.target.value }))}
                   type={f.secret ? 'password' : 'text'}
                   autoComplete="new-password"
                   placeholder={f.key}
-                  className="flex-1 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-[12px] text-zinc-200 outline-none focus:border-zinc-600"
+                  className="flex-1 outline-none"
                 />
               </div>
             ))}
@@ -199,47 +202,47 @@ export default function SecretsPage() {
             <div className="text-[11px] text-zinc-500">{tr('字段（键 = 环境变量名 / 值）', 'Fields (key = env var name / value)')}</div>
             {rows.map((row, i) => (
               <div key={i} className="flex items-center gap-2">
-                <input
+                <Input
                   value={row.key}
                   onChange={(e) => setRow(i, { key: e.target.value })}
                   placeholder={tr('字段名（如 GITHUB_TOKEN）', 'field key (e.g. GITHUB_TOKEN)')}
-                  className="w-48 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 font-mono text-[12px] text-zinc-200 outline-none focus:border-zinc-600"
+                  className="w-48 font-mono outline-none"
                 />
-                <input
+                <Input
                   value={row.value}
                   onChange={(e) => setRow(i, { value: e.target.value })}
                   type="password"
                   autoComplete="new-password"
                   placeholder={tr('值', 'value')}
-                  className="flex-1 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-[12px] text-zinc-200 outline-none focus:border-zinc-600"
+                  className="flex-1 outline-none"
                 />
-                <button
+                <Hint content={tr('删除字段', 'Remove field')}><Button variant="outline" size="sm"
                   type="button"
                   onClick={() => removeRow(i)}
-                  className="rounded border border-zinc-700 p-1.5 text-zinc-500 hover:text-zinc-300"
-                  title={tr('删除字段', 'Remove field')}
+                  className="p-1.5"
+
                 >
                   <X size={13} />
-                </button>
+                </Button></Hint>
               </div>
             ))}
-            <button type="button" onClick={addRow} className="inline-flex items-center gap-1 text-[11px] text-indigo-400 hover:text-indigo-300">
+            <Button variant="subtle" size="sm" type="button" onClick={addRow} className="inline-flex items-center gap-1 text-indigo-400">
               <Plus size={12} />
               {tr('加字段', 'Add field')}
-            </button>
+            </Button>
           </div>
         )}
 
         <div>
-          <button
+          <Button variant="primary" size="sm"
             type="button"
             onClick={() => void onAdd()}
             disabled={busy || !name.trim()}
-            className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-indigo-500 disabled:opacity-40"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 font-medium"
           >
             <Plus size={13} />
             {tr('保存凭据', 'Save credential')}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -288,15 +291,15 @@ export default function SecretsPage() {
                     </div>
                   </td>
                   <td className="px-3 py-2 text-right">
-                    <button
+                    <Hint content={tr('删除', 'Delete')}><Button variant="dangerGhost" size="sm"
                       type="button"
                       onClick={() => void onDelete(s.id)}
                       disabled={busy}
-                      className="rounded border border-zinc-700 p-1 text-zinc-500 hover:border-red-800 hover:text-red-400 disabled:opacity-40"
-                      title={tr('删除', 'Delete')}
+                      className="p-1"
+
                     >
                       <Trash2 size={13} />
-                    </button>
+                    </Button></Hint>
                   </td>
                 </tr>
               ))

@@ -1,3 +1,7 @@
+import { Label, Radio, Input } from '@/components/ui';
+import { useDialogs } from '@/components/ui/useDialogs';
+import { Hint } from '@/components/ui/Tooltip';
+import { Checkbox } from '@/components/ui/Checkbox';
 // DeviceShell — full-page WebSSH terminal.
 //
 // Flow:
@@ -98,6 +102,7 @@ export default function DeviceShellPage() {
 }
 
 export function DeviceShell() {
+  const { confirmAction, dialog } = useDialogs();
   const { tr } = useI18n();
   const { deviceId = '' } = useParams<{ deviceId: string }>();
   const navigate = useNavigate();
@@ -279,7 +284,7 @@ export function DeviceShell() {
         });
       };
 
-      ws.onmessage = (ev) => {
+      ws.onmessage = async (ev) => {
         if (wsRef.current !== ws) return;
         // Binary == stdout/stderr. xterm handles it directly.
         if (ev.data instanceof ArrayBuffer) {
@@ -320,20 +325,29 @@ export function DeviceShell() {
             setModalOpen(true);
             break;
           }
-          case 'host_key_unknown':
-            if (confirm(tr(
+          case 'host_key_unknown': {
+            // The socket may close while the asynchronous dialog is open.
+            const retryInputs = { ...inputs };
+            const trusted = await confirmAction(tr(
               `首次连接此 SSH 服务。确认信任主机指纹？\n${frame.fingerprint}`,
               `First connection to this SSH service. Trust this host key?\n${frame.fingerprint}`,
-            ))) {
+            ));
+            if (wsRef.current && wsRef.current !== ws) {
+              retryInputs.password = '';
+              break;
+            }
+            if (trusted) {
               teardown();
-              void openConnectionRef.current(inputs, frame.fingerprint);
+              void openConnectionRef.current(retryInputs, frame.fingerprint);
             } else {
+              retryInputs.password = '';
               inputs.password = '';
               setConnectionError(tr('未信任 SSH 主机指纹，连接已取消', 'SSH host key was not trusted; connection cancelled'));
               setConn({ kind: 'closed', reason: 'host-key' });
               setModalOpen(true);
             }
             break;
+          }
           case 'host_key_changed': {
             inputs.password = '';
             const message = tr(
@@ -387,7 +401,7 @@ export function DeviceShell() {
         ws.send(encoder.encode(data));
       };
     },
-    [closeTerminalPage, deviceId, edge, teardown, tr, writeBanner],
+    [closeTerminalPage, confirmAction, deviceId, edge, teardown, tr, writeBanner],
   );
   openConnectionRef.current = openConnection;
 
@@ -443,7 +457,7 @@ export function DeviceShell() {
     extractHostname(edge?.host_info) || edge?.name || deviceId || tr('设备', 'device');
 
   return (
-    <main className="anim-fade flex flex-1 flex-col overflow-hidden bg-zinc-950">
+    <>{dialog}<main className="anim-fade flex flex-1 flex-col overflow-hidden bg-zinc-950">
       <header className="flex items-center justify-between border-b border-zinc-800/60 bg-zinc-900/60 px-4 py-2">
         <div className="flex min-w-0 items-center gap-2 text-xs text-zinc-300">
           <TerminalIcon size={14} className="text-zinc-500" />
@@ -508,7 +522,7 @@ export function DeviceShell() {
         }}
         onSubmit={handleConnect}
       />
-    </main>
+    </main></>
   );
 }
 
@@ -529,6 +543,7 @@ export function ConnectModal({
   onSubmit(inputs: ConnectInputs): void;
   onCancel(): void;
 }) {
+  const { confirmAction, dialog } = useDialogs();
   const { tr } = useI18n();
   const [user, setUser] = useState('root');
   const [password, setPassword] = useState('');
@@ -600,7 +615,7 @@ export function ConnectModal({
   };
 
   const removeCredential = async (credential: ShellCredential) => {
-    if (!confirm(tr(`删除账户“${credential.ssh_user}”？`, `Delete account “${credential.ssh_user}”?`))) return;
+    if (!(await confirmAction(tr(`删除账户“${credential.ssh_user}”？`, `Delete account “${credential.ssh_user}”?`)))) return;
     setBusy(true);
     try {
       await deleteShellCredential(deviceId, credential.id);
@@ -615,7 +630,7 @@ export function ConnectModal({
   };
 
   const resetKnownHost = async (sshPort: number) => {
-    if (!confirm(tr(`重置端口 ${sshPort} 的主机指纹信任？`, `Reset trusted host key for port ${sshPort}?`))) return;
+    if (!(await confirmAction(tr(`重置端口 ${sshPort} 的主机指纹信任？`, `Reset trusted host key for port ${sshPort}?`)))) return;
     setBusy(true);
     try {
       await resetShellKnownHost(deviceId, sshPort);
@@ -627,7 +642,7 @@ export function ConnectModal({
   };
 
   return (
-    <Modal
+    <>{dialog}<Modal
       open
       onClose={onCancel}
       title={title}
@@ -664,48 +679,48 @@ export function ConnectModal({
                     key={credential.id}
                     className={`flex items-center rounded-lg border transition-colors ${checked ? 'border-indigo-500/50 bg-indigo-500/10' : 'border-zinc-800 bg-zinc-950 hover:border-zinc-700'}`}
                   >
-                    <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 px-3 py-2.5">
-                      <input
-                        type="radio"
+                    <Label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 px-3 py-2.5">
+                      <Radio
+
                         name="webssh-account"
                         value={credential.id}
                         checked={checked}
                         onChange={() => setSelected(String(credential.id))}
-                        className="h-3.5 w-3.5 accent-indigo-500"
+                        className="h-3.5 w-3.5"
                       />
                       <UserRound size={16} className="shrink-0 text-zinc-500" />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-xs font-medium text-zinc-100">{credential.ssh_user}</span>
                         <span className="mt-0.5 block text-[11px] text-zinc-500">127.0.0.1 · {tr('端口', 'Port')} {credential.ssh_port}</span>
                       </span>
-                    </label>
+                    </Label>
                     <div className="flex items-center gap-0.5 pr-2">
-                      <button
+                      <Hint content={tr('重置主机信任', 'Reset host trust')}><Button variant="subtle" size="sm"
                         type="button"
                         onClick={() => void resetKnownHost(credential.ssh_port)}
                         disabled={busy}
                         aria-label={tr(`重置 ${credential.ssh_user} 的主机信任`, `Reset host trust for ${credential.ssh_user}`)}
-                        title={tr('重置主机信任', 'Reset host trust')}
-                        className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-40"
+
+                        className="p-1.5"
                       >
                         <ShieldCheck size={14} />
-                      </button>
-                      <button
+                      </Button></Hint>
+                      <Hint content={tr('删除账户', 'Delete account')}><Button variant="plain" size="sm"
                         type="button"
                         onClick={() => void removeCredential(credential)}
                         disabled={busy}
                         aria-label={tr(`删除 ${credential.ssh_user}`, `Delete ${credential.ssh_user}`)}
-                        title={tr('删除账户', 'Delete account')}
-                        className="rounded-md p-1.5 text-zinc-500 hover:bg-red-500/10 hover:text-red-400 disabled:opacity-40"
+
+                        className="p-1.5 text-zinc-500 hover:bg-red-500/10 hover:text-red-400"
                       >
                         <Trash2 size={14} />
-                      </button>
+                      </Button></Hint>
                     </div>
                   </div>
                 );
               })}
             </div>
-            <button
+            <Button variant="outline" size="sm"
               type="button"
               onClick={() => {
                 setSelected('new');
@@ -715,28 +730,28 @@ export function ConnectModal({
                 setSaveCredential(false);
                 setErr(null);
               }}
-              className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-zinc-700 px-3 py-2.5 text-xs font-medium text-zinc-400 transition-colors hover:border-zinc-600 hover:bg-zinc-800 hover:text-zinc-100"
+              className="flex w-full items-center justify-center gap-1.5 px-3 py-2.5 font-medium transition-colors"
             >
               <Plus size={14} />
               {tr('新增账户', 'Add account')}
-            </button>
+            </Button>
           </>
         )}
 
         {!loading && selected === 'new' && (
           <>
             {credentials.length > 0 && (
-              <button
+              <Button variant="subtle" size="sm"
                 type="button"
                 onClick={() => {
                   setSelected(String(credentials[0].id));
                   setErr(null);
                 }}
-                className="flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-200"
+                className="flex items-center gap-1"
               >
                 <ChevronLeft size={13} />
                 {tr('返回已保存账户', 'Back to saved accounts')}
-              </button>
+              </Button>
             )}
             <div className="flex items-center gap-2 text-[11px] font-medium text-zinc-500">
               <Plus size={13} />
@@ -744,57 +759,57 @@ export function ConnectModal({
             </div>
             <div className="grid grid-cols-[minmax(0,1fr)_96px] gap-3">
               <div>
-                <label htmlFor="webssh-user" className="mb-1 block text-[11px] text-zinc-500">
+                <Label htmlFor="webssh-user" className="mb-1 block text-[11px] text-zinc-500">
                   {tr('OS 用户', 'OS user')}
-                </label>
-                <input
+                </Label>
+                <Input
                   id="webssh-user"
                   autoFocus
                   autoComplete="off"
                   value={user}
                   onChange={(e) => setUser(e.target.value)}
-                  className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-2 text-xs text-zinc-100 focus:border-indigo-500 focus:outline-none"
+                  className="w-full"
                 />
               </div>
               <div>
-                <label htmlFor="webssh-port" className="mb-1 block text-[11px] text-zinc-500">
+                <Label htmlFor="webssh-port" className="mb-1 block text-[11px] text-zinc-500">
                   {tr('SSH 端口', 'SSH port')}
-                </label>
-                <input
+                </Label>
+                <Input
                   id="webssh-port"
                   inputMode="numeric"
                   value={port}
                   onChange={(e) => setPort(e.target.value.replace(/[^0-9]/g, ''))}
                   placeholder="22"
-                  className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-2 text-xs text-zinc-100 focus:border-indigo-500 focus:outline-none"
+                  className="w-full"
                 />
               </div>
             </div>
             <div>
-              <label htmlFor="webssh-pass" className="mb-1 block text-[11px] text-zinc-500">
+              <Label htmlFor="webssh-pass" className="mb-1 block text-[11px] text-zinc-500">
                 {tr('密码', 'Password')}
-              </label>
-              <input
+              </Label>
+              <Input
                 id="webssh-pass"
                 type="password"
                 autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-2 text-xs text-zinc-100 focus:border-indigo-500 focus:outline-none"
+                className="w-full"
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') void submit();
                 }}
               />
             </div>
-            <label className="flex cursor-pointer items-center gap-2 text-xs text-zinc-300">
-              <input
-                type="checkbox"
+            <Label className="flex cursor-pointer items-center gap-2 text-xs text-zinc-300">
+              <Checkbox
+
                 checked={saveCredential}
-                onChange={(e) => setSaveCredential(e.target.checked)}
-                className="h-3.5 w-3.5 accent-indigo-500"
+                onCheckedChange={(checkedValue) => setSaveCredential(checkedValue)}
+                className="h-3.5 w-3.5"
               />
               {tr('保存此账户，下次可直接登录', 'Save this account for one-click login next time')}
-            </label>
+            </Label>
             <p className="text-[11px] leading-4 text-zinc-600">
               {tr('连接目标固定为设备本机 127.0.0.1，可使用任意有效 SSH 端口。', 'Connections target device loopback 127.0.0.1 and may use any valid SSH port.')}
             </p>
@@ -814,7 +829,7 @@ export function ConnectModal({
           </p>
         )}
       </div>
-    </Modal>
+    </Modal></>
   );
 }
 

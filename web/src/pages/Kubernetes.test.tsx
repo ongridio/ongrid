@@ -1,3 +1,5 @@
+import userEvent from '@testing-library/user-event';
+import { selectOption } from '@/test/select-option';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { http, HttpResponse } from 'msw';
@@ -597,7 +599,8 @@ describe('KubernetesPage', () => {
     expect(row).not.toBeNull();
     expect(within(row as HTMLElement).getByText('1400')).toBeInTheDocument();
     expect(within(row as HTMLElement).getByText('12')).toBeInTheDocument();
-    expect(screen.getAllByRole('option', { name: 'late-page' }).length).toBeGreaterThan(0);
+    await userEvent.click(screen.getByRole('combobox', { name: '命名空间过滤' }));
+    expect((await screen.findAllByRole('option', { name: 'late-page' })).length).toBeGreaterThan(0);
   });
 
   it('关键异常先按严重程度排序再截断展示', async () => {
@@ -844,7 +847,7 @@ describe('KubernetesPage', () => {
     expect(expand).toHaveAttribute('aria-expanded', 'true');
     expect(screen.queryByText('worker-current-5b6d7')).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByRole('combobox', { name: '命名空间过滤' }), { target: { value: 'apps' } });
+    await selectOption(screen.getByRole('combobox', { name: '命名空间过滤' }), 'apps');
     await waitFor(() => {
       expect(screen.queryByText('worker')).not.toBeInTheDocument();
       expect(screen.getByText('api')).toBeInTheDocument();
@@ -935,8 +938,8 @@ describe('KubernetesPage', () => {
     const workloadCells = await screen.findAllByText('ongrid-edge-controller');
     const row = workloadCells.map((cell) => cell.closest('tr')).find(Boolean);
     expect(row).toBeTruthy();
-    fireEvent.click(within(row as HTMLElement).getByRole('button', { name: '排障' }));
-    fireEvent.click(within(screen.getByRole('menu', { name: '资源排障' })).getByRole('button', { name: '日志' }));
+    await userEvent.click(within(row as HTMLElement).getByRole('button', { name: '排障' }));
+    fireEvent.click(within(await screen.findByRole('menu', { name: '资源排障' })).getByRole('menuitem', { name: '日志' }));
 
     expect(screen.getByTestId('current-location')).toHaveTextContent(
       '/logs?cluster_id=95&range=1h&namespace=ongrid-system&workload=ongrid-edge-controller',
@@ -1423,14 +1426,14 @@ describe('KubernetesPage', () => {
     const podCell = await screen.findByText('ongrid-edge-controller-abc');
     const row = podCell.closest('tr');
     expect(row).not.toBeNull();
-    fireEvent.click(within(row as HTMLElement).getByRole('button', { name: '排障' }));
+    await userEvent.click(within(row as HTMLElement).getByRole('button', { name: '排障' }));
 
-    const menu = screen.getByRole('menu', { name: '资源排障' });
-    expect(within(menu).getByRole('button', { name: '日志' })).toBeInTheDocument();
-    expect(within(menu).getByRole('button', { name: 'describe' })).toBeInTheDocument();
-    expect(within(menu).getByRole('button', { name: '链路' })).toBeInTheDocument();
+    const menu = await screen.findByRole('menu', { name: '资源排障' });
+    expect(within(menu).getByRole('menuitem', { name: '日志' })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitem', { name: 'describe' })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitem', { name: '链路' })).toBeInTheDocument();
 
-    fireEvent.click(within(menu).getByRole('button', { name: 'AI 分析' }));
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'AI 分析' }));
 
     await waitFor(() => {
       expect(sessionPayload).toEqual({ title: 'analyze ongrid-edge-controller-abc', agent_id: 'default' });
@@ -1498,19 +1501,19 @@ describe('KubernetesPage', () => {
     const warningObject = await screen.findByText('Pod/api-crash-abc');
     const warningRow = warningObject.closest('tr');
     expect(warningRow).not.toBeNull();
-    fireEvent.click(within(warningRow as HTMLElement).getByRole('button', { name: '排障' }));
+    await userEvent.click(within(warningRow as HTMLElement).getByRole('button', { name: '排障' }));
 
-    const menu = screen.getByRole('menu', { name: '资源排障' });
-    expect(within(menu).getByRole('button', { name: '日志' })).toBeInTheDocument();
-    expect(within(menu).getByRole('button', { name: 'describe' })).toBeInTheDocument();
-    expect(within(menu).getByRole('button', { name: '链路' })).toBeInTheDocument();
+    const menu = await screen.findByRole('menu', { name: '资源排障' });
+    expect(within(menu).getByRole('menuitem', { name: '日志' })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitem', { name: 'describe' })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitem', { name: '链路' })).toBeInTheDocument();
 
     const normalObject = await screen.findByText('Pod/ongrid-edge-controller-abc');
     const normalRow = normalObject.closest('tr');
     expect(normalRow).not.toBeNull();
     expect(within(normalRow as HTMLElement).queryByRole('button', { name: '排障' })).not.toBeInTheDocument();
 
-    fireEvent.click(within(menu).getByRole('button', { name: 'AI 分析' }));
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'AI 分析' }));
 
     await waitFor(() => {
       expect(sessionPayload).toEqual({ title: 'analyze BackOff', agent_id: 'default' });
@@ -1758,7 +1761,7 @@ describe('KubernetesPage', () => {
     renderKubernetesDetail('/kubernetes/1');
 
     await screen.findByText('集群健康结论');
-    const podTabs = screen.getAllByRole('button', { name: /Pods/ });
+    const podTabs = screen.getAllByRole('tab', { name: /Pods/ });
     fireEvent.click(podTabs[0]);
 
     await waitFor(() => {
@@ -1798,16 +1801,16 @@ describe('KubernetesPage', () => {
     const nodeCells = await screen.findAllByText('ongrid-k8s-control-plane');
     const row = nodeCells.map((cell) => cell.closest('tr')).find(Boolean);
     expect(row).toBeTruthy();
-    fireEvent.click(within(row as HTMLElement).getByRole('button', { name: '排障' }));
+    await userEvent.click(within(row as HTMLElement).getByRole('button', { name: '排障' }));
 
-    const menu = screen.getByRole('menu', { name: '资源排障' });
+    const menu = await screen.findByRole('menu', { name: '资源排障' });
     expect(row).not.toContainElement(menu);
-    expect(menu).toHaveClass('fixed');
-    expect(within(menu).getByRole('button', { name: '日志' })).toBeInTheDocument();
-    expect(within(menu).getByRole('button', { name: 'describe' })).toBeInTheDocument();
-    expect(within(menu).queryByRole('button', { name: '链路' })).not.toBeInTheDocument();
+    expect(menu).toHaveClass('og-menu');
+    expect(within(menu).getByRole('menuitem', { name: '日志' })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitem', { name: 'describe' })).toBeInTheDocument();
+    expect(within(menu).queryByRole('menuitem', { name: '链路' })).not.toBeInTheDocument();
 
-    fireEvent.click(within(menu).getByRole('button', { name: 'AI 分析' }));
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'AI 分析' }));
 
     await waitFor(() => {
       expect(sessionPayload).toEqual({ title: 'analyze ongrid-k8s-control-plane', agent_id: 'default' });
@@ -1831,7 +1834,7 @@ describe('KubernetesPage', () => {
       expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith({ block: 'start', behavior: 'smooth' });
     });
     expect(screen.getByText('Pod 资源视图')).toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: '命名空间过滤' })).toHaveValue('ongrid-system');
+    expect(screen.getByRole('combobox', { name: '命名空间过滤' })).toHaveTextContent('ongrid-system');
     expect(await screen.findByText('ongrid-edge-controller-abc')).toBeInTheDocument();
   });
 
@@ -1843,8 +1846,10 @@ describe('KubernetesPage', () => {
     expect(screen.getByText('7 次重启')).toBeInTheDocument();
     expect(screen.getByText(/Back-off restarting failed container api/)).toBeInTheDocument();
     expect(screen.getAllByText('查看日志').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('describe').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('关联链路').length).toBeGreaterThan(0);
+    await userEvent.click(screen.getAllByRole('button', { name: '更多' })[0]);
+    expect(await screen.findByRole('menuitem', { name: 'describe' })).toBeInTheDocument();
+    expect(await screen.findByRole('menuitem', { name: '关联链路' })).toBeInTheDocument();
+    await userEvent.keyboard('{Escape}');
     expect(screen.getAllByRole('button', { name: 'AI 分析' }).length).toBeGreaterThan(0);
     expect(screen.queryByText('default · Pod/api-crash-abc')).not.toBeInTheDocument();
     expect(screen.getAllByText('更多').length).toBeGreaterThan(0);
@@ -1855,10 +1860,10 @@ describe('KubernetesPage', () => {
       expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith({ block: 'start', behavior: 'smooth' });
     });
     expect(screen.getByRole('textbox', { name: '搜索资源' })).toHaveValue('api-crash-abc');
-    expect(screen.getByRole('combobox', { name: '命名空间过滤' })).toHaveValue('default');
+    expect(screen.getByRole('combobox', { name: '命名空间过滤' })).toHaveTextContent('default');
     expect(screen.getByRole('button', { name: '只看异常' })).toHaveClass('border-amber-500/50');
 
-    fireEvent.click(screen.getAllByRole('button', { name: /Nodes/ })[0]);
+    fireEvent.click(screen.getAllByRole('tab', { name: /Nodes/ })[0]);
 
     expect(screen.getByRole('textbox', { name: '搜索资源' })).toHaveValue('');
     expect(screen.getByRole('button', { name: '只看异常' })).not.toHaveClass('border-amber-500/50');
@@ -1885,18 +1890,17 @@ describe('KubernetesPage', () => {
 
     const moreButtons = await screen.findAllByText('更多');
     expect(moreButtons.length).toBeGreaterThan(1);
-    const firstMenu = moreButtons[0].closest('details');
-    const secondMenu = moreButtons[1].closest('details');
+    const firstTrigger = moreButtons[0].closest('button')!;
+    const secondTrigger = moreButtons[1].closest('button')!;
+    await userEvent.click(firstTrigger);
+    await waitFor(() => expect(firstTrigger).toHaveAttribute('aria-expanded', 'true'));
+    await userEvent.keyboard('{Escape}');
+    await userEvent.click(secondTrigger);
+    expect(firstTrigger).toHaveAttribute('aria-expanded', 'false');
+    await waitFor(() => expect(secondTrigger).toHaveAttribute('aria-expanded', 'true'));
+    await userEvent.click(screen.getByText('异常线索'));
+    await waitFor(() => expect(secondTrigger).toHaveAttribute('aria-expanded', 'false'));
 
-    fireEvent.click(moreButtons[0]);
-    expect(firstMenu).toHaveAttribute('open');
-
-    fireEvent.click(moreButtons[1]);
-    expect(firstMenu).not.toHaveAttribute('open');
-    expect(secondMenu).toHaveAttribute('open');
-
-    fireEvent.click(screen.getByText('异常线索'));
-    expect(secondMenu).not.toHaveAttribute('open');
   });
 
   it('异常线索内联展示并发起匹配的写动作建议', async () => {
@@ -2047,23 +2051,23 @@ describe('KubernetesPage', () => {
     expect(screen.getByText('delete_pod · default · Pod/api-crash-abc')).toBeInTheDocument();
     expect(screen.getByText('scale · default · Deployment/api → 2')).toBeInTheDocument();
 
-    fireEvent.change(screen.getByRole('combobox', { name: '审批状态过滤' }), { target: { value: 'pending' } });
+    await selectOption(screen.getByRole('combobox', { name: '审批状态过滤' }), '待审批');
 
     expect(screen.getByText('delete_pod · default · Pod/api-crash-abc')).toBeInTheDocument();
     expect(screen.queryByText('rollout_restart · default · Deployment/api')).not.toBeInTheDocument();
     expect(screen.queryByText('scale · default · Deployment/api → 2')).not.toBeInTheDocument();
     expect(screen.getByText('1 条匹配')).toBeInTheDocument();
 
-    fireEvent.change(screen.getByRole('combobox', { name: '审批状态过滤' }), { target: { value: 'all' } });
-    fireEvent.change(screen.getByRole('combobox', { name: '动作类型过滤' }), { target: { value: 'scale' } });
+    await selectOption(screen.getByRole('combobox', { name: '审批状态过滤' }), '全部状态');
+    await selectOption(screen.getByRole('combobox', { name: '动作类型过滤' }), 'scale deployment');
 
     expect(screen.getByText('scale · default · Deployment/api → 2')).toBeInTheDocument();
     expect(screen.queryByText('delete_pod · default · Pod/api-crash-abc')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '清除' }));
 
-    expect(screen.getByRole('combobox', { name: '审批状态过滤' })).toHaveValue('all');
-    expect(screen.getByRole('combobox', { name: '动作类型过滤' })).toHaveValue('all');
+    expect(screen.getByRole('combobox', { name: '审批状态过滤' })).toHaveTextContent('全部状态');
+    expect(screen.getByRole('combobox', { name: '动作类型过滤' })).toHaveTextContent('全部动作');
     expect(screen.getByText('rollout_restart · default · Deployment/api')).toBeInTheDocument();
     expect(screen.getByText('delete_pod · default · Pod/api-crash-abc')).toBeInTheDocument();
     expect(screen.getByText('scale · default · Deployment/api → 2')).toBeInTheDocument();

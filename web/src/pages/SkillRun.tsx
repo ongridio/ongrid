@@ -1,3 +1,6 @@
+import { Button, Label, Input } from '@/components/ui';
+import { Checkbox } from '@/components/ui/Checkbox';
+import { Select } from '@/components/ui/Select';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ChevronLeft, Play, AlertTriangle, RefreshCw, Loader2 } from 'lucide-react';
@@ -173,14 +176,14 @@ export default function SkillRunPage() {
                 <div className="mt-0.5 font-mono text-[11px] text-zinc-500">{skill.key}</div>
                 <p className="mt-1 max-w-3xl text-xs text-zinc-400">{skill.description || '—'}</p>
               </div>
-              <button
+              <Button variant="outline" size="sm"
                 type="button"
                 onClick={fetchSkill}
-                className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5"
               >
                 <RefreshCw size={12} />
                 {tr('刷新', 'Refresh')}
-              </button>
+              </Button>
             </div>
           ) : null}
         </header>
@@ -223,10 +226,10 @@ export default function SkillRunPage() {
                   </div>
                 ) : (
                   <Field label={<span>{tr('目标设备', 'Target device')}<RequiredMark /></span>}>
-                    <select
+                    <Select label={tr('目标设备', 'Target device')}
                       value={edgeID}
-                      onChange={(e) => setEdgeID(e.target.value)}
-                      className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                      onValueChange={(selectedValue) => setEdgeID(selectedValue)}
+                      className="w-full"
                     >
                       {edges.length === 0 && <option value="">{tr('无设备可选', 'No device available')}</option>}
                       {edges.map((e) => (
@@ -234,7 +237,7 @@ export default function SkillRunPage() {
                           #{e.id} · {e.name} ({e.status})
                         </option>
                       ))}
-                    </select>
+                    </Select>
                     {edgesErr && (
                       <div className="mt-1 text-[11px] text-red-300">{tr('设备列表加载失败：', 'Device list failed: ')}{edgesErr}</div>
                     )}
@@ -272,7 +275,7 @@ export default function SkillRunPage() {
                 </div>
 
                 <div className="mt-5 flex items-center justify-end gap-2">
-                  <button
+                  <Button variant="plain" size="sm"
                     type="button"
                     onClick={onExecute}
                     disabled={executing || isInventoryOnly || (!isManagerScope && !edgeID)}
@@ -287,7 +290,7 @@ export default function SkillRunPage() {
                   >
                     {executing ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
                     {executing ? tr('执行中…', 'Running…') : tr('执行', 'Run')}
-                  </button>
+                  </Button>
                 </div>
               </section>
 
@@ -388,7 +391,7 @@ function ParamField({
 }) {
   const { tr } = useI18n();
   const inputCls =
-    'w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none';
+    "w-full";
   const label = (
     <span>
       <span className="font-mono">{param.name}</span>
@@ -401,35 +404,35 @@ function ParamField({
   switch (param.type) {
     case 'bool':
       control = (
-        <label className="inline-flex items-center gap-2 text-xs text-zinc-300">
-          <input
-            type="checkbox"
+        <Label className="inline-flex items-center gap-2 text-xs text-zinc-300">
+          <Checkbox
+
             checked={Boolean(value)}
-            onChange={(e) => onChange(e.target.checked)}
-            className="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-900"
+            onCheckedChange={(checkedValue) => onChange(checkedValue)}
+            className="h-3.5 w-3.5"
           />
           <span>{Boolean(value) ? 'true' : 'false'}</span>
-        </label>
+        </Label>
       );
       break;
     case 'enum':
       control = (
-        <select
+        <Select label={param.name}
           value={value === undefined || value === null ? '' : String(value)}
-          onChange={(e) => onChange(e.target.value)}
-          className={inputCls}
+          onValueChange={(selectedValue) => onChange(selectedValue)}
+          className="w-full"
         >
           {!param.required && <option value="">{tr('(未选)', '(not selected)')}</option>}
           {(param.enum ?? []).map((opt) => (
             <option key={opt} value={opt}>{opt}</option>
           ))}
-        </select>
+        </Select>
       );
       break;
     case 'int':
     case 'float':
       control = (
-        <input
+        <Input
           type="number"
           step={param.type === 'int' ? 1 : 'any'}
           value={value === undefined || value === null ? '' : String(value)}
@@ -450,7 +453,7 @@ function ParamField({
     case 'string':
     default:
       control = (
-        <input
+        <Input
           type="text"
           value={value === undefined || value === null ? '' : String(value)}
           onChange={(e) => onChange(e.target.value)}
@@ -471,10 +474,10 @@ function ParamField({
 
 function Field({ label, children }: { label: React.ReactNode; children: React.ReactNode }) {
   return (
-    <label className="block">
+    <Label className="block">
       <span className="mb-1 block text-xs text-zinc-400">{label}</span>
       {children}
-    </label>
+    </Label>
   );
 }
 

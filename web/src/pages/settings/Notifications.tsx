@@ -1,3 +1,6 @@
+import { Input, Label } from '@/components/ui';
+import { Hint } from '@/components/ui/Tooltip';
+import { Checkbox } from '@/components/ui/Checkbox';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Bell,
@@ -391,15 +394,15 @@ function TypeCard({
                 <Button onClick={() => onEdit(ch)} variant="ghost">
                   <Pencil size={11} /> {tr('编辑', 'Edit')}
                 </Button>
-                <Button
+                <Hint content={tr('删除', 'Delete')}><Button
                   onClick={() => onDelete(ch)}
                   aria-label={tr('删除', 'Delete')}
-                  title={tr('删除', 'Delete')}
+
                   variant="dangerGhost"
                   className="px-2"
                 >
                   <Trash2 size={12} />
-                </Button>
+                </Button></Hint>
               </div>
             </div>
           </li>
@@ -496,11 +499,11 @@ function ChannelEditorModal({
     >
       <div className="space-y-3 text-sm">
         <Field label={tr('名称', 'Name')}>
-          <input
+          <Input
             value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
             placeholder={`primary-${form.type}`}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full"
           />
         </Field>
         <Field label={tr('类型', 'Type')}>
@@ -510,13 +513,13 @@ function ChannelEditorModal({
           </div>
         </Field>
         <Field label="Endpoint URL">
-          <input
+          <Input
             value={form.endpoint}
             onChange={(e) => setForm({ ...form, endpoint: e.target.value })}
             placeholder={
               TYPE_CARDS.find((t) => t.type === form.type)?.endpointPlaceholder ?? ''
             }
-            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full font-mono"
           />
           {endpointTruncated && (
             <div className="mt-1 text-[11px] text-amber-400">
@@ -528,7 +531,7 @@ function ChannelEditorModal({
           )}
         </Field>
         <Field label={tr('Secret（可选，签名/验签用）', 'Secret (optional, for signing / verification)')}>
-          <input
+          <Input
             type="password"
             value={form.secret ?? ''}
             onChange={(e) => setForm({ ...form, secret: e.target.value })}
@@ -537,7 +540,7 @@ function ChannelEditorModal({
                 ? tr('留空保留旧值；输入 - 表示清除', 'Leave empty to keep the existing value; enter - to clear')
                 : tr('可选：签名密钥 / 验签 token', 'Optional: signing key / verification token')
             }
-            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full font-mono"
           />
           {(form.type === 'slack' || form.type === 'wecom') && (
             <div className="mt-1 text-[11px] text-zinc-500">
@@ -553,15 +556,15 @@ function ChannelEditorModal({
             </div>
           )}
         </Field>
-        <label className="inline-flex items-center gap-2 text-xs text-zinc-300">
-          <input
-            type="checkbox"
+        <Label className="inline-flex items-center gap-2 text-xs text-zinc-300">
+          <Checkbox
+
             checked={form.enabled}
-            onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
-            className="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-900"
+            onCheckedChange={(checkedValue) => setForm({ ...form, enabled: checkedValue })}
+            className="h-3.5 w-3.5"
           />
           {tr('启用此渠道', 'Enable this channel')}
-        </label>
+        </Label>
         {err && <div className="text-xs text-red-400">{err}</div>}
       </div>
     </Modal>
@@ -570,9 +573,9 @@ function ChannelEditorModal({
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label className="block">
+    <Label className="block">
       <span className="mb-1 block text-xs text-zinc-500">{label}</span>
       {children}
-    </label>
+    </Label>
   );
 }

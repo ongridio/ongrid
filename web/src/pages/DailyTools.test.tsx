@@ -43,15 +43,25 @@ function sse(event: string, data: unknown) {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }
 
+async function pickOption(label: string, option: string) {
+  await act(async () => { await userEvent.keyboard('{Escape}'); });
+  const trigger = await screen.findByRole('combobox', { name: label });
+  await waitFor(() => expect(trigger).toBeEnabled());
+  act(() => trigger.focus());
+  await act(async () => { await userEvent.keyboard('{ArrowDown}'); });
+  await act(async () => { await userEvent.click(await screen.findByRole('option', { name: option })); });
+  await waitFor(() => expect(trigger).toHaveFocus());
+}
+
 async function openEdgePicker() {
-  await screen.findByRole('button', { name: /#1 edge-001|选择 Edge/ });
-  await userEvent.click(screen.getByRole('button', { name: /#1 edge-001|选择 Edge/ }));
+  await screen.findByRole('combobox', { name: /#1 edge-001|选择 Edge/ });
+  await act(async () => { await userEvent.click(screen.getByRole('combobox', { name: /#1 edge-001|选择 Edge/ })); });
   await screen.findByLabelText('搜索 Edge');
 }
 
 async function selectEdge(label = '选择 #1 edge-001') {
   await openEdgePicker();
-  await userEvent.click(screen.getByLabelText(label));
+  await act(async () => { await userEvent.click(screen.getByLabelText(label)); });
 }
 
 describe('DailyToolsPage', () => {
@@ -69,9 +79,57 @@ describe('DailyToolsPage', () => {
   it('初始状态不默认选择 Edge，也不预填探测目标', async () => {
     render(<MemoryRouter><DailyToolsPage /></MemoryRouter>);
 
-    expect(await screen.findByRole('button', { name: '选择 Edge' })).toBeInTheDocument();
+    expect(await screen.findByRole('combobox', { name: '选择 Edge' })).toBeInTheDocument();
     expect(screen.getByLabelText('目标 Host / IP')).toHaveValue('');
     expect(screen.getByRole('button', { name: /^执行$/ })).toBeDisabled();
+  });
+
+  it('Edge 搜索多选保留跨筛选的选择，支持键盘、空态和清空', async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><DailyToolsPage /></MemoryRouter>);
+    await selectEdge();
+    const search = screen.getByRole('combobox', { name: '搜索 Edge' });
+    await act(async () => { await user.type(search, 'edge-002'); });
+    expect(screen.queryByRole('option', { name: '选择 #1 edge-001' })).not.toBeInTheDocument();
+    await act(async () => { await user.keyboard('{ArrowDown}{Enter}'); });
+    expect(await screen.findByText('已选 2 台')).toBeInTheDocument();
+    await act(async () => { await user.clear(search); });
+    await act(async () => { await user.type(search, 'no-such-edge'); });
+    expect(await screen.findByText('没有可选 Edge')).toBeVisible();
+    await act(async () => { await user.keyboard('{Escape}'); });
+    const trigger = screen.getByRole('combobox', { name: '2 台 Edge' });
+    await waitFor(() => expect(trigger).toHaveFocus());
+    await act(async () => { await user.keyboard('{ArrowDown}'); });
+    await act(async () => { await user.clear(await screen.findByRole('combobox', { name: '搜索 Edge' })); });
+    expect(screen.getByRole('option', { name: '选择 #1 edge-001' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('option', { name: '选择 #2 edge-002' })).toHaveAttribute('aria-selected', 'true');
+    await act(async () => { await user.click(screen.getByRole('option', { name: '选择 #2 edge-002' })); });
+    expect(screen.getByText('已选 1 台')).toBeInTheDocument();
+    await act(async () => { await user.click(screen.getByRole('button', { name: '清空已选' })); });
+    expect(screen.queryByText('已选 1 台')).not.toBeInTheDocument();
+    await act(async () => { await user.keyboard('{Escape}'); });
+    expect(screen.getByRole('combobox', { name: '选择 Edge' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^执行$/ })).toBeDisabled();
+  });
+
+  it('切换性能分析收敛为一台 Edge，单选替换目标且关闭弹层', async () => {
+    server.use(http.get('/api/v1/edges/:id/plugins', () => HttpResponse.json({ items: [] })));
+    const user = userEvent.setup();
+    render(<MemoryRouter><DailyToolsPage /></MemoryRouter>);
+    await selectEdge();
+    await act(async () => { await user.click(screen.getByRole('option', { name: '选择 #2 edge-002' })); });
+    await act(async () => { await user.keyboard('{Escape}'); });
+    await pickOption('工具类型', '性能分析');
+    expect(screen.getByRole('combobox', { name: '#1 edge-001' })).toBeInTheDocument();
+    await openEdgePicker();
+    await act(async () => { await user.click(screen.getByRole('option', { name: '选择 #2 edge-002' })); });
+    await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument());
+    const trigger = screen.getByRole('combobox', { name: '#2 edge-002' });
+    await waitFor(() => expect(trigger).toHaveFocus());
+    await act(async () => { await user.keyboard('{ArrowDown}'); });
+    expect(await screen.findByRole('option', { name: '选择 #1 edge-001' })).toHaveAttribute('aria-selected', 'false');
+    expect(screen.getByRole('option', { name: '选择 #2 edge-002' })).toHaveAttribute('aria-selected', 'true');
+    await act(async () => { await user.keyboard('{Escape}'); });
   });
 
   it('恢复未清空的运行历史', async () => {
@@ -124,9 +182,9 @@ describe('DailyToolsPage', () => {
     render(<MemoryRouter><DailyToolsPage /></MemoryRouter>);
 
     await selectEdge();
-    await userEvent.click(screen.getByLabelText('选择 #2 edge-002'));
-    await userEvent.type(screen.getByLabelText('目标 Host / IP'), '101.34.63.91');
-    await userEvent.click(screen.getByRole('button', { name: /^执行$/ }));
+    await act(async () => { await userEvent.click(screen.getByLabelText('选择 #2 edge-002')); });
+    await act(async () => { await userEvent.type(screen.getByLabelText('目标 Host / IP'), '101.34.63.91'); });
+    await act(async () => { await userEvent.click(screen.getByRole('button', { name: /^执行$/ })); });
 
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0].edge_ids).toEqual([1, 2]);
@@ -160,8 +218,8 @@ describe('DailyToolsPage', () => {
     render(<MemoryRouter><DailyToolsPage /></MemoryRouter>);
 
     await selectEdge();
-    await userEvent.type(screen.getByLabelText('目标 Host / IP'), '101.34.63.91');
-    await userEvent.click(screen.getByRole('button', { name: /^执行$/ }));
+    await act(async () => { await userEvent.type(screen.getByLabelText('目标 Host / IP'), '101.34.63.91'); });
+    await act(async () => { await userEvent.click(screen.getByRole('button', { name: /^执行$/ })); });
 
     await waitFor(() => expect(screen.getAllByText('Ping 101.34.63.91').length).toBeGreaterThan(0));
     const terminalText = screen.getByTestId('xterminal').textContent ?? '';
@@ -194,10 +252,10 @@ describe('DailyToolsPage', () => {
     render(<MemoryRouter><DailyToolsPage /></MemoryRouter>);
 
     await selectEdge();
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: '工具' }), 'tcp');
+    await pickOption('工具', 'TCP');
     const hostInput = screen.getByLabelText('目标 Host / IP');
-    await userEvent.type(hostInput, '101.34.63.91:443');
-    await userEvent.click(screen.getByRole('button', { name: /^执行$/ }));
+    await act(async () => { await userEvent.type(hostInput, '101.34.63.91:443'); });
+    await act(async () => { await userEvent.click(screen.getByRole('button', { name: /^执行$/ })); });
 
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0]).toMatchObject({ command: 'tcp', args: { host: '101.34.63.91', port: 443 } });
@@ -227,12 +285,11 @@ describe('DailyToolsPage', () => {
     render(<MemoryRouter><DailyToolsPage /></MemoryRouter>);
 
     await selectEdge();
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: '工具' }), 'http');
-    await userEvent.type(screen.getByLabelText('URL'), 'https://101.34.63.91/healthz');
-    await userEvent.click(screen.getByLabelText('跳过 TLS 检测'));
-    await screen.findByRole('option', { name: 'blue' });
-    await userEvent.selectOptions(await screen.findByLabelText('网络命名空间'), 'blue');
-    await userEvent.click(screen.getByRole('button', { name: /^执行$/ }));
+    await pickOption('工具', 'HTTP');
+    await act(async () => { await userEvent.type(screen.getByLabelText('URL'), 'https://101.34.63.91/healthz'); });
+    await act(async () => { await userEvent.click(screen.getByRole('checkbox', { name: '跳过 TLS 检测' })); });
+    await pickOption('网络命名空间', 'blue');
+    await act(async () => { await userEvent.click(screen.getByRole('button', { name: /^执行$/ })); });
 
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0]).toMatchObject({
@@ -282,9 +339,9 @@ describe('DailyToolsPage', () => {
     render(<MemoryRouter><DailyToolsPage /></MemoryRouter>);
 
     await selectEdge();
-    await userEvent.selectOptions(await screen.findByLabelText('网络命名空间'), 'blue');
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: '工具' }), 'capture');
-    await userEvent.click(screen.getByRole('button', { name: '开始' }));
+    await pickOption('网络命名空间', 'blue');
+    await pickOption('工具', 'Tcpdump');
+    await act(async () => { await userEvent.click(screen.getByRole('button', { name: '开始' })); });
 
     await waitFor(() => expect(captureCalls).toHaveLength(1));
     expect(captureCalls[0].targets).toEqual([{ device_id: 11, interface: 'eth0', network_namespace: 'blue' }]);
@@ -295,7 +352,7 @@ describe('DailyToolsPage', () => {
     expect(screen.getAllByText(/\$ ip netns exec blue tcpdump -U -n -q -i eth0 -s 1514 -w <artifact>\.pcap/).length).toBeGreaterThan(0);
     expect(within(panel.closest('section') as HTMLElement).getByRole('button', { name: '取消并丢弃' })).toBeInTheDocument();
 
-    await userEvent.click(within(panel.closest('section') as HTMLElement).getByRole('button', { name: '停止并保存' }));
+    await act(async () => { await userEvent.click(within(panel.closest('section') as HTMLElement).getByRole('button', { name: '停止并保存' })); });
     await waitFor(() => expect(cancelCalls).toEqual(['session']));
     expect(screen.getAllByText(/已发送停止并保存请求，正在上传已有数据包。/).length).toBeGreaterThan(0);
   });
@@ -348,9 +405,9 @@ describe('DailyToolsPage', () => {
     render(<MemoryRouter><DailyToolsPage /></MemoryRouter>);
 
     await selectEdge();
-    await userEvent.click(screen.getByLabelText('选择 #2 edge-002'));
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: '工具' }), 'capture');
-    await userEvent.click(screen.getByRole('button', { name: '开始' }));
+    await act(async () => { await userEvent.click(screen.getByLabelText('选择 #2 edge-002')); });
+    await pickOption('工具', 'Tcpdump');
+    await act(async () => { await userEvent.click(screen.getByRole('button', { name: '开始' })); });
 
     expect(await screen.findByText(/capture 41/)).toBeInTheDocument();
 
@@ -432,8 +489,8 @@ describe('DailyToolsPage', () => {
     render(<MemoryRouter><DailyToolsPage /></MemoryRouter>);
 
     await selectEdge();
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: '工具' }), 'capture');
-    await userEvent.click(screen.getByRole('button', { name: '开始' }));
+    await pickOption('工具', 'Tcpdump');
+    await act(async () => { await userEvent.click(screen.getByRole('button', { name: '开始' })); });
 
     expect((await screen.findAllByText(/device 11: packet capture/)).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: '停止' })).not.toBeInTheDocument();
@@ -496,29 +553,31 @@ describe('DailyToolsPage', () => {
 
     render(<MemoryRouter><DailyToolsPage /></MemoryRouter>);
     const toolSelect = screen.getByRole('combobox', { name: '工具' });
-    expect(within(toolSelect).getByRole('option', { name: 'Ping' })).toBeInTheDocument();
-    expect(within(toolSelect).queryByRole('option', { name: '应用性能分析' })).not.toBeInTheDocument();
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: '工具类型' }), 'performance');
-    expect(within(toolSelect).getByRole('option', { name: '应用性能分析' })).toBeInTheDocument();
+    await act(async () => { await userEvent.click(toolSelect); });
+    expect(await screen.findByRole('option', { name: 'Ping' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: '应用性能分析' })).not.toBeInTheDocument();
+    await act(async () => { await userEvent.keyboard('{Escape}'); });
+    await pickOption('工具类型', '性能分析');
+    expect(toolSelect).toHaveTextContent('应用性能分析');
     await selectEdge();
     const profileType = await screen.findByRole('combobox', { name: '分析类型' });
-    expect(profileType).toHaveValue('heap');
+    expect(profileType).toHaveTextContent('Heap · pprof');
     expect(screen.queryByRole('combobox', { name: '分析进程' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('service.name')).not.toBeInTheDocument();
     expect(screen.getByLabelText('采集 URL')).toHaveValue('http://127.0.0.1:16060/debug/pprof/heap');
     expect(screen.getByText(/默认采集当前 Edge 的 ongrid-edge/)).toBeInTheDocument();
 
-    await userEvent.selectOptions(profileType, 'cpu');
+    await pickOption('分析类型', 'CPU · pprof');
     expect(screen.queryByRole('combobox', { name: '分析进程' })).not.toBeInTheDocument();
     expect(screen.getByLabelText('采集 URL')).toHaveValue('http://127.0.0.1:16060/debug/pprof/profile?seconds=30');
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: '采样时长' }), '60');
+    await pickOption('采样时长', '1 分钟');
     expect(screen.getByLabelText('采集 URL')).toHaveValue('http://127.0.0.1:16060/debug/pprof/profile?seconds=60');
-    await userEvent.selectOptions(profileType, 'heap');
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: '采样时长' }), '30');
+    await pickOption('分析类型', 'Heap · pprof');
+    await pickOption('采样时长', '30 秒（推荐）');
 
     expect(screen.queryByLabelText('采样频率（Hz）')).not.toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: '采样时长' })).toHaveValue('30');
-    await userEvent.click(screen.getByRole('button', { name: '开始采样' }));
+    expect(screen.getByRole('combobox', { name: '采样时长' })).toHaveTextContent('30 秒（推荐）');
+    await act(async () => { await userEvent.click(screen.getByRole('button', { name: '开始采样' })); });
     await waitFor(() => expect(saved.enabled).toBe(true));
     await waitFor(() => expect(screen.getAllByText('采样中')).not.toHaveLength(0), { timeout: 3000 });
     expect(saved.spec).toMatchObject({
@@ -537,7 +596,7 @@ describe('DailyToolsPage', () => {
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:profile') });
     Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
     const clickDownload = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
-    await userEvent.click(screen.getByRole('button', { name: '下载数据' }));
+    await act(async () => { await userEvent.click(screen.getByRole('button', { name: '下载数据' })); });
     await waitFor(() => expect(downloaded).toBe(true));
     clickDownload.mockRestore();
 
@@ -546,11 +605,11 @@ describe('DailyToolsPage', () => {
     await new Promise((resolve) => setTimeout(resolve, 2200));
     expect(flamegraphCalls).toBe(1);
     expect(frame).not.toHaveAttribute('title');
-    await userEvent.hover(frame);
+    await act(async () => { await userEvent.hover(frame); });
     expect(within(viewer).getByRole('tooltip')).toHaveTextContent('ongrid-edge.main');
     expect(within(viewer).getByRole('tooltip')).toHaveTextContent('Total: 100 samples (100%)');
     expect(within(viewer).getByRole('tooltip')).toHaveTextContent('Self: 35 samples');
-    await userEvent.unhover(frame);
+    await act(async () => { await userEvent.unhover(frame); });
     expect(within(viewer).queryByRole('tooltip')).not.toBeInTheDocument();
     let refreshStarted!: () => void;
     let releaseRefresh!: () => void;
@@ -561,23 +620,23 @@ describe('DailyToolsPage', () => {
       await refreshResponse;
       return HttpResponse.json(flamegraphResponse);
     }));
-    await userEvent.click(within(viewer).getByRole('button', { name: '刷新' }));
+    await act(async () => { await userEvent.click(within(viewer).getByRole('button', { name: '刷新' })); });
     await refreshRequest;
     expect(frame).toBeInTheDocument();
     await act(async () => releaseRefresh());
     await waitFor(() => expect(within(viewer).getByRole('button', { name: '刷新' })).toBeEnabled());
     expect(within(viewer).queryByRole('combobox', { name: '火焰图时间范围' })).not.toBeInTheDocument();
-    expect(within(viewer).getByRole('button', { name: '火焰图' })).toHaveAttribute('aria-pressed', 'true');
-    await userEvent.click(within(viewer).getByRole('button', { name: '冰柱图' }));
-    expect(within(viewer).getByRole('button', { name: '冰柱图' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(viewer).getByRole('tab', { name: '火焰图' })).toHaveAttribute('aria-selected', 'true');
+    await act(async () => { await userEvent.click(within(viewer).getByRole('tab', { name: '冰柱图' })); });
+    expect(within(viewer).getByRole('tab', { name: '冰柱图' })).toHaveAttribute('aria-selected', 'true');
     expect(within(viewer).getByRole('group', { name: '冰柱图视图' })).toHaveClass('flex-col');
-    expect(within(viewer).getByRole('button', { name: '调用图' })).toBeInTheDocument();
-    await userEvent.click(within(viewer).getByRole('button', { name: '调用图' }));
-    expect(within(viewer).getByRole('button', { name: '调用图' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(viewer).getByRole('tab', { name: '调用图' })).toBeInTheDocument();
+    await act(async () => { await userEvent.click(within(viewer).getByRole('tab', { name: '调用图' })); });
+    expect(within(viewer).getByRole('tab', { name: '调用图' })).toHaveAttribute('aria-selected', 'true');
     expect(within(viewer).getByText('展示最热 3 个函数，连线宽度表示累计占用')).toBeInTheDocument();
     expect(within(viewer).getByText('Self 35 samples (35.00%)')).toBeInTheDocument();
     expect(within(viewer).getAllByText('Total 100 samples (100%)')).not.toHaveLength(0);
-    await userEvent.click(within(viewer).getByRole('button', { name: '全屏' }));
+    await act(async () => { await userEvent.click(within(viewer).getByRole('button', { name: '全屏' })); });
     expect(viewer).toHaveClass('fixed', 'inset-0');
     expect(within(viewer).getByRole('button', { name: '退出全屏' })).toBeInTheDocument();
     expect(within(viewer).queryByTitle('应用性能火焰图')).not.toBeInTheDocument();

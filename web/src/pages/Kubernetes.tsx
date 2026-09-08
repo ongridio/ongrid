@@ -1,5 +1,11 @@
+import { FilterField } from '@/components/ui/FilterField';
+import { Label, Input } from '@/components/ui';
+import { useDialogs } from '@/components/ui/useDialogs';
+import { Hint } from '@/components/ui/Tooltip';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/DropdownMenu';
+import { Select } from '@/components/ui/Select';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   Activity,
@@ -250,51 +256,51 @@ export default function KubernetesPage() {
                       </td>
                       <td className="sticky right-0 z-10 min-w-[340px] border-l border-zinc-800/60 bg-zinc-900 px-4 py-2.5 text-left" onClick={(ev) => ev.stopPropagation()}>
                         <div className="flex items-center gap-1">
-                          <Link
+                          <Hint content={tr('详情', 'Details')}><Link
                             to={`/kubernetes/${cluster.id}`}
                             aria-label={tr(`查看集群 ${cluster.name} 详情`, `View cluster ${cluster.name} details`)}
-                            title={tr('详情', 'Details')}
+
                             className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
                           >
                             <ExternalLink size={13} />
                             {tr('详情', 'Details')}
-                          </Link>
+                          </Link></Hint>
                           {isAdmin && (
-                            <button
+                            <Hint content={tr('升级命令', 'Upgrade command')}><Button variant="subtle" size="sm"
                               type="button"
                               aria-label={tr(`查看集群 ${cluster.name} 的升级命令`, `View upgrade command for cluster ${cluster.name}`)}
-                              title={tr('升级命令', 'Upgrade command')}
+
                               onClick={() => setUpgradeCluster(cluster)}
-                              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                              className="inline-flex items-center gap-1 px-2 py-1"
                             >
                               <RefreshCw size={13} />
                               {tr('升级命令', 'Upgrade')}
-                            </button>
+                            </Button></Hint>
                           )}
                           {isAdmin && (
-                            <button
+                            <Hint content={tr('卸载命令', 'Uninstall command')}><Button variant="subtle" size="sm"
                               type="button"
                               aria-label={tr(`查看集群 ${cluster.name} 的卸载命令`, `View uninstall command for cluster ${cluster.name}`)}
-                              title={tr('卸载命令', 'Uninstall command')}
+
                               onClick={() => setUninstallCluster(cluster)}
-                              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                              className="inline-flex items-center gap-1 px-2 py-1"
                             >
                               <Clipboard size={13} />
                               {tr('卸载命令', 'Uninstall')}
-                            </button>
+                            </Button></Hint>
                           )}
                           {isAdmin && (
-                            <button
+                            <Hint content={tr('删除', 'Delete')}><Button variant="plain" size="sm"
                               type="button"
                               aria-label={tr(`删除集群 ${cluster.name}`, `Delete cluster ${cluster.name}`)}
-                              title={tr('删除', 'Delete')}
+
                               disabled={deletingClusterID === cluster.id}
                               onClick={() => setDeleteClusterTarget(cluster)}
-                              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-red-300 hover:bg-red-500/10 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-50"
+                              className="inline-flex items-center gap-1 px-2 py-1 text-red-300 hover:bg-red-500/10 hover:text-red-200"
                             >
                               <Trash2 size={13} />
                               {deletingClusterID === cluster.id ? tr('删除中…', 'Deleting…') : tr('删除', 'Delete')}
-                            </button>
+                            </Button></Hint>
                           )}
                         </div>
                       </td>
@@ -330,6 +336,7 @@ export default function KubernetesPage() {
 }
 
 export function KubernetesClusterDetailPage() {
+  const { confirmAction, dialog } = useDialogs();
   const { tr } = useI18n();
   const { isAdmin } = usePermissions();
   const navigate = useNavigate();
@@ -845,7 +852,7 @@ export function KubernetesClusterDetailPage() {
 
   async function rotateToken() {
     if (!cluster) return;
-    if (!confirm(tr(`轮换 ${cluster.name} 的 bootstrap token？旧 token 将立即失效。`, `Rotate bootstrap token for ${cluster.name}? The old token becomes invalid immediately.`))) {
+    if (!(await confirmAction(tr(`轮换 ${cluster.name} 的 bootstrap token？旧 token 将立即失效。`, `Rotate bootstrap token for ${cluster.name}? The old token becomes invalid immediately.`)))) {
       return;
     }
     const out = await rotateKubernetesBootstrapToken(cluster.id);
@@ -866,7 +873,7 @@ export function KubernetesClusterDetailPage() {
     : tr('加载中…', 'Loading…');
 
   return (
-    <>
+    <>{dialog}<Tabs value={activeTab} onValueChange={(next) => openResourceTab(next, { scroll: true, resetFilters: true })} className="contents"><>
       <main className="anim-fade flex flex-1 flex-col overflow-hidden">
         <PageHeader
           leading={
@@ -900,31 +907,26 @@ export function KubernetesClusterDetailPage() {
           }
           extra={
             awaitingConnection ? null : (
-              <div className="flex flex-wrap gap-2">
+              <TabsList className="flex flex-wrap gap-2">
                 {detailTabs.map((tab) => (
-                  <button
+                  <TabsTrigger
                     key={tab.key}
-                    type="button"
-                    onClick={() => openResourceTab(tab.key, { scroll: true, resetFilters: true })}
-                    className={cn(
-                      'inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs',
-                      activeTab === tab.key
-                        ? 'bg-zinc-100 text-zinc-950'
-                        : 'border border-zinc-800 bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100',
-                    )}
+
+                    value={tab.key}
+
                   >
                     {tr(tab.zh, tab.en)}
                     <span className="font-mono text-[11px] opacity-70">
                       {formatNumber(detailTabCount(tab.key, totals, namespaces.length, actionProposalTotal))}
                     </span>
-                  </button>
+                  </TabsTrigger>
                 ))}
-              </div>
+              </TabsList>
             )
           }
         />
 
-        <div className="flex-1 overflow-y-auto px-6 py-6">
+        <TabsContent value={activeTab} className="contents"><div className="flex-1 overflow-y-auto px-6 py-6">
           {error && (
             <div className="mb-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-300">
               {tr('加载失败：', 'Load failed: ')}
@@ -1139,12 +1141,12 @@ export function KubernetesClusterDetailPage() {
               />
             </>
           )}
-        </div>
+        </div></TabsContent>
       </main>
 
       <RegistrationModal data={registration} onClose={() => setRegistration(null)} />
       <UpgradeCommandModal cluster={upgradeCluster} onClose={() => setUpgradeCluster(null)} />
-    </>
+    </></Tabs></>
   );
 }
 
@@ -1495,15 +1497,6 @@ function K8sHealthQueue({
   const navigate = useNavigate();
   const grafanaOrgId = useObservability((s) => s.grafanaOrgId);
   const [writeBusy, setWriteBusy] = useState<string | null>(null);
-  useEffect(() => {
-    const closeOtherMenus = (event: MouseEvent) => {
-      document.querySelectorAll<HTMLDetailsElement>('details[data-k8s-triage-menu][open]').forEach((menu) => {
-        if (!menu.contains(event.target as Node)) menu.open = false;
-      });
-    };
-    document.addEventListener('click', closeOtherMenus);
-    return () => document.removeEventListener('click', closeOtherMenus);
-  }, []);
   const writeEnabled = cluster?.mode === 'full-node';
   const queueWriteActionRecommendations = writeEnabled ? writeActionRecommendations : [];
   const hasOpenIssues = triageIssues.length > 0;
@@ -1781,44 +1774,41 @@ function TriageQueueRow({
           {issueResourceActionLabel(issue, tr)}
         </Button>
         {hasMoreActions && (
-          <details data-k8s-triage-menu className="group relative">
-            <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-[11px] font-medium text-zinc-300 transition-colors hover:bg-zinc-800 hover:text-zinc-100 [&::-webkit-details-marker]:hidden">
-              <MoreHorizontal size={11} />
-              {tr('更多', 'More')}
-            </summary>
-            <div className="absolute right-0 z-20 mt-1 w-32 rounded-lg border border-zinc-800 bg-zinc-950 p-1 shadow-xl">
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<Button className="px-2 py-1 text-[11px]" />}><MoreHorizontal size={11} />{tr('更多', 'More')}</DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
               {canOpenLogs && (
-                <button
-                  type="button"
+                <DropdownMenuItem
+
                   className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[11px] text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100"
                   onClick={onOpenLogs}
                 >
                   <FileText size={11} />
                   {tr('查看日志', 'Logs')}
-                </button>
+                </DropdownMenuItem>
               )}
               {canDescribe && (
-                <button
-                  type="button"
+                <DropdownMenuItem
+
                   className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[11px] text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100"
                   onClick={onDescribe}
                 >
                   <Search size={11} />
                   describe
-                </button>
+                </DropdownMenuItem>
               )}
               {canOpenTrace && (
-                <button
-                  type="button"
+                <DropdownMenuItem
+
                   className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[11px] text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100"
                   onClick={onTrace}
                 >
                   <Waypoints size={11} />
                   {tr('关联链路', 'Traces')}
-                </button>
+                </DropdownMenuItem>
               )}
-            </div>
-          </details>
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
       </div>
     </div>
@@ -2431,7 +2421,7 @@ function K8sActionAuditTrail({ proposal, args }: { proposal: KubernetesActionAud
         {steps.map((step, index) => (
           <div key={step.key} className="flex items-center gap-1.5">
             {index > 0 && <span className="text-zinc-700">→</span>}
-            <span
+            <Hint content={step.detail}><span
               className={cn(
                 'inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px]',
                 step.tone === 'success'
@@ -2442,11 +2432,11 @@ function K8sActionAuditTrail({ proposal, args }: { proposal: KubernetesActionAud
                       ? 'border-red-500/30 bg-red-500/10 text-red-300'
                       : 'border-zinc-800 bg-zinc-950/30 text-zinc-500',
               )}
-              title={step.detail}
+
             >
               <span>{step.label}</span>
               <span className="max-w-[180px] truncate text-zinc-500">{step.detail}</span>
-            </span>
+            </span></Hint>
           </div>
         ))}
       </div>
@@ -2798,56 +2788,59 @@ function ResourceFilterBar({
   return (
     <div className="border-b border-zinc-800/60 bg-zinc-900 px-4 py-3">
       <div className="flex flex-wrap items-center gap-2">
-        <label className="relative min-w-[220px] flex-1 sm:max-w-sm">
+        <Label className="relative min-w-[220px] flex-1 sm:max-w-sm">
           <Search size={13} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-zinc-500" />
-          <input
+          <Input
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}
-            className="h-8 w-full rounded-md border border-zinc-800 bg-zinc-950 pl-7 pr-2 text-xs text-zinc-100 outline-none transition-colors placeholder:text-zinc-600 focus:border-zinc-600"
+            className="w-full pl-7 pr-2 outline-none transition-colors"
             placeholder={tr('搜索名称 / 状态 / 原因', 'Search name / status / reason')}
             aria-label={tr('搜索资源', 'Search resources')}
           />
-        </label>
+        </Label>
         {showNamespace && (
-          <select
-            value={namespace}
-            onChange={(event) => onNamespaceChange(event.target.value)}
-            className="h-8 rounded-md border border-zinc-800 bg-zinc-950 px-2 text-xs text-zinc-100 outline-none transition-colors focus:border-zinc-600"
-            aria-label={tr('命名空间过滤', 'Namespace filter')}
-          >
-            <option value="all">{tr('全部命名空间', 'All namespaces')}</option>
-            {visibleNamespaces.map((item) => (
-              <option key={item} value={item}>{item}</option>
-            ))}
-          </select>
+          <FilterField label={tr('命名空间', 'Namespace')} className="w-64">
+            <Select
+              value={namespace}
+              onValueChange={(selectedValue) => onNamespaceChange(selectedValue)}
+              aria-label={tr('命名空间过滤', 'Namespace filter')}
+            >
+              <option value="all">{tr('全部命名空间', 'All namespaces')}</option>
+              {visibleNamespaces.map((item) => (
+                <option key={item} value={item}>{item}</option>
+              ))}
+            </Select>
+          </FilterField>
         )}
         {showActionAuditFilters ? (
           <>
-            <select
-              value={actionDecision}
-              onChange={(event) => onActionDecisionChange(event.target.value as ActionDecisionFilter)}
-              className="h-8 rounded-md border border-zinc-800 bg-zinc-950 px-2 text-xs text-zinc-100 outline-none transition-colors focus:border-zinc-600"
-              aria-label={tr('审批状态过滤', 'Decision filter')}
-            >
-              {ACTION_DECISION_FILTERS.map((item) => (
-                <option key={item} value={item}>{actionDecisionFilterLabel(item, tr)}</option>
-              ))}
-            </select>
-            <select
-              value={actionType}
-              onChange={(event) => onActionTypeChange(event.target.value)}
-              className="h-8 rounded-md border border-zinc-800 bg-zinc-950 px-2 text-xs text-zinc-100 outline-none transition-colors focus:border-zinc-600"
-              aria-label={tr('动作类型过滤', 'Action type filter')}
-            >
-              <option value="all">{tr('全部动作', 'All actions')}</option>
-              {visibleActionTypes.map((item) => (
-                <option key={item} value={item}>{k8sActionTypeLabel(item, tr)}</option>
-              ))}
-            </select>
+            <FilterField label={tr('审批状态', 'Decision')} className="w-56">
+              <Select
+                value={actionDecision}
+                onValueChange={(selectedValue) => onActionDecisionChange(selectedValue as ActionDecisionFilter)}
+                aria-label={tr('审批状态过滤', 'Decision filter')}
+              >
+                {ACTION_DECISION_FILTERS.map((item) => (
+                  <option key={item} value={item}>{actionDecisionFilterLabel(item, tr)}</option>
+                ))}
+              </Select>
+            </FilterField>
+            <FilterField label={tr('动作类型', 'Action type')} className="w-64">
+              <Select
+                value={actionType}
+                onValueChange={(selectedValue) => onActionTypeChange(selectedValue)}
+                aria-label={tr('动作类型过滤', 'Action type filter')}
+              >
+                <option value="all">{tr('全部动作', 'All actions')}</option>
+                {visibleActionTypes.map((item) => (
+                  <option key={item} value={item}>{k8sActionTypeLabel(item, tr)}</option>
+                ))}
+              </Select>
+            </FilterField>
           </>
         ) : (
           <Button
-            className={cn('h-8', issueOnly && 'border-amber-500/50 bg-amber-500/10 text-amber-200 hover:bg-amber-500/15')}
+            className={cn(issueOnly && 'border-amber-500/50 bg-amber-500/10 text-amber-200 hover:bg-amber-500/15')}
             onClick={() => onIssueOnlyChange(!issueOnly)}
           >
             <AlertTriangle size={12} />
@@ -2856,7 +2849,6 @@ function ResourceFilterBar({
         )}
         {filterActive && (
           <Button
-            className="h-8"
             onClick={onClear}
           >
             {tr('清除', 'Clear')}
@@ -2919,94 +2911,52 @@ type ResourceRowActionHandlers = {
 
 function ResourceRowActions({ issue, actions }: { issue: K8sTriageIssue; actions: ResourceRowActionHandlers }) {
   const { tr } = useI18n();
-  const [open, setOpen] = useState(false);
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const [position, setPosition] = useState<{ top: number; right: number } | null>(null);
-  const syncPosition = useCallback(() => {
-    const trigger = triggerRef.current;
-    if (!trigger) return;
-    const rect = trigger.getBoundingClientRect();
-    setPosition({ top: rect.bottom + 4, right: Math.max(8, window.innerWidth - rect.right) });
-  }, []);
-  useEffect(() => {
-    if (!open) return;
-    syncPosition();
-    window.addEventListener('resize', syncPosition);
-    window.addEventListener('scroll', syncPosition, true);
-    return () => {
-      window.removeEventListener('resize', syncPosition);
-      window.removeEventListener('scroll', syncPosition, true);
-    };
-  }, [open, syncPosition]);
-  const run = (fn: (issue: K8sTriageIssue) => void) => {
-    setOpen(false);
-    fn(issue);
-  };
-  return (
-    <div className="relative inline-flex justify-end">
-      <Button
-        ref={triggerRef}
-        className="h-7 px-2 text-[11px]"
-        onClick={() => setOpen((value) => !value)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-      >
-        <MoreHorizontal size={11} />
-        {tr('排障', 'Triage')}
-      </Button>
-      {open && position && createPortal(
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} aria-hidden />
-          <div
-            role="menu"
-            aria-label={tr('资源排障', 'Resource triage')}
-            className="fixed z-50 w-32 rounded-lg border border-zinc-800 bg-zinc-950 p-1 text-left shadow-xl"
-            style={position}
-          >
-            <button
-              type="button"
+  const run = (fn: (issue: K8sTriageIssue) => void) => fn(issue);
+  return <DropdownMenu>
+    <DropdownMenuTrigger render={<Button className="h-7 px-2 text-[11px]" />}>
+      <MoreHorizontal size={11} />{tr('排障', 'Triage')}
+    </DropdownMenuTrigger>
+    <DropdownMenuContent align="end" aria-label={tr('资源排障', 'Resource triage')}>
+            <DropdownMenuItem
+
               className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[11px] text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100"
               onClick={() => run(actions.onAnalyze)}
             >
               <Activity size={11} />
               {tr('AI 分析', 'AI analyze')}
-            </button>
+            </DropdownMenuItem>
             {issueSupportsLogs(issue) && (
-              <button
-                type="button"
+              <DropdownMenuItem
+
                 className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[11px] text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100"
                 onClick={() => run(actions.onOpenLogs)}
               >
                 <FileText size={11} />
                 {tr('日志', 'Logs')}
-              </button>
+              </DropdownMenuItem>
             )}
             {issueSupportsDescribe(issue) && (
-              <button
-                type="button"
+              <DropdownMenuItem
+
                 className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[11px] text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100"
                 onClick={() => run(actions.onDescribe)}
               >
                 <Search size={11} />
                 describe
-              </button>
+              </DropdownMenuItem>
             )}
             {issueSupportsTrace(issue) && (
-              <button
-                type="button"
+              <DropdownMenuItem
+
                 className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[11px] text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100"
                 onClick={() => run(actions.onTrace)}
               >
                 <Network size={11} />
                 {tr('链路', 'Trace')}
-              </button>
+              </DropdownMenuItem>
             )}
-          </div>
-        </>,
-        document.body,
-      )}
-    </div>
-  );
+    </DropdownMenuContent>
+  </DropdownMenu>;
 }
 
 function NodesTable({
@@ -3247,18 +3197,18 @@ function WorkloadsTable({
                                 <div className="font-mono font-medium text-zinc-200">
                                   {replicaSet.revision ? `Revision ${replicaSet.revision}` : tr('Revision 未知', 'Revision unknown')}
                                 </div>
-                                <div className="min-w-0 truncate font-mono text-[11px] text-zinc-400" title={replicaSet.name}>
+                                <Hint content={replicaSet.name}><div className="min-w-0 truncate font-mono text-[11px] text-zinc-400" >
                                   {replicaSet.name}
-                                </div>
+                                </div></Hint>
                                 <Chip tone={versionStatus.tone} className="w-fit">{versionStatus.label}</Chip>
                                 <div className="font-mono text-zinc-400">{replicaSet.ready_replicas}/{replicaSet.desired_replicas}</div>
-                                <time
+                                <Hint content={fullDateTime(replicaSet.creation_timestamp)}><time
                                   dateTime={replicaSet.creation_timestamp || undefined}
-                                  title={fullDateTime(replicaSet.creation_timestamp)}
+
                                   className="text-zinc-400"
                                 >
                                   {fullDateTime(replicaSet.creation_timestamp)}
-                                </time>
+                                </time></Hint>
                                 {actions ? (
                                   <div className="justify-self-end">
                                     <ResourceRowActions issue={workloadResourceIssue(replicaSet, tr)} actions={actions} />
@@ -3586,24 +3536,24 @@ function CreateClusterModal({
       }
     >
       <div className="space-y-3 text-xs">
-        <label className="block">
+        <Label className="block">
           <span className="mb-1 block text-zinc-500">{tr('集群名称', 'Cluster name')}</span>
-          <input
+          <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full"
             placeholder="kind-local"
           />
-        </label>
-        <label className="block">
+        </Label>
+        <Label className="block">
           <span className="mb-1 block text-zinc-500">UID</span>
-          <input
+          <Input
             value={uid}
             onChange={(e) => setUID(e.target.value)}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-sm text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full font-mono"
             placeholder={tr('可留空', 'Optional')}
           />
-        </label>
+        </Label>
         {error && (
           <div className="rounded-md border border-red-500/30 bg-red-500/10 px-2 py-1.5 text-red-300">
             {error}

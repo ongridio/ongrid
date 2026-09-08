@@ -1,3 +1,5 @@
+import { Label } from './Label';
+import { FilterField } from './FilterField';
 // RoleSelect — single dropdown reused across Monitor / Edges / Logs /
 // Traces for "filter by device role". The contract is intentionally
 // shaped around the EdgeRole enum + two synthetic options:
@@ -8,10 +10,12 @@
 // value is safe.
 import { EDGE_ROLES, EDGE_ROLE_LABELS, EDGE_ROLE_LABELS_EN } from '@/api/edges';
 import { useI18n } from '@/i18n/locale';
+import { Select } from './Select';
+import { cn } from '@/lib/cn';
 
 export type RoleFilterValue = '' | 'unknown' | (typeof EDGE_ROLES)[number];
 
-// `chip` (default): inline pill — caption + select on one line. Used in
+// `chip` (default): caption + transparent select inside one shared frame. Used in
 //                   toolbars (Monitor) where horizontal density matters.
 // `block`         : caption above, full-width select below. Used in
 //                   form-column layouts (Logs query form) where the
@@ -43,44 +47,18 @@ export function RoleSelect({
   ];
   const UNKNOWN_OPTION = { value: 'unknown' as RoleFilterValue, label: tr('未分类', 'Uncategorized') };
   const options = omitUnknown ? BASE_OPTIONS : [...BASE_OPTIONS, UNKNOWN_OPTION];
-  if (variant === 'block') {
-    return (
-      <label className={'block ' + (className ?? '')}>
-        {showLabel && <span className="mb-1 block text-[11px] text-zinc-500">{tr('角色', 'Role')}</span>}
-        <select
-          value={value}
-          onChange={(e) => onChange(e.target.value as RoleFilterValue)}
-          className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
-        >
-          {options.map((o) => (
-            <option key={o.value} value={o.value} className="bg-zinc-900">
-              {o.label}
-            </option>
-          ))}
-        </select>
-      </label>
-    );
+  const control = <Select
+    value={value}
+    onValueChange={(next) => onChange(next as RoleFilterValue)}
+    options={options}
+    label={tr('角色', 'Role')}
+    className={variant === 'chip' ? 'min-w-[112px] flex-1' : 'w-full'}
+  />;
+  if (variant === 'chip' && showLabel) {
+    return <FilterField label={tr('角色', 'Role')} className={className}>{control}</FilterField>;
   }
-
-  return (
-    <label
-      className={
-        'inline-flex items-center gap-1 rounded-md border border-zinc-800/60 bg-zinc-950/40 pl-2 pr-1 py-1 text-zinc-300 hover:border-zinc-700 ' +
-        (className ?? '')
-      }
-    >
-      {showLabel && <span className="text-[11px] text-zinc-500">{tr('角色', 'Role')}</span>}
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value as RoleFilterValue)}
-        className="appearance-none border-none bg-transparent pl-1 pr-4 text-[12px] text-zinc-100 focus:outline-none"
-      >
-        {options.map((o) => (
-          <option key={o.value} value={o.value} className="bg-zinc-900">
-            {o.label}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
+  return <Label className={cn('block', className)}>
+    {showLabel && <span className="mb-1 block text-[11px] text-text-faint">{tr('角色', 'Role')}</span>}
+    {control}
+  </Label>;
 }

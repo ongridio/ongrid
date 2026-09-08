@@ -1,3 +1,6 @@
+import { Label, Input } from '@/components/ui';
+import { useDialogs } from '@/components/ui/useDialogs';
+import { Hint } from '@/components/ui/Tooltip';
 // /settings/webshell — WebSSH 会话审计 + 在线踢人。
 //
 // 数据源：
@@ -52,6 +55,7 @@ const TERMINATED_LABELS: Record<string, { zh: string; en: string; tone: Tone }> 
 type StatusFilter = 'all' | 'active' | 'terminated';
 
 export default function SettingsWebshell() {
+  const { confirmAction, dialog } = useDialogs();
   const { tr } = useI18n();
   const { me } = useMe();
   const isAdmin = me?.role === 'admin';
@@ -186,10 +190,10 @@ export default function SettingsWebshell() {
 
   const handleKill = useCallback(
     async (s: ShellSession) => {
-      if (!confirm(tr(
+      if (!(await confirmAction(tr(
         `确认踢出该会话？（${s.ssh_user} → 设备 #${s.device_id}）`,
         `Kill this session? (${s.ssh_user} → device #${s.device_id})`,
-      ))) return;
+      )))) return;
       setKillBusy(s.id);
       try {
         await killShellSession(s.id);
@@ -210,11 +214,11 @@ export default function SettingsWebshell() {
         setKillBusy(null);
       }
     },
-    [refresh, tr],
+    [confirmAction, refresh, tr],
   );
 
   const filterChip = (key: StatusFilter, label: string, n: number) => (
-    <button
+    <Button variant="outline" size="sm"
       type="button"
       onClick={() => setStatusFilter(key)}
       className={cn(
@@ -233,11 +237,11 @@ export default function SettingsWebshell() {
       >
         {n}
       </span>
-    </button>
+    </Button>
   );
 
   return (
-    <main className="anim-fade flex flex-1 flex-col overflow-hidden">
+    <>{dialog}<main className="anim-fade flex flex-1 flex-col overflow-hidden">
       <PageHeader
         title={
           <span className="inline-flex items-center gap-2">
@@ -264,27 +268,27 @@ export default function SettingsWebshell() {
           {filterChip('active', tr('活跃', 'Active'), counts.active)}
           {filterChip('terminated', tr('已结束', 'Ended'), counts.history)}
           <div className="ml-auto flex items-center gap-2">
-            <label className="relative block w-72">
+            <Label className="relative block w-72">
               <span className="sr-only">{tr('搜索', 'Search')}</span>
-              <input
+              <Input
                 type="search"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder={tr('搜索 用户 / 设备 / SSH 用户 / 终止原因', 'Search user / device / SSH user / reason')}
-                className="w-full rounded-md border border-zinc-800/60 bg-zinc-950/40 py-1.5 pl-3 pr-2 text-xs text-zinc-200 placeholder:text-zinc-500 focus:border-zinc-600 focus:outline-none"
+                className="w-full pl-3 pr-2"
               />
-            </label>
+            </Label>
             {(search || statusFilter !== 'all') && (
-              <button
+              <Button variant="subtle" size="sm"
                 type="button"
                 onClick={() => {
                   setSearch('');
                   setStatusFilter('all');
                 }}
-                className="text-[11px] text-zinc-500 hover:text-zinc-300"
+                className=""
               >
                 {tr('清除筛选', 'Clear filters')}
-              </button>
+              </Button>
             )}
           </div>
         </div>
@@ -312,16 +316,16 @@ export default function SettingsWebshell() {
           ) : visibleItems.length === 0 ? (
             <div className="flex h-40 flex-col items-center justify-center gap-2 text-sm text-zinc-500">
               <span>{tr('没有匹配的会话', 'No matching sessions')}</span>
-              <button
+              <Button variant="subtle" size="sm"
                 type="button"
                 onClick={() => {
                   setSearch('');
                   setStatusFilter('all');
                 }}
-                className="text-[11px] text-zinc-400 hover:text-zinc-200 underline-offset-2 hover:underline"
+                className="underline-offset-2 hover:underline"
               >
                 {tr('清除筛选', 'Clear filters')}
-              </button>
+              </Button>
             </div>
           ) : (
             <SessionTable
@@ -349,7 +353,7 @@ export default function SettingsWebshell() {
           {toast.text}
         </div>
       )}
-    </main>
+    </main></>
   );
 }
 
@@ -441,11 +445,11 @@ function SessionTable({
                 </td>
                 <td className="px-4 py-2.5">
                   {s.is_active && isAdmin ? (
-                    <Button
+                    <Hint content={tr('管理员强制终止该会话', 'Admin force-terminate this session')}><Button
                       variant="danger"
                       onClick={() => onKill(s)}
                       disabled={killBusy === s.id}
-                      title={tr('管理员强制终止该会话', 'Admin force-terminate this session')}
+
                     >
                       {killBusy === s.id ? (
                         <Loader2 size={11} className="animate-spin" />
@@ -453,7 +457,7 @@ function SessionTable({
                         <Skull size={11} />
                       )}
                       {tr('踢出', 'Kill')}
-                    </Button>
+                    </Button></Hint>
                   ) : (
                     <span className="text-[11px] text-zinc-600">—</span>
                   )}

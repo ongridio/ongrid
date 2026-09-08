@@ -1,3 +1,8 @@
+import { Button, Input, Textarea, Label } from '@/components/ui';
+import { Hint } from '@/components/ui/Tooltip';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/Popover';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/DropdownMenu';
+import { Select } from '@/components/ui/Select';
 // FlowEditor — the React Flow canvas for one workflow (HLD-016).
 // Palette (left) adds nodes; edges carry control ports (next / true /
 // false / error); the drawer (right) edits the selected node's config.
@@ -678,27 +683,27 @@ export default function FlowEditorPage() {
     <main className="anim-fade flex min-w-0 flex-1 flex-col overflow-hidden">
       {/* toolbar */}
       <div className="flex items-center gap-3 border-b border-zinc-800 px-4 py-2">
-        <button
+        <Button variant="subtle" size="sm"
           type="button"
           onClick={() => navigate('/workflows')}
-          className="rounded-md p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+          className="p-1.5"
         >
           <ArrowLeft size={16} />
-        </button>
-        <input
+        </Button>
+        <Input variant="inset"
           value={flow.name}
           disabled={!canWrite}
           onChange={(e) => {
             setFlow({ ...flow, name: e.target.value });
             setDirty(true);
           }}
-          className="min-w-[8rem] max-w-[24rem] rounded-md border border-transparent bg-transparent px-2 py-1 text-[14px] font-medium text-zinc-100 outline-none [field-sizing:content] focus:border-zinc-600"
+          className="min-w-[8rem] max-w-[24rem] px-2 py-1 font-medium outline-none [field-sizing:content]"
         />
         <span className="shrink-0 rounded bg-zinc-800 px-1 py-0.5 text-[10px] text-zinc-500">v{flow.version}</span>
         {dirty && <span className="text-[11px] text-amber-500">{tr('未保存', 'Unsaved')}</span>}
         <div className="flex-1" />
-        {error && <span title={error} className="max-w-md truncate text-[12px] text-red-400" role="alert">{error}</span>}
-        <button
+        {error && <Hint content={error}><span  className="max-w-md truncate text-[12px] text-red-400" role="alert">{error}</span></Hint>}
+        <Button variant="subtle" size="sm"
           type="button"
           onClick={() => setShowRuns((v) => !v)}
           className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12px] transition-colors ${
@@ -707,60 +712,45 @@ export default function FlowEditorPage() {
         >
           <History size={14} />
           {tr('运行记录', 'Runs')}
-        </button>
+        </Button>
         {canWrite && (
           <>
-            <button
+            <Button variant="outline" size="sm"
               type="button"
               onClick={() => void onSave()}
               disabled={saving || !dirty}
-              className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 px-2.5 py-1.5 text-[12px] text-zinc-300 transition-colors hover:bg-zinc-800 disabled:opacity-40"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 transition-colors"
             >
               <Save size={14} />
               {tr('保存', 'Save')}
-            </button>
+            </Button>
             {hasManualTrigger && (
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setShowRunInput((v) => !v)}
-                  title={tr('手动触发输入（JSON，节点用 {{trigger.字段}} 引用）', 'Manual trigger input (JSON; referenced as {{trigger.<field>}})')}
-                  className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[12px] transition-colors ${
-                    showRunInput || runInputText.trim()
-                      ? 'border-indigo-700 bg-indigo-950/30 text-indigo-300'
-                      : 'border-zinc-700 text-zinc-300 hover:bg-zinc-800'
-                  }`}
-                >
-                  <Variable size={14} />
-                  {tr('输入', 'Input')}
-                </button>
-                {showRunInput && (
-                  <div className="absolute right-0 top-full z-30 mt-1 w-72 rounded-md border border-zinc-700 bg-zinc-900 p-2 shadow-lg">
+              <Popover open={showRunInput} onOpenChange={setShowRunInput}>
+                <PopoverTrigger className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-text-muted"><Variable size={14} />{tr('输入', 'Input')}</PopoverTrigger>
+                <PopoverContent align="end" className="w-72" aria-label={tr('手动触发输入', 'Manual trigger input')}>
                     <div className="mb-1 text-[11px] font-medium text-zinc-300">{tr('手动触发输入（JSON）', 'Manual trigger input (JSON)')}</div>
-                    <textarea
+                    <Textarea
                       value={runInputText}
                       onChange={(e) => setRunInputText(e.target.value)}
                       rows={4}
                       spellCheck={false}
                       placeholder={'{"host":"vm-1"}'}
-                      className="w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1 font-mono text-[11px] text-zinc-200 outline-none focus:border-zinc-600"
+                      className="w-full font-mono outline-none"
                     />
                     <div className="mt-1 text-[10px] leading-relaxed text-zinc-600">
                       {tr('运行时作为触发器载荷；节点用 {{trigger.字段}} 引用。', 'Used as the trigger payload at run time; reference it with {{trigger.<field>}}.')}
                     </div>
-                    {runInputErr && <div className="mt-1 text-[10px] text-red-400">{runInputErr}</div>}
-                  </div>
-                )}
-              </div>
+                    {runInputErr && <div className="mt-1 text-[10px] text-red-400">{runInputErr}</div>}                </PopoverContent>
+              </Popover>
             )}
-            <button
+            <Button variant="primary" size="sm"
               type="button"
               onClick={() => void onRun()}
-              className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-[12px] font-medium text-white transition-colors hover:bg-indigo-500"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 font-medium transition-colors"
             >
               <Play size={14} />
               {tr('运行', 'Run')}
-            </button>
+            </Button>
           </>
         )}
       </div>
@@ -849,24 +839,24 @@ export default function FlowEditorPage() {
             <div className="mb-2 flex items-center justify-between">
               <div className="text-[12px] font-medium uppercase tracking-wide text-zinc-500">{selected.data.flowType}</div>
               {canWrite && (
-                <button
+                <Button variant="dangerGhost" size="sm"
                   type="button"
                   onClick={removeSelected}
-                  className="rounded-md p-1 text-zinc-500 hover:bg-zinc-800 hover:text-red-400"
+                  className="p-1"
                 >
                   <Trash2 size={14} />
-                </button>
+                </Button>
               )}
             </div>
-            <label className="mb-3 block">
+            <Label className="mb-3 block">
               <span className="mb-1 block text-[12px] text-zinc-500">{tr('名称', 'Name')}</span>
-              <input
+              <Input
                 value={selected.data.label}
                 disabled={!canWrite}
                 onChange={(e) => patchSelected({ label: e.target.value })}
-                className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-[13px] text-zinc-200 outline-none focus:border-zinc-600"
+                className="w-full outline-none"
               />
-            </label>
+            </Label>
             {/* 工具介绍 — tool description (tool nodes only) */}
             {selected.data.flowType === 'tool' && (
               <>
@@ -962,17 +952,17 @@ export default function FlowEditorPage() {
             {canWrite && (selected.data.flowType === 'tool' || selected.data.flowType === 'llm' || selected.data.flowType === 'agent') && (
               <>
                 <SectionDivider label={tr('试跑', 'Test run')} />
-                <button
+                <Button variant="outline" size="sm"
                   type="button"
                   onClick={() => void runTest(selected)}
                   disabled={testing}
-                  className="inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-violet-700/60 bg-violet-950/30 px-2.5 py-1.5 text-[12px] font-medium text-violet-300 transition-colors hover:bg-violet-900/40 disabled:opacity-50"
+                  className="inline-flex w-full items-center justify-center gap-1.5 px-2.5 py-1.5 font-medium text-violet-300 transition-colors"
                 >
                   <Play size={13} />
                   {testing ? tr('试跑中…', 'Testing…') : tr('试跑此节点（看真实输出）', 'Test this node (see real output)')}
-                </button>
+                </Button>
                 {testErr && (
-                  <div title={testErr} className="mt-1 break-all rounded-md border border-red-900/50 bg-red-950/30 px-2 py-1 text-[11px] text-red-400">{friendlyFlowError(testErr, tr)}</div>
+                  <Hint content={testErr}><div  className="mt-1 break-all rounded-md border border-red-900/50 bg-red-950/30 px-2 py-1 text-[11px] text-red-400">{friendlyFlowError(testErr, tr)}</div></Hint>
                 )}
                 {!testErr && testOut[selected.id] !== undefined && (
                   <div className="mt-1 rounded-md border border-violet-900/40 bg-violet-950/20 p-2">
@@ -1027,7 +1017,7 @@ export default function FlowEditorPage() {
                       <span className="text-[12px] text-zinc-300">{n.node_name || nodeLabelByID.get(n.node_id) || n.node_id}</span>
                       <div className="flex items-center gap-1.5">
                         {n.fired_port && n.fired_port !== 'next' && (
-                          <span
+                          <Hint content={tr('该节点触发的输出端口', 'The output port this node fired')}><span
                             className={`rounded px-1 text-[9px] font-medium ${
                               n.fired_port === 'true'
                                 ? 'bg-emerald-900/40 text-emerald-400'
@@ -1035,27 +1025,27 @@ export default function FlowEditorPage() {
                                   ? 'bg-red-900/40 text-red-400'
                                   : 'bg-zinc-800 text-zinc-400'
                             }`}
-                            title={tr('该节点触发的输出端口', 'The output port this node fired')}
+
                           >
                             → {n.fired_port}
-                          </span>
+                          </span></Hint>
                         )}
                         <RunStatusChip status={n.status} />
                       </div>
                     </div>
                     {nodePageURL(n.output) && (
-                      <a
+                      <Hint content={tr('打开托管页面（私有，需登录）— 也可在 产物 里分享', 'Open the hosted page (private, login required) — or share it under Artifacts')}><a
                         href={nodePageURL(n.output) || '/pages'}
                         target="_blank"
                         rel="noreferrer"
                         onClick={(e) => e.stopPropagation()}
-                        title={tr('打开托管页面（私有，需登录）— 也可在 产物 里分享', 'Open the hosted page (private, login required) — or share it under Artifacts')}
+
                         className="mt-1.5 inline-flex items-center gap-1 rounded-md border border-indigo-500/40 bg-indigo-500/10 px-2 py-1 text-[11px] font-medium text-indigo-300 transition-colors hover:bg-indigo-500/20"
                       >
                         <ExternalLink size={11} /> {tr('打开生成的页面', 'Open the generated page')}
-                      </a>
+                      </a></Hint>
                     )}
-                    {n.error && <div title={n.error} className="mt-1 break-all text-[11px] text-red-400">{friendlyFlowError(n.error, tr)}</div>}
+                    {n.error && <Hint content={n.error}><div  className="mt-1 break-all text-[11px] text-red-400">{friendlyFlowError(n.error, tr)}</div></Hint>}
                     <details className="mt-1">
                       <summary className="cursor-pointer text-[11px] text-zinc-600">{tr('输入 / 输出', 'Input / output')}</summary>
                       <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-zinc-950 p-1.5 text-[10px] text-zinc-500">
@@ -1065,7 +1055,7 @@ export default function FlowEditorPage() {
                   </div>
                 ))}
                 {activeRun.run.error && (
-                  <div title={activeRun.run.error} className="rounded-md border border-red-900/50 bg-red-950/30 p-2 text-[11px] text-red-400">{friendlyFlowError(activeRun.run.error, tr)}</div>
+                  <Hint content={activeRun.run.error}><div  className="rounded-md border border-red-900/50 bg-red-950/30 p-2 text-[11px] text-red-400">{friendlyFlowError(activeRun.run.error, tr)}</div></Hint>
                 )}
               </div>
             )}
@@ -1108,9 +1098,9 @@ function ConfigField({
 
   if (spec.kind === 'json') {
     return (
-      <label className="mb-3 block">
+      <Label className="mb-3 block">
         <span className="mb-1 block text-[12px] text-zinc-500">{label}</span>
-        <textarea
+        <Textarea aria-invalid={Boolean(jsonErr)}
           value={jsonText}
           disabled={disabled}
           rows={4}
@@ -1130,25 +1120,23 @@ function ConfigField({
               setJsonErr(true);
             }
           }}
-          className={`w-full rounded-md border bg-zinc-950 px-2 py-1.5 font-mono text-[12px] text-zinc-200 outline-none focus:border-zinc-600 ${
-            jsonErr ? 'border-red-700' : 'border-zinc-800'
-          }`}
+          className="w-full font-mono"
         />
         {jsonErr && <span className="text-[11px] text-red-400">{tr('JSON 无效（未保存到节点）', 'Invalid JSON (not applied)')}</span>}
-      </label>
+      </Label>
     );
   }
   const common =
     'w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-[13px] text-zinc-200 outline-none focus:border-zinc-600';
   return (
-    <label className="mb-3 block">
+    <Label className="mb-3 block">
       <span className="mb-1 block text-[12px] text-zinc-500">{label}</span>
       {spec.kind === 'select' ? (
-        <select
+        <Select
           value={(value as string) ?? ''}
           disabled={disabled}
-          onChange={(e) => onChange(e.target.value || undefined)}
-          className={`${common} cursor-pointer`}
+          onValueChange={(selectedValue) => onChange(selectedValue || undefined)}
+          className="w-full"
         >
           <option value="">{spec.placeholder || tr('（默认）', '(default)')}</option>
           {(spec.options ?? []).map((o) => (
@@ -1156,9 +1144,9 @@ function ConfigField({
               {o}
             </option>
           ))}
-        </select>
+        </Select>
       ) : spec.kind === 'textarea' ? (
-        <textarea
+        <Textarea
           value={(value as string) ?? ''}
           disabled={disabled}
           rows={4}
@@ -1167,7 +1155,7 @@ function ConfigField({
           className={common}
         />
       ) : (
-        <input
+        <Input
           value={(value as string) ?? ''}
           disabled={disabled}
           placeholder={spec.placeholder}
@@ -1175,7 +1163,7 @@ function ConfigField({
           className={common}
         />
       )}
-    </label>
+    </Label>
   );
 }
 
@@ -1225,11 +1213,11 @@ function ToolPalette({
         </span>
       </div>
       <div className="px-2 py-1.5">
-        <input
+        <Input
           value={query}
           onChange={(e) => onQuery(e.target.value)}
           placeholder={tr('搜索工具…', 'Search tools…')}
-          className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 text-[12px] text-zinc-200 outline-none focus:border-zinc-600"
+          className="w-full outline-none"
         />
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-2">
@@ -1257,10 +1245,10 @@ function ToolPalette({
                 <span className="text-zinc-600">{byCat.get(cat)!.length}</span>
               </button>
               {!isCollapsed && byCat.get(cat)!.map((t) => (
-                <button
-                  key={t.name}
+                <Hint key={t.name} content={(locale === 'zh-CN' ? t.description_zh || t.description : t.description) + (t.when_to_use ? '\n\n' + t.when_to_use : '')}><button
+
                   type="button"
-                  title={(locale === 'zh-CN' ? t.description_zh || t.description : t.description) + (t.when_to_use ? '\n\n' + t.when_to_use : '')}
+
                   onClick={() => onPick(t)}
                   className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-[12px] text-zinc-300 transition-colors hover:bg-zinc-800"
                 >
@@ -1278,7 +1266,7 @@ function ToolPalette({
                       {t.class === 'destructive' ? tr('危', 'D') : tr('写', 'W')}
                     </span>
                   )}
-                </button>
+                </button></Hint>
               ))}
             </div>
             );
@@ -1424,7 +1412,7 @@ function ToolArgsForm({
           : type === 'number' || type === 'integer' ? `123  ${tr('或', 'or')}  {{…}}`
           : '{{…}}';
         return (
-          <label key={key} className="mb-3 block">
+          <Label key={key} className="mb-3 block">
             <div className="mb-1 flex items-center gap-1 text-[12px] text-zinc-500">
               <span className="font-mono text-zinc-400">{key}</span>
               {required.has(key) ? (
@@ -1444,11 +1432,11 @@ function ToolArgsForm({
               return desc ? <div className="mb-1 text-[11px] leading-snug text-zinc-600">{desc}</div> : null;
             })()}
             {isEnum ? (
-              <select
+              <Select label={key}
                 value={val}
                 disabled={disabled}
-                onChange={(e) => setArg(key, e.target.value, type)}
-                className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-[13px] text-zinc-200 outline-none focus:border-zinc-600"
+                onValueChange={(selectedValue) => setArg(key, selectedValue, type)}
+                className="w-full"
               >
                 <option value="">{tr('（不设置）', '(unset)')}</option>
                 {(spec.enum as unknown[]).map((o) => (
@@ -1456,33 +1444,33 @@ function ToolArgsForm({
                     {String(o)}
                   </option>
                 ))}
-              </select>
+              </Select>
             ) : isBool && !isTemplate ? (
-              <select
+              <Select label={key}
                 value={val}
                 disabled={disabled}
-                onChange={(e) => {
+                onValueChange={(selectedValue) => {
                   const next = { ...args };
-                  if (e.target.value === '') delete next[key];
-                  else next[key] = e.target.value === 'true';
+                  if (selectedValue === '') delete next[key];
+                  else next[key] = selectedValue === 'true';
                   onChange(next);
                 }}
-                className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-[13px] text-zinc-200 outline-none focus:border-zinc-600"
+                className="w-full"
               >
                 <option value="">{tr('（不设置）', '(unset)')}</option>
                 <option value="true">true</option>
                 <option value="false">false</option>
-              </select>
+              </Select>
             ) : (
-              <input
+              <Input
                 value={val}
                 disabled={disabled}
                 placeholder={ph}
                 onChange={(e) => setArg(key, e.target.value, type)}
-                className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-[12px] text-zinc-200 outline-none focus:border-zinc-600"
+                className="w-full font-mono outline-none"
               />
             )}
-          </label>
+          </Label>
         );
       })}
     </div>
@@ -1841,31 +1829,21 @@ function pickerRefsFrom(
 function VarPicker({ refs, onInsert }: { refs: PickerRef[]; onInsert: (ref: string) => void }) {
   const { tr } = useI18n();
   const [open, setOpen] = useState(false);
-  return (
-    <div className="relative shrink-0">
-      <button
-        type="button"
-        title={tr('插入上游变量', 'Insert upstream variable')}
-        onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-0.5 rounded border border-zinc-800 bg-zinc-900 px-1 py-0.5 text-[9px] text-zinc-500 transition-colors hover:border-zinc-700 hover:text-indigo-400"
-      >
-        <Braces size={10} />
-        {tr('引用', 'ref')}
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-20 mt-1 max-h-56 w-60 overflow-auto rounded-md border border-zinc-700 bg-zinc-900 p-1 shadow-xl">
+  return <DropdownMenu open={open} onOpenChange={setOpen}>
+    <Hint content={tr('插入上游变量', 'Insert upstream variable')}><DropdownMenuTrigger  className="inline-flex shrink-0 items-center gap-0.5 rounded border border-border bg-card px-1 py-0.5 text-[11px] text-text-muted">
+      <Braces size={10} />{tr('引用', 'ref')}
+    </DropdownMenuTrigger></Hint>
+    <DropdownMenuContent align="end" className="max-h-56 w-60">
             {refs.length === 0 ? (
               <div className="px-2 py-1.5 text-[11px] text-zinc-600">
                 {tr('无上游变量——先把上游节点连进来', 'No upstream variables — wire an upstream node in first')}
               </div>
             ) : (
               refs.map((r) => (
-                <button
-                  key={r.ref}
-                  type="button"
-                  title={r.ref}
+                <Hint key={r.ref} content={r.ref}><DropdownMenuItem
+
+
+
                   onClick={() => {
                     onInsert(r.ref);
                     setOpen(false);
@@ -1874,14 +1852,10 @@ function VarPicker({ refs, onInsert }: { refs: PickerRef[]; onInsert: (ref: stri
                 >
                   <span className="text-zinc-500">{r.nodeLabel} › </span>
                   {r.fieldLabel}
-                </button>
+                </DropdownMenuItem></Hint>
               ))
-            )}
-          </div>
-        </>
-      )}
-    </div>
-  );
+            )}    </DropdownMenuContent>
+  </DropdownMenu>;
 }
 
 function UpstreamRefs({
@@ -1942,10 +1916,10 @@ function UpstreamRefs({
                 const label = friendlyFieldLabel(e.path, locale);
                 const preview = u.live ? previewValue(e.value) : '';
                 return (
-                  <button
-                    key={e.path}
+                  <Hint key={e.path} content={`${label}\n${e.path}\n${ref}${preview ? `\n= ${preview}` : ''}`}><Button variant="outline" size="sm"
+
                     type="button"
-                    title={`${label}\n${e.path}\n${ref}${preview ? `\n= ${preview}` : ''}`}
+
                     onClick={() => onCopy(ref)}
                     className={`max-w-full truncate rounded border px-1 py-0.5 text-[10px] transition-colors ${
                       copied === ref
@@ -1955,7 +1929,7 @@ function UpstreamRefs({
                   >
                     {label}
                     {preview ? <span className="ml-1 font-mono text-[9px] text-zinc-500">= {preview}</span> : null}
-                  </button>
+                  </Button></Hint>
                 );
               })}
             </div>
@@ -1984,13 +1958,13 @@ function ReferencedData({ config, nodes }: { config: Record<string, unknown>; no
       <div className="mb-1 text-[11px] font-medium text-indigo-300/90">{tr('本节点引用了', 'This node references')}</div>
       <div className="flex flex-wrap gap-1">
         {items.map((it) => (
-          <span
-            key={it.ref}
-            title={it.ref}
+          <Hint key={it.ref} content={it.ref}><span
+
+
             className="rounded border border-indigo-900/50 bg-indigo-950/30 px-1.5 py-0.5 text-[10px] text-indigo-200"
           >
             {it.friendly}
-          </span>
+          </span></Hint>
         ))}
       </div>
     </div>
@@ -2069,10 +2043,10 @@ function SelfOutputRefs({
           const label = friendlyFieldLabel(e.path, locale);
           const preview = hasValues ? previewValue(e.value) : '';
           return (
-            <button
-              key={e.path}
+            <Hint key={e.path} content={`${label}\n${e.path}\n${ref}${preview ? `\n= ${preview}` : ''}`}><Button variant="outline" size="sm"
+
               type="button"
-              title={`${label}\n${e.path}\n${ref}${preview ? `\n= ${preview}` : ''}`}
+
               onClick={() => onCopy(ref)}
               className={`max-w-full truncate rounded border px-1 py-0.5 text-[10px] transition-colors ${
                 copied === ref
@@ -2082,7 +2056,7 @@ function SelfOutputRefs({
             >
               {label}
               {preview ? <span className="ml-1 font-mono text-[9px] text-zinc-500">= {preview}</span> : null}
-            </button>
+            </Button></Hint>
           );
         })}
       </div>

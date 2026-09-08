@@ -1,3 +1,6 @@
+import { Button, Input, Textarea, Label } from '@/components/ui';
+import { Hint } from '@/components/ui/Tooltip';
+import { Select } from '@/components/ui/Select';
 import { useEffect, useState } from 'react';
 import { Modal } from './Modal';
 import { NLQueryHelper } from './NLQueryHelper';
@@ -102,52 +105,52 @@ export function MonitorPanelModal({ open, panel, onClose, onSubmit }: MonitorPan
       title={isEdit ? tr('编辑面板', 'Edit panel') : tr('添加面板', 'Add panel')}
       footer={
         <>
-          <button
+          <Button variant="outline" size="sm"
             type="button"
             onClick={onClose}
-            className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-200 hover:border-zinc-500 hover:bg-zinc-800"
+            className="px-3 py-1.5"
           >
             {tr('取消', 'Cancel')}
-          </button>
-          <button
+          </Button>
+          <Button variant="outline" size="sm"
             type="submit"
             form="monitor-panel-form"
             disabled={submitting}
-            className="rounded-lg border border-emerald-600 bg-emerald-600/20 px-3 py-1.5 text-xs text-emerald-200 hover:bg-emerald-600/30 disabled:opacity-50"
+            className="px-3 py-1.5 text-emerald-200"
           >
             {submitting ? tr('保存中…', 'Saving…') : tr('保存', 'Save')}
-          </button>
+          </Button>
         </>
       }
     >
       <form id="monitor-panel-form" onSubmit={handleSubmit} className="space-y-4">
         <Field label={tr('标题', 'Title')}>
-          <input
+          <Input
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder={tr('如 入站流量 / 业务 QPS', 'e.g. Inbound traffic / Service QPS')}
-            className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full"
           />
         </Field>
 
         <Field label={tr('类型', 'Type')}>
-          <select
+          <Select label={tr('类型', 'Type')}
             value={type}
-            onChange={(e) => setType(e.target.value as MonitorPanelType)}
-            className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            onValueChange={(selectedValue) => setType(selectedValue as MonitorPanelType)}
+            className="w-full"
           >
             {TYPE_OPTIONS.map((o) => (
               <option key={o.value} value={o.value} className="bg-zinc-900">
                 {o.label}
               </option>
             ))}
-          </select>
+          </Select>
         </Field>
 
         <Field label={tr('PromQL 查询', 'PromQL query')}>
           <div className="flex items-start gap-1.5">
-            <textarea
+            <Textarea
               value={promql}
               onChange={(e) => setPromql(e.target.value)}
               autoFocus
@@ -156,7 +159,7 @@ export function MonitorPanelModal({ open, panel, onClose, onSubmit }: MonitorPan
                 '示例: sum by (device_id) (rate(node_network_receive_bytes_total[5m]))',
                 'e.g. sum by (device_id) (rate(node_network_receive_bytes_total[5m]))',
               )}
-              className="w-full resize-y rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 font-mono text-[12px] text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              className="w-full resize-y font-mono"
             />
             <NLQueryHelper
               dialect="promql"
@@ -169,26 +172,26 @@ export function MonitorPanelModal({ open, panel, onClose, onSubmit }: MonitorPan
           <div className="mt-2 flex flex-wrap gap-1.5">
             <span className="text-[11px] text-zinc-500">{tr('模板:', 'Templates:')}</span>
             {PROMQL_TEMPLATES.map((t) => (
-              <button
-                key={t.label}
+              <Hint key={t.label} content={t.query}><Button variant="outline" size="sm"
+
                 type="button"
-                title={t.query}
+
                 onClick={() => setPromql(t.query)}
-                className="rounded-full border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-300 hover:border-zinc-500 hover:bg-zinc-800"
+                className="px-2 py-0.5"
               >
                 {t.label}
-              </button>
+              </Button></Hint>
             ))}
           </div>
         </Field>
 
         <Field label={tr('图例 (legend)', 'Legend (legend)')}>
-          <input
+          <Input
             type="text"
             value={legend}
             onChange={(e) => setLegend(e.target.value)}
             placeholder={tr('示例: {{device_id}} / {{instance}}（留空则按 series 自动）', 'e.g. {{device_id}} / {{instance}} (empty = auto by series)')}
-            className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full"
           />
           <p className="mt-1 text-[11px] text-zinc-500">
             {tr('支持 ', 'Supports ')}{'{{label}}'}{tr(' 占位符，与 Grafana 一致。', ' placeholder, same as Grafana.')}
@@ -196,17 +199,17 @@ export function MonitorPanelModal({ open, panel, onClose, onSubmit }: MonitorPan
         </Field>
 
         <Field label={tr('单位', 'Unit')}>
-          <select
+          <Select label={tr('单位', 'Unit')}
             value={unit}
-            onChange={(e) => setUnit(e.target.value)}
-            className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            onValueChange={(selectedValue) => setUnit(selectedValue)}
+            className="w-full"
           >
             {UNIT_OPTIONS.map((o) => (
               <option key={o.value} value={o.value} className="bg-zinc-900">
                 {o.label}
               </option>
             ))}
-          </select>
+          </Select>
         </Field>
 
         {errMsg && (
@@ -224,11 +227,11 @@ export function MonitorPanelModal({ open, panel, onClose, onSubmit }: MonitorPan
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label className="block">
+    <Label className="block">
       <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-zinc-400">
         {label}
       </span>
       {children}
-    </label>
+    </Label>
   );
 }

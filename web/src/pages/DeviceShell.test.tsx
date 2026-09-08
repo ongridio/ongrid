@@ -98,7 +98,7 @@ describe('ConnectModal', () => {
     fireEvent.change(within(dialog).getByLabelText('OS 用户'), { target: { value: 'tester' } });
     fireEvent.change(within(dialog).getByLabelText('SSH 端口'), { target: { value: '2222' } });
     fireEvent.change(within(dialog).getByLabelText('密码'), { target: { value: 'secret' } });
-    fireEvent.click(within(dialog).getByLabelText('保存此账户，下次可直接登录'));
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: '保存此账户，下次可直接登录' }));
     expect(within(dialog).queryByText('凭据名称')).not.toBeInTheDocument();
     expect(within(dialog).getByText('连接目标固定为设备本机 127.0.0.1，可使用任意有效 SSH 端口。')).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: '连接' }));
@@ -132,12 +132,12 @@ describe('ConnectModal', () => {
     renderShell();
 
     fireEvent.change(await screen.findByLabelText('密码'), { target: { value: 'secret' } });
-    fireEvent.click(screen.getByLabelText('保存此账户，下次可直接登录'));
+    fireEvent.click(screen.getByRole('checkbox', { name: '保存此账户，下次可直接登录' }));
     fireEvent.click(screen.getByRole('button', { name: '连接' }));
     await waitFor(() => expect(openShellSocket).toHaveBeenCalledWith('42', 'test-ticket'));
     expect(ticketBody).toMatchObject({ ssh_user: 'root', ssh_pass: 'secret', ssh_port: 22, save_credential: true });
 
-    act(() => socket.onmessage?.({ data: JSON.stringify({ type: 'ready' }) } as MessageEvent));
+    await act(async () => { await socket.onmessage?.({ data: JSON.stringify({ type: 'ready' }) } as MessageEvent); });
     expect(screen.queryByText(/保存账户失败/)).not.toBeInTheDocument();
   });
 
@@ -162,16 +162,36 @@ describe('ConnectModal', () => {
     renderShell();
 
     fireEvent.change(await screen.findByLabelText('密码'), { target: { value: 'wrong' } });
-    fireEvent.click(screen.getByLabelText('保存此账户，下次可直接登录'));
+    fireEvent.click(screen.getByRole('checkbox', { name: '保存此账户，下次可直接登录' }));
     fireEvent.click(screen.getByRole('button', { name: '连接' }));
     await waitFor(() => expect(openShellSocket).toHaveBeenCalledWith('42', 'test-ticket'));
 
-    act(() => socket.onmessage?.({
+    await act(async () => { await socket.onmessage?.({
       data: JSON.stringify({ type: 'auth_error', message: '用户名或密码错误' }),
-    } as MessageEvent));
+    } as MessageEvent); });
 
     expect(await screen.findByText('SSH 认证失败：用户名或密码错误')).toBeInTheDocument();
     expect(ticketBody).toMatchObject({ save_credential: true });
+  });
+
+  it('信任主机指纹时允许原连接先关闭，并用原输入重新申请票据', async () => {
+    const tickets: unknown[] = [];
+    server.use(http.post('/api/v1/devices/42/shell/tickets', async ({ request }) => {
+      tickets.push(await request.json());
+      return HttpResponse.json({ ticket: 'test-ticket', expires_at: '2026-09-04T00:00:30Z' });
+    }));
+    const socket = { readyState: WebSocket.OPEN, send: vi.fn(), close: vi.fn() } as unknown as WebSocket;
+    openShellSocket.mockReturnValue(socket);
+    renderShell();
+    fireEvent.change(await screen.findByLabelText('密码'), { target: { value: 'secret' } });
+    fireEvent.click(screen.getByRole('button', { name: '连接' }));
+    await waitFor(() => expect(openShellSocket).toHaveBeenCalledOnce());
+    act(() => { void socket.onmessage?.({ data: JSON.stringify({ type: 'host_key_unknown', fingerprint: 'SHA256:test' }) } as MessageEvent); });
+    expect(await screen.findByRole('dialog', { name: '确认操作' })).toHaveTextContent('SHA256:test');
+    act(() => { socket.onclose?.({ code: 1000 } as CloseEvent); });
+    fireEvent.click(screen.getByRole('button', { name: '确认' }));
+    await waitFor(() => expect(tickets).toHaveLength(2));
+    expect(tickets[1]).toMatchObject({ ssh_pass: 'secret', accept_host_key: 'SHA256:test' });
   });
 
   it('最外层 SSH 会话退出后离开终端页', async () => {
@@ -192,19 +212,23 @@ describe('ConnectModal', () => {
     fireEvent.click(screen.getByRole('button', { name: '连接' }));
     await waitFor(() => expect(openShellSocket).toHaveBeenCalledWith('42', 'test-ticket'));
 
-    act(() => socket.onmessage?.({
+    await act(async () => { await socket.onmessage?.({
       data: JSON.stringify({ type: 'exit', exit_code: 0 }),
-    } as MessageEvent));
+    } as MessageEvent); });
 
     expect(close).toHaveBeenCalledOnce();
     expect(await screen.findByText('设备列表页')).toBeInTheDocument();
   });
 
-  it('点击关闭直接离开终端页', () => {
+  it('点击关闭直接离开终端页', async () => {
+    openShellSocket.mockReturnValue({ close: vi.fn(), send: vi.fn(), readyState: WebSocket.CONNECTING });
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
     const close = vi.spyOn(window, 'close').mockImplementation(() => {});
     renderShell();
 
+    fireEvent.change(await screen.findByLabelText('密码'), { target: { value: 'secret' } });
+    fireEvent.click(screen.getByRole('button', { name: '连接' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: '关闭终端' }));
 
     expect(confirm).not.toHaveBeenCalled();

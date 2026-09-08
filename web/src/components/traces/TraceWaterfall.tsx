@@ -1,3 +1,5 @@
+import { Label, Input } from '@/components/ui';
+import { Hint } from '@/components/ui/Tooltip';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
@@ -126,12 +128,12 @@ export function TraceWaterfall({ trace, traceId, fallbackService, fallbackName }
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
             <span className={cn('h-2 w-2 shrink-0 rounded-full', model.errorCount ? 'bg-red-500' : 'bg-zinc-500')} />
-            <h2 className="truncate font-mono text-sm font-medium text-zinc-100" title={name}>{name}</h2>
+            <Hint content={name}><h2 className="truncate font-mono text-sm font-medium text-zinc-100" >{name}</h2></Hint>
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-zinc-500">
             <span>{service}</span>
             <span>·</span>
-            <span className="font-mono" title={traceId}>{shortId(traceId)}</span>
+            <Hint content={traceId}><span className="font-mono" >{shortId(traceId)}</span></Hint>
             <CopyValueButton value={traceId} label={tr('复制 trace_id', 'Copy trace_id')} />
           </div>
         </div>
@@ -142,29 +144,29 @@ export function TraceWaterfall({ trace, traceId, fallbackService, fallbackName }
           {model.errorCount > 0 && (
             <Chip tone="danger">{tr(`${model.errorCount} 个错误`, `${model.errorCount} errors`)}</Chip>
           )}
-          <Button
+          <Hint content={isFullscreen ? tr('退出全屏', 'Exit fullscreen') : tr('最大化链路工作区', 'Maximize trace workspace')}><Button
             onClick={toggleFullscreen}
             aria-pressed={isFullscreen}
-            title={isFullscreen ? tr('退出全屏', 'Exit fullscreen') : tr('最大化链路工作区', 'Maximize trace workspace')}
+
           >
             {isFullscreen ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
             {isFullscreen ? tr('退出全屏', 'Exit fullscreen') : tr('最大化', 'Maximize')}
-          </Button>
+          </Button></Hint>
         </div>
       </Card>
 
       <section className="overflow-hidden rounded-xl border border-zinc-800/60 bg-zinc-900/40">
         <div className="flex flex-wrap items-center gap-2 border-b border-zinc-800/60 px-3 py-2.5">
-          <label className="relative min-w-56 flex-1">
+          <Label className="relative min-w-56 flex-1">
             <Search size={12} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
-            <input
+            <Input
               value={filterText}
               onChange={(event) => setFilterText(event.target.value)}
               aria-label={tr('搜索 Span', 'Search spans')}
               placeholder={tr('搜索 Span、服务或 Span ID', 'Search span, service, or span ID')}
-              className="h-8 w-full rounded-md border border-zinc-800 bg-zinc-950 pl-8 pr-2 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none"
+              className="w-full pl-8 pr-2"
             />
-          </label>
+          </Label>
           <Button
             aria-pressed={errorsOnly}
             onClick={() => setErrorsOnly((value) => !value)}
@@ -172,15 +174,15 @@ export function TraceWaterfall({ trace, traceId, fallbackService, fallbackName }
           >
             <AlertTriangle size={12} /> {tr('只看错误', 'Errors only')}
           </Button>
-          <Button onClick={() => setCollapsedKeys(new Set())} title={tr('展开全部 Span', 'Expand all spans')}>
+          <Hint content={tr('展开全部 Span', 'Expand all spans')}><Button onClick={() => setCollapsedKeys(new Set())} >
             <ListTree size={12} /> {tr('展开全部', 'Expand all')}
-          </Button>
-          <Button
+          </Button></Hint>
+          <Hint content={tr('折叠所有父 Span', 'Collapse all parent spans')}><Button
             onClick={() => setCollapsedKeys(new Set(model.spans.filter((span) => span.children.length > 0).map((span) => span.key)))}
-            title={tr('折叠所有父 Span', 'Collapse all parent spans')}
+
           >
             {tr('折叠全部', 'Collapse all')}
-          </Button>
+          </Button></Hint>
           <span className="ml-auto text-[11px] text-zinc-500">
             {tr(`显示 ${visible.length}/${model.spans.length}`, `${visible.length}/${model.spans.length} shown`)}
           </span>
@@ -217,14 +219,14 @@ export function TraceWaterfall({ trace, traceId, fallbackService, fallbackName }
                   <div className="flex min-w-0 items-center border-r border-zinc-800/60 px-2 py-1.5">
                     <span className="shrink-0" style={{ width: depth * 14 }} aria-hidden="true" />
                     {node.children.length > 0 ? (
-                      <button
+                      <Button variant="subtle" size="sm"
                         type="button"
                         onClick={() => toggleCollapsed(node.key)}
-                        className="mr-1 rounded p-0.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+                        className="mr-1 p-0.5"
                         aria-label={collapsed ? tr('展开子 Span', 'Expand child spans') : tr('折叠子 Span', 'Collapse child spans')}
                       >
                         {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
-                      </button>
+                      </Button>
                     ) : (
                       <span className="mr-1 w-[16px] shrink-0" />
                     )}
@@ -235,8 +237,8 @@ export function TraceWaterfall({ trace, traceId, fallbackService, fallbackName }
                     >
                       <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', isErrorStatus(node.statusCode) ? 'bg-red-500' : 'bg-zinc-500')} />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate font-mono text-zinc-200" title={node.name}>{node.name}</span>
-                        <span className="block truncate text-[10px] text-zinc-500" title={spanServiceLabel(node)}>{spanServiceLabel(node)}</span>
+                        <Hint content={node.name}><span className="block truncate font-mono text-zinc-200" >{node.name}</span></Hint>
+                        <Hint content={spanServiceLabel(node)}><span className="block truncate text-[10px] text-zinc-500" >{spanServiceLabel(node)}</span></Hint>
                       </span>
                       <span className="shrink-0 font-mono text-[10px] text-zinc-400">{formatDuration(node.durationMs)}</span>
                     </button>
@@ -255,14 +257,14 @@ export function TraceWaterfall({ trace, traceId, fallbackService, fallbackName }
                         aria-hidden="true"
                       />
                     ))}
-                    <span
+                    <Hint content={`${node.name} · ${formatDuration(node.durationMs)}`}><span
                       className={cn(
                         'absolute top-1/2 h-3 -translate-y-1/2 rounded-sm',
                         active ? 'bg-indigo-500' : isErrorStatus(node.statusCode) ? 'bg-red-500' : 'bg-sky-500/70',
                       )}
                       style={spanBarStyle(node, model)}
-                      title={`${node.name} · ${formatDuration(node.durationMs)}`}
-                    />
+
+                    /></Hint>
                   </button>
                 </div>
               );
@@ -285,7 +287,7 @@ function SpanDetails({ span, traceStartMs }: { span: TraceSpanNode; traceStartMs
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className={cn('h-2 w-2 rounded-full', isErrorStatus(span.statusCode) ? 'bg-red-500' : 'bg-zinc-500')} />
-            <h3 className="truncate font-mono text-sm font-medium text-zinc-100" title={span.name}>{span.name}</h3>
+            <Hint content={span.name}><h3 className="truncate font-mono text-sm font-medium text-zinc-100" >{span.name}</h3></Hint>
           </div>
           <p className="mt-1 text-[11px] text-zinc-500">{spanServiceLabel(span)}</p>
         </div>
@@ -351,7 +353,7 @@ function DetailRow({ label, value, copy }: { label: string; value: string; copy?
     <div className="grid grid-cols-[104px_minmax(0,1fr)] gap-2 px-3 py-2">
       <dt className="text-zinc-500">{label}</dt>
       <dd className="flex min-w-0 items-center gap-1 font-mono text-zinc-300">
-        <span className="truncate" title={value}>{value}</span>
+        <Hint content={value}><span className="truncate" >{value}</span></Hint>
         {copy && <CopyValueButton value={copy} label={`Copy ${label}`} />}
       </dd>
     </div>
@@ -367,7 +369,7 @@ function AttributeList({ title, attributes }: { title: string; attributes: OtlpA
           <div className="px-3 py-5 text-center text-zinc-500">-</div>
         ) : attributes.map((attribute) => (
           <div key={attribute.key} className="grid grid-cols-[minmax(110px,34%)_minmax(0,1fr)] gap-2 px-3 py-1.5">
-            <dt className="truncate font-mono text-zinc-500" title={attribute.key}>{attribute.key}</dt>
+            <Hint content={attribute.key}><dt className="truncate font-mono text-zinc-500" >{attribute.key}</dt></Hint>
             <dd className="break-all font-mono text-zinc-300">{attributeValue(attribute)}</dd>
           </div>
         ))}
@@ -379,7 +381,7 @@ function AttributeList({ title, attributes }: { title: string; attributes: OtlpA
 function CopyValueButton({ value, label }: { value: string; label: string }) {
   const [copied, setCopied] = useState(false);
   return (
-    <button
+    <Hint content={label}><Button variant="subtle" size="sm"
       type="button"
       onClick={() => {
         void navigator.clipboard.writeText(value).then(() => {
@@ -387,12 +389,12 @@ function CopyValueButton({ value, label }: { value: string; label: string }) {
           window.setTimeout(() => setCopied(false), 1200);
         });
       }}
-      className="shrink-0 rounded p-0.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
-      title={label}
+      className="shrink-0 p-0.5"
+
       aria-label={label}
     >
       {copied ? <Check size={10} /> : <Copy size={10} />}
-    </button>
+    </Button></Hint>
   );
 }
 

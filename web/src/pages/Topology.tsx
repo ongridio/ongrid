@@ -1,3 +1,10 @@
+import { FilterField } from '@/components/ui/FilterField';
+import { Input, Textarea, Label } from '@/components/ui';
+import { useDialogs } from '@/components/ui/useDialogs';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/Popover';
+import { Checkbox } from '@/components/ui/Checkbox';
+import { Select } from '@/components/ui/Select';
 // Topology page. MVP scope: nodes list + filter +
 // search, click-to-detail showing the node's neighbors + props, and
 // the relation-type registry where admins register custom kinds.
@@ -47,7 +54,7 @@ export default function TopologyPage() {
   const { tr } = useI18n();
 
   return (
-    <main className="anim-fade flex flex-1 flex-col overflow-hidden">
+    <Tabs value={tab} onValueChange={setTab} className="contents"><main className="anim-fade flex flex-1 flex-col overflow-hidden">
       <PageHeader
         title={
           <span className="inline-flex items-center gap-2">
@@ -60,55 +67,32 @@ export default function TopologyPage() {
           'Business graph: nodes / relations / types',
         )}
         extra={
-          <div className="flex items-center gap-1.5 text-xs">
-            <TabButton active={tab === 'graph'} onClick={() => setTab('graph')}>
+          <TabsList className="flex items-center gap-1.5 text-xs">
+            <TabsTrigger  value={'graph'}>
               {tr('图谱', 'Graph')}
-            </TabButton>
-            <TabButton active={tab === 'nodes'} onClick={() => setTab('nodes')}>
+            </TabsTrigger>
+            <TabsTrigger  value={'nodes'}>
               {tr('节点 + 关系', 'Nodes + relations')}
-            </TabButton>
-            <TabButton active={tab === 'relation-types'} onClick={() => setTab('relation-types')}>
+            </TabsTrigger>
+            <TabsTrigger  value={'relation-types'}>
               {tr('类型管理', 'Types')}
-            </TabButton>
-          </div>
+            </TabsTrigger>
+          </TabsList>
         }
       />
-      {tab === 'graph' && <GraphTab isAdmin={isAdmin} />}
+      <TabsContent value={tab} className="contents">{tab === 'graph' && <GraphTab isAdmin={isAdmin} />}
       {tab === 'nodes' && <NodesTab isAdmin={isAdmin} />}
       {tab === 'relation-types' && (
         <div className="flex flex-1 flex-col overflow-auto">
           <NodeTypesPanel isAdmin={isAdmin} />
           <RelationTypesTab isAdmin={isAdmin} />
         </div>
-      )}
-    </main>
+      )}</TabsContent>
+    </main></Tabs>
   );
 }
 
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        'rounded-md border px-2.5 py-1 transition-colors',
-        active
-          ? 'border-zinc-600 bg-zinc-800 text-zinc-100'
-          : 'border-zinc-800 bg-zinc-900/40 text-zinc-400 hover:bg-zinc-900',
-      )}
-    >
-      {children}
-    </button>
-  );
-}
+
 
 function FilterChip({
   active,
@@ -120,7 +104,7 @@ function FilterChip({
   children: React.ReactNode;
 }) {
   return (
-    <button
+    <Button variant="plain" size="sm"
       type="button"
       onClick={onClick}
       className={cn(
@@ -136,7 +120,7 @@ function FilterChip({
       )}
     >
       {children}
-    </button>
+    </Button>
   );
 }
 
@@ -221,7 +205,7 @@ function NodesTab({ isAdmin }: { isAdmin: boolean }) {
   return (
     <div className="flex flex-1 overflow-hidden">
       <div className="flex flex-1 flex-col overflow-hidden">
-        <div className="flex items-center gap-2 border-b border-zinc-800/60 px-6 py-3">
+        <div className="flex flex-wrap items-center gap-2 border-b border-zinc-800/60 px-6 py-3">
           <div className="flex flex-wrap items-center gap-1.5">
             {typeChips.map((c) => (
               <FilterChip
@@ -235,11 +219,11 @@ function NodesTab({ isAdmin }: { isAdmin: boolean }) {
           </div>
           <div className="relative ml-2 flex-1 max-w-xs">
             <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
-            <input
+            <Input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={tr('按 name 搜索', 'Search by name')}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-900/40 py-1.5 pl-7 pr-2.5 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none"
+              className="w-full pl-7 pr-2.5"
             />
           </div>
           <div className="ml-auto flex items-center gap-1.5">
@@ -362,6 +346,7 @@ function NodeDetailDrawer({
   onClose: () => void;
   onChanged: () => void;
 }) {
+  const { confirmAction, alertAction, dialog } = useDialogs();
   const { tr } = useI18n();
   const [neighbors, setNeighbors] = useState<TopologyRelation[]>([]);
   const [nodeMap, setNodeMap] = useState<Map<number, TopologyNode>>(new Map());
@@ -405,24 +390,24 @@ function NodeDetailDrawer({
   }, [fetchNeighbors]);
 
   const handleDeleteNode = async () => {
-    if (!window.confirm(tr(
+    if (!(await confirmAction(tr(
       `确认删除节点 "${node.name}"？请先确保已无关系引用。`,
       `Delete node "${node.name}"? Make sure no relations reference it first.`,
-    ))) return;
+    )))) return;
     setBusy(true);
     try {
       await deleteNode(node.id);
       onChanged();
       onClose();
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : (e as Error).message);
+      (await alertAction(e instanceof ApiError ? e.message : (e as Error).message));
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <aside className="flex w-96 shrink-0 flex-col border-l border-zinc-800/60 bg-zinc-950/40">
+    <>{dialog}<aside className="flex w-96 shrink-0 flex-col border-l border-zinc-800/60 bg-zinc-950/40">
       <div className="flex items-start justify-between gap-2 border-b border-zinc-800/60 px-4 py-3">
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold text-zinc-100">{node.name}</div>
@@ -431,14 +416,14 @@ function NodeDetailDrawer({
             <span className="ml-1.5">#{node.id}</span>
           </div>
         </div>
-        <button
+        <Button variant="subtle" size="sm"
           type="button"
           onClick={onClose}
-          className="rounded-md p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+          className="p-1"
           aria-label={tr('关闭', 'Close')}
         >
           <X size={14} />
-        </button>
+        </Button>
       </div>
       <div className="flex-1 overflow-auto px-4 py-3">
         {node.props && typeof node.props === 'object' && Object.keys(node.props).length > 0 && (
@@ -456,13 +441,13 @@ function NodeDetailDrawer({
             {tr(`关系（${neighbors.length}）`, `Relations (${neighbors.length})`)}
           </div>
           {isAdmin && (
-            <button
+            <Button variant="outline" size="sm"
               type="button"
               onClick={() => setAddingRelation(true)}
-              className="inline-flex items-center gap-1 rounded-md border border-zinc-800 px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800"
+              className="inline-flex items-center gap-1 px-2 py-0.5"
             >
               <Plus size={10} /> {tr('添加', 'Add')}
-            </button>
+            </Button>
           )}
         </div>
         {err && (
@@ -518,7 +503,7 @@ function NodeDetailDrawer({
           }}
         />
       )}
-    </aside>
+    </aside></>
   );
 }
 
@@ -535,21 +520,22 @@ function NeighborRow({
   isAdmin: boolean;
   onDeleted: () => void;
 }) {
+  const { confirmAction, alertAction, dialog } = useDialogs();
   const { tr } = useI18n();
   const outgoing = rel.src_id === centerID;
   const arrow = outgoing ? '→' : '←';
   const otherID = outgoing ? rel.dst_id : rel.src_id;
   const handleDelete = async () => {
-    if (!window.confirm(tr('删除这条关系？', 'Delete this relation?'))) return;
+    if (!(await confirmAction(tr('删除这条关系？', 'Delete this relation?')))) return;
     try {
       await deleteRelation(rel.id);
       onDeleted();
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : (e as Error).message);
+      (await alertAction(e instanceof ApiError ? e.message : (e as Error).message));
     }
   };
   return (
-    <li className="rounded-md border border-zinc-800/60 bg-zinc-900/30 px-2.5 py-1.5">
+    <>{dialog}<li className="rounded-md border border-zinc-800/60 bg-zinc-900/30 px-2.5 py-1.5">
       <div className="flex items-center gap-2 text-[11px]">
         <span className="font-mono text-zinc-500">{arrow}</span>
         <span className="rounded bg-zinc-800 px-1 py-0.5 font-mono text-zinc-300">{rel.type}</span>
@@ -560,17 +546,17 @@ function NeighborRow({
           )}
         </span>
         {isAdmin && (
-          <button
+          <Button variant="dangerGhost" size="sm"
             type="button"
             onClick={handleDelete}
-            className="rounded p-0.5 text-zinc-500 hover:bg-zinc-800 hover:text-red-300"
+            className="p-0.5"
             aria-label={tr('删除关系', 'Delete relation')}
           >
             <Trash2 size={11} />
-          </button>
+          </Button>
         )}
       </div>
-    </li>
+    </li></>
   );
 }
 
@@ -675,17 +661,17 @@ function CreateNodeModal({
           </div>
         )}
         <Field label={tr('类型', 'Type')}>
-          <select
+          <Select label={tr('类型', 'Type')}
             value={registeringType ? '__new__' : type}
-            onChange={(e) => {
-              if (e.target.value === '__new__') {
+            onValueChange={(selectedValue) => {
+              if (selectedValue === '__new__') {
                 setRegisteringType(true);
               } else {
                 setRegisteringType(false);
-                setType(e.target.value);
+                setType(selectedValue);
               }
             }}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-900/60 px-2 py-1.5 text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full"
           >
             {nodeTypes.filter((nt) => !isDomainManagedNodeType(nt.name)).map((nt) => (
               <option key={nt.name} value={nt.name}>
@@ -693,58 +679,58 @@ function CreateNodeModal({
               </option>
             ))}
             <option value="__new__">{tr('+ 新建类型…', '+ New type…')}</option>
-          </select>
+          </Select>
         </Field>
         {registeringType && (
           <div className="space-y-2 rounded-md border border-indigo-500/30 bg-indigo-500/5 px-3 py-2">
             <div className="text-[11px] font-medium text-indigo-300">{tr('新建节点类型', 'New node type')}</div>
             <Field label={tr('name（snake_case，AIOps 用）', 'name (snake_case, AIOps key)')}>
-              <input
+              <Input
                 value={newTypeName}
                 onChange={(e) => setNewTypeName(e.target.value)}
                 placeholder={tr('如 vm', 'e.g. vm')}
-                className="w-full rounded-md border border-zinc-800 bg-zinc-900/60 px-2 py-1.5 font-mono text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                className="w-full font-mono"
               />
             </Field>
             <Field label={tr('display_name（chip 上显示的中文 / i18n 标签）', 'display_name (chip label, any language)')}>
-              <input
+              <Input
                 value={newTypeDisplay}
                 onChange={(e) => setNewTypeDisplay(e.target.value)}
                 placeholder={tr('如 虚拟机', 'e.g. VM')}
-                className="w-full rounded-md border border-zinc-800 bg-zinc-900/60 px-2 py-1.5 text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                className="w-full"
               />
             </Field>
             <Field
               label={tr('层级（0=顶层应用，4=机架；不知道填 99 = 单独成行）', 'Tier (0=top app, 4=rack; 99 = standalone row)')}
             >
-              <input
+              <Input
                 type="number"
                 value={newTypeTier}
                 onChange={(e) => setNewTypeTier(Number(e.target.value))}
                 min={0}
                 max={99}
-                className="w-24 rounded-md border border-zinc-800 bg-zinc-900/60 px-2 py-1.5 text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                className="w-24"
               />
             </Field>
           </div>
         )}
         <Field label={tr('名称', 'Name')}>
-          <input
+          <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder={tr('比如 order-api', 'e.g. order-api')}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-900/60 px-2 py-1.5 text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full"
           />
         </Field>
         <Field
           label={tr('属性（可选 JSON 对象）', 'Props (optional JSON object)')}
           hint={tr('例如 {"owner_team": "pay", "region": "cn-hz"}', 'e.g. {"owner_team": "pay", "region": "cn-hz"}')}
         >
-          <textarea
+          <Textarea
             value={propsText}
             onChange={(e) => setPropsText(e.target.value)}
             rows={4}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-900/60 px-2 py-1.5 font-mono text-[11px] text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full font-mono"
           />
         </Field>
       </div>
@@ -763,7 +749,7 @@ function Field({
 }) {
   return (
     <div>
-      <label className="mb-1 block text-[11px] font-medium text-zinc-400">{label}</label>
+      <Label className="mb-1 block text-[11px] font-medium text-zinc-400">{label}</Label>
       {children}
       {hint && <div className="mt-0.5 text-[10px] text-zinc-600">{hint}</div>}
     </div>
@@ -872,10 +858,10 @@ function AddRelationModal({
           </div>
         </Field>
         <Field label={tr('关系类型', 'Relation type')}>
-          <select
+          <Select label={tr('关系类型', 'Relation type')}
             value={relTypeName}
-            onChange={(e) => setRelTypeName(e.target.value)}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-900/60 px-2 py-1.5 text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            onValueChange={(selectedValue) => setRelTypeName(selectedValue)}
+            className="w-full"
           >
             {relTypes.map((rt) => (
               <option key={rt.name} value={rt.name}>
@@ -884,14 +870,14 @@ function AddRelationModal({
                 {rt.builtin ? ' · builtin' : ''}
               </option>
             ))}
-          </select>
+          </Select>
         </Field>
         <Field label={tr('对端节点（按 name 搜索）', 'Other node (search by name)')}>
-          <input
+          <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={tr('开始输入...', 'Start typing...')}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-900/60 px-2 py-1.5 text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full"
           />
           <div className="mt-1.5 max-h-48 overflow-auto rounded-md border border-zinc-800 bg-zinc-900/40">
             {candidates.length === 0 ? (
@@ -917,11 +903,11 @@ function AddRelationModal({
           </div>
         </Field>
         <Field label={tr('属性（可选 JSON）', 'Props (optional JSON)')}>
-          <textarea
+          <Textarea
             value={propsText}
             onChange={(e) => setPropsText(e.target.value)}
             rows={3}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-900/60 px-2 py-1.5 font-mono text-[11px] text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full font-mono"
           />
         </Field>
       </div>
@@ -936,6 +922,7 @@ function AddRelationModal({
 // register custom kinds with their own display_name + tier so chips
 // stay WYSIWYG without losing i18n on the builtin set.
 function NodeTypesPanel({ isAdmin }: { isAdmin: boolean }) {
+  const { confirmAction, alertAction, dialog } = useDialogs();
   const { tr, locale } = useI18n();
   const [items, setItems] = useState<NodeType[]>([]);
   const [loading, setLoading] = useState(true);
@@ -960,20 +947,20 @@ function NodeTypesPanel({ isAdmin }: { isAdmin: boolean }) {
   }, [fetch]);
 
   const handleDelete = async (nt: NodeType) => {
-    if (!window.confirm(tr(
+    if (!(await confirmAction(tr(
       `确认删除自定义类型 "${nt.name}"？需先把该类型下所有节点删完。`,
       `Delete custom type "${nt.name}"? Delete all its nodes first.`,
-    ))) return;
+    )))) return;
     try {
       await deleteNodeType(nt.name);
       fetch();
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : (e as Error).message);
+      (await alertAction(e instanceof ApiError ? e.message : (e as Error).message));
     }
   };
 
   return (
-    <div className="border-b border-zinc-800/60">
+    <>{dialog}<div className="border-b border-zinc-800/60">
       <div className="flex items-center justify-between gap-2 px-6 py-3">
         <div className="text-xs text-zinc-400">
           {tr(
@@ -1021,14 +1008,14 @@ function NodeTypesPanel({ isAdmin }: { isAdmin: boolean }) {
                     <div className="mt-1 text-sm text-zinc-100">{localizedTypeLabel(nt, locale)}</div>
                   </div>
                   {isAdmin && !nt.builtin && (
-                    <button
+                    <Button variant="dangerGhost" size="sm"
                       type="button"
                       onClick={() => handleDelete(nt)}
-                      className="rounded-md p-1 text-zinc-500 hover:bg-zinc-800 hover:text-red-300"
+                      className="p-1"
                       aria-label={tr('删除', 'Delete')}
                     >
                       <Trash2 size={12} />
-                    </button>
+                    </Button>
                   )}
                 </div>
                 <div className="mt-2 text-[11px] text-zinc-500">
@@ -1051,7 +1038,7 @@ function NodeTypesPanel({ isAdmin }: { isAdmin: boolean }) {
           }}
         />
       )}
-    </div>
+    </div></>
   );
 }
 
@@ -1119,27 +1106,27 @@ function CreateNodeTypeModal({
           </div>
         )}
         <Field label={tr('name（snake_case，AIOps 用作 key）', 'name (snake_case, AIOps key)')}>
-          <input
+          <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder={tr('如 vm / datacenter', 'e.g. vm / datacenter')}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-900/60 px-2 py-1.5 font-mono text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full font-mono"
           />
         </Field>
         <Field label={tr('display_name（中文标签）', 'display_name (Chinese label)')}>
-          <input
+          <Input
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
             placeholder={tr('如 虚拟机 / 数据中心', 'e.g. 虚拟机 / 数据中心')}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-900/60 px-2 py-1.5 text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full"
           />
         </Field>
         <Field label={tr('display_name_en（可选；en-US locale 下用）', 'display_name_en (optional; shown in en-US locale)')}>
-          <input
+          <Input
             value={displayNameEN}
             onChange={(e) => setDisplayNameEN(e.target.value)}
             placeholder={tr('如 VM / Datacenter', 'e.g. VM / Datacenter')}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-900/60 px-2 py-1.5 text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full"
           />
         </Field>
         <Field
@@ -1148,21 +1135,21 @@ function CreateNodeTypeModal({
             'tier (layout: 0 app / 1 service / 2 cluster / 3 device / 4 rack / 99 standalone row)',
           )}
         >
-          <input
+          <Input
             type="number"
             value={tier}
             onChange={(e) => setTier(Number(e.target.value))}
             min={0}
             max={99}
-            className="w-24 rounded-md border border-zinc-800 bg-zinc-900/60 px-2 py-1.5 text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-24"
           />
         </Field>
         <Field label={tr('description（可选）', 'description (optional)')}>
-          <textarea
+          <Textarea
             value={desc}
             onChange={(e) => setDesc(e.target.value)}
             rows={2}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-900/60 px-2 py-1.5 text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full"
           />
         </Field>
       </div>
@@ -1258,19 +1245,20 @@ function RelationTypeCard({
   isAdmin: boolean;
   onChanged: () => void;
 }) {
+  const { confirmAction, alertAction, dialog } = useDialogs();
   const { tr, locale } = useI18n();
   const handleDelete = async () => {
-    if (!window.confirm(tr(`确认删除自定义关系类型 "${rt.name}"？`, `Delete custom relation type "${rt.name}"?`))) return;
+    if (!(await confirmAction(tr(`确认删除自定义关系类型 "${rt.name}"？`, `Delete custom relation type "${rt.name}"?`)))) return;
     try {
       await deleteRelationType(rt.name);
       onChanged();
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : (e as Error).message);
+      (await alertAction(e instanceof ApiError ? e.message : (e as Error).message));
     }
   };
   return (
-    <Card>
-      <div className="flex items-start justify-between gap-2">
+    <>{dialog}<Card>
+      <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
             <span className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-xs text-zinc-100">
@@ -1292,14 +1280,14 @@ function RelationTypeCard({
           )}
         </div>
         {isAdmin && !rt.builtin && (
-          <button
+          <Button variant="dangerGhost" size="sm"
             type="button"
             onClick={handleDelete}
-            className="rounded-md p-1 text-zinc-500 hover:bg-zinc-800 hover:text-red-300"
+            className="p-1"
             aria-label={tr('删除', 'Delete')}
           >
             <Trash2 size={12} />
-          </button>
+          </Button>
         )}
       </div>
       <div className="mt-2 grid grid-cols-2 gap-1.5 text-[11px]">
@@ -1309,7 +1297,7 @@ function RelationTypeCard({
       {rt.description && (
         <div className="mt-2 text-[11px] text-zinc-400">{rt.description}</div>
       )}
-    </Card>
+    </Card></>
   );
 }
 
@@ -1391,81 +1379,81 @@ function CreateRelationTypeModal({
           </div>
         )}
         <Field label={tr('name（snake_case，全局唯一）', 'name (snake_case, globally unique)')}>
-          <input
+          <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder={tr('如 shares_storage_with', 'e.g. shares_storage_with')}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-900/60 px-2 py-1.5 font-mono text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full font-mono"
           />
         </Field>
         <Field label={tr('display_name（中文标签）', 'display_name (Chinese label)')}>
-          <input
+          <Input
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
             placeholder={tr('如 共享存储', 'e.g. 共享存储')}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-900/60 px-2 py-1.5 text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full"
           />
         </Field>
         <Field label={tr('display_name_en（可选；en-US locale 下用）', 'display_name_en (optional; shown in en-US locale)')}>
-          <input
+          <Input
             value={displayNameEN}
             onChange={(e) => setDisplayNameEN(e.target.value)}
             placeholder={tr('如 Shared storage', 'e.g. Shared storage')}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-900/60 px-2 py-1.5 text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full"
           />
         </Field>
         <Field
           label={tr('direction（故障 / 影响沿哪个方向传）', 'direction (which way failure flows)')}
           hint={RELATION_DIRECTIONS.find((d) => d.value === direction)?.hint}
         >
-          <select
+          <Select label={tr('direction（故障 / 影响沿哪个方向传）', 'direction (which way failure flows)')}
             value={direction}
-            onChange={(e) => setDirection(e.target.value as RelationDirection)}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-900/60 px-2 py-1.5 text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            onValueChange={(selectedValue) => setDirection(selectedValue as RelationDirection)}
+            className="w-full"
           >
             {RELATION_DIRECTIONS.map((d) => (
               <option key={d.value} value={d.value}>
                 {d.label} — {d.hint}
               </option>
             ))}
-          </select>
+          </Select>
         </Field>
         <Field
           label={tr('semantics_tag（AIOps 推理大类）', 'semantics_tag (AIOps reasoning bucket)')}
           hint={SEMANTICS_TAGS.find((t) => t.value === tag)?.hint}
         >
-          <select
+          <Select label={tr('semantics_tag（AIOps 推理大类）', 'semantics_tag (AIOps reasoning bucket)')}
             value={tag}
-            onChange={(e) => setTag(e.target.value as SemanticsTag)}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-900/60 px-2 py-1.5 text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            onValueChange={(selectedValue) => setTag(selectedValue as SemanticsTag)}
+            className="w-full"
           >
             {SEMANTICS_TAGS.map((t) => (
               <option key={t.value} value={t.value}>
                 {t.label} — {t.hint}
               </option>
             ))}
-          </select>
+          </Select>
         </Field>
         <Field label="propagates_failure">
-          <label className="flex items-center gap-2 text-[11px] text-zinc-300">
-            <input
-              type="checkbox"
+          <Label className="flex items-center gap-2 text-[11px] text-zinc-300">
+            <Checkbox
+
               checked={propagates}
-              onChange={(e) => setPropagates(e.target.checked)}
+              onCheckedChange={(checkedValue) => setPropagates(checkedValue)}
               className="h-3.5 w-3.5"
             />
             {tr(
               '勾选：故障会沿这条关系传播（AIOps 影响面计算会走这条边）',
               'Check: failure propagates along this relation (AIOps blast-radius walks it)',
             )}
-          </label>
+          </Label>
         </Field>
         <Field label={tr('description（可选）', 'description (optional)')}>
-          <textarea
+          <Textarea
             value={desc}
             onChange={(e) => setDesc(e.target.value)}
             rows={2}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-900/60 px-2 py-1.5 text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full"
           />
         </Field>
       </div>
@@ -1604,18 +1592,17 @@ function GraphTab({ isAdmin }: { isAdmin: boolean }) {
   return (
     <div className="flex flex-1 overflow-hidden">
       <div className="flex flex-1 flex-col overflow-hidden">
-        <div className="flex items-center gap-2 border-b border-zinc-800/60 px-6 py-3">
+        <div className="flex flex-wrap items-center gap-2 border-b border-zinc-800/60 px-6 py-3">
           {/* App focus dropdown comes first — it's the most coarse
               filter ("which application am I looking at?") and lives
               left of the type chips so the operator's eye lands on
               it before they start narrowing further. */}
           {appNodes.length > 0 && (
-            <label className="flex items-center gap-1.5 text-[11px] text-zinc-400">
-              {tr('聚焦应用', 'Focus app')}
-              <select
+            <FilterField label={tr('聚焦应用', 'Focus app')} className="max-w-sm shrink-0">
+              <Select
                 value={appFocus ?? ''}
-                onChange={(e) => setAppFocus(e.target.value ? Number(e.target.value) : null)}
-                className="rounded-md border border-zinc-800 bg-zinc-900/40 px-1.5 py-1 text-[11px] text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                onValueChange={(selectedValue) => setAppFocus(selectedValue ? Number(selectedValue) : null)}
+
               >
                 <option value="">{tr('全部应用', 'All apps')}</option>
                 {appNodes.map((a) => (
@@ -1623,8 +1610,8 @@ function GraphTab({ isAdmin }: { isAdmin: boolean }) {
                     {a.name}
                   </option>
                 ))}
-              </select>
-            </label>
+              </Select>
+            </FilterField>
           )}
           <div className="flex flex-wrap items-center gap-1.5">
             {typeChips.map((c) => (
@@ -1651,15 +1638,15 @@ function GraphTab({ isAdmin }: { isAdmin: boolean }) {
               </span>
             )}
           </div>
-          <label className="ml-2 flex cursor-pointer items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-200">
-            <input
-              type="checkbox"
+          <Label className="ml-2 flex cursor-pointer items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-200">
+            <Checkbox
+
               checked={hideOrphans}
-              onChange={(e) => setHideOrphans(e.target.checked)}
-              className="h-3 w-3 cursor-pointer"
+              onCheckedChange={(checkedValue) => setHideOrphans(checkedValue)}
+              className="h-3 w-3"
             />
             {tr('隐藏孤立节点', 'Hide orphan nodes')}
-          </label>
+          </Label>
           <RelationTypeFilter
             relationTypes={relationTypes}
             visible={visibleRelTypes ?? new Set(relationTypes.map((r) => r.name))}
@@ -1778,50 +1765,39 @@ function RelationTypeFilter({
   const selectAll = () => onChange(new Set(relationTypes.map((rt) => rt.name)));
   const propagatingOnly = () =>
     onChange(new Set(relationTypes.filter((rt) => rt.propagates_failure).map((rt) => rt.name)));
-  return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        className={cn(
-          'rounded-md border border-zinc-800 bg-zinc-900/40 px-2 py-1 text-[11px] text-zinc-300 hover:bg-zinc-900',
-          open && 'border-zinc-600 bg-zinc-800',
-        )}
-      >
-        {tr('关系类型', 'Relations')} {visibleCount === total ? tr('全部', 'All') : `${visibleCount}/${total}`}
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-full z-20 mt-1 w-72 rounded-lg border border-zinc-800 bg-zinc-950 p-3 shadow-2xl">
+  return <Popover open={open} onOpenChange={setOpen}>
+    <PopoverTrigger className="rounded-md border border-border bg-card px-2 py-1 text-xs text-text-muted">
+      {tr('关系类型', 'Relations')} {visibleCount === total ? tr('全部', 'All') : `${visibleCount}/${total}`}
+    </PopoverTrigger>
+    <PopoverContent className="w-72" aria-label={tr('关系类型', 'Relations')}>
             <div className="mb-2 flex items-center justify-between text-[11px] text-zinc-500">
               <span>{tr('选择要画的边类型', 'Select edges to draw')}</span>
               <div className="flex items-center gap-1.5">
-                <button
+                <Button variant="outline" size="sm"
                   type="button"
                   onClick={selectAll}
-                  className="rounded border border-zinc-800 px-1.5 py-0.5 text-zinc-400 hover:bg-zinc-800"
+                  className="px-1.5 py-0.5"
                 >
                   {tr('全选', 'All')}
-                </button>
-                <button
+                </Button>
+                <Button variant="outline" size="sm"
                   type="button"
                   onClick={propagatingOnly}
-                  className="rounded border border-zinc-800 px-1.5 py-0.5 text-zinc-400 hover:bg-zinc-800"
+                  className="px-1.5 py-0.5"
                 >
                   {tr('只看传故障的', 'Propagating only')}
-                </button>
+                </Button>
               </div>
             </div>
             <ul className="max-h-64 space-y-0.5 overflow-auto">
               {relationTypes.map((rt) => (
                 <li key={rt.name}>
-                  <label className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-[11px] hover:bg-zinc-900">
-                    <input
-                      type="checkbox"
+                  <Label className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-[11px] hover:bg-zinc-900">
+                    <Checkbox
+
                       checked={visible.has(rt.name)}
-                      onChange={() => toggle(rt.name)}
-                      className="h-3 w-3 cursor-pointer"
+                      onCheckedChange={() => toggle(rt.name)}
+                      className="h-3 w-3"
                     />
                     <span className="rounded bg-zinc-800 px-1 py-0.5 font-mono text-zinc-300">
                       {rt.name}
@@ -1830,15 +1806,11 @@ function RelationTypeFilter({
                       <span className="text-[10px] text-amber-400">{tr('传故障', 'propagates')}</span>
                     )}
                     <span className="ml-auto text-zinc-500">{rt.semantics_tag}</span>
-                  </label>
+                  </Label>
                 </li>
               ))}
-            </ul>
-          </div>
-        </>
-      )}
-    </div>
-  );
+            </ul>    </PopoverContent>
+  </Popover>;
 }
 
 // creatingTypeLabel picks a Chinese button label keyed on the active

@@ -183,13 +183,13 @@ describe('EdgeDetailPage network device layout', () => {
 
     expect(await screen.findByText('Ongrid Lab')).toBeInTheDocument();
     expect(screen.getByText('可达')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '概览' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '接口' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '概览' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '接口' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '指标' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '主机信息' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '插件' })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '接口' }));
+    fireEvent.click(screen.getByRole('tab', { name: '接口' }));
     expect(await screen.findByText('eth0')).toBeInTheDocument();
     expect(screen.getByText('02:42:ac:14:00:03')).toBeInTheDocument();
   });
@@ -204,7 +204,7 @@ describe('EdgeDetailPage network device layout', () => {
     );
 
     await screen.findByText('ongrid-netdev-b');
-    expect(screen.getByRole('button', { name: '拓扑' })).toHaveClass('border-zinc-100');
+    expect(screen.getByRole('tab', { name: '拓扑' })).toHaveAttribute('aria-selected', 'true');
   });
 });
 
