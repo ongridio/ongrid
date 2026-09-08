@@ -6,12 +6,20 @@ Single-page React + TypeScript app for ongrid AIOps. Production build is a stati
 ## Stack
 
 - Vite 5 + React 18 + TypeScript 5 (strict)
-- Tailwind CSS v3 (dark-only)
+- Tailwind CSS v3 (light/dark theme tokens)
 - React Router v6
 - Zustand (auth + UI state, persisted to localStorage)
 - Native `fetch` (no axios)
 - `lucide-react` icons, `recharts` charts
 - `react-markdown` + `remark-gfm` for assistant messages
+
+## Frontend design
+
+Read the [frontend design language and development guide](../docs/design/frontend-design-language.md)
+before adding or changing UI. It covers page structure, theme tokens, shared controls,
+form and filter layouts, accessibility, localization, and review checks.
+Shared controls live in [src/components/ui](src/components/ui/); complex interactions
+use Base UI with shadcn-style presentation adapted to Ongrid.
 
 ## Build
 
