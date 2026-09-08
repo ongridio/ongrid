@@ -13,7 +13,9 @@ import {
   Plus,
   RotateCw,
   Trash2,
-  MoreVertical,
+  Pencil,
+  Settings2,
+  ChevronDown,
   Copy,
   Check,
   ExternalLink,
@@ -65,6 +67,7 @@ import {
 } from "@/api/topology";
 import {
   deleteDevice,
+  renameDevice,
   getNetworkDeviceDetail,
   listDevices,
   listNetworkCandidates,
@@ -312,6 +315,7 @@ export default function EdgesPage() {
       .then((r) => setManagerVersion(r.manager_version || ""))
       .catch(() => setManagerVersion(""));
   }, []);
+  const [renameTarget, setRenameTarget] = useState<DeviceRow | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [batchInstallOpen, setBatchInstallOpen] = useState(false);
   const [secretReveal, setSecretReveal] = useState<{
@@ -851,7 +855,7 @@ export default function EdgesPage() {
                 "min-w-full text-xs",
                 compactNetworkTable
                   ? "w-full min-w-[1120px] table-fixed"
-                  : "w-[1637px] table-fixed",
+                  : "w-[1727px] table-fixed",
               )}
             >
               {compactNetworkTable ? (
@@ -880,7 +884,7 @@ export default function EdgesPage() {
                   <col className="w-[110px]" />
                   <col className="w-[110px]" />
                   <col className="w-[145px]" />
-                  <col className="w-[190px]" />
+                  <col className="w-[280px]" />
                 </colgroup>
               )}
               <thead className="device-list-table__header border-b border-zinc-800/60 bg-zinc-950/40 text-[11px] uppercase tracking-wider text-zinc-500">
@@ -949,7 +953,7 @@ export default function EdgesPage() {
                       <th className="px-2.5 py-2.5 text-left">Edge</th>
                     </>
                   )}
-                  <th className="sticky right-0 z-20 border-l border-zinc-800/60 bg-zinc-900 px-2.5 py-2.5 text-left">
+                  <th className="sticky right-0 z-20 border-l border-zinc-800/60 bg-zinc-900 px-2.5 py-2.5 text-right">
                     {tr("操作", "Actions")}
                   </th>
                 </tr>
@@ -990,11 +994,8 @@ export default function EdgesPage() {
                       ? (k8sAttachments?.[edge.id] ?? [])
                       : [];
                     const managedByK8s = isK8sManagedEdge(attachments);
-                    const displayName = managedByK8s
-                      ? d.hostname ||
-                        (edge ? displayEdgeName(edge, attachments) : "") ||
-                        d.name
-                      : d.name || d.hostname || edge?.name || "";
+                    const displayName = d.name || d.hostname ||
+                      (edge ? displayEdgeName(edge, attachments) : "");
                     if (compactNetworkTable) {
                       const detail = networkDetails[d.id];
                       const reachability = detail?.reachability_status
@@ -1086,31 +1087,34 @@ export default function EdgesPage() {
                               : "—"}
                           </td>
                           <td
-                            className="sticky right-0 z-10 whitespace-nowrap border-l border-zinc-800/60 bg-zinc-900 px-2.5 py-2.5 text-left"
+                            className="sticky right-0 z-10 whitespace-nowrap border-l border-zinc-800/60 bg-zinc-900 px-2.5 py-2.5 text-right"
                             onClick={(event) => event.stopPropagation()}
                           >
-                            <button
-                              type="button"
-                              onClick={() =>
-                                navigate(
-                                  `/devices/${encodeURIComponent(String(d.id))}?tab=topology`,
-                                )
-                              }
-                              className="mr-1 inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
-                            >
-                              <ExternalLink size={14} />
-                              {tr("查看拓扑", "View topology")}
-                            </button>
-                            <RowMenu
-                              onViewTopology={() =>
-                                navigate(
-                                  `/devices/${encodeURIComponent(String(d.id))}?tab=topology`,
-                                )
-                              }
-                              onDeleteDevice={() => void onDeleteDevice(d)}
-                              deviceOnline={false}
-                              upgradePackageBusy={false}
-                            />
+                            <div className="flex items-center justify-end gap-1">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  navigate(
+                                    `/devices/${encodeURIComponent(String(d.id))}?tab=topology`,
+                                  )
+                                }
+                                className="inline-flex h-6 items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                              >
+                                <ExternalLink size={14} />
+                                {tr("查看拓扑", "View topology")}
+                              </button>
+                              <RowMenu
+                                onRename={canMutate ? () => setRenameTarget(d) : undefined}
+                                onViewTopology={() =>
+                                  navigate(
+                                    `/devices/${encodeURIComponent(String(d.id))}?tab=topology`,
+                                  )
+                                }
+                                onDeleteDevice={() => void onDeleteDevice(d)}
+                                deviceOnline={false}
+                                upgradePackageBusy={false}
+                              />
+                            </div>
                           </td>
                         </tr>
                       );
@@ -1285,95 +1289,97 @@ export default function EdgesPage() {
                           </>
                         )}
                         <td
-                          className="sticky right-0 z-10 whitespace-nowrap border-l border-zinc-800/60 bg-zinc-900 px-2.5 py-2.5 text-left"
+                          className="sticky right-0 z-10 whitespace-nowrap border-l border-zinc-800/60 bg-zinc-900 px-2.5 py-2.5 text-right"
                           onClick={(ev) => ev.stopPropagation()}
                         >
-                          {networkDevice ? (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  navigate(
-                                    `/devices/${encodeURIComponent(String(d.id))}?tab=topology`,
-                                  )
-                                }
-                                className="mr-1 inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
-                              >
-                                <ExternalLink size={14} />
-                                {tr("查看拓扑", "View topology")}
-                              </button>
-                              <RowMenu
-                                onViewTopology={() =>
-                                  navigate(
-                                    `/devices/${encodeURIComponent(String(d.id))}?tab=topology`,
-                                  )
-                                }
-                                onDeleteDevice={() => void onDeleteDevice(d)}
-                                deviceOnline={false}
-                                upgradePackageBusy={false}
-                              />
-                            </>
-                          ) : managedByK8s ? (
-                            <ShellButton device={d} canMutate={canMutate} />
-                          ) : (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => void openServerChart(d)}
-                                title={tr(
-                                  `在 Grafana 查看 ${displayName} 图表`,
-                                  `View ${displayName} chart in Grafana`,
-                                )}
-                                aria-label={tr(
-                                  `在 Grafana 查看 ${displayName} 图表`,
-                                  `View ${displayName} chart in Grafana`,
-                                )}
-                                className="mr-1 inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
-                              >
-                                <ExternalLink size={14} />
-                                <span>{tr("查看图表", "View chart")}</span>
-                              </button>
-                              <ShellButton device={d} canMutate={canMutate} />
-                              <RowMenu
-                                onAssignRoles={() => setRolesEditTarget(d)}
-                                onViewTopology={() =>
-                                  navigate(
-                                    `/devices/${encodeURIComponent(String(d.id))}?tab=topology`,
-                                  )
-                                }
-                                onDeleteDevice={() => void onDeleteDevice(d)}
-                                deviceOnline={d.online === true}
-                                onRotate={
-                                  edge
-                                    ? () =>
-                                        onRotate(
-                                          edge.id,
-                                          displayName,
-                                          edge.access_key_id,
-                                        )
-                                    : undefined
-                                }
-                                onDelete={
-                                  edge
-                                    ? () => onDelete(edge.id, displayName)
-                                    : undefined
-                                }
-                                onUpgrade={
-                                  edge
-                                    ? () => setUpgradeTarget(edge)
-                                    : undefined
-                                }
-                                onUpgradePackage={
-                                  edge
-                                    ? () => void onPackageUpgrade(edge)
-                                    : undefined
-                                }
-                                upgradePackageBusy={
-                                  edge ? pkgUpgradingId === edge.id : false
-                                }
-                              />
-                            </>
-                          )}
+                          <div className="flex items-center justify-end gap-1">
+                            {networkDevice ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    navigate(
+                                      `/devices/${encodeURIComponent(String(d.id))}?tab=topology`,
+                                    )
+                                  }
+                                  className="inline-flex h-6 items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                                >
+                                  <ExternalLink size={14} />
+                                  {tr("查看拓扑", "View topology")}
+                                </button>
+                                <RowMenu
+                                onRename={canMutate ? () => setRenameTarget(d) : undefined}
+                                  onViewTopology={() =>
+                                    navigate(
+                                      `/devices/${encodeURIComponent(String(d.id))}?tab=topology`,
+                                    )
+                                  }
+                                  onDeleteDevice={() => void onDeleteDevice(d)}
+                                  deviceOnline={false}
+                                  upgradePackageBusy={false}
+                                />
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => void openServerChart(d)}
+                                  title={tr(
+                                    `在 Grafana 查看 ${displayName} 图表`,
+                                    `View ${displayName} chart in Grafana`,
+                                  )}
+                                  aria-label={tr(
+                                    `在 Grafana 查看 ${displayName} 图表`,
+                                    `View ${displayName} chart in Grafana`,
+                                  )}
+                                  className="inline-flex h-6 items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                                >
+                                  <ExternalLink size={14} />
+                                  <span>{tr("查看图表", "View chart")}</span>
+                                </button>
+                                <ShellButton device={d} canMutate={canMutate} />
+                                <RowMenu
+                                onRename={canMutate ? () => setRenameTarget(d) : undefined}
+                                  onAssignRoles={managedByK8s ? undefined : () => setRolesEditTarget(d)}
+                                  onViewTopology={() =>
+                                    navigate(
+                                      `/devices/${encodeURIComponent(String(d.id))}?tab=topology`,
+                                    )
+                                  }
+                                  onDeleteDevice={managedByK8s ? undefined : () => void onDeleteDevice(d)}
+                                  deviceOnline={d.online === true}
+                                  onRotate={
+                                    edge && !managedByK8s
+                                      ? () =>
+                                          onRotate(
+                                            edge.id,
+                                            displayName,
+                                            edge.access_key_id,
+                                          )
+                                      : undefined
+                                  }
+                                  onDelete={
+                                    edge && !managedByK8s
+                                      ? () => onDelete(edge.id, displayName)
+                                      : undefined
+                                  }
+                                  onUpgrade={
+                                    edge && !managedByK8s
+                                      ? () => setUpgradeTarget(edge)
+                                      : undefined
+                                  }
+                                  onUpgradePackage={
+                                    edge && !managedByK8s
+                                      ? () => void onPackageUpgrade(edge)
+                                      : undefined
+                                  }
+                                  upgradePackageBusy={
+                                    edge ? pkgUpgradingId === edge.id : false
+                                  }
+                                />
+                              </>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -1386,6 +1392,19 @@ export default function EdgesPage() {
         </div>
       </main>
 
+      {renameTarget && (
+        <RenameDeviceModal
+          device={renameTarget}
+          onClose={() => setRenameTarget(null)}
+          onSaved={(name) => {
+            setDevices((current) => current.map((d) =>
+              d.id === renameTarget.id ? { ...d, name } : d,
+            ));
+            setRenameTarget(null);
+            notifyDevicesChanged();
+          }}
+        />
+      )}
       <CreateEdgeModal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
@@ -2360,7 +2379,7 @@ function ShellButton({
       <span
         title={reason}
         aria-label={`${displayName} ${reason}`}
-        className="mr-1 inline-flex cursor-not-allowed items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-600"
+        className="inline-flex h-6 cursor-not-allowed items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-600"
       >
         <TerminalSquare size={14} />
         <span>{tr("终端", "Terminal")}</span>
@@ -2380,7 +2399,7 @@ function ShellButton({
         `打开 ${displayName} 终端，新标签页`,
         `Open ${displayName} terminal in a new tab`,
       )}
-      className="mr-1 inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+      className="inline-flex h-6 items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
     >
       <TerminalSquare size={14} />
       <span>{tr("终端", "Terminal")}</span>
@@ -2389,6 +2408,7 @@ function ShellButton({
 }
 
 function RowMenu({
+  onRename,
   onAssignRoles,
   onViewTopology,
   onDeleteDevice,
@@ -2399,9 +2419,10 @@ function RowMenu({
   onUpgradePackage,
   upgradePackageBusy,
 }: {
+  onRename?: () => void;
   onAssignRoles?: () => void;
   onViewTopology(): void;
-  onDeleteDevice(): void;
+  onDeleteDevice?: () => void;
   deviceOnline: boolean;
   onRotate?: () => void;
   onDelete?: () => void;
@@ -2469,6 +2490,15 @@ function RowMenu({
           <div className="px-3 pb-1 pt-1.5 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
             {tr("设备操作", "Device actions")}
           </div>
+          {onRename && (
+            <button
+              type="button"
+              onClick={() => { setOpen(false); onRename(); }}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-200 hover:bg-zinc-800"
+            >
+              <Pencil size={13} /> {tr("修改设备名称", "Rename device")}
+            </button>
+          )}
           {onAssignRoles && (
             <button
               type="button"
@@ -2491,42 +2521,46 @@ function RowMenu({
           >
             <ExternalLink size={13} /> {tr("查看拓扑", "View topology")}
           </button>
-          <button
-            type="button"
-            disabled={deviceOnline}
-            title={tr(
-              deviceOnline
-                ? "在线设备不可删除，请先让它离线。"
-                : "离线可删除，并清理关联 Edge 和密钥。",
-              deviceOnline
-                ? "Online devices cannot be deleted. Bring it offline first."
-                : "Offline devices can be deleted; linked Edges and credentials are cleaned too.",
-            )}
-            onClick={() => {
-              if (deviceOnline) return;
-              setOpen(false);
-              onDeleteDevice();
-            }}
-            className={cn(
-              "flex w-full items-center gap-2 px-3 py-2 text-left text-xs",
-              deviceOnline
-                ? "cursor-not-allowed text-zinc-600"
-                : "text-red-300 hover:bg-red-500/10",
-            )}
-          >
-            <Trash2 size={13} /> {tr("删除设备", "Delete device")}
-          </button>
-          <div className="px-3 pb-2 text-[11px] leading-4 text-zinc-500">
-            {tr(
-              deviceOnline
-                ? "在线设备不可删除。"
-                : "离线可删除，并清理 Edge 和密钥。",
-              deviceOnline
-                ? "Online devices cannot be deleted."
-                : "Offline devices can be deleted; Edges and credentials are cleaned too.",
-            )}
-          </div>
+          {onDeleteDevice && (
+            <>
+              <button
+                type="button"
+                disabled={deviceOnline}
+                title={tr(
+                  deviceOnline
+                    ? "在线设备不可删除，请先让它离线。"
+                    : "离线可删除，并清理关联 Edge 和密钥。",
+                  deviceOnline
+                    ? "Online devices cannot be deleted. Bring it offline first."
+                    : "Offline devices can be deleted; linked Edges and credentials are cleaned too.",
+                )}
+                onClick={() => {
+                  if (deviceOnline) return;
+                  setOpen(false);
+                  onDeleteDevice();
+                }}
+                className={cn(
+                  "flex w-full items-center gap-2 px-3 py-2 text-left text-xs",
+                  deviceOnline
+                    ? "cursor-not-allowed text-zinc-600"
+                    : "text-red-300 hover:bg-red-500/10",
+                )}
+              >
+                <Trash2 size={13} /> {tr("删除设备", "Delete device")}
+              </button>
+              <div className="px-3 pb-2 text-[11px] leading-4 text-zinc-500">
+                {tr(
+                  deviceOnline
+                    ? "在线设备不可删除。"
+                    : "离线可删除，并清理 Edge 和密钥。",
+                  deviceOnline
+                    ? "Online devices cannot be deleted."
+                    : "Offline devices can be deleted; Edges and credentials are cleaned too.",
+                )}
+              </div>
 
+            </>
+          )}
           {onRotate && onDelete && onUpgrade && onUpgradePackage && (
             <>
               <div className="my-1 border-t border-zinc-800" />
@@ -2590,6 +2624,7 @@ function RowMenu({
     );
   }, [
     deviceOnline,
+    onRename,
     onAssignRoles,
     onDelete,
     onDeleteDevice,
@@ -2604,7 +2639,7 @@ function RowMenu({
   ]);
 
   return (
-    <div className="relative inline-block">
+    <div className="relative inline-flex">
       <button
         ref={triggerRef}
         type="button"
@@ -2616,13 +2651,71 @@ function RowMenu({
           setPosition(null);
           setOpen(true);
         }}
-        aria-label={tr("更多操作", "More actions")}
-        className="rounded-md p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+        aria-label={tr("操作", "Actions")}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="inline-flex h-6 items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
       >
-        <MoreVertical size={15} />
+        <Settings2 size={14} aria-hidden="true" />
+        <span>{tr("操作", "Actions")}</span>
+        <ChevronDown size={14} aria-hidden="true" />
       </button>
       {menu}
     </div>
+  );
+}
+
+function RenameDeviceModal({
+  device,
+  onClose,
+  onSaved,
+}: {
+  device: Device;
+  onClose(): void;
+  onSaved(name: string): void;
+}) {
+  const { tr } = useI18n();
+  const [name, setName] = useState(device.name || "");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save() {
+    if (pending || !name.trim()) return;
+    setPending(true);
+    setError(null);
+    try {
+      await renameDevice(device.id, name.trim());
+      onSaved(name.trim());
+    } catch (e) {
+      setError((e as Error).message || tr("保存失败", "Save failed"));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <Modal
+      open
+      onClose={() => { if (!pending) onClose(); }}
+      title={tr("修改设备名称", "Rename device")}
+      footer={
+        <>
+          <Button disabled={pending} onClick={onClose}>{tr("取消", "Cancel")}</Button>
+          <Button variant="primary" type="submit" form="rename-device" disabled={pending || !name.trim()}>
+            {pending ? tr("保存中…", "Saving…") : tr("保存", "Save")}
+          </Button>
+        </>
+      }
+    >
+      <form id="rename-device" onSubmit={(event) => { event.preventDefault(); void save(); }}>
+        <label htmlFor="device-name" className="mb-1 block text-xs text-zinc-400">{tr("设备名称", "Device name")}</label>
+        <input id="device-name" autoFocus required value={name} disabled={pending}
+          onChange={(event) => setName(event.target.value)}
+          className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+        />
+        {error && <p role="alert" className="mt-2 text-xs text-red-400">{error}</p>}
+      </form>
+    </Modal>
   );
 }
 

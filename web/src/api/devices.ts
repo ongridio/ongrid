@@ -185,6 +185,10 @@ export function configureNetworkPolling(id: string | number, input: NetworkPolli
   );
 }
 
+export function renameDevice(id: string | number, name: string) {
+  return request<void>('PATCH', `/devices/${encodeURIComponent(String(id))}`, { name });
+}
+
 export function deleteDevice(id: string | number) {
   return request<void>('DELETE', `/devices/${encodeURIComponent(String(id))}`);
 }

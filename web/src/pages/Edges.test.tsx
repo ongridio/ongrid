@@ -7,13 +7,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import EdgesPage from "./Edges";
 import { server } from "@/test/msw-server";
+import { openMetricDrilldown } from "@/lib/drilldown";
 
-vi.mock("@/store/me", () => ({
-  usePermissions: () => ({ isAdmin: true, canMutate: true, role: "admin" }),
-}));
+vi.mock("@/lib/drilldown", () => ({ openMetricDrilldown: vi.fn().mockResolvedValue(undefined) }));
+
+const permissions = vi.hoisted(() => ({ isAdmin: true, canMutate: true, role: "admin" }));
+vi.mock("@/store/me", () => ({ usePermissions: () => permissions }));
 
 describe("EdgesPage", () => {
   beforeEach(() => {
+    Object.assign(permissions, { isAdmin: true, canMutate: true, role: "admin" });
     localStorage.setItem("ongrid-locale", "zh-CN");
     server.use(
       http.get("/api/v1/version", () =>
@@ -188,10 +191,10 @@ describe("EdgesPage", () => {
     );
 
     const k8sNameCells = await screen.findAllByText("ongrid-k8s-control-plane");
-    expect(k8sNameCells).toHaveLength(2);
+    expect(k8sNameCells).toHaveLength(1);
     expect(
-      screen.queryByText("k8s:kind-local:ongrid-k8s-control-plane"),
-    ).not.toBeInTheDocument();
+      screen.getByText("k8s:kind-local:ongrid-k8s-control-plane"),
+    ).toBeInTheDocument();
     expect(screen.queryByText("kind-controller")).not.toBeInTheDocument();
     expect(screen.queryByText("K8s Node")).not.toBeInTheDocument();
     expect(screen.queryByText("K8s Controller")).not.toBeInTheDocument();
@@ -219,8 +222,8 @@ describe("EdgesPage", () => {
     expect(terminalLink).toHaveAttribute("href", "/devices/17/shell");
     expect(terminalLink).toHaveAttribute("target", "_blank");
     expect(
-      within(k8sRow as HTMLTableRowElement).queryByText("查看图表"),
-    ).not.toBeInTheDocument();
+      within(k8sRow as HTMLTableRowElement).getByText("查看图表"),
+    ).toBeInTheDocument();
     expect(
       within(k8sRow as HTMLTableRowElement).queryByLabelText(/选择/),
     ).not.toBeInTheDocument();
@@ -234,7 +237,7 @@ describe("EdgesPage", () => {
     expect(screen.getByRole("table")).toHaveClass("min-w-full", "table-fixed");
   });
 
-  it("点击 K8s 托管设备行进入设备详情，操作列只保留 WebSSH", async () => {
+  it("点击 K8s 托管设备行进入设备详情，操作列支持 WebSSH 和修改名称", async () => {
     const user = userEvent.setup();
     render(
       <MemoryRouter initialEntries={["/devices"]}>
@@ -260,13 +263,83 @@ describe("EdgesPage", () => {
     expect(
       within(k8sRow).getByRole("link", { name: /打开.*终端/ }),
     ).toHaveAttribute("href", "/devices/17/shell");
-    expect(within(k8sRow).queryByText("查看图表")).not.toBeInTheDocument();
+    expect(within(k8sRow).getByText("查看图表")).toBeInTheDocument();
     expect(
-      within(k8sRow).queryByRole("button", { name: /更多/ }),
-    ).not.toBeInTheDocument();
+      within(k8sRow).getByRole("button", { name: "操作" }),
+    ).toBeInTheDocument();
     await waitFor(() =>
       expect(screen.getByTestId("location")).toHaveTextContent("/devices/17"),
     );
+  });
+
+  it.each([
+    [19, "bare-metal-1", "bm-1"],
+    [17, "k8s:kind-local:ongrid-k8s-control-plane", "ongrid-k8s-control-plane"],
+  ])("修改设备 %s 名称，保存后优先展示名称并保留主机名", async (id, oldName, hostname) => {
+    const user = userEvent.setup();
+    let submitted: unknown;
+    server.use(http.patch(`/api/v1/devices/${id}`, async ({ request }) => {
+      submitted = await request.json();
+      return new HttpResponse(null, { status: 204 });
+    }));
+    render(<MemoryRouter><EdgesPage /></MemoryRouter>);
+    const row = (await screen.findByText(oldName)).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: "操作" }));
+    await user.click(screen.getByRole("button", { name: "修改设备名称" }));
+    const dialog = screen.getByRole("dialog", { name: "修改设备名称" });
+    const input = within(dialog).getByLabelText("设备名称");
+    expect(input).toHaveValue(oldName);
+    await user.clear(input);
+    await user.type(input, "   ");
+    expect(within(dialog).getByRole("button", { name: "保存" })).toBeDisabled();
+    await user.clear(input);
+    await user.type(input, "  数据库主机  ");
+    await user.click(within(dialog).getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(submitted).toEqual({ name: "数据库主机" });
+    expect(within(row).getByText("数据库主机")).toBeInTheDocument();
+    expect(within(row).getByText(hostname)).toBeInTheDocument();
+  });
+
+  it("K8s 设备查看图表使用设备 ID", async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><EdgesPage /></MemoryRouter>);
+    await user.click(await screen.findByRole("button", { name: "在 Grafana 查看 k8s:kind-local:ongrid-k8s-control-plane 图表" }));
+    expect(openMetricDrilldown).toHaveBeenCalledWith(expect.objectContaining({
+      deviceId: 17,
+      expr: expect.stringContaining('device_id="17"'),
+    }));
+  });
+
+  it("只读用户不能修改设备名称", async () => {
+    Object.assign(permissions, { isAdmin: false, canMutate: false, role: "viewer" });
+    const user = userEvent.setup();
+    render(<MemoryRouter><EdgesPage /></MemoryRouter>);
+    const row = (await screen.findByText("bare-metal-1")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: "操作" }));
+    expect(screen.queryByRole("button", { name: "修改设备名称" })).not.toBeInTheDocument();
+  });
+
+  it("名称保存失败时保留输入，允许重试", async () => {
+    const user = userEvent.setup();
+    server.use(http.patch("/api/v1/devices/19", () =>
+      HttpResponse.json({ message: "保存失败" }, { status: 500 }),
+    ));
+    render(<MemoryRouter><EdgesPage /></MemoryRouter>);
+    const row = (await screen.findByText("bare-metal-1")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: "操作" }));
+    await user.click(screen.getByRole("button", { name: "修改设备名称" }));
+    const input = screen.getByLabelText("设备名称");
+    await user.clear(input);
+    await user.type(input, "新名称");
+    await user.click(screen.getByRole("button", { name: "保存" }));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(input).toHaveValue("新名称");
+    expect(within(row).getByText("bare-metal-1")).toBeInTheDocument();
+    server.use(http.patch("/api/v1/devices/19", () => new HttpResponse(null, { status: 204 })));
+    await user.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(within(row).getByText("新名称")).toBeInTheDocument();
   });
 
   it("让设备操作菜单在视口内翻转或滚动", async () => {
@@ -289,7 +362,7 @@ describe("EdgesPage", () => {
     const rectSpy = vi
       .spyOn(Element.prototype, "getBoundingClientRect")
       .mockImplementation(function (this: Element) {
-        if (this.getAttribute("aria-label") === "更多操作") return triggerRect;
+        if (this.getAttribute("aria-label") === "操作") return triggerRect;
         if (this.getAttribute("role") === "menu") return menuRect;
         return originalGetBoundingClientRect.call(this);
       });
@@ -303,7 +376,7 @@ describe("EdgesPage", () => {
 
       await screen.findByText("bare-metal-1");
       await act(async () => {
-        await user.click(screen.getByRole("button", { name: "更多操作" }));
+        await user.click(within(screen.getByText("bare-metal-1").closest("tr")!).getByRole("button", { name: "操作" }));
       });
 
       const menu = await screen.findByRole("menu");
@@ -376,7 +449,7 @@ describe("EdgesPage", () => {
       );
       await screen.findByText("bare-metal-1");
       await act(async () => {
-        await user.click(screen.getByRole("button", { name: "更多操作" }));
+        await user.click(within(screen.getByText("bare-metal-1").closest("tr")!).getByRole("button", { name: "操作" }));
       });
       await act(async () => {
         await user.click(
