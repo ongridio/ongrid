@@ -171,17 +171,18 @@ type ProtocolMetrics struct {
 }
 
 type Summary struct {
-	Identity   Identity          `json:"identity"`
-	Operation  string            `json:"operation,omitempty"`
-	RPS        *float64          `json:"rps"`
-	ErrorRate  *float64          `json:"error_rate"`
-	P50Ms      *float64          `json:"p50_ms"`
-	P95Ms      *float64          `json:"p95_ms"`
-	P99Ms      *float64          `json:"p99_ms"`
-	Requests   *float64          `json:"requests"`
-	DataStatus string            `json:"data_status"`
-	Protocols  []ProtocolMetrics `json:"protocols,omitempty"`
-	Languages  []string          `json:"languages,omitempty"`
+	MetricSource string            `json:"metric_source"`
+	Identity     Identity          `json:"identity"`
+	Operation    string            `json:"operation,omitempty"`
+	RPS          *float64          `json:"rps"`
+	ErrorRate    *float64          `json:"error_rate"`
+	P50Ms        *float64          `json:"p50_ms"`
+	P95Ms        *float64          `json:"p95_ms"`
+	P99Ms        *float64          `json:"p99_ms"`
+	Requests     *float64          `json:"requests"`
+	DataStatus   string            `json:"data_status"`
+	Protocols    []ProtocolMetrics `json:"protocols,omitempty"`
+	Languages    []string          `json:"languages,omitempty"`
 }
 
 type Metadata struct {
@@ -348,6 +349,9 @@ func TraceQL(q Query) string {
 	}
 	clauses = append(clauses, "kind = "+q.SpanKind)
 	if q.MetricSource == "tempo_spanmetrics" {
+		if q.Protocol == "http" && q.SpanKind == "server" {
+			clauses = append(clauses, `(span.http.request.method != nil || span.http.method != nil)`)
+		}
 		if q.Operation != "" {
 			clauses = append(clauses, "name = "+strconv.Quote(q.Operation))
 		}

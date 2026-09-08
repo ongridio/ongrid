@@ -44,7 +44,7 @@ func (s *Service) List(ctx context.Context, q Query, operations bool) (*ListResu
 	if err := q.Validate(operations); err != nil {
 		return nil, err
 	}
-	rows, err := s.summaries(ctx, q, operations)
+	rows, err := s.requestSummaries(ctx, &q, operations)
 	if err != nil {
 		return nil, err
 	}
@@ -66,13 +66,28 @@ func (s *Service) List(ctx context.Context, q Query, operations bool) (*ListResu
 			filtered = append(filtered, row)
 		}
 	}
+	meta := metadata(q)
+	if q.MetricSource == "application_metrics" && slices.ContainsFunc(rows, func(row Summary) bool { return row.MetricSource == "tempo_spanmetrics" }) {
+		meta.MetricSource, meta.Sampling = "mixed", "varies_by_service"
+	}
 	return &ListResult{
 		Items: pageRows(sortedSummaries(filtered, q), q), Total: len(filtered), Page: q.Page, PageSize: q.PageSize,
-		Metadata: metadata(q), Environments: sortedKeys(envs), ServiceNamespaces: sortedKeys(namespaces),
+		Metadata: meta, Environments: sortedKeys(envs), ServiceNamespaces: sortedKeys(namespaces),
 	}, nil
 }
 
-// Discover trace-only services without using sampled spans as request metrics.
+// Prefer native request metrics. Only HTTP falls back; sampled and full request
+// populations are never summed, and diagnostics still inspect native metrics.
+func (s *Service) requestSummaries(ctx context.Context, q *Query, operations bool) ([]Summary, error) {
+	rows, err := s.summaries(ctx, *q, operations)
+	if err != nil || len(rows) > 0 || q.Protocol != "http" || q.MetricSource != "application_metrics" {
+		return rows, err
+	}
+	q.MetricSource = "tempo_spanmetrics"
+	return s.summaries(ctx, *q, operations)
+}
+
+// Discover server spans, then fill trace-only HTTP services with labelled samples.
 // The additional query is bounded and independent of the service count.
 func (s *Service) appendTraceServices(ctx context.Context, q Query, rows []Summary) ([]Summary, error) {
 	expr := fmt.Sprintf("sum by (%s,telemetry_sdk_language) (count_over_time(traces_spanmetrics_calls_total%s[%s]))", identityLabels, q.selector(), promDuration(q.End.Sub(q.Start)))
@@ -100,10 +115,24 @@ func (s *Service) appendTraceServices(ctx context.Context, q Query, rows []Summa
 			}
 			i = len(rows)
 			indices[id] = i
-			rows = append(rows, Summary{Identity: id, DataStatus: "traces_only"})
+			rows = append(rows, Summary{Identity: id, DataStatus: "traces_only", MetricSource: "tempo_spanmetrics"})
 		}
 		if language := item.Metric["telemetry_sdk_language"]; language != "" {
 			rows[i].Languages = append(rows[i].Languages, language)
+		}
+	}
+	if slices.ContainsFunc(rows, func(row Summary) bool { return row.DataStatus == "traces_only" }) {
+		sampled := q
+		sampled.MetricSource, sampled.Protocol = "tempo_spanmetrics", "http"
+		httpRows, err := s.summaries(ctx, sampled, false)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range httpRows {
+			if i, ok := indices[row.Identity]; ok && rows[i].DataStatus == "traces_only" {
+				row.Languages = append(row.Languages, rows[i].Languages...)
+				rows[i] = row
+			}
 		}
 	}
 	for i := range rows {
@@ -166,6 +195,7 @@ func (s *Service) summaries(ctx context.Context, q Query, operations bool) ([]Su
 	out := make([]Summary, 0, len(rows))
 	for _, row := range rows {
 		row.finish(window)
+		row.MetricSource = q.MetricSource
 		out = append(out, *row)
 	}
 	return out, nil
@@ -184,7 +214,7 @@ func (s *Service) protocolSummaries(ctx context.Context, q Query) ([]Summary, er
 		}
 		for _, row := range rows {
 			if grouped[row.Identity] == nil {
-				grouped[row.Identity] = &Summary{Identity: row.Identity}
+				grouped[row.Identity] = &Summary{Identity: row.Identity, MetricSource: "application_metrics"}
 			}
 			service := grouped[row.Identity]
 			service.Languages = append(service.Languages, row.Languages...)
@@ -247,7 +277,7 @@ func (s *Service) Overview(ctx context.Context, q Query) (*Overview, error) {
 	if err := q.Validate(true); err != nil {
 		return nil, err
 	}
-	rows, err := s.summaries(ctx, q, false)
+	rows, err := s.requestSummaries(ctx, &q, false)
 	if err != nil {
 		return nil, err
 	}

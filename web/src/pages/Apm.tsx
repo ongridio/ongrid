@@ -298,7 +298,7 @@ export default function ApmPage() {
   const status = (s: string) =>
     ({
       observed: tr('已观测', 'Observed'),
-      traces_only: tr('仅 Trace · 无请求指标', 'Traces only · No request metrics'),
+      traces_only: tr('仅 Trace · 无 HTTP 维度', 'Traces only · No HTTP dimensions'),
       no_data: tr('无数据', 'No data'),
       no_requests: tr('无请求', 'No requests'),
       insufficient_samples: tr('样本不足', 'Insufficient samples'),
@@ -589,7 +589,7 @@ export default function ApmPage() {
               </p>
             </div>
             <div className="flex flex-wrap gap-4 text-sm">
-              {isAdmin && !traceMetrics && (
+              {isAdmin && !traceMetrics && overview?.metadata?.metric_source !== 'tempo_spanmetrics' && (
                 <Button variant="subtle" size="sm"
                   type="button"
                   className=""
@@ -690,6 +690,12 @@ export default function ApmPage() {
               {detail && !traceMetrics && (tab === 'overview' || tab === 'operations') && (
                 <h2 className="text-sm font-semibold">{protocol.toUpperCase()}</h2>
               )}
+              {(overview?.metadata?.metric_source === 'tempo_spanmetrics' || list?.metadata?.metric_source === 'tempo_spanmetrics') && (
+                <p className="text-xs text-zinc-500">{tr(
+                  '以下指标来自 Trace 样本，受采样影响；RPS 为样本速率，错误率和延迟仅代表已采样请求。',
+                  'These metrics use Trace samples. RPS is the sampled rate; errors and latency describe sampled requests only.',
+                )}</p>
+              )}
               {list && (
                 <Card className="!p-0 overflow-hidden">
                   <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
@@ -777,7 +783,10 @@ export default function ApmPage() {
                               ? Math.max(...row.protocols.map((item) => item.p95_ms!))
                               : null
                             : row.p95_ms;
-                          if (row.operation) target.set('operation', row.operation);
+                          if (row.operation) {
+                            target.set('operation', row.operation);
+                            if (row.metric_source === 'tempo_spanmetrics') target.set('metric_source', row.metric_source);
+                          }
                           const to = `/apm/service?${target}`;
                           return (
                             <tbody
@@ -837,6 +846,7 @@ export default function ApmPage() {
                                   <span
                                     className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full ${row.data_status === 'observed' ? 'bg-zinc-500' : 'bg-amber-500'}`}
                                   />
+                                  {row.metric_source === 'tempo_spanmetrics' && row.data_status !== 'traces_only' && `${tr('Trace 样本', 'Trace samples')} · `}
                                   {status(row.data_status)}
                                 </td>
                               </tr>
@@ -967,6 +977,7 @@ export default function ApmPage() {
                                 {operations.items.map((row) => {
                                   const scope = serviceParams(params, row.identity, protocol);
                                   if (row.operation) scope.set('operation', row.operation);
+                                  if (row.metric_source === 'tempo_spanmetrics') scope.set('metric_source', row.metric_source);
                                   return (
                                     <tr key={row.operation}>
                                       <td className="max-w-64 break-words py-2.5">

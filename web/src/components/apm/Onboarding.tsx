@@ -113,8 +113,8 @@ export function Onboarding() {
       )}
       {language === 'ruby' && (
         <p className="text-xs text-zinc-500">{tr(
-          'Ruby 示例使用官方 Sinatra 自动埋点，提供 Trace 与 JSON 日志关联。官方指标 SDK 尚未稳定，不提供全量请求指标；服务列表标记为“仅 Trace”，请求级告警需要先接入独立的请求指标。',
-          'The Ruby example uses official Sinatra instrumentation for traces and correlated JSON logs. Its metrics SDK is not yet stable, so full request metrics are unavailable. Services are marked Traces only; request-level alerts require independent request metrics first.',
+          'Ruby 示例使用官方 Sinatra 自动埋点，提供 Trace 与 JSON 日志关联。官方指标 SDK 尚未稳定，不提供全量请求指标；APM 使用服务端 HTTP Trace 补充样本速率、错误率和延迟，并标注“Trace 样本”；请求级告警需要先接入独立的请求指标。',
+          'The Ruby example uses official Sinatra instrumentation for traces and correlated JSON logs. Its metrics SDK is not yet stable, so full request metrics are unavailable. APM fills sampled HTTP rates, errors and latency from server traces and labels them Trace samples; request-level alerts require independent request metrics first.',
         )}</p>
       )}
       <pre className="overflow-auto rounded-lg bg-zinc-950 p-4 text-xs">{config}</pre>

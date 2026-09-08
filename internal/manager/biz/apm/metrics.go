@@ -72,8 +72,19 @@ func (q Query) metricSelector(extra ...string) string {
 // Apply rate before dropping instance labels so restarts remain correct.
 // Alias resource/operation labels only in query results; raw metrics stay intact.
 func (q Query) aggregate(fn, metric string, window time.Duration, group string, extra ...string) string {
-	expr := fmt.Sprintf("%s(%s%s[%s])", fn, metric, q.metricSelector(extra...), promDuration(window))
-	return q.aggregateExpression(expr, group)
+	selectors := []string{q.metricSelector(extra...)}
+	if q.MetricSource == "tempo_spanmetrics" && q.Protocol == "http" && q.SpanKind == "server" {
+		// The union deduplicates spans exporting both semantic-convention versions.
+		selectors = []string{
+			q.metricSelector(append(append([]string{}, extra...), `http_request_method!=""`)...),
+			q.metricSelector(append(append([]string{}, extra...), `http_method!=""`)...),
+		}
+	}
+	parts := make([]string, 0, len(selectors))
+	for _, selector := range selectors {
+		parts = append(parts, fmt.Sprintf("%s(%s%s[%s])", fn, metric, selector, promDuration(window)))
+	}
+	return q.aggregateExpression("("+strings.Join(parts, " or ")+")", group)
 }
 
 func (q Query) aggregateExpression(expr, group string) string {

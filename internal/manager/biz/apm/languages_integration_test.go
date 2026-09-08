@@ -29,9 +29,19 @@ func TestAPMLanguageMetricsIntegration(t *testing.T) {
 			if language == "ruby" {
 				q.Protocol = "all"
 				rows, err := svc.List(t.Context(), q, false)
-				if err != nil || len(rows.Items) != 1 || rows.Items[0].DataStatus != "traces_only" || rows.Items[0].RPS != nil || strings.Join(rows.Items[0].Languages, ",") != "ruby" {
-					t.Fatalf("Ruby trace-only discovery: %+v %v", rows, err)
+				if err != nil || len(rows.Items) != 1 || rows.Items[0].MetricSource != "tempo_spanmetrics" || rows.Items[0].RPS == nil || *rows.Items[0].RPS <= 0 || rows.Items[0].ErrorRate == nil || math.Abs(*rows.Items[0].ErrorRate-25) > 5 || rows.Items[0].P95Ms == nil || strings.Join(rows.Items[0].Languages, ",") != "ruby" {
+					t.Fatalf("Ruby sampled HTTP RED: %+v %v", rows, err)
 				}
+				q.Protocol = "http"
+				overview, err := svc.Overview(t.Context(), q)
+				if err != nil || overview.Metadata.MetricSource != "tempo_spanmetrics" || len(overview.Points) == 0 {
+					t.Fatalf("Ruby sampled overview: %+v %v", overview, err)
+				}
+				operations, err := svc.List(t.Context(), q, true)
+				if err != nil || operations.Total == 0 || operations.Metadata.MetricSource != "tempo_spanmetrics" {
+					t.Fatalf("Ruby sampled operations: %+v %v", operations, err)
+				}
+				t.Logf("Ruby HTTP Trace fallback: %.3f sampled RPS, %.2f%% errors, %.2fms P95; overview and operations verified", *rows.Items[0].RPS, *rows.Items[0].ErrorRate, *rows.Items[0].P95Ms)
 				return
 			}
 			if os.Getenv("APM_MORE_LANGUAGES") != "" {

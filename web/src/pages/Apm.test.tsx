@@ -82,6 +82,23 @@ describe('Application performance', () => {
     expect(await screen.findByText('应用接入')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'orders' })).not.toBeInTheDocument();
   });
+  it('labels sampled HTTP metrics in the list and overview and preserves the source in operation links', async () => {
+    const sample = { ...row, metric_source: 'tempo_spanmetrics' };
+    const metadata = { metric_source: 'tempo_spanmetrics', sampling: 'unknown', protocol: 'http', metric_format: 'otel' };
+    server.use(
+      http.get('/api/v1/apm/services', () => HttpResponse.json({ data: { items: [sample], total: 1, page: 1, page_size: 25 } })),
+      http.get('/api/v1/apm/overview', ({ request }) => HttpResponse.json({ data: new URL(request.url).searchParams.get('protocol') === 'rpc'
+        ? { summary: { ...row, rps: null, data_status: 'no_data' }, points: [], metadata: { ...metadata, metric_source: 'application_metrics' } }
+        : { summary: sample, points: [], metadata } })),
+      http.get('/api/v1/apm/operations', () => HttpResponse.json({ data: { items: [{ ...sample, operation: 'GET /orders/:id' }], total: 1, page: 1, page_size: 25, metadata } })),
+    );
+    render(<MemoryRouter initialEntries={[`/apm?${period}`]}><ApmPage /></MemoryRouter>);
+    expect(await screen.findByText('Trace 样本 · 已观测')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('link', { name: 'orders' }));
+    expect(await screen.findByText(/RPS 为样本速率/)).toBeInTheDocument();
+    const operation = (await screen.findAllByRole('link', { name: 'GET /orders/:id' }))[0];
+    expect(new URL(operation.getAttribute('href')!, 'http://localhost').searchParams.get('metric_source')).toBe('tempo_spanmetrics');
+  });
   it('displays backend failure as an error instead of a healthy empty list', async () => {
     server.use(
       http.get('/api/v1/apm/services', () =>

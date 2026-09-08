@@ -89,3 +89,13 @@ C++ 运行镜像包含官方 `libopentelemetry_proto.so`；周期与超时使用
 后端 `go test -race ./internal/manager/biz/apm`、前端 APM/API 18 项测试及生产构建通过。本轮未重新执行旧语言开销/容量压测，不能据此增加新的性能承诺。
 
 本地更新使用 `ongrid:dev-apm-more-languages` 与 `ongrid-web:dev-apm-more-languages`，Tempo 增加 `telemetry.sdk.language` span-metrics 维度；原日志来源继续保留，新来源经 Manager 配置下发。回滚应用可将 `ongrid:rollback-before-apm-more-languages`、`ongrid-web:rollback-before-apm-more-languages` 标记回 `:dev` 并按原 Compose 项目重建对应服务。新增服务的停止与日志来源移除方式见示例说明；保留历史观测数据。
+
+
+## HTTP Trace 样本回退补充验收
+
+后续调整允许无原生请求指标的 HTTP 服务复用 Tempo span-metrics。覆盖上述 Ruby 空 RED 的旧行为：服务列表、概览、趋势、接口均返回样本 RED，`metric_source=tempo_spanmetrics` 明确标注来源；已有原生指标时继续优先使用，不相加、不推断全量请求数或采样率。仅包含 HTTP 方法属性的 SERVER Span 参与计算，新旧属性用集合并集避免重复。Tempo 新增 HTTP 方法维度，只影响后续 Span。
+
+- `go test -race ./internal/manager/biz/apm` 通过，覆盖原生优先、完整身份、HTTP 方法维度、服务/接口/趋势回退及 RPC 不误用 HTTP 样本。
+- 前端 APM / API 21 项测试、构建、修改文件 ESLint 通过，验证来源提示和接口到 HTTP Trace 的范围。
+- `APM_MORE_LANGUAGES=ruby scripts/apm-test/run-more-languages.sh` 独立验收通过并清理容器：开启采样 41 条 Trace（含健康检查），关闭采样 0 条，两实例均无原生 HTTP Metrics；样本错误率 25%，P95 125.44 ms，真实查询适配器的概览/趋势/接口均有结果。
+- 本地持续 Edge 上 Ruby 与 ongrid-manager 的 HTTP 样本 RED 已出现，其他八语言仍用原生指标。浏览器实际检查列表、Ruby 概览图表、接口明细和 Trace 查询链接；截图见 `output/apm-demo/trace-fallback-*.jpg`。本地健康与就绪检查通过。

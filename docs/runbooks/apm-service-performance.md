@@ -115,7 +115,7 @@ OTLP 日志使用标准 trace_id/span_id；文件或 CRI 日志可写单行 JSON
 
 Node.js/Python 的 gRPC 请求可用显式 Trace 样本视图排查；不能把样本计数当作全量请求指标或建立新的请求级告警。样例与锁定依赖在 `examples/apm-languages`，使用官方 SDK/自动埋点，无自研探针或手工拼造 OTLP 数据。PHP 使用长驻 worker 保持累计计数；普通 PHP-FPM 需另行设计指标聚合，不能直接照搬。C++/Rust 需在请求处理处初始化并调用官方 SDK，环境变量本身不会自动埋点。
 
-Ruby 的官方指标 SDK 尚未稳定。服务列表通过 SERVER Span 指标发现此类服务，显示“仅 Trace · 无请求指标”，所有 RED 值保持空值；不把 Span 计数作为全量请求指标。发现需 Tempo span-metrics 处理器，语言图标需配置 `telemetry.sdk.language` 维度。若未启用该处理器，仍可直接在链路页面查询。请求级告警应先接入真实业务指标。
+Ruby 的官方指标 SDK 尚未稳定。服务列表通过 SERVER Span 指标发现此类服务。没有原生请求指标时，HTTP 列表、概览、趋势和接口统计回退到 Tempo span-metrics，标注“Trace 样本”；RPS 是样本速率，错误率与延迟只覆盖已采样请求，不推算全量请求或采样比例。已有原生指标时始终优先使用，不叠加样本数据。仅使用包含 `http.request.method` 或 `http.method` 的 SERVER Span（两种属性同时存在也只计一次），排除 RPC、内部和消息消费 Span。发现需 Tempo span-metrics 处理器，并配置上述 HTTP 维度与 `telemetry.sdk.language`；新维度只影响后续 Span，旧数据不会自动补齐。若未启用该处理器，仍可直接在链路页面查询。请求级告警应先接入真实业务指标。
 
 新增五语言示例、能力边界、持续运行与隔离验收命令见 [示例说明](../../examples/apm-languages/README.md)。`scripts/apm-test/run-more-languages.sh` 检查开启/关闭采样实例各 40 个真实请求、25% 错误、慢请求、Histogram、Trace/JSON 日志关联与正式 APM 查询适配器。
 

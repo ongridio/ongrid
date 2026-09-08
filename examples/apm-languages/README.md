@@ -69,7 +69,7 @@ C++ SDK 要求 `OTEL_METRIC_EXPORT_TIMEOUT` 小于 `OTEL_METRIC_EXPORT_INTERVAL`
 
 这里没有自研 SDK。PHP 示例使用 ReactPHP 长驻 worker 保留累计计数，不代表普通 PHP-FPM 每请求新建 SDK 能直接生成连续累计指标。C++、Rust 需要在应用代码初始化 Provider 并埋点；只配环境变量不会自动观测业务请求。新增五种语言当前示例只验证 HTTP，不承诺未测过的 RPC 自动指标。
 
-Ruby 在应用性能列表显示“仅 Trace · 无请求指标”，RPS、错误率和延迟保持空值。发现依赖 Tempo span-metrics 处理器；升级 Tempo 配置后新增 `telemetry.sdk.language` 维度才可显示语言图标。没有该处理器时仍可在链路页面查询 Trace。请求级告警需另行接入真实请求指标。
+Ruby 的 HTTP RPS、错误率和延迟从服务端 Trace 样本计算，并标注“Trace 样本”；这不是全量请求指标，也不补偿采样比例。概览、趋势和接口使用相同来源。发现依赖 Tempo span-metrics 处理器，以及 `http.request.method` / `http.method` 和 `telemetry.sdk.language` 维度；新配置只对后续 Span 生效。没有该处理器时仍可在链路页面查询 Trace。请求级告警需另行接入真实请求指标。
 
 先构建新增五个镜像，再运行隔离验收：
 
@@ -78,4 +78,4 @@ docker compose -f examples/apm-languages/compose.yaml build dotnet php cpp rust 
 scripts/apm-test/run-more-languages.sh
 ```
 
-脚本复用现有 Edge Collector 配置生成器、Tempo、Prometheus，测试每种语言的开启/关闭采样实例。每实例发送 40 个真实 HTTP 请求，包含 10 个 500 和 10 个慢请求，断言原生 Histogram 计数不受 Trace 采样开关影响，并验证采样开启时 Trace ID 与 JSON 日志一致。Ruby 明确断言无请求指标；关闭采样时所有语言均无 Trace。输出为 `output/apm-acceptance/more-languages.json`，退出自动清理测试容器和卷。需要空闲端口 13200、19090、14319。
+脚本复用现有 Edge Collector 配置生成器、Tempo、Prometheus，测试每种语言的开启/关闭采样实例。每实例发送 40 个真实 HTTP 请求，包含 10 个 500 和 10 个慢请求，断言原生 Histogram 计数不受 Trace 采样开关影响，并验证采样开启时 Trace ID 与 JSON 日志一致。Ruby 明确断言无原生请求指标，同时验证 HTTP Trace 样本的 RED、概览和接口回退；关闭采样时所有语言均无 Trace。输出为 `output/apm-acceptance/more-languages.json`，退出自动清理测试容器和卷。需要空闲端口 13200、19090、14319。

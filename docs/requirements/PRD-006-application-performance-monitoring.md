@@ -90,4 +90,4 @@
 
 ### 2026-09-08 扩展官方语言接入
 
-接入向导和持续 Edge 示例扩展为 Go、Java、Node.js、Python、C# / .NET、PHP、C++、Rust、Ruby。新增示例使用官方 SDK/框架埋点与标准 OTLP；PHP/C++/Rust 通过官方 Metrics API 测量实际请求，Rust 标注 Beta，Ruby 仅提供 Trace 与日志关联。服务列表发现只有 SERVER Trace 的服务并显示“仅 Trace · 无请求指标”，RED 保持空值；不推断全量请求统计。新增五语言必须验证开/关采样、真实请求计数、Trace/日志关联、完整服务身份和本地持续运行。证据见同日验收记录与 `examples/apm-languages/README.md`。
+接入向导和持续 Edge 示例扩展为 Go、Java、Node.js、Python、C# / .NET、PHP、C++、Rust、Ruby。新增示例使用官方 SDK/框架埋点与标准 OTLP；PHP/C++/Rust 通过官方 Metrics API 测量实际请求，Rust 标注 Beta，Ruby 仅提供 Trace 与日志关联。服务列表发现只有 SERVER Trace 的服务。无原生请求指标时，HTTP RED、趋势和接口统计使用 Trace 样本补充，并明确标注样本来源；不推断全量请求统计，不将两种来源相加。新增五语言必须验证开/关采样、真实请求计数、Trace/日志关联、完整服务身份和本地持续运行。证据见同日验收记录与 `examples/apm-languages/README.md`。

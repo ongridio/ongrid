@@ -38,7 +38,8 @@ message Query {
   // rps (total), error_rate (request-weighted), p95_ms (highest protocol P95), name.
   string sort = 10;
   string search = 11;
-  // application_metrics (default) or tempo_spanmetrics. Never silently mixed.
+  // application_metrics (default, HTTP falls back to labelled Trace samples when absent)
+  // or tempo_spanmetrics. Native and sampled populations are never added together.
   string metric_source = 12;
   // http (default) or rpc; services also accept all to group both protocols.
   // Protocol-specific percentiles remain separate. Traces retain span_kind.
@@ -56,14 +57,15 @@ message Summary {
   optional double p95_ms = 6;
   optional double p99_ms = 7;
   optional double requests = 8;
-  // traces_only means the service was observed in server spans but no native
-  // request metrics were observed. Request rates and latencies remain absent.
+  // traces_only means server spans exist without HTTP dimensions for RED.
   string data_status = 9;
   // Populated for protocol=all services. Top-level RPS and error rate cover all
   // observed protocols; percentiles are only exposed per protocol.
   repeated ProtocolMetrics protocols = 10;
   // Distinct telemetry.sdk.language values observed in request metrics or traces.
   repeated string languages = 11;
+  // application_metrics or tempo_spanmetrics, per row in a mixed services list.
+  string metric_source = 12;
 }
 
 message ProtocolMetrics {

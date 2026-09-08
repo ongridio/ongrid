@@ -6,6 +6,7 @@ export type ServiceIdentity = {
   environment: string;
 };
 export type ApmSummary = {
+  metric_source?: string;
   identity: ServiceIdentity;
   operation?: string;
   languages?: string[];
@@ -145,6 +146,8 @@ export function serviceTraceQL(params: URLSearchParams, extra?: string) {
   }
   const operation = params.get('operation');
   if (params.get('metric_source') === 'tempo_spanmetrics') {
+    if (params.get('protocol') !== 'rpc' && params.get('protocol') !== 'all' && params.get('span_kind') !== 'consumer')
+      clauses.push('(span.http.request.method != nil || span.http.method != nil)');
     if (operation) clauses.push('name = ' + JSON.stringify(operation));
   } else if (params.get('protocol') === 'rpc') {
     clauses.push('(span.rpc.system.name != nil || span.rpc.system != nil)');

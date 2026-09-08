@@ -49,6 +49,8 @@ metrics_generator:
         - service.namespace
         - deployment.environment.name
         - telemetry.sdk.language
+        - http.request.method
+        - http.method
     service_graphs:
       max_items: 10000
       enable_client_server_prefix: true

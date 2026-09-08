@@ -81,7 +81,7 @@ def run(job):
             c.request('GET', '/orders/42' + suffix); r = c.getresponse(); r.read(); c.close()
             assert r.status == status, (job, suffix, r.status)
             if 'slow' in suffix: assert time.monotonic() - before >= 0.075
-        time.sleep(2)
+        time.sleep(3)
 with ThreadPoolExecutor(max_workers=len(jobs)) as pool: list(pool.map(run,jobs))
 '''.replace('JOBS', repr(results))
     subprocess.run(['docker', 'run', '--rm', '--network', NETWORK, '--entrypoint', 'python',
@@ -107,6 +107,7 @@ with ThreadPoolExecutor(max_workers=len(jobs)) as pool: list(pool.map(run,jobs))
                     assert len(traces) >= 40, (language, 'waiting for all sampled requests', len(traces))
                     if language == 'ruby':
                         assert query('traces_spanmetrics_calls_total{service="apm-ruby",span_kind="SPAN_KIND_SERVER",telemetry_sdk_language="ruby"}'), 'waiting for Tempo service discovery metrics'
+                        assert query('sum(rate(traces_spanmetrics_calls_total{service="apm-ruby",span_kind="SPAN_KIND_SERVER",http_method!=""}[1m]) or rate(traces_spanmetrics_calls_total{service="apm-ruby",span_kind="SPAN_KIND_SERVER",http_request_method!=""}[1m])) > 0'), 'waiting for sampled HTTP rates'
                     logs = []
                     for line in (LOGS / f'{language}-{instance}.log').read_text().splitlines():
                         try: logs.append(json.loads(line))

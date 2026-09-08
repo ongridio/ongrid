@@ -255,6 +255,9 @@ func (p *protocolProm) Query(ctx context.Context, expr string, at time.Time) (*p
 	}
 	if strings.Contains(expr, "traces_spanmetrics_calls_total") {
 		protocol = "traces"
+		if strings.Contains(expr, `http_request_method!=""`) {
+			protocol = "trace_http"
+		}
 	}
 	p.result = p.results[protocol]
 	if p.result == "" {
@@ -361,5 +364,52 @@ func TestTraceOnlyDiscoveryPreservesNativeMetricsAndIdentity(t *testing.T) {
 	}
 	if !strings.Contains(p.expr, `span_kind="SPAN_KIND_SERVER"`) {
 		t.Fatalf("discovery includes non-server spans: %s", p.expr)
+	}
+}
+
+func TestHTTPTraceFallbackIsLabelledAndNativeMetricsWin(t *testing.T) {
+	p := &protocolProm{results: map[string]string{
+		"traces": `[{"metric":{"service":"orders","service_namespace":"trade","deployment_environment_name":"production","telemetry_sdk_language":"ruby"},"value":[1600,"5"]}]`,
+		"trace_http": `[
+ {"metric":{"service":"orders","service_namespace":"trade","deployment_environment_name":"production","apm_stat":"rps"},"value":[1600,"2"]},
+ {"metric":{"service":"orders","service_namespace":"trade","deployment_environment_name":"production","apm_stat":"error_rate"},"value":[1600,"25"]},
+ {"metric":{"service":"orders","service_namespace":"trade","deployment_environment_name":"production","apm_stat":"p95_ms"},"value":[1600,"120"]}
+ ]`,
+	}}
+	svc := New(p, nil, nil)
+	q := testQuery()
+	q.MetricSource, q.Protocol = "application_metrics", "all"
+	list, err := svc.List(t.Context(), q, false)
+	if err != nil || len(list.Items) != 1 || list.Metadata.MetricSource != "mixed" {
+		t.Fatalf("service fallback: %+v %v", list, err)
+	}
+	row := list.Items[0]
+	if row.MetricSource != "tempo_spanmetrics" || row.RPS == nil || *row.RPS != 2 || row.ErrorRate == nil || *row.ErrorRate != 25 || row.P95Ms == nil || *row.P95Ms != 120 || strings.Join(row.Languages, ",") != "ruby" {
+		t.Fatalf("sample RED missing provenance or language: %+v", row)
+	}
+	for _, required := range []string{`span_kind="SPAN_KIND_SERVER"`, `http_request_method!=""`, `http_method!=""`, " or "} {
+		if !strings.Contains(p.expr, required) {
+			t.Fatalf("HTTP population filter missing %s: %s", required, p.expr)
+		}
+	}
+	q.Protocol = "http"
+	operations, err := svc.List(t.Context(), q, true)
+	if err != nil || operations.Metadata.MetricSource != "tempo_spanmetrics" || len(operations.Items) != 1 {
+		t.Fatalf("operation fallback: %+v %v", operations, err)
+	}
+	overview, err := svc.Overview(t.Context(), q)
+	if err != nil || overview.Metadata.MetricSource != "tempo_spanmetrics" || overview.Summary.RPS == nil || !strings.Contains(p.expr, "traces_spanmetrics_latency_bucket") {
+		t.Fatalf("overview/trend fallback: %+v %v %s", overview, err, p.expr)
+	}
+	p.results["http"] = `[{"metric":{"service":"orders","service_namespace":"trade","deployment_environment_name":"production","apm_stat":"rps"},"value":[1600,"10"]}]`
+	q.Protocol = "all"
+	list, err = svc.List(t.Context(), q, false)
+	if err != nil || len(list.Items) != 1 || list.Items[0].MetricSource != "application_metrics" || *list.Items[0].RPS != 10 {
+		t.Fatalf("sample and native populations mixed: %+v %v", list, err)
+	}
+	q.Protocol = "rpc"
+	list, err = svc.List(t.Context(), q, true)
+	if err != nil || len(list.Items) != 0 {
+		t.Fatalf("HTTP spans became RPC metrics: %+v %v", list, err)
 	}
 }
