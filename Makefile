@@ -101,6 +101,15 @@ build-ongrid-edge: ## 构建边端 ongrid-edge
 # ----------------------------------------------------------------------------
 
 .PHONY: test test-race test-integration test-e2e test-e2e-live
+.PHONY: test-apm-acceptance
+test-apm-acceptance: ## APM 真实多语言、ES 关联、告警、容量和按需 Profiling 验收（独立 Docker）
+	APM_TEST_LOAD=1 APM_TEST_OVERHEAD="$${APM_TEST_OVERHEAD:-1}" scripts/apm-test/run-languages.sh
+	APM_TEST_LANGUAGE_LOG_DIR="$${APM_ACCEPTANCE_OUTPUT:-$(CURDIR)/output/apm-acceptance}" scripts/apm-test/run-logs.sh
+	scripts/apm-test/run.sh
+	scripts/apm-test/run-profiles.sh
+	npm run typecheck --prefix web
+	npm test --prefix web -- --run src/api/apm.test.ts src/pages/Apm.test.tsx src/pages/Logs.test.tsx src/pages/DailyTools.test.tsx src/pages/Traces.test.tsx --maxWorkers=2 --minWorkers=2 --testTimeout=20000
+
 test: ## 单元测试
 	go test ./...
 

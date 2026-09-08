@@ -593,7 +593,7 @@ describe('Application performance', () => {
     expect(traceURL.searchParams.get('q')).not.toContain('span.http');
     expect(traceURL.searchParams.get('q')).not.toContain('span.rpc');
   });
-  it('includes RPC-only sampled instances and deduplicates instances shared by both protocols', async () => {
+  it('shows instances without sampled traces and deduplicates both protocols', async () => {
     const protocols = new Set<string>();
     const shared = {
       instance_id: 'shared-instance',
@@ -628,6 +628,7 @@ describe('Application performance', () => {
       </MemoryRouter>,
     );
     await screen.findByText(/rpc-instance/);
+    expect(screen.getByRole('heading', { name: '观测到的实例' })).toBeInTheDocument();
     expect(screen.getAllByText(/shared-instance/)).toHaveLength(1);
     expect([...protocols].sort()).toEqual(['http', 'rpc']);
     fireEvent.click(screen.getByRole('button', { name: '接入管理' }));

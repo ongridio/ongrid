@@ -40,6 +40,16 @@ func (s *Service) Diagnostics(ctx context.Context, q Query) (*Diagnostics, error
 		return nil, err
 	}
 	out := &Diagnostics{Checks: []Check{}, Instances: []Instance{}, TraceIDs: []string{}, Metadata: metadata(q)}
+	instances := map[Instance]bool{}
+	addInstance := func(instance Instance) {
+		if (instance.InstanceID != "" || instance.DeviceID != "" || instance.Pod != "") && !instances[instance] {
+			instances[instance] = true
+			out.Instances = append(out.Instances, instance)
+		}
+	}
+	defer func() {
+		sort.Slice(out.Instances, func(i, j int) bool { return fmt.Sprint(out.Instances[i]) < fmt.Sprint(out.Instances[j]) })
+	}()
 	rows, err := s.summaries(ctx, q, false)
 	switch {
 	case err != nil:
@@ -48,6 +58,25 @@ func (s *Service) Diagnostics(ctx context.Context, q Query) (*Diagnostics, error
 		out.Checks = append(out.Checks, Check{"metrics", "not_observed", "no_metrics"})
 	default:
 		out.Checks = append(out.Checks, Check{"metrics", "observed", rows[0].DataStatus})
+	}
+	if err == nil && len(rows) > 0 && q.MetricSource != "tempo_spanmetrics" {
+		// Keep instance discovery independent of trace sampling. Scope is still
+		// the exact service/environment/namespace and selected metric schema.
+		expr := q.aggregate("count_over_time", q.counter(), q.End.Sub(q.Start), "service_instance_id,device_id,cluster_id,k8s_pod_name,service_version")
+		series, instanceErr := s.instant(ctx, expr, q.End)
+		if instanceErr != nil {
+			out.Checks = append(out.Checks, Check{"instance_metrics", "unavailable", "query_failed"})
+		} else {
+			for _, sample := range series {
+				labels := sample.Metric
+				addInstance(Instance{labels["service_instance_id"], labels["device_id"], labels["cluster_id"], labels["k8s_pod_name"], labels["service_version"]})
+			}
+			status := "observed"
+			if len(out.Instances) == 0 {
+				status = "incomplete"
+			}
+			out.Checks = append(out.Checks, Check{"instance_metrics", status, strconv.Itoa(len(out.Instances))})
+		}
 	}
 	out.Checks = append(out.Checks, Check{"sampling", "unknown", "upstream_sampling_unknown"})
 	if s.traces == nil {
@@ -70,7 +99,6 @@ func (s *Service) Diagnostics(ctx context.Context, q Query) (*Diagnostics, error
 		out.Checks = append(out.Checks, Check{"traces", "not_observed", "no_traces"})
 		return out, nil
 	}
-	instances := map[Instance]bool{}
 	var serviceSpans, downstream, missingParents int
 	for _, summary := range summaries[:min(3, len(summaries))] {
 		traceID := canonicalTraceID(summary.TraceID)
@@ -108,9 +136,7 @@ func (s *Service) Diagnostics(ctx context.Context, q Query) (*Diagnostics, error
 				}
 			}
 			instance := Instance{attrs["service.instance.id"], attrs["device_id"], attrs["cluster_id"], attrs["k8s.pod.name"], attrs["service.version"]}
-			if instance.InstanceID != "" || instance.DeviceID != "" || instance.Pod != "" {
-				instances[instance] = true
-			}
+			addInstance(instance)
 		}
 		if matched {
 			out.TraceIDs = append(out.TraceIDs, traceID)
@@ -137,10 +163,6 @@ func (s *Service) Diagnostics(ctx context.Context, q Query) (*Diagnostics, error
 		status = "incomplete"
 	}
 	out.Checks = append(out.Checks, Check{"context", status, strconv.Itoa(missingParents)})
-	for instance := range instances {
-		out.Instances = append(out.Instances, instance)
-	}
-	sort.Slice(out.Instances, func(i, j int) bool { return fmt.Sprint(out.Instances[i]) < fmt.Sprint(out.Instances[j]) })
 	if s.logs == nil {
 		out.Checks = append(out.Checks, Check{"logs", "unavailable", "backend_disabled"})
 	} else {

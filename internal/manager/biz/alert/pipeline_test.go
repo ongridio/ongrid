@@ -19,6 +19,26 @@ type fakeEdgeLister struct {
 	err   error
 }
 
+func TestPipelineNotificationPreservesApplicationIdentity(t *testing.T) {
+	repo, notifier := newFakeRepo(), &fakeNotifier{}
+	prom := &fakePromQuerier{result: &promquery.InstantResult{ResultType: "vector", Result: json.RawMessage(`[{"metric":{"service":"orders","service_namespace":"trade","deployment_environment_name":"production","span_name":"GET /orders/{id}","incident_id":"spoofed"},"value":[1,"25"]}]`)}}
+	rules := NewStaticRulesProvider(WithMetricRawRules([]MetricRawRule{{ID: 1, RuleKey: "apm_error", Name: "APM errors", ScopeType: "global", Expr: "up > 0"}}))
+	evaluator := newPipelineEvaluator(t, repo, notifier, rules, PipelineEvaluatorOpts{PromQuerier: prom})
+	evaluator.EvaluateOnce(t.Context())
+	if len(notifier.msgs) != 1 {
+		t.Fatalf("notifications=%d", len(notifier.msgs))
+	}
+	labels := notifier.msgs[0].Labels
+	for key, want := range map[string]string{"service": "orders", "service_namespace": "trade", "deployment_environment_name": "production", "span_name": "GET /orders/{id}"} {
+		if labels[key] != want {
+			t.Fatalf("lost %s in notification: %+v", key, labels)
+		}
+	}
+	if labels["rule"] != "apm_error" || labels["incident_id"] == "spoofed" || labels["incident_id"] == "" {
+		t.Fatalf("control identity overwritten: %+v", labels)
+	}
+}
+
 func (f *fakeEdgeLister) List(_ context.Context, _ edgebiz.ListFilter) ([]*edgemodel.Edge, error) {
 	return f.edges, f.err
 }

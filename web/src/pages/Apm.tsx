@@ -1163,6 +1163,7 @@ export default function ApmPage() {
                           <span>
                             {{
                               metrics: tr('请求指标', 'Request metrics'),
+                              instance_metrics: tr('实例指标', 'Instance metrics'),
                               sampling: tr('Trace 采样覆盖率', 'Trace sampling coverage'),
                               traces: tr('链路接收', 'Trace ingestion'),
                               resource_identity: tr('服务身份', 'Service identity'),
@@ -1201,11 +1202,11 @@ export default function ApmPage() {
             {tab === 'instances' && (
               <Card>
                 <h2 className="text-sm font-medium">
-                  {tr('样本关联实例', 'Instances in sampled traces')}
+                  {tr('观测到的实例', 'Observed instances')}
                 </h2>
                 {instances.length === 0 ? (
                   <EmptyState
-                    title={tr('样本缺少实例关联字段', 'Samples have no instance identity')}
+                    title={tr('未观测到实例关联字段', 'No instance identity observed')}
                   />
                 ) : (
                   <div className="divide-y divide-[rgb(var(--border))]">

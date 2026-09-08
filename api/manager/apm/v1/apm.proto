@@ -122,6 +122,8 @@ message GetDependenciesResponse { int32 code = 1; string message = 2; GetDepende
 
 message DiagnosticCheck { string key = 1; string status = 2; string detail = 3; }
 message ObservedInstance {
+  // Observed in native request metrics or sampled traces within the query
+  // window; this is not an inventory of every deployed application instance.
   string instance_id = 1;
   string device_id = 2;
   string cluster_id = 3;
@@ -131,7 +133,7 @@ message ObservedInstance {
 message GetDiagnosticsRequest { Query query = 1; }
 message GetDiagnosticsData {
   repeated DiagnosticCheck checks = 1;
-  repeated ObservedInstance instances = 2;
+  repeated ObservedInstance instances = 2; // Includes metric-only, unsampled instances.
   repeated string trace_ids = 3;
   uint32 sampled_traces = 4;
   QueryMetadata metadata = 5;

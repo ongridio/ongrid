@@ -8,6 +8,8 @@
 
 在「接入管理」填写语言、目标地址、服务、业务命名空间和环境，复制配置。应用身份为 `(environment, service.namespace, service.name)`；service.namespace 不等同于 K8s namespace。缺失属性会进入“未设置”。接收端将旧 deployment.environment 补为 deployment.environment.name，已有规范属性优先。身份保持稳定，路由使用 `/orders/{id}`，不要使用带参数的原始 URL、用户 ID 或 SQL 作为指标标签。
 
+多副本部署须在 `OTEL_RESOURCE_ATTRIBUTES` 中额外设置每个实例唯一的 `service.instance.id`，例如由部署系统注入 Pod UID。不要把同一个固定示例值复制到所有副本；仅有 `device_id` 只能关联设备，无法区分同机的多个应用实例。用实际部署清单与观测列表逐项核对接入覆盖。
+
 - Java：下载官方 [Java Agent](https://opentelemetry.io/docs/zero-code/java/agent/)，将其路径传给 `-javaagent`。
 - Node.js：安装 `@opentelemetry/api` 和 `@opentelemetry/auto-instrumentations-node`，在框架加载前注册。页面命令针对 CommonJS；ESM 按[官方指引](https://github.com/open-telemetry/opentelemetry-js/blob/main/doc/esm-support.md)使用 loader。
 - Python：安装 `opentelemetry-distro`、`opentelemetry-exporter-otlp`，执行 `opentelemetry-bootstrap -a install`，使用 `opentelemetry-instrument` 启动应用。
@@ -69,7 +71,7 @@ OTLP 日志使用标准 trace_id/span_id；文件或 CRI 日志可写单行 JSON
 
 查询通过当前选择的 Loki/Elasticsearch 后端，环境和服务命名空间使用结构化字段；“未设置”匹配空或缺失属性。页面会显示关联筛选，点击日志上的 Trace ID 返回链路。
 
-**K8s 网关现有 OTLP 日志出口是 Loki 通道。选择 Elasticsearch 不会自动改变它。** ES 场景使用已有 Node Agent 的容器/文件日志采集（按当前日志后端下发的配置写 ES），应用保留 `OTEL_LOGS_EXPORTER=none`，避免写入与查询分离。已有官方 OTel ES 直写管道也可复用，但必须核验该服务身份和 trace_id 确实写到当前查询索引。
+**已配置 Elasticsearch 的环境继续使用现有 ES 日志通道，无需迁移到 Loki。** Node Agent 的容器/文件日志会按当前日志后端配置写 ES。另需区分：K8s Gateway 的 OTLP 日志出口仍是 Loki，切换查询后端不会自动修改这个独立出口。ES 场景使用已有 Node Agent 的容器/文件日志采集（按当前日志后端下发的配置写 ES），应用保留 `OTEL_LOGS_EXPORTER=none`，避免写入与查询分离。已有官方 OTel ES 直写管道也可复用，但必须核验该服务身份和 trace_id 确实写到当前查询索引。
 
 ## 4. 验收和数据语义
 
@@ -95,9 +97,23 @@ OTLP 日志使用标准 trace_id/span_id；文件或 CRI 日志可写单行 JSON
 
 四种格式分别查询 `_count` 和 `_bucket`。必需资源标签为 `service_name`，环境与命名空间使用 `deployment_environment_name`、`service_namespace`。HTTP/RPC 分别计算指标后按完整服务身份分组；只有请求速率和按请求量加权的错误率可以跨协议汇总，分位数保持协议独立。新旧格式不混合，不回退到 Trace 指标。不同语言版本可能尚未实现当前 RPC 约定，需检查实际导出名称；任意自定义 RPC 指标不能直接套用。
 
+已验证的语言兼容性（2026-09-08）：
+
+| 接入组件 | HTTP 请求指标 | gRPC 请求指标 | HTTP/gRPC Trace 和 JSON 日志关联 |
+|---|---|---|---|
+| Go 官方 SDK 1.43 / instrumentation 0.68 | 支持 | 支持 | 支持 |
+| Java Agent 2.31.1 | 支持 | 支持 | 支持 |
+| Node auto-instrumentations 0.80.0 / grpc instrumentation 0.222.0 | 支持 | 官方自动埋点未提供 | 支持 |
+| Python distro / instrumentation 0.65b0 / SDK 1.44.0 | 支持 | 官方自动埋点未提供 | 支持 |
+
+Node.js/Python 的 gRPC 请求可用显式 Trace 样本视图排查；不能把样本计数当作全量请求指标或建立新的请求级告警。样例与锁定依赖在 `examples/apm-languages`，使用官方自动埋点，无自研探针或手工拼造语言请求指标。
+
 自动化验收：
 
 ```bash
+# 完整验收含多语言、ES、本地 Webhook、容量及埋点开销：
+# 需 Docker、Go、Node.js/npm、Python3、JDK17+；首次自动下载固定测试依赖。
+make test-apm-acceptance
 # 独立容器、仅本机端口；退出清理测试容器/卷。需 Docker + Go。
 scripts/apm-test/run.sh
 scripts/apm-test/run-logs.sh
@@ -110,6 +126,8 @@ cd web && npm test -- src/api/apm.test.ts src/pages/Apm.test.tsx src/pages/Logs.
 ## 5. 运行时与按需 Profile
 
 运行时页面读取已有应用 gauge：Go goroutines/heap、process RSS、JVM memory/threads、Node event-loop lag。指标需带 `service_name`（或 service）、`service_namespace`、`deployment_environment_name`，以及可选 `service_instance_id`。没有这些标签时不猜测主机指标属于哪个应用。页面显示结束时间前 5 分钟内的最近值。
+
+实例页合并所选时段内原生请求指标与 Trace 样本中的实例身份，因此关闭 Trace 采样的实例仍可出现。缺少实例 ID 时只使用实际上报的设备/Pod 字段，不按同名补猜；这不是部署实例清单，全部实例是否完成接入还需与业务部署清单核对。
 
 从诊断中的实例跳转「按需 pprof 采集」会预选关联设备和服务身份，采集 URL 留空，必须输入该实例真实、可达的端点再开始。默认查询新采集的最近 15 分钟，可切换为跳转时的绝对历史区间。API 新增可选 start/end、environment、service_namespace、instance_id，旧 range 查询兼容。没有同期 Profile 就是无数据；新采集无法还原历史。pprof 的时间关联不是 Span 级函数归因，也不代表所有语言都支持 pprof。
 

@@ -81,3 +81,9 @@
 - 应用 Metrics 默认来源，HTTP / RPC 可切换；旧版格式单独选择，Trace 样本视图不静默回退或混算，不能新建请求级告警。
 - 官方 Go SDK + HTTP/gRPC 埋点，Trace 采样关闭：各 12 次调用、零导出 Span。实际 Collector 0.157.0 → Prometheus 2.54 查询验证精确计数、25% 错误率、毫秒延迟、接口过滤、当前/旧版 RPC 双发不重复计数。
 - 主机 Collector 复用本机 Prometheus exporter + 既有认证隧道，Kubernetes 保留现有 Metrics remote_write；不新增存储或公开写入口。
+
+### 2026-09-08 补齐验收
+
+新增官方 Java/Node/Python 真实 HTTP/gRPC 应用与一条 `make test-apm-acceptance` 验收入口，覆盖采样关闭、指标实例发现、真实请求日志经现有 Collector 写 ES、告警持久化/本地通知/恢复和容量/SDK 开销测试。实例不再只来自 Trace 抽样；通知保留应用身份。Node/Python 官方 gRPC 原生指标支持边界在接入页明确展示。
+
+范围、证据与仍需业务试点确认的项目见 [验收记录](../test/apm-acceptance-20260908.md)，规模与开销见 [压测记录](../ops/loadtest-20260908.md)。历史“未压测”描述仅对应 2026-09-07 当日状态；本轮仍不等同于生产业务验收。
