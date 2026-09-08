@@ -658,7 +658,7 @@ it('APM 跳转预选设备、要求实例端点，并按历史区间查询完整
   render(<MemoryRouter initialEntries={['/tools?tool=profile&device_id=11&service_name=orders&service_namespace=trade&environment=production&instance_id=pod-1&start=2026-09-07T00:00:00Z&end=2026-09-07T01:00:00Z']}><DailyToolsPage /></MemoryRouter>);
   expect(await screen.findByLabelText('采集 URL')).toHaveValue('');
   expect(screen.getByRole('button', { name: '开始采样' })).toBeDisabled();
-  await userEvent.click(screen.getByRole('checkbox', { name: /查询跳转时的历史区间/ }));
+  await act(async () => { await userEvent.click(screen.getByRole('checkbox', { name: /查询跳转时的历史区间/ })); });
   await waitFor(() => expect(profileQuery).toBeDefined());
   expect(profileQuery?.searchParams.get('device_id')).toBe('11');
   expect(profileQuery?.searchParams.get('service')).toBe('orders');

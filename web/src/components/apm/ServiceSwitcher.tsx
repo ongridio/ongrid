@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { Hint } from '@/components/ui/Tooltip';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/Popover';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ChevronDown } from 'lucide-react';
 import { queryApm, serviceParams, type ApmList } from '@/api/apm';
@@ -17,18 +19,8 @@ export function ServiceSwitcher({
   const [search, setSearch] = useState('');
   const [result, setResult] = useState<ApmList>();
   const [error, setError] = useState('');
-  const container = useRef<HTMLDivElement>(null);
-  const trigger = useRef<HTMLButtonElement>(null);
   const query = params.toString();
   useEffect(() => setOpen(false), [query]);
-  useEffect(() => {
-    if (!open) return;
-    const close = (e: PointerEvent) => {
-      if (!container.current?.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('pointerdown', close);
-    return () => document.removeEventListener('pointerdown', close);
-  }, [open]);
   useEffect(() => {
     if (!open) return;
     const p = new URLSearchParams(query);
@@ -56,36 +48,11 @@ export function ServiceSwitcher({
       });
     return () => controller.abort();
   }, [open, search, query]);
-  return (
-    <div
-      ref={container}
-      className="relative min-w-0"
-      onKeyDown={(e) => {
-        if (e.key === 'Escape') {
-          setOpen(false);
-          trigger.current?.focus();
-        }
-      }}
-    >
-      <button
-        ref={trigger}
-        type="button"
-        aria-label={tr('切换服务', 'Switch service')}
-        aria-expanded={open}
-        className="flex max-w-full items-center gap-2 rounded text-left hover:text-indigo-500"
-        onClick={() => setOpen(!open)}
-      >
-        <span className="truncate" title={params.get('service_name') || ''}>
-          {params.get('service_name')}
-        </span>
-        <ChevronDown size={15} className="shrink-0" />
-      </button>
-      {open && (
-        <div
-          role="dialog"
-          aria-label={tr('选择服务', 'Choose service')}
-          className="absolute left-0 top-full z-30 mt-2 w-80 max-w-[calc(100vw-3rem)] rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-sm font-normal shadow-lg"
-        >
+  return <Popover open={open} onOpenChange={setOpen}>
+    <PopoverTrigger aria-label={tr('切换服务', 'Switch service')} className="flex min-w-0 max-w-full items-center gap-2 rounded text-left hover:text-indigo-500">
+      <Hint content={params.get('service_name') || ''}><span className="truncate" >{params.get('service_name')}</span></Hint><ChevronDown size={15} className="shrink-0" />
+    </PopoverTrigger>
+    <PopoverContent aria-label={tr('选择服务', 'Choose service')} className="w-80 text-sm font-normal">
           <SearchInput
             value={search}
             onChange={setSearch}
@@ -128,8 +95,6 @@ export function ServiceSwitcher({
               )}
             </p>
           )}
-        </div>
-      )}
-    </div>
-  );
+    </PopoverContent>
+  </Popover>;
 }

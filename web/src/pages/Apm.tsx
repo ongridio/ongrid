@@ -1,3 +1,8 @@
+import { FilterField } from '@/components/ui/FilterField';
+import { Label, Input } from '@/components/ui';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
+import { Hint } from '@/components/ui/Tooltip';
+import { Select } from '@/components/ui/Select';
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowDown, ArrowRight, ArrowUp, ArrowUpRight, Clock, RefreshCw } from 'lucide-react';
@@ -31,7 +36,7 @@ import { useI18n } from '@/i18n/locale';
 import { usePermissions } from '@/store/me';
 import './Apm.css';
 
-const input = 'h-9 rounded-md border border-zinc-800 bg-zinc-950 px-2 text-xs text-zinc-100';
+const input = "";
 const periods = [
   ['15m', 900000, '最近 15 分钟', 'Last 15 minutes'],
   ['1h', 3600000, '最近 1 小时', 'Last hour'],
@@ -369,21 +374,21 @@ export default function ApmPage() {
         className={`px-3 py-2.5 font-normal ${numeric ? 'text-right' : 'pl-4'}`}
         aria-sort={active ? (key === 'name' ? 'ascending' : 'descending') : 'none'}
       >
-        <button
+        <Hint content={hint}><Button variant="subtle" size="sm"
           type="button"
-          title={hint}
+
           onClick={() => set(sortKey, key)}
           aria-label={tr(`按${label}排序`, `Sort by ${label}`)}
           className={`inline-flex items-center gap-1 rounded py-0.5 hover:text-zinc-100 ${active ? 'font-medium text-zinc-100' : ''}`}
         >
           {label}
           {active && (key === 'name' ? <ArrowUp size={12} /> : <ArrowDown size={12} />)}
-        </button>
+        </Button></Hint>
       </th>
     );
   };
   return (
-    <div className="apm-page flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+    <Tabs value={operation ? 'operations' : tab} className="contents"><div className="apm-page flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <PageHeader
         title={
           detail ? (
@@ -420,13 +425,12 @@ export default function ApmPage() {
                     )
                   : ''}
             </span>
-            <div className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2">
-              <Clock size={13} className="text-zinc-500" />
-              <select
+            <FilterField label={<><Clock size={13} />{tr('时间', 'Time')}</>}>
+              <Select
                 aria-label={tr('时间范围', 'Time range')}
-                className={`${input} border-0 px-0`}
+                className="h-9 w-auto"
                 value={period}
-                onChange={(e) => pickPeriod(e.target.value)}
+                onValueChange={(selectedValue) => pickPeriod(selectedValue)}
               >
                 {periods.map(([key, , zh, en]) => (
                   <option key={key} value={key}>
@@ -434,8 +438,8 @@ export default function ApmPage() {
                   </option>
                 ))}
                 <option value="custom">{tr('自定义时间', 'Custom range')}</option>
-              </select>
-            </div>
+              </Select>
+            </FilterField>
             <Button
               className="h-9"
               onClick={() => (period === 'custom' ? setRefresh((v) => v + 1) : pickPeriod(period))}
@@ -461,31 +465,33 @@ export default function ApmPage() {
                       ],
                     ] as const
                   ).map(([key, label, options]) => (
-                    <select
-                      key={key}
-                      aria-label={
-                        key === 'environment'
-                          ? tr('环境', 'Environment')
-                          : tr('业务命名空间', 'Service namespace')
-                      }
-                      className={`${input} max-w-52`}
-                      value={params.get(key) || ''}
-                      onChange={(e) => set(key, e.target.value || null)}
-                    >
-                      <option value="">{label}</option>
-                      {[
-                        ...new Set([
-                          ...(options || []),
-                          ...(params.has(key) ? [params.get(key)!] : []),
-                        ]),
-                      ]
-                        .filter(Boolean)
-                        .map((value) => (
-                          <option key={value} value={value}>
-                            {value}
-                          </option>
-                        ))}
-                    </select>
+                    <FilterField key={key} label={key === 'environment' ? tr('环境', 'Environment') : tr('业务命名空间', 'Service namespace')} className="max-w-sm">
+                      <Select
+                        key={key}
+                        aria-label={
+                          key === 'environment'
+                            ? tr('环境', 'Environment')
+                            : tr('业务命名空间', 'Service namespace')
+                        }
+                        className="h-9 w-auto max-w-52"
+                        value={params.get(key) || ''}
+                        onValueChange={(selectedValue) => set(key, selectedValue || null)}
+                      >
+                        <option value="">{label}</option>
+                        {[
+                          ...new Set([
+                            ...(options || []),
+                            ...(params.has(key) ? [params.get(key)!] : []),
+                          ]),
+                        ]
+                          .filter(Boolean)
+                          .map((value) => (
+                            <option key={value} value={value}>
+                              {value}
+                            </option>
+                          ))}
+                      </Select>
+                    </FilterField>
                   ))}
 
                   <div className="w-full sm:max-w-sm sm:flex-1">
@@ -499,12 +505,12 @@ export default function ApmPage() {
               )}
               {period === 'custom' &&
                 ['start', 'end'].map((key) => (
-                  <label
+                  <FilterField
                     key={key}
-                    className="flex flex-wrap items-center gap-2 text-xs text-zinc-500"
+                    label={key === 'start' ? tr('开始时间', 'Start time') : tr('结束时间', 'End time')}
                   >
-                    {key === 'start' ? tr('开始时间', 'Start time') : tr('结束时间', 'End time')}
-                    <input
+                    <Input
+                      aria-label={key === 'start' ? tr('开始时间', 'Start time') : tr('结束时间', 'End time')}
                       type="datetime-local"
                       step="1"
                       className={input}
@@ -513,40 +519,34 @@ export default function ApmPage() {
                         if (e.target.value) set(key, new Date(e.target.value).toISOString());
                       }}
                     />
-                  </label>
+                  </FilterField>
                 ))}
             </div>
           )
         }
       />
       {detail && (
-        <nav
+        <TabsList activateOnFocus={false}
           aria-label={tr('应用性能视图', 'APM views')}
           className="flex shrink-0 flex-wrap items-center gap-x-5 border-b border-zinc-800 px-6"
         >
           {tabs.map(([key, label]) => (
-            <Link
-              key={key}
-              state={location.state}
-              to={viewLink(key)}
-              className={`border-b-2 py-3 text-xs ${(operation ? 'operations' : tab) === key ? 'border-indigo-500 font-medium text-zinc-100' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}
-              aria-current={(operation ? 'operations' : tab) === key ? 'page' : undefined}
-            >
+            <TabsTrigger key={key} value={key} nativeButton={false} render={<Link state={location.state} to={viewLink(key)} />} >
               {label}
-            </Link>
+            </TabsTrigger>
           ))}
           <div className="ml-auto flex items-center gap-4 py-1.5">
-            <button
+            <Button variant="subtle" size="sm"
               type="button"
-              className="text-xs text-zinc-500 hover:text-zinc-100"
+              className=""
               onClick={() => set('tab', 'onboarding')}
             >
               {tr('接入管理', 'Instrumentation')}
-            </button>
+            </Button>
           </div>
-        </nav>
+        </TabsList>
       )}
-      <main ref={main} className="flex-1 space-y-3 overflow-auto px-6 py-4">
+      <TabsContent value={operation ? 'operations' : tab} className="contents"><main ref={main} className="flex-1 space-y-3 overflow-auto px-6 py-4">
         {detail && tab === 'overview' && (
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
@@ -573,13 +573,13 @@ export default function ApmPage() {
             </div>
             <div className="flex flex-wrap gap-4 text-sm">
               {isAdmin && !traceMetrics && (
-                <button
+                <Button variant="subtle" size="sm"
                   type="button"
-                  className="text-zinc-500 hover:text-indigo-500"
+                  className=""
                   onClick={() => set('tab', 'alerts')}
                 >
                   {tr('创建告警', 'Create alert')}
-                </button>
+                </Button>
               )}
               <Link
                 className="inline-flex items-center gap-1 text-zinc-500 hover:text-indigo-500"
@@ -641,43 +641,40 @@ export default function ApmPage() {
               >
                 ← {tr('返回指标', 'Back to metrics')}
               </Link>
-              <label className="flex items-center gap-2 text-xs text-zinc-500">
-                {tr('指标来源', 'Metric source')}
-                <select
-                  className={input}
+              <FilterField label={tr('指标来源', 'Metric source')}>
+                <Select
+                  label={tr('指标来源', 'Metric source')}
                   value={params.get('metric_source') || 'application_metrics'}
-                  onChange={(e) => set('metric_source', e.target.value)}
+                  onValueChange={(selectedValue) => set('metric_source', selectedValue)}
                 >
                   <option value="application_metrics">
                     {tr('应用指标', 'Application metrics')}
                   </option>
                   <option value="tempo_spanmetrics">{tr('Trace 样本', 'Trace samples')}</option>
-                </select>
-              </label>
+                </Select>
+              </FilterField>
               {!traceMetrics ? (
-                <label className="flex items-center gap-2 text-xs text-zinc-500">
-                  {tr('指标格式', 'Metric format')}
-                  <select
-                    className={input}
+                <FilterField label={tr('指标格式', 'Metric format')}>
+                  <Select
+                    label={tr('指标格式', 'Metric format')}
                     value={params.get('metric_format') || 'otel'}
-                    onChange={(e) => set('metric_format', e.target.value)}
+                    onValueChange={(selectedValue) => set('metric_format', selectedValue)}
                   >
                     <option value="otel">{tr('当前 OTel 约定', 'Current OTel conventions')}</option>
                     <option value="legacy">{tr('旧版 HTTP / gRPC', 'Legacy HTTP / gRPC')}</option>
-                  </select>
-                </label>
+                  </Select>
+                </FilterField>
               ) : (
-                <label className="flex items-center gap-2 text-xs text-zinc-500">
-                  {tr('入口类型', 'Entry type')}
-                  <select
-                    className={input}
+                <FilterField label={tr('入口类型', 'Entry type')}>
+                  <Select
+                    label={tr('入口类型', 'Entry type')}
                     value={params.get('span_kind') || 'server'}
-                    onChange={(e) => set('span_kind', e.target.value)}
+                    onValueChange={(selectedValue) => set('span_kind', selectedValue)}
                   >
                     <option value="server">{tr('服务端请求', 'Server requests')}</option>
                     <option value="consumer">{tr('消息消费', 'Message consumer')}</option>
-                  </select>
-                </label>
+                  </Select>
+                </FilterField>
               )}
             </div>
             <Onboarding />
@@ -720,13 +717,13 @@ export default function ApmPage() {
                         : tr(`服务 · ${list.total}`, `Services · ${list.total}`)}
                     </h2>
                     {!detail && (
-                      <button
+                      <Button variant="subtle" size="sm"
                         type="button"
-                        className="text-xs text-zinc-500 hover:text-zinc-100"
+                        className=""
                         onClick={() => set('tab', 'onboarding')}
                       >
                         {tr('接入管理', 'Instrumentation')}
-                      </button>
+                      </Button>
                     )}
                   </div>
                   {list.items.length === 0 ? (
@@ -818,18 +815,18 @@ export default function ApmPage() {
                                 </td>
                                 {!detail && (
                                   <>
-                                    <td
+                                    <Hint content={row.identity.environment || unset}><td
                                       className="truncate px-3 py-4 align-top text-zinc-400"
-                                      title={row.identity.environment || unset}
+
                                     >
                                       {row.identity.environment || unset}
-                                    </td>
-                                    <td
+                                    </td></Hint>
+                                    <Hint content={row.identity.service_namespace || unset}><td
                                       className="truncate px-3 py-4 align-top text-zinc-400"
-                                      title={row.identity.service_namespace || unset}
+
                                     >
                                       {row.identity.service_namespace || unset}
-                                    </td>
+                                    </td></Hint>
                                   </>
                                 )}
                                 <td className="px-3 py-3 text-right tabular-nums">
@@ -876,16 +873,16 @@ export default function ApmPage() {
                       <section key={key} className="min-w-0 lg:pl-3 first:lg:pl-0">
                         <h2 className="text-sm text-zinc-400">
                           {key === latency ? (
-                            <select
+                            <Select
                               aria-label={tr('延迟分位数', 'Latency percentile')}
-                              className="max-w-full bg-transparent text-sm text-zinc-400"
+                              className="max-w-full"
                               value={latency}
-                              onChange={(e) => setLatency(e.target.value as typeof latency)}
+                              onValueChange={(selectedValue) => setLatency(selectedValue as typeof latency)}
                             >
                               <option value="p95_ms">{tr('P95 延迟', 'P95 latency')}</option>
                               <option value="p50_ms">{tr('P50 延迟', 'P50 latency')}</option>
                               <option value="p99_ms">{tr('P99 延迟', 'P99 latency')}</option>
-                            </select>
+                            </Select>
                           ) : (
                             title
                           )}
@@ -978,8 +975,8 @@ export default function ApmPage() {
                                   return (
                                     <tr key={row.operation}>
                                       <td className="max-w-64 break-words py-2.5">
-                                        <Link
-                                          title={row.operation}
+                                        <Hint content={row.operation}><Link
+
                                           className="font-medium hover:text-indigo-500 hover:underline"
                                           state={{
                                             ...location.state,
@@ -988,7 +985,7 @@ export default function ApmPage() {
                                           to={`/apm/service?${scope}`}
                                         >
                                           {row.operation}
-                                        </Link>
+                                        </Link></Hint>
                                       </td>
                                       <td className="px-3 text-right tabular-nums">
                                         {number(row.rps)}
@@ -1074,14 +1071,14 @@ export default function ApmPage() {
                                   {external ? (
                                     <span className="truncate">{peer.service_name}</span>
                                   ) : (
-                                    <Link
-                                      title={peer.service_name}
+                                    <Hint content={peer.service_name}><Link
+
                                       className="truncate font-medium hover:underline"
                                       state={location.state}
                                       to={`/apm/service?${serviceParams(params, peer)}`}
                                     >
                                       {peer.service_name}
-                                    </Link>
+                                    </Link></Hint>
                                   )}
                                 </div>
                                 <p className="mt-1 truncate text-zinc-500">
@@ -1307,35 +1304,35 @@ export default function ApmPage() {
               )}
             </p>
             <div className="flex flex-wrap gap-3">
-              <label className="grid gap-1 text-xs">
+              <Label className="grid gap-1 text-xs">
                 {tr('指标', 'Metric')}
-                <select
-                  className={input}
+                <Select
+                  className="h-9 w-auto"
                   value={metric}
-                  onChange={(e) => {
-                    setMetric(e.target.value);
-                    setThreshold(e.target.value === 'p95_ms' ? '500' : '5');
+                  onValueChange={(selectedValue) => {
+                    setMetric(selectedValue);
+                    setThreshold(selectedValue === 'p95_ms' ? '500' : '5');
                   }}
                 >
                   <option value="error_rate">{tr('错误率 (%)', 'Error rate (%)')}</option>
                   <option value="p95_ms">P95 (ms)</option>
-                </select>
-              </label>
+                </Select>
+              </Label>
               {[
                 [tr('阈值', 'Threshold'), threshold, setThreshold],
                 [tr('最少请求数', 'Minimum requests'), minimum, setMinimum],
                 [tr('持续秒数（30 的倍数）', 'Duration (multiples of 30s)'), dwell, setDwell],
               ].map(([label, value, setter]) => (
-                <label key={String(label)} className="grid gap-1 text-xs">
+                <Label key={String(label)} className="grid gap-1 text-xs">
                   {String(label)}
-                  <input
+                  <Input
                     type="number"
                     min="0"
                     className={input}
                     value={String(value)}
                     onChange={(e) => (setter as (s: string) => void)(e.target.value)}
                   />
-                </label>
+                </Label>
               ))}
             </div>
             <div className="flex gap-3">
@@ -1359,7 +1356,7 @@ export default function ApmPage() {
             )}
           </Card>
         )}
-      </main>
-    </div>
+      </main></TabsContent>
+    </div></Tabs>
   );
 }

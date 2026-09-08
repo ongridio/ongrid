@@ -1,3 +1,5 @@
+import { Label, Input } from '@/components/ui';
+import { Select } from '@/components/ui/Select';
 import { useState } from 'react';
 import { useI18n } from '@/i18n/locale';
 import { Button, Card } from '@/components/ui';
@@ -11,7 +13,7 @@ export function Onboarding() {
   const [environment, setEnvironment] = useState('production');
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState('');
-  const input = 'rounded-md border border-zinc-800 bg-zinc-950 p-2 text-xs';
+  const input = "";
   const valid =
     /^https?:\/\/[^\s]+$/.test(endpoint) &&
     [service, namespace, environment].every((v) => /^[a-zA-Z0-9_.-]{1,128}$/.test(v));
@@ -46,28 +48,28 @@ export function Onboarding() {
         )}
       </p>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <label className="flex flex-col gap-1 text-xs">
+        <Label className="flex flex-col gap-1 text-xs">
           {tr('语言', 'Language')}
-          <select className={input} value={language} onChange={(e) => setLanguage(e.target.value)}>
+          <Select className="w-full" value={language} onValueChange={(selectedValue) => setLanguage(selectedValue)}>
             {['java', 'node', 'python', 'go'].map((v) => (
               <option key={v}>{v}</option>
             ))}
-          </select>
-        </label>
+          </Select>
+        </Label>
         {[
           [tr('OTLP 基础地址', 'OTLP base endpoint'), endpoint, setEndpoint],
           [tr('服务名', 'Service name'), service, setService],
           [tr('业务命名空间', 'Service namespace'), namespace, setNamespace],
           [tr('环境', 'Environment'), environment, setEnvironment],
         ].map(([label, value, setter]) => (
-          <label className="flex flex-col gap-1 text-xs" key={String(label)}>
+          <Label className="flex flex-col gap-1 text-xs" key={String(label)}>
             {String(label)}
-            <input
+            <Input
               className={input}
               value={String(value)}
               onChange={(e) => (setter as (s: string) => void)(e.target.value)}
             />
-          </label>
+          </Label>
         ))}
       </div>
       {!valid && (

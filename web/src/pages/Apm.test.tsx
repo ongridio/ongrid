@@ -1,3 +1,5 @@
+import userEvent from '@testing-library/user-event';
+import { selectOption } from '@/test/select-option';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { http, HttpResponse } from 'msw';
@@ -119,10 +121,8 @@ describe('Application performance', () => {
     );
     await screen.findByRole('link', { name: 'consume' });
     fireEvent.click(screen.getByRole('button', { name: '接入管理' }));
-    fireEvent.change(screen.getByLabelText('入口类型'), {
-      target: { value: 'consumer' },
-    });
-    fireEvent.click(screen.getByRole('link', { name: '接口' }));
+    await selectOption(screen.getByLabelText('入口类型'), '消息消费');
+    fireEvent.click(screen.getByRole('tab', { name: '接口' }));
     await waitFor(() => expect(requestURL?.searchParams.get('span_kind')).toBe('consumer'));
     expect(requestURL?.searchParams.has('environment')).toBe(true);
     expect(requestURL?.searchParams.get('environment')).toBe('');
@@ -163,9 +163,7 @@ describe('Application performance', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('dependency timeout');
     expect(httpPanel.getByText('P95 延迟')).toBeInTheDocument();
     expect(httpPanel.getAllByText('200')).toHaveLength(2);
-    fireEvent.change(httpPanel.getByLabelText('延迟分位数'), {
-      target: { value: 'p99_ms' },
-    });
+    await selectOption(httpPanel.getByLabelText('延迟分位数'), 'P99 延迟');
     expect(httpPanel.getByText('220')).toBeInTheDocument();
     expect(urls.every((url) => url.searchParams.get('service_namespace') === 'trade')).toBe(true);
     expect(
@@ -177,7 +175,7 @@ describe('Application performance', () => {
     expect(linked.searchParams.get('start')).toBe('2026-09-07T00:00:00Z');
     expect(linked.searchParams.get('environment')).toBe('production');
     expect(screen.queryByRole('link', { name: '运行时指标' })).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '实例' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '实例' })).toBeInTheDocument();
   });
   it('uses server facets and moves relative windows forward only on refresh', async () => {
     let requested: URL | undefined;
@@ -203,19 +201,16 @@ describe('Application performance', () => {
     );
     await screen.findByRole('link', { name: 'orders' });
     expect(screen.getByText('服务 · 72')).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'staging' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('combobox', { name: '环境' }));
+    expect(await screen.findByRole('option', { name: 'staging' })).toBeInTheDocument();
     expect(screen.queryByText('估算样本请求数')).not.toBeInTheDocument();
     expect(screen.queryByText('应用指标 · 独立于 Trace 采样')).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: '未设置' })).not.toBeInTheDocument();
     expect(requested?.searchParams.has('environment')).toBe(false);
     expect(requested?.searchParams.has('service_namespace')).toBe(false);
-    fireEvent.change(screen.getByLabelText('环境'), {
-      target: { value: 'staging' },
-    });
+    await selectOption(screen.getByRole('combobox', { name: '环境' }), 'staging');
     await waitFor(() => expect(requested?.searchParams.get('environment')).toBe('staging'));
-    fireEvent.change(screen.getByLabelText('时间范围'), {
-      target: { value: '15m' },
-    });
+    await selectOption(screen.getByLabelText('时间范围'), '最近 15 分钟');
     await waitFor(() => expect(requested?.searchParams.get('range')).toBe('15m'));
     const oldEnd = requested!.searchParams.get('end')!;
     expect(Date.parse(oldEnd) - Date.parse(requested!.searchParams.get('start')!)).toBe(900000);
@@ -223,7 +218,7 @@ describe('Application performance', () => {
     fireEvent.click(screen.getByRole('button', { name: '刷新' }));
     await waitFor(() => expect(requested!.searchParams.get('end')).not.toBe(oldEnd));
     expect(requested?.searchParams.get('environment')).toBe('staging');
-    fireEvent.change(screen.getByLabelText('环境'), { target: { value: '' } });
+    await selectOption(screen.getByRole('combobox', { name: '环境' }), '全部环境');
     await waitFor(() => expect(requested?.searchParams.has('environment')).toBe(false));
   });
   it('shows one aggregate service row and both protocol sections without a switch', async () => {
@@ -292,7 +287,7 @@ describe('Application performance', () => {
     expect(screen.queryByRole('group', { name: '请求协议' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '更多' })).not.toBeInTheDocument();
     expect(screen.queryByRole('combobox', { name: '排序' })).not.toBeInTheDocument();
-    const env = screen.getByLabelText('环境');
+    const env = screen.getByRole('combobox', { name: '环境' });
     const namespace = screen.getByLabelText('业务命名空间');
     const search = screen.getByRole('textbox', { name: '搜索服务名称…' });
     expect(env.compareDocumentPosition(namespace) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -400,9 +395,7 @@ describe('Application performance', () => {
     await act(async () => resolve());
     expect(await screen.findByRole('alert')).toHaveTextContent('保留上次结果');
     expect(screen.getByRole('link', { name: 'orders' })).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('时间范围'), {
-      target: { value: '15m' },
-    });
+    await selectOption(screen.getByLabelText('时间范围'), '最近 15 分钟');
     expect(screen.queryByRole('link', { name: 'orders' })).not.toBeInTheDocument();
   });
   it('opens scoped operation metrics and restores the operation query and pagination', async () => {

@@ -1,3 +1,4 @@
+import { Label, Input } from '@/components/ui';
 import { useEffect, useState } from 'react';
 import { Search } from 'lucide-react';
 
@@ -20,19 +21,19 @@ export function SearchInput({
     return () => clearTimeout(timer);
   }, [draft, value, onChange]);
   return (
-    <label className="relative block min-w-40 flex-1">
-      <Search size={14} className="pointer-events-none absolute left-3 top-2.5 text-zinc-500" />
-      <input
+    <Label className="relative block min-w-40 flex-1">
+      <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+      <Input
         aria-label={label}
         placeholder={label}
         autoFocus={autoFocus}
-        className="h-9 w-full rounded-md border border-zinc-800 bg-zinc-950 pl-9 pr-3 text-sm text-zinc-100"
+        className="w-full pl-9 pr-3"
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter') onChange(draft);
         }}
       />
-    </label>
+    </Label>
   );
 }

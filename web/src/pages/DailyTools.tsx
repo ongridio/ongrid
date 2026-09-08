@@ -1238,7 +1238,7 @@ function ProfilingPanel({
   return (
     <Card className={cn(viewerOpen && 'flex h-full min-h-0 flex-col')}>
       {value.service_name && <p className="mb-3 text-xs text-zinc-500">{tr('关联服务：', 'Linked service: ')}{value.service_name} · {value.environment || '∅'} / {value.service_namespace || '∅'} · {value.instance_id || '∅'}</p>}
-      {linkedTime && <label className="mb-3 flex gap-2 text-xs"><input type="checkbox" checked={historical} onChange={e => { setHistorical(e.target.checked); setViewerOpen(true); }} />{tr('查询跳转时的历史区间（新采集不在该区间）', 'Query the linked historical window (new captures are outside it)')}</label>}
+      {linkedTime && <Label className="mb-3 flex gap-2 text-xs"><Checkbox checked={historical} onCheckedChange={checkedValue => { setHistorical(checkedValue); setViewerOpen(true); }} />{tr('查询跳转时的历史区间（新采集不在该区间）', 'Query the linked historical window (new captures are outside it)')}</Label>}
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-zinc-800/60 pb-4">
         <div className="flex min-w-0 items-start gap-3">
           <div className="mt-0.5 rounded-lg border border-indigo-500/20 bg-indigo-500/10 p-2 text-indigo-300"><Flame size={18} /></div>
