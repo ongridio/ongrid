@@ -159,6 +159,92 @@ func TestRegisterHandlersListPods(t *testing.T) {
 	}
 }
 
+func TestRegisterHandlersListEvents(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		writeTestResponse(t, w, `{"metadata":{"resourceVersion":"42"},"items":[
+			{
+				"metadata":{"name":"api-1.1","namespace":"default","uid":"event-1"},
+				"involvedObject":{"kind":"Pod","namespace":"default","name":"api-1","uid":"pod-uid"},
+				"type":"Warning",
+				"reason":"BackOff",
+				"message":"Back-off restarting failed container",
+				"source":{"component":"kubelet","host":"node-a"},
+				"count":3,
+				"firstTimestamp":"2026-09-07T00:00:00Z",
+				"lastTimestamp":"2026-09-07T01:00:00Z"
+			},
+			{
+				"metadata":{"name":"api-1.2","namespace":"default","uid":"event-2"},
+				"involvedObject":{"kind":"Pod","namespace":"default","name":"api-1","uid":"pod-uid"},
+				"type":"Normal",
+				"reason":"Started",
+				"message":"Started container"
+			}
+		]}`)
+	}))
+	defer srv.Close()
+
+	fc := &fakeTunnelClient{handlers: map[string]tunnel.Handler{}}
+	p := &InventoryPusher{
+		client: fc,
+		info:   tunnel.KubernetesInfo{ClusterID: 7, Role: "controller"},
+		api:    &apiClient{baseURL: srv.URL, token: "test-token", http: srv.Client()},
+	}
+	p.RegisterHandlers()
+
+	h := fc.handlers[tunnel.MethodListK8sEvents]
+	if h == nil {
+		t.Fatalf("handler %q not registered", tunnel.MethodListK8sEvents)
+	}
+	body, _ := json.Marshal(tunnel.KubernetesListEventsRequest{
+		ClusterID:    7,
+		Namespace:    "default",
+		Type:         "Warning",
+		Reason:       "BackOff",
+		InvolvedKind: "Pod",
+		InvolvedName: "api-1",
+		Limit:        50,
+	})
+	out, err := h(context.Background(), tunnel.Session{}, tunnel.MethodListK8sEvents, body)
+	if err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if gotPath != "/api/v1/namespaces/default/events" {
+		t.Fatalf("unexpected request path=%q", gotPath)
+	}
+	var resp tunnel.KubernetesListEventsResponse
+	if err := json.Unmarshal(out, &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.ClusterID != 7 || resp.Total != 1 || len(resp.Events) != 1 {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+	if resp.Events[0].Reason != "BackOff" || resp.Events[0].Count != 3 {
+		t.Fatalf("unexpected event: %+v", resp.Events[0])
+	}
+}
+
+func TestListEventsLiveRejectsMismatchedCluster(t *testing.T) {
+	fc := &fakeTunnelClient{handlers: map[string]tunnel.Handler{}}
+	p := &InventoryPusher{
+		client: fc,
+		info:   tunnel.KubernetesInfo{ClusterID: 7, Role: "controller"},
+		api:    &apiClient{baseURL: "http://127.0.0.1", token: "token", http: http.DefaultClient},
+	}
+	p.RegisterHandlers()
+
+	h := fc.handlers[tunnel.MethodListK8sEvents]
+	if h == nil {
+		t.Fatalf("handler %q not registered", tunnel.MethodListK8sEvents)
+	}
+	body, _ := json.Marshal(tunnel.KubernetesListEventsRequest{ClusterID: 99})
+	if _, err := h(context.Background(), tunnel.Session{}, tunnel.MethodListK8sEvents, body); err == nil {
+		t.Fatal("handler should reject mismatched cluster_id")
+	}
+}
+
 func TestDescribeResourceRejectsDisallowedKind(t *testing.T) {
 	api := &apiClient{baseURL: "http://127.0.0.1", token: "token", http: http.DefaultClient}
 	_, err := api.describeResource(context.Background(), tunnel.KubernetesDescribeResourceRequest{

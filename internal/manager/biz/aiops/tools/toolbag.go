@@ -64,6 +64,8 @@ var tierByName = map[string]string{
 	"query_logql":             "core",
 	"query_traceql":           "core",
 	"query_k8s_snapshot":      "core",
+	"kube_get_pods":           "core",
+	"kube_events":             "core",
 	"describe_k8s_resource":   "core",
 	"query_k8s_logs":          "core",
 	"query_knowledge":         "core",

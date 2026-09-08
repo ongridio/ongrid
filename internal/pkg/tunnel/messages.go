@@ -26,6 +26,7 @@ const (
 	MethodProbeNetworkSNMP     = "probe_network_snmp"
 	MethodPushK8sInventory     = "push_k8s_inventory"
 	MethodListK8sPods          = "list_k8s_pods"
+	MethodListK8sEvents        = "list_k8s_events"
 	MethodDescribeK8sResource  = "describe_k8s_resource"
 	MethodQueryK8sLogs         = "query_k8s_logs"
 	MethodExecuteK8sAction     = "execute_k8s_action"
@@ -684,6 +685,33 @@ type KubernetesListPodsResponse struct {
 	Pods      []KubernetesPodSummary `json:"pods"`
 	Continue  string                 `json:"continue,omitempty"`
 	FetchedAt int64                  `json:"fetched_at"`
+}
+
+// ---------------------------------------------------------------------
+// list_k8s_events (cloud -> edge controller)
+// ---------------------------------------------------------------------
+
+// KubernetesListEventsRequest asks the cluster controller for a bounded, live
+// Kubernetes Events list. It exposes only the filters a fault-triage agent
+// needs; full event correlation stays in the manager DB snapshot.
+type KubernetesListEventsRequest struct {
+	ClusterID    uint64 `json:"cluster_id"`
+	Namespace    string `json:"namespace,omitempty"`
+	Type         string `json:"type,omitempty"`
+	Reason       string `json:"reason,omitempty"`
+	InvolvedKind string `json:"involved_kind,omitempty"`
+	InvolvedName string `json:"involved_name,omitempty"`
+	Limit        int    `json:"limit,omitempty"`
+}
+
+// KubernetesListEventsResponse carries live Events already sanitized for
+// model consumption. Total is the filtered count before the Limit is applied.
+type KubernetesListEventsResponse struct {
+	ClusterID uint64                    `json:"cluster_id"`
+	Namespace string                    `json:"namespace,omitempty"`
+	Events    []KubernetesEventSnapshot `json:"events"`
+	Total     int                       `json:"total"`
+	FetchedAt int64                     `json:"fetched_at"`
 }
 
 // ---------------------------------------------------------------------

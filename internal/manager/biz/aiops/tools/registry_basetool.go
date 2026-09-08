@@ -126,6 +126,7 @@ func (r *Registry) BuildBaseTools() *ToolBag {
 		out = append(out, NewQueryK8sSnapshotTool(r.k8sSnapshot, r.log))
 		if r.caller != nil {
 			out = append(out, NewKubeGetPodsTool(r.caller, r.k8sSnapshot, r.log))
+			out = append(out, NewKubeEventsTool(r.caller, r.k8sSnapshot, r.log))
 			out = append(out, NewDescribeK8sResourceTool(r.caller, r.k8sSnapshot, r.log))
 			out = append(out, NewQueryK8sLogsTool(r.caller, r.k8sSnapshot, r.log))
 			out = append(out, NewExecuteK8sActionTool(r.caller, r.k8sSnapshot, r.log))

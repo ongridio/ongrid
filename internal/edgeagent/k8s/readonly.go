@@ -16,10 +16,12 @@ import (
 
 const (
 	defaultPodListLimit       = 50
+	defaultEventListLimit     = 50
 	defaultPodLogTailLines    = 100
 	defaultPodLogLimitBytes   = 16 * 1024
 	defaultPodLogSinceSeconds = int64(3600)
 	maxPodListLimit           = 100
+	maxEventListLimit         = 200
 	maxPodLogTailLines        = 500
 	maxPodLogLimitBytes       = 64 * 1024
 	maxPodLogSinceSeconds     = int64(24 * 3600)
@@ -45,6 +47,24 @@ func (p *InventoryPusher) RegisterHandlers() {
 			}
 			req.ClusterID = p.info.ClusterID
 			resp, err := p.api.listPodsLive(ctx, req)
+			if err != nil {
+				return nil, err
+			}
+			return json.Marshal(resp)
+		})
+	p.client.RegisterHandler(tunnel.MethodListK8sEvents,
+		func(ctx context.Context, _ tunnel.Session, _ string, body []byte) ([]byte, error) {
+			var req tunnel.KubernetesListEventsRequest
+			if len(body) > 0 {
+				if err := json.Unmarshal(body, &req); err != nil {
+					return nil, fmt.Errorf("list_k8s_events: decode: %w", err)
+				}
+			}
+			if req.ClusterID != 0 && req.ClusterID != p.info.ClusterID {
+				return nil, fmt.Errorf("list_k8s_events: cluster_id %d does not match controller cluster_id %d", req.ClusterID, p.info.ClusterID)
+			}
+			req.ClusterID = p.info.ClusterID
+			resp, err := p.api.listEventsLive(ctx, req)
 			if err != nil {
 				return nil, err
 			}
@@ -164,6 +184,59 @@ func (c *apiClient) listPodsLive(ctx context.Context, req tunnel.KubernetesListP
 		pods = append(pods, tunnel.KubernetesPodSummary{Namespace: item.Metadata.Namespace, Name: item.Metadata.Name, NodeName: item.Spec.NodeName, Phase: item.Status.Phase, Reason: item.Status.Reason, RestartCount: restarts})
 	}
 	return &tunnel.KubernetesListPodsResponse{ClusterID: req.ClusterID, Namespace: namespace, Pods: pods, Continue: list.Metadata.Continue, FetchedAt: time.Now().Unix()}, nil
+}
+
+// listEventsLive reads a bounded, filtered page of live Kubernetes Events.
+// Unlike the inventory snapshot, this goes straight to the live API and keeps
+// the result small enough for a single tool response.
+func (c *apiClient) listEventsLive(ctx context.Context, req tunnel.KubernetesListEventsRequest) (*tunnel.KubernetesListEventsResponse, error) {
+	namespace := strings.TrimSpace(req.Namespace)
+	limit := req.Limit
+	if limit <= 0 {
+		limit = defaultEventListLimit
+	}
+	if limit > maxEventListLimit {
+		limit = maxEventListLimit
+	}
+
+	events, _, err := c.listEvents(ctx, namespace)
+	if err != nil {
+		return nil, err
+	}
+
+	wantType := strings.TrimSpace(req.Type)
+	wantReason := strings.TrimSpace(req.Reason)
+	wantInvolvedKind := strings.TrimSpace(req.InvolvedKind)
+	wantInvolvedName := strings.TrimSpace(req.InvolvedName)
+
+	total := 0
+	filtered := make([]tunnel.KubernetesEventSnapshot, 0, limit)
+	for _, ev := range events {
+		if wantType != "" && ev.Type != wantType {
+			continue
+		}
+		if wantReason != "" && ev.Reason != wantReason {
+			continue
+		}
+		if wantInvolvedKind != "" && ev.InvolvedKind != wantInvolvedKind {
+			continue
+		}
+		if wantInvolvedName != "" && ev.InvolvedName != wantInvolvedName {
+			continue
+		}
+		total++
+		if len(filtered) < limit {
+			filtered = append(filtered, ev)
+		}
+	}
+
+	return &tunnel.KubernetesListEventsResponse{
+		ClusterID: req.ClusterID,
+		Namespace: namespace,
+		Events:    filtered,
+		Total:     total,
+		FetchedAt: time.Now().Unix(),
+	}, nil
 }
 
 func (c *apiClient) describeResource(ctx context.Context, req tunnel.KubernetesDescribeResourceRequest) (*tunnel.KubernetesDescribeResourceResponse, error) {

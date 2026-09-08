@@ -200,6 +200,12 @@ func (r *Registry) SetK8sSnapshotReader(k K8sSnapshotReader) {
 				Execute:     r.executeKubeGetPods,
 			})
 			r.Register(Tool{
+				Name:        ToolNameKubeEvents,
+				Description: KubeEventsDescription,
+				Schema:      KubeEventsSchema,
+				Execute:     r.executeKubeEvents,
+			})
+			r.Register(Tool{
 				Name:        ToolNameDescribeK8sResource,
 				Description: DescribeK8sResourceDescription,
 				Schema:      DescribeK8sResourceSchema,
