@@ -87,15 +87,15 @@ export function Onboarding() {
       )}
       <p className="text-xs text-zinc-500">
         {tr(
-          'HTTP 使用路由模板，RPC 使用服务/方法名，避免将请求 ID 放进指标。旧版 SDK 可在接入管理中切换指标格式；具体支持取决于语言和埋点版本。Go 还需在代码中初始化 MeterProvider。',
-          'Use HTTP route templates and RPC service/method names, never request IDs. Select legacy metrics in Instrumentation for older SDKs; support depends on language and instrumentation version. Go also requires a MeterProvider in code.',
+          'HTTP 使用路由模板，RPC 使用服务/方法名，避免将请求 ID 放进指标。具体支持取决于语言和埋点版本。Go 还需在代码中初始化 MeterProvider。',
+          'Use HTTP route templates and RPC service/method names, never request IDs. Support depends on language and instrumentation version. Go also requires a MeterProvider in code.',
         )}
       </p>
       {(language === 'node' || language === 'python') && (
         <p className="text-xs text-zinc-500">
           {tr(
-            '当前已验收的官方自动埋点支持 HTTP 请求指标和 gRPC 链路；gRPC 请求指标尚未提供，可在 Trace 样本视图查看已采样的 RPC 请求。',
-            'The verified official auto-instrumentation provides HTTP request metrics and gRPC traces. Native gRPC request metrics are not available; use the Trace samples view for sampled RPC requests.',
+            '当前已验收的官方自动埋点支持 HTTP 请求指标和 gRPC 链路；gRPC 请求指标尚未提供，可在链路页面查看已采样的 RPC 请求。',
+            'The verified official auto-instrumentation provides HTTP request metrics and gRPC traces. Native gRPC request metrics are not available; use the Traces page for sampled RPC requests.',
           )}
         </p>
       )}

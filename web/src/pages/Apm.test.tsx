@@ -119,7 +119,7 @@ describe('Application performance', () => {
     render(
       <MemoryRouter
         initialEntries={[
-          `/apm/service?${period}&service_name=orders&environment=&service_namespace=trade&tab=operations&metric_source=tempo_spanmetrics`,
+          `/apm/service?${period}&service_name=orders&environment=&service_namespace=trade&tab=operations&metric_source=tempo_spanmetrics&span_kind=consumer`,
         ]}
       >
         <ApmPage />
@@ -127,7 +127,9 @@ describe('Application performance', () => {
     );
     await screen.findByRole('link', { name: 'consume' });
     fireEvent.click(screen.getByRole('button', { name: '接入管理' }));
-    await selectOption(screen.getByLabelText('入口类型'), '消息消费');
+    expect(screen.queryByLabelText('指标来源')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('指标格式')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('入口类型')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: '接口' }));
     await waitFor(() => expect(requestURL?.searchParams.get('span_kind')).toBe('consumer'));
     expect(requestURL?.searchParams.has('environment')).toBe(true);

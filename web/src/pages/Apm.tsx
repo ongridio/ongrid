@@ -650,41 +650,6 @@ export default function ApmPage() {
               >
                 ← {tr('返回指标', 'Back to metrics')}
               </Link>
-              <FilterField label={tr('指标来源', 'Metric source')}>
-                <Select
-                  label={tr('指标来源', 'Metric source')}
-                  value={params.get('metric_source') || 'application_metrics'}
-                  onValueChange={(selectedValue) => set('metric_source', selectedValue)}
-                >
-                  <option value="application_metrics">
-                    {tr('应用指标', 'Application metrics')}
-                  </option>
-                  <option value="tempo_spanmetrics">{tr('Trace 样本', 'Trace samples')}</option>
-                </Select>
-              </FilterField>
-              {!traceMetrics ? (
-                <FilterField label={tr('指标格式', 'Metric format')}>
-                  <Select
-                    label={tr('指标格式', 'Metric format')}
-                    value={params.get('metric_format') || 'otel'}
-                    onValueChange={(selectedValue) => set('metric_format', selectedValue)}
-                  >
-                    <option value="otel">{tr('当前 OTel 约定', 'Current OTel conventions')}</option>
-                    <option value="legacy">{tr('旧版 HTTP / gRPC', 'Legacy HTTP / gRPC')}</option>
-                  </Select>
-                </FilterField>
-              ) : (
-                <FilterField label={tr('入口类型', 'Entry type')}>
-                  <Select
-                    label={tr('入口类型', 'Entry type')}
-                    value={params.get('span_kind') || 'server'}
-                    onValueChange={(selectedValue) => set('span_kind', selectedValue)}
-                  >
-                    <option value="server">{tr('服务端请求', 'Server requests')}</option>
-                    <option value="consumer">{tr('消息消费', 'Message consumer')}</option>
-                  </Select>
-                </FilterField>
-              )}
             </div>
             <Onboarding />
           </>
