@@ -1,4 +1,5 @@
-import io.grpc.ServerBuilder;
+import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder;
+import java.net.InetSocketAddress;
 import io.grpc.Status;
 import io.grpc.health.v1.HealthGrpc;
 import io.grpc.health.v1.HealthCheckRequest;
@@ -10,11 +11,11 @@ import io.opentelemetry.api.trace.Span;
 public class App {
   static void log(String protocol) {
     var ctx = Span.current().getSpanContext();
-    System.out.printf("{\"message\":\"request completed\",\"protocol\":\"%s\",\"service.name\":\"%s\",\"service.namespace\":\"trade\",\"deployment.environment.name\":\"acceptance\",\"trace_id\":\"%s\",\"span_id\":\"%s\"}%n",
-        protocol, System.getenv("OTEL_SERVICE_NAME"), ctx.getTraceId(), ctx.getSpanId());
+    System.out.printf("{\"message\":\"request completed\",\"protocol\":\"%s\",\"service.name\":\"%s\",\"service.namespace\":\"%s\",\"deployment.environment.name\":\"%s\",\"trace_id\":\"%s\",\"span_id\":\"%s\"}%n",
+        protocol, System.getenv("OTEL_SERVICE_NAME"), System.getenv().getOrDefault("SERVICE_NAMESPACE", "trade"), System.getenv().getOrDefault("DEPLOYMENT_ENVIRONMENT", "acceptance"), ctx.getTraceId(), ctx.getSpanId());
   }
   public static void main(String[] args) throws Exception {
-    ServerBuilder.forPort(Integer.parseInt(System.getenv().getOrDefault("RPC_PORT", "18081")))
+    NettyServerBuilder.forAddress(new InetSocketAddress("127.0.0.1", Integer.parseInt(System.getenv().getOrDefault("RPC_PORT", "18081"))))
         .addService(new HealthGrpc.HealthImplBase() {
           public void check(HealthCheckRequest req, StreamObserver<HealthCheckResponse> out) {
             if (req.getService().equals("slow")) {

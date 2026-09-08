@@ -8,8 +8,8 @@ const health = grpc.loadPackageDefinition(loader.loadSync(path.join(__dirname, '
 function logRequest(protocol) {
   const ctx = trace.getActiveSpan()?.spanContext();
   console.log(JSON.stringify({ message: 'request completed', protocol,
-    'service.name': process.env.OTEL_SERVICE_NAME, 'service.namespace': 'trade',
-    'deployment.environment.name': 'acceptance', trace_id: ctx?.traceId, span_id: ctx?.spanId }));
+    'service.name': process.env.OTEL_SERVICE_NAME, 'service.namespace': process.env.SERVICE_NAMESPACE || 'trade',
+    'deployment.environment.name': process.env.DEPLOYMENT_ENVIRONMENT || 'acceptance', trace_id: ctx?.traceId, span_id: ctx?.spanId }));
 }
 const app = express();
 app.get('/orders/:id', async (req, res) => {

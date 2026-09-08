@@ -15,7 +15,7 @@ def log_request(protocol):
     ctx = trace.get_current_span().get_span_context()
     print(json.dumps({"message": "request completed", "protocol": protocol,
                       "service.name": os.environ["OTEL_SERVICE_NAME"],
-                      "service.namespace": "trade", "deployment.environment.name": "acceptance",
+                      "service.namespace": os.environ.get("SERVICE_NAMESPACE", "trade"), "deployment.environment.name": os.environ.get("DEPLOYMENT_ENVIRONMENT", "acceptance"),
                       "trace_id": f"{ctx.trace_id:032x}", "span_id": f"{ctx.span_id:016x}"}), flush=True)
 
 

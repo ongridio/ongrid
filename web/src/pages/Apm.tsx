@@ -41,6 +41,10 @@ const languageLabels: Record<string, string> = {
   go: 'Go', java: 'Java', nodejs: 'Node.js', webjs: 'JavaScript', javascript: 'JavaScript', python: 'Python',
   dotnet: '.NET', cpp: 'C++', ruby: 'Ruby', php: 'PHP', rust: 'Rust', swift: 'Swift',
 };
+const languageIcons: Record<string, string> = {
+  go: 'go', java: 'java', nodejs: 'nodejs', webjs: 'javascript', javascript: 'javascript',
+  python: 'python', dotnet: 'dotnet', cpp: 'cpp', ruby: 'ruby', php: 'php', rust: 'rust', swift: 'swift',
+};
 const periods = [
   ['15m', 900000, '最近 15 分钟', 'Last 15 minutes'],
   ['1h', 3600000, '最近 1 小时', 'Last hour'],
@@ -819,7 +823,13 @@ export default function ApmPage() {
                                   {!detail && (
                                     <Chip className="ml-2" title={tr('编程语言', 'Programming language')}>
                                       {row.languages?.length
-                                        ? row.languages.map((language) => languageLabels[language] || language).join(' / ')
+                                        ? row.languages.map((language, index) => (
+                                          <span key={language} className="inline-flex items-center gap-1">
+                                            {index > 0 && <span className="mx-1">/</span>}
+                                            {languageIcons[language] && <img src={`/icons/languages/${languageIcons[language]}.svg`} alt="" aria-hidden="true" width={14} height={14} className="h-3.5 w-3.5 shrink-0" />}
+                                            {languageLabels[language] || language}
+                                          </span>
+                                        ))
                                         : tr('未知', 'Unknown')}
                                     </Chip>
                                   )}

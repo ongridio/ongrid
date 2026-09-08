@@ -63,7 +63,10 @@ describe('Application performance', () => {
     );
     const links = await screen.findAllByRole('link', { name: 'orders' });
     expect(links).toHaveLength(2);
-    expect(screen.getByText('Go / Java / Node.js')).toBeInTheDocument();
+    expect(screen.getByText('Go')).toBeInTheDocument();
+    expect(screen.getByText('Java')).toBeInTheDocument();
+    expect(screen.getByText('Node.js')).toBeInTheDocument();
+    expect(document.querySelector('img[src="/icons/languages/go.svg"]')).toBeInTheDocument();
     expect(screen.getByText('未知')).toBeInTheDocument();
     const urls = links.map((link) => new URL(link.getAttribute('href')!, 'http://localhost'));
     expect(urls.map((url) => url.searchParams.get('environment'))).toEqual([

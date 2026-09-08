@@ -78,7 +78,7 @@ func run() error {
 	}()
 	otel.SetTracerProvider(provider)
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
-	log := slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service.name", os.Getenv("OTEL_SERVICE_NAME"), "service.namespace", "trade", "deployment.environment.name", "development")
+	log := slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service.name", os.Getenv("OTEL_SERVICE_NAME"), "service.namespace", envDefault("SERVICE_NAMESPACE", "trade"), "deployment.environment.name", envDefault("DEPLOYMENT_ENVIRONMENT", "development"))
 	mux := application(log)
 	server := &http.Server{Addr: "127.0.0.1:18080", Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	listener, err := net.Listen("tcp", "127.0.0.1:18081")
@@ -145,4 +145,11 @@ func rpcApplication() *grpc.Server {
 	server := grpc.NewServer(grpc.StatsHandler(otelgrpc.NewServerHandler()))
 	healthpb.RegisterHealthServer(server, health.NewServer())
 	return server
+}
+
+func envDefault(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
 }
