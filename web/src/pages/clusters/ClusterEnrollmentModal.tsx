@@ -1,3 +1,4 @@
+import { Label, Input } from '@/components/ui';
 import { useEffect, useState } from "react";
 import { Check, Copy, Network } from "lucide-react";
 import { Modal } from "@/components/Modal";
@@ -141,19 +142,19 @@ export function ClusterEnrollmentModal({
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block text-[11px] text-zinc-500 sm:col-span-2">
+            <Label className="block text-[11px] text-zinc-500 sm:col-span-2">
               {tr("安装批次名称", "Installation batch name")}
-              <input
+              <Input
                 autoFocus
                 maxLength={128}
                 value={name}
                 onChange={(event) => setName(event.target.value)}
-                className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-2 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                className="mt-1 w-full"
               />
-            </label>
-            <label className="block text-[11px] text-zinc-500">
+            </Label>
+            <Label className="block text-[11px] text-zinc-500">
               {tr("有效期（小时）", "Validity (hours)")}
-              <input
+              <Input
                 type="number"
                 min={1}
                 max={168}
@@ -161,20 +162,20 @@ export function ClusterEnrollmentModal({
                 onChange={(event) =>
                   setExpiresInHours(Number(event.target.value))
                 }
-                className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-2 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                className="mt-1 w-full"
               />
-            </label>
-            <label className="block text-[11px] text-zinc-500">
+            </Label>
+            <Label className="block text-[11px] text-zinc-500">
               {tr("最多安装设备数", "Maximum devices")}
-              <input
+              <Input
                 type="number"
                 min={1}
                 max={10000}
                 value={maxUses}
                 onChange={(event) => setMaxUses(Number(event.target.value))}
-                className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-2 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                className="mt-1 w-full"
               />
-            </label>
+            </Label>
           </div>
         </div>
       )}
@@ -219,7 +220,7 @@ function EnrollmentCommand({ token }: { token: string }) {
         <span className="text-[11px] uppercase tracking-wider text-zinc-500">
           {tr("在每台目标主机执行", "Run on every target host")}
         </span>
-        <button
+        <Button variant="subtle" size="sm"
           type="button"
           aria-label={tr("复制安装命令", "Copy installation command")}
           onClick={() => {
@@ -240,7 +241,7 @@ function EnrollmentCommand({ token }: { token: string }) {
         >
           {copied ? <Check size={12} /> : <Copy size={12} />}
           {copied ? tr("已复制", "Copied") : tr("复制单行", "Copy one-liner")}
-        </button>
+        </Button>
       </div>
       <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 font-mono text-[11px] leading-relaxed text-zinc-200">
         {display}

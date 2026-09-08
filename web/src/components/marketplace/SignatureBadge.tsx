@@ -1,5 +1,5 @@
 import { ShieldCheck, ShieldAlert, ShieldX } from 'lucide-react';
-import { cn } from '@/lib/cn';
+import { Chip } from '@/components/ui/Chip';
 import type { SignatureState } from '@/api/marketplace';
 
 // SignatureBadge surfaces the trust state v1
@@ -14,39 +14,24 @@ export function SignatureBadge({
 }) {
   if (state === 'verified') {
     return (
-      <span
-        className={cn(
-          'inline-flex items-center gap-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[11px] text-emerald-300',
-          className,
-        )}
-      >
+      <Chip tone="success" className={className}>
         <ShieldCheck size={11} />
         verified
-      </span>
+      </Chip>
     );
   }
   if (state === 'failed') {
     return (
-      <span
-        className={cn(
-          'inline-flex items-center gap-1 rounded-md border border-red-500/40 bg-red-500/10 px-1.5 py-0.5 text-[11px] text-red-300',
-          className,
-        )}
-      >
+      <Chip tone="danger" className={className}>
         <ShieldX size={11} />
         signature failed
-      </span>
+      </Chip>
     );
   }
   return (
-    <span
-      className={cn(
-        'inline-flex items-center gap-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-300',
-        className,
-      )}
-    >
+    <Chip tone="warning" className={className}>
       <ShieldAlert size={11} />
       unsigned
-    </span>
+    </Chip>
   );
 }

@@ -1,3 +1,7 @@
+import { Label, Input } from '@/components/ui';
+import { useDialogs } from '@/components/ui/useDialogs';
+import { Hint } from '@/components/ui/Tooltip';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
 // Pages — operations view for hosted "artifacts": pages the agent / workflows
 // generate via serve_page. Pages are private (authed) — thumbnails + preview
 // fetch the HTML with the bearer and render it via a sandboxed iframe srcdoc.
@@ -85,6 +89,7 @@ function PageThumb({ id }: { id: string }) {
 }
 
 export default function PagesPage() {
+  const { confirmAction, promptAction, dialog } = useDialogs();
   const { tr } = useI18n();
   const navigate = useNavigate();
   const { id: routeId } = useParams<{ id?: string }>();
@@ -156,7 +161,7 @@ export default function PagesPage() {
   }, [preview]);
 
   const onDelete = async (p: HostedPage) => {
-    if (!window.confirm(tr(`删除页面「${p.title || p.id}」？分享链接将立即失效。`, `Delete page "${p.title || p.id}"? Its share links die immediately.`))) return;
+    if (!(await confirmAction(tr(`删除页面「${p.title || p.id}」？分享链接将立即失效。`, `Delete page "${p.title || p.id}"? Its share links die immediately.`)))) return;
     setBusyId(p.id);
     try {
       await deletePage(p.id);
@@ -187,7 +192,7 @@ export default function PagesPage() {
       try {
         await navigator.clipboard.writeText(link);
       } catch {
-        window.prompt(tr('复制此公开分享链接：', 'Copy this public share link:'), link);
+        (await promptAction(tr('复制此公开分享链接：', 'Copy this public share link:'), link));
       }
       setCopiedId(p.id);
       window.setTimeout(() => setCopiedId((c) => (c === p.id ? null : c)), 2200);
@@ -222,7 +227,7 @@ export default function PagesPage() {
   });
 
   return (
-    <main className="anim-fade flex flex-1 flex-col overflow-hidden">
+    <>{dialog}<Tabs value={tab} onValueChange={setTab} className="contents"><main className="anim-fade flex flex-1 flex-col overflow-hidden">
       <PageHeader
         title={tr('产物', 'Artifacts')}
         subtitle={
@@ -234,27 +239,24 @@ export default function PagesPage() {
         }
       />
       {/* Tab bar — 页面 / 报告 / 数据包 are artifact views, not feature silos. */}
-      <div className="flex items-center gap-1 border-b border-zinc-800 px-6">
+      <TabsList className="flex items-center gap-1 border-b border-zinc-800 px-6">
         {([
           ['pages', tr('页面', 'Pages'), AppWindow],
           ['reports', tr('报告', 'Reports'), FileBarChart],
           ['packets', tr('数据包', 'Packets'), FileCode2],
         ] as const).map(([key, label, Icon]) => (
-          <button
+          <TabsTrigger
             key={key}
-            type="button"
-            onClick={() => setTab(key)}
-            className={cn(
-              'relative -mb-px flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-xs transition-colors',
-              tab === key ? 'border-indigo-500 text-zinc-100' : 'border-transparent text-zinc-400 hover:text-zinc-200',
-            )}
+
+            value={key}
+
           >
             <Icon size={13} /> {label}
-          </button>
+          </TabsTrigger>
         ))}
-      </div>
+      </TabsList>
 
-      {tab === 'reports' ? (
+      <TabsContent value={tab} className="contents">{tab === 'reports' ? (
         <ReportsTabView />
       ) : tab === 'packets' ? (
         <PacketArtifactsTabView
@@ -264,17 +266,17 @@ export default function PagesPage() {
       {items.length > 0 && (
         <div className="border-b border-zinc-800 px-6 py-3">
           <div className="flex flex-wrap items-center gap-3">
-            <label className="relative block w-64">
+            <Label className="relative block w-64">
               <span className="sr-only">{tr('搜索', 'Search')}</span>
               <Search size={12} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
-              <input
+              <Input
                 type="search"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder={tr('搜索页面…', 'Search pages…')}
-                className="w-full rounded-md border border-zinc-800 bg-zinc-950/40 py-1.5 pl-8 pr-2 text-xs text-zinc-200 placeholder:text-zinc-500 focus:border-zinc-600 focus:outline-none"
+                className="w-full pl-8 pr-2"
               />
-            </label>
+            </Label>
             <span className="ml-auto text-xs text-zinc-500">
               {tr(`${items.length} 个 · 匹配 ${shown.length}`, `${items.length} total · ${shown.length} matched`)}
             </span>
@@ -303,11 +305,11 @@ export default function PagesPage() {
                 key={p.id}
                 className="group flex flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/40 transition-colors hover:border-zinc-700"
               >
-                <button
+                <Hint content={tr('预览', 'Preview')}><button
                   type="button"
                   onClick={() => setPreview(p)}
                   className="relative block w-full border-b border-zinc-800 text-left"
-                  title={tr('预览', 'Preview')}
+
                 >
                   <PageThumb id={p.id} />
                   <span className="absolute inset-0 flex items-center justify-center bg-zinc-950/0 opacity-0 transition-opacity group-hover:bg-zinc-950/30 group-hover:opacity-100">
@@ -315,44 +317,45 @@ export default function PagesPage() {
                       <Eye size={13} /> {tr('预览', 'Preview')}
                     </span>
                   </span>
-                </button>
+                </button></Hint>
                 <div className="flex flex-1 flex-col gap-2 p-3">
                   <div className="min-w-0">
-                    <div className="truncate text-[13px] font-medium text-zinc-200" title={p.title}>
+                    <Hint content={p.title}><div className="truncate text-[13px] font-medium text-zinc-200" >
                       {p.title || tr('（未命名页面）', '(untitled page)')}
-                    </div>
+                    </div></Hint>
                     <div className="mt-1 flex items-center gap-2">
                       <span className="text-[11px] text-zinc-500">{relTime(p.created_at)}</span>
                       <SourceBadge source={p.source} tr={tr} />
                     </div>
                   </div>
                   <div className="mt-auto flex items-center gap-1.5">
-                    <button
+                    <Hint content={tr('在新标签页打开完整页面', 'Open the full page in a new tab')}><Button variant="subtle" size="sm"
                       type="button"
                       onClick={() => void onOpen(p)}
-                      title={tr('在新标签页打开完整页面', 'Open the full page in a new tab')}
-                      className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
+
+                      className="inline-flex items-center gap-1 px-2 py-1 transition-colors"
                     >
                       <ExternalLink size={13} /> {tr('打开', 'Open')}
-                    </button>
-                    <button
+                    </Button></Hint>
+                    <Hint content={shareHint}><Button variant="subtle" size="sm"
                       type="button"
                       onClick={() => void onShare(p)}
                       disabled={sharingId === p.id}
-                      title={shareHint}
+
                       className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors ${
                         copiedId === p.id ? 'text-emerald-400' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
                       }`}
                     >
                       {sharingId === p.id ? <Loader2 size={13} className="animate-spin" /> : copiedId === p.id ? <Check size={13} /> : <Share2 size={13} />}
                       {copiedId === p.id ? tr('已复制', 'Copied') : tr('分享', 'Share')}
-                    </button>
+                    </Button></Hint>
                     {canWrite && (
                       <Button
                         variant="danger"
+                        size="sm"
                         onClick={() => void onDelete(p)}
                         disabled={busyId === p.id}
-                        className="ml-auto whitespace-nowrap"
+                        className="ml-auto w-7 p-0"
                       >
                         {busyId === p.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
                       </Button>
@@ -372,16 +375,16 @@ export default function PagesPage() {
           <div className="space-y-2">
             <div className="flex items-center gap-3 text-[11px] text-zinc-500">
               <span className="truncate font-mono">{preview.id}</span>
-              <button
+              <Hint content={shareHint}><Button variant="subtle" size="sm"
                 type="button"
                 onClick={() => void onShare(preview)}
                 disabled={sharingId === preview.id}
-                title={shareHint}
+
                 className={`ml-auto inline-flex shrink-0 items-center gap-1 ${copiedId === preview.id ? 'text-emerald-400' : 'text-indigo-400 hover:text-indigo-300'}`}
               >
                 {sharingId === preview.id ? <Loader2 size={11} className="animate-spin" /> : copiedId === preview.id ? <Check size={11} /> : <Share2 size={11} />}
                 {copiedId === preview.id ? tr('已复制公开链接', 'Public link copied') : tr('生成分享链接', 'Share link')}
-              </button>
+              </Button></Hint>
             </div>
             {previewHtml == null ? (
               <div className="flex h-[60vh] w-full items-center justify-center rounded-md border border-zinc-800 bg-white text-xs text-zinc-400">
@@ -397,8 +400,8 @@ export default function PagesPage() {
             )}
           </div>
         </Modal>
-      )}
-    </main>
+      )}</TabsContent>
+    </main></Tabs></>
   );
 }
 
@@ -468,7 +471,7 @@ function PacketCaptureSessionsView() {
                       <td className="whitespace-nowrap px-4 py-3 font-mono text-[11px] text-zinc-500">{shortPacketSessionID(item.id)}</td>
                       <td className="px-4 py-3">
                         <div className="font-medium text-zinc-100">{item.title || item.id}</div>
-                        <div className="mt-1 max-w-[520px] truncate font-mono text-[11px] text-zinc-500" title={item.id}>{item.id}</div>
+                        <Hint content={item.id}><div className="mt-1 max-w-[520px] truncate font-mono text-[11px] text-zinc-500" >{item.id}</div></Hint>
                         <div className="mt-1 max-w-[520px] truncate font-mono text-[11px] text-zinc-600">{item.canonical_filter || tr('全部流量', 'all traffic')}</div>
                       </td>
                       <td className="px-4 py-3 text-zinc-400">{packetSourceLabel(item.source, tr)}</td>
@@ -574,24 +577,24 @@ function PacketAnalysisView({ capture, ready, tr }: { capture: PacketCapture; re
       <div className="grid shrink-0 grid-cols-[minmax(260px,1fr)_auto] items-center gap-3 border-b border-zinc-800 bg-zinc-900 px-3 py-2">
         <div className="flex min-w-0 items-center gap-2 rounded border border-zinc-700 bg-zinc-950 px-2">
           <Search size={13} className="shrink-0 text-zinc-500" />
-          <input
+          <Input variant="inset"
             value={filter}
             onChange={(event) => {
               setFilter(event.target.value);
               setSelectedIndex(0);
             }}
             placeholder={tr('显示过滤器：tcp.stream == 0 / ip.addr == 10.0.0.1 / dns', 'Display filter: tcp.stream == 0 / ip.addr == 10.0.0.1 / dns')}
-            className="h-8 min-w-0 flex-1 bg-transparent font-mono text-[11px] text-zinc-200 outline-none placeholder:text-zinc-600"
+            className="h-8 min-w-0 flex-1 font-mono outline-none"
           />
           {filter ? (
-            <button type="button" onClick={() => setFilter('')} className="text-zinc-500 hover:text-zinc-300">×</button>
+            <Button variant="subtle" size="sm" type="button" onClick={() => setFilter('')} className="">×</Button>
           ) : null}
         </div>
         <div className="flex min-w-0 items-center gap-2 overflow-x-auto text-[11px] text-zinc-500">
           <span className="shrink-0">TCP stream</span>
-          <button type="button" onClick={() => setFilter('')} className={cn('rounded border px-2 py-1 font-mono', !filter ? 'border-indigo-500 text-indigo-300' : 'border-zinc-700 text-zinc-400')}>ALL</button>
+          <Button variant="outline" size="sm" type="button" onClick={() => setFilter('')} className={cn('rounded border px-2 py-1 font-mono', !filter ? 'border-indigo-500 text-indigo-300' : 'border-zinc-700 text-zinc-400')}>ALL</Button>
           {streams.map((stream) => (
-            <button key={stream} type="button" onClick={() => setFilter(`tcp.stream == ${stream}`)} className="rounded border border-zinc-700 px-2 py-1 font-mono text-zinc-300 hover:border-zinc-600">{stream}</button>
+            <Button variant="outline" size="sm" key={stream} type="button" onClick={() => setFilter(`tcp.stream == ${stream}`)} className="px-2 py-1 font-mono">{stream}</Button>
           ))}
         </div>
       </div>
@@ -658,7 +661,7 @@ function PacketAnalysisView({ capture, ready, tr }: { capture: PacketCapture; re
                       <td className="border-b border-zinc-900 px-2 py-1.5 text-sky-300">{String(packet.protocol || '-').toUpperCase()}</td>
                       <td className="border-b border-zinc-900 px-2 py-1.5 text-zinc-500">{displayValue(packetStream(packet))}</td>
                       <td className="border-b border-zinc-900 px-2 py-1.5 text-zinc-500">{packet.length ?? '-'}</td>
-                      <td className="truncate border-b border-zinc-900 px-2 py-1.5 text-zinc-400" title={packet.info || ''}>{packet.info || '-'}</td>
+                      <Hint content={packet.info || ''}><td className="truncate border-b border-zinc-900 px-2 py-1.5 text-zinc-400" >{packet.info || '-'}</td></Hint>
                     </tr>
                     );
                   })

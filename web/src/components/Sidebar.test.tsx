@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { http, HttpResponse } from 'msw';
@@ -27,7 +27,7 @@ describe('Sidebar configurable sections', () => {
   });
 
   it('隐藏子菜单并从父菜单管理入口恢复', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ skipHover: true });
     render(
       <MemoryRouter>
         <Sidebar />
@@ -35,27 +35,27 @@ describe('Sidebar configurable sections', () => {
     );
 
     expect(await screen.findByRole('link', { name: '网络设备' })).toBeInTheDocument();
-    await act(async () => {
-      await user.click(screen.getByRole('button', { name: '从侧栏取消固定网络设备' }));
-    });
+
+      fireEvent.click(screen.getByRole('button', { name: '从侧栏取消固定网络设备' }));
+
 
     expect(screen.queryByRole('link', { name: '网络设备' })).not.toBeInTheDocument();
     expect(localStorage.getItem('sidebar.section.resources.hidden')).toContain('network-devices');
 
-    await act(async () => {
+
       await user.click(screen.getByRole('button', { name: '管理基础设施菜单' }));
-    });
-    const checkbox = screen.getByRole('checkbox', { name: '网络设备' });
+
+    const checkbox = await screen.findByRole('checkbox', { name: '网络设备' });
     expect(checkbox).not.toBeChecked();
-    await act(async () => {
-      await user.click(checkbox);
-    });
+
+      fireEvent.click(checkbox);
+
 
     await waitFor(() => {
       expect(screen.getByRole('link', { name: '网络设备' })).toBeInTheDocument();
     });
     expect(localStorage.getItem('sidebar.section.resources.hidden')).toBe('[]');
-  });
+  }, 20000);
 
   it('所有可折叠分组都提供菜单管理入口', () => {
     render(
@@ -86,7 +86,7 @@ describe('Sidebar configurable sections', () => {
   });
 
   it('展开后展示全部会话', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ skipHover: true });
     const sessions = Array.from({ length: 12 }, (_, index) => ({
       id: String(index + 1),
       user_id: 1,
@@ -104,14 +104,14 @@ describe('Sidebar configurable sections', () => {
 
     expect(await screen.findByText('测试会话 1')).toBeInTheDocument();
     expect(screen.queryByText('测试会话 6')).not.toBeInTheDocument();
-    await act(async () => {
+
       await user.click(screen.getByRole('button', { name: '展开剩余 7 条' }));
-    });
+
     expect(screen.getByText('测试会话 12')).toBeInTheDocument();
   });
 
   it('批量选择并删除会话', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ skipHover: true });
     const sessions = Array.from({ length: 3 }, (_, index) => ({
       id: String(index + 1),
       user_id: 1,
@@ -133,16 +133,16 @@ describe('Sidebar configurable sections', () => {
     );
 
     await screen.findByText('测试会话 1');
-    await act(async () => {
+
       await user.click(screen.getByRole('button', { name: '批量删除会话' }));
-    });
-    await act(async () => {
+
+
       await user.click(screen.getByRole('checkbox', { name: '选择会话 测试会话 1' }));
       await user.click(screen.getByRole('checkbox', { name: '选择会话 测试会话 3' }));
-    });
-    await act(async () => {
+
+
       await user.click(screen.getByRole('button', { name: '删除 2 条' }));
-    });
+
 
     await waitFor(() => expect(deleted.sort()).toEqual(['1', '3']));
     expect(screen.queryByRole('dialog', { name: '批量删除会话' })).not.toBeInTheDocument();

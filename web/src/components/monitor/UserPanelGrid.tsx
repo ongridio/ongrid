@@ -1,3 +1,5 @@
+import { Button } from '@/components/ui';
+import { Hint } from '@/components/ui/Tooltip';
 // UserPanelGrid — renders user-authored monitor panels (CRUD via the
 // /v1/monitor/panels endpoints). Same chrome / chart / threshold logic
 // as the four built-in panels, plus edit / delete overlays on hover and
@@ -106,46 +108,46 @@ export function UserPanelGrid({
               onOpenInGrafana={onOpenPanel}
             />
             {isFiltered && (
-              <div
+              <Hint content={tr('本面板按角色筛选过设备', 'This panel is filtered by role')}><div
                 className="absolute left-2 top-2 rounded-md border border-emerald-700/40 bg-emerald-900/30 px-1.5 py-0.5 text-[10px] text-emerald-200"
-                title={tr('本面板按角色筛选过设备', 'This panel is filtered by role')}
+
               >
                 {tr('已筛选', 'Filtered')}
-              </div>
+              </div></Hint>
             )}
             {isUnfilteredButRoleSet && (
-              <div
+              <Hint content={tr("该面板的 PromQL 未引用 device_id，角色筛选不影响它", "This panel's PromQL does not reference device_id, so the role filter has no effect")}><div
                 className="absolute left-2 top-2 rounded-md border border-zinc-700/60 bg-zinc-900/60 px-1.5 py-0.5 text-[10px] text-zinc-400"
-                title={tr("该面板的 PromQL 未引用 device_id，角色筛选不影响它", "This panel's PromQL does not reference device_id, so the role filter has no effect")}
+
               >
                 {tr('全集群', 'Cluster-wide')}
-              </div>
+              </div></Hint>
             )}
             <div className="absolute right-2 top-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-              <button
+              <Hint content={tr('编辑面板', 'Edit panel')}><Button variant="outline" size="sm"
                 type="button"
                 onClick={() => onEdit(p)}
-                title={tr('编辑面板', 'Edit panel')}
-                className="rounded border border-zinc-800/60 bg-zinc-900/80 p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+
+                className="p-1"
               >
                 <Pencil size={12} />
-              </button>
-              <button
+              </Button></Hint>
+              <Hint content={tr('删除面板', 'Delete panel')}><Button variant="dangerGhost" size="sm"
                 type="button"
                 onClick={() => onDelete(p)}
-                title={tr('删除面板', 'Delete panel')}
-                className="rounded border border-zinc-800/60 bg-zinc-900/80 p-1 text-zinc-400 hover:bg-red-900/30 hover:text-red-300"
+
+                className="p-1"
               >
                 <Trash2 size={12} />
-              </button>
+              </Button></Hint>
             </div>
             {p.last_sync_error && (
-              <div
+              <Hint content={p.last_sync_error}><div
                 className="absolute bottom-2 left-2 right-2 rounded-md border border-amber-700/40 bg-amber-900/30 px-2 py-1 text-[10px] text-amber-200"
-                title={p.last_sync_error}
+
               >
                 {tr('Grafana 同步失败 — 本地仍可用', 'Grafana sync failed — local copy still works')}
-              </div>
+              </div></Hint>
             )}
           </div>
         );

@@ -32,6 +32,8 @@ export function formatTraceSummaryDuration(ms: number): string {
   return `${(ms / 1000).toFixed(2)}s`;
 }
 
+export type TraceQuickFilter = '' | 'span:status = error' | 'trace:duration > 1s';
+
 export type TraceScope = 'business' | 'internal' | 'all';
 
 const INTERNAL_ROOTS = '(GET|POST|PUT|PATCH|DELETE) /(internal|api/v1/traces)/.*|GET /api/v1/prometheus/auth|GET /healthz|GET /readyz|HTTP (GET|POST) prometheus|metrics\\..*|alert\\.Evaluate';
@@ -42,9 +44,11 @@ export function traceSearchQuery(
   operation: string,
   peerService = '',
   scope: TraceScope = 'business',
+  quickFilter: TraceQuickFilter = '',
 ): string {
   const explicit = traceQL.trim();
   const clauses = [
+    quickFilter,
     service && `resource.service.name = ${JSON.stringify(service)}`,
     operation && `span:name = ${JSON.stringify(operation)}`,
     peerService && `span.peer.service = ${JSON.stringify(peerService)}`,

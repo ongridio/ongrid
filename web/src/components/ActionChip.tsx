@@ -1,3 +1,4 @@
+import { Button } from '@/components/ui/Button';
 import type { MouseEventHandler } from 'react';
 import { cn } from '@/lib/cn';
 import type { IconType } from '@/lib/icon';
@@ -12,7 +13,7 @@ type Props = {
 
 export function ActionChip({ icon: Icon, label, onClick, disabled, className }: Props) {
   return (
-    <button
+    <Button variant="outline" size="sm"
       type="button"
       onClick={onClick}
       disabled={disabled}
@@ -26,6 +27,6 @@ export function ActionChip({ icon: Icon, label, onClick, disabled, className }: 
     >
       {Icon && <Icon size={14} className="text-zinc-400" />}
       <span>{label}</span>
-    </button>
+    </Button>
   );
 }

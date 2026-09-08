@@ -1,3 +1,5 @@
+import { Label } from '@/components/ui';
+import { Checkbox } from '@/components/ui/Checkbox';
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
@@ -359,12 +361,12 @@ function UpgradePreflight({
       </div>
 
       {defaultPlan.upToDate.length > 0 && (
-        <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-zinc-200 px-3 py-2.5 dark:border-zinc-800/60">
-          <input
-            type="checkbox"
+        <Label className="flex cursor-pointer items-start gap-3 rounded-lg border border-zinc-200 px-3 py-2.5 dark:border-zinc-800/60">
+          <Checkbox
+
             checked={forceReinstall}
-            onChange={(event) => onForceReinstallChange(event.target.checked)}
-            className="mt-0.5 h-4 w-4 accent-indigo-600"
+            onCheckedChange={(checkedValue) => onForceReinstallChange(checkedValue)}
+            className="mt-0.5 h-4 w-4"
           />
           <span>
             <span className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
@@ -380,7 +382,7 @@ function UpgradePreflight({
               )}
             </span>
           </span>
-        </label>
+        </Label>
       )}
 
       {skipped > 0 && (

@@ -2,6 +2,56 @@
 @tailwind components;
 @tailwind utilities;
 
+/* shadcn/ui selection controls, adapted to Ongrid's RGB theme tokens. */
+@layer components {
+  .og-select-trigger {
+    @apply inline-flex h-9 w-auto min-w-0 items-center justify-between gap-2 rounded-md border border-border bg-card px-2.5 text-xs text-text shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .og-select-trigger:hover:not(:disabled) { border-color: rgb(var(--text-faint)); }
+  .og-select-trigger:focus-visible {
+    outline: 2px solid rgb(var(--text-muted) / 0.5);
+    outline-offset: 2px;
+  }
+  .og-select-trigger[data-variant="ghost"] { @apply border-transparent bg-transparent text-text-muted shadow-none; }
+  .og-select-trigger[data-variant="ghost"]:hover:not(:disabled),
+  .og-select-trigger[data-variant="ghost"][aria-expanded="true"] { border-color: transparent; background-color: rgb(var(--text) / .05); color: rgb(var(--text)); }
+  .og-filter-field { @apply inline-flex h-9 max-w-full min-w-0 items-center rounded-md border border-border bg-card text-xs transition-colors; }
+  .og-filter-caption { @apply inline-flex h-full shrink-0 items-center gap-1.5 whitespace-nowrap rounded-l-md border-r border-border px-2.5 text-[11px] font-medium text-text-muted; background-color: rgb(var(--text) / .025); }
+  .og-filter-field > .og-select-trigger,
+  .og-filter-field > .og-input { @apply h-full min-w-0 flex-1 rounded-none rounded-r-md border-0 bg-transparent shadow-none; }
+  .og-filter-field > .og-select-trigger { width: auto; }
+  .og-filter-field > .og-select-trigger:hover:not(:disabled) { background-color: rgb(var(--text) / .04); }
+  .og-filter-field > .og-select-trigger:focus-visible,
+  .og-filter-field > .og-input:focus-visible { outline: none; box-shadow: none; }
+  .og-filter-field:focus-within { border-color: rgb(var(--text-muted)); box-shadow: 0 0 0 3px rgb(var(--text) / .08); }
+  .og-select-positioner { z-index: 150; }
+  .og-select-popup {
+    @apply overflow-hidden rounded-lg border border-border bg-card text-text shadow-md;
+    width: max(var(--anchor-width), 12rem);
+    max-width: var(--available-width);
+    max-height: var(--available-height);
+  }
+  .og-select-list {
+    @apply overflow-y-auto overscroll-contain p-1;
+    max-height: min(18rem, var(--available-height));
+  }
+  .og-select-popup:has(.og-select-search) { width: max(var(--anchor-width), 16rem); }
+  .og-select-popup:has(.og-select-search) .og-select-list {
+    max-height: min(18rem, calc(var(--available-height) - 6rem));
+  }
+  .og-select-item {
+    @apply relative flex min-h-8 cursor-default select-none items-center gap-2 rounded-md py-1.5 pl-2 pr-8 text-xs;
+    outline: none;
+  }
+  .og-select-item[data-highlighted] { background-color: rgb(var(--text) / 0.07); }
+  .og-select-item:focus-visible { outline: none; }
+  .og-select-item[data-disabled] { @apply pointer-events-none opacity-50; }
+  .og-select-search { @apply flex h-10 items-center gap-2 border-b border-border px-3; }
+  .og-select-search:focus-within { border-color: rgb(var(--text-muted)); }
+  .og-select-search input { @apply h-full w-full min-w-0 flex-1 border-0 bg-transparent p-0 text-xs text-text shadow-none placeholder:text-text-faint; }
+  .og-select-search input:focus-visible { outline: none; box-shadow: none; }
+}
+
 /* Semantic design tokens (dark theme).
    Values are bare RGB triplets so we can compose them with /<alpha-value>
    via tailwind's color extension (`rgb(var(--token) / <alpha-value>)`).
@@ -445,23 +495,6 @@ html.light .app-header {
 html.light *:focus-visible {
   outline-color: rgb(148 163 184); /* slate-400 — soft, not black */
 }
-/* Text controls already signal focus by darkening their own border
-   (focus:border-…), so the offset focus ring is redundant and reads as a
-   floating outer frame. Drop it on inputs; keep it for buttons/links where the
-   ring is the only focus affordance. */
-/* Form controls show focus via their border, never an outline ring. Must win
-   over both Tailwind's focus:outline-none (which is actually a *transparent*
-   2px outline) and the html.light *:focus-visible recolor above — hence
-   !important, else the recolor turns that transparent outline visible. */
-input:focus,
-input:focus-visible,
-textarea:focus,
-textarea:focus-visible,
-select:focus,
-select:focus-visible {
-  outline: none !important;
-}
-
 /* Markdown body styling within assistant bubbles */
 .md-body {
   line-height: 1.65;
@@ -688,3 +721,101 @@ html.light .react-flow__minimap-mask {
     margin: 12mm;
   }
 }
+
+/* Shared shadcn Base UI controls, using the same tokens in both themes. */
+@layer components {
+  .og-floating-positioner { z-index: 150; }
+  .og-popover, .og-menu, .og-tooltip {
+    @apply rounded-lg border border-border bg-card text-text shadow-lg;
+    max-width: min(95vw, var(--available-width));
+    max-height: var(--available-height);
+    overflow-y: auto;
+  }
+  .og-popover { @apply p-3; }
+  .og-menu { @apply min-w-[10rem] p-1; }
+  .og-tooltip { @apply max-w-xs px-2.5 py-1.5 text-xs; }
+  .og-menu-item { @apply flex cursor-default items-center gap-2 rounded-md px-2.5 py-2 text-xs outline-none; }
+  .og-menu-item[data-highlighted] { background: rgb(var(--text) / .07); }
+  .og-menu-item[data-disabled] { @apply pointer-events-none opacity-50; }
+  .og-dialog-overlay { @apply fixed inset-0 z-50 bg-black/70; }
+  .og-dialog-content { @apply fixed left-1/2 top-1/2 z-50 flex max-h-[90vh] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 flex-col rounded-xl border border-border bg-card text-text shadow-xl; }
+  .og-checkbox { @apply inline-flex h-3.5 w-3.5 shrink-0 cursor-pointer items-center justify-center rounded border border-border bg-card align-middle text-white; }
+  .og-checkbox[data-checked], .og-checkbox[data-indeterminate] { @apply border-indigo-600 bg-indigo-600; }
+  .og-checkbox[data-disabled], .og-switch[data-disabled] { @apply cursor-not-allowed opacity-50; }
+  .og-switch { @apply relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-border bg-zinc-600 transition-colors; }
+  .og-switch[data-checked] { @apply border-indigo-600 bg-indigo-600; }
+  .og-switch-thumb { @apply block h-3.5 w-3.5 translate-x-0.5 rounded-full bg-white transition-transform; }
+  .og-switch-thumb[data-checked] { @apply translate-x-[18px]; }
+  .og-tabs-list { @apply flex items-center gap-1 overflow-x-auto border-b border-border; }
+  .og-tabs-trigger { @apply inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap border-b-2 border-transparent px-3 py-2 text-xs text-text-muted; }
+  .og-tabs-trigger[data-active] { @apply border-indigo-500 text-text; }
+  .og-tabs-trigger[data-disabled] { @apply cursor-not-allowed opacity-50; }
+}
+
+/* Form hints and placeholders must remain readable on dark dialog surfaces. */
+html.dark .og-dialog-content { --text-faint: var(--text-muted); }
+html.dark .og-dialog-content .text-zinc-500,
+html.dark .og-dialog-content .text-zinc-600 { color: rgb(var(--text-muted)); }
+
+.og-dialog-content[data-placement="right"] { left: auto; right: 0; top: 0; transform: none; height: 100dvh; max-height: 100dvh; border-radius: 0; }
+
+/* Small controls share the same surface, spacing and interaction states. */
+@layer components {
+  .og-input, .og-textarea {
+    @apply block w-full min-w-0 rounded-md border border-border bg-card px-2.5 text-xs text-text shadow-sm transition-colors placeholder:text-text-faint;
+  }
+  .og-input { @apply h-9 py-1; }
+  .og-input[type="search"] { @apply bg-transparent shadow-none; }
+  .og-textarea { @apply min-h-20 resize-y py-2 leading-5; }
+  .og-input:disabled, .og-textarea:disabled { @apply cursor-not-allowed opacity-50; }
+  .og-input[readonly], .og-textarea[readonly] { color: rgb(var(--text-muted)); }
+  .og-input:hover:not(:disabled), .og-textarea:hover:not(:disabled) { border-color: rgb(var(--text-faint)); }
+  .og-input:focus-visible, .og-textarea:focus-visible {
+    border-color: rgb(var(--text-muted));
+    box-shadow: 0 0 0 3px rgb(var(--text) / .08);
+    outline: none;
+  }
+  .og-input[aria-invalid="true"], .og-textarea[aria-invalid="true"] { @apply border-red-500; box-shadow: 0 0 0 3px rgb(239 68 68 / .1); }
+  .og-input[data-variant="inset"], .og-textarea[data-variant="inset"] { @apply min-h-0 rounded-none border-0 bg-transparent shadow-none; }
+  .og-input[data-variant="inset"]:focus-visible, .og-textarea[data-variant="inset"]:focus-visible { box-shadow: none; }
+  .og-input[type="file"] { @apply h-auto py-1.5; }
+  .og-input[type="file"]::file-selector-button { @apply mr-3 rounded border-0 bg-transparent text-xs font-medium text-text; }
+  .og-label { @apply text-xs font-medium leading-5 text-text-muted; }
+  .og-label:has(:disabled) { @apply cursor-not-allowed; }
+  .og-radio { @apply h-3.5 w-3.5 shrink-0 cursor-pointer appearance-none rounded-full border border-border bg-card align-middle; }
+  .og-radio:checked { border: 4px solid rgb(79 70 229); }
+  .og-radio:disabled, .og-slider:disabled { @apply cursor-not-allowed opacity-50; }
+  .og-slider { @apply h-5 w-full cursor-pointer appearance-none bg-transparent; }
+  .og-slider::-webkit-slider-runnable-track { @apply h-1.5 rounded-full bg-zinc-600; }
+  .og-slider::-moz-range-track { @apply h-1.5 rounded-full bg-zinc-600; }
+  .og-slider::-webkit-slider-thumb { @apply -mt-1.5 h-[18px] w-[18px] appearance-none rounded-full border-2 border-solid border-indigo-600 bg-white; }
+  .og-slider::-moz-range-thumb { @apply h-4 w-4 rounded-full border-2 border-solid border-indigo-600 bg-white; }
+  .og-button { @apply inline-flex h-9 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-transparent px-3 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50; }
+  .og-button:where([data-size="sm"]) { @apply h-7 px-2.5; }
+  .og-button:where([data-size="icon"]) { @apply h-9 w-9 p-0; }
+  .og-button:where([data-variant="primary"]) { @apply border-indigo-600 bg-indigo-600 text-white; }
+  .og-button:where([data-variant="primary"]):hover:not(:disabled) { @apply border-indigo-500 bg-indigo-500; }
+  .og-button:where([data-variant="ghost"]), .og-button:where([data-variant="outline"]) { @apply border-border bg-card text-text; }
+  .og-button:where([data-variant="ghost"]):hover:not(:disabled), .og-button:where([data-variant="outline"]):hover:not(:disabled), .og-button:where([data-variant="subtle"]):hover:not(:disabled) { background-color: rgb(var(--text) / .06); }
+  .og-button:where([data-variant="subtle"]), .og-button:where([data-variant="link"]) { @apply bg-transparent text-text-muted; }
+  .og-button:where([data-variant="link"]) { @apply h-auto p-0; }
+  .og-button:where([data-variant="link"]):hover:not(:disabled) { @apply text-text underline underline-offset-4; }
+  .og-button:where([data-variant="danger"]) { @apply border-red-600 bg-red-600 text-white; }
+  .og-button:where([data-variant="danger"]):hover:not(:disabled) { @apply bg-red-500; }
+  .og-button:where([data-variant="dangerGhost"]) { @apply border-border bg-card text-red-500; }
+  .og-button:where([data-variant="dangerGhost"]):hover:not(:disabled) { @apply border-red-500/40 bg-red-500/10; }
+}
+
+@layer components {
+  .og-chip { @apply inline-flex items-center gap-1 rounded-md border border-border bg-transparent px-1.5 py-0.5 text-[10px] font-medium leading-4 text-text-muted; }
+  .og-chip[data-tone="success"] { @apply border-emerald-500/20 bg-emerald-500/10 text-emerald-400; }
+  .og-chip[data-tone="warning"] { @apply border-amber-500/20 bg-amber-500/10 text-amber-400; }
+  .og-chip[data-tone="danger"] { @apply border-red-500/20 bg-red-500/10 text-red-400; }
+  .og-chip[data-tone="info"] { @apply border-sky-500/20 bg-sky-500/10 text-sky-400; }
+  .og-chip[data-tone="accent"] { @apply border-indigo-500/20 bg-indigo-500/10 text-indigo-400; }
+}
+html.light .og-chip[data-tone="success"] { color: rgb(4 120 87); }
+html.light .og-chip[data-tone="warning"] { color: rgb(180 83 9); }
+html.light .og-chip[data-tone="danger"] { color: rgb(185 28 28); }
+html.light .og-chip[data-tone="info"] { color: rgb(3 105 161); }
+html.light .og-chip[data-tone="accent"] { color: rgb(67 56 202); }

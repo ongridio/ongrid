@@ -1,3 +1,7 @@
+import { Input, Label } from '@/components/ui';
+import { Hint } from '@/components/ui/Tooltip';
+import { Checkbox } from '@/components/ui/Checkbox';
+import { Select } from '@/components/ui/Select';
 // Channels — two-way IM bot admin. CRUD for Larksuite / DingTalk /
 // Telegram / Slack bot registrations. Each item drives one long-connection
 // (stream mode) or one webhook endpoint that the platform calls. Configured
@@ -267,15 +271,15 @@ function IMProviderCard({
                 <Button onClick={() => onEdit(app)} variant="ghost">
                   <Pencil size={11} /> {tr('编辑', 'Edit')}
                 </Button>
-                <Button
+                <Hint content={tr('删除', 'Delete')}><Button
                   onClick={() => onDelete(app)}
                   variant="dangerGhost"
                   className="px-2"
                   aria-label={tr('删除', 'Delete')}
-                  title={tr('删除', 'Delete')}
+
                 >
                   <Trash2 size={12} />
-                </Button>
+                </Button></Hint>
               </div>
             </div>
           </li>
@@ -403,21 +407,21 @@ function IMAppEditor({
       title={isCreate ? tr(`新建${meta.labelZh}机器人`, `New ${meta.labelEn} bot`) : tr(`编辑 — ${target!.name}`, `Edit — ${target!.name}`)}
       footer={
         <>
-          <button
+          <Button variant="outline" size="sm"
             type="button"
             onClick={onClose}
-            className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+            className="px-3 py-1.5"
           >
             {tr('取消', 'Cancel')}
-          </button>
-          <button
+          </Button>
+          <Button variant="primary" size="sm"
             type="button"
             onClick={save}
             disabled={busy}
-            className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent/90 disabled:opacity-50"
+            className="px-3 py-1.5 font-medium text-accent-fg"
           >
             {busy ? tr('保存中…', 'Saving…') : tr('保存', 'Save')}
-          </button>
+          </Button>
         </>
       }
     >
@@ -436,14 +440,14 @@ function IMAppEditor({
           <Field label={tr('模式', 'Mode')} hint={mode === 'stream'
             ? tr('manager 主动 dial 长连接，无需公网回调。推荐。', 'Manager dials out via long connection — recommended.')
             : tr('平台 webhook 推到我们这边，需要公网回调 URL + encrypt_key。', 'Platform pushes webhooks to our public URL — needs encrypt_key.')}>
-            <select
+            <Select label={tr('模式', 'Mode')}
               value={mode}
-              onChange={(e) => setMode(e.target.value as IMMode)}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              onValueChange={(selectedValue) => setMode(selectedValue as IMMode)}
+              className="w-full"
             >
               <option value="stream">{tr('stream（推荐）', 'stream (recommended)')}</option>
               {provider !== 'telegram' && provider !== 'slack' && <option value="webhook">webhook</option>}
-            </select>
+            </Select>
           </Field>
         </div>
 
@@ -452,20 +456,20 @@ function IMAppEditor({
         </p>
 
         <Field label={tr('名称（仅展示）', 'Name (display only)')}>
-          <input
+          <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder={tr('如：运维群机器人', 'e.g. Ops Channel Bot')}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full"
           />
         </Field>
 
         <Field label="app_id" hint={tr('飞书 app_id (cli_xxx) / 钉钉 AppKey / Telegram bot 用户名 / Slack workspace team_id (T…)', 'Larksuite app_id (cli_xxx) / DingTalk AppKey / Telegram bot username / Slack workspace team_id (T…)')}>
-          <input
+          <Input
             value={appID}
             onChange={(e) => setAppID(e.target.value)}
             placeholder="cli_a1b2c3d4e5f6"
-            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full font-mono"
           />
         </Field>
 
@@ -478,12 +482,12 @@ function IMAppEditor({
                 'Slack app-level token (xapp-…) — used to open the Socket Mode WebSocket. Create at Your app → Basic Information → App-Level Tokens.',
               )}
             >
-              <input
+              <Input
                 type={revealedSecret ? 'text' : 'password'}
                 value={slackAppToken}
                 onChange={(e) => setSlackAppToken(e.target.value)}
                 placeholder={isCreate ? 'xapp-1-…' : tr('留空保留现值', 'Leave blank to keep current')}
-                className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                className="w-full font-mono"
               />
             </Field>
             <Field
@@ -494,24 +498,24 @@ function IMAppEditor({
               )}
             >
               <div className="flex items-center gap-2">
-                <input
+                <Input
                   type={revealedSecret ? 'text' : 'password'}
                   value={slackBotToken}
                   onChange={(e) => setSlackBotToken(e.target.value)}
                   placeholder={isCreate ? 'xoxb-…' : tr('留空保留现值', 'Leave blank to keep current')}
-                  className="flex-1 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                  className="flex-1 font-mono"
                 />
                 {!isCreate && (
-                  <button
+                  <Hint content={revealedSecret ? tr('清空', 'Clear') : tr('查看', 'Reveal')}><Button variant="outline" size="sm"
                     type="button"
                     onClick={revealedSecret
                       ? () => { setRevealedSecret(null); setSlackAppToken(''); setSlackBotToken(''); }
                       : reveal}
-                    className="rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-zinc-300 hover:bg-zinc-800"
-                    title={revealedSecret ? tr('清空', 'Clear') : tr('查看', 'Reveal')}
+                    className="px-2 py-1.5"
+
                   >
                     {revealedSecret ? <EyeOff size={12} /> : <Eye size={12} />}
-                  </button>
+                  </Button></Hint>
                 )}
               </div>
             </Field>
@@ -521,22 +525,22 @@ function IMAppEditor({
             ? tr('从平台开放后台拷贝（Telegram 填 BotFather 的 token）', 'Copy from the platform admin (Telegram: the BotFather token)')
             : tr('留空 = 保留现值；填了 = 覆盖', 'Empty = keep existing; filled = overwrite')}>
             <div className="flex items-center gap-2">
-              <input
+              <Input
                 type={revealedSecret ? 'text' : 'password'}
                 value={appSecret}
                 onChange={(e) => setAppSecret(e.target.value)}
                 placeholder={isCreate ? tr('必填', 'Required') : tr('留空保留现值', 'Leave blank to keep current')}
-                className="flex-1 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                className="flex-1 font-mono"
               />
               {!isCreate && (
-                <button
+                <Hint content={revealedSecret ? tr('清空', 'Clear') : tr('查看', 'Reveal')}><Button variant="outline" size="sm"
                   type="button"
                   onClick={revealedSecret ? () => { setRevealedSecret(null); setAppSecret(''); } : reveal}
-                  className="rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-zinc-300 hover:bg-zinc-800"
-                  title={revealedSecret ? tr('清空', 'Clear') : tr('查看', 'Reveal')}
+                  className="px-2 py-1.5"
+
                 >
                   {revealedSecret ? <EyeOff size={12} /> : <Eye size={12} />}
-                </button>
+                </Button></Hint>
               )}
             </div>
           </Field>
@@ -556,11 +560,11 @@ function IMAppEditor({
                 )
             }
           >
-            <input
+            <Input
               value={allowFrom}
               onChange={(e) => setAllowFrom(e.target.value)}
               placeholder={provider === 'telegram' ? '8211893274, 123456789' : 'U0ABCD1234, U0EFGH5678'}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              className="w-full font-mono"
             />
           </Field>
         )}
@@ -572,45 +576,45 @@ function IMAppEditor({
             'Language the agent replies in. "Auto" lets the model mirror the user; choosing 中文 / English appends a directive to every incoming message, overriding the persona\'s default.',
           )}
         >
-          <select
+          <Select label={tr('回复语言', 'Reply language')}
             value={defaultLocale}
-            onChange={(e) => setDefaultLocale(e.target.value as '' | 'en' | 'zh')}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            onValueChange={(selectedValue) => setDefaultLocale(selectedValue as '' | 'en' | 'zh')}
+            className="w-full"
           >
             <option value="">{tr('自动（跟随用户）', 'Auto (mirror user)')}</option>
             <option value="zh">{tr('中文', '中文')}</option>
             <option value="en">{tr('English', 'English')}</option>
-          </select>
+          </Select>
         </Field>
 
         {mode === 'webhook' && provider === 'feishu' && (
           <div className="grid grid-cols-2 gap-3">
             <Field label="verify_token" hint={tr('飞书事件订阅 verification token（可选）', 'Larksuite event subscription verification token (optional)')}>
-              <input
+              <Input
                 value={verifyToken}
                 onChange={(e) => setVerifyToken(e.target.value)}
-                className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                className="w-full font-mono"
               />
             </Field>
             <Field label="encrypt_key" hint={tr('webhook 模式必填；事件加密 key', 'Required in webhook mode — event encryption key')}>
-              <input
+              <Input
                 value={encryptKey}
                 onChange={(e) => setEncryptKey(e.target.value)}
-                className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                className="w-full font-mono"
               />
             </Field>
           </div>
         )}
 
-        <label className="inline-flex items-center gap-2 text-xs text-zinc-300">
-          <input
-            type="checkbox"
+        <Label className="inline-flex items-center gap-2 text-xs text-zinc-300">
+          <Checkbox
+
             checked={enabled}
-            onChange={(e) => setEnabled(e.target.checked)}
-            className="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-900"
+            onCheckedChange={(checkedValue) => setEnabled(checkedValue)}
+            className="h-3.5 w-3.5"
           />
           {tr('启用此 IM', 'Enable this channel')}
-        </label>
+        </Label>
 
         {mode === 'webhook' && (
           <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-300">
@@ -630,11 +634,11 @@ function IMAppEditor({
 
 function Field({ label, hint, children }: { label: React.ReactNode; hint?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <label className="block">
+    <Label className="block">
       <span className="mb-1 block text-xs text-zinc-400">{label}</span>
       {children}
       {hint && <span className="mt-1 block text-[10px] text-zinc-500">{hint}</span>}
-    </label>
+    </Label>
   );
 }
 
@@ -672,21 +676,21 @@ function DeleteConfirm({
       title={tr(`删除 ${target.name}`, `Delete ${target.name}`)}
       footer={
         <>
-          <button
+          <Button variant="outline" size="sm"
             type="button"
             onClick={onClose}
-            className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+            className="px-3 py-1.5"
           >
             {tr('取消', 'Cancel')}
-          </button>
-          <button
+          </Button>
+          <Button variant="danger" size="sm"
             type="button"
             onClick={submit}
             disabled={busy}
-            className="rounded-md bg-red-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-600 disabled:opacity-50"
+            className="px-3 py-1.5 font-medium"
           >
             {busy ? tr('删除中…', 'Deleting…') : tr('删除', 'Delete')}
-          </button>
+          </Button>
         </>
       }
     >

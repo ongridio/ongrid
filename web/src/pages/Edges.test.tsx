@@ -1,4 +1,4 @@
-import { act } from "react";
+import { selectOption } from '@/test/select-option';
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
@@ -7,13 +7,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import EdgesPage from "./Edges";
 import { server } from "@/test/msw-server";
+import { openMetricDrilldown } from "@/lib/drilldown";
 
-vi.mock("@/store/me", () => ({
-  usePermissions: () => ({ isAdmin: true, canMutate: true, role: "admin" }),
-}));
+vi.mock("@/lib/drilldown", () => ({ openMetricDrilldown: vi.fn().mockResolvedValue(undefined) }));
+
+const permissions = vi.hoisted(() => ({ isAdmin: true, canMutate: true, role: "admin" }));
+vi.mock("@/store/me", () => ({ usePermissions: () => permissions }));
 
 describe("EdgesPage", () => {
   beforeEach(() => {
+    Object.assign(permissions, { isAdmin: true, canMutate: true, role: "admin" });
     localStorage.setItem("ongrid-locale", "zh-CN");
     server.use(
       http.get("/api/v1/version", () =>
@@ -188,10 +191,10 @@ describe("EdgesPage", () => {
     );
 
     const k8sNameCells = await screen.findAllByText("ongrid-k8s-control-plane");
-    expect(k8sNameCells).toHaveLength(2);
+    expect(k8sNameCells).toHaveLength(1);
     expect(
-      screen.queryByText("k8s:kind-local:ongrid-k8s-control-plane"),
-    ).not.toBeInTheDocument();
+      screen.getByText("k8s:kind-local:ongrid-k8s-control-plane"),
+    ).toBeInTheDocument();
     expect(screen.queryByText("kind-controller")).not.toBeInTheDocument();
     expect(screen.queryByText("K8s Node")).not.toBeInTheDocument();
     expect(screen.queryByText("K8s Controller")).not.toBeInTheDocument();
@@ -207,8 +210,8 @@ describe("EdgesPage", () => {
     expect(clusterLink).toHaveAttribute("href", "/kubernetes/1");
     const clusterChip = within(clusterLink)
       .getByText("集群 · kind-local")
-      .closest("span.inline-flex");
-    expect(clusterChip).toHaveClass("bg-sky-500/10", "text-sky-300");
+      .closest('[data-slot="badge"]');
+    expect(clusterChip).toHaveAttribute("data-tone", "info");
     expect(
       within(k8sRow as HTMLTableRowElement).queryByText("Kubernetes 管理"),
     ).not.toBeInTheDocument();
@@ -219,8 +222,8 @@ describe("EdgesPage", () => {
     expect(terminalLink).toHaveAttribute("href", "/devices/17/shell");
     expect(terminalLink).toHaveAttribute("target", "_blank");
     expect(
-      within(k8sRow as HTMLTableRowElement).queryByText("查看图表"),
-    ).not.toBeInTheDocument();
+      within(k8sRow as HTMLTableRowElement).getByText("查看图表"),
+    ).toBeInTheDocument();
     expect(
       within(k8sRow as HTMLTableRowElement).queryByLabelText(/选择/),
     ).not.toBeInTheDocument();
@@ -234,7 +237,7 @@ describe("EdgesPage", () => {
     expect(screen.getByRole("table")).toHaveClass("min-w-full", "table-fixed");
   });
 
-  it("点击 K8s 托管设备行进入设备详情，操作列只保留 WebSSH", async () => {
+  it("点击 K8s 托管设备行进入设备详情，操作列支持 WebSSH 和修改名称", async () => {
     const user = userEvent.setup();
     render(
       <MemoryRouter initialEntries={["/devices"]}>
@@ -247,9 +250,9 @@ describe("EdgesPage", () => {
     const k8sRow = k8sNameCells[0].closest("tr") as HTMLTableRowElement;
     expect(k8sRow).not.toBeNull();
 
-    await act(async () => {
+
       await user.click(k8sRow);
-    });
+
     await waitFor(() =>
       expect(screen.getByTestId("location")).toHaveTextContent("/devices/17"),
     );
@@ -260,89 +263,96 @@ describe("EdgesPage", () => {
     expect(
       within(k8sRow).getByRole("link", { name: /打开.*终端/ }),
     ).toHaveAttribute("href", "/devices/17/shell");
-    expect(within(k8sRow).queryByText("查看图表")).not.toBeInTheDocument();
+    expect(within(k8sRow).getByText("查看图表")).toBeInTheDocument();
     expect(
-      within(k8sRow).queryByRole("button", { name: /更多/ }),
-    ).not.toBeInTheDocument();
+      within(k8sRow).getByRole("button", { name: "操作" }),
+    ).toBeInTheDocument();
     await waitFor(() =>
       expect(screen.getByTestId("location")).toHaveTextContent("/devices/17"),
     );
   });
 
-  it("让设备操作菜单在视口内翻转或滚动", async () => {
+  it.each([
+    [19, "bare-metal-1", "bm-1"],
+    [17, "k8s:kind-local:ongrid-k8s-control-plane", "ongrid-k8s-control-plane"],
+  ])("修改设备 %s 名称，保存后优先展示名称并保留主机名", async (id, oldName, hostname) => {
     const user = userEvent.setup();
-    const originalInnerHeight = window.innerHeight;
-    const originalGetBoundingClientRect =
-      Element.prototype.getBoundingClientRect;
-    let triggerRect = makeRect({
-      top: 540,
-      left: 1200,
-      width: 32,
-      height: 32,
-    });
-    const menuRect = makeRect({ top: 0, left: 0, width: 208, height: 315 });
+    let submitted: unknown;
+    server.use(http.patch(`/api/v1/devices/${id}`, async ({ request }) => {
+      submitted = await request.json();
+      return new HttpResponse(null, { status: 204 });
+    }));
+    render(<MemoryRouter><EdgesPage /></MemoryRouter>);
+    const row = (await screen.findByText(oldName)).closest("tr")!;
+     await user.click(within(row).getByRole("button", { name: "操作" }));
+    await user.click(await screen.findByRole('menuitem', { name: "修改设备名称" }));
+    const dialog = screen.getByRole("dialog", { name: "修改设备名称" });
+    const input = within(dialog).getByLabelText("设备名称");
+    expect(input).toHaveValue(oldName);
+    await user.clear(input);
+    await user.type(input, "   ");
+    expect(within(dialog).getByRole("button", { name: "保存" })).toBeDisabled();
+    await user.clear(input);
+    await user.type(input, "  数据库主机  ");
+    await user.click(within(dialog).getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(submitted).toEqual({ name: "数据库主机" });
+    expect(within(row).getByText("数据库主机")).toBeInTheDocument();
+    expect(within(row).getByText(hostname)).toBeInTheDocument();
+  });
 
-    Object.defineProperty(window, "innerHeight", {
-      configurable: true,
-      value: 600,
-    });
-    const rectSpy = vi
-      .spyOn(Element.prototype, "getBoundingClientRect")
-      .mockImplementation(function (this: Element) {
-        if (this.getAttribute("aria-label") === "更多操作") return triggerRect;
-        if (this.getAttribute("role") === "menu") return menuRect;
-        return originalGetBoundingClientRect.call(this);
-      });
+  it("K8s 设备查看图表使用设备 ID", async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><EdgesPage /></MemoryRouter>);
+    await user.click(await screen.findByRole("button", { name: "在 Grafana 查看 k8s:kind-local:ongrid-k8s-control-plane 图表" }));
+    expect(openMetricDrilldown).toHaveBeenCalledWith(expect.objectContaining({
+      deviceId: 17,
+      expr: expect.stringContaining('device_id="17"'),
+    }));
+  });
 
-    try {
-      render(
-        <MemoryRouter>
-          <EdgesPage />
-        </MemoryRouter>,
-      );
+  it("只读用户不能修改设备名称", async () => {
+    Object.assign(permissions, { isAdmin: false, canMutate: false, role: "viewer" });
+    const user = userEvent.setup();
+    render(<MemoryRouter><EdgesPage /></MemoryRouter>);
+    const row = (await screen.findByText("bare-metal-1")).closest("tr")!;
+     await user.click(within(row).getByRole("button", { name: "操作" }));
+    expect(screen.queryByRole('menuitem', { name: "修改设备名称" })).not.toBeInTheDocument();
+  });
 
-      await screen.findByText("bare-metal-1");
-      await act(async () => {
-        await user.click(screen.getByRole("button", { name: "更多操作" }));
-      });
+  it("名称保存失败时保留输入，允许重试", async () => {
+    const user = userEvent.setup();
+    server.use(http.patch("/api/v1/devices/19", () =>
+      HttpResponse.json({ message: "保存失败" }, { status: 500 }),
+    ));
+    render(<MemoryRouter><EdgesPage /></MemoryRouter>);
+    const row = (await screen.findByText("bare-metal-1")).closest("tr")!;
+     await user.click(within(row).getByRole("button", { name: "操作" }));
+    await user.click(await screen.findByRole('menuitem', { name: "修改设备名称" }));
+    const input = screen.getByLabelText("设备名称");
+    await user.clear(input);
+    await user.type(input, "新名称");
+    await user.click(screen.getByRole("button", { name: "保存" }));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(input).toHaveValue("新名称");
+    expect(within(row).getByText("bare-metal-1")).toBeInTheDocument();
+    server.use(http.patch("/api/v1/devices/19", () => new HttpResponse(null, { status: 204 })));
+    await user.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(within(row).getByText("新名称")).toBeInTheDocument();
+  });
 
-      const menu = await screen.findByRole("menu");
-      await waitFor(() => {
-        const top = Number.parseFloat(menu.style.top);
-        expect(top).toBeLessThan(triggerRect.top);
-        expect(top).toBeGreaterThanOrEqual(8);
-        expect(top + menuRect.height).toBeLessThanOrEqual(
-          window.innerHeight - 8,
-        );
-      });
-
-      await act(async () => {
-        triggerRect = makeRect({
-          top: 100,
-          left: 1200,
-          width: 32,
-          height: 32,
-        });
-        Object.defineProperty(window, "innerHeight", {
-          configurable: true,
-          value: 240,
-        });
-        window.dispatchEvent(new Event("resize"));
-      });
-      await waitFor(() => {
-        const top = Number.parseFloat(menu.style.top);
-        const maxHeight = Number.parseFloat(menu.style.maxHeight);
-        expect(top).toBeGreaterThan(triggerRect.bottom);
-        expect(maxHeight).toBeLessThan(menuRect.height);
-        expect(top + maxHeight).toBeLessThanOrEqual(window.innerHeight - 8);
-      });
-    } finally {
-      rectSpy.mockRestore();
-      Object.defineProperty(window, "innerHeight", {
-        configurable: true,
-        value: originalInnerHeight,
-      });
-    }
+  it("设备操作菜单支持键盘打开和 Escape 返回触发按钮", async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><EdgesPage /></MemoryRouter>);
+    const row = (await screen.findByText("bare-metal-1")).closest("tr")!;
+    const trigger = within(row).getByRole("button", { name: "操作" });
+    trigger.focus();
+    await user.keyboard("{ArrowDown}");
+    expect(await screen.findByRole("menu")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+    expect(trigger).toHaveFocus();
   });
 
   it("整包升级创建可按设备架构执行和验证的持久任务", async () => {
@@ -375,17 +385,18 @@ describe("EdgesPage", () => {
         </MemoryRouter>,
       );
       await screen.findByText("bare-metal-1");
-      await act(async () => {
-        await user.click(screen.getByRole("button", { name: "更多操作" }));
-      });
-      await act(async () => {
+
+        await user.click(within(screen.getByText("bare-metal-1").closest("tr")!).getByRole("button", { name: "操作" }));
+
+
         await user.click(
-          await screen.findByRole("button", {
+          await screen.findByRole('menuitem', {
             name: "升级整包（Edge + 插件）",
           }),
         );
-      });
 
+
+      await user.click(await screen.findByRole("button", { name: "确认" }));
       await waitFor(() =>
         expect(submitted).toEqual({
           edge_ids: [9],
@@ -450,30 +461,27 @@ describe("EdgesPage", () => {
     );
 
     await screen.findByText("bare-metal-1");
-    await act(async () => {
+
       await user.click(screen.getByRole("button", { name: "批量安装设备" }));
-    });
+
     const dialog = await screen.findByRole("dialog", { name: "批量安装 Edge" });
     await within(dialog).findByText("暂无安装批次");
-    await act(async () => {
+
       await user.type(
         within(dialog).getByLabelText("安装批次名称"),
         "机房批次",
       );
-      await user.selectOptions(
-        within(dialog).getByLabelText("归属方式"),
-        "cluster",
-      );
-    });
+      await selectOption(within(dialog).getByLabelText("归属方式"), "关联拓扑集群");
+
     await waitFor(() =>
       expect(within(dialog).getByLabelText("集群")).toBeInTheDocument(),
     );
-    await act(async () => {
-      await user.selectOptions(within(dialog).getByLabelText("集群"), "88");
+
+      await selectOption(within(dialog).getByLabelText("集群"), "bare-metal-prod");
       await user.click(
         within(dialog).getByRole("button", { name: "生成安装命令" }),
       );
-    });
+
 
     await waitFor(() =>
       expect(submitted).toEqual({
@@ -535,6 +543,7 @@ describe("EdgesPage", () => {
       await within(dialog).findByText("待删除批次");
       await user.click(within(dialog).getByRole("button", { name: "删除" }));
 
+      await user.click(await screen.findByRole("button", { name: "确认" }));
       await waitFor(() => expect(deletedProfile).toBe(7));
       expect(within(dialog).queryByText("待删除批次")).not.toBeInTheDocument();
     } finally {
@@ -598,21 +607,18 @@ describe("EdgesPage", () => {
     );
 
     await screen.findByText("bare-metal-1");
-    await act(async () => {
+
       await user.click(screen.getByRole("button", { name: "批量安装设备" }));
-    });
+
     const dialog = await screen.findByRole("dialog", { name: "批量安装 Edge" });
     await within(dialog).findByText("暂无安装批次");
-    await act(async () => {
+
       await user.type(
         within(dialog).getByLabelText("安装批次名称"),
         "首次部署",
       );
-      await user.selectOptions(
-        within(dialog).getByLabelText("归属方式"),
-        "cluster",
-      );
-    });
+      await selectOption(within(dialog).getByLabelText("归属方式"), "关联拓扑集群");
+
 
     expect(
       within(dialog).getByRole("radio", { name: "新建集群" }),
@@ -620,7 +626,7 @@ describe("EdgesPage", () => {
     expect(
       within(dialog).getByRole("radio", { name: "选择已有集群" }),
     ).toBeDisabled();
-    await act(async () => {
+
       await user.type(
         within(dialog).getByLabelText("新集群名称"),
         "上海机房生产集群",
@@ -628,7 +634,7 @@ describe("EdgesPage", () => {
       await user.click(
         within(dialog).getByRole("button", { name: "生成安装命令" }),
       );
-    });
+
 
     await waitFor(() => expect(requestOrder).toEqual(["cluster", "profile"]));
     expect(clusterInput).toEqual({
@@ -695,10 +701,10 @@ describe("EdgesPage", () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByTitle("Kubernetes 设备")).toBeInTheDocument();
-    expect(screen.getByTitle("主机设备")).toBeInTheDocument();
-    expect(screen.getByTitle("存储设备")).toBeInTheDocument();
-    expect(screen.getByTitle("网络设备")).toBeInTheDocument();
+    expect(await screen.findByLabelText("Kubernetes 设备")).toBeInTheDocument();
+    expect(screen.getByLabelText("主机设备")).toBeInTheDocument();
+    expect(screen.getByLabelText("存储设备")).toBeInTheDocument();
+    expect(screen.getByLabelText("网络设备")).toBeInTheDocument();
 
     const networkRow = screen.getAllByText("core-switch")[0].closest(
       "tr",
@@ -759,7 +765,7 @@ describe("EdgesPage", () => {
 
     await screen.findAllByText("core-switch");
     const table = screen.getByRole("table");
-    expect(table).toHaveClass("w-full", "min-w-[1120px]", "table-fixed");
+    expect(table).toHaveClass("w-full", "min-w-[1200px]", "table-fixed");
     expect(table.querySelectorAll("col")).toHaveLength(10);
     expect(screen.queryByRole("button", { name: "网络发现" })).not.toBeInTheDocument();
     expect(screen.queryByText("WebSSH 会话")).not.toBeInTheDocument();
@@ -817,30 +823,6 @@ describe("EdgesPage", () => {
     expect(screen.queryByRole("button", { name: "新建设备" })).not.toBeInTheDocument();
   });
 });
-
-function makeRect({
-  top,
-  left,
-  width,
-  height,
-}: {
-  top: number;
-  left: number;
-  width: number;
-  height: number;
-}): DOMRect {
-  return {
-    x: left,
-    y: top,
-    top,
-    left,
-    width,
-    height,
-    right: left + width,
-    bottom: top + height,
-    toJSON: () => ({}),
-  };
-}
 
 function LocationProbe() {
   const location = useLocation();

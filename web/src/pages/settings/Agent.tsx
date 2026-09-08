@@ -1,9 +1,11 @@
+import { Label, Input } from '@/components/ui';
+import { Switch } from '@/components/ui/Switch';
+import { Select } from '@/components/ui/Select';
 import { useCallback, useEffect, useState } from 'react';
 import { Bot, Clock3, Languages, Loader2, Save, ShieldCheck } from 'lucide-react';
 import { listSettings, setSetting } from '@/api/settings';
 import { Button, Card } from '@/components/ui';
 import { useI18n } from '@/i18n/locale';
-import { cn } from '@/lib/cn';
 
 // SettingsAgent — admin controls for AI-agent behaviour. It hosts the
 // write-action gate and the assistant LLM request timeout. The whole
@@ -148,24 +150,7 @@ export default function SettingsAgent() {
                 </div>
               </div>
             </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={writeEnabled}
-              disabled={saving}
-              onClick={() => void onToggle(!writeEnabled)}
-              className={cn(
-                'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50',
-                writeEnabled ? 'bg-emerald-500/80' : 'bg-zinc-700',
-              )}
-            >
-              <span
-                className={cn(
-                  'inline-block h-4 w-4 transform rounded-full bg-white transition-transform',
-                  writeEnabled ? 'translate-x-6' : 'translate-x-1',
-                )}
-              />
-            </button>
+            <Switch checked={writeEnabled} disabled={saving} onCheckedChange={(next) => void onToggle(next)} aria-label={tr('允许 Agent 执行写操作', 'Allow Agent write actions')} />
           </div>
         )}
         <p className="mt-4 text-[11px] leading-relaxed text-zinc-600">
@@ -193,21 +178,21 @@ export default function SettingsAgent() {
           </div>
         ) : (
           <>
-            <label className="block max-w-sm" htmlFor="agent-output-locale">
+            <Label className="block max-w-sm" htmlFor="agent-output-locale">
               <span className="mb-1 block text-xs text-zinc-400">
                 {tr('输出语言', 'Output language')}
               </span>
-              <select
+              <Select
                 id="agent-output-locale"
                 value={outputLocale}
-                onChange={(event) => setOutputLocale(event.target.value as '' | 'zh' | 'en')}
-                className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 outline-none transition focus:border-zinc-600"
+                onValueChange={(selectedValue) => setOutputLocale(selectedValue as '' | 'zh' | 'en')}
+                className="w-full"
               >
                 <option value="">{tr('按任务上下文', 'Use task context')}</option>
                 <option value="zh">中文</option>
                 <option value="en">English</option>
-              </select>
-            </label>
+              </Select>
+            </Label>
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <Button variant="primary" disabled={savingLocale} onClick={() => void onSaveLocale()}>
                 <Save size={14} />
@@ -245,11 +230,11 @@ export default function SettingsAgent() {
         ) : (
           <>
             <div className="max-w-sm">
-              <label className="mb-1 block text-xs text-zinc-400" htmlFor="agent-llm-timeout-seconds">
+              <Label className="mb-1 block text-xs text-zinc-400" htmlFor="agent-llm-timeout-seconds">
                 {tr('超时秒数', 'Timeout seconds')}
-              </label>
+              </Label>
               <div className="flex items-center gap-2">
-                <input
+                <Input
                   id="agent-llm-timeout-seconds"
                   type="number"
                   min={MIN_LLM_TIMEOUT_SECONDS}
@@ -257,7 +242,7 @@ export default function SettingsAgent() {
                   step={1}
                   value={llmTimeoutSeconds}
                   onChange={(event) => setLLMTimeoutSeconds(event.target.value)}
-                  className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 outline-none transition focus:border-zinc-600"
+                  className="w-full font-mono outline-none transition"
                 />
                 <span className="shrink-0 text-xs text-zinc-500">{tr('秒', 'seconds')}</span>
               </div>

@@ -1,3 +1,5 @@
+import { Button } from '@/components/ui';
+import { useDialogs } from '@/components/ui/useDialogs';
 import { useCallback, useEffect, useState } from 'react';
 import { ShieldCheck, RefreshCw, Check, X, ChevronDown, ChevronRight } from 'lucide-react';
 import { listApprovals, approveApproval, rejectApproval, type Approval } from '@/api/approvals';
@@ -12,6 +14,7 @@ import { PageHeader } from '@/components/ui';
 const STATUSES = ['pending', 'approved', 'executed', 'rejected', 'failed'] as const;
 
 export default function ApprovalsPage() {
+  const { confirmAction, promptAction, dialog } = useDialogs();
   const { tr } = useI18n();
   const [items, setItems] = useState<Approval[]>([]);
   const [status, setStatus] = useState<string>('pending');
@@ -38,7 +41,7 @@ export default function ApprovalsPage() {
   }, [load]);
 
   const onApprove = async (a: Approval) => {
-    if (!window.confirm(tr(`确认批准并执行：${a.title}？`, `Approve and execute: ${a.title}?`))) return;
+    if (!(await confirmAction(tr(`确认批准并执行：${a.title}？`, `Approve and execute: ${a.title}?`)))) return;
     setBusy(a.id);
     try {
       await approveApproval(a.id);
@@ -51,7 +54,8 @@ export default function ApprovalsPage() {
   };
 
   const onReject = async (a: Approval) => {
-    const reason = window.prompt(tr('拒绝原因（可选）', 'Reject reason (optional)')) ?? '';
+    const reason = await promptAction(tr('拒绝原因（可选）', 'Reject reason (optional)'));
+    if (reason === null) return;
     setBusy(a.id);
     try {
       await rejectApproval(a.id, reason);
@@ -64,24 +68,24 @@ export default function ApprovalsPage() {
   };
 
   return (
-    <main className="anim-fade flex flex-1 flex-col overflow-hidden">
+    <>{dialog}<main className="anim-fade flex flex-1 flex-col overflow-hidden">
       <PageHeader
         title={tr('待确认', 'Approvals')}
         subtitle={tr('Agent / 工作流提交的危险操作，需人工批准后才执行', 'Dangerous actions proposed by agents / flows — execute only after a human approves')}
         actions={
-          <button
+          <Button variant="outline" size="sm"
             type="button"
             onClick={() => void load()}
-            className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 px-2.5 py-1.5 text-[12px] text-zinc-300 hover:bg-zinc-800"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5"
           >
             <RefreshCw size={13} />
             {tr('刷新', 'Refresh')}
-          </button>
+          </Button>
         }
         extra={
           <div className="-mb-2 flex items-center gap-1">
             {STATUSES.map((s) => (
-              <button
+              <Button variant="subtle" size="sm"
                 key={s}
                 type="button"
                 onClick={() => setStatus(s)}
@@ -90,7 +94,7 @@ export default function ApprovalsPage() {
                 }`}
               >
                 {statusLabel(s, tr)}
-              </button>
+              </Button>
             ))}
           </div>
         }
@@ -110,13 +114,13 @@ export default function ApprovalsPage() {
             {items.map((a) => (
               <div key={a.id} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
                 <div className="flex items-start gap-3">
-                  <button
+                  <Button variant="subtle" size="sm"
                     type="button"
                     onClick={() => setExpanded((e) => ({ ...e, [a.id]: !e[a.id] }))}
-                    className="mt-0.5 text-zinc-500 hover:text-zinc-300"
+                    className="mt-0.5"
                   >
                     {expanded[a.id] ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                  </button>
+                  </Button>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="font-medium text-zinc-100">{a.title}</span>
@@ -144,24 +148,24 @@ export default function ApprovalsPage() {
                   </div>
                   {a.status === 'pending' && (
                     <div className="flex shrink-0 items-center gap-1.5">
-                      <button
+                      <Button variant="outline" size="sm"
                         type="button"
                         onClick={() => void onApprove(a)}
                         disabled={busy === a.id}
-                        className="inline-flex items-center gap-1 rounded-md border border-emerald-700 bg-emerald-950/30 px-2 py-1 text-[12px] text-emerald-300 hover:bg-emerald-900/40 disabled:opacity-40"
+                        className="inline-flex items-center gap-1 px-2 py-1 text-emerald-300"
                       >
                         <Check size={13} />
                         {tr('批准', 'Approve')}
-                      </button>
-                      <button
+                      </Button>
+                      <Button variant="dangerGhost" size="sm"
                         type="button"
                         onClick={() => void onReject(a)}
                         disabled={busy === a.id}
-                        className="inline-flex items-center gap-1 rounded-md border border-zinc-700 px-2 py-1 text-[12px] text-zinc-400 hover:border-red-800 hover:text-red-400 disabled:opacity-40"
+                        className="inline-flex items-center gap-1 px-2 py-1"
                       >
                         <X size={13} />
                         {tr('拒绝', 'Reject')}
-                      </button>
+                      </Button>
                     </div>
                   )}
                 </div>
@@ -170,7 +174,7 @@ export default function ApprovalsPage() {
           </div>
         )}
       </div>
-    </main>
+    </main></>
   );
 }
 

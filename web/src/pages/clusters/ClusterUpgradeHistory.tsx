@@ -1,3 +1,4 @@
+import { Hint } from '@/components/ui/Tooltip';
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   CheckCircle2,
@@ -245,12 +246,12 @@ export function ClusterUpgradeHistory({
                     <td className="px-4 py-3">
                       <JobStatusChip status={job.status} />
                     </td>
-                    <td
+                    <Hint content={fullDateTime(job.created_at)}><td
                       className="whitespace-nowrap px-4 py-3 text-zinc-500"
-                      title={fullDateTime(job.created_at)}
+
                     >
                       {relativeTime(job.created_at)}
-                    </td>
+                    </td></Hint>
                     <td className="px-4 py-3 text-right">
                       <Button onClick={() => setSelectedID(job.id)}>
                         {tr("查看", "View")}

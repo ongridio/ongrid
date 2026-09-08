@@ -1,3 +1,7 @@
+import { FilterField } from '@/components/ui/FilterField';
+import { Input } from '@/components/ui';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/Dialog';
+import { Select } from '@/components/ui/Select';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Filter, Loader2, RefreshCw, Shield, X } from 'lucide-react';
 import { ApiError } from '@/api/client';
@@ -103,55 +107,63 @@ export default function SettingsAuditLog() {
       <Card className="mt-4 p-3">
         <div className="flex flex-wrap items-center gap-2">
           <Filter size={14} className="shrink-0 text-zinc-500" />
-          <input
-            type="text"
-            value={filter.user_email ?? ''}
-            onChange={(e) => {
-              setPage(0);
-              setFilter((f) => ({ ...f, user_email: e.target.value || undefined }));
-            }}
-            placeholder={tr('用户邮箱', 'User email')}
-            className="rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-200 outline-none focus:border-zinc-600"
-          />
-          <select
-            value={filter.action ?? ''}
-            onChange={(e) => {
-              setPage(0);
-              setFilter((f) => ({ ...f, action: e.target.value || undefined }));
-            }}
-            className="rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-200 outline-none focus:border-zinc-600 cursor-pointer"
-          >
-            <option value="">{tr('全部 action', 'All actions')}</option>
-            {actionOptions.map((a) => (
-              <option key={a} value={a}>{actionLabel(a)}</option>
-            ))}
-          </select>
-          <select
-            value={filter.resource_type ?? ''}
-            onChange={(e) => {
-              setPage(0);
-              setFilter((f) => ({ ...f, resource_type: e.target.value || undefined }));
-            }}
-            className="rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-200 outline-none focus:border-zinc-600 cursor-pointer"
-          >
-            <option value="">{tr('全部资源', 'All resources')}</option>
-            {resourceOptions.map((a) => (
-              <option key={a} value={a}>{resourceLabel(a)}</option>
-            ))}
-          </select>
-          <select
-            value={filter.status ?? ''}
-            onChange={(e) => {
-              setPage(0);
-              setFilter((f) => ({ ...f, status: (e.target.value as AuditListFilters['status']) || undefined }));
-            }}
-            className="rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-200 outline-none focus:border-zinc-600 cursor-pointer"
-          >
-            <option value="">{tr('全部结果', 'All status')}</option>
-            <option value="success">success</option>
-            <option value="failure">failure</option>
-            <option value="denied">denied</option>
-          </select>
+          <FilterField label={tr('用户邮箱', 'User email')} className="w-64">
+            <Input
+              type="text"
+              value={filter.user_email ?? ''}
+              onChange={(e) => {
+                setPage(0);
+                setFilter((f) => ({ ...f, user_email: e.target.value || undefined }));
+              }}
+              placeholder={tr('用户邮箱', 'User email')}
+              aria-label={tr('用户邮箱', 'User email')}
+            />
+          </FilterField>
+          <FilterField label={tr('动作', 'Action')} className="w-56">
+            <Select label={tr('动作', 'Action')}
+              value={filter.action ?? ''}
+              onValueChange={(selectedValue) => {
+                setPage(0);
+                setFilter((f) => ({ ...f, action: selectedValue || undefined }));
+              }}
+
+            >
+              <option value="">{tr('全部 action', 'All actions')}</option>
+              {actionOptions.map((a) => (
+                <option key={a} value={a}>{actionLabel(a)}</option>
+              ))}
+            </Select>
+          </FilterField>
+          <FilterField label={tr('资源类型', 'Resource type')} className="w-60">
+            <Select label={tr('资源类型', 'Resource type')}
+              value={filter.resource_type ?? ''}
+              onValueChange={(selectedValue) => {
+                setPage(0);
+                setFilter((f) => ({ ...f, resource_type: selectedValue || undefined }));
+              }}
+
+            >
+              <option value="">{tr('全部资源', 'All resources')}</option>
+              {resourceOptions.map((a) => (
+                <option key={a} value={a}>{resourceLabel(a)}</option>
+              ))}
+            </Select>
+          </FilterField>
+          <FilterField label={tr('结果', 'Status')} className="w-52">
+            <Select label={tr('结果', 'Status')}
+              value={filter.status ?? ''}
+              onValueChange={(selectedValue) => {
+                setPage(0);
+                setFilter((f) => ({ ...f, status: (selectedValue as AuditListFilters['status']) || undefined }));
+              }}
+
+            >
+              <option value="">{tr('全部结果', 'All status')}</option>
+              <option value="success">success</option>
+              <option value="failure">failure</option>
+              <option value="denied">denied</option>
+            </Select>
+          </FilterField>
           {(filter.user_email || filter.action || filter.resource_type || filter.status) && (
             <Button variant="ghost" onClick={() => {
               setPage(0);
@@ -262,14 +274,11 @@ function DetailDrawer({ row, onClose }: { row: AuditLog; onClose: () => void }) 
     /* keep raw */
   }
   return (
-    <div className="fixed inset-0 z-40 flex justify-end bg-black/40" onClick={onClose}>
-      <div
-        className="h-full w-full max-w-lg overflow-y-auto bg-zinc-950 p-4 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <Dialog open onOpenChange={(next) => { if (!next) onClose(); }}>
+      <DialogContent placement="right" className="max-w-lg overflow-y-auto p-4">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-base font-semibold">{tr('审计详情', 'Audit detail')}</h2>
-          <Button variant="ghost" onClick={onClose}>
+          <DialogTitle className="text-base font-semibold">{tr('审计详情', 'Audit detail')}</DialogTitle>
+          <Button variant="ghost" onClick={onClose} aria-label={tr('关闭', 'Close')}>
             <X size={14} />
           </Button>
         </div>
@@ -292,8 +301,8 @@ function DetailDrawer({ row, onClose }: { row: AuditLog; onClose: () => void }) 
             </pre>
           </div>
         )}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

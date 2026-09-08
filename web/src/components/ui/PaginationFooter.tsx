@@ -1,3 +1,4 @@
+import { Button } from './Button';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useI18n } from '@/i18n/locale';
 import { cn } from '@/lib/cn';
@@ -47,22 +48,22 @@ export function PaginationFooter({
       className,
     )}>
       <span className="mr-2 text-zinc-600">{rangeLabel}</span>
-      <button
+      <Button variant="outline" size="sm"
         type="button"
         disabled={loading || !canPrev}
         onClick={() => onPageChange(Math.max(0, currentPage - 1))}
-        className="inline-flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1 hover:bg-zinc-800 disabled:opacity-40"
+        className="inline-flex items-center gap-1 px-2.5 py-1"
       >
         <ChevronLeft size={13} /> {tr('上一页', 'Prev')}
-      </button>
-      <button
+      </Button>
+      <Button variant="outline" size="sm"
         type="button"
         disabled={loading || !canNext}
         onClick={() => onPageChange(currentPage + 1)}
-        className="inline-flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1 hover:bg-zinc-800 disabled:opacity-40"
+        className="inline-flex items-center gap-1 px-2.5 py-1"
       >
         {tr('下一页', 'Next')} <ChevronRight size={13} />
-      </button>
+      </Button>
     </div>
   );
 }

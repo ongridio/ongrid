@@ -1,3 +1,5 @@
+import { Button } from '@/components/ui';
+import { Hint } from '@/components/ui/Tooltip';
 import { Check, Gauge, Globe, Monitor, Moon, Palette, Sun } from 'lucide-react';
 import { ACCENT_PRESETS, useTheme } from '@/store/theme';
 import { useI18n } from '@/i18n/locale';
@@ -33,7 +35,7 @@ export default function SettingsPreferences() {
           {(['zh-CN', 'en-US'] as const).map((l) => {
             const active = l === locale;
             return (
-              <button
+              <Button variant="outline" size="sm"
                 key={l}
                 type="button"
                 onClick={() => setLocale(l)}
@@ -46,7 +48,7 @@ export default function SettingsPreferences() {
               >
                 <span className="font-medium">{l === 'zh-CN' ? '中文' : 'English'}</span>
                 {active && <Check size={12} className="text-zinc-300" />}
-              </button>
+              </Button>
             );
           })}
         </div>
@@ -74,7 +76,7 @@ export default function SettingsPreferences() {
                   ? tr('浅色', 'Light')
                   : tr('深色', 'Dark');
             return (
-              <button
+              <Button variant="outline" size="sm"
                 key={id}
                 type="button"
                 onClick={() => setTheme(id)}
@@ -88,7 +90,7 @@ export default function SettingsPreferences() {
                 <Icon size={12} />
                 <span className="font-medium">{label}</span>
                 {active && <Check size={12} className="text-zinc-300" />}
-              </button>
+              </Button>
             );
           })}
         </div>
@@ -110,11 +112,11 @@ export default function SettingsPreferences() {
           {ACCENT_PRESETS.map((p) => {
             const active = p.id === accentId;
             return (
-              <button
-                key={p.id}
+              <Hint key={p.id} content={`${p.label} · ${p.hex}`}><button
+
                 type="button"
                 onClick={() => setAccent(p.id)}
-                title={`${p.label} · ${p.hex}`}
+
                 className={cn(
                   'group flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs transition',
                   active
@@ -129,7 +131,7 @@ export default function SettingsPreferences() {
                 />
                 <span className="font-medium">{p.label}</span>
                 {active && <Check size={12} className="text-zinc-300" />}
-              </button>
+              </button></Hint>
             );
           })}
         </div>
@@ -138,12 +140,12 @@ export default function SettingsPreferences() {
             {tr('预览', 'Preview')}
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            <button
+            <Button variant="primary" size="sm"
               type="button"
-              className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent/90"
+              className="px-3 py-1.5 font-medium text-accent-fg"
             >
               {tr('主要按钮', 'Primary button')}
-            </button>
+            </Button>
             <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[11px] text-accent ring-1 ring-accent/30">
               {tr('已选中', 'Selected')}
             </span>

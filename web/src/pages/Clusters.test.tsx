@@ -297,6 +297,7 @@ describe("device cluster pages", () => {
         screen.getByRole("button", { name: "删除安装批次 prod rollout" }),
       );
 
+      await user.click(await screen.findByRole("button", { name: "确认" }));
       await waitFor(() => expect(deletedProfile).toBe(31));
       expect(screen.queryByText("prod rollout")).not.toBeInTheDocument();
       expect(
@@ -453,10 +454,8 @@ describe("device cluster pages", () => {
     await screen.findByRole("heading", { name: "成员设备" });
     const deleteButton = screen.getByRole("button", { name: "删除集群" });
     expect(deleteButton).toBeDisabled();
-    expect(deleteButton).toHaveAttribute(
-      "title",
-      "请先移除全部成员，再删除集群。",
-    );
+    await userEvent.hover(deleteButton.parentElement!);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("请先移除全部成员，再删除集群。");
     expect(screen.queryByText("集群生命周期")).not.toBeInTheDocument();
   });
 });

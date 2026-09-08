@@ -1,3 +1,6 @@
+import { Label, Input, Textarea } from '@/components/ui';
+import { useDialogs } from '@/components/ui/useDialogs';
+import { Hint } from '@/components/ui/Tooltip';
 // Flows — workflow orchestration list (HLD-016). The canvas editor
 // lives at /workflows/:id (FlowEditor.tsx); this page is the entry:
 // create / open / run / toggle / delete.
@@ -15,6 +18,7 @@ import { cn } from '@/lib/cn';
 const PAGE_SIZE = 50;
 
 export default function FlowsPage() {
+  const { confirmAction, dialog } = useDialogs();
   const { tr } = useI18n();
   const navigate = useNavigate();
   const role = useAuth((s) => s.role);
@@ -99,7 +103,7 @@ export default function FlowsPage() {
   };
 
   const onDelete = async (f: Flow) => {
-    if (!window.confirm(tr(`删除工作流「${f.name}」？运行历史一并不可见。`, `Delete workflow "${f.name}"?`))) return;
+    if (!(await confirmAction(tr(`删除工作流「${f.name}」？运行历史一并不可见。`, `Delete workflow "${f.name}"?`)))) return;
     setBusyId(f.id);
     try {
       await deleteFlow(f.id);
@@ -112,7 +116,7 @@ export default function FlowsPage() {
   };
 
   return (
-    <main className="anim-fade flex flex-1 flex-col overflow-hidden">
+    <>{dialog}<main className="anim-fade flex flex-1 flex-col overflow-hidden">
       <PageHeader
         title={tr('工作流', 'Workflows')}
         subtitle={tr(
@@ -131,17 +135,17 @@ export default function FlowsPage() {
       {items.length > 0 && (
         <div className="border-b border-zinc-800 px-6 py-3">
           <div className="flex flex-wrap items-center gap-3">
-            <label className="relative block w-64">
+            <Label className="relative block w-64">
               <span className="sr-only">{tr('搜索', 'Search')}</span>
               <Search size={12} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
-              <input
+              <Input
                 type="search"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder={tr('搜索工作流…', 'Search workflows…')}
-                className="w-full rounded-md border border-zinc-800 bg-zinc-950/40 py-1.5 pl-8 pr-2 text-xs text-zinc-200 placeholder:text-zinc-500 focus:border-zinc-600 focus:outline-none"
+                className="w-full pl-8 pr-2"
               />
-            </label>
+            </Label>
             <span className="ml-auto text-xs text-zinc-500">
               {tr(`本页 ${items.length} 个 · 匹配 ${shown.length}`, `${items.length} on this page · ${shown.length} matched`)}
             </span>
@@ -205,32 +209,32 @@ export default function FlowsPage() {
               </div>
               {canWrite && (
                 <div className="flex shrink-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                  <button
+                  <Hint content={tr('运行', 'Run')}><Button variant="subtle" size="sm"
                     type="button"
-                    title={tr('运行', 'Run')}
+
                     disabled={busyId === f.id || !f.enabled}
                     onClick={() => void onRun(f)}
-                    className="rounded-md p-1.5 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-indigo-400 disabled:opacity-40"
+                    className="p-1.5 transition-colors"
                   >
                     <Play size={15} />
-                  </button>
-                  <button
+                  </Button></Hint>
+                  <Button variant="subtle" size="sm"
                     type="button"
                     onClick={() => void onToggle(f)}
                     disabled={busyId === f.id}
-                    className="rounded-md px-2 py-1 text-[12px] text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
+                    className="px-2 py-1 transition-colors"
                   >
                     {f.enabled ? tr('停用', 'Disable') : tr('启用', 'Enable')}
-                  </button>
-                  <button
+                  </Button>
+                  <Hint content={tr('删除', 'Delete')}><Button variant="dangerGhost" size="sm"
                     type="button"
-                    title={tr('删除', 'Delete')}
+
                     disabled={busyId === f.id}
                     onClick={() => void onDelete(f)}
-                    className="rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-red-400"
+                    className="p-1.5 transition-colors"
                   >
                     <Trash2 size={15} />
-                  </button>
+                  </Button></Hint>
                 </div>
               )}
             </div>
@@ -252,7 +256,7 @@ export default function FlowsPage() {
         onClose={() => setCreating(false)}
         onCreated={(id) => navigate(`/workflows/${id}`)}
       />
-    </main>
+    </main></>
   );
 }
 
@@ -313,27 +317,27 @@ function CreateFlowModal({
     >
       <div className="space-y-3">
         <div className="inline-flex rounded-md border border-zinc-800 p-0.5 text-xs">
-          <button
+          <Button variant="subtle" size="sm"
             type="button"
             onClick={() => setMode('ai')}
             className={`rounded px-3 py-1 transition-colors ${mode === 'ai' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'}`}
           >
             ✨ {tr('AI 生成', 'AI generate')}
-          </button>
-          <button
+          </Button>
+          <Button variant="subtle" size="sm"
             type="button"
             onClick={() => setMode('name')}
             className={`rounded px-3 py-1 transition-colors ${mode === 'name' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'}`}
           >
             {tr('手动命名', 'Blank')}
-          </button>
+          </Button>
         </div>
         {mode === 'ai' ? (
-          <label className="block">
+          <Label className="block">
             <span className="mb-1 block text-[11px] text-zinc-400">
               {tr('用一句话描述你要的工作流，AI 自动连好节点和数据流', 'Describe the workflow; the model drafts the nodes & data flow')}
             </span>
-            <textarea
+            <Textarea
               autoFocus
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
@@ -342,24 +346,24 @@ function CreateFlowModal({
                 '例如：巡检设备1的负载和Top进程，让 AI 诊断后生成一个网页报告',
                 'e.g. inspect device 1 load + top processes, then AI-diagnose and generate a web report',
               )}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 text-[13px] text-zinc-200 outline-none focus:border-zinc-600"
+              className="w-full outline-none"
             />
             <span className="mt-1 block text-[10px] text-zinc-600">
               {tr('生成后自动打开编辑器，可以再手动调整', 'Opens in the editor afterwards so you can tweak it')}
             </span>
-          </label>
+          </Label>
         ) : (
-          <label className="block">
+          <Label className="block">
             <span className="mb-1 block text-[11px] text-zinc-400">{tr('工作流名称', 'Workflow name')}</span>
-            <input
+            <Input
               autoFocus
               value={name}
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && void submit()}
               placeholder={tr('如：磁盘告警自动处置', 'e.g. disk-alert auto-remediation')}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 text-[13px] text-zinc-200 outline-none focus:border-zinc-600"
+              className="w-full outline-none"
             />
-          </label>
+          </Label>
         )}
         {err && <div className="rounded-md border border-red-900/50 bg-red-950/30 px-3 py-2 text-xs text-red-400">{err}</div>}
       </div>

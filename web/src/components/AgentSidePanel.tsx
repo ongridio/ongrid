@@ -1,3 +1,6 @@
+import { Button, Textarea } from '@/components/ui';
+import { Hint } from '@/components/ui/Tooltip';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/Dialog';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Send, Loader2, X, ExternalLink, Bot } from 'lucide-react';
@@ -36,14 +39,6 @@ export function AgentSidePanel({ open, onClose }: Props) {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
-  // Reset everything when the panel closes — every reopen starts a
-  // fresh ephemeral session. We don't reset on open because we want
-  // the fresh state to be visible immediately, no flicker.
-  useEffect(() => {
-    if (!open) return;
-    setTimeout(() => inputRef.current?.focus(), 100);
-  }, [open]);
-
   useEffect(() => {
     if (open) return;
     // Reset state slightly after close so the slide-out animation
@@ -57,19 +52,6 @@ export function AgentSidePanel({ open, onClose }: Props) {
     }, 250);
     return () => clearTimeout(handle);
   }, [open]);
-
-  // Esc closes.
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent | globalThis.KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
 
   // Auto-scroll to bottom on new messages.
   useEffect(() => {
@@ -142,57 +124,33 @@ export function AgentSidePanel({ open, onClose }: Props) {
     onClose();
   }
 
-  // We always render the wrapper so the slide animation can play in
-  // both directions; pointer-events-none gates clicks while closed.
   return (
-    <div
-      className={cn(
-        'fixed inset-0 z-[55] transition-opacity duration-200',
-        open ? 'opacity-100' : 'pointer-events-none opacity-0',
-      )}
-      aria-hidden={!open}
-    >
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-[2px]"
-        onClick={onClose}
-        aria-hidden
-      />
-
-      {/* Side panel */}
-      <aside
-        role="dialog"
-        aria-modal="true"
-        aria-label={tr('助理', 'Assistant')}
-        className={cn(
-          'absolute right-0 top-0 flex h-full w-full max-w-[480px] flex-col border-l border-zinc-800/60 bg-zinc-900 shadow-2xl transition-transform duration-200',
-          open ? 'translate-x-0' : 'translate-x-full',
-        )}
-      >
+    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
+      <DialogContent placement="right" initialFocus={inputRef} className="max-w-[480px]" aria-label={tr('助理', 'Assistant')}>
         <header className="flex items-center gap-2 border-b border-zinc-800/60 px-4 py-3">
           <Bot size={15} className="text-emerald-400" />
-          <h2 className="flex-1 truncate text-[13px] font-semibold text-zinc-100">
+          <DialogTitle className="flex-1 truncate text-[13px] font-semibold text-zinc-100">
             {tr('助理', 'Assistant')} <span className="ml-1 text-[11px] font-normal text-zinc-500">（⌘K）</span>
-          </h2>
+          </DialogTitle>
           {sessionId && (
-            <button
+            <Hint content={tr('在完整会话页打开', 'Open in full session view')}><Button variant="subtle" size="sm"
               type="button"
               onClick={openInFullThread}
-              title={tr('在完整会话页打开', 'Open in full session view')}
+
               aria-label={tr('在完整会话页打开', 'Open in full session view')}
-              className="rounded-md p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+              className="p-1.5"
             >
               <ExternalLink size={14} />
-            </button>
+            </Button></Hint>
           )}
-          <button
+          <Button variant="subtle" size="sm"
             type="button"
             onClick={onClose}
             aria-label={tr('关闭', 'Close')}
-            className="rounded-md p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+            className="p-1.5"
           >
             <X size={14} />
-          </button>
+          </Button>
         </header>
 
         <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">
@@ -221,7 +179,7 @@ export function AgentSidePanel({ open, onClose }: Props) {
 
         <div className="border-t border-zinc-800/60 p-3">
           <div className="flex items-end gap-2 rounded-xl border border-zinc-800/60 bg-zinc-950/50 px-2.5 py-2 focus-within:border-zinc-700">
-            <textarea
+            <Textarea variant="inset"
               ref={inputRef}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
@@ -229,9 +187,9 @@ export function AgentSidePanel({ open, onClose }: Props) {
               placeholder={tr('问点什么…（Enter 发送，Shift+Enter 换行）', 'Ask anything… (Enter to send, Shift+Enter for newline)')}
               rows={1}
               disabled={submitting}
-              className="max-h-32 flex-1 resize-none bg-transparent text-[13px] leading-relaxed text-zinc-100 placeholder:text-zinc-500 focus:outline-none disabled:opacity-60"
+              className="max-h-32 flex-1 resize-none p-0 text-[13px] leading-relaxed"
             />
-            <button
+            <Button variant="subtle" size="sm"
               type="button"
               onClick={() => void send()}
               disabled={submitting || draft.trim().length === 0}
@@ -244,11 +202,11 @@ export function AgentSidePanel({ open, onClose }: Props) {
               )}
             >
               {submitting ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
-            </button>
+            </Button>
           </div>
         </div>
-      </aside>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

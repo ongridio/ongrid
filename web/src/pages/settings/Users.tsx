@@ -1,5 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { Input, Label } from '@/components/ui';
+import { Hint } from '@/components/ui/Tooltip';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/DropdownMenu';
+import { Select } from '@/components/ui/Select';
+import { useCallback, useEffect, useState } from 'react';
 import {
   KeyRound,
   Loader2,
@@ -338,10 +341,10 @@ function UserTable({
                 </td>
                 <td className="px-4 py-2.5">
                   <div className="flex items-center gap-1">
-                    <Button onClick={() => onEdit(u)} title={tr('编辑姓名 / 手机', 'Edit name / phone')}>
+                    <Hint content={tr('编辑姓名 / 手机', 'Edit name / phone')}><Button onClick={() => onEdit(u)} >
                       <Pencil size={11} />
                       {tr('编辑', 'Edit')}
-                    </Button>
+                    </Button></Hint>
                     <RowActionsMenu
                       user={u}
                       isSelf={isSelf}
@@ -385,50 +388,12 @@ function RowActionsMenu({
 }) {
   const { tr } = useI18n();
   const [open, setOpen] = useState(false);
-  // Portal-based positioning: the row sits inside `overflow-x-auto` so
-  // an absolutely-positioned dropdown would be clipped. We measure the
-  // trigger button and render the menu from <body> with viewport
-  // coordinates instead.
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const [position, setPosition] = useState<{ top: number; right: number } | null>(null);
-
-  const syncPosition = useCallback(() => {
-    const trigger = triggerRef.current;
-    if (!trigger) return;
-    const rect = trigger.getBoundingClientRect();
-    setPosition({
-      top: rect.bottom + 6,
-      right: window.innerWidth - rect.right,
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!open) return;
-    syncPosition();
-    const onChange = () => syncPosition();
-    window.addEventListener('resize', onChange);
-    window.addEventListener('scroll', onChange, true);
-    return () => {
-      window.removeEventListener('resize', onChange);
-      window.removeEventListener('scroll', onChange, true);
-    };
-  }, [open, syncPosition]);
-
-  const run = (fn: () => void) => () => {
-    setOpen(false);
-    fn();
-  };
-
-  const menu = useMemo(() => {
-    if (!open || !position) return null;
-    return createPortal(
-      <>
-        <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} aria-hidden />
-        <div
-          role="menu"
-          className="fixed z-50 w-44 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl"
-          style={{ top: position.top, right: position.right }}
-        >
+  const run = (fn: () => void) => () => { setOpen(false); fn(); };
+  return <DropdownMenu open={open} onOpenChange={setOpen}>
+    <DropdownMenuTrigger aria-label={tr('更多操作', 'More actions')} className="rounded-md p-1 text-text-muted hover:bg-zinc-800">
+      <MoreVertical size={14} />
+    </DropdownMenuTrigger>
+    <DropdownMenuContent align="end" className="w-44">
           <MenuItem onClick={run(onPassword)} icon={<KeyRound size={12} />}>
             {tr('重置密码', 'Reset password')}
           </MenuItem>
@@ -461,27 +426,8 @@ function RowActionsMenu({
           >
             {tr('删除用户', 'Delete user')}
           </MenuItem>
-        </div>
-      </>,
-      document.body,
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, position, user.role, user.status, isSelf]);
-
-  return (
-    <div className="relative inline-block">
-      <button
-        ref={triggerRef}
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-label={tr('更多操作', 'More actions')}
-        className="rounded-md p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
-      >
-        <MoreVertical size={14} />
-      </button>
-      {menu}
-    </div>
-  );
+    </DropdownMenuContent>
+  </DropdownMenu>;
 }
 
 function MenuItem({
@@ -500,12 +446,12 @@ function MenuItem({
   children: React.ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      role="menuitem"
+    <Hint content={title}><DropdownMenuItem
+
+
       onClick={onClick}
       disabled={disabled}
-      title={title}
+
       className={[
         'flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition',
         disabled
@@ -517,7 +463,7 @@ function MenuItem({
     >
       {icon}
       {children}
-    </button>
+    </DropdownMenuItem></Hint>
   );
 }
 
@@ -594,7 +540,7 @@ function CreateUserModal({
     >
       <div className="space-y-3">
         <Field label={tr('邮箱', 'Email')} required>
-          <input
+          <Input
             className={inputClass}
             value={email}
             onChange={(e) => {
@@ -615,14 +561,14 @@ function CreateUserModal({
           />
         </Field>
         <Field label={tr('初始密码', 'Initial password')} required hint={tr('管理员设置；创建后通过安全渠道告知该用户', 'You set this here; deliver it to the user through a secure channel')}>
-          <input className={inputClass} value={password} onChange={(e) => setPassword(e.target.value)} placeholder={tr('至少 8 位', '8+ chars')} />
+          <Input className={inputClass} value={password} onChange={(e) => setPassword(e.target.value)} placeholder={tr('至少 8 位', '8+ chars')} />
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label={tr('显示名', 'Display name')} required hint={tr('UI 上展示的名称；空时会自动用邮箱前段', 'Shown in UI; auto-filled from email local-part when blank')}>
-            <input className={inputClass} value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
+            <Input className={inputClass} value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
           </Field>
           <Field label={tr('手机', 'Phone')}>
-            <input className={inputClass} value={phone} onChange={(e) => setPhone(e.target.value)} />
+            <Input className={inputClass} value={phone} onChange={(e) => setPhone(e.target.value)} />
           </Field>
         </div>
         <Field
@@ -632,15 +578,15 @@ function CreateUserModal({
             'admin manages the platform (users/orgs/integrations/alerts/IM); user has full functional use (including mutating tools in chat); viewer is read-only with restricted chat (LLM gets read-only tools).',
           )}
         >
-          <select
-            className={inputClass}
+          <Select label={tr('系统角色', 'System role')}
+            className="w-full"
             value={role}
-            onChange={(e) => setRole(e.target.value as SystemRole)}
+            onValueChange={(selectedValue) => setRole(selectedValue as SystemRole)}
           >
             <option value="user">user</option>
             <option value="viewer">viewer</option>
             <option value="admin">admin</option>
-          </select>
+          </Select>
         </Field>
         {err && <div className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">{err}</div>}
       </div>
@@ -707,10 +653,10 @@ function EditUserModal({
     >
       <div className="space-y-3">
         <Field label={tr('显示名', 'Display name')}>
-          <input className={inputClass} value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
+          <Input className={inputClass} value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
         </Field>
         <Field label={tr('手机', 'Phone')}>
-          <input className={inputClass} value={phone} onChange={(e) => setPhone(e.target.value)} />
+          <Input className={inputClass} value={phone} onChange={(e) => setPhone(e.target.value)} />
         </Field>
         {err && <div className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">{err}</div>}
       </div>
@@ -772,7 +718,7 @@ function ResetPasswordModal({
     >
       <div className="space-y-3">
         <Field label={tr('新密码', 'New password')} required hint={tr('设置后请通过安全渠道告知用户', 'After setting, deliver it to the user through a secure channel')}>
-          <input className={inputClass} value={pw} onChange={(e) => setPw(e.target.value)} placeholder={tr('至少 8 位', '8+ chars')} />
+          <Input className={inputClass} value={pw} onChange={(e) => setPw(e.target.value)} placeholder={tr('至少 8 位', '8+ chars')} />
         </Field>
         {err && <div className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">{err}</div>}
       </div>
@@ -828,19 +774,19 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <label className="block">
+    <Label className="block">
       <span className="mb-1 block text-[11px] text-zinc-400">
         {label}
         {required && <span className="ml-0.5 text-red-400">*</span>}
       </span>
       {children}
       {hint && <span className="mt-1 block text-[11px] text-zinc-500">{hint}</span>}
-    </label>
+    </Label>
   );
 }
 
 const inputClass =
-  'w-full rounded-md border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
+  "w-full";
 
 function errMsg(e: unknown): string {
   if (e instanceof ApiError) return e.message;

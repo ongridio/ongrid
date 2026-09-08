@@ -58,6 +58,10 @@ describe('AgentsPage', () => {
         <AgentsPage />
       </MemoryRouter>,
     );
+    // 淡色卡片操作不能被实心主按钮背景覆盖，否则浅色主题下紫字落在紫底上。
+    const useButton = (await screen.findAllByRole('button', { name: '使用此助理' }))[0];
+    expect(useButton).toHaveAttribute('data-variant', 'plain');
+    expect(useButton).toHaveClass('bg-indigo-500/10', 'text-indigo-200');
     // 卡片标题用短名；点击卡片主体打开详情
     await userEvent.click(await screen.findByText('SRE 专家'));
 

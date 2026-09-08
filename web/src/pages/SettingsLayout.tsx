@@ -1,3 +1,4 @@
+import { Hint } from '@/components/ui/Tooltip';
 import { Suspense } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import {
@@ -120,9 +121,9 @@ function RailLink({ item }: { item: RailItem }) {
   const hint = tr(item.hintZh, item.hintEn);
   if (item.disabled) {
     return (
-      <div
+      <Hint content={hint}><div
         aria-disabled
-        title={hint}
+
         className="group relative flex shrink-0 cursor-not-allowed items-center gap-2 rounded-md px-3 py-2 text-sm text-zinc-600 lg:gap-3"
       >
         <Icon size={14} className="shrink-0 text-zinc-700" />
@@ -130,7 +131,7 @@ function RailLink({ item }: { item: RailItem }) {
           <div className="truncate text-[13px] font-medium">{label}</div>
           <div className="hidden truncate text-[11px] text-zinc-600 lg:block">{hint}</div>
         </div>
-      </div>
+      </div></Hint>
     );
   }
   return (

@@ -1,3 +1,4 @@
+import { Label, Input, Textarea } from '@/components/ui';
 import { useEffect, useMemo, useState } from "react";
 import { Check, HardDrive, Search } from "lucide-react";
 import type { Device } from "@/api/devices";
@@ -83,9 +84,9 @@ export function CreateDeviceClusterModal({
       }
     >
       <div className="space-y-4">
-        <label className="block text-[11px] text-zinc-500">
+        <Label className="block text-[11px] text-zinc-500">
           {tr("集群名称", "Cluster name")}
-          <input
+          <Input
             autoFocus
             maxLength={128}
             value={name}
@@ -93,19 +94,19 @@ export function CreateDeviceClusterModal({
             onKeyDown={(event) => {
               if (event.key === "Enter") void submit();
             }}
-            className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-2 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="mt-1 w-full"
           />
-        </label>
-        <label className="block text-[11px] text-zinc-500">
+        </Label>
+        <Label className="block text-[11px] text-zinc-500">
           {tr("说明（可选）", "Description (optional)")}
-          <textarea
+          <Textarea
             rows={3}
             maxLength={500}
             value={description}
             onChange={(event) => setDescription(event.target.value)}
-            className="mt-1 w-full resize-none rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-2 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="mt-1 w-full resize-none"
           />
-        </label>
+        </Label>
         {error && <InlineError message={error} />}
       </div>
     </Modal>
@@ -172,9 +173,9 @@ export function RenameDeviceClusterModal({
         </>
       }
     >
-      <label className="block text-[11px] text-zinc-500">
+      <Label className="block text-[11px] text-zinc-500">
         {tr("集群名称", "Cluster name")}
-        <input
+        <Input
           autoFocus
           maxLength={128}
           value={name}
@@ -182,9 +183,9 @@ export function RenameDeviceClusterModal({
           onKeyDown={(event) => {
             if (event.key === "Enter") void submit();
           }}
-          className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-2 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+          className="mt-1 w-full"
         />
-      </label>
+      </Label>
       {error && <InlineError message={error} />}
     </Modal>
   );
@@ -289,8 +290,8 @@ export function AddClusterMembersModal({
       }
     >
       <div className="relative mb-3">
-        <Search size={14} className="absolute left-2.5 top-2.5 text-zinc-500" />
-        <input
+        <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
+        <Input
           autoFocus
           value={query}
           onChange={(event) => setQuery(event.target.value)}
@@ -298,7 +299,7 @@ export function AddClusterMembersModal({
             "搜索名称、主机名或 IP",
             "Search name, hostname, or IP",
           )}
-          className="w-full rounded-md border border-zinc-800 bg-zinc-950 py-2 pl-8 pr-3 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none"
+          className="w-full pl-8 pr-3"
         />
       </div>
 

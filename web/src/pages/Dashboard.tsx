@@ -1,3 +1,5 @@
+import { Button } from '@/components/ui';
+import { Hint } from '@/components/ui/Tooltip';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ExternalLink, RotateCw } from 'lucide-react';
@@ -323,7 +325,7 @@ export default function DashboardPage() {
               {refreshing && lastRefreshedAt ? tr(' · 刷新中…', ' · refreshing…') : null}
             </p>
           </div>
-          <button
+          <Button variant="outline" size="sm"
             type="button"
             onClick={() => void loadAll()}
             disabled={refreshing}
@@ -334,7 +336,7 @@ export default function DashboardPage() {
             )}
           >
             <RotateCw size={12} className={cn(refreshing && 'animate-spin')} />
-          </button>
+          </Button>
         </header>
 
         <div className="flex-1 overflow-y-auto px-6 py-6">
@@ -423,13 +425,13 @@ export default function DashboardPage() {
                 <h2 className="text-sm font-medium uppercase tracking-wider text-zinc-300">
                   {tr('集群态势', 'Cluster posture')}
                 </h2>
-                <button
+                <Button variant="subtle" size="sm"
                   type="button"
                   onClick={() => navigate('/edges')}
-                  className="text-[11px] text-zinc-500 hover:text-zinc-200"
+                  className=""
                 >
                   {tr(`${devices.length} 台 →`, `${devices.length} →`)}
-                </button>
+                </Button>
               </div>
               <div className="flex-1">
                 <ClusterPosture
@@ -484,11 +486,11 @@ function SeverityDot({ severity }: { severity: string }) {
         ? 'bg-amber-400'
         : 'bg-sky-400';
   return (
-    <span
+    <Hint content={severity}><span
       aria-label={`severity ${severity}`}
-      title={severity}
+
       className={cn('mt-1.5 inline-block h-2 w-2 shrink-0 rounded-full', tone)}
-    />
+    /></Hint>
   );
 }
 

@@ -1,3 +1,4 @@
+import { Select } from '@/components/ui/Select';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { KeyRound, Check, Loader2, Plus, X } from 'lucide-react';
@@ -111,9 +112,6 @@ export function CredentialBindings({
     </>
   );
 
-  const selectCls =
-    'min-w-[200px] rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 disabled:opacity-50';
-
   return (
     <div className="mt-3 rounded-md border border-zinc-800/80 bg-zinc-950/40 p-3">
       <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-zinc-400">
@@ -146,17 +144,17 @@ export function CredentialBindings({
                   <div className="font-mono text-[10px] text-zinc-500">{s.fields.join(', ')}</div>
                 )}
               </div>
-              <select
+              <Select label={s.slot}
                 value={slotSel[s.slot] ?? ''}
                 disabled={!isAdmin}
-                onChange={(e) => {
-                  setSlotSel((m) => ({ ...m, [s.slot]: e.target.value }));
+                onValueChange={(selectedValue) => {
+                  setSlotSel((m) => ({ ...m, [s.slot]: selectedValue }));
                   setTouched(true);
                 }}
-                className={selectCls}
+                className="min-w-[200px] w-auto"
               >
                 {credOptions(slotSel[s.slot] ?? '')}
-              </select>
+              </Select>
             </div>
           ))}
 
@@ -164,45 +162,45 @@ export function CredentialBindings({
           {extra.map((c, i) => (
             <div key={`extra-${i}`} className="flex flex-wrap items-center gap-2">
               <div className="min-w-[140px] text-xs text-zinc-400">{tr('额外凭证', 'Extra credential')}</div>
-              <select
+              <Select label={tr('额外凭证', 'Extra credential')}
                 value={c}
                 disabled={!isAdmin}
-                onChange={(e) => {
-                  setExtra((arr) => arr.map((x, j) => (j === i ? e.target.value : x)));
+                onValueChange={(selectedValue) => {
+                  setExtra((arr) => arr.map((x, j) => (j === i ? selectedValue : x)));
                   setTouched(true);
                 }}
-                className={selectCls}
+                className="min-w-[200px] w-auto"
               >
                 {credOptions(c)}
-              </select>
+              </Select>
               {isAdmin && (
-                <button
+                <Button variant="dangerGhost" size="sm"
                   type="button"
                   aria-label={tr('移除', 'Remove')}
                   onClick={() => {
                     setExtra((arr) => arr.filter((_, j) => j !== i));
                     setTouched(true);
                   }}
-                  className="rounded p-1 text-zinc-500 hover:text-red-400"
+                  className="p-1"
                 >
                   <X size={13} />
-                </button>
+                </Button>
               )}
             </div>
           ))}
 
           {isAdmin && (
-            <button
+            <Button variant="subtle" size="sm"
               type="button"
               onClick={() => {
                 setExtra((arr) => [...arr, '']);
                 setTouched(true);
               }}
-              className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-200"
+              className="inline-flex items-center gap-1"
             >
               <Plus size={12} />
               {tr('关联凭证', 'Associate a credential')}
-            </button>
+            </Button>
           )}
 
           {err && <div className="text-[11px] text-red-400">{err}</div>}

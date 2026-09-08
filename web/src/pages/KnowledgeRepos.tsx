@@ -1,3 +1,6 @@
+import { Button, Label, Input, Textarea } from '@/components/ui';
+import { useDialogs } from '@/components/ui/useDialogs';
+import { Hint } from '@/components/ui/Tooltip';
 // KnowledgeRepos page — add / sync / remove git repos. Each
 // successfully-synced repo populates knowledge_docs (source_type=repo);
 // the LLM's query_knowledge tool then searches them alongside manual
@@ -155,22 +158,22 @@ export default function KnowledgeReposPage() {
             </p>
           </div>
           <div className="flex gap-2">
-            <button
+            <Button variant="outline" size="sm"
               type="button"
               onClick={() => fetchAll(true)}
               disabled={loading || refreshing}
-              className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5"
             >
               <RefreshCw size={12} className={cn(refreshing && 'animate-spin')} />
               {tr('刷新', 'Refresh')}
-            </button>
-            <button
+            </Button>
+            <Button variant="primary" size="sm"
               type="button"
               onClick={() => setCreating(true)}
-              className="inline-flex items-center gap-1.5 rounded-md bg-accent px-2.5 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent/90"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 font-medium text-accent-fg"
             >
               <Plus size={12} /> {tr('添加仓库', 'Add repo')}
-            </button>
+            </Button>
           </div>
         </div>
       </header>
@@ -190,13 +193,13 @@ export default function KnowledgeReposPage() {
           <div className="flex h-60 flex-col items-center justify-center gap-2 text-zinc-500">
             <GitBranch size={28} className="text-zinc-600" />
             <div className="text-sm">{tr('还没添加仓库', 'No repos added yet')}</div>
-            <button
+            <Button variant="primary" size="sm"
               type="button"
               onClick={() => setCreating(true)}
-              className="mt-1 inline-flex items-center gap-1 rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent/90"
+              className="mt-1 inline-flex items-center gap-1 px-3 py-1.5 font-medium text-accent-fg"
             >
               <Plus size={12} /> {tr('添加仓库', 'Add repo')}
-            </button>
+            </Button>
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -250,11 +253,11 @@ function RepoCard({
   const { tr } = useI18n();
   return (
     <section className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="truncate font-mono text-sm text-zinc-100" title={repo.url}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 w-full sm:flex-1">
+          <Hint content={repo.url}><div className="truncate font-mono text-sm text-zinc-100" >
             {repo.url}
-          </div>
+          </div></Hint>
           <div className="mt-0.5 text-[11px] text-zinc-500">
             {tr('分支 ', 'Branch ')}<span className="font-mono text-zinc-300">{repo.branch}</span>
             {repo.last_synced_at && (
@@ -270,31 +273,31 @@ function RepoCard({
               </>
             )}
           </div>
+          {repo.description && (
+            <p className="mt-2 break-words text-xs text-zinc-400">{repo.description}</p>
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          <button
+          <Hint content={tr('git pull + 重建索引', 'git pull + rebuild index')}><Button variant="outline" size="sm"
             type="button"
             onClick={onSync}
             disabled={syncing}
-            className="inline-flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-[11px] text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
-            title={tr('git pull + 重建索引', 'git pull + rebuild index')}
+            className="inline-flex items-center gap-1 px-2 py-1"
+
           >
             <RefreshCw size={11} className={cn(syncing && 'animate-spin')} />
             {syncing ? tr('同步中…', 'Syncing…') : tr('同步', 'Sync')}
-          </button>
-          <button
+          </Button></Hint>
+          <Hint content={tr('移除', 'Remove')}><Button variant="dangerGhost" size="sm"
             type="button"
             onClick={onDelete}
-            title={tr('移除', 'Remove')}
-            className="rounded p-1 text-zinc-500 hover:bg-red-900/30 hover:text-red-300"
+
+            className="p-1"
           >
             <Trash2 size={11} />
-          </button>
+          </Button></Hint>
         </div>
       </div>
-      {repo.description && (
-        <p className="mt-2 text-xs text-zinc-400">{repo.description}</p>
-      )}
       {repo.last_sync_error && (
         <div className="mt-2 rounded-md border border-red-500/30 bg-red-500/5 px-2 py-1.5 text-[11px] text-red-300">
           <div className="font-medium">
@@ -342,34 +345,34 @@ function RepoCreator({ onClose, onCreated }: { onClose: () => void; onCreated: (
       title={tr('添加 git 仓库', 'Add git repo')}
       footer={
         <>
-          <button
+          <Button variant="outline" size="sm"
             type="button"
             onClick={onClose}
-            className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+            className="px-3 py-1.5"
           >
             {tr('取消', 'Cancel')}
-          </button>
-          <button
+          </Button>
+          <Button variant="primary" size="sm"
             type="button"
             onClick={() => void submit()}
             disabled={submitting || url.trim() === ''}
-            className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent/90 disabled:opacity-50"
+            className="px-3 py-1.5 font-medium text-accent-fg"
           >
             {submitting ? tr('保存中…', 'Saving…') : tr('保存（保存后再点同步）', 'Save (then click Sync)')}
-          </button>
+          </Button>
         </>
       }
     >
       <div className="space-y-3 text-xs text-zinc-300">
         {err && <div className="rounded-md border border-red-500/40 bg-red-500/5 px-3 py-2 text-red-300">{err}</div>}
-        <label className="block">
+        <Label className="block">
           <div className="mb-1 text-[11px] text-zinc-500">{tr('仓库 URL *', 'Repo URL *')}</div>
-          <input
+          <Input
             type="text"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             placeholder="https://github.com/your-org/runbooks.git  /  git@gitlab.company.internal:team/repo.git"
-            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full font-mono"
           />
           <div className="mt-1 text-[11px] text-zinc-500">
             {tr(
@@ -377,27 +380,27 @@ function RepoCreator({ onClose, onCreated }: { onClose: () => void; onCreated: (
               'HTTPS (public) or SSH (git@host:owner/repo) both work. For SSH private repos, configure a matching SSH key in "Credentials · SSH key" above first. Do NOT embed tokens in the URL — they leak via git argv / logs / DB columns.',
             )}
           </div>
-        </label>
-        <label className="block">
+        </Label>
+        <Label className="block">
           <div className="mb-1 text-[11px] text-zinc-500">{tr('分支', 'Branch')}</div>
-          <input
+          <Input
             type="text"
             value={branch}
             onChange={(e) => setBranch(e.target.value)}
             placeholder="main"
-            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full font-mono"
           />
-        </label>
-        <label className="block">
+        </Label>
+        <Label className="block">
           <div className="mb-1 text-[11px] text-zinc-500">{tr('说明（可选）', 'Description (optional)')}</div>
-          <input
+          <Input
             type="text"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder={tr('一句话说这个仓库装什么', "One-liner describing what this repo holds")}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full"
           />
-        </label>
+        </Label>
         <div className="rounded-md border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-[11px] text-zinc-500">
           {tr('仅索引：', 'Indexed only: ')}<span className="font-mono">.md / .txt / .rst / .yaml / .yml / .toml / .json</span>
           {tr('；忽略 ', '; ignored: ')}<span className="font-mono">.git / vendor / node_modules / dist / build</span>
@@ -431,21 +434,21 @@ function DeleteRepoDialog({ repo, onClose, onDone }: { repo: KnowledgeRepo; onCl
       title={tr('移除仓库', 'Remove repo')}
       footer={
         <>
-          <button
+          <Button variant="outline" size="sm"
             type="button"
             onClick={onClose}
-            className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+            className="px-3 py-1.5"
           >
             {tr('取消', 'Cancel')}
-          </button>
-          <button
+          </Button>
+          <Button variant="danger" size="sm"
             type="button"
             onClick={() => void submit()}
             disabled={submitting}
-            className="rounded-md bg-red-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-600 disabled:opacity-50"
+            className="px-3 py-1.5 font-medium"
           >
             {submitting ? tr('删除中…', 'Deleting…') : tr('删除', 'Delete')}
-          </button>
+          </Button>
         </>
       }
     >
@@ -466,6 +469,7 @@ function DeleteRepoDialog({ repo, onClose, onDone }: { repo: KnowledgeRepo; onCl
 // keys + the hosts they auth against. Lives in this page so all git
 // auth config (HTTPS PAT card above + SSH keys here) is one stop.
 function SSHIdentitiesCard() {
+  const { confirmAction, dialog } = useDialogs();
   const { tr } = useI18n();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<SSHIdentity[]>([]);
@@ -491,7 +495,7 @@ function SSHIdentitiesCard() {
   }, [open, refresh]);
 
   const onDelete = async (id: number) => {
-    if (!window.confirm(tr('删除该 SSH 凭证？后续指向其 hosts 的仓库会同步失败。', 'Delete this SSH identity? Subsequent syncs to its hosts will fail.'))) return;
+    if (!(await confirmAction(tr('删除该 SSH 凭证？后续指向其 hosts 的仓库会同步失败。', 'Delete this SSH identity? Subsequent syncs to its hosts will fail.')))) return;
     try {
       await deleteSSHIdentity(id);
       await refresh();
@@ -501,7 +505,7 @@ function SSHIdentitiesCard() {
   };
 
   return (
-    <section className="mb-4 rounded-xl border border-zinc-800 bg-zinc-900/40">
+    <>{dialog}<section className="mb-4 rounded-xl border border-zinc-800 bg-zinc-900/40">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -535,7 +539,7 @@ function SSHIdentitiesCard() {
               {items.map((id) => (
                 <li
                   key={id.id}
-                  className="flex items-start justify-between gap-3 rounded-md border border-zinc-800/60 bg-zinc-950/40 px-3 py-2"
+                  className="flex items-center justify-between gap-3 rounded-md border border-zinc-800/60 bg-zinc-950/40 px-3 py-2"
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
@@ -561,24 +565,24 @@ function SSHIdentitiesCard() {
                       </div>
                     )}
                   </div>
-                  <button
+                  <Button variant="plain" size="sm"
                     type="button"
                     onClick={() => void onDelete(id.id)}
-                    className="inline-flex shrink-0 items-center gap-1 rounded-md border border-red-500/40 bg-red-500/10 px-2 py-1 text-[11px] text-red-300 hover:bg-red-500/20"
+                    className="inline-flex shrink-0 items-center gap-1 px-2 py-1 border border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/20"
                   >
                     <Trash2 size={11} /> {tr('删除', 'Delete')}
-                  </button>
+                  </Button>
                 </li>
               ))}
             </ul>
           )}
-          <button
+          <Button variant="outline" size="sm"
             type="button"
             onClick={() => setAdding(true)}
-            className="inline-flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800"
+            className="inline-flex items-center gap-1 px-2.5 py-1.5"
           >
             <Plus size={12} /> {tr('添加 SSH 凭证', 'Add SSH identity')}
-          </button>
+          </Button>
           <p className="text-[11px] text-zinc-500">
             {tr(
               '建议为 ongrid 单独生成一对 ed25519 deploy key（无 passphrase），公钥粘到 GitHub/GitLab/Gitea 的 Deploy keys 列表。这里粘私钥。',
@@ -596,7 +600,7 @@ function SSHIdentitiesCard() {
           }}
         />
       )}
-    </section>
+    </section></>
   );
 }
 
@@ -675,13 +679,13 @@ function AddSSHIdentityModal({
         title={tr('SSH 凭证已创建', 'SSH identity created')}
         size="md"
         footer={
-          <button
+          <Button variant="primary" size="sm"
             type="button"
             onClick={closeAndRefresh}
-            className="inline-flex items-center rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent/90"
+            className="inline-flex items-center px-3 py-1.5 font-medium text-accent-fg"
           >
             {tr('我已复制', 'Copied — done')}
-          </button>
+          </Button>
         }
       >
         <div className="space-y-3 text-sm text-zinc-300">
@@ -721,25 +725,25 @@ function AddSSHIdentityModal({
       size="md"
       footer={
         <>
-          <button
+          <Button variant="outline" size="sm"
             type="button"
             onClick={onClose}
-            className="inline-flex items-center rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800"
+            className="inline-flex items-center px-3 py-1.5"
           >
             {tr('取消', 'Cancel')}
-          </button>
-          <button
+          </Button>
+          <Button variant="primary" size="sm"
             type="button"
             disabled={!canSubmit}
             onClick={() => void submit()}
-            className="inline-flex items-center gap-1 rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent/90 disabled:opacity-40"
+            className="inline-flex items-center gap-1 px-3 py-1.5 font-medium text-accent-fg"
           >
             {busy
               ? tr('处理中…', 'Working…')
               : mode === 'generate'
                 ? tr('生成密钥对', 'Generate keypair')
                 : tr('保存', 'Save')}
-          </button>
+          </Button>
         </>
       }
     >
@@ -747,7 +751,7 @@ function AddSSHIdentityModal({
         {/* Mode picker — generate first, paste second; the labelling
             steers admins toward the safer auto-gen flow. */}
         <div className="inline-flex rounded-md border border-zinc-800 bg-zinc-950/40 p-0.5 text-[11px]">
-          <button
+          <Button variant="subtle" size="sm"
             type="button"
             onClick={() => setMode('generate')}
             className={cn(
@@ -756,8 +760,8 @@ function AddSSHIdentityModal({
             )}
           >
             {tr('manager 生成（推荐）', 'Generate on manager (recommended)')}
-          </button>
-          <button
+          </Button>
+          <Button variant="subtle" size="sm"
             type="button"
             onClick={() => setMode('paste')}
             className={cn(
@@ -766,40 +770,40 @@ function AddSSHIdentityModal({
             )}
           >
             {tr('粘贴现有私钥', 'Paste existing key')}
-          </button>
+          </Button>
         </div>
 
-        <label className="block">
+        <Label className="block">
           <span className="mb-1 block text-[11px] text-zinc-500">{tr('名称', 'Name')}</span>
-          <input
+          <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder={tr('如 github-personal、corp-gitlab', 'e.g. github-personal, corp-gitlab')}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none"
+            className="w-full"
           />
-        </label>
-        <label className="block">
+        </Label>
+        <Label className="block">
           <span className="mb-1 block text-[11px] text-zinc-500">
             {tr('hosts（空格 / 逗号分隔；支持通配 * ?）', 'hosts (space or comma separated; * ? globs supported)')}
           </span>
-          <input
+          <Input
             value={hosts}
             onChange={(e) => setHosts(e.target.value)}
             placeholder="github.com gitlab.company.internal"
-            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none"
+            className="w-full font-mono"
           />
-        </label>
+        </Label>
         {mode === 'paste' && (
-          <label className="block">
+          <Label className="block">
             <span className="mb-1 block text-[11px] text-zinc-500">
               {tr('私钥（PEM；无 passphrase）', 'Private key (PEM, no passphrase)')}
             </span>
-            <textarea
+            <Textarea
               value={privateKey}
               onChange={(e) => setPrivateKey(e.target.value)}
               placeholder={`-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----`}
               rows={9}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-[11px] text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none"
+              className="w-full font-mono"
             />
             <span className="mt-1 block text-[11px] text-zinc-500">
               {tr(
@@ -807,7 +811,7 @@ function AddSSHIdentityModal({
                 'ed25519 recommended, passphrase-less (manager runs headless; cannot prompt for an unlock). Once saved the key cannot be revealed back — rotate by delete + recreate.',
               )}
             </span>
-          </label>
+          </Label>
         )}
         {mode === 'generate' && (
           <div className="rounded-md border border-zinc-800/60 bg-zinc-950/40 px-3 py-2 text-[11px] text-zinc-400">

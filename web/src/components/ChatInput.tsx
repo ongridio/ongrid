@@ -1,3 +1,7 @@
+import { Button, Label, Textarea } from '@/components/ui';
+import { Select } from '@/components/ui/Select';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/Popover';
+import { Switch } from '@/components/ui/Switch';
 import {
   useEffect,
   useMemo,
@@ -15,7 +19,6 @@ import {
   Github,
   Slack,
   AtSign,
-  ChevronDown,
   X as XIcon,
   Server as ServerIcon,
   AlertTriangle,
@@ -149,7 +152,6 @@ export function ChatInput({
       if (isScrollbarMouseEvent(e)) return;
       if (!containerRef.current.contains(e.target as Node)) {
         setPopoverOpen(false);
-        setModelMenuOpen(false);
       }
     }
     document.addEventListener('mousedown', onDocMouseDown);
@@ -338,14 +340,14 @@ export function ChatInput({
               <MentionIcon type={c.type} />
               <span className="text-zinc-400">{c.type}</span>
               <span className="text-zinc-100">{c.label}</span>
-              <button
+              <Button variant="subtle" size="sm"
                 type="button"
                 aria-label={tr(`移除引用 ${c.label}`, `Remove mention ${c.label}`)}
-                className="-mr-0.5 ml-0.5 rounded p-0.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+                className="-mr-0.5 ml-0.5 p-0.5"
                 onClick={() => removeChip(i)}
               >
                 <XIcon size={11} />
-              </button>
+              </Button>
             </span>
           ))}
         </div>
@@ -357,10 +359,10 @@ export function ChatInput({
           'focus-within:border-zinc-700 focus-within:bg-zinc-900'
         )}
       >
-        <label htmlFor="chat-input" className="sr-only">
+        <Label htmlFor="chat-input" className="sr-only">
           {tr('消息输入框', 'Message input')}
-        </label>
-        <textarea
+        </Label>
+        <Textarea variant="inset"
           id="chat-input"
           ref={ref}
           value={value}
@@ -379,10 +381,7 @@ export function ChatInput({
           rows={1}
           disabled={disabled}
           aria-label={tr('消息输入框', 'Message input')}
-          className={cn(
-            'block w-full resize-none bg-transparent px-5 pb-2 pt-4 text-[15px] leading-[22px] text-zinc-100',
-            'placeholder:text-zinc-500 focus:outline-none disabled:opacity-60'
-          )}
+          className="w-full resize-none px-5 pb-2 pt-4 text-[15px] leading-[22px]"
         />
 
         {popoverOpen && (
@@ -419,7 +418,7 @@ export function ChatInput({
                 here so we don't ship dead icons that look interactive
                 but no-op. Tracked in docs/todo/home-chat-toolbar.md. */}
           </div>
-          <button
+          <Button variant="subtle" size="sm"
             type="button"
             onClick={submit}
             disabled={disabled || empty}
@@ -432,7 +431,7 @@ export function ChatInput({
             )}
           >
             <Send size={15} />
-          </button>
+          </Button>
         </div>
       </div>
       {showSkillsRow && (
@@ -616,112 +615,26 @@ function ModelDropdown({
   onPick: (m: ModelSelection) => void;
 }) {
   const { tr } = useI18n();
-  const empty = providers.length === 0;
-  // Active provider id + visible label. When nothing's selected we
-  // still show a clickable affordance — "未配置模型" if no providers,
-  // "选择模型" otherwise. The visible icon is the active provider's
-  // brand mark (no text label, the icon implies it).
-  const activeProviderId = selected?.provider ?? '';
-  const activeModel = selected?.model ?? '';
-  const triggerLabel = empty
-    ? tr('未配置模型', 'No model configured')
-    : activeModel || (providers[0]?.model ?? providers[0]?.models?.[0] ?? tr('选择模型', 'Select model'));
-
-  // Auto-flip: the home page input sits near viewport top (more room
-  // below); the chat thread input sits near the bottom (more room
-  // above). Measure once per open so the menu never gets clipped by
-  // the viewport edge or the hero section above.
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const [openUp, setOpenUp] = useState(true);
-  useEffect(() => {
-    if (!open || !triggerRef.current) return;
-    const rect = triggerRef.current.getBoundingClientRect();
-    const spaceAbove = rect.top;
-    const spaceBelow = window.innerHeight - rect.bottom;
-    setOpenUp(spaceAbove >= spaceBelow);
-  }, [open]);
-
-  return (
-    <div className="relative">
-      <button
-        ref={triggerRef}
-        type="button"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        onClick={() => setOpen(!open)}
-        className={cn(
-          'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800/60',
-          empty && 'text-zinc-400'
-        )}
-      >
-        {!empty && selected?.model && (
-          <ModelIcon
-            model={selected.model}
-            provider={activeProviderId || providers[0]?.id || ''}
-            size={13}
-          />
-        )}
-        <span className={cn(empty && 'italic')}>{triggerLabel}</span>
-        <ChevronDown size={12} className="text-zinc-500" />
-      </button>
-      {open && (
-        <div
-          role="listbox"
-          aria-label={tr('选择模型', 'Select model')}
-          className={cn(
-            'absolute left-0 z-30 min-w-[260px] max-h-[60vh] overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-950 shadow-xl',
-            openUp ? 'bottom-full mb-1' : 'top-full mt-1',
-          )}
-        >
-          {empty ? (
-            <div className="px-3 py-3 text-[12px] text-zinc-300">
-              <p className="mb-2 text-zinc-200">{tr('还未配置任何 LLM 提供商。', 'No LLM provider configured yet.')}</p>
-              <p className="mb-2 text-[11px] text-zinc-500">
-                {tr('到 ', 'Go to ')}
-                <Link
-                  to="/settings/integrations"
-                  className="text-emerald-400 hover:text-emerald-300"
-                  onClick={() => setOpen(false)}
-                >
-                  {tr('设置 → 集成 → LLM 模型', 'Settings → Integrations → LLM models')}
-                </Link>{' '}
-                {tr('配置 OpenAI / Anthropic / 智谱 / Gemini / DeepSeek / Kimi / MiniMax / 小米 MiMo 的 API key。', 'to set API keys for OpenAI / Anthropic / Zhipu / Gemini / DeepSeek / Kimi / MiniMax / Xiaomi MiMo.')}
-              </p>
-            </div>
-          ) : (
-            // Flat model list — provider headers add visual noise without
-            // helping the user pick. The leading icon already discloses
-            // which brand each model belongs to.
-            providers.flatMap((p) => {
-              const models = p.models.length > 0 ? p.models : p.model ? [p.model] : [];
-              return models.map((m) => {
-                const active = selected?.provider === p.id && selected?.model === m;
-                return (
-                  <button
-                    key={`${p.id}-${m}`}
-                    type="button"
-                    role="option"
-                    aria-selected={active}
-                    onClick={() => onPick({ provider: p.id, model: m })}
-                    className={cn(
-                      'flex w-full items-center gap-2 px-3 py-2 text-left text-[12px]',
-                      active ? 'bg-zinc-800 text-zinc-50' : 'text-zinc-200 hover:bg-zinc-900',
-                    )}
-                  >
-                    <ModelIcon model={m} provider={p.id} size={18} />
-                    <span>{m}</span>
-                    {active && (
-                      <span className="ml-auto text-[10px] text-emerald-400">{tr('当前', 'Current')}</span>
-                    )}
-                  </button>
-                );
-              });
-            })
-          )}
-        </div>
-      )}
-    </div>
-  );
+  const options = providers.flatMap((provider) => (provider.models.length > 0 ? provider.models : provider.model ? [provider.model] : []).map((model) => ({
+    value: JSON.stringify([provider.id, model]), label: model,
+    icon: <ModelIcon model={model} provider={provider.id} size={15} />,
+  })));
+  if (options.length === 0) return <Popover open={open} onOpenChange={setOpen}>
+    <PopoverTrigger className="rounded-md px-2.5 py-1.5 text-xs text-text-muted">{tr('未配置模型', 'No model configured')}</PopoverTrigger>
+    <PopoverContent className="w-72 text-xs" aria-label={tr('配置模型', 'Configure model')}>
+      <p>{tr('还未配置任何可用模型。', 'No usable model configured yet.')}</p>
+      <Link to="/settings/integrations" onClick={() => setOpen(false)} className="mt-2 block text-indigo-500">{tr('设置 → 集成 → LLM 模型', 'Settings → Integrations → LLM models')}</Link>
+    </PopoverContent>
+  </Popover>;
+  return <Select
+    open={open} onOpenChange={setOpen} label={tr('选择模型', 'Select model')}
+    value={selected ? JSON.stringify([selected.provider, selected.model]) : options[0].value}
+    options={options} searchable variant="ghost" className="h-8 w-auto max-w-xs"
+    onValueChange={(value) => {
+      const [provider, model] = JSON.parse(value) as [string, string];
+      onPick({ provider, model });
+    }}
+  />;
 }
 
 // WebSearchToggle is the chat toolbar's globe icon. Click flips the
@@ -738,22 +651,7 @@ function WebSearchToggle({
 }) {
   const { tr } = useI18n();
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={enabled}
-      aria-label={enabled ? tr('关闭联网搜索', 'Disable web search') : tr('开启联网搜索', 'Enable web search')}
-      onClick={() => onToggle(!enabled)}
-      className={cn(
-        'inline-flex items-center justify-center rounded-lg p-1.5 transition-colors',
-        enabled
-          ? 'bg-emerald-900/30 text-emerald-300 ring-1 ring-emerald-600/60 hover:bg-emerald-900/50'
-          : 'text-zinc-500 hover:bg-zinc-800/60 hover:text-zinc-300'
-      )}
-      title={enabled ? tr('联网搜索已开启 — 模型可调用 web_search', 'Web search on — the model can call web_search') : tr('联网搜索关闭 — 仅查询内部数据', 'Web search off — internal data only')}
-    >
-      <Globe size={15} />
-    </button>
+    <Label className="inline-flex items-center gap-1.5 text-text-muted"><Globe size={15} /><Switch checked={enabled} onCheckedChange={onToggle} aria-label={enabled ? tr('关闭联网搜索', 'Disable web search') : tr('开启联网搜索', 'Enable web search')} /></Label>
   );
 }
 
@@ -765,13 +663,13 @@ function SkillIcon({
   label: string;
 }) {
   return (
-    <button
+    <Button variant="outline" size="sm"
       type="button"
       disabled
       aria-label={label}
-      className="inline-flex h-7 w-7 cursor-not-allowed items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900/40 text-zinc-500"
+      className="inline-flex h-7 w-7 cursor-not-allowed items-center justify-center"
     >
       <Icon size={13} />
-    </button>
+    </Button>
   );
 }

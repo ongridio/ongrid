@@ -1,5 +1,6 @@
+import { Button } from '@/components/ui/Button';
+import { Hint } from '@/components/ui/Tooltip';
 import { ExternalLink } from 'lucide-react';
-import { cn } from '@/lib/cn';
 
 // GrafanaLinkButton renders the universal "open in Grafana" header
 // button used by Monitor / Logs / Traces. Same shape, same icon, same
@@ -24,18 +25,15 @@ export function GrafanaLinkButton({
   className?: string;
 }) {
   return (
-    <button
+    <Hint content={title}><Button variant="outline"
       type="button"
       onClick={onClick}
       disabled={disabled}
-      title={title}
-      className={cn(
-        'inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-200 hover:border-zinc-500 hover:bg-zinc-800 disabled:opacity-50',
-        className,
-      )}
+
+      className={className}
     >
       <ExternalLink size={12} />
       <span>{label}</span>
-    </button>
+    </Button></Hint>
   );
 }

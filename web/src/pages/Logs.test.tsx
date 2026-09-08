@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { selectOption } from '@/test/select-option';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { http, HttpResponse } from 'msw';
@@ -198,8 +199,8 @@ describe('LogsPage', () => {
     expect(screen.getByText('已加载', { exact: false })).toHaveTextContent('2');
     expect(screen.getByText('耗时', { exact: false })).toHaveTextContent('27 ms');
     expect(screen.getByRole('group', { name: /日志时间直方图/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /原始日志/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /表格/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /原始日志/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /表格/ })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /采集与后端配置/ })).toHaveAttribute('href', '/settings/integrations?focus=logs');
     expect(screen.queryByText('日志检索')).not.toBeInTheDocument();
     expect(screen.queryByText('采集配置')).not.toBeInTheDocument();
@@ -214,8 +215,8 @@ describe('LogsPage', () => {
 
     await waitForInitialLogs();
 
-    expect(screen.getByRole('combobox', { name: '集群' })).toHaveValue('7');
-    expect(screen.getByRole('combobox', { name: '时间范围' })).toHaveValue('6h');
+    expect(screen.getByRole('combobox', { name: '集群' })).toHaveTextContent('kind-local (#7)');
+    expect(screen.getByRole('combobox', { name: '时间范围' })).toHaveTextContent('6 小时');
     expect(searchRequests[0]?.scope).toMatchObject({
       cluster_ids: ['7'],
       namespaces: ['production'],
@@ -295,7 +296,7 @@ describe('LogsPage', () => {
     const rawRow = screen.getByText('payment request completed').closest('[role="listitem"]');
     await waitFor(() => expect(rawRow).toHaveTextContent('集群:kind-local (#7)'));
 
-    await user.click(screen.getByRole('button', { name: /表格/ }));
+    await user.click(screen.getByRole('tab', { name: /表格/ }));
     expect(screen.getByText('payment request completed').closest('tr')).toHaveTextContent('kind-local (#7)');
   });
 
@@ -461,12 +462,13 @@ describe('LogsPage', () => {
     await waitForInitialLogs();
 
     const clusterSelect = screen.getByRole('combobox', { name: '集群' });
-    await waitFor(() => expect(within(clusterSelect).getByRole('option', { name: 'kind-local (#7)' })).toBeInTheDocument());
-    expect(within(clusterSelect).getByRole('option', { name: 'production (#12)' })).toBeInTheDocument();
+    await user.click(clusterSelect);
+    await waitFor(() => expect(screen.getByRole('option', { name: 'kind-local (#7)' })).toBeInTheDocument());
+    expect(screen.getByRole('option', { name: 'production (#12)' })).toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: 'Namespace' })).not.toBeInTheDocument();
 
     const requestCount = searchRequests.length;
-    await user.selectOptions(clusterSelect, '12');
+    await selectOption(clusterSelect, 'production (#12)');
 
     await waitFor(() => expect(searchRequests.length).toBeGreaterThan(requestCount));
     expect(searchRequests.at(-1)?.scope?.cluster_ids).toEqual(['12']);
@@ -497,11 +499,12 @@ describe('LogsPage', () => {
 
     render(<MemoryRouter><LogsPage /></MemoryRouter>);
     const clusterSelect = screen.getByRole('combobox', { name: '集群' });
-    await waitFor(() => expect(within(clusterSelect).getByRole('option', { name: 'production (#12)' })).toBeInTheDocument());
+    await user.click(clusterSelect);
+    await waitFor(() => expect(screen.getByRole('option', { name: 'production (#12)' })).toBeInTheDocument());
     await waitFor(() => expect(searchRequests.length).toBeGreaterThan(0));
     const abortedBeforeSelection = abortedCount;
 
-    await user.selectOptions(clusterSelect, '12');
+    await selectOption(clusterSelect, 'production (#12)');
 
     await waitFor(() => expect(abortedCount).toBeGreaterThan(abortedBeforeSelection));
     await screen.findByText('payment request completed');
@@ -537,7 +540,7 @@ describe('LogsPage', () => {
     selection?.addRange(range);
     expect(selection?.toString()).toBe('upstream timeout while calling inventory');
 
-    await user.click(screen.getByRole('button', { name: /表格/ }));
+    await user.click(screen.getByRole('tab', { name: /表格/ }));
     expect(screen.getByRole('columnheader', { name: '日志正文' })).toBeInTheDocument();
     const row = screen.getByText('upstream timeout while calling inventory').closest('tr');
     expect(row).not.toBeNull();
@@ -569,7 +572,7 @@ describe('LogsPage', () => {
     expect(rawRow).toHaveClass('w-max', 'min-w-full');
     expect(rawRow?.parentElement).toHaveClass('overflow-x-auto');
 
-    await user.click(screen.getByRole('button', { name: /表格/ }));
+    await user.click(screen.getByRole('tab', { name: /表格/ }));
     const tableMessage = screen.getByText('upstream timeout while calling inventory').closest('td');
     const table = tableMessage?.closest('table');
     expect(tableMessage).toHaveClass('whitespace-nowrap');

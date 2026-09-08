@@ -1,3 +1,4 @@
+import { Button } from '@/components/ui/Button';
 // ProcessTopPanel — Monitor 页 "top-N 进程" 时间线面板。
 //
 // 数据源：manager-side Prometheus，PromQL 直接打 process-exporter 系列
@@ -255,7 +256,7 @@ function SortBtn({ icon, label, active, onClick }: {
   onClick: () => void;
 }) {
   return (
-    <button
+    <Button variant="outline" size="sm"
       type="button"
       onClick={onClick}
       className={cn(
@@ -267,6 +268,6 @@ function SortBtn({ icon, label, active, onClick }: {
     >
       {icon}
       {label}
-    </button>
+    </Button>
   );
 }

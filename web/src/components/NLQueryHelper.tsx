@@ -1,3 +1,5 @@
+import { Button, Label, Textarea } from '@/components/ui';
+import { Hint } from '@/components/ui/Tooltip';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Loader2, Sparkles } from 'lucide-react';
 import { Modal } from './Modal';
@@ -135,15 +137,15 @@ export function NLQueryHelper({ dialect, context, onAccept, children }: NLQueryH
   if (unavailable) return null;
 
   const trigger = children ?? (
-    <button
+    <Hint content={tr('AI 助查', 'AI query helper')}><Button variant="plain" size="sm"
       type="button"
       onClick={() => setOpen(true)}
-      title={tr('AI 助查', 'AI query helper')}
+
       aria-label={tr('AI 助查', 'AI query helper')}
-      className="inline-flex items-center justify-center rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-indigo-300 hover:border-indigo-500/60 hover:bg-indigo-500/10"
+      className="inline-flex items-center justify-center px-2 py-1.5 border border-zinc-700 bg-zinc-900 text-indigo-300 hover:border-indigo-500/60 hover:bg-indigo-500/10"
     >
       <Sparkles size={12} />
-    </button>
+    </Button></Hint>
   );
 
   return (
@@ -165,51 +167,51 @@ export function NLQueryHelper({ dialect, context, onAccept, children }: NLQueryH
         title={tr(`AI 助查 · ${DIALECT_LABELS[dialect]}`, `AI query helper · ${DIALECT_LABELS[dialect]}`)}
         footer={
           <>
-            <button
+            <Button variant="outline" size="sm"
               type="button"
               onClick={() => setOpen(false)}
-              className="rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-200 hover:border-zinc-500 hover:bg-zinc-800"
+              className="px-3 py-1.5"
             >
               {tr('取消', 'Cancel')}
-            </button>
+            </Button>
             {result ? (
               <>
-                <button
+                <Button variant="outline" size="sm"
                   type="button"
                   onClick={onRetry}
-                  className="rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-200 hover:border-zinc-500 hover:bg-zinc-800"
+                  className="px-3 py-1.5"
                 >
                   {tr('重新翻译', 'Retry')}
-                </button>
-                <button
+                </Button>
+                <Button variant="outline" size="sm"
                   type="button"
                   onClick={onAcceptClick}
-                  className="rounded-md border border-emerald-600 bg-emerald-600/20 px-3 py-1.5 text-xs text-emerald-200 hover:bg-emerald-600/30"
+                  className="px-3 py-1.5 text-emerald-200"
                 >
                   {tr('采纳并填入', 'Accept & fill')}
-                </button>
+                </Button>
               </>
             ) : (
-              <button
+              <Button variant="plain" size="sm"
                 type="button"
                 onClick={() => void onTranslate()}
                 disabled={submitting || !prompt.trim()}
-                className="inline-flex items-center gap-1.5 rounded-md border border-indigo-600 bg-indigo-600/20 px-3 py-1.5 text-xs text-indigo-200 hover:bg-indigo-600/30 disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-indigo-600 bg-indigo-600/20 text-indigo-200 hover:bg-indigo-600/30"
               >
                 {submitting && <Loader2 size={11} className="animate-spin" />}
                 {tr('翻译', 'Translate')}
-              </button>
+              </Button>
             )}
           </>
         }
       >
         <div className="space-y-3">
           <div>
-            <label className="block">
+            <Label className="block">
               <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-zinc-400">
                 {tr('用一句话描述你想查什么', 'Describe what you want to query in one sentence')}
               </span>
-              <textarea
+              <Textarea
                 ref={textareaRef}
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
@@ -224,9 +226,9 @@ export function NLQueryHelper({ dialect, context, onAccept, children }: NLQueryH
                 rows={3}
                 disabled={submitting || !!result}
                 placeholder={tr(DIALECT_PLACEHOLDERS_ZH[dialect], DIALECT_PLACEHOLDERS_EN[dialect])}
-                className="w-full resize-y rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none disabled:opacity-60"
+                className="w-full resize-y"
               />
-            </label>
+            </Label>
             <p className="mt-1 text-[11px] text-zinc-500">
               {tr('翻译结果只填回主输入框，不会自动提交，请审核后再点查询。', 'The translation is only filled into the main input — not auto-submitted. Review it before running the query.')}
             </p>

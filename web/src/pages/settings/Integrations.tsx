@@ -1,3 +1,6 @@
+import { Label, Input, Radio } from '@/components/ui';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
+import { Checkbox } from '@/components/ui/Checkbox';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -351,15 +354,15 @@ function PrometheusCard() {
             onChange={(v) => update('basic_password', v)}
             placeholder={tr('（留空 = 不用 Basic）', '(empty = no Basic)')}
           />
-          <label className="flex items-center gap-2 text-xs text-zinc-300">
-            <input
-              type="checkbox"
+          <Label className="flex items-center gap-2 text-xs text-zinc-300">
+            <Checkbox
+
               checked={draft.tls_insecure === 'true'}
-              onChange={(e) => update('tls_insecure', e.target.checked ? 'true' : 'false')}
-              className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-900 accent-emerald-500"
+              onCheckedChange={(checkedValue) => update('tls_insecure', checkedValue ? 'true' : 'false')}
+              className="h-3.5 w-3.5"
             />
             {tr('跳过 TLS 校验（自签证书时勾选）', 'Skip TLS verification (check this for self-signed certs)')}
-          </label>
+          </Label>
         </div>
       )}
 
@@ -435,7 +438,7 @@ function PromField({
 }) {
   const inputType = sensitive ? (revealed ? 'text' : 'password') : 'text';
   return (
-    <label className="block">
+    <Label className="block">
       <span className="mb-1 flex items-center gap-1.5 text-xs text-zinc-400">
         {label}
         {sensitive && (
@@ -445,32 +448,32 @@ function PromField({
         )}
       </span>
       <div className="relative">
-        <input
+        <Input
           type={inputType}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
           disabled={disabled}
           className={cn(
-            'w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none disabled:cursor-not-allowed disabled:opacity-45',
-            sensitive && 'pr-9'
+            "w-full",
+            sensitive && "pr-9"
           )}
           autoComplete="off"
         />
         {sensitive && onToggleReveal && (
-          <button
+          <Button variant="subtle" size="sm"
             type="button"
             onClick={onToggleReveal}
             tabIndex={-1}
             aria-label={revealed ? 'Hide' : 'Show'}
-            className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+            className="absolute right-2 top-1/2 -translate-y-1/2 p-1"
           >
             {revealed ? <EyeOff size={14} /> : <Eye size={14} />}
-          </button>
+          </Button>
         )}
       </div>
       {hint && <span className="mt-1 block text-[11px] text-zinc-500">{hint}</span>}
-    </label>
+    </Label>
   );
 }
 
@@ -671,15 +674,15 @@ function GrafanaCard() {
             onChange={(v) => update('org_id', v)}
             placeholder="1"
           />
-          <label className="flex items-center gap-2 text-xs text-zinc-300">
-            <input
-              type="checkbox"
+          <Label className="flex items-center gap-2 text-xs text-zinc-300">
+            <Checkbox
+
               checked={draft.tls_insecure === 'true'}
-              onChange={(e) => update('tls_insecure', e.target.checked ? 'true' : 'false')}
-              className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-900 accent-emerald-500"
+              onCheckedChange={(checkedValue) => update('tls_insecure', checkedValue ? 'true' : 'false')}
+              className="h-3.5 w-3.5"
             />
             {tr('跳过 TLS 校验（自签证书时勾选）', 'Skip TLS verification (check this for self-signed certs)')}
-          </label>
+          </Label>
         </div>
       )}
 
@@ -696,23 +699,23 @@ function GrafanaCard() {
           {savedOk && !dirty ? <Check size={14} /> : <Save size={14} />}
           <span>{saving ? tr('保存中…', 'Saving…') : savedOk && !dirty ? tr('已保存', 'Saved') : tr('保存', 'Save')}</span>
         </Button>
-        <button
+        <Button variant="outline"
           type="button"
           onClick={sync}
           disabled={status.kind === 'syncing' || dirty || !canTestSync(server)}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-700/60 bg-emerald-900/20 px-3 py-1.5 text-sm text-emerald-300 transition-colors hover:bg-emerald-900/40 disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex items-center gap-1.5 text-emerald-300 transition-colors"
         >
           {status.kind === 'syncing' ? <Loader2 size={14} className="animate-spin" /> : <Cloud size={14} />}
           <span>{tr('同步 Grafana', 'Sync Grafana')}</span>
-        </button>
-        <button
+        </Button>
+        <Button variant="outline"
           type="button"
           onClick={testJump}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-200 transition-colors hover:border-zinc-500 hover:bg-zinc-800"
+          className="inline-flex items-center gap-1.5 transition-colors"
         >
           <ExternalLink size={14} />
           <span>{tr('测试跳转', 'Test jump')}</span>
-        </button>
+        </Button>
       </div>
 
       <StatusLine status={status} dirty={dirty} />
@@ -751,14 +754,14 @@ function GrafanaDrilldownAdvanced() {
 
   return (
     <div className="mt-6 border-t border-zinc-800 pt-4">
-      <button
+      <Button variant="subtle" size="sm"
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-300"
+        className="flex items-center gap-1"
       >
         {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         <span>{tr('高级：图表「打开 Grafana」深链参数（仅当前浏览器）', 'Advanced: chart "Open in Grafana" deep-link params (this browser only)')}</span>
-      </button>
+      </Button>
       {open && (
         <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
           <PromField
@@ -782,15 +785,15 @@ function GrafanaDrilldownAdvanced() {
             placeholder="1"
           />
           <div className="md:col-span-2 flex items-center gap-3">
-            <button
+            <Button variant="outline" size="sm"
               type="button"
               onClick={save}
               disabled={!dirty}
-              className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5"
             >
               <Save size={12} />
               <span>{savedFlag && !dirty ? tr('已保存', 'Saved') : tr('保存', 'Save')}</span>
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -1027,7 +1030,7 @@ function LogsIntegrationCard() {
   ];
 
   return (
-    <Card className="overflow-hidden p-0">
+    <Tabs value={selected} onValueChange={setSelected} className="contents"><Card className="overflow-hidden p-0">
       <div className="border-b border-zinc-800 px-5 py-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -1046,21 +1049,17 @@ function LogsIntegrationCard() {
           {loading && <span className="inline-flex items-center gap-2 text-xs text-zinc-500"><Loader2 size={13} className="animate-spin" />{tr('读取当前后端…', 'Reading selected backend…')}</span>}
         </div>
 
-        <div className="mt-4 grid max-w-2xl grid-cols-2 gap-1 rounded-lg border border-zinc-800 bg-zinc-950 p-1" role="tablist" aria-label={tr('日志后端', 'Log backend')}>
+        <TabsList className="mt-4 grid max-w-2xl grid-cols-2 gap-1 rounded-lg border border-zinc-800 bg-zinc-950 p-1"  aria-label={tr('日志后端', 'Log backend')}>
           {options.map((option) => {
-            const active = selected === option.kind;
             const inUse = current === option.kind;
             return (
-              <button
+              <TabsTrigger
                 key={option.kind}
-                type="button"
-                role="tab"
-                aria-selected={active}
-                onClick={() => setSelected(option.kind)}
-                className={cn(
-                  'flex min-w-0 items-center justify-between gap-3 rounded-md px-3 py-2.5 text-left transition-colors',
-                  active ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
-                )}
+
+
+
+                value={option.kind}
+
               >
                 <span className="min-w-0">
                   <span className="block text-xs font-medium">{option.title}</span>
@@ -1069,21 +1068,21 @@ function LogsIntegrationCard() {
                 <span className={cn('shrink-0 text-[10px]', inUse ? 'text-emerald-400' : option.configured ? 'text-zinc-500' : 'text-zinc-600')}>
                   {inUse ? tr('当前使用', 'In use') : option.configured ? tr('已配置', 'Configured') : tr('未配置', 'Not configured')}
                 </span>
-              </button>
+              </TabsTrigger>
             );
           })}
-        </div>
+        </TabsList>
         {error && <p className="mt-3 text-xs text-red-400">{error}</p>}
       </div>
 
-      <div className="p-5" role="tabpanel">
+      <TabsContent value={selected} className="p-5">
         {selected === 'elasticsearch' ? (
           <ElasticsearchLogsCard current={current === 'elasticsearch'} exploreUrl={exploreUrl} onBackendChange={setBackend} />
         ) : (
           <LokiCard current={current === 'loki'} backend={backend} exploreUrl={exploreUrl} onBackendChange={setBackend} />
         )}
-      </div>
-    </Card>
+      </TabsContent>
+    </Card></Tabs>
   );
 }
 
@@ -1366,25 +1365,25 @@ function ElasticsearchLogsCard({ current, exploreUrl, onBackendChange }: { curre
               revealed={revealedKeys.query}
               onToggleReveal={() => setRevealedKeys((current) => ({ ...current, query: !current.query }))}
             />
-            <label className="flex items-center gap-2 text-xs text-zinc-300 md:col-span-2"><input type="checkbox" checked={form.tlsInsecure} onChange={(event) => update('tlsInsecure', event.target.checked)} className="accent-amber-500" />{tr('测试环境：允许 HTTP / 跳过 TLS 校验', 'Test environments: allow HTTP / skip TLS verification')}</label>
+            <Label className="flex items-center gap-2 text-xs text-zinc-300 md:col-span-2"><Checkbox  checked={form.tlsInsecure} onCheckedChange={(checkedValue) => update('tlsInsecure', checkedValue)}  />{tr('测试环境：允许 HTTP / 跳过 TLS 校验', 'Test environments: allow HTTP / skip TLS verification')}</Label>
           </fieldset>
 
           {editingCurrent && <p className="mt-3 text-[11px] leading-5 text-zinc-500">{tr('保存不会影响当前日志链路；点击“设为当前”会在 Manager 连接与权限测试通过后切换，设备同步可另行检查。', 'Saving does not affect the current log pipeline. Selecting switches after Manager connectivity and privilege checks; device convergence can be checked separately.')}</p>}
 
           <div className="mt-2 text-[11px] leading-5 text-zinc-500">{tr('API Key 是只写字段：Manager 接收后立即放入加密凭证库，读取后端配置时不会回显；Edge 只通过专用密钥通道取得写 Key。', 'API keys are write-only: Manager immediately stores them in the encrypted credential vault and never echoes them when reading backend configuration; Edge receives only the write key through the dedicated secret channel.')}</div>
 
-          <div className="mt-5 flex flex-wrap items-end gap-3 border-t border-zinc-800/70 pt-4">
+          <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-zinc-800/70 pt-4">
             <Button onClick={() => void testElasticsearch()} disabled={!canTest || busy !== null} variant="ghost">{busy === 'test' ? <Loader2 size={14} className="animate-spin" /> : <PlugZap size={14} />}<span>{tr('测试连接', 'Test connection')}</span></Button>
             <Button onClick={() => void save()} disabled={!canSave || busy !== null} variant="primary">{busy === 'save' ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}<span>{tr('保存', 'Save')}</span></Button>
             {dirty && <span className="text-xs text-zinc-500">{validated ? tr('测试通过，可以保存', 'Test passed; ready to save') : tr('请先测试连接，通过后才能保存', 'Test the connection before saving')}</span>}
             <Button onClick={() => void selectElasticsearch()} disabled={!canSelect || busy !== null} variant="primary">{busy === 'select' ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}<span>{tr('设为当前', 'Select')}</span></Button>
             <Button onClick={() => void checkDeviceConnections()} disabled={!canCheckConnections || busy !== null} variant="ghost">{busy === 'connections' ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}<span>{tr('检查设备连接', 'Check device connections')}</span></Button>
-            <button
+            <Button variant="outline"
               type="button"
               disabled={!current || !exploreUrl}
               onClick={() => current && exploreUrl && void openObservabilityUrl(exploreUrl)}
               className={cn(
-                'inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm transition-colors',
+                'inline-flex items-center gap-1.5 border transition-colors',
                 current && exploreUrl
                   ? 'border-zinc-700 text-zinc-200 hover:border-zinc-500 hover:bg-zinc-800'
                   : 'cursor-not-allowed border-zinc-800 text-zinc-600'
@@ -1392,7 +1391,7 @@ function ElasticsearchLogsCard({ current, exploreUrl, onBackendChange }: { curre
             >
               <ExternalLink size={14} />
               <span>{tr('在 Grafana 中查看日志', 'Open logs in Grafana')}</span>
-            </button>
+            </Button>
           </div>
 
           {message && <p className={cn('mt-3 break-all text-xs', message.ok ? 'text-emerald-400' : 'text-red-400')}>{message.ok ? '✓ ' : '✗ '}{message.text}</p>}
@@ -1632,15 +1631,15 @@ function LokiCard({ current, backend, exploreUrl, onBackendChange }: { current: 
             onChange={(v) => update('basic_password', v)}
             placeholder={tr('（留空 = 不用 Basic）', '(empty = no Basic)')}
           />
-          <label className="flex items-center gap-2 text-xs text-zinc-300">
-            <input
-              type="checkbox"
+          <Label className="flex items-center gap-2 text-xs text-zinc-300">
+            <Checkbox
+
               checked={draft.tls_insecure === 'true'}
-              onChange={(e) => update('tls_insecure', e.target.checked ? 'true' : 'false')}
-              className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-900 accent-emerald-500"
+              onCheckedChange={(checkedValue) => update('tls_insecure', checkedValue ? 'true' : 'false')}
+              className="h-3.5 w-3.5"
             />
             {tr('跳过 TLS 校验（自签证书时勾选）', 'Skip TLS verification (check this for self-signed certs)')}
-          </label>
+          </Label>
         </div>
       )}
 
@@ -1665,12 +1664,12 @@ function LokiCard({ current, backend, exploreUrl, onBackendChange }: { current: 
           {checkingConnections ? <Loader2 size={14} className="animate-spin motion-reduce:animate-none" /> : <RefreshCw size={14} />}
           <span>{tr('检查设备连接', 'Check device connections')}</span>
         </Button>
-        <button
+        <Button variant="outline"
           type="button"
           disabled={!exploreUrl}
           onClick={() => exploreUrl && void openObservabilityUrl(exploreUrl)}
           className={cn(
-            'inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm transition-colors',
+            'inline-flex items-center gap-1.5 border transition-colors',
             exploreUrl
               ? 'border-zinc-700 text-zinc-200 hover:border-zinc-500 hover:bg-zinc-800'
               : 'cursor-not-allowed border-zinc-800 text-zinc-600'
@@ -1678,7 +1677,7 @@ function LokiCard({ current, backend, exploreUrl, onBackendChange }: { current: 
         >
           <ExternalLink size={14} />
           <span>{tr('在 Grafana 中查看日志', 'Open logs in Grafana')}</span>
-        </button>
+        </Button>
         {err && <span className="break-all text-xs text-red-400">{err}</span>}
         {grafanaSyncWarning && <span className="break-all text-xs text-amber-400">{grafanaSyncWarning}</span>}
         {dirty && <span className="text-xs text-zinc-500">{probe.kind === 'ok' ? tr('测试通过，可以保存', 'Test passed; ready to save') : tr('请先测试连接，通过后才能保存', 'Test the connection before saving')}</span>}
@@ -1853,15 +1852,15 @@ function TempoCard() {
             onChange={(v) => update('basic_password', v)}
             placeholder={tr('（留空 = 不用 Basic）', '(empty = no Basic)')}
           />
-          <label className="flex items-center gap-2 text-xs text-zinc-300">
-            <input
-              type="checkbox"
+          <Label className="flex items-center gap-2 text-xs text-zinc-300">
+            <Checkbox
+
               checked={draft.tls_insecure === 'true'}
-              onChange={(e) => update('tls_insecure', e.target.checked ? 'true' : 'false')}
-              className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-900 accent-emerald-500"
+              onCheckedChange={(checkedValue) => update('tls_insecure', checkedValue ? 'true' : 'false')}
+              className="h-3.5 w-3.5"
             />
             {tr('跳过 TLS 校验（自签证书时勾选）', 'Skip TLS verification (check this for self-signed certs)')}
-          </label>
+          </Label>
         </div>
       )}
 
@@ -1878,12 +1877,12 @@ function TempoCard() {
           {savedOk && !dirty ? <Check size={14} /> : <Save size={14} />}
           <span>{saving ? tr('保存中…', 'Saving…') : savedOk && !dirty ? tr('已保存', 'Saved') : tr('保存', 'Save')}</span>
         </Button>
-        <button
+        <Button variant="outline"
           type="button"
           disabled={!exploreUrl}
           onClick={() => exploreUrl && void openObservabilityUrl(exploreUrl)}
           className={cn(
-            'inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm transition-colors',
+            'inline-flex items-center gap-1.5 border transition-colors',
             exploreUrl
               ? 'border-zinc-700 text-zinc-200 hover:border-zinc-500 hover:bg-zinc-800'
               : 'cursor-not-allowed border-zinc-800 text-zinc-600'
@@ -1891,7 +1890,7 @@ function TempoCard() {
         >
           <ExternalLink size={14} />
           <span>{tr('在 Grafana 中查看链路', 'Open traces in Grafana')}</span>
-        </button>
+        </Button>
         {dirty && <span className="text-xs text-zinc-500">{probe.kind === 'ok' ? tr('测试通过，可以保存', 'Test passed; ready to save') : tr('请先测试连接，通过后才能保存', 'Test the connection before saving')}</span>}
         {err && <span className="break-all text-xs text-red-400">{err}</span>}
       </div>
@@ -2256,14 +2255,14 @@ function ProviderBlock({
         checked ? 'border-emerald-700/60 bg-emerald-900/10' : 'border-zinc-800 bg-zinc-950/40'
       )}
     >
-      <label className="flex cursor-pointer items-start gap-3">
-        <input
-          type="radio"
+      <Label className="flex cursor-pointer items-start gap-3">
+        <Radio
+
           name="websearch_provider"
           value={id}
           checked={checked}
           onChange={onSelect}
-          className="mt-1 h-3.5 w-3.5 accent-emerald-500"
+          className="mt-1 h-3.5 w-3.5"
         />
         <div className="flex-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -2274,7 +2273,7 @@ function ProviderBlock({
           </div>
           <p className="mt-1 text-[11px] text-zinc-500">{description}</p>
         </div>
-      </label>
+      </Label>
       {checked && <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">{children}</div>}
     </div>
   );

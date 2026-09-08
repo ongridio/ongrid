@@ -1,3 +1,5 @@
+import { Button, Label, Input, Textarea } from '@/components/ui';
+import { Hint } from '@/components/ui/Tooltip';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
@@ -285,16 +287,16 @@ function Header({
         </div>
 
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <button
+          <Button variant="outline" size="sm"
             type="button"
             onClick={onRefresh}
             disabled={loading || refreshing}
-            className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5"
           >
             <RefreshCw size={12} className={cn(refreshing && 'animate-spin')} />
             {tr('刷新', 'Refresh')}
-          </button>
-          <button
+          </Button>
+          <Button variant="plain" size="sm"
             type="button"
             disabled={!grafanaUrl}
             aria-disabled={!grafanaUrl}
@@ -309,60 +311,60 @@ function Header({
             )}
           >
             <ExternalLink size={12} /> {tr('在 Grafana 查看相关指标', 'View related metrics in Grafana')}
-          </button>
+          </Button>
           {lokiUrl && (
-            <button
+            <Button variant="outline" size="sm"
               type="button"
               onClick={() => void openObservabilityUrl(lokiUrl)}
-              className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1.5 text-xs text-emerald-200 hover:bg-emerald-500/20"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-emerald-200"
             >
               <FileText size={12} /> {tr('跳查相关日志', 'View related logs')}
-            </button>
+            </Button>
           )}
           {tempoUrl && (
-            <button
+            <Button variant="outline" size="sm"
               type="button"
               onClick={() => void openObservabilityUrl(tempoUrl)}
-              className="inline-flex items-center gap-1.5 rounded-md border border-violet-500/40 bg-violet-500/10 px-2.5 py-1.5 text-xs text-violet-200 hover:bg-violet-500/20"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-violet-200"
             >
               <GitBranch size={12} /> {tr('跳查相关链路', 'View related traces')}
-            </button>
+            </Button>
           )}
-          <button
+          <Button variant="plain" size="sm"
             type="button"
             onClick={() => void onDeepDive()}
             disabled={!incident || deepDiveBusy}
-            className="inline-flex items-center gap-1.5 rounded-md border border-indigo-500/40 bg-indigo-500/10 px-2.5 py-1.5 text-xs text-indigo-200 hover:bg-indigo-500/20 disabled:opacity-40"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-indigo-500/40 bg-indigo-500/10 text-indigo-200 hover:bg-indigo-500/20"
           >
             <Bot size={12} /> {deepDiveBusy ? tr('创建会话…', 'Creating…') : tr('深入诊断', 'Deep diagnose')}
-          </button>
-          <button
+          </Button>
+          <Hint content={viewerTip}><Button variant="outline" size="sm"
             type="button"
             onClick={() => onAct('ack')}
             disabled={!canAck}
-            title={viewerTip}
-            className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800 disabled:opacity-40"
+
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5"
           >
             <Bell size={12} /> Ack
-          </button>
-          <button
+          </Button></Hint>
+          <Hint content={viewerTip}><Button variant="outline" size="sm"
             type="button"
             onClick={() => onAct('resolve')}
             disabled={!canResolve}
-            title={viewerTip}
-            className="inline-flex items-center gap-1.5 rounded-md border border-emerald-700/60 bg-emerald-900/20 px-2.5 py-1.5 text-xs text-emerald-300 hover:bg-emerald-900/40 disabled:opacity-40"
+
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-emerald-300"
           >
             <CheckCircle2 size={12} /> Resolve
-          </button>
-          <button
+          </Button></Hint>
+          <Hint content={viewerTip}><Button variant="outline" size="sm"
             type="button"
             onClick={() => onAct('silence')}
             disabled={!canSilence}
-            title={viewerTip}
-            className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800 disabled:opacity-40"
+
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5"
           >
             <BellOff size={12} /> Silence
-          </button>
+          </Button></Hint>
         </div>
       </div>
     </header>
@@ -511,15 +513,15 @@ function InvestigationReportPanel({ incidentId }: { incidentId: number }) {
           {tr('该告警暂无自动根因分析（功能启用前发生的告警，或严重度低于阈值）。点右侧按钮手动派出。',
               'No automatic investigation for this alert (fired before the feature was enabled, or below severity floor). Trigger manually with the button.')}
         </div>
-        <button
+        <Button type="submit" variant="plain" size="sm"
           onClick={triggerNow}
           disabled={triggering}
-          className="rounded border border-indigo-500/40 bg-indigo-500/10 px-3 py-1.5 text-xs text-indigo-200 hover:bg-indigo-500/20 disabled:opacity-50"
+          className="px-3 py-1.5 border border-indigo-500/40 bg-indigo-500/10 text-indigo-200 hover:bg-indigo-500/20"
         >
           {triggering
             ? tr('派出中…', 'Spawning…')
             : tr('手动派出根因分析', 'Run root-cause analysis now')}
-        </button>
+        </Button>
       </section>
     );
   }
@@ -540,13 +542,13 @@ function InvestigationReportPanel({ incidentId }: { incidentId: number }) {
           <div className="font-medium">{tr('根因分析失败', 'Investigation failed')}</div>
           {report.status_reason && <div className="mt-1 text-red-300/80">{report.status_reason}</div>}
         </div>
-        <button
+        <Button type="submit" variant="dangerGhost" size="sm"
           onClick={triggerNow}
           disabled={triggering}
-          className="shrink-0 rounded border border-red-400/40 bg-red-400/10 px-2.5 py-1 text-[11px] text-red-200 hover:bg-red-400/20 disabled:opacity-50"
+          className="shrink-0 px-2.5 py-1 text-red-200"
         >
           {triggering ? tr('派出中…', 'Spawning…') : tr('重新分析', 'Re-analyze')}
-        </button>
+        </Button>
       </section>
     );
   }
@@ -557,13 +559,13 @@ function InvestigationReportPanel({ incidentId }: { incidentId: number }) {
           {tr('根因分析已跳过：', 'Investigation skipped: ')}
           {report.status_reason || tr('未知原因', 'no reason provided')}
         </span>
-        <button
+        <Button type="submit" variant="outline" size="sm"
           onClick={triggerNow}
           disabled={triggering}
-          className="shrink-0 rounded border border-zinc-600 bg-zinc-800 px-2.5 py-1 text-[11px] text-zinc-300 hover:bg-zinc-700 disabled:opacity-50"
+          className="shrink-0 px-2.5 py-1"
         >
           {triggering ? tr('派出中…', 'Spawning…') : tr('重新分析', 'Re-analyze')}
-        </button>
+        </Button>
       </section>
     );
   }
@@ -603,13 +605,13 @@ function InvestigationReportPanel({ incidentId }: { incidentId: number }) {
             <span>{report.tool_call_count} {tr('个 tool call', 'tool calls')}</span>
           )}
           {report.ready_at && <span>{relativeTime(report.ready_at)}</span>}
-          <button
+          <Button type="submit" variant="outline" size="sm"
             onClick={triggerNow}
             disabled={triggering}
-            className="rounded border border-emerald-400/40 bg-emerald-400/10 px-2 py-0.5 text-[11px] text-emerald-200 hover:bg-emerald-400/20 disabled:opacity-50"
+            className="px-2 py-0.5 text-emerald-200"
           >
             {triggering ? tr('派出中…', 'Spawning…') : tr('重新分析', 'Re-analyze')}
-          </button>
+          </Button>
         </div>
       </header>
 
@@ -721,16 +723,16 @@ function InvestigationReportPanel({ incidentId }: { incidentId: number }) {
 
         {report.findings_md && (
           <div>
-            <button
+            <Button variant="subtle" size="sm"
               type="button"
               onClick={() => setExpandFindings((v) => !v)}
-              className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-200"
+              className="inline-flex items-center gap-1"
             >
               {expandFindings ? '▾' : '▸'}{' '}
               {expandFindings
                 ? tr('收起完整 markdown', 'Hide full markdown')
                 : tr('展开完整 markdown', 'Show full markdown')}
-            </button>
+            </Button>
             {expandFindings && (
               <div className="md-body mt-2 rounded-md border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-[13px] leading-relaxed text-zinc-100">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{report.findings_md}</ReactMarkdown>
@@ -1108,21 +1110,21 @@ function ActionDialog({
       title={title}
       footer={
         <>
-          <button
+          <Button variant="outline" size="sm"
             type="button"
             onClick={onClose}
-            className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+            className="px-3 py-1.5"
           >
             {tr('取消', 'Cancel')}
-          </button>
-          <button
+          </Button>
+          <Button variant="primary" size="sm"
             type="button"
             onClick={submit}
             disabled={submitting}
-            className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent/90 disabled:opacity-50"
+            className="px-3 py-1.5 font-medium text-accent-fg"
           >
             {submitting ? tr('提交中…', 'Submitting…') : cta}
-          </button>
+          </Button>
         </>
       }
     >
@@ -1132,27 +1134,27 @@ function ActionDialog({
           <div className="mt-1 text-[11px] text-zinc-500">incident #{incident.id}</div>
         </div>
         {kind === 'silence' && (
-          <label className="block text-xs text-zinc-400">
+          <Label className="block text-xs text-zinc-400">
             <span className="mb-1 block">{tr('静默时长（必填）', 'Silence duration (required)')}</span>
-            <input
+            <Input
               type="text"
               value={until}
               onChange={(e) => setUntil(e.target.value)}
               placeholder={tr('例：30m / 2h / 2026-05-03T12:00:00Z', 'e.g. 30m / 2h / 2026-05-03T12:00:00Z')}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none"
+              className="w-full"
             />
             <span className="mt-1 block text-[11px] text-zinc-600">
               {tr('支持持续时间（30m / 2h）、RFC3339 时间戳或 unix 秒。', 'Supports a duration (30m / 2h), RFC3339 timestamp, or unix seconds.')}
             </span>
-          </label>
+          </Label>
         )}
-        <label className="block text-xs text-zinc-400">
+        <Label className="block text-xs text-zinc-400">
           <span className="mb-1 block">
             {kind === 'silence'
               ? tr('原因（必填）', 'Reason (required)')
               : tr('备注（可选，进入 incident 时间线）', 'Note (optional; recorded in the incident timeline)')}
           </span>
-          <textarea
+          <Textarea
             value={note}
             onChange={(e) => setNote(e.target.value)}
             rows={3}
@@ -1163,9 +1165,9 @@ function ActionDialog({
                 ? tr('例：服务已重启，指标恢复', 'e.g. service restarted, metrics back to normal')
                 : tr('例：上线变更窗口，先静默 30 分钟', 'e.g. deploy window, silencing for 30 min')
             }
-            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none"
+            className="w-full"
           />
-        </label>
+        </Label>
         {err && <div className="text-xs text-red-400">{err}</div>}
       </div>
     </Modal>
@@ -1617,8 +1619,8 @@ function ToolCallChip({ tc }: { tc: ToolCallSummary }) {
       ? 'border-red-500/30 bg-red-500/10 text-red-200'
       : 'border-zinc-700 bg-zinc-800 text-zinc-300';
   return (
-    <span
-      title={tc.error || `${tc.status}${tc.duration_ms != null ? ` · ${tc.duration_ms}ms` : ''}`}
+    <Hint content={tc.error || `${tc.status}${tc.duration_ms != null ? ` · ${tc.duration_ms}ms` : ''}`}><span
+
       className={cn(
         'inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono text-[10px]',
         color,
@@ -1628,6 +1630,6 @@ function ToolCallChip({ tc }: { tc: ToolCallSummary }) {
       {tc.duration_ms != null && (
         <span className="text-[9px] text-zinc-500">{tc.duration_ms}ms</span>
       )}
-    </span>
+    </span></Hint>
   );
 }

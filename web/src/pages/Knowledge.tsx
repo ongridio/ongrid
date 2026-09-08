@@ -1,3 +1,5 @@
+import { Input, Label, Textarea } from '@/components/ui';
+import { Hint } from '@/components/ui/Tooltip';
 // Knowledge page — folder-tree view of the RAG knowledge base.
 //
 // Layout:
@@ -293,7 +295,7 @@ export default function KnowledgePage() {
           <>
             {/* Group-scoped actions (upload / new / sync) live on the
                 sidebar section headers now; the toolbar keeps only refresh. */}
-            <input
+            <Input
               ref={fileInputRef}
               type="file"
               accept=".md,.markdown,.txt,.text,.pdf,.docx"
@@ -338,10 +340,10 @@ export default function KnowledgePage() {
 
       <div className="border-b border-zinc-800/60 px-6 py-2.5">
         <div className="flex items-center gap-2">
-          <label className="relative block flex-1 max-w-2xl">
+          <Label className="relative block flex-1 max-w-2xl">
             <span className="sr-only">{tr('检索', 'Search')}</span>
             <Search size={12} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
-            <input
+            <Input
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -353,17 +355,17 @@ export default function KnowledgePage() {
                   ? tr(`在「${activePath}」内检索（同 query_knowledge 工具）`, `Search within "${activePath}" (same as the query_knowledge tool)`)
                   : tr('试搜：LLM 看到的命中结果（同 query_knowledge 工具）', "Try a search — see what the LLM would (same as query_knowledge tool)")
               }
-              className="w-full rounded-md border border-zinc-800/60 bg-zinc-950/40 py-1.5 pl-8 pr-2 text-xs text-zinc-200 placeholder:text-zinc-500 focus:border-zinc-600 focus:outline-none"
+              className="w-full pl-8 pr-2"
             />
-          </label>
-          <button
+          </Label>
+          <Button variant="primary" size="sm"
             type="button"
             onClick={() => void runSearch()}
             disabled={searching || !query.trim()}
-            className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent/90 disabled:opacity-50"
+            className="px-3 py-1.5 font-medium text-accent-fg"
           >
             {searching ? tr('检索中…', 'Searching…') : tr('检索', 'Search')}
-          </button>
+          </Button>
           {hits.length > 0 && (
             <span className="text-[11px] text-zinc-500">{tr(`命中 ${hits.length} 条`, `${hits.length} hit(s)`)}</span>
           )}
@@ -390,30 +392,30 @@ export default function KnowledgePage() {
             onMoveDoc={onMoveDoc}
             actions={
               <>
-                <button
+                <Hint content={tr('上传文件 (.md/.txt/.pdf/.docx)', 'Upload file (.md/.txt/.pdf/.docx)')}><Button variant="subtle" size="sm"
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
                     fileInputRef.current?.click();
                   }}
                   disabled={uploading}
-                  title={tr('上传文件 (.md/.txt/.pdf/.docx)', 'Upload file (.md/.txt/.pdf/.docx)')}
-                  className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 disabled:opacity-50"
+
+                  className="p-1"
                 >
                   <Upload size={13} className={cn(uploading && 'animate-pulse')} />
-                </button>
-                <button
+                </Button></Hint>
+                <Hint content={tr('新建文档', 'New doc')}><Button variant="subtle" size="sm"
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
                     setSourceScope('org');
                     setEditing('create');
                   }}
-                  title={tr('新建文档', 'New doc')}
-                  className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+
+                  className="p-1"
                 >
                   <Plus size={13} />
-                </button>
+                </Button></Hint>
               </>
             }
           />
@@ -427,25 +429,25 @@ export default function KnowledgePage() {
             activePath={activePath}
             onPick={(p) => pickFolder('builtin', p)}
             actions={
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void onSyncBuiltin();
-                }}
-                disabled={syncingBuiltin}
-                title={
+              <Hint content={
                   lastVaultSync
                     ? tr(
                         `上次同步 ${fullDateTime(lastVaultSync.at)} · ${lastVaultSync.count} 篇 · ${lastVaultSync.source === 'cloud' ? '来源云端' : '离线内置'}`,
                         `Last synced ${fullDateTime(lastVaultSync.at)} · ${lastVaultSync.count} docs · ${lastVaultSync.source === 'cloud' ? 'from cloud' : 'offline baseline'}`,
                       )
                     : tr('从云端同步内置知识库（github.com/ongridio/vault，连不上则用离线内置版）', 'Sync built-in vault from cloud (github.com/ongridio/vault; offline baseline if unreachable)')
-                }
-                className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 disabled:opacity-50"
+                }><Button variant="subtle" size="sm"
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void onSyncBuiltin();
+                }}
+                disabled={syncingBuiltin}
+
+                className="p-1"
               >
                 <DownloadCloud size={13} className={cn(syncingBuiltin && 'animate-pulse')} />
-              </button>
+              </Button></Hint>
             }
           />
         </aside>
@@ -570,7 +572,7 @@ function ScopeTreeSection({
           group (no separate "全部" row); folders are the next level down.
           It's also the drop target for "move to root". */}
       <div className="flex items-center gap-1">
-        <button
+        <Button variant="subtle" size="sm"
           type="button"
           onClick={() => onPick('')}
           onDragOver={onMoveDoc ? (e) => setRootDragOver(acceptDrop(e)) : undefined}
@@ -598,7 +600,7 @@ function ScopeTreeSection({
             {label}
           </span>
           <span className="text-[10px] text-zinc-500">{total}</span>
-        </button>
+        </Button>
         {actions && <div className="flex shrink-0 items-center gap-0.5 pr-1">{actions}</div>}
       </div>
       <div className="mt-0.5">
@@ -675,7 +677,7 @@ function FolderNode({
         )}
         style={{ paddingLeft: 6 + depth * 12 }}
       >
-        <button
+        <Button variant="subtle" size="sm"
           type="button"
           onClick={() => setExpanded((v) => !v)}
           disabled={!hasChildren}
@@ -689,19 +691,19 @@ function FolderNode({
             size={11}
             className={cn('transition-transform', expanded && 'rotate-90')}
           />
-        </button>
-        <button
+        </Button>
+        <Hint content={localizedPath(node.path)}><Button variant="subtle" size="sm"
           type="button"
           onClick={() => onPick(node.path)}
           className="flex flex-1 items-center justify-between gap-1.5 truncate"
-          title={localizedPath(node.path)}
+
         >
           <span className="flex items-center gap-1.5 truncate">
             <Icon size={12} className="shrink-0" />
             <span className="truncate">{localizedPathSegment(node.name)}</span>
           </span>
           <span className="text-[10px] text-zinc-500">{node.subtreeCount}</span>
-        </button>
+        </Button></Hint>
       </div>
       {expanded && hasChildren && (
         <div>
@@ -763,9 +765,9 @@ function DocCard({
     >
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <div className="truncate text-sm font-medium text-zinc-100" title={localizedDocTitle(doc)}>
+          <Hint content={localizedDocTitle(doc)}><div className="truncate text-sm font-medium text-zinc-100" >
             {localizedDocTitle(doc)}
-          </div>
+          </div></Hint>
           <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px] uppercase tracking-wider text-zinc-500">
             <span className={sourceBadge.cls}>{sourceBadge.label}</span>
             {doc.path && (
@@ -787,49 +789,49 @@ function DocCard({
             </div>
           )}
           {doc.url && (
-            <div className="mt-1 truncate font-mono text-[10px] text-zinc-600" title={doc.url}>
+            <Hint content={doc.url}><div className="mt-1 truncate font-mono text-[10px] text-zinc-600" >
               {doc.url}
-            </div>
+            </div></Hint>
           )}
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {editable ? (
             <>
-              <button
+              <Hint content={tr('编辑', 'Edit')}><Button variant="subtle" size="sm"
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   onEdit();
                 }}
-                title={tr('编辑', 'Edit')}
-                className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+
+                className="p-1"
               >
                 <Pencil size={11} />
-              </button>
-              <button
+              </Button></Hint>
+              <Hint content={tr('删除', 'Delete')}><Button variant="dangerGhost" size="sm"
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   onDelete();
                 }}
-                title={tr('删除', 'Delete')}
-                className="rounded p-1 text-zinc-500 hover:bg-red-900/30 hover:text-red-300"
+
+                className="p-1"
               >
                 <Trash2 size={11} />
-              </button>
+              </Button></Hint>
             </>
           ) : (
-            <button
+            <Hint content={tr('查看', 'View')}><Button variant="subtle" size="sm"
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 onEdit();
               }}
-              title={tr('查看', 'View')}
-              className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+
+              className="p-1"
             >
               <Eye size={11} />
-            </button>
+            </Button></Hint>
           )}
         </div>
       </div>
@@ -1009,14 +1011,18 @@ function DocEditor({
         title={existing ? localizedDocTitle(existing) : tr('文档', 'Document')}
         footer={
           <>
-            <button
+            <Button variant="outline" size="sm"
               type="button"
               onClick={onClose}
-              className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+              className="px-3 py-1.5"
             >
               {tr('关闭', 'Close')}
-            </button>
-            <button
+            </Button>
+            <Hint content={
+                isVault
+                  ? tr('内置文档随同步更新、不可直接修改；复制一份到组织知识库后即可编辑', 'Built-in docs are refreshed on sync and not directly editable; copy into the org knowledge base to edit')
+                  : tr('repo 文档随同步更新、不可直接修改；复制一份到组织知识库后即可编辑', 'Repo docs are refreshed on sync and not directly editable; copy into the org knowledge base to edit')
+              }><Button variant="primary" size="sm"
               type="button"
               onClick={() => {
                 // The copy is a fresh org doc — drop the source url
@@ -1025,16 +1031,12 @@ function DocEditor({
                 setForked(true);
               }}
               disabled={loading || !content}
-              title={
-                isVault
-                  ? tr('内置文档随同步更新、不可直接修改；复制一份到组织知识库后即可编辑', 'Built-in docs are refreshed on sync and not directly editable; copy into the org knowledge base to edit')
-                  : tr('repo 文档随同步更新、不可直接修改；复制一份到组织知识库后即可编辑', 'Repo docs are refreshed on sync and not directly editable; copy into the org knowledge base to edit')
-              }
-              className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent/90 disabled:opacity-50"
+
+              className="flex items-center gap-1.5 px-3 py-1.5 font-medium text-accent-fg"
             >
               <Copy size={11} />
               {tr('复制为组织文档', 'Copy as org doc')}
-            </button>
+            </Button></Hint>
           </>
         }
       >
@@ -1055,19 +1057,19 @@ function DocEditor({
             ))}
             {existing?.url &&
               (existing.url.startsWith('http') ? (
-                <a
+                <Hint content={existing.url}><a
                   href={existing.url}
                   target="_blank"
                   rel="noreferrer"
                   className="ml-auto truncate font-mono text-[10px] text-zinc-500 hover:text-zinc-300 underline-offset-2 hover:underline"
-                  title={existing.url}
+
                 >
                   {existing.url}
-                </a>
+                </a></Hint>
               ) : (
-                <span className="ml-auto truncate font-mono text-[10px] text-zinc-500" title={existing.url}>
+                <Hint content={existing.url}><span className="ml-auto truncate font-mono text-[10px] text-zinc-500" >
                   {existing.url}
-                </span>
+                </span></Hint>
               ))}
           </div>
           {/* 不再自限 60vh：Modal 本体已 max-h-90vh + 内部滚动，
@@ -1101,21 +1103,21 @@ function DocEditor({
       }
       footer={
         <>
-          <button
+          <Button variant="outline" size="sm"
             type="button"
             onClick={onClose}
-            className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+            className="px-3 py-1.5"
           >
             {tr('取消', 'Cancel')}
-          </button>
-          <button
+          </Button>
+          <Button variant="primary" size="sm"
             type="button"
             onClick={() => void submit()}
             disabled={submitting || title.trim() === '' || content.trim() === ''}
-            className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent/90 disabled:opacity-50"
+            className="px-3 py-1.5 font-medium text-accent-fg"
           >
             {submitting ? tr('保存中…', 'Saving…') : tr('保存', 'Save')}
-          </button>
+          </Button>
         </>
       }
     >
@@ -1123,77 +1125,77 @@ function DocEditor({
         {err && (
           <div className="rounded-md border border-red-500/40 bg-red-500/5 px-3 py-2 text-red-300">{err}</div>
         )}
-        <label className="block">
+        <Label className="block">
           <div className="mb-1 text-[11px] text-zinc-500">{tr('标题 *', 'Title *')}</div>
-          <input
+          <Input
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder={tr('例：nginx 重启 SOP', 'e.g. nginx restart SOP')}
             maxLength={256}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full"
           />
-        </label>
-        <label className="block">
+        </Label>
+        <Label className="block">
           <div className="mb-1 text-[11px] text-zinc-500">
             {tr('英文标题（可选；en-US locale 下显示）', 'English title (optional; shown in en-US locale)')}
           </div>
-          <input
+          <Input
             type="text"
             value={titleEN}
             onChange={(e) => setTitleEN(e.target.value)}
             placeholder={tr('例：nginx restart SOP', 'e.g. nginx restart SOP')}
             maxLength={256}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full"
           />
-        </label>
+        </Label>
         <div className="grid grid-cols-2 gap-2">
-          <label className="block">
+          <Label className="block">
             <div className="mb-1 text-[11px] text-zinc-500">{tr('目录路径（用 / 分隔）', 'Folder path (separated by /)')}</div>
-            <input
+            <Input
               type="text"
               value={path}
               onChange={(e) => setPath(e.target.value)}
               placeholder={tr('网络/DNS', 'Network/DNS')}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              className="w-full"
             />
-          </label>
-          <label className="block">
+          </Label>
+          <Label className="block">
             <div className="mb-1 text-[11px] text-zinc-500">{tr('标签（逗号分隔）', 'Tags (comma separated)')}</div>
-            <input
+            <Input
               type="text"
               value={tagsText}
               onChange={(e) => setTagsText(e.target.value)}
               placeholder="dns, resolv"
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+              className="w-full"
             />
-          </label>
+          </Label>
         </div>
-        <label className="block">
+        <Label className="block">
           <div className="mb-1 text-[11px] text-zinc-500">
             {urlLocked ? tr('来源文件（不可修改）', 'Source file (read-only)') : tr('来源 URL（可选）', 'Source URL (optional)')}
           </div>
-          <input
+          <Input
             type="text"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             readOnly={urlLocked}
             placeholder="https://wiki.internal/runbook/nginx-restart"
             className={cn(
-              'w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none',
-              urlLocked && 'cursor-not-allowed text-zinc-500',
+              "w-full",
+              urlLocked && "cursor-not-allowed",
             )}
           />
-        </label>
-        <label className="block">
+        </Label>
+        <Label className="block">
           <div className="mb-1 text-[11px] text-zinc-500">{tr('内容（markdown）*', 'Content (markdown) *')}</div>
-          <textarea
+          <Textarea
             value={content}
             onChange={(e) => setContent(e.target.value)}
             placeholder={tr('支持 markdown。LLM 通过 query_knowledge 检索时按语义匹配 title + content。', 'Markdown supported. The LLM does semantic match over title + content via the query_knowledge tool.')}
-            className="h-72 w-full resize-y rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="h-72 w-full resize-y font-mono"
           />
-        </label>
+        </Label>
       </div>
     </Modal>
   );
@@ -1230,21 +1232,21 @@ function DeleteDocDialog({
       title={tr(`删除 ${localizedDocTitle(doc)}`, `Delete ${localizedDocTitle(doc)}`)}
       footer={
         <>
-          <button
+          <Button variant="outline" size="sm"
             type="button"
             onClick={onClose}
-            className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+            className="px-3 py-1.5"
           >
             {tr('取消', 'Cancel')}
-          </button>
-          <button
+          </Button>
+          <Button variant="danger" size="sm"
             type="button"
             onClick={() => void submit()}
             disabled={submitting}
-            className="rounded-md bg-red-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-600 disabled:opacity-50"
+            className="px-3 py-1.5 font-medium"
           >
             {submitting ? tr('删除中…', 'Deleting…') : tr('删除', 'Delete')}
-          </button>
+          </Button>
         </>
       }
     >

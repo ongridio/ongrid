@@ -1,4 +1,7 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Label, Input, Button } from '@/components/ui';
+import { Hint } from '@/components/ui/Tooltip';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Cloud, Cpu, Wrench, RefreshCw, Play, Search, Puzzle, ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/cn';
@@ -44,20 +47,20 @@ export default function SkillsPage() {
   };
 
   return (
-    <main className="anim-fade flex flex-1 flex-col overflow-hidden">
+    <Tabs value={tab} onValueChange={setTab} className="contents"><main className="anim-fade flex flex-1 flex-col overflow-hidden">
       <PageHeader
         title={tr('技能', 'Skills')}
         subtitle={tr('LLM 当前可见的能力，以及安装 / 管理扩展', 'Capabilities the LLM can use — plus installing / managing extensions')}
         extra={
           isAdmin ? (
-            <div className="-mb-4 flex items-center gap-1">
-              <TabButton active={tab === 'catalog'} onClick={() => setTab('catalog')} icon={<Wrench size={14} />} label={tr('技能目录', 'Catalog')} />
-              <TabButton active={tab === 'install'} onClick={() => setTab('install')} icon={<Puzzle size={14} />} label={tr('扩展', 'Extensions')} />
-            </div>
+            <TabsList className="-mb-4 flex items-center gap-1">
+              <TabsTrigger value={'catalog'}>{<Wrench size={14} />} {tr('技能目录', 'Catalog')}</TabsTrigger>
+              <TabsTrigger value={'install'}>{<Puzzle size={14} />} {tr('扩展', 'Extensions')}</TabsTrigger>
+            </TabsList>
           ) : undefined
         }
       />
-      {tab === 'install' ? (
+      <TabsContent value={tab} className="contents">{tab === 'install' ? (
         <div className="flex-1 overflow-auto px-6 py-4">
           <InstallChatBar />
           <Suspense fallback={<div className="flex h-40 items-center justify-center text-sm text-zinc-500">{tr('加载中…', 'Loading…')}</div>}>
@@ -66,8 +69,8 @@ export default function SkillsPage() {
         </div>
       ) : (
         <CatalogTab />
-      )}
-    </main>
+      )}</TabsContent>
+    </main></Tabs>
   );
 }
 
@@ -143,23 +146,7 @@ function InstallChatBar() {
   );
 }
 
-function TabButton({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: ReactNode; label: string }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        'inline-flex items-center gap-1.5 border-b-2 px-3 py-2 text-[13px] font-medium transition-colors',
-        active
-          ? 'border-indigo-500 text-zinc-100'
-          : 'border-transparent text-zinc-500 hover:text-zinc-300'
-      )}
-    >
-      {icon}
-      {label}
-    </button>
-  );
-}
+
 
 // mcpToSkill maps an MCP flow tool into a Skills-page inventory item. MCP
 // carries no read/write signal, so class is shown gently (read→safe, else
@@ -290,17 +277,17 @@ function CatalogTab() {
     <div className="flex flex-1 flex-col overflow-hidden">
         <div className="border-b border-zinc-800 px-6 py-3">
           <div className="flex flex-wrap items-center gap-3">
-            <label className="relative block w-64">
+            <Label className="relative block w-64">
               <span className="sr-only">{tr('搜索', 'Search')}</span>
               <Search size={12} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
-              <input
+              <Input
                 type="search"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder={tr('搜索 name / key / description', 'Search name / key / description')}
-                className="w-full rounded-md border border-zinc-800 bg-zinc-950/40 py-1.5 pl-8 pr-2 text-xs text-zinc-200 placeholder:text-zinc-500 focus:border-zinc-600 focus:outline-none"
+                className="w-full pl-8 pr-2"
               />
-            </label>
+            </Label>
             <div className="inline-flex items-center gap-1.5 text-xs text-zinc-400">
               <span className="text-zinc-500">{tr('运行位置', 'Runs on')}</span>
               <div className="flex flex-wrap gap-1">
@@ -345,15 +332,15 @@ function CatalogTab() {
               <span className="text-xs text-zinc-500">
                 {tr(`${items.length} 个 · 匹配 ${filtered.length}`, `${items.length} total · ${filtered.length} matched`)}
               </span>
-              <button
+              <Button variant="outline" size="sm"
                 type="button"
                 onClick={() => fetchSkills(true)}
                 disabled={loading || refreshing}
-                className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5"
               >
                 <RefreshCw size={12} className={cn(refreshing && 'animate-spin')} />
                 {tr('刷新', 'Refresh')}
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -433,7 +420,7 @@ function CategoryChip({
   onClick(): void;
 }) {
   return (
-    <button
+    <Button variant="outline" size="sm"
       type="button"
       onClick={onClick}
       className={cn(
@@ -444,7 +431,7 @@ function CategoryChip({
       )}
     >
       {label}
-    </button>
+    </Button>
   );
 }
 
@@ -454,9 +441,9 @@ function SkillRow({ skill, displayName, onView }: { skill: SkillSummary; display
     <tr className="cursor-pointer transition-colors hover:bg-zinc-900/40" onClick={onView}>
       <td className="whitespace-nowrap px-4 py-1.5 pl-8">
         <span className="text-xs text-zinc-200">{displayName ?? skill.name}</span>
-        <div className="font-mono text-[10px] text-zinc-600" title={skill.key}>
+        <Hint content={skill.key}><div className="font-mono text-[10px] text-zinc-600" >
           {skill.key}
-        </div>
+        </div></Hint>
       </td>
       <td className="whitespace-nowrap px-4 py-1.5">
         <ScopeBadge value={skill.scope ?? 'host'} />
@@ -473,15 +460,15 @@ function SkillRow({ skill, displayName, onView }: { skill: SkillSummary; display
       </td>
       <td className="whitespace-nowrap px-4 py-1.5 text-right">
         {skill.inventory_only ? (
-          <span
-            title={tr(
+          <Hint content={tr(
               '此能力主要由 AI 助手在 chat 中调用，参数 schema 太复杂没法手动填表',
               'Mainly invoked by the AI assistant in chat — schema too complex for a manual form',
-            )}
+            )}><span
+
             className="text-[11px] text-zinc-500"
           >
             {tr('仅 AI 调用', 'AI only')}
-          </span>
+          </span></Hint>
         ) : (
           <Link
             to={`/skills/${encodeURIComponent(skill.key)}`}
@@ -504,10 +491,10 @@ export function ScopeBadge({ value }: { value: SkillScope }) {
   const { tr } = useI18n();
   const isHost = value === 'host';
   return (
-    <span
-      title={isHost
+    <Hint content={isHost
         ? tr('在设备上执行（需要选择设备）', 'Runs on the device (requires device selection)')
-        : tr('在云端执行（无需设备）', 'Runs on the cloud (no device required)')}
+        : tr('在云端执行（无需设备）', 'Runs on the cloud (no device required)')}><span
+
       className={cn(
         'inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset',
         isHost
@@ -517,7 +504,7 @@ export function ScopeBadge({ value }: { value: SkillScope }) {
     >
       {isHost ? <Cpu size={10} /> : <Cloud size={10} />}
       {isHost ? tr('设备端', 'Device') : tr('云端', 'Cloud')}
-    </span>
+    </span></Hint>
   );
 }
 

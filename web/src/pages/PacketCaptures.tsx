@@ -1,3 +1,7 @@
+import { Label, Input, Textarea } from '@/components/ui';
+import { Hint } from '@/components/ui/Tooltip';
+import { Checkbox } from '@/components/ui/Checkbox';
+import { Select } from '@/components/ui/Select';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Camera, ExternalLink, Filter, Loader2, Plus, RefreshCw, ShieldAlert } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -123,7 +127,7 @@ export default function PacketCapturesPage() {
         extra={
           <div className="flex flex-wrap items-center gap-1">
             {STATES.map((s) => (
-              <button
+              <Button variant="plain" size="sm"
                 key={s.key || 'all'}
                 type="button"
                 onClick={() => setState(s.key)}
@@ -135,7 +139,7 @@ export default function PacketCapturesPage() {
                 )}
               >
                 {tr(s.zh, s.en)}
-              </button>
+              </Button>
             ))}
           </div>
         }
@@ -248,7 +252,7 @@ function CaptureRow({
         <div className="mt-0.5 truncate text-[11px] text-zinc-500">{device?.hostname || device?.ip_address || `device_id=${item.device_id}`}</div>
       </td>
       <td className="px-4 py-3">
-        <div className="truncate font-medium text-zinc-200" title={item.title}>{item.title || `capture-${item.id}`}</div>
+        <Hint content={item.title}><div className="truncate font-medium text-zinc-200" >{item.title || `capture-${item.id}`}</div></Hint>
         <div className="mt-0.5 truncate text-[11px] text-zinc-500">{item.description || `${item.format} · ${item.direction}`}</div>
       </td>
       <td className="px-4 py-3">
@@ -273,7 +277,7 @@ function CaptureRow({
       </td>
       <td className="px-4 py-3">
         <div className="text-zinc-300">{sourceLabel(item.source, tr)}</div>
-        <div className="mt-0.5 text-[11px] text-zinc-500" title={fullDateTime(item.created_at)}>{fullDateTime(item.created_at)}</div>
+        <Hint content={fullDateTime(item.created_at)}><div className="mt-0.5 text-[11px] text-zinc-500" >{fullDateTime(item.created_at)}</div></Hint>
       </td>
       <td className="sticky right-0 bg-zinc-900 px-4 py-3">
         <div className="flex items-center gap-1.5">
@@ -370,41 +374,41 @@ function CreateCaptureModal({ devices, onClose, onCreated }: { devices: Device[]
         </div>
         {error && <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-red-300">{error}</div>}
         <div className="grid gap-3 md:grid-cols-2">
-          <label className="space-y-1">
+          <Label className="space-y-1">
             <span className="text-zinc-400">{tr('设备', 'Device')}</span>
-            <select value={form.device_id} onChange={(e) => set('device_id', e.target.value)} className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-2.5 py-2 text-zinc-100">
+            <Select value={form.device_id} onValueChange={(selectedValue) => set('device_id', selectedValue)} className="w-full">
               <option value="">{tr('选择在线主机', 'Select online host')}</option>
               {devices.map((d) => (
                 <option key={d.id} value={d.id}>
                   {d.name || d.hostname || d.id}{d.online ? '' : ` · ${tr('离线', 'offline')}`}
                 </option>
               ))}
-            </select>
-          </label>
-          <label className="space-y-1">
+            </Select>
+          </Label>
+          <Label className="space-y-1">
             <span className="text-zinc-400">{tr('网卡', 'Interface')}</span>
-            <input value={form.interface} onChange={(e) => set('interface', e.target.value)} placeholder="eth0" className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-2.5 py-2 font-mono text-zinc-100" />
-          </label>
-          <label className="space-y-1 md:col-span-2">
+            <Input value={form.interface} onChange={(e) => set('interface', e.target.value)} placeholder="eth0" className="w-full font-mono" />
+          </Label>
+          <Label className="space-y-1 md:col-span-2">
             <span className="text-zinc-400"><Filter size={12} className="mr-1 inline-block align-[-2px]" /> BPF filter</span>
-            <input value={form.filter} onChange={(e) => set('filter', e.target.value)} placeholder="tcp port 443 and host 10.0.4.17" className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-2.5 py-2 font-mono text-zinc-100" />
-          </label>
+            <Input value={form.filter} onChange={(e) => set('filter', e.target.value)} placeholder="tcp port 443 and host 10.0.4.17" className="w-full font-mono" />
+          </Label>
           <NumberInput label={tr('时长（秒）', 'Duration (sec)')} value={form.duration_seconds} onChange={(v) => set('duration_seconds', v)} />
           <NumberInput label={tr('最大大小（MiB）', 'Max size (MiB)')} value={form.max_bytes_mb} onChange={(v) => set('max_bytes_mb', v)} />
           <NumberInput label={tr('最大包数', 'Max packets')} value={form.max_packets} onChange={(v) => set('max_packets', v)} />
           <NumberInput label="Snaplen" value={form.snaplen} onChange={(v) => set('snaplen', v)} />
-          <label className="flex items-center gap-2 text-zinc-300">
-            <input type="checkbox" checked={form.promiscuous} onChange={(e) => set('promiscuous', e.target.checked)} />
+          <Label className="flex items-center gap-2 text-zinc-300">
+            <Checkbox  checked={form.promiscuous} onCheckedChange={(checkedValue) => set('promiscuous', checkedValue)} />
             {tr('混杂模式', 'Promiscuous mode')}
-          </label>
-          <label className="space-y-1 md:col-span-2">
+          </Label>
+          <Label className="space-y-1 md:col-span-2">
             <span className="text-zinc-400">{tr('标题', 'Title')}</span>
-            <input value={form.title} onChange={(e) => set('title', e.target.value)} placeholder={tr('可选，默认按设备和网卡生成', 'Optional, defaults to device and interface')} className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-2.5 py-2 text-zinc-100" />
-          </label>
-          <label className="space-y-1 md:col-span-2">
+            <Input value={form.title} onChange={(e) => set('title', e.target.value)} placeholder={tr('可选，默认按设备和网卡生成', 'Optional, defaults to device and interface')} className="w-full" />
+          </Label>
+          <Label className="space-y-1 md:col-span-2">
             <span className="text-zinc-400">{tr('说明', 'Description')}</span>
-            <textarea value={form.description} onChange={(e) => set('description', e.target.value)} rows={3} className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-2.5 py-2 text-zinc-100" />
-          </label>
+            <Textarea value={form.description} onChange={(e) => set('description', e.target.value)} rows={3} className="w-full" />
+          </Label>
         </div>
       </div>
     </Modal>
@@ -413,10 +417,10 @@ function CreateCaptureModal({ devices, onClose, onCreated }: { devices: Device[]
 
 function NumberInput({ label, value, onChange }: { label: string; value: string; onChange(value: string): void }) {
   return (
-    <label className="space-y-1">
+    <Label className="space-y-1">
       <span className="text-zinc-400">{label}</span>
-      <input type="number" min="1" value={value} onChange={(e) => onChange(e.target.value)} className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-2.5 py-2 font-mono text-zinc-100" />
-    </label>
+      <Input type="number" min="1" value={value} onChange={(e) => onChange(e.target.value)} className="w-full font-mono" />
+    </Label>
   );
 }
 

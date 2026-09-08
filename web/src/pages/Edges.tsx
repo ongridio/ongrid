@@ -1,19 +1,26 @@
+import { Label, Input, Radio } from '@/components/ui';
+import { useDialogs } from '@/components/ui/useDialogs';
+import { Hint } from '@/components/ui/Tooltip';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/DropdownMenu';
+import { Select } from '@/components/ui/Select';
+import { Checkbox } from '@/components/ui/Checkbox';
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
-import { createPortal } from "react-dom";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Plus,
   RotateCw,
   Trash2,
-  MoreVertical,
+  Pencil,
+  Settings2,
+  ChevronDown,
   Copy,
   Check,
   ExternalLink,
@@ -65,6 +72,7 @@ import {
 } from "@/api/topology";
 import {
   deleteDevice,
+  renameDevice,
   getNetworkDeviceDetail,
   listDevices,
   listNetworkCandidates,
@@ -104,54 +112,6 @@ type DeviceRow = Device & {
   hostEdge?: Edge;
   topologyClusters: TopologyNode[];
 };
-
-const ROW_MENU_GAP = 6;
-const ROW_MENU_VIEWPORT_PADDING = 8;
-
-type RowMenuPosition = {
-  top: number;
-  right: number;
-  maxHeight: number;
-};
-
-function calculateRowMenuPosition(
-  triggerRect: DOMRect,
-  menuHeight: number,
-  viewportWidth: number,
-  viewportHeight: number,
-): RowMenuPosition {
-  const viewportBottom = Math.max(
-    ROW_MENU_VIEWPORT_PADDING,
-    viewportHeight - ROW_MENU_VIEWPORT_PADDING,
-  );
-  const belowTop = Math.min(
-    Math.max(triggerRect.bottom + ROW_MENU_GAP, ROW_MENU_VIEWPORT_PADDING),
-    viewportBottom,
-  );
-  const aboveBottom = Math.min(
-    Math.max(ROW_MENU_VIEWPORT_PADDING, triggerRect.top - ROW_MENU_GAP),
-    viewportBottom,
-  );
-  const belowSpace = Math.max(
-    0,
-    viewportHeight - ROW_MENU_VIEWPORT_PADDING - belowTop,
-  );
-  const aboveSpace = Math.max(0, aboveBottom - ROW_MENU_VIEWPORT_PADDING);
-  const openAbove = menuHeight > belowSpace && aboveSpace > belowSpace;
-  const maxHeight = openAbove ? aboveSpace : belowSpace;
-  const visibleHeight = Math.min(menuHeight, maxHeight);
-
-  return {
-    top: openAbove
-      ? Math.max(ROW_MENU_VIEWPORT_PADDING, aboveBottom - visibleHeight)
-      : belowTop,
-    right: Math.max(
-      ROW_MENU_VIEWPORT_PADDING,
-      viewportWidth - triggerRect.right,
-    ),
-    maxHeight,
-  };
-}
 
 function selectHostEdgesByDevice(edges: Edge[]): Map<number, Edge> {
   const out = new Map<number, Edge>();
@@ -240,36 +200,37 @@ function DeviceTypeIcon({
 
   if (isManagedNetworkDevice(device)) {
     return (
-      <span title={tr("网络设备", "Network device")} className="text-sky-400">
+      <Hint content={tr("网络设备", "Network device")}><span  className="text-sky-400">
         <Network className={iconClass} aria-hidden />
-      </span>
+      </span></Hint>
     );
   }
   if (attachments.length > 0) {
     return (
-      <span
-        title={tr("Kubernetes 设备", "Kubernetes device")}
+      <Hint content={tr("Kubernetes 设备", "Kubernetes device")}><span
+
         className="text-sky-400"
       >
         <ShipWheel className={iconClass} aria-hidden />
-      </span>
+      </span></Hint>
     );
   }
   if (device.roles?.includes("storage")) {
     return (
-      <span title={tr("存储设备", "Storage device")} className="text-amber-400">
+      <Hint content={tr("存储设备", "Storage device")}><span  className="text-amber-400">
         <HardDrive className={iconClass} aria-hidden />
-      </span>
+      </span></Hint>
     );
   }
   return (
-    <span title={tr("主机设备", "Host device")} className="text-zinc-400">
+    <Hint content={tr("主机设备", "Host device")}><span  className="text-zinc-400">
       <Server className={iconClass} aria-hidden />
-    </span>
+    </span></Hint>
   );
 }
 
 export default function EdgesPage() {
+  const { confirmAction, alertAction, dialog } = useDialogs();
   const navigate = useNavigate();
   const location = useLocation();
   const { tr } = useI18n();
@@ -312,6 +273,7 @@ export default function EdgesPage() {
       .then((r) => setManagerVersion(r.manager_version || ""))
       .catch(() => setManagerVersion(""));
   }, []);
+  const [renameTarget, setRenameTarget] = useState<DeviceRow | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [batchInstallOpen, setBatchInstallOpen] = useState(false);
   const [secretReveal, setSecretReveal] = useState<{
@@ -463,12 +425,10 @@ export default function EdgesPage() {
 
   async function onRotate(id: number, name: string, accessKey: string) {
     if (
-      !confirm(
-        tr(
+      !(await confirmAction(tr(
           `确定要轮换 ${name} 的密钥？旧密钥将立即失效。`,
           `Rotate ${name}'s secret? The old key takes effect immediately becomes invalid.`,
-        ),
-      )
+        )))
     )
       return;
     try {
@@ -479,55 +439,47 @@ export default function EdgesPage() {
         secretKey: r.secret_key,
       });
     } catch (err) {
-      alert((err as Error).message || tr("轮换失败", "Rotate failed"));
+      (await alertAction((err as Error).message || tr("轮换失败", "Rotate failed")));
     }
   }
 
   async function onDelete(id: number, name: string) {
     if (
-      !confirm(
-        tr(
+      !(await confirmAction(tr(
           `确定要删除 ${name} 的 Edge？设备记录会保留。`,
           `Delete ${name}'s edge? The device record will remain.`,
-        ),
-      )
+        )))
     )
       return;
     try {
       await deleteEdge(id);
       void refresh();
     } catch (err) {
-      alert((err as Error).message || tr("删除失败", "Delete failed"));
+      (await alertAction((err as Error).message || tr("删除失败", "Delete failed")));
     }
   }
 
   async function onDeleteDevice(device: DeviceRow) {
     const name = device.name || device.hostname || `#${device.id}`;
     if (device.online) {
-      alert(
-        tr(
+      (await alertAction(tr(
           "在线设备不可删除，请先让它离线。",
           "Online devices cannot be deleted. Bring it offline first.",
-        ),
-      );
+        )));
       return;
     }
     if (
-      !confirm(
-        tr(
+      !(await confirmAction(tr(
           `删除离线设备 ${name}？会同时清理关联 Edge 和密钥。`,
           `Delete offline device ${name}? Linked Edges and credentials will also be cleaned.`,
-        ),
-      )
+        )))
     )
       return;
     try {
       await deleteDevice(device.id);
       void refresh();
     } catch (err) {
-      alert(
-        (err as Error).message || tr("删除设备失败", "Delete device failed"),
-      );
+      (await alertAction((err as Error).message || tr("删除设备失败", "Delete device failed")));
     }
   }
 
@@ -536,12 +488,10 @@ export default function EdgesPage() {
   // the restarted Edge re-registers with the target version.
   async function onPackageUpgrade(e: Edge) {
     if (
-      !confirm(
-        tr(
+      !(await confirmAction(tr(
           `升级 ${e.name} 整包？Edge 会短暂重启；失败会自动回滚到当前版本。`,
           `Upgrade ${e.name} package? Edge will briefly restart; failed upgrades auto-rollback to current version.`,
-        ),
-      )
+        )))
     )
       return;
     setPkgUpgradingId(e.id);
@@ -659,12 +609,10 @@ export default function EdgesPage() {
     const ids = selectedHostEdgeIds;
     if (ids.length === 0) return;
     if (
-      !confirm(
-        tr(
+      !(await confirmAction(tr(
           `升级选中的 ${ids.length} 个 Edge 整包？各 Edge 会短暂重启；失败会自动回滚。`,
           `Upgrade package on ${ids.length} selected edge(s)? Each edge briefly restarts; failures auto-rollback.`,
-        ),
-      )
+        )))
     )
       return;
     setBatchBusy(true);
@@ -705,12 +653,10 @@ export default function EdgesPage() {
     const ids = selectedHostEdgeIds;
     if (ids.length === 0) return;
     if (
-      !confirm(
-        tr(
+      !(await confirmAction(tr(
           `确定要删除选中的 ${ids.length} 个 Edge？设备记录会保留。`,
           `Delete ${ids.length} selected edge(s)? Device records will remain.`,
-        ),
-      )
+        )))
     )
       return;
     setBatchBusy(true);
@@ -731,7 +677,7 @@ export default function EdgesPage() {
   }
 
   return (
-    <>
+    <>{dialog}<Tabs value={discoveryView ? 'network-discovery' : 'devices'} onValueChange={(next) => navigate(next === 'devices' ? '/devices' : '/devices?view=network-discovery')} className="contents"><>
       <main className="anim-fade flex min-w-0 flex-1 flex-col overflow-hidden">
         <header className="app-header flex items-center justify-between border-b border-zinc-800/60 px-6 py-4">
           <div>
@@ -746,35 +692,35 @@ export default function EdgesPage() {
           </div>
           {!discoveryView && rolesFilter !== "network" && (
           <div className="flex items-center gap-2">
-            <Link
-              to="/edges/shell-sessions"
-              className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
-              title={tr(
+            <Hint content={tr(
                 "WebSSH 会话审计 / 活跃会话",
                 "WebSSH session audit / active sessions",
-              )}
+              )}><Link
+              to="/edges/shell-sessions"
+              className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+
             >
               <TerminalSquare size={12} />{" "}
               {tr("WebSSH 会话", "WebSSH sessions")}
-            </Link>
+            </Link></Hint>
               <>
-                <button
+                <Button variant="outline" size="sm"
                   type="button"
                   onClick={() => setBatchInstallOpen(true)}
                   disabled={!canMutate}
                   aria-label={tr("批量安装设备", "Batch install devices")}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5"
                 >
                   <Copy size={12} /> {tr("批量安装", "Batch install")}
-                </button>
-                <button
+                </Button>
+                <Button variant="primary" size="sm"
                   type="button"
                   onClick={() => setCreateOpen(true)}
                   aria-label={tr("新建设备", "New device")}
-                  className="inline-flex items-center gap-1.5 rounded-md bg-accent px-2.5 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent/90"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 font-medium text-accent-fg"
                 >
                   <Plus size={12} /> {tr("新建", "New")}
-                </button>
+                </Button>
               </>
           </div>
           )}
@@ -782,12 +728,12 @@ export default function EdgesPage() {
 
         <div className="min-w-0 flex-1 overflow-y-auto px-6 py-6">
           {rolesFilter !== "network" && (
-            <div className="mb-4 flex items-center gap-1 border-b border-zinc-800/60">
-              <button type="button" onClick={() => navigate("/devices")} className={cn("border-b-2 px-3 py-2 text-[11px] font-medium", !discoveryView ? "border-accent text-zinc-100" : "border-transparent text-zinc-500 hover:text-zinc-300")}>{tr("全部设备", "All devices")}</button>
-              <button type="button" onClick={() => navigate("/devices?view=network-discovery")} className={cn("border-b-2 px-3 py-2 text-[11px] font-medium", discoveryView ? "border-accent text-zinc-100" : "border-transparent text-zinc-500 hover:text-zinc-300")}>{tr("网络发现", "Network discovery")}</button>
-            </div>
+            <TabsList className="mb-4 flex items-center gap-1 border-b border-zinc-800/60">
+              <TabsTrigger  value={'devices'} >{tr("全部设备", "All devices")}</TabsTrigger>
+              <TabsTrigger  value={'network-discovery'} >{tr("网络发现", "Network discovery")}</TabsTrigger>
+            </TabsList>
           )}
-          {error && (
+          <TabsContent value={discoveryView ? 'network-discovery' : 'devices'} className="contents">{error && (
             <div
               role="alert"
               className="mb-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-300"
@@ -811,37 +757,37 @@ export default function EdgesPage() {
                 {tr(`已选择 ${selected.size} 台`, `${selected.size} selected`)}
               </span>
               <span className="flex-1" />
-              <button
+              <Button variant="outline" size="sm"
                 type="button"
                 disabled={batchBusy || selectedHostEdgeIds.length === 0}
                 onClick={() => void onBatchPackageUpgrade()}
-                className="inline-flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
+                className="inline-flex items-center gap-1 px-2.5 py-1.5"
               >
                 <ExternalLink size={12} /> {tr("升级整包", "Upgrade package")}
-              </button>
-              <button
+              </Button>
+              <Button variant="outline" size="sm"
                 type="button"
                 disabled={batchBusy || selectedHostEdgeIds.length === 0}
                 onClick={() => setBatchUpgradeOpen(true)}
-                className="inline-flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
+                className="inline-flex items-center gap-1 px-2.5 py-1.5"
               >
                 <ExternalLink size={12} /> {tr("自定义升级", "Custom upgrade")}
-              </button>
-              <button
+              </Button>
+              <Button variant="plain" size="sm"
                 type="button"
                 disabled={batchBusy || selectedHostEdgeIds.length === 0}
                 onClick={() => void onBatchDelete()}
-                className="inline-flex items-center gap-1 rounded-md border border-red-500/40 bg-red-500/10 px-2.5 py-1.5 text-red-300 hover:bg-red-500/20 disabled:opacity-50"
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/20"
               >
                 <Trash2 size={12} /> {tr("删除 Edge", "Delete edge")}
-              </button>
-              <button
+              </Button>
+              <Button variant="subtle" size="sm"
                 type="button"
                 onClick={clearSelection}
-                className="rounded-md px-2 py-1.5 text-zinc-400 hover:text-zinc-200"
+                className="px-2 py-1.5"
               >
                 {tr("清除", "Clear")}
-              </button>
+              </Button>
             </div>
           )}
 
@@ -850,8 +796,8 @@ export default function EdgesPage() {
               className={cn(
                 "min-w-full text-xs",
                 compactNetworkTable
-                  ? "w-full min-w-[1120px] table-fixed"
-                  : "w-[1637px] table-fixed",
+                  ? "w-full min-w-[1200px] table-fixed"
+                  : "w-[1767px] table-fixed",
               )}
             >
               {compactNetworkTable ? (
@@ -865,7 +811,7 @@ export default function EdgesPage() {
                   <col style={{ width: 105 }} />
                   <col style={{ width: 130 }} />
                   <col style={{ width: 95 }} />
-                  <col style={{ width: 160 }} />
+                  <col style={{ width: 240 }} />
                 </colgroup>
               ) : (
                 <colgroup>
@@ -880,23 +826,19 @@ export default function EdgesPage() {
                   <col className="w-[110px]" />
                   <col className="w-[110px]" />
                   <col className="w-[145px]" />
-                  <col className="w-[190px]" />
+                  <col className="w-[320px]" />
                 </colgroup>
               )}
               <thead className="device-list-table__header border-b border-zinc-800/60 bg-zinc-950/40 text-[11px] uppercase tracking-wider text-zinc-500">
                 <tr>
                   <th className="px-2.5 py-2.5 text-left">
-                    <input
-                      type="checkbox"
+                    <Checkbox
+
                       aria-label={tr("全选", "Select all")}
-                      className="h-3.5 w-3.5 accent-accent"
+                      className="h-3.5 w-3.5"
                       checked={allVisibleSelected}
-                      ref={(el) => {
-                        if (el)
-                          el.indeterminate =
-                            selected.size > 0 && !allVisibleSelected;
-                      }}
-                      onChange={toggleAllVisible}
+                      indeterminate={selected.size > 0 && !allVisibleSelected}
+                      onCheckedChange={toggleAllVisible}
                     />
                   </th>
                   <th className="px-2.5 py-2.5 text-left">ID</th>
@@ -949,7 +891,7 @@ export default function EdgesPage() {
                       <th className="px-2.5 py-2.5 text-left">Edge</th>
                     </>
                   )}
-                  <th className="sticky right-0 z-20 border-l border-zinc-800/60 bg-zinc-900 px-2.5 py-2.5 text-left">
+                  <th className="sticky right-0 z-20 border-l border-zinc-800/60 bg-zinc-900 px-2.5 py-2.5 text-right">
                     {tr("操作", "Actions")}
                   </th>
                 </tr>
@@ -990,11 +932,8 @@ export default function EdgesPage() {
                       ? (k8sAttachments?.[edge.id] ?? [])
                       : [];
                     const managedByK8s = isK8sManagedEdge(attachments);
-                    const displayName = managedByK8s
-                      ? d.hostname ||
-                        (edge ? displayEdgeName(edge, attachments) : "") ||
-                        d.name
-                      : d.name || d.hostname || edge?.name || "";
+                    const displayName = d.name || d.hostname ||
+                      (edge ? displayEdgeName(edge, attachments) : "");
                     if (compactNetworkTable) {
                       const detail = networkDetails[d.id];
                       const reachability = detail?.reachability_status
@@ -1027,15 +966,15 @@ export default function EdgesPage() {
                             className="px-2.5 py-2.5"
                             onClick={(event) => event.stopPropagation()}
                           >
-                            <input
-                              type="checkbox"
+                            <Checkbox
+
                               aria-label={tr(
                                 `选择 ${displayName}`,
                                 `Select ${displayName}`,
                               )}
-                              className="h-3.5 w-3.5 accent-accent"
+                              className="h-3.5 w-3.5"
                               checked={selected.has(d.id)}
-                              onChange={() => toggleOne(d.id)}
+                              onCheckedChange={() => toggleOne(d.id)}
                             />
                           </td>
                           <td className="truncate whitespace-nowrap px-2.5 py-2.5 font-mono text-xs text-zinc-400">
@@ -1086,22 +1025,24 @@ export default function EdgesPage() {
                               : "—"}
                           </td>
                           <td
-                            className="sticky right-0 z-10 whitespace-nowrap border-l border-zinc-800/60 bg-zinc-900 px-2.5 py-2.5 text-left"
+                            className="sticky right-0 z-10 whitespace-nowrap border-l border-zinc-800/60 bg-zinc-900 px-2.5 py-2.5 text-right"
                             onClick={(event) => event.stopPropagation()}
                           >
-                            <button
+                            <div className="flex items-center justify-end gap-1">
+                            <Button variant="subtle" size="sm"
                               type="button"
                               onClick={() =>
                                 navigate(
                                   `/devices/${encodeURIComponent(String(d.id))}?tab=topology`,
                                 )
                               }
-                              className="mr-1 inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                              className="inline-flex h-6 items-center gap-1 px-2 py-1"
                             >
                               <ExternalLink size={14} />
                               {tr("查看拓扑", "View topology")}
-                            </button>
+                            </Button>
                             <RowMenu
+                              onRename={canMutate ? () => setRenameTarget(d) : undefined}
                               onViewTopology={() =>
                                 navigate(
                                   `/devices/${encodeURIComponent(String(d.id))}?tab=topology`,
@@ -1111,7 +1052,8 @@ export default function EdgesPage() {
                               deviceOnline={false}
                               upgradePackageBusy={false}
                             />
-                          </td>
+                            </div>
+                        </td>
                         </tr>
                       );
                     }
@@ -1134,25 +1076,25 @@ export default function EdgesPage() {
                           onClick={(ev) => ev.stopPropagation()}
                         >
                           {managedByK8s ? (
-                            <span
-                              title={tr(
+                            <Hint content={tr(
                                 "Kubernetes 托管设备不参与设备批量操作",
                                 "Kubernetes-managed devices are excluded from device batch actions",
-                              )}
+                              )}><span
+
                               className="inline-flex h-3.5 w-3.5 items-center justify-center text-[10px] text-zinc-600"
                             >
                               —
-                            </span>
+                            </span></Hint>
                           ) : (
-                            <input
-                              type="checkbox"
+                            <Checkbox
+
                               aria-label={tr(
                                 `选择 ${displayName}`,
                                 `Select ${displayName}`,
                               )}
-                              className="h-3.5 w-3.5 accent-accent"
+                              className="h-3.5 w-3.5"
                               checked={selected.has(d.id)}
-                              onChange={() => toggleOne(d.id)}
+                              onCheckedChange={() => toggleOne(d.id)}
                             />
                           )}
                         </td>
@@ -1196,14 +1138,7 @@ export default function EdgesPage() {
                         </td>
                         {!compactNetworkTable && (
                           <>
-                            <td
-                              className={cn(
-                                "whitespace-nowrap px-2.5 py-2.5",
-                                !managedByK8s &&
-                                  !networkDevice &&
-                                  "cursor-pointer",
-                              )}
-                              title={
+                            <Hint content={
                                 networkDevice
                                   ? tr(
                                       "网络设备角色由发现流程维护",
@@ -1215,7 +1150,14 @@ export default function EdgesPage() {
                                       "Manage Kubernetes-managed devices from the cluster page",
                                     )
                                   : tr("点击分配角色", "Click to assign roles")
-                              }
+                              }><td
+                              className={cn(
+                                "whitespace-nowrap px-2.5 py-2.5",
+                                !managedByK8s &&
+                                  !networkDevice &&
+                                  "cursor-pointer",
+                              )}
+
                               onClick={(ev) => {
                                 ev.stopPropagation();
                                 if (managedByK8s || networkDevice) return;
@@ -1226,7 +1168,7 @@ export default function EdgesPage() {
                                 roles={asEdgeRoles(d.roles)}
                                 editable={!networkDevice}
                               />
-                            </td>
+                            </td></Hint>
                             <td className="whitespace-nowrap px-2.5 py-2.5">
                               {networkDevice ? (
                                 <span className="inline-flex items-center gap-1.5 text-[11px] text-zinc-400">
@@ -1285,24 +1227,26 @@ export default function EdgesPage() {
                           </>
                         )}
                         <td
-                          className="sticky right-0 z-10 whitespace-nowrap border-l border-zinc-800/60 bg-zinc-900 px-2.5 py-2.5 text-left"
+                          className="sticky right-0 z-10 whitespace-nowrap border-l border-zinc-800/60 bg-zinc-900 px-2.5 py-2.5 text-right"
                           onClick={(ev) => ev.stopPropagation()}
                         >
+                            <div className="flex items-center justify-end gap-1">
                           {networkDevice ? (
                             <>
-                              <button
+                              <Button variant="subtle" size="sm"
                                 type="button"
                                 onClick={() =>
                                   navigate(
                                     `/devices/${encodeURIComponent(String(d.id))}?tab=topology`,
                                   )
                                 }
-                                className="mr-1 inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                                className="inline-flex h-6 items-center gap-1 px-2 py-1"
                               >
                                 <ExternalLink size={14} />
                                 {tr("查看拓扑", "View topology")}
-                              </button>
+                              </Button>
                               <RowMenu
+                                onRename={canMutate ? () => setRenameTarget(d) : undefined}
                                 onViewTopology={() =>
                                   navigate(
                                     `/devices/${encodeURIComponent(String(d.id))}?tab=topology`,
@@ -1313,38 +1257,37 @@ export default function EdgesPage() {
                                 upgradePackageBusy={false}
                               />
                             </>
-                          ) : managedByK8s ? (
-                            <ShellButton device={d} canMutate={canMutate} />
                           ) : (
                             <>
-                              <button
-                                type="button"
-                                onClick={() => void openServerChart(d)}
-                                title={tr(
+                              <Hint content={tr(
                                   `在 Grafana 查看 ${displayName} 图表`,
                                   `View ${displayName} chart in Grafana`,
-                                )}
+                                )}><Button variant="subtle" size="sm"
+                                type="button"
+                                onClick={() => void openServerChart(d)}
+
                                 aria-label={tr(
                                   `在 Grafana 查看 ${displayName} 图表`,
                                   `View ${displayName} chart in Grafana`,
                                 )}
-                                className="mr-1 inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                                className="inline-flex h-6 items-center gap-1 px-2 py-1"
                               >
                                 <ExternalLink size={14} />
                                 <span>{tr("查看图表", "View chart")}</span>
-                              </button>
+                              </Button></Hint>
                               <ShellButton device={d} canMutate={canMutate} />
                               <RowMenu
-                                onAssignRoles={() => setRolesEditTarget(d)}
+                                onRename={canMutate ? () => setRenameTarget(d) : undefined}
+                                onAssignRoles={managedByK8s ? undefined : () => setRolesEditTarget(d)}
                                 onViewTopology={() =>
                                   navigate(
                                     `/devices/${encodeURIComponent(String(d.id))}?tab=topology`,
                                   )
                                 }
-                                onDeleteDevice={() => void onDeleteDevice(d)}
+                                onDeleteDevice={managedByK8s ? undefined : () => void onDeleteDevice(d)}
                                 deviceOnline={d.online === true}
                                 onRotate={
-                                  edge
+                                  edge && !managedByK8s
                                     ? () =>
                                         onRotate(
                                           edge.id,
@@ -1354,17 +1297,17 @@ export default function EdgesPage() {
                                     : undefined
                                 }
                                 onDelete={
-                                  edge
+                                  edge && !managedByK8s
                                     ? () => onDelete(edge.id, displayName)
                                     : undefined
                                 }
                                 onUpgrade={
-                                  edge
+                                  edge && !managedByK8s
                                     ? () => setUpgradeTarget(edge)
                                     : undefined
                                 }
                                 onUpgradePackage={
-                                  edge
+                                  edge && !managedByK8s
                                     ? () => void onPackageUpgrade(edge)
                                     : undefined
                                 }
@@ -1374,6 +1317,7 @@ export default function EdgesPage() {
                               />
                             </>
                           )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -1382,10 +1326,23 @@ export default function EdgesPage() {
               </tbody>
             </table>
           </div>
-          </>}
+          </>}</TabsContent>
         </div>
       </main>
 
+      {renameTarget && (
+        <RenameDeviceModal
+          device={renameTarget}
+          onClose={() => setRenameTarget(null)}
+          onSaved={(name) => {
+            setDevices((current) => current.map((d) =>
+              d.id === renameTarget.id ? { ...d, name } : d,
+            ));
+            setRenameTarget(null);
+            notifyDevicesChanged();
+          }}
+        />
+      )}
       <CreateEdgeModal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
@@ -1478,7 +1435,7 @@ export default function EdgesPage() {
           {toast.text}
         </div>
       )}
-    </>
+    </></Tabs></>
   );
 
   async function openServerChart(device: DeviceRow) {
@@ -1545,10 +1502,10 @@ function ClusterChipLink({
 }) {
   const { tr } = useI18n();
   return (
-    <Link
+    <Hint content={title}><Link
       to={to}
       onClick={(ev) => ev.stopPropagation()}
-      title={title}
+
       aria-label={tr(`所属集群 ${name}`, `Cluster ${name}`)}
       className="block max-w-[160px] hover:opacity-80"
     >
@@ -1557,7 +1514,7 @@ function ClusterChipLink({
           {tr("集群", "Cluster")} · {name}
         </span>
       </Chip>
-    </Link>
+    </Link></Hint>
   );
 }
 
@@ -1672,36 +1629,36 @@ function SNMPScanModal({
         <p className="text-zinc-400">{tr("只有 SNMP 读取成功后，候选设备才会进入全部设备和正式拓扑。凭证不会保存。", "The candidate enters All devices and the formal topology only after a successful SNMP read. Credentials are not stored.")}</p>
         {error && <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-red-300">{error}</div>}
         <div className="grid grid-cols-2 gap-3">
-          <label className="text-zinc-400">{tr("设备名称", "Device name")}<input value={input.name ?? ""} onChange={(e) => set("name", e.target.value)} placeholder={tr("可选，默认使用 sysName", "Optional, defaults to sysName")} className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-2.5 py-2 text-zinc-100" /></label>
-          <label className="text-zinc-400">{tr("地址", "Address")}<input value={input.address ?? ""} onChange={(e) => set("address", e.target.value)} className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-2.5 py-2 font-mono text-zinc-100" /></label>
-          <label className="text-zinc-400">{tr("版本", "Version")}<select value={input.version} onChange={(e) => set("version", e.target.value as "v2c" | "v3")} className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-2.5 py-2 text-zinc-100"><option value="v2c">SNMP v2c</option><option value="v3">SNMP v3</option></select></label>
-          <label className="text-zinc-400">Port<input type="number" value={input.port ?? 161} onChange={(e) => set("port", Number(e.target.value))} className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-2.5 py-2 font-mono text-zinc-100" /></label>
+          <Label className="text-zinc-400">{tr("设备名称", "Device name")}<Input value={input.name ?? ""} onChange={(e) => set("name", e.target.value)} placeholder={tr("可选，默认使用 sysName", "Optional, defaults to sysName")} className="mt-1 w-full" /></Label>
+          <Label className="text-zinc-400">{tr("地址", "Address")}<Input value={input.address ?? ""} onChange={(e) => set("address", e.target.value)} className="mt-1 w-full font-mono" /></Label>
+          <Label className="text-zinc-400">{tr("版本", "Version")}<Select value={input.version} onValueChange={(selectedValue) => set("version", selectedValue as "v2c" | "v3")} className="mt-1 w-full"><option value="v2c">SNMP v2c</option><option value="v3">SNMP v3</option></Select></Label>
+          <Label className="text-zinc-400">Port<Input type="number" value={input.port ?? 161} onChange={(e) => set("port", Number(e.target.value))} className="mt-1 w-full font-mono" /></Label>
         </div>
         {input.version === "v2c" ? (
-          <label className="block text-zinc-400">
+          <Label className="block text-zinc-400">
             Community
-            <input
+            <Input
               value={input.community ?? ""}
               onChange={(event) => set("community", event.target.value)}
-              className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-2.5 py-2 font-mono text-zinc-100"
+              className="mt-1 w-full font-mono"
             />
-          </label>
+          </Label>
         ) : (
           <div className="grid grid-cols-2 gap-3">
-            <label className="text-zinc-400">
+            <Label className="text-zinc-400">
               Username
-              <input
+              <Input
                 value={input.username ?? ""}
                 onChange={(event) => set("username", event.target.value)}
-                className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-2.5 py-2 text-zinc-100"
+                className="mt-1 w-full"
               />
-            </label>
-            <label className="text-zinc-400">
+            </Label>
+            <Label className="text-zinc-400">
               {tr("认证协议", "Auth protocol")}
-              <select
+              <Select
                 value={input.auth_protocol ?? "none"}
-                onChange={(event) => {
-                  const authProtocol = event.target.value;
+                onValueChange={(selectedValue) => {
+                  const authProtocol = selectedValue;
                   setInput((current) => ({
                     ...current,
                     auth_protocol: authProtocol,
@@ -1714,7 +1671,7 @@ function SNMPScanModal({
                       : {}),
                   }));
                 }}
-                className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-2.5 py-2 text-zinc-100"
+                className="mt-1 w-full"
               >
                 <option value="none">{tr("不认证", "No authentication")}</option>
                 <option value="sha256">SHA-256</option>
@@ -1723,26 +1680,26 @@ function SNMPScanModal({
                 <option value="sha224">SHA-224</option>
                 <option value="sha1">{tr("SHA-1（旧）", "SHA-1 (legacy)")}</option>
                 <option value="md5">{tr("MD5（旧）", "MD5 (legacy)")}</option>
-              </select>
-            </label>
+              </Select>
+            </Label>
             {input.auth_protocol && input.auth_protocol !== "none" && (
-              <label className="text-zinc-400">
+              <Label className="text-zinc-400">
                 {tr("认证密钥", "Auth secret")}
-                <input
+                <Input
                   type="password"
                   value={input.auth_secret ?? ""}
                   onChange={(event) => set("auth_secret", event.target.value)}
-                  className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-2.5 py-2 text-zinc-100"
+                  className="mt-1 w-full"
                 />
-              </label>
+              </Label>
             )}
-            <label className="text-zinc-400">
+            <Label className="text-zinc-400">
               {tr("隐私协议", "Privacy protocol")}
-              <select
+              <Select
                 value={input.privacy_protocol ?? "none"}
                 disabled={!input.auth_protocol || input.auth_protocol === "none"}
-                onChange={(event) => set("privacy_protocol", event.target.value)}
-                className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-2.5 py-2 text-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                onValueChange={(selectedValue) => set("privacy_protocol", selectedValue)}
+                className="mt-1 w-full"
               >
                 <option value="none">{tr("不加密", "No privacy")}</option>
                 <option value="aes128">AES-128</option>
@@ -1751,18 +1708,18 @@ function SNMPScanModal({
                 <option value="aes256">AES-256 (Blumenthal)</option>
                 <option value="aes192">AES-192 (Blumenthal)</option>
                 <option value="des">{tr("DES（旧）", "DES (legacy)")}</option>
-              </select>
-            </label>
+              </Select>
+            </Label>
             {input.privacy_protocol && input.privacy_protocol !== "none" && (
-              <label className="text-zinc-400">
+              <Label className="text-zinc-400">
                 {tr("隐私密钥", "Privacy secret")}
-                <input
+                <Input
                   type="password"
                   value={input.privacy_secret ?? ""}
                   onChange={(event) => set("privacy_secret", event.target.value)}
-                  className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-950 px-2.5 py-2 text-zinc-100"
+                  className="mt-1 w-full"
                 />
-              </label>
+              </Label>
             )}
           </div>
         )}
@@ -1818,15 +1775,15 @@ function AgentVersionCell({
         {agentVersion}
       </span>
       {drifted && (
-        <span
-          className="rounded border border-amber-700/50 bg-amber-900/20 px-1.5 py-0.5 text-[10px] text-amber-300"
-          title={tr(
+        <Hint content={tr(
             `manager 版本 ${managerVersion} — 该 edge 与 manager 不同步`,
             `manager version ${managerVersion} — this edge is out of sync with the manager`,
-          )}
+          )}><span
+          className="rounded border border-amber-700/50 bg-amber-900/20 px-1.5 py-0.5 text-[10px] text-amber-300"
+
         >
           {tr("落后", "outdated")}
-        </span>
+        </span></Hint>
       )}
     </span>
   );
@@ -1906,29 +1863,29 @@ function UpgradeModal({
             )}
           </div>
         </div>
-        <label className="block">
+        <Label className="block">
           <span className="mb-1 block text-zinc-500">
             {tr("下载 URL", "Download URL")}
           </span>
-          <input
+          <Input
             type="text"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-[11px] text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full font-mono"
           />
-        </label>
-        <label className="block">
+        </Label>
+        <Label className="block">
           <span className="mb-1 block text-zinc-500">
             {tr("SHA256（64 位小写 hex）", "SHA256 (64-char lowercase hex)")}
           </span>
-          <input
+          <Input
             type="text"
             value={sha256}
             onChange={(e) => setSha256(e.target.value)}
             placeholder="e.g. 3a7f...  by `sha256sum ongrid-edge-linux-amd64`"
-            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-[11px] text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full font-mono"
           />
-        </label>
+        </Label>
         <p className="text-[11px] text-zinc-500">
           {tr(
             "edge 会下载、校验 sha256，原子 stage 后干净退出；systemd ExecStartPre 在重启时把新二进制 mv 到 ",
@@ -1946,23 +1903,23 @@ function UpgradeModal({
           </div>
         )}
         <div className="flex justify-end gap-2 pt-2">
-          <button
+          <Button variant="outline" size="sm"
             type="button"
             onClick={onClose}
-            className="rounded-md border border-zinc-700 px-3 py-1.5 text-zinc-300 hover:bg-zinc-800"
+            className="px-3 py-1.5"
           >
             {tr("取消", "Cancel")}
-          </button>
-          <button
+          </Button>
+          <Button variant="primary" size="sm"
             type="button"
             disabled={submitting}
             onClick={submit}
-            className="rounded-md bg-accent px-3 py-1.5 text-accent-fg hover:bg-accent/90 disabled:opacity-50"
+            className="px-3 py-1.5 text-accent-fg"
           >
             {submitting
               ? tr("触发中…", "Triggering…")
               : tr("触发升级", "Trigger upgrade")}
-          </button>
+          </Button>
         </div>
       </div>
     </Modal>
@@ -2026,52 +1983,52 @@ function BatchUpgradeModal({
             `The same binary is dispatched to all ${count} selected devices. Make sure they share an architecture (default linux-amd64).`,
           )}
         </p>
-        <label className="block">
+        <Label className="block">
           <span className="mb-1 block text-zinc-500">
             {tr("下载 URL", "Download URL")}
           </span>
-          <input
+          <Input
             type="text"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-[11px] text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full font-mono"
           />
-        </label>
-        <label className="block">
+        </Label>
+        <Label className="block">
           <span className="mb-1 block text-zinc-500">
             {tr("SHA256（64 位小写 hex）", "SHA256 (64-char lowercase hex)")}
           </span>
-          <input
+          <Input
             type="text"
             value={sha256}
             onChange={(e) => setSha256(e.target.value)}
             placeholder="e.g. 3a7f...  by `sha256sum ongrid-edge-linux-amd64`"
-            className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 font-mono text-[11px] text-zinc-100 focus:border-zinc-600 focus:outline-none"
+            className="w-full font-mono"
           />
-        </label>
+        </Label>
         {err && (
           <div className="rounded-md border border-red-500/30 bg-red-500/10 px-2 py-1.5 text-red-300">
             {err}
           </div>
         )}
         <div className="flex justify-end gap-2 pt-2">
-          <button
+          <Button variant="outline" size="sm"
             type="button"
             onClick={onClose}
-            className="rounded-md border border-zinc-700 px-3 py-1.5 text-zinc-300 hover:bg-zinc-800"
+            className="px-3 py-1.5"
           >
             {tr("取消", "Cancel")}
-          </button>
-          <button
+          </Button>
+          <Button variant="primary" size="sm"
             type="button"
             disabled={submitting}
             onClick={submit}
-            className="rounded-md bg-accent px-3 py-1.5 text-accent-fg hover:bg-accent/90 disabled:opacity-50"
+            className="px-3 py-1.5 text-accent-fg"
           >
             {submitting
               ? tr("触发中…", "Triggering…")
               : tr("触发升级", "Trigger upgrade")}
-          </button>
+          </Button>
         </div>
       </div>
     </Modal>
@@ -2197,21 +2154,21 @@ function RolesEditorModal({
       size="sm"
       footer={
         <>
-          <button
+          <Button variant="outline" size="sm"
             type="button"
             onClick={onClose}
-            className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+            className="px-3 py-1.5"
           >
             {tr("取消", "Cancel")}
-          </button>
-          <button
+          </Button>
+          <Button variant="primary" size="sm"
             type="button"
             onClick={submit}
             disabled={submitting}
-            className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent/90 disabled:opacity-50"
+            className="px-3 py-1.5 font-medium text-accent-fg"
           >
             {submitting ? tr("保存中…", "Saving…") : tr("保存", "Save")}
-          </button>
+          </Button>
         </>
       }
     >
@@ -2224,15 +2181,15 @@ function RolesEditorModal({
         </p>
         <div className="space-y-1">
           {EDGE_ROLES.map((r) => (
-            <label
+            <Label
               key={r}
               className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-zinc-200 hover:bg-zinc-800/60"
             >
-              <input
-                type="checkbox"
+              <Checkbox
+
                 checked={selected.has(r)}
-                onChange={() => toggle(r)}
-                className="h-3.5 w-3.5 accent-zinc-300"
+                onCheckedChange={() => toggle(r)}
+                className="h-3.5 w-3.5"
               />
               <span
                 className={cn(
@@ -2242,7 +2199,7 @@ function RolesEditorModal({
               >
                 {tr(EDGE_ROLE_LABELS[r], EDGE_ROLE_LABELS_EN[r])}
               </span>
-            </label>
+            </Label>
           ))}
         </div>
         {err && <div className="text-xs text-red-400">{err}</div>}
@@ -2357,38 +2314,39 @@ function ShellButton({
   const href = `/devices/${encodeURIComponent(String(device.id))}/shell`;
   if (disabled) {
     return (
-      <span
-        title={reason}
+      <Hint content={reason}><span
+
         aria-label={`${displayName} ${reason}`}
-        className="mr-1 inline-flex cursor-not-allowed items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-600"
+        className="inline-flex h-6 cursor-not-allowed items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-600"
       >
         <TerminalSquare size={14} />
         <span>{tr("终端", "Terminal")}</span>
-      </span>
+      </span></Hint>
     );
   }
   return (
-    <a
+    <Hint content={tr(
+        `打开 ${displayName} 终端 (WebSSH) — 在新标签页`,
+        `Open ${displayName} terminal (WebSSH) — new tab`,
+      )}><a
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      title={tr(
-        `打开 ${displayName} 终端 (WebSSH) — 在新标签页`,
-        `Open ${displayName} terminal (WebSSH) — new tab`,
-      )}
+
       aria-label={tr(
         `打开 ${displayName} 终端，新标签页`,
         `Open ${displayName} terminal in a new tab`,
       )}
-      className="mr-1 inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+      className="inline-flex h-6 items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
     >
       <TerminalSquare size={14} />
       <span>{tr("终端", "Terminal")}</span>
-    </a>
+    </a></Hint>
   );
 }
 
 function RowMenu({
+  onRename,
   onAssignRoles,
   onViewTopology,
   onDeleteDevice,
@@ -2399,9 +2357,10 @@ function RowMenu({
   onUpgradePackage,
   upgradePackageBusy,
 }: {
+  onRename?: () => void;
   onAssignRoles?: () => void;
   onViewTopology(): void;
-  onDeleteDevice(): void;
+  onDeleteDevice?: () => void;
   deviceOnline: boolean;
   onRotate?: () => void;
   onDelete?: () => void;
@@ -2411,67 +2370,29 @@ function RowMenu({
 }) {
   const { tr } = useI18n();
   const [open, setOpen] = useState(false);
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
-  const [position, setPosition] = useState<RowMenuPosition | null>(null);
-
-  const syncPosition = useCallback(() => {
-    const trigger = triggerRef.current;
-    const menuElement = menuRef.current;
-    if (!trigger || !menuElement) return;
-    const menuRect = menuElement.getBoundingClientRect();
-    const menuHeight = Math.max(menuElement.scrollHeight, menuRect.height);
-    setPosition(
-      calculateRowMenuPosition(
-        trigger.getBoundingClientRect(),
-        menuHeight,
-        window.innerWidth,
-        window.innerHeight,
-      ),
-    );
-  }, []);
-
-  useLayoutEffect(() => {
-    if (!open) return;
-    syncPosition();
-    const onViewportChange = () => syncPosition();
-    window.addEventListener("resize", onViewportChange);
-    window.addEventListener("scroll", onViewportChange, {
-      capture: true,
-      passive: true,
-    });
-    return () => {
-      window.removeEventListener("resize", onViewportChange);
-      window.removeEventListener("scroll", onViewportChange, true);
-    };
-  }, [open, syncPosition]);
-
-  const menu = useMemo(() => {
-    if (!open) return null;
-    return createPortal(
-      <>
-        <div
-          className="fixed inset-0 z-40"
-          onClick={() => setOpen(false)}
-          aria-hidden
-        />
-        <div
-          ref={menuRef}
-          role="menu"
-          className="fixed z-50 w-52 max-w-[calc(100vw-1rem)] overflow-x-hidden overflow-y-auto rounded-lg border border-zinc-800 bg-zinc-900 py-1 shadow-xl"
-          style={{
-            top: position?.top ?? 0,
-            right: position?.right ?? ROW_MENU_VIEWPORT_PADDING,
-            maxHeight: position?.maxHeight,
-            visibility: position ? "visible" : "hidden",
-          }}
-        >
+  return <DropdownMenu open={open} onOpenChange={setOpen}>
+    <DropdownMenuTrigger aria-label={tr("操作", "Actions")} className="inline-flex h-6 items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100">
+      <Settings2 size={14} aria-hidden="true" /><span>{tr("操作", "Actions")}</span><ChevronDown size={14} aria-hidden="true" />
+    </DropdownMenuTrigger>
+    <DropdownMenuContent align="end" className="w-52">
           <div className="px-3 pb-1 pt-1.5 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
             {tr("设备操作", "Device actions")}
           </div>
+          {onRename && (
+            <DropdownMenuItem
+
+              onClick={() => {
+                setOpen(false);
+                onRename();
+              }}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-200 hover:bg-zinc-800"
+            >
+              <Pencil size={13} /> {tr("修改设备名称", "Rename device")}
+            </DropdownMenuItem>
+          )}
           {onAssignRoles && (
-            <button
-              type="button"
+            <DropdownMenuItem
+
               onClick={() => {
                 setOpen(false);
                 onAssignRoles();
@@ -2479,10 +2400,10 @@ function RowMenu({
               className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-200 hover:bg-zinc-800"
             >
               <Plus size={13} /> {tr("分配角色", "Assign roles")}
-            </button>
+            </DropdownMenuItem>
           )}
-          <button
-            type="button"
+          <DropdownMenuItem
+
             onClick={() => {
               setOpen(false);
               onViewTopology();
@@ -2490,51 +2411,54 @@ function RowMenu({
             className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-200 hover:bg-zinc-800"
           >
             <ExternalLink size={13} /> {tr("查看拓扑", "View topology")}
-          </button>
-          <button
-            type="button"
-            disabled={deviceOnline}
-            title={tr(
-              deviceOnline
-                ? "在线设备不可删除，请先让它离线。"
-                : "离线可删除，并清理关联 Edge 和密钥。",
-              deviceOnline
-                ? "Online devices cannot be deleted. Bring it offline first."
-                : "Offline devices can be deleted; linked Edges and credentials are cleaned too.",
-            )}
-            onClick={() => {
-              if (deviceOnline) return;
-              setOpen(false);
-              onDeleteDevice();
-            }}
-            className={cn(
-              "flex w-full items-center gap-2 px-3 py-2 text-left text-xs",
-              deviceOnline
-                ? "cursor-not-allowed text-zinc-600"
-                : "text-red-300 hover:bg-red-500/10",
-            )}
-          >
-            <Trash2 size={13} /> {tr("删除设备", "Delete device")}
-          </button>
-          <div className="px-3 pb-2 text-[11px] leading-4 text-zinc-500">
-            {tr(
-              deviceOnline
-                ? "在线设备不可删除。"
-                : "离线可删除，并清理 Edge 和密钥。",
-              deviceOnline
-                ? "Online devices cannot be deleted."
-                : "Offline devices can be deleted; Edges and credentials are cleaned too.",
-            )}
-          </div>
+          </DropdownMenuItem>
+          {onDeleteDevice && (
+            <>
+              <Hint content={tr(
+                  deviceOnline
+                    ? "在线设备不可删除，请先让它离线。"
+                    : "离线可删除，并清理关联 Edge 和密钥。",
+                  deviceOnline
+                    ? "Online devices cannot be deleted. Bring it offline first."
+                    : "Offline devices can be deleted; linked Edges and credentials are cleaned too.",
+                )}><DropdownMenuItem
 
+                disabled={deviceOnline}
+
+                onClick={() => {
+                  if (deviceOnline) return;
+                  setOpen(false);
+                  onDeleteDevice();
+                }}
+                className={cn(
+                  "flex w-full items-center gap-2 px-3 py-2 text-left text-xs",
+                  deviceOnline
+                    ? "cursor-not-allowed text-zinc-600"
+                    : "text-red-300 hover:bg-red-500/10",
+                )}
+              >
+                <Trash2 size={13} /> {tr("删除设备", "Delete device")}
+              </DropdownMenuItem></Hint>
+              <div className="px-3 pb-2 text-[11px] leading-4 text-zinc-500">
+                {tr(
+                  deviceOnline
+                    ? "在线设备不可删除。"
+                    : "离线可删除，并清理 Edge 和密钥。",
+                  deviceOnline
+                    ? "Online devices cannot be deleted."
+                    : "Offline devices can be deleted; Edges and credentials are cleaned too.",
+                )}
+              </div>
+            </>
+          )}
           {onRotate && onDelete && onUpgrade && onUpgradePackage && (
             <>
               <div className="my-1 border-t border-zinc-800" />
               <div className="px-3 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
                 {tr("Edge 操作", "Edge actions")}
               </div>
-              <button
-                type="button"
+              <DropdownMenuItem
+
                 disabled={upgradePackageBusy}
                 onClick={() => {
                   setOpen(false);
@@ -2549,9 +2473,9 @@ function RowMenu({
                       "升级整包（Edge + 插件）",
                       "Upgrade package (edge + plugins)",
                     )}
-              </button>
-              <button
-                type="button"
+              </DropdownMenuItem>
+              <DropdownMenuItem
+
                 onClick={() => {
                   setOpen(false);
                   onUpgrade();
@@ -2560,9 +2484,9 @@ function RowMenu({
               >
                 <ExternalLink size={13} />{" "}
                 {tr("自定义升级 (URL + sha)", "Custom upgrade (URL + sha)")}
-              </button>
-              <button
-                type="button"
+              </DropdownMenuItem>
+              <DropdownMenuItem
+
                 onClick={() => {
                   setOpen(false);
                   onRotate();
@@ -2571,9 +2495,9 @@ function RowMenu({
               >
                 <RotateCw size={13} />{" "}
                 {tr("轮换 Edge 密钥", "Rotate edge secret")}
-              </button>
-              <button
-                type="button"
+              </DropdownMenuItem>
+              <DropdownMenuItem
+
                 onClick={() => {
                   setOpen(false);
                   onDelete();
@@ -2581,48 +2505,64 @@ function RowMenu({
                 className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-red-300 hover:bg-red-500/10"
               >
                 <Trash2 size={13} /> {tr("删除 Edge", "Delete edge")}
-              </button>
+              </DropdownMenuItem>
             </>
           )}
-        </div>
-      </>,
-      document.body,
-    );
-  }, [
-    deviceOnline,
-    onAssignRoles,
-    onDelete,
-    onDeleteDevice,
-    onRotate,
-    onUpgrade,
-    onUpgradePackage,
-    onViewTopology,
-    open,
-    position,
-    tr,
-    upgradePackageBusy,
-  ]);
+    </DropdownMenuContent>
+  </DropdownMenu>;
+}
+
+function RenameDeviceModal({
+  device,
+  onClose,
+  onSaved,
+}: {
+  device: Device;
+  onClose(): void;
+  onSaved(name: string): void;
+}) {
+  const { tr } = useI18n();
+  const [name, setName] = useState(device.name || "");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save() {
+    if (pending || !name.trim()) return;
+    setPending(true);
+    setError(null);
+    try {
+      await renameDevice(device.id, name.trim());
+      onSaved(name.trim());
+    } catch (e) {
+      setError((e as Error).message || tr("保存失败", "Save failed"));
+    } finally {
+      setPending(false);
+    }
+  }
 
   return (
-    <div className="relative inline-block">
-      <button
-        ref={triggerRef}
-        type="button"
-        onClick={() => {
-          if (open) {
-            setOpen(false);
-            return;
-          }
-          setPosition(null);
-          setOpen(true);
-        }}
-        aria-label={tr("更多操作", "More actions")}
-        className="rounded-md p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
-      >
-        <MoreVertical size={15} />
-      </button>
-      {menu}
-    </div>
+    <Modal
+      open
+      onClose={() => { if (!pending) onClose(); }}
+      title={tr("修改设备名称", "Rename device")}
+      footer={
+        <>
+          <Button disabled={pending} onClick={onClose}>{tr("取消", "Cancel")}</Button>
+          <Button variant="primary" type="submit" form="rename-device" disabled={pending || !name.trim()}>
+            {pending ? tr("保存中…", "Saving…") : tr("保存", "Save")}
+          </Button>
+        </>
+      }
+    >
+      <form id="rename-device" onSubmit={(event) => { event.preventDefault(); void save(); }}>
+        <Label htmlFor="device-name" className="mb-1 block text-xs text-zinc-400">{tr("设备名称", "Device name")}</Label>
+        <Input id="device-name" autoFocus required value={name} disabled={pending}
+          onChange={(event) => setName(event.target.value)}
+          className="w-full"
+        />
+        {error && <p role="alert" className="mt-2 text-xs text-red-400">{error}</p>}
+      </form>
+    </Modal>
   );
 }
 
@@ -2670,31 +2610,31 @@ function CreateEdgeModal({
       title={tr("新建设备", "New device")}
       footer={
         <>
-          <button
+          <Button variant="outline" size="sm"
             type="button"
             onClick={onClose}
-            className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+            className="px-3 py-1.5"
           >
             {tr("取消", "Cancel")}
-          </button>
-          <button
+          </Button>
+          <Button variant="primary" size="sm"
             type="button"
             onClick={() => void go()}
             disabled={pending}
-            className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-60"
+            className="px-3 py-1.5 font-medium text-accent-fg"
           >
             {pending ? tr("创建中…", "Creating…") : tr("创建", "Create")}
-          </button>
+          </Button>
         </>
       }
     >
-      <label
+      <Label
         htmlFor="edge-name"
         className="mb-1 block text-[11px] text-zinc-500"
       >
         {tr("名称", "Name")}
-      </label>
-      <input
+      </Label>
+      <Input
         id="edge-name"
         autoFocus
         value={name}
@@ -2703,7 +2643,7 @@ function CreateEdgeModal({
           "留空，主机上线后自动填主机名",
           "Leave blank; auto-fill on first heartbeat",
         )}
-        className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+        className="w-full"
         onKeyDown={(e) => {
           if (e.key === "Enter") void go();
         }}
@@ -2742,13 +2682,13 @@ function SecretRevealModal({
       title={data.title}
       size="md"
       footer={
-        <button
+        <Button variant="primary" size="sm"
           type="button"
           onClick={onClose}
-          className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent/90"
+          className="px-3 py-1.5 font-medium text-accent-fg"
         >
           {tr("我已保存", "I've saved it")}
-        </button>
+        </Button>
       }
     >
       <p className="mb-3 text-xs text-amber-300/90">
@@ -2796,7 +2736,7 @@ function InstallCommandRow({
         <div className="text-[11px] uppercase tracking-wider text-zinc-500">
           {tr("在目标主机上一键安装", "One-line install on the target host")}
         </div>
-        <button
+        <Button variant="subtle" size="sm"
           type="button"
           onClick={() => {
             navigator.clipboard
@@ -2819,7 +2759,7 @@ function InstallCommandRow({
         >
           {copied ? <Check size={12} /> : <Copy size={12} />}
           {copied ? tr("已复制", "Copied") : tr("复制单行", "Copy one-liner")}
-        </button>
+        </Button>
       </div>
       <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2 font-mono text-[11px] leading-relaxed text-zinc-200">
         {display}
@@ -2846,6 +2786,7 @@ function BatchEnrollmentModal({
   open: boolean;
   onClose(): void;
 }) {
+  const { confirmAction, dialog } = useDialogs();
   const { tr } = useI18n();
   const [name, setName] = useState("");
   const [mode, setMode] = useState<EnrollmentAssignmentMode>("batch_only");
@@ -2972,12 +2913,10 @@ function BatchEnrollmentModal({
 
   async function deleteProfile(profile: EdgeEnrollmentProfile) {
     if (
-      !confirm(
-        tr(
+      !(await confirmAction(tr(
           `删除安装批次“${profile.name}”？该安装命令会立即失效，已安装设备不会被删除。`,
           `Delete installation batch “${profile.name}”? Its installation command will stop working immediately. Installed devices will not be deleted.`,
-        ),
-      )
+        )))
     ) {
       return;
     }
@@ -2996,39 +2935,39 @@ function BatchEnrollmentModal({
   }
 
   return (
-    <Modal
+    <>{dialog}<Modal
       open={open}
       onClose={onClose}
       title={tr("批量安装 Edge", "Batch install Edge")}
       size="lg"
       footer={
         created ? (
-          <button
+          <Button variant="primary" size="sm"
             type="button"
             onClick={onClose}
-            className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent/90"
+            className="px-3 py-1.5 font-medium text-accent-fg"
           >
             {tr("我已保存命令", "I've saved the command")}
-          </button>
+          </Button>
         ) : (
           <>
-            <button
+            <Button variant="outline" size="sm"
               type="button"
               onClick={onClose}
-              className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+              className="px-3 py-1.5"
             >
               {tr("取消", "Cancel")}
-            </button>
-            <button
+            </Button>
+            <Button variant="primary" size="sm"
               type="button"
               onClick={() => void createProfile()}
               disabled={pending}
-              className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent/90 disabled:opacity-50"
+              className="px-3 py-1.5 font-medium text-accent-fg"
             >
               {pending
                 ? tr("生成中…", "Generating…")
                 : tr("生成安装命令", "Generate command")}
-            </button>
+            </Button>
           </>
         )
       }
@@ -3046,9 +2985,9 @@ function BatchEnrollmentModal({
       ) : (
         <div className="space-y-5">
           <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block text-[11px] text-zinc-500 sm:col-span-2">
+            <Label className="block text-[11px] text-zinc-500 sm:col-span-2">
               {tr("安装批次名称", "Installation batch name")}
-              <input
+              <Input
                 autoFocus
                 value={name}
                 onChange={(event) => setName(event.target.value)}
@@ -3056,16 +2995,15 @@ function BatchEnrollmentModal({
                   "例如：上海机房 2026-07",
                   "e.g. Shanghai DC 2026-07",
                 )}
-                className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-2 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                className="mt-1 w-full"
               />
-            </label>
-            <label className="block text-[11px] text-zinc-500">
+            </Label>
+            <Label className="block text-[11px] text-zinc-500">
               {tr("归属方式", "Assignment")}
-              <select
+              <Select
                 value={mode}
-                onChange={(event) => {
-                  const nextMode = event.target
-                    .value as EnrollmentAssignmentMode;
+                onValueChange={(selectedValue) => {
+                  const nextMode = selectedValue as EnrollmentAssignmentMode;
                   setMode(nextMode);
                   if (nextMode === "cluster") {
                     setClusterInputMode(
@@ -3074,7 +3012,7 @@ function BatchEnrollmentModal({
                     setClusterChoice(clusters[0] ? String(clusters[0].id) : "");
                   }
                 }}
-                className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-2 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                className="mt-1 w-full"
               >
                 <option value="batch_only">
                   {tr("仅安装批次（不关联集群）", "Batch only (no cluster)")}
@@ -3082,8 +3020,8 @@ function BatchEnrollmentModal({
                 <option value="cluster">
                   {tr("关联拓扑集群", "Attach to topology cluster")}
                 </option>
-              </select>
-            </label>
+              </Select>
+            </Label>
             {mode === "cluster" && (
               <fieldset className="space-y-2 sm:col-span-2">
                 <legend className="text-[11px] text-zinc-500">
@@ -3094,7 +3032,7 @@ function BatchEnrollmentModal({
                   aria-label={tr("集群设置方式", "Cluster setup")}
                   className="flex flex-wrap gap-2"
                 >
-                  <label
+                  <Label
                     className={cn(
                       "inline-flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs",
                       clusterInputMode === "existing"
@@ -3103,8 +3041,8 @@ function BatchEnrollmentModal({
                       clusters.length === 0 && "cursor-not-allowed opacity-50",
                     )}
                   >
-                    <input
-                      type="radio"
+                    <Radio
+
                       name="batch-cluster-input-mode"
                       value="existing"
                       checked={clusterInputMode === "existing"}
@@ -3115,11 +3053,11 @@ function BatchEnrollmentModal({
                           clusters[0] ? String(clusters[0].id) : "",
                         );
                       }}
-                      className="accent-accent"
+                      className=""
                     />
                     {tr("选择已有集群", "Choose existing")}
-                  </label>
-                  <label
+                  </Label>
+                  <Label
                     className={cn(
                       "inline-flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs",
                       clusterInputMode === "new"
@@ -3127,25 +3065,25 @@ function BatchEnrollmentModal({
                         : "border-zinc-800 bg-zinc-950 text-zinc-400",
                     )}
                   >
-                    <input
-                      type="radio"
+                    <Radio
+
                       name="batch-cluster-input-mode"
                       value="new"
                       checked={clusterInputMode === "new"}
                       onChange={() => setClusterInputMode("new")}
-                      className="accent-accent"
+                      className=""
                     />
                     {tr("新建集群", "Create new")}
-                  </label>
+                  </Label>
                 </div>
                 {clusterInputMode === "existing" ? (
-                  <label className="block text-[11px] text-zinc-500">
+                  <Label className="block text-[11px] text-zinc-500">
                     {tr("已有集群", "Existing cluster")}
-                    <select
+                    <Select
                       aria-label={tr("集群", "Cluster")}
                       value={clusterChoice}
-                      onChange={(event) => setClusterChoice(event.target.value)}
-                      className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-2 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                      onValueChange={(selectedValue) => setClusterChoice(selectedValue)}
+                      className="mt-1 w-full"
                     >
                       <option value="">{tr("请选择", "Select")}</option>
                       {clusters.map((cluster) => (
@@ -3153,12 +3091,12 @@ function BatchEnrollmentModal({
                           {cluster.name}
                         </option>
                       ))}
-                    </select>
-                  </label>
+                    </Select>
+                  </Label>
                 ) : (
-                  <label className="block text-[11px] text-zinc-500">
+                  <Label className="block text-[11px] text-zinc-500">
                     {tr("新集群名称", "New cluster name")}
-                    <input
+                    <Input
                       aria-label={tr("新集群名称", "New cluster name")}
                       value={newClusterName}
                       maxLength={128}
@@ -3169,7 +3107,7 @@ function BatchEnrollmentModal({
                         "例如：上海机房生产集群",
                         "e.g. Shanghai production cluster",
                       )}
-                      className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-2 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                      className="mt-1 w-full"
                     />
                     <span className="mt-1 block text-[11px] text-zinc-600">
                       {clusters.length === 0
@@ -3182,13 +3120,13 @@ function BatchEnrollmentModal({
                             "The topology cluster will be created and linked when generating the command.",
                           )}
                     </span>
-                  </label>
+                  </Label>
                 )}
               </fieldset>
             )}
-            <label className="block text-[11px] text-zinc-500">
+            <Label className="block text-[11px] text-zinc-500">
               {tr("有效期（小时）", "Validity (hours)")}
-              <input
+              <Input
                 type="number"
                 min={1}
                 max={168}
@@ -3196,20 +3134,20 @@ function BatchEnrollmentModal({
                 onChange={(event) =>
                   setExpiresInHours(Number(event.target.value))
                 }
-                className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-2 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                className="mt-1 w-full"
               />
-            </label>
-            <label className="block text-[11px] text-zinc-500">
+            </Label>
+            <Label className="block text-[11px] text-zinc-500">
               {tr("最多安装设备数", "Maximum devices")}
-              <input
+              <Input
                 type="number"
                 min={1}
                 max={10000}
                 value={maxUses}
                 onChange={(event) => setMaxUses(Number(event.target.value))}
-                className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-2 text-xs text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                className="mt-1 w-full"
               />
-            </label>
+            </Label>
           </div>
 
           <div>
@@ -3255,16 +3193,16 @@ function BatchEnrollmentModal({
                     >
                       {enrollmentStatusLabel(profile.status, tr)}
                     </span>
-                    <button
+                    <Button variant="plain" size="sm"
                       type="button"
                       disabled={deletingProfileID === profile.id}
                       onClick={() => void deleteProfile(profile)}
-                      className="rounded px-2 py-1 text-[11px] text-red-300 hover:bg-red-500/10 disabled:opacity-40"
+                      className="px-2 py-1 text-red-300 hover:bg-red-500/10"
                     >
                       {deletingProfileID === profile.id
                         ? tr("删除中…", "Deleting…")
                         : tr("删除", "Delete")}
-                    </button>
+                    </Button>
                   </div>
                 ))
               )}
@@ -3280,7 +3218,7 @@ function BatchEnrollmentModal({
           {err}
         </div>
       )}
-    </Modal>
+    </Modal></>
   );
 }
 
@@ -3311,7 +3249,7 @@ function BatchInstallCommand({ token }: { token: string }) {
         <span className="text-[11px] uppercase tracking-wider text-zinc-500">
           {tr("在每台目标主机执行", "Run on every target host")}
         </span>
-        <button
+        <Button variant="subtle" size="sm"
           type="button"
           aria-label={tr("复制批量安装命令", "Copy batch install command")}
           onClick={() => {
@@ -3332,7 +3270,7 @@ function BatchInstallCommand({ token }: { token: string }) {
         >
           {copied ? <Check size={12} /> : <Copy size={12} />}
           {copied ? tr("已复制", "Copied") : tr("复制单行", "Copy one-liner")}
-        </button>
+        </Button>
       </div>
       <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2 font-mono text-[11px] leading-relaxed text-zinc-200">
         {display}

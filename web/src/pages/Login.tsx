@@ -1,3 +1,5 @@
+import { Button } from '@/components/ui/Button';
+import { Label, Input } from '@/components/ui';
 import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
@@ -68,10 +70,10 @@ export default function LoginPage() {
 
         <form onSubmit={onSubmit} className="space-y-3" noValidate>
           <div>
-            <label htmlFor="email" className="mb-1 block text-xs text-zinc-400">
+            <Label htmlFor="email" className="mb-1 block text-xs text-zinc-400">
               {tr('邮箱', 'Email')}
-            </label>
-            <input
+            </Label>
+            <Input
               id="email"
               type="email"
               required
@@ -79,23 +81,23 @@ export default function LoginPage() {
               autoFocus
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-zinc-600 focus:outline-none"
+              className="w-full"
               placeholder="you@example.com"
             />
           </div>
 
           <div>
-            <label htmlFor="password" className="mb-1 block text-xs text-zinc-400">
+            <Label htmlFor="password" className="mb-1 block text-xs text-zinc-400">
               {tr('密码', 'Password')}
-            </label>
-            <input
+            </Label>
+            <Input
               id="password"
               type="password"
               required
               autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-zinc-600 focus:outline-none"
+              className="w-full"
               placeholder="••••••••"
             />
           </div>
@@ -109,22 +111,15 @@ export default function LoginPage() {
             </div>
           )}
 
-          <button
+          <Button variant="primary"
             type="submit"
             disabled={pending || !email || !password}
             aria-label={tr('登录', 'Sign in')}
-            style={{
-              // Brand gradient lifted from the logo's left pillar — keeps
-              // the primary CTA visually anchored to the brand. Hover
-              // ramps brightness; disabled uses inherited opacity.
-              backgroundImage:
-                'linear-gradient(135deg, #8C6DF0 0%, #5269F4 100%)',
-            }}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white shadow-md transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex w-full items-center justify-center gap-2 px-3 py-2 font-medium transition disabled:cursor-not-allowed"
           >
             {pending && <Loader2 size={14} className="animate-spin" />}
             <span>{tr('登录', 'Sign in')}</span>
-          </button>
+          </Button>
         </form>
 
       </div>
