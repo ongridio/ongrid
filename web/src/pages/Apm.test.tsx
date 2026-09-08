@@ -366,10 +366,10 @@ describe('Application performance', () => {
     expect(
       namespace.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: '按最高 P95 (ms)排序' }));
+    fireEvent.click(screen.getByRole('button', { name: '按P95 (ms)排序' }));
     await waitFor(() => expect(listURL?.searchParams.get('sort')).toBe('p95_ms'));
     await screen.findByRole('link', { name: 'orders' });
-    expect(screen.getByRole('columnheader', { name: '最高 P95 (ms)' })).toHaveAttribute(
+    expect(screen.getByRole('columnheader', { name: 'P95 (ms)' })).toHaveAttribute(
       'aria-sort',
       'descending',
     );

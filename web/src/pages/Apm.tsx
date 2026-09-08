@@ -382,7 +382,7 @@ export default function ApmPage() {
             {
               rps: tr('按服务总请求速率排序', 'Sort by total service request rate'),
               error_rate: tr('按服务整体错误率排序', 'Sort by overall service error rate'),
-              p95_ms: tr('按服务入口的最高 P95 排序', 'Sort by the highest entry-point P95'),
+              p95_ms: tr('取 HTTP、RPC 各自 P95 中的较大值，并按此排序；Trace 样本服务使用 HTTP P95。', 'Uses and sorts by the higher HTTP or RPC P95; Trace-sampled services use HTTP P95.'),
             } as Record<string, string>
           )[key]
         : undefined;
@@ -763,7 +763,7 @@ export default function ApmPage() {
                             {sortHeading('error_rate', tr('错误率', 'Error rate'), true, protocol)}
                             {sortHeading(
                               'p95_ms',
-                              detail ? 'P95 (ms)' : tr('最高 P95 (ms)', 'Max P95 (ms)'),
+                              'P95 (ms)',
                               true,
                               protocol,
                             )}
