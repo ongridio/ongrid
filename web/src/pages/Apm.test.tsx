@@ -235,7 +235,8 @@ describe('Application performance', () => {
     expect(requested?.searchParams.has('service_namespace')).toBe(false);
     await selectOption(screen.getByRole('combobox', { name: '环境' }), 'staging');
     await waitFor(() => expect(requested?.searchParams.get('environment')).toBe('staging'));
-    await selectOption(screen.getByLabelText('时间范围'), '最近 15 分钟');
+    fireEvent.click(screen.getByRole('button', { name: '时间范围' }));
+    fireEvent.click(screen.getByRole('button', { name: '最近 15 分钟' }));
     await waitFor(() => expect(requested?.searchParams.get('range')).toBe('15m'));
     const oldEnd = requested!.searchParams.get('end')!;
     expect(Date.parse(oldEnd) - Date.parse(requested!.searchParams.get('start')!)).toBe(900000);
@@ -467,7 +468,8 @@ describe('Application performance', () => {
     await act(async () => resolve());
     expect(await screen.findByRole('alert')).toHaveTextContent('保留上次结果');
     expect(screen.getByRole('link', { name: 'orders' })).toBeInTheDocument();
-    await selectOption(screen.getByLabelText('时间范围'), '最近 15 分钟');
+    fireEvent.click(screen.getByRole('button', { name: '时间范围' }));
+    fireEvent.click(screen.getByRole('button', { name: '最近 15 分钟' }));
     expect(screen.queryByRole('link', { name: 'orders' })).not.toBeInTheDocument();
   });
   it('opens scoped operation metrics and restores the operation query and pagination', async () => {

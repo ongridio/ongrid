@@ -1,3 +1,4 @@
+import { TimeRangePicker } from '@/components/ui/TimeRangePicker';
 import { FilterField } from '@/components/ui/FilterField';
 import { Input, Label } from '@/components/ui';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
@@ -10,7 +11,6 @@ import {
   BarChart3,
   Braces,
   ChevronDown,
-  Clock,
   Download,
   FileSearch,
   ListFilter,
@@ -868,16 +868,7 @@ export default function LogsPage() {
             </div>
           )}
 
-          {range === 'custom' && (
-            <div className="flex flex-wrap items-center gap-2">
-              <FilterField label={tr('开始时间', 'Start time')}>
-                <Input aria-label={tr('开始时间', 'Start time')} type="datetime-local" step="1" value={customStart} onChange={(event) => setCustomStart(event.target.value)} className="w-52" />
-              </FilterField>
-              <FilterField label={tr('结束时间', 'End time')}>
-                <Input aria-label={tr('结束时间', 'End time')} type="datetime-local" step="1" value={customEnd} onChange={(event) => setCustomEnd(event.target.value)} className="w-52" />
-              </FilterField>
-            </div>
-          )}
+
 
           <div className="flex min-h-6 flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-1.5">
@@ -908,11 +899,17 @@ export default function LogsPage() {
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="rounded border border-zinc-800 bg-zinc-900 px-2 py-1 text-zinc-500">{tr('粒度', 'Interval')} {bucketInterval}</span>
-            <FilterField label={<><Clock size={11} />{tr('时间', 'Time')}</>}>
-              <Select aria-label={tr('时间范围', 'Time range')} value={range} onValueChange={(selectedValue) => { setRange(selectedValue); setTimeHistory([]); setLive(false); }} >
-                {RANGE_PRESETS.map((item) => <option key={item.value} value={item.value} className="bg-zinc-900">{tr(item.zh, item.en)}</option>)}
-              </Select>
-            </FilterField>
+            <TimeRangePicker
+              value={{ range, start: range === 'custom' ? customStart : undefined, end: range === 'custom' ? customEnd : undefined }}
+              presets={RANGE_PRESETS.filter((item) => item.value !== 'custom').map((item) => ({ value: item.value, label: tr(item.zh, item.en), durationMs: rangeToMs(item.value) }))}
+              onChange={(selection) => {
+                setRange(selection.range);
+                setCustomStart(localDateTime(selection.start));
+                setCustomEnd(localDateTime(selection.end));
+                setTimeHistory([]);
+                setLive(false);
+              }}
+            />
             <Button variant="outline" type="button" onClick={() => setLive((value) => !value)} className={cn('inline-flex h-9 items-center gap-1.5 rounded-md border px-2.5 text-xs', live ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-500' : 'border-zinc-800 bg-zinc-900 text-zinc-400')}>
               {live ? <Pause size={11} /> : <Play size={11} />}{live ? tr('实时中', 'Live') : tr('实时', 'Live')}
             </Button>

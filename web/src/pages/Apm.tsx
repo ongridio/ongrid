@@ -5,7 +5,7 @@ import { Hint } from '@/components/ui/Tooltip';
 import { Select } from '@/components/ui/Select';
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowDown, ArrowRight, ArrowUp, ArrowUpRight, Clock, RefreshCw } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowUp, ArrowUpRight, RefreshCw } from 'lucide-react';
 import {
   CartesianGrid,
   Line,
@@ -16,7 +16,7 @@ import {
   YAxis,
 } from 'recharts';
 import { usePoll } from '@/lib/usePoll';
-import { localDateTime } from '@/lib/telemetryContext';
+import { TimeRangePicker } from '@/components/ui/TimeRangePicker';
 import {
   queryApm,
   serviceParams,
@@ -442,21 +442,17 @@ export default function ApmPage() {
                     )
                   : ''}
             </span>
-            <FilterField label={<><Clock size={13} />{tr('时间', 'Time')}</>}>
-              <Select
-                aria-label={tr('时间范围', 'Time range')}
-                className="h-9 w-auto"
-                value={period}
-                onValueChange={(selectedValue) => pickPeriod(selectedValue)}
-              >
-                {periods.map(([key, , zh, en]) => (
-                  <option key={key} value={key}>
-                    {tr(zh, en)}
-                  </option>
-                ))}
-                <option value="custom">{tr('自定义时间', 'Custom range')}</option>
-              </Select>
-            </FilterField>
+            <TimeRangePicker
+              value={{ range: period, start: params.get('start') || undefined, end: params.get('end') || undefined }}
+              presets={periods.map(([value, durationMs, zh, en]) => ({ value, durationMs, label: tr(zh, en) }))}
+              minDurationMs={60000}
+              onChange={(selection) => {
+                const next = new URLSearchParams(params);
+                for (const [key, value] of Object.entries(selection)) next.set(key, value);
+                for (const page of ['page', 'http_page', 'rpc_page']) next.delete(page);
+                setParams(next, { state: location.state });
+              }}
+            />
             <Button
               className="h-9"
               onClick={() => (period === 'custom' ? setRefresh((v) => v + 1) : pickPeriod(period))}
@@ -468,7 +464,7 @@ export default function ApmPage() {
           </>
         }
         extra={
-          ((!detail && tab === 'services') || period === 'custom') && (
+          !detail && tab === 'services' && (
             <div className="flex flex-wrap items-center gap-3">
               {!detail && tab === 'services' && (
                 <>
@@ -520,24 +516,7 @@ export default function ApmPage() {
                   </div>
                 </>
               )}
-              {period === 'custom' &&
-                ['start', 'end'].map((key) => (
-                  <FilterField
-                    key={key}
-                    label={key === 'start' ? tr('开始时间', 'Start time') : tr('结束时间', 'End time')}
-                  >
-                    <Input
-                      aria-label={key === 'start' ? tr('开始时间', 'Start time') : tr('结束时间', 'End time')}
-                      type="datetime-local"
-                      step="1"
-                      className={input}
-                      value={localDateTime(params.get(key) || '')}
-                      onChange={(e) => {
-                        if (e.target.value) set(key, new Date(e.target.value).toISOString());
-                      }}
-                    />
-                  </FilterField>
-                ))}
+
             </div>
           )
         }

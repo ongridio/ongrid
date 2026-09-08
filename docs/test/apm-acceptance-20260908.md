@@ -99,3 +99,12 @@ C++ 运行镜像包含官方 `libopentelemetry_proto.so`；周期与超时使用
 - 前端 APM / API 21 项测试、构建、修改文件 ESLint 通过，验证来源提示和接口到 HTTP Trace 的范围。
 - `APM_MORE_LANGUAGES=ruby scripts/apm-test/run-more-languages.sh` 独立验收通过并清理容器：开启采样 41 条 Trace（含健康检查），关闭采样 0 条，两实例均无原生 HTTP Metrics；样本错误率 25%，P95 125.44 ms，真实查询适配器的概览/趋势/接口均有结果。
 - 本地持续 Edge 上 Ruby 与 ongrid-manager 的 HTTP 样本 RED 已出现，其他八语言仍用原生指标。浏览器实际检查列表、Ruby 概览图表、接口明细和 Trace 查询链接；截图见 `output/apm-demo/trace-fallback-*.jpg`。本地健康与就绪检查通过。
+
+## 统一时间范围弹层验收
+
+应用性能、日志、链路、监控复用 `TimeRangePicker`：快捷范围立即应用，自定义起止时间只在弹层中编辑，确认后统一生效；取消 / Escape 丢弃草稿。保留本地时区与原生日期输入，校验时间顺序和最多 7 天，APM 最短 1 分钟。自定义查询固定起止时间，返回相对范围后重新计算当前窗口。
+
+- 相关五个测试文件共 42 项通过，覆盖草稿、取消、Escape、无效范围、快捷选择，以及监控固定窗口和链路重新查询。前端构建通过；修改文件 ESLint 无错误，仅 Monitor 原有 locale 依赖警告。
+- 本地 `https://localhost:8443` 实测四页编辑并应用 2026-09-08 18:00:01 至 19:00:01（Asia/Shanghai），应用后页面中无额外日期输入；APM 服务区顶部应用前后均为 148px。APM / Traces / Monitor URL 中 UTC 起止时间正确，日志按钮显示已选区间。随后均恢复 1 小时快捷范围。
+- 实看浅色、深色、英文截图：`output/apm-demo/time-picker-{light,dark,en}.jpg`。英文 Escape 关闭弹层并将焦点返回时间按钮；结束时恢复中文及系统主题。
+- 本次只更新本地前端，部署前镜像保留为 `ongrid-web:rollback-before-time-picker`。

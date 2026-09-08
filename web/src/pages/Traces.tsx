@@ -1,3 +1,4 @@
+import { TimeRangePicker } from '@/components/ui/TimeRangePicker';
 import { FilterField } from '@/components/ui/FilterField';
 import { Label, Input } from '@/components/ui';
 import { Hint } from '@/components/ui/Tooltip';
@@ -8,7 +9,6 @@ import {
   ChevronRight,
   ArrowLeft,
   Braces,
-  Clock,
   Copy,
   Filter,
   Loader2,
@@ -144,7 +144,7 @@ function normalizeRow(t: TempoTraceSummary): TraceRow {
 export default function TracesPage() {
   const { tr } = useI18n();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const absolute = absoluteWindow(searchParams);
   const initialQuery = searchParams.get('q') || DEFAULT_TRACEQL;
   const absoluteStart = absolute?.start;
@@ -396,18 +396,18 @@ export default function TracesPage() {
       (grafanaBaseUrl || '').replace(/\/+$/, '') || `${window.location.origin}/grafana`;
     const expr = traceSearchQuery(traceQL, serviceFilter, operationFilter, peerFilter, scope, quickFilter);
     const now = Date.now();
-    const from = now - rangeToMs(range);
+    const from = range === 'custom' && absoluteStart ? Date.parse(absoluteStart) : now - rangeToMs(range);
     const url = buildExploreUrl({
       base,
       dsType: 'tempo',
       dsUid: 'ongrid-tempo',
       query: { query: expr, queryType: 'traceql' },
       fromMs: from,
-      toMs: now,
+      toMs: range === 'custom' && absoluteEnd ? Date.parse(absoluteEnd) : now,
       orgId: grafanaOrgId,
     });
     void openObservabilityUrl(url);
-  }, [grafanaBaseUrl, grafanaOrgId, range, serviceFilter, operationFilter, peerFilter, scope, traceQL, quickFilter]);
+  }, [grafanaBaseUrl, grafanaOrgId, range, serviceFilter, operationFilter, peerFilter, scope, traceQL, quickFilter, absoluteStart, absoluteEnd]);
 
   return (
     <main className="anim-fade flex flex-1 flex-col overflow-hidden">
@@ -483,17 +483,27 @@ export default function TracesPage() {
                   ]}
                 />
               </FilterField>
-              <FilterField label={<><Clock size={10} />{tr('时间范围', 'Time range')}</>} className="w-52 shrink-0">
-                <Select
-                  label={tr('时间范围', 'Time range')}
-                  value={range}
-                  onValueChange={setRange}
-                  options={[
-                    ...(absolute ? [{ value: 'custom', label: tr('关联时间范围', 'Linked time window') }] : []),
-                    ...RANGE_PRESETS.map((option) => ({ value: option.value, label: tr(option.labelZh, option.labelEn) })),
-                  ]}
-                />
-              </FilterField>
+              <TimeRangePicker
+                value={{ range, start: range === 'custom' ? absoluteStart : undefined, end: range === 'custom' ? absoluteEnd : undefined }}
+                presets={RANGE_PRESETS.map((option) => ({ value: option.value, label: tr(option.labelZh, option.labelEn), durationMs: rangeToMs(option.value) }))}
+                onChange={(selection) => {
+                  if (selection.range === submitted.range && (selection.range === 'custom'
+                    ? selection.start === absoluteStart && selection.end === absoluteEnd
+                    : !absoluteStart && !absoluteEnd)) void fetchTraces();
+                  const next = new URLSearchParams(searchParams);
+                  if (selection.range === 'custom') {
+                    next.set('start', selection.start);
+                    next.set('end', selection.end);
+                  } else {
+                    next.delete('start');
+                    next.delete('end');
+                  }
+                  setRange(selection.range);
+                  setSubmitted((current) => ({ ...current, range: selection.range }));
+                  setLive(false);
+                  setSearchParams(next, { replace: true });
+                }}
+              />
               <FilterField label={<><SearchIcon size={10} />trace_id</>} className="min-w-64 flex-1">
                 <Input aria-label="trace_id" value={traceIdInput} onChange={(event) => setTraceIdInput(event.target.value)} placeholder={tr('粘贴 ID 直接打开', 'Paste an ID to open')} className={cn(INPUT_BASE, "font-mono")} />
               </FilterField>

@@ -49,7 +49,8 @@ it('快捷筛选叠加现有条件，切换服务后仍生效，重置清空所�
   fireEvent.change(screen.getByPlaceholderText('{ resource.service.name="my-api" && duration > 200ms }'), { target: { value: '{ span:name = "custom" }' } });
   fireEvent.click(screen.getByRole('button', { name: '查询' }));
   await waitFor(() => expect(query()).toBe('{ span:name = "custom" } with (most_recent=true)'));
-  await selectOption(screen.getByRole('combobox', { name: '时间范围' }), '1 天');
+  fireEvent.click(screen.getByRole('button', { name: '时间范围' }));
+  fireEvent.click(screen.getByRole('button', { name: '1 天' }));
   fireEvent.change(screen.getByRole('textbox', { name: 'trace_id' }), { target: { value: 'abc123' } });
   fireEvent.click(screen.getByRole('button', { name: '重置' }));
   await waitFor(() => expect(query()).toBe('{} with (most_recent=true)'));
@@ -57,7 +58,7 @@ it('快捷筛选叠加现有条件，切换服务后仍生效，重置清空所�
     expect(screen.getByRole('combobox', { name })).toHaveTextContent(name === 'peer.service' ? '全部依赖' : '全部');
   }
   expect(screen.getByRole('combobox', { name: '请求类型' })).toHaveTextContent('全部请求');
-  expect(screen.getByRole('combobox', { name: '时间范围' })).toHaveTextContent('1 小时');
+  expect(screen.getByRole('button', { name: '时间范围' })).toHaveTextContent('1 小时');
   expect(screen.getByRole('textbox', { name: 'trace_id' })).toHaveValue('');
   expect(screen.getByPlaceholderText('{ resource.service.name="my-api" && duration > 200ms }')).toHaveValue('');
   const request = vi.mocked(searchTraces).mock.calls.at(-1)![0];
@@ -103,4 +104,28 @@ it('APM 链路详情保留查询时间与服务范围，日志使用完整 Trace
   fireEvent.click(screen.getByRole('button', { name: /返回链路列表/ }));
   expect(screen.getByTestId('location')).toHaveTextContent('/traces?');
   expect(screen.getByTestId('location')).toHaveTextContent('environment=production');
+});
+
+it('自定义时间仅在应用后查询，并保留到 Trace 搜索的起止时间', async () => {
+  localStorage.setItem('ongrid-locale', 'zh-CN');
+  vi.mocked(searchTraces).mockClear();
+  render(<MemoryRouter initialEntries={['/traces']}><TracesPage /></MemoryRouter>);
+  await waitFor(() => expect(searchTraces).toHaveBeenCalled());
+  const count = vi.mocked(searchTraces).mock.calls.length;
+  fireEvent.click(screen.getByRole('button', { name: '时间范围' }));
+  fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2026-09-08T01:00:00' } });
+  fireEvent.change(screen.getByLabelText('结束时间'), { target: { value: '2026-09-08T02:00:00' } });
+  expect(searchTraces).toHaveBeenCalledTimes(count);
+  fireEvent.click(screen.getByRole('button', { name: '应用' }));
+  await waitFor(() => expect(vi.mocked(searchTraces).mock.calls.at(-1)![0]).toMatchObject({
+    start: new Date('2026-09-08T01:00:00').toISOString(), end: new Date('2026-09-08T02:00:00').toISOString(),
+  }));
+  expect(screen.queryByLabelText('开始时间')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '时间范围' }));
+  fireEvent.click(screen.getByRole('button', { name: '1 小时' }));
+  await waitFor(() => expect(Date.parse(vi.mocked(searchTraces).mock.calls.at(-1)![0].end)).toBeGreaterThan(Date.now() - 10000));
+  const beforeRepeat = vi.mocked(searchTraces).mock.calls.length;
+  fireEvent.click(screen.getByRole('button', { name: '时间范围' }));
+  fireEvent.click(screen.getByRole('button', { name: '1 小时' }));
+  await waitFor(() => expect(searchTraces).toHaveBeenCalledTimes(beforeRepeat + 1));
 });

@@ -1,3 +1,5 @@
+import { TimeRangePicker } from '@/components/ui/TimeRangePicker';
+import { absoluteWindow } from '@/lib/telemetryContext';
 import { FilterField } from '@/components/ui/FilterField';
 import { Button } from '@/components/ui';
 import { useDialogs } from '@/components/ui/useDialogs';
@@ -5,7 +7,7 @@ import { Hint } from '@/components/ui/Tooltip';
 import { Select } from '@/components/ui/Select';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePoll } from '@/lib/usePoll';
-import { Clock, RefreshCw, Plus } from 'lucide-react';
+import { RefreshCw, Plus } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { type GrafanaPanel } from '@/api/grafana';
 import {
@@ -283,6 +285,9 @@ export default function MonitorPage() {
   const { tr, locale } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
   const range = searchParams.get('range') || DEFAULT_RANGE;
+  const selectedWindow = range === 'custom' ? absoluteWindow(searchParams) : null;
+  const selectedStart = selectedWindow?.start;
+  const selectedEnd = selectedWindow?.end;
   const roleFilter = (searchParams.get('role') || '') as RoleFilterValue;
   // device filter overrides role: if both set, only `device` is honored
   // so the user can drill from "all servers" down to one specific host
@@ -418,10 +423,11 @@ export default function MonitorPage() {
   // fromMs / toMs are computed off `range` and `tick` so a refresh slides
   // the window forward — the same effect Grafana's auto-refresh has.
   const { fromMs, toMs } = useMemo(() => {
+    if (selectedStart && selectedEnd) return { fromMs: Date.parse(selectedStart), toMs: Date.parse(selectedEnd) };
     const now = Date.now();
     return { fromMs: now - rangeToMs(range), toMs: now };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [range, tick]);
+  }, [range, tick, selectedStart, selectedEnd]);
 
   const handleRefresh = useCallback(() => {
     setTick((t) => t + 1);
@@ -535,12 +541,13 @@ export default function MonitorPage() {
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px]">
-          <ToolbarSelect
-            icon={<Clock size={12} />}
-            label={tr('时间', 'Time')}
-            value={range}
-            options={RANGE_PRESETS.map((o) => ({ value: o.value, label: tr(o.labelZh, o.labelEn) }))}
-            onChange={(v) => updateParams({ range: v })}
+          <TimeRangePicker
+            value={{ range, start: selectedStart, end: selectedEnd }}
+            presets={RANGE_PRESETS.map((option) => ({ value: option.value, label: tr(option.labelZh, option.labelEn), durationMs: rangeToMs(option.value) }))}
+            onChange={(selection) => {
+              updateParams({ range: selection.range, start: selection.range === 'custom' ? selection.start : '', end: selection.range === 'custom' ? selection.end : '' });
+              setTick((current) => current + 1);
+            }}
           />
           <ToolbarSelect
             icon={<RefreshCw size={12} />}

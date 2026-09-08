@@ -1,5 +1,5 @@
 import { selectOption } from '@/test/select-option';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { http, HttpResponse } from 'msw';
@@ -216,7 +216,7 @@ describe('LogsPage', () => {
     await waitForInitialLogs();
 
     expect(screen.getByRole('combobox', { name: '集群' })).toHaveTextContent('kind-local (#7)');
-    expect(screen.getByRole('combobox', { name: '时间范围' })).toHaveTextContent('6 小时');
+    expect(screen.getByRole('button', { name: '时间范围' })).toHaveTextContent('6 小时');
     expect(searchRequests[0]?.scope).toMatchObject({
       cluster_ids: ['7'],
       namespaces: ['production'],
@@ -634,7 +634,10 @@ describe('LogsPage', () => {
     const clicked = searchRequests.at(-1)!;
     expect(new Date(clicked.end).getTime() - new Date(clicked.start).getTime()).toBe(60_000);
     expect(screen.getByText(/已选时间/)).toBeInTheDocument();
+    expect(screen.queryByLabelText('开始时间')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '时间范围' }));
     expect(screen.getByLabelText('开始时间')).toHaveAttribute('step', '1');
+    await user.click(screen.getByRole('button', { name: '取消' }));
 
     const clickedRequestCount = searchRequests.length;
     await user.click(screen.getByRole('button', { name: /返回上一级范围/ }));
