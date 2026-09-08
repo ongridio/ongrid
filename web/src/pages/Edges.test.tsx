@@ -832,7 +832,7 @@ describe("EdgesPage", () => {
 
     await screen.findAllByText("core-switch");
     const table = screen.getByRole("table");
-    expect(table).toHaveClass("w-full", "min-w-[1120px]", "table-fixed");
+    expect(table).toHaveClass("w-full", "min-w-[1200px]", "table-fixed");
     expect(table.querySelectorAll("col")).toHaveLength(10);
     expect(screen.queryByRole("button", { name: "网络发现" })).not.toBeInTheDocument();
     expect(screen.queryByText("WebSSH 会话")).not.toBeInTheDocument();
