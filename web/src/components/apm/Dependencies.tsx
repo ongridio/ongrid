@@ -11,10 +11,19 @@ export function Dependencies({ data, params }: { data: ApmDependencies; params: 
   const { nodes, edges } = useMemo(() => {
     const identities = new Map<string, ServiceIdentity>();
     const external = new Set<string>();
-    const key = (id: ServiceIdentity) => JSON.stringify(id);
+    const key = (id: ServiceIdentity) => JSON.stringify([id.service_name, id.service_namespace, id.environment]);
     const graph = new dagre.graphlib.Graph()
       .setGraph({ rankdir: 'LR', ranksep: 90 })
       .setDefaultEdgeLabel(() => ({}));
+    const current: ServiceIdentity = {
+      service_name: params.get('service_name') || '',
+      service_namespace: params.get('service_namespace') || '',
+      environment: params.get('environment') || '',
+    };
+    if (current.service_name) {
+      identities.set(key(current), current);
+      graph.setNode(key(current), { width: 220, height: 90 });
+    }
     const edges: Edge[] = data.items.map((edge, index) => {
       for (const id of [edge.client, edge.server]) {
         identities.set(key(id), id);
@@ -71,7 +80,7 @@ export function Dependencies({ data, params }: { data: ApmDependencies; params: 
       </p>
       {nodes.length > 0 && (
         <div className="my-4 h-80 rounded-lg border border-zinc-800">
-          <ReactFlow nodes={nodes} edges={edges} fitView nodesDraggable={false} nodesConnectable={false}>
+          <ReactFlow nodes={nodes} edges={edges} fitView fitViewOptions={{ maxZoom: 1 }} nodesDraggable={false} nodesConnectable={false}>
             <Background />
             <Controls showInteractive={false} />
           </ReactFlow>
