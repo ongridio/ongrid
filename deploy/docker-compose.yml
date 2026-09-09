@@ -171,6 +171,7 @@ services:
       # via /edge/<name>.
       - ./edge:/usr/share/ongrid/edge-bundles:ro
       - ../.cache/embedding-models:/var/lib/ongrid/embeddings
+      - ongrid_repos:/var/lib/ongrid/repos
       # HLD-017 cloud skill marketplace: persist user-installed skills so
       # they survive container recreation (bind-mount, not container layer).
       - ../.cache/ongrid-skills:/var/lib/ongrid/skills
@@ -442,6 +443,7 @@ services:
 #      - ongrid_net
 
 volumes:
+  ongrid_repos:
   mysql_data:
   prometheus_data:
   grafana_data:
