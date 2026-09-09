@@ -89,7 +89,7 @@ func TestAPMReplicaMetricsIntegration(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			cpu, memory := map[string]bool{}, map[string]bool{}
+			cpu, memory, jvm := map[string]bool{}, map[string]bool{}, map[string]bool{}
 			for _, row := range runtime.Items {
 				if row.Value == nil || len(row.Points) < 2 {
 					continue
@@ -97,12 +97,18 @@ func TestAPMReplicaMetricsIntegration(t *testing.T) {
 				if row.Name == "process_cpu_cores" && *row.Value >= 0 {
 					cpu[row.InstanceID] = true
 				}
-				if (row.Name == "process_resident_memory_bytes" || row.Name == "process_memory_usage_bytes" || row.Name == "jvm_memory_used_bytes") && *row.Value > 0 {
+				if (row.Name == "process_resident_memory_bytes" || row.Name == "process_memory_usage_bytes") && *row.Value > 0 {
 					memory[row.InstanceID] = true
+				}
+				if row.Name == "jvm_memory_used_bytes" && *row.Value > 0 {
+					jvm[row.InstanceID] = true
 				}
 			}
 			if len(cpu) != 2 || len(memory) != 2 {
 				t.Fatalf("CPU instances=%v memory instances=%v", cpu, memory)
+			}
+			if language == "java" && len(jvm) != 2 {
+				t.Fatalf("JVM memory instances=%v", jvm)
 			}
 			errors := []float64{}
 			for i, version := range []string{"1.0.0", "1.1.0-demo"} {
@@ -117,10 +123,17 @@ func TestAPMReplicaMetricsIntegration(t *testing.T) {
 				if err != nil || len(selected.Items) == 0 {
 					t.Fatalf("selected runtime=%+v err=%v", selected, err)
 				}
+				hasRSS := false
 				for _, row := range selected.Items {
 					if row.InstanceID != q.InstanceID || row.Version != version {
 						t.Fatalf("scope leak: %+v", row)
 					}
+					if (row.Name == "process_resident_memory_bytes" || row.Name == "process_memory_usage_bytes") && row.Value != nil && *row.Value > 0 && len(row.Points) >= 2 {
+						hasRSS = true
+					}
+				}
+				if !hasRSS {
+					t.Fatalf("missing scoped RSS for %s", q.InstanceID)
 				}
 				ops, err := svc.List(t.Context(), q, true)
 				if err != nil || len(ops.Items) == 0 {

@@ -41,3 +41,11 @@ go test -race ./internal/manager/biz/apm -run TestAPMReplicaMetricsIntegration -
 - 依赖 API 过滤 `connection_type=virtual_node`、调用方为 `user` 且环境/命名空间均为空的占位关系，概览和依赖图共用。保留同名真实服务、具备身份的调用方、具名外部服务及数据库；底层遥测保留。无可识别关系时显示空状态，不展示空表。
 - 接入管理删除 HTTP/RPC 诊断区，不再自动请求诊断或运行时；诊断 API 保留。概览操作使用统一小尺寸次级按钮外观及链接图标，链接保留原有筛选条件。
 - 后端 race 测试与 22 项前端测试通过；相关 ESLint 和构建通过。
+
+## Java 进程 RSS 补充
+
+Java 两个实例增加官方 Collector 0.157.0 `host_metrics/process` 采集器；分别加入对应 Java 容器 PID 命名空间，普通用户、只读文件系统、无 capabilities。只采集 `process.memory.usage`，通过标准资源属性绑定原有服务身份，交给现有 Edge OTLP 链路。JVM 内存保留，Manager 和前端无需修改。
+
+实际验证：两个实例上报 RSS 为 270.76 / 267.98 MiB，随即读取 `/proc/1/status` 为 268.98 / 266.16 MiB，异步采样差异均小于 1%。每个采集器内存约 34–43 MiB（单次快照）。配置校验通过，重启后无采集错误；只静默最小镜像缺少 passwd 数据库导致的无关用户名解析错误。真实数据 race 验收覆盖三种语言的两条 RSS 曲线、Java 两条 JVM 曲线及按版本/实例筛选，全部通过。Ego 浏览器实看 RSS 与 JVM 内存并列显示，截图 `output/apm-demo/java-rss.png`。RSS 历史从此次启用时开始。
+
+回滚：停止 `java-rss-v1`、`java-rss-v2`，恢复 `/opt/ongrid-apm-demo/compose.before-java-rss.yaml` 为 `compose.yaml`；Java 应用及其他采集链路不受影响。异步采样不要求与 `/proc` 瞬时值完全相等。

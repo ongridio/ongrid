@@ -1,0 +1,37 @@
+# Each collector shares only its Java container's PID namespace.
+receivers:
+  host_metrics:
+    collection_interval: 5s
+    scrapers:
+      process:
+        # The minimal collector image has no passwd database; owner is unused.
+        mute_process_user_error: true
+        include:
+          names: [java]
+          match_type: strict
+        metrics:
+          process.cpu.time: {enabled: false}
+          process.disk.io: {enabled: false}
+          process.memory.virtual: {enabled: false}
+          process.memory.usage: {enabled: true}
+        resource_attributes:
+          process.command: {enabled: false}
+          process.command_line: {enabled: false}
+          process.executable.path: {enabled: false}
+          process.owner: {enabled: false}
+          process.parent_pid: {enabled: false}
+processors:
+  resource_detection:
+    detectors: [env]
+exporters:
+  otlp_http:
+    endpoint: http://127.0.0.1:4318
+service:
+  telemetry:
+    metrics:
+      level: none
+  pipelines:
+    metrics:
+      receivers: [host_metrics]
+      processors: [resource_detection]
+      exporters: [otlp_http]

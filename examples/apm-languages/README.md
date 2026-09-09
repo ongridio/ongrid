@@ -34,7 +34,9 @@ docker compose -f examples/apm-languages/compose.yaml up -d --build --remove-orp
 
 标准 OTel Resource 使用 `service.name`、`service.namespace=apm-demo`、`deployment.environment.name=development`、`service.version` 和 `service.instance.id`。部署到其他主机时需使用唯一实例名。两个版本使用同一示例构建，版本标签用于演示：请求生成器分别每 20 / 5 组产生一组真实失败，预期错误率约 5% / 20%，不代表代码版本回归。每组后等待 2 秒；包含 HTTP 慢请求，Go gRPC Health 仅模拟成功与失败。
 
-CPU 与内存均为实际测量。Go 复用官方 Prometheus Go/Process collector 经 OTel bridge 导出；Python 使用官方 system metrics instrumentation；Java 使用官方 Agent 的 JVM 指标。页面 CPU 是占用核数，Go/Python 内存是进程 RSS，Java 是 JVM 堆与非堆已用内存，不能等同 RSS。Go 堆与 goroutine、Java 线程数也在运行时表中展示。
+CPU 与内存均为实际测量。Go 复用官方 Prometheus Go/Process collector 经 OTel bridge 导出；Python 使用官方 system metrics instrumentation；Java 使用官方 Agent 的 JVM 指标，并由官方 Collector `hostmetrics/process` 补充进程 RSS。页面 CPU 是占用核数，三种语言均展示进程 RSS；Java 额外展示 JVM 堆与非堆已用内存，两者不能等同。Go 堆与 goroutine、Java 线程数也在运行时图中展示。
+
+`java-rss-v1/v2` 分别共享对应 Java 容器的 PID 命名空间，仅采集名为 `java` 的进程 RSS；不需要宿主机 PID、Docker socket 或特权权限。通过标准资源属性绑定服务、环境、命名空间、实例和版本，沿用 Edge 的 OTLP HTTP 接收器。`java-rss.yaml` 必须与部署的 compose 文件放在同一目录。Compose 更新 Java 容器时会重启其采集器；外部工具单独删除重建 Java 容器后，需同时重建对应 RSS 采集器以重新加入 PID 命名空间。采集间隔 5 秒，已有 JVM CPU 指标不会重复采集。
 
 服务详情可按版本、实例筛选 RED、接口、链路和资源曲线。概览聚焦服务请求表现；“实例与资源”集中展示 CPU、内存及语言运行时趋势图，点击实例继续留在资源页查看该实例。依赖图保持服务级聚合，需要清除版本和实例筛选查看；日志链接明确查看服务全部实例。指标每 5 秒导出，后端仍有短暂延迟。选择最近 15 分钟可查看当前实例，历史服务仍保留在此前时间窗口。
 

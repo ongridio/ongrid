@@ -25,6 +25,21 @@ x-env: &env
   OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE: cumulative
   OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION: explicit_bucket_histogram
   OTEL_PYTHON_SYSTEM_METRICS_EXCLUDED_METRICS: system.*,process.runtime.*
+x-java-rss: &java-rss
+  image: otel/opentelemetry-collector-contrib:0.157.0
+  network_mode: host
+  restart: unless-stopped
+  user: "65532:65532"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  mem_limit: 128m
+  cpus: 0.25
+  command: ["--config=/etc/otelcol/java-rss.yaml"]
+  volumes: ["./java-rss.yaml:/etc/otelcol/java-rss.yaml:ro"]
+  logging:
+    driver: local
+    options: {max-size: "5m", max-file: "2"}
 services:
   go-v1:
     <<: *app
@@ -94,6 +109,24 @@ services:
       SERVICE_INSTANCE_ID: ubuntu-java-2
       SERVICE_VERSION: 1.1.0-demo
       OTEL_RESOURCE_ATTRIBUTES: service.namespace=apm-demo,deployment.environment.name=development,service.instance.id=ubuntu-java-2,service.version=1.1.0-demo
+  java-rss-v1:
+    <<: *java-rss
+    pid: service:java-v1
+    depends_on:
+      java-v1:
+        condition: service_started
+        restart: true
+    environment:
+      OTEL_RESOURCE_ATTRIBUTES: service.name=apm-demo-java,service.namespace=apm-demo,deployment.environment.name=development,service.instance.id=ubuntu-java-1,service.version=1.0.0
+  java-rss-v2:
+    <<: *java-rss
+    pid: service:java-v2
+    depends_on:
+      java-v2:
+        condition: service_started
+        restart: true
+    environment:
+      OTEL_RESOURCE_ATTRIBUTES: service.name=apm-demo-java,service.namespace=apm-demo,deployment.environment.name=development,service.instance.id=ubuntu-java-2,service.version=1.1.0-demo
   python-v1:
     <<: *app
     image: ongrid-apm-demo-python:local
