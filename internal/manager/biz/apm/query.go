@@ -31,6 +31,9 @@ type Query struct {
 	ServiceNamespace                     *string
 	ServiceName                          string
 	ServiceVersion, InstanceID           string
+	DeviceID, ClusterID                  string
+	ClusterNodeID                        uint64
+	resourceScope                        *ResourceScope
 	Operation                            string
 	SpanKind                             string
 	Page, PageSize                       int
@@ -42,7 +45,7 @@ func (q *Query) Validate(serviceRequired bool) error {
 	if q.Start.IsZero() || q.End.IsZero() || !q.End.After(q.Start) || q.End.Sub(q.Start) < time.Minute || q.End.Sub(q.Start) > 7*24*time.Hour {
 		return fmt.Errorf("%w: time range must be between 1 minute and 7 days", errs.ErrInvalid)
 	}
-	for _, value := range []string{q.ServiceName, q.ServiceVersion, q.InstanceID, q.Operation, q.Search, deref(q.Environment), deref(q.ServiceNamespace)} {
+	for _, value := range []string{q.ServiceName, q.ServiceVersion, q.InstanceID, q.DeviceID, q.ClusterID, q.Operation, q.Search, deref(q.Environment), deref(q.ServiceNamespace)} {
 		if len(value) > 256 || !utf8.ValidString(value) || strings.IndexFunc(value, unicode.IsControl) >= 0 {
 			return fmt.Errorf("%w: service filters must be valid text of at most 256 bytes", errs.ErrInvalid)
 		}
@@ -118,6 +121,19 @@ func (q Query) instanceLabels() []string {
 	}
 	if q.InstanceID != "" {
 		labels = append(labels, "service_instance_id="+strconv.Quote(q.InstanceID))
+	}
+	if q.DeviceID != "" {
+		labels = append(labels, "device_id="+strconv.Quote(q.DeviceID))
+	}
+	if q.ClusterID != "" {
+		labels = append(labels, "cluster_id="+strconv.Quote(q.ClusterID))
+	}
+	if q.resourceScope != nil {
+		if q.resourceScope.ClusterID != "" {
+			labels = append(labels, "cluster_id="+strconv.Quote(q.resourceScope.ClusterID))
+		} else {
+			labels = append(labels, "device_id=~"+strconv.Quote(devicePattern(q.resourceScope.DeviceIDs)))
+		}
 	}
 	return labels
 }
@@ -198,13 +214,14 @@ type Summary struct {
 }
 
 type Metadata struct {
-	Start        time.Time `json:"start"`
-	End          time.Time `json:"end"`
-	MetricSource string    `json:"metric_source"`
-	Sampling     string    `json:"sampling"`
-	SpanKind     string    `json:"span_kind"`
-	Protocol     string    `json:"protocol"`
-	MetricFormat string    `json:"metric_format"`
+	Start         time.Time      `json:"start"`
+	End           time.Time      `json:"end"`
+	MetricSource  string         `json:"metric_source"`
+	Sampling      string         `json:"sampling"`
+	SpanKind      string         `json:"span_kind"`
+	Protocol      string         `json:"protocol"`
+	MetricFormat  string         `json:"metric_format"`
+	ResourceScope *ResourceScope `json:"resource_scope,omitempty"`
 }
 
 func metadata(q Query) Metadata {
@@ -212,7 +229,7 @@ func metadata(q Query) Metadata {
 	if q.MetricSource == "tempo_spanmetrics" {
 		sampling = "unknown"
 	}
-	return Metadata{q.Start, q.End, q.MetricSource, sampling, q.SpanKind, q.Protocol, q.MetricFormat}
+	return Metadata{q.Start, q.End, q.MetricSource, sampling, q.SpanKind, q.Protocol, q.MetricFormat, q.resourceScope}
 }
 
 type ListResult struct {
@@ -359,12 +376,19 @@ func TraceQL(q Query) string {
 		}
 		clauses = append(clauses, clause)
 	}
-	for _, field := range []struct{ name, value string }{{"service.version", q.ServiceVersion}, {"service.instance.id", q.InstanceID}} {
+	for _, field := range []struct{ name, value string }{{"service.version", q.ServiceVersion}, {"service.instance.id", q.InstanceID}, {"device_id", q.DeviceID}, {"cluster_id", q.ClusterID}} {
 		if field.value != "" {
 			clauses = append(clauses, "resource."+field.name+" = "+strconv.Quote(field.value))
 		}
 	}
 	clauses = append(clauses, "kind = "+q.SpanKind)
+	if q.resourceScope != nil {
+		if q.resourceScope.ClusterID != "" {
+			clauses = append(clauses, "resource.cluster_id = "+strconv.Quote(q.resourceScope.ClusterID))
+		} else {
+			clauses = append(clauses, "resource.device_id =~ "+strconv.Quote("^("+devicePattern(q.resourceScope.DeviceIDs)+")$"))
+		}
+	}
 	if q.MetricSource == "tempo_spanmetrics" {
 		if q.Protocol == "http" && q.SpanKind == "server" {
 			clauses = append(clauses, `(span.http.request.method != nil || span.http.method != nil)`)

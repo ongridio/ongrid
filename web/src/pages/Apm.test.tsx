@@ -34,9 +34,33 @@ const row = {
   data_status: 'observed',
 };
 describe('Application performance', () => {
-  beforeEach(() => { localStorage.setItem('ongrid-locale', 'zh-CN'); server.use(http.get('/api/v1/traces/search', () => HttpResponse.json({ traces: [] })), http.get('/api/v1/apm/runtime', () => HttpResponse.json({ data: { items: [], instances: [] } }))); });
+  it('filters services by device and cluster before pagination and preserves both in detail links', async () => {
+    const queries: URLSearchParams[] = [];
+    server.use(http.get('/api/v1/apm/services', ({ request }) => {
+      const query = new URL(request.url).searchParams;
+      queries.push(query);
+      return HttpResponse.json({ data: { items: [row], total: 1, page: 1, page_size: 25 } });
+    }));
+    render(<MemoryRouter initialEntries={[`/apm?${period}&page=3`]}><ApmPage /></MemoryRouter>);
+    await screen.findByRole('link', { name: 'orders' });
+    await selectOption(screen.getByRole('combobox', { name: '设备' }), 'ubuntu (#42)');
+    await waitFor(() => expect(queries.at(-1)?.get('device_id')).toBe('42'));
+    await selectOption(screen.getByRole('combobox', { name: '集群' }), 'production (#7)');
+    await waitFor(() => expect(queries.at(-1)?.get('cluster_node_id')).toBe('7'));
+    expect(queries.at(-1)?.get('device_id')).toBe('42');
+    expect(queries.at(-1)?.has('page')).toBe(false);
+    const link = new URL(screen.getByRole('link', { name: 'orders' }).getAttribute('href')!, 'http://localhost');
+    expect(link.searchParams.get('device_id')).toBe('42');
+    expect(link.searchParams.get('cluster_node_id')).toBe('7');
+    expect(new URLSearchParams(link.searchParams.get('list_query')!).get('cluster_node_id')).toBe('7');
+    await selectOption(screen.getByRole('combobox', { name: '设备' }), '全部设备');
+    await waitFor(() => expect(queries.at(-1)?.has('device_id')).toBe(false));
+    expect(queries.at(-1)?.get('cluster_node_id')).toBe('7');
+  });
+  beforeEach(() => { localStorage.setItem('ongrid-locale', 'zh-CN'); server.use(http.get('/api/v1/devices', () => HttpResponse.json({ items: [{ id: 42, name: 'ubuntu' }] })), http.get('/api/v1/topology/nodes', () => HttpResponse.json({ items: [{ id: 7, name: 'production' }] })), http.get('/api/v1/apm/repository-binding', () => HttpResponse.json({ data: null })), http.get('/api/v1/traces/search', () => HttpResponse.json({ traces: [] })), http.get('/api/v1/apm/runtime', () => HttpResponse.json({ data: { items: [], instances: [] } }))); });
   it('keeps same-name services separate and links their complete identity', async () => {
     server.use(
+      http.get('/api/v1/apm/repository-binding', ({ request }) => HttpResponse.json({ data: new URL(request.url).searchParams.get('environment') === 'production' ? { identity: row.identity, repo_id: '3', repo_url: 'ssh://git@example/apm-demo.git', source_directory: '', tag_pattern: '{version}' } : null })),
       http.get('/api/v1/apm/services', () =>
         HttpResponse.json({
           data: {
@@ -64,6 +88,8 @@ describe('Application performance', () => {
     );
     const links = await screen.findAllByRole('link', { name: 'orders' });
     expect(links).toHaveLength(2);
+    expect(await screen.findByRole('button', { name: 'apm-demo' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '绑定仓库' })).toBeInTheDocument();
     expect(screen.getByText('Go')).toBeInTheDocument();
     expect(screen.getByText('Java')).toBeInTheDocument();
     expect(screen.getByText('Node.js')).toBeInTheDocument();
@@ -718,7 +744,7 @@ describe('Application performance', () => {
 
 
 describe('Official language onboarding', () => {
-  beforeEach(() => server.use(http.get('/api/v1/traces/search', () => HttpResponse.json({ traces: [] }))));
+  beforeEach(() => server.use(http.get('/api/v1/devices', () => HttpResponse.json({ items: [] })), http.get('/api/v1/topology/nodes', () => HttpResponse.json({ items: [] })), http.get('/api/v1/apm/repository-binding', () => HttpResponse.json({ data: null })), http.get('/api/v1/traces/search', () => HttpResponse.json({ traces: [] }))));
   it('provides nine languages and states metrics boundaries', async () => {
     localStorage.setItem('ongrid-locale', 'zh-CN');
     render(<Onboarding />);

@@ -92,7 +92,7 @@ func (s *Service) runtimeInstances(ctx context.Context, q Query) ([]Instance, er
 }
 
 func (s *Service) Runtime(ctx context.Context, q Query) (*Runtime, error) {
-	if err := q.Validate(true); err != nil {
+	if err := s.validateQuery(ctx, &q, true); err != nil {
 		return nil, err
 	}
 	out := &Runtime{Items: []RuntimeMetric{}, Instances: []Instance{}, Metadata: metadata(q)}

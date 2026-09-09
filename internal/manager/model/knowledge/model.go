@@ -40,15 +40,22 @@ const (
 // Repository is a git repo we mirror locally + index. Tracked via
 // last_synced_at; a refresh job re-clones / pulls then re-walks files.
 type Repository struct {
-	ID            uint64    `gorm:"primaryKey;autoIncrement"`
-	URL           string    `gorm:"size:512;not null;uniqueIndex:idx_repo_url"`
-	Branch        string    `gorm:"size:128;not null;default:main"`
-	Description   string    `gorm:"size:512"`
-	LastSyncedAt  *time.Time `gorm:"column:last_synced_at"`
-	LastSyncError string    `gorm:"type:text;column:last_sync_error"`
-	FileCount     int       `gorm:"column:file_count"`
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID              uint64     `gorm:"primaryKey;autoIncrement"`
+	URL             string     `gorm:"size:512;not null;uniqueIndex:idx_repo_url"`
+	Branch          string     `gorm:"size:128;not null;default:main"`
+	Description     string     `gorm:"size:512"`
+	LastSyncedAt    *time.Time `gorm:"column:last_synced_at"`
+	LastSyncError   string     `gorm:"type:text;column:last_sync_error"`
+	FileCount       int        `gorm:"column:file_count"`
+	IndexedCommit   string     `gorm:"size:40"`
+	CommitCount     int
+	TagCount        int
+	BranchCount     int
+	HistoryComplete bool
+	SourceSyncedAt  *time.Time
+	Syncing         bool `gorm:"-"`
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 // TableName pins the table name.

@@ -53,6 +53,7 @@ export type ApmMetadata = {
   sampling: string;
   protocol: string;
   metric_format: string;
+  resource_scope?: { cluster_id: string; device_ids: string[] | null };
 };
 export type ApmList = {
   metadata: ApmMetadata;
@@ -93,6 +94,7 @@ export type ApmDiagnostics = {
   sampled_traces: number;
 };
 export type ApmRuntime = {
+  metadata?: ApmMetadata;
   instances?: ApmDiagnostics['instances'];
   items: {
     name: string;
@@ -174,8 +176,16 @@ export function serviceTraceQL(params: URLSearchParams, extra?: string) {
     const clause = `resource.${attribute} = ${JSON.stringify(value)}`;
     clauses.push(value === '' ? `(${clause} || resource.${attribute} = nil)` : clause);
   }
-  for (const [key, attribute] of [['service_version', 'service.version'], ['instance_id', 'service.instance.id']]) {
+  for (const [key, attribute] of [['service_version', 'service.version'], ['instance_id', 'service.instance.id'], ['device_id', 'device_id'], ['cluster_id', 'cluster_id']]) {
     if (params.get(key)) clauses.push(`resource.${attribute} = ${JSON.stringify(params.get(key))}`);
+  }
+  if (params.has('cluster_node_id')) {
+    if (params.get('telemetry_cluster_id')) {
+      clauses.push(`resource.cluster_id = ${JSON.stringify(params.get('telemetry_cluster_id'))}`);
+    } else {
+      const ids = (params.get('cluster_device_ids') || '').split(',').filter((id) => /^\d+$/.test(id));
+      clauses.push(`resource.device_id =~ ${JSON.stringify(ids.length ? `^(${ids.join('|')})$` : 'a^')}`);
+    }
   }
   const operation = params.get('operation');
   if (params.get('metric_source') === 'tempo_spanmetrics') {

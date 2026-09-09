@@ -335,13 +335,14 @@ export default function KubernetesPage() {
   );
 }
 
-export function KubernetesClusterDetailPage() {
+export function KubernetesClusterDetailPage({ kubernetesClusterID }: { kubernetesClusterID?: string } = {}) {
   const { confirmAction, dialog } = useDialogs();
   const { tr } = useI18n();
   const { isAdmin } = usePermissions();
   const navigate = useNavigate();
   const grafanaOrgId = useObservability((s) => s.grafanaOrgId);
-  const { clusterId = '' } = useParams();
+  const route = useParams();
+  const clusterId = kubernetesClusterID ?? route.clusterId ?? '';
   const routeClusterID = clusterId.trim();
   const [logClusterID, setLogClusterID] = useState('');
   const [searchParams, setSearchParams] = useSearchParams();
@@ -373,6 +374,9 @@ export function KubernetesClusterDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [registration, setRegistration] = useState<KubernetesRegistration | null>(null);
   const [upgradeCluster, setUpgradeCluster] = useState<KubernetesCluster | null>(null);
+  const [uninstallCluster, setUninstallCluster] = useState<KubernetesCluster | null>(null);
+  const [deleteClusterTarget, setDeleteClusterTarget] = useState<KubernetesCluster | null>(null);
+  const [deletingCluster, setDeletingCluster] = useState(false);
   const resourceViewRef = useRef<HTMLDivElement | null>(null);
   const [resourceQuery, setResourceQuery] = useState('');
   const [appliedResourceQuery, setAppliedResourceQuery] = useState('');
@@ -850,6 +854,18 @@ export function KubernetesClusterDetailPage() {
     setResourceFilterRetryNonce((value) => value + 1);
   }, []);
 
+  async function removeCluster(target: KubernetesCluster) {
+    setDeletingCluster(true);
+    try {
+      await deleteKubernetesCluster(target.id);
+      navigate('/clusters');
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setDeletingCluster(false);
+    }
+  }
+
   async function rotateToken() {
     if (!cluster) return;
     if (!(await confirmAction(tr(`轮换 ${cluster.name} 的 bootstrap token？旧 token 将立即失效。`, `Rotate bootstrap token for ${cluster.name}? The old token becomes invalid immediately.`)))) {
@@ -877,9 +893,9 @@ export function KubernetesClusterDetailPage() {
       <main className="anim-fade flex flex-1 flex-col overflow-hidden">
         <PageHeader
           leading={
-            <Link to="/kubernetes" className="inline-flex items-center gap-1 hover:text-zinc-300">
+            <Link to="/clusters" className="inline-flex items-center gap-1 hover:text-zinc-300">
               <ArrowLeft size={12} />
-              {tr('Kubernetes 集群', 'Kubernetes clusters')}
+              {tr('集群', 'Clusters')}
             </Link>
           }
           title={cluster?.name ?? tr('Kubernetes 集群', 'Kubernetes cluster')}
@@ -903,6 +919,13 @@ export function KubernetesClusterDetailPage() {
                   {tr('轮换 Token', 'Rotate token')}
                 </Button>
               )}
+              {isAdmin && cluster && <DropdownMenu>
+                <DropdownMenuTrigger render={<Button />}>{tr('集群操作', 'Cluster actions')}</DropdownMenuTrigger>
+                <DropdownMenuContent>
+                  <DropdownMenuItem onClick={() => setUninstallCluster(cluster)}>{tr('卸载命令', 'Uninstall command')}</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setDeleteClusterTarget(cluster)}>{tr('删除集群', 'Delete cluster')}</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>}
             </>
           }
           extra={
@@ -1146,6 +1169,9 @@ export function KubernetesClusterDetailPage() {
 
       <RegistrationModal data={registration} onClose={() => setRegistration(null)} />
       <UpgradeCommandModal cluster={upgradeCluster} onClose={() => setUpgradeCluster(null)} />
+      <UninstallCommandModal cluster={uninstallCluster} onClose={() => setUninstallCluster(null)} />
+      <DeleteClusterModal cluster={deleteClusterTarget} deleting={deletingCluster}
+        onClose={() => { if (!deletingCluster) setDeleteClusterTarget(null); }} onDelete={(target) => void removeCluster(target)} />
     </></Tabs></>
   );
 }
@@ -5040,3 +5066,5 @@ function workloadTraceAttribute(kind: string) {
       return '';
   }
 }
+
+export { CreateClusterModal as CreateKubernetesClusterModal, RegistrationModal as KubernetesRegistrationModal };

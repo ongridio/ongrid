@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -36,7 +37,7 @@ type Diagnostics struct {
 }
 
 func (s *Service) Diagnostics(ctx context.Context, q Query) (*Diagnostics, error) {
-	if err := q.Validate(true); err != nil {
+	if err := s.validateQuery(ctx, &q, true); err != nil {
 		return nil, err
 	}
 	out := &Diagnostics{Checks: []Check{}, Instances: []Instance{}, TraceIDs: []string{}, Metadata: metadata(q)}
@@ -122,6 +123,17 @@ func (s *Service) Diagnostics(ctx context.Context, q Query) (*Diagnostics, error
 		matched := false
 		for _, resource := range resources {
 			attrs := resource.attributes()
+			if scope := q.resourceScope; scope != nil {
+				if scope.ClusterID != "" && attrs["cluster_id"] != scope.ClusterID {
+					continue
+				}
+				if scope.ClusterID == "" && !slices.Contains(scope.DeviceIDs, attrs["device_id"]) {
+					continue
+				}
+			}
+			if (q.DeviceID != "" && attrs["device_id"] != q.DeviceID) || (q.ClusterID != "" && attrs["cluster_id"] != q.ClusterID) {
+				continue
+			}
 			if (q.ServiceVersion != "" && attrs["service.version"] != q.ServiceVersion) || (q.InstanceID != "" && attrs["service.instance.id"] != q.InstanceID) {
 				continue
 			}
@@ -200,6 +212,9 @@ func canonicalTraceID(id string) string {
 }
 
 type traceSpan struct {
+	Status struct {
+		Code json.RawMessage `json:"code"`
+	} `json:"status"`
 	SpanID       string          `json:"spanId"`
 	ParentSpanID string          `json:"parentSpanId"`
 	Kind         json.RawMessage `json:"kind"`

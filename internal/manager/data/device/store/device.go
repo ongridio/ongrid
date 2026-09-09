@@ -29,6 +29,19 @@ func NewRepo(db *gorm.DB) *Repo { return &Repo{db: db} }
 // compile-time check.
 var _ biz.Repo = (*Repo)(nil)
 
+// DeviceIDsForNodes resolves the authoritative device.node_id relationship;
+// legacy topology nodes need not have a device_id property or a matching name.
+func (r *Repo) DeviceIDsForNodes(ctx context.Context, nodeIDs []uint64) ([]uint64, error) {
+	ids := []uint64{}
+	if len(nodeIDs) == 0 {
+		return ids, nil
+	}
+	err := r.db.WithContext(ctx).Model(&model.Device{}).
+		Joins("JOIN nodes ON nodes.id = devices.node_id AND nodes.type = 'device' AND nodes.deleted_at IS NULL").
+		Where("devices.node_id IN ?", nodeIDs).Limit(5001).Pluck("devices.id", &ids).Error
+	return ids, err
+}
+
 // FindOrCreateByFingerprint returns the existing row for seed.Fingerprint
 // or creates a fresh row populated from seed. Implementation uses an
 // ON CONFLICT DO NOTHING insert plus a follow-up select; this works on

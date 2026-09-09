@@ -90,7 +90,7 @@ func (h *Handler) runtime(w http.ResponseWriter, r *http.Request) {
 // @Router /api/v1/apm/alert-template [get]
 // @Success 200 {object} apm.AlertTemplate
 func (h *Handler) alertTemplate(w http.ResponseWriter, r *http.Request) {
-	h.serve(w, r, true, func(_ context.Context, q biz.Query) (any, error) {
+	h.serve(w, r, true, func(ctx context.Context, q biz.Query) (any, error) {
 		values := r.URL.Query()
 		threshold, err := strconv.ParseFloat(values.Get("threshold"), 64)
 		if err != nil {
@@ -104,7 +104,7 @@ func (h *Handler) alertTemplate(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return nil, errs.ErrInvalid
 		}
-		return biz.BuildAlertTemplate(q, values.Get("metric"), threshold, minimum, dwell)
+		return h.svc.AlertTemplate(ctx, q, values.Get("metric"), threshold, minimum, dwell)
 	})
 }
 
@@ -139,6 +139,13 @@ func parseQuery(r *http.Request) (biz.Query, error) {
 	values := r.URL.Query()
 	q := biz.Query{MetricSource: values.Get("metric_source"), Protocol: values.Get("protocol"), MetricFormat: values.Get("metric_format"), ServiceName: values.Get("service_name"), Operation: values.Get("operation"), ServiceVersion: values.Get("service_version"), InstanceID: values.Get("instance_id"), SpanKind: values.Get("span_kind"), Sort: values.Get("sort"), Search: values.Get("search")}
 	var err error
+	q.DeviceID, q.ClusterID = values.Get("device_id"), values.Get("cluster_id")
+	if values.Has("cluster_node_id") {
+		q.ClusterNodeID, err = strconv.ParseUint(values.Get("cluster_node_id"), 10, 64)
+		if err != nil || q.ClusterNodeID == 0 {
+			return q, errs.ErrInvalid
+		}
+	}
 	q.Start, err = time.Parse(time.RFC3339Nano, values.Get("start"))
 	if err != nil {
 		return q, errs.ErrInvalid

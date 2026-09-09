@@ -12,8 +12,46 @@ import (
 	model "github.com/ongridio/ongrid/internal/manager/model/device"
 	edgemodel "github.com/ongridio/ongrid/internal/manager/model/edge"
 	k8smodel "github.com/ongridio/ongrid/internal/manager/model/k8s"
+	topologymodel "github.com/ongridio/ongrid/internal/manager/model/topology"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
+
+func TestDeviceIDsForLegacyTopologyNodes(t *testing.T) {
+	db := newDeviceTestDB(t)
+	if err := db.AutoMigrate(&topologymodel.Node{}); err != nil {
+		t.Fatal(err)
+	}
+	nodes := []topologymodel.Node{{ID: 100, Type: "device", Name: "old name", PropsJSON: ""}, {ID: 101, Type: "device", Name: "old name", PropsJSON: `{}`}, {ID: 102, Type: "device", Name: "deleted device", PropsJSON: ""}}
+	if err := db.Create(&nodes).Error; err != nil {
+		t.Fatal(err)
+	}
+	for i, nodeID := range []uint64{100, 101, 102} {
+		device := sampleDevice([]string{"first", "second", "deleted"}[i])
+		device.ID, device.NodeID = uint64(650+i), &nodeID
+		if err := db.Create(device).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	repo, ctx := NewRepo(db), context.Background()
+	if err := repo.Delete(ctx, 652); err != nil {
+		t.Fatal(err)
+	}
+	ids, err := repo.DeviceIDsForNodes(ctx, []uint64{100, 102})
+	if err != nil || len(ids) != 1 || ids[0] != 650 {
+		t.Fatalf("legacy device association: %v %v", ids, err)
+	}
+	if err := db.Delete(&nodes[1]).Error; err != nil {
+		t.Fatal(err)
+	}
+	ids, err = repo.DeviceIDsForNodes(ctx, []uint64{101})
+	if err != nil || len(ids) != 0 {
+		t.Fatalf("deleted node association: %v %v", ids, err)
+	}
+	ids, err = repo.DeviceIDsForNodes(ctx, nil)
+	if err != nil || len(ids) != 0 {
+		t.Fatalf("empty scope expanded: %v %v", ids, err)
+	}
+}
 
 func newDeviceTestDB(t *testing.T) *gorm.DB {
 	t.Helper()

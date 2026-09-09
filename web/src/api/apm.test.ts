@@ -5,6 +5,18 @@ import { server } from '@/test/msw-server';
 import { absoluteWindow, correlationFilters, logTraceLink, canonicalTraceID } from '@/lib/telemetryContext';
 
 describe('APM correlation', () => {
+  it('uses resolved device membership or Kubernetes telemetry identity and fails closed while unresolved', () => {
+    const p = new URLSearchParams({ service_name: 'orders', cluster_node_id: '101' });
+    expect(serviceTraceQL(p)).toContain('resource.device_id =~ "a^"');
+    p.set('cluster_device_ids', '42,43');
+    expect(serviceTraceQL(p)).toContain('resource.device_id =~ "^(42|43)$"');
+    p.set('device_id', '42');
+    expect(serviceTraceQL(p)).toContain('resource.device_id = "42"');
+    p.set('telemetry_cluster_id', '7');
+    expect(serviceTraceQL(p)).toContain('resource.cluster_id = "7"');
+    expect(serviceTraceQL(p)).not.toContain('resource.device_id =~');
+    expect(serviceTraceQL(p)).not.toContain('cluster_id = "101"');
+  });
   it('keeps trace-sample service discovery valid after visiting an all-protocol service', async () => {
     let received: URL | undefined;
     server.use(http.get('/api/v1/apm/services', ({ request }) => {
@@ -26,6 +38,8 @@ describe('APM correlation', () => {
     environment: '',
     service_namespace: 'trade',
     span_kind: 'server',
+    device_id: '42',
+    cluster_id: '7',
   });
   it('preserves full identity and exact time while resetting list pagination', () => {
     const next = serviceParams(params, {
@@ -37,6 +51,10 @@ describe('APM correlation', () => {
     expect(next.get('start')).toBe(params.get('start'));
     expect(next.get('environment')).toBe('staging');
     expect(next.get('protocol')).toBe('all');
+    expect(next.get('device_id')).toBe('42');
+    expect(next.get('cluster_id')).toBe('7');
+    expect(serviceTraceQL(next)).toContain('resource.device_id = "42"');
+    expect(serviceTraceQL(next)).toContain('resource.cluster_id = "7"');
     expect(serviceTraceQL(next)).not.toContain('span.http');
     expect(serviceTraceQL(next)).not.toContain('span.rpc');
     expect(serviceTraceQL(params)).toContain(String.raw`resource.service.name = "orders\"}"`);

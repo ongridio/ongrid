@@ -70,10 +70,11 @@ func (r *Repo) CreateRepo(ctx context.Context, repo *model.Repository) error {
 }
 
 // UpdateRepoSync refreshes last_synced_at + last_sync_error + file_count.
-func (r *Repo) UpdateRepoSync(ctx context.Context, id uint64, fileCount int, syncErr string) error {
+func (r *Repo) UpdateRepoSync(ctx context.Context, id uint64, fileCount int, syncErr string, indexedCommit string) error {
 	res := r.db.WithContext(ctx).Model(&model.Repository{}).Where("id = ?", id).
 		Updates(map[string]any{
 			"file_count":      fileCount,
+			"indexed_commit":  indexedCommit,
 			"last_sync_error": syncErr,
 			"last_synced_at":  gorm.Expr("CURRENT_TIMESTAMP"),
 		})
@@ -158,6 +159,28 @@ func (r *Repo) TouchSSHIdentityUsage(ctx context.Context, id uint64) error {
 // DeleteSSHIdentity removes by id.
 func (r *Repo) DeleteSSHIdentity(ctx context.Context, id uint64) error {
 	res := r.db.WithContext(ctx).Where("id = ?", id).Delete(&model.SSHIdentity{})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return errs.ErrNotFound
+	}
+	return nil
+}
+
+// UpdateRepoSource persists the last successful full fetch independently of indexing.
+func (r *Repo) UpdateRepoSource(ctx context.Context, repo *model.Repository) error {
+	return r.db.WithContext(ctx).Model(&model.Repository{}).Where("id = ?", repo.ID).Updates(map[string]any{
+		"commit_count": repo.CommitCount, "tag_count": repo.TagCount, "branch_count": repo.BranchCount,
+		"history_complete": repo.HistoryComplete, "source_synced_at": repo.SourceSyncedAt,
+	}).Error
+}
+
+// UpdateRepo makes the new indexing ref due immediately; source history is kept.
+func (r *Repo) UpdateRepo(ctx context.Context, id uint64, branch, description string) error {
+	res := r.db.WithContext(ctx).Model(&model.Repository{}).Where("id = ?", id).Updates(map[string]any{
+		"branch": branch, "description": description, "last_synced_at": nil, "last_sync_error": "",
+	})
 	if res.Error != nil {
 		return res.Error
 	}

@@ -356,6 +356,7 @@ func (a *Agent) runInternal(ctx context.Context, sessionID string, userID uint64
 		return nil, errs.ErrNotFound
 	}
 	ctx = basetool.WithSessionID(ctx, sess.ID)
+	ctx = basetool.WithAPMSource(ctx, sess.APMSource)
 	writeEnabled := false
 	if a.writeEnabled != nil {
 		writeEnabled = a.writeEnabled(ctx)

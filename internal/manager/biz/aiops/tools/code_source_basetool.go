@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"path"
+	"strings"
 
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	knowledgebiz "github.com/ongridio/ongrid/internal/manager/biz/knowledge"
@@ -40,11 +42,11 @@ const listRepoSourcesDescription = "List one directory level of a registered git
 var listRepoSourcesSchema = json.RawMessage(`{
   "type": "object",
   "properties": {
-    "revision": {"type": "string", "description": "Exact locally synced Git tag (prefer refs/tags/v1.0.0) or full commit SHA. Omit only for unversioned browsing of synced HEAD. Missing revisions fail; never fall back to HEAD. Reuse the returned commit_sha in subsequent calls."},
+    "revision": {"type": "string", "description": "Exact locally synced Git tag (prefer refs/tags/v1.0.0) or full commit SHA. Required. Use explicit HEAD only for unversioned browsing, never for a deployed-version investigation. Missing revisions fail; never fall back to HEAD. Reuse the returned commit_sha in subsequent calls."},
     "repo": {"type": "string", "description": "Which registered repo: its URL (or a unique substring like \"liaison-cloud\") or numeric id."},
     "subpath": {"type": "string", "description": "Directory inside the repo to list (e.g. \"internal/manager\"). Empty = repo root."}
   },
-  "required": ["repo"]
+  "required": ["revision", "repo"]
 }`)
 
 type listRepoSourcesArgs struct {
@@ -84,6 +86,15 @@ func (t *ListRepoSourcesTool) InvokableRun(ctx context.Context, argsJSON string,
 	if err := json.Unmarshal([]byte(argsJSON), &in); err != nil {
 		return "", fmt.Errorf("%s: bad args: %w", ToolNameListRepoSources, err)
 	}
+	if strings.TrimSpace(in.Revision) == "" {
+		return "", fmt.Errorf("%s: revision required; use the deployed tag/full commit SHA, or explicit HEAD only for unversioned browsing", ToolNameListRepoSources)
+	}
+	if err := applyAPMSourceScope(ctx, &in.Repo, &in.Revision, &in.Subpath); err != nil {
+		return "", err
+	}
+	if in.Revision == "HEAD" {
+		in.Revision = "" // Explicit unversioned browsing retains the existing biz behavior.
+	}
 	res, err := t.svc.ListRepoSources(ctx, in.Repo, in.Subpath, in.Revision)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", ToolNameListRepoSources, err)
@@ -95,18 +106,18 @@ func (t *ListRepoSourcesTool) InvokableRun(ctx context.Context, argsJSON string,
 
 const ToolNameReadSource = "read_source"
 
-const readSourceDescription = "Read a source file (or a 1-indexed [start_line,end_line] window) from a registered git repo. Binary files are refused; large files are capped."
+const readSourceDescription = "Read a source file (or a 1-indexed [start_line,end_line] window) from a registered git repo. The content includes absolute line numbers as N: text; cite these numbers without recounting. Binary files are refused; large files are capped."
 
 var readSourceSchema = json.RawMessage(`{
   "type": "object",
   "properties": {
-    "revision": {"type": "string", "description": "Exact locally synced Git tag (prefer refs/tags/v1.0.0) or full commit SHA. Omit only for unversioned browsing of synced HEAD. Missing revisions fail; never fall back to HEAD. Reuse the returned commit_sha in subsequent calls."},
+    "revision": {"type": "string", "description": "Exact locally synced Git tag (prefer refs/tags/v1.0.0) or full commit SHA. Required. Use explicit HEAD only for unversioned browsing, never for a deployed-version investigation. Missing revisions fail; never fall back to HEAD. Reuse the returned commit_sha in subsequent calls."},
     "repo": {"type": "string", "description": "Which registered repo: URL / unique substring / numeric id."},
     "path": {"type": "string", "description": "File path relative to repo root, e.g. \"internal/pkg/tunnel/messages.go\"."},
     "start_line": {"type": "integer", "description": "1-indexed first line to return. Omit/0 = whole file. Set this to the line from a stack trace.", "minimum": 1},
     "end_line": {"type": "integer", "description": "Inclusive last line. Omit/0 = to EOF (or a sensible window around start_line)."}
   },
-  "required": ["repo", "path"]
+  "required": ["revision", "repo", "path"]
 }`)
 
 type readSourceArgs struct {
@@ -148,9 +159,31 @@ func (t *ReadSourceTool) InvokableRun(ctx context.Context, argsJSON string, _ ..
 	if err := json.Unmarshal([]byte(argsJSON), &in); err != nil {
 		return "", fmt.Errorf("%s: bad args: %w", ToolNameReadSource, err)
 	}
+	if strings.TrimSpace(in.Revision) == "" {
+		return "", fmt.Errorf("%s: revision required; use the deployed tag/full commit SHA, or explicit HEAD only for unversioned browsing", ToolNameReadSource)
+	}
+	if err := applyAPMSourceScope(ctx, &in.Repo, &in.Revision, &in.Path); err != nil {
+		return "", err
+	}
+	if in.Revision == "HEAD" {
+		in.Revision = "" // Explicit unversioned browsing retains the existing biz behavior.
+	}
 	res, err := t.svc.ReadSource(ctx, in.Repo, in.Path, in.StartLine, in.EndLine, in.Revision)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", ToolNameReadSource, err)
+	}
+	// Number at the tool boundary; the underlying source API still returns raw text.
+	if res != nil {
+		copy := *res
+		var numbered strings.Builder
+		for i, line := range strings.Split(res.Content, "\n") {
+			if res.StartLine+i > res.EndLine {
+				break
+			}
+			fmt.Fprintf(&numbered, "%d: %s\n", res.StartLine+i, line)
+		}
+		copy.Content = numbered.String()
+		return marshalToolJSON(ToolNameReadSource, &copy)
 	}
 	return marshalToolJSON(ToolNameReadSource, res)
 }
@@ -164,13 +197,13 @@ const grepSourceDescription = "Search a registered git repo's tracked source for
 var grepSourceSchema = json.RawMessage(`{
   "type": "object",
   "properties": {
-    "revision": {"type": "string", "description": "Exact locally synced Git tag (prefer refs/tags/v1.0.0) or full commit SHA. Omit only for unversioned browsing of synced HEAD. Missing revisions fail; never fall back to HEAD. Reuse the returned commit_sha in subsequent calls."},
+    "revision": {"type": "string", "description": "Exact locally synced Git tag (prefer refs/tags/v1.0.0) or full commit SHA. Required. Use explicit HEAD only for unversioned browsing, never for a deployed-version investigation. Missing revisions fail; never fall back to HEAD. Reuse the returned commit_sha in subsequent calls."},
     "repo": {"type": "string", "description": "Which registered repo: URL / unique substring / numeric id."},
     "pattern": {"type": "string", "description": "git-grep basic regex. e.g. a function name \"func ResolveEdgeID\" or an error string \"connection refused\"."},
     "path_glob": {"type": "string", "description": "Optional pathspec to narrow the search, e.g. \"*.go\" or \"internal/manager/\". Empty = whole repo."},
     "max_results": {"type": "integer", "description": "Cap on hits returned. Default 50, max 200.", "default": 50, "minimum": 1, "maximum": 200}
   },
-  "required": ["repo", "pattern"]
+  "required": ["revision", "repo", "pattern"]
 }`)
 
 type grepSourceArgs struct {
@@ -212,6 +245,15 @@ func (t *GrepSourceTool) InvokableRun(ctx context.Context, argsJSON string, _ ..
 	if err := json.Unmarshal([]byte(argsJSON), &in); err != nil {
 		return "", fmt.Errorf("%s: bad args: %w", ToolNameGrepSource, err)
 	}
+	if strings.TrimSpace(in.Revision) == "" {
+		return "", fmt.Errorf("%s: revision required; use the deployed tag/full commit SHA, or explicit HEAD only for unversioned browsing", ToolNameGrepSource)
+	}
+	if err := applyAPMSourceScope(ctx, &in.Repo, &in.Revision, &in.PathGlob); err != nil {
+		return "", err
+	}
+	if in.Revision == "HEAD" {
+		in.Revision = "" // Explicit unversioned browsing retains the existing biz behavior.
+	}
 	res, err := t.svc.GrepSource(ctx, in.Repo, in.Pattern, in.PathGlob, in.MaxResults, in.Revision)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", ToolNameGrepSource, err)
@@ -226,4 +268,50 @@ func marshalToolJSON(toolName string, v any) (string, error) {
 		return "", fmt.Errorf("%s: marshal response: %w", toolName, err)
 	}
 	return string(out), nil
+}
+
+// All three source tools share the persisted APM boundary. The LLM cannot change
+// repositories, switch to HEAD, or escape the bound source directory.
+func applyAPMSourceScope(ctx context.Context, repo, revision, subpath *string) error {
+	scope := basetool.APMSourceFromContext(ctx)
+	if scope == nil {
+		return nil
+	}
+	if scope.Error != "" {
+		return fmt.Errorf("APM source unavailable: %s", scope.Error)
+	}
+	if scope.CommitSHA == "" || scope.RepoID == "" {
+		return fmt.Errorf("APM source scope incomplete")
+	}
+	if *repo != scope.RepoID {
+		return fmt.Errorf("APM source: repo must be %s", scope.RepoID)
+	}
+	if *revision != scope.CommitSHA && *revision != scope.Revision {
+		return fmt.Errorf("APM source: revision must be pinned commit %s", scope.CommitSHA)
+	}
+	*revision = scope.CommitSHA
+	// Restrict Git pathspecs to plain paths/globs inside the bound directory.
+	// Reject magic/exclusion syntax and traversal instead of attempting to rewrite it.
+	if strings.ContainsAny(*subpath, ":\\") || strings.HasPrefix(*subpath, "/") {
+		return fmt.Errorf("APM source: invalid source path")
+	}
+	for _, part := range strings.Split(*subpath, "/") {
+		if part == ".." {
+			return fmt.Errorf("APM source: path escapes scope")
+		}
+	}
+	dir := strings.Trim(scope.SourceDirectory, "/")
+	if dir == "" {
+		return nil
+	}
+	if *subpath == "" {
+		*subpath = dir
+		return nil
+	}
+	clean := path.Clean(*subpath)
+	if clean != dir && !strings.HasPrefix(clean, dir+"/") {
+		return fmt.Errorf("APM source: path must stay inside %s", dir)
+	}
+	*subpath = clean
+	return nil
 }

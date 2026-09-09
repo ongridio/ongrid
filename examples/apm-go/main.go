@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -21,6 +22,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
@@ -33,6 +35,10 @@ import (
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 )
+
+// Set from the exact source checkout at build time.
+var version = "dev"
+var commit = ""
 
 func main() {
 	if err := run(); err != nil {
@@ -47,7 +53,13 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("create OTLP exporter: %w", err)
 	}
-	res, err := resource.New(ctx, resource.WithFromEnv(), resource.WithTelemetrySDK())
+	buildVersion := version
+	if buildVersion == "dev" {
+		buildVersion = envDefault("SERVICE_VERSION", "dev")
+	}
+	res, err := resource.New(ctx, resource.WithFromEnv(), resource.WithTelemetrySDK(), resource.WithAttributes(
+		attribute.String("service.version", buildVersion), attribute.String("vcs.ref.head.revision", commit),
+	))
 	if err != nil {
 		return fmt.Errorf("create resource: %w", err)
 	}
@@ -84,7 +96,7 @@ func run() error {
 	}()
 	otel.SetTracerProvider(provider)
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
-	log := slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service.name", os.Getenv("OTEL_SERVICE_NAME"), "service.namespace", envDefault("SERVICE_NAMESPACE", "trade"), "deployment.environment.name", envDefault("DEPLOYMENT_ENVIRONMENT", "development"), "service.instance.id", os.Getenv("SERVICE_INSTANCE_ID"), "service.version", os.Getenv("SERVICE_VERSION"))
+	log := slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service.name", os.Getenv("OTEL_SERVICE_NAME"), "service.namespace", envDefault("SERVICE_NAMESPACE", "trade"), "deployment.environment.name", envDefault("DEPLOYMENT_ENVIRONMENT", "development"), "service.instance.id", os.Getenv("SERVICE_INSTANCE_ID"), "service.version", buildVersion, "commit_sha", commit)
 	mux := application(log)
 	server := &http.Server{Addr: "127.0.0.1:" + envDefault("HTTP_PORT", "18080"), Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	listener, err := net.Listen("tcp", "127.0.0.1:"+envDefault("RPC_PORT", "18081"))
@@ -114,6 +126,13 @@ func run() error {
 
 func application(log *slog.Logger) http.Handler {
 	mux := http.NewServeMux()
+	mux.Handle("GET /checkout/{id}", otelhttp.NewHandler(checkoutHandler(log), "GET /checkout/{id}"))
+	mux.HandleFunc("GET /build", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]string{"version": version, "commit_sha": commit}); err != nil {
+			log.Debug("write build info", "error", err)
+		}
+	})
 	mux.Handle("GET /orders/{id}", otelhttp.NewHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		span := trace.SpanFromContext(r.Context())
 		sc := span.SpanContext()

@@ -4,7 +4,7 @@
 //  1. Manual docs: user pastes markdown via the SPA's /knowledge page
 //     (or POST /v1/knowledge/docs). We embed and upsert into qdrant.
 //  2. Repo sync: user registers a git URL; Sync() shells `git clone
-//     --depth=1` (or `git pull` when the dir already exists) into
+//     --no-single-branch` (or full-history fetch on existing clones) into
 //     /var/lib/ongrid/repos/<id>, walks the tree for .md / .txt /
 //     .rst / .yaml / .yml / .toml / .json files, embeds each, replaces
 //     the qdrant point set for that repo.
@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -47,7 +48,9 @@ type RepoStore interface {
 	GetRepo(ctx context.Context, id uint64) (*model.Repository, error)
 	GetRepoByURL(ctx context.Context, url string) (*model.Repository, error)
 	CreateRepo(ctx context.Context, repo *model.Repository) error
-	UpdateRepoSync(ctx context.Context, id uint64, fileCount int, syncErr string) error
+	UpdateRepoSync(ctx context.Context, id uint64, fileCount int, syncErr string, indexedCommit string) error
+	UpdateRepoSource(ctx context.Context, repo *model.Repository) error
+	UpdateRepo(ctx context.Context, id uint64, branch, description string) error
 	DeleteRepo(ctx context.Context, id uint64) error
 
 	// SSH identities — managed in the same data layer for
@@ -97,6 +100,8 @@ type Usecase struct {
 	repo     RepoStore
 	vec      QdrantClient
 	embed    embedding.Embedder
+	active   sync.Map // Per-repository mutation guard, including manual sync and deletion.
+	syncWake chan struct{}
 	cloneDir string
 	log      *slog.Logger
 
@@ -167,7 +172,7 @@ func New(ctx context.Context, repo RepoStore, vec QdrantClient, embed embedding.
 				slog.Any("err", err))
 		}
 	}
-	return &Usecase{repo: repo, vec: vec, embed: embed, cloneDir: cloneDir, log: log}, nil
+	return &Usecase{repo: repo, vec: vec, embed: embed, cloneDir: cloneDir, log: log, syncWake: make(chan struct{}, 1)}, nil
 }
 
 // ----- Doc CRUD -----
@@ -850,8 +855,7 @@ func (u *Usecase) EnsureRepoSeed(ctx context.Context, in CreateRepoInput) (*mode
 	return u.CreateRepo(ctx, in)
 }
 
-// CreateRepo persists a repo registration. Doesn't sync — caller hits
-// /v1/knowledge/repos/{id}/sync to pull.
+// CreateRepo persists a registration and wakes the background sync loop.
 func (u *Usecase) CreateRepo(ctx context.Context, in CreateRepoInput) (*model.Repository, error) {
 	url := strings.TrimSpace(in.URL)
 	if url == "" {
@@ -860,6 +864,12 @@ func (u *Usecase) CreateRepo(ctx context.Context, in CreateRepoInput) (*model.Re
 	branch := strings.TrimSpace(in.Branch)
 	if branch == "" {
 		branch = "main"
+	}
+	if err := u.validateRepository(ctx, url, branch); err != nil {
+		return nil, err
+	}
+	if len(strings.TrimSpace(in.Description)) > 512 {
+		return nil, fmt.Errorf("%w: description exceeds 512 bytes", errs.ErrInvalid)
 	}
 	now := time.Now().UTC()
 	r := &model.Repository{
@@ -872,12 +882,26 @@ func (u *Usecase) CreateRepo(ctx context.Context, in CreateRepoInput) (*model.Re
 	if err := u.repo.CreateRepo(ctx, r); err != nil {
 		return nil, fmt.Errorf("knowledge: create repo: %w", err)
 	}
+	select {
+	case u.syncWake <- struct{}{}:
+	default:
+	}
 	return r, nil
 }
 
 // ListRepos returns every registered repo.
 func (u *Usecase) ListRepos(ctx context.Context) ([]*model.Repository, error) {
-	return u.repo.ListRepos(ctx)
+	rows, err := u.repo.ListRepos(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*model.Repository, 0, len(rows))
+	for _, row := range rows {
+		r := *row
+		_, r.Syncing = u.active.Load(r.ID)
+		out = append(out, &r)
+	}
+	return out, nil
 }
 
 // DeleteRepo removes the registration + every qdrant point owned by
@@ -888,6 +912,10 @@ func (u *Usecase) ListRepos(ctx context.Context) ([]*model.Repository, error) {
 // the onRepoDelete hook can persist a seed-optout sentinel scoped to
 // that exact URL.
 func (u *Usecase) DeleteRepo(ctx context.Context, id uint64) error {
+	if _, busy := u.active.LoadOrStore(id, true); busy {
+		return fmt.Errorf("%w: repository syncing", errs.ErrConflict)
+	}
+	defer u.active.Delete(id)
 	var (
 		deletedURL string
 		preRepo    *model.Repository
@@ -925,14 +953,18 @@ func (u *Usecase) DeleteRepo(ctx context.Context, id uint64) error {
 // walks the tree for indexable files, embeds them, and replaces the
 // qdrant point set for repo_id=id. Synchronous.
 func (u *Usecase) Sync(ctx context.Context, id uint64) (*model.Repository, error) {
-	if u.embed == nil {
-		return nil, fmt.Errorf("%w: embedder not configured (set ONGRID_EMBEDDING_API_KEY)", errs.ErrNotWiredYet)
+	if _, busy := u.active.LoadOrStore(id, true); busy {
+		return nil, fmt.Errorf("%w: repository syncing", errs.ErrConflict)
 	}
+	defer u.active.Delete(id)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
 	repo, err := u.repo.GetRepo(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	dir := u.repoDir(id)
+	indexedCommit := ""
 	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
 		return nil, fmt.Errorf("knowledge: mkdir parent: %w", err)
 	}
@@ -981,7 +1013,7 @@ func (u *Usecase) Sync(ctx context.Context, id uint64) (*model.Repository, error
 		//     in place. If anything fails we fall through to the slow
 		//     path — the worst case is "wasted bandwidth", never corruption.
 		//
-		//   Slow / repair: clone --depth=1 into a sibling tmp dir, then on
+		//   Slow / repair: full clone into a sibling tmp dir, then on
 		//     success rm -rf <dir> and os.Rename(tmp, dir). os.Rename is
 		//     atomic within the same filesystem (and our parent is one
 		//     dir, so it's always the same FS); a crash mid-sync leaves
@@ -1005,6 +1037,29 @@ func (u *Usecase) Sync(ctx context.Context, id uint64) (*model.Repository, error
 				return u.recordSyncFailure(ctx, repo, fmt.Errorf("git clone failed: %v\n%s", err, strings.TrimSpace(out)))
 			}
 		}
+	}
+
+	if !IsBuiltinVaultURL(repo.URL) {
+		if err := readSourceStats(ctx, dir, repo); err != nil {
+			return u.recordSyncFailure(ctx, repo, err)
+		}
+		if err := u.repo.UpdateRepoSource(ctx, repo); err != nil {
+			return nil, fmt.Errorf("knowledge: save source stats: %w", err)
+		}
+		newHead, err := runGit(ctx, dir, nil, "rev-parse", "HEAD")
+		if err != nil {
+			return u.recordSyncFailure(ctx, repo, err)
+		}
+		indexedCommit = strings.TrimSpace(newHead)
+		if repo.IndexedCommit == indexedCommit && repo.LastSyncedAt != nil && repo.LastSyncError == "" {
+			if err := u.repo.UpdateRepoSync(ctx, id, repo.FileCount, "", indexedCommit); err != nil {
+				return nil, err
+			}
+			return u.repo.GetRepo(ctx, id)
+		}
+	}
+	if u.embed == nil {
+		return u.recordSyncFailure(ctx, repo, fmt.Errorf("%w: embedder not configured", errs.ErrNotWiredYet))
 	}
 
 	files, err := scanRepoFiles(dir)
@@ -1109,7 +1164,7 @@ func (u *Usecase) Sync(ctx context.Context, id uint64) (*model.Repository, error
 	// file_count tracks distinct files (the operator-facing "how many
 	// docs are in this repo"), not the chunk fanout count.
 	indexed := len(files)
-	if err := u.repo.UpdateRepoSync(ctx, id, indexed, ""); err != nil {
+	if err := u.repo.UpdateRepoSync(ctx, id, indexed, "", indexedCommit); err != nil {
 		return nil, fmt.Errorf("knowledge: update sync state: %w", err)
 	}
 	return u.repo.GetRepo(ctx, id)
@@ -1401,7 +1456,9 @@ func (u *Usecase) upsertDoc(ctx context.Context, d *model.Doc) error {
 
 func (u *Usecase) recordSyncFailure(ctx context.Context, repo *model.Repository, syncErr error) (*model.Repository, error) {
 	u.log.Warn("knowledge: sync failed", slog.Uint64("repo_id", repo.ID), slog.Any("err", syncErr))
-	_ = u.repo.UpdateRepoSync(ctx, repo.ID, 0, syncErr.Error())
+	if err := u.repo.UpdateRepoSync(ctx, repo.ID, 0, syncErr.Error(), ""); err != nil {
+		return nil, errors.Join(syncErr, fmt.Errorf("save sync failure: %w", err))
+	}
 	return nil, syncErr
 }
 
@@ -1455,7 +1512,11 @@ func (u *Usecase) syncFastPath(ctx context.Context, dir string, gitEnv []string,
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
 		return false
 	}
-	if _, err := runGitWithRetry(ctx, dir, gitEnv, "fetch", "--depth=1", "origin", branch); err != nil {
+	if _, err := runGitWithRetry(ctx, dir, gitEnv, "fetch", "origin", branch); err != nil {
+		return false
+	}
+	// Preserve the indexing target in FETCH_HEAD while updating all source history.
+	if _, err := fetchSourceHistory(ctx, dir, gitEnv); err != nil {
 		return false
 	}
 	// FETCH_HEAD is what git fetch always writes; using it sidesteps the
@@ -1468,6 +1529,24 @@ func (u *Usecase) syncFastPath(ctx context.Context, dir string, gitEnv []string,
 	// failed sync; otherwise scanRepoFiles indexes stale content.
 	_, _ = runGit(ctx, dir, nil, "clean", "-fdx")
 	return true
+}
+
+// Upgrade existing single-branch shallow clones in place. The working tree is
+// still only the indexing ref; source readers use immutable objects directly.
+func fetchSourceHistory(ctx context.Context, dir string, gitEnv []string) (string, error) {
+	if out, err := runGit(ctx, dir, nil, "config", "--replace-all", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"); err != nil {
+		return out, err
+	}
+	shallow, err := runGit(ctx, dir, nil, "rev-parse", "--is-shallow-repository")
+	if err != nil {
+		return shallow, err
+	}
+	args := []string{"fetch", "--tags", "--no-write-fetch-head"}
+	if strings.TrimSpace(shallow) == "true" {
+		args = append(args, "--unshallow")
+	}
+	args = append(args, "origin", "+refs/heads/*:refs/remotes/origin/*")
+	return runGitWithRetry(ctx, dir, gitEnv, args...)
 }
 
 // syncAtomicReplace performs the full repair path: clone into a sibling
@@ -1502,8 +1581,13 @@ func (u *Usecase) syncAtomicReplace(ctx context.Context, dir string, gitEnv []st
 		// than a hang. Harmless on the ssh path.
 		out, cloneErr := runGit(ctx, "", gitEnv,
 			"-c", "http.lowSpeedLimit=1024", "-c", "http.lowSpeedTime=20",
-			"clone", "--depth=1", "--branch", branch, repoURL, tmp)
+			"clone", "--no-single-branch", "--branch", branch, repoURL, tmp)
+		if cloneErr == nil {
+			// Include tags outside the default branch history.
+			out, cloneErr = fetchSourceHistory(ctx, tmp, gitEnv)
+		}
 		if cloneErr != nil {
+			// Best-effort cleanup; the published clone is untouched.
 			_ = os.RemoveAll(tmp)
 			lastOut, lastErr = out, cloneErr
 			// Classify on output AND the error string: a WaitDelay/ctx kill

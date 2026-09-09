@@ -1,0 +1,26 @@
+syntax = "proto3";
+package ongrid.manager.knowledge.v1;
+option go_package = "github.com/ongridio/ongrid/api/gen/manager/knowledge/v1;knowledgev1";
+
+// Additive fields on the existing knowledge repository HTTP DTO.
+message RepositorySourceStatus {
+  int64 commit_count = 1 [json_name = "commit_count"];
+  int64 tag_count = 2 [json_name = "tag_count"];
+  int64 branch_count = 3 [json_name = "branch_count"];
+  bool history_complete = 4 [json_name = "history_complete"];
+  string source_synced_at = 5 [json_name = "source_synced_at"];
+  bool syncing = 6;
+}
+
+// POST /v1/knowledge/repos validates access and the exact ref before insertion.
+message CreateRepositoryRequest {
+  string url = 1;
+  string branch = 2;
+  string description = 3;
+}
+// PATCH /v1/knowledge/repos/{id}; URL and repository identity are immutable.
+message UpdateRepositoryRequest {
+  uint64 id = 1;
+  string branch = 2;
+  string description = 3;
+}

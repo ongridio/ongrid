@@ -1,6 +1,9 @@
 import { Input } from '@/components/ui';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { Hint } from '@/components/ui/Tooltip';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/DropdownMenu';
+import { CreateKubernetesClusterModal, KubernetesRegistrationModal, KubernetesClusterDetailPage } from './Kubernetes';
+import type { KubernetesRegistration } from '@/api/kubernetes';
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
@@ -32,7 +35,7 @@ import {
   deleteNode,
   deleteRelation,
   getNode,
-  listNodes,
+  listAllNodes,
   listRelations,
   type TopologyNode,
   type TopologyRelation,
@@ -55,11 +58,11 @@ import {
   RenameDeviceClusterModal,
 } from "./clusters/ClusterManagementModals";
 import {
-  buildDeviceClusterSummaries,
+  buildClusterSummaries,
   clusterMembershipByDeviceNode,
   isDeviceCluster,
   relationSource,
-  type DeviceClusterSummary,
+  type ClusterSummary,
 } from "./clusters/model";
 import {
   buildClusterUpgradePlan,
@@ -73,14 +76,16 @@ export default function ClustersPage() {
   const { tr } = useI18n();
   const { isAdmin } = usePermissions();
   const navigate = useNavigate();
-  const [summaries, setSummaries] = useState<DeviceClusterSummary[]>([]);
+  const [summaries, setSummaries] = useState<ClusterSummary[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [kubernetesCreateOpen, setKubernetesCreateOpen] = useState(false);
+  const [registration, setRegistration] = useState<KubernetesRegistration | null>(null);
   const [deleteTarget, setDeleteTarget] =
-    useState<DeviceClusterSummary | null>(null);
+    useState<ClusterSummary | null>(null);
   const [deletingClusterID, setDeletingClusterID] = useState<number | null>(
     null,
   );
@@ -91,13 +96,13 @@ export default function ClustersPage() {
       else setLoading(true);
       try {
         const [nodes, devicesOut, relations, profiles] = await Promise.all([
-          loadAllNodes("cluster"),
+          listAllNodes("cluster"),
           listDevices(),
           loadAllRelations({}),
           loadAllEnrollmentProfiles(),
         ]);
         setSummaries(
-          buildDeviceClusterSummaries(
+          buildClusterSummaries(
             nodes,
             devicesOut.items ?? [],
             relations,
@@ -159,11 +164,19 @@ export default function ClustersPage() {
     }
   }
 
+  const createMenu = <DropdownMenu>
+                  <DropdownMenuTrigger render={<Button variant="primary" />}><Plus size={13} />{tr("新建集群", "New cluster")}</DropdownMenuTrigger>
+                  <DropdownMenuContent>
+                    <DropdownMenuItem onClick={() => setCreateOpen(true)}>{tr('设备接入', 'Device enrollment')}</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setKubernetesCreateOpen(true)}>{tr('Kubernetes 接入', 'Kubernetes enrollment')}</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>;
+
   return (
     <>
       <main className="anim-fade flex min-w-0 flex-1 flex-col overflow-hidden">
         <PageHeader
-          title={tr("设备集群", "Device clusters")}
+          title={tr("集群", "Clusters")}
           subtitle={tr(
             `${summaries.length} 个集群 · ${deviceTotal} 台设备 · ${onlineTotal} 台在线`,
             `${summaries.length} clusters · ${deviceTotal} devices · ${onlineTotal} online`,
@@ -178,10 +191,7 @@ export default function ClustersPage() {
                 {tr("刷新", "Refresh")}
               </Button>
               {isAdmin && (
-                <Button variant="primary" onClick={() => setCreateOpen(true)}>
-                  <Plus size={13} />
-                  {tr("新建集群", "New cluster")}
-                </Button>
+                createMenu
               )}
             </>
           }
@@ -214,26 +224,18 @@ export default function ClustersPage() {
                 title={
                   query
                     ? tr("没有匹配的集群", "No matching clusters")
-                    : tr("还没有设备集群", "No device clusters yet")
+                    : tr("还没有集群", "No clusters yet")
                 }
                 hint={
                   query
                     ? tr("尝试其他搜索关键词", "Try another search term")
                     : tr(
-                        "创建设备集群后，可统一维护成员和批量安装命令。",
-                        "Create a cluster to manage members and installation commands together.",
+                        "新建集群并选择设备或 Kubernetes 接入方式。",
+                        "Create a cluster and choose device or Kubernetes enrollment.",
                       )
                 }
                 action={
-                  isAdmin && !query ? (
-                    <Button
-                      variant="primary"
-                      onClick={() => setCreateOpen(true)}
-                    >
-                      <Plus size={13} />
-                      {tr("新建集群", "New cluster")}
-                    </Button>
-                  ) : undefined
+                  isAdmin && !query ? createMenu : undefined
                 }
               />
             ) : (
@@ -243,6 +245,9 @@ export default function ClustersPage() {
                     <tr>
                       <th className="px-4 py-2.5 font-medium">
                         {tr("集群", "Cluster")}
+                      </th>
+                      <th className="px-4 py-2.5 font-medium">
+                        {tr("接入方式", "Enrollment")}
                       </th>
                       <th className="px-4 py-2.5 font-medium">
                         {tr("成员", "Members")}
@@ -293,6 +298,9 @@ export default function ClustersPage() {
           navigate(`/clusters/${cluster.id}`);
         }}
       />
+      <CreateKubernetesClusterModal open={kubernetesCreateOpen} onClose={() => setKubernetesCreateOpen(false)}
+        onCreated={(out) => { setKubernetesCreateOpen(false); setRegistration(out); void refresh(true); }} />
+      <KubernetesRegistrationModal data={registration} onClose={() => setRegistration(null)} />
       <DeleteDeviceClusterModal
         cluster={deleteTarget?.cluster ?? null}
         blockedReason={
@@ -314,7 +322,7 @@ function ClusterRow({
   deleting,
   onDelete,
 }: {
-  summary: DeviceClusterSummary;
+  summary: ClusterSummary;
   isAdmin: boolean;
   deleting: boolean;
   onDelete(): void;
@@ -322,6 +330,8 @@ function ClusterRow({
   const { tr } = useI18n();
   const navigate = useNavigate();
   const deleteBlockedReason = clusterDeleteBlockedReason(summary, tr);
+  const kubernetes = summary.cluster.props?.source === 'kubernetes';
+  const kubernetesStatus = String(summary.cluster.props?.status || 'pending');
   const description =
     typeof summary.cluster.props?.description === "string"
       ? summary.cluster.props.description
@@ -342,6 +352,7 @@ function ClusterRow({
           {description || `#${summary.cluster.id}`}
         </div>
       </td>
+      <td className="px-4 py-3 text-zinc-400">{kubernetes ? 'Kubernetes' : tr('设备', 'Device')}</td>
       <td className="px-4 py-3 text-zinc-300">
         <span className="font-medium text-zinc-100">
           {summary.members.length}
@@ -349,7 +360,9 @@ function ClusterRow({
         <span className="ml-1 text-zinc-600">{tr("台", "devices")}</span>
       </td>
       <td className="px-4 py-3">
-        {summary.members.length === 0 ? (
+        {kubernetes ? (
+          <span className="inline-flex items-center gap-1.5 text-zinc-400"><span className={`h-1.5 w-1.5 rounded-full ${kubernetesStatus === 'online' ? 'bg-emerald-500' : kubernetesStatus === 'degraded' ? 'bg-amber-500' : 'bg-zinc-500'}`} />{{ online: tr('在线', 'Online'), offline: tr('离线', 'Offline'), degraded: tr('降级', 'Degraded'), pending: tr('待连接', 'Pending') }[kubernetesStatus] || tr('未知', 'Unknown')}</span>
+        ) : summary.members.length === 0 ? (
           <span className="text-zinc-600">{tr("暂无成员", "No members")}</span>
         ) : (
           <div className="flex items-center gap-3">
@@ -410,7 +423,9 @@ function ClusterRow({
           >
             {tr("管理", "Manage")}
           </Link>
-          {isAdmin && (
+          <Link to={`/apm?cluster_node_id=${summary.cluster.id}`} onClick={(event) => event.stopPropagation()}
+            className="inline-flex items-center rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100">{tr('应用性能', 'Application performance')}</Link>
+          {isAdmin && !kubernetes && (
             <Hint content={deleteBlockedReason}><Button variant="danger" size="sm"
               type="button"
               aria-label={tr(
@@ -436,7 +451,7 @@ function ClusterRow({
 }
 
 function clusterDeleteBlockedReason(
-  summary: DeviceClusterSummary,
+  summary: ClusterSummary,
   tr: (zh: string, en: string) => string,
 ): string | undefined {
   if (summary.memberRelations.length > 0) {
@@ -458,6 +473,37 @@ function clusterDeleteBlockedReason(
     );
   }
   return undefined;
+}
+
+export function ClusterDetailPage() {
+  const { clusterId = '' } = useParams();
+  const { tr } = useI18n();
+  const [node, setNode] = useState<TopologyNode>();
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let cancelled = false;
+    setNode(undefined);
+    setError('');
+    if (!/^\d+$/.test(clusterId) || Number(clusterId) <= 0) {
+      setError(tr('无效的集群 ID', 'Invalid cluster ID'));
+      return;
+    }
+    void getNode(Number(clusterId)).then((value) => {
+      if (cancelled) return;
+      if (value.type !== 'cluster') setError(tr('该节点不是集群', 'This node is not a cluster'));
+      else setNode(value);
+    }).catch((err: Error) => { if (!cancelled) setError(err.message); });
+    return () => { cancelled = true; };
+  }, [clusterId, tr]);
+  if (error) return <EmptyState title={error} action={<Link to="/clusters">{tr('返回集群', 'Back to clusters')}</Link>} />;
+  if (!node || String(node.id) !== clusterId) return <TableLoading label={tr('正在加载集群…', 'Loading cluster…')} />;
+  if (node.props?.source === 'kubernetes') {
+    const id = String(node.props.k8s_cluster_id || '');
+    return /^\d+$/.test(id) && Number(id) > 0
+      ? <KubernetesClusterDetailPage key={clusterId} kubernetesClusterID={id} />
+      : <EmptyState title={tr('集群接入信息不完整', 'Cluster enrollment data is incomplete')} />;
+  }
+  return <DeviceClusterDetailPage key={clusterId} />;
 }
 
 export function DeviceClusterDetailPage() {
@@ -526,7 +572,7 @@ export function DeviceClusterDetailPage() {
         ] = await Promise.all([
           getNode(numericClusterID),
           listDevices(),
-          loadAllNodes("cluster"),
+          listAllNodes("cluster"),
           loadAllRelations({ type: "member_of" }),
           loadAllRelations({ src_or_dst_id: numericClusterID }),
           loadAllEnrollmentProfiles(),
@@ -787,7 +833,7 @@ export function DeviceClusterDetailPage() {
               className="inline-flex items-center gap-1 hover:text-zinc-300"
             >
               <ArrowLeft size={12} />
-              {tr("设备集群", "Device clusters")}
+              {tr("集群", "Clusters")}
             </Link>
           }
           title={cluster.name}
@@ -1307,20 +1353,6 @@ function compareDevices(left: Device, right: Device) {
   return (left.name || left.hostname || "").localeCompare(
     right.name || right.hostname || "",
   );
-}
-
-async function loadAllNodes(type: string): Promise<TopologyNode[]> {
-  const out: TopologyNode[] = [];
-  for (let offset = 0; ; offset += PAGE_SIZE) {
-    const response = await listNodes({ type, limit: PAGE_SIZE, offset });
-    out.push(...(response.items ?? []));
-    if (
-      out.length >= response.total ||
-      (response.items ?? []).length < PAGE_SIZE
-    )
-      break;
-  }
-  return out;
 }
 
 async function loadAllRelations(filter: {

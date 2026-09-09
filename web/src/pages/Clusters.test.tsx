@@ -29,7 +29,7 @@ const kubernetesCluster = {
   id: 901,
   type: "cluster",
   name: "k8s-prod",
-  props: { source: "kubernetes" },
+  props: { source: "kubernetes", k8s_cluster_id: 48, status: "degraded" },
   created_at: "2026-07-31T00:00:00Z",
   updated_at: "2026-07-31T01:00:00Z",
 };
@@ -98,7 +98,7 @@ describe("device cluster pages", () => {
     installBaseHandlers();
   });
 
-  it("lists non-Kubernetes clusters with member and enrollment health", async () => {
+  it("lists both enrollment methods with member and enrollment health", async () => {
     render(
       <MemoryRouter>
         <ClustersPage />
@@ -109,12 +109,15 @@ describe("device cluster pages", () => {
       name: "bare-metal-prod",
     });
     expect(clusterLink).toHaveAttribute("href", "/clusters/501");
-    expect(screen.queryByText("k8s-prod")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "k8s-prod" })).toHaveAttribute("href", "/clusters/901");
+    expect(screen.getByText("接入方式")).toBeInTheDocument();
+    expect(screen.getByText("降级")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "删除集群 k8s-prod" })).not.toBeInTheDocument();
     expect(screen.getByText("1 / 1 个有效")).toBeInTheDocument();
     expect(screen.getByText("最近活动")).toBeInTheDocument();
     expect(screen.getByText("拓扑连接")).toBeInTheDocument();
     expect(
-      screen.getByText("1 个集群 · 1 台设备 · 1 台在线"),
+      screen.getByText("2 个集群 · 1 台设备 · 1 台在线"),
     ).toBeInTheDocument();
   });
 

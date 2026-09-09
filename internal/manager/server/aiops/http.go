@@ -300,10 +300,11 @@ func operationArtifactDTOs(items []*model.OperationArtifact) []operationArtifact
 }
 
 type createSessionReq struct {
-	Title    string   `json:"title"`
-	Scope    []string `json:"scope,omitempty"`
-	Provider string   `json:"provider,omitempty"`
-	Model    string   `json:"model,omitempty"`
+	APMSource *model.APMSourceTarget `json:"apm_source,omitempty"`
+	Title     string                 `json:"title"`
+	Scope     []string               `json:"scope,omitempty"`
+	Provider  string                 `json:"provider,omitempty"`
+	Model     string                 `json:"model,omitempty"`
 	// RelatedIncidentID links the session back to an alert incident.
 	// Set by the IncidentDetail "深入诊断" button so the per-incident
 	// agent-timeline panel can list this session under the incident.
@@ -315,17 +316,18 @@ type createSessionReq struct {
 }
 
 type sessionDTO struct {
-	ID                string     `json:"id"`
-	UserID            uint64     `json:"user_id"`
-	Title             string     `json:"title"`
-	Scope             []string   `json:"scope,omitempty"`
-	RelatedIncidentID *uint64    `json:"related_incident_id,omitempty"`
-	AgentID           *string    `json:"agent_id,omitempty"`
-	Provider          *string    `json:"provider,omitempty"`
-	Model             *string    `json:"model,omitempty"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
-	ClosedAt          *time.Time `json:"closed_at,omitempty"`
+	APMSource         *model.APMSourceScope `json:"apm_source,omitempty"`
+	ID                string                `json:"id"`
+	UserID            uint64                `json:"user_id"`
+	Title             string                `json:"title"`
+	Scope             []string              `json:"scope,omitempty"`
+	RelatedIncidentID *uint64               `json:"related_incident_id,omitempty"`
+	AgentID           *string               `json:"agent_id,omitempty"`
+	Provider          *string               `json:"provider,omitempty"`
+	Model             *string               `json:"model,omitempty"`
+	CreatedAt         time.Time             `json:"created_at"`
+	UpdatedAt         time.Time             `json:"updated_at"`
+	ClosedAt          *time.Time            `json:"closed_at,omitempty"`
 }
 
 type listSessionsResp struct {
@@ -463,6 +465,7 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 	}
 	s, err := h.svc.CreateSession(r.Context(), caller, svc.CreateSessionInput{
 		Title:             req.Title,
+		APMSource:         req.APMSource,
 		Scope:             req.Scope,
 		RelatedIncidentID: req.RelatedIncidentID,
 		AgentID:           req.AgentID,
@@ -1032,6 +1035,7 @@ func toSessionDTO(s *model.Session) sessionDTO {
 		ID:                s.ID,
 		UserID:            s.UserID,
 		Title:             s.Title,
+		APMSource:         s.APMSource,
 		RelatedIncidentID: s.RelatedIncidentID,
 		AgentID:           s.AgentID,
 		Provider:          s.Provider,

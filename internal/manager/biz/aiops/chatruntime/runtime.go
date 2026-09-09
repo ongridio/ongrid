@@ -811,6 +811,7 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (*Reply, error) {
 	// agent workspace at exec time (files persist across commands in a session
 	// instead of running in a throwaway temp dir).
 	ctx = basetool.WithSessionID(ctx, sess.ID)
+	ctx = basetool.WithAPMSource(ctx, sess.APMSource)
 	// Tag artifacts produced in this turn (serve_page) as chat-sourced so the
 	// operations UI's 生成来源 column can tell assistant pages from workflow pages.
 	ctx = basetool.WithArtifactSource(ctx, basetool.ArtifactSourceChat)

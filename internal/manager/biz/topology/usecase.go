@@ -16,6 +16,7 @@ import (
 // handlers (and future tools) call into Usecase rather than the repos
 // directly so all validation lives in one place.
 type Usecase struct {
+	clusterDevices      ClusterDeviceResolver
 	nodes               NodeRepo
 	relations           RelationRepo
 	types               RelationTypeRepo

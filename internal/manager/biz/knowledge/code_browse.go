@@ -307,10 +307,16 @@ func (u *Usecase) ReadSource(ctx context.Context, ref, path string, startLine, e
 	if startLine <= 0 {
 		out.StartLine = 1
 		out.Content = string(raw)
-		out.EndLine = strings.Count(out.Content, "\n") + 1
+		out.EndLine = len(strings.Split(strings.TrimSuffix(out.Content, "\n"), "\n"))
+		if len(raw) == 0 {
+			out.EndLine = 0
+		}
 		return out, nil
 	}
-	lines := strings.Split(string(raw), "\n")
+	lines := strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
+	if len(raw) == 0 {
+		lines = nil
+	}
 	if startLine > len(lines) {
 		return nil, fmt.Errorf("%w: start_line %d past EOF (%d lines)", errs.ErrInvalid, startLine, len(lines))
 	}

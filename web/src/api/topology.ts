@@ -224,3 +224,17 @@ export const SEMANTICS_TAGS: { value: SemanticsTag; label: string; hint: string 
   { value: 'traffic', label: 'traffic', hint: '流量路由；上游不可达 → 下游不可达' },
   { value: 'annotation', label: 'annotation', hint: '纯标注；不参与 AIOps 推理' },
 ];
+
+export async function listAllNodes(type: string): Promise<TopologyNode[]> {
+  const out: TopologyNode[] = [];
+  for (let offset = 0; ; offset += 500) {
+    const response = await listNodes({ type, limit: 500, offset });
+    out.push(...(response.items ?? []));
+    if (
+      out.length >= response.total ||
+      (response.items ?? []).length < 500
+    )
+      break;
+  }
+  return out;
+}

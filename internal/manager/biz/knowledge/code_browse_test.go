@@ -25,8 +25,12 @@ func (f *fakeRepoStore) GetRepo(context.Context, uint64) (*model.Repository, err
 func (f *fakeRepoStore) GetRepoByURL(context.Context, string) (*model.Repository, error) {
 	return nil, errs.ErrNotFound
 }
-func (f *fakeRepoStore) CreateRepo(context.Context, *model.Repository) error       { return nil }
-func (f *fakeRepoStore) UpdateRepoSync(context.Context, uint64, int, string) error { return nil }
+func (f *fakeRepoStore) CreateRepo(context.Context, *model.Repository) error { return nil }
+func (f *fakeRepoStore) UpdateRepoSync(context.Context, uint64, int, string, string) error {
+	return nil
+}
+func (f *fakeRepoStore) UpdateRepo(context.Context, uint64, string, string) error  { return nil }
+func (f *fakeRepoStore) UpdateRepoSource(context.Context, *model.Repository) error { return nil }
 func (f *fakeRepoStore) DeleteRepo(context.Context, uint64) error                  { return nil }
 func (f *fakeRepoStore) ListSSHIdentities(context.Context) ([]*model.SSHIdentity, error) {
 	return nil, nil
@@ -132,7 +136,7 @@ func TestReadSource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read whole: %v", err)
 	}
-	if !strings.Contains(f.Content, "func ResolveEdgeID") || f.StartLine != 1 {
+	if !strings.Contains(f.Content, "func ResolveEdgeID") || f.StartLine != 1 || f.EndLine != 6 {
 		t.Fatalf("whole-file read wrong: %+v", f)
 	}
 

@@ -14,13 +14,14 @@ describe('APM error traces', () => {
   it('scopes recent errors and starts a trace/log/performance investigation only on click', async () => {
     let query: URLSearchParams | undefined;
     let sessions = 0;
+ let sessionInput: Record<string, unknown> = {};
     server.use(
-      http.get('/api/v1/apm/repository-binding', () => HttpResponse.json({ data: { repo_id: '3', repo_url: 'ssh://git@example/orders.git', source_directory: 'services/orders', tag_pattern: 'v{version}' } })),
+      http.get('/api/v1/apm/repository-binding', () => HttpResponse.json({ data: { repo_id: '3', repo_url: 'ssh://git@example/orders.git', source_directory: 'services/orders', tag_pattern: 'v{version}', synced_ref: 'old-index-tag' } })),
       http.get('/api/v1/traces/search', ({ request }) => {
         query = new URL(request.url).searchParams;
         return HttpResponse.json({ traces: [{ traceID: id, rootTraceName: 'GET /orders', durationMs: 10, startTimeUnixNano: '1788913800000000000' }] });
       }),
-      http.post('/api/v1/chat/sessions', () => { sessions++; return HttpResponse.json({ id: 'analysis-1' }); }),
+      http.post('/api/v1/chat/sessions', async ({ request }) => { sessions++; sessionInput = await request.json() as Record<string, unknown>; return HttpResponse.json({ id: 'analysis-1' }); }),
     );
     render(<MemoryRouter><Routes><Route path="/" element={<ErrorTraces params={params} refresh={0} />} /><Route path="/chat/:id" element={<ChatContext />} /></Routes></MemoryRouter>);
     expect(await screen.findByText('GET /orders')).toBeInTheDocument();
@@ -32,8 +33,11 @@ describe('APM error traces', () => {
     fireEvent.click(screen.getByRole('button', { name: 'AI 分析' }));
     await waitFor(() => expect(screen.getByText(/initialPrompt/)).toBeInTheDocument());
     const prompt = screen.getByText(/initialPrompt/).textContent!;
-    for (const value of [id, 'pod-2', 'v2', 'query_traceql', 'query_logql', 'query_promql', '最近 15 分钟', '只读分析', 'repository_binding', 'services/orders', 'v{version}', 'revision', 'commit_sha']) expect(prompt).toContain(value);
+    for (const value of [id, 'pod-2', 'v2', 'query_traceql', 'query_logql', 'query_promql', '最近 15 分钟', '只读分析', 'repository_binding', 'services/orders', 'v{version}', 'revision', 'commit_sha', '真实行号', '相同 operation', '500 总量', '无法判断']) expect(prompt).toContain(value);
+    expect(prompt).not.toContain('old-index-tag');
+    expect(prompt).not.toContain('synced_ref');
     expect(sessions).toBe(1);
+ expect(sessionInput.apm_source).toEqual({ trace_id: id, service_name: 'orders', service_namespace: 'trade', environment: 'prod', service_version: 'v2', instance_id: 'pod-2' });
   });
   it('distinguishes query failure from absence and lets the user retry', async () => {
     server.use(http.get('/api/v1/traces/search', () => HttpResponse.json({ message: 'Tempo unavailable' }, { status: 503 })));

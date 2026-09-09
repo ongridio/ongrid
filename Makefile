@@ -174,11 +174,14 @@ migrate-down: ## DB migrate down 1 步
 # docker
 # ----------------------------------------------------------------------------
 
+ONGRID_DOCKERFILE ?= deploy/Dockerfile.ongrid
+ONGRID_BUILD_CONTEXT ?= .
+
 .PHONY: docker docker-ongrid docker-ongrid-edge
 docker: docker-ongrid docker-ongrid-edge ## 构建全部镜像
 
 docker-ongrid: ## 构建 ongrid 镜像
-	docker build --build-arg VERSION=$(VERSION) -t ongrid:$(VERSION) -f deploy/Dockerfile.ongrid .
+	docker build --build-arg VERSION=$(VERSION) -t ongrid:$(VERSION) -f "$(ONGRID_DOCKERFILE)" "$(ONGRID_BUILD_CONTEXT)"
 
 docker-ongrid-edge: ## 构建 ongrid-edge 镜像
 	docker build \
@@ -193,12 +196,21 @@ docker-ongrid-edge: ## 构建 ongrid-edge 镜像
 # compose
 # ----------------------------------------------------------------------------
 
+APM_GO_SOURCE ?= .
+.PHONY: build-apm-go
+build-apm-go: ## 构建 Go APM 示例（版本与提交写入二进制）
+	cd "$(APM_GO_SOURCE)" && $(GO_BUILD) -o "$(abspath $(BIN_DIR))/apm-go" ./examples/apm-go
+
+COMPOSE ?= docker compose
+COMPOSE_ARGS ?= -f deploy/docker-compose.yml
+COMPOSE_SERVICES ?=
+
 .PHONY: compose-up compose-down
 compose-up: ## 本地 docker compose 启动
-	docker compose -f deploy/docker-compose.yml up -d
+	$(COMPOSE) $(COMPOSE_ARGS) up -d $(COMPOSE_SERVICES)
 
 compose-down: ## 本地 docker compose 停止
-	docker compose -f deploy/docker-compose.yml down
+	$(COMPOSE) $(COMPOSE_ARGS) down
 
 # ----------------------------------------------------------------------------
 # run
@@ -282,14 +294,16 @@ build-web: ## [release] 编译前端 SPA 到 web/dist/
 	cd web && npm ci && npm run build
 
 .PHONY: docker-build-web
+WEB_DOCKERFILE ?= deploy/Dockerfile.web
+WEB_BUILD_CONTEXT ?= .
 docker-build-web: ## [release] 构建 ongrid-web:$(VERSION) 镜像（前端 SPA + nginx）
 	docker buildx build \
 		--platform $(PLATFORM) \
 		--build-arg VERSION=$(VERSION) \
 		-t ongrid-web:$(VERSION) \
-		-f deploy/Dockerfile.web \
+		-f "$(WEB_DOCKERFILE)" \
 		$(DOCKER_BUILD_WEB_CACHE_ARGS) \
-		--load .
+		--load "$(WEB_BUILD_CONTEXT)"
 
 .PHONY: docker-push-cloud-manager docker-push-cloud-manager-platform docker-merge-cloud-manager docker-push-cloud-web docker-push-cloud-images docker-push-release-images release-image-refs verify-release-images test-release-manifest-filter test-release-image-publish
 docker-push-cloud-manager: ## [release] 发布 manager 多架构镜像到 CNB（兼容本地串行发布）

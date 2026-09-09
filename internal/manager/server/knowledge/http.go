@@ -55,6 +55,7 @@ type Service interface {
 
 	ListRepos(ctx context.Context) ([]*model.Repository, error)
 	CreateRepo(ctx context.Context, in biz.CreateRepoInput) (*model.Repository, error)
+	UpdateRepo(ctx context.Context, id uint64, branch, description string) (*model.Repository, error)
 	Sync(ctx context.Context, id uint64) (*model.Repository, error)
 	DeleteRepo(ctx context.Context, id uint64) error
 	// SyncBuiltinVault syncs the platform vault into qdrant (source_type=vault):
@@ -121,6 +122,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Get("/v1/knowledge/paths", h.listPaths)
 	r.Get("/v1/knowledge/repos", h.listRepos)
 	r.With(h.writeMW("knowledge:repo")).Post("/v1/knowledge/repos", h.createRepo)
+	r.With(h.writeMW("knowledge:repo")).Patch("/v1/knowledge/repos/{id}", h.updateRepo)
 	r.With(h.writeMW("knowledge:repo")).Post("/v1/knowledge/repos/{id}/sync", h.syncRepo)
 	r.With(h.deleteMW("knowledge:repo")).Delete("/v1/knowledge/repos/{id}", h.deleteRepo)
 	// Built-in vault sync — platform content, not a repo row, so it gets
@@ -177,13 +179,19 @@ func toDocDTO(d *model.Doc, includeContent bool) docDTO {
 }
 
 type repoDTO struct {
-	ID            uint64     `json:"id"`
-	URL           string     `json:"url"`
-	Branch        string     `json:"branch"`
-	Description   string     `json:"description,omitempty"`
-	LastSyncedAt  *time.Time `json:"last_synced_at,omitempty"`
-	LastSyncError string     `json:"last_sync_error,omitempty"`
-	FileCount     int        `json:"file_count"`
+	ID              uint64     `json:"id"`
+	URL             string     `json:"url"`
+	Branch          string     `json:"branch"`
+	Description     string     `json:"description,omitempty"`
+	LastSyncedAt    *time.Time `json:"last_synced_at,omitempty"`
+	LastSyncError   string     `json:"last_sync_error,omitempty"`
+	FileCount       int        `json:"file_count"`
+	CommitCount     int        `json:"commit_count"`
+	TagCount        int        `json:"tag_count"`
+	BranchCount     int        `json:"branch_count"`
+	HistoryComplete bool       `json:"history_complete"`
+	SourceSyncedAt  *time.Time `json:"source_synced_at,omitempty"`
+	Syncing         bool       `json:"syncing"`
 	// IsBuiltin marks the embedded platform vault (url == builtin://vault).
 	// The frontend uses this to (a) hide it from the user-facing Repos list
 	// and (b) drive the Knowledge page's "同步内置知识库" sync button — so
@@ -196,16 +204,22 @@ type repoDTO struct {
 
 func toRepoDTO(r *model.Repository) repoDTO {
 	return repoDTO{
-		ID:            r.ID,
-		URL:           r.URL,
-		Branch:        r.Branch,
-		Description:   r.Description,
-		LastSyncedAt:  r.LastSyncedAt,
-		LastSyncError: r.LastSyncError,
-		FileCount:     r.FileCount,
-		IsBuiltin:     biz.IsBuiltinVaultURL(r.URL),
-		CreatedAt:     r.CreatedAt,
-		UpdatedAt:     r.UpdatedAt,
+		ID:              r.ID,
+		URL:             r.URL,
+		Branch:          r.Branch,
+		Description:     r.Description,
+		LastSyncedAt:    r.LastSyncedAt,
+		LastSyncError:   r.LastSyncError,
+		FileCount:       r.FileCount,
+		CommitCount:     r.CommitCount,
+		TagCount:        r.TagCount,
+		BranchCount:     r.BranchCount,
+		HistoryComplete: r.HistoryComplete,
+		SourceSyncedAt:  r.SourceSyncedAt,
+		Syncing:         r.Syncing,
+		IsBuiltin:       biz.IsBuiltinVaultURL(r.URL),
+		CreatedAt:       r.CreatedAt,
+		UpdatedAt:       r.UpdatedAt,
 	}
 }
 
@@ -496,6 +510,10 @@ type createRepoReq struct {
 	Description string `json:"description,omitempty"`
 }
 
+// createRepo validates access before storing the repository.
+// @Summary Validate and create a repository
+// @Router /v1/knowledge/repos [post]
+// @Success 201 {object} repoDTO
 func (h *Handler) createRepo(w http.ResponseWriter, r *http.Request) {
 	var req createRepoReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -609,4 +627,37 @@ func writeErr(w http.ResponseWriter, err error) {
 	default:
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+}
+
+// updateRepo edits the document indexing ref without changing repository identity.
+// @Summary Validate and update a repository indexing ref
+// @Router /v1/knowledge/repos/{id} [patch]
+// @Success 200 {object} repoDTO
+func (h *Handler) updateRepo(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	var req struct {
+		Branch      string `json:"branch"`
+		Description string `json:"description"`
+	}
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		writeErr(w, errors.Join(errs.ErrInvalid, err))
+		return
+	}
+	row, err := h.svc.UpdateRepo(r.Context(), id, req.Branch, req.Description)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	auditmw.SetAuditEvent(r, bizaudit.Event{
+		Action: auditmodel.ActionRepoUpdate, ResourceType: auditmodel.ResourceRepo,
+		ResourceID: strconv.FormatUint(id, 10), ResourceName: row.URL, Status: auditmodel.StatusSuccess,
+		Payload: map[string]any{"branch": row.Branch},
+	})
+	writeJSON(w, http.StatusOK, toRepoDTO(row))
 }

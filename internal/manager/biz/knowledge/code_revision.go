@@ -39,3 +39,15 @@ func sourceRevision(ctx context.Context, dir, revision string) (string, error) {
 	}
 	return strings.TrimSpace(string(out)), nil
 }
+
+// ResolveSourceRevision returns a full commit without checking out another tree.
+func (u *Usecase) ResolveSourceRevision(ctx context.Context, ref, revision string) (string, error) {
+	_, dir, err := u.resolveRepoClone(ctx, ref)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(revision) == "" {
+		return "", fmt.Errorf("%w: revision required", errs.ErrInvalid)
+	}
+	return sourceRevision(ctx, dir, revision)
+}

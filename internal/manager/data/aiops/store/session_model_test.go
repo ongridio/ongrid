@@ -38,3 +38,17 @@ func TestUpdateSessionModelPersistsAndIsolatesSessions(t *testing.T) {
 		t.Fatalf("second route leaked = %v/%v", gotSecond.Provider, gotSecond.Model)
 	}
 }
+
+func TestAPMSourceScopeSurvivesReload(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	scope := &model.APMSourceScope{TraceID: "trace", RepoID: "1", CommitSHA: "commit", Revision: "refs/tags/v1", SourceDirectory: "src", Error: "missing tag"}
+	session := &model.Session{UserID: 1, Title: "APM", APMSource: scope}
+	if err := repo.CreateSession(ctx, session); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.GetSession(ctx, session.ID)
+	if err != nil || got.APMSource == nil || *got.APMSource != *scope {
+		t.Fatalf("reload: %+v %v", got, err)
+	}
+}

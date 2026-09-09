@@ -51,6 +51,8 @@ metrics_generator:
         - telemetry.sdk.language
         - service.instance.id
         - service.version
+        - device_id
+        - cluster_id
         - http.request.method
         - http.method
     service_graphs:

@@ -72,7 +72,13 @@ func ParseKernel(s string) Kernel {
 
 // Service bundles the agent + session repo. Handlers call into it with the
 // caller's user-id + role; ownership enforcement lives here.
+type APMSourceResolver interface {
+	ResolveAPMSource(context.Context, model.APMSourceTarget) *model.APMSourceScope
+}
+
 type Service struct {
+	apmSource APMSourceResolver
+
 	legacyAgent *agent.Agent
 	runtime     RuntimeHandler
 	kernel      Kernel
@@ -190,6 +196,8 @@ func (s *Service) ListMutatingProposals(ctx context.Context, caller Caller, f bi
 // the signature stays additive (callers don't break when a new field
 // like RelatedIncidentID lands).
 type CreateSessionInput struct {
+	APMSource *model.APMSourceTarget
+
 	Title             string
 	Scope             []string
 	RelatedIncidentID *uint64
@@ -203,6 +211,9 @@ type CreateSessionInput struct {
 	// at run time — see runtime.go::Handle.
 	AgentID string
 }
+
+// WithAPMSourceResolver is configured at startup.
+func (s *Service) WithAPMSourceResolver(resolver APMSourceResolver) { s.apmSource = resolver }
 
 // CreateSession opens a new chat session for the caller.
 func (s *Service) CreateSession(ctx context.Context, caller Caller, in CreateSessionInput) (*model.Session, error) {
@@ -222,6 +233,15 @@ func (s *Service) CreateSession(ctx context.Context, caller Caller, in CreateSes
 		Audience:          model.SessionAudienceUser,
 		CreatedAt:         time.Now().UTC(),
 		UpdatedAt:         time.Now().UTC(),
+	}
+	if in.APMSource != nil {
+		if s.apmSource == nil {
+			return nil, fmt.Errorf("%w: APM source resolver unavailable", errs.ErrInvalid)
+		}
+		sess.APMSource = s.apmSource.ResolveAPMSource(ctx, *in.APMSource)
+		if sess.APMSource == nil {
+			return nil, fmt.Errorf("%w: APM source resolution returned no scope", errs.ErrInvalid)
+		}
 	}
 	if in.AgentID != "" {
 		ag := in.AgentID

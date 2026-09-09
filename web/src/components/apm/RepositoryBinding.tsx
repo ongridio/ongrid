@@ -23,18 +23,17 @@ export function RepositoryBindingButton({ identity, canEdit }: { identity: Servi
   const scope = JSON.stringify(identity);
 
   useEffect(() => {
-    if (!open) return;
     let active = true;
     setLoading(true);
     setLoaded(false);
     setError('');
-    Promise.all([getRepositoryBinding(JSON.parse(scope)), listRepos()]).then(([value, data]) => {
+    Promise.all([getRepositoryBinding(JSON.parse(scope)), open ? listRepos() : Promise.resolve(null)]).then(([value, data]) => {
       if (!active) return;
       setBinding(value);
       setRepoID(value?.repo_id || '');
       setDirectory(value?.source_directory || '');
       setPattern(value?.tag_pattern || '{version}');
-      setRepos((data.items || []).filter((repo) => !isBuiltinVault(repo)));
+      if (data) setRepos((data.items || []).filter((repo) => !isBuiltinVault(repo)));
       setLoaded(true);
     }).catch((e: Error) => { if (active) setError(e.message); })
       .finally(() => { if (active) setLoading(false); });
@@ -53,7 +52,7 @@ export function RepositoryBindingButton({ identity, canEdit }: { identity: Servi
   }
 
   return <>
-    <Button variant="subtle" size="sm" onClick={() => setOpen(true)}><GitBranch size={14} />{tr('绑定仓库', 'Bind repository')}</Button>
+    <Button variant="subtle" size="sm" className="max-w-full" title={binding?.repo_url} onClick={() => setOpen(true)}><GitBranch size={14} className="shrink-0" /><span className="truncate">{binding?.repo_missing ? tr('仓库已移除', 'Repository removed') : binding?.repo_url ? repositoryName(binding.repo_url) : error && !open ? tr('仓库加载失败', 'Repository unavailable') : tr('绑定仓库', 'Bind repository')}</span></Button>
     <Modal open={open} onClose={() => { if (!busy) setOpen(false); }} title={tr('绑定源码仓库', 'Bind source repository')} size="md" footer={<>
       {canEdit && binding && <Button variant="dangerGhost" disabled={busy || !loaded} onClick={() => void save(true)}>{tr('解除绑定', 'Unbind')}</Button>}
       <Button variant="outline" disabled={busy} onClick={() => setOpen(false)}>{tr('取消', 'Cancel')}</Button>
@@ -65,7 +64,8 @@ export function RepositoryBindingButton({ identity, canEdit }: { identity: Servi
         {error && <div role="alert" className="text-red-500">{error}{!loaded && <Button variant="ghost" size="sm" onClick={() => setRetry((value) => value + 1)}>{tr('重试', 'Retry')}</Button>}</div>}
         {loaded && <>
           {binding?.repo_missing && <p role="alert" className="text-amber-500">{tr('原仓库已移除，请重新选择或解除绑定。', 'The bound repository was removed. Select another or unbind.')}</p>}
-          <Label className="block space-y-1"><span>{tr('代码仓库', 'Repository')}</span><Select className="w-full max-w-full" aria-label={tr('代码仓库', 'Repository')} value={repoID} onValueChange={setRepoID} disabled={!canEdit || busy} options={[{ value: '', label: tr('请选择仓库', 'Select a repository') }, ...repos.map((repo) => ({ value: String(repo.id), label: `${repositoryName(repo.url)} · ${repo.url}` }))]} /></Label>
+          <Label className="block space-y-1"><span>{tr('代码仓库', 'Repository')}</span><Select className="w-full max-w-full" aria-label={tr('代码仓库', 'Repository')} value={repoID} onValueChange={setRepoID} disabled={!canEdit || busy} options={[{ value: '', label: tr('请选择仓库', 'Select a repository') }, ...repos.map((repo) => ({ value: String(repo.id), label: repositoryName(repo.url) + (repos.filter((item) => repositoryName(item.url) === repositoryName(repo.url)).length > 1 ? ` (#${repo.id})` : '') }))]} /></Label>
+          {repoID && <p className="break-all font-mono text-xs text-text-muted">{repos.find((repo) => String(repo.id) === repoID)?.url}</p>}
           {repos.length === 0 && <p className="text-zinc-500">{tr('还没有可绑定的仓库。', 'No repositories are available.')}</p>}
           <Link to="/knowledge/repos" className="inline-block text-xs text-indigo-500 hover:underline">{tr('管理代码仓库', 'Manage repositories')}</Link>
           <Label className="block space-y-1"><span>{tr('源码目录', 'Source directory')}</span><Input aria-label={tr('源码目录', 'Source directory')} value={directory} onChange={(e) => setDirectory(e.target.value)} disabled={!canEdit || busy} placeholder={tr('留空表示仓库根目录', 'Empty means repository root')} maxLength={512} /></Label>

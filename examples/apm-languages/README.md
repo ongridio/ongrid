@@ -82,3 +82,12 @@ scripts/apm-test/run-more-languages.sh
 ```
 
 脚本复用现有 Edge Collector 配置生成器、Tempo、Prometheus，测试每种语言的开启/关闭采样实例。每实例发送 40 个真实 HTTP 请求，包含 10 个 500 和 10 个慢请求，断言原生 Histogram 计数不受 Trace 采样开关影响，并验证采样开启时 Trace ID 与 JSON 日志一致。Ruby 明确断言无原生请求指标，同时验证 HTTP Trace 样本的 RED、概览和接口回退；关闭采样时所有语言均无 Trace。输出为 `output/apm-acceptance/more-languages.json`，退出自动清理测试容器和卷。需要空闲端口 13200、19090、14319。
+
+## Go 双版本源码定位演示
+
+2026-09-09 的 Ubuntu 现场通过 `examples/apm-go/compose.versions.yaml` 覆盖部署：
+`ubuntu-go-1` 使用 `2.0.0-demo`，`ubuntu-go-2` 使用 `2.1.0-demo`，两个 Tag 对应不同提交和独立编译的二进制。Java/Python 仍保持上表的原版本。
+
+Go 流量改为结算链路 `/checkout/42`：包含订单读取、优惠计算、模拟支付授权与配送报价的子 Span。成功请求使用 `?region=US`，失败请求使用 `?coupon=SAVE20&region=eu&quantity=2`；不会产生真实订单或扣款。
+
+完整版本映射、按 Tag 的验证结果和复现方法见 [Go 双版本验证](../../docs/test/apm-go-version-analysis-20260909.md)。仅运行基础 compose 文件仍是同一源码构建，不可把它当作双版本源码验证。

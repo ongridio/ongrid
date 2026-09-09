@@ -16,6 +16,8 @@ import {
   YAxis,
 } from 'recharts';
 import { usePoll } from '@/lib/usePoll';
+import { listDevices } from '@/api/devices';
+import { listAllNodes } from '@/api/topology';
 import { TimeRangePicker } from '@/components/ui/TimeRangePicker';
 import {
   queryApm,
@@ -82,6 +84,19 @@ export default function ApmPage() {
   const [refresh, setRefresh] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [resourceOptions, setResourceOptions] = useState<Record<string, { value: string; label: string }[]>>({});
+  const [resourceError, setResourceError] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.allSettled([listDevices(), listAllNodes('cluster').then((items) => ({ items }))]).then((results) => {
+      if (cancelled) return;
+      setResourceError(results.some((result) => result.status === 'rejected'));
+      setResourceOptions(Object.fromEntries(results.map((result, index) => [index === 0 ? 'device_id' : 'cluster_node_id',
+        result.status === 'fulfilled' ? (result.value.items || []).map((item) => ({ value: String(item.id), label: `${item.name || item.id} (#${item.id})` })) : [],
+      ])));
+    });
+    return () => { cancelled = true; };
+  }, [refresh]);
   const [latency, setLatency] = useState<'p50_ms' | 'p95_ms' | 'p99_ms'>('p95_ms');
   const [metric, setMetric] = useState('error_rate');
   const [threshold, setThreshold] = useState('5');
@@ -101,7 +116,7 @@ export default function ApmPage() {
   const query = params.toString();
   const operation = params.get('operation');
   const combined = detail && !traceMetrics && !operation;
-  const scopedReplica = !!(params.get('service_version') || params.get('instance_id'));
+  const scopedReplica = !!(params.get('service_version') || params.get('instance_id') || params.get('device_id') || params.get('cluster_id') || params.get('cluster_node_id'));
   const activeProtocol = params.get('protocol') === 'rpc' ? 'rpc' : 'http';
   const context = new URLSearchParams(params);
   context.delete('list_query');
@@ -141,6 +156,11 @@ export default function ApmPage() {
         next.delete('span_kind');
       }
       if (key === 'service_version') next.delete('instance_id');
+      if (key === 'cluster_node_id') next.delete('cluster_id');
+      if (key === 'device_id' || key === 'cluster_node_id') {
+        next.delete('instance_id');
+        next.delete('service_version');
+      }
       if (key.endsWith('_sort')) next.delete(key.replace('_sort', '_page'));
       else if (!key.endsWith('page')) {
         for (const page of ['page', 'http_page', 'rpc_page']) next.delete(page);
@@ -315,7 +335,15 @@ export default function ApmPage() {
     return `/apm/service?${next}`;
   };
   const traceParams = new URLSearchParams(params);
+  const resolvedScope = runtime?.metadata?.resource_scope;
+  const traceScopeReady = !params.has('cluster_node_id') || !!resolvedScope;
+  if (resolvedScope) {
+    traceParams.set('telemetry_cluster_id', resolvedScope.cluster_id);
+    traceParams.set('cluster_device_ids', (resolvedScope.device_ids || []).join(','));
+  }
   if (combined) traceParams.set('protocol', 'all');
+  const logParams = new URLSearchParams(params);
+  if (params.has('cluster_node_id')) logParams.set('cluster_id', params.get('cluster_node_id')!);
   const back = new URLSearchParams(params.get('list_query') || params);
   if (!params.has('list_query'))
     for (const key of ['service_name', 'operation', 'tab', 'page', 'sort', 'search'])
@@ -395,6 +423,23 @@ export default function ApmPage() {
       </th>
     );
   };
+  const resourceFilters = <>
+    {([
+      ['device_id', tr('设备', 'Device'), tr('全部设备', 'All devices')],
+      ['cluster_node_id', tr('集群', 'Cluster'), tr('全部集群', 'All clusters')],
+    ] as const).map(([key, label, all]) => {
+      const options = resourceOptions[key] || [];
+      const selected = params.get(key) || '';
+      return <FilterField key={key} label={label} className="max-w-sm">
+        <Select aria-label={label} className="max-w-52" value={selected}
+          onValueChange={(value) => set(key, value || null)}
+          options={[{ value: '', label: all }, ...options,
+            ...(selected && !options.some((item) => item.value === selected) ? [{ value: selected, label: `#${selected}` }] : [])]} />
+      </FilterField>;
+    })}
+    {resourceError && <span role="status" className="text-xs text-amber-500">{tr('部分筛选选项加载失败，请刷新重试', 'Some filter options failed to load; refresh to retry')}</span>}
+  </>;
+
   return (
     <Tabs value={operation ? 'operations' : tab} className="contents"><div className="apm-page flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <PageHeader
@@ -457,6 +502,7 @@ export default function ApmPage() {
         extra={
           detail ? (
             <div className="flex flex-wrap items-center gap-3">
+              {resourceFilters}
               <FilterField label={tr('版本', 'Version')}>
                 <Select aria-label={tr('版本', 'Version')} className="w-44" value={params.get('service_version') || ''}
                   onValueChange={(value) => set('service_version', value || null)}
@@ -472,6 +518,7 @@ export default function ApmPage() {
           ) :
           !detail && tab === 'services' && (
             <div className="flex flex-wrap items-center gap-3">
+              {resourceFilters}
               {!detail && tab === 'services' && (
                 <>
                   {(
@@ -583,6 +630,7 @@ export default function ApmPage() {
                   {tr('创建告警', 'Create alert')}
                 </Button>
               )}
+              {traceScopeReady && <>
               <Link
                 className="og-button" data-slot="button" data-variant="ghost" data-size="sm"
                 to={traceLink(traceParams)}
@@ -604,9 +652,10 @@ export default function ApmPage() {
                 {tr('错误链路', 'Error traces')}
                 <ArrowUpRight size={13} aria-hidden="true" />
               </Link>
+              </>}
               <Link
                 className="og-button" data-slot="button" data-variant="ghost" data-size="sm"
-                to={`/logs?${params}`}
+                to={`/logs?${logParams}`}
               >
                 {scopedReplica ? tr('服务日志（全部实例）', 'Service logs (all instances)') : tr('服务日志', 'Service logs')}
                 <ArrowUpRight size={13} />
@@ -717,10 +766,10 @@ export default function ApmPage() {
                     />
                   ) : (
                     <div className="overflow-x-auto">
-                      <table className="w-full min-w-[760px] table-fixed text-left text-sm">
+                      <table className="w-full min-w-[960px] table-fixed text-left text-sm">
                         <colgroup>
                           {(!detail
-                            ? ['28%', '13%', '13%', '11%', '11%', '12%', '12%']
+                            ? ['22%', '12%', '12%', '8%', '9%', '12%', '12%', '13%']
                             : ['45%', '14%', '14%', '14%', '13%']
                           ).map((width, i) => (
                             <col key={i} style={{ width }} />
@@ -755,6 +804,7 @@ export default function ApmPage() {
                             <th className="px-4 py-3 font-normal">
                               {tr('数据状态', 'Data status')}
                             </th>
+                            {!detail && <th className="px-4 py-3 font-normal">{tr('代码仓库', 'Repository')}</th>}
                           </tr>
                         </thead>
                         {list.items.map((row) => {
@@ -841,6 +891,7 @@ export default function ApmPage() {
                                   {row.metric_source === 'tempo_spanmetrics' && row.data_status !== 'traces_only' && `${tr('Trace 样本', 'Trace samples')} · `}
                                   {status(row.data_status)}
                                 </td>
+                                {!detail && <td className="px-3 py-3"><RepositoryBindingButton identity={row.identity} canEdit={isAdmin} /></td>}
                               </tr>
                             </tbody>
                           );
@@ -1017,7 +1068,7 @@ export default function ApmPage() {
             </section>
           );
         })}
-        {detail && tab === 'overview' && <ErrorTraces params={traceParams} refresh={refresh} />}
+        {detail && tab === 'overview' && traceScopeReady && <ErrorTraces params={traceParams} refresh={refresh} />}
         {detail && tab === 'overview' && !operation && (
           <>
             <div className="space-y-3">
@@ -1181,7 +1232,7 @@ export default function ApmPage() {
         {runtime && tab === 'instances' && <RuntimeMetrics data={runtime} />}
         {tab === 'dependencies' && scopedReplica && (
           <EmptyState title={tr('依赖图按服务汇总', 'Dependency graphs are service-wide')}
-            hint={tr('请选择全部版本和全部实例查看服务依赖。', 'Select all versions and all instances to view dependencies.')} />
+            hint={tr('请选择全部设备、集群、版本和实例查看服务依赖。', 'Select all devices, clusters, versions and instances to view dependencies.')} />
         )}
         {tab === 'alerts' && traceMetrics && (
           <Card>

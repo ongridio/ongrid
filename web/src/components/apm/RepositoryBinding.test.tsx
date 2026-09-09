@@ -19,20 +19,20 @@ describe('Service repository binding', () => {
       http.put('/api/v1/apm/repository-binding', async ({ request }) => {
         const scope = new URL(request.url).searchParams;
         for (const [key, value] of Object.entries(identity)) expect(scope.get(key)).toBe(value);
-        saved = { ...(await request.json() as object), identity };
+        saved = { ...(await request.json() as object), identity, repo_url: url };
         return HttpResponse.json({ data: saved });
       }),
       http.delete('/api/v1/apm/repository-binding', () => { saved = null; return HttpResponse.json({ data: null }); }),
     );
     render(<MemoryRouter><RepositoryBindingButton identity={identity} canEdit /></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: '绑定仓库' }));
-    await selectOption(await screen.findByRole('combobox', { name: '代码仓库' }), `apm-demo · ${url}`);
+    await selectOption(await screen.findByRole('combobox', { name: '代码仓库' }), 'apm-demo');
     fireEvent.change(screen.getByLabelText('源码目录'), { target: { value: 'services/orders' } });
     fireEvent.change(screen.getByLabelText('版本 Tag 规则'), { target: { value: 'v{version}' } });
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(saved).toMatchObject({ repo_id: '3', source_directory: 'services/orders', tag_pattern: 'v{version}' });
-    fireEvent.click(screen.getByRole('button', { name: '绑定仓库' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'apm-demo' }));
     expect(await screen.findByDisplayValue('services/orders')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '解除绑定' }));
     await waitFor(() => expect(saved).toBeNull());

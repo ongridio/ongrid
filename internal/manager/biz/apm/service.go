@@ -31,6 +31,8 @@ type LogCounter interface {
 }
 
 type Service struct {
+	clusters ClusterScopeResolver
+	source   SourceRevisionResolver
 	prom     PromQuerier
 	traces   TraceQuerier
 	logs     LogCounter
@@ -43,7 +45,7 @@ func New(prom PromQuerier, traces TraceQuerier, logs LogCounter) *Service {
 }
 
 func (s *Service) List(ctx context.Context, q Query, operations bool) (*ListResult, error) {
-	if err := q.Validate(operations); err != nil {
+	if err := s.validateQuery(ctx, &q, operations); err != nil {
 		return nil, err
 	}
 	rows, err := s.requestSummaries(ctx, &q, operations)
@@ -276,7 +278,7 @@ type Overview struct {
 }
 
 func (s *Service) Overview(ctx context.Context, q Query) (*Overview, error) {
-	if err := q.Validate(true); err != nil {
+	if err := s.validateQuery(ctx, &q, true); err != nil {
 		return nil, err
 	}
 	rows, err := s.requestSummaries(ctx, &q, false)
@@ -367,11 +369,11 @@ type Dependencies struct {
 }
 
 func (s *Service) Dependencies(ctx context.Context, q Query) (*Dependencies, error) {
-	if err := q.Validate(true); err != nil {
+	if err := s.validateQuery(ctx, &q, true); err != nil {
 		return nil, err
 	}
-	if q.ServiceVersion != "" || q.InstanceID != "" {
-		return nil, fmt.Errorf("%w: dependency graphs are service-wide; clear version and instance filters", errs.ErrInvalid)
+	if q.ServiceVersion != "" || q.InstanceID != "" || q.DeviceID != "" || q.ClusterID != "" || q.ClusterNodeID != 0 {
+		return nil, fmt.Errorf("%w: dependency graphs are service-wide; clear version, instance, device and cluster filters", errs.ErrInvalid)
 	}
 
 	group := "client,server,client_service_namespace,server_service_namespace,client_deployment_environment_name,server_deployment_environment_name,connection_type"
@@ -449,7 +451,17 @@ type AlertTemplate struct {
 	RunbookPath string `json:"runbook_path"`
 }
 
+func (s *Service) AlertTemplate(ctx context.Context, q Query, metric string, threshold, minRequests float64, forSeconds int) (*AlertTemplate, error) {
+	if err := s.validateQuery(ctx, &q, true); err != nil {
+		return nil, err
+	}
+	return BuildAlertTemplate(q, metric, threshold, minRequests, forSeconds)
+}
+
 func BuildAlertTemplate(q Query, metric string, threshold, minRequests float64, forSeconds int) (*AlertTemplate, error) {
+	if q.ClusterNodeID != 0 && q.resourceScope == nil {
+		return nil, fmt.Errorf("%w: resolve the cluster scope before building an alert", errs.ErrInvalid)
+	}
 	if err := q.Validate(true); err != nil {
 		return nil, err
 	}

@@ -14,7 +14,6 @@ const MonitorPage = lazy(() => import('@/pages/Monitor'));
 const LogsPage = lazy(() => import('@/pages/Logs'));
 const ApmPage = lazy(() => import('@/pages/Apm'));
 const TracesPage = lazy(() => import('@/pages/Traces'));
-const KubernetesPage = lazy(() => import('@/pages/Kubernetes'));
 const KubernetesClusterDetailPage = lazy(() =>
   import('@/pages/Kubernetes').then((m) => ({ default: m.KubernetesClusterDetailPage })),
 );
@@ -39,8 +38,8 @@ const KnowledgePage = lazy(() => import('@/pages/Knowledge'));
 const KnowledgeReposPage = lazy(() => import('@/pages/KnowledgeRepos'));
 const TopologyPage = lazy(() => import('@/pages/Topology'));
 const ClustersPage = lazy(() => import('@/pages/Clusters'));
-const DeviceClusterDetailPage = lazy(() =>
-  import('@/pages/Clusters').then((m) => ({ default: m.DeviceClusterDetailPage })),
+const ClusterDetailPage = lazy(() =>
+  import('@/pages/Clusters').then((m) => ({ default: m.ClusterDetailPage })),
 );
 const SettingsLayout = lazy(() => import('@/pages/SettingsLayout'));
 const SettingsLLM = lazy(() => import('@/pages/settings/LLM'));
@@ -121,7 +120,7 @@ export default function App() {
         <Route path="/apm/service" element={<ApmPage />} />
         <Route path="/traces" element={<TracesPage />} />
         <Route path="/traces/:traceId" element={<TracesPage />} />
-        <Route path="/kubernetes" element={<KubernetesPage />} />
+        <Route path="/kubernetes" element={<Navigate to="/clusters" replace />} />
         <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />
         <Route path="/alerts" element={<AlertsPage />} />
         <Route path="/alerts/rules" element={<AlertRulesPage />} />
@@ -148,7 +147,7 @@ export default function App() {
         <Route path="/knowledge" element={<KnowledgePage />} />
         <Route path="/knowledge/repos" element={<KnowledgeReposPage />} />
         <Route path="/clusters" element={<ClustersPage />} />
-        <Route path="/clusters/:clusterId" element={<DeviceClusterDetailPage />} />
+        <Route path="/clusters/:clusterId" element={<ClusterDetailPage />} />
         <Route path="/topology" element={<TopologyPage />} />
         {/* Old per-entity routes — folded into /topology with a type
             chip. Redirect (without query string) so bookmarks open the

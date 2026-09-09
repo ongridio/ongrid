@@ -14,6 +14,7 @@ import (
 func TestReplicaScopeAcrossQueries(t *testing.T) {
 	q := testQuery()
 	q.InstanceID, q.ServiceVersion = `pod"1`, "1.1.0"
+	q.DeviceID, q.ClusterID = `42"`, "7"
 	if err := q.Validate(true); err != nil {
 		t.Fatal(err)
 	}
@@ -22,19 +23,22 @@ func TestReplicaScopeAcrossQueries(t *testing.T) {
 		for _, protocol := range []string{"http", "rpc"} {
 			q.Protocol = protocol
 			expr := q.metricSelector()
-			for _, want := range []string{`service_instance_id="pod\"1"`, `service_version="1.1.0"`} {
+			for _, want := range []string{`device_id="42\""`, `cluster_id="7"`, `service_instance_id="pod\"1"`, `service_version="1.1.0"`} {
 				if !strings.Contains(expr, want) {
 					t.Fatalf("missing %s: %s", want, expr)
 				}
 			}
 			traceQL := TraceQL(q)
+			if !strings.Contains(traceQL, `resource.device_id = "42\""`) || !strings.Contains(traceQL, `resource.cluster_id = "7"`) {
+				t.Fatal(traceQL)
+			}
 			if !strings.Contains(traceQL, `resource.service.instance.id = "pod\"1"`) || !strings.Contains(traceQL, `resource.service.version = "1.1.0"`) {
 				t.Fatal(traceQL)
 			}
 		}
 	}
 	expr := runtimeExpression(q, 5*time.Minute)
-	for _, want := range []string{`service_instance_id="pod\"1"`, `service_version="1.1.0"`, `rate(process_cpu_seconds_total`, `rate(jvm_cpu_time_seconds_total`, `last_over_time`, `service_instance_id,instance,service_version`} {
+	for _, want := range []string{`device_id="42\""`, `cluster_id="7"`, `service_instance_id="pod\"1"`, `service_version="1.1.0"`, `rate(process_cpu_seconds_total`, `rate(jvm_cpu_time_seconds_total`, `last_over_time`, `service_instance_id,instance,service_version`} {
 		if !strings.Contains(expr, want) {
 			t.Fatalf("missing %s: %s", want, expr)
 		}

@@ -6,6 +6,7 @@ import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import KubernetesPage, { KubernetesClusterDetailPage } from './Kubernetes';
+import { ClusterDetailPage } from './Clusters';
 import { invalidateGrafanaRootCache } from '@/lib/drilldown';
 import { server } from '@/test/msw-server';
 
@@ -944,6 +945,24 @@ describe('KubernetesPage', () => {
     expect(screen.getByTestId('current-location')).toHaveTextContent(
       '/logs?cluster_id=95&range=1h&namespace=ongrid-system&workload=ongrid-edge-controller',
     );
+  });
+
+  it('统一集群详情使用 Kubernetes 接入 ID，并保留生命周期操作与集群返回入口', async () => {
+    let requested = '';
+    server.use(
+      http.get('/api/v1/topology/nodes/901', () => HttpResponse.json({ id: 901, type: 'cluster', name: 'kind-local', props: { source: 'kubernetes', k8s_cluster_id: 48 } })),
+      http.get('/api/v1/k8s/clusters/:id', ({ params }) => { requested = String(params.id); return HttpResponse.json({ ...cluster, id: 48 }); }),
+    );
+    render(<MemoryRouter initialEntries={['/clusters/901']}><Routes>
+      <Route path="/clusters/:clusterId" element={<ClusterDetailPage />} />
+      <Route path="/clusters" element={<LocationProbe />} />
+    </Routes></MemoryRouter>);
+    await screen.findByRole('heading', { name: 'kind-local' });
+    expect(requested).toBe('48');
+    expect(screen.getByRole('link', { name: '集群' })).toHaveAttribute('href', '/clusters');
+    await userEvent.click(screen.getByRole('button', { name: '集群操作' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: '卸载命令' }));
+    expect(await screen.findByRole('dialog', { name: 'Helm 卸载命令' })).toBeInTheDocument();
   });
 
   it('集群详情提供 Helm 升级命令', async () => {

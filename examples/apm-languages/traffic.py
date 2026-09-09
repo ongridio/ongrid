@@ -19,8 +19,11 @@ def run(language, port, rpc, check=False, error_every=10):
             iteration += 1
             failed, slow = iteration % error_every == 0, iteration % 5 == 0
             suffix = "?fail=1" if failed else "?slow=1" if slow else ""
+            path = f"/orders/42{suffix}"
+            if language == "go":
+                path = "/checkout/42?coupon=SAVE20&region=eu&quantity=2" if failed else "/checkout/42?region=US"
             try:
-                with urllib.request.urlopen(f"http://127.0.0.1:{port}/orders/42{suffix}", timeout=5) as response:
+                with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=5) as response:
                     response.read()
                     assert response.status == 200 and not failed
             except urllib.error.HTTPError as error:
@@ -47,7 +50,7 @@ def run(language, port, rpc, check=False, error_every=10):
 
 
 if __name__ == "__main__":
-    # Same example build, two release labels and explicit demo traffic profiles:
+    # Distinct Go checkout releases; Java/Python retain their original builds.
     # baseline 5% failures, canary 20%. CPU and memory are real measured values.
     with ThreadPoolExecutor(max_workers=6) as pool:
         jobs = [pool.submit(run, language, port + offset, True, "--check" in sys.argv, error_every)

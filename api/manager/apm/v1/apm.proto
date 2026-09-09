@@ -77,6 +77,12 @@ message Query {
   // Exact resource filters; absent/empty means all versions or instances.
   string service_version = 15;
   string instance_id = 16;
+  // Exact Ongrid resource IDs; absent/empty means all devices or clusters.
+  string device_id = 17;
+  string cluster_id = 18;
+  // Unified topology cluster ID. Resolved to current member devices for
+  // device enrollment, or to the Kubernetes telemetry cluster ID.
+  uint64 cluster_node_id = 19;
 }
 
 message Summary {
@@ -115,6 +121,15 @@ message QueryMetadata {
   string span_kind = 5;
   string protocol = 6;
   string metric_format = 7;
+  // Resolved resource scope for Trace navigation; present for cluster_node_id.
+  ResourceScope resource_scope = 8;
+}
+
+message ResourceScope {
+  string cluster_id = 1;
+  // For device clusters, an empty list matches no devices; for Kubernetes
+  // clusters, cluster_id takes precedence.
+  repeated string device_ids = 2;
 }
 
 message ListServicesRequest { Query query = 1; }

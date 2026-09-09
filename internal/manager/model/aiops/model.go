@@ -46,7 +46,30 @@ const (
 // Both nullable columns are indexed so the SPA worker-tree view can
 // fan out from a parent session id in O(log N), and audit queries can
 // filter by persona.
+// APMSourceTarget identifies the selected trace; it contains no caller-supplied repository or commit.
+type APMSourceTarget struct {
+	TraceID          string `json:"trace_id"`
+	ServiceName      string `json:"service_name"`
+	ServiceNamespace string `json:"service_namespace"`
+	Environment      string `json:"environment"`
+	ServiceVersion   string `json:"service_version"`
+	InstanceID       string `json:"instance_id"`
+}
+
+// APMSourceScope is an immutable server-resolved snapshot for a conversation.
+// Error keeps unresolved APM sessions fail-closed while telemetry analysis remains available.
+type APMSourceScope struct {
+	TraceID         string `json:"trace_id"`
+	RepoID          string `json:"repo_id"`
+	SourceDirectory string `json:"source_directory"`
+	Revision        string `json:"revision"`
+	CommitSHA       string `json:"commit_sha"`
+	Error           string `json:"error,omitempty"`
+}
+
 type Session struct {
+	APMSource *APMSourceScope `gorm:"serializer:json;type:text;column:apm_source"`
+
 	ID        string  `gorm:"primaryKey;type:char(36);column:id"`
 	UserID    uint64  `gorm:"index;not null;column:user_id"`
 	Title     string  `gorm:"size:256;not null"`

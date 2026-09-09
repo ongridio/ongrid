@@ -3,7 +3,7 @@ import type { Device } from "@/api/devices";
 import type { EdgeEnrollmentProfile } from "@/api/edges";
 import type { TopologyNode, TopologyRelation } from "@/api/topology";
 import {
-  buildDeviceClusterSummaries,
+  buildClusterSummaries,
   clusterMembershipByDeviceNode,
 } from "./model";
 
@@ -82,15 +82,17 @@ const profiles: EdgeEnrollmentProfile[] = [
 ];
 
 describe("device cluster model", () => {
-  it("excludes Kubernetes clusters and summarizes members and profiles", () => {
-    const result = buildDeviceClusterSummaries(
+  it("includes both cluster enrollment methods and summarizes members and profiles", () => {
+    const result = buildClusterSummaries(
       clusters,
       devices,
       relations,
       profiles,
     );
 
-    expect(result).toHaveLength(1);
+    expect(result).toHaveLength(2);
+    expect(result.some((item) => item.cluster.id === 901)).toBe(true);
+    result.sort((a,b) => a.cluster.id - b.cluster.id);
     expect(result[0].cluster.id).toBe(501);
     expect(result[0].members.map((device) => device.id)).toEqual([19, 20]);
     expect(result[0].online).toBe(1);

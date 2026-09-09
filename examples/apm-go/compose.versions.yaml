@@ -1,0 +1,16 @@
+services:
+  go-v1:
+    volumes:
+      - /opt/ongrid-apm-demo/releases/2.0.0-demo/apm-go:/app/app:ro
+    environment:
+      SERVICE_VERSION: 2.0.0-demo
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=apm-demo,deployment.environment.name=development,service.instance.id=ubuntu-go-1,service.version=2.0.0-demo
+  go-v2:
+    volumes:
+      - /opt/ongrid-apm-demo/releases/2.1.0-demo/apm-go:/app/app:ro
+    environment:
+      SERVICE_VERSION: 2.1.0-demo
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=apm-demo,deployment.environment.name=development,service.instance.id=ubuntu-go-2,service.version=2.1.0-demo
+  traffic:
+    volumes:
+      - /opt/ongrid-apm-demo/traffic.versions.py:/app/traffic.py:ro

@@ -926,7 +926,7 @@ func main() {
 	topologyNodeTypeRepo := managertopologydata.NewNodeTypeRepo(db)
 	topologyUC := managerbiztopology.NewUsecase(
 		topologyNodeRepo, topologyRelationRepo, topologyRelationTypeRepo, topologyNodeTypeRepo, log,
-	)
+	).WithClusterDevices(deviceRepo)
 	topologyUC.AddClusterDeleteGuard(managerbizedge.NewUpgradeJobClusterDeleteGuard(edgeRepo))
 	topologyHandler := managerservertopology.NewHandler(topologyUC)
 
@@ -1196,7 +1196,7 @@ func main() {
 	if cfg.Traces.URL != "" {
 		apmTraces = pkgtracequery.New(cfg.Traces.URL, log.With(slog.String("comp", "apm-traces")))
 	}
-	apmService := managerbizapm.New(apmProm, apmTraces, logsBackendSvc)
+	apmService := managerbizapm.New(apmProm, apmTraces, logsBackendSvc).WithClusterScopes(topologyUC)
 	apmHandler := managerserverapm.NewHandler(apmService, log)
 
 	// Frontierbound service-end SDK: opens a long-lived service connection
@@ -1525,7 +1525,9 @@ func main() {
 			log.Warn("knowledge: usecase build failed", slog.Any("err", kErr))
 		} else {
 			knowledgeUC = uc
+			go knowledgeUC.RunAutoSync(rootCtx)
 			toolsReg.SetKnowledgeSearcher(knowledgeUC)
+			apmService.WithSourceRevisions(knowledgeUC)
 			// GitHub-PAT-via-GIT_ASKPASS resolver wiring
 			// removed. SSH-style repos use ssh_identities; HTTPS auth
 			// returns in P3 via credential.helper.
@@ -1656,6 +1658,7 @@ func main() {
 
 	aiopsSvc := managersvcaiops.NewWithKernel(aiopsAgent, aiopsRuntime, kernel, aiopsRepo, aiopsUsage, log)
 	aiopsSvc.SetMutatingProposalRepo(mutatingProposalRepo)
+	aiopsSvc.WithAPMSourceResolver(apmService)
 	aiopsHandler := managerserveraiops.NewHandler(aiopsSvc)
 	aiopsHandler.SetOperationActions(operationUC, func(ctx context.Context, operation *manageraiopsmodel.Operation, action string) (*manageraiopsmodel.Operation, error) {
 		if operation == nil || action != "cancel" || operation.Kind != "packet_capture_session" {

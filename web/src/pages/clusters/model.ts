@@ -2,7 +2,7 @@ import type { Device } from "@/api/devices";
 import type { EdgeEnrollmentProfile } from "@/api/edges";
 import type { TopologyNode, TopologyRelation } from "@/api/topology";
 
-export type DeviceClusterSummary = {
+export type ClusterSummary = {
   cluster: TopologyNode;
   members: Device[];
   memberRelations: TopologyRelation[];
@@ -18,19 +18,19 @@ export function isDeviceCluster(node: TopologyNode): boolean {
   return node.type === "cluster" && node.props?.source !== "kubernetes";
 }
 
-export function buildDeviceClusterSummaries(
+export function buildClusterSummaries(
   nodes: TopologyNode[],
   devices: Device[],
   relations: TopologyRelation[],
   profiles: EdgeEnrollmentProfile[],
-): DeviceClusterSummary[] {
+): ClusterSummary[] {
   const devicesByNodeID = new Map<number, Device>();
   for (const device of devices) {
     if (device.node_id) devicesByNodeID.set(device.node_id, device);
   }
 
   return nodes
-    .filter(isDeviceCluster)
+    .filter((node) => node.type === "cluster")
     .map((cluster) => {
       const memberRelations = relations.filter(
         (relation) =>

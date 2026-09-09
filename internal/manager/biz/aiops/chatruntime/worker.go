@@ -270,6 +270,7 @@ func (rt *Runtime) SpawnWorker(ctx context.Context, req SpawnRequest) (*Worker, 
 	// row-level scoping; missing parent → worker session is orphan-able
 	// (still persisted, but parent_session_id=nil) so the LLM-driven
 	// flow remains usable in tests / sync calls without a parent row.
+	var sourceScope *aiopsmodel.APMSourceScope
 	var ownerUserID uint64
 	var parentRefForRow *string
 	var rootRefForRow *string
@@ -281,6 +282,7 @@ func (rt *Runtime) SpawnWorker(ctx context.Context, req SpawnRequest) (*Worker, 
 				return nil, fmt.Errorf("chatruntime: delegation depth exceeded for parent session %q", req.ParentSession)
 			}
 			ownerUserID = parentSess.UserID
+			sourceScope = parentSess.APMSource
 			pid := req.ParentSession
 			parentRefForRow = &pid
 			rootID := parentSess.ID
@@ -318,6 +320,7 @@ func (rt *Runtime) SpawnWorker(ctx context.Context, req SpawnRequest) (*Worker, 
 		}
 		row := &aiopsmodel.Session{
 			ID:              sessID,
+			APMSource:       sourceScope,
 			UserID:          effectiveOwner,
 			Title:           fmt.Sprintf("Worker: %s", agentDef.Name),
 			RootSessionID:   rootRefForRow,
@@ -573,6 +576,14 @@ func (rt *Runtime) GetWorker(workerID string) (*Worker, bool) {
 // matching Handle()'s "user message lands on disk before the LLM call"
 // invariant — same survival semantics on a graph crash.
 func (rt *Runtime) runWorker(ctx context.Context, agentDef *Agent, sessID, userText, locale string, parentEmit Emit, workerID string) (string, error) {
+	if rt.cfg.Sessions != nil && sessID != "" {
+		session, err := rt.cfg.Sessions.GetSession(ctx, sessID)
+		if err != nil {
+			return "", fmt.Errorf("chatruntime: load worker source scope: %w", err)
+		}
+		ctx = basetool.WithAPMSource(ctx, session.APMSource)
+	}
+
 	// Workers are not an authorization bypass. The coordinator stamps the
 	// resolved gate on context; absent wiring fails closed so a direct spawn
 	// cannot expose mutating tools unexpectedly.

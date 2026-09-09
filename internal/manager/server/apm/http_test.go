@@ -32,8 +32,8 @@ func TestAuthenticatedValidationAndDisabledBackend(t *testing.T) {
 			}
 		})
 	}
-	q, err := parseQuery(httptest.NewRequest(http.MethodGet, base+"&environment=&service_namespace=", nil))
-	if err != nil || q.Environment == nil || q.ServiceNamespace == nil || *q.Environment != "" {
+	q, err := parseQuery(httptest.NewRequest(http.MethodGet, base+"&environment=&service_namespace=&device_id=42&cluster_id=7", nil))
+	if err != nil || q.DeviceID != "42" || q.ClusterID != "7" || q.Environment == nil || q.ServiceNamespace == nil || *q.Environment != "" {
 		t.Fatalf("lost explicit empty scope: %+v %v", q, err)
 	}
 }
