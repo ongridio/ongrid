@@ -29,6 +29,7 @@ require (
 	github.com/singchia/geminio v1.3.0-rc.2
 	github.com/testcontainers/testcontainers-go/modules/mysql v0.42.0
 	github.com/yuin/goldmark v1.8.2
+	go.opentelemetry.io/contrib/bridges/prometheus v0.55.0
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.68.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.68.0
 	go.opentelemetry.io/otel v1.43.0
@@ -167,7 +168,7 @@ require (
 	github.com/klauspost/compress v1.18.5 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
-	github.com/prometheus/common v0.55.0
+	github.com/prometheus/common v0.59.1
 	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/singchia/frontier v1.2.4

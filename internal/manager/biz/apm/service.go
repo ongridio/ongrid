@@ -368,6 +368,10 @@ func (s *Service) Dependencies(ctx context.Context, q Query) (*Dependencies, err
 	if err := q.Validate(true); err != nil {
 		return nil, err
 	}
+	if q.ServiceVersion != "" || q.InstanceID != "" {
+		return nil, fmt.Errorf("%w: dependency graphs are service-wide; clear version and instance filters", errs.ErrInvalid)
+	}
+
 	group := "client,server,client_service_namespace,server_service_namespace,client_deployment_environment_name,server_deployment_environment_name,connection_type"
 	rate := func(metric string, histogram bool) string {
 		parts := []string{}

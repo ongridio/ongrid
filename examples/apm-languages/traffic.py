@@ -11,13 +11,13 @@ import health_pb2
 import health_pb2_grpc
 
 
-def run(language, port, rpc, check=False):
+def run(language, port, rpc, check=False, error_every=10):
     with grpc.insecure_channel(f"127.0.0.1:{port + 1}") as channel:
         client = health_pb2_grpc.HealthStub(channel)
         iteration = 0
-        while not check or iteration < 10:
+        while not check or iteration < error_every:
             iteration += 1
-            failed, slow = iteration % 10 == 0, iteration % 5 == 0
+            failed, slow = iteration % error_every == 0, iteration % 5 == 0
             suffix = "?fail=1" if failed else "?slow=1" if slow else ""
             try:
                 with urllib.request.urlopen(f"http://127.0.0.1:{port}/orders/42{suffix}", timeout=5) as response:
@@ -47,7 +47,11 @@ def run(language, port, rpc, check=False):
 
 
 if __name__ == "__main__":
-    with ThreadPoolExecutor(max_workers=9) as pool:
-        jobs = [pool.submit(run, language, port, language in {"go", "java", "node", "python"}, "--check" in sys.argv) for language, port in [("go", 18080), ("java", 18082), ("node", 18084), ("python", 18086), ("dotnet", 18088), ("php", 18090), ("cpp", 18092), ("rust", 18094), ("ruby", 18096)]]
+    # Same example build, two release labels and explicit demo traffic profiles:
+    # baseline 5% failures, canary 20%. CPU and memory are real measured values.
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        jobs = [pool.submit(run, language, port + offset, True, "--check" in sys.argv, error_every)
+                for language, port in [("go", 18080), ("java", 18082), ("python", 18086)]
+                for offset, error_every in [(0, 20), (100, 5)]]
         for job in jobs:
             job.result()

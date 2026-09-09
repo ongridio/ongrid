@@ -24,8 +24,9 @@ x-env: &env
   OTEL_SEMCONV_STABILITY_OPT_IN: http,rpc
   OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE: cumulative
   OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION: explicit_bucket_histogram
+  OTEL_PYTHON_SYSTEM_METRICS_EXCLUDED_METRICS: system.*,process.runtime.*
 services:
-  go:
+  go-v1:
     <<: *app
     image: ongrid-apm-demo-go:local
     build:
@@ -39,8 +40,27 @@ services:
       HTTP_PORT: "18080"
       RPC_PORT: "18081"
       OTEL_SERVICE_NAME: apm-demo-go
-      OTEL_RESOURCE_ATTRIBUTES: service.namespace=apm-demo,deployment.environment.name=development,service.instance.id=ubuntu-go-1
-  java:
+      SERVICE_INSTANCE_ID: ubuntu-go-1
+      SERVICE_VERSION: 1.0.0
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=apm-demo,deployment.environment.name=development,service.instance.id=ubuntu-go-1,service.version=1.0.0
+  go-v2:
+    <<: *app
+    image: ongrid-apm-demo-go:local
+    build:
+      context: ../..
+      dockerfile: examples/apm-languages/Dockerfile
+      target: go
+    mem_limit: 256m
+    environment:
+      <<: *env
+      APP_LANGUAGE: go
+      HTTP_PORT: "18180"
+      RPC_PORT: "18181"
+      OTEL_SERVICE_NAME: apm-demo-go
+      SERVICE_INSTANCE_ID: ubuntu-go-2
+      SERVICE_VERSION: 1.1.0-demo
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=apm-demo,deployment.environment.name=development,service.instance.id=ubuntu-go-2,service.version=1.1.0-demo
+  java-v1:
     <<: *app
     image: ongrid-apm-demo-java:local
     build:
@@ -54,23 +74,27 @@ services:
       HTTP_PORT: "18082"
       RPC_PORT: "18083"
       OTEL_SERVICE_NAME: apm-demo-java
-      OTEL_RESOURCE_ATTRIBUTES: service.namespace=apm-demo,deployment.environment.name=development,service.instance.id=ubuntu-java-1
-  node:
+      SERVICE_INSTANCE_ID: ubuntu-java-1
+      SERVICE_VERSION: 1.0.0
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=apm-demo,deployment.environment.name=development,service.instance.id=ubuntu-java-1,service.version=1.0.0
+  java-v2:
     <<: *app
-    image: ongrid-apm-demo-node:local
+    image: ongrid-apm-demo-java:local
     build:
       context: ../..
       dockerfile: examples/apm-languages/Dockerfile
-      target: node
-    mem_limit: 256m
+      target: java
+    mem_limit: 512m
     environment:
       <<: *env
-      APP_LANGUAGE: node
-      HTTP_PORT: "18084"
-      RPC_PORT: "18085"
-      OTEL_SERVICE_NAME: apm-demo-node
-      OTEL_RESOURCE_ATTRIBUTES: service.namespace=apm-demo,deployment.environment.name=development,service.instance.id=ubuntu-node-1
-  python:
+      APP_LANGUAGE: java
+      HTTP_PORT: "18182"
+      RPC_PORT: "18183"
+      OTEL_SERVICE_NAME: apm-demo-java
+      SERVICE_INSTANCE_ID: ubuntu-java-2
+      SERVICE_VERSION: 1.1.0-demo
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=apm-demo,deployment.environment.name=development,service.instance.id=ubuntu-java-2,service.version=1.1.0-demo
+  python-v1:
     <<: *app
     image: ongrid-apm-demo-python:local
     build:
@@ -84,74 +108,26 @@ services:
       HTTP_PORT: "18086"
       RPC_PORT: "18087"
       OTEL_SERVICE_NAME: apm-demo-python
-      OTEL_RESOURCE_ATTRIBUTES: service.namespace=apm-demo,deployment.environment.name=development,service.instance.id=ubuntu-python-1
-  dotnet:
+      SERVICE_INSTANCE_ID: ubuntu-python-1
+      SERVICE_VERSION: 1.0.0
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=apm-demo,deployment.environment.name=development,service.instance.id=ubuntu-python-1,service.version=1.0.0
+  python-v2:
     <<: *app
-    image: ongrid-apm-demo-dotnet:local
+    image: ongrid-apm-demo-python:local
     build:
       context: ../..
       dockerfile: examples/apm-languages/Dockerfile
-      target: dotnet
+      target: python
+    mem_limit: 256m
     environment:
       <<: *env
-      APP_LANGUAGE: dotnet
-      HTTP_PORT: "18088"
-      OTEL_SERVICE_NAME: apm-demo-dotnet
-      OTEL_RESOURCE_ATTRIBUTES: service.namespace=apm-demo,deployment.environment.name=development,service.instance.id=ubuntu-dotnet-1
-  php:
-    <<: *app
-    image: ongrid-apm-demo-php:local
-    build:
-      context: ../..
-      dockerfile: examples/apm-languages/Dockerfile
-      target: php
-    environment:
-      <<: *env
-      APP_LANGUAGE: php
-      HTTP_PORT: "18090"
-      OTEL_SERVICE_NAME: apm-demo-php
-      OTEL_RESOURCE_ATTRIBUTES: service.namespace=apm-demo,deployment.environment.name=development,service.instance.id=ubuntu-php-1
-  cpp:
-    <<: *app
-    image: ongrid-apm-demo-cpp:local
-    build:
-      context: ../..
-      dockerfile: examples/apm-languages/Dockerfile
-      target: cpp
-    environment:
-      <<: *env
-      APP_LANGUAGE: cpp
-      OTEL_METRIC_EXPORT_TIMEOUT: "1000"
-      HTTP_PORT: "18092"
-      OTEL_SERVICE_NAME: apm-demo-cpp
-      OTEL_RESOURCE_ATTRIBUTES: service.namespace=apm-demo,deployment.environment.name=development,service.instance.id=ubuntu-cpp-1
-  rust:
-    <<: *app
-    image: ongrid-apm-demo-rust:local
-    build:
-      context: ../..
-      dockerfile: examples/apm-languages/Dockerfile
-      target: rust
-    environment:
-      <<: *env
-      APP_LANGUAGE: rust
-      HTTP_PORT: "18094"
-      OTEL_SERVICE_NAME: apm-demo-rust
-      OTEL_RESOURCE_ATTRIBUTES: service.namespace=apm-demo,deployment.environment.name=development,service.instance.id=ubuntu-rust-1
-  ruby:
-    <<: *app
-    image: ongrid-apm-demo-ruby:local
-    build:
-      context: ../..
-      dockerfile: examples/apm-languages/Dockerfile
-      target: ruby
-    environment:
-      <<: *env
-      APP_LANGUAGE: ruby
-      HTTP_PORT: "18096"
-      OTEL_SERVICE_NAME: apm-demo-ruby
-      OTEL_RESOURCE_ATTRIBUTES: service.namespace=apm-demo,deployment.environment.name=development,service.instance.id=ubuntu-ruby-1
-      OTEL_METRICS_EXPORTER: none
+      APP_LANGUAGE: python
+      HTTP_PORT: "18186"
+      RPC_PORT: "18187"
+      OTEL_SERVICE_NAME: apm-demo-python
+      SERVICE_INSTANCE_ID: ubuntu-python-2
+      SERVICE_VERSION: 1.1.0-demo
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=apm-demo,deployment.environment.name=development,service.instance.id=ubuntu-python-2,service.version=1.1.0-demo
   traffic:
     <<: *app
     image: ongrid-apm-demo-python:local

@@ -70,11 +70,14 @@ export type ApmDiagnostics = {
   sampled_traces: number;
 };
 export type ApmRuntime = {
+  instances?: ApmDiagnostics['instances'];
   items: {
     name: string;
     unit: string;
     instance_id: string;
     value: number | null;
+    version?: string;
+    points?: { timestamp: number; value: number | null }[];
   }[];
 };
 export type ApmAlertTemplate = {
@@ -117,6 +120,10 @@ export function serviceParams(
     list.delete('list_query');
     next.set('list_query', list.toString());
   }
+  if (Object.entries(identity).some(([key, value]) => params.get(key) !== value)) {
+    next.delete('service_version');
+    next.delete('instance_id');
+  }
   for (const [key, value] of Object.entries(identity)) next.set(key, value);
   for (const key of [
     'page',
@@ -143,6 +150,9 @@ export function serviceTraceQL(params: URLSearchParams, extra?: string) {
     const value = params.get(key)!;
     const clause = `resource.${attribute} = ${JSON.stringify(value)}`;
     clauses.push(value === '' ? `(${clause} || resource.${attribute} = nil)` : clause);
+  }
+  for (const [key, attribute] of [['service_version', 'service.version'], ['instance_id', 'service.instance.id']]) {
+    if (params.get(key)) clauses.push(`resource.${attribute} = ${JSON.stringify(params.get(key))}`);
   }
   const operation = params.get('operation');
   if (params.get('metric_source') === 'tempo_spanmetrics') {

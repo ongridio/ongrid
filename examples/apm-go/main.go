@@ -15,6 +15,9 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+	prombridge "go.opentelemetry.io/contrib/bridges/prometheus"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
@@ -59,7 +62,10 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("create metrics exporter: %w", err)
 	}
-	meter := sdkmetric.NewMeterProvider(sdkmetric.WithResource(res), sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExporter)))
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
+	meter := sdkmetric.NewMeterProvider(sdkmetric.WithResource(res), sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExporter,
+		sdkmetric.WithProducer(prombridge.NewMetricProducer(prombridge.WithGatherer(registry))))))
 	otel.SetMeterProvider(meter)
 	defer func() {
 		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -78,10 +84,10 @@ func run() error {
 	}()
 	otel.SetTracerProvider(provider)
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
-	log := slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service.name", os.Getenv("OTEL_SERVICE_NAME"), "service.namespace", envDefault("SERVICE_NAMESPACE", "trade"), "deployment.environment.name", envDefault("DEPLOYMENT_ENVIRONMENT", "development"))
+	log := slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service.name", os.Getenv("OTEL_SERVICE_NAME"), "service.namespace", envDefault("SERVICE_NAMESPACE", "trade"), "deployment.environment.name", envDefault("DEPLOYMENT_ENVIRONMENT", "development"), "service.instance.id", os.Getenv("SERVICE_INSTANCE_ID"), "service.version", os.Getenv("SERVICE_VERSION"))
 	mux := application(log)
-	server := &http.Server{Addr: "127.0.0.1:18080", Handler: mux, ReadHeaderTimeout: 5 * time.Second}
-	listener, err := net.Listen("tcp", "127.0.0.1:18081")
+	server := &http.Server{Addr: "127.0.0.1:" + envDefault("HTTP_PORT", "18080"), Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	listener, err := net.Listen("tcp", "127.0.0.1:"+envDefault("RPC_PORT", "18081"))
 	if err != nil {
 		return fmt.Errorf("listen RPC: %w", err)
 	}

@@ -30,6 +30,7 @@ type Query struct {
 	Environment                          *string
 	ServiceNamespace                     *string
 	ServiceName                          string
+	ServiceVersion, InstanceID           string
 	Operation                            string
 	SpanKind                             string
 	Page, PageSize                       int
@@ -41,7 +42,7 @@ func (q *Query) Validate(serviceRequired bool) error {
 	if q.Start.IsZero() || q.End.IsZero() || !q.End.After(q.Start) || q.End.Sub(q.Start) < time.Minute || q.End.Sub(q.Start) > 7*24*time.Hour {
 		return fmt.Errorf("%w: time range must be between 1 minute and 7 days", errs.ErrInvalid)
 	}
-	for _, value := range []string{q.ServiceName, q.Operation, q.Search, deref(q.Environment), deref(q.ServiceNamespace)} {
+	for _, value := range []string{q.ServiceName, q.ServiceVersion, q.InstanceID, q.Operation, q.Search, deref(q.Environment), deref(q.ServiceNamespace)} {
 		if len(value) > 256 || !utf8.ValidString(value) || strings.IndexFunc(value, unicode.IsControl) >= 0 {
 			return fmt.Errorf("%w: service filters must be valid text of at most 256 bytes", errs.ErrInvalid)
 		}
@@ -110,6 +111,17 @@ func deref(value *string) string {
 	return *value
 }
 
+func (q Query) instanceLabels() []string {
+	labels := []string{}
+	if q.ServiceVersion != "" {
+		labels = append(labels, "service_version="+strconv.Quote(q.ServiceVersion))
+	}
+	if q.InstanceID != "" {
+		labels = append(labels, "service_instance_id="+strconv.Quote(q.InstanceID))
+	}
+	return labels
+}
+
 func (q Query) selector(extra ...string) string {
 	labels := []string{`service!=""`, `span_kind="SPAN_KIND_` + strings.ToUpper(q.SpanKind) + `"`}
 	if q.ServiceName != "" {
@@ -124,7 +136,7 @@ func (q Query) selector(extra ...string) string {
 	if q.Operation != "" {
 		labels = append(labels, "span_name="+strconv.Quote(q.Operation))
 	}
-	return "{" + strings.Join(append(labels, extra...), ",") + "}"
+	return "{" + strings.Join(append(append(labels, q.instanceLabels()...), extra...), ",") + "}"
 }
 
 func promDuration(d time.Duration) string { return strconv.FormatInt(int64(d/time.Second), 10) + "s" }
@@ -346,6 +358,11 @@ func TraceQL(q Query) string {
 			clause = "(" + clause + " || resource." + field.name + " = nil)"
 		}
 		clauses = append(clauses, clause)
+	}
+	for _, field := range []struct{ name, value string }{{"service.version", q.ServiceVersion}, {"service.instance.id", q.InstanceID}} {
+		if field.value != "" {
+			clauses = append(clauses, "resource."+field.name+" = "+strconv.Quote(field.value))
+		}
 	}
 	clauses = append(clauses, "kind = "+q.SpanKind)
 	if q.MetricSource == "tempo_spanmetrics" {

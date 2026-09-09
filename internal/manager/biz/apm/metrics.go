@@ -66,7 +66,7 @@ func (q Query) metricSelector(extra ...string) string {
 			labels = append(labels, "rpc_method="+strconv.Quote(q.Operation))
 		}
 	}
-	return "{" + strings.Join(append(labels, extra...), ",") + "}"
+	return "{" + strings.Join(append(append(labels, q.instanceLabels()...), extra...), ",") + "}"
 }
 
 // Apply rate before dropping instance labels so restarts remain correct.

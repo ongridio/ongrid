@@ -31,6 +31,7 @@ import { Button, Card, Chip, EmptyState, PageHeader, PaginationFooter } from '@/
 import { Dependencies } from '@/components/apm/Dependencies';
 import { SearchInput } from '@/components/apm/SearchInput';
 import { ServiceSwitcher } from '@/components/apm/ServiceSwitcher';
+import { RuntimeMetrics } from '@/components/apm/RuntimeMetrics';
 import { Onboarding } from '@/components/apm/Onboarding';
 import { chartTooltipStyle, chartTooltipLabelStyle } from '@/lib/chartTheme';
 import { useI18n } from '@/i18n/locale';
@@ -101,6 +102,7 @@ export default function ApmPage() {
   const query = params.toString();
   const operation = params.get('operation');
   const combined = detail && !traceMetrics && !operation;
+  const scopedReplica = !!(params.get('service_version') || params.get('instance_id'));
   const activeProtocol = params.get('protocol') === 'rpc' ? 'rpc' : 'http';
   const context = new URLSearchParams(params);
   context.delete('list_query');
@@ -122,13 +124,19 @@ export default function ApmPage() {
         { protocol: 'rpc', data: current?.rpcDiagnostics },
       ]
     : [{ protocol: activeProtocol, data: diagnostics }];
-  const instances = [
-    ...new Map(
-      diagnosticPanels
-        .flatMap(({ data }) => data?.instances || [])
-        .map((instance) => [JSON.stringify(instance), instance]),
-    ).values(),
-  ];
+  const instances = [...new Map(
+    (runtime?.instances || diagnosticPanels.flatMap(({ data }) => data?.instances || []))
+      .map((instance) => [JSON.stringify([instance.instance_id, instance.version]), instance]),
+  ).values()];
+  const visibleInstances = instances.filter((item) =>
+    (!params.get('service_version') || item.version === params.get('service_version')) &&
+    (!params.get('instance_id') || item.instance_id === params.get('instance_id')));
+  const versions = [...new Set([...instances.map((item) => item.version), params.get('service_version') || ''].filter(Boolean))].sort();
+  const instanceOptions = [...new Set([
+    ...instances.filter((item) => !params.get('service_version') || item.version === params.get('service_version')).map((item) => item.instance_id),
+    params.get('instance_id') || '',
+  ].filter(Boolean))].sort();
+
 
   const set = useCallback(
     (key: string, value: string | null) => {
@@ -139,6 +147,7 @@ export default function ApmPage() {
         next.delete('operation');
         next.delete('span_kind');
       }
+      if (key === 'service_version') next.delete('instance_id');
       if (key.endsWith('_sort')) next.delete(key.replace('_sort', '_page'));
       else if (!key.endsWith('page')) {
         for (const page of ['page', 'http_page', 'rpc_page']) next.delete(page);
@@ -259,9 +268,9 @@ export default function ApmPage() {
           );
         }
       }
-      if (tab === 'overview' && !operation)
+      if (tab === 'overview' && !operation && !scopedReplica)
         fetchPanel(queryApm('dependencies', p, controller.signal), 'dependencies');
-    } else if (tab === 'dependencies')
+    } else if (tab === 'dependencies' && !scopedReplica)
       fetchPanel(queryApm('dependencies', p, controller.signal), 'dependencies');
     else if (tab === 'instances' || tab === 'onboarding') {
       for (const protocol of combined ? ['http', 'rpc'] : [activeProtocol]) {
@@ -273,8 +282,9 @@ export default function ApmPage() {
           protocol,
         );
       }
-      if (tab === 'instances') fetchPanel(queryApm('runtime', p, controller.signal), 'runtime');
+
     }
+    if (detail && tab !== 'alerts') fetchPanel(queryApm('runtime', p, controller.signal), 'runtime');
     Promise.all(tasks).finally(() => {
       if (!controller.signal.aborted) {
         setLoading(false);
@@ -283,7 +293,7 @@ export default function ApmPage() {
       }
     });
     return () => controller.abort();
-  }, [query, tab, detail, refresh, scope, combined, activeProtocol, operation]);
+  }, [query, tab, detail, refresh, scope, combined, activeProtocol, operation, scopedReplica]);
   useEffect(() => {
     if (detail && tab !== 'operations') {
       restoredScroll.current = '';
@@ -464,6 +474,21 @@ export default function ApmPage() {
           </>
         }
         extra={
+          detail ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <FilterField label={tr('版本', 'Version')}>
+                <Select aria-label={tr('版本', 'Version')} className="w-44" value={params.get('service_version') || ''}
+                  onValueChange={(value) => set('service_version', value || null)}
+                  options={[{value: '', label: tr('全部版本', 'All versions')}, ...versions.map((value) => ({value, label: value}))]} />
+              </FilterField>
+              <FilterField label={tr('实例', 'Instance')}>
+                <Select aria-label={tr('实例', 'Instance')} className="w-56" value={params.get('instance_id') || ''}
+                  onValueChange={(value) => set('instance_id', value || null)}
+                  options={[{value: '', label: tr('全部实例', 'All instances')}, ...instanceOptions.map((value) => ({value, label: value}))]} />
+              </FilterField>
+              <span className="text-xs text-zinc-500">{tr('请求指标与资源指标使用相同筛选', 'Requests and resources share these filters')}</span>
+            </div>
+          ) :
           !detail && tab === 'services' && (
             <div className="flex flex-wrap items-center gap-3">
               {!detail && tab === 'services' && (
@@ -600,7 +625,7 @@ export default function ApmPage() {
                 className="inline-flex items-center gap-1 text-zinc-500 hover:text-indigo-500"
                 to={`/logs?${params}`}
               >
-                {tr('服务日志', 'Service logs')}
+                {scopedReplica ? tr('服务日志（全部实例）', 'Service logs (all instances)') : tr('服务日志', 'Service logs')}
                 <ArrowUpRight size={13} />
               </Link>
             </div>
@@ -1196,19 +1221,19 @@ export default function ApmPage() {
                 <h2 className="text-sm font-medium">
                   {tr('观测到的实例', 'Observed instances')}
                 </h2>
-                {instances.length === 0 ? (
+                {visibleInstances.length === 0 ? (
                   <EmptyState
                     title={tr('未观测到实例关联字段', 'No instance identity observed')}
                   />
                 ) : (
                   <div className="divide-y divide-[rgb(var(--border))]">
-                    {instances.map((instance, i) => (
+                    {visibleInstances.map((instance, i) => (
                       <div
                         key={i}
                         className="flex flex-wrap items-center justify-between gap-3 py-3 text-xs"
                       >
                         <span>
-                          {instance.instance_id || instance.pod || unset} ·{' '}
+                          <Button variant="link" size="sm" onClick={() => { const next = new URLSearchParams(params); next.set('instance_id', instance.instance_id); if (instance.version) next.set('service_version', instance.version); next.set('tab', 'overview'); setParams(next); }}>{instance.instance_id || instance.pod || unset}</Button> ·{' '}
                           {instance.version || unset} · {tr('设备', 'Device')}{' '}
                           {instance.device_id || unset}
                         </span>
@@ -1234,48 +1259,10 @@ export default function ApmPage() {
             )}
           </>
         )}
-        {runtime && (
-          <Card>
-            <h2 className="mb-3 text-sm font-medium">{tr('运行时指标', 'Runtime metrics')}</h2>
-            <p className="mb-2 text-xs text-zinc-500">
-              {tr(
-                '应用已导出的运行时指标，取结束时间前 5 分钟内的最近值；需配置服务身份标签。',
-                'Runtime gauges exported by the application, using the latest value within 5 minutes of the end time; service identity labels are required.',
-              )}
-            </p>
-            {runtime.items.length === 0 ? (
-              <EmptyState
-                title={tr('未观测到支持的运行时指标', 'No supported runtime metrics observed')}
-              />
-            ) : (
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr>
-                    {[
-                      tr('指标', 'Metric'),
-                      tr('实例', 'Instance'),
-                      tr('数值 / 单位', 'Value / unit'),
-                    ].map((v) => (
-                      <th className="p-3 [&:nth-child(n+2):nth-child(-n+4)]:text-right" key={v}>
-                        {v}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[rgb(var(--border))]">
-                  {runtime.items.map((row, i) => (
-                    <tr key={i}>
-                      <td className="p-3">{row.name}</td>
-                      <td>{row.instance_id || unset}</td>
-                      <td>
-                        {number(row.value)} {row.unit}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </Card>
+        {runtime && (tab === 'overview' || tab === 'instances') && <RuntimeMetrics data={runtime} />}
+        {tab === 'dependencies' && scopedReplica && (
+          <EmptyState title={tr('依赖图按服务汇总', 'Dependency graphs are service-wide')}
+            hint={tr('请选择全部版本和全部实例查看服务依赖。', 'Select all versions and all instances to view dependencies.')} />
         )}
         {tab === 'alerts' && traceMetrics && (
           <Card>

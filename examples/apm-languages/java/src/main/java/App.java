@@ -11,8 +11,8 @@ import io.opentelemetry.api.trace.Span;
 public class App {
   static void log(String protocol) {
     var ctx = Span.current().getSpanContext();
-    System.out.printf("{\"message\":\"request completed\",\"protocol\":\"%s\",\"service.name\":\"%s\",\"service.namespace\":\"%s\",\"deployment.environment.name\":\"%s\",\"trace_id\":\"%s\",\"span_id\":\"%s\"}%n",
-        protocol, System.getenv("OTEL_SERVICE_NAME"), System.getenv().getOrDefault("SERVICE_NAMESPACE", "trade"), System.getenv().getOrDefault("DEPLOYMENT_ENVIRONMENT", "acceptance"), ctx.getTraceId(), ctx.getSpanId());
+    System.out.printf("{\"message\":\"request completed\",\"protocol\":\"%s\",\"service.name\":\"%s\",\"service.namespace\":\"%s\",\"deployment.environment.name\":\"%s\",\"service.instance.id\":\"%s\",\"service.version\":\"%s\",\"trace_id\":\"%s\",\"span_id\":\"%s\"}%n",
+        protocol, System.getenv("OTEL_SERVICE_NAME"), System.getenv().getOrDefault("SERVICE_NAMESPACE", "trade"), System.getenv().getOrDefault("DEPLOYMENT_ENVIRONMENT", "acceptance"), System.getenv().getOrDefault("SERVICE_INSTANCE_ID", ""), System.getenv().getOrDefault("SERVICE_VERSION", ""), ctx.getTraceId(), ctx.getSpanId());
   }
   public static void main(String[] args) throws Exception {
     NettyServerBuilder.forAddress(new InetSocketAddress("127.0.0.1", Integer.parseInt(System.getenv().getOrDefault("RPC_PORT", "18081"))))

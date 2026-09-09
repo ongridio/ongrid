@@ -16,44 +16,43 @@ Java、Node.js、Python 各提供 HTTP `/orders/42` 和 gRPC Health Check，包�
 
 ## 持续运行的 Edge 演示
 
-`compose.yaml` 运行 Go、Java、Node.js、Python、C# / .NET、PHP、C++、Rust、Ruby 九个服务和低频请求生成器。用于已有 Edge 的 Linux 主机，OTLP HTTP 接收器需监听 `127.0.0.1:4318`。镜像使用官方 SDK/Agent，所有业务端口仅监听本机；`network_mode: host` 让请求和 OTLP 直接进入同机 Edge。
+`compose.yaml` 持续运行 Go、Java、Python 三种语言，每种两个实例，共六个实例和一个低频请求生成器。其他语言源码及隔离验收保留。用于已有 Edge 的 Linux 主机，OTLP HTTP 接收器需监听 `127.0.0.1:4318`；业务端口仅监听本机，使用官方 SDK/Agent。
 
 ```sh
 sudo install -d -o 65532 -g 65532 /var/log/ongrid-apm-demo
-docker compose -f examples/apm-languages/compose.yaml up -d --build
+docker compose -f examples/apm-languages/compose.yaml up -d --build --remove-orphans
 ```
 
-| 服务 | HTTP / gRPC 端口 | 语言 |
-| --- | --- | --- |
-| apm-demo-go | 18080 / 18081 | Go |
-| apm-demo-java | 18082 / 18083 | Java |
-| apm-demo-node | 18084 / 18085 | Node.js |
-| apm-demo-python | 18086 / 18087 | Python |
-| apm-demo-dotnet | 18088 / — | C# / .NET |
-| apm-demo-php | 18090 / — | PHP |
-| apm-demo-cpp | 18092 / — | C++ |
-| apm-demo-rust | 18094 / — | Rust |
-| apm-demo-ruby | 18096 / — | Ruby |
+| 服务 | 实例 | 版本 | HTTP / gRPC 端口 |
+| --- | --- | --- | --- |
+| apm-demo-go | ubuntu-go-1 | 1.0.0 | 18080 / 18081 |
+| apm-demo-go | ubuntu-go-2 | 1.1.0-demo | 18180 / 18181 |
+| apm-demo-java | ubuntu-java-1 | 1.0.0 | 18082 / 18083 |
+| apm-demo-java | ubuntu-java-2 | 1.1.0-demo | 18182 / 18183 |
+| apm-demo-python | ubuntu-python-1 | 1.0.0 | 18086 / 18087 |
+| apm-demo-python | ubuntu-python-2 | 1.1.0-demo | 18186 / 18187 |
 
-环境为 `development`，业务命名空间为 `apm-demo`。每种语言在完成一组请求后等待 2 秒；每 10 组包含 1 组失败和 1 组慢请求。Go 标准 gRPC Health 服务只模拟成功/失败，慢请求在 HTTP 产生。实例以 `ubuntu-<language>-1` 标识，部署到其他主机时应改为唯一实例名。进程自动重启，单服务内存限额 256 MiB（Java 为 512 MiB），CPU 上限 0.5 核。
+标准 OTel Resource 使用 `service.name`、`service.namespace=apm-demo`、`deployment.environment.name=development`、`service.version` 和 `service.instance.id`。部署到其他主机时需使用唯一实例名。两个版本使用同一示例构建，版本标签用于演示：请求生成器分别每 20 / 5 组产生一组真实失败，预期错误率约 5% / 20%，不代表代码版本回归。每组后等待 2 秒；包含 HTTP 慢请求，Go gRPC Health 仅模拟成功与失败。
 
-在设备的 logs 插件配置中追加九个 `sources`，各自使用 `id`/`service_name: apm-demo-<language>`、`include: ["/var/log/ongrid-apm-demo/<language>.log"]`、`parser: json`、`start_at: beginning`。语言文件名为 `go/java/node/python/dotnet/php/cpp/rust/ruby`。保留原有来源与现有日志后端配置。请求日志自带服务身份、Trace ID 和 Span ID；启动诊断可能是普通文本。文件需配置主机 logrotate，例如每日轮转、`maxsize 5M`、`rotate 3`、`compress`、`copytruncate`、`missingok`、`notifempty`、`su 65532 65532`；按主机 timer 周期检查大小。
+CPU 与内存均为实际测量。Go 复用官方 Prometheus Go/Process collector 经 OTel bridge 导出；Python 使用官方 system metrics instrumentation；Java 使用官方 Agent 的 JVM 指标。页面 CPU 是占用核数，Go/Python 内存是进程 RSS，Java 是 JVM 堆与非堆已用内存，不能等同 RSS。Go 堆与 goroutine、Java 线程数也在运行时表中展示。
 
-从应用性能页面查看九个服务，进入服务可跳转链路和日志。指标每 5 秒导出；Edge 采集及后端索引还会带来短暂延迟。刚启动时“最近 1 小时”的平均 RPS 会偏低，可以改用较短时间范围。Node/Python 的 gRPC 原生请求指标边界见上文。
+服务详情可按版本、实例筛选 RED、接口、链路和资源曲线；实例页点击实例可进入对应概览。依赖图保持服务级聚合，需要清除版本和实例筛选查看；日志链接明确查看服务全部实例。指标每 5 秒导出，后端仍有短暂延迟。选择最近 15 分钟可查看当前实例，历史服务仍保留在此前时间窗口。
 
-停止（保留历史观测数据）：
+设备 logs 插件需要三个来源，分别使用 `id`/`service_name: apm-demo-<language>`、`include: ["/var/log/ongrid-apm-demo/<language>.log"]`、`parser: json`、`start_at: beginning`，语言为 `go/java/python`。同语言两个实例共用日志文件，日志带版本、实例、Trace ID 和 Span ID。保留其他业务来源。主机需配置 logrotate，例如每日轮转、`maxsize 5M`、`rotate 3`、`compress`、`copytruncate`、`missingok`、`notifempty`、`su 65532 65532`。
+
+检查六个实例的成功、慢请求及预期失败（非预期结果返回非零）：
+
+```sh
+docker compose -f examples/apm-languages/compose.yaml exec -T traffic python /app/traffic.py --check
+```
+
+停止并保留历史观测数据：
 
 ```sh
 docker compose -f examples/apm-languages/compose.yaml down
 ```
 
-停止后可从设备 logs 配置移除这九个演示来源；不要删除其他来源。当前本地部署位于 Ubuntu Edge 的 `/opt/ongrid-apm-demo/compose.yaml`，可用 `orb -m ubuntu -u root docker compose -f /opt/ongrid-apm-demo/compose.yaml down` 停止。
-
-运行状态稳定后，可用以下命令检查九种语言各 10 组 HTTP 请求及原有四种语言的 gRPC 请求（包含正常、慢请求和预期失败），非预期结果返回非零退出码：
-
-```sh
-docker compose -f examples/apm-languages/compose.yaml exec -T traffic python /app/traffic.py --check
-```
+当前本地 Ubuntu Edge 部署文件为 `/opt/ongrid-apm-demo/compose.yaml`。停止后可移除对应演示日志来源，保留其他来源。
 
 ## 新增语言的能力与验收
 
@@ -74,7 +73,9 @@ Ruby 的 HTTP RPS、错误率和延迟从服务端 Trace 样本计算，并标�
 先构建新增五个镜像，再运行隔离验收：
 
 ```sh
-docker compose -f examples/apm-languages/compose.yaml build dotnet php cpp rust ruby
+for language in dotnet php cpp rust ruby; do
+  docker build -f examples/apm-languages/Dockerfile --target "$language" -t "ongrid-apm-demo-$language:local" .
+done
 scripts/apm-test/run-more-languages.sh
 ```
 

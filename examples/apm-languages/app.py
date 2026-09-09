@@ -16,6 +16,7 @@ def log_request(protocol):
     print(json.dumps({"message": "request completed", "protocol": protocol,
                       "service.name": os.environ["OTEL_SERVICE_NAME"],
                       "service.namespace": os.environ.get("SERVICE_NAMESPACE", "trade"), "deployment.environment.name": os.environ.get("DEPLOYMENT_ENVIRONMENT", "acceptance"),
+                      "service.instance.id": os.environ.get("SERVICE_INSTANCE_ID", ""), "service.version": os.environ.get("SERVICE_VERSION", ""),
                       "trace_id": f"{ctx.trace_id:032x}", "span_id": f"{ctx.span_id:016x}"}), flush=True)
 
 

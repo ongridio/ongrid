@@ -46,6 +46,9 @@ message Query {
   string protocol = 13;
   // otel (default) or legacy. Query one metric family to avoid dual-export double counting.
   string metric_format = 14;
+  // Exact resource filters; absent/empty means all versions or instances.
+  string service_version = 15;
+  string instance_id = 16;
 }
 
 message Summary {
@@ -146,9 +149,19 @@ message GetDiagnosticsData {
 }
 message GetDiagnosticsResponse { int32 code = 1; string message = 2; GetDiagnosticsData data = 3; }
 
-message RuntimeMetric { string name = 1; string unit = 2; string instance_id = 3; optional double value = 4; }
+message RuntimePoint { double timestamp = 1; optional double value = 2; }
+message RuntimeMetric {
+  string name = 1; string unit = 2; string instance_id = 3; optional double value = 4;
+  string version = 5;
+  repeated RuntimePoint points = 6;
+}
 message GetRuntimeRequest { Query query = 1; }
-message GetRuntimeData { repeated RuntimeMetric items = 1; QueryMetadata metadata = 2; }
+message GetRuntimeData {
+  repeated RuntimeMetric items = 1;
+  QueryMetadata metadata = 2;
+  // Service-wide options in the selected window, independent of version/instance filters.
+  repeated ObservedInstance instances = 3;
+}
 message GetRuntimeResponse { int32 code = 1; string message = 2; GetRuntimeData data = 3; }
 
 message GetAlertTemplateRequest {

@@ -122,6 +122,9 @@ func (s *Service) Diagnostics(ctx context.Context, q Query) (*Diagnostics, error
 		matched := false
 		for _, resource := range resources {
 			attrs := resource.attributes()
+			if (q.ServiceVersion != "" && attrs["service.version"] != q.ServiceVersion) || (q.InstanceID != "" && attrs["service.instance.id"] != q.InstanceID) {
+				continue
+			}
 			if attrs["service.name"] != q.ServiceName || attrs["service.namespace"] != *q.ServiceNamespace || attrs["deployment.environment.name"] != *q.Environment {
 				continue
 			}
@@ -248,58 +251,4 @@ func decodeTrace(body []byte) ([]traceResource, error) {
 		return nil, fmt.Errorf("apm: trace exceeds resource limit")
 	}
 	return resources, nil
-}
-
-type RuntimeMetric struct {
-	Name       string   `json:"name"`
-	Unit       string   `json:"unit"`
-	InstanceID string   `json:"instance_id"`
-	Value      *float64 `json:"value"`
-}
-
-type Runtime struct {
-	Items    []RuntimeMetric `json:"items"`
-	Metadata Metadata        `json:"metadata"`
-}
-
-func (s *Service) Runtime(ctx context.Context, q Query) (*Runtime, error) {
-	if err := q.Validate(true); err != nil {
-		return nil, err
-	}
-	// Only already-exported gauges are queried; no host metrics are guessed
-	// to belong to an application. Missing instance labels mean aggregate.
-	names := "go_goroutines|go_memstats_heap_alloc_bytes|process_resident_memory_bytes|jvm_memory_used_bytes|jvm_threads_live_threads|nodejs_eventloop_lag_seconds"
-	scope := fmt.Sprintf(`deployment_environment_name=%q,service_namespace=%q`, *q.Environment, *q.ServiceNamespace)
-	parts := []string{}
-	for _, match := range []string{fmt.Sprintf("service_name=%q", q.ServiceName), fmt.Sprintf(`service_name="",service=%q`, q.ServiceName)} {
-		parts = append(parts, fmt.Sprintf(`sum by (__name__,service_instance_id,instance) (last_over_time({__name__=~%q,%s,%s}[5m]))`, names, scope, match))
-	}
-	series, err := s.instant(ctx, strings.Join(parts, " or "), q.End)
-	if err != nil {
-		return nil, err
-	}
-	out := &Runtime{Items: []RuntimeMetric{}, Metadata: metadata(q)}
-	out.Metadata.MetricSource, out.Metadata.Sampling = "application_metrics", "not_applicable"
-	for _, item := range series {
-		value, err := sampleValue(item.Value)
-		if err != nil {
-			return nil, err
-		}
-		name := item.Metric["__name__"]
-		unit := "count"
-		if strings.HasSuffix(name, "_bytes") {
-			unit = "bytes"
-		} else if strings.HasSuffix(name, "_seconds") {
-			unit = "seconds"
-		}
-		instance := item.Metric["service_instance_id"]
-		if instance == "" {
-			instance = item.Metric["instance"]
-		}
-		out.Items = append(out.Items, RuntimeMetric{name, unit, instance, value})
-	}
-	sort.Slice(out.Items, func(i, j int) bool {
-		return out.Items[i].Name+out.Items[i].InstanceID < out.Items[j].Name+out.Items[j].InstanceID
-	})
-	return out, nil
 }

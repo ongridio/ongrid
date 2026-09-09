@@ -49,6 +49,8 @@ metrics_generator:
         - service.namespace
         - deployment.environment.name
         - telemetry.sdk.language
+        - service.instance.id
+        - service.version
         - http.request.method
         - http.method
     service_graphs:

@@ -34,7 +34,7 @@ const row = {
   data_status: 'observed',
 };
 describe('Application performance', () => {
-  beforeEach(() => localStorage.setItem('ongrid-locale', 'zh-CN'));
+  beforeEach(() => { localStorage.setItem('ongrid-locale', 'zh-CN'); server.use(http.get('/api/v1/apm/runtime', () => HttpResponse.json({ data: { items: [], instances: [] } }))); });
   it('keeps same-name services separate and links their complete identity', async () => {
     server.use(
       http.get('/api/v1/apm/services', () =>
@@ -734,4 +734,34 @@ describe('Official language onboarding', () => {
     await selectOption(screen.getByRole('combobox', { name: '语言' }), 'PHP');
     expect(screen.getByText(/长驻 worker/)).toBeInTheDocument();
   });
+  it('keeps resource and request queries scoped to the chosen version and instance', async () => {
+    const requests: URL[] = [];
+    const instances = ['1.0.0', '1.1.0-demo'].map((version, index) => ({instance_id: `pod-${index + 1}`, version, device_id: '', cluster_id: '', pod: ''}));
+    server.use(
+      http.get('/api/v1/apm/runtime', ({request}) => {
+        const url = new URL(request.url); requests.push(url);
+        return HttpResponse.json({data: {instances, items: instances
+          .filter((item) => !url.searchParams.get('service_version') || item.version === url.searchParams.get('service_version'))
+          .map((item) => ({...item, name: 'process_cpu_cores', unit: 'cores', value: 0.02, points: []}))}});
+      }),
+      http.get('/api/v1/apm/diagnostics', () => HttpResponse.json({data: {checks: [], instances: [], trace_ids: []}})),
+      http.get('/api/v1/apm/overview', ({request}) => {requests.push(new URL(request.url)); return HttpResponse.json({data: {summary: row, points: []}});}),
+      http.get('/api/v1/apm/operations', ({request}) => {requests.push(new URL(request.url)); return HttpResponse.json({data: {items: [], total: 0, page: 1, page_size: 5}});}),
+      http.get('/api/v1/apm/dependencies', () => HttpResponse.json({data: {items: []}})),
+    );
+    render(<MemoryRouter initialEntries={[`/apm?${period}&service_name=orders&environment=production&service_namespace=trade&tab=instances`]}><ApmPage /></MemoryRouter>);
+    await screen.findByRole('button', {name: 'pod-2'});
+    await selectOption(screen.getByRole('combobox', {name: '版本'}), '1.1.0-demo');
+    await waitFor(() => expect(requests.some((url) => url.pathname.endsWith('/runtime') && url.searchParams.get('service_version') === '1.1.0-demo')).toBe(true));
+    await selectOption(screen.getByRole('combobox', {name: '实例'}), 'pod-2');
+    await waitFor(() => expect(requests.some((url) => url.searchParams.get('instance_id') === 'pod-2')).toBe(true));
+    expect(screen.queryByRole('button', {name: 'pod-1'})).not.toBeInTheDocument();
+    expect(screen.getByRole('button', {name: 'pod-2'})).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', {name: '概览'}));
+    await waitFor(() => expect(requests.some((url) => url.pathname.endsWith('/overview') && url.searchParams.get('service_version') === '1.1.0-demo' && url.searchParams.get('instance_id') === 'pod-2')).toBe(true));
+    const traces = new URL(screen.getByRole('link', {name: '查看链路'}).getAttribute('href')!, 'https://ongrid.test');
+    expect(traces.searchParams.get('q')).toContain('resource.service.version = "1.1.0-demo"');
+    expect(traces.searchParams.get('q')).toContain('resource.service.instance.id = "pod-2"');
+  });
+
 });
