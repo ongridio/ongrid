@@ -15,6 +15,34 @@ service APMService {
   rpc GetDiagnostics(GetDiagnosticsRequest) returns (GetDiagnosticsResponse);
   rpc GetRuntime(GetRuntimeRequest) returns (GetRuntimeResponse);
   rpc GetAlertTemplate(GetAlertTemplateRequest) returns (GetAlertTemplateResponse);
+  rpc GetRepositoryBinding(GetRepositoryBindingRequest) returns (RepositoryBindingResponse);
+  rpc PutRepositoryBinding(PutRepositoryBindingRequest) returns (RepositoryBindingResponse);
+  rpc DeleteRepositoryBinding(GetRepositoryBindingRequest) returns (RepositoryBindingResponse);
+}
+
+// /api/v1/apm/repository-binding uses the complete service identity, without a time window.
+message RepositoryBinding {
+  ServiceIdentity identity = 1;
+  uint64 repo_id = 2;
+  string source_directory = 3;
+  // Exactly one {version}; for example {version}, v{version}, or orders/{version}.
+  string tag_pattern = 4;
+  // Read-only, resolved from the registered repository.
+  string repo_url = 5;
+  string synced_ref = 6;
+  bool repo_missing = 7;
+}
+message GetRepositoryBindingRequest { ServiceIdentity identity = 1; }
+message PutRepositoryBindingRequest {
+  ServiceIdentity identity = 1;
+  uint64 repo_id = 2;
+  string source_directory = 3;
+  string tag_pattern = 4;
+}
+message RepositoryBindingResponse {
+  int32 code = 1;
+  string message = 2;
+  RepositoryBinding data = 3;
 }
 
 message ServiceIdentity {

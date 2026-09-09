@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"testing"
 
-	knowledgebiz "github.com/ongridio/ongrid/internal/manager/biz/knowledge"
 	edgebiz "github.com/ongridio/ongrid/internal/manager/biz/edge"
+	knowledgebiz "github.com/ongridio/ongrid/internal/manager/biz/knowledge"
 )
 
 // codeKnowledge satisfies BOTH KnowledgeSearcher and CodeBrowser — i.e. the
@@ -17,13 +17,13 @@ type codeKnowledge struct{}
 func (codeKnowledge) Search(context.Context, string, knowledgebiz.SearchOptions) ([]knowledgebiz.SearchHit, error) {
 	return nil, nil
 }
-func (codeKnowledge) ListRepoSources(context.Context, string, string) (*knowledgebiz.RepoSourceListing, error) {
+func (codeKnowledge) ListRepoSources(context.Context, string, string, string) (*knowledgebiz.RepoSourceListing, error) {
 	return nil, nil
 }
-func (codeKnowledge) ReadSource(context.Context, string, string, int, int) (*knowledgebiz.SourceFile, error) {
+func (codeKnowledge) ReadSource(context.Context, string, string, int, int, string) (*knowledgebiz.SourceFile, error) {
 	return nil, nil
 }
-func (codeKnowledge) GrepSource(context.Context, string, string, string, int) (*knowledgebiz.GrepResult, error) {
+func (codeKnowledge) GrepSource(context.Context, string, string, string, int, string) (*knowledgebiz.GrepResult, error) {
 	return nil, nil
 }
 

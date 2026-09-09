@@ -15,6 +15,7 @@ describe('APM error traces', () => {
     let query: URLSearchParams | undefined;
     let sessions = 0;
     server.use(
+      http.get('/api/v1/apm/repository-binding', () => HttpResponse.json({ data: { repo_id: '3', repo_url: 'ssh://git@example/orders.git', source_directory: 'services/orders', tag_pattern: 'v{version}' } })),
       http.get('/api/v1/traces/search', ({ request }) => {
         query = new URL(request.url).searchParams;
         return HttpResponse.json({ traces: [{ traceID: id, rootTraceName: 'GET /orders', durationMs: 10, startTimeUnixNano: '1788913800000000000' }] });
@@ -31,7 +32,7 @@ describe('APM error traces', () => {
     fireEvent.click(screen.getByRole('button', { name: 'AI 分析' }));
     await waitFor(() => expect(screen.getByText(/initialPrompt/)).toBeInTheDocument());
     const prompt = screen.getByText(/initialPrompt/).textContent!;
-    for (const value of [id, 'pod-2', 'v2', 'query_traceql', 'query_logql', 'query_promql', '最近 15 分钟', '只读分析']) expect(prompt).toContain(value);
+    for (const value of [id, 'pod-2', 'v2', 'query_traceql', 'query_logql', 'query_promql', '最近 15 分钟', '只读分析', 'repository_binding', 'services/orders', 'v{version}', 'revision', 'commit_sha']) expect(prompt).toContain(value);
     expect(sessions).toBe(1);
   });
   it('distinguishes query failure from absence and lets the user retry', async () => {

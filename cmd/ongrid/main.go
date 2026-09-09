@@ -1196,7 +1196,8 @@ func main() {
 	if cfg.Traces.URL != "" {
 		apmTraces = pkgtracequery.New(cfg.Traces.URL, log.With(slog.String("comp", "apm-traces")))
 	}
-	apmHandler := managerserverapm.NewHandler(managerbizapm.New(apmProm, apmTraces, logsBackendSvc), log)
+	apmService := managerbizapm.New(apmProm, apmTraces, logsBackendSvc)
+	apmHandler := managerserverapm.NewHandler(apmService, log)
 
 	// Frontierbound service-end SDK: opens a long-lived service connection
 	// to the upstream frontier broker (a separate docker container) and
@@ -1469,6 +1470,7 @@ func main() {
 		log.Error("knowledge: migrate failed", slog.Any("err", err))
 	}
 	knowledgeRepo := managerknowledgedata.New(db)
+	apmService.WithRepositoryBindings(settingSvc, knowledgeRepo)
 	// Embedding provider — defaults to OpenAI-compatible API
 	// (works for OpenAI, GLM, Qwen, DeepSeek). Falls back to the
 	// existing OPENAI_API_KEY when ONGRID_EMBEDDING_API_KEY is empty

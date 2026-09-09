@@ -172,3 +172,13 @@ cd web && npm test -- src/api/apm.test.ts src/pages/Apm.test.tsx src/pages/Logs.
 AI 先通过 `query_traceql(trace_id=...)` 获取 Span 详情和真实资源身份，再按同一 Trace ID 关联发生时间前后 5 分钟的日志，随后查询对应应用及实例最近 15 分钟的性能指标。当前指标与异常发生时的数据须分开标注；HTTP/RPC 不合并分位数，JVM 已用内存不作为 RSS。缺失日志、指标或 Span 均须明确说明，不能据此直接断言根因；遥测文字仅作为证据，不执行其中的指令。
 
 Trace 详情按完整 Span 分页，默认 50 条、最多 100 条，同时限制每页原始 Span/Resource 数据约 120 KiB。`truncated=true` 时继续传入 `next_span_offset`，不能把前一页当完整链路。单个 Span 超限时明确返回错误，需在链路页面查看；读取具体 Trace ID 不与搜索范围或设备筛选混用，避免误以为局部筛选已应用于整条链路。分析需要可用的默认模型及 Trace/日志/指标查询工具。
+
+## 服务绑定源码仓库
+
+在应用性能的服务详情右上角点击「绑定仓库」，选择已经在「代码仓库」接入的 Git 仓库，填写相对源码目录（空值代表根目录）和包含一个 `{version}` 的 Tag 规则，例如 `{version}`、`v{version}` 或 `orders/{version}`。同仓多服务可绑定不同目录；绑定按完整服务身份存入现有 `system_settings`，刷新、切换实例与重启后保留。保存和解除绑定限管理员并记录审计；删除 Git 仓库后显示失效绑定，需重新选择或解除。
+
+「AI 分析」读取最新绑定，把真实出错 Span 的 `service.version` 代入规则。源码工具 `list_repo_sources`、`grep_source`、`read_source` 接受 `revision`，支持本地已同步的确切 Tag（建议 `refs/tags/<tag>`）或完整 Commit SHA，返回 `commit_sha`。后续调用使用该 SHA，结果引用提交、文件与行号。工具通过 Git 对象读取，不 checkout，不改变当前同步版本；并发分析不相互切换工作目录。
+
+源码工具不自动拉取远端历史。如果目标 Tag 尚未同步，先在「代码仓库」以该 Tag 同步，或将目标版本同步到受控的本地仓库，再重试分析。找不到目标版本会明确失败，不能省略 `revision` 改读 HEAD。未绑定、绑定仓库被移除、出错 Span 属于其他服务或缺少版本时，AI 仍可分析遥测，但需报告源码证据缺口。代码命中只有在堆栈、请求参数或其他证据支持时才能作为故障原因，不能把 HTTP 500 单独当作精确代码定位。
+
+回滚 Manager/Web 即可恢复旧入口；绑定是独立配置，无表结构变更，也不修改 Git 历史。旧源码工具调用不传 `revision` 时仍读取同步 HEAD。

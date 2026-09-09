@@ -25,16 +25,16 @@ func (f *fakeRepoStore) GetRepo(context.Context, uint64) (*model.Repository, err
 func (f *fakeRepoStore) GetRepoByURL(context.Context, string) (*model.Repository, error) {
 	return nil, errs.ErrNotFound
 }
-func (f *fakeRepoStore) CreateRepo(context.Context, *model.Repository) error          { return nil }
-func (f *fakeRepoStore) UpdateRepoSync(context.Context, uint64, int, string) error    { return nil }
-func (f *fakeRepoStore) DeleteRepo(context.Context, uint64) error                     { return nil }
+func (f *fakeRepoStore) CreateRepo(context.Context, *model.Repository) error       { return nil }
+func (f *fakeRepoStore) UpdateRepoSync(context.Context, uint64, int, string) error { return nil }
+func (f *fakeRepoStore) DeleteRepo(context.Context, uint64) error                  { return nil }
 func (f *fakeRepoStore) ListSSHIdentities(context.Context) ([]*model.SSHIdentity, error) {
 	return nil, nil
 }
 func (f *fakeRepoStore) GetSSHIdentity(context.Context, uint64) (*model.SSHIdentity, error) {
 	return nil, errs.ErrNotFound
 }
-func (f *fakeRepoStore) CreateSSHIdentity(context.Context, *model.SSHIdentity) error          { return nil }
+func (f *fakeRepoStore) CreateSSHIdentity(context.Context, *model.SSHIdentity) error { return nil }
 func (f *fakeRepoStore) UpdateSSHIdentity(context.Context, uint64, string, string, string) error {
 	return nil
 }
@@ -92,7 +92,7 @@ func TestListRepoSources(t *testing.T) {
 	ctx := context.Background()
 
 	// resolve by URL substring; root listing has dirs-first ordering and hides .git
-	got, err := uc.ListRepoSources(ctx, "widget", "")
+	got, err := uc.ListRepoSources(ctx, "widget", "", "")
 	if err != nil {
 		t.Fatalf("list root: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestListRepoSources(t *testing.T) {
 	}
 
 	// resolve by numeric id, list a subdir
-	sub, err := uc.ListRepoSources(ctx, "1", "internal/pkg")
+	sub, err := uc.ListRepoSources(ctx, "1", "internal/pkg", "")
 	if err != nil {
 		t.Fatalf("list subdir: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestReadSource(t *testing.T) {
 	ctx := context.Background()
 
 	// whole file
-	f, err := uc.ReadSource(ctx, "widget", "internal/pkg/resolver.go", 0, 0)
+	f, err := uc.ReadSource(ctx, "widget", "internal/pkg/resolver.go", 0, 0, "")
 	if err != nil {
 		t.Fatalf("read whole: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestReadSource(t *testing.T) {
 	}
 
 	// line window (the func signature is on line 4)
-	win, err := uc.ReadSource(ctx, "widget", "internal/pkg/resolver.go", 4, 4)
+	win, err := uc.ReadSource(ctx, "widget", "internal/pkg/resolver.go", 4, 4, "")
 	if err != nil {
 		t.Fatalf("read window: %v", err)
 	}
@@ -146,12 +146,12 @@ func TestReadSource(t *testing.T) {
 	}
 
 	// binary file refused
-	if _, err := uc.ReadSource(ctx, "widget", "blob.bin", 0, 0); !errors.Is(err, errs.ErrInvalid) {
+	if _, err := uc.ReadSource(ctx, "widget", "blob.bin", 0, 0, ""); !errors.Is(err, errs.ErrInvalid) {
 		t.Fatalf("binary read should be ErrInvalid, got %v", err)
 	}
 
 	// path traversal refused
-	if _, err := uc.ReadSource(ctx, "widget", "../../../../etc/passwd", 0, 0); err == nil {
+	if _, err := uc.ReadSource(ctx, "widget", "../../../../etc/passwd", 0, 0, ""); err == nil {
 		t.Fatal("path traversal should fail")
 	}
 }
@@ -160,7 +160,7 @@ func TestGrepSource(t *testing.T) {
 	uc, _ := newCodeBrowseUC(t)
 	ctx := context.Background()
 
-	res, err := uc.GrepSource(ctx, "widget", "ResolveEdgeID", "", 0)
+	res, err := uc.GrepSource(ctx, "widget", "ResolveEdgeID", "", 0, "")
 	if err != nil {
 		t.Fatalf("grep: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestGrepSource(t *testing.T) {
 	}
 
 	// path_glob narrows; no match → empty (not error)
-	none, err := uc.GrepSource(ctx, "widget", "ResolveEdgeID", "*.md", 0)
+	none, err := uc.GrepSource(ctx, "widget", "ResolveEdgeID", "*.md", 0, "")
 	if err != nil {
 		t.Fatalf("grep glob: %v", err)
 	}

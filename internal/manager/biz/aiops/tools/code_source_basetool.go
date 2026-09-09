@@ -18,9 +18,9 @@ import (
 // CodeBrowser is the narrow biz contract these tools need. *knowledge.Usecase
 // satisfies it (alongside KnowledgeSearcher).
 type CodeBrowser interface {
-	ListRepoSources(ctx context.Context, ref, subpath string) (*knowledgebiz.RepoSourceListing, error)
-	ReadSource(ctx context.Context, ref, path string, startLine, endLine int) (*knowledgebiz.SourceFile, error)
-	GrepSource(ctx context.Context, ref, pattern, pathGlob string, max int) (*knowledgebiz.GrepResult, error)
+	ListRepoSources(ctx context.Context, ref, subpath, revision string) (*knowledgebiz.RepoSourceListing, error)
+	ReadSource(ctx context.Context, ref, path string, startLine, endLine int, revision string) (*knowledgebiz.SourceFile, error)
+	GrepSource(ctx context.Context, ref, pattern, pathGlob string, max int, revision string) (*knowledgebiz.GrepResult, error)
 }
 
 const codeSourceWhenToUse = "运维/故障分析时把告警或日志里的代码线索关联到源码,做**逻辑探查**:起点可以是 stack trace 的 " +
@@ -40,6 +40,7 @@ const listRepoSourcesDescription = "List one directory level of a registered git
 var listRepoSourcesSchema = json.RawMessage(`{
   "type": "object",
   "properties": {
+    "revision": {"type": "string", "description": "Exact locally synced Git tag (prefer refs/tags/v1.0.0) or full commit SHA. Omit only for unversioned browsing of synced HEAD. Missing revisions fail; never fall back to HEAD. Reuse the returned commit_sha in subsequent calls."},
     "repo": {"type": "string", "description": "Which registered repo: its URL (or a unique substring like \"liaison-cloud\") or numeric id."},
     "subpath": {"type": "string", "description": "Directory inside the repo to list (e.g. \"internal/manager\"). Empty = repo root."}
   },
@@ -47,8 +48,9 @@ var listRepoSourcesSchema = json.RawMessage(`{
 }`)
 
 type listRepoSourcesArgs struct {
-	Repo    string `json:"repo"`
-	Subpath string `json:"subpath"`
+	Revision string `json:"revision"`
+	Repo     string `json:"repo"`
+	Subpath  string `json:"subpath"`
 }
 
 // ListRepoSourcesTool is the BaseTool for list_repo_sources.
@@ -82,7 +84,7 @@ func (t *ListRepoSourcesTool) InvokableRun(ctx context.Context, argsJSON string,
 	if err := json.Unmarshal([]byte(argsJSON), &in); err != nil {
 		return "", fmt.Errorf("%s: bad args: %w", ToolNameListRepoSources, err)
 	}
-	res, err := t.svc.ListRepoSources(ctx, in.Repo, in.Subpath)
+	res, err := t.svc.ListRepoSources(ctx, in.Repo, in.Subpath, in.Revision)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", ToolNameListRepoSources, err)
 	}
@@ -98,6 +100,7 @@ const readSourceDescription = "Read a source file (or a 1-indexed [start_line,en
 var readSourceSchema = json.RawMessage(`{
   "type": "object",
   "properties": {
+    "revision": {"type": "string", "description": "Exact locally synced Git tag (prefer refs/tags/v1.0.0) or full commit SHA. Omit only for unversioned browsing of synced HEAD. Missing revisions fail; never fall back to HEAD. Reuse the returned commit_sha in subsequent calls."},
     "repo": {"type": "string", "description": "Which registered repo: URL / unique substring / numeric id."},
     "path": {"type": "string", "description": "File path relative to repo root, e.g. \"internal/pkg/tunnel/messages.go\"."},
     "start_line": {"type": "integer", "description": "1-indexed first line to return. Omit/0 = whole file. Set this to the line from a stack trace.", "minimum": 1},
@@ -107,6 +110,7 @@ var readSourceSchema = json.RawMessage(`{
 }`)
 
 type readSourceArgs struct {
+	Revision  string `json:"revision"`
 	Repo      string `json:"repo"`
 	Path      string `json:"path"`
 	StartLine int    `json:"start_line"`
@@ -144,7 +148,7 @@ func (t *ReadSourceTool) InvokableRun(ctx context.Context, argsJSON string, _ ..
 	if err := json.Unmarshal([]byte(argsJSON), &in); err != nil {
 		return "", fmt.Errorf("%s: bad args: %w", ToolNameReadSource, err)
 	}
-	res, err := t.svc.ReadSource(ctx, in.Repo, in.Path, in.StartLine, in.EndLine)
+	res, err := t.svc.ReadSource(ctx, in.Repo, in.Path, in.StartLine, in.EndLine, in.Revision)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", ToolNameReadSource, err)
 	}
@@ -160,6 +164,7 @@ const grepSourceDescription = "Search a registered git repo's tracked source for
 var grepSourceSchema = json.RawMessage(`{
   "type": "object",
   "properties": {
+    "revision": {"type": "string", "description": "Exact locally synced Git tag (prefer refs/tags/v1.0.0) or full commit SHA. Omit only for unversioned browsing of synced HEAD. Missing revisions fail; never fall back to HEAD. Reuse the returned commit_sha in subsequent calls."},
     "repo": {"type": "string", "description": "Which registered repo: URL / unique substring / numeric id."},
     "pattern": {"type": "string", "description": "git-grep basic regex. e.g. a function name \"func ResolveEdgeID\" or an error string \"connection refused\"."},
     "path_glob": {"type": "string", "description": "Optional pathspec to narrow the search, e.g. \"*.go\" or \"internal/manager/\". Empty = whole repo."},
@@ -169,6 +174,7 @@ var grepSourceSchema = json.RawMessage(`{
 }`)
 
 type grepSourceArgs struct {
+	Revision   string `json:"revision"`
 	Repo       string `json:"repo"`
 	Pattern    string `json:"pattern"`
 	PathGlob   string `json:"path_glob"`
@@ -206,7 +212,7 @@ func (t *GrepSourceTool) InvokableRun(ctx context.Context, argsJSON string, _ ..
 	if err := json.Unmarshal([]byte(argsJSON), &in); err != nil {
 		return "", fmt.Errorf("%s: bad args: %w", ToolNameGrepSource, err)
 	}
-	res, err := t.svc.GrepSource(ctx, in.Repo, in.Pattern, in.PathGlob, in.MaxResults)
+	res, err := t.svc.GrepSource(ctx, in.Repo, in.Pattern, in.PathGlob, in.MaxResults, in.Revision)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", ToolNameGrepSource, err)
 	}

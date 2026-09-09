@@ -37,3 +37,32 @@ func TestAuthenticatedValidationAndDisabledBackend(t *testing.T) {
 		t.Fatalf("lost explicit empty scope: %+v %v", q, err)
 	}
 }
+
+func TestRepositoryBindingAuthorizationAndBody(t *testing.T) {
+	router := chi.NewRouter()
+	NewHandler(biz.New(nil, nil, nil), nil).Register(router)
+	url := "/v1/apm/repository-binding?service_name=orders&service_namespace=&environment="
+	for _, tc := range []struct {
+		method, body string
+		caller       *tenantctx.Tenant
+		status       int
+	}{
+		{"GET", "", nil, 401},
+		{"PUT", `{}`, &tenantctx.Tenant{UserID: 1}, 403},
+		{"DELETE", "", &tenantctx.Tenant{UserID: 1}, 403},
+		{"PUT", `{"repo_id":"1","repo_url":"https://unregistered"}`, &tenantctx.Tenant{IsSuperuser: true}, 400},
+		{"PUT", `{"repo_id":"1"} {}`, &tenantctx.Tenant{IsSuperuser: true}, 400},
+		{"PUT", `{"repo_id":"1","source_directory":"../escape"}`, &tenantctx.Tenant{Role: "admin"}, 400},
+		{"GET", "", &tenantctx.Tenant{UserID: 1}, 503},
+	} {
+		r := httptest.NewRequest(tc.method, url, strings.NewReader(tc.body))
+		if tc.caller != nil {
+			r = r.WithContext(tenantctx.With(r.Context(), *tc.caller))
+		}
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, r)
+		if w.Code != tc.status {
+			t.Fatalf("%s: status %d, want %d: %s", tc.method, w.Code, tc.status, w.Body.String())
+		}
+	}
+}

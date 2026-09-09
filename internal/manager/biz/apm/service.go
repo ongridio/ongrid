@@ -31,9 +31,11 @@ type LogCounter interface {
 }
 
 type Service struct {
-	prom   PromQuerier
-	traces TraceQuerier
-	logs   LogCounter
+	prom     PromQuerier
+	traces   TraceQuerier
+	logs     LogCounter
+	bindings BindingSettings
+	repos    BindingRepositories
 }
 
 func New(prom PromQuerier, traces TraceQuerier, logs LogCounter) *Service {

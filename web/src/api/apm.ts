@@ -5,6 +5,29 @@ export type ServiceIdentity = {
   service_namespace: string;
   environment: string;
 };
+
+export type RepositoryBinding = {
+  identity: ServiceIdentity;
+  repo_id: string;
+  source_directory: string;
+  tag_pattern: string;
+  repo_url?: string;
+  synced_ref?: string;
+  repo_missing?: boolean;
+};
+
+function bindingURL(identity: ServiceIdentity) {
+  return `/apm/repository-binding?${new URLSearchParams(identity)}`;
+}
+export function getRepositoryBinding(identity: ServiceIdentity, signal?: AbortSignal) {
+  return request<{ data: RepositoryBinding | null }>('GET', bindingURL(identity), undefined, { signal }).then((r) => r.data);
+}
+export function saveRepositoryBinding(identity: ServiceIdentity, binding: Pick<RepositoryBinding, 'repo_id' | 'source_directory' | 'tag_pattern'>) {
+  return request<{ data: RepositoryBinding }>('PUT', bindingURL(identity), binding).then((r) => r.data);
+}
+export function deleteRepositoryBinding(identity: ServiceIdentity) {
+  return request('DELETE', bindingURL(identity));
+}
 export type ApmSummary = {
   metric_source?: string;
   identity: ServiceIdentity;

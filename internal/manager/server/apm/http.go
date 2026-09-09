@@ -39,6 +39,9 @@ func (h *Handler) Register(r chi.Router) {
 	r.Get("/v1/apm/diagnostics", h.diagnostics)
 	r.Get("/v1/apm/runtime", h.runtime)
 	r.Get("/v1/apm/alert-template", h.alertTemplate)
+	r.Get("/v1/apm/repository-binding", h.repositoryBinding)
+	r.Put("/v1/apm/repository-binding", h.repositoryBinding)
+	r.Delete("/v1/apm/repository-binding", h.repositoryBinding)
 }
 
 // @Summary List observed application services

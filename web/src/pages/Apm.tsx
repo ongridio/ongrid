@@ -29,6 +29,7 @@ import {
 import { Button, Card, Chip, EmptyState, PageHeader, PaginationFooter } from '@/components/ui';
 import { Dependencies } from '@/components/apm/Dependencies';
 import { ErrorTraces } from '@/components/apm/ErrorTraces';
+import { RepositoryBindingButton } from '@/components/apm/RepositoryBinding';
 import { SearchInput } from '@/components/apm/SearchInput';
 import { ServiceSwitcher } from '@/components/apm/ServiceSwitcher';
 import { RuntimeMetrics } from '@/components/apm/RuntimeMetrics';
@@ -537,6 +538,7 @@ export default function ApmPage() {
             </TabsTrigger>
           ))}
           <div className="ml-auto flex items-center gap-4 py-1.5">
+            <RepositoryBindingButton key={JSON.stringify([params.get('environment'), params.get('service_namespace'), params.get('service_name')])} identity={{ service_name: params.get('service_name') || '', service_namespace: params.get('service_namespace') || '', environment: params.get('environment') || '' }} canEdit={isAdmin} />
             <Button variant="subtle" size="sm"
               type="button"
               className=""
