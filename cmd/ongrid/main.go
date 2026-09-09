@@ -251,10 +251,12 @@ func main() {
 		}
 	}
 	otelShutdown, err := tracing.Init(rootCtx, tracing.Config{
-		ServiceName:   "ongrid-manager",
-		Endpoint:      otelEndpoint,
-		Insecure:      true,
-		SamplingRatio: otelSamplingRatio,
+		ServiceName:      "ongrid-manager",
+		ServiceNamespace: "ongrid",
+		Environment:      "internal",
+		Endpoint:         otelEndpoint,
+		Insecure:         true,
+		SamplingRatio:    otelSamplingRatio,
 	})
 	if err != nil {
 		log.Warn("tracing: init failed (continuing without OTel)", slog.Any("err", err))

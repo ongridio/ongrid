@@ -43,6 +43,9 @@ type Config struct {
 	// ServiceName goes into resource.service.name; the spanmetrics
 	// generator splits series by this so manager + edge stay separate.
 	ServiceName string
+	// Deployment identity defaults; OTEL_RESOURCE_ATTRIBUTES can override these.
+	ServiceNamespace string
+	Environment      string
 	// Endpoint is the OTLP HTTP collector. host:port — the SDK
 	// derives http://host:port/v1/traces. Empty disables exporting
 	// (Init returns a no-op shutdown so callers can defer it
@@ -130,21 +133,28 @@ func Init(ctx context.Context, cfg Config) (Shutdown, error) {
 		opts = append(opts, otlptracehttp.WithInsecure())
 	}
 
+	// Avoid mixing schema URLs from different semconv versions. Use the SDK
+	// detector's schema and allow standard environment attributes to override defaults.
+	attrs := []attribute.KeyValue{}
+	if cfg.ServiceNamespace != "" {
+		attrs = append(attrs, semconv.ServiceNamespace(cfg.ServiceNamespace))
+	}
+	if cfg.Environment != "" {
+		attrs = append(attrs, attribute.String("deployment.environment.name", cfg.Environment))
+	}
+	res, err := resource.New(ctx,
+		resource.WithAttributes(attrs...),
+		resource.WithFromEnv(),
+		resource.WithTelemetrySDK(),
+		resource.WithAttributes(semconv.ServiceName(cfg.ServiceName)),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("tracing: build resource: %w", err)
+	}
 	exporter, err := otlptracehttp.New(ctx, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("tracing: build exporter: %w", err)
 	}
-
-	// Build a fresh resource (skip resource.Default() merge to avoid
-	// schema-URL version conflicts between different otel module
-	// versions in the dep tree). Service name is the load-bearing
-	// attribute spanmetrics generator splits by; everything else
-	// (host, process pid) is nice-to-have.
-	res := resource.NewWithAttributes(
-		semconv.SchemaURL,
-		semconv.ServiceName(cfg.ServiceName),
-	)
-	_ = err // legacy alias kept; resource.NewWithAttributes can't error
 
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(exporter,

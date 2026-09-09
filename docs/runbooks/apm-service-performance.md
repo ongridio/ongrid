@@ -2,6 +2,12 @@
 
 适用版本：本分支使用 Tempo 2.10.0、Prometheus 2.54.0、Collector Contrib 0.157.0，复用当前日志后端和 Pyroscope。入口为「监控告警 → 应用性能」。不需要安装 Ongrid 自研语言探针。
 
+## 内置 Manager 标识
+
+启用 Trace 后，`ongrid-manager` 自动上报标准 SDK 名称、语言（`go`）及 SDK 版本，默认 `service.namespace=ongrid`、`deployment.environment.name=internal`，用于区分内置服务。部署时可通过 `OTEL_RESOURCE_ATTRIBUTES` 覆盖命名空间和环境，例如 `service.namespace=ongrid,deployment.environment.name=production`。服务名保持 `ongrid-manager`。
+
+修改资源身份只影响重启后的新 Trace；查询时间窗包含旧数据时，原先“未设置”的服务记录仍可能出现，可筛选环境 `internal` 和命名空间 `ongrid` 查看新数据。
+
 ## 1. 接入应用
 
 先启用本机 Edge 的 traces 和 metrics 插件，或在 Kubernetes 安装 Telemetry Gateway。主机的 Collector 在 `127.0.0.1:9464` 暴露应用指标，由 metrics 插件经认证隧道上报；显式关闭的插件不会被自动开启。OTLP 基础地址可用 `http://127.0.0.1:4318`；Docker 使用容器可达地址，K8s 使用网关 Service 的实际 DNS。不要向业务应用分发 Manager/Edge 管理密钥。

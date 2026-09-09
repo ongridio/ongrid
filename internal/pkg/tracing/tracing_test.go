@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"go.opentelemetry.io/otel"
@@ -116,4 +117,47 @@ func spanAttribute(span sdktrace.ReadOnlySpan, key string) string {
 		}
 	}
 	return ""
+}
+
+func TestInitResource(t *testing.T) {
+	for _, tc := range []struct{ name, attrs, namespace, environment string }{
+		{"defaults", "", "ongrid", "internal"},
+		{"deployment overrides", "service.namespace=platform,deployment.environment.name=staging", "platform", "staging"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("OTEL_RESOURCE_ATTRIBUTES", tc.attrs)
+			t.Setenv("OTEL_SERVICE_NAME", "external-name")
+			previousProvider, previousPropagator := otel.GetTracerProvider(), otel.GetTextMapPropagator()
+			t.Cleanup(func() { otel.SetTracerProvider(previousProvider); otel.SetTextMapPropagator(previousPropagator) })
+			collector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))
+			defer collector.Close()
+			shutdown, err := Init(context.Background(), Config{ServiceName: "ongrid-manager", ServiceNamespace: "ongrid", Environment: "internal", Endpoint: strings.TrimPrefix(collector.URL, "http://"), Insecure: true, SamplingRatio: 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			recorder := tracetest.NewSpanRecorder()
+			otel.GetTracerProvider().(*sdktrace.TracerProvider).RegisterSpanProcessor(recorder)
+			_, span := otel.Tracer("test").Start(context.Background(), "resource check")
+			span.End()
+			if err := shutdown(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			spans := recorder.Ended()
+			if len(spans) != 1 {
+				t.Fatalf("got %d spans", len(spans))
+			}
+			attrs := map[string]string{}
+			for _, attr := range spans[0].Resource().Attributes() {
+				attrs[string(attr.Key)] = attr.Value.AsString()
+			}
+			for key, want := range map[string]string{"service.name": "ongrid-manager", "service.namespace": tc.namespace, "deployment.environment.name": tc.environment, "telemetry.sdk.language": "go", "telemetry.sdk.name": "opentelemetry"} {
+				if attrs[key] != want {
+					t.Errorf("%s = %q, want %q", key, attrs[key], want)
+				}
+			}
+			if attrs["telemetry.sdk.version"] == "" {
+				t.Error("missing SDK version")
+			}
+		})
+	}
 }
