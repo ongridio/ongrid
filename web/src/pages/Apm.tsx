@@ -28,6 +28,7 @@ import {
 } from '@/api/apm';
 import { Button, Card, Chip, EmptyState, PageHeader, PaginationFooter } from '@/components/ui';
 import { Dependencies } from '@/components/apm/Dependencies';
+import { ErrorTraces } from '@/components/apm/ErrorTraces';
 import { SearchInput } from '@/components/apm/SearchInput';
 import { ServiceSwitcher } from '@/components/apm/ServiceSwitcher';
 import { RuntimeMetrics } from '@/components/apm/RuntimeMetrics';
@@ -1014,6 +1015,7 @@ export default function ApmPage() {
             </section>
           );
         })}
+        {detail && tab === 'overview' && <ErrorTraces params={traceParams} refresh={refresh} />}
         {detail && tab === 'overview' && !operation && (
           <>
             <div className="space-y-3">

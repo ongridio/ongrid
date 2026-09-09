@@ -22,6 +22,7 @@
 5. 提供多语言接入示例、Collector 双目标转发说明和基于真实遥测样本的接入诊断。
 6. 请求级告警通过已有规则编辑、预览和执行流程创建，不改变旧 Trace 告警。
 7. 运行时数据仅在已上报兼容指标时展示，明确无指标/无 Trace/查询失败/无请求之间的区别。
+8. 概览列出所选范围内最近 10 条已采样错误 Trace，可查看详情或启动 AI 只读分析。复用现有会话，按真实 Span 身份串联日志和应用当前性能，展示工具过程及证据缺口；不把模型推断当成确定根因。
 
 ## 非功能需求与边界
 
@@ -91,3 +92,9 @@
 ### 2026-09-08 扩展官方语言接入
 
 接入向导和持续 Edge 示例扩展为 Go、Java、Node.js、Python、C# / .NET、PHP、C++、Rust、Ruby。新增示例使用官方 SDK/框架埋点与标准 OTLP；PHP/C++/Rust 通过官方 Metrics API 测量实际请求，Rust 标注 Beta，Ruby 仅提供 Trace 与日志关联。服务列表发现只有 SERVER Trace 的服务。无原生请求指标时，HTTP RED、趋势和接口统计使用 Trace 样本补充，并明确标注样本来源；不推断全量请求统计，不将两种来源相加。新增五语言必须验证开/关采样、真实请求计数、Trace/日志关联、完整服务身份和本地持续运行。证据见同日验收记录与 `examples/apm-languages/README.md`。
+
+### 2026-09-09 错误 Trace 分析验证
+
+- 概览错误列表及 AI 入口已更新本地 Manager/Web；前端 29 项定向测试、ESLint、TypeScript/Vite 构建与 Linux `go test -race ./internal/manager/biz/aiops/tools -run TestQueryTraceQL` 通过。
+- 浏览器点击真实 Java 错误 Trace `cec04114ffe111d760b88c9586ddd724`，默认助理读取完整单 Span，关联到 Elasticsearch 中相同 Trace/Span ID 的请求日志，查询到实例 `ubuntu-java-2` 的 HTTP 状态码速率、P95、JVM CPU 和进程 RSS，最终生成分析报告。日志首次参数校验失败，模型修正流选择器后成功；工具过程可在会话中展开核对。
+- 本轮验证了数据关联与分析流程，不代表模型结论全部正确。模型未进一步查询 RPC/其他 JVM 指标，且对单 Span、短窗口 CPU/RSS 的排除性措辞偏强；这些证据不足以断言无下游故障、无 OOM 或无泄漏，根因仍需人工审阅与补证。未部署生产。

@@ -34,6 +34,7 @@ import {
   formatTraceSummaryDuration,
   traceSearchQuery,
   traceSummaryDurationMs,
+  traceSummaryStartMs,
   type TraceScope,
   type TraceQuickFilter,
 } from '@/components/traces/traceSummary';
@@ -121,16 +122,7 @@ type TraceRow = {
 function normalizeRow(t: TempoTraceSummary): TraceRow {
   // Tempo omits durationMs below 1ms, while spanSet keeps durationNanos.
   const durationMs = traceSummaryDurationMs(t);
-  // Tempo 2.x: startTimeUnixNano (string of nanos); some clients emit
-  // startTime (RFC3339). Convert both to ms.
-  let startMs = 0;
-  if (t.startTimeUnixNano) {
-    const n = Number(t.startTimeUnixNano);
-    if (Number.isFinite(n)) startMs = n / 1_000_000;
-  } else if (t.startTime) {
-    const d = Date.parse(t.startTime);
-    if (Number.isFinite(d)) startMs = d;
-  }
+  const startMs = traceSummaryStartMs(t);
   return {
     traceId: t.traceID,
     service: t.rootServiceName ?? '',

@@ -99,7 +99,7 @@ export function searchTraces(params: {
   limit?: number;
   minDuration?: string;
   maxDuration?: string;
-}) {
+}, signal?: AbortSignal) {
   const qs = new URLSearchParams();
   if (params.q) qs.set('q', params.q);
   if (params.service) qs.set('service', params.service);
@@ -109,7 +109,7 @@ export function searchTraces(params: {
   if (params.limit) qs.set('limit', String(params.limit));
   if (params.minDuration) qs.set('minDuration', params.minDuration);
   if (params.maxDuration) qs.set('maxDuration', params.maxDuration);
-  return request<TraceSearchResponse>('GET', `/traces/search?${qs.toString()}`);
+  return request<TraceSearchResponse>('GET', `/traces/search?${qs.toString()}`, undefined, { signal });
 }
 
 export function getTrace(traceId: string) {

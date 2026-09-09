@@ -34,7 +34,7 @@ const row = {
   data_status: 'observed',
 };
 describe('Application performance', () => {
-  beforeEach(() => { localStorage.setItem('ongrid-locale', 'zh-CN'); server.use(http.get('/api/v1/apm/runtime', () => HttpResponse.json({ data: { items: [], instances: [] } }))); });
+  beforeEach(() => { localStorage.setItem('ongrid-locale', 'zh-CN'); server.use(http.get('/api/v1/traces/search', () => HttpResponse.json({ traces: [] })), http.get('/api/v1/apm/runtime', () => HttpResponse.json({ data: { items: [], instances: [] } }))); });
   it('keeps same-name services separate and links their complete identity', async () => {
     server.use(
       http.get('/api/v1/apm/services', () =>
@@ -718,6 +718,7 @@ describe('Application performance', () => {
 
 
 describe('Official language onboarding', () => {
+  beforeEach(() => server.use(http.get('/api/v1/traces/search', () => HttpResponse.json({ traces: [] }))));
   it('provides nine languages and states metrics boundaries', async () => {
     localStorage.setItem('ongrid-locale', 'zh-CN');
     render(<Onboarding />);

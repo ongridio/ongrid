@@ -3,6 +3,13 @@ import type { TempoTraceSummary } from '@/api/traces';
 type SearchSpan = { durationNanos?: string | number };
 type SearchSpanSet = { spans?: SearchSpan[] };
 
+export function traceSummaryStartMs(summary: TempoTraceSummary): number {
+  const value = summary.startTimeUnixNano
+    ? Number(summary.startTimeUnixNano) / 1_000_000
+    : Date.parse(summary.startTime || '');
+  return Number.isFinite(value) ? value : 0;
+}
+
 export function traceSummaryDurationMs(summary: TempoTraceSummary): number {
   for (const value of [summary.durationMs, summary.traceDurationMs]) {
     if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value;

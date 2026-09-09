@@ -33,7 +33,7 @@ const queryTraceQLWhenToUse = "When the user wants TRACES — span chains across
 	"specific trace IDs, or 'which call took 5 seconds'. " +
 	"NOT for log lines (use query_logql), NOT for metric trends (use query_promql), " +
 	"NOT for live host stats (use get_host_load). " +
-	"At least one filter (query / service / operation / duration) is required — Tempo unfiltered search is too expensive."
+	"Use trace_id for full span details; otherwise at least one search filter is required."
 
 // Info returns metadata. Class=read.
 func (t *QueryTraceQLTool) Info(_ context.Context) (*basetool.ToolInfo, error) {
@@ -54,6 +54,10 @@ func (t *QueryTraceQLTool) InvokableRun(ctx context.Context, argsJSON string, _ 
 	var in QueryTraceQLArgs
 	if err := json.Unmarshal([]byte(argsJSON), &in); err != nil {
 		return "", fmt.Errorf("query_traceql: bad args: %w", err)
+	}
+	if in.TraceID != "" {
+		out, err := queryTraceByID(ctx, t.traceQuery, in)
+		return string(out), err
 	}
 
 	if strings.TrimSpace(in.Query) == "" &&
