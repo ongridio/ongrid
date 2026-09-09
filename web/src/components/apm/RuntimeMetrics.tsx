@@ -22,19 +22,20 @@ export function RuntimeMetrics({ data }: { data: ApmRuntime }) {
     jvm_threads_live_threads: tr('JVM 线程数', 'JVM threads'),
     nodejs_eventloop_lag_seconds: tr('事件循环延时', 'Event loop lag'),
   };
-  const metrics = ['process_cpu_cores', 'process_resident_memory_bytes', 'process_memory_usage_bytes', 'jvm_memory_used_bytes']
+  const metrics = Object.keys(labels)
     .filter((name) => data.items.some((row) => row.name === name));
   return <Card>
     <h2 className="mb-2 text-sm font-medium">{tr('实例资源与运行时', 'Instance resources and runtime')}</h2>
     <p className="mb-4 text-xs text-zinc-500">{tr(
-      '每条曲线代表一个实例及版本。CPU 以占用核数表示；JVM 已用内存不等于进程 RSS。',
-      'Each line represents an instance and version. CPU is measured in cores; JVM used memory is not process RSS.',
+      '每条曲线对应一个实例及版本，图例显示最近值。CPU 以占用核数表示。',
+      'Each line represents an instance and version; legends show latest values. CPU is measured in cores.',
     )}</p>
     {data.items.length === 0 ? <EmptyState title={tr('未观测到支持的运行时指标', 'No supported runtime metrics observed')} /> : <>
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-x-8 gap-y-8 lg:grid-cols-2">
         {metrics.map((name) => {
           const rows = data.items.filter((row) => row.name === name);
           const bytes = rows[0].unit === 'bytes';
+          const unit = bytes ? 'MiB' : rows[0].unit === 'cores' ? tr('核', 'cores') : rows[0].unit === 'seconds' ? 's' : '';
           const points = new Map<number, Record<string, number | null>>();
           rows.forEach((row, index) => row.points?.forEach((point) => {
             if (!points.has(point.timestamp)) points.set(point.timestamp, { timestamp: point.timestamp });
@@ -42,6 +43,7 @@ export function RuntimeMetrics({ data }: { data: ApmRuntime }) {
           }));
           return <section key={name} aria-label={labels[name]} className="min-w-0">
             <h3 className="mb-2 text-xs font-medium text-zinc-400">{labels[name]}{bytes && ' · MiB'}</h3>
+            {name === 'jvm_memory_used_bytes' && <p className="mb-2 text-xs text-zinc-500">{tr('JVM 已用内存不等于进程 RSS。', 'JVM used memory is not process RSS.')}</p>}
             <div className="h-48">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={[...points.values()].sort((a, b) => a.timestamp! - b.timestamp!)} margin={{ left: 0, right: 12, top: 5, bottom: 0 }}>
@@ -50,7 +52,7 @@ export function RuntimeMetrics({ data }: { data: ApmRuntime }) {
                   <YAxis width={48} tick={{ fontSize: 10, fill: 'rgb(var(--text-muted))' }} tickFormatter={(value: number) => value.toLocaleString(undefined, { maximumSignificantDigits: 3 })} />
                   <Tooltip contentStyle={chartTooltipStyle} labelStyle={chartTooltipLabelStyle}
                     labelFormatter={(value) => new Date(Number(value) * 1000).toLocaleString()}
-                    formatter={(value: number) => `${value.toLocaleString(undefined, { maximumSignificantDigits: 4 })} ${bytes ? 'MiB' : tr('核', 'cores')}`} />
+                    formatter={(value: number) => `${value.toLocaleString(undefined, { maximumSignificantDigits: 4 })} ${unit}`} />
                   {rows.map((row, index) => <Line key={`${row.instance_id}-${row.version}`} type="monotone" dataKey={`v${index}`} name={`${row.instance_id || tr('未设置实例', 'Unset instance')} · ${row.version || tr('未设置版本', 'Unset version')}`} stroke={colors[index % colors.length]} strokeWidth={1.5} dot={false} connectNulls={false} isAnimationActive={false} />)}
                 </LineChart>
               </ResponsiveContainer>
@@ -63,15 +65,6 @@ export function RuntimeMetrics({ data }: { data: ApmRuntime }) {
             </div>
           </section>;
         })}
-      </div>
-      <div className="mt-5 overflow-x-auto">
-        <table className="w-full text-left text-xs">
-          <caption className="mb-2 text-left text-zinc-500">{tr('结束时间的最近观测值；无近期数据时显示 —', 'Latest observations at the end time; — means no recent data')}</caption>
-          <thead><tr>{[tr('指标', 'Metric'), tr('实例', 'Instance'), tr('版本', 'Version'), tr('数值', 'Value')].map((label) => <th key={label} className="px-3 py-2 font-normal text-zinc-500 last:text-right">{label}</th>)}</tr></thead>
-          <tbody className="divide-y divide-[rgb(var(--border))]">{data.items.map((row) => <tr key={`${row.name}-${row.instance_id}-${row.version}`}>
-            <td className="px-3 py-2" title={row.name}>{labels[row.name] || row.name}</td><td className="px-3 py-2">{row.instance_id || '—'}</td><td className="px-3 py-2">{row.version || '—'}</td><td className="px-3 py-2 text-right tabular-nums">{display(row.value, row.unit)}</td>
-          </tr>)}</tbody>
-        </table>
       </div>
     </>}
   </Card>;

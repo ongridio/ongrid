@@ -272,7 +272,7 @@ export default function ApmPage() {
         fetchPanel(queryApm('dependencies', p, controller.signal), 'dependencies');
     } else if (tab === 'dependencies' && !scopedReplica)
       fetchPanel(queryApm('dependencies', p, controller.signal), 'dependencies');
-    else if (tab === 'instances' || tab === 'onboarding') {
+    else if (tab === 'onboarding') {
       for (const protocol of combined ? ['http', 'rpc'] : [activeProtocol]) {
         const scoped = new URLSearchParams(p);
         scoped.set('protocol', protocol);
@@ -321,7 +321,7 @@ export default function ApmPage() {
     ['overview', tr('概览', 'Overview')],
     ['operations', tr('接口', 'Operations')],
     ['dependencies', tr('依赖', 'Dependencies')],
-    ['instances', tr('实例', 'Instances')],
+    ['instances', tr('实例与资源', 'Instances & resources')],
   ];
   const viewLink = (view: string) => {
     if (view === 'operations' && operation && location.state?.apmOperations)
@@ -1155,7 +1155,7 @@ export default function ApmPage() {
             <Dependencies data={dependencies} params={params} />
           </Card>
         )}
-        {(diagnostics || current?.rpcDiagnostics) && (
+        {(tab === 'instances' || diagnostics || current?.rpcDiagnostics) && (
           <>
             {tab === 'onboarding' &&
               diagnosticPanels.map(({ protocol, data: diagnostics }) => {
@@ -1233,7 +1233,7 @@ export default function ApmPage() {
                         className="flex flex-wrap items-center justify-between gap-3 py-3 text-xs"
                       >
                         <span>
-                          <Button variant="link" size="sm" onClick={() => { const next = new URLSearchParams(params); next.set('instance_id', instance.instance_id); if (instance.version) next.set('service_version', instance.version); next.set('tab', 'overview'); setParams(next); }}>{instance.instance_id || instance.pod || unset}</Button> ·{' '}
+                          <Button variant="link" size="sm" onClick={() => { const next = new URLSearchParams(params); next.set('instance_id', instance.instance_id); if (instance.version) next.set('service_version', instance.version); next.set('tab', 'instances'); setParams(next); }}>{instance.instance_id || instance.pod || unset}</Button> ·{' '}
                           {instance.version || unset} · {tr('设备', 'Device')}{' '}
                           {instance.device_id || unset}
                         </span>
@@ -1259,7 +1259,7 @@ export default function ApmPage() {
             )}
           </>
         )}
-        {runtime && (tab === 'overview' || tab === 'instances') && <RuntimeMetrics data={runtime} />}
+        {runtime && tab === 'instances' && <RuntimeMetrics data={runtime} />}
         {tab === 'dependencies' && scopedReplica && (
           <EmptyState title={tr('依赖图按服务汇总', 'Dependency graphs are service-wide')}
             hint={tr('请选择全部版本和全部实例查看服务依赖。', 'Select all versions and all instances to view dependencies.')} />

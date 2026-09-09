@@ -27,3 +27,11 @@ go test -race ./internal/manager/biz/apm -run TestAPMReplicaMetricsIntegration -
 依赖拓扑仍为服务级聚合，带版本/实例筛选时提示清除筛选；日志入口明确查看全部实例。历史实例和已停服务可能在涵盖其观测时间的窗口出现，不能据此判断容器仍运行。CPU 使用至少 5 分钟滚动窗口，内存最近值最多回看 5 分钟。
 
 部署前镜像保留为 `ongrid:rollback-before-replicas`、`ongrid-web:rollback-before-replicas`，需要时重新标记为 dev 并重建对应容器。Ubuntu 旧演示配置备份为 `/opt/ongrid-apm-demo/compose.before-replicas.yaml`；恢复前先停止当前六实例以释放端口。
+
+## 服务与资源布局调整
+
+概览保留 HTTP/RPC 请求指标、重点接口与依赖；现有实例 tab 改为“实例与资源”，集中展示全部已支持的运行时趋势图。删除最近值明细表，最近值保留在各图图例，窄屏单列、宽屏双列。点击实例保持在资源页。共享版本、实例与时间筛选不变。
+
+参考 [Datadog Service Page](https://docs.datadoghq.com/tracing/services/service_page/) 对服务、基础设施与运行时视图的区分，以及 [ARMS 应用监控](https://www.alibabacloud.com/help/en/arms/application-monitoring/user-guide/application/) 对应用概览与实例/JVM 监控的区分；这里复用现有 tab，不增加嵌套导航。
+
+布局回归：22 项前端测试通过（机器负载下原有九语言切换测试超过默认 5 秒，使用命令行 `--testTimeout=15000` 重跑通过）；随后将实例页链路诊断改为接入管理按需执行，对应两项定向回归通过，ESLint 与构建通过。Ego 浏览器实看 1440px 宽屏双列和 780px 窄屏单列，无整页横向溢出；资源区无表格。截图为 `output/apm-demo/layout-*.png`。

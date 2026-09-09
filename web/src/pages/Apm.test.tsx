@@ -200,7 +200,7 @@ describe('Application performance', () => {
     expect(linked.searchParams.get('start')).toBe('2026-09-07T00:00:00Z');
     expect(linked.searchParams.get('environment')).toBe('production');
     expect(screen.queryByRole('link', { name: '运行时指标' })).not.toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: '实例' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '实例与资源' })).toBeInTheDocument();
   });
   it('uses server facets and moves relative windows forward on manual refresh', async () => {
     let requested: URL | undefined;
@@ -671,7 +671,7 @@ describe('Application performance', () => {
     expect(traceURL.searchParams.get('q')).not.toContain('span.http');
     expect(traceURL.searchParams.get('q')).not.toContain('span.rpc');
   });
-  it('shows instances without sampled traces and deduplicates both protocols', async () => {
+  it('shows runtime instances without scanning traces and opens diagnostics on demand', async () => {
     const protocols = new Set<string>();
     const shared = {
       instance_id: 'shared-instance',
@@ -694,7 +694,7 @@ describe('Application performance', () => {
           },
         });
       }),
-      http.get('/api/v1/apm/runtime', () => HttpResponse.json({ data: { items: [] } })),
+      http.get('/api/v1/apm/runtime', () => HttpResponse.json({ data: { items: [], instances: [shared, shared, {...shared, instance_id: 'rpc-instance'}] } })),
     );
     render(
       <MemoryRouter
@@ -708,10 +708,11 @@ describe('Application performance', () => {
     await screen.findByText(/rpc-instance/);
     expect(screen.getByRole('heading', { name: '观测到的实例' })).toBeInTheDocument();
     expect(screen.getAllByText(/shared-instance/)).toHaveLength(1);
-    expect([...protocols].sort()).toEqual(['http', 'rpc']);
+    expect([...protocols]).toEqual([]);
     fireEvent.click(screen.getByRole('button', { name: '接入管理' }));
     expect(await screen.findByRole('heading', { name: 'HTTP · 接入诊断' })).toBeInTheDocument();
     expect(await screen.findByRole('heading', { name: 'RPC · 接入诊断' })).toBeInTheDocument();
+    expect([...protocols].sort()).toEqual(['http', 'rpc']);
   });
 });
 
@@ -742,7 +743,11 @@ describe('Official language onboarding', () => {
         const url = new URL(request.url); requests.push(url);
         return HttpResponse.json({data: {instances, items: instances
           .filter((item) => !url.searchParams.get('service_version') || item.version === url.searchParams.get('service_version'))
-          .map((item) => ({...item, name: 'process_cpu_cores', unit: 'cores', value: 0.02, points: []}))}});
+          .flatMap((item) => [
+            {...item, name: 'process_cpu_cores', unit: 'cores', value: 0.02, points: []},
+            {...item, name: 'go_memstats_heap_alloc_bytes', unit: 'bytes', value: 1048576, points: []},
+            {...item, name: 'go_goroutines', unit: 'count', value: 17, points: []},
+          ])}});
       }),
       http.get('/api/v1/apm/diagnostics', () => HttpResponse.json({data: {checks: [], instances: [], trace_ids: []}})),
       http.get('/api/v1/apm/overview', ({request}) => {requests.push(new URL(request.url)); return HttpResponse.json({data: {summary: row, points: []}});}),
@@ -751,6 +756,11 @@ describe('Official language onboarding', () => {
     );
     render(<MemoryRouter initialEntries={[`/apm?${period}&service_name=orders&environment=production&service_namespace=trade&tab=instances`]}><ApmPage /></MemoryRouter>);
     await screen.findByRole('button', {name: 'pod-2'});
+    expect(screen.getByRole('region', {name: 'Go 堆内存'})).toBeInTheDocument();
+    expect(screen.getByRole('region', {name: 'Goroutines'})).toBeInTheDocument();
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', {name: 'pod-2'}));
+    expect(screen.getByRole('tab', {name: '实例与资源'})).toHaveAttribute('aria-selected', 'true');
     await selectOption(screen.getByRole('combobox', {name: '版本'}), '1.1.0-demo');
     await waitFor(() => expect(requests.some((url) => url.pathname.endsWith('/runtime') && url.searchParams.get('service_version') === '1.1.0-demo')).toBe(true));
     await selectOption(screen.getByRole('combobox', {name: '实例'}), 'pod-2');
@@ -759,6 +769,7 @@ describe('Official language onboarding', () => {
     expect(screen.getByRole('button', {name: 'pod-2'})).toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', {name: '概览'}));
     await waitFor(() => expect(requests.some((url) => url.pathname.endsWith('/overview') && url.searchParams.get('service_version') === '1.1.0-demo' && url.searchParams.get('instance_id') === 'pod-2')).toBe(true));
+    expect(screen.queryByRole('heading', {name: '实例资源与运行时'})).not.toBeInTheDocument();
     const traces = new URL(screen.getByRole('link', {name: '查看链路'}).getAttribute('href')!, 'https://ongrid.test');
     expect(traces.searchParams.get('q')).toContain('resource.service.version = "1.1.0-demo"');
     expect(traces.searchParams.get('q')).toContain('resource.service.instance.id = "pod-2"');

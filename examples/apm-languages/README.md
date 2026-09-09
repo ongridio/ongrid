@@ -36,7 +36,7 @@ docker compose -f examples/apm-languages/compose.yaml up -d --build --remove-orp
 
 CPU 与内存均为实际测量。Go 复用官方 Prometheus Go/Process collector 经 OTel bridge 导出；Python 使用官方 system metrics instrumentation；Java 使用官方 Agent 的 JVM 指标。页面 CPU 是占用核数，Go/Python 内存是进程 RSS，Java 是 JVM 堆与非堆已用内存，不能等同 RSS。Go 堆与 goroutine、Java 线程数也在运行时表中展示。
 
-服务详情可按版本、实例筛选 RED、接口、链路和资源曲线；实例页点击实例可进入对应概览。依赖图保持服务级聚合，需要清除版本和实例筛选查看；日志链接明确查看服务全部实例。指标每 5 秒导出，后端仍有短暂延迟。选择最近 15 分钟可查看当前实例，历史服务仍保留在此前时间窗口。
+服务详情可按版本、实例筛选 RED、接口、链路和资源曲线。概览聚焦服务请求表现；“实例与资源”集中展示 CPU、内存及语言运行时趋势图，点击实例继续留在资源页查看该实例。依赖图保持服务级聚合，需要清除版本和实例筛选查看；日志链接明确查看服务全部实例。指标每 5 秒导出，后端仍有短暂延迟。选择最近 15 分钟可查看当前实例，历史服务仍保留在此前时间窗口。
 
 设备 logs 插件需要三个来源，分别使用 `id`/`service_name: apm-demo-<language>`、`include: ["/var/log/ongrid-apm-demo/<language>.log"]`、`parser: json`、`start_at: beginning`，语言为 `go/java/python`。同语言两个实例共用日志文件，日志带版本、实例、Trace ID 和 Span ID。保留其他业务来源。主机需配置 logrotate，例如每日轮转、`maxsize 5M`、`rotate 3`、`compress`、`copytruncate`、`missingok`、`notifempty`、`su 65532 65532`。
 
