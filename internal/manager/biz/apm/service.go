@@ -405,6 +405,10 @@ func (s *Service) Dependencies(ctx context.Context, q Query) (*Dependencies, err
 	for _, item := range series {
 		l := item.Metric
 		k := key{Identity{l["client"], l["client_service_namespace"], l["client_deployment_environment_name"]}, Identity{l["server"], l["server_service_namespace"], l["server_deployment_environment_name"]}, l["connection_type"]}
+		// Tempo uses user for an unidentified caller, not an observed service.
+		if k.kind == "virtual_node" && k.client == (Identity{ServiceName: "user"}) {
+			continue
+		}
 		if rows[k] == nil {
 			rows[k] = &Dependency{Client: k.client, Server: k.server, ConnectionType: k.kind}
 		}

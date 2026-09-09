@@ -413,3 +413,22 @@ func TestHTTPTraceFallbackIsLabelledAndNativeMetricsWin(t *testing.T) {
 		t.Fatalf("HTTP spans became RPC metrics: %+v %v", list, err)
 	}
 }
+
+func TestDependenciesHideOnlyUnidentifiedVirtualCaller(t *testing.T) {
+	p := &fakeProm{result: `[
+		{"metric":{"client":"user","server":"orders","connection_type":"virtual_node","apm_stat":"rps"},"value":[1600,"3"]},
+		{"metric":{"client":"payments","server":"orders","connection_type":"virtual_node","apm_stat":"rps"},"value":[1600,"2"]},
+		{"metric":{"client":"user","client_service_namespace":"trade","server":"orders","connection_type":"virtual_node","apm_stat":"rps"},"value":[1600,"1"]},
+		{"metric":{"client":"user","server":"orders","apm_stat":"rps"},"value":[1600,"1"]},
+		{"metric":{"client":"orders","server":"mysql","connection_type":"database","apm_stat":"rps"},"value":[1600,"1"]}
+	]`}
+	out, err := New(p, nil, nil).Dependencies(t.Context(), testQuery())
+	if err != nil || len(out.Items) != 4 {
+		t.Fatalf("dependencies = %+v, %v", out, err)
+	}
+	for _, edge := range out.Items {
+		if edge.ConnectionType == "virtual_node" && edge.Client == (Identity{ServiceName: "user"}) {
+			t.Fatal("unidentified caller retained")
+		}
+	}
+}

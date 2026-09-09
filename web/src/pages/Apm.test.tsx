@@ -671,7 +671,7 @@ describe('Application performance', () => {
     expect(traceURL.searchParams.get('q')).not.toContain('span.http');
     expect(traceURL.searchParams.get('q')).not.toContain('span.rpc');
   });
-  it('shows runtime instances without scanning traces and opens diagnostics on demand', async () => {
+  it('shows runtime instances and keeps onboarding free of diagnostics', async () => {
     const protocols = new Set<string>();
     const shared = {
       instance_id: 'shared-instance',
@@ -710,9 +710,9 @@ describe('Application performance', () => {
     expect(screen.getAllByText(/shared-instance/)).toHaveLength(1);
     expect([...protocols]).toEqual([]);
     fireEvent.click(screen.getByRole('button', { name: '接入管理' }));
-    expect(await screen.findByRole('heading', { name: 'HTTP · 接入诊断' })).toBeInTheDocument();
-    expect(await screen.findByRole('heading', { name: 'RPC · 接入诊断' })).toBeInTheDocument();
-    expect([...protocols].sort()).toEqual(['http', 'rpc']);
+    expect(await screen.findByRole('heading', { name: '应用接入' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', {name: /接入诊断/})).not.toBeInTheDocument();
+    expect([...protocols]).toEqual([]);
   });
 });
 

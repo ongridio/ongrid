@@ -24,7 +24,6 @@ import {
   type ApmList,
   type ApmOverview,
   type ApmDependencies,
-  type ApmDiagnostics,
   type ApmRuntime,
 } from '@/api/apm';
 import { Button, Card, Chip, EmptyState, PageHeader, PaginationFooter } from '@/components/ui';
@@ -66,8 +65,6 @@ type Panels = {
   rpcOperations?: ApmList;
   rpcList?: ApmList;
   dependencies?: ApmDependencies;
-  diagnostics?: ApmDiagnostics;
-  rpcDiagnostics?: ApmDiagnostics;
   runtime?: ApmRuntime;
 };
 
@@ -117,15 +114,9 @@ export default function ApmPage() {
     scope: '',
   });
   const current = results.scope === scope ? results : undefined;
-  const { list, overview, dependencies, diagnostics, runtime } = current || {};
-  const diagnosticPanels = combined
-    ? [
-        { protocol: 'http', data: diagnostics },
-        { protocol: 'rpc', data: current?.rpcDiagnostics },
-      ]
-    : [{ protocol: activeProtocol, data: diagnostics }];
+  const { list, overview, dependencies, runtime } = current || {};
   const instances = [...new Map(
-    (runtime?.instances || diagnosticPanels.flatMap(({ data }) => data?.instances || []))
+    (runtime?.instances || [])
       .map((instance) => [JSON.stringify([instance.instance_id, instance.version]), instance]),
   ).values()];
   const visibleInstances = instances.filter((item) =>
@@ -272,19 +263,7 @@ export default function ApmPage() {
         fetchPanel(queryApm('dependencies', p, controller.signal), 'dependencies');
     } else if (tab === 'dependencies' && !scopedReplica)
       fetchPanel(queryApm('dependencies', p, controller.signal), 'dependencies');
-    else if (tab === 'onboarding') {
-      for (const protocol of combined ? ['http', 'rpc'] : [activeProtocol]) {
-        const scoped = new URLSearchParams(p);
-        scoped.set('protocol', protocol);
-        fetchPanel(
-          queryApm('diagnostics', scoped, controller.signal),
-          combined && protocol === 'rpc' ? 'rpcDiagnostics' : 'diagnostics',
-          protocol,
-        );
-      }
-
-    }
-    if (detail && tab !== 'alerts') fetchPanel(queryApm('runtime', p, controller.signal), 'runtime');
+    if (detail && tab !== 'alerts' && tab !== 'onboarding') fetchPanel(queryApm('runtime', p, controller.signal), 'runtime');
     Promise.all(tasks).finally(() => {
       if (!controller.signal.aborted) {
         setLoading(false);
@@ -592,37 +571,38 @@ export default function ApmPage() {
                 )}
               </p>
             </div>
-            <div className="flex flex-wrap gap-4 text-sm">
+            <div className="flex flex-wrap items-center gap-2">
               {isAdmin && !traceMetrics && overview?.metadata?.metric_source !== 'tempo_spanmetrics' && (
-                <Button variant="subtle" size="sm"
+                <Button variant="ghost" size="sm"
                   type="button"
-                  className=""
                   onClick={() => set('tab', 'alerts')}
                 >
                   {tr('创建告警', 'Create alert')}
                 </Button>
               )}
               <Link
-                className="inline-flex items-center gap-1 text-zinc-500 hover:text-indigo-500"
+                className="og-button" data-slot="button" data-variant="ghost" data-size="sm"
                 to={traceLink(traceParams)}
               >
                 {tr('查看链路', 'View traces')}
                 <ArrowUpRight size={13} />
               </Link>
               <Link
-                className="text-zinc-500 hover:text-indigo-500"
+                className="og-button" data-slot="button" data-variant="ghost" data-size="sm"
                 to={traceLink(traceParams, 'duration > 1s')}
               >
                 {tr('慢链路 (>1s)', 'Slow traces (>1s)')}
+                <ArrowUpRight size={13} aria-hidden="true" />
               </Link>
               <Link
-                className="text-zinc-500 hover:text-indigo-500"
+                className="og-button" data-slot="button" data-variant="ghost" data-size="sm"
                 to={traceLink(traceParams, 'status = error')}
               >
                 {tr('错误链路', 'Error traces')}
+                <ArrowUpRight size={13} aria-hidden="true" />
               </Link>
               <Link
-                className="inline-flex items-center gap-1 text-zinc-500 hover:text-indigo-500"
+                className="og-button" data-slot="button" data-variant="ghost" data-size="sm"
                 to={`/logs?${params}`}
               >
                 {scopedReplica ? tr('服务日志（全部实例）', 'Service logs (all instances)') : tr('服务日志', 'Service logs')}
@@ -645,8 +625,6 @@ export default function ApmPage() {
           !current?.rpcList &&
           !current?.rpcOverview &&
           !dependencies &&
-          !diagnostics &&
-          !current?.rpcDiagnostics &&
           !runtime && (
             <Card className="flex min-h-64 items-center justify-center text-sm text-zinc-500">
               {tr('正在加载当前范围的数据…', 'Loading data for the current scope…')}
@@ -1134,8 +1112,8 @@ export default function ApmPage() {
                     {!dependencies && !loading
                       ? tr('依赖查询不可用', 'Dependency query unavailable')
                       : tr(
-                          '当前范围未观测到 Trace 依赖',
-                          'No trace dependencies observed in this scope',
+                          '暂未观测到可识别的服务依赖',
+                          'No identifiable service dependencies observed',
                         )}
                   </span>
                   <Link
@@ -1155,68 +1133,7 @@ export default function ApmPage() {
             <Dependencies data={dependencies} params={params} />
           </Card>
         )}
-        {(tab === 'instances' || diagnostics || current?.rpcDiagnostics) && (
-          <>
-            {tab === 'onboarding' &&
-              diagnosticPanels.map(({ protocol, data: diagnostics }) => {
-                if (!diagnostics) return null;
-                const scoped = new URLSearchParams(params);
-                scoped.set('protocol', protocol);
-                return (
-                  <Card key={protocol}>
-                    <h2 className="mb-3 text-sm font-medium">
-                      {!traceMetrics && `${protocol.toUpperCase()} · `}
-                      {tr('接入诊断', 'Instrumentation diagnostics')}
-                    </h2>
-                    <p className="mb-4 text-xs text-zinc-500">
-                      {tr(
-                        `检查 ${diagnostics.sampled_traces} 条代表性链路。仅反映样本，不自动认定根因或采样比例。`,
-                        `Inspected ${diagnostics.sampled_traces} representative traces. These are sample observations, not a root-cause or sampling-coverage determination.`,
-                      )}
-                    </p>
-                    <div className="divide-y divide-[rgb(var(--border))]">
-                      {diagnostics.checks.map((check) => (
-                        <div key={check.key} className="flex justify-between gap-4 py-3 text-xs">
-                          <span>
-                            {{
-                              metrics: tr('请求指标', 'Request metrics'),
-                              instance_metrics: tr('实例指标', 'Instance metrics'),
-                              sampling: tr('Trace 采样覆盖率', 'Trace sampling coverage'),
-                              traces: tr('链路接收', 'Trace ingestion'),
-                              resource_identity: tr('服务身份', 'Service identity'),
-                              downstream: tr('下游埋点', 'Downstream instrumentation'),
-                              context: tr('父子上下文', 'Parent context'),
-                              logs: tr('样本请求日志', 'Sample request logs'),
-                            }[check.key] || check.key}
-                          </span>
-                          <span
-                            className={
-                              check.status === 'unavailable' || check.status === 'incomplete'
-                                ? 'text-amber-500'
-                                : 'text-zinc-500'
-                            }
-                          >
-                            {status(check.status)}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="mt-4 flex flex-wrap gap-4 text-xs underline">
-                      {diagnostics.trace_ids.map((id) => (
-                        <span key={id}>
-                          <Link to={traceLink(scoped, undefined, id)}>{id.slice(0, 12)}…</Link> ·{' '}
-                          <Link
-                            to={`/logs?${new URLSearchParams({ start: params.get('start')!, end: params.get('end')!, trace_id: id, service_name: params.get('service_name')!, environment: params.get('environment') || '', service_namespace: params.get('service_namespace') || '' })}`}
-                          >
-                            {tr('同请求日志', 'Request logs')}
-                          </Link>
-                        </span>
-                      ))}
-                    </div>
-                  </Card>
-                );
-              })}
-            {tab === 'instances' && (
+        {tab === 'instances' && (
               <Card>
                 <h2 className="text-sm font-medium">
                   {tr('观测到的实例', 'Observed instances')}
@@ -1256,8 +1173,6 @@ export default function ApmPage() {
                   )}
                 </p>
               </Card>
-            )}
-          </>
         )}
         {runtime && tab === 'instances' && <RuntimeMetrics data={runtime} />}
         {tab === 'dependencies' && scopedReplica && (

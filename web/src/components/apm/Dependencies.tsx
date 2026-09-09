@@ -77,7 +77,7 @@ export function Dependencies({ data, params }: { data: ApmDependencies; params: 
           </ReactFlow>
         </div>
       )}
-      <div className="overflow-auto">
+      {data.items.length > 0 && <div className="overflow-auto">
         <table className="w-full text-left text-xs">
           <thead className="text-zinc-500">
             <tr>
@@ -126,10 +126,10 @@ export function Dependencies({ data, params }: { data: ApmDependencies; params: 
             ))}
           </tbody>
         </table>
-      </div>
+      </div>}
       {data.items.length === 0 && (
         <p className="py-8 text-center text-zinc-500">
-          {tr('当前时间段未观测到依赖', 'No dependencies observed in this window')}
+          {tr('暂未观测到可识别的服务依赖', 'No identifiable service dependencies observed')}
         </p>
       )}
       {data.truncated && (

@@ -35,3 +35,9 @@ go test -race ./internal/manager/biz/apm -run TestAPMReplicaMetricsIntegration -
 参考 [Datadog Service Page](https://docs.datadoghq.com/tracing/services/service_page/) 对服务、基础设施与运行时视图的区分，以及 [ARMS 应用监控](https://www.alibabacloud.com/help/en/arms/application-monitoring/user-guide/application/) 对应用概览与实例/JVM 监控的区分；这里复用现有 tab，不增加嵌套导航。
 
 布局回归：22 项前端测试通过（机器负载下原有九语言切换测试超过默认 5 秒，使用命令行 `--testTimeout=15000` 重跑通过）；随后将实例页链路诊断改为接入管理按需执行，对应两项定向回归通过，ESLint 与构建通过。Ego 浏览器实看 1440px 宽屏双列和 780px 窄屏单列，无整页横向溢出；资源区无表格。截图为 `output/apm-demo/layout-*.png`。
+
+## 依赖与操作区整理
+
+- 依赖 API 过滤 `connection_type=virtual_node`、调用方为 `user` 且环境/命名空间均为空的占位关系，概览和依赖图共用。保留同名真实服务、具备身份的调用方、具名外部服务及数据库；底层遥测保留。无可识别关系时显示空状态，不展示空表。
+- 接入管理删除 HTTP/RPC 诊断区，不再自动请求诊断或运行时；诊断 API 保留。概览操作使用统一小尺寸次级按钮外观及链接图标，链接保留原有筛选条件。
+- 后端 race 测试与 22 项前端测试通过；相关 ESLint 和构建通过。
