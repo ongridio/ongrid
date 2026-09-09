@@ -17,12 +17,12 @@
 - `/clusters/:clusterId` 使用统一拓扑 ID，根据接入方式复用已有详情。
 - Kubernetes 详情保留升级、Token 轮换、卸载命令和删除确认；设备集群继续使用原有成员、批次及升级管理。
 - 侧栏统一为“集群”。旧 `/kubernetes` 列表地址转至 `/clusters`，旧 Kubernetes 详情地址继续兼容。
-- 各集群列表行可直接打开对应的 APM 服务列表。
+- 集群列表不提供 APM 跳转；Kubernetes 行右侧保留管理、升级命令、卸载命令和删除快捷入口，操作列固定在右侧。
 
 ## 自动验证
 
 - Go `-race`：APM、拓扑、设备存储、APM HTTP 四个包通过。
-- 前端：APM/API、集群列表/模型、Kubernetes 共 76 项测试通过。
+- 前端：APM/API、集群列表/模型、Kubernetes 共 76 项测试通过。后续快捷命令调整后，集群页 13 项测试、TypeScript、ESLint 和前端构建通过；升级及卸载弹窗已实际打开核验并关闭，未执行命令。
 - 设备存储测试覆盖空拓扑属性、同名节点、设备主键与节点主键不同、删除设备、删除节点、空范围。
 - 统一集群测试覆盖设备成员范围、Kubernetes ID 转换、空集群、未知集群、组合条件、告警范围和依赖图限制。
 - TypeScript、ESLint、proto 生成、`git diff --check` 通过。

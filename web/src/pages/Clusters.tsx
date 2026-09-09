@@ -3,11 +3,13 @@ import { useDialogs } from '@/components/ui/useDialogs';
 import { Hint } from '@/components/ui/Tooltip';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/DropdownMenu';
 import { CreateKubernetesClusterModal, KubernetesRegistrationModal, KubernetesClusterDetailPage } from './Kubernetes';
-import type { KubernetesRegistration } from '@/api/kubernetes';
+import { getKubernetesCluster, deleteKubernetesCluster, type KubernetesCluster, type KubernetesRegistration } from '@/api/kubernetes';
+import { UpgradeCommandModal, UninstallCommandModal, DeleteClusterModal } from './kubernetes/KubernetesLifecycleModals';
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
+  Clipboard,
   HardDrive,
   KeyRound,
   Network,
@@ -84,6 +86,8 @@ export default function ClustersPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [kubernetesCreateOpen, setKubernetesCreateOpen] = useState(false);
   const [registration, setRegistration] = useState<KubernetesRegistration | null>(null);
+  const [kubernetesAction, setKubernetesAction] = useState<{ action: "upgrade" | "uninstall" | "delete"; cluster: KubernetesCluster } | null>(null);
+  const [kubernetesBusy, setKubernetesBusy] = useState(false);
   const [deleteTarget, setDeleteTarget] =
     useState<ClusterSummary | null>(null);
   const [deletingClusterID, setDeletingClusterID] = useState<number | null>(
@@ -164,6 +168,37 @@ export default function ClustersPage() {
     }
   }
 
+  async function openKubernetesAction(summary: ClusterSummary, action: "upgrade" | "uninstall" | "delete") {
+    const id = Number(summary.cluster.props?.k8s_cluster_id);
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      setError(tr('集群接入信息不完整', 'Cluster enrollment data is incomplete'));
+      return;
+    }
+    setKubernetesBusy(true);
+    try {
+      const cluster = await getKubernetesCluster(id);
+      setKubernetesAction({ action, cluster });
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setKubernetesBusy(false);
+    }
+  }
+
+  async function performKubernetesDelete(cluster: KubernetesCluster) {
+    setKubernetesBusy(true);
+    try {
+      await deleteKubernetesCluster(cluster.id);
+      setKubernetesAction(null);
+      await refresh(true);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setKubernetesBusy(false);
+    }
+  }
+
   const createMenu = <DropdownMenu>
                   <DropdownMenuTrigger render={<Button variant="primary" />}><Plus size={13} />{tr("新建集群", "New cluster")}</DropdownMenuTrigger>
                   <DropdownMenuContent>
@@ -240,7 +275,7 @@ export default function ClustersPage() {
               />
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
+                <table className="w-full min-w-[1100px] whitespace-nowrap text-left text-xs">
                   <thead className="border-b border-zinc-800/60 bg-zinc-950/30 text-[11px] uppercase tracking-wide text-zinc-500">
                     <tr>
                       <th className="px-4 py-2.5 font-medium">
@@ -267,7 +302,7 @@ export default function ClustersPage() {
                       <th className="px-4 py-2.5 font-medium">
                         {tr("更新时间", "Updated")}
                       </th>
-                      <th className="px-4 py-2.5 text-right font-medium">
+                      <th className="sticky right-0 z-20 border-l border-zinc-800/60 bg-zinc-950 px-4 py-2.5 text-right font-medium">
                         {tr("操作", "Actions")}
                       </th>
                     </tr>
@@ -280,6 +315,8 @@ export default function ClustersPage() {
                         isAdmin={isAdmin}
                         deleting={deletingClusterID === summary.cluster.id}
                         onDelete={() => setDeleteTarget(summary)}
+                        kubernetesBusy={kubernetesBusy}
+                        onKubernetesAction={(action) => void openKubernetesAction(summary, action)}
                       />
                     ))}
                   </tbody>
@@ -301,6 +338,10 @@ export default function ClustersPage() {
       <CreateKubernetesClusterModal open={kubernetesCreateOpen} onClose={() => setKubernetesCreateOpen(false)}
         onCreated={(out) => { setKubernetesCreateOpen(false); setRegistration(out); void refresh(true); }} />
       <KubernetesRegistrationModal data={registration} onClose={() => setRegistration(null)} />
+      <UpgradeCommandModal cluster={kubernetesAction?.action === 'upgrade' ? kubernetesAction.cluster : null} onClose={() => setKubernetesAction(null)} />
+      <UninstallCommandModal cluster={kubernetesAction?.action === 'uninstall' ? kubernetesAction.cluster : null} onClose={() => setKubernetesAction(null)} />
+      <DeleteClusterModal cluster={kubernetesAction?.action === 'delete' ? kubernetesAction.cluster : null}
+        deleting={kubernetesBusy} onClose={() => setKubernetesAction(null)} onDelete={(cluster) => void performKubernetesDelete(cluster)} />
       <DeleteDeviceClusterModal
         cluster={deleteTarget?.cluster ?? null}
         blockedReason={
@@ -321,11 +362,15 @@ function ClusterRow({
   isAdmin,
   deleting,
   onDelete,
+  kubernetesBusy,
+  onKubernetesAction,
 }: {
   summary: ClusterSummary;
   isAdmin: boolean;
   deleting: boolean;
   onDelete(): void;
+  kubernetesBusy: boolean;
+  onKubernetesAction(action: "upgrade" | "uninstall" | "delete"): void;
 }) {
   const { tr } = useI18n();
   const navigate = useNavigate();
@@ -415,7 +460,7 @@ function ClusterRow({
       <td className="whitespace-nowrap px-4 py-3 text-zinc-500">
         {relativeTime(summary.cluster.updated_at)}
       </td>
-      <td className="px-4 py-3 text-right">
+      <td className="sticky right-0 z-10 border-l border-zinc-800/60 bg-zinc-900 px-4 py-3 text-right" onClick={(event) => event.stopPropagation()}>
         <div className="inline-flex items-center gap-1">
           <Link
             to={`/clusters/${summary.cluster.id}`}
@@ -423,8 +468,20 @@ function ClusterRow({
           >
             {tr("管理", "Manage")}
           </Link>
-          <Link to={`/apm?cluster_node_id=${summary.cluster.id}`} onClick={(event) => event.stopPropagation()}
-            className="inline-flex items-center rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100">{tr('应用性能', 'Application performance')}</Link>
+          {isAdmin && kubernetes && <>
+            <Button variant="subtle" size="sm" disabled={kubernetesBusy} onClick={() => onKubernetesAction('upgrade')}
+              aria-label={tr(`查看集群 ${summary.cluster.name} 的升级命令`, `View upgrade command for cluster ${summary.cluster.name}`)}>
+              <RefreshCw size={13} />{tr('升级命令', 'Upgrade')}
+            </Button>
+            <Button variant="subtle" size="sm" disabled={kubernetesBusy} onClick={() => onKubernetesAction('uninstall')}
+              aria-label={tr(`查看集群 ${summary.cluster.name} 的卸载命令`, `View uninstall command for cluster ${summary.cluster.name}`)}>
+              <Clipboard size={13} />{tr('卸载命令', 'Uninstall')}
+            </Button>
+            <Button variant="danger" size="sm" disabled={kubernetesBusy} onClick={() => onKubernetesAction('delete')}
+              aria-label={tr(`删除集群 ${summary.cluster.name}`, `Delete cluster ${summary.cluster.name}`)}>
+              <Trash2 size={13} />{tr('删除', 'Delete')}
+            </Button>
+          </>}
           {isAdmin && !kubernetes && (
             <Hint content={deleteBlockedReason}><Button variant="danger" size="sm"
               type="button"
