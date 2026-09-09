@@ -45,6 +45,10 @@ export type KnowledgeRepo = {
   updated_at: string;
 };
 
+export function repositoryName(url: string): string {
+  return url.split(/[?#]/)[0].replace(/\/+$/, '').split(/[/:]/).pop()?.replace(/\.git$/i, '') || url;
+}
+
 // isBuiltinVault is the single source of truth for "is this the built-in
 // platform vault row?". Prefers the server's is_builtin flag; falls back to
 // the builtin:// URL scheme (and the legacy ongridio/vault form) so it still

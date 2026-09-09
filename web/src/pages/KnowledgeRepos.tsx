@@ -27,6 +27,7 @@ import {
   isBuiltinVault,
   listRepos,
   listSSHIdentities,
+  repositoryName,
   syncRepo,
   type KnowledgeRepo,
   type SSHIdentity,
@@ -100,6 +101,7 @@ export default function KnowledgeReposPage() {
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState<KnowledgeRepo | null>(null);
   const [syncingID, setSyncingID] = useState<number | null>(null);
+  const [credentialsRefresh, setCredentialsRefresh] = useState(0);
 
   const fetchAll = useCallback(async (silent = false) => {
     if (silent) setRefreshing(true);
@@ -160,7 +162,7 @@ export default function KnowledgeReposPage() {
           <div className="flex gap-2">
             <Button variant="outline" size="sm"
               type="button"
-              onClick={() => fetchAll(true)}
+              onClick={() => { void fetchAll(true); setCredentialsRefresh((value) => value + 1); }}
               disabled={loading || refreshing}
               className="inline-flex items-center gap-1.5 px-2.5 py-1.5"
             >
@@ -185,7 +187,7 @@ export default function KnowledgeReposPage() {
           </div>
         )}
 
-        <SSHIdentitiesCard />
+        <SSHIdentitiesCard refreshKey={credentialsRefresh} />
 
         {loading ? (
           <div className="flex h-40 items-center justify-center text-sm text-zinc-500">{tr('加载中…', 'Loading…')}</div>
@@ -255,9 +257,8 @@ function RepoCard({
     <section className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 w-full sm:flex-1">
-          <Hint content={repo.url}><div className="truncate font-mono text-sm text-zinc-100" >
-            {repo.url}
-          </div></Hint>
+          <h2 className="truncate text-sm font-medium text-zinc-100">{repositoryName(repo.url)}</h2>
+          <Hint content={repo.url}><div className="mt-1 truncate font-mono text-xs text-zinc-500">{repo.url}</div></Hint>
           <div className="mt-0.5 text-[11px] text-zinc-500">
             {tr('分支 ', 'Branch ')}<span className="font-mono text-zinc-300">{repo.branch}</span>
             {repo.last_synced_at && (
@@ -468,12 +469,12 @@ function DeleteRepoDialog({ repo, onClose, onDone }: { repo: KnowledgeRepo; onCl
 // SSHIdentitiesCard — phase 1. Manages stored SSH private
 // keys + the hosts they auth against. Lives in this page so all git
 // auth config (HTTPS PAT card above + SSH keys here) is one stop.
-function SSHIdentitiesCard() {
+function SSHIdentitiesCard({ refreshKey }: { refreshKey: number }) {
   const { confirmAction, dialog } = useDialogs();
   const { tr } = useI18n();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<SSHIdentity[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
 
@@ -491,8 +492,8 @@ function SSHIdentitiesCard() {
   }, []);
 
   useEffect(() => {
-    if (open) void refresh();
-  }, [open, refresh]);
+    void refresh();
+  }, [refresh, refreshKey]);
 
   const onDelete = async (id: number) => {
     if (!(await confirmAction(tr('删除该 SSH 凭证？后续指向其 hosts 的仓库会同步失败。', 'Delete this SSH identity? Subsequent syncs to its hosts will fail.')))) return;
@@ -508,14 +509,15 @@ function SSHIdentitiesCard() {
     <>{dialog}<section className="mb-4 rounded-xl border border-zinc-800 bg-zinc-900/40">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => { setOpen((v) => !v); if (!open && err) void refresh(); }}
+        aria-expanded={open}
         className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
       >
         <div className="flex items-center gap-2 text-sm text-zinc-200">
           <KeyRound size={14} className="text-zinc-400" />
           {tr('凭证 · SSH key', 'Credentials · SSH key')}
           <span className="text-[11px] text-zinc-500">
-            {items.length > 0
+            {loading ? tr('加载中…', 'Loading…') : err ? tr('查询失败', 'Query failed') : items.length > 0
               ? tr(`已配置 ${items.length} 条`, `${items.length} configured`)
               : tr('未配置', 'None')}
           </span>
@@ -527,7 +529,7 @@ function SSHIdentitiesCard() {
           {err && <div className="rounded-md border border-red-500/40 bg-red-500/5 px-3 py-2 text-[11px] text-red-300">{err}</div>}
           {loading ? (
             <div className="text-[11px] text-zinc-500">{tr('加载中…', 'Loading…')}</div>
-          ) : items.length === 0 ? (
+          ) : err ? null : items.length === 0 ? (
             <div className="text-[11px] text-zinc-500">
               {tr(
                 '还没有 SSH 凭证。添加 SSH 风格的仓库（git@host:owner/repo）之前需要先在这里配置一条。',
