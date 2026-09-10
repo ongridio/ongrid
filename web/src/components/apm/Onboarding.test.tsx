@@ -9,6 +9,7 @@ describe('gRPC onboarding', () => {
     const { container } = render(<Onboarding />);
     expect(container.querySelector('pre')?.textContent).toContain('-Dotel.javaagent.extensions=');
     expect(screen.getByText(/Java Agent 2.31.1/, { selector: 'p' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Markdown/ })).toHaveAttribute('download', 'apm-configuration-files.md');
     const select = screen.getByRole('combobox');
     await selectOption(select, 'Python');
     expect(container.querySelector('pre')?.textContent).toContain('OpenTelemetryPlugin');

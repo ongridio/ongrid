@@ -14,6 +14,8 @@ Java、Node.js、Python 各提供 HTTP `/orders/42` 和 gRPC Health Check，包�
 
 Java、Node.js、Python 示例均提供 HTTP/gRPC 全量请求指标。Java 使用官方 Agent；Python 在自动埋点之外注册官方 `grpcio-observability`；Node.js 在官方自动 Trace 之外，通过 gRPC 服务端拦截器调用官方 Metrics API。验收在开启和关闭 Trace 采样时均检查每协议 12 次请求、3 次失败。旧版本边界见 [历史验收报告](../../docs/test/apm-acceptance-20260908.md)。
 
+使用文件管理配置时，参见 [配置文件接入指南](../../docs/guides/apm-configuration-files.md)：Java Agent properties、Spring Boot YAML、.NET appsettings.json，以及业务配置到 SDK 的映射。
+
 ### Python / Node.js gRPC 指标接入
 
 Python 安装与 `grpcio` 同版本的 `grpcio-observability`（示例锁定 1.83.1）。在创建 gRPC 服务和 Channel 前注册 `OpenTelemetryPlugin`，按 [app.py](app.py) 使用官方 `MeterProvider`、OTLP HTTP exporter 和 `View` 配置秒级延迟桶（5ms 到 10s）。插件默认桶不适合毫秒级 P95，不能省略该 View。

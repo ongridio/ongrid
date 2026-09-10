@@ -196,3 +196,5 @@ Trace 详情按完整 Span 分页，默认 50 条、最多 100 条，同时限�
 服务日志已支持 `service_version` / `instance_id` 精确筛选，对应 `service.version` / `service.instance.id`。Loki 使用结构化元数据，Elasticsearch 使用 OTel 资源属性；缺失字段不匹配非空筛选。文件日志需要更新 Edge Collector 配置，将 JSON 中这两个字段提升为资源属性；历史日志不会被回填。筛选无结果时，应先检查实际日志字段。
 
 Java Agent 2.31.1 的 RPC 秒级桶配置见 [语言示例](../../examples/apm-languages/README.md#java-rpc-延迟桶)。扩展随应用重启生效；已有应用需主动更新，不能只更新 Manager。回滚时移除 `OTEL_JAVAAGENT_EXTENSIONS` 或对应 JVM 参数；界面与 Manager 可回退到上一镜像，新字段均为向后兼容的可选字段。
+
+配置文件接入见 [应用配置文件指南](../guides/apm-configuration-files.md)，包含配置读取者、覆盖优先级及容器挂载说明。

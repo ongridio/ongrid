@@ -1,3 +1,4 @@
+import configurationGuideUrl from '../../../../docs/guides/apm-configuration-files.md?url';
 import { Label, Input } from '@/components/ui';
 import { Select } from '@/components/ui/Select';
 import { useState } from 'react';
@@ -127,6 +128,10 @@ export function Onboarding() {
           'The Ruby example uses official Sinatra instrumentation for traces and correlated JSON logs. Its metrics SDK is not yet stable, so full request metrics are unavailable. APM fills sampled HTTP rates, errors and latency from server traces and labels them Trace samples; request-level alerts require independent request metrics first.',
         )}</p>
       )}
+      <p className="text-xs text-zinc-500">
+        {tr('也可使用配置文件：Java Agent properties、Spring Boot YAML、.NET appsettings.json；其他语言通过应用配置初始化 SDK。', 'Configuration files are also supported: Java Agent properties, Spring Boot YAML, .NET appsettings.json, or application configuration passed to the SDK.')}{' '}
+        <a className="underline" href={configurationGuideUrl} download="apm-configuration-files.md">{tr('下载配置文件接入指南（Markdown）', 'Download configuration file guide (Chinese Markdown)')}</a>
+      </p>
       <pre className="overflow-auto rounded-lg bg-zinc-950 p-4 text-xs">{config}</pre>
       <Button
         disabled={!valid}
