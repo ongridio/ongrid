@@ -267,39 +267,10 @@ function RepoCard({
     <section className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 w-full sm:flex-1">
-          <h2 className="truncate text-lg font-semibold text-text">{repositoryName(repo.url)}</h2>
+          <h2 className="break-words text-2xl font-semibold tracking-tight text-text">{repositoryName(repo.url)}</h2>
           <Hint content={repo.url}><div className="mt-1 truncate font-mono text-xs text-zinc-500">{repo.url}</div></Hint>
-          <div className="mt-0.5 text-[11px] text-zinc-500">
-            {tr('文档索引分支 ', 'Document indexing ref ')}<span className="font-mono text-zinc-300">{repo.branch}</span>
-            {repo.last_synced_at && (
-              <>
-                {' · '}
-                {tr(`上次同步 ${fullDateTime(repo.last_synced_at)}`, `Last sync ${fullDateTime(repo.last_synced_at)}`)}
-              </>
-            )}
-            {!repo.last_synced_at && <span className="ml-2 text-text-muted">{tr('等待重建索引', 'Awaiting reindex')}</span>}
-            {repo.last_synced_at && repo.file_count > 0 && (
-              <>
-                {' · '}
-                {tr(`文件 ${repo.file_count}`, `${repo.file_count} files`)}
-              </>
-            )}
-          </div>
-          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
-            <span>Commit {repo.source_synced_at ? (repo.commit_count ?? 0).toLocaleString() : '—'}</span>
-            <span>Tag {repo.source_synced_at ? (repo.tag_count ?? 0).toLocaleString() : '—'}</span>
-            <span>{tr('分支', 'Branches')} {repo.source_synced_at ? (repo.branch_count ?? 0).toLocaleString() : '—'}</span>
-            <span className="inline-flex items-center gap-1.5">
-              <span aria-hidden className={cn('h-1.5 w-1.5 rounded-full', repo.last_sync_error ? 'bg-red-500' : repo.source_synced_at && repo.history_complete ? 'bg-emerald-500' : 'bg-zinc-500')} />
-              {syncing ? tr('同步中', 'Syncing') : repo.last_sync_error ? tr('同步失败，将自动重试', 'Sync failed; will retry automatically') : repo.source_synced_at && repo.history_complete ? tr('完整历史已同步', 'Full history synced') : tr('等待完整同步', 'Awaiting full sync')}
-            </span>
-          </div>
-          {repo.source_synced_at && <p className="mt-1 text-xs text-text-faint">
-            {tr('源码最近拉取：', 'Source last fetched: ')}{fullDateTime(repo.source_synced_at)}
-            {' · '}{tr('数量为本地快照，不代表远端此刻没有新提交。', 'Counts reflect the local snapshot; newer remote commits may exist.')}
-          </p>}
           {repo.description && (
-            <p className="mt-2 break-words text-xs text-zinc-400">{repo.description}</p>
+            <p className="mt-2 break-words text-sm text-text-muted">{repo.description}</p>
           )}
         </div>
         <div className="flex shrink-0 items-center gap-1">
@@ -326,6 +297,41 @@ function RepoCard({
           </Button></Hint>
         </div>
       </div>
+      <details className="mt-4 border-t border-border pt-3 text-xs text-text-muted">
+        <summary className="w-fit cursor-pointer select-none rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-500">{tr('同步详情', 'Sync details')}
+          <span className="ml-3 inline-flex items-center gap-1.5">
+            <span aria-hidden className={cn('h-1.5 w-1.5 rounded-full', repo.last_sync_error ? 'bg-red-500' : repo.source_synced_at && repo.history_complete ? 'bg-emerald-500' : 'bg-zinc-500')} />
+            {syncing ? tr('同步中', 'Syncing') : repo.last_sync_error ? tr('同步失败，将自动重试', 'Sync failed; will retry automatically') : repo.source_synced_at && repo.history_complete ? tr('完整历史已同步', 'Full history synced') : tr('等待完整同步', 'Awaiting full sync')}
+          </span>
+        </summary>
+        <div className="mt-3 space-y-2">
+          <div className="mt-0.5 text-[11px] text-zinc-500">
+            {tr('文档索引分支 ', 'Document indexing ref ')}<span className="font-mono text-zinc-300">{repo.branch}</span>
+            {repo.last_synced_at && (
+              <>
+                {' · '}
+                {tr(`上次同步 ${fullDateTime(repo.last_synced_at)}`, `Last sync ${fullDateTime(repo.last_synced_at)}`)}
+              </>
+            )}
+            {!repo.last_synced_at && <span className="ml-2 text-text-muted">{tr('等待重建索引', 'Awaiting reindex')}</span>}
+            {repo.last_synced_at && repo.file_count > 0 && (
+              <>
+                {' · '}
+                {tr(`文件 ${repo.file_count}`, `${repo.file_count} files`)}
+              </>
+            )}
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
+            <span>Commit {repo.source_synced_at ? (repo.commit_count ?? 0).toLocaleString() : '—'}</span>
+            <span>Tag {repo.source_synced_at ? (repo.tag_count ?? 0).toLocaleString() : '—'}</span>
+            <span>{tr('分支', 'Branches')} {repo.source_synced_at ? (repo.branch_count ?? 0).toLocaleString() : '—'}</span>
+          </div>
+          {repo.source_synced_at && <p className="mt-1 text-xs text-text-faint">
+            {tr('源码最近拉取：', 'Source last fetched: ')}{fullDateTime(repo.source_synced_at)}
+            {' · '}{tr('数量为本地快照，不代表远端此刻没有新提交。', 'Counts reflect the local snapshot; newer remote commits may exist.')}
+          </p>}
+        </div>
+      </details>
       {repo.last_sync_error && (
         <div className="mt-2 rounded-md border border-red-500/30 bg-red-500/5 px-2 py-1.5 text-[11px] text-red-300">
           <div className="font-medium">
