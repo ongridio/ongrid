@@ -55,6 +55,9 @@ type Service struct {
 
 	mu    sync.RWMutex
 	cache map[string]string // key = "category|key"
+	// 每次失效递增；旧读取只能返回自己的快照，不能回填已失效的缓存。
+	// 配置写入低频，使用单一版本号避免为已删除的 key 永久保留版本记录。
+	cacheGeneration uint64
 }
 
 // New builds the service. log may be nil.
@@ -86,6 +89,7 @@ func (s *Service) Get(ctx context.Context, category, key string) (string, bool, 
 
 	s.mu.RLock()
 	v, ok := s.cache[ck]
+	generation := s.cacheGeneration
 	s.mu.RUnlock()
 	if ok {
 		return v, true, nil
@@ -100,7 +104,9 @@ func (s *Service) Get(ctx context.Context, category, key string) (string, bool, 
 	}
 
 	s.mu.Lock()
-	s.cache[ck] = row.Value
+	if generation == s.cacheGeneration {
+		s.cache[ck] = row.Value
+	}
 	s.mu.Unlock()
 	return row.Value, true, nil
 }
@@ -118,6 +124,7 @@ func (s *Service) Set(ctx context.Context, category, key, value string, sensitiv
 		return err
 	}
 	s.mu.Lock()
+	s.cacheGeneration++
 	delete(s.cache, cacheKey(category, key))
 	s.mu.Unlock()
 	s.log.Info("setting updated",
@@ -149,6 +156,7 @@ func (s *Service) SetBatch(ctx context.Context, settings []model.Setting) error 
 	}
 
 	s.mu.Lock()
+	s.cacheGeneration++
 	for i := range settings {
 		delete(s.cache, cacheKey(settings[i].Category, settings[i].Key))
 	}
@@ -256,6 +264,7 @@ func (s *Service) Delete(ctx context.Context, category, key string) error {
 		return err
 	}
 	s.mu.Lock()
+	s.cacheGeneration++
 	delete(s.cache, cacheKey(category, key))
 	s.mu.Unlock()
 	return nil
@@ -266,6 +275,7 @@ func (s *Service) Delete(ctx context.Context, category, key string) error {
 // value (e.g. after a manual DB edit).
 func (s *Service) InvalidateAll() {
 	s.mu.Lock()
+	s.cacheGeneration++
 	s.cache = make(map[string]string)
 	s.mu.Unlock()
 }
