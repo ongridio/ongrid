@@ -57,3 +57,18 @@ func TestChannelHasDestination_EndpointKey(t *testing.T) {
 		t.Error("empty config should not be a destination")
 	}
 }
+
+func TestSMTPChannelDestination(t *testing.T) {
+	ch := chWithConfig("email", "smtp", map[string]string{"smtp": `{"host":"smtp.example.test","port":587,"from":"alerts@example.test","to":["ops@example.test"],"tls_mode":"starttls"}`})
+	if !channelHasDestination(ch) {
+		t.Fatal("valid SMTP channel must be deliverable without webhook endpoint")
+	}
+	sender, err := BuildSenderFromChannel(ch)
+	if err != nil || sender.Name() != "email" {
+		t.Fatalf("SMTP sender: %v", err)
+	}
+	ch.ConfigJSON = `{"smtp":"{}"}`
+	if channelHasDestination(ch) {
+		t.Fatal("invalid SMTP config must not be deliverable")
+	}
+}

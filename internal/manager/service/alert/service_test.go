@@ -444,3 +444,41 @@ func TestServiceTestChannelReportsFailure(t *testing.T) {
 		t.Fatalf("TestChannel().Message = %q, want 503 detail", got.Message)
 	}
 }
+
+func TestSMTPChannelCreateAndPasswordUpdates(t *testing.T) {
+	repo := &channelRepoStub{}
+	svc := &Service{repo: repo}
+	config := &notify.SMTPConfig{Host: "smtp.example.test", Port: 587, From: "alerts@example.test", To: []string{"ops@example.test"}, Username: "user", TLSMode: "starttls"}
+	input := ChannelInput{Name: "email", Type: "smtp", Enabled: true, SMTP: config, Secret: " spaced-test-password "}
+	channel, err := svc.CreateChannel(context.Background(), Caller{UserID: 1}, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(channel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "spaced-test-password") || channel.SMTP == nil || channel.SMTP.Host != config.Host {
+		t.Fatalf("incorrect response: %s", encoded)
+	}
+	row := repo.createdRow
+	row.ID = 1
+	repo.rows = []*model.Channel{row}
+	for _, step := range []struct{ secret, want string }{{"", " spaced-test-password "}, {"rotated", "rotated"}, {"-", ""}} {
+		input.Secret = step.secret
+		if _, err := svc.UpdateChannel(context.Background(), Caller{}, 1, input); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := repo.updatedRow.Config()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg["secret"] != step.want {
+			t.Fatal("password preserve/rotate/clear mismatch")
+		}
+	}
+	input.SMTP = &notify.SMTPConfig{Host: "smtp.example.test", Port: 0}
+	if _, err := svc.CreateChannel(context.Background(), Caller{}, input); !errors.Is(err, errs.ErrInvalid) {
+		t.Fatalf("invalid SMTP config: %v", err)
+	}
+}

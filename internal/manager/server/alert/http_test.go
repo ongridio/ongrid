@@ -454,3 +454,21 @@ func TestListChannelsRequiresAuth(t *testing.T) {
 		t.Fatalf("status = %d, want 401", w.Code)
 	}
 }
+
+func TestCreateSMTPChannelPassesStructuredConfig(t *testing.T) {
+	f := &fakeService{createChannelResp: &svc.Channel{ID: 1, Name: "email", Type: "smtp"}}
+	router := buildRouter(NewHandler(f, f, f), &tenantctx.Tenant{UserID: 9, Role: "admin"})
+	req := httptest.NewRequest(http.MethodPost, "/v1/notification-channels", strings.NewReader(`{"name":"email","type":"smtp","enabled":true,"secret":"test-password","smtp":{"host":"smtp.example.test","port":587,"from":"alerts@example.test","to":["ops@example.test"],"tls_mode":"starttls"}}`))
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("status=%d: %s", recorder.Code, recorder.Body.String())
+	}
+	input := f.lastChannelInput
+	if input.SMTP == nil || input.SMTP.Host != "smtp.example.test" || input.SMTP.Port != 587 || len(input.SMTP.To) != 1 || input.Secret != "test-password" {
+		t.Fatal("SMTP request fields were not forwarded")
+	}
+	if strings.Contains(recorder.Body.String(), "test-password") {
+		t.Fatal("password leaked into response")
+	}
+}
