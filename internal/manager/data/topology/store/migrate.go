@@ -4,6 +4,7 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 
 	"gorm.io/gorm"
@@ -11,6 +12,7 @@ import (
 
 	model "github.com/ongridio/ongrid/internal/manager/model/topology"
 	"github.com/ongridio/ongrid/internal/pkg/dbx"
+	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
 
 // Migrate registers nodes / relations / relation_types with GORM
@@ -84,12 +86,12 @@ func backfillDeviceNodes(db *gorm.DB) error {
 		if name == "" {
 			name = fmt.Sprintf("device-%d", d.ID)
 		}
-		n := &model.Node{Type: string(model.NodeTypeDevice), Name: name}
-		if err := db.Create(n).Error; err != nil {
+		if _, err := NewNodeRepo(db).EnsureForDevice(db.Statement.Context, d.ID, name); err != nil {
+			// 设备可能在扫描后被删除，无需再回填。
+			if errors.Is(err, errs.ErrNotFound) {
+				continue
+			}
 			return fmt.Errorf("backfill node for device %d: %w", d.ID, err)
-		}
-		if err := db.Exec("UPDATE devices SET node_id = ? WHERE id = ?", n.ID, d.ID).Error; err != nil {
-			return fmt.Errorf("backfill device.node_id for %d: %w", d.ID, err)
 		}
 	}
 	return nil
