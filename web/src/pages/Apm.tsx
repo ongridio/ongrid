@@ -716,8 +716,18 @@ export default function ApmPage() {
                 ← {tr('返回指标', 'Back to metrics')}
               </Link>
             </div>
-            {detail && <InstrumentationDiagnostics params={params} refresh={refresh} />}
-            <Onboarding />
+            {detail ? (
+              <Tabs defaultValue="diagnostics" className="space-y-3">
+                <TabsList aria-label={tr('接入管理', 'Instrumentation management')}>
+                  <TabsTrigger value="diagnostics">{tr('接入诊断', 'Diagnostics')}</TabsTrigger>
+                  <TabsTrigger value="guide">{tr('接入指南', 'Setup guide')}</TabsTrigger>
+                </TabsList>
+                <TabsContent value="diagnostics">
+                  <InstrumentationDiagnostics params={params} refresh={refresh} />
+                </TabsContent>
+                <TabsContent value="guide"><Onboarding /></TabsContent>
+              </Tabs>
+            ) : <Onboarding />}
           </>
         )}
         {detail && tab === 'operations' && (

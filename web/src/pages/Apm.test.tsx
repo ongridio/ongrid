@@ -753,9 +753,15 @@ describe('Application performance', () => {
     expect(screen.getAllByText(/shared-instance/)).toHaveLength(1);
     expect([...protocols]).toEqual([]);
     fireEvent.click(screen.getByRole('button', { name: '接入管理' }));
-    expect(await screen.findByRole('heading', { name: '应用接入' })).toBeInTheDocument();
     expect(await screen.findByRole('heading', { name: '接入诊断' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '应用接入' })).not.toBeInTheDocument();
     await waitFor(() => expect([...protocols].sort()).toEqual(['http', 'rpc']));
+    fireEvent.click(screen.getByRole('tab', { name: '接入指南' }));
+    expect(await screen.findByRole('heading', { name: '应用接入' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '接入诊断' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: '接入诊断' }));
+    expect(await screen.findByRole('heading', { name: '接入诊断' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '应用接入' })).not.toBeInTheDocument();
   });
 });
 
