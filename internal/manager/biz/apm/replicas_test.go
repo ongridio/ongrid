@@ -104,7 +104,7 @@ func TestAPMReplicaMetricsIntegration(t *testing.T) {
 				if (row.Name == "process_resident_memory_bytes" || row.Name == "process_memory_usage_bytes") && *row.Value > 0 {
 					memory[row.InstanceID] = true
 				}
-				if row.Name == "jvm_memory_used_bytes" && *row.Value > 0 {
+				if row.Name == "jvm_heap_memory_used_bytes" && *row.Value > 0 {
 					jvm[row.InstanceID] = true
 				}
 			}

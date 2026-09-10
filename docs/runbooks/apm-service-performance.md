@@ -142,7 +142,23 @@ cd web && npm test -- src/api/apm.test.ts src/pages/Apm.test.tsx src/pages/Logs.
 
 ## 5. 运行时与按需 Profile
 
-运行时页面读取已有应用 gauge：Go goroutines/heap、process RSS、JVM memory/threads、Node event-loop lag。指标需带 `service_name`（或 service）、`service_namespace`、`deployment_environment_name`，以及可选 `service_instance_id`。没有这些标签时不猜测主机指标属于哪个应用。页面显示结束时间前 5 分钟内的最近值。
+运行时页面复用已有官方采集组件，不要求安装 Ongrid SDK。指标需带 `service_name`（或 `service`）、`service_namespace`、`deployment_environment_name`，并建议带 `service_instance_id` 与 `service_version`；所有图表沿用设备、集群、版本、实例筛选。未收到支持的指标时提示检查运行时采集与资源标识，不按服务同名猜测主机指标归属。
+
+| 图表 | 采集来源与口径 |
+| --- | --- |
+| CPU / RSS | 现有进程或 JVM CPU 累计时间经 `rate` 换算为占用核数；RSS 为进程常驻内存，显示 MiB |
+| Go 堆 / Goroutines | 示例使用官方 Prometheus Go collector，经官方 OTel Prometheus bridge 导出 |
+| Go 内存分配速率 | `go_memstats_alloc_bytes_total` 的 `rate`，显示 MiB/s；不是当前堆大小或净增长率 |
+| Go GC 平均暂停 | `go_gc_duration_seconds_sum` 与 `_count` 分别求 `rate` 再相除，显示 ms；不累加 Summary 的 quantile |
+| JVM 堆 / 非堆 | 官方 Java Agent 的 `jvm.memory.used` 按 `jvm.memory.type=heap/non_heap` 分别汇总内存池；无类型标签的旧数据保留“未分类型”图，均不等于 RSS |
+| JVM GC 平均耗时 | 官方 `jvm.gc.duration` 的 sum/count 增量比，显示 ms；是 GC 动作耗时，不直接等同于应用暂停时间 |
+| JVM 线程 / Node 事件循环 | 沿用已有线程数与事件循环延迟指标，延迟显示 ms |
+
+Gauge 取结束时间前 5 分钟内的最近值；CPU、分配速率和 GC 使用至少 5 分钟的滑动窗口，并先对原始序列求 `rate` 再聚合以处理计数器重置。窗口内没有 GC 时平均耗时为空，曲线保留断点，不显示为 0 ms。默认仅展示收到的指标；Java Agent 的 runtime telemetry 需保持启用，Go 使用现有 collector/bridge 即可，不需要修改业务请求埋点。
+
+来源：[JVM 官方指标语义](https://opentelemetry.io/docs/specs/semconv/runtime/jvm-metrics/)、[Prometheus Go collector](https://github.com/prometheus/client_golang/tree/main/prometheus/collectors)。上述查询结果名称是页面内部标识，不是要求用户额外上报的新指标。
+
+验证：`APM_TEST_PROMTOOL="$PWD/scripts/apm-test/promtool.sh" go test -race -run TestRuntimePromQL ./internal/manager/biz/apm` 检查真实 PromQL 的重置计数、内存池汇总和实例隔离。`APM_RUNTIME_PROMETHEUS=<Prometheus 基础地址> go test -race -v -run TestRuntimeMetricsIntegration ./internal/manager/biz/apm` 只读验证两副本 Go/Java 演示数据；Java 已停止时可用 `APM_RUNTIME_JAVA_END=<Unix 秒>` 明确选取历史窗口，不能把历史验收写成当前在线状态。
 
 实例页合并所选时段内原生请求指标与 Trace 样本中的实例身份，因此关闭 Trace 采样的实例仍可出现。缺少实例 ID 时只使用实际上报的设备/Pod 字段，不按同名补猜；这不是部署实例清单，全部实例是否完成接入还需与业务部署清单核对。
 

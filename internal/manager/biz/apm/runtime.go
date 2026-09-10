@@ -35,7 +35,7 @@ type Runtime struct {
 // memory remains a JVM metric; it is never presented as process RSS.
 func runtimeExpression(q Query, window time.Duration) string {
 	group := "service_instance_id,instance,service_version"
-	names := "go_goroutines|go_memstats_heap_alloc_bytes|process_resident_memory_bytes|process_memory_usage_bytes|jvm_memory_used_bytes|jvm_thread_count|jvm_threads_live_threads|nodejs_eventloop_lag_seconds"
+	names := "go_goroutines|go_memstats_heap_alloc_bytes|process_resident_memory_bytes|process_memory_usage_bytes|jvm_thread_count|jvm_threads_live_threads|nodejs_eventloop_lag_seconds"
 	scope := fmt.Sprintf(`deployment_environment_name=%q,service_namespace=%q`, *q.Environment, *q.ServiceNamespace)
 	if filters := q.instanceLabels(); len(filters) > 0 {
 		scope += "," + strings.Join(filters, ",")
@@ -52,6 +52,24 @@ func runtimeExpression(q Query, window time.Duration) string {
 			cpu = append(cpu, fmt.Sprintf("sum by (%s) (rate(%s%s[%s]))", group, name, selector, promDuration(window)))
 		}
 		parts = append(parts, fmt.Sprintf(`label_replace((%s), "apm_runtime", "process_cpu_cores", "", "")`, strings.Join(cpu, " or ")))
+		// Preserve memory pool semantics; untyped exporters retain the legacy view.
+		for _, kind := range []string{"heap", "non_heap", ""} {
+			name := "jvm_memory_used_bytes"
+			if kind != "" {
+				name = "jvm_" + kind + "_memory_used_bytes"
+			}
+			expr := fmt.Sprintf(`sum by (%s) (last_over_time(jvm_memory_used_bytes{%s,%s,jvm_memory_type=%q}[5m]))`, group, scope, service, kind)
+			parts = append(parts, fmt.Sprintf(`label_replace(%s, "apm_runtime", %q, "", "")`, expr, name))
+		}
+		allocation := fmt.Sprintf(`sum by (%s) (rate(go_memstats_alloc_bytes_total%s[%s]))`, group, selector, promDuration(window))
+		parts = append(parts, fmt.Sprintf(`label_replace(%s, "apm_runtime", "go_memory_allocation_bytes_per_second", "", "")`, allocation))
+		// Use reset-aware rates of sums/counts, never aggregate summary quantiles.
+		// A zero count yields NaN, decoded as null to preserve gaps in the trend.
+		for _, runtime := range []string{"go", "jvm"} {
+			sum := fmt.Sprintf(`sum by (%s) (rate(%s_gc_duration_seconds_sum%s[%s]))`, group, runtime, selector, promDuration(window))
+			count := fmt.Sprintf(`sum by (%s) (rate(%s_gc_duration_seconds_count%s[%s]))`, group, runtime, selector, promDuration(window))
+			parts = append(parts, fmt.Sprintf(`label_replace((%s) / (%s), "apm_runtime", %q, "", "")`, sum, count, runtime+"_gc_mean_duration_seconds"))
+		}
 	}
 	return strings.Join(parts, " or ")
 }
@@ -129,7 +147,9 @@ func (s *Service) Runtime(ctx context.Context, q Query) (*Runtime, error) {
 		key := [3]string{name, instance, labels["service_version"]}
 		if rows[key] == nil {
 			unit := "count"
-			if strings.HasSuffix(name, "_bytes") {
+			if strings.HasSuffix(name, "_bytes_per_second") {
+				unit = "bytes_per_second"
+			} else if strings.HasSuffix(name, "_bytes") {
 				unit = "bytes"
 			} else if name == "process_cpu_cores" {
 				unit = "cores"
