@@ -2,7 +2,7 @@ import userEvent from '@testing-library/user-event';
 import { selectOption } from '@/test/select-option';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { server } from '@/test/msw-server';
 import ApmPage from './Apm';
@@ -34,6 +34,38 @@ const row = {
   data_status: 'observed',
 };
 describe('Application performance', () => {
+  it.each([
+    ['版本', 'service_version', 'v2', 'v1'],
+    ['实例', 'instance_id', 'pod-2', 'pod-1'],
+    ['环境', 'environment', 'staging', 'production'],
+    ['业务命名空间', 'service_namespace', 'sales', 'trade'],
+  ])('keeps %s options stable while switching and refreshing', async (label, key, first, second) => {
+    const detail = key === 'service_version' || key === 'instance_id';
+    let latest = new URLSearchParams();
+    server.use(http.get(`/api/v1/apm/${detail ? 'runtime' : 'services'}`, async ({ request }) => {
+      latest = new URL(request.url).searchParams;
+      await delay(100);
+      return HttpResponse.json({ data: detail ? {
+        instances: [{ instance_id: 'pod-1', version: 'v1' }, { instance_id: 'pod-2', version: 'v2' }], items: [],
+      } : { items: [row], total: 1, environments: ['production', 'staging'], service_namespaces: ['trade', 'sales'] } });
+    }));
+    render(<MemoryRouter initialEntries={[`/apm?${period}${detail ? '&service_name=orders&environment=production&service_namespace=trade&tab=instances' : ''}`]}><ApmPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByRole('button', { name: '刷新' })).toBeEnabled());
+    const trigger = screen.getByRole('combobox', { name: label });
+    for (const value of [first, second, first]) {
+      await selectOption(trigger, value);
+      await waitFor(() => expect(latest.get(key)).toBe(value));
+      // Options must remain available before the replacement request completes.
+      await userEvent.click(trigger);
+      expect(await screen.findByRole('option', { name: first })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: second })).toBeInTheDocument();
+      await userEvent.keyboard('{Escape}');
+      await waitFor(() => expect(screen.getByRole('button', { name: '刷新' })).toBeEnabled());
+      expect(trigger).toHaveTextContent(value);
+      expect(latest.get(key)).toBe(value);
+    }
+  });
+
   it('filters services by device and cluster before pagination and preserves both in detail links', async () => {
     const queries: URLSearchParams[] = [];
     server.use(http.get('/api/v1/apm/services', ({ request }) => {

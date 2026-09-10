@@ -132,6 +132,18 @@ export default function ApmPage() {
     context.delete('end');
   }
   const scope = context.toString();
+  // Discovery options survive result refreshes, but never cross service/device scope.
+  const optionScope = JSON.stringify([
+    detail ? ['service_name', 'service_namespace', 'environment'].map((key) => params.get(key)) : null,
+    ...['device_id', 'cluster_id', 'cluster_node_id', 'metric_source'].map((key) => params.get(key)),
+  ]);
+  const [filterOptions, setFilterOptions] = useState<{
+    scope: string;
+    instances?: ApmRuntime['instances'];
+    environments?: string[];
+    service_namespaces?: string[];
+  }>({ scope: '' });
+  const available = filterOptions.scope === optionScope ? filterOptions : undefined;
   const [results, setResults] = useState<Panels & { scope: string; updated?: number }>({
     scope: '',
   });
@@ -144,9 +156,9 @@ export default function ApmPage() {
   const visibleInstances = instances.filter((item) =>
     (!params.get('service_version') || item.version === params.get('service_version')) &&
     (!params.get('instance_id') || item.instance_id === params.get('instance_id')));
-  const versions = [...new Set([...instances.map((item) => item.version), params.get('service_version') || ''].filter(Boolean))].sort();
+  const versions = [...new Set([...(available?.instances || []).map((item) => item.version), params.get('service_version') || ''].filter(Boolean))].sort();
   const instanceOptions = [...new Set([
-    ...instances.filter((item) => !params.get('service_version') || item.version === params.get('service_version')).map((item) => item.instance_id),
+    ...(available?.instances || []).filter((item) => !params.get('service_version') || item.version === params.get('service_version')).map((item) => item.instance_id),
     params.get('instance_id') || '',
   ].filter(Boolean))].sort();
 
@@ -237,11 +249,17 @@ export default function ApmPage() {
       tasks.push(
         task
           .then((data) => {
-            if (!controller.signal.aborted)
+            if (!controller.signal.aborted) {
+              if (panel === 'runtime') setFilterOptions({ scope: optionScope, instances: (data as ApmRuntime).instances });
+              else if (panel === 'list' && !detail) {
+                const facets = data as ApmList;
+                setFilterOptions({ scope: optionScope, environments: facets.environments, service_namespaces: facets.service_namespaces });
+              }
               setResults((previous) => ({
                 ...(previous.scope === scope ? previous : { scope }),
                 [panel]: data,
               }));
+            }
           })
           .catch((e: Error) => {
             failed = true;
@@ -306,7 +324,7 @@ export default function ApmPage() {
       }
     });
     return () => controller.abort();
-  }, [query, tab, detail, refresh, scope, combined, activeProtocol, operation, scopedReplica]);
+  }, [query, tab, detail, refresh, scope, optionScope, combined, activeProtocol, operation, scopedReplica]);
   useEffect(() => {
     if (detail && tab !== 'operations') {
       restoredScroll.current = '';
@@ -539,11 +557,11 @@ export default function ApmPage() {
                 <>
                   {(
                     [
-                      ['environment', tr('全部环境', 'All environments'), list?.environments],
+                      ['environment', tr('全部环境', 'All environments'), available?.environments],
                       [
                         'service_namespace',
                         tr('全部命名空间', 'All namespaces'),
-                        list?.service_namespaces,
+                        available?.service_namespaces,
                       ],
                     ] as const
                   ).map(([key, label, options]) => (
