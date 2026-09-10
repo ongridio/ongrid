@@ -158,7 +158,7 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 		`set(log.trace_id, TraceID(log.cache["trace_id"])) where IsString(log.cache["trace_id"]) and IsMatch(log.cache["trace_id"], "^[a-fA-F0-9]{32}$") and IsEmpty(log.trace_id)`,
 		`set(log.span_id, SpanID(log.cache["span_id"])) where IsString(log.cache["span_id"]) and IsMatch(log.cache["span_id"], "^[a-fA-F0-9]{16}$") and IsEmpty(log.span_id)`,
 	}
-	for _, attribute := range []string{"service.name", "service.namespace", "deployment.environment.name", "deployment.environment"} {
+	for _, attribute := range []string{"service.name", "service.namespace", "service.version", "service.instance.id", "deployment.environment.name", "deployment.environment"} {
 		correlationStatements = append(correlationStatements,
 			fmt.Sprintf(`set(resource.attributes[%q], log.attributes[%q]) where resource.attributes[%q] == nil and IsString(log.attributes[%q]) and Len(log.attributes[%q]) <= 256`, attribute, attribute, attribute, attribute, attribute),
 			fmt.Sprintf(`set(resource.attributes[%q], log.cache[%q]) where resource.attributes[%q] == nil and IsString(log.cache[%q]) and Len(log.cache[%q]) <= 256`, attribute, attribute, attribute, attribute, attribute))

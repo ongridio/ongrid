@@ -29,11 +29,12 @@ type Instance struct {
 }
 
 type Diagnostics struct {
-	Checks        []Check    `json:"checks"`
-	Instances     []Instance `json:"instances"`
-	TraceIDs      []string   `json:"trace_ids"`
-	SampledTraces int        `json:"sampled_traces"`
-	Metadata      Metadata   `json:"metadata"`
+	Checks              []Check    `json:"checks"`
+	Instances           []Instance `json:"instances"`
+	TraceIDs            []string   `json:"trace_ids"`
+	SampledTraces       int        `json:"sampled_traces"`
+	Metadata            Metadata   `json:"metadata"`
+	LastMetricTimestamp *float64   `json:"last_metric_timestamp,omitempty"`
 }
 
 func (s *Service) Diagnostics(ctx context.Context, q Query) (*Diagnostics, error) {
@@ -41,6 +42,12 @@ func (s *Service) Diagnostics(ctx context.Context, q Query) (*Diagnostics, error
 		return nil, err
 	}
 	out := &Diagnostics{Checks: []Check{}, Instances: []Instance{}, TraceIDs: []string{}, Metadata: metadata(q)}
+	identityStatus := "observed"
+	if *q.Environment == "" || *q.ServiceNamespace == "" || strings.HasPrefix(q.ServiceName, "unknown_service") {
+		identityStatus = "incomplete"
+	}
+	out.Checks = append(out.Checks, Check{"resource_identity", identityStatus, "service_identity"},
+		Check{"coverage", "unknown", "expected_instances_unknown"})
 	instances := map[Instance]bool{}
 	addInstance := func(instance Instance) {
 		if (instance.InstanceID != "" || instance.DeviceID != "" || instance.Pod != "") && !instances[instance] {
@@ -49,6 +56,15 @@ func (s *Service) Diagnostics(ctx context.Context, q Query) (*Diagnostics, error
 		}
 	}
 	defer func() {
+		for _, key := range []string{"downstream", "context", "logs"} {
+			if !slices.ContainsFunc(out.Checks, func(check Check) bool { return check.Key == key }) {
+				status, detail := "unknown", "no_sampled_trace"
+				if key == "logs" && s.logs == nil {
+					status, detail = "unavailable", "backend_disabled"
+				}
+				out.Checks = append(out.Checks, Check{key, status, detail})
+			}
+		}
 		sort.Slice(out.Instances, func(i, j int) bool { return fmt.Sprint(out.Instances[i]) < fmt.Sprint(out.Instances[j]) })
 	}()
 	rows, err := s.summaries(ctx, q, false)
@@ -61,6 +77,20 @@ func (s *Service) Diagnostics(ctx context.Context, q Query) (*Diagnostics, error
 		out.Checks = append(out.Checks, Check{"metrics", "observed", rows[0].DataStatus})
 	}
 	if err == nil && len(rows) > 0 && q.MetricSource != "tempo_spanmetrics" {
+		// Prometheus sample freshness at the selected end, not request activity.
+		fresh, freshErr := s.instant(ctx, "max(timestamp("+q.counter()+q.metricSelector()+"))", q.End)
+		freshStatus := "not_observed"
+		if freshErr != nil {
+			freshStatus = "unavailable"
+		} else if len(fresh) > 0 {
+			out.LastMetricTimestamp, freshErr = sampleValue(fresh[0].Value)
+			if freshErr != nil {
+				freshStatus = "unavailable"
+			} else if out.LastMetricTimestamp != nil {
+				freshStatus = "observed"
+			}
+		}
+		out.Checks = append(out.Checks, Check{"metric_freshness", freshStatus, "prometheus_sample_at_window_end"})
 		// Keep instance discovery independent of trace sampling. Scope is still
 		// the exact service/environment/namespace and selected metric schema.
 		expr := q.aggregate("count_over_time", q.counter(), q.End.Sub(q.Start), "service_instance_id,device_id,cluster_id,k8s_pod_name,service_version")
@@ -68,8 +98,10 @@ func (s *Service) Diagnostics(ctx context.Context, q Query) (*Diagnostics, error
 		if instanceErr != nil {
 			out.Checks = append(out.Checks, Check{"instance_metrics", "unavailable", "query_failed"})
 		} else {
+			missingID := false
 			for _, sample := range series {
 				labels := sample.Metric
+				missingID = missingID || labels["service_instance_id"] == ""
 				addInstance(Instance{labels["service_instance_id"], labels["device_id"], labels["cluster_id"], labels["k8s_pod_name"], labels["service_version"]})
 			}
 			status := "observed"
@@ -77,6 +109,30 @@ func (s *Service) Diagnostics(ctx context.Context, q Query) (*Diagnostics, error
 				status = "incomplete"
 			}
 			out.Checks = append(out.Checks, Check{"instance_metrics", status, strconv.Itoa(len(out.Instances))})
+			idStatus := "observed"
+			if len(series) == 0 {
+				idStatus = "not_observed"
+			} else if missingID {
+				idStatus = "incomplete"
+			}
+			out.Checks = append(out.Checks, Check{"instance_identity", idStatus, "service_instance_id"})
+			// Historical placement changes can be legitimate rollouts. Flag reuse
+			// for investigation without claiming simultaneous duplicate processes.
+			locations := map[string]string{}
+			reused := false
+			for _, instance := range out.Instances {
+				if instance.InstanceID == "" {
+					continue
+				}
+				location := strings.Join([]string{instance.DeviceID, instance.ClusterID, instance.Pod}, "\x00")
+				if previous, ok := locations[instance.InstanceID]; ok && previous != location {
+					reused = true
+				}
+				locations[instance.InstanceID] = location
+			}
+			if reused {
+				out.Checks = append(out.Checks, Check{"instance_reuse", "unknown", "multiple_locations_in_window"})
+			}
 		}
 	}
 	out.Checks = append(out.Checks, Check{"sampling", "unknown", "upstream_sampling_unknown"})
@@ -163,11 +219,6 @@ func (s *Service) Diagnostics(ctx context.Context, q Query) (*Diagnostics, error
 		return out, nil
 	}
 	out.Checks = append(out.Checks, Check{"traces", "observed", strconv.Itoa(out.SampledTraces)})
-	identityStatus := "observed"
-	if *q.Environment == "" || *q.ServiceNamespace == "" || strings.HasPrefix(q.ServiceName, "unknown_service") {
-		identityStatus = "incomplete"
-	}
-	out.Checks = append(out.Checks, Check{"resource_identity", identityStatus, "service_identity"})
 	status := "not_observed"
 	if downstream > 0 {
 		status = "observed"
@@ -183,10 +234,23 @@ func (s *Service) Diagnostics(ctx context.Context, q Query) (*Diagnostics, error
 	} else {
 		// Exact trace-ID lookup goes through the currently selected backend.
 		// A miss is only a sample observation, not proof of broken logging.
+		filters := []logquery.FieldFilter{{Field: "trace_id", Operator: logquery.FilterEqual, Values: []string{out.TraceIDs[0]}}, {Field: "service_namespace", Operator: logquery.FilterEqual, Values: []string{*q.ServiceNamespace}}, {Field: "environment", Operator: logquery.FilterEqual, Values: []string{*q.Environment}}}
+		for _, field := range []struct{ key, value string }{{"service_version", q.ServiceVersion}, {"instance_id", q.InstanceID}, {"device_id", q.DeviceID}, {"cluster_id", q.ClusterID}} {
+			if field.value != "" {
+				filters = append(filters, logquery.FieldFilter{Field: field.key, Operator: logquery.FilterEqual, Values: []string{field.value}})
+			}
+		}
+		if scope := q.resourceScope; scope != nil {
+			if scope.ClusterID != "" {
+				filters = append(filters, logquery.FieldFilter{Field: "cluster_id", Operator: logquery.FilterEqual, Values: []string{scope.ClusterID}})
+			} else {
+				filters = append(filters, logquery.FieldFilter{Field: "device_id", Operator: logquery.FilterIn, Values: scope.DeviceIDs})
+			}
+		}
 		n, err := s.logs.Count(ctx, logquery.SearchRequest{
 			Start: q.Start, End: q.End,
 			Scope:   logquery.Scope{ServiceNames: []string{q.ServiceName}},
-			Filters: []logquery.FieldFilter{{Field: "trace_id", Operator: logquery.FilterEqual, Values: []string{out.TraceIDs[0]}}, {Field: "service_namespace", Operator: logquery.FilterEqual, Values: []string{*q.ServiceNamespace}}, {Field: "environment", Operator: logquery.FilterEqual, Values: []string{*q.Environment}}},
+			Filters: filters,
 		})
 		status := "not_observed"
 		if err != nil {

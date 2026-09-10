@@ -10,8 +10,8 @@ export function absoluteWindow(params: URLSearchParams) {
     : null;
 }
 export function correlationFilters(params: URLSearchParams): LogFieldFilter[] {
-  return ['trace_id', 'span_id', 'service_name', 'environment', 'service_namespace']
-    .filter((key) => params.has(key))
+  return ['trace_id', 'span_id', 'service_name', 'environment', 'service_namespace', 'service_version', 'instance_id']
+    .filter((key) => params.has(key) && (!['service_version', 'instance_id'].includes(key) || !!params.get(key)))
     .map((field) => ({ field, operator: 'eq', values: [params.get(field)!] }));
 }
 export function logTraceLink(record: LogRecord, params: URLSearchParams) {

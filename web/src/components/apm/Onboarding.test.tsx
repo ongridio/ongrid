@@ -7,6 +7,8 @@ describe('gRPC onboarding', () => {
   it.each(['zh-CN', 'en-US'])('explains the required Python plugin and Node interceptor in %s', async (locale) => {
     localStorage.setItem('ongrid-locale', locale);
     const { container } = render(<Onboarding />);
+    expect(container.querySelector('pre')?.textContent).toContain('-Dotel.javaagent.extensions=');
+    expect(screen.getByText(/Java Agent 2.31.1/, { selector: 'p' })).toBeInTheDocument();
     const select = screen.getByRole('combobox');
     await selectOption(select, 'Python');
     expect(container.querySelector('pre')?.textContent).toContain('OpenTelemetryPlugin');

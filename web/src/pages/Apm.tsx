@@ -37,6 +37,7 @@ import { RepositoryBindingButton } from '@/components/apm/RepositoryBinding';
 import { SearchInput } from '@/components/apm/SearchInput';
 import { ServiceSwitcher } from '@/components/apm/ServiceSwitcher';
 import { RuntimeMetrics } from '@/components/apm/RuntimeMetrics';
+import { InstrumentationDiagnostics } from '@/components/apm/InstrumentationDiagnostics';
 import { Onboarding } from '@/components/apm/Onboarding';
 import { chartTooltipStyle, chartTooltipLabelStyle } from '@/lib/chartTheme';
 import { useI18n } from '@/i18n/locale';
@@ -715,6 +716,7 @@ export default function ApmPage() {
                 ← {tr('返回指标', 'Back to metrics')}
               </Link>
             </div>
+            {detail && <InstrumentationDiagnostics params={params} refresh={refresh} />}
             <Onboarding />
           </>
         )}

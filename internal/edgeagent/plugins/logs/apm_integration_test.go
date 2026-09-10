@@ -26,7 +26,7 @@ func TestAPMLogCorrelationIntegration(t *testing.T) {
 		name, line, service, environment, traceID, spanID string
 		backends                                          []string
 	}
-	fixtures := []fixture{{"fixed", `{"message":"apm-correlated-request","trace_id":"00000000000000000000000000000003","span_id":"0000000000000001","service.name":"orders","service.namespace":"trade","deployment.environment":"production","device_id":"spoofed"}`, "orders", "production", "00000000000000000000000000000003", "0000000000000001", []string{backendBuiltinLoki, backendExternalES}}}
+	fixtures := []fixture{{"fixed", `{"message":"apm-correlated-request","trace_id":"00000000000000000000000000000003","span_id":"0000000000000001","service.name":"orders","service.namespace":"trade","service.version":"v1","service.instance.id":"orders-1","deployment.environment":"production","device_id":"spoofed"}`, "orders", "production", "00000000000000000000000000000003", "0000000000000001", []string{backendBuiltinLoki, backendExternalES}}}
 	if dir := os.Getenv("APM_TEST_LANGUAGE_LOG_DIR"); dir != "" {
 		for _, language := range []string{"java", "node", "python"} {
 			raw, err := os.ReadFile(filepath.Join(dir, language+"-requests.jsonl"))
@@ -54,7 +54,32 @@ func TestAPMLogCorrelationIntegration(t *testing.T) {
 					t.Fatal(err)
 				}
 				line := input.line
-				if err := os.WriteFile(filepath.Join(dir, "source.log"), []byte(line+"\n"+strings.ReplaceAll(line, input.environment, "staging")+"\n"), 0644); err != nil {
+				var identity map[string]string
+				if err := json.Unmarshal([]byte(line), &identity); err != nil {
+					t.Fatal(err)
+				}
+				extra := ""
+				for _, field := range []string{"service.version", "service.instance.id"} {
+					if identity[field] != "" {
+						for _, value := range []string{"other", ""} {
+							other := make(map[string]string, len(identity))
+							for key, original := range identity {
+								other[key] = original
+							}
+							if value == "" {
+								delete(other, field)
+							} else {
+								other[field] = value
+							}
+							raw, err := json.Marshal(other)
+							if err != nil {
+								t.Fatal(err)
+							}
+							extra += string(raw) + "\n"
+						}
+					}
+				}
+				if err := os.WriteFile(filepath.Join(dir, "source.log"), []byte(line+"\n"+strings.ReplaceAll(line, input.environment, "staging")+"\n"+extra), 0644); err != nil {
 					t.Fatal(err)
 				}
 				if err := os.WriteFile(filepath.Join(dir, "key"), []byte("test-only"), 0644); err != nil {
@@ -98,6 +123,12 @@ func TestAPMLogCorrelationIntegration(t *testing.T) {
 					}
 				}
 				query := logquery.SearchRequest{Start: time.Now().Add(-time.Minute), End: time.Now().Add(time.Minute), Scope: logquery.Scope{DeviceIDs: []uint64{42}, ServiceNames: []string{input.service}}, Filters: []logquery.FieldFilter{{Field: "trace_id", Operator: logquery.FilterEqual, Values: []string{input.traceID}}, {Field: "service_namespace", Operator: logquery.FilterEqual, Values: []string{"trade"}}, {Field: "environment", Operator: logquery.FilterEqual, Values: []string{input.environment}}}}
+				for field, attribute := range map[string]string{"service_version": "service.version", "instance_id": "service.instance.id"} {
+					if identity[attribute] != "" {
+						query.Filters = append(query.Filters, logquery.FieldFilter{Field: field, Operator: logquery.FilterEqual, Values: []string{identity[attribute]}})
+					}
+				}
+
 				var result *logquery.SearchResult
 				for attempt := 0; attempt < 50; attempt++ {
 					result, err = searcher.Search(ctx, query)

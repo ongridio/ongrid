@@ -80,15 +80,13 @@ func TestAPMLanguageMetricsIntegration(t *testing.T) {
 				if rpc.Items[0].Operation != "grpc.health.v1.Health/Check" {
 					t.Fatalf("%s RPC method: %q", language, rpc.Items[0].Operation)
 				}
-				if language == "python" || language == "node" {
-					if rpc.Items[0].P95Ms == nil {
-						t.Fatal("missing RPC P95")
-					}
-					if p95 := *rpc.Items[0].P95Ms; p95 < 50 || p95 > 1000 {
-						t.Fatalf("%s RPC P95 outside slow request range: %fms", language, p95)
-					}
-					t.Logf("%s RPC: %.2f%% errors, %.2fms P95", language, *rpc.Items[0].ErrorRate, *rpc.Items[0].P95Ms)
+				if rpc.Items[0].P95Ms == nil {
+					t.Fatal("missing RPC P95")
 				}
+				if p95 := *rpc.Items[0].P95Ms; p95 < 50 || p95 > 1000 {
+					t.Fatalf("%s RPC P95 outside slow request range: %fms", language, p95)
+				}
+				t.Logf("%s RPC: %.2f%% errors, %.2fms P95", language, *rpc.Items[0].ErrorRate, *rpc.Items[0].P95Ms)
 				q.Operation = rpc.Items[0].Operation
 				instances, err := svc.Diagnostics(t.Context(), q)
 				if err != nil || len(instances.Instances) != 2 || instances.Instances[0].InstanceID != "sampled" || instances.Instances[1].InstanceID != "unsampled" {

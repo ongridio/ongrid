@@ -70,6 +70,9 @@ message LogKeywords {
 }
 
 // service_namespace and environment support eq "" to match unset attributes.
+// service_version and instance_id filter exact service.version and
+// service.instance.id resource attributes; non-empty equality filters do not
+// match missing attributes.
 message LogFieldFilter {
   string field = 1;
   LogFilterOperator operator = 2;

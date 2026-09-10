@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { closeLogCursor, searchLogs, type LogSearchResult } from '@/api/logs';
 import { absoluteWindow, correlationFilters, logTraceLink } from '@/lib/telemetryContext';
 import { Button, Card, EmptyState } from '@/components/ui';
@@ -7,14 +7,11 @@ import { useI18n } from '@/i18n/locale';
 
 export function ServiceLogs({ params, refresh }: { params: URLSearchParams; refresh: number }) {
   const { tr } = useI18n();
-  const [currentParams, setParams] = useSearchParams();
   const query = params.toString();
-  const unsupported = !!(params.get('service_version') || params.get('instance_id'));
   const [retry, setRetry] = useState(0);
   const [result, setResult] = useState<{ query: string; data?: LogSearchResult; error?: string }>();
   const current = result?.query === query ? result : undefined;
   useEffect(() => {
-    if (unsupported) return;
     const scope = new URLSearchParams(query);
     const window = absoluteWindow(scope);
     if (!window) return;
@@ -31,10 +28,7 @@ export function ServiceLogs({ params, refresh }: { params: URLSearchParams; refr
       if (!controller.signal.aborted) setResult({ query, error: error.message });
     });
     return () => controller.abort();
-  }, [query, refresh, retry, unsupported]);
-  if (unsupported) return <EmptyState title={tr('日志暂不支持版本和实例筛选', 'Logs do not support version or instance filters yet')}
-    hint={tr('清除这两项后查看当前服务的日志，保留环境、命名空间、设备、集群和时间范围。', 'Clear these filters to view service logs while retaining environment, namespace, device, cluster and time range.')}
-    action={<Button onClick={() => { const next = new URLSearchParams(currentParams); next.delete('service_version'); next.delete('instance_id'); setParams(next); }}>{tr('清除版本和实例筛选', 'Clear version and instance filters')}</Button>} />;
+  }, [query, refresh, retry]);
   return <Card>
     <div className="flex flex-wrap items-center justify-between gap-2">
       <h2 className="text-sm font-medium">{tr('近期日志', 'Recent logs')}</h2>

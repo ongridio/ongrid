@@ -56,7 +56,7 @@ def exercise(language, sampled, *, measure=False, instrumented=True):
     started = int(time.time()) - 5
     service = "apm-" + language + ("-overhead" if measure else "")
     instance = "sampled" if sampled else "unsampled"
-    env = {**os.environ, "OTEL_SERVICE_NAME": service,
+    env = {**os.environ, "OTEL_JAVAAGENT_EXTENSIONS": str(CACHE / "java/target/apm-java-1.0.jar"), "OTEL_SERVICE_NAME": service,
            "OTEL_RESOURCE_ATTRIBUTES": f"service.namespace=trade,deployment.environment.name=acceptance,service.instance.id={instance}",
            "OTEL_EXPORTER_OTLP_ENDPOINT": "http://127.0.0.1:14319",
            "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf", "OTEL_METRICS_EXPORTER": "otlp",

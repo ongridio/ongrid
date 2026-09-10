@@ -110,3 +110,17 @@ scripts/apm-test/run-more-languages.sh
 Go 流量改为结算链路 `/checkout/42`：包含订单读取、优惠计算、模拟支付授权与配送报价的子 Span。成功请求使用 `?region=US`，失败请求使用 `?coupon=SAVE20&region=eu&quantity=2`；不会产生真实订单或扣款。
 
 完整版本映射、按 Tag 的验证结果和复现方法见 [Go 双版本验证](../../docs/test/apm-go-version-analysis-20260909.md)。仅运行基础 compose 文件仍是同一源码构建，不可把它当作双版本源码验证。
+
+### Java RPC 延迟桶
+
+Agent 2.31.1 的稳定 `rpc.server.call.duration` 使用秒，但默认通用桶会把 80ms 请求放入 0–5s 区间，导致 P95 插值约 4.75s。`java/src/main/java/RpcMetricsConfiguration.java` 通过官方 `AutoConfigurationCustomizerProvider` 注册 SDK View，仅覆盖 `rpc.*.call.duration` 的桶为 5ms–10s。保留官方自动埋点和现有 OTLP、Resource、采样环境变量；不是另一个 SDK，也不修改服务端查询倍率。
+
+```sh
+cd examples/apm-languages/java
+mvn package
+# 将生成的 JAR 作为官方 Java Agent 扩展加载；业务应用仍用自己的 app.jar。
+java -Dotel.javaagent.extensions=/path/to/apm-java-1.0.jar \
+  -javaagent:/path/to/opentelemetry-javaagent.jar -jar app.jar
+```
+
+示例 Dockerfile 与隔离验收驱动已自动加载扩展，SPI 编译依赖为 `provided`，运行时使用 Agent 自带 SDK。此配置需随 Java 应用重启生效，已有部署不会自动改变。每次升级 Agent 后重跑 `scripts/apm-test/run-languages.sh`，核实桶、计数和关闭采样场景；官方默认桶修复后可移除扩展环境变量及该 View。只移除扩展可回滚，保留其他埋点配置。

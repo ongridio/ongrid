@@ -7,6 +7,8 @@ ADD --checksum=sha256:bbf83c151b6400709e2f225bdd07a04f839d9d13b8b93464241333fd25
 
 FROM eclipse-temurin:21-jre AS java
 WORKDIR /app
+COPY --from=java-build /src/target/apm-java-1.0.jar ./rpc-metrics.jar
+ENV OTEL_JAVAAGENT_EXTENSIONS=/app/rpc-metrics.jar
 COPY --from=java-build /src/target/classes/ ./classes/
 COPY --from=java-build /deps/ ./deps/
 COPY --from=java-build --chmod=644 /agent.jar ./agent.jar

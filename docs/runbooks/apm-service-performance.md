@@ -186,3 +186,13 @@ Trace 详情按完整 Span 分页，默认 50 条、最多 100 条，同时限�
 开发 Compose 使用 `ongrid_repos` 卷保存 `/var/lib/ongrid/repos`。从未挂载仓库目录的旧容器升级时，先备份已有克隆，或升级后重新同步目标 Tag；数据库里的仓库登记和服务绑定不会自动重建 Git 对象。
 
 2026-09-09 本地验收：24 项前端回归、TypeScript/Vite 构建和相关 Go `-race` 测试通过；凭证折叠状态刷新显示真实数量，仓库卡片短名称及绑定弹窗经明暗主题截图检查。Java 服务保存绑定后刷新与 Manager 重建仍可读取；持久化卷中的目标 Tag 在容器重建后保留。只读 AI 会话 `56695614-d3f2-4e5b-add4-0fc494959192` 实际通过 `grep_source` / `read_source` 返回提交 `9cf93884fa5d2f851dec73526bf5774c0e7d3731`，定位 `examples/apm-languages/java/src/main/java/App.java:33` 的显式 500 分支。首次源码读取因旧部署未持久化克隆失败，补充卷并同步后续查成功；日志和运行时指标缺口仍按证据报告，本验收不代表生产容量或完整遥测闭环。
+
+## 接入诊断与日志范围
+
+服务详情的「接入管理」同时显示 HTTP/RPC 接入诊断，沿用当前环境、命名空间、版本、实例、设备、集群与时间范围。检查服务身份、原生指标中的实例 ID、同一 ID 的多位置记录、Prometheus 样本时间，以及最多三条采样链路的上下游和日志关联。缺少 Trace 时，指标与实例检查仍会返回；Trace 相关检查明确显示无法判断。多位置记录可能来自滚动部署，不能直接认定实例 ID 冲突。
+
+`last_metric_timestamp` 是查询结束时 Prometheus 回看范围内的最新样本，既不是最后一次请求时间，也不能保证所有实例持续上报。没有预期部署实例清单，因此覆盖率和上游采样率始终为未知；不要据观测实例数报告 100% 接入。
+
+服务日志已支持 `service_version` / `instance_id` 精确筛选，对应 `service.version` / `service.instance.id`。Loki 使用结构化元数据，Elasticsearch 使用 OTel 资源属性；缺失字段不匹配非空筛选。文件日志需要更新 Edge Collector 配置，将 JSON 中这两个字段提升为资源属性；历史日志不会被回填。筛选无结果时，应先检查实际日志字段。
+
+Java Agent 2.31.1 的 RPC 秒级桶配置见 [语言示例](../../examples/apm-languages/README.md#java-rpc-延迟桶)。扩展随应用重启生效；已有应用需主动更新，不能只更新 Manager。回滚时移除 `OTEL_JAVAAGENT_EXTENSIONS` 或对应 JVM 参数；界面与 Manager 可回退到上一镜像，新字段均为向后兼容的可选字段。

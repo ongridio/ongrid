@@ -82,6 +82,8 @@ export type ApmDependency = {
 };
 export type ApmDependencies = { items: ApmDependency[]; truncated: boolean };
 export type ApmDiagnostics = {
+  metadata?: ApmMetadata;
+  last_metric_timestamp?: number;
   checks: { key: string; status: string; detail: string }[];
   instances: {
     instance_id: string;

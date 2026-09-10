@@ -1,6 +1,7 @@
 package apm
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -23,5 +24,34 @@ func TestMetricInstancesSurviveDisabledTraces(t *testing.T) {
 		if !strings.Contains(p.expr, part) {
 			t.Fatalf("instance query lost scope: %s", p.expr)
 		}
+	}
+}
+
+func TestDiagnosticsExposeUncertaintyWithoutTraces(t *testing.T) {
+	for _, tc := range []struct {
+		name, rows, identity string
+		reused               bool
+	}{
+		{"missing ID", `[{"metric":{"service":"orders","apm_stat":"present","device_id":"42"},"value":[1600,"2"]}]`, "incomplete", false},
+		{"reused ID", `[{"metric":{"service":"orders","apm_stat":"present","service_instance_id":"shared","device_id":"42"},"value":[1600,"2"]},{"metric":{"service":"orders","apm_stat":"present","service_instance_id":"shared","device_id":"43"},"value":[1600,"2"]}]`, "observed", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			q := testQuery()
+			q.MetricSource = "application_metrics"
+			empty := ""
+			q.Environment = &empty
+			result, err := New(&fakeProm{result: tc.rows}, nil, nil).Diagnostics(t.Context(), q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for key, status := range map[string]string{"resource_identity": "incomplete", "coverage": "unknown", "instance_identity": tc.identity, "sampling": "unknown", "traces": "unavailable", "context": "unknown", "downstream": "unknown", "logs": "unavailable"} {
+				if !slices.ContainsFunc(result.Checks, func(check Check) bool { return check.Key == key && check.Status == status }) {
+					t.Fatalf("missing %s=%s: %+v", key, status, result.Checks)
+				}
+			}
+			if got := slices.ContainsFunc(result.Checks, func(check Check) bool { return check.Key == "instance_reuse" && check.Status == "unknown" }); got != tc.reused {
+				t.Fatalf("instance reuse: %+v", result.Checks)
+			}
+		})
 	}
 }

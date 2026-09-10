@@ -56,18 +56,19 @@ it('queries scoped service logs and releases the unused pagination cursor', asyn
   expect(input?.filters).toEqual(expect.arrayContaining([{ field: 'service_namespace', operator: 'eq', values: ['trade'] }, { field: 'environment', operator: 'eq', values: ['production'] }]));
   await waitFor(() => expect(cursorClosed).toBe(true));
 });
-it('does not silently broaden logs when an instance filter cannot be applied', async () => {
-  let searches = 0;
-  server.use(http.post('/api/v1/logs/search', () => { searches++; return HttpResponse.json({ data: { records: [], has_more: false } }); }));
+it('keeps version and instance filters in log queries and explorer links', async () => {
+  let input: Record<string, unknown> | undefined;
+  server.use(http.post('/api/v1/logs/search', async ({ request }) => { input = await request.json() as Record<string, unknown>; return HttpResponse.json({ data: { records: [], has_more: false } }); }));
   render(<MemoryRouter initialEntries={[`/apm/service?${scope}&tab=logs&instance_id=orders-1&service_version=v1&cluster_node_id=7`]}><ApmPage /></MemoryRouter>);
-  expect(screen.getByText('日志暂不支持版本和实例筛选')).toBeInTheDocument();
-  expect(searches).toBe(0);
-  fireEvent.click(screen.getByRole('button', { name: '清除版本和实例筛选' }));
   await screen.findByText('当前范围未查询到日志');
-  expect(searches).toBe(1);
-  const traces = new URL(screen.getByRole('tab', { name: '链路' }).getAttribute('href')!, 'http://localhost');
-  expect(traces.searchParams.get('cluster_node_id')).toBe('7');
-  expect(traces.searchParams.has('cluster_id')).toBe(false);
+  expect(input?.filters).toEqual(expect.arrayContaining([
+    { field: 'service_version', operator: 'eq', values: ['v1'] },
+    { field: 'instance_id', operator: 'eq', values: ['orders-1'] },
+  ]));
+  expect(input?.scope).toEqual({ device_ids: [42], cluster_ids: ['7'] });
+  const link = new URL(screen.getByRole('link', { name: /打开日志检索/ }).getAttribute('href')!, 'http://localhost');
+  expect(link.searchParams.get('service_version')).toBe('v1');
+  expect(link.searchParams.get('instance_id')).toBe('orders-1');
 });
 it('queries historical profiles for the selected device, service and instance without starting a capture', async () => {
   let query: URLSearchParams | undefined;
@@ -80,4 +81,32 @@ it('queries historical profiles for the selected device, service and instance wi
   const link = new URL(screen.getByRole('link', { name: /按需 pprof/ }).getAttribute('href')!, 'http://localhost');
   expect(link.searchParams.get('service_name')).toBe('orders');
   expect(link.searchParams.get('tool')).toBe('profile');
+});
+
+it('scopes diagnostics and retries a partial protocol failure', async () => {
+  const queries: URLSearchParams[] = [];
+  let failRPC = true;
+  server.use(http.get('/api/v1/apm/diagnostics', ({ request }) => {
+    const query = new URL(request.url).searchParams;
+    queries.push(query);
+    if (query.get('protocol') === 'rpc' && failRPC) return HttpResponse.json({ message: 'RPC backend unavailable' }, { status: 503 });
+    return HttpResponse.json({ data: { checks: [
+      { key: 'coverage', status: 'unknown', detail: 'expected_instances_unknown' },
+      { key: 'instance_identity', status: 'incomplete', detail: 'service_instance_id' },
+      { key: 'metric_freshness', status: 'observed', detail: 'prometheus_sample_at_window_end' },
+    ], instances: [], trace_ids: [], sampled_traces: 0, last_metric_timestamp: 1789001940 } });
+  }));
+  render(<MemoryRouter initialEntries={[`/apm/service?${scope}&tab=onboarding&service_version=v1&instance_id=orders-1`]}><ApmPage /></MemoryRouter>);
+  await screen.findByText('未配置预期实例数，不能计算覆盖率。');
+  expect(screen.getByText('信息不完整')).toBeInTheDocument();
+  expect(screen.getByRole('alert')).toHaveTextContent('RPC backend unavailable');
+  for (const query of queries) {
+    for (const [key, value] of scope) expect(query.get(key)).toBe(value);
+    expect(query.get('service_version')).toBe('v1');
+    expect(query.get('instance_id')).toBe('orders-1');
+  }
+  failRPC = false;
+  fireEvent.click(screen.getByRole('button', { name: '重新检查' }));
+  await waitFor(() => expect(screen.getAllByText('未配置预期实例数，不能计算覆盖率。')).toHaveLength(2));
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 });

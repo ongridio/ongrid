@@ -19,7 +19,7 @@ export function Onboarding() {
     [service, namespace, environment].every((v) => /^[a-zA-Z0-9_.-]{1,128}$/.test(v));
   const quote = (value: string) => "'" + value.replace(/'/g, "'\\''") + "'";
   const commands: Record<string, string> = {
-    java: 'java -javaagent:/path/to/opentelemetry-javaagent.jar -jar app.jar',
+    java: '# For precise RPC buckets with Agent 2.31.1, build the SDK View extension\n# in examples/apm-languages/java and add -Dotel.javaagent.extensions=/path/to/apm-java-1.0.jar.\njava -javaagent:/path/to/opentelemetry-javaagent.jar -jar app.jar',
     node: '# For gRPC metrics, register grpcMetricsInterceptor on grpc.Server.\n# See examples/apm-languages/grpc-metrics.cjs.\nnode --require @opentelemetry/auto-instrumentations-node/register app.js',
     python: '# Install grpcio-observability matching grpcio, then register OpenTelemetryPlugin\n# with a MeterProvider and seconds-based histogram View before creating gRPC servers. See examples/apm-languages/app.py.\nopentelemetry-instrument python app.py',
     go: '# Initialize the official OTel Go SDK and HTTP/gRPC instrumentation.\n# See docs/runbooks/apm-service-performance.md for the runnable example.',
@@ -91,6 +91,10 @@ export function Onboarding() {
           'Use HTTP route templates and RPC service/method names, never request IDs. Support depends on language and instrumentation version. Go also requires a MeterProvider in code.',
         )}
       </p>
+      {language === 'java' && <p className="text-xs text-zinc-500">{tr(
+        'Java Agent 2.31.1 的默认 RPC 桶较粗。需要毫秒级延迟分位数时，按仓库 examples/apm-languages/java 配置官方 SDK View 扩展；示例镜像已启用。',
+        'Java Agent 2.31.1 uses coarse default RPC buckets. For millisecond latency quantiles, configure the official SDK View extension in examples/apm-languages/java; the example image enables it.',
+      )}</p>}
       {language === 'python' && (
         <p className="text-xs text-zinc-500">
           {tr(
