@@ -1,4 +1,6 @@
-import configurationGuideUrl from '../../../../docs/guides/apm-configuration-files.md?url';
+import configurationGuide from '../../../../docs/guides/apm-configuration-files.md?raw';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Label, Input } from '@/components/ui';
 import { Select } from '@/components/ui/Select';
 import { useState } from 'react';
@@ -13,6 +15,7 @@ export function Onboarding() {
   const [namespace, setNamespace] = useState('trade');
   const [environment, setEnvironment] = useState('production');
   const [copied, setCopied] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
   const [error, setError] = useState('');
   const input = "";
   const valid =
@@ -130,7 +133,7 @@ export function Onboarding() {
       )}
       <p className="text-xs text-zinc-500">
         {tr('也可使用配置文件：Java Agent properties、Spring Boot YAML、.NET appsettings.json；其他语言通过应用配置初始化 SDK。', 'Configuration files are also supported: Java Agent properties, Spring Boot YAML, .NET appsettings.json, or application configuration passed to the SDK.')}{' '}
-        <a className="underline" href={configurationGuideUrl} download="apm-configuration-files.md">{tr('下载配置文件接入指南（Markdown）', 'Download configuration file guide (Chinese Markdown)')}</a>
+
       </p>
       <pre className="overflow-auto rounded-lg bg-zinc-950 p-4 text-xs">{config}</pre>
       <Button
@@ -148,6 +151,19 @@ export function Onboarding() {
         {copied ? tr('已复制', 'Copied') : tr('复制配置', 'Copy configuration')}
       </Button>
       {error && <p role="alert">{error}</p>}
+      <Button variant="subtle" aria-expanded={showGuide} aria-controls="apm-configuration-guide" onClick={() => setShowGuide(!showGuide)}>
+        {showGuide ? tr('收起配置文件接入指南', 'Hide configuration file guide') : tr('查看配置文件接入指南', 'Read configuration file guide (Chinese)')}
+      </Button>
+      {showGuide && (
+        <div id="apm-configuration-guide" className="md-body min-w-0 overflow-x-auto text-sm text-zinc-200">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={(url) => {
+            const safeUrl = defaultUrlTransform(url);
+            return safeUrl ? new URL(safeUrl, 'https://github.com/ongridio/ongrid/blob/main/docs/guides/').href : '';
+          }} components={{ a: ({ children, ...props }) => <a {...props} target="_blank" rel="noreferrer">{children}</a> }}>
+            {configurationGuide}
+          </ReactMarkdown>
+        </div>
+      )}
       <p className="text-xs text-zinc-500">
         {tr(
           '先安装对应的官方埋点组件，再启动应用并发送真实请求。配置生成不代表接入成功：从服务列表打开服务，检查请求指标、链路和日志关联。采样覆盖率需要单独核验。',

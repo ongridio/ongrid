@@ -23,7 +23,7 @@ RUN --mount=type=cache,target=/root/.npm \
     npm ci --prefer-offline
 
 COPY web/ ./
-# Preserve the repository-relative guide import used by the onboarding download.
+# Preserve the repository-relative guide import used by the embedded onboarding guide.
 COPY docs/guides/apm-configuration-files.md /docs/guides/apm-configuration-files.md
 # vite cache persists the build artefact cache between rebuilds too,
 # so a no-op web build drops from ~40s to ~5s.
