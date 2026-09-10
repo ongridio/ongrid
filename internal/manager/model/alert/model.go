@@ -194,6 +194,7 @@ func IsEvaluableKind(k string) bool {
 // {"msgtype":"text","text":{"content":"..."}}; no signing required for
 // the v1 wiring (the bot URL itself carries the secret query param).
 const (
+	ChannelTypeSMTP     = "smtp"
 	ChannelTypeWebhook  = "webhook"
 	ChannelTypeSlack    = "slack"
 	ChannelTypeFeishu   = "feishu"
@@ -274,10 +275,10 @@ type Event struct {
 func (Event) TableName() string { return "alert_events" }
 
 type Silence struct {
-	ID           uint64         `gorm:"column:id;primaryKey;autoIncrement"`
-	Name         string         `gorm:"column:name;size:256;not null;default:''"`
-	Scope        string         `gorm:"column:scope;size:32;not null;default:''"`
-	ScopeType    string         `gorm:"column:scope_type;size:32;not null;default:''"`
+	ID        uint64 `gorm:"column:id;primaryKey;autoIncrement"`
+	Name      string `gorm:"column:name;size:256;not null;default:''"`
+	Scope     string `gorm:"column:scope;size:32;not null;default:''"`
+	ScopeType string `gorm:"column:scope_type;size:32;not null;default:''"`
 	// DeviceID renamed from EdgeID in May 2026 (entity split).
 	DeviceID     *uint64        `gorm:"column:device_id;index:idx_alert_silences_device_rule,priority:1"`
 	Rule         string         `gorm:"column:rule;size:128;not null;default:'';index:idx_alert_silences_device_rule,priority:2"`

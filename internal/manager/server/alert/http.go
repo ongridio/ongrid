@@ -19,6 +19,7 @@ import (
 	svc "github.com/ongridio/ongrid/internal/manager/service/alert"
 	auditmw "github.com/ongridio/ongrid/internal/manager/server/middleware"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
+	"github.com/ongridio/ongrid/internal/pkg/notify"
 	"github.com/ongridio/ongrid/internal/pkg/tenantctx"
 )
 
@@ -239,6 +240,7 @@ type mutationReq struct {
 }
 
 type channelReq struct {
+	SMTP     *notify.SMTPConfig `json:"smtp,omitempty"`
 	Name     string `json:"name"`
 	Type     string `json:"type"`
 	Endpoint string `json:"endpoint"`
@@ -600,6 +602,7 @@ func (h *Handler) createChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	item, err := h.channels.CreateChannel(r.Context(), caller, svc.ChannelInput{
+		SMTP:     req.SMTP,
 		Name:     req.Name,
 		Type:     req.Type,
 		Endpoint: req.Endpoint,
@@ -637,6 +640,7 @@ func (h *Handler) updateChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	item, err := h.channels.UpdateChannel(r.Context(), caller, id, svc.ChannelInput{
+		SMTP:     req.SMTP,
 		Name:     req.Name,
 		Type:     req.Type,
 		Endpoint: req.Endpoint,

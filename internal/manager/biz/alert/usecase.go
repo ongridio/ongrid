@@ -1514,6 +1514,10 @@ func channelHasDestination(ch *model.Channel) bool {
 	if err != nil {
 		return false
 	}
+	if ch.ChannelType == model.ChannelTypeSMTP {
+		_, err := BuildSenderFromChannel(ch)
+		return err == nil
+	}
 	return strings.TrimSpace(cfg["endpoint"]) != "" || strings.TrimSpace(cfg["url"]) != ""
 }
 
@@ -1529,6 +1533,13 @@ func BuildSenderFromChannel(ch *model.Channel) (notify.Sender, error) {
 	cfg, err := ch.Config()
 	if err != nil {
 		return nil, fmt.Errorf("decode channel config: %w", err)
+	}
+	if ch.ChannelType == model.ChannelTypeSMTP {
+		var config notify.SMTPConfig
+		if err := json.Unmarshal([]byte(cfg["smtp"]), &config); err != nil {
+			return nil, fmt.Errorf("decode SMTP config: %w", err)
+		}
+		return notify.NewSMTPSender(ch.Name, config, cfg["secret"])
 	}
 	endpoint := strings.TrimSpace(cfg["endpoint"])
 	if endpoint == "" {
