@@ -23,6 +23,8 @@ CACHE = Path(os.environ["APM_LANGUAGE_CACHE"])
 OUTPUT = Path(os.environ["APM_ACCEPTANCE_OUTPUT"])
 PROM = "http://127.0.0.1:19090/prometheus"
 TEMPO = "http://127.0.0.1:13200"
+HTTP_PORT = int(os.environ.get("HTTP_PORT", "18080"))
+RPC_PORT = int(os.environ.get("RPC_PORT", "18081"))
 
 
 def get_json(url):
@@ -41,7 +43,7 @@ def wait_ready(process):
         if process.poll() is not None:
             raise RuntimeError(f"application exited {process.returncode}")
         try:
-            for port in (18080, 18081):
+            for port in (HTTP_PORT, RPC_PORT):
                 with socket.create_connection(("127.0.0.1", port), timeout=0.2):
                     pass
             return
@@ -73,6 +75,7 @@ def exercise(language, sampled, *, measure=False, instrumented=True):
     }
     command = commands[language]
     if not instrumented:
+        env["OTEL_SDK_DISABLED"] = "true"
         command = {"python": command[1:], "node": ["node", str(SOURCE / "app.cjs")],
                    "java": [command[0], *command[2:]]}[language]
     logfile = OUTPUT / f"{language}-{instance}{'-overhead' if measure else ''}.log"
@@ -88,7 +91,7 @@ def exercise(language, sampled, *, measure=False, instrumented=True):
                     assert response.status == 200
                     response.read()
                     return (time.perf_counter() - before) * 1000
-                warmup = HTTPConnection("127.0.0.1", 18080, timeout=5)
+                warmup = HTTPConnection("127.0.0.1", HTTP_PORT, timeout=5)
                 try:
                     for _ in range(200):
                         call(warmup)
@@ -99,7 +102,7 @@ def exercise(language, sampled, *, measure=False, instrumented=True):
                     deadline = before + 10
                     def worker(_):
                         timings = []
-                        connection = HTTPConnection("127.0.0.1", 18080, timeout=5)
+                        connection = HTTPConnection("127.0.0.1", HTTP_PORT, timeout=5)
                         try:
                             while time.perf_counter() < deadline:
                                 started_request = time.perf_counter()
@@ -117,13 +120,13 @@ def exercise(language, sampled, *, measure=False, instrumented=True):
                           "p50_ms": timings[len(timings) // 2], "p95_ms": timings[int(len(timings) * 0.95)], "rss_kib": rss}
                 print(json.dumps(result), flush=True)
                 return result
-            with grpc.insecure_channel("127.0.0.1:18081") as channel:
+            with grpc.insecure_channel(f"127.0.0.1:{RPC_PORT}") as channel:
                 client = health_pb2_grpc.HealthStub(channel)
                 for batch in range(3):
                     for i in range(4):
                         suffix = "?fail=1" if i == 0 else "?slow=1" if i == 1 else ""
                         try:
-                            with urllib.request.urlopen("http://127.0.0.1:18080/orders/42" + suffix, timeout=5) as response:
+                            with urllib.request.urlopen(f"http://127.0.0.1:{HTTP_PORT}/orders/42" + suffix, timeout=5) as response:
                                 assert response.status == 200 and i != 0
                         except urllib.error.HTTPError as error:
                             assert i == 0 and error.code == 500
@@ -151,11 +154,7 @@ def exercise(language, sampled, *, measure=False, instrumented=True):
             assert errors[http] == 3, (language, "HTTP errors", errors)
             assert len(routes) == 1 and "42" not in next(iter(routes)) and "" not in routes, (language, "route cardinality", routes)
             rpc = "rpc_server_call_duration_seconds_count"
-            if language == "java":
-                assert counts.get(rpc) == 12 and errors[rpc] == 3, (language, "RPC metrics", counts, errors)
-            else:
-                # Fail when upstream gains metrics so the compatibility record must be updated.
-                assert not any(name.startswith("rpc_") for name in counts), (language, "new RPC support: update contract", counts)
+            assert counts.get(rpc) == 12 and errors[rpc] == 3, (language, "RPC metrics", counts, errors)
             query = '{ resource.service.name = "%s" && resource.service.instance.id = "%s" && kind = server }' % (service, instance)
             deadline = time.monotonic() + 60
             while True:
@@ -175,7 +174,7 @@ def exercise(language, sampled, *, measure=False, instrumented=True):
                 (OUTPUT / f"{language}-requests.jsonl").write_text("".join(json.dumps(record) + "\n" for record in records))
             result = {"language": language, "instance": instance, "requests_per_protocol": 12, "metrics": counts,
                       "errors": errors, "routes": sorted(routes), "server_traces": len(traces), "logs": len(records),
-                      "rpc_metrics_supported": language == "java"}
+                      "rpc_metrics_supported": True}
             print(json.dumps(result), flush=True)
             return result
         finally:

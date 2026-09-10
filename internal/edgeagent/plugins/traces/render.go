@@ -99,6 +99,25 @@ processors:
         value: "{{ $v }}"
         action: upsert
 {{- end }}
+{{- if .MetricsEnabled }}
+
+  # gRPC's official Python plugin uses grpc.* names for the same server RED
+  # histogram. Normalize only that metric; preserve its seconds and buckets.
+  transform/grpc_metrics:
+    error_mode: ignore
+    metric_statements:
+      - context: datapoint
+        conditions:
+          - metric.name == "grpc.server.call.duration"
+        statements:
+          - set(attributes["rpc.system.name"], "grpc")
+          - set(attributes["rpc.method"], attributes["grpc.method"])
+          - replace_pattern(attributes["rpc.method"], "^/", "")
+          - set(attributes["rpc.response.status_code"], attributes["grpc.status"])
+      - context: metric
+        statements:
+          - set(name, "rpc.server.call.duration") where name == "grpc.server.call.duration"
+{{- end }}
 {{- if .LogsEnabled }}
 
   resource/loki_labels:
@@ -260,7 +279,7 @@ service:
 {{- if .MetricsEnabled }}
     metrics:
       receivers: [otlp]
-      processors: [{{ if .BoundedPipelines }}memory_limiter, {{ end }}{{ if .K8sAttributesEnabled }}k8sattributes, {{ end }}resource/device, {{ if .BoundedPipelines }}batch/metrics{{ else }}batch{{ end }}]
+      processors: [{{ if .BoundedPipelines }}memory_limiter, {{ end }}{{ if .K8sAttributesEnabled }}k8sattributes, {{ end }}resource/device, transform/grpc_metrics, {{ if .BoundedPipelines }}batch/metrics{{ else }}batch{{ end }}]
       exporters: [{{ if .MetricsRemoteWriteEnabled }}prometheusremotewrite/manager{{ else }}prometheus/gateway{{ end }}]
 {{- end }}
 `

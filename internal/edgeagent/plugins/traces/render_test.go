@@ -369,7 +369,10 @@ func TestRenderStandaloneGatewayUsesBoundedRemoteWritePipelines(t *testing.T) {
 		"exporters: [prometheusremotewrite/manager]",
 		"processors: [memory_limiter, k8sattributes, resource/device, batch/traces]",
 		"processors: [memory_limiter, k8sattributes, resource/device, resource/loki_labels, batch/logs]",
-		"processors: [memory_limiter, k8sattributes, resource/device, batch/metrics]",
+		"processors: [memory_limiter, k8sattributes, resource/device, transform/grpc_metrics, batch/metrics]",
+		`metric.name == "grpc.server.call.duration"`,
+		`set(attributes["rpc.response.status_code"], attributes["grpc.status"])`,
+		`set(name, "rpc.server.call.duration") where name == "grpc.server.call.duration"`,
 		"host: 0.0.0.0",
 		"port: 8888",
 	} {

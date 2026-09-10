@@ -110,13 +110,15 @@ describe("device cluster pages", () => {
     });
     expect(clusterLink).toHaveAttribute("href", "/clusters/501");
     expect(screen.getByRole("link", { name: "k8s-prod" })).toHaveAttribute("href", "/clusters/901");
-    expect(screen.getByText("接入方式")).toBeInTheDocument();
+    expect(screen.getByText("接入类型")).toBeInTheDocument();
+    expect(screen.getByText("Host")).toBeInTheDocument();
+    expect(screen.getByText("K8s")).toBeInTheDocument();
     expect(screen.getByText("降级")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "删除集群 k8s-prod" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "应用性能" })).not.toBeInTheDocument();
-    expect(screen.getByText("1 / 1 个有效")).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "安装批次" })).not.toBeInTheDocument();
     expect(screen.getByText("最近活动")).toBeInTheDocument();
-    expect(screen.getByText("拓扑连接")).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "拓扑连接" })).not.toBeInTheDocument();
     expect(
       screen.getByText("2 个集群 · 1 台设备 · 1 台在线"),
     ).toBeInTheDocument();

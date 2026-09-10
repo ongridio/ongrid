@@ -275,14 +275,14 @@ export default function ClustersPage() {
               />
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[1100px] whitespace-nowrap text-left text-xs">
+                <table className="w-full min-w-[1000px] table-fixed whitespace-nowrap text-left text-xs">
                   <thead className="border-b border-zinc-800/60 bg-zinc-950/30 text-[11px] uppercase tracking-wide text-zinc-500">
                     <tr>
-                      <th className="px-4 py-2.5 font-medium">
+                      <th className="w-[22%] px-4 py-2.5 font-medium">
                         {tr("集群", "Cluster")}
                       </th>
                       <th className="px-4 py-2.5 font-medium">
-                        {tr("接入方式", "Enrollment")}
+                        {tr("接入类型", "Access type")}
                       </th>
                       <th className="px-4 py-2.5 font-medium">
                         {tr("成员", "Members")}
@@ -291,18 +291,12 @@ export default function ClustersPage() {
                         {tr("状态", "Health")}
                       </th>
                       <th className="px-4 py-2.5 font-medium">
-                        {tr("安装批次", "Install batches")}
-                      </th>
-                      <th className="px-4 py-2.5 font-medium">
-                        {tr("拓扑连接", "Topology links")}
-                      </th>
-                      <th className="px-4 py-2.5 font-medium">
                         {tr("最近活动", "Last activity")}
                       </th>
                       <th className="px-4 py-2.5 font-medium">
                         {tr("更新时间", "Updated")}
                       </th>
-                      <th className="sticky right-0 z-20 border-l border-zinc-800/60 bg-zinc-950 px-4 py-2.5 text-right font-medium">
+                      <th className="w-[320px] px-4 py-2.5 text-right font-medium">
                         {tr("操作", "Actions")}
                       </th>
                     </tr>
@@ -389,7 +383,8 @@ function ClusterRow({
       <td className="px-4 py-3">
         <Link
           to={`/clusters/${summary.cluster.id}`}
-          className="font-medium text-zinc-100 hover:text-indigo-300"
+          className="block truncate font-medium text-zinc-100 hover:text-indigo-300"
+          title={summary.cluster.name}
         >
           {summary.cluster.name}
         </Link>
@@ -397,7 +392,11 @@ function ClusterRow({
           {description || `#${summary.cluster.id}`}
         </div>
       </td>
-      <td className="px-4 py-3 text-zinc-400">{kubernetes ? 'Kubernetes' : tr('设备', 'Device')}</td>
+      <td className="px-4 py-3">
+        <span className={`inline-flex items-center whitespace-nowrap rounded border px-1 py-[1px] text-[10px] leading-4 ${kubernetes ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-indigo-500/30 bg-indigo-500/10 text-indigo-300'}`}>
+          {kubernetes ? 'K8s' : 'Host'}
+        </span>
+      </td>
       <td className="px-4 py-3 text-zinc-300">
         <span className="font-medium text-zinc-100">
           {summary.members.length}
@@ -426,41 +425,13 @@ function ClusterRow({
           </div>
         )}
       </td>
-      <td className="px-4 py-3">
-        {summary.activeProfiles > 0 ? (
-          <Chip tone="accent" title={tr("有效 / 总安装批次", "Active / total install batches")}>
-            {tr(
-              `${summary.activeProfiles} / ${summary.profiles.length} 个有效`,
-              `${summary.activeProfiles} / ${summary.profiles.length} active`,
-            )}
-          </Chip>
-        ) : (
-          <span className="text-zinc-600">
-            {summary.profiles.length > 0
-              ? tr(`0 / ${summary.profiles.length} 个有效`, `0 / ${summary.profiles.length} active`)
-              : "—"}
-          </span>
-        )}
-      </td>
-      <td className="px-4 py-3 text-zinc-300">
-        {summary.externalRelations.length > 0 ? (
-          <span>
-            {tr(
-              `${summary.externalRelations.length} 条连接`,
-              `${summary.externalRelations.length} links`,
-            )}
-          </span>
-        ) : (
-          <span className="text-zinc-600">—</span>
-        )}
-      </td>
       <td className="whitespace-nowrap px-4 py-3 text-zinc-500">
         {relativeTime(summary.lastMemberSeenAt)}
       </td>
       <td className="whitespace-nowrap px-4 py-3 text-zinc-500">
         {relativeTime(summary.cluster.updated_at)}
       </td>
-      <td className="sticky right-0 z-10 border-l border-zinc-800/60 bg-zinc-900 px-4 py-3 text-right" onClick={(event) => event.stopPropagation()}>
+      <td className="px-4 py-3 text-right" onClick={(event) => event.stopPropagation()}>
         <div className="inline-flex items-center gap-1">
           <Link
             to={`/clusters/${summary.cluster.id}`}

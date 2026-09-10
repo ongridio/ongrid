@@ -9,6 +9,7 @@ python3 -m venv "$APM_LANGUAGE_CACHE/python"
 mkdir -p "$APM_LANGUAGE_CACHE/node"
 cp examples/apm-languages/package*.json "$APM_LANGUAGE_CACHE/node/"
 npm ci --prefix "$APM_LANGUAGE_CACHE/node" --no-audit --no-fund
+NODE_PATH="$APM_LANGUAGE_CACHE/node/node_modules" node --test examples/apm-languages/grpc-metrics.test.cjs
 if [[ ! -s "$APM_LANGUAGE_CACHE/opentelemetry-javaagent.jar" ]]; then
   curl --fail --location https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v2.31.1/opentelemetry-javaagent.jar -o "$APM_LANGUAGE_CACHE/opentelemetry-javaagent.jar"
 fi

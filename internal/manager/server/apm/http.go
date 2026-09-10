@@ -69,7 +69,7 @@ func (h *Handler) operations(w http.ResponseWriter, r *http.Request) {
 // @Router /api/v1/apm/dependencies [get]
 // @Success 200 {object} apm.Dependencies
 func (h *Handler) dependencies(w http.ResponseWriter, r *http.Request) {
-	h.serve(w, r, true, func(ctx context.Context, q biz.Query) (any, error) { return h.svc.Dependencies(ctx, q) })
+	h.serve(w, r, r.URL.Query().Get("service_name") != "", func(ctx context.Context, q biz.Query) (any, error) { return h.svc.Dependencies(ctx, q) })
 }
 
 // @Summary Inspect application telemetry samples

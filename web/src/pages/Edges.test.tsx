@@ -234,7 +234,7 @@ describe("EdgesPage", () => {
       "bg-indigo-500/10",
       "text-indigo-300",
     );
-    expect(screen.getByRole("table")).toHaveClass("min-w-full", "table-fixed");
+    expect(screen.getByRole("table")).toHaveClass("min-w-full", "w-max", "table-auto");
   });
 
   it("点击 K8s 托管设备行进入设备详情，操作列支持 WebSSH 和修改名称", async () => {

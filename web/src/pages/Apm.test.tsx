@@ -43,6 +43,7 @@ describe('Application performance', () => {
     }));
     render(<MemoryRouter initialEntries={[`/apm?${period}&page=3`]}><ApmPage /></MemoryRouter>);
     await screen.findByRole('link', { name: 'orders' });
+    expect(screen.getByRole('heading', { name: '服务' })).toBeInTheDocument();
     await selectOption(screen.getByRole('combobox', { name: '设备' }), 'ubuntu (#42)');
     await waitFor(() => expect(queries.at(-1)?.get('device_id')).toBe('42'));
     await selectOption(screen.getByRole('combobox', { name: '集群' }), 'production (#7)');
@@ -226,7 +227,7 @@ describe('Application performance', () => {
     expect(linked.searchParams.get('start')).toBe('2026-09-07T00:00:00Z');
     expect(linked.searchParams.get('environment')).toBe('production');
     expect(screen.queryByRole('link', { name: '运行时指标' })).not.toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: '实例与资源' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '实例' })).toBeInTheDocument();
   });
   it('uses server facets and moves relative windows forward on manual refresh', async () => {
     let requested: URL | undefined;
@@ -382,7 +383,8 @@ describe('Application performance', () => {
     const mixedLatency = within(screen.getByRole('link', { name: 'orders' }).closest('tr')!).getAllByRole('cell')[5];
     expect(mixedLatency).toHaveTextContent('HTTP800RPC12');
     const rpcLatency = within(screen.getByRole('link', { name: 'rpc-only' }).closest('tr')!).getAllByRole('cell')[5];
-    expect(rpcLatency).toHaveTextContent('HTTP—RPC12');
+    expect(rpcLatency).toHaveTextContent('RPC12');
+    expect(rpcLatency).not.toHaveTextContent('HTTP');
     expect(screen.queryByRole('columnheader', { name: '协议' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'RPC' })).not.toBeInTheDocument();
     expect(screen.getAllByRole('row')).toHaveLength(3);
@@ -417,6 +419,21 @@ describe('Application performance', () => {
     expect(screen.getByRole('region', { name: 'HTTP' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'RPC' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'RPC' })).not.toBeInTheDocument();
+  });
+
+  it.each(['http', 'rpc'])('hides uncollected %s panels but keeps collected zero-traffic metrics', async (missing) => {
+    server.use(
+      http.get('/api/v1/apm/overview', ({ request }) => HttpResponse.json({ data: {
+        summary: { ...row, rps: 0, data_status: new URL(request.url).searchParams.get('protocol') === missing ? 'no_data' : 'no_requests' }, points: [],
+      } })),
+      http.get('/api/v1/apm/operations', () => HttpResponse.json({ data: { items: [], total: 0, page: 1, page_size: 5 } })),
+      http.get('/api/v1/apm/dependencies', () => HttpResponse.json({ data: { items: [] } })),
+    );
+    render(<MemoryRouter initialEntries={[`/apm/service?${period}&service_name=orders`]}><ApmPage /></MemoryRouter>);
+    const present = missing === 'http' ? 'RPC' : 'HTTP';
+    await within(await screen.findByRole('region', { name: present })).findByText('请求速率');
+    await waitFor(() => expect(screen.queryByRole('region', { name: missing.toUpperCase() })).not.toBeInTheDocument());
+    expect(within(screen.getByRole('region', { name: present })).getByText('请求速率')).toBeInTheDocument();
   });
 
   it('debounces search and restores list filters, page and scroll after visiting a service', async () => {
@@ -787,7 +804,7 @@ describe('Official language onboarding', () => {
     expect(screen.getByRole('region', {name: 'Goroutines'})).toBeInTheDocument();
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', {name: 'pod-2'}));
-    expect(screen.getByRole('tab', {name: '实例与资源'})).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', {name: '实例'})).toHaveAttribute('aria-selected', 'true');
     await selectOption(screen.getByRole('combobox', {name: '版本'}), '1.1.0-demo');
     await waitFor(() => expect(requests.some((url) => url.pathname.endsWith('/runtime') && url.searchParams.get('service_version') === '1.1.0-demo')).toBe(true));
     await selectOption(screen.getByRole('combobox', {name: '实例'}), 'pod-2');

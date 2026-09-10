@@ -3,7 +3,7 @@ import { Label, Input } from '@/components/ui';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
 import { Hint } from '@/components/ui/Tooltip';
 import { Select } from '@/components/ui/Select';
-import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowDown, ArrowRight, ArrowUp, ArrowUpRight, RefreshCw } from 'lucide-react';
 import {
@@ -29,8 +29,10 @@ import {
   type ApmRuntime,
 } from '@/api/apm';
 import { Button, Card, Chip, EmptyState, PageHeader, PaginationFooter } from '@/components/ui';
+import { ServiceMap } from '@/components/apm/ServiceMap';
 import { Dependencies } from '@/components/apm/Dependencies';
-import { ErrorTraces } from '@/components/apm/ErrorTraces';
+import { ErrorTraces, ServiceTraces } from '@/components/apm/ErrorTraces';
+import { ServiceLogs } from '@/components/apm/ServiceLogs';
 import { RepositoryBindingButton } from '@/components/apm/RepositoryBinding';
 import { SearchInput } from '@/components/apm/SearchInput';
 import { ServiceSwitcher } from '@/components/apm/ServiceSwitcher';
@@ -40,6 +42,8 @@ import { chartTooltipStyle, chartTooltipLabelStyle } from '@/lib/chartTheme';
 import { useI18n } from '@/i18n/locale';
 import { usePermissions } from '@/store/me';
 import './Apm.css';
+
+const ServiceProfiles = lazy(() => import('@/components/apm/ServiceProfiles').then((module) => ({ default: module.ServiceProfiles })));
 
 const input = "";
 const languageLabels: Record<string, string> = {
@@ -249,7 +253,14 @@ export default function ApmPage() {
           }),
       );
     };
-    if (!detail) fetchPanel(queryApm('services', p, controller.signal), 'list');
+    if (!detail && tab === 'map') {
+      if (!scopedReplica) {
+        p.set('page', '1'); p.set('page_size', '100'); p.set('sort', 'rps');
+        p.delete('search');
+        fetchPanel(queryApm('services', p, controller.signal), 'list');
+        fetchPanel(queryApm('dependencies', p, controller.signal), 'dependencies');
+      }
+    } else if (!detail) fetchPanel(queryApm('services', p, controller.signal), 'list');
     else if (tab === 'overview' || tab === 'operations') {
       for (const protocol of combined ? ['http', 'rpc'] : [activeProtocol]) {
         const scoped = new URLSearchParams(p);
@@ -321,8 +332,12 @@ export default function ApmPage() {
   const tabs = [
     ['overview', tr('概览', 'Overview')],
     ['operations', tr('接口', 'Operations')],
+    ['instances', tr('实例', 'Instances')],
     ['dependencies', tr('依赖', 'Dependencies')],
-    ['instances', tr('实例与资源', 'Instances & resources')],
+    ['traces', tr('链路', 'Traces')],
+    ['errors', tr('错误', 'Errors')],
+    ['logs', tr('日志', 'Logs')],
+    ['profiles', tr('性能剖析', 'Profiling')],
   ];
   const viewLink = (view: string) => {
     if (view === 'operations' && operation && location.state?.apmOperations)
@@ -447,7 +462,7 @@ export default function ApmPage() {
           detail ? (
             <ServiceSwitcher params={params} navigationState={location.state} />
           ) : (
-            tr('应用性能', 'Application performance')
+            tr('服务', 'Services')
           )
         }
         leading={
@@ -516,10 +531,10 @@ export default function ApmPage() {
               <span className="text-xs text-zinc-500">{tr('请求指标与资源指标使用相同筛选', 'Requests and resources share these filters')}</span>
             </div>
           ) :
-          !detail && tab === 'services' && (
+          !detail && ['services', 'map'].includes(tab) && (
             <div className="flex flex-wrap items-center gap-3">
-              {resourceFilters}
-              {!detail && tab === 'services' && (
+              {tab !== 'map' && resourceFilters}
+              {!detail && ['services', 'map'].includes(tab) && (
                 <>
                   {(
                     [
@@ -560,7 +575,7 @@ export default function ApmPage() {
                     </FilterField>
                   ))}
 
-                  <div className="w-full sm:max-w-sm sm:flex-1">
+                  <div className="w-full sm:max-w-sm sm:flex-1" hidden={tab === 'map'}>
                     <SearchInput
                       value={params.get('search') || ''}
                       onChange={changeSearch}
@@ -574,9 +589,12 @@ export default function ApmPage() {
           )
         }
       />
+      {!detail && <TabsList activateOnFocus={false} aria-label={tr('服务视图', 'Service views')} className="shrink-0 border-b border-zinc-800 px-6">
+        {[['services', tr('服务列表', 'Service list')], ['map', tr('服务地图', 'Service map')]].map(([value, label]) => <TabsTrigger key={value} value={value} onClick={() => set('tab', value)}>{label}</TabsTrigger>)}
+      </TabsList>}
       {detail && (
         <TabsList activateOnFocus={false}
-          aria-label={tr('应用性能视图', 'APM views')}
+          aria-label={tr('服务视图', 'Service views')}
           className="flex shrink-0 flex-wrap items-center gap-x-5 border-b border-zinc-800 px-6"
         >
           {tabs.map(([key, label]) => (
@@ -597,6 +615,10 @@ export default function ApmPage() {
         </TabsList>
       )}
       <TabsContent value={operation ? 'operations' : tab} className="contents"><main ref={main} className="flex-1 space-y-3 overflow-auto px-6 py-4">
+        {!detail && tab === 'map' && (scopedReplica ? <EmptyState title={tr('服务地图按服务汇总', 'The service map is service-wide')}
+          hint={tr('请清除设备、集群、版本和实例筛选后查看。', 'Clear device, cluster, version and instance filters to view the map.')}
+          action={<Button onClick={() => { const next = new URLSearchParams(params); for (const key of ['device_id', 'cluster_id', 'cluster_node_id', 'service_version', 'instance_id']) next.delete(key); setParams(next); }}>{tr('清除不支持的筛选', 'Clear unsupported filters')}</Button>} />
+          : <ServiceMap list={list} dependencies={dependencies} params={params} loading={loading} />)}
         {detail && tab === 'overview' && (
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
@@ -671,7 +693,7 @@ export default function ApmPage() {
             {error}
           </Card>
         )}
-        {loading &&
+        {loading && tab !== 'map' &&
           !list &&
           !overview &&
           !current?.rpcList &&
@@ -715,6 +737,7 @@ export default function ApmPage() {
           const overview = rpc ? current?.rpcOverview : current?.overview;
           const operations = rpc ? current?.rpcOperations : current?.operations;
           const list = rpc ? current?.rpcList : current?.list;
+          if (detail && ['no_data', 'traces_only'].includes(overview?.summary.data_status || '')) return null;
           return (
             <section
               key={protocol}
@@ -874,7 +897,10 @@ export default function ApmPage() {
                                 <td className="px-3 py-3 text-right tabular-nums">
                                   {detail ? number(row.p95_ms) : (
                                     <div className="inline-grid grid-cols-[auto_auto] gap-x-3 gap-y-1 text-xs">
-                                      {(['http', 'rpc'] as const).map((protocol) => (
+                                      {(['http', 'rpc'] as const).filter((protocol) =>
+                                        row.protocols?.some((item) => item.protocol === protocol)
+                                        || (protocol === 'http' && row.metric_source === 'tempo_spanmetrics' && row.data_status !== 'traces_only' && row.data_status !== 'no_data'),
+                                      ).map((protocol) => (
                                         <div key={protocol} className="contents">
                                           <span className="text-left text-zinc-500">{protocol.toUpperCase()}</span>
                                           <span>{number(row.protocols?.find((item) => item.protocol === protocol)?.p95_ms
@@ -1068,7 +1094,13 @@ export default function ApmPage() {
             </section>
           );
         })}
-        {detail && tab === 'overview' && traceScopeReady && <ErrorTraces params={traceParams} refresh={refresh} />}
+        {detail && tab === 'traces' && traceScopeReady && <ServiceTraces params={traceParams} refresh={refresh} />}
+        {detail && tab === 'errors' && traceScopeReady && <ErrorTraces params={traceParams} refresh={refresh} />}
+        {detail && ['traces', 'errors'].includes(tab) && !traceScopeReady && !loading && (
+          <EmptyState title={tr('集群范围尚未解析', 'Cluster scope is not resolved')} hint={tr('请刷新后重试，避免查询到其他集群的链路。', 'Refresh to retry resolving the cluster scope.')} />
+        )}
+        {detail && tab === 'logs' && <ServiceLogs params={logParams} refresh={refresh} />}
+        {detail && tab === 'profiles' && <Suspense fallback={<p role="status" className="text-sm text-zinc-500">{tr('正在加载性能剖析…', 'Loading profiling…')}</p>}><ServiceProfiles params={params} instances={visibleInstances} loading={loading} refresh={refresh} /></Suspense>}
         {detail && tab === 'overview' && !operation && (
           <>
             <div className="space-y-3">
@@ -1212,21 +1244,15 @@ export default function ApmPage() {
                         {instance.device_id && (
                           <Link
                             className="underline"
-                            to={`/tools?${new URLSearchParams({ tool: 'profile', device_id: instance.device_id, service_name: params.get('service_name')!, environment: params.get('environment') || '', service_namespace: params.get('service_namespace') || '', instance_id: instance.instance_id, start: params.get('start')!, end: params.get('end')! })}`}
+                            to={`/apm/service?${new URLSearchParams({ ...Object.fromEntries(params), tab: 'profiles', device_id: instance.device_id, instance_id: instance.instance_id })}`}
                           >
-                            {tr('按需 pprof 采集', 'On-demand pprof')}
+                            {tr('性能剖析', 'Profiling')}
                           </Link>
                         )}
                       </div>
                     ))}
                   </div>
                 )}
-                <p className="text-xs text-zinc-500">
-                  {tr(
-                    '需确认所选设备能访问该实例的 pprof 端点。新采集不能补回历史 Profile，也不代表某个 Span 的函数耗时。',
-                    'Confirm that the device can reach this instance’s pprof endpoint. New captures cannot recover historical profiles or attribute function time to one span.',
-                  )}
-                </p>
               </Card>
         )}
         {runtime && tab === 'instances' && <RuntimeMetrics data={runtime} />}

@@ -369,7 +369,7 @@ type Dependencies struct {
 }
 
 func (s *Service) Dependencies(ctx context.Context, q Query) (*Dependencies, error) {
-	if err := s.validateQuery(ctx, &q, true); err != nil {
+	if err := s.validateQuery(ctx, &q, q.ServiceName != ""); err != nil {
 		return nil, err
 	}
 	if q.ServiceVersion != "" || q.InstanceID != "" || q.DeviceID != "" || q.ClusterID != "" || q.ClusterNodeID != 0 {
@@ -380,7 +380,17 @@ func (s *Service) Dependencies(ctx context.Context, q Query) (*Dependencies, err
 	rate := func(metric string, histogram bool) string {
 		parts := []string{}
 		for _, side := range []string{"client", "server"} {
-			selector := fmt.Sprintf(`{%s=%q,%s_service_namespace=%q,%s_deployment_environment_name=%q}`, side, q.ServiceName, side, *q.ServiceNamespace, side, *q.Environment)
+			filters := []string{`client!=""`, `server!=""`}
+			if q.ServiceName != "" {
+				filters = append(filters, fmt.Sprintf(`%s=%q`, side, q.ServiceName))
+			}
+			if q.ServiceNamespace != nil {
+				filters = append(filters, fmt.Sprintf(`%s_service_namespace=%q`, side, *q.ServiceNamespace))
+			}
+			if q.Environment != nil {
+				filters = append(filters, fmt.Sprintf(`%s_deployment_environment_name=%q`, side, *q.Environment))
+			}
+			selector := "{" + strings.Join(filters, ",") + "}"
 			labels := group
 			if histogram {
 				labels += ",le"

@@ -797,7 +797,7 @@ export default function EdgesPage() {
                 "min-w-full text-xs",
                 compactNetworkTable
                   ? "w-full min-w-[1200px] table-fixed"
-                  : "w-[1767px] table-fixed",
+                  : "w-max table-auto",
               )}
             >
               {compactNetworkTable ? (

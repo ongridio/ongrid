@@ -165,7 +165,7 @@ type ProfileForm = {
 };
 type ProfileView = 'flame' | 'icicle' | 'callgraph';
 type ToolCategory = 'network' | 'performance';
-type FlamebearerProfile = {
+export type FlamebearerProfile = {
   flamebearer: {
     names: string[];
     levels: number[][];
@@ -1338,7 +1338,7 @@ function ProfilingPanel({
   );
 }
 
-function NativeFlamegraph({ profile, loading, error, service, onRefresh }: {
+export function NativeFlamegraph({ profile, loading, error, service, onRefresh }: {
   profile: FlamebearerProfile | null;
   loading: boolean;
   error: string;

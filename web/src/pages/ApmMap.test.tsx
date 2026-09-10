@@ -1,0 +1,30 @@
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
+import { http, HttpResponse } from 'msw';
+import { beforeEach, expect, it, vi } from 'vitest';
+import { server } from '@/test/msw-server';
+import ApmPage from './Apm';
+vi.mock('@/components/apm/ServiceMap', () => ({ ServiceMap: () => <div>map canvas</div> }));
+const period = 'start=2026-09-10T00:00:00Z&end=2026-09-10T01:00:00Z';
+beforeEach(() => { localStorage.setItem('ongrid-locale', 'zh-CN'); server.use(http.get('/api/v1/devices', () => HttpResponse.json({ items: [] })), http.get('/api/v1/topology/nodes', () => HttpResponse.json({ items: [] }))); });
+it('loads one bounded global relationship query and full service metrics', async () => {
+  const requests: URL[] = [];
+  server.use(http.get('/api/v1/apm/services', ({ request }) => { requests.push(new URL(request.url)); return HttpResponse.json({ data: { items: [], total: 0, environments: ['production'], service_namespaces: ['trade'] } }); }), http.get('/api/v1/apm/dependencies', ({ request }) => { requests.push(new URL(request.url)); return HttpResponse.json({ data: { items: [], truncated: false } }); }));
+  render(<MemoryRouter initialEntries={[`/apm?${period}&environment=production&service_namespace=trade&page=4&search=old`]}><ApmPage /></MemoryRouter>);
+  await waitFor(() => expect(requests.length).toBeGreaterThan(0));
+  fireEvent.click(screen.getByRole('tab', { name: '服务地图' }));
+  expect(await screen.findByText('map canvas')).toBeInTheDocument();
+  await waitFor(() => expect(requests.filter(r => r.pathname.endsWith('/dependencies'))).toHaveLength(1));
+  const query = requests.find(r => r.pathname.endsWith('/dependencies'))!.searchParams;
+  expect(query.get('environment')).toBe('production'); expect(query.get('service_namespace')).toBe('trade');
+  expect(query.has('service_name')).toBe(false); expect(query.has('search')).toBe(false);
+  expect(requests.filter(r => r.pathname.endsWith('/services')).at(-1)?.searchParams.get('page_size')).toBe('100');
+});
+it('requires explicit clearing of unsupported resource filters', async () => {
+  const calls = vi.fn();
+  server.use(http.get('/api/v1/apm/dependencies', () => { calls(); return HttpResponse.json({ data: { items: [] } }); }), http.get('/api/v1/apm/services', () => HttpResponse.json({ data: { items: [], total: 0 } })));
+  render(<MemoryRouter initialEntries={[`/apm?${period}&tab=map&device_id=42`]}><ApmPage /></MemoryRouter>);
+  expect(await screen.findByText('服务地图按服务汇总')).toBeInTheDocument(); expect(calls).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '清除不支持的筛选' }));
+  await waitFor(() => expect(calls).toHaveBeenCalledOnce());
+});

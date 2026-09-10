@@ -8,8 +8,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Background,
   BackgroundVariant,
+  BaseEdge,
   Controls,
   Edge,
+  EdgeProps,
+  getSmoothStepPath,
   Handle,
   MiniMap,
   Node,
@@ -17,6 +20,7 @@ import {
   NodeProps,
   Position,
   ReactFlow,
+  useNodes,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import dagre from '@dagrejs/dagre';
@@ -27,13 +31,11 @@ import type {
   TopologyRelation,
 } from '@/api/topology';
 import { useThemeMode } from '@/store/mode';
+import { facingSides, routeAroundNodes } from './route';
+import { alignResourceColumns } from './layout';
 
 const NODE_WIDTH = 160;
 const NODE_HEIGHT = 44;
-const HANDLE_TARGET_TOP = 'target-top';
-const HANDLE_TARGET_BOTTOM = 'target-bottom';
-const HANDLE_SOURCE_TOP = 'source-top';
-const HANDLE_SOURCE_BOTTOM = 'source-bottom';
 const HIDDEN_HANDLE_STYLE = { visibility: 'hidden' as const };
 
 // Per-node-type fill / border colors. Falls back to neutral zinc for
@@ -99,21 +101,6 @@ const EDGE_DASH: Record<string, string | undefined> = {
   annotation: '2 4',             // dotted
 };
 
-// Hierarchical tier per node type. Lower number = higher in the
-// vertical stack (business intent at top, raw infrastructure at
-// bottom). Used to bucket nodes onto fixed horizontal bands so the
-// graph reads as a layer diagram instead of a tangled mesh.
-const TYPE_TIER: Record<string, number> = {
-  app: 0,        // 业务系统（顶层）
-  service: 1,    // 微服务
-  cluster: 2,    // 集群（有状态组件）
-  network_device: 3, // 网络设备（主机之上）
-  device: 4,     // 主机
-  rack: 5,       // 物理位置（底层）
-};
-const TIER_BAND_HEIGHT = NODE_HEIGHT + 140;
-const NODE_X_SPACING = NODE_WIDTH + 80;
-
 function semanticsForType(relTypes: RelationType[], typeName: string): string {
   const rt = relTypes.find((t) => t.name === typeName);
   return rt?.semantics_tag ?? 'annotation';
@@ -125,10 +112,6 @@ function isNetworkDevice(node: TopologyNode | undefined): boolean {
 
 function visualNodeType(node: TopologyNode | undefined): string {
   return isNetworkDevice(node) ? 'network_device' : (node?.type ?? '');
-}
-
-function nodeTier(node: TopologyNode | undefined): number {
-  return TYPE_TIER[visualNodeType(node)] ?? 99;
 }
 
 // CustomTopologyNode renders one node tile inside react-flow. Colors
@@ -161,12 +144,9 @@ function CustomTopologyNode(props: NodeProps) {
         overflow: 'hidden',
       }}
     >
-      {/* The graph is tiered, but relation direction is semantic rather
-          than always top->bottom (e.g. device member_of cluster points
-          upward). Expose hidden handles on both vertical sides so each
-          edge can pick the side that faces its target tier. */}
-      <Handle id={HANDLE_TARGET_TOP} type="target" position={Position.Top} style={HIDDEN_HANDLE_STYLE} />
-      <Handle id={HANDLE_SOURCE_TOP} type="source" position={Position.Top} style={HIDDEN_HANDLE_STYLE} />
+      {Object.values(Position).flatMap((position) => (['source', 'target'] as const).map((type) => (
+        <Handle key={`${type}-${position}`} id={`${type}-${position}`} type={type} position={position} style={HIDDEN_HANDLE_STYLE} />
+      )))}
       <div
         style={{
           fontWeight: 500,
@@ -179,13 +159,41 @@ function CustomTopologyNode(props: NodeProps) {
         {data.label}
       </div>
       <div style={{ fontSize: 10, opacity: 0.6, fontFamily: 'monospace' }}>{data.type}</div>
-      <Handle id={HANDLE_TARGET_BOTTOM} type="target" position={Position.Bottom} style={HIDDEN_HANDLE_STYLE} />
-      <Handle id={HANDLE_SOURCE_BOTTOM} type="source" position={Position.Bottom} style={HIDDEN_HANDLE_STYLE} />
     </div>
   );
 }
 
 const nodeTypes = { topo: CustomTopologyNode };
+
+function AvoidingEdge(props: EdgeProps) {
+  const nodes = useNodes();
+  const start = { x: props.sourceX, y: props.sourceY };
+  const end = { x: props.targetX, y: props.targetY };
+  const offset = (point: { x: number; y: number }, side: Position) => ({
+    x: point.x + (side === Position.Left ? -24 : side === Position.Right ? 24 : 0),
+    y: point.y + (side === Position.Top ? -24 : side === Position.Bottom ? 24 : 0),
+  });
+  const route = routeAroundNodes(
+    offset(start, props.sourcePosition),
+    offset(end, props.targetPosition),
+    nodes.map((n) => ({ ...n.position, width: n.width ?? NODE_WIDTH, height: n.height ?? NODE_HEIGHT })),
+  );
+  let [path, labelX, labelY] = getSmoothStepPath(props);
+  if (route) {
+    const points = [start, ...route, end];
+    path = points.map((p, i) => `${i ? 'L' : 'M'} ${p.x} ${p.y}`).join(' ');
+    const segments = points.slice(1).map((p, i) => ({ a: points[i], b: p, length: Math.abs(p.x - points[i].x) + Math.abs(p.y - points[i].y) }));
+    const longest = segments.reduce((a, b) => a.length >= b.length ? a : b);
+    labelX = (longest.a.x + longest.b.x) / 2;
+    labelY = (longest.a.y + longest.b.y) / 2;
+  }
+  return <BaseEdge id={props.id} path={path} style={props.style} markerEnd={props.markerEnd} markerStart={props.markerStart}
+    label={props.label} labelX={labelX} labelY={labelY} labelStyle={props.labelStyle}
+    labelShowBg={props.labelShowBg} labelBgStyle={props.labelBgStyle}
+    labelBgPadding={props.labelBgPadding} labelBgBorderRadius={props.labelBgBorderRadius} />;
+}
+
+const edgeTypes = { avoiding: AvoidingEdge };
 
 type Props = {
   nodes: TopologyNode[];
@@ -216,7 +224,7 @@ export function TopologyGraph({
 }: Props) {
   const { resolved } = useThemeMode();
   const isLight = resolved === 'light';
-  const { rfNodes: layoutNodes, rfEdges } = useMemo(
+  const { rfNodes: layoutNodes, rfEdges: layoutEdges } = useMemo(
     () =>
       layoutGraph(
         nodes,
@@ -240,6 +248,13 @@ export function TopologyGraph({
     })),
     [layoutNodes, draggedPositions],
   );
+  const rfEdges = useMemo(() => {
+    const positions = new Map(rfNodes.map((node) => [node.id, node.position]));
+    return layoutEdges.map((edge) => {
+      const [source, target] = facingSides(positions.get(edge.source)!, positions.get(edge.target)!);
+      return { ...edge, sourceHandle: `source-${source}`, targetHandle: `target-${target}` };
+    });
+  }, [rfNodes, layoutEdges]);
   const onNodesChange = useCallback((changes: NodeChange[]) => {
     setDraggedPositions((previous) => {
       const next = { ...previous };
@@ -270,6 +285,7 @@ export function TopologyGraph({
         nodes={rfNodes}
         edges={rfEdges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         nodesDraggable
         nodesConnectable={false}
@@ -311,19 +327,6 @@ export function TopologyGraph({
 // layoutGraph runs dagre to assign positions then builds the react-flow
 // node + edge arrays. Pure function — no react state or DOM access.
 //
-// Tuning notes (2026-05-17 — was crowded on first dogfood):
-//   - nodesep 30 → 60: same-rank nodes (e.g. orphan devices in column 0)
-//     were touching; bumped so edge labels never overlap node borders.
-//   - ranksep 80 → 180: gave parallel `member_of` + `depends_on` edges
-//     room to route around each other instead of dog-piling labels at
-//     mid-segment.
-//   - hideOrphans drops nodes without any relations entirely so a fresh
-//     tenant with 50 unrelated devices isn't dominated by a wall of
-//     disconnected cards. The chip filter above is the operator's
-//     escape hatch to see them.
-//   - Parallel edges (two relations between the same pair) get a small
-//     curvature offset per-index so their labels separate; otherwise
-//     smoothstep stacks them at the same midpoint.
 function layoutGraph(
   nodes: TopologyNode[],
   relations: TopologyRelation[],
@@ -357,18 +360,13 @@ function layoutGraph(
     : nodes;
   const visibleNodeIDs = new Set(visibleNodes.map((n) => n.id));
 
-  // ----- Dagre TB pass -----
-  // Run a top-to-bottom dagre layout to get X positions (which
-  // minimise edge crossings within rows) — then we OVERRIDE the Y
-  // positions to snap each node onto its type-based tier band.
-  // This gives a hierarchical "layer diagram" feel where app sits at
-  // the top, devices at the bottom, dependencies as colored arrows.
+  // Dagre keeps related nodes on nearby rows; resource columns are fixed below.
   const g = new dagre.graphlib.Graph();
   g.setDefaultEdgeLabel(() => ({}));
   g.setGraph({
-    rankdir: 'TB',
+    rankdir: 'LR',
     nodesep: 80,
-    ranksep: 60,
+    ranksep: 110,
     marginx: 40,
     marginy: 40,
   });
@@ -382,51 +380,15 @@ function layoutGraph(
   }
   dagre.layout(g);
 
-  // ----- Tier snap + X spread -----
-  // Group visible nodes by their tier, then within each tier sort by
-  // dagre's chosen X (preserves crossing-minimisation order) and lay
-  // them out on an even spacing grid. Snapping Y to dagre's value made
-  // siblings overlap because dagre's X-spacing assumes the original Y
-  // — once we override Y the X-collision avoidance breaks. Explicit
-  // spread fixes it.
-  const byTier = new Map<number, TopologyNode[]>();
-  for (const n of visibleNodes) {
-    const tier = nodeTier(n);
-    const bucket = byTier.get(tier) ?? [];
-    bucket.push(n);
-    byTier.set(tier, bucket);
-  }
-  // Stable sort within each tier by dagre x; widest tier sets the
-  // overall canvas width so narrower tiers can centre under it.
-  const tierLayout = new Map<number, { y: number; xs: number[] }>();
-  const sortedTiers = [...byTier.keys()].sort((a, b) => a - b);
-  let maxRowWidth = 0;
-  for (const tier of sortedTiers) {
-    const bucket = byTier.get(tier)!;
-    bucket.sort((a, b) => (g.node(String(a.id))?.x ?? 0) - (g.node(String(b.id))?.x ?? 0));
-    const rowWidth = bucket.length * NODE_X_SPACING;
-    if (rowWidth > maxRowWidth) maxRowWidth = rowWidth;
-  }
-  sortedTiers.forEach((tier, tierIdx) => {
-    const bucket = byTier.get(tier)!;
-    const rowWidth = bucket.length * NODE_X_SPACING;
-    const startX = 40 + (maxRowWidth - rowWidth) / 2;
-    const xs = bucket.map((_, i) => startX + i * NODE_X_SPACING);
-    tierLayout.set(tier, { y: 40 + tierIdx * TIER_BAND_HEIGHT, xs });
-  });
-  const positionFor = new Map<number, { x: number; y: number }>();
-  for (const tier of sortedTiers) {
-    const bucket = byTier.get(tier)!;
-    const { y, xs } = tierLayout.get(tier)!;
-    bucket.forEach((n, i) => positionFor.set(n.id, { x: xs[i], y }));
-  }
-
+  const positions = alignResourceColumns(visibleNodes.map((n) => {
+    const pos = g.node(String(n.id));
+    return { id: String(n.id), type: visualNodeType(n), x: pos.x - NODE_WIDTH / 2, y: pos.y - NODE_HEIGHT / 2 };
+  }), NODE_WIDTH, NODE_HEIGHT);
   const rfNodes: Node[] = visibleNodes.map((n) => {
-    const pos = positionFor.get(n.id) ?? { x: 0, y: 0 };
     return {
       id: String(n.id),
       type: 'topo',
-      position: pos,
+      position: positions.get(String(n.id))!,
       // Explicit width/height — the MiniMap reads these to draw the
       // proxy rect for each node. Without them it can't paint anything
       // before the DOM measure pass lands, which on a slow first load
@@ -446,11 +408,6 @@ function layoutGraph(
     };
   });
 
-  // Edges. For TB tier layout with Top/Bottom handles, smoothstep gives
-  // clean orthogonal lines. Pick handles per edge direction: semantic
-  // relations can point upward (device -> cluster member_of), and those
-  // must leave the source from the top instead of looping below the card.
-  //
   // Label dedup: when multiple relations exist between the same pair
   // (e.g. order-api -> mysql-prod with both depends_on AND member_of),
   // react-flow stacks both labels at the midpoint and the text becomes
@@ -460,7 +417,6 @@ function layoutGraph(
   // distinction; the dropper drawer shows the full relation list per
   // node for the labels.
   const seenPairs = new Set<string>();
-  const nodeByID = new Map(visibleNodes.map((n) => [n.id, n]));
   const rfEdges: Edge[] = includedRelations
     .filter((r) => visibleNodeIDs.has(r.src_id) && visibleNodeIDs.has(r.dst_id))
     .map((r) => {
@@ -471,16 +427,11 @@ function layoutGraph(
       const pairKey = `${r.src_id}->${r.dst_id}`;
       const showLabel = !seenPairs.has(pairKey);
       seenPairs.add(pairKey);
-      const srcTier = nodeTier(nodeByID.get(r.src_id));
-      const dstTier = nodeTier(nodeByID.get(r.dst_id));
-      const pointsUp = srcTier > dstTier;
       return {
         id: `rel-${r.id}`,
         source: String(r.src_id),
         target: String(r.dst_id),
-        sourceHandle: pointsUp ? HANDLE_SOURCE_TOP : HANDLE_SOURCE_BOTTOM,
-        targetHandle: pointsUp ? HANDLE_TARGET_BOTTOM : HANDLE_TARGET_TOP,
-        type: 'smoothstep',
+        type: 'avoiding',
         animated: false,
         label: showLabel ? r.type : undefined,
         labelStyle: { fill: stroke, fontSize: 10, fontFamily: 'monospace' },

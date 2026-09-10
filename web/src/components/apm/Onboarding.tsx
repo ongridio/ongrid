@@ -20,8 +20,8 @@ export function Onboarding() {
   const quote = (value: string) => "'" + value.replace(/'/g, "'\\''") + "'";
   const commands: Record<string, string> = {
     java: 'java -javaagent:/path/to/opentelemetry-javaagent.jar -jar app.jar',
-    node: 'node --require @opentelemetry/auto-instrumentations-node/register app.js',
-    python: 'opentelemetry-instrument python app.py',
+    node: '# For gRPC metrics, register grpcMetricsInterceptor on grpc.Server.\n# See examples/apm-languages/grpc-metrics.cjs.\nnode --require @opentelemetry/auto-instrumentations-node/register app.js',
+    python: '# Install grpcio-observability matching grpcio, then register OpenTelemetryPlugin\n# with a MeterProvider and seconds-based histogram View before creating gRPC servers. See examples/apm-languages/app.py.\nopentelemetry-instrument python app.py',
     go: '# Initialize the official OTel Go SDK and HTTP/gRPC instrumentation.\n# See docs/runbooks/apm-service-performance.md for the runnable example.',
     dotnet: '# Register the official OTel SDK, ASP.NET Core instrumentation and OTLP exporters in Program.cs.\ndotnet App.dll',
     php: 'export OTEL_PHP_AUTOLOAD_ENABLED=true\n# Install the OTel extension, SDK, OTLP exporter and framework instrumentation.\nphp app.php',
@@ -91,13 +91,19 @@ export function Onboarding() {
           'Use HTTP route templates and RPC service/method names, never request IDs. Support depends on language and instrumentation version. Go also requires a MeterProvider in code.',
         )}
       </p>
-      {(language === 'node' || language === 'python') && (
+      {language === 'python' && (
         <p className="text-xs text-zinc-500">
           {tr(
-            '当前已验收的官方自动埋点支持 HTTP 请求指标和 gRPC 链路；gRPC 请求指标尚未提供，可在链路页面查看已采样的 RPC 请求。',
-            'The verified official auto-instrumentation provides HTTP request metrics and gRPC traces. Native gRPC request metrics are not available; use the Traces page for sampled RPC requests.',
+            'HTTP 指标和 gRPC 链路使用官方自动埋点；gRPC 请求指标需额外注册官方 grpcio-observability 插件，并配置秒级延迟直方图桶。参考仓库 examples/apm-languages/app.py，指标不受 Trace 采样影响。',
+            'Official auto-instrumentation provides HTTP metrics and gRPC traces. For gRPC request metrics, also register the official grpcio-observability plugin with seconds-based latency histogram buckets. See examples/apm-languages/app.py; metrics are independent of trace sampling.',
           )}
         </p>
+      )}
+      {language === 'node' && (
+        <p className="text-xs text-zinc-500">{tr(
+          'HTTP 指标和 gRPC 链路使用官方自动埋点；gRPC 请求指标需注册示例中的服务端拦截器，通过官方 Metrics API 记录真实请求。参考仓库 examples/apm-languages/grpc-metrics.cjs，仅配置环境变量不会启用该拦截器。',
+          'Official auto-instrumentation provides HTTP metrics and gRPC traces. For gRPC request metrics, register the example server interceptor, which measures real calls through the official Metrics API. See examples/apm-languages/grpc-metrics.cjs; environment variables alone do not enable it.',
+        )}</p>
       )}
       {language === 'dotnet' && (
         <p className="text-xs text-zinc-500">{tr(

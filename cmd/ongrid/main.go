@@ -926,7 +926,7 @@ func main() {
 	topologyNodeTypeRepo := managertopologydata.NewNodeTypeRepo(db)
 	topologyUC := managerbiztopology.NewUsecase(
 		topologyNodeRepo, topologyRelationRepo, topologyRelationTypeRepo, topologyNodeTypeRepo, log,
-	).WithClusterDevices(deviceRepo)
+	).WithClusterDevices(deviceRepo).WithServiceDevices(deviceRepo)
 	topologyUC.AddClusterDeleteGuard(managerbizedge.NewUpgradeJobClusterDeleteGuard(edgeRepo))
 	topologyHandler := managerservertopology.NewHandler(topologyUC)
 
@@ -2760,6 +2760,9 @@ func main() {
 	eg.Go(func() error { return auditUC.RunRetention(egCtx, auditRetentionDays) })
 	eg.Go(func() error { return runK8sEventRetention(egCtx, k8sUC, log) })
 	eg.Go(func() error { return runK8sTopologyReconcile(egCtx, k8sUC, log) })
+	if apmProm != nil {
+		eg.Go(func() error { return runServiceTopologyReconcile(egCtx, apmService, topologyUC, log) })
+	}
 
 	// ADR-026: chatruntime worker session sampler — surfaces orphan
 	// worker accumulation as a gauge. The 161-orphan incident (v0.7.44)

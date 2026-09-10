@@ -4,7 +4,7 @@ Java、Node.js、Python 各提供 HTTP `/orders/42` 和 gRPC Health Check，包�
 
 从仓库根目录执行 `scripts/apm-test/run-languages.sh`。需要 Docker、Go、Node/npm、Python 3、Java 17+，以及下载锁定依赖的网络权限。脚本将依赖与 Java 构建缓存放在 `/tmp/ongrid-apm-languages`，Python gRPC 代码也在该临时目录生成，不写回源码。
 
-测试使用独立 Collector、Tempo 和 Prometheus，退出自动删除这些测试容器与卷。端口 13200、19090、14319、18080、18081 必须空闲。默认依次检查开/关 Trace 采样的实例、真实原生指标、链路和告警生命周期。结果写入 `output/apm-acceptance`。
+测试使用独立 Collector、Tempo 和 Prometheus，退出自动删除这些测试容器与卷。端口 13200、19090、14319、18080、18081 必须空闲；应用端口可通过 `HTTP_PORT` / `RPC_PORT` 覆盖。默认依次检查开/关 Trace 采样的实例、真实原生指标、链路和告警生命周期。结果写入 `output/apm-acceptance`。
 
 - `APM_TEST_LOAD=1`：增加 100/500/1000 服务的合成指标查询测试。
 - `APM_TEST_OVERHEAD=1`：增加无埋点、仅指标、指标加全采样的 HTTP 开销对照，各三轮、每轮十秒。
@@ -12,7 +12,26 @@ Java、Node.js、Python 各提供 HTTP `/orders/42` 和 gRPC Health Check，包�
 
 开销已独立验收时，可用 `APM_TEST_OVERHEAD=0 make test-apm-acceptance` 只重跑功能与容量；开销单独执行 `APM_OVERHEAD_ONLY=1 APM_TEST_OVERHEAD=1 scripts/apm-test/run-languages.sh`。报告必须区分这两个执行结果。
 
-当前锁定版本中 Java 提供 HTTP/gRPC 原生请求指标；Node/Python 的 gRPC 自动埋点提供 Trace，未提供原生请求指标。测试明确检查这个边界，不用已采样 Span 冒充全量请求指标。完整记录见 [验收报告](../../docs/test/apm-acceptance-20260908.md)。
+Java、Node.js、Python 示例均提供 HTTP/gRPC 全量请求指标。Java 使用官方 Agent；Python 在自动埋点之外注册官方 `grpcio-observability`；Node.js 在官方自动 Trace 之外，通过 gRPC 服务端拦截器调用官方 Metrics API。验收在开启和关闭 Trace 采样时均检查每协议 12 次请求、3 次失败。旧版本边界见 [历史验收报告](../../docs/test/apm-acceptance-20260908.md)。
+
+### Python / Node.js gRPC 指标接入
+
+Python 安装与 `grpcio` 同版本的 `grpcio-observability`（示例锁定 1.83.1）。在创建 gRPC 服务和 Channel 前注册 `OpenTelemetryPlugin`，按 [app.py](app.py) 使用官方 `MeterProvider`、OTLP HTTP exporter 和 `View` 配置秒级延迟桶（5ms 到 10s）。插件默认桶不适合毫秒级 P95，不能省略该 View。
+
+已有应用自行初始化 MeterProvider 时，可直接把 View 配在同一个 Provider 并交给插件。示例使用 `opentelemetry-instrument`，其全局 Provider 已在应用启动前初始化、无法通过公开 API 追加 View，因此另建一个仅供 gRPC 插件使用的官方 Provider，使用相同 OTLP 环境变量和标准 Resource；HTTP 指标仍由自动埋点导出。退出时停止服务、注销插件并关闭该 Provider。
+
+继续使用 `opentelemetry-instrument python app.py` 启动。插件导出 `grpc.server.call.duration`；更新后的 Edge / Telemetry Gateway Collector 将其映射为 APM 已支持的 `rpc.server.call.duration` 和对应方法、状态属性，保留秒单位及原始桶。已有 Collector 需更新并重新生成配置；直接绕过该 Collector 的外部指标路径需配置同等映射。
+
+Node.js 复制同目录 [grpc-metrics.cjs](grpc-metrics.cjs)，在创建服务时注册一次：
+
+```javascript
+const { grpcMetricsInterceptor } = require('./grpc-metrics.cjs');
+const server = new grpc.Server({ interceptors: [grpcMetricsInterceptor] });
+```
+
+继续用 `node --require @opentelemetry/auto-instrumentations-node/register app.cjs` 启动，复用其 MeterProvider 和 OTLP exporter。拦截器记录每次调用的终态和秒级耗时，覆盖 unary、流式、取消和超时；不读取 Span，也不补偿采样比例。此拦截器是示例接入代码，不是官方自动埋点自带能力。仅配置环境变量不会注册插件或拦截器；不要对同一请求重复安装指标生产者。
+
+本地检查：先安装该目录的 npm 依赖，再运行 `node --test grpc-metrics.test.cjs`。隔离端到端验收仍使用上面的 `run-languages.sh`。回滚时移除插件/拦截器注册并回退 Collector 配置，已有 HTTP 和 Trace 接入保持原有方式。
 
 ## 持续运行的 Edge 演示
 

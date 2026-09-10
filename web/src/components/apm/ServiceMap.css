@@ -1,0 +1,17 @@
+.service-map { --map-tint: 99 102 241; }
+.service-map .traffic-0 { --traffic-alpha: 0.035; }
+.service-map .traffic-1 { --traffic-alpha: 0.09; }
+.service-map .traffic-2 { --traffic-alpha: 0.17; }
+.service-map .traffic-3 { --traffic-alpha: 0.29; }
+.service-map .traffic-4 { --traffic-alpha: 0.43; }
+.service-map .service-map-node { color: rgb(var(--text)); border: 1px solid rgb(var(--border)); border-radius: 12px; padding: 14px; background: linear-gradient(rgb(var(--map-tint) / var(--traffic-alpha, 0)), rgb(var(--map-tint) / var(--traffic-alpha, 0))), rgb(var(--card)); }
+.service-map .inferred { border-style: dashed; }
+.service-map .traffic-swatch { display: inline-block; width: 12px; height: 12px; border: 1px solid rgb(var(--border)); border-radius: 3px; background: rgb(var(--map-tint) / var(--traffic-alpha)); }
+.service-map-body { display: grid; grid-template-columns: minmax(0, 1fr); }
+.service-map-canvas { height: clamp(420px, 62vh, 760px); min-width: 0; }
+.service-map .react-flow__controls button { background: rgb(var(--card)); color: rgb(var(--text)); border-color: rgb(var(--border)); }
+.service-map .react-flow__controls button svg { fill: currentColor; }
+.service-map .react-flow__handle { background: #64748b; border: 0; }
+@media (min-width: 1024px) { .service-map-body.has-selection { grid-template-columns: minmax(0, 1fr) 280px; } }
+@media (max-width: 1023px) { .service-map aside { border-left: 0; border-top: 1px solid rgb(var(--border)); } }
+@media (prefers-reduced-motion: reduce) { .service-map .react-flow__edge-path { animation: none !important; } }

@@ -111,15 +111,15 @@ OTLP 日志使用标准 trace_id/span_id；文件或 CRI 日志可写单行 JSON
 |---|---|---|---|
 | Go 官方 SDK 1.43 / instrumentation 0.68 | 支持 | 支持 | 支持 |
 | Java Agent 2.31.1 | 支持 | 支持 | 支持 |
-| Node auto-instrumentations 0.80.0 / grpc instrumentation 0.222.0 | 支持 | 官方自动埋点未提供 | 支持 |
-| Python distro / instrumentation 0.65b0 / SDK 1.44.0 | 支持 | 官方自动埋点未提供 | 支持 |
+| Node auto-instrumentations 0.80.0 / grpc instrumentation 0.222.0 | 支持 | 注册示例 gRPC 拦截器，使用官方 Metrics API | 支持 |
+| Python distro / instrumentation 0.65b0 / SDK 1.44.0 | 支持 | 额外注册官方 grpcio-observability 1.83.1 | 支持 |
 | .NET SDK / ASP.NET Core instrumentation 1.18.0 | 支持 | 本示例未验证 | HTTP 支持 |
 | PHP SDK 1.15.0 / Slim instrumentation 1.5.0 | 官方 Metrics API 显式记录 | 本示例未验证 | HTTP 支持 |
 | C++ SDK 1.28.0 | 官方 Metrics API 显式记录 | 本示例未验证 | HTTP 支持 |
 | Rust SDK 0.32.0（Beta） | 官方 Metrics API 显式记录 | 本示例未验证 | HTTP 支持 |
 | Ruby SDK 1.13.0 / Sinatra instrumentation 0.30.0 | 未提供 | 未提供 | HTTP 支持 |
 
-Node.js/Python 的 gRPC 请求可用显式 Trace 样本视图排查；不能把样本计数当作全量请求指标或建立新的请求级告警。样例与锁定依赖在 `examples/apm-languages`，使用官方 SDK/自动埋点，无自研探针或手工拼造 OTLP 数据。PHP 使用长驻 worker 保持累计计数；普通 PHP-FPM 需另行设计指标聚合，不能直接照搬。C++/Rust 需在请求处理处初始化并调用官方 SDK，环境变量本身不会自动埋点。
+Node.js/Python 的 gRPC 全量请求指标需按 [接入示例](../../examples/apm-languages/README.md#python--nodejs-grpc-指标接入) 注册拦截器或官方插件，不能只设置环境变量。Python 官方插件的 `grpc.server.call.duration` 经更新后的 Edge / Gateway Collector 映射为 `rpc.server.call.duration`，`grpc.method` / `grpc.status` 映射为 `rpc.method` / `rpc.response.status_code`，单位和桶保持不变；绕过该 Collector 的外部路径需同等映射。指标独立于 Trace 采样，未注册时仍只有 gRPC Trace。样例与锁定依赖在 `examples/apm-languages`，使用官方 SDK/自动埋点，不手工拼造 OTLP 数据。PHP 使用长驻 worker 保持累计计数；普通 PHP-FPM 需另行设计指标聚合，不能直接照搬。C++/Rust 需在请求处理处初始化并调用官方 SDK，环境变量本身不会自动埋点。
 
 Ruby 的官方指标 SDK 尚未稳定。服务列表通过 SERVER Span 指标发现此类服务。没有原生请求指标时，HTTP 列表、概览、趋势和接口统计回退到 Tempo span-metrics，标注“Trace 样本”；RPS 是样本速率，错误率与延迟只覆盖已采样请求，不推算全量请求或采样比例。已有原生指标时始终优先使用，不叠加样本数据。仅使用包含 `http.request.method` 或 `http.method` 的 SERVER Span（两种属性同时存在也只计一次），排除 RPC、内部和消息消费 Span。发现需 Tempo span-metrics 处理器，并配置上述 HTTP 维度与 `telemetry.sdk.language`；新维度只影响后续 Span，旧数据不会自动补齐。若未启用该处理器，仍可直接在链路页面查询。请求级告警应先接入真实业务指标。
 

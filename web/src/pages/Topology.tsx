@@ -10,6 +10,7 @@ import { Select } from '@/components/ui/Select';
 // the relation-type registry where admins register custom kinds.
 // Graph visualisation (react-flow) ships separately as PR-3b.
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Network, Plus, RefreshCw, Search, Trash2, X } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { Modal } from '@/components/Modal';
@@ -46,6 +47,7 @@ import {
 type Tab = 'graph' | 'nodes' | 'relation-types';
 
 const isDomainManagedNodeType = (type: string) => type === 'device' || type === 'cluster';
+const isReportedService = (node: TopologyNode) => node.type === 'service' && node.props?.source === 'apm';
 
 export default function TopologyPage() {
   const role = useAuth((s) => s.role);
@@ -354,7 +356,8 @@ function NodeDetailDrawer({
   const [err, setErr] = useState<string | null>(null);
   const [addingRelation, setAddingRelation] = useState(false);
   const [busy, setBusy] = useState(false);
-  const domainManaged = isDomainManagedNodeType(node.type);
+  const reportedService = isReportedService(node);
+  const domainManaged = isDomainManagedNodeType(node.type) || reportedService;
 
   const fetchNeighbors = useCallback(async () => {
     setLoading(true);
@@ -426,6 +429,15 @@ function NodeDetailDrawer({
         </Button>
       </div>
       <div className="flex-1 overflow-auto px-4 py-3">
+        {reportedService && (
+          <Link className="mb-3 inline-block text-xs text-indigo-400 hover:underline" to={`/apm?${new URLSearchParams({
+            service_name: String(node.props?.service_name ?? node.name),
+            service_namespace: String(node.props?.service_namespace ?? ''),
+            environment: String(node.props?.environment ?? ''),
+          })}`}>
+            {tr('查看服务', 'View service')}
+          </Link>
+        )}
         {node.props && typeof node.props === 'object' && Object.keys(node.props).length > 0 && (
           <div className="mb-4">
             <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-zinc-500">
@@ -467,7 +479,7 @@ function NodeDetailDrawer({
               <NeighborRow
                 key={rel.id}
                 rel={rel}
-                centerID={node.id}
+                centerNode={node}
                 otherNode={nodeMap.get(rel.src_id === node.id ? rel.dst_id : rel.src_id)}
                 isAdmin={isAdmin}
                 onDeleted={fetchNeighbors}
@@ -486,7 +498,9 @@ function NodeDetailDrawer({
       )}
       {isAdmin && domainManaged && (
         <div className="border-t border-zinc-800/60 px-4 py-3 text-[11px] text-zinc-500">
-          {node.type === 'device'
+          {reportedService
+            ? tr('此服务及其设备关联由遥测上报自动维护，不能手动修改。', 'This service and its device links are maintained by telemetry and cannot be edited manually.')
+            : node.type === 'device'
             ? tr('此节点由设备管理同步，请从设备页面删除。', 'This node is synced from Devices. Delete it from the Devices page.')
             : node.props?.source === 'kubernetes'
               ? tr('此节点由 Kubernetes 托管，请从 Kubernetes 集群页面删除。', 'This node is managed by Kubernetes. Delete it from the Kubernetes cluster page.')
@@ -509,19 +523,26 @@ function NodeDetailDrawer({
 
 function NeighborRow({
   rel,
-  centerID,
+  centerNode,
   otherNode,
   isAdmin,
   onDeleted,
 }: {
   rel: TopologyRelation;
-  centerID: number;
+  centerNode: TopologyNode;
   otherNode: TopologyNode | undefined;
   isAdmin: boolean;
   onDeleted: () => void;
 }) {
   const { confirmAction, alertAction, dialog } = useDialogs();
   const { tr } = useI18n();
+  const centerID = centerNode.id;
+  const sourceNode = rel.src_id === centerID ? centerNode : otherNode;
+  const destinationNode = rel.dst_id === centerID ? centerNode : otherNode;
+  const clusterMembership = rel.type === 'member_of' &&
+    sourceNode?.type === 'device' && destinationNode?.type === 'cluster';
+  const synced = ['edge_enrollment', 'kubernetes', 'network_discovery', 'apm'].includes(String(rel.props?.source ?? ''));
+  const managed = clusterMembership || synced;
   const outgoing = rel.src_id === centerID;
   const arrow = outgoing ? '→' : '←';
   const otherID = outgoing ? rel.dst_id : rel.src_id;
@@ -545,7 +566,16 @@ function NeighborRow({
             <span className="ml-1 text-zinc-500">[{otherNode.type}]</span>
           )}
         </span>
-        {isAdmin && (
+        {managed && (
+          <span className="shrink-0 text-zinc-500" title={clusterMembership
+            ? tr('请在集群内管理成员关系。', 'Manage membership from the cluster page.')
+            : rel.props?.source === 'apm'
+              ? tr('此关联由遥测上报自动维护，随上报变化更新。', 'This link is maintained automatically as telemetry reports change.')
+              : tr('此关系由系统自动同步，请从对应资源管理页面操作。', 'This relation is synced automatically. Manage it from its resource page.')}>
+            {tr('托管', 'Managed')}
+          </span>
+        )}
+        {isAdmin && !managed && otherNode && (
           <Button variant="dangerGhost" size="sm"
             type="button"
             onClick={handleDelete}
@@ -786,11 +816,13 @@ function AddRelationModal({
   useEffect(() => {
     const handle = setTimeout(() => {
       listNodes({ q: search, limit: 20 })
-        .then((r) => setCandidates((r.items ?? []).filter((n) => n.id !== centerNode.id)))
+        .then((r) => setCandidates((r.items ?? []).filter((n) => n.id !== centerNode.id &&
+          !(isReportedService(centerNode) && n.type === 'device') &&
+          !(centerNode.type === 'device' && isReportedService(n)))))
         .catch(() => undefined);
     }, 200);
     return () => clearTimeout(handle);
-  }, [search, centerNode.id]);
+  }, [search, centerNode]);
 
   const handleCreate = async () => {
     setErr(null);

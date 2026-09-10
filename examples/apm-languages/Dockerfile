@@ -19,7 +19,7 @@ FROM node:22-bookworm-slim AS node
 WORKDIR /app
 COPY examples/apm-languages/package*.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev --no-audit --no-fund
-COPY examples/apm-languages/app.cjs examples/apm-languages/health.proto examples/apm-languages/log-entrypoint.sh ./
+COPY examples/apm-languages/app.cjs examples/apm-languages/grpc-metrics.cjs examples/apm-languages/health.proto examples/apm-languages/log-entrypoint.sh ./
 USER 65532:65532
 ENTRYPOINT ["sh", "/app/log-entrypoint.sh"]
 CMD ["node", "--require", "@opentelemetry/auto-instrumentations-node/register", "app.cjs"]

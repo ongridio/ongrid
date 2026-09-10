@@ -11,6 +11,8 @@ service APMService {
   rpc ListServices(ListServicesRequest) returns (ListServicesResponse);
   rpc GetOverview(GetOverviewRequest) returns (GetOverviewResponse);
   rpc ListOperations(ListOperationsRequest) returns (ListOperationsResponse);
+  // Omit service_name for the service map; optional environment/namespace match
+  // either endpoint. Supplying service_name still requires a complete identity.
   rpc GetDependencies(GetDependenciesRequest) returns (GetDependenciesResponse);
   rpc GetDiagnostics(GetDiagnosticsRequest) returns (GetDiagnosticsResponse);
   rpc GetRuntime(GetRuntimeRequest) returns (GetRuntimeResponse);

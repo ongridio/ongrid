@@ -8,7 +8,11 @@ import { Button, Card, EmptyState } from '@/components/ui';
 import { formatTraceSummaryDuration, traceSummaryDurationMs, traceSummaryStartMs } from '@/components/traces/traceSummary';
 import { useI18n } from '@/i18n/locale';
 
-export function ErrorTraces({ params, refresh }: { params: URLSearchParams; refresh: number }) {
+export function ErrorTraces(props: { params: URLSearchParams; refresh: number }) {
+  return <ServiceTraces {...props} errorsOnly />;
+}
+
+export function ServiceTraces({ params, refresh, errorsOnly = false }: { params: URLSearchParams; refresh: number; errorsOnly?: boolean }) {
   const { tr } = useI18n();
   const navigate = useNavigate();
   const query = params.toString();
@@ -25,7 +29,7 @@ export function ErrorTraces({ params, refresh }: { params: URLSearchParams; refr
     const controller = new AbortController();
     setResult(undefined);
     setAnalysisError('');
-    searchTraces({ q: `${serviceTraceQL(scope, 'status = error')} with (most_recent=true)`, start, end, limit: 10 }, controller.signal)
+    searchTraces({ q: `${serviceTraceQL(scope, errorsOnly ? 'status = error' : undefined)} with (most_recent=true)`, start, end, limit: 10 }, controller.signal)
       .then((data) => {
         if (!controller.signal.aborted) setResult({ query, traces: [...(data.traces || [])].sort((a, b) => traceSummaryStartMs(b) - traceSummaryStartMs(a)) });
       })
@@ -33,7 +37,7 @@ export function ErrorTraces({ params, refresh }: { params: URLSearchParams; refr
         if (!controller.signal.aborted) setResult({ query, error: error.message });
       });
     return () => controller.abort();
-  }, [query, refresh, retry]);
+  }, [query, refresh, retry, errorsOnly]);
 
   async function analyze(trace: TempoTraceSummary) {
     if (analyzing) return;
@@ -64,28 +68,28 @@ export function ErrorTraces({ params, refresh }: { params: URLSearchParams; refr
 
   return <Card>
     <div className="flex flex-wrap items-center justify-between gap-2">
-      <h2 className="text-sm font-medium">{tr('近期错误 Trace', 'Recent error traces')}</h2>
-      <Link to={traceLink(params, 'status = error')} className="inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-100">
+      <h2 className="text-sm font-medium">{errorsOnly ? tr('近期错误 Trace', 'Recent error traces') : tr('近期链路', 'Recent traces')}</h2>
+      <Link to={traceLink(params, errorsOnly ? 'status = error' : undefined)} className="inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-100">
         {tr('查看全部', 'View all')} <ArrowUpRight size={13} />
       </Link>
     </div>
-    <p className="mt-1 text-xs text-zinc-500">{tr('所选范围内最近 10 条已采样错误链路。AI 分析将关联 Span、日志和应用性能。', 'Latest 10 sampled error traces in this window. AI analysis correlates spans, logs and application performance.')}</p>
+    <p className="mt-1 text-xs text-zinc-500">{errorsOnly ? tr('所选范围内最近 10 条已采样错误链路。AI 分析将关联 Span、日志和应用性能。', 'Latest 10 sampled error traces in this window. AI analysis correlates spans, logs and application performance.') : tr('所选服务和时间范围内最近 10 条已采样链路，点击 Trace ID 查看完整调用过程。', 'Latest 10 sampled traces for this service and time window. Open a trace ID to inspect the full call path.')}</p>
     {analysisError && <p role="alert" className="mt-3 text-sm text-red-500">{analysisError}</p>}
     {current?.error ? <div role="alert" className="mt-3 text-sm text-red-500">
-      {tr('错误链路查询失败', 'Error trace query failed')}: {current.error}
+      {errorsOnly ? tr('错误链路查询失败', 'Error trace query failed') : tr('链路查询失败', 'Trace query failed')}: {current.error}
       <Button variant="ghost" size="sm" onClick={() => setRetry((value) => value + 1)}>{tr('重试', 'Retry')}</Button>
-    </div> : !current?.traces ? <p role="status" className="py-6 text-sm text-zinc-500">{tr('正在查询错误链路…', 'Loading error traces…')}</p>
-      : current.traces.length === 0 ? <EmptyState title={tr('当前范围未观测到错误 Trace', 'No error traces observed in this window')} hint={tr('采样可能使错误请求没有对应链路。', 'Sampling may leave failed requests without a trace.')} />
+    </div> : !current?.traces ? <p role="status" className="py-6 text-sm text-zinc-500">{tr('正在查询链路…', 'Loading traces…')}</p>
+      : current.traces.length === 0 ? <EmptyState title={errorsOnly ? tr('当前范围未观测到错误 Trace', 'No error traces observed in this window') : tr('当前范围未观测到链路', 'No traces observed in this window')} hint={tr('采样可能使错误请求没有对应链路。', 'Sampling may leave failed requests without a trace.')} />
         : <div className="mt-3 overflow-x-auto"><table className="w-full text-left text-xs">
           <thead className="text-zinc-500"><tr>
-            {[tr('发生时间', 'Time'), tr('根操作', 'Root operation'), tr('总耗时', 'Duration'), 'Trace ID', tr('分析', 'Analysis')].map((label) => <th key={label} className="px-3 py-2 font-normal first:pl-0 last:pr-0">{label}</th>)}
+            {[tr('发生时间', 'Time'), tr('根操作', 'Root operation'), tr('总耗时', 'Duration'), 'Trace ID', ...(errorsOnly ? [tr('分析', 'Analysis')] : [])].map((label) => <th key={label} className="px-3 py-2 font-normal first:pl-0 last:pr-0">{label}</th>)}
           </tr></thead>
           <tbody className="divide-y divide-zinc-800">{current.traces.map((trace) => <tr key={trace.traceID}>
             <td className="whitespace-nowrap py-3 pr-3 text-zinc-400">{traceSummaryStartMs(trace) ? new Date(traceSummaryStartMs(trace)).toLocaleString() : '—'}</td>
             <td className="max-w-xs break-words px-3 py-3">{trace.rootTraceName || '—'}</td>
             <td className="whitespace-nowrap px-3 py-3 tabular-nums">{formatTraceSummaryDuration(traceSummaryDurationMs(trace))}</td>
-            <td className="px-3 py-3"><Link title={trace.traceID} className="font-mono text-indigo-500 hover:underline" to={traceLink(params, 'status = error', trace.traceID)}>{trace.traceID.slice(0, 12)}…</Link></td>
-            <td className="py-3 pl-3 text-right"><Button variant="ghost" size="sm" disabled={!!analyzing} onClick={() => void analyze(trace)}><Sparkles size={13} />{analyzing === trace.traceID ? tr('正在启动…', 'Starting…') : tr('AI 分析', 'AI analysis')}</Button></td>
+            <td className="px-3 py-3"><Link title={trace.traceID} className="font-mono text-indigo-500 hover:underline" to={traceLink(params, errorsOnly ? 'status = error' : undefined, trace.traceID)}>{trace.traceID.slice(0, 12)}…</Link></td>
+            {errorsOnly && <td className="py-3 pl-3 text-right"><Button variant="ghost" size="sm" disabled={!!analyzing} onClick={() => void analyze(trace)}><Sparkles size={13} />{analyzing === trace.traceID ? tr('正在启动…', 'Starting…') : tr('AI 分析', 'AI analysis')}</Button></td>}
           </tr>)}</tbody>
         </table></div>}
   </Card>;

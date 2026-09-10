@@ -2,6 +2,7 @@
 const { trace } = require('@opentelemetry/api');
 const express = require('express');
 const grpc = require('@grpc/grpc-js');
+const { grpcMetricsInterceptor } = require('./grpc-metrics.cjs');
 const loader = require('@grpc/proto-loader');
 const path = require('node:path');
 const health = grpc.loadPackageDefinition(loader.loadSync(path.join(__dirname, 'health.proto'))).grpc.health.v1;
@@ -18,7 +19,7 @@ app.get('/orders/:id', async (req, res) => {
   res.status(req.query.fail ? 500 : 200).json({ id: req.params.id });
 });
 app.listen(Number(process.env.HTTP_PORT || 18080), '127.0.0.1');
-const rpc = new grpc.Server();
+const rpc = new grpc.Server({ interceptors: [grpcMetricsInterceptor] });
 rpc.addService(health.Health.service, { check: async (call, callback) => {
   if (call.request.service === 'slow') await new Promise(resolve => setTimeout(resolve, 80));
   logRequest('rpc');

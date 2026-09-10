@@ -16,6 +16,7 @@ import (
 // handlers (and future tools) call into Usecase rather than the repos
 // directly so all validation lives in one place.
 type Usecase struct {
+	serviceDevices      ServiceDeviceResolver
 	clusterDevices      ClusterDeviceResolver
 	nodes               NodeRepo
 	relations           RelationRepo
@@ -66,6 +67,9 @@ func (u *Usecase) CreateNode(ctx context.Context, typ, name, propsJSON string) (
 		}
 	}
 	n := &model.Node{Type: typ, Name: name, PropsJSON: propsJSON}
+	if topologyPropsSource(propsJSON) == "apm" {
+		return nil, fmt.Errorf("%w: reported service nodes are managed by telemetry", errs.ErrConflict)
+	}
 	if err := u.nodes.Create(ctx, n); err != nil {
 		return nil, err
 	}
@@ -88,6 +92,13 @@ func (u *Usecase) UpdateNode(ctx context.Context, id uint64, name, propsJSON str
 	}
 	if propsJSON != "" && !json.Valid([]byte(propsJSON)) {
 		return fmt.Errorf("%w: props_jsonb is not valid JSON", errs.ErrInvalid)
+	}
+	node, err := u.nodes.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if isReportedService(node) || topologyPropsSource(propsJSON) == "apm" {
+		return fmt.Errorf("%w: reported service nodes are managed by telemetry", errs.ErrConflict)
 	}
 	return u.nodes.Update(ctx, id, name, propsJSON)
 }
@@ -128,6 +139,9 @@ func (u *Usecase) DeleteNode(ctx context.Context, id uint64) error {
 	node, err := u.nodes.Get(ctx, id)
 	if err != nil {
 		return err
+	}
+	if isReportedService(node) {
+		return fmt.Errorf("%w: reported service nodes are managed by telemetry", errs.ErrConflict)
 	}
 	if node.Type == string(model.NodeTypeDevice) {
 		return fmt.Errorf("%w: device topology nodes must be deleted from Devices", errs.ErrConflict)
@@ -181,6 +195,11 @@ func (u *Usecase) CreateRelation(ctx context.Context, srcID, dstID uint64, typ, 
 	}
 	if _, ok := endpoints[dstID]; !ok {
 		return nil, fmt.Errorf("%w: dst node %d", errs.ErrNotFound, dstID)
+	}
+	if topologyPropsSource(propsJSON) == "apm" ||
+		(isReportedService(endpoints[srcID]) && endpoints[dstID].Type == string(model.NodeTypeDevice)) ||
+		(isReportedService(endpoints[dstID]) && endpoints[srcID].Type == string(model.NodeTypeDevice)) {
+		return nil, fmt.Errorf("%w: service deployments are managed by telemetry", errs.ErrConflict)
 	}
 	if typ == model.RelMemberOf &&
 		endpoints[srcID].Type == string(model.NodeTypeDevice) &&
@@ -261,6 +280,13 @@ func (u *Usecase) UpdateRelation(ctx context.Context, id uint64, propsJSON strin
 	if propsJSON != "" && !json.Valid([]byte(propsJSON)) {
 		return fmt.Errorf("%w: props_jsonb is not valid JSON", errs.ErrInvalid)
 	}
+	relation, err := u.relations.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if topologyPropsSource(relation.PropsJSON) == "apm" || topologyPropsSource(propsJSON) == "apm" {
+		return fmt.Errorf("%w: service deployments are managed by telemetry", errs.ErrConflict)
+	}
 	return u.relations.Update(ctx, id, propsJSON)
 }
 
@@ -292,6 +318,13 @@ func (u *Usecase) ListRelations(ctx context.Context, f RelationListFilter) ([]*m
 func (u *Usecase) DeleteRelation(ctx context.Context, id uint64) error {
 	if u.relations == nil {
 		return errs.ErrNotWiredYet
+	}
+	relation, err := u.relations.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if topologyPropsSource(relation.PropsJSON) == "apm" {
+		return fmt.Errorf("%w: service deployments are managed by telemetry", errs.ErrConflict)
 	}
 	return u.relations.Delete(ctx, id)
 }
