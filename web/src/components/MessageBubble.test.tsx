@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -8,6 +8,7 @@ import { executeOperationAction, getOperation } from '@/api/operations';
 import { getPacketCaptureSession } from '@/api/packetCaptures';
 import { getApproval } from '@/api/approvals';
 import { setLocale } from '@/i18n/locale';
+import * as chatApi from '@/api/chat';
 
 vi.mock('@/api/operations', () => ({
   executeOperationAction: vi.fn(),
@@ -26,6 +27,23 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   setLocale('zh-CN');
+});
+
+describe('MessageBubble image preview', () => {
+  it('opens a protected message image on click', async () => {
+    URL.revokeObjectURL = vi.fn();
+    vi.spyOn(chatApi, 'loadChatAttachment').mockResolvedValue('blob:protected-image');
+    render(<MessageBubble sessionId="session-1" message={{
+      id: 'message-1',
+      role: 'user',
+      content: '',
+      attachments: [{ id: 'attachment-1', name: 'diagram.png', mime_type: 'image/png', size: 123 }],
+    }} />);
+
+    const thumbnail = await screen.findByAltText('diagram.png');
+    fireEvent.click(thumbnail);
+    expect(await screen.findByAltText('Preview diagram.png')).toBeInTheDocument();
+  });
 });
 
 describe('MessageBubble shared approval card', () => {

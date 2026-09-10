@@ -16,6 +16,7 @@ package agent
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -220,10 +221,19 @@ type RunOptions struct {
 	Provider         string
 	Model            string
 	Mentions         []Mention
+	Attachments      []model.Attachment
 	WebSearchEnabled bool
 	// Locale is the UI language the reply should be in ("en-US"/"zh-CN").
 	// Threaded to the graph kernel's prompt assembler. Empty = no directive.
 	Locale string
+}
+
+func attachmentIDs(items []model.Attachment) []string {
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		ids = append(ids, item.ID)
+	}
+	return ids
 }
 
 // ToolWebSearch is the registered name of the manager-scoped Tavily /
@@ -383,10 +393,12 @@ func (a *Agent) runInternal(ctx context.Context, sessionID string, userID uint64
 	}
 	userMsgContent := augmented
 	userMsg := &model.Message{
-		SessionID: sess.ID,
-		Role:      model.RoleUser,
-		Content:   &userMsgContent,
-		CreatedAt: time.Now().UTC(),
+		SessionID:     sess.ID,
+		Role:          model.RoleUser,
+		Content:       &userMsgContent,
+		Attachments:   opts.Attachments,
+		AttachmentIDs: attachmentIDs(opts.Attachments),
+		CreatedAt:     time.Now().UTC(),
 	}
 	if err := a.sessions.AppendMessage(ctx, userMsg); err != nil {
 		return nil, fmt.Errorf("agent: persist user msg: %w", err)
@@ -796,7 +808,11 @@ func (a *Agent) buildMessages(history []*model.Message) []llm.Message {
 			if m.Content == nil {
 				continue
 			}
-			out = append(out, llm.Message{Role: m.Role, Content: *m.Content})
+			msg := llm.Message{Role: m.Role, Content: *m.Content}
+			for _, image := range m.Attachments {
+				msg.Images = append(msg.Images, llm.ImageInput{Name: image.Name, MIMEType: image.MIMEType, Data: base64.StdEncoding.EncodeToString(image.Data)})
+			}
+			out = append(out, msg)
 		case model.RoleAssistant:
 			calls, ok := callIDs[m.ID]
 			if len(m.ToolCalls) > 0 && !ok {

@@ -17,6 +17,26 @@ import (
 
 type labelPair = dto.LabelPair
 
+func TestToOpenAIMessagePreservesImageInputs(t *testing.T) {
+	got, err := toOpenAIMessage(Message{
+		Role: "user", Content: "describe this",
+		Images: []ImageInput{{MIMEType: "image/png", Data: "aGVsbG8="}},
+	})
+	if err != nil {
+		t.Fatalf("toOpenAIMessage: %v", err)
+	}
+	if got.Content != "" || len(got.MultiContent) != 2 {
+		t.Fatalf("unexpected multimodal message: %+v", got)
+	}
+	if got.MultiContent[0].Text != "describe this" {
+		t.Fatalf("text part = %q", got.MultiContent[0].Text)
+	}
+	image := got.MultiContent[1].ImageURL
+	if image == nil || image.URL != "data:image/png;base64,aGVsbG8=" {
+		t.Fatalf("image part = %+v", image)
+	}
+}
+
 // sampleChatResponse returns a minimal, well-formed OpenAI-style chat
 // completion response body.
 func sampleChatResponse(content string, toolCalls []map[string]any) []byte {

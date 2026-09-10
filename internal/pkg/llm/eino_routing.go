@@ -429,14 +429,19 @@ func (c *clientChatModel) buildChatReq(input []*schema.Message, common *model.Op
 }
 
 // einoMessageToLLM converts an eino *schema.Message → llm.Message.
-// Keeps only the fields the existing llm.Client understands; multimodal
-// content is dropped on the floor in PR-1 (text-only first).
+// Preserves text, tool calls, and user image inputs.
 func einoMessageToLLM(m *schema.Message) Message {
 	out := Message{
 		Role:       string(m.Role),
 		Content:    m.Content,
 		ToolCallID: m.ToolCallID,
 		ToolName:   m.ToolName,
+	}
+	for _, part := range m.UserInputMultiContent {
+		if part.Type != schema.ChatMessagePartTypeImageURL || part.Image == nil || part.Image.Base64Data == nil {
+			continue
+		}
+		out.Images = append(out.Images, ImageInput{MIMEType: part.Image.MIMEType, Data: *part.Image.Base64Data})
 	}
 	if len(m.ToolCalls) > 0 {
 		out.ToolCalls = make([]ToolCall, 0, len(m.ToolCalls))

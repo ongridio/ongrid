@@ -223,12 +223,12 @@ export default function HomePage() {
     }
   }
 
-  async function startSession(content: string) {
-    if (!content.trim() || submitting) return;
+  async function startSession(content: string, attachments: File[] = []) {
+    if ((!content.trim() && attachments.length === 0) || submitting) return;
     setError(null);
     setSubmitting(true);
     try {
-      const title = content.trim().slice(0, 30);
+      const title = content.trim().slice(0, 30) || attachments[0]?.name || tr('图片会话', 'Image conversation');
       // Bind home-launched sessions to the virtual "default" persona —
       // shows the 默认 badge in sidebar/agents and uses the unrestricted
       // coordinator-equivalent toolBag on the backend.
@@ -242,7 +242,7 @@ export default function HomePage() {
       // through the SSE streamMessage path so the user sees tool cards and
       // the assistant reply incrementally. The picked model is already stored
       // on the new session, so every browser inherits the same route.
-      navigate(`/chat/${session.id}`, { state: { initialPrompt: content } });
+      navigate(`/chat/${session.id}`, { state: { initialPrompt: content, initialAttachments: attachments } });
     } catch (err) {
       setError((err as Error).message || tr('创建会话失败', 'Failed to create session'));
       setSubmitting(false);
@@ -266,8 +266,9 @@ export default function HomePage() {
             onChange={setDraft}
             onSubmit={(p) => {
               setDraft('');
-              void startSession(p.text);
+              void startSession(p.text, p.attachments);
             }}
+            allowAttachments
             disabled={submitting}
             autoFocus
             providers={providers}

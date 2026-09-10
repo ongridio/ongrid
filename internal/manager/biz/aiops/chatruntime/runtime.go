@@ -37,6 +37,7 @@ package chatruntime
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -155,6 +156,7 @@ type Request struct {
 	// LLM cannot reach mutating tools no matter what the persona allows.
 	Role             string
 	UserText         string
+	Attachments      []aiopsmodel.Attachment
 	Mentions         []Mention
 	Provider         string
 	Model            string
@@ -562,10 +564,12 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (*Reply, error) {
 	//    a graph crash).
 	userContent := augmentedUserText
 	userMsg := &aiopsmodel.Message{
-		SessionID: sess.ID,
-		Role:      aiopsmodel.RoleUser,
-		Content:   &userContent,
-		CreatedAt: time.Now().UTC(),
+		SessionID:     sess.ID,
+		Role:          aiopsmodel.RoleUser,
+		Content:       &userContent,
+		Attachments:   req.Attachments,
+		AttachmentIDs: attachmentIDs(req.Attachments),
+		CreatedAt:     time.Now().UTC(),
 	}
 	if err := rt.cfg.Sessions.AppendMessage(ctx, userMsg); err != nil {
 		return nil, fmt.Errorf("chatruntime: persist user msg: %w", err)
@@ -832,6 +836,7 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (*Reply, error) {
 		SystemPrompt:     systemPrompt,
 		History:          einoHistory,
 		UserText:         req.UserText,
+		UserImages:       imageInputParts(req.Attachments),
 		WebSearchEnabled: req.WebSearchEnabled,
 		MentionsRendered: mentionsRendered,
 		AgentReminder:    agentReminder,
@@ -1130,6 +1135,26 @@ func (rt *Runtime) toCallbackEmitter(emit Emit, sessionID string) callbacks.SSEE
 // The graph assembler appends the user turn separately (from Input.UserText);
 // to avoid the LLM seeing the same turn twice we strip a trailing role=user
 // row from the persisted history.
+func imageInputParts(images []aiopsmodel.Attachment) []schema.MessageInputPart {
+	parts := make([]schema.MessageInputPart, 0, len(images))
+	for _, image := range images {
+		data := base64.StdEncoding.EncodeToString(image.Data)
+		parts = append(parts, schema.MessageInputPart{
+			Type:  schema.ChatMessagePartTypeImageURL,
+			Image: &schema.MessageInputImage{MessagePartCommon: schema.MessagePartCommon{Base64Data: &data, MIMEType: image.MIMEType}, Detail: schema.ImageURLDetailAuto},
+		})
+	}
+	return parts
+}
+
+func attachmentIDs(items []aiopsmodel.Attachment) []string {
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		ids = append(ids, item.ID)
+	}
+	return ids
+}
+
 func buildEinoHistory(rows []*aiopsmodel.Message) []*schema.Message {
 	if len(rows) == 0 {
 		return nil
@@ -1192,10 +1217,12 @@ func buildEinoHistory(rows []*aiopsmodel.Message) []*schema.Message {
 			if m.Content == nil {
 				continue
 			}
-			out = append(out, &schema.Message{
-				Role:    schema.RoleType(m.Role),
-				Content: *m.Content,
-			})
+			msg := &schema.Message{
+				Role:                  schema.RoleType(m.Role),
+				Content:               *m.Content,
+				UserInputMultiContent: imageInputParts(m.Attachments),
+			}
+			out = append(out, msg)
 		case aiopsmodel.RoleAssistant:
 			calls, ok := callIDs[m.ID]
 			if len(m.ToolCalls) > 0 && !ok {

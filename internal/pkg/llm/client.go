@@ -49,10 +49,11 @@ const defaultTimeout = 120 * time.Second
 // without reshaping the interface. Timeout applies when the caller's ctx has
 // no deadline; default is 120s.
 type Config struct {
-	APIKey  string
-	Model   string
-	BaseURL string
-	Timeout time.Duration
+	TLSInsecure bool
+	APIKey      string
+	Model       string
+	BaseURL     string
+	Timeout     time.Duration
 }
 
 // Message is one entry in the chat completions messages array. The shape is
@@ -70,6 +71,13 @@ type Message struct {
 	ToolCalls  []ToolCall
 	ToolCallID string
 	ToolName   string
+	Images     []ImageInput
+}
+
+type ImageInput struct {
+	Name     string
+	MIMEType string
+	Data     string
 }
 
 // ToolCall is one tool invocation requested by the assistant.
@@ -318,10 +326,13 @@ func (c *openaiClient) sdkFor(apiKey, baseURL string) *openai.Client {
 	if baseURL != "" {
 		sdkCfg.BaseURL = baseURL
 	}
+	transport := http.RoundTripper(NewHTTPTransport(c.cfg.TLSInsecure))
 	if zhipuauth.LooksLikeZhipuURL(baseURL) && zhipuauth.LooksLikeZhipuKey(apiKey) {
 		sdkCfg.HTTPClient = &http.Client{
-			Transport: &zhipuJWTTransport{apiKey: apiKey, base: http.DefaultTransport},
+			Transport: &zhipuJWTTransport{apiKey: apiKey, base: transport},
 		}
+	} else {
+		sdkCfg.HTTPClient = &http.Client{Transport: transport}
 	}
 	sdk := openai.NewClientWithConfig(sdkCfg)
 	c.sdkCache[k] = sdk
@@ -574,6 +585,18 @@ func toOpenAIMessage(m Message) (openai.ChatCompletionMessage, error) {
 		Name:       m.ToolName,
 		ToolCallID: m.ToolCallID,
 	}
+	if len(m.Images) > 0 {
+		out.Content = ""
+		if m.Content != "" {
+			out.MultiContent = append(out.MultiContent, openai.ChatMessagePart{Type: openai.ChatMessagePartTypeText, Text: m.Content})
+		}
+		for _, image := range m.Images {
+			out.MultiContent = append(out.MultiContent, openai.ChatMessagePart{
+				Type:     openai.ChatMessagePartTypeImageURL,
+				ImageURL: &openai.ChatMessageImageURL{URL: "data:" + image.MIMEType + ";base64," + image.Data, Detail: openai.ImageURLDetailAuto},
+			})
+		}
+	}
 	if len(m.ToolCalls) > 0 {
 		out.ToolCalls = make([]openai.ToolCall, 0, len(m.ToolCalls))
 		for _, tc := range m.ToolCalls {
@@ -722,6 +745,7 @@ func estimatePromptTokens(msgs []Message) int {
 	for _, m := range msgs {
 		total += perMsgOverhead
 		total += len(m.Content) / 4
+		total += len(m.Images) * 256
 		for _, tc := range m.ToolCalls {
 			total += len(tc.Name) / 4
 			total += len(tc.Args) / 4

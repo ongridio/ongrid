@@ -410,10 +410,10 @@ func TestRoutingChatModel_Providers(t *testing.T) {
 
 // einoStubClient is a llm.Client used by the adapter tests.
 type einoStubClient struct {
-	resp     *ChatResp
-	err      error
-	lastReq  ChatReq
-	callCnt  atomic.Int32
+	resp    *ChatResp
+	err     error
+	lastReq ChatReq
+	callCnt atomic.Int32
 }
 
 func (s *einoStubClient) Chat(_ context.Context, req ChatReq) (*ChatResp, error) {
@@ -481,6 +481,33 @@ func TestClientChatModel_GenerateTranslatesUsage(t *testing.T) {
 	}
 	if len(stub.lastReq.Messages) != 1 || stub.lastReq.Messages[0].Content != "hello world" {
 		t.Errorf("req messages = %+v", stub.lastReq.Messages)
+	}
+}
+
+func TestClientChatModelPreservesMultimodalInput(t *testing.T) {
+	t.Parallel()
+	stub := &einoStubClient{}
+	cm, err := NewClientChatModel(ClientChatModelConfig{Client: stub})
+	if err != nil {
+		t.Fatalf("NewClientChatModel: %v", err)
+	}
+	data := "aGVsbG8="
+	_, err = cm.Generate(context.Background(), []*schema.Message{{
+		Role:    schema.User,
+		Content: "describe",
+		UserInputMultiContent: []schema.MessageInputPart{{
+			Type:  schema.ChatMessagePartTypeImageURL,
+			Image: &schema.MessageInputImage{MessagePartCommon: schema.MessagePartCommon{Base64Data: &data, MIMEType: "image/png"}},
+		}},
+	}})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(stub.lastReq.Messages) != 1 || len(stub.lastReq.Messages[0].Images) != 1 {
+		t.Fatalf("multimodal input was not preserved: %+v", stub.lastReq.Messages)
+	}
+	if got := stub.lastReq.Messages[0].Images[0]; got.MIMEType != "image/png" || got.Data != data {
+		t.Fatalf("unexpected image: %+v", got)
 	}
 }
 

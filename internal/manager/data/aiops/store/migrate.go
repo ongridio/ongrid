@@ -19,6 +19,7 @@ func Migrate(db *gorm.DB) error {
 	return db.AutoMigrate(
 		&model.Session{},
 		&model.Message{},
+		&model.Attachment{},
 		&model.ToolCall{},
 		&model.MutatingProposal{},
 		&model.UserAgent{},

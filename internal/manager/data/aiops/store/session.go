@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,11 +22,24 @@ func isDuplicate(err error) bool {
 
 // SessionRepo is the GORM-backed biz/aiops.SessionRepo.
 type SessionRepo struct {
-	db *gorm.DB
+	db             *gorm.DB
+	attachmentRoot string
 }
 
 // NewSessionRepo constructs the repo around an opened *gorm.DB.
-func NewSessionRepo(db *gorm.DB) *SessionRepo { return &SessionRepo{db: db} }
+func NewSessionRepo(db *gorm.DB) *SessionRepo {
+	root := strings.TrimSpace(os.Getenv("ONGRID_CHAT_ATTACHMENT_DIR"))
+	if root == "" {
+		root = "/var/lib/ongrid/chat-attachments"
+	}
+	return &SessionRepo{db: db, attachmentRoot: filepath.Clean(root)}
+}
+
+// NewSessionRepoWithAttachmentRoot is intended for tests and embedded
+// deployments that need an explicit private file root.
+func NewSessionRepoWithAttachmentRoot(db *gorm.DB, root string) *SessionRepo {
+	return &SessionRepo{db: db, attachmentRoot: filepath.Clean(root)}
+}
 
 // NewBizRepo is the wire-ready constructor. cmd/ongrid binds this at
 // assembly time to obtain a biz.SessionRepo without exposing the concrete
@@ -162,7 +177,22 @@ func (r *SessionRepo) UpdateSessionModel(ctx context.Context, id string, provide
 // and chat_messages(session_id) → chat_sessions ordering; no FKs are
 // declared in our schema, so cascade is manual.
 func (r *SessionRepo) DeleteSession(ctx context.Context, id string) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	sessionDir := filepath.Join(r.attachmentRoot, id)
+	trashRoot := filepath.Join(r.attachmentRoot, ".trash")
+	tombstone := filepath.Join(trashRoot, id+"-"+time.Now().UTC().Format("20060102150405.000000000"))
+	moved := false
+	if err := os.MkdirAll(trashRoot, 0o700); err != nil {
+		return err
+	}
+	if err := os.Rename(sessionDir, tombstone); err == nil {
+		moved = true
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if res := tx.Where("session_id = ?", id).Delete(&model.Attachment{}); res.Error != nil {
+			return res.Error
+		}
 		if res := tx.
 			Where("message_id IN (?)", tx.Model(&model.Message{}).Select("id").Where("session_id = ?", id)).
 			Delete(&model.ToolCall{}); res.Error != nil {
@@ -180,6 +210,16 @@ func (r *SessionRepo) DeleteSession(ctx context.Context, id string) error {
 		}
 		return nil
 	})
+	if err != nil {
+		if moved {
+			_ = os.Rename(tombstone, sessionDir)
+		}
+		return err
+	}
+	if moved {
+		_ = os.RemoveAll(tombstone) // stale tombstones are retried by expiry cleanup
+	}
+	return nil
 }
 
 // AppendMessage inserts m.
@@ -187,7 +227,26 @@ func (r *SessionRepo) AppendMessage(ctx context.Context, m *model.Message) error
 	if m == nil {
 		return errs.ErrInvalid
 	}
-	if err := r.db.WithContext(ctx).Create(m).Error; err != nil {
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(m).Error; err != nil {
+			return err
+		}
+		if len(m.AttachmentIDs) == 0 {
+			return nil
+		}
+		now := time.Now().UTC()
+		res := tx.Model(&model.Attachment{}).
+			Where("id IN ? AND session_id = ? AND message_id IS NULL AND (expires_at IS NULL OR expires_at > ?)", m.AttachmentIDs, m.SessionID, now).
+			Updates(map[string]any{"message_id": m.ID, "expires_at": nil})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected != int64(len(m.AttachmentIDs)) {
+			return errs.ErrInvalid
+		}
+		return nil
+	})
+	if err != nil {
 		if isDuplicate(err) {
 			return errs.ErrConflict
 		}
@@ -224,6 +283,9 @@ func (r *SessionRepo) ListMessages(ctx context.Context, sessionID string, limit 
 		}
 	}
 	if err := r.hydrateToolCalls(ctx, out); err != nil {
+		return nil, err
+	}
+	if err := r.hydrateAttachments(ctx, out); err != nil {
 		return nil, err
 	}
 	return out, nil

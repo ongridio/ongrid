@@ -1,8 +1,10 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
@@ -32,7 +34,43 @@ func newTestRepo(t *testing.T) *SessionRepo {
 	if err := Migrate(db); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	return NewSessionRepo(db)
+	return NewSessionRepoWithAttachmentRoot(db, t.TempDir())
+}
+
+func TestAttachmentUploadBindHydrateAndDelete(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	s := &model.Session{UserID: 7, Title: "images"}
+	if err := repo.CreateSession(ctx, s); err != nil {
+		t.Fatal(err)
+	}
+	data := []byte("private-image-bytes")
+	a, err := repo.CreateAttachment(ctx, s.ID, 7, "chart.png", "image/png", int64(len(data)), bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.GetAttachment(ctx, s.ID, a.ID, 8, false); !errors.Is(err, errs.ErrNotFound) {
+		t.Fatalf("cross-user read error = %v, want not found", err)
+	}
+	content := "inspect"
+	msg := &model.Message{SessionID: s.ID, Role: model.RoleUser, Content: &content, AttachmentIDs: []string{a.ID}}
+	if err := repo.AppendMessage(ctx, msg); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := repo.ListMessages(ctx, s.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || len(rows[0].Attachments) != 1 || !bytes.Equal(rows[0].Attachments[0].Data, data) {
+		t.Fatalf("hydrated attachments = %+v", rows)
+	}
+	path := rows[0].Attachments[0].StoragePath
+	if err := repo.DeleteSession(ctx, s.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("attachment file still exists: %v", err)
+	}
 }
 
 func TestSessionRepoRoundTrip(t *testing.T) {
@@ -108,12 +146,15 @@ func TestMessageAndToolCallLifecycle(t *testing.T) {
 	}
 
 	content := "what's happening"
-	userMsg := &model.Message{SessionID: s.ID, Role: model.RoleUser, Content: &content, CreatedAt: time.Now().UTC()}
+	messageTime := time.Now().UTC()
+	userMsg := &model.Message{
+		SessionID: s.ID, Role: model.RoleUser, Content: &content, CreatedAt: messageTime,
+	}
 	if err := repo.AppendMessage(ctx, userMsg); err != nil {
 		t.Fatalf("AppendMessage user: %v", err)
 	}
 
-	asstMsg := &model.Message{SessionID: s.ID, Role: model.RoleAssistant, Content: nil, CreatedAt: time.Now().UTC()}
+	asstMsg := &model.Message{SessionID: s.ID, Role: model.RoleAssistant, Content: nil, CreatedAt: messageTime.Add(time.Second)}
 	if err := repo.AppendMessage(ctx, asstMsg); err != nil {
 		t.Fatalf("AppendMessage assistant: %v", err)
 	}

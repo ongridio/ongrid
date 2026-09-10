@@ -183,6 +183,7 @@ services:
       - ../.cache/ongrid-tools:/var/lib/ongrid/tools
       # Packet capture raw PCAP objects for local dev.
       - ../.cache/ongrid-packet-captures:/var/lib/ongrid/packet-captures
+      - ../.cache/ongrid-chat-attachments:/var/lib/ongrid/chat-attachments
     # ADR-008: HTTP API (8080) is no longer published to host in the
     # production-shape stack — nginx fronts it on 443/80. Metrics port
     # 9100 stays exposed for the host's Prometheus.

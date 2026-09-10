@@ -1659,6 +1659,8 @@ func main() {
 	aiopsSvc := managersvcaiops.NewWithKernel(aiopsAgent, aiopsRuntime, kernel, aiopsRepo, aiopsUsage, log)
 	aiopsSvc.SetMutatingProposalRepo(mutatingProposalRepo)
 	aiopsSvc.WithAPMSourceResolver(apmService)
+	aiopsSvc.SetAttachmentRepo(aiopsRepo)
+	aiopsSvc.SetModelCatalog(llmRouter)
 	aiopsHandler := managerserveraiops.NewHandler(aiopsSvc)
 	aiopsHandler.SetOperationActions(operationUC, func(ctx context.Context, operation *manageraiopsmodel.Operation, action string) (*manageraiopsmodel.Operation, error) {
 		if operation == nil || action != "cancel" || operation.Kind != "packet_capture_session" {

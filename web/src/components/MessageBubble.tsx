@@ -16,7 +16,7 @@ import {
   X,
   XCircle,
 } from 'lucide-react';
-import type { ChatMessage, ToolCallSummary } from '@/api/chat';
+import { loadChatAttachment, type ChatMessage, type ImageAttachment, type ToolCallSummary } from '@/api/chat';
 import { approveApproval, rejectApproval, getApproval } from '@/api/approvals';
 import { cn } from '@/lib/cn';
 import { isConfigDraftConfirmationMessage } from '@/lib/configDraftConfirmation';
@@ -24,6 +24,7 @@ import { useI18n } from '@/i18n/locale';
 import { Button, Chip } from '@/components/ui';
 import { executeOperationAction, getOperation, type Operation } from '@/api/operations';
 import { getPacketCaptureSession } from '@/api/packetCaptures';
+import { Modal } from '@/components/Modal';
 
 export type ConfigDraftResult = {
   kind: 'config_draft';
@@ -59,16 +60,17 @@ export type OperationCardData = {
 
 type Props = {
   message: ChatMessage;
+  sessionId?: string;
   onConfirmConfigDraft?: ConfirmConfigDraft;
   hideActiveOperations?: boolean;
 };
 
-export function MessageBubble({ message, onConfirmConfigDraft, hideActiveOperations }: Props) {
+export function MessageBubble({ message, sessionId, onConfirmConfigDraft, hideActiveOperations }: Props) {
   if (message.kind === 'tool_card' && message.tool_call) {
     return <ToolCallSummaryBlock call={fromSummary(message.tool_call)} onConfirmConfigDraft={onConfirmConfigDraft} hideActiveOperations={hideActiveOperations} />;
   }
   if (message.role === 'tool') return <ToolBubble message={message} onConfirmConfigDraft={onConfirmConfigDraft} hideActiveOperations={hideActiveOperations} />;
-  if (message.role === 'user') return <UserBubble message={message} />;
+  if (message.role === 'user') return <UserBubble message={message} sessionId={sessionId} />;
   // Tool-only assistant rows (empty content + has tool_calls) shouldn't
   // appear during streaming; on history reload they would, so suppress.
   if (
@@ -105,7 +107,7 @@ function safeParse(s: string): unknown {
   }
 }
 
-function UserBubble({ message }: Props) {
+function UserBubble({ message, sessionId }: Props) {
   const { tr } = useI18n();
   const content = compactUserContent(message.content ?? '', tr);
 
@@ -113,11 +115,60 @@ function UserBubble({ message }: Props) {
   // — keeps the visual weight on the assistant content below.
   return (
     <div className="flex justify-end">
-      <div className="max-w-[78%] rounded-2xl rounded-br-md bg-zinc-800/80 px-3.5 py-2 text-[14px] leading-relaxed text-zinc-100 ring-1 ring-zinc-700/60">
-        {content}
+      <div className="max-w-[78%] space-y-2 rounded-2xl rounded-br-md bg-zinc-800/80 px-3.5 py-2 text-[14px] leading-relaxed text-zinc-100 ring-1 ring-zinc-700/60">
+        {!!message.attachments?.length && (
+          <div className="grid max-w-md grid-cols-2 gap-2">
+            {message.attachments.map((attachment, index) => (
+              <ProtectedAttachmentImage key={`${attachment.id}-${index}`} sessionId={sessionId} attachment={attachment} />
+            ))}
+          </div>
+        )}
+        {content && <div>{content}</div>}
       </div>
     </div>
   );
+}
+
+function ProtectedAttachmentImage({ sessionId, attachment }: { sessionId?: string; attachment: ImageAttachment }) {
+  const [src, setSrc] = useState('');
+  const [failed, setFailed] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  useEffect(() => {
+    if (!sessionId) return;
+    let active = true;
+    let objectURL = '';
+    setFailed(false);
+    void loadChatAttachment(sessionId, attachment.id)
+      .then((url) => {
+        objectURL = url;
+        if (active) setSrc(url);
+        else URL.revokeObjectURL(url);
+      })
+      .catch(() => {
+        if (active) setFailed(true);
+      });
+    return () => {
+      active = false;
+      if (objectURL) URL.revokeObjectURL(objectURL);
+    };
+  }, [sessionId, attachment.id]);
+  if (failed) return <div className="flex h-24 w-24 items-center justify-center rounded-lg bg-zinc-700 px-2 text-center text-xs text-zinc-300">Image unavailable</div>;
+  return src ? (
+    <>
+      <img
+        src={src}
+        alt={attachment.name}
+        title="Click to preview"
+        className="max-h-64 cursor-zoom-in rounded-lg object-contain"
+        onClick={() => setPreviewOpen(true)}
+      />
+      <Modal open={previewOpen} onClose={() => setPreviewOpen(false)} title={attachment.name} size="xl">
+        <div className="flex min-h-48 items-center justify-center">
+          <img src={src} alt={`Preview ${attachment.name}`} className="max-h-[75vh] max-w-full rounded-lg object-contain" />
+        </div>
+      </Modal>
+    </>
+  ) : <div className="h-24 w-24 animate-pulse rounded-lg bg-zinc-700" />;
 }
 
 function compactUserContent(

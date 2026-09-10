@@ -167,12 +167,14 @@ func (s *Session) BeforeCreate(*gorm.DB) error {
 // without conflating empty-string with absent. ToolCallID / ToolName are
 // non-nil on role=tool messages.
 type Message struct {
-	ID         string  `gorm:"primaryKey;type:char(36);column:id"`
-	SessionID  string  `gorm:"index:idx_session_msg,priority:1;type:char(36);not null;column:session_id"`
-	Role       string  `gorm:"size:16;not null;check:role IN ('user','assistant','tool','system')"`
-	Content    *string `gorm:"type:text"`
-	ToolCallID *string `gorm:"size:64;column:tool_call_id"`
-	ToolName   *string `gorm:"size:64;column:tool_name"`
+	ID            string       `gorm:"primaryKey;type:char(36);column:id"`
+	SessionID     string       `gorm:"index:idx_session_msg,priority:1;type:char(36);not null;column:session_id"`
+	Role          string       `gorm:"size:16;not null;check:role IN ('user','assistant','tool','system')"`
+	Content       *string      `gorm:"type:text"`
+	Attachments   []Attachment `gorm:"-" json:"attachments,omitempty"`
+	AttachmentIDs []string     `gorm:"-" json:"-"`
+	ToolCallID    *string      `gorm:"size:64;column:tool_call_id"`
+	ToolName      *string      `gorm:"size:64;column:tool_name"`
 	// Model is the LLM model id that produced this message — only set on
 	// role=assistant rows. Lets the SPA show per-message provenance ("the
 	// answer above came from glm-4-plus; the answer below from opus") and
@@ -192,6 +194,33 @@ type Message struct {
 	// reject the request with "tool must follow tool_calls". Transient:
 	// `gorm:"-"` keeps it out of the chat_messages schema.
 	ToolCalls []ToolCall `gorm:"-"`
+}
+
+// Attachment stores metadata for a file uploaded to a chat session. The file
+// bytes live below ONGRID_CHAT_ATTACHMENT_DIR and are never serialized in
+// message/history responses. Data is populated only while building an LLM
+// request.
+type Attachment struct {
+	ID          string     `gorm:"primaryKey;type:char(36);column:id" json:"id"`
+	SessionID   string     `gorm:"index:idx_chat_attachment_session;type:char(36);not null" json:"session_id,omitempty"`
+	MessageID   *string    `gorm:"index:idx_chat_attachment_message;type:char(36)" json:"message_id,omitempty"`
+	UserID      uint64     `gorm:"index:idx_chat_attachment_owner;not null" json:"-"`
+	Name        string     `gorm:"size:255;not null" json:"name"`
+	MIMEType    string     `gorm:"size:64;not null" json:"mime_type"`
+	Size        int64      `gorm:"not null" json:"size"`
+	StoragePath string     `gorm:"size:512;not null" json:"-"`
+	ExpiresAt   *time.Time `gorm:"index:idx_chat_attachment_expiry" json:"-"`
+	CreatedAt   time.Time  `json:"created_at"`
+	Data        []byte     `gorm:"-" json:"-"`
+}
+
+func (Attachment) TableName() string { return "chat_attachments" }
+
+func (a *Attachment) BeforeCreate(*gorm.DB) error {
+	if a.ID == "" {
+		a.ID = uuid.NewString()
+	}
+	return nil
 }
 
 // TableName pins the SQLite table name.

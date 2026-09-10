@@ -271,6 +271,7 @@ services:
       # reading them back from the Edge, then serves authenticated downloads and
       # private parser fetches from the same durable path.
       - ${ONGRID_DATA_DIR:-/var/lib/ongrid}/packet-captures:/var/lib/ongrid/packet-captures
+      - ${ONGRID_DATA_DIR:-/var/lib/ongrid}/chat-attachments:/var/lib/ongrid/chat-attachments
       - ${ONGRID_DATA_DIR:-/var/lib/ongrid}/pcap-parser/manager:/var/lib/ongrid/pcap-parser:ro
     logging:
       driver: json-file

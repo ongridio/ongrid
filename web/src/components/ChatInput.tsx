@@ -24,6 +24,7 @@ import {
   AlertTriangle,
   Bell,
   FileText,
+  Paperclip,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { isImeComposing } from '@/lib/keyboard';
@@ -36,6 +37,7 @@ import {
   type LLMProvider,
 } from '@/api/chat';
 import { ModelIcon } from '@/components/icons/Provider';
+import { Modal } from '@/components/Modal';
 import { tr as trInline, useI18n } from '@/i18n/locale';
 
 // SubmitPayload is what the host page receives. Mentions are the
@@ -44,7 +46,10 @@ import { tr as trInline, useI18n } from '@/i18n/locale';
 export type SubmitPayload = {
   text: string;
   mentions: Mention[];
+  attachments: File[];
 };
+
+type PendingAttachment = { file: File; previewURL: string };
 
 // ModelSelection is the per-session (provider, model) pair. The host
 // page persists this into chat session state; ChatInput renders it
@@ -72,10 +77,15 @@ type Props = {
   // metric question.
   webSearchEnabled?: boolean;
   onWebSearchToggle?(next: boolean): void;
+  allowAttachments?: boolean;
 };
 
 const MAX_ROWS = 6;
 const LINE_HEIGHT = 22;
+const MAX_IMAGES = 4;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_TOTAL_IMAGE_BYTES = 20 * 1024 * 1024;
+const ACCEPTED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 
 export function ChatInput({
   value: controlled,
@@ -91,6 +101,7 @@ export function ChatInput({
   onModelChange,
   webSearchEnabled,
   onWebSearchToggle,
+  allowAttachments = false,
 }: Props) {
   const { tr } = useI18n();
   const effectivePlaceholder = placeholder ?? tr('从任何想法开始… 输入 @ 可调出设备/资源 · Shift+Enter 换行', 'Start anywhere… type @ for devices/resources · Shift+Enter for newline');
@@ -102,6 +113,11 @@ export function ChatInput({
   };
   const ref = useRef<HTMLTextAreaElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  const [previewAttachment, setPreviewAttachment] = useState<PendingAttachment | null>(null);
+  const [attachmentError, setAttachmentError] = useState('');
+  const [dragActive, setDragActive] = useState(false);
 
   // Active @-mention chips. We keep two parallel lists in the textarea
   // and `chips`: typing literal text still works (the agent gets the
@@ -250,12 +266,44 @@ export function ChatInput({
     setChips((prev) => prev.filter((_, i) => i !== idx));
   }
 
+  async function addImageFiles(files: FileList | File[]) {
+    const incoming = Array.from(files);
+    setAttachmentError('');
+    if (attachments.length + incoming.length > MAX_IMAGES) {
+      setAttachmentError(tr(`每条消息最多添加 ${MAX_IMAGES} 张图片`, `Up to ${MAX_IMAGES} images per message`));
+      return;
+    }
+    const next: PendingAttachment[] = [];
+    for (const file of incoming) {
+      if (!ACCEPTED_IMAGE_TYPES.has(file.type)) {
+        setAttachmentError(tr('仅支持 PNG、JPEG 和 WebP 图片', 'Only PNG, JPEG, and WebP images are supported'));
+        return;
+      }
+      if (file.size > MAX_IMAGE_BYTES) {
+        setAttachmentError(tr('单张图片不能超过 5 MiB', 'Each image must be 5 MiB or smaller'));
+        return;
+      }
+      next.push({ file, previewURL: URL.createObjectURL(file) });
+    }
+    const total = [...attachments, ...next].reduce((sum, item) => sum + item.file.size, 0);
+    if (total > MAX_TOTAL_IMAGE_BYTES) {
+      next.forEach((item) => URL.revokeObjectURL(item.previewURL));
+      setAttachmentError(tr('图片合计不能超过 20 MiB', 'Images must total 20 MiB or less'));
+      return;
+    }
+    setAttachments((prev) => [...prev, ...next]);
+  }
+
   const submit = () => {
     const trimmed = value.trim();
-    if (!trimmed || disabled) return;
-    onSubmit({ text: trimmed, mentions: chips });
+    if ((!trimmed && attachments.length === 0) || disabled) return;
+    onSubmit({ text: trimmed, mentions: chips, attachments: attachments.map((item) => item.file) });
     if (controlled === undefined) setInternal('');
     setChips([]);
+    setPreviewAttachment(null);
+    attachments.forEach((item) => URL.revokeObjectURL(item.previewURL));
+    setAttachments([]);
+    setAttachmentError('');
     setPopoverOpen(false);
   };
 
@@ -314,7 +362,7 @@ export function ChatInput({
     }
   };
 
-  const empty = value.trim().length === 0;
+  const empty = value.trim().length === 0 && attachments.length === 0;
   const hasModels = (providers?.length ?? 0) > 0;
   // Resolve the active model slug + the provider id that owns it. The
   // dropdown shows [providerIcon] modelSlug — no provider label text,
@@ -356,9 +404,40 @@ export function ChatInput({
       <div
         className={cn(
           'group relative rounded-2xl border border-zinc-800 bg-zinc-900/80 backdrop-blur transition-colors',
-          'focus-within:border-zinc-700 focus-within:bg-zinc-900'
+          'focus-within:border-zinc-700 focus-within:bg-zinc-900',
+          dragActive && 'border-indigo-500 bg-indigo-500/5',
         )}
+        onDragEnter={(event) => { if (allowAttachments) { event.preventDefault(); setDragActive(true); } }}
+        onDragOver={(event) => { if (allowAttachments) event.preventDefault(); }}
+        onDragLeave={(event) => { if (event.currentTarget === event.target || !event.currentTarget.contains(event.relatedTarget as Node | null)) setDragActive(false); }}
+        onDrop={(event) => {
+          if (!allowAttachments) return;
+          event.preventDefault();
+          setDragActive(false);
+          void addImageFiles(event.dataTransfer.files);
+        }}
       >
+        {allowAttachments && (
+          <input ref={fileInputRef} type="file" accept=".png,.jpg,.jpeg,.webp" multiple className="sr-only" aria-label={tr('选择图片', 'Choose images')} onChange={(event) => { if (event.target.files) void addImageFiles(event.target.files); event.target.value = ''; }} />
+        )}
+        {attachments.length > 0 && (
+          <div className="flex flex-wrap gap-2 px-4 pt-4" aria-label={tr('待发送图片', 'Images to send')}>
+            {attachments.map((attachment, index) => (
+              <div
+                key={`${attachment.file.name}-${index}`}
+                className="relative h-16 w-16 cursor-zoom-in overflow-hidden rounded-xl border border-zinc-700/80 bg-zinc-950 shadow-sm"
+                title={tr('点击预览图片', 'Click to preview')}
+                onClick={() => setPreviewAttachment(attachment)}
+              >
+                <img src={attachment.previewURL} alt={attachment.file.name} className="h-full w-full object-cover" />
+                <Button variant="dangerGhost" size="sm" type="button" aria-label={tr(`移除图片 ${attachment.file.name}`, `Remove image ${attachment.file.name}`)} className="absolute right-1 top-1 h-5 w-5 rounded-full bg-zinc-950/85 p-0 opacity-80 shadow-sm hover:opacity-100" onClick={(event) => { event.stopPropagation(); setAttachments((prev) => { URL.revokeObjectURL(prev[index].previewURL); return prev.filter((_, i) => i !== index); }); setAttachmentError(''); }}>
+                  <XIcon size={11} />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+        {attachmentError && <p role="alert" className="px-4 pt-2 text-xs text-red-500">{attachmentError}</p>}
         <Label htmlFor="chat-input" className="sr-only">
           {tr('消息输入框', 'Message input')}
         </Label>
@@ -368,6 +447,22 @@ export function ChatInput({
           value={value}
           onChange={onTextareaChange}
           onKeyDown={onKeyDown}
+          onPaste={(event) => {
+            if (!allowAttachments) return;
+            // Screenshots copied by browsers and desktop tools are commonly
+            // exposed through DataTransferItemList, while clipboardData.files
+            // may remain empty (notably on Windows/Chromium).
+            const itemImages = Array.from(event.clipboardData.items ?? [])
+              .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+              .map((item) => item.getAsFile())
+              .filter((file): file is File => file !== null);
+            const images = itemImages.length > 0
+              ? itemImages
+              : Array.from(event.clipboardData.files).filter((file) => file.type.startsWith('image/'));
+            if (images.length === 0) return;
+            event.preventDefault();
+            void addImageFiles(images);
+          }}
           onClick={() => {
             // Recompute on click — caret may have moved into / out of
             // a mention region.
@@ -381,7 +476,7 @@ export function ChatInput({
           rows={1}
           disabled={disabled}
           aria-label={tr('消息输入框', 'Message input')}
-          className="w-full resize-none px-5 pb-2 pt-4 text-[15px] leading-[22px]"
+          className={cn('w-full resize-none px-5 pb-2 text-[15px] leading-[22px]', attachments.length > 0 ? 'pt-3' : 'pt-4')}
         />
 
         {popoverOpen && (
@@ -411,12 +506,11 @@ export function ChatInput({
               enabled={!!webSearchEnabled}
               onToggle={(v) => onWebSearchToggle?.(v)}
             />
-            {/* TODO(home-toolbar): re-introduce attachments + plugins
-                pickers once the backend wires file upload to the
-                conversation context and the plugin runtime exposes a
-                "callable from chat" tool list. Pulled from the toolbar
-                here so we don't ship dead icons that look interactive
-                but no-op. Tracked in docs/todo/home-chat-toolbar.md. */}
+            {allowAttachments && (
+              <Button variant="outline" size="sm" type="button" disabled={disabled || attachments.length >= MAX_IMAGES} aria-label={tr('添加图片', 'Add images')} title={tr('添加图片', 'Add images')} className="h-7 w-7 p-0" onClick={() => fileInputRef.current?.click()}>
+                <Paperclip size={14} />
+              </Button>
+            )}
           </div>
           <Button variant="subtle" size="sm"
             type="button"
@@ -445,6 +539,22 @@ export function ChatInput({
           <SkillIcon icon={AtSign} label="Webhook" />
         </div>
       )}
+      <Modal
+        open={previewAttachment !== null}
+        onClose={() => setPreviewAttachment(null)}
+        title={previewAttachment?.file.name ?? tr('图片预览', 'Image preview')}
+        size="xl"
+      >
+        {previewAttachment && (
+          <div className="flex min-h-48 items-center justify-center">
+            <img
+              src={previewAttachment.previewURL}
+              alt={tr(`预览 ${previewAttachment.file.name}`, `Preview ${previewAttachment.file.name}`)}
+              className="max-h-[75vh] max-w-full rounded-lg object-contain"
+            />
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }
@@ -585,6 +695,15 @@ function labelForType(t: MentionType): string {
     case 'file':
       return trInline('日志文件', 'Log file');
   }
+}
+
+function readFileAsDataURL(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error ?? new Error('failed to read image'));
+    reader.readAsDataURL(file);
+  });
 }
 
 function MentionIcon({ type }: { type: MentionType }) {

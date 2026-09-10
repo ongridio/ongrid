@@ -14,6 +14,24 @@ import (
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 )
 
+func TestAssembleMessagesAddsCurrentTurnImages(t *testing.T) {
+	data := "aGVsbG8="
+	out, err := assembleMessages(&Input{
+		UserText: "describe",
+		UserImages: []schema.MessageInputPart{{
+			Type:  schema.ChatMessagePartTypeImageURL,
+			Image: &schema.MessageInputImage{MessagePartCommon: schema.MessagePartCommon{Base64Data: &data, MIMEType: "image/png"}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("assembleMessages: %v", err)
+	}
+	last := out[len(out)-1]
+	if last.Content != "describe" || len(last.UserInputMultiContent) != 1 {
+		t.Fatalf("unexpected current turn: %+v", last)
+	}
+}
+
 // scriptedState is the shared mutable bookkeeping for scriptedChatModel
 // instances. eino's ToolCallingChatModel.WithTools returns a *new*
 // instance with tools bound, which means the test must share counters /

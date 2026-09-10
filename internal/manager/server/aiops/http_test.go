@@ -2,6 +2,7 @@ package aiops
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -51,6 +52,24 @@ type fakeService struct {
 	lastCreateModel    string
 	lastUpdateProvider string
 	lastUpdateModel    string
+}
+
+func TestValidateImageAttachments(t *testing.T) {
+	const onePixelPNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+	data, err := base64.StdEncoding.DecodeString(onePixelPNG)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mimeType, err := validateUploadedImage(data); err != nil || mimeType != "image/png" {
+		t.Fatalf("validateUploadedImage = %q, %v", mimeType, err)
+	}
+	if _, err := validateUploadedImage([]byte("not an image")); err == nil {
+		t.Fatal("expected invalid image error")
+	}
+	tooMany := make([]string, maxMessageImages+1)
+	if _, err := attachmentRefs(tooMany); err == nil {
+		t.Fatal("expected image count error")
+	}
 }
 
 type fakeOperationReader struct {
@@ -474,6 +493,27 @@ func TestUnauthenticated(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("code = %d, want 401", w.Code)
+	}
+}
+
+func TestValidateUploadedImageWebPDimensions(t *testing.T) {
+	webp := make([]byte, 30)
+	copy(webp[0:4], "RIFF")
+	copy(webp[8:12], "WEBP")
+	copy(webp[12:16], "VP8X")
+	// VP8X stores width-1 and height-1 as little-endian 24-bit values.
+	webp[24], webp[25] = 0xff, 0x03 // 1024
+	webp[27], webp[28] = 0xff, 0x02 // 768
+
+	mimeType, err := validateUploadedImage(webp)
+	if err != nil || mimeType != "image/webp" {
+		t.Fatalf("validate WebP = %q, %v", mimeType, err)
+	}
+
+	webp[24], webp[25], webp[26] = 0xff, 0xff, 0xff
+	webp[27], webp[28], webp[29] = 0xff, 0xff, 0xff
+	if _, err := validateUploadedImage(webp); err == nil {
+		t.Fatal("expected oversized WebP to be rejected")
 	}
 }
 

@@ -31,21 +31,22 @@ import (
 // closed-set of model slugs the operator wants to expose for this
 // provider; Label is the human-readable name shown in the UI dropdown.
 type ProviderConfig struct {
-	ID      string   // stable provider id, e.g. "openai" or "minimax"
-	Label   string   // display name
-	APIKey  string   // empty → provider not configured (skipped at build)
-	Model   string   // default model
-	BaseURL string   // optional base URL override
-	Models  []string // closed-set of allowed models for the UI selector
+	TLSInsecure bool
+	ID          string   // stable provider id, e.g. "openai" or "minimax"
+	Label       string   // display name
+	APIKey      string   // empty → provider not configured (skipped at build)
+	Model       string   // default model
+	BaseURL     string   // optional base URL override
+	Models      []string // closed-set of allowed models for the UI selector
 }
 
 // ProviderInfo is the subset of ProviderConfig safe to leak through the
 // HTTP /v1/aiops/models endpoint (no API key).
 type ProviderInfo struct {
-	ID     string
-	Label  string
-	Model  string
-	Models []string
+	ID          string
+	Label       string
+	Model       string
+	Models      []string
 }
 
 // ProvidersResolver supplies a fresh provider catalog at call time. The
@@ -105,7 +106,7 @@ func NewMultiClient(providers []ProviderConfig, defaultProvider string, fallback
 		if strings.TrimSpace(p.APIKey) == "" {
 			continue
 		}
-		sub := New(Config{APIKey: p.APIKey, Model: p.Model, BaseURL: p.BaseURL}, nil, nil)
+		sub := New(Config{APIKey: p.APIKey, Model: p.Model, BaseURL: p.BaseURL, TLSInsecure: p.TLSInsecure}, nil, nil)
 		mc.staticSubs[p.ID] = sub
 		models := p.Models
 		if len(models) == 0 && p.Model != "" {
@@ -193,7 +194,7 @@ func (m *MultiClient) activeSubs(ctx context.Context) (map[string]Client, []Prov
 		if strings.TrimSpace(p.APIKey) == "" {
 			continue
 		}
-		sub := New(Config{APIKey: p.APIKey, Model: p.Model, BaseURL: p.BaseURL}, nil, nil)
+		sub := New(Config{APIKey: p.APIKey, Model: p.Model, BaseURL: p.BaseURL, TLSInsecure: p.TLSInsecure}, nil, nil)
 		newSubs[p.ID] = sub
 		models := p.Models
 		if len(models) == 0 && p.Model != "" {
@@ -349,10 +350,10 @@ func llmStatusFor(err error) string {
 // shape the /v1/aiops/models response. Lives here so the wire shape is
 // co-located with the router definition.
 type ProviderInfoToWire struct {
-	ID     string   `json:"id"`
-	Label  string   `json:"label"`
-	Models []string `json:"models"`
-	Model  string   `json:"model,omitempty"`
+	ID          string   `json:"id"`
+	Label       string   `json:"label"`
+	Models      []string `json:"models"`
+	Model       string   `json:"model,omitempty"`
 }
 
 // AsWire renders the router's provider catalog into the JSON DTO the
@@ -362,10 +363,10 @@ func (m *MultiClient) AsWire() []ProviderInfoToWire {
 	out := make([]ProviderInfoToWire, 0, len(infos))
 	for _, p := range infos {
 		out = append(out, ProviderInfoToWire{
-			ID:     p.ID,
-			Label:  p.Label,
-			Models: p.Models,
-			Model:  p.Model,
+			ID:          p.ID,
+			Label:       p.Label,
+			Models:      p.Models,
+			Model:       p.Model,
 		})
 	}
 	return out

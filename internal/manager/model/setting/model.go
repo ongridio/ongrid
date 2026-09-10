@@ -17,9 +17,9 @@ import "time"
 // clear by list endpoints; the service layer is responsible for masking
 // before sending to the client.
 type Setting struct {
-	ID        uint64    `gorm:"primaryKey;autoIncrement"`
-	Category  string    `gorm:"size:32;not null;uniqueIndex:idx_settings_cat_key,priority:1"`
-	Key       string    `gorm:"size:128;not null;uniqueIndex:idx_settings_cat_key,priority:2"`
+	ID       uint64 `gorm:"primaryKey;autoIncrement"`
+	Category string `gorm:"size:32;not null;uniqueIndex:idx_settings_cat_key,priority:1"`
+	Key      string `gorm:"size:128;not null;uniqueIndex:idx_settings_cat_key,priority:2"`
 	// MySQL 拒绝 TEXT 列的 DEFAULT 值；Go 零值已经是 ""，业务层 Set 总是
 	// 显式写入，schema 不必声明默认。
 	Value     string    `gorm:"type:text;not null"`
@@ -149,6 +149,7 @@ const (
 	// required — the resolver skips it until one is supplied.
 	KeyCustomAPIKey       = "custom_api_key" // sensitive
 	KeyCustomBaseURL      = "custom_base_url"
+	KeyCustomTLSInsecure  = "custom_tls_insecure"
 	KeyCustomModels       = "custom_models"
 	KeyCustomDefaultModel = "custom_default_model"
 
@@ -176,11 +177,11 @@ const (
 const (
 	KeyPromQueryURL       = "query_url"
 	KeyPromRemoteWriteURL = "remote_write_url"
-	KeyPromBearerToken    = "bearer_token"     // sensitive
+	KeyPromBearerToken    = "bearer_token" // sensitive
 	KeyPromBasicUser      = "basic_user"
-	KeyPromBasicPassword  = "basic_password"   // sensitive
-	KeyPromTLSInsecure    = "tls_insecure"     // "true" / "false"
-	KeyPromTLSCAPEM       = "tls_ca_pem"       // PEM text
+	KeyPromBasicPassword  = "basic_password" // sensitive
+	KeyPromTLSInsecure    = "tls_insecure"   // "true" / "false"
+	KeyPromTLSCAPEM       = "tls_ca_pem"     // PEM text
 )
 
 // Well-known keys under CategoryGrafana. PR-2 wires these into a Grafana
@@ -197,10 +198,10 @@ const (
 // backend so the dashboard-fetch proxy can default it without making the
 // SPA pass it on every call.
 const (
-	KeyGrafanaRootURL = "root_url"
-	KeyGrafanaSAToken = "sa_token" // sensitive — Grafana service-account token
-	KeyGrafanaAPIKey  = "api_key"  // sensitive — alternative bearer for external Grafana
-	KeyGrafanaOrgID   = "org_id"
+	KeyGrafanaRootURL     = "root_url"
+	KeyGrafanaSAToken     = "sa_token" // sensitive — Grafana service-account token
+	KeyGrafanaAPIKey      = "api_key"  // sensitive — alternative bearer for external Grafana
+	KeyGrafanaOrgID       = "org_id"
 	KeyGrafanaTLSInsecure = "tls_insecure"
 )
 
@@ -211,19 +212,19 @@ const (
 // in built-in deployments points at the docker-internal loki:3100 (the
 // edge then pushes to manager nginx /loki/api/v1/push, which proxies on).
 const (
-	KeyLokiURL          = "url"             // e.g. https://loki.customer.com or http://loki:3100 (default)
-	KeyLokiBasicUser    = "basic_user"
+	KeyLokiURL           = "url" // e.g. https://loki.customer.com or http://loki:3100 (default)
+	KeyLokiBasicUser     = "basic_user"
 	KeyLokiBasicPassword = "basic_password" // sensitive
-	KeyLokiTLSInsecure  = "tls_insecure"    // "true" / "false"
+	KeyLokiTLSInsecure   = "tls_insecure"   // "true" / "false"
 )
 
 // Well-known keys under CategoryTempo. Mirrors CategoryLoki; URL is the
 // OTLP HTTP push endpoint (e.g. https://tempo.customer.com/v1/traces).
 const (
-	KeyTempoURL          = "url"
-	KeyTempoBasicUser    = "basic_user"
+	KeyTempoURL           = "url"
+	KeyTempoBasicUser     = "basic_user"
 	KeyTempoBasicPassword = "basic_password" // sensitive
-	KeyTempoTLSInsecure  = "tls_insecure"
+	KeyTempoTLSInsecure   = "tls_insecure"
 )
 
 // Well-known keys under CategoryWebSearch. Read by the manager-scoped
@@ -243,10 +244,10 @@ const (
 // Empty / unset provider falls through to "searxng" (the zero-config
 // baseline). Tavily / Brave are opt-in via UI.
 const (
-	KeyWebSearchProvider = "provider"        // "searxng" | "tavily" | "brave"
-	KeySearxngURL        = "searxng_url"     // e.g. http://searxng:8080 (default)
-	KeyTavilyAPIKey      = "tavily_api_key"  // sensitive — Tavily Search API key
-	KeyBraveAPIKey       = "brave_api_key"   // sensitive — Brave Search API key
+	KeyWebSearchProvider = "provider"       // "searxng" | "tavily" | "brave"
+	KeySearxngURL        = "searxng_url"    // e.g. http://searxng:8080 (default)
+	KeyTavilyAPIKey      = "tavily_api_key" // sensitive — Tavily Search API key
+	KeyBraveAPIKey       = "brave_api_key"  // sensitive — Brave Search API key
 )
 
 // WebSearch provider names, exported as constants so callers don't pass

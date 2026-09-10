@@ -61,7 +61,8 @@ type Input struct {
 	// UserText is the new user turn (verbatim, post-mention-inlining).
 	// MentionsRendered, when non-empty, is prepended as a markdown
 	// preamble per agent.go's existing behaviour.
-	UserText string
+	UserText   string
+	UserImages []schema.MessageInputPart
 
 	// WebSearchEnabled is the per-call gate the SPA's globe toggle
 	// flips. PR-6 carries this through but enforcement remains at the

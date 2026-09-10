@@ -69,6 +69,7 @@ type LLMRouterInvalidator interface {
 // biz/setting implementation performs one minimal upstream completion and
 // returns stable, secret-free failure codes.
 type LLMConfigProbe interface {
+	FetchModels(ctx context.Context, in bizsetting.LLMProbeInput) (bizsetting.LLMModelsResult, error)
 	Probe(ctx context.Context, in bizsetting.LLMProbeInput) (bizsetting.LLMProbeResult, error)
 	Save(ctx context.Context, in bizsetting.LLMProbeInput) (bizsetting.LLMProbeResult, error)
 }
@@ -124,9 +125,55 @@ func (h *Handler) Register(r chi.Router) {
 	r.Post("/v1/integrations/tempo/test", h.testTempo)
 	r.Post("/v1/integrations/websearch/test", h.testWebSearch)
 	r.Post("/v1/integrations/llm/test", h.testLLMConfiguration)
+	r.Post("/v1/integrations/llm/models", h.fetchLLMModels)
 	r.Post("/v1/integrations/llm/validate-and-save", h.validateAndSaveLLMConfiguration)
 	r.Post("/v1/integrations/llm/invalidate", h.invalidateLLM)
 	r.Get("/v1/observability/dashboards/{uid}", h.fetchDashboard)
+}
+
+// fetchLLMModels queries an unsaved provider draft without persisting it or
+// invalidating the runtime model cache.
+//
+// @Summary Fetch models using an unsaved LLM provider draft
+// @Tags integrations
+// @Accept json
+// @Produce json
+// @Param request body bizsetting.LLMProbeInput true "LLM provider draft"
+// @Success 200 {object} bizsetting.LLMModelsResult
+// @Failure 400 {object} errorBody
+// @Failure 401 {object} errorBody
+// @Failure 403 {object} errorBody
+// @Failure 502 {object} errorBody
+// @Failure 503 {object} errorBody
+// @Router /api/v1/integrations/llm/models [post]
+func (h *Handler) fetchLLMModels(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	if h.llmProbe == nil {
+		writeJSON(w, http.StatusServiceUnavailable, errorBody{
+			Error: "llm configuration service not wired",
+			Code:  "llm-probe-disabled",
+		})
+		return
+	}
+	in, ok := decodeLLMConfigurationRequest(w, r)
+	if !ok {
+		return
+	}
+	result, err := h.llmProbe.FetchModels(r.Context(), in)
+	if errors.Is(err, bizsetting.ErrLLMModelsUnavailable) {
+		writeJSON(w, http.StatusBadGateway, errorBody{
+			Error: err.Error(),
+			Code:  "llm-models-unavailable",
+		})
+		return
+	}
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 // testLLMConfiguration validates one unsaved provider draft.

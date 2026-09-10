@@ -161,7 +161,14 @@ export function invalidateLLMRouter(): Promise<{ status: string }> {
   return request<{ status: string }>('POST', '/integrations/llm/invalidate');
 }
 
+export function fetchLLMModels(
+  input: LLMConfigurationProbeInput,
+): Promise<{ models: string[]; truncated: boolean }> {
+  return request<{ models: string[]; truncated: boolean }>('POST', '/integrations/llm/models', input);
+}
+
 export type LLMConfigurationProbeInput = {
+  tls_insecure?: boolean;
   provider: string;
   api_key: string;
   base_url: string;

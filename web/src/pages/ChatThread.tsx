@@ -17,9 +17,11 @@ import {
   stopSession,
   streamMessage,
   updateSessionModel,
+  uploadChatAttachment,
   type ChatMessage,
   type LLMProvider,
   type Mention,
+  type ImageAttachment,
 } from '@/api/chat';
 import { listApprovals, type Approval } from '@/api/approvals';
 import { invalidateChatSessions, useChatSessions } from '@/store/chatSessions';
@@ -32,7 +34,7 @@ import {
   unregisterChatTurnController,
 } from '@/lib/chatTurnRegistry';
 
-type LocationState = { initialPrompt?: string } | null;
+type LocationState = { initialPrompt?: string; initialAttachments?: File[] } | null;
 
 export default function ChatThreadPage() {
   const { tr, locale } = useI18n();
@@ -40,6 +42,7 @@ export default function ChatThreadPage() {
   const { sessionId = '' } = useParams<{ sessionId: string }>();
   const location = useLocation();
   const initialPrompt = (location.state as LocationState)?.initialPrompt;
+  const initialAttachments = (location.state as LocationState)?.initialAttachments;
 
   const sessions = useChatSessions((s) => s.sessions);
   const sessionMeta = sessions.find((s) => String(s.id) === String(sessionId));
@@ -229,16 +232,16 @@ export default function ChatThreadPage() {
   // tool cards as they happen.
   useEffect(() => {
     if (loading) return;
-    if (!initialPrompt || !sessionId || sentInitialRef.current) return;
+    if ((!initialPrompt && !initialAttachments?.length) || !sessionId || sentInitialRef.current) return;
     if (messages.length > 0) {
       // Session already has messages (e.g. user navigated back); skip.
       sentInitialRef.current = true;
       return;
     }
     sentInitialRef.current = true;
-    void send(initialPrompt, []);
+    void send(initialPrompt ?? '', [], { attachments: initialAttachments });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, initialPrompt, sessionId, messages.length]);
+  }, [loading, initialPrompt, initialAttachments, sessionId, messages.length]);
 
   // Auto-scroll to bottom — but ONLY if the user hasn't scrolled up.
   // Driven by stickToBottomRef (see its definition above for why we
@@ -267,15 +270,26 @@ export default function ChatThreadPage() {
   async function send(
     content: string,
     mentions: Mention[],
-    opts: { expectedTool?: string; displayContent?: string } = {},
+    opts: { expectedTool?: string; displayContent?: string; attachments?: File[] } = {},
   ): Promise<boolean> {
-    if (!sessionId || !content.trim()) return false;
+    if (!sessionId || (!content.trim() && !opts.attachments?.length)) return false;
     const turnSessionID = sessionId;
     setError(null);
     setSubmitting(true);
     const ac = new AbortController();
     abortRef.current = ac;
     registerChatTurnController(turnSessionID, ac);
+
+    let uploadedAttachments: ImageAttachment[] = [];
+    try {
+      uploadedAttachments = await Promise.all((opts.attachments ?? []).map((file) => uploadChatAttachment(turnSessionID, file)));
+    } catch (uploadError) {
+      setError((uploadError as Error).message || tr('图片上传失败', 'Image upload failed'));
+      setSubmitting(false);
+      unregisterChatTurnController(turnSessionID, ac);
+      abortRef.current = null;
+      return false;
+    }
     let expectedToolSeen = !opts.expectedTool;
     let expectedToolFailed = false;
 
@@ -287,7 +301,7 @@ export default function ChatThreadPage() {
     const tempUserId = `optimistic-user-${Date.now()}`;
     setMessages((prev) => [
       ...prev,
-      { id: tempUserId, role: 'user', content: opts.displayContent ?? content },
+      { id: tempUserId, role: 'user', content: opts.displayContent ?? content, attachments: uploadedAttachments },
     ]);
 
     try {
@@ -444,6 +458,7 @@ export default function ChatThreadPage() {
           mentions,
           provider: selectedModel?.provider,
           model: selectedModel?.model,
+          attachmentIds: uploadedAttachments.map((attachment) => attachment.id),
           webSearchEnabled,
           locale,
         },
@@ -624,6 +639,7 @@ export default function ChatThreadPage() {
                 <MessageBubble
                   key={m.id}
                   message={m}
+                  sessionId={sessionId}
                   onConfirmConfigDraft={isViewer ? undefined : confirmConfigDraft}
                   hideActiveOperations
                 />
@@ -680,7 +696,8 @@ export default function ChatThreadPage() {
               </div>
             )}
             <ChatInput
-              onSubmit={(p: SubmitPayload) => void send(p.text, p.mentions)}
+              onSubmit={(p: SubmitPayload) => void send(p.text, p.mentions, { attachments: p.attachments })}
+              allowAttachments
               disabled={submitting}
               autoFocus
               placeholder={tr('继续聊…  Shift+Enter 换行', 'Continue the conversation… Shift+Enter for newline')}

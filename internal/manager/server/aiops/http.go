@@ -14,11 +14,15 @@
 package aiops
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -53,6 +57,11 @@ type AIOpsService interface {
 	StopSession(ctx context.Context, caller svc.Caller, sessionID string) (bool, error)
 	UsageToday(ctx context.Context) (*biz.DailyUsage, error)
 	ListMutatingProposals(ctx context.Context, caller svc.Caller, f biz.MutatingProposalFilter) ([]*model.MutatingProposal, int64, error)
+}
+
+type attachmentService interface {
+	UploadAttachment(ctx context.Context, caller svc.Caller, sessionID, name, mimeType string, size int64, src io.Reader) (*model.Attachment, error)
+	GetAttachment(ctx context.Context, caller svc.Caller, sessionID, attachmentID string) (*model.Attachment, error)
 }
 
 // MentionSearcher is the narrow biz contract for @-mention search. Optional —
@@ -146,6 +155,8 @@ func (h *Handler) Register(r chi.Router) {
 	r.Post("/v1/chat/sessions", h.createSession)
 	r.Get("/v1/chat/sessions", h.listSessions)
 	r.Post("/v1/chat/sessions/{id}/messages", h.postMessage)
+	r.Post("/v1/chat/sessions/{id}/attachments", h.uploadAttachment)
+	r.Get("/v1/chat/sessions/{id}/attachments/{attachmentID}", h.getAttachment)
 	r.Post("/v1/chat/sessions/{id}/messages/stream", h.postMessageStream)
 	r.Post("/v1/chat/sessions/{id}/stop", h.stopSession)
 	r.Get("/v1/chat/sessions/{id}/messages", h.listMessages)
@@ -337,6 +348,7 @@ type listSessionsResp struct {
 
 type postMessageReq struct {
 	Content          string         `json:"content"`
+	AttachmentIDs    []string       `json:"attachment_ids,omitempty"`
 	Provider         string         `json:"provider,omitempty"`
 	Model            string         `json:"model,omitempty"`
 	Mentions         []mentionInput `json:"mentions,omitempty"`
@@ -344,6 +356,38 @@ type postMessageReq struct {
 	// Locale is the SPA's UI language ("en-US"/"zh-CN") so the agent
 	// answers in that language. Optional (IM/other callers omit it).
 	Locale string `json:"locale,omitempty"`
+}
+
+const (
+	maxMessageImages     = 4
+	maxImageBytes        = 5 << 20
+	maxMessageImageBytes = 20 << 20
+	maxImagePixels       = 40_000_000
+	maxMessageBodyBytes  = 1 << 20
+)
+
+func isAllowedImageMIMEType(mimeType string) bool {
+	switch mimeType {
+	case "image/png", "image/jpeg", "image/webp":
+		return true
+	default:
+		return false
+	}
+}
+
+func attachmentRefs(ids []string) ([]model.Attachment, error) {
+	if len(ids) > maxMessageImages {
+		return nil, fmt.Errorf("%w: at most %d images are allowed", errs.ErrInvalid, maxMessageImages)
+	}
+	out := make([]model.Attachment, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return nil, fmt.Errorf("%w: empty attachment id", errs.ErrInvalid)
+		}
+		out = append(out, model.Attachment{ID: id})
+	}
+	return out, nil
 }
 
 // mentionInput is the wire shape the SPA sends for each @-mention chip.
@@ -399,11 +443,12 @@ type postMessageResp struct {
 }
 
 type messageDTO struct {
-	ID         string `json:"id"`
-	Role       string `json:"role"`
-	Content    string `json:"content,omitempty"`
-	ToolCallID string `json:"tool_call_id,omitempty"`
-	ToolName   string `json:"tool_name,omitempty"`
+	ID          string             `json:"id"`
+	Role        string             `json:"role"`
+	Content     string             `json:"content,omitempty"`
+	Attachments []model.Attachment `json:"attachments,omitempty"`
+	ToolCallID  string             `json:"tool_call_id,omitempty"`
+	ToolName    string             `json:"tool_name,omitempty"`
 	// Model carries the LLM model id that produced the message — only
 	// populated for role=assistant rows where the routing layer recorded
 	// it. Older rows return "" so the SPA can fall back to "default".
@@ -515,6 +560,161 @@ func (h *Handler) listSessions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, listSessionsResp{Items: items, Total: len(items)})
 }
 
+func (h *Handler) uploadAttachment(w http.ResponseWriter, r *http.Request) {
+	caller, ok := callerFromCtx(r.Context())
+	if !ok {
+		writeErr(w, errs.ErrUnauthorized)
+		return
+	}
+	attachments, ok := h.svc.(attachmentService)
+	if !ok {
+		writeErr(w, errs.ErrNotWiredYet)
+		return
+	}
+	sessionID, err := parseID(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxImageBytes+(1<<20))
+	if err := r.ParseMultipartForm(maxImageBytes); err != nil {
+		writeErr(w, fmt.Errorf("%w: invalid multipart upload", errs.ErrInvalid))
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeErr(w, fmt.Errorf("%w: image file required", errs.ErrInvalid))
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, maxImageBytes+1))
+	if err != nil || len(data) == 0 || len(data) > maxImageBytes {
+		writeErr(w, fmt.Errorf("%w: image must be between 1 byte and 5 MiB", errs.ErrInvalid))
+		return
+	}
+	mimeType, err := validateUploadedImage(data)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	name := filepath.Base(strings.TrimSpace(header.Filename))
+	if name == "." || name == "" {
+		name = "image"
+	}
+	item, err := attachments.UploadAttachment(r.Context(), caller, sessionID, name, mimeType, int64(len(data)), bytes.NewReader(data))
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, item)
+}
+
+func validateUploadedImage(data []byte) (string, error) {
+	mimeType := strings.ToLower(strings.TrimSpace(http.DetectContentType(data)))
+	if !isAllowedImageMIMEType(mimeType) {
+		return "", fmt.Errorf("%w: only PNG, JPEG and WebP images are supported", errs.ErrInvalid)
+	}
+	width, height, ok := imageDimensions(data, mimeType)
+	if !ok || width <= 0 || height <= 0 || int64(width)*int64(height) > maxImagePixels {
+		return "", fmt.Errorf("%w: invalid image or pixel dimensions too large", errs.ErrInvalid)
+	}
+	return mimeType, nil
+}
+
+func imageDimensions(data []byte, mimeType string) (int, int, bool) {
+	if mimeType == "image/png" {
+		if len(data) < 24 || !bytes.Equal(data[:8], []byte{137, 80, 78, 71, 13, 10, 26, 10}) {
+			return 0, 0, false
+		}
+		return int(binary.BigEndian.Uint32(data[16:20])), int(binary.BigEndian.Uint32(data[20:24])), true
+	}
+	if mimeType == "image/webp" {
+		return webPDimensions(data)
+	}
+	if mimeType != "image/jpeg" || len(data) < 4 || data[0] != 0xff || data[1] != 0xd8 {
+		return 0, 0, false
+	}
+	for offset := 2; offset+9 < len(data); {
+		if data[offset] != 0xff {
+			offset++
+			continue
+		}
+		marker := data[offset+1]
+		offset += 2
+		if marker == 0xd8 || marker == 0xd9 {
+			continue
+		}
+		if offset+2 > len(data) {
+			break
+		}
+		length := int(binary.BigEndian.Uint16(data[offset : offset+2]))
+		if length < 2 || offset+length > len(data) {
+			break
+		}
+		if marker >= 0xc0 && marker <= 0xc3 && length >= 7 {
+			return int(binary.BigEndian.Uint16(data[offset+5 : offset+7])), int(binary.BigEndian.Uint16(data[offset+3 : offset+5])), true
+		}
+		offset += length
+	}
+	return 0, 0, false
+}
+
+func webPDimensions(data []byte) (int, int, bool) {
+	if len(data) < 30 || string(data[:4]) != "RIFF" || string(data[8:12]) != "WEBP" {
+		return 0, 0, false
+	}
+	switch string(data[12:16]) {
+	case "VP8X":
+		width := 1 + int(data[24]) + int(data[25])<<8 + int(data[26])<<16
+		height := 1 + int(data[27]) + int(data[28])<<8 + int(data[29])<<16
+		return width, height, true
+	case "VP8L":
+		if len(data) < 25 || data[20] != 0x2f {
+			return 0, 0, false
+		}
+		bits := binary.LittleEndian.Uint32(data[21:25])
+		return int(bits&0x3fff) + 1, int((bits>>14)&0x3fff) + 1, true
+	case "VP8 ":
+		if len(data) < 30 || data[23] != 0x9d || data[24] != 0x01 || data[25] != 0x2a {
+			return 0, 0, false
+		}
+		width := int(binary.LittleEndian.Uint16(data[26:28]) & 0x3fff)
+		height := int(binary.LittleEndian.Uint16(data[28:30]) & 0x3fff)
+		return width, height, true
+	default:
+		return 0, 0, false
+	}
+}
+
+func (h *Handler) getAttachment(w http.ResponseWriter, r *http.Request) {
+	caller, ok := callerFromCtx(r.Context())
+	if !ok {
+		writeErr(w, errs.ErrUnauthorized)
+		return
+	}
+	attachments, ok := h.svc.(attachmentService)
+	if !ok {
+		writeErr(w, errs.ErrNotWiredYet)
+		return
+	}
+	sessionID, err := parseID(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	item, err := attachments.GetAttachment(r.Context(), caller, sessionID, chi.URLParam(r, "attachmentID"))
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", item.MIMEType)
+	w.Header().Set("Content-Length", strconv.FormatInt(int64(len(item.Data)), 10))
+	w.Header().Set("Cache-Control", "private, max-age=3600")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(item.Data)
+}
+
 func (h *Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 	caller, ok := callerFromCtx(r.Context())
 	if !ok {
@@ -526,9 +726,15 @@ func (h *Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxMessageBodyBytes)
 	var req postMessageReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, errors.Join(errs.ErrInvalid, err))
+		return
+	}
+	attachments, err := attachmentRefs(req.AttachmentIDs)
+	if err != nil {
+		writeErr(w, err)
 		return
 	}
 	opts := agent.RunOptions{
@@ -537,6 +743,7 @@ func (h *Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 		Mentions:         toAgentMentions(req.Mentions),
 		WebSearchEnabled: req.WebSearchEnabled,
 		Locale:           req.Locale,
+		Attachments:      attachments,
 	}
 	reply, err := h.svc.PostMessageWithOpts(r.Context(), caller, id, req.Content, opts)
 	if err != nil {
@@ -573,9 +780,15 @@ func (h *Handler) postMessageStream(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxMessageBodyBytes)
 	var req postMessageReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, errors.Join(errs.ErrInvalid, err))
+		return
+	}
+	attachments, err := attachmentRefs(req.AttachmentIDs)
+	if err != nil {
+		writeErr(w, err)
 		return
 	}
 	opts := agent.RunOptions{
@@ -584,6 +797,7 @@ func (h *Handler) postMessageStream(w http.ResponseWriter, r *http.Request) {
 		Mentions:         toAgentMentions(req.Mentions),
 		WebSearchEnabled: req.WebSearchEnabled,
 		Locale:           req.Locale,
+		Attachments:      attachments,
 	}
 
 	flusher, ok := w.(http.Flusher)
@@ -999,10 +1213,10 @@ func (h *Handler) listModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type providerDTO struct {
-		ID     string   `json:"id"`
-		Label  string   `json:"label"`
-		Models []string `json:"models"`
-		Model  string   `json:"model,omitempty"`
+		ID          string   `json:"id"`
+		Label       string   `json:"label"`
+		Models      []string `json:"models"`
+		Model       string   `json:"model,omitempty"`
 	}
 	type defaultDTO struct {
 		Provider string `json:"provider"`
@@ -1016,10 +1230,10 @@ func (h *Handler) listModels(w http.ResponseWriter, r *http.Request) {
 	if h.catalog != nil {
 		for _, p := range h.catalog.Providers() {
 			out.Providers = append(out.Providers, providerDTO{
-				ID:     p.ID,
-				Label:  p.Label,
-				Models: p.Models,
-				Model:  p.Model,
+				ID:          p.ID,
+				Label:       p.Label,
+				Models:      p.Models,
+				Model:       p.Model,
 			})
 		}
 		defID, defModel := h.catalog.Default()
@@ -1055,9 +1269,10 @@ func toSessionDTO(s *model.Session) sessionDTO {
 
 func toMessageDTO(m *model.Message) messageDTO {
 	out := messageDTO{
-		ID:        m.ID,
-		Role:      m.Role,
-		CreatedAt: m.CreatedAt,
+		ID:          m.ID,
+		Role:        m.Role,
+		CreatedAt:   m.CreatedAt,
+		Attachments: m.Attachments,
 	}
 	if m.Content != nil {
 		out.Content = *m.Content

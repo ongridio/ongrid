@@ -44,7 +44,9 @@ func ProbeChatCompletion(ctx context.Context, cfg Config) (*ProbeResult, error) 
 	if baseURL != "" {
 		sdkCfg.BaseURL = baseURL
 	}
-	transport := http.RoundTripper(http.DefaultTransport)
+	baseTransport := NewHTTPTransport(cfg.TLSInsecure)
+	defer baseTransport.CloseIdleConnections()
+	transport := http.RoundTripper(baseTransport)
 	if zhipuauth.LooksLikeZhipuURL(baseURL) && zhipuauth.LooksLikeZhipuKey(cfg.APIKey) {
 		transport = &zhipuJWTTransport{apiKey: cfg.APIKey, base: transport}
 	}

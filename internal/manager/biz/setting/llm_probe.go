@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -57,6 +58,7 @@ const (
 // persisted only by LLMConfigurationService.Save; it must never be logged or
 // copied into LLMProbeResult.
 type LLMProbeInput struct {
+	TLSInsecure  bool     `json:"tls_insecure"`
 	Provider     string   `json:"provider"`
 	APIKey       string   `json:"api_key"`
 	BaseURL      string   `json:"base_url"`
@@ -101,6 +103,7 @@ func NewLLMConfigProbe(defaults map[string]EnvProviderDefaults) *LLMConfigProbe 
 }
 
 type validatedLLMConfig struct {
+	tlsInsecure      bool
 	provider         string
 	apiKey           string
 	storedBaseURL    string
@@ -167,12 +170,20 @@ func (s *LLMConfigurationService) Save(ctx context.Context, in LLMProbeInput) (L
 	if err != nil {
 		return result, fmt.Errorf("encode llm models: %w", err)
 	}
-	if err := s.settings.SetBatch(ctx, []settingmodel.Setting{
+	rows := []settingmodel.Setting{
 		{Category: settingmodel.CategoryLLM, Key: keys.apiKey, Value: cfg.apiKey, Sensitive: true},
 		{Category: settingmodel.CategoryLLM, Key: keys.baseURL, Value: cfg.storedBaseURL},
 		{Category: settingmodel.CategoryLLM, Key: keys.defaultModel, Value: cfg.defaultModel},
 		{Category: settingmodel.CategoryLLM, Key: keys.models, Value: modelsJSON},
-	}); err != nil {
+	}
+	if cfg.provider == settingmodel.LLMProviderCustom {
+		rows = append(rows, settingmodel.Setting{
+			Category: settingmodel.CategoryLLM,
+			Key:      settingmodel.KeyCustomTLSInsecure,
+			Value:    strconv.FormatBool(cfg.tlsInsecure),
+		})
+	}
+	if err := s.settings.SetBatch(ctx, rows); err != nil {
 		return result, fmt.Errorf("save llm provider %s: %w", cfg.provider, err)
 	}
 	result.Saved = true
@@ -207,12 +218,18 @@ func (p *LLMConfigProbe) validateInput(in LLMProbeInput, operational bool) (vali
 	defaultModel := strings.TrimSpace(in.DefaultModel)
 	result := LLMProbeResult{Code: LLMProbeCodeOK, Provider: provider, Model: defaultModel}
 	cfg := validatedLLMConfig{
+		tlsInsecure:   in.TLSInsecure,
 		provider:      provider,
 		apiKey:        in.APIKey,
 		storedBaseURL: strings.TrimSpace(in.BaseURL),
 		defaultModel:  defaultModel,
 	}
 
+	if in.TLSInsecure && provider != settingmodel.LLMProviderCustom {
+		result.Code = LLMProbeCodeInvalidRequest
+		result.Detail = "TLS override is only allowed for custom providers"
+		return cfg, result, false
+	}
 	if !isKnownLLMProvider(provider) {
 		result.Code = LLMProbeCodeUnsupportedProvider
 		return cfg, result, false
@@ -313,10 +330,11 @@ func (p *LLMConfigProbe) probeValidated(ctx context.Context, cfg validatedLLMCon
 	}
 	for _, modelName := range models {
 		_, err := p.call(probeCtx, llm.Config{
-			APIKey:  cfg.apiKey,
-			Model:   modelName,
-			BaseURL: cfg.effectiveBaseURL,
-			Timeout: p.timeout,
+			TLSInsecure: cfg.tlsInsecure,
+			APIKey:      cfg.apiKey,
+			Model:       modelName,
+			BaseURL:     cfg.effectiveBaseURL,
+			Timeout:     p.timeout,
 		})
 		if err != nil {
 			result.Model = modelName

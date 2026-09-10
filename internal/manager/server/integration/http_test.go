@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -29,6 +30,7 @@ type stubGrafana struct {
 }
 
 type stubLLMConfigProbe struct {
+	fetch func(context.Context, bizsetting.LLMProbeInput) (bizsetting.LLMModelsResult, error)
 	probe func(context.Context, bizsetting.LLMProbeInput) (bizsetting.LLMProbeResult, error)
 	save  func(context.Context, bizsetting.LLMProbeInput) (bizsetting.LLMProbeResult, error)
 }
@@ -55,6 +57,58 @@ func (s stubURLConfigProbe) ProbeConfiguration(ctx context.Context, in bizsettin
 
 func (s stubWebSearchConfigProbe) ProbeConfiguration(ctx context.Context, in bizsetting.WebSearchProbeInput) (string, string, error) {
 	return s.probe(ctx, in)
+}
+
+func (s stubLLMConfigProbe) FetchModels(ctx context.Context, in bizsetting.LLMProbeInput) (bizsetting.LLMModelsResult, error) {
+	if s.fetch == nil {
+		return bizsetting.LLMModelsResult{}, errors.New("unexpected llm model fetch")
+	}
+	return s.fetch(ctx, in)
+}
+
+func TestFetchLLMModels(t *testing.T) {
+	for _, tc := range []struct {
+		role   string
+		wired  bool
+		body   string
+		status int
+	}{
+		{role: "admin", wired: true, body: `{"provider":"custom","api_key":"draft"}`, status: http.StatusOK},
+		{role: "user", wired: true, body: `{}`, status: http.StatusForbidden},
+		{wired: true, body: `{}`, status: http.StatusUnauthorized},
+		{role: "admin", body: `{}`, status: http.StatusServiceUnavailable},
+		{role: "admin", wired: true, body: `{"unknown":1}`, status: http.StatusBadRequest},
+		{role: "admin", wired: true, body: `{} {}`, status: http.StatusBadRequest},
+	} {
+		t.Run(fmt.Sprintf("%s-%d", tc.role, tc.status), func(t *testing.T) {
+			h := NewHandler(nil, nil, nil, nil, nil)
+			calls := 0
+			if tc.wired {
+				h.SetLLMProbe(stubLLMConfigProbe{fetch: func(_ context.Context, in bizsetting.LLMProbeInput) (bizsetting.LLMModelsResult, error) {
+					calls++
+					if in.APIKey != "draft" {
+						t.Error("draft credential not forwarded")
+					}
+					return bizsetting.LLMModelsResult{Models: []string{"model-a"}}, nil
+				}})
+			}
+			r := httptest.NewRequest(http.MethodPost, "/v1/integrations/llm/models", strings.NewReader(tc.body))
+			if tc.role != "" {
+				r = r.WithContext(tenantctx.With(r.Context(), tenantctx.Tenant{UserID: 7, Role: tc.role}))
+			}
+			w := httptest.NewRecorder()
+			newRouter(h).ServeHTTP(w, r)
+			if w.Code != tc.status {
+				t.Fatalf("status %d: %s", w.Code, w.Body.String())
+			}
+			if tc.status != http.StatusOK && calls != 0 {
+				t.Fatal("rejected request reached service")
+			}
+			if strings.Contains(w.Body.String(), "draft") {
+				t.Fatal("credential leaked")
+			}
+		})
+	}
 }
 
 func (s stubLLMConfigProbe) Probe(ctx context.Context, in bizsetting.LLMProbeInput) (bizsetting.LLMProbeResult, error) {

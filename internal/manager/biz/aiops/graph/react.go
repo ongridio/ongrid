@@ -229,7 +229,7 @@ func assembleMessages(in *Input) ([]*schema.Message, error) {
 	}
 	out = append(out, in.History...)
 
-	if in.UserText != "" {
+	if in.UserText != "" || len(in.UserImages) > 0 {
 		// 1. Per-turn system-reminder, as its own user-role message.
 		// — re-injected on every turn so it survives
 		//    long-session attention drift.
@@ -242,7 +242,9 @@ func assembleMessages(in *Input) ([]*schema.Message, error) {
 		if in.MentionsRendered != "" {
 			userBody = in.MentionsRendered + "\n\n" + userBody
 		}
-		out = append(out, schema.UserMessage(userBody))
+		userMessage := schema.UserMessage(userBody)
+		userMessage.UserInputMultiContent = in.UserImages
+		out = append(out, userMessage)
 	}
 	return out, nil
 }

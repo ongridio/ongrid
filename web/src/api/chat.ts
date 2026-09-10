@@ -3,6 +3,14 @@ import { getToken } from '@/store/auth';
 
 export type ChatRole = 'user' | 'assistant' | 'tool' | 'system';
 
+export type ImageAttachment = {
+	 id: string;
+  name: string;
+  mime_type: string;
+  size: number;
+  created_at?: string;
+};
+
 export type ToolCallSummary = {
   id?: string; // server tool_call_id (UUID); absent on history-replay rows
   name: string;
@@ -26,6 +34,7 @@ export type ChatMessage = {
   id: string;
   role: ChatRole;
   content?: string;
+  attachments?: ImageAttachment[];
   tool_call_id?: string;
   tool_name?: string;
   created_at?: string;
@@ -122,6 +131,34 @@ export function getMessages(sessionId: string | number) {
   );
 }
 
+export async function uploadChatAttachment(sessionId: string | number, file: File): Promise<ImageAttachment> {
+  const form = new FormData();
+  form.append('file', file);
+  const headers: Record<string, string> = {};
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const response = await fetch(`/api/v1/chat/sessions/${encodeURIComponent(String(sessionId))}/attachments`, {
+    method: 'POST',
+    headers,
+    body: form,
+  });
+  if (!response.ok) {
+    throw new ApiError(await response.text(), response.status);
+  }
+  return response.json() as Promise<ImageAttachment>;
+}
+
+export async function loadChatAttachment(sessionId: string | number, attachmentId: string): Promise<string> {
+  const headers: Record<string, string> = {};
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const response = await fetch(`/api/v1/chat/sessions/${encodeURIComponent(String(sessionId))}/attachments/${encodeURIComponent(attachmentId)}`, { headers });
+  if (!response.ok) {
+    throw new ApiError(await response.text(), response.status);
+  }
+  return URL.createObjectURL(await response.blob());
+}
+
 // Mention is the structured @-reference produced by the chat input
 // popover and round-tripped to the backend so the agent can hydrate
 // each into a context bullet (read-only — no tool round-trip).
@@ -141,6 +178,7 @@ export type MentionItem = {
 };
 
 export type SendOptions = {
+  attachmentIds?: string[];
   mentions?: Mention[];
   provider?: string;
   model?: string;
@@ -161,6 +199,7 @@ export function postMessage(sessionId: string | number, content: string, opts: S
   if (opts.mentions && opts.mentions.length > 0) body.mentions = opts.mentions;
   if (opts.webSearchEnabled) body.web_search_enabled = true;
   if (opts.locale) body.locale = opts.locale;
+  if (opts.attachmentIds && opts.attachmentIds.length > 0) body.attachment_ids = opts.attachmentIds;
   return request<PostMessageResponse>(
     'POST',
     `/chat/sessions/${encodeURIComponent(String(sessionId))}/messages`,
@@ -281,6 +320,7 @@ export async function streamMessage(
   if (opts.mentions && opts.mentions.length > 0) body.mentions = opts.mentions;
   if (opts.webSearchEnabled) body.web_search_enabled = true;
   if (opts.locale) body.locale = opts.locale;
+  if (opts.attachmentIds && opts.attachmentIds.length > 0) body.attachment_ids = opts.attachmentIds;
 
   const res = await fetch(url, {
     method: 'POST',

@@ -6,9 +6,10 @@ import { Input, Label } from '@/components/ui';
 // integrations 里以 LLMCard 形式存在。这次拆出来，让 /settings/llm
 // 直接进多 provider 配置（更对应它的菜单名字）。
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, Eye, EyeOff, Loader2, PlugZap, Plus, Save, Sparkles, Star, Trash2 } from 'lucide-react';
+import { Check, Download, Eye, EyeOff, Loader2, PlugZap, Plus, Save, Sparkles, Star, Trash2 } from 'lucide-react';
 import { ApiError } from '@/api/client';
 import {
+  fetchLLMModels,
   listSettings,
   revealSetting,
   saveLLMConfiguration,
@@ -25,6 +26,7 @@ import { useI18n } from '@/i18n/locale';
 type LLMProviderID = 'openai' | 'anthropic' | 'zhipu' | 'gemini' | 'deepseek' | 'kimi' | 'minimax' | 'xiaomi' | 'custom';
 
 type LLMProviderForm = {
+  tls_insecure: boolean;
   api_key: string;
   base_url: string;
   models: string[]; // 顺序敏感；index 0 = 默认（除非 default_model 覆盖）
@@ -209,6 +211,7 @@ function orderedProviders(locale: string): LLMProviderMeta[] {
 }
 
 const emptyLLMForm: LLMProviderForm = {
+  tls_insecure: false,
   api_key: '',
   base_url: '',
   models: [],
@@ -307,9 +310,12 @@ function LLMProviderCard({ meta, initialSettings }: { meta: LLMProviderMeta; ini
   const [revealed, setRevealed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [fetchingModels, setFetchingModels] = useState(false);
+  const [modelFetchMessage, setModelFetchMessage] = useState<string | null>(null);
   const [savedOk, setSavedOk] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [newModel, setNewModel] = useState('');
+  const [modelListTouched, setModelListTouched] = useState(false);
   const [probe, setProbe] = useState<LLMProbeState>({ kind: 'idle' });
   const probeVersion = useRef(0);
 
@@ -320,6 +326,7 @@ function LLMProviderCard({ meta, initialSettings }: { meta: LLMProviderMeta; ini
       const items = initial ?? (await listSettings('llm')).items as SystemSetting[];
       const next: LLMProviderForm = { ...emptyLLMForm, models: [] };
       for (const it of items) {
+        if (meta.custom && it.key === 'custom_tls_insecure') next.tls_insecure = it.value === 'true';
         if (it.key === meta.keyBaseURL) next.base_url = it.value ?? '';
         if (it.key === meta.keyDefaultModel) next.default_model = it.value ?? '';
         if (it.key === meta.keyModels && it.value) {
@@ -344,6 +351,7 @@ function LLMProviderCard({ meta, initialSettings }: { meta: LLMProviderMeta; ini
       }
       setServer(next);
       setDraft(next);
+      setModelListTouched(false);
       setConfigured(providerConfigured(items, meta));
       setRevealed(false);
     } catch (e) {
@@ -358,6 +366,8 @@ function LLMProviderCard({ meta, initialSettings }: { meta: LLMProviderMeta; ini
   }, [initialSettings, refresh]);
 
   const dirty =
+    modelListTouched ||
+    draft.tls_insecure !== server.tls_insecure ||
     draft.api_key !== server.api_key ||
     draft.base_url !== server.base_url ||
     draft.default_model !== server.default_model ||
@@ -390,6 +400,7 @@ function LLMProviderCard({ meta, initialSettings }: { meta: LLMProviderMeta; ini
   };
 
   const removeModel = (m: string) => {
+    setModelListTouched(true);
     setSavedOk(false);
     probeVersion.current += 1;
     setProbe({ kind: 'idle' });
@@ -409,12 +420,53 @@ function LLMProviderCard({ meta, initialSettings }: { meta: LLMProviderMeta; ini
   };
 
   const signatureFor = (form: LLMProviderForm) => JSON.stringify([
+    form.tls_insecure,
     meta.id,
     form.api_key,
     form.base_url.trim(),
     form.default_model.trim(),
     form.models.map((model) => model.trim()),
   ]);
+
+  const loadModels = async () => {
+    const requestVersion = probeVersion.current + 1;
+    probeVersion.current = requestVersion;
+    setFetchingModels(true);
+    setModelFetchMessage(null);
+    setErr(null);
+    setProbe({ kind: 'idle' });
+    try {
+      const result = await fetchLLMModels({
+        provider: meta.id,
+        api_key: draft.api_key,
+        base_url: draft.base_url.trim(),
+        default_model: draft.default_model.trim(),
+        models: draft.models,
+        ...(meta.custom ? { tls_insecure: draft.tls_insecure } : {}),
+      });
+      // Do not let an older request overwrite edits made while it was running.
+      if (probeVersion.current !== requestVersion) return;
+      if (result.models.length === 0) {
+        setModelFetchMessage(tr('服务未返回任何模型，已保留原列表。', 'The provider returned no models; the existing list is unchanged.'));
+        return;
+      }
+      setDraft((current) => ({
+        ...current,
+        models: result.models,
+        default_model: result.models.includes(current.default_model) ? current.default_model : result.models[0],
+      }));
+      setSavedOk(false);
+      setModelFetchMessage(result.truncated
+        ? tr(`已获取前 ${result.models.length} 个模型，请检查后保存。`, `Fetched the first ${result.models.length} models. Review and save.`)
+        : tr(`已获取 ${result.models.length} 个模型，请检查后保存。`, `Fetched ${result.models.length} models. Review and save.`));
+    } catch (e) {
+      if (probeVersion.current === requestVersion) {
+        setErr(e instanceof ApiError ? e.message : (e as Error).message);
+      }
+    } finally {
+      setFetchingModels(false);
+    }
+  };
 
   const testDraft = async (): Promise<LLMConfigurationProbeResult | null> => {
     const signature = signatureFor(draft);
@@ -430,6 +482,7 @@ function LLMProviderCard({ meta, initialSettings }: { meta: LLMProviderMeta; ini
         base_url: draft.base_url.trim(),
         default_model: draft.default_model.trim(),
         models: draft.models,
+        ...(meta.custom ? { tls_insecure: draft.tls_insecure } : {}),
       });
       if (probeVersion.current !== requestVersion) return null;
       setProbe(result.valid
@@ -470,6 +523,7 @@ function LLMProviderCard({ meta, initialSettings }: { meta: LLMProviderMeta; ini
         base_url: snapshot.base_url.trim(),
         default_model: snapshot.default_model.trim(),
         models: snapshot.models,
+        ...(meta.custom ? { tls_insecure: snapshot.tls_insecure } : {}),
       });
       if (probeVersion.current !== requestVersion) return;
       if (!result.valid || !result.saved) {
@@ -564,7 +618,17 @@ function LLMProviderCard({ meta, initialSettings }: { meta: LLMProviderMeta; ini
           )}
 
           <div>
-            <span className="mb-1 block text-xs text-zinc-400">{tr('模型列表', 'Models')}</span>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <span className="text-xs text-zinc-400">{tr('模型列表', 'Models')}</span>
+              <Button
+                onClick={() => void loadModels()}
+                disabled={fetchingModels || saving || probe.kind === 'testing' || draft.api_key.trim() === '' || (meta.custom && draft.base_url.trim() === '')}
+              >
+                {fetchingModels ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                {fetchingModels ? tr('获取中…', 'Fetching…') : tr('获取模型', 'Fetch models')}
+              </Button>
+            </div>
+            {modelFetchMessage && <p role="status" className="mb-2 text-xs text-zinc-400">{modelFetchMessage}</p>}
             {draft.models.length === 0 ? (
               <p className="rounded border border-dashed border-zinc-800 bg-zinc-950/40 px-3 py-2 text-[11px] text-zinc-600">
                 {tr(`还没添加模型 — 在下面输入框里加一个，例 ${meta.modelPlaceholder}`, `No models yet — add one in the input below, e.g. ${meta.modelPlaceholder}`)}
@@ -636,15 +700,33 @@ function LLMProviderCard({ meta, initialSettings }: { meta: LLMProviderMeta; ini
         </div>
       )}
 
+      {meta.custom && !loading && (
+        <div className="mt-4 space-y-1">
+          <label className="flex items-center gap-2 text-xs text-zinc-400">
+            <input
+              type="checkbox"
+              checked={draft.tls_insecure}
+              onChange={(event) => update('tls_insecure', event.target.checked)}
+            />
+            {tr('跳过 TLS 校验（自签证书时勾选）', 'Skip TLS verification (for self-signed certificates)')}
+          </label>
+          {draft.tls_insecure && (
+            <p className="text-xs text-amber-500">
+              {tr('将不验证服务端证书，仅用于可信内网。获取模型、测试和保存后的对话均生效。', 'Server certificates will not be verified. Use only on trusted networks; applies to model discovery, testing and saved chats.')}
+            </p>
+          )}
+        </div>
+      )}
+
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <Button
           onClick={() => void testDraft()}
-          disabled={saving || probe.kind === 'testing' || draft.api_key.trim() === ''}
+          disabled={fetchingModels || saving || probe.kind === 'testing' || draft.api_key.trim() === ''}
         >
           {probe.kind === 'testing' ? <Loader2 size={14} className="animate-spin" /> : <PlugZap size={14} />}
           <span>{probe.kind === 'testing' ? tr('检测中…', 'Testing…') : tr('测试配置', 'Test configuration')}</span>
         </Button>
-        <Button onClick={submit} disabled={!dirty || saving || probe.kind === 'testing'} variant="primary">
+        <Button onClick={submit} disabled={fetchingModels || !dirty || saving || probe.kind === 'testing'} variant="primary">
           {savedOk && !dirty ? <Check size={14} /> : <Save size={14} />}
           <span>{saving
             ? probe.kind === 'testing' ? tr('校验中…', 'Validating…') : tr('保存中…', 'Saving…')

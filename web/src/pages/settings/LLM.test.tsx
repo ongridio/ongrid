@@ -51,6 +51,70 @@ beforeEach(() => {
   localStorage.setItem('ongrid-locale', 'zh-CN');
 });
 
+describe('SettingsLLM model discovery and custom TLS', () => {
+  it('fetches models from the unsaved draft without saving', async () => {
+    let body: Record<string, unknown> | null = null;
+    let saves = 0;
+    server.use(
+      http.get('/api/v1/system-settings', () => HttpResponse.json({ items: baseRows(), total: 4 })),
+      http.get('/api/v1/system-settings/llm/openai_api_key/reveal', () => HttpResponse.json({ value: 'secret-key' })),
+      http.post('/api/v1/integrations/llm/models', async ({ request }) => {
+        body = await request.json() as Record<string, unknown>;
+        return HttpResponse.json({ models: ['a-new', 'gpt-test'], truncated: false });
+      }),
+      http.post('/api/v1/integrations/llm/validate-and-save', () => {
+        saves += 1;
+        return HttpResponse.json({});
+      }),
+    );
+
+    await renderPage();
+    const { controls } = await openAIControls();
+    await userEvent.click(controls.getByRole('button', { name: '获取模型' }));
+
+    expect(await controls.findByText('a-new')).toBeInTheDocument();
+    expect(body).toMatchObject({ provider: 'openai', api_key: 'secret-key' });
+    expect(within(controls.getByText('gpt-test').closest('li')!).getByText('默认')).toBeInTheDocument();
+    expect(controls.getByRole('button', { name: '保存' })).toBeEnabled();
+    expect(saves).toBe(0);
+  });
+
+  it('shows the custom TLS warning and forwards the opt-in to discovery and testing', async () => {
+    const now = new Date().toISOString();
+    const rows = [
+      { category: 'llm', key: 'custom_api_key', value: 'masked', sensitive: true, updated_at: now },
+      { category: 'llm', key: 'custom_base_url', value: 'https://local.test/v1', sensitive: false, updated_at: now },
+      { category: 'llm', key: 'custom_models', value: '["old"]', sensitive: false, updated_at: now },
+      { category: 'llm', key: 'custom_default_model', value: 'old', sensitive: false, updated_at: now },
+    ];
+    const calls: Record<string, unknown>[] = [];
+    server.use(
+      http.get('/api/v1/system-settings', () => HttpResponse.json({ items: rows, total: rows.length })),
+      http.get('/api/v1/system-settings/llm/custom_api_key/reveal', () => HttpResponse.json({ value: 'test-only-key' })),
+      http.post('/api/v1/integrations/llm/models', async ({ request }) => {
+        calls.push(await request.json() as Record<string, unknown>);
+        return HttpResponse.json({ models: ['new'], truncated: false });
+      }),
+      http.post('/api/v1/integrations/llm/test', async ({ request }) => {
+        calls.push(await request.json() as Record<string, unknown>);
+        return HttpResponse.json({ valid: true, code: 'ok' });
+      }),
+    );
+
+    await renderPage();
+    const controls = within(await screen.findByTestId('llm-provider-custom'));
+    const checkbox = await controls.findByRole('checkbox', { name: /跳过 TLS 校验/ });
+    expect(checkbox).not.toBeChecked();
+    await userEvent.click(checkbox);
+    expect(controls.getByText(/将不验证服务端证书/)).toBeInTheDocument();
+    await userEvent.click(controls.getByRole('button', { name: '获取模型' }));
+    expect(await controls.findByText('new')).toBeInTheDocument();
+    await userEvent.click(controls.getByRole('button', { name: '测试配置' }));
+    await waitFor(() => expect(calls).toHaveLength(2));
+    calls.forEach((call) => expect(call.tls_insecure).toBe(true));
+  });
+});
+
 describe('SettingsLLM configuration probe', () => {
   it('shows configured providers and adds another provider on demand', async () => {
     server.use(
@@ -232,5 +296,43 @@ describe('SettingsLLM configuration probe', () => {
     expect(await controls.findByRole('button', { name: '已保存' })).toBeDisabled();
     expect(testCalls).toBe(0);
     expect(saveBody).toMatchObject({ api_key: '', default_model: 'gpt-test', models: ['gpt-test'] });
+  });
+
+  it('enables save after removing a persisted model', async () => {
+    server.use(
+      http.get('/api/v1/system-settings', () => HttpResponse.json({ items: baseRows(), total: 4 })),
+      http.get('/api/v1/system-settings/llm/openai_api_key/reveal', () => HttpResponse.json({ value: 'secret-key' })),
+    );
+
+    await renderPage();
+    const { controls } = await openAIControls();
+    const user = userEvent.setup();
+
+    expect(controls.getByRole('button', { name: '保存' })).toBeDisabled();
+    await user.click(controls.getByRole('button', { name: /gpt-test/ }));
+
+    expect(controls.getByRole('button', { name: '保存' })).toBeEnabled();
+  });
+
+  it('keeps save enabled when removing an unsaved discovered model restores the original list', async () => {
+    const rows = baseRows();
+    const modelsRow = rows.find((row) => row.key === 'openai_models');
+    const defaultRow = rows.find((row) => row.key === 'openai_default_model');
+    if (modelsRow) modelsRow.value = '[]';
+    if (defaultRow) defaultRow.value = '';
+    server.use(
+      http.get('/api/v1/system-settings', () => HttpResponse.json({ items: rows, total: 4 })),
+      http.get('/api/v1/system-settings/llm/openai_api_key/reveal', () => HttpResponse.json({ value: 'secret-key' })),
+      http.post('/api/v1/integrations/llm/models', () => HttpResponse.json({ models: ['discovered-model'], truncated: false })),
+    );
+
+    await renderPage();
+    const { controls } = await openAIControls();
+    const user = userEvent.setup();
+
+    await user.click(controls.getByRole('button', { name: '获取模型' }));
+    await user.click(await controls.findByRole('button', { name: /discovered-model/ }));
+
+    expect(controls.getByRole('button', { name: '保存' })).toBeEnabled();
   });
 });

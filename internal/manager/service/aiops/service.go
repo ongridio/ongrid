@@ -23,6 +23,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"reflect"
 	"strings"
@@ -34,6 +35,7 @@ import (
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/chatruntime"
 	model "github.com/ongridio/ongrid/internal/manager/model/aiops"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
+	"github.com/ongridio/ongrid/internal/pkg/llm"
 	"github.com/ongridio/ongrid/internal/pkg/tenantctx"
 )
 
@@ -77,15 +79,16 @@ type APMSourceResolver interface {
 }
 
 type Service struct {
-	apmSource APMSourceResolver
-
-	legacyAgent *agent.Agent
-	runtime     RuntimeHandler
-	kernel      Kernel
-	sessions    biz.SessionRepo
-	proposals   biz.MutatingProposalRepo
-	usage       *biz.UsageUsecase
-	log         *slog.Logger
+	apmSource    APMSourceResolver
+	legacyAgent  *agent.Agent
+	runtime      RuntimeHandler
+	kernel       Kernel
+	sessions     biz.SessionRepo
+	attachments  biz.AttachmentRepo
+	modelCatalog modelCapabilityCatalog
+	proposals    biz.MutatingProposalRepo
+	usage        *biz.UsageUsecase
+	log          *slog.Logger
 
 	// cancels maps an in-flight turn's session id to its cancel func, so an
 	// explicit user "stop" (Esc) can interrupt the turn. This is needed
@@ -138,6 +141,40 @@ func (s *Service) Kernel() Kernel { return s.kernel }
 // closed with ErrNotWiredYet until wired.
 func (s *Service) SetMutatingProposalRepo(repo biz.MutatingProposalRepo) {
 	s.proposals = repo
+}
+
+// SetAttachmentRepo enables private chat image upload and retrieval.
+func (s *Service) SetAttachmentRepo(repo biz.AttachmentRepo) { s.attachments = repo }
+
+type modelCapabilityCatalog interface {
+	Providers() []llm.ProviderInfo
+	Default() (string, string)
+}
+
+func (s *Service) SetModelCatalog(catalog modelCapabilityCatalog) { s.modelCatalog = catalog }
+
+func (s *Service) UploadAttachment(ctx context.Context, caller Caller, sessionID, name, mimeType string, size int64, src io.Reader) (*model.Attachment, error) {
+	if caller.IsViewer() {
+		return nil, errs.ErrForbidden
+	}
+	if _, err := s.GetSession(ctx, caller, sessionID); err != nil {
+		return nil, err
+	}
+	if s.attachments == nil {
+		return nil, errs.ErrNotWiredYet
+	}
+	_, _ = s.attachments.CleanupExpiredAttachments(ctx, time.Now().UTC())
+	return s.attachments.CreateAttachment(ctx, sessionID, caller.UserID, name, mimeType, size, src)
+}
+
+func (s *Service) GetAttachment(ctx context.Context, caller Caller, sessionID, attachmentID string) (*model.Attachment, error) {
+	if _, err := s.GetSession(ctx, caller, sessionID); err != nil {
+		return nil, err
+	}
+	if s.attachments == nil {
+		return nil, errs.ErrNotWiredYet
+	}
+	return s.attachments.GetAttachment(ctx, sessionID, attachmentID, caller.UserID, caller.IsAdmin())
 }
 
 // Caller is the authenticated identity that invoked the HTTP request.
@@ -382,17 +419,41 @@ func (s *Service) PostMessageStreamWithOpts(ctx context.Context, caller Caller, 
 // the response.
 func (s *Service) runWithKernel(ctx context.Context, caller Caller, sessionID string, content string, emit agent.Emit, opts agent.RunOptions) (*agent.Reply, error) {
 	content = strings.TrimSpace(content)
-	if content == "" {
+	if content == "" && len(opts.Attachments) == 0 {
 		return nil, fmt.Errorf("%w: content required", errs.ErrInvalid)
 	}
 	sess, err := s.GetSession(ctx, caller, sessionID)
 	if err != nil {
 		return nil, err
 	}
+	if len(opts.Attachments) > 0 {
+		if s.attachments == nil {
+			return nil, errs.ErrNotWiredYet
+		}
+		ids := make([]string, 0, len(opts.Attachments))
+		for _, attachment := range opts.Attachments {
+			ids = append(ids, attachment.ID)
+		}
+		resolved, resolveErr := s.attachments.ResolveAttachments(ctx, sessionID, ids, caller.UserID, caller.IsAdmin())
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		var total int64
+		for _, attachment := range resolved {
+			total += attachment.Size
+		}
+		if total > 20<<20 {
+			return nil, fmt.Errorf("%w: image attachments exceed 20 MiB", errs.ErrInvalid)
+		}
+		opts.Attachments = resolved
+	}
 	// Per-request overrides win; otherwise use the durable session route.
 	// Empty legacy session fields deliberately fall through to the router's
 	// deployment-wide default.
 	opts = resolveSessionRunOptions(sess, opts)
+	if err := s.validateImageContext(ctx, sessionID, &opts); err != nil {
+		return nil, err
+	}
 
 	// HLD-021: detach the chat turn from the HTTP request lifecycle. A turn now
 	// routinely blocks for minutes inside cloud_bash waiting on a human
@@ -426,6 +487,31 @@ func (s *Service) runWithKernel(ctx context.Context, caller Caller, sessionID st
 		return nil, errs.ErrNotWiredYet
 	}
 	return s.legacyAgent.RunStreamWithOpts(ctx, sessionID, sess.UserID, content, emit, opts)
+}
+
+func (s *Service) validateImageContext(ctx context.Context, sessionID string, opts *agent.RunOptions) error {
+	var total int64
+	for _, attachment := range opts.Attachments {
+		total += attachment.Size
+	}
+	history, err := s.sessions.ListMessages(ctx, sessionID, 0)
+	if err != nil {
+		return err
+	}
+	for _, message := range history {
+		for _, attachment := range message.Attachments {
+			total += attachment.Size
+		}
+	}
+	if total > 20<<20 {
+		return fmt.Errorf("%w: image context exceeds 20 MiB; start a new conversation", errs.ErrInvalid)
+	}
+	// Image capability is intentionally delegated to the selected upstream
+	// model. OpenAI-compatible model catalogs do not expose a standard,
+	// reliable vision-capability flag, so requiring an administrator-maintained
+	// allowlist creates false negatives. Unsupported models return their native
+	// error while Ongrid continues to enforce attachment safety and size limits.
+	return nil
 }
 
 func resolveSessionRunOptions(sess *model.Session, opts agent.RunOptions) agent.RunOptions {
@@ -523,6 +609,7 @@ func (s *Service) runGraph(ctx context.Context, sess *model.Session, content str
 		Model:            opts.Model,
 		WebSearchEnabled: opts.WebSearchEnabled,
 		Locale:           opts.Locale,
+		Attachments:      opts.Attachments,
 		Emit:             graphEmit,
 	}
 	reply, err := s.runtime.Handle(ctx, req)

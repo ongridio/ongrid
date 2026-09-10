@@ -2,10 +2,21 @@ package aiops
 
 import (
 	"context"
+	"io"
 	"time"
 
 	model "github.com/ongridio/ongrid/internal/manager/model/aiops"
 )
+
+// AttachmentRepo owns chat image metadata and the corresponding private
+// files. Implementations must enforce session/user ownership on every read.
+type AttachmentRepo interface {
+	CreateAttachment(ctx context.Context, sessionID string, userID uint64, name, mimeType string, size int64, src io.Reader) (*model.Attachment, error)
+	GetAttachment(ctx context.Context, sessionID, attachmentID string, userID uint64, admin bool) (*model.Attachment, error)
+	ResolveAttachments(ctx context.Context, sessionID string, ids []string, userID uint64, admin bool) ([]model.Attachment, error)
+	DeleteSessionAttachments(ctx context.Context, sessionID string) error
+	CleanupExpiredAttachments(ctx context.Context, now time.Time) (int, error)
+}
 
 // TokenSums is the aggregated token / request count returned by
 // SessionRepo.SumTokensSince. NULL token columns count as zero. Requests is
