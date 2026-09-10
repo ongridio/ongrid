@@ -878,27 +878,29 @@ export default function ApmPage() {
                             >
                               <tr>
                                 <td className="px-4 py-4 align-top">
-                                  <Link
-                                    className="break-words font-medium text-zinc-100 hover:text-indigo-500 hover:underline"
-                                    state={location.state}
-                                    to={to}
-                                    onClick={(event) => openService(event, to)}
-                                  >
-                                    {detail ? row.operation : row.identity.service_name}
-                                  </Link>
-                                  {!detail && (
-                                    <Chip className="ml-2" title={tr('编程语言', 'Programming language')}>
-                                      {row.languages?.length
-                                        ? row.languages.map((language, index) => (
-                                          <span key={language} className="inline-flex items-center gap-1">
-                                            {index > 0 && <span className="mx-1">/</span>}
-                                            {languageIcons[language] && <img src={`/icons/languages/${languageIcons[language]}.svg`} alt="" aria-hidden="true" width={14} height={14} className={`h-3.5 w-3.5 shrink-0${language === 'rust' ? ' rounded-full bg-white' : ''}`} />}
-                                            {languageLabels[language] || language}
-                                          </span>
-                                        ))
-                                        : tr('未知', 'Unknown')}
-                                    </Chip>
-                                  )}
+                                  <div className="flex items-center gap-2">
+                                    <Link
+                                      className="min-w-0 break-words font-medium text-zinc-100 hover:text-indigo-500 hover:underline"
+                                      state={location.state}
+                                      to={to}
+                                      onClick={(event) => openService(event, to)}
+                                    >
+                                      {detail ? row.operation : row.identity.service_name}
+                                    </Link>
+                                    {!detail && (
+                                      <Chip className="shrink-0" title={tr('编程语言', 'Programming language')}>
+                                        {row.languages?.length
+                                          ? row.languages.map((language, index) => (
+                                            <span key={language} className="inline-flex items-center gap-1">
+                                              {index > 0 && <span className="mx-1">/</span>}
+                                              {languageIcons[language] && <img src={`/icons/languages/${languageIcons[language]}.svg`} alt="" aria-hidden="true" width={14} height={14} className={`h-3.5 w-3.5 shrink-0${language === 'rust' ? ' rounded-full bg-white' : ''}`} />}
+                                              {languageLabels[language] || language}
+                                            </span>
+                                          ))
+                                          : tr('未知', 'Unknown')}
+                                      </Chip>
+                                    )}
+                                  </div>
                                 </td>
                                 {!detail && (
                                   <>
