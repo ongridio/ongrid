@@ -5153,14 +5153,11 @@ func coerceValue(v any, typ string) (any, bool) {
 	return v, false
 }
 
-// flowMCPSource live-queries the registered MCP servers (HLD-018) so the flow
-// tool palette and the `tool` node always reflect the CURRENT tool universe —
-// add/remove a server and it shows up / drops out without a restart (n8n's
-// McpClient live-listSearch pattern). MCP tools carry a JSON inputSchema, so
-// they are first-class deterministic nodes (skills, lacking a schema, are not).
+// flowMCPSource 为流程工具面板提供有界并发发现和短期缓存，调用时仍实时校验。
 type flowMCPSource struct {
-	uc  *managerbizmcp.Usecase
-	log *slog.Logger
+	uc    flowMCPBackend
+	log   *slog.Logger
+	cache flowMCPCache
 }
 
 // mcpEntry is one live MCP tool: its wire name + the (server, bareTool) needed
@@ -5171,47 +5168,6 @@ type mcpEntry struct {
 	bare   string
 	desc   string
 	schema json.RawMessage
-}
-
-// enumerate connects to every enabled server and lists its tools. Best-effort:
-// an unreachable server is logged and skipped (degradation, not a hard fail).
-func (m *flowMCPSource) enumerate(ctx context.Context) []mcpEntry {
-	if m == nil || m.uc == nil {
-		return nil
-	}
-	servers, err := m.uc.ListEnabled(ctx)
-	if err != nil {
-		return nil
-	}
-	var out []mcpEntry
-	for _, srv := range servers {
-		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		cli, berr := m.uc.BuildClient(cctx, srv)
-		if berr == nil {
-			berr = cli.Initialize(cctx)
-		}
-		var tools []mcpclient.Tool
-		if berr == nil {
-			tools, berr = cli.ListTools(cctx)
-		}
-		cancel()
-		if berr != nil {
-			if m.log != nil {
-				m.log.Warn("flow mcp: list failed, skipping server", slog.String("server", srv.Name), slog.Any("err", berr))
-			}
-			continue
-		}
-		for _, t := range tools {
-			out = append(out, mcpEntry{
-				wire:   aiopstools.MCPToolName(srv.Name, t.Name),
-				server: srv.Name,
-				bare:   t.Name,
-				desc:   t.Description,
-				schema: t.InputSchema,
-			})
-		}
-	}
-	return out
 }
 
 // metas returns the live MCP tools as flow palette entries.
@@ -5671,8 +5627,8 @@ func (s flowNotifierShim) Notify(ctx context.Context, channelIDs []uint64, title
 // registry — surfaces every registered BaseTool to the canvas palette so
 // each becomes a draggable, form-driven `tool` node. Rebuilds the bag per
 // call (cheap, low-frequency: editor load) so newly registered tools show
-// up without a restart. mcp (optional) live-queries the registered MCP
-// servers each call so their tools appear/disappear without a restart too.
+// up without a restart. MCP discovery uses a short TTL cache; server
+// configuration changes invalidate it immediately.
 type flowToolCatalog struct {
 	reg *aiopstools.Registry
 	mcp *flowMCPSource
