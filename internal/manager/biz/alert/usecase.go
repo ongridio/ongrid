@@ -68,7 +68,7 @@ type Investigator interface {
 // implicitly satisfies it. main.go injects.
 type WorkflowDispatcher interface {
 	// OnAlertFired MUST be non-blocking (same contract as Investigator).
-	OnAlertFired(incidentID uint64, rule, severity string, edgeID, deviceID uint64, labels map[string]string, firedAt time.Time)
+	OnAlertFired(incidentID uint64, ruleKey, ruleName, severity string, edgeID, deviceID uint64, labels map[string]string, firedAt time.Time)
 }
 
 // RuleCacheRefresher makes persisted rule migrations visible to the running
@@ -500,7 +500,7 @@ func (u *Usecase) RecordFiring(ctx context.Context, in FiringInput) (*FiringResu
 			_ = json.Unmarshal([]byte(incident.LabelsJSON), &labels)
 		}
 		// edge_id == device_id 1:1 post entity-split (see model comment).
-		u.workflowDispatcher.OnAlertFired(incident.ID, incident.RuleName, incident.Severity, devID, devID, labels, occurredAt)
+		u.workflowDispatcher.OnAlertFired(incident.ID, incident.Rule, incident.RuleName, incident.Severity, devID, devID, labels, occurredAt)
 	}
 
 	return &FiringResult{
