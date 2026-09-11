@@ -35,14 +35,14 @@ func NewDispatcher(uc *Usecase, log *slog.Logger) *Dispatcher {
 // OnAlertFired is non-blocking — the firing path can't wait on flow
 // execution. Scans + triggers on a detached goroutine. Signature matches
 // biz/alert.WorkflowDispatcher.
-func (d *Dispatcher) OnAlertFired(incidentID uint64, rule, severity string, edgeID, deviceID uint64, labels map[string]string, firedAt time.Time) {
+func (d *Dispatcher) OnAlertFired(incidentID uint64, ruleKey, ruleName, severity string, edgeID, deviceID uint64, labels map[string]string, firedAt time.Time) {
 	if d == nil || d.uc == nil {
 		return
 	}
-	go d.dispatch(incidentID, rule, severity, edgeID, deviceID, labels, firedAt)
+	go d.dispatch(incidentID, ruleKey, ruleName, severity, edgeID, deviceID, labels, firedAt)
 }
 
-func (d *Dispatcher) dispatch(incidentID uint64, rule, severity string, edgeID, deviceID uint64, labels map[string]string, firedAt time.Time) {
+func (d *Dispatcher) dispatch(incidentID uint64, ruleKey, ruleName, severity string, edgeID, deviceID uint64, labels map[string]string, firedAt time.Time) {
 	ctx := context.Background()
 	flows, err := d.uc.ListEnabledFlows(ctx)
 	if err != nil {
@@ -51,7 +51,7 @@ func (d *Dispatcher) dispatch(incidentID uint64, rule, severity string, edgeID, 
 	}
 	payload := map[string]any{
 		"incident_id": incidentID,
-		"rule":        rule,
+		"rule":        ruleName,
 		"severity":    severity,
 		"edge_id":     edgeID,
 		"device_id":   deviceID,
@@ -67,7 +67,7 @@ func (d *Dispatcher) dispatch(incidentID uint64, rule, severity string, edgeID, 
 			if t.Type != NodeTriggerAlert {
 				continue
 			}
-			if !alertMatches(t.Config, rule, severity) {
+			if !alertMatches(t.Config, ruleKey, ruleName, severity) {
 				continue
 			}
 			if _, err := d.uc.TriggerEvent(ctx, f.ID, NodeTriggerAlert, payload); err != nil {
@@ -82,20 +82,21 @@ func (d *Dispatcher) dispatch(incidentID uint64, rule, severity string, edgeID, 
 
 // alertTriggerConfig is the trigger.alert_fired node's config.
 type alertTriggerConfig struct {
-	Rule        string `json:"rule"`         // optional: case-insensitive substring on rule name
+	Rule        string `json:"rule"`         // optional: case-insensitive substring on rule key or display name
 	MinSeverity string `json:"min_severity"` // optional: warning / error / critical
 }
 
 // severityRank orders severities for the min_severity gate.
 var severityRank = map[string]int{"info": 0, "warning": 1, "error": 2, "critical": 3}
 
-func alertMatches(cfgRaw json.RawMessage, rule, severity string) bool {
+func alertMatches(cfgRaw json.RawMessage, ruleKey, ruleName, severity string) bool {
 	var cfg alertTriggerConfig
 	if len(cfgRaw) > 0 {
 		_ = json.Unmarshal(cfgRaw, &cfg)
 	}
 	if want := strings.TrimSpace(cfg.Rule); want != "" {
-		if !strings.Contains(strings.ToLower(rule), strings.ToLower(want)) {
+		want = strings.ToLower(want)
+		if !strings.Contains(strings.ToLower(ruleKey), want) && !strings.Contains(strings.ToLower(ruleName), want) {
 			return false
 		}
 	}
