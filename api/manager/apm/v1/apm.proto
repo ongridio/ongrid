@@ -10,12 +10,17 @@ option go_package = "github.com/ongridio/ongrid/api/gen/manager/apm/v1;apmv1";
 service APMService {
   rpc ListServices(ListServicesRequest) returns (ListServicesResponse);
   rpc GetOverview(GetOverviewRequest) returns (GetOverviewResponse);
+  // The same scoped summary and source metadata, without trend queries.
+  rpc GetSummary(GetOverviewRequest) returns (GetOverviewResponse);
   rpc ListOperations(ListOperationsRequest) returns (ListOperationsResponse);
   // Omit service_name for the service map; optional environment/namespace match
   // either endpoint. Supplying service_name still requires a complete identity.
   rpc GetDependencies(GetDependenciesRequest) returns (GetDependenciesResponse);
   rpc GetDiagnostics(GetDiagnosticsRequest) returns (GetDiagnosticsResponse);
   rpc GetRuntime(GetRuntimeRequest) returns (GetRuntimeResponse);
+  // Lightweight service-wide instance discovery, without runtime gauges or curves.
+  rpc GetInstances(GetRuntimeRequest) returns (GetRuntimeResponse);
+  rpc GetErrorGroups(GetErrorGroupsRequest) returns (GetErrorGroupsResponse);
   rpc GetAlertTemplate(GetAlertTemplateRequest) returns (GetAlertTemplateResponse);
   rpc GetRepositoryBinding(GetRepositoryBindingRequest) returns (RepositoryBindingResponse);
   rpc PutRepositoryBinding(PutRepositoryBindingRequest) returns (RepositoryBindingResponse);
@@ -213,6 +218,37 @@ message GetRuntimeData {
   repeated ObservedInstance instances = 3;
 }
 message GetRuntimeResponse { int32 code = 1; string message = 2; GetRuntimeData data = 3; }
+
+// Groups matching error spans from at most 50 recently sampled traces per
+// protocol, not all failed requests. First/last timestamps describe this sample.
+message GetErrorGroupsRequest { Query query = 1; }
+message ErrorGroup {
+  string fingerprint = 1;
+  string operation = 2;
+  string error_type = 3;
+  string status_code = 4;
+  string stack_trace = 5;
+  uint32 count = 6;
+  double first_seen = 7; // Unix seconds of matching spans.
+  double last_seen = 8;
+  repeated string versions = 9;
+  repeated string instances = 10;
+  string trace_id = 11; // Representative trace containing a matching error span.
+  string span_id = 12;
+  string representative_version = 13;
+  string representative_instance = 14;
+}
+message GetErrorGroupsData {
+  repeated ErrorGroup items = 1;
+  uint32 total = 2;
+  uint32 page = 3;
+  uint32 page_size = 4;
+  uint32 sampled_traces = 5;
+  uint32 failed_traces = 6;
+  bool truncated = 7;
+  QueryMetadata metadata = 8;
+}
+message GetErrorGroupsResponse { int32 code = 1; string message = 2; GetErrorGroupsData data = 3; }
 
 message GetAlertTemplateRequest {
   Query query = 1;

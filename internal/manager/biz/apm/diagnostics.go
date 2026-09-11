@@ -279,9 +279,16 @@ type traceSpan struct {
 	Status struct {
 		Code json.RawMessage `json:"code"`
 	} `json:"status"`
-	SpanID       string          `json:"spanId"`
-	ParentSpanID string          `json:"parentSpanId"`
-	Kind         json.RawMessage `json:"kind"`
+	SpanID       string           `json:"spanId"`
+	ParentSpanID string           `json:"parentSpanId"`
+	Kind         json.RawMessage  `json:"kind"`
+	Name         string           `json:"name"`
+	StartTime    string           `json:"startTimeUnixNano"`
+	Attributes   []errorAttribute `json:"attributes"`
+	Events       []struct {
+		Name       string           `json:"name"`
+		Attributes []errorAttribute `json:"attributes"`
+	} `json:"events"`
 }
 
 type scopeSpans struct {

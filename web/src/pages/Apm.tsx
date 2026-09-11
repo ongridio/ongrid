@@ -31,7 +31,9 @@ import {
 import { Button, Card, Chip, EmptyState, PageHeader, PaginationFooter } from '@/components/ui';
 import { ServiceMap } from '@/components/apm/ServiceMap';
 import { Dependencies } from '@/components/apm/Dependencies';
-import { ErrorTraces, ServiceTraces } from '@/components/apm/ErrorTraces';
+import { ServiceTraces } from '@/components/apm/ErrorTraces';
+import { ErrorGroups } from '@/components/apm/ErrorGroups';
+import { VersionComparison } from '@/components/apm/VersionComparison';
 import { ServiceLogs } from '@/components/apm/ServiceLogs';
 import { RepositoryBindingButton } from '@/components/apm/RepositoryBinding';
 import { SearchInput } from '@/components/apm/SearchInput';
@@ -211,7 +213,7 @@ export default function ApmPage() {
   };
   usePoll(() => {
     if (!loading) pickPeriod(period, true);
-  }, 30_000, periods.some(([key]) => key === period) && tab !== 'onboarding' && tab !== 'alerts');
+  }, 30_000, periods.some(([key]) => key === period) && !['onboarding', 'alerts', 'errors'].includes(tab));
   useEffect(() => {
     const next = new URLSearchParams(params);
     const duration = periods.find(([key]) => key === params.get('range'))?.[1];
@@ -315,7 +317,8 @@ export default function ApmPage() {
         fetchPanel(queryApm('dependencies', p, controller.signal), 'dependencies');
     } else if (tab === 'dependencies' && !scopedReplica)
       fetchPanel(queryApm('dependencies', p, controller.signal), 'dependencies');
-    if (detail && tab !== 'alerts' && tab !== 'onboarding') fetchPanel(queryApm('runtime', p, controller.signal), 'runtime');
+    if (detail && tab !== 'alerts' && tab !== 'onboarding')
+      fetchPanel(queryApm(tab === 'instances' ? 'runtime' : 'instances', p, controller.signal), 'runtime');
     Promise.all(tasks).finally(() => {
       if (!controller.signal.aborted) {
         setLoading(false);
@@ -355,6 +358,7 @@ export default function ApmPage() {
     ['dependencies', tr('依赖', 'Dependencies')],
     ['traces', tr('链路', 'Traces')],
     ['errors', tr('错误', 'Errors')],
+    ['compare', tr('版本对比', 'Compare versions')],
     ['logs', tr('日志', 'Logs')],
     ['profiles', tr('性能剖析', 'Profiling')],
   ];
@@ -364,7 +368,7 @@ export default function ApmPage() {
     const next = new URLSearchParams(params);
     next.set('tab', view);
     next.delete('page');
-    next.delete('operation');
+    if (view !== 'compare') next.delete('operation');
     next.delete('search');
     return `/apm/service?${next}`;
   };
@@ -475,7 +479,7 @@ export default function ApmPage() {
   </>;
 
   return (
-    <Tabs value={operation ? 'operations' : tab} className="contents"><div className="apm-page flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+    <Tabs value={operation && ['overview', 'operations'].includes(tab) ? 'operations' : tab} className="contents"><div className="apm-page flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <PageHeader
         title={
           detail ? (
@@ -537,6 +541,7 @@ export default function ApmPage() {
           detail ? (
             <div className="flex flex-wrap items-center gap-3">
               {resourceFilters}
+              {tab !== 'compare' && <>
               <FilterField label={tr('版本', 'Version')}>
                 <Select aria-label={tr('版本', 'Version')} className="w-44" value={params.get('service_version') || ''}
                   onValueChange={(value) => set('service_version', value || null)}
@@ -548,6 +553,7 @@ export default function ApmPage() {
                   options={[{value: '', label: tr('全部实例', 'All instances')}, ...instanceOptions.map((value) => ({value, label: value}))]} />
               </FilterField>
               <span className="text-xs text-zinc-500">{tr('请求指标与资源指标使用相同筛选', 'Requests and resources share these filters')}</span>
+              </>}
             </div>
           ) :
           !detail && ['services', 'map'].includes(tab) && (
@@ -633,7 +639,7 @@ export default function ApmPage() {
           </div>
         </TabsList>
       )}
-      <TabsContent value={operation ? 'operations' : tab} className="contents"><main ref={main} className="flex-1 space-y-3 overflow-auto px-6 py-4">
+      <TabsContent value={operation && ['overview', 'operations'].includes(tab) ? 'operations' : tab} className="contents"><main ref={main} className="flex-1 space-y-3 overflow-auto px-6 py-4">
         {!detail && tab === 'map' && (scopedReplica ? <EmptyState title={tr('服务地图按服务汇总', 'The service map is service-wide')}
           hint={tr('请清除设备、集群、版本和实例筛选后查看。', 'Clear device, cluster, version and instance filters to view the map.')}
           action={<Button onClick={() => { const next = new URLSearchParams(params); for (const key of ['device_id', 'cluster_id', 'cluster_node_id', 'service_version', 'instance_id']) next.delete(key); setParams(next); }}>{tr('清除不支持的筛选', 'Clear unsupported filters')}</Button>} />
@@ -1127,7 +1133,8 @@ export default function ApmPage() {
           );
         })}
         {detail && tab === 'traces' && traceScopeReady && <ServiceTraces params={traceParams} refresh={refresh} />}
-        {detail && tab === 'errors' && traceScopeReady && <ErrorTraces params={traceParams} refresh={refresh} />}
+        {detail && tab === 'errors' && traceScopeReady && <ErrorGroups params={traceParams} refresh={refresh} />}
+        {detail && tab === 'compare' && <VersionComparison params={params} versions={versions} refresh={refresh} onChange={(next) => setParams(next, { state: location.state })} />}
         {detail && ['traces', 'errors'].includes(tab) && !traceScopeReady && !loading && (
           <EmptyState title={tr('集群范围尚未解析', 'Cluster scope is not resolved')} hint={tr('请刷新后重试，避免查询到其他集群的链路。', 'Refresh to retry resolving the cluster scope.')} />
         )}

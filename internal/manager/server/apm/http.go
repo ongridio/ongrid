@@ -34,10 +34,13 @@ func NewHandler(svc *biz.Service, log *slog.Logger) *Handler {
 func (h *Handler) Register(r chi.Router) {
 	r.Get("/v1/apm/services", h.services)
 	r.Get("/v1/apm/overview", h.overview)
+	r.Get("/v1/apm/summary", h.summary)
 	r.Get("/v1/apm/operations", h.operations)
 	r.Get("/v1/apm/dependencies", h.dependencies)
 	r.Get("/v1/apm/diagnostics", h.diagnostics)
 	r.Get("/v1/apm/runtime", h.runtime)
+	r.Get("/v1/apm/instances", h.instances)
+	r.Get("/v1/apm/error-groups", h.errorGroups)
 	r.Get("/v1/apm/alert-template", h.alertTemplate)
 	r.Get("/v1/apm/repository-binding", h.repositoryBinding)
 	r.Put("/v1/apm/repository-binding", h.repositoryBinding)
@@ -56,6 +59,13 @@ func (h *Handler) services(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {object} apm.Overview
 func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 	h.serve(w, r, true, func(ctx context.Context, q biz.Query) (any, error) { return h.svc.Overview(ctx, q) })
+}
+
+// @Summary Query scoped application request totals without trend curves
+// @Router /api/v1/apm/summary [get]
+// @Success 200 {object} apm.Overview
+func (h *Handler) summary(w http.ResponseWriter, r *http.Request) {
+	h.serve(w, r, true, func(ctx context.Context, q biz.Query) (any, error) { return h.svc.Summary(ctx, q) })
 }
 
 // @Summary List application operation metrics
@@ -84,6 +94,20 @@ func (h *Handler) diagnostics(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {object} apm.Runtime
 func (h *Handler) runtime(w http.ResponseWriter, r *http.Request) {
 	h.serve(w, r, true, func(ctx context.Context, q biz.Query) (any, error) { return h.svc.Runtime(ctx, q) })
+}
+
+// @Summary Discover observed application instances without runtime curves
+// @Router /api/v1/apm/instances [get]
+// @Success 200 {object} apm.Runtime
+func (h *Handler) instances(w http.ResponseWriter, r *http.Request) {
+	h.serve(w, r, true, func(ctx context.Context, q biz.Query) (any, error) { return h.svc.Instances(ctx, q) })
+}
+
+// @Summary Group matching error spans from a bounded sample of recent traces
+// @Router /api/v1/apm/error-groups [get]
+// @Success 200 {object} apm.ErrorGroups
+func (h *Handler) errorGroups(w http.ResponseWriter, r *http.Request) {
+	h.serve(w, r, true, func(ctx context.Context, q biz.Query) (any, error) { return h.svc.ErrorGroups(ctx, q) })
 }
 
 // @Summary Build a request-level alert template for the existing rule editor

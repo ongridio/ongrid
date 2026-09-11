@@ -109,6 +109,20 @@ func (s *Service) runtimeInstances(ctx context.Context, q Query) ([]Instance, er
 	return instances, nil
 }
 
+func (s *Service) Instances(ctx context.Context, q Query) (*Runtime, error) {
+	if err := s.validateQuery(ctx, &q, true); err != nil {
+		return nil, err
+	}
+	out := &Runtime{Items: []RuntimeMetric{}, Instances: []Instance{}, Metadata: metadata(q)}
+	out.Metadata.MetricSource, out.Metadata.Sampling = "application_metrics", "not_applicable"
+	var err error
+	out.Instances, err = s.runtimeInstances(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (s *Service) Runtime(ctx context.Context, q Query) (*Runtime, error) {
 	if err := s.validateQuery(ctx, &q, true); err != nil {
 		return nil, err

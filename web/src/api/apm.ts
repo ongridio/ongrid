@@ -112,13 +112,42 @@ export type ApmAlertTemplate = {
   metric: string;
   runbook_path: string;
 };
+export type ApmErrorGroup = {
+  fingerprint: string;
+  operation: string;
+  error_type: string;
+  status_code: string;
+  stack_trace: string;
+  count: number;
+  first_seen: number;
+  last_seen: number;
+  versions: string[];
+  instances: string[];
+  trace_id: string;
+  span_id: string;
+  representative_version: string;
+  representative_instance: string;
+};
+export type ApmErrorGroups = {
+  items: ApmErrorGroup[];
+  total: number;
+  page: number;
+  page_size: number;
+  sampled_traces: number;
+  failed_traces: number;
+  truncated: boolean;
+  metadata: ApmMetadata;
+};
 type Endpoints = {
   services: ApmList;
   overview: ApmOverview;
+  summary: ApmOverview;
   operations: ApmList;
   dependencies: ApmDependencies;
   diagnostics: ApmDiagnostics;
   runtime: ApmRuntime;
+  instances: ApmRuntime;
+  'error-groups': ApmErrorGroups;
   'alert-template': ApmAlertTemplate;
 };
 export function queryApm<K extends keyof Endpoints>(
@@ -129,6 +158,8 @@ export function queryApm<K extends keyof Endpoints>(
   const query = new URLSearchParams(params);
   for (const key of ['list_query', 'http_page', 'rpc_page', 'http_sort', 'rpc_sort'])
     query.delete(key);
+  query.delete('baseline_version');
+  query.delete('comparison_version');
   if (endpoint === 'services')
     query.set('protocol', query.get('metric_source') === 'tempo_spanmetrics' ? 'http' : 'all');
   return request<{ data: Endpoints[K] }>('GET', `/apm/${endpoint}?${query}`, undefined, {
@@ -150,6 +181,8 @@ export function serviceParams(
   if (Object.entries(identity).some(([key, value]) => params.get(key) !== value)) {
     next.delete('service_version');
     next.delete('instance_id');
+    next.delete('baseline_version');
+    next.delete('comparison_version');
   }
   for (const [key, value] of Object.entries(identity)) next.set(key, value);
   for (const key of [

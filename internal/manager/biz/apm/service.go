@@ -277,19 +277,31 @@ type Overview struct {
 	Metadata Metadata `json:"metadata"`
 }
 
-func (s *Service) Overview(ctx context.Context, q Query) (*Overview, error) {
-	if err := s.validateQuery(ctx, &q, true); err != nil {
+func (s *Service) Summary(ctx context.Context, q Query) (*Overview, error) {
+	return s.overviewSummary(ctx, &q)
+}
+
+func (s *Service) overviewSummary(ctx context.Context, q *Query) (*Overview, error) {
+	if err := s.validateQuery(ctx, q, true); err != nil {
 		return nil, err
 	}
-	rows, err := s.requestSummaries(ctx, &q, false)
+	rows, err := s.requestSummaries(ctx, q, false)
 	if err != nil {
 		return nil, err
 	}
-	out := &Overview{Summary: Summary{Identity: q.Identity(), DataStatus: "no_data"}, Points: []Point{}, Metadata: metadata(q)}
+	out := &Overview{Summary: Summary{Identity: q.Identity(), DataStatus: "no_data"}, Points: []Point{}, Metadata: metadata(*q)}
 	if len(rows) == 0 {
 		return out, nil
 	}
 	out.Summary = rows[0]
+	return out, nil
+}
+
+func (s *Service) Overview(ctx context.Context, q Query) (*Overview, error) {
+	out, err := s.overviewSummary(ctx, &q)
+	if err != nil || out.Summary.DataStatus == "no_data" {
+		return out, err
+	}
 	step := max(30*time.Second, time.Duration((q.End.Sub(q.Start).Seconds()+239)/240)*time.Second)
 	window := max(5*time.Minute, 4*step)
 	result, err := s.prom.QueryRange(ctx, combineExpressions(metricExpressions(q, window, identityLabels)), q.Start, q.End, step)

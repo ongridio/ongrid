@@ -40,6 +40,14 @@ func testQuery() Query {
 	return Query{Start: time.Unix(1000, 0), End: time.Unix(1600, 0), Environment: &env, ServiceNamespace: &ns, ServiceName: "orders", MetricSource: "tempo_spanmetrics", Protocol: "http", MetricFormat: "otel"}
 }
 
+func TestSummarySkipsTrendsAndPreservesSource(t *testing.T) {
+	p := &fakeProm{result: `[{"metric":{"service":"orders","service_namespace":"trade","deployment_environment_name":"production","apm_stat":"rps"},"value":[1600,"2"]}]`}
+	out, err := New(p, nil, nil).Summary(t.Context(), testQuery())
+	if err != nil || p.calls != 1 || len(out.Points) != 0 || out.Metadata.MetricSource != "tempo_spanmetrics" || out.Summary.RPS == nil || *out.Summary.RPS != 2 {
+		t.Fatalf("lightweight summary lost scope or fetched curves: %+v calls=%d err=%v", out, p.calls, err)
+	}
+}
+
 func TestQueryBoundariesAndEscaping(t *testing.T) {
 	q := testQuery()
 	q.ServiceName = `orders"} or vector(1)`

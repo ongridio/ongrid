@@ -6,6 +6,19 @@ import (
 	"testing"
 )
 
+func TestInstanceDiscoverySkipsRuntimeCurves(t *testing.T) {
+	p := &fakeProm{result: `[{"metric":{"service_instance_id":"one","service_version":"v1"},"value":[1600,"1"]}]`}
+	q := testQuery()
+	q.InstanceID, q.ServiceVersion = "two", "v2"
+	out, err := New(p, nil, nil).Instances(t.Context(), q)
+	if err != nil || p.calls != 1 || len(out.Items) != 0 || len(out.Instances) != 1 {
+		t.Fatalf("discovery must only query identity metadata: %+v, calls=%d, err=%v", out, p.calls, err)
+	}
+	if strings.Contains(p.expr, `service_instance_id="two"`) || strings.Contains(p.expr, "process_cpu") || strings.Contains(p.expr, `service_version="v2"`) {
+		t.Fatalf("discovery queried selected runtime data: %s", p.expr)
+	}
+}
+
 func TestMetricInstancesSurviveDisabledTraces(t *testing.T) {
 	p := &fakeProm{result: `[
  {"metric":{"service":"orders","service_namespace":"trade","deployment_environment_name":"production","apm_stat":"present","service_instance_id":"unsampled","device_id":"42"},"value":[1600,"2"]},

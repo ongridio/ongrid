@@ -34,6 +34,19 @@ const row = {
   data_status: 'observed',
 };
 describe('Application performance', () => {
+  it('only loads runtime curves on the instances tab', async () => {
+    let discovery = 0, curves = 0;
+    server.use(
+      http.get('/api/v1/apm/instances', () => { discovery++; return HttpResponse.json({ data: { items: [], instances: [] } }); }),
+      http.get('/api/v1/apm/runtime', () => { curves++; return HttpResponse.json({ data: { items: [], instances: [] } }); }),
+    );
+    render(<MemoryRouter initialEntries={[`/apm?${period}&service_name=orders&environment=production&service_namespace=trade&tab=traces`]}><ApmPage /></MemoryRouter>);
+    await screen.findByText('当前范围未观测到链路');
+    expect(discovery).toBe(1);
+    expect(curves).toBe(0);
+    fireEvent.click(screen.getByRole('tab', { name: '实例' }));
+    await waitFor(() => expect(curves).toBe(1));
+  });
   it.each([
     ['版本', 'service_version', 'v2', 'v1'],
     ['实例', 'instance_id', 'pod-2', 'pod-1'],
@@ -90,7 +103,7 @@ describe('Application performance', () => {
     await waitFor(() => expect(queries.at(-1)?.has('device_id')).toBe(false));
     expect(queries.at(-1)?.get('cluster_node_id')).toBe('7');
   });
-  beforeEach(() => { localStorage.setItem('ongrid-locale', 'zh-CN'); server.use(http.get('/api/v1/devices', () => HttpResponse.json({ items: [{ id: 42, name: 'ubuntu' }] })), http.get('/api/v1/topology/nodes', () => HttpResponse.json({ items: [{ id: 7, name: 'production' }] })), http.get('/api/v1/apm/repository-binding', () => HttpResponse.json({ data: null })), http.get('/api/v1/traces/search', () => HttpResponse.json({ traces: [] })), http.get('/api/v1/apm/runtime', () => HttpResponse.json({ data: { items: [], instances: [] } }))); });
+  beforeEach(() => { localStorage.setItem('ongrid-locale', 'zh-CN'); server.use(http.get('/api/v1/devices', () => HttpResponse.json({ items: [{ id: 42, name: 'ubuntu' }] })), http.get('/api/v1/topology/nodes', () => HttpResponse.json({ items: [{ id: 7, name: 'production' }] })), http.get('/api/v1/apm/repository-binding', () => HttpResponse.json({ data: null })), http.get('/api/v1/traces/search', () => HttpResponse.json({ traces: [] })), http.get('/api/v1/apm/runtime', () => HttpResponse.json({ data: { items: [], instances: [] } })), http.get('/api/v1/apm/instances', () => HttpResponse.json({ data: { items: [], instances: [] } }))); });
   it('keeps same-name services separate and links their complete identity', async () => {
     server.use(
       http.get('/api/v1/apm/repository-binding', ({ request }) => HttpResponse.json({ data: new URL(request.url).searchParams.get('environment') === 'production' ? { identity: row.identity, repo_id: '3', repo_url: 'ssh://git@example/apm-demo.git', source_directory: '', tag_pattern: '{version}' } : null })),
