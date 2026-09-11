@@ -22,6 +22,17 @@ enum NotificationChannelType {
     NOTIFICATION_CHANNEL_TYPE_SLACK = 2;
     NOTIFICATION_CHANNEL_TYPE_FEISHU = 3;
     NOTIFICATION_CHANNEL_TYPE_DINGTALK = 4;
+    NOTIFICATION_CHANNEL_TYPE_SMTP = 5;
+}
+
+// 密码通过请求 secret 字段单独提交，响应不包含密码。
+message SMTPConfig {
+    string host = 1;
+    int32 port = 2;
+    string username = 3;
+    string from = 4;
+    repeated string to = 5;
+    string tls_mode = 6; // starttls（默认）或 tls（隐式 TLS）
 }
 
 message NotificationChannel {
@@ -32,6 +43,7 @@ message NotificationChannel {
     string endpoint_masked = 5 [json_name = "endpoint_masked"];
     google.protobuf.Timestamp created_at = 6 [json_name = "created_at"];
     google.protobuf.Timestamp updated_at = 7 [json_name = "updated_at"];
+    SMTPConfig smtp = 8;
 }
 
 message ListChannelsRequest {
@@ -55,6 +67,8 @@ message GetChannelResponse {
 }
 
 message CreateChannelRequest {
+    SMTPConfig smtp = 5;
+    string secret = 6;
     string name = 1 [json_name = "name"];
     NotificationChannelType type = 2 [json_name = "type"];
     string endpoint = 3 [json_name = "endpoint"];
@@ -66,6 +80,8 @@ message CreateChannelResponse {
 }
 
 message UpdateChannelRequest {
+    SMTPConfig smtp = 5;
+    string secret = 6;
     uint64 id = 1 [json_name = "id"];
     string name = 2 [json_name = "name"];
     string endpoint = 3 [json_name = "endpoint"];
