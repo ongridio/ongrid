@@ -61,6 +61,7 @@ type ErrorGroups struct {
 	FailedTraces  int          `json:"failed_traces"`
 	Truncated     bool         `json:"truncated"`
 	Metadata      Metadata     `json:"metadata"`
+	SnapshotID    string       `json:"snapshot_id,omitempty"`
 }
 
 // ErrorGroups counts matching spans, not root-trace summaries or all failed
@@ -68,6 +69,9 @@ type ErrorGroups struct {
 func (s *Service) ErrorGroups(ctx context.Context, q Query) (*ErrorGroups, error) {
 	if err := s.validateQuery(ctx, &q, true); err != nil {
 		return nil, err
+	}
+	if q.SnapshotID != "" {
+		return s.errorSnapshots.page(ctx, q)
 	}
 	if s.traces == nil {
 		return nil, errs.ErrNotWiredYet
@@ -104,11 +108,22 @@ func (s *Service) ErrorGroups(ctx context.Context, q Query) (*ErrorGroups, error
 	results := make([][]ErrorGroup, len(ids))
 	failures := make([]bool, len(ids))
 	workers, workerCtx := errgroup.WithContext(ctx)
-	workers.SetLimit(4)
+	workers.SetLimit(8)
 	for i, id := range ids {
-		workers.Go(func() error {
+		workers.Go(func() (err error) {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					err = fmt.Errorf("apm: error trace worker panicked: %v", recovered)
+				}
+			}()
 			if err := workerCtx.Err(); err != nil {
 				return err
+			}
+			select {
+			case s.errorReads <- struct{}{}:
+				defer func() { <-s.errorReads }()
+			case <-workerCtx.Done():
+				return workerCtx.Err()
 			}
 			trace, err := s.traces.GetTrace(workerCtx, id)
 			if err != nil || trace == nil || len(trace.Body) > 2<<20 {
@@ -172,9 +187,15 @@ func (s *Service) ErrorGroups(ctx context.Context, q Query) (*ErrorGroups, error
 		return a.Fingerprint < b.Fingerprint
 	})
 	out.Total = len(out.Items)
+	s.errorSnapshots.save(ctx, q, out)
+	return errorGroupsPage(out, q), nil
+}
+
+func errorGroupsPage(out *ErrorGroups, q Query) *ErrorGroups {
+	out.Page, out.PageSize = q.Page, q.PageSize
 	start := min((q.Page-1)*q.PageSize, out.Total)
 	out.Items = out.Items[start:min(start+q.PageSize, out.Total)]
-	return out, nil
+	return out
 }
 
 func errorSamples(q Query, traceID string, resources []traceResource) ([]ErrorGroup, bool) {

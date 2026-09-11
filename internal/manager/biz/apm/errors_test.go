@@ -7,7 +7,11 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"golang.org/x/sync/errgroup"
+
+	"github.com/ongridio/ongrid/internal/pkg/tenantctx"
 	"github.com/ongridio/ongrid/internal/pkg/tracequery"
 )
 
@@ -17,6 +21,65 @@ type errorTraceFixture struct {
 	query     tracequery.SearchOptions
 	failedID  string
 	calls     atomic.Int32
+}
+
+type concurrentErrorTraces struct {
+	active, peak, calls atomic.Int32
+}
+
+func (f *concurrentErrorTraces) SearchTraces(context.Context, tracequery.SearchOptions) (*tracequery.SearchResult, error) {
+	ids := make([]map[string]string, 50)
+	for i := range ids {
+		ids[i] = map[string]string{"traceID": fmt.Sprintf("%032x", i+1)}
+	}
+	body, err := json.Marshal(ids)
+	return &tracequery.SearchResult{Traces: body}, err
+}
+
+func (f *concurrentErrorTraces) GetTrace(ctx context.Context, _ string) (*tracequery.TraceResult, error) {
+	active := f.active.Add(1)
+	defer f.active.Add(-1)
+	for old := f.peak.Load(); active > old; old = f.peak.Load() {
+		if f.peak.CompareAndSwap(old, active) {
+			break
+		}
+	}
+	timer := time.NewTimer(10 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-timer.C:
+	}
+	f.calls.Add(1)
+	return &tracequery.TraceResult{Body: json.RawMessage(`{"resourceSpans":[]}`)}, nil
+}
+
+func TestErrorGroupsBoundConcurrentReadersWithoutDroppingTraces(t *testing.T) {
+	traces := &concurrentErrorTraces{}
+	svc := New(nil, traces, nil)
+	workers, ctx := errgroup.WithContext(t.Context())
+	for range 4 {
+		workers.Go(func() error {
+			out, err := svc.ErrorGroups(ctx, testQuery())
+			if err != nil {
+				return err
+			}
+			if out.SampledTraces != 50 || out.FailedTraces != 0 {
+				return fmt.Errorf("lost trace details: %+v", out)
+			}
+			return nil
+		})
+	}
+	if err := workers.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if traces.peak.Load() > 16 || traces.peak.Load() < 8 || traces.calls.Load() != 200 {
+		t.Fatalf("wrong concurrency/coverage: peak=%d calls=%d", traces.peak.Load(), traces.calls.Load())
+	}
+	if len(svc.errorReads) != 0 {
+		t.Fatal("leaked reader slots")
+	}
 }
 
 func (f *errorTraceFixture) SearchTraces(_ context.Context, q tracequery.SearchOptions) (*tracequery.SearchResult, error) {
@@ -72,7 +135,9 @@ func TestErrorGroupsUseMatchingSpansAndPreserveSampleBoundaries(t *testing.T) {
 			q.ServiceVersion = tc.version
 			q.InstanceID = tc.instance
 			q.Operation = tc.operation
-			result, err := New(nil, trace, nil).ErrorGroups(t.Context(), q)
+			svc := New(nil, trace, nil)
+			ctx := tenantctx.With(t.Context(), tenantctx.Tenant{UserID: 1})
+			result, err := svc.ErrorGroups(ctx, q)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -86,6 +151,17 @@ func TestErrorGroupsUseMatchingSpansAndPreserveSampleBoundaries(t *testing.T) {
 				g := result.Items[0]
 				if g.FirstSeen != 1300 || g.LastSeen != 1400 || len(g.Versions) != 2 || len(g.Instances) != 2 || g.SpanID != "2" || g.Operation != "GET /orders" {
 					t.Fatalf("lost evidence: %+v", g)
+				}
+				q.Page, q.PageSize, q.SnapshotID = 2, 1, result.SnapshotID
+				page, err := svc.ErrorGroups(ctx, q)
+				if err != nil || page.Total != 3 || len(page.Items) != 1 || page.Items[0].Fingerprint != result.Items[1].Fingerprint || trace.calls.Load() != 2 {
+					t.Fatalf("pagination reread or lost errors: %+v %v calls=%d", page, err, trace.calls.Load())
+				}
+				trace.failedID = "" // Previously unavailable details arrived.
+				q.Page, q.SnapshotID = 1, ""
+				fresh, err := svc.ErrorGroups(ctx, q)
+				if err != nil || fresh.Items[0].Count != 4 || fresh.FailedTraces != 0 || trace.calls.Load() != 4 || fresh.SnapshotID == result.SnapshotID {
+					t.Fatalf("refresh missed newly available errors: %+v %v", fresh, err)
 				}
 			}
 		})
@@ -102,6 +178,60 @@ func TestErrorGroupsUseMatchingSpansAndPreserveSampleBoundaries(t *testing.T) {
 	result, err = New(nil, trace, nil).WithClusterScopes(clusterScopes{}).ErrorGroups(t.Context(), q)
 	if err != nil || result.Total != 0 {
 		t.Fatalf("leaked empty cluster: %+v %v", result, err)
+	}
+}
+
+func TestErrorSnapshotsPreserveScopeExpiryAndMemoryBounds(t *testing.T) {
+	ctx := tenantctx.With(t.Context(), tenantctx.Tenant{UserID: 1})
+	q := testQuery()
+	cache := &errorSnapshots{}
+	out := &ErrorGroups{Items: []ErrorGroup{{Fingerprint: "first", Count: 7}, {Fingerprint: "last", Count: 9}}, Total: 2, FailedTraces: 1, Truncated: true}
+	cache.save(ctx, q, out)
+	q.SnapshotID, q.Page, q.PageSize = out.SnapshotID, 2, 1
+	page, err := cache.page(ctx, q)
+	if err != nil || len(page.Items) != 1 || page.Items[0].Count != 9 || page.FailedTraces != 1 || !page.Truncated {
+		t.Fatalf("lost snapshot evidence: %+v %v", page, err)
+	}
+	page.Items[0].Count = 0
+	again, err := cache.page(ctx, q)
+	if err != nil || again.Items[0].Count != 9 {
+		t.Fatal("response mutated stored snapshot")
+	}
+	for _, field := range []string{"version", "window", "protocol", "cluster"} {
+		changed := q
+		switch field {
+		case "version":
+			changed.ServiceVersion = "another"
+		case "window":
+			changed.End = changed.End.Add(time.Minute)
+		case "protocol":
+			changed.Protocol = "rpc"
+		case "cluster":
+			changed.resourceScope = &ResourceScope{DeviceIDs: []string{"other"}}
+		}
+		if _, err := cache.page(ctx, changed); err == nil {
+			t.Fatalf("snapshot crossed %s scope", field)
+		}
+	}
+	if _, err := cache.page(tenantctx.With(t.Context(), tenantctx.Tenant{UserID: 2}), q); err == nil {
+		t.Fatal("snapshot crossed caller boundary")
+	}
+	entry := cache.items[q.SnapshotID]
+	entry.expires = time.Now().Add(-time.Second)
+	cache.items[q.SnapshotID] = entry
+	if _, err := cache.page(ctx, q); err == nil {
+		t.Fatal("expired snapshot reused silently")
+	}
+	for range 12 {
+		cache.save(ctx, q, out)
+	}
+	if len(cache.items) != 8 {
+		t.Fatalf("unbounded cache: %d", len(cache.items))
+	}
+	out.Items[0].StackTrace = strings.Repeat("x", 2<<20)
+	cache.save(ctx, q, out)
+	if out.SnapshotID != "" || len(cache.items) != 8 {
+		t.Fatal("oversized snapshot retained")
 	}
 }
 

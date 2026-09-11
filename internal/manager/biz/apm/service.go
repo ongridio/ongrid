@@ -38,10 +38,13 @@ type Service struct {
 	logs     LogCounter
 	bindings BindingSettings
 	repos    BindingRepositories
+
+	errorSnapshots errorSnapshots
+	errorReads     chan struct{}
 }
 
 func New(prom PromQuerier, traces TraceQuerier, logs LogCounter) *Service {
-	return &Service{prom: prom, traces: traces, logs: logs}
+	return &Service{prom: prom, traces: traces, logs: logs, errorReads: make(chan struct{}, 16)}
 }
 
 func (s *Service) List(ctx context.Context, q Query, operations bool) (*ListResult, error) {

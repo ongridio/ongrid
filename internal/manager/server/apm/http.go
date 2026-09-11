@@ -164,6 +164,7 @@ func parseQuery(r *http.Request) (biz.Query, error) {
 	q := biz.Query{MetricSource: values.Get("metric_source"), Protocol: values.Get("protocol"), MetricFormat: values.Get("metric_format"), ServiceName: values.Get("service_name"), Operation: values.Get("operation"), ServiceVersion: values.Get("service_version"), InstanceID: values.Get("instance_id"), SpanKind: values.Get("span_kind"), Sort: values.Get("sort"), Search: values.Get("search")}
 	var err error
 	q.DeviceID, q.ClusterID = values.Get("device_id"), values.Get("cluster_id")
+	q.SnapshotID = values.Get("snapshot_id")
 	if values.Has("cluster_node_id") {
 		q.ClusterNodeID, err = strconv.ParseUint(values.Get("cluster_node_id"), 10, 64)
 		if err != nil || q.ClusterNodeID == 0 {

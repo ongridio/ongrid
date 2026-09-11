@@ -64,7 +64,15 @@ func (s staticBase) ResolveBaseURL(_ context.Context) (string, error) {
 // default of $ONGRID_TRACE_QUERY_URL); the /api/* suffix is appended on
 // each call.
 func New(baseURL string, log *slog.Logger) *Client {
-	return NewWithHTTPClient(baseURL, &http.Client{Timeout: defaultTimeout}, log)
+	hc := &http.Client{Timeout: defaultTimeout}
+	if base, ok := http.DefaultTransport.(*http.Transport); ok {
+		transport := base.Clone()
+		// Error grouping reads many trace IDs in parallel. The default idle
+		// pool of two connections otherwise discards most reusable sockets.
+		transport.MaxIdleConnsPerHost = 16
+		hc.Transport = transport
+	}
+	return NewWithHTTPClient(baseURL, hc, log)
 }
 
 // NewWithHTTPClient is the test seam for the static-baseURL form.

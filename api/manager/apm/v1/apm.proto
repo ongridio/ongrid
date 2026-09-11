@@ -90,6 +90,9 @@ message Query {
   // Unified topology cluster ID. Resolved to current member devices for
   // device enrollment, or to the Kubernetes telemetry cluster ID.
   uint64 cluster_node_id = 19;
+  // Error groups only: reuse an exact query snapshot for pagination.
+  // Omit on refresh to include newly ingested spans.
+  string snapshot_id = 20;
 }
 
 message Summary {
@@ -247,6 +250,7 @@ message GetErrorGroupsData {
   uint32 failed_traces = 6;
   bool truncated = 7;
   QueryMetadata metadata = 8;
+  string snapshot_id = 9;
 }
 message GetErrorGroupsResponse { int32 code = 1; string message = 2; GetErrorGroupsData data = 3; }
 

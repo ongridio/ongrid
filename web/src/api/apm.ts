@@ -137,6 +137,7 @@ export type ApmErrorGroups = {
   failed_traces: number;
   truncated: boolean;
   metadata: ApmMetadata;
+  snapshot_id?: string;
 };
 type Endpoints = {
   services: ApmList;

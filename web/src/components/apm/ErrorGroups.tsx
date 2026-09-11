@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Sparkles } from 'lucide-react';
 import { queryApm, traceLink, type ApmErrorGroups } from '@/api/apm';
@@ -6,35 +6,53 @@ import { Button, Card, EmptyState, PaginationFooter } from '@/components/ui';
 import { useI18n } from '@/i18n/locale';
 import { useTraceAnalysis } from './ErrorTraces';
 
+function useErrorGroups(query: string, protocol: 'http' | 'rpc', enabled: boolean, refresh: number) {
+  const [retry, setRetry] = useState(0);
+  const scope = JSON.stringify([query, refresh, retry]);
+  const [selected, setSelected] = useState({ scope, page: 1 });
+  const page = selected.scope === scope ? selected.page : 1;
+  const key = JSON.stringify([scope, page]);
+  const [result, setResult] = useState<{ key: string; data?: ApmErrorGroups; error?: string }>({ key: '' });
+  const cache = useRef<{ scope: string; snapshot?: string; pages: Map<number, ApmErrorGroups> }>({ scope: '', pages: new Map() });
+
+  useEffect(() => {
+    if (!enabled) return;
+    if (cache.current.scope !== scope) cache.current = { scope, pages: new Map() };
+    const cached = cache.current.pages.get(page);
+    if (cached) { setResult({ key, data: cached }); return; }
+    const p = new URLSearchParams(query);
+    p.set('protocol', protocol);
+    p.set('page', String(page));
+    p.set('page_size', '25');
+    p.delete('snapshot_id');
+    if (cache.current.snapshot) p.set('snapshot_id', cache.current.snapshot);
+    const controller = new AbortController();
+    setResult({ key });
+    queryApm('error-groups', p, controller.signal)
+      .then((data) => {
+        if (controller.signal.aborted) return;
+        if (data.snapshot_id) {
+          cache.current.snapshot = data.snapshot_id;
+          cache.current.pages.set(page, data);
+        }
+        setResult({ key, data });
+      })
+      .catch((error: Error) => { if (!controller.signal.aborted) setResult({ key, error: error.message }); });
+    return () => controller.abort();
+  }, [query, protocol, enabled, scope, page, key]);
+
+  return { ...(result.key === key ? result : {}), retry: () => setRetry((value) => value + 1), onPageChange: (page: number) => setSelected({ scope, page: page + 1 }) };
+}
+
 export function ErrorGroups({ params, refresh }: { params: URLSearchParams; refresh: number }) {
   const { tr } = useI18n();
   const query = params.toString();
-  const [retry, setRetry] = useState(0);
-  const [pages, setPages] = useState<{ query: string; http?: number; rpc?: number }>({ query });
-  const [results, setResults] = useState<{ query: string; http?: ApmErrorGroups; rpc?: ApmErrorGroups; httpError?: string; rpcError?: string }>({ query });
   const { analyze, analyzing, analysisError } = useTraceAnalysis(params);
   const protocols = params.get('protocol') === 'all' ? ['http', 'rpc'] as const : [params.get('protocol') === 'rpc' ? 'rpc' : 'http'] as const;
-  const httpPage = pages.query === query ? pages.http || 1 : 1;
-  const rpcPage = pages.query === query ? pages.rpc || 1 : 1;
-  const resultKey = JSON.stringify([query, httpPage, rpcPage, retry, refresh]);
-  const current = results.query === resultKey ? results : undefined;
-
-  useEffect(() => {
-    const p = new URLSearchParams(query);
-    const controller = new AbortController();
-    setResults({ query: resultKey });
-    const protocols = p.get('protocol') === 'all' ? ['http', 'rpc'] as const : [p.get('protocol') === 'rpc' ? 'rpc' : 'http'] as const;
-    for (const protocol of protocols) {
-      const scoped = new URLSearchParams(p);
-      scoped.set('protocol', protocol);
-      scoped.set('page', String(protocol === 'http' ? httpPage : rpcPage));
-      scoped.set('page_size', '25');
-      queryApm('error-groups', scoped, controller.signal)
-        .then((data) => { if (!controller.signal.aborted) setResults((old) => ({ ...old, [protocol]: data })); })
-        .catch((error: Error) => { if (!controller.signal.aborted) setResults((old) => ({ ...old, [`${protocol}Error`]: error.message })); });
-    }
-    return () => controller.abort();
-  }, [query, httpPage, rpcPage, resultKey]);
+  const results = {
+    http: useErrorGroups(query, 'http', protocols.some((p) => p === 'http'), refresh),
+    rpc: useErrorGroups(query, 'rpc', protocols.some((p) => p === 'rpc'), refresh),
+  };
 
   const labels = (values: string[]) => values.map((value) => value || tr('未上报', 'Not reported')).join(', ');
   const date = (seconds: number) => new Date(seconds * 1000).toLocaleString();
@@ -48,11 +66,11 @@ export function ErrorGroups({ params, refresh }: { params: URLSearchParams; refr
     <p className="mt-1 text-xs text-text-muted">{tr('聚合结果按当前窗口生成快照，点击顶部刷新更新。', 'Groups are a snapshot of this window. Use Refresh above to update.')}</p>
     {analysisError && <p role="alert" className="mt-3 text-sm text-red-500">{analysisError}</p>}
     {protocols.map((protocol) => {
-      const data = current?.[protocol], error = current?.[`${protocol}Error`];
+      const { data, error, retry, onPageChange } = results[protocol];
       const scoped = new URLSearchParams(params); scoped.set('protocol', protocol);
       return <section key={protocol} aria-label={`${protocol.toUpperCase()} ${tr('错误聚合', 'error groups')}`} className="mt-5">
         <h3 className="text-sm font-medium">{protocol.toUpperCase()}</h3>
-        {error ? <p role="alert" className="mt-2 text-sm text-red-500">{error} <Button size="sm" variant="subtle" onClick={() => setRetry((value) => value + 1)}>{tr('重试', 'Retry')}</Button></p>
+        {error ? <p role="alert" className="mt-2 text-sm text-red-500">{error} <Button size="sm" variant="subtle" onClick={retry}>{tr('重试', 'Retry')}</Button></p>
           : !data ? <p role="status" className="py-4 text-sm text-text-muted">{tr('正在聚合错误…', 'Grouping errors…')}</p>
             : <>
               <p className="mt-1 text-xs text-text-muted">{tr(`已检查 ${data.sampled_traces} 条链路 · ${data.total} 组`, `Inspected ${data.sampled_traces} traces · ${data.total} groups`)}</p>
@@ -78,7 +96,7 @@ export function ErrorGroups({ params, refresh }: { params: URLSearchParams; refr
                   </details>
                   <Link className="mt-2 inline-block font-mono text-xs text-indigo-500 hover:underline" to={traceLink(scoped, 'status = error', group.trace_id)}>{tr('代表链路', 'Representative trace')} {group.trace_id.slice(0, 12)}…</Link>
                 </div>)}</div>}
-              <PaginationFooter page={data.page - 1} pageSize={data.page_size} shown={data.items.length} total={data.total} onPageChange={(page) => setPages((old) => ({ ...(old.query === query ? old : { query }), [protocol]: page + 1 }))} />
+              <PaginationFooter page={data.page - 1} pageSize={data.page_size} shown={data.items.length} total={data.total} onPageChange={onPageChange} />
             </>}
       </section>;
     })}

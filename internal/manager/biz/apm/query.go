@@ -39,9 +39,13 @@ type Query struct {
 	Page, PageSize                       int
 	Sort, Search                         string
 	MetricSource, Protocol, MetricFormat string
+	SnapshotID                           string
 }
 
 func (q *Query) Validate(serviceRequired bool) error {
+	if len(q.SnapshotID) > 64 {
+		return fmt.Errorf("%w: invalid snapshot ID", errs.ErrInvalid)
+	}
 	if q.Start.IsZero() || q.End.IsZero() || !q.End.After(q.Start) || q.End.Sub(q.Start) < time.Minute || q.End.Sub(q.Start) > 7*24*time.Hour {
 		return fmt.Errorf("%w: time range must be between 1 minute and 7 days", errs.ErrInvalid)
 	}

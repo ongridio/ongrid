@@ -3,12 +3,56 @@ package tracequery
 import (
 	"context"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 )
+
+func TestClientReusesParallelTraceConnections(t *testing.T) {
+	var connections, requests atomic.Int32
+	gates := []chan struct{}{make(chan struct{}), make(chan struct{})}
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := int(requests.Add(1)) - 1
+		gate := gates[n/8]
+		if n%8 == 7 {
+			close(gate)
+		}
+		select {
+		case <-gate:
+		case <-r.Context().Done():
+			return
+		}
+		_, _ = w.Write([]byte(`{"resourceSpans":[]}`))
+	}))
+	srv.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			connections.Add(1)
+		}
+	}
+	srv.Start()
+	defer srv.Close()
+	c := New(srv.URL, nil)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	for range 2 {
+		workers, ctx := errgroup.WithContext(ctx)
+		for range 8 {
+			workers.Go(func() error { _, err := c.GetTrace(ctx, "abc123"); return err })
+		}
+		if err := workers.Wait(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if connections.Load() != 8 {
+		t.Fatalf("parallel reads redialed connections: %d", connections.Load())
+	}
+}
 
 func TestClient_SearchTraces_Query(t *testing.T) {
 	var gotPath string
