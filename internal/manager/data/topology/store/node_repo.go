@@ -124,3 +124,47 @@ func applyNodeFilter(q *gorm.DB, f biz.NodeListFilter) *gorm.DB {
 	}
 	return q
 }
+
+// EnsureForDevice 使用已有 devices.node_id 作为身份来源，不通过可变名称匹配。
+// 与回填共用事务，避免并发注册或回填产生孤立节点、覆盖已有绑定。
+func (r *NodeRepo) EnsureForDevice(ctx context.Context, deviceID uint64, name string) (*model.Node, error) {
+	var node model.Node
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 先获取写锁：MySQL 锁定设备行，SQLite 获取写事务锁，避免读后升级锁失败。
+		// 不改变字段值，也不触发 GORM 的 updated_at 更新。
+		if err := tx.Exec("UPDATE devices SET node_id = node_id WHERE id = ? AND deleted_at IS NULL", deviceID).Error; err != nil {
+			return err
+		}
+		var device struct {
+			ID     uint64
+			NodeID *uint64
+		}
+		if err := tx.Table("devices").Select("id, node_id").Where("id = ? AND deleted_at IS NULL", deviceID).Take(&device).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errs.ErrNotFound
+			}
+			return err
+		}
+		if device.NodeID != nil {
+			if err := tx.First(&node, *device.NodeID).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return errs.ErrNotFound
+				}
+				return err
+			}
+			if node.Type != string(model.NodeTypeDevice) {
+				return errs.ErrConflict
+			}
+			return nil
+		}
+		node = model.Node{Type: string(model.NodeTypeDevice), Name: name}
+		if err := tx.Create(&node).Error; err != nil {
+			return err
+		}
+		return tx.Exec("UPDATE devices SET node_id = ? WHERE id = ?", node.ID, deviceID).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &node, nil
+}

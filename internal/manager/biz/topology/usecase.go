@@ -331,20 +331,7 @@ func (u *Usecase) DeleteRelation(ctx context.Context, id uint64) error {
 
 // ---------- DeviceMirror ----------------------------------------------------
 
-// EnsureNodeForDevice is the device→topology mirror entry point. Called
-// from the edge register flow (via edge.Usecase.NodeMirror) after a
-// fresh device row lands. Look up an existing Node by
-// (type='device', name=deviceName) — keyed on name because that's
-// what the device row already carries; if not found, create one.
-// Returns the node id either way; caller writes it back to
-// device.node_id.
-//
-// Implementation note: we do NOT key the lookup on device.id (e.g. a
-// props_jsonb.device_id field) because the migration backfill might
-// race with a real-time write. Keying on (type, name) is good enough
-// for v1 since device names are operator-edited and a duplicate name
-// already means "the operator is treating these as the same logical
-// thing".
+// EnsureNodeForDevice 按设备 ID 复用已有关联，节点创建与绑定由仓储原子完成。
 func (u *Usecase) EnsureNodeForDevice(ctx context.Context, deviceID uint64, deviceName string) (uint64, error) {
 	if u.nodes == nil {
 		return 0, errs.ErrNotWiredYet
@@ -353,22 +340,11 @@ func (u *Usecase) EnsureNodeForDevice(ctx context.Context, deviceID uint64, devi
 	if deviceName == "" {
 		return 0, fmt.Errorf("%w: device name required", errs.ErrInvalid)
 	}
-	rows, err := u.nodes.List(ctx, NodeListFilter{
-		Type:  string(model.NodeTypeDevice),
-		Q:     deviceName,
-		Limit: 50,
-	})
+	if deviceID == 0 {
+		return 0, fmt.Errorf("%w: device ID required", errs.ErrInvalid)
+	}
+	n, err := u.nodes.EnsureForDevice(ctx, deviceID, deviceName)
 	if err != nil {
-		return 0, err
-	}
-	for _, n := range rows {
-		// Q is substring (case-insensitive); require exact match here.
-		if strings.EqualFold(n.Name, deviceName) {
-			return n.ID, nil
-		}
-	}
-	n := &model.Node{Type: string(model.NodeTypeDevice), Name: deviceName}
-	if err := u.nodes.Create(ctx, n); err != nil {
 		return 0, err
 	}
 	if u.log != nil {

@@ -41,6 +41,8 @@ type RelationListFilter struct {
 
 // NodeRepo is the persistence contract for Node rows.
 type NodeRepo interface {
+	// EnsureForDevice 原子地读取或创建设备的节点关联。
+	EnsureForDevice(ctx context.Context, deviceID uint64, name string) (*model.Node, error)
 	Create(ctx context.Context, n *model.Node) error
 	Update(ctx context.Context, id uint64, name, propsJSON string) error
 	Get(ctx context.Context, id uint64) (*model.Node, error)

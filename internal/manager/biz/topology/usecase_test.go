@@ -637,3 +637,51 @@ func TestDeleteRelationTypeGuards(t *testing.T) {
 		t.Fatalf("delete with refs: want ErrConflict, got %v", err)
 	}
 }
+
+// 不同设备即使同名也不能共享节点；重命名不应改变已有拓扑身份。
+func TestDeviceMirrorIdentity(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("CREATE TABLE devices (id INTEGER PRIMARY KEY, node_id INTEGER UNIQUE, deleted_at datetime)").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.Node{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("INSERT INTO devices (id) VALUES (1), (2), (3)").Error; err != nil {
+		t.Fatal(err)
+	}
+	uc := biz.NewUsecase(store.NewNodeRepo(db), nil, nil, nil, nil)
+	ctx := context.Background()
+	first, err := uc.EnsureNodeForDevice(ctx, 1, "VM-0-6-ubuntu")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[uint64]bool{first: true}
+	for _, id := range []uint64{2, 3} {
+		second, err := uc.EnsureNodeForDevice(ctx, id, "vm-0-6-ubuntu")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if seen[second] {
+			t.Fatalf("device %d reused node %d", id, second)
+		}
+		seen[second] = true
+	}
+	renamed, err := uc.EnsureNodeForDevice(ctx, 1, "renamed-host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if renamed != first {
+		t.Fatalf("rename changed node: %d -> %d", first, renamed)
+	}
+	var linked uint64
+	if err := db.Raw("SELECT node_id FROM devices WHERE id = 1").Scan(&linked).Error; err != nil {
+		t.Fatal(err)
+	}
+	if linked != first {
+		t.Fatalf("device linked to %d, want %d", linked, first)
+	}
+}
