@@ -82,8 +82,9 @@ jobs:
         run: npm ci
 
       - name: Test
+        # Keep DOM-heavy suites from competing for CPU within their test timeouts.
         run: >-
-          npm test -- --run
+          npm test -- --run --no-file-parallelism
           src/api/apm.test.ts
           src/components/apm
           src/pages/Apm
