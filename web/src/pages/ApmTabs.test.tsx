@@ -14,18 +14,23 @@ beforeEach(() => {
     http.get('/api/v1/devices', () => HttpResponse.json({ items: [] })),
     http.get('/api/v1/topology/nodes', () => HttpResponse.json({ items: [] })),
     http.get('/api/v1/apm/repository-binding', () => HttpResponse.json({ data: null })),
-    http.get('/api/v1/apm/runtime', () => HttpResponse.json({ data: { items: [], instances: [{ instance_id: 'orders-1', version: 'v1', device_id: '42' }] } })),
+    http.get('/api/v1/apm/instances', () => HttpResponse.json({ data: { items: [], instances: [{ instance_id: 'orders-1', version: 'v1', device_id: '42' }] } })),
   );
 });
-it('orders the eight service views and preserves scope while switching between traces and errors', async () => {
+it('orders the nine service views and preserves scope while switching between traces and errors', async () => {
   const queries: URLSearchParams[] = [];
   server.use(http.get('/api/v1/traces/search', ({ request }) => {
     queries.push(new URL(request.url).searchParams);
     return HttpResponse.json({ traces: [{ traceID: '0123456789abcdef0123456789abcdef', rootTraceName: 'GET /orders', durationMs: 20 }] });
   }));
-  render(<MemoryRouter initialEntries={[`/apm/service?${scope}&tab=traces`]}><ApmPage /></MemoryRouter>);
+  const errorQueries: URLSearchParams[] = [];
+  server.use(http.get('/api/v1/apm/error-groups', ({ request }) => {
+    errorQueries.push(new URL(request.url).searchParams);
+    return HttpResponse.json({ data: { items: [{ fingerprint: 'one', operation: 'GET /orders', count: 1, first_seen: 1788998400, last_seen: 1788998400, versions: ['v1'], instances: ['orders-1'], trace_id: '0123456789abcdef0123456789abcdef', stack_trace: '' }], total: 1, page: 1, page_size: 25, sampled_traces: 1, failed_traces: 0 } });
+  }));
+  render(<MemoryRouter initialEntries={[`/apm/service?${scope}&tab=traces&protocol=http&operation=GET%20%2Forders`]}><ApmPage /></MemoryRouter>);
   const tabs = within(screen.getByRole('tablist', { name: '服务视图' })).getAllByRole('tab');
-  expect(tabs.map((tab) => tab.textContent)).toEqual(['概览', '接口', '实例', '依赖', '链路', '错误', '日志', '性能剖析']);
+  expect(tabs.map((tab) => tab.textContent)).toEqual(['概览', '接口', '实例', '依赖', '链路', '错误', '版本对比', '日志', '性能剖析']);
   for (const tab of tabs) {
     const url = new URL(tab.getAttribute('href')!, 'http://localhost');
     for (const [key, value] of scope) expect(url.searchParams.get(key)).toBe(value);
@@ -34,9 +39,9 @@ it('orders the eight service views and preserves scope while switching between t
   expect(queries.at(-1)?.get('q')).not.toContain('status = error');
   expect(screen.queryByRole('button', { name: 'AI 分析' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('tab', { name: '错误' }));
-  await screen.findByRole('button', { name: 'AI 分析' });
-  const query = queries.at(-1)!;
-  for (const value of ['status = error', 'resource.service.name = "orders"', 'resource.service.namespace = "trade"', 'resource.deployment.environment.name = "production"', 'resource.device_id = "42"']) expect(query.get('q')).toContain(value);
+  await screen.findAllByRole('button', { name: 'AI 分析' });
+  const query = errorQueries.at(-1)!;
+  for (const [key, value] of scope) expect(query.get(key)).toBe(value);
   expect(query.get('start')).toBe(scope.get('start'));
   expect(screen.getByRole('tab', { name: '错误' })).toHaveAttribute('aria-selected', 'true');
 });
@@ -78,9 +83,11 @@ it('queries historical profiles for the selected device, service and instance wi
   for (const key of ['environment', 'service_namespace', 'device_id', 'start', 'end']) expect(query?.get(key)).toBe(scope.get(key));
   expect(query?.get('service')).toBe('orders');
   expect(query?.get('instance_id')).toBe('orders-1');
+  expect(query?.get('service_version')).toBe('v1');
   const link = new URL(screen.getByRole('link', { name: /按需 pprof/ }).getAttribute('href')!, 'http://localhost');
   expect(link.searchParams.get('service_name')).toBe('orders');
   expect(link.searchParams.get('tool')).toBe('profile');
+  expect(link.searchParams.get('service_version')).toBe('v1');
 });
 
 it('scopes diagnostics and retries a partial protocol failure', async () => {

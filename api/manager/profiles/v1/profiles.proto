@@ -13,6 +13,7 @@ message ProfileQuery {
   optional string environment = 7;
   optional string service_namespace = 8;
   optional string instance_id = 9;
+  optional string service_version = 10;
 }
 // Additive keys accepted by the existing profiles plugin runtime_target spec.
 message RuntimeTargetIdentity {
@@ -20,4 +21,5 @@ message RuntimeTargetIdentity {
   string service_namespace = 2;
   string environment = 3;
   string instance_id = 4;
+  string service_version = 5;
 }

@@ -84,6 +84,9 @@ jobs:
       - name: Test
         run: >-
           npm test -- --run
+          src/api/apm.test.ts
+          src/components/apm
+          src/pages/Apm
           src/pages/Kubernetes.test.tsx
           src/pages/Edges.test.tsx
           src/pages/Dashboard.test.tsx

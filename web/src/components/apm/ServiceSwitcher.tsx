@@ -26,6 +26,8 @@ export function ServiceSwitcher({
     const p = new URLSearchParams(query);
     for (const key of [
       'service_name',
+      'service_version',
+      'instance_id',
       'operation',
       'environment',
       'service_namespace',

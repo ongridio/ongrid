@@ -43,7 +43,7 @@ func validateProfilesSpec(spec map[string]interface{}) error {
 	if name := mapString(target, "service_name"); len(name) > 128 || strings.ContainsAny(name, "\r\n") {
 		return fmt.Errorf("%w: profiles.runtime_target.service_name is invalid", errs.ErrInvalid)
 	}
-	for _, key := range []string{"service_namespace", "environment", "instance_id"} {
+	for _, key := range []string{"service_namespace", "environment", "instance_id", "service_version"} {
 		if raw, exists := target[key]; exists {
 			value, ok := raw.(string)
 			if !ok || len(value) > 256 || strings.ContainsAny(value, "\r\n\x00") {

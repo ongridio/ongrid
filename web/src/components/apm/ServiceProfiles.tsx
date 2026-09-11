@@ -15,7 +15,7 @@ export function ServiceProfiles({ params, instances, loading, refresh }: { param
   const targetKey = (instance: (typeof targets)[number]) => JSON.stringify([instance.device_id, instance.instance_id, instance.version]);
   const selected = targets.find((instance) => targetKey(instance) === target) || (targets.length === 1 ? targets[0] : undefined);
   const queryParams = new URLSearchParams({ service: params.get('service_name') || '', environment: params.get('environment') || '', service_namespace: params.get('service_namespace') || '', kind, range: '1h', start: params.get('start') || '', end: params.get('end') || '' });
-  if (selected) { queryParams.set('device_id', selected.device_id); queryParams.set('instance_id', selected.instance_id); }
+  if (selected) { queryParams.set('device_id', selected.device_id); queryParams.set('instance_id', selected.instance_id); queryParams.set('service_version', selected.version); }
   const query = queryParams.toString();
   const [result, setResult] = useState<{ query: string; profile?: FlamebearerProfile; error?: string }>();
   const current = result?.query === query ? result : undefined;

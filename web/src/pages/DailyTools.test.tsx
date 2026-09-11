@@ -655,7 +655,7 @@ it('APM 跳转预选设备、要求实例端点，并按历史区间查询完整
       return HttpResponse.json({ flamebearer: { names: [], levels: [], numTicks: 0, maxSelf: 0 }, metadata: { format: 'single', units: 'samples' } });
     }),
   );
-  render(<MemoryRouter initialEntries={['/tools?tool=profile&device_id=11&service_name=orders&service_namespace=trade&environment=production&instance_id=pod-1&start=2026-09-07T00:00:00Z&end=2026-09-07T01:00:00Z']}><DailyToolsPage /></MemoryRouter>);
+  render(<MemoryRouter initialEntries={['/tools?tool=profile&device_id=11&service_name=orders&service_namespace=trade&environment=production&instance_id=pod-1&service_version=v2&start=2026-09-07T00:00:00Z&end=2026-09-07T01:00:00Z']}><DailyToolsPage /></MemoryRouter>);
   expect(await screen.findByLabelText('采集 URL')).toHaveValue('');
   expect(screen.getByRole('button', { name: '开始采样' })).toBeDisabled();
   await act(async () => { await userEvent.click(screen.getByRole('checkbox', { name: /查询跳转时的历史区间/ })); });
@@ -665,5 +665,6 @@ it('APM 跳转预选设备、要求实例端点，并按历史区间查询完整
   expect(profileQuery?.searchParams.get('environment')).toBe('production');
   expect(profileQuery?.searchParams.get('service_namespace')).toBe('trade');
   expect(profileQuery?.searchParams.get('instance_id')).toBe('pod-1');
+  expect(profileQuery?.searchParams.get('service_version')).toBe('v2');
   expect(profileQuery?.searchParams.get('start')).toBe('2026-09-07T00:00:00.000Z');
 });

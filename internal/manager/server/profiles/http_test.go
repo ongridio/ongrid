@@ -106,14 +106,14 @@ func TestProfileAbsoluteTimeAndInstanceScope(t *testing.T) {
 	handler := NewHandler("http://pyroscope.test")
 	handler.client.Transport = roundTripper(func(r *http.Request) (*http.Response, error) {
 		q := r.URL.Query()
-		if q.Get("from") != "1788739200" || q.Get("until") != "1788742800" || !strings.Contains(q.Get("query"), `deployment_environment_name="production",service_namespace="trade",service_instance_id="pod-1"`) {
+		if q.Get("from") != "1788739200" || q.Get("until") != "1788742800" || !strings.Contains(q.Get("query"), `deployment_environment_name="production",service_namespace="trade",service_instance_id="pod-1",service_version="v2"`) {
 			t.Fatalf("incorrect profile query: %s", r.URL)
 		}
 		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{}`))}, nil
 	})
 	router := chi.NewRouter()
 	handler.Register(router)
-	base := "/v1/profiles/flamegraph?device_id=42&service=orders&kind=heap&environment=production&service_namespace=trade&instance_id=pod-1"
+	base := "/v1/profiles/flamegraph?device_id=42&service=orders&kind=heap&environment=production&service_namespace=trade&instance_id=pod-1&service_version=v2"
 	for _, tc := range []struct {
 		query  string
 		status int

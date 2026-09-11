@@ -159,6 +159,7 @@ type ProfileForm = {
   service_namespace?: string;
   environment?: string;
   instance_id?: string;
+  service_version?: string;
   kind: ProfileKind;
   url: string;
   duration_seconds: string;
@@ -236,7 +237,7 @@ export default function DailyToolsPage() {
   });
   const [profile, setProfile] = useState<ProfileForm>({
     kind: 'heap', url: searchParams.has('service_name') ? '' : 'http://127.0.0.1:16060/debug/pprof/heap', duration_seconds: '30',
-    service_name: searchParams.get('service_name') || '', service_namespace: searchParams.get('service_namespace') ?? undefined, environment: searchParams.get('environment') ?? undefined, instance_id: searchParams.get('instance_id') || undefined,
+    service_name: searchParams.get('service_name') || '', service_namespace: searchParams.get('service_namespace') ?? undefined, environment: searchParams.get('environment') ?? undefined, instance_id: searchParams.get('instance_id') || undefined, service_version: searchParams.get('service_version') ?? undefined,
   });
   const [profilePlugin, setProfilePlugin] = useState<PluginRow | null>(null);
   const [profileSaving, setProfileSaving] = useState(false);
@@ -1161,7 +1162,7 @@ function ProfilingPanel({
     const controller = new AbortController();
     let active = true;
     const params = new URLSearchParams({ device_id: String(deviceID), service, kind: value.kind, range: '15m' });
-    for (const key of ['environment', 'service_namespace', 'instance_id'] as const) { if (value[key] != null) params.set(key, value[key]!); }
+    for (const key of ['environment', 'service_namespace', 'instance_id', 'service_version'] as const) { if (value[key] != null) params.set(key, value[key]!); }
     if (historical && linkedTime) { params.set('start', linkedTime.start); params.set('end', linkedTime.end); }
     setViewerLoading(true);
     setViewerError('');
@@ -1193,7 +1194,7 @@ function ProfilingPanel({
     setViewerError('');
     try {
       const params = new URLSearchParams({ device_id: String(deviceID), service, kind: value.kind, range: '15m' });
-      for (const key of ['environment', 'service_namespace', 'instance_id'] as const) { if (value[key] != null) params.set(key, value[key]!); }
+      for (const key of ['environment', 'service_namespace', 'instance_id', 'service_version'] as const) { if (value[key] != null) params.set(key, value[key]!); }
       if (historical && linkedTime) { params.set('start', linkedTime.start); params.set('end', linkedTime.end); }
       const token = getToken();
       const response = await fetch(`/api/v1/profiles/download?${params.toString()}`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
@@ -2108,7 +2109,7 @@ function profileSpec(form: ProfileForm): Record<string, unknown> {
       url: form.url.trim(),
       profile_type: form.kind,
       service_name: form.service_name || profileServiceName(form.url),
-      service_namespace: form.service_namespace, environment: form.environment, instance_id: form.instance_id,
+      service_namespace: form.service_namespace, environment: form.environment, instance_id: form.instance_id, service_version: form.service_version,
       collection_interval_seconds: form.kind === 'cpu' ? duration_seconds : 10,
       tls_insecure_skip_verify: false,
     },
@@ -2134,6 +2135,7 @@ function profileFormFromSpec(spec: Record<string, unknown>, current: ProfileForm
     service_namespace: typeof target.service_namespace === 'string' ? target.service_namespace : undefined,
     environment: typeof target.environment === 'string' ? target.environment : undefined,
     instance_id: typeof target.instance_id === 'string' ? target.instance_id : undefined,
+    service_version: typeof target.service_version === 'string' ? target.service_version : undefined,
     duration_seconds: stringValue(spec.duration_seconds, current.duration_seconds),
   };
 }

@@ -91,7 +91,7 @@ func (h *Handler) render(w http.ResponseWriter, r *http.Request, format string) 
 	selector := profileType + "{device_id=" + strconv.Quote(strconv.FormatUint(deviceID, 10)) + ",service_name=" + strconv.Quote(service) + ",profile_type=" + strconv.Quote(profileKind) + "}"
 	params.Set("from", "now-"+lookback)
 	params.Set("until", "now")
-	for _, field := range []struct{ param, label string }{{"environment", "deployment_environment_name"}, {"service_namespace", "service_namespace"}, {"instance_id", "service_instance_id"}} {
+	for _, field := range []struct{ param, label string }{{"environment", "deployment_environment_name"}, {"service_namespace", "service_namespace"}, {"instance_id", "service_instance_id"}, {"service_version", "service_version"}} {
 		if r.URL.Query().Has(field.param) {
 			value := r.URL.Query().Get(field.param)
 			if len(value) > 256 || strings.ContainsAny(value, "\n\r\x00") {
