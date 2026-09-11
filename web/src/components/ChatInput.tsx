@@ -1,7 +1,6 @@
 import { Button, Label, Textarea } from '@/components/ui';
 import { Select } from '@/components/ui/Select';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/Popover';
-import { Switch } from '@/components/ui/Switch';
 import {
   useEffect,
   useMemo,
@@ -474,9 +473,10 @@ export function ChatInput({
           }}
           placeholder={effectivePlaceholder}
           rows={1}
+          style={{ minHeight: 80 }}
           disabled={disabled}
           aria-label={tr('消息输入框', 'Message input')}
-          className={cn('w-full resize-none px-5 pb-2 text-[15px] leading-[22px]', attachments.length > 0 ? 'pt-3' : 'pt-4')}
+          className={cn('block w-full resize-none px-5 pb-2 text-[15px] leading-[22px]', attachments.length > 0 ? 'pt-3' : 'pt-4')}
         />
 
         {popoverOpen && (
@@ -507,7 +507,7 @@ export function ChatInput({
               onToggle={(v) => onWebSearchToggle?.(v)}
             />
             {allowAttachments && (
-              <Button variant="outline" size="sm" type="button" disabled={disabled || attachments.length >= MAX_IMAGES} aria-label={tr('添加图片', 'Add images')} title={tr('添加图片', 'Add images')} className="h-7 w-7 p-0" onClick={() => fileInputRef.current?.click()}>
+              <Button variant="subtle" size="sm" type="button" disabled={disabled || attachments.length >= MAX_IMAGES} aria-label={tr('添加图片', 'Add images')} title={tr('添加图片', 'Add images')} className="h-6 w-6 p-0" onClick={() => fileInputRef.current?.click()}>
                 <Paperclip size={14} />
               </Button>
             )}
@@ -770,7 +770,17 @@ function WebSearchToggle({
 }) {
   const { tr } = useI18n();
   return (
-    <Label className="inline-flex items-center gap-1.5 text-text-muted"><Globe size={15} /><Switch checked={enabled} onCheckedChange={onToggle} aria-label={enabled ? tr('关闭联网搜索', 'Disable web search') : tr('开启联网搜索', 'Enable web search')} /></Label>
+    <Button
+      variant="plain" size="sm" role="switch" aria-checked={enabled}
+      aria-label={enabled ? tr('关闭联网搜索', 'Disable web search') : tr('开启联网搜索', 'Enable web search')}
+      title={enabled ? tr('关闭联网搜索', 'Disable web search') : tr('开启联网搜索', 'Enable web search')}
+      onClick={() => onToggle(!enabled)}
+      className={cn('w-7 p-0', enabled
+        ? 'bg-emerald-500/10 text-emerald-600 ring-1 ring-emerald-500/40 hover:bg-emerald-500/20 dark:text-emerald-400'
+        : 'text-text-muted hover:bg-muted')}
+    >
+      <Globe size={15} />
+    </Button>
   );
 }
 

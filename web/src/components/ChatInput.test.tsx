@@ -128,3 +128,17 @@ describe('ChatInput image attachments', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });
+
+it('toggles web search directly from the globe button', () => {
+  const onToggle = vi.fn();
+  const view = (enabled: boolean) => <MemoryRouter><ChatInput onSubmit={vi.fn()} webSearchEnabled={enabled} onWebSearchToggle={onToggle} /></MemoryRouter>;
+  const { rerender } = render(view(true));
+  const globe = screen.getByRole('switch', { name: 'Disable web search' });
+  expect(globe.querySelector('svg')).toBeInTheDocument();
+  expect(globe).toHaveAttribute('aria-checked', 'true');
+  fireEvent.click(globe);
+  expect(onToggle).toHaveBeenLastCalledWith(false);
+  rerender(view(false));
+  fireEvent.click(screen.getByRole('switch', { name: 'Enable web search' }));
+  expect(onToggle).toHaveBeenLastCalledWith(true);
+});

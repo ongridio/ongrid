@@ -254,7 +254,7 @@ export default function HomePage() {
   return (
     <main className="flex flex-1 flex-col overflow-hidden">
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-3xl flex-col items-stretch px-6 pb-16 pt-16 sm:pt-20">
+        <div className="mx-auto flex w-full max-w-4xl flex-col items-stretch px-6 pb-16 pt-16 sm:pt-20">
           <StatusRow />
 
           <h1 className="mb-8 mt-8 text-center text-3xl font-semibold tracking-tight text-zinc-100">
