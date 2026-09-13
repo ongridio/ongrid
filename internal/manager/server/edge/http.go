@@ -723,13 +723,27 @@ func (h *Handler) packageArchForEdge(ctx context.Context, edgeID uint64) (string
 	if device == nil {
 		return "", fmt.Errorf("%w: host device %d is unavailable", errs.ErrInvalid, *edge.DeviceID)
 	}
-	if osName := strings.ToLower(strings.TrimSpace(device.OS)); osName != "" && osName != "linux" {
+	// An empty OS marks legacy devices that predate host-fact reporting;
+	// they are linux-only, so treat them as linux.
+	osName := strings.ToLower(strings.TrimSpace(device.OS))
+	switch osName {
+	case "", "linux", "windows":
+	default:
 		return "", fmt.Errorf("%w: unsupported device OS %q", errs.ErrInvalid, device.OS)
 	}
+	// Most arch aliases carry no OS prefix (e.g. "amd64", "x86_64"), so the
+	// resolved bundle arch follows the device OS. Windows edges ship amd64
+	// binaries only; arm64 stays linux-only.
 	switch strings.ToLower(strings.TrimSpace(device.Arch)) {
-	case "amd64", "x86_64", "x64", "linux-amd64", "linux/amd64":
+	case "amd64", "x86_64", "x64", "linux-amd64", "linux/amd64", "windows-amd64", "windows/amd64":
+		if osName == "windows" {
+			return "windows-amd64", nil
+		}
 		return "linux-amd64", nil
 	case "arm64", "aarch64", "linux-arm64", "linux/arm64":
+		if osName == "windows" {
+			return "", fmt.Errorf("%w: unsupported windows architecture %q (only amd64)", errs.ErrInvalid, device.Arch)
+		}
 		return "linux-arm64", nil
 	default:
 		return "", fmt.Errorf("%w: unsupported device architecture %q", errs.ErrInvalid, device.Arch)

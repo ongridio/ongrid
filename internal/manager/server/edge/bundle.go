@@ -176,6 +176,8 @@ func knownArch(a string) bool {
 		return true
 	case "linux-arm64":
 		return true
+	case "windows-amd64":
+		return true
 	default:
 		return false
 	}
