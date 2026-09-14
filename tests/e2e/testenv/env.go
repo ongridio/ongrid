@@ -444,6 +444,13 @@ func TerminateSharedMySQL() {
 	mysqlContainer = nil
 }
 
+// SharedMySQLDSN exposes the shared container's DSN to tests that exercise
+// a store against real MySQL without spawning a manager process. The DSN
+// carries the production `loc=Local` setting, so a test that reassigns
+// time.Local before calling this observes the driver's timezone conversion
+// exactly as a deployment in that zone would.
+func SharedMySQLDSN(t *testing.T) string { return sharedMySQL(t) }
+
 // sharedMySQL brings up one MySQL container per `go test` process and
 // returns a DSN pointing at the `ongrid` schema. Tests share the schema
 // but each Start truncates the cross-test-leaky tables (system_settings,
