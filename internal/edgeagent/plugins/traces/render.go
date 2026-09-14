@@ -96,7 +96,7 @@ processors:
         action: upsert
 {{- range $k, $v := .ExtraAttrs }}
       - key: {{ $k }}
-        value: "{{ $v }}"
+        value: {{ printf "%q" $v }}
         action: upsert
 {{- end }}
 {{- if .MetricsEnabled }}
@@ -248,7 +248,7 @@ exporters:
 
 extensions:
   health_check:
-    endpoint: 127.0.0.1:13133
+    endpoint: {{ .HealthEndpoint }}
 
 service:
   extensions: [health_check]
@@ -405,6 +405,7 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 	// text/template ranges over maps in key-sorted order (Go 1.12+), so
 	// passing the raw map yields stable rendered output across runs.
 	data := map[string]any{
+		"HealthEndpoint":             stringOr(cfg.Spec, "health_endpoint", "127.0.0.1:13133"),
 		"EdgeID":                     cfg.EdgeID,
 		"EmitDeviceID":               !omitDeviceID,
 		"GRPCEndpoint":               grpcEP,

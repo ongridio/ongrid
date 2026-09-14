@@ -52,6 +52,7 @@ const (
 	PluginNameLogs     = "logs"
 	PluginNameTraces   = "traces"
 	PluginNameProfiles = "profiles"
+	PluginNameAutoAPM  = "autoapm"
 	// hostmetrics / procmetrics wrap Prometheus-ecosystem exporters
 	// (node_exporter, ncabatoff/process-exporter) the edge ships as
 	// bundled subprocess plugins. Manager toggles enable + spec.
@@ -67,7 +68,7 @@ const (
 // exporter wrappers.
 func IsKnownPluginName(n string) bool {
 	switch n {
-	case PluginNameMetrics, PluginNameLogs, PluginNameTraces, PluginNameProfiles,
+	case PluginNameAutoAPM, PluginNameMetrics, PluginNameLogs, PluginNameTraces, PluginNameProfiles,
 		PluginNameHostMetrics, PluginNameProcMetrics,
 		PluginNameCustomMetrics, PluginNameDatabaseMetrics:
 		return true

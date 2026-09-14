@@ -30,6 +30,7 @@ import (
 // life of the supervisor; only resets when manager pushes a new config
 // that re-enables the plugin from a disabled state.
 type SubprocessPlugin struct {
+	environment func(PluginConfig) []string
 	// Static (set by concrete plugin constructor).
 	name         string
 	binary       string                                             // /opt/ongrid-edge/bin/otelcol-contrib
@@ -87,10 +88,12 @@ func (s *SubprocessPlugin) WaitReady(ctx context.Context) error {
 // plugins (logs, traces, ...) wrap this with their own constructor that
 // fills in the binary / configRender / args fields.
 type SubprocessOpts struct {
-	Name       string
-	Binary     string
-	WorkDir    string
-	ConfigFile string // path under WorkDir to write the rendered config
+	// Environment optionally isolates inherited configuration for the child.
+	Environment func(PluginConfig) []string
+	Name        string
+	Binary      string
+	WorkDir     string
+	ConfigFile  string // path under WorkDir to write the rendered config
 	// ConfigRender returns the bytes to write at ConfigFile. Optional —
 	// plugins like hostmetrics (node_exporter, no config file) leave this
 	// nil and put everything into Args via PluginConfig.
@@ -119,6 +122,7 @@ func NewSubprocess(opts SubprocessOpts) *SubprocessPlugin {
 	}
 	return &SubprocessPlugin{
 		name:         opts.Name,
+		environment:  opts.Environment,
 		binary:       opts.Binary,
 		workDir:      opts.WorkDir,
 		configFile:   configFile,
@@ -312,6 +316,9 @@ func (s *SubprocessPlugin) runLoop(ctx context.Context, stopped chan struct{}) {
 func (s *SubprocessPlugin) runOnce(ctx context.Context) error {
 	s.mu.Lock()
 	cmd := exec.CommandContext(ctx, s.binary, s.args(s.cfg, s.configFile)...)
+	if s.environment != nil {
+		cmd.Env = s.environment(s.cfg)
+	}
 	cmd.Dir = s.workDir
 	// Send SIGTERM (not SIGKILL) on context cancel for graceful shutdown.
 	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }

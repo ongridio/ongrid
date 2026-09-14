@@ -12,6 +12,8 @@ package plugins
 import (
 	"context"
 	"time"
+
+	"github.com/ongridio/ongrid/internal/pkg/autoapm"
 )
 
 // Plugin is what every edge capability implements. The Supervisor calls
@@ -83,14 +85,16 @@ const (
 // LastError is populated on crash; cleared once a fresh start succeeds.
 // PID is the subprocess PID (0 for in-process plugins).
 type PluginHealth struct {
-	Name         string         `json:"name"`
-	State        PluginState    `json:"state"`
-	LastError    string         `json:"last_error,omitempty"`
-	RestartCount int            `json:"restart_count"`
-	PID          int            `json:"pid,omitempty"`
-	StartedAt    time.Time      `json:"started_at,omitempty"`
-	UpdatedAt    time.Time      `json:"updated_at"`
-	Targets      []TargetHealth `json:"targets,omitempty"`
+	Candidates     []autoapm.Candidate `json:"candidates,omitempty"`
+	DiscoveryError string              `json:"discovery_error,omitempty"`
+	Name           string              `json:"name"`
+	State          PluginState         `json:"state"`
+	LastError      string              `json:"last_error,omitempty"`
+	RestartCount   int                 `json:"restart_count"`
+	PID            int                 `json:"pid,omitempty"`
+	StartedAt      time.Time           `json:"started_at,omitempty"`
+	UpdatedAt      time.Time           `json:"updated_at"`
+	Targets        []TargetHealth      `json:"targets,omitempty"`
 }
 
 // TargetHealth is the source-level runtime state reported by multi-target

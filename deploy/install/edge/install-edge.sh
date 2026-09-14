@@ -189,6 +189,13 @@ chown -R "$SERVICE_USER":"$SERVICE_GROUP" /var/lib/ongrid-edge/.upgrade
 chmod 0750 /var/lib/ongrid-edge/.upgrade
 
 # otelcol-contrib (logs, traces, and application profiles plugins).
+if [[ -f "${SCRIPT_DIR}/obi.NOTICES-${OS}-${ARCH}" ]]; then
+    install -m 0644 -o root -g root "${SCRIPT_DIR}/obi.NOTICES-${OS}-${ARCH}" "${PLUGIN_BIN_DIR}/obi.NOTICES"
+fi
+if [[ -f "${SCRIPT_DIR}/obi-${OS}-${ARCH}" ]]; then
+    install -m 0755 -o root -g root "${SCRIPT_DIR}/obi-${OS}-${ARCH}" "${PLUGIN_BIN_DIR}/obi"
+fi
+
 OTELCOL_SRC="${SCRIPT_DIR}/otelcol-contrib-${OS}-${ARCH}"
 if [[ -f "$OTELCOL_SRC" ]]; then
     log_info "installing otelcol-contrib to ${PLUGIN_BIN_DIR}/otelcol-contrib"
@@ -304,7 +311,7 @@ echo "${C_BOLD}${C_CYAN}--- self-check ---${C_RESET}"
 SELFCHECK_FAIL=0
 
 # 1) plugin binaries present + executable
-for tool in otelcol-contrib node_exporter process_exporter mysqld_exporter postgres_exporter redis_exporter mongodb_exporter; do
+for tool in obi otelcol-contrib node_exporter process_exporter mysqld_exporter postgres_exporter redis_exporter mongodb_exporter; do
     if [[ -x "${PLUGIN_BIN_DIR}/${tool}" ]]; then
         log_info "plugin binary present: ${tool}"
     else

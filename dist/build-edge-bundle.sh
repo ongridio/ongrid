@@ -42,6 +42,8 @@ ENTRIES=(
   "postgres_exporter      0755 /usr/local/lib/ongrid-edge/postgres_exporter          $BIN_DIR/postgres_exporter"
   "redis_exporter         0755 /usr/local/lib/ongrid-edge/redis_exporter             $BIN_DIR/redis_exporter"
   "mongodb_exporter       0755 /usr/local/lib/ongrid-edge/mongodb_exporter           $BIN_DIR/mongodb_exporter"
+  "obi.NOTICES            0644 /usr/local/lib/ongrid-edge/obi.NOTICES               $BIN_DIR/obi.NOTICES"
+  "obi                    0755 /usr/local/lib/ongrid-edge/obi                       $BIN_DIR/obi"
   "otelcol-contrib        0755 /usr/local/lib/ongrid-edge/otelcol-contrib            $BIN_DIR/otelcol-contrib"
   "apply-pending-upgrade.sh 0755 /usr/local/lib/ongrid-edge/apply-pending-upgrade.sh $APPLY_SCRIPT"
 )

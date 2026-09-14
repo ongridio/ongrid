@@ -258,9 +258,10 @@ fetch_plugin_bin() {
     fi
     rm -f "$tmp"
 }
-for pbin in node_exporter process_exporter otelcol-contrib mysqld_exporter postgres_exporter redis_exporter mongodb_exporter; do
+for pbin in obi obi.NOTICES node_exporter process_exporter otelcol-contrib mysqld_exporter postgres_exporter redis_exporter mongodb_exporter; do
     fetch_plugin_bin "$pbin"
 done
+if [[ -f "${APPLY_HOOK_DIR}/obi.NOTICES" ]]; then chmod 0644 "${APPLY_HOOK_DIR}/obi.NOTICES"; fi
 
 # --- service user ------------------------------------------------------------
 
@@ -474,7 +475,7 @@ printf '\n'
 echo
 echo "${C_BOLD}${C_CYAN}--- self-check ---${C_RESET}"
 SELFCHECK_FAIL=0
-for tool in otelcol-contrib node_exporter process_exporter mysqld_exporter postgres_exporter redis_exporter mongodb_exporter; do
+for tool in obi otelcol-contrib node_exporter process_exporter mysqld_exporter postgres_exporter redis_exporter mongodb_exporter; do
     if [[ -x "${APPLY_HOOK_DIR}/${tool}" ]]; then
         log_ok "plugin binary present: ${tool}"
     else

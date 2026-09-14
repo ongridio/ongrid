@@ -29,6 +29,8 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/tenantctx"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
+
+	"github.com/ongridio/ongrid/internal/pkg/autoapm"
 )
 
 // roleAdmin mirrors iam/model.RoleAdmin without crossing the BC boundary
@@ -235,14 +237,16 @@ func (h *Handler) listPlugins(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 		healthByName[hp.Name] = &pluginHealthDTO{
-			State:        hp.State,
-			LastError:    hp.LastError,
-			RestartCount: hp.RestartCount,
-			PID:          hp.PID,
-			StartedAt:    nilIfZero(hp.StartedAt),
-			UpdatedAt:    nilIfZero(hp.UpdatedAt),
-			ReportedAt:   nilIfZero(hp.ReportedAt),
-			Targets:      targets,
+			State:          hp.State,
+			Candidates:     hp.Candidates,
+			DiscoveryError: hp.DiscoveryError,
+			LastError:      hp.LastError,
+			RestartCount:   hp.RestartCount,
+			PID:            hp.PID,
+			StartedAt:      nilIfZero(hp.StartedAt),
+			UpdatedAt:      nilIfZero(hp.UpdatedAt),
+			ReportedAt:     nilIfZero(hp.ReportedAt),
+			Targets:        targets,
 		}
 	}
 	items := make([]pluginItemDTO, 0, len(rows))
@@ -269,14 +273,16 @@ type pluginItemDTO struct {
 // pluginHealthDTO is the wire shape for one plugin's heartbeat-reported
 // runtime health. nil times render as omitted.
 type pluginHealthDTO struct {
-	State        string                  `json:"state"`
-	LastError    string                  `json:"last_error,omitempty"`
-	RestartCount int                     `json:"restart_count,omitempty"`
-	PID          int                     `json:"pid,omitempty"`
-	StartedAt    *time.Time              `json:"started_at,omitempty"`
-	UpdatedAt    *time.Time              `json:"updated_at,omitempty"`
-	ReportedAt   *time.Time              `json:"reported_at,omitempty"`
-	Targets      []pluginTargetHealthDTO `json:"targets,omitempty"`
+	Candidates     []autoapm.Candidate     `json:"candidates,omitempty"`
+	DiscoveryError string                  `json:"discovery_error,omitempty"`
+	State          string                  `json:"state"`
+	LastError      string                  `json:"last_error,omitempty"`
+	RestartCount   int                     `json:"restart_count,omitempty"`
+	PID            int                     `json:"pid,omitempty"`
+	StartedAt      *time.Time              `json:"started_at,omitempty"`
+	UpdatedAt      *time.Time              `json:"updated_at,omitempty"`
+	ReportedAt     *time.Time              `json:"reported_at,omitempty"`
+	Targets        []pluginTargetHealthDTO `json:"targets,omitempty"`
 }
 
 type pluginTargetHealthDTO struct {

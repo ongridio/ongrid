@@ -19,6 +19,9 @@ image:
   pullPolicy: IfNotPresent
 
 node:
+  # Installation capability gate; capture still requires per-node UI selection.
+  autoAPM:
+    allowBPF: false
   serviceAccountName: ""
   # hostmetrics exposes node_exporter and the metrics plugin forwards it.
   # Keep the legacy embedded periodic push off to avoid duplicate node_* series.

@@ -314,3 +314,26 @@ message RetryUpgradeJobRequest {
 message RetryUpgradeJobResponse {
     UpgradeJob job = 1 [json_name = "job"];
 }
+
+// AutoAPMSpec is the JSON spec of the existing autoapm plugin configuration.
+// enabled=false stops discovery and capture without deleting this spec.
+// An empty targets list enables discovery only; it NEVER means capture all.
+message AutoAPMSpec {
+    string environment = 1;
+    optional double sample_ratio = 2 [json_name = "sample_ratio"];
+    repeated AutoAPMTarget targets = 3;
+    bool tls_insecure_skip_verify = 4 [json_name = "tls_insecure_skip_verify"];
+}
+message AutoAPMTarget {
+    // Exact executable path AND listening port; all matching process instances.
+    string executable = 1;
+    uint32 port = 2;
+    string service_name = 3 [json_name = "service_name"];
+    string service_namespace = 4 [json_name = "service_namespace"];
+}
+// Reported in plugin health. Candidates are listeners, not verified protocols.
+message AutoAPMCandidate {
+    string executable = 1;
+    uint32 port = 2;
+    int32 pid = 3;
+}

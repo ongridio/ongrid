@@ -43,7 +43,8 @@ K8S_EDGE_IMAGE_REF ?= $(K8S_EDGE_IMAGE_REPO):$(K8S_EDGE_IMAGE_TAG)
 # dependencies use an immutable tag derived from every upstream version and
 # are uploaded only once; the small self-developed binary follows VERSION.
 EDGE_ATTACHMENT_TARGETS ?= linux-amd64 linux-arm64
-EDGE_DEPS_TAG ?= edge-deps-layout2-o$(OTELCOL_VERSION)-n$(NODE_EXPORTER_VERSION)-pr$(PROCESS_EXPORTER_VERSION)-my$(MYSQLD_EXPORTER_VERSION)-pg$(POSTGRES_EXPORTER_VERSION)-r$(REDIS_EXPORTER_VERSION)-m$(MONGODB_EXPORTER_VERSION)
+OBI_VERSION ?= 0.12.1
+EDGE_DEPS_TAG ?= edge-deps-layout2-obi$(OBI_VERSION)-o$(OTELCOL_VERSION)-n$(NODE_EXPORTER_VERSION)-pr$(PROCESS_EXPORTER_VERSION)-my$(MYSQLD_EXPORTER_VERSION)-pg$(POSTGRES_EXPORTER_VERSION)-r$(REDIS_EXPORTER_VERSION)-m$(MONGODB_EXPORTER_VERSION)
 EDGE_ATTACHMENTS_OUT ?= $(OUT)/edge-attachments
 CNB_RELEASE_BASE_URL ?= https://cnb.cool/ongridio/ongrid-edge/-/releases/download
 CNB_REPO_SLUG ?= ongridio/ongrid-edge
@@ -188,6 +189,7 @@ docker-ongrid-edge: ## 构建 ongrid-edge 镜像
 		--build-arg VERSION=$(VERSION) \
 		--build-arg NODE_EXPORTER_VERSION=$(NODE_EXPORTER_VERSION) \
 		--build-arg PROCESS_EXPORTER_VERSION=$(PROCESS_EXPORTER_VERSION) \
+		--build-arg OBI_VERSION=$(OBI_VERSION) \
 		--build-arg OTELCOL_VERSION=$(OTELCOL_VERSION) \
 		-t ongrid-edge:$(VERSION) \
 		-f deploy/Dockerfile.ongrid-edge .
@@ -363,6 +365,7 @@ docker-build-k8s-edge: ## [dev] 构建本地 Kubernetes ongrid-edge 镜像（默
 		--build-arg VERSION=$(VERSION) \
 		--build-arg NODE_EXPORTER_VERSION=$(NODE_EXPORTER_VERSION) \
 		--build-arg PROCESS_EXPORTER_VERSION=$(PROCESS_EXPORTER_VERSION) \
+		--build-arg OBI_VERSION=$(OBI_VERSION) \
 		--build-arg OTELCOL_VERSION=$(OTELCOL_VERSION) \
 		-t ongrid-edge:$(VERSION) \
 		-t $(K8S_EDGE_IMAGE_REF) \
@@ -378,6 +381,7 @@ docker-push-k8s-edge: ## [release] 发布 Kubernetes ongrid-edge 多架构镜像
 		--build-arg VERSION=$(VERSION) \
 		--build-arg NODE_EXPORTER_VERSION=$(NODE_EXPORTER_VERSION) \
 		--build-arg PROCESS_EXPORTER_VERSION=$(PROCESS_EXPORTER_VERSION) \
+		--build-arg OBI_VERSION=$(OBI_VERSION) \
 		--build-arg OTELCOL_VERSION=$(OTELCOL_VERSION) \
 		-t $(K8S_EDGE_IMAGE_REF) \
 		-f deploy/Dockerfile.ongrid-edge \
@@ -695,8 +699,8 @@ verify-edge-version-release: ## [release] 校验当前 VERSION 的 Edge Release 
 	@echo "verified immutable Edge release $(VERSION)"
 
 build-edge-deps-attachments: EDGE_PLUGIN_ARCHES := $(EDGE_ATTACHMENT_TARGETS)
-build-edge-deps-attachments: fetch-otelcol fetch-node-exporter fetch-process-exporter fetch-db-exporters ## [release] 构建一次性公共 Edge 依赖附件
-	OTELCOL_VERSION="$(OTELCOL_VERSION)" \
+build-edge-deps-attachments: fetch-obi fetch-otelcol fetch-node-exporter fetch-process-exporter fetch-db-exporters ## [release] 构建一次性公共 Edge 依赖附件
+	OBI_VERSION="$(OBI_VERSION)" OTELCOL_VERSION="$(OTELCOL_VERSION)" \
 	NODE_EXPORTER_VERSION="$(NODE_EXPORTER_VERSION)" \
 	PROCESS_EXPORTER_VERSION="$(PROCESS_EXPORTER_VERSION)" \
 	MYSQLD_EXPORTER_VERSION="$(MYSQLD_EXPORTER_VERSION)" \
@@ -775,7 +779,7 @@ package: check-release-target ## [release] 打兼容命名的单架构安装包�
 	@if [ "$(ONGRID_BUNDLE_EDGE_ASSETS)" = "1" ]; then \
 		$(MAKE) --no-print-directory \
 			$(addprefix build-edge-,$(PACKAGE_EDGE_TARGETS)) \
-			fetch-otelcol fetch-node-exporter fetch-process-exporter fetch-db-exporters \
+			fetch-obi fetch-otelcol fetch-node-exporter fetch-process-exporter fetch-db-exporters \
 			EDGE_PLUGIN_ARCHES="$(PACKAGE_EDGE_TARGETS)"; \
 	fi
 	PACKAGE_TARGET="$(PACKAGE_TARGET)" \
@@ -825,3 +829,10 @@ version-print: ## [release] 打印当前 VERSION（CI 消费用）
 .PHONY: clean
 clean: ## 清理构建产物
 	rm -rf $(BIN_DIR) coverage.out coverage.html
+
+.PHONY: fetch-obi
+fetch-obi: ## [release] 下载并校验 Linux OBI 自动 APM 运行时
+	@for target in $(EDGE_PLUGIN_ARCHES); do \
+		arch=$${target#linux-}; \
+		bash scripts/fetch-obi.sh "$(OBI_VERSION)" "$$arch" "$(BIN_DIR)/$$target" || exit 1; \
+	done

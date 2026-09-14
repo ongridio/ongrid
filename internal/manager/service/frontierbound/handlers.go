@@ -360,14 +360,16 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 					})
 				}
 				items = append(items, edgebiz.PluginHealth{
-					Name:         p.Name,
-					State:        p.State,
-					LastError:    p.LastError,
-					RestartCount: p.RestartCount,
-					PID:          p.PID,
-					StartedAt:    unixOrZero(p.StartedAt),
-					UpdatedAt:    unixOrZero(p.UpdatedAt),
-					Targets:      targets,
+					Candidates:     p.Candidates,
+					DiscoveryError: p.DiscoveryError,
+					Name:           p.Name,
+					State:          p.State,
+					LastError:      p.LastError,
+					RestartCount:   p.RestartCount,
+					PID:            p.PID,
+					StartedAt:      unixOrZero(p.StartedAt),
+					UpdatedAt:      unixOrZero(p.UpdatedAt),
+					Targets:        targets,
 				})
 			}
 			w.EdgeUC.RecordPluginHealth(canonicalEdgeID, items)

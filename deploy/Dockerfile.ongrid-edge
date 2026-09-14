@@ -11,6 +11,7 @@
 ARG VERSION=dev
 ARG NODE_EXPORTER_VERSION=1.8.2
 ARG PROCESS_EXPORTER_VERSION=0.8.4
+ARG OBI_VERSION=0.12.1
 ARG OTELCOL_VERSION=0.157.0
 
 # ---------- Stage 1: builder ----------
@@ -111,10 +112,19 @@ RUN set -eux; \
     chmod 0755 /out/otelcol-contrib; \
     rm -f /tmp/otelcol-contrib.tgz
 
+FROM --platform=$BUILDPLATFORM alpine:3.20 AS obi
+ARG OBI_VERSION
+ARG TARGETARCH
+RUN apk add --no-cache bash curl tar coreutils
+COPY scripts/fetch-obi.sh /fetch-obi.sh
+RUN bash /fetch-obi.sh "$OBI_VERSION" "$TARGETARCH" /out
+
 # ---------- Stage 5: runtime (distroless, nonroot) ----------
 FROM gcr.io/distroless/base-debian12:nonroot
 
 COPY --from=builder /out/ongrid-edge /ongrid-edge
+COPY --from=obi /out/obi /usr/local/lib/ongrid-edge/obi
+COPY --from=obi /out/obi.NOTICES /usr/local/lib/ongrid-edge/obi.NOTICES
 COPY --from=node-exporter /out/node_exporter /usr/local/lib/ongrid-edge/node_exporter
 COPY --from=process-exporter /out/process_exporter /usr/local/lib/ongrid-edge/process_exporter
 COPY --from=otelcol-contrib /out/otelcol-contrib /usr/local/lib/ongrid-edge/otelcol-contrib

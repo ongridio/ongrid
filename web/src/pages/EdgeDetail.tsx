@@ -1,3 +1,4 @@
+import { AutoAPMCard } from '@/components/autoapm/AutoAPMCard';
 import { Label, Input, Textarea, Slider } from '@/components/ui';
 import { Hint } from '@/components/ui/Tooltip';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
@@ -1380,11 +1381,12 @@ function PluginsTab({ edgeId }: { edgeId: number }) {
 
   // saveRow is shared between the toggle + the spec form. We optimistically
   // patch local state so the toggle flip feels instant; on failure we
-  // re-fetch to revert.
+  // restore the saved row without unmounting and losing form drafts.
   const saveRow = async (
     name: string,
     body: { enabled: boolean; spec?: Record<string, unknown> }
   ): Promise<PluginRow> => {
+    const previous = rows.find(r => r.plugin_name === name);
     setErr(null);
     setSaveNotice(null);
     setRows((cur) =>
@@ -1402,7 +1404,7 @@ function PluginsTab({ edgeId }: { edgeId: number }) {
     } catch (e) {
       const err = e instanceof ApiError ? e : new Error((e as Error).message || tr('保存失败', 'Save failed'));
       setErr(err.message);
-      void fetchRows();
+      if (previous) setRows(cur => cur.map(r => r.plugin_name === name ? previous : r));
       throw err;
     }
   };
@@ -1458,7 +1460,9 @@ function PluginsTab({ edgeId }: { edgeId: number }) {
             const childRowsByParent: Record<string, PluginRow[]> = {
               metrics: rows.filter((r) => childNames.has(r.plugin_name)),
             };
-            return topRows.map((row) => (
+            return topRows.map((row) => row.plugin_name === 'autoapm' ? (
+              <AutoAPMCard key={row.plugin_name} edgeId={edgeId} row={row} onSave={body => saveRow(row.plugin_name, body)} />
+            ) : (
               <PluginCard
                 key={row.plugin_name}
                 row={row}

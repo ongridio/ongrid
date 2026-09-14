@@ -38,3 +38,19 @@ func TestK8sHostCapabilities(t *testing.T) {
 		t.Fatal("CAP_SYS_ADMIN must be dropped before starting the host edge")
 	}
 }
+
+func TestAutoAPMCapabilitiesRequireOptIn(t *testing.T) {
+	t.Setenv("ONGRID_AUTO_APM_ALLOW_BPF", "false")
+	if isK8sHostCapability(unix.CAP_BPF) {
+		t.Fatal("default granted BPF")
+	}
+	t.Setenv("ONGRID_AUTO_APM_ALLOW_BPF", "true")
+	for _, cap := range []int{unix.CAP_BPF, unix.CAP_PERFMON, unix.CAP_SYS_PTRACE, unix.CAP_CHECKPOINT_RESTORE, unix.CAP_NET_RAW} {
+		if !isK8sHostCapability(cap) {
+			t.Fatalf("missing capability %d", cap)
+		}
+	}
+	if isK8sHostCapability(unix.CAP_SYS_ADMIN) {
+		t.Fatal("BPF opt-in retained SYS_ADMIN")
+	}
+}

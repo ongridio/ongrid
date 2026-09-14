@@ -486,3 +486,15 @@ func TestRenderRejectsMissingEdgeID(t *testing.T) {
 		t.Errorf("render must reject missing edge_id")
 	}
 }
+
+func TestRenderEscapesResourceValuesAndIsolatesHealth(t *testing.T) {
+	body, err := render(plugins.PluginConfig{EdgeID: 42, Endpoint: "http://127.0.0.1/v1/traces", Spec: map[string]interface{}{
+		"health_endpoint": "127.0.0.1:14333", "extra_attrs": map[string]interface{}{"environment": "prod\"quoted\\path"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), `value: "prod\"quoted\\path"`) || !strings.Contains(string(body), "endpoint: 127.0.0.1:14333") {
+		t.Fatalf("unsafe or conflicting config: %s", body)
+	}
+}

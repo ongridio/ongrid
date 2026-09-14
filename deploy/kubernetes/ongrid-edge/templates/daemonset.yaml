@@ -8,6 +8,11 @@ metadata:
     {{- include "ongrid-edge.labels" . | nindent 4 }}
     app.kubernetes.io/component: node
 spec:
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "ongrid-edge.name" . }}
@@ -135,6 +140,8 @@ spec:
                   fieldPath: metadata.namespace
             - name: ONGRID_EDGE_COLLECTOR_MODE
               value: {{ .Values.node.collectorMode | quote }}
+            - name: ONGRID_AUTO_APM_ALLOW_BPF
+              value: {{ .Values.node.autoAPM.allowBPF | quote }}
             - name: HOST_PROC
               value: /proc
             - name: HOST_SYS
@@ -151,7 +158,7 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
-              add: ["DAC_READ_SEARCH", "NET_ADMIN", "SETGID", "SETPCAP", "SETUID", "SYS_CHROOT"]
+              add: ["DAC_READ_SEARCH", "NET_ADMIN", "SETGID", "SETPCAP", "SETUID", "SYS_CHROOT"{{ if .Values.node.autoAPM.allowBPF }}, "BPF", "PERFMON", "SYS_PTRACE", "CHECKPOINT_RESTORE", "NET_RAW"{{ end }}]
           volumeMounts:
             - name: host-root
               mountPath: /host/root

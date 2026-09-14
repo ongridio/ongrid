@@ -1,6 +1,10 @@
 package edge
 
-import "time"
+import (
+	"time"
+
+	"github.com/ongridio/ongrid/internal/pkg/autoapm"
+)
 
 // PluginHealth is one plugin's last-reported runtime health, shipped by the
 // edge on its heartbeat. It is intentionally ephemeral — kept in memory only,
@@ -9,15 +13,17 @@ import "time"
 // "the logs plugin silently ships nothing" into "logs: crashed — subprocess
 // binary missing".
 type PluginHealth struct {
-	Name         string               `json:"name"`
-	State        string               `json:"state"` // stopped|starting|running|crashed
-	LastError    string               `json:"last_error,omitempty"`
-	RestartCount int                  `json:"restart_count,omitempty"`
-	PID          int                  `json:"pid,omitempty"`
-	StartedAt    time.Time            `json:"started_at,omitempty"`
-	UpdatedAt    time.Time            `json:"updated_at,omitempty"`  // edge-side update time
-	ReportedAt   time.Time            `json:"reported_at,omitempty"` // manager receive time
-	Targets      []PluginTargetHealth `json:"targets,omitempty"`
+	Candidates     []autoapm.Candidate  `json:"candidates,omitempty"`
+	DiscoveryError string               `json:"discovery_error,omitempty"`
+	Name           string               `json:"name"`
+	State          string               `json:"state"` // stopped|starting|running|crashed
+	LastError      string               `json:"last_error,omitempty"`
+	RestartCount   int                  `json:"restart_count,omitempty"`
+	PID            int                  `json:"pid,omitempty"`
+	StartedAt      time.Time            `json:"started_at,omitempty"`
+	UpdatedAt      time.Time            `json:"updated_at,omitempty"`  // edge-side update time
+	ReportedAt     time.Time            `json:"reported_at,omitempty"` // manager receive time
+	Targets        []PluginTargetHealth `json:"targets,omitempty"`
 }
 
 // PluginTargetHealth is a per-source health row for metric sub-plugins

@@ -36,6 +36,7 @@ import (
 	edgek8s "github.com/ongridio/ongrid/internal/edgeagent/k8s"
 	edgeoperator "github.com/ongridio/ongrid/internal/edgeagent/operator"
 	edgeplugins "github.com/ongridio/ongrid/internal/edgeagent/plugins"
+	edgepluginautoapm "github.com/ongridio/ongrid/internal/edgeagent/plugins/autoapm"
 	edgeplugincustommetrics "github.com/ongridio/ongrid/internal/edgeagent/plugins/custommetrics"
 	edgeplugindatabasemetrics "github.com/ongridio/ongrid/internal/edgeagent/plugins/databasemetrics"
 	edgepluginhostmetrics "github.com/ongridio/ongrid/internal/edgeagent/plugins/hostmetrics"
@@ -350,6 +351,7 @@ func main() {
 				// + Endpoint set to the manager public /v1/traces URL.
 				edgeplugintraces.New(pluginBinDir, pluginWorkDir, pluginLog),
 				edgepluginprofiles.New(pluginBinDir, pluginWorkDir, pluginLog),
+				edgepluginautoapm.New(pluginBinDir, pluginWorkDir, client, agent.EdgeID, pluginLog),
 				// metrics plugin: in-process scraper that polls a
 				// local /metrics endpoint (default node_exporter on
 				// 127.0.0.1:9100) and pushes via the existing push_prom_samples
@@ -411,12 +413,14 @@ func main() {
 					targets = append(targets, wth)
 				}
 				w := tunnel.PluginHealthWire{
-					Name:         s.Name,
-					State:        string(s.State),
-					LastError:    s.LastError,
-					RestartCount: s.RestartCount,
-					PID:          s.PID,
-					Targets:      targets,
+					Name:           s.Name,
+					Candidates:     s.Candidates,
+					DiscoveryError: s.DiscoveryError,
+					State:          string(s.State),
+					LastError:      s.LastError,
+					RestartCount:   s.RestartCount,
+					PID:            s.PID,
+					Targets:        targets,
 				}
 				if !s.StartedAt.IsZero() {
 					w.StartedAt = s.StartedAt.Unix()

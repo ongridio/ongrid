@@ -196,7 +196,7 @@ for target in ${EDGE_TARGETS}; do
 done
 if [[ "$BUNDLE_EDGE_ASSETS" == "1" ]]; then
 required_edge_components=(
-    ongrid-edge otelcol-contrib node_exporter process_exporter
+    ongrid-edge obi obi.NOTICES otelcol-contrib node_exporter process_exporter
     mysqld_exporter postgres_exporter redis_exporter mongodb_exporter
 )
 for target in ${EDGE_TARGETS}; do
@@ -219,6 +219,11 @@ for target in ${EDGE_TARGETS}; do
 done
 
 # --- bundled plugin binaries (ADR-015) --------------------------------------
+for target in ${EDGE_TARGETS}; do
+    install -m 0755 "${EDGE_BIN_ROOT}/${target}/obi" "${STAGE_DIR}/edge/obi-${target}"
+    install -m 0644 "${EDGE_BIN_ROOT}/${target}/obi.NOTICES" "${STAGE_DIR}/edge/obi.NOTICES-${target}"
+done
+
 # otelcol-contrib (logs, traces, and profiles plugins) ships next to ongrid-edge so
 # install-edge.sh can install it under /usr/local/lib/ongrid-edge/otelcol-contrib.
 for target in ${EDGE_TARGETS}; do

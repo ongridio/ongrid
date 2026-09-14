@@ -39,7 +39,7 @@ fi
 
 components=(
     node_exporter process_exporter mysqld_exporter postgres_exporter
-    redis_exporter mongodb_exporter otelcol-contrib
+    redis_exporter mongodb_exporter otelcol-contrib obi obi.NOTICES
 )
 required=(TARGET DEPENDENCIES "${components[@]}")
 
@@ -49,7 +49,7 @@ fi
 while IFS= read -r entry; do
     entry=${entry#./}
     case "$entry" in
-        ""|TARGET|DEPENDENCIES|MANIFEST.sha256|node_exporter|process_exporter|mysqld_exporter|postgres_exporter|redis_exporter|mongodb_exporter|otelcol-contrib) ;;
+        ""|TARGET|DEPENDENCIES|MANIFEST.sha256|node_exporter|process_exporter|mysqld_exporter|postgres_exporter|redis_exporter|mongodb_exporter|otelcol-contrib|obi|obi.NOTICES) ;;
         *) die "archive contains unexpected path: $entry" ;;
     esac
 done <<<"$archive_entries"
@@ -103,7 +103,7 @@ done
 
 metadata="$EXTRACT_DIR/DEPENDENCIES"
 metadata_lines=$(awk 'NF {count++} END {print count + 0}' "$metadata")
-[[ "$metadata_lines" == 9 ]] || die "DEPENDENCIES must contain exactly 9 entries"
+[[ "$metadata_lines" == 10 ]] || die "DEPENDENCIES must contain exactly 10 entries"
 metadata_value() {
     local key=$1
     awk -F= -v expected="$key" '
@@ -118,6 +118,7 @@ metadata_value() {
     ' "$metadata"
 }
 
+obi=$(metadata_value obi) || die "DEPENDENCIES has invalid obi metadata"
 layout=$(metadata_value layout) || die "DEPENDENCIES has invalid layout metadata"
 otelcol=$(metadata_value otelcol-contrib) || die "DEPENDENCIES has invalid otelcol-contrib metadata"
 node_exporter=$(metadata_value node_exporter) || die "DEPENDENCIES has invalid node_exporter metadata"
@@ -128,7 +129,7 @@ redis_exporter=$(metadata_value redis_exporter) || die "DEPENDENCIES has invalid
 mongodb_exporter=$(metadata_value mongodb_exporter) || die "DEPENDENCIES has invalid mongodb_exporter metadata"
 release_tag=$(metadata_value release_tag) || die "DEPENDENCIES has invalid release_tag metadata"
 
-computed_tag="edge-deps-layout${layout}-o${otelcol}-n${node_exporter}-pr${process_exporter}-my${mysqld_exporter}-pg${postgres_exporter}-r${redis_exporter}-m${mongodb_exporter}"
+computed_tag="edge-deps-layout${layout}-obi${obi}-o${otelcol}-n${node_exporter}-pr${process_exporter}-my${mysqld_exporter}-pg${postgres_exporter}-r${redis_exporter}-m${mongodb_exporter}"
 [[ "$release_tag" == "$EXPECTED_TAG" ]] \
     || die "dependency archive release tag does not match $EXPECTED_TAG"
 [[ "$computed_tag" == "$EXPECTED_TAG" ]] \

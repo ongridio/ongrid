@@ -8,6 +8,7 @@ import (
 	"log/slog"
 
 	model "github.com/ongridio/ongrid/internal/manager/model/edge"
+	"github.com/ongridio/ongrid/internal/pkg/autoapm"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
@@ -197,6 +198,7 @@ func (uc *PluginConfigUC) ListForUI(ctx context.Context, edgeID uint64) ([]Plugi
 		model.PluginNameLogs,
 		model.PluginNameTraces,
 		model.PluginNameProfiles,
+		model.PluginNameAutoAPM,
 		model.PluginNameHostMetrics,
 		model.PluginNameProcMetrics,
 		model.PluginNameCustomMetrics,
@@ -233,6 +235,19 @@ func (uc *PluginConfigUC) Set(ctx context.Context, edgeID uint64, plugin string,
 	var databaseSecretReqs []tunnel.WriteDatabaseMetricsSecretRequest
 	var previous *model.PluginConfig
 	switch plugin {
+	case model.PluginNameAutoAPM:
+		if in.Spec == nil {
+			previous, err := uc.repo.Get(ctx, edgeID, plugin)
+			if err != nil && !errors.Is(err, errs.ErrNotFound) {
+				return nil, err
+			}
+			if previous != nil {
+				in.Spec = decodeSpec(previous.SpecJSON)
+			}
+		}
+		if _, err := autoapm.Parse(in.Spec); err != nil {
+			return nil, fmt.Errorf("%w: %s", errs.ErrInvalid, err)
+		}
 	case model.PluginNameCustomMetrics:
 		if err := validateCustomMetricsSpec(in.Spec); err != nil {
 			return nil, err
@@ -324,6 +339,7 @@ func (uc *PluginConfigUC) FetchForEdge(ctx context.Context, edgeID uint64) (*Wir
 		model.PluginNameLogs,
 		model.PluginNameTraces,
 		model.PluginNameProfiles,
+		model.PluginNameAutoAPM,
 		model.PluginNameHostMetrics,
 		model.PluginNameProcMetrics,
 		model.PluginNameCustomMetrics,
@@ -335,6 +351,9 @@ func (uc *PluginConfigUC) FetchForEdge(ctx context.Context, edgeID uint64) (*Wir
 		cfg := WireConfig{
 			Endpoint: uc.resolver.Endpoint(ctx, name),
 			Enabled:  pluginDefaultEnabled[name],
+		}
+		if name == model.PluginNameAutoAPM {
+			cfg.Endpoint = uc.resolver.Endpoint(ctx, model.PluginNameTraces)
 		}
 		if r, ok := have[name]; ok {
 			// Explicit row wins. This preserves opt-out: an operator

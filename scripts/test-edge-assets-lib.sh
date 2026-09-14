@@ -71,7 +71,7 @@ embedded="$tmp_dir/embedded"
 mkdir -p "$embedded"
 components=(
     ongrid-edge node_exporter process_exporter mysqld_exporter postgres_exporter
-    redis_exporter mongodb_exporter otelcol-contrib
+    redis_exporter mongodb_exporter otelcol-contrib obi obi.NOTICES
 )
 for target in linux-amd64 linux-arm64; do
     for component in "${components[@]}"; do

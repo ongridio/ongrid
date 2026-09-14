@@ -95,6 +95,7 @@ func linuxLastCapability() int {
 }
 
 func dropToHostEdgeUser(uid, gid, lastCapability int) error {
+	capabilities := retainedK8sHostCapabilities()
 	for capability := 0; capability <= lastCapability; capability++ {
 		if isK8sHostCapability(capability) {
 			continue
@@ -117,7 +118,7 @@ func dropToHostEdgeUser(uid, gid, lastCapability int) error {
 	}
 
 	capabilityData := [2]unix.CapUserData{}
-	for _, capability := range k8sHostCapabilities {
+	for _, capability := range capabilities {
 		mask := uint32(1) << (uint(capability) % 32)
 		index := uint(capability) / 32
 		capabilityData[index].Effective |= mask
@@ -128,7 +129,7 @@ func dropToHostEdgeUser(uid, gid, lastCapability int) error {
 	if err := unix.Capset(&header, &capabilityData[0]); err != nil {
 		return fmt.Errorf("retain host edge capabilities: %w", err)
 	}
-	for _, capability := range k8sHostCapabilities {
+	for _, capability := range capabilities {
 		if err := unix.Prctl(unix.PR_CAP_AMBIENT, unix.PR_CAP_AMBIENT_RAISE, uintptr(capability), 0, 0); err != nil {
 			return fmt.Errorf("raise ambient capability %d: %w", capability, err)
 		}
@@ -137,10 +138,20 @@ func dropToHostEdgeUser(uid, gid, lastCapability int) error {
 }
 
 func isK8sHostCapability(capability int) bool {
-	for _, allowed := range k8sHostCapabilities {
+	for _, allowed := range retainedK8sHostCapabilities() {
 		if capability == allowed {
 			return true
 		}
 	}
 	return false
+}
+
+// Helm explicitly grants these capabilities only for opted-in nodes. Do not
+// grant SYS_ADMIN or attempt to elevate after the host identity transition.
+func retainedK8sHostCapabilities() []int {
+	out := append([]int(nil), k8sHostCapabilities...)
+	if os.Getenv("ONGRID_AUTO_APM_ALLOW_BPF") == "true" {
+		out = append(out, unix.CAP_BPF, unix.CAP_PERFMON, unix.CAP_SYS_PTRACE, unix.CAP_CHECKPOINT_RESTORE, unix.CAP_NET_RAW)
+	}
+	return out
 }

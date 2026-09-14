@@ -1,0 +1,30 @@
+enforce_sys_caps: true
+log_level: WARN
+discovery:
+  services:
+    - exe_path: '^/opt/order\.v1$'
+      open_ports: '8080'
+      name: order
+      namespace: ''
+  exclude_otel_instrumented_services: true
+ebpf:
+  context_propagation: headers
+otel_traces_export:
+  endpoint: http://127.0.0.1:14318/v1/traces
+  protocol: http/protobuf
+  instrumentations: [http, grpc]
+  sampler:
+    name: parentbased_traceidratio
+    arg: '0.01'
+otel_metrics_export:
+  endpoint: http://127.0.0.1:14318/v1/metrics
+  protocol: http/protobuf
+  interval: 15s
+  histogram_aggregation: explicit_bucket_histogram
+  instrumentations: [http, grpc]
+metrics:
+  features: [application]
+
+attributes:
+  kubernetes:
+    enable: "false"
