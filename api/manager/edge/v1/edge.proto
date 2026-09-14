@@ -316,7 +316,8 @@ message RetryUpgradeJobResponse {
 }
 
 // AutoAPMSpec is the JSON spec of the existing autoapm plugin configuration.
-// enabled=false stops discovery and capture without deleting this spec.
+// Effective enabled is owned by platform.auto_apm_enabled, not the per-edge row.
+// The global gate stops discovery and capture without deleting saved targets.
 // An empty targets list enables discovery only; it NEVER means capture all.
 message AutoAPMSpec {
     string environment = 1;

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Button, Card, Input, Switch } from '@/components/ui';
+import { Button, Card, Input } from '@/components/ui';
 import { useI18n } from '@/i18n/locale';
 import { listEdgePlugins, type PluginRow, type PluginHealth } from '@/api/integrations';
 
@@ -54,15 +54,13 @@ export function AutoAPMCard({ edgeId, row, onSave }: Props) {
   return <Card className="space-y-4 text-text">
     <div className="flex items-center justify-between gap-3">
       <div>
-        <h3 className="font-medium">{tr('自动 APM', 'Automatic APM')}</h3>
+        <h3 className="font-medium">{tr('采集目标', 'Capture targets')}</h3>
         <p className="text-sm text-text-muted">{tr('开启后发现监听进程，仅采集已配置目标的 HTTP/gRPC 指标与链路。', 'Discover listening processes and capture HTTP/gRPC metrics and traces only for configured targets.')}</p>
       </div>
-      <Switch aria-label={tr('自动 APM', 'Automatic APM')} checked={row.enabled} disabled={saving}
-        onCheckedChange={checked => void save(checked, row.spec ?? {})} />
     </div>
     <p className="text-sm text-text-muted">{row.enabled
       ? tr('未配置目标时只发现、不采集。候选进程不代表协议一定受支持。', 'Without targets, discovery runs without capture. A candidate does not guarantee protocol support.')
-      : tr('已关闭，采集配置会保留。已有 SDK 上报与历史查询不受影响。', 'Off. Saved targets are retained. SDK ingestion and historical queries remain available.')}</p>
+      : tr('全局自动 APM 已关闭。可保存目标，开启后生效。', 'Global Automatic APM is off. Saved targets take effect when enabled.')}</p>
     {row.enabled && <div className="space-y-2">
       {(!health || stale) && <p role="status" className="text-sm text-text-muted">{tr('等待设备上报最新发现状态…', 'Waiting for the device to report discovery status…')}</p>}
       {health?.last_error && <p role="alert" className="text-sm text-red-500">{health.last_error}</p>}

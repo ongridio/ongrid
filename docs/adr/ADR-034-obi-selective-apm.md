@@ -31,3 +31,14 @@ Linux amd64/arm64，要求内核 BTF 和相应 eBPF 能力。原生服务通常�
 已在 ARM64 Linux 6.19 上通过原生 HTTP/gRPC 验收。最低 Linux 5.15 的实际 BPF 加载、x86 内核运行、多语言应用以及 Kubernetes 现场能力仍需发布前环境验收；编译通过不代替这些验证。
 
 全仓 macOS race 测试除两项既有平台问题外通过：`internal/manager/biz/aiops/tools` 的测试引用 Linux-only cmdpolicy；`internal/edgeagent/upgrademachine` 的路径大小写测试在 macOS /var→/private/var 路径上失败。这两处未修改。`cmd/ongrid-edge` 在 Linux 单独通过全部测试。Manager 所需 ONNX 依赖需要 CGO，不能用 CGO_ENABLED=0 进行整仓交叉构建；本次 Edge 双架构交叉构建与其余包原生构建分别验证。
+
+
+## 全局发现入口（2026-09-14 修订）
+
+服务页统一管理发现与选择采集。system_settings/platform/auto_apm_enabled
+是唯一有效开关（默认 false），PluginConfigUC 在 UI、数据接收 gate、下发快照
+三个路径使用同一策略。旧设备 enabled 字段不再改变行为；目标 spec 保留。
+关闭不会删目标，新设备无需创建配置行就能发现；设备 60 秒轮询自动生效。
+服务页按设备分页读取既有插件发现心跳并编辑目标，复用现有设置鉴权与
+edge:plugin 写权限。不新增表、广播任务或全量采集模式。
+回滚到上一版前先将全局开关置 false；上一版恢复设备级 enabled 语义，需核对各设备旧值。

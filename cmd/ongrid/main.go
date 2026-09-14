@@ -894,6 +894,7 @@ func main() {
 	}
 	k8sUC.SetTelemetryTargetResolver(pluginEndpointResolver)
 	pluginConfigUC := managerbizedge.NewPluginConfigUC(pluginConfigRepo, nil, pluginEndpointResolver, log)
+	pluginConfigUC.SetAutoAPMEnabledProvider(settingSvc.AutoAPMEnabled)
 	edgeUC.SetPluginSeeder(pluginConfigUC)
 
 	edgeHandler := managerserveredge.NewHandler(edgeSvc, deviceRepo, pluginConfigUC)

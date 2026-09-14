@@ -1,3 +1,4 @@
+import { AutoAPMManagement } from '@/components/autoapm/AutoAPMManagement';
 import { FilterField } from '@/components/ui/FilterField';
 import { Label, Input } from '@/components/ui';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
@@ -640,6 +641,7 @@ export default function ApmPage() {
         </TabsList>
       )}
       <TabsContent value={operation && ['overview', 'operations'].includes(tab) ? 'operations' : tab} className="contents"><main ref={main} className="flex-1 space-y-3 overflow-auto px-6 py-4">
+        {!detail && <AutoAPMManagement expanded={tab === 'onboarding'} canEdit={isAdmin} initialEdgeId={params.get('capture_edge_id')} onManage={() => set('tab', 'onboarding')} />}
         {!detail && tab === 'map' && (scopedReplica ? <EmptyState title={tr('服务地图按服务汇总', 'The service map is service-wide')}
           hint={tr('请清除设备、集群、版本和实例筛选后查看。', 'Clear device, cluster, version and instance filters to view the map.')}
           action={<Button onClick={() => { const next = new URLSearchParams(params); for (const key of ['device_id', 'cluster_id', 'cluster_node_id', 'service_version', 'instance_id']) next.delete(key); setParams(next); }}>{tr('清除不支持的筛选', 'Clear unsupported filters')}</Button>} />
@@ -751,7 +753,7 @@ export default function ApmPage() {
                 </TabsContent>
                 <TabsContent value="guide"><Onboarding /></TabsContent>
               </Tabs>
-            ) : <Onboarding />}
+            ) : <details className="rounded-lg border border-border p-4"><summary className="cursor-pointer text-sm font-medium">{tr('SDK 接入指南', 'SDK setup guide')}</summary><div className="mt-4"><Onboarding /></div></details>}
           </>
         )}
         {detail && tab === 'operations' && (

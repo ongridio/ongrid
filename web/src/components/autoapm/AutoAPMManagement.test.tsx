@@ -1,0 +1,43 @@
+import { act, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { beforeEach, expect, it, vi } from 'vitest';
+import { AutoAPMManagement } from './AutoAPMManagement';
+import { listSettings, setSetting } from '@/api/settings';
+import { listEdges } from '@/api/edges';
+import { listEdgePlugins, setEdgePlugin } from '@/api/integrations';
+vi.mock('@/api/settings', () => ({ listSettings: vi.fn(), setSetting: vi.fn() }));
+vi.mock('@/api/edges', () => ({ listEdges: vi.fn() }));
+vi.mock('@/api/integrations', () => ({ listEdgePlugins: vi.fn(), setEdgePlugin: vi.fn() }));
+vi.mock('@/i18n/locale', () => ({ useI18n: () => ({ tr: (_zh: string, en: string) => en }) }));
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.mocked(listSettings).mockResolvedValue({ items: [], total: 0 });
+  vi.mocked(listEdges).mockResolvedValue({ items: [{ id: 67, name: 'Ubuntu', device_id: 650, status: 'online', roles: [], access_key_id: '', last_seen_at: null }], total: 1 });
+  vi.mocked(listEdgePlugins).mockResolvedValue({ items: [{ plugin_name: 'autoapm', enabled: true, health: { state: 'running', reported_at: new Date().toISOString(), candidates: [{ executable: '/opt/orders', port: 8080, pid: 1 }] } }] });
+});
+it('uses one persisted global switch and configures a discovered target from Services', async () => {
+  const user = userEvent.setup();
+  render(<AutoAPMManagement expanded canEdit initialEdgeId={null} onManage={vi.fn()} />);
+  const toggle = screen.getByRole('switch', { name: 'Global discovery' });
+  await waitFor(() => expect(toggle).not.toHaveAttribute('aria-disabled', 'true'));
+  await act(async () => { await user.click(toggle); });
+  expect(setSetting).toHaveBeenCalledWith('platform', 'auto_apm_enabled', 'true', false);
+  expect(setEdgePlugin).not.toHaveBeenCalled();
+  await screen.findByText('/opt/orders:8080');
+  await act(async () => { await user.click(screen.getByRole('button', { name: 'Configure capture' })); });
+  expect(screen.getAllByRole('switch', { hidden: true })).toHaveLength(1);
+  await act(async () => { await user.click(await screen.findByRole('button', { name: 'Add target' })); });
+  vi.mocked(setEdgePlugin).mockResolvedValue({ plugin_name: 'autoapm', enabled: true });
+  await act(async () => { await user.click(screen.getByRole('button', { name: 'Save capture settings' })); });
+  expect(setEdgePlugin).toHaveBeenCalledWith(67, 'autoapm', { enabled: true, spec: { targets: [{ executable: '/opt/orders', port: 8080, service_name: 'orders', service_namespace: '' }] } });
+});
+it('retains the global state when saving fails', async () => {
+  const user = userEvent.setup();
+  vi.mocked(setSetting).mockRejectedValue(new Error('permission denied'));
+  render(<AutoAPMManagement expanded={false} canEdit initialEdgeId={null} onManage={vi.fn()} />);
+  const toggle = screen.getByRole('switch');
+  await waitFor(() => expect(toggle).not.toHaveAttribute('aria-disabled', 'true'));
+  await act(async () => { await user.click(toggle); });
+  expect(await screen.findByRole('alert')).toHaveTextContent('permission denied');
+  expect(toggle).not.toBeChecked();
+});

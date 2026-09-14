@@ -4,6 +4,11 @@ import { http, HttpResponse } from 'msw';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { server } from '@/test/msw-server';
 import ApmPage from './Apm';
+
+beforeEach(() => server.use(
+  http.get('/api/v1/system-settings', () => HttpResponse.json({ items: [], total: 0 })),
+  http.get('/api/v1/edges', () => HttpResponse.json({ items: [], total: 0 })),
+));
 vi.mock('@/components/apm/ServiceMap', () => ({ ServiceMap: () => <div>map canvas</div> }));
 const period = 'start=2026-09-10T00:00:00Z&end=2026-09-10T01:00:00Z';
 beforeEach(() => { localStorage.setItem('ongrid-locale', 'zh-CN'); server.use(http.get('/api/v1/devices', () => HttpResponse.json({ items: [] })), http.get('/api/v1/topology/nodes', () => HttpResponse.json({ items: [] }))); });

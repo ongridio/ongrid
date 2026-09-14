@@ -68,12 +68,13 @@ type PluginRuntimeOverlayProvider interface {
 // the affected edge so changes propagate within seconds, not within the
 // edge's 60s safety-net poll window.
 type PluginConfigUC struct {
-	repo         PluginConfigRepo
-	notifier     EdgeReloadNotifier
-	secretWriter DatabaseMetricsSecretWriter
-	resolver     EndpointResolver
-	runtime      PluginRuntimeOverlayProvider
-	log          *slog.Logger
+	repo           PluginConfigRepo
+	notifier       EdgeReloadNotifier
+	secretWriter   DatabaseMetricsSecretWriter
+	resolver       EndpointResolver
+	runtime        PluginRuntimeOverlayProvider
+	autoAPMEnabled func(context.Context) bool
+	log            *slog.Logger
 }
 
 var _ PluginConfigSeeder = (*PluginConfigUC)(nil)
@@ -119,11 +120,23 @@ func (uc *PluginConfigUC) SetRuntimeOverlayProvider(provider PluginRuntimeOverla
 	uc.runtime = provider
 }
 
+// SetAutoAPMEnabledProvider installs the global gate before serving requests.
+func (uc *PluginConfigUC) SetAutoAPMEnabledProvider(provider func(context.Context) bool) {
+	uc.autoAPMEnabled = provider
+}
+
+func (uc *PluginConfigUC) isAutoAPMEnabled(ctx context.Context) bool {
+	return uc.autoAPMEnabled != nil && uc.autoAPMEnabled(ctx)
+}
+
 // IsEnabled resolves the effective plugin policy for one Edge. An explicit
 // row wins; otherwise the same default used by ListForUI/FetchForEdge applies.
 func (uc *PluginConfigUC) IsEnabled(ctx context.Context, edgeID uint64, plugin string) (bool, error) {
 	if edgeID == 0 || !model.IsKnownPluginName(plugin) {
 		return false, errs.ErrInvalid
+	}
+	if plugin == model.PluginNameAutoAPM {
+		return uc.isAutoAPMEnabled(ctx), nil
 	}
 	row, err := uc.repo.Get(ctx, edgeID, plugin)
 	if errors.Is(err, errs.ErrNotFound) {
@@ -212,6 +225,9 @@ func (uc *PluginConfigUC) ListForUI(ctx context.Context, edgeID uint64) ([]Plugi
 			row.Enabled = r.Enabled
 			row.Spec = decodeSpec(r.SpecJSON)
 		}
+		if name == model.PluginNameAutoAPM {
+			row.Enabled = uc.isAutoAPMEnabled(ctx)
+		}
 		out = append(out, row)
 	}
 	return out, nil
@@ -236,6 +252,8 @@ func (uc *PluginConfigUC) Set(ctx context.Context, edgeID uint64, plugin string,
 	var previous *model.PluginConfig
 	switch plugin {
 	case model.PluginNameAutoAPM:
+		// Per-edge writes only edit targets; they cannot change the global gate.
+		in.Enabled = uc.isAutoAPMEnabled(ctx)
 		if in.Spec == nil {
 			previous, err := uc.repo.Get(ctx, edgeID, plugin)
 			if err != nil && !errors.Is(err, errs.ErrNotFound) {
@@ -361,6 +379,9 @@ func (uc *PluginConfigUC) FetchForEdge(ctx context.Context, edgeID uint64) (*Wir
 			// Enabled=false and the default does not override it.
 			cfg.Enabled = r.Enabled
 			cfg.Spec = decodeSpec(r.SpecJSON)
+		}
+		if name == model.PluginNameAutoAPM {
+			cfg.Enabled = uc.isAutoAPMEnabled(ctx)
 		}
 		if uc.runtime != nil {
 			overlay, overlayErr := uc.runtime.PluginRuntimeOverlay(ctx, edgeID, name)

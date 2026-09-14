@@ -6,17 +6,14 @@ import { listEdgePlugins } from '@/api/integrations';
 vi.mock('@/api/integrations', () => ({ listEdgePlugins: vi.fn() }));
 vi.mock('@/i18n/locale', () => ({ useI18n: () => ({ tr: (_zh: string, en: string) => en }) }));
 beforeEach(() => { vi.clearAllMocks(); });
-it('enables discovery with no targets and preserves saved targets on off', async () => {
+it('has no per-device switch and saves targets while the global gate is off', async () => {
   const user = userEvent.setup(); const save = vi.fn().mockResolvedValue(undefined);
   const spec = { targets: [{ executable: '/opt/orders', port: 8080, service_name: 'orders' }] };
-  const { rerender } = render(<AutoAPMCard edgeId={1} row={{ plugin_name: 'autoapm', enabled: false }} onSave={save} />);
+  render(<AutoAPMCard edgeId={1} row={{ plugin_name: 'autoapm', enabled: false, spec }} onSave={save} />);
   expect(listEdgePlugins).not.toHaveBeenCalled();
-  await act(async () => { await user.click(screen.getByRole('switch', { name: 'Automatic APM' })); });
-  expect(save).toHaveBeenCalledWith({ enabled: true, spec: {} });
-  vi.mocked(listEdgePlugins).mockResolvedValue({ items: [] });
-  rerender(<AutoAPMCard edgeId={1} row={{ plugin_name: 'autoapm', enabled: true, spec }} onSave={save} />);
-  await act(async () => { await user.click(screen.getByRole('switch', { name: 'Automatic APM' })); });
-  expect(save).toHaveBeenLastCalledWith({ enabled: false, spec });
+  expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+  await act(async () => { await user.click(screen.getByRole('button', { name: 'Save capture settings' })); });
+  expect(save).toHaveBeenCalledWith({ enabled: false, spec });
 });
 it('adds a discovered listener only after explicitly saving and retains draft on error', async () => {
   const user = userEvent.setup(); const save = vi.fn().mockRejectedValue(new Error('save failed'));

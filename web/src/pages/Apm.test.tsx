@@ -6,6 +6,11 @@ import { delay, http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { server } from '@/test/msw-server';
 import ApmPage from './Apm';
+
+beforeEach(() => server.use(
+  http.get('/api/v1/system-settings', () => HttpResponse.json({ items: [], total: 0 })),
+  http.get('/api/v1/edges', () => HttpResponse.json({ items: [], total: 0 })),
+));
 import { Onboarding } from '@/components/apm/Onboarding';
 
 vi.mock('@/components/apm/Dependencies', () => ({ Dependencies: () => null }));

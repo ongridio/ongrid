@@ -5,6 +5,11 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { server } from '@/test/msw-server';
 import ApmPage from './Apm';
 
+beforeEach(() => server.use(
+  http.get('/api/v1/system-settings', () => HttpResponse.json({ items: [], total: 0 })),
+  http.get('/api/v1/edges', () => HttpResponse.json({ items: [], total: 0 })),
+));
+
 vi.mock('@/pages/DailyTools', () => ({ NativeFlamegraph: ({ error, loading }: { error: string; loading: boolean }) => <div>{error || (loading ? 'Loading profile' : 'Profile loaded')}</div> }));
 vi.mock('@/components/apm/Dependencies', () => ({ Dependencies: () => null }));
 const scope = new URLSearchParams({ service_name: 'orders', environment: 'production', service_namespace: 'trade', range: 'custom', start: '2026-09-10T00:00:00Z', end: '2026-09-10T01:00:00Z', device_id: '42' });

@@ -1,11 +1,10 @@
-import { AutoAPMCard } from '@/components/autoapm/AutoAPMCard';
-import { Label, Input, Textarea, Slider } from '@/components/ui';
+import { Label, Input, Textarea, Slider, Card } from '@/components/ui';
 import { Hint } from '@/components/ui/Tooltip';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
 import { Select } from '@/components/ui/Select';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   CartesianGrid,
   Line,
@@ -1461,7 +1460,11 @@ function PluginsTab({ edgeId }: { edgeId: number }) {
               metrics: rows.filter((r) => childNames.has(r.plugin_name)),
             };
             return topRows.map((row) => row.plugin_name === 'autoapm' ? (
-              <AutoAPMCard key={row.plugin_name} edgeId={edgeId} row={row} onSave={body => saveRow(row.plugin_name, body)} />
+              <Card key={row.plugin_name} className="flex flex-wrap items-center justify-between gap-3">
+                <div><h3 className="font-medium">{tr('自动 APM', 'Automatic APM')}</h3>
+                  <p className="text-sm text-text-muted">{tr('全局发现开关与采集目标统一在服务页管理。', 'Manage global discovery and capture targets on the Services page.')}</p></div>
+                <Link className="text-sm text-indigo-500 hover:underline" to={`/apm?tab=onboarding&capture_edge_id=${edgeId}`}>{tr('管理采集', 'Manage capture')}</Link>
+              </Card>
             ) : (
               <PluginCard
                 key={row.plugin_name}
