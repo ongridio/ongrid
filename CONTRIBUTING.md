@@ -95,8 +95,10 @@ rejects Han characters in the PR title or anywhere in a commit message.
 This is a deterministic check, not English language recognition.
 Merge commits must also satisfy the policy; prefer rebasing your
 feature branch. PRs above the API limit of 250 commits fail closed and must be
-split. A failed check creates one English bot comment, then updates that same
-comment on subsequent runs, including when the PR title or commits are fixed.
+split. The first failed check posts one English reminder with the policy and a
+link to the latest PR checks. The comment contains no commit-specific results
+and is never updated. Later failures, fixes, and regressions only update the
+check status and run summary, which lists the current violations.
 Editing the PR title or target branch triggers another check. If the title,
 head commit, or base branch changes during validation, the run fails and must
 be rerun against the current PR state.
