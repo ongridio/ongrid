@@ -2,7 +2,7 @@ name: PR Commit Policy
 
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, edited, synchronize, reopened, ready_for_review]
 
 permissions:
   pull-requests: write
@@ -40,31 +40,39 @@ jobs:
               if (!commits.length || commits.length !== current.commits) {
                 failures.push('The complete commit list could not be checked. Split PRs larger than 250 commits and retry.');
               }
-              for (const { sha, commit } of commits) {
-                const message = commit.message;
+              const messages = [
+                { label: 'PR title', message: current.title },
+                ...commits.map(({ sha, commit }) => ({ label: sha.slice(0, 7), message: commit.message })),
+              ];
+              for (const { label, message } of messages) {
                 const subject = message.split(/\r?\n/, 1)[0];
                 const reasons = [];
                 if (!/^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-zA-Z0-9_./-]+\))?!?: \S.*$/.test(subject)) {
                   reasons.push('use Conventional Commits, e.g. `fix: handle empty service names`');
                 }
                 // ponytail: this rejects Han characters, not every non-English language; use language review for semantic enforcement.
-                if (/\p{Script=Han}/u.test(message)) reasons.push('rewrite the title and body in English (Han characters are not allowed)');
-                if (reasons.length) failures.push(`- ${sha.slice(0, 7)}: ${reasons.join('; ')}.`);
+                if (/\p{Script=Han}/u.test(message)) reasons.push('rewrite this text in English (Han characters are not allowed)');
+                if (reasons.length) failures.push(`- ${label}: ${reasons.join('; ')}.`);
               }
-              const { data: latest } = await github.rest.pulls.get(params);
-              if (latest.head.sha !== pr.head.sha) return;
               const comments = await github.paginate(github.rest.issues.listComments, { ...repo, issue_number: pr.number, per_page: 100 });
+              const { data: latest } = await github.rest.pulls.get(params);
+              if (latest.head.sha !== current.head.sha || latest.base.ref !== current.base.ref ||
+                  latest.base.sha !== current.base.sha || latest.title !== current.title) {
+                await status('failure', 'PR changed during validation. Re-run the workflow.');
+                core.setFailed('PR changed during validation. Re-run the workflow.');
+                return;
+              }
               const previous = comments.find(c => c.user?.login === 'github-actions[bot]' && c.body?.startsWith(marker));
               const body = `${marker}\n### Commit message policy\n\n` + (failures.length
-                ? `Please use English Conventional Commit messages for every commit.\n\n${failures.slice(0, 50).join('\n')}\n\n${failures.length > 50 ? 'Only the first 50 failures are shown.\n\n' : ''}Reword the listed commits and push the updated branch. This comment will update after the next check.`
-                : 'All commit messages pass the format and Han-character checks. Thank you!');
+                ? `Please use English Conventional Commits for the PR title and every commit message.\n\n${failures.slice(0, 50).join('\n')}\n\n${failures.length > 50 ? 'Only the first 50 failures are shown.\n\n' : ''}Edit the PR title if listed above. Reword any listed commits and push the updated branch. This comment will update after the next check.`
+                : 'The PR title and all commit messages pass the format and Han-character checks. Thank you!');
               if (previous && previous.body !== body) {
                 await github.rest.issues.updateComment({ ...repo, comment_id: previous.id, body });
               } else if (!previous && failures.length) {
                 await github.rest.issues.createComment({ ...repo, issue_number: pr.number, body });
               }
-              await status(failures.length ? 'failure' : 'success', failures.length ? 'Rewrite commit messages; see the PR comment.' : 'Commit messages pass the policy.');
-              if (failures.length) core.setFailed('Commit messages do not meet the policy.');
+              await status(failures.length ? 'failure' : 'success', failures.length ? 'Fix the PR title or commits; see the PR comment.' : 'PR title and commit messages pass the policy.');
+              if (failures.length) core.setFailed('PR title or commit messages do not meet the policy.');
             } catch (error) {
               await status('failure', 'Commit policy could not be verified. Re-run the workflow.');
               throw error;

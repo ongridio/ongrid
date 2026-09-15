@@ -85,17 +85,25 @@ contributions.
 
 ## Commit message checks
 
-Write every commit title and body in English. Titles must use Conventional
-Commits, for example `fix(api): handle empty service names`. Supported types are
+Write the PR title and every commit title and body in English. Titles must use
+Conventional Commits, for example `fix(api): handle empty service names`. Supported types are
 `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`,
 and `revert`; scopes and breaking-change `!` markers are optional.
 
-The `commit-policy` check validates the title format and rejects Han characters
-anywhere in the message. This is a deterministic check, not English language
-recognition. Merge commits must also satisfy the policy; prefer rebasing your
+The `commit-policy` check validates the PR title and commit title format and
+rejects Han characters in the PR title or anywhere in a commit message.
+This is a deterministic check, not English language recognition.
+Merge commits must also satisfy the policy; prefer rebasing your
 feature branch. PRs above the API limit of 250 commits fail closed and must be
 split. A failed check creates one English bot comment, then updates that same
-comment on subsequent runs, including when the commits are fixed.
+comment on subsequent runs, including when the PR title or commits are fixed.
+Editing the PR title or target branch triggers another check. If the title,
+head commit, or base branch changes during validation, the run fails and must
+be rerun against the current PR state.
+
+Squash merges use the PR title as the default commit title, so the PR title
+must pass the same policy. This check cannot validate a custom commit message
+typed into the merge dialog; maintainers must keep that message compliant.
 
 Maintainers: after this workflow is merged into `main` and has run on a PR,
 add `commit-policy` as a required status check in the branch rules for `main`,
