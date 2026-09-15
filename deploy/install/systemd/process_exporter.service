@@ -1,0 +1,29 @@
+[Unit]
+Description=process_exporter (ongrid process metrics)
+Documentation=https://github.com/ncabatoff/process-exporter
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ongrid-prometheus
+Group=ongrid-prometheus
+ExecStart=/usr/local/bin/process_exporter --config.path=/etc/ongrid/process-exporter.yml --web.listen-address=127.0.0.1:9256
+Restart=always
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=process_exporter
+
+NoNewPrivileges=true
+ProtectSystem=true
+ProtectHome=true
+PrivateTmp=true
+# 补 PrivateDevices=true（屏蔽 /dev 物理设备）。process_exporter 从
+# /proc 读取进程指标，不需要 /dev 设备节点。与 ongrid-frontier.service
+# 加固基线对齐。
+PrivateDevices=true
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

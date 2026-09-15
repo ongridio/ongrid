@@ -1,0 +1,39 @@
+[Unit]
+Description=Prometheus (ongrid metrics TSDB)
+Documentation=https://prometheus.io/docs/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ongrid-prometheus
+Group=ongrid-prometheus
+ExecStart=/usr/local/bin/prometheus \
+  --config.file=/etc/ongrid/prometheus/prometheus.yml \
+  --storage.tsdb.path=/var/lib/ongrid-prometheus \
+  --storage.tsdb.retention.time=7d \
+  --web.listen-address=127.0.0.1:9090 \
+  --web.external-url=http://localhost/prometheus/ \
+  --web.route-prefix=/ \
+  --web.enable-remote-write-receiver
+ExecReload=/bin/kill -HUP $MAINPID
+KillMode=mixed
+TimeoutStopSec=30s
+Restart=always
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ongrid-prometheus
+
+NoNewPrivileges=true
+ProtectSystem=true
+ProtectHome=true
+PrivateTmp=true
+StateDirectory=ongrid-prometheus
+# 与 install-deps.sh step 3a 的 0750 基线对齐（仅 owner+group 可读）。
+StateDirectoryMode=0750
+ReadWritePaths=/var/lib/ongrid-prometheus
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
