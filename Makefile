@@ -825,3 +825,7 @@ version-print: ## [release] 打印当前 VERSION（CI 消费用）
 .PHONY: clean
 clean: ## 清理构建产物
 	rm -rf $(BIN_DIR) coverage.out coverage.html
+
+.PHONY: test-commit-policy
+test-commit-policy: ## Verify PR commit policy and bot feedback
+	node scripts/test-commit-policy.cjs

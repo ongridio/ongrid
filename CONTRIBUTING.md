@@ -82,3 +82,26 @@ contributions.
 - **Bugs / features** → open a GitHub issue.
 - **Security vulnerabilities** → do **not** open a public issue. See
   [SECURITY.md](SECURITY.md).
+
+## Commit message checks
+
+Write every commit title and body in English. Titles must use Conventional
+Commits, for example `fix(api): handle empty service names`. Supported types are
+`feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`,
+and `revert`; scopes and breaking-change `!` markers are optional.
+
+The `commit-policy` check validates the title format and rejects Han characters
+anywhere in the message. This is a deterministic check, not English language
+recognition. Merge commits must also satisfy the policy; prefer rebasing your
+feature branch. PRs above the API limit of 250 commits fail closed and must be
+split. A failed check creates one English bot comment, then updates that same
+comment on subsequent runs, including when the commits are fixed.
+
+Maintainers: after this workflow is merged into `main` and has run on a PR,
+add `commit-policy` as a required status check in the branch rules for `main`,
+retain existing checks, and restrict bypass access. The workflow publishes the
+status on the PR head commit and runs only trusted base-branch code, including
+for fork PRs. It does not enforce the language of human PR comments. To roll
+back, remove this required check first, then revert the workflow change.
+
+Run the policy regression checks locally with `make test-commit-policy`.

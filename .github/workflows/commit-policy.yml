@@ -1,0 +1,71 @@
+name: PR Commit Policy
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  pull-requests: write
+  statuses: write
+
+concurrency:
+  group: commit-policy-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: validate commit messages
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      # This privileged workflow reads API metadata only. Never check out or run PR code.
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const repo = context.repo;
+            const marker = '<!-- ongrid-commit-policy -->';
+            const status = (state, description) => github.rest.repos.createCommitStatus({
+              ...repo, sha: pr.head.sha, context: 'commit-policy', state, description,
+              target_url: `${context.serverUrl}/${repo.owner}/${repo.repo}/actions/runs/${context.runId}`,
+            });
+            await status('pending', 'Checking commit messages.');
+            try {
+              const params = { ...repo, pull_number: pr.number };
+              const { data: current } = await github.rest.pulls.get(params);
+              if (current.head.sha !== pr.head.sha) return;
+              const commits = await github.paginate(github.rest.pulls.listCommits, { ...params, per_page: 100 });
+              const failures = [];
+              // ponytail: the API caps PR commits at 250; split larger PRs instead of silently skipping commits.
+              if (!commits.length || commits.length !== current.commits) {
+                failures.push('The complete commit list could not be checked. Split PRs larger than 250 commits and retry.');
+              }
+              for (const { sha, commit } of commits) {
+                const message = commit.message;
+                const subject = message.split(/\r?\n/, 1)[0];
+                const reasons = [];
+                if (!/^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-zA-Z0-9_./-]+\))?!?: \S.*$/.test(subject)) {
+                  reasons.push('use Conventional Commits, e.g. `fix: handle empty service names`');
+                }
+                // ponytail: this rejects Han characters, not every non-English language; use language review for semantic enforcement.
+                if (/\p{Script=Han}/u.test(message)) reasons.push('rewrite the title and body in English (Han characters are not allowed)');
+                if (reasons.length) failures.push(`- ${sha.slice(0, 7)}: ${reasons.join('; ')}.`);
+              }
+              const { data: latest } = await github.rest.pulls.get(params);
+              if (latest.head.sha !== pr.head.sha) return;
+              const comments = await github.paginate(github.rest.issues.listComments, { ...repo, issue_number: pr.number, per_page: 100 });
+              const previous = comments.find(c => c.user?.login === 'github-actions[bot]' && c.body?.startsWith(marker));
+              const body = `${marker}\n### Commit message policy\n\n` + (failures.length
+                ? `Please use English Conventional Commit messages for every commit.\n\n${failures.slice(0, 50).join('\n')}\n\n${failures.length > 50 ? 'Only the first 50 failures are shown.\n\n' : ''}Reword the listed commits and push the updated branch. This comment will update after the next check.`
+                : 'All commit messages pass the format and Han-character checks. Thank you!');
+              if (previous && previous.body !== body) {
+                await github.rest.issues.updateComment({ ...repo, comment_id: previous.id, body });
+              } else if (!previous && failures.length) {
+                await github.rest.issues.createComment({ ...repo, issue_number: pr.number, body });
+              }
+              await status(failures.length ? 'failure' : 'success', failures.length ? 'Rewrite commit messages; see the PR comment.' : 'Commit messages pass the policy.');
+              if (failures.length) core.setFailed('Commit messages do not meet the policy.');
+            } catch (error) {
+              await status('failure', 'Commit policy could not be verified. Re-run the workflow.');
+              throw error;
+            }
