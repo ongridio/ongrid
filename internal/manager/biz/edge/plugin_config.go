@@ -17,6 +17,7 @@ import (
 // needs. *sqlite.PluginConfigRepo satisfies it.
 type PluginConfigRepo interface {
 	ListByEdge(ctx context.Context, edgeID uint64) ([]*model.PluginConfig, error)
+	ListAutoAPMSpecs(ctx context.Context) ([]string, error)
 	Get(ctx context.Context, edgeID uint64, plugin string) (*model.PluginConfig, error)
 	Upsert(ctx context.Context, in *model.PluginConfig) (*model.PluginConfig, error)
 	Delete(ctx context.Context, edgeID uint64, plugin string) error
@@ -68,13 +69,16 @@ type PluginRuntimeOverlayProvider interface {
 // the affected edge so changes propagate within seconds, not within the
 // edge's 60s safety-net poll window.
 type PluginConfigUC struct {
-	repo           PluginConfigRepo
-	notifier       EdgeReloadNotifier
-	secretWriter   DatabaseMetricsSecretWriter
-	resolver       EndpointResolver
-	runtime        PluginRuntimeOverlayProvider
-	autoAPMEnabled func(context.Context) bool
-	log            *slog.Logger
+	kubernetesAutoAPM      func(context.Context, uint64) (*autoapm.Spec, bool, error)
+	kubernetesAutoAPMSpecs func(context.Context) ([]string, error)
+	repo                   PluginConfigRepo
+	notifier               EdgeReloadNotifier
+	secretWriter           DatabaseMetricsSecretWriter
+	resolver               EndpointResolver
+	runtime                PluginRuntimeOverlayProvider
+	autoAPMEnabled         func(context.Context) bool
+	autoAPMEnvironment     func(context.Context, uint64) (string, string, error)
+	log                    *slog.Logger
 }
 
 var _ PluginConfigSeeder = (*PluginConfigUC)(nil)
@@ -125,6 +129,34 @@ func (uc *PluginConfigUC) SetAutoAPMEnabledProvider(provider func(context.Contex
 	uc.autoAPMEnabled = provider
 }
 
+func (uc *PluginConfigUC) SetAutoAPMEnvironmentProvider(provider func(context.Context, uint64) (string, string, error)) {
+	uc.autoAPMEnvironment = provider
+}
+
+func (uc *PluginConfigUC) SetKubernetesAutoAPMProvider(provider func(context.Context, uint64) (*autoapm.Spec, bool, error), specs func(context.Context) ([]string, error)) {
+	uc.kubernetesAutoAPM, uc.kubernetesAutoAPMSpecs = provider, specs
+}
+
+func (uc *PluginConfigUC) NotifyAutoAPMChanged(ctx context.Context, edgeID uint64) {
+	uc.notify(ctx, edgeID, model.PluginNameAutoAPM)
+}
+
+type AutoAPMDefaults struct {
+	Environment string `json:"environment"`
+	ClusterName string `json:"cluster_name"`
+}
+
+func (uc *PluginConfigUC) autoAPMDefaults(ctx context.Context, edgeID uint64) (*AutoAPMDefaults, error) {
+	if uc.autoAPMEnvironment == nil {
+		return nil, nil
+	}
+	environment, cluster, err := uc.autoAPMEnvironment(ctx, edgeID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve auto APM environment: %w", err)
+	}
+	return &AutoAPMDefaults{Environment: environment, ClusterName: cluster}, nil
+}
+
 func (uc *PluginConfigUC) isAutoAPMEnabled(ctx context.Context) bool {
 	return uc.autoAPMEnabled != nil && uc.autoAPMEnabled(ctx)
 }
@@ -136,6 +168,15 @@ func (uc *PluginConfigUC) IsEnabled(ctx context.Context, edgeID uint64, plugin s
 		return false, errs.ErrInvalid
 	}
 	if plugin == model.PluginNameAutoAPM {
+		if uc.kubernetesAutoAPM != nil {
+			spec, managed, err := uc.kubernetesAutoAPM(ctx, edgeID)
+			if err != nil {
+				return false, err
+			}
+			if managed && spec == nil {
+				return false, nil
+			}
+		}
 		return uc.isAutoAPMEnabled(ctx), nil
 	}
 	row, err := uc.repo.Get(ctx, edgeID, plugin)
@@ -153,6 +194,7 @@ type PluginRow struct {
 	PluginName string                 `json:"plugin_name"`
 	Enabled    bool                   `json:"enabled"`
 	Spec       map[string]interface{} `json:"spec,omitempty"`
+	Defaults   *AutoAPMDefaults       `json:"defaults,omitempty"`
 }
 
 // pluginDefaultEnabled declares the on-by-default policy for fresh
@@ -227,6 +269,24 @@ func (uc *PluginConfigUC) ListForUI(ctx context.Context, edgeID uint64) ([]Plugi
 		}
 		if name == model.PluginNameAutoAPM {
 			row.Enabled = uc.isAutoAPMEnabled(ctx)
+			if uc.kubernetesAutoAPM != nil {
+				spec, managed, err := uc.kubernetesAutoAPM(ctx, edgeID)
+				if err != nil {
+					return nil, err
+				}
+				if managed {
+					row.Spec = nil
+					if spec == nil {
+						row.Enabled = false
+					} else {
+						row.Spec = spec.Map()
+					}
+				}
+			}
+			row.Defaults, err = uc.autoAPMDefaults(ctx, edgeID)
+			if err != nil {
+				return nil, err
+			}
 		}
 		out = append(out, row)
 	}
@@ -252,6 +312,15 @@ func (uc *PluginConfigUC) Set(ctx context.Context, edgeID uint64, plugin string,
 	var previous *model.PluginConfig
 	switch plugin {
 	case model.PluginNameAutoAPM:
+		if uc.kubernetesAutoAPM != nil {
+			_, managed, err := uc.kubernetesAutoAPM(ctx, edgeID)
+			if err != nil {
+				return nil, err
+			}
+			if managed {
+				return nil, fmt.Errorf("%w: configure Kubernetes capture on the cluster", errs.ErrInvalid)
+			}
+		}
 		// Per-edge writes only edit targets; they cannot change the global gate.
 		in.Enabled = uc.isAutoAPMEnabled(ctx)
 		if in.Spec == nil {
@@ -263,8 +332,10 @@ func (uc *PluginConfigUC) Set(ctx context.Context, edgeID uint64, plugin string,
 				in.Spec = decodeSpec(previous.SpecJSON)
 			}
 		}
-		if _, err := autoapm.Parse(in.Spec); err != nil {
+		if spec, err := autoapm.Parse(in.Spec); err != nil {
 			return nil, fmt.Errorf("%w: %s", errs.ErrInvalid, err)
+		} else if spec.Kubernetes != nil {
+			return nil, fmt.Errorf("%w: Kubernetes rules require a cluster", errs.ErrInvalid)
 		}
 	case model.PluginNameCustomMetrics:
 		if err := validateCustomMetricsSpec(in.Spec); err != nil {
@@ -382,6 +453,29 @@ func (uc *PluginConfigUC) FetchForEdge(ctx context.Context, edgeID uint64) (*Wir
 		}
 		if name == model.PluginNameAutoAPM {
 			cfg.Enabled = uc.isAutoAPMEnabled(ctx)
+			if uc.kubernetesAutoAPM != nil {
+				spec, managed, err := uc.kubernetesAutoAPM(ctx, edgeID)
+				if err != nil {
+					return nil, fmt.Errorf("resolve Kubernetes capture settings: %w", err)
+				}
+				if managed {
+					cfg.Spec = nil
+					if spec == nil {
+						cfg.Enabled = false
+					} else {
+						cfg.Spec = spec.Map()
+					}
+				}
+			}
+			defaults, err := uc.autoAPMDefaults(ctx, edgeID)
+			if err != nil {
+				return nil, err
+			}
+			if defaults != nil && defaults.Environment != "" {
+				if environment, _ := cfg.Spec["environment"].(string); environment == "" {
+					cfg.Spec = mergeRuntimeOverlay(cfg.Spec, map[string]interface{}{"environment": defaults.Environment})
+				}
+			}
 		}
 		if uc.runtime != nil {
 			overlay, overlayErr := uc.runtime.PluginRuntimeOverlay(ctx, edgeID, name)

@@ -35,6 +35,12 @@ func (r *PluginConfigRepo) ListByEdge(ctx context.Context, edgeID uint64) ([]*mo
 	return out, nil
 }
 
+func (r *PluginConfigRepo) ListAutoAPMSpecs(ctx context.Context) ([]string, error) {
+	var specs []string
+	err := r.db.WithContext(ctx).Model(&model.PluginConfig{}).Where("plugin_name = ?", model.PluginNameAutoAPM).Pluck("spec_json", &specs).Error
+	return specs, err
+}
+
 // Get returns a single (edge_id, plugin_name) row or errs.ErrNotFound.
 func (r *PluginConfigRepo) Get(ctx context.Context, edgeID uint64, plugin string) (*model.PluginConfig, error) {
 	var row model.PluginConfig

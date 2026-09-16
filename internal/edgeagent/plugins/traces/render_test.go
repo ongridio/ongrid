@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ongridio/ongrid/internal/edgeagent/plugins"
+	"gopkg.in/yaml.v3"
 )
 
 // TestRenderedStandaloneConfigAcceptedByCollector is an opt-in compatibility
@@ -26,6 +27,7 @@ func TestRenderedStandaloneConfigAcceptedByCollector(t *testing.T) {
 		AuthUser: "kt_access",
 		AuthPass: "ks_secret",
 		Spec: map[string]interface{}{
+			"service_environments":              []map[string]string{{"service_name": "orders", "service_namespace": "shop", "environment": "production"}, {"service_name": "inventory", "environment": "test"}},
 			"omit_device_id":                    true,
 			"enable_k8sattributes":              true,
 			"enable_logs":                       true,
@@ -496,5 +498,57 @@ func TestRenderEscapesResourceValuesAndIsolatesHealth(t *testing.T) {
 	}
 	if !strings.Contains(string(body), `value: "prod\"quoted\\path"`) || !strings.Contains(string(body), "endpoint: 127.0.0.1:14333") {
 		t.Fatalf("unsafe or conflicting config: %s", body)
+	}
+}
+
+func TestServiceEnvironmentEnrichesBothSignals(t *testing.T) {
+	body, err := render(plugins.PluginConfig{EdgeID: 1, Endpoint: "https://manager/v1/traces", Spec: map[string]interface{}{
+		"enable_metrics": true, "metrics_export_endpoint": "127.0.0.1:9465",
+		"service_environments": []map[string]string{{"service_name": "orders", "service_namespace": "shop", "environment": "production"}, {"service_name": "inventory", "environment": "test"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg map[string]interface{}
+	if err := yaml.Unmarshal(body, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	processors := cfg["processors"].(map[string]interface{})
+	transform := processors["transform/service_environment"].(map[string]interface{})
+	for _, signal := range []string{"trace_statements", "metric_statements"} {
+		statements := transform[signal].([]interface{})[0].(map[string]interface{})["statements"].([]interface{})
+		if len(statements) != 2 || !strings.Contains(statements[0].(string), `attributes["service.namespace"] == "shop"`) || !strings.Contains(statements[1].(string), `attributes["service.namespace"] == nil`) {
+			t.Fatalf("statements: %+v", statements)
+		}
+	}
+	for _, pipeline := range []string{"traces", "metrics"} {
+		p := cfg["service"].(map[string]interface{})["pipelines"].(map[string]interface{})[pipeline].(map[string]interface{})["processors"].([]interface{})
+		found := false
+		for _, name := range p {
+			if name == "transform/service_environment" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("%s does not apply environment", pipeline)
+		}
+	}
+}
+
+func TestKubernetesNamespaceEnrichesBothSignals(t *testing.T) {
+	body, err := render(plugins.PluginConfig{EdgeID: 1, Endpoint: "https://manager/v1/traces", Spec: map[string]interface{}{"enable_metrics": true, "metrics_export_endpoint": "127.0.0.1:9465", "kubernetes_service_namespace": true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg map[string]interface{}
+	if err := yaml.Unmarshal(body, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	transform := cfg["processors"].(map[string]interface{})["transform/service_environment"].(map[string]interface{})
+	for _, signal := range []string{"trace_statements", "metric_statements"} {
+		statements := transform[signal].([]interface{})[0].(map[string]interface{})["statements"].([]interface{})
+		if len(statements) != 1 || statements[0] != `set(attributes["service.namespace"], attributes["k8s.namespace.name"]) where attributes["k8s.namespace.name"] != nil` {
+			t.Fatalf("invalid namespace transform: %+v", statements)
+		}
 	}
 }

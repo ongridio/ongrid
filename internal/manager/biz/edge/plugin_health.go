@@ -99,5 +99,19 @@ func (u *Usecase) PluginHealth(edgeID uint64) []PluginHealth {
 	}
 	out := make([]PluginHealth, len(src))
 	copy(out, src)
+	for i := range out {
+		if out[i].Name != "autoapm" {
+			continue
+		}
+		// Apply current exclusions to older Edges as well, without mutating
+		// their stored heartbeat slice while holding the read lock.
+		candidates := make([]autoapm.Candidate, 0, len(out[i].Candidates))
+		for _, candidate := range out[i].Candidates {
+			if !autoapm.Excluded(candidate.Executable) {
+				candidates = append(candidates, candidate)
+			}
+		}
+		out[i].Candidates = candidates
+	}
 	return out
 }

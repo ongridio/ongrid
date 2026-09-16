@@ -324,6 +324,7 @@ message AutoAPMSpec {
     optional double sample_ratio = 2 [json_name = "sample_ratio"];
     repeated AutoAPMTarget targets = 3;
     bool tls_insecure_skip_verify = 4 [json_name = "tls_insecure_skip_verify"];
+    AutoAPMKubernetes kubernetes = 5;
 }
 message AutoAPMTarget {
     // Exact executable path AND listening port; all matching process instances.
@@ -331,10 +332,32 @@ message AutoAPMTarget {
     uint32 port = 2;
     string service_name = 3 [json_name = "service_name"];
     string service_namespace = 4 [json_name = "service_namespace"];
+    // Empty inherits the device default, then the cluster default.
+    string environment = 5;
+}
+// GET /v1/integrations/autoapm-options. Values from saved capture settings.
+message AutoAPMOptions {
+    repeated string environments = 1;
+    repeated string namespaces = 2;
+}
+// Read-only metadata on the autoapm plugin row; never persisted into spec.
+message AutoAPMDefaults {
+    string environment = 1;
+    string cluster_name = 2 [json_name = "cluster_name"];
 }
 // Reported in plugin health. Candidates are listeners, not verified protocols.
 message AutoAPMCandidate {
     string executable = 1;
     uint32 port = 2;
     int32 pid = 3;
+}
+
+// Cluster-owned selectors. No Pod names, PIDs or node IDs are persisted.
+message AutoAPMKubernetes { repeated AutoAPMKubernetesRule rules = 1; }
+message AutoAPMKubernetesRule {
+    string namespace = 1;
+    // Empty kind/name selects the entire namespace, including future workloads.
+    string workload_kind = 2 [json_name = "workload_kind"];
+    string workload_name = 3 [json_name = "workload_name"];
+    string container = 4;
 }

@@ -3,6 +3,7 @@ package traces
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/url"
@@ -98,6 +99,22 @@ processors:
       - key: {{ $k }}
         value: {{ printf "%q" $v }}
         action: upsert
+{{- end }}
+{{- if .ServiceEnvironments }}
+  transform/service_environment:
+    error_mode: propagate
+    trace_statements:
+      - context: resource
+        statements:
+{{- range .ServiceEnvironments }}
+          - {{ printf "%q" . }}
+{{- end }}
+    metric_statements:
+      - context: resource
+        statements:
+{{- range .ServiceEnvironments }}
+          - {{ printf "%q" . }}
+{{- end }}
 {{- end }}
 {{- if .MetricsEnabled }}
 
@@ -268,7 +285,7 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [{{ if .BoundedPipelines }}memory_limiter, {{ end }}{{ if .K8sAttributesEnabled }}k8sattributes, {{ end }}resource/device, {{ if .BoundedPipelines }}batch/traces{{ else }}batch{{ end }}]
+      processors: [{{ if .BoundedPipelines }}memory_limiter, {{ end }}{{ if .K8sAttributesEnabled }}k8sattributes, {{ end }}resource/device, {{ if .ServiceEnvironments }}transform/service_environment, {{ end }}{{ if .BoundedPipelines }}batch/traces{{ else }}batch{{ end }}]
       exporters: [otlphttp/manager]
 {{- if .LogsEnabled }}
     logs:
@@ -279,7 +296,7 @@ service:
 {{- if .MetricsEnabled }}
     metrics:
       receivers: [otlp]
-      processors: [{{ if .BoundedPipelines }}memory_limiter, {{ end }}{{ if .K8sAttributesEnabled }}k8sattributes, {{ end }}resource/device, transform/grpc_metrics, {{ if .BoundedPipelines }}batch/metrics{{ else }}batch{{ end }}]
+      processors: [{{ if .BoundedPipelines }}memory_limiter, {{ end }}{{ if .K8sAttributesEnabled }}k8sattributes, {{ end }}resource/device, {{ if .ServiceEnvironments }}transform/service_environment, {{ end }}transform/grpc_metrics, {{ if .BoundedPipelines }}batch/metrics{{ else }}batch{{ end }}]
       exporters: [{{ if .MetricsRemoteWriteEnabled }}prometheusremotewrite/manager{{ else }}prometheus/gateway{{ end }}]
 {{- end }}
 `
@@ -404,7 +421,15 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 
 	// text/template ranges over maps in key-sorted order (Go 1.12+), so
 	// passing the raw map yields stable rendered output across runs.
+	environments, err := serviceEnvironmentStatements(cfg.Spec["service_environments"])
+	if err != nil {
+		return nil, err
+	}
+	if boolSpec(cfg.Spec, "kubernetes_service_namespace") {
+		environments = append(environments, `set(attributes["service.namespace"], attributes["k8s.namespace.name"]) where attributes["k8s.namespace.name"] != nil`)
+	}
 	data := map[string]any{
+		"ServiceEnvironments":        environments,
 		"HealthEndpoint":             stringOr(cfg.Spec, "health_endpoint", "127.0.0.1:13133"),
 		"EdgeID":                     cfg.EdgeID,
 		"EmitDeviceID":               !omitDeviceID,
@@ -551,4 +576,36 @@ func intSpec(spec map[string]interface{}, key string, fallback int) int {
 	default:
 		return fallback
 	}
+}
+
+// serviceEnvironmentStatements is used only by selective OBI capture. Match the
+// complete exported identity; an absent namespace and an empty one are equivalent.
+func serviceEnvironmentStatements(raw interface{}) ([]string, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	body, err := json.Marshal(raw)
+	if err != nil {
+		return nil, fmt.Errorf("service environments: %w", err)
+	}
+	var rules []struct {
+		Name        string `json:"service_name"`
+		Namespace   string `json:"service_namespace"`
+		Environment string `json:"environment"`
+	}
+	if err := json.Unmarshal(body, &rules); err != nil {
+		return nil, fmt.Errorf("service environments: %w", err)
+	}
+	statements := make([]string, 0, len(rules))
+	for _, rule := range rules {
+		if rule.Name == "" || rule.Environment == "" {
+			return nil, fmt.Errorf("service environments: service name and environment required")
+		}
+		condition := fmt.Sprintf(`attributes["service.namespace"] == %q`, rule.Namespace)
+		if rule.Namespace == "" {
+			condition = `(` + condition + ` or attributes["service.namespace"] == nil)`
+		}
+		statements = append(statements, fmt.Sprintf(`set(attributes["deployment.environment.name"], %q) where attributes["service.name"] == %q and %s`, rule.Environment, rule.Name, condition))
+	}
+	return statements, nil
 }

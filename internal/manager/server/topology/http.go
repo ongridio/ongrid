@@ -52,6 +52,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Get("/v1/topology/nodes/{id}", h.getNode)
 	r.With(h.requireAdmin).Post("/v1/topology/nodes", h.createNode)
 	r.With(h.requireAdmin).Patch("/v1/topology/nodes/{id}", h.updateNode)
+	r.With(h.requireAdmin).Put("/v1/topology/nodes/{id}/environment", h.setClusterEnvironment)
 	r.With(h.requireAdmin).Delete("/v1/topology/nodes/{id}", h.deleteNode)
 
 	// Relations
@@ -265,6 +266,30 @@ func (h *Handler) updateNode(w http.ResponseWriter, r *http.Request) {
 		propsStr = s
 	}
 	if err := h.uc.UpdateNode(r.Context(), id, name, propsStr); err != nil {
+		writeErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// setClusterEnvironment updates a cluster's default capture environment.
+// @Summary Set cluster default environment
+// @Router /api/v1/topology/nodes/{id}/environment [put]
+// @Success 204
+func (h *Handler) setClusterEnvironment(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r, "id")
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	var in struct {
+		Environment *string `json:"environment"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&in); err != nil || in.Environment == nil {
+		writeErr(w, errs.ErrInvalid)
+		return
+	}
+	if err := h.uc.SetClusterEnvironment(r.Context(), id, *in.Environment); err != nil {
 		writeErr(w, err)
 		return
 	}

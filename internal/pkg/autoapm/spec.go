@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"regexp"
 	"strings"
 )
 
@@ -19,8 +20,20 @@ type Target struct {
 	Port             uint16 `json:"port"`
 	ServiceName      string `json:"service_name"`
 	ServiceNamespace string `json:"service_namespace,omitempty"`
+	Environment      string `json:"environment,omitempty"`
+}
+type KubernetesRule struct {
+	Namespace    string `json:"namespace"`
+	WorkloadKind string `json:"workload_kind,omitempty"`
+	WorkloadName string `json:"workload_name,omitempty"`
+	Container    string `json:"container,omitempty"`
+}
+type Kubernetes struct {
+	Rules []KubernetesRule `json:"rules"`
 }
 type Spec struct {
+	Kubernetes *Kubernetes `json:"kubernetes,omitempty"`
+
 	TLSInsecureSkipVerify bool     `json:"tls_insecure_skip_verify,omitempty"`
 	Environment           string   `json:"environment,omitempty"`
 	SampleRatio           *float64 `json:"sample_ratio,omitempty"`
@@ -59,11 +72,12 @@ func Parse(raw map[string]interface{}) (Spec, error) {
 		return s, fmt.Errorf("auto APM: at most %d targets", MaxTargets)
 	}
 	seen := map[string]bool{}
+	identities := map[[2]string]string{}
 	for i, t := range s.Targets {
 		if !strings.HasPrefix(t.Executable, "/") || path.Clean(t.Executable) != t.Executable || len(t.Executable) > 4096 || strings.ContainsAny(t.Executable, "\x00\r\n$") || t.Port == 0 {
 			return s, fmt.Errorf("auto APM: target %d requires an absolute executable path and port 1..65535", i+1)
 		}
-		if strings.TrimSpace(t.ServiceName) == "" || !validText(t.ServiceName) || !validText(t.ServiceNamespace) {
+		if strings.TrimSpace(t.ServiceName) == "" || !validText(t.ServiceName) || !validText(t.ServiceNamespace) || !validText(t.Environment) {
 			return s, fmt.Errorf("auto APM: target %d has invalid service identity", i+1)
 		}
 		if Excluded(t.Executable) {
@@ -74,6 +88,37 @@ func Parse(raw map[string]interface{}) (Spec, error) {
 			return s, fmt.Errorf("auto APM: duplicate target %d", i+1)
 		}
 		seen[key] = true
+		// OBI exports service identity, not the selection rule. All targets of
+		// one service must agree so the Collector can enrich it unambiguously.
+		identity := [2]string{t.ServiceName, t.ServiceNamespace}
+		if env, ok := identities[identity]; ok && env != t.Environment {
+			return s, fmt.Errorf("auto APM: targets with the same service name and namespace must use the same environment setting")
+		}
+		identities[identity] = t.Environment
+	}
+	if s.Kubernetes != nil {
+		if len(s.Targets) > 0 {
+			return s, fmt.Errorf("auto APM: host targets and Kubernetes rules cannot be mixed")
+		}
+		if len(s.Kubernetes.Rules) > MaxTargets {
+			return s, fmt.Errorf("auto APM: at most %d Kubernetes rules", MaxTargets)
+		}
+		for i, r := range s.Kubernetes.Rules {
+			if !kubeName(r.Namespace, 63) || (r.WorkloadKind == "") != (r.WorkloadName == "") ||
+				(r.WorkloadKind != "" && WorkloadAttribute(r.WorkloadKind) == "") ||
+				(r.WorkloadName != "" && !kubeName(r.WorkloadName, 253)) ||
+				(r.Container != "" && !kubeName(r.Container, 63)) {
+				return s, fmt.Errorf("auto APM: invalid Kubernetes rule %d", i+1)
+			}
+			if r.WorkloadName == "" && r.Container != "" {
+				return s, fmt.Errorf("auto APM: namespace-wide rules cannot select a container")
+			}
+			for _, previous := range s.Kubernetes.Rules[:i] {
+				if r.Namespace == previous.Namespace && (r.WorkloadName == "" || previous.WorkloadName == "" || (r.WorkloadKind == previous.WorkloadKind && r.WorkloadName == previous.WorkloadName)) {
+					return s, fmt.Errorf("auto APM: overlapping Kubernetes rules in namespace %s", r.Namespace)
+				}
+			}
+		}
 	}
 	return s, nil
 }
@@ -82,7 +127,7 @@ func validText(s string) bool {
 }
 func Excluded(executable string) bool {
 	n := path.Base(executable)
-	if strings.HasPrefix(n, "ongrid") {
+	if strings.HasPrefix(n, "ongrid") || n == "systemd" || strings.HasPrefix(n, "systemd-") {
 		return true
 	}
 	switch n {
@@ -96,4 +141,51 @@ func (s Spec) Ratio() float64 {
 		return *s.SampleRatio
 	}
 	return 0.1
+}
+
+func kubeName(value string, max int) bool {
+	if value == "" || len(value) > max || (max == 63 && strings.Contains(value, ".")) {
+		return false
+	}
+	for _, label := range strings.Split(value, ".") {
+		if len(label) > 63 || !regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`).MatchString(label) {
+			return false
+		}
+	}
+	return true
+}
+
+// WorkloadAttribute returns the OTel resource attribute and whitelists selectors.
+func WorkloadAttribute(kind string) string {
+	switch kind {
+	case "Deployment":
+		return "k8s.deployment.name"
+	case "StatefulSet":
+		return "k8s.statefulset.name"
+	case "DaemonSet":
+		return "k8s.daemonset.name"
+	case "Job":
+		return "k8s.job.name"
+	case "CronJob":
+		return "k8s.cronjob.name"
+	}
+	return ""
+}
+func (s Spec) Selected() bool {
+	return len(s.Targets) > 0 || (s.Kubernetes != nil && len(s.Kubernetes.Rules) > 0)
+}
+
+// Map adapts the typed contract to the existing plugin configuration wire format.
+func (s Spec) Map() map[string]interface{} {
+	out := map[string]interface{}{"environment": s.Environment, "tls_insecure_skip_verify": s.TLSInsecureSkipVerify}
+	if s.SampleRatio != nil {
+		out["sample_ratio"] = *s.SampleRatio
+	}
+	if len(s.Targets) > 0 {
+		out["targets"] = s.Targets
+	}
+	if s.Kubernetes != nil {
+		out["kubernetes"] = s.Kubernetes
+	}
+	return out
 }

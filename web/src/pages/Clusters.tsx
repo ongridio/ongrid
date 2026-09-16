@@ -72,6 +72,8 @@ import {
   versionsEqual,
 } from "./clusters/upgrade";
 
+import { ClusterEnvironment } from "./clusters/ClusterEnvironment";
+
 const PAGE_SIZE = 500;
 
 export default function ClustersPage() {
@@ -284,6 +286,7 @@ export default function ClustersPage() {
                       <th className="px-4 py-2.5 font-medium">
                         {tr("接入类型", "Access type")}
                       </th>
+                      <th className="px-4 py-2.5 font-medium">{tr('默认环境', 'Default environment')}</th>
                       <th className="px-4 py-2.5 font-medium">
                         {tr("成员", "Members")}
                       </th>
@@ -309,6 +312,7 @@ export default function ClustersPage() {
                         isAdmin={isAdmin}
                         deleting={deletingClusterID === summary.cluster.id}
                         onDelete={() => setDeleteTarget(summary)}
+                        onEnvironmentSaved={() => void refresh(true)}
                         kubernetesBusy={kubernetesBusy}
                         onKubernetesAction={(action) => void openKubernetesAction(summary, action)}
                       />
@@ -358,11 +362,13 @@ function ClusterRow({
   onDelete,
   kubernetesBusy,
   onKubernetesAction,
+  onEnvironmentSaved,
 }: {
   summary: ClusterSummary;
   isAdmin: boolean;
   deleting: boolean;
   onDelete(): void;
+  onEnvironmentSaved(): void;
   kubernetesBusy: boolean;
   onKubernetesAction(action: "upgrade" | "uninstall" | "delete"): void;
 }) {
@@ -397,6 +403,7 @@ function ClusterRow({
           {kubernetes ? 'K8s' : 'Host'}
         </span>
       </td>
+      <td className="px-4 py-3" onClick={event => event.stopPropagation()}><ClusterEnvironment cluster={summary.cluster} onSaved={onEnvironmentSaved} /></td>
       <td className="px-4 py-3 text-zinc-300">
         <span className="font-medium text-zinc-100">
           {summary.members.length}
@@ -881,6 +888,7 @@ export function DeviceClusterDetailPage() {
               </Button>
               {isAdmin && (
                 <>
+                  <ClusterEnvironment cluster={cluster} onSaved={() => void refresh(true)} />
                   <Button onClick={() => setRenameOpen(true)}>
                     <Pencil size={13} />
                     {tr("重命名", "Rename")}

@@ -3,6 +3,7 @@ syntax = "proto3";
 package ongrid.manager.k8s.v1;
 
 import "google/protobuf/timestamp.proto";
+import "manager/edge/v1/edge.proto";
 
 option go_package = "github.com/ongridio/ongrid/api/gen/manager/k8s/v1;k8sv1";
 
@@ -10,6 +11,8 @@ option go_package = "github.com/ongridio/ongrid/api/gen/manager/k8s/v1;k8sv1";
 service KubernetesService {
     rpc CreateCluster(CreateClusterRequest) returns (CreateClusterResponse);
     rpc ListClusters(ListClustersRequest) returns (ListClustersResponse);
+    rpc GetAutoAPM(GetAutoAPMRequest) returns (AutoAPMResponse);
+    rpc SetAutoAPM(SetAutoAPMRequest) returns (AutoAPMResponse);
     rpc GetCluster(GetClusterRequest) returns (GetClusterResponse);
     rpc GetClusterHealth(GetClusterHealthRequest) returns (GetClusterHealthResponse);
     rpc ListEdgeAttachments(ListEdgeAttachmentsRequest) returns (ListEdgeAttachmentsResponse);
@@ -387,4 +390,15 @@ message EnrollResponse {
     string secret_key = 6 [json_name = "secret_key"];
     string cloud_addr = 7 [json_name = "cloud_addr"];
     string manager_public_url = 8 [json_name = "manager_public_url"];
+}
+
+// GET/PUT /v1/k8s/clusters/{cluster_id}/autoapm. PUT requires admin.
+message GetAutoAPMRequest { uint64 cluster_id = 1; }
+message SetAutoAPMRequest {
+    uint64 cluster_id = 1;
+    ongrid.manager.edge.v1.AutoAPMSpec spec = 2;
+}
+message AutoAPMResponse {
+    ongrid.manager.edge.v1.AutoAPMSpec spec = 1;
+    ongrid.manager.edge.v1.AutoAPMDefaults defaults = 2;
 }

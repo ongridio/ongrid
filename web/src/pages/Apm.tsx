@@ -115,6 +115,7 @@ export default function ApmPage() {
   const detail = params.has('service_name');
   const requestedTab = params.get('tab') || (detail ? 'overview' : 'services');
   const tab =
+    !detail && requestedTab === 'onboarding' && params.has('capture_edge_id') ? 'discovery' :
     requestedTab === 'runtime'
       ? 'instances'
       : requestedTab === 'diagnostics'
@@ -175,6 +176,7 @@ export default function ApmPage() {
         next.delete('operation');
         next.delete('span_kind');
       }
+      if (key === 'tab' && value !== 'discovery') next.delete('capture_edge_id');
       if (key === 'service_version') next.delete('instance_id');
       if (key === 'cluster_node_id') next.delete('cluster_id');
       if (key === 'device_id' || key === 'cluster_node_id') {
@@ -214,7 +216,7 @@ export default function ApmPage() {
   };
   usePoll(() => {
     if (!loading) pickPeriod(period, true);
-  }, 30_000, periods.some(([key]) => key === period) && !['onboarding', 'alerts', 'errors'].includes(tab));
+  }, 30_000, periods.some(([key]) => key === period) && !['onboarding', 'discovery', 'alerts', 'errors'].includes(tab));
   useEffect(() => {
     const next = new URLSearchParams(params);
     const duration = periods.find(([key]) => key === params.get('range'))?.[1];
@@ -237,7 +239,7 @@ export default function ApmPage() {
     setLoading(false);
     setError('');
     setResults((previous) => (previous.scope === scope ? previous : { scope }));
-    if (!p.has('start') || !p.has('end') || tab === 'alerts' || (!detail && tab === 'onboarding'))
+    if (!p.has('start') || !p.has('end') || tab === 'alerts' || (!detail && ['onboarding', 'discovery'].includes(tab)))
       return;
     const controller = new AbortController();
     setLoading(true);
@@ -506,7 +508,7 @@ export default function ApmPage() {
         }
         className="!py-3 [&>div:first-child]:flex-wrap [&>div:first-child>div:last-child]:shrink [&_h1]:break-all"
         actions={
-          <>
+          (detail || !['discovery', 'onboarding'].includes(tab)) && <>
             <span role="status" className="text-xs text-zinc-500">
               {loading
                 ? tr('正在更新…', 'Updating…')
@@ -616,7 +618,7 @@ export default function ApmPage() {
         }
       />
       {!detail && <TabsList activateOnFocus={false} aria-label={tr('服务视图', 'Service views')} className="shrink-0 border-b border-zinc-800 px-6">
-        {[['services', tr('服务列表', 'Service list')], ['map', tr('服务地图', 'Service map')]].map(([value, label]) => <TabsTrigger key={value} value={value} onClick={() => set('tab', value)}>{label}</TabsTrigger>)}
+        {[['services', tr('服务列表', 'Service list')], ['map', tr('服务地图', 'Service map')], ['discovery', tr('服务发现', 'Service discovery')], ['onboarding', tr('接入指南', 'Setup guide')]].map(([value, label]) => <TabsTrigger key={value} value={value} onClick={() => set('tab', value)}>{label}</TabsTrigger>)}
       </TabsList>}
       {detail && (
         <TabsList activateOnFocus={false}
@@ -641,7 +643,7 @@ export default function ApmPage() {
         </TabsList>
       )}
       <TabsContent value={operation && ['overview', 'operations'].includes(tab) ? 'operations' : tab} className="contents"><main ref={main} className="flex-1 space-y-3 overflow-auto px-6 py-4">
-        {!detail && <AutoAPMManagement expanded={tab === 'onboarding'} canEdit={isAdmin} initialEdgeId={params.get('capture_edge_id')} onManage={() => set('tab', 'onboarding')} />}
+        {!detail && tab === 'discovery' && <AutoAPMManagement canEdit={isAdmin} initialEdgeId={params.get('capture_edge_id')} />}
         {!detail && tab === 'map' && (scopedReplica ? <EmptyState title={tr('服务地图按服务汇总', 'The service map is service-wide')}
           hint={tr('请清除设备、集群、版本和实例筛选后查看。', 'Clear device, cluster, version and instance filters to view the map.')}
           action={<Button onClick={() => { const next = new URLSearchParams(params); for (const key of ['device_id', 'cluster_id', 'cluster_node_id', 'service_version', 'instance_id']) next.delete(key); setParams(next); }}>{tr('清除不支持的筛选', 'Clear unsupported filters')}</Button>} />
@@ -720,7 +722,7 @@ export default function ApmPage() {
             {error}
           </Card>
         )}
-        {loading && tab !== 'map' &&
+        {loading && !['map', 'discovery', 'onboarding'].includes(tab) &&
           !list &&
           !overview &&
           !current?.rpcList &&
@@ -733,7 +735,7 @@ export default function ApmPage() {
           )}
         {tab === 'onboarding' && (
           <>
-            <div className="flex flex-wrap items-center gap-3">
+            {detail && <div className="flex flex-wrap items-center gap-3">
               <Link
                 className="text-sm text-zinc-400 hover:underline"
                 state={location.state}
@@ -741,7 +743,7 @@ export default function ApmPage() {
               >
                 ← {tr('返回指标', 'Back to metrics')}
               </Link>
-            </div>
+            </div>}
             {detail ? (
               <Tabs defaultValue="diagnostics" className="space-y-3">
                 <TabsList aria-label={tr('接入管理', 'Instrumentation management')}>
@@ -753,7 +755,7 @@ export default function ApmPage() {
                 </TabsContent>
                 <TabsContent value="guide"><Onboarding /></TabsContent>
               </Tabs>
-            ) : <details className="rounded-lg border border-border p-4"><summary className="cursor-pointer text-sm font-medium">{tr('SDK 接入指南', 'SDK setup guide')}</summary><div className="mt-4"><Onboarding /></div></details>}
+            ) : <Onboarding />}
           </>
         )}
         {detail && tab === 'operations' && (

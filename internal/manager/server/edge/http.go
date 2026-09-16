@@ -80,6 +80,7 @@ type PluginConfigService interface {
 	ListForUI(ctx context.Context, edgeID uint64) ([]biz.PluginRow, error)
 	Set(ctx context.Context, edgeID uint64, plugin string, in biz.SetInput) (*biz.PluginRow, error)
 	CountByPlugin(ctx context.Context) (map[string]int64, error)
+	AutoAPMOptions(ctx context.Context) (*biz.AutoAPMOptions, error)
 }
 
 type UpgradeJobService interface {
@@ -196,6 +197,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Get("/v1/edges/{id}/processes", h.getProcesses)
 	// Plugin runtime
 	r.Get("/v1/edges/{id}/plugins", h.listPlugins)
+	r.Get("/v1/integrations/autoapm-options", h.autoAPMOptions)
 	r.With(h.writeMW("edge:plugin")).Put("/v1/edges/{id}/plugins/{name}", h.setPlugin)
 	r.Get("/v1/integrations/plugin-counts", h.pluginCounts)
 }
@@ -255,6 +257,7 @@ func (h *Handler) listPlugins(w http.ResponseWriter, r *http.Request) {
 			PluginName: row.PluginName,
 			Enabled:    row.Enabled,
 			Spec:       row.Spec,
+			Defaults:   row.Defaults,
 			Health:     healthByName[row.PluginName],
 		})
 	}
@@ -267,7 +270,25 @@ type pluginItemDTO struct {
 	PluginName string                 `json:"plugin_name"`
 	Enabled    bool                   `json:"enabled"`
 	Spec       map[string]interface{} `json:"spec,omitempty"`
+	Defaults   *biz.AutoAPMDefaults   `json:"defaults,omitempty"`
 	Health     *pluginHealthDTO       `json:"health,omitempty"`
+}
+
+// autoAPMOptions lists values already used in saved capture settings.
+// @Summary List saved APM environments and namespaces
+// @Router /api/v1/integrations/autoapm-options [get]
+// @Success 200 {object} biz.AutoAPMOptions
+func (h *Handler) autoAPMOptions(w http.ResponseWriter, r *http.Request) {
+	if h.pluginCfg == nil {
+		writeErr(w, errs.ErrNotFound)
+		return
+	}
+	options, err := h.pluginCfg.AutoAPMOptions(r.Context())
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, options)
 }
 
 // pluginHealthDTO is the wire shape for one plugin's heartbeat-reported

@@ -40,3 +40,58 @@ func TestSelectiveContract(t *testing.T) {
 		t.Fatalf("valid: %v %v", s, err)
 	}
 }
+
+func TestEnvironmentOverridesAndSystemProcessExclusion(t *testing.T) {
+	for _, exe := range []string{"/usr/lib/systemd/systemd", "/usr/lib/systemd/systemd-resolved"} {
+		if !Excluded(exe) {
+			t.Fatalf("system process allowed: %s", exe)
+		}
+		if _, err := Parse(map[string]interface{}{"targets": []Target{{Executable: exe, Port: 22, ServiceName: "system"}}}); err == nil {
+			t.Fatal("manual system target accepted")
+		}
+	}
+	for _, exe := range []string{"/usr/bin/nginx", "/opt/orders", "/usr/bin/java", "/usr/bin/python3"} {
+		if Excluded(exe) {
+			t.Fatalf("business process excluded: %s", exe)
+		}
+	}
+	targets := []Target{{Executable: "/opt/orders", Port: 8080, ServiceName: "orders", Environment: "test"}, {Executable: "/opt/orders", Port: 8081, ServiceName: "orders", ServiceNamespace: "prod", Environment: "production"}}
+	if _, err := Parse(map[string]interface{}{"targets": targets}); err != nil {
+		t.Fatal(err)
+	}
+	targets[1].ServiceNamespace = ""
+	if _, err := Parse(map[string]interface{}{"targets": targets}); err == nil {
+		t.Fatal("ambiguous identity environments accepted")
+	}
+	targets[0].Environment = "${SECRET}"
+	if _, err := Parse(map[string]interface{}{"targets": targets[:1]}); err == nil {
+		t.Fatal("environment substitution accepted")
+	}
+}
+
+func TestKubernetesSelectorsAreBoundedAndUnambiguous(t *testing.T) {
+	valid := Spec{Kubernetes: &Kubernetes{Rules: []KubernetesRule{{Namespace: "shop", WorkloadKind: "Deployment", WorkloadName: "api.v1", Container: "app"}}}}
+	if _, err := Parse(valid.Map()); err != nil {
+		t.Fatal(err)
+	}
+	for _, rules := range [][]KubernetesRule{
+		{{Namespace: ".*"}},
+		{{Namespace: "shop", WorkloadKind: "Pod", WorkloadName: "api"}},
+		{{Namespace: "shop", WorkloadName: "api"}},
+		{{Namespace: "shop", Container: "app"}},
+		{{Namespace: "shop"}, {Namespace: "shop", WorkloadKind: "Deployment", WorkloadName: "api"}},
+		{{Namespace: "shop", WorkloadKind: "Deployment", WorkloadName: "api"}, {Namespace: "shop", WorkloadKind: "Deployment", WorkloadName: "api", Container: "app"}},
+	} {
+		spec := Spec{Kubernetes: &Kubernetes{Rules: rules}}
+		if _, err := Parse(spec.Map()); err == nil {
+			t.Fatalf("accepted unsafe selectors: %+v", rules)
+		}
+	}
+	valid.Targets = []Target{{Executable: "/opt/app", Port: 8080, ServiceName: "app"}}
+	if _, err := Parse(valid.Map()); err == nil {
+		t.Fatal("mixed host and Kubernetes targets")
+	}
+	if _, err := Parse(map[string]interface{}{"kubernetes": map[string]interface{}{"rules": []interface{}{map[string]interface{}{"namespace": "shop", "service_namespace": "fake"}}}}); err == nil {
+		t.Fatal("namespace override accepted")
+	}
+}

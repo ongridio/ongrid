@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -22,6 +23,8 @@ const roleAdmin = "admin"
 const maxListLimit = 500
 
 type Service interface {
+	GetAutoAPM(ctx context.Context, clusterID uint64) (*biz.AutoAPMConfig, error)
+	SetAutoAPM(ctx context.Context, clusterID uint64, spec map[string]interface{}) (*biz.AutoAPMConfig, error)
 	CreateCluster(ctx context.Context, in biz.CreateClusterInput) (*biz.ClusterRegistration, error)
 	ListClusters(ctx context.Context, f biz.ListClustersFilter) ([]*model.Cluster, error)
 	CountClusters(ctx context.Context, f biz.ListClustersFilter) (int64, error)
@@ -91,6 +94,8 @@ func NewHandler(s Service, actionAudits ...ActionAuditReader) *Handler {
 }
 
 func (h *Handler) RegisterProtected(r chi.Router) {
+	r.Get("/v1/k8s/clusters/{cluster_id}/autoapm", h.getAutoAPM)
+	r.With(h.requireAdmin).Put("/v1/k8s/clusters/{cluster_id}/autoapm", h.setAutoAPM)
 	r.With(h.requireAdmin).Post("/v1/k8s/clusters", h.createCluster)
 	r.Get("/v1/k8s/clusters", h.listClusters)
 	r.Get("/v1/k8s/edge-attachments", h.listEdgeAttachments)
@@ -1239,4 +1244,51 @@ func errCode(err error) string {
 	default:
 		return "internal"
 	}
+}
+
+// @Summary Read cluster service capture settings
+// @Router /api/v1/k8s/clusters/{cluster_id}/autoapm [get]
+// @Success 200 {object} biz.AutoAPMConfig
+func (h *Handler) getAutoAPM(w http.ResponseWriter, r *http.Request) {
+	id, err := parseClusterID(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	result, err := h.svc.GetAutoAPM(r.Context(), id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// @Summary Save cluster service capture settings
+// @Router /api/v1/k8s/clusters/{cluster_id}/autoapm [put]
+// @Success 200 {object} biz.AutoAPMConfig
+func (h *Handler) setAutoAPM(w http.ResponseWriter, r *http.Request) {
+	id, err := parseClusterID(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	var body struct {
+		Spec map[string]interface{} `json:"spec"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil {
+		writeErr(w, errs.ErrInvalid)
+		return
+	}
+	if err := decoder.Decode(new(interface{})); err != io.EOF {
+		writeErr(w, errs.ErrInvalid)
+		return
+	}
+	result, err := h.svc.SetAutoAPM(r.Context(), id, body.Spec)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }

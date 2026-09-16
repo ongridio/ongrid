@@ -141,3 +141,10 @@ func (s *Service) IngestInventory(ctx context.Context, edgeID uint64, in tunnel.
 	}
 	return out.AcceptedNodes, out.AcceptedWorkloads, out.AcceptedPods, out.AcceptedEvents, nil
 }
+
+func (s *Service) GetAutoAPM(ctx context.Context, clusterID uint64) (*biz.AutoAPMConfig, error) {
+	return s.uc.GetAutoAPM(ctx, clusterID)
+}
+func (s *Service) SetAutoAPM(ctx context.Context, clusterID uint64, spec map[string]interface{}) (*biz.AutoAPMConfig, error) {
+	return s.uc.SetAutoAPM(ctx, clusterID, spec)
+}

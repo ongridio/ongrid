@@ -5,7 +5,7 @@
 ## 开发入口与维护边界
 
 - 页面骨架复用 [PageHeader](../../web/src/components/ui/PageHeader.tsx)、[Card](../../web/src/components/ui/Card.tsx)、[EmptyState](../../web/src/components/ui/EmptyState.tsx) 和 [PaginationFooter](../../web/src/components/ui/PaginationFooter.tsx)。参考 [设备](../../web/src/pages/Edges.tsx)、[日志](../../web/src/pages/Logs.tsx)、[监控](../../web/src/pages/Monitor.tsx) 的对应区域。
-- 控件从 [components/ui](../../web/src/components/ui/) 导入。复杂交互由 Base UI 支撑，原生输入继续保留浏览器验证和事件；外观借鉴 shadcn/ui，并适配本项目 Tailwind 3 和主题变量，不直接复制另一套主题或升级框架。
+- 控件统一复用 [components/ui](../../web/src/components/ui/) 中的 **shadcn/ui 风格与派生组件实现**。复杂交互由 **Base UI** 支撑，原生输入继续保留浏览器验证和事件；统一适配本项目 Tailwind 3、主题变量和组件 API。新增控件先复用已有实现，缺失时在公共层按同一体系补齐，不在业务页面另写一套，也不直接复制另一套主题或升级框架。
 - 公共外观和状态维护在 [styles/index.css](../../web/src/styles/index.css) 的 `.og-*` 规则中；Tailwind 映射和字体见 [tailwind.config.ts](../../web/tailwind.config.ts)。页面 `className` 补充布局、宽度、图标让位和代码字体，避免重复覆盖边框、背景、圆角、字号与聚焦样式。
 - 本文是设计约定的集中维护入口。公共组件契约或视觉规则改变时，在同一个 PR 更新本文与相关测试；引用 shadcn 派生代码时保留 [MIT 许可](../../web/src/components/ui/shadcn.LICENSE)。
 
@@ -51,6 +51,7 @@
 | 多行输入 | `Textarea`；组合搜索栏、聊天输入使用 `variant="inset"`，边框由外层提供 |
 | 列表搜索 | `Input type="search"`，透明表面融入页面，保留边框和聚焦反馈 |
 | 单选列表 | `Select`；通过 `options` 或已有 `<option>` 子元素提供选项 |
+| 可复用已有值，也允许输入新值 | `Autocomplete`；例如环境、服务命名空间，使用 Base UI 交互及公共输入框和浮层样式，避免原生 `datalist` 的主题差异 |
 | 复选、开关、互斥选择、范围 | `Checkbox` / `Switch` / `Radio` / `Slider` |
 | 元数据与状态 | `Chip`（亦导出为 `Badge`） |
 

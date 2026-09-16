@@ -41,6 +41,8 @@ const (
 
 // Repository is the k8s bounded context persistence contract.
 type Repository interface {
+	UpdateAutoAPM(ctx context.Context, clusterID uint64, specJSON string) error
+	ListAutoAPMSpecs(ctx context.Context) ([]string, error)
 	CreateCluster(ctx context.Context, c *model.Cluster) error
 	GetCluster(ctx context.Context, id uint64) (*model.Cluster, error)
 	GetClusterByControllerEdge(ctx context.Context, edgeID uint64) (*model.Cluster, error)
@@ -222,6 +224,8 @@ type TelemetryTargetResolver interface {
 }
 
 type Usecase struct {
+	autoAPMEnvironment func(context.Context, uint64) (string, error)
+	autoAPMNotify      func(context.Context, uint64)
 	repo               Repository
 	edgeIssuer         EdgeIssuer
 	edgeRemover        EdgeRemover

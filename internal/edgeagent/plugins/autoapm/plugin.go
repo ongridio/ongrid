@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"gopkg.in/yaml.v3"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -22,6 +24,8 @@ import (
 const Name = "autoapm"
 
 type Plugin struct {
+	kubernetes              bool
+	kubeconfigPath          string
 	mu                      sync.Mutex
 	selected                bool
 	running                 bool
@@ -38,8 +42,15 @@ func New(binDir, workDir string, pusher custommetrics.Pusher, edgeID custommetri
 	binary := filepath.Join(binDir, "obi")
 	return &Plugin{
 		health: plugins.PluginHealth{Name: Name, State: plugins.StateStopped}, discover: discover,
-		collector: traces.New(binDir, root, log), scraper: custommetrics.New(pusher, edgeID, log),
-		obi: plugins.NewSubprocess(plugins.SubprocessOpts{Name: Name, Binary: binary, Environment: obiEnvironment, WorkDir: root, ConfigFile: filepath.Join(root, "obi.yaml"), ConfigRender: render,
+		kubeconfigPath: filepath.Join(root, "kubeconfig"),
+		collector:      traces.New(binDir, root, log), scraper: custommetrics.New(pusher, edgeID, log),
+		obi: plugins.NewSubprocess(plugins.SubprocessOpts{Name: Name, Binary: binary, Environment: func(cfg plugins.PluginConfig) []string {
+			env := obiEnvironment(cfg)
+			if spec, err := contract.Parse(cfg.Spec); err == nil && spec.Kubernetes != nil {
+				env = append(env, "KUBECONFIG="+filepath.Join(root, "kubeconfig"))
+			}
+			return env
+		}, WorkDir: root, ConfigFile: filepath.Join(root, "obi.yaml"), ConfigRender: render,
 			// OBI v0.12.1 validates v1 at startup; its standalone validate command
 			// only accepts v2, which cannot preserve per-target service names.
 			Args: func(_ plugins.PluginConfig, path string) []string { return []string{"--config=" + path} }, Log: log}),
@@ -51,7 +62,7 @@ func (p *Plugin) Configure(cfg plugins.PluginConfig) error {
 	if err != nil {
 		return p.fail(err)
 	}
-	if len(s.Targets) > 0 {
+	if s.Selected() {
 		if os.Getenv("ONGRID_K8S_ROLE") == "node" && os.Getenv("ONGRID_AUTO_APM_ALLOW_BPF") != "true" {
 			return p.fail(fmt.Errorf("Kubernetes node requires Helm node.autoAPM.allowBPF=true before capture"))
 		}
@@ -60,6 +71,11 @@ func (p *Plugin) Configure(cfg plugins.PluginConfig) error {
 		}
 		if _, err := os.Stat("/sys/kernel/btf/vmlinux"); err != nil {
 			return p.fail(fmt.Errorf("OBI requires kernel BTF: %w", err))
+		}
+		if s.Kubernetes != nil {
+			if err := p.writeKubeconfig(); err != nil {
+				return p.fail(err)
+			}
 		}
 		if err := p.obi.Configure(cfg); err != nil {
 			return p.fail(err)
@@ -73,7 +89,8 @@ func (p *Plugin) Configure(cfg plugins.PluginConfig) error {
 		}
 	}
 	p.mu.Lock()
-	p.selected = len(s.Targets) > 0
+	p.selected = s.Selected()
+	p.kubernetes = s.Kubernetes != nil
 	p.health.LastError = ""
 	p.mu.Unlock()
 	return nil
@@ -150,6 +167,15 @@ func (p *Plugin) Start(ctx context.Context) error {
 	return nil
 }
 func (p *Plugin) refresh(ctx context.Context) {
+	p.mu.Lock()
+	if p.kubernetes {
+		p.health.Candidates = nil
+		p.health.DiscoveryError = ""
+		p.health.UpdatedAt = time.Now()
+		p.mu.Unlock()
+		return
+	}
+	p.mu.Unlock()
 	dctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	candidates, err := p.discover(dctx)
@@ -227,10 +253,42 @@ func (p *Plugin) HealthSnapshot() plugins.PluginHealth {
 func obiEnvironment(_ plugins.PluginConfig) []string {
 	out := []string{}
 	for _, v := range os.Environ() {
-		if strings.HasPrefix(v, "OTEL_") || strings.HasPrefix(v, "BEYLA_") {
+		if strings.HasPrefix(v, "OTEL_") || strings.HasPrefix(v, "BEYLA_") || strings.HasPrefix(v, "KUBECONFIG=") {
 			continue
 		}
 		out = append(out, v)
 	}
 	return out
+}
+
+// The node runtime is chrooted into the host. Reference the projected token
+// file, preserving Kubernetes token rotation without copying credentials.
+func (p *Plugin) writeKubeconfig() error {
+	host, port := os.Getenv("KUBERNETES_SERVICE_HOST"), os.Getenv("KUBERNETES_SERVICE_PORT")
+	account := os.Getenv("ONGRID_K8S_SERVICE_ACCOUNT_DIR")
+	if host == "" || port == "" || account == "" || p.kubeconfigPath == "" {
+		return fmt.Errorf("Kubernetes API and service account configuration required for capture")
+	}
+	for _, name := range []string{"token", "ca.crt"} {
+		if _, err := os.Stat(filepath.Join(account, name)); err != nil {
+			return fmt.Errorf("Kubernetes service account %s: %w", name, err)
+		}
+	}
+	config := map[string]interface{}{
+		"apiVersion": "v1", "kind": "Config", "current-context": "ongrid",
+		"clusters": []interface{}{map[string]interface{}{"name": "ongrid", "cluster": map[string]interface{}{"server": "https://" + net.JoinHostPort(host, port), "certificate-authority": filepath.Join(account, "ca.crt")}}},
+		"users":    []interface{}{map[string]interface{}{"name": "ongrid", "user": map[string]interface{}{"tokenFile": filepath.Join(account, "token")}}},
+		"contexts": []interface{}{map[string]interface{}{"name": "ongrid", "context": map[string]interface{}{"cluster": "ongrid", "user": "ongrid"}}},
+	}
+	data, err := yaml.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("encode OBI kubeconfig: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(p.kubeconfigPath), 0700); err != nil {
+		return fmt.Errorf("create OBI directory: %w", err)
+	}
+	if err := os.WriteFile(p.kubeconfigPath, data, 0600); err != nil {
+		return fmt.Errorf("write OBI kubeconfig: %w", err)
+	}
+	return nil
 }

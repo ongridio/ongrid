@@ -1463,7 +1463,7 @@ function PluginsTab({ edgeId }: { edgeId: number }) {
               <Card key={row.plugin_name} className="flex flex-wrap items-center justify-between gap-3">
                 <div><h3 className="font-medium">{tr('自动 APM', 'Automatic APM')}</h3>
                   <p className="text-sm text-text-muted">{tr('全局发现开关与采集目标统一在服务页管理。', 'Manage global discovery and capture targets on the Services page.')}</p></div>
-                <Link className="text-sm text-indigo-500 hover:underline" to={`/apm?tab=onboarding&capture_edge_id=${edgeId}`}>{tr('管理采集', 'Manage capture')}</Link>
+                <Link className="text-sm text-indigo-500 hover:underline" to={`/apm?tab=discovery&capture_edge_id=${edgeId}`}>{tr('管理采集', 'Manage capture')}</Link>
               </Card>
             ) : (
               <PluginCard

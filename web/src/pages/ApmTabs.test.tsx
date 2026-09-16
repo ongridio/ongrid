@@ -122,3 +122,19 @@ it('scopes diagnostics and retries a partial protocol failure', async () => {
   await waitFor(() => expect(screen.getAllByText('未配置预期实例数，不能计算覆盖率。')).toHaveLength(2));
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 });
+it('gives discovery a selected top-level tab and hides metric time controls', async () => {
+  render(<MemoryRouter initialEntries={['/apm?tab=discovery']}><ApmPage /></MemoryRouter>);
+  const tabs = within(screen.getByRole('tablist', { name: '服务视图' })).getAllByRole('tab');
+  expect(tabs.map(tab => tab.textContent)).toEqual(['服务列表', '服务地图', '服务发现', '接入指南']);
+  expect(screen.getByRole('tab', { name: '服务发现' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.queryByRole('button', { name: '时间范围' })).not.toBeInTheDocument();
+  expect(await screen.findByText('尚未接入设备')).toBeInTheDocument();
+});
+
+it('lets legacy device discovery links navigate to the setup guide', async () => {
+  render(<MemoryRouter initialEntries={['/apm?tab=onboarding&capture_edge_id=67']}><ApmPage /></MemoryRouter>);
+  expect(screen.getByRole('tab', { name: '服务发现' })).toHaveAttribute('aria-selected', 'true');
+  fireEvent.click(screen.getByRole('tab', { name: '接入指南' }));
+  expect(screen.getByRole('tab', { name: '接入指南' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.queryByRole('switch', { name: '全局自动发现' })).not.toBeInTheDocument();
+});

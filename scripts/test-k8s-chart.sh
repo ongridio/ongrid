@@ -263,3 +263,9 @@ expect_template_failure 'upgrade.migrationHook.timeout must be a whole second, m
   helm template invalid-upgrade-timeout "$chart_package" "${common_args[@]}" --is-upgrade --set upgrade.migrationHook.timeout=1m30s
 
 echo "Kubernetes Helm chart validation passed"
+
+# Kubernetes capture permissions remain opt-in, alongside the existing BPF gate.
+! grep -q 'name: ongrid-edge-node-autoapm' "$tmp_dir/default.yaml"
+helm template ongrid-edge "$chart_dir" "${common_args[@]}" --set node.autoAPM.allowBPF=true >"$tmp_dir/autoapm.yaml"
+grep -q 'name: ongrid-edge-node-autoapm' "$tmp_dir/autoapm.yaml"
+grep -q 'resources: \["replicasets"\]' "$tmp_dir/autoapm.yaml"

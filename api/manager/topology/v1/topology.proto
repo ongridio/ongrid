@@ -1,0 +1,11 @@
+syntax = "proto3";
+package manager.topology.v1;
+option go_package = "github.com/ongridio/ongrid/api/gen/manager/topology/v1;topologyv1";
+
+// PUT /v1/topology/nodes/{id}/environment (admin).
+// Sets an optional default for service capture on this cluster's devices.
+// Empty clears the default. Other cluster properties are preserved.
+message UpdateClusterEnvironmentRequest {
+    uint64 id = 1;
+    string environment = 2;
+}

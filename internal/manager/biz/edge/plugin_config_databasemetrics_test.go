@@ -22,6 +22,16 @@ func newFakePluginConfigRepo() *fakePluginConfigRepo {
 	return &fakePluginConfigRepo{rows: map[string]*model.PluginConfig{}}
 }
 
+func (r *fakePluginConfigRepo) ListAutoAPMSpecs(_ context.Context) ([]string, error) {
+	var specs []string
+	for _, row := range r.rows {
+		if row.PluginName == model.PluginNameAutoAPM {
+			specs = append(specs, row.SpecJSON)
+		}
+	}
+	return specs, nil
+}
+
 func (r *fakePluginConfigRepo) ListByEdge(_ context.Context, edgeID uint64) ([]*model.PluginConfig, error) {
 	out := []*model.PluginConfig{}
 	for _, row := range r.rows {

@@ -986,6 +986,39 @@ func main() {
 		log.Info("device: orphan reconcile on boot completed", slog.Int("count", n))
 	}
 	k8sUC.SetTopologyMirror(topologyUC)
+	pluginConfigUC.SetKubernetesAutoAPMProvider(k8sUC.AutoAPMForEdge, k8sUC.AutoAPMSpecs)
+	k8sUC.SetAutoAPMProviders(func(ctx context.Context, nodeID uint64) (string, error) {
+		node, err := topologyUC.GetNode(ctx, nodeID)
+		if err != nil {
+			return "", err
+		}
+		var props struct {
+			Environment string `json:"environment"`
+		}
+		if node.PropsJSON != "" {
+			if err := json.Unmarshal([]byte(node.PropsJSON), &props); err != nil {
+				return "", fmt.Errorf("decode cluster environment: %w", err)
+			}
+		}
+		return props.Environment, nil
+	}, pluginConfigUC.NotifyAutoAPMChanged)
+	pluginConfigUC.SetAutoAPMEnvironmentProvider(func(ctx context.Context, edgeID uint64) (string, string, error) {
+		deviceID, err := edgeDeviceRepo.LookupHostDevice(ctx, edgeID)
+		if errors.Is(err, errs.ErrNotFound) || (err == nil && deviceID == 0) {
+			return "", "", nil
+		}
+		if err != nil {
+			return "", "", err
+		}
+		device, err := deviceRepo.Get(ctx, deviceID)
+		if err != nil {
+			return "", "", err
+		}
+		if device.NodeID == nil || *device.NodeID == 0 {
+			return "", "", nil
+		}
+		return topologyUC.DeviceClusterEnvironment(ctx, *device.NodeID)
+	})
 	if err := k8sUC.ReconcileTopology(rootCtx); err != nil {
 		log.Warn("k8s: topology reconcile on boot failed", slog.Any("err", err))
 	}

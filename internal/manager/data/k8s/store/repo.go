@@ -1259,3 +1259,19 @@ func applyLikeAny(tx *gorm.DB, query string, columns []string) *gorm.DB {
 	tx = tx.Where("("+strings.Join(clauses, " OR ")+")", args...)
 	return tx
 }
+
+func (r *Repo) UpdateAutoAPM(ctx context.Context, clusterID uint64, specJSON string) error {
+	result := r.db.WithContext(ctx).Model(&model.Cluster{}).Where("id = ?", clusterID).Update("auto_apm_config_json", specJSON)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errs.ErrNotFound
+	}
+	return nil
+}
+func (r *Repo) ListAutoAPMSpecs(ctx context.Context) ([]string, error) {
+	var specs []string
+	err := r.db.WithContext(ctx).Model(&model.Cluster{}).Where("auto_apm_config_json IS NOT NULL AND auto_apm_config_json <> ''").Pluck("auto_apm_config_json", &specs).Error
+	return specs, err
+}

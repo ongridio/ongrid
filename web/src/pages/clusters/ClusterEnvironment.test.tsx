@@ -1,0 +1,27 @@
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { beforeEach, expect, it, vi } from 'vitest';
+import { ClusterEnvironment } from './ClusterEnvironment';
+import { setClusterEnvironment } from '@/api/topology';
+vi.mock('@/store/me', () => ({ usePermissions: () => ({ isAdmin: true }) }));
+vi.mock('@/api/topology', () => ({ setClusterEnvironment: vi.fn() }));
+vi.mock('@/components/autoapm/useAutoAPMOptions', () => ({ useAutoAPMOptions: () => ({ options: { environments: ['production'], namespaces: [] }, error: '' }) }));
+vi.mock('@/i18n/locale', () => ({ useI18n: () => ({ tr: (_zh: string, en: string) => en }) }));
+beforeEach(() => { vi.clearAllMocks(); });
+it('preserves a failed draft, saves just the environment and supports clearing it', async () => {
+  const user = userEvent.setup(); const saved = vi.fn();
+  vi.mocked(setClusterEnvironment).mockRejectedValueOnce(new Error('save failed')).mockResolvedValue(undefined);
+  render(<ClusterEnvironment cluster={{ id: 42, type: 'cluster', name: 'prod', props: { environment: 'production' }, created_at: '', updated_at: '' }} onSaved={saved} />);
+  await user.click(screen.getByRole('button', { name: 'Set default environment for prod' }));
+  const input = screen.getByLabelText('Default environment (optional)');
+  expect(input).toHaveValue('production');
+  await user.clear(input); await user.type(input, 'staging');
+  await user.click(screen.getByRole('button', { name: 'Save' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('save failed');
+  expect(input).toHaveValue('staging');
+  expect(saved).not.toHaveBeenCalled();
+  await user.clear(input);
+  await user.click(screen.getByRole('button', { name: 'Save' }));
+  await waitFor(() => expect(saved).toHaveBeenCalledOnce());
+  expect(setClusterEnvironment).toHaveBeenLastCalledWith(42, '');
+});

@@ -67,6 +67,11 @@ func (u *Usecase) CreateNode(ctx context.Context, typ, name, propsJSON string) (
 		}
 	}
 	n := &model.Node{Type: typ, Name: name, PropsJSON: propsJSON}
+	if typ == string(model.NodeTypeCluster) {
+		if err := validateClusterEnvironmentProps(propsJSON); err != nil {
+			return nil, err
+		}
+	}
 	if topologyPropsSource(propsJSON) == "apm" {
 		return nil, fmt.Errorf("%w: reported service nodes are managed by telemetry", errs.ErrConflict)
 	}
@@ -100,7 +105,32 @@ func (u *Usecase) UpdateNode(ctx context.Context, id uint64, name, propsJSON str
 	if isReportedService(node) || topologyPropsSource(propsJSON) == "apm" {
 		return fmt.Errorf("%w: reported service nodes are managed by telemetry", errs.ErrConflict)
 	}
+	if node.Type == string(model.NodeTypeCluster) {
+		if err := validateClusterEnvironmentProps(propsJSON); err != nil {
+			return err
+		}
+	}
 	return u.nodes.Update(ctx, id, name, propsJSON)
+}
+
+func validateClusterEnvironmentProps(raw string) error {
+	if raw == "" {
+		return nil
+	}
+	var props struct {
+		Environment string `json:"environment"`
+	}
+	if err := json.Unmarshal([]byte(raw), &props); err != nil {
+		return fmt.Errorf("%w: invalid cluster properties", errs.ErrInvalid)
+	}
+	return validateClusterEnvironment(props.Environment)
+}
+
+func validateClusterEnvironment(environment string) error {
+	if len(environment) > 256 || environment != strings.TrimSpace(environment) || strings.ContainsAny(environment, "\x00\r\n$") {
+		return fmt.Errorf("%w: invalid environment", errs.ErrInvalid)
+	}
+	return nil
 }
 
 // GetNode returns one node by id.
@@ -109,6 +139,43 @@ func (u *Usecase) GetNode(ctx context.Context, id uint64) (*model.Node, error) {
 		return nil, errs.ErrNotWiredYet
 	}
 	return u.nodes.Get(ctx, id)
+}
+
+// SetClusterEnvironment changes only the operator-owned capture default.
+func (u *Usecase) SetClusterEnvironment(ctx context.Context, id uint64, environment string) error {
+	if err := validateClusterEnvironment(environment); err != nil {
+		return err
+	}
+	node, err := u.GetNode(ctx, id)
+	if err != nil {
+		return err
+	}
+	if node.Type != string(model.NodeTypeCluster) {
+		return fmt.Errorf("%w: node must be a cluster", errs.ErrInvalid)
+	}
+	props, err := json.Marshal(map[string]string{"environment": environment})
+	if err != nil {
+		return err
+	}
+	return u.nodes.MergeProps(ctx, id, nil, string(props))
+}
+
+func (u *Usecase) DeviceClusterEnvironment(ctx context.Context, deviceNodeID uint64) (string, string, error) {
+	id, name, err := u.ResolveDeviceCluster(ctx, deviceNodeID)
+	if err != nil || id == 0 {
+		return "", "", err
+	}
+	node, err := u.GetNode(ctx, id)
+	if err != nil {
+		return "", "", err
+	}
+	var props struct {
+		Environment string `json:"environment"`
+	}
+	if err := json.Unmarshal([]byte(node.PropsJSON), &props); err != nil {
+		return "", "", fmt.Errorf("cluster environment: %w", err)
+	}
+	return props.Environment, name, nil
 }
 
 // ListNodes returns nodes matching f.
@@ -641,7 +708,7 @@ func (u *Usecase) EnsureKubernetesCluster(ctx context.Context, clusterID uint64,
 		if err == nil && n.Type == string(model.NodeTypeCluster) {
 			if match, owned := topologyPropsMatchKubernetesCluster(n.PropsJSON, clusterID); owned && match {
 				if n.Name != name || n.PropsJSON != propsJSON {
-					if err := u.nodes.Update(ctx, n.ID, name, propsJSON); err != nil {
+					if err := u.nodes.MergeProps(ctx, n.ID, &name, propsJSON); err != nil {
 						return 0, err
 					}
 				}
@@ -656,7 +723,7 @@ func (u *Usecase) EnsureKubernetesCluster(ctx context.Context, clusterID uint64,
 		return 0, err
 	} else if n != nil {
 		if n.Name != name || n.PropsJSON != propsJSON {
-			if err := u.nodes.Update(ctx, n.ID, name, propsJSON); err != nil {
+			if err := u.nodes.MergeProps(ctx, n.ID, &name, propsJSON); err != nil {
 				return 0, err
 			}
 		}

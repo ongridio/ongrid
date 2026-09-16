@@ -68,7 +68,8 @@ import { formatNumber, fullDateTime, relativeTime } from '@/lib/format';
 import { usePoll } from '@/lib/usePoll';
 import { useObservability } from '@/store/observability';
 import { usePermissions } from '@/store/me';
-import { listNodes as listTopologyNodes } from '@/api/topology';
+import { listNodes as listTopologyNodes, getNode, type TopologyNode } from '@/api/topology';
+import { ClusterEnvironment } from './clusters/ClusterEnvironment';
 import {
   POLL_INTERVAL_MS,
   RESOURCE_PAGE_SIZE,
@@ -345,6 +346,7 @@ export function KubernetesClusterDetailPage({ kubernetesClusterID }: { kubernete
   const clusterId = kubernetesClusterID ?? route.clusterId ?? '';
   const routeClusterID = clusterId.trim();
   const [logClusterID, setLogClusterID] = useState('');
+  const [clusterNode, setClusterNode] = useState<TopologyNode>();
   const [searchParams, setSearchParams] = useSearchParams();
   const rawActiveTab = normalizeTab(searchParams.get('tab'));
   const [cluster, setCluster] = useState<KubernetesCluster | null>(null);
@@ -399,6 +401,7 @@ export function KubernetesClusterDetailPage({ kubernetesClusterID }: { kubernete
     }
     let cancelled = false;
     setLogClusterID('');
+    setClusterNode(undefined);
     void listTopologyNodes({ type: 'cluster', limit: 500 }).then((result) => {
       if (cancelled) return;
       const match = (result.items ?? []).find((node) => (
@@ -406,6 +409,7 @@ export function KubernetesClusterDetailPage({ kubernetesClusterID }: { kubernete
         && String(node.props.k8s_cluster_id ?? '') === routeClusterID
       ));
       setLogClusterID(match ? String(match.id) : routeClusterID);
+      setClusterNode(match);
     }).catch(() => {
       if (!cancelled) setLogClusterID(routeClusterID);
     });
@@ -903,6 +907,7 @@ export function KubernetesClusterDetailPage({ kubernetesClusterID }: { kubernete
           actions={
             <>
               <TopologyLinkButton />
+              {clusterNode && <ClusterEnvironment cluster={clusterNode} onSaved={() => { void getNode(clusterNode.id).then(setClusterNode).catch((e: Error) => setError(e.message)); }} />}
               <Button onClick={() => refresh({ silent: true })} disabled={loading || refreshing}>
                 <RefreshCw size={12} className={cn(refreshing && 'animate-spin')} />
                 {tr('刷新', 'Refresh')}

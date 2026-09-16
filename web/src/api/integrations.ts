@@ -63,7 +63,13 @@ export type PluginRow = {
   enabled: boolean;
   spec?: Record<string, unknown>;
   health?: PluginHealth;
+  defaults?: { environment: string; cluster_name: string };
 };
+
+export type AutoAPMOptions = { environments: string[]; namespaces: string[] };
+export function getAutoAPMOptions() {
+  return request<AutoAPMOptions>('GET', '/integrations/autoapm-options');
+}
 
 export type PluginListResp = { items: PluginRow[] };
 

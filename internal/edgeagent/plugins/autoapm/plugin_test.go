@@ -123,3 +123,49 @@ func TestRenderLiteralSelectionAndIndependentSampling(t *testing.T) {
 		}
 	}
 }
+
+func TestCollectorReceivesDefaultAndServiceEnvironment(t *testing.T) {
+	cfg := collectorConfig(plugins.PluginConfig{}, contract.Spec{Environment: "production", Targets: []contract.Target{{ServiceName: "orders", ServiceNamespace: "shop", Environment: "test"}, {ServiceName: "inventory"}}})
+	if cfg.Spec["extra_attrs"].(map[string]interface{})["deployment.environment.name"] != "production" {
+		t.Fatal("default missing")
+	}
+	rules := cfg.Spec["service_environments"].([]map[string]string)
+	if len(rules) != 1 || rules[0]["environment"] != "test" || rules[0]["service_namespace"] != "shop" {
+		t.Fatalf("overrides: %+v", rules)
+	}
+}
+
+func TestKubernetesRulesUseMetadataAndSkipHostDiscovery(t *testing.T) {
+	spec := contract.Spec{Environment: "production", Kubernetes: &contract.Kubernetes{Rules: []contract.KubernetesRule{
+		{Namespace: "shop", WorkloadKind: "Deployment", WorkloadName: "api.v1", Container: "app"},
+		{Namespace: "future"},
+	}}}
+	body, err := render(plugins.PluginConfig{Spec: spec.Map()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config map[string]interface{}
+	if err := yaml.Unmarshal(body, &config); err != nil {
+		t.Fatal(err)
+	}
+	rules := config["discovery"].(map[string]interface{})["services"].([]interface{})
+	first := rules[0].(map[string]interface{})
+	if first["k8s_deployment_name"] != `^api\.v1$` || first["k8s_namespace"] != "^shop$" || first["k8s_container_name"] != "^app$" || first["name"] != nil || first["exe_path"] != nil {
+		t.Fatalf("invalid selector: %#v", first)
+	}
+	if len(rules[1].(map[string]interface{})) != 1 {
+		t.Fatal("namespace policy must preserve service identities")
+	}
+	collector := collectorConfig(plugins.PluginConfig{}, spec)
+	if collector.Spec["kubernetes_service_namespace"] != true || collector.Spec["extra_attrs"].(map[string]interface{})["deployment.environment.name"] != "production" {
+		t.Fatal("missing inherited metadata")
+	}
+	p := &Plugin{kubernetes: true, discover: func(context.Context) ([]contract.Candidate, error) {
+		t.Fatal("Kubernetes node scanned host processes")
+		return nil, nil
+	}}
+	p.refresh(context.Background())
+	if p.health.UpdatedAt.IsZero() {
+		t.Fatal("missing heartbeat")
+	}
+}

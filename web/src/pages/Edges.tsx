@@ -1,3 +1,4 @@
+import { selectHostEdgesByDevice } from '@/lib/edgeSelection';
 import { Label, Input, Radio } from '@/components/ui';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { Hint } from '@/components/ui/Tooltip';
@@ -113,19 +114,6 @@ type DeviceRow = Device & {
   topologyClusters: TopologyNode[];
 };
 
-function selectHostEdgesByDevice(edges: Edge[]): Map<number, Edge> {
-  const out = new Map<number, Edge>();
-  for (const edge of edges) {
-    const deviceID = edge.device_id;
-    if (!deviceID) continue;
-    const current = out.get(deviceID);
-    if (!current || isBetterHostEdge(edge, current)) {
-      out.set(deviceID, edge);
-    }
-  }
-  return out;
-}
-
 function indexTopologyClusters(
   clusters: TopologyNode[],
   relations: TopologyRelation[],
@@ -157,19 +145,6 @@ async function loadTopologyClusters(): Promise<Map<number, TopologyNode[]>> {
     clusterResp.items ?? [],
     relationResp.items ?? [],
   );
-}
-
-function isBetterHostEdge(candidate: Edge, current: Edge): boolean {
-  if (candidate.status !== current.status) {
-    return candidate.status === "online";
-  }
-  return edgeSeenAt(candidate) > edgeSeenAt(current);
-}
-
-function edgeSeenAt(edge: Edge): number {
-  if (!edge.last_seen_at) return 0;
-  const ts = Date.parse(edge.last_seen_at);
-  return Number.isFinite(ts) ? ts : 0;
 }
 
 function asEdgeRoles(roles: string[] | undefined): EdgeRole[] {

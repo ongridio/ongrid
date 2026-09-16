@@ -1010,3 +1010,30 @@ func newTestRepo(t *testing.T) (*gorm.DB, *Repo) {
 	}
 	return db, NewRepo(db)
 }
+
+func TestClusterCapturePersistenceSurvivesInventoryUpdates(t *testing.T) {
+	_, repo := newTestRepo(t)
+	ctx := context.Background()
+	cluster := &model.Cluster{Name: "capture-test"}
+	if err := repo.CreateCluster(ctx, cluster); err != nil {
+		t.Fatal(err)
+	}
+	spec := `{"kubernetes":{"rules":[{"namespace":"shop"}]}}`
+	if err := repo.UpdateAutoAPM(ctx, cluster.ID, spec); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateClusterInventorySync(ctx, cluster.ID, biz.ClusterInventorySync{}); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := repo.GetCluster(ctx, cluster.ID)
+	if err != nil || saved.AutoAPMConfigJSON != spec {
+		t.Fatalf("settings lost during inventory sync: %+v %v", saved, err)
+	}
+	specs, err := repo.ListAutoAPMSpecs(ctx)
+	if err != nil || len(specs) != 1 || specs[0] != spec {
+		t.Fatalf("options missing capture settings: %v %v", specs, err)
+	}
+	if err := repo.UpdateAutoAPM(ctx, 99999, spec); !errors.Is(err, errs.ErrNotFound) {
+		t.Fatalf("unknown cluster: %v", err)
+	}
+}

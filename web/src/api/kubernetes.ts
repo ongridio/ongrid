@@ -307,3 +307,25 @@ function buildQuery(params?: Record<string, string | number | boolean | undefine
   const s = q.toString();
   return s ? `?${s}` : '';
 }
+
+export type KubernetesCaptureRule = {
+  namespace: string;
+  workload_kind?: string;
+  workload_name?: string;
+  container?: string;
+};
+export type KubernetesCaptureSpec = {
+  kubernetes: { rules: KubernetesCaptureRule[] };
+  sample_ratio?: number;
+  tls_insecure_skip_verify?: boolean;
+};
+export type KubernetesCaptureConfig = {
+  spec: KubernetesCaptureSpec;
+  defaults: { environment: string; cluster_name: string };
+};
+export function getKubernetesCapture(clusterID: number) {
+  return request<KubernetesCaptureConfig>('GET', `/k8s/clusters/${clusterID}/autoapm`);
+}
+export function setKubernetesCapture(clusterID: number, spec: KubernetesCaptureSpec) {
+  return request<KubernetesCaptureConfig>('PUT', `/k8s/clusters/${clusterID}/autoapm`, { spec });
+}

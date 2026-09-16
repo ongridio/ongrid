@@ -19,7 +19,7 @@ image:
   pullPolicy: IfNotPresent
 
 node:
-  # Installation capability gate; capture still requires per-node UI selection.
+  # Installation capability gate; capture still requires cluster-owned namespace/workload selection.
   autoAPM:
     allowBPF: false
   serviceAccountName: ""

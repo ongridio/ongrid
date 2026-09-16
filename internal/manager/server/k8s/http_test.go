@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/ongridio/ongrid/internal/pkg/tenantctx"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -402,6 +404,42 @@ func assertCapabilityMissing(t *testing.T, items []clusterCapabilityDTO, key str
 	for _, item := range items {
 		if item.Key == key {
 			t.Fatalf("capability %q should not be exposed", key)
+		}
+	}
+}
+
+type captureService struct {
+	Service
+	saved bool
+}
+
+func (s *captureService) SetAutoAPM(_ context.Context, _ uint64, _ map[string]interface{}) (*biz.AutoAPMConfig, error) {
+	s.saved = true
+	return &biz.AutoAPMConfig{}, nil
+}
+
+func TestCaptureWriteRequiresAdminAndSingleJSONBody(t *testing.T) {
+	svc := &captureService{}
+	router := chi.NewRouter()
+	NewHandler(svc).RegisterProtected(router)
+	for _, tc := range []struct {
+		admin  bool
+		body   string
+		status int
+	}{
+		{false, `{"spec":{"kubernetes":{"rules":[]}}}`, http.StatusForbidden},
+		{true, `{"spec":{"kubernetes":{"rules":[]}}} {}`, http.StatusBadRequest},
+		{true, `{"spec":{"kubernetes":{"rules":[]}}}`, http.StatusOK},
+	} {
+		svc.saved = false
+		req := httptest.NewRequest(http.MethodPut, "/v1/k8s/clusters/1/autoapm", strings.NewReader(tc.body))
+		if tc.admin {
+			req = req.WithContext(tenantctx.With(req.Context(), tenantctx.Tenant{Role: "admin"}))
+		}
+		res := httptest.NewRecorder()
+		router.ServeHTTP(res, req)
+		if res.Code != tc.status || svc.saved != (tc.status == http.StatusOK) {
+			t.Fatalf("status=%d saved=%v body=%s", res.Code, svc.saved, res.Body.String())
 		}
 	}
 }

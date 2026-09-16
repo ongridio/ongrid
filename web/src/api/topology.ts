@@ -42,6 +42,10 @@ export function updateNode(id: number, input: { name?: string; props?: Record<st
   return request<void>('PATCH', `/topology/nodes/${id}`, input);
 }
 
+export function setClusterEnvironment(id: number, environment: string) {
+  return request<void>('PUT', `/topology/nodes/${id}/environment`, { environment });
+}
+
 export function deleteNode(id: number) {
   return request<void>('DELETE', `/topology/nodes/${id}`);
 }

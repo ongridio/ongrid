@@ -20,11 +20,12 @@ const (
 
 // Cluster is one Kubernetes cluster registration in manager.
 type Cluster struct {
-	ID     uint64  `gorm:"primaryKey;autoIncrement"`
-	Name   string  `gorm:"size:128;not null;column:name;index:idx_k8s_clusters_name"`
-	UID    *string `gorm:"size:128;column:uid;uniqueIndex:idx_k8s_clusters_uid_deleted,priority:1"`
-	Mode   string  `gorm:"size:32;not null;default:'full-node';column:mode"`
-	Status string  `gorm:"size:16;not null;default:'offline';column:status;index:idx_k8s_clusters_status_seen,priority:1"`
+	AutoAPMConfigJSON string  `gorm:"type:text;column:auto_apm_config_json"`
+	ID                uint64  `gorm:"primaryKey;autoIncrement"`
+	Name              string  `gorm:"size:128;not null;column:name;index:idx_k8s_clusters_name"`
+	UID               *string `gorm:"size:128;column:uid;uniqueIndex:idx_k8s_clusters_uid_deleted,priority:1"`
+	Mode              string  `gorm:"size:32;not null;default:'full-node';column:mode"`
+	Status            string  `gorm:"size:16;not null;default:'offline';column:status;index:idx_k8s_clusters_status_seen,priority:1"`
 
 	BootstrapTokenHash            string     `gorm:"size:512;not null;column:bootstrap_token_hash"`
 	NodeBootstrapTokenHash        string     `gorm:"size:512;not null;default:'';column:node_bootstrap_token_hash"`
