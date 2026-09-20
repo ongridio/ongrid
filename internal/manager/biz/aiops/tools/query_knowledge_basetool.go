@@ -42,6 +42,12 @@ const queryKnowledgeSchema = `{
       "type": "string",
       "description": "Natural language search query (full sentence preferred over keyword bag, e.g. 'DNS 解析失败怎么排查')."
     },
+    "mode": {
+      "type": "string",
+      "enum": ["hybrid", "wiki", "rag"],
+      "default": "hybrid",
+      "description": "Retrieval layer. hybrid ranks Wiki above Raw while retaining evidence."
+    },
     "path": {
       "type": "string",
       "description": "Optional exact path filter (e.g. '网络/DNS'). Empty = no filter. Mutually exclusive with path_prefix."
@@ -99,6 +105,7 @@ func (t *QueryKnowledgeTool) Info(_ context.Context) (*basetool.ToolInfo, error)
 
 type queryKnowledgeArgs struct {
 	Query      string   `json:"query"`
+	Mode       string   `json:"mode,omitempty"`
 	Path       string   `json:"path,omitempty"`
 	PathPrefix string   `json:"path_prefix,omitempty"`
 	Tags       []string `json:"tags,omitempty"`
@@ -106,14 +113,18 @@ type queryKnowledgeArgs struct {
 }
 
 type queryKnowledgeHit struct {
-	ID         uint64   `json:"id"`
-	Title      string   `json:"title"`
-	SourceType string   `json:"source_type"`
-	URL        string   `json:"url,omitempty"`
-	Path       string   `json:"path,omitempty"`
-	Tags       []string `json:"tags,omitempty"`
-	Score      float64  `json:"score"`
-	Preview    string   `json:"preview"`
+	ID              uint64   `json:"id"`
+	Title           string   `json:"title"`
+	SourceType      string   `json:"source_type"`
+	URL             string   `json:"url,omitempty"`
+	Path            string   `json:"path,omitempty"`
+	Tags            []string `json:"tags,omitempty"`
+	Score           float64  `json:"score"`
+	Preview         string   `json:"preview"`
+	Layer           string   `json:"layer"`
+	PageType        string   `json:"page_type,omitempty"`
+	PageID          string   `json:"page_id,omitempty"`
+	SourceVersionID string   `json:"source_version_id,omitempty"`
 }
 
 type queryKnowledgeResponse struct {
@@ -142,7 +153,14 @@ func (t *QueryKnowledgeTool) InvokableRun(ctx context.Context, argsJSON string, 
 	if args.MaxResults > 20 {
 		args.MaxResults = 20
 	}
+	if args.Mode == "" {
+		args.Mode = "hybrid"
+	}
+	if args.Mode != "hybrid" && args.Mode != "wiki" && args.Mode != "rag" {
+		return "", fmt.Errorf("%s: mode must be hybrid, wiki, or rag", ToolNameQueryKnowledge)
+	}
 	hits, err := t.svc.Search(ctx, args.Query, knowledgebiz.SearchOptions{
+		Mode:       args.Mode,
 		Path:       args.Path,
 		PathPrefix: args.PathPrefix,
 		Tags:       args.Tags,
@@ -157,19 +175,24 @@ func (t *QueryKnowledgeTool) InvokableRun(ctx context.Context, argsJSON string, 
 		// Cap at ~800 chars per hit so a max_results=5 reply stays
 		// under ~4k tokens. The LLM can re-ask for full content via
 		// a follow-up if needed (future doc-fetch tool).
-		if len(preview) > 800 {
-			preview = preview[:800] + "…"
+		previewRunes := []rune(preview)
+		if len(previewRunes) > 800 {
+			preview = string(previewRunes[:800]) + "…"
 			out.Truncated = true
 		}
 		out.Items = append(out.Items, queryKnowledgeHit{
-			ID:         h.Doc.ID,
-			Title:      h.Doc.Title,
-			SourceType: h.Doc.SourceType,
-			URL:        h.Doc.URL,
-			Path:       h.Doc.Path,
-			Tags:       h.Doc.Tags,
-			Score:      h.Score,
-			Preview:    preview,
+			ID:              h.Doc.ID,
+			Title:           h.Doc.Title,
+			SourceType:      h.Doc.SourceType,
+			URL:             h.Doc.URL,
+			Path:            h.Doc.Path,
+			Tags:            h.Doc.Tags,
+			Score:           h.Score,
+			Preview:         preview,
+			Layer:           knowledgeLayer(h.Layer),
+			PageType:        h.PageType,
+			PageID:          h.PageID,
+			SourceVersionID: h.SourceVersionID,
 		})
 	}
 	out.Total = len(out.Items)
@@ -178,4 +201,11 @@ func (t *QueryKnowledgeTool) InvokableRun(ctx context.Context, argsJSON string, 
 		return "", fmt.Errorf("%s: marshal response: %w", ToolNameQueryKnowledge, err)
 	}
 	return string(body), nil
+}
+
+func knowledgeLayer(value string) string {
+	if value != "" {
+		return value
+	}
+	return "raw"
 }

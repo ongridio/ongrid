@@ -8,7 +8,7 @@
 //	POST /v1/knowledge/docs create manual doc
 //	PATCH /v1/knowledge/docs/{id} update manual doc title/content
 //	DELETE /v1/knowledge/docs/{id} delete manual doc
-//	GET /v1/knowledge/search?q=...&limit=N keyword search across all docs
+//	GET /v1/knowledge/search?q=...&limit=N&mode=hybrid mixed vector search across RAG and LLM Wiki docs
 //
 //	GET /v1/knowledge/repos list registered git repos
 //	POST /v1/knowledge/repos register a git repo
@@ -72,6 +72,10 @@ type Service interface {
 	DeleteSSHIdentity(ctx context.Context, id uint64) error
 }
 
+type SearchService interface {
+	Search(ctx context.Context, q string, opts biz.SearchOptions) ([]biz.SearchHit, error)
+}
+
 // AuthzMW is the narrow casbin middleware contract. Optional — when
 // nil mutating routes fall through to the legacy passthrough (any
 // authenticated caller, since auth middleware already gates).
@@ -81,12 +85,23 @@ type AuthzMW interface {
 
 // Handler bundles the service.
 type Handler struct {
-	svc   Service
-	authz AuthzMW
+	svc        Service
+	searcher   SearchService
+	authz      AuthzMW
+	llmWikiSvc llmWikiService
 }
 
 // NewHandler builds the handler.
-func NewHandler(s Service) *Handler { return &Handler{svc: s} }
+func NewHandler(s Service) *Handler { return &Handler{svc: s, searcher: s} }
+
+// SetSearchService replaces the default RAG searcher with an optional hybrid
+// searcher. The composition root uses this to add LLM Wiki results without
+// coupling the knowledge HTTP layer to the Wiki bounded context.
+func (h *Handler) SetSearchService(search SearchService) {
+	if search != nil {
+		h.searcher = search
+	}
+}
 
 // SetAuthz wires the casbin middleware post-construction.
 func (h *Handler) SetAuthz(a AuthzMW) { h.authz = a }
@@ -109,6 +124,12 @@ func passthrough(next http.Handler) http.Handler { return next }
 
 // Register wires the routes on r.
 func (h *Handler) Register(r chi.Router) {
+	if h.svc == nil {
+		if h.llmWikiSvc != nil {
+			h.registerLLMWiki(r)
+		}
+		return
+	}
 	r.Get("/v1/knowledge/docs", h.listDocs)
 	r.Get("/v1/knowledge/docs/{id}", h.getDoc)
 	r.With(h.writeMW("knowledge:doc")).Post("/v1/knowledge/docs", h.createDoc)
@@ -136,6 +157,9 @@ func (h *Handler) Register(r chi.Router) {
 	r.With(h.writeMW("knowledge:repo")).Post("/v1/knowledge/ssh-identities/generate", h.generateSSHIdentity)
 	r.With(h.writeMW("knowledge:repo")).Patch("/v1/knowledge/ssh-identities/{id}", h.updateSSHIdentity)
 	r.With(h.deleteMW("knowledge:repo")).Delete("/v1/knowledge/ssh-identities/{id}", h.deleteSSHIdentity)
+	if h.llmWikiSvc != nil {
+		h.registerLLMWiki(r)
+	}
 }
 
 // --- DTOs ---
@@ -445,6 +469,7 @@ func (h *Handler) search(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	opts := biz.SearchOptions{
+		Mode:       r.URL.Query().Get("mode"),
 		Limit:      limit,
 		Path:       r.URL.Query().Get("path"),
 		PathPrefix: r.URL.Query().Get("path_prefix"),
@@ -453,18 +478,31 @@ func (h *Handler) search(w http.ResponseWriter, r *http.Request) {
 		// repeat ?tag=a&tag=b
 		opts.Tags = tags
 	}
-	hits, err := h.svc.Search(r.Context(), q, opts)
+	hits, err := h.searcher.Search(r.Context(), q, opts)
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
 	type hitDTO struct {
-		Doc   docDTO  `json:"doc"`
-		Score float64 `json:"score"`
+		Doc             docDTO  `json:"doc"`
+		Score           float64 `json:"score"`
+		Layer           string  `json:"layer,omitempty"`
+		PageType        string  `json:"page_type,omitempty"`
+		PageID          string  `json:"page_id,omitempty"`
+		SourceVersionID string  `json:"source_version_id,omitempty"`
+		MatchedNode     string  `json:"matched_node,omitempty"`
 	}
 	out := make([]hitDTO, 0, len(hits))
 	for _, h := range hits {
-		out = append(out, hitDTO{Doc: toDocDTO(h.Doc, true), Score: h.Score})
+		out = append(out, hitDTO{
+			Doc:             toDocDTO(h.Doc, true),
+			Score:           h.Score,
+			Layer:           h.Layer,
+			PageType:        h.PageType,
+			PageID:          h.PageID,
+			SourceVersionID: h.SourceVersionID,
+			MatchedNode:     h.MatchedNode,
+		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": out, "total": len(out)})
 }

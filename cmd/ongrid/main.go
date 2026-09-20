@@ -119,6 +119,7 @@ import (
 	managerbizimbridgeslack "github.com/ongridio/ongrid/internal/manager/biz/imbridge/provider/slack"
 	managerbizimbridgetelegram "github.com/ongridio/ongrid/internal/manager/biz/imbridge/provider/telegram"
 	managerbizknowledge "github.com/ongridio/ongrid/internal/manager/biz/knowledge"
+	managerbizllmwiki "github.com/ongridio/ongrid/internal/manager/biz/knowledge/llm_wiki"
 	managerbizmarketplace "github.com/ongridio/ongrid/internal/manager/biz/marketplace"
 	managerbizmcp "github.com/ongridio/ongrid/internal/manager/biz/mcp"
 	managerbizmonitor "github.com/ongridio/ongrid/internal/manager/biz/monitor"
@@ -131,6 +132,8 @@ import (
 	manageraiopsdata "github.com/ongridio/ongrid/internal/manager/data/aiops/store"
 	managerapprovaldata "github.com/ongridio/ongrid/internal/manager/data/approval/store"
 	managerimbridgedata "github.com/ongridio/ongrid/internal/manager/data/imbridge/store"
+	managerllmwikidata "github.com/ongridio/ongrid/internal/manager/data/knowledge/llm_wiki"
+	managerllmwikistore "github.com/ongridio/ongrid/internal/manager/data/knowledge/llm_wiki/store"
 	managerknowledgedata "github.com/ongridio/ongrid/internal/manager/data/knowledge/store"
 	managermarketplacedata "github.com/ongridio/ongrid/internal/manager/data/marketplace/store"
 	managermcpdata "github.com/ongridio/ongrid/internal/manager/data/mcp/store"
@@ -194,6 +197,7 @@ import (
 	managersvcedge "github.com/ongridio/ongrid/internal/manager/service/edge"
 	managersvcfb "github.com/ongridio/ongrid/internal/manager/service/frontierbound"
 	managersvck8s "github.com/ongridio/ongrid/internal/manager/service/k8s"
+	managersvcknowledge "github.com/ongridio/ongrid/internal/manager/service/knowledge"
 	managersvcmetric "github.com/ongridio/ongrid/internal/manager/service/metric"
 	managersvcprom "github.com/ongridio/ongrid/internal/manager/service/prometheus"
 	managersvcsystemhealth "github.com/ongridio/ongrid/internal/manager/service/systemhealth"
@@ -301,6 +305,7 @@ func main() {
 		manageraudtdata.Migrate,
 		managerreportdata.Migrate,
 		managerflowdata.Migrate,
+		managerllmwikistore.Migrate,
 		managerpacketcapturedata.Migrate,
 	); err != nil {
 		log.Error("run migrations", slog.Any("err", err))
@@ -1501,9 +1506,42 @@ func main() {
 	if qdrantURL == "" {
 		qdrantURL = "http://qdrant:6333"
 	}
+	qdrantClient := qdrantx.New(qdrantURL, log.With(slog.String("comp", "qdrant")))
+	var maybeEmbedder embedding.Embedder
+	if embErr != nil {
+		log.Warn("knowledge: embedder unavailable — reads enabled, writes disabled",
+			slog.Any("err", embErr))
+	} else {
+		maybeEmbedder = embedder
+	}
+	var llmWikiUC *managerbizllmwiki.Usecase
+	if cfg.LLMWiki.Enabled {
+		wikiRoot := strings.TrimSpace(cfg.LLMWiki.Dir)
+		wikiFiles, err := managerbizllmwiki.NewFileStore(wikiRoot)
+		if err != nil {
+			log.Error("llm wiki: file store failed", slog.Any("err", err))
+		} else if ensureErr := wikiFiles.Ensure(rootCtx); ensureErr != nil {
+			log.Error("llm wiki: initialize file tree failed", slog.Any("err", ensureErr))
+		} else {
+			wikiStore, openErr := managerllmwikidata.Open(rootCtx, db, qdrantClient, maybeEmbedder, embDim, log.With(slog.String("comp", "llmwiki-db")))
+			if openErr != nil {
+				log.Error("llm wiki: store open failed", slog.Any("err", openErr))
+			} else {
+				wikiRepo := wikiStore.Repository()
+				wikiIndexer := wikiStore.SearchIndex
+				// Bind Wiki compilation to the configured LLM model. Provider/Model
+				// are left empty so the shared LLM router follows the user's default.
+				wikiSummarizer := managerbizllmwiki.NewLLMAdapter(llmClient, "", "", cfg.OpenAI.Model)
+				llmWikiUC, err = managerbizllmwiki.NewWithUsageRecorder(rootCtx, wikiRepo, wikiFiles, wikiSummarizer, wikiIndexer, log.With(slog.String("comp", "llmwiki")), managersvcknowledge.NewLLMWikiUsageRecorder(aiopsRepo), managerbizllmwiki.CompileTriggerOption{Owner: "ongrid-manager", Timeout: time.Duration(cfg.LLMWiki.TimeoutSeconds) * time.Second})
+				if err != nil {
+					log.Error("llm wiki: usecase failed", slog.Any("err", err))
+				}
+			}
+		}
+	}
 	var knowledgeUC *managerbizknowledge.Usecase
+	var knowledgeSearcher *managersvcknowledge.HybridSearcher
 	{
-		qdrantClient := qdrantx.New(qdrantURL, log.With(slog.String("comp", "qdrant")))
 		// Build with a nil embedder when one isn't configured — the
 		// usecase exposes read paths (ListDocs/Repos/GetDoc/ListPaths)
 		// and gates write paths (CreateManualDoc/Sync/Search) on
@@ -1511,13 +1549,6 @@ func main() {
 		// fresh install instead of 404'ing. Operator configures
 		// ONGRID_EMBEDDING_API_KEY later → writes unblock without
 		// restart-of-stack (only the manager needs the key on boot).
-		var maybeEmbedder embedding.Embedder
-		if embErr != nil {
-			log.Warn("knowledge: embedder unavailable — reads enabled, writes disabled",
-				slog.Any("err", embErr))
-		} else {
-			maybeEmbedder = embedder
-		}
 		uc, kErr := managerbizknowledge.New(rootCtx, knowledgeRepo, qdrantClient, maybeEmbedder,
 			os.Getenv("ONGRID_KNOWLEDGE_REPO_DIR"),
 			log.With(slog.String("comp", "knowledge")))
@@ -1526,7 +1557,8 @@ func main() {
 		} else {
 			knowledgeUC = uc
 			go knowledgeUC.RunAutoSync(rootCtx)
-			toolsReg.SetKnowledgeSearcher(knowledgeUC)
+			knowledgeSearcher = managersvcknowledge.NewHybridSearcher(knowledgeUC, llmWikiUC)
+			toolsReg.SetKnowledgeSearcher(knowledgeSearcher)
 			apmService.WithSourceRevisions(knowledgeUC)
 			// GitHub-PAT-via-GIT_ASKPASS resolver wiring
 			// removed. SSH-style repos use ssh_identities; HTTPS auth
@@ -2044,6 +2076,14 @@ func main() {
 	var knowledgeHandler *managerserverknowledge.Handler
 	if knowledgeUC != nil {
 		knowledgeHandler = managerserverknowledge.NewHandler(knowledgeUC)
+		knowledgeHandler.SetSearchService(knowledgeSearcher)
+		knowledgeHandler.SetAuthz(authzMW)
+	}
+	if llmWikiUC != nil {
+		if knowledgeHandler == nil {
+			knowledgeHandler = managerserverknowledge.NewHandler(nil)
+		}
+		knowledgeHandler.SetLLMWikiService(llmWikiUC)
 		knowledgeHandler.SetAuthz(authzMW)
 	}
 

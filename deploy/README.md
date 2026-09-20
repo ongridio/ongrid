@@ -93,7 +93,8 @@ In production, set both to strong values in `.env` **before** the first
 | `http://localhost:9090`         | Prometheus UI (targets, graph)  |
 | `localhost:3306`                | MySQL (user `ongrid`, pw `ongrid`, db `ongrid`) |
 
-Data lives in the `mysql_data` Docker volume. Back that volume up with
+MySQL data lives in the `mysql_data` Docker volume. LLM Wiki files persist in
+`../.cache/ongrid-llm-wiki` on the host. Back up MySQL with
 `sudo tar czf mysql.tgz -C "$(docker volume inspect -f '{{.Mountpoint}}' mysql_data)" .`
 or the equivalent in your ops tooling.
 

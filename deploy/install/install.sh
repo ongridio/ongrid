@@ -585,6 +585,7 @@ mkdir -p \
     "$ONGRID_DATA_DIR/skills" \
     "$ONGRID_DATA_DIR/pages" \
     "$ONGRID_DATA_DIR/packet-captures" \
+    "$ONGRID_DATA_DIR/llm-wiki" \
     "$ONGRID_DATA_DIR/workspace" \
     "$ONGRID_DATA_DIR/tools" \
     "$ONGRID_LOG_DIR"
@@ -616,6 +617,7 @@ chown -R 65532:65532 "$ONGRID_DATA_DIR/skills" 2>/dev/null || true
 # cloud_bash fails "mkdir session" (workspace) + can't install tools.
 chown -R 65532:65532 "$ONGRID_DATA_DIR/pages" 2>/dev/null || true
 chown -R 65532:65532 "$ONGRID_DATA_DIR/packet-captures" 2>/dev/null || true
+chown -R 65532:65532 "$ONGRID_DATA_DIR/llm-wiki" 2>/dev/null || true
 chown -R 65532:65532 "$ONGRID_DATA_DIR/workspace" 2>/dev/null || true
 chown -R 65532:65532 "$ONGRID_DATA_DIR/tools" 2>/dev/null || true
 

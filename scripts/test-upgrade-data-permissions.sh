@@ -43,6 +43,7 @@ expected_owner_for_path() {
         "$data_dir/loki"|"$data_dir/tempo") printf '10001:10001\n' ;;
         "$data_dir/grafana") printf '472:472\n' ;;
         "$data_dir/embeddings"|"$data_dir/skills"|"$data_dir/pages"|"$data_dir/packet-captures"|\
+            "$data_dir/llm-wiki"|\
             "$data_dir/chat-attachments"|\
             "$data_dir/workspace"|"$data_dir/tools") printf '65532:65532\n' ;;
         *) printf '0:0\n' ;;
@@ -90,6 +91,8 @@ grep -Fqx "chown 65532:65532 $data_dir/skills" "$command_log" \
     || fail "normal preparation did not set the skills root directory owner"
 grep -Fqx "chown 65532:65532 $data_dir/packet-captures" "$command_log" \
     || fail "normal preparation did not set the packet capture root directory owner"
+grep -Fqx "chown 65532:65532 $data_dir/llm-wiki" "$command_log" \
+    || fail "normal preparation did not set the LLM Wiki root directory owner"
 grep -Fqx "chown 65532:65532 $data_dir/chat-attachments" "$command_log" \
     || fail "normal preparation did not set the chat attachment root directory owner"
 if grep -Eq '^(chown|chmod) -R ' "$command_log"; then
@@ -135,6 +138,8 @@ grep -Fqx "chown -R 10001:10001 $data_dir/loki" "$command_log" \
     || fail "explicit repair did not recursively repair Loki"
 grep -Fqx "chown -R 65532:65532 $data_dir/skills" "$command_log" \
     || fail "explicit repair did not recursively repair skills"
+grep -Fqx "chown -R 65532:65532 $data_dir/llm-wiki" "$command_log" \
+    || fail "explicit repair did not recursively repair LLM Wiki data"
 grep -Fqx "chown -R 65532:65532 $data_dir/chat-attachments" "$command_log" \
     || fail "explicit repair did not recursively repair chat attachments"
 
@@ -266,7 +271,7 @@ grep -Fq '"$INSTALL_DIR"/ongrid-v*-linux.tar.xz' "$upgrade_script" \
     || fail "upgrade.sh does not include universal xz release packages in retention cleanup"
 grep -Fq '"$INSTALL_DIR"/ongrid-v*-linux-*.tar.xz' "$upgrade_script" \
     || fail "upgrade.sh no longer includes legacy architecture-specific xz packages in cleanup"
-for persistent_dir in mysql prometheus loki tempo grafana skills pages packet-captures chat-attachments workspace tools; do
+for persistent_dir in mysql prometheus loki tempo grafana skills pages packet-captures llm-wiki chat-attachments workspace tools; do
     if grep -Eq "chown -R .*ONGRID_DATA_DIR/${persistent_dir}" "$upgrade_script"; then
         fail "upgrade.sh directly recurses through $persistent_dir outside the repair helper"
     fi

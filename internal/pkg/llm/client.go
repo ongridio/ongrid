@@ -110,13 +110,34 @@ type Usage struct {
 // "zhipu", "gemini"). Empty → router uses the default provider. The
 // non-multi-provider single-client path ignores Provider.
 type ChatReq struct {
-	Model       string
-	Provider    string
-	Messages    []Message
-	Tools       []ToolSchema
-	Temperature float32
-	UserID      uint64 // optional; used for budget scoping + logging only
+	Model          string
+	Provider       string
+	Messages       []Message
+	Tools          []ToolSchema
+	ResponseFormat *ResponseFormat
+	Temperature    float32
+	// MaxOutputTokens bounds visible output plus reasoning tokens when the
+	// provider supports the OpenAI-compatible completion limit. Zero leaves
+	// the provider default unchanged.
+	MaxOutputTokens int
+	UserID          uint64 // optional; used for budget scoping + logging only
 }
+
+// ResponseFormat describes an OpenAI-compatible structured response request.
+// Schema is passed through as JSON because providers differ in the subset of
+// JSON Schema they accept; request translation stays inside this package.
+type ResponseFormat struct {
+	Type        string
+	Name        string
+	Description string
+	Schema      json.RawMessage
+	Strict      bool
+}
+
+const (
+	ResponseFormatJSONObject = "json_object"
+	ResponseFormatJSONSchema = "json_schema"
+)
 
 // ChatResp is the output of Client.Chat.
 type ChatResp struct {
@@ -257,6 +278,13 @@ type openaiClient struct {
 	// the isReasoningModel name heuristic. Keyed by the raw model string.
 	noSamplingMu sync.RWMutex
 	noSampling   map[string]bool
+
+	// jsonSchemaUnsupported records providers/models that reject the
+	// OpenAI structured-output response format. The key includes the
+	// normalized base URL because the same model name can be served by
+	// different providers with different capabilities.
+	jsonSchemaUnsupportedMu sync.RWMutex
+	jsonSchemaUnsupported   map[string]bool
 }
 
 type sdkKey struct {
@@ -439,6 +467,13 @@ func (c *openaiClient) Chat(ctx context.Context, req ChatReq) (*ChatResp, error)
 		defer cancel()
 	}
 
+	// A provider may accept JSON object mode but not the newer JSON Schema
+	// mode. Skip the known-incompatible schema request after the first
+	// observed rejection; the compiler still validates the returned JSON.
+	if c.modelRejectsJSONSchema(baseURL, model) {
+		downgradeJSONSchemaResponseFormat(&sdkReq)
+	}
+
 	// 4. Issue the request through the SDK matching the resolved creds.
 	// 旧消息没有可恢复的思考字段；DeepSeek 接受显式空值，但 SDK 的
 	// omitempty 会删掉它。仅对需要此兼容处理的请求补齐空字段。
@@ -449,18 +484,28 @@ func (c *openaiClient) Chat(ctx context.Context, req ChatReq) (*ChatResp, error)
 	start := time.Now()
 	sdkResp, err := sdk.CreateChatCompletion(callCtx, sdkReq)
 
-	// Reactive self-heal for reasoning models the name heuristic did not
-	// catch (custom gateway aliases like "gpt-5.6-sol"). These fix
-	// temperature/top_p/n at 1 and penalties at 0, and 400 on any other
-	// value. If that's what we hit AND we actually sent a sampling param,
-	// remember the model, strip the params, and retry once. Safe: this is
-	// still the single completion call — no tool has executed yet, so the
-	// no-retry-on-tools rule below does not apply.
-	if err != nil && isSamplingParamError(err) && hasCustomSampling(sdkReq) {
-		c.rememberNoSampling(model)
-		stripSamplingParams(&sdkReq)
-		c.log.Warn("llm: model rejects custom sampling params; retrying without them",
-			slog.String("model", model))
+	// Reactive compatibility retries are safe here: no tool has executed yet,
+	// so this is still one logical completion call. At most two request-shape
+	// changes are possible (JSON Schema -> JSON object and custom sampling ->
+	// provider defaults), which prevents an accidental retry loop.
+	for retries := 0; err != nil && retries < 2; retries++ {
+		changed := false
+		switch {
+		case isResponseFormatUnsupportedError(err) && downgradeJSONSchemaResponseFormat(&sdkReq):
+			c.rememberNoJSONSchema(baseURL, model)
+			changed = true
+			c.log.Warn("llm: provider rejects JSON Schema response format; retrying with JSON object mode",
+				slog.String("model", model))
+		case isSamplingParamError(err) && hasCustomSampling(sdkReq):
+			c.rememberNoSampling(model)
+			stripSamplingParams(&sdkReq)
+			changed = true
+			c.log.Warn("llm: model rejects custom sampling params; retrying without them",
+				slog.String("model", model))
+		}
+		if !changed {
+			break
+		}
 		sdkResp, err = sdk.CreateChatCompletion(callCtx, sdkReq)
 	}
 
@@ -577,12 +622,54 @@ func (c *openaiClient) toOpenAIReq(req ChatReq, model string) (openai.ChatComple
 		}
 	}
 
-	return openai.ChatCompletionRequest{
+	request := openai.ChatCompletionRequest{
 		Model:       model,
 		Messages:    msgs,
 		Tools:       tools,
 		Temperature: temp,
-	}, nil
+	}
+	if req.ResponseFormat != nil {
+		responseFormat, err := toOpenAIResponseFormat(req.ResponseFormat)
+		if err != nil {
+			return openai.ChatCompletionRequest{}, fmt.Errorf("response format: %w", err)
+		}
+		request.ResponseFormat = responseFormat
+	}
+	if req.MaxOutputTokens > 0 {
+		request.MaxCompletionTokens = req.MaxOutputTokens
+	}
+	return request, nil
+}
+
+func toOpenAIResponseFormat(format *ResponseFormat) (*openai.ChatCompletionResponseFormat, error) {
+	if format == nil {
+		return nil, nil
+	}
+	switch format.Type {
+	case ResponseFormatJSONObject:
+		return &openai.ChatCompletionResponseFormat{
+			Type: openai.ChatCompletionResponseFormatTypeJSONObject,
+		}, nil
+	case ResponseFormatJSONSchema:
+		name := strings.TrimSpace(format.Name)
+		if name == "" {
+			return nil, errors.New("json schema name is required")
+		}
+		if len(format.Schema) == 0 || !json.Valid(format.Schema) {
+			return nil, errors.New("json schema must be valid JSON")
+		}
+		return &openai.ChatCompletionResponseFormat{
+			Type: openai.ChatCompletionResponseFormatTypeJSONSchema,
+			JSONSchema: &openai.ChatCompletionResponseFormatJSONSchema{
+				Name:        name,
+				Description: format.Description,
+				Schema:      json.RawMessage(format.Schema),
+				Strict:      format.Strict,
+			},
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported type %q", format.Type)
+	}
 }
 
 func toOpenAIMessage(m Message) (openai.ChatCompletionMessage, error) {
@@ -702,6 +789,58 @@ func (c *openaiClient) rememberNoSampling(model string) {
 	c.noSampling[model] = true
 }
 
+// modelRejectsJSONSchema reports whether a provider/model pair previously
+// rejected response_format.type=json_schema. The provider URL is part of the
+// key because model names are not globally unique across OpenAI-compatible
+// gateways.
+func (c *openaiClient) modelRejectsJSONSchema(baseURL, model string) bool {
+	if strings.TrimSpace(model) == "" {
+		return false
+	}
+	key := responseFormatCapabilityKey(baseURL, model)
+	c.jsonSchemaUnsupportedMu.RLock()
+	defer c.jsonSchemaUnsupportedMu.RUnlock()
+	return c.jsonSchemaUnsupported[key]
+}
+
+// rememberNoJSONSchema caches a provider/model capability discovered from a
+// definitive response-format rejection, avoiding one failed request for
+// every subsequent Wiki chunk.
+func (c *openaiClient) rememberNoJSONSchema(baseURL, model string) {
+	if strings.TrimSpace(model) == "" {
+		return
+	}
+	key := responseFormatCapabilityKey(baseURL, model)
+	c.jsonSchemaUnsupportedMu.Lock()
+	defer c.jsonSchemaUnsupportedMu.Unlock()
+	if c.jsonSchemaUnsupported == nil {
+		c.jsonSchemaUnsupported = make(map[string]bool)
+	}
+	c.jsonSchemaUnsupported[key] = true
+}
+
+func responseFormatCapabilityKey(baseURL, model string) string {
+	return normalizeOpenAIBaseURL(baseURL) + "\x00" + strings.TrimSpace(model)
+}
+
+func hasJSONSchemaResponseFormat(req openai.ChatCompletionRequest) bool {
+	return req.ResponseFormat != nil && req.ResponseFormat.Type == openai.ChatCompletionResponseFormatTypeJSONSchema
+}
+
+// downgradeJSONSchemaResponseFormat switches only JSON Schema mode to the
+// older JSON object mode. The prompt still requires the exact JSON shape and
+// the caller validates the decoded result, so this fallback is safe for
+// providers that do not implement structured-output schemas.
+func downgradeJSONSchemaResponseFormat(req *openai.ChatCompletionRequest) bool {
+	if req == nil || !hasJSONSchemaResponseFormat(*req) {
+		return false
+	}
+	req.ResponseFormat = &openai.ChatCompletionResponseFormat{
+		Type: openai.ChatCompletionResponseFormatTypeJSONObject,
+	}
+	return true
+}
+
 // isSamplingParamError reports whether err is a provider 400 rejecting a
 // sampling param (temperature/top_p/n/penalties) as unsupported/fixed — the
 // signature of a reasoning model. Matched on message text because the shape
@@ -723,6 +862,26 @@ func isSamplingParamError(err error) bool {
 		strings.Contains(msg, "does not support") ||
 		strings.Contains(msg, "unsupported value") ||
 		strings.Contains(msg, "unsupported_value")
+}
+
+// isResponseFormatUnsupportedError reports the compatibility error returned
+// by OpenAI-compatible providers that do not implement JSON Schema output.
+// It deliberately requires both the response_format field and an
+// unsupported/unavailable phrase so malformed schemas are not silently
+// retried with weaker validation.
+func isResponseFormatUnsupportedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if !strings.Contains(msg, "response_format") && !strings.Contains(msg, "response format") {
+		return false
+	}
+	return strings.Contains(msg, "unavailable") ||
+		strings.Contains(msg, "unsupported") ||
+		strings.Contains(msg, "not supported") ||
+		strings.Contains(msg, "does not support") ||
+		strings.Contains(msg, "not available")
 }
 
 // hasCustomSampling reports whether req carries any sampling param that a
