@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ongridio/ongrid/internal/edgeagent/plugins"
+	"github.com/ongridio/ongrid/internal/pkg/autoapm"
 	"gopkg.in/yaml.v3"
 )
 
@@ -48,7 +49,7 @@ func TestRenderedConfigsAcceptedByCollector(t *testing.T) {
 		},
 		"kubernetes-loki": {
 			Enabled: true, EdgeID: 42, Endpoint: "https://manager.example.com/loki/api/v1/push",
-			Spec: map[string]interface{}{"mode": "kubernetes", "cluster_id": "9", "node_name": "worker-1"},
+			Spec: map[string]interface{}{"mode": "kubernetes", "cluster_id": "9", "node_name": "worker-1", "pod_log_paths": []string{"/var/log/pods/shop_*_*/*/*.log"}},
 		},
 	}
 	for name, cfg := range cases {
@@ -288,14 +289,22 @@ func TestRenderKubernetesMode(t *testing.T) {
 		Enabled: true, EdgeID: 42, Endpoint: "https://manager.example.com/loki/api/v1/push",
 		Spec: map[string]interface{}{
 			"mode": "kubernetes", "cluster_id": float64(7), "node_name": "kind-worker",
+			"pod_log_paths":        []string{"/var/log/pods/shop_orders_uid/app/*.log", "/var/log/pods/billing_*_*/*/*.log"},
+			"pod_log_self_exclude": "/var/log/pods/custom_custom-edge-node-x_*/*/*.log",
 		},
 	})
 	receivers := object(t, root, "receivers")
-	if _, exists := receivers["journald/system"]; exists {
-		t.Fatal("kubernetes mode must not enable journald")
+	if _, exists := receivers["journald/system"]; !exists {
+		t.Fatal("Kubernetes node must retain system journald")
 	}
 	kubernetes := object(t, receivers, "filelog/kubernetes")
-	assertStringListContains(t, kubernetes["include"], defaultKubernetesPodLogPath)
+	assertStringListContains(t, kubernetes["include"], "/var/log/pods/shop_orders_uid/app/*.log")
+	assertStringListContains(t, kubernetes["include"], "/var/log/pods/billing_*_*/*/*.log")
+	if len(list(t, kubernetes["include"])) != 2 {
+		t.Fatal("unselected paths included")
+	}
+	assertStringListContains(t, kubernetes["exclude"], "/var/log/pods/ongrid-system_ongrid-edge-node-*/*/*.log")
+	assertStringListContains(t, kubernetes["exclude"], "/var/log/pods/custom_custom-edge-node-x_*/*/*.log")
 	resource := object(t, kubernetes, "resource")
 	if scalar(t, resource, "device_id") != "42" || scalar(t, resource, "cluster_id") != "7" {
 		t.Fatalf("unexpected kubernetes resource attributes: %#v", resource)
@@ -316,6 +325,8 @@ func TestRenderKubernetesModeCanExplicitlyEnableK8sAttributes(t *testing.T) {
 		Enabled: true, EdgeID: 42, Endpoint: "https://manager.example.com/loki/api/v1/push",
 		Spec: map[string]interface{}{
 			"mode": "kubernetes", "cluster_id": float64(7), "node_name": "kind-worker",
+			"pod_log_paths":        []string{"/var/log/pods/shop_orders_uid/app/*.log", "/var/log/pods/billing_*_*/*/*.log"},
+			"pod_log_self_exclude": "/var/log/pods/custom_custom-edge-node-x_*/*/*.log",
 			"enable_k8sattributes": true,
 		},
 	})
@@ -592,4 +603,75 @@ func cloneMap(input map[string]interface{}) map[string]interface{} {
 		copy[key] = value
 	}
 	return copy
+}
+
+func TestKubernetesLogsRejectUnselectedOrUnboundedPaths(t *testing.T) {
+	for _, paths := range [][]string{{"/var/log/pods/*/*/*.log"}, {"/var/log/pods/*_*_*/*/*.log"}, {"/var/log/pods/shop_../../etc_uid/*/*.log"}, {"/var/log/syslog"}} {
+		_, err := render(plugins.PluginConfig{EdgeID: 42, Spec: map[string]interface{}{"mode": "kubernetes", "cluster_id": "7", "pod_log_paths": paths, "pod_log_path": "/var/log/pods/*/*/*.log"}})
+		if err == nil {
+			t.Fatalf("unsafe paths accepted: %v", paths)
+		}
+	}
+}
+
+func TestServiceFileLogsIdentityAndDeviceOverlap(t *testing.T) {
+	capture := autoapm.Spec{Environment: "production", Targets: []autoapm.Target{
+		{Executable: "/opt/orders", Port: 8080, ServiceName: "orders", ServiceNamespace: "shop", LogPath: "/var/log/orders/*.log"},
+		{Executable: "/opt/orders", Port: 8081, ServiceName: "orders", ServiceNamespace: "shop", LogPath: "/var/log/orders/*.log"},
+		{Executable: "/opt/inventory", Port: 8082, ServiceName: "inventory", Environment: "test", LogPath: "/var/log/inventory.log"},
+	}}
+	cfg := plugins.PluginConfig{EdgeID: 42, Endpoint: "https://manager.example.com/loki/api/v1/push", Spec: map[string]interface{}{
+		"enable_journald": true, "file_paths": []string{"/var/log/**/*.log"}, "service_capture": capture.Map(),
+	}}
+	raw, err := render(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]interface{}
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	receivers := doc["receivers"].(map[string]interface{})
+	if len(receivers) != 4 {
+		t.Fatalf("receivers: %+v", receivers)
+	}
+	serviceCount := 0
+	for id, raw := range receivers {
+		receiver := raw.(map[string]interface{})
+		if strings.HasPrefix(id, "filelog/service-") {
+			serviceCount++
+			resource := receiver["resource"].(map[string]interface{})
+			if resource["service.name"] == "orders" {
+				if resource["service.namespace"] != "shop" || resource["deployment.environment.name"] != "production" {
+					t.Fatalf("identity: %+v", resource)
+				}
+			} else if resource["deployment.environment.name"] != "test" {
+				t.Fatalf("override: %+v", resource)
+			}
+		} else if strings.HasPrefix(id, "filelog/") && len(receiver["exclude"].([]interface{})) != 2 {
+			t.Fatal("device glob duplicates service logs")
+		}
+	}
+	if serviceCount != 2 {
+		t.Fatal("duplicate service file receiver")
+	}
+	delete(cfg.Spec, "service_capture")
+	raw, err = render(cfg)
+	if err != nil || strings.Contains(string(raw), "filelog/service-") {
+		t.Fatalf("removed selection: %s %v", raw, err)
+	}
+}
+
+func TestKubernetesJournalWithoutContainerSelection(t *testing.T) {
+	for _, paths := range [][]string{nil, {}} {
+		root := renderConfig(t, plugins.PluginConfig{EdgeID: 42, Endpoint: "https://manager.example.com/loki/api/v1/push", Spec: map[string]interface{}{
+			"mode": "kubernetes", "cluster_id": "7", "node_name": "worker-1", "pod_log_paths": paths,
+			"pod_log_path": "/var/log/pods/*/*/*.log", "file_paths": []string{"/var/log/pods/*/*/*.log"},
+		}})
+		receivers := object(t, root, "receivers")
+		if len(receivers) != 1 || receivers["journald/system"] == nil {
+			t.Fatalf("system-only receivers: %+v", receivers)
+		}
+		assertStringListContains(t, object(t, object(t, root, "service"), "pipelines")["logs"].(map[string]interface{})["receivers"], "journald/system")
+	}
 }

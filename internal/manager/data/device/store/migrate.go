@@ -4,6 +4,7 @@
 package store
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -60,7 +61,10 @@ func Migrate(db *gorm.DB) error {
 	if err := detachKubernetesControllerHosts(db); err != nil {
 		return err
 	}
-	return backfillFromEdges(db)
+	if err := backfillFromEdges(db); err != nil {
+		return err
+	}
+	return backfillDeviceEnvironments(db)
 }
 
 // detachKubernetesControllerHosts removes host associations accidentally
@@ -321,5 +325,45 @@ func backfillFromEdges(db *gorm.DB) error {
 		_ = db.Migrator().DropColumn("edges", "roles")
 	}
 
+	return nil
+}
+
+// Import the preferred host collector's default once. An explicit empty device
+// value is durable: restarting Manager must never restore a retired Edge value.
+func backfillDeviceEnvironments(db *gorm.DB) error {
+	if !db.Migrator().HasTable("edges") || !db.Migrator().HasTable("edge_plugin_configs") {
+		return nil
+	}
+	var rows []struct {
+		ID       uint64
+		SpecJSON string
+	}
+	err := db.Table("devices d").Select("d.id, COALESCE(p.spec_json, '') AS spec_json").
+		Joins("JOIN edge_devices l ON l.device_id = d.id AND l.type = ? AND l.delete_marker = 0", model.EdgeDeviceRelationHost).
+		Joins("JOIN edges e ON e.id = l.edge_id AND e.delete_marker = 0").
+		Joins("LEFT JOIN edge_plugin_configs p ON p.edge_id = e.id AND p.plugin_name = ? AND p.delete_marker = 0", "autoapm").
+		Where("d.environment IS NULL AND d.delete_marker = 0").
+		Order("d.id, (e.status = 'online') DESC, e.last_seen_at DESC, e.id DESC").Scan(&rows).Error
+	if err != nil {
+		return fmt.Errorf("load legacy device environments: %w", err)
+	}
+	seen := make(map[uint64]bool)
+	for _, row := range rows {
+		if seen[row.ID] {
+			continue
+		}
+		seen[row.ID] = true
+		var spec struct {
+			Environment string `json:"environment"`
+		}
+		if row.SpecJSON != "" {
+			if err := json.Unmarshal([]byte(row.SpecJSON), &spec); err != nil {
+				return fmt.Errorf("decode device %d legacy environment: %w", row.ID, err)
+			}
+		}
+		if err := db.Model(&model.Device{}).Where("id = ? AND environment IS NULL", row.ID).Update("environment", spec.Environment).Error; err != nil {
+			return fmt.Errorf("import device %d environment: %w", row.ID, err)
+		}
+	}
 	return nil
 }

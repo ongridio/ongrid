@@ -23,7 +23,7 @@ otel_metrics_export:
   histogram_aggregation: explicit_bucket_histogram
   instrumentations: [http, grpc]
 metrics:
-  features: [application]
+  features: [application, application_runtime]
 
 attributes:
   kubernetes:

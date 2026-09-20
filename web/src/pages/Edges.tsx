@@ -1,3 +1,5 @@
+import { ClusterChipLink } from "@/components/ClusterChipLink";
+import { loadTopologyClusters } from "@/lib/deviceClusters";
 import { selectHostEdgesByDevice } from '@/lib/edgeSelection';
 import { Label, Input, Radio } from '@/components/ui';
 import { useDialogs } from '@/components/ui/useDialogs';
@@ -34,7 +36,7 @@ import {
 } from "lucide-react";
 import { StatusPill } from "@/components/StatusPill";
 import { Modal } from "@/components/Modal";
-import { Button, Chip } from "@/components/ui";
+import { Button } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { openMetricDrilldown } from "@/lib/drilldown";
 import { relativeTime } from "@/lib/format";
@@ -67,9 +69,7 @@ import {
 import {
   createNode,
   listNodes,
-  listRelations,
   type TopologyNode,
-  type TopologyRelation,
 } from "@/api/topology";
 import {
   deleteDevice,
@@ -113,39 +113,6 @@ type DeviceRow = Device & {
   hostEdge?: Edge;
   topologyClusters: TopologyNode[];
 };
-
-function indexTopologyClusters(
-  clusters: TopologyNode[],
-  relations: TopologyRelation[],
-): Map<number, TopologyNode[]> {
-  const clustersByID = new Map(
-    clusters.map((cluster) => [cluster.id, cluster]),
-  );
-  const out = new Map<number, TopologyNode[]>();
-  for (const relation of relations) {
-    if (relation.type !== "member_of") continue;
-    const cluster = clustersByID.get(relation.dst_id);
-    if (!cluster) continue;
-    const memberships = out.get(relation.src_id) ?? [];
-    if (!memberships.some((item) => item.id === cluster.id)) {
-      memberships.push(cluster);
-      memberships.sort((a, b) => a.name.localeCompare(b.name));
-    }
-    out.set(relation.src_id, memberships);
-  }
-  return out;
-}
-
-async function loadTopologyClusters(): Promise<Map<number, TopologyNode[]>> {
-  const [clusterResp, relationResp] = await Promise.all([
-    listNodes({ type: "cluster" }),
-    listRelations({ type: "member_of" }),
-  ]);
-  return indexTopologyClusters(
-    clusterResp.items ?? [],
-    relationResp.items ?? [],
-  );
-}
 
 function asEdgeRoles(roles: string[] | undefined): EdgeRole[] {
   if (!roles) return [];
@@ -1463,33 +1430,6 @@ function EdgeAccessMeta({
           />
         ))}
     </div>
-  );
-}
-
-function ClusterChipLink({
-  to,
-  name,
-  title,
-}: {
-  to: string;
-  name: string;
-  title: string;
-}) {
-  const { tr } = useI18n();
-  return (
-    <Hint content={title}><Link
-      to={to}
-      onClick={(ev) => ev.stopPropagation()}
-
-      aria-label={tr(`所属集群 ${name}`, `Cluster ${name}`)}
-      className="block max-w-[160px] hover:opacity-80"
-    >
-      <Chip tone="info" dense className="max-w-full whitespace-nowrap">
-        <span className="truncate">
-          {tr("集群", "Cluster")} · {name}
-        </span>
-      </Chip>
-    </Link></Hint>
   );
 }
 

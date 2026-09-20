@@ -1,0 +1,18 @@
+syntax = "proto3";
+package manager.device.v1;
+option go_package = "github.com/ongridio/ongrid/api/gen/manager/device/v1;devicev1";
+
+// PUT /v1/devices/{id}/environment (admin). Empty restores cluster inheritance.
+message UpdateDeviceEnvironmentRequest {
+  uint64 id = 1;
+  string environment = 2;
+}
+
+// GET/PUT /v1/devices/{id}/environment. The HTTP response wraps this in data.
+message DeviceEnvironment {
+  string environment = 1;
+  string effective_environment = 2;
+  string inherited_environment = 3;
+  string cluster_name = 4;
+  string source = 5; // device, cluster, or unset
+}

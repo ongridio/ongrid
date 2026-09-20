@@ -36,6 +36,39 @@ func TestRuntimePromQL(t *testing.T) {
 	add("jvm_gc_duration_seconds_sum", `,jvm_gc_name="young"`, "0+0x5")
 	add("jvm_gc_duration_seconds_count", `,jvm_gc_name="young"`, "0+0x5")
 	inputs = append(inputs, map[string]any{"series": `go_memstats_alloc_bytes_total{service_name="orders",service_namespace="trade",deployment_environment_name="production",service_instance_id="other",service_version="v1"}`, "values": "0+60000x5"})
+	// OBI inputs include idle CPU (must not count), histogram estimates, and
+	// different memory types. An SDK allocation metric wins over its OBI alias.
+	add("go_memory_allocated_bytes_total", "", "0+6000x5")
+	add("go_goroutine_count", "", "7+0x5")
+	add("go_memory_used_bytes", `,go_memory_type="stack"`, "2048+0x5")
+	add("go_memory_used_bytes", `,go_memory_type="other"`, "4096+0x5")
+	add("go_cpu_time_seconds_total", `,go_cpu_state="user"`, "0+7.5x5")
+	add("go_cpu_time_seconds_total", `,go_cpu_state="gc",go_cpu_detailed_state="gc/mark/assist"`, "0+7.5x5")
+	add("go_cpu_time_seconds_total", `,go_cpu_state="idle"`, "0+600x5")
+	add("go_memory_gc_cycles_total", "", "0+6x5")
+	add("go_memory_allocations_total", "", "0+60x5")
+	add("go_memory_gc_pause_duration_seconds_sum", "", "0+0.006x5")
+	add("go_memory_gc_pause_duration_seconds_count", "", "0+6x5")
+	add("go_schedule_duration_seconds_sum", "", "0+0.012x5")
+	add("go_schedule_duration_seconds_count", "", "0+6x5")
+	add("jvm_memory_committed_bytes", `,jvm_memory_type="heap",jvm_memory_pool_name="eden"`, "100+0x5")
+	add("jvm_memory_committed_bytes", `,jvm_memory_type="heap",jvm_memory_pool_name="old"`, "200+0x5")
+	add("jvm_memory_limit_bytes", `,jvm_memory_type="non_heap",jvm_memory_pool_name="code"`, "500+0x5")
+	add("jvm_memory_used_after_last_gc_bytes", `,jvm_memory_type="heap",jvm_memory_pool_name="old"`, "25+0x5")
+	add("nodejs_eventloop_time_seconds_total", `,nodejs_eventloop_state="active"`, "0+15x5")
+	add("ongrid_apm_process_cpu_seconds_total", `,process_pid="21",process_start_ticks="100"`, "0+6x5")
+	add("ongrid_apm_process_cpu_seconds_total", `,process_pid="22",process_start_ticks="200"`, "0 12 24 0 12 24")
+	add("process_cpu_seconds_total", "", "0+600x5") // SDK duplicate must not add to Edge CPU.
+	add("ongrid_apm_process_resident_memory_bytes", `,process_pid="21"`, "1024+0x5")
+	add("ongrid_apm_process_resident_memory_bytes", `,process_pid="22"`, "2048+0x5")
+	add("ongrid_apm_process_resident_memory_bytes", `,process_pid="exited"`, "9000 9000 9000 _ _ _")
+	add("process_resident_memory_bytes", "", "99999+0x5")
+	add("process_memory_usage_bytes", "", "99999+0x5")
+	add("ongrid_apm_process_virtual_memory_bytes", "", "8192+0x5")
+	add("ongrid_apm_process_threads", "", "5+0x5")
+	add("ongrid_apm_process_open_fds", "", "4+0x5")
+	add("ongrid_apm_process_io_read_bytes_total", "", "0+600x5")
+	add("ongrid_apm_process_io_write_bytes_total", "", "0+1200x5")
 	samples := []any{}
 	for _, item := range []struct {
 		name  string
@@ -45,6 +78,25 @@ func TestRuntimePromQL(t *testing.T) {
 		{"go_gc_mean_duration_seconds", .1},
 		{"jvm_heap_memory_used_bytes", 30},
 		{"jvm_non_heap_memory_used_bytes", 5},
+		{"go_goroutines", 7},
+		{"go_stack_memory_used_bytes", 2048},
+		{"go_other_memory_used_bytes", 4096},
+		{"go_runtime_cpu_cores", .25},
+		{"go_gc_cycles_per_second", .1},
+		{"go_allocations_per_second", 1},
+		{"go_gc_pause_mean_duration_seconds", .001},
+		{"go_schedule_mean_duration_seconds", .002},
+		{"jvm_heap_memory_committed_bytes", 300},
+		{"jvm_non_heap_memory_limit_bytes", 500},
+		{"jvm_heap_memory_used_after_last_gc_bytes", 25},
+		{"nodejs_eventloop_active_ratio", .25},
+		{"process_cpu_cores", .26},
+		{"process_resident_memory_bytes", 3072},
+		{"process_virtual_memory_bytes", 8192},
+		{"process_threads", 5},
+		{"process_open_fds", 4},
+		{"process_io_read_bytes_per_second", 10},
+		{"process_io_write_bytes_per_second", 20},
 	} {
 		samples = append(samples, map[string]any{"labels": fmt.Sprintf(`{apm_runtime=%q,service_instance_id="pod-1",service_version="v1"}`, item.name), "value": item.value})
 	}
@@ -71,6 +123,10 @@ func TestRuntimeUnitsAndMissingGC(t *testing.T) {
 	}{
 		{"go_memory_allocation_bytes_per_second", "1048576", "bytes_per_second", false},
 		{"jvm_gc_mean_duration_seconds", "NaN", "seconds", true},
+		{"go_runtime_cpu_cores", "0.1", "cores", false},
+		{"go_gc_cycles_per_second", "0.5", "per_second", false},
+		{"go_config_gogc_percent", "100", "percent", false},
+		{"nodejs_eventloop_utilization_ratio", "0.25", "ratio", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := &fakeProm{result: fmt.Sprintf(`[{"metric":{"apm_runtime":%q,"service_instance_id":"one","service_version":"v1"},"value":[1600,%q]}]`, tc.name, tc.value)}

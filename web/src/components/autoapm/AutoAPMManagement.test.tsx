@@ -1,48 +1,39 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
+import type { ReactElement } from 'react';
+import { fireEvent, render as testingRender, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { AutoAPMManagement } from './AutoAPMManagement';
-import { listSettings, setSetting } from '@/api/settings';
 import { loadK8sEdgeAttachments } from '@/pages/kubernetes/edgeAttachments';
 import { listEdges } from '@/api/edges';
+import { listDevices } from '@/api/devices';
+import { listNodes, listRelations } from '@/api/topology';
 import { listEdgePlugins, setEdgePlugin } from '@/api/integrations';
 vi.mock('@/pages/kubernetes/edgeAttachments', () => ({ loadK8sEdgeAttachments: vi.fn().mockResolvedValue({}) }));
-vi.mock('@/api/settings', () => ({ listSettings: vi.fn(), setSetting: vi.fn() }));
 vi.mock('@/api/edges', () => ({ listEdges: vi.fn() }));
+vi.mock('@/api/devices', () => ({ listDevices: vi.fn(), getDeviceEnvironment: vi.fn().mockResolvedValue({ environment: "", effective_environment: "production", inherited_environment: "production", cluster_name: "prod-hosts", source: "cluster" }) }));
 vi.mock('@/api/integrations', () => ({ listEdgePlugins: vi.fn(), setEdgePlugin: vi.fn(), getAutoAPMOptions: vi.fn().mockResolvedValue({ environments: [], namespaces: [] }) }));
-vi.mock('@/api/topology', () => ({ listAllNodes: vi.fn().mockResolvedValue([]) }));
+vi.mock('@/api/topology', () => ({ listNodes: vi.fn(), listRelations: vi.fn() }));
 vi.mock('@/i18n/locale', async importOriginal => ({ ...await importOriginal<typeof import('@/i18n/locale')>(), useI18n: () => ({ tr: (_zh: string, en: string) => en }) }));
+const render = (ui: ReactElement) => testingRender(<MemoryRouter>{ui}</MemoryRouter>);
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(listSettings).mockResolvedValue({ items: [], total: 0 });
+  vi.mocked(loadK8sEdgeAttachments).mockResolvedValue({});
+  vi.mocked(listDevices).mockResolvedValue({ items: [], total: 0 });
+  vi.mocked(listNodes).mockResolvedValue({ items: [], total: 0 });
+  vi.mocked(listRelations).mockResolvedValue({ items: [], total: 0 });
   vi.mocked(listEdges).mockResolvedValue({ items: [{ id: 67, name: 'Ubuntu', device_id: 650, status: 'online', roles: [], access_key_id: '', last_seen_at: null }], total: 1 });
-  vi.mocked(listEdgePlugins).mockResolvedValue({ items: [{ plugin_name: 'autoapm', enabled: true, health: { state: 'running', reported_at: new Date().toISOString(), candidates: [{ executable: '/opt/orders', port: 8080, pid: 1 }] } }] });
+  vi.mocked(listEdgePlugins).mockResolvedValue({ items: [{ plugin_name: 'autoapm', enabled: true, defaults: { environment: 'production', cluster_name: 'prod-hosts' }, health: { state: 'running', reported_at: new Date().toISOString(), candidates: [{ executable: '/opt/orders', port: 8080, pid: 1 }] } }] });
 });
-it('uses one persisted global switch and configures a discovered target from Services', async () => {
-  const user = userEvent.setup();
+it('links to a dedicated capture page without opening a dialog', async () => {
+  vi.mocked(listEdgePlugins).mockResolvedValue({ items: [{ plugin_name: 'autoapm', enabled: true, health: { state: 'running', reported_at: new Date().toISOString(), candidates: [{ executable: '/opt/orders', port: 8080, pid: 12 }, { executable: '/opt/orders', port: 9090, pid: 12 }] } }] });
   render(<AutoAPMManagement canEdit initialEdgeId={null} />);
-  const toggle = screen.getByRole('switch', { name: 'Global discovery' });
-  await waitFor(() => expect(toggle).not.toHaveAttribute('aria-disabled', 'true'));
-  await act(async () => { await user.click(toggle); });
-  expect(setSetting).toHaveBeenCalledWith('platform', 'auto_apm_enabled', 'true', false);
-  expect(setEdgePlugin).not.toHaveBeenCalled();
   await screen.findByText('Discovering');
-  await act(async () => { await user.click(screen.getByRole('button', { name: 'Configure capture' })); });
-  expect(screen.getAllByRole('switch', { hidden: true })).toHaveLength(1);
-  await act(async () => { await user.click(await screen.findByRole('checkbox', { name: 'Capture /opt/orders:8080' })); });
-  vi.mocked(setEdgePlugin).mockResolvedValue({ plugin_name: 'autoapm', enabled: true });
-  await act(async () => { await user.click(screen.getByRole('button', { name: 'Save capture settings' })); });
-  expect(setEdgePlugin).toHaveBeenCalledWith(67, 'autoapm', { enabled: true, spec: { targets: [{ executable: '/opt/orders', port: 8080, service_name: 'orders', service_namespace: undefined, environment: undefined }], environment: undefined } });
-});
-it('retains the global state when saving fails', async () => {
-  const user = userEvent.setup();
-  vi.mocked(setSetting).mockRejectedValue(new Error('permission denied'));
-  render(<AutoAPMManagement canEdit initialEdgeId={null} />);
-  const toggle = screen.getByRole('switch');
-  await waitFor(() => expect(toggle).not.toHaveAttribute('aria-disabled', 'true'));
-  await act(async () => { await user.click(toggle); });
-  expect(await screen.findByRole('alert')).toHaveTextContent('permission denied');
-  expect(toggle).not.toBeChecked();
+  expect(screen.getByRole('columnheader', { name: 'Default environment' })).toBeInTheDocument();
+  expect(await screen.findByRole('button', { name: 'Set default environment for Ubuntu' })).toHaveTextContent('production');
+  expect(screen.getByRole('link', { name: 'Configure capture' })).toHaveAttribute('href', '/apm/capture/hosts/67');
+  expect(within(screen.getAllByRole('row')[1]).getAllByRole('cell')[3]).toHaveTextContent('1');
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(setEdgePlugin).not.toHaveBeenCalled();
 });
 it('distinguishes a failed device request from an empty inventory', async () => {
   vi.mocked(listEdges).mockRejectedValue(new Error('network unavailable'));
@@ -50,13 +41,24 @@ it('distinguishes a failed device request from an empty inventory', async () => 
   expect(await screen.findByRole('alert')).toHaveTextContent('Could not load devices');
   expect(screen.queryByText('No devices connected')).not.toBeInTheDocument();
 });
+it('uses device identity and topology membership independently of collector names and environment defaults', async () => {
+  vi.mocked(listDevices).mockResolvedValue({ items: [{ id: 650, node_id: 900, name: 'Orders host', hostname: 'orders-01', ip_address: '10.0.0.5' }], total: 1 });
+  vi.mocked(listNodes).mockResolvedValue({ items: [{ id: 95, type: 'cluster', name: 'bare-metal-prod', created_at: '', updated_at: '' }], total: 1 });
+  vi.mocked(listRelations).mockResolvedValue({ items: [{ id: 1, src_id: 900, dst_id: 95, type: 'member_of', created_at: '' }], total: 1 });
+  render(<AutoAPMManagement canEdit initialEdgeId={null} />);
+  expect(await screen.findByRole('link', { name: 'Orders host' })).toHaveAttribute('href', '/devices/650');
+  expect(screen.queryByText('orders-01 · 10.0.0.5')).not.toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'Cluster bare-metal-prod' })).toHaveAttribute('href', '/clusters/95');
+  expect(screen.queryByRole('link', { name: 'Cluster prod-hosts' })).not.toBeInTheDocument();
+  fireEvent.change(screen.getByRole('searchbox', { name: 'Search devices' }), { target: { value: 'bare-metal-prod' } });
+  expect(screen.getByRole('link', { name: 'Orders host' })).toBeInTheDocument();
+});
 it('does not present stale discovery as current results', async () => {
-  vi.mocked(listSettings).mockResolvedValue({ items: [{ key: 'auto_apm_enabled', value: 'true', category: 'platform', sensitive: false, updated_at: new Date().toISOString() }], total: 1 });
   vi.mocked(listEdgePlugins).mockResolvedValue({ items: [{ plugin_name: 'autoapm', enabled: true, health: { state: 'running', reported_at: '2000-01-01T00:00:00Z', candidates: [{ executable: '/opt/stale', port: 8080, pid: 1 }] } }] });
   render(<AutoAPMManagement canEdit={false} initialEdgeId={null} />);
   expect(await screen.findByText('Awaiting report')).toBeInTheDocument();
   expect(screen.queryByText('/opt/stale')).not.toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Configure capture' })).toBeDisabled();
+  expect(screen.getByRole('link', { name: 'View settings' })).toHaveAttribute('href', '/apm/capture/hosts/67');
 });
 
 it('shows one preferred collector per device and retains devices that are offline', async () => {
@@ -70,7 +72,7 @@ it('shows one preferred collector per device and retains devices that are offlin
   ], total: 5 });
   render(<AutoAPMManagement canEdit initialEdgeId={null} />);
   await screen.findByText('2 devices');
-  await waitFor(() => expect(screen.getAllByRole('button', { name: 'Configure capture' }).every(button => !button.hasAttribute('disabled'))).toBe(true));
+  await waitFor(() => expect(screen.getAllByRole('link', { name: 'Configure capture' }).every(button => !button.hasAttribute('disabled'))).toBe(true));
   expect(screen.getAllByRole('row')).toHaveLength(3);
   expect(screen.getByText('Offline device')).toBeInTheDocument();
   expect(screen.queryByText(/Retired collector|Older online collector|Controller/)).not.toBeInTheDocument();

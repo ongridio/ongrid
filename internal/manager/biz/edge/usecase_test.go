@@ -145,6 +145,17 @@ func (d *fakeDeviceRepo) UpdateRoles(_ context.Context, id uint64, roles uint8) 
 	return nil
 }
 
+func (d *fakeDeviceRepo) UpdateEnvironment(_ context.Context, id uint64, value string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	dev, ok := d.byID[id]
+	if !ok {
+		return errs.ErrNotFound
+	}
+	dev.Environment = &value
+	return nil
+}
+
 func (d *fakeDeviceRepo) UpdateNameDescription(_ context.Context, id uint64, name, description string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()

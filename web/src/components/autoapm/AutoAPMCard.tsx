@@ -1,161 +1,144 @@
 import { useEffect, useState } from 'react';
-import { Plus, Search } from 'lucide-react';
+import { Check, FileText, Pencil, Plus, RefreshCw, Search, Terminal, Trash2 } from 'lucide-react';
 import { Modal } from '@/components/Modal';
-import { Autocomplete, Button, Checkbox, EmptyState, Input, Label, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui';
+import { Autocomplete, Button, Card, Chip, EmptyState, Input, Label, Radio } from '@/components/ui';
 import { useI18n } from '@/i18n/locale';
 import { listEdgePlugins, type PluginRow, type PluginHealth } from '@/api/integrations';
-
 import { useAutoAPMOptions } from './useAutoAPMOptions';
+import { groupDiscoveredProcesses, matchesProcess } from './hostProcesses';
 
-type Target = { executable: string; port: number; service_name: string; service_namespace?: string; environment?: string };
-type Spec = { tls_insecure_skip_verify?: boolean; environment?: string; sample_ratio?: number; targets?: Target[] };
+type Target = { executable: string; port: number; service_name: string; service_namespace?: string; environment?: string; log_path?: string };
+type Spec = { environment?: string; targets?: Target[] };
 type Props = {
   edgeId: number;
   deviceName: string;
   online: boolean;
   row: PluginRow;
-  onClose(): void;
+  canEdit?: boolean;
   onSave(body: { enabled: boolean; spec?: Record<string, unknown> }): Promise<PluginRow | void>;
 };
 
-export function AutoAPMCard({ edgeId, deviceName, online, row, onClose, onSave }: Props) {
+export function AutoAPMCard({ edgeId, deviceName, online, row, canEdit = true, onSave }: Props) {
   const { tr } = useI18n();
   const { options, error: optionsError } = useAutoAPMOptions();
-  const [draft, setDraft] = useState<Spec>(() => row.spec ?? {});
-  const [sampleRatio, setSampleRatio] = useState<string>();
+  const [spec, setSpec] = useState<Spec>(() => row.spec ?? {});
+  const [editor, setEditor] = useState<{ index: number; target: Target }>();
   const [health, setHealth] = useState<PluginHealth | undefined>(row.health);
   const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
   const [pollError, setPollError] = useState('');
-  const [view, setView] = useState('all');
   const [query, setQuery] = useState('');
+  const [refresh, setRefresh] = useState(0);
+  const [checkedAt, setCheckedAt] = useState(Date.now);
   useEffect(() => {
-    if (!row.enabled || !online) { setHealth(undefined); return; }
+    if (!online) { setHealth(undefined); return; }
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
     const refresh = async () => {
       try {
         const response = await listEdgePlugins(edgeId);
-        if (!cancelled) {
-          setHealth(response.items.find(item => item.plugin_name === 'autoapm')?.health);
-          setPollError('');
-        }
+        if (!cancelled) { setHealth(response.items.find(item => item.plugin_name === 'autoapm')?.health); setPollError(''); }
       } catch (e) { if (!cancelled) setPollError((e as Error).message); }
-      finally { if (!cancelled) timer = setTimeout(() => void refresh(), 5000); }
+      finally { if (!cancelled) { setCheckedAt(Date.now()); timer = setTimeout(() => void refresh(), 5000); } }
     };
     void refresh();
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [edgeId, row.enabled, online]);
+  }, [edgeId, online, refresh]);
 
-  const save = async () => {
-    if (saving) return;
-    if ((draft.targets ?? []).some(target => !target.executable.startsWith('/') || !Number.isInteger(target.port) || target.port < 1 || target.port > 65535 || !target.service_name.trim())) {
-      setView('selected'); setQuery('');
-      setError(tr('请补全目标的绝对路径、有效端口和服务名称。', 'Complete each target with an absolute path, valid port and service name.'));
-      return;
-    }
-    const ratio = sampleRatio !== undefined ? Number(sampleRatio) : draft.sample_ratio;
-    if (sampleRatio === '' || (ratio != null && (!Number.isFinite(ratio) || ratio < 0 || ratio > 1))) {
-      setView('settings'); setError(tr('链路采样比例必须在 0 到 1 之间。', 'Trace sampling ratio must be between 0 and 1.')); return;
-    }
-    setSaving(true); setError('');
-    try { await onSave({ enabled: row.enabled, spec: { ...draft, ...(sampleRatio !== undefined ? { sample_ratio: ratio } : {}), environment: draft.environment?.trim() || undefined, targets: (draft.targets ?? []).map(target => ({ ...target, service_name: target.service_name.trim(), service_namespace: target.service_namespace?.trim() || undefined, environment: target.environment?.trim() || undefined })) } }); }
+  const targets = spec.targets ?? [];
+  const defaultEnvironment = row.defaults ? row.defaults.environment || '' : spec.environment || '';
+  const environmentOptions = [...new Set([...options.environments, defaultEnvironment, ...targets.map(target => target.environment ?? '')])].filter(Boolean).sort();
+  const namespaceOptions = [...new Set([...options.namespaces, ...targets.map(target => target.service_namespace ?? '')])].filter(Boolean).sort();
+  const fresh = online && !!health?.reported_at && checkedAt - Date.parse(health.reported_at) <= 90000;
+  const processes = groupDiscoveredProcesses(fresh ? health?.candidates : []);
+  const candidates = processes.filter(candidate => !targets.some((target, index) => index !== editor?.index && matchesProcess(target, candidate)));
+  const availableCandidates = candidates.filter(candidate => `${candidate.executable} ${candidate.ports.join(' ')} ${candidate.pid}`.toLowerCase().includes(query.toLowerCase()));
+  const selectedCandidate = !!editor && candidates.some(candidate => matchesProcess(editor.target, candidate));
+  const targetPorts = (target: Target) => [...new Set([target.port, ...processes.filter(process => matchesProcess(target, process)).flatMap(process => process.ports)])].sort((a, b) => a - b).join(', ');
+  const begin = (index: number) => {
+    if (!canEdit) return;
+    setError(''); setSaved(false); setQuery('');
+    setEditor({ index, target: index < 0 ? { executable: '', port: 0, service_name: '' } : { ...targets[index] } });
+  };
+  const patch = (value: Partial<Target>) => setEditor(current => current && ({ ...current, target: { ...current.target, ...value } }));
+  const persist = async (next: Target[]) => {
+    if (saving || !canEdit) return;
+    setSaving(true); setError(''); setSaved(false);
+    const nextSpec = { ...spec, environment: undefined, sample_ratio: 1, tls_insecure_skip_verify: true, targets: next };
+    try { await onSave({ enabled: true, spec: nextSpec }); setSpec(nextSpec); setEditor(undefined); setSaved(true); }
     catch (e) { setError((e as Error).message); }
     finally { setSaving(false); }
   };
-  const targets = draft.targets ?? [];
-  const defaultEnvironment = draft.environment || row.defaults?.environment || '';
-  const environmentOptions = [...new Set([...options.environments, draft.environment ?? '', row.defaults?.environment ?? '', ...targets.map(target => target.environment ?? '')])].filter(Boolean).sort();
-  const namespaceOptions = [...new Set([...options.namespaces, ...targets.map(target => target.service_namespace ?? '')])].filter(Boolean).sort();
-  const patch = (index: number, value: Partial<Target>) => setDraft(current => ({
-    ...current, targets: (current.targets ?? []).map((target, i) => i === index ? { ...target, ...value } : target),
-  }));
-  const add = (executable = '', port = 8080) => setDraft(current => ({ ...current, targets: [...(current.targets ?? []), {
-    executable, port, service_name: executable.split('/').pop() ?? '', service_namespace: '',
-  }] }));
-  const remove = (index: number) => setDraft(current => ({ ...current, targets: (current.targets ?? []).filter((_, i) => i !== index) }));
-  const fresh = online && row.enabled && !!health?.reported_at && Date.now() - Date.parse(health.reported_at) <= 90000;
-  const candidates = fresh ? health?.candidates ?? [] : [];
-  const rows = [
-    ...targets.map((target, index) => ({ ...target, index, pid: candidates.find(c => c.executable === target.executable && c.port === target.port)?.pid })),
-    ...candidates.filter(c => !targets.some(t => t.executable === c.executable && t.port === c.port)).map(c => ({ ...c, index: -1, environment: '', service_name: '', service_namespace: '' })),
-  ].filter(target => (view === 'all' || target.index >= 0) && `${target.executable} ${target.port} ${target.service_name} ${target.service_namespace ?? ''}`.toLowerCase().includes(query.toLowerCase()));
-  const notice = !row.enabled ? tr('全局自动发现已关闭，保存的目标将在开启后采集。', 'Global discovery is off. Saved targets will be captured when enabled.')
-    : !online ? tr('设备离线，保存的配置将在重连后生效。', 'Device offline. Saved settings apply when it reconnects.')
-    : !fresh ? tr('等待设备上报，可先配置采集目标。', 'Waiting for a device report. You can configure targets now.') : '';
+  const save = () => {
+    if (!editor || saving || !canEdit) return;
+    if (editor.index < 0 && !selectedCandidate) { setError(tr('请选择当前发现的进程。', 'Select a currently discovered process.')); return; }
+    const target = { ...editor.target, service_name: editor.target.service_name.trim(), service_namespace: editor.target.service_namespace?.trim() || undefined, environment: editor.target.environment?.trim() || undefined, log_path: editor.target.log_path?.trim() || undefined };
+    if (!target.executable.startsWith('/') || !Number.isInteger(target.port) || target.port < 1 || target.port > 65535 || !target.service_name) {
+      setError(tr('请补全目标的绝对路径、有效端口和服务名称。', 'Complete the target with an absolute path, valid port and service name.')); return;
+    }
+    if (targets.some((item, index) => index !== editor.index && item.executable === target.executable && item.port === target.port)) {
+      setError(tr('该路径和端口已配置采集。', 'This path and port are already configured.')); return;
+    }
+    void persist(editor.index < 0 ? [...targets, target] : targets.map((item, index) => index === editor.index ? target : item));
+  };
+  const notice = !online ? tr('设备离线，保存的配置将在重连后生效。', 'Device offline. Saved settings apply when it reconnects.')
+    : !fresh ? tr('等待设备上报，可编辑已有目标。', 'Waiting for a device report. Existing targets remain editable.') : '';
 
-  return <Modal open onClose={() => { if (!saving) onClose(); }} size="xl" title={tr(`配置采集 · ${deviceName}`, `Configure capture · ${deviceName}`)} footer={<>
-    <span className="mr-auto text-xs text-text-muted">{tr(`已选 ${targets.length} / 100 个目标`, `${targets.length} / 100 targets selected`)}</span>
-    <Button disabled={saving} onClick={onClose}>{tr('取消', 'Cancel')}</Button>
-    <Button form={`autoapm-${edgeId}`} type="submit" variant="primary" disabled={saving}>{saving ? tr('保存中…', 'Saving…') : tr('保存采集配置', 'Save capture settings')}</Button>
-  </>}>
-    <form id={`autoapm-${edgeId}`} className="space-y-4" onSubmit={event => { event.preventDefault(); void save(); }}>
-      <p className="text-sm text-text-muted">{tr('勾选要采集的进程并设置服务名称，保存后生效。', 'Select processes and name their services. Changes take effect after saving.')}</p>
-      <p className="text-xs text-text-muted">{draft.environment
-        ? tr(`默认环境：${draft.environment}（设备设置）`, `Default environment: ${draft.environment} (device setting)`)
-        : row.defaults?.cluster_name ? tr(`继承集群 ${row.defaults.cluster_name}：${row.defaults.environment || '未设置环境'}`, `Inherit from cluster ${row.defaults.cluster_name}: ${row.defaults.environment || 'no environment set'}`)
-        : tr('未归属集群，可为每个服务设置环境。', 'No cluster assigned. You can set an environment for each service.')}</p>
-      {optionsError && <p role="status" className="text-xs text-amber-600">{tr('已有属性加载失败，仍可手动输入。', 'Could not load saved values. You can still type new ones.')}</p>}
+  return <div className="space-y-4">
       {notice && <p role="status" className="text-sm text-text-muted">{notice}</p>}
       {fresh && health?.last_error && <p role="alert" className="text-sm text-red-500">{health.last_error}</p>}
       {fresh && health?.discovery_error && <p role="status" className="text-sm text-amber-600">{health.discovery_error}</p>}
       {pollError && <p role="alert" className="text-sm text-red-500">{pollError}</p>}
-      <Tabs value={view} onValueChange={setView} className="space-y-4">
-        <TabsList aria-label={tr('进程筛选', 'Process filter')}>
-          <TabsTrigger value="all">{tr('全部进程', 'All processes')}</TabsTrigger>
-          <TabsTrigger value="selected">{tr(`已选目标 (${targets.length})`, `Selected targets (${targets.length})`)}</TabsTrigger>
-          <TabsTrigger value="settings">{tr('采集设置', 'Capture settings')}</TabsTrigger>
-        </TabsList>
-      {view !== 'settings' && <TabsContent value={view} className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <Button className="order-2 sm:ml-auto" disabled={saving || targets.length >= 100} onClick={() => { add(); setView('selected'); setQuery(''); }}><Plus size={14} aria-hidden="true" />{tr('手动添加', 'Add manually')}</Button>
-      <div className="relative order-1 w-full sm:w-72"><Search size={14} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" /><Input type="search" className="w-full pl-9" aria-label={tr('搜索进程', 'Search processes')} placeholder={tr('搜索进程、端口或服务名称', 'Search process, port or service name')} value={query} onChange={e => setQuery(e.target.value)} /></div>
-      </div>
-      <div className="overflow-x-auto rounded-lg border border-border">
-        {!rows.length ? <EmptyState title={query ? tr('没有匹配的进程', 'No matching processes') : view === 'selected' ? tr('尚未选择采集目标', 'No targets selected') : tr('暂无发现结果', 'No discovery results yet')}
-          hint={query ? tr('尝试其他关键词。', 'Try another search.') : tr('可从发现结果中勾选，也可手动添加。空目标仅发现、不采集。', 'Select discovered processes or add a target manually. No targets means discovery only.')} />
-          : <table className="w-full min-w-[820px] table-fixed text-sm">
-            <thead className="bg-bg text-left text-xs text-text-muted"><tr className="border-b border-border">
-              <th className="w-10 px-3 py-2.5"><span className="sr-only">{tr('采集', 'Capture')}</span></th>
-              <th className="w-[29%] px-3 py-2.5 font-medium">{tr('进程 / 监听端口', 'Process / listening port')}</th>
-              <th className="px-3 py-2.5 font-medium">{tr('服务名称', 'Service name')}</th>
-              <th className="px-3 py-2.5 font-medium">{tr('服务命名空间', 'Service namespace')}</th>
-              <th className="px-3 py-2.5 font-medium">{tr('环境', 'Environment')}</th>
-            </tr></thead>
-            <tbody className="divide-y divide-border">{rows.map((target) => {
-              const selected = target.index >= 0;
-              const label = `${target.executable || tr('手动目标', 'Manual target')}:${target.port}`;
-              return <tr key={view === 'all' && target.executable ? label : `selected-${target.index}`} >
-                <td className="px-3 py-3 align-top"><Checkbox aria-label={tr(`采集 ${label}`, `Capture ${label}`)} checked={selected} disabled={saving || (!selected && targets.length >= 100)} onCheckedChange={checked => checked ? add(target.executable, target.port) : remove(target.index)} /></td>
-                <td className="px-3 py-3 align-top">{selected && view === 'selected' ? <div className="space-y-2">
-                  <Input aria-label={tr(`可执行文件路径 ${target.index + 1}`, `Executable path ${target.index + 1}`)} className="w-full font-mono" required disabled={saving} value={target.executable} onChange={e => patch(target.index, { executable: e.target.value })} />
-                  <Input aria-label={tr(`监听端口 ${target.index + 1}`, `Listening port ${target.index + 1}`)} className="w-28" type="number" required min={1} max={65535} disabled={saving} value={target.port} onChange={e => patch(target.index, { port: Number(e.target.value) })} />
-                </div> : <>
-                  <div className="flex items-center gap-2"><span className="truncate font-medium" title={target.executable}>{target.executable.split('/').pop()}</span><span className="text-xs tabular-nums text-text-muted">:{target.port}</span></div>
-                  <div className="mt-1 truncate font-mono text-xs text-text-muted" title={target.executable}>{target.executable}</div>
-                  <div className="mt-1 text-xs text-text-faint">{target.pid ? `PID ${target.pid}` : tr('已配置 · 当前未发现', 'Configured · not currently discovered')}</div>
-                </>}</td>
-                <td className="px-3 py-3 align-top">{selected ? <Input aria-label={tr(`服务名称 ${target.index + 1}`, `Service name ${target.index + 1}`)} className="w-full" required maxLength={256} disabled={saving} value={target.service_name} onChange={e => patch(target.index, { service_name: e.target.value })} /> : <span className="text-xs text-text-faint">{tr('勾选后配置', 'Select to configure')}</span>}</td>
-                <td className="px-3 py-3 align-top">{selected ? <Autocomplete options={namespaceOptions} aria-label={tr(`服务命名空间 ${target.index + 1}`, `Service namespace ${target.index + 1}`)} className="w-full" maxLength={256} disabled={saving} value={target.service_namespace ?? ''} placeholder={tr('选择或输入', 'Choose or type')} onValueChange={value => patch(target.index, { service_namespace: value })} /> : <span className="text-text-faint">—</span>}</td>
-                <td className="px-3 py-3 align-top">{selected ? <>
-                  <Autocomplete options={environmentOptions} aria-label={tr(`服务环境 ${target.index + 1}`, `Service environment ${target.index + 1}`)} className="w-full" maxLength={256} disabled={saving} value={target.environment ?? ''} placeholder={defaultEnvironment ? tr(`继承：${defaultEnvironment}`, `Inherit: ${defaultEnvironment}`) : tr('选择或输入', 'Choose or type')} onValueChange={value => patch(target.index, { environment: value })} />
-                  {target.environment ? <Button size="sm" variant="link" disabled={saving} onClick={() => patch(target.index, { environment: '' })}>{tr('恢复继承', 'Use default')}</Button> : <span className="mt-1 block text-xs text-text-faint">{defaultEnvironment ? tr('使用默认环境', 'Using default environment') : tr('未设置', 'Not set')}</span>}
-                </> : <span className="text-text-faint">—</span>}</td>
-              </tr>;
-            })}</tbody>
-          </table>}
-      </div>
-      <p className="text-xs text-text-muted">{tr('路径与端口共同匹配进程及其新实例；发现结果不保证协议受支持。', 'Path and port match processes, including new instances. Discovery does not guarantee protocol support.')}</p>
-      </TabsContent>}
-      <TabsContent value="settings">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div><Label htmlFor="autoapm-environment">{tr('设备默认环境（可选）', 'Device default environment (optional)')}</Label><Autocomplete options={environmentOptions} aria-label={tr('设备默认环境', 'Device default environment')} id="autoapm-environment" className="w-full" value={draft.environment ?? ''} maxLength={256} disabled={saving} placeholder={row.defaults?.environment ? tr(`继承集群：${row.defaults.environment}`, `Inherit cluster: ${row.defaults.environment}`) : tr('留空继承集群', 'Leave empty to inherit cluster')} onValueChange={value => setDraft({ ...draft, environment: value })} /><p className="mt-1 text-xs text-text-muted">{tr('留空继承集群；单个服务的环境设置优先。', 'Leave empty to inherit the cluster. Service settings take precedence.')}</p></div>
-          <div><Label htmlFor="autoapm-sampling">{tr('链路采样比例', 'Trace sampling ratio')}</Label><Input id="autoapm-sampling" className="w-full" type="number" min={0} max={1} step={0.01} required disabled={saving} value={sampleRatio ?? String(draft.sample_ratio ?? 0.1)} onChange={e => setSampleRatio(e.target.value)} /></div>
-          <label className="flex items-center gap-2 text-sm text-text-muted sm:col-span-2"><Checkbox checked={draft.tls_insecure_skip_verify ?? false} disabled={saving} onCheckedChange={checked => setDraft({ ...draft, tls_insecure_skip_verify: checked })} />{tr('允许自签名证书（跳过证书验证）', 'Allow self-signed certificates (skip verification)')}</label>
+      <Card className="!p-0 overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-4">
+          <div className="flex items-center gap-2"><h2 className="text-sm font-semibold text-text">{tr('采集目标', 'Capture targets')}</h2><Chip>{targets.length}</Chip></div>
+          <span className="text-xs text-text-muted">{tr('默认环境', 'Default environment')} · {defaultEnvironment || tr('未设置', 'Not set')}</span>
         </div>
-      </TabsContent>
-      </Tabs>
-      {error && <p role="alert" className="text-sm text-red-500">{error}</p>}
-    </form>
-  </Modal>;
+        {!targets.length ? <EmptyState icon={Terminal} className="flex flex-col items-center gap-2 px-6 py-10 text-center" title={tr('尚未配置采集目标', 'No capture targets configured')} hint={tr('从已发现的应用进程中选择，开始采集指标与链路。', 'Select a discovered application process to collect metrics and traces.')} /> : <div className="overflow-x-auto"><table className="og-resource-table min-w-[720px]" data-variant="quiet" aria-label={tr('已配置采集目标', 'Configured capture targets')}>
+          <thead><tr><th>{tr('服务 / 进程', 'Service / process')}</th><th>{tr('命名空间', 'Namespace')}</th><th>{tr('环境', 'Environment')}</th><th>{tr('文件日志', 'File logs')}</th><th className="text-right"><span className="sr-only">{tr('操作', 'Actions')}</span></th></tr></thead>
+          <tbody>{targets.map((target, index) => <tr key={`${target.executable}:${target.port}`}>
+            <td className="max-w-xs"><div className="truncate font-medium text-text" title={target.service_name}>{target.service_name}</div><div className="mt-1 flex items-start gap-2 font-mono text-xs text-text-muted"><span className="min-w-0 truncate" title={target.executable}>{target.executable}</span><span className="max-w-[45%] shrink-0 break-words">:{targetPorts(target)}</span></div></td>
+            <td className="max-w-40 truncate text-text-muted" title={target.service_namespace}>{target.service_namespace || '—'}</td>
+            <td className="max-w-40 truncate text-text-muted" title={target.environment || defaultEnvironment}>{target.environment || defaultEnvironment || '—'}</td>
+            <td className="max-w-56 text-xs text-text-muted">{target.log_path ? <span className="block truncate font-mono" title={target.log_path}>{target.log_path}</span> : tr('未配置', 'Not configured')}</td>
+            <td className="text-right"><Button size="sm" variant="subtle" disabled={!canEdit || !!editor || saving} aria-label={tr(`编辑 ${target.service_name}`, `Edit ${target.service_name}`)} onClick={() => begin(index)}><Pencil size={14} aria-hidden="true" />{tr('编辑', 'Edit')}</Button></td>
+          </tr>)}</tbody>
+        </table></div>}
+        {canEdit && <div className="flex items-center justify-between gap-3 px-4 py-3"><Button variant="subtle" disabled={!!editor || targets.length >= 100} onClick={() => begin(-1)}><Plus size={16} aria-hidden="true" />{tr('添加采集目标', 'Add capture target')}</Button><span className="text-xs tabular-nums text-text-faint">{targets.length} / 100</span></div>}
+      </Card>
+      {editor && <Modal open size="lg" title={editor.index < 0 ? tr('添加采集目标', 'Add capture target') : tr('编辑采集目标', 'Edit capture target')} onClose={() => { if (!saving) { setEditor(undefined); setError(''); } }} footer={<>
+        {editor.index >= 0 && <Button className="mr-auto" variant="dangerGhost" disabled={saving} onClick={() => void persist(targets.filter((_, index) => index !== editor.index))}><Trash2 size={14} aria-hidden="true" />{tr('移除目标', 'Remove target')}</Button>}
+        <Button disabled={saving} onClick={() => { setEditor(undefined); setError(''); }}>{tr('取消', 'Cancel')}</Button><Button form={`autoapm-${edgeId}`} type="submit" variant="primary" disabled={saving || (editor.index < 0 && !selectedCandidate)}>{saving ? tr('保存中…', 'Saving…') : tr('保存目标', 'Save target')}</Button>
+      </>}><form id={`autoapm-${edgeId}`} className="space-y-5" onSubmit={event => { event.preventDefault(); save(); }}>
+        <p className="text-xs text-text-muted">{deviceName}</p>
+        {editor.index < 0 && <div className="space-y-3">
+          <div className="flex items-center justify-between gap-3"><h3 className="text-sm font-medium text-text">{tr('选择进程', 'Select a process')}</h3><Button size="sm" variant="subtle" disabled={saving} onClick={() => setRefresh(value => value + 1)}><RefreshCw size={14} aria-hidden="true" />{tr('刷新发现结果', 'Refresh discovery')}</Button></div>
+          <div className="relative"><Search size={14} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" /><Input autoFocus type="search" className="w-full pl-9" aria-label={tr('搜索发现的进程', 'Search discovered processes')} placeholder={tr('搜索进程或端口', 'Search process or port')} value={query} onChange={event => setQuery(event.target.value)} /></div>
+          <div className="max-h-56 overflow-auto rounded-lg border border-border">
+            {!fresh ? <EmptyState className="flex flex-col items-center gap-2 px-5 py-8 text-center" title={tr('等待设备上报发现结果', 'Waiting for discovery results')} hint={tr('设备在线并上报后，即可选择要采集的进程。', 'Select a process after the device connects and reports its inventory.')} />
+              : !availableCandidates.length ? <EmptyState className="flex flex-col items-center gap-2 px-5 py-8 text-center" title={query ? tr('没有匹配的进程', 'No matching processes') : tr('暂无可添加的进程', 'No processes available to add')} hint={query ? tr('尝试其他进程名称或端口。', 'Try another process name or port.') : tr('已配置的进程不会重复显示，新发现的应用进程会自动出现在这里。', 'Configured processes are excluded. Newly discovered application processes appear here automatically.')} />
+              : <div role="radiogroup" aria-label={tr('发现的进程', 'Discovered processes')}>{availableCandidates.map(candidate => <label className="og-choice-row" key={`${candidate.executable}:${candidate.pid}:${candidate.ports[0]}`}>
+                <Radio name="capture-process" aria-label={tr(`选择 ${candidate.executable}:${candidate.ports.join(', ')}`, `Select ${candidate.executable}:${candidate.ports.join(', ')}`)} disabled={saving} checked={matchesProcess(editor.target, candidate)} onChange={() => patch({ executable: candidate.executable, port: candidate.ports[0], service_name: candidate.executable.split('/').pop() ?? '' })} />
+                <span className="min-w-0 flex-1"><span className="flex flex-wrap items-baseline gap-2"><span className="font-medium text-text">{candidate.executable.split('/').pop()}</span>{candidate.pid > 0 && <span className="font-mono text-xs text-text-faint">PID {candidate.pid}</span>}</span><span className="mt-0.5 block break-all font-mono text-xs text-text-muted">{candidate.executable}</span></span><span className="max-w-[40%] break-words text-right font-mono text-xs text-text-muted">:{candidate.ports.join(', ')}</span>
+              </label>)}</div>}
+
+          </div>
+          {pollError && <p role="alert" className="text-sm text-red-500">{pollError}</p>}
+          {health?.discovery_error && <p role="status" className="text-sm text-amber-600">{health.discovery_error}</p>}
+        </div>}
+        {editor.target.executable && <div className="space-y-4 border-t border-border pt-4">
+        <div><h3 className="text-sm font-medium text-text">{tr('服务信息', 'Service details')}</h3><p className="mt-1 flex items-start gap-1.5 break-all text-xs text-text-muted"><Check size={13} aria-hidden="true" className="mt-0.5 shrink-0" /><span className="font-mono">{editor.target.executable}:{targetPorts(editor.target)}</span></p></div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-1.5 sm:col-span-2"><Label htmlFor="autoapm-name">{tr('服务名称', 'Service name')}</Label><Input autoFocus={editor.index >= 0} id="autoapm-name" className="w-full" required maxLength={256} disabled={saving} value={editor.target.service_name} onChange={e => patch({ service_name: e.target.value })} /></div>
+          <div className="space-y-1.5"><Label htmlFor="autoapm-namespace">{tr('服务命名空间', 'Service namespace')}</Label><Autocomplete id="autoapm-namespace" aria-label={tr('服务命名空间', 'Service namespace')} options={namespaceOptions} className="w-full" maxLength={256} disabled={saving} value={editor.target.service_namespace ?? ''} placeholder={tr('选择或输入', 'Choose or type')} onValueChange={value => patch({ service_namespace: value })} /></div>
+          <div className="space-y-1.5"><Label htmlFor="autoapm-environment">{tr('服务环境', 'Service environment')}</Label><Autocomplete id="autoapm-environment" aria-label={tr('服务环境', 'Service environment')} options={environmentOptions} className="w-full" maxLength={256} disabled={saving} value={editor.target.environment ?? ''} placeholder={defaultEnvironment ? tr(`继承：${defaultEnvironment}`, `Inherit: ${defaultEnvironment}`) : tr('选择或输入', 'Choose or type')} onValueChange={value => patch({ environment: value })} />{editor.target.environment && <Button size="sm" variant="link" disabled={saving} onClick={() => patch({ environment: '' })}>{tr('恢复继承', 'Use default')}</Button>}</div>
+          <div className="space-y-1.5 border-t border-border pt-4 sm:col-span-2"><Label htmlFor="autoapm-log"><FileText size={13} aria-hidden="true" className="mr-1.5 inline" />{tr('日志路径（可选）', 'Log path (optional)')}</Label><Input id="autoapm-log" className="w-full font-mono" maxLength={4096} disabled={saving} value={editor.target.log_path ?? ''} placeholder="/var/log/orders/*.log" onChange={e => patch({ log_path: e.target.value })} /><p className="text-xs text-text-muted">{tr('支持绝对路径和通配符，留空不采集该服务的文件日志。', 'Use an absolute path or glob. Leave empty to skip service file logs.')}</p></div>
+        </div>
+        </div>}
+        {optionsError && <p role="status" className="text-xs text-amber-600">{tr('已有属性加载失败，仍可手动输入。', 'Could not load saved values. You can still type new ones.')}</p>}
+        {error && <p role="alert" className="text-sm text-red-500">{error}</p>}
+      </form></Modal>}
+      {saved && <p role="status" className="text-xs text-text-muted">{tr('已保存，配置通常在 60 秒内生效。', 'Saved. Settings normally apply within 60 seconds.')}</p>}
+  </div>;
 }

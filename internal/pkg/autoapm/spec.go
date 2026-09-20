@@ -21,12 +21,14 @@ type Target struct {
 	ServiceName      string `json:"service_name"`
 	ServiceNamespace string `json:"service_namespace,omitempty"`
 	Environment      string `json:"environment,omitempty"`
+	LogPath          string `json:"log_path,omitempty"`
 }
 type KubernetesRule struct {
 	Namespace    string `json:"namespace"`
 	WorkloadKind string `json:"workload_kind,omitempty"`
 	WorkloadName string `json:"workload_name,omitempty"`
-	Container    string `json:"container,omitempty"`
+	// Deprecated: accepted from old saved configs and cleared by Parse.
+	Container string `json:"container,omitempty"`
 }
 type Kubernetes struct {
 	Rules []KubernetesRule `json:"rules"`
@@ -73,12 +75,23 @@ func Parse(raw map[string]interface{}) (Spec, error) {
 	}
 	seen := map[string]bool{}
 	identities := map[[2]string]string{}
+	logPaths := map[string][3]string{}
 	for i, t := range s.Targets {
 		if !strings.HasPrefix(t.Executable, "/") || path.Clean(t.Executable) != t.Executable || len(t.Executable) > 4096 || strings.ContainsAny(t.Executable, "\x00\r\n$") || t.Port == 0 {
 			return s, fmt.Errorf("auto APM: target %d requires an absolute executable path and port 1..65535", i+1)
 		}
 		if strings.TrimSpace(t.ServiceName) == "" || !validText(t.ServiceName) || !validText(t.ServiceNamespace) || !validText(t.Environment) {
 			return s, fmt.Errorf("auto APM: target %d has invalid service identity", i+1)
+		}
+		if t.LogPath != "" {
+			if !path.IsAbs(t.LogPath) || len(t.LogPath) > 4096 || strings.Contains(t.LogPath, "..") || strings.ContainsAny(t.LogPath, "\x00\r\n$") || t.LogPath != strings.TrimSpace(t.LogPath) {
+				return s, fmt.Errorf("auto APM: target %d requires an absolute log path without traversal", i+1)
+			}
+			identity := [3]string{t.ServiceName, t.ServiceNamespace, t.Environment}
+			if previous, ok := logPaths[t.LogPath]; ok && previous != identity {
+				return s, fmt.Errorf("auto APM: one log path cannot belong to different services")
+			}
+			logPaths[t.LogPath] = identity
 		}
 		if Excluded(t.Executable) {
 			return s, fmt.Errorf("auto APM: target %d is an observability/system component", i+1)
@@ -104,14 +117,12 @@ func Parse(raw map[string]interface{}) (Spec, error) {
 			return s, fmt.Errorf("auto APM: at most %d Kubernetes rules", MaxTargets)
 		}
 		for i, r := range s.Kubernetes.Rules {
+			// Selected namespaces/workloads always include all containers, including legacy configs.
+			s.Kubernetes.Rules[i].Container = ""
 			if !kubeName(r.Namespace, 63) || (r.WorkloadKind == "") != (r.WorkloadName == "") ||
 				(r.WorkloadKind != "" && WorkloadAttribute(r.WorkloadKind) == "") ||
-				(r.WorkloadName != "" && !kubeName(r.WorkloadName, 253)) ||
-				(r.Container != "" && !kubeName(r.Container, 63)) {
+				(r.WorkloadName != "" && !kubeName(r.WorkloadName, 253)) {
 				return s, fmt.Errorf("auto APM: invalid Kubernetes rule %d", i+1)
-			}
-			if r.WorkloadName == "" && r.Container != "" {
-				return s, fmt.Errorf("auto APM: namespace-wide rules cannot select a container")
 			}
 			for _, previous := range s.Kubernetes.Rules[:i] {
 				if r.Namespace == previous.Namespace && (r.WorkloadName == "" || previous.WorkloadName == "" || (r.WorkloadKind == previous.WorkloadKind && r.WorkloadName == previous.WorkloadName)) {

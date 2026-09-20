@@ -7,6 +7,7 @@ export type Device = {
   name: string;
   hostname?: string;
   description?: string;
+  environment?: string;
   ip_address?: string;
   os?: string;
   os_version?: string;
@@ -84,11 +85,11 @@ export type NetworkInterface = {
   description?: string;
   admin_status?: string;
   oper_status?: string;
-	 speed_bps?: number;
-	 in_octets?: number;
-	 out_octets?: number;
-	 in_errors?: number;
-	 out_errors?: number;
+  speed_bps?: number;
+  in_octets?: number;
+  out_octets?: number;
+  in_errors?: number;
+  out_errors?: number;
   addresses?: string[];
 };
 
@@ -114,12 +115,12 @@ export type NetworkDeviceDetail = {
   bridge_base_mac?: string;
   reachability_status: string;
   last_reachable_at?: string;
-	 poll_enabled?: boolean;
-	 poll_interval_seconds?: number;
-	 poll_credential_name?: string;
-	 poll_port?: number;
-	 last_poll_at?: string;
-	 last_poll_error?: string;
+  poll_enabled?: boolean;
+  poll_interval_seconds?: number;
+  poll_credential_name?: string;
+  poll_port?: number;
+  last_poll_at?: string;
+  last_poll_error?: string;
   discovery_source?: string;
   scanner_edge_id?: number;
   scanner_edge_name?: string;
@@ -198,4 +199,20 @@ export function listDeviceEdges(id: string | number) {
     'GET',
     `/devices/${encodeURIComponent(String(id))}/edges`,
   );
+}
+
+export type DeviceEnvironment = {
+  environment: string;
+  effective_environment: string;
+  inherited_environment: string;
+  cluster_name: string;
+  source: 'device' | 'cluster' | 'unset';
+};
+
+export function getDeviceEnvironment(id: number) {
+  return request<{ data: DeviceEnvironment }>('GET', `/devices/${id}/environment`).then(r => r.data);
+}
+
+export function setDeviceEnvironment(id: number, environment: string) {
+  return request<{ data: DeviceEnvironment }>('PUT', `/devices/${id}/environment`, { environment }).then(r => r.data);
 }

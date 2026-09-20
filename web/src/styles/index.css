@@ -4,6 +4,23 @@
 
 /* shadcn/ui selection controls, adapted to Ongrid's RGB theme tokens. */
 @layer components {
+  /* Resource inventories and capture pickers share density and selection states. */
+  .og-resource-table { @apply relative w-full text-left text-sm; }
+  .og-resource-table thead { @apply border-b border-border bg-bg text-xs text-text-muted; }
+  .og-resource-table th { @apply px-4 py-3 font-medium; }
+  .og-resource-table td { @apply px-4 py-4 align-middle; }
+  .og-resource-table tbody tr { @apply border-b border-border last:border-0; }
+  .og-resource-table tbody tr:hover { background-color: rgb(var(--text) / .025); }
+  .og-resource-table[data-variant="quiet"] thead { background: transparent; border-bottom: 0; }
+  .og-resource-table[data-variant="quiet"] tbody tr { border-color: rgb(var(--border) / .5); }
+  .og-resource-link { @apply font-medium text-text underline-offset-4 hover:underline focus-visible:underline; }
+  .og-choice-row { @apply flex min-w-0 cursor-pointer items-center gap-3 border-b border-border px-4 py-3 text-sm last:border-0; }
+  .og-choice-row:hover { background-color: rgb(var(--text) / .035); }
+  .og-choice-row:has(input:checked) { @apply bg-indigo-500/10; }
+  .og-choice-row:has(input:focus-visible) { @apply outline outline-2 -outline-offset-2 outline-indigo-500; }
+  .og-choice-row:has(input:disabled) { @apply cursor-not-allowed text-text-muted; }
+  .og-choice-row:has(input:disabled):hover { background-color: transparent; }
+
   .og-select-trigger {
     @apply inline-flex h-9 w-auto min-w-0 items-center justify-between gap-2 rounded-md border border-border bg-card px-2.5 text-xs text-text shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50;
   }

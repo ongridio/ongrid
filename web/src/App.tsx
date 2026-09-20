@@ -12,6 +12,7 @@ const DeviceShellPage = lazy(() => import('@/pages/DeviceShell'));
 const DashboardPage = lazy(() => import('@/pages/Dashboard'));
 const MonitorPage = lazy(() => import('@/pages/Monitor'));
 const LogsPage = lazy(() => import('@/pages/Logs'));
+const ApmCapturePage = lazy(() => import('@/pages/ApmCapture'));
 const ApmPage = lazy(() => import('@/pages/Apm'));
 const TracesPage = lazy(() => import('@/pages/Traces'));
 const KubernetesClusterDetailPage = lazy(() =>
@@ -117,6 +118,7 @@ export default function App() {
         <Route path="/monitor" element={<MonitorPage />} />
         <Route path="/logs" element={<LogsPage />} />
         <Route path="/apm" element={<ApmPage />} />
+        <Route path="/apm/capture/:kind/:id" element={<ApmCapturePage />} />
         <Route path="/apm/service" element={<ApmPage />} />
         <Route path="/traces" element={<TracesPage />} />
         <Route path="/traces/:traceId" element={<TracesPage />} />

@@ -65,6 +65,15 @@ func (d *fakeDeviceRepo) GetMany(_ context.Context, ids []uint64) (map[uint64]*d
 }
 func (d *fakeDeviceRepo) UpdateUsage(context.Context, uint64, devicebiz.Usage) error { return nil }
 func (d *fakeDeviceRepo) UpdateRoles(context.Context, uint64, uint8) error           { return nil }
+func (d *fakeDeviceRepo) UpdateEnvironment(_ context.Context, id uint64, value string) error {
+	dev, ok := d.byID[id]
+	if !ok {
+		return errs.ErrNotFound
+	}
+	dev.Environment = &value
+	return nil
+}
+
 func (d *fakeDeviceRepo) UpdateNameDescription(context.Context, uint64, string, string) error {
 	return nil
 }

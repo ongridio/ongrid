@@ -43,6 +43,9 @@ type Device struct {
 	// detail page without affecting the Edge agent's name.
 	Name        string `gorm:"size:255;not null;default:''"`
 	Description string `gorm:"size:255;not null;default:''"`
+	// Environment is an operator override; empty inherits the cluster default.
+	// NULL also allows a one-time import of legacy Edge APM settings.
+	Environment *string `gorm:"column:environment;type:varchar(256)"`
 
 	Hostname      string `gorm:"size:255;not null"`
 	OS            string `gorm:"size:64;not null"`

@@ -65,6 +65,7 @@ type Repo interface {
 
 	// UpdateNameDescription updates operator-editable display fields.
 	UpdateNameDescription(ctx context.Context, id uint64, name, description string) error
+	UpdateEnvironment(ctx context.Context, id uint64, environment string) error
 
 	// SetNodeID writes Device.NodeID — the link to the topology
 	// `nodes` table. Called from the edge register flow (via NodeMirror)

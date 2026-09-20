@@ -25,6 +25,7 @@ require (
 	github.com/prometheus/client_model v0.6.1
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/sashabaranov/go-openai v1.41.2
+	github.com/prometheus/procfs v0.15.1
 	github.com/shirou/gopsutil/v3 v3.23.6
 	github.com/singchia/geminio v1.3.0-rc.2
 	github.com/testcontainers/testcontainers-go/modules/mysql v0.42.0
@@ -169,7 +170,6 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/prometheus/common v0.59.1
-	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/singchia/frontier v1.2.4
 	github.com/singchia/go-timer/v2 v2.2.2 // indirect

@@ -123,8 +123,10 @@ func TestTunnelConfigFetcherAppliesKubernetesLogsDefaults(t *testing.T) {
 	assertSpecEqual(t, cfg.Spec, "mode", "kubernetes")
 	assertSpecEqual(t, cfg.Spec, "cluster_id", "9")
 	assertSpecEqual(t, cfg.Spec, "node_name", "kind-worker")
-	assertSpecEqual(t, cfg.Spec, "pod_log_path", "/var/log/pods/*/*/*.log")
-	assertSpecEqual(t, cfg.Spec, "enable_journald", false)
+	if !cfg.Enabled {
+		t.Fatal("missing container selection stopped node journal")
+	}
+	assertSpecEqual(t, cfg.Spec, "enable_journald", true)
 	assertSpecEqual(t, cfg.Spec, "enable_k8sattributes", false)
 }
 
@@ -439,7 +441,7 @@ func TestTunnelConfigFetcherKeepsReachableLogsEndpoint(t *testing.T) {
 	}
 }
 
-func TestTunnelConfigFetcherDoesNotOverrideExplicitHostLogsMode(t *testing.T) {
+func TestTunnelConfigFetcherRejectsHostLogsOverrideOnKubernetesNode(t *testing.T) {
 	t.Setenv("ONGRID_K8S_ROLE", "node")
 	t.Setenv("ONGRID_K8S_MODE", "full-node")
 	t.Setenv("ONGRID_K8S_CLUSTER_ID", "9")
@@ -465,9 +467,9 @@ func TestTunnelConfigFetcherDoesNotOverrideExplicitHostLogsMode(t *testing.T) {
 	if cfg.Endpoint != "https://manager.example.com/loki/api/v1/push" {
 		t.Fatalf("Endpoint = %q", cfg.Endpoint)
 	}
-	assertSpecEqual(t, cfg.Spec, "mode", "host")
-	if _, ok := cfg.Spec["cluster_id"]; ok {
-		t.Fatalf("cluster_id should not be injected when mode=host: %#v", cfg.Spec)
+	assertSpecEqual(t, cfg.Spec, "mode", "kubernetes")
+	if !cfg.Enabled || cfg.Spec["pod_log_paths"] != nil {
+		t.Fatal("system logs stopped or container scope widened")
 	}
 }
 
@@ -489,8 +491,8 @@ func TestTunnelConfigFetcherAppliesKubernetesDefaultsToEnvFallback(t *testing.T)
 		t.Fatalf("Fetch: %v", err)
 	}
 	cfg := got["logs"]
-	if !cfg.Enabled {
-		t.Fatalf("logs fallback config should remain enabled")
+	if !cfg.Enabled || cfg.Spec["pod_log_paths"] != nil {
+		t.Fatal("fallback must keep system logs without enabling container logs")
 	}
 	if cfg.EdgeID != 0 {
 		t.Fatalf("fallback device label = %d, want unresolved 0", cfg.EdgeID)
@@ -940,5 +942,42 @@ func TestHostApplicationMetricsDefaults(t *testing.T) {
 		if out["metrics"].Spec["application_metrics_url"] != nil {
 			t.Fatalf("overrode disabled/custom/Kubernetes config %+v", tc)
 		}
+	}
+}
+
+func TestKubernetesLogSelectionRefreshAndOfflineCache(t *testing.T) {
+	t.Setenv("ONGRID_K8S_ROLE", "node")
+	t.Setenv("ONGRID_K8S_MODE", "full-node")
+	t.Setenv("ONGRID_K8S_POD_NAMESPACE", "custom")
+	t.Setenv("ONGRID_K8S_POD_NAME", "custom-edge-node-x")
+	client := &fakeTunnelClient{resp: tunnel.GetPluginConfigsResponse{EdgeID: 42, Configs: map[string]tunnel.GetPluginConfigsEntry{
+		"logs": {Enabled: true, Spec: map[string]interface{}{"pod_log_paths": []interface{}{"/var/log/pods/shop_*_*/*/*.log"}}},
+	}}}
+	fetcher := NewTunnelConfigFetcher(client, []string{"logs"})
+	cfg, err := fetcher.Fetch(context.Background())
+	if err != nil || !cfg["logs"].Enabled {
+		t.Fatalf("selected: %v %v", cfg, err)
+	}
+	assertSpecEqual(t, cfg["logs"].Spec, "pod_log_self_exclude", "/var/log/pods/custom_custom-edge-node-x_*/*/*.log")
+	client.err = errors.New("offline")
+	cfg, err = fetcher.Fetch(context.Background())
+	if err != nil || !cfg["logs"].Enabled || cfg["logs"].Spec["pod_log_paths"] == nil {
+		t.Fatal("offline cache lost scope")
+	}
+	client.err = nil
+	client.resp.Configs["logs"] = tunnel.GetPluginConfigsEntry{Enabled: true}
+	cfg, err = fetcher.Fetch(context.Background())
+	if err != nil || !cfg["logs"].Enabled || cfg["logs"].Spec["pod_log_paths"] != nil || cfg["logs"].Spec["enable_journald"] != true {
+		t.Fatal("clearing scope stopped journal or retained container selection")
+	}
+	client.resp.Configs["logs"] = tunnel.GetPluginConfigsEntry{Enabled: false}
+	cfg, err = fetcher.Fetch(context.Background())
+	if err != nil || cfg["logs"].Enabled {
+		t.Fatal("revocation did not stop logs")
+	}
+	client.err = errors.New("offline")
+	cfg, err = fetcher.Fetch(context.Background())
+	if err != nil || cfg["logs"].Enabled {
+		t.Fatal("offline fallback resurrected removed scope")
 	}
 }

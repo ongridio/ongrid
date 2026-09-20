@@ -36,9 +36,8 @@ func (uc *PluginConfigUC) AutoAPMOptions(ctx context.Context) (*AutoAPMOptions, 
 		}
 		environments[spec.Environment] = true
 		if spec.Kubernetes != nil {
-			for _, rule := range spec.Kubernetes.Rules {
-				namespaces[rule.Namespace] = true
-			}
+			// Kubernetes uses its own namespace inventory, not host service suggestions.
+			continue
 		}
 		for _, target := range spec.Targets {
 			environments[target.Environment] = true

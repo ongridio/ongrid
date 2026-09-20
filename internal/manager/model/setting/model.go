@@ -63,7 +63,7 @@ const (
 	// network-discovery reports from Edges. Unset defaults to enabled so a new
 	// installation discovers candidates without an additional configuration step.
 	KeyNetworkDiscoveryEnabled = "network_discovery_enabled"
-	// KeyAutoAPMEnabled gates discovery and selected capture on every Edge.
+	// KeyAutoAPMEnabled is a legacy setting, retained for API compatibility only.
 	KeyAutoAPMEnabled = "auto_apm_enabled"
 )
 

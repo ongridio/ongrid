@@ -184,6 +184,18 @@ func (r *Repo) UpdateNameDescription(ctx context.Context, id uint64, name, descr
 	return nil
 }
 
+func (r *Repo) UpdateEnvironment(ctx context.Context, id uint64, environment string) error {
+	res := r.db.WithContext(ctx).Model(&model.Device{}).Where("id = ?", id).Update("environment", environment)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		_, err := r.Get(ctx, id)
+		return err
+	}
+	return nil
+}
+
 // MarkOnline flips online=true and bumps last_seen_at.
 func (r *Repo) MarkOnline(ctx context.Context, id uint64) error {
 	now := time.Now().UTC()

@@ -481,6 +481,116 @@ export default function ApmPage() {
     {resourceError && <span role="status" className="text-xs text-amber-500">{tr('部分筛选选项加载失败，请刷新重试', 'Some filter options failed to load; refresh to retry')}</span>}
   </>;
 
+  const timeControls = (
+    (detail || !['discovery', 'onboarding'].includes(tab)) && <>
+      <span role="status" className="text-xs text-zinc-500">
+        {loading
+          ? tr('正在更新…', 'Updating…')
+          : current?.updated
+            ? tr(
+                `更新于 ${new Date(current.updated).toLocaleTimeString()}`,
+                `Updated ${new Date(current.updated).toLocaleTimeString()}`,
+              )
+            : ''}
+      </span>
+      <TimeRangePicker
+        value={{ range: period, start: params.get('start') || undefined, end: params.get('end') || undefined }}
+        presets={periods.map(([value, durationMs, zh, en]) => ({ value, durationMs, label: tr(zh, en) }))}
+        minDurationMs={60000}
+        onChange={(selection) => {
+          const next = new URLSearchParams(params);
+          for (const [key, value] of Object.entries(selection)) next.set(key, value);
+          for (const page of ['page', 'http_page', 'rpc_page']) next.delete(page);
+          setParams(next, { state: location.state });
+        }}
+      />
+      <Button
+        className="h-9"
+        onClick={() => (period === 'custom' ? setRefresh((v) => v + 1) : pickPeriod(period))}
+        disabled={loading}
+      >
+        <RefreshCw size={13} />
+        {tr('刷新', 'Refresh')}
+      </Button>
+    </>
+  );
+  const scopeFilters = (
+    detail ? (
+      <div className="flex flex-wrap items-center gap-3">
+        {resourceFilters}
+        {tab !== 'compare' && <>
+        <FilterField label={tr('版本', 'Version')}>
+          <Select aria-label={tr('版本', 'Version')} className="w-44" value={params.get('service_version') || ''}
+            onValueChange={(value) => set('service_version', value || null)}
+            options={[{value: '', label: tr('全部版本', 'All versions')}, ...versions.map((value) => ({value, label: value}))]} />
+        </FilterField>
+        <FilterField label={tr('实例', 'Instance')}>
+          <Select aria-label={tr('实例', 'Instance')} className="w-56" value={params.get('instance_id') || ''}
+            onValueChange={(value) => set('instance_id', value || null)}
+            options={[{value: '', label: tr('全部实例', 'All instances')}, ...instanceOptions.map((value) => ({value, label: value}))]} />
+        </FilterField>
+        <span className="text-xs text-zinc-500">{tr('请求指标与资源指标使用相同筛选', 'Requests and resources share these filters')}</span>
+        </>}
+      </div>
+    ) :
+    !detail && ['services', 'map'].includes(tab) && (
+      <div className="flex flex-wrap items-center gap-3">
+        {tab !== 'map' && resourceFilters}
+        {!detail && ['services', 'map'].includes(tab) && (
+          <>
+            {(
+              [
+                ['environment', tr('全部环境', 'All environments'), available?.environments],
+                [
+                  'service_namespace',
+                  tr('全部命名空间', 'All namespaces'),
+                  available?.service_namespaces,
+                ],
+              ] as const
+            ).map(([key, label, options]) => (
+              <FilterField key={key} label={key === 'environment' ? tr('环境', 'Environment') : tr('业务命名空间', 'Service namespace')} className="max-w-sm">
+                <Select
+                  key={key}
+                  aria-label={
+                    key === 'environment'
+                      ? tr('环境', 'Environment')
+                      : tr('业务命名空间', 'Service namespace')
+                  }
+                  className="h-9 w-auto max-w-52"
+                  value={params.get(key) || ''}
+                  onValueChange={(selectedValue) => set(key, selectedValue || null)}
+                >
+                  <option value="">{label}</option>
+                  {[
+                    ...new Set([
+                      ...(options || []),
+                      ...(params.has(key) ? [params.get(key)!] : []),
+                    ]),
+                  ]
+                    .filter(Boolean)
+                    .map((value) => (
+                      <option key={value} value={value}>
+                        {value}
+                      </option>
+                    ))}
+                </Select>
+              </FilterField>
+            ))}
+
+            <div className="w-full sm:max-w-sm sm:flex-1" hidden={tab === 'map'}>
+              <SearchInput
+                value={params.get('search') || ''}
+                onChange={changeSearch}
+                label={tr('搜索服务名称…', 'Search services…')}
+              />
+            </div>
+          </>
+        )}
+
+      </div>
+    )
+  );
+
   return (
     <Tabs value={operation && ['overview', 'operations'].includes(tab) ? 'operations' : tab} className="contents"><div className="apm-page flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <PageHeader
@@ -506,116 +616,7 @@ export default function ApmPage() {
                 'Explore service requests, traces, logs and instances',
               )
         }
-        className="!py-3 [&>div:first-child]:flex-wrap [&>div:first-child>div:last-child]:shrink [&_h1]:break-all"
-        actions={
-          (detail || !['discovery', 'onboarding'].includes(tab)) && <>
-            <span role="status" className="text-xs text-zinc-500">
-              {loading
-                ? tr('正在更新…', 'Updating…')
-                : current?.updated
-                  ? tr(
-                      `更新于 ${new Date(current.updated).toLocaleTimeString()}`,
-                      `Updated ${new Date(current.updated).toLocaleTimeString()}`,
-                    )
-                  : ''}
-            </span>
-            <TimeRangePicker
-              value={{ range: period, start: params.get('start') || undefined, end: params.get('end') || undefined }}
-              presets={periods.map(([value, durationMs, zh, en]) => ({ value, durationMs, label: tr(zh, en) }))}
-              minDurationMs={60000}
-              onChange={(selection) => {
-                const next = new URLSearchParams(params);
-                for (const [key, value] of Object.entries(selection)) next.set(key, value);
-                for (const page of ['page', 'http_page', 'rpc_page']) next.delete(page);
-                setParams(next, { state: location.state });
-              }}
-            />
-            <Button
-              className="h-9"
-              onClick={() => (period === 'custom' ? setRefresh((v) => v + 1) : pickPeriod(period))}
-              disabled={loading}
-            >
-              <RefreshCw size={13} />
-              {tr('刷新', 'Refresh')}
-            </Button>
-          </>
-        }
-        extra={
-          detail ? (
-            <div className="flex flex-wrap items-center gap-3">
-              {resourceFilters}
-              {tab !== 'compare' && <>
-              <FilterField label={tr('版本', 'Version')}>
-                <Select aria-label={tr('版本', 'Version')} className="w-44" value={params.get('service_version') || ''}
-                  onValueChange={(value) => set('service_version', value || null)}
-                  options={[{value: '', label: tr('全部版本', 'All versions')}, ...versions.map((value) => ({value, label: value}))]} />
-              </FilterField>
-              <FilterField label={tr('实例', 'Instance')}>
-                <Select aria-label={tr('实例', 'Instance')} className="w-56" value={params.get('instance_id') || ''}
-                  onValueChange={(value) => set('instance_id', value || null)}
-                  options={[{value: '', label: tr('全部实例', 'All instances')}, ...instanceOptions.map((value) => ({value, label: value}))]} />
-              </FilterField>
-              <span className="text-xs text-zinc-500">{tr('请求指标与资源指标使用相同筛选', 'Requests and resources share these filters')}</span>
-              </>}
-            </div>
-          ) :
-          !detail && ['services', 'map'].includes(tab) && (
-            <div className="flex flex-wrap items-center gap-3">
-              {tab !== 'map' && resourceFilters}
-              {!detail && ['services', 'map'].includes(tab) && (
-                <>
-                  {(
-                    [
-                      ['environment', tr('全部环境', 'All environments'), available?.environments],
-                      [
-                        'service_namespace',
-                        tr('全部命名空间', 'All namespaces'),
-                        available?.service_namespaces,
-                      ],
-                    ] as const
-                  ).map(([key, label, options]) => (
-                    <FilterField key={key} label={key === 'environment' ? tr('环境', 'Environment') : tr('业务命名空间', 'Service namespace')} className="max-w-sm">
-                      <Select
-                        key={key}
-                        aria-label={
-                          key === 'environment'
-                            ? tr('环境', 'Environment')
-                            : tr('业务命名空间', 'Service namespace')
-                        }
-                        className="h-9 w-auto max-w-52"
-                        value={params.get(key) || ''}
-                        onValueChange={(selectedValue) => set(key, selectedValue || null)}
-                      >
-                        <option value="">{label}</option>
-                        {[
-                          ...new Set([
-                            ...(options || []),
-                            ...(params.has(key) ? [params.get(key)!] : []),
-                          ]),
-                        ]
-                          .filter(Boolean)
-                          .map((value) => (
-                            <option key={value} value={value}>
-                              {value}
-                            </option>
-                          ))}
-                      </Select>
-                    </FilterField>
-                  ))}
-
-                  <div className="w-full sm:max-w-sm sm:flex-1" hidden={tab === 'map'}>
-                    <SearchInput
-                      value={params.get('search') || ''}
-                      onChange={changeSearch}
-                      label={tr('搜索服务名称…', 'Search services…')}
-                    />
-                  </div>
-                </>
-              )}
-
-            </div>
-          )
-        }
+        className="!py-3 shrink-0 [&_h1]:break-all"
       />
       {!detail && <TabsList activateOnFocus={false} aria-label={tr('服务视图', 'Service views')} className="shrink-0 border-b border-zinc-800 px-6">
         {[['services', tr('服务列表', 'Service list')], ['map', tr('服务地图', 'Service map')], ['discovery', tr('服务发现', 'Service discovery')], ['onboarding', tr('接入指南', 'Setup guide')]].map(([value, label]) => <TabsTrigger key={value} value={value} onClick={() => set('tab', value)}>{label}</TabsTrigger>)}
@@ -643,7 +644,13 @@ export default function ApmPage() {
         </TabsList>
       )}
       <TabsContent value={operation && ['overview', 'operations'].includes(tab) ? 'operations' : tab} className="contents"><main ref={main} className="flex-1 space-y-3 overflow-auto px-6 py-4">
-        {!detail && tab === 'discovery' && <AutoAPMManagement canEdit={isAdmin} initialEdgeId={params.get('capture_edge_id')} />}
+        {(scopeFilters || timeControls) && (
+          <div role="group" aria-label={tr('当前视图筛选', 'Current view filters')} className="flex flex-wrap items-center justify-between gap-3">
+            {scopeFilters}
+            <div className="ml-auto flex flex-wrap items-center gap-2">{timeControls}</div>
+          </div>
+        )}
+        {!detail && tab === 'discovery' && <AutoAPMManagement canEdit={isAdmin} initialEdgeId={params.get('capture_edge_id')} initialScope={params.get('discovery_scope')} />}
         {!detail && tab === 'map' && (scopedReplica ? <EmptyState title={tr('服务地图按服务汇总', 'The service map is service-wide')}
           hint={tr('请清除设备、集群、版本和实例筛选后查看。', 'Clear device, cluster, version and instance filters to view the map.')}
           action={<Button onClick={() => { const next = new URLSearchParams(params); for (const key of ['device_id', 'cluster_id', 'cluster_node_id', 'service_version', 'instance_id']) next.delete(key); setParams(next); }}>{tr('清除不支持的筛选', 'Clear unsupported filters')}</Button>} />

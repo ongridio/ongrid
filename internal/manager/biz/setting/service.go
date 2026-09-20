@@ -290,14 +290,3 @@ func maskValue(v string, sensitive bool) string {
 	}
 	return v[:4] + "***" + v[len(v)-4:]
 }
-
-// AutoAPMEnabled is the global gate for existing and newly connected Edges.
-// Fail closed on a settings read failure; never fall back to an old per-edge toggle.
-func (s *Service) AutoAPMEnabled(ctx context.Context) bool {
-	value, _, err := s.Get(ctx, model.CategoryPlatform, model.KeyAutoAPMEnabled)
-	if err != nil {
-		s.log.ErrorContext(ctx, "read automatic APM gate", "error", err)
-		return false
-	}
-	return value == "true"
-}

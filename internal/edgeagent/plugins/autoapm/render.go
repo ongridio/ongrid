@@ -34,9 +34,6 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 			if attr := contract.WorkloadAttribute(target.WorkloadKind); attr != "" {
 				rule[strings.ReplaceAll(attr, ".", "_")] = "^" + regexp.QuoteMeta(target.WorkloadName) + "$"
 			}
-			if target.Container != "" {
-				rule["k8s_container_name"] = "^" + regexp.QuoteMeta(target.Container) + "$"
-			}
 			rules = append(rules, rule)
 		}
 	}
@@ -50,7 +47,7 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 		"ebpf":                map[string]interface{}{"context_propagation": "headers"},
 		"otel_traces_export":  map[string]interface{}{"endpoint": "http://127.0.0.1:14318/v1/traces", "protocol": "http/protobuf", "instrumentations": []string{"http", "grpc"}, "sampler": map[string]string{"name": "parentbased_traceidratio", "arg": strconv.FormatFloat(s.Ratio(), 'f', -1, 64)}},
 		"otel_metrics_export": map[string]interface{}{"endpoint": "http://127.0.0.1:14318/v1/metrics", "protocol": "http/protobuf", "interval": "15s", "histogram_aggregation": "explicit_bucket_histogram", "instrumentations": []string{"http", "grpc"}},
-		"metrics":             map[string]interface{}{"features": []string{"application"}},
+		"metrics":             map[string]interface{}{"features": []string{"application", "application_runtime"}},
 	})
 }
 

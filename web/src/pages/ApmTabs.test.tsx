@@ -18,6 +18,7 @@ beforeEach(() => {
   server.use(
     http.get('/api/v1/devices', () => HttpResponse.json({ items: [] })),
     http.get('/api/v1/topology/nodes', () => HttpResponse.json({ items: [] })),
+    http.get('/api/v1/topology/relations', () => HttpResponse.json({ items: [] })),
     http.get('/api/v1/apm/repository-binding', () => HttpResponse.json({ data: null })),
     http.get('/api/v1/apm/instances', () => HttpResponse.json({ data: { items: [], instances: [{ instance_id: 'orders-1', version: 'v1', device_id: '42' }] } })),
   );
@@ -123,6 +124,7 @@ it('scopes diagnostics and retries a partial protocol failure', async () => {
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 });
 it('gives discovery a selected top-level tab and hides metric time controls', async () => {
+  server.use(http.get('/api/v1/k8s/edge-attachments', () => HttpResponse.json({ data: { items: [], total: 0 } })));
   render(<MemoryRouter initialEntries={['/apm?tab=discovery']}><ApmPage /></MemoryRouter>);
   const tabs = within(screen.getByRole('tablist', { name: '服务视图' })).getAllByRole('tab');
   expect(tabs.map(tab => tab.textContent)).toEqual(['服务列表', '服务地图', '服务发现', '接入指南']);

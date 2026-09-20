@@ -71,14 +71,13 @@ func TestEnvironmentOverridesAndSystemProcessExclusion(t *testing.T) {
 
 func TestKubernetesSelectorsAreBoundedAndUnambiguous(t *testing.T) {
 	valid := Spec{Kubernetes: &Kubernetes{Rules: []KubernetesRule{{Namespace: "shop", WorkloadKind: "Deployment", WorkloadName: "api.v1", Container: "app"}}}}
-	if _, err := Parse(valid.Map()); err != nil {
-		t.Fatal(err)
+	if parsed, err := Parse(valid.Map()); err != nil || parsed.Kubernetes.Rules[0].Container != "" {
+		t.Fatalf("legacy container restriction retained: %+v %v", parsed, err)
 	}
 	for _, rules := range [][]KubernetesRule{
 		{{Namespace: ".*"}},
 		{{Namespace: "shop", WorkloadKind: "Pod", WorkloadName: "api"}},
 		{{Namespace: "shop", WorkloadName: "api"}},
-		{{Namespace: "shop", Container: "app"}},
 		{{Namespace: "shop"}, {Namespace: "shop", WorkloadKind: "Deployment", WorkloadName: "api"}},
 		{{Namespace: "shop", WorkloadKind: "Deployment", WorkloadName: "api"}, {Namespace: "shop", WorkloadKind: "Deployment", WorkloadName: "api", Container: "app"}},
 	} {
@@ -93,5 +92,27 @@ func TestKubernetesSelectorsAreBoundedAndUnambiguous(t *testing.T) {
 	}
 	if _, err := Parse(map[string]interface{}{"kubernetes": map[string]interface{}{"rules": []interface{}{map[string]interface{}{"namespace": "shop", "service_namespace": "fake"}}}}); err == nil {
 		t.Fatal("namespace override accepted")
+	}
+}
+
+func TestServiceLogPaths(t *testing.T) {
+	target := Target{Executable: "/opt/orders", Port: 8080, ServiceName: "orders"}
+	for _, pattern := range []string{"/var/log/orders/*.log", "/opt/orders/logs/app.log", ""} {
+		target.LogPath = pattern
+		if _, err := Parse(Spec{Targets: []Target{target}}.Map()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, pattern := range []string{"relative.log", "/var/log/../secret", "/var/log/${SECRET}", "/var/log/a\n", " /var/log/a"} {
+		target.LogPath = pattern
+		if _, err := Parse(Spec{Targets: []Target{target}}.Map()); err == nil {
+			t.Fatalf("accepted %q", pattern)
+		}
+	}
+	target.LogPath = "/var/log/app.log"
+	other := target
+	other.Port, other.ServiceName = 8081, "inventory"
+	if _, err := Parse(Spec{Targets: []Target{target, other}}.Map()); err == nil {
+		t.Fatal("ambiguous log identity accepted")
 	}
 }

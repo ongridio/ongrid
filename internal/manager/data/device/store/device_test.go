@@ -519,3 +519,57 @@ func TestDeleteOfflineWithLinkedEdgesCleansEdgesAndCredentials(t *testing.T) {
 		t.Fatalf("secret hash after cleanup = %q, want empty", deletedEdge.SecretKeyHash)
 	}
 }
+
+func TestDeviceEnvironmentLegacyImportIsOneTimeAndPrefersOnlineEdge(t *testing.T) {
+	db := newDeviceTestDB(t)
+	if err := db.AutoMigrate(&edgemodel.Edge{}, &edgemodel.PluginConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	d := sampleDevice("environment-test")
+	if err := db.Create(d).Error; err != nil {
+		t.Fatal(err)
+	}
+	for i, status := range []string{"online", "offline"} {
+		edge := &edgemodel.Edge{ID: uint64(i + 1), AccessKeyID: status, SecretKeyHash: "hash", Status: status, DeviceID: &d.ID}
+		if err := db.Create(edge).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Create(&model.EdgeDevice{EdgeID: edge.ID, DeviceID: d.ID, Type: model.EdgeDeviceRelationHost}).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Create(&edgemodel.PluginConfig{EdgeID: edge.ID, PluginName: "autoapm", SpecJSON: `{"environment":"` + status + `"}`}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := backfillDeviceEnvironments(db); err != nil {
+		t.Fatal(err)
+	}
+	repo, ctx := NewRepo(db), context.Background()
+	got, err := repo.Get(ctx, d.ID)
+	if err != nil || got.Environment == nil || *got.Environment != "online" {
+		t.Fatalf("legacy import: %+v %v", got, err)
+	}
+	if err := repo.UpdateEnvironment(ctx, d.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := backfillDeviceEnvironments(db); err != nil {
+		t.Fatal(err)
+	}
+	got, err = repo.Get(ctx, d.ID)
+	if err != nil || got.Environment == nil || *got.Environment != "" {
+		t.Fatalf("clear resurrected legacy value: %+v %v", got, err)
+	}
+	if err := repo.UpdateEnvironment(ctx, d.ID, ""); err != nil {
+		t.Fatalf("idempotent update: %v", err)
+	}
+	if err := repo.UpdateEnvironment(ctx, 999, "test"); !errors.Is(err, errs.ErrNotFound) {
+		t.Fatalf("missing device: %v", err)
+	}
+	var old edgemodel.PluginConfig
+	if err := db.Where("edge_id = ?", 1).First(&old).Error; err != nil {
+		t.Fatal(err)
+	}
+	if old.SpecJSON != `{"environment":"online"}` {
+		t.Fatal("rollback legacy configuration mutated")
+	}
+}

@@ -374,22 +374,3 @@ func TestServiceDeleteInvalidatesCache(t *testing.T) {
 		t.Fatalf("post-Delete Get = (%q,%v); want (\"\", false)", v, ok)
 	}
 }
-
-func TestAutoAPMGlobalSetting(t *testing.T) {
-	ctx := context.Background()
-	svc := New(newFakeRepo(), nil)
-	if svc.AutoAPMEnabled(ctx) {
-		t.Fatal("must default off")
-	}
-	for _, value := range []string{"true", "false", "true"} {
-		if err := svc.Set(ctx, model.CategoryPlatform, model.KeyAutoAPMEnabled, value, false); err != nil {
-			t.Fatal(err)
-		}
-		if svc.AutoAPMEnabled(ctx) != (value == "true") {
-			t.Fatal("cached value did not change")
-		}
-	}
-	if err := svc.Set(ctx, model.CategoryPlatform, model.KeyAutoAPMEnabled, "all", false); err == nil {
-		t.Fatal("invalid gate accepted")
-	}
-}

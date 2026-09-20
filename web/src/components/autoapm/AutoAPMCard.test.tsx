@@ -1,4 +1,5 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+vi.mock('@/api/devices', () => ({ listDevices: vi.fn().mockResolvedValue({ items: [{ id: 1, name: 'host', environment: 'device-only-env' }], total: 1 }) }));
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { AutoAPMCard } from './AutoAPMCard';
@@ -6,82 +7,127 @@ import { listEdgePlugins, getAutoAPMOptions } from '@/api/integrations';
 vi.mock('@/api/integrations', () => ({ listEdgePlugins: vi.fn(), getAutoAPMOptions: vi.fn() }));
 vi.mock('@/api/topology', () => ({ listAllNodes: vi.fn().mockResolvedValue([{ props: { environment: 'production' } }]) }));
 vi.mock('@/i18n/locale', () => ({ useI18n: () => ({ tr: (_zh: string, en: string) => en }) }));
-beforeEach(() => { vi.clearAllMocks(); vi.mocked(getAutoAPMOptions).mockResolvedValue({ environments: ['test'], namespaces: ['commerce'] }); });
-it('has no per-device switch and saves targets while the global gate is off', async () => {
+const target = { executable: '/opt/orders', port: 8080, service_name: 'orders' };
+beforeEach(() => { vi.clearAllMocks(); vi.mocked(listEdgePlugins).mockResolvedValue({ items: [] }); vi.mocked(getAutoAPMOptions).mockResolvedValue({ environments: ['test'], namespaces: ['commerce'] }); });
+it('opens saved targets read-only, cancels edits and saves fixed capture defaults', async () => {
   const user = userEvent.setup(); const save = vi.fn().mockResolvedValue(undefined);
-  const spec = { targets: [{ executable: '/opt/orders', port: 8080, service_name: 'orders' }] };
-  render(<AutoAPMCard edgeId={1} deviceName="Ubuntu" online onClose={vi.fn()} row={{ plugin_name: 'autoapm', enabled: false, spec }} onSave={save} />);
-  expect(listEdgePlugins).not.toHaveBeenCalled();
-  expect(screen.queryByRole('switch')).not.toBeInTheDocument();
-  await act(async () => { await user.click(screen.getByRole('button', { name: 'Save capture settings' })); });
-  expect(save).toHaveBeenCalledWith({ enabled: false, spec });
-});
-it('adds a discovered listener only after explicitly saving and retains draft on error', async () => {
-  const user = userEvent.setup(); const save = vi.fn().mockRejectedValue(new Error('save failed'));
-  vi.mocked(listEdgePlugins).mockResolvedValue({ items: [{ plugin_name: 'autoapm', enabled: true, health: { state: 'running', reported_at: new Date().toISOString(), candidates: [{ executable: '/opt/orders', port: 8080, pid: 12 }] } }] });
-  render(<AutoAPMCard edgeId={1} deviceName="Ubuntu" online onClose={vi.fn()} row={{ plugin_name: 'autoapm', enabled: true }} onSave={save} />);
-  const add = await screen.findByRole('checkbox', { name: 'Capture /opt/orders:8080' });
-  await act(async () => { await user.click(add); });
+  render(<AutoAPMCard edgeId={1} deviceName="Ubuntu" online={false} row={{ plugin_name: 'autoapm', enabled: false, spec: { sample_ratio: 0.1, tls_insecure_skip_verify: false, targets: [target] } }} onSave={save} />);
+  expect(screen.getByText('orders')).toBeInTheDocument();
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+  expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+  expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Save target' })).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Edit orders' }));
+  await user.clear(screen.getByLabelText('Service name'));
+  await user.type(screen.getByLabelText('Service name'), 'changed');
+  await user.click(screen.getByRole('button', { name: 'Cancel' }));
   expect(save).not.toHaveBeenCalled();
-  expect(screen.getByRole('checkbox', { name: 'Capture /opt/orders:8080' })).toHaveFocus();
-  await act(async () => { await user.click(screen.getByRole('button', { name: 'Save capture settings' })); });
-  await waitFor(() => expect(save).toHaveBeenCalledWith({ enabled: true, spec: { targets: [{ executable: '/opt/orders', port: 8080, service_name: 'orders', service_namespace: undefined, environment: undefined }], environment: undefined } }));
-  expect(await screen.findByRole('alert')).toHaveTextContent('save failed');
-  expect(screen.getByLabelText('Service name 1')).toHaveValue('orders');
+  expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Edit orders' }));
+  expect(screen.getByLabelText('Service name')).toHaveValue('orders');
+  await user.click(screen.getByRole('button', { name: 'Save target' }));
+  expect(save).toHaveBeenCalledWith({ enabled: true, spec: { sample_ratio: 1, tls_insecure_skip_verify: true, targets: [target] } });
+  expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
 });
-it('keeps undiscovered saved targets editable while offline', async () => {
-  const user = userEvent.setup(); const save = vi.fn().mockResolvedValue(undefined);
-  const spec = { environment: 'production', sample_ratio: 0, tls_insecure_skip_verify: true, targets: [{ executable: '/opt/orders', port: 8080, service_name: 'orders' }] };
-  render(<AutoAPMCard edgeId={1} deviceName="Ubuntu" online={false} onClose={vi.fn()} row={{ plugin_name: 'autoapm', enabled: true, spec }} onSave={save} />);
-  expect(listEdgePlugins).not.toHaveBeenCalled();
-  await user.click(screen.getByRole('tab', { name: 'Selected targets (1)' }));
-  expect(screen.getByLabelText('Executable path 1')).toHaveValue('/opt/orders');
-  await user.clear(screen.getByLabelText('Service name 1'));
-  await user.type(screen.getByLabelText('Service name 1'), 'orders-renamed');
-  await user.click(screen.getByRole('button', { name: 'Save capture settings' }));
-  expect(save).toHaveBeenCalledWith({ enabled: true, spec: { ...spec, targets: [{ ...spec.targets[0], service_name: 'orders-renamed' }] } });
-});
-it('cancels selection without persisting and does not duplicate a saved candidate', async () => {
-  const user = userEvent.setup(); const save = vi.fn(); const close = vi.fn();
+it('adds a discovered process only on save and preserves the draft on failure', async () => {
+  const user = userEvent.setup(); const save = vi.fn().mockRejectedValue(new Error('save failed'));
   const health = { state: 'running', reported_at: new Date().toISOString(), candidates: [{ executable: '/opt/orders', port: 8080, pid: 12 }] };
   vi.mocked(listEdgePlugins).mockResolvedValue({ items: [{ plugin_name: 'autoapm', enabled: true, health }] });
-  render(<AutoAPMCard edgeId={1} deviceName="Ubuntu" online onClose={close} row={{ plugin_name: 'autoapm', enabled: true, health, spec: { targets: [{ executable: '/opt/orders', port: 8080, service_name: 'orders' }] } }} onSave={save} />);
-  expect(screen.getAllByRole('checkbox', { name: 'Capture /opt/orders:8080' })).toHaveLength(1);
-  await user.click(screen.getByRole('checkbox', { name: 'Capture /opt/orders:8080' }));
-  await user.click(screen.getByRole('button', { name: 'Cancel' }));
-  expect(close).toHaveBeenCalled();
+  render(<AutoAPMCard edgeId={1} deviceName="Ubuntu" online row={{ plugin_name: 'autoapm', enabled: true, health }} onSave={save} />);
+  expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Add capture target' }));
+  await act(async () => { await user.click(within(await screen.findByRole('radiogroup', { name: 'Discovered processes' })).getByText('orders')); });
+  expect(screen.getByRole('radio', { name: 'Select /opt/orders:8080' })).toBeChecked();
+  expect(screen.queryByLabelText('Executable path')).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('Listening port')).not.toBeInTheDocument();
+  expect(screen.getByLabelText('Service name')).toHaveValue('orders');
   expect(save).not.toHaveBeenCalled();
+  await user.click(screen.getByRole('button', { name: 'Save target' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('save failed');
+  expect(screen.getByLabelText('Service name')).toHaveValue('orders');
+  expect(save.mock.calls[0][0].spec).toMatchObject({ sample_ratio: 1, tls_insecure_skip_verify: true, targets: [target] });
 });
-
-it('reveals an incomplete target hidden by search instead of submitting it', async () => {
-  const user = userEvent.setup(); const save = vi.fn();
-  render(<AutoAPMCard edgeId={1} deviceName="Ubuntu" online={false} onClose={vi.fn()} row={{ plugin_name: 'autoapm', enabled: false }} onSave={save} />);
-  await user.click(screen.getByRole('button', { name: 'Add manually' }));
-  await user.type(screen.getByRole('searchbox', { name: 'Search processes' }), 'hide-empty-target');
-  await user.click(screen.getByRole('button', { name: 'Save capture settings' }));
-  expect(save).not.toHaveBeenCalled();
-  expect(screen.getByRole('alert')).toHaveTextContent('Complete each target');
-  expect(screen.getByLabelText('Executable path 1')).toHaveValue('');
-});
-
-
-it('reuses saved values and restores cluster inheritance without persisting the default', async () => {
+it('reuses namespaces and environments, preserves other targets and clears log paths', async () => {
   const user = userEvent.setup(); const save = vi.fn().mockResolvedValue(undefined);
-  render(<AutoAPMCard edgeId={1} deviceName="Worker" online={false} onClose={vi.fn()} row={{ plugin_name: 'autoapm', enabled: true, defaults: { environment: 'production', cluster_name: 'prod-cluster' }, spec: { targets: [{ executable: '/opt/orders', port: 8080, service_name: 'orders' }] } }} onSave={save} />);
-  const environment = screen.getByLabelText('Service environment 1');
-  expect(environment).toHaveValue('');
-  expect(environment).toHaveAttribute('placeholder', 'Inherit: production');
-  await user.click(environment);
+  const other = { ...target, port: 8081, service_name: 'inventory', log_path: '/logs/inventory.log' };
+  render(<AutoAPMCard edgeId={1} deviceName="Worker" online={false} row={{ plugin_name: 'autoapm', enabled: true, defaults: { environment: 'production', cluster_name: 'prod' }, spec: { targets: [target, other] } }} onSave={save} />);
+  await user.click(screen.getByRole('button', { name: 'Edit orders' }));
+  expect(screen.getByLabelText('Service environment')).toHaveAttribute('placeholder', 'Inherit: production');
+  await user.click(screen.getByLabelText('Service environment'));
   await user.click(await screen.findByRole('option', { name: 'test' }));
-  expect(environment).toHaveValue('test');
-  const namespace = screen.getByLabelText('Service namespace 1');
-  await user.click(namespace);
+  await user.click(screen.getByLabelText('Service namespace'));
   await user.click(await screen.findByRole('option', { name: 'commerce' }));
-  expect(namespace).toHaveValue('commerce');
-  await user.click(screen.getByRole('button', { name: 'Save capture settings' }));
-  expect(save.mock.calls[0][0].spec.targets[0]).toMatchObject({ environment: 'test', service_namespace: 'commerce' });
+  await user.type(screen.getByLabelText('Log path (optional)'), '/logs/orders/*.log');
+  await user.click(screen.getByRole('button', { name: 'Save target' }));
+  expect(save.mock.calls[0][0].spec.targets).toEqual([{ ...target, environment: 'test', service_namespace: 'commerce', log_path: '/logs/orders/*.log' }, other]);
+  await user.click(screen.getByRole('button', { name: 'Edit orders' }));
   await user.click(screen.getByRole('button', { name: 'Use default' }));
-  await user.click(screen.getByRole('button', { name: 'Save capture settings' }));
-  expect(save.mock.calls[1][0].spec.environment).toBeUndefined();
+  await user.clear(screen.getByLabelText('Log path (optional)'));
+  await user.click(screen.getByRole('button', { name: 'Save target' }));
   expect(save.mock.calls[1][0].spec.targets[0].environment).toBeUndefined();
+  expect(save.mock.calls[1][0].spec.targets[0].log_path).toBeUndefined();
+  await user.click(screen.getByRole('button', { name: 'Edit orders' }));
+  await user.click(screen.getByRole('button', { name: 'Remove target' }));
+  await waitFor(() => expect(save.mock.calls[2][0].spec.targets).toEqual([other]));
+  expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+});
+it('excludes configured processes and never offers manual input for empty or stale discovery', async () => {
+  const user = userEvent.setup(); const save = vi.fn();
+  const health = { state: 'running', reported_at: new Date().toISOString(), candidates: [{ ...target, pid: 12 }, { ...target, port: 9090, pid: 12 }] };
+  vi.mocked(listEdgePlugins).mockResolvedValue({ items: [{ plugin_name: 'autoapm', enabled: true, health }] });
+  render(<AutoAPMCard edgeId={1} deviceName="Ubuntu" online row={{ plugin_name: 'autoapm', enabled: true, health, spec: { targets: [target] } }} onSave={save} />);
+  expect(screen.getByText(':8080, 9090')).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Add capture target' }));
+  expect(screen.getByText('No processes available to add')).toBeInTheDocument();
+  expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+  expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('Executable path')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Save target' })).toBeDisabled();
+  expect(save).not.toHaveBeenCalled();
+  vi.mocked(listEdgePlugins).mockResolvedValue({ items: [{ plugin_name: 'autoapm', enabled: true, health: { ...health, reported_at: '2000-01-01T00:00:00Z' } }] });
+  await user.click(screen.getByRole('button', { name: 'Refresh discovery' }));
+  expect(await screen.findByText('Waiting for discovery results')).toBeInTheDocument();
+  expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+});
+
+it('adds both ports as one process, keeps other processes separate and retains the saved port while offline', async () => {
+  const user = userEvent.setup(); const save = vi.fn().mockResolvedValue(undefined);
+  const health = { state: 'running', reported_at: new Date().toISOString(), candidates: [
+    { executable: '/opt/orders', port: 9090, pid: 12 },
+    { executable: '/opt/orders', port: 8080, pid: 12 },
+    { executable: '/opt/orders', port: 8081, pid: 13 },
+  ] };
+  vi.mocked(listEdgePlugins).mockResolvedValue({ items: [{ plugin_name: 'autoapm', enabled: true, health }] });
+  const props = { edgeId: 1, deviceName: 'Ubuntu', row: { plugin_name: 'autoapm', enabled: true, health }, onSave: save };
+  const view = render(<AutoAPMCard {...props} online />);
+  await user.click(screen.getByRole('button', { name: 'Add capture target' }));
+  expect(screen.getAllByRole('radio')).toHaveLength(2);
+  await user.type(screen.getByRole('searchbox'), '9090');
+  expect(screen.getAllByRole('radio')).toHaveLength(1);
+  await user.click(screen.getByRole('radio', { name: 'Select /opt/orders:8080, 9090' }));
+  await user.click(screen.getByRole('button', { name: 'Save target' }));
+  expect(save.mock.calls[0][0].spec.targets).toEqual([target]);
+  expect(screen.getByText(':8080, 9090')).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Add capture target' }));
+  expect(screen.getAllByRole('radio')).toHaveLength(1);
+  expect(screen.getByRole('radio', { name: 'Select /opt/orders:8081' })).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Cancel' }));
+  view.rerender(<AutoAPMCard {...props} online={false} />);
+  expect(screen.queryByText(':8080, 9090')).not.toBeInTheDocument();
+  expect(screen.getByText(':8080')).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Edit orders' }));
+  await user.click(screen.getByRole('button', { name: 'Save target' }));
+  expect(save.mock.calls[1][0].spec.targets).toEqual([target]);
+});
+
+it('uses the device default even when a retired collector default remains saved', async () => {
+  const user = userEvent.setup();
+  render(<AutoAPMCard edgeId={1} deviceName="Worker" online={false} row={{ plugin_name: 'autoapm', enabled: true, defaults: { environment: '', cluster_name: '' }, spec: { environment: 'legacy', targets: [target] } }} onSave={vi.fn()} />);
+  expect(screen.queryByText('legacy')).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Edit orders' }));
+  const field = screen.getByLabelText('Service environment');
+  expect(field).toHaveAttribute('placeholder', 'Choose or type');
+  await user.click(field);
+  expect(await screen.findByRole('option', { name: 'device-only-env' })).toBeInTheDocument();
 });

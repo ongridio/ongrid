@@ -1,10 +1,11 @@
-import { Label, Input, Textarea, Slider, Card } from '@/components/ui';
+import { DeviceEnvironment } from '@/components/DeviceEnvironment';
+import { Card, Label, Input, Textarea, Slider } from '@/components/ui';
 import { Hint } from '@/components/ui/Tooltip';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
 import { Select } from '@/components/ui/Select';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   CartesianGrid,
   Line,
@@ -139,6 +140,7 @@ type PanelKey = 'cpu' | 'disk' | 'netRx' | 'netTx';
 const EMPTY_PANEL: PanelData = { rows: [], series: [] };
 
 export default function EdgeDetailPage() {
+  const { isAdmin } = usePermissions();
   const { tr } = useI18n();
   const navigate = useNavigate();
   const location = useLocation();
@@ -503,6 +505,11 @@ export default function EdgeDetailPage() {
           )}
 
           {tab === 'host' && (
+            <div className="space-y-4">
+            {device && <Card><div className="flex flex-wrap items-center justify-between gap-3">
+              <span className="text-sm font-medium">{tr('默认环境', 'Default environment')}</span>
+              <DeviceEnvironment deviceId={device.id} deviceName={device.name || device.hostname || String(device.id)} canEdit={isAdmin} />
+            </div></Card>}
             <JsonCard
               title="host_info"
               data={device
@@ -522,6 +529,7 @@ export default function EdgeDetailPage() {
                 : ((edge?.host_info as Record<string, unknown> | null) ?? null)}
               empty={tr('暂无主机信息（设备未上报或字段暂未识别）', 'No host info (device has not reported, or field not recognized)')}
             />
+            </div>
           )}
 
           {tab === 'plugins' && edge && <PluginsTab edgeId={edge.id} />}
@@ -794,10 +802,10 @@ function NetworkInterfacesTable({ interfaces }: { interfaces: NetworkInterface[]
               <td className="truncate px-3 py-2.5 font-mono text-zinc-400">{row.addresses?.join(', ') || '—'}</td>
               <td className="px-3 py-2.5"><InterfaceStatus value={row.admin_status} /></td>
               <td className="px-3 py-2.5"><InterfaceStatus value={row.oper_status} /></td>
-			  <td className="px-3 py-2.5 text-right font-mono text-zinc-400">{formatBits(row.speed_bps)}</td>
-			  <td className="px-3 py-2.5 text-right font-mono text-zinc-400">{formatBytes(row.in_octets)}</td>
-			  <td className="px-3 py-2.5 text-right font-mono text-zinc-400">{formatBytes(row.out_octets)}</td>
-			  <td className="px-3 py-2.5 text-right font-mono text-zinc-400">{formatCount((row.in_errors || 0) + (row.out_errors || 0))}</td>
+              <td className="px-3 py-2.5 text-right font-mono text-zinc-400">{formatBits(row.speed_bps)}</td>
+              <td className="px-3 py-2.5 text-right font-mono text-zinc-400">{formatBytes(row.in_octets)}</td>
+              <td className="px-3 py-2.5 text-right font-mono text-zinc-400">{formatBytes(row.out_octets)}</td>
+              <td className="px-3 py-2.5 text-right font-mono text-zinc-400">{formatCount((row.in_errors || 0) + (row.out_errors || 0))}</td>
             </tr>
           ))}
         </tbody>
@@ -1455,17 +1463,11 @@ function PluginsTab({ edgeId }: { edgeId: number }) {
               'custommetrics',
               'databasemetrics',
             ]);
-            const topRows = rows.filter((r) => !childNames.has(r.plugin_name));
+            const topRows = rows.filter((r) => !['autoapm', 'profiles'].includes(r.plugin_name) && !childNames.has(r.plugin_name));
             const childRowsByParent: Record<string, PluginRow[]> = {
               metrics: rows.filter((r) => childNames.has(r.plugin_name)),
             };
-            return topRows.map((row) => row.plugin_name === 'autoapm' ? (
-              <Card key={row.plugin_name} className="flex flex-wrap items-center justify-between gap-3">
-                <div><h3 className="font-medium">{tr('自动 APM', 'Automatic APM')}</h3>
-                  <p className="text-sm text-text-muted">{tr('全局发现开关与采集目标统一在服务页管理。', 'Manage global discovery and capture targets on the Services page.')}</p></div>
-                <Link className="text-sm text-indigo-500 hover:underline" to={`/apm?tab=discovery&capture_edge_id=${edgeId}`}>{tr('管理采集', 'Manage capture')}</Link>
-              </Card>
-            ) : (
+            return topRows.map((row) => (
               <PluginCard
                 key={row.plugin_name}
                 row={row}

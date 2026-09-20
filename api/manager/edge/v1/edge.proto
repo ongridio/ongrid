@@ -5,7 +5,7 @@ package ongrid.manager.edge.v1;
 import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/singchia/ongrid/api/gen/manager/edge/v1;edgev1";
+option go_package = "github.com/ongridio/ongrid/api/gen/manager/edge/v1;edgev1";
 
 // EdgeService 管理一个 org 下的 edge 设备：注册 / 列表 / 详情 / 删除 / 轮换密钥。
 // org_id 从 URL path（/api/v1/orgs/:org_id/edges/...）与 JWT claims 取，
@@ -316,13 +316,15 @@ message RetryUpgradeJobResponse {
 }
 
 // AutoAPMSpec is the JSON spec of the existing autoapm plugin configuration.
-// Effective enabled is owned by platform.auto_apm_enabled, not the per-edge row.
-// The global gate stops discovery and capture without deleting saved targets.
+// Discovery is always enabled on host/node Edges; controllers do not run OBI.
+// Legacy per-edge enabled and platform.auto_apm_enabled do not gate discovery.
 // An empty targets list enables discovery only; it NEVER means capture all.
 message AutoAPMSpec {
     string environment = 1;
+    // Legacy input retained for compatibility. Manager capture uses ratio 1.
     optional double sample_ratio = 2 [json_name = "sample_ratio"];
     repeated AutoAPMTarget targets = 3;
+    // Manager capture permits self-signed certificates for hosts and Kubernetes.
     bool tls_insecure_skip_verify = 4 [json_name = "tls_insecure_skip_verify"];
     AutoAPMKubernetes kubernetes = 5;
 }
@@ -334,10 +336,13 @@ message AutoAPMTarget {
     string service_namespace = 4 [json_name = "service_namespace"];
     // Empty inherits the device default, then the cluster default.
     string environment = 5;
+    // Optional absolute log file path/glob; empty disables this target's file logs.
+    string log_path = 6 [json_name = "log_path"];
 }
 // GET /v1/integrations/autoapm-options. Values from saved capture settings.
 message AutoAPMOptions {
     repeated string environments = 1;
+    // Saved host service namespaces only; Kubernetes Namespace selectors are separate.
     repeated string namespaces = 2;
 }
 // Read-only metadata on the autoapm plugin row; never persisted into spec.
@@ -359,5 +364,17 @@ message AutoAPMKubernetesRule {
     // Empty kind/name selects the entire namespace, including future workloads.
     string workload_kind = 2 [json_name = "workload_kind"];
     string workload_name = 3 [json_name = "workload_name"];
-    string container = 4;
+    // Legacy input ignored; selected scopes always include every container.
+    string container = 4 [deprecated = true];
 }
+
+// Manager-derived runtime overlay on the logs plugin; never user-editable.
+// Empty paths disable container logs; node journald remains enabled.
+// Selection comes from cluster AutoAPM rules.
+message KubernetesLogsRuntime {
+    repeated string pod_log_paths = 1 [json_name = "pod_log_paths"];
+    bool enable_journald = 2 [json_name = "enable_journald"];
+}
+
+// Manager-owned logs runtime overlay for ordinary host service targets.
+message HostServiceLogsRuntime { AutoAPMSpec service_capture = 1 [json_name = "service_capture"]; }

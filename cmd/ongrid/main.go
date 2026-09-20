@@ -894,7 +894,6 @@ func main() {
 	}
 	k8sUC.SetTelemetryTargetResolver(pluginEndpointResolver)
 	pluginConfigUC := managerbizedge.NewPluginConfigUC(pluginConfigRepo, nil, pluginEndpointResolver, log)
-	pluginConfigUC.SetAutoAPMEnabledProvider(settingSvc.AutoAPMEnabled)
 	edgeUC.SetPluginSeeder(pluginConfigUC)
 
 	edgeHandler := managerserveredge.NewHandler(edgeSvc, deviceRepo, pluginConfigUC)
@@ -987,6 +986,7 @@ func main() {
 	}
 	k8sUC.SetTopologyMirror(topologyUC)
 	pluginConfigUC.SetKubernetesAutoAPMProvider(k8sUC.AutoAPMForEdge, k8sUC.AutoAPMSpecs)
+	pluginConfigUC.SetKubernetesLogPathsProvider(k8sUC.LogPathsForEdge)
 	k8sUC.SetAutoAPMProviders(func(ctx context.Context, nodeID uint64) (string, error) {
 		node, err := topologyUC.GetNode(ctx, nodeID)
 		if err != nil {
@@ -1002,6 +1002,7 @@ func main() {
 		}
 		return props.Environment, nil
 	}, pluginConfigUC.NotifyAutoAPMChanged)
+	deviceUC.SetEnvironmentProvider(topologyUC.DeviceClusterEnvironment, pluginConfigUC.NotifyAutoAPMChanged)
 	pluginConfigUC.SetAutoAPMEnvironmentProvider(func(ctx context.Context, edgeID uint64) (string, string, error) {
 		deviceID, err := edgeDeviceRepo.LookupHostDevice(ctx, edgeID)
 		if errors.Is(err, errs.ErrNotFound) || (err == nil && deviceID == 0) {
@@ -1010,14 +1011,11 @@ func main() {
 		if err != nil {
 			return "", "", err
 		}
-		device, err := deviceRepo.Get(ctx, deviceID)
+		resolved, err := deviceUC.ResolveEnvironment(ctx, deviceID)
 		if err != nil {
 			return "", "", err
 		}
-		if device.NodeID == nil || *device.NodeID == 0 {
-			return "", "", nil
-		}
-		return topologyUC.DeviceClusterEnvironment(ctx, *device.NodeID)
+		return resolved.EffectiveEnvironment, resolved.ClusterName, nil
 	})
 	if err := k8sUC.ReconcileTopology(rootCtx); err != nil {
 		log.Warn("k8s: topology reconcile on boot failed", slog.Any("err", err))

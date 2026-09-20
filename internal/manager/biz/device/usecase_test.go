@@ -2,6 +2,8 @@ package device
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	devicemodel "github.com/ongridio/ongrid/internal/manager/model/device"
@@ -107,6 +109,15 @@ func (r *fakeRepo) UpdateUsage(context.Context, uint64, Usage) error { return ni
 
 func (r *fakeRepo) UpdateRoles(context.Context, uint64, uint8) error { return nil }
 
+func (r *fakeRepo) UpdateEnvironment(_ context.Context, id uint64, value string) error {
+	dev, ok := r.byID[id]
+	if !ok {
+		return errs.ErrNotFound
+	}
+	dev.Environment = &value
+	return nil
+}
+
 func (r *fakeRepo) UpdateNameDescription(context.Context, uint64, string, string) error {
 	return nil
 }
@@ -195,4 +206,59 @@ type fakeTopologyMirror struct {
 func (m *fakeTopologyMirror) DeleteNodeForDevice(_ context.Context, deviceID, nodeID uint64) error {
 	m.deleted = append(m.deleted, [2]uint64{deviceID, nodeID})
 	return nil
+}
+
+func TestDeviceEnvironmentInheritanceAndOverride(t *testing.T) {
+	ctx := context.Background()
+	nodeID := uint64(9)
+	repo := &fakeRepo{byID: map[uint64]*devicemodel.Device{1: {ID: 1}, 2: {ID: 2, NodeID: &nodeID}}}
+	uc := NewUsecase(repo, nil, nil)
+	clusterEnv := "production"
+	uc.SetEnvironmentProvider(func(context.Context, uint64) (string, string, error) { return clusterEnv, "cluster-a", nil }, nil)
+	check := func(id uint64, value, effective, source string) {
+		t.Helper()
+		got, err := uc.SetEnvironment(ctx, id, value)
+		if err != nil || got.Environment != strings.TrimSpace(value) || got.EffectiveEnvironment != effective || got.Source != source {
+			t.Fatalf("environment: %+v, %v", got, err)
+		}
+		got, err = uc.ResolveEnvironment(ctx, id)
+		if err != nil || got.EffectiveEnvironment != effective || got.Source != source {
+			t.Fatalf("read environment: %+v, %v", got, err)
+		}
+	}
+	check(1, " staging ", "staging", "device")
+	check(1, "", "", "unset")
+	check(2, "", "production", "cluster")
+	check(2, "test", "test", "device")
+	clusterEnv = "development"
+	got, err := uc.ResolveEnvironment(ctx, 2)
+	if err != nil || got.EffectiveEnvironment != "test" || got.InheritedEnvironment != "development" {
+		t.Fatalf("override lost: %+v %v", got, err)
+	}
+	check(2, "", "development", "cluster")
+	for _, invalid := range []string{"prod\n", "a\x00b", "${ENV}", strings.Repeat("x", 257)} {
+		if _, err := uc.SetEnvironment(ctx, 2, invalid); !errors.Is(err, errs.ErrInvalid) {
+			t.Fatalf("accepted invalid %q: %v", invalid, err)
+		}
+	}
+	if *repo.byID[2].Environment != "" {
+		t.Fatal("invalid input changed environment")
+	}
+	if _, err := uc.SetEnvironment(ctx, 999, "test"); !errors.Is(err, errs.ErrNotFound) {
+		t.Fatalf("missing device: %v", err)
+	}
+}
+
+func TestDeviceEnvironmentNotifiesOnlyHostCollectors(t *testing.T) {
+	repo := &fakeRepo{byID: map[uint64]*devicemodel.Device{1: {ID: 1}}}
+	links := &fakeLinks{rows: []*devicemodel.EdgeDevice{{EdgeID: 67, Type: devicemodel.EdgeDeviceRelationHost}, {EdgeID: 68, Type: devicemodel.EdgeDeviceRelationDiscovered}}}
+	uc := NewUsecase(repo, links, nil)
+	var notified []uint64
+	uc.SetEnvironmentProvider(nil, func(_ context.Context, id uint64) { notified = append(notified, id) })
+	if _, err := uc.SetEnvironment(context.Background(), 1, "production"); err != nil {
+		t.Fatal(err)
+	}
+	if len(notified) != 1 || notified[0] != 67 {
+		t.Fatalf("notified collectors: %v", notified)
+	}
 }

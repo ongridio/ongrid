@@ -52,6 +52,8 @@ func NewHandler(uc *devicebiz.Usecase) *Handler { return &Handler{uc: uc} }
 func (h *Handler) Register(r chi.Router) {
 	r.Get("/v1/devices", h.list)
 	r.Get("/v1/devices/{id}", h.get)
+	r.Get("/v1/devices/{id}/environment", h.getEnvironment)
+	r.With(h.requireAdmin).Put("/v1/devices/{id}/environment", h.setEnvironment)
 	r.With(h.requireAdmin).Patch("/v1/devices/{id}", h.update)
 	r.With(h.requireAdmin).Patch("/v1/devices/{id}/roles", h.updateRoles)
 	r.With(h.requireAdmin).Delete("/v1/devices/{id}", h.delete)
@@ -84,6 +86,7 @@ func (h *Handler) requireAdmin(next http.Handler) http.Handler {
 // --- DTOs ---
 
 type deviceItem struct {
+	Environment    *string    `json:"environment,omitempty"`
 	ID             uint64     `json:"id"`
 	Name           string     `json:"name"`
 	Description    string     `json:"description,omitempty"`
@@ -558,6 +561,7 @@ func (h *Handler) scanNetworkCandidate(w http.ResponseWriter, r *http.Request) {
 
 func devToItem(d *devicemodel.Device) deviceItem {
 	return deviceItem{
+		Environment:    d.Environment,
 		ID:             d.ID,
 		Name:           d.Name,
 		Description:    d.Description,

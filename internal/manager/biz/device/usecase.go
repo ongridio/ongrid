@@ -15,11 +15,13 @@ import (
 
 // Usecase is the manager/device biz-layer facade.
 type Usecase struct {
-	repo     Repo
-	links    EdgeDeviceRepo
-	topology TopologyMirror
-	log      *slog.Logger
-	network  *NetworkDiscoveryUsecase
+	repo               Repo
+	links              EdgeDeviceRepo
+	topology           TopologyMirror
+	log                *slog.Logger
+	network            *NetworkDiscoveryUsecase
+	clusterEnvironment func(context.Context, uint64) (string, string, error)
+	environmentChanged func(context.Context, uint64)
 }
 
 // SetNetworkDiscovery wires the optional network-neighbor discovery facade.

@@ -312,7 +312,6 @@ export type KubernetesCaptureRule = {
   namespace: string;
   workload_kind?: string;
   workload_name?: string;
-  container?: string;
 };
 export type KubernetesCaptureSpec = {
   kubernetes: { rules: KubernetesCaptureRule[] };

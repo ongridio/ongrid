@@ -35,15 +35,19 @@ type Plugin struct {
 	health                  plugins.PluginHealth
 	obi, collector, scraper plugins.Plugin
 	discover                func(context.Context) ([]contract.Candidate, error)
+	pusher                  custommetrics.Pusher
+	resourceSpec            contract.Spec
+	resourceError           string
 }
 
 func New(binDir, workDir string, pusher custommetrics.Pusher, edgeID custommetrics.EdgeIDProvider, log *slog.Logger) *Plugin {
 	root := filepath.Join(workDir, Name)
 	binary := filepath.Join(binDir, "obi")
-	return &Plugin{
+	p := &Plugin{
+		pusher: pusher,
 		health: plugins.PluginHealth{Name: Name, State: plugins.StateStopped}, discover: discover,
 		kubeconfigPath: filepath.Join(root, "kubeconfig"),
-		collector:      traces.New(binDir, root, log), scraper: custommetrics.New(pusher, edgeID, log),
+		collector:      traces.New(binDir, root, log),
 		obi: plugins.NewSubprocess(plugins.SubprocessOpts{Name: Name, Binary: binary, Environment: func(cfg plugins.PluginConfig) []string {
 			env := obiEnvironment(cfg)
 			if spec, err := contract.Parse(cfg.Spec); err == nil && spec.Kubernetes != nil {
@@ -55,6 +59,8 @@ func New(binDir, workDir string, pusher custommetrics.Pusher, edgeID custommetri
 			// only accepts v2, which cannot preserve per-target service names.
 			Args: func(_ plugins.PluginConfig, path string) []string { return []string{"--config=" + path} }, Log: log}),
 	}
+	p.scraper = custommetrics.New(p, edgeID, log)
+	return p
 }
 func (p *Plugin) Name() string { return Name }
 func (p *Plugin) Configure(cfg plugins.PluginConfig) error {
@@ -90,6 +96,8 @@ func (p *Plugin) Configure(cfg plugins.PluginConfig) error {
 	}
 	p.mu.Lock()
 	p.selected = s.Selected()
+	p.resourceSpec = s
+	p.resourceError = ""
 	p.kubernetes = s.Kubernetes != nil
 	p.health.LastError = ""
 	p.mu.Unlock()
@@ -225,6 +233,7 @@ func (p *Plugin) HealthSnapshot() plugins.PluginHealth {
 	p.mu.Lock()
 	h := p.health
 	capture := p.capture
+	resourceError := p.resourceError
 	h.Candidates = append([]contract.Candidate(nil), h.Candidates...)
 	p.mu.Unlock()
 	if capture {
@@ -244,6 +253,9 @@ func (p *Plugin) HealthSnapshot() plugins.PluginHealth {
 				}
 			}
 		}
+	}
+	if capture && resourceError != "" {
+		h.LastError = resourceError
 	}
 	return h
 }

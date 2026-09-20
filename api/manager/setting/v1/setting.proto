@@ -5,10 +5,7 @@ package ongrid.manager.setting.v1;
 option go_package = "github.com/ongridio/ongrid/api/gen/manager/setting/v1;settingv1";
 
 // SettingService 管理管理员可编辑的运行时配置。
-// The existing system-settings GET/PUT surface also owns platform.auto_apm_enabled:
-// only the string "true" enables discovery on all current and future Edges.
-// Default is false; disabling preserves each Edge AutoAPMSpec and SDK settings.
-// PUT /api/v1/system-settings/platform/auto_apm_enabled accepts {value:"true"|"false"}.
+// Legacy platform.auto_apm_enabled values are retained but no longer affect discovery.
 service SettingService {
     // ApplyBuiltInObservabilityLimits saves storage limits and recreates only
     // the selected built-in Compose service in explicitly enabled test setups.

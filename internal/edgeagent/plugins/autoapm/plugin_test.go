@@ -150,7 +150,7 @@ func TestKubernetesRulesUseMetadataAndSkipHostDiscovery(t *testing.T) {
 	}
 	rules := config["discovery"].(map[string]interface{})["services"].([]interface{})
 	first := rules[0].(map[string]interface{})
-	if first["k8s_deployment_name"] != `^api\.v1$` || first["k8s_namespace"] != "^shop$" || first["k8s_container_name"] != "^app$" || first["name"] != nil || first["exe_path"] != nil {
+	if first["k8s_deployment_name"] != `^api\.v1$` || first["k8s_namespace"] != "^shop$" || first["k8s_container_name"] != nil || first["name"] != nil || first["exe_path"] != nil {
 		t.Fatalf("invalid selector: %#v", first)
 	}
 	if len(rules[1].(map[string]interface{})) != 1 {

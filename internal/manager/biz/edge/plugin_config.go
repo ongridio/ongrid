@@ -69,6 +69,7 @@ type PluginRuntimeOverlayProvider interface {
 // the affected edge so changes propagate within seconds, not within the
 // edge's 60s safety-net poll window.
 type PluginConfigUC struct {
+	kubernetesLogPaths     func(context.Context, uint64) ([]string, bool, error)
 	kubernetesAutoAPM      func(context.Context, uint64) (*autoapm.Spec, bool, error)
 	kubernetesAutoAPMSpecs func(context.Context) ([]string, error)
 	repo                   PluginConfigRepo
@@ -76,7 +77,6 @@ type PluginConfigUC struct {
 	secretWriter           DatabaseMetricsSecretWriter
 	resolver               EndpointResolver
 	runtime                PluginRuntimeOverlayProvider
-	autoAPMEnabled         func(context.Context) bool
 	autoAPMEnvironment     func(context.Context, uint64) (string, string, error)
 	log                    *slog.Logger
 }
@@ -124,11 +124,6 @@ func (uc *PluginConfigUC) SetRuntimeOverlayProvider(provider PluginRuntimeOverla
 	uc.runtime = provider
 }
 
-// SetAutoAPMEnabledProvider installs the global gate before serving requests.
-func (uc *PluginConfigUC) SetAutoAPMEnabledProvider(provider func(context.Context) bool) {
-	uc.autoAPMEnabled = provider
-}
-
 func (uc *PluginConfigUC) SetAutoAPMEnvironmentProvider(provider func(context.Context, uint64) (string, string, error)) {
 	uc.autoAPMEnvironment = provider
 }
@@ -157,15 +152,16 @@ func (uc *PluginConfigUC) autoAPMDefaults(ctx context.Context, edgeID uint64) (*
 	return &AutoAPMDefaults{Environment: environment, ClusterName: cluster}, nil
 }
 
-func (uc *PluginConfigUC) isAutoAPMEnabled(ctx context.Context) bool {
-	return uc.autoAPMEnabled != nil && uc.autoAPMEnabled(ctx)
-}
-
 // IsEnabled resolves the effective plugin policy for one Edge. An explicit
 // row wins; otherwise the same default used by ListForUI/FetchForEdge applies.
 func (uc *PluginConfigUC) IsEnabled(ctx context.Context, edgeID uint64, plugin string) (bool, error) {
 	if edgeID == 0 || !model.IsKnownPluginName(plugin) {
 		return false, errs.ErrInvalid
+	}
+	if plugin == model.PluginNameLogs {
+		if cfg, managed, err := uc.kubernetesLogsConfig(ctx, edgeID); err != nil || managed {
+			return cfg.Enabled, err
+		}
 	}
 	if plugin == model.PluginNameAutoAPM {
 		if uc.kubernetesAutoAPM != nil {
@@ -177,16 +173,21 @@ func (uc *PluginConfigUC) IsEnabled(ctx context.Context, edgeID uint64, plugin s
 				return false, nil
 			}
 		}
-		return uc.isAutoAPMEnabled(ctx), nil
+		return true, nil
 	}
 	row, err := uc.repo.Get(ctx, edgeID, plugin)
-	if errors.Is(err, errs.ErrNotFound) {
-		return pluginDefaultEnabled[plugin], nil
-	}
-	if err != nil {
+	cfg := WireConfig{Enabled: pluginDefaultEnabled[plugin]}
+	if err != nil && !errors.Is(err, errs.ErrNotFound) {
 		return false, err
 	}
-	return row.Enabled, nil
+	if row != nil {
+		cfg.Enabled, cfg.Spec = row.Enabled, decodeSpec(row.SpecJSON)
+	}
+	if plugin == model.PluginNameLogs {
+		cfg, err = uc.hostLogsConfig(ctx, edgeID, cfg)
+		return cfg.Enabled, err
+	}
+	return cfg.Enabled, nil
 }
 
 // PluginRow is the UI/HTTP-friendly view of one plugin row.
@@ -267,8 +268,24 @@ func (uc *PluginConfigUC) ListForUI(ctx context.Context, edgeID uint64) ([]Plugi
 			row.Enabled = r.Enabled
 			row.Spec = decodeSpec(r.SpecJSON)
 		}
+		if name == model.PluginNameLogs {
+			cfg, managed, err := uc.kubernetesLogsConfig(ctx, edgeID)
+			if err != nil {
+				return nil, err
+			}
+			if managed {
+				row.Enabled = cfg.Enabled
+				row.Spec = mergeRuntimeOverlay(row.Spec, cfg.Spec)
+			} else {
+				effective, err := uc.hostLogsConfig(ctx, edgeID, WireConfig{Enabled: row.Enabled, Spec: row.Spec})
+				if err != nil {
+					return nil, err
+				}
+				row.Enabled = effective.Enabled
+			}
+		}
 		if name == model.PluginNameAutoAPM {
-			row.Enabled = uc.isAutoAPMEnabled(ctx)
+			row.Enabled = true
 			if uc.kubernetesAutoAPM != nil {
 				spec, managed, err := uc.kubernetesAutoAPM(ctx, edgeID)
 				if err != nil {
@@ -311,6 +328,12 @@ func (uc *PluginConfigUC) Set(ctx context.Context, edgeID uint64, plugin string,
 	var databaseSecretReqs []tunnel.WriteDatabaseMetricsSecretRequest
 	var previous *model.PluginConfig
 	switch plugin {
+	case model.PluginNameLogs:
+		if _, managed, err := uc.kubernetesLogsConfig(ctx, edgeID); err != nil {
+			return nil, err
+		} else if managed {
+			return nil, fmt.Errorf("%w: configure Kubernetes log capture in service discovery", errs.ErrInvalid)
+		}
 	case model.PluginNameAutoAPM:
 		if uc.kubernetesAutoAPM != nil {
 			_, managed, err := uc.kubernetesAutoAPM(ctx, edgeID)
@@ -321,8 +344,8 @@ func (uc *PluginConfigUC) Set(ctx context.Context, edgeID uint64, plugin string,
 				return nil, fmt.Errorf("%w: configure Kubernetes capture on the cluster", errs.ErrInvalid)
 			}
 		}
-		// Per-edge writes only edit targets; they cannot change the global gate.
-		in.Enabled = uc.isAutoAPMEnabled(ctx)
+		// Discovery stays on; an empty selection stops capture.
+		in.Enabled = true
 		if in.Spec == nil {
 			previous, err := uc.repo.Get(ctx, edgeID, plugin)
 			if err != nil && !errors.Is(err, errs.ErrNotFound) {
@@ -452,12 +475,14 @@ func (uc *PluginConfigUC) FetchForEdge(ctx context.Context, edgeID uint64) (*Wir
 			cfg.Spec = decodeSpec(r.SpecJSON)
 		}
 		if name == model.PluginNameAutoAPM {
-			cfg.Enabled = uc.isAutoAPMEnabled(ctx)
+			cfg.Enabled = true
+			clusterManaged := false
 			if uc.kubernetesAutoAPM != nil {
 				spec, managed, err := uc.kubernetesAutoAPM(ctx, edgeID)
 				if err != nil {
 					return nil, fmt.Errorf("resolve Kubernetes capture settings: %w", err)
 				}
+				clusterManaged = managed
 				if managed {
 					cfg.Spec = nil
 					if spec == nil {
@@ -467,12 +492,13 @@ func (uc *PluginConfigUC) FetchForEdge(ctx context.Context, edgeID uint64) (*Wir
 					}
 				}
 			}
-			defaults, err := uc.autoAPMDefaults(ctx, edgeID)
-			if err != nil {
-				return nil, err
-			}
-			if defaults != nil && defaults.Environment != "" {
-				if environment, _ := cfg.Spec["environment"].(string); environment == "" {
+			if !clusterManaged {
+				defaults, err := uc.autoAPMDefaults(ctx, edgeID)
+				if err != nil {
+					return nil, err
+				}
+				if defaults != nil {
+					// The device owns the default, including clearing a legacy Edge value.
 					cfg.Spec = mergeRuntimeOverlay(cfg.Spec, map[string]interface{}{"environment": defaults.Environment})
 				}
 			}
@@ -484,6 +510,35 @@ func (uc *PluginConfigUC) FetchForEdge(ctx context.Context, edgeID uint64) (*Wir
 			}
 			if len(overlay) > 0 {
 				cfg.Spec = mergeRuntimeOverlay(cfg.Spec, overlay)
+			}
+		}
+		if name == model.PluginNameLogs {
+			selected, managed, err := uc.kubernetesLogsConfig(ctx, edgeID)
+			if err != nil {
+				return nil, fmt.Errorf("resolve Kubernetes log scope: %w", err)
+			}
+			if managed {
+				cfg.Enabled = selected.Enabled
+				cfg.Spec = mergeRuntimeOverlay(cfg.Spec, selected.Spec)
+			} else {
+				cfg, err = uc.hostLogsConfig(ctx, edgeID, cfg)
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+		if name == model.PluginNameAutoAPM {
+			// Capture settings are uniform for hosts and Kubernetes, including
+			// configurations saved before these controls were removed from the UI.
+			cfg.Spec = mergeRuntimeOverlay(cfg.Spec, map[string]interface{}{
+				"sample_ratio": float64(1), "tls_insecure_skip_verify": true,
+			})
+			if targets, ok := cfg.Spec["targets"].([]interface{}); ok {
+				for _, target := range targets {
+					if fields, ok := target.(map[string]interface{}); ok {
+						delete(fields, "log_path")
+					}
+				}
 			}
 		}
 		if cfg.Enabled {

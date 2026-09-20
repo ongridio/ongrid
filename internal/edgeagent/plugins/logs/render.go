@@ -1,6 +1,7 @@
 package logs
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -13,11 +14,11 @@ import (
 	"strings"
 
 	"github.com/ongridio/ongrid/internal/edgeagent/plugins"
+	"github.com/ongridio/ongrid/internal/pkg/autoapm"
 	"gopkg.in/yaml.v3"
 )
 
 const (
-	defaultKubernetesPodLogPath  = "/var/log/pods/*/*/*.log"
 	backendBuiltinLoki           = "builtin_loki"
 	backendExternalES            = "external_elasticsearch"
 	logsStorageExtension         = "file_storage/logs"
@@ -28,16 +29,19 @@ const (
 )
 
 var (
-	sourceIDPattern    = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$`)
-	resourceKeyRegex   = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9._-]{0,127}$`)
-	datasetPattern     = regexp.MustCompile(`^ongrid\.[a-z0-9][a-z0-9._-]{0,91}$`)
-	namespacePattern   = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,99}$`)
-	logsProbeIDPattern = regexp.MustCompile(`^ongrid-log-probe-[A-Za-z0-9_-]{20,64}$`)
+	selectedPodLogPattern = regexp.MustCompile(`^/var/log/pods/[a-z0-9][a-z0-9-]*_(\*|[a-zA-Z0-9][a-zA-Z0-9.-]*)_(\*|[a-zA-Z0-9][a-zA-Z0-9.-]*)/(\*|[a-z0-9][a-z0-9-]*)/\*\.log$`)
+	sourceIDPattern       = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$`)
+	resourceKeyRegex      = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9._-]{0,127}$`)
+	datasetPattern        = regexp.MustCompile(`^ongrid\.[a-z0-9][a-z0-9._-]{0,91}$`)
+	namespacePattern      = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,99}$`)
+	logsProbeIDPattern    = regexp.MustCompile(`^ongrid-log-probe-[A-Za-z0-9_-]{20,64}$`)
 )
 
 type fileSource struct {
 	ID               string
 	ServiceName      string
+	ServiceNamespace string
+	Environment      string
 	Dataset          string
 	Include          []string
 	Exclude          []string
@@ -88,24 +92,25 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 
 	receivers := make(map[string]interface{})
 	receiverIDs := make([]string, 0, 4)
-	if mode == "kubernetes" {
-		podPath := strings.TrimSpace(stringSpec(spec, "pod_log_path"))
-		if podPath == "" {
-			podPath = defaultKubernetesPodLogPath
-		}
-		if err := validateLogPattern(podPath); err != nil {
-			return nil, fmt.Errorf("logs plugin: pod_log_path: %w", err)
-		}
-		receiverID := "filelog/kubernetes"
-		receivers[receiverID] = kubernetesReceiver(spec, cfg.EdgeID, clusterID, nodeName, podPath, startAt)
+	enableJournald := boolSpecDefault(spec, "enable_journald", true)
+	if enableJournald {
+		receiverID := "journald/system"
+		receivers[receiverID] = journaldReceiver(spec, cfg.EdgeID, startAt)
 		receiverIDs = append(receiverIDs, receiverID)
-	} else {
-		enableJournald := boolSpecDefault(spec, "enable_journald", true)
-		if enableJournald {
-			receiverID := "journald/system"
-			receivers[receiverID] = journaldReceiver(spec, cfg.EdgeID, startAt)
+	}
+	if mode == "kubernetes" {
+		podPaths := stringSlice(spec, "pod_log_paths")
+		for _, podPath := range podPaths {
+			if !selectedPodLogPattern.MatchString(podPath) {
+				return nil, errors.New("logs plugin: invalid selected Kubernetes log path")
+			}
+		}
+		if len(podPaths) > 0 {
+			receiverID := "filelog/kubernetes"
+			receivers[receiverID] = kubernetesReceiver(spec, cfg.EdgeID, clusterID, nodeName, podPaths, startAt)
 			receiverIDs = append(receiverIDs, receiverID)
 		}
+	} else {
 		sources, err := parseFileSources(spec, startAt)
 		if err != nil {
 			return nil, err
@@ -114,6 +119,42 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 			sources = []fileSource{{
 				ID: "system", ServiceName: "system", Include: []string{"/var/log/syslog", "/var/log/messages"}, Parser: "plain", StartAt: startAt,
 			}}
+		}
+		if raw, ok := spec["service_capture"]; ok {
+			fields, ok := raw.(map[string]interface{})
+			if !ok {
+				return nil, errors.New("logs plugin: service_capture must be an object")
+			}
+			capture, err := autoapm.Parse(fields)
+			if err != nil {
+				return nil, err
+			}
+			seen := map[string]bool{}
+			var selected []fileSource
+			var paths []string
+			for _, target := range capture.Targets {
+				if target.LogPath == "" || seen[target.LogPath] {
+					continue
+				}
+				seen[target.LogPath] = true
+				environment := target.Environment
+				if environment == "" {
+					environment = capture.Environment
+				}
+				sum := sha256.Sum256([]byte(target.LogPath))
+				selected = append(selected, fileSource{
+					ID: fmt.Sprintf("service-%x", sum[:8]), ServiceName: target.ServiceName,
+					ServiceNamespace: target.ServiceNamespace, Environment: environment,
+					Include: []string{target.LogPath}, Exclude: append([]string(nil), paths...),
+					Parser: "plain", StartAt: startAt,
+				})
+				paths = append(paths, target.LogPath)
+			}
+			// Service selection owns these files, even if an existing device glob overlaps.
+			for i := range sources {
+				sources[i].Exclude = append(sources[i].Exclude, paths...)
+			}
+			sources = append(sources, selected...)
 		}
 		for _, source := range sources {
 			receiverID := "filelog/" + source.ID
@@ -334,7 +375,7 @@ func journaldReceiver(spec map[string]interface{}, edgeID uint64, startAt string
 	return receiver
 }
 
-func kubernetesReceiver(spec map[string]interface{}, edgeID uint64, clusterID, nodeName, podPath, startAt string) map[string]interface{} {
+func kubernetesReceiver(spec map[string]interface{}, edgeID uint64, clusterID, nodeName string, podPaths []string, startAt string) map[string]interface{} {
 	resource := map[string]interface{}{
 		"device_id": strconv.FormatUint(edgeID, 10), "cluster_id": clusterID, "ongrid_source": "kubernetes:pod",
 	}
@@ -342,14 +383,17 @@ func kubernetesReceiver(spec map[string]interface{}, edgeID uint64, clusterID, n
 		resource["k8s.node.name"] = nodeName
 	}
 	excludes := normalizedStrings(stringSlice(spec, "pod_log_exclude"), maxSourcePatterns)
-	if len(excludes) == 0 {
-		excludes = []string{
-			"/var/log/pods/ongrid-system_ongrid-node-*/*/*.log",
-			"/var/log/pods/ongrid_ongrid-node-*/*/*.log",
-		}
+	excludes = append(excludes,
+		"/var/log/pods/ongrid-system_ongrid-node-*/*/*.log",
+		"/var/log/pods/ongrid_ongrid-node-*/*/*.log",
+		"/var/log/pods/ongrid-system_ongrid-edge-node-*/*/*.log",
+		"/var/log/pods/ongrid_ongrid-edge-node-*/*/*.log",
+	)
+	if ownPod := stringSpec(spec, "pod_log_self_exclude"); ownPod != "" {
+		excludes = append(excludes, ownPod)
 	}
 	return map[string]interface{}{
-		"include": []string{podPath}, "exclude": excludes,
+		"include": podPaths, "exclude": excludes,
 		"start_at": startAt, "storage": logsStorageExtension,
 		"include_file_path": true, "include_file_name": false,
 		"exclude_older_than": "24h", "max_log_size": "256KiB",
@@ -365,6 +409,12 @@ func fileReceiver(edgeID uint64, source fileSource) map[string]interface{} {
 	}
 	if source.ServiceName != "" {
 		resource["service.name"] = source.ServiceName
+	}
+	if source.ServiceNamespace != "" {
+		resource["service.namespace"] = source.ServiceNamespace
+	}
+	if source.Environment != "" {
+		resource["deployment.environment.name"] = source.Environment
 	}
 	if source.Dataset != "" {
 		resource["data_stream.dataset"] = source.Dataset
