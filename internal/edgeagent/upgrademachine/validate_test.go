@@ -13,6 +13,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -46,10 +47,6 @@ func TestDestBaseWhitelist_Membership(t *testing.T) {
 
 func TestValidateEntry_DestWhitelist(t *testing.T) {
 	binDir := t.TempDir()
-	// 大小写变体用例需要大小写不敏感文件系统（Windows/NTFS）；Linux CI 跳过
-	if _, err := filepath.EvalSymlinks(strings.ToUpper(binDir)); err != nil {
-		t.Skipf("文件系统大小写敏感，大小写变体用例不适用: %v", err)
-	}
 
 	cases := []struct {
 		name    string
@@ -59,7 +56,6 @@ func TestValidateEntry_DestWhitelist(t *testing.T) {
 		{"worker 合法", filepath.Join(binDir, WorkerBinaryName), false},
 		{"supervisor 合法", filepath.Join(binDir, SupervisorBinaryName), false},
 		{"plugin 合法", filepath.Join(binDir, "windows_exporter.exe"), false},
-		{"大小写变体合法（NTFS 不区分大小写）", filepath.Join(strings.ToUpper(binDir), strings.ToUpper(WorkerBinaryName)), false},
 		{"系统镜像被拒", filepath.Join(binDir, "svchost.exe"), true},
 		{"任意文件名被拒", filepath.Join(binDir, "evil.exe"), true},
 		{"受管根外被拒", filepath.Join(t.TempDir(), WorkerBinaryName), true},
@@ -74,6 +70,56 @@ func TestValidateEntry_DestWhitelist(t *testing.T) {
 			err := validateDest(binDir, tc.dest)
 			if (err != nil) != tc.wantErr {
 				t.Errorf("validateDest(%q) err=%v, wantErr=%v", tc.dest, err, tc.wantErr)
+			}
+		})
+	}
+	t.Run("大小写变体合法（NTFS 不区分大小写）", func(t *testing.T) {
+		requireCaseInsensitiveDir(t, binDir)
+		dest := filepath.Join(strings.ToUpper(binDir), strings.ToUpper(WorkerBinaryName))
+		if err := validateDest(binDir, dest); err != nil {
+			t.Fatalf("validateDest(%q): %v", dest, err)
+		}
+	})
+}
+
+// 只跳过不支持大小写变体的用例，其他白名单与越界检查仍在 Linux 执行。
+func requireCaseInsensitiveDir(t *testing.T, dir string) {
+	t.Helper()
+	if _, err := os.Stat(strings.ToUpper(dir)); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Fatalf("Windows 回归测试需要大小写不敏感目录: %v", err)
+		}
+		t.Skipf("文件系统不支持大小写变体: %v", err)
+	}
+}
+
+func TestEnsureWithinDir_CaseInsensitivePaths(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "managed")
+	child := filepath.Join(root, "plugins")
+	sibling := filepath.Join(parent, "managed-evil")
+	for _, dir := range []string{child, sibling} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	requireCaseInsensitiveDir(t, root)
+	for _, tc := range []struct {
+		name    string
+		root    string
+		path    string
+		wantErr bool
+	}{
+		{"same directory with upper-case path", root, strings.ToUpper(root), false},
+		{"same directory with upper-case root", strings.ToUpper(root), root, false},
+		{"child with upper-case path", root, strings.ToUpper(child), false},
+		{"sibling prefix still rejected", root, strings.ToUpper(sibling), true},
+		{"parent still rejected", root, strings.ToUpper(parent), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ensureWithinDir(tc.root, tc.path)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("ensureWithinDir(%q, %q) = %v, wantErr=%v", tc.root, tc.path, err, tc.wantErr)
 			}
 		})
 	}

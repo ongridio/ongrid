@@ -116,6 +116,27 @@ test: ## 单元测试
 test-race: ## 单元测试 + race
 	go test -race ./...
 
+# Windows 交叉编译与原生验证共用包清单，避免只编译入口而漏掉测试。
+WINDOWS_EDGE_BASE_PACKAGES := ./internal/edgeagent/dpapi/... ./internal/edgeagent/edgedirs/... ./internal/edgeagent/install/... ./internal/edgeagent/config/...
+WINDOWS_EDGE_UPGRADE_PACKAGES := ./cmd/ongrid-edge-supervisor ./internal/edgeagent/upgrademachine ./internal/edgeagent/upgradebundle ./internal/edgeagent/supervisorhealth
+WINDOWS_EDGE_PACKAGES := $(WINDOWS_EDGE_BASE_PACKAGES) $(WINDOWS_EDGE_UPGRADE_PACKAGES)
+
+.PHONY: check-windows-cross test-windows-native
+check-windows-cross: export GOOS := windows
+check-windows-cross: export GOARCH := amd64
+check-windows-cross: export CGO_ENABLED := 0
+check-windows-cross: ## 在 Linux 上交叉构建、vet 并编译 Windows Edge 测试
+	go build $(WINDOWS_EDGE_PACKAGES) ./cmd/ongrid-edge
+	go vet $(WINDOWS_EDGE_PACKAGES) ./cmd/ongrid-edge
+	@set -e; for pkg in $(WINDOWS_EDGE_PACKAGES); do \
+		echo "compile Windows test binary: $$pkg"; \
+		go test -c -o /dev/null "$$pkg"; \
+	done
+
+test-windows-native: ## 在 Windows 上实际执行 supervisor 与升级相关 race 测试
+	@test "$$(go env GOHOSTOS)" = windows || { echo "requires a native Windows Go toolchain"; exit 1; }
+	go test -race -count=1 -timeout=10m $(WINDOWS_EDGE_UPGRADE_PACKAGES)
+
 test-integration: ## 集成测试（build tag: integration）
 	go test -tags=integration ./...
 

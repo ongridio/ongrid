@@ -184,7 +184,7 @@ func ensureWithinDir(rootDir, path string) error {
 	if err != nil {
 		return fmt.Errorf("canonical %s: %w", path, err)
 	}
-	if pathCanon == rootCanon {
+	if strings.EqualFold(pathCanon, rootCanon) {
 		return nil
 	}
 	rootPrefix := rootCanon + string(filepath.Separator)
