@@ -19,6 +19,7 @@ import (
 	"github.com/singchia/geminio"
 	gclient "github.com/singchia/geminio/client"
 	"github.com/singchia/geminio/delegate"
+	"golang.org/x/sync/singleflight"
 )
 
 // NewClient returns a Client backed by github.com/singchia/geminio. The
@@ -61,6 +62,16 @@ type geminioClient struct {
 	pendingConn       net.Conn
 	pendingGeneration uint64
 	nextGeneration    uint64
+
+	// Reachability probe state. probeFn is the injection seam for tests;
+	// nil means the real probeCloud. probeSF merges concurrent probes and
+	// probeLastErr/probeLastAt cache the latest conclusion for probeTTL.
+	probeFn      func(ctx context.Context) error
+	probeSF      singleflight.Group
+	probeMu      sync.Mutex
+	probeLastErr error
+	probeLastAt  time.Time
+	probeTTL     time.Duration
 
 	closeOnce sync.Once
 	closed    atomic.Bool
@@ -164,13 +175,15 @@ func (c *geminioClient) Dial(ctx context.Context) error {
 	}
 }
 
-// buildDialer wraps net.Dial (or tls.Dial if a TLS CA is set).
-func (c *geminioClient) buildDialer() (gclient.Dialer, error) {
-	addr := c.cfg.resolvedServerAddr()
+// dialTimeout is the TCP dial budget shared by the tunnel dialer and
+// the reachability probe so the two paths cannot drift.
+const dialTimeout = 10 * time.Second
+
+// loadTLSConfig returns the TLS material used to verify the server, or
+// nil when the deployment runs plain TCP. Shared by the tunnel dialer
+// and the reachability probe for the same reason as dialTimeout.
+func (c *geminioClient) loadTLSConfig() (*tls.Config, error) {
 	caFile := c.cfg.resolvedTLSCA()
-	if addr == "" {
-		return nil, errors.New("tunnel: ServerAddr (or CloudAddr) is required")
-	}
 	if caFile == "" {
 		// Fail closed: TLS was configured at install time (the installer
 		// records ONGRID_EDGE_TLS_REQUIRED=1 alongside the CA path), but the
@@ -180,14 +193,7 @@ func (c *geminioClient) buildDialer() (gclient.Dialer, error) {
 		if c.cfg.TLSRequired {
 			return nil, errors.New("tunnel: TLS required (installed with --tls-ca-file) but ONGRID_EDGE_TLS_CA_FILE is unset; refusing plaintext downgrade")
 		}
-		d := &net.Dialer{Timeout: 10 * time.Second}
-		return func() (net.Conn, error) {
-			conn, err := d.Dial("tcp", addr)
-			if err == nil {
-				c.trackConnection(conn)
-			}
-			return conn, err
-		}, nil
+		return nil, nil
 	}
 	pem, err := os.ReadFile(caFile)
 	if err != nil {
@@ -197,29 +203,58 @@ func (c *geminioClient) buildDialer() (gclient.Dialer, error) {
 	if !pool.AppendCertsFromPEM(pem) {
 		return nil, errors.New("tunnel: TLS CA file contains no valid PEM cert")
 	}
-	tlsCfg := &tls.Config{
+	return &tls.Config{
 		RootCAs:    pool,
 		MinVersion: tls.VersionTLS12,
-	}
-	// Derive the TLS ServerName from the address (required for cert
-	// verification). When the address is an IP literal but the cert's
-	// CN is a DNS name, the caller must override it via
-	// ONGRID_EDGE_TLS_SERVER_NAME.
+	}, nil
+}
+
+// applyTLSServerName derives the TLS ServerName from the address
+// (required for cert verification) — an explicit TLSServerName override
+// wins, otherwise the host part of addr is used when it is a DNS name.
+// Fail closed: a TLS config with an unresolved ServerName (IP-literal
+// address and no override) refuses to proceed, otherwise the TLS
+// handshake would fail later with a cryptic error ("certificate signed
+// by unknown authority" or "x509: cannot validate certificate") that
+// operators tend to misread as a CA misconfiguration.
+func (c *geminioClient) applyTLSServerName(tlsCfg *tls.Config, addr string) error {
 	if c.cfg.TLSServerName != "" {
 		tlsCfg.ServerName = c.cfg.TLSServerName
 	} else if host, _, err := net.SplitHostPort(addr); err == nil && net.ParseIP(host) == nil {
 		tlsCfg.ServerName = host
 	}
-	// Fail closed: a non-empty TLSCAFile with an unresolved ServerName
-	// (IP-literal address and no TLSServerName override) refuses to
-	// start. Otherwise the TLS handshake would fail later with a
-	// cryptic error ("certificate signed by unknown authority" or
-	// "x509: cannot validate certificate") that operators tend to
-	// misread as a CA misconfiguration.
 	if tlsCfg.ServerName == "" {
-		return nil, fmt.Errorf("tunnel: TLS ServerName unresolved (addr=%q is IP literal; set ONGRID_EDGE_TLS_SERVER_NAME)", addr)
+		return fmt.Errorf("tunnel: TLS ServerName unresolved (addr=%q is IP literal; set ONGRID_EDGE_TLS_SERVER_NAME)", addr)
 	}
-	d := &net.Dialer{Timeout: 10 * time.Second}
+	return nil
+}
+
+// buildDialer wraps net.Dial (or tls.Client if a TLS CA is set).
+func (c *geminioClient) buildDialer() (gclient.Dialer, error) {
+	addr := c.cfg.resolvedServerAddr()
+	if addr == "" {
+		return nil, errors.New("tunnel: ServerAddr (or CloudAddr) is required")
+	}
+	tlsCfg, err := c.loadTLSConfig()
+	if err != nil {
+		return nil, err
+	}
+	d := &net.Dialer{Timeout: dialTimeout}
+	if tlsCfg == nil {
+		return func() (net.Conn, error) {
+			conn, err := d.Dial("tcp", addr)
+			if err == nil {
+				c.trackConnection(conn)
+			}
+			return conn, err
+		}, nil
+	}
+	// Derive the TLS ServerName and fail closed when it cannot be
+	// resolved. Shared with the probe so both paths verify certificates
+	// against the same name.
+	if err := c.applyTLSServerName(tlsCfg, addr); err != nil {
+		return nil, err
+	}
 	return func() (net.Conn, error) {
 		raw, err := d.Dial("tcp", addr)
 		if err != nil {
@@ -229,6 +264,79 @@ func (c *geminioClient) buildDialer() (gclient.Dialer, error) {
 		c.trackConnection(conn)
 		return conn, nil
 	}, nil
+}
+
+// Probe budgets: the TCP leg reuses the tunnel's dialTimeout; the TLS
+// handshake leg gets its own budget because a SYN-answering middlebox
+// (reverse proxy or transparent proxy) accepts TCP but goes silent at
+// the first TLS byte — the handshake deadline is what turns that into a
+// red conclusion instead of an endless wait.
+const (
+	probeHandshakeTimeout = 10 * time.Second
+	defaultProbeTTL       = 30 * time.Second
+)
+
+// probeCloud dials the server address with the same transport semantics
+// as the tunnel dialer (resolved address, shared dial budget, shared
+// TLS material and certificate verification) and reports whether the
+// cloud endpoint answered. The connection is deliberately NOT fed
+// through trackConnection: a probe must never disturb the
+// pendingConn/generation state machine that mirrors the live tunnel.
+func (c *geminioClient) probeCloud(ctx context.Context) error {
+	addr := c.cfg.resolvedServerAddr()
+	if addr == "" {
+		return errors.New("tunnel: probe: ServerAddr (or CloudAddr) is required")
+	}
+	tlsCfg, err := c.loadTLSConfig()
+	if err != nil {
+		return err
+	}
+	if tlsCfg != nil {
+		// Same certificate-verification name as the tunnel dialer, so
+		// the probe conclusion cannot diverge from the live transport.
+		if err := c.applyTLSServerName(tlsCfg, addr); err != nil {
+			return err
+		}
+	}
+	d := &net.Dialer{Timeout: dialTimeout}
+	raw, err := d.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return err
+	}
+	defer raw.Close()
+	if tlsCfg == nil {
+		return nil
+	}
+	hctx, cancel := context.WithTimeout(ctx, probeHandshakeTimeout)
+	defer cancel()
+	if err := tls.Client(raw, tlsCfg).HandshakeContext(hctx); err != nil {
+		return err
+	}
+	return nil
+}
+
+// recycleTransport closes the current active connection so the
+// underlying RetryEnd redials on it. Used when a timed-out call's probe
+// says the cloud is reachable: the transport is half-open, and a fresh
+// dial recovers the next tick instead of waiting for TCP keepalives to
+// notice. Stale generations are ignored, mirroring recycleBrokenRoute.
+func (c *geminioClient) recycleTransport(generation uint64) {
+	if c.closed.Load() {
+		return
+	}
+	c.connMu.Lock()
+	if generation == 0 || generation != c.activeGeneration || c.activeConn == nil {
+		c.connMu.Unlock()
+		return
+	}
+	conn := c.activeConn
+	c.activeConn = nil
+	c.connMu.Unlock()
+
+	c.log.Warn("tunnel: rpc timed out but cloud reachable; recycling transport for redial")
+	if err := conn.Close(); err != nil {
+		c.log.Debug("tunnel: close timed-out transport", slog.Any("err", err))
+	}
 }
 
 // RegisterHandler installs a handler for cloud->edge RPCs. Safe to call
@@ -280,7 +388,7 @@ func (c *geminioClient) Call(ctx context.Context, method string, req, resp any) 
 	rsp, callErr := end.Call(ctx, method, end.NewRequest(body))
 	if callErr != nil {
 		c.recycleBrokenRoute(method, callErr, connGeneration)
-		return fmt.Errorf("tunnel call %q: %w", method, callErr)
+		return c.wrapCallFailure(method, callErr, connGeneration)
 	}
 	if rerr := rsp.Error(); rerr != nil {
 		c.recycleBrokenRoute(method, rerr, connGeneration)

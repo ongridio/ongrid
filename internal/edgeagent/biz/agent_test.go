@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -340,6 +341,244 @@ func TestAgent_PersistentHeartbeatAndRegistrationFailuresRestartProcess(t *testi
 	}
 	if got := fc.countOf(tunnel.MethodRegisterEdge); got < 6 {
 		t.Fatalf("register_edge called %d times, want initial registration plus >=5 recovery attempts", got)
+	}
+}
+
+// --- heartbeat failure classification: unreachable vs stuck ---
+//
+// The tunnel Call exit is the single classification point: it wraps
+// unreachable-class failures (DNS / dial / red reachability probe) with
+// tunnel.ErrCloudUnreachable, probe-green timeouts with
+// tunnel.ErrRPCTimeout, and passes everything else through with one %w
+// layer. The helpers below reproduce those exit shapes so the biz
+// layer sees exactly what the real tunnel returns.
+
+func dnsUnreachableExit() error {
+	return fmt.Errorf("tunnel call %q: %w: %w", tunnel.MethodHeartbeat,
+		tunnel.ErrCloudUnreachable,
+		&net.OpError{
+			Op:  "dial",
+			Net: "tcp",
+			Err: &net.DNSError{Err: "no such host", Name: "cloud.example.com", IsNotFound: true},
+		})
+}
+
+func dialRefusedExit() error {
+	return fmt.Errorf("tunnel call %q: %w: %w", tunnel.MethodHeartbeat,
+		tunnel.ErrCloudUnreachable,
+		&net.OpError{Op: "dial", Net: "tcp", Err: fmt.Errorf("connect: connection refused")})
+}
+
+// connWriteExit mimics a failure on an established connection: the
+// tunnel passes it through unclassified, which is stuck-class evidence.
+func connWriteExit() error {
+	return fmt.Errorf("tunnel call %q: %w", tunnel.MethodHeartbeat,
+		&net.OpError{Op: "write", Net: "tcp", Err: fmt.Errorf("connection reset by peer")})
+}
+
+// timeoutExit is the probe-green shape: the cloud answered the
+// reachability probe, the tunnel recycled the transport, and the
+// caller's streak accounting decides whether this warrants an exit.
+func timeoutExit() error {
+	return fmt.Errorf("tunnel call %q: %w: %w", tunnel.MethodHeartbeat,
+		tunnel.ErrRPCTimeout, context.DeadlineExceeded)
+}
+
+// errScript consumes errs in call order; once exhausted it keeps
+// returning tail (nil = success).
+type errScript struct {
+	errs []error
+	tail error
+}
+
+func (s *errScript) next(count int32) error {
+	if int(count) <= len(s.errs) {
+		return s.errs[count-1]
+	}
+	return s.tail
+}
+
+// TestAgent_HeartbeatErrorClassification verifies how the heartbeat loop
+// classifies failures: unreachable-class errors (DNS / dial failures)
+// are not counted and the process stays alive; stuck-class failures keep
+// counting toward the 5-failure exit. Only externally observable
+// behavior is asserted: exit / heartbeat call count / WARN log output.
+func TestAgent_HeartbeatErrorClassification(t *testing.T) {
+	stuckErr := fmt.Errorf("heartbeat unavailable")
+	tests := []struct {
+		name              string
+		heartbeat         errScript
+		register          error // persistent re-register failure (nil = success; the initial registration always succeeds)
+		registerFromStart bool  // fail the initial registration too, driving the EdgeID==0 retry path
+		runFor            time.Duration
+		wantStuck         bool
+		wantHbExact       int32 // exact heartbeat call count when wantStuck
+		wantHbMin         int32
+		wantLogContain    string
+	}{
+		{
+			name:           "dns failure stays alive, not counted",
+			heartbeat:      errScript{tail: dnsUnreachableExit()},
+			runFor:         250 * time.Millisecond,
+			wantHbMin:      7,
+			wantLogContain: "unreachable",
+		},
+		{
+			name:           "dial failure stays alive, not counted",
+			heartbeat:      errScript{tail: dialRefusedExit()},
+			runFor:         250 * time.Millisecond,
+			wantHbMin:      7,
+			wantLogContain: "unreachable",
+		},
+		{
+			name:      "stuck-class failures still exit (regression)",
+			heartbeat: errScript{tail: stuckErr},
+			register:  stuckErr,
+			runFor:    time.Second,
+			wantStuck: true,
+		},
+		{
+			name:      "write-stage OpError counts as stuck, not unreachable",
+			heartbeat: errScript{tail: connWriteExit()},
+			register:  stuckErr,
+			runFor:    time.Second,
+			wantStuck: true,
+		},
+		{
+			name:      "recovery after unreachable resets and continues",
+			heartbeat: errScript{errs: []error{dnsUnreachableExit(), dnsUnreachableExit(), dnsUnreachableExit()}},
+			runFor:    250 * time.Millisecond,
+			wantHbMin: 6,
+		},
+		{
+			name: "mixed sequence counts only stuck-class failures",
+			heartbeat: errScript{
+				errs: []error{
+					dnsUnreachableExit(), dnsUnreachableExit(), dnsUnreachableExit(),
+					stuckErr, stuckErr, stuckErr, stuckErr, stuckErr,
+				},
+				tail: stuckErr,
+			},
+			register:    stuckErr,
+			runFor:      time.Second,
+			wantStuck:   true,
+			wantHbExact: 8,
+		},
+		{
+			name:           "stuck heartbeat + unreachable re-register stays alive",
+			heartbeat:      errScript{tail: stuckErr},
+			register:       dnsUnreachableExit(),
+			runFor:         250 * time.Millisecond,
+			wantHbMin:      7,
+			wantLogContain: "unreachable",
+		},
+		{
+			// A probe-green timeout streak, one unreachable gap, then a
+			// single timeout: the unreachable gap resets the streak, so
+			// the post-gap failure must not ride on the old count and
+			// tip over the threshold.
+			name: "unreachable gap resets the stuck streak",
+			heartbeat: errScript{
+				errs: []error{
+					timeoutExit(), timeoutExit(), timeoutExit(), timeoutExit(),
+					dnsUnreachableExit(),
+					timeoutExit(),
+				},
+			},
+			register: stuckErr,
+			runFor:   250 * time.Millisecond,
+			// The sixth call must not ride on the pre-gap count of four;
+			// with the reset it lands at one and the agent keeps running.
+			wantHbMin: 7,
+		},
+		{
+			// Probe-green timeouts count toward the streak, a successful
+			// redial zeroes it, and a later timeout starts a fresh count
+			// instead of inheriting the pre-recovery one.
+			name: "recovery after probe-green timeouts starts a new streak",
+			heartbeat: errScript{
+				errs: []error{timeoutExit(), timeoutExit(), timeoutExit(), timeoutExit(), nil, timeoutExit()},
+			},
+			runFor:    250 * time.Millisecond,
+			wantHbMin: 7,
+		},
+		{
+			// The initial-registration retry path classifies the same
+			// way: an unreachable cloud keeps the process alive. The
+			// message, not the error text, is asserted — the typed
+			// error itself contains "unreachable" in its chain.
+			name:              "unreachable register retry stays alive",
+			register:          dnsUnreachableExit(),
+			registerFromStart: true,
+			runFor:            250 * time.Millisecond,
+			wantLogContain:    "staying alive",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fc := newFakeClient()
+			register := tt.register
+			fc.callError = func(method string, count int32) error {
+				switch method {
+				case tunnel.MethodHeartbeat:
+					return tt.heartbeat.next(count)
+				case tunnel.MethodRegisterEdge:
+					// count==1 is the initial registration at Run startup.
+					// It must succeed so EdgeID != 0 and the heartbeat
+					// loop reaches the code under test, unless the case
+					// explicitly drives the EdgeID==0 retry path.
+					if register != nil && (count > 1 || tt.registerFromStart) {
+						return register
+					}
+				}
+				return nil
+			}
+			logBuf := &strings.Builder{}
+			a := biz.NewAgent(fc, &fakeCollector{}, biz.Config{
+				HeartbeatInterval: 10 * time.Millisecond,
+				MetricsInterval:   time.Second,
+				CloudAddr:         "cloud.example.com:443",
+			}, slog.New(slog.NewTextHandler(logBuf, nil)))
+
+			ctx, cancel := context.WithTimeout(context.Background(), tt.runFor+2*time.Second)
+			defer cancel()
+			done := make(chan error, 1)
+			go func() { done <- a.Run(ctx) }()
+			var exitErr error
+			select {
+			case exitErr = <-done:
+			case <-time.After(tt.runFor):
+			}
+			if tt.wantStuck {
+				if exitErr == nil || !strings.Contains(exitErr.Error(), "tunnel stuck") {
+					t.Fatalf("Run error = %v, want tunnel stuck", exitErr)
+				}
+				if tt.wantHbExact > 0 {
+					if got := fc.countOf(tunnel.MethodHeartbeat); got != tt.wantHbExact {
+						t.Fatalf("heartbeat calls = %d, want exactly %d (unreachable failures must not count)", got, tt.wantHbExact)
+					}
+				}
+				return
+			}
+			if exitErr != nil {
+				t.Fatalf("Run exited early: %v", exitErr)
+			}
+			// Stop the agent and wait for Run to return before reading
+			// the log buffer or call counters: the heartbeat goroutine
+			// writes both, and strings.Builder is not thread-safe.
+			cancel()
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				t.Fatal("Run did not stop after cancel")
+			}
+			if got := fc.countOf(tunnel.MethodHeartbeat); got < tt.wantHbMin {
+				t.Fatalf("heartbeat calls = %d, want >= %d", got, tt.wantHbMin)
+			}
+			if tt.wantLogContain != "" && !strings.Contains(logBuf.String(), tt.wantLogContain) {
+				t.Fatalf("logs missing %q; got:\n%s", tt.wantLogContain, logBuf.String())
+			}
+		})
 	}
 }
 
