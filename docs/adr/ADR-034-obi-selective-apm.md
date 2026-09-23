@@ -65,6 +65,14 @@ OrbStack PID 命名空间补丁仅用于本地测试，补丁、源码副本和�
 
 ## 实例基础资源（2026-09-20）
 
+### Kubernetes 集群身份统一（2026-09-23）
+
+Manager 复用 Kubernetes Cluster.NodeID 映射，在下发 OBI、SDK Collector 和日志配置时设置统一拓扑 `cluster_id`；内部注册和认证继续使用原 K8s ID。新 APM 数据另携带 `k8s_cluster_id` 作为内部身份校验，避免统一 ID 与历史内部 ID 数字碰撞。映射缺失时拒绝下发，不将注册 ID 当作统一 ID。用户保存采集设置不能覆盖这些 Manager 所有的字段。
+
+按统一集群查询时，分别匹配新数据的 `(cluster_id=拓扑 ID, k8s_cluster_id=内部 ID)` 和历史数据的 `(cluster_id=内部 ID, k8s_cluster_id 缺失)`，指标在 rate 后、汇总前合并，链路使用同样的范围。日志回退先将新旧实例身份解析为同一个拓扑集群，仍限制设备、namespace 和 Pod。回滚时同时恢复 Manager、Edge 和 web，历史数据不重写。
+
+独立遥测网关由控制器刷新 Secret 的 `telemetry-cluster-node-id` 获取统一 ID；旧 `telemetry-cluster-id` 仍供注册及 Kubernetes 基础设施指标使用，基础设施查询继续沿用已有映射。升级需同步更新 Manager、控制器、网关与节点 Edge，网关在新 ID 尚未投影时拒绝生成错误身份的配置。Tempo spanmetrics 需增加 `k8s_cluster_id` dimension（安装模板已更新），否则缺少该维度的新 spanmetrics 不会被归入选定集群。
+
 在 autoapm 既有 15 秒指标 scrape / push 通道附加 `ongrid_apm_process_*`，复用 procfs 库读取 CPU 累计秒、RSS、虚拟内存、线程、FD 和磁盘字节计数，不新增 exporter、监听端口或 OBI 源码补丁。OBI `target_info` 提供服务身份；主机以实时 exe + port + PID 再验证，Kubernetes 复用现有只读 Pod API，限制当前节点，以 Pod UID / 容器名称取得当前 runtime container ID，再精确匹配 `/proc/<pid>/cgroup`。不按 Pod 总量、进程名称或工作负载前缀猜测。
 
 主机发现通过 procfs 的监听 socket inode 关联全部所属进程，保留同路径、同端口的不同 PID，覆盖 `SO_REUSEPORT` 和继承共享监听 socket 的 worker；同一 PID 的重复监听记录仍合并。只调整 Ongrid 的发现逻辑，不修改 OBI 或依赖库源码。

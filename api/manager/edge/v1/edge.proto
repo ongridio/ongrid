@@ -327,6 +327,9 @@ message AutoAPMSpec {
     // Manager capture permits self-signed certificates for hosts and Kubernetes.
     bool tls_insecure_skip_verify = 4 [json_name = "tls_insecure_skip_verify"];
     AutoAPMKubernetes kubernetes = 5;
+    // Manager-owned runtime identity; rejected on user configuration writes.
+    uint64 cluster_id = 6;
+    uint64 k8s_cluster_id = 7;
 }
 message AutoAPMTarget {
     // Exact executable path AND listening port; all matching process instances.

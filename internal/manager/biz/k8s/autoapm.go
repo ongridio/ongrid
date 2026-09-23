@@ -59,6 +59,9 @@ func (u *Usecase) SetAutoAPM(ctx context.Context, clusterID uint64, raw map[stri
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", errs.ErrInvalid, err)
 	}
+	if spec.ClusterID != 0 || spec.K8sClusterID != 0 {
+		return nil, fmt.Errorf("%w: cluster identities are manager-owned", errs.ErrInvalid)
+	}
 	if spec.Kubernetes == nil || len(spec.Targets) > 0 || spec.Environment != "" {
 		return nil, fmt.Errorf("%w: Kubernetes rules required; environment is inherited from the cluster", errs.ErrInvalid)
 	}
@@ -122,4 +125,24 @@ func (u *Usecase) AutoAPMForEdge(ctx context.Context, edgeID uint64) (spec *auto
 
 func (u *Usecase) AutoAPMSpecs(ctx context.Context) ([]string, error) {
 	return u.repo.ListAutoAPMSpecs(ctx)
+}
+
+// TelemetryClusterForEdge translates registration identity into the shared
+// topology identity. Controllers and gateways belong to the same cluster.
+func (u *Usecase) TelemetryClusterForEdge(ctx context.Context, edgeID uint64) (uint64, uint64, error) {
+	clusterID, err := u.repo.GetClusterIDByEdgeID(ctx, edgeID)
+	if errors.Is(err, errs.ErrNotFound) {
+		return 0, 0, nil
+	}
+	if err != nil {
+		return 0, 0, err
+	}
+	cluster, err := u.repo.GetCluster(ctx, clusterID)
+	if err != nil {
+		return 0, 0, err
+	}
+	if cluster.NodeID == nil || *cluster.NodeID == 0 {
+		return 0, 0, fmt.Errorf("Kubernetes cluster %d has no topology mapping", clusterID)
+	}
+	return *cluster.NodeID, clusterID, nil
 }

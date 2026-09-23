@@ -535,6 +535,7 @@ type k8sEnrollResponse struct {
 }
 
 type k8sTelemetryConfig struct {
+	ClusterNodeID          uint64 `json:"cluster_node_id"`
 	ClusterID              uint64 `json:"cluster_id"`
 	AccessKey              string `json:"access_key"`
 	SecretKey              string `json:"secret_key"`

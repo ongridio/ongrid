@@ -812,6 +812,7 @@ type enrollResponse struct {
 }
 
 type telemetryConfigResponse struct {
+	ClusterNodeID          uint64 `json:"cluster_node_id"`
 	ClusterID              uint64 `json:"cluster_id"`
 	AccessKey              string `json:"access_key"`
 	SecretKey              string `json:"secret_key"`
@@ -839,6 +840,7 @@ func telemetryConfigDTO(in *biz.TelemetryConfig) *telemetryConfigResponse {
 		return nil
 	}
 	return &telemetryConfigResponse{
+		ClusterNodeID:          in.ClusterNodeID,
 		ClusterID:              in.ClusterID,
 		AccessKey:              in.AccessKey,
 		SecretKey:              in.SecretKey,

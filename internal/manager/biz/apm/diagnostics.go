@@ -21,12 +21,13 @@ type Check struct {
 }
 
 type Instance struct {
-	InstanceID string `json:"instance_id"`
-	DeviceID   string `json:"device_id"`
-	ClusterID  string `json:"cluster_id"`
-	Pod        string `json:"pod"`
-	Version    string `json:"version"`
-	Namespace  string `json:"namespace"`
+	K8sClusterID string `json:"k8s_cluster_id,omitempty"`
+	InstanceID   string `json:"instance_id"`
+	DeviceID     string `json:"device_id"`
+	ClusterID    string `json:"cluster_id"`
+	Pod          string `json:"pod"`
+	Version      string `json:"version"`
+	Namespace    string `json:"namespace"`
 }
 
 type Diagnostics struct {
@@ -79,7 +80,11 @@ func (s *Service) Diagnostics(ctx context.Context, q Query) (*Diagnostics, error
 	}
 	if err == nil && len(rows) > 0 && q.MetricSource != "tempo_spanmetrics" {
 		// Prometheus sample freshness at the selected end, not request activity.
-		fresh, freshErr := s.instant(ctx, "max(timestamp("+q.counter()+q.metricSelector()+"))", q.End)
+		timestamps := []string{}
+		for _, selector := range q.metricSelectors() {
+			timestamps = append(timestamps, "timestamp("+q.counter()+selector+")")
+		}
+		fresh, freshErr := s.instant(ctx, "max("+strings.Join(timestamps, " or ")+")", q.End)
 		freshStatus := "not_observed"
 		if freshErr != nil {
 			freshStatus = "unavailable"
@@ -94,7 +99,7 @@ func (s *Service) Diagnostics(ctx context.Context, q Query) (*Diagnostics, error
 		out.Checks = append(out.Checks, Check{"metric_freshness", freshStatus, "prometheus_sample_at_window_end"})
 		// Keep instance discovery independent of trace sampling. Scope is still
 		// the exact service/environment/namespace and selected metric schema.
-		expr := q.aggregate("count_over_time", q.counter(), q.End.Sub(q.Start), "service_instance_id,device_id,cluster_id,k8s_pod_name,service_version,k8s_namespace_name")
+		expr := q.aggregate("count_over_time", q.counter(), q.End.Sub(q.Start), "service_instance_id,device_id,cluster_id,k8s_pod_name,service_version,k8s_namespace_name,k8s_cluster_id")
 		series, instanceErr := s.instant(ctx, expr, q.End)
 		if instanceErr != nil {
 			out.Checks = append(out.Checks, Check{"instance_metrics", "unavailable", "query_failed"})
@@ -103,7 +108,7 @@ func (s *Service) Diagnostics(ctx context.Context, q Query) (*Diagnostics, error
 			for _, sample := range series {
 				labels := sample.Metric
 				missingID = missingID || labels["service_instance_id"] == ""
-				addInstance(Instance{InstanceID: labels["service_instance_id"], DeviceID: labels["device_id"], ClusterID: labels["cluster_id"], Pod: labels["k8s_pod_name"], Version: labels["service_version"], Namespace: labels["k8s_namespace_name"]})
+				addInstance(Instance{InstanceID: labels["service_instance_id"], DeviceID: labels["device_id"], ClusterID: labels["cluster_id"], K8sClusterID: labels["k8s_cluster_id"], Pod: labels["k8s_pod_name"], Version: labels["service_version"], Namespace: labels["k8s_namespace_name"]})
 			}
 			status := "observed"
 			if len(out.Instances) == 0 {
@@ -180,13 +185,8 @@ func (s *Service) Diagnostics(ctx context.Context, q Query) (*Diagnostics, error
 		matched := false
 		for _, resource := range resources {
 			attrs := resource.attributes()
-			if scope := q.resourceScope; scope != nil {
-				if scope.ClusterID != "" && attrs["cluster_id"] != scope.ClusterID {
-					continue
-				}
-				if scope.ClusterID == "" && !slices.Contains(scope.DeviceIDs, attrs["device_id"]) {
-					continue
-				}
+			if !q.resourceScope.matches(attrs) {
+				continue
 			}
 			if (q.DeviceID != "" && attrs["device_id"] != q.DeviceID) || (q.ClusterID != "" && attrs["cluster_id"] != q.ClusterID) {
 				continue
@@ -207,7 +207,7 @@ func (s *Service) Diagnostics(ctx context.Context, q Query) (*Diagnostics, error
 					missingParents++
 				}
 			}
-			instance := Instance{InstanceID: attrs["service.instance.id"], DeviceID: attrs["device_id"], ClusterID: attrs["cluster_id"], Pod: attrs["k8s.pod.name"], Version: attrs["service.version"], Namespace: attrs["k8s.namespace.name"]}
+			instance := Instance{InstanceID: attrs["service.instance.id"], DeviceID: attrs["device_id"], ClusterID: attrs["cluster_id"], K8sClusterID: attrs["k8s_cluster_id"], Pod: attrs["k8s.pod.name"], Version: attrs["service.version"], Namespace: attrs["k8s.namespace.name"]}
 			addInstance(instance)
 		}
 		if matched {

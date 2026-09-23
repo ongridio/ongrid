@@ -380,6 +380,7 @@ export default function ApmPage() {
   const traceScopeReady = !params.has('cluster_node_id') || !!resolvedScope;
   if (resolvedScope) {
     traceParams.set('telemetry_cluster_id', resolvedScope.cluster_id);
+    traceParams.set('telemetry_k8s_cluster_id', resolvedScope.k8s_cluster_id || '');
     traceParams.set('cluster_device_ids', (resolvedScope.device_ids || []).join(','));
   }
   if (combined) traceParams.set('protocol', 'all');

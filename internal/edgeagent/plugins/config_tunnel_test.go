@@ -121,7 +121,9 @@ func TestTunnelConfigFetcherAppliesKubernetesLogsDefaults(t *testing.T) {
 		t.Fatalf("auth = %q/%q, want ak/sk", cfg.AuthUser, cfg.AuthPass)
 	}
 	assertSpecEqual(t, cfg.Spec, "mode", "kubernetes")
-	assertSpecEqual(t, cfg.Spec, "cluster_id", "9")
+	if cfg.Spec["cluster_id"] != nil {
+		t.Fatal("bootstrap ID leaked into telemetry")
+	}
 	assertSpecEqual(t, cfg.Spec, "node_name", "kind-worker")
 	if !cfg.Enabled {
 		t.Fatal("missing container selection stopped node journal")
@@ -220,8 +222,8 @@ func TestTunnelConfigFetcherAppliesKubernetesTracesDefaults(t *testing.T) {
 		t.Fatalf("auth = %q/%q, want enrolled credentials", cfg.AuthUser, cfg.AuthPass)
 	}
 	extra := specMap(t, cfg.Spec, "extra_attrs")
-	if extra["cluster_id"] != "9" {
-		t.Fatalf("extra_attrs.cluster_id = %#v, want 9", extra["cluster_id"])
+	if extra["cluster_id"] != nil {
+		t.Fatal("bootstrap ID leaked into telemetry")
 	}
 	if extra["node_name"] != "kind-worker" {
 		t.Fatalf("extra_attrs.node_name = %#v, want kind-worker", extra["node_name"])
@@ -309,8 +311,8 @@ func TestTunnelConfigFetcherAppliesKubernetesGatewayTracesDefaults(t *testing.T)
 	assertSpecEqual(t, cfg.Spec, "metrics_export_endpoint", "127.0.0.1:9464")
 	assertSpecEqual(t, cfg.Spec, "tls_insecure_skip_verify", true)
 	extra := specMap(t, cfg.Spec, "extra_attrs")
-	if extra["cluster_id"] != "9" {
-		t.Fatalf("extra_attrs.cluster_id = %#v, want 9", extra["cluster_id"])
+	if extra["cluster_id"] != nil {
+		t.Fatal("bootstrap ID leaked into telemetry")
 	}
 	if extra["telemetry_gateway"] != "kubernetes" {
 		t.Fatalf("extra_attrs.telemetry_gateway = %#v, want kubernetes", extra["telemetry_gateway"])
@@ -501,7 +503,9 @@ func TestTunnelConfigFetcherAppliesKubernetesDefaultsToEnvFallback(t *testing.T)
 		t.Fatalf("Endpoint = %q", cfg.Endpoint)
 	}
 	assertSpecEqual(t, cfg.Spec, "mode", "kubernetes")
-	assertSpecEqual(t, cfg.Spec, "cluster_id", "9")
+	if cfg.Spec["cluster_id"] != nil {
+		t.Fatal("bootstrap ID leaked into telemetry")
+	}
 	assertSpecEqual(t, cfg.Spec, "node_name", "kind-worker")
 	assertSpecEqual(t, cfg.Spec, "enable_k8sattributes", false)
 }

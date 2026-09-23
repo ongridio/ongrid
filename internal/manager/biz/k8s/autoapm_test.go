@@ -60,3 +60,38 @@ func TestClusterCaptureFollowsNodesAndEnvironment(t *testing.T) {
 		t.Fatal("empty rules must stop capture")
 	}
 }
+
+func TestTelemetryClusterMappingAndOwnership(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	nodeID := uint64(132)
+	cluster := &model.Cluster{Name: "mapped", NodeID: &nodeID}
+	if err := repo.CreateCluster(ctx, cluster); err != nil {
+		t.Fatal(err)
+	}
+	bindFakeController(t, repo, cluster.ID, 63)
+	bindFakeNode(t, repo, cluster.ID, 64, "node-a", "uid-a")
+	uc := NewUsecase(repo, nil, Config{})
+	for _, id := range []uint64{63, 64} {
+		unified, internal, err := uc.TelemetryClusterForEdge(ctx, id)
+		if err != nil || unified != 132 || internal != cluster.ID {
+			t.Fatalf("edge %d: %d %d %v", id, unified, internal, err)
+		}
+	}
+	unified, internal, err := uc.TelemetryClusterForEdge(ctx, 1000)
+	if err != nil || unified != 0 || internal != 0 {
+		t.Fatal("ordinary host classified as Kubernetes")
+	}
+	wire, err := uc.resolveTelemetryConfig(ctx, cluster, "test", "test")
+	if err != nil || wire.ClusterNodeID != 132 || wire.ClusterID != cluster.ID {
+		t.Fatalf("gateway mapping: %+v %v", wire, err)
+	}
+	spec := autoapm.Spec{ClusterID: 999, K8sClusterID: cluster.ID, Kubernetes: &autoapm.Kubernetes{}}
+	if _, err := uc.SetAutoAPM(ctx, cluster.ID, spec.Map()); err == nil {
+		t.Fatal("accepted user supplied mapping")
+	}
+	repo.clusters[cluster.ID].NodeID = nil
+	if _, _, err := uc.TelemetryClusterForEdge(ctx, 64); err == nil {
+		t.Fatal("missing mapping fell back to internal ID")
+	}
+}

@@ -53,6 +53,7 @@ metrics_generator:
         - service.version
         - device_id
         - cluster_id
+        - k8s_cluster_id
         - http.request.method
         - http.method
     service_graphs:

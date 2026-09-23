@@ -200,3 +200,50 @@ func TestKubernetesEnvironmentIgnoresDeviceOverride(t *testing.T) {
 		}
 	}
 }
+
+func TestKubernetesTelemetryIdentityIsManagerOwned(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakePluginConfigRepo()
+	repo.rows["traces"] = &model.PluginConfig{PluginName: "traces", Enabled: true, SpecJSON: `{"extra_attrs":{"cluster_id":"50","team":"payments"}}`}
+	uc := NewPluginConfigUC(repo, nil, fakeEndpointResolver{}, nil)
+	uc.SetKubernetesTelemetryProvider(func(_ context.Context, id uint64) (uint64, uint64, error) {
+		if id == 3 {
+			return 0, 0, nil
+		}
+		return 132, 50, nil
+	})
+	uc.SetKubernetesAutoAPMProvider(func(_ context.Context, id uint64) (*autoapm.Spec, bool, error) {
+		if id == 1 {
+			return &autoapm.Spec{Kubernetes: &autoapm.Kubernetes{}}, true, nil
+		}
+		return nil, id == 2, nil
+	}, nil)
+	for _, id := range []uint64{1, 2} {
+		repo.rows["traces"].EdgeID = id
+		snapshot, err := uc.FetchForEdge(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		extra := snapshot.Configs["traces"].Spec["extra_attrs"].(map[string]interface{})
+		if extra["cluster_id"] != "132" || extra["k8s_cluster_id"] != "50" || extra["team"] != "payments" || snapshot.Configs["logs"].Spec["cluster_id"] != "132" {
+			t.Fatalf("inconsistent identity: %+v", snapshot)
+		}
+		spec, err := autoapm.Parse(snapshot.Configs["autoapm"].Spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if id == 1 && (spec.ClusterID != 132 || spec.K8sClusterID != 50) {
+			t.Fatalf("OBI identity: %+v", spec)
+		}
+		if id == 2 && snapshot.Configs["autoapm"].Enabled {
+			t.Fatal("controller capture enabled")
+		}
+	}
+	host, err := uc.FetchForEdge(ctx, 3)
+	if err != nil || host.Configs["autoapm"].Spec["cluster_id"] != nil {
+		t.Fatalf("host identity changed: %v %v", host, err)
+	}
+	if repo.rows["traces"].SpecJSON != `{"extra_attrs":{"cluster_id":"50","team":"payments"}}` {
+		t.Fatal("mutated stored settings")
+	}
+}

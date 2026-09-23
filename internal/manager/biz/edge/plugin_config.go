@@ -69,16 +69,17 @@ type PluginRuntimeOverlayProvider interface {
 // the affected edge so changes propagate within seconds, not within the
 // edge's 60s safety-net poll window.
 type PluginConfigUC struct {
-	kubernetesLogPaths     func(context.Context, uint64) ([]string, bool, error)
-	kubernetesAutoAPM      func(context.Context, uint64) (*autoapm.Spec, bool, error)
-	kubernetesAutoAPMSpecs func(context.Context) ([]string, error)
-	repo                   PluginConfigRepo
-	notifier               EdgeReloadNotifier
-	secretWriter           DatabaseMetricsSecretWriter
-	resolver               EndpointResolver
-	runtime                PluginRuntimeOverlayProvider
-	autoAPMEnvironment     func(context.Context, uint64) (string, string, error)
-	log                    *slog.Logger
+	kubernetesTelemetryCluster func(context.Context, uint64) (uint64, uint64, error)
+	kubernetesLogPaths         func(context.Context, uint64) ([]string, bool, error)
+	kubernetesAutoAPM          func(context.Context, uint64) (*autoapm.Spec, bool, error)
+	kubernetesAutoAPMSpecs     func(context.Context) ([]string, error)
+	repo                       PluginConfigRepo
+	notifier                   EdgeReloadNotifier
+	secretWriter               DatabaseMetricsSecretWriter
+	resolver                   EndpointResolver
+	runtime                    PluginRuntimeOverlayProvider
+	autoAPMEnvironment         func(context.Context, uint64) (string, string, error)
+	log                        *slog.Logger
 }
 
 var _ PluginConfigSeeder = (*PluginConfigUC)(nil)
@@ -130,6 +131,10 @@ func (uc *PluginConfigUC) SetAutoAPMEnvironmentProvider(provider func(context.Co
 
 func (uc *PluginConfigUC) SetKubernetesAutoAPMProvider(provider func(context.Context, uint64) (*autoapm.Spec, bool, error), specs func(context.Context) ([]string, error)) {
 	uc.kubernetesAutoAPM, uc.kubernetesAutoAPMSpecs = provider, specs
+}
+
+func (uc *PluginConfigUC) SetKubernetesTelemetryProvider(provider func(context.Context, uint64) (uint64, uint64, error)) {
+	uc.kubernetesTelemetryCluster = provider
 }
 
 func (uc *PluginConfigUC) NotifyAutoAPMChanged(ctx context.Context, edgeID uint64) {
@@ -357,6 +362,8 @@ func (uc *PluginConfigUC) Set(ctx context.Context, edgeID uint64, plugin string,
 		}
 		if spec, err := autoapm.Parse(in.Spec); err != nil {
 			return nil, fmt.Errorf("%w: %s", errs.ErrInvalid, err)
+		} else if spec.ClusterID != 0 || spec.K8sClusterID != 0 {
+			return nil, fmt.Errorf("%w: cluster identities are manager-owned", errs.ErrInvalid)
 		} else if spec.Kubernetes != nil {
 			return nil, fmt.Errorf("%w: Kubernetes rules require a cluster", errs.ErrInvalid)
 		}
@@ -440,6 +447,13 @@ func (uc *PluginConfigUC) FetchForEdge(ctx context.Context, edgeID uint64) (*Wir
 	rows, err := uc.repo.ListByEdge(ctx, edgeID)
 	if err != nil {
 		return nil, err
+	}
+	var clusterID, k8sClusterID uint64
+	if uc.kubernetesTelemetryCluster != nil {
+		clusterID, k8sClusterID, err = uc.kubernetesTelemetryCluster(ctx, edgeID)
+		if err != nil {
+			return nil, fmt.Errorf("resolve telemetry cluster identity: %w", err)
+		}
 	}
 	have := map[string]*model.PluginConfig{}
 	for _, r := range rows {
@@ -539,6 +553,20 @@ func (uc *PluginConfigUC) FetchForEdge(ctx context.Context, edgeID uint64) (*Wir
 						delete(fields, "log_path")
 					}
 				}
+			}
+		}
+		if clusterID != 0 {
+			switch name {
+			case model.PluginNameAutoAPM:
+				if cfg.Spec["kubernetes"] != nil {
+					cfg.Spec = mergeRuntimeOverlay(cfg.Spec, map[string]interface{}{"cluster_id": clusterID, "k8s_cluster_id": k8sClusterID})
+				}
+			case model.PluginNameTraces:
+				extra, _ := cfg.Spec["extra_attrs"].(map[string]interface{})
+				extra = mergeRuntimeOverlay(extra, map[string]interface{}{"cluster_id": fmt.Sprint(clusterID), "k8s_cluster_id": fmt.Sprint(k8sClusterID)})
+				cfg.Spec = mergeRuntimeOverlay(cfg.Spec, map[string]interface{}{"extra_attrs": extra})
+			case model.PluginNameLogs:
+				cfg.Spec = mergeRuntimeOverlay(cfg.Spec, map[string]interface{}{"cluster_id": fmt.Sprint(clusterID)})
 			}
 		}
 		if cfg.Enabled {

@@ -34,6 +34,14 @@ type Runtime struct {
 // Query only application metrics with an exact resource identity. JVM used
 // memory remains a JVM metric; it is never presented as process RSS.
 func runtimeExpression(q Query, window time.Duration) string {
+	parts := []string{}
+	for _, variant := range q.clusterQueries() {
+		parts = append(parts, "("+runtimeClusterExpression(variant, window)+")")
+	}
+	return strings.Join(parts, " or ")
+}
+
+func runtimeClusterExpression(q Query, window time.Duration) string {
 	group := "service_instance_id,instance,service_version"
 	names := "go_goroutines|go_memstats_heap_alloc_bytes|jvm_thread_count|jvm_threads_live_threads|nodejs_eventloop_lag_seconds|go_memory_limit_bytes|go_memory_gc_goal_bytes|go_processor_limit|go_config_gogc_percent|nodejs_eventloop_utilization_ratio|nodejs_eventloop_delay_(min|max|mean|stddev|p50|p90|p99)_seconds"
 	scope := fmt.Sprintf(`deployment_environment_name=%q,service_namespace=%q`, *q.Environment, *q.ServiceNamespace)
@@ -133,14 +141,14 @@ func runtimeExpression(q Query, window time.Duration) string {
 func (s *Service) runtimeInstances(ctx context.Context, q Query) ([]Instance, error) {
 	q.InstanceID, q.ServiceVersion, q.Operation = "", "", ""
 	q.MetricSource = "application_metrics"
-	group := "service_instance_id,device_id,cluster_id,k8s_pod_name,service_version,k8s_namespace_name"
+	group := "service_instance_id,device_id,cluster_id,k8s_pod_name,service_version,k8s_namespace_name,k8s_cluster_id"
 	parts := []string{}
 	for _, protocol := range []string{"http", "rpc"} {
 		q.Protocol = protocol
 		parts = append(parts, q.aggregate("count_over_time", q.counter(), q.End.Sub(q.Start), group))
 	}
 	q.MetricSource = "tempo_spanmetrics"
-	parts = append(parts, fmt.Sprintf("sum by (%s) (count_over_time(traces_spanmetrics_calls_total%s[%s]))", group, q.selector(), promDuration(q.End.Sub(q.Start))))
+	parts = append(parts, q.aggregate("count_over_time", "traces_spanmetrics_calls_total", q.End.Sub(q.Start), group))
 	// A selected process can consume resources without receiving requests.
 	q.MetricSource = "application_metrics"
 	q.Protocol = "http" // process metrics carry no protocol labels
@@ -156,7 +164,7 @@ func (s *Service) runtimeInstances(ctx context.Context, q Query) ([]Instance, er
 		if labels["service_instance_id"] == "" && labels["k8s_pod_name"] == "" {
 			continue
 		}
-		key := Instance{InstanceID: labels["service_instance_id"], DeviceID: labels["device_id"], ClusterID: labels["cluster_id"], Pod: labels["k8s_pod_name"], Version: labels["service_version"], Namespace: labels["k8s_namespace_name"]}
+		key := Instance{InstanceID: labels["service_instance_id"], DeviceID: labels["device_id"], ClusterID: labels["cluster_id"], K8sClusterID: labels["k8s_cluster_id"], Pod: labels["k8s_pod_name"], Version: labels["service_version"], Namespace: labels["k8s_namespace_name"]}
 		if seen[key] {
 			continue
 		}

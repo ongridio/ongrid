@@ -476,7 +476,7 @@ func TestResolveTelemetryConfigPublishesIndependentExternalTraceAndLogTargets(t 
 		},
 	}})
 
-	out, err := uc.resolveTelemetryConfig(context.Background(), 7, "kt_access", "ks_secret")
+	out, err := uc.resolveTelemetryConfig(context.Background(), &model.Cluster{ID: 7}, "kt_access", "ks_secret")
 	if err != nil {
 		t.Fatalf("resolveTelemetryConfig() error = %v", err)
 	}

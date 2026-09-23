@@ -50,7 +50,16 @@ export function ServiceLogs({ params, refresh }: { params: URLSearchParams; refr
         const pods = [...new Set(matching.map((instance) => instance.pod))];
         const deviceIDs = [...new Set(matching.map((instance) => Number(instance.device_id)).filter((id) => Number.isInteger(id) && id > 0))];
         const namespaces = [...new Set(matching.map((instance) => instance.namespace))];
-        const clusters = [...new Set(matching.map((instance) => instance.cluster_id))];
+        // Normalize both generations before grouping: one Pod may span an Edge upgrade.
+        const nodes = matching.some(instance => instance.cluster_id) ? await listAllNodes('cluster') : [];
+        const clusters = [...new Set(matching.map((instance) => {
+          if (!instance.cluster_id) return '';
+          const internalID = instance.k8s_cluster_id || instance.cluster_id;
+          const matches = nodes.filter(node => node.props?.source === 'kubernetes' && String(node.props.k8s_cluster_id ?? '') === internalID);
+          if (matches.length !== 1 || (instance.k8s_cluster_id && String(matches[0].id) !== instance.cluster_id))
+            throw new Error(tr('无法解析容器日志的集群，请刷新集群信息后重试。', 'Unable to resolve the container log cluster. Refresh the cluster information and retry.'));
+          return String(matches[0].id);
+        }))];
         // ponytail: Scope arrays cannot express unions of Pod identity tuples.
         // Require one cluster/namespace until the log API supports scoped unions.
         if (pods.length && (namespaces.length > 1 || clusters.length > 1 || (!clusters[0] && deviceIDs.length > 1))) {
@@ -58,15 +67,7 @@ export function ServiceLogs({ params, refresh }: { params: URLSearchParams; refr
           return;
         }
         if (pods.length && deviceIDs.length && namespaces.length === 1 && namespaces[0] && clusters.length === 1) {
-          // APM uses the Kubernetes telemetry ID; container logs use the unified topology ID.
-          // Never reuse a numeric ID across these namespaces or drop the cluster restriction.
-          let podClusterID = '';
-          if (clusters[0]) {
-            const nodes = await listAllNodes('cluster');
-            const matches = nodes.filter(node => node.props?.source === 'kubernetes' && String(node.props.k8s_cluster_id ?? '') === clusters[0]);
-            if (matches.length !== 1) throw new Error(tr('无法解析容器日志的集群，请刷新集群信息后重试。', 'Unable to resolve the container log cluster. Refresh the cluster information and retry.'));
-            podClusterID = String(matches[0].id);
-          }
+          const podClusterID = clusters[0];
           if (controller.signal.aborted) return;
           const podScope: LogScope = { pods, device_ids: deviceIDs, namespaces: [namespaces[0]], ...(podClusterID ? { cluster_ids: [podClusterID] } : {}) };
           data = await searchLogs({ ...window, scope: podScope, limit: 50, direction: 'backward' }, controller.signal);

@@ -987,6 +987,7 @@ func main() {
 	k8sUC.SetTopologyMirror(topologyUC)
 	pluginConfigUC.SetKubernetesAutoAPMProvider(k8sUC.AutoAPMForEdge, k8sUC.AutoAPMSpecs)
 	pluginConfigUC.SetKubernetesLogPathsProvider(k8sUC.LogPathsForEdge)
+	pluginConfigUC.SetKubernetesTelemetryProvider(k8sUC.TelemetryClusterForEdge)
 	k8sUC.SetAutoAPMProviders(func(ctx context.Context, nodeID uint64) (string, error) {
 		node, err := topologyUC.GetNode(ctx, nodeID)
 		if err != nil {

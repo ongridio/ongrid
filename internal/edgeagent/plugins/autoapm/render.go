@@ -2,7 +2,6 @@ package autoapm
 
 import (
 	"fmt"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -27,6 +26,9 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 	kubernetes := map[string]interface{}{"enable": "false"}
 	ebpf := map[string]interface{}{"context_propagation": "headers"}
 	if s.Kubernetes != nil {
+		if s.ClusterID == 0 {
+			return nil, fmt.Errorf("auto APM: Kubernetes capture requires a manager-provided cluster identity")
+		}
 		ebpf["bpf_fs_path"] = "/sys/fs/bpf/ongrid"
 		kubernetes["enable"] = "true"
 		kubernetes["disable_informers"] = []string{"service"}
@@ -55,8 +57,9 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 
 func collectorConfig(cfg plugins.PluginConfig, s contract.Spec) plugins.PluginConfig {
 	attrs := map[string]interface{}{"ongrid.instrumentation.source": "obi"}
-	if clusterID, err := strconv.ParseUint(os.Getenv("ONGRID_K8S_CLUSTER_ID"), 10, 64); err == nil && clusterID > 0 {
-		attrs["cluster_id"] = strconv.FormatUint(clusterID, 10)
+	if s.ClusterID != 0 {
+		attrs["cluster_id"] = strconv.FormatUint(s.ClusterID, 10)
+		attrs["k8s_cluster_id"] = strconv.FormatUint(s.K8sClusterID, 10)
 	}
 	if s.Environment != "" {
 		attrs["deployment.environment.name"] = s.Environment

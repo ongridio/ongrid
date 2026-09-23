@@ -80,7 +80,7 @@ func resourceIdentities(samples []tunnel.PromSample) []map[string]string {
 			continue
 		}
 		labels := map[string]string{}
-		for _, key := range []string{"service_name", "service_namespace", "deployment_environment_name", "service_instance_id", "service_version", "instance", "host_name", "cluster_id", "k8s_pod_uid", "k8s_pod_name", "k8s_namespace_name", "k8s_container_name", "k8s_node_name", "k8s_deployment_name", "k8s_statefulset_name", "k8s_daemonset_name", "k8s_job_name", "k8s_cronjob_name"} {
+		for _, key := range []string{"service_name", "service_namespace", "deployment_environment_name", "service_instance_id", "service_version", "instance", "host_name", "cluster_id", "k8s_cluster_id", "k8s_pod_uid", "k8s_pod_name", "k8s_namespace_name", "k8s_container_name", "k8s_node_name", "k8s_deployment_name", "k8s_statefulset_name", "k8s_daemonset_name", "k8s_job_name", "k8s_cronjob_name"} {
 			if v := sample.Labels[key]; v != "" {
 				labels[key] = v
 			}

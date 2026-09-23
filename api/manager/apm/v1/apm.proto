@@ -140,6 +140,8 @@ message ResourceScope {
   // For device clusters, an empty list matches no devices; for Kubernetes
   // clusters, cluster_id takes precedence.
   repeated string device_ids = 2;
+  // Internal Kubernetes identity, also used to scope pre-unification telemetry.
+  string k8s_cluster_id = 3;
 }
 
 message ListServicesRequest { Query query = 1; }
@@ -194,6 +196,7 @@ message ObservedInstance {
   string pod = 4;
   string version = 5;
   string namespace = 6; // Kubernetes namespace; independent of service.namespace.
+  string k8s_cluster_id = 7; // Present when cluster_id is the unified topology ID.
 }
 message GetDiagnosticsRequest { Query query = 1; }
 message GetDiagnosticsData {

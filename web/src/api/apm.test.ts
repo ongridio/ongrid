@@ -16,6 +16,10 @@ describe('APM correlation', () => {
     expect(serviceTraceQL(p)).toContain('resource.cluster_id = "7"');
     expect(serviceTraceQL(p)).not.toContain('resource.device_id =~');
     expect(serviceTraceQL(p)).not.toContain('cluster_id = "101"');
+    p.set('telemetry_cluster_id', '101');
+    p.set('telemetry_k8s_cluster_id', '7');
+    expect(serviceTraceQL(p)).toContain('resource.cluster_id = "101" && resource.k8s_cluster_id = "7"');
+    expect(serviceTraceQL(p)).toContain('resource.cluster_id = "7" && (resource.k8s_cluster_id = nil || resource.k8s_cluster_id = "")');
   });
   it('keeps trace-sample service discovery valid after visiting an all-protocol service', async () => {
     let received: URL | undefined;

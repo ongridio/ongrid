@@ -20,6 +20,7 @@ beforeEach(() => {
     http.get('/api/v1/topology/nodes', () => HttpResponse.json({ items: [
       { id: 132, type: 'cluster', name: 'Kubernetes', props: { source: 'kubernetes', k8s_cluster_id: 50 } },
       { id: 50, type: 'cluster', name: 'Other cluster', props: { source: 'kubernetes', k8s_cluster_id: 75 } },
+      { id: 133, type: 'cluster', name: 'Second cluster', props: { source: 'kubernetes', k8s_cluster_id: 51 } },
     ] })),
     http.get('/api/v1/topology/relations', () => HttpResponse.json({ items: [] })),
     http.get('/api/v1/apm/repository-binding', () => HttpResponse.json({ data: null })),
@@ -128,6 +129,30 @@ it.each(['', '&cluster_node_id=132', '&cluster_id=50'])('maps telemetry clusters
   expect(link.searchParams.get('cluster_id')).toBe('132');
   expect(link.searchParams.has('cluster_node_id')).toBe(false);
   expect(link.searchParams.has('service_name')).toBe(false);
+});
+it.each([false, true])('normalizes new and legacy instances before matching logs, mismatch=%s', async (mismatch) => {
+  const requests: Record<string, unknown>[] = [];
+  server.use(
+    http.get('/api/v1/apm/instances', () => HttpResponse.json({ data: { instances: [
+      { instance_id: 'one', device_id: '42', cluster_id: '50', namespace: 'payments', pod: 'orders-abc' },
+      { instance_id: 'one', device_id: '42', cluster_id: mismatch ? '50' : '132', k8s_cluster_id: '50', namespace: 'payments', pod: 'orders-abc' },
+    ] } })),
+    http.post('/api/v1/logs/search', async ({ request }) => {
+      requests.push(await request.json() as Record<string, unknown>);
+      return HttpResponse.json({ data: { records: [], has_more: false } });
+    }),
+  );
+  const params = new URLSearchParams(scope);
+  params.delete('cluster_id');
+  render(<MemoryRouter initialEntries={[`/apm/service?${params}&tab=logs`]}><ApmPage /></MemoryRouter>);
+  if (mismatch) {
+    await screen.findByText(/无法解析容器日志的集群/);
+    expect(requests).toHaveLength(1);
+  } else {
+    await screen.findByText(/按已观测到的 Pod/);
+    expect(requests).toHaveLength(2);
+    expect(requests[1]).toMatchObject({ scope: { cluster_ids: ['132'], pods: ['orders-abc'], device_ids: [42], namespaces: ['payments'] } });
+  }
 });
 it.each(['missing', 'ambiguous'])('does not query unscoped container logs when the cluster mapping is %s', async (mapping) => {
   const requests: Record<string, unknown>[] = [];

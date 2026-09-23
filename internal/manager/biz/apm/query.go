@@ -34,6 +34,7 @@ type Query struct {
 	DeviceID, ClusterID                  string
 	ClusterNodeID                        uint64
 	resourceScope                        *ResourceScope
+	legacyCluster                        bool
 	Operation                            string
 	SpanKind                             string
 	Page, PageSize                       int
@@ -134,7 +135,14 @@ func (q Query) instanceLabels() []string {
 	}
 	if q.resourceScope != nil {
 		if q.resourceScope.ClusterID != "" {
-			labels = append(labels, "cluster_id="+strconv.Quote(q.resourceScope.ClusterID))
+			clusterID, k8sID := q.resourceScope.ClusterID, q.resourceScope.K8sClusterID
+			if q.legacyCluster {
+				clusterID, k8sID = k8sID, ""
+			}
+			labels = append(labels, "cluster_id="+strconv.Quote(clusterID))
+			if q.resourceScope.K8sClusterID != "" {
+				labels = append(labels, "k8s_cluster_id="+strconv.Quote(k8sID))
+			}
 		} else {
 			labels = append(labels, "device_id=~"+strconv.Quote(devicePattern(q.resourceScope.DeviceIDs)))
 		}
@@ -388,7 +396,11 @@ func TraceQL(q Query) string {
 	clauses = append(clauses, "kind = "+q.SpanKind)
 	if q.resourceScope != nil {
 		if q.resourceScope.ClusterID != "" {
-			clauses = append(clauses, "resource.cluster_id = "+strconv.Quote(q.resourceScope.ClusterID))
+			clause := "resource.cluster_id = " + strconv.Quote(q.resourceScope.ClusterID)
+			if id := q.resourceScope.K8sClusterID; id != "" {
+				clause = "((" + clause + " && resource.k8s_cluster_id = " + strconv.Quote(id) + ") || (resource.cluster_id = " + strconv.Quote(id) + ` && (resource.k8s_cluster_id = nil || resource.k8s_cluster_id = "")))`
+			}
+			clauses = append(clauses, clause)
 		} else {
 			clauses = append(clauses, "resource.device_id =~ "+strconv.Quote("^("+devicePattern(q.resourceScope.DeviceIDs)+")$"))
 		}

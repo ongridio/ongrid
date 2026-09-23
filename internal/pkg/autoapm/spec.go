@@ -35,6 +35,9 @@ type Kubernetes struct {
 }
 type Spec struct {
 	Kubernetes *Kubernetes `json:"kubernetes,omitempty"`
+	// Manager-owned identities, projected only into the runtime snapshot.
+	ClusterID    uint64 `json:"cluster_id,omitempty"`
+	K8sClusterID uint64 `json:"k8s_cluster_id,omitempty"`
 
 	TLSInsecureSkipVerify bool     `json:"tls_insecure_skip_verify,omitempty"`
 	Environment           string   `json:"environment,omitempty"`
@@ -66,6 +69,9 @@ func Parse(raw map[string]interface{}) (Spec, error) {
 	}
 	if !validText(s.Environment) {
 		return s, fmt.Errorf("auto APM: invalid environment")
+	}
+	if (s.ClusterID == 0) != (s.K8sClusterID == 0) || (s.ClusterID != 0 && s.Kubernetes == nil) {
+		return s, fmt.Errorf("auto APM: Kubernetes cluster identities must be supplied together")
 	}
 	if s.SampleRatio != nil && (*s.SampleRatio < 0 || *s.SampleRatio > 1) {
 		return s, fmt.Errorf("auto APM: sample_ratio must be between 0 and 1")
@@ -189,6 +195,9 @@ func (s Spec) Selected() bool {
 // Map adapts the typed contract to the existing plugin configuration wire format.
 func (s Spec) Map() map[string]interface{} {
 	out := map[string]interface{}{"environment": s.Environment, "tls_insecure_skip_verify": s.TLSInsecureSkipVerify}
+	if s.ClusterID != 0 {
+		out["cluster_id"], out["k8s_cluster_id"] = s.ClusterID, s.K8sClusterID
+	}
 	if s.SampleRatio != nil {
 		out["sample_ratio"] = *s.SampleRatio
 	}

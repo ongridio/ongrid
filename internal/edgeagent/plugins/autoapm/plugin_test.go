@@ -166,7 +166,7 @@ func TestCollectorReceivesDefaultAndServiceEnvironment(t *testing.T) {
 }
 
 func TestKubernetesRulesUseMetadataAndSkipHostDiscovery(t *testing.T) {
-	spec := contract.Spec{Environment: "production", Kubernetes: &contract.Kubernetes{Rules: []contract.KubernetesRule{
+	spec := contract.Spec{Environment: "production", ClusterID: 132, K8sClusterID: 50, Kubernetes: &contract.Kubernetes{Rules: []contract.KubernetesRule{
 		{Namespace: "shop", WorkloadKind: "Deployment", WorkloadName: "api.v1", Container: "app"},
 		{Namespace: "future"},
 	}}}
@@ -200,5 +200,22 @@ func TestKubernetesRulesUseMetadataAndSkipHostDiscovery(t *testing.T) {
 	p.refresh(context.Background())
 	if p.health.UpdatedAt.IsZero() {
 		t.Fatal("missing heartbeat")
+	}
+}
+
+func TestCollectorUsesMappedIdentityInsteadOfBootstrap(t *testing.T) {
+	t.Setenv("ONGRID_K8S_CLUSTER_ID", "50")
+	spec := contract.Spec{ClusterID: 132, K8sClusterID: 50, Kubernetes: &contract.Kubernetes{Rules: []contract.KubernetesRule{{Namespace: "shop"}}}}
+	attrs := collectorConfig(plugins.PluginConfig{}, spec).Spec["extra_attrs"].(map[string]interface{})
+	if attrs["cluster_id"] != "132" || attrs["k8s_cluster_id"] != "50" {
+		t.Fatalf("identity: %v", attrs)
+	}
+	spec.ClusterID, spec.K8sClusterID = 0, 0
+	if _, err := render(plugins.PluginConfig{Spec: spec.Map()}); err == nil {
+		t.Fatal("capture accepted missing mapping")
+	}
+	attrs = collectorConfig(plugins.PluginConfig{}, contract.Spec{}).Spec["extra_attrs"].(map[string]interface{})
+	if attrs["cluster_id"] != nil {
+		t.Fatal("host inherited stale bootstrap environment")
 	}
 }

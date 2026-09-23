@@ -69,16 +69,22 @@ func (q Query) metricSelector(extra ...string) string {
 	return "{" + strings.Join(append(append(labels, q.instanceLabels()...), extra...), ",") + "}"
 }
 
+func (q Query) metricSelectors(extra ...string) []string {
+	selectors := []string{}
+	for _, variant := range q.clusterQueries() {
+		selectors = append(selectors, variant.metricSelector(extra...))
+	}
+	return selectors
+}
+
 // Apply rate before dropping instance labels so restarts remain correct.
 // Alias resource/operation labels only in query results; raw metrics stay intact.
 func (q Query) aggregate(fn, metric string, window time.Duration, group string, extra ...string) string {
-	selectors := []string{q.metricSelector(extra...)}
+	selectors := q.metricSelectors(extra...)
 	if q.MetricSource == "tempo_spanmetrics" && q.Protocol == "http" && q.SpanKind == "server" {
 		// The union deduplicates spans exporting both semantic-convention versions.
-		selectors = []string{
-			q.metricSelector(append(append([]string{}, extra...), `http_request_method!=""`)...),
-			q.metricSelector(append(append([]string{}, extra...), `http_method!=""`)...),
-		}
+		selectors = append(q.metricSelectors(append(append([]string{}, extra...), `http_request_method!=""`)...),
+			q.metricSelectors(append(append([]string{}, extra...), `http_method!=""`)...)...)
 	}
 	parts := make([]string, 0, len(selectors))
 	for _, selector := range selectors {
@@ -115,20 +121,20 @@ func (q Query) errorRate(window time.Duration, group string) string {
 	if q.MetricSource == "tempo_spanmetrics" {
 		return requestRate(q, window, group, `status_code="STATUS_CODE_ERROR"`)
 	}
-	selectors := []string{q.metricSelector(`error_type!=""`)}
+	selectors := q.metricSelectors(`error_type!=""`)
 	if q.Protocol == "http" {
 		status := "http_response_status_code"
 		if q.MetricFormat == "legacy" {
 			status = "http_status_code"
 		}
-		selectors = append(selectors, q.metricSelector(status+`=~"5.."`))
+		selectors = append(selectors, q.metricSelectors(status+`=~"5.."`)...)
 	} else {
 		system := `rpc_system_name="grpc"`
 		if q.MetricFormat == "legacy" {
 			system = `rpc_system="grpc"`
-			selectors = append(selectors, q.metricSelector(`rpc_grpc_status_code=~"[1-9]|1[0-6]"`))
+			selectors = append(selectors, q.metricSelectors(`rpc_grpc_status_code=~"[1-9]|1[0-6]"`)...)
 		}
-		selectors = append(selectors, q.metricSelector(system, `rpc_response_status_code!=""`, `rpc_response_status_code!="OK"`))
+		selectors = append(selectors, q.metricSelectors(system, `rpc_response_status_code!=""`, `rpc_response_status_code!="OK"`)...)
 	}
 	parts := make([]string, 0, len(selectors))
 	for _, selector := range selectors {

@@ -97,7 +97,9 @@ func (s *Service) requestSummaries(ctx context.Context, q *Query, operations boo
 // Discover server spans, then fill trace-only HTTP services with labelled samples.
 // The additional query is bounded and independent of the service count.
 func (s *Service) appendTraceServices(ctx context.Context, q Query, rows []Summary) ([]Summary, error) {
-	expr := fmt.Sprintf("sum by (%s,telemetry_sdk_language) (count_over_time(traces_spanmetrics_calls_total%s[%s]))", identityLabels, q.selector(), promDuration(q.End.Sub(q.Start)))
+	spanQuery := q
+	spanQuery.MetricSource, spanQuery.Protocol = "tempo_spanmetrics", "all"
+	expr := spanQuery.aggregate("count_over_time", "traces_spanmetrics_calls_total", q.End.Sub(q.Start), identityLabels+",telemetry_sdk_language")
 	series, err := s.instant(ctx, expr, q.End)
 	if err != nil {
 		return nil, err

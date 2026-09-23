@@ -289,9 +289,6 @@ func (t *TunnelConfigFetcher) withKubernetesLogsDefaults(cfg PluginConfig) Plugi
 		spec["pod_log_self_exclude"] = fmt.Sprintf("/var/log/pods/%s_%s_*/*/*.log", t.k8sNamespace, t.k8sPodName)
 	}
 	spec["mode"] = "kubernetes"
-	if _, ok := spec["cluster_id"]; !ok && t.k8sClusterID != 0 {
-		spec["cluster_id"] = fmt.Sprintf("%d", t.k8sClusterID)
-	}
 	if _, ok := spec["node_name"]; !ok && t.k8sNodeName != "" {
 		spec["node_name"] = t.k8sNodeName
 	}
@@ -318,9 +315,6 @@ func (t *TunnelConfigFetcher) withKubernetesTracesDefaults(cfg PluginConfig) Plu
 	extraAttrs := copyStringMapSpec(spec["extra_attrs"])
 	if extraAttrs == nil {
 		extraAttrs = map[string]interface{}{}
-	}
-	if _, ok := extraAttrs["cluster_id"]; !ok && t.k8sClusterID != 0 {
-		extraAttrs["cluster_id"] = fmt.Sprintf("%d", t.k8sClusterID)
 	}
 	if _, ok := extraAttrs["node_name"]; !ok && t.k8sNodeName != "" {
 		extraAttrs["node_name"] = t.k8sNodeName
@@ -371,9 +365,6 @@ func (t *TunnelConfigFetcher) withKubernetesGatewayTracesDefaults(cfg PluginConf
 	extraAttrs := copyStringMapSpec(spec["extra_attrs"])
 	if extraAttrs == nil {
 		extraAttrs = map[string]interface{}{}
-	}
-	if _, ok := extraAttrs["cluster_id"]; !ok && t.k8sClusterID != 0 {
-		extraAttrs["cluster_id"] = fmt.Sprintf("%d", t.k8sClusterID)
 	}
 	if _, ok := extraAttrs["telemetry_gateway"]; !ok {
 		extraAttrs["telemetry_gateway"] = "kubernetes"

@@ -210,10 +210,8 @@ func errorSamples(q Query, traceID string, resources []traceResource) ([]ErrorGr
 		if q.ServiceVersion != "" && attrs["service.version"] != q.ServiceVersion || q.InstanceID != "" && attrs["service.instance.id"] != q.InstanceID || q.DeviceID != "" && attrs["device_id"] != q.DeviceID || q.ClusterID != "" && attrs["cluster_id"] != q.ClusterID {
 			continue
 		}
-		if scope := q.resourceScope; scope != nil {
-			if scope.ClusterID != "" && attrs["cluster_id"] != scope.ClusterID || scope.ClusterID == "" && !slices.Contains(scope.DeviceIDs, attrs["device_id"]) {
-				continue
-			}
+		if !q.resourceScope.matches(attrs) {
+			continue
 		}
 		for _, span := range resource.spans() {
 			count++

@@ -406,3 +406,28 @@ message SetAutoAPMResponse {
     ongrid.manager.edge.v1.AutoAPMSpec spec = 1;
     ongrid.manager.edge.v1.AutoAPMDefaults defaults = 2;
 }
+
+// Internal controller telemetry-config response. cluster_id remains the registration ID.
+message KubernetesTelemetryConfig {
+    uint64 cluster_id = 1;
+    string access_key = 2;
+    string secret_key = 3;
+    string manager_public_url = 4;
+    string traces_endpoint = 5;
+    string traces_auth_mode = 6;
+    string traces_basic_user = 7;
+    string traces_basic_pass = 8;
+    bool traces_tls_insecure = 9;
+    string logs_endpoint = 10;
+    string logs_auth_mode = 11;
+    string logs_basic_user = 12;
+    string logs_basic_pass = 13;
+    bool logs_tls_insecure = 14;
+    string remote_write_endpoint = 15;
+    string remote_write_bearer = 16;
+    string remote_write_basic_user = 17;
+    string remote_write_basic_pass = 18;
+    bool remote_write_tls_insecure = 19;
+    string remote_write_tls_ca_pem = 20;
+    uint64 cluster_node_id = 21;
+}
