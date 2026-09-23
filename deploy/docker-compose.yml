@@ -104,6 +104,11 @@ services:
       ONGRID_EMBEDDING_BASE_URL: ${ONGRID_EMBEDDING_BASE_URL:-}
       ONGRID_EMBEDDING_API_KEY: ${ONGRID_EMBEDDING_API_KEY:-}
       ONGRID_EMBEDDING_CACHE_DIR: ${ONGRID_EMBEDDING_CACHE_DIR:-/var/lib/ongrid/embeddings}
+      # LLM Wiki source files, generated pages, version snapshots and staging data.
+      # The bind-mount target below follows ONGRID_LLM_WIKI_DIR.
+      ONGRID_LLM_WIKI_ENABLED: ${ONGRID_LLM_WIKI_ENABLED:-true}
+      ONGRID_LLM_WIKI_DIR: ${ONGRID_LLM_WIKI_DIR:-/var/lib/ongrid/llm-wiki}
+      ONGRID_LLM_WIKI_TIMEOUT_SECONDS: ${ONGRID_LLM_WIKI_TIMEOUT_SECONDS:-600}
       # Optional pip index mirror for cloud_bash runtime tool installs (empty =
       # pypi). Set to a regional mirror where pypi.org is slow.
       ONGRID_PIP_INDEX_URL: ${ONGRID_PIP_INDEX_URL:-}
@@ -183,6 +188,8 @@ services:
       - ../.cache/ongrid-tools:/var/lib/ongrid/tools
       # Packet capture raw PCAP objects for local dev.
       - ../.cache/ongrid-packet-captures:/var/lib/ongrid/packet-captures
+      # LLM Wiki raw sources, generated Markdown, snapshots and staging data.
+      - ../.cache/ongrid-llm-wiki:${ONGRID_LLM_WIKI_DIR:-/var/lib/ongrid/llm-wiki}
       - ../.cache/ongrid-chat-attachments:/var/lib/ongrid/chat-attachments
     # ADR-008: HTTP API (8080) is no longer published to host in the
     # production-shape stack — nginx fronts it on 443/80. Metrics port

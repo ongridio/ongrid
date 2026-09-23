@@ -102,6 +102,7 @@ ongrid_prepare_data_directories() {
         "$data_dir/skills" \
         "$data_dir/pages" \
         "$data_dir/packet-captures" \
+        "$data_dir/llm-wiki" \
         "$data_dir/chat-attachments" \
         "$data_dir/workspace" \
         "$data_dir/tools" \
@@ -123,6 +124,7 @@ ongrid_prepare_data_directories() {
     ongrid_ensure_path_owner 65532:65532 "$data_dir/skills" || failed=1
     ongrid_ensure_path_owner 65532:65532 "$data_dir/pages" || failed=1
     ongrid_ensure_path_owner 65532:65532 "$data_dir/packet-captures" || failed=1
+    ongrid_ensure_path_owner 65532:65532 "$data_dir/llm-wiki" || failed=1
     ongrid_ensure_path_owner 65532:65532 "$data_dir/chat-attachments" || failed=1
     ongrid_ensure_path_owner 65532:65532 "$data_dir/workspace" || failed=1
     ongrid_ensure_path_owner 65532:65532 "$data_dir/tools" || failed=1
@@ -149,6 +151,7 @@ ongrid_repair_data_permissions() {
     ongrid_chown_tree_required 65532:65532 "$data_dir/skills" || failed=1
     ongrid_chown_tree_required 65532:65532 "$data_dir/pages" || failed=1
     ongrid_chown_tree_required 65532:65532 "$data_dir/packet-captures" || failed=1
+    ongrid_chown_tree_required 65532:65532 "$data_dir/llm-wiki" || failed=1
     ongrid_chown_tree_required 65532:65532 "$data_dir/chat-attachments" || failed=1
     ongrid_chown_tree_required 65532:65532 "$data_dir/workspace" || failed=1
     ongrid_chown_tree_required 65532:65532 "$data_dir/tools" || failed=1
