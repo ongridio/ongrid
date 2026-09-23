@@ -1149,7 +1149,7 @@ export default function ApmPage() {
         {detail && ['traces', 'errors'].includes(tab) && !traceScopeReady && !loading && (
           <EmptyState title={tr('集群范围尚未解析', 'Cluster scope is not resolved')} hint={tr('请刷新后重试，避免查询到其他集群的链路。', 'Refresh to retry resolving the cluster scope.')} />
         )}
-        {detail && tab === 'logs' && <ServiceLogs params={logParams} refresh={refresh} />}
+        {detail && tab === 'logs' && <ServiceLogs params={params} refresh={refresh} />}
         {detail && tab === 'profiles' && <Suspense fallback={<p role="status" className="text-sm text-zinc-500">{tr('正在加载性能剖析…', 'Loading profiling…')}</p>}><ServiceProfiles params={params} instances={visibleInstances} loading={loading} refresh={refresh} /></Suspense>}
         {detail && tab === 'overview' && !operation && (
           <>

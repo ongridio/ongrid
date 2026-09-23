@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { closeLogCursor, searchLogs, type LogScope, type LogSearchResult } from '@/api/logs';
 import { queryApm } from '@/api/apm';
+import { listAllNodes } from '@/api/topology';
 import { absoluteWindow, correlationFilters, logTraceLink } from '@/lib/telemetryContext';
 import { Button, Card, EmptyState } from '@/components/ui';
 import { useI18n } from '@/i18n/locale';
@@ -13,6 +14,8 @@ export function ServiceLogs({ params, refresh }: { params: URLSearchParams; refr
   const [result, setResult] = useState<{ query: string; data?: LogSearchResult; podScope?: LogScope; narrowPodScope?: boolean; error?: string }>();
   const current = result?.query === query ? result : undefined;
   const explorerParams = new URLSearchParams(params);
+  if (params.has('cluster_node_id')) explorerParams.set('cluster_id', params.get('cluster_node_id')!);
+  explorerParams.delete('cluster_node_id');
   if (current?.podScope) {
     for (const key of ['service_name', 'service_namespace', 'environment', 'service_version', 'instance_id', 'cluster_id']) explorerParams.delete(key);
     explorerParams.set('pod', current.podScope.pods!.join(','));
@@ -22,6 +25,7 @@ export function ServiceLogs({ params, refresh }: { params: URLSearchParams; refr
   }
   useEffect(() => {
     const scope = new URLSearchParams(query);
+    const logClusterID = scope.get('cluster_node_id') || scope.get('cluster_id');
     const window = absoluteWindow(scope);
     if (!window) return;
     const controller = new AbortController();
@@ -29,7 +33,7 @@ export function ServiceLogs({ params, refresh }: { params: URLSearchParams; refr
     void (async () => {
       let data = await searchLogs({ ...window, filters: correlationFilters(scope), scope: {
         ...(scope.get('device_id') ? { device_ids: [Number(scope.get('device_id'))] } : {}),
-        ...(scope.get('cluster_id') ? { cluster_ids: [scope.get('cluster_id')!] } : {}),
+        ...(logClusterID ? { cluster_ids: [logClusterID] } : {}),
       }, limit: 50, direction: 'backward' }, controller.signal);
       // This preview does not page; release the backend cursor even after unmount.
       if (data.next_cursor) void closeLogCursor(data.next_cursor).catch((error: Error) => console.warn('Failed to close service log cursor', error.message));
@@ -54,7 +58,17 @@ export function ServiceLogs({ params, refresh }: { params: URLSearchParams; refr
           return;
         }
         if (pods.length && deviceIDs.length && namespaces.length === 1 && namespaces[0] && clusters.length === 1) {
-          const podScope: LogScope = { pods, device_ids: deviceIDs, namespaces: [namespaces[0]], ...(clusters[0] ? { cluster_ids: [clusters[0]] } : {}) };
+          // APM uses the Kubernetes telemetry ID; container logs use the unified topology ID.
+          // Never reuse a numeric ID across these namespaces or drop the cluster restriction.
+          let podClusterID = '';
+          if (clusters[0]) {
+            const nodes = await listAllNodes('cluster');
+            const matches = nodes.filter(node => node.props?.source === 'kubernetes' && String(node.props.k8s_cluster_id ?? '') === clusters[0]);
+            if (matches.length !== 1) throw new Error(tr('无法解析容器日志的集群，请刷新集群信息后重试。', 'Unable to resolve the container log cluster. Refresh the cluster information and retry.'));
+            podClusterID = String(matches[0].id);
+          }
+          if (controller.signal.aborted) return;
+          const podScope: LogScope = { pods, device_ids: deviceIDs, namespaces: [namespaces[0]], ...(podClusterID ? { cluster_ids: [podClusterID] } : {}) };
           data = await searchLogs({ ...window, scope: podScope, limit: 50, direction: 'backward' }, controller.signal);
           if (data.next_cursor) void closeLogCursor(data.next_cursor).catch((error: Error) => console.warn('Failed to close service log cursor', error.message));
           if (!controller.signal.aborted) setResult({ query, data, podScope });
@@ -66,7 +80,7 @@ export function ServiceLogs({ params, refresh }: { params: URLSearchParams; refr
       if (!controller.signal.aborted) setResult({ query, error: error.message });
     });
     return () => controller.abort();
-  }, [query, refresh, retry]);
+  }, [query, refresh, retry, tr]);
   return <Card>
     <div className="flex flex-wrap items-center justify-between gap-2">
       <h2 className="text-sm font-medium">{tr('近期日志', 'Recent logs')}</h2>
