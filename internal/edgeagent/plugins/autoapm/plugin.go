@@ -197,6 +197,13 @@ func (p *Plugin) refresh(ctx context.Context) {
 	if ctx.Err() != nil {
 		return
 	}
+	// Limit heartbeat/UI payloads, not the process inventory used by resource collection.
+	if len(candidates) > contract.MaxCandidates {
+		candidates = candidates[:contract.MaxCandidates]
+		if err == nil {
+			err = fmt.Errorf("discovery display limited to %d process/port candidates", contract.MaxCandidates)
+		}
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.health.Candidates = candidates

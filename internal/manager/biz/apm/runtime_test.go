@@ -9,9 +9,27 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestInstancesPreserveKubernetesLogScope(t *testing.T) {
+	p := &fakeProm{result: `[
+		{"metric":{"service_instance_id":"pod.app","device_id":"42","cluster_id":"132","k8s_namespace_name":"payments","k8s_pod_name":"pod","service_version":"v1"},"value":[1600,"1"]},
+		{"metric":{"service_instance_id":"pod.app","device_id":"43","cluster_id":"133","k8s_namespace_name":"staging","k8s_pod_name":"pod","service_version":"v1"},"value":[1600,"1"]}
+	]`}
+	out, err := New(p, nil, nil).Instances(t.Context(), testQuery())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Instances) != 2 || out.Instances[0].Namespace != "payments" || out.Instances[1].Namespace != "staging" {
+		t.Fatalf("namespace or instance scope lost: %+v", out.Instances)
+	}
+	if !strings.Contains(p.expr, "k8s_namespace_name") {
+		t.Fatal("instance aggregation discarded Kubernetes namespace")
+	}
+}
 
 // Evaluate the generated query in Prometheus, including reset counters, GC
 // with no collections, memory pool aggregation, and cross-instance isolation.

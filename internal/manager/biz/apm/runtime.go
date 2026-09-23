@@ -133,7 +133,7 @@ func runtimeExpression(q Query, window time.Duration) string {
 func (s *Service) runtimeInstances(ctx context.Context, q Query) ([]Instance, error) {
 	q.InstanceID, q.ServiceVersion, q.Operation = "", "", ""
 	q.MetricSource = "application_metrics"
-	group := "service_instance_id,device_id,cluster_id,k8s_pod_name,service_version"
+	group := "service_instance_id,device_id,cluster_id,k8s_pod_name,service_version,k8s_namespace_name"
 	parts := []string{}
 	for _, protocol := range []string{"http", "rpc"} {
 		q.Protocol = protocol
@@ -150,18 +150,18 @@ func (s *Service) runtimeInstances(ctx context.Context, q Query) ([]Instance, er
 		return nil, err
 	}
 	instances := []Instance{}
-	seen := map[[2]string]bool{}
+	seen := map[Instance]bool{}
 	for _, item := range series {
 		labels := item.Metric
 		if labels["service_instance_id"] == "" && labels["k8s_pod_name"] == "" {
 			continue
 		}
-		key := [2]string{labels["service_instance_id"], labels["service_version"]}
+		key := Instance{InstanceID: labels["service_instance_id"], DeviceID: labels["device_id"], ClusterID: labels["cluster_id"], Pod: labels["k8s_pod_name"], Version: labels["service_version"], Namespace: labels["k8s_namespace_name"]}
 		if seen[key] {
 			continue
 		}
 		seen[key] = true
-		instances = append(instances, Instance{labels["service_instance_id"], labels["device_id"], labels["cluster_id"], labels["k8s_pod_name"], labels["service_version"]})
+		instances = append(instances, key)
 	}
 	sort.Slice(instances, func(i, j int) bool { return fmt.Sprint(instances[i]) < fmt.Sprint(instances[j]) })
 	return instances, nil

@@ -169,6 +169,9 @@ func (u *Usecase) DeviceClusterEnvironment(ctx context.Context, deviceNodeID uin
 	if err != nil {
 		return "", "", err
 	}
+	if strings.TrimSpace(node.PropsJSON) == "" {
+		return "", name, nil
+	}
 	var props struct {
 		Environment string `json:"environment"`
 	}

@@ -91,6 +91,7 @@ export type ApmDiagnostics = {
     cluster_id: string;
     pod: string;
     version: string;
+    namespace?: string;
   }[];
   trace_ids: string[];
   sampled_traces: number;

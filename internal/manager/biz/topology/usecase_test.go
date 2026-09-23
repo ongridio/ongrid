@@ -638,6 +638,25 @@ func TestDeleteRelationTypeGuards(t *testing.T) {
 	}
 }
 
+func TestDeviceInClusterWithoutProperties(t *testing.T) {
+	uc, ctx := newUC(t), t.Context()
+	cluster, err := uc.CreateNode(ctx, "cluster", "unconfigured-cluster", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	device, err := uc.CreateNode(ctx, "device", "host", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := uc.AssignEnrollmentDevice(ctx, cluster.ID, device.ID, 11, 21); err != nil {
+		t.Fatal(err)
+	}
+	env, name, err := uc.DeviceClusterEnvironment(ctx, device.ID)
+	if err != nil || env != "" || name != cluster.Name {
+		t.Fatalf("cluster with no environment must not block device configuration: %q %q %v", env, name, err)
+	}
+}
+
 func TestClusterEnvironmentSurvivesInventoryAndCanBeCleared(t *testing.T) {
 	uc, ctx := newUC(t), context.Background()
 	id, err := uc.EnsureKubernetesCluster(ctx, 42, nil, "prod", "uid", "full-node", "online")

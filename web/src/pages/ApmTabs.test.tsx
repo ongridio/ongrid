@@ -93,8 +93,8 @@ it('finds Kubernetes container logs through the observed service Pod when servic
   const requests: Record<string, unknown>[] = [];
   server.use(
     http.get('/api/v1/apm/instances', () => HttpResponse.json({ data: { items: [], instances: [
-      { instance_id: 'trade.orders-abc.orders', version: 'v1', device_id: '42', pod: 'orders-abc' },
-      { instance_id: 'trade.orders-def.orders', version: 'v2', device_id: '42', pod: 'orders-def' },
+      { instance_id: 'trade.orders-abc.orders', version: 'v1', device_id: '42', cluster_id: '132', namespace: 'payments', pod: 'orders-abc' },
+      { instance_id: 'trade.orders-def.orders', version: 'v2', device_id: '42', cluster_id: '132', namespace: 'payments', pod: 'orders-def' },
     ] } })),
     http.post('/api/v1/logs/search', async ({ request }) => {
       const input = await request.json() as Record<string, unknown>;
@@ -105,12 +105,53 @@ it('finds Kubernetes container logs through the observed service Pod when servic
   render(<MemoryRouter initialEntries={[`/apm/service?${scope}&tab=logs&instance_id=trade.orders-abc.orders&service_version=v1`]}><ApmPage /></MemoryRouter>);
   await screen.findByText('container output');
   expect(requests).toHaveLength(2);
-  expect(requests[1]).toMatchObject({ scope: { pods: ['orders-abc'], device_ids: [42] } });
+  expect(requests[1]).toMatchObject({ scope: { pods: ['orders-abc'], device_ids: [42], namespaces: ['payments'], cluster_ids: ['132'] } });
   expect(requests[1]).not.toHaveProperty('filters');
   const link = new URL(screen.getByRole('link', { name: /打开日志检索/ }).getAttribute('href')!, 'http://localhost');
   expect(link.searchParams.get('pod')).toBe('orders-abc');
   expect(link.searchParams.get('device_id')).toBe('42');
+  expect(link.searchParams.get('namespace')).toBe('payments');
+  expect(link.searchParams.get('cluster_id')).toBe('132');
   expect(link.searchParams.has('service_name')).toBe(false);
+});
+it('preserves all observed devices in the container log explorer link', async () => {
+  const requests: Record<string, unknown>[] = [];
+  server.use(
+    http.get('/api/v1/apm/instances', () => HttpResponse.json({ data: { instances: [
+      { instance_id: 'one', device_id: '42', cluster_id: '132', namespace: 'payments', pod: 'orders-abc' },
+      { instance_id: 'two', device_id: '43', cluster_id: '132', namespace: 'payments', pod: 'orders-def' },
+    ] } })),
+    http.post('/api/v1/logs/search', async ({ request }) => {
+      requests.push(await request.json() as Record<string, unknown>);
+      return HttpResponse.json({ data: { records: [], has_more: false } });
+    }),
+  );
+  const allDevices = new URLSearchParams(scope);
+  allDevices.delete('device_id');
+  render(<MemoryRouter initialEntries={[`/apm/service?${allDevices}&tab=logs`]}><ApmPage /></MemoryRouter>);
+  await screen.findByText(/按已观测到的 Pod/);
+  expect(requests[1]).toMatchObject({ scope: { device_ids: [42, 43], cluster_ids: ['132'], namespaces: ['payments'] } });
+  const link = new URL(screen.getByRole('link', { name: /打开日志检索/ }).getAttribute('href')!, 'http://localhost');
+  expect(link.searchParams.get('device_id')).toBe('42,43');
+  expect(link.searchParams.get('cluster_id')).toBe('132');
+  expect(link.searchParams.get('namespace')).toBe('payments');
+});
+it.each([['payments', 'staging'], ['payments', undefined]])('does not broaden container log matching across unknown or different namespaces: %s / %s', async (first, second) => {
+  const requests: Record<string, unknown>[] = [];
+  server.use(
+    http.get('/api/v1/apm/instances', () => HttpResponse.json({ data: { instances: [
+      { instance_id: 'one', device_id: '42', cluster_id: '132', namespace: first, pod: 'same-name' },
+      { instance_id: 'two', device_id: '42', cluster_id: '132', namespace: second, pod: 'other-name' },
+    ] } })),
+    http.post('/api/v1/logs/search', async ({ request }) => {
+      requests.push(await request.json() as Record<string, unknown>);
+      return HttpResponse.json({ data: { records: [], has_more: false } });
+    }),
+  );
+  render(<MemoryRouter initialEntries={[`/apm/service?${scope}&tab=logs`]}><ApmPage /></MemoryRouter>);
+  await screen.findByText('当前范围未查询到日志');
+  expect(requests).toHaveLength(1);
+  expect(screen.queryByText(/按已观测到的 Pod/)).not.toBeInTheDocument();
 });
 it('queries historical profiles for the selected device, service and instance without starting a capture', async () => {
   let query: URLSearchParams | undefined;

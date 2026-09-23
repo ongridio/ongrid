@@ -8,7 +8,7 @@ Status: Accepted — 原始决策 2026-09-14；以下早期设计记录中的开
 
 ## 决策
 
-新增 autoapm 插件，复用现有 Manager 插件配置、鉴权 tunnel、心跳及 subprocess 生命周期。enabled 表示整个自动 APM 开关；targets 为空只运行监听进程发现。候选最多 200 组，目标最多 100 组，只上报路径/端口/PID，不采集进程参数或环境变量。目标必须为确定的绝对路径和非零端口；不接受 glob、正则配置或环境替换符。
+新增 autoapm 插件，复用现有 Manager 插件配置、鉴权 tunnel、心跳及 subprocess 生命周期。enabled 表示整个自动 APM 开关；targets 为空只运行监听进程发现。心跳及界面候选最多 200 组，已选目标的资源采集不受候选展示上限限制；目标最多 100 组，只上报路径/端口/PID，不采集进程参数或环境变量。目标必须为确定的绝对路径和非零端口；不接受 glob、正则配置或环境替换符。
 
 选择进程后启动固定版本 OBI v0.12.1 与私有 Collector 0.157.0。OBI 使用 v1 services 的转义完整路径正则与端口 AND 匹配，保留逐目标服务名称；其 v2 迁移不支持逐目标名称，独立 `config validate` 命令也只接受 v2。因此 v1 由 OBI 启动时校验，复用 subprocess readiness 检测启动错误并回滚。所需系统能力设为强制检查，禁止缺权限仍显示成功启动。
 
@@ -67,9 +67,13 @@ OrbStack PID 命名空间补丁仅用于本地测试，补丁、源码副本和�
 
 在 autoapm 既有 15 秒指标 scrape / push 通道附加 `ongrid_apm_process_*`，复用 procfs 库读取 CPU 累计秒、RSS、虚拟内存、线程、FD 和磁盘字节计数，不新增 exporter、监听端口或 OBI 源码补丁。OBI `target_info` 提供服务身份；主机以实时 exe + port + PID 再验证，Kubernetes 复用现有只读 Pod API，限制当前节点，以 Pod UID / 容器名称取得当前 runtime container ID，再精确匹配 `/proc/<pid>/cgroup`。不按 Pod 总量、进程名称或工作负载前缀猜测。
 
+主机发现通过 procfs 的监听 socket inode 关联全部所属进程，保留同路径、同端口的不同 PID，覆盖 `SO_REUSEPORT` 和继承共享监听 socket 的 worker；同一 PID 的重复监听记录仍合并。只调整 Ongrid 的发现逻辑，不修改 OBI 或依赖库源码。
+
+服务日志回查保留设备、集群及实际 Kubernetes namespace，跳转日志检索时保留全部设备范围。Pod 名称只在同集群、同 namespace 内唯一；跨集群或 namespace 时要求先缩小到具体集群或实例，避免用多个独立列表的笛卡尔积匹配其他服务日志。实例缺少 Kubernetes namespace 时不猜测业务服务命名空间。
+
 每次资源读取限时 5 秒、最多 1000 个匹配进程；原 HTTP/RPC/运行时样本在资源读取失败时仍继续上报。进程 PID 和 start ticks 区分重启后的计数器；读取结束再次检查 start ticks，跨进程生命周期的样本丢弃。部分不可读指标不填零；`ongrid_apm_process_scrape_success`、`ongrid_apm_resource_collection_success` 和插件心跳错误展示失败。基础 gauge 只合计最近 30 秒的进程样本，避免退出子进程继续计入；CPU、I/O 先 rate 再汇总，Edge CPU/RSS 优先于重复 SDK 数据。Kubernetes RSS 为容器内进程 RSS 合计，不能用于容器工作集或内存限制利用率。
 
-回滚恢复之前的 Edge、Manager 和 web 产物；无 schema/API 变更，历史基础资源指标保留在 Prometheus。无需调整 OBI 权限，服务发现、现有设备 process-exporter、日志和 SDK 接入继续沿用原路径。
+回滚恢复之前的 Edge、Manager 和 web 产物；实例响应新增兼容字段 `namespace`，无数据库 schema 变更，历史基础资源指标保留在 Prometheus。无需调整 OBI 权限，服务发现、现有设备 process-exporter、日志和 SDK 接入继续沿用原路径。
 
 ## 官方 OBI 权限与启动预检（2026-09-21）
 

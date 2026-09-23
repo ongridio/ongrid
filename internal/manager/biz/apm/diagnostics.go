@@ -26,6 +26,7 @@ type Instance struct {
 	ClusterID  string `json:"cluster_id"`
 	Pod        string `json:"pod"`
 	Version    string `json:"version"`
+	Namespace  string `json:"namespace"`
 }
 
 type Diagnostics struct {
@@ -93,7 +94,7 @@ func (s *Service) Diagnostics(ctx context.Context, q Query) (*Diagnostics, error
 		out.Checks = append(out.Checks, Check{"metric_freshness", freshStatus, "prometheus_sample_at_window_end"})
 		// Keep instance discovery independent of trace sampling. Scope is still
 		// the exact service/environment/namespace and selected metric schema.
-		expr := q.aggregate("count_over_time", q.counter(), q.End.Sub(q.Start), "service_instance_id,device_id,cluster_id,k8s_pod_name,service_version")
+		expr := q.aggregate("count_over_time", q.counter(), q.End.Sub(q.Start), "service_instance_id,device_id,cluster_id,k8s_pod_name,service_version,k8s_namespace_name")
 		series, instanceErr := s.instant(ctx, expr, q.End)
 		if instanceErr != nil {
 			out.Checks = append(out.Checks, Check{"instance_metrics", "unavailable", "query_failed"})
@@ -102,7 +103,7 @@ func (s *Service) Diagnostics(ctx context.Context, q Query) (*Diagnostics, error
 			for _, sample := range series {
 				labels := sample.Metric
 				missingID = missingID || labels["service_instance_id"] == ""
-				addInstance(Instance{labels["service_instance_id"], labels["device_id"], labels["cluster_id"], labels["k8s_pod_name"], labels["service_version"]})
+				addInstance(Instance{InstanceID: labels["service_instance_id"], DeviceID: labels["device_id"], ClusterID: labels["cluster_id"], Pod: labels["k8s_pod_name"], Version: labels["service_version"], Namespace: labels["k8s_namespace_name"]})
 			}
 			status := "observed"
 			if len(out.Instances) == 0 {
@@ -206,7 +207,7 @@ func (s *Service) Diagnostics(ctx context.Context, q Query) (*Diagnostics, error
 					missingParents++
 				}
 			}
-			instance := Instance{attrs["service.instance.id"], attrs["device_id"], attrs["cluster_id"], attrs["k8s.pod.name"], attrs["service.version"]}
+			instance := Instance{InstanceID: attrs["service.instance.id"], DeviceID: attrs["device_id"], ClusterID: attrs["cluster_id"], Pod: attrs["k8s.pod.name"], Version: attrs["service.version"], Namespace: attrs["k8s.namespace.name"]}
 			addInstance(instance)
 		}
 		if matched {

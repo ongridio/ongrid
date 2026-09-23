@@ -229,6 +229,13 @@ describe('LogsPage', () => {
     expect(new Date(searchRequests[0].end).getTime() - new Date(searchRequests[0].start).getTime()).toBe(6 * 60 * 60 * 1000);
   });
 
+  it('preserves multiple devices from a service log deep link', async () => {
+    render(<MemoryRouter initialEntries={['/logs?device_id=42,43&cluster_id=7&namespace=payments&pod=orders-abc,orders-def']}><LogsPage /></MemoryRouter>);
+    await waitForInitialLogs();
+    expect(searchRequests[0]?.scope).toMatchObject({ device_ids: [42, 43], cluster_ids: ['7'], namespaces: ['payments'], pods: ['orders-abc', 'orders-def'] });
+    expect(screen.getByRole('combobox', { name: '设备' })).toHaveTextContent('42,43');
+  });
+
   it('keeps successful logs and closes their cursor when the histogram fails', async () => {
     let closedCursor = '';
     server.use(

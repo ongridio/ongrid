@@ -193,6 +193,7 @@ message ObservedInstance {
   string cluster_id = 3;
   string pod = 4;
   string version = 5;
+  string namespace = 6; // Kubernetes namespace; independent of service.namespace.
 }
 message GetDiagnosticsRequest { Query query = 1; }
 message GetDiagnosticsData {
