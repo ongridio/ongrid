@@ -41,13 +41,7 @@ jobs:
           setup_only: true
 
       - name: buf lint
-        run: |
-          buf lint \
-            --config '{"version":"v2","lint":{"use":["STANDARD"],"except":["PACKAGE_DIRECTORY_MATCH"]}}' \
-            api/manager/k8s/v1/k8s.proto
-          buf lint \
-            --config '{"version":"v2","lint":{"use":["STANDARD"],"except":["PACKAGE_DIRECTORY_MATCH"]}}' \
-            api/manager/setting/v1/setting.proto
+        run: make lint-proto
 
       - name: go build
         run: go build ./...

@@ -11,8 +11,8 @@ option go_package = "github.com/ongridio/ongrid/api/gen/manager/k8s/v1;k8sv1";
 service KubernetesService {
     rpc CreateCluster(CreateClusterRequest) returns (CreateClusterResponse);
     rpc ListClusters(ListClustersRequest) returns (ListClustersResponse);
-    rpc GetAutoAPM(GetAutoAPMRequest) returns (AutoAPMResponse);
-    rpc SetAutoAPM(SetAutoAPMRequest) returns (AutoAPMResponse);
+    rpc GetAutoAPM(GetAutoAPMRequest) returns (GetAutoAPMResponse);
+    rpc SetAutoAPM(SetAutoAPMRequest) returns (SetAutoAPMResponse);
     rpc GetCluster(GetClusterRequest) returns (GetClusterResponse);
     rpc GetClusterHealth(GetClusterHealthRequest) returns (GetClusterHealthResponse);
     rpc ListEdgeAttachments(ListEdgeAttachmentsRequest) returns (ListEdgeAttachmentsResponse);
@@ -398,7 +398,11 @@ message SetAutoAPMRequest {
     uint64 cluster_id = 1;
     ongrid.manager.edge.v1.AutoAPMSpec spec = 2;
 }
-message AutoAPMResponse {
+message GetAutoAPMResponse {
+    ongrid.manager.edge.v1.AutoAPMSpec spec = 1;
+    ongrid.manager.edge.v1.AutoAPMDefaults defaults = 2;
+}
+message SetAutoAPMResponse {
     ongrid.manager.edge.v1.AutoAPMSpec spec = 1;
     ongrid.manager.edge.v1.AutoAPMDefaults defaults = 2;
 }
