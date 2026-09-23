@@ -1,0 +1,79 @@
+name: PR Commit Policy
+
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+permissions:
+  pull-requests: write
+  statuses: write
+
+concurrency:
+  group: commit-policy-${{ github.event.pull_request.number }}
+  # Finish posting the first reminder before another run can look for it.
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: validate commit messages
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      # This privileged workflow reads API metadata only. Never check out or run PR code.
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const repo = context.repo;
+            const marker = '<!-- ongrid-commit-policy -->';
+            const status = (state, description) => github.rest.repos.createCommitStatus({
+              ...repo, sha: pr.head.sha, context: 'commit-policy', state, description,
+              target_url: `${context.serverUrl}/${repo.owner}/${repo.repo}/actions/runs/${context.runId}`,
+            });
+            await status('pending', 'Checking commit messages.');
+            try {
+              const params = { ...repo, pull_number: pr.number };
+              const { data: current } = await github.rest.pulls.get(params);
+              if (current.head.sha !== pr.head.sha) return;
+              const commits = await github.paginate(github.rest.pulls.listCommits, { ...params, per_page: 100 });
+              const failures = [];
+              // ponytail: the API caps PR commits at 250; split larger PRs instead of silently skipping commits.
+              if (!commits.length || commits.length !== current.commits) {
+                failures.push('The complete commit list could not be checked. Split PRs larger than 250 commits and retry.');
+              }
+              const messages = [
+                { label: 'PR title', message: current.title },
+                ...commits.map(({ sha, commit }) => ({ label: sha.slice(0, 7), message: commit.message })),
+              ];
+              for (const { label, message } of messages) {
+                const subject = message.split(/\r?\n/, 1)[0];
+                const reasons = [];
+                if (!/^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-zA-Z0-9_./-]+\))?!?: \S.*$/.test(subject)) {
+                  reasons.push('use Conventional Commits, e.g. `fix: handle empty service names`');
+                }
+                // ponytail: this rejects Han characters, not every non-English language; use language review for semantic enforcement.
+                if (/\p{Script=Han}/u.test(message)) reasons.push('rewrite this text in English (Han characters are not allowed)');
+                if (reasons.length) failures.push(`- ${label}: ${reasons.join('; ')}.`);
+              }
+              const comments = await github.paginate(github.rest.issues.listComments, { ...repo, issue_number: pr.number, per_page: 100 });
+              const { data: latest } = await github.rest.pulls.get(params);
+              if (latest.head.sha !== current.head.sha || latest.base.ref !== current.base.ref ||
+                  latest.base.sha !== current.base.sha || latest.title !== current.title) {
+                await status('failure', 'PR changed during validation. Re-run the workflow.');
+                core.setFailed('PR changed during validation. Re-run the workflow.');
+                return;
+              }
+              const details = failures.length ? failures.join('\n') : 'The PR title and all commit messages pass the format and Han-character checks.';
+              await core.summary.addRaw(`### Commit message policy\n\n${details}\n`).write();
+              const notified = comments.some(c => c.user?.login === 'github-actions[bot]' && c.body?.startsWith(marker));
+              if (!notified && failures.length) {
+                const checksUrl = `${context.serverUrl}/${repo.owner}/${repo.repo}/pull/${pr.number}/checks`;
+                const body = `${marker}\n### Commit message policy\n\nPlease write the PR title and every commit message in English using Conventional Commits, for example \`fix: handle empty service names\`. The automated check validates the format and rejects Han characters.\n\nSee [the latest PR checks](${checksUrl}) and open \`commit-policy\` for the current result and details.\n\nThis reminder is posted once per PR. Later failures and fixes only update the checks; this comment is not updated.`;
+                await github.rest.issues.createComment({ ...repo, issue_number: pr.number, body });
+              }
+              await status(failures.length ? 'failure' : 'success', failures.length ? 'Fix the PR title or commits; see the run summary.' : 'PR title and commit messages pass the policy.');
+              if (failures.length) core.setFailed('PR title or commit messages do not meet the policy.');
+            } catch (error) {
+              await status('failure', 'Commit policy could not be verified. Re-run the workflow.');
+              throw error;
+            }

@@ -78,6 +78,10 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
+      - name: Verify commit policy
+        working-directory: .
+        run: make test-commit-policy
+
       - name: Install dependencies
         run: npm ci
 

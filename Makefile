@@ -836,3 +836,7 @@ fetch-obi: ## [release] 下载并校验 Linux OBI 自动 APM 运行时
 		arch=$${target#linux-}; \
 		bash scripts/fetch-obi.sh "$(OBI_VERSION)" "$$arch" "$(BIN_DIR)/$$target" || exit 1; \
 	done
+
+.PHONY: test-commit-policy
+test-commit-policy: ## Verify PR commit policy and bot feedback
+	node scripts/test-commit-policy.cjs
