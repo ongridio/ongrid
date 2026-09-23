@@ -45,8 +45,21 @@ func TestK8sTelemetryGatewayFetcherBuildsStandaloneConfig(t *testing.T) {
 	if err := os.Remove(filepath.Join(dir, "telemetry-cluster-node-id")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := (&k8sTelemetryGatewayFetcher{dir: dir}).Fetch(context.Background()); err == nil {
-		t.Fatal("gateway accepted missing mapping")
+	legacy, err := (&k8sTelemetryGatewayFetcher{dir: dir}).Fetch(context.Background())
+	if err != nil {
+		t.Fatalf("old controller Secret rejected: %v", err)
+	}
+	attrs = legacy[edgeplugintraces.Name].Spec["extra_attrs"].(map[string]interface{})
+	if attrs["cluster_id"] != "7" || attrs["k8s_cluster_id"] != nil {
+		t.Fatalf("legacy gateway identity: %v", attrs)
+	}
+	for _, invalid := range []string{"0", "-1", "oops"} {
+		if err := os.WriteFile(filepath.Join(dir, "telemetry-cluster-node-id"), []byte(invalid), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := (&k8sTelemetryGatewayFetcher{dir: dir}).Fetch(context.Background()); err == nil {
+			t.Fatalf("invalid mapping %q fell back to legacy", invalid)
+		}
 	}
 	cfg, ok := configs[edgeplugintraces.Name]
 	if !ok {

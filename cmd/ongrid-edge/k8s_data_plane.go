@@ -164,6 +164,15 @@ func (f *k8sTelemetryGatewayFetcher) Fetch(ctx context.Context) (map[string]edge
 	if files.tracesEndpoint == "" || files.logsEndpoint == "" || files.remoteWriteEndpoint == "" {
 		return nil, errors.New("kubernetes telemetry endpoints are not ready")
 	}
+	attrs := map[string]interface{}{
+		"cluster_id":        strconv.FormatUint(files.clusterID, 10),
+		"telemetry_gateway": "kubernetes",
+		"gateway_namespace": strings.TrimSpace(os.Getenv("ONGRID_K8S_POD_NAMESPACE")),
+	}
+	if files.clusterNodeID != 0 {
+		attrs["cluster_id"] = strconv.FormatUint(files.clusterNodeID, 10)
+		attrs["k8s_cluster_id"] = strconv.FormatUint(files.clusterID, 10)
+	}
 	spec := map[string]interface{}{
 		"grpc_endpoint":                     "0.0.0.0:4317",
 		"http_endpoint":                     "0.0.0.0:4318",
@@ -189,12 +198,7 @@ func (f *k8sTelemetryGatewayFetcher) Fetch(ctx context.Context) (map[string]edge
 		"queue_size":                        parseIntEnv("ONGRID_K8S_GATEWAY_QUEUE_SIZE", 512),
 		"collector_metrics_endpoint":        "0.0.0.0:8888",
 		"tls_insecure_skip_verify":          files.tracesTLSInsecure,
-		"extra_attrs": map[string]interface{}{
-			"cluster_id":        strconv.FormatUint(files.clusterNodeID, 10),
-			"k8s_cluster_id":    strconv.FormatUint(files.clusterID, 10),
-			"telemetry_gateway": "kubernetes",
-			"gateway_namespace": strings.TrimSpace(os.Getenv("ONGRID_K8S_POD_NAMESPACE")),
-		},
+		"extra_attrs":                       attrs,
 	}
 	if files.remoteWriteCAPath != "" {
 		spec["metrics_remote_write_ca_file"] = files.remoteWriteCAPath
@@ -238,13 +242,17 @@ func readTelemetryFiles(ctx context.Context, dir string) (telemetryFiles, error)
 	if err != nil {
 		return telemetryFiles{}, err
 	}
-	clusterNodeRaw, err := readTelemetryFile(ctx, dir, "telemetry-cluster-node-id", true)
+	clusterNodeRaw, err := readTelemetryFile(ctx, dir, "telemetry-cluster-node-id", false)
 	if err != nil {
 		return telemetryFiles{}, err
 	}
-	files.clusterNodeID, err = strconv.ParseUint(clusterNodeRaw, 10, 64)
-	if err != nil || files.clusterNodeID == 0 {
-		return telemetryFiles{}, errors.New("Kubernetes telemetry requires a manager-provided unified cluster ID")
+	// Older controllers do not project this key. Continue their legacy labeling
+	// until it appears; malformed mappings must never silently change identity.
+	if clusterNodeRaw != "" {
+		files.clusterNodeID, err = strconv.ParseUint(clusterNodeRaw, 10, 64)
+		if err != nil || files.clusterNodeID == 0 {
+			return telemetryFiles{}, errors.New("invalid Kubernetes unified cluster ID")
+		}
 	}
 	accessKey, err := readTelemetryFile(ctx, dir, "telemetry-access-key", true)
 	if err != nil {

@@ -69,9 +69,15 @@ OrbStack PID 命名空间补丁仅用于本地测试，补丁、源码副本和�
 
 Manager 复用 Kubernetes Cluster.NodeID 映射，在下发 OBI、SDK Collector 和日志配置时设置统一拓扑 `cluster_id`；内部注册和认证继续使用原 K8s ID。新 APM 数据另携带 `k8s_cluster_id` 作为内部身份校验，避免统一 ID 与历史内部 ID 数字碰撞。映射缺失时拒绝下发，不将注册 ID 当作统一 ID。用户保存采集设置不能覆盖这些 Manager 所有的字段。
 
-按统一集群查询时，分别匹配新数据的 `(cluster_id=拓扑 ID, k8s_cluster_id=内部 ID)` 和历史数据的 `(cluster_id=内部 ID, k8s_cluster_id 缺失)`，指标在 rate 后、汇总前合并，链路使用同样的范围。日志回退先将新旧实例身份解析为同一个拓扑集群，仍限制设备、namespace 和 Pod。回滚时同时恢复 Manager、Edge 和 web，历史数据不重写。
+按统一集群查询时，分别匹配新数据的 `(cluster_id=拓扑 ID, k8s_cluster_id=内部 ID)` 和历史数据的 `(cluster_id=内部 ID, k8s_cluster_id 缺失)`，指标在 rate 后、汇总前合并，链路使用同样的范围。日志回退先将新旧实例身份解析为同一个拓扑集群，仍限制设备、namespace 和 Pod。回滚优先恢复 Edge，保留新 Manager 查询新旧身份；若继续回滚 Manager 和 web，已写入统一身份的数据仍保留，但旧查询端不保证能按原集群筛选到这些数据。
 
-独立遥测网关由控制器刷新 Secret 的 `telemetry-cluster-node-id` 获取统一 ID；旧 `telemetry-cluster-id` 仍供注册及 Kubernetes 基础设施指标使用，基础设施查询继续沿用已有映射。升级需同步更新 Manager、控制器、网关与节点 Edge，网关在新 ID 尚未投影时拒绝生成错误身份的配置。Tempo spanmetrics 需增加 `k8s_cluster_id` dimension（安装模板已更新），否则缺少该维度的新 spanmetrics 不会被归入选定集群。
+独立遥测网关由控制器刷新 Secret 的 `telemetry-cluster-node-id` 获取统一 ID；旧 `telemetry-cluster-id` 仍供注册及 Kubernetes 基础设施指标使用，基础设施查询继续沿用已有映射。Tempo spanmetrics 需增加 `k8s_cluster_id` dimension（安装模板已更新），否则缺少该维度的新 spanmetrics 不会被归入选定集群。
+
+### 混合版本兼容（2026-09-23）
+
+每次 `get_plugin_configs` 请求携带可选的 `unified_cluster_identity` 能力；不依赖版本号、注册记录或持久缓存，因此滚动升级和回滚都会重新协商。旧 Edge 的空请求继续获得不含新增字段的 OBI 配置和原内部 ID 的 traces 配置；容器日志仍使用其已有的统一 ID。新 Edge 才获得统一 ID 与内部 ID 的配对。集群 ID 始终由 Manager 解析，Edge 只声明能力，不能指定映射。
+
+新 Edge 连接旧 Manager 时，Kubernetes OBI 和 SDK traces 使用原来的内部 ID，且不添加表示统一身份的 `k8s_cluster_id`；新网关读取旧控制器的 Secret 时同样保留旧标签语义。Secret 新字段缺失或为空表示旧协议，非空但非法则拒绝应用。新控制器从旧 Manager 收不到映射时投影空值，避免把零值或旧的残留映射当作新身份。建议先升级 Manager 和 Tempo 配置，再滚动升级控制器、网关和节点 Edge；升级期间 APM 按既有映射兼容两种身份，旧数据不重写。链路查询用 `!(resource.k8s_cluster_id != nil)` 判断缺失，避开 Tempo 2.10 在 OR 内直接使用 `= nil` 时漏查旧链路的问题；独立 Tempo 验收覆盖新旧样本和数值碰撞。
 
 在 autoapm 既有 15 秒指标 scrape / push 通道附加 `ongrid_apm_process_*`，复用 procfs 库读取 CPU 累计秒、RSS、虚拟内存、线程、FD 和磁盘字节计数，不新增 exporter、监听端口或 OBI 源码补丁。OBI `target_info` 提供服务身份；主机以实时 exe + port + PID 再验证，Kubernetes 复用现有只读 Pod API，限制当前节点，以 Pod UID / 容器名称取得当前 runtime container ID，再精确匹配 `/proc/<pid>/cgroup`。不按 Pod 总量、进程名称或工作负载前缀猜测。
 

@@ -221,8 +221,9 @@ export function serviceTraceQL(params: URLSearchParams, extra?: string) {
     if (params.get('telemetry_cluster_id')) {
       const cluster = JSON.stringify(params.get('telemetry_cluster_id'));
       const k8s = params.get('telemetry_k8s_cluster_id');
+      // Negated existence keeps legacy spans visible with Tempo 2.10 OR filters.
       clauses.push(k8s
-        ? `((resource.cluster_id = ${cluster} && resource.k8s_cluster_id = ${JSON.stringify(k8s)}) || (resource.cluster_id = ${JSON.stringify(k8s)} && (resource.k8s_cluster_id = nil || resource.k8s_cluster_id = "")))`
+        ? `((resource.cluster_id = ${cluster} && resource.k8s_cluster_id = ${JSON.stringify(k8s)}) || (resource.cluster_id = ${JSON.stringify(k8s)} && (!(resource.k8s_cluster_id != nil) || resource.k8s_cluster_id = "")))`
         : `resource.cluster_id = ${cluster}`);
     } else {
       const ids = (params.get('cluster_device_ids') || '').split(',').filter((id) => /^\d+$/.test(id));

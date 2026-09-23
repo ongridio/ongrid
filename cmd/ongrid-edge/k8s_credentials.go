@@ -445,9 +445,13 @@ func (c *k8sSecretClient) patchDataKeys(ctx context.Context, values map[string][
 }
 
 func telemetrySecretData(in k8sTelemetryConfig) map[string][]byte {
+	clusterNodeID := ""
+	if in.ClusterNodeID != 0 {
+		clusterNodeID = strconv.FormatUint(in.ClusterNodeID, 10)
+	}
 	return map[string][]byte{
 		"telemetry-cluster-id":                []byte(strconv.FormatUint(in.ClusterID, 10)),
-		"telemetry-cluster-node-id":           []byte(strconv.FormatUint(in.ClusterNodeID, 10)),
+		"telemetry-cluster-node-id":           []byte(clusterNodeID),
 		"telemetry-access-key":                []byte(in.AccessKey),
 		"telemetry-secret-key":                []byte(in.SecretKey),
 		"telemetry-traces-endpoint":           []byte(in.TracesEndpoint),

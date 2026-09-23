@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 
@@ -89,13 +90,15 @@ func (f *fakeDeviceResolver) LookupHostDevice(_ context.Context, edgeID uint64) 
 }
 
 type fakePluginConfigFetcher struct {
-	calledEdgeID uint64
-	snap         *edgebiz.WireSnapshot
-	err          error
+	calledEdgeID           uint64
+	unifiedClusterIdentity bool
+	snap                   *edgebiz.WireSnapshot
+	err                    error
 }
 
-func (f *fakePluginConfigFetcher) FetchForEdge(_ context.Context, edgeID uint64) (*edgebiz.WireSnapshot, error) {
+func (f *fakePluginConfigFetcher) FetchForEdge(_ context.Context, edgeID uint64, unifiedClusterIdentity bool) (*edgebiz.WireSnapshot, error) {
 	f.calledEdgeID = edgeID
+	f.unifiedClusterIdentity = unifiedClusterIdentity
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -364,6 +367,25 @@ func TestInstall_GetPluginConfigs_UsesResolvedDeviceIDAsWireLabelID(t *testing.T
 	}
 	if got := out.Configs["traces"].Endpoint; got != "https://manager.example.com/v1/traces" {
 		t.Fatalf("traces endpoint = %q", got)
+	}
+	for _, tc := range []struct {
+		body             string
+		unified, invalid bool
+	}{
+		{"", false, false}, {"{}", false, false},
+		{`{"unified_cluster_identity":true}`, true, false},
+		{`{"unified_cluster_identity":false}`, false, false},
+		{`{"unified_cluster_identity":"true"}`, false, true},
+		{strings.Repeat(" ", 16<<10+1), false, true},
+	} {
+		rsp := &fakeResp{}
+		rpc(context.Background(), &fakeReq{clientID: 777, data: []byte(tc.body)}, rsp)
+		if (rsp.err != nil) != tc.invalid {
+			t.Fatalf("invalid=%v: %v", tc.invalid, rsp.err)
+		}
+		if !tc.invalid && (fetcher.calledEdgeID != 42 || fetcher.unifiedClusterIdentity != tc.unified) {
+			t.Fatalf("capability or authenticated identity lost: %+v", fetcher)
+		}
 	}
 }
 

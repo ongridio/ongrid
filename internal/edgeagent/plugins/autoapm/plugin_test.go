@@ -211,11 +211,19 @@ func TestCollectorUsesMappedIdentityInsteadOfBootstrap(t *testing.T) {
 		t.Fatalf("identity: %v", attrs)
 	}
 	spec.ClusterID, spec.K8sClusterID = 0, 0
-	if _, err := render(plugins.PluginConfig{Spec: spec.Map()}); err == nil {
-		t.Fatal("capture accepted missing mapping")
+	if _, err := render(plugins.PluginConfig{Spec: spec.Map()}); err != nil {
+		t.Fatalf("old Manager config rejected: %v", err)
+	}
+	attrs = collectorConfig(plugins.PluginConfig{}, spec).Spec["extra_attrs"].(map[string]interface{})
+	if attrs["cluster_id"] != "50" || attrs["k8s_cluster_id"] != nil {
+		t.Fatalf("legacy ID was marked unified: %v", attrs)
 	}
 	attrs = collectorConfig(plugins.PluginConfig{}, contract.Spec{}).Spec["extra_attrs"].(map[string]interface{})
 	if attrs["cluster_id"] != nil {
 		t.Fatal("host inherited stale bootstrap environment")
+	}
+	t.Setenv("ONGRID_K8S_CLUSTER_ID", "")
+	if _, err := render(plugins.PluginConfig{Spec: spec.Map()}); err == nil {
+		t.Fatal("capture accepted missing cluster identity")
 	}
 }

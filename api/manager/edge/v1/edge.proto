@@ -315,6 +315,11 @@ message RetryUpgradeJobResponse {
     UpgradeJob job = 1 [json_name = "job"];
 }
 
+// Edge-to-Manager tunnel request. Absent capability keeps the legacy config shape.
+message GetPluginConfigsRequest {
+    bool unified_cluster_identity = 1;
+}
+
 // AutoAPMSpec is the JSON spec of the existing autoapm plugin configuration.
 // Discovery is always enabled on host/node Edges; controllers do not run OBI.
 // Legacy per-edge enabled and platform.auto_apm_enabled do not gate discovery.

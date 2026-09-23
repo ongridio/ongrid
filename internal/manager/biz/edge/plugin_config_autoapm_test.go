@@ -1,7 +1,9 @@
 package edge
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	model "github.com/ongridio/ongrid/internal/manager/model/edge"
 	"github.com/ongridio/ongrid/internal/pkg/autoapm"
 	"testing"
@@ -15,7 +17,7 @@ func TestDiscoveryAlwaysOnForNewAndLegacyDisabledEdges(t *testing.T) {
 		if configured {
 			repo.rows["autoapm"] = &model.PluginConfig{EdgeID: 1, PluginName: "autoapm", Enabled: false, SpecJSON: `{"targets":[{"executable":"/opt/orders","port":8080,"service_name":"orders"}]}`}
 		}
-		wire, err := uc.FetchForEdge(ctx, 1)
+		wire, err := uc.FetchForEdge(ctx, 1, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -62,7 +64,7 @@ func TestAutoAPMEnvironmentInheritanceAndSavedOptions(t *testing.T) {
 	}
 	for _, env := range []string{"production", "staging", ""} {
 		environment = env
-		snapshot, err := uc.FetchForEdge(ctx, 1)
+		snapshot, err := uc.FetchForEdge(ctx, 1, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -86,7 +88,7 @@ func TestAutoAPMEnvironmentInheritanceAndSavedOptions(t *testing.T) {
 	if _, err := uc.Set(ctx, 2, "autoapm", SetInput{Spec: spec}); err != nil {
 		t.Fatal(err)
 	}
-	snapshot, err := uc.FetchForEdge(ctx, 2)
+	snapshot, err := uc.FetchForEdge(ctx, 2, false)
 	if err != nil || snapshot.Configs["autoapm"].Spec["environment"] != "production" {
 		t.Fatalf("device default did not replace legacy collector value: %+v %v", snapshot, err)
 	}
@@ -132,14 +134,14 @@ func TestClusterCaptureReplacesNodeTargetsAndDisablesController(t *testing.T) {
 		return nil, false, nil
 	}, nil)
 	{
-		snapshot, err := uc.FetchForEdge(ctx, 1)
+		snapshot, err := uc.FetchForEdge(ctx, 1, false)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if !snapshot.Configs["autoapm"].Enabled || snapshot.Configs["autoapm"].Spec["kubernetes"] == nil {
 			t.Fatal("cluster policy lost")
 		}
-		snapshot, err = uc.FetchForEdge(ctx, 2)
+		snapshot, err = uc.FetchForEdge(ctx, 2, false)
 		if err != nil || snapshot.Configs["autoapm"].Enabled {
 			t.Fatal("controller was enabled")
 		}
@@ -164,7 +166,7 @@ func TestCaptureUsesFixedSamplingAndTLSForHostsAndKubernetes(t *testing.T) {
 				return &autoapm.Spec{SampleRatio: &ratio, Kubernetes: &autoapm.Kubernetes{Rules: []autoapm.KubernetesRule{{Namespace: "shop"}}}}, true, nil
 			}, nil)
 		}
-		snapshot, err := uc.FetchForEdge(ctx, 1)
+		snapshot, err := uc.FetchForEdge(ctx, 1, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -190,7 +192,7 @@ func TestKubernetesEnvironmentIgnoresDeviceOverride(t *testing.T) {
 		uc.SetKubernetesAutoAPMProvider(func(context.Context, uint64) (*autoapm.Spec, bool, error) {
 			return &autoapm.Spec{Environment: env, Kubernetes: &autoapm.Kubernetes{Rules: []autoapm.KubernetesRule{{Namespace: "shop"}}}}, true, nil
 		}, nil)
-		snapshot, err := uc.FetchForEdge(ctx, 1)
+		snapshot, err := uc.FetchForEdge(ctx, 1, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -214,13 +216,13 @@ func TestKubernetesTelemetryIdentityIsManagerOwned(t *testing.T) {
 	})
 	uc.SetKubernetesAutoAPMProvider(func(_ context.Context, id uint64) (*autoapm.Spec, bool, error) {
 		if id == 1 {
-			return &autoapm.Spec{Kubernetes: &autoapm.Kubernetes{}}, true, nil
+			return &autoapm.Spec{Kubernetes: &autoapm.Kubernetes{Rules: []autoapm.KubernetesRule{{Namespace: "shop"}}}}, true, nil
 		}
 		return nil, id == 2, nil
 	}, nil)
 	for _, id := range []uint64{1, 2} {
 		repo.rows["traces"].EdgeID = id
-		snapshot, err := uc.FetchForEdge(ctx, id)
+		snapshot, err := uc.FetchForEdge(ctx, id, true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -239,11 +241,43 @@ func TestKubernetesTelemetryIdentityIsManagerOwned(t *testing.T) {
 			t.Fatal("controller capture enabled")
 		}
 	}
-	host, err := uc.FetchForEdge(ctx, 3)
+	host, err := uc.FetchForEdge(ctx, 3, false)
 	if err != nil || host.Configs["autoapm"].Spec["cluster_id"] != nil {
 		t.Fatalf("host identity changed: %v %v", host, err)
 	}
 	if repo.rows["traces"].SpecJSON != `{"extra_attrs":{"cluster_id":"50","team":"payments"}}` {
 		t.Fatal("mutated stored settings")
+	}
+	// Freeze the pre-unification strict decoder: new fields would reject the
+	// whole plugin config, including a cold start after upgrading only Manager.
+	for _, unified := range []bool{false, true, false} {
+		snapshot, err := uc.FetchForEdge(ctx, 1, unified)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var legacy struct {
+			Kubernetes            *autoapm.Kubernetes `json:"kubernetes,omitempty"`
+			TLSInsecureSkipVerify bool                `json:"tls_insecure_skip_verify,omitempty"`
+			Environment           string              `json:"environment,omitempty"`
+			SampleRatio           *float64            `json:"sample_ratio,omitempty"`
+			Targets               []autoapm.Target    `json:"targets,omitempty"`
+		}
+		raw, err := json.Marshal(snapshot.Configs["autoapm"].Spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.DisallowUnknownFields()
+		err = decoder.Decode(&legacy)
+		if (err == nil) == unified || (!unified && (legacy.Kubernetes == nil || len(legacy.Kubernetes.Rules) != 1 || legacy.Kubernetes.Rules[0].Namespace != "shop")) {
+			t.Fatalf("unified=%v: old decoder=%v config=%s", unified, err, raw)
+		}
+		extra := snapshot.Configs["traces"].Spec["extra_attrs"].(map[string]interface{})
+		if !unified && (extra["cluster_id"] != "50" || extra["k8s_cluster_id"] != nil) {
+			t.Fatalf("legacy trace identity changed: %v", extra)
+		}
+		if snapshot.Configs["logs"].Spec["cluster_id"] != "132" {
+			t.Fatal("container logs lost their existing unified identity")
+		}
 	}
 }

@@ -22,6 +22,7 @@ type fakeTunnelClient struct {
 	secretReq  *tunnel.GetPluginSecretRequest
 	secretReqs []tunnel.GetPluginSecretRequest
 	reportReq  *tunnel.ReportPluginConfigAppliedRequest
+	configReq  tunnel.GetPluginConfigsRequest
 }
 
 func (f *fakeTunnelClient) Dial(context.Context) error { return nil }
@@ -34,6 +35,11 @@ func (f *fakeTunnelClient) Call(_ context.Context, method string, req, resp any)
 	}
 	switch method {
 	case tunnel.MethodGetPluginConfigs:
+		in, ok := req.(tunnel.GetPluginConfigsRequest)
+		if !ok {
+			return fmt.Errorf("unexpected config request type %T", req)
+		}
+		f.configReq = in
 		out, ok := resp.(*tunnel.GetPluginConfigsResponse)
 		if !ok {
 			return fmt.Errorf("unexpected response type %T", resp)
@@ -109,6 +115,9 @@ func TestTunnelConfigFetcherAppliesKubernetesLogsDefaults(t *testing.T) {
 	got, err := fetcher.Fetch(context.Background())
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
+	}
+	if !client.configReq.UnifiedClusterIdentity {
+		t.Fatal("new Edge did not advertise unified identity support")
 	}
 	cfg := got["logs"]
 	if cfg.EdgeID != 100 {
@@ -222,8 +231,8 @@ func TestTunnelConfigFetcherAppliesKubernetesTracesDefaults(t *testing.T) {
 		t.Fatalf("auth = %q/%q, want enrolled credentials", cfg.AuthUser, cfg.AuthPass)
 	}
 	extra := specMap(t, cfg.Spec, "extra_attrs")
-	if extra["cluster_id"] != nil {
-		t.Fatal("bootstrap ID leaked into telemetry")
+	if extra["cluster_id"] != "9" || extra["k8s_cluster_id"] != nil {
+		t.Fatalf("old Manager identity was not preserved: %v", extra)
 	}
 	if extra["node_name"] != "kind-worker" {
 		t.Fatalf("extra_attrs.node_name = %#v, want kind-worker", extra["node_name"])
@@ -311,8 +320,8 @@ func TestTunnelConfigFetcherAppliesKubernetesGatewayTracesDefaults(t *testing.T)
 	assertSpecEqual(t, cfg.Spec, "metrics_export_endpoint", "127.0.0.1:9464")
 	assertSpecEqual(t, cfg.Spec, "tls_insecure_skip_verify", true)
 	extra := specMap(t, cfg.Spec, "extra_attrs")
-	if extra["cluster_id"] != nil {
-		t.Fatal("bootstrap ID leaked into telemetry")
+	if extra["cluster_id"] != "9" || extra["k8s_cluster_id"] != nil {
+		t.Fatalf("old Manager identity was not preserved: %v", extra)
 	}
 	if extra["telemetry_gateway"] != "kubernetes" {
 		t.Fatalf("extra_attrs.telemetry_gateway = %#v, want kubernetes", extra["telemetry_gateway"])

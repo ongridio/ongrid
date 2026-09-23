@@ -111,7 +111,7 @@ type WebshellRouter interface {
 
 // the edge biz PluginConfigUC. *edgebiz.PluginConfigUC satisfies it.
 type PluginConfigFetcher interface {
-	FetchForEdge(ctx context.Context, edgeID uint64) (*edgebiz.WireSnapshot, error)
+	FetchForEdge(ctx context.Context, edgeID uint64, unifiedClusterIdentity bool) (*edgebiz.WireSnapshot, error)
 }
 
 type PluginSecretProvider interface {
@@ -595,9 +595,18 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 	// (lets ongrid run without the plugin runtime when no plugins are
 	// in use).
 	if w.PluginConfigUC != nil {
-		if err := c.Register(ctx, tunnel.MethodGetPluginConfigs, func(rpcCtx context.Context, edgeID uint64, _ []byte) ([]byte, error) {
+		if err := c.Register(ctx, tunnel.MethodGetPluginConfigs, func(rpcCtx context.Context, edgeID uint64, body []byte) ([]byte, error) {
+			if len(body) > 16<<10 {
+				return nil, fmt.Errorf("get_plugin_configs: request too large")
+			}
+			var in tunnel.GetPluginConfigsRequest
+			if len(body) != 0 {
+				if err := json.Unmarshal(body, &in); err != nil {
+					return nil, fmt.Errorf("get_plugin_configs: decode: %w", err)
+				}
+			}
 			canonicalEdgeID := c.canonicalizeEdgeID(edgeID)
-			snap, err := w.PluginConfigUC.FetchForEdge(rpcCtx, canonicalEdgeID)
+			snap, err := w.PluginConfigUC.FetchForEdge(rpcCtx, canonicalEdgeID, in.UnifiedClusterIdentity)
 			if err != nil {
 				return nil, fmt.Errorf("get_plugin_configs: %w", err)
 			}

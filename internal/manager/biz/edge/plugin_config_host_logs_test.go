@@ -25,7 +25,7 @@ func TestHostServiceLogsFollowTargetsAndPreserveDeviceSettings(t *testing.T) {
 			if _, err := uc.Set(ctx, 1, "autoapm", SetInput{Spec: autoapm.Spec{Environment: "legacy-collector", Targets: []autoapm.Target{target}}.Map()}); err != nil {
 				t.Fatal(err)
 			}
-			wire, err := uc.FetchForEdge(ctx, 1)
+			wire, err := uc.FetchForEdge(ctx, 1, false)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -76,7 +76,7 @@ func TestHostServiceLogsFollowTargetsAndPreserveDeviceSettings(t *testing.T) {
 		if _, err := uc.Set(ctx, 1, "autoapm", SetInput{Spec: autoapm.Spec{}.Map()}); err != nil {
 			t.Fatal(err)
 		}
-		wire, err := uc.FetchForEdge(ctx, 1)
+		wire, err := uc.FetchForEdge(ctx, 1, false)
 		if err != nil || wire.Configs["logs"].Enabled != deviceLogs || wire.Configs["logs"].Spec["service_capture"] != nil {
 			t.Fatalf("removal: %+v %v", wire, err)
 		}

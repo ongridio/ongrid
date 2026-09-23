@@ -398,7 +398,9 @@ func TraceQL(q Query) string {
 		if q.resourceScope.ClusterID != "" {
 			clause := "resource.cluster_id = " + strconv.Quote(q.resourceScope.ClusterID)
 			if id := q.resourceScope.K8sClusterID; id != "" {
-				clause = "((" + clause + " && resource.k8s_cluster_id = " + strconv.Quote(id) + ") || (resource.cluster_id = " + strconv.Quote(id) + ` && (resource.k8s_cluster_id = nil || resource.k8s_cluster_id = "")))`
+				// Tempo 2.10 drops missing attributes for = nil inside OR;
+				// negated existence preserves the same identity predicate.
+				clause = "((" + clause + " && resource.k8s_cluster_id = " + strconv.Quote(id) + ") || (resource.cluster_id = " + strconv.Quote(id) + ` && (!(resource.k8s_cluster_id != nil) || resource.k8s_cluster_id = "")))`
 			}
 			clauses = append(clauses, clause)
 		} else {

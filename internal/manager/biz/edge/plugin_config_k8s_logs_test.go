@@ -36,7 +36,7 @@ func TestKubernetesLogsUseServiceSelectionAcrossAllConfigViews(t *testing.T) {
 		{nil, true},
 	} {
 		paths = step.paths
-		wire, err := uc.FetchForEdge(ctx, 1)
+		wire, err := uc.FetchForEdge(ctx, 1, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -60,14 +60,14 @@ func TestKubernetesLogsUseServiceSelectionAcrossAllConfigViews(t *testing.T) {
 		if _, err := uc.Set(ctx, 1, "logs", SetInput{Enabled: true}); err == nil {
 			t.Fatal("node override accepted")
 		}
-		controller, err := uc.FetchForEdge(ctx, 3)
+		controller, err := uc.FetchForEdge(ctx, 3, false)
 		if err != nil || controller.Configs["logs"].Enabled {
 			t.Fatalf("controller started node logs: %+v %v", controller, err)
 		}
 		if !wire.Configs["traces"].Enabled {
 			t.Fatal("SDK ingestion changed")
 		}
-		host, err := uc.FetchForEdge(ctx, 2)
+		host, err := uc.FetchForEdge(ctx, 2, false)
 		if err != nil || !host.Configs["logs"].Enabled || host.Configs["logs"].Spec["pod_log_paths"] != nil {
 			t.Fatal("ordinary host logging changed")
 		}

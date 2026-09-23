@@ -88,7 +88,7 @@ func TestClusterMigrationExcludesCollidingIDs(t *testing.T) {
 		}
 	}
 	trace := TraceQL(q)
-	for _, want := range []string{`resource.cluster_id = "132" && resource.k8s_cluster_id = "50"`, `resource.cluster_id = "50" && (resource.k8s_cluster_id = nil || resource.k8s_cluster_id = "")`} {
+	for _, want := range []string{`resource.cluster_id = "132" && resource.k8s_cluster_id = "50"`, `resource.cluster_id = "50" && (!(resource.k8s_cluster_id != nil) || resource.k8s_cluster_id = "")`} {
 		if !strings.Contains(trace, want) {
 			t.Fatalf("missing trace identity: %s", trace)
 		}

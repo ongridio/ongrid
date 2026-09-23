@@ -113,7 +113,7 @@ func (t *TunnelConfigFetcher) Fetch(ctx context.Context) (map[string]PluginConfi
 		return t.applyKubernetesDefaults(envSnap), nil
 	}
 	var resp tunnel.GetPluginConfigsResponse
-	if err := t.client.Call(ctx, tunnel.MethodGetPluginConfigs, struct{}{}, &resp); err != nil {
+	if err := t.client.Call(ctx, tunnel.MethodGetPluginConfigs, tunnel.GetPluginConfigsRequest{UnifiedClusterIdentity: true}, &resp); err != nil {
 		if cached := t.cachedSnapshot(); cached != nil {
 			return cached, nil
 		}
@@ -316,6 +316,11 @@ func (t *TunnelConfigFetcher) withKubernetesTracesDefaults(cfg PluginConfig) Plu
 	if extraAttrs == nil {
 		extraAttrs = map[string]interface{}{}
 	}
+	if _, ok := extraAttrs["cluster_id"]; !ok && t.k8sClusterID != 0 {
+		// Legacy Manager snapshots omit identity; preserve their internal ID
+		// without the k8s_cluster_id marker used by unified telemetry.
+		extraAttrs["cluster_id"] = fmt.Sprint(t.k8sClusterID)
+	}
 	if _, ok := extraAttrs["node_name"]; !ok && t.k8sNodeName != "" {
 		extraAttrs["node_name"] = t.k8sNodeName
 	}
@@ -365,6 +370,9 @@ func (t *TunnelConfigFetcher) withKubernetesGatewayTracesDefaults(cfg PluginConf
 	extraAttrs := copyStringMapSpec(spec["extra_attrs"])
 	if extraAttrs == nil {
 		extraAttrs = map[string]interface{}{}
+	}
+	if _, ok := extraAttrs["cluster_id"]; !ok && t.k8sClusterID != 0 {
+		extraAttrs["cluster_id"] = fmt.Sprint(t.k8sClusterID)
 	}
 	if _, ok := extraAttrs["telemetry_gateway"]; !ok {
 		extraAttrs["telemetry_gateway"] = "kubernetes"

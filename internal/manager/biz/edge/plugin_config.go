@@ -443,7 +443,7 @@ func (uc *PluginConfigUC) rollbackPluginConfig(ctx context.Context, edgeID uint6
 // / traces on first connect so Monitor panels and log/trace ingestion
 // just work. Any explicit DB row (operator opt-out via UI) beats the
 // default — table lookup wins.
-func (uc *PluginConfigUC) FetchForEdge(ctx context.Context, edgeID uint64) (*WireSnapshot, error) {
+func (uc *PluginConfigUC) FetchForEdge(ctx context.Context, edgeID uint64, unifiedClusterIdentity bool) (*WireSnapshot, error) {
 	rows, err := uc.repo.ListByEdge(ctx, edgeID)
 	if err != nil {
 		return nil, err
@@ -558,12 +558,16 @@ func (uc *PluginConfigUC) FetchForEdge(ctx context.Context, edgeID uint64) (*Wir
 		if clusterID != 0 {
 			switch name {
 			case model.PluginNameAutoAPM:
-				if cfg.Spec["kubernetes"] != nil {
+				if unifiedClusterIdentity && cfg.Spec["kubernetes"] != nil {
 					cfg.Spec = mergeRuntimeOverlay(cfg.Spec, map[string]interface{}{"cluster_id": clusterID, "k8s_cluster_id": k8sClusterID})
 				}
 			case model.PluginNameTraces:
 				extra, _ := cfg.Spec["extra_attrs"].(map[string]interface{})
-				extra = mergeRuntimeOverlay(extra, map[string]interface{}{"cluster_id": fmt.Sprint(clusterID), "k8s_cluster_id": fmt.Sprint(k8sClusterID)})
+				extra = mergeRuntimeOverlay(extra, map[string]interface{}{"cluster_id": fmt.Sprint(k8sClusterID)})
+				delete(extra, "k8s_cluster_id")
+				if unifiedClusterIdentity {
+					extra["cluster_id"], extra["k8s_cluster_id"] = fmt.Sprint(clusterID), fmt.Sprint(k8sClusterID)
+				}
 				cfg.Spec = mergeRuntimeOverlay(cfg.Spec, map[string]interface{}{"extra_attrs": extra})
 			case model.PluginNameLogs:
 				cfg.Spec = mergeRuntimeOverlay(cfg.Spec, map[string]interface{}{"cluster_id": fmt.Sprint(clusterID)})

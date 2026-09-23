@@ -201,3 +201,85 @@ func TestOTLPIntegration(t *testing.T) {
 	}
 	t.Log("Verified 60 exact server calls, 10% errors, zero-error fallback, histogram milliseconds, environment isolation, unset TraceQL, consumer isolation, trends, dependencies, trace diagnostics and alert PromQL on Tempo 2.10 / Prometheus 2.54")
 }
+
+// Run in the isolated Tempo acceptance stack so nil/OR behavior is exercised,
+// not merely the generated string or the query parser.
+func TestClusterMigrationTraceQLIntegration(t *testing.T) {
+	if os.Getenv("APM_TEST_TEMPO") == "" || os.Getenv("APM_TEST_OTLP") == "" {
+		t.Skip("run scripts/apm-test/run.sh for isolated telemetry acceptance")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	now := time.Now()
+	name := fmt.Sprintf("apm-cluster-compat-%d", now.UnixNano())
+	resources := []any{}
+	want := map[string]bool{}
+	for i, identity := range []struct{ cluster, internal string }{{"132", "50"}, {"50", ""}, {"50", "75"}, {"132", ""}} {
+		id := fmt.Sprintf("%016x%016x", now.UnixNano(), i+1)
+		if i < 2 {
+			want[id] = true
+		}
+		attrs := []any{}
+		for key, value := range map[string]string{"service.name": name, "service.namespace": "compat", "deployment.environment.name": "test", "cluster_id": identity.cluster, "k8s_cluster_id": identity.internal} {
+			if value != "" {
+				attrs = append(attrs, map[string]any{"key": key, "value": map[string]string{"stringValue": value}})
+			}
+		}
+		resources = append(resources, map[string]any{
+			"resource": map[string]any{"attributes": attrs},
+			"scopeSpans": []any{map[string]any{"spans": []any{map[string]any{
+				"traceId": id, "spanId": "0000000000000001", "name": "GET /compat", "kind": 2,
+				"startTimeUnixNano": fmt.Sprint(now.UnixNano()), "endTimeUnixNano": fmt.Sprint(now.Add(time.Millisecond).UnixNano()),
+				"attributes": []any{map[string]any{"key": "http.request.method", "value": map[string]string{"stringValue": "GET"}}},
+			}}}},
+		})
+	}
+	body, err := json.Marshal(map[string]any{"resourceSpans": resources})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, os.Getenv("APM_TEST_OTLP"), bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("OTLP status: %d", resp.StatusCode)
+	}
+	q := testQuery()
+	q.ServiceName, q.SpanKind = name, "server"
+	namespace, environment := "compat", "test"
+	q.ServiceNamespace, q.Environment = &namespace, &environment
+	q.resourceScope = &ResourceScope{ClusterID: "132", K8sClusterID: "50"}
+	client := tracequery.New(os.Getenv("APM_TEST_TEMPO"), nil)
+	for {
+		result, err := client.SearchTraces(ctx, tracequery.SearchOptions{Query: TraceQL(q), Start: now.Add(-time.Minute), End: time.Now().Add(time.Second), Limit: 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var rows []struct {
+			TraceID string `json:"traceID"`
+		}
+		if err := json.Unmarshal(result.Traces, &rows); err != nil {
+			t.Fatal(err)
+		}
+		for _, row := range rows {
+			if !want[row.TraceID] {
+				t.Fatalf("colliding cluster entered results: %s", row.TraceID)
+			}
+		}
+		if len(rows) == len(want) {
+			return
+		}
+		select {
+		case <-time.After(time.Second):
+		case <-ctx.Done():
+			t.Fatalf("new and legacy traces missing: %s", result.Traces)
+		}
+	}
+}

@@ -169,6 +169,12 @@ type ShellExitRequest struct {
 // ShellExitResponse is empty.
 type ShellExitResponse struct{}
 
+// GetPluginConfigsRequest advertises support on every fetch, including after
+// upgrades or rollbacks. It never supplies a cluster ID; Manager owns the mapping.
+type GetPluginConfigsRequest struct {
+	UnifiedClusterIdentity bool `json:"unified_cluster_identity,omitempty"`
+}
+
 // GetPluginConfigsResponse is the wire snapshot served on
 // MethodGetPluginConfigs. Mirrors biz/edge.WireSnapshot — duplicated
 // here to keep internal/pkg/tunnel free of biz imports.

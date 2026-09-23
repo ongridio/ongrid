@@ -152,6 +152,13 @@ func TestTelemetrySecretDataContainsOnlyPublishedDataPlaneFields(t *testing.T) {
 	if _, ok := got["controller"]; ok {
 		t.Fatal("telemetry Secret must not contain the controller credential document")
 	}
+	if string(got["telemetry-cluster-node-id"]) != "" {
+		t.Fatal("old Manager must project an empty unified identity")
+	}
+	in.ClusterNodeID = 132
+	if string(telemetrySecretData(in)["telemetry-cluster-node-id"]) != "132" {
+		t.Fatal("new Manager mapping was not projected")
+	}
 }
 
 func TestApplyManagerTelemetryTLSIsOriginScoped(t *testing.T) {
