@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 )
@@ -28,14 +29,29 @@ func New(addr string, h http.Handler, log *slog.Logger) *Server {
 	}
 }
 
-// Start blocks until either ListenAndServe returns an error or ctx is
+// Start blocks until serving returns an error or ctx is
 // cancelled. On ctx cancel it triggers Shutdown with a 10s deadline.
 // Returns nil on clean shutdown.
 func (s *Server) Start(ctx context.Context) error {
+	addr := s.Addr
+	if addr == "" {
+		addr = ":http"
+	}
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", addr)
+	if err != nil {
+		return err
+	}
+	return s.StartListener(ctx, ln)
+}
+
+// StartListener takes ownership of an already-bound listener and shuts it down
+// with ctx. The listener is never released and rebound between selection and serving.
+func (s *Server) StartListener(ctx context.Context, ln net.Listener) error {
 	errCh := make(chan error, 1)
 	go func() {
-		s.log.Info("http server listening", slog.String("addr", s.Addr))
-		err := s.ListenAndServe()
+		s.log.Info("http server listening", slog.String("addr", ln.Addr().String()))
+		err := s.Serve(ln)
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 			return
@@ -51,6 +67,8 @@ func (s *Server) Start(ctx context.Context) error {
 			s.log.Error("http server shutdown error", slog.String("addr", s.Addr), slog.Any("err", err))
 			return err
 		}
+		// Serve also closes ln when cancellation wins before it starts.
+		<-errCh
 		s.log.Info("http server shutdown complete", slog.String("addr", s.Addr))
 		return nil
 	case err := <-errCh:

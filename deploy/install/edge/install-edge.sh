@@ -239,6 +239,14 @@ for exporter in mysqld_exporter postgres_exporter redis_exporter mongodb_exporte
 done
 
 # ---------- render env file ----------
+# Preserve only this setting; never source the credentials file as shell code.
+METRICS_ENV_LINE=""
+if [[ ${ONGRID_EDGE_METRICS_ADDR+x} ]]; then
+    [[ "$ONGRID_EDGE_METRICS_ADDR" != *$'\n'* && "$ONGRID_EDGE_METRICS_ADDR" != *$'\r'* ]] || { log_error "metrics address must be one line"; exit 1; }
+    METRICS_ENV_LINE="ONGRID_EDGE_METRICS_ADDR=$ONGRID_EDGE_METRICS_ADDR"
+elif [[ -f "$ENV_FILE" ]]; then
+    METRICS_ENV_LINE=$(sed -n '/^ONGRID_EDGE_METRICS_ADDR=/p' "$ENV_FILE")
+fi
 log_info "rendering $ENV_FILE"
 mkdir -p "$CONFIG_DIR"
 chmod 750 "$CONFIG_DIR"
@@ -257,6 +265,9 @@ sed \
     -e "s|__ACCESS_KEY__|$(esc "$EDGE_ACCESS_KEY")|g" \
     -e "s|__SECRET_KEY__|$(esc "$EDGE_SECRET_KEY")|g" \
     "$TEMPLATE" > "$ENV_FILE"
+if [[ -n "$METRICS_ENV_LINE" ]]; then
+    printf '\n%s\n' "$METRICS_ENV_LINE" >> "$ENV_FILE"
+fi
 chmod 640 "$ENV_FILE"
 chown root:"$SERVICE_GROUP" "$ENV_FILE" 2>/dev/null || true
 

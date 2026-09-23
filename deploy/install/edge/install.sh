@@ -301,6 +301,14 @@ mkdir -p "$ENV_DIR"
 chown "root:${SERVICE_GROUP}" "$ENV_DIR"
 chmod 750 "$ENV_DIR"
 
+# Preserve only this setting; never source the credentials file as shell code.
+METRICS_ENV_LINE=""
+if [[ ${ONGRID_EDGE_METRICS_ADDR+x} ]]; then
+    [[ "$ONGRID_EDGE_METRICS_ADDR" != *$'\n'* && "$ONGRID_EDGE_METRICS_ADDR" != *$'\r'* ]] || { log_error "metrics address must be one line"; exit 1; }
+    METRICS_ENV_LINE="ONGRID_EDGE_METRICS_ADDR=$ONGRID_EDGE_METRICS_ADDR"
+elif [[ -f "$ENV_FILE" ]]; then
+    METRICS_ENV_LINE=$(sed -n '/^ONGRID_EDGE_METRICS_ADDR=/p' "$ENV_FILE")
+fi
 if [[ -n "$PENDING_ENV_FILE" ]]; then
     install -m 0640 -o root -g "$SERVICE_GROUP" "$PENDING_ENV_FILE" "$ENV_FILE"
     rm -f "$PENDING_ENV_FILE"
@@ -311,6 +319,9 @@ ONGRID_EDGE_CLOUD_ADDR=${SERVER_EDGE_ADDR}
 ONGRID_EDGE_ACCESS_KEY=${ACCESS_KEY}
 ONGRID_EDGE_SECRET_KEY=${SECRET_KEY}
 EOF
+fi
+if [[ -n "$METRICS_ENV_LINE" ]]; then
+    printf '\n%s\n' "$METRICS_ENV_LINE" >> "$ENV_FILE"
 fi
 chmod 640 "$ENV_FILE"
 chown "root:${SERVICE_GROUP}" "$ENV_FILE"

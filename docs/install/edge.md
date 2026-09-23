@@ -16,6 +16,28 @@ curl -k -sSL https://<server>/install.sh | bash -s -- \
 
 The install script detects the host architecture and downloads the matching binary from `https://<server>/edge/ongrid-edge-<os>-<arch>`.
 
+## Diagnostics port conflicts
+
+Ordinary host and Kubernetes Node agents prefer TCP port `9101` for their own
+`/healthz` and `/metrics` endpoints. If that port is occupied, the OS allocates a
+free port without interrupting startup. The `edge diagnostics listener bound`
+log records `requested_addr`, `actual_addr`, `mode`, and `fallback_reason`.
+The chosen port stays bound until exit and may change after a restart.
+This does not change the cloud tunnel or host/process exporter ports.
+
+If an external scraper, Docker port mapping, or firewall requires a fixed port,
+set `ONGRID_EDGE_METRICS_ADDR=:19101` in `/etc/ongrid-edge/ongrid-edge.env` and
+restart the service. You can also export this variable to the installer; both
+Linux installers preserve it on reinstall unless an explicit new value is supplied.
+An empty value restores automatic mode. Fixed addresses must contain a numeric
+port from 1 to 65535; a bind failure is reported rather than silently changing it.
+For loopback-only access, use `127.0.0.1:19101`.
+
+The standalone Kubernetes telemetry Gateway and metrics Scraper retain their
+fixed diagnostics listeners and HTTP probes. Logs, OBI, OTLP, pprof, and exporter
+listeners are not changed by this fallback. If automatic allocation also fails,
+startup fails with the bind errors; no existing process is stopped or reused.
+
 ## Batch install (non-Kubernetes fleets)
 
 Open **Devices → Batch install** to create a bounded installation profile. A profile can either be:

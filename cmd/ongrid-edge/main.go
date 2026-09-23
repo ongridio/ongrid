@@ -297,9 +297,14 @@ func main() {
 	metricsMux.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	})
-	metricsServer := httpserver.New(edgeMetricsAddr, metricsMux, log.With(slog.String("listener", "metrics")))
-
-	eg.Go(func() error { return metricsServer.Start(egCtx) })
+	eg.Go(func() error {
+		metricsLog := log.With(slog.String("listener", "metrics"))
+		if isK8sController(k8sInfo) {
+			// Legacy controllers retain their fixed diagnostics listener.
+			return httpserver.New(edgeMetricsAddr, metricsMux, metricsLog).Start(egCtx)
+		}
+		return runEdgeMetrics(egCtx, metricsMux, metricsLog)
+	})
 	pprofServer := httpserver.New(edgePprofAddr, http.DefaultServeMux, log.With(slog.String("listener", "pprof")))
 	eg.Go(func() error {
 		if err := pprofServer.Start(egCtx); err != nil {

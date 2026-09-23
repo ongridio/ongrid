@@ -117,6 +117,11 @@ test: ## 单元测试
 test-race: ## 单元测试 + race
 	go test -race ./...
 
+.PHONY: test-edge-metrics-env
+test-edge-metrics-env: ## Edge 诊断端口安装配置保留检查
+	bash -n deploy/install/edge/install.sh deploy/install/edge/install-edge.sh
+	python3 scripts/test-edge-metrics-env.py
+
 test-integration: ## 集成测试（build tag: integration）
 	go test -tags=integration ./...
 
