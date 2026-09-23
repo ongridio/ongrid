@@ -10,3 +10,7 @@ import (
 func enterK8sHost(context.Context, string, int, int) error {
 	return fmt.Errorf("entering the kubernetes host is supported only on linux")
 }
+
+func prepareK8sOBIFilesystem(context.Context, string, int, int) error {
+	return fmt.Errorf("OBI requires Linux bpffs")
+}

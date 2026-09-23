@@ -91,7 +91,7 @@ grep -A1 'name: ONGRID_K8S_TELEMETRY_CONFIG_REFRESH_INTERVAL' "$tmp_dir/default.
 grep -q 'hostNetwork: true' "$tmp_dir/default.yaml"
 grep -q 'name: install-host-runtime' "$tmp_dir/default.yaml"
 grep -q -- '- install-k8s-host-runtime' "$tmp_dir/default.yaml"
-grep -A16 'name: install-host-runtime' "$tmp_dir/default.yaml" | grep -q 'memory: 128Mi'
+grep -A19 'name: install-host-runtime' "$tmp_dir/default.yaml" | grep -q 'memory: 128Mi'
 grep -q -- '- enter-k8s-host' "$tmp_dir/default.yaml"
 test "$(grep -E -c '^[[:space:]]+mountPath: /host/root$' "$tmp_dir/default-node.yaml")" -eq 2
 grep -q 'mountPropagation: HostToContainer' "$tmp_dir/default.yaml"
@@ -269,3 +269,13 @@ echo "Kubernetes Helm chart validation passed"
 helm template ongrid-edge "$chart_dir" "${common_args[@]}" --set node.autoAPM.allowBPF=true >"$tmp_dir/autoapm.yaml"
 grep -q 'name: ongrid-edge-node-autoapm' "$tmp_dir/autoapm.yaml"
 grep -q 'resources: \["replicasets"\]' "$tmp_dir/autoapm.yaml"
+for capability in BPF PERFMON SYS_PTRACE CHECKPOINT_RESTORE NET_RAW SYS_ADMIN SYS_RESOURCE DAC_READ_SEARCH NET_ADMIN; do
+  grep -q "\"$capability\"" "$tmp_dir/autoapm.yaml"
+done
+! grep -q 'privileged: true' "$tmp_dir/autoapm.yaml"
+helm template ongrid-edge "$chart_dir" "${common_args[@]}" --kube-version 1.29 --set node.autoAPM.allowBPF=true >"$tmp_dir/autoapm-legacy.yaml"
+grep -q 'container.apparmor.security.beta.kubernetes.io/edge-node: unconfined' "$tmp_dir/autoapm-legacy.yaml"
+! grep -q 'appArmorProfile:' "$tmp_dir/autoapm-legacy.yaml"
+helm template ongrid-edge "$chart_dir" "${common_args[@]}" --kube-version 1.34 --set node.autoAPM.allowBPF=true >"$tmp_dir/autoapm-modern.yaml"
+grep -q 'appArmorProfile:' "$tmp_dir/autoapm-modern.yaml"
+! grep -q 'container.apparmor.security.beta' "$tmp_dir/autoapm-modern.yaml"

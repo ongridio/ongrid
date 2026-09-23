@@ -35,6 +35,7 @@ type Plugin struct {
 	health                  plugins.PluginHealth
 	obi, collector, scraper plugins.Plugin
 	discover                func(context.Context) ([]contract.Candidate, error)
+	preflight               func(context.Context) error
 	pusher                  custommetrics.Pusher
 	resourceSpec            contract.Spec
 	resourceError           string
@@ -44,8 +45,9 @@ func New(binDir, workDir string, pusher custommetrics.Pusher, edgeID custommetri
 	root := filepath.Join(workDir, Name)
 	binary := filepath.Join(binDir, "obi")
 	p := &Plugin{
-		pusher: pusher,
-		health: plugins.PluginHealth{Name: Name, State: plugins.StateStopped}, discover: discover,
+		pusher:    pusher,
+		preflight: checkCaptureEnvironment,
+		health:    plugins.PluginHealth{Name: Name, State: plugins.StateStopped}, discover: discover,
 		kubeconfigPath: filepath.Join(root, "kubeconfig"),
 		collector:      traces.New(binDir, root, log),
 		obi: plugins.NewSubprocess(plugins.SubprocessOpts{Name: Name, Binary: binary, Environment: func(cfg plugins.PluginConfig) []string {
@@ -119,6 +121,11 @@ func (p *Plugin) Start(ctx context.Context) error {
 	selected := p.selected
 	p.mu.Unlock()
 	if selected {
+		if p.preflight != nil {
+			if err := p.preflight(ctx); err != nil {
+				return p.fail(err)
+			}
+		}
 		// Start the local transport before the probes. No existing SDK receiver
 		// is reconfigured or stopped by this plugin.
 		if err := p.collector.Start(ctx); err != nil {

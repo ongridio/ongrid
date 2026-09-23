@@ -96,6 +96,9 @@ func resourceIdentities(samples []tunnel.PromSample) []map[string]string {
 				labels["service_name"] = ns
 			}
 		}
+		if labels["k8s_namespace_name"] != "" {
+			labels["service_namespace"] = labels["k8s_namespace_name"]
+		}
 		if labels["service_name"] == "" || labels["service_instance_id"] == "" {
 			continue
 		}

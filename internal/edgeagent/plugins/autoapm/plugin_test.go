@@ -2,6 +2,7 @@ package autoapm
 
 import (
 	"context"
+	"errors"
 	"os"
 	"reflect"
 	"strings"
@@ -15,6 +16,34 @@ import (
 )
 
 type fakeChild struct{ starts, stops atomic.Int32 }
+
+func TestCapturePreflightFailureAndRecovery(t *testing.T) {
+	denied := errors.New("perf_event_open(uprobe): permission denied")
+	children := []*fakeChild{{}, {}, {}}
+	p := &Plugin{selected: true, kubernetes: true, obi: children[0], collector: children[1], scraper: children[2], preflight: func(context.Context) error { return denied }}
+	ctx := context.Background()
+	if err := p.Start(ctx); !errors.Is(err, denied) {
+		t.Fatalf("missing permission failure: %v", err)
+	}
+	if h := p.HealthSnapshot(); h.State != plugins.StateCrashed || h.LastError != denied.Error() {
+		t.Fatalf("failed capture reported healthy: %+v", h)
+	}
+	for _, child := range children {
+		if child.starts.Load() != 0 {
+			t.Fatal("started capture before passing permission check")
+		}
+	}
+	p.preflight = func(context.Context) error { return nil }
+	if err := p.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if h := p.HealthSnapshot(); h.State != plugins.StateRunning || h.LastError != "" {
+		t.Fatalf("capture did not recover after permissions repaired: %+v", h)
+	}
+	if err := p.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func (f *fakeChild) Name() string                         { return "fake" }
 func (f *fakeChild) Configure(plugins.PluginConfig) error { return nil }
@@ -31,6 +60,7 @@ func TestDiscoveryOnlyAndOff(t *testing.T) {
 		discovered <- struct{}{}
 		return []contract.Candidate{{Executable: "/opt/orders", Port: 8080}}, nil
 	}}
+	p.preflight = func(context.Context) error { t.Fatal("discovery requires no capture permissions"); return nil }
 	if err := p.Configure(plugins.PluginConfig{Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -149,6 +179,9 @@ func TestKubernetesRulesUseMetadataAndSkipHostDiscovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	rules := config["discovery"].(map[string]interface{})["services"].([]interface{})
+	if config["ebpf"].(map[string]interface{})["bpf_fs_path"] != "/sys/fs/bpf/ongrid" {
+		t.Fatal("Kubernetes OBI must use its owned bpffs directory")
+	}
 	first := rules[0].(map[string]interface{})
 	if first["k8s_deployment_name"] != `^api\.v1$` || first["k8s_namespace"] != "^shop$" || first["k8s_container_name"] != nil || first["name"] != nil || first["exe_path"] != nil {
 		t.Fatalf("invalid selector: %#v", first)

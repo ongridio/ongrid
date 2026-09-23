@@ -316,7 +316,7 @@ export default function LogsPage() {
   const [committedExclude, setCommittedExclude] = useState('');
   const [matchMode, setMatchMode] = useState<LogMatchMode>('any');
   const [committedMode, setCommittedMode] = useState<LogMatchMode>('any');
-  const [deviceID, setDeviceID] = useState('');
+  const [deviceID, setDeviceID] = useState(searchParams.get('device_id') || '');
   const [role, setRole] = useState<'' | EdgeRole>('');
   const [scopeDraft, setScopeDraft] = useState<ScopeDraft>(() => initialScope);
   const [committedScope, setCommittedScope] = useState<ScopeDraft>(() => initialScope);

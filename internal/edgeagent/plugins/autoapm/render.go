@@ -25,7 +25,9 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 		rules = append(rules, map[string]interface{}{"exe_path": "^" + regexp.QuoteMeta(t.Executable) + "$", "open_ports": strconv.Itoa(int(t.Port)), "name": t.ServiceName, "namespace": t.ServiceNamespace})
 	}
 	kubernetes := map[string]interface{}{"enable": "false"}
+	ebpf := map[string]interface{}{"context_propagation": "headers"}
 	if s.Kubernetes != nil {
+		ebpf["bpf_fs_path"] = "/sys/fs/bpf/ongrid"
 		kubernetes["enable"] = "true"
 		kubernetes["disable_informers"] = []string{"service"}
 		kubernetes["meta_restrict_local_node"] = true
@@ -44,7 +46,7 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 		"log_level":           "WARN",
 		"attributes":          map[string]interface{}{"kubernetes": kubernetes},
 		"discovery":           map[string]interface{}{"services": rules, "exclude_otel_instrumented_services": true},
-		"ebpf":                map[string]interface{}{"context_propagation": "headers"},
+		"ebpf":                ebpf,
 		"otel_traces_export":  map[string]interface{}{"endpoint": "http://127.0.0.1:14318/v1/traces", "protocol": "http/protobuf", "instrumentations": []string{"http", "grpc"}, "sampler": map[string]string{"name": "parentbased_traceidratio", "arg": strconv.FormatFloat(s.Ratio(), 'f', -1, 64)}},
 		"otel_metrics_export": map[string]interface{}{"endpoint": "http://127.0.0.1:14318/v1/metrics", "protocol": "http/protobuf", "interval": "15s", "histogram_aggregation": "explicit_bucket_histogram", "instrumentations": []string{"http", "grpc"}},
 		"metrics":             map[string]interface{}{"features": []string{"application", "application_runtime"}},

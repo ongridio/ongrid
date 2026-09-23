@@ -108,6 +108,11 @@ func installK8sHostRuntime(ctx context.Context, paths k8sHostInstallPaths) error
 	if !info.IsDir() {
 		return fmt.Errorf("host root %q is not a directory", paths.hostRoot)
 	}
+	if os.Getenv("ONGRID_AUTO_APM_ALLOW_BPF") == "true" {
+		if err := prepareK8sOBIFilesystem(ctx, paths.hostRoot, paths.uid, paths.gid); err != nil {
+			return err
+		}
+	}
 
 	runtimeDir := hostPath(paths.hostRoot, k8sHostRuntimeDir)
 	pluginDir := hostPath(paths.hostRoot, k8sHostPluginDir)

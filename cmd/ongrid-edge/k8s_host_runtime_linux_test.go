@@ -3,10 +3,25 @@
 package main
 
 import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/sys/unix"
 )
+
+func TestOBIFilesystemRejectsUnMountedDirectory(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "sys/fs/bpf"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	err := prepareK8sOBIFilesystem(context.Background(), root, os.Getuid(), os.Getgid())
+	if err == nil || !strings.Contains(err.Error(), "bpf filesystem mounted") {
+		t.Fatalf("ordinary directory accepted as bpffs: %v", err)
+	}
+}
 
 func TestRequiresHostMountNamespace(t *testing.T) {
 	tests := []struct {
@@ -29,6 +44,7 @@ func TestRequiresHostMountNamespace(t *testing.T) {
 }
 
 func TestK8sHostCapabilities(t *testing.T) {
+	t.Setenv("ONGRID_AUTO_APM_ALLOW_BPF", "false")
 	for _, capability := range []int{unix.CAP_DAC_READ_SEARCH, unix.CAP_NET_ADMIN} {
 		if !isK8sHostCapability(capability) {
 			t.Fatalf("capability %d is not retained", capability)
@@ -41,16 +57,15 @@ func TestK8sHostCapabilities(t *testing.T) {
 
 func TestAutoAPMCapabilitiesRequireOptIn(t *testing.T) {
 	t.Setenv("ONGRID_AUTO_APM_ALLOW_BPF", "false")
-	if isK8sHostCapability(unix.CAP_BPF) {
-		t.Fatal("default granted BPF")
+	for _, cap := range []int{unix.CAP_BPF, unix.CAP_PERFMON, unix.CAP_SYS_PTRACE, unix.CAP_CHECKPOINT_RESTORE, unix.CAP_NET_RAW, unix.CAP_SYS_ADMIN, unix.CAP_SYS_RESOURCE, unix.CAP_SYS_CHROOT, unix.CAP_SETUID, unix.CAP_SETGID} {
+		if isK8sHostCapability(cap) {
+			t.Fatalf("default granted capture capability %d", cap)
+		}
 	}
 	t.Setenv("ONGRID_AUTO_APM_ALLOW_BPF", "true")
-	for _, cap := range []int{unix.CAP_BPF, unix.CAP_PERFMON, unix.CAP_SYS_PTRACE, unix.CAP_CHECKPOINT_RESTORE, unix.CAP_NET_RAW} {
+	for _, cap := range []int{unix.CAP_BPF, unix.CAP_PERFMON, unix.CAP_SYS_PTRACE, unix.CAP_CHECKPOINT_RESTORE, unix.CAP_NET_RAW, unix.CAP_SYS_ADMIN, unix.CAP_SYS_RESOURCE, unix.CAP_SYS_CHROOT, unix.CAP_SETUID, unix.CAP_SETGID} {
 		if !isK8sHostCapability(cap) {
 			t.Fatalf("missing capability %d", cap)
 		}
-	}
-	if isK8sHostCapability(unix.CAP_SYS_ADMIN) {
-		t.Fatal("BPF opt-in retained SYS_ADMIN")
 	}
 }

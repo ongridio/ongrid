@@ -21,6 +21,11 @@ image:
 node:
   # Installation capability gate; capture still requires cluster-owned namespace/workload selection.
   autoAPM:
+    # Grants official OBI capabilities, including SYS_ADMIN for Go propagation,
+    # network namespace access and restrictive perf policies, plus SYS_RESOURCE
+    # for older kernels. Retains SYS_CHROOT, SETUID and SETGID for JVM attach.
+    # Node AppArmor is unconfined to inspect host processes
+    # and write only its owned bpffs directory. Never privileged.
     allowBPF: false
   serviceAccountName: ""
   # hostmetrics exposes node_exporter and the metrics plugin forwards it.

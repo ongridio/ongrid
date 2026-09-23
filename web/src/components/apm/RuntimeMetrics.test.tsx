@@ -1,15 +1,33 @@
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { ApmRuntime } from '@/api/apm';
 import { RuntimeMetrics } from './RuntimeMetrics';
 
 vi.mock('recharts', () => ({
   ResponsiveContainer: ({ children }: { children: React.ReactNode }) => children,
-  LineChart: ({ data }: { data: unknown }) => <div data-testid="points">{JSON.stringify(data)}</div>,
-  CartesianGrid: () => null, Line: () => null, Tooltip: () => null, XAxis: () => null, YAxis: () => null,
+  LineChart: ({ data, children }: { data: unknown; children: React.ReactNode }) => <div><div data-testid="points">{JSON.stringify(data)}</div>{children}</div>,
+  CartesianGrid: () => null, Line: ({ name }: { name: string }) => <div data-testid="series" data-name={name} />, Tooltip: () => null, XAxis: () => null, YAxis: () => null,
 }));
 
 describe('Runtime metrics', () => {
+  it('filters only the clicked chart and restores all lines on a second click', async () => {
+    localStorage.setItem('ongrid-locale', 'zh-CN');
+    const user = userEvent.setup();
+    render(<RuntimeMetrics data={{ items: ['process_cpu_cores', 'process_threads'].flatMap((name) => [
+      { name, unit: 'count', value: 1, instance_id: 'python:1', version: 'v1', points: [{ timestamp: 1, value: 1 }] },
+      { name, unit: 'count', value: 2, instance_id: 'python:2', version: 'v1', points: [{ timestamp: 1, value: 2 }] },
+    ]) } as ApmRuntime} />);
+    const cpu = screen.getByRole('region', { name: 'CPU 使用量' });
+    const threads = screen.getByRole('region', { name: '线程数' });
+    await act(async () => { await user.click(within(cpu).getByRole('button', { name: /python:2.*只显示此曲线/ })); });
+    expect(within(cpu).getAllByTestId('series')).toHaveLength(1);
+    expect(within(cpu).getByTestId('series')).toHaveAttribute('data-name', 'python:2 · v1');
+    expect(within(threads).getAllByTestId('series')).toHaveLength(2);
+    await act(async () => { await user.click(within(cpu).getByRole('button', { name: /python:2.*显示全部曲线/ })); });
+    expect(within(cpu).getAllByTestId('series')).toHaveLength(2);
+  });
+
   it('shows Python process resources above the independent runtime empty state', () => {
     localStorage.setItem('ongrid-locale', 'zh-CN');
     render(<RuntimeMetrics data={{ items: [

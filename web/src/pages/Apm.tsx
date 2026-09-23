@@ -1144,7 +1144,7 @@ export default function ApmPage() {
           );
         })}
         {detail && tab === 'traces' && traceScopeReady && <ServiceTraces params={traceParams} refresh={refresh} />}
-        {detail && tab === 'errors' && traceScopeReady && <ErrorGroups params={traceParams} refresh={refresh} />}
+        {detail && <div hidden={tab !== 'errors' || !traceScopeReady}><ErrorGroups params={traceParams} refresh={refresh} enabled={tab === 'errors' && traceScopeReady} /></div>}
         {detail && tab === 'compare' && <VersionComparison params={params} versions={versions} refresh={refresh} onChange={(next) => setParams(next, { state: location.state })} />}
         {detail && ['traces', 'errors'].includes(tab) && !traceScopeReady && !loading && (
           <EmptyState title={tr('集群范围尚未解析', 'Cluster scope is not resolved')} hint={tr('请刷新后重试，避免查询到其他集群的链路。', 'Refresh to retry resolving the cluster scope.')} />

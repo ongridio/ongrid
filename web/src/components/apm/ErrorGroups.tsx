@@ -31,10 +31,8 @@ function useErrorGroups(query: string, protocol: 'http' | 'rpc', enabled: boolea
     queryApm('error-groups', p, controller.signal)
       .then((data) => {
         if (controller.signal.aborted) return;
-        if (data.snapshot_id) {
-          cache.current.snapshot = data.snapshot_id;
-          cache.current.pages.set(page, data);
-        }
+        if (data.snapshot_id) cache.current.snapshot = data.snapshot_id;
+        cache.current.pages.set(page, data);
         setResult({ key, data });
       })
       .catch((error: Error) => { if (!controller.signal.aborted) setResult({ key, error: error.message }); });
@@ -44,14 +42,18 @@ function useErrorGroups(query: string, protocol: 'http' | 'rpc', enabled: boolea
   return { ...(result.key === key ? result : {}), retry: () => setRetry((value) => value + 1), onPageChange: (page: number) => setSelected({ scope, page: page + 1 }) };
 }
 
-export function ErrorGroups({ params, refresh }: { params: URLSearchParams; refresh: number }) {
+export function ErrorGroups({ params, refresh, enabled = true }: { params: URLSearchParams; refresh: number; enabled?: boolean }) {
   const { tr } = useI18n();
-  const query = params.toString();
+  const queryParams = new URLSearchParams();
+  for (const key of ['start', 'end', 'service_name', 'service_namespace', 'environment', 'metric_source', 'protocol', 'metric_format', 'service_version', 'instance_id', 'device_id', 'cluster_id', 'cluster_node_id', 'span_kind', 'operation']) {
+    if (params.has(key)) queryParams.set(key, params.get(key)!);
+  }
+  const query = queryParams.toString();
   const { analyze, analyzing, analysisError } = useTraceAnalysis(params);
   const protocols = params.get('protocol') === 'all' ? ['http', 'rpc'] as const : [params.get('protocol') === 'rpc' ? 'rpc' : 'http'] as const;
   const results = {
-    http: useErrorGroups(query, 'http', protocols.some((p) => p === 'http'), refresh),
-    rpc: useErrorGroups(query, 'rpc', protocols.some((p) => p === 'rpc'), refresh),
+    http: useErrorGroups(query, 'http', enabled && protocols.some((p) => p === 'http'), refresh),
+    rpc: useErrorGroups(query, 'rpc', enabled && protocols.some((p) => p === 'rpc'), refresh),
   };
 
   const labels = (values: string[]) => values.map((value) => value || tr('未上报', 'Not reported')).join(', ');

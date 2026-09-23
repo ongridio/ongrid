@@ -208,7 +208,7 @@ describe('LogsPage', () => {
 
   it('applies the cluster and time range from a Kubernetes log deep link', async () => {
     render(
-      <MemoryRouter initialEntries={['/logs?cluster_id=7&range=6h&namespace=production&workload=payments&pod=payments-7d4&container=payments&node=worker-1']}>
+      <MemoryRouter initialEntries={['/logs?device_id=42&cluster_id=7&range=6h&namespace=production&workload=payments&pod=payments-7d4&container=payments&node=worker-1']}>
         <LogsPage />
       </MemoryRouter>,
     );
@@ -218,6 +218,7 @@ describe('LogsPage', () => {
     expect(screen.getByRole('combobox', { name: '集群' })).toHaveTextContent('kind-local (#7)');
     expect(screen.getByRole('button', { name: '时间范围' })).toHaveTextContent('6 小时');
     expect(searchRequests[0]?.scope).toMatchObject({
+      device_ids: [42],
       cluster_ids: ['7'],
       namespaces: ['production'],
       workloads: ['payments'],

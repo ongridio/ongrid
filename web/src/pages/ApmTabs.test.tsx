@@ -44,12 +44,20 @@ it('orders the nine service views and preserves scope while switching between tr
   await screen.findByText('GET /orders');
   expect(queries.at(-1)?.get('q')).not.toContain('status = error');
   expect(screen.queryByRole('button', { name: 'AI 分析' })).not.toBeInTheDocument();
+  expect(errorQueries).toHaveLength(0);
   fireEvent.click(screen.getByRole('tab', { name: '错误' }));
   await screen.findAllByRole('button', { name: 'AI 分析' });
   const query = errorQueries.at(-1)!;
-  for (const [key, value] of scope) expect(query.get(key)).toBe(value);
+  expect(errorQueries).toHaveLength(2);
+  for (const [key, value] of scope) if (key !== 'range') expect(query.get(key)).toBe(value);
   expect(query.get('start')).toBe(scope.get('start'));
+  expect(query.has('tab')).toBe(false);
+  expect(query.has('range')).toBe(false);
   expect(screen.getByRole('tab', { name: '错误' })).toHaveAttribute('aria-selected', 'true');
+  fireEvent.click(screen.getByRole('tab', { name: '链路' }));
+  fireEvent.click(screen.getByRole('tab', { name: '错误' }));
+  await screen.findAllByRole('button', { name: 'AI 分析' });
+  expect(errorQueries).toHaveLength(2);
 });
 it('queries scoped service logs and releases the unused pagination cursor', async () => {
   let input: Record<string, unknown> | undefined;
@@ -80,6 +88,29 @@ it('keeps version and instance filters in log queries and explorer links', async
   const link = new URL(screen.getByRole('link', { name: /打开日志检索/ }).getAttribute('href')!, 'http://localhost');
   expect(link.searchParams.get('service_version')).toBe('v1');
   expect(link.searchParams.get('instance_id')).toBe('orders-1');
+});
+it('finds Kubernetes container logs through the observed service Pod when service attributes are absent', async () => {
+  const requests: Record<string, unknown>[] = [];
+  server.use(
+    http.get('/api/v1/apm/instances', () => HttpResponse.json({ data: { items: [], instances: [
+      { instance_id: 'trade.orders-abc.orders', version: 'v1', device_id: '42', pod: 'orders-abc' },
+      { instance_id: 'trade.orders-def.orders', version: 'v2', device_id: '42', pod: 'orders-def' },
+    ] } })),
+    http.post('/api/v1/logs/search', async ({ request }) => {
+      const input = await request.json() as Record<string, unknown>;
+      requests.push(input);
+      return HttpResponse.json({ data: { records: requests.length === 2 ? [{ id: 'pod-log', timestamp: scope.get('start'), message: 'container output' }] : [], has_more: false } });
+    }),
+  );
+  render(<MemoryRouter initialEntries={[`/apm/service?${scope}&tab=logs&instance_id=trade.orders-abc.orders&service_version=v1`]}><ApmPage /></MemoryRouter>);
+  await screen.findByText('container output');
+  expect(requests).toHaveLength(2);
+  expect(requests[1]).toMatchObject({ scope: { pods: ['orders-abc'], device_ids: [42] } });
+  expect(requests[1]).not.toHaveProperty('filters');
+  const link = new URL(screen.getByRole('link', { name: /打开日志检索/ }).getAttribute('href')!, 'http://localhost');
+  expect(link.searchParams.get('pod')).toBe('orders-abc');
+  expect(link.searchParams.get('device_id')).toBe('42');
+  expect(link.searchParams.has('service_name')).toBe(false);
 });
 it('queries historical profiles for the selected device, service and instance without starting a capture', async () => {
   let query: URLSearchParams | undefined;

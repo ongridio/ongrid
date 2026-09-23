@@ -1,13 +1,16 @@
+import { useState } from 'react';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { ApmRuntime } from '@/api/apm';
-import { Card, EmptyState } from '@/components/ui';
+import { Button, Card, EmptyState } from '@/components/ui';
 import { chartTooltipStyle, chartTooltipLabelStyle } from '@/lib/chartTheme';
 import { useI18n } from '@/i18n/locale';
 
 const colors = ['#6366f1', '#0ea5e9', '#d97706', '#10b981', '#a855f7', '#e11d48'];
+const seriesKey = (row: ApmRuntime['items'][number]) => JSON.stringify([row.instance_id, row.version ?? '']);
 
 export function RuntimeMetrics({ data }: { data: ApmRuntime }) {
   const { tr } = useI18n();
+  const [selectedSeries, setSelectedSeries] = useState<Record<string, string | null>>({});
   const labels: Record<string, string> = {
     process_cpu_cores: tr('CPU 使用量', 'CPU usage'),
     process_resident_memory_bytes: tr('进程常驻内存（RSS）', 'Resident memory (RSS)'),
@@ -85,6 +88,7 @@ export function RuntimeMetrics({ data }: { data: ApmRuntime }) {
       <div className="grid grid-cols-1 gap-x-8 gap-y-8 lg:grid-cols-2">
         {section.metrics.map((name) => {
           const rows = data.items.filter((row) => row.name === name);
+          const selectedKey = rows.some((row) => seriesKey(row) === selectedSeries[name]) ? selectedSeries[name] : null;
           const sourceUnit = rows[0].unit;
           const factor = sourceUnit.startsWith('bytes') ? 1 / 1048576 : sourceUnit === 'seconds' ? 1000 : sourceUnit === 'ratio' ? 100 : 1;
           const unit = sourceUnit === 'bytes' ? 'MiB' : sourceUnit === 'bytes_per_second' ? 'MiB/s' : sourceUnit === 'cores' ? tr('核', 'cores') : sourceUnit === 'seconds' ? 'ms' : ['ratio', 'percent'].includes(sourceUnit) ? '%' : sourceUnit === 'per_second' ? '/s' : '';
@@ -114,15 +118,22 @@ export function RuntimeMetrics({ data }: { data: ApmRuntime }) {
                   <Tooltip contentStyle={chartTooltipStyle} labelStyle={chartTooltipLabelStyle}
                     labelFormatter={(value) => new Date(Number(value) * 1000).toLocaleString()}
                     formatter={(value: number) => `${value.toLocaleString(undefined, { maximumSignificantDigits: 4 })} ${unit}`} />
-                  {rows.map((row, index) => <Line key={`${row.instance_id}-${row.version}`} type="monotone" dataKey={`v${index}`} name={`${row.instance_id || tr('未设置实例', 'Unset instance')} · ${row.version || tr('未设置版本', 'Unset version')}`} stroke={colors[index % colors.length]} strokeWidth={1.5} dot={false} connectNulls={false} isAnimationActive={false} />)}
+                  {rows.map((row, index) => selectedKey && seriesKey(row) !== selectedKey ? null : <Line key={seriesKey(row)} type="monotone" dataKey={`v${index}`} name={`${row.instance_id || tr('未设置实例', 'Unset instance')} · ${row.version || tr('未设置版本', 'Unset version')}`} stroke={colors[index % colors.length]} strokeWidth={1.5} dot={false} connectNulls={false} isAnimationActive={false} />)}
                 </LineChart>
               </ResponsiveContainer>
             </div>
             <div className="mt-2 space-y-1 text-xs">
-              {rows.map((row, index) => <div key={`${row.instance_id}-${row.version}`} className="flex flex-wrap items-center justify-between gap-2">
-                <span className="inline-flex min-w-0 items-center gap-2 text-text-muted"><span aria-hidden="true" className="h-0.5 w-3 shrink-0" style={{ backgroundColor: colors[index % colors.length] }} /><span className="break-all">{row.instance_id || '—'} · {row.version || '—'}</span></span>
-                <span className="tabular-nums">{display(row.value)}</span>
-              </div>)}
+              {rows.map((row, index) => {
+                const key = seriesKey(row);
+                const active = selectedKey === key;
+                return <Button key={key} variant="plain" size="sm" aria-pressed={active}
+                  aria-label={`${row.instance_id || tr('未设置实例', 'Unset instance')} · ${row.version || tr('未设置版本', 'Unset version')} · ${active ? tr('显示全部曲线', 'Show all lines') : tr('只显示此曲线', 'Show only this line')}`}
+                  onClick={() => setSelectedSeries((current) => ({ ...current, [name]: active ? null : key }))}
+                  className={`h-auto min-h-7 w-full min-w-0 shrink justify-between whitespace-normal px-1.5 py-1 text-left focus-visible:ring-2 focus-visible:ring-indigo-500 ${active ? 'border-indigo-500/40 bg-indigo-500/10' : 'hover:bg-bg'}`}>
+                  <span className={`inline-flex min-w-0 items-center gap-2 ${active ? 'text-text' : 'text-text-muted'}`}><span aria-hidden="true" className="h-0.5 w-3 shrink-0" style={{ backgroundColor: colors[index % colors.length] }} /><span className="break-all">{row.instance_id || '—'} · {row.version || '—'}</span></span>
+                  <span className="shrink-0 tabular-nums">{display(row.value)}</span>
+                </Button>;
+              })}
             </div>
           </section>;
         })}

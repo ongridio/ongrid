@@ -127,3 +127,15 @@ func TestResourceIdentitiesUseOBIResourceMetadata(t *testing.T) {
 		t.Fatalf("wrong resource metadata: %v", got)
 	}
 }
+
+func TestResourceIdentitiesUseKubernetesNamespace(t *testing.T) {
+	labels := map[string]string{
+		"ongrid_instrumentation_source": "obi", "service_name": "obi-mock-java",
+		"service_namespace": "ongrid-obi-mock", "k8s_namespace_name": "obi-mock",
+		"service_instance_id": "obi-mock.pod.java", "k8s_pod_uid": "pod-uid",
+	}
+	got := resourceIdentities([]tunnel.PromSample{{Name: "target_info", Value: 1, Labels: labels}})
+	if len(got) != 1 || got[0]["service_namespace"] != "obi-mock" {
+		t.Fatalf("Kubernetes resource identity must use the Pod namespace: %v", got)
+	}
+}

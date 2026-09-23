@@ -70,3 +70,19 @@ OrbStack PID 命名空间补丁仅用于本地测试，补丁、源码副本和�
 每次资源读取限时 5 秒、最多 1000 个匹配进程；原 HTTP/RPC/运行时样本在资源读取失败时仍继续上报。进程 PID 和 start ticks 区分重启后的计数器；读取结束再次检查 start ticks，跨进程生命周期的样本丢弃。部分不可读指标不填零；`ongrid_apm_process_scrape_success`、`ongrid_apm_resource_collection_success` 和插件心跳错误展示失败。基础 gauge 只合计最近 30 秒的进程样本，避免退出子进程继续计入；CPU、I/O 先 rate 再汇总，Edge CPU/RSS 优先于重复 SDK 数据。Kubernetes RSS 为容器内进程 RSS 合计，不能用于容器工作集或内存限制利用率。
 
 回滚恢复之前的 Edge、Manager 和 web 产物；无 schema/API 变更，历史基础资源指标保留在 Prometheus。无需调整 OBI 权限，服务发现、现有设备 process-exporter、日志和 SDK 接入继续沿用原路径。
+
+## 官方 OBI 权限与启动预检（2026-09-21）
+
+Kubernetes 开启 `node.autoAPM.allowBPF=true` 时，节点容器及切换到非 root 的宿主机 Edge 都保留官方能力集合：`BPF`、`NET_RAW`、`NET_ADMIN`、`PERFMON`、`DAC_READ_SEARCH`、`CHECKPOINT_RESTORE`、`SYS_PTRACE`、`SYS_RESOURCE`、`SYS_ADMIN`。`SYS_RESOURCE` 主要用于 5.11 以下内核的锁定内存限制；统一清单仍保留此项。`SYS_ADMIN` 用于 Go 库级上下文传播、网络命名空间访问及发行版 perf 限制。该变更覆盖上文旧权限清单，但不启用 privileged；默认未开启 BPF 的安装不增加这些权限。
+
+非 root 的 JVM attach 还需要保留启动器已有的 `SYS_CHROOT`：Linux `setns(CLONE_NEWNS)` 同时要求 `SYS_ADMIN` 和 `SYS_CHROOT`，实测仅官方九项时返回 EPERM，补充后成功。同时保留启动器已有的 `SETUID`、`SETGID`，供官方 JVM attach 匹配目标进程的 UID/GID；本地 Java 使用 UID 65532、GID 0，与 Edge GID 不同，缺少 SETGID 时已实际报凭据切换失败。以上权限仅在开启 BPF 时继续保留，参见 [setns(2)](https://man7.org/linux/man-pages/man2/setns.2.html)。
+
+采集节点的 AppArmor 配置为 Unconfined，以允许宿主机进程检查及 bpffs 访问；这仅作用于显式启用 OBI 的节点容器，不关闭宿主机 AppArmor。Kubernetes 1.30 以前使用兼容 annotation，之后使用 securityContext.appArmorProfile。节点启动器仍切换到配置的非 root UID，保留只读容器根文件系统及 allowPrivilegeEscalation=false。宿主机须挂载 `/sys/fs/bpf`，安装器只创建、授权 `/sys/fs/bpf/ongrid`，不修改 bpffs 根目录或其他 Agent 的目录。OBI 通过官方 `ebpf.bpf_fs_path` 使用该目录；tracefs、cgroup 与 procfs 通过既有 host-root 挂载及 chroot 可见。Kubernetes RBAC 仍只读 Pods、Nodes、ReplicaSets。
+
+启动采集前，Edge 用自身实际身份执行一次 disabled uprobe 的 `perf_event_open` 并立即关闭，不加载或执行额外 BPF 程序。失败通过现有插件 health.last_error 上报操作、内核 perf 设置和修正方向，随后由既有 Supervisor 重试；未选目标的发现流程不执行此检查。此检查确认基础探针权限，不等于所有目标、TLS 或语言版本都已完成采集验收。
+
+本地 Lima Ubuntu 6.8 对照实验中，单独将 perf_event_paranoid 从 4 改为 2 未解决问题；相同非 root 用户加入 SYS_ADMIN 后 uprobe 打开成功。因此恢复原值 4，适配部署权限，禁止 Agent 自动修改宿主机 sysctl。官方 OBI 二进制及源码保持不变。
+
+Lima Kubernetes 实测通过：非 root OBI 进程保留以上权限，Go HTTP/gRPC、Go 运行时指标、Java 堆/非堆内存指标与三个应用的容器日志可查询；Go → Python → Java 的同一 Trace ID 及客户端/服务端父子关系正确。相关 Linux race 测试、Edge 双架构编译和 Helm 兼容模板测试通过。此结果仅覆盖该 Ubuntu 6.8 ARM64 测试集群，不代替其他内核、架构或语言版本验收。
+
+参考：https://opentelemetry.io/docs/zero-code/obi/security/ 。回滚须同时恢复 Edge 镜像与 Helm chart；若不再需要 OBI，先清空采集范围，再关闭 allowBPF。内核参数不随部署变更。
