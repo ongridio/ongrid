@@ -22,6 +22,7 @@ const (
 	networkInventoryCallTimeout    = 8 * time.Second
 	networkInventoryDefaultLimit   = 50
 	networkInventoryMaxLimit       = 100
+	networkInterfaceMaxLimit       = 500
 )
 
 const queryNetworkDevicesDescription = "List verified network devices with SNMP identity, reachability, management address, discovery source, and interface/link counts. " +
@@ -59,7 +60,10 @@ var getNetworkNeighborsSchema = json.RawMessage(`{
 const queryNetworkInterfacesDescription = "List the latest SNMP interface snapshot for one verified network device, including interface name, MAC and IP addresses, admin state, operational state, and whether the port needs attention. It never returns SNMP credentials."
 
 const queryNetworkInterfacesWhenToUse = "Use after query_network_devices identifies a network device when the user asks about switch ports, interface status, down links, or addresses on a network device. " +
-	"The output is the last SNMP observation, not a live packet capture."
+	"The output is the last SNMP observation, not a live packet capture. " +
+	"When has_more is true, set offset to the returned next_offset with the same filters to read the remaining interfaces. " +
+	"total is the filtered snapshot count; count is the current page size. " +
+	"If last_observed_at changes between pages, restart from offset 0 for a consistent snapshot."
 
 var queryNetworkInterfacesSchema = json.RawMessage(`{
   "type": "object",
@@ -68,7 +72,8 @@ var queryNetworkInterfacesSchema = json.RawMessage(`{
     "name_contains": {"type": "string", "description": "Case-insensitive substring of an interface name or description."},
     "oper_status": {"type": "string", "enum": ["up", "down", "unknown"], "description": "Optional operational state filter."},
     "only_attention": {"type": "boolean", "default": false, "description": "When true, return interfaces that are administratively enabled but not operationally up."},
-    "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50, "description": "Maximum interfaces returned."}
+    "offset": {"type": "integer", "minimum": 0, "default": 0, "description": "Number of matching interfaces to skip. Use next_offset to continue with the same filters."},
+    "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 50, "description": "Maximum interfaces returned per page (up to 500)."}
   },
   "required": ["network_device_id"]
 }`)
@@ -209,6 +214,7 @@ type GetNetworkNeighborsTool struct {
 }
 
 type queryNetworkInterfacesArgs struct {
+	Offset          int    `json:"offset,omitempty"`
 	NetworkDeviceID uint64 `json:"network_device_id"`
 	NameContains    string `json:"name_contains,omitempty"`
 	OperStatus      string `json:"oper_status,omitempty"`
@@ -286,18 +292,12 @@ func (t *QueryNetworkInterfacesTool) InvokableRun(ctx context.Context, argsJSON 
 		}
 	}
 
-	rows := make([]networkInterfaceRow, 0, min(len(reported), in.Limit))
-	for _, row := range reported {
-		row.AdminStatus = strings.ToLower(strings.TrimSpace(row.AdminStatus))
-		row.OperStatus = strings.ToLower(strings.TrimSpace(row.OperStatus))
-		row.NeedsAttention = row.AdminStatus == "up" && row.OperStatus != "up"
-		if !matchesNetworkInterface(row, in) {
-			continue
-		}
-		rows = append(rows, row)
-		if len(rows) >= in.Limit {
-			break
-		}
+	rows, total := networkInterfacePage(reported, in)
+	// offset 可以很大；仅在存在后续匹配行时相加，避免整数溢出。
+	var nextOffset *int
+	if in.Offset < total && len(rows) < total-in.Offset {
+		next := in.Offset + len(rows)
+		nextOffset = &next
 	}
 
 	lastObservedAt := (*time.Time)(nil)
@@ -311,11 +311,35 @@ func (t *QueryNetworkInterfacesTool) InvokableRun(ctx context.Context, argsJSON 
 		"last_observed_at":  lastObservedAt,
 		"interfaces":        rows,
 		"count":             len(rows),
+		"total":             total,
+		"offset":            in.Offset,
+		"limit":             in.Limit,
+		"has_more":          nextOffset != nil,
+		"next_offset":       nextOffset,
 	})
 	if err != nil {
 		return "", fmt.Errorf("query_network_interfaces: marshal: %w", err)
 	}
 	return string(out), nil
+}
+
+// networkInterfacePage 先过滤再分页，保留快照顺序，避免一次返回全部端口。
+func networkInterfacePage(reported []networkInterfaceRow, in queryNetworkInterfacesArgs) ([]networkInterfaceRow, int) {
+	rows := make([]networkInterfaceRow, 0, min(len(reported), in.Limit))
+	total := 0
+	for _, row := range reported {
+		row.AdminStatus = strings.ToLower(strings.TrimSpace(row.AdminStatus))
+		row.OperStatus = strings.ToLower(strings.TrimSpace(row.OperStatus))
+		row.NeedsAttention = row.AdminStatus == "up" && row.OperStatus != "up"
+		if !matchesNetworkInterface(row, in) {
+			continue
+		}
+		if total >= in.Offset && len(rows) < in.Limit {
+			rows = append(rows, row)
+		}
+		total++
+	}
+	return rows, total
 }
 
 func normalizeNetworkInterfaceArgs(in *queryNetworkInterfacesArgs) error {
@@ -327,11 +351,14 @@ func normalizeNetworkInterfaceArgs(in *queryNetworkInterfacesArgs) error {
 	if in.OperStatus != "" && in.OperStatus != "up" && in.OperStatus != "down" && in.OperStatus != "unknown" {
 		return fmt.Errorf("query_network_interfaces: oper_status must be up|down|unknown")
 	}
+	if in.Offset < 0 {
+		return fmt.Errorf("query_network_interfaces: offset must be non-negative")
+	}
 	if in.Limit <= 0 {
 		in.Limit = networkInventoryDefaultLimit
 	}
-	if in.Limit > networkInventoryMaxLimit {
-		in.Limit = networkInventoryMaxLimit
+	if in.Limit > networkInterfaceMaxLimit {
+		in.Limit = networkInterfaceMaxLimit
 	}
 	return nil
 }
