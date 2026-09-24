@@ -95,7 +95,7 @@ Kubernetes 节点容器及切换到非 root 的宿主机 Edge 都保留官方能
 
 非 root 的 JVM attach 还需要保留启动器已有的 `SYS_CHROOT`：Linux `setns(CLONE_NEWNS)` 同时要求 `SYS_ADMIN` 和 `SYS_CHROOT`，实测仅官方九项时返回 EPERM，补充后成功。同时保留启动器已有的 `SETUID`、`SETGID`，供官方 JVM attach 匹配目标进程的 UID/GID；本地 Java 使用 UID 65532、GID 0，与 Edge GID 不同，缺少 SETGID 时已实际报凭据切换失败。以上权限仅在开启 BPF 时继续保留，参见 [setns(2)](https://man7.org/linux/man-pages/man2/setns.2.html)。
 
-采集节点的 AppArmor 配置为 Unconfined，以允许宿主机进程检查及 bpffs 访问；这仅作用于节点容器，不关闭宿主机 AppArmor。Kubernetes 1.30 以前使用兼容 annotation，之后使用 securityContext.appArmorProfile。节点启动器仍切换到配置的非 root UID，保留只读容器根文件系统及 allowPrivilegeEscalation=false。宿主机须挂载 `/sys/fs/bpf`，安装器只创建、授权 `/sys/fs/bpf/ongrid`，不修改 bpffs 根目录或其他 Agent 的目录。OBI 通过官方 `ebpf.bpf_fs_path` 使用该目录；tracefs、cgroup 与 procfs 通过既有 host-root 挂载及 chroot 可见。Kubernetes RBAC 仍只读 Pods、Nodes、ReplicaSets。
+采集节点的 AppArmor 配置为 Unconfined，以允许宿主机进程检查及 bpffs 访问；这仅作用于节点容器，不关闭宿主机 AppArmor。Kubernetes 1.30 以前使用兼容 annotation，之后使用 securityContext.appArmorProfile。节点启动器仍切换到配置的非 root UID，保留只读容器根文件系统及 allowPrivilegeEscalation=false。宿主机已挂载 `/sys/fs/bpf` 时，安装器只创建、授权 `/sys/fs/bpf/ongrid`，不修改 bpffs 根目录或其他 Agent 的目录。未挂载时仅记录警告并跳过，不阻断节点启动；OBI 降级固定 map 相关功能，基础 APM 采集不依赖该挂载。OBI 通过官方 `ebpf.bpf_fs_path` 使用该目录；tracefs、cgroup 与 procfs 通过既有 host-root 挂载及 chroot 可见。Kubernetes RBAC 仍只读 Pods、Nodes、ReplicaSets。
 
 启动采集前，Edge 用自身实际身份执行一次 disabled uprobe 的 `perf_event_open` 并立即关闭，不加载或执行额外 BPF 程序。失败通过现有插件 health.last_error 上报操作、内核 perf 设置和修正方向，随后由既有 Supervisor 重试；未选目标的发现流程不执行此检查。此检查确认基础探针权限，不等于所有目标、TLS 或语言版本都已完成采集验收。
 
@@ -109,6 +109,6 @@ Lima Kubernetes 实测通过：非 root OBI 进程保留以上权限，Go HTTP/g
 
 节点统一准备上述 OBI 能力、AppArmor 与只读 RBAC，移除 `node.autoAPM.allowBPF` 配置及 Edge、启动器对 `ONGRID_AUTO_APM_ALLOW_BPF` 的判断，取代上文需要额外开启的部署约定。Chart 为兼容旧 Edge 镜像仍固定传入旧环境变量 `true`，旧 values 中的 `allowBPF=false` 不再控制渲染结果。
 
-用户仍需保存采集目标才启动 OBI 或其 Collector；清空目标停止采集，平台、BTF 和实际 uprobe 权限校验保留。节点运行时安装会准备专属 bpffs 目录，宿主机仍须具备已挂载的 `/sys/fs/bpf`；内核参数不由 Agent 修改。仍不启用 privileged。
+用户仍需保存采集目标才启动 OBI 或其 Collector；清空目标停止采集，平台、BTF 和实际 uprobe 权限校验保留。节点运行时安装在宿主机已挂载 bpffs 时准备专属目录，未挂载时警告并跳过，避免影响普通指标、日志和服务发现；Agent 不主动挂载 bpffs 或修改内核参数。OBI v0.12.1 的 `setupOtelBPFFSPath` 在目录不可用时关闭 map pinning 并继续采集，参见 [上游实现](https://github.com/open-telemetry/opentelemetry-ebpf-instrumentation/blob/v0.12.1/pkg/ebpf/tracer_linux.go#L159-L195)。仍不启用 privileged。
 
 安装和升级命令保持原有流程。合并后随新的 Chart 和 Edge 版本一同发布，已有集群执行针对新版本的升级命令；发布动作不会自动更新已安装集群。停止采集使用空目标配置；恢复旧部署权限需同时回滚 Chart 和 Edge 镜像。

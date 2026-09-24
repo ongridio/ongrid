@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -47,11 +48,16 @@ func prepareK8sOBIFilesystem(ctx context.Context, root string, uid, gid int) err
 	}
 	base := hostPath(root, "/sys/fs/bpf")
 	var stat unix.Statfs_t
-	if err := unix.Statfs(base, &stat); err != nil {
-		return fmt.Errorf("OBI requires mounted host bpffs at /sys/fs/bpf: %w", err)
+	err := unix.Statfs(base, &stat)
+	if errors.Is(err, os.ErrNotExist) || (err == nil && stat.Type != unix.BPF_FS_MAGIC) {
+		// OBI can capture without pinned maps. Do not turn an optional APM
+		// facility into a startup requirement for metrics and logs, or create
+		// a pin directory on a filesystem that cannot hold BPF objects.
+		slog.WarnContext(ctx, "host bpffs is not mounted; skipping optional OBI map pinning directory")
+		return nil
 	}
-	if stat.Type != unix.BPF_FS_MAGIC {
-		return fmt.Errorf("OBI requires a bpf filesystem mounted at host /sys/fs/bpf")
+	if err != nil {
+		return fmt.Errorf("inspect host bpffs at /sys/fs/bpf: %w", err)
 	}
 	return ensureOwnedDirectory(filepath.Join(base, "ongrid"), uid, gid, 0750)
 }

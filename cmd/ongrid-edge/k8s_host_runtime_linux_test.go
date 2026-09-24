@@ -6,20 +6,28 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"golang.org/x/sys/unix"
 )
 
-func TestOBIFilesystemRejectsUnMountedDirectory(t *testing.T) {
-	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, "sys/fs/bpf"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	err := prepareK8sOBIFilesystem(context.Background(), root, os.Getuid(), os.Getgid())
-	if err == nil || !strings.Contains(err.Error(), "bpf filesystem mounted") {
-		t.Fatalf("ordinary directory accepted as bpffs: %v", err)
+func TestOBIFilesystemWithoutBPFFSDoesNotBlockNodeStartup(t *testing.T) {
+	for _, name := range []string{"missing", "unmounted"} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			base := filepath.Join(root, "sys/fs/bpf")
+			if name == "unmounted" {
+				if err := os.MkdirAll(base, 0755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := prepareK8sOBIFilesystem(context.Background(), root, os.Getuid(), os.Getgid()); err != nil {
+				t.Fatalf("optional bpffs blocks node startup: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(base, "ongrid")); !os.IsNotExist(err) {
+				t.Fatalf("must not create a pin directory outside bpffs: %v", err)
+			}
+		})
 	}
 }
 
