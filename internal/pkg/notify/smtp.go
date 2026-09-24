@@ -161,8 +161,9 @@ func (s *smtpSender) deliver(ctx context.Context, client *smtp.Client, payload [
 }
 
 func (s *smtpSender) message(msg Message) ([]byte, error) {
-	if strings.ContainsAny(msg.Subject, "\r\n") {
-		return nil, fmt.Errorf("smtp: subject must not contain newlines")
+	headerSubject, err := smtpHeaderSubject(msg.Subject)
+	if err != nil {
+		return nil, err
 	}
 	from, err := mail.ParseAddress(s.config.From)
 	if err != nil {
@@ -177,7 +178,7 @@ func (s *smtpSender) message(msg Message) ([]byte, error) {
 		recipients = append(recipients, a.String())
 	}
 	var out bytes.Buffer
-	fmt.Fprintf(&out, "From: %s\r\nTo: %s\r\nSubject: %s\r\nDate: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n", from.String(), strings.Join(recipients, ",\r\n "), mime.QEncoding.Encode("UTF-8", msg.Subject), time.Now().Format(time.RFC1123Z))
+	fmt.Fprintf(&out, "From: %s\r\nTo: %s\r\nSubject: %s\r\nDate: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n", from.String(), strings.Join(recipients, ",\r\n "), mime.QEncoding.Encode("UTF-8", headerSubject), time.Now().Format(time.RFC1123Z))
 	writer := quotedprintable.NewWriter(&out)
 	if _, err := writer.Write([]byte(formatText(msg))); err != nil {
 		return nil, err
@@ -186,4 +187,15 @@ func (s *smtpSender) message(msg Message) ([]byte, error) {
 		return nil, err
 	}
 	return out.Bytes(), nil
+}
+
+// smtpHeaderSubject folds legitimate multi-line content (for example PromQL)
+// into one header line. The original subject remains untouched in the message
+// body via formatText. Carriage returns and NUL bytes are rejected rather than
+// normalized so untrusted input cannot create or corrupt SMTP headers.
+func smtpHeaderSubject(subject string) (string, error) {
+	if strings.ContainsAny(subject, "\r\x00") {
+		return "", fmt.Errorf("smtp: subject contains invalid control characters")
+	}
+	return strings.Join(strings.Fields(subject), " "), nil
 }

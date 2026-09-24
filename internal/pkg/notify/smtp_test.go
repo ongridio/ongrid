@@ -2,6 +2,7 @@ package notify
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -211,6 +212,39 @@ func TestSMTPSend(t *testing.T) {
 	}
 }
 
+func TestSMTPMessageNormalizesMultilineSubject(t *testing.T) {
+	config := SMTPConfig{Host: "smtp.example.test", Port: 587, From: "alerts@example.test", To: []string{"ops@example.test"}}
+	sender, err := NewSMTPSender("mail", config, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := "cpu_high: sum(\n  rate(node_cpu_seconds_total[5m])\n) > 1"
+	payload, err := sender.(*smtpSender).message(Message{Subject: original, Severity: SeverityWarning})
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, err := mail.ReadMessage(bytes.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject, err := new(mime.WordDecoder).DecodeHeader(message.Header.Get("Subject"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const wantSubject = "cpu_high: sum( rate(node_cpu_seconds_total[5m]) ) > 1"
+	if subject != wantSubject {
+		t.Fatalf("subject = %q, want %q", subject, wantSubject)
+	}
+	body, err := io.ReadAll(quotedprintable.NewReader(message.Body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodedBody := strings.ReplaceAll(string(body), "\r\n", "\n")
+	if !strings.Contains(decodedBody, original) {
+		t.Fatalf("body did not preserve the original multi-line subject: %q", body)
+	}
+}
+
 func TestSMTPFailures(t *testing.T) {
 	for _, failure := range []string{"no-starttls", "auth", "recipient", "data", "untrusted", "stall", "quit"} {
 		t.Run(failure, func(t *testing.T) {
@@ -248,7 +282,9 @@ func TestSMTPValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := sender.(*smtpSender).message(Message{Subject: "alert\r\nBcc: attacker@example.test"}); err == nil {
-		t.Fatal("accepted header injection")
+	for _, subject := range []string{"alert\r\nBcc: attacker@example.test", "alert\x00Bcc: attacker@example.test"} {
+		if _, err := sender.(*smtpSender).message(Message{Subject: subject}); err == nil {
+			t.Fatalf("accepted unsafe subject %q", subject)
+		}
 	}
 }
