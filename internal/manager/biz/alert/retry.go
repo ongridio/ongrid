@@ -111,8 +111,10 @@ func (w *RetryWorker) runOnce(ctx context.Context) {
 //  1. Resolve incident + channel rows.
 //  2. If the incident is already resolved, mark the delivery success
 //     (operator no longer needs the notify).
-//  3. Otherwise rebuild the notify.Message from the incident state and
-//     re-call notifier.Send for the channel name.
+//  3. Otherwise rebuild the notify.Message and the typed sender from the
+//     persisted channel, then deliver through notifier.SendVia. This mirrors
+//     the initial delivery path and avoids resolving DB channels against the
+//     environment-configured router by name.
 //  4. Update the delivery with attempt_count++ and the new outcome.
 func (w *RetryWorker) retryOne(ctx context.Context, d *model.Delivery, now time.Time) {
 	if d == nil || d.IncidentID == nil {
@@ -137,7 +139,12 @@ func (w *RetryWorker) retryOne(ctx context.Context, d *model.Delivery, now time.
 	if incident.Status == model.IncidentStatusResolved {
 		// No point retrying — operator's question is moot.
 		finished := now
-		_ = w.repo.UpdateDeliveryStatus(ctx, d.ID, model.DeliveryStatusSuccess, d.AttemptCount+1, nil, nil, ptrString("incident resolved before retry"), &finished, &finished)
+		if err := w.repo.UpdateDeliveryStatus(ctx, d.ID, model.DeliveryStatusSuccess, d.AttemptCount+1, nil, nil, ptrString("incident resolved before retry"), &finished, &finished); err != nil {
+			w.log.Warn("retry: mark resolved delivery finished",
+				slog.Uint64("delivery_id", d.ID),
+				slog.Any("err", err),
+			)
+		}
 		return
 	}
 	channel, err := w.repo.GetChannelByID(ctx, d.ChannelID)
@@ -154,14 +161,25 @@ func (w *RetryWorker) retryOne(ctx context.Context, d *model.Delivery, now time.
 		// retrying by burning the budget.
 		finished := now
 		errMsg := fmt.Sprintf("channel %q disabled", channel.Name)
-		_ = w.repo.UpdateDeliveryStatus(ctx, d.ID, model.DeliveryStatusFailed, w.maxAttempts, nil, nil, &errMsg, d.SentAt, &finished)
+		if err := w.repo.UpdateDeliveryStatus(ctx, d.ID, model.DeliveryStatusFailed, w.maxAttempts, nil, nil, &errMsg, d.SentAt, &finished); err != nil {
+			w.log.Warn("retry: exhaust disabled channel delivery",
+				slog.Uint64("delivery_id", d.ID),
+				slog.Any("err", err),
+			)
+		}
 		return
 	}
 
 	msg := buildIncidentMessage(incident, now)
 	sentAt := now
 	finished := now
-	sendErr := w.notifier.Send(ctx, msg, channel.Name)
+	sender, buildErr := BuildSenderFromChannel(channel)
+	var sendErr error
+	if buildErr != nil {
+		sendErr = buildErr
+	} else {
+		sendErr = w.notifier.SendVia(ctx, msg, sender)
+	}
 	status := model.DeliveryStatusSuccess
 	var errMsg *string
 	eventType := model.EventTypeNotificationSent
