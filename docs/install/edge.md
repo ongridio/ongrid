@@ -102,6 +102,16 @@ cp bin/linux-arm64/ongrid-edge  bin/ongrid-edge-linux-arm64
 
 ## Configuration notes
 
+### Logs on Kubernetes nodes
+
+The node's `logs` plugin accepts the same `enable_journald`, `journald_units`,
+`file_paths`, and `sources` settings as an ordinary host. In `kubernetes` mode,
+host file sources can run alongside the configured `pod_log_paths`.
+An explicitly saved node configuration takes precedence over service-discovery
+defaults, including the plugin's enabled switch. Nodes with no saved configuration
+(or an enabled, empty spec) continue to use service-discovery defaults.
+Update both Manager and Edge to use this behavior.
+
 ### Tunnel port
 
 `--server-edge-addr` points to the geminio tunnel endpoint. The default port is **40012**, but `install.sh` increments automatically if the port is already in use. Always check the actual value in `.env` (`ONGRID_TUNNEL_PORT`):

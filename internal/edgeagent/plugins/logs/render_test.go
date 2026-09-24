@@ -51,6 +51,14 @@ func TestRenderedConfigsAcceptedByCollector(t *testing.T) {
 			Enabled: true, EdgeID: 42, Endpoint: "https://manager.example.com/loki/api/v1/push",
 			Spec: map[string]interface{}{"mode": "kubernetes", "cluster_id": "9", "node_name": "worker-1", "pod_log_paths": []string{"/var/log/pods/shop_*_*/*/*.log"}},
 		},
+		"kubernetes-with-host-files": {
+			Enabled: true, EdgeID: 42, Endpoint: "https://manager.example.com/loki/api/v1/push",
+			Spec: map[string]interface{}{
+				"mode": "kubernetes", "cluster_id": "9", "pod_log_paths": []string{"/var/log/pods/default_*/*/*.log"},
+				"file_paths": []string{"/var/log/**/*.log"}, "journald_units": []string{"nginx.service"},
+				"sources": []interface{}{map[string]interface{}{"id": "kubernetes", "include": []string{"/var/log/nginx/*.log"}, "parser": "json"}},
+			},
+		},
 	}
 	for name, cfg := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -605,11 +613,11 @@ func cloneMap(input map[string]interface{}) map[string]interface{} {
 	return copy
 }
 
-func TestKubernetesLogsRejectUnselectedOrUnboundedPaths(t *testing.T) {
-	for _, paths := range [][]string{{"/var/log/pods/*/*/*.log"}, {"/var/log/pods/*_*_*/*/*.log"}, {"/var/log/pods/shop_../../etc_uid/*/*.log"}, {"/var/log/syslog"}} {
+func TestKubernetesLogsRejectInvalidPaths(t *testing.T) {
+	for _, paths := range [][]string{{"relative/*.log"}, {"/var/log/pods/shop_../../etc_uid/*/*.log"}, {"/var/log/pods/\x00*.log"}, {"/var/log/pods/\n*.log"}} {
 		_, err := render(plugins.PluginConfig{EdgeID: 42, Spec: map[string]interface{}{"mode": "kubernetes", "cluster_id": "7", "pod_log_paths": paths, "pod_log_path": "/var/log/pods/*/*/*.log"}})
-		if err == nil {
-			t.Fatalf("unsafe paths accepted: %v", paths)
+		if err == nil || !strings.Contains(err.Error(), "log path") {
+			t.Fatalf("invalid paths = %v, err = %v", paths, err)
 		}
 	}
 }
@@ -666,7 +674,7 @@ func TestKubernetesJournalWithoutContainerSelection(t *testing.T) {
 	for _, paths := range [][]string{nil, {}} {
 		root := renderConfig(t, plugins.PluginConfig{EdgeID: 42, Endpoint: "https://manager.example.com/loki/api/v1/push", Spec: map[string]interface{}{
 			"mode": "kubernetes", "cluster_id": "7", "node_name": "worker-1", "pod_log_paths": paths,
-			"pod_log_path": "/var/log/pods/*/*/*.log", "file_paths": []string{"/var/log/pods/*/*/*.log"},
+			"pod_log_path": "/var/log/pods/*/*/*.log",
 		}})
 		receivers := object(t, root, "receivers")
 		if len(receivers) != 1 || receivers["journald/system"] == nil {
@@ -674,4 +682,57 @@ func TestKubernetesJournalWithoutContainerSelection(t *testing.T) {
 		}
 		assertStringListContains(t, object(t, object(t, root, "service"), "pipelines")["logs"].(map[string]interface{})["receivers"], "journald/system")
 	}
+}
+
+func TestKubernetesLogsHonorAllConfiguredSources(t *testing.T) {
+	for _, selected := range []bool{false, true} {
+		for _, journal := range []bool{false, true} {
+			var paths []string
+			if selected {
+				paths = []string{"/var/log/pods/default_*/*/*.log", "/var/log/pods/*/*/*.log"}
+			}
+			root := renderConfig(t, plugins.PluginConfig{EdgeID: 42, Endpoint: "https://manager.example.com/loki/api/v1/push", Spec: map[string]interface{}{
+				"mode": "kubernetes", "cluster_id": "7", "pod_log_paths": paths,
+				"enable_journald": journal, "journald_units": []string{"nginx.service"}, "file_paths": []string{"/var/log/**/*.log"},
+				"sources": []interface{}{map[string]interface{}{"id": "kubernetes", "include": []string{"/var/log/nginx/*.log"}, "parser": "json"}},
+			}})
+			receivers := object(t, root, "receivers")
+			if (receivers["journald/system"] != nil) != journal || (receivers["filelog/kubernetes"] != nil) != selected {
+				t.Fatalf("selected=%v journal=%v: %+v", selected, journal, receivers)
+			}
+			if journal {
+				assertStringListContains(t, object(t, receivers, "journald/system")["units"], "nginx.service")
+			}
+			if selected {
+				for _, path := range paths {
+					assertStringListContains(t, object(t, receivers, "filelog/kubernetes")["include"], path)
+				}
+			}
+			hostCount := 0
+			for id, raw := range receivers {
+				if strings.HasPrefix(id, "filelog/host-") {
+					hostCount++
+					receiver := asObject(t, raw)
+					if receiver["exclude"] != nil {
+						t.Fatalf("unexpected path exclusions: %+v", receiver)
+					}
+					wantPath := "/var/log/**/*.log"
+					if id == "filelog/host-kubernetes" {
+						wantPath = "/var/log/nginx/*.log"
+					}
+					assertStringListContains(t, receiver["include"], wantPath)
+				}
+			}
+			if hostCount != 2 {
+				t.Fatalf("host file sources = %d, want 2", hostCount)
+			}
+		}
+	}
+}
+
+func TestKubernetesLogsHonorExplicitLegacyPath(t *testing.T) {
+	root := renderConfig(t, plugins.PluginConfig{EdgeID: 42, Endpoint: "https://manager.example.com/loki/api/v1/push", Spec: map[string]interface{}{
+		"mode": "kubernetes", "cluster_id": "7", "pod_log_path": "/var/log/pods/*/*/*.log",
+	}})
+	assertStringListContains(t, object(t, object(t, root, "receivers"), "filelog/kubernetes")["include"], "/var/log/pods/*/*/*.log")
 }

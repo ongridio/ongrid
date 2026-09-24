@@ -29,12 +29,11 @@ const (
 )
 
 var (
-	selectedPodLogPattern = regexp.MustCompile(`^/var/log/pods/[a-z0-9][a-z0-9-]*_(\*|[a-zA-Z0-9][a-zA-Z0-9.-]*)_(\*|[a-zA-Z0-9][a-zA-Z0-9.-]*)/(\*|[a-z0-9][a-z0-9-]*)/\*\.log$`)
-	sourceIDPattern       = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$`)
-	resourceKeyRegex      = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9._-]{0,127}$`)
-	datasetPattern        = regexp.MustCompile(`^ongrid\.[a-z0-9][a-z0-9._-]{0,91}$`)
-	namespacePattern      = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,99}$`)
-	logsProbeIDPattern    = regexp.MustCompile(`^ongrid-log-probe-[A-Za-z0-9_-]{20,64}$`)
+	sourceIDPattern    = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$`)
+	resourceKeyRegex   = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9._-]{0,127}$`)
+	datasetPattern     = regexp.MustCompile(`^ongrid\.[a-z0-9][a-z0-9._-]{0,91}$`)
+	namespacePattern   = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,99}$`)
+	logsProbeIDPattern = regexp.MustCompile(`^ongrid-log-probe-[A-Za-z0-9_-]{20,64}$`)
 )
 
 type fileSource struct {
@@ -100,9 +99,14 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 	}
 	if mode == "kubernetes" {
 		podPaths := stringSlice(spec, "pod_log_paths")
+		if _, ok := spec["pod_log_paths"]; !ok {
+			// An explicitly empty list disables container logs, even when an old
+			// singular path remains in the saved config.
+			podPaths = stringSliceOrScalar(spec, "pod_log_path")
+		}
 		for _, podPath := range podPaths {
-			if !selectedPodLogPattern.MatchString(podPath) {
-				return nil, errors.New("logs plugin: invalid selected Kubernetes log path")
+			if err := validateLogPattern(podPath); err != nil {
+				return nil, fmt.Errorf("logs plugin: Kubernetes log path: %w", err)
 			}
 		}
 		if len(podPaths) > 0 {
@@ -110,58 +114,62 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 			receivers[receiverID] = kubernetesReceiver(spec, cfg.EdgeID, clusterID, nodeName, podPaths, startAt)
 			receiverIDs = append(receiverIDs, receiverID)
 		}
-	} else {
-		sources, err := parseFileSources(spec, startAt)
+	}
+	sources, err := parseFileSources(spec, startAt)
+	if err != nil {
+		return nil, err
+	}
+	if mode == "host" && len(sources) == 0 && !enableJournald {
+		sources = []fileSource{{
+			ID: "system", ServiceName: "system", Include: []string{"/var/log/syslog", "/var/log/messages"}, Parser: "plain", StartAt: startAt,
+		}}
+	}
+	if raw, ok := spec["service_capture"]; ok && mode == "host" {
+		fields, ok := raw.(map[string]interface{})
+		if !ok {
+			return nil, errors.New("logs plugin: service_capture must be an object")
+		}
+		capture, err := autoapm.Parse(fields)
 		if err != nil {
 			return nil, err
 		}
-		if len(sources) == 0 && !enableJournald {
-			sources = []fileSource{{
-				ID: "system", ServiceName: "system", Include: []string{"/var/log/syslog", "/var/log/messages"}, Parser: "plain", StartAt: startAt,
-			}}
+		seen := map[string]bool{}
+		var selected []fileSource
+		var paths []string
+		for _, target := range capture.Targets {
+			if target.LogPath == "" || seen[target.LogPath] {
+				continue
+			}
+			seen[target.LogPath] = true
+			environment := target.Environment
+			if environment == "" {
+				environment = capture.Environment
+			}
+			sum := sha256.Sum256([]byte(target.LogPath))
+			selected = append(selected, fileSource{
+				ID: fmt.Sprintf("service-%x", sum[:8]), ServiceName: target.ServiceName,
+				ServiceNamespace: target.ServiceNamespace, Environment: environment,
+				Include: []string{target.LogPath}, Exclude: append([]string(nil), paths...),
+				Parser: "plain", StartAt: startAt,
+			})
+			paths = append(paths, target.LogPath)
 		}
-		if raw, ok := spec["service_capture"]; ok {
-			fields, ok := raw.(map[string]interface{})
-			if !ok {
-				return nil, errors.New("logs plugin: service_capture must be an object")
-			}
-			capture, err := autoapm.Parse(fields)
-			if err != nil {
-				return nil, err
-			}
-			seen := map[string]bool{}
-			var selected []fileSource
-			var paths []string
-			for _, target := range capture.Targets {
-				if target.LogPath == "" || seen[target.LogPath] {
-					continue
-				}
-				seen[target.LogPath] = true
-				environment := target.Environment
-				if environment == "" {
-					environment = capture.Environment
-				}
-				sum := sha256.Sum256([]byte(target.LogPath))
-				selected = append(selected, fileSource{
-					ID: fmt.Sprintf("service-%x", sum[:8]), ServiceName: target.ServiceName,
-					ServiceNamespace: target.ServiceNamespace, Environment: environment,
-					Include: []string{target.LogPath}, Exclude: append([]string(nil), paths...),
-					Parser: "plain", StartAt: startAt,
-				})
-				paths = append(paths, target.LogPath)
-			}
-			// Service selection owns these files, even if an existing device glob overlaps.
-			for i := range sources {
-				sources[i].Exclude = append(sources[i].Exclude, paths...)
-			}
-			sources = append(sources, selected...)
+		// Service selection owns these files, even if an existing device glob overlaps.
+		for i := range sources {
+			sources[i].Exclude = append(sources[i].Exclude, paths...)
 		}
-		for _, source := range sources {
-			receiverID := "filelog/" + source.ID
-			receivers[receiverID] = fileReceiver(cfg.EdgeID, source)
-			receiverIDs = append(receiverIDs, receiverID)
-		}
+		sources = append(sources, selected...)
 	}
+	for _, source := range sources {
+		receiverID := "filelog/" + source.ID
+		if mode == "kubernetes" {
+			// Keep user source IDs separate from the container receiver.
+			receiverID = "filelog/host-" + source.ID
+		}
+		receivers[receiverID] = fileReceiver(cfg.EdgeID, source)
+		receiverIDs = append(receiverIDs, receiverID)
+	}
+
 	if len(receiverIDs) == 0 {
 		return nil, errors.New("logs plugin: at least one log source is required")
 	}
