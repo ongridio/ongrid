@@ -655,7 +655,7 @@ fetch-mongodb-exporter: ## [release] 下载 mongodb_exporter 到 bin/<os>-<arch>
 build-edge-bundle: ## [release] 打 ADR-024 edge upgrade bundle 到 dist/out/edge-bundles/
 	@mkdir -p $(OUT)/edge-bundles
 	@for arch in $(EDGE_PLUGIN_ARCHES); do \
-		bash dist/build-edge-bundle.sh $(VERSION) $$arch $(OUT)/edge-bundles; \
+		bash dist/build-edge-bundle.sh $(VERSION) $$arch $(OUT)/edge-bundles || exit 1; \
 	done
 
 .PHONY: package-k8s-chart publish-k8s-chart test-k8s-chart test-publish-k8s-chart
@@ -790,6 +790,7 @@ publish-edge-attachments: publish-edge-deps-attachments publish-edge-version-att
 test-edge-attachments: ## [test] 校验附件构建、直链下载和 checksum 拒绝路径
 	bash scripts/test-edge-assets.sh
 	bash scripts/test-edge-assets-lib.sh
+	bash scripts/test-edge-bundle.sh
 	bash scripts/test-verify-cnb-release-attachments.sh
 	bash scripts/test-ensure-cnb-release.sh
 	bash scripts/test-publish-cnb-release-attachments.sh

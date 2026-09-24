@@ -36,6 +36,8 @@ ENTRIES=(
   "postgres_exporter        0755 /usr/local/lib/ongrid-edge/postgres_exporter        postgres_exporter-${ARCH}"
   "redis_exporter           0755 /usr/local/lib/ongrid-edge/redis_exporter           redis_exporter-${ARCH}"
   "mongodb_exporter         0755 /usr/local/lib/ongrid-edge/mongodb_exporter         mongodb_exporter-${ARCH}"
+  "obi.NOTICES              0644 /usr/local/lib/ongrid-edge/obi.NOTICES              obi.NOTICES-${ARCH}"
+  "obi                      0755 /usr/local/lib/ongrid-edge/obi                      obi-${ARCH}"
   "otelcol-contrib          0755 /usr/local/lib/ongrid-edge/otelcol-contrib          otelcol-contrib-${ARCH}"
   "apply-pending-upgrade.sh 0755 /usr/local/lib/ongrid-edge/apply-pending-upgrade.sh apply-pending-upgrade.sh"
 )
@@ -65,7 +67,7 @@ for entry in "${ENTRIES[@]}"; do
     echo "build-edge-bundle(host): missing regular non-empty file $src_file — bundle NOT built" >&2
     exit 1
   fi
-  install -m 0755 "$src_file" "$work/$src_in_bundle"
+  install -m "$mode" "$src_file" "$work/$src_in_bundle"
   sha=$(sha256sum "$work/$src_in_bundle" | awk '{print $1}')
   echo "$sha  $mode  $src_in_bundle  $dest" >> "$manifest"
   staged=$((staged + 1))

@@ -14,6 +14,8 @@
 #   bin/<arch>/postgres_exporter
 #   bin/<arch>/redis_exporter
 #   bin/<arch>/mongodb_exporter
+#   bin/<arch>/obi
+#   bin/<arch>/obi.NOTICES
 #   bin/<arch>/otelcol-contrib
 #   deploy/install/apply-pending-upgrade.sh
 #
@@ -68,11 +70,11 @@ for entry in "${ENTRIES[@]}"; do
   dest=$3
   src_file=$4
 
-  if [[ ! -f "$src_file" ]]; then
-    echo "build-edge-bundle: missing $src_file — skipping (bundle will be incomplete)" >&2
-    continue
+  if [[ ! -f "$src_file" || -L "$src_file" || ! -s "$src_file" ]]; then
+    echo "build-edge-bundle: missing regular non-empty file $src_file — bundle NOT built" >&2
+    exit 1
   fi
-  install -m 0755 "$src_file" "$work/$src_in_bundle"
+  install -m "$mode" "$src_file" "$work/$src_in_bundle"
   sha=$(sha256sum "$work/$src_in_bundle" | awk '{print $1}')
   echo "$sha  $mode  $src_in_bundle  $dest" >> "$manifest"
 done
