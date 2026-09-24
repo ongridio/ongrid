@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -452,7 +453,7 @@ func TestTunnelConfigFetcherKeepsReachableLogsEndpoint(t *testing.T) {
 	}
 }
 
-func TestTunnelConfigFetcherRejectsHostLogsOverrideOnKubernetesNode(t *testing.T) {
+func TestTunnelConfigFetcherPreservesHostLogsOnKubernetesNode(t *testing.T) {
 	t.Setenv("ONGRID_K8S_ROLE", "node")
 	t.Setenv("ONGRID_K8S_MODE", "full-node")
 	t.Setenv("ONGRID_K8S_CLUSTER_ID", "9")
@@ -464,7 +465,7 @@ func TestTunnelConfigFetcherRejectsHostLogsOverrideOnKubernetesNode(t *testing.T
 			"logs": {
 				Enabled: true,
 				Spec: map[string]interface{}{
-					"mode": "host",
+					"mode": "host", "enable_journald": false, "file_paths": []string{"/var/log/nginx/*.log"},
 				},
 			},
 		},
@@ -478,9 +479,9 @@ func TestTunnelConfigFetcherRejectsHostLogsOverrideOnKubernetesNode(t *testing.T
 	if cfg.Endpoint != "https://manager.example.com/loki/api/v1/push" {
 		t.Fatalf("Endpoint = %q", cfg.Endpoint)
 	}
-	assertSpecEqual(t, cfg.Spec, "mode", "kubernetes")
-	if !cfg.Enabled || cfg.Spec["pod_log_paths"] != nil {
-		t.Fatal("system logs stopped or container scope widened")
+	assertSpecEqual(t, cfg.Spec, "mode", "host")
+	if !cfg.Enabled || cfg.Spec["enable_journald"] != false || !reflect.DeepEqual(cfg.Spec["file_paths"], []string{"/var/log/nginx/*.log"}) {
+		t.Fatal("explicit host log configuration changed")
 	}
 }
 

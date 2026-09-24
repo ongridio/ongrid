@@ -334,10 +334,14 @@ func (uc *PluginConfigUC) Set(ctx context.Context, edgeID uint64, plugin string,
 	var previous *model.PluginConfig
 	switch plugin {
 	case model.PluginNameLogs:
-		if _, managed, err := uc.kubernetesLogsConfig(ctx, edgeID); err != nil {
-			return nil, err
-		} else if managed {
-			return nil, fmt.Errorf("%w: configure Kubernetes log capture in service discovery", errs.ErrInvalid)
+		if uc.kubernetesAutoAPM != nil {
+			spec, managed, err := uc.kubernetesAutoAPM(ctx, edgeID)
+			if err != nil {
+				return nil, err
+			}
+			if managed && spec == nil {
+				return nil, fmt.Errorf("%w: configure host logs on a Kubernetes node", errs.ErrInvalid)
+			}
 		}
 	case model.PluginNameAutoAPM:
 		if uc.kubernetesAutoAPM != nil {

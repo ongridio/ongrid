@@ -283,12 +283,13 @@ func (t *TunnelConfigFetcher) withKubernetesLogsDefaults(cfg PluginConfig) Plugi
 	}
 
 	spec := copySpec(cfg.Spec)
-	// Journal collection is independent of selected container paths. Missing
-	// pod_log_paths never falls back to the legacy wildcard container scan.
+	// Preserve explicit log settings; only fill in missing node defaults.
 	if t.k8sPodName != "" && t.k8sNamespace != "" {
 		spec["pod_log_self_exclude"] = fmt.Sprintf("/var/log/pods/%s_%s_*/*/*.log", t.k8sNamespace, t.k8sPodName)
 	}
-	spec["mode"] = "kubernetes"
+	if mode, _ := spec["mode"].(string); strings.TrimSpace(mode) == "" {
+		spec["mode"] = "kubernetes"
+	}
 	if _, ok := spec["node_name"]; !ok && t.k8sNodeName != "" {
 		spec["node_name"] = t.k8sNodeName
 	}
