@@ -19,14 +19,15 @@ image:
   pullPolicy: IfNotPresent
 
 node:
-  # Installation capability gate; capture still requires cluster-owned namespace/workload selection.
+  # Capture capabilities are ready by default; capture still requires selected targets.
   autoAPM:
     # Grants official OBI capabilities, including SYS_ADMIN for Go propagation,
     # network namespace access and restrictive perf policies, plus SYS_RESOURCE
     # for older kernels. Retains SYS_CHROOT, SETUID and SETGID for JVM attach.
     # Node AppArmor is unconfined to inspect host processes
     # and write only its owned bpffs directory. Never privileged.
-    allowBPF: false
+    # Set false to opt out of node auto-instrumentation capabilities.
+    allowBPF: true
   serviceAccountName: ""
   # hostmetrics exposes node_exporter and the metrics plugin forwards it.
   # Keep the legacy embedded periodic push off to avoid duplicate node_* series.

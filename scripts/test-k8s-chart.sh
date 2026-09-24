@@ -103,8 +103,7 @@ grep -q 'defaultMode: 0444' "$tmp_dir/default-node.yaml"
 grep -A1 'name: ONGRID_EDGE_SECRET_DIR' "$tmp_dir/default-node.yaml" | grep -q 'value: /var/lib/ongrid-edge/k8s-state/secrets'
 grep -A1 'name: ONGRID_EDGE_COLLECTOR_MODE' "$tmp_dir/default.yaml" | grep -q 'value: "off"'
 grep -q 'add: \["CHOWN", "DAC_OVERRIDE", "FOWNER"\]' "$tmp_dir/default.yaml"
-grep -q 'add: \["DAC_READ_SEARCH", "NET_ADMIN", "SETGID", "SETPCAP", "SETUID", "SYS_CHROOT"\]' "$tmp_dir/default.yaml"
-! grep -q 'SYS_ADMIN\|SYS_PTRACE' "$tmp_dir/default.yaml"
+grep -A1 'name: ONGRID_AUTO_APM_ALLOW_BPF' "$tmp_dir/default-node.yaml" | grep -q 'value: "true"'
 ! grep -q 'privileged: true' "$tmp_dir/default.yaml"
 ! grep -q 'supplementalGroups:' "$tmp_dir/default.yaml"
 ! grep -q '^data:' "$tmp_dir/telemetry-secret.yaml"
@@ -262,20 +261,26 @@ expect_template_failure 'scaleDownPeriodSeconds must be between 1 and 1800' \
 expect_template_failure 'upgrade.migrationHook.timeout must be a whole second, minute, or hour duration' \
   helm template invalid-upgrade-timeout "$chart_package" "${common_args[@]}" --is-upgrade --set upgrade.migrationHook.timeout=1m30s
 
-echo "Kubernetes Helm chart validation passed"
-
-# Kubernetes capture permissions remain opt-in, alongside the existing BPF gate.
-! grep -q 'name: ongrid-edge-node-autoapm' "$tmp_dir/default.yaml"
-helm template ongrid-edge "$chart_dir" "${common_args[@]}" --set node.autoAPM.allowBPF=true >"$tmp_dir/autoapm.yaml"
-grep -q 'name: ongrid-edge-node-autoapm' "$tmp_dir/autoapm.yaml"
-grep -q 'resources: \["replicasets"\]' "$tmp_dir/autoapm.yaml"
+# Published Chart defaults prepare node capture without an extra install/upgrade flag.
+grep -q 'name: ongrid-edge-node-autoapm' "$tmp_dir/default.yaml"
+grep -q 'resources: \["replicasets"\]' "$tmp_dir/default.yaml"
 for capability in BPF PERFMON SYS_PTRACE CHECKPOINT_RESTORE NET_RAW SYS_ADMIN SYS_RESOURCE DAC_READ_SEARCH NET_ADMIN; do
-  grep -q "\"$capability\"" "$tmp_dir/autoapm.yaml"
+  grep -q "\"$capability\"" "$tmp_dir/default-node.yaml"
 done
-! grep -q 'privileged: true' "$tmp_dir/autoapm.yaml"
-helm template ongrid-edge "$chart_dir" "${common_args[@]}" --kube-version 1.29 --set node.autoAPM.allowBPF=true >"$tmp_dir/autoapm-legacy.yaml"
+! grep -q 'privileged: true' "$tmp_dir/default.yaml"
+helm template ongrid-edge "$chart_package" "${common_args[@]}" --kube-version 1.29 >"$tmp_dir/autoapm-legacy.yaml"
 grep -q 'container.apparmor.security.beta.kubernetes.io/edge-node: unconfined' "$tmp_dir/autoapm-legacy.yaml"
 ! grep -q 'appArmorProfile:' "$tmp_dir/autoapm-legacy.yaml"
-helm template ongrid-edge "$chart_dir" "${common_args[@]}" --kube-version 1.34 --set node.autoAPM.allowBPF=true >"$tmp_dir/autoapm-modern.yaml"
+helm template ongrid-edge "$chart_package" "${common_args[@]}" --kube-version 1.34 --is-upgrade >"$tmp_dir/autoapm-modern.yaml"
 grep -q 'appArmorProfile:' "$tmp_dir/autoapm-modern.yaml"
 ! grep -q 'container.apparmor.security.beta' "$tmp_dir/autoapm-modern.yaml"
+
+# An explicit saved opt-out must continue to win over the new default.
+helm template ongrid-edge "$chart_package" "${common_args[@]}" --is-upgrade \
+  --set node.autoAPM.allowBPF=false >"$tmp_dir/autoapm-disabled.yaml"
+grep -A1 'name: ONGRID_AUTO_APM_ALLOW_BPF' "$tmp_dir/autoapm-disabled.yaml" | grep -q 'value: "false"'
+grep -q 'add: \["DAC_READ_SEARCH", "NET_ADMIN", "SETGID", "SETPCAP", "SETUID", "SYS_CHROOT"\]' "$tmp_dir/autoapm-disabled.yaml"
+! grep -q 'name: ongrid-edge-node-autoapm\|SYS_ADMIN\|SYS_PTRACE\|appArmorProfile:\|container.apparmor.security.beta' "$tmp_dir/autoapm-disabled.yaml"
+! grep -q 'privileged: true' "$tmp_dir/autoapm-disabled.yaml"
+
+echo "Kubernetes Helm chart validation passed"

@@ -104,3 +104,9 @@ Kubernetes 开启 `node.autoAPM.allowBPF=true` 时，节点容器及切换到非
 Lima Kubernetes 实测通过：非 root OBI 进程保留以上权限，Go HTTP/gRPC、Go 运行时指标、Java 堆/非堆内存指标与三个应用的容器日志可查询；Go → Python → Java 的同一 Trace ID 及客户端/服务端父子关系正确。相关 Linux race 测试、Edge 双架构编译和 Helm 兼容模板测试通过。此结果仅覆盖该 Ubuntu 6.8 ARM64 测试集群，不代替其他内核、架构或语言版本验收。
 
 参考：https://opentelemetry.io/docs/zero-code/obi/security/ 。回滚须同时恢复 Edge 镜像与 Helm chart；若不再需要 OBI，先清空采集范围，再关闭 allowBPF。内核参数不随部署变更。
+
+## Helm 默认准备采集能力（2026-09-24）
+
+Chart 将 `node.autoAPM.allowBPF` 默认改为 `true`，取代上文默认关闭、需要额外开启的部署约定。它是 Ongrid Chart 的可选配置；普通安装和升级无需额外传参。准备的能力、AppArmor 与只读 RBAC 沿用上述清单，仍不启用 privileged；空采集目标仍不启动 OBI 或其 Collector。
+
+页面生成的升级命令继续使用 `--reset-then-reuse-values`：没有显式配置该字段的旧安装采用新版默认值，用户曾显式设为 `false` 的安装保留关闭状态。仅使用 `--reuse-values` 的自定义命令可能保留旧 Chart 默认值。发布新版本后，已有集群仍需执行针对新版本的升级命令；发布动作不会自动更新已安装集群。回滚可恢复旧 Chart 或显式将该字段设为 `false`。
