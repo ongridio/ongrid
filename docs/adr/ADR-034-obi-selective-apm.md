@@ -18,7 +18,7 @@ OBI 仅向 loopback 的 OTLP 14317/14318 导出。Collector 健康端口 14333�
 
 ## 部署及边界
 
-Linux amd64/arm64，要求内核 BTF 和相应 eBPF 能力。原生服务通常以 root 运行；受限部署需要 CAP_DAC_READ_SEARCH、CAP_SYS_PTRACE、CAP_PERFMON、CAP_BPF、CAP_CHECKPOINT_RESTORE、CAP_NET_ADMIN、CAP_NET_RAW。Kubernetes 需先设置 Helm `node.autoAPM.allowBPF=true` 授予节点权限，再在设备插件中开启。默认 false 不扩展现有节点权限。更新策略禁止 surge，避免同节点两个探针。Kubernetes 元数据自动探测关闭，当前使用用户指定服务身份，不新增 API Server RBAC。
+Linux amd64/arm64，要求内核 BTF 和相应 eBPF 能力。原生服务通常以 root 运行；受限部署需要 CAP_DAC_READ_SEARCH、CAP_SYS_PTRACE、CAP_PERFMON、CAP_BPF、CAP_CHECKPOINT_RESTORE、CAP_NET_ADMIN、CAP_NET_RAW。Kubernetes 节点部署自动准备采集权限，用户保存目标后启动 OBI（节点部署开关已于 2026-09-24 取消，见下文）。更新策略禁止 surge，避免同节点两个探针。Kubernetes 元数据自动探测关闭，当前使用用户指定服务身份，不新增 API Server RBAC。
 
 按节点选择进程是本期范围；不提供独立 OBI DaemonSet、工作负载策略或跨节点规则同步。多容器同路径同端口会一起匹配；只采部分工作负载时应等待工作负载选择能力。HTTP/gRPC 支持范围受 OBI、语言、加密方式和内核限制，不承诺所有监听进程均可采集。应用内原有 Trace 上下文和第三方中间件的端到端传播需要环境验收。
 
@@ -91,11 +91,11 @@ Manager 复用 Kubernetes Cluster.NodeID 映射，在下发 OBI、SDK Collector 
 
 ## 官方 OBI 权限与启动预检（2026-09-21）
 
-Kubernetes 开启 `node.autoAPM.allowBPF=true` 时，节点容器及切换到非 root 的宿主机 Edge 都保留官方能力集合：`BPF`、`NET_RAW`、`NET_ADMIN`、`PERFMON`、`DAC_READ_SEARCH`、`CHECKPOINT_RESTORE`、`SYS_PTRACE`、`SYS_RESOURCE`、`SYS_ADMIN`。`SYS_RESOURCE` 主要用于 5.11 以下内核的锁定内存限制；统一清单仍保留此项。`SYS_ADMIN` 用于 Go 库级上下文传播、网络命名空间访问及发行版 perf 限制。该变更覆盖上文旧权限清单，但不启用 privileged；默认未开启 BPF 的安装不增加这些权限。
+Kubernetes 节点容器及切换到非 root 的宿主机 Edge 都保留官方能力集合：`BPF`、`NET_RAW`、`NET_ADMIN`、`PERFMON`、`DAC_READ_SEARCH`、`CHECKPOINT_RESTORE`、`SYS_PTRACE`、`SYS_RESOURCE`、`SYS_ADMIN`。`SYS_RESOURCE` 主要用于 5.11 以下内核的锁定内存限制；统一清单仍保留此项。`SYS_ADMIN` 用于 Go 库级上下文传播、网络命名空间访问及发行版 perf 限制。该变更覆盖上文旧权限清单，但不启用 privileged；实际采集仍由用户保存的目标控制。
 
 非 root 的 JVM attach 还需要保留启动器已有的 `SYS_CHROOT`：Linux `setns(CLONE_NEWNS)` 同时要求 `SYS_ADMIN` 和 `SYS_CHROOT`，实测仅官方九项时返回 EPERM，补充后成功。同时保留启动器已有的 `SETUID`、`SETGID`，供官方 JVM attach 匹配目标进程的 UID/GID；本地 Java 使用 UID 65532、GID 0，与 Edge GID 不同，缺少 SETGID 时已实际报凭据切换失败。以上权限仅在开启 BPF 时继续保留，参见 [setns(2)](https://man7.org/linux/man-pages/man2/setns.2.html)。
 
-采集节点的 AppArmor 配置为 Unconfined，以允许宿主机进程检查及 bpffs 访问；这仅作用于显式启用 OBI 的节点容器，不关闭宿主机 AppArmor。Kubernetes 1.30 以前使用兼容 annotation，之后使用 securityContext.appArmorProfile。节点启动器仍切换到配置的非 root UID，保留只读容器根文件系统及 allowPrivilegeEscalation=false。宿主机须挂载 `/sys/fs/bpf`，安装器只创建、授权 `/sys/fs/bpf/ongrid`，不修改 bpffs 根目录或其他 Agent 的目录。OBI 通过官方 `ebpf.bpf_fs_path` 使用该目录；tracefs、cgroup 与 procfs 通过既有 host-root 挂载及 chroot 可见。Kubernetes RBAC 仍只读 Pods、Nodes、ReplicaSets。
+采集节点的 AppArmor 配置为 Unconfined，以允许宿主机进程检查及 bpffs 访问；这仅作用于节点容器，不关闭宿主机 AppArmor。Kubernetes 1.30 以前使用兼容 annotation，之后使用 securityContext.appArmorProfile。节点启动器仍切换到配置的非 root UID，保留只读容器根文件系统及 allowPrivilegeEscalation=false。宿主机须挂载 `/sys/fs/bpf`，安装器只创建、授权 `/sys/fs/bpf/ongrid`，不修改 bpffs 根目录或其他 Agent 的目录。OBI 通过官方 `ebpf.bpf_fs_path` 使用该目录；tracefs、cgroup 与 procfs 通过既有 host-root 挂载及 chroot 可见。Kubernetes RBAC 仍只读 Pods、Nodes、ReplicaSets。
 
 启动采集前，Edge 用自身实际身份执行一次 disabled uprobe 的 `perf_event_open` 并立即关闭，不加载或执行额外 BPF 程序。失败通过现有插件 health.last_error 上报操作、内核 perf 设置和修正方向，随后由既有 Supervisor 重试；未选目标的发现流程不执行此检查。此检查确认基础探针权限，不等于所有目标、TLS 或语言版本都已完成采集验收。
 
@@ -103,10 +103,12 @@ Kubernetes 开启 `node.autoAPM.allowBPF=true` 时，节点容器及切换到非
 
 Lima Kubernetes 实测通过：非 root OBI 进程保留以上权限，Go HTTP/gRPC、Go 运行时指标、Java 堆/非堆内存指标与三个应用的容器日志可查询；Go → Python → Java 的同一 Trace ID 及客户端/服务端父子关系正确。相关 Linux race 测试、Edge 双架构编译和 Helm 兼容模板测试通过。此结果仅覆盖该 Ubuntu 6.8 ARM64 测试集群，不代替其他内核、架构或语言版本验收。
 
-参考：https://opentelemetry.io/docs/zero-code/obi/security/ 。回滚须同时恢复 Edge 镜像与 Helm chart；若不再需要 OBI，先清空采集范围，再关闭 allowBPF。内核参数不随部署变更。
+参考：https://opentelemetry.io/docs/zero-code/obi/security/ 。回滚须同时恢复 Edge 镜像与 Helm chart；若不再需要 OBI，清空采集范围即可停止探针。内核参数不随部署变更。
 
-## Helm 默认准备采集能力（2026-09-24）
+## 取消节点部署开关（2026-09-24）
 
-Chart 将 `node.autoAPM.allowBPF` 默认改为 `true`，取代上文默认关闭、需要额外开启的部署约定。它是 Ongrid Chart 的可选配置；普通安装和升级无需额外传参。准备的能力、AppArmor 与只读 RBAC 沿用上述清单，仍不启用 privileged；空采集目标仍不启动 OBI 或其 Collector。
+节点统一准备上述 OBI 能力、AppArmor 与只读 RBAC，移除 `node.autoAPM.allowBPF` 配置及 Edge、启动器对 `ONGRID_AUTO_APM_ALLOW_BPF` 的判断，取代上文需要额外开启的部署约定。Chart 为兼容旧 Edge 镜像仍固定传入旧环境变量 `true`，旧 values 中的 `allowBPF=false` 不再控制渲染结果。
 
-页面生成的升级命令继续使用 `--reset-then-reuse-values`：没有显式配置该字段的旧安装采用新版默认值，用户曾显式设为 `false` 的安装保留关闭状态。仅使用 `--reuse-values` 的自定义命令可能保留旧 Chart 默认值。发布新版本后，已有集群仍需执行针对新版本的升级命令；发布动作不会自动更新已安装集群。回滚可恢复旧 Chart 或显式将该字段设为 `false`。
+用户仍需保存采集目标才启动 OBI 或其 Collector；清空目标停止采集，平台、BTF 和实际 uprobe 权限校验保留。节点运行时安装会准备专属 bpffs 目录，宿主机仍须具备已挂载的 `/sys/fs/bpf`；内核参数不由 Agent 修改。仍不启用 privileged。
+
+安装和升级命令保持原有流程。合并后随新的 Chart 和 Edge 版本一同发布，已有集群执行针对新版本的升级命令；发布动作不会自动更新已安装集群。停止采集使用空目标配置；恢复旧部署权限需同时回滚 Chart 和 Edge 镜像。

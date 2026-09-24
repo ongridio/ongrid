@@ -172,10 +172,9 @@ subjects:
     name: {{ include "ongrid-edge.controllerServiceAccount" . }}
     namespace: {{ .Release.Namespace }}
 
-{{- if .Values.node.autoAPM.allowBPF }}
 ---
 # OBI resolves stable workload selectors from Kubernetes metadata. This role
-# exists only when the operator explicitly enables node auto-instrumentation.
+# is available to node Agents; OBI still requires configured capture targets.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -204,4 +203,3 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "ongrid-edge.nodeServiceAccount" . }}
     namespace: {{ .Release.Namespace }}
-{{- end }}

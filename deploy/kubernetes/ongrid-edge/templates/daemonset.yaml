@@ -23,7 +23,7 @@ spec:
       annotations:
         checksum/config: {{ $nodeConfigChecksum }}
         checksum/node-bootstrap: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
-        {{- if and .Values.node.autoAPM.allowBPF (not (semverCompare ">=1.30-0" .Capabilities.KubeVersion.Version)) }}
+        {{- if not (semverCompare ">=1.30-0" .Capabilities.KubeVersion.Version) }}
         container.apparmor.security.beta.kubernetes.io/edge-node: unconfined
         {{- end }}
       labels:
@@ -54,8 +54,9 @@ spec:
             - {{ .Values.podSecurity.runAsUser | quote }}
             - {{ .Values.podSecurity.runAsGroup | quote }}
           env:
+            # Compatibility for older Edge images; current images ignore this gate.
             - name: ONGRID_AUTO_APM_ALLOW_BPF
-              value: {{ .Values.node.autoAPM.allowBPF | quote }}
+              value: "true"
           resources:
             requests:
               cpu: 5m
@@ -146,8 +147,9 @@ spec:
                   fieldPath: metadata.namespace
             - name: ONGRID_EDGE_COLLECTOR_MODE
               value: {{ .Values.node.collectorMode | quote }}
+            # Compatibility for older Edge images; current images ignore this gate.
             - name: ONGRID_AUTO_APM_ALLOW_BPF
-              value: {{ .Values.node.autoAPM.allowBPF | quote }}
+              value: "true"
             - name: HOST_PROC
               value: /proc
             - name: HOST_SYS
@@ -162,15 +164,15 @@ spec:
             runAsGroup: 0
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
-            {{- if and .Values.node.autoAPM.allowBPF (semverCompare ">=1.30-0" .Capabilities.KubeVersion.Version) }}
+            {{- if semverCompare ">=1.30-0" .Capabilities.KubeVersion.Version }}
             # Host process inspection and bpffs writes cross the runtime's
-            # default AppArmor boundary. This applies only to the opted-in node.
+            # default AppArmor boundary. These permissions apply to the node Agent.
             appArmorProfile:
               type: Unconfined
             {{- end }}
             capabilities:
               drop: ["ALL"]
-              add: ["DAC_READ_SEARCH", "NET_ADMIN", "SETGID", "SETPCAP", "SETUID", "SYS_CHROOT"{{ if .Values.node.autoAPM.allowBPF }}, "BPF", "PERFMON", "SYS_PTRACE", "CHECKPOINT_RESTORE", "NET_RAW", "SYS_ADMIN", "SYS_RESOURCE"{{ end }}]
+              add: ["DAC_READ_SEARCH", "NET_ADMIN", "SETGID", "SETPCAP", "SETUID", "SYS_CHROOT", "BPF", "PERFMON", "SYS_PTRACE", "CHECKPOINT_RESTORE", "NET_RAW", "SYS_ADMIN", "SYS_RESOURCE"]
           volumeMounts:
             - name: host-root
               mountPath: /host/root

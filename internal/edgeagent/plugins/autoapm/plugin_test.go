@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -16,6 +17,28 @@ import (
 )
 
 type fakeChild struct{ starts, stops atomic.Int32 }
+
+func TestNodeCaptureIgnoresLegacySwitch(t *testing.T) {
+	t.Setenv("ONGRID_K8S_ROLE", "node")
+	for _, value := range []string{"", "false"} {
+		t.Setenv("ONGRID_AUTO_APM_ALLOW_BPF", value)
+		p := &Plugin{obi: &fakeChild{}, collector: &fakeChild{}, scraper: &fakeChild{}}
+		err := p.Configure(plugins.PluginConfig{Spec: map[string]interface{}{
+			"targets": []interface{}{map[string]interface{}{"executable": "/opt/orders", "port": 8080, "service_name": "orders"}},
+		}})
+		if runtime.GOOS != "linux" || (runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64") {
+			if err == nil || !strings.Contains(err.Error(), "OBI requires Linux") {
+				t.Fatalf("platform check: %v", err)
+			}
+		} else if _, btfErr := os.Stat("/sys/kernel/btf/vmlinux"); btfErr != nil {
+			if err == nil || !strings.Contains(err.Error(), "OBI requires kernel BTF") {
+				t.Fatalf("BTF check: %v", err)
+			}
+		} else if err != nil {
+			t.Fatalf("legacy switch %q rejected capture: %v", value, err)
+		}
+	}
+}
 
 func TestCapturePreflightFailureAndRecovery(t *testing.T) {
 	denied := errors.New("perf_event_open(uprobe): permission denied")

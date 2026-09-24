@@ -71,9 +71,6 @@ func (p *Plugin) Configure(cfg plugins.PluginConfig) error {
 		return p.fail(err)
 	}
 	if s.Selected() {
-		if os.Getenv("ONGRID_K8S_ROLE") == "node" && os.Getenv("ONGRID_AUTO_APM_ALLOW_BPF") != "true" {
-			return p.fail(fmt.Errorf("Kubernetes node requires Helm node.autoAPM.allowBPF=true before capture"))
-		}
 		if runtime.GOOS != "linux" || (runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64") {
 			return p.fail(fmt.Errorf("OBI requires Linux amd64/arm64"))
 		}

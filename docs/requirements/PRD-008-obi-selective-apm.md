@@ -31,7 +31,7 @@
 - 规则保存在集群，节点执行 OBI 元数据选择器；Pod 重建、扩容、节点加入后无需重新勾选。控制器不运行 OBI。
 - Kubernetes 环境直接继承集群默认环境，服务命名空间取实际 Kubernetes Namespace，不允许额外覆盖；Namespace 全选保留各工作负载服务名称。
 - 节点状态显示真实心跳与错误，配置保存、运行状态不等同于已收到服务数据。清空规则停止 OBI；集群基础设施清单同步仍由既有控制器维护。
-- Helm Chart 默认 `node.autoAPM.allowBPF=true`，随正常安装、升级准备 OBI 能力及读取 pods/nodes/replicasets 元数据的权限；用户仍需保存采集目标才启动探针。需要禁用节点自动采集能力时可显式设为 `false`，升级保留该覆盖值。
+- Helm Chart 统一准备节点 OBI 能力及读取 pods/nodes/replicasets 元数据的权限，不再提供 `node.autoAPM.allowBPF` 开关。用户保存采集目标后启动探针，清空目标停止采集；普通安装和升级命令无需追加参数。
 - MySQL 生产发布先执行 `20260916160000_add_k8s_autoapm_config.up.sql`。回滚前清空集群规则，再回滚 Edge 和 Manager；新增列可保留，避免丢失配置。
 
 ### Kubernetes 容器日志按服务范围采集（2026-09-20）

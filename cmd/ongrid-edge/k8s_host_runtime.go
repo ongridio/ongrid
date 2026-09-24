@@ -52,14 +52,17 @@ func runK8sHostCommand(ctx context.Context, args []string) (bool, error) {
 		if err != nil {
 			return true, fmt.Errorf("resolve edge executable: %w", err)
 		}
-		return true, installK8sHostRuntime(ctx, k8sHostInstallPaths{
+		if err := installK8sHostRuntime(ctx, k8sHostInstallPaths{
 			hostRoot:             args[1],
 			edgeSource:           executable,
 			pluginSourceDir:      containerPluginDir,
 			serviceAccountSource: containerServiceAccountDir,
 			uid:                  uid,
 			gid:                  gid,
-		})
+		}); err != nil {
+			return true, err
+		}
+		return true, prepareK8sOBIFilesystem(ctx, args[1], uid, gid)
 	case enterK8sHostCommand:
 		if len(args) != 4 {
 			return true, fmt.Errorf("usage: %s <host-root> <uid> <gid>", enterK8sHostCommand)
@@ -108,12 +111,6 @@ func installK8sHostRuntime(ctx context.Context, paths k8sHostInstallPaths) error
 	if !info.IsDir() {
 		return fmt.Errorf("host root %q is not a directory", paths.hostRoot)
 	}
-	if os.Getenv("ONGRID_AUTO_APM_ALLOW_BPF") == "true" {
-		if err := prepareK8sOBIFilesystem(ctx, paths.hostRoot, paths.uid, paths.gid); err != nil {
-			return err
-		}
-	}
-
 	runtimeDir := hostPath(paths.hostRoot, k8sHostRuntimeDir)
 	pluginDir := hostPath(paths.hostRoot, k8sHostPluginDir)
 	serviceAccountDir := hostPath(paths.hostRoot, k8sHostServiceAccountDir)

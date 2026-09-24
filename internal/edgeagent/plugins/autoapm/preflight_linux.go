@@ -45,7 +45,7 @@ func checkCaptureEnvironment(ctx context.Context) error {
 		if value, readErr := os.ReadFile("/proc/sys/kernel/perf_event_paranoid"); readErr == nil {
 			paranoid = strings.TrimSpace(string(value))
 		}
-		return fmt.Errorf("OBI capture unavailable: perf_event_open(uprobe) failed (kernel.perf_event_paranoid=%s); check CAP_PERFMON/CAP_SYS_ADMIN and container seccomp/AppArmor policy; Kubernetes requires the current chart with node.autoAPM.allowBPF=true: %w", paranoid, err)
+		return fmt.Errorf("OBI capture unavailable: perf_event_open(uprobe) failed (kernel.perf_event_paranoid=%s); check CAP_PERFMON/CAP_SYS_ADMIN and container seccomp/AppArmor policy; Kubernetes requires the current node Chart permissions: %w", paranoid, err)
 	}
 	if err := unix.Close(fd); err != nil {
 		return fmt.Errorf("close OBI permission check: %w", err)

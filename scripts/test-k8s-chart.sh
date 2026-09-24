@@ -275,12 +275,14 @@ helm template ongrid-edge "$chart_package" "${common_args[@]}" --kube-version 1.
 grep -q 'appArmorProfile:' "$tmp_dir/autoapm-modern.yaml"
 ! grep -q 'container.apparmor.security.beta' "$tmp_dir/autoapm-modern.yaml"
 
-# An explicit saved opt-out must continue to win over the new default.
+# Old persisted false values must not disable node prerequisites after an upgrade.
 helm template ongrid-edge "$chart_package" "${common_args[@]}" --is-upgrade \
-  --set node.autoAPM.allowBPF=false >"$tmp_dir/autoapm-disabled.yaml"
-grep -A1 'name: ONGRID_AUTO_APM_ALLOW_BPF' "$tmp_dir/autoapm-disabled.yaml" | grep -q 'value: "false"'
-grep -q 'add: \["DAC_READ_SEARCH", "NET_ADMIN", "SETGID", "SETPCAP", "SETUID", "SYS_CHROOT"\]' "$tmp_dir/autoapm-disabled.yaml"
-! grep -q 'name: ongrid-edge-node-autoapm\|SYS_ADMIN\|SYS_PTRACE\|appArmorProfile:\|container.apparmor.security.beta' "$tmp_dir/autoapm-disabled.yaml"
-! grep -q 'privileged: true' "$tmp_dir/autoapm-disabled.yaml"
+  --set node.autoAPM.allowBPF=false >"$tmp_dir/autoapm-legacy-false.yaml"
+grep -A1 'name: ONGRID_AUTO_APM_ALLOW_BPF' "$tmp_dir/autoapm-legacy-false.yaml" | grep -q 'value: "true"'
+grep -q 'name: ongrid-edge-node-autoapm' "$tmp_dir/autoapm-legacy-false.yaml"
+for capability in BPF PERFMON SYS_PTRACE CHECKPOINT_RESTORE NET_RAW SYS_ADMIN SYS_RESOURCE; do
+  grep -q "\"$capability\"" "$tmp_dir/autoapm-legacy-false.yaml"
+done
+! grep -q 'privileged: true' "$tmp_dir/autoapm-legacy-false.yaml"
 
 echo "Kubernetes Helm chart validation passed"

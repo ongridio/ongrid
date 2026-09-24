@@ -21,9 +21,22 @@ const (
 	procHostMountNamespace     = "/proc/1/ns/mnt"
 )
 
+// Keep the Chart's node capabilities across the non-root host identity transition.
+// OBI needs SYS_ADMIN for Go propagation, setns and restrictive perf policies;
+// JVM attach also needs SYS_CHROOT and SETUID/SETGID for target credentials.
 var k8sHostCapabilities = []int{
 	unix.CAP_DAC_READ_SEARCH,
 	unix.CAP_NET_ADMIN,
+	unix.CAP_BPF,
+	unix.CAP_PERFMON,
+	unix.CAP_SYS_PTRACE,
+	unix.CAP_CHECKPOINT_RESTORE,
+	unix.CAP_NET_RAW,
+	unix.CAP_SYS_ADMIN,
+	unix.CAP_SYS_RESOURCE,
+	unix.CAP_SYS_CHROOT,
+	unix.CAP_SETUID,
+	unix.CAP_SETGID,
 }
 
 // Give non-root OBI its own bpffs directory; never change ownership or mode of
@@ -112,7 +125,7 @@ func linuxLastCapability() int {
 }
 
 func dropToHostEdgeUser(uid, gid, lastCapability int) error {
-	capabilities := retainedK8sHostCapabilities()
+	capabilities := k8sHostCapabilities
 	for capability := 0; capability <= lastCapability; capability++ {
 		if isK8sHostCapability(capability) {
 			continue
@@ -155,23 +168,10 @@ func dropToHostEdgeUser(uid, gid, lastCapability int) error {
 }
 
 func isK8sHostCapability(capability int) bool {
-	for _, allowed := range retainedK8sHostCapabilities() {
+	for _, allowed := range k8sHostCapabilities {
 		if capability == allowed {
 			return true
 		}
 	}
 	return false
-}
-
-// Helm explicitly grants these capabilities only for opted-in nodes. SYS_ADMIN
-// is needed by official OBI for Go propagation, setns and restrictive perf policies.
-// JVM attach also needs SYS_CHROOT for mount namespaces and SETUID/SETGID
-// to match the target process credentials.
-// Preserve the granted capabilities across the non-root host identity transition.
-func retainedK8sHostCapabilities() []int {
-	out := append([]int(nil), k8sHostCapabilities...)
-	if os.Getenv("ONGRID_AUTO_APM_ALLOW_BPF") == "true" {
-		out = append(out, unix.CAP_BPF, unix.CAP_PERFMON, unix.CAP_SYS_PTRACE, unix.CAP_CHECKPOINT_RESTORE, unix.CAP_NET_RAW, unix.CAP_SYS_ADMIN, unix.CAP_SYS_RESOURCE, unix.CAP_SYS_CHROOT, unix.CAP_SETUID, unix.CAP_SETGID)
-	}
-	return out
 }
