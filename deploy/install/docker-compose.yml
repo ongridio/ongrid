@@ -282,7 +282,7 @@ services:
   frontier:
     # Upstream broker mirrored to the project CNB registry. The pinned tag is
     # bumped together with Makefile var FRONTIER_VERSION.
-    image: docker.cnb.cool/ongridio/ongrid/frontier:v1.2.4
+    image: docker.cnb.cool/ongridio/ongrid/frontier:1.2.6
     container_name: ongrid-frontier
     restart: unless-stopped
     volumes:

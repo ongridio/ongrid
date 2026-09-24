@@ -225,7 +225,7 @@ services:
     # Upstream broker (ADR-007), mirrored to the project CNB registry.
     # Edge-bound port 40012 is exposed on host:40012 so the tunnel endpoint
     # URL stays identical to pre-split deployments.
-    image: docker.cnb.cool/ongridio/ongrid/frontier:v1.2.4
+    image: docker.cnb.cool/ongridio/ongrid/frontier:1.2.6
     container_name: ongrid-frontier
     restart: unless-stopped
     volumes:

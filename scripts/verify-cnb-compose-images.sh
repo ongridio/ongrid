@@ -22,7 +22,7 @@ render_images "$repo_root/deploy/install/docker-compose.yml" "$tmp_dir/install.a
 cat >"$tmp_dir/install.expected" <<'EOF'
 docker.cnb.cool/ongridio/ongrid/ongrid-web:v9.9.9
 docker.cnb.cool/ongridio/ongrid:v9.9.9
-docker.cnb.cool/ongridio/ongrid/frontier:v1.2.4
+docker.cnb.cool/ongridio/ongrid/frontier:1.2.6
 docker.cnb.cool/ongridio/ongrid/grafana-oss:11.1.4
 docker.cnb.cool/ongridio/ongrid/loki:3.4.0
 docker.cnb.cool/ongridio/ongrid/mysql:8.0
@@ -39,7 +39,7 @@ diff -u "$tmp_dir/install.expected" "$tmp_dir/install.actual"
 
 render_images "$repo_root/deploy/docker-compose.yml" "$tmp_dir/dev.actual"
 cat >"$tmp_dir/dev.expected" <<'EOF'
-docker.cnb.cool/ongridio/ongrid/frontier:v1.2.4
+docker.cnb.cool/ongridio/ongrid/frontier:1.2.6
 docker.cnb.cool/ongridio/ongrid/grafana-oss:11.1.4
 docker.cnb.cool/ongridio/ongrid/loki:3.4.0
 docker.cnb.cool/ongridio/ongrid/mysql:8.0

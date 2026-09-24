@@ -33,7 +33,9 @@ CLOUD_IMAGE_PLATFORMS ?= linux/amd64,linux/arm64
 CLOUD_IMAGE_REPO ?= docker.cnb.cool/ongridio/ongrid
 CLOUD_MANAGER_IMAGE_REF ?= $(CLOUD_IMAGE_REPO):$(VERSION)
 CLOUD_WEB_IMAGE_REF ?= $(CLOUD_IMAGE_REPO)/ongrid-web:$(VERSION)
-FRONTIER_VERSION ?= v1.2.4
+FRONTIER_VERSION ?= 1.2.6
+FRONTIER_UPSTREAM_IMAGE ?= docker.io/singchia/frontier:$(FRONTIER_VERSION)
+FRONTIER_MIRROR_IMAGE ?= $(CLOUD_IMAGE_REPO)/frontier:$(FRONTIER_VERSION)
 K8S_EDGE_IMAGE_PLATFORM ?= linux/amd64
 K8S_EDGE_IMAGE_PLATFORMS ?= linux/amd64,linux/arm64
 K8S_EDGE_IMAGE_TAG ?= $(VERSION)
@@ -432,6 +434,10 @@ verify-compose-images: ## [test] 校验正式安装使用 CNB、开发环境使�
 # Release packages and Compose deployments use the existing CNB mirror.
 FRONTIER_SRC     ?= $(HOME)/frontier
 FRONTIER_BUILD_FORCE ?= 1
+
+.PHONY: docker-mirror-broker
+docker-mirror-broker: ## [release] 将已发布的 Frontier 镜像同步到 CNB
+	docker buildx imagetools create --tag "$(FRONTIER_MIRROR_IMAGE)" "$(FRONTIER_UPSTREAM_IMAGE)"
 
 .PHONY: docker-build-broker
 docker-build-broker: ## [dev] 从上游源码本地构建 singchia/frontier:$(FRONTIER_VERSION)
