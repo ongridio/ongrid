@@ -34,7 +34,7 @@ CLOUD_IMAGE_REPO ?= docker.cnb.cool/ongridio/ongrid
 CLOUD_MANAGER_IMAGE_REF ?= $(CLOUD_IMAGE_REPO):$(VERSION)
 CLOUD_WEB_IMAGE_REF ?= $(CLOUD_IMAGE_REPO)/ongrid-web:$(VERSION)
 FRONTIER_VERSION ?= 1.2.6
-FRONTIER_UPSTREAM_IMAGE ?= docker.io/singchia/frontier:$(FRONTIER_VERSION)
+FRONTIER_SOURCE_IMAGES ?= docker.io/singchia/frontier:$(FRONTIER_VERSION)
 FRONTIER_MIRROR_IMAGE ?= $(CLOUD_IMAGE_REPO)/frontier:$(FRONTIER_VERSION)
 K8S_EDGE_IMAGE_PLATFORM ?= linux/amd64
 K8S_EDGE_IMAGE_PLATFORMS ?= linux/amd64,linux/arm64
@@ -437,7 +437,11 @@ FRONTIER_BUILD_FORCE ?= 1
 
 .PHONY: docker-mirror-broker
 docker-mirror-broker: ## [release] 将已发布的 Frontier 镜像同步到 CNB
-	docker buildx imagetools create --tag "$(FRONTIER_MIRROR_IMAGE)" "$(FRONTIER_UPSTREAM_IMAGE)"
+	@docker buildx imagetools create --dry-run $(FRONTIER_SOURCE_IMAGES) \
+		| jq -e -f "$(RELEASE_MANIFEST_PLATFORM_FILTER)" >/dev/null
+	bash "$(RELEASE_IMAGE_PUBLISHER)" \
+		"$(FRONTIER_MIRROR_IMAGE)" "$(RELEASE_MANIFEST_PLATFORM_FILTER)" \
+		-- docker buildx imagetools create --tag "$(FRONTIER_MIRROR_IMAGE)" $(FRONTIER_SOURCE_IMAGES)
 
 .PHONY: docker-build-broker
 docker-build-broker: ## [dev] 从上游源码本地构建 singchia/frontier:$(FRONTIER_VERSION)
