@@ -443,6 +443,18 @@ docker-mirror-broker: ## [release] 将已发布的 Frontier 镜像同步到 CNB
 		"$(FRONTIER_MIRROR_IMAGE)" "$(RELEASE_MANIFEST_PLATFORM_FILTER)" \
 		-- docker buildx imagetools create --tag "$(FRONTIER_MIRROR_IMAGE)" $(FRONTIER_SOURCE_IMAGES)
 
+.PHONY: docker-merge-broker _docker-merge-broker
+docker-merge-broker: ## [release] 合并 CNB 中已上传的 Frontier 单平台摘要
+	@docker buildx imagetools create --dry-run $(FRONTIER_SOURCE_IMAGES) \
+		| jq -e -f "$(RELEASE_MANIFEST_PLATFORM_FILTER)" >/dev/null
+	bash "$(RELEASE_IMAGE_PUBLISHER)" \
+		"$(FRONTIER_MIRROR_IMAGE)" "$(RELEASE_MANIFEST_PLATFORM_FILTER)" \
+		-- $(MAKE) --no-print-directory _docker-merge-broker
+
+_docker-merge-broker:
+	docker manifest create --amend "$(FRONTIER_MIRROR_IMAGE)" $(FRONTIER_SOURCE_IMAGES)
+	docker manifest push --purge "$(FRONTIER_MIRROR_IMAGE)"
+
 .PHONY: docker-build-broker
 docker-build-broker: ## [dev] 从上游源码本地构建 singchia/frontier:$(FRONTIER_VERSION)
 	@existing_platform=$$(docker image inspect -f '{{.Os}}/{{.Architecture}}' singchia/frontier:$(FRONTIER_VERSION) 2>/dev/null || true); \
