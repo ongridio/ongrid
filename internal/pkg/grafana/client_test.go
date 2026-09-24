@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -104,28 +105,58 @@ func TestUpsertDatasourceSkipsReadOnly(t *testing.T) {
 
 func TestUpsertDatasourceUpdatesWhenPresent(t *testing.T) {
 	t.Parallel()
-	updated := false
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/datasources/uid/"):
-			_, _ = io.WriteString(w, `{"id":42,"uid":"uid-1"}`)
-		case r.Method == http.MethodPut && r.URL.Path == "/api/datasources/42":
-			updated = true
-			_, _ = io.WriteString(w, `{}`)
-		default:
-			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
-		}
-	}))
-	defer srv.Close()
+	for _, tt := range []struct {
+		name     string
+		basePath string
+		existing string
+	}{
+		{"numeric ID present", "", `{"id":42,"uid":"uid-1"}`},
+		{"numeric ID absent and subpath", "/grafana", `{"uid":"uid-1"}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			updated := make(chan Datasource, 1)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != tt.basePath+"/api/datasources/uid/uid-1" {
+					// Grafana 13 disables the legacy numeric-ID routes by default.
+					http.NotFound(w, r)
+					return
+				}
+				switch r.Method {
+				case http.MethodGet:
+					_, _ = io.WriteString(w, tt.existing)
+				case http.MethodPut:
+					var got Datasource
+					if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+						t.Errorf("decode datasource: %v", err)
+						http.Error(w, "invalid payload", http.StatusBadRequest)
+						return
+					}
+					updated <- got
+					_, _ = io.WriteString(w, `{}`)
+				default:
+					http.Error(w, "unexpected method", http.StatusMethodNotAllowed)
+				}
+			}))
+			defer srv.Close()
 
-	err := New(srv.URL, "t", srv.Client()).UpsertDatasource(context.Background(), Datasource{
-		UID: "uid-1", Name: "n", Type: "prometheus", URL: "http://prom",
-	})
-	if err != nil {
-		t.Fatalf("Upsert: %v", err)
-	}
-	if !updated {
-		t.Fatal("PUT /api/datasources/42 never called")
+			ds := Datasource{
+				UID: "uid-1", Name: "n", Type: "prometheus", URL: "http://prom",
+				JSONData:       map[string]any{"httpHeaderName1": "Authorization", "tlsSkipVerify": true},
+				SecureJSONData: map[string]string{"httpHeaderValue1": "Bearer prom-token"},
+			}
+			if err := New(srv.URL+tt.basePath+"/", "t", srv.Client()).UpsertDatasource(context.Background(), ds); err != nil {
+				t.Fatalf("Upsert: %v", err)
+			}
+			ds.Access = "proxy"
+			select {
+			case got := <-updated:
+				if !reflect.DeepEqual(got, ds) {
+					t.Fatalf("payload = %#v, want %#v", got, ds)
+				}
+			default:
+				t.Fatal("existing datasource was not updated")
+			}
+		})
 	}
 }
 
@@ -241,8 +272,12 @@ func TestNon2xxBubblesUp(t *testing.T) {
 		http.Error(w, "no", http.StatusNotFound)
 	}))
 	defer srv2.Close()
-	c := New(srv2.URL, "t", srv2.Client())
-	if _, err := c.do(context.Background(), http.MethodGet, "/x", nil); !errors.Is(err, notFoundErr) {
+	c := New(srv2.URL+"/grafana", "t", srv2.Client())
+	_, err = c.do(context.Background(), http.MethodGet, "/x", nil)
+	if !errors.Is(err, notFoundErr) {
 		t.Fatalf("expected notFoundErr, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "GET /grafana/x returned 404") {
+		t.Fatalf("expected method, full path and status in error, got %v", err)
 	}
 }

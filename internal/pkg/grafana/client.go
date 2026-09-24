@@ -132,8 +132,7 @@ func (c *Client) UpsertDatasource(ctx context.Context, ds Datasource) error {
 	body, err := c.do(ctx, http.MethodGet, "/api/datasources/uid/"+ds.UID, nil)
 	if err == nil && len(body) > 0 {
 		var existing struct {
-			ID       int64 `json:"id"`
-			ReadOnly bool  `json:"readOnly"`
+			ReadOnly bool `json:"readOnly"`
 		}
 		if jerr := json.Unmarshal(body, &existing); jerr != nil {
 			return fmt.Errorf("grafana: decode existing datasource: %w", jerr)
@@ -143,7 +142,7 @@ func (c *Client) UpsertDatasource(ctx context.Context, ds Datasource) error {
 			// dashboards reference by UID and that hasn't changed.
 			return nil
 		}
-		_, perr := c.do(ctx, http.MethodPut, fmt.Sprintf("/api/datasources/%d", existing.ID), ds)
+		_, perr := c.do(ctx, http.MethodPut, "/api/datasources/uid/"+ds.UID, ds)
 		// Forward-compat: even if a future Grafana drops readOnly from the
 		// GET response, a 403 with the read-only message is unambiguous.
 		if perr != nil && isReadOnlyError(perr) {
@@ -356,7 +355,7 @@ func (c *Client) do(ctx context.Context, method, path string, payload any) ([]by
 
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1 MiB cap
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, notFoundErr
+		return nil, fmt.Errorf("%w: %s %s returned %d", notFoundErr, method, req.URL.EscapedPath(), resp.StatusCode)
 	}
 	if resp.StatusCode/100 != 2 {
 		return nil, fmt.Errorf("grafana: %s %s returned %d: %s",

@@ -75,7 +75,7 @@ func TestGrafana_LokiDatasourceSync_O4(t *testing.T) {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/datasources/uid/ongrid-loki":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"id":42,"uid":"ongrid-loki","readOnly":false,"url":"http://loki:3100"}`))
-		case r.Method == http.MethodPut && r.URL.Path == "/api/datasources/42":
+		case r.Method == http.MethodPut && r.URL.Path == "/api/datasources/uid/ongrid-loki":
 			var got datasourceReq
 			if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
 				http.Error(w, "invalid datasource payload", http.StatusBadRequest)
