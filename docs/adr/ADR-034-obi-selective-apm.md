@@ -112,3 +112,11 @@ Lima Kubernetes 实测通过：非 root OBI 进程保留以上权限，Go HTTP/g
 用户仍需保存采集目标才启动 OBI 或其 Collector；清空目标停止采集，平台、BTF 和实际 uprobe 权限校验保留。节点运行时安装在宿主机已挂载 bpffs 时准备专属目录，未挂载时警告并跳过，避免影响普通指标、日志和服务发现；Agent 不主动挂载 bpffs 或修改内核参数。OBI v0.12.1 的 `setupOtelBPFFSPath` 在目录不可用时关闭 map pinning 并继续采集，参见 [上游实现](https://github.com/open-telemetry/opentelemetry-ebpf-instrumentation/blob/v0.12.1/pkg/ebpf/tracer_linux.go#L159-L195)。仍不启用 privileged。
 
 安装和升级命令保持原有流程。合并后随新的 Chart 和 Edge 版本一同发布，已有集群执行针对新版本的升级命令；发布动作不会自动更新已安装集群。停止采集使用空目标配置；恢复旧部署权限需同时回滚 Chart 和 Edge 镜像。
+
+## Kubernetes Node 名与 hostname 不一致（2026-09-28）
+
+官方 OBI v0.12.1 用 `os.Hostname()` 推断 Node 名；无法匹配时仍以 hostname 设置 Pod 的 `spec.nodeName` 过滤，导致以 IP 等不同名称注册的节点没有 Pod 元数据，按工作负载选择的采集无法匹配。该版本不支持直接传入 Node 名。
+
+Edge 仅在 hostname 与 Downward API 注入的 `ONGRID_K8S_NODE_NAME` 完全一致时启用 `meta_restrict_local_node`；不同、缺失或无法读取 hostname 时关闭该元数据优化，读取集群元数据。本机进程与容器 ID 关联以及既有 Namespace / 工作负载规则继续限制实际采集，不会采集远端节点进程或未选目标。代价是这类节点的元数据缓存与 API 开销随集群规模增长；上游提供显式 Node 名后可恢复精确过滤。节点名自动发现告警仍可能出现，不再因这层过滤阻断目标匹配。
+
+无需新增配置、修改设备名称或重命名主机；随 Edge 镜像升级生效，普通主机配置保持原状。回滚 Edge 镜像恢复旧行为，原采集规则与历史数据保留。

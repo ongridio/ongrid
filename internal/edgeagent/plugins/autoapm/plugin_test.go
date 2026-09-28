@@ -226,6 +226,46 @@ func TestKubernetesRulesUseMetadataAndSkipHostDiscovery(t *testing.T) {
 	}
 }
 
+func TestKubernetesMetadataHandlesDifferentNodeNames(t *testing.T) {
+	hostname, err := os.Hostname()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, nodeName string
+		restrict       bool
+	}{
+		{"matching hostname", hostname, true},
+		{"IP node name", "192.0.2.10", false},
+		{"qualified node name", hostname + ".cluster.example", false},
+		{"missing node name", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("ONGRID_K8S_NODE_NAME", tc.nodeName)
+			spec := contract.Spec{ClusterID: 132, K8sClusterID: 50, Kubernetes: &contract.Kubernetes{Rules: []contract.KubernetesRule{
+				{Namespace: "default", WorkloadKind: "Deployment", WorkloadName: "orders"},
+			}}}
+			body, err := render(plugins.PluginConfig{Spec: spec.Map()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var config map[string]interface{}
+			if err := yaml.Unmarshal(body, &config); err != nil {
+				t.Fatal(err)
+			}
+			kubernetes := config["attributes"].(map[string]interface{})["kubernetes"].(map[string]interface{})
+			if kubernetes["meta_restrict_local_node"] != tc.restrict {
+				t.Fatalf("hostname=%q node=%q: metadata restriction=%v, want %v", hostname, tc.nodeName, kubernetes["meta_restrict_local_node"], tc.restrict)
+			}
+			rules := config["discovery"].(map[string]interface{})["services"]
+			want := []interface{}{map[string]interface{}{"k8s_namespace": "^default$", "k8s_deployment_name": "^orders$"}}
+			if !reflect.DeepEqual(rules, want) {
+				t.Fatalf("node name changed capture selection: %#v", rules)
+			}
+		})
+	}
+}
+
 func TestCollectorUsesMappedIdentityInsteadOfBootstrap(t *testing.T) {
 	t.Setenv("ONGRID_K8S_CLUSTER_ID", "50")
 	spec := contract.Spec{ClusterID: 132, K8sClusterID: 50, Kubernetes: &contract.Kubernetes{Rules: []contract.KubernetesRule{{Namespace: "shop"}}}}

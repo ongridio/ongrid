@@ -37,7 +37,12 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 		ebpf["bpf_fs_path"] = "/sys/fs/bpf/ongrid"
 		kubernetes["enable"] = "true"
 		kubernetes["disable_informers"] = []string{"service"}
-		kubernetes["meta_restrict_local_node"] = true
+		// OBI v0.12.1 infers its node from os.Hostname, not spec.nodeName.
+		// Only restrict metadata when that inference is safe. Otherwise local
+		// process/container IDs still limit capture to this node's selected Pods.
+		// ponytail: cache cluster metadata until OBI accepts an explicit node name.
+		hostname, err := os.Hostname()
+		kubernetes["meta_restrict_local_node"] = err == nil && hostname != "" && hostname == os.Getenv("ONGRID_K8S_NODE_NAME")
 		for _, target := range s.Kubernetes.Rules {
 			rule := map[string]interface{}{"k8s_namespace": "^" + regexp.QuoteMeta(target.Namespace) + "$"}
 			if attr := contract.WorkloadAttribute(target.WorkloadKind); attr != "" {
