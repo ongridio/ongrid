@@ -20,6 +20,8 @@ const (
 	defaultLinuxLastCapability = 63
 	procHostRoot               = "/proc/1/root"
 	procHostMountNamespace     = "/proc/1/ns/mnt"
+	// SECBIT_NO_SETUID_FIXUP from linux/securebits.h.
+	securebitNoSetUIDFixup = 1 << 2
 )
 
 // Keep the Chart's node capabilities across the non-root host identity transition.
@@ -140,8 +142,16 @@ func dropToHostEdgeUser(uid, gid, lastCapability int) error {
 			return fmt.Errorf("drop capability %d from bounding set: %w", capability, err)
 		}
 	}
-	if err := unix.Prctl(unix.PR_SET_KEEPCAPS, 1, 0, 0, 0); err != nil {
-		return fmt.Errorf("preserve capabilities while dropping uid: %w", err)
+	// JVM attach changes the effective UID process-wide, including concurrent
+	// collector threads. KEEP_CAPS is cleared by exec and does not preserve the
+	// effective set during UID changes. NO_SETUID_FIXUP survives exec; capset
+	// below still limits the node and its children to the existing capability list.
+	securebits, err := unix.PrctlRetInt(unix.PR_GET_SECUREBITS, 0, 0, 0, 0)
+	if err != nil {
+		return fmt.Errorf("read host edge securebits: %w", err)
+	}
+	if err := unix.Prctl(unix.PR_SET_SECUREBITS, uintptr(securebits)|securebitNoSetUIDFixup, 0, 0, 0); err != nil {
+		return fmt.Errorf("preserve host edge capabilities across uid changes: %w", err)
 	}
 	if err := unix.Setgroups(nil); err != nil {
 		return fmt.Errorf("clear supplementary groups: %w", err)

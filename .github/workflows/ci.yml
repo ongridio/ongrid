@@ -52,6 +52,9 @@ jobs:
       - name: go test
         run: go test -race ./...
 
+      - name: Kubernetes JVM attach capabilities
+        run: make test-k8s-capabilities
+
   web-test:
     name: web test + build
     runs-on: ubuntu-24.04

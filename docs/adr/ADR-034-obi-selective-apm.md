@@ -120,3 +120,13 @@ Lima Kubernetes 实测通过：非 root OBI 进程保留以上权限，Go HTTP/g
 Edge 仅在 hostname 与 Downward API 注入的 `ONGRID_K8S_NODE_NAME` 完全一致时启用 `meta_restrict_local_node`；不同、缺失或无法读取 hostname 时关闭该元数据优化，读取集群元数据。本机进程与容器 ID 关联以及既有 Namespace / 工作负载规则继续限制实际采集，不会采集远端节点进程或未选目标。代价是这类节点的元数据缓存与 API 开销随集群规模增长；上游提供显式 Node 名后可恢复精确过滤。节点名自动发现告警仍可能出现，不再因这层过滤阻断目标匹配。
 
 无需新增配置、修改设备名称或重命名主机；随 Edge 镜像升级生效，普通主机配置保持原状。回滚 Edge 镜像恢复旧行为，原采集规则与历史数据保留。
+
+## Kubernetes JVM attach 的 UID 切换（2026-09-28）
+
+官方 OBI 的 JVM attach 会通过进程级 `Seteuid` / `Setegid` 匹配目标 Java 身份。节点 Edge 原本只用 `PR_SET_KEEPCAPS` 保留初次降权的能力，但该标志在 exec 时清除，且不能阻止有效 UID 从 root 切回非 root 时清空 effective capabilities。非 root OBI 附加 root Java 后可永久丢失 permitted / effective capabilities；单纯把 OBI 改成 root，附加非 root Java 时仍会让并发采集线程暂时丢失 effective capabilities。
+
+宿主机启动器改用 Linux `SECBIT_NO_SETUID_FIXUP`，合并保留已有 securebits，使必要能力跨 exec 和后续 UID 切换保持稳定。该设置只进入 Kubernetes 节点 Edge 的启动链路，由节点 Edge 及其子进程继承；不修改主机全局设置、普通 systemd Edge 或其他 Kubernetes 组件。节点继续使用已配置的 UID/GID，既有状态文件无需迁移。现有 bounding / permitted / effective / inheritable / ambient 能力清单和 `no_new_privs` 保持不变，不保留额外的 `SETPCAP`，不启用 privileged。继承该标志的子进程若要主动放弃能力，须显式缩减 capability 集合，不能只靠切换 UID；现有 Collector、exporter 和命令执行器没有通过 UID 切换实施权限隔离的路径。
+
+回归测试 `TestK8sHostCapabilitiesSurviveJVMAttach` 通过 `make test-k8s-capabilities` 在隔离 Linux 环境运行，需要 root / sudo 及节点启动器的 capability 清单；CI 的 Ubuntu runner 使用同一入口。测试在独立子进程调用真实启动器，经 exec 后反复切换 root / 非 root Java 身份，验证当前和并发线程的精确能力集合、网络命名空间系统调用及 `no_new_privs`。采集配置与目标匹配不变。随 Edge 镜像升级生效；回滚镜像并重建节点 Pod 恢复原权限语义，不需要迁移配置或数据。
+
+Lima ARM64 对照使用未修改的官方 OBI v0.12.1、真实启动器降权函数和独立 Java Pod。旧启动器出现 `failed to enter target net namespace`，permitted / effective / ambient 能力归零，root Java 没有 HTTP 请求指标；新启动器仍以 UID 65532 运行并保留原能力清单，root / 非 root Java 均产生 HTTP 请求指标，未选中的第三个端口没有上报。该实测使用端口选择和 OBI 原生 Prometheus 导出，未覆盖 Kubernetes 元数据匹配及 Manager / APM 页面全链路。两轮均有 Java agent attach 超时，因此此修复只确认权限丢失及对应 HTTP 采集恢复，不能据此宣称 Java TLS 采集已恢复。测试命名空间、进程和 BPF 目录已清理。
