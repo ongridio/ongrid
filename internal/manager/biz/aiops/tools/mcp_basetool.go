@@ -13,6 +13,8 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/cloudwego/eino/compose"
+
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 )
 
@@ -21,10 +23,9 @@ type MCPCaller interface {
 	CallMCPTool(ctx context.Context, server, tool string, args map[string]any) (string, error)
 }
 
-// MCPProposer queues an MCP call for human approval (default path), returning
-// the approval id.
+// MCPProposer waits for human approval and returns the executed tool result.
 type MCPProposer interface {
-	ProposeMCPCall(ctx context.Context, server, tool string, args map[string]any, sessionID string, userID uint64) (id string, err error)
+	ProposeMCPCallAndAwait(ctx context.Context, server, tool string, args map[string]any, sessionID, toolCallID string, userID uint64) (string, error)
 }
 
 // MCPTool is the BaseTool wrapping one (server, tool) pair.
@@ -140,18 +141,13 @@ func (t *MCPTool) InvokableRun(ctx context.Context, argsJSON string, opts ...bas
 		return "", fmt.Errorf("mcp %s: approval not wired", t.wireName)
 	}
 	cfg := basetool.ResolveOptions(opts)
-	id, err := t.proposer.ProposeMCPCall(ctx, t.server, t.bareName, args, "", cfg.UserID)
+	toolCallID := compose.GetToolCallID(ctx)
+	if toolCallID == "" {
+		toolCallID = basetool.ToolCallIDFromContext(ctx)
+	}
+	result, err := t.proposer.ProposeMCPCallAndAwait(ctx, t.server, t.bareName, args, basetool.SessionIDFromContext(ctx), toolCallID, cfg.UserID)
 	if err != nil {
 		return "", fmt.Errorf("mcp %s: propose: %w", t.wireName, err)
 	}
-	out := map[string]any{
-		"status":      "pending_approval",
-		"approval_id": id,
-		// LLM-facing instruction (same contract as cloud_bash): the inline
-		// confirmation card is already rendered; don't point at a page or
-		// restate the call.
-		"message": "An interactive confirmation card is now shown inline in this conversation. Do NOT tell the user to open any page or menu, do NOT restate the call, approval id, or a status table. Reply with a single short sentence saying this external MCP action needs the user's confirmation in this conversation before it runs.",
-	}
-	b, _ := json.Marshal(out)
-	return string(b), nil
+	return result, nil
 }

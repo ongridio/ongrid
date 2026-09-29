@@ -2453,7 +2453,11 @@ func main() {
 				for _, mt := range discovered {
 					raw := aiopstools.NewMCPTool(srv.Name, mt.Name, mt.Description, mt.InputSchema, srv.Trusted, mcpCaller, mcpProposer, log)
 					rawTools = append(rawTools, raw)
-					graphTools = append(graphTools, aiopstoolsdec.Wrap(raw, mcpDeps))
+					deps := mcpDeps
+					if !srv.Trusted {
+						deps.Timeout = approvalWaitTimeout + time.Minute
+					}
+					graphTools = append(graphTools, aiopstoolsdec.Wrap(raw, deps))
 				}
 			}
 			chatRT.ReplaceCatalogToolsByNamePrefix(prefix, rawTools)
@@ -4992,8 +4996,11 @@ func (s mcpCallerShim) CallMCPTool(ctx context.Context, server, tool string, arg
 // untrusted path) — same propose-confirm model as cloud_bash.
 type mcpProposerShim struct{ uc *managerbizapproval.Usecase }
 
-func (s mcpProposerShim) ProposeMCPCall(ctx context.Context, server, tool string, args map[string]any, sessionID string, userID uint64) (string, error) {
-	argsJSON, _ := json.Marshal(args)
+func (s mcpProposerShim) ProposeMCPCallAndAwait(ctx context.Context, server, tool string, args map[string]any, sessionID, toolCallID string, userID uint64) (string, error) {
+	argsJSON, err := json.Marshal(args)
+	if err != nil {
+		return "", fmt.Errorf("marshal MCP approval arguments: %w", err)
+	}
 	cmd := server + " / " + tool + " " + string(argsJSON)
 	if len(cmd) > 200 {
 		cmd = cmd[:200] + "…"
@@ -5009,7 +5016,24 @@ func (s mcpProposerShim) ProposeMCPCall(ctx context.Context, server, tool string
 	if err != nil {
 		return "", err
 	}
-	return a.ID, nil
+	if emit := aiopschatruntime.EmitFromContext(ctx); emit != nil {
+		emit(aiopschatruntime.Event{
+			Type: aiopschatruntime.EventApprovalPending,
+			Approval: &aiopschatruntime.ApprovalPending{
+				ApprovalID: a.ID, ToolCallID: toolCallID, Kind: "mcp_call",
+				ToolName: aiopstools.MCPToolName(server, tool), Command: cmd,
+			},
+		})
+	} else if emit := aiopsagent.EmitFromContext(ctx); emit != nil {
+		emit(aiopsagent.Event{
+			Type: aiopsagent.EventApprovalPending,
+			Approval: &aiopsagent.ApprovalPendingEvent{
+				ApprovalID: a.ID, ToolCallID: toolCallID, Kind: "mcp_call",
+				ToolName: aiopstools.MCPToolName(server, tool), Command: cmd,
+			},
+		})
+	}
+	return cloudBashProposerShim{uc: s.uc}.awaitDecision(ctx, a.ID)
 }
 
 type flowToolInvoker struct {
