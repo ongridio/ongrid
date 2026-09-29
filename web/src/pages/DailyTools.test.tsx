@@ -80,6 +80,8 @@ describe('DailyToolsPage', () => {
     render(<MemoryRouter><DailyToolsPage /></MemoryRouter>);
 
     expect(await screen.findByRole('combobox', { name: '选择 Edge' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: '选择 Edge' })).toHaveClass('w-full');
+    expect(screen.getByText('尚未执行工具')).toBeInTheDocument();
     expect(screen.getByLabelText('目标 Host / IP')).toHaveValue('');
     expect(screen.getByRole('button', { name: /^执行$/ })).toBeDisabled();
   });
@@ -130,6 +132,24 @@ describe('DailyToolsPage', () => {
     expect(await screen.findByRole('option', { name: '选择 #1 edge-001' })).toHaveAttribute('aria-selected', 'false');
     expect(screen.getByRole('option', { name: '选择 #2 edge-002' })).toHaveAttribute('aria-selected', 'true');
     await act(async () => { await user.keyboard('{Escape}'); });
+  });
+
+  it('只有抓包历史时不显示工具空状态，清空后恢复空状态', async () => {
+    localStorage.setItem('ongrid-daily-tools-runs-v1', JSON.stringify({
+      runs: [],
+      captureRuns: [{
+        id: 'capture-only', status: 'ready', title: '保存的抓包', target: 'tcp port 443',
+        edgeLabels: ['#1 edge-001'], startedAt: '2026-08-16T00:00:00Z',
+        captureIDs: [41], link: '/pages?tab=packets',
+        members: [{ id: 41, edgeLabel: '#1 edge-001', state: 'ready', capturedPackets: 8, capturedBytes: 512 }], logs: [],
+      }],
+    }));
+    render(<MemoryRouter><DailyToolsPage /></MemoryRouter>);
+    expect(await screen.findByText('保存的抓包')).toBeInTheDocument();
+    expect(screen.queryByText('尚未执行工具')).not.toBeInTheDocument();
+    await act(async () => { await userEvent.click(screen.getByRole('button', { name: '清空运行' })); });
+    expect(screen.getByText('尚未执行工具')).toBeInTheDocument();
+    expect(screen.queryByText('保存的抓包')).not.toBeInTheDocument();
   });
 
   it('恢复未清空的运行历史', async () => {

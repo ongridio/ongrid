@@ -839,7 +839,7 @@ export default function DailyToolsPage() {
           ) : <>
             {(runs.length > 0 || captureRuns.length > 0) ? <div className="flex justify-end"><Button onClick={() => { setRuns([]); setCaptureRuns([]); setSelectedResult(null); }}>{tr('清空运行', 'Clear runs')}</Button></div> : null}
             {captureRuns.length > 0 ? <CaptureQuickPanel runs={captureRuns} nowMs={nowMs} onStop={(run) => void stopCapture(run)} onDiscard={(run) => void discardCapture(run)} /> : null}
-          <section className="min-h-[420px]">
+          {runs.length > 0 || captureRuns.length === 0 ? <section className="min-h-[420px]">
             {runs.length === 0 ? (
               <div className="py-20"><EmptyState icon={Activity} title={tr('尚未执行工具', 'No tool runs yet')} hint={tr('选择 Edge 和工具后执行；多次执行会在这里分栏或分页。', 'Select Edges and a tool to run; repeated runs appear here for comparison.')} /></div>
             ) : (
@@ -847,7 +847,7 @@ export default function DailyToolsPage() {
                 {workspaceRuns.map((run) => <RunPanel key={run.id} run={run} nowMs={nowMs} onInspect={setSelectedResult} onCancel={(item) => void cancelToolRun(item)} onClose={(id) => closeRun(id, setRuns, setSelectedResult)} />)}
               </div>
             )}
-          </section>
+          </section> : null}
           </>}
         </div>
       </div>
@@ -1025,7 +1025,7 @@ function EdgePicker({
         onInputValueChange={onQuery}
         autoHighlight
       >
-        <Combobox.Trigger className="og-select-trigger" aria-label={label}>
+        <Combobox.Trigger className="og-select-trigger w-full" aria-label={label}>
           <span className={cn('min-w-0 flex-1 truncate text-left', selectedEdges.length === 0 && 'text-text-faint')}>{label}</span>
           <ChevronDown size={14} className="shrink-0 text-text-faint" aria-hidden="true" />
         </Combobox.Trigger>
