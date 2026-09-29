@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -43,7 +44,31 @@ func (p *Plugin) Call(ctx context.Context, method string, req, resp any) error {
 			success = 0
 		}
 		batch.Samples = append(batch.Samples, tunnel.PromSample{Name: "ongrid_apm_resource_collection_success", Value: success, TsMs: time.Now().UnixMilli()})
-		req = batch
+		// Enrich once per scrape, then split transport requests without limiting
+		// the total sample count. Keep the scrape's final up sample last.
+		for i, sample := range batch.Samples {
+			if sample.Name == "up" && sample.Labels["plugin"] == "custommetrics" && sample.Labels["target_id"] == "autoapm" {
+				copy(batch.Samples[i:], batch.Samples[i+1:])
+				batch.Samples[len(batch.Samples)-1] = sample
+				break
+			}
+		}
+		// ponytail: a full scrape is retained for resource enrichment; use
+		// scrape-scoped streaming identities if this becomes a memory bottleneck.
+		accepted := 0
+		for chunk := range slices.Chunk(batch.Samples, 1000) {
+			request := batch
+			request.Samples = chunk
+			var result tunnel.PushPromSamplesResponse
+			if err := p.pusher.Call(ctx, method, request, &result); err != nil {
+				return err
+			}
+			accepted += result.Accepted
+		}
+		if result, ok := resp.(*tunnel.PushPromSamplesResponse); ok {
+			result.Accepted = accepted
+		}
+		return nil
 	}
 	return p.pusher.Call(ctx, method, req, resp)
 }

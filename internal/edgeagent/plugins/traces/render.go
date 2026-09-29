@@ -44,12 +44,6 @@ receivers:
         endpoint: {{ .HTTPEndpoint }}
 
 processors:
-{{- if .BoundedPipelines }}
-  memory_limiter:
-    check_interval: 1s
-    limit_mib: {{ .MemoryLimitMiB }}
-    spike_limit_mib: {{ .MemorySpikeMiB }}
-{{- end }}
 {{- if .K8sAttributesEnabled }}
   # Enrich gateway spans with Kubernetes resource attributes using the
   # controller ServiceAccount. Keep metadata bounded to stable ownership
@@ -285,18 +279,18 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [{{ if .BoundedPipelines }}memory_limiter, {{ end }}{{ if .K8sAttributesEnabled }}k8sattributes, {{ end }}resource/device, {{ if .ServiceEnvironments }}transform/service_environment, {{ end }}{{ if .BoundedPipelines }}batch/traces{{ else }}batch{{ end }}]
+      processors: [{{ if .K8sAttributesEnabled }}k8sattributes, {{ end }}resource/device, {{ if .ServiceEnvironments }}transform/service_environment, {{ end }}{{ if .BoundedPipelines }}batch/traces{{ else }}batch{{ end }}]
       exporters: [otlphttp/manager]
 {{- if .LogsEnabled }}
     logs:
       receivers: [otlp]
-      processors: [{{ if .BoundedPipelines }}memory_limiter, {{ end }}{{ if .K8sAttributesEnabled }}k8sattributes, {{ end }}resource/device, resource/loki_labels, {{ if .BoundedPipelines }}batch/logs{{ else }}batch{{ end }}]
+      processors: [{{ if .K8sAttributesEnabled }}k8sattributes, {{ end }}resource/device, resource/loki_labels, {{ if .BoundedPipelines }}batch/logs{{ else }}batch{{ end }}]
       exporters: [otlphttp/loki_manager]
 {{- end }}
 {{- if .MetricsEnabled }}
     metrics:
       receivers: [otlp]
-      processors: [{{ if .BoundedPipelines }}memory_limiter, {{ end }}{{ if .K8sAttributesEnabled }}k8sattributes, {{ end }}resource/device, {{ if .ServiceEnvironments }}transform/service_environment, {{ end }}transform/grpc_metrics, {{ if .BoundedPipelines }}batch/metrics{{ else }}batch{{ end }}]
+      processors: [{{ if .K8sAttributesEnabled }}k8sattributes, {{ end }}resource/device, {{ if .ServiceEnvironments }}transform/service_environment, {{ end }}transform/grpc_metrics, {{ if .BoundedPipelines }}batch/metrics{{ else }}batch{{ end }}]
       exporters: [{{ if .MetricsRemoteWriteEnabled }}prometheusremotewrite/manager{{ else }}prometheus/gateway{{ end }}]
 {{- end }}
 `
@@ -319,6 +313,9 @@ service:
 //	logs_tls_insecure_skip_verify : bool (defaults to trace TLS policy)
 //	enable_metrics : bool (default false; true for Kubernetes telemetry gateway)
 //	metrics_export_endpoint : string (required when enable_metrics=true; local scrape endpoint)
+//
+// Collector subprocesses share the enclosing Edge resource budget. Legacy
+// memory_limit_mib and memory_spike_limit_mib keys no longer impose a limit.
 //
 // The Endpoint must be the manager's public OTLP HTTP write URL (e.g.
 // https://manager.example.com/v1/traces). Auth: when AuthUser is set we
@@ -356,16 +353,11 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 		return nil, fmt.Errorf("traces plugin: metrics_export_endpoint required when enable_metrics=true")
 	}
 	boundedPipelines := boolSpec(cfg.Spec, "bounded_pipelines")
-	memoryLimitMiB := intSpec(cfg.Spec, "memory_limit_mib", 384)
-	memorySpikeMiB := intSpec(cfg.Spec, "memory_spike_limit_mib", 96)
 	batchSendSize := intSpec(cfg.Spec, "batch_send_size", 2048)
 	batchMaxSize := intSpec(cfg.Spec, "batch_max_size", 4096)
 	queueSize := 1024
 	if boundedPipelines {
 		queueSize = intSpec(cfg.Spec, "queue_size", 512)
-	}
-	if boundedPipelines && (memoryLimitMiB <= 0 || memorySpikeMiB <= 0 || memorySpikeMiB >= memoryLimitMiB) {
-		return nil, fmt.Errorf("traces plugin: memory limiter requires 0 < spike_limit_mib < memory_limit_mib")
 	}
 	if boundedPipelines && (batchSendSize <= 0 || batchMaxSize < batchSendSize || batchMaxSize > 4096) {
 		return nil, fmt.Errorf("traces plugin: bounded batch requires 0 < send size <= max size <= 4096")
@@ -452,8 +444,6 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 		"MetricsTLSInsecure":         boolSpec(cfg.Spec, "metrics_remote_write_tls_insecure"),
 		"MetricsCAFile":              stringOr(cfg.Spec, "metrics_remote_write_ca_file", ""),
 		"BoundedPipelines":           boundedPipelines,
-		"MemoryLimitMiB":             memoryLimitMiB,
-		"MemorySpikeMiB":             memorySpikeMiB,
 		"BatchSendSize":              batchSendSize,
 		"BatchMaxSize":               batchMaxSize,
 		"QueueSize":                  queueSize,

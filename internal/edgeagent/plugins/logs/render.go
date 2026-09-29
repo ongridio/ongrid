@@ -230,10 +230,6 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 		`set(resource.attributes["workload"], resource.attributes["k8s.cronjob.name"]) where resource.attributes["k8s.cronjob.name"] != nil`,
 	)
 	processors := map[string]interface{}{
-		"memory_limiter/logs": map[string]interface{}{
-			"check_interval": "1s", "limit_mib": intSpecDefault(spec, "memory_limit_mib", 192, 64, 2048),
-			"spike_limit_mib": intSpecDefault(spec, "memory_spike_mib", 48, 16, 512),
-		},
 		"resource/common": map[string]interface{}{"attributes": resourceActions},
 		"transform/guard": map[string]interface{}{
 			// Each application log gets its own resource before promotion, so
@@ -241,7 +237,8 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 			"flatten_data": true, "error_mode": "silent", "log_statements": guardStatements,
 		},
 	}
-	baseProcessorIDs := []string{"memory_limiter/logs"}
+	// Collector subprocesses share the enclosing Edge resource budget.
+	var baseProcessorIDs []string
 	if mode == "kubernetes" && boolSpecDefault(spec, "enable_k8sattributes", false) {
 		processors["k8sattributes/logs"] = k8sAttributesProcessor()
 		baseProcessorIDs = append(baseProcessorIDs, "k8sattributes/logs")
@@ -940,14 +937,6 @@ func boolSpecDefault(spec map[string]interface{}, key string, fallback bool) boo
 		return value
 	}
 	return fallback
-}
-
-func intSpecDefault(spec map[string]interface{}, key string, fallback, minValue, maxValue int) int {
-	value, err := strconv.Atoi(stringSpec(spec, key))
-	if err != nil || value < minValue || value > maxValue {
-		return fallback
-	}
-	return value
 }
 
 func jobNameSafe(value string) string {

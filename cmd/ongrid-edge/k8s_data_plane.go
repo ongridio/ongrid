@@ -191,8 +191,6 @@ func (f *k8sTelemetryGatewayFetcher) Fetch(ctx context.Context) (map[string]edge
 		"metrics_remote_write_bearer":       files.remoteWriteBearer,
 		"metrics_remote_write_tls_insecure": files.remoteWriteTLSInsecure,
 		"bounded_pipelines":                 true,
-		"memory_limit_mib":                  parseIntEnv("ONGRID_K8S_GATEWAY_MEMORY_LIMIT_MIB", 768),
-		"memory_spike_limit_mib":            parseIntEnv("ONGRID_K8S_GATEWAY_MEMORY_SPIKE_LIMIT_MIB", 128),
 		"batch_send_size":                   parseIntEnv("ONGRID_K8S_GATEWAY_BATCH_SIZE", 2048),
 		"batch_max_size":                    parseIntEnv("ONGRID_K8S_GATEWAY_BATCH_MAX_SIZE", 4096),
 		"queue_size":                        parseIntEnv("ONGRID_K8S_GATEWAY_QUEUE_SIZE", 512),

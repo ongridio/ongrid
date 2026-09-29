@@ -104,9 +104,14 @@ func TestRenderBuiltInLokiPipeline(t *testing.T) {
 			"journald_units":  []interface{}{"ongrid-edge", "sshd"},
 			"extra_labels":    map[string]interface{}{"service.name": "edge", "deployment.environment": "test"},
 			"enable_journald": true,
+			// Persisted configuration from older Edges must not restore a limit.
+			"memory_limit_mib": 192, "memory_spike_mib": 48,
 		},
 	}
 	root := renderConfig(t, cfg)
+	if _, exists := object(t, root, "processors")["memory_limiter/logs"]; exists {
+		t.Fatal("logs Collector must share the Edge resource budget")
+	}
 
 	receivers := object(t, root, "receivers")
 	for _, receiverID := range []string{"journald/system", "filelog/file-var-log-syslog", "filelog/file-var-log-auth-log"} {
@@ -141,6 +146,12 @@ func TestRenderBuiltInLokiPipeline(t *testing.T) {
 	service := object(t, root, "service")
 	pipelines := object(t, service, "pipelines")
 	logsPipeline := object(t, pipelines, "logs")
+	for _, processor := range logsPipeline["processors"].([]interface{}) {
+		if processor == "memory_limiter/logs" {
+			t.Fatal("logs pipeline still references an independent memory limiter")
+		}
+	}
+	assertStringListContains(t, logsPipeline["processors"], "batch/logs")
 	assertStringListContains(t, logsPipeline["receivers"], "journald/system")
 	assertStringListContains(t, logsPipeline["exporters"], "otlphttp/builtin_loki")
 	if _, exists := root["scrape_configs"]; exists {

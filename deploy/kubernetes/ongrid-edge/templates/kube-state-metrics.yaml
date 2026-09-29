@@ -121,11 +121,11 @@ spec:
             {{- toYaml $resources | nindent 12 }}
             {{- else }}
             requests:
-              cpu: 20m
-              memory: 64Mi
-            limits:
               cpu: 200m
-              memory: 256Mi
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 4Gi
             {{- end }}
           securityContext:
             allowPrivilegeEscalation: false

@@ -4,7 +4,6 @@
 {{- $gw := default dict .Values.telemetryGateway -}}
 {{- $pdb := default dict $gw.podDisruptionBudget -}}
 {{- $autoscaling := default dict $gw.autoscaling -}}
-{{- $memoryLimiter := default dict $gw.memoryLimiter -}}
 {{- if or (not (hasKey $pdb "enabled")) $pdb.enabled }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -29,10 +28,11 @@ spec:
 {{- if hasKey $autoscaling "targetCPUUtilizationPercentage" -}}
 {{- $targetCPU = int $autoscaling.targetCPUUtilizationPercentage -}}
 {{- end -}}
-{{- $targetMemory := default "512Mi" $autoscaling.targetMemoryAverageValue -}}
+{{- $containerMemory := required "telemetryGateway.resources.limits.memory is required" $gw.resources.limits.memory -}}
+{{- $containerLimitMiB := int (include "ongrid-edge.memoryQuantityMiB" $containerMemory) -}}
+{{- $targetMemory := default (printf "%dMi" (div $containerLimitMiB 2)) $autoscaling.targetMemoryAverageValue -}}
 {{- $targetMemoryMiB := int (include "ongrid-edge.memoryQuantityMiB" $targetMemory) -}}
-{{- $softLimitMiB := sub (int (default 768 $memoryLimiter.limitMiB)) (int (default 128 $memoryLimiter.spikeLimitMiB)) -}}
-{{- $maxTargetMemoryMiB := div (mul $softLimitMiB 80) 100 -}}
+{{- $maxTargetMemoryMiB := div (mul $containerLimitMiB 80) 100 -}}
 {{- $scaleDownWindow := 300 -}}
 {{- if hasKey $autoscaling "scaleDownStabilizationWindowSeconds" -}}
 {{- $scaleDownWindow = int $autoscaling.scaleDownStabilizationWindowSeconds -}}
@@ -55,7 +55,7 @@ spec:
 {{- fail "telemetryGateway.autoscaling.targetCPUUtilizationPercentage must be between 1 and 100" -}}
 {{- end -}}
 {{- if or (lt $targetMemoryMiB 1) (gt $targetMemoryMiB $maxTargetMemoryMiB) -}}
-{{- fail "telemetryGateway.autoscaling.targetMemoryAverageValue must be positive and at most 80% of the memory_limiter soft limit" -}}
+{{- fail "telemetryGateway.autoscaling.targetMemoryAverageValue must be positive and at most 80% of the container memory limit" -}}
 {{- end -}}
 {{- if or (lt $scaleDownWindow 0) (gt $scaleDownWindow 3600) -}}
 {{- fail "telemetryGateway.autoscaling.scaleDownStabilizationWindowSeconds must be between 0 and 3600" -}}

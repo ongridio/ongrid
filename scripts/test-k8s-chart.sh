@@ -58,7 +58,8 @@ grep -q 'kind: HorizontalPodAutoscaler' "$tmp_dir/default.yaml"
 grep -q 'minReplicas: 2' "$tmp_dir/default.yaml"
 grep -q 'maxReplicas: 10' "$tmp_dir/default.yaml"
 grep -q 'averageUtilization: 60' "$tmp_dir/default.yaml"
-grep -q 'averageValue: 512Mi' "$tmp_dir/default.yaml"
+grep -q 'averageValue: 4096Mi' "$tmp_dir/default.yaml"
+! grep -q 'ONGRID_K8S_GATEWAY_MEMORY_' "$tmp_dir/default-gateway.yaml"
 grep -A12 '^    scaleUp:' "$tmp_dir/default.yaml" | grep -q 'value: 100'
 grep -A12 '^    scaleUp:' "$tmp_dir/default.yaml" | grep -q 'value: 4'
 grep -A8 '^    scaleDown:' "$tmp_dir/default.yaml" | grep -q 'stabilizationWindowSeconds: 300'
@@ -218,6 +219,7 @@ helm template hpa "$chart_package" "${common_args[@]}" \
   --set telemetryGateway.autoscaling.enabled=true \
   --set telemetryGateway.autoscaling.minReplicas=3 \
   --set telemetryGateway.autoscaling.maxReplicas=12 \
+  --set telemetryGateway.autoscaling.targetMemoryAverageValue=3Gi \
   --set telemetryGateway.autoscaling.scaleDownStabilizationWindowSeconds=0 \
   --set telemetryGateway.autoscaling.scaleDownMaxPods=2 \
   --set telemetryGateway.autoscaling.scaleDownPeriodSeconds=120 \
@@ -226,7 +228,7 @@ grep -q '# Source: ongrid-edge/templates/telemetry-gateway-policy.yaml' "$tmp_di
 grep -q 'kind: HorizontalPodAutoscaler' "$tmp_dir/hpa.yaml"
 grep -q 'minReplicas: 3' "$tmp_dir/hpa.yaml"
 grep -q 'maxReplicas: 12' "$tmp_dir/hpa.yaml"
-grep -q 'averageValue: 512Mi' "$tmp_dir/hpa.yaml"
+grep -q 'averageValue: 3Gi' "$tmp_dir/hpa.yaml"
 grep -A8 '^    scaleDown:' "$tmp_dir/hpa.yaml" | grep -q 'stabilizationWindowSeconds: 0'
 grep -A8 '^    scaleDown:' "$tmp_dir/hpa.yaml" | grep -q 'value: 2'
 grep -A8 '^    scaleDown:' "$tmp_dir/hpa.yaml" | grep -q 'periodSeconds: 120'
@@ -238,18 +240,26 @@ extract_source 'ongrid-edge/templates/telemetry-gateway-deployment.yaml' "$tmp_d
 ! grep -q 'kind: HorizontalPodAutoscaler' "$tmp_dir/fixed-gateway.yaml"
 grep -q '^  replicas: 2' "$tmp_dir/fixed-gateway-deployment.yaml"
 
+# Preserve a smaller user container budget and ignore obsolete Collector caps.
+helm template legacy-gateway "$chart_package" "${common_args[@]}" --is-upgrade \
+  --set telemetryGateway.resources.requests.memory=256Mi \
+  --set telemetryGateway.resources.limits.memory=1Gi \
+  --set telemetryGateway.memoryLimiter.limitMiB=900 \
+  --set telemetryGateway.memoryLimiter.spikeLimitMiB=128 \
+  >"$tmp_dir/legacy-gateway.yaml"
+grep -q 'averageValue: 512Mi' "$tmp_dir/legacy-gateway.yaml"
+! grep -q 'ONGRID_K8S_GATEWAY_MEMORY_' "$tmp_dir/legacy-gateway.yaml"
+
 expect_template_failure 'kubernetesMetrics.mode must be controller or scraper' \
   helm template invalid-mode "$chart_package" "${common_args[@]}" --set kubernetesMetrics.mode=invalid
 expect_template_failure 'kubernetesMetrics.replicas must be 1' \
   helm template invalid-scraper "$chart_package" "${common_args[@]}" --set kubernetesMetrics.mode=scraper --set kubernetesMetrics.replicas=2
 expect_template_failure 'telemetryGateway.replicas must be at least 2' \
   helm template invalid-gateway "$chart_package" "${common_args[@]}" --set telemetryGateway.mode=deployment --set telemetryGateway.autoscaling.enabled=false --set telemetryGateway.replicas=1
-expect_template_failure 'telemetryGateway.memoryLimiter.limitMiB must be at most 80%' \
-  helm template invalid-limiter "$chart_package" "${common_args[@]}" --set telemetryGateway.mode=deployment --set telemetryGateway.memoryLimiter.limitMiB=900
 expect_template_failure 'telemetryGateway.batch requires 0 < sendSize <= maxSize <= 4096' \
   helm template invalid-batch "$chart_package" "${common_args[@]}" --set telemetryGateway.mode=deployment --set telemetryGateway.batch.maxSize=5000
-expect_template_failure 'targetMemoryAverageValue must be positive and at most 80% of the memory_limiter soft limit' \
-  helm template invalid-hpa-memory "$chart_package" "${common_args[@]}" --set telemetryGateway.mode=deployment --set telemetryGateway.autoscaling.enabled=true --set telemetryGateway.autoscaling.targetMemoryAverageValue=600Mi
+expect_template_failure 'targetMemoryAverageValue must be positive and at most 80% of the container memory limit' \
+  helm template invalid-hpa-memory "$chart_package" "${common_args[@]}" --set telemetryGateway.mode=deployment --set telemetryGateway.autoscaling.enabled=true --set telemetryGateway.autoscaling.targetMemoryAverageValue=7Gi
 expect_template_failure 'targetCPUUtilizationPercentage must be between 1 and 100' \
   helm template invalid-hpa-cpu "$chart_package" "${common_args[@]}" --set telemetryGateway.mode=deployment --set telemetryGateway.autoscaling.enabled=true --set telemetryGateway.autoscaling.targetCPUUtilizationPercentage=0
 expect_template_failure 'scaleDownMaxPods must be at least 1' \

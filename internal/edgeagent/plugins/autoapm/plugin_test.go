@@ -16,7 +16,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-type fakeChild struct{ starts, stops atomic.Int32 }
+type fakeChild struct {
+	starts, stops atomic.Int32
+	cfg           plugins.PluginConfig
+}
 
 func TestNodeCaptureIgnoresLegacySwitch(t *testing.T) {
 	t.Setenv("ONGRID_K8S_ROLE", "node")
@@ -36,6 +39,11 @@ func TestNodeCaptureIgnoresLegacySwitch(t *testing.T) {
 			}
 		} else if err != nil {
 			t.Fatalf("legacy switch %q rejected capture: %v", value, err)
+		} else {
+			targets := p.scraper.(*fakeChild).cfg.Spec["targets"].([]interface{})
+			if targets[0].(map[string]interface{})["sample_limit"] != 0 {
+				t.Fatal("Auto APM scrape must not impose a sample count limit")
+			}
 		}
 	}
 }
@@ -68,10 +76,10 @@ func TestCapturePreflightFailureAndRecovery(t *testing.T) {
 	}
 }
 
-func (f *fakeChild) Name() string                         { return "fake" }
-func (f *fakeChild) Configure(plugins.PluginConfig) error { return nil }
-func (f *fakeChild) Start(context.Context) error          { f.starts.Add(1); return nil }
-func (f *fakeChild) Stop(context.Context) error           { f.stops.Add(1); return nil }
+func (f *fakeChild) Name() string                             { return "fake" }
+func (f *fakeChild) Configure(cfg plugins.PluginConfig) error { f.cfg = cfg; return nil }
+func (f *fakeChild) Start(context.Context) error              { f.starts.Add(1); return nil }
+func (f *fakeChild) Stop(context.Context) error               { f.stops.Add(1); return nil }
 func (f *fakeChild) HealthSnapshot() plugins.PluginHealth {
 	return plugins.PluginHealth{State: plugins.StateRunning}
 }
@@ -179,6 +187,9 @@ func TestRenderLiteralSelectionAndIndependentSampling(t *testing.T) {
 
 func TestCollectorReceivesDefaultAndServiceEnvironment(t *testing.T) {
 	cfg := collectorConfig(plugins.PluginConfig{}, contract.Spec{Environment: "production", Targets: []contract.Target{{ServiceName: "orders", ServiceNamespace: "shop", Environment: "test"}, {ServiceName: "inventory"}}})
+	if cfg.Spec["bounded_pipelines"] != true {
+		t.Fatal("Auto APM must share the Edge memory budget while retaining bounded batches and queues")
+	}
 	if cfg.Spec["extra_attrs"].(map[string]interface{})["deployment.environment.name"] != "production" {
 		t.Fatal("default missing")
 	}

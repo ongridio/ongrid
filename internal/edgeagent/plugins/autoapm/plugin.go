@@ -88,7 +88,7 @@ func (p *Plugin) Configure(cfg plugins.PluginConfig) error {
 		if err := p.collector.Configure(collectorConfig(cfg, s)); err != nil {
 			return p.fail(err)
 		}
-		scrapeCfg := plugins.PluginConfig{Enabled: true, Spec: map[string]interface{}{"targets": []interface{}{map[string]interface{}{"id": "autoapm", "target_url": "http://127.0.0.1:9465/metrics", "source_label": "obi", "scrape_interval": "15s", "sample_limit": 20000}}}}
+		scrapeCfg := plugins.PluginConfig{Enabled: true, Spec: map[string]interface{}{"targets": []interface{}{map[string]interface{}{"id": "autoapm", "target_url": "http://127.0.0.1:9465/metrics", "source_label": "obi", "scrape_interval": "15s", "sample_limit": 0}}}}
 		if err := p.scraper.Configure(scrapeCfg); err != nil {
 			return p.fail(err)
 		}

@@ -3,11 +3,8 @@
 {{- if and $enabled (eq $mode "deployment") }}
 {{- $gw := default dict .Values.telemetryGateway -}}
 {{- $autoscaling := default dict $gw.autoscaling -}}
-{{- $memoryLimiter := default dict $gw.memoryLimiter -}}
 {{- $batch := default dict $gw.batch -}}
 {{- $replicas := int (default 2 $gw.replicas) -}}
-{{- $limitMiB := int (default 768 $memoryLimiter.limitMiB) -}}
-{{- $spikeMiB := int (default 128 $memoryLimiter.spikeLimitMiB) -}}
 {{- $sendSize := int (default 2048 $batch.sendSize) -}}
 {{- $maxSize := int (default 4096 $batch.maxSize) -}}
 {{- $queueSize := int (default 512 $gw.queueSize) -}}
@@ -16,11 +13,8 @@
 {{- if and (not (default false $autoscaling.enabled)) (lt $replicas 2) -}}
 {{- fail "telemetryGateway.replicas must be at least 2 when autoscaling is disabled" -}}
 {{- end -}}
-{{- if or (le $spikeMiB 0) (le $limitMiB $spikeMiB) -}}
-{{- fail "telemetryGateway.memoryLimiter requires 0 < spikeLimitMiB < limitMiB" -}}
-{{- end -}}
-{{- if gt (mul $limitMiB 100) (mul $containerLimitMiB 80) -}}
-{{- fail "telemetryGateway.memoryLimiter.limitMiB must be at most 80% of the container memory limit" -}}
+{{- if le $containerLimitMiB 0 -}}
+{{- fail "telemetryGateway.resources.limits.memory must be positive" -}}
 {{- end -}}
 {{- if or (le $sendSize 0) (lt $maxSize $sendSize) (gt $maxSize 4096) -}}
 {{- fail "telemetryGateway.batch requires 0 < sendSize <= maxSize <= 4096" -}}
@@ -112,10 +106,6 @@ spec:
               value: {{ default "10s" $gw.reloadInterval | quote }}
             - name: ONGRID_K8S_ENROLL_TLS_INSECURE
               value: {{ .Values.manager.tlsInsecure | quote }}
-            - name: ONGRID_K8S_GATEWAY_MEMORY_LIMIT_MIB
-              value: {{ $limitMiB | quote }}
-            - name: ONGRID_K8S_GATEWAY_MEMORY_SPIKE_LIMIT_MIB
-              value: {{ $spikeMiB | quote }}
             - name: ONGRID_K8S_GATEWAY_BATCH_SIZE
               value: {{ $sendSize | quote }}
             - name: ONGRID_K8S_GATEWAY_BATCH_MAX_SIZE

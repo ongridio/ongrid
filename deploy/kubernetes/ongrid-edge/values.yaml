@@ -26,13 +26,14 @@ node:
   collectorMode: "off"
   tolerations:
     - operator: Exists
+  # Shared by the node Edge and all collector/OBI subprocesses.
   resources:
     requests:
-      cpu: 50m
-      memory: 128Mi
-    limits:
       cpu: 500m
-      memory: 512Mi
+      memory: 1Gi
+    limits:
+      cpu: "4"
+      memory: 8Gi
 
 controller:
   replicas: 1
@@ -58,11 +59,11 @@ controller:
       enabled: false
   resources:
     requests:
-      cpu: 50m
-      memory: 128Mi
-    limits:
-      cpu: 500m
+      cpu: 250m
       memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 4Gi
 
 kubeStateMetrics:
   enabled: true
@@ -78,11 +79,11 @@ kubeStateMetrics:
   collectors: []
   resources:
     requests:
-      cpu: 20m
-      memory: 64Mi
-    limits:
       cpu: 200m
-      memory: 256Mi
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 4Gi
 
 telemetryConfig:
   # Controller republishes endpoint/auth/TLS changes to the projected Secret;
@@ -117,11 +118,11 @@ kubernetesMetrics:
   retryBackoff: 500ms
   resources:
     requests:
-      cpu: 100m
-      memory: 128Mi
-    limits:
       cpu: 500m
-      memory: 512Mi
+      memory: 1Gi
+    limits:
+      cpu: "4"
+      memory: 8Gi
 
 upgrade:
   # A pre-upgrade Helm hook performs any live hand-off that cannot be made
@@ -142,20 +143,17 @@ telemetryGateway:
   replicas: 2
   serviceAccountName: ""
   reloadInterval: 10s
-  memoryLimiter:
-    limitMiB: 768
-    spikeLimitMiB: 128
   batch:
     sendSize: 2048
     maxSize: 4096
   queueSize: 512
   resources:
     requests:
-      cpu: 200m
-      memory: 256Mi
+      cpu: "1"
+      memory: 2Gi
     limits:
-      cpu: 1000m
-      memory: 1Gi
+      cpu: "4"
+      memory: 8Gi
   autoscaling:
     # Requires the standard metrics.k8s.io API (normally provided by
     # metrics-server). Disable this flag to fall back to a fixed replica count
@@ -164,9 +162,9 @@ telemetryGateway:
     minReplicas: 2
     maxReplicas: 10
     targetCPUUtilizationPercentage: 60
-    # Keep the target at no more than 80% of memory_limiter's 640Mi soft limit
-    # (768Mi - 128Mi spike), leaving headroom for HPA tolerance and sampling lag.
-    targetMemoryAverageValue: 512Mi
+    # Null scales at half the container memory limit (4Gi by default), leaving
+    # room for bursts. Existing explicit targets remain valid overrides.
+    targetMemoryAverageValue: null
     scaleDownStabilizationWindowSeconds: 300
     # Drain in-memory telemetry gradually after the stabilization window.
     scaleDownMaxPods: 1

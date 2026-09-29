@@ -86,7 +86,8 @@ func collectorConfig(cfg plugins.PluginConfig, s contract.Spec) plugins.PluginCo
 	cfg.Spec = map[string]interface{}{
 		"grpc_endpoint": "127.0.0.1:14317", "http_endpoint": "127.0.0.1:14318",
 		"enable_metrics": true, "metrics_export_endpoint": "127.0.0.1:9465",
-		"bounded_pipelines": true, "memory_limit_mib": 128, "memory_spike_limit_mib": 32,
+		// Share the Edge resource budget; keep batches and queues bounded.
+		"bounded_pipelines":            true,
 		"tls_insecure_skip_verify":     s.TLSInsecureSkipVerify,
 		"collector_metrics_endpoint":   "127.0.0.1:18888",
 		"health_endpoint":              "127.0.0.1:14333",

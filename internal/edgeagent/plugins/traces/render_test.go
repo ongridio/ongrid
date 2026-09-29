@@ -355,9 +355,6 @@ func TestRenderStandaloneGatewayUsesBoundedRemoteWritePipelines(t *testing.T) {
 	}
 	body := string(out)
 	for _, want := range []string{
-		"memory_limiter:",
-		"limit_mib: 384",
-		"spike_limit_mib: 96",
 		"batch/traces:",
 		"batch/logs:",
 		"batch/metrics:",
@@ -369,9 +366,9 @@ func TestRenderStandaloneGatewayUsesBoundedRemoteWritePipelines(t *testing.T) {
 		"remote_write_queue:",
 		"num_consumers: 1",
 		"exporters: [prometheusremotewrite/manager]",
-		"processors: [memory_limiter, k8sattributes, resource/device, batch/traces]",
-		"processors: [memory_limiter, k8sattributes, resource/device, resource/loki_labels, batch/logs]",
-		"processors: [memory_limiter, k8sattributes, resource/device, transform/grpc_metrics, batch/metrics]",
+		"processors: [k8sattributes, resource/device, batch/traces]",
+		"processors: [k8sattributes, resource/device, resource/loki_labels, batch/logs]",
+		"processors: [k8sattributes, resource/device, transform/grpc_metrics, batch/metrics]",
 		`metric.name == "grpc.server.call.duration"`,
 		`set(attributes["rpc.response.status_code"], attributes["grpc.status"])`,
 		`set(name, "rpc.server.call.duration") where name == "grpc.server.call.duration"`,
@@ -384,6 +381,38 @@ func TestRenderStandaloneGatewayUsesBoundedRemoteWritePipelines(t *testing.T) {
 	}
 	if strings.Contains(body, "prometheus/gateway:") {
 		t.Fatalf("standalone gateway must not retain the in-memory scrape exporter:\n%s", body)
+	}
+	if strings.Contains(body, "memory_limiter") {
+		t.Fatal("legacy memory keys must not impose a separate Collector limit")
+	}
+}
+
+func TestRenderBoundedPipelinesWithoutMemoryLimiter(t *testing.T) {
+	cfg := plugins.PluginConfig{
+		EdgeID: 42, Endpoint: "https://manager.example.com/v1/traces",
+		Spec: map[string]interface{}{
+			"bounded_pipelines": true, "memory_limit_mib": 0,
+			"enable_logs": true, "logs_endpoint": "https://manager.example.com/loki/api/v1/push",
+			"enable_metrics": true, "metrics_export_endpoint": "127.0.0.1:9465",
+		},
+	}
+	out, err := render(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(out)
+	if strings.Contains(body, "memory_limiter") {
+		t.Fatal("disabled memory limiter remains in the rendered configuration")
+	}
+	for _, want := range []string{
+		"send_batch_max_size: 4096", "queue_size: 512",
+		"processors: [resource/device, batch/traces]",
+		"processors: [resource/device, resource/loki_labels, batch/logs]",
+		"processors: [resource/device, transform/grpc_metrics, batch/metrics]",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("bounded pipeline missing %q", want)
+		}
 	}
 }
 
