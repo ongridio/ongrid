@@ -81,8 +81,8 @@ overrides:
         - service-graphs
         - span-metrics
     ingestion:
-      rate_limit_bytes: 20_000_000     # 20 MB/s per tenant
-      burst_size_bytes: 30_000_000
+      rate_limit_bytes: 40_000_000     # 40 MB/s per tenant
+      burst_size_bytes: 80_000_000
     global:
       max_bytes_per_trace: 50_000_000  # 50 MB cap per trace
 
