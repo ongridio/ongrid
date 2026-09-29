@@ -57,7 +57,7 @@ grep -q '# Source: ongrid-edge/templates/metrics-scraper-deployment.yaml' "$tmp_
 grep -q 'kind: HorizontalPodAutoscaler' "$tmp_dir/default.yaml"
 grep -q 'minReplicas: 2' "$tmp_dir/default.yaml"
 grep -q 'maxReplicas: 10' "$tmp_dir/default.yaml"
-grep -q 'averageUtilization: 60' "$tmp_dir/default.yaml"
+grep -q 'averageUtilization: 300' "$tmp_dir/default.yaml"
 grep -q 'averageValue: 4096Mi' "$tmp_dir/default.yaml"
 ! grep -q 'ONGRID_K8S_GATEWAY_MEMORY_' "$tmp_dir/default-gateway.yaml"
 grep -A12 '^    scaleUp:' "$tmp_dir/default.yaml" | grep -q 'value: 100'
@@ -219,6 +219,7 @@ helm template hpa "$chart_package" "${common_args[@]}" \
   --set telemetryGateway.autoscaling.enabled=true \
   --set telemetryGateway.autoscaling.minReplicas=3 \
   --set telemetryGateway.autoscaling.maxReplicas=12 \
+  --set telemetryGateway.autoscaling.targetCPUUtilizationPercentage=60 \
   --set telemetryGateway.autoscaling.targetMemoryAverageValue=3Gi \
   --set telemetryGateway.autoscaling.scaleDownStabilizationWindowSeconds=0 \
   --set telemetryGateway.autoscaling.scaleDownMaxPods=2 \
@@ -228,6 +229,7 @@ grep -q '# Source: ongrid-edge/templates/telemetry-gateway-policy.yaml' "$tmp_di
 grep -q 'kind: HorizontalPodAutoscaler' "$tmp_dir/hpa.yaml"
 grep -q 'minReplicas: 3' "$tmp_dir/hpa.yaml"
 grep -q 'maxReplicas: 12' "$tmp_dir/hpa.yaml"
+grep -q 'averageUtilization: 60' "$tmp_dir/hpa.yaml"
 grep -q 'averageValue: 3Gi' "$tmp_dir/hpa.yaml"
 grep -A8 '^    scaleDown:' "$tmp_dir/hpa.yaml" | grep -q 'stabilizationWindowSeconds: 0'
 grep -A8 '^    scaleDown:' "$tmp_dir/hpa.yaml" | grep -q 'value: 2'
@@ -260,7 +262,7 @@ expect_template_failure 'telemetryGateway.batch requires 0 < sendSize <= maxSize
   helm template invalid-batch "$chart_package" "${common_args[@]}" --set telemetryGateway.mode=deployment --set telemetryGateway.batch.maxSize=5000
 expect_template_failure 'targetMemoryAverageValue must be positive and at most 80% of the container memory limit' \
   helm template invalid-hpa-memory "$chart_package" "${common_args[@]}" --set telemetryGateway.mode=deployment --set telemetryGateway.autoscaling.enabled=true --set telemetryGateway.autoscaling.targetMemoryAverageValue=7Gi
-expect_template_failure 'targetCPUUtilizationPercentage must be between 1 and 100' \
+expect_template_failure 'targetCPUUtilizationPercentage must be a positive int32' \
   helm template invalid-hpa-cpu "$chart_package" "${common_args[@]}" --set telemetryGateway.mode=deployment --set telemetryGateway.autoscaling.enabled=true --set telemetryGateway.autoscaling.targetCPUUtilizationPercentage=0
 expect_template_failure 'scaleDownMaxPods must be at least 1' \
   helm template invalid-hpa-scale-down-pods "$chart_package" "${common_args[@]}" --set telemetryGateway.mode=deployment --set telemetryGateway.autoscaling.enabled=true --set telemetryGateway.autoscaling.scaleDownMaxPods=-1

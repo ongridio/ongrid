@@ -3,7 +3,35 @@ package custommetrics
 import (
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestParseTargetPushTimeout(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  time.Duration
+	}{
+		{"", 15 * time.Second},
+		{"60s", 60 * time.Second},
+		{"0s", 0},
+		{"-1s", 0},
+		{"invalid", 0},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			target, err := parseTarget(0, map[string]interface{}{
+				"id": "test", "target_url": "http://localhost:9465/metrics",
+				"scrape_interval": "15s", "push_timeout": tc.value,
+			})
+			if tc.want == 0 {
+				if err == nil || !strings.Contains(err.Error(), "push_timeout") {
+					t.Fatalf("expected push_timeout validation error, got %v", err)
+				}
+			} else if err != nil || target.PushTimeout != tc.want {
+				t.Fatalf("push timeout = %v, error = %v; want %v", target.PushTimeout, err, tc.want)
+			}
+		})
+	}
+}
 
 func TestParseSpecCustomDatabaseType(t *testing.T) {
 	targets, err := parseSpec(map[string]interface{}{

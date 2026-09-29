@@ -50,19 +50,23 @@ dozens of nodes and around a thousand Pods, not a load-tested capacity guarantee
 
 | Component | CPU / memory request | CPU / memory limit | Replicas |
 | --- | --- | --- | --- |
-| Node Edge (including OBI and all node Collectors) | 500m / 1Gi | 4 / 8Gi | One per node |
-| Telemetry Gateway | 1 / 2Gi | 4 / 8Gi | HPA 2–10 |
-| Kubernetes metrics Scraper | 500m / 1Gi | 4 / 8Gi | 1 |
-| Controller | 250m / 512Mi | 2 / 4Gi | 1 |
-| kube-state-metrics | 200m / 512Mi | 2 / 4Gi | 1 |
+| Node Edge (including OBI and all node Collectors) | 50m / 128Mi | 4 / 8Gi | One per node |
+| Telemetry Gateway | 200m / 256Mi | 4 / 8Gi | HPA 2–10 |
+| Kubernetes metrics Scraper | 100m / 128Mi | 4 / 8Gi | 1 |
+| Controller | 50m / 128Mi | 2 / 4Gi | 1 |
+| kube-state-metrics | 20m / 64Mi | 2 / 4Gi | 1 |
 
-Requests affect scheduling; limits are ceilings, not reserved capacity. Check
-node capacity before upgrading. Existing explicit Helm resource overrides win;
+Requests retain the lightweight defaults; raise them to measured sustained usage
+on busy clusters. They affect scheduling and resource contention; limits are
+ceilings, not reserved capacity. Existing explicit Helm resource overrides win;
 when retaining smaller limits, also keep requests at or below those limits.
 Ordinary host installs need systemd resource limits to enforce an overall cap.
 
 Gateway HPA requires metrics-server. Its default memory target is half the
-container limit (4Gi), and CPU utilization is 60% of the CPU **request**.
+container limit (4Gi), and CPU utilization is 300% of the CPU **request**
+(200m × 300% = 600m per Pod). Tune the percentage together with CPU requests;
+explicit legacy percentages are preserved. Kubernetes permits CPU utilization
+targets above 100% because requests are not CPU ceilings.
 Explicit memory targets are preserved and must stay at or below 80% of the container
 limit. Collectors can still be OOM-killed during bursts; removing their memory
 limiter trades early backpressure for reliance on the container's OOM boundary.
@@ -77,7 +81,11 @@ backend needs its own capacity work; raising Edge limits will not fix it. See
 
 Auto APM has no per-scrape sample count limit and sends at most 1,000 samples
 per tunnel request. A complete scrape is still held in Edge memory for resource
-enrichment; scrape/push timeouts and the container resource budget still apply.
+enrichment. HTTP scraping has a 10s timeout; resource enrichment and all batches
+share one 60s push budget. Scrapes remain serial, and stopping the plugin cancels
+an in-flight push. Other custom metrics targets retain the 15s default push
+timeout, configurable per target with `push_timeout`. The container resource
+budget still applies.
 The separate cluster metrics scraper defaults to 250,000 samples per target.
 Roll back both the Edge image and Chart to restore the previous Collector policy
 and resource defaults.

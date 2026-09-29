@@ -29,8 +29,8 @@ node:
   # Shared by the node Edge and all collector/OBI subprocesses.
   resources:
     requests:
-      cpu: 500m
-      memory: 1Gi
+      cpu: 50m
+      memory: 128Mi
     limits:
       cpu: "4"
       memory: 8Gi
@@ -59,8 +59,8 @@ controller:
       enabled: false
   resources:
     requests:
-      cpu: 250m
-      memory: 512Mi
+      cpu: 50m
+      memory: 128Mi
     limits:
       cpu: "2"
       memory: 4Gi
@@ -79,8 +79,8 @@ kubeStateMetrics:
   collectors: []
   resources:
     requests:
-      cpu: 200m
-      memory: 512Mi
+      cpu: 20m
+      memory: 64Mi
     limits:
       cpu: "2"
       memory: 4Gi
@@ -118,8 +118,8 @@ kubernetesMetrics:
   retryBackoff: 500ms
   resources:
     requests:
-      cpu: 500m
-      memory: 1Gi
+      cpu: 100m
+      memory: 128Mi
     limits:
       cpu: "4"
       memory: 8Gi
@@ -149,8 +149,8 @@ telemetryGateway:
   queueSize: 512
   resources:
     requests:
-      cpu: "1"
-      memory: 2Gi
+      cpu: 200m
+      memory: 256Mi
     limits:
       cpu: "4"
       memory: 8Gi
@@ -161,7 +161,9 @@ telemetryGateway:
     enabled: true
     minReplicas: 2
     maxReplicas: 10
-    targetCPUUtilizationPercentage: 60
+    # 300% of the 200m request targets 600m CPU per Pod; this is not a limit.
+    # Tune together with CPU requests. Explicit legacy percentages still win.
+    targetCPUUtilizationPercentage: 300
     # Null scales at half the container memory limit (4Gi by default), leaving
     # room for bursts. Existing explicit targets remain valid overrides.
     targetMemoryAverageValue: null

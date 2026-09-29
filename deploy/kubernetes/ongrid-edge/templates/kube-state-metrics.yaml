@@ -121,8 +121,8 @@ spec:
             {{- toYaml $resources | nindent 12 }}
             {{- else }}
             requests:
-              cpu: 200m
-              memory: 512Mi
+              cpu: 20m
+              memory: 64Mi
             limits:
               cpu: "2"
               memory: 4Gi

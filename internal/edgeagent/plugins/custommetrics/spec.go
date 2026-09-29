@@ -68,6 +68,10 @@ func parseTarget(i int, m map[string]interface{}) (metricscommon.Target, error) 
 	if timeout > interval {
 		timeout = interval
 	}
+	pushTimeout, err := durationFrom(m, "push_timeout", defaultPushTimeout)
+	if err != nil {
+		return metricscommon.Target{}, fmt.Errorf("targets[%d].push_timeout: %w", i, err)
+	}
 	enabled := boolFrom(m, "enabled", true)
 	source := stringFrom(m, "source_label")
 	if source == "" {
@@ -95,6 +99,7 @@ func parseTarget(i int, m map[string]interface{}) (metricscommon.Target, error) 
 		Enabled:       enabled,
 		Interval:      interval,
 		Timeout:       timeout,
+		PushTimeout:   pushTimeout,
 		TLSInsecure:   boolFrom(m, "tls_insecure", false),
 		BearerToken:   firstNonEmpty(stringFrom(m, "bearer_token"), stringFrom(auth, "bearer_token")),
 		BasicUsername: stringFrom(auth, "username"),

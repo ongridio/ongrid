@@ -24,7 +24,7 @@ spec:
 {{- if default false $autoscaling.enabled }}
 {{- $minReplicas := int (default 2 $autoscaling.minReplicas) -}}
 {{- $maxReplicas := int (default 10 $autoscaling.maxReplicas) -}}
-{{- $targetCPU := 60 -}}
+{{- $targetCPU := 300 -}}
 {{- if hasKey $autoscaling "targetCPUUtilizationPercentage" -}}
 {{- $targetCPU = int $autoscaling.targetCPUUtilizationPercentage -}}
 {{- end -}}
@@ -51,8 +51,8 @@ spec:
 {{- if lt $maxReplicas $minReplicas -}}
 {{- fail "telemetryGateway.autoscaling.maxReplicas must be greater than or equal to minReplicas" -}}
 {{- end -}}
-{{- if or (lt $targetCPU 1) (gt $targetCPU 100) -}}
-{{- fail "telemetryGateway.autoscaling.targetCPUUtilizationPercentage must be between 1 and 100" -}}
+{{- if or (lt $targetCPU 1) (gt $targetCPU 2147483647) -}}
+{{- fail "telemetryGateway.autoscaling.targetCPUUtilizationPercentage must be a positive int32" -}}
 {{- end -}}
 {{- if or (lt $targetMemoryMiB 1) (gt $targetMemoryMiB $maxTargetMemoryMiB) -}}
 {{- fail "telemetryGateway.autoscaling.targetMemoryAverageValue must be positive and at most 80% of the container memory limit" -}}

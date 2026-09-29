@@ -41,8 +41,12 @@ func TestNodeCaptureIgnoresLegacySwitch(t *testing.T) {
 			t.Fatalf("legacy switch %q rejected capture: %v", value, err)
 		} else {
 			targets := p.scraper.(*fakeChild).cfg.Spec["targets"].([]interface{})
-			if targets[0].(map[string]interface{})["sample_limit"] != 0 {
+			target := targets[0].(map[string]interface{})
+			if target["sample_limit"] != 0 {
 				t.Fatal("Auto APM scrape must not impose a sample count limit")
+			}
+			if target["scrape_timeout"] != "10s" || target["push_timeout"] != "60s" {
+				t.Fatalf("unexpected Auto APM scrape/push budgets: %v", target)
 			}
 		}
 	}

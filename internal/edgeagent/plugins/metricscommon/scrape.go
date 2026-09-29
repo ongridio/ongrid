@@ -27,6 +27,7 @@ type Target struct {
 	Enabled            bool
 	Interval           time.Duration
 	Timeout            time.Duration
+	PushTimeout        time.Duration
 	TLSInsecure        bool
 	BearerToken        string
 	BasicUsername      string

@@ -2,16 +2,56 @@ package custommetrics
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/ongridio/ongrid/internal/edgeagent/plugins"
 	"github.com/ongridio/ongrid/internal/edgeagent/plugins/metricscommon"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
+
+type blockedPusher struct{}
+
+func (blockedPusher) Call(ctx context.Context, _ string, _, _ any) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func TestPushBudgetAndCancellation(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		budget  time.Duration
+		cancel  bool
+		elapsed time.Duration
+		wantErr error
+	}{
+		{"default_budget", 0, false, 15 * time.Second, context.DeadlineExceeded},
+		{"extended_budget", 60 * time.Second, false, 60 * time.Second, context.DeadlineExceeded},
+		{"parent_cancellation", 60 * time.Second, true, time.Second, context.Canceled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				if tc.cancel {
+					timer := time.AfterFunc(time.Second, cancel)
+					defer timer.Stop()
+				}
+				p := New(blockedPusher{}, func() uint64 { return 42 }, nil)
+				start := time.Now()
+				err := p.pushPromSamples(ctx, metricscommon.Target{PushTimeout: tc.budget}, nil)
+				if !errors.Is(err, tc.wantErr) || time.Since(start) != tc.elapsed {
+					t.Fatalf("push returned %v after %v; want %v after %v", err, time.Since(start), tc.wantErr, tc.elapsed)
+				}
+			})
+		})
+	}
+}
 
 type fakePusher struct {
 	mu    sync.Mutex

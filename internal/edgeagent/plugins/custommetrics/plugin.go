@@ -22,6 +22,8 @@ import (
 
 const Name = "custommetrics"
 
+const defaultPushTimeout = 15 * time.Second
+
 type Pusher interface {
 	Call(ctx context.Context, method string, req, resp any) error
 }
@@ -215,7 +217,11 @@ func (p *Plugin) pushPromSamples(ctx context.Context, target metricscommon.Targe
 	if edgeID == 0 {
 		return fmt.Errorf("edge_id=0; waiting for register_edge")
 	}
-	pctx, pcancel := context.WithTimeout(ctx, 15*time.Second)
+	timeout := target.PushTimeout
+	if timeout <= 0 {
+		timeout = defaultPushTimeout
+	}
+	pctx, pcancel := context.WithTimeout(ctx, timeout)
 	defer pcancel()
 	var resp tunnel.PushPromSamplesResponse
 	if err := p.pusher.Call(pctx, tunnel.MethodPushPromSamples, tunnel.PushPromSamplesRequest{
