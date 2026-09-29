@@ -371,6 +371,10 @@ if [[ ! -f "$ENV_FILE" ]]; then
     exit 1
 fi
 
+ongrid_resolve_data_directories "$ENV_FILE" "$INSTALL_DIR" || exit 1
+log_info "data dir: $ONGRID_DATA_DIR  (override via ONGRID_DATA_DIR)"
+log_info "log dir:  $ONGRID_LOG_DIR  (override via ONGRID_LOG_DIR)"
+
 log_info "upgrading ongrid at $INSTALL_DIR"
 # Symmetry with install.sh: an install created under a restrictive umask keeps a
 # 0750/0700 install dir, which blocks non-root tooling on the host. Doing it here
@@ -423,10 +427,6 @@ preflight_runtime_images
 # Prepare mount-point directories while the current stack is still available.
 # This is deliberately non-recursive: existing descendants were written by the
 # same container UIDs, while walking large Loki/Tempo trees can take minutes.
-ONGRID_DATA_DIR="${ONGRID_DATA_DIR:-/var/lib/ongrid}"
-ONGRID_LOG_DIR="${ONGRID_LOG_DIR:-/var/log/ongrid}"
-log_info "data dir: $ONGRID_DATA_DIR  (override via ONGRID_DATA_DIR)"
-log_info "log dir:  $ONGRID_LOG_DIR  (override via ONGRID_LOG_DIR)"
 if ! ongrid_prepare_data_directories "$ONGRID_DATA_DIR" "$ONGRID_LOG_DIR"; then
     log_error "data directory permissions are not usable; the existing stack was not stopped"
     exit 1
@@ -573,8 +573,6 @@ if ! ongrid_repair_data_permissions_or_restore \
     "$REPAIR_PERMISSIONS" "$ONGRID_DATA_DIR" "$INSTALL_DIR"; then
     exit 1
 fi
-
-export ONGRID_DATA_DIR ONGRID_LOG_DIR
 
 # Overwrite shipped assets. Do NOT touch .env or certs/.
 log_info "copying new docker-compose.yml / frontier.yaml / nginx.conf / prometheus / edge / VERSION"

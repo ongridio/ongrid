@@ -46,11 +46,11 @@ sudo ./install.sh
 `install.sh` 的执行过程：
 
 1. 自检 Docker 环境；非 root 自动 `sudo` 重入。
-2. 创建 `/opt/ongrid/`（可通过 `ONGRID_INSTALL_DIR` 覆盖）。
+2. 创建 `/opt/ongrid/`（可通过 `ONGRID_INSTALL_DIR` 覆盖）；若 `.env` 不存在则从 `.env.example` 创建，权限置 `600`。先解析数据和日志目录，再准备资源与挂载点。
 3. 从 CNB Release 直链下载一次性公共依赖压缩包和当前版本 `ongrid-edge` 裸二进制，校验附件 SHA-256、压缩包内部 manifest 和架构，在 staging 目录重建原有 `edge/` 单文件及一键升级 bundle；全部成功后再原子安装到 `/opt/ongrid/edge`。
 4. 拷贝 `docker-compose.yml`、`nginx.conf`、`prometheus.yml`、`grafana/`、`edge/`、`VERSION` 到安装目录。
 5. **生成自签 TLS 证书**（首次安装且 `certs/tls.crt` 不存在时）：通过临时 OpenSSL 配置生成 CN=ongrid、SAN 包含 `ongrid` / `localhost` / `127.0.0.1` 的 365 天证书，落到 `${INSTALL_DIR}/certs/`，私钥 `chmod 600`。脚本不交互，直接生成；末尾 banner 提示替换真证书。
-6. 若 `/opt/ongrid/.env` 不存在则从 `.env.example` 创建，并对空字段（`MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD`、`ONGRID_JWT_SECRET`、`ONGRID_ADMIN_PASSWORD`）生成随机值，文件权限置 `600`。
+6. 对 `.env` 中的空字段（`MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD`、`ONGRID_JWT_SECRET`、`ONGRID_ADMIN_PASSWORD`）生成随机值。
 7. 先渲染 Compose 配置并从 `docker.cnb.cool/ongridio/ongrid` 拉取全部精确镜像；任一镜像不可用即停止，不启动半套服务。
 8. `docker compose up -d` 启动 MySQL + ongrid + frontier + nginx + prometheus（ADR-009）。
 9. 轮询 `https://localhost:${ONGRID_HTTP_PORT}/healthz`（nginx 透传到 manager，`-k` 跳过自签校验）最多 60 秒。
@@ -179,6 +179,17 @@ v0.7.45 起所有有状态服务（MySQL / Prometheus / Loki / Tempo / qdrant / 
 
 - 把 `ONGRID_DATA_DIR` 指向独立 SSD / NVMe / NFS 挂载点；
 - 关键卷（`mysql`、`prometheus`）单独走快速本地盘，`loki` / `tempo` 走容量盘。
+
+数据和日志目录的解析优先级为 **shell 环境变量 → 安装目录下的 `.env` → 默认值**。脚本复用 Docker Compose 的解析规则，支持引号、空格、注释和变量引用；显式空值按 Compose 的 `${VAR:-default}` 使用默认目录。相对路径以安装目录为基准，路径不能包含换行。解析失败时停止，升级不会进入停栈步骤。
+
+持久配置请修改 `/opt/ongrid/.env`（自定义 `ONGRID_INSTALL_DIR` 时使用对应目录）：
+
+```dotenv
+ONGRID_DATA_DIR=/data/ongrid/data
+ONGRID_LOG_DIR=/data/ongrid/logs
+```
+
+安装、升级日志打印最终目录；目录准备、镜像预检、启动和失败恢复都使用这些值。shell 环境变量只对本次执行生效，不会改写 `.env`；应确保与已有数据所在位置一致。回退此修复后若需使用旧脚本，请显式传入已有数据和日志目录，避免再次选中默认目录。
 
 ### 数据备份
 
