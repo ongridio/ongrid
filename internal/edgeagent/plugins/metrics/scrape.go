@@ -87,6 +87,17 @@ func parseSpec(spec map[string]interface{}) (specView, error) {
 	if v := stringFrom(spec, "application_metrics_url"); v != "" && !slices.Contains(out.URLs, v) {
 		out.URLs = append(out.URLs, v)
 	}
+	// One plugin applies the same labels/auth to every URL. Exact duplicates
+	// would scrape and transmit the same target twice on every tick.
+	seen := make(map[string]bool, len(out.URLs))
+	urls := out.URLs[:0]
+	for _, u := range out.URLs {
+		if !seen[u] {
+			seen[u] = true
+			urls = append(urls, u)
+		}
+	}
+	out.URLs = urls
 	if v := stringFrom(spec, "scrape_interval"); v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil {

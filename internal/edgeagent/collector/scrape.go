@@ -27,15 +27,14 @@ import (
 )
 
 // Scraper drives one HTTP scrape goroutine per target and stores the
-// most recent successful MetricFamily snapshot per target in memory.
+// most recent successful flattened snapshot per target in memory.
 //
 // Scrape mode is multi-target: one CollectorOutput is produced per
 // target on each tick, so the agent loop iterates and pushes them
 // individually with distinct Source values.
 //
-// HostInfo / GetHostLoad / GetProcessList still use gopsutil — the
-// scraper itself doesn't try to derive host load from arbitrary
-// upstream metric names.
+// HostInfo / GetProcessList use gopsutil; GetHostLoad reads the same immutable
+// host-role snapshot used for pushes, without changing counter-rate state.
 type Scraper struct {
 	cfg *ScrapeConfig
 	log *slog.Logger
@@ -43,16 +42,19 @@ type Scraper struct {
 	// per-target HTTP client (TLS / bearer auth applied at construction)
 	clients map[string]*http.Client
 
-	mu       sync.RWMutex
-	snapshot map[string]targetSnapshot
-	mappers  map[string]*Mapper
+	mu             sync.RWMutex
+	snapshot       map[string]targetSnapshot
+	mappers        map[string]*Mapper
+	nextSnapshotID uint64
 }
 
 type targetSnapshot struct {
-	families []*dto.MetricFamily
-	at       time.Time
-	source   string
-	role     string
+	id        uint64
+	samples   []tunnel.PromSample
+	hostPoint tunnel.HostMetricPoint
+	at        time.Time
+	source    string
+	role      string
 }
 
 // NewScraper builds a Scraper from the parsed config. Run must be called
@@ -171,14 +173,21 @@ func (s *Scraper) scrapeOnce(ctx context.Context, t ScrapeTarget) {
 		return
 	}
 	mfs := familiesToSlice(families)
+	at := time.Now()
+	snap := targetSnapshot{
+		at: at, source: SourceScrapePrefix + t.Name, role: t.Role,
+		samples: FlattenSamples(at, SourceScrapePrefix+t.Name, mfs, t.StaticLabels),
+	}
+	if t.Role == ScrapeRoleHost {
+		// Map counters exactly once per acquisition. Re-reading a cached
+		// snapshot must neither re-stamp it nor mutate the rate baseline.
+		snap.hostPoint = s.mappers[t.Name].MapToHostPoint(at, mfs)
+	}
 
 	s.mu.Lock()
-	s.snapshot[t.Name] = targetSnapshot{
-		families: mfs,
-		at:       time.Now(),
-		source:   SourceScrapePrefix + t.Name,
-		role:     t.Role,
-	}
+	s.nextSnapshotID++
+	snap.id = s.nextSnapshotID
+	s.snapshot[t.Name] = snap
 	s.mu.Unlock()
 }
 
@@ -186,38 +195,17 @@ func (s *Scraper) scrapeOnce(ctx context.Context, t ScrapeTarget) {
 // snapshot. Targets that have not yet produced a successful scrape are
 // skipped silently — the next tick will retry.
 func (s *Scraper) CollectAll(ctx context.Context) ([]CollectorOutput, error) {
-	now := time.Now()
 	s.mu.RLock()
-	snaps := make([]targetSnapshot, 0, len(s.snapshot))
-	names := make([]string, 0, len(s.snapshot))
-	for name, snap := range s.snapshot {
-		names = append(names, name)
-		snaps = append(snaps, snap)
-	}
-	s.mu.RUnlock()
-
-	if len(snaps) == 0 {
-		return nil, nil
-	}
-	out := make([]CollectorOutput, 0, len(snaps))
-	for i, snap := range snaps {
-		name := names[i]
-		target := s.targetByName(name)
-		var extras map[string]string
-		if target != nil {
-			extras = target.StaticLabels
-		}
-		mp := s.mappers[name]
-		if mp == nil {
-			mp = NewMapper()
-			s.mappers[name] = mp
-		}
+	defer s.mu.RUnlock()
+	out := make([]CollectorOutput, 0, len(s.snapshot))
+	for _, snap := range s.snapshot {
 		co := CollectorOutput{
-			Source:  snap.source,
-			Samples: FlattenSamples(now, snap.source, snap.families, extras),
+			SnapshotID: snap.id,
+			Source:     snap.source,
+			Samples:    snap.samples,
 		}
 		if snap.role == ScrapeRoleHost {
-			co.HostPoint = mp.MapToHostPoint(now, snap.families)
+			co.HostPoint = snap.hostPoint
 			co.HostPointValid = true
 		}
 		out = append(out, co)
@@ -280,14 +268,10 @@ func (s *Scraper) GetHostLoad(ctx context.Context) (tunnel.GetHostLoadResponse, 
 		if snap.role != ScrapeRoleHost {
 			continue
 		}
-		if len(snap.families) == 0 {
+		if len(snap.samples) == 0 {
 			continue
 		}
-		mp := s.mappers[k]
-		if mp == nil {
-			continue
-		}
-		hp := mp.MapToHostPoint(now, snap.families)
+		hp := snap.hostPoint
 		if hp.CPUPct == 0 && hp.MemPct == 0 && hp.Load1 == 0 {
 			continue
 		}
@@ -297,18 +281,10 @@ func (s *Scraper) GetHostLoad(ctx context.Context) (tunnel.GetHostLoadResponse, 
 		resp.Load1 = hp.Load1
 		resp.Load5 = hp.Load5
 		resp.Load15 = hp.Load15
+		resp.SampledAt = snap.at.Unix()
 		return resp, nil
 	}
 	return resp, nil
-}
-
-func (s *Scraper) targetByName(name string) *ScrapeTarget {
-	for i := range s.cfg.Targets {
-		if s.cfg.Targets[i].Name == name {
-			return &s.cfg.Targets[i]
-		}
-	}
-	return nil
 }
 
 // GetProcessList delegates to gopsutil — scraped targets don't carry

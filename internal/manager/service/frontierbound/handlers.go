@@ -301,8 +301,9 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 		}
 		c.bindEdgeTransport(edgeID, canonicalEdgeID)
 		out := tunnel.RegisterEdgeResponse{
-			EdgeID:     canonicalEdgeID,
-			ServerTime: time.Now().UTC().Unix(),
+			EdgeID:             canonicalEdgeID,
+			ServerTime:         time.Now().UTC().Unix(),
+			MetricsCompression: tunnel.MetricsCompressionSnappy,
 		}
 		return json.Marshal(out)
 	}); err != nil {
@@ -431,7 +432,7 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 	// push_host_metrics: forward batches to the ingester.
 	if err := c.Register(ctx, tunnel.MethodPushHostMetrics, func(rpcCtx context.Context, edgeID uint64, body []byte) ([]byte, error) {
 		var in tunnel.PushHostMetricsRequest
-		if err := json.Unmarshal(body, &in); err != nil {
+		if err := tunnel.DecodeMetricsRequest(body, &in); err != nil {
 			return nil, fmt.Errorf("push_host_metrics: decode: %w", err)
 		}
 		canonicalEdgeID := c.canonicalizeEdgeID(edgeID)
@@ -477,7 +478,7 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 	// silently — the edge has no business knowing the cloud's Prom state.
 	if err := c.Register(ctx, tunnel.MethodPushPromSamples, func(rpcCtx context.Context, edgeID uint64, body []byte) ([]byte, error) {
 		var in tunnel.PushPromSamplesRequest
-		if err := json.Unmarshal(body, &in); err != nil {
+		if err := tunnel.DecodeMetricsRequest(body, &in); err != nil {
 			return nil, fmt.Errorf("push_prom_samples: decode: %w", err)
 		}
 		canonicalEdgeID := c.canonicalizeEdgeID(edgeID)
@@ -486,10 +487,9 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 		}
 		n := len(in.Samples)
 		if canonicalEdgeID == 0 {
-			// Edge hasn't completed register_edge yet. Silent drop to
-			// avoid leaking the raw transport ID as edge_id label
-			// (v0.7.39 fix).
-			return json.Marshal(tunnel.PushPromSamplesResponse{Accepted: n})
+			// Registration is incomplete. Do not write a transport ID as an
+			// edge label or acknowledge data that has not reached ingestion.
+			return json.Marshal(tunnel.PushPromSamplesResponse{Accepted: 0})
 		}
 		if w.PromIngester == nil {
 			// Prom disabled / not wired. Quiet drop, return Accepted=n so the
@@ -511,7 +511,7 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 					slog.String("source", in.Source),
 					slog.Int("n", n),
 				)
-				return json.Marshal(tunnel.PushPromSamplesResponse{Accepted: n})
+				return json.Marshal(tunnel.PushPromSamplesResponse{Accepted: 0})
 			}
 			if err := w.PromIngester.PushKubernetes(rpcCtx, clusterID, in.Source, in.Samples); err != nil {
 				log.Warn("frontierbound: k8s prom ingest push",
@@ -543,16 +543,15 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 				}
 				return json.Marshal(tunnel.PushPromSamplesResponse{Accepted: n})
 			}
-			// Host junction missing — drop rather than pollute the TSDB
-			// with edge_id-as-device_id (issue #96). Accepted=n so the
-			// edge does not spin-retry; the link lands on register_edge.
+			// Host junction missing: leave the snapshot unconfirmed so a
+			// later collection tick can retry after registration repairs it.
 			log.Warn("frontierbound: push_prom_samples dropped — device_id unresolved (edge_devices host junction missing; edge needs to (re)register)",
 				slog.Uint64("edge_id", canonicalEdgeID),
 				slog.Uint64("transport_edge_id", edgeID),
 				slog.String("source", in.Source),
 				slog.Int("n", n),
 			)
-			return json.Marshal(tunnel.PushPromSamplesResponse{Accepted: n})
+			return json.Marshal(tunnel.PushPromSamplesResponse{Accepted: 0})
 		}
 		if err := w.PromIngester.Push(rpcCtx, deviceID, in.Source, in.Samples); err != nil {
 			log.Warn("frontierbound: prom ingest push",

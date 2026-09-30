@@ -330,8 +330,9 @@ type RegisterEdgeRequest struct {
 
 // RegisterEdgeResponse is what the cloud answers on successful register.
 type RegisterEdgeResponse struct {
-	EdgeID     uint64 `json:"edge_id"`
-	ServerTime int64  `json:"server_time"` // unix seconds UTC
+	EdgeID             uint64 `json:"edge_id"`
+	ServerTime         int64  `json:"server_time"` // unix seconds UTC
+	MetricsCompression string `json:"metrics_compression,omitempty"`
 }
 
 // ---------------------------------------------------------------------

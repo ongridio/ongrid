@@ -900,6 +900,7 @@ func (a collectorAdapter) CollectAll(ctx context.Context) ([]edgebiz.CollectorOu
 			Source:         o.Source,
 			HostPoint:      o.HostPoint,
 			HostPointValid: o.HostPointValid,
+			SnapshotID:     o.SnapshotID,
 			Samples:        o.Samples,
 		})
 	}

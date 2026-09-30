@@ -1,5 +1,12 @@
 // These messages are transported over a geminio tunnel (not gRPC).
-// Encoded as JSON on the wire in MVP (see ADR-001); may switch to proto binary in Phase 2.
+// Encoded as JSON on the wire (see ADR-001). After register_edge advertises
+// metrics_compression="snappy", push_host_metrics and push_prom_samples may use
+// a six-byte prefix (00 4f 47 4d 53 01) followed by Snappy block-compressed JSON.
+// RPC names and response formats stay unchanged. Decoded compressed requests
+// are limited to 16 MiB. Larger batches are split by encoded JSON bytes before
+// compression, preserving item order and metadata. A single oversized item
+// or oversized shared metadata keeps legacy JSON instead of truncating data.
+// Smaller than 1 KiB and non-beneficial requests also keep legacy JSON.
 //
 // No gRPC service is declared here — cloud and edge register handlers by method name
 // on geminio End objects; these messages are just the request / response body shapes.
@@ -87,6 +94,8 @@ message RegisterEdgeResponse {
     uint64 edge_id = 1 [json_name = "edge_id"];
     uint64 org_id = 2 [json_name = "org_id"];
     google.protobuf.Timestamp server_time = 3 [json_name = "server_time"];
+    // Empty in older Managers. Only "snappy" enables metric request compression.
+    string metrics_compression = 4 [json_name = "metrics_compression"];
 }
 
 // ============================================================

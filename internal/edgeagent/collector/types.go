@@ -29,6 +29,9 @@ const (
 //   - Samples is the flat open-set rich path consumed by the new
 //     push_prom_samples wire method.
 type CollectorOutput struct {
+	// SnapshotID is nonzero only for cached scrapes. A new acquisition gets
+	// a new ID even when every sample value is unchanged.
+	SnapshotID     uint64
 	Source         CollectorSource
 	HostPoint      tunnel.HostMetricPoint
 	HostPointValid bool

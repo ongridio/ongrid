@@ -51,6 +51,7 @@ type NetworkDiscoveryCollector interface {
 // Samples is the open-set rich path consumed by the new
 // push_prom_samples wire method.
 type CollectorOutput struct {
+	SnapshotID     uint64 // nonzero identifies one immutable cached scrape
 	Source         string
 	HostPoint      tunnel.HostMetricPoint
 	HostPointValid bool
@@ -610,13 +611,13 @@ var errTunnelStuck = errors.New("tunnel stuck")
 // push_prom_samples path. One push per source — multi-target scrape
 // produces one push_host_metrics + one push_prom_samples per target.
 //
-// On either push failure, the corresponding output is dropped and the
-// next tick retries with fresh data; we deliberately do not buffer
-// open-set samples on the edge because Prometheus remote_write expects
-// timely delivery and stale samples are useless.
+// Cached scrapes retain their acquisition ID and timestamp. Only confirmed
+// delivery is deduplicated; failed paths remain eligible on the next tick.
+// The collector still retains its latest snapshot, not a persistent queue.
 func (a *Agent) metricsLoop(ctx context.Context) error {
 	t := time.NewTicker(a.cfg.MetricsInterval)
 	defer t.Stop()
+	delivered := make(map[string]snapshotDelivery)
 
 	for {
 		select {
@@ -629,16 +630,38 @@ func (a *Agent) metricsLoop(ctx context.Context) error {
 				// CollectAll may still return a partial slice on error.
 			}
 			for _, out := range outs {
-				a.pushOne(ctx, out)
+				a.pushSnapshot(ctx, out, delivered)
 			}
 		}
 	}
 }
 
+type snapshotDelivery struct {
+	id      uint64
+	host    bool
+	samples int
+}
+
+func (a *Agent) pushSnapshot(ctx context.Context, out CollectorOutput, delivered map[string]snapshotDelivery) {
+	if out.SnapshotID == 0 {
+		a.pushOne(ctx, out)
+		return
+	}
+	state := delivered[out.Source]
+	if state.id != out.SnapshotID {
+		state = snapshotDelivery{id: out.SnapshotID}
+	}
+	out.HostPointValid = out.HostPointValid && !state.host
+	out.Samples = out.Samples[state.samples:]
+	host, samples := a.pushOne(ctx, out)
+	state.host = state.host || host
+	state.samples += samples
+	delivered[out.Source] = state
+}
+
 // pushOne emits one CollectorOutput's two halves (HostPoint and Samples)
-// to cloud. Errors are logged but never propagate — the next tick is
-// the only retry strategy here.
-func (a *Agent) pushOne(ctx context.Context, out CollectorOutput) {
+// to cloud, returning confirmed delivery independently for the two paths.
+func (a *Agent) pushOne(ctx context.Context, out CollectorOutput) (hostSent bool, samplesSent int) {
 	// 1) legacy fast path: push_host_metrics with one point, but only
 	// for the selected host source. Component scrape targets should not
 	// populate dashboard/alert fast-path rows.
@@ -656,7 +679,10 @@ func (a *Agent) pushOne(ctx context.Context, out CollectorOutput) {
 				slog.String("source", out.Source),
 				slog.Any("err", err),
 			)
+		} else if resp1.Accepted != 1 {
+			a.log.Warn("agent: host metric not accepted", slog.String("source", out.Source), slog.Uint64("accepted", uint64(resp1.Accepted)))
 		} else {
+			hostSent = true
 			a.log.Debug("agent: pushed host metrics",
 				slog.String("source", out.Source),
 				slog.Int("accepted", int(resp1.Accepted)),
@@ -666,7 +692,7 @@ func (a *Agent) pushOne(ctx context.Context, out CollectorOutput) {
 
 	// 2) open-set rich path: push_prom_samples
 	if len(out.Samples) == 0 {
-		return
+		return hostSent, 0
 	}
 	rctx2, cancel2 := context.WithTimeout(ctx, 15*time.Second)
 	var resp2 tunnel.PushPromSamplesResponse
@@ -677,19 +703,28 @@ func (a *Agent) pushOne(ctx context.Context, out CollectorOutput) {
 			Samples: out.Samples,
 		}, &resp2)
 	cancel2()
+	// Split requests expose only a fully acknowledged prefix even on error.
+	if resp2.Accepted >= 0 && resp2.Accepted <= len(out.Samples) {
+		samplesSent = resp2.Accepted
+	}
 	if err != nil {
 		a.log.Warn("agent: push_prom_samples failed",
 			slog.String("source", out.Source),
 			slog.Int("samples", len(out.Samples)),
 			slog.Any("err", err),
 		)
-		return
+		return hostSent, samplesSent
+	}
+	if samplesSent != len(out.Samples) {
+		a.log.Warn("agent: prom samples not fully accepted", slog.String("source", out.Source), slog.Int("accepted", resp2.Accepted), slog.Int("samples", len(out.Samples)))
+		return hostSent, 0 // A count alone cannot identify an arbitrary partial subset.
 	}
 	a.log.Debug("agent: pushed prom samples",
 		slog.String("source", out.Source),
 		slog.Int("samples", len(out.Samples)),
 		slog.Int("accepted", resp2.Accepted),
 	)
+	return hostSent, samplesSent
 }
 
 // noopCollector is used when the Phase 1 New() constructor is still in

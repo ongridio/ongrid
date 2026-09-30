@@ -55,12 +55,13 @@ type geminioClient struct {
 
 	endPtr atomic.Pointer[geminio.End]
 
-	connMu            sync.Mutex
-	activeConn        net.Conn
-	activeGeneration  uint64
-	pendingConn       net.Conn
-	pendingGeneration uint64
-	nextGeneration    uint64
+	connMu             sync.Mutex
+	activeConn         net.Conn
+	activeGeneration   uint64
+	pendingConn        net.Conn
+	pendingGeneration  uint64
+	nextGeneration     uint64
+	metricsCompression bool // guarded by connMu; reset on each connection/registration
 
 	closeOnce sync.Once
 	closed    atomic.Bool
@@ -268,31 +269,81 @@ func (c *geminioClient) registerOn(end geminio.End, method string, h Handler) er
 // errors as-is. RetryEnd owns transport recovery; application errors must
 // not force a second connection while the current transport is still live.
 func (c *geminioClient) Call(ctx context.Context, method string, req, resp any) error {
-	end := c.loadEnd()
-	if end == nil {
-		return errors.New("tunnel: not dialed")
-	}
 	body, err := json.Marshal(req)
 	if err != nil {
 		return fmt.Errorf("marshal %q req: %w", method, err)
 	}
-	connGeneration := c.connectionGeneration()
-	rsp, callErr := end.Call(ctx, method, end.NewRequest(body))
+	var data []byte
+	if len(body) > maxMetricsDecodedBytes && metricsItemsField(method) != "" {
+		data, err = c.callMetricsBatches(ctx, method, body)
+	} else {
+		data, err = c.callJSON(ctx, method, body)
+	}
+	if resp != nil && (err == nil || data != nil) {
+		if decodeErr := json.Unmarshal(data, resp); decodeErr != nil {
+			return fmt.Errorf("unmarshal %q resp: %w", method, decodeErr)
+		}
+	}
+	return err
+}
+
+func (c *geminioClient) callJSON(ctx context.Context, method string, body []byte) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	end := c.loadEnd()
+	if end == nil {
+		return nil, errors.New("tunnel: not dialed")
+	}
+	c.connMu.Lock()
+	connGeneration := c.activeGeneration
+	if method == MethodRegisterEdge {
+		c.metricsCompression = false
+	}
+	compress := c.metricsCompression
+	c.connMu.Unlock()
+	wireBody := body
+	if compress {
+		wireBody = encodeMetricsRequest(method, body)
+	}
+	rsp, callErr := end.Call(ctx, method, end.NewRequest(wireBody))
+	remoteError := callErr == nil
+	if callErr == nil {
+		callErr = rsp.Error()
+	}
+	if wireBody[0] == 0 && legacyMetricsEncodingError(method, callErr) {
+		// Manager can roll back without the Edge-to-Frontier connection changing.
+		// Keep the original RPC name so Frontier retains the same routing key.
+		c.setMetricsCompression(connGeneration, false)
+		rsp, callErr = end.Call(ctx, method, end.NewRequest(body))
+		remoteError = callErr == nil
+		if callErr == nil {
+			callErr = rsp.Error()
+		}
+	}
 	if callErr != nil {
 		c.recycleBrokenRoute(method, callErr, connGeneration)
-		return fmt.Errorf("tunnel call %q: %w", method, callErr)
+		if remoteError {
+			return nil, fmt.Errorf("tunnel call %q: remote: %w", method, callErr)
+		}
+		return nil, fmt.Errorf("tunnel call %q: %w", method, callErr)
 	}
-	if rerr := rsp.Error(); rerr != nil {
-		c.recycleBrokenRoute(method, rerr, connGeneration)
-		return fmt.Errorf("tunnel call %q: remote: %w", method, rerr)
+	if method == MethodRegisterEdge {
+		var registration RegisterEdgeResponse
+		if err := json.Unmarshal(rsp.Data(), &registration); err != nil {
+			return nil, fmt.Errorf("unmarshal %q resp: %w", method, err)
+		}
+		c.setMetricsCompression(connGeneration, registration.MetricsCompression == MetricsCompressionSnappy)
 	}
-	if resp == nil {
-		return nil
+	return rsp.Data(), nil
+}
+
+func (c *geminioClient) setMetricsCompression(generation uint64, enabled bool) {
+	c.connMu.Lock()
+	defer c.connMu.Unlock()
+	if generation == c.activeGeneration {
+		c.metricsCompression = enabled
 	}
-	if err := json.Unmarshal(rsp.Data(), resp); err != nil {
-		return fmt.Errorf("unmarshal %q resp: %w", method, err)
-	}
-	return nil
 }
 
 func (c *geminioClient) trackConnection(conn net.Conn) {
@@ -334,6 +385,7 @@ func (c *geminioClient) promotePendingConnection() {
 	}
 	c.activeConn = conn
 	c.activeGeneration = c.pendingGeneration
+	c.metricsCompression = false
 	c.pendingConn = nil
 	c.pendingGeneration = 0
 	c.connMu.Unlock()

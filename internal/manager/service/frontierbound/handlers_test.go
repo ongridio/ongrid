@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/golang/snappy"
 	"github.com/singchia/geminio"
 
 	edgebiz "github.com/ongridio/ongrid/internal/manager/biz/edge"
@@ -28,6 +30,7 @@ type fakePromIngester struct {
 	wantK8sErr     error
 	pushCnt        int
 	pushK8sPushCnt int
+	gotSamples     []tunnel.PromSample
 }
 
 func (f *fakePromIngester) Push(_ context.Context, edgeID uint64, source string, samples []tunnel.PromSample) error {
@@ -37,6 +40,7 @@ func (f *fakePromIngester) Push(_ context.Context, edgeID uint64, source string,
 	f.gotEdge = edgeID
 	f.gotSrc = source
 	f.gotN = len(samples)
+	f.gotSamples = samples
 	return f.wantErr
 }
 
@@ -52,9 +56,13 @@ func (f *fakePromIngester) PushKubernetes(_ context.Context, clusterID uint64, s
 
 // fakeMetricIngester is a minimal stub for the existing MetricIngester
 // requirement of Install. push_host_metrics tests aren't run here.
-type fakeMetricIngester struct{}
+type fakeMetricIngester struct {
+	gotDevice uint64
+	gotPoints []tunnel.HostMetricPoint
+}
 
-func (f *fakeMetricIngester) Push(_ context.Context, _ uint64, _ []tunnel.HostMetricPoint) error {
+func (f *fakeMetricIngester) Push(_ context.Context, deviceID uint64, points []tunnel.HostMetricPoint) error {
+	f.gotDevice, f.gotPoints = deviceID, points
 	return nil
 }
 
@@ -459,6 +467,58 @@ func TestInstall_PushPromSamples_HappyPath(t *testing.T) {
 	}
 }
 
+func TestInstall_CompressedMetricsPreserveIdentityAndData(t *testing.T) {
+	pi, mi := &fakePromIngester{}, &fakeMetricIngester{}
+	fs, c, _ := installAndDispatch(t, Wiring{
+		PromIngester: pi, MetricIngester: mi, DeviceResolver: &fakeDeviceResolver{id: 81},
+	})
+	c.bindEdgeTransport(7, 42)
+	samples := []tunnel.PromSample{{Name: "request_total", Labels: map[string]string{"service_name": "api"}, Value: 17.5, TsMs: 1234567}}
+	points := []tunnel.HostMetricPoint{{Ts: 1234, CPUPct: 12.5, MemPct: 34.5}}
+	for _, tc := range []struct {
+		method  string
+		request any
+	}{
+		{tunnel.MethodPushPromSamples, tunnel.PushPromSamplesRequest{EdgeID: 42, Source: "obi", Samples: samples}},
+		{tunnel.MethodPushHostMetrics, tunnel.PushHostMetricsRequest{EdgeID: 42, Points: points}},
+	} {
+		t.Run(tc.method, func(t *testing.T) {
+			body, err := json.Marshal(tc.request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Encode the documented wire format independently of the Edge encoder.
+			wire := append([]byte{0, 'O', 'G', 'M', 'S', 1}, snappy.Encode(nil, body)...)
+			rsp := &fakeResp{}
+			fs.rpcs[tc.method](context.Background(), &fakeReq{data: wire, clientID: 7}, rsp)
+			if rsp.err != nil {
+				t.Fatal(rsp.err)
+			}
+			if string(rsp.data) != `{"accepted":1}` {
+				t.Fatalf("response=%s", rsp.data)
+			}
+		})
+	}
+	if pi.gotEdge != 81 || pi.gotSrc != "obi" || !reflect.DeepEqual(pi.gotSamples, samples) {
+		t.Fatal("Prom metrics identity/data changed")
+	}
+	if mi.gotDevice != 81 || !reflect.DeepEqual(mi.gotPoints, points) {
+		t.Fatal("host metrics identity/data changed")
+	}
+	// Compression must not bypass the existing authenticated Edge-ID check.
+	body, err := json.Marshal(tunnel.PushPromSamplesRequest{EdgeID: 99, Samples: samples})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rsp := &fakeResp{}
+	fs.rpcs[tunnel.MethodPushPromSamples](context.Background(), &fakeReq{
+		data: append([]byte{0, 'O', 'G', 'M', 'S', 1}, snappy.Encode(nil, body)...), clientID: 7,
+	}, rsp)
+	if rsp.err == nil || pi.pushCnt != 1 {
+		t.Fatal("mismatched identity reached the ingester")
+	}
+}
+
 func TestInstall_PushPromSamples_DoesNotTrustUnboundBodyEdgeID(t *testing.T) {
 	pi := &fakePromIngester{}
 	_, _, rpc := installAndDispatch(t, Wiring{PromIngester: pi, Log: slog.Default()})
@@ -549,29 +609,45 @@ func TestInstall_PushPromSamples_IngesterError(t *testing.T) {
 	}
 }
 
-// Issue #96: when the host junction can't be resolved, resolveDeviceID
-// returns 0 and the handler MUST drop the batch (never write edge_id as
-// the device_id label). The ingester must not be called.
-func TestInstall_PushPromSamples_DropsWhenDeviceUnresolved(t *testing.T) {
-	pi := &fakePromIngester{}
-	_, c, rpc := installAndDispatch(t, Wiring{
-		PromIngester:   pi,
-		DeviceResolver: &fakeDeviceResolver{err: errors.New("no host junction")},
-		Log:            slog.Default(),
-	})
-	c.bindEdgeTransport(1, 5)
-	body, _ := json.Marshal(tunnel.PushPromSamplesRequest{
-		EdgeID:  5,
-		Source:  "embedded",
-		Samples: []tunnel.PromSample{{Name: "x", Value: 1, TsMs: 1}},
-	})
-	rsp := &fakeResp{}
-	rpc(context.Background(), &fakeReq{data: body, clientID: 1}, rsp)
-	if rsp.err != nil {
-		t.Fatalf("drop must not error: %v", rsp.err)
-	}
-	if pi.pushCnt != 0 {
-		t.Fatalf("ingester called %d times, want 0 — must drop, never write edge_id as device_id", pi.pushCnt)
+// Missing identity must never write transport IDs as device labels (#96),
+// nor falsely confirm a snapshot that the Edge would then deduplicate.
+func TestInstall_PushPromSamples_OnlyAcknowledgesResolvedIdentity(t *testing.T) {
+	for _, missing := range []string{"registration", "device", "cluster"} {
+		t.Run(missing, func(t *testing.T) {
+			pi := &fakePromIngester{}
+			resolver := &fakeDeviceResolver{id: 81}
+			registry := &fakeK8sRegistry{}
+			_, c, rpc := installAndDispatch(t, Wiring{PromIngester: pi, DeviceResolver: resolver, K8sRegistry: registry})
+			if missing != "registration" {
+				c.bindEdgeTransport(1, 5)
+			}
+			if missing == "device" {
+				resolver.err = errors.New("no host junction")
+			}
+			source := "scrape:host"
+			if missing == "cluster" {
+				source = "k8s:kube-state-metrics"
+			}
+			body, err := json.Marshal(tunnel.PushPromSamplesRequest{EdgeID: 5, Source: source,
+				Samples: []tunnel.PromSample{{Name: "x", Value: 1, TsMs: 1}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, accepted := range []int{0, 1} {
+				rsp := &fakeResp{}
+				rpc(context.Background(), &fakeReq{data: body, clientID: 1}, rsp)
+				var out tunnel.PushPromSamplesResponse
+				if err := json.Unmarshal(rsp.data, &out); err != nil || rsp.err != nil || out.Accepted != accepted {
+					t.Fatalf("accepted=%d want=%d decode=%v rpc=%v", out.Accepted, accepted, err, rsp.err)
+				}
+				if pi.pushCnt+pi.pushK8sPushCnt != accepted {
+					t.Fatal("acknowledgement does not match ingestion")
+				}
+				c.bindEdgeTransport(1, 5)
+				resolver.err = nil
+				registry.clusterID = 7
+			}
+		})
 	}
 }
 
@@ -650,7 +726,8 @@ func TestInstall_PushPromSamples_K8sSourceBypassesHostDeviceID(t *testing.T) {
 
 func TestInstall_PushPromSamples_NilIngesterSilentlyAccepts(t *testing.T) {
 	// Wiring.PromIngester == nil => Prom disabled.
-	_, _, rpc := installAndDispatch(t, Wiring{PromIngester: nil, Log: slog.Default()})
+	_, c, rpc := installAndDispatch(t, Wiring{PromIngester: nil, Log: slog.Default()})
+	c.bindEdgeTransport(1, 1)
 
 	body, _ := json.Marshal(tunnel.PushPromSamplesRequest{
 		Source: "embedded",

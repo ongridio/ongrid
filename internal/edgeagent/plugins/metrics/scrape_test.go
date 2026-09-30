@@ -470,3 +470,12 @@ func TestApplicationMetricsScrapeTarget(t *testing.T) {
 		t.Fatalf("duplicated custom target %+v %v", custom, err)
 	}
 }
+
+func TestDuplicateMetricsURLsAreScrapedOnce(t *testing.T) {
+	first := "http://127.0.0.1:9464/metrics?scope=first"
+	second := "http://127.0.0.1:9464/metrics?scope=second"
+	spec, err := parseSpec(map[string]any{"target_urls": []string{first, second, first, second}, "application_metrics_url": first})
+	if err != nil || len(spec.URLs) != 2 || spec.URLs[0] != first || spec.URLs[1] != second {
+		t.Fatalf("targets=%v err=%v", spec.URLs, err)
+	}
+}

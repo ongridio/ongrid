@@ -86,6 +86,8 @@ type Client interface {
 	// automatic on reconnect.
 	RegisterHandler(method string, h Handler)
 	// Call invokes an RPC on cloud (heartbeat, push_host_metrics, ...).
+	// Oversized metric requests are split in order. On a later batch failure,
+	// resp.Accepted contains only the fully acknowledged prefix, even on error.
 	Call(ctx context.Context, method string, req, resp any) error
 	// AcceptStream blocks until the cloud opens a new bidirectional
 	// stream against this edge (frontier OpenStream call). Used by
