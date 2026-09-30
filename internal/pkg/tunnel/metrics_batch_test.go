@@ -12,7 +12,25 @@ import (
 
 	"github.com/golang/snappy"
 	"github.com/singchia/geminio"
+	"github.com/singchia/geminio/packet"
+	"github.com/singchia/geminio/pkg/id"
 )
+
+func assertMetricsPacketFits(t *testing.T, method string, body []byte) {
+	t.Helper()
+	factory := packet.NewPacketFactory(id.NewIDCounter(id.Inc))
+	pkt := factory.NewRequestPacket([]byte(method), body)
+	pkt.Data.Custom = make([]byte, 8) // Frontier appends the authenticated Edge ID.
+	encoded, err := pkt.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Geminio base64-encodes Data.Value within its JSON frame. Test the real
+	// encoded packet, since a raw JSON body below 10 MiB can still exceed it.
+	if len(encoded) > packet.MaxDecodablePacketLen {
+		t.Fatalf("encoded Geminio packet exceeds 10 MiB: %d bytes", len(encoded))
+	}
+}
 
 func TestMetricsBatchExactBytesAndMetadata(t *testing.T) {
 	for _, field := range []string{"samples", "points"} {
@@ -119,47 +137,93 @@ func TestMetricsBatchOversizedItemAndCancellation(t *testing.T) {
 	}
 }
 
-func TestSingleOversizedMetricRetainsLegacyJSON(t *testing.T) {
+func TestSingleLargeMetricPreservesDataWhenItsFrameFits(t *testing.T) {
 	request := PushPromSamplesRequest{EdgeID: 42, Source: "large", Samples: []PromSample{
 		{Name: "before", Labels: map[string]string{"label": strings.Repeat("a", 1024)}, Value: 1, TsMs: 123},
-		{Name: "oversized", Labels: map[string]string{"label": strings.Repeat("b", maxMetricsDecodedBytes)}, Value: 2, TsMs: 124},
+		{Name: "oversized", Labels: map[string]string{"label": strings.Repeat("b", maxMetricsBatchBytes+1024)}, Value: 2, TsMs: 124},
 		{Name: "after", Labels: map[string]string{"label": strings.Repeat("c", 1024)}, Value: 3, TsMs: 125},
 	}}
-	client := NewClient(ClientConfig{}).(*geminioClient)
-	client.setMetricsCompression(0, true)
-	calls := 0
-	var end geminio.End = &metricsTestEnd{call: func(_ context.Context, _ string, req geminio.Request) (geminio.Response, error) {
-		if calls >= len(request.Samples) {
-			t.Fatal("unexpected retry")
+	for _, compressed := range []bool{false, true} {
+		client := NewClient(ClientConfig{}).(*geminioClient)
+		client.setMetricsCompression(0, compressed)
+		calls := 0
+		var end geminio.End = &metricsTestEnd{call: func(_ context.Context, method string, req geminio.Request) (geminio.Response, error) {
+			if calls >= len(request.Samples) {
+				t.Fatal("unexpected retry")
+			}
+			body := req.Data()
+			assertMetricsPacketFits(t, method, body)
+			if (body[0] == 0) != compressed {
+				t.Fatal("unexpected encoding")
+			}
+			var got PushPromSamplesRequest
+			if err := DecodeMetricsRequest(body, &got); err != nil {
+				t.Fatal(err)
+			}
+			if got.EdgeID != request.EdgeID || got.Source != request.Source || !reflect.DeepEqual(got.Samples, request.Samples[calls:calls+1]) {
+				t.Fatal("sample or metadata lost")
+			}
+			calls++
+			return &metricsTestResponse{body: []byte(`{"accepted":1}`)}, nil
+		}}
+		client.endPtr.Store(&end)
+		var result PushPromSamplesResponse
+		if err := client.Call(context.Background(), MethodPushPromSamples, &request, &result); err != nil || calls != 3 || result.Accepted != 3 {
+			t.Fatalf("accepted=%d calls=%d err=%v", result.Accepted, calls, err)
 		}
-		body := req.Data()
-		if (body[0] != 0) != (calls == 1) {
-			t.Fatal("only the indivisible oversized item should use legacy JSON")
-		}
-		var got PushPromSamplesRequest
-		if err := DecodeMetricsRequest(body, &got); err != nil {
-			t.Fatal(err)
-		}
-		if got.EdgeID != request.EdgeID || got.Source != request.Source || !reflect.DeepEqual(got.Samples, request.Samples[calls:calls+1]) {
-			t.Fatal("sample or metadata lost")
-		}
-		calls++
-		return &metricsTestResponse{body: []byte(`{"accepted":1}`)}, nil
-	}}
-	client.endPtr.Store(&end)
-	var result PushPromSamplesResponse
-	if err := client.Call(context.Background(), MethodPushPromSamples, &request, &result); err != nil || calls != 3 || result.Accepted != 3 {
-		t.Fatalf("accepted=%d calls=%d err=%v", result.Accepted, calls, err)
+	}
+}
+
+func TestUnsendableMetricPreservesOnlyConfirmedPrefix(t *testing.T) {
+	for _, mode := range []string{"legacy", "rollback", "decoder limit"} {
+		t.Run(mode, func(t *testing.T) {
+			labelBytes := maxMetricsWireBytes + 1024
+			if mode == "decoder limit" {
+				labelBytes = maxMetricsDecodedBytes
+			}
+			request := PushPromSamplesRequest{Samples: []PromSample{
+				{Name: "first", Value: 1, TsMs: 123},
+				{Name: "oversized", Labels: map[string]string{"large": strings.Repeat("x", labelBytes)}, Value: 2, TsMs: 124},
+				{Name: "after", Value: 3, TsMs: 125},
+			}}
+			client := NewClient(ClientConfig{}).(*geminioClient)
+			client.setMetricsCompression(0, mode != "legacy")
+			calls, received := 0, 0
+			var end geminio.End = &metricsTestEnd{call: func(_ context.Context, method string, req geminio.Request) (geminio.Response, error) {
+				calls++
+				assertMetricsPacketFits(t, method, req.Data())
+				var got PushPromSamplesRequest
+				if err := json.Unmarshal(req.Data(), &got); err != nil {
+					return &metricsTestResponse{err: fmt.Errorf("%s: decode: %w", method, err)}, nil
+				}
+				if len(got.Samples) != 1 || got.Samples[0].Name != "first" {
+					t.Fatal("oversized or later sample was incorrectly sent")
+				}
+				received++
+				return &metricsTestResponse{body: []byte(`{"accepted":1}`)}, nil
+			}}
+			client.endPtr.Store(&end)
+			var result PushPromSamplesResponse
+			err := client.Call(context.Background(), MethodPushPromSamples, request, &result)
+			wantCalls := 1
+			if mode == "rollback" {
+				wantCalls = 2 // The compressed large item was rejected before decoding.
+			}
+			if !errors.Is(err, packet.ErrPacketTooLarge) || result.Accepted != 1 || received != 1 || calls != wantCalls {
+				t.Fatalf("accepted=%d received=%d calls=%d err=%v", result.Accepted, received, calls, err)
+			}
+		})
 	}
 }
 
 func TestLargeMetricRequestSplitsBeforeCompression(t *testing.T) {
-	// Three large samples exercise real 16 MiB splitting without relying on
-	// an estimate or a sample-count limit. Full labels are compared after decode.
+	// The raw request is below the 16 MiB decompression limit, but its legacy
+	// Geminio frame exceeds 10 MiB. Two samples fit the 6 MiB JSON batch budget.
+	const labelBytes = (3 << 20) - 256
 	request := PushPromSamplesRequest{EdgeID: 42, Source: "large", Samples: []PromSample{
-		{Name: "first", Labels: map[string]string{"large": strings.Repeat("a", 6<<20)}, Value: 1, TsMs: 123},
-		{Name: "second", Labels: map[string]string{"large": strings.Repeat("b", 6<<20)}, Value: 2, TsMs: 124},
-		{Name: "third", Labels: map[string]string{"large": strings.Repeat("c", 6<<20)}, Value: 3, TsMs: 125},
+		{Name: "first", Labels: map[string]string{"large": strings.Repeat("a", labelBytes)}, Value: 1, TsMs: 123},
+		{Name: "second", Labels: map[string]string{"large": strings.Repeat("b", labelBytes)}, Value: 2, TsMs: 124},
+		{Name: "third", Labels: map[string]string{"large": strings.Repeat("c", labelBytes)}, Value: 3, TsMs: 125},
 	}}
 	for _, mode := range []string{"snappy", "old manager", "failure", "partial acknowledgement", "rollback"} {
 		t.Run(mode, func(t *testing.T) {
@@ -173,6 +237,7 @@ func TestLargeMetricRequestSplitsBeforeCompression(t *testing.T) {
 					t.Fatal("routing key changed")
 				}
 				body := req.Data()
+				assertMetricsPacketFits(t, method, body)
 				wireBytes += len(body)
 				if body[0] == 0 {
 					compressed++
@@ -187,7 +252,7 @@ func TestLargeMetricRequestSplitsBeforeCompression(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				if len(body) > maxMetricsDecodedBytes {
+				if len(body) > maxMetricsBatchBytes {
 					t.Fatalf("batch exceeds cap: %d", len(body))
 				}
 				var got PushPromSamplesRequest

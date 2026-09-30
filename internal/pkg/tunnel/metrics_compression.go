@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/golang/snappy"
+	"github.com/singchia/geminio/packet"
 )
 
 const (
@@ -16,7 +17,18 @@ const (
 	metricsSnappyPrefix        = "\x00OGMS\x01"
 	minMetricsCompressionBytes = 1024
 	maxMetricsDecodedBytes     = 16 << 20
+	// Geminio base64-encodes payloads inside a JSON frame capped at 10 MiB.
+	maxMetricsBatchBytes = 6 << 20
+	// Reserve 1 KiB for RPC metadata, deadlines, and Frontier's Edge-ID tail.
+	maxMetricsWireBytes = (packet.MaxDecodablePacketLen - 1024) / 4 * 3
 )
+
+func checkMetricsWireSize(method string, body []byte) error {
+	if metricsItemsField(method) != "" && len(body) > maxMetricsWireBytes {
+		return fmt.Errorf("%s: encoded metrics payload %d exceeds tunnel budget %d: %w", method, len(body), maxMetricsWireBytes, packet.ErrPacketTooLarge)
+	}
+	return nil
+}
 
 func encodeMetricsRequest(method string, body []byte) []byte {
 	if (method != MethodPushPromSamples && method != MethodPushHostMetrics) ||

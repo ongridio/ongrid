@@ -48,7 +48,7 @@ func forEachMetricsBatch(ctx context.Context, body []byte, field string, limit i
 	baseBytes := len(prefix) + 2 // closing array and object
 	if baseBytes > limit {
 		// Metadata cannot be split without changing the protocol. Preserve the
-		// previously valid JSON request rather than imposing a new data limit.
+		// full request; callJSON still checks whether its wire encoding fits.
 		return send(body, len(items))
 	}
 	batch := make([]byte, 0, min(limit, len(body)))
@@ -72,8 +72,8 @@ func forEachMetricsBatch(ctx context.Context, body []byte, field string, limit i
 		if count > 0 {
 			batch = append(batch, ',')
 		}
-		// An indivisible item larger than the budget travels alone as legacy
-		// JSON. Other batches still benefit from compression; nothing is cut.
+		// An indivisible item travels alone. callJSON compresses it if possible
+		// and rejects it if it cannot fit the transport; nothing is cut.
 		batch = append(batch, item...)
 		count++
 	}
@@ -85,7 +85,7 @@ func forEachMetricsBatch(ctx context.Context, body []byte, field string, limit i
 
 func (c *geminioClient) callMetricsBatches(ctx context.Context, method string, body []byte) ([]byte, error) {
 	accepted := 0
-	err := forEachMetricsBatch(ctx, body, metricsItemsField(method), maxMetricsDecodedBytes, func(batch []byte, count int) error {
+	err := forEachMetricsBatch(ctx, body, metricsItemsField(method), maxMetricsBatchBytes, func(batch []byte, count int) error {
 		data, err := c.callJSON(ctx, method, batch)
 		if err != nil {
 			return fmt.Errorf("metrics batch after %d confirmed items: %w", accepted, err)

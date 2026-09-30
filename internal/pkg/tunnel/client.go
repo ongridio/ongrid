@@ -274,7 +274,7 @@ func (c *geminioClient) Call(ctx context.Context, method string, req, resp any) 
 		return fmt.Errorf("marshal %q req: %w", method, err)
 	}
 	var data []byte
-	if len(body) > maxMetricsDecodedBytes && metricsItemsField(method) != "" {
+	if len(body) > maxMetricsBatchBytes && metricsItemsField(method) != "" {
 		data, err = c.callMetricsBatches(ctx, method, body)
 	} else {
 		data, err = c.callJSON(ctx, method, body)
@@ -306,6 +306,9 @@ func (c *geminioClient) callJSON(ctx context.Context, method string, body []byte
 	if compress {
 		wireBody = encodeMetricsRequest(method, body)
 	}
+	if err := checkMetricsWireSize(method, wireBody); err != nil {
+		return nil, err
+	}
 	rsp, callErr := end.Call(ctx, method, end.NewRequest(wireBody))
 	remoteError := callErr == nil
 	if callErr == nil {
@@ -315,6 +318,9 @@ func (c *geminioClient) callJSON(ctx context.Context, method string, body []byte
 		// Manager can roll back without the Edge-to-Frontier connection changing.
 		// Keep the original RPC name so Frontier retains the same routing key.
 		c.setMetricsCompression(connGeneration, false)
+		if err := checkMetricsWireSize(method, body); err != nil {
+			return nil, err
+		}
 		rsp, callErr = end.Call(ctx, method, end.NewRequest(body))
 		remoteError = callErr == nil
 		if callErr == nil {

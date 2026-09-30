@@ -3,9 +3,11 @@
 // metrics_compression="snappy", push_host_metrics and push_prom_samples may use
 // a six-byte prefix (00 4f 47 4d 53 01) followed by Snappy block-compressed JSON.
 // RPC names and response formats stay unchanged. Decoded compressed requests
-// are limited to 16 MiB. Larger batches are split by encoded JSON bytes before
-// compression, preserving item order and metadata. A single oversized item
-// or oversized shared metadata keeps legacy JSON instead of truncating data.
+// are limited to 16 MiB. Batches over 6 MiB of JSON are split before compression,
+// leaving room for Geminio's base64 framing within its 10 MiB packet limit.
+// Item order and metadata are preserved. An indivisible item or metadata may
+// exceed the batch budget only if its encoded payload still fits the tunnel;
+// otherwise the caller receives an error, without truncation or acknowledgement.
 // Smaller than 1 KiB and non-beneficial requests also keep legacy JSON.
 //
 // No gRPC service is declared here — cloud and edge register handlers by method name
