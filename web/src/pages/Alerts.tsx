@@ -1,4 +1,4 @@
-import { Button, Label, Textarea } from '@/components/ui';
+import { Button, Label, Textarea, PageHeader } from '@/components/ui';
 import { Hint } from '@/components/ui/Tooltip';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -146,10 +146,8 @@ export default function AlertsPage() {
   return (
     <>
       <main className="anim-fade flex flex-1 flex-col overflow-hidden">
-        <header className="app-header border-b border-zinc-800 px-6 py-4">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <h1 className="flex items-center gap-2 text-base font-semibold text-zinc-100">
+        <PageHeader
+          title={<span className="flex items-center gap-2">
                 {tr('告警', 'Alerts')}
                 {globalOpen > 0 && (
                   <Hint content={tr('全局未确认告警数 — 跟侧边栏红点同源', 'Global unacknowledged count — same source as the sidebar badge')}><span
@@ -159,15 +157,12 @@ export default function AlertsPage() {
                     {globalOpen} {tr('未确认', 'open')}
                   </span></Hint>
                 )}
-              </h1>
-              <p className="mt-0.5 text-xs text-zinc-500">
-                {tr(
+              </span>}
+          subtitle={tr(
                   `全局 ${globalOpen} 未确认 · 当前筛选 ${total} 条 · 本页 Critical ${counts.critical}`,
                   `${globalOpen} open globally · ${total} in current filter · ${counts.critical} critical on this page`,
                 )}
-              </p>
-            </div>
-            <div className="flex gap-2">
+          actions={<div className="flex gap-2">
               <Link
                 to="/alerts/rules"
                 className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
@@ -183,11 +178,8 @@ export default function AlertsPage() {
                 <RefreshCw size={12} className={cn(refreshing && 'animate-spin')} />
                 {tr('刷新', 'Refresh')}
               </Button>
-            </div>
-          </div>
-        </header>
-
-        <div className="flex flex-wrap items-center gap-3 border-b border-zinc-800 px-6 py-3 text-xs text-zinc-400">
+            </div>}
+          extra={<div className="flex flex-wrap items-center gap-3 text-xs text-zinc-400">
           <FilterGroup
             label={tr('状态', 'Status')}
             options={STATUS_FILTERS.map((o) => ({ key: o.key, label: tr(o.labelZh, o.labelEn) }))}
@@ -206,7 +198,8 @@ export default function AlertsPage() {
               setSeverityFilter(next);
             }}
           />
-        </div>
+        </div>}
+        />
 
         <div className="flex-1 overflow-y-auto">
           {err && (

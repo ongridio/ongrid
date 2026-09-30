@@ -36,7 +36,7 @@ import {
 } from "lucide-react";
 import { StatusPill } from "@/components/StatusPill";
 import { Modal } from "@/components/Modal";
-import { Button } from "@/components/ui";
+import { Button, PageHeader } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { openMetricDrilldown } from "@/lib/drilldown";
 import { relativeTime } from "@/lib/format";
@@ -621,18 +621,12 @@ export default function EdgesPage() {
   return (
     <>{dialog}<Tabs value={discoveryView ? 'network-discovery' : 'devices'} onValueChange={(next) => navigate(next === 'devices' ? '/devices' : '/devices?view=network-discovery')} className="contents"><>
       <main className="anim-fade flex min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="app-header flex items-center justify-between border-b border-zinc-800/60 px-6 py-4">
-          <div>
-            <h1 className="text-base font-semibold text-zinc-100">
-              {headerTitle}
-            </h1>
-            <p className="mt-0.5 text-xs text-zinc-500">
-              {discoveryView
+        <PageHeader
+          title={headerTitle}
+          subtitle={discoveryView
                 ? tr(`${pendingCandidateCount} 个候选等待 SNMP 校验`, `${pendingCandidateCount} candidates awaiting SNMP verification`)
                 : tr(`${devices.length} 台设备 · 每 10 秒自动刷新`, `${devices.length} device(s) · auto-refresh every 10s`)}
-            </p>
-          </div>
-          {!discoveryView && rolesFilter !== "network" && (
+          actions={!discoveryView && rolesFilter !== "network" && (
           <div className="flex items-center gap-2">
             <Hint content={tr(
                 "WebSSH 会话审计 / 活跃会话",
@@ -666,15 +660,15 @@ export default function EdgesPage() {
               </>
           </div>
           )}
-        </header>
-
-        <div className="min-w-0 flex-1 overflow-y-auto px-6 py-6">
-          {rolesFilter !== "network" && (
-            <TabsList className="mb-4 flex items-center gap-1 border-b border-zinc-800/60">
+          navigation={rolesFilter !== "network" && (
+            <TabsList className="flex items-center gap-1">
               <TabsTrigger  value={'devices'} >{tr("全部设备", "All devices")}</TabsTrigger>
               <TabsTrigger  value={'network-discovery'} >{tr("网络发现", "Network discovery")}</TabsTrigger>
             </TabsList>
           )}
+        />
+
+        <div className="min-w-0 flex-1 overflow-y-auto px-6 py-6">
           <TabsContent value={discoveryView ? 'network-discovery' : 'devices'} className="contents">{error && (
             <div
               role="alert"
@@ -760,7 +754,7 @@ export default function EdgesPage() {
                   <col className="w-10" />
                   <col className="w-[52px]" />
                   <col className="w-[220px]" />
-                  <col className="w-[230px]" />
+                  <col className="w-[140px]" />
                   <col className="w-[190px]" />
                   <col className="w-[130px]" />
                   <col className="w-[130px]" />
@@ -1402,7 +1396,7 @@ function EdgeAccessMeta({
   const { tr } = useI18n();
   const clusters = uniqueAttachmentClusters(attachments);
   return (
-    <div className="flex min-w-0 shrink-0 items-center gap-1">
+    <div className="flex w-[120px] min-w-0 flex-wrap items-center gap-1 [&>a]:max-w-full">
       <EdgeAccessPill kind={attachments.length > 0 ? "k8s" : "host"}>
         {attachments.length > 0 ? "K8s" : "Host"}
       </EdgeAccessPill>

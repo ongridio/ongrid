@@ -13,12 +13,14 @@ type Props = {
   actions?: ReactNode;
   /** Optional content rendered below the title row inside the same header. */
   extra?: ReactNode;
+  /** Page-level tabs share the header's bottom divider. */
+  navigation?: ReactNode;
   /** Optional content rendered above the title (breadcrumb / back link). */
   leading?: ReactNode;
   className?: string;
 };
 
-export function PageHeader({ title, subtitle, actions, extra, leading, className }: Props) {
+export function PageHeader({ title, subtitle, actions, extra, navigation, leading, className }: Props) {
   return (
     <header
       className={cn(
@@ -35,6 +37,7 @@ export function PageHeader({ title, subtitle, actions, extra, leading, className
         {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
       </div>
       {extra && <div className="mt-3">{extra}</div>}
+      {navigation && <div className="mt-3 -mb-4 [&>.og-tabs-list]:border-b-0">{navigation}</div>}
     </header>
   );
 }

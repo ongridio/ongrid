@@ -51,9 +51,9 @@ export default function SkillsPage() {
       <PageHeader
         title={tr('技能', 'Skills')}
         subtitle={tr('LLM 当前可见的能力，以及安装 / 管理扩展', 'Capabilities the LLM can use — plus installing / managing extensions')}
-        extra={
+        navigation={
           isAdmin ? (
-            <TabsList className="-mb-4 flex items-center gap-1">
+            <TabsList className="flex items-center gap-1">
               <TabsTrigger value={'catalog'}>{<Wrench size={14} />} {tr('技能目录', 'Catalog')}</TabsTrigger>
               <TabsTrigger value={'install'}>{<Puzzle size={14} />} {tr('扩展', 'Extensions')}</TabsTrigger>
             </TabsList>

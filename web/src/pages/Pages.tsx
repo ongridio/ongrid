@@ -237,9 +237,7 @@ export default function PagesPage() {
               ? tr('定时或手动生成的运维报告', 'Scheduled and on-demand ops reports')
               : tr('抓包会话、成员数据包和逐包详情按层级呈现，可从会话发起 AI 分析。', 'Capture sessions, member artifacts, and packet details are presented hierarchically; sessions can start AI analysis.')
         }
-      />
-      {/* Tab bar — 页面 / 报告 / 数据包 are artifact views, not feature silos. */}
-      <TabsList className="flex items-center gap-1 border-b border-zinc-800 px-6">
+        navigation={<TabsList className="flex items-center gap-1">
         {([
           ['pages', tr('页面', 'Pages'), AppWindow],
           ['reports', tr('报告', 'Reports'), FileBarChart],
@@ -254,7 +252,8 @@ export default function PagesPage() {
             <Icon size={13} /> {label}
           </TabsTrigger>
         ))}
-      </TabsList>
+      </TabsList>}
+      />
 
       <TabsContent value={tab} className="contents">{tab === 'reports' ? (
         <ReportsTabView />

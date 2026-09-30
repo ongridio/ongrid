@@ -617,15 +617,13 @@ export default function ApmPage() {
                 'Explore service requests, traces, logs and instances',
               )
         }
-        className="!py-3 shrink-0 [&_h1]:break-all"
-      />
-      {!detail && <TabsList activateOnFocus={false} aria-label={tr('服务视图', 'Service views')} className="shrink-0 border-b border-zinc-800 px-6">
+        className="shrink-0 [&_h1]:break-all"
+        navigation={!detail ? <TabsList activateOnFocus={false} aria-label={tr('服务视图', 'Service views')} className="shrink-0">
         {[['services', tr('服务列表', 'Service list')], ['map', tr('服务地图', 'Service map')], ['discovery', tr('服务发现', 'Service discovery')], ['onboarding', tr('接入指南', 'Setup guide')]].map(([value, label]) => <TabsTrigger key={value} value={value} onClick={() => set('tab', value)}>{label}</TabsTrigger>)}
-      </TabsList>}
-      {detail && (
+      </TabsList> : (
         <TabsList activateOnFocus={false}
           aria-label={tr('服务视图', 'Service views')}
-          className="flex shrink-0 flex-wrap items-center gap-x-5 border-b border-zinc-800 px-6"
+          className="flex shrink-0 flex-wrap items-center gap-x-5"
         >
           {tabs.map(([key, label]) => (
             <TabsTrigger key={key} value={key} nativeButton={false} render={<Link state={location.state} to={viewLink(key)} />} >
@@ -644,6 +642,7 @@ export default function ApmPage() {
           </div>
         </TabsList>
       )}
+      />
       <TabsContent value={operation && ['overview', 'operations'].includes(tab) ? 'operations' : tab} className="contents"><main ref={main} className="flex-1 space-y-3 overflow-auto px-6 py-4">
         {(scopeFilters || timeControls) && (
           <div role="group" aria-label={tr('当前视图筛选', 'Current view filters')} className="flex flex-wrap items-center justify-between gap-3">

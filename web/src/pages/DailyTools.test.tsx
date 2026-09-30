@@ -147,6 +147,10 @@ describe('DailyToolsPage', () => {
     render(<MemoryRouter><DailyToolsPage /></MemoryRouter>);
     expect(await screen.findByText('保存的抓包')).toBeInTheDocument();
     expect(screen.queryByText('尚未执行工具')).not.toBeInTheDocument();
+    const runButton = screen.getByRole('button', { name: '执行' });
+    const clearButton = within(runButton.parentElement!).getByRole('button', { name: '清空运行' });
+    expect(runButton.nextElementSibling).toBe(clearButton);
+    expect(clearButton).toHaveAttribute('type', 'button');
     await act(async () => { await userEvent.click(screen.getByRole('button', { name: '清空运行' })); });
     expect(screen.getByText('尚未执行工具')).toBeInTheDocument();
     expect(screen.queryByText('保存的抓包')).not.toBeInTheDocument();

@@ -21,6 +21,7 @@ import '@xyflow/react/dist/style.css';
 import dagre from '@dagrejs/dagre';
 import {
   Activity,
+  Trash2,
   Check,
   ChevronDown,
   Copy,
@@ -798,14 +799,20 @@ export default function DailyToolsPage() {
                 {active === 'http' && <HTTPFields value={http} onChange={setHTTP} />}
                 {active === 'capture' && <CaptureFields value={capture} selectedEdges={selectedEdges} onChange={setCapture} />}
               </div>
-              {active !== 'profile' ? <Button variant="primary" size="sm"
+              {active !== 'profile' ? <div className="ml-auto flex shrink-0 items-center gap-2 self-end"><Button variant="primary" size="sm"
                 type="submit"
                 disabled={!canRun}
-                className="ml-auto inline-flex h-9 shrink-0 items-center gap-1.5 self-end px-3 font-medium text-accent-fg"
+                className="inline-flex h-9 shrink-0 items-center gap-1.5 px-3 font-medium text-accent-fg"
               >
                 <Play size={12} fill="currentColor" />
                 {active === 'capture' ? tr('开始', 'Start') : tr('执行', 'Run')}
-              </Button> : null}
+              </Button>
+                {runs.length > 0 || captureRuns.length > 0 ? (
+                  <Button type="button" variant="outline" size="sm" className="h-9" onClick={() => { setRuns([]); setCaptureRuns([]); setSelectedResult(null); }}>
+                    <Trash2 size={13} />{tr('清空运行', 'Clear runs')}
+                  </Button>
+                ) : null}
+              </div> : null}
             </div>
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               <span className="text-xs text-zinc-500">{tr(`${selectedEdges.length} 台 Edge · ${activeTool.zh}`, `${selectedEdges.length} Edge(s) · ${activeTool.en}`)}</span>
@@ -837,7 +844,6 @@ export default function DailyToolsPage() {
               onStop={() => void stopProfile()}
             />
           ) : <>
-            {(runs.length > 0 || captureRuns.length > 0) ? <div className="flex justify-end"><Button onClick={() => { setRuns([]); setCaptureRuns([]); setSelectedResult(null); }}>{tr('清空运行', 'Clear runs')}</Button></div> : null}
             {captureRuns.length > 0 ? <CaptureQuickPanel runs={captureRuns} nowMs={nowMs} onStop={(run) => void stopCapture(run)} onDiscard={(run) => void discardCapture(run)} /> : null}
           {runs.length > 0 || captureRuns.length === 0 ? <section className="min-h-[420px]">
             {runs.length === 0 ? (
@@ -1009,7 +1015,7 @@ function EdgePicker({
       ? edgeLabel(selectedEdges[0])
       : tr(`${selectedEdges.length} 台 Edge`, `${selectedEdges.length} Edges`);
   return (
-    <div className="w-80 min-w-[240px] max-w-full shrink-0 space-y-1">
+    <div className="w-72 min-w-0 max-w-full shrink-0 space-y-1">
       <span className="block text-[11px] leading-4 text-zinc-400">{tr('执行目标', 'Execution target')}</span>
       <Combobox.Root
         multiple={multiple}
