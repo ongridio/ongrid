@@ -465,7 +465,17 @@ export function previewRule(input: RuleInput, lookbackSeconds = 86400) {
 
 // ---- Channels ----
 
+export type SMTPConfig = {
+  host: string;
+  port: number;
+  username: string;
+  from: string;
+  to: string[];
+  tls_mode: 'starttls' | 'tls';
+};
+
 export type Channel = {
+  smtp?: SMTPConfig;
   id: number;
   name: string;
   type: string;
@@ -478,6 +488,7 @@ export type Channel = {
 export type ChannelListResp = { items: Channel[]; total: number };
 
 export type ChannelInput = {
+  smtp?: SMTPConfig;
   name: string;
   type: string;
   endpoint: string;

@@ -1,9 +1,10 @@
-import { Input, Label } from '@/components/ui';
+import { Input, Label, Select } from '@/components/ui';
 import { Hint } from '@/components/ui/Tooltip';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Bell,
+  Mail,
   Loader2,
   Webhook,
   Plus,
@@ -35,7 +36,7 @@ import { useI18n } from '@/i18n/locale';
 // every notification attempt with status — that's the audit trail.
 // Operators looking for delivery history should hit
 // 设置 → 告警事件 instead.
-type ChannelType = 'webhook' | 'slack' | 'feishu' | 'dingtalk' | 'wecom' | 'telegram';
+type ChannelType = 'webhook' | 'slack' | 'feishu' | 'dingtalk' | 'wecom' | 'telegram' | 'smtp';
 
 type TypeMeta = {
   type: ChannelType;
@@ -48,6 +49,12 @@ type TypeMeta = {
 };
 
 const TYPE_CARDS: TypeMeta[] = [
+  {
+    type: 'smtp', group: 'generic', labelZh: '邮件 (SMTP)', labelEn: 'Email (SMTP)',
+    hintZh: '通过 SMTP 发送告警邮件，支持 STARTTLS 和 TLS 加密。',
+    hintEn: 'Send alert emails over SMTP with STARTTLS or TLS encryption.',
+    endpointPlaceholder: '',
+  },
   {
     type: 'feishu',
     group: 'cn',
@@ -118,6 +125,7 @@ function orderCardsByLocale(locale: string): TypeMeta[] {
 }
 
 function ChannelTypeIcon({ type, size }: { type: ChannelType; size: number }) {
+  if (type === 'smtp') return <Mail size={size} className="text-zinc-400" />;
   return type === 'webhook'
     ? <Webhook size={size} className="text-zinc-400" />
     : <CommunicationProviderIcon provider={type} size={size} />;
@@ -438,8 +446,10 @@ function ChannelEditorModal({
     type: channel?.type ?? presetType ?? 'webhook',
     endpoint: channel?.endpoint ?? '',
     secret: '',
+    smtp: channel?.smtp ?? ((channel?.type ?? presetType) === 'smtp' ? { host: '', port: 587, username: '', from: '', to: [], tls_mode: 'starttls' } : undefined),
     enabled: channel?.enabled ?? true,
   }));
+  const [recipients, setRecipients] = useState(channel?.smtp?.to.join(', ') ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -463,15 +473,18 @@ function ChannelEditorModal({
       setErr(tr('请选择渠道类型', 'Please pick a channel type'));
       return;
     }
-    if (!form.endpoint.trim()) {
+    if (form.type !== 'smtp' && !form.endpoint.trim()) {
       setErr(tr('请填写 endpoint URL', 'Please enter an endpoint URL'));
       return;
     }
+    const payload = form.type === 'smtp' && form.smtp
+      ? { ...form, smtp: { ...form.smtp, to: recipients.split(/[,;\n]+/).map(v => v.trim()).filter(Boolean) } }
+      : form;
     setSubmitting(true);
     setErr(null);
     try {
-      if (mode === 'create') await createChannel(form);
-      else if (channel) await updateChannel(channel.id, form);
+      if (mode === 'create') await createChannel(payload);
+      else if (channel) await updateChannel(channel.id, payload);
       onSaved();
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : (e as Error).message);
@@ -512,6 +525,23 @@ function ChannelEditorModal({
             <span>{typeLabel}</span>
           </div>
         </Field>
+        {form.type === 'smtp' && form.smtp ? (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label={tr('SMTP 服务器', 'SMTP server')}><Input value={form.smtp.host} onChange={e => setForm({ ...form, smtp: { ...form.smtp!, host: e.target.value } })} placeholder="smtp.example.com" /></Field>
+              <Field label={tr('端口', 'Port')}><Input type="number" min={1} max={65535} value={form.smtp.port} onChange={e => setForm({ ...form, smtp: { ...form.smtp!, port: Number(e.target.value) } })} /></Field>
+            </div>
+            <Field label={tr('连接加密', 'Connection encryption')}>
+              <Select label={tr('连接加密', 'Connection encryption')} value={form.smtp.tls_mode} onValueChange={value => setForm({ ...form, smtp: { ...form.smtp!, tls_mode: value as 'starttls' | 'tls' } })}>
+                <option value="starttls">STARTTLS</option><option value="tls">TLS</option>
+              </Select>
+              <p className="mt-1 text-xs text-zinc-500">{tr('通常 STARTTLS 使用 587 端口，TLS 使用 465 端口。', 'STARTTLS usually uses port 587; TLS usually uses port 465.')}</p>
+            </Field>
+            <Field label={tr('发件人邮箱', 'From address')}><Input value={form.smtp.from} onChange={e => setForm({ ...form, smtp: { ...form.smtp!, from: e.target.value } })} placeholder="alerts@example.com" /></Field>
+            <Field label={tr('收件人邮箱', 'Recipients')}><Input value={recipients} onChange={e => setRecipients(e.target.value)} placeholder="ops@example.com, oncall@example.com" /><p className="mt-1 text-xs text-zinc-500">{tr('多个邮箱用逗号分隔，最多 100 个。', 'Separate addresses with commas, up to 100 recipients.')}</p></Field>
+            <Field label={tr('用户名（可选）', 'Username (optional)')}><Input autoComplete="off" value={form.smtp.username} onChange={e => setForm({ ...form, smtp: { ...form.smtp!, username: e.target.value } })} /></Field>
+          </>
+        ) : (
         <Field label="Endpoint URL">
           <Input
             value={form.endpoint}
@@ -530,7 +560,8 @@ function ChannelEditorModal({
             </div>
           )}
         </Field>
-        <Field label={tr('Secret（可选，签名/验签用）', 'Secret (optional, for signing / verification)')}>
+        )}
+        <Field label={form.type === 'smtp' ? tr('密码 / 授权码（可选）', 'Password / app password (optional)') : tr('Secret（可选，签名/验签用）', 'Secret (optional, for signing / verification)')}>
           <Input
             type="password"
             value={form.secret ?? ''}
@@ -538,7 +569,7 @@ function ChannelEditorModal({
             placeholder={
               mode === 'edit'
                 ? tr('留空保留旧值；输入 - 表示清除', 'Leave empty to keep the existing value; enter - to clear')
-                : tr('可选：签名密钥 / 验签 token', 'Optional: signing key / verification token')
+                : form.type === 'smtp' ? tr('SMTP 密码或邮箱授权码', 'SMTP password or app password') : tr('可选：签名密钥 / 验签 token', 'Optional: signing key / verification token')
             }
             className="w-full font-mono"
           />

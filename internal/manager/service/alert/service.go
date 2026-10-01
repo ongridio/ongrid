@@ -86,16 +86,18 @@ type Event struct {
 }
 
 type Channel struct {
-	ID             uint64    `json:"id"`
-	Name           string    `json:"name"`
-	Type           string    `json:"type"`
-	Enabled        bool      `json:"enabled"`
-	EndpointMasked string    `json:"endpoint,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	SMTP           *notify.SMTPConfig `json:"smtp,omitempty"`
+	ID             uint64             `json:"id"`
+	Name           string             `json:"name"`
+	Type           string             `json:"type"`
+	Enabled        bool               `json:"enabled"`
+	EndpointMasked string             `json:"endpoint,omitempty"`
+	CreatedAt      time.Time          `json:"created_at"`
+	UpdatedAt      time.Time          `json:"updated_at"`
 }
 
 type ChannelInput struct {
+	SMTP     *notify.SMTPConfig
 	Name     string
 	Type     string
 	Endpoint string
@@ -445,6 +447,13 @@ func (s *Service) CreateChannel(ctx context.Context, caller Caller, in ChannelIn
 		Enabled:     in.Enabled,
 		ConfigJSON:  encodeChannelConfig(in.Endpoint, in.Secret),
 	}
+	if row.ChannelType == model.ChannelTypeSMTP {
+		var err error
+		row.ConfigJSON, err = smtpChannelConfig("", in)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if caller.UserID != 0 {
 		uid := caller.UserID
 		row.CreatedBy = &uid
@@ -479,7 +488,19 @@ func (s *Service) UpdateChannel(ctx context.Context, _ Caller, id uint64, in Cha
 		merged.ChannelType = t
 	}
 	merged.Enabled = in.Enabled
+	effective := in
+	effective.Type = merged.ChannelType
+	if err := validateChannelInput(effective, false); err != nil {
+		return nil, err
+	}
 	merged.ConfigJSON = mergeChannelConfig(existing.ConfigJSON, in.Endpoint, in.Secret)
+	if merged.ChannelType == model.ChannelTypeSMTP {
+		merged.ConfigJSON, err = smtpChannelConfig(existing.ConfigJSON, in)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	if err := s.repo.UpdateChannel(ctx, id, &merged); err != nil {
 		return nil, err
 	}
@@ -752,11 +773,23 @@ func validateRuleInput(in RuleInput, requireKey bool) error {
 }
 
 func validateChannelInput(in ChannelInput, requireType bool) error {
+	if in.SMTP != nil && strings.TrimSpace(in.Type) != "" && strings.TrimSpace(in.Type) != model.ChannelTypeSMTP {
+		return fmt.Errorf("%w: SMTP config requires smtp channel type", errs.ErrInvalid)
+	}
 	if strings.TrimSpace(in.Name) == "" {
 		return fmt.Errorf("%w: channel name required", errs.ErrInvalid)
 	}
 	if requireType && strings.TrimSpace(in.Type) == "" {
 		return fmt.Errorf("%w: channel type required", errs.ErrInvalid)
+	}
+	if strings.TrimSpace(in.Type) == model.ChannelTypeSMTP || in.SMTP != nil {
+		if in.SMTP == nil {
+			return fmt.Errorf("%w: SMTP config required", errs.ErrInvalid)
+		}
+		if err := in.SMTP.Validate(); err != nil {
+			return fmt.Errorf("%w: %v", errs.ErrInvalid, err)
+		}
+		return nil
 	}
 	if strings.TrimSpace(in.Endpoint) == "" {
 		return fmt.Errorf("%w: channel endpoint required", errs.ErrInvalid)
@@ -836,6 +869,16 @@ func toServiceChannel(r *model.Channel) *Channel {
 						break
 					}
 				}
+			}
+		}
+	}
+	if r.ChannelType == model.ChannelTypeSMTP {
+		cfg, err := r.Config()
+		if err == nil {
+			var config notify.SMTPConfig
+			if json.Unmarshal([]byte(cfg["smtp"]), &config) == nil {
+				out.SMTP = &config
+				out.EndpointMasked = config.Host
 			}
 		}
 	}
@@ -1030,4 +1073,41 @@ func pageBounds(page, pageSize int) (int, int) {
 		pageSize = 200
 	}
 	return pageSize, (page - 1) * pageSize
+}
+
+// smtpChannelConfig 复用渠道密码的保留/清除语义，不裁剪 SMTP 密码中的空格。
+func smtpChannelConfig(existing string, in ChannelInput) (string, error) {
+	if in.SMTP == nil {
+		return "", fmt.Errorf("%w: SMTP config required", errs.ErrInvalid)
+	}
+	if err := in.SMTP.Validate(); err != nil {
+		return "", fmt.Errorf("%w: %v", errs.ErrInvalid, err)
+	}
+	cfg := map[string]string{}
+	if existing != "" {
+		if err := json.Unmarshal([]byte(existing), &cfg); err != nil {
+			return "", fmt.Errorf("decode channel config: %w", err)
+		}
+	}
+	password := cfg["secret"]
+	if in.Secret == "-" {
+		password = ""
+	} else if in.Secret != "" {
+		password = in.Secret
+	}
+	config := *in.SMTP
+	if config.TLSMode == "" {
+		config.TLSMode = "starttls"
+	}
+	encoded, err := json.Marshal(config)
+	if err != nil {
+		return "", err
+	}
+	cfg = map[string]string{"smtp": string(encoded)}
+	if password != "" {
+		cfg["secret"] = password
+		cfg["secret_set"] = "true"
+	}
+	encoded, err = json.Marshal(cfg)
+	return string(encoded), err
 }
