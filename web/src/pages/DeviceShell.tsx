@@ -117,6 +117,7 @@ export function DeviceShell() {
   // outliving any single render is the whole point of this page.
   const termRef = useRef<XTerminalApi | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const shellReadyRef = useRef(false);
   // Latest cols/rows reported by xterm. We need them when sending the
   // first `open` frame (called from a callback that doesn't have direct
   // access to the terminal's geometry).
@@ -196,6 +197,7 @@ export function DeviceShell() {
   // Tear down the socket. Caller decides whether to also dispose the
   // terminal — usually we keep it so the user can read final output.
   const teardown = useCallback(() => {
+    shellReadyRef.current = false;
     sendCloseOnce();
     const ws = wsRef.current;
     wsRef.current = null;
@@ -275,6 +277,7 @@ export function DeviceShell() {
 
       ws.onopen = () => {
         if (wsRef.current !== ws) return;
+        termRef.current?.fit();
         const { cols, rows } = sizeRef.current;
         sendControl(ws, {
           type: 'open',
@@ -302,6 +305,8 @@ export function DeviceShell() {
         switch (frame.type) {
           case 'ready': {
             inputs.password = '';
+            shellReadyRef.current = true;
+            termRef.current?.fit();
             setConn({ kind: 'open' });
             writeBanner(ansiDim(tr(`-- SSH 已连接 (${inputs.user}@${edge?.name ?? deviceId}) --`, `-- SSH connected (${inputs.user}@${edge?.name ?? deviceId}) --`)));
             break;
@@ -376,6 +381,7 @@ export function DeviceShell() {
 
       ws.onclose = (ev) => {
         if (wsRef.current !== ws) return;
+        shellReadyRef.current = false;
         inputs.password = '';
         if (!closedSentRef.current && ev.code === 1006) {
           const message = tr('连接异常断开', 'Connection dropped unexpectedly');
@@ -416,7 +422,7 @@ export function DeviceShell() {
   const onTermResize = useCallback((cols: number, rows: number) => {
     sizeRef.current = { cols, rows };
     const ws = wsRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN) {
+    if (shellReadyRef.current && ws && ws.readyState === WebSocket.OPEN) {
       sendControl(ws, { type: 'resize', cols, rows });
     }
   }, []);
@@ -457,8 +463,8 @@ export function DeviceShell() {
     extractHostname(edge?.host_info) || edge?.name || deviceId || tr('设备', 'device');
 
   return (
-    <>{dialog}<main className="anim-fade flex flex-1 flex-col overflow-hidden bg-zinc-950">
-      <header className="flex items-center justify-between border-b border-zinc-800/60 bg-zinc-900/60 px-4 py-2">
+    <>{dialog}<main className="anim-fade flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-zinc-950">
+      <header className="flex shrink-0 items-center justify-between border-b border-zinc-800/60 bg-zinc-900/60 px-4 py-2">
         <div className="flex min-w-0 items-center gap-2 text-xs text-zinc-300">
           <TerminalIcon size={14} className="text-zinc-500" />
           <span className="truncate font-medium text-zinc-100">{hostname}</span>
@@ -498,7 +504,7 @@ export function DeviceShell() {
         </div>
       </header>
 
-      <div className="flex-1 overflow-hidden p-2">
+      <div className="min-h-0 min-w-0 flex-1 overflow-hidden p-2">
         <XTerminal
           onData={onTermData}
           onResize={onTermResize}

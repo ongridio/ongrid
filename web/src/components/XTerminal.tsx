@@ -130,17 +130,26 @@ export function XTerminal({ onData, onResize, attachRef, readOnly = false, class
 
     term.open(el);
     terminalRef.current = term;
-    // Initial fit must happen after open() lays out the DOM.
-    try {
-      fitAddon.fit();
-    } catch {
-      /* container not laid out yet — ResizeObserver will catch up */
-    }
-
-    const dataDisposable = readOnly ? null : term.onData((d) => onData?.(d));
-    const resizeDisposable = term.onResize(({ cols, rows }) => {
+    let lastSize: { cols: number; rows: number } | undefined;
+    const publishSize = () => {
+      const { cols, rows } = term;
+      if (lastSize?.cols === cols && lastSize.rows === rows) return;
+      lastSize = { cols, rows };
       onResize?.(cols, rows);
-    });
+    };
+    const dataDisposable = readOnly ? null : term.onData((d) => onData?.(d));
+    const resizeDisposable = term.onResize(publishSize);
+    const fit = (forceReport = false) => {
+      if (forceReport) lastSize = undefined;
+      try {
+        fitAddon.fit();
+        publishSize();
+      } catch {
+        /* container not laid out yet — ResizeObserver will catch up */
+      }
+    };
+    // Subscribe before fitting, including grids that stay at xterm's default size.
+    fit();
 
     if (readOnly) {
       term.attachCustomKeyEventHandler((event) => {
@@ -150,17 +159,12 @@ export function XTerminal({ onData, onResize, attachRef, readOnly = false, class
       });
     }
 
-    // Re-fit on container size changes (sidebar collapse, window resize).
-    // We debounce nothing — fit() is cheap and the resize control frame
-    // is throttled by SSH itself.
-    const ro = new ResizeObserver(() => {
-      try {
-        fitAddon.fit();
-      } catch {
-        /* dom temporarily detached during route change */
-      }
-    });
+    const ro = new ResizeObserver(() => fit());
     ro.observe(el);
+    let disposed = false;
+    void document.fonts?.ready.then(() => {
+      if (!disposed) fit();
+    });
 
     // Hand the imperative API back to the parent. The decoder is created
     // once and reused so we don't churn allocations per inbound chunk.
@@ -179,13 +183,8 @@ export function XTerminal({ onData, onResize, attachRef, readOnly = false, class
       writeln: (line) => term.writeln(line),
       clear: () => term.clear(),
       focus: () => term.focus(),
-      fit: () => {
-        try {
-          fitAddon.fit();
-        } catch {
-          /* noop */
-        }
-      },
+      // A new SSH session must receive dimensions even when the grid is unchanged.
+      fit: () => fit(true),
       dispose: () => term.dispose(),
     };
     attachRef(api);
@@ -195,6 +194,7 @@ export function XTerminal({ onData, onResize, attachRef, readOnly = false, class
     if (!readOnly) term.focus();
 
     return () => {
+      disposed = true;
       terminalRef.current = null;
       ro.disconnect();
       dataDisposable?.dispose();

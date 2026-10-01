@@ -5,10 +5,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ConnectModal, DeviceShell } from './DeviceShell';
 import { server } from '@/test/msw-server';
+import { useEffect } from 'react';
 
 const openShellSocket = vi.hoisted(() => vi.fn());
 
-vi.mock('@/components/XTerminal', () => ({ XTerminal: () => null }));
+const terminalSize = vi.hoisted(() => ({ cols: 132, rows: 42 }));
+vi.mock('@/components/XTerminal', () => ({ XTerminal: ({ attachRef, onResize }: {
+  attachRef(api: Partial<import('@/components/XTerminal').XTerminalApi>): void;
+  onResize(cols: number, rows: number): void;
+}) => {
+  useEffect(() => {
+    attachRef({ fit: () => onResize(terminalSize.cols, terminalSize.rows), write: vi.fn() });
+  }, [attachRef, onResize]);
+  return null;
+} }));
 vi.mock('@/api/webshell', async () => ({
   ...await vi.importActual<typeof import('@/api/webshell')>('@/api/webshell'),
   openShellSocket,
@@ -39,6 +49,8 @@ describe('ConnectModal', () => {
   beforeEach(() => {
     localStorage.setItem('ongrid-locale', 'zh-CN');
     openShellSocket.mockReset();
+    terminalSize.cols = 132;
+    terminalSize.rows = 42;
     server.use(
       http.get('/api/v1/edges', () => HttpResponse.json({ items: [edge], total: 1 })),
       http.get('/api/v1/edges/70', () => HttpResponse.json(edge)),
@@ -52,6 +64,32 @@ describe('ConnectModal', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it('sends measured open size first and re-synchronizes unchanged size on ready and reconnect', async () => {
+    const first = { readyState: WebSocket.OPEN, send: vi.fn(), close: vi.fn() } as unknown as WebSocket;
+    const second = { readyState: WebSocket.OPEN, send: vi.fn(), close: vi.fn() } as unknown as WebSocket;
+    openShellSocket.mockReturnValueOnce(first).mockReturnValueOnce(second);
+    renderShell();
+    fireEvent.change(await screen.findByLabelText('密码'), { target: { value: 'secret' } });
+    fireEvent.click(screen.getByRole('button', { name: '连接' }));
+    await waitFor(() => expect(openShellSocket).toHaveBeenCalledOnce());
+    act(() => { first.onopen?.(new Event('open')); });
+    expect(first.send).toHaveBeenCalledTimes(1);
+    expect(first.send).toHaveBeenLastCalledWith(JSON.stringify({ type: 'open', cols: 132, rows: 42, term: 'xterm-256color' }));
+    terminalSize.rows = 38;
+    await act(async () => { await first.onmessage?.({ data: JSON.stringify({ type: 'ready' }) } as MessageEvent); });
+    expect(first.send).toHaveBeenLastCalledWith(JSON.stringify({ type: 'resize', cols: 132, rows: 38 }));
+
+    fireEvent.click(screen.getByRole('button', { name: '重新连接' }));
+    fireEvent.change(await screen.findByLabelText('密码'), { target: { value: 'secret' } });
+    fireEvent.click(screen.getByRole('button', { name: '连接' }));
+    await waitFor(() => expect(openShellSocket).toHaveBeenCalledTimes(2));
+    act(() => { second.onopen?.(new Event('open')); });
+    expect(second.send).toHaveBeenCalledTimes(1);
+    expect(second.send).toHaveBeenLastCalledWith(JSON.stringify({ type: 'open', cols: 132, rows: 38, term: 'xterm-256color' }));
+    await act(async () => { await second.onmessage?.({ data: JSON.stringify({ type: 'ready' }) } as MessageEvent); });
+    expect(second.send).toHaveBeenLastCalledWith(JSON.stringify({ type: 'resize', cols: 132, rows: 38 }));
   });
 
   it('先展示已保存账户，新增账户时直接连接并延后保存', async () => {
