@@ -81,6 +81,13 @@ describe('ConnectModal', () => {
     await act(async () => { await first.onmessage?.({ data: JSON.stringify({ type: 'ready' }) } as MessageEvent); });
     expect(first.send).toHaveBeenLastCalledWith(JSON.stringify({ type: 'resize', cols: 132, rows: 38 }));
 
+    const requestFullscreen = vi.fn().mockRejectedValue(new Error('denied'));
+    Object.defineProperty(screen.getByRole('main'), 'requestFullscreen', { value: requestFullscreen, configurable: true });
+    fireEvent.click(screen.getByRole('button', { name: '全屏' }));
+    await waitFor(() => expect(requestFullscreen).toHaveBeenCalledOnce());
+    expect(await screen.findByRole('alert')).toHaveTextContent('无法切换全屏');
+    expect(first.close).not.toHaveBeenCalled();
+
     fireEvent.click(screen.getByRole('button', { name: '重新连接' }));
     fireEvent.change(await screen.findByLabelText('密码'), { target: { value: 'secret' } });
     fireEvent.click(screen.getByRole('button', { name: '连接' }));

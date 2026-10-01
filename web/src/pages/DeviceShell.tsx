@@ -24,6 +24,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ChevronLeft,
+  Maximize,
+  Minimize,
   KeyRound,
   Plus,
   Power,
@@ -112,6 +114,34 @@ export function DeviceShell() {
   const [modalOpen, setModalOpen] = useState(true);
   const [conn, setConn] = useState<ConnState>({ kind: 'idle' });
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [layoutError, setLayoutError] = useState<string | null>(null);
+  const workspaceRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const syncFullscreen = () => setFullscreen(document.fullscreenElement === workspaceRef.current);
+    document.addEventListener('fullscreenchange', syncFullscreen);
+    return () => document.removeEventListener('fullscreenchange', syncFullscreen);
+  }, []);
+
+  const toggleFullscreen = async () => {
+    setLayoutError(null);
+    try {
+      if (document.fullscreenElement === workspaceRef.current) await document.exitFullscreen();
+      else await workspaceRef.current?.requestFullscreen();
+    } catch {
+      setLayoutError(tr('无法切换全屏，请重试', 'Unable to toggle fullscreen. Please retry.'));
+    }
+  };
+
+  // Connection dialogs use a body portal, so leave native fullscreen first.
+  useEffect(() => {
+    if (modalOpen && document.fullscreenElement === workspaceRef.current) {
+      void document.exitFullscreen().catch(() => {
+        setLayoutError(tr('请先退出全屏再连接', 'Exit fullscreen before connecting.'));
+      });
+    }
+  }, [modalOpen, tr]);
 
   // The terminal API + ws live on refs — they're side-effectful and
   // outliving any single render is the whole point of this page.
@@ -463,8 +493,8 @@ export function DeviceShell() {
     extractHostname(edge?.host_info) || edge?.name || deviceId || tr('设备', 'device');
 
   return (
-    <>{dialog}<main className="anim-fade flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-zinc-950">
-      <header className="flex shrink-0 items-center justify-between border-b border-zinc-800/60 bg-zinc-900/60 px-4 py-2">
+    <>{dialog}<main ref={workspaceRef} className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-hidden bg-bg p-3 sm:p-6">
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2 text-xs text-zinc-300">
           <TerminalIcon size={14} className="text-zinc-500" />
           <span className="truncate font-medium text-zinc-100">{hostname}</span>
@@ -495,6 +525,15 @@ export function DeviceShell() {
           </Button>
           <Button
             variant="ghost"
+            disabled={!fullscreen && conn.kind !== 'open'}
+            onClick={() => void toggleFullscreen()}
+            aria-label={fullscreen ? tr('退出全屏', 'Exit fullscreen') : tr('全屏', 'Fullscreen')}
+          >
+            {fullscreen ? <Minimize size={14} /> : <Maximize size={14} />}
+            {fullscreen ? tr('退出全屏', 'Exit fullscreen') : tr('全屏', 'Fullscreen')}
+          </Button>
+          <Button
+            variant="ghost"
             onClick={closeTerminalPage}
             aria-label={tr('关闭终端', 'Close terminal')}
           >
@@ -504,7 +543,8 @@ export function DeviceShell() {
         </div>
       </header>
 
-      <div className="min-h-0 min-w-0 flex-1 overflow-hidden p-2">
+      {layoutError && <p role="alert" className="shrink-0 text-xs text-red-500">{layoutError}</p>}
+      <div className="min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border border-border bg-zinc-950 px-3.5 py-3">
         <XTerminal
           onData={onTermData}
           onResize={onTermResize}
