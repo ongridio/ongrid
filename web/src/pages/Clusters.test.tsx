@@ -109,6 +109,8 @@ describe("device cluster pages", () => {
       name: "bare-metal-prod",
     });
     expect(clusterLink).toHaveAttribute("href", "/clusters/501");
+    expect(screen.getByRole('columnheader', { name: '操作' })).toHaveClass('w-px', 'text-left');
+    expect(clusterLink.closest('table')).toHaveClass('table-auto');
     expect(screen.getByRole("link", { name: "k8s-prod" })).toHaveAttribute("href", "/clusters/901");
     expect(screen.getByText("接入类型")).toBeInTheDocument();
     expect(screen.getByText("Host")).toBeInTheDocument();

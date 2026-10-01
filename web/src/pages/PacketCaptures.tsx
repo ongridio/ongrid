@@ -152,7 +152,7 @@ export default function PacketCapturesPage() {
           </div>
         )}
         <div className="w-full min-w-0 overflow-x-auto rounded-xl border border-zinc-800/60 bg-zinc-900/40">
-          <table className="min-w-[1280px] table-fixed text-xs">
+          <table className="og-action-table min-w-[1280px] table-auto text-xs">
             <colgroup>
               <col className="w-[70px]" />
               <col className="w-[220px]" />
@@ -162,7 +162,7 @@ export default function PacketCapturesPage() {
               <col className="w-[210px]" />
               <col className="w-[140px]" />
               <col className="w-[130px]" />
-              <col className="w-[110px]" />
+              <col className="w-px" />
             </colgroup>
             <thead className="text-[11px] uppercase tracking-wide text-zinc-500">
               <tr className="border-b border-zinc-800/60">
@@ -279,7 +279,7 @@ function CaptureRow({
         <div className="text-zinc-300">{sourceLabel(item.source, tr)}</div>
         <Hint content={fullDateTime(item.created_at)}><div className="mt-0.5 text-[11px] text-zinc-500" >{fullDateTime(item.created_at)}</div></Hint>
       </td>
-      <td className="sticky right-0 bg-zinc-900 px-4 py-3">
+      <td className="sticky right-0 whitespace-nowrap bg-zinc-900 px-4 py-3">
         <div className="flex items-center gap-1.5">
           <Button onClick={onRefresh} disabled={refreshing} className="px-2">
             {refreshing ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}

@@ -277,7 +277,7 @@ export default function ClustersPage() {
               />
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[1000px] table-fixed whitespace-nowrap text-left text-xs">
+                <table className="w-full min-w-[1000px] table-auto whitespace-nowrap text-left text-xs">
                   <thead className="border-b border-zinc-800/60 bg-zinc-950/30 text-[11px] uppercase tracking-wide text-zinc-500">
                     <tr>
                       <th className="w-[22%] px-4 py-2.5 font-medium">
@@ -299,7 +299,7 @@ export default function ClustersPage() {
                       <th className="px-4 py-2.5 font-medium">
                         {tr("更新时间", "Updated")}
                       </th>
-                      <th className="w-[320px] px-4 py-2.5 text-right font-medium">
+                      <th className="w-px px-4 py-2.5 text-left font-medium">
                         {tr("操作", "Actions")}
                       </th>
                     </tr>
@@ -438,7 +438,7 @@ function ClusterRow({
       <td className="whitespace-nowrap px-4 py-3 text-zinc-500">
         {relativeTime(summary.cluster.updated_at)}
       </td>
-      <td className="px-4 py-3 text-right" onClick={(event) => event.stopPropagation()}>
+      <td className="w-px px-4 py-3 text-left" onClick={(event) => event.stopPropagation()}>
         <div className="inline-flex items-center gap-1">
           <Link
             to={`/clusters/${summary.cluster.id}`}

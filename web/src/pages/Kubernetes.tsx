@@ -182,7 +182,7 @@ export default function KubernetesPage() {
           )}
 
           <div className="w-full min-w-0 max-w-full overflow-x-auto rounded-xl border border-zinc-800/60 bg-zinc-900/40">
-            <table className="min-w-[1120px] w-full text-sm">
+            <table className="og-action-table min-w-[1120px] w-full text-sm">
               <thead className="border-b border-zinc-800/60 bg-zinc-950/40 text-[11px] uppercase tracking-wider text-zinc-500">
                 <tr>
                   <th className="whitespace-nowrap px-4 py-2.5 text-left">{tr('集群', 'Cluster')}</th>
@@ -192,7 +192,7 @@ export default function KubernetesPage() {
                   <th className="whitespace-nowrap px-4 py-2.5 text-left">{tr('节点接入', 'Node access')}</th>
                   <th className="whitespace-nowrap px-4 py-2.5 text-left">{tr('Controller', 'Controller')}</th>
                   <th className="whitespace-nowrap px-4 py-2.5 text-left">{tr('最近同步', 'Last sync')}</th>
-                  <th className="sticky right-0 z-20 min-w-[340px] border-l border-zinc-800/60 bg-zinc-950 px-4 py-2.5 text-left">{tr('操作', 'Actions')}</th>
+                  <th className="sticky right-0 z-20 w-px whitespace-nowrap border-l border-zinc-800/60 bg-zinc-950 px-4 py-2.5 text-left">{tr('操作', 'Actions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800/40">
@@ -255,7 +255,7 @@ export default function KubernetesPage() {
                       <td className="whitespace-nowrap px-4 py-2.5 text-zinc-400">
                         {relativeTime(clusterSyncTime(cluster))}
                       </td>
-                      <td className="sticky right-0 z-10 min-w-[340px] border-l border-zinc-800/60 bg-zinc-900 px-4 py-2.5 text-left" onClick={(ev) => ev.stopPropagation()}>
+                      <td className="sticky right-0 z-10 w-px whitespace-nowrap border-l border-zinc-800/60 bg-zinc-900 px-4 py-2.5 text-left" onClick={(ev) => ev.stopPropagation()}>
                         <div className="flex items-center gap-1">
                           <Hint content={tr('详情', 'Details')}><Link
                             to={`/kubernetes/${cluster.id}`}
@@ -3031,7 +3031,7 @@ function NodesTable({
   return (
     <>
       <ResourcePagination shown={items.length} total={total} page={page} pageSize={pageSize} loading={loading} filtered={filtered} onPageChange={onPageChange} />
-      <table className="min-w-[1120px] w-full text-sm">
+      <table className="og-action-table min-w-[1120px] w-full text-sm">
       <thead className="border-b border-zinc-800/60 bg-zinc-950/40 text-[11px] uppercase tracking-wider text-zinc-500">
         <tr>
           <th className="whitespace-nowrap px-4 py-2.5 text-left">Node</th>
@@ -3042,7 +3042,7 @@ function NodesTable({
           <th className="whitespace-nowrap px-4 py-2.5 text-left">CPU</th>
           <th className="whitespace-nowrap px-4 py-2.5 text-left">{tr('内存', 'Memory')}</th>
           <th className="whitespace-nowrap px-4 py-2.5 text-left">{tr('最近同步', 'Last sync')}</th>
-          {actions && <th className="sticky right-0 z-20 whitespace-nowrap border-l border-zinc-800/60 bg-zinc-950 px-4 py-2.5 text-right">{tr('排障', 'Triage')}</th>}
+          {actions && <th className="sticky right-0 z-20 w-px whitespace-nowrap border-l border-zinc-800/60 bg-zinc-950 px-4 py-2.5 text-left">{tr('排障', 'Triage')}</th>}
         </tr>
       </thead>
       <tbody className="divide-y divide-zinc-800/40">
@@ -3072,7 +3072,7 @@ function NodesTable({
               <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-zinc-400">{formatKubernetesMemory(resourceValue(item.capacity, 'memory'))}</td>
               <td className="whitespace-nowrap px-4 py-2.5 text-zinc-400">{relativeTime(item.last_seen_at)}</td>
               {actions && (
-                <td className="sticky right-0 z-10 whitespace-nowrap border-l border-zinc-800/60 bg-zinc-900 px-4 py-2.5 text-right">
+                <td className="sticky right-0 z-10 w-px whitespace-nowrap border-l border-zinc-800/60 bg-zinc-900 px-4 py-2.5 text-left">
                   <ResourceRowActions issue={issue} actions={actions} />
                 </td>
               )}
@@ -3133,7 +3133,7 @@ function WorkloadsTable({
   return (
     <>
       <ResourcePagination shown={items.length} total={total} page={page} pageSize={pageSize} loading={loading} filtered={filtered} onPageChange={onPageChange} />
-      <table className="min-w-[1120px] w-full text-sm">
+      <table className="og-action-table min-w-[1120px] w-full text-sm">
         <thead className="border-b border-zinc-800/60 bg-zinc-950/40 text-[11px] uppercase tracking-wider text-zinc-500">
           <tr>
             <th className="whitespace-nowrap px-4 py-2.5 text-left">{tr('命名空间', 'Namespace')}</th>
@@ -3142,7 +3142,7 @@ function WorkloadsTable({
             <th className="whitespace-nowrap px-4 py-2.5 text-left">{tr('进度', 'Progress')}</th>
             <th className="whitespace-nowrap px-4 py-2.5 text-left">{tr('状态', 'Status')}</th>
             <th className="whitespace-nowrap px-4 py-2.5 text-left">{tr('最近同步', 'Last sync')}</th>
-            {actions && <th className="sticky right-0 z-20 whitespace-nowrap border-l border-zinc-800/60 bg-zinc-950 px-4 py-2.5 text-right">{tr('排障', 'Triage')}</th>}
+            {actions && <th className="sticky right-0 z-20 w-px whitespace-nowrap border-l border-zinc-800/60 bg-zinc-950 px-4 py-2.5 text-left">{tr('排障', 'Triage')}</th>}
           </tr>
         </thead>
         <tbody className="divide-y divide-zinc-800/40">
@@ -3190,7 +3190,7 @@ function WorkloadsTable({
                   </td>
                   <td className="whitespace-nowrap px-4 py-2.5 text-zinc-400">{relativeTime(item.last_seen_at)}</td>
                   {actions && (
-                    <td className="sticky right-0 z-10 whitespace-nowrap border-l border-zinc-800/60 bg-zinc-900 px-4 py-2.5 text-right">
+                    <td className="sticky right-0 z-10 w-px whitespace-nowrap border-l border-zinc-800/60 bg-zinc-900 px-4 py-2.5 text-left">
                       <ResourceRowActions issue={issue} actions={actions} />
                     </td>
                   )}
@@ -3301,7 +3301,7 @@ function PodsTable({
   return (
     <>
       <ResourcePagination shown={items.length} total={total} page={page} pageSize={pageSize} loading={loading} filtered={filtered} onPageChange={onPageChange} />
-      <table className="min-w-[1220px] w-full text-sm">
+      <table className="og-action-table min-w-[1220px] w-full text-sm">
         <thead className="border-b border-zinc-800/60 bg-zinc-950/40 text-[11px] uppercase tracking-wider text-zinc-500">
           <tr>
             <th className="whitespace-nowrap px-4 py-2.5 text-left">{tr('命名空间', 'Namespace')}</th>
@@ -3312,7 +3312,7 @@ function PodsTable({
             <th className="whitespace-nowrap px-4 py-2.5 text-left">{tr('重启', 'Restarts')}</th>
             <th className="whitespace-nowrap px-4 py-2.5 text-left">{tr('原因', 'Reason')}</th>
             <th className="whitespace-nowrap px-4 py-2.5 text-left">{tr('最近同步', 'Last sync')}</th>
-            {actions && <th className="sticky right-0 z-20 whitespace-nowrap border-l border-zinc-800/60 bg-zinc-950 px-4 py-2.5 text-right">{tr('排障', 'Triage')}</th>}
+            {actions && <th className="sticky right-0 z-20 w-px whitespace-nowrap border-l border-zinc-800/60 bg-zinc-950 px-4 py-2.5 text-left">{tr('排障', 'Triage')}</th>}
           </tr>
         </thead>
         <tbody className="divide-y divide-zinc-800/40">
@@ -3331,7 +3331,7 @@ function PodsTable({
                 <td className="max-w-[220px] truncate px-4 py-2.5 text-zinc-400">{item.reason || '—'}</td>
                 <td className="whitespace-nowrap px-4 py-2.5 text-zinc-400">{relativeTime(item.last_seen_at)}</td>
                 {actions && (
-                  <td className="sticky right-0 z-10 whitespace-nowrap border-l border-zinc-800/60 bg-zinc-900 px-4 py-2.5 text-right">
+                  <td className="sticky right-0 z-10 w-px whitespace-nowrap border-l border-zinc-800/60 bg-zinc-900 px-4 py-2.5 text-left">
                     <ResourceRowActions issue={issue} actions={actions} />
                   </td>
                 )}
@@ -3383,7 +3383,7 @@ function EventsTable({
   return (
     <>
       <ResourcePagination shown={items.length} total={total} page={page} pageSize={pageSize} loading={loading} filtered={filtered} onPageChange={onPageChange} />
-      <table className="min-w-[1060px] w-full text-sm">
+      <table className="og-action-table min-w-[1060px] w-full text-sm">
         <thead className="border-b border-zinc-800/60 bg-zinc-950/40 text-[11px] uppercase tracking-wider text-zinc-500">
           <tr>
             <th className="whitespace-nowrap px-4 py-2.5 text-left">{tr('类型', 'Type')}</th>
@@ -3393,7 +3393,7 @@ function EventsTable({
             <th className="whitespace-nowrap px-4 py-2.5 text-left">{tr('次数', 'Count')}</th>
             <th className="whitespace-nowrap px-4 py-2.5 text-left">{tr('最近事件', 'Last event')}</th>
             <th className="whitespace-nowrap px-4 py-2.5 text-left">{tr('同步', 'Synced')}</th>
-            {actions && <th className="sticky right-0 z-20 whitespace-nowrap border-l border-zinc-800/60 bg-zinc-950 px-4 py-2.5 text-right">{tr('排障', 'Triage')}</th>}
+            {actions && <th className="sticky right-0 z-20 w-px whitespace-nowrap border-l border-zinc-800/60 bg-zinc-950 px-4 py-2.5 text-left">{tr('排障', 'Triage')}</th>}
           </tr>
         </thead>
         <tbody className="divide-y divide-zinc-800/40">
@@ -3414,7 +3414,7 @@ function EventsTable({
                 </td>
                 <td className="whitespace-nowrap px-4 py-2.5 text-zinc-400">{relativeTime(item.last_seen_at)}</td>
                 {actions && (
-                  <td className="sticky right-0 z-10 whitespace-nowrap border-l border-zinc-800/60 bg-zinc-900 px-4 py-2.5 text-right">
+                  <td className="sticky right-0 z-10 w-px whitespace-nowrap border-l border-zinc-800/60 bg-zinc-900 px-4 py-2.5 text-left">
                     {issue ? <ResourceRowActions issue={issue} actions={actions} /> : <span className="text-zinc-600">—</span>}
                   </td>
                 )}

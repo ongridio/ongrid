@@ -222,6 +222,34 @@ html.light .bg-zinc-800\/80       { background-color: rgb(226 232 240 / 0.7); }
 /* Device and network-discovery tables need opaque light surfaces. Their
    scrolling container and header otherwise inherit transparent zinc fills,
    which can expose a dark background beneath an embedded table. */
+.og-action-table {
+  --action-row-bg: 15 15 18;
+  --action-header-bg: 13 13 15;
+  --action-hover-bg: 19 19 23;
+}
+.og-action-table tbody tr,
+.og-action-table tbody tr > td.sticky,
+html.light .og-action-table tbody tr,
+html.light .og-action-table tbody tr > td.sticky {
+  background-color: rgb(var(--action-row-bg));
+}
+.og-action-table tbody tr:hover,
+.og-action-table tbody tr:hover > td.sticky,
+html.light .og-action-table tbody tr:hover,
+html.light .og-action-table tbody tr:hover > td.sticky {
+  background-color: rgb(var(--action-hover-bg));
+}
+.og-action-table thead,
+.og-action-table thead th.sticky,
+html.light .og-action-table thead,
+html.light .og-action-table thead th.sticky {
+  background-color: rgb(var(--action-header-bg));
+}
+html.light .og-action-table {
+  --action-row-bg: var(--card);
+  --action-header-bg: 248 250 252;
+  --action-hover-bg: 245 248 251;
+}
 html.light .device-list-table,
 html.light .network-discovery-table { background-color: rgb(var(--card)); }
 html.light .device-list-table__header,

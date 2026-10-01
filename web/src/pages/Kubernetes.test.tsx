@@ -407,6 +407,9 @@ describe('KubernetesPage', () => {
     expect(await screen.findByText('ongrid-edge-controller-abc')).toBeInTheDocument();
     expect(screen.getAllByText('ongrid-system').length).toBeGreaterThan(0);
     expect(screen.getByText('Running')).toBeInTheDocument();
+    const triageHeader = screen.getByRole('columnheader', { name: '排障' });
+    expect(triageHeader).toHaveClass('w-px', 'text-left');
+    expect(triageHeader.closest('table')).toHaveClass('og-action-table');
     expect(screen.getAllByText('1n / 1w / 1p / 1e').length).toBeGreaterThan(0);
     expect(screen.getByText('集群健康结论')).toBeInTheDocument();
     expect(screen.getByText('Controller')).toBeInTheDocument();
