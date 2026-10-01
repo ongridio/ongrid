@@ -9,6 +9,8 @@ import (
 
 	einomodel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
+
+	"github.com/ongridio/ongrid/internal/pkg/llm"
 )
 
 type budgetStopModel struct {
@@ -23,6 +25,10 @@ func wrapBudgetStopModel(inner einomodel.ToolCallingChatModel) einomodel.ToolCal
 }
 
 func (m *budgetStopModel) Generate(ctx context.Context, input []*schema.Message, opts ...einomodel.Option) (*schema.Message, error) {
+	// 回调只能标记预算拒绝；在普通推理和工具熔断总结之前终止模型调用。
+	if err := llm.BudgetRejectionFromContext(ctx); err != nil {
+		return nil, err
+	}
 	if env, ok := latestTerminalToolBudget(input); ok {
 		return m.synthesizeAfterToolBudget(ctx, input, env.Tool, opts...)
 	}
@@ -38,6 +44,9 @@ func (m *budgetStopModel) Generate(ctx context.Context, input []*schema.Message,
 }
 
 func (m *budgetStopModel) Stream(ctx context.Context, input []*schema.Message, opts ...einomodel.Option) (*schema.StreamReader[*schema.Message], error) {
+	if err := llm.BudgetRejectionFromContext(ctx); err != nil {
+		return nil, err
+	}
 	if env, ok := latestTerminalToolBudget(input); ok {
 		msg, err := m.synthesizeAfterToolBudget(ctx, input, env.Tool, opts...)
 		if err != nil {
