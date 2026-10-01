@@ -5,6 +5,58 @@
 # written by a running service have the correct numeric owner, and recursively
 # walking a large Loki/Tempo tree turns that invariant check into downtime.
 
+# 借用 config --images 的原始字符串输出，让旧版 Compose 也能解析 dotenv。
+# 合成模型只有一个用于承载目录的字段；仅渲染配置，不拉取镜像或启动容器。
+ongrid_resolve_compose_directory() {
+    local env_file="$1" install_dir="$2" expression="$3" resolved
+    local suffix='/.ongrid-directory-end'
+
+    # 原始解析错误可能包含 .env 密钥，失败时只报告文件位置。
+    if ! resolved=$(docker compose --project-name ongrid-dir-resolver \
+        --project-directory "$install_dir" --env-file "$env_file" \
+        -f - config --images 2>/dev/null <<EOF
+services:
+  directory:
+    image: $expression$suffix
+EOF
+    ); then
+        printf '[ERROR] could not resolve data directories from %s with Docker Compose\n' "$env_file" >&2
+        return 1
+    fi
+
+    # 后缀避免命令替换吞掉目录末尾的换行，不能把多行目录截断后继续安装。
+    if [[ "$resolved" != *"$suffix" ]]; then
+        printf '[ERROR] invalid directory output from Docker Compose\n' >&2
+        return 1
+    fi
+    resolved=${resolved%"$suffix"}
+    if [[ -z "$resolved" || "$resolved" == *$'\n'* || "$resolved" == *$'\r'* ]]; then
+        printf '[ERROR] data and log directories must be non-empty, single-line paths\n' >&2
+        return 1
+    fi
+    # Compose 将 ~ 前缀相对于进程 HOME 展开，不查询 ~user 的系统账号。
+    if [[ "$resolved" == '~'* && -n "${HOME:-}" ]]; then
+        resolved=${resolved#\~}
+        resolved="${HOME%/}/${resolved#/}"
+    fi
+    # Compose 的相对 bind 路径以安装目录为基准，而脚本运行在解压目录。
+    [[ "$resolved" == /* ]] || resolved="$install_dir/$resolved"
+    printf '%s\n' "$resolved"
+}
+
+# 与 Compose 保持 shell env > .env > 默认值的优先级，不能 source 管理员的 .env。
+ongrid_resolve_data_directories() {
+    local env_file="$1" install_dir="$2" data_dir log_dir
+
+    [[ "$install_dir" == /* ]] || install_dir="$PWD/$install_dir"
+    data_dir=$(ongrid_resolve_compose_directory "$env_file" "$install_dir" \
+        '${ONGRID_DATA_DIR:-/var/lib/ongrid}') || return 1
+    log_dir=$(ongrid_resolve_compose_directory "$env_file" "$install_dir" \
+        '${ONGRID_LOG_DIR:-/var/log/ongrid}') || return 1
+    # 两个路径都解析成功后再导出，预检、权限准备、启动和恢复使用同一配置。
+    export ONGRID_DATA_DIR="$data_dir" ONGRID_LOG_DIR="$log_dir"
+}
+
 ongrid_stat_path_owner() {
     local path="$1" owner
 
