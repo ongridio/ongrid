@@ -7,8 +7,8 @@
 // Design intent:
 //   - OnStart estimates prompt tokens (cheap rule-of-thumb: joined content
 //     length / 4) and asks BudgetChecker.Check. On rejection we mark the
-//     context so OnEnd / OnError can short-circuit reporting and PR-2 graph
-//     code can surface ErrBudgetExceeded.
+//     context so the graph's ChatModel wrapper can return ErrBudgetExceeded
+//     before invoking the underlying model.
 //   - OnEnd reads schema.ResponseMeta.Usage from the model's reply and
 //     records it via BudgetChecker.Record.
 //   - We do NOT touch the legacy budget gate inside openaiClient.Chat — it
@@ -19,9 +19,8 @@
 //
 // Why not return an error from OnStart? eino's callback contract gives
 // handlers no way to short-circuit a component. We attach the rejection
-// to ctx so the graph node (PR-2) can read it back out and fail-fast
-// before the network call. PR-1 ships the plumbing; PR-2 wires the check
-// into the node.
+// to ctx so the graph's ChatModel wrapper can read it back and fail before
+// either a normal model call or a tool-budget synthesis call.
 package llm
 
 import (
@@ -39,9 +38,9 @@ import (
 type budgetRejectKey struct{}
 
 // BudgetRejectionFromContext returns the budget-rejection error attached
-// to ctx by BudgetCallbackHandler.OnStart, or nil if none. Graph nodes
-// (PR-2) call this immediately after invoking the model to convert the
-// soft signal into a hard error.
+// to ctx by BudgetCallbackHandler.OnStart, or nil if none. The graph's
+// ChatModel wrapper checks it before invoking the model, including Stream,
+// to convert the callback signal into a hard error.
 func BudgetRejectionFromContext(ctx context.Context) error {
 	v := ctx.Value(budgetRejectKey{})
 	if v == nil {
