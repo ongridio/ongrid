@@ -3595,6 +3595,8 @@ function CreateClusterModal({
   );
 }
 
+const HELM_INSTALL_COMMAND = 'curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash';
+
 function RegistrationModal({
   data,
   onClose,
@@ -3603,32 +3605,58 @@ function RegistrationModal({
   onClose(): void;
 }) {
   const { tr } = useI18n();
-  const [copied, setCopied] = useState(false);
+  const [copiedHelm, setCopiedHelm] = useState(false);
+  const [copiedApp, setCopiedApp] = useState(false);
+
   useEffect(() => {
-    setCopied(false);
+    setCopiedHelm(false);
+    setCopiedApp(false);
   }, [data?.install_command]);
+
   if (!data) return null;
   const installCommand = data.install_command;
-  async function copyInstallCommand() {
-    await navigator.clipboard?.writeText(installCommand);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1200);
+
+  async function copyHelmCommand() {
+    await navigator.clipboard?.writeText(HELM_INSTALL_COMMAND);
+    setCopiedHelm(true);
+    window.setTimeout(() => setCopiedHelm(false), 1200);
   }
+
+  async function copyAppCommand() {
+    await navigator.clipboard?.writeText(installCommand);
+    setCopiedApp(true);
+    window.setTimeout(() => setCopiedApp(false), 1200);
+  }
+
   return (
     <Modal open onClose={onClose} title={tr('Helm 安装命令', 'Helm install command')} size="lg">
-      <div className="space-y-3 text-xs">
+      <div className="space-y-4 text-xs">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-zinc-500">{tr('集群', 'Cluster')}</span>
           <Chip tone="accent">{data.cluster.name}</Chip>
           <ModeChip mode={data.cluster.mode} />
           <ClusterStatusChip status={data.cluster.status} />
         </div>
+
         <div>
           <div className="mb-1 flex items-center justify-between gap-2 text-zinc-500">
-            <span>{tr('安装命令（执行一次）', 'Install command (run once)')}</span>
-            <Button onClick={() => void copyInstallCommand()}>
-              {copied ? <Check size={12} /> : <Clipboard size={12} />}
-              {copied ? tr('已复制', 'Copied') : tr('复制', 'Copy')}
+            <span>{tr('安装Helm命令（执行一次）', 'Install Helm command (run once)')}</span>
+            <Button onClick={() => void copyHelmCommand()}>
+              {copiedHelm ? <Check size={12} /> : <Clipboard size={12} />}
+              {copiedHelm ? tr('已复制', 'Copied') : tr('复制', 'Copy')}
+            </Button>
+          </div>
+          <pre className="overflow-auto rounded-md border border-zinc-800 bg-zinc-950 p-3 text-[11px] leading-5 text-zinc-300">
+            {HELM_INSTALL_COMMAND}
+          </pre>
+        </div>
+
+        <div>
+          <div className="mb-1 flex items-center justify-between gap-2 text-zinc-500">
+            <span>{tr('安装应用命令（执行一次）', 'Install application command (run once)')}</span>
+            <Button onClick={() => void copyAppCommand()}>
+              {copiedApp ? <Check size={12} /> : <Clipboard size={12} />}
+              {copiedApp ? tr('已复制', 'Copied') : tr('复制', 'Copy')}
             </Button>
           </div>
           <pre className="max-h-72 overflow-auto rounded-md border border-zinc-800 bg-zinc-950 p-3 text-[11px] leading-5 text-zinc-300">
