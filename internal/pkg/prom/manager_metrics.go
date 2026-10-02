@@ -106,6 +106,20 @@ var (
 	//   status   = ok | error | timeout | rate_limited
 	LLMCallsTotal *prometheus.CounterVec
 
+	// WikiCompileLLMStageCallsTotal counts logical compiler calls by bounded
+	// stage (leaf|leaf_batch|leaf_repair|leaf_batch_repair|hierarchy|source_synthesis|planner|planner_repair|canonical_matcher|canonical_matcher_repair|writer|writer_repair) and
+	// result (ok|error). Provider retry attempts remain in LLMCallsTotal.
+	WikiCompileLLMStageCallsTotal      *prometheus.CounterVec
+	WikiCompileLLMStageTokensTotal     *prometheus.CounterVec
+	WikiCompileChunkCacheTotal         *prometheus.CounterVec
+	WikiCompileValidationFailuresTotal *prometheus.CounterVec
+	// WikiCompileStructuredOutputTotal counts strict structured-output decode
+	// outcomes by stage and bounded result category.
+	WikiCompileStructuredOutputTotal *prometheus.CounterVec
+	// WikiCompileRecoveryTotal counts framing normalization, repair, and batch
+	// degradation outcomes. No response text or identifier is a label.
+	WikiCompileRecoveryTotal *prometheus.CounterVec
+
 	// LLMCallDuration observes provider wall-clock latency (seconds).
 	// status label omitted on the histogram for the same cardinality
 	// reason as HTTPRequestDuration.
@@ -140,6 +154,23 @@ var (
 	// this gauge; values pegged at the cap mean operators should
 	// either bump the cap or expect skipped rows on new fires.
 	InvestigatorInflight prometheus.Gauge
+
+	// LLM Wiki compilation gauges expose the most recently completed source
+	// compilation. They intentionally carry no tenant/source labels, keeping
+	// cardinality bounded while still making page explosion and thin-page
+	// regressions visible.
+	WikiCompileSourceCount        prometheus.Gauge
+	WikiCompileChunkCount         prometheus.Gauge
+	WikiCompileCandidatePageCount prometheus.Gauge
+	WikiCompilePublishedPageCount prometheus.Gauge
+	WikiCompileDroppedPageCount   prometheus.Gauge
+	WikiCompileAvgPageBytes       prometheus.Gauge
+	WikiCompileMedianPageBytes    prometheus.Gauge
+	WikiCompilePagesLT500Bytes    prometheus.Gauge
+	WikiCompilePagesLT1000Bytes   prometheus.Gauge
+	WikiCompileAvgSections        prometheus.Gauge
+	WikiCompileLLMInputTokens     prometheus.Gauge
+	WikiCompileLLMOutputTokens    prometheus.Gauge
 )
 
 // alertEvaluatorBuckets are the histogram buckets for AlertEvaluatorLatency.
@@ -260,6 +291,48 @@ func RegisterManagerMetrics(reg *prometheus.Registry, log *slog.Logger) {
 		},
 		[]string{"provider", "model", "kind"},
 	)
+	wikiStageCalls := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "ongrid_llmwiki_stage_calls_total",
+			Help: "Logical LLM Wiki compiler calls by bounded stage and result.",
+		},
+		[]string{"stage", "result"},
+	)
+	wikiCache := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "ongrid_llmwiki_chunk_cache_total",
+			Help: "LLM Wiki content-addressed chunk cache lookups by result (hit|miss|error).",
+		},
+		[]string{"result"},
+	)
+	wikiStageTokens := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "ongrid_llmwiki_stage_tokens_total",
+			Help: "LLM Wiki compiler tokens by bounded stage and direction (input|output).",
+		},
+		[]string{"stage", "direction"},
+	)
+	wikiValidation := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "ongrid_llmwiki_validation_failures_total",
+			Help: "LLM Wiki structured-output validation failures by bounded stage.",
+		},
+		[]string{"stage"},
+	)
+	wikiStructuredOutput := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "ongrid_llm_wiki_structured_output_total",
+			Help: "LLM Wiki structured-output decode outcomes by bounded stage and result.",
+		},
+		[]string{"stage", "result"},
+	)
+	wikiRecovery := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "ongrid_llm_wiki_recovery_total",
+			Help: "LLM Wiki structured-output recovery outcomes by bounded stage and strategy.",
+		},
+		[]string{"stage", "strategy", "result"},
+	)
 	workerSess := prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "ongrid_chatruntime_worker_sessions",
@@ -285,6 +358,28 @@ func RegisterManagerMetrics(reg *prometheus.Registry, log *slog.Logger) {
 		Name: "ongrid_investigator_inflight",
 		Help: "Live RCA investigator workers; capped at investigator.Config.MaxConcurrent.",
 	})
+	wikiGauges := []struct {
+		name string
+		help string
+	}{
+		{"wiki_compile_source_count", "Sources included in the most recently completed LLM Wiki source compilation."},
+		{"wiki_compile_chunk_count", "Chunks included in the most recently completed LLM Wiki source compilation."},
+		{"wiki_compile_candidate_page_count", "Topic candidates in the most recently completed LLM Wiki source compilation."},
+		{"wiki_compile_published_page_count", "Topic pages accepted in the most recently completed LLM Wiki source compilation."},
+		{"wiki_compile_dropped_page_count", "Topic pages rejected in the most recently completed LLM Wiki source compilation."},
+		{"wiki_compile_avg_page_bytes", "Average generated Topic page bytes in the most recently completed source compilation."},
+		{"wiki_compile_median_page_bytes", "Median generated Topic page bytes in the most recently completed source compilation."},
+		{"wiki_compile_pages_lt_500_bytes", "Generated Topic pages below 500 bytes in the most recently completed source compilation."},
+		{"wiki_compile_pages_lt_1000_bytes", "Generated Topic pages below 1000 bytes in the most recently completed source compilation."},
+		{"wiki_compile_avg_sections", "Average section count of generated Topic pages in the most recently completed source compilation."},
+		{"wiki_compile_llm_input_tokens", "LLM input tokens consumed by the most recently completed source compilation."},
+		{"wiki_compile_llm_output_tokens", "LLM output tokens consumed by the most recently completed source compilation."},
+	}
+	registeredWikiGauges := make([]prometheus.Gauge, 0, len(wikiGauges))
+	for _, definition := range wikiGauges {
+		gauge := prometheus.NewGauge(prometheus.GaugeOpts{Name: definition.name, Help: definition.help})
+		registeredWikiGauges = append(registeredWikiGauges, registerOrExistingGauge(registerer, gauge, log, definition.name))
+	}
 
 	HTTPRequestsTotal = registerOrExistingCounterVec2(registerer, httpReqs, log, "ongrid_http_requests_total")
 	HTTPRequestDuration = registerOrExistingHistogramVec(registerer, httpDur, log)
@@ -295,10 +390,28 @@ func RegisterManagerMetrics(reg *prometheus.Registry, log *slog.Logger) {
 	LLMCallsTotal = registerOrExistingCounterVec2(registerer, llmCalls, log, "ongrid_llm_calls_total")
 	LLMCallDuration = registerOrExistingHistogramVec(registerer, llmDur, log)
 	LLMTokensTotal = registerOrExistingCounterVec2(registerer, llmToks, log, "ongrid_llm_router_tokens_total")
+	WikiCompileLLMStageCallsTotal = registerOrExistingCounterVec2(registerer, wikiStageCalls, log, "ongrid_llmwiki_stage_calls_total")
+	WikiCompileLLMStageTokensTotal = registerOrExistingCounterVec2(registerer, wikiStageTokens, log, "ongrid_llmwiki_stage_tokens_total")
+	WikiCompileChunkCacheTotal = registerOrExistingCounterVec2(registerer, wikiCache, log, "ongrid_llmwiki_chunk_cache_total")
+	WikiCompileValidationFailuresTotal = registerOrExistingCounterVec2(registerer, wikiValidation, log, "ongrid_llmwiki_validation_failures_total")
+	WikiCompileStructuredOutputTotal = registerOrExistingCounterVec2(registerer, wikiStructuredOutput, log, "ongrid_llm_wiki_structured_output_total")
+	WikiCompileRecoveryTotal = registerOrExistingCounterVec2(registerer, wikiRecovery, log, "ongrid_llm_wiki_recovery_total")
 	ChatRuntimeWorkerSessions = registerOrExistingGaugeVec(registerer, workerSess, log)
 	AlertEvalTicksTotal = registerOrExistingCounterVec2(registerer, alertTicks, log, "ongrid_alert_eval_ticks_total")
 	EdgeConnections = registerOrExistingGaugeVec(registerer, edgeConns, log)
 	InvestigatorInflight = registerOrExistingGauge(registerer, investigatorInflight, log, "ongrid_investigator_inflight")
+	WikiCompileSourceCount = registeredWikiGauges[0]
+	WikiCompileChunkCount = registeredWikiGauges[1]
+	WikiCompileCandidatePageCount = registeredWikiGauges[2]
+	WikiCompilePublishedPageCount = registeredWikiGauges[3]
+	WikiCompileDroppedPageCount = registeredWikiGauges[4]
+	WikiCompileAvgPageBytes = registeredWikiGauges[5]
+	WikiCompileMedianPageBytes = registeredWikiGauges[6]
+	WikiCompilePagesLT500Bytes = registeredWikiGauges[7]
+	WikiCompilePagesLT1000Bytes = registeredWikiGauges[8]
+	WikiCompileAvgSections = registeredWikiGauges[9]
+	WikiCompileLLMInputTokens = registeredWikiGauges[10]
+	WikiCompileLLMOutputTokens = registeredWikiGauges[11]
 
 	// Go runtime + process collectors give us goroutines / heap / GC / fd
 	// for free. Idempotent — ignore AlreadyRegisteredError so a second

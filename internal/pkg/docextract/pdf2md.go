@@ -2,17 +2,21 @@ package docextract
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"math"
 	"sort"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/ledongthuc/pdf"
 )
 
 const pdfHeadingRatio = 1.2
+
+var errPDFNoText = errors.New("PDF has no reliably extractable body text; image-only PDFs are not supported")
 
 // pdf2md converts an embedded PDF text layer to Markdown. Text whose font
 // size is at least pdfHeadingRatio times the document's dominant body size is
@@ -68,7 +72,7 @@ func pdf2md(data []byte) (out string, err error) {
 	if out == "" {
 		return pdfPlainText(r)
 	}
-	return out, nil
+	return validatePDFText(out)
 }
 
 func pdfPlainText(r *pdf.Reader) (string, error) {
@@ -81,10 +85,34 @@ func pdfPlainText(r *pdf.Reader) (string, error) {
 		return "", fmt.Errorf("read pdf text: %w", err)
 	}
 	out := strings.TrimSpace(b.String())
-	if out == "" {
-		return "", fmt.Errorf("no extractable text in pdf (scanned/image PDFs need OCR, not supported)")
+	return validatePDFText(out)
+}
+
+// validatePDFText rejects empty text and text layers that contain a
+// substantial amount of control data. Some scanned PDFs embed a bogus
+// character map alongside their page images; ledongthuc/pdf can then return a
+// non-empty string made mostly of control characters and isolated glyphs.
+// Treating that string as source text produces plausible-looking but
+// fabricated Wiki summaries.
+func validatePDFText(text string) (string, error) {
+	var (
+		runes        int
+		controlRunes int
+		replacement  int
+	)
+	for _, r := range text {
+		runes++
+		if r == '\uFFFD' {
+			replacement++
+		}
+		if unicode.IsControl(r) && r != '\n' && r != '\r' && r != '\t' && r != '\f' {
+			controlRunes++
+		}
 	}
-	return out, nil
+	if runes == 0 || replacement > 0 || controlRunes > 32 || controlRunes*100 > runes*5 {
+		return "", errPDFNoText
+	}
+	return text, nil
 }
 
 func pdfBodyFontSize(texts []pdf.Text) float64 {

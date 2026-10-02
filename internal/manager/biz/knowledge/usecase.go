@@ -260,7 +260,7 @@ func (u *Usecase) UploadDoc(ctx context.Context, in UploadDocInput) (*model.Doc,
 		title = title[:256]
 	}
 	now := time.Now().UTC()
-	return u.ingestUpload(ctx, model.Doc{
+	doc := model.Doc{
 		SourceType: model.SourceUpload,
 		URL:        url,
 		Title:      title,
@@ -269,7 +269,8 @@ func (u *Usecase) UploadDoc(ctx context.Context, in UploadDocInput) (*model.Doc,
 		Tags:       normalizeTags(in.Tags),
 		CreatedAt:  now,
 		UpdatedAt:  now,
-	})
+	}
+	return u.ingestUpload(ctx, doc)
 }
 
 // ingestUpload (re)chunks one org-uploaded file into qdrant under
@@ -508,6 +509,31 @@ func (u *Usecase) ListDocs(ctx context.Context, f ListDocsFilter) ([]*model.Doc,
 		// works as "contains".
 		must["tags"] = f.Tag
 	}
+	if f.All {
+		const pageSize = 1000
+		points := make([]qdrantx.SearchHit, 0, pageSize)
+		var offset *uint64
+		for {
+			res, err := u.vec.Scroll(ctx, CollectionName, qdrantx.ScrollOpts{
+				MustMatch: must,
+				Limit:     pageSize,
+				Offset:    offset,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("knowledge: scroll all: %w", err)
+			}
+			points = append(points, res.Points...)
+			if res.NextOffset == nil {
+				return dedupeByIDAlias(points, 0), nil
+			}
+			if offset != nil && *res.NextOffset == *offset {
+				return nil, errors.New("knowledge: scroll all returned a repeated offset")
+			}
+			next := *res.NextOffset
+			offset = &next
+		}
+	}
+
 	limit := f.Limit
 	if limit <= 0 {
 		limit = 200
@@ -820,6 +846,7 @@ func (u *Usecase) Search(ctx context.Context, q string, opts SearchOptions) ([]S
 		out = append(out, SearchHit{
 			Doc:   payloadToDoc(h.ID, h.Payload),
 			Score: h.Score,
+			Layer: "raw",
 		})
 		if len(out) >= limit {
 			break
@@ -1066,7 +1093,6 @@ func (u *Usecase) Sync(ctx context.Context, id uint64) (*model.Repository, error
 	if err != nil {
 		return u.recordSyncFailure(ctx, repo, fmt.Errorf("scan files: %w", err))
 	}
-
 	// Drop the previous point set first; if embedding/upsert fails
 	// downstream we'd rather show "0 indexed, last_sync_error=…" than
 	// keep stale rows mixed with new ones.
@@ -1077,89 +1103,8 @@ func (u *Usecase) Sync(ctx context.Context, id uint64) (*model.Repository, error
 		return u.recordSyncFailure(ctx, repo, fmt.Errorf("drop prior: %w", err))
 	}
 
-	// Expand each scanned file into 1+ chunks of ≤chunkChars runes each.
-	// Small docs become a single chunk (identical to the pre-chunking
-	// behaviour); large docs (RFCs, long kernel admin guides) become N
-	// chunks so semantic search can hit content past the first ~2500
-	// chars instead of being stuck on the lead. Each chunk becomes its
-	// own qdrant point with its own embedding; payload dedup ('parent_url'
-	// + 'chunk_index') lets listings collapse to one entry per file.
-	type chunkRef struct {
-		file       *scannedFile
-		chunkIndex int
-		chunkTotal int
-		body       string
-	}
-	now := time.Now().UTC()
-	chunks := make([]chunkRef, 0, len(files))
-	for i := range files {
-		parts := splitForChunks(files[i].Content)
-		for j, p := range parts {
-			// Chunk 0 prepends the title so the embedding picks up the
-			// "what is this doc" signal — same as the pre-chunking
-			// behaviour for short docs. Chunks beyond 0 carry only
-			// their slice (the title would dominate the vector
-			// otherwise).
-			var body string
-			if j == 0 {
-				body = files[i].Title + "\n\n" + p
-			} else {
-				body = p
-			}
-			chunks = append(chunks, chunkRef{
-				file:       &files[i],
-				chunkIndex: j,
-				chunkTotal: len(parts),
-				body:       body,
-			})
-		}
-	}
-
-	// Embed in batches of 32 — keeps each request well under the
-	// embedding provider's per-request input cap (Zhipu = 3072 tokens
-	// per single input; we cap each input to chunkChars=2500 runes
-	// before truncateForEmbedding clips further if needed).
-	const batch = 32
-	for i := 0; i < len(chunks); i += batch {
-		end := i + batch
-		if end > len(chunks) {
-			end = len(chunks)
-		}
-		texts := make([]string, 0, end-i)
-		for _, c := range chunks[i:end] {
-			texts = append(texts, truncateForEmbedding(c.body))
-		}
-		vectors, err := u.embed.Embed(ctx, texts)
-		if err != nil {
-			return u.recordSyncFailure(ctx, repo, fmt.Errorf("embed batch %d: %w", i, err))
-		}
-		points := make([]qdrantx.Point, 0, len(vectors))
-		for j, v := range vectors {
-			c := chunks[i+j]
-			// Path: derive from URL directory so the SPA folder-tree
-			// view groups docs by their repo subdirectory (concepts/,
-			// reference/external/dns/, etc.). Repo docs never set Path
-			// explicitly — without this derivation the folder tree was
-			// silently empty for the entire repo corpus.
-			folder := filepath.Dir(c.file.URL)
-			if folder == "." || folder == "/" {
-				folder = ""
-			}
-			pt := repoChunkPoint(repo.ID, c.file.URL, c.chunkIndex, c.chunkTotal, v, model.Doc{
-				SourceType: model.SourceRepo,
-				RepoID:     ptrU64(repo.ID),
-				URL:        c.file.URL,
-				Title:      c.file.Title,
-				Content:    c.file.Content,
-				Path:       folder,
-				CreatedAt:  now,
-				UpdatedAt:  now,
-			}, c.body)
-			points = append(points, pt)
-		}
-		if err := u.vec.Upsert(ctx, CollectionName, points); err != nil {
-			return u.recordSyncFailure(ctx, repo, fmt.Errorf("upsert batch %d: %w", i, err))
-		}
+	if err := u.embedScannedFiles(ctx, files, model.SourceRepo, ptrU64(repo.ID), time.Now().UTC()); err != nil {
+		return u.recordSyncFailure(ctx, repo, err)
 	}
 	// file_count tracks distinct files (the operator-facing "how many
 	// docs are in this repo"), not the chunk fanout count.
@@ -1220,61 +1165,109 @@ func (u *Usecase) SyncBuiltinVault(ctx context.Context) (int, string, error) {
 	}); err != nil {
 		return 0, "", fmt.Errorf("knowledge: drop prior vault: %w", err)
 	}
-	now := time.Now().UTC()
-	type chunkRef struct {
-		file               *scannedFile
-		chunkIndex, chunkN int
-		body               string
-	}
-	chunks := make([]chunkRef, 0, len(files))
-	for i := range files {
-		parts := splitForChunks(files[i].Content)
-		for j, p := range parts {
-			body := p
-			if j == 0 {
-				body = files[i].Title + "\n\n" + p
-			}
-			chunks = append(chunks, chunkRef{file: &files[i], chunkIndex: j, chunkN: len(parts), body: body})
-		}
-	}
-	const batch = 32
-	for i := 0; i < len(chunks); i += batch {
-		end := i + batch
-		if end > len(chunks) {
-			end = len(chunks)
-		}
-		texts := make([]string, 0, end-i)
-		for _, c := range chunks[i:end] {
-			texts = append(texts, truncateForEmbedding(c.body))
-		}
-		vectors, err := u.embed.Embed(ctx, texts)
-		if err != nil {
-			return 0, "", fmt.Errorf("knowledge: embed vault batch %d: %w", i, err)
-		}
-		points := make([]qdrantx.Point, 0, len(vectors))
-		for j, v := range vectors {
-			c := chunks[i+j]
-			folder := filepath.Dir(c.file.URL)
-			if folder == "." || folder == "/" {
-				folder = ""
-			}
-			points = append(points, vaultChunkPoint(c.file.URL, c.chunkIndex, c.chunkN, v, model.Doc{
-				SourceType: model.SourceVault,
-				URL:        c.file.URL,
-				Title:      c.file.Title,
-				Content:    c.file.Content,
-				Path:       folder,
-				CreatedAt:  now,
-				UpdatedAt:  now,
-			}, c.body))
-		}
-		if err := u.vec.Upsert(ctx, CollectionName, points); err != nil {
-			return 0, "", fmt.Errorf("knowledge: upsert vault batch %d: %w", i, err)
-		}
+	if err := u.embedScannedFiles(ctx, files, model.SourceVault, nil, time.Now().UTC()); err != nil {
+		return 0, "", err
 	}
 	u.log.Info("knowledge: built-in vault synced",
 		slog.String("source", source), slog.Int("file_count", len(files)))
 	return len(files), source, nil
+}
+
+const knowledgeEmbeddingBatchSize = 32
+
+type embeddingChunk struct {
+	file       *scannedFile
+	chunkIndex int
+	chunkTotal int
+	body       string
+}
+
+func buildEmbeddingChunks(files []scannedFile) []embeddingChunk {
+	chunks := make([]embeddingChunk, 0, len(files))
+	for i := range files {
+		parts := splitForChunks(files[i].Content)
+		for j, part := range parts {
+			body := part
+			if j == 0 {
+				body = files[i].Title + "\n\n" + part
+			}
+			chunks = append(chunks, embeddingChunk{
+				file:       &files[i],
+				chunkIndex: j,
+				chunkTotal: len(parts),
+				body:       body,
+			})
+		}
+	}
+	return chunks
+}
+
+func (u *Usecase) embedScannedFiles(ctx context.Context, files []scannedFile, sourceType string, repoID *uint64, now time.Time) error {
+	switch sourceType {
+	case model.SourceRepo:
+		if repoID == nil {
+			return errors.New("knowledge: repo embedding requires repo id")
+		}
+	case model.SourceVault:
+		if repoID != nil {
+			return errors.New("knowledge: vault embedding cannot have repo id")
+		}
+	default:
+		return fmt.Errorf("knowledge: unsupported scanned source type %q", sourceType)
+	}
+	chunks := buildEmbeddingChunks(files)
+	label := sourceType
+	if sourceType == model.SourceRepo {
+		label = "repo"
+	} else if sourceType == model.SourceVault {
+		label = "vault"
+	}
+	for i := 0; i < len(chunks); i += knowledgeEmbeddingBatchSize {
+		end := i + knowledgeEmbeddingBatchSize
+		if end > len(chunks) {
+			end = len(chunks)
+		}
+		texts := make([]string, 0, end-i)
+		for _, chunk := range chunks[i:end] {
+			texts = append(texts, truncateForEmbedding(chunk.body))
+		}
+		vectors, err := u.embed.Embed(ctx, texts)
+		if err != nil {
+			return fmt.Errorf("knowledge: embed %s batch %d: %w", label, i, err)
+		}
+		if len(vectors) != end-i {
+			return fmt.Errorf("knowledge: embed %s batch %d returned %d vectors, want %d", label, i, len(vectors), end-i)
+		}
+		points := make([]qdrantx.Point, 0, len(vectors))
+		for j, vector := range vectors {
+			chunk := chunks[i+j]
+			folder := filepath.Dir(chunk.file.URL)
+			if folder == "." || folder == "/" {
+				folder = ""
+			}
+			doc := model.Doc{
+				SourceType: sourceType,
+				RepoID:     repoID,
+				URL:        chunk.file.URL,
+				Title:      chunk.file.Title,
+				Content:    chunk.file.Content,
+				Path:       folder,
+				CreatedAt:  now,
+				UpdatedAt:  now,
+			}
+			var point qdrantx.Point
+			if repoID != nil {
+				point = repoChunkPoint(*repoID, chunk.file.URL, chunk.chunkIndex, chunk.chunkTotal, vector, doc, chunk.body)
+			} else {
+				point = vaultChunkPoint(chunk.file.URL, chunk.chunkIndex, chunk.chunkTotal, vector, doc, chunk.body)
+			}
+			points = append(points, point)
+		}
+		if err := u.vec.Upsert(ctx, CollectionName, points); err != nil {
+			return fmt.Errorf("knowledge: upsert %s batch %d: %w", label, i, err)
+		}
+	}
+	return nil
 }
 
 // cloudVaultAttempts / cloudVaultPerTry tune the retry loop in fetchCloudVault.
@@ -1982,6 +1975,7 @@ func ptrU64(v uint64) *uint64 { return &v }
 func manualDocID(title string) uint64 {
 	return docID("manual||" + title)
 }
+
 func repoDocID(repoID uint64, url string) uint64 {
 	return docID(fmt.Sprintf("repo||%d||%s", repoID, url))
 }

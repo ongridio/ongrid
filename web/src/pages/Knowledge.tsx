@@ -20,6 +20,7 @@ import {
   Eye,
   Folder,
   FolderOpen,
+  Loader2,
   Pencil,
   Plus,
   RefreshCw,
@@ -33,7 +34,7 @@ import { cn } from '@/lib/cn';
 import { fullDateTime } from '@/lib/format';
 import { splitFrontmatter, stripFrontmatter } from '@/lib/frontmatter';
 import { Modal } from '@/components/Modal';
-import { Button, Card, EmptyState, PageHeader } from '@/components/ui';
+import { Button, Card, Chip, EmptyState, PageHeader } from '@/components/ui';
 import {
   createDoc,
   deleteDoc,
@@ -51,6 +52,7 @@ import {
   type SearchHit,
 } from '@/api/knowledge';
 import { ApiError } from '@/api/client';
+import { LLMWikiNavigation, LLMWikiPane } from '@/features/llm-wiki/LLMWikiPane';
 import { useI18n } from '@/i18n/locale';
 
 // Drag-and-drop payload key for relocating an org doc onto a folder (ADR-029).
@@ -101,7 +103,12 @@ export default function KnowledgePage() {
   // Two trees by source (ADR-028): 'builtin' = the read-only platform vault
   // (source_type=vault); 'org' = the organization's own content
   // (upload + manual), full CRUD. Each scope renders its own folder tree.
-  const [sourceScope, setSourceScope] = useState<'builtin' | 'org'>('org');
+  const [sourceScope, setSourceScope] = useState<'builtin' | 'org' | 'wiki'>('org');
+  const [wikiDocumentCount, setWikiDocumentCount] = useState(0);
+  const [wikiJobsRefreshKey, setWikiJobsRefreshKey] = useState(0);
+  const [wikiRefreshKey, setWikiRefreshKey] = useState(0);
+  const [wikiInitialDirectory, setWikiInitialDirectory] = useState<import('@/features/llm-wiki/types').LLMWikiNode | null>(null);
+  const [wikiInitialLayer, setWikiInitialLayer] = useState<'all' | 'raw' | 'wiki'>('all');
   const [activePath, setActivePath] = useState<string>(''); // '' = 全部
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -282,7 +289,10 @@ export default function KnowledgePage() {
         title={tr('知识库', 'Knowledge base')}
         subtitle={
           <>
-            {tr(`共 ${counts.total} 条 · 组织 ${counts.org} · 内置 ${counts.builtin}`, `${counts.total} total · ${counts.org} org · ${counts.builtin} built-in`)}
+            {tr(
+              `共 ${counts.total + wikiDocumentCount} 条 · 组织 ${counts.org} · 内置 ${counts.builtin} · LLM Wiki ${wikiDocumentCount}`,
+              `${counts.total + wikiDocumentCount} total · ${counts.org} org · ${counts.builtin} built-in · ${wikiDocumentCount} LLM Wiki`,
+            )}
             {activePath && (
               <>
                 {tr(' · 当前目录 ', ' · current folder ')}
@@ -402,7 +412,7 @@ export default function KnowledgePage() {
 
                   className="p-1"
                 >
-                  <Upload size={13} className={cn(uploading && 'animate-pulse')} />
+                  {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
                 </Button></Hint>
                 <Hint content={tr('新建文档', 'New doc')}><Button variant="subtle" size="sm"
                   type="button"
@@ -446,18 +456,44 @@ export default function KnowledgePage() {
 
                 className="p-1"
               >
-                <DownloadCloud size={13} className={cn(syncingBuiltin && 'animate-pulse')} />
+                {syncingBuiltin ? <Loader2 size={13} className="animate-spin" /> : <DownloadCloud size={13} />}
               </Button></Hint>
             }
           />
+          <div className="my-2 border-t border-zinc-800/60" />
+          <LLMWikiNavigation
+            active={sourceScope === 'wiki'}
+            onOpen={(dir, ly) => {
+              setSourceScope('wiki');
+              setActivePath('');
+              setWikiInitialDirectory(dir);
+              setWikiInitialLayer(ly);
+            }}
+            onDocumentCount={setWikiDocumentCount}
+            activeDirectory={sourceScope === 'wiki' ? wikiInitialDirectory : null}
+            activeLayer={sourceScope === 'wiki' ? wikiInitialLayer : 'all'}
+            jobsRefreshKey={wikiJobsRefreshKey}
+            refreshKey={wikiRefreshKey}
+            onChanged={() => setWikiRefreshKey((key) => key + 1)}
+            onJobsChanged={() => setWikiJobsRefreshKey((key) => key + 1)}
+          />
         </aside>
-        <div className="flex-1 overflow-y-auto px-6 py-6">
+
+            <div className="flex-1 overflow-y-auto px-6 py-6">
           {err && (
             <div className="mb-4 rounded-lg border border-red-500/40 bg-red-500/5 px-4 py-3 text-sm text-red-300">
               {err}
             </div>
           )}
-          {loading ? (
+          {sourceScope === 'wiki' ? (
+            <LLMWikiPane
+              hideSidebar
+              initialDirectory={wikiInitialDirectory}
+              initialLayer={wikiInitialLayer}
+              externalRefreshKey={wikiRefreshKey}
+              onExit={() => { setSourceScope('org'); setActivePath(''); setWikiInitialDirectory(null); setWikiInitialLayer('all'); }}
+            />
+          ) : loading ? (
             <div className="flex h-40 items-center justify-center text-sm text-zinc-500">{tr('加载中…', 'Loading…')}</div>
           ) : visibleDocs.length === 0 ? (
             <EmptyState
@@ -498,9 +534,8 @@ export default function KnowledgePage() {
               ))}
             </div>
           )}
-        </div>
+            </div>
       </div>
-
       {editing && (
         <DocEditor
           mode={editing === 'create' ? 'create' : 'edit'}
@@ -840,6 +875,7 @@ function DocCard({
 }
 
 function SearchHitCard({ hit }: { hit: SearchHit }) {
+  const { tr } = useI18n();
   return (
     <div className="rounded-md border border-zinc-800/60 bg-zinc-950/40 px-3 py-2">
       <div className="flex items-center justify-between text-[11px] text-zinc-500">
@@ -855,6 +891,21 @@ function SearchHitCard({ hit }: { hit: SearchHit }) {
               repo
             </span>
           )}
+          {hit.layer === 'wiki' && (
+            <span className="rounded bg-indigo-500/10 px-1.5 py-0.5 text-[10px] text-indigo-300">
+              LLM Wiki
+            </span>
+          )}
+          {hit.matched_node && (
+            <Chip tone="info" dense>
+              {tr('命中知识节点', 'Matched node')}: {hit.matched_node}
+            </Chip>
+          )}
+          {hit.layer === 'raw' && (
+            <span className="rounded bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-300">
+              {tr('RAG', 'RAG')}
+            </span>
+          )}
         </div>
         <span>score {hit.score.toFixed(2)}</span>
       </div>
@@ -868,13 +919,13 @@ function SearchHitCard({ hit }: { hit: SearchHit }) {
 
 // 阅读态正文：先剥离 YAML frontmatter 再渲染 —— 否则 `title: …\n---`
 // 会按 setext 标题渲染成粗体大字。元信息以弱化的 key/value 行单独展示。
-function DocBody({ content }: { content: string }) {
+function DocBody({ content, omitMetaKeys }: { content: string; omitMetaKeys?: readonly string[] }) {
   const fm = useMemo(() => splitFrontmatter(content), [content]);
   return (
     <div className="md-body text-sm text-zinc-200">
       {fm && (
         <dl className="mb-4 space-y-1 border-b border-zinc-800 pb-3">
-          {fm.meta.map(([key, value]) => (
+          {fm.meta.filter(([key]) => !omitMetaKeys?.includes(key)).map(([key, value]) => (
             <div key={key} className="flex items-baseline gap-2 text-xs">
               <dt className="shrink-0 font-mono text-[11px] text-zinc-500">{key}</dt>
               {Array.isArray(value) ? (
