@@ -5,6 +5,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -224,6 +225,10 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	if len(in.Password) > 128 || len(in.Email) > 254 {
+		writeErr(w, fmt.Errorf("%w: password or email exceeds maximum allowed length", errs.ErrInvalid))
+		return
+	}
 	ip := clientIP(r)
 	emailKey := strings.ToLower(strings.TrimSpace(in.Email))
 	if err := h.throttle.check(ip, emailKey); err != nil {
@@ -296,7 +301,11 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	u, err := h.svc.Register(r.Context(), in.Email, in.Password, in.Role)
+	if len(in.Password) > 128 || len(in.Email) > 254 {
+		writeErr(w, fmt.Errorf("%w: password or email exceeds maximum allowed length", errs.ErrInvalid))
+		return
+	}
+	u, err := h.svc.Register(r.Context(), in.Email, in.Password, "")
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -433,5 +442,9 @@ func writeJSON(w http.ResponseWriter, code int, body any) {
 }
 
 func writeErr(w http.ResponseWriter, err error) {
-	http.Error(w, err.Error(), errs.HTTPStatus(err))
+	status := errs.HTTPStatus(err)
+	if status == http.StatusTooManyRequests {
+		w.Header().Set("Retry-After", "60")
+	}
+	http.Error(w, err.Error(), status)
 }

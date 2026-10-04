@@ -83,14 +83,25 @@ func (u *Usecase) Login(ctx context.Context, email, password string) (*TokenPair
 	if email == "" || password == "" {
 		return nil, fmt.Errorf("%w: email and password required", errs.ErrInvalid)
 	}
+
+	// Limit password length to prevent CPU exhaustion DoS attacks on Argon2id hashing
+	if len(password) > 128 {
+		return nil, fmt.Errorf("%w: password exceeds max length of 128 characters", errs.ErrInvalid)
+	}
+
+	// Standard Argon2id dummy hash used for non-existent or disabled users to prevent timing side-channel attacks
+	const dummyHash = "$argon2id$v=19$m=65536,t=1,p=4$vMDBeCJ3bhBGkkDL1b+egw$o/enaT0GzKXtNduUcTTE4+9MlYd2weKWm/lbFw2zkH4"
+
 	user, err := u.repo.GetByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, errs.ErrNotFound) {
+			_ = verifyPassword(password, dummyHash)
 			return nil, errs.ErrUnauthorized
 		}
 		return nil, err
 	}
 	if user.Status != model.StatusActive {
+		_ = verifyPassword(password, dummyHash)
 		return nil, errs.ErrUnauthorized
 	}
 	if !verifyPassword(password, user.PassHash) {

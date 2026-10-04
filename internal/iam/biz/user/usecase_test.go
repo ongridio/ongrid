@@ -181,3 +181,42 @@ func TestRegisterRejectsDuplicateEmail(t *testing.T) {
 		t.Fatalf("want ErrConflict, got %v", err)
 	}
 }
+
+func TestLogin_PasswordTooLong(t *testing.T) {
+	uc := newTestUsecase(t)
+	ctx := context.Background()
+
+	longPassword := string(make([]byte, 129))
+	_, err := uc.Login(ctx, "user@example.com", longPassword)
+	if !errors.Is(err, errs.ErrInvalid) {
+		t.Fatalf("want ErrInvalid for password > 128 chars, got %v", err)
+	}
+}
+
+func TestLogin_NonExistentUser(t *testing.T) {
+	uc := newTestUsecase(t)
+	ctx := context.Background()
+
+	_, err := uc.Login(ctx, "nonexistent@example.com", "any-password")
+	if !errors.Is(err, errs.ErrUnauthorized) {
+		t.Fatalf("want ErrUnauthorized for non-existent user, got %v", err)
+	}
+}
+
+func TestLogin_InactiveUser(t *testing.T) {
+	uc := newTestUsecase(t)
+	ctx := context.Background()
+
+	u, err := uc.Register(ctx, "inactive@example.com", "validpass123", model.RoleUser)
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if err := uc.repo.UpdateStatus(ctx, u.ID, model.StatusDisabled); err != nil {
+		t.Fatalf("update status: %v", err)
+	}
+
+	_, err = uc.Login(ctx, "inactive@example.com", "validpass123")
+	if !errors.Is(err, errs.ErrUnauthorized) {
+		t.Fatalf("want ErrUnauthorized for inactive user, got %v", err)
+	}
+}
