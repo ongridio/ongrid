@@ -120,6 +120,13 @@ func BuildReActGraph(
 		GraphName:     "ReActAgent",
 		ModelNodeName: "ChatModel",
 		ToolsNodeName: "Tools",
+		StreamToolCallChecker: func(_ context.Context, modelOutput *schema.StreamReader[*schema.Message]) (bool, error) {
+			msg, err := schema.ConcatMessageStream(modelOutput)
+			if err != nil {
+				return false, err
+			}
+			return msg != nil && len(msg.ToolCalls) > 0, nil
+		},
 	}
 	reactAgent, err := react.NewAgent(context.Background(), reactCfg)
 	if err != nil {

@@ -120,7 +120,7 @@ func regOrExist(reg prometheus.Registerer, c prometheus.Collector) prometheus.Co
 type MetricsHandler struct {
 	collectors *metricsCollectors
 
-	chatTurns atomic.Int64
+	chatTurns    atomic.Int64
 	toolStartsMu sync.Mutex
 	toolStarts   map[string]time.Time
 
@@ -147,7 +147,7 @@ func (h *MetricsHandler) Needed(_ context.Context, info *callbacks.RunInfo, timi
 	switch info.Component {
 	case components.ComponentOfChatModel:
 		switch timing {
-		case callbacks.TimingOnEnd, callbacks.TimingOnError:
+		case callbacks.TimingOnEnd, callbacks.TimingOnError, callbacks.TimingOnEndWithStreamOutput:
 			return true
 		}
 	case components.ComponentOfTool:
@@ -246,8 +246,9 @@ func (h *MetricsHandler) OnError(ctx context.Context, info *callbacks.RunInfo, e
 	return ctx
 }
 
-// OnStartWithStreamInput / OnEndWithStreamOutput are no-ops; the
-// counters fire on the non-stream OnEnd path.
+// OnStartWithStreamInput is a no-op. OnEndWithStreamOutput drains the
+// handler's independent stream copy and applies the same ChatModel counters
+// as the non-stream path.
 func (h *MetricsHandler) OnStartWithStreamInput(ctx context.Context, _ *callbacks.RunInfo, in *schema.StreamReader[callbacks.CallbackInput]) context.Context {
 	if in != nil {
 		in.Close()
@@ -257,7 +258,10 @@ func (h *MetricsHandler) OnStartWithStreamInput(ctx context.Context, _ *callback
 
 func (h *MetricsHandler) OnEndWithStreamOutput(ctx context.Context, _ *callbacks.RunInfo, out *schema.StreamReader[callbacks.CallbackOutput]) context.Context {
 	if out != nil {
-		out.Close()
+		if _, err := concatModelCallbackStream(out); err == nil {
+			h.chatTurns.Add(1)
+			h.collectors.chatTurns.WithLabelValues("success").Inc()
+		}
 	}
 	return ctx
 }

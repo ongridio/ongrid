@@ -77,6 +77,9 @@ const (
 	// tool-calling turns Content is empty but PendingToolCalls is non-zero
 	// — the UI should render placeholders for that many tool calls.
 	EventAssistant EventType = "assistant"
+	// EventAssistantDelta carries one user-visible content chunk before the
+	// persisted assistant frame. It is emitted by the graph kernel only.
+	EventAssistantDelta EventType = "assistant_delta"
 	// EventToolStart fires after a tool_call row is persisted as pending,
 	// before the tool actually runs.
 	EventToolStart EventType = "tool_start"
@@ -102,6 +105,7 @@ const (
 type Event struct {
 	Type         EventType
 	Assistant    *AssistantEvent
+	Delta        *AssistantDeltaEvent
 	Tool         *ToolEvent
 	Done         *Reply
 	Notification *TaskNotificationEvent
@@ -143,6 +147,12 @@ type AssistantEvent struct {
 	Content          string
 	CreatedAt        time.Time
 	PendingToolCalls int
+}
+
+type AssistantDeltaEvent struct {
+	Iteration int
+	Content   string
+	Kind      string
 }
 
 // ToolEvent describes one tool_call lifecycle event. EndedAt, Status,

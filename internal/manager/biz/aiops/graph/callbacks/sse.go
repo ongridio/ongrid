@@ -2,6 +2,9 @@ package callbacks
 
 import (
 	"context"
+	"errors"
+	"io"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -57,12 +60,12 @@ const (
 type SSEEvent struct {
 	Type         SSEEventType
 	Iteration    int
-	Assistant    *AssistantPayload         // for assistant_start / assistant_end
-	Delta        *AssistantDelta           // for assistant_delta
-	Tool         *ToolPayload              // for tool_start / tool_end
-	Done         *DonePayload              // for done
-	Error        *ErrorPayload             // for error
-	Notification *TaskNotificationPayload  // for task_notification
+	Assistant    *AssistantPayload        // for assistant_start / assistant_end
+	Delta        *AssistantDelta          // for assistant_delta
+	Tool         *ToolPayload             // for tool_start / tool_end
+	Done         *DonePayload             // for done
+	Error        *ErrorPayload            // for error
+	Notification *TaskNotificationPayload // for task_notification
 }
 
 // AssistantPayload is the start/end frame body. ContentSoFar is empty
@@ -87,6 +90,9 @@ type AssistantPayload struct {
 type AssistantDelta struct {
 	Iteration int
 	Content   string
+	// Kind is "reasoning" for provider reasoning_content chunks and
+	// "content" for user-visible answer chunks. Empty means content.
+	Kind string
 }
 
 // ToolPayload is the tool_start / tool_end frame body.
@@ -114,7 +120,7 @@ type ErrorPayload struct {
 }
 
 // TaskNotificationPayload is the body of a task_notification frame
-//Emitted by the coordinator runtime when a background
+// Emitted by the coordinator runtime when a background
 // worker spawned via AgentTool reaches a terminal state. The shape is
 // stable wire because the SPA reads each field directly:
 //
@@ -171,6 +177,10 @@ type SSEEmitter func(SSEEvent)
 // the response writer, which is already single-goroutine).
 type SSEHandler struct {
 	emit SSEEmitter
+
+	// drainWG tracks stream-copy drain goroutines so the runtime can wait for
+	// all SSE writes to finish before returning to the HTTP handler.
+	drainWG sync.WaitGroup
 
 	// iterations counts ChatModel turns for the assistant frame's
 	// `iteration` field. Atomic because tool fan-out callbacks may
@@ -412,14 +422,32 @@ func (h *SSEHandler) OnEndWithStreamOutput(ctx context.Context, info *callbacks.
 		out.Close()
 		return ctx
 	}
-	go h.drainStream(out)
+	h.drainWG.Add(1)
+	go func() {
+		defer h.drainWG.Done()
+		h.drainStream(out)
+	}()
 	return ctx
+}
+
+// Wait blocks until every asynchronous stream-copy drain has completed. It is
+// safe to call concurrently with normal callback processing.
+func (h *SSEHandler) Wait() {
+	if h == nil {
+		return
+	}
+	h.drainWG.Wait()
 }
 
 func (h *SSEHandler) drainStream(out *schema.StreamReader[callbacks.CallbackOutput]) {
 	defer out.Close()
+	var content strings.Builder
+	pendingToolCalls := 0
 	for {
 		chunk, err := out.Recv()
+		if errors.Is(err, io.EOF) {
+			break
+		}
 		if err != nil {
 			return
 		}
@@ -427,16 +455,43 @@ func (h *SSEHandler) drainStream(out *schema.StreamReader[callbacks.CallbackOutp
 		if mo == nil || mo.Message == nil {
 			continue
 		}
-		if mo.Message.Content == "" {
-			continue
+		if mo.Message.Content != "" {
+			content.WriteString(mo.Message.Content)
+			h.emit(SSEEvent{
+				Type:      SSEEventAssistantDelta,
+				Iteration: int(h.iterations.Load()),
+				Delta: &AssistantDelta{
+					Iteration: int(h.iterations.Load()),
+					Content:   mo.Message.Content,
+				},
+			})
 		}
-		it := int(h.iterations.Load())
-		h.emit(SSEEvent{
-			Type:      SSEEventAssistantDelta,
-			Iteration: it,
-			Delta:     &AssistantDelta{Iteration: it, Content: mo.Message.Content},
-		})
+		if mo.Message.ReasoningContent != "" {
+			h.emit(SSEEvent{
+				Type:      SSEEventAssistantDelta,
+				Iteration: int(h.iterations.Load()),
+				Delta: &AssistantDelta{
+					Iteration: int(h.iterations.Load()),
+					Content:   mo.Message.ReasoningContent,
+					Kind:      "reasoning",
+				},
+			})
+		}
+		pendingToolCalls += len(mo.Message.ToolCalls)
 	}
+	h.assistantIDRelay.wait()
+	it := int(h.iterations.Load())
+	h.emit(SSEEvent{
+		Type:      SSEEventAssistantEnd,
+		Iteration: it,
+		Assistant: &AssistantPayload{
+			Iteration:        it,
+			MessageID:        h.assistantIDRelay.load(),
+			Content:          content.String(),
+			PendingToolCalls: pendingToolCalls,
+			CreatedAt:        time.Now().UTC(),
+		},
+	})
 }
 
 // IterationCount returns the number of ChatModel turns the handler has

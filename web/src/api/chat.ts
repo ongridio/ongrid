@@ -4,7 +4,7 @@ import { getToken } from '@/store/auth';
 export type ChatRole = 'user' | 'assistant' | 'tool' | 'system';
 
 export type ImageAttachment = {
-	 id: string;
+  id: string;
   name: string;
   mime_type: string;
   size: number;
@@ -34,6 +34,9 @@ export type ChatMessage = {
   id: string;
   role: ChatRole;
   content?: string;
+  reasoning?: string;
+  // Persisted message history uses the provider-compatible field name.
+  reasoning_content?: string;
   attachments?: ImageAttachment[];
   tool_call_id?: string;
   tool_name?: string;
@@ -286,11 +289,19 @@ export type ApprovalPendingStreamEvent = {
 
 export type StreamCallbacks = {
   onAssistant?: (e: AssistantStreamEvent) => void;
+  onAssistantDelta?: (e: AssistantDeltaStreamEvent) => void;
   onToolStart?: (e: ToolStreamEvent) => void;
   onToolEnd?: (e: ToolStreamEvent) => void;
   onApprovalPending?: (e: ApprovalPendingStreamEvent) => void;
   onDone?: (reply: PostMessageResponse) => void;
   onError?: (err: Error) => void;
+};
+
+export type AssistantDeltaStreamEvent = {
+  session_id: string;
+  iteration: number;
+  content: string;
+  kind?: 'content' | 'reasoning';
 };
 
 // streamMessage opens an SSE connection to the agent loop and dispatches
@@ -350,7 +361,7 @@ export async function streamMessage(
   const decoder = new TextDecoder();
   let buf = '';
 
-  while (true) {
+  for (;;) {
     const { value, done } = await reader.read();
     if (done) break;
     buf += decoder.decode(value, { stream: true });
@@ -385,6 +396,9 @@ function dispatchFrame(raw: string, cbs: StreamCallbacks) {
   switch (event) {
     case 'assistant':
       cbs.onAssistant?.(payload as AssistantStreamEvent);
+      break;
+    case 'assistant_delta':
+      cbs.onAssistantDelta?.(payload as AssistantDeltaStreamEvent);
       break;
     case 'tool_start':
       cbs.onToolStart?.(payload as ToolStreamEvent);

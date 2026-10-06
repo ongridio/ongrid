@@ -3924,6 +3924,17 @@ func (p *providerInjectingClient) Chat(ctx context.Context, req llm.ChatReq) (*l
 	return p.inner.Chat(ctx, req)
 }
 
+func (p *providerInjectingClient) ChatStream(ctx context.Context, req llm.ChatReq) (llm.ChatStreamReader, error) {
+	if req.Provider == "" {
+		req.Provider = p.provider
+	}
+	streamer, ok := p.inner.(llm.StreamingClient)
+	if !ok {
+		return nil, fmt.Errorf("%w: provider %q", llm.ErrStreamingUnsupported, p.provider)
+	}
+	return streamer.ChatStream(ctx, req)
+}
+
 // loadBootstrapRegistries walks ./agents + ./skills + the marketplace
 // skill root and returns populated registries. Called once at boot
 // regardless of kernel choice, so /v1/agents has data to render even
@@ -4208,6 +4219,10 @@ func buildAIOpsRuntime(
 	// param lints stay quiet across edits.
 	_ = ctx
 	_ = llmRouter
+	tokenStreaming := false
+	if value, err := strconv.ParseBool(strings.TrimSpace(os.Getenv("ONGRID_CHAT_TOKEN_STREAM"))); err == nil {
+		tokenStreaming = value
+	}
 	rt, err := aiopschatruntime.NewRuntime(aiopschatruntime.Config{
 		SkillRegistry:   skillReg,
 		AgentRegistry:   agentReg,
@@ -4223,8 +4238,9 @@ func buildAIOpsRuntime(
 			MaxIterations: 30,
 			ToolTimeout:   15 * time.Second,
 		},
-		CallbackDeps: cbDeps,
-		Logger:       log.With(slog.String("comp", "chatruntime")),
+		CallbackDeps:   cbDeps,
+		TokenStreaming: tokenStreaming,
+		Logger:         log.With(slog.String("comp", "chatruntime")),
 	})
 	if err != nil {
 		return nil, err

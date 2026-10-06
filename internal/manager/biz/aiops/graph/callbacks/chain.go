@@ -3,9 +3,12 @@ package callbacks
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 
 	"github.com/cloudwego/eino/callbacks"
+	einomodel "github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/schema"
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/ongridio/ongrid/internal/pkg/llm"
@@ -24,7 +27,9 @@ import (
 // id (v0.7.63 hotfix) because this field was empty. Now it can use
 // the real DB id.
 type assistantIDRelay struct {
-	id atomic.Pointer[string]
+	id       atomic.Pointer[string]
+	done     chan struct{}
+	doneOnce sync.Once
 }
 
 func (r *assistantIDRelay) store(id string) {
@@ -42,6 +47,38 @@ func (r *assistantIDRelay) load() string {
 		return *p
 	}
 	return ""
+}
+
+func (r *assistantIDRelay) complete() {
+	if r == nil {
+		return
+	}
+	r.doneOnce.Do(func() {
+		if r.done != nil {
+			close(r.done)
+		}
+	})
+}
+
+func (r *assistantIDRelay) wait() {
+	if r == nil || r.done == nil {
+		return
+	}
+	<-r.done
+}
+
+func concatModelCallbackStream(out *schema.StreamReader[callbacks.CallbackOutput]) (*schema.Message, error) {
+	if out == nil {
+		return nil, nil
+	}
+	messages := schema.StreamReaderWithConvert(out, func(item callbacks.CallbackOutput) (*schema.Message, error) {
+		mo := einomodel.ConvCallbackOutput(item)
+		if mo == nil || mo.Message == nil {
+			return nil, schema.ErrNoValue
+		}
+		return mo.Message, nil
+	})
+	return schema.ConcatMessageStream(messages)
 }
 
 // Deps bundles every dependency the default callback chain needs.
@@ -92,12 +129,12 @@ func NewDefaultHandlers(deps Deps) []callbacks.Handler {
 		out = append(out, h)
 	}
 
-	// Shared relay so Persistence (runs first) can hand the freshly-
-	// written assistant row id to SSE (runs second) for the
-	// assistant_end frame.
-	relay := &assistantIDRelay{}
-
+	// Shared relay lets the persistence stream copy announce completion to
+	// SSE's independent stream copy. Stream handlers drain concurrently, so
+	// registration order alone is not a safe message-id handoff.
+	var relay *assistantIDRelay
 	if h := NewPersistenceHandler(deps.Persistence); h != nil {
+		relay = &assistantIDRelay{done: make(chan struct{})}
 		h.assistantIDRelay = relay
 		out = append(out, h)
 	}
@@ -115,6 +152,16 @@ func NewDefaultHandlers(deps Deps) []callbacks.Handler {
 		out = append(out, llm.NewBudgetCallbackHandler(deps.BudgetChecker, deps.BudgetUserID))
 	}
 	return out
+}
+
+// SSEHandlerFromHandlers returns the request-scoped SSE handler, if wired.
+func SSEHandlerFromHandlers(handlers []callbacks.Handler) *SSEHandler {
+	for _, handler := range handlers {
+		if sse, ok := handler.(*SSEHandler); ok {
+			return sse
+		}
+	}
+	return nil
 }
 
 // EnableSynchronousToolPersistence returns the request-scoped persistence

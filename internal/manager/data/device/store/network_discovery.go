@@ -275,8 +275,10 @@ func (r *NetworkDiscoveryRepo) ListDueNetworkPolls(ctx context.Context, now time
 		limit = 10
 	}
 	var profiles []*model.DeviceNetwork
+	dueCondition, dueArgs := networkPollDueCondition(r.db, now)
 	if err := r.db.WithContext(ctx).
-		Where("poll_enabled = ? AND poll_credential_name <> ? AND (last_poll_at IS NULL OR DATE_ADD(last_poll_at, INTERVAL poll_interval_seconds SECOND) <= ?)", true, "", now).
+		Where("poll_enabled = ? AND poll_credential_name <> ?", true, "").
+		Where(dueCondition, dueArgs...).
 		Order("COALESCE(last_poll_at, created_at) ASC").Limit(limit).Find(&profiles).Error; err != nil {
 		return nil, err
 	}
@@ -289,6 +291,13 @@ func (r *NetworkDiscoveryRepo) ListDueNetworkPolls(ctx context.Context, now time
 		out = append(out, detail)
 	}
 	return out, nil
+}
+
+func networkPollDueCondition(db *gorm.DB, now time.Time) (string, []any) {
+	if db.Dialector.Name() == "sqlite" {
+		return "last_poll_at IS NULL OR julianday(last_poll_at) <= julianday(?) - poll_interval_seconds / 86400.0", []any{now}
+	}
+	return "last_poll_at IS NULL OR DATE_ADD(last_poll_at, INTERVAL poll_interval_seconds SECOND) <= ?", []any{now}
 }
 
 func (r *NetworkDiscoveryRepo) ReplaceNetworkInterfaces(ctx context.Context, deviceID uint64, rows []*model.NetworkInterface) error {

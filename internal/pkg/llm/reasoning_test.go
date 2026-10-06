@@ -23,6 +23,7 @@ func TestReasoning_MultipleToolRounds_PreservesProviderContent(t *testing.T) {
 			reasons := []string{" 合成协议样本一\n", "合成协议样本二", "合成最终回答样本", "合成新轮次样本"}
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				var request struct {
+					Stream   bool `json:"stream"`
 					Messages []struct {
 						Role      string  `json:"role"`
 						Reasoning *string `json:"reasoning_content"`
@@ -60,6 +61,22 @@ func TestReasoning_MultipleToolRounds_PreservesProviderContent(t *testing.T) {
 				if n < 2 {
 					message["tool_calls"] = []any{map[string]any{"id": fmt.Sprintf("call_%d", n), "type": "function", "function": map[string]any{"name": "test_value", "arguments": "{}"}}}
 				}
+				if request.Stream {
+					w.Header().Set("Content-Type", "text/event-stream")
+					chunk, err := json.Marshal(map[string]any{"choices": []any{map[string]any{"index": 0, "delta": message}}})
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					_, _ = w.Write([]byte("data: " + string(chunk) + "\n\n"))
+					usage, err := json.Marshal(map[string]any{"choices": []any{}, "usage": map[string]any{"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3}})
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					_, _ = w.Write([]byte("data: " + string(usage) + "\n\ndata: [DONE]\n\n"))
+					return
+				}
 				w.Header().Set("Content-Type", "application/json")
 				if err := json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": message}}}); err != nil {
 					t.Error(err)
@@ -76,8 +93,7 @@ func TestReasoning_MultipleToolRounds_PreservesProviderContent(t *testing.T) {
 				if streaming {
 					s, err := cm.Stream(context.Background(), history)
 					require.NoError(t, err)
-					msg, err = s.Recv()
-					s.Close()
+					msg, err = schema.ConcatMessageStream(s)
 					require.NoError(t, err)
 				} else {
 					msg, err = cm.Generate(context.Background(), history)
