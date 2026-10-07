@@ -59,6 +59,25 @@ func Open(cfg config.DBConfig, log *slog.Logger) (*gorm.DB, error) {
 
 // openMySQL opens a MySQL connection via gorm and verifies reachability
 // with Ping(). The DSN password is never logged.
+//
+// Time storage contract. A Go time.Time is the source of truth for every
+// timestamp column; the on-disk representation differs per backend and is
+// not itself a UTC timestamp:
+//
+//   - MySQL DATETIME carries no offset. go-sql-driver/mysql converts a
+//     time.Time to the DSN's `loc` (ONGRID_DB_DSN defaults to loc=Local)
+//     before writing, and parses back through the same `loc` on read, so
+//     the instant round-trips regardless of the zone the value carried in
+//     Go — but the stored wall clock is driver-local, not UTC.
+//   - SQLite stores ISO-8601 text *including* the offset, which makes
+//     `WHERE ts <= ?` a lexical compare. Values written in a non-UTC zone
+//     therefore sort wrongly against a UTC bind; see the next_fire_at
+//     backfill in internal/manager/data/report/store.
+//
+// Consequences: normalize to UTC in Go before persisting anything that is
+// range-queried, and treat any consumer that reads these columns outside
+// this driver (ops scripts, BI, a raw SELECT) as responsible for
+// converting from the driver's `loc` itself.
 func openMySQL(dsn string, log *slog.Logger) (*gorm.DB, error) {
 	if dsn == "" {
 		return nil, fmt.Errorf("dbx: empty mysql DSN")

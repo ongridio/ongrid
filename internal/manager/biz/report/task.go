@@ -23,7 +23,7 @@ func (u *Usecase) CreateOneoffTaskAndRun(ctx context.Context, createdBy uint64, 
 	if strings.TrimSpace(tz) == "" {
 		tz = "UTC"
 	}
-	loc, err := loadLocation(tz)
+	loc, err := LoadLocation(tz)
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +64,7 @@ func (u *Usecase) RerunOneoffTask(ctx context.Context, taskID, locale string, no
 	if err != nil {
 		return nil, err
 	}
-	loc, err := loadLocation("UTC")
+	loc, err := LoadLocation("UTC")
 	if err != nil {
 		return nil, err
 	}

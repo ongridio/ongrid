@@ -81,7 +81,13 @@ type ReportSchedule struct {
 	AgentPersona   string  `gorm:"column:agent_persona;size:64;not null;default:'reporter'"`
 	PromptOverride *string `gorm:"column:prompt_override;type:text"` // NULL = use persona default
 
-	// Scheduling state
+	// Scheduling state. NextFireAt / LastFireAt are always persisted as UTC
+	// instants: the evaluator's `next_fire_at <= now` runs against a UTC
+	// clock, and under SQLite that comparison is lexical over offset-bearing
+	// text, so a schedule-timezone value would never be selected. Display
+	// layers localize from the UTC instant (rendering it in Timezone, not
+	// the viewer's zone). See dbx.openMySQL for the per-backend storage
+	// contract.
 	Enabled      bool       `gorm:"column:enabled;not null;default:true;index:idx_rsched_enabled_next,priority:1"`
 	NextFireAt   *time.Time `gorm:"column:next_fire_at;index:idx_rsched_enabled_next,priority:2"`
 	LastFireAt   *time.Time `gorm:"column:last_fire_at"`

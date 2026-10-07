@@ -80,7 +80,7 @@ func (s *Scheduler) fireOne(ctx context.Context, sched *model.ReportSchedule, no
 		}
 	}()
 
-	loc, err := loadLocation(sched.Timezone)
+	loc, err := LoadLocation(sched.Timezone)
 	if err != nil {
 		s.log.Warn("bad schedule timezone — disabling",
 			slog.Uint64("schedule_id", sched.ID), slog.String("tz", sched.Timezone))
