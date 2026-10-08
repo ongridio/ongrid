@@ -28,31 +28,60 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+
+      - name: Classify documentation changes
+        id: changes
+        env:
+          CI_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python3 scripts/ci-docs-only.py
 
       - name: Set up Go
+        if: steps.changes.outputs.docs_only != 'true'
+        id: go
         uses: actions/setup-go@v6
         with:
           go-version: '1.25.x'
-          cache: true
+          cache: false
+
+      - name: Restore and refresh Go cache
+        if: steps.changes.outputs.docs_only != 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          # Save completed builds per commit; restore the latest compatible cache.
+          key: go-v1-ubuntu24-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-linux-${{ hashFiles('go.mod', 'go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            go-v1-ubuntu24-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-linux-${{ hashFiles('go.mod', 'go.sum') }}-
+            go-v1-ubuntu24-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-linux-
 
       - name: Set up Buf
+        if: steps.changes.outputs.docs_only != 'true'
         uses: bufbuild/buf-action@v1
         with:
           setup_only: true
 
       - name: buf lint
+        if: steps.changes.outputs.docs_only != 'true'
         run: make lint-proto
 
       - name: go build
+        if: steps.changes.outputs.docs_only != 'true'
         run: go build ./...
 
       - name: go vet
+        if: steps.changes.outputs.docs_only != 'true'
         run: go vet ./...
 
       - name: go test
+        if: steps.changes.outputs.docs_only != 'true'
         run: go test -race ./...
 
       - name: Kubernetes JVM attach capabilities
+        if: steps.changes.outputs.docs_only != 'true'
         run: make test-k8s-capabilities
 
   web-test:
@@ -67,8 +96,18 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+
+      - name: Classify documentation changes
+        id: changes
+        working-directory: .
+        env:
+          CI_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python3 scripts/ci-docs-only.py
 
       - name: Set up Node.js
+        if: steps.changes.outputs.docs_only != 'true'
         uses: actions/setup-node@v6
         with:
           node-version: '22'
@@ -80,9 +119,11 @@ jobs:
         run: make test-commit-policy
 
       - name: Install dependencies
+        if: steps.changes.outputs.docs_only != 'true'
         run: npm ci
 
       - name: Test
+        if: steps.changes.outputs.docs_only != 'true'
         # Keep DOM-heavy suites from competing for CPU within their test timeouts.
         run: >-
           npm test -- --run --no-file-parallelism
@@ -100,6 +141,7 @@ jobs:
           src/pages/kubernetes/registryCommands.test.ts
 
       - name: Build
+        if: steps.changes.outputs.docs_only != 'true'
         run: npm run build
 
   deployment-test:
@@ -113,6 +155,9 @@ jobs:
 
       - name: Set up Helm
         uses: azure/setup-helm@v5
+
+      - name: Verify documentation-only CI routing
+        run: make test-ci-docs-only
 
       - name: Check release scripts
         run: bash -n dist/package.sh dist/package-k8s-chart.sh dist/build-edge-attachments.sh deploy/install/install.sh deploy/install/upgrade.sh deploy/install/uninstall.sh deploy/install/public-url.sh deploy/install/data-permissions.sh deploy/install/apply-pending-upgrade.sh deploy/install/edge/fetch-edge-assets.sh deploy/install/edge/verify-edge-deps-archive.sh deploy/install/edge/edge-assets-lib.sh scripts/verify-cnb-compose-images.sh scripts/verify-release-images.sh scripts/publish-release-image.sh scripts/publish-release-image-platform.sh scripts/merge-release-image-manifest.sh scripts/test-publish-release-image.sh scripts/test-release-image-platform-publish.sh scripts/ensure-cnb-release.sh scripts/test-ensure-cnb-release.sh scripts/test-publish-cnb-release-attachments.sh scripts/test-verify-cnb-release-attachments.sh scripts/test-release-workflow.sh scripts/test-edge-assets.sh scripts/test-edge-assets-lib.sh scripts/test-edge-installer-connectivity-guard.sh scripts/test-edge-upgrade-hook-guard.sh scripts/test-public-url.sh scripts/test-upgrade-data-permissions.sh scripts/test-compose-release-package.sh scripts/test-apply-pending-upgrade.sh scripts/publish-helm-chart.sh scripts/test-publish-helm-chart.sh scripts/test-k8s-chart.sh

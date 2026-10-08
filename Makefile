@@ -884,3 +884,7 @@ fetch-obi: ## [release] 下载并校验 Linux OBI 自动 APM 运行时
 .PHONY: test-commit-policy
 test-commit-policy: ## Verify PR commit policy and bot feedback
 	node scripts/test-commit-policy.cjs
+
+.PHONY: test-ci-docs-only
+test-ci-docs-only: ## Verify documentation-only CI routing
+	python3 scripts/test-ci-docs-only.py
