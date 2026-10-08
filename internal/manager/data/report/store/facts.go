@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 
 	bizreport "github.com/ongridio/ongrid/internal/manager/biz/report"
+	devicemodel "github.com/ongridio/ongrid/internal/manager/model/device"
 	"github.com/ongridio/ongrid/internal/pkg/promquery"
 )
 
@@ -181,20 +182,16 @@ func (c *FactsCollector) collectFleet(ctx context.Context) bizreport.FleetFacts 
 		return f
 	}
 	f.Roles = map[string]int{}
-	roleNames := map[uint8]string{1: "server", 2: "storage", 4: "network", 8: "database"}
 	for _, r := range rows {
 		f.Total++
 		if r.Online {
 			f.Online++
 		}
-		matched := false
-		for bit, name := range roleNames {
-			if r.Roles&bit != 0 {
-				f.Roles[name]++
-				matched = true
-			}
+		roles := devicemodel.DecodeRoles(r.Roles)
+		for _, name := range roles {
+			f.Roles[name]++
 		}
-		if !matched {
+		if len(roles) == 0 {
 			f.Roles["unknown"]++
 		}
 	}

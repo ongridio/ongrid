@@ -76,11 +76,11 @@ type Device struct {
 	DiskUsagePct float32 `gorm:"not null;default:0;column:disk_usage_pct"`
 
 	// Roles is a bit field of device roles (server / storage / network /
-	// database). Multi-role boxes (hyper-converged, edge gateways,
+	// database / gpu). Multi-role boxes (hyper-converged, edge gateways,
 	// application NAS) can carry several bits at once; 0 means "未分类".
 	// Moved from Edge during the May 2026 split — this is host metadata,
 	// not agent metadata.
-	Roles uint8 `gorm:"not null;default:0;index:idx_devices_roles;check:roles BETWEEN 0 AND 15;column:roles"`
+	Roles uint8 `gorm:"not null;default:0;index:idx_devices_roles;check:roles BETWEEN 0 AND 31;column:roles"`
 
 	// Online / LastSeenAt mirror the most recently observed agent
 	// presence on this host. They are denormalised from Edge for fast
@@ -109,17 +109,18 @@ func (Device) TableName() string { return "devices" }
 
 // Role bit constants. Aligned with the sidebar 设备 sub-menu; AI prompt
 // routing in aiops uses these values verbatim. Storage layout: 1 byte,
-// 4 bits used, 4 reserved. Do NOT renumber existing bits — operators'
+// 5 bits used, 3 reserved. Do NOT renumber existing bits — operators'
 // stored values would all silently re-categorize.
 const (
 	RoleBitServer   uint8 = 1 << 0 // 0b0001
 	RoleBitStorage  uint8 = 1 << 1 // 0b0010
 	RoleBitNetwork  uint8 = 1 << 2 // 0b0100
 	RoleBitDatabase uint8 = 1 << 3 // 0b1000
+	RoleBitGPU      uint8 = 1 << 4 // 0b1_0000
 
 	// RolesAllKnownBits is the OR of every defined bit. Anything outside
 	// this mask is invalid and rejected by IsValidRoles.
-	RolesAllKnownBits uint8 = RoleBitServer | RoleBitStorage | RoleBitNetwork | RoleBitDatabase
+	RolesAllKnownBits uint8 = RoleBitServer | RoleBitStorage | RoleBitNetwork | RoleBitDatabase | RoleBitGPU
 )
 
 // Role string identifiers. Wire / UI uses an array of these names; DB
@@ -129,6 +130,7 @@ const (
 	RoleStorage  = "storage"
 	RoleNetwork  = "network"
 	RoleDatabase = "database"
+	RoleGPU      = "gpu"
 	// RoleUnknown is the convention used by the wire shape when Roles==0.
 	// It never sets a bit — it's purely a label for "no roles assigned".
 	RoleUnknown = "unknown"
@@ -140,6 +142,7 @@ var roleNameToBit = map[string]uint8{
 	RoleStorage:  RoleBitStorage,
 	RoleNetwork:  RoleBitNetwork,
 	RoleDatabase: RoleBitDatabase,
+	RoleGPU:      RoleBitGPU,
 }
 
 var roleBitToName = map[uint8]string{
@@ -147,6 +150,7 @@ var roleBitToName = map[uint8]string{
 	RoleBitStorage:  RoleStorage,
 	RoleBitNetwork:  RoleNetwork,
 	RoleBitDatabase: RoleDatabase,
+	RoleBitGPU:      RoleGPU,
 }
 
 // IsValidRoleName reports whether s is a recognized role name. Used by
@@ -180,11 +184,11 @@ func EncodeRoles(names []string) uint8 {
 }
 
 // DecodeRoles turns a bit set into a deterministic slice of role names
-// in the canonical order (server, storage, network, database). An empty
+// in the canonical order (server, storage, network, database, gpu). An empty
 // bit set returns an empty slice — callers render "未分类" themselves.
 func DecodeRoles(r uint8) []string {
-	out := make([]string, 0, 4)
-	for _, bit := range []uint8{RoleBitServer, RoleBitStorage, RoleBitNetwork, RoleBitDatabase} {
+	out := make([]string, 0, 5)
+	for _, bit := range []uint8{RoleBitServer, RoleBitStorage, RoleBitNetwork, RoleBitDatabase, RoleBitGPU} {
 		if r&bit != 0 {
 			out = append(out, roleBitToName[bit])
 		}
@@ -206,7 +210,7 @@ func DecodeRoles(r uint8) []string {
 //   - mask == 0 → returns []int{0}, i.e. "未分类 only"
 //   - mask outside known bits → those bits are ignored
 //
-// At 4 bits the worst case is 15 values (filter "any role"); fine for IN-lists.
+// At 5 bits the worst case is 31 values (filter "any role"); fine for IN-lists.
 func MatchingRoleValues(mask uint8) []int {
 	mask &= RolesAllKnownBits
 	if mask == 0 {

@@ -75,6 +75,7 @@ it('禁用下拉不可打开，公共角色选择保留未分类选项和隐藏�
   }
   render(<Roles />);
   await act(async () => { await user.click(screen.getByRole('combobox', { name: '角色' })); });
+  expect(await screen.findByRole('option', { name: 'GPU' })).toBeInTheDocument();
   const unknown = await screen.findByRole('option', { name: '未分类' });
   await act(async () => { await user.click(unknown); });
   expect(screen.getByRole('combobox', { name: '角色' })).toHaveTextContent('未分类');

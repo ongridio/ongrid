@@ -106,6 +106,8 @@ const ROLE_FILTER_TITLES: Record<string, [string, string]> = {
   server: ["服务器", "Servers"],
   storage: ["存储", "Storage"],
   network: ["网络设备", "Network devices"],
+  database: ["数据库设备", "Database devices"],
+  gpu: ["GPU设备", "GPU devices"],
   unknown: ["未分类设备", "Uncategorized devices"],
 };
 
@@ -177,7 +179,7 @@ export default function EdgesPage() {
   const location = useLocation();
   const { tr } = useI18n();
   const { canMutate } = usePermissions();
-  // Sidebar sub-items navigate by appending ?roles=server|storage|network|unknown.
+  // Sidebar sub-items navigate by appending a canonical role filter.
   // No param = "全部". We forward the param to the backend so filtering uses the
   // sargable IN-list path (see internal/manager/biz/edge.ListFilter).
   const rolesFilter = useMemo(() => {
@@ -2000,10 +2002,11 @@ const ROLE_CHIP_CLASS: Record<EdgeRole, string> = {
   storage: "border-violet-500/30 bg-violet-500/10 text-violet-300",
   network: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
   database: "border-amber-500/30  bg-amber-500/10  text-amber-300",
+  gpu: "border-cyan-500/30    bg-cyan-500/10    text-cyan-300",
 };
 
-// RolesEditorModal lets an admin toggle the three role bits for one edge.
-// Keep "全选" / "全清" out of MVP — three checkboxes is already trivial UX.
+// RolesEditorModal lets an admin toggle the role bits for one device. Keep
+// "全选" / "全清" out of MVP — the role list is still short and explicit.
 // Saving sends the full roles array (PATCH .../roles {roles:[...]}); empty
 // array means "未分类". Backend rejects unknown names so the UI doesn't
 // have to client-side validate.

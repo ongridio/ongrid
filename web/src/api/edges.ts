@@ -6,13 +6,14 @@ export type EdgeStatus = "online" | "offline" | "unknown";
 // Backend stores a bit field; the wire shape is an array of these names.
 // One device can carry multiple roles (e.g. a hyper-converged box that's
 // both server + storage).
-export type EdgeRole = "server" | "storage" | "network" | "database";
+export type EdgeRole = "server" | "storage" | "network" | "database" | "gpu";
 
 export const EDGE_ROLES: EdgeRole[] = [
   "server",
   "storage",
   "network",
   "database",
+  "gpu",
 ];
 
 export const EDGE_ROLE_LABELS: Record<EdgeRole, string> = {
@@ -20,6 +21,7 @@ export const EDGE_ROLE_LABELS: Record<EdgeRole, string> = {
   storage: "存储",
   network: "网络设备",
   database: "数据库",
+  gpu: "GPU",
 };
 
 export const EDGE_ROLE_LABELS_EN: Record<EdgeRole, string> = {
@@ -27,6 +29,7 @@ export const EDGE_ROLE_LABELS_EN: Record<EdgeRole, string> = {
   storage: "Storage",
   network: "Network",
   database: "Database",
+  gpu: "GPU",
 };
 
 export type Edge = {

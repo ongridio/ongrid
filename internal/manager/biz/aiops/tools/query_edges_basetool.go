@@ -97,6 +97,8 @@ func (t *QueryEdgesTool) InvokableRun(ctx context.Context, argsJSON string, _ ..
 			f.RolesAny = devicemodel.RoleBitNetwork
 		case devicemodel.RoleDatabase:
 			f.RolesAny = devicemodel.RoleBitDatabase
+		case devicemodel.RoleGPU:
+			f.RolesAny = devicemodel.RoleBitGPU
 		default:
 			return "", fmt.Errorf("query_devices: invalid role %q", in.Role)
 		}

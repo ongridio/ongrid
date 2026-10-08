@@ -53,6 +53,26 @@ func TestDeviceIDsForLegacyTopologyNodes(t *testing.T) {
 	}
 }
 
+func TestMigrateAcceptsGPUDeviceRoles(t *testing.T) {
+	db := newDeviceTestDB(t)
+	gpu := sampleDevice("gpu-host")
+	gpu.Roles = model.RoleBitServer | model.RoleBitGPU
+	if err := db.Create(gpu).Error; err != nil {
+		t.Fatalf("create GPU device: %v", err)
+	}
+
+	var got model.Device
+	if err := db.First(&got, gpu.ID).Error; err != nil {
+		t.Fatalf("load GPU device: %v", err)
+	}
+	if got.Roles != model.RoleBitServer|model.RoleBitGPU {
+		t.Fatalf("roles = %d, want %d", got.Roles, model.RoleBitServer|model.RoleBitGPU)
+	}
+	if err := db.Model(&model.Device{}).Where("id = ?", gpu.ID).Update("roles", uint8(1<<5)).Error; err == nil {
+		t.Fatal("reserved role bit unexpectedly passed the database constraint")
+	}
+}
+
 func newDeviceTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{

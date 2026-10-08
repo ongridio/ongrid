@@ -88,8 +88,8 @@ func TestFactsCollector_Collect(t *testing.T) {
 		(3,'2026-06-03T00:00:00Z','success','chat_send','session','','u@x'),
 		(4,'2026-06-04T00:00:00Z','failure','rule_delete','alert_rule','旧规则','ops@x')`)
 
-	// devices: 2 online (server, server+database) + 1 offline (storage).
-	db.Exec(`INSERT INTO devices VALUES (1,1,1,NULL),(2,1,9,NULL),(3,0,2,NULL)`)
+	// devices: 2 online (server, server+database) + 1 offline (storage+gpu).
+	db.Exec(`INSERT INTO devices VALUES (1,1,1,NULL),(2,1,9,NULL),(3,0,18,NULL)`)
 
 	// prom=nil → Resource.Available=false → hero falls back to
 	// devices/incidents/actions/online.
@@ -137,11 +137,11 @@ func TestFactsCollector_Collect(t *testing.T) {
 	if facts.Actions.MutatingTotal != 3 || facts.Actions.MutatingApproved != 2 {
 		t.Errorf("actions = %+v, want total 3 approved 2", facts.Actions)
 	}
-	// Fleet from devices: total 3, online 2, roles server×2 storage×1 database×1.
+	// Fleet from devices: total 3, online 2, roles server×2 storage×1 database×1 gpu×1.
 	if facts.Fleet.Total != 3 || facts.Fleet.Online != 2 {
 		t.Errorf("fleet = %+v, want total 3 online 2", facts.Fleet)
 	}
-	if facts.Fleet.Roles["server"] != 2 || facts.Fleet.Roles["database"] != 1 || facts.Fleet.Roles["storage"] != 1 {
+	if facts.Fleet.Roles["server"] != 2 || facts.Fleet.Roles["database"] != 1 || facts.Fleet.Roles["storage"] != 1 || facts.Fleet.Roles["gpu"] != 1 {
 		t.Errorf("fleet roles = %+v", facts.Fleet.Roles)
 	}
 	// Changes: 2 success change-actions (failure + non-change excluded).

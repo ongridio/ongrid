@@ -52,6 +52,9 @@ func Migrate(db *gorm.DB) error {
 	); err != nil {
 		return err
 	}
+	if err := refreshDeviceRolesConstraint(db); err != nil {
+		return err
+	}
 	if err := dbx.BackfillDeleteMarker(db, model.Device{}.TableName()); err != nil {
 		return err
 	}
@@ -65,6 +68,38 @@ func Migrate(db *gorm.DB) error {
 		return err
 	}
 	return backfillDeviceEnvironments(db)
+}
+
+// refreshDeviceRolesConstraint reapplies the current model constraint for
+// existing SQLite databases. GORM creates CHECK constraints for new tables,
+// but does not alter an existing constraint when the allowed role bits grow.
+// Production MySQL installations use the versioned SQL migration under
+// db/migrations; this keeps local SQLite upgrades on the same contract.
+func refreshDeviceRolesConstraint(db *gorm.DB) error {
+	if db.Dialector.Name() != "sqlite" {
+		return nil
+	}
+	const constraintName = "chk_devices_roles"
+	if !db.Migrator().HasConstraint(&model.Device{}, constraintName) {
+		return nil
+	}
+	var createSQL string
+	if err := db.Raw("SELECT sql FROM sqlite_master WHERE type = ? AND name = ?", "table", model.Device{}.TableName()).Scan(&createSQL).Error; err != nil {
+		return fmt.Errorf("inspect device roles constraint: %w", err)
+	}
+	if strings.Contains(strings.ToUpper(createSQL), "ROLES BETWEEN 0 AND 31") {
+		return nil
+	}
+	if err := db.Migrator().DropConstraint(&model.Device{}, constraintName); err != nil {
+		return fmt.Errorf("drop device roles constraint: %w", err)
+	}
+	if err := db.Migrator().CreateConstraint(&model.Device{}, constraintName); err != nil {
+		return fmt.Errorf("create device roles constraint: %w", err)
+	}
+	if err := db.AutoMigrate(&model.Device{}); err != nil {
+		return fmt.Errorf("restore device indexes: %w", err)
+	}
+	return nil
 }
 
 // detachKubernetesControllerHosts removes host associations accidentally

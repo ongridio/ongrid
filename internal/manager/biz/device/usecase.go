@@ -98,7 +98,7 @@ func (u *Usecase) List(ctx context.Context, f ListFilter) ([]*model.Device, erro
 
 // UpdateRoles assigns the device-roles bit set used for sidebar grouping
 // and AI prompt routing. Names is the canonical wire shape ("server" /
-// "storage" / "network" / "database"); the special "unknown" name (or
+// "storage" / "network" / "database" / "gpu"); the special "unknown" name (or
 // an empty list) clears the bit set. Names outside the canonical enum
 // are rejected so a silent typo can't park a device in a phantom bucket.
 func (u *Usecase) UpdateRoles(ctx context.Context, id uint64, names []string) error {

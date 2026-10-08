@@ -760,6 +760,7 @@ const EDGE_ROLE_LABEL_ZH: Record<string, string> = {
   storage: '存储',
   network: '网络设备',
   database: '数据库',
+  gpu: 'GPU',
 };
 
 const EDGE_ROLE_LABEL_EN: Record<string, string> = {
@@ -767,6 +768,7 @@ const EDGE_ROLE_LABEL_EN: Record<string, string> = {
   storage: 'Storage',
   network: 'Network',
   database: 'Database',
+  gpu: 'GPU',
 };
 
 type KpiCardProps = {

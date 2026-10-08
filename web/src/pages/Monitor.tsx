@@ -274,7 +274,7 @@ function buildMonitorPanels(): GrafanaPanel[] {
 
 // Role filter — partition cluster panels by device role. We rewrite each
 // PromQL target to add a `device_id=~"..."` matcher so 服务器/存储/网络/
-// 数据库 each show only their own device_ids. 未分类 picks rows whose
+// 数据库/GPU each show only their own device_ids. 未分类 picks rows whose
 // .roles is empty. Implemented client-side because the metrics carry
 // `device_id` (linked Device.ID) but no `role` label — relabeling all
 // node_exporter scrapes with the role bitmap is more work than the value

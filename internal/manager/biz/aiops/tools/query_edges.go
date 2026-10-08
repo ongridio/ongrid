@@ -35,7 +35,7 @@ var QueryEdgesSchema = json.RawMessage(`{
   "properties": {
     "role": {
       "type": "string",
-      "enum": ["server", "storage", "network", "database"],
+      "enum": ["server", "storage", "network", "database", "gpu"],
       "description": "Filter to devices that carry this role bit. Optional."
     },
     "status": {
@@ -139,6 +139,8 @@ func (r *Registry) executeQueryEdges(ctx context.Context, args json.RawMessage) 
 			f.RolesAny = devicemodel.RoleBitNetwork
 		case devicemodel.RoleDatabase:
 			f.RolesAny = devicemodel.RoleBitDatabase
+		case devicemodel.RoleGPU:
+			f.RolesAny = devicemodel.RoleBitGPU
 		default:
 			return ExecuteResult{}, fmt.Errorf("query_devices: invalid role %q", in.Role)
 		}
