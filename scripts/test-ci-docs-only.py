@@ -12,10 +12,20 @@ import tempfile
 script = Path(__file__).with_name("ci-docs-only.py").resolve()
 docs_only = runpy.run_path(str(script))["docs_only"]
 assert docs_only(["AGENTS.md", "README_zh.md", "docs/design/guide.md"])
+assert docs_only(["CHANGELOG.md", "ROADMAP.zh-CN.md", "LICENSE", "docs/guide.rst"])
+assert docs_only(["web/README.md", "deploy/install/README.md", "api/README.md", "web/e2e/README.md"])
+assert docs_only(["docs/assets/demo.gif", "docs/assets/integrations/openai.svg", "docs/assets/guide.pdf"])
+assert docs_only([".github/pull_request_template.md", ".github/PULL_REQUEST_TEMPLATE/feature.md"])
+assert docs_only([".github/ISSUE_TEMPLATE/legacy.md"])
 assert docs_only([".github/ISSUE_TEMPLATE/config.yml", ".github/ISSUE_TEMPLATE/bug.yaml"])
 for paths in [[], ["main.go"], ["Makefile"], [".github/workflows/ci.yml"],
               ["internal/manager/biz/knowledge/builtin_vault/guide.md"],
-              ["docs/config.yml"], ["web/README.md"], ["AGENTS.md", "main.go"],
+              ["internal/manager/biz/aiops/chatruntime/testdata/agent_registry/multi/README.md"],
+              ["docs/guides/apm-configuration-files.md"], ["agents/reviewer.md"], ["skills/bash/SKILL.md"],
+              ["web/src/guide.md"], ["web/public/logo.svg"], ["new-package/README.md"],
+              ["docs/config.yml"], ["docs/assets/app.js"], ["docs/example.go"],
+              ["go.sum"], ["web/package-lock.json"], ["deploy/install/install.sh"], ["VERSION"],
+              ["AGENTS.md", "main.go"], ["docs/assets/demo.gif", "web/src/App.tsx"],
               [".github/ISSUE_TEMPLATE/script.py"], [".github/ISSUE_TEMPLATE/nested/config.yml"],
               [".github/ISSUE_TEMPLATE/config.yml", ".github/workflows/ci.yml"]]:
     assert not docs_only(paths), paths
@@ -47,6 +57,11 @@ with tempfile.TemporaryDirectory() as directory:
     base = commit()
     check(base, False)  # Empty diff.
     (root / "docs" / "guide.md").write_text("Updated guide\n")
+    commit()
+    check(base, True)
+    (root / "docs" / "assets").mkdir()
+    (root / "docs" / "assets" / "demo.gif").write_bytes(b"GIF89a")
+    (root / "CHANGELOG.md").write_text("Release notes\n")
     commit()
     check(base, True)
     for missing in ["", "--help", "0" * 40]:
