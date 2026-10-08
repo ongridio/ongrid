@@ -3,6 +3,3 @@ contact_links:
   - name: Usage questions / 使用咨询
     url: https://github.com/ongridio/ongrid/discussions
     about: Ask about setup, configuration, and usage. / 交流安装、配置和使用问题。
-  - name: Security vulnerability / 安全漏洞
-    url: https://github.com/ongridio/ongrid/security/advisories/new
-    about: Report vulnerabilities privately; follow SECURITY.md. / 按 SECURITY.md 私密报告漏洞。
