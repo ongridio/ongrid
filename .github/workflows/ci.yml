@@ -84,10 +84,14 @@ jobs:
         if: steps.changes.outputs.docs_only != 'true'
         run: make test-k8s-capabilities
 
-  web-test:
-    name: web test + build
+  web-checks:
+    name: web (${{ matrix.target }})
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [test-web-ci-apm, test-web-ci-platform, build-web]
 
     defaults:
       run:
@@ -119,30 +123,25 @@ jobs:
         run: make test-commit-policy
 
       - name: Install dependencies
-        if: steps.changes.outputs.docs_only != 'true'
+        if: steps.changes.outputs.docs_only != 'true' && matrix.target != 'build-web'
         run: npm ci
 
-      - name: Test
+      - name: Run web check
         if: steps.changes.outputs.docs_only != 'true'
-        # Keep DOM-heavy suites from competing for CPU within their test timeouts.
-        run: >-
-          npm test -- --run --no-file-parallelism
-          src/api/apm.test.ts
-          src/components/apm
-          src/pages/Apm
-          src/pages/Kubernetes.test.tsx
-          src/pages/Edges.test.tsx
-          src/pages/Dashboard.test.tsx
-          src/pages/settings/Upgrade.test.tsx
-          src/pages/settings/LLM.test.tsx
-          src/pages/settings/CommunicationProviders.test.tsx
-          src/components/icons/Provider.test.tsx
-          src/pages/kubernetes/edgeAttachments.test.ts
-          src/pages/kubernetes/registryCommands.test.ts
+        working-directory: .
+        run: make ${{ matrix.target }}
 
-      - name: Build
-        if: steps.changes.outputs.docs_only != 'true'
-        run: npm run build
+  web-test:
+    name: web test + build
+    needs: web-checks
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require all web checks to succeed
+        env:
+          WEB_RESULT: ${{ needs.web-checks.result }}
+        run: test "$WEB_RESULT" = success
 
   deployment-test:
     name: deployment manifests

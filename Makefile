@@ -886,5 +886,24 @@ test-commit-policy: ## Verify PR commit policy and bot feedback
 	node scripts/test-commit-policy.cjs
 
 .PHONY: test-ci-docs-only
-test-ci-docs-only: ## Verify documentation-only CI routing
+test-ci-docs-only: ## Verify lightweight CI routing and the required web check
 	python3 scripts/test-ci-docs-only.py
+
+.PHONY: check-issue-templates
+check-issue-templates: ## Validate GitHub Issue Forms and chooser metadata
+	ruby scripts/check-issue-templates.rb
+
+# Keep the two slow DOM suites (APM and Kubernetes) on separate CI runners.
+.PHONY: test-web-ci-apm
+test-web-ci-apm: ## Run the serial APM frontend CI tests (requires npm ci in web)
+	cd web && npm test -- --run --no-file-parallelism \
+		src/api/apm.test.ts src/components/apm src/pages/Apm
+
+.PHONY: test-web-ci-platform
+test-web-ci-platform: ## Run the serial platform frontend CI tests (requires npm ci in web)
+	cd web && npm test -- --run --no-file-parallelism \
+		src/pages/Kubernetes.test.tsx src/pages/Edges.test.tsx \
+		src/pages/Dashboard.test.tsx src/pages/settings/Upgrade.test.tsx \
+		src/pages/settings/LLM.test.tsx src/pages/settings/CommunicationProviders.test.tsx \
+		src/components/icons/Provider.test.tsx src/pages/kubernetes/edgeAttachments.test.ts \
+		src/pages/kubernetes/registryCommands.test.ts

@@ -13,6 +13,7 @@ def docs_only(paths):
         path in root_docs
         or ("/" not in path and path.startswith("README_") and path.endswith(".md"))
         or (path.startswith("docs/") and path.endswith(".md"))
+        or re.fullmatch(r"\.github/ISSUE_TEMPLATE/[^/]+\.ya?ml", path) is not None
         for path in paths
     )
 
@@ -33,6 +34,8 @@ def changed_paths(base):
 
 
 def main():
+    # Validate metadata even when the PR qualifies for the lightweight path.
+    subprocess.run(["ruby", str(Path(__file__).with_name("check-issue-templates.rb"))], check=True)
     base = os.environ.get("CI_BASE_SHA", "")
     only_docs = docs_only(changed_paths(base))
     if only_docs:
@@ -40,7 +43,7 @@ def main():
     result = f"docs_only={str(only_docs).lower()}\n"
     with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
         output.write(result)
-    print("Documentation-only PR: whitespace checked; skipping Go/web builds and tests."
+    print("Documentation/template-only PR: metadata and whitespace checked; skipping Go/web builds and tests."
           if only_docs else "Running full CI: changes are not documentation-only or base is unavailable.")
 
 

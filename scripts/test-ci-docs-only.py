@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Regression check for the docs fast path, using real Git diffs."""
+"""Regressions for lightweight CI validation and the aggregate web check."""
 
+import json
 import os
 from pathlib import Path
 import runpy
@@ -11,9 +12,12 @@ import tempfile
 script = Path(__file__).with_name("ci-docs-only.py").resolve()
 docs_only = runpy.run_path(str(script))["docs_only"]
 assert docs_only(["AGENTS.md", "README_zh.md", "docs/design/guide.md"])
+assert docs_only([".github/ISSUE_TEMPLATE/config.yml", ".github/ISSUE_TEMPLATE/bug.yaml"])
 for paths in [[], ["main.go"], ["Makefile"], [".github/workflows/ci.yml"],
               ["internal/manager/biz/knowledge/builtin_vault/guide.md"],
-              ["docs/config.yml"], ["web/README.md"], ["AGENTS.md", "main.go"]]:
+              ["docs/config.yml"], ["web/README.md"], ["AGENTS.md", "main.go"],
+              [".github/ISSUE_TEMPLATE/script.py"], [".github/ISSUE_TEMPLATE/nested/config.yml"],
+              [".github/ISSUE_TEMPLATE/config.yml", ".github/workflows/ci.yml"]]:
     assert not docs_only(paths), paths
 
 with tempfile.TemporaryDirectory() as directory:
@@ -56,8 +60,47 @@ with tempfile.TemporaryDirectory() as directory:
     (root / "docs" / "space and\nnewline.md").write_text("Guide\n")
     commit()
     check(deleted, True)  # NUL-separated paths, including whitespace in names.
+
+    templates = root / ".github" / "ISSUE_TEMPLATE"
+    templates.mkdir(parents=True)
+    template = templates / "bug.yml"
+    valid = "name: Bug report\ndescription: Report a bug\nbody:\n  - type: input\n    id: summary\n    attributes:\n      label: Summary\n"
+    template.write_text(valid)
+    template_base = commit()
+    check(deleted, True)
+    for invalid in ["body: [", "name: Bug report\ndescription: Report a bug\nbody: []\n",
+                    valid.replace("type: input", "type: unknown"),
+                    valid + "  - type: input\n    id: summary\n    attributes:\n      label: Duplicate\n",
+                    valid.replace("type: input", "type: dropdown") + "      options: [true]\n"]:
+        template.write_text(invalid)
+        commit()
+        check(template_base, True, success=False)
+        check("", False, success=False)  # Main pushes must validate templates too.
+    template.write_text(valid)
+    commit()
+    check(template_base, False)
+    chooser = templates / "config.yml"
+    chooser.write_text("blank_issues_enabled: true\ncontact_links:\n  - name: Help\n    url: file:///invalid\n    about: Help\n")
+    commit()
+    check(template_base, True, success=False)
+    chooser.unlink()
+    commit()
+
     (root / "docs" / "bad.md").write_text("Trailing whitespace \n")
     commit()
     check(deleted, True, success=False)
 
-print("CI documentation routing checks passed")
+# A failed, cancelled, or skipped matrix must never satisfy the old required check.
+workflow = script.parent.parent / ".github" / "workflows" / "ci.yml"
+jobs = json.loads(subprocess.check_output([
+    "ruby", "-ryaml", "-rjson", "-e", "puts JSON.generate(YAML.load_file(ARGV[0]))", str(workflow)
+]))["jobs"]
+gate = jobs["web-test"]
+assert gate["name"] == "web test + build"
+assert gate["needs"] == "web-checks" and gate["if"] == "always()"
+for result in ["success", "failure", "cancelled", "skipped", ""]:
+    status = subprocess.run(["bash", "-c", gate["steps"][0]["run"]],
+                            env={**os.environ, "WEB_RESULT": result}).returncode
+    assert (status == 0) == (result == "success"), result
+
+print("CI routing, template validation, and web gate checks passed")
