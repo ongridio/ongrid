@@ -19,6 +19,7 @@ const (
 	MaxFilterCount     = 20
 	MaxScopeValueCount = 100
 	MaxKeywordLength   = 512
+	MaxFilePathLength  = 4096
 )
 
 type MatchMode string
@@ -327,7 +328,11 @@ func (r *SearchRequest) NormalizeAndValidate() error {
 		if f.Operator == FilterEqual && (f.Field == "environment" || f.Field == "service_namespace") && len(f.Values) == 1 && f.Values[0] == "" {
 			continue // Unset APM identity includes empty and missing attributes.
 		}
-		if err := validateStrings("filter value", f.Values, MaxKeywordLength); err != nil {
+		maxLength := MaxKeywordLength
+		if f.Field == "file" {
+			maxLength = MaxFilePathLength
+		}
+		if err := validateStrings("filter value", f.Values, maxLength); err != nil {
 			return err
 		}
 	}
@@ -496,7 +501,11 @@ func validateScope(scope Scope) error {
 		if len(item.values) > MaxScopeValueCount {
 			return fmt.Errorf("logquery: scope %s has too many values", item.name)
 		}
-		if err := validateStrings("scope "+item.name, item.values, 256); err != nil {
+		maxLength := 256
+		if item.name == "file" {
+			maxLength = MaxFilePathLength
+		}
+		if err := validateStrings("scope "+item.name, item.values, maxLength); err != nil {
 			return err
 		}
 	}

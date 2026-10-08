@@ -1,5 +1,5 @@
 import { selectOption } from '@/test/select-option';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { http, HttpResponse } from 'msw';
@@ -105,6 +105,7 @@ const logFields = [
   { name: 'service_name', type: 'keyword', searchable: true, aggregatable: true },
   { name: 'service_name_extracted', type: 'keyword', searchable: true, aggregatable: true },
   { name: 'source_id', type: 'keyword', searchable: true, aggregatable: true },
+  { name: 'file', type: 'keyword', searchable: true, aggregatable: true },
   { name: 'level', type: 'keyword', searchable: true, aggregatable: true },
   { name: 'trace_id', type: 'keyword', searchable: true, aggregatable: false },
   { name: 'k8s.container.restart_count', type: 'long', searchable: true, aggregatable: true },
@@ -227,6 +228,99 @@ describe('LogsPage', () => {
       nodes: ['worker-1'],
     });
     expect(new Date(searchRequests[0].end).getTime() - new Date(searchRequests[0].start).getTime()).toBe(6 * 60 * 60 * 1000);
+  });
+
+  it.each([
+    { name: 'canonical', attributes: { filename: '/ignored.log' }, resource_attributes: { file: '/app/微服务/payments.log' } },
+    { name: 'Loki', attributes: { filename: '/app/微服务/payments.log' }, resource_attributes: {} },
+    { name: 'OTel', attributes: { 'log.file.path': '/app/微服务/payments.log' }, resource_attributes: {} },
+    { name: 'normalized OTel', attributes: { log_file_path: '/app/微服务/payments.log' }, resource_attributes: {} },
+  ])('shows the actual filename by default for $name records in both views', async ({ attributes, resource_attributes }) => {
+    const sourceID = 'file-var-log-payments-log';
+    server.use(http.post('/api/v1/logs/search', () => HttpResponse.json({
+      code: 0, message: '', data: {
+        records: [{ ...records[0], attributes, resource_attributes: { ...records[0].resource_attributes, source_id: sourceID, ...resource_attributes } }],
+        has_more: false, took_ms: 1, backends: ['loki'],
+      },
+    })));
+    const user = userEvent.setup();
+    render(<MemoryRouter><LogsPage /></MemoryRouter>);
+    await waitForInitialLogs();
+
+    expect(screen.getByRole('checkbox', { name: /文件.*file/ })).toBeChecked();
+    const name = '查看完整文件路径：/app/微服务/payments.log';
+    expect(screen.getByRole('button', { name })).toHaveTextContent(/^文件:payments.log$/);
+    expect(screen.getByRole('button', { name })).not.toHaveTextContent('/app/');
+    expect(screen.getByText('payment request completed').closest('[role="listitem"]')).toHaveTextContent(`来源:${sourceID}`);
+    await user.click(screen.getByRole('tab', { name: /表格/ }));
+    expect(screen.getByRole('columnheader', { name: '文件' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name })).toHaveTextContent(/^payments.log$/);
+    expect(screen.getByRole('cell', { name: sourceID })).toBeInTheDocument();
+    await user.click(screen.getByRole('checkbox', { name: /文件.*file/ }));
+    expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
+  });
+
+  it('distinguishes identical filenames and copies the full path using the keyboard', async () => {
+    const paths = ['/app/very-long-directory-name/production/order-service/application.log', '/app/very-long-directory-name/production/payment-service/application.log'];
+    server.use(http.post('/api/v1/logs/search', () => HttpResponse.json({
+      code: 0, message: '', data: {
+        records: records.map((record, index) => ({ ...record, attributes: { filename: paths[index] } })),
+        has_more: false, took_ms: 1, backends: ['loki'],
+      },
+    })));
+    const user = userEvent.setup();
+    const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+    render(<MemoryRouter><LogsPage /></MemoryRouter>);
+    await waitForInitialLogs();
+
+    expect(screen.getAllByText('application.log')).toHaveLength(2);
+    const trigger = screen.getByRole('button', { name: `查看完整文件路径：${paths[1]}` });
+    trigger.focus();
+    await user.keyboard('{Enter}');
+    const popup = await screen.findByRole('dialog', { name: '完整文件路径' });
+    expect(within(popup).getByText(paths[1])).toHaveClass('select-text');
+    await user.click(within(popup).getByRole('button', { name: '复制完整路径' }));
+    expect(copy).toHaveBeenCalledWith(paths[1]);
+    expect(await within(popup).findByRole('status')).toHaveTextContent('已复制');
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '完整文件路径' })).not.toBeInTheDocument());
+    expect(trigger).toHaveFocus();
+    copy.mockRestore();
+  });
+
+  it('keeps the complete Windows path selectable when copying fails in English', async () => {
+    const path = 'C:\\services\\checkout\\checkout-worker.log';
+    localStorage.setItem('ongrid-locale', 'en-US');
+    server.use(http.post('/api/v1/logs/search', () => HttpResponse.json({
+      code: 0, message: '', data: {
+        records: [{ ...records[0], attributes: { 'log.file.path': path } }],
+        has_more: false, took_ms: 1, backends: ['elasticsearch'],
+      },
+    })));
+    const user = userEvent.setup();
+    const copy = vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValue(new Error('denied'));
+    render(<MemoryRouter><LogsPage /></MemoryRouter>);
+    await waitForInitialLogs();
+
+    const trigger = screen.getByRole('button', { name: `View full file path: ${path}` });
+    expect(trigger).toHaveTextContent('File:checkout-worker.log');
+    await user.click(trigger);
+    const popup = await screen.findByRole('dialog', { name: 'Full file path' });
+    await user.click(within(popup).getByRole('button', { name: 'Copy full path' }));
+    expect(await within(popup).findByRole('alert')).toHaveTextContent('Copy failed. Select the path above to copy it manually.');
+    expect(within(popup).getByText(path)).toHaveClass('select-text');
+    copy.mockRestore();
+  });
+
+  it('keeps source IDs available without inventing a filename for records without a path', async () => {
+    server.use(http.post('/api/v1/logs/search', () => HttpResponse.json({
+      code: 0, message: '', data: { records: [records[1]], has_more: false, took_ms: 1, backends: ['loki'] },
+    })));
+    render(<MemoryRouter><LogsPage /></MemoryRouter>);
+    await screen.findByText('upstream timeout while calling inventory');
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: /来源.*source_id/ })).toBeChecked());
+    expect(screen.queryByRole('checkbox', { name: /文件.*file/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /查看完整文件路径/ })).not.toBeInTheDocument();
   });
 
   it('preserves multiple devices from a service log deep link', async () => {
@@ -429,8 +523,8 @@ describe('LogsPage', () => {
 
     await user.click(screen.getByRole('button', { name: /更多筛选/ }));
 
-    await waitFor(() => expect(completed).toBe(2));
-    expect(started).toBe(2);
+    await waitFor(() => expect(completed).toBe(3));
+    expect(started).toBe(3);
     expect(maxActive).toBeLessThanOrEqual(2);
   });
 

@@ -379,6 +379,9 @@ func TestDecodeLokiRecords_ProducesStableRecord(t *testing.T) {
 	if first[0].Attributes["filename"] != "/var/log/app.log" || first[0].TraceID != "abc123" {
 		t.Fatalf("structured metadata = %#v trace=%q", first[0].Attributes, first[0].TraceID)
 	}
+	if first[0].ResourceAttributes["file"] != "/var/log/app.log" {
+		t.Fatalf("canonical file = %q, want the full filename path", first[0].ResourceAttributes["file"])
+	}
 	if _, ok := first[0].Attributes["severity_text"]; ok {
 		t.Fatalf("severity_text leaked into attributes: %#v", first[0].Attributes)
 	}

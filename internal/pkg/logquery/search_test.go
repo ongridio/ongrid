@@ -83,6 +83,100 @@ func TestSearchRequestNormalizeAndValidate_DeduplicatesDeviceIDs(t *testing.T) {
 	}
 }
 
+func TestFilePathValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		path string
+		want string
+	}{
+		{"long_path", "/var/log/" + strings.Repeat("service/", 80) + "application.log", ""},
+		{"at_limit", "/" + strings.Repeat("a", 4095), ""},
+		{"over_limit", "/" + strings.Repeat("a", 4096), "exceeds 4096 bytes"},
+		{"multibyte_over_limit", "/" + strings.Repeat("服", 1366), "exceeds 4096 bytes"},
+		{"empty", " ", "must not be empty"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, entry := range []string{"search_scope", "field_values_scope", "field_filter"} {
+				t.Run(entry, func(t *testing.T) {
+					req := validSearchRequest()
+					req.Scope.Files = []string{tc.path}
+					var err error
+					switch entry {
+					case "field_values_scope":
+						values := FieldValuesRequest{Field: "file", Start: req.Start, End: req.End, Scope: req.Scope}
+						err = values.NormalizeAndValidate()
+					case "field_filter":
+						req.Scope.Files = nil
+						req.Filters = []FieldFilter{{Field: "file", Operator: FilterEqual, Values: []string{tc.path}}}
+						err = req.NormalizeAndValidate()
+					default:
+						err = req.NormalizeAndValidate()
+					}
+					if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
+						t.Fatalf("error = %v, want %q", err, tc.want)
+					}
+				})
+			}
+		})
+	}
+
+	for _, tc := range []struct {
+		name  string
+		scope Scope
+		want  string
+	}{
+		{"source_limit_unchanged", Scope{SourceIDs: []string{strings.Repeat("a", 257)}}, "exceeds 256 bytes"},
+		{"file_count_limit_unchanged", Scope{Files: make([]string, MaxScopeValueCount+1)}, "too many values"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := validSearchRequest()
+			req.Scope = tc.scope
+			if err := req.NormalizeAndValidate(); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestLongFilePathQueriesAcrossBackends(t *testing.T) {
+	path := "/var/log/" + strings.Repeat("service/", 80) + `应用-"quoted"-\worker.log`
+	for _, entry := range []string{"scope", "filter"} {
+		t.Run(entry, func(t *testing.T) {
+			req := validSearchRequest()
+			if entry == "scope" {
+				req.Scope.Files = []string{path}
+			} else {
+				req.Filters = []FieldFilter{{Field: "file", Operator: FilterEqual, Values: []string{path}}}
+			}
+			if err := req.NormalizeAndValidate(); err != nil {
+				t.Fatal(err)
+			}
+			quoted, err := json.Marshal(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			loki, err := compileLogQL(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(loki, "| filename="+string(quoted)) {
+				t.Fatalf("Loki query did not preserve the full escaped path: %s", loki)
+			}
+			es, err := buildElasticsearchQuery(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, err := json.Marshal(es)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(body), `"resource.attributes.filename"`) || !strings.Contains(string(body), string(quoted)) {
+				t.Fatalf("Elasticsearch query did not preserve the full escaped path: %s", body)
+			}
+		})
+	}
+}
+
 func TestAllowedFields_DoNotExposeElasticsearchIndexControls(t *testing.T) {
 	names := map[string]bool{}
 	for _, field := range AllowedFields() {

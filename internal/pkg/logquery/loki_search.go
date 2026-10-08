@@ -616,7 +616,7 @@ func decodeLokiRecords(result *QueryRangeResult) ([]Record, error) {
 				delete(attrs, "service_name")
 			}
 			resources := map[string]string{}
-			for _, logical := range []string{"device_id", "cluster_id", "namespace", "workload", "pod", "container", "node", "service_name", "service_namespace", "environment", "source_id"} {
+			for _, logical := range []string{"device_id", "cluster_id", "namespace", "workload", "pod", "container", "node", "service_name", "service_namespace", "environment", "source_id", "file"} {
 				def, _ := LookupField(logical)
 				if v := labels[def.LokiName]; v != "" && !(logical == "service_name" && strings.EqualFold(strings.TrimSpace(v), "unknown_service")) {
 					resources[logical] = v
