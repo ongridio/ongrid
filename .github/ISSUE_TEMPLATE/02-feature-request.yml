@@ -1,0 +1,56 @@
+name: Feature or improvement / 功能与改进建议
+description: Describe a use case, improvement, or scoped engineering task. / 提交使用场景、改进建议或范围明确的工程任务。
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        You can write in English or Chinese. Search [existing issues](https://github.com/ongridio/ongrid/issues?q=is%3Aissue) first; focus on one outcome.
+        支持中文或英文。请先搜索已有 Issue，每个建议聚焦一个目标。
+
+        Use the Bug report form for broken behavior. Report security vulnerabilities [privately](https://github.com/ongridio/ongrid/security/advisories/new).
+        已有功能异常请使用问题反馈表单；安全漏洞请私密报告。
+
+  - type: input
+    id: area
+    attributes:
+      label: Related area / 相关模块
+      placeholder: "Edge, Kubernetes, Auto APM, AI / RCA, web console, installation, documentation, ..."
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Use case and problem / 使用场景与问题
+      description: Who needs this, what are they trying to do, and what blocks them today? Include scale or frequency when relevant. / 谁在什么场景下遇到什么困难？涉及规模或使用频率时请说明。
+    validations:
+      required: true
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome / 期望结果
+      description: Describe the behavior or capability you need. An implementation plan is optional. / 描述希望具备的行为或能力，无需先设计实现方案。
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria / 验收标准
+      description: If known, give a concrete scenario or measurable result that shows the request is complete. / 如已有想法，请用具体场景或可衡量结果说明怎样算完成。
+      placeholder: "Given ... when ... then ... / 在……情况下，执行……后，应得到……。"
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and constraints / 替代方案与限制
+      description: "Optional: describe current workarounds and their limits. Note compatibility, permissions, performance, or deployment constraints. / 可说明当前替代方法及不足，以及兼容性、权限、性能或部署限制。"
+
+  - type: textarea
+    id: references
+    attributes:
+      label: Related material / 关联资料
+      description: |
+        Optional: link related issues, PRs, mockups, or existing RFC / PRD / ADR documents. Larger proposals can link docs/rfc/, docs/requirements/, or docs/design/ after discussion.
+        可关联 Issue、PR、示意图或已有 RFC / PRD / ADR。较大方案可在讨论后补充 docs/rfc/、docs/requirements/ 或 docs/design/ 下的文档。
+        Share only redacted examples; omit credentials and personal data. / 示例请脱敏，不要包含凭据和个人信息。

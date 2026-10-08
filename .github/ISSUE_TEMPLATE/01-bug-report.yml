@@ -1,0 +1,107 @@
+name: Bug report / 问题反馈
+description: Report a reproducible failure or unexpected behavior in Ongrid. / 反馈故障或异常行为。
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        You can write in English or Chinese. Search [existing issues](https://github.com/ongridio/ongrid/issues?q=is%3Aissue) first; report one problem per issue.
+        支持中文或英文。请先搜索已有 Issue，每个 Issue 描述一个问题。
+
+        For security vulnerabilities, use [private reporting](https://github.com/ongridio/ongrid/security/advisories/new), as described in [SECURITY.md](https://github.com/ongridio/ongrid/blob/main/SECURITY.md).
+        安全漏洞请按安全政策私密报告，不要发布在公开 Issue 中。
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area / 相关模块
+      multiple: true
+      options:
+        - Manager / API / Authentication / 认证与权限
+        - Edge / Registration / Connectivity / 注册与连接
+        - Kubernetes / Cluster management / 集群管理
+        - Auto APM / Traces / 自动链路追踪
+        - Metrics / Logs / Alerts / 指标、日志与告警
+        - AI agents / RCA / Workflows / 智能体、根因分析与工作流
+        - Knowledge / Skills / MCP / 知识库与工具
+        - Web console / 控制台
+        - IM channels / 消息渠道
+        - Installation / Upgrade / 安装与升级
+        - Documentation / 文档
+        - Other or unsure / 其他或不确定
+
+  - type: input
+    id: version
+    attributes:
+      label: Version / 版本
+      description: Include Manager and Edge versions when relevant, or image tags / source commit. Write unknown if unavailable. / 请填写相关的 Manager、Edge 版本、镜像标签或源码提交；无法获取可填“不确定”。
+      placeholder: "Manager: vX.Y.Z; Edge: vX.Y.Z; commit: ..."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment / 部署方式
+      description: Select all that apply to the affected components. / 可分别选择服务端与 Edge 使用的方式。
+      multiple: true
+      options:
+        - Release installer / Docker Compose / 正式安装包
+        - Custom or development Docker Compose / 自定义或开发 Compose
+        - Kubernetes Edge / Helm
+        - Native binary / systemd / 原生进程
+        - Built from source / 源码运行
+        - Other or unsure / 其他或不确定
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment and scale / 环境与规模
+      description: |
+        Include only relevant details; unknown is fine. / 只填写与问题相关的信息，不确定的项目可注明。
+        OS, architecture and kernel; Kubernetes version; Manager replicas / CPU / RAM; Edge / node / Pod count; data backend type and version.
+        操作系统、架构、内核；Kubernetes 版本；Manager 副本数与 CPU / 内存；Edge / 节点 / Pod 数量；数据存储类型与版本。
+        For AI issues, include model / provider; for UI issues, browser / language / theme. / AI 问题补充模型和供应商；界面问题补充浏览器、语言和主题。
+      placeholder: "Manager: ...; Edge: ...; scale / 规模: ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and impact / 实际现象与影响
+      description: What failed? Include the exact error and affected scope. Note whether it blocks use and when it started. / 描述原始错误、影响范围、是否阻断使用以及首次出现时间。
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior / 期望行为
+      description: What should have happened? / 正常情况下应该发生什么？
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce / 复现步骤
+      description: Include the starting state and actions taken. For intermittent failures, describe frequency and known triggers. / 说明初始状态和操作步骤；偶发问题请说明频率与已知触发条件。
+      placeholder: |
+        1. Setup / 初始状态:
+        2. Action or command / 操作或命令:
+        3. Observed result / 观察结果:
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs, screenshots and recent changes / 日志、截图与近期变更
+      description: |
+        Optional: add short logs with timestamps and timezone, request / trace IDs, redacted config snippets, or screenshots. Mention upgrades, the last working version, and workarounds if known.
+        可补充带时间和时区的日志片段、请求或 trace ID、脱敏配置、截图，以及升级记录、最后正常版本和临时解决方法。
+        Remove passwords, tokens, API keys, personal data and internal addresses. Do not upload full .env files or kubeconfigs.
+        请移除密码、令牌、API key、个人信息和内部地址，不要上传完整 .env 或 kubeconfig。
