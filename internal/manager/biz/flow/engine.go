@@ -194,7 +194,8 @@ func (e *Engine) runNode(ctx context.Context, run *model.FlowRun, g *Graph, byID
 	}
 
 	// Resolve config templates under the lock (context reads), execute
-	// outside it (slow: agents/tools).
+	// outside it (slow: agents/tools). The executor gets a private copy of
+	// the context: other branches keep writing the shared maps meanwhile.
 	var cfg map[string]any
 	var resolveErr error
 	st.mu.Lock()
@@ -208,7 +209,7 @@ func (e *Engine) runNode(ctx context.Context, run *model.FlowRun, g *Graph, byID
 			cfg, _ = resolved.(map[string]any)
 		}
 	}
-	rcSnapshot := st.rc
+	rcSnapshot := st.rc.snapshot()
 	st.mu.Unlock()
 	if cfg == nil {
 		cfg = map[string]any{}

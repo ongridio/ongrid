@@ -41,6 +41,35 @@ func TestEngineConcurrentSetVarsNoRace(t *testing.T) {
 	}
 }
 
+// TestEngineConditionReadsContextNoRace runs a condition while sibling `set`
+// branches write vars. The trigger value itself contains a template, so the
+// condition resolves {{vars.k}} again during evaluation. Before the fix the
+// executor got the shared RunContext and that read raced the engine's
+// locked writes (`go test -race`; "concurrent map read and map write" in
+// prod, which recover cannot catch).
+func TestEngineConditionReadsContextNoRace(t *testing.T) {
+	const n = 12
+	var nodes, edges strings.Builder
+	nodes.WriteString(`{"id":"t","type":"trigger.manual"},` +
+		`{"id":"s","type":"set","config":{"name":"k","value":"v"}},` +
+		`{"id":"c","type":"condition","config":{"expr":"{{trigger.msg}} == \"v\""}}`)
+	edges.WriteString(`{"id":"ts","source":"t","target":"s"},{"id":"sc","source":"s","target":"c"}`)
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(&nodes, `,{"id":"s%d","type":"set","config":{"name":"k%d","value":"v%d"}}`, i, i, i)
+		fmt.Fprintf(&edges, `,{"id":"te%d","source":"t","target":"s%d"}`, i, i)
+	}
+	g := mustGraph(t, `{"nodes":[`+nodes.String()+`],"edges":[`+edges.String()+`]}`)
+
+	eng := NewEngine(Executors{}, &fakeRunRepo{}, nil)
+	for i := 0; i < 20; i++ {
+		run := &model.FlowRun{ID: "cond-race", TriggerJSON: `{"msg":"{{vars.k}}"}`}
+		status, err := eng.Execute(context.Background(), run, g, "")
+		if err != nil || status != model.RunStatusSucceeded {
+			t.Fatalf("Execute = %s, %v", status, err)
+		}
+	}
+}
+
 // TestEngineFanOutNodePanicRecovered proves a panic inside a fan-out node's
 // executor is recovered and fails the run, rather than crashing the whole
 // manager process. The Execute-level recover only guards the main

@@ -6,6 +6,7 @@ package flow
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"regexp"
 	"strconv"
 	"strings"
@@ -20,6 +21,13 @@ type RunContext struct {
 	Nodes map[string]any
 	// Vars holds set-node variables ({{vars.<name>}}).
 	Vars map[string]any
+}
+
+// snapshot copies the context for an executor running outside the engine
+// lock. Shallow is enough: the engine only adds or replaces top-level
+// entries and never mutates a stored value; Trigger is never written.
+func (c *RunContext) snapshot() *RunContext {
+	return &RunContext{Trigger: c.Trigger, Nodes: maps.Clone(c.Nodes), Vars: maps.Clone(c.Vars)}
 }
 
 var tmplRe = regexp.MustCompile(`\{\{\s*([^{}]+?)\s*\}\}`)
