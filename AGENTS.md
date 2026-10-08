@@ -1,141 +1,88 @@
 # AGENTS.md
 
-> 本项目遵循 [gospec](https://github.com/singchia/gospec) — Go 后端项目 SDLC 全流程规范。
->
-> 本文件由 `scripts/install.sh` 自动生成。完整规范见 gospec 仓库。
+本文件维护 Ongrid 的项目约定。修改规则时核对代码、CI 和关联文档；不要用外部模板覆盖本文件。
 
-## Agent 必读
+## 工作方式与规范入口
 
-任何编码 / 设计 / API / 数据 / 测试 / CI / 部署 / 监控 / 安全 / 文档 任务，**先按 gospec 规范走**。
+- 开始前检查当前分支、工作区改动和适用的子目录说明。保留用户已有工作，只修改本次任务涉及的内容。
+- 修复前读完整调用链，搜索相关函数的调用方；优先在共同入口修复根因，复用已有组件、工具和依赖。
+- 项目规则以本文件、[贡献指南](CONTRIBUTING.md)、[安全政策](SECURITY.md)及相关专题文档为准。发现冲突时指出具体条款，避免借小改动迁移架构、协议或数据模型。
+- 前端任务必读[前端设计语言与开发规范](docs/design/frontend-design-language.md)；依赖边界查 [.go-arch-lint.yml](.go-arch-lint.yml)；构建与测试入口查 [Makefile](Makefile)、[前端脚本](web/package.json)和 [.github/workflows](.github/workflows)。
+- [gospec 参考版本](https://github.com/singchia/gospec/blob/0eb883fb40b62b509125d35a1c27e7e6a238d390/spec/spec.md)固定为 `0eb883fb40b62b509125d35a1c27e7e6a238d390`。项目规则未覆盖时，按其任务路由表只读相关的 1–3 个专题；外部规范不覆盖项目规则。
+- 如需读取本地 gospec，先查 `.claude/skills/gospec/spec/spec.md`，再查 `~/.claude/skills/gospec/spec/spec.md`，并核对上述版本。缺失或版本不符时可读取固定版本链接；不要自动安装或更新个人目录。无法读取时说明未核对项，继续不依赖它的工作。
 
-涉及前端页面、组件、样式或交互时，**同时必读 [Ongrid 前端设计语言与开发规范](docs/design/frontend-design-language.md)**，并遵守下方「前端 UI」约束。该规范来自 [UI 统一 PR #395](https://github.com/ongridio/ongrid/pull/395)，适用于整个控制台，包括新增功能、既有页面修改及弹窗；不能仅凭单个历史页面的写法实现 UI。
+## 架构与代码
 
-### 第一步：找到 gospec 任务路由表
+| 位置 | 职责与依赖 |
+| --- | --- |
+| `cmd/ongrid`、`cmd/ongrid-edge` | 配置、依赖装配、启动和退出；Manager 装配 iam/manager，Edge 装配 edgeagent |
+| `internal/<domain>/server` | HTTP 服务、路由、中间件、请求解析和响应 |
+| `internal/<domain>/service` | 服务入口、校验与用例调用；不得直接依赖 data |
+| `internal/<domain>/biz` | 业务用例和消费方 Repo 接口；不依赖 data 的具体实现 |
+| `internal/<domain>/data` | 实现 biz 的 Repo 接口，处理存储和外部数据访问 |
+| `internal/<domain>/model` | 领域与持久化数据结构，不依赖上层 |
+| `internal/pkg` | 共享基础设施，不依赖 iam、manager、edgeagent |
+| `web` | React 控制台，不是 Go 后端的一层 |
 
-按以下顺序查找 spec 入口：
+- iam、manager、edgeagent 之间禁止直接 import；跨域通过接口装配、API 或事件协作。允许的依赖以 `.go-arch-lint.yml` 为准，新增目录检查 [CODEOWNERS](CODEOWNERS) 覆盖。
+- 接口定义在消费方，依赖通过构造函数注入。先复用现有实现，不为单一实现新增不必要的接口、工厂或配置层。
+- 新增 IO 路径传递 `context.Context`，尊重超时与取消；goroutine 必须有退出条件。共享可变状态使用锁、原子操作或明确的所有权保护，并运行 race 检查。
+- 错误补充上下文时用 `%w`；在处理边界记录，避免重复日志。不得静默丢弃错误，确需忽略时说明原因。
+- `init()` 仅用于注册，不做 IO 或可能 panic 的初始化；禁止全局可变业务状态。公共 API 避免不必要的 `any`，解码或 SDK 适配例外需就近说明。
 
-1. `~/.claude/skills/gospec/spec/spec.md`（个人安装，推荐）
-2. `.claude/skills/gospec/spec/spec.md`（项目级安装）
-3. 上面都不存在 → 重新安装：
-   ```bash
-   git clone https://github.com/singchia/gospec ~/.claude/skills/gospec
-   ```
+## API 与数据
 
-### 第二步：路由 → 加载
+- 修改 API 时同步对应的 `api/**/*.proto`、HTTP DTO、前端调用和相关测试；生成内容通过 `make proto` 更新，禁止手改生成代码。新增接口先检查所在模块的契约和生成方式。
+- 保持现有 HTTP 状态码、响应结构和错误结构。例如 Edge 列表使用 `{items, total}`，不要在局部修复中加上 `{code, message, data}` 包装。破坏性变更需要版本或迁移方案。
+- Handler 说明方法、路由、权限、请求和响应；接入 Swagger 的模块沿用其注释与生成流程。
+- 数据库变更沿用 `internal/<domain>/data/**/migrate.go` 和 `dbx.RunMigrations` 入口。提交迁移或回填代码，检查幂等性、旧数据兼容和回滚限制；不要在普通修复中引入第二套迁移框架。
+- MySQL schema 变更兼容滚动发布；大表变更评估锁表和在线 DDL。SQLite 是可选后端，修改共享存储逻辑时检查两种方言的适用范围。
+- 仅在实际使用对应存储的路径应用其约束：Redis 缓存 key 设 TTL，持久状态说明生命周期，限制 key/value 大小，分布式锁校验 owner；ClickHouse 批量写入，复制与排序键按部署拓扑和查询设计；InfluxDB 控制 tag 基数并设置 retention。不要为满足模板引入存储依赖。
 
-读 `spec/spec.md` 顶部的"任务路由表"，找到当前任务对应的 1-3 个子文件，**只读必要文件**，不要顺序读完整个 spec。
+## 前端 UI
 
-### 第三步：实施 + 自查
+- [设计规范](docs/design/frontend-design-language.md)集中维护尺寸、配色、布局、弹层及表格操作列规则；组件 API 以 `web/src/components/ui/` 为准。公共规则变更在同一 PR 更新规范与相关测试。
+- 复用现有 shadcn/ui 派生组件、Base UI 交互和 `.og-*` 样式，保留 Tailwind 3 与主题变量；不在页面另建组件库或主题。历史页面的不一致不能作为新规范。
+- 用户文案统一使用 `tr('中文', 'English')`，覆盖占位符、错误、Tooltip 和可访问名称。使用语义色，检查 light/dark、中英文、窄屏及 Portal 浮层。
+- 保留键盘操作、焦点提示、字段标签和图标按钮名称；区分加载、空态和失败，防止重复提交，失败保留输入，取消不能执行动作。
+- 视觉变更提交前按设计规范实看真实浏览器截图，light/dark 各一张；无法完成时如实说明。纯文档和非 UI 变更无需截图。表格操作列还需检查横向滚动、不同权限和按钮数量。
 
-按子文件指引实施，结束前对照文件末尾的"自查清单"逐项核对。
+## 安全与可观测性
 
-### 第四步：PR 前对照 review 清单
+- 保留现有认证、授权和资源归属检查，复用 `internal/pkg/auth`、`authzmw`、`tenantctx`。当前 `tenantctx` 表示调用者身份，不代表所有表都有 `tenant_id`；新增多租户能力需明确隔离模型并验证越权路径。
+- 在信任边界校验输入；SQL 值必须参数化，动态标识符使用白名单。密码使用 bcrypt/argon2id；密钥、token、DSN 密码不得进入代码、镜像、日志或提交。
+- PII 按项目数据保护要求加密存储，测试不使用生产明文数据。安全漏洞按 `SECURITY.md` 私密报告。
+- 容器默认非 root；宿主机采集需要的权限遵循现有部署设计，权限变更验证最小能力集合。CI 必须包含 `govulncheck`、依赖与镜像漏洞检查，缺失时如实报告。
+- 对外服务提供 `/healthz`、`/readyz`、`/metrics`；结构化日志保留错误链和请求 trace 上下文。Prometheus label 不使用 user_id、email、任意 URL 等高基数字段。
 
-提交 PR 前对照 `spec/07-code-review.md` 自查清单。
+## 并发、容量与运维
 
----
+- 涉及连接池、并发任务、队列或批量上报时，检查资源上限、超时、取消、释放和背压。数据库连接预算计入所有服务实例及其他客户端，不按 VM 数量直接配置连接数。
+- 重试必须有边界、退避和抖动，并确认操作可安全重复；依赖拥塞时避免立即重注册或层层重试放大负载。容量结论需说明节点数、上报周期、资源配置和负载证据。
+- 故障排查先确认版本、部署拓扑、报错服务和完整错误链；明确区分代码发现、根因推测与现场证据。
+- 部署、配置和数据变更说明回滚方式与限制；高风险变更使用金丝雀或 feature flag。告警附 Runbook，P0/P1 事故恢复后记录无责复盘；仅改文档无需部署回滚方案。
 
-## 核心约束（无需读 spec 也要遵守）
+## 验证与交付
 
-> 这些是任何任务都要守的红线。不论 agent 是否加载了完整 spec，都不能违反。
+先运行受影响路径的检查；新增行为和缺陷修复保留能覆盖关键行为的回归测试。按影响扩大范围，不能用局部通过替代项目要求的完整检查。
 
-### 架构
-- **单服务**：`cmd → web → controlplane → repo → model`，禁止跨层调用
-- **monorepo**：`internal/<domain>` 之间禁止直接 import，必须通过 API / 事件 / `internal/shared/`
-- 接口在消费方定义，禁止循环依赖
-- `utils/`、`lerrors/` 不依赖任何业务包
-- 依赖通过构造函数注入，不使用全局变量
-- 每个目录都被 CODEOWNERS 覆盖
+| 改动范围 | 验证入口 |
+| --- | --- |
+| Go 逻辑 | 对受影响包执行 `go test -race`；PR 前按贡献指南运行 `go test ./...`，全量 race 用 `make test-race`；CI 另有 build/vet |
+| 依赖边界 | `make arch-lint`；工具缺失时该目标会跳过，不能记为检查通过 |
+| 前端逻辑或 UI | 在 `web` 运行 `npm test -- <相关测试路径>`、`npm run build`、`npm run lint`；视觉验收另按上文执行 |
+| Proto | `make proto` 并检查生成差异；`make lint-proto` 当前只覆盖 k8s/setting，其他变更文件需用相同 Buf 配置补充 `--path` 检查 |
+| 集成或 E2E | 按影响运行 `make test-integration` / `make test-e2e`；使用隔离数据并清理；live 检查先确认目标环境与授权 |
+| 部署或发布脚本 | 运行 Makefile 中对应的 Chart、安装包或发布脚本检查，说明未覆盖的平台与运行时验证 |
+| 纯文档 | 检查差异、链接、路径、命令与现有规则的一致性，并运行 `git diff --check`；无需构建或截图 |
 
-### 编码
-- 禁止 `_ = fn()` 忽略错误（确实想丢弃必须注释说明）
-- 共享状态必须加锁，测试必须带 `-race`
-- 错误用 `%w` 包装；不重复记录（要么处理要么传播）
-- 所有涉及 IO 的函数第一个参数为 `context.Context`
-- `init()` 仅允许做注册（pprof / metrics collector / driver），禁止做 IO 或可能 panic
-- 禁止全局可变变量（只读单例 / collector 除外）
-- 避免 `any` / `interface{}` 出现在公共 API 边界（解码 / SDK 适配等不可避免时就近注释）
+- 沟通默认中文，已有文档和注释延续所在文件的语言。**PR 标题、commit 标题和正文必须使用英文；标题遵循 Conventional Commits。** 规则见 `CONTRIBUTING.md` 和 [.github/workflows/commit-policy.yml](.github/workflows/commit-policy.yml)。
+- 分支使用 `feat/...`、`fix/...`、`chore/...`，不加 `[codex]`；一个 PR 处理一个逻辑变更。所有变更通过 PR，不直接推送或 force push main/master。
+- PR 使用 [.github/pull_request_template.md](.github/pull_request_template.md)，原样保留 Author confirmation，由 PR 作者确认贡献条款，不代替其他作者勾选。
+- 提交 PR 前核对相关规则和测试，创建或更新后运行 `gh pr checks <number> --repo ongridio/ongrid`。检查失败、等待中和环境限制均需明确说明；代码验证、CI 通过、合并和发布是不同状态。
 
-### 前端 UI（全局统一约束）
+## 需求与文档范围
 
-- **规范优先**：[前端设计语言与开发规范](docs/design/frontend-design-language.md) 是公共设计规则的集中维护入口，组件 API 以 `web/src/components/ui/` 实现为准。未写明的布局参考设备、日志、监控等成熟页面的对应区域；历史页面的不一致不能作为新规范。新增或修改的 UI 必须融入现有控制台，不另建一套风格。
-- **统一组件体系**：沿用仓库已有的 **shadcn/ui 风格与派生组件实现**，复杂交互基于 **Base UI**，统一封装在 `web/src/components/ui/`。页面复用这些组件，保留 Ongrid 的 Tailwind 3、主题变量和组件 API；新增控件先检查已有实现，缺失时在公共层按同一体系补齐，不在业务页面另写一套。
-- **页面骨架**：复用 `PageHeader` / `Card` / `EmptyState` / `PaginationFooter`；统一页头、操作区、筛选栏、列表及分页。相关信息优先一个 `Card` 加 `divide-y`，不为每行重复套卡片。长文本使用 `min-w-0`，窄屏允许操作换行，密集表格只在容器内横向滚动。
-- **表单与筛选**：从 `@/components/ui` 复用 `Input` / `Textarea` / `Select` / `Checkbox` / `Switch` / `Radio` / `Slider`。表单用 `Label` 关联字段，横向筛选用 `FilterField`，列表搜索用 `Input type="search"`；不手写另一套输入框、下拉框或开关。
-- **尺寸与按钮**：常规控件沿用默认 36px，密集行内操作用 `Button size="sm"`（28px），独立图标操作用 `size="icon"`。主要操作用 `primary`，次要操作用 `outline` / `ghost`，危险操作用 `danger` / `dangerGhost`；不通过局部 `h-*`、`py-*`、字号和圆角拼出第三套常规尺寸。
-- **弹层与导航**：复用 `Modal` / `Dialog` / `DropdownMenu` / `Hint` / `Popover` / `Tabs`，确认和输入请求用 `useDialogs`。弹窗使用预设尺寸，长内容在正文区滚动；不重写浮层定位、Escape、焦点管理或使用浏览器原生弹窗替代公共交互。监控类时间筛选复用 `TimeRangePicker`。
-- **样式归属**：公共外观与状态在 `web/src/styles/index.css` 的 `.og-*` 和主题变量中维护。页面 `className` 主要补布局、宽度及代码字体，避免重复覆盖公共控件的背景、边框、圆角、字号和聚焦样式；优先扩展已有公共组件，不引入第二套组件库或主题。
-- **语义配色**：新代码使用 `bg-bg` / `bg-card` / `border-border`、`text-text` / `text-text-muted` / `text-text-faint`。主操作沿用 indigo；成功 / 降级 / 异常 / 信息使用 emerald / amber / red / sky，状态复用 `Chip tone`，状态点用 `-500`。品牌 `--accent` 仅用于品牌区域，不铺成大面积操作区。
-- **克制与图标**：正常态用小圆点加灰字，让异常突出；禁止 `animate-pulse`、发光阴影、`hover:scale` 和花哨的刷新徽章。通用图标用 `lucide-react`，品牌图标复用现有 `components/icons`；沿用公共字体与文字层级，不把紧凑元数据字号用于主要操作和必要提示。
-- **明暗主题**：不得写死只适配深色的页面配色；检查 light / dark 的默认、悬停、聚焦、禁用、选中、错误及 Portal 浮层状态。维护旧 zinc 类时确认 light 覆盖，尤其透明度变体；不要局部叠加透明度降低提示可读性。
-- **交互与可访问性**：导航用链接，动作用按钮；保留键盘操作和焦点提示，图标按钮提供可访问名称。区分加载、空数据、筛选无结果和失败；提交中防重复，失败保留输入，错误提供重试或修正入口，取消不能执行动作。
-- **i18n**：所有用户文案使用 `tr('中文', 'English')`，包含占位符、空态、错误、Tooltip 和可访问名称；不在同一字符串中英并排，检查较长英文与长选项是否挤压布局。
-- **验收与维护**：按设计规范末尾清单检查布局、交互、窄屏、中英文及明暗主题；视觉改动提交前必须通过真实浏览器截图实看，light / dark 各一张，纯文档变更无需截图。运行相关交互测试、构建与 lint，如实记录未验证项和既有失败。公共规则变更在同一 PR 更新设计规范与相关测试，避免页面各自演变。
-
-- **表格操作列**：遵循设计规范「表格操作列」：按内容收紧，表头与按钮组左对齐；固定列复用 `.og-action-table` 不透明底色。验证横向滚动、深浅主题和不同权限下的按钮数量，不能仅检查满按钮状态。
-
-### API
-- 所有 API 变更先更新 `.proto`，禁止改生成代码
-- Handler 必须有 Swagger 注释：`@Summary`、`@Router`、`@Success` 缺一不可
-- 响应格式统一：`{code, message, data}`
-- 破坏性变更走新版本，原版本只允许加非破坏性内容
-
-### 测试
-- 新功能必须有单元测试
-- CI 强制启用 `-race`
-- E2E 测试必须清理数据
-
-### Git
-- 提交格式：`<type>(<scope>): <desc>`（Conventional Commits）
-- 禁止提交敏感信息（密码、密钥、token）
-- 禁止 force push main/master
-
-### 可观测性
-- 所有对外服务必须暴露 `/healthz`、`/readyz`、`/metrics`
-- 日志结构化（slog / zap）+ `trace_id`，ERROR 包含完整 error chain
-- 高基数字段（user_id、email、url）禁止作为 Prometheus label
-- 敏感字段禁止明文入日志
-
-### 安全
-- 密码必须用 bcrypt / argon2id，禁止 MD5 / SHA1
-- SQL 全部参数化，禁止字符串拼接
-- 密钥禁止进代码仓库 / 镜像 / 日志
-- 容器以非 root 用户运行
-- 多租户接口强制 `tenant_id` 过滤
-- CI 必须包含 `govulncheck` + 依赖 / 镜像漏洞扫描
-
-### 运维
-- 任何变更必须有回滚方案
-- 告警规则必须配 Runbook 链接
-- 高风险变更走金丝雀或 feature flag
-- P0 / P1 事故必须产出 blameless postmortem
-
-### 数据存储
-- **MySQL**：生产 schema 变更走 migration 文件；大表用在线 DDL 工具；变更兼容滚动发布（expand-contract）
-- **Redis**：所有 key 必须设 TTL；禁止大 key（value > 10KB / 集合 > 5000）；分布式锁必须有 owner 校验
-- **ClickHouse**：必须 Replicated engine；写入必须批量；ORDER BY 从低基数到高基数
-- **InfluxDB**：tag 必须低基数（user_id / url 等禁止做 tag）；bucket 必须有 retention
-- PII 字段加密存储，测试环境禁止生产数据明文
-
----
-
-## 需求载体选择
-
-不是所有变更都要写 PRD。按变更类型选载体（详见 `spec/01-requirement/`）：
-
-| 变更类型 | 载体 |
-|---------|------|
-| Bug / 小改 / 配置 / 文档修复 | Issue（issue tracker） |
-| 重构 / 升级依赖 / 性能优化（用户不感知） | RFC（`docs/rfc/RFC-XXX-*.md`） |
-| 用户可感知的功能 / 业务变更 | PRD（`docs/requirements/PRD-XXX-*.md`） |
-| 跨多个 PRD 的战略 | Epic（`docs/requirements/EPIC-XXX-*.md`） |
-
----
-
-## 输出语言
-
-默认中文（代码注释、文档、commit message）。
-
----
-
-完整规范、所有子主题的具体细节、模板和自查清单见 `spec/spec.md` 的任务路由表。
+- 局部 Bug、小功能、配置、文档和范围明确的性能优化，在 Issue 或 PR 写清问题、方案与验证即可。
+- 跨模块、影响兼容性或存在重要方案取舍时，补 RFC/ADR；较复杂的用户流程补 PRD，跨多个需求的战略用 Epic。按影响和不确定性决定，不仅按改动类别决定。
+- 沿用仓库已有文档目录：设计决策放 `docs/design/`，部署说明放 `docs/install/`，需求和 RFC 分别放 `docs/requirements/`、`docs/rfc/`。README 保持简洁，多语言内容按贡献指南同步。
