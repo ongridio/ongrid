@@ -195,8 +195,6 @@ processors:
     send_batch_max_size: 10000
 exporters:
   prometheusremotewrite:
-    target_info:
-      enabled: false
     remote_write_queue:
       enabled: true
       num_consumers: 1

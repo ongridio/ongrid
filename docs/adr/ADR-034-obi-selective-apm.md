@@ -31,6 +31,8 @@ Scraper 只增加 Pod 的 list/watch 权限，范围通过卷投影读取，不�
 `ongrid_source="k8s:app-metrics"`。目标状态使用官方 `up` 指标；有 KSM 时
 Scraper readiness 继续反映核心采集状态，只有 Pod 发现时反映 Collector 进程健康。
 readiness 不代表所有应用端点或 remote_write 出口都成功。
+Receiver 将应用的 `target_info` 转为资源属性，remote_write 保持默认的
+`target_info` 导出，以保留服务、版本等元数据及 `job`/`instance` 关联。
 
 APM 请求、错误率、延迟和运行时查询排除此原始抓取来源，保留现有 APM 统计口径。
 原始指标仍可独立查询。此来源选择是 Ongrid 的产品策略，不是官方通用语义去重：
@@ -39,6 +41,9 @@ OBI 保持 `exclude_otel_instrumented_services=true`；其 OTel 导出检测不�
 识别任意 Prometheus `/metrics` 与 OBI 的指标重叠。
 
 验证示例位于 [examples/prometheus-go](../../examples/prometheus-go/README.md)。
+设置 `ONGRID_TEST_OTELCOL_BINARY` 为随 Edge 分发的 Collector 路径后，运行
+`go test -race ./cmd/ongrid-edge -run TestPodMetricsPreservesTargetInfo`，
+可验证真实抓取和 remote_write 转发后的元数据与关联标签。
 官方参考：[Prometheus Receiver](https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/receiver/prometheusreceiver)、
 [Scraper 分片](https://opentelemetry.io/docs/collector/scaling/#scaling-the-scrapers)、
 [OBI 已插桩服务排除](https://opentelemetry.io/docs/zero-code/obi/configure/service-discovery/#exclude-otel-instrumented-services)。
