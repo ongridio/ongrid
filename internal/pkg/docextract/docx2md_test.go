@@ -69,6 +69,24 @@ func TestDOCX2MD_UsesStyleOutlineLevelForHeading(t *testing.T) {
 	}
 }
 
+func TestExtractPlainText_DoesNotEmitMarkdown(t *testing.T) {
+	document := `<w:document xmlns:w="urn:w"><w:body>
+<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Release notes</w:t></w:r></w:p>
+<w:p><w:r><w:t>Plain paragraph</w:t></w:r><w:r><w:tab/></w:r><w:r><w:t>with tab</w:t></w:r></w:p>
+</w:body></w:document>`
+
+	got, err := ExtractPlainText("guide.docx", testDOCX(t, map[string]string{"word/document.xml": document}))
+	if err != nil {
+		t.Fatalf("extract plain text: %v", err)
+	}
+	if strings.Contains(got, "# Release notes") || strings.Contains(got, "|") {
+		t.Fatalf("plain preview contains Markdown syntax: %q", got)
+	}
+	if !strings.Contains(got, "Release notes\nPlain paragraph\twith tab") {
+		t.Fatalf("plain preview lost document text: %q", got)
+	}
+}
+
 func TestDOCX2MD_TableFirstRowBecomesHeader(t *testing.T) {
 	document := `<w:document xmlns:w="urn:w"><w:body><w:tbl>
 <w:tr><w:tc><w:p><w:r><w:t>Name</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Version</w:t></w:r></w:p></w:tc></w:tr>

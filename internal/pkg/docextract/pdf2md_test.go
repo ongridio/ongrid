@@ -2,6 +2,7 @@ package docextract
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -64,9 +65,55 @@ func TestPDF2MD_CapsHeadingLevelAtH3(t *testing.T) {
 }
 
 func TestPDF2MD_WithoutTextReturnsError(t *testing.T) {
-	_, err := pdf2md(testPDF(t, ""))
-	if err == nil || !strings.Contains(err.Error(), "no extractable text") {
-		t.Fatalf("empty PDF error = %v, want no extractable text", err)
+	got, err := pdf2md(testPDF(t, ""))
+	if !errors.Is(err, errPDFNoText) {
+		t.Fatalf("empty PDF error = %v, want errPDFNoText", err)
+	}
+	if got != "" {
+		t.Fatalf("empty PDF text = %q, want empty", got)
+	}
+}
+
+func TestValidatePDFText_RejectsCorruptedTextLayer(t *testing.T) {
+	corrupted := strings.Repeat("\x1b\u0091x\n", 40)
+	got, err := validatePDFText(corrupted)
+	if !errors.Is(err, errPDFNoText) {
+		t.Fatalf("corrupted text error = %v, want errPDFNoText", err)
+	}
+	if got != "" {
+		t.Fatalf("corrupted text = %q, want empty", got)
+	}
+}
+
+func TestValidatePDFText_AcceptsReadableText(t *testing.T) {
+	readable := "# 原则\n\n每条原则都应能被清晰验证。\n"
+	got, err := validatePDFText(readable)
+	if err != nil {
+		t.Fatalf("readable text rejected: %v", err)
+	}
+	if got != readable {
+		t.Fatalf("readable text changed: %q", got)
+	}
+}
+
+func TestExtract_PDFWithoutTextReturnsError(t *testing.T) {
+	data := testPDF(t, "")
+	for _, tc := range []struct {
+		name string
+		call func(string, []byte) (string, error)
+	}{
+		{name: "markdown", call: Extract},
+		{name: "plain text", call: ExtractPlainText},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := tc.call("scan.pdf", data)
+			if !errors.Is(err, errPDFNoText) {
+				t.Fatalf("error = %v, want errPDFNoText", err)
+			}
+			if got != "" {
+				t.Fatalf("text = %q, want empty", got)
+			}
+		})
 	}
 }
 

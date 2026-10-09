@@ -1,4 +1,5 @@
 syntax = "proto3";
+
 package ongrid.manager.knowledge.v1;
 option go_package = "github.com/ongridio/ongrid/api/gen/manager/knowledge/v1;knowledgev1";
 
@@ -23,4 +24,174 @@ message UpdateRepositoryRequest {
   uint64 id = 1;
   string branch = 2;
   string description = 3;
+}
+
+// ---------------------------------------------------------------------------
+// LLM Wiki
+//
+// The compiled Wiki: mirrored raw sources, the generated pages of the active
+// build and the compile jobs that produce them. Every route answers the shared
+// `{code, message, data}` HTTP envelope, so only the `data` payload is modelled
+// here. Node ids are opaque to clients: they encode the layer and the
+// store-relative path and must be sent back unchanged.
+// ---------------------------------------------------------------------------
+
+// One mirrored raw source.
+message LLMWikiSource {
+  string id = 1;
+  string source_key = 2;
+  string source_type = 3;
+  string raw_path = 4;
+  string current_version_id = 5;
+  string status = 6;  // pending | succeeded | stale | failed
+  string updated_at = 7;
+}
+
+// One compile job. A tenant has at most one pending or running job.
+message LLMWikiJob {
+  string id = 1;
+  string status = 2;  // pending | running | succeeded | skipped | failed | cancelled
+  string stage = 3;
+  string error = 4;
+  string created_at = 5;
+  string updated_at = 6;
+}
+
+// One node of the Wiki tree: a raw file, a generated page or a folder.
+message LLMWikiTreeNode {
+  string id = 1;
+  string parent_id = 2;
+  string layer = 3;  // raw | wiki
+  string kind = 4;   // folder | file
+  string name = 5;
+  string relative_path = 6;
+  bool has_children = 7;
+  int64 child_count = 8;
+  int64 document_count = 9;
+  string source_id = 10;
+  string page_id = 11;
+  string page_type = 12;
+  string status = 13;
+  string updated_at = 14;
+}
+
+// One published Wiki page.
+message LLMWikiSearchHit {
+  string layer = 1;
+  string page_type = 2;
+  string page_id = 3;
+  string source_version_id = 4;
+  string title = 5;
+  string preview = 6;
+  double score = 7;
+  string matched_node = 8;
+}
+
+// GET /v1/knowledge/llm-wiki/tree?layer=&parent_id=
+message LLMWikiTreeRequest {
+  string layer = 1;      // raw | wiki | empty for both layers
+  string parent_id = 2;  // empty for the layer root
+}
+message LLMWikiTreeResponse {
+  repeated LLMWikiTreeNode items = 1;
+  int64 total = 2;
+  int64 document_count = 3;
+}
+
+// GET /v1/knowledge/llm-wiki/nodes/{id} answers with the tree node flattened
+// next to the body and its metadata, because the Go DTO embeds TreeNode.
+// Metadata is a JSON object in `metadata_json`.
+message LLMWikiNodeRequest {
+  string id = 1;
+}
+message LLMWikiNodeResponse {
+  string id = 1;
+  string parent_id = 2;
+  string layer = 3;
+  string kind = 4;
+  string name = 5;
+  string relative_path = 6;
+  bool has_children = 7;
+  int64 child_count = 8;
+  int64 document_count = 9;
+  string source_id = 10;
+  string page_id = 11;
+  string page_type = 12;
+  string status = 13;
+  string updated_at = 14;
+  string content = 15;
+  string metadata_json = 16;
+}
+
+// GET /v1/knowledge/llm-wiki/nodes/{id}/preview streams the original bytes of a
+// raw PDF or DOCX instead of the JSON envelope.
+message LLMWikiPreviewRequest {
+  string id = 1;
+}
+
+// DELETE /v1/knowledge/llm-wiki/nodes/{id} removes a raw source, the pages
+// generated from it and its index entries. Generated pages cannot be deleted
+// individually: they belong to an immutable build.
+message LLMWikiDeleteRequest {
+  string id = 1;
+}
+message LLMWikiDeleteResponse {
+  bool deleted = 1;
+}
+
+// GET /v1/knowledge/llm-wiki/sources?status=&limit=
+message LLMWikiSourcesRequest {
+  string status = 1;
+  int32 limit = 2;
+}
+message LLMWikiSourcesResponse {
+  repeated LLMWikiSource items = 1;
+  int64 total = 2;
+}
+
+// GET /v1/knowledge/llm-wiki/search?q=&limit= searches published Wiki pages
+// only; knowledge-base path and tag filters are not supported here.
+message LLMWikiSearchRequest {
+  string q = 1;
+  int32 limit = 2;
+}
+message LLMWikiSearchResponse {
+  repeated LLMWikiSearchHit items = 1;
+  int64 total = 2;
+}
+
+// GET /v1/knowledge/llm-wiki/jobs?limit=
+message LLMWikiJobsRequest {
+  int32 limit = 1;
+}
+message LLMWikiJobsResponse {
+  repeated LLMWikiJob items = 1;
+  int64 total = 2;
+}
+
+// POST /v1/knowledge/llm-wiki/sync projects the organization knowledge base
+// (manual and upload documents) into the Wiki raw tree. It is refused with a
+// conflict while a compile job is pending or running.
+message LLMWikiSyncResponse {
+  int64 created = 1;
+  int64 updated = 2;
+  int64 unchanged = 3;
+  int64 deleted = 4;
+  int64 total = 5;
+}
+
+// POST /v1/knowledge/llm-wiki/compile queues one compilation and answers 202
+// with an LLMWikiJob as the payload. An empty source_ids compiles the whole
+// corpus; otherwise only the listed sources are recompiled and the pages that do
+// not depend on them are inherited from the active build.
+message LLMWikiCompileRequest {
+  bool force = 1;
+  repeated string source_ids = 2;
+}
+
+// POST /v1/knowledge/llm-wiki/jobs/{id}/retry re-queues a failed or cancelled
+// job; POST /v1/knowledge/llm-wiki/jobs/{id}/cancel requests cancellation of a
+// pending or running one. Both answer with the updated LLMWikiJob as the payload.
+message LLMWikiJobRequest {
+  string id = 1;
 }

@@ -996,11 +996,13 @@ func (rt *Runtime) prologueKBLookup(ctx context.Context, bag []basetool.BaseTool
 		return ""
 	}
 	// Schema across versions has used both "query" and "q"; send
-	// "query" and let the tool ignore extras.
+	// "query" and let the tool ignore extras. The count argument is
+	// "max_results" — "top_k" and "min_score" are not in the tool schema and
+	// json.Unmarshal dropped them, so this call silently took the tool default
+	// of 5 and left the earlier "min_score" filtering to the check below.
 	args, _ := json.Marshal(map[string]any{
-		"query":     userText,
-		"top_k":     3,
-		"min_score": 0.6,
+		"query":       userText,
+		"max_results": 3,
 	})
 	out, err := kb.InvokableRun(ctx, string(args))
 	if err != nil || out == "" {
@@ -1022,6 +1024,11 @@ func (rt *Runtime) prologueKBLookup(ctx context.Context, bag []basetool.BaseTool
 	if len(parsed.Items) == 0 {
 		return ""
 	}
+	// The score is the hit's own relevance, not the RRF rank value the hybrid
+	// searcher used to publish: a raw or Wiki-vector hit reports a Qdrant cosine
+	// on the same 0..1 scale this threshold was written for. A Wiki page matched
+	// only by the lexical leg reports its coarse match rank instead, so it clears
+	// the bar only on a title or alias hit.
 	top := parsed.Items[0]
 	if top.Score < 0.6 {
 		return ""

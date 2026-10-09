@@ -1,6 +1,8 @@
 package knowledge
 
 import (
+	"bytes"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -104,7 +106,7 @@ func TestE2E_MoveDoc(t *testing.T) {
 
 // TestE2E_Validation covers the input-rejection paths that surface as 400/404.
 func TestE2E_Validation(t *testing.T) {
-	router, _ := newE2E(t)
+	router, store := newE2E(t)
 
 	cases := []struct {
 		name string
@@ -130,12 +132,48 @@ func TestE2E_Validation(t *testing.T) {
 		}
 	})
 
+	t.Run("image-only pdf rejected", func(t *testing.T) {
+		ct, body := buildUpload(t, "scan.pdf", string(emptyPDF(t)), "", "")
+		rec := req(t, router, http.MethodPost, "/v1/knowledge/upload", ct, body)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("want 400, got %d (%s)", rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), "no reliably extractable body text") {
+			t.Fatalf("unexpected error: %s", rec.Body.String())
+		}
+		if store.count() != 0 {
+			t.Fatalf("image-only PDF created %d knowledge points", store.count())
+		}
+	})
+
 	t.Run("get missing doc 404", func(t *testing.T) {
 		rec := req(t, router, http.MethodGet, "/v1/knowledge/docs/999999", "", nil)
 		if rec.Code != http.StatusNotFound {
 			t.Fatalf("want 404, got %d (%s)", rec.Code, rec.Body.String())
 		}
 	})
+}
+
+// emptyPDF builds a valid one-page PDF with no text layer.
+func emptyPDF(t *testing.T) []byte {
+	t.Helper()
+	var b bytes.Buffer
+	b.WriteString("%PDF-1.4\n")
+	offsets := make([]int, 1, 6)
+	writeObject := func(n int, body string) {
+		offsets = append(offsets, b.Len())
+		fmt.Fprintf(&b, "%d 0 obj\n%s\nendobj\n", n, body)
+	}
+	writeObject(1, "<< /Type /Catalog /Pages 2 0 R >>")
+	writeObject(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>")
+	writeObject(3, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>")
+	xref := b.Len()
+	fmt.Fprintf(&b, "xref\n0 %d\n0000000000 65535 f \n", len(offsets))
+	for _, offset := range offsets[1:] {
+		fmt.Fprintf(&b, "%010d 00000 n \n", offset)
+	}
+	fmt.Fprintf(&b, "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n", len(offsets), xref)
+	return b.Bytes()
 }
 
 // TestE2E_ListFiltersAndPaths exercises the source_type / tag filters and the

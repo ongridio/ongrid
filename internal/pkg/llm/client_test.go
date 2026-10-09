@@ -170,6 +170,135 @@ func TestChatRoundTrip(t *testing.T) {
 	}
 }
 
+func TestChatRoundTripCarriesStrictJSONSchema(t *testing.T) {
+	var responseFormat map[string]any
+	_, cfg := fakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read request body: %v", err)
+			return
+		}
+		var body struct {
+			ResponseFormat map[string]any `json:"response_format"`
+		}
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Errorf("decode request body: %v", err)
+			return
+		}
+		responseFormat = body.ResponseFormat
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(sampleChatResponse(`{"ok":true}`, nil))
+	})
+
+	client := newTestClient(t, cfg, nil)
+	_, err := client.Chat(context.Background(), ChatReq{
+		Messages: []Message{{Role: "user", Content: "hi"}},
+		ResponseFormat: &ResponseFormat{
+			Type:   ResponseFormatJSONSchema,
+			Name:   "chunk_batch",
+			Schema: json.RawMessage(`{"type":"object","properties":{"chunks":{"type":"array"}}}`),
+			Strict: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if responseFormat["type"] != ResponseFormatJSONSchema {
+		t.Fatalf("response_format.type = %#v, want %q", responseFormat["type"], ResponseFormatJSONSchema)
+	}
+	schema, ok := responseFormat["json_schema"].(map[string]any)
+	if !ok {
+		t.Fatalf("response_format.json_schema = %#v, want object", responseFormat["json_schema"])
+	}
+	if schema["name"] != "chunk_batch" || schema["strict"] != true {
+		t.Fatalf("json_schema metadata = %#v, want name and strict", schema)
+	}
+	if _, ok := schema["schema"].(map[string]any); !ok {
+		t.Fatalf("json_schema.schema = %#v, want object", schema["schema"])
+	}
+}
+
+func TestChatDowngradesUnsupportedJSONSchema(t *testing.T) {
+	var (
+		calls     int
+		seenTypes []string
+		rejected  bool
+	)
+	_, cfg := fakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read request body: %v", err)
+			return
+		}
+		var body struct {
+			ResponseFormat struct {
+				Type string `json:"type"`
+			} `json:"response_format"`
+		}
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Errorf("decode request body: %v", err)
+			return
+		}
+		seenTypes = append(seenTypes, body.ResponseFormat.Type)
+		if !rejected {
+			rejected = true
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"message":"This response_format type is unavailable now","type":"invalid_request_error"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(sampleChatResponse(`{"ok":true}`, nil))
+	})
+	client := newTestClient(t, cfg, nil)
+	request := ChatReq{
+		Messages: []Message{{Role: "user", Content: "return JSON"}},
+		ResponseFormat: &ResponseFormat{
+			Type:   ResponseFormatJSONSchema,
+			Name:   "chunk_summary",
+			Schema: json.RawMessage(`{"type":"object","properties":{"ok":{"type":"boolean"}}}`),
+			Strict: true,
+		},
+	}
+
+	if _, err := client.Chat(context.Background(), request); err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("server calls = %d, want 2 (schema rejection + JSON object retry)", calls)
+	}
+	if len(seenTypes) != 2 || seenTypes[0] != ResponseFormatJSONSchema || seenTypes[1] != ResponseFormatJSONObject {
+		t.Fatalf("response format types = %v, want [%s %s]", seenTypes, ResponseFormatJSONSchema, ResponseFormatJSONObject)
+	}
+
+	// The capability is cached per provider/model, so later Wiki chunks skip
+	// the known-bad JSON Schema request entirely.
+	calls = 0
+	seenTypes = nil
+	if _, err := client.Chat(context.Background(), request); err != nil {
+		t.Fatalf("Chat after capability learning: %v", err)
+	}
+	if calls != 1 || len(seenTypes) != 1 || seenTypes[0] != ResponseFormatJSONObject {
+		t.Fatalf("cached response format = calls %d types %v, want 1 [%s]", calls, seenTypes, ResponseFormatJSONObject)
+	}
+}
+
+func TestChatRejectsInvalidResponseFormat(t *testing.T) {
+	client := newTestClient(t, Config{APIKey: "test-key", Model: "gpt-4o"}, nil)
+	_, err := client.Chat(context.Background(), ChatReq{
+		Messages: []Message{{Role: "user", Content: "hi"}},
+		ResponseFormat: &ResponseFormat{
+			Type:   ResponseFormatJSONSchema,
+			Name:   "chunk_batch",
+			Schema: json.RawMessage(`{"type":`),
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "response format") {
+		t.Fatalf("error = %v, want invalid response format", err)
+	}
+}
+
 // TestChatToolCallDecoded verifies that a server response with tool_calls
 // lands in ChatResp.Assistant.ToolCalls with args preserved verbatim.
 func TestChatToolCallDecoded(t *testing.T) {
