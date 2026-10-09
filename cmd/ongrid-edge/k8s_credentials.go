@@ -445,11 +445,14 @@ func (c *k8sSecretClient) patchDataKeys(ctx context.Context, values map[string][
 }
 
 func telemetrySecretData(in k8sTelemetryConfig) map[string][]byte {
+	// This concrete type contains only string slices, so JSON encoding cannot fail.
+	scope, _ := json.Marshal(in.AppMetricsScope)
 	clusterNodeID := ""
 	if in.ClusterNodeID != 0 {
 		clusterNodeID = strconv.FormatUint(in.ClusterNodeID, 10)
 	}
 	return map[string][]byte{
+		"telemetry-app-metrics-scope":         scope,
 		"telemetry-cluster-id":                []byte(strconv.FormatUint(in.ClusterID, 10)),
 		"telemetry-cluster-node-id":           []byte(clusterNodeID),
 		"telemetry-access-key":                []byte(in.AccessKey),

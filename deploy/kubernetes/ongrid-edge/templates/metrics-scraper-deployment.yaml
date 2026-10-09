@@ -158,7 +158,11 @@ spec:
         - name: telemetry-credentials
           secret:
             secretName: {{ include "ongrid-edge.telemetryCredentialSecretName" . }}
+            # Old controllers have no scope yet. Missing data must not block KSM.
+            optional: true
             items:
+              - key: telemetry-app-metrics-scope
+                path: telemetry-app-metrics-scope
               - key: telemetry-cluster-id
                 path: telemetry-cluster-id
               - key: telemetry-remote-write-endpoint

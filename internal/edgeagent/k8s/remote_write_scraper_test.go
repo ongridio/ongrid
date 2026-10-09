@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/ongridio/ongrid/internal/pkg/autoapm"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -186,10 +187,13 @@ app_requests_total{route="/ready",id="two",instance="app",url="/business"} 4
 	scraper, err := newRemoteWriteScraper(writer, RemoteWriteScraperConfig{
 		ClusterID:    7,
 		DiscoverApps: true,
-		Interval:     time.Second,
-		Timeout:      time.Second,
-		PushTimeout:  time.Second,
-		MaxRetries:   1,
+		AppMetricsScope: func(context.Context) (autoapm.MetricsScope, error) {
+			return autoapm.MetricsScope{Namespaces: []string{"default"}}, nil
+		},
+		Interval:    time.Second,
+		Timeout:     time.Second,
+		PushTimeout: time.Second,
+		MaxRetries:  1,
 	}, slog.Default(), nil, &apiClient{baseURL: apiServer.URL, http: apiServer.Client()})
 	if err != nil {
 		t.Fatalf("newRemoteWriteScraper() error = %v", err)
@@ -232,10 +236,13 @@ func TestRemoteWriteScraperKeepsCoreReadyWhenAppDiscoveryFails(t *testing.T) {
 		ClusterID:    7,
 		Endpoint:     metricsServer.URL,
 		DiscoverApps: true,
-		Interval:     time.Second,
-		Timeout:      time.Second,
-		PushTimeout:  time.Second,
-		MaxRetries:   1,
+		AppMetricsScope: func(context.Context) (autoapm.MetricsScope, error) {
+			return autoapm.MetricsScope{Namespaces: []string{"default"}}, nil
+		},
+		Interval:    time.Second,
+		Timeout:     time.Second,
+		PushTimeout: time.Second,
+		MaxRetries:  1,
 	}, slog.Default(), nil, &apiClient{baseURL: apiServer.URL, http: apiServer.Client()})
 	if err != nil {
 		t.Fatalf("newRemoteWriteScraper() error = %v", err)

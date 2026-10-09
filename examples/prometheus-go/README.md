@@ -24,6 +24,11 @@ Receiver. A second declared container port tests that the annotated 8080 endpoin
 is still scraped once; the application does not listen on 8081.
 
 Select namespace `metrics-demo`, Deployment `prometheus-go` in Ongrid Auto APM.
+Both Auto APM and annotated Pod metrics follow this selection. Selecting the
+whole namespace includes its annotated Pods, including future Pods. Selecting
+a workload includes only its Pods. An empty selection collects no application
+metrics; kube-state-metrics remains independent. Scope changes propagate through
+the controller's configuration sync and Kubernetes Secret projection.
 Keep other capture rules. Generate requests with:
 
 ```sh

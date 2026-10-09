@@ -20,6 +20,7 @@ import (
 	"time"
 
 	model "github.com/ongridio/ongrid/internal/manager/model/k8s"
+	"github.com/ongridio/ongrid/internal/pkg/autoapm"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/k8sredact"
 	"github.com/ongridio/ongrid/internal/pkg/passwd"
@@ -1357,6 +1358,7 @@ type EnrollResult struct {
 // by that controller into a Kubernetes Secret. Secrets are never persisted in
 // plaintext by manager.
 type TelemetryConfig struct {
+	AppMetricsScope        autoapm.MetricsScope
 	ClusterNodeID          uint64
 	ClusterID              uint64
 	AccessKey              string
@@ -2276,8 +2278,13 @@ func newTelemetryCredential(clusterID uint64) (*model.TelemetryCredential, strin
 }
 
 func (u *Usecase) resolveTelemetryConfig(ctx context.Context, cluster *model.Cluster, accessKey, secretKey string) (*TelemetryConfig, error) {
+	scope, err := u.appMetricsScope(ctx, cluster)
+	if err != nil {
+		return nil, err
+	}
 	publicURL := strings.TrimRight(strings.TrimSpace(u.cfg.PublicURL), "/")
 	out := &TelemetryConfig{
+		AppMetricsScope:  scope,
 		ClusterID:        cluster.ID,
 		AccessKey:        accessKey,
 		SecretKey:        secretKey,

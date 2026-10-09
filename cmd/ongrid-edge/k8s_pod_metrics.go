@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +14,8 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/ongridio/ongrid/internal/edgeagent/plugins"
+	"github.com/ongridio/ongrid/internal/pkg/autoapm"
+	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
 
 const podMetricsPlugin = "k8s-pod-metrics"
@@ -44,7 +47,31 @@ func renderPodMetrics(cfg plugins.PluginConfig) ([]byte, error) {
 
 type podMetricsFetcher struct{ dir string }
 
+func loadK8sAppMetricsScope(ctx context.Context, info *tunnel.KubernetesInfo) (autoapm.MetricsScope, error) {
+	client, err := newK8sSecretClient(info)
+	if err != nil {
+		return autoapm.MetricsScope{}, err
+	}
+	if client == nil {
+		return autoapm.MetricsScope{}, nil
+	}
+	client.secretName = envOr("ONGRID_K8S_TELEMETRY_SECRET", client.secretName)
+	data, _, err := client.getData(ctx)
+	if err != nil {
+		return autoapm.MetricsScope{}, err
+	}
+	return autoapm.ParseMetricsScope(data["telemetry-app-metrics-scope"])
+}
+
 func (f *podMetricsFetcher) Fetch(ctx context.Context) (map[string]plugins.PluginConfig, error) {
+	rawScope, err := readTelemetryFile(ctx, f.dir, "telemetry-app-metrics-scope", false)
+	if err != nil {
+		return nil, err
+	}
+	scope, err := autoapm.ParseMetricsScope([]byte(rawScope))
+	if err != nil {
+		return nil, err
+	}
 	files, err := readRemoteWriteFiles(ctx, f.dir)
 	if err != nil {
 		return nil, err
@@ -55,6 +82,18 @@ func (f *podMetricsFetcher) Fetch(ctx context.Context) (map[string]plugins.Plugi
 	}
 	receiver := config["receivers"].(map[string]interface{})["prometheus"].(map[string]interface{})
 	scrape := receiver["config"].(map[string]interface{})["scrape_configs"].([]interface{})[0].(map[string]interface{})
+	allowed := make([]string, 0, len(scope.Namespaces)+len(scope.PodUIDs))
+	for _, namespace := range scope.Namespaces {
+		allowed = append(allowed, regexp.QuoteMeta(namespace)+";.*")
+	}
+	for _, uid := range scope.PodUIDs {
+		allowed = append(allowed, ".*;"+regexp.QuoteMeta(uid))
+	}
+	// The empty regex cannot match namespace;UID, so missing or cleared rules deny all.
+	scrape["relabel_configs"] = append([]interface{}{map[string]interface{}{
+		"source_labels": []string{"__meta_kubernetes_namespace", "__meta_kubernetes_pod_uid"},
+		"action":        "keep", "regex": strings.Join(allowed, "|"),
+	}}, scrape["relabel_configs"].([]interface{})...)
 	interval := parseDurationEnv("ONGRID_K8S_METRICS_INTERVAL", 30*time.Second)
 	timeout := min(parseDurationEnv("ONGRID_K8S_METRICS_TIMEOUT", 15*time.Second), interval)
 	scrape["scrape_interval"], scrape["scrape_timeout"] = interval.String(), timeout.String()

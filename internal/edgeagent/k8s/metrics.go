@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ongridio/ongrid/internal/edgeagent/plugins/metricscommon"
+	"github.com/ongridio/ongrid/internal/pkg/autoapm"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
 
@@ -36,6 +37,7 @@ type MetricsConfig struct {
 	BatchSampleLimit int
 	BatchByteLimit   int
 	DiscoverApps     bool
+	AppMetricsScope  func(context.Context) (autoapm.MetricsScope, error)
 }
 
 type MetricsPusher struct {
@@ -289,7 +291,12 @@ func (p *MetricsPusher) logScrapeOutcome(target metricscommon.Target, stats metr
 }
 
 func (p *MetricsPusher) discoverAndPushAppMetrics(ctx context.Context, edgeID uint64) {
-	if p.api == nil {
+	if p.api == nil || p.cfg.AppMetricsScope == nil {
+		return
+	}
+	scope, err := p.cfg.AppMetricsScope(ctx)
+	if err != nil {
+		p.log.Warn("k8s app metrics scope unavailable", slog.Any("err", err))
 		return
 	}
 	pods, err := p.api.listMetricPods(ctx, "")
@@ -299,7 +306,7 @@ func (p *MetricsPusher) discoverAndPushAppMetrics(ctx context.Context, edgeID ui
 	}
 	discovered := 0
 	for _, pod := range pods {
-		target, ok := appMetricsTarget(pod, p.cfg)
+		target, ok := appMetricsTarget(pod, p.cfg, scope)
 		if !ok {
 			continue
 		}
@@ -389,7 +396,10 @@ func (c *apiClient) listMetricPods(ctx context.Context, namespace string) ([]pod
 	return list.Items, nil
 }
 
-func appMetricsTarget(pod podItem, cfg MetricsConfig) (metricscommon.Target, bool) {
+func appMetricsTarget(pod podItem, cfg MetricsConfig, scope autoapm.MetricsScope) (metricscommon.Target, bool) {
+	if !scope.Allows(pod.Metadata.Namespace, pod.Metadata.UID) {
+		return metricscommon.Target{}, false
+	}
 	ann := pod.Metadata.Annotations
 	if !annotationBool(ann["prometheus.io/scrape"]) {
 		return metricscommon.Target{}, false

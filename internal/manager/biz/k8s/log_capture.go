@@ -50,7 +50,7 @@ func (u *Usecase) LogPathsForEdge(ctx context.Context, edgeID uint64) ([]string,
 				continue
 			}
 			for _, rule := range spec.Kubernetes.Rules {
-				if rule.WorkloadName == "" || !podMatchesLogRule(pod, rule, owners) {
+				if rule.WorkloadName == "" || !podMatchesCaptureRule(pod, rule, owners) {
 					continue
 				}
 				// Inventory is external input; never allow glob/path injection.
@@ -69,7 +69,7 @@ func (u *Usecase) LogPathsForEdge(ctx context.Context, edgeID uint64) ([]string,
 	return out, true, nil
 }
 
-func podMatchesLogRule(pod *model.Pod, rule autoapm.KubernetesRule, owners map[string]*model.Workload) bool {
+func podMatchesCaptureRule(pod *model.Pod, rule autoapm.KubernetesRule, owners map[string]*model.Workload) bool {
 	if pod.Namespace != rule.Namespace {
 		return false
 	}

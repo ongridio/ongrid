@@ -14,6 +14,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/ongridio/ongrid/internal/edgeagent/plugins/metricscommon"
+	"github.com/ongridio/ongrid/internal/pkg/autoapm"
 	pkgpromwrite "github.com/ongridio/ongrid/internal/pkg/promwrite"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
@@ -32,6 +33,7 @@ type RemoteWriteScraperConfig struct {
 	ClusterID        uint64
 	Endpoint         string
 	DiscoverApps     bool
+	AppMetricsScope  func(context.Context) (autoapm.MetricsScope, error)
 	Interval         time.Duration
 	Timeout          time.Duration
 	PushTimeout      time.Duration
@@ -196,6 +198,14 @@ func (s *RemoteWriteScraper) targets(ctx context.Context) ([]metricscommon.Targe
 	if !s.cfg.DiscoverApps {
 		return targets, true
 	}
+	if s.cfg.AppMetricsScope == nil {
+		return targets, true
+	}
+	scope, err := s.cfg.AppMetricsScope(ctx)
+	if err != nil {
+		s.log.Warn("k8s app metrics scope unavailable", slog.Any("err", err))
+		return targets, false
+	}
 	if s.api == nil {
 		s.log.Warn("k8s app metrics discovery client is unavailable")
 		return targets, false
@@ -214,7 +224,7 @@ func (s *RemoteWriteScraper) targets(ctx context.Context) ([]metricscommon.Targe
 	}
 	discovered := 0
 	for _, pod := range pods {
-		target, ok := appMetricsTarget(pod, appCfg)
+		target, ok := appMetricsTarget(pod, appCfg, scope)
 		if !ok {
 			continue
 		}

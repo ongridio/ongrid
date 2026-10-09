@@ -135,6 +135,8 @@ grep -q 'automountServiceAccountToken: true' "$tmp_dir/scraper.yaml"
 grep -q 'k8s-app-metrics-discovery: "true"' "$tmp_dir/default.yaml"
 grep -q 'verbs: \["list", "watch"\]' "$tmp_dir/default.yaml"
 grep -q 'mountPath: /var/lib/ongrid-edge/plugins' "$tmp_dir/scraper.yaml"
+grep -q 'key: telemetry-app-metrics-scope' "$tmp_dir/scraper.yaml"
+grep -q 'optional: true' "$tmp_dir/scraper.yaml"
 grep -q 'name: ONGRID_K8S_APP_METRICS_DISCOVERY' "$tmp_dir/scraper.yaml"
 ! grep -q 'telemetry-access-key\|telemetry-secret-key\|telemetry-traces-endpoint\|telemetry-logs-endpoint' "$tmp_dir/scraper.yaml"
 

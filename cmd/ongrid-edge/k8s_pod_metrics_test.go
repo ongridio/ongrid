@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -77,5 +78,63 @@ func TestPodMetricsCollectorConfig(t *testing.T) {
 	}
 	if reflect.DeepEqual(first, second) {
 		t.Fatal("projected CA replacement did not trigger configuration reload")
+	}
+}
+
+func TestPodMetricsScopeFiltersBeforeScraping(t *testing.T) {
+	dir := t.TempDir()
+	for name, value := range map[string]string{
+		"telemetry-cluster-id": "7", "telemetry-remote-write-endpoint": "http://manager.example/api/v1/write",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(value), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fetcher := &podMetricsFetcher{dir: dir}
+	for _, tc := range []struct {
+		name, scope string
+		allowed     []string
+	}{
+		{"old controller", "", nil},
+		{"namespace", `{"namespaces":["shop"]}`, []string{"shop;uid-one", "shop;future-uid"}},
+		{"workload", `{"pod_uids":["uid-one"]}`, []string{"shop;uid-one"}},
+		{"mixed", `{"namespaces":["shop"],"pod_uids":["uid-other"]}`, []string{"shop;uid-one", "shop;future-uid", "other;uid-other"}},
+		{"clear", `{}`, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.scope != "" {
+				if err := os.WriteFile(filepath.Join(dir, "telemetry-app-metrics-scope"), []byte(tc.scope), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			configs, err := fetcher.Fetch(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			config := configs[podMetricsPlugin].Spec["collector"].(map[string]interface{})
+			scrape := config["receivers"].(map[string]interface{})["prometheus"].(map[string]interface{})["config"].(map[string]interface{})["scrape_configs"].([]interface{})[0].(map[string]interface{})
+			rule := scrape["relabel_configs"].([]interface{})[0].(map[string]interface{})
+			if rule["action"] != "keep" || !reflect.DeepEqual(rule["source_labels"], []string{"__meta_kubernetes_namespace", "__meta_kubernetes_pod_uid"}) {
+				t.Fatal("scope must filter target metadata before scraping")
+			}
+			pattern := regexp.MustCompile("^(?:" + rule["regex"].(string) + ")$")
+			for _, target := range []string{"shop;uid-one", "shop;future-uid", "other;uid-other", "shopping;uid-one-other"} {
+				want := false
+				for _, allowed := range tc.allowed {
+					want = want || target == allowed
+				}
+				if pattern.MatchString(target) != want {
+					t.Errorf("target %q: allowed=%v, want %v", target, pattern.MatchString(target), want)
+				}
+			}
+		})
+	}
+	for _, invalid := range []string{`{"namespaces":[".*"]}`, `{"pod_uids":[""]}`, `{"unknown":true}`, `{} {}`} {
+		if err := os.WriteFile(filepath.Join(dir, "telemetry-app-metrics-scope"), []byte(invalid), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := fetcher.Fetch(context.Background()); err == nil {
+			t.Fatalf("invalid scope accepted: %s", invalid)
+		}
 	}
 }

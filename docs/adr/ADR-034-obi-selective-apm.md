@@ -13,8 +13,17 @@ Scraper 保持单副本和 Recreate 更新；扩容前必须增加目标分片�
 KSM 保持原有采集路径；旧 controller 兼容模式继续使用已有抓取实现。
 
 新安装默认开启 Pod 注解发现，显式设置的旧版或新版 `appDiscovery.enabled=false`
-仍有效。Pod 注解是每个应用的采集声明，与 Auto APM 的工作负载规则独立。
-Scraper 只增加 Pod 的 list/watch 权限，不增加 Secret 读取权限。
+仍有效。Pod 注解是每个应用的采集声明，采集范围与 Auto APM 共用同一组
+Namespace/工作负载规则；未选择任何规则时不采集应用指标。Namespace 规则
+自动包含该 Namespace 的新 Pod，工作负载规则复用库存的真实 owner 链解析
+Pod UID，不使用 Pod 名称前缀猜测归属。KSM 不受应用范围限制。
+Manager 通过现有 telemetry-config 下发范围，Controller 同步到现有 Secret，
+Scraper 在抓取前按 Namespace/Pod UID 过滤。Controller 默认每分钟同步一次，
+随后还需等待 Kubernetes Secret 投影与 Scraper 的 10 秒配置检查；新增工作负载
+Pod 还需先完成库存同步。取消选择不是瞬时生效，历史指标不会删除。
+缺少范围的旧 Manager/Controller 不会使新版 Scraper 回退为全量采集；应先升级
+Manager 和 Controller，再升级 Scraper。已有配置读取失败时沿用最近有效配置。
+Scraper 只增加 Pod 的 list/watch 权限，范围通过卷投影读取，不增加 Secret API 读取权限。
 
 应用指标保留业务标签。Prometheus 的 `honor_labels=false` 将与目标身份冲突的
 应用标签保存在 `exported_*` 标签中；平台控制 `cluster_id`、`ongrid_source`，

@@ -14,6 +14,7 @@ import (
 
 	biz "github.com/ongridio/ongrid/internal/manager/biz/k8s"
 	model "github.com/ongridio/ongrid/internal/manager/model/k8s"
+	"github.com/ongridio/ongrid/internal/pkg/autoapm"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/tenantctx"
 )
@@ -812,27 +813,28 @@ type enrollResponse struct {
 }
 
 type telemetryConfigResponse struct {
-	ClusterNodeID          uint64 `json:"cluster_node_id"`
-	ClusterID              uint64 `json:"cluster_id"`
-	AccessKey              string `json:"access_key"`
-	SecretKey              string `json:"secret_key"`
-	ManagerPublicURL       string `json:"manager_public_url,omitempty"`
-	TracesEndpoint         string `json:"traces_endpoint,omitempty"`
-	TracesAuthMode         string `json:"traces_auth_mode,omitempty"`
-	TracesBasicUser        string `json:"traces_basic_user,omitempty"`
-	TracesBasicPass        string `json:"traces_basic_pass,omitempty"`
-	TracesTLSInsecure      bool   `json:"traces_tls_insecure,omitempty"`
-	LogsEndpoint           string `json:"logs_endpoint,omitempty"`
-	LogsAuthMode           string `json:"logs_auth_mode,omitempty"`
-	LogsBasicUser          string `json:"logs_basic_user,omitempty"`
-	LogsBasicPass          string `json:"logs_basic_pass,omitempty"`
-	LogsTLSInsecure        bool   `json:"logs_tls_insecure,omitempty"`
-	RemoteWriteEndpoint    string `json:"remote_write_endpoint,omitempty"`
-	RemoteWriteBearer      string `json:"remote_write_bearer,omitempty"`
-	RemoteWriteBasicUser   string `json:"remote_write_basic_user,omitempty"`
-	RemoteWriteBasicPass   string `json:"remote_write_basic_pass,omitempty"`
-	RemoteWriteTLSInsecure bool   `json:"remote_write_tls_insecure,omitempty"`
-	RemoteWriteTLSCAPEM    string `json:"remote_write_tls_ca_pem,omitempty"`
+	AppMetricsScope        autoapm.MetricsScope `json:"app_metrics_scope"`
+	ClusterNodeID          uint64               `json:"cluster_node_id"`
+	ClusterID              uint64               `json:"cluster_id"`
+	AccessKey              string               `json:"access_key"`
+	SecretKey              string               `json:"secret_key"`
+	ManagerPublicURL       string               `json:"manager_public_url,omitempty"`
+	TracesEndpoint         string               `json:"traces_endpoint,omitempty"`
+	TracesAuthMode         string               `json:"traces_auth_mode,omitempty"`
+	TracesBasicUser        string               `json:"traces_basic_user,omitempty"`
+	TracesBasicPass        string               `json:"traces_basic_pass,omitempty"`
+	TracesTLSInsecure      bool                 `json:"traces_tls_insecure,omitempty"`
+	LogsEndpoint           string               `json:"logs_endpoint,omitempty"`
+	LogsAuthMode           string               `json:"logs_auth_mode,omitempty"`
+	LogsBasicUser          string               `json:"logs_basic_user,omitempty"`
+	LogsBasicPass          string               `json:"logs_basic_pass,omitempty"`
+	LogsTLSInsecure        bool                 `json:"logs_tls_insecure,omitempty"`
+	RemoteWriteEndpoint    string               `json:"remote_write_endpoint,omitempty"`
+	RemoteWriteBearer      string               `json:"remote_write_bearer,omitempty"`
+	RemoteWriteBasicUser   string               `json:"remote_write_basic_user,omitempty"`
+	RemoteWriteBasicPass   string               `json:"remote_write_basic_pass,omitempty"`
+	RemoteWriteTLSInsecure bool                 `json:"remote_write_tls_insecure,omitempty"`
+	RemoteWriteTLSCAPEM    string               `json:"remote_write_tls_ca_pem,omitempty"`
 }
 
 func telemetryConfigDTO(in *biz.TelemetryConfig) *telemetryConfigResponse {
@@ -840,6 +842,7 @@ func telemetryConfigDTO(in *biz.TelemetryConfig) *telemetryConfigResponse {
 		return nil
 	}
 	return &telemetryConfigResponse{
+		AppMetricsScope:        in.AppMetricsScope,
 		ClusterNodeID:          in.ClusterNodeID,
 		ClusterID:              in.ClusterID,
 		AccessKey:              in.AccessKey,

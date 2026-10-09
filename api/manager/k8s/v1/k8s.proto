@@ -430,4 +430,11 @@ message KubernetesTelemetryConfig {
     bool remote_write_tls_insecure = 19;
     string remote_write_tls_ca_pem = 20;
     uint64 cluster_node_id = 21;
+    KubernetesAppMetricsScope app_metrics_scope = 22;
+}
+
+// Resolved from the same namespace/workload rules as Auto APM. Empty means none.
+message KubernetesAppMetricsScope {
+    repeated string namespaces = 1;
+    repeated string pod_uids = 2;
 }

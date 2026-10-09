@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ongridio/ongrid/internal/edgeagent/plugins/metricscommon"
+	"github.com/ongridio/ongrid/internal/pkg/autoapm"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -512,6 +513,9 @@ demo_requests_total{instance="pod-ip",pod_uid="app-defined"} 3
 			Timeout:      time.Second,
 			SampleLimit:  20,
 			DiscoverApps: true,
+			AppMetricsScope: func(context.Context) (autoapm.MetricsScope, error) {
+				return autoapm.MetricsScope{Namespaces: []string{"default"}}, nil
+			},
 		},
 		log: slog.Default(),
 		api: &apiClient{baseURL: srv.URL, token: "tok", http: srv.Client()},
@@ -520,6 +524,13 @@ demo_requests_total{instance="pod-ip",pod_uid="app-defined"} 3
 	pusher.discoverAndPushAppMetrics(context.Background(), 41)
 	if metricsHits != 1 {
 		t.Fatalf("metricsHits = %d, want 1", metricsHits)
+	}
+	pusher.cfg.AppMetricsScope = func(context.Context) (autoapm.MetricsScope, error) { return autoapm.MetricsScope{}, nil }
+	pusher.discoverAndPushAppMetrics(context.Background(), 41)
+	pusher.cfg.AppMetricsScope = nil
+	pusher.discoverAndPushAppMetrics(context.Background(), 41)
+	if metricsHits != 1 {
+		t.Fatal("empty or missing scope still scraped application metrics")
 	}
 	if len(fc.requests) != 1 {
 		t.Fatalf("app metric push requests = %d, want data and up in one batch", len(fc.requests))
@@ -667,7 +678,7 @@ func TestAppMetricsTargetValidation(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pod := podItem{Metadata: objectMeta{Name: "api", Namespace: "default", Annotations: map[string]string{"prometheus.io/scrape": "true", "prometheus.io/port": tc.port, "prometheus.io/scheme": tc.scheme, "prometheus.io/path": tc.path}}, Status: podStatus{PodIP: "fd00::1", Phase: tc.phase}}
-			target, ok := appMetricsTarget(pod, MetricsConfig{})
+			target, ok := appMetricsTarget(pod, MetricsConfig{}, autoapm.MetricsScope{Namespaces: []string{"default"}})
 			if ok != (tc.want != "") || target.URL != tc.want {
 				t.Fatalf("target %q, accepted=%v; want %q", target.URL, ok, tc.want)
 			}

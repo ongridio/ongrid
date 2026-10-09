@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ongridio/ongrid/internal/pkg/autoapm"
 	"github.com/ongridio/ongrid/internal/pkg/config"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
@@ -110,6 +111,7 @@ func TestK8sCredentialFileRejectsDifferentNode(t *testing.T) {
 
 func TestTelemetrySecretDataContainsOnlyPublishedDataPlaneFields(t *testing.T) {
 	in := k8sTelemetryConfig{
+		AppMetricsScope:        autoapm.MetricsScope{Namespaces: []string{"shop"}, PodUIDs: []string{"pod-one"}},
 		ClusterID:              7,
 		AccessKey:              "kt_access",
 		SecretKey:              "ks_secret",
@@ -128,6 +130,7 @@ func TestTelemetrySecretDataContainsOnlyPublishedDataPlaneFields(t *testing.T) {
 	}
 	got := telemetrySecretData(in)
 	wants := map[string]string{
+		"telemetry-app-metrics-scope":         `{"namespaces":["shop"],"pod_uids":["pod-one"]}`,
 		"telemetry-cluster-id":                "7",
 		"telemetry-access-key":                "kt_access",
 		"telemetry-secret-key":                "ks_secret",
@@ -158,6 +161,11 @@ func TestTelemetrySecretDataContainsOnlyPublishedDataPlaneFields(t *testing.T) {
 	in.ClusterNodeID = 132
 	if string(telemetrySecretData(in)["telemetry-cluster-node-id"]) != "132" {
 		t.Fatal("new Manager mapping was not projected")
+	}
+	in.AppMetricsScope = autoapm.MetricsScope{}
+	scope, err := autoapm.ParseMetricsScope(telemetrySecretData(in)["telemetry-app-metrics-scope"])
+	if err != nil || scope.Allows("shop", "pod-one") {
+		t.Fatal("cleared selection retained an old scope")
 	}
 }
 

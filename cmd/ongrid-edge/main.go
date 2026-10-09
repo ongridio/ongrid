@@ -24,6 +24,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/ongridio/ongrid/internal/pkg/autoapm"
 	"github.com/ongridio/ongrid/internal/pkg/config"
 	"github.com/ongridio/ongrid/internal/pkg/httpserver"
 	"github.com/ongridio/ongrid/internal/pkg/logger"
@@ -279,6 +280,9 @@ func main() {
 					BatchSampleLimit: parseIntEnv("ONGRID_K8S_METRICS_BATCH_SAMPLE_LIMIT", 10000),
 					BatchByteLimit:   parseIntEnv("ONGRID_K8S_METRICS_BATCH_BYTE_LIMIT", 4<<20),
 					DiscoverApps:     appMetricsDiscovery,
+					AppMetricsScope: func(ctx context.Context) (autoapm.MetricsScope, error) {
+						return loadK8sAppMetricsScope(ctx, k8sInfo)
+					},
 				},
 				log.With(slog.String("comp", "k8s-metrics")),
 				edgek8s.WithMetricsRegisterer(reg),
@@ -540,27 +544,28 @@ type k8sEnrollResponse struct {
 }
 
 type k8sTelemetryConfig struct {
-	ClusterNodeID          uint64 `json:"cluster_node_id"`
-	ClusterID              uint64 `json:"cluster_id"`
-	AccessKey              string `json:"access_key"`
-	SecretKey              string `json:"secret_key"`
-	ManagerPublicURL       string `json:"manager_public_url,omitempty"`
-	TracesEndpoint         string `json:"traces_endpoint,omitempty"`
-	TracesAuthMode         string `json:"traces_auth_mode,omitempty"`
-	TracesBasicUser        string `json:"traces_basic_user,omitempty"`
-	TracesBasicPass        string `json:"traces_basic_pass,omitempty"`
-	TracesTLSInsecure      bool   `json:"traces_tls_insecure,omitempty"`
-	LogsEndpoint           string `json:"logs_endpoint,omitempty"`
-	LogsAuthMode           string `json:"logs_auth_mode,omitempty"`
-	LogsBasicUser          string `json:"logs_basic_user,omitempty"`
-	LogsBasicPass          string `json:"logs_basic_pass,omitempty"`
-	LogsTLSInsecure        bool   `json:"logs_tls_insecure,omitempty"`
-	RemoteWriteEndpoint    string `json:"remote_write_endpoint,omitempty"`
-	RemoteWriteBearer      string `json:"remote_write_bearer,omitempty"`
-	RemoteWriteBasicUser   string `json:"remote_write_basic_user,omitempty"`
-	RemoteWriteBasicPass   string `json:"remote_write_basic_pass,omitempty"`
-	RemoteWriteTLSInsecure bool   `json:"remote_write_tls_insecure,omitempty"`
-	RemoteWriteTLSCAPEM    string `json:"remote_write_tls_ca_pem,omitempty"`
+	AppMetricsScope        autoapm.MetricsScope `json:"app_metrics_scope"`
+	ClusterNodeID          uint64               `json:"cluster_node_id"`
+	ClusterID              uint64               `json:"cluster_id"`
+	AccessKey              string               `json:"access_key"`
+	SecretKey              string               `json:"secret_key"`
+	ManagerPublicURL       string               `json:"manager_public_url,omitempty"`
+	TracesEndpoint         string               `json:"traces_endpoint,omitempty"`
+	TracesAuthMode         string               `json:"traces_auth_mode,omitempty"`
+	TracesBasicUser        string               `json:"traces_basic_user,omitempty"`
+	TracesBasicPass        string               `json:"traces_basic_pass,omitempty"`
+	TracesTLSInsecure      bool                 `json:"traces_tls_insecure,omitempty"`
+	LogsEndpoint           string               `json:"logs_endpoint,omitempty"`
+	LogsAuthMode           string               `json:"logs_auth_mode,omitempty"`
+	LogsBasicUser          string               `json:"logs_basic_user,omitempty"`
+	LogsBasicPass          string               `json:"logs_basic_pass,omitempty"`
+	LogsTLSInsecure        bool                 `json:"logs_tls_insecure,omitempty"`
+	RemoteWriteEndpoint    string               `json:"remote_write_endpoint,omitempty"`
+	RemoteWriteBearer      string               `json:"remote_write_bearer,omitempty"`
+	RemoteWriteBasicUser   string               `json:"remote_write_basic_user,omitempty"`
+	RemoteWriteBasicPass   string               `json:"remote_write_basic_pass,omitempty"`
+	RemoteWriteTLSInsecure bool                 `json:"remote_write_tls_insecure,omitempty"`
+	RemoteWriteTLSCAPEM    string               `json:"remote_write_tls_ca_pem,omitempty"`
 }
 
 func ensureK8sEnrollment(ctx context.Context, cfg *config.Config, log *slog.Logger) (*tunnel.KubernetesInfo, error) {

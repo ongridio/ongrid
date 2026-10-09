@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/ongridio/ongrid/internal/pkg/autoapm"
 	"github.com/ongridio/ongrid/internal/pkg/tenantctx"
 	"net/http"
 	"net/http/httptest"
@@ -89,6 +90,7 @@ func (s *telemetryRefreshService) RefreshTelemetryConfig(_ context.Context, cont
 
 func TestRefreshTelemetryConfigUsesAuthenticatedControllerIdentity(t *testing.T) {
 	svc := &telemetryRefreshService{out: &biz.TelemetryConfig{
+		AppMetricsScope:     autoapm.MetricsScope{Namespaces: []string{"shop"}, PodUIDs: []string{"pod-one"}},
 		ClusterID:           7,
 		AccessKey:           "kt_access",
 		SecretKey:           "ks_secret",
@@ -126,6 +128,9 @@ func TestRefreshTelemetryConfigUsesAuthenticatedControllerIdentity(t *testing.T)
 	if got.ClusterID != 7 || got.AccessKey != "kt_access" || got.SecretKey != "ks_secret" ||
 		got.ManagerPublicURL != "https://manager.example" {
 		t.Fatalf("response = %#v", got)
+	}
+	if !got.AppMetricsScope.Allows("shop", "future") || !got.AppMetricsScope.Allows("other", "pod-one") || got.AppMetricsScope.Allows("other", "pod-two") {
+		t.Fatalf("application metrics scope lost or widened: %+v", got.AppMetricsScope)
 	}
 	if got.TracesEndpoint != "https://tempo.example/v1/traces" || got.TracesAuthMode != "backend" ||
 		got.TracesBasicUser != "tempo-user" || got.TracesBasicPass != "tempo-pass" || !got.TracesTLSInsecure ||

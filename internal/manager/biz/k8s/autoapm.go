@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	model "github.com/ongridio/ongrid/internal/manager/model/k8s"
 	"github.com/ongridio/ongrid/internal/pkg/autoapm"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
@@ -28,13 +29,7 @@ func (u *Usecase) GetAutoAPM(ctx context.Context, clusterID uint64) (*AutoAPMCon
 	if err != nil {
 		return nil, err
 	}
-	raw := map[string]interface{}{}
-	if cluster.AutoAPMConfigJSON != "" {
-		if err := json.Unmarshal([]byte(cluster.AutoAPMConfigJSON), &raw); err != nil {
-			return nil, fmt.Errorf("read cluster capture settings: %w", err)
-		}
-	}
-	spec, err := autoapm.Parse(raw)
+	spec, err := clusterCaptureSpec(cluster)
 	if err != nil {
 		return nil, err
 	}
@@ -52,6 +47,16 @@ func (u *Usecase) GetAutoAPM(ctx context.Context, clusterID uint64) (*AutoAPMCon
 		}
 	}
 	return out, nil
+}
+
+func clusterCaptureSpec(cluster *model.Cluster) (autoapm.Spec, error) {
+	raw := map[string]interface{}{}
+	if cluster.AutoAPMConfigJSON != "" {
+		if err := json.Unmarshal([]byte(cluster.AutoAPMConfigJSON), &raw); err != nil {
+			return autoapm.Spec{}, fmt.Errorf("read cluster capture settings: %w", err)
+		}
+	}
+	return autoapm.Parse(raw)
 }
 
 func (u *Usecase) SetAutoAPM(ctx context.Context, clusterID uint64, raw map[string]interface{}) (*AutoAPMConfig, error) {
