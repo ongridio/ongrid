@@ -4356,7 +4356,7 @@ function TracesSpecForm({
           </Label>
         </div>
         <div className="mt-1 text-[11px] text-zinc-500">
-          {tr('监听 localhost / docker bridge；应用 SDK 直接 export 到 edge:4317。', 'Listens on localhost / docker bridge; app SDKs export directly to edge:4317.')}
+          {tr('普通 Linux 设备默认监听 localhost 和本机 Docker bridge 地址；容器向所在 bridge 的网关地址上报。显式配置 grpc_endpoint / http_endpoint 时对应协议使用指定地址。', 'Ordinary Linux hosts listen on localhost and local Docker bridge addresses by default; containers export to their bridge gateway address. Explicit grpc_endpoint / http_endpoint settings override the corresponding protocol.')}
         </div>
       </div>
     </div>

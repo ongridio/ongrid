@@ -12,6 +12,10 @@
 
 先启用本机 Edge 的 traces 和 metrics 插件，或在 Kubernetes 安装 Telemetry Gateway。主机的 Collector 在 `127.0.0.1:9464` 暴露应用指标，由 metrics 插件经认证隧道上报；显式关闭的插件不会被自动开启。OTLP 基础地址可用 `http://127.0.0.1:4318`；Docker 使用容器可达地址，K8s 使用网关 Service 的实际 DNS。不要向业务应用分发 Manager/Edge 管理密钥。
 
+普通 Linux 设备的 traces 插件默认保留 localhost 监听，并通过本机 Docker Unix socket 的只读网络查询，为所有 Docker bridge 接口上的 IPv4/IPv6 单播地址增加 `4317/4318` 监听。容器填写所在网络的实际网关地址，例如 `http://172.17.0.1:4318`，不要填写容器自己的 localhost。网络增删随 Edge 的配置检查更新，通常不超过 60 秒；地址变化会重启 Collector，期间可能短暂中断上报。Docker 未安装或查询失败时只保留 localhost，失败会记录日志，不会退回全网卡监听；不自动增加 Docker socket 权限。支持 `DOCKER_HOST=unix:///path/to/docker.sock` 指定本机 socket。
+
+显式设置 Spec 的 `grpc_endpoint` / `http_endpoint` 会覆盖对应协议的自动 bridge 监听；将两项设置为 `127.0.0.1:4317` / `127.0.0.1:4318` 可恢复原来的仅 localhost 行为。Kubernetes gateway 和 OBI 内部 Collector 不走此发现路径。bridge 监听不提供来源鉴权；有跨网段路由或不可信容器时，使用防火墙限制访问。Docker Desktop 的 bridge 位于 VM 内，不适用此宿主机发现方式。
+
 在「接入管理」填写语言、目标地址、服务、业务命名空间和环境，复制配置。应用身份为 `(environment, service.namespace, service.name)`；service.namespace 不等同于 K8s namespace。缺失属性会进入“未设置”。接收端将旧 deployment.environment 补为 deployment.environment.name，已有规范属性优先。身份保持稳定，路由使用 `/orders/{id}`，不要使用带参数的原始 URL、用户 ID 或 SQL 作为指标标签。
 
 多副本部署须在 `OTEL_RESOURCE_ATTRIBUTES` 中额外设置每个实例唯一的 `service.instance.id`，例如由部署系统注入 Pod UID。不要把同一个固定示例值复制到所有副本；仅有 `device_id` 只能关联设备，无法区分同机的多个应用实例。用实际部署清单与观测列表逐项核对接入覆盖。

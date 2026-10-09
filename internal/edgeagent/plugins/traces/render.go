@@ -16,10 +16,9 @@ import (
 
 // otelcolTemplate is the OTel Collector config we render per edge.
 //
-// Receivers: OTLP gRPC + HTTP, bound to docker bridge / localhost addresses
-// the application can reach. We intentionally do NOT bind 0.0.0.0 — the edge
-// is meant to ingest from local apps (host or sibling containers on the
-// docker bridge), not from the public internet.
+// Receivers: localhost plus locally discovered Docker bridge addresses on
+// ordinary Linux hosts. Explicit endpoints override discovery per protocol;
+// Kubernetes gateways keep their explicit wildcard listeners.
 //
 // Exporters: a single OTLP HTTP exporter pointing at the manager /v1/traces
 // endpoint. Use traces_endpoint, not endpoint: otlphttp.endpoint is a base URL
@@ -36,12 +35,18 @@ const otelcolTemplate = `# Rendered by ongrid-edge traces plugin.
 # DO NOT EDIT — regenerated from manager-pushed PluginConfig on every reconcile.
 
 receivers:
-  otlp:
+{{- range .Receivers }}
+  {{ .Name }}:
     protocols:
+{{- if .GRPC }}
       grpc:
-        endpoint: {{ .GRPCEndpoint }}
+        endpoint: {{ printf "%q" .GRPC }}
+{{- end }}
+{{- if .HTTP }}
       http:
-        endpoint: {{ .HTTPEndpoint }}
+        endpoint: {{ printf "%q" .HTTP }}
+{{- end }}
+{{- end }}
 
 processors:
 {{- if .K8sAttributesEnabled }}
@@ -278,18 +283,18 @@ service:
                 without_units: true
   pipelines:
     traces:
-      receivers: [otlp]
+      receivers: [{{ .ReceiverNames }}]
       processors: [{{ if .K8sAttributesEnabled }}k8sattributes, {{ end }}resource/device, {{ if .ServiceEnvironments }}transform/service_environment, {{ end }}{{ if .BoundedPipelines }}batch/traces{{ else }}batch{{ end }}]
       exporters: [otlphttp/manager]
 {{- if .LogsEnabled }}
     logs:
-      receivers: [otlp]
+      receivers: [{{ .ReceiverNames }}]
       processors: [{{ if .K8sAttributesEnabled }}k8sattributes, {{ end }}resource/device, resource/loki_labels, {{ if .BoundedPipelines }}batch/logs{{ else }}batch{{ end }}]
       exporters: [otlphttp/loki_manager]
 {{- end }}
 {{- if .MetricsEnabled }}
     metrics:
-      receivers: [otlp]
+      receivers: [{{ .ReceiverNames }}]
       processors: [{{ if .K8sAttributesEnabled }}k8sattributes, {{ end }}resource/device, {{ if .ServiceEnvironments }}transform/service_environment, {{ end }}transform/grpc_metrics, {{ if .BoundedPipelines }}batch/metrics{{ else }}batch{{ end }}]
       exporters: [{{ if .MetricsRemoteWriteEnabled }}prometheusremotewrite/manager{{ else }}prometheus/gateway{{ end }}]
 {{- end }}
@@ -331,6 +336,29 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 
 	grpcEP := stringOr(cfg.Spec, "grpc_endpoint", "127.0.0.1:4317")
 	httpEP := stringOr(cfg.Spec, "http_endpoint", "127.0.0.1:4318")
+	type receiver struct{ Name, GRPC, HTTP string }
+	receivers := []receiver{{Name: "otlp", GRPC: grpcEP, HTTP: httpEP}}
+	receiverNames := []string{"otlp"}
+	bridgeAddresses, _ := cfg.Spec[dockerBridgeAddressesKey].([]string)
+	defaultGRPC := stringOr(cfg.Spec, "grpc_endpoint", "") == ""
+	defaultHTTP := stringOr(cfg.Spec, "http_endpoint", "") == ""
+	if defaultGRPC || defaultHTTP {
+		for i, address := range bridgeAddresses {
+			ip := net.ParseIP(address)
+			if ip == nil || !ip.IsGlobalUnicast() {
+				return nil, fmt.Errorf("traces plugin: invalid Docker bridge address %q", address)
+			}
+			r := receiver{Name: fmt.Sprintf("otlp/docker_%d", i)}
+			if defaultGRPC {
+				r.GRPC = net.JoinHostPort(ip.String(), "4317")
+			}
+			if defaultHTTP {
+				r.HTTP = net.JoinHostPort(ip.String(), "4318")
+			}
+			receivers = append(receivers, r)
+			receiverNames = append(receiverNames, r.Name)
+		}
+	}
 	extra := stringMap(cfg.Spec, "extra_attrs")
 	k8sAttributes := boolSpec(cfg.Spec, "enable_k8sattributes")
 	logsEnabled := boolSpec(cfg.Spec, "enable_logs")
@@ -425,8 +453,8 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 		"HealthEndpoint":             stringOr(cfg.Spec, "health_endpoint", "127.0.0.1:13133"),
 		"EdgeID":                     cfg.EdgeID,
 		"EmitDeviceID":               !omitDeviceID,
-		"GRPCEndpoint":               grpcEP,
-		"HTTPEndpoint":               httpEP,
+		"Receivers":                  receivers,
+		"ReceiverNames":              strings.Join(receiverNames, ", "),
 		"ExtraAttrs":                 extra,
 		"Endpoint":                   strings.TrimRight(cfg.Endpoint, "/"),
 		"AuthHeader":                 authHeader,

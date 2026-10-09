@@ -10,7 +10,7 @@ Status: Accepted — 用户确认方案并授权实现，2026-09-07。
 
 应用复用官方 OTel SDK/Agent，HTTP 采用 `http.server.request.duration`（秒），RPC 采用 `rpc.server.call.duration`（秒）。兼容模式分别查询旧 `http.server.duration` / `rpc.server.duration`（毫秒；旧 RPC 错误口径限 gRPC），整次查询只选一个指标版本，避免双发重复计数。切换兼容模式是显式操作，不对不同桶边界或单位的直方图混合求分位数。错误使用 error.type，兼容 HTTP 5xx 和 gRPC 非 OK 状态码，原始序列先并集去重再聚合。要求资源属性进入 Prometheus 标签，接口使用路由模板或 RPC 完整方法名。
 
-主机复用 traces 插件的 OTLP 接收器和本机 Prometheus exporter，再由现有 metrics 插件通过已鉴权 tunnel 上报；Kubernetes 复用现有 Telemetry Gateway 的 Metrics remote_write。保持默认监听 loopback，不新增公开写入口或向业务应用下发管理凭据。
+主机复用 traces 插件的 OTLP 接收器和本机 Prometheus exporter，再由现有 metrics 插件通过已鉴权 tunnel 上报；Kubernetes 复用现有 Telemetry Gateway 的 Metrics remote_write。2026-10-09 修订：普通 Linux 设备默认监听 loopback 和本机 Docker bridge 地址，显式监听地址配置优先；不默认绑定全网卡，也不向业务应用下发管理凭据。
 
 ## 理由与影响
 
