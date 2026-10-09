@@ -5,8 +5,8 @@
 //     (or POST /v1/knowledge/docs). We embed and upsert into qdrant.
 //  2. Repo sync: user registers a git URL; Sync() shells `git clone
 //     --no-single-branch` (or full-history fetch on existing clones) into
-//     /var/lib/ongrid/repos/<id>, walks the tree for .md / .txt /
-//     .rst / .yaml / .yml / .toml / .json files, embeds each, replaces
+//     /var/lib/ongrid/repos/<id>, walks the tree for .md / .markdown /
+//     .txt / .rst files, embeds each, replaces
 //     the qdrant point set for that repo.
 //
 // The repo registrations themselves live in MySQL (knowledge_repos —
@@ -282,18 +282,9 @@ func (u *Usecase) UploadDoc(ctx context.Context, in UploadDocInput) (*model.Doc,
 // docs, and a vault re-sync never touches these (its delete is scoped to
 // source_type=vault). Returns the logical doc (head chunk id).
 func (u *Usecase) ingestUpload(ctx context.Context, d model.Doc) (*model.Doc, error) {
-	parts := make([]string, 0)
-
-	ext := strings.ToLower(filepath.Ext(d.URL))
-	switch ext {
-	case ".md", ".markdown", ".docx", ".pdf":
-		chunks, err := splitMarkdown(ctx, d.Content)
-		if err != nil {
-			return nil, fmt.Errorf("knowledge: split markdown: %w", err)
-		}
-		parts = chunks
-	default:
-		parts = splitForChunks(d.Content)
+	parts, err := splitKnowledgeContent(ctx, d.URL, d.Content)
+	if err != nil {
+		return nil, fmt.Errorf("knowledge: split %q: %w", d.URL, err)
 	}
 	if len(parts) == 0 {
 		return nil, fmt.Errorf("%w: empty file", errs.ErrInvalid)
@@ -1093,7 +1084,10 @@ func (u *Usecase) Sync(ctx context.Context, id uint64) (*model.Repository, error
 	now := time.Now().UTC()
 	chunks := make([]chunkRef, 0, len(files))
 	for i := range files {
-		parts := splitForChunks(files[i].Content)
+		parts, err := splitKnowledgeContent(ctx, files[i].URL, files[i].Content)
+		if err != nil {
+			return u.recordSyncFailure(ctx, repo, fmt.Errorf("split file %q: %w", files[i].URL, err))
+		}
 		for j, p := range parts {
 			// Chunk 0 prepends the title so the embedding picks up the
 			// "what is this doc" signal — same as the pre-chunking
@@ -1228,7 +1222,10 @@ func (u *Usecase) SyncBuiltinVault(ctx context.Context) (int, string, error) {
 	}
 	chunks := make([]chunkRef, 0, len(files))
 	for i := range files {
-		parts := splitForChunks(files[i].Content)
+		parts, err := splitKnowledgeContent(ctx, files[i].URL, files[i].Content)
+		if err != nil {
+			return 0, "", fmt.Errorf("knowledge: split vault file %q: %w", files[i].URL, err)
+		}
 		for j, p := range parts {
 			body := p
 			if j == 0 {
@@ -1725,9 +1722,10 @@ func isTransientGitErr(combinedOutput string) bool {
 // future "code repo" mode lands (HLD TBD), it'll widen the allow-list
 // behind an explicit kind=code flag.
 var indexableExts = map[string]bool{
-	".md":  true,
-	".txt": true,
-	".rst": true,
+	".md":       true,
+	".markdown": true,
+	".txt":      true,
+	".rst":      true,
 }
 
 // skipDirNames are directories that scanRepoFiles drops without
@@ -2062,6 +2060,20 @@ func vaultChunkPoint(url string, chunkIndex, chunkTotal int, vec []float32, d mo
 func docID(key string) uint64 {
 	sum := md5.Sum([]byte(key))
 	return binary.BigEndian.Uint64(sum[:8])
+}
+
+// splitKnowledgeContent keeps document chunking consistent across upload,
+// repository, and built-in vault ingestion. DOCX/PDF content has already been
+// converted to Markdown by the upload extractor, so it uses the same structured
+// splitter as native Markdown files. Plain text and reStructuredText retain the
+// fixed-window behavior because they do not have the same heading contract.
+func splitKnowledgeContent(ctx context.Context, filename, content string) ([]string, error) {
+	switch strings.ToLower(filepath.Ext(filename)) {
+	case ".md", ".markdown", ".docx", ".pdf":
+		return splitMarkdown(ctx, content)
+	default:
+		return splitForChunks(content), nil
+	}
 }
 
 // splitForChunks splits a body into chunkChars-sized overlapping pieces.
