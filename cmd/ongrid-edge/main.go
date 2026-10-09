@@ -394,7 +394,13 @@ func main() {
 		)
 		var pluginFetcher edgeplugins.ConfigFetcher = tunnelFetcher
 		if k8sInfo.Role == "" {
-			pluginFetcher = edgeplugintraces.WithDockerBridges(pluginFetcher, pluginLog)
+			for i, p := range registered {
+				if p.Name() == edgeplugintraces.Name {
+					bridges := edgeplugintraces.WithDockerBridges(pluginFetcher, p, pluginLog)
+					pluginFetcher, registered[i] = bridges, bridges
+					break
+				}
+			}
 		}
 		supervisor := edgeplugins.NewSupervisor(edgeplugins.SupervisorOpts{
 			Fetcher: pluginFetcher,

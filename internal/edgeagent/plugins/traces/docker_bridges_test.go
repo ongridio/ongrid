@@ -162,7 +162,7 @@ func TestDockerBridgeFetcherRefreshesWithoutMutatingSnapshot(t *testing.T) {
 	base := &bridgeTestFetcher{configs: map[string]plugins.PluginConfig{Name: {Enabled: true, Spec: spec}}}
 	addresses := []string{"172.17.0.1"}
 	var discoveryErr error
-	fetcher := &dockerBridgeFetcher{ConfigFetcher: base, log: slog.New(slog.NewTextHandler(io.Discard, nil)), discover: func(context.Context) ([]string, error) { return addresses, discoveryErr }}
+	fetcher := &dockerBridgeRuntime{ConfigFetcher: base, log: slog.New(slog.NewTextHandler(io.Discard, nil)), discover: func(context.Context) ([]string, error) { return addresses, discoveryErr }, probe: func(context.Context, string) error { return nil }}
 	first, err := fetcher.Fetch(t.Context())
 	if err != nil || !reflect.DeepEqual(first[Name].Spec[dockerBridgeAddressesKey], addresses) {
 		t.Fatalf("first Fetch: %v, %v", first, err)
@@ -195,7 +195,7 @@ func TestDockerBridgeFetcherSkipsDisabledAndExplicitReceivers(t *testing.T) {
 		{Enabled: true, Spec: map[string]interface{}{"grpc_endpoint": "127.0.0.1:14317", "http_endpoint": "127.0.0.1:14318"}},
 	} {
 		base := &bridgeTestFetcher{configs: map[string]plugins.PluginConfig{Name: cfg}}
-		fetcher := &dockerBridgeFetcher{ConfigFetcher: base, discover: func(context.Context) ([]string, error) { t.Fatal("unexpected discovery"); return nil, nil }}
+		fetcher := &dockerBridgeRuntime{ConfigFetcher: base, discover: func(context.Context) ([]string, error) { t.Fatal("unexpected discovery"); return nil, nil }}
 		if _, err := fetcher.Fetch(t.Context()); err != nil {
 			t.Fatal(err)
 		}

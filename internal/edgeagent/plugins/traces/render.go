@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"text/template"
@@ -340,6 +341,7 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 	receivers := []receiver{{Name: "otlp", GRPC: grpcEP, HTTP: httpEP}}
 	receiverNames := []string{"otlp"}
 	bridgeAddresses, _ := cfg.Spec[dockerBridgeAddressesKey].([]string)
+	blockedEndpoints, _ := cfg.Spec[dockerBridgeBlockedKey].([]string)
 	defaultGRPC := stringOr(cfg.Spec, "grpc_endpoint", "") == ""
 	defaultHTTP := stringOr(cfg.Spec, "http_endpoint", "") == ""
 	if defaultGRPC || defaultHTTP {
@@ -349,11 +351,14 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 				return nil, fmt.Errorf("traces plugin: invalid Docker bridge address %q", address)
 			}
 			r := receiver{Name: fmt.Sprintf("otlp/docker_%d", i)}
-			if defaultGRPC {
-				r.GRPC = net.JoinHostPort(ip.String(), "4317")
+			if endpoint := net.JoinHostPort(ip.String(), "4317"); defaultGRPC && !slices.Contains(blockedEndpoints, endpoint) {
+				r.GRPC = endpoint
 			}
-			if defaultHTTP {
-				r.HTTP = net.JoinHostPort(ip.String(), "4318")
+			if endpoint := net.JoinHostPort(ip.String(), "4318"); defaultHTTP && !slices.Contains(blockedEndpoints, endpoint) {
+				r.HTTP = endpoint
+			}
+			if r.GRPC == "" && r.HTTP == "" {
+				continue
 			}
 			receivers = append(receivers, r)
 			receiverNames = append(receiverNames, r.Name)

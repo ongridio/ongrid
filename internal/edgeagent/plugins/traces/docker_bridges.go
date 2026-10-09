@@ -3,6 +3,7 @@ package traces
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -19,33 +20,52 @@ import (
 	"github.com/ongridio/ongrid/internal/edgeagent/plugins"
 )
 
-const dockerBridgeAddressesKey = "docker_bridge_addresses"
+const (
+	dockerBridgeAddressesKey = "docker_bridge_addresses"
+	dockerBridgeBlockedKey   = "docker_bridge_blocked_endpoints"
+	dockerBridgeRevisionKey  = "docker_bridge_revision"
+)
 
-type dockerBridgeFetcher struct {
+type dockerBridgeRuntime struct {
 	plugins.ConfigFetcher
+	plugins.Plugin
 	log      *slog.Logger
 	discover func(context.Context) ([]string, error)
+	probe    func(context.Context, string) error
+
+	// Lifecycle and fetch methods run serially on the supervisor's reconcile loop.
+	pending  plugins.PluginConfig
+	runCtx   context.Context
+	active   map[string]bool
+	revision uint64
 }
 
 // WithDockerBridges refreshes host-only listeners on the supervisor's normal
 // reconcile cycle. Kubernetes and OBI collectors use their own explicit endpoints.
-func WithDockerBridges(fetcher plugins.ConfigFetcher, log *slog.Logger) plugins.ConfigFetcher {
-	if runtime.GOOS != "linux" {
-		return fetcher
-	}
+// Register the returned value as both fetcher and traces plugin so occupied
+// Collector listeners are preserved and failed bridge starts can fall back.
+func WithDockerBridges(fetcher plugins.ConfigFetcher, plugin plugins.Plugin, log *slog.Logger) *dockerBridgeRuntime {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &dockerBridgeFetcher{ConfigFetcher: fetcher, log: log, discover: discoverDockerBridgeAddresses}
+	f := &dockerBridgeRuntime{ConfigFetcher: fetcher, Plugin: plugin, log: log, discover: discoverDockerBridgeAddresses, probe: probeDockerBridgePort}
+	if runtime.GOOS != "linux" {
+		f.discover = func(context.Context) ([]string, error) { return nil, nil }
+	}
+	return f
 }
 
-func (f *dockerBridgeFetcher) Fetch(ctx context.Context) (map[string]plugins.PluginConfig, error) {
+func (f *dockerBridgeRuntime) Fetch(ctx context.Context) (map[string]plugins.PluginConfig, error) {
 	configs, err := f.ConfigFetcher.Fetch(ctx)
 	if err != nil {
 		return nil, err
 	}
 	cfg, ok := configs[Name]
+	if f.Plugin != nil && f.Plugin.HealthSnapshot().State != plugins.StateRunning {
+		f.active = nil
+	}
 	if !ok || !cfg.Enabled {
+		f.active = nil
 		return configs, nil
 	}
 	// Never modify the fetcher's cached snapshot or accept bridge addresses
@@ -56,20 +76,117 @@ func (f *dockerBridgeFetcher) Fetch(ctx context.Context) (map[string]plugins.Plu
 		cfg.Spec = make(map[string]interface{})
 	}
 	delete(cfg.Spec, dockerBridgeAddressesKey)
+	delete(cfg.Spec, dockerBridgeBlockedKey)
+	delete(cfg.Spec, dockerBridgeRevisionKey)
+	if f.revision > 0 {
+		cfg.Spec[dockerBridgeRevisionKey] = f.revision
+	}
 	if stringOr(cfg.Spec, "grpc_endpoint", "") == "" || stringOr(cfg.Spec, "http_endpoint", "") == "" {
 		addresses, err := f.discover(ctx)
 		if err != nil {
 			f.log.Warn("Docker bridge discovery failed; keeping default receivers on localhost", slog.Any("err", err))
 		} else if len(addresses) > 0 {
 			cfg.Spec[dockerBridgeAddressesKey] = addresses
+			var blocked []string
+			for _, endpoint := range dockerBridgeEndpoints(cfg) {
+				if f.active[endpoint] {
+					continue
+				}
+				if err := f.probe(ctx, endpoint); err != nil {
+					f.log.Warn("Docker bridge receiver unavailable; skipping endpoint", slog.String("endpoint", endpoint), slog.Any("err", err))
+					blocked = append(blocked, endpoint)
+				}
+			}
+			if len(blocked) > 0 {
+				cfg.Spec[dockerBridgeBlockedKey] = blocked
+			}
 		}
 	}
 	configs[Name] = cfg
 	return configs, nil
 }
 
+func dockerBridgeEndpoints(cfg plugins.PluginConfig) []string {
+	addresses, _ := cfg.Spec[dockerBridgeAddressesKey].([]string)
+	blocked, _ := cfg.Spec[dockerBridgeBlockedKey].([]string)
+	var endpoints []string
+	for _, address := range addresses {
+		for _, protocol := range [][2]string{{"grpc_endpoint", "4317"}, {"http_endpoint", "4318"}} {
+			endpoint := net.JoinHostPort(address, protocol[1])
+			if stringOr(cfg.Spec, protocol[0], "") == "" && !slices.Contains(blocked, endpoint) {
+				endpoints = append(endpoints, endpoint)
+			}
+		}
+	}
+	return endpoints
+}
+
+func probeDockerBridgePort(ctx context.Context, endpoint string) error {
+	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", endpoint)
+	if err != nil {
+		return err
+	}
+	return listener.Close()
+}
+
+func (f *dockerBridgeRuntime) Configure(cfg plugins.PluginConfig) error {
+	if err := f.Plugin.Configure(cfg); err != nil {
+		return err
+	}
+	f.pending = cfg
+	return nil
+}
+
+func (f *dockerBridgeRuntime) Start(ctx context.Context) error {
+	f.runCtx = ctx
+	return f.Plugin.Start(ctx)
+}
+
+func (f *dockerBridgeRuntime) Stop(ctx context.Context) error {
+	f.active = nil
+	return f.Plugin.Stop(ctx)
+}
+
+func (f *dockerBridgeRuntime) WaitReady(ctx context.Context) error {
+	ready := f.Plugin.(plugins.ReadyPlugin)
+	if err := ready.WaitReady(ctx); err != nil {
+		f.active = nil
+		if ctx.Err() != nil || len(dockerBridgeEndpoints(f.pending)) == 0 {
+			return err
+		}
+		// A port can be taken after the probe. Restore loopback instead of crash-looping.
+		f.log.Warn("Collector bridge startup failed; retrying without automatic bridge receivers", slog.Any("err", err))
+		if stopErr := f.Stop(ctx); stopErr != nil {
+			return errors.Join(err, stopErr)
+		}
+		if ctx.Err() != nil {
+			return errors.Join(err, ctx.Err())
+		}
+		fallback := f.pending
+		fallback.Spec = maps.Clone(fallback.Spec)
+		delete(fallback.Spec, dockerBridgeAddressesKey)
+		delete(fallback.Spec, dockerBridgeBlockedKey)
+		if fallbackErr := f.Configure(fallback); fallbackErr != nil {
+			return errors.Join(err, fallbackErr)
+		}
+		if fallbackErr := f.Plugin.Start(f.runCtx); fallbackErr != nil {
+			return errors.Join(err, fallbackErr)
+		}
+		if fallbackErr := ready.WaitReady(ctx); fallbackErr != nil {
+			return errors.Join(err, fallbackErr)
+		}
+		// Make the next desired snapshot differ even if the conflict has already cleared.
+		f.revision++
+	}
+	f.active = make(map[string]bool)
+	for _, endpoint := range dockerBridgeEndpoints(f.pending) {
+		f.active[endpoint] = true
+	}
+	return nil
+}
+
 // Preserve acknowledgements for other plugins when wrapping the tunnel fetcher.
-func (f *dockerBridgeFetcher) ReportPluginConfigApplied(ctx context.Context, name string, cfg plugins.PluginConfig, applyErr error) error {
+func (f *dockerBridgeRuntime) ReportPluginConfigApplied(ctx context.Context, name string, cfg plugins.PluginConfig, applyErr error) error {
 	if reporter, ok := f.ConfigFetcher.(plugins.ConfigApplyReporter); ok {
 		return reporter.ReportPluginConfigApplied(ctx, name, cfg, applyErr)
 	}

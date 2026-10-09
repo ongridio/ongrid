@@ -16,6 +16,8 @@
 
 显式设置 Spec 的 `grpc_endpoint` / `http_endpoint` 会覆盖对应协议的自动 bridge 监听；将两项设置为 `127.0.0.1:4317` / `127.0.0.1:4318` 可恢复原来的仅 localhost 行为。Kubernetes gateway 和 OBI 内部 Collector 不走此发现路径。bridge 监听不提供来源鉴权；有跨网段路由或不可信容器时，使用防火墙限制访问。Docker Desktop 的 bridge 位于 VM 内，不适用此宿主机发现方式。
 
+新增 bridge 监听前会检查端口可用性。端口冲突时仅跳过该地址上的对应协议并记录告警，localhost 和其他可用监听继续接收；下一轮配置检查会重试被跳过的端口。如果检查后发生端口竞争导致 Collector 启动失败，会先退回保留显式配置的 localhost 默认接收器，再在后续检查中恢复可用的 bridge 监听。
+
 在「接入管理」填写语言、目标地址、服务、业务命名空间和环境，复制配置。应用身份为 `(environment, service.namespace, service.name)`；service.namespace 不等同于 K8s namespace。缺失属性会进入“未设置”。接收端将旧 deployment.environment 补为 deployment.environment.name，已有规范属性优先。身份保持稳定，路由使用 `/orders/{id}`，不要使用带参数的原始 URL、用户 ID 或 SQL 作为指标标签。
 
 多副本部署须在 `OTEL_RESOURCE_ATTRIBUTES` 中额外设置每个实例唯一的 `service.instance.id`，例如由部署系统注入 Pod UID。不要把同一个固定示例值复制到所有副本；仅有 `device_id` 只能关联设备，无法区分同机的多个应用实例。用实际部署清单与观测列表逐项核对接入覆盖。
