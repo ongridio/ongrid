@@ -8,6 +8,8 @@ import ApmPage from './Apm';
 beforeEach(() => server.use(
   http.get('/api/v1/system-settings', () => HttpResponse.json({ items: [], total: 0 })),
   http.get('/api/v1/edges', () => HttpResponse.json({ items: [], total: 0 })),
+  http.get('/api/v1/k8s/clusters', () => HttpResponse.json({ items: [], total: 0 })),
+  http.get('/api/v1/k8s/edge-attachments', () => HttpResponse.json({ data: { items: [], total: 0 } })),
 ));
 
 vi.mock('@/pages/DailyTools', () => ({ NativeFlamegraph: ({ error, loading }: { error: string; loading: boolean }) => <div>{error || (loading ? 'Loading profile' : 'Profile loaded')}</div> }));
@@ -228,7 +230,7 @@ it('queries historical profiles for the selected device, service and instance wi
   expect(link.searchParams.get('service_version')).toBe('v1');
 });
 
-it('scopes diagnostics and retries a partial protocol failure', async () => {
+it.each(['diagnostics', 'onboarding'])('scopes diagnostics and retries a partial protocol failure via %s', async (tab) => {
   const queries: URLSearchParams[] = [];
   let failRPC = true;
   server.use(http.get('/api/v1/apm/diagnostics', ({ request }) => {
@@ -241,7 +243,7 @@ it('scopes diagnostics and retries a partial protocol failure', async () => {
       { key: 'metric_freshness', status: 'observed', detail: 'prometheus_sample_at_window_end' },
     ], instances: [], trace_ids: [], sampled_traces: 0, last_metric_timestamp: 1789001940 } });
   }));
-  render(<MemoryRouter initialEntries={[`/apm/service?${scope}&tab=onboarding&service_version=v1&instance_id=orders-1`]}><ApmPage /></MemoryRouter>);
+  render(<MemoryRouter initialEntries={[`/apm/service?${scope}&tab=${tab}&service_version=v1&instance_id=orders-1`]}><ApmPage /></MemoryRouter>);
   await screen.findByText('未配置预期实例数，不能计算覆盖率。');
   expect(screen.getByText('信息不完整')).toBeInTheDocument();
   expect(screen.getByRole('alert')).toHaveTextContent('RPC backend unavailable');
@@ -255,20 +257,39 @@ it('scopes diagnostics and retries a partial protocol failure', async () => {
   await waitFor(() => expect(screen.getAllByText('未配置预期实例数，不能计算覆盖率。')).toHaveLength(2));
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 });
-it('gives discovery a selected top-level tab and hides metric time controls', async () => {
-  server.use(http.get('/api/v1/k8s/edge-attachments', () => HttpResponse.json({ data: { items: [], total: 0 } })));
-  render(<MemoryRouter initialEntries={['/apm?tab=discovery']}><ApmPage /></MemoryRouter>);
+it.each(['discovery', 'onboarding', 'diagnostics'])('opens Kubernetes discovery without setup guides or time controls via %s', async (tab) => {
+  render(<MemoryRouter initialEntries={[`/apm?tab=${tab}`]}><ApmPage /></MemoryRouter>);
   const tabs = within(screen.getByRole('tablist', { name: '服务视图' })).getAllByRole('tab');
-  expect(tabs.map(tab => tab.textContent)).toEqual(['服务列表', '服务地图', '服务发现', '接入指南']);
+  expect(tabs.map(tab => tab.textContent)).toEqual(['服务列表', '服务地图', '服务发现']);
   expect(screen.getByRole('tab', { name: '服务发现' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByRole('tab', { name: 'Kubernetes 集群' })).toHaveAttribute('aria-selected', 'true');
   expect(screen.queryByRole('button', { name: '时间范围' })).not.toBeInTheDocument();
-  expect(await screen.findByText('尚未接入设备')).toBeInTheDocument();
+  expect(await screen.findByText('暂无匹配的集群')).toBeInTheDocument();
 });
 
-it('lets legacy device discovery links navigate to the setup guide', async () => {
-  render(<MemoryRouter initialEntries={['/apm?tab=onboarding&capture_edge_id=67']}><ApmPage /></MemoryRouter>);
+it.each(['/apm?tab=onboarding&capture_edge_id=67', '/apm?tab=discovery&discovery_scope=hosts'])('preserves host discovery links: %s', async (url) => {
+  render(<MemoryRouter initialEntries={[url]}><ApmPage /></MemoryRouter>);
   expect(screen.getByRole('tab', { name: '服务发现' })).toHaveAttribute('aria-selected', 'true');
-  fireEvent.click(screen.getByRole('tab', { name: '接入指南' }));
-  expect(screen.getByRole('tab', { name: '接入指南' })).toHaveAttribute('aria-selected', 'true');
-  expect(screen.queryByRole('switch', { name: '全局自动发现' })).not.toBeInTheDocument();
+  expect(screen.getByRole('tab', { name: '普通设备' })).toHaveAttribute('aria-selected', 'true');
+  expect(await screen.findByText('尚未接入设备')).toBeInTheDocument();
+  expect(screen.queryByRole('tab', { name: '接入指南' })).not.toBeInTheDocument();
+});
+
+it('routes an empty service list to Kubernetes discovery', async () => {
+  server.use(http.get('/api/v1/apm/services', () => HttpResponse.json({ data: { items: [], total: 0, page: 1, page_size: 25 } })));
+  render(<MemoryRouter initialEntries={['/apm']}><ApmPage /></MemoryRouter>);
+  fireEvent.click(await screen.findByRole('button', { name: '查看服务发现' }));
+  expect(screen.getByRole('tab', { name: 'Kubernetes 集群' })).toHaveAttribute('aria-selected', 'true');
+  expect(await screen.findByText('暂无匹配的集群')).toBeInTheDocument();
+});
+
+it('keeps empty operation diagnostics scoped to the service', async () => {
+  server.use(
+    http.get('/api/v1/apm/operations', () => HttpResponse.json({ data: { items: [], total: 0, page: 1, page_size: 25 } })),
+    http.get('/api/v1/apm/diagnostics', () => HttpResponse.json({ data: { checks: [], instances: [], trace_ids: [], sampled_traces: 0 } })),
+  );
+  render(<MemoryRouter initialEntries={[`/apm/service?${scope}&tab=operations`]}><ApmPage /></MemoryRouter>);
+  fireEvent.click((await screen.findAllByRole('button', { name: '检查采集状态' }))[0]);
+  expect(await screen.findByRole('heading', { name: '采集诊断' })).toBeInTheDocument();
+  expect(screen.queryByRole('tab', { name: 'Kubernetes 集群' })).not.toBeInTheDocument();
 });

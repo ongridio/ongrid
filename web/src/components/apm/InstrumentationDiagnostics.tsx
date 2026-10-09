@@ -59,12 +59,12 @@ export function InstrumentationDiagnostics({ params, refresh }: { params: URLSea
   };
   return <Card>
     <div className="flex items-center justify-between gap-3">
-      <h2 className="text-sm font-medium">{tr('接入诊断', 'Instrumentation diagnostics')}</h2>
+      <h2 className="text-sm font-medium">{tr('采集诊断', 'Collection diagnostics')}</h2>
       <Button size="sm" variant="subtle" onClick={() => setRetry((value) => value + 1)}>{tr('重新检查', 'Check again')}</Button>
     </div>
     <p className="mt-1 text-xs text-zinc-500">{tr('按当前服务、筛选和时间范围检查。样本时间反映指标存储，不代表请求活跃度或完整接入。', 'Checks the current service, filters and time window. Sample timestamps describe stored metrics, not request activity or complete ingestion.')}</p>
     {!current ? <p role="status" className="py-6 text-sm text-zinc-500">{tr('正在检查接入…', 'Checking instrumentation…')}</p>
-      : <div className="mt-4 grid gap-6 lg:grid-cols-2">{current.items.map(({ protocol, data, error }) => <section key={protocol} aria-label={`${protocol.toUpperCase()} ${tr('接入诊断', 'instrumentation diagnostics')}`} className="min-w-0">
+      : <div className="mt-4 grid gap-6 lg:grid-cols-2">{current.items.map(({ protocol, data, error }) => <section key={protocol} aria-label={`${protocol.toUpperCase()} ${tr('采集诊断', 'collection diagnostics')}`} className="min-w-0">
         <h3 className="mb-2 text-sm font-medium">{protocol.toUpperCase()}</h3>
         {error ? <p role="alert" className="text-sm text-red-500">{error}</p> : data && <div className="divide-y divide-zinc-800">{data.checks.map((check) => <div key={check.key} className="py-2.5">
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs">

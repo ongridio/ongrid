@@ -10,8 +10,10 @@ import ApmPage from './Apm';
 beforeEach(() => server.use(
   http.get('/api/v1/system-settings', () => HttpResponse.json({ items: [], total: 0 })),
   http.get('/api/v1/edges', () => HttpResponse.json({ items: [], total: 0 })),
+  http.get('/api/v1/k8s/clusters', () => HttpResponse.json({ items: [], total: 0 })),
+  http.get('/api/v1/k8s/edge-attachments', () => HttpResponse.json({ data: { items: [], total: 0 } })),
+  http.get('/api/v1/topology/relations', () => HttpResponse.json({ items: [] })),
 ));
-import { Onboarding } from '@/components/apm/Onboarding';
 
 vi.mock('@/components/apm/Dependencies', () => ({ Dependencies: () => null }));
 vi.mock('recharts', () => ({
@@ -155,8 +157,8 @@ describe('Application performance', () => {
     expect(urls[0].searchParams.get('start')).toBe('2026-09-07T00:00:00Z');
     expect(screen.getByText('样本不足')).toBeInTheDocument();
     expect(screen.getByText('0.0004')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '接入管理' }));
-    expect(await screen.findByText('应用接入')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: '服务发现' }));
+    expect(await screen.findByText('暂无匹配的集群')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'orders' })).not.toBeInTheDocument();
   });
   it('labels sampled HTTP metrics in the list and overview and preserves the source in operation links', async () => {
@@ -220,7 +222,7 @@ describe('Application performance', () => {
       </MemoryRouter>,
     );
     await screen.findByRole('link', { name: 'consume' });
-    fireEvent.click(screen.getByRole('button', { name: '接入管理' }));
+    fireEvent.click(screen.getByRole('button', { name: '采集诊断' }));
     expect(screen.queryByLabelText('指标来源')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('指标格式')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('入口类型')).not.toBeInTheDocument();
@@ -764,7 +766,7 @@ describe('Application performance', () => {
     expect(traceURL.searchParams.get('q')).not.toContain('span.http');
     expect(traceURL.searchParams.get('q')).not.toContain('span.rpc');
   });
-  it('keeps instance queries independent and checks both protocols in onboarding', async () => {
+  it('keeps instance queries independent and checks both protocols in diagnostics', async () => {
     const protocols = new Set<string>();
     const shared = {
       instance_id: 'shared-instance',
@@ -802,39 +804,17 @@ describe('Application performance', () => {
     expect(screen.getByRole('heading', { name: '观测到的实例' })).toBeInTheDocument();
     expect(screen.getAllByText(/shared-instance/)).toHaveLength(1);
     expect([...protocols]).toEqual([]);
-    fireEvent.click(screen.getByRole('button', { name: '接入管理' }));
-    expect(await screen.findByRole('heading', { name: '接入诊断' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '采集诊断' }));
+    expect(await screen.findByRole('heading', { name: '采集诊断' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: '应用接入' })).not.toBeInTheDocument();
     await waitFor(() => expect([...protocols].sort()).toEqual(['http', 'rpc']));
-    fireEvent.click(screen.getByRole('tab', { name: '接入指南' }));
-    expect(await screen.findByRole('heading', { name: '应用接入' })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: '接入诊断' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('tab', { name: '接入诊断' }));
-    expect(await screen.findByRole('heading', { name: '接入诊断' })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: '应用接入' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: '接入指南' })).not.toBeInTheDocument();
   });
 });
 
 
-describe('Official language onboarding', () => {
+describe('Service resource scope', () => {
   beforeEach(() => server.use(http.get('/api/v1/devices', () => HttpResponse.json({ items: [] })), http.get('/api/v1/topology/nodes', () => HttpResponse.json({ items: [] })), http.get('/api/v1/apm/repository-binding', () => HttpResponse.json({ data: null })), http.get('/api/v1/traces/search', () => HttpResponse.json({ traces: [] }))));
-  it('provides nine languages and states metrics boundaries', async () => {
-    localStorage.setItem('ongrid-locale', 'zh-CN');
-    render(<Onboarding />);
-    for (const [label, command] of [
-      ['Java', 'java -javaagent:'], ['Node.js', 'node --require'], ['Python', 'opentelemetry-instrument'],
-      ['Go', 'official OTel Go SDK'], ['C# / .NET', 'dotnet App.dll'], ['PHP', 'php app.php'],
-      ['C++', './app'], ['Rust', './target/release/ongrid-apm-rust-example'], ['Ruby', 'bundle exec ruby app.rb'],
-    ]) {
-      await selectOption(screen.getByRole('combobox', { name: '语言' }), label);
-      expect(document.querySelector('pre')).toHaveTextContent(command);
-      expect(document.querySelector('pre')).toHaveTextContent('service.namespace=trade,deployment.environment.name=production');
-    }
-    expect(document.querySelector('pre')).toHaveTextContent('OTEL_METRICS_EXPORTER=none');
-    expect(screen.getByText(/官方指标 SDK 尚未稳定/)).toBeInTheDocument();
-    await selectOption(screen.getByRole('combobox', { name: '语言' }), 'PHP');
-    expect(screen.getByText(/长驻 worker/)).toBeInTheDocument();
-  });
   it('keeps resource and request queries scoped to the chosen version and instance', async () => {
     const requests: URL[] = [];
     const instances = ['1.0.0', '1.1.0-demo'].map((version, index) => ({instance_id: `pod-${index + 1}`, version, device_id: '', cluster_id: '', pod: ''}));
