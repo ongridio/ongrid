@@ -46,6 +46,7 @@ func TestRuntimePromQL(t *testing.T) {
 		inputs = append(inputs, map[string]any{"series": name + "{" + scope + extra + "}", "values": values})
 	}
 	add("go_memstats_alloc_bytes_total", "", "0 60 120 0 60 120")
+	add("go_memstats_alloc_bytes_total", `,ongrid_source="k8s:app-metrics"`, "0+60000x5")
 	add("go_gc_duration_seconds_sum", "", "0 0.6 1.2 0 0.6 1.2")
 	add("go_gc_duration_seconds_count", "", "0 6 12 0 6 12")
 	add("jvm_memory_used_bytes", `,jvm_memory_type="heap",jvm_memory_pool_name="eden"`, "10+0x5")

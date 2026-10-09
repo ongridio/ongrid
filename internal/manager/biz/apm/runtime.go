@@ -44,7 +44,7 @@ func runtimeExpression(q Query, window time.Duration) string {
 func runtimeClusterExpression(q Query, window time.Duration) string {
 	group := "service_instance_id,instance,service_version"
 	names := "go_goroutines|go_memstats_heap_alloc_bytes|jvm_thread_count|jvm_threads_live_threads|nodejs_eventloop_lag_seconds|go_memory_limit_bytes|go_memory_gc_goal_bytes|go_processor_limit|go_config_gogc_percent|nodejs_eventloop_utilization_ratio|nodejs_eventloop_delay_(min|max|mean|stddev|p50|p90|p99)_seconds"
-	scope := fmt.Sprintf(`deployment_environment_name=%q,service_namespace=%q`, *q.Environment, *q.ServiceNamespace)
+	scope := fmt.Sprintf(`ongrid_source!="k8s:app-metrics",deployment_environment_name=%q,service_namespace=%q`, *q.Environment, *q.ServiceNamespace)
 	if filters := q.instanceLabels(); len(filters) > 0 {
 		scope += "," + strings.Join(filters, ",")
 	}

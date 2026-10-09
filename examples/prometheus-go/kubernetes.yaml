@@ -1,0 +1,65 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: metrics-demo
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus-go
+  namespace: metrics-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus-go
+  template:
+    metadata:
+      labels:
+        app: prometheus-go
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: /metrics
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: prometheus-go
+          image: ongrid-prometheus-go:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+            # A second declared port tests deduplication of the annotated endpoint.
+            - name: second-test
+              containerPort: 8081
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          securityContext:
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus-go
+  namespace: metrics-demo
+spec:
+  selector:
+    app: prometheus-go
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -394,11 +395,12 @@ func appMetricsTarget(pod podItem, cfg MetricsConfig) (metricscommon.Target, boo
 		return metricscommon.Target{}, false
 	}
 	podIP := strings.TrimSpace(pod.Status.PodIP)
-	if podIP == "" {
+	if podIP == "" || pod.Status.Phase == "Succeeded" || pod.Status.Phase == "Failed" {
 		return metricscommon.Target{}, false
 	}
 	port := firstMetricString(strings.TrimSpace(ann["prometheus.io/port"]), firstContainerPort(pod))
-	if port == "" {
+	portNumber, err := strconv.Atoi(port)
+	if err != nil || portNumber < 1 || portNumber > 65535 {
 		return metricscommon.Target{}, false
 	}
 	scheme := strings.ToLower(firstMetricString(strings.TrimSpace(ann["prometheus.io/scheme"]), "http"))
@@ -434,17 +436,6 @@ func appMetricsTarget(pod podItem, cfg MetricsConfig) (metricscommon.Target, boo
 		ExtraLabels: labels,
 		SampleLimit: cfg.SampleLimit,
 		Kind:        "kubernetes-app",
-		LabelDrop: []string{
-			"uid",
-			"pod_uid",
-			"container_id",
-			"image_id",
-			"id",
-			"owner_uid",
-			"controller_revision_hash",
-			"instance",
-			"url",
-		},
 	}, true
 }
 

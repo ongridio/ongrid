@@ -147,7 +147,9 @@ func TestRemoteWriteScraperReadyTracksCompleteCycle(t *testing.T) {
 func TestRemoteWriteScraperDiscoversApplicationTargets(t *testing.T) {
 	metricsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-		_, _ = w.Write([]byte("app_requests_total{route=\"/ready\"} 3\n"))
+		_, _ = w.Write([]byte(`app_requests_total{route="/ready",id="one",instance="app",url="/business",cluster_id="spoofed",ongrid_source="spoofed"} 3
+app_requests_total{route="/ready",id="two",instance="app",url="/business"} 4
+`))
 	}))
 	defer metricsServer.Close()
 	metricsURL, err := url.Parse(metricsServer.URL)
@@ -196,18 +198,21 @@ func TestRemoteWriteScraperDiscoversApplicationTargets(t *testing.T) {
 		t.Fatal("application-only scrape cycle did not become ready")
 	}
 
+	seen := map[string]float64{}
 	for _, batch := range writer.batches {
 		for _, sample := range batch {
 			labels := remoteWriteLabelMap(sample.Labels)
 			if labels["__name__"] == "app_requests_total" {
-				if labels["ongrid_source"] != k8sAppMetricsSource || labels["namespace"] != "default" || labels["pod"] != "api" {
+				if labels["ongrid_source"] != k8sAppMetricsSource || labels["cluster_id"] != "7" || labels["namespace"] != "default" || labels["pod"] != "api" || labels["instance"] != "app" || labels["url"] != "/business" {
 					t.Fatalf("application labels = %#v", labels)
 				}
-				return
+				seen[labels["id"]] = sample.Value
 			}
 		}
 	}
-	t.Fatal("discovered application metric was not written")
+	if len(seen) != 2 || seen["one"] != 3 || seen["two"] != 4 {
+		t.Fatalf("business series collapsed: %#v", seen)
+	}
 }
 
 func TestRemoteWriteScraperKeepsCoreReadyWhenAppDiscoveryFails(t *testing.T) {

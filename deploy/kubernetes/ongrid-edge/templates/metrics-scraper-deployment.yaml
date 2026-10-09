@@ -143,10 +143,18 @@ spec:
             capabilities:
               drop: ["ALL"]
           volumeMounts:
+            {{- if $appDiscoveryEnabled }}
+            - name: pod-metrics-work
+              mountPath: /var/lib/ongrid-edge/plugins
+            {{- end }}
             - name: telemetry-credentials
               mountPath: /var/run/ongrid-telemetry
               readOnly: true
       volumes:
+        {{- if $appDiscoveryEnabled }}
+        - name: pod-metrics-work
+          emptyDir: {}
+        {{- end }}
         - name: telemetry-credentials
           secret:
             secretName: {{ include "ongrid-edge.telemetryCredentialSecretName" . }}

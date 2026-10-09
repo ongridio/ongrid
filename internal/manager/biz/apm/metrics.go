@@ -38,7 +38,8 @@ func (q Query) metricSelector(extra ...string) string {
 	if q.MetricSource == "tempo_spanmetrics" {
 		return q.selector(extra...)
 	}
-	labels := []string{`service_name!=""`}
+	// Raw Pod metrics retain their own semantics; do not add them to APM.
+	labels := []string{`service_name!=""`, `ongrid_source!="k8s:app-metrics"`}
 	if q.ServiceName != "" {
 		labels = append(labels, "service_name="+strconv.Quote(q.ServiceName))
 	}

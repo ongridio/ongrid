@@ -101,7 +101,7 @@ false
 {{- else if kindIs "bool" $legacyApp.enabled -}}
 {{- if $legacyApp.enabled -}}true{{- else -}}false{{- end -}}
 {{- else -}}
-false
+true
 {{- end -}}
 {{- end -}}
 

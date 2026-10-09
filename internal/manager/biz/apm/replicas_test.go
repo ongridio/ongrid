@@ -151,3 +151,13 @@ func TestAPMReplicaMetricsIntegration(t *testing.T) {
 		})
 	}
 }
+
+func TestAPMExcludesRawPodMetrics(t *testing.T) {
+	q := testQuery()
+	q.MetricSource = "application_metrics"
+	for _, expression := range []string{requestRate(q, 5*time.Minute, identityLabels), q.errorRate(5*time.Minute, identityLabels), runtimeExpression(q, 5*time.Minute)} {
+		if !strings.Contains(expression, `ongrid_source!="k8s:app-metrics"`) {
+			t.Fatalf("raw Pod metrics can enter APM: %s", expression)
+		}
+	}
+}

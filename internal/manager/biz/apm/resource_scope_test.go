@@ -107,6 +107,7 @@ func TestClusterMigrationPromQL(t *testing.T) {
 	inputs := []any{}
 	for _, tc := range []struct{ labels, values string }{
 		{`cluster_id="132",k8s_cluster_id="50"`, "0+60x5"},
+		{`cluster_id="132",k8s_cluster_id="50",ongrid_source="k8s:app-metrics"`, "0+60000x5"},
 		{`cluster_id="50"`, "0+120x5"},
 		{`cluster_id="50",k8s_cluster_id="75"`, "0+60000x5"},
 		{`cluster_id="132"`, "0+60000x5"},

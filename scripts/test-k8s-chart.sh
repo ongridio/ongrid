@@ -131,7 +131,10 @@ grep -q '# Source: ongrid-edge/templates/metrics-scraper-deployment.yaml' "$tmp_
 ! grep -q 'ONGRID_K8S_TELEMETRY_GATEWAY_ENABLED\|ONGRID_K8S_METRICS_ENDPOINT\|containerPort: 4317\|containerPort: 4318' "$tmp_dir/split-controller.yaml"
 grep -A1 'name: ONGRID_K8S_TELEMETRY_REQUIRED' "$tmp_dir/split-controller.yaml" | grep -q 'value: "true"'
 grep -q 'replicas: 1' "$tmp_dir/scraper.yaml"
-grep -q 'automountServiceAccountToken: false' "$tmp_dir/scraper.yaml"
+grep -q 'automountServiceAccountToken: true' "$tmp_dir/scraper.yaml"
+grep -q 'k8s-app-metrics-discovery: "true"' "$tmp_dir/default.yaml"
+grep -q 'verbs: \["list", "watch"\]' "$tmp_dir/default.yaml"
+grep -q 'mountPath: /var/lib/ongrid-edge/plugins' "$tmp_dir/scraper.yaml"
 grep -q 'name: ONGRID_K8S_APP_METRICS_DISCOVERY' "$tmp_dir/scraper.yaml"
 ! grep -q 'telemetry-access-key\|telemetry-secret-key\|telemetry-traces-endpoint\|telemetry-logs-endpoint' "$tmp_dir/scraper.yaml"
 
@@ -166,6 +169,7 @@ grep -q 'k8s-metrics-interval: "45s"' "$tmp_dir/explicit-new-metrics.yaml"
 helm template legacy-disabled "$chart_package" "${common_args[@]}" \
   --set kubeStateMetrics.enabled=false \
   --set controller.metrics.enabled=false \
+  --set controller.metrics.appDiscovery.enabled=false \
   >"$tmp_dir/legacy-disabled.yaml"
 ! grep -q '# Source: ongrid-edge/templates/metrics-scraper-deployment.yaml' "$tmp_dir/legacy-disabled.yaml"
 
@@ -178,6 +182,16 @@ grep -q 'k8s-metrics-endpoint: ""' "$tmp_dir/legacy-app-discovery.yaml"
 grep -q 'k8s-app-metrics-discovery: "true"' "$tmp_dir/legacy-app-discovery.yaml"
 grep -q 'automountServiceAccountToken: true' "$tmp_dir/legacy-app-scraper.yaml"
 grep -q 'ongrid-edge-metrics-scraper-discovery' "$tmp_dir/legacy-app-discovery.yaml"
+
+# Explicit new opt-out wins over the legacy switch and removes Pod API access.
+helm template app-discovery-disabled "$chart_package" "${common_args[@]}" \
+  --set controller.metrics.appDiscovery.enabled=true \
+  --set kubernetesMetrics.appDiscovery.enabled=false \
+  >"$tmp_dir/app-discovery-disabled.yaml"
+extract_source 'ongrid-edge/templates/metrics-scraper-deployment.yaml' "$tmp_dir/app-discovery-disabled.yaml" "$tmp_dir/app-discovery-disabled-scraper.yaml"
+grep -q 'k8s-app-metrics-discovery: "false"' "$tmp_dir/app-discovery-disabled.yaml"
+grep -q 'automountServiceAccountToken: false' "$tmp_dir/app-discovery-disabled-scraper.yaml"
+! grep -q 'ongrid-edge-metrics-scraper-discovery' "$tmp_dir/app-discovery-disabled.yaml"
 
 # A Scraper-only tuning change must restart the Scraper without needlessly
 # recycling the cluster-wide Controller or every node Agent.

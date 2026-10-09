@@ -103,26 +103,54 @@ func runK8sMetricsScraper(ctx context.Context, log *slog.Logger) error {
 		return fmt.Errorf("build k8s metrics remote_write client: %w", err)
 	}
 	registry := prom.NewRegistry()
-	scraper, err := edgek8s.NewRemoteWriteScraper(writer, edgek8s.RemoteWriteScraperConfig{
-		ClusterID:        config.clusterID,
-		Endpoint:         strings.TrimSpace(os.Getenv("ONGRID_K8S_METRICS_ENDPOINT")),
-		DiscoverApps:     parseBoolEnv("ONGRID_K8S_APP_METRICS_DISCOVERY", false),
-		Interval:         parseDurationEnv("ONGRID_K8S_METRICS_INTERVAL", 30*time.Second),
-		Timeout:          parseDurationEnv("ONGRID_K8S_METRICS_TIMEOUT", 15*time.Second),
-		PushTimeout:      pushTimeout,
-		SampleLimit:      parseIntEnv("ONGRID_K8S_METRICS_SAMPLE_LIMIT", 250000),
-		BatchSampleLimit: parseIntEnv("ONGRID_K8S_METRICS_BATCH_SAMPLE_LIMIT", 10000),
-		BatchByteLimit:   parseIntEnv("ONGRID_K8S_METRICS_BATCH_BYTE_LIMIT", 4<<20),
-		MaxRetries:       parseIntEnv("ONGRID_K8S_METRICS_MAX_RETRIES", 3),
-		RetryBackoff:     parseDurationEnv("ONGRID_K8S_METRICS_RETRY_BACKOFF", 500*time.Millisecond),
-	}, log.With(slog.String("comp", "k8s-metrics-scraper")), registry)
-	if err != nil {
-		return err
+	endpoint := strings.TrimSpace(os.Getenv("ONGRID_K8S_METRICS_ENDPOINT"))
+	discoverApps := parseBoolEnv("ONGRID_K8S_APP_METRICS_DISCOVERY", false)
+	if endpoint == "" && !discoverApps {
+		return errors.New("k8s metrics scraper requires an endpoint or Pod discovery")
+	}
+	var scraper *edgek8s.RemoteWriteScraper
+	if endpoint != "" {
+		scraper, err = edgek8s.NewRemoteWriteScraper(writer, edgek8s.RemoteWriteScraperConfig{
+			ClusterID:        config.clusterID,
+			Endpoint:         endpoint,
+			Interval:         parseDurationEnv("ONGRID_K8S_METRICS_INTERVAL", 30*time.Second),
+			Timeout:          parseDurationEnv("ONGRID_K8S_METRICS_TIMEOUT", 15*time.Second),
+			PushTimeout:      pushTimeout,
+			SampleLimit:      parseIntEnv("ONGRID_K8S_METRICS_SAMPLE_LIMIT", 250000),
+			BatchSampleLimit: parseIntEnv("ONGRID_K8S_METRICS_BATCH_SAMPLE_LIMIT", 10000),
+			BatchByteLimit:   parseIntEnv("ONGRID_K8S_METRICS_BATCH_BYTE_LIMIT", 4<<20),
+			MaxRetries:       parseIntEnv("ONGRID_K8S_METRICS_MAX_RETRIES", 3),
+			RetryBackoff:     parseDurationEnv("ONGRID_K8S_METRICS_RETRY_BACKOFF", 500*time.Millisecond),
+		}, log.With(slog.String("comp", "k8s-metrics-scraper")), registry)
+		if err != nil {
+			return err
+		}
 	}
 
 	group, groupCtx := errgroup.WithContext(ctx)
-	group.Go(func() error { return scraper.Run(groupCtx) })
-	group.Go(func() error { return runDataPlaneDiagnostics(groupCtx, registry, scraper.Ready, log) })
+	if scraper != nil {
+		group.Go(func() error { return scraper.Run(groupCtx) })
+	}
+	var podSupervisor *edgeplugins.Supervisor
+	if discoverApps {
+		podSupervisor = newPodMetricsSupervisor(dir, log.With(slog.String("comp", "pod-metrics")))
+		group.Go(func() error { return podSupervisor.Run(groupCtx) })
+	}
+	collectorClient := &http.Client{Timeout: 500 * time.Millisecond}
+	group.Go(func() error {
+		return runDataPlaneDiagnostics(groupCtx, registry, func() bool {
+			// Optional application targets must not take healthy KSM collection offline.
+			if scraper != nil {
+				return scraper.Ready()
+			}
+			for _, snapshot := range podSupervisor.HealthSnapshots() {
+				if snapshot.Name == podMetricsPlugin {
+					return snapshot.State == edgeplugins.StateRunning && collectorHealthReady(groupCtx, collectorClient)
+				}
+			}
+			return false
+		}, log)
+	})
 	log.Info("kubernetes metrics scraper mode started; tunnel and inventory are disabled",
 		slog.Uint64("cluster_id", config.clusterID),
 	)

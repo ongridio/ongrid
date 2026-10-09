@@ -485,7 +485,7 @@ func TestMetricsPusherDiscoversAnnotatedPodMetrics(t *testing.T) {
 			_, _ = w.Write([]byte(`
 # HELP demo_requests_total Demo requests.
 # TYPE demo_requests_total counter
-demo_requests_total{instance="pod-ip",pod_uid="drop-me"} 3
+demo_requests_total{instance="pod-ip",pod_uid="app-defined"} 3
 `))
 		default:
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
@@ -535,11 +535,8 @@ demo_requests_total{instance="pod-ip",pod_uid="drop-me"} 3
 	if sample.Labels["workload_kind"] != "ReplicaSet" || sample.Labels["workload_name"] != "api-rs" {
 		t.Fatalf("workload labels missing: %#v", sample.Labels)
 	}
-	if _, ok := sample.Labels["pod_uid"]; ok {
-		t.Fatalf("pod_uid label should be dropped: %#v", sample.Labels)
-	}
-	if _, ok := sample.Labels["instance"]; ok {
-		t.Fatalf("instance label should be dropped: %#v", sample.Labels)
+	if sample.Labels["pod_uid"] != "app-defined" || sample.Labels["instance"] != "pod-ip" {
+		t.Fatalf("application labels were lost: %#v", sample.Labels)
 	}
 	up, ok := findSample(samples, metricscommon.ScrapeUpMetricName)
 	if !ok {
@@ -655,4 +652,25 @@ func (c *contextAwareTunnelClient) Call(ctx context.Context, method string, req 
 		return err
 	}
 	return c.fakeTunnelClient.Call(ctx, method, req, resp)
+}
+
+func TestAppMetricsTargetValidation(t *testing.T) {
+	for _, tc := range []struct{ name, port, phase, scheme, path, want string }{
+		{"defaults", "8080", "Running", "", "", "http://[fd00::1]:8080/metrics"},
+		{"https path", "8443", "Running", "https", "custom", "https://[fd00::1]:8443/custom"},
+		{"zero", "0", "Running", "", "", ""},
+		{"large", "65536", "Running", "", "", ""},
+		{"invalid", "8080/path", "Running", "", "", ""},
+		{"complete", "8080", "Succeeded", "", "", ""},
+		{"failed", "8080", "Failed", "", "", ""},
+		{"scheme", "8080", "Running", "ftp", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pod := podItem{Metadata: objectMeta{Name: "api", Namespace: "default", Annotations: map[string]string{"prometheus.io/scrape": "true", "prometheus.io/port": tc.port, "prometheus.io/scheme": tc.scheme, "prometheus.io/path": tc.path}}, Status: podStatus{PodIP: "fd00::1", Phase: tc.phase}}
+			target, ok := appMetricsTarget(pod, MetricsConfig{})
+			if ok != (tc.want != "") || target.URL != tc.want {
+				t.Fatalf("target %q, accepted=%v; want %q", target.URL, ok, tc.want)
+			}
+		})
+	}
 }
