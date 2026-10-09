@@ -369,6 +369,7 @@ sudo ONGRID_CLOUD_ADDR=ongrid.example.com:40012 \
 - **`invalid IP address in add-host: "host-gateway"`**：目标机 Docker daemon 太旧，不支持 Docker 20.10 引入的 `host-gateway` 特殊值。新版 `install.sh` / `upgrade.sh` 会自动把 `.env` 里的 `ONGRID_HOST_GATEWAY` 写成 Docker bridge 网关 IP；已经遇到该错误的机器可直接重跑 `sudo ./install.sh`。如仍失败，手动执行 `ip -4 addr show docker0` 查网关（通常是 `172.17.0.1`），写入 `/opt/ongrid/.env`：`ONGRID_HOST_GATEWAY=<网关IP>` 后再 `cd /opt/ongrid && sudo docker compose --env-file .env up -d`。
 - **MySQL healthcheck 超时**：首次拉起冷启动慢，observe `docker logs ongrid-mysql`。安装脚本最多等 60 秒，ongrid 容器会一直等到 mysql healthy；如 60s 内没进入 healthy，手动看 MySQL 日志。
 - **`/healthz` 不通**：`docker logs ongrid -n 200`，常见是 `.env` 里 `ONGRID_JWT_SECRET` 为空或 `ONGRID_DB_DSN` 错误。
+- **MySQL `too many connections`**：检查[连接池预算、心跳退避与验证步骤](https://github.com/ongridio/ongrid/blob/main/docs/install/mysql-connection-pool.md)，不要仅提高数据库连接上限。
 - **AI Chat 接口 500**：`OPENAI_API_KEY` 没填。要么填 key，要么不调用 chat 接口。
 - **Edge 连不上**：检查云端 `ONGRID_TUNNEL_PORT`（默认 40012）防火墙；edge 侧 `journalctl -u ongrid-edge -n 100` 看 `dial tcp ... i/o timeout` 是否路径不通。
 

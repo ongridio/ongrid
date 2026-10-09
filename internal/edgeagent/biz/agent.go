@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"strings"
@@ -199,13 +200,14 @@ func (a *Agent) Run(ctx context.Context) error {
 	//    canonical edge_id. The agent doesn't inspect RPC error patterns
 	//    — that's the tunnel's job.
 	a.client.OnReconnect(func() {
-		rctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		rctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
 		if err := a.registerEdge(rctx); err != nil {
 			a.log.Warn("agent: re-register after tunnel reconnect failed",
 				slog.Any("err", err))
 			return
 		}
+		a.writeHealthMarker()
 		a.log.Info("agent: re-registered after tunnel reconnect",
 			slog.Uint64("edge_id", a.EdgeID()))
 	})
@@ -219,10 +221,11 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 
 	// 4. register_edge.
-	if err := a.registerEdge(ctx); err != nil {
-		// Register failure is almost always an auth mismatch. Log and
-		// continue — the periodic loops will keep trying because
-		// tunnel-level reconnect is transparent.
+	rctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	err := a.registerEdge(rctx)
+	cancel()
+	if err != nil {
+		// Retry startup dependency failures through the heartbeat backoff.
 		a.log.Warn("agent: register_edge failed; will keep running",
 			slog.Any("err", err),
 		)
@@ -260,7 +263,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		}
 	})
 
-	err := eg.Wait()
+	err = eg.Wait()
 	_ = a.client.Close()
 	if errors.Is(err, errUpgradeRequested) {
 		return nil
@@ -482,6 +485,9 @@ func (a *Agent) registerHandlers() {
 func (a *Agent) registerEdge(ctx context.Context) error {
 	a.registerMu.Lock()
 	defer a.registerMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	info, err := a.collector.HostInfo(ctx)
 	if err != nil {
@@ -535,12 +541,12 @@ func applyKubernetesHostIdentity(k8sInfo *tunnel.KubernetesInfo, host *tunnel.Ho
 // sending heartbeats so a transient startup dependency does not leave the
 // edge permanently at edge_id=0.
 func (a *Agent) heartbeatLoop(ctx context.Context) error {
-	t := time.NewTicker(a.cfg.HeartbeatInterval)
-	defer t.Stop()
 	var consecutiveFail int
 	for {
+		t := time.NewTimer(heartbeatRetryDelay(a.cfg.HeartbeatInterval, consecutiveFail))
 		select {
 		case <-ctx.Done():
+			t.Stop()
 			return nil
 		case <-t.C:
 			if a.EdgeID() == 0 {
@@ -548,7 +554,7 @@ func (a *Agent) heartbeatLoop(ctx context.Context) error {
 				err := a.registerEdge(rctx)
 				cancel()
 				if err != nil {
-					consecutiveFail++
+					consecutiveFail = min(consecutiveFail+1, 63)
 					a.log.Warn("agent: register_edge retry failed",
 						slog.Int("consecutive_fail", consecutiveFail),
 						slog.Any("err", err))
@@ -574,27 +580,12 @@ func (a *Agent) heartbeatLoop(ctx context.Context) error {
 				}, nil)
 			cancel()
 			if err != nil {
-				consecutiveFail++
+				consecutiveFail = min(consecutiveFail+1, 63)
 				a.log.Warn("agent: heartbeat failed",
 					slog.Int("consecutive_fail", consecutiveFail),
 					slog.Any("err", err))
-				// A manager restart can lose its in-memory transport binding while
-				// Frontier keeps this connection alive. Re-registering is safe and
-				// authenticated, and repairs that state without restarting the pod.
-				rctx, rcancel := context.WithTimeout(ctx, 10*time.Second)
-				rerr := a.registerEdge(rctx)
-				rcancel()
-				if rerr != nil {
-					a.log.Warn("agent: re-register after heartbeat failure failed",
-						slog.Any("err", rerr))
-					if consecutiveFail >= tunnelStuckThreshold {
-						return fmt.Errorf("%w after %d heartbeat failures: %v",
-							errTunnelStuck, consecutiveFail, rerr)
-					}
-				} else {
-					a.writeHealthMarker()
-					consecutiveFail = 0
-				}
+				// Tunnel recovery re-registers stale bindings. Retrying registration
+				// here would amplify temporary Manager/DB failures into extra writes.
 				continue
 			}
 			consecutiveFail = 0
@@ -602,9 +593,20 @@ func (a *Agent) heartbeatLoop(ctx context.Context) error {
 	}
 }
 
-const tunnelStuckThreshold = 5
-
-var errTunnelStuck = errors.New("tunnel stuck")
+// Cap failure backoff at one minute (or a longer configured interval). Jitter
+// also spreads healthy heartbeats from agents that started together.
+func heartbeatRetryDelay(interval time.Duration, failures int) time.Duration {
+	delay, limit := interval, max(interval, time.Minute)
+	for i := 0; i < failures && delay < limit; i++ {
+		if delay > limit/2 {
+			delay = limit
+		} else {
+			delay *= 2
+		}
+	}
+	jitter := delay / 10
+	return delay - jitter + time.Duration(rand.Int64N(int64(jitter)+1))
+}
 
 // metricsLoop samples the collector every MetricsInterval and fans out
 // the result to the legacy push_host_metrics path and the new

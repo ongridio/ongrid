@@ -65,6 +65,8 @@ services:
       ONGRID_FRONTIER_SERVICE_NAME: ${ONGRID_FRONTIER_SERVICE_NAME:-ongrid-manager}
       ONGRID_DB_DIALECT: mysql
       ONGRID_DB_DSN: ongrid:${MYSQL_PASSWORD}@tcp(mysql:3306)/ongrid?parseTime=true&charset=utf8mb4&loc=Local
+      ONGRID_DB_MAX_OPEN_CONNS: ${ONGRID_DB_MAX_OPEN_CONNS:-50}
+      ONGRID_DB_MAX_IDLE_CONNS: ${ONGRID_DB_MAX_IDLE_CONNS:-10}
       ONGRID_JWT_SECRET: ${ONGRID_JWT_SECRET:?ONGRID_JWT_SECRET is required in .env}
       # HLD-017 credential vault at-rest key (AES-256-GCM). Lives in .env
       # (outside the DB) so a DB dump alone yields no plaintext credentials.

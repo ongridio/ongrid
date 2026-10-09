@@ -49,7 +49,7 @@ import (
 func Open(cfg config.DBConfig, log *slog.Logger) (*gorm.DB, error) {
 	switch cfg.Dialect {
 	case "", "mysql":
-		return openMySQL(cfg.DSN, log)
+		return openMySQL(cfg, log)
 	case "sqlite":
 		return openSQLite(cfg.Path, log)
 	default:
@@ -59,9 +59,19 @@ func Open(cfg config.DBConfig, log *slog.Logger) (*gorm.DB, error) {
 
 // openMySQL opens a MySQL connection via gorm and verifies reachability
 // with Ping(). The DSN password is never logged.
-func openMySQL(dsn string, log *slog.Logger) (*gorm.DB, error) {
+func openMySQL(cfg config.DBConfig, log *slog.Logger) (*gorm.DB, error) {
+	dsn := cfg.DSN
 	if dsn == "" {
 		return nil, fmt.Errorf("dbx: empty mysql DSN")
+	}
+	if cfg.MaxOpenConns == 0 {
+		cfg.MaxOpenConns = config.DefaultDBMaxOpenConns
+	}
+	if cfg.MaxIdleConns == 0 {
+		cfg.MaxIdleConns = config.DefaultDBMaxIdleConns
+	}
+	if cfg.MaxOpenConns < 1 || cfg.MaxIdleConns < 1 || cfg.MaxIdleConns > cfg.MaxOpenConns {
+		return nil, fmt.Errorf("dbx: mysql pool requires 0 < max idle connections <= max open connections")
 	}
 
 	gdb, err := gorm.Open(gormmysql.Open(dsn), &gorm.Config{
@@ -75,12 +85,22 @@ func openMySQL(dsn string, log *slog.Logger) (*gorm.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("dbx: mysql sql.DB handle: %w", err)
 	}
-	if err := sqlDB.Ping(); err != nil {
+	sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)
+	sqlDB.SetMaxIdleConns(cfg.MaxIdleConns)
+	sqlDB.SetConnMaxIdleTime(time.Minute)
+	sqlDB.SetConnMaxLifetime(3 * time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := sqlDB.PingContext(ctx); err != nil {
+		if closeErr := sqlDB.Close(); closeErr != nil && log != nil {
+			log.Warn("mysql close after ping failure", "err", closeErr)
+		}
 		return nil, fmt.Errorf("dbx: mysql ping failed: %w", err)
 	}
 
 	if log != nil {
-		log.Info("mysql opened", "endpoint", redactDSN(dsn))
+		log.Info("mysql opened", "endpoint", redactDSN(dsn),
+			"max_open_conns", cfg.MaxOpenConns, "max_idle_conns", cfg.MaxIdleConns)
 	}
 	return gdb, nil
 }

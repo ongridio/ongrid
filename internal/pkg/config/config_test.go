@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -12,6 +13,7 @@ func TestLoadDefaults(t *testing.T) {
 		"ONGRID_K8S_EVENT_RETENTION", "ONGRID_K8S_EVENT_MAX_PER_CLUSTER",
 		"ONGRID_K8S_EVENT_CLEANUP_INTERVAL",
 		"ONGRID_DB_DIALECT", "ONGRID_DB_DSN", "ONGRID_DB_PATH",
+		"ONGRID_DB_MAX_OPEN_CONNS", "ONGRID_DB_MAX_IDLE_CONNS",
 		"ONGRID_JWT_SECRET", "ONGRID_JWT_ACCESS_TTL", "ONGRID_JWT_REFRESH_TTL",
 		"ONGRID_OPENAI_API_KEY", "ONGRID_OPENAI_MODEL", "ONGRID_OPENAI_BASE_URL",
 		"ONGRID_MINIMAX_API_KEY", "ONGRID_MINIMAX_MODEL", "ONGRID_MINIMAX_BASE_URL", "ONGRID_MINIMAX_MODELS",
@@ -66,6 +68,9 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if cfg.DB.Path != "./data/ongrid.db" {
 		t.Errorf("DB.Path default = %q, want ./data/ongrid.db", cfg.DB.Path)
+	}
+	if cfg.DB.MaxOpenConns != 50 || cfg.DB.MaxIdleConns != 10 {
+		t.Errorf("DB pool defaults = %d/%d, want 50/10", cfg.DB.MaxOpenConns, cfg.DB.MaxIdleConns)
 	}
 	if cfg.JWT.AccessTTL != 15*time.Minute {
 		t.Errorf("JWT.AccessTTL default = %v, want 15m", cfg.JWT.AccessTTL)
@@ -366,5 +371,27 @@ func TestLoadOverrides(t *testing.T) {
 	}
 	if cfg.FrontierClient.ServiceName != "ongrid-manager-staging" {
 		t.Errorf("FrontierClient.ServiceName = %q", cfg.FrontierClient.ServiceName)
+	}
+}
+
+func TestLoadDBPool(t *testing.T) {
+	t.Setenv("ONGRID_DB_MAX_OPEN_CONNS", "20")
+	t.Setenv("ONGRID_DB_MAX_IDLE_CONNS", "5")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DB.MaxOpenConns != 20 || cfg.DB.MaxIdleConns != 5 {
+		t.Fatalf("DB pool overrides = %d/%d, want 20/5", cfg.DB.MaxOpenConns, cfg.DB.MaxIdleConns)
+	}
+	for _, key := range []string{"ONGRID_DB_MAX_OPEN_CONNS", "ONGRID_DB_MAX_IDLE_CONNS"} {
+		for _, value := range []string{"-1", "0", "invalid", "1.5"} {
+			t.Run(key+"/"+value, func(t *testing.T) {
+				t.Setenv(key, value)
+				if _, err := Load(); err == nil || !strings.Contains(err.Error(), key) {
+					t.Fatalf("Load with %s=%s returned %v", key, value, err)
+				}
+			})
+		}
 	}
 }

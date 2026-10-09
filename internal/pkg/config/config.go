@@ -9,6 +9,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -322,7 +323,15 @@ type DBConfig struct {
 	// Path is the sqlite database file path used when Dialect == "sqlite".
 	// The special value ":memory:" is accepted for tests.
 	Path string
+	// MySQL pool limits per Manager. Zero uses the defaults below.
+	MaxOpenConns int
+	MaxIdleConns int
 }
+
+const (
+	DefaultDBMaxOpenConns = 50
+	DefaultDBMaxIdleConns = 10
+)
 
 // JWTConfig holds JWT signing / expiry parameters used by the iam bounded context.
 type JWTConfig struct {
@@ -485,6 +494,23 @@ func Load() (*Config, error) {
 		"ongrid:ongrid@tcp(127.0.0.1:3306)/ongrid?parseTime=true&charset=utf8mb4&loc=Local",
 	)
 	c.DB.Path = getEnv("ONGRID_DB_PATH", "./data/ongrid.db")
+	for _, pool := range []struct {
+		key      string
+		value    *int
+		fallback int
+	}{
+		{"ONGRID_DB_MAX_OPEN_CONNS", &c.DB.MaxOpenConns, DefaultDBMaxOpenConns},
+		{"ONGRID_DB_MAX_IDLE_CONNS", &c.DB.MaxIdleConns, DefaultDBMaxIdleConns},
+	} {
+		*pool.value = pool.fallback
+		if raw := os.Getenv(pool.key); raw != "" {
+			n, err := strconv.Atoi(raw)
+			if err != nil || n <= 0 {
+				return nil, fmt.Errorf("%s must be a positive integer", pool.key)
+			}
+			*pool.value = n
+		}
+	}
 
 	c.JWT.Secret = getEnv("ONGRID_JWT_SECRET", "dev-insecure-secret-change-me")
 	c.JWT.AccessTTL = getEnvDuration("ONGRID_JWT_ACCESS_TTL", 15*time.Minute)

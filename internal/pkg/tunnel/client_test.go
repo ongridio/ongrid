@@ -82,6 +82,8 @@ func TestShouldRecycleBrokenRouteIsNarrow(t *testing.T) {
 		{name: "heartbeat binding missing", method: MethodHeartbeat, err: errors.New("heartbeat: edge binding not ready; re-register required"), want: true},
 		{name: "heartbeat identity mismatch", method: MethodHeartbeat, err: errors.New("heartbeat: edge id mismatch"), want: true},
 		{name: "application not found", method: MethodHeartbeat, err: errors.New("record not found"), want: false},
+		{name: "database overloaded", method: MethodHeartbeat, err: errors.New("heartbeat: Error 1040: Too many connections"), want: false},
+		{name: "registration database overloaded", method: MethodRegisterEdge, err: errors.New("register_edge: Error 1040: Too many connections"), want: false},
 		{name: "unrelated register not found", method: MethodRegisterEdge, err: errors.New("register_edge: k8s node: not found"), want: false},
 		{name: "optional method missing", method: MethodPushPromSamples, err: errors.New("no such rpc: push_prom_samples"), want: false},
 	}

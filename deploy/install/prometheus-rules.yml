@@ -51,7 +51,7 @@ groups:
           source: self
         annotations:
           summary: "DB pool > 90% utilised for 5m"
-          description: "Tune ONGRID_DB_MAX_OPEN_CONNS upward, or investigate slow queries. Check ongrid_db_pool_wait_count_total rate to see if requests are queueing."
+          description: "Check slow queries and ongrid_db_pool_wait_count_total rate. Before changing ONGRID_DB_MAX_OPEN_CONNS, budget all Manager instances and other clients below MySQL max_connections with operational headroom."
 
       - alert: OngridAlertEvaluatorStalled
         expr: sum(rate(ongrid_alert_eval_ticks_total[5m])) == 0

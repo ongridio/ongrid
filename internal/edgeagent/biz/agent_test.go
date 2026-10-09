@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"strings"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/ongridio/ongrid/internal/edgeagent/biz"
@@ -27,6 +29,7 @@ type fakeClient struct {
 	callError    func(method string, count int32) error
 
 	onRegisterEdge func(req tunnel.RegisterEdgeRequest) tunnel.RegisterEdgeResponse
+	onReconnect    func()
 
 	closed atomic.Bool
 }
@@ -90,9 +93,18 @@ func (f *fakeClient) failNext(method string, count int) {
 	f.mu.Unlock()
 }
 
-// OnReconnect is a no-op in the fake — these tests never trigger a
-// tunnel-level reconnect, only verify periodic Call invocations.
-func (f *fakeClient) OnReconnect(_ func()) {}
+func (f *fakeClient) OnReconnect(fn func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onReconnect = fn
+}
+
+func (f *fakeClient) reconnect() {
+	f.mu.Lock()
+	fn := f.onReconnect
+	f.mu.Unlock()
+	fn()
+}
 
 // AcceptStream satisfies the Client interface. WebSSH stream dispatch
 // is exercised elsewhere; agent-lifecycle tests don't use it.
@@ -279,68 +291,147 @@ func TestAgent_RetriesInitialRegistration(t *testing.T) {
 }
 
 func TestAgent_HeartbeatFailuresDoNotRestartProcess(t *testing.T) {
-	fc := newFakeClient()
-	fc.failNext(tunnel.MethodHeartbeat, 100)
-	a := biz.NewAgent(fc, &fakeCollector{}, biz.Config{
-		HeartbeatInterval: 10 * time.Millisecond,
-		MetricsInterval:   time.Second,
-	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	synctest.Test(t, func(t *testing.T) {
+		fc := newFakeClient()
+		fc.failNext(tunnel.MethodHeartbeat, 100)
+		a := biz.NewAgent(fc, &fakeCollector{}, biz.Config{
+			HeartbeatInterval: 10 * time.Millisecond,
+			MetricsInterval:   time.Second,
+		}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- a.Run(ctx) }()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		done := make(chan error, 1)
+		go func() { done <- a.Run(ctx) }()
 
-	select {
-	case err := <-done:
-		t.Fatalf("Run exited during temporary heartbeat failures: %v", err)
-	case <-time.After(100 * time.Millisecond):
-	}
-	if got := fc.countOf(tunnel.MethodHeartbeat); got < 5 {
-		t.Fatalf("heartbeat called %d times, want >=5", got)
-	}
-	if got := fc.countOf(tunnel.MethodRegisterEdge); got < 2 {
-		t.Fatalf("register_edge called %d times, want recovery attempts after heartbeat failures", got)
-	}
-	cancel()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("Run returned err after cancel: %v", err)
+		select {
+		case err := <-done:
+			t.Fatalf("Run exited during temporary heartbeat failures: %v", err)
+		case <-time.After(100 * time.Millisecond):
 		}
-	case <-time.After(time.Second):
-		t.Fatal("Run did not stop after cancel")
-	}
+		if got := fc.countOf(tunnel.MethodHeartbeat); got < 2 || got > 4 {
+			t.Fatalf("heartbeat called %d times, want 2-4 with backoff", got)
+		}
+		if got := fc.countOf(tunnel.MethodRegisterEdge); got != 1 {
+			t.Fatalf("register_edge called %d times, want only the initial registration", got)
+		}
+		cancel()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("Run returned err after cancel: %v", err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("Run did not stop after cancel")
+		}
+	})
 }
 
-func TestAgent_PersistentHeartbeatAndRegistrationFailuresRestartProcess(t *testing.T) {
-	fc := newFakeClient()
-	fc.callError = func(method string, count int32) error {
-		switch {
-		case method == tunnel.MethodHeartbeat:
-			return fmt.Errorf("heartbeat unavailable")
-		case method == tunnel.MethodRegisterEdge && count > 1:
-			return fmt.Errorf("registration unavailable")
-		default:
+func TestAgent_DatabaseOutageDoesNotTriggerRegistrationOrRestart(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		fc := newFakeClient()
+		fc.callError = func(method string, _ int32) error {
+			if method == tunnel.MethodHeartbeat {
+				return fmt.Errorf("heartbeat: Error 1040: Too many connections")
+			}
 			return nil
 		}
-	}
-	a := biz.NewAgent(fc, &fakeCollector{}, biz.Config{
-		HeartbeatInterval: 10 * time.Millisecond,
-		MetricsInterval:   time.Second,
-	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		a := biz.NewAgent(fc, &fakeCollector{}, biz.Config{
+			HeartbeatInterval: 10 * time.Second, MetricsInterval: time.Hour,
+		}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
+		defer cancel()
+		started := time.Now()
+		if err := a.Run(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if time.Since(started) != 10*time.Minute {
+			t.Fatal("agent exited before cancellation during database outage")
+		}
+		if got := fc.countOf(tunnel.MethodHeartbeat); got < 10 || got > 14 {
+			t.Fatalf("heartbeat calls = %d, want capped backoff", got)
+		}
+		if got := fc.countOf(tunnel.MethodRegisterEdge); got != 1 {
+			t.Fatalf("register calls = %d, want 1", got)
+		}
+	})
+}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	err := a.Run(ctx)
-	if err == nil || !strings.Contains(err.Error(), "tunnel stuck") {
-		t.Fatalf("Run error = %v, want tunnel stuck", err)
-	}
-	if got := fc.countOf(tunnel.MethodHeartbeat); got < 5 {
-		t.Fatalf("heartbeat called %d times, want >=5", got)
-	}
-	if got := fc.countOf(tunnel.MethodRegisterEdge); got < 6 {
-		t.Fatalf("register_edge called %d times, want initial registration plus >=5 recovery attempts", got)
-	}
+func TestAgent_HeartbeatRecoveryResetsBackoff(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		fc := newFakeClient()
+		var calls []time.Time
+		fc.callError = func(method string, count int32) error {
+			if method != tunnel.MethodHeartbeat {
+				return nil
+			}
+			calls = append(calls, time.Now())
+			if count <= 2 {
+				return context.DeadlineExceeded
+			}
+			if count == 4 {
+				cancel()
+			}
+			return nil
+		}
+		a := biz.NewAgent(fc, &fakeCollector{}, biz.Config{
+			HeartbeatInterval: 10 * time.Second, MetricsInterval: time.Hour,
+		}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		if err := a.Run(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if len(calls) != 4 {
+			t.Fatalf("heartbeat calls = %d", len(calls))
+		}
+		for i, limit := range []time.Duration{20 * time.Second, 40 * time.Second, 10 * time.Second} {
+			gap := calls[i+1].Sub(calls[i])
+			if gap < limit-limit/10 || gap > limit {
+				t.Fatalf("heartbeat gap %d = %s, expected 90-100%% of %s", i, gap, limit)
+			}
+		}
+		if got := fc.countOf(tunnel.MethodRegisterEdge); got != 1 {
+			t.Fatalf("register calls = %d, want 1", got)
+		}
+	})
+}
+
+func TestAgent_TransportReconnectStillRegisters(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		fc := newFakeClient()
+		fc.failNext(tunnel.MethodRegisterEdge, 1)
+		stage := t.TempDir()
+		a := biz.NewAgent(fc, &fakeCollector{}, biz.Config{
+			HeartbeatInterval: time.Second, MetricsInterval: time.Hour,
+			UpgradeStageDir: stage, AgentVersion: "test",
+		}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		done := make(chan error, 1)
+		go func() { done <- a.Run(ctx) }()
+		synctest.Wait()
+		fc.reconnect()
+		if got := fc.countOf(tunnel.MethodRegisterEdge); got != 2 {
+			t.Fatalf("register calls after reconnect = %d, want 2", got)
+		}
+		if data, err := os.ReadFile(filepath.Join(stage, "healthy_marker")); err != nil || string(data) != "test\n" {
+			t.Fatalf("reconnect recovery health marker = %q: %v", data, err)
+		}
+		time.Sleep(time.Second)
+		synctest.Wait()
+		if fc.countOf(tunnel.MethodHeartbeat) == 0 {
+			t.Fatal("heartbeats did not resume")
+		}
+		cancel()
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		fc.reconnect()
+		if got := fc.countOf(tunnel.MethodRegisterEdge); got != 2 {
+			t.Fatalf("registration ran after shutdown: %d", got)
+		}
+	})
 }
 
 // TestAgent_HandlersRegistered asserts that handlers are available on

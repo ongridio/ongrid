@@ -152,6 +152,18 @@ func TestOpen_UnsupportedDialect(t *testing.T) {
 	}
 }
 
+func TestOpen_RejectsInvalidMySQLPoolBeforeDial(t *testing.T) {
+	for _, limits := range [][2]int{{-1, 10}, {50, -1}, {5, 10}} {
+		_, err := Open(config.DBConfig{
+			DSN:          "ongrid:test@tcp(127.0.0.1:1)/ongrid",
+			MaxOpenConns: limits[0], MaxIdleConns: limits[1],
+		}, nil)
+		if err == nil || !contains(err.Error(), "mysql pool requires") {
+			t.Fatalf("limits %v: %v, want pool validation error", limits, err)
+		}
+	}
+}
+
 // fakeModel is a tiny model used to exercise RunMigrations end-to-end
 // against the SQLite :memory: backend.
 type fakeModel struct {
