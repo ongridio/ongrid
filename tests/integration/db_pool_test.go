@@ -87,15 +87,9 @@ func TestMySQLPoolHeartbeatBurst(t *testing.T) {
 		if err := db.Create(&row).Error; err != nil {
 			t.Fatal(err)
 		}
-		if err := uc.HandleRegister(ctx, id, tunnel.HostInfo{
-			Hostname: name, Fingerprint: name, HardwareFingerprint: name,
-			OS: "linux", Arch: "amd64", CPUCount: 2,
-		}, "test"); err != nil {
-			t.Fatal(err)
-		}
 	}
 	started := time.Now()
-	for range 3 {
+	for wave := range 4 {
 		start := make(chan struct{})
 		var wg sync.WaitGroup
 		for id := uint64(1); id <= 220; id++ {
@@ -103,13 +97,25 @@ func TestMySQLPoolHeartbeatBurst(t *testing.T) {
 				<-start
 				rpcCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 				defer cancel()
-				if err := uc.HandleHeartbeat(rpcCtx, id, time.Now().UTC()); err != nil {
+				if wave == 0 {
+					name := fmt.Sprintf("pool-test-%d", id)
+					if err := uc.HandleRegister(rpcCtx, id, tunnel.HostInfo{
+						Hostname: name, Fingerprint: name, HardwareFingerprint: name,
+						OS: "linux", Arch: "amd64", CPUCount: 2,
+					}, "test"); err != nil {
+						t.Errorf("register %d: %v", id, err)
+					}
+				} else if err := uc.HandleHeartbeat(rpcCtx, id, time.Now().UTC()); err != nil {
 					t.Errorf("heartbeat %d: %v", id, err)
 				}
 			})
 		}
 		close(start)
 		wg.Wait()
+	}
+	var registered int64
+	if err := db.Model(&edgemodel.Edge{}).Where("device_id IS NOT NULL AND status = ?", edgemodel.StatusOnline).Count(&registered).Error; err != nil || registered != 220 {
+		t.Fatalf("registered online edges = %d, want 220: %v", registered, err)
 	}
 	stats := pool.Stats()
 	if stats.InUse != 0 || stats.Idle > config.DefaultDBMaxIdleConns {
@@ -120,7 +126,7 @@ func TestMySQLPoolHeartbeatBurst(t *testing.T) {
 	if err := pool.QueryRowContext(ctx, "SHOW GLOBAL STATUS LIKE 'Connection_errors_max_connections'").Scan(&key, &rejected); err != nil || rejected != 0 {
 		t.Fatalf("MySQL rejected connections = %d: %v", rejected, err)
 	}
-	t.Logf("660 heartbeats: elapsed=%s wait_count=%d open=%d idle=%d", time.Since(started), stats.WaitCount, stats.OpenConnections, stats.Idle)
+	t.Logf("220 concurrent registrations and 660 heartbeats: elapsed=%s wait_count=%d open=%d idle=%d", time.Since(started), stats.WaitCount, stats.OpenConnections, stats.Idle)
 
 	// Occupy every slot, then verify cancellation while queued and recovery
 	// after release. No MySQL connection limit is changed to make this pass.

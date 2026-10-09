@@ -309,8 +309,8 @@ func TestAgent_HeartbeatFailuresDoNotRestartProcess(t *testing.T) {
 			t.Fatalf("Run exited during temporary heartbeat failures: %v", err)
 		case <-time.After(100 * time.Millisecond):
 		}
-		if got := fc.countOf(tunnel.MethodHeartbeat); got < 2 || got > 4 {
-			t.Fatalf("heartbeat called %d times, want 2-4 with backoff", got)
+		if got := fc.countOf(tunnel.MethodHeartbeat); got < 3 || got > 5 {
+			t.Fatalf("heartbeat called %d times, want 3-5 with backoff", got)
 		}
 		if got := fc.countOf(tunnel.MethodRegisterEdge); got != 1 {
 			t.Fatalf("register_edge called %d times, want only the initial registration", got)
@@ -385,7 +385,7 @@ func TestAgent_HeartbeatRecoveryResetsBackoff(t *testing.T) {
 		if len(calls) != 4 {
 			t.Fatalf("heartbeat calls = %d", len(calls))
 		}
-		for i, limit := range []time.Duration{20 * time.Second, 40 * time.Second, 10 * time.Second} {
+		for i, limit := range []time.Duration{5 * time.Second, 10 * time.Second, 10 * time.Second} {
 			gap := calls[i+1].Sub(calls[i])
 			if gap < limit-limit/10 || gap > limit {
 				t.Fatalf("heartbeat gap %d = %s, expected 90-100%% of %s", i, gap, limit)
@@ -394,6 +394,60 @@ func TestAgent_HeartbeatRecoveryResetsBackoff(t *testing.T) {
 		if got := fc.countOf(tunnel.MethodRegisterEdge); got != 1 {
 			t.Fatalf("register calls = %d, want 1", got)
 		}
+	})
+}
+
+func TestAgent_ConcurrentHeartbeatTimeoutRecoversBeforeOfflineThreshold(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const agents = 220
+		var maxStaleness [agents]time.Duration
+		var wg sync.WaitGroup
+		for id := range agents {
+			wg.Go(func() {
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				fc := newFakeClient()
+				var lastSeen time.Time
+				fc.callError = func(method string, count int32) error {
+					if method != tunnel.MethodHeartbeat {
+						return nil
+					}
+					if count == 2 {
+						time.Sleep(10 * time.Second)
+						return context.DeadlineExceeded
+					}
+					// Include slow successful RPCs and the wire timestamp's second precision.
+					ts := time.Unix(time.Now().Unix(), 0)
+					time.Sleep(9900 * time.Millisecond)
+					if !lastSeen.IsZero() {
+						maxStaleness[id] = max(maxStaleness[id], time.Since(lastSeen))
+					}
+					lastSeen = ts
+					if count == 4 {
+						cancel()
+					}
+					return nil
+				}
+				a := biz.NewAgent(fc, &fakeCollector{}, biz.Config{
+					MetricsInterval: time.Hour,
+				}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+				if err := a.Run(ctx); err != nil {
+					t.Errorf("agent %d: %v", id, err)
+				}
+				if fc.countOf(tunnel.MethodHeartbeat) != 4 || fc.countOf(tunnel.MethodRegisterEdge) != 1 {
+					t.Errorf("agent %d did not recover with only its initial registration", id)
+				}
+			})
+		}
+		wg.Wait()
+		var worst time.Duration
+		for id, age := range maxStaleness {
+			if age <= 0 || age >= 90*time.Second {
+				t.Errorf("agent %d: heartbeat staleness %s, want below default 90s offline threshold", id, age)
+			}
+			worst = max(worst, age)
+		}
+		t.Logf("%d agents recovered from one heartbeat timeout; worst staleness=%s", agents, worst)
 	})
 }
 

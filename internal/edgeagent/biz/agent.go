@@ -597,7 +597,11 @@ func (a *Agent) heartbeatLoop(ctx context.Context) error {
 // also spreads healthy heartbeats from agents that started together.
 func heartbeatRetryDelay(interval time.Duration, failures int) time.Duration {
 	delay, limit := interval, max(interval, time.Minute)
-	for i := 0; i < failures && delay < limit; i++ {
+	if failures > 0 {
+		// Leave room for RPC latency before the default 90s offline threshold.
+		delay = max(interval/2, time.Nanosecond)
+	}
+	for i := 1; i < failures && delay < limit; i++ {
 		if delay > limit/2 {
 			delay = limit
 		} else {
