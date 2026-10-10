@@ -73,6 +73,69 @@ ensure_log_groups() {
 }
 ensure_log_groups
 
+# ----- Pre-start: migrate the ProtectHome= setting installed earlier -------
+#
+# install.sh / install-edge.sh used to write ProtectHome=true, which hides
+# /home (and /root, /run/user) behind an empty tmpfs, so the log collector
+# could never read logs under /home (issue #163). Both installers now write
+# read-only, but a bundle upgrade never rewrites
+# /etc/systemd/system/ongrid-edge.service — it only swaps the files listed in
+# MANIFEST.txt — so an existing node keeps ProtectHome=true however often it
+# upgrades. Re-assert just that directive here, the same way ensure_log_groups
+# re-asserts group membership.
+#
+# Scope is deliberately narrow: only the ProtectHome line of the unit this
+# project installs is rewritten, every other directive keeps the operator's
+# edits, and drop-ins under ongrid-edge.service.d/ are left untouched (one
+# that still pins true is reported instead of silently overridden).
+# Idempotent — once the value is read-only nothing matches. Rollback is to
+# put the line back to true and run systemctl daemon-reload.
+#
+# The agent starts after this oneshot (Wants= + After=), so the reload makes
+# the migrated unit effective on the very next start, with no reinstall.
+ensure_protect_home() {
+  local unit=${ONGRID_EDGE_UNIT_FILE:-/etc/systemd/system/ongrid-edge.service}
+  local dropin_dir=${ONGRID_EDGE_DROPIN_DIR:-/etc/systemd/system/ongrid-edge.service.d}
+  local pattern='^[[:space:]]*ProtectHome[[:space:]]*=[[:space:]]*(yes|true|on|1)[[:space:]]*$'
+  local tmp mode owner conf changed=0
+
+  [[ -f $unit ]] || return 0
+  grep -Eiq "$pattern" "$unit" || return 0
+
+  # Keep the unit's own mode and ownership across the atomic rename.
+  mode=$(stat -c '%a' "$unit" 2>/dev/null) || mode=0644
+  owner=$(stat -c '%u:%g' "$unit" 2>/dev/null) || owner='0:0'
+  tmp=$(mktemp "${unit}.protect-home.XXXXXX") || return 0
+  if sed -E "s/${pattern}/ProtectHome=read-only/I" "$unit" > "$tmp"; then
+    chmod "$mode" "$tmp" 2>/dev/null || true
+    chown "$owner" "$tmp" 2>/dev/null || true
+    if mv -f "$tmp" "$unit" 2>/dev/null; then
+      log "protect-home: rewrote $unit (ProtectHome=true -> read-only)"
+      changed=1
+    else
+      rm -f "$tmp"
+    fi
+  else
+    log "protect-home: could not rewrite $unit — leaving the installed unit unchanged"
+    rm -f "$tmp"
+    return 0
+  fi
+
+  # A drop-in wins over the main unit, so report it rather than editing the
+  # operator's own file.
+  for conf in "$dropin_dir"/*.conf; do
+    [[ -f $conf ]] || continue
+    grep -Eiq "$pattern" "$conf" && \
+      log "protect-home: drop-in $conf still pins ProtectHome=true, /home logs stay hidden until it is fixed"
+  done
+
+  if [[ $changed == 1 ]] && command -v systemctl >/dev/null 2>&1; then
+    systemctl daemon-reload 2>/dev/null || \
+      log "protect-home: daemon-reload failed, the migrated setting applies on the next reload"
+  fi
+}
+ensure_protect_home
+
 # ----- Mode 1: auto-rollback ------------------------------------------------
 #
 # Trigger: a prior boot ran apply (LAST_UPGRADE_AT exists) AND the agent

@@ -9,18 +9,54 @@ trap 'rm -rf "$tmp_dir"' EXIT
 stage="$tmp_dir/stage"
 bin_dir="$tmp_dir/bin"
 lib_dir="$tmp_dir/lib"
-mkdir -p "$stage" "$bin_dir" "$lib_dir"
+unit_dir="$tmp_dir/systemd"
+dropin_dir="$unit_dir/ongrid-edge.service.d"
+unit_file="$unit_dir/ongrid-edge.service"
+sbin="$tmp_dir/sbin"
+systemctl_log="$tmp_dir/systemctl.log"
+logger_log="$tmp_dir/logger.log"
+mkdir -p "$stage" "$bin_dir" "$lib_dir" "$unit_dir" "$dropin_dir" "$sbin"
+: > "$systemctl_log"
+: > "$logger_log"
 
-sha256_file() {
-  sha256sum "$1" | awk '{print $1}'
-}
+# Command shims come first, before the hook is invoked even once: the hook must
+# never reach a real systemd or a real journal from this suite, and its reload
+# calls and log lines have to stay observable.
+cat > "$sbin/systemctl" <<'SHIM'
+#!/bin/sh
+printf '%s\n' "$*" >> "$ONGRID_EDGE_SYSTEMCTL_LOG"
+SHIM
+cat > "$sbin/logger" <<'SHIM'
+#!/bin/sh
+printf '%s\n' "$*" >> "$ONGRID_EDGE_LOGGER_LOG"
+SHIM
+chmod 0755 "$sbin/systemctl" "$sbin/logger"
 
-run_hook() {
+# One isolation entry shared by every invocation: upgrade stage, binary and
+# library dirs, legacy target, the unit and drop-in paths, the shims. Overriding
+# the unit paths matters — left at their defaults they point at
+# /etc/systemd/system/ongrid-edge.service, so running this suite as root on a
+# host that really has an edge installed would rewrite that host's unit.
+run_hook_env() {
+  local unit=$1
   ONGRID_EDGE_UPGRADE_STAGE_DIR="$stage" \
   ONGRID_EDGE_UPGRADE_BIN_DIR="$bin_dir" \
   ONGRID_EDGE_UPGRADE_LIB_DIR="$lib_dir" \
   ONGRID_EDGE_UPGRADE_LEGACY_TARGET="$bin_dir/ongrid-edge" \
+  ONGRID_EDGE_UNIT_FILE="$unit" \
+  ONGRID_EDGE_DROPIN_DIR="$dropin_dir" \
+  ONGRID_EDGE_SYSTEMCTL_LOG="$systemctl_log" \
+  ONGRID_EDGE_LOGGER_LOG="$logger_log" \
+  PATH="$sbin:$PATH" \
     bash "$hook"
+}
+
+# Bundle-level runs must not touch any unit, so they are pointed at a path that
+# never exists.
+run_hook() { run_hook_env "$unit_dir/absent.service"; }
+
+sha256_file() {
+  sha256sum "$1" | awk '{print $1}'
 }
 
 write_bundle() {
@@ -97,5 +133,81 @@ grep -Fxq bundle-agent "$bin_dir/ongrid-edge"
 grep -Fxq bundle-plugin "$lib_dir/plugin"
 test ! -e "$stage/pending"
 test ! -e "$stage/pending.sha256"
+
+# A node installed before the ProtectHome=read-only fix keeps ProtectHome=true,
+# because a bundle upgrade only swaps the files listed in MANIFEST.txt and never
+# rewrites the unit. The pre-start hook must migrate exactly that directive and
+# reload systemd, exercised through the real hook entry point.
+# Isolation check for every bundle-level run above: they were pointed at an
+# absent unit, so nothing may have reloaded systemd or mentioned the migration,
+# and no unit file may have been created anywhere. The last guard catches a run
+# that forgot to override the unit path at all — on a host that really has an
+# edge install, the hook's default /etc/systemd/system/ongrid-edge.service would
+# otherwise show up here.
+test ! -s "$systemctl_log"
+test ! -e "$unit_file"
+if grep -q 'protect-home' "$logger_log"; then
+  echo "bundle-level runs must not touch any unit" >&2
+  exit 1
+fi
+if grep -q '/etc/systemd' "$logger_log"; then
+  echo "tests must never operate on the host unit path" >&2
+  exit 1
+fi
+
+run_hook_with_unit() { run_hook_env "$unit_file"; }
+
+cat > "$unit_file" <<'UNIT'
+[Unit]
+Description=Ongrid Edge
+[Service]
+User=ongrid-edge
+ProtectSystem=strict
+ProtectHome=true
+LimitNOFILE=65536
+Environment=ONGRID_EDGE_CUSTOM=keep-me
+UNIT
+: > "$systemctl_log"
+: > "$logger_log"
+
+# The operator's own drop-in is reported, never rewritten.
+printf '[Service]\nProtectHome=true\n' > "$dropin_dir/override.conf"
+run_hook_with_unit
+grep -Fxq 'ProtectHome=read-only' "$unit_file"
+grep -Fxq 'ProtectSystem=strict' "$unit_file"
+grep -Fxq 'LimitNOFILE=65536' "$unit_file"
+grep -Fxq 'Environment=ONGRID_EDGE_CUSTOM=keep-me' "$unit_file"
+grep -Fxq 'ProtectHome=true' "$dropin_dir/override.conf"
+grep -q 'still pins ProtectHome=true' "$logger_log"
+test "$(grep -c 'daemon-reload' "$systemctl_log")" -eq 1
+
+# Running the same upgrade again changes nothing and does not reload again.
+cp "$unit_file" "$tmp_dir/unit.after-first"
+run_hook_with_unit
+cmp -s "$unit_file" "$tmp_dir/unit.after-first"
+test "$(grep -c 'daemon-reload' "$systemctl_log")" -eq 1
+
+# Only the stale value is migrated: an operator who chose ProtectHome=false, or
+# a unit without the directive at all, must come back byte-identical.
+printf '[Service]\nProtectHome=false\n' > "$unit_file"
+cp "$unit_file" "$tmp_dir/unit.disabled"
+run_hook_with_unit
+grep -Fxq 'ProtectHome=false' "$unit_file"
+cmp -s "$unit_file" "$tmp_dir/unit.disabled"
+printf '[Service]\nProtectSystem=strict\n' > "$unit_file"
+run_hook_with_unit
+grep -Fxq 'ProtectSystem=strict' "$unit_file"
+test "$(grep -c 'daemon-reload' "$systemctl_log")" -eq 1
+
+# The spelling of the stale value varies across installs, so match it the way
+# systemd does: any case, with optional surrounding spaces.
+printf '[Service]\nProtectHome = True\n' > "$unit_file"
+run_hook_with_unit
+grep -Fxq 'ProtectHome=read-only' "$unit_file"
+
+# A missing unit (package installs without it, or a first boot) is a no-op.
+rm -f "$unit_file"
+run_hook_with_unit
+test ! -e "$unit_file"
 
 echo "apply-pending-upgrade tests passed"

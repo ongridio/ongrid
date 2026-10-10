@@ -393,7 +393,11 @@ RestartSec=5
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
 NoNewPrivileges=true
 ProtectSystem=strict
-ProtectHome=true
+# read-only, not true: ProtectHome=true hides /home, /root and /run/user behind
+# an empty tmpfs, so the logs plugin's otelcol-contrib filelog receiver finds no
+# files there and collects nothing. read-only keeps those paths unwritable while
+# they stay readable.
+ProtectHome=read-only
 PrivateTmp=true
 # StateDirectory auto-creates /var/lib/ongrid-edge at start and implicitly
 # adds it to ReadWritePaths. Without this, ProtectSystem=strict makes /var/lib
