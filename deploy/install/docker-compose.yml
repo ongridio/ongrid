@@ -455,6 +455,7 @@ services:
       - ./profiles-gateway.yaml:/etc/otelcol/profiles-gateway.yaml:ro
     depends_on:
       - pyroscope
+      - tempo
     logging:
       driver: json-file
       options:

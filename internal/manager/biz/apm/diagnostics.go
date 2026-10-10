@@ -21,13 +21,15 @@ type Check struct {
 }
 
 type Instance struct {
-	K8sClusterID string `json:"k8s_cluster_id,omitempty"`
-	InstanceID   string `json:"instance_id"`
-	DeviceID     string `json:"device_id"`
-	ClusterID    string `json:"cluster_id"`
-	Pod          string `json:"pod"`
-	Version      string `json:"version"`
-	Namespace    string `json:"namespace"`
+	K8sClusterID  string `json:"k8s_cluster_id,omitempty"`
+	InstanceID    string `json:"instance_id"`
+	DeviceID      string `json:"device_id"`
+	ClusterID     string `json:"cluster_id"`
+	Pod           string `json:"pod"`
+	Version       string `json:"version"`
+	Namespace     string `json:"namespace"`
+	ContainerName string `json:"container_name,omitempty"`
+	TargetID      string `json:"target_id,omitempty"`
 }
 
 type Diagnostics struct {
@@ -108,7 +110,7 @@ func (s *Service) Diagnostics(ctx context.Context, q Query) (*Diagnostics, error
 			for _, sample := range series {
 				labels := sample.Metric
 				missingID = missingID || labels["service_instance_id"] == ""
-				addInstance(Instance{InstanceID: labels["service_instance_id"], DeviceID: labels["device_id"], ClusterID: labels["cluster_id"], K8sClusterID: labels["k8s_cluster_id"], Pod: labels["k8s_pod_name"], Version: labels["service_version"], Namespace: labels["k8s_namespace_name"]})
+				addInstance(Instance{InstanceID: labels["service_instance_id"], DeviceID: labels["device_id"], ClusterID: labels["cluster_id"], K8sClusterID: labels["k8s_cluster_id"], Pod: labels["k8s_pod_name"], Version: labels["service_version"], Namespace: labels["k8s_namespace_name"], ContainerName: labels["container_name"]})
 			}
 			status := "observed"
 			if len(out.Instances) == 0 {
@@ -207,7 +209,7 @@ func (s *Service) Diagnostics(ctx context.Context, q Query) (*Diagnostics, error
 					missingParents++
 				}
 			}
-			instance := Instance{InstanceID: attrs["service.instance.id"], DeviceID: attrs["device_id"], ClusterID: attrs["cluster_id"], K8sClusterID: attrs["k8s_cluster_id"], Pod: attrs["k8s.pod.name"], Version: attrs["service.version"], Namespace: attrs["k8s.namespace.name"]}
+			instance := Instance{InstanceID: attrs["service.instance.id"], DeviceID: attrs["device_id"], ClusterID: attrs["cluster_id"], K8sClusterID: attrs["k8s_cluster_id"], Pod: attrs["k8s.pod.name"], Version: attrs["service.version"], Namespace: attrs["k8s.namespace.name"], ContainerName: attrs["container.name"]}
 			addInstance(instance)
 		}
 		if matched {

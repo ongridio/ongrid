@@ -24,6 +24,10 @@ scrape_configs:
       - targets: ['ongrid:9100']
     scrape_interval: 15s
 
+  - job_name: 'ongrid-traces-gateway'
+    static_configs:
+      - targets: ['profiles-gateway:8888']
+
   # frontier 没有自暴露 /metrics（singchia/frontier:v1.2.4 暂未开），
   # 等上游加了再来。
   #

@@ -6,7 +6,7 @@ import { Hint } from '@/components/ui/Tooltip';
 import { Select } from '@/components/ui/Select';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowDown, ArrowRight, ArrowUp, ArrowUpRight, RefreshCw } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowUp, ArrowUpRight, RefreshCw, Settings2 } from 'lucide-react';
 import {
   CartesianGrid,
   Line,
@@ -28,6 +28,7 @@ import {
   type ApmOverview,
   type ApmDependencies,
   type ApmRuntime,
+  type ApmSummary,
 } from '@/api/apm';
 import { Button, Card, Chip, EmptyState, PageHeader, PaginationFooter } from '@/components/ui';
 import { ServiceMap } from '@/components/apm/ServiceMap';
@@ -37,6 +38,7 @@ import { ErrorGroups } from '@/components/apm/ErrorGroups';
 import { VersionComparison } from '@/components/apm/VersionComparison';
 import { ServiceLogs } from '@/components/apm/ServiceLogs';
 import { RepositoryBindingButton } from '@/components/apm/RepositoryBinding';
+import { ServiceSetup } from '@/components/apm/ServiceSetup';
 import { SearchInput } from '@/components/apm/SearchInput';
 import { ServiceSwitcher } from '@/components/apm/ServiceSwitcher';
 import { RuntimeMetrics } from '@/components/apm/RuntimeMetrics';
@@ -89,6 +91,7 @@ export default function ApmPage() {
   const initialWindow = useRef(true);
   const [params, setParams] = useSearchParams();
   const [refresh, setRefresh] = useState(0);
+  const [setupService, setSetupService] = useState<ApmSummary>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [resourceOptions, setResourceOptions] = useState<Record<string, { value: string; label: string }[]>>({});
@@ -134,10 +137,11 @@ export default function ApmPage() {
     context.delete('end');
   }
   const scope = context.toString();
-  // Discovery options survive result refreshes, but never cross service/device scope.
+  // Discovery options survive refreshes, but never cross identity or time windows.
   const optionScope = JSON.stringify([
     detail ? ['service_name', 'service_namespace', 'environment'].map((key) => params.get(key)) : null,
     ...['device_id', 'cluster_id', 'cluster_node_id', 'metric_source'].map((key) => params.get(key)),
+    period, ...(period === 'custom' ? ['start', 'end'].map((key) => params.get(key)) : []),
   ]);
   const [filterOptions, setFilterOptions] = useState<{
     scope: string;
@@ -214,7 +218,7 @@ export default function ApmPage() {
   };
   usePoll(() => {
     if (!loading) pickPeriod(period, true);
-  }, 30_000, periods.some(([key]) => key === period) && !['diagnostics', 'discovery', 'alerts', 'errors'].includes(tab));
+  }, 30_000, !setupService && periods.some(([key]) => key === period) && !['diagnostics', 'discovery', 'alerts', 'errors'].includes(tab));
   useEffect(() => {
     const next = new URLSearchParams(params);
     const duration = periods.find(([key]) => key === params.get('range'))?.[1];
@@ -817,15 +821,12 @@ export default function ApmPage() {
                     />
                   ) : (
                     <div className="overflow-x-auto">
-                      <table className="w-full min-w-[960px] table-fixed text-left text-sm">
-                        <colgroup>
-                          {(!detail
-                            ? ['22%', '12%', '12%', '8%', '9%', '12%', '12%', '13%']
-                            : ['45%', '14%', '14%', '14%', '13%']
-                          ).map((width, i) => (
+                      <table className={`w-full min-w-[960px] text-left text-sm${detail ? ' table-fixed' : ''}`}>
+                        {detail && <colgroup>
+                          {['45%', '14%', '14%', '14%', '13%'].map((width, i) => (
                             <col key={i} style={{ width }} />
                           ))}
-                        </colgroup>
+                        </colgroup>}
                         <thead className="border-y border-[rgb(var(--border))] bg-zinc-900/40 text-xs text-zinc-500">
                           <tr>
                             {sortHeading(
@@ -855,7 +856,7 @@ export default function ApmPage() {
                             <th className="px-4 py-3 font-normal">
                               {tr('数据状态', 'Data status')}
                             </th>
-                            {!detail && <th className="px-4 py-3 font-normal">{tr('代码仓库', 'Repository')}</th>}
+                            {!detail && <><th className="w-px whitespace-nowrap px-4 py-3 font-normal">{tr('代码仓库', 'Repository')}</th><th className="w-px whitespace-nowrap px-4 py-3 text-left font-normal">{tr('接入', 'Ingestion')}</th></>}
                           </tr>
                         </thead>
                         {list.items.map((row) => {
@@ -875,10 +876,10 @@ export default function ApmPage() {
                               className="border-b border-[rgb(var(--border))] last:border-0 hover:bg-zinc-900/40"
                             >
                               <tr>
-                                <td className="px-4 py-4 align-top">
+                                <td className="max-w-xs px-4 py-4 align-top">
                                   <div className="flex items-center gap-2">
                                     <Link
-                                      className="min-w-0 break-words font-medium text-zinc-100 hover:text-indigo-500 hover:underline"
+                                      className="min-w-0 [overflow-wrap:anywhere] font-medium text-zinc-100 hover:text-indigo-500 hover:underline"
                                       state={location.state}
                                       to={to}
                                       onClick={(event) => openService(event, to)}
@@ -903,13 +904,13 @@ export default function ApmPage() {
                                 {!detail && (
                                   <>
                                     <Hint content={row.identity.environment || unset}><td
-                                      className="truncate px-3 py-4 align-top text-zinc-400"
+                                      className="max-w-40 truncate px-3 py-4 align-top text-zinc-400"
 
                                     >
                                       {row.identity.environment || unset}
                                     </td></Hint>
                                     <Hint content={row.identity.service_namespace || unset}><td
-                                      className="truncate px-3 py-4 align-top text-zinc-400"
+                                      className="max-w-48 truncate px-3 py-4 align-top text-zinc-400"
 
                                     >
                                       {row.identity.service_namespace || unset}
@@ -947,7 +948,8 @@ export default function ApmPage() {
                                   {row.metric_source === 'tempo_spanmetrics' && row.data_status !== 'traces_only' && `${tr('Trace 样本', 'Trace samples')} · `}
                                   {status(row.data_status)}
                                 </td>
-                                {!detail && <td className="px-3 py-3"><RepositoryBindingButton identity={row.identity} canEdit={isAdmin} /></td>}
+                                {!detail && <td className="w-px whitespace-nowrap px-3 py-3"><div className="max-w-52"><RepositoryBindingButton identity={row.identity} canEdit={isAdmin} /></div></td>}
+                                {!detail && <td className="w-px whitespace-nowrap px-3 py-3"><Button variant="subtle" size="sm" aria-label={tr(`接入配置：${row.identity.service_name}`, `Ingestion configuration: ${row.identity.service_name}`)} onClick={() => setSetupService(row)}><Settings2 size={14} aria-hidden="true" />{tr('接入配置', 'Ingestion configuration')}</Button></td>}
                               </tr>
                             </tbody>
                           );
@@ -1364,6 +1366,7 @@ export default function ApmPage() {
           </Card>
         )}
       </main></TabsContent>
+      {setupService && <ServiceSetup service={setupService} params={serviceParams(params, setupService.identity, 'http')} onClose={() => setSetupService(undefined)} />}
     </div></Tabs>
   );
 }

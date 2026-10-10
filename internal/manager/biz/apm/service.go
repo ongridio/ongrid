@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"slices"
 	"sort"
 	"strconv"
@@ -38,6 +39,9 @@ type Service struct {
 	logs     LogCounter
 	bindings BindingSettings
 	repos    BindingRepositories
+
+	receivers ReceiverResolver
+	log       *slog.Logger
 
 	errorSnapshots errorSnapshots
 	errorReads     chan struct{}

@@ -113,6 +113,7 @@ for arch in amd64 arm64; do
     "$package_root/prometheus.yml" \
     "$package_root/loki-config.yaml" \
     "$package_root/tempo-config.yaml" \
+    "$package_root/profiles-gateway.yaml" \
     "$package_root/edge/fetch-edge-assets.sh" \
     "$package_root/edge/verify-edge-deps-archive.sh" \
     "$package_root/edge/edge-assets-lib.sh" \
@@ -151,8 +152,10 @@ for arch in amd64 arm64; do
   grep -Fq 'EDGE_SWAP_COMPLETE=1' "$extract_dir/$package_root/install.sh"
   grep -Fq 'restored the previous Edge directory after install failure' \
     "$extract_dir/$package_root/install.sh"
-  grep -Fq -- '--no-deps --force-recreate ongrid nginx' \
+  grep -Fq -- '--no-deps --force-recreate ongrid nginx profiles-gateway' \
     "$extract_dir/$package_root/install.sh"
+  cmp "$repo_root/deploy/install/profiles-gateway.yaml" \
+    "$extract_dir/$package_root/profiles-gateway.yaml"
   grep -Fq 'pcap-parser:' "$extract_dir/$package_root/docker-compose.yml"
   grep -Fq 'ONGRID_PACKET_PARSER_URL: http://pcap-parser:8080' \
     "$extract_dir/$package_root/docker-compose.yml"

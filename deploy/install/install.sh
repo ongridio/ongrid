@@ -896,13 +896,13 @@ log_info "starting stack: docker compose ${COMPOSE_ARGS[*]} up -d"
 )
 
 # A running container keeps its bind mount attached to the old directory inode
-# after an atomic host-side rename. On re-install, force only the two Edge
-# directory consumers to rebind even when the image/config version is unchanged.
+# after an atomic host-side rename. On re-install, rebind the Edge directory
+# consumers and restart the Collector to load its replaced configuration.
 if [[ $EDGE_RECREATE_REQUIRED -eq 1 ]]; then
-    log_info "recreating Manager and nginx to activate the replaced Edge directory"
+    log_info "recreating Manager, nginx and Collector to activate replaced assets"
     (
         cd "$INSTALL_DIR"
-        docker compose "${COMPOSE_ARGS[@]}" up -d --no-deps --force-recreate ongrid nginx
+        docker compose "${COMPOSE_ARGS[@]}" up -d --no-deps --force-recreate ongrid nginx profiles-gateway
     )
 fi
 
