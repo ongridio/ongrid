@@ -11,7 +11,8 @@ const target = { executable: '/opt/orders', port: 8080, service_name: 'orders' }
 beforeEach(() => { vi.clearAllMocks(); vi.mocked(listEdgePlugins).mockResolvedValue({ items: [] }); vi.mocked(getAutoAPMOptions).mockResolvedValue({ environments: ['test'], namespaces: ['commerce'] }); });
 it('opens saved targets read-only, cancels edits and saves fixed capture defaults', async () => {
   const user = userEvent.setup(); const save = vi.fn().mockResolvedValue(undefined);
-  render(<AutoAPMCard edgeId={1} deviceName="Ubuntu" online={false} row={{ plugin_name: 'autoapm', enabled: false, spec: { sample_ratio: 0.1, tls_insecure_skip_verify: false, targets: [target] } }} onSave={save} />);
+  const ownedTarget = { ...target, target_id: 'ad7d4482-8da1-5bf7-ad11-83e93f3caaf8' };
+  render(<AutoAPMCard edgeId={1} deviceName="Ubuntu" online={false} row={{ plugin_name: 'autoapm', enabled: false, spec: { sample_ratio: 0.1, tls_insecure_skip_verify: false, targets: [ownedTarget] } }} onSave={save} />);
   expect(screen.getByText('orders')).toBeInTheDocument();
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
@@ -27,7 +28,7 @@ it('opens saved targets read-only, cancels edits and saves fixed capture default
   await user.click(screen.getByRole('button', { name: 'Edit orders' }));
   expect(screen.getByLabelText('Service name')).toHaveValue('orders');
   await user.click(screen.getByRole('button', { name: 'Save target' }));
-  expect(save).toHaveBeenCalledWith({ enabled: true, spec: { sample_ratio: 1, tls_insecure_skip_verify: true, targets: [target] } });
+  expect(save).toHaveBeenCalledWith({ enabled: true, spec: { sample_ratio: 1, tls_insecure_skip_verify: true, targets: [ownedTarget] } });
   expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
 });
 it('adds a discovered process only on save and preserves the draft on failure', async () => {

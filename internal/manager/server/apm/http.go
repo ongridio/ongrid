@@ -40,6 +40,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Get("/v1/apm/diagnostics", h.diagnostics)
 	r.Get("/v1/apm/runtime", h.runtime)
 	r.Get("/v1/apm/instances", h.instances)
+	r.Get("/v1/apm/ingestion", h.ingestion)
 	r.Get("/v1/apm/error-groups", h.errorGroups)
 	r.Get("/v1/apm/alert-template", h.alertTemplate)
 	r.Get("/v1/apm/repository-binding", h.repositoryBinding)
@@ -101,6 +102,14 @@ func (h *Handler) runtime(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {object} apm.Runtime
 func (h *Handler) instances(w http.ResponseWriter, r *http.Request) {
 	h.serve(w, r, true, func(ctx context.Context, q biz.Query) (any, error) { return h.svc.Instances(ctx, q) })
+}
+
+// @Summary Resolve application OTLP receivers for an observed service
+// @Description Authenticated read; exact service identity and current resource scope are required.
+// @Router /api/v1/apm/ingestion [get]
+// @Success 200 {object} apm.Ingestion
+func (h *Handler) ingestion(w http.ResponseWriter, r *http.Request) {
+	h.serve(w, r, true, func(ctx context.Context, q biz.Query) (any, error) { return h.svc.Ingestion(ctx, q) })
 }
 
 // @Summary Group matching error spans from a bounded sample of recent traces

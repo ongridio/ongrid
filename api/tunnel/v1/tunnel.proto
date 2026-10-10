@@ -199,6 +199,23 @@ message EstablishedConnection {
 
 message GetNetstatRequest {}
 
+// get_application_receiver: read the OTLP listener reachable from an observed process.
+message ApplicationReceiverRequest {
+  int32 process_id = 1 [json_name = "process_id"];
+  string container_name = 2 [json_name = "container_name"];
+  string instance_id = 3 [json_name = "instance_id"];
+  string service_name = 4 [json_name = "service_name"];
+  string service_namespace = 5 [json_name = "service_namespace"];
+  string environment = 6 [json_name = "environment"];
+}
+message ApplicationReceiverResponse {
+    string endpoint = 1 [json_name = "endpoint"];
+    string location = 2 [json_name = "location"];
+    bool metrics = 3 [json_name = "metrics"];
+    string reason = 4 [json_name = "reason"];
+    string target_id = 5 [json_name = "target_id"];
+}
+
 message GetNetstatResponse {
     repeated ListeningSocket listening = 1 [json_name = "listening"];
     repeated EstablishedConnection established = 2 [json_name = "established"];

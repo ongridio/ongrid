@@ -4,14 +4,113 @@ receivers:
       http:
         endpoint: 0.0.0.0:4318
 
+processors:
+  memory_limiter/traces:
+    check_interval: 1s
+    limit_mib: 384
+    spike_limit_mib: 64
+  filter/sdk:
+    error_mode: propagate
+    traces:
+      span:
+        - 'resource.attributes["ongrid.instrumentation.source"] == "obi" or resource.attributes["telemetry.distro.name"] == "opentelemetry-ebpf-instrumentation"'
+  filter/preference_candidates:
+    error_mode: propagate
+    traces:
+      span:
+        # An SDK without an instance identity cannot suppress another process.
+        - 'resource.attributes["ongrid.instrumentation.source"] != "obi" and resource.attributes["telemetry.distro.name"] != "opentelemetry-ebpf-instrumentation" and (resource.attributes["service.instance.id"] == nil or resource.attributes["service.instance.id"] == "") and (resource.attributes["k8s.pod.uid"] == nil or resource.attributes["k8s.pod.uid"] == "")'
+  transform/preference_key:
+    error_mode: propagate
+    trace_statements:
+      - context: span
+        statements:
+          # Tail sampling groups by TraceID. Partition its private copy by
+          # resource identity so one SDK service cannot erase a downstream OBI service.
+          - set(span.attributes["ongrid.internal.original_trace_id"], span.trace_id.string)
+          - set(span.cache["scope"], "")
+          - set(span.cache["scope"], Concat(["device:", String(resource.attributes["device_id"])], "")) where resource.attributes["device_id"] != nil
+          - set(span.cache["scope"], Concat(["cluster:", String(resource.attributes["cluster_id"])], "")) where resource.attributes["cluster_id"] != nil and String(resource.attributes["cluster_id"]) != "0" and String(resource.attributes["cluster_id"]) != ""
+          - set(span.cache["namespace"], "")
+          - set(span.cache["namespace"], String(resource.attributes["service.namespace"])) where resource.attributes["service.namespace"] != nil
+          - set(span.cache["name"], "")
+          - set(span.cache["name"], String(resource.attributes["service.name"])) where resource.attributes["service.name"] != nil
+          - set(span.cache["instance"], "")
+          - set(span.cache["instance"], String(resource.attributes["service.instance.id"])) where resource.attributes["service.instance.id"] != nil
+          - set(span.cache["instance"], String(resource.attributes["k8s.pod.uid"])) where resource.attributes["k8s.pod.uid"] != nil and String(resource.attributes["k8s.pod.uid"]) != ""
+          - set(span.cache["environment"], "")
+          - set(span.cache["environment"], String(resource.attributes["deployment.environment.name"])) where resource.attributes["deployment.environment.name"] != nil
+          - set(span.trace_id.string, Substring(SHA256(Concat([span.trace_id.string, SHA256(span.cache["scope"]), SHA256(span.cache["namespace"]), SHA256(span.cache["name"]), SHA256(span.cache["instance"]), SHA256(span.cache["environment"])], "")), 0, 32))
+  tail_sampling/sdk_preference:
+    decision_wait: 30s
+    num_traces: 10000
+    maximum_trace_size_bytes: 1048576
+    decision_cache:
+      sampled_cache_size: 100000
+      non_sampled_cache_size: 100000
+    # A pending OBI batch must not escape before the decision window on shutdown.
+    drop_pending_traces_on_shutdown: true
+    policies:
+      - name: sdk-wins
+        type: drop
+        drop:
+          drop_sub_policy:
+            - name: has-sdk
+              type: ottl_condition
+              ottl_condition:
+                error_mode: propagate
+                span:
+                  - 'resource.attributes["ongrid.instrumentation.source"] != "obi" and resource.attributes["telemetry.distro.name"] != "opentelemetry-ebpf-instrumentation"'
+      - name: obi-fallback
+        type: always_sample
+  filter/obi:
+    error_mode: propagate
+    traces:
+      span:
+        - 'resource.attributes["ongrid.instrumentation.source"] != "obi" and resource.attributes["telemetry.distro.name"] != "opentelemetry-ebpf-instrumentation"'
+  transform/restore_trace_id:
+    error_mode: propagate
+    trace_statements:
+      - context: span
+        statements:
+          - set(span.trace_id.string, span.attributes["ongrid.internal.original_trace_id"])
+          - delete_key(span.attributes, "ongrid.internal.original_trace_id")
+  batch/traces:
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+    timeout: 1s
+
 exporters:
+  otlphttp/tempo:
+    traces_endpoint: http://tempo:4318/v1/traces
+    compression: gzip
+    sending_queue:
+      queue_size: 1000
+    retry_on_failure:
+      max_elapsed_time: 5m
   otlp_grpc/pyroscope:
     endpoint: pyroscope:4040
     tls:
       insecure: true
 
 service:
+  telemetry:
+    metrics:
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 0.0.0.0
+                port: 8888
   pipelines:
+    traces/sdk:
+      receivers: [otlp]
+      processors: [memory_limiter/traces, filter/sdk, batch/traces]
+      exporters: [otlphttp/tempo]
+    traces/obi_fallback:
+      receivers: [otlp]
+      processors: [memory_limiter/traces, filter/preference_candidates, transform/preference_key, tail_sampling/sdk_preference, filter/obi, transform/restore_trace_id, batch/traces]
+      exporters: [otlphttp/tempo]
     profiles:
       receivers: [otlp]
       exporters: [otlp_grpc/pyroscope]

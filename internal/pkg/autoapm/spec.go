@@ -10,12 +10,15 @@ import (
 	"path"
 	"regexp"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 const MaxTargets = 100
 const MaxCandidates = 200
 
 type Target struct {
+	TargetID         string `json:"target_id,omitempty"`
 	Executable       string `json:"executable"`
 	Port             uint16 `json:"port"`
 	ServiceName      string `json:"service_name"`
@@ -23,6 +26,15 @@ type Target struct {
 	Environment      string `json:"environment,omitempty"`
 	LogPath          string `json:"log_path,omitempty"`
 }
+
+// ID also gives legacy targets a stable device-scoped identity without a migration.
+func (t Target) ID() string {
+	if t.TargetID != "" {
+		return t.TargetID
+	}
+	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(fmt.Sprintf("ongrid:autoapm:%s:%d", t.Executable, t.Port))).String()
+}
+
 type KubernetesRule struct {
 	Namespace    string `json:"namespace"`
 	WorkloadKind string `json:"workload_kind,omitempty"`
@@ -80,6 +92,7 @@ func Parse(raw map[string]interface{}) (Spec, error) {
 		return s, fmt.Errorf("auto APM: at most %d targets", MaxTargets)
 	}
 	seen := map[string]bool{}
+	ids := map[string]bool{}
 	identities := map[[2]string]string{}
 	logPaths := map[string][3]string{}
 	for i, t := range s.Targets {
@@ -107,6 +120,13 @@ func Parse(raw map[string]interface{}) (Spec, error) {
 			return s, fmt.Errorf("auto APM: duplicate target %d", i+1)
 		}
 		seen[key] = true
+		id := t.ID()
+		parsedID, err := uuid.Parse(id)
+		if err != nil || parsedID.String() != id || ids[id] {
+			return s, fmt.Errorf("auto APM: target %d requires a unique UUID target_id", i+1)
+		}
+		ids[id] = true
+		s.Targets[i].TargetID = id
 		// OBI exports service identity, not the selection rule. All targets of
 		// one service must agree so the Collector can enrich it unambiguously.
 		identity := [2]string{t.ServiceName, t.ServiceNamespace}

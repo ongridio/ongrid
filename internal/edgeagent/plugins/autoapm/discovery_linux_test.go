@@ -4,13 +4,16 @@ package autoapm
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 
@@ -60,6 +63,59 @@ func TestDiscoverySameBinarySamePortWorkers(t *testing.T) {
 			testListeningWorkers(t, shared)
 		})
 	}
+}
+
+func TestDiscoveryFindsListenerInAnotherNetworkNamespace(t *testing.T) {
+	command := exec.Command("unshare", "--net", os.Args[0], "-test.run=^TestDiscoveryListenerChild$")
+	command.Env = append(os.Environ(), "ONGRID_TEST_LISTEN_PORT=0")
+	var stderr bytes.Buffer
+	command.Stderr = &stderr
+	in, err := command.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := command.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := command.Start(); err != nil {
+		in.Close()
+		if errors.Is(err, exec.ErrNotFound) {
+			t.Skip("unshare is unavailable")
+		}
+		t.Fatal(err)
+	}
+	reader := bufio.NewScanner(out)
+	if !reader.Scan() {
+		in.Close()
+		waitErr := command.Wait()
+		if strings.Contains(stderr.String(), "Operation not permitted") {
+			t.Skip("network namespace creation requires CAP_SYS_ADMIN")
+		}
+		t.Fatalf("namespaced listener failed: %v %s", waitErr, stderr.String())
+	}
+	t.Cleanup(func() {
+		if err := in.Close(); err != nil {
+			t.Error(err)
+		}
+		if err := command.Wait(); err != nil {
+			t.Error(err)
+		}
+	})
+	port, err := strconv.Atoi(reader.Text())
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidates, err := discover(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, candidate := range candidates {
+		if int(candidate.PID) == command.Process.Pid && int(candidate.Port) == port {
+			return
+		}
+	}
+	t.Fatalf("missing namespaced listener PID=%d port=%d: %+v", command.Process.Pid, port, candidates)
 }
 
 func testListeningWorkers(t *testing.T, shared bool) {
@@ -144,7 +200,7 @@ func testListeningWorkers(t *testing.T, shared bool) {
 	identities := []tunnel.PromSample{}
 	for _, pid := range []int{first, second} {
 		identities = append(identities, tunnel.PromSample{Name: "target_info", Value: 1, Labels: map[string]string{
-			"ongrid_instrumentation_source": "obi", "host_name": "host", "service_name": "workers", "service_namespace": "shop", "deployment_environment_name": "test", "service_instance_id": fmt.Sprintf("host:%d", pid),
+			"ongrid_instrumentation_source": "obi", "host_name": "host", "service_name": "workers", "service_namespace": "shop", "deployment_environment_name": "test", "service_instance_id": fmt.Sprintf("host:%d", pid), "instance": fmt.Sprintf("host:%d", pid),
 		}})
 	}
 	p := Plugin{discover: discover}
@@ -189,7 +245,7 @@ func TestDiscoveryDisplayLimitDoesNotDropResources(t *testing.T) {
 		t.Fatalf("heartbeat should remain bounded with a warning: %+v", p.health)
 	}
 	spec := contract.Spec{Environment: "test", Targets: []contract.Target{{Executable: chosen.Executable, Port: chosen.Port, ServiceName: "orders", ServiceNamespace: "shop"}}}
-	labels := map[string]string{"ongrid_instrumentation_source": "obi", "host_name": "host", "service_name": "orders", "service_namespace": "shop", "deployment_environment_name": "test", "service_instance_id": fmt.Sprintf("host:%d", os.Getpid())}
+	labels := map[string]string{"ongrid_instrumentation_source": "obi", "host_name": "host", "service_name": "orders", "service_namespace": "shop", "deployment_environment_name": "test", "service_instance_id": fmt.Sprintf("host:%d", os.Getpid()), "instance": fmt.Sprintf("host:%d", os.Getpid())}
 	samples, err := p.collectResources(t.Context(), spec, []tunnel.PromSample{{Name: "target_info", Value: 1, Labels: labels}})
 	if err != nil || len(samples) != 8 {
 		t.Fatalf("selected process beyond display limit lost resources: %d %v", len(samples), err)

@@ -189,6 +189,32 @@ func TestRenderLiteralSelectionAndIndependentSampling(t *testing.T) {
 	}
 }
 
+func TestAutomaticSDKTraceDetectionRetainsOBIFallbackAndMetrics(t *testing.T) {
+	body, err := render(plugins.PluginConfig{Spec: contract.Spec{Targets: []contract.Target{
+		{Executable: "/opt/sdk", Port: 8080, ServiceName: "sdk"},
+		{Executable: "/opt/automatic", Port: 8080, ServiceName: "automatic"},
+	}}.Map()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config map[string]interface{}
+	if err := yaml.Unmarshal(body, &config); err != nil {
+		t.Fatal(err)
+	}
+	discovery := config["discovery"].(map[string]interface{})
+	if discovery["exclude_otel_instrumented_services"] != true {
+		t.Fatal("automatic SDK detection disabled")
+	}
+	for _, rule := range discovery["services"].([]interface{}) {
+		if _, ok := rule.(map[string]interface{})["exports"]; ok {
+			t.Fatal("target cannot fall back to OBI traces")
+		}
+	}
+	if !reflect.DeepEqual(config["metrics"].(map[string]interface{})["features"], []interface{}{"application", "application_runtime"}) {
+		t.Fatal("OBI runtime metrics disabled")
+	}
+}
+
 func TestCollectorReceivesDefaultAndServiceEnvironment(t *testing.T) {
 	cfg := collectorConfig(plugins.PluginConfig{}, contract.Spec{Environment: "production", Targets: []contract.Target{{ServiceName: "orders", ServiceNamespace: "shop", Environment: "test"}, {ServiceName: "inventory"}}})
 	if cfg.Spec["bounded_pipelines"] != true {

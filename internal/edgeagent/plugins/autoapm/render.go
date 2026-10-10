@@ -37,7 +37,7 @@ func render(cfg plugins.PluginConfig) ([]byte, error) {
 		ebpf["bpf_fs_path"] = "/sys/fs/bpf/ongrid"
 		kubernetes["enable"] = "true"
 		kubernetes["disable_informers"] = []string{"service"}
-		// OBI v0.12.1 infers its node from os.Hostname, not spec.nodeName.
+		// OBI infers its node from os.Hostname, not spec.nodeName.
 		// Only restrict metadata when that inference is safe. Otherwise local
 		// process/container IDs still limit capture to this node's selected Pods.
 		// ponytail: cache cluster metadata until OBI accepts an explicit node name.

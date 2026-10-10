@@ -39,6 +39,8 @@ type Plugin struct {
 	pusher                  custommetrics.Pusher
 	resourceSpec            contract.Spec
 	resourceError           string
+	resourceGeneration      uint64
+	bindings                map[[4]string][]processBinding
 }
 
 func New(binDir, workDir string, pusher custommetrics.Pusher, edgeID custommetrics.EdgeIDProvider, log *slog.Logger) *Plugin {
@@ -57,7 +59,7 @@ func New(binDir, workDir string, pusher custommetrics.Pusher, edgeID custommetri
 			}
 			return env
 		}, WorkDir: root, ConfigFile: filepath.Join(root, "obi.yaml"), ConfigRender: render,
-			// OBI v0.12.1 validates v1 at startup; its standalone validate command
+			// OBI validates v1 at startup; its standalone validate command
 			// only accepts v2, which cannot preserve per-target service names.
 			Args: func(_ plugins.PluginConfig, path string) []string { return []string{"--config=" + path} }, Log: log}),
 	}
@@ -101,6 +103,8 @@ func (p *Plugin) Configure(cfg plugins.PluginConfig) error {
 	p.mu.Lock()
 	p.selected = s.Selected()
 	p.resourceSpec = s
+	p.resourceGeneration++
+	p.bindings = nil
 	p.resourceError = ""
 	p.kubernetes = s.Kubernetes != nil
 	p.health.LastError = ""

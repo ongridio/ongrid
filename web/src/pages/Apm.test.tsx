@@ -8,6 +8,7 @@ import { server } from '@/test/msw-server';
 import ApmPage from './Apm';
 
 beforeEach(() => server.use(
+  http.get('/api/v1/apm/ingestion', () => HttpResponse.json({ data: { targets: [] } })),
   http.get('/api/v1/system-settings', () => HttpResponse.json({ items: [], total: 0 })),
   http.get('/api/v1/edges', () => HttpResponse.json({ items: [], total: 0 })),
   http.get('/api/v1/k8s/clusters', () => HttpResponse.json({ items: [], total: 0 })),
@@ -53,6 +54,37 @@ describe('Application performance', () => {
     expect(curves).toBe(0);
     fireEvent.click(screen.getByRole('tab', { name: '实例' }));
     await waitFor(() => expect(curves).toBe(1));
+  });
+  it('clears instances, curves and options when the selected time window changes', async () => {
+    let release = () => {};
+    const replacement = new Promise<void>((resolve) => { release = resolve; });
+    let changed = false;
+    server.use(http.get('/api/v1/apm/runtime', async ({ request }) => {
+      const next = new URL(request.url).searchParams.get('start') !== '2026-09-07T00:00:00Z';
+      if (next) { changed = true; await replacement; }
+      const id = next ? 'new-instance' : 'old-instance';
+      return HttpResponse.json({ data: {
+        instances: [{ instance_id: id, version: 'v1' }],
+        items: [{ name: 'go_goroutines', instance_id: id, version: 'v1', unit: 'count', value: 2, points: [] }],
+      } });
+    }));
+    render(<MemoryRouter initialEntries={[`/apm/service?${period}&range=custom&service_name=orders&environment=production&service_namespace=trade&tab=instances`]}><ApmPage /></MemoryRouter>);
+    await screen.findByRole('button', { name: 'old-instance' });
+    await userEvent.click(screen.getByRole('button', { name: '时间范围' }));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2026-09-07T02:00:00' } });
+    fireEvent.change(screen.getByLabelText('结束时间'), { target: { value: '2026-09-07T03:00:00' } });
+    await userEvent.click(screen.getByRole('button', { name: '应用' }));
+    await waitFor(() => expect(changed).toBe(true));
+    expect(screen.queryByRole('button', { name: 'old-instance' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /old-instance.*只显示此曲线/ })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('combobox', { name: '实例' }));
+    expect(screen.queryByRole('option', { name: 'old-instance' })).not.toBeInTheDocument();
+    await userEvent.keyboard('{Escape}');
+    release();
+    await screen.findByRole('button', { name: 'new-instance' });
+    await userEvent.click(screen.getByRole('combobox', { name: '实例' }));
+    expect(await screen.findByRole('option', { name: 'new-instance' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'old-instance' })).not.toBeInTheDocument();
   });
   it.each([
     ['版本', 'service_version', 'v2', 'v1'],
@@ -157,6 +189,13 @@ describe('Application performance', () => {
     expect(urls[0].searchParams.get('start')).toBe('2026-09-07T00:00:00Z');
     expect(screen.getByText('样本不足')).toBeInTheDocument();
     expect(screen.getByText('0.0004')).toBeInTheDocument();
+    const stagingRow = links[1].closest('tr')!;
+    fireEvent.click(within(stagingRow).getByRole('button', { name: '接入配置：orders' }));
+    const setup = await screen.findByRole('dialog', { name: '接入配置' });
+    expect(within(setup).getByText('orders')).toBeInTheDocument();
+    expect(within(setup).getByText('staging')).toBeInTheDocument();
+    expect(within(setup).getByText('trade')).toBeInTheDocument();
+    fireEvent.click(within(setup).getAllByRole('button', { name: '关闭' })[0]);
     fireEvent.click(screen.getByRole('tab', { name: '服务发现' }));
     expect(await screen.findByText('暂无匹配的集群')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'orders' })).not.toBeInTheDocument();

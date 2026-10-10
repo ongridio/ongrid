@@ -56,11 +56,41 @@ OBI 保持 `exclude_otel_instrumented_services=true`；其 OTel 导出检测不�
 
 新增 autoapm 插件，复用现有 Manager 插件配置、鉴权 tunnel、心跳及 subprocess 生命周期。enabled 表示整个自动 APM 开关；targets 为空只运行监听进程发现。心跳及界面候选最多 200 组，已选目标的资源采集不受候选展示上限限制；目标最多 100 组，只上报路径/端口/PID，不采集进程参数或环境变量。目标必须为确定的绝对路径和非零端口；不接受 glob、正则配置或环境替换符。
 
-选择进程后启动固定版本 OBI v0.12.1 与私有 Collector 0.157.0。OBI 使用 v1 services 的转义完整路径正则与端口 AND 匹配，保留逐目标服务名称；其 v2 迁移不支持逐目标名称，独立 `config validate` 命令也只接受 v2。因此 v1 由 OBI 启动时校验，复用 subprocess readiness 检测启动错误并回滚。所需系统能力设为强制检查，禁止缺权限仍显示成功启动。
+选择进程后启动固定版本 OBI v0.14.0 与私有 Collector 0.157.0。OBI 使用 v1 services 的转义完整路径正则与端口 AND 匹配，保留逐目标服务名称；其 v2 迁移不支持逐目标名称，独立 `config validate` 命令也只接受 v2。因此 v1 由 OBI 启动时校验，复用 subprocess readiness 检测启动错误并回滚。所需系统能力设为强制检查，禁止缺权限仍显示成功启动。
 
 OBI 仅向 loopback 的 OTLP 14317/14318 导出。Collector 健康端口 14333、自监控 18888、应用指标 exporter 9465，避免影响已有 SDK Collector。Trace 经现有 Manager URL 与鉴权写入 Tempo；指标复用 custommetrics scraper，经 push_prom_samples 上报，source=obi。环境、device_id、可用的 cluster_id 和 ongrid.instrumentation.source 在 Collector 设置。未添加新的公开接收端口、存储或 spanmetrics 管线。自动 APM 采集统一使用 Trace 采样比例 1，并允许 Manager 自签名证书（跳过证书验证）。由 Manager 在下发时覆盖历史采样和证书选项，普通设备与 Kubernetes 一致；旧 API 字段保留以兼容旧配置。
 
-请求指标直接使用 OBI 的 HTTP/RPC 秒制直方图，沿用现有 APM 查询，不从已采样 Trace 计算全量 RED。OBI 开启现有 OTLP 导出进程排除以减少重复采集，但这不是任意 SDK/协议的可靠去重器；已接 SDK 的服务应由用户保持单一采集路径。APM 目前不提供 OBI/SDK 按信号自动择优合并。
+请求指标直接使用 OBI 的 HTTP/RPC 秒制直方图，沿用现有 APM 查询，不从已采样 Trace 计算全量 RED。OBI 开启 `exclude_otel_instrumented_services`：没有 SDK Trace 时使用 OBI，观测到该进程成功导出 SDK Trace 后停止 OBI Trace。Trace 与指标独立检测，不因 SDK 仅发送指标而关闭 OBI Trace；运行时和进程资源采集保留。检测结果保持到进程退出，不能保证同进程 SDK 停用后自动回退。检测前已输出的重叠 Trace 另由下述入口缓冲处理；不合并或修改应用指标。
+
+## SDK 与 OBI 首批 Trace 去重（2026-10-10）
+
+用户确认等待窗口为 30 秒。内置 nginx `/v1/traces` 保留原认证、限流和请求上限，改为进入已有 `profiles-gateway` 的官方 Collector 0.157.0；复用其现有 OTLP 接收端及镜像，不新增服务、依赖、公开端口、OBI 源码补丁或 Manager Go 数据流。Profiles 管线保留。SDK Trace 直接转发；另一路同时观察 SDK 与 OBI，在首次收到每组 Trace 后等待 30 秒。组内出现 SDK 时丢弃该组的 OBI；否则输出 OBI。因此无 SDK 时仍有 Trace，延迟约 30 秒加出口批处理时间。
+
+Collector 的 tail sampling 只能按 TraceID 分组。仅在私有候选管线中，将 TraceID 临时映射为原 TraceID 加身份的 SHA256 前 128 位；身份包含设备或统一集群、服务名称、命名空间、环境和实例。每个身份部分先分别散列，避免分隔符碰撞。Kubernetes 优先用实际 `k8s.pod.uid` 对齐 SDK Pod UID 和 OBI 容器实例名，并沿用服务名称区分同 Pod 的服务。输出 OBI 前恢复原 TraceID、删除临时属性；SDK 直通管线不修改原数据。SpanID、父 SpanID、事件、状态和业务属性保留。同一分布式 Trace 中其他实例或服务的 OBI 不会因上游 SDK 被删除。缺少实例及 Pod UID 的 SDK 不参与抑制。
+
+内存限制 384 MiB、尖峰 64 MiB，候选上限 10000 组、单组 1 MiB，保留与丢弃决定缓存各 100000 项；超出容量可能拒收或淘汰候选，不能把此上限当作无损吞吐承诺。Collector 自监控由内网 Prometheus 抓取，应观察拒收、提前淘汰、采样丢弃和出口失败；在代表性负载下验证容量后才能扩容。共享 Collector 同时承载 Profiles，其内存也计入限制检查。
+
+边界：SDK 和 OBI 必须带一致的身份、TraceID，并进入同一个入口 Collector。SDK 到达超过 30 秒、直接写外部后端、旧 nginx 绕过入口、多个入口未经 Trace 分片、同 Pod 同名服务未提供容器级身份，均不在此去重保证内。SDK 与 OBI 没有共同上下文时不按时间或 URL 猜测删除。该管线不处理 SDK 内部重复插桩，也不消除无 SDK 时 OBI 自己的多层服务端 Span。重启入口会丢弃尚未决策的候选，避免提前发出 OBI 而产生重复；出口仍使用官方有界队列和重试。回滚先恢复 nginx 直写 Tempo，再回滚 Collector 配置；历史重复 Span 不删除。
+
+真实管线回归入口：设置 `ONGRID_TEST_OTELCOL_BINARY` 后执行 `go test -race ./internal/edgeagent/plugins/traces -run TestGatewaySDKPreference`。测试启动原版 Collector，检查延迟 SDK、无 SDK 回退、同 Trace 跨实例/服务/设备/环境隔离、Pod UID 对齐与输出 Span 原值；生产配置的 30 秒窗口另做现场冷启动验收。
+
+本地 30 秒配置验收：普通 Linux 设备上的原生二进制和 Docker bridge 应用各重启三轮，启动脚本和环境配置不变；每轮 PID 与实例 UUID 更新，目标 UUID 保持。共 320 个冷启动请求（各 160 个）均只保留对应 SDK 服务端 Span，SpanID 和父 SpanID 正确，SDK 请求指标和当前进程资源归属通过。另用完全不含 OTel SDK 的 Go 标准库容器发送 20 个请求，15 秒时均未输出，窗口结束后全部由 OBI 输出且每次只有一个服务端 Span。真实 Collector 的 traces 包 race 检查、双架构安装包配置打包检查通过；入口拒收和提前淘汰计数为零。这不是容量压测或 Kubernetes 现场验收。
+
+升级前的运行时指标单独记录：OBI v0.12.1 第一轮和第三轮当前实例的六类 Go 运行时指标通过；第二轮原生进程在新 GC 后等待 90 秒仍未收到 Go 指标，BPF 检查显示该进程的 Go 探针未附着，Docker 同轮正常。第三轮两个进程均恢复，期间未重启 OBI。该三轮记录只证明 Trace 去重，重新附着修复及后续验收见下文。
+
+## Go 探针重新附着（2026-10-10）
+
+升级固定版本至官方 OBI v0.14.0。v0.12.1 的 `NewExecutable` 查找可复用探针后先释放锁，再提交新进程；并发的 `UnlinkExecutable` 可在两者之间关闭该探针，新进程随后复用已关闭的链接。该竞态与现场“新进程元数据已注册，但 Go uprobes 缺失”的故障一致。v0.14.0 对整个附着过程持有与卸载相同的锁，避免关闭后再提交；同时统一探针关闭的所有权。参见 [v0.12.1 实现](https://github.com/open-telemetry/opentelemetry-ebpf-instrumentation/blob/v0.12.1/pkg/ebpf/tracer_linux.go)、[v0.14.0 实现](https://github.com/open-telemetry/opentelemetry-ebpf-instrumentation/blob/v0.14.0/pkg/ebpf/tracer_linux.go)和 [上游修改](https://github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pull/3418)。
+
+Make 与 Edge Docker 构建使用同一版本，依赖附件标签随 `OBI_VERSION` 更新；仍从官方 Release 下载、校验双架构发布包和分发许可证，不修改 OBI 源码。现有 v1 目标匹配、SDK 自动排除、Collector、服务身份和应用启动配置继续使用。应用重启由 OBI 自动处理，Ongrid 不增加按应用重启探针的逻辑。
+
+官方原版在 Lima Linux 6.8 ARM64 上完成六轮现场验收：原生二进制和 Docker bridge 容器原地重启四轮、容器重建一轮，以及两种应用各连续重启八次后的最终检查一轮。连续重启间隔为 3 秒，遵守测试服务的 systemd 启动限频。OBI PID 全程为 27260；应用启动脚本和环境配置校验和不变，每轮实例 UUID 更新、目标 UUID 保持。每个当前实例均有六类 Go 指标（345 条原始运行时序列）和八条身份正确的进程资源序列；重建后的容器 ID 更新。共 480 个 SDK 请求均无重复服务端 Span，SpanID、父 SpanID、请求数、错误数和业务计数器正确。
+
+新版另用完全不含 OTel SDK 的 Go 标准库容器复验 20 个请求：15 秒时全部仍被入口缓冲，窗口结束后全部由 OBI 输出，每次只有一个服务端 Span。临时容器及其镜像标签已清理，主测试应用及 OBI 进程保持运行。
+
+受影响包的 Linux/macOS race 检查、双架构官方包校验及 Edge 依赖附件/升级包检查通过。保留宿主机 PID 的真实 OBI 集成测试通过 HTTP/gRPC、三次应用重启后的 Go 指标、关闭/恢复及零采样指标检查。另一次让 OBI 自身进入独立 PID 命名空间的测试，在新实例 Go 指标检查处超时；该拓扑仍有兼容问题，不能把宿主机验证推广到它。Docker 应用使用独立 PID/bridge 网络命名空间、由宿主机 OBI 采集的场景已按上述现场测试通过。
+
+部署新版 Edge 依赖后由现有监督器启动新版 OBI。回滚恢复旧 Edge 依赖包并重启 Edge；采集目标和历史数据保留，但旧 OBI 的重新附着竞态会恢复。此升级不代表 Linux 5.15、amd64、多语言或 Kubernetes 的新增现场验收。
 
 ## 部署及边界
 
@@ -76,7 +106,9 @@ Linux amd64/arm64，要求内核 BTF 和相应 eBPF 能力。原生服务通常�
 
 相关 Go 测试包含 race、严格输入验证、默认关闭/配置保留、空目标不启动采集、关闭清理和恢复；前端测试覆盖显式保存与失败草稿；安装附件测试覆盖校验和、缓存和双架构文件集。
 
-`internal/edgeagent/plugins/autoapm/integration_test.go` 是可选 Linux 原生验收。设置 ONGRID_TEST_AUTOAPM_BIN_DIR 为包含 obi/otelcol-contrib 的目录，在独立 PID/网络命名空间运行 TestOBISelectiveIntegration；需要 BPF 权限。测试启动两个未接 SDK 的 HTTP 进程（选中进程另含 gRPC 服务），选择一个，经真实 OBI/Collector 验证身份、指标、Trace、鉴权，以及关闭/恢复和零采样指标。临时进程、Collector 与探针在结束时清理。
+2026-10-10 早期 SDK 共存验收发现启动窗口：OBI 在 SDK 首批 Trace 导出前也会输出 Trace。固定禁用 OBI Trace 虽能避免重复，但会丢失无 SDK 时的采集，因此撤回该方案；该启动窗口现由前述 30 秒入口决策处理。早期恢复自动模式后，两个 SDK 进程的稳定阶段共 40 个请求均只收到 SDK 服务端 Span；SDK exporter 关闭但仍链接 otelhttp 的进程，20 个请求全部由 OBI 输出，但每次同时含包装层和 HTTP 层两个服务端 Span，唯一性检查未通过。Docker 重建一轮还出现 OBI 未重新附着 Go 运行时探针，重启 OBI 后恢复；这是升级前的故障记录；后续重新附着验收单独覆盖容器重建，不能用容器原地重启替代。
+
+`internal/edgeagent/plugins/autoapm/integration_test.go` 是可选 Linux 原生验收。设置 ONGRID_TEST_AUTOAPM_BIN_DIR 为包含 obi/otelcol-contrib 的目录，保留宿主机 PID，在独立网络/挂载命名空间运行 TestOBISelectiveIntegration；需要 BPF 权限。测试启动两个未接 SDK 的 HTTP 进程（选中进程另含 gRPC 服务），选择一个，经真实 OBI/Collector 验证身份、指标、Trace、鉴权、应用连续重启三次后的六类 Go 指标，以及关闭/恢复和零采样指标。重启检查只接受新实例身份，且要求 OBI PID 不变。临时进程、Collector 与探针在结束时清理。
 
 已在 ARM64 Linux 6.19 上通过原生 HTTP/gRPC 验收。最低 Linux 5.15 的实际 BPF 加载、x86 内核运行、多语言应用以及 Kubernetes 现场能力仍需发布前环境验收；编译通过不代替这些验证。
 
@@ -105,7 +137,7 @@ OBI v0.12.1 的本地 OrbStack 验收发现嵌套 PID 命名空间会影响 Go �
 
 ### 官方发布与本地测试边界（2026-09-20）
 
-正式发布使用 OpenTelemetry 官方 OBI Release 原版二进制，不修改 OBI 源码、不应用兼容补丁、不发布自维护 fork。版本由 `OBI_VERSION` 固定（当前 0.12.1），通过 `scripts/fetch-obi.sh` 从官方 Release 下载并校验 `SHA256SUMS`；Edge 镜像及依赖附件构建均沿用该入口。
+正式发布使用 OpenTelemetry 官方 OBI Release 原版二进制，不修改 OBI 源码、不应用兼容补丁、不发布自维护 fork。版本由 `OBI_VERSION` 固定（当前 0.14.0），通过 `scripts/fetch-obi.sh` 从官方 Release 下载并校验 `SHA256SUMS`；Edge 镜像及依赖附件构建均沿用该入口。
 
 OrbStack PID 命名空间补丁仅用于本地测试，补丁、源码副本和测试产物保留在已被 Git 与 Docker 构建上下文忽略的 `output/obi-runtime/`，不得复制到发布依赖目录或复用为发布镜像。补丁环境的验收结果不能作为官方原版的兼容性证明；正式支持范围以原版实测为准，遇到兼容问题优先跟进官方修复或升级官方版本。Ongrid 的进程基础资源采集及页面适配继续保留，它们不修改 OBI 源码。
 

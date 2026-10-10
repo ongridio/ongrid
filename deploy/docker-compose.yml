@@ -310,9 +310,8 @@ services:
     networks:
       - ongrid_net
 
-  # OpenTelemetry Profiles is still alpha, so keep the gateway and backend
-  # versions pinned. Edge collectors send OTLP/HTTP through authenticated nginx;
-  # this collector forwards the profiles signal to Pyroscope over OTLP/gRPC.
+  # Reuse the pinned official Collector for Profiles and the trace decision
+  # pipeline. Edge collectors enter through authenticated nginx.
   profiles-gateway:
     image: otel/opentelemetry-collector-contrib:0.157.0
     container_name: ongrid-profiles-gateway
@@ -324,6 +323,7 @@ services:
       - ./install/profiles-gateway.yaml:/etc/otelcol/profiles-gateway.yaml:ro
     depends_on:
       - pyroscope
+      - tempo
     networks:
       - ongrid_net
 

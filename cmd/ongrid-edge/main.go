@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -343,6 +344,7 @@ func main() {
 		pluginLog := log.With(slog.String("comp", "plugins"))
 
 		var registered []edgeplugins.Plugin
+		var autoAPM *edgepluginautoapm.Plugin
 		if telemetryGatewayEnabled {
 			log.Info("kubernetes controller: telemetry gateway plugin runtime enabled",
 				slog.String("role", k8sInfo.Role),
@@ -353,6 +355,7 @@ func main() {
 			}
 		} else {
 			edgeplugindatabasemetrics.RegisterSecretHandler(client, pluginLog)
+			autoAPM = edgepluginautoapm.New(pluginBinDir, pluginWorkDir, client, agent.EdgeID, pluginLog)
 			registered = []edgeplugins.Plugin{
 				edgepluginlogs.New(pluginBinDir, pluginWorkDir, pluginLog),
 				// traces plugin: subprocess otelcol-contrib. Stays
@@ -360,7 +363,7 @@ func main() {
 				// + Endpoint set to the manager public /v1/traces URL.
 				edgeplugintraces.New(pluginBinDir, pluginWorkDir, pluginLog),
 				edgepluginprofiles.New(pluginBinDir, pluginWorkDir, pluginLog),
-				edgepluginautoapm.New(pluginBinDir, pluginWorkDir, client, agent.EdgeID, pluginLog),
+				autoAPM,
 				// metrics plugin: in-process scraper that polls a
 				// local /metrics endpoint (default node_exporter on
 				// 127.0.0.1:9100) and pushes via the existing push_prom_samples
@@ -393,7 +396,7 @@ func main() {
 			cfg.Edge.SecretKey,
 		)
 		var pluginFetcher edgeplugins.ConfigFetcher = tunnelFetcher
-		if k8sInfo.Role == "" {
+		if k8sInfo == nil {
 			for i, p := range registered {
 				if p.Name() == edgeplugintraces.Name {
 					bridges := edgeplugintraces.WithDockerBridges(pluginFetcher, p, pluginLog)
@@ -409,6 +412,29 @@ func main() {
 		for _, p := range registered {
 			supervisor.Register(p)
 		}
+		client.RegisterHandler(tunnel.MethodGetApplicationReceiver, func(ctx context.Context, _ tunnel.Session, _ string, body []byte) ([]byte, error) {
+			var request tunnel.ApplicationReceiverRequest
+			if err := json.Unmarshal(body, &request); err != nil {
+				return nil, fmt.Errorf("decode application receiver request: %w", err)
+			}
+			for _, health := range supervisor.HealthSnapshots() {
+				if health.Name != edgeplugintraces.Name || health.State != edgeplugins.StateRunning {
+					continue
+				}
+				var receiver tunnel.ApplicationReceiverResponse
+				var err error
+				if autoAPM != nil && request.InstanceID != "" {
+					receiver, err = autoAPM.ApplicationReceiver(ctx, filepath.Join(pluginWorkDir, edgeplugintraces.Name, "otelcol.yaml"), request)
+				} else {
+					receiver, err = edgeplugintraces.ApplicationReceiver(ctx, filepath.Join(pluginWorkDir, edgeplugintraces.Name, "otelcol.yaml"), request)
+				}
+				if err != nil {
+					return nil, err
+				}
+				return json.Marshal(receiver)
+			}
+			return json.Marshal(tunnel.ApplicationReceiverResponse{Reason: "receiver_unavailable"})
+		})
 		agent.SetPluginHealthFn(func() []tunnel.PluginHealthWire {
 			snaps := supervisor.HealthSnapshots()
 			out := make([]tunnel.PluginHealthWire, 0, len(snaps))

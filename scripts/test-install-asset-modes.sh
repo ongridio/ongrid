@@ -54,7 +54,7 @@ install_dir="$tmp_dir/opt/ongrid"
         "$install_dir/grafana/provisioning/datasources" \
         "$install_dir/prometheus"
     for f in docker-compose.yml prometheus.yml prometheus-rules.yml \
-        loki-config.yaml tempo-config.yaml frontier.yaml nginx.conf VERSION; do
+        loki-config.yaml tempo-config.yaml profiles-gateway.yaml frontier.yaml nginx.conf VERSION; do
         printf 'x\n' > "$install_dir/$f"
     done
     printf 'x\n' > "$install_dir/searxng/settings.yml"
@@ -87,7 +87,7 @@ ongrid_normalize_shared_asset_modes "$install_dir"
 
 # Bind-mounted files must be readable by a non-root, non-zero-gid container.
 for f in docker-compose.yml prometheus.yml prometheus-rules.yml \
-    loki-config.yaml tempo-config.yaml frontier.yaml nginx.conf VERSION; do
+    loki-config.yaml tempo-config.yaml profiles-gateway.yaml frontier.yaml nginx.conf VERSION; do
     assert_mode 644 "$install_dir/$f"
 done
 assert_mode 644 "$install_dir/edge/edge-bundle-linux-amd64-v9.9.9.tar.gz"

@@ -366,6 +366,8 @@ func (uc *PluginConfigUC) Set(ctx context.Context, edgeID uint64, plugin string,
 			return nil, fmt.Errorf("%w: cluster identities are manager-owned", errs.ErrInvalid)
 		} else if spec.Kubernetes != nil {
 			return nil, fmt.Errorf("%w: Kubernetes rules require a cluster", errs.ErrInvalid)
+		} else if len(spec.Targets) > 0 {
+			in.Spec["targets"] = spec.Targets
 		}
 	case model.PluginNameCustomMetrics:
 		if err := validateCustomMetricsSpec(in.Spec); err != nil {
