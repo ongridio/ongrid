@@ -33,6 +33,7 @@ import {
   registerChatTurnController,
   unregisterChatTurnController,
 } from '@/lib/chatTurnRegistry';
+import { mergeAssistantFinalMessage } from '@/lib/chatStreamMessages';
 
 type LocationState = { initialPrompt?: string; initialAttachments?: File[] } | null;
 
@@ -309,6 +310,27 @@ export default function ChatThreadPage() {
         sessionId,
         content,
         {
+          onAssistantDelta: (delta) => {
+            if (activeSessionRef.current !== turnSessionID) return;
+            const deltaID = `assistant-delta-${turnSessionID}-${delta.iteration}`;
+            const kind = delta.kind === 'reasoning' ? 'reasoning' : 'content';
+            setMessages((prev) => {
+              const idx = prev.findIndex((m) => m.id === deltaID);
+              if (idx >= 0) {
+                const next = prev.slice();
+                next[idx] = {
+                  ...next[idx],
+                  [kind]: ((kind === 'reasoning' ? next[idx].reasoning : next[idx].content) ?? '') + delta.content,
+                  pending: true,
+                };
+                return next;
+              }
+              return [
+                ...prev,
+                { id: deltaID, role: 'assistant', [kind]: delta.content, pending: true },
+              ];
+            });
+          },
           onAssistant: (e) => {
             if (activeSessionRef.current !== turnSessionID) return;
             // Tool-only turn (no text, agent is just dispatching tools);
@@ -331,13 +353,13 @@ export default function ChatThreadPage() {
               pending: false,
             };
             setMessages((prev) => {
-              const idx = prev.findIndex((m) => m.id === stableID);
-              if (idx >= 0) {
-                const next = prev.slice();
-                next[idx] = newMsg;
-                return next;
+              const deltaID = `assistant-delta-${turnSessionID}-${e.iteration}`;
+              const withoutDelta = prev.filter((m) => m.id !== deltaID);
+              const stableIdx = withoutDelta.findIndex((m) => m.id === stableID);
+              if (!e.content || e.content.length === 0) {
+                return stableIdx >= 0 ? withoutDelta : withoutDelta.filter((m) => m.id !== deltaID);
               }
-              return [...prev, newMsg];
+              return mergeAssistantFinalMessage(prev, deltaID, newMsg);
             });
           },
           onToolStart: (t) => {
@@ -470,13 +492,18 @@ export default function ChatThreadPage() {
       // error. Leave the partial conversation as-is (the server persisted it);
       // the history poll reconciles the final state.
       if (ac.signal.aborted || (err as Error).name === 'AbortError') {
+        setMessages((prev) => prev.map((m) =>
+          m.id.startsWith(`assistant-delta-${turnSessionID}-`) ? { ...m, pending: false } : m,
+        ));
         return false;
       }
       if (activeSessionRef.current !== turnSessionID) return false;
       const msg = (err as Error).message || tr('请求失败', 'Request failed');
       setError(msg);
       setMessages((prev) => [
-        ...prev,
+        ...prev.map((m) =>
+          m.id.startsWith(`assistant-delta-${turnSessionID}-`) ? { ...m, pending: false } : m,
+        ),
         {
           id: `optimistic-error-${Date.now()}`,
           role: 'assistant',

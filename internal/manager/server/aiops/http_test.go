@@ -517,6 +517,24 @@ func TestValidateUploadedImageWebPDimensions(t *testing.T) {
 	}
 }
 
+type panickingFlushResponseWriter struct {
+	header http.Header
+}
+
+func (w *panickingFlushResponseWriter) Header() http.Header { return w.header }
+func (w *panickingFlushResponseWriter) WriteHeader(int)     {}
+func (w *panickingFlushResponseWriter) Write(p []byte) (int, error) {
+	return len(p), nil
+}
+func (w *panickingFlushResponseWriter) Flush() {
+	panic("flush after request complete")
+}
+
+func TestWriteSSERecoversFromClosedResponseWriter(t *testing.T) {
+	w := &panickingFlushResponseWriter{header: http.Header{}}
+	writeSSE(w, w, "assistant_delta", map[string]string{"content": "ok"})
+}
+
 // TestInvalidSessionID was removed when chat IDs flipped to UUIDs:
 // chi routing already rejects empty path segments, and any opaque
 // string reaching the handler is forwarded to the service layer (which

@@ -3,6 +3,7 @@ package graph
 import (
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -187,6 +188,55 @@ func TestBuildReActGraph_ToolCallThenFinal(t *testing.T) {
 	}
 	if scripted.generateCalls() != 2 {
 		t.Errorf("Generate calls = %d, want 2", scripted.generateCalls())
+	}
+}
+
+func TestBuildReActGraph_StreamToolCallThenFinal(t *testing.T) {
+	t.Parallel()
+	scripted := newScriptedChatModel(
+		makeAssistantToolCall("先查数据", "call_1", "echo", `{"a":1}`),
+		makeAssistantNoTools("done"),
+	)
+	echo := &fakeBaseTool{
+		name:       "echo",
+		parameters: `{"type":"object","properties":{"a":{"type":"integer"}}}`,
+		runResp:    `{"echoed":1}`,
+	}
+	g, err := BuildReActGraph(scripted, []basetool.BaseTool{echo}, Config{MaxIterations: 5})
+	if err != nil {
+		t.Fatalf("BuildReActGraph: %v", err)
+	}
+	stream, err := g.Stream(context.Background(), &Input{UserText: "do it"})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	defer stream.Close()
+
+	var outputs []*Output
+	for {
+		out, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("stream Recv: %v", err)
+		}
+		if out != nil {
+			outputs = append(outputs, out)
+		}
+	}
+	if len(outputs) == 0 {
+		t.Fatal("graph stream produced no outputs")
+	}
+	final := outputs[len(outputs)-1]
+	if final.AssistantMessage == nil || final.AssistantMessage.Content != "done" {
+		t.Fatalf("final streamed output = %+v", final)
+	}
+	if echo.calls.Load() != 1 {
+		t.Fatalf("tool calls = %d, want 1", echo.calls.Load())
+	}
+	if scripted.generateCalls() != 2 {
+		t.Fatalf("model calls = %d, want 2", scripted.generateCalls())
 	}
 }
 

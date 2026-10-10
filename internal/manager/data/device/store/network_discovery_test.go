@@ -155,3 +155,48 @@ func TestGetNetworkDeviceDetailReturnsProfileAndLatestObservation(t *testing.T) 
 		t.Fatalf("detail=%+v", detail)
 	}
 }
+
+func TestListDueNetworkPollsWithSQLite(t *testing.T) {
+	db := newDeviceTestDB(t)
+	repo := NewNetworkDiscoveryRepo(db)
+	ctx := context.Background()
+	now := time.Date(2026, 10, 5, 7, 26, 13, 918000000, time.UTC)
+
+	profiles := []*model.DeviceNetwork{
+		{DeviceID: 201, DeviceKind: "network", PollEnabled: true, PollIntervalSeconds: 300, PollCredentialName: "snmp", CreatedAt: now.Add(-time.Hour)},
+		{DeviceID: 202, DeviceKind: "network", PollEnabled: true, PollIntervalSeconds: 300, PollCredentialName: "snmp", LastPollAt: ptrTime(now.Add(-301 * time.Second)), CreatedAt: now.Add(-2 * time.Hour)},
+		{DeviceID: 203, DeviceKind: "network", PollEnabled: true, PollIntervalSeconds: 300, PollCredentialName: "snmp", LastPollAt: ptrTime(now.Add(-299 * time.Second)), CreatedAt: now.Add(-3 * time.Hour)},
+		{DeviceID: 204, DeviceKind: "network", PollEnabled: false, PollIntervalSeconds: 300, PollCredentialName: "snmp", CreatedAt: now.Add(-4 * time.Hour)},
+		{DeviceID: 205, DeviceKind: "network", PollEnabled: true, PollIntervalSeconds: 300, PollCredentialName: "", CreatedAt: now.Add(-5 * time.Hour)},
+	}
+	for _, profile := range profiles {
+		if err := db.Create(profile).Error; err != nil {
+			t.Fatalf("insert network profile %d: %v", profile.DeviceID, err)
+		}
+	}
+
+	details, err := repo.ListDueNetworkPolls(ctx, now, 10)
+	if err != nil {
+		t.Fatalf("list due network polls: %v", err)
+	}
+	gotIDs := make([]uint64, 0, len(details))
+	for _, detail := range details {
+		if detail.Profile == nil {
+			t.Fatal("due network poll has no profile")
+		}
+		gotIDs = append(gotIDs, detail.Profile.DeviceID)
+	}
+	wantIDs := []uint64{201, 202}
+	if len(gotIDs) != len(wantIDs) {
+		t.Fatalf("due device IDs = %v, want %v", gotIDs, wantIDs)
+	}
+	for i := range wantIDs {
+		if gotIDs[i] != wantIDs[i] {
+			t.Fatalf("due device IDs = %v, want %v", gotIDs, wantIDs)
+		}
+	}
+}
+
+func ptrTime(value time.Time) *time.Time {
+	return &value
+}
