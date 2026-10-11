@@ -60,8 +60,7 @@ func New(z Authorizer, log *slog.Logger) *Middleware {
 // Resolution:
 //  1. No tenant in ctx → 401
 //  2. Superuser → bypass (allow)
-//  3. Authorizer nil (legacy / test wiring) → bypass (allow) so the
-//     deployment without iam Phase-1 still works
+//  3. Authorizer nil → fail closed (403 Forbidden)
 //  4. AllowAnyOrg(user, obj, act) → allow
 //  5. Otherwise → 403
 //
@@ -80,7 +79,8 @@ func (m *Middleware) Require(obj, act string) func(http.Handler) http.Handler {
 				return
 			}
 			if m.z == nil {
-				next.ServeHTTP(w, r)
+				m.log.Error("authz: enforcer not initialized; failing closed for security")
+				http.Error(w, errs.ErrForbidden.Error(), http.StatusForbidden)
 				return
 			}
 			if m.z.AllowAnyOrg(r.Context(), t.UserID, obj, act) {
