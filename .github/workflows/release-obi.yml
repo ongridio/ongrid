@@ -1,0 +1,76 @@
+name: Release patched OBI
+
+on:
+  push:
+    tags:
+      - 'obi-v*.*.*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-obi-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  obi-release:
+    name: Publish patched OBI artifacts
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - name: Resolve OBI tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(jq -er .release_version patches/obi/manifest.json)
+          test "$GITHUB_REF_NAME" = "obi-v$version"
+          bash scripts/test-fetch-obi.sh
+      - name: Build or verify immutable OBI release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          out=dist/obi-release
+          version=$(jq -er .release_version patches/obi/manifest.json)
+          if gh release view "$GITHUB_REF_NAME" --json tagName > "$RUNNER_TEMP/obi-release.json" 2> "$RUNNER_TEMP/obi-release-error"; then
+            mkdir -p "$out"
+            gh release download "$GITHUB_REF_NAME" --dir "$out"
+            cmp patches/obi/manifest.json "$out/manifest.json"
+            cmp patches/obi/v0.14.0-trace-continuity.patch "$out/v0.14.0-trace-continuity.patch"
+          else
+            grep -Eq 'release not found|HTTP 404' "$RUNNER_TEMP/obi-release-error" || { cat "$RUNNER_TEMP/obi-release-error" >&2; exit 1; }
+            bash scripts/build-patched-obi.sh "$out"
+            cat > "$RUNNER_TEMP/obi-release-notes.md" <<EOF
+          Ongrid's patched OpenTelemetry eBPF Instrumentation $version, based on upstream v0.14.0.
+
+          Includes the SDK/OBI trace-continuity source patch, Linux amd64 and arm64 binaries, generated source, upstream licenses and dependency notices. This is an Ongrid derivative build. Checksums are in SHA256SUMS; source and build provenance are in manifest.json.
+
+          The runtime delivery checks are tracked in Ongrid PR #489. This dependency release does not publish or promote an Ongrid application version.
+          EOF
+            gh release create "$GITHUB_REF_NAME" "$out"/* --verify-tag --prerelease --latest=false \
+              --title "OBI $version (Ongrid patch)" --notes-file "$RUNNER_TEMP/obi-release-notes.md"
+          fi
+          for file in "obi-v$version-linux-amd64.tar.gz" "obi-v$version-linux-arm64.tar.gz" \
+              "obi-v$version-source-generated.tar.gz" manifest.json v0.14.0-trace-continuity.patch; do
+            test -s "$out/$file"
+            grep -Fq "  $file" "$out/SHA256SUMS"
+          done
+          (cd "$out" && sha256sum -c SHA256SUMS)
+
+  edge-dependencies:
+    name: Publish CNB Edge dependencies
+    needs: obi-release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - name: Publish immutable dependency archives
+        env:
+          CNB_TOKEN: ${{ secrets.CNB_TOKEN }}
+        run: make publish-edge-deps-attachments
+      - name: Verify public dependency downloads
+        run: make verify-edge-deps-release

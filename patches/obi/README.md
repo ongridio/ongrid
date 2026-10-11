@@ -25,7 +25,7 @@ bash scripts/build-patched-obi.sh /tmp/obi-release-output
 
 产物包含双架构压缩包、带生成对象的完整修改源码、补丁、来源清单和 `SHA256SUMS`。二进制携带补丁版本和补丁 SHA；分发包保留上游及依赖许可证，并在 NOTICE 标明 Ongrid 修改。
 
-发布使用 Ongrid 仓库独立的 `obi-v0.14.0-ongrid.1` 标签，不设置为 Ongrid 最新应用版本，不覆盖官方 OBI Release。产物经过验收后上传到该标签对应的 GitHub Release；同一标签的既有资产不得覆盖，修改补丁必须递增 `-ongrid.N`。
+发布使用 Ongrid 仓库独立的 `obi-v0.14.0-ongrid.1` 标签，触发 `.github/workflows/release-obi.yml`。该流程构建并上传双架构 OBI，再复用现有 CNB 发布器创建公共 Edge 依赖附件并验证公开下载。OBI Release 初始标记为预发布，完成运行验收后再转为正式依赖；不设置为 Ongrid 最新应用版本，不覆盖官方 OBI Release。同一标签的既有资产不得覆盖，重跑先校验已发布资产，修改补丁必须递增 `-ongrid.N`。
 
 ```sh
 make fetch-obi EDGE_PLUGIN_ARCHES='linux-amd64 linux-arm64'

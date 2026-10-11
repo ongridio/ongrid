@@ -143,3 +143,15 @@ raise "remote reuse is not compared through the immutable publisher" unless publ
 ' "$makefile"
 
 echo "release workflow tests passed"
+
+ruby -ryaml -e '
+workflow = YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)
+triggers = workflow.fetch("on") { workflow.fetch(true) }
+raise "OBI dependency tags must not publish application versions" unless triggers.fetch("push").fetch("tags") == ["obi-v*.*.*"]
+jobs = workflow.fetch("jobs")
+raise "CNB dependencies must wait for OBI artifacts" unless jobs.fetch("edge-dependencies").fetch("needs") == "obi-release"
+publish = jobs.fetch("edge-dependencies").fetch("steps").find { |s| s["name"] == "Publish immutable dependency archives" }
+raise "OBI release must use the immutable CNB publisher" unless publish.fetch("run") == "make publish-edge-deps-attachments"
+raise "CNB publisher must use the existing secret" unless publish.fetch("env").fetch("CNB_TOKEN") == "${{ secrets.CNB_TOKEN }}"
+' "$repo_root/.github/workflows/release-obi.yml"
+echo "OBI dependency workflow tests passed"
