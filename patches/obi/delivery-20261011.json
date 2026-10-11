@@ -1,0 +1,96 @@
+{
+  "date": "2026-10-11",
+  "status": "passed",
+  "release_version": "0.14.0-ongrid.3",
+  "publication": "local CNB complete Edge dependency archives",
+  "source_commit": "8ee9cb2d",
+  "source_tag": "obi-v0.14.0-ongrid.3",
+  "patch_sha256": "b5611708bbf87b294c050c2b181731c5620c833e72e5ec42a6f0f909684a18bb",
+  "matching_source_files": 35,
+  "generated_bpf_objects": 30,
+  "cnb_tag": "edge-deps-layout2-obi0.14.0-ongrid.3-o0.157.0-n1.8.2-pr0.8.4-my0.19.0-pg0.19.1-r1.86.0-m0.51.0",
+  "cnb_release_url": "https://cnb.cool/ongridio/ongrid-edge/-/releases/tag/edge-deps-layout2-obi0.14.0-ongrid.3-o0.157.0-n1.8.2-pr0.8.4-my0.19.0-pg0.19.1-r1.86.0-m0.51.0",
+  "artifacts": {
+    "amd64": {
+      "filename": "edge-deps-linux-amd64.tar.xz",
+      "sha256": "712fc82218a7fc0e3fb0287f29e26a43212281bd13c13c5d27ad558982550438",
+      "obi_sha256": "04a275124000bf7eb191cbb3077dc5ea67bedad86a9360a6c1920887be9e475e",
+      "default_fetch_verified": true,
+      "edge_image_verified": true,
+      "image_id": "sha256:2d49a29c411d2d209ff3f33f624177cdd9b1b464cce645fe56dd8a8f14e94d5d"
+    },
+    "arm64": {
+      "filename": "edge-deps-linux-arm64.tar.xz",
+      "sha256": "bb0f1807c9613550f111ca56ad90fab411d18c215e92ae71ac894809850a53fb",
+      "obi_sha256": "f15d732ef5cf9bf1254cbf9153ec1a418fbcdfc3b7879ddcc66e4f62cb1fe5d9",
+      "default_fetch_verified": true,
+      "edge_image_verified": true,
+      "image_id": "sha256:dd40aa3f20bcdbba28c6794c6a2208ea012fb4a244a86440fa6cbd1efaf4b515"
+    }
+  },
+  "acceptance": {
+    "native": {
+      "architecture": "arm64",
+      "kernel": "6.8.0-142-generic",
+      "matrix": 360,
+      "boundaries": 152,
+      "passed": 512,
+      "offline_replay": "PASS"
+    },
+    "docker": {
+      "architecture": "arm64",
+      "kernel": "6.19.13-orbstack-gbd1dc07b8cf4",
+      "matrix": 360,
+      "boundaries": 152,
+      "passed": 512,
+      "offline_replay": "PASS"
+    },
+    "kubernetes": {
+      "architecture": "arm64",
+      "kernel": "6.8.0-142-generic",
+      "matrix": 360,
+      "boundaries": 152,
+      "passed": 512,
+      "offline_replay": "PASS"
+    },
+    "amd64": {
+      "architecture": "amd64",
+      "kernel": "6.8.0-146-generic",
+      "matrix": 360,
+      "boundaries": 152,
+      "passed": 512,
+      "offline_replay": "PASS"
+    }
+  },
+  "plugin_integration": {
+    "arm64": {
+      "status": "PASS",
+      "seconds": 156.67
+    },
+    "amd64": {
+      "status": "PASS",
+      "seconds": 234.11
+    }
+  },
+  "checks": {
+    "go_test_all_linux_nonroot": "PASS",
+    "autoapm_go_test_race": "PASS",
+    "release_package": "PASS",
+    "release_workflow_and_fetch": "PASS",
+    "trace_verifier_self_tests": 7,
+    "focused_bpf_tests": 5
+  },
+  "limitations": [
+    "Go 1.25.11 fixture; OTel SDK 1.43.0, Auto SDK 1.2.1, otelhttp/otelgrpc 0.68.0",
+    "No TLS, other language, Linux 5.15, or capacity/failure acceptance",
+    "Redis, MongoDB, Kafka context transformations have unit coverage only",
+    "Docker fixture validates Go library propagation; tracefs/network-injection fallback is unavailable",
+    "CAP_SYS_ADMIN removal was not validated",
+    "Full upstream BPF suite fails in existing test_failed_connect_event due to missing __always_inline in test headers"
+  ],
+  "ongrid_application_release": false,
+  "pull_request": "https://github.com/ongridio/ongrid/pull/489",
+  "total_requests": 2048,
+  "sampled_traces": 2000,
+  "unsampled_requests": 48
+}

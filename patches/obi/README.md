@@ -48,17 +48,20 @@ make verify-edge-deps-release
 
 ## 验证
 
-此前 `0.14.0-local-sdk-context9` 候选二进制的现场结果如下，不代表后续发布包的验收结果。测试夹具为移除符号表的 Go 1.25.11，使用 OTel SDK 1.43.0、Auto SDK 1.2.1 和 otelhttp/otelgrpc 0.68.0。
+2026-10-11 的完整交付结果见 [delivery-20261011.json](delivery-20261011.json)。以下结果属于已上传 CNB 的 `0.14.0-ongrid.3`；公开校验和、Make 默认下载、双架构 Edge 镜像内 OBI 均与已测二进制一致。测试夹具为移除符号表的 Go 1.25.11，使用 OTel SDK 1.43.0、Auto SDK 1.2.1 和 otelhttp/otelgrpc 0.68.0。
 
 | 环境 | HTTP/gRPC 矩阵 | 边界请求 | 合计 |
 | --- | ---: | ---: | ---: |
 | Linux 6.8 ARM64 原生进程 | 360/360 | 152/152 | 512/512 |
 | OrbStack 6.19 ARM64 Docker bridge | 360/360 | 152/152 | 512/512 |
-| Linux 6.8 ARM64 Kubernetes | 360/360 | 152/152 | 512/512 |
+| Linux 6.8 ARM64 Kubernetes（最终 Edge 镜像） | 360/360 | 152/152 | 512/512 |
+| Linux 6.8 AMD64 原生进程（QEMU x86_64 内核） | 360/360 | 152/152 | 512/512 |
 
 矩阵包含 SDK→OBI、OBI→SDK、SDK→SDK、OBI→OBI、Auto SDK→OBI、部分 SDK→OBI。入口为 HTTP/1，下游为 HTTP/1、HTTP/2 h2c、gRPC，覆盖首次业务请求、连接复用、并发及重启后的新实例。边界包含 SQLite、20 秒请求、8/32/64 KiB 填充头和未采样传播。
 
-逐请求检查 TraceID、父引用、SDK SpanID、自定义 Span 的直接父子关系、操作数量、唯一传播头和有效时间戳。36 个未采样请求的 flags 保持 `00`，出口等待窗口结束后无后端 Span。原始 Trace、传播日志及离线重放结果保留于本地 `output/obi-runtime/trace-continuity-20261010/`；本目录上传源码与验收摘要，不上传环境日志。
+逐请求检查 TraceID、父引用、SDK SpanID、自定义 Span 的直接父子关系、操作数量、唯一传播头和有效时间戳。48 个未采样请求的 flags 保持 `00`，出口等待窗口结束后无后端 Span。原始 Trace、传播日志及离线重放结果保留于本地 `output/obi-runtime/edge-delivery-20261011/`；本目录上传源码与验收摘要，不上传环境日志。四组共 2048/2048 条请求，离线重放也全部通过。
+
+双架构真实 Linux 插件测试通过，覆盖 `Configure/Start/Stop`、选择性采集、三次应用重启后重新附加、认证导出、服务身份、RED 与运行时指标、零采样和恢复。Linux 非 root `go test ./...`、Auto APM race 检查、完整安装/发布脚本测试、7 个 Trace 校验器自检及 5 个相关 BPF 回归通过。
 
 应用补丁并生成 BPF 后，可在具备 C 编译器的 Linux 环境运行已有回归测试：
 
@@ -80,7 +83,7 @@ done
 
 ## 发布边界
 
-未完成其他语言、TLS、amd64 实际运行、Linux 5.15、故障/容量压力及其他 SDK/Go ABI 的现场验收。Redis、MongoDB、Kafka 仅通过上下文转换单元测试。最终候选未重跑移除 CAP_SYS_ADMIN 的矩阵；Docker 夹具缺少 tracefs，验收覆盖 Go 库级传播，未覆盖网络注入回退。
+未完成其他语言、TLS、Linux 5.15、故障/容量压力及其他 SDK/Go ABI 的现场验收。Redis、MongoDB、Kafka 仅通过上下文转换单元测试。最终候选未重跑移除 CAP_SYS_ADMIN 的矩阵；Docker 夹具缺少 tracefs，验收覆盖 Go 库级传播，未覆盖网络注入回退。
 
 HTTP/1 提前检查最多 512 个头名称；HTTP/2 保留现有 65535 字节帧缓冲边界。本次验收未覆盖更大边界、SDK 导出故障和异步跨 goroutine 上下文。
 

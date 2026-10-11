@@ -169,6 +169,12 @@ OBI v0.12.1 的本地 OrbStack 验收发现嵌套 PID 命名空间会影响 Go �
 
 `OBI_VERSION`、Edge Dockerfile 与补丁清单保持一致，`scripts/fetch-obi.sh` 统一校验并安装。CNB 公共依赖标签包含完整补丁版本，宿主机安装/升级与 Kubernetes 镜像均使用相同产物。版本和发布资产不可复用覆盖；后续修改递增补丁版本。
 
+最终交付验收见 [delivery-20261011.json](../../patches/obi/delivery-20261011.json)。`.2` 包复验发现四条 Docker 并发 gRPC 上下文异常；`.3` 将服务端 stream/transport 缓存按进程隔离，并在删除 LRU 项目前复制父上下文。另修复零采样的仅指标语义，以及非 HTTP 子操作的导出选择。新补丁包含 35 个源码/测试文件，干净源码构建重新生成双架构的 30 个 BPF 对象。
+
+已发布 `.3` 的 ARM64 原生、Docker bridge、Kubernetes 最终 Edge 镜像及 AMD64 原生进程各通过 512/512，共 2048/2048；2000 条采样 Trace 和 48 条未采样查询均完成离线重放。AMD64 使用实际 x86_64 Linux 6.8 内核，测试请求在 QEMU VM 内生成。双架构真实插件生命周期、三次应用重启、身份、认证导出、RED/运行时指标及零采样测试通过。CNB 公开校验和、Make 默认下载和两架构 Edge 镜像内 OBI 与已测二进制一致。完整 Linux 非 root Go 测试、Auto APM race、安装/发布脚本和五个相关 BPF 回归通过。
+
+该交付结果补充了此前候选的 AMD64 与实际安装路径证据，不扩大至 TLS、其他语言、Linux 5.15 或容量/故障验收。Redis、MongoDB、Kafka 仍仅有上下文转换单元测试。Docker 夹具验证 Go 库级传播，未覆盖网络注入回退。测试资源已清理，原五条采集规则已恢复；本次不包含 Ongrid 应用版本发布或 PR 合并。
+
 早期候选的原始测试产物继续保存在 Git 和 Docker 忽略的 `output/obi-runtime/`。候选通过、发布产物通过、Ongrid PR 合并及应用版本发布分别报告。补丁版的验收不能作为官方原版兼容性证明；支持范围以实际产物和环境的验证为准。回滚恢复旧 Edge 镜像或依赖包，会同时撤回混合链路修复。
 
 ## 实例基础资源（2026-09-20）
