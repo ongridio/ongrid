@@ -1,6 +1,6 @@
 # OBI Trace 连续性补丁
 
-完整的 SDK/OBI 混合链路修复依赖本目录的 OBI 源码补丁。仅部署 Ongrid 侧修改和官方 OBI v0.14.0，不能得到本补丁的完整行为。补丁随 Ongrid 代码一起审查、保存和推送，构建为独立版本 `0.14.0-ongrid.1`。Make 和 Edge 镜像的默认依赖均使用这个补丁版本。
+完整的 SDK/OBI 混合链路修复依赖本目录的 OBI 源码补丁。仅部署 Ongrid 侧修改和官方 OBI v0.14.0，不能得到本补丁的完整行为。补丁随 Ongrid 代码一起审查、保存和推送，构建为独立版本 `0.14.0-ongrid.2`。Make 和 Edge 镜像的默认依赖均使用这个补丁版本。
 
 - 上游：[OpenTelemetry eBPF Instrumentation](https://github.com/open-telemetry/opentelemetry-ebpf-instrumentation)，`v0.14.0`，commit `13d9b0c3f600a060bd78820a63ebec882b10757e`。
 - 补丁：[v0.14.0-trace-continuity.patch](v0.14.0-trace-continuity.patch)，包含 31 个源码和测试文件。
@@ -25,7 +25,7 @@ bash scripts/build-patched-obi.sh /tmp/obi-release-output
 
 产物包含双架构压缩包、带生成对象的完整修改源码、补丁、来源清单和 `SHA256SUMS`。二进制携带补丁版本和补丁 SHA；分发包保留上游及依赖许可证，并在 NOTICE 标明 Ongrid 修改。
 
-发布使用 Ongrid 仓库独立的 `obi-v0.14.0-ongrid.1` 标签，触发 `.github/workflows/release-obi.yml`。该流程构建并上传双架构 OBI，再复用现有 CNB 发布器创建公共 Edge 依赖附件并验证公开下载。OBI Release 初始标记为预发布，完成运行验收后再转为正式依赖；不设置为 Ongrid 最新应用版本，不覆盖官方 OBI Release。同一标签的既有资产不得覆盖，重跑先校验已发布资产，修改补丁必须递增 `-ongrid.N`。
+发布使用 Ongrid 仓库独立的 `obi-v0.14.0-ongrid.2` 标签，触发 `.github/workflows/release-obi.yml`。该流程构建并上传双架构 OBI，再复用现有 CNB 发布器创建公共 Edge 依赖附件并验证公开下载。OBI Release 初始标记为预发布，完成运行验收后再转为正式依赖；不设置为 Ongrid 最新应用版本，不覆盖官方 OBI Release。同一标签的既有资产不得覆盖，重跑先校验已发布资产，修改补丁必须递增 `-ongrid.N`。
 
 ```sh
 make fetch-obi EDGE_PLUGIN_ARCHES='linux-amd64 linux-arm64'

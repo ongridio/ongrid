@@ -31,9 +31,11 @@ cp "$patch" "$out/"
 docker run --rm \
     -v "$work/source:/src" -v "$out:/out" \
     -v ongrid-obi-go-mod:/go/pkg -v ongrid-obi-go-build:/root/.cache/go-build \
-    -e "OBI_RELEASE_VERSION=$version" -e "OBI_PATCH_SHA=$patch_sha" \
+    -e "OBI_RELEASE_VERSION=$version" -e "OBI_PATCH_SHA=$patch_sha" -e "OBI_BUILD_OWNER=$(id -u):$(id -g)" \
     -w /src --entrypoint /bin/sh "$image" -ec '
     set -o pipefail
+    # Return root-created build directories to the caller for Linux runner cleanup.
+    trap '\''chown -R "$OBI_BUILD_OWNER" /src /out'\'' EXIT
     export PATH="/usr/lib/llvm22/bin:$PATH" BPF2GO=/go/bin/bpf2go
     make generate/all
     BPF_CLANG=clang BPF_CFLAGS="-O2 -g -Wall -Werror" \
