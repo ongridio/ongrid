@@ -4,7 +4,7 @@
   "upstream_commit": "13d9b0c3f600a060bd78820a63ebec882b10757e",
   "source_archive_sha256": "a1c1184837c93cf83d6bc3065511902daa1aaa09e2a899a41f7af644e5316c6b",
   "patch": "v0.14.0-trace-continuity.patch",
-  "patch_sha256": "b5611708bbf87b294c050c2b181731c5620c833e72e5ec42a6f0f909684a18bb",
+  "patch_sha256": "046d4de7076aed7aa6d7ac997f4f7c45fba1606e9612dcd97e09918d24243b29",
   "build_tools": {
     "go": "go1.27.0 linux/arm64",
     "clang": "Alpine 22.1.8",
@@ -16,13 +16,10 @@
     "bpf/common/tp_info.h",
     "bpf/gotracer/go_common.h",
     "bpf/gotracer/go_grpc.c",
-    "bpf/gotracer/go_kafka_go.c",
-    "bpf/gotracer/go_mongo.c",
     "bpf/gotracer/go_net_common.h",
     "bpf/gotracer/go_nethttp.c",
     "bpf/gotracer/go_observer_pid.h",
     "bpf/gotracer/go_offsets.h",
-    "bpf/gotracer/go_redis.c",
     "bpf/gotracer/go_sdk.c",
     "bpf/gotracer/go_sql.c",
     "bpf/gotracer/gotracer.c",
@@ -50,7 +47,7 @@
     "pkg/internal/goexec/structmembers_test.go"
   ],
   "production_dependency_changed": true,
-  "release_version": "0.14.0-ongrid.3",
+  "release_version": "0.14.0-ongrid.4",
   "embedded_java_agent_sha256": "9d499797e42f96058a2b9fb9b75c29369f72debc35d32a92119463bb9567bd61",
   "historical_candidate_acceptance": {
     "candidate_version": "0.14.0-local-sdk-context9",

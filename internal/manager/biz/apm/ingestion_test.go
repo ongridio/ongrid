@@ -3,11 +3,16 @@ package apm
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 type testReceiverResolver struct {
+	mu                          sync.Mutex
 	calls                       []Instance
 	versionError, receiverError error
 	receiverErrors              map[string]error
@@ -15,7 +20,9 @@ type testReceiverResolver struct {
 }
 
 func (r *testReceiverResolver) ResolveReceiver(_ context.Context, _ Identity, in Instance) (Receiver, error) {
+	r.mu.Lock()
 	r.calls = append(r.calls, in)
+	r.mu.Unlock()
 	if err := r.receiverErrors[in.DeviceID]; err != nil {
 		return Receiver{}, err
 	}
@@ -123,5 +130,99 @@ func TestIngestionPrefersVerifiedCurrentPodOverDeletedPod(t *testing.T) {
 	out, err := New(p, nil, nil).WithReceivers(resolver, nil).Ingestion(t.Context(), testQuery())
 	if err != nil || len(out.Targets) != 2 || out.Targets[0].Instance.Pod != "live" || out.Targets[0].VersionFieldPath == "" || out.Targets[1].Endpoint == "" {
 		t.Fatalf("lost current default or historical receiver: out=%+v err=%v", out, err)
+	}
+}
+
+// A stalled dependency waits for the actual child context, rather than returning an immediate error.
+type stalledReceiverResolver struct {
+	metadata bool
+	calls    atomic.Int32
+	started  chan struct{}
+}
+
+func (r *stalledReceiverResolver) ResolveReceiver(ctx context.Context, _ Identity, in Instance) (Receiver, error) {
+	r.calls.Add(1)
+	if !r.metadata && in.DeviceID != "healthy" {
+		if r.started != nil {
+			r.started <- struct{}{}
+		}
+		<-ctx.Done()
+		return Receiver{}, ctx.Err()
+	}
+	location := "host"
+	if r.metadata {
+		location = "kubernetes"
+	}
+	return Receiver{Endpoint: "http://gateway:4318", Location: location}, nil
+}
+
+func (r *stalledReceiverResolver) ResolveVersionField(ctx context.Context, in Instance) (string, error) {
+	if in.Pod == "healthy" {
+		return "metadata.labels['app.kubernetes.io/version']", nil
+	}
+	if r.started != nil {
+		r.started <- struct{}{}
+	}
+	<-ctx.Done()
+	return "", ctx.Err()
+}
+
+func TestIngestionCancelsActiveLookups(t *testing.T) {
+	for _, metadata := range []bool{false, true} {
+		resolver := &stalledReceiverResolver{metadata: metadata, started: make(chan struct{})}
+		service := New(&fakeProm{result: `[{"metric":{"service_instance_id":"old","device_id":"slow"},"value":[1600,"1"]}]`}, nil, nil).WithReceivers(resolver, nil)
+		ctx, cancel := context.WithCancel(t.Context())
+		go func() {
+			select {
+			case <-resolver.started:
+				cancel()
+			case <-ctx.Done():
+			}
+		}()
+		if _, err := service.Ingestion(ctx, testQuery()); !errors.Is(err, context.Canceled) {
+			t.Fatalf("active lookup cancellation ignored (metadata=%t): %v", metadata, err)
+		}
+		cancel()
+	}
+}
+
+func TestIngestionReturnsHealthyTargetsBeforeRequestDeadline(t *testing.T) {
+	for _, metadata := range []bool{false, true} {
+		for _, count := range []int{5, 100} {
+			t.Run(fmt.Sprintf("metadata=%t/instances=%d", metadata, count), func(t *testing.T) {
+				samples := make([]string, count)
+				for i := range samples {
+					id := fmt.Sprintf("slow-%03d", i)
+					if i == count-1 {
+						id = "healthy"
+					}
+					labels := fmt.Sprintf(`"device_id":%q`, id)
+					if metadata {
+						labels = fmt.Sprintf(`"k8s_cluster_id":"50","k8s_namespace_name":"app","k8s_pod_name":%q`, id)
+					}
+					samples[i] = fmt.Sprintf(`{"metric":{"service_instance_id":"%03d",%s},"value":[1600,"1"]}`, i, labels)
+				}
+				resolver := &stalledReceiverResolver{metadata: metadata}
+				service := New(&fakeProm{result: "[" + strings.Join(samples, ",") + "]"}, nil, nil).WithReceivers(resolver, nil)
+				ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+				defer cancel()
+				out, err := service.Ingestion(ctx, testQuery())
+				if err != nil || ctx.Err() != nil || out == nil || len(out.Targets) != count {
+					t.Fatalf("slow dependencies blocked healthy results: out=%+v err=%v context=%v", out, err, ctx.Err())
+				}
+				if metadata {
+					if resolver.calls.Load() != 1 || out.Targets[0].Instance.Pod != "healthy" || out.Targets[0].VersionFieldPath == "" {
+						t.Fatalf("lost cluster deduplication or verified Pod priority: calls=%d first=%+v", resolver.calls.Load(), out.Targets[0])
+					}
+					for _, target := range out.Targets {
+						if target.Endpoint == "" || (target.Instance.Pod != "healthy" && target.VersionFieldPath != "") {
+							t.Fatalf("metadata timeout discarded receiver or invented a version: %+v", target)
+						}
+					}
+				} else if resolver.calls.Load() != int32(count) || out.Targets[count-1].Endpoint == "" || out.Targets[0].Reason != "receiver_unavailable" {
+					t.Fatalf("starved last receiver or lost timeout reason: calls=%d targets=%+v", resolver.calls.Load(), out.Targets)
+				}
+			})
+		}
 	}
 }

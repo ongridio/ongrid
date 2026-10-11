@@ -1,8 +1,8 @@
 diff --git a/bpf/common/tp_info.h b/bpf/common/tp_info.h
-index c404fa9..6b810e8 100644
+index c404fa9..5f3408d 100644
 --- a/bpf/common/tp_info.h
 +++ b/bpf/common/tp_info.h
-@@ -19,7 +19,10 @@ typedef struct tp_info {
+@@ -19,7 +19,11 @@ typedef struct tp_info {
      unsigned char parent_id[SPAN_ID_SIZE_BYTES];
      u64 ts;
      u8 flags;
@@ -10,12 +10,13 @@ index c404fa9..6b810e8 100644
 +    u8 sdk_kind;
 +    u8 sdk_owned;
 +    u8 sdk_context;
-+    u8 _pad[4];
++    u8 sdk_parent_kind;
++    u8 _pad[3];
  } tp_info_t;
  
  // how a client span got its parent, decided where the parent is adopted
 diff --git a/bpf/gotracer/go_common.h b/bpf/gotracer/go_common.h
-index f0ade92..e86f725 100644
+index f0ade92..ecdc098 100644
 --- a/bpf/gotracer/go_common.h
 +++ b/bpf/gotracer/go_common.h
 @@ -40,6 +40,14 @@
@@ -45,42 +46,138 @@ index f0ade92..e86f725 100644
      __type(value, grpc_transports_t);
      __uint(max_entries, MAX_CONCURRENT_REQUESTS);
  } ongoing_grpc_transports SEC(".maps");
-@@ -224,6 +231,7 @@ static __always_inline void tp_from_parent(tp_info_t *tp, tp_info_t *parent) {
+@@ -119,7 +126,7 @@ typedef struct sql_func_invocation {
+     u64 driver_conn_ptr;
+     tp_info_t tp;
+     connection_info_t conn;
+-    u8 _pad[4];
++    u32 stack_off;
+ } sql_func_invocation_t;
+ 
+ struct {
+@@ -129,6 +136,11 @@ struct {
+     __uint(max_entries, MAX_CONCURRENT_REQUESTS);
+ } ongoing_sql_queries SEC(".maps");
+ 
++static __always_inline bool sql_query_started(const go_addr_key_t *key, u32 stack_off) {
++    const sql_func_invocation_t *active = bpf_map_lookup_elem(&ongoing_sql_queries, key);
++    return active && active->start_monotime_ns && active->stack_off == stack_off;
++}
++
+ typedef struct grpc_header_field {
+     u8 *key_ptr;
+     u64 key_len;
+@@ -224,6 +236,8 @@ static __always_inline void tp_from_parent(tp_info_t *tp, tp_info_t *parent) {
      *((u64 *)(tp->trace_id + 8)) = *((u64 *)(parent->trace_id + 8));
      *((u64 *)tp->parent_id) = *((u64 *)parent->span_id);
      tp->flags = parent->flags;
 +    tp->sdk_context = parent->sdk_context;
++    tp->sdk_parent_kind = parent->sdk_kind;
  }
  
  static __always_inline void tp_clone(tp_info_t *dest, tp_info_t *src) {
-@@ -317,7 +325,7 @@ static __always_inline void update_tp_parent_go(go_addr_key_t *gp_key, tp_info_t
-     bpf_map_update_elem(&go_trace_map, gp_key, tp, BPF_ANY);
- }
+@@ -319,6 +333,10 @@ static __always_inline void update_tp_parent_go(go_addr_key_t *gp_key, tp_info_t
  
--static __always_inline u8 client_trace_parent(void *goroutine_addr, tp_info_t *tp_i) {
-+static __always_inline u8 client_trace_parent(void *goroutine_addr, tp_info_t *tp_i, u8 sdk_kind) {
+ static __always_inline u8 client_trace_parent(void *goroutine_addr, tp_info_t *tp_i) {
      u8 found_trace_id = 0;
++    tp_i->sdk_kind = 0;
++    tp_i->sdk_owned = 0;
++    tp_i->sdk_context = 0;
++    tp_i->sdk_parent_kind = 0;
  
      // May get overridden when decoding existing traceparent or finding a server span, but otherwise we set sample ON
-@@ -342,7 +350,12 @@ static __always_inline u8 client_trace_parent(void *goroutine_addr, tp_info_t *t
+     tp_i->flags = k_flag_sampled;
+@@ -342,7 +360,7 @@ static __always_inline u8 client_trace_parent(void *goroutine_addr, tp_info_t *t
          tp_info_t *tp = tp_info_from_parent_go(&g_key, 0);
  
          if (tp) {
 -            if (should_be_in_same_transaction(tp, tp_i)) {
 +            if (tp->sdk_context || should_be_in_same_transaction(tp, tp_i)) {
-+                if (tp->sdk_kind == sdk_kind) {
-+                    *tp_i = *tp;
-+                    tp_i->sdk_owned = 1;
-+                    return 1;
-+                }
                  tp_from_parent(tp_i, tp);
                  found_trace_id = 1;
              } else {
+@@ -361,6 +379,43 @@ static __always_inline u8 client_trace_parent(void *goroutine_addr, tp_info_t *t
+     return found_trace_id;
+ }
+ 
++// SpanKind alone does not identify the operation; require its propagated SDK context.
++static __always_inline bool sdk_client_parent_matches_header(const tp_info_t *tp,
++                                                              const unsigned char *header) {
++    if (!tp->sdk_context || tp->sdk_parent_kind != k_go_sdk_span_client) {
++        return false;
++    }
++    unsigned char expected[W3C_VAL_LENGTH] = {'0', '0', '-'};
++    encode_hex(expected + 3, tp->trace_id, TRACE_ID_SIZE_BYTES);
++    expected[35] = '-';
++    encode_hex(expected + 36, tp->parent_id, SPAN_ID_SIZE_BYTES);
++    expected[52] = '-';
++    expected[53] = '0';
++    expected[54] = tp->flags ? '1' : '0';
++    return __builtin_memcmp(expected, header, sizeof(expected)) == 0;
++}
++
++static __always_inline void mark_sdk_client_header(const go_addr_key_t *key,
++                                                    tp_info_t *tp,
++                                                    const void *value,
++                                                    u64 len) {
++    if (!tp || len != W3C_VAL_LENGTH) {
++        return;
++    }
++    tp_info_t *sdk = bpf_map_lookup_elem(&go_trace_map, key);
++    if (!sdk || sdk->sdk_kind != k_go_sdk_span_client ||
++        __builtin_memcmp(sdk->trace_id, tp->trace_id, sizeof(tp->trace_id)) ||
++        __builtin_memcmp(sdk->span_id, tp->parent_id, sizeof(tp->parent_id))) {
++        return;
++    }
++    unsigned char header[W3C_VAL_LENGTH];
++    if (!bpf_probe_read_user(header, sizeof(header), value) &&
++        sdk_client_parent_matches_header(tp, header)) {
++        *tp = *sdk;
++        tp->sdk_owned = 1;
++    }
++}
++
+ static __always_inline void read_ip_and_port(void *src, u8 *dst_ip, u16 *dst_port) {
+     s64 addr_len = 0;
+     void *addr_ip = 0;
 diff --git a/bpf/gotracer/go_grpc.c b/bpf/gotracer/go_grpc.c
-index 5044683..e5a39bf 100644
+index 5044683..55ac4ad 100644
 --- a/bpf/gotracer/go_grpc.c
 +++ b/bpf/gotracer/go_grpc.c
-@@ -228,7 +228,8 @@ int GUARDED_PROG(obi_uprobe_server_handleStream, struct pt_regs *, ctx) {
+@@ -80,7 +80,7 @@ static __always_inline bool grpc_header_name_is_traceparent(const unsigned char
+     return mismatch == 0;
+ }
+ 
+-static __always_inline bool grpc_client_headers_are_app_owned(const go_slice_t *fields) {
++static __always_inline bool grpc_client_headers_are_app_owned(const go_slice_t *fields, const go_addr_key_t *request_key) {
+     if (fields->len <= 0) {
+         return false;
+     }
+@@ -110,6 +110,11 @@ static __always_inline bool grpc_client_headers_are_app_owned(const go_slice_t *
+             return true;
+         }
+         if (grpc_header_name_is_traceparent(name)) {
++            grpc_client_func_invocation_t *request =
++                bpf_map_lookup_elem(&ongoing_grpc_client_requests, request_key);
++            if (request) {
++                mark_sdk_client_header(request_key, &request->tp, field.val_ptr, field.val_len);
++            }
+             return true;
+         }
+     }
+@@ -219,6 +224,11 @@ int GUARDED_PROG(obi_uprobe_server_handleStream, struct pt_regs *, ctx) {
+         st_offset = go_offset_of(ot, (go_offset){.v = _grpc_server_stream_st_ptr_pos});
+     }
+ 
++    // Go stack growth can replay entry; the first probe already consumed the stream parent.
++    if (grpc_server_request_started(&g_key, (u64)stream_stream_ptr)) {
++        return 0;
++    }
++
+     grpc_srv_func_invocation_t invocation = {
+         .start_monotime_ns = bpf_ktime_get_ns(),
+         .stream = (u64)stream_stream_ptr,
+@@ -228,7 +238,8 @@ int GUARDED_PROG(obi_uprobe_server_handleStream, struct pt_regs *, ctx) {
  
      if (stream_ptr) {
          void *st_ptr = 0;
@@ -90,7 +187,7 @@ index 5044683..e5a39bf 100644
          // Read the embedded object ptr
          bpf_probe_read(&st_ptr, sizeof(st_ptr), (void *)(stream_ptr + st_offset + sizeof(void *)));
  
-@@ -242,12 +243,12 @@ int GUARDED_PROG(obi_uprobe_server_handleStream, struct pt_regs *, ctx) {
+@@ -242,12 +253,12 @@ int GUARDED_PROG(obi_uprobe_server_handleStream, struct pt_regs *, ctx) {
                  (void *)(stream_stream_ptr +
                           go_offset_of(ot, (go_offset){.v = _grpc_transport_stream_id_pos})));
              if (stream_id) {
@@ -108,7 +205,7 @@ index 5044683..e5a39bf 100644
              }
          }
  
-@@ -294,7 +295,9 @@ int GUARDED_PROG(obi_uprobe_http2Server_operateHeaders, struct pt_regs *, ctx) {
+@@ -294,7 +305,9 @@ int GUARDED_PROG(obi_uprobe_http2Server_operateHeaders, struct pt_regs *, ctx) {
      process_meta_frame_headers(frame, &t.tp);
  
      bpf_map_update_elem(&ongoing_grpc_operate_headers, &g_key, &tr, BPF_ANY);
@@ -119,7 +216,7 @@ index 5044683..e5a39bf 100644
  
      // Per-stream tp avoids last-writer-wins on the per-transport entry.
      // MetaHeadersFrame.HeadersFrame is *HeadersFrame at offset 0;
-@@ -306,7 +309,8 @@ int GUARDED_PROG(obi_uprobe_http2Server_operateHeaders, struct pt_regs *, ctx) {
+@@ -306,7 +319,8 @@ int GUARDED_PROG(obi_uprobe_http2Server_operateHeaders, struct pt_regs *, ctx) {
              u32 stream_id = 0;
              bpf_probe_read(&stream_id, sizeof(stream_id), (unsigned char *)headers_frame + 8);
              if (stream_id) {
@@ -129,7 +226,7 @@ index 5044683..e5a39bf 100644
                  bpf_map_update_elem(&ongoing_grpc_server_stream_tps, &k, &t.tp, BPF_ANY);
              }
          }
-@@ -339,7 +343,9 @@ int GUARDED_PROG(obi_uprobe_server_handler_transport_handle_streams, struct pt_r
+@@ -339,7 +353,9 @@ int GUARDED_PROG(obi_uprobe_server_handler_transport_handle_streams, struct pt_r
              };
              __builtin_memcpy(&t.conn, conn, sizeof(connection_info_t));
  
@@ -140,7 +237,7 @@ index 5044683..e5a39bf 100644
          }
      }
  
-@@ -413,7 +419,9 @@ int GUARDED_PROG(obi_uprobe_server_handleStream_return, struct pt_regs *, ctx) {
+@@ -413,7 +429,9 @@ int GUARDED_PROG(obi_uprobe_server_handleStream_return, struct pt_regs *, ctx) {
  
      u8 found_conn = 0;
      if (st_ptr) {
@@ -151,50 +248,15 @@ index 5044683..e5a39bf 100644
  
          bpf_dbg_printk("found t: %llx", t);
          if (t) {
-@@ -509,7 +517,7 @@ static __always_inline void clientConnStart(void *goroutine_addr,
-                                 go_offset_of(ot, (go_offset){.v = _value_context_val_ptr_pos}) +
-                                 sizeof(void *)));
+@@ -1256,7 +1274,7 @@ static __always_inline void observe_grpc_client_headers(const pending_h2_invocat
+     go_addr_key_from_id(&writer_key, writer_goroutine);
+     bpf_map_update_elem(&grpc_h2_header_observations, &writer_key, &observation, BPF_ANY);
  
--        invocation.flags = client_trace_parent(goroutine_addr, &invocation.tp);
-+        invocation.flags = client_trace_parent(goroutine_addr, &invocation.tp, k_go_sdk_span_client);
-     } else {
-         // it's OK sending empty tp for a client, the userspace id generator will make random trace_id, span_id
-         bpf_dbg_printk("No ctx_ptr: %llx", ctx_ptr);
-diff --git a/bpf/gotracer/go_kafka_go.c b/bpf/gotracer/go_kafka_go.c
-index 60d8b9f..ef4a4e2 100644
---- a/bpf/gotracer/go_kafka_go.c
-+++ b/bpf/gotracer/go_kafka_go.c
-@@ -43,7 +43,7 @@ int GUARDED_PROG(obi_uprobe_writer_write_messages, struct pt_regs *, ctx) {
- 
-     tp_info_t tp = {};
- 
--    client_trace_parent(goroutine_addr, &tp);
-+    client_trace_parent(goroutine_addr, &tp, k_go_sdk_span_producer);
-     go_addr_key_t p_key = {};
-     go_addr_key_from_id(&p_key, w_ptr);
- 
-diff --git a/bpf/gotracer/go_mongo.c b/bpf/gotracer/go_mongo.c
-index a891df1..7d3c28d 100644
---- a/bpf/gotracer/go_mongo.c
-+++ b/bpf/gotracer/go_mongo.c
-@@ -71,7 +71,7 @@ obi_uprobe_mongo_coll_op(struct pt_regs *ctx, const char *op, const u32 op_len)
-     go_addr_key_t g_key = {};
-     go_addr_key_from_id(&g_key, goroutine_addr);
- 
--    client_trace_parent(goroutine_addr, &req.tp);
-+    client_trace_parent(goroutine_addr, &req.tp, k_go_sdk_span_client);
- 
-     bpf_d_printk("op=%s, [%s]", req.op, __FUNCTION__);
- 
-@@ -155,7 +155,7 @@ int GUARDED_PROG(obi_uprobe_mongo_op_execute, struct pt_regs *, ctx) {
-     const u8 begun = req != NULL;
- 
-     if (!req) {
--        client_trace_parent(goroutine_addr, &fresh_req.tp);
-+        client_trace_parent(goroutine_addr, &fresh_req.tp, k_go_sdk_span_client);
-         req = &fresh_req;
+-    if (grpc_client_headers_are_app_owned(fields)) {
++    if (grpc_client_headers_are_app_owned(fields, &pending->request_key)) {
+         mark_grpc_app_owned_write(&writer_key, &observation);
+         replace_grpc_h2_owned_stream(&observation);
      }
- 
 diff --git a/bpf/gotracer/go_net_common.h b/bpf/gotracer/go_net_common.h
 index e286868..e8cc343 100644
 --- a/bpf/gotracer/go_net_common.h
@@ -210,7 +272,7 @@ index e286868..e8cc343 100644
          if (t) {
              if (t->conn.d_port == 0 && t->conn.s_port == 0) {
 diff --git a/bpf/gotracer/go_nethttp.c b/bpf/gotracer/go_nethttp.c
-index bcd2300..61f4f4f 100644
+index bcd2300..2d91ec8 100644
 --- a/bpf/gotracer/go_nethttp.c
 +++ b/bpf/gotracer/go_nethttp.c
 @@ -70,13 +70,11 @@ SCRATCH_MEM_TYPED(round_trip_client_data, http_client_data_t)
@@ -250,16 +312,39 @@ index bcd2300..61f4f4f 100644
  SEC("uprobe/findHandler")
  int GUARDED_PROG(obi_uprobe_findHandlerRet, struct pt_regs *, ctx) {
      bpf_dbg_printk("=== uprobe/findHandler ===");
-@@ -678,7 +684,7 @@ static __always_inline void roundTripStartHelper(struct pt_regs *ctx) {
+@@ -994,6 +1000,31 @@ done:
+     return 0;
+ }
  
-     http_func_invocation_t invocation = {.start_monotime_ns = bpf_ktime_get_ns(), .tp = {0}};
- 
--    client_trace_parent(goroutine_addr, &invocation.tp);
-+    client_trace_parent(goroutine_addr, &invocation.tp, k_go_sdk_span_client);
- 
-     http_client_data_t *trace = round_trip_client_data_mem();
-     if (!trace) {
-@@ -1041,9 +1047,26 @@ client_request_has_traceparent(void *buf_ptr,
++static __always_inline void
++mark_http_sdk_client_header(u64 request_go, const void *value, u64 len) {
++    go_addr_key_t key = {};
++    go_addr_key_from_id(&key, (void *)request_go);
++    http_func_invocation_t *request = bpf_map_lookup_elem(&go_ongoing_http_client_requests, &key);
++    if (!request) {
++        return;
++    }
++    const u64 previous_span = *((u64 *)request->tp.span_id);
++    mark_sdk_client_header(&key, &request->tp, value, len);
++    if (!request->tp.sdk_owned) {
++        return;
++    }
++    connection_info_t *info = bpf_map_lookup_elem(&ongoing_client_connections, &key);
++    if (info) {
++        connection_info_t conn = *info;
++        sort_connection_info(&conn);
++        tp_info_pid_t *cached = trace_info_for_connection(&conn, TRACE_TYPE_CLIENT);
++        if (cached && cached->pid == key.pid && *((u64 *)cached->tp.span_id) == previous_span) {
++            // Large headers can make the server use this fallback instead of the wire header.
++            tp_clone(&cached->tp, &request->tp);
++        }
++    }
++}
++
+ // client_request_has_traceparent scans the header block that writeSubset just
+ // serialized ([entry_n, return_n)) for an existing traceparent header, reusing
+ // the same primitive as the server-side extraction. All offsets are validated
+@@ -1041,9 +1072,26 @@ client_request_has_traceparent(void *buf_ptr,
      return found != NULL;
  }
  
@@ -287,7 +372,7 @@ index bcd2300..61f4f4f 100644
      if (!g_bpf_header_propagation || !g_bpf_probe_write_user_enabled) {
          return 0;
      }
-@@ -1100,8 +1123,10 @@ static __always_inline int on_writeSubset_returns(struct pt_regs *ctx,
+@@ -1100,8 +1148,10 @@ static __always_inline int on_writeSubset_returns(struct pt_regs *ctx,
      bpf_dbg_printk("buf_ptr=%llx, entry_n=%d, len=%d", (void *)buf_ptr, inv->entry_n, len);
  
      // If the application already wrote its own traceparent, don't add a second.
@@ -299,7 +384,7 @@ index bcd2300..61f4f4f 100644
          goto done;
      }
  
-@@ -1114,13 +1139,18 @@ static __always_inline int on_writeSubset_returns(struct pt_regs *ctx,
+@@ -1114,13 +1164,18 @@ static __always_inline int on_writeSubset_returns(struct pt_regs *ctx,
  
      if (len < size - header_len) {
          unsigned char *dst = (unsigned char *)buf_ptr + len;
@@ -322,7 +407,7 @@ index bcd2300..61f4f4f 100644
  
          // For Go we support two types of HTTP context propagation for now.
          //   1. The one that this code does, which uses the locked down bpf_probe_write_user.
-@@ -1128,23 +1158,7 @@ static __always_inline int on_writeSubset_returns(struct pt_regs *ctx,
+@@ -1128,23 +1183,7 @@ static __always_inline int on_writeSubset_returns(struct pt_regs *ctx,
          // If this code ran, we should ensure that the second part doesn't run, therefore
          // we remove the metadata setup in uprobe_persistConnRoundTrip(struct pt_regs *ctx), so
          // that approach 2. skips this packet.
@@ -347,7 +432,7 @@ index bcd2300..61f4f4f 100644
      }
  
  done:
-@@ -1160,12 +1174,60 @@ done:
+@@ -1160,12 +1199,64 @@ done:
  // with "number of funcs in func_info doesn't match number of subprogs".
  SEC("uprobe/header_writeSubset_returns")
  int GUARDED_PROG(obi_uprobe_writeSubset_returns, struct pt_regs *, ctx) {
@@ -399,6 +484,10 @@ index bcd2300..61f4f4f 100644
 +            goto preserve;
 +        }
 +        if (stricmp((const char *)name, "traceparent", W3C_KEY_LENGTH)) {
++            go_string_t value = {};
++            if (!bpf_probe_read_user(&value, sizeof(value), kv.values.array)) {
++                mark_http_sdk_client_header(inv->req_goaddr, value.str, value.len);
++            }
 +            goto preserve;
 +        }
 +    }
@@ -410,7 +499,7 @@ index bcd2300..61f4f4f 100644
  }
  
  // HTTP 2.0 server support
-@@ -1254,14 +1316,13 @@ int GUARDED_PROG(obi_uprobe_http2serverConn_runHandler, struct pt_regs *, ctx) {
+@@ -1254,14 +1345,13 @@ int GUARDED_PROG(obi_uprobe_http2serverConn_runHandler, struct pt_regs *, ctx) {
                  __builtin_memcpy(&inv->tp, tp, sizeof(tp_info_t));
                  bpf_dbg_printk("Found traceparent in HTTP2 headers");
                  bpf_map_update_elem(&ongoing_http_server_requests, &g_key, inv, BPF_ANY);
@@ -427,7 +516,7 @@ index bcd2300..61f4f4f 100644
  }
  
  static __always_inline bool find_http_client_request_key(const go_addr_key_t *writer_key,
-@@ -1288,6 +1349,7 @@ static __always_inline bool find_http_client_request_key(const go_addr_key_t *wr
+@@ -1288,6 +1378,7 @@ static __always_inline bool find_http_client_request_key(const go_addr_key_t *wr
  static __always_inline void setup_http2_client_conn(void *goroutine_addr,
                                                      void *cc_ptr,
                                                      u32 stream_id,
@@ -435,7 +524,7 @@ index bcd2300..61f4f4f 100644
                                                      go_offset_const off_cc_tconn_pos,
                                                      go_offset_const off_cc_tls_pos,
                                                      go_offset_const off_cc_framer_pos) {
-@@ -1380,7 +1442,12 @@ static __always_inline void setup_http2_client_conn(void *goroutine_addr,
+@@ -1380,7 +1471,12 @@ static __always_inline void setup_http2_client_conn(void *goroutine_addr,
                  };
                  s_key.conn_ptr = (u64)framer;
  
@@ -449,7 +538,15 @@ index bcd2300..61f4f4f 100644
                  if (owned_ref_published) {
                      bpf_map_update_elem(&http2_owned_stream_by_framer, &s_key, &owned_ref, BPF_ANY);
                  }
-@@ -1470,8 +1537,13 @@ int GUARDED_PROG(obi_uprobe_http2WriteHeaders, struct pt_regs *, ctx) {
+@@ -1446,6 +1542,7 @@ int GUARDED_PROG(obi_uprobe_http2ClientConnWriteHeader, struct pt_regs *, ctx) {
+     if (bpf_probe_read_user(name, sizeof(name), (void *)GO_PARAM2(ctx)) == 0 &&
+         stricmp((const char *)name, "traceparent", W3C_KEY_LENGTH)) {
+         observation->app_owned = 1;
++        mark_http_sdk_client_header(observation->request_go, GO_PARAM4(ctx), (u64)GO_PARAM5(ctx));
+     }
+     return 0;
+ }
+@@ -1470,8 +1567,13 @@ int GUARDED_PROG(obi_uprobe_http2WriteHeaders, struct pt_regs *, ctx) {
  
      bpf_dbg_printk("=== uprobe/http2WriteHeaders ===");
  
@@ -465,7 +562,7 @@ index bcd2300..61f4f4f 100644
  
      return 0;
  }
-@@ -1490,6 +1562,7 @@ int GUARDED_PROG(obi_uprobe_http2WriteHeaders_vendored, struct pt_regs *, ctx) {
+@@ -1490,6 +1592,7 @@ int GUARDED_PROG(obi_uprobe_http2WriteHeaders_vendored, struct pt_regs *, ctx) {
      setup_http2_client_conn(goroutine_addr,
                              cc_ptr,
                              (u32)stream_id,
@@ -473,7 +570,7 @@ index bcd2300..61f4f4f 100644
                              _cc_tconn_vendored_pos,
                              _cc_tls_vendored_pos,
                              _cc_framer_vendored_pos);
-@@ -1534,10 +1607,10 @@ on_http2FramerWriteHeaders(struct pt_regs *ctx, off_table_t *ot, u64 stream_id)
+@@ -1534,10 +1637,10 @@ on_http2FramerWriteHeaders(struct pt_regs *ctx, off_table_t *ot, u64 stream_id)
          return;
      }
  
@@ -487,7 +584,7 @@ index bcd2300..61f4f4f 100644
          bpf_dbg_printk("Found existing stream data, go_addr=%llx", go_addr);
          go_addr_key_t g_key = {};
          go_addr_key_from_id(&g_key, go_addr);
-@@ -1575,6 +1648,7 @@ on_http2FramerWriteHeaders(struct pt_regs *ctx, off_table_t *ot, u64 stream_id)
+@@ -1575,6 +1678,7 @@ on_http2FramerWriteHeaders(struct pt_regs *ctx, off_table_t *ot, u64 stream_id)
                          .s_port = conn_info ? conn_info->s_port : 0,
                          .d_port = conn_info ? conn_info->d_port : 0,
                          .frame_type = k_h2_frame_headers,
@@ -495,7 +592,7 @@ index bcd2300..61f4f4f 100644
                      };
                      go_addr_key_t f_key = {};
                      go_addr_key_from_id(&f_key, goroutine_addr);
-@@ -1685,6 +1759,13 @@ enum : u32 {
+@@ -1685,6 +1789,13 @@ enum : u32 {
      k_h2_pad_length_stack_offset_limit = 512,
  };
  
@@ -509,7 +606,7 @@ index bcd2300..61f4f4f 100644
  static __always_inline int reserve_http2_framer_padding(struct pt_regs *ctx,
                                                          go_offset_const pad_offset) {
      if (!g_bpf_header_propagation || !g_bpf_probe_write_user_enabled) {
-@@ -1746,7 +1827,7 @@ static __always_inline int reserve_http2_framer_padding(struct pt_regs *ctx,
+@@ -1746,7 +1857,7 @@ static __always_inline int reserve_http2_framer_padding(struct pt_regs *ctx,
          return 0;
      }
      const u64 max_fragment =
@@ -518,7 +615,7 @@ index bcd2300..61f4f4f 100644
      if (fragment_len > max_fragment) {
          return 0;
      }
-@@ -1788,10 +1869,10 @@ int GUARDED_PROG(obi_uprobe_http2FramerReservePadding_vendored, struct pt_regs *
+@@ -1788,10 +1899,10 @@ int GUARDED_PROG(obi_uprobe_http2FramerReservePadding_vendored, struct pt_regs *
  static __always_inline bool
  commit_http2_reserved_padding(void *buf, s64 n, const go_h2_framer_func_invocation_t *f_info) {
      if (n < k_h2_frame_header_len + 1 + k_h2_tp_hpack_huffman_size ||
@@ -531,7 +628,7 @@ index bcd2300..61f4f4f 100644
  
      unsigned char header[k_h2_frame_header_len] = {};
      if (bpf_probe_read_user(header, sizeof(header), buf) != 0 || header[3] != k_h2_frame_headers ||
-@@ -1822,10 +1903,10 @@ commit_http2_reserved_padding(void *buf, s64 n, const go_h2_framer_func_invocati
+@@ -1822,10 +1933,10 @@ commit_http2_reserved_padding(void *buf, s64 n, const go_h2_framer_func_invocati
  static __always_inline u8 append_http2_traceparent_to_framer(
      void *framer, u64 wbuf_pos, void *buf, s64 n, s64 cap, go_h2_framer_func_invocation_t *f_info) {
      if (n < k_h2_frame_header_len || cap < n ||
@@ -544,7 +641,7 @@ index bcd2300..61f4f4f 100644
  
      unsigned char header[k_h2_frame_header_len] = {};
      if (bpf_probe_read_user(header, sizeof(header), buf) != 0 || header[3] != f_info->frame_type ||
-@@ -1840,12 +1921,11 @@ static __always_inline u8 append_http2_traceparent_to_framer(
+@@ -1840,12 +1951,11 @@ static __always_inline u8 append_http2_traceparent_to_framer(
      if (!(header[4] & k_h2_flag_end_headers)) {
          return k_go_h2_user_write_deferred;
      }
@@ -627,19 +724,6 @@ index 3026f01..0ab00d8 100644
      _last_go_offset,
  } go_offset_const;
  
-diff --git a/bpf/gotracer/go_redis.c b/bpf/gotracer/go_redis.c
-index d0f4316..3df0049 100644
---- a/bpf/gotracer/go_redis.c
-+++ b/bpf/gotracer/go_redis.c
-@@ -44,7 +44,7 @@ static __always_inline void setup_request(void *goroutine_addr) {
-         go_addr_key_t g_key = {};
-         go_addr_key_from_id(&g_key, goroutine_addr);
- 
--        client_trace_parent(goroutine_addr, &req->tp);
-+        client_trace_parent(goroutine_addr, &req->tp, k_go_sdk_span_client);
- 
-         bpf_map_update_elem(&ongoing_redis_requests, &g_key, req, BPF_ANY);
-     }
 diff --git a/bpf/gotracer/go_sdk.c b/bpf/gotracer/go_sdk.c
 index d8d35f7..59e1d80 100644
 --- a/bpf/gotracer/go_sdk.c
@@ -885,18 +969,33 @@ index d8d35f7..59e1d80 100644
          return 0;
      }
 diff --git a/bpf/gotracer/go_sql.c b/bpf/gotracer/go_sql.c
-index f499ba5..375e801 100644
+index f499ba5..020df12 100644
 --- a/bpf/gotracer/go_sql.c
 +++ b/bpf/gotracer/go_sql.c
-@@ -308,7 +308,7 @@ static __always_inline void set_sql_info(
-                                         .conn = {0},
+@@ -301,7 +301,14 @@ static __always_inline void extract_sql_hostname(sql_request_trace_t *trace,
+ 
+ static __always_inline void set_sql_info(
+     void *goroutine_addr, void *driver_conn, void *sql_param, void *query_len, u64 stack_off) {
++    go_addr_key_t g_key = {};
++    go_addr_key_from_id(&g_key, goroutine_addr);
++    // Go stack growth replays this entry without starting another query.
++    if (sql_query_started(&g_key, stack_off)) {
++        return;
++    }
+     sql_func_invocation_t invocation = {.start_monotime_ns = bpf_ktime_get_ns(),
++                                        .stack_off = stack_off,
+                                         .sql_param = (u64)sql_param,
+                                         .query_len = (u64)query_len,
+                                         .driver_conn_ptr = (u64)driver_conn,
+@@ -309,8 +316,6 @@ static __always_inline void set_sql_info(
                                          .tp = {0}};
  
--    client_trace_parent(goroutine_addr, &invocation.tp);
-+    client_trace_parent(goroutine_addr, &invocation.tp, k_go_sdk_span_client);
-     go_addr_key_t g_key = {};
-     go_addr_key_from_id(&g_key, goroutine_addr);
+     client_trace_parent(goroutine_addr, &invocation.tp);
+-    go_addr_key_t g_key = {};
+-    go_addr_key_from_id(&g_key, goroutine_addr);
  
+     // Write event
+     if (bpf_map_update_elem(&ongoing_sql_queries, &g_key, &invocation, BPF_ANY)) {
 diff --git a/bpf/gotracer/gotracer.c b/bpf/gotracer/gotracer.c
 index 15a0d1b..82a41f1 100644
 --- a/bpf/gotracer/gotracer.c
@@ -919,10 +1018,22 @@ index 15a0d1b..82a41f1 100644
      if (!identity) {
          return 0;
 diff --git a/bpf/gotracer/maps/grpc.h b/bpf/gotracer/maps/grpc.h
-index bd94b83..21747fb 100644
+index bd94b83..da51bc3 100644
 --- a/bpf/gotracer/maps/grpc.h
 +++ b/bpf/gotracer/maps/grpc.h
-@@ -127,7 +127,19 @@ struct {
+@@ -33,6 +33,11 @@ struct {
+     __uint(max_entries, MAX_CONCURRENT_REQUESTS);
+ } ongoing_grpc_server_requests SEC(".maps");
+ 
++static __always_inline bool grpc_server_request_started(const go_addr_key_t *key, u64 stream) {
++    grpc_srv_func_invocation_t *request = bpf_map_lookup_elem(&ongoing_grpc_server_requests, key);
++    return request && request->start_monotime_ns && request->stream == stream;
++}
++
+ struct {
+     __uint(type, BPF_MAP_TYPE_LRU_HASH);
+     __type(key, go_addr_key_t); // key: pid + pointer to the transport
+@@ -127,7 +132,19 @@ struct {
  // Avoids the last-writer-wins race on the transport-keyed ongoing_grpc_transports
  struct {
      __uint(type, BPF_MAP_TYPE_LRU_HASH);
@@ -979,35 +1090,38 @@ index 5bd5a33..e792f68 100644
 +    u32 max_frame_size;
  } go_h2_framer_func_invocation_t;
 diff --git a/bpf/tests/bpf_go_client_trace_parent.c b/bpf/tests/bpf_go_client_trace_parent.c
-index 59da97e..2b07929 100644
+index 59da97e..43a65e0 100644
 --- a/bpf/tests/bpf_go_client_trace_parent.c
 +++ b/bpf/tests/bpf_go_client_trace_parent.c
-@@ -70,7 +70,7 @@ static void no_parent_request(void) {
- 
-     memset(&tp, 0xAB, sizeof(tp));
- 
--    const u8 found = client_trace_parent((void *)0x1234, &tp);
-+    const u8 found = client_trace_parent((void *)0x1234, &tp, k_go_sdk_span_client);
- 
-     expect(found == 0, true, "no parent request is found when the maps are empty");
-     expect(valid_span(tp.parent_id),
-@@ -93,7 +93,7 @@ static void parent_is_a_sql_wrapper(void) {
- 
-     sql_wrapper = &invocation;
-     bpf_map_lookup_elem_hook = sql_wrapper_lookup;
--    const u8 found = client_trace_parent((void *)0x1234, &tp);
-+    const u8 found = client_trace_parent((void *)0x1234, &tp, k_go_sdk_span_client);
-     bpf_map_lookup_elem_hook = NULL;
- 
-     expect(found == 1, true, "a cloud web database wrapping the call is adopted as the parent");
-@@ -107,9 +107,42 @@ static void parent_is_a_sql_wrapper(void) {
+@@ -107,9 +107,97 @@ static void parent_is_a_sql_wrapper(void) {
      expect(valid_span(tp.span_id), true, "the adopted client call still gets its own span id");
  }
  
++static void sql_stack_growth_preserves_query(void) {
++    sql_func_invocation_t invocation = {.start_monotime_ns = 1, .stack_off = 128};
++    go_addr_key_t key = {.addr = 0x1234};
++    bpf_map_lookup_elem_hook = sql_wrapper_lookup;
++    sql_wrapper = NULL;
++    expect(sql_query_started(&key, 128), false, "a first SQL query starts normally");
++    sql_wrapper = &invocation;
++    expect(sql_query_started(&key, 128), true,
++           "stack growth must keep the existing query and its parent context");
++    expect(sql_query_started(&key, 256), false,
++           "a deeper nested SQL call is a separate operation");
++    invocation.start_monotime_ns = 0;
++    expect(sql_query_started(&key, 128), false, "an unstarted query is not a replay");
++    bpf_map_lookup_elem_hook = NULL;
++}
++
 +static tp_info_t *sdk_parent;
 +
 +static void *sdk_parent_lookup(void *map, const void *key) {
 +    return map == &go_trace_map ? sdk_parent : NULL;
++}
++
++static long read_user_memory(void *dst, unsigned int size, const void *src) {
++    memcpy(dst, src, size);
++    return 0;
 +}
 +
 +static void parent_is_sdk_span(void) {
@@ -1019,36 +1133,70 @@ index 59da97e..2b07929 100644
 +    bpf_map_lookup_elem_hook = sdk_parent_lookup;
 +    bpf_ktime_ns_value = 60000000000;
 +    tp_info_t tp = {};
-+    expect(client_trace_parent((void *)0x1234, &tp, k_go_sdk_span_client), true,
++    expect(client_trace_parent((void *)0x1234, &tp), true,
 +           "active SDK context survives long operations");
-+    expect(tp.sdk_owned && !memcmp(tp.span_id, parent.span_id, sizeof(tp.span_id)), true,
-+           "SDK client owns the matching client operation");
-+    parent.sdk_kind = 1; // internal SDK work does not cover a client operation
-+    tp = (tp_info_t){};
-+    expect(client_trace_parent((void *)0x1234, &tp, k_go_sdk_span_client), true,
-+           "uncovered client inherits SDK parent");
 +    expect(tp.sdk_context && !tp.sdk_owned && tp.flags == 0, true,
-+           "uncovered client retains context and sampling, without SDK ownership");
++           "raw SQL/HTTP clients inside an SDK CLIENT wrapper remain separate operations");
 +    expect(memcmp(tp.parent_id, parent.span_id, sizeof(tp.parent_id)) == 0, true,
-+           "client is a direct child of internal SDK work");
++           "uncovered client is a direct child of SDK CLIENT work");
 +    expect(memcmp(tp.span_id, parent.span_id, sizeof(tp.span_id)) != 0, true,
 +           "uncovered client has its own span ID");
++
++    unsigned char header[W3C_VAL_LENGTH];
++    make_tp_string(header, &parent);
++    expect(sdk_client_parent_matches_header(&tp, header), true,
++           "a request propagating this SDK CLIENT context is covered");
++    header[3] = 'f';
++    expect(sdk_client_parent_matches_header(&tp, header), false,
++           "an unrelated trace header does not establish SDK ownership");
++    make_tp_string(header, &parent);
++    header[36] = 'f';
++    expect(sdk_client_parent_matches_header(&tp, header), false,
++           "another span in the same trace does not establish SDK ownership");
++    make_tp_string(header, &parent);
++    for (u8 kind = k_go_sdk_span_internal; kind <= k_go_sdk_span_consumer; kind++) {
++        parent.sdk_kind = kind;
++        memset(&tp, 0xAB, sizeof(tp));
++        expect(client_trace_parent((void *)0x1234, &tp), true,
++               "every SDK kind provides parent context");
++        expect(tp.sdk_context && !tp.sdk_owned && !tp.sdk_kind && tp.flags == 0, true,
++               "an SDK parent alone never suppresses nested client operations");
++        expect(sdk_client_parent_matches_header(&tp, header), kind == k_go_sdk_span_client,
++               "propagating a server or internal context does not cover a client operation");
++    }
++    parent.sdk_kind = k_go_sdk_span_client;
++    client_trace_parent((void *)0x1234, &tp);
++    go_addr_key_t key = {.addr = 0x1234};
++    bpf_probe_read_user_hook = read_user_memory;
++    mark_sdk_client_header(&key, &tp, header, sizeof(header) - 1);
++    expect(tp.sdk_owned, false, "incomplete headers cannot suppress an operation");
++    sdk_parent = NULL;
++    mark_sdk_client_header(&key, &tp, header, sizeof(header));
++    expect(tp.sdk_owned, false, "missing live SDK context cannot suppress an operation");
++    sdk_parent = &parent;
++    mark_sdk_client_header(&key, &tp, header, sizeof(header));
++    expect(tp.sdk_owned && !memcmp(tp.span_id, parent.span_id, sizeof(tp.span_id)), true,
++           "confirmed SDK ownership uses the propagated span ID in every fallback");
++    expect(!memcmp(tp.parent_id, parent.parent_id, sizeof(tp.parent_id)), true,
++           "adopting SDK context preserves its real parent instead of creating a self-reference");
++    bpf_probe_read_user_hook = NULL;
 +    bpf_map_lookup_elem_hook = NULL;
 +}
 +
  int main(void) {
      no_parent_request();
      parent_is_a_sql_wrapper();
++    sql_stack_growth_preserves_query();
 +    parent_is_sdk_span();
  
      printf("OK: %s\n", __FILE__);
      return 0;
 diff --git a/bpf/tests/bpf_go_grpc_server_trace_parent.c b/bpf/tests/bpf_go_grpc_server_trace_parent.c
 new file mode 100644
-index 0000000..d07b53d
+index 0000000..c707224
 --- /dev/null
 +++ b/bpf/tests/bpf_go_grpc_server_trace_parent.c
-@@ -0,0 +1,62 @@
+@@ -0,0 +1,77 @@
 +// Copyright The OpenTelemetry Authors
 +// SPDX-License-Identifier: Apache-2.0
 +
@@ -1061,6 +1209,8 @@ index 0000000..d07b53d
 +static grpc_stream_key_t keys[2];
 +static tp_info_t values[2];
 +static bool present[2];
++static go_addr_key_t request_key = {.pid = 100, .addr = 0x5678};
++static grpc_srv_func_invocation_t request;
 +
 +static int entry(void *map, const void *key) {
 +    if (map != &ongoing_grpc_server_stream_tps) {
@@ -1075,6 +1225,9 @@ index 0000000..d07b53d
 +}
 +
 +static void *lookup(void *map, const void *key) {
++    if (map == &ongoing_grpc_server_requests) {
++        return memcmp(key, &request_key, sizeof(request_key)) ? NULL : &request;
++    }
 +    int i = entry(map, key);
 +    return i < 0 ? NULL : &values[i];
 +}
@@ -1108,7 +1261,17 @@ index 0000000..d07b53d
 +    assert(!take_grpc_server_trace_parent(&keys[0], &parent));
 +    assert(take_grpc_server_trace_parent(&keys[1], &parent));
 +    assert(parent.trace_id[0] == 0x22 && parent.parent_id[0] == 0x22);
-+    puts("PASS gRPC server parent copy-before-delete and process isolation");
++    assert(!grpc_server_request_started(&request_key, 0x1234));
++    request = (grpc_srv_func_invocation_t){.start_monotime_ns = 1, .stream = 0x1234, .tp = parent};
++    assert(grpc_server_request_started(&request_key, 0x1234));
++    assert(!grpc_server_request_started(&request_key, 0x5678));
++    go_addr_key_t other_process = request_key;
++    other_process.pid++;
++    assert(!grpc_server_request_started(&other_process, 0x1234));
++    assert(request.tp.trace_id[0] == 0x22);
++    request.start_monotime_ns = 0;
++    assert(!grpc_server_request_started(&request_key, 0x1234));
++    puts("PASS gRPC parent copy-before-delete, process isolation, and repeated-entry guard");
 +    return 0;
 +}
 diff --git a/bpf/tests/bpf_go_observer_pid.c b/bpf/tests/bpf_go_observer_pid.c
@@ -1153,10 +1316,10 @@ index 0000000..8701d25
 +    return 0;
 +}
 diff --git a/bpf/tests/bpfcore/bpf_helpers.h b/bpf/tests/bpfcore/bpf_helpers.h
-index edba123..653c0ef 100644
+index edba123..1eaa84d 100644
 --- a/bpf/tests/bpfcore/bpf_helpers.h
 +++ b/bpf/tests/bpfcore/bpf_helpers.h
-@@ -39,8 +39,9 @@ static inline long
+@@ -39,14 +39,16 @@ static inline long
  bpf_map_update_elem(void *map, const void *key, const void *val, unsigned long long flags) {
      return 0;
  }
@@ -1166,6 +1329,14 @@ index edba123..653c0ef 100644
 +    return bpf_map_delete_elem_hook ? bpf_map_delete_elem_hook(map, key) : 0;
  }
  static inline long bpf_probe_read(void *dst, unsigned int size, const void *src) {
+     return 0;
+ }
++static long (*bpf_probe_read_user_hook)(void *dst, unsigned int size, const void *src);
+ static inline long bpf_probe_read_user(void *dst, unsigned int size, const void *src) {
+-    return 0;
++    return bpf_probe_read_user_hook ? bpf_probe_read_user_hook(dst, size, src) : 0;
+ }
+ static inline long bpf_probe_read_kernel(void *dst, unsigned int size, const void *src) {
      return 0;
 diff --git a/bpf/tests/bpfcore/vmlinux.h b/bpf/tests/bpfcore/vmlinux.h
 index 38fbf1c..7e3af88 100644

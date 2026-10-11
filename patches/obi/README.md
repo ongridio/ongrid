@@ -1,9 +1,9 @@
 # OBI Trace 连续性补丁
 
-完整的 SDK/OBI 混合链路修复依赖本目录的 OBI 源码补丁。仅部署 Ongrid 侧修改和官方 OBI v0.14.0，不能得到本补丁的完整行为。补丁随 Ongrid 代码一起审查、保存和推送，构建为独立版本 `0.14.0-ongrid.3`。Make 和 Edge 镜像的默认依赖均使用这个补丁版本。
+完整的 SDK/OBI 混合链路修复依赖本目录的 OBI 源码补丁。仅部署 Ongrid 侧修改和官方 OBI v0.14.0，不能得到本补丁的完整行为。补丁随 Ongrid 代码一起审查、保存和推送，构建为独立版本 `0.14.0-ongrid.4`。Make 和 Edge 镜像的默认依赖均使用这个补丁版本。
 
 - 上游：[OpenTelemetry eBPF Instrumentation](https://github.com/open-telemetry/opentelemetry-ebpf-instrumentation)，`v0.14.0`，commit `13d9b0c3f600a060bd78820a63ebec882b10757e`。
-- 补丁：[v0.14.0-trace-continuity.patch](v0.14.0-trace-continuity.patch)，包含 35 个源码和测试文件。
+- 补丁：[v0.14.0-trace-continuity.patch](v0.14.0-trace-continuity.patch)，包含 32 个源码和测试文件。
 - 版本、哈希、工具链和验收计数：[manifest.json](manifest.json)。补丁 SHA256 与实际验收版本一致。
 - 上游 [LICENSE](LICENSE) 和 [NOTICE](NOTICE) 原样保留。差异文件明确列出 Ongrid 对上游的修改；这不是上游官方发布。
 
@@ -14,6 +14,10 @@ Go 探针读取 SDK recording span 上下文，识别 SDK 已覆盖的操作，�
 补丁也修复 HTTP/1 大请求头的传播交接、HTTP/2 协商帧大小及 h2c 服务端时间戳、嵌套 PID 命名空间内的探针身份和 Auto SDK 激活，以及 parent-based 采样的父上下文。不增加用户配置项。Ongrid 的 Trace 导出配置同时启用 HTTP、gRPC、SQL、Redis、Kafka、MongoDB，避免补丁采集到的非 HTTP 子操作在出口被关闭；真实服务端验收范围仍以下表和发布边界为准。
 
 `0.14.0-ongrid.3` 还将 gRPC 服务端的 stream/transport 缓存按进程隔离，并在删除缓存项前复制父上下文，避免并发插入复用 LRU 槽位。回归测试模拟删除时立即覆盖槽位，并验证相同指针和 stream ID 在不同进程之间不会串联。Ongrid 在 `sample_ratio=0` 时使用 `always_off`，保留仅采集指标的行为；其他比例继续尊重父级采样标志。
+
+`0.14.0-ongrid.4` 修复自定义 SDK CLIENT Span 吞掉内部未插桩 SQL、HTTP 等子操作的问题。子调用先创建自己的 Span；HTTP/gRPC 仅在具体请求与 SDK 上下文关联后才去重。HTTP 的传播头匹配还会更新同连接的备用上下文，确保大请求头下的服务端仍连接到真实 SDK Span。自定义 CLIENT 包装与内部原始 SQL 调用保留为两个有父子关系的 Span，不能仅凭 SpanKind 相同合并。 gRPC 服务端和 SQL 入口保留同一调用的首次上下文，防止 Go 扩栈后重入探针覆盖已生成的 Span；SQL 使用相对栈位置区分重入与真正的嵌套调用。
+
+Manager 的接入地址查询同时修复串行探测耗尽请求时间的问题。每阶段按去重后的目标并发探测，上限受 100 个实例限制；阶段预算最多 8 秒，且不超过剩余请求时间的一半。探测超时只影响对应目标，可选 Pod 元数据超时保留已确认的接收地址；调用者取消仍返回取消错误。
 
 ## 构建、下载与安装
 
@@ -48,7 +52,7 @@ make verify-edge-deps-release
 
 ## 验证
 
-2026-10-11 的完整交付结果见 [delivery-20261011.json](delivery-20261011.json)。以下结果属于已上传 CNB 的 `0.14.0-ongrid.3`；公开校验和、Make 默认下载、双架构 Edge 镜像内 OBI 均与已测二进制一致。测试夹具为移除符号表的 Go 1.25.11，使用 OTel SDK 1.43.0、Auto SDK 1.2.1 和 otelhttp/otelgrpc 0.68.0。
+`0.14.0-ongrid.3` 的历史完整交付结果见 [delivery-20261011.json](delivery-20261011.json)。下表保留该版本的验收记录；公开校验和、Make 默认下载、双架构 Edge 镜像内 OBI 均与已测二进制一致。测试夹具为移除符号表的 Go 1.25.11，使用 OTel SDK 1.43.0、Auto SDK 1.2.1 和 otelhttp/otelgrpc 0.68.0。
 
 | 环境 | HTTP/gRPC 矩阵 | 边界请求 | 合计 |
 | --- | ---: | ---: | ---: |
