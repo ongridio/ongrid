@@ -23,9 +23,12 @@ git clone --quiet --depth 1 --branch "$tag" "$upstream" "$work/source"
 [[ "$(git -C "$work/source" rev-parse HEAD)" == "$commit" ]] || { echo 'OBI upstream commit mismatch' >&2; exit 1; }
 git -C "$work/source" apply --check "$patch"
 git -C "$work/source" apply "$patch"
-# The upstream tag includes the Java agent and its native libraries for both architectures.
+# Verify the upstream input before rebuilding the patched Java agent and both native libraries.
 printf '%s  %s\n' "$(jq -er .embedded_java_agent_sha256 "$manifest")" \
     "$work/source/pkg/internal/java/embedded/obi-java-agent.jar" | sha256sum -c -
+docker build --file "$work/source/javaagent.Dockerfile" --target export \
+    --output "type=local,dest=$work/source/pkg/internal/java/embedded" "$work/source"
+(cd "$work/source" && sha256sum pkg/internal/java/embedded/obi-java-agent.jar) > "$out/JAVA-AGENT.sha256"
 cp "$manifest" "$out/manifest.json"
 cp "$patch" "$out/"
 docker run --rm \
@@ -57,6 +60,6 @@ docker run --rm \
     cp /out/manifest.json ONGRID-PATCH.json
     tar --exclude=./.git --exclude=./bin -cf - . | gzip -n > "/out/obi-v$OBI_RELEASE_VERSION-source-generated.tar.gz"
     cd /out
-    sha256sum *.tar.gz *.patch manifest.json > SHA256SUMS
+    sha256sum *.tar.gz *.patch manifest.json JAVA-AGENT.sha256 > SHA256SUMS
     sha256sum -c SHA256SUMS
     '

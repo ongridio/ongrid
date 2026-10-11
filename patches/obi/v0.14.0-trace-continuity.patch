@@ -1,3 +1,45 @@
+diff --git a/bpf/common/h2_defs.h b/bpf/common/h2_defs.h
+index 9d3501b..e125628 100644
+--- a/bpf/common/h2_defs.h
++++ b/bpf/common/h2_defs.h
+@@ -79,7 +79,8 @@ enum {
+     k_hpack_value_len_tp = k_tp_val_dash3 + 3, // remaining "-01" suffix
+     k_hpack_tp_val_offset = k_hpack_tp_name_offset + k_hpack_tp_name_len + 1,
+     k_hpack_tp_val_offset_huffman = k_hpack_tp_name_offset + k_hpack_tp_name_huffman_len + 1,
+-    k_hpack_tp_max_scan = 256 - k_h2_frame_header_len,
++    k_hpack_tp_max_scan = k_kprobes_http2_buf_size - k_h2_frame_header_len,
++    k_hpack_tp_name_scan_size = 256 - k_h2_frame_header_len,
+ 
+     // --- Full HPACK traceparent entry sizes ---
+     k_h2_tp_hpack_size = k_hpack_tp_val_offset + k_hpack_value_len_tp,
+diff --git a/bpf/common/http_buf_size.h b/bpf/common/http_buf_size.h
+index a3c0461..d26fbbb 100644
+--- a/bpf/common/http_buf_size.h
++++ b/bpf/common/http_buf_size.h
+@@ -3,7 +3,7 @@
+ 
+ #pragma once
+ 
+-enum { k_kprobes_http2_buf_size = 256 };
++enum { k_kprobes_http2_buf_size = 512 };
+ enum { k_kprobes_http2_ret_buf_size = 64 };
+ 
+ // should be enough for most URLs, we may need to extend it if not.
+diff --git a/bpf/common/http_types.h b/bpf/common/http_types.h
+index f21f1ab..4d58e5e 100644
+--- a/bpf/common/http_types.h
++++ b/bpf/common/http_types.h
+@@ -50,9 +50,8 @@ typedef struct call_protocol_args {
+     u8 packet_type;
+     unsigned char small_buf[MIN_HTTP2_SIZE];
+     protocol_selector_t protocols;
+-    u8 skip_tp_parsing;
+     u8 use_bpf_loop;
+-    u8 pad[1];
++    u8 pad[2];
+     int bytes_len;
+     u16 orig_dport;
+     u16 _pad2;
 diff --git a/bpf/common/tp_info.h b/bpf/common/tp_info.h
 index c404fa9..5f3408d 100644
 --- a/bpf/common/tp_info.h
@@ -15,6 +57,194 @@ index c404fa9..5f3408d 100644
  } tp_info_t;
  
  // how a client span got its parent, decided where the parent is adopted
+diff --git a/bpf/generictracer/hpack_traceparent_parse.h b/bpf/generictracer/hpack_traceparent_parse.h
+index 601cb9b..37bd4d2 100644
+--- a/bpf/generictracer/hpack_traceparent_parse.h
++++ b/bpf/generictracer/hpack_traceparent_parse.h
+@@ -124,6 +124,46 @@ static __always_inline u8 find_hpack_traceparent_value(const unsigned char *data
+     return 0;
+ }
+ 
++typedef struct h2_plain_scan_loop_ctx {
++    const unsigned char *base;
++    tp_info_t *tp;
++    u32 off;
++    u32 max_pos;
++    u8 found;
++    u8 _pad[7];
++} h2_plain_scan_loop_ctx_t;
++
++static int h2_plain_scan_step(u32 i, void *vctx) {
++    h2_plain_scan_loop_ctx_t *c = vctx;
++    if (i >= k_hpack_tp_max_scan || i > c->max_pos) {
++        return 1;
++    }
++    u32 at = c->off + i;
++    if (at > k_kprobes_http2_buf_size - k_hpack_value_len_tp - 1) {
++        return 1;
++    }
++    bpf_clamp_umax(at, k_kprobes_http2_buf_size - k_hpack_value_len_tp - 1);
++    c->found = find_hpack_traceparent_value(c->base + at, k_hpack_value_len_tp + 1, c->tp);
++    return c->found;
++}
++
++static __always_inline u8 find_hpack_traceparent_value_loop(const unsigned char *base,
++                                                            u32 off,
++                                                            u32 data_len,
++                                                            tp_info_t *tp) {
++    if (data_len < k_hpack_value_len_tp + 1 || off >= k_kprobes_http2_buf_size) {
++        return 0;
++    }
++    h2_plain_scan_loop_ctx_t c = {
++        .base = base,
++        .tp = tp,
++        .off = off,
++        .max_pos = data_len - k_hpack_value_len_tp - 1,
++    };
++    bpf_loop(k_hpack_tp_max_scan, h2_plain_scan_step, &c, 0);
++    return c.found;
++}
++
+ // w and out are the caller's map-value scratch buffers
+ static __always_inline u8 try_parse_tp_huffman_value(const unsigned char *data,
+                                                      u32 data_len,
+@@ -164,12 +204,14 @@ static __always_inline u8 parse_hpack_traceparent(const unsigned char *data,
+                                                   h2_tp_huff_candidate_t *huff) {
+     huff->at = 0;
+     huff->len = 0;
++    // Preserve the original verifier range; value scans cover the extended buffer.
++    bpf_clamp_umax(data_len, k_hpack_tp_name_scan_size);
+ 
+     // bounded by the smallest field worth recognizing; each shape re-checks its own length
+     if (data_len >= k_h2_tp_hpack_huff_min) {
+         const u32 max_pos = data_len - k_h2_tp_hpack_huff_min;
+ 
+-        for (u16 i = 0; i < k_hpack_tp_max_scan && i <= max_pos; i++) {
++        for (u16 i = 0; i < k_hpack_tp_name_scan_size && i <= max_pos; i++) {
+             // senders that index the name emit any of the three literal forms
+             if (!h2_hpack_is_literal(data[i])) {
+                 continue;
+diff --git a/bpf/generictracer/protocol_http.h b/bpf/generictracer/protocol_http.h
+index 46dbbce..de9e231 100644
+--- a/bpf/generictracer/protocol_http.h
++++ b/bpf/generictracer/protocol_http.h
+@@ -546,7 +546,7 @@ __obi_continue_protocol_http_tp(struct pt_regs *ctx,
+         goto done;
+     }
+ 
+-    if (g_bpf_traceparent_enabled && !args->skip_tp_parsing) {
++    if (g_bpf_traceparent_enabled) {
+         // The below buffer scan can be expensive on high volume of requests. We make it optional
+         // for customers to enable it. Off by default.
+         if (!capture_header_buffer) {
+@@ -741,20 +741,6 @@ __obi_continue_protocol_http(struct pt_regs *ctx,
+         bpf_dbg_printk("tp: %s", tp_buf);
+     }
+ 
+-    args->skip_tp_parsing = 0;
+-
+-    // If we receive SSL request, we know that OBI definitely didn't
+-    // inject the traceparent via the header, so if we already have
+-    // info about this transaction keep that, don't parse headers. Istio
+-    // for example can forward headers as-is, which can give us a stale
+-    // value.
+-    if (meta) {
+-        if (meta->type == k_event_type_http_request && found_tp && args->ssl) {
+-            bpf_dbg_printk("skipping headers parsing because of existing tp info for SSL call");
+-            args->skip_tp_parsing = 1;
+-        }
+-    }
+-
+     if (tp_loop_fn == bpf_strstr_tp_loop) {
+         return __obi_continue_protocol_http_tp(ctx, args, info, meta, tp_loop_fn);
+     } else {
+diff --git a/bpf/generictracer/protocol_http2.h b/bpf/generictracer/protocol_http2.h
+index 47f28ab..365a303 100644
+--- a/bpf/generictracer/protocol_http2.h
++++ b/bpf/generictracer/protocol_http2.h
+@@ -158,7 +158,9 @@ static __always_inline u8 http2_emit_hpack_event(grpc_frames_ctx_t *g_ctx,
+     }
+ 
+     bpf_memset(event, 0, __builtin_offsetof(http2_grpc_request_t, data));
+-    bpf_memset(&event->data, 0, sizeof(*event) - __builtin_offsetof(http2_grpc_request_t, data));
++    bpf_memset(event->data, 0, sizeof(event->data));
++    bpf_memset(event->ret_data, 0, sizeof(event->ret_data));
++    bpf_memset(&event->len, 0, sizeof(*event) - __builtin_offsetof(http2_grpc_request_t, len));
+     event->flags = event_type;
+     event->ssl = g_ctx->args.ssl;
+     event->type = request_type_by_direction(g_ctx->args.direction,
+@@ -741,24 +743,13 @@ int GUARDED_PROG(obi_protocol_http2_grpc_handle_start_frame_server, void *, ctx)
+     // an earlier stream in this buffer may have left huffman retry state here
+     bpf_memset(&g_ctx->huff_scan, 0, sizeof(g_ctx->huff_scan));
+ 
+-    if (parse_hpack_traceparent(h2g_info->data + hpack_off, hpack_len, &tp_p->tp, &g_ctx->huff)) {
+-        h2_tail_call(ctx, g_ctx, k_tail_protocol_http2_grpc_handle_start_frame_server_finalize);
+-        return 0;
+-    }
+-
+-    // without bpf_loop the decode program is a dummy, so skip the detour entirely
+     if (g_bpf_loop_enabled) {
+-        // name matched, value compressed: decoding needs its own program
+-        if (g_ctx->huff.len) {
+-            h2_tail_call(ctx, g_ctx, k_tail_protocol_http2_grpc_handle_start_frame_server_huffman);
+-            return 0;
+-        }
+-
+-        // the scan's bpf_loop callback must stay out of this program: before 5.13 it fails the load
++        // Keep callbacks in the program replaced by a dummy on older kernels.
+         h2_tail_call(ctx, g_ctx, k_tail_protocol_http2_grpc_handle_start_frame_server_huffscan);
+         return 0;
+     }
+ 
++    (void)parse_hpack_traceparent(h2g_info->data + hpack_off, hpack_len, &tp_p->tp, &g_ctx->huff);
+     h2_tail_call(ctx, g_ctx, k_tail_protocol_http2_grpc_handle_start_frame_server_finalize);
+     return 0;
+ }
+@@ -774,6 +765,19 @@ int GUARDED_PROG(obi_protocol_http2_grpc_handle_start_frame_server_huffscan, voi
+     if (!h2g_info) {
+         return 0;
+     }
++    tp_info_pid_t *tp_p = tp_info_mem();
++    if (!tp_p) {
++        return 0;
++    }
++
++    if (!g_ctx->huff_scan.done) {
++        u32 hpack_off;
++        const u32 hpack_len = h2_hpack_window(h2g_info, &hpack_off);
++        if (find_hpack_traceparent_value_loop(h2g_info->data, hpack_off, hpack_len, &tp_p->tp)) {
++            h2_tail_call(ctx, g_ctx, k_tail_protocol_http2_grpc_handle_start_frame_server_commit);
++            return 0;
++        }
++    }
+ 
+     if (h2_server_huffscan(g_ctx, h2g_info)) {
+         h2_tail_call(ctx, g_ctx, k_tail_protocol_http2_grpc_handle_start_frame_server_huffman);
+@@ -876,16 +880,17 @@ int GUARDED_PROG(obi_protocol_http2_grpc_handle_start_frame_server_finalize, voi
+         return 0;
+     }
+ 
+-    if (!valid_trace(tp_p->tp.trace_id)) {
+-        find_trace_for_server_request(
+-            &g_ctx->stream.pid_conn.conn, &tp_p->tp, k_event_type_http_request);
++    if (!g_bpf_loop_enabled && !valid_trace(tp_p->tp.trace_id)) {
++        u32 hpack_off;
++        u32 hpack_len = h2_hpack_window(h2g_info, &hpack_off);
++        bpf_clamp_umax(hpack_len, k_hpack_tp_name_scan_size);
++        // Per-stream headers take precedence over another stream's connection context.
++        (void)find_hpack_traceparent_value(h2g_info->data + hpack_off, hpack_len, &tp_p->tp);
+     }
+ 
+     if (!valid_trace(tp_p->tp.trace_id)) {
+-        u32 hpack_off;
+-        const u32 hpack_len = h2_hpack_window(h2g_info, &hpack_off);
+-        // a miss leaves tp invalid and commit assigns a new trace id
+-        (void)find_hpack_traceparent_value(h2g_info->data + hpack_off, hpack_len, &tp_p->tp);
++        find_trace_for_server_request(
++            &g_ctx->stream.pid_conn.conn, &tp_p->tp, k_event_type_http_request);
+     }
+ 
+     // commit here: one tail call less per stream, so more streams fit in a buffer
 diff --git a/bpf/gotracer/go_common.h b/bpf/gotracer/go_common.h
 index f0ade92..ecdc098 100644
 --- a/bpf/gotracer/go_common.h
@@ -1315,6 +1545,46 @@ index 0000000..8701d25
 +    assert(go_pid_in_namespace(&process, 10) == 0);
 +    return 0;
 +}
+diff --git a/bpf/tests/bpf_hpack_traceparent_parse.c b/bpf/tests/bpf_hpack_traceparent_parse.c
+index 224dae1..1699519 100644
+--- a/bpf/tests/bpf_hpack_traceparent_parse.c
++++ b/bpf/tests/bpf_hpack_traceparent_parse.c
+@@ -429,7 +429,35 @@ static void test_plain_value_wins_over_huffman_lookalike(void) {
+     assert_tp_match(&tp);
+ }
+ 
++static void test_traceparent_after_grpc_metadata(void) {
++    unsigned char buf[512] = {0};
++    const u32 offset = 280;
++    const u32 len = offset + build_plain_entry(buf + offset);
++    tp_info_t tp = {0};
++    h2_tp_huff_candidate_t huff = {0};
++    assertf(parse_hpack_traceparent(buf, len, &tp, &huff) == 0, "late name uses value fallback");
++    assertf(find_hpack_traceparent_value(buf, len, &tp) == 1,
++            "traceparent after gRPC authority, encoding, timeout, and user-agent metadata");
++    assert_tp_match(&tp);
++    memset(&tp, 0, sizeof(tp));
++    assertf(find_hpack_traceparent_value_loop(
++                buf, k_h2_frame_header_len, len - k_h2_frame_header_len, &tp) == 1,
++            "callback scan finds the late value after a frame header");
++    assert_tp_match(&tp);
++    memset(&tp, 0, sizeof(tp));
++    assertf(find_hpack_traceparent_value_loop(buf, 0, len - 1, &tp) == 0,
++            "callback scan rejects a truncated value");
++    memset(buf, 0, sizeof(buf));
++    build_value_only(buf + sizeof(buf) - k_hpack_value_len_tp - 1);
++    assertf(find_hpack_traceparent_value_loop(buf, 0, sizeof(buf), &tp) == 1,
++            "callback scan includes the last complete value");
++    assert_tp_match(&tp);
++    assertf(find_hpack_traceparent_value_loop(buf, sizeof(buf), sizeof(buf), &tp) == 0,
++            "callback scan rejects an offset outside the capture");
++}
++
+ int main(void) {
++    test_traceparent_after_grpc_metadata();
+     test_plain_name_baseline();
+     test_huffman_name_baseline();
+     test_plain_name_huffman_value();
 diff --git a/bpf/tests/bpfcore/bpf_helpers.h b/bpf/tests/bpfcore/bpf_helpers.h
 index edba123..1eaa84d 100644
 --- a/bpf/tests/bpfcore/bpf_helpers.h
@@ -1354,6 +1624,56 @@ index 38fbf1c..7e3af88 100644
      struct upid numbers[8];
  };
  
+diff --git a/bpf/tpinjector/tpinjector.c b/bpf/tpinjector/tpinjector.c
+index 7b16eb5..d631d62 100644
+--- a/bpf/tpinjector/tpinjector.c
++++ b/bpf/tpinjector/tpinjector.c
+@@ -191,6 +191,7 @@ typedef struct tailcall_ctx {
+     bool tp_present;              // frame already carries a traceparent we cannot adopt
+     bool scan_exhausted;          // retry budget ran out before the block was walked
+     u8 opener;                    // first HPACK field byte of the frame being considered
++    msg_buffer_t msg_buf;         // header capture must stay off the 512-byte BPF stack
+ } tailcall_ctx;
+ 
+ SCRATCH_MEM(tailcall_ctx);
+@@ -720,17 +721,22 @@ static __always_inline bool fill_msg_buffers(struct sk_msg_md *msg,
+     u32 window = (unsigned char *)msg->data_end - (unsigned char *)msg->data;
+     bpf_clamp_umax(window, k_msg_buffer_size_max);
+ 
+-    msg_buffer_t msg_buf = {
+-        .pos = 0,
+-        .real_size = window,
+-        .cpu_id = bpf_get_smp_processor_id(),
+-    };
++    tailcall_ctx *t_ctx = tailcall_ctx_mem();
++    if (!t_ctx) {
++        invalidate_msg_buffers(e_key);
++        return false;
++    }
++    msg_buffer_t *msg_buf = &t_ctx->msg_buf;
++    bpf_memset(msg_buf->fallback_buf, 0, sizeof(msg_buf->fallback_buf));
++    msg_buf->pos = 0;
++    msg_buf->real_size = window;
++    msg_buf->cpu_id = bpf_get_smp_processor_id();
+ 
+     // fallback_buf is a fixed k_kprobes_http2_buf_size array, smaller than window's
+     // ceiling, so it needs its own, tighter clamp.
+     u32 fallback_bytes = window;
+     bpf_clamp_umax(fallback_bytes, k_kprobes_http2_buf_size);
+-    bpf_probe_read_kernel(msg_buf.fallback_buf, fallback_bytes, msg->data);
++    bpf_probe_read_kernel(msg_buf->fallback_buf, fallback_bytes, msg->data);
+ 
+     unsigned char *msg_ptr = bpf_map_lookup_elem(&msg_buffer_mem, &(u32){0});
+ 
+@@ -753,7 +759,7 @@ static __always_inline bool fill_msg_buffers(struct sk_msg_md *msg,
+     // outgoing_trace_map data used by Traffic Control to write the
+     // actual 'Traceparent:...' string.
+ 
+-    if (bpf_map_update_elem(&msg_buffers, e_key, &msg_buf, BPF_ANY)) {
++    if (bpf_map_update_elem(&msg_buffers, e_key, msg_buf, BPF_ANY)) {
+         // fail if we can't setup a msg buffer
+         invalidate_msg_buffers(e_key);
+         return false;
 diff --git a/configs/offsets/recordingsdk/inspect.go b/configs/offsets/recordingsdk/inspect.go
 new file mode 100644
 index 0000000..3ce1dd6
@@ -1880,4 +2200,69 @@ index 6c999d0..29c39fe 100644
 +	require.NoError(t, err)
 +	require.NotEmpty(t, points[symbol])
 +	require.NotEmpty(t, points[symbol][0].Returns)
++}
+diff --git a/pkg/internal/java/agent/src/main/java/io/opentelemetry/obi/java/instrumentations/NettySSLHandlerInst.java b/pkg/internal/java/agent/src/main/java/io/opentelemetry/obi/java/instrumentations/NettySSLHandlerInst.java
+index 7e19dc8..1d71605 100644
+--- a/pkg/internal/java/agent/src/main/java/io/opentelemetry/obi/java/instrumentations/NettySSLHandlerInst.java
++++ b/pkg/internal/java/agent/src/main/java/io/opentelemetry/obi/java/instrumentations/NettySSLHandlerInst.java
+@@ -15,12 +15,15 @@ import net.bytebuddy.matcher.ElementMatchers;
+ public class NettySSLHandlerInst {
+   private static final String instClassName = "io.netty.handler.ssl.SslHandler";
+ 
++  private static final String grpcInstClassName =
++      "io.grpc.netty.shaded.io.netty.handler.ssl.SslHandler";
++
+   public static ElementMatcher<? super TypeDescription> type() {
+-    return ElementMatchers.named(instClassName);
++    return ElementMatchers.namedOneOf(instClassName, grpcInstClassName);
+   }
+ 
+   public static boolean matches(Class<?> clazz) {
+-    return clazz.getName().equals(instClassName);
++    return clazz.getName().equals(instClassName) || clazz.getName().equals(grpcInstClassName);
+   }
+ 
+   public static AgentBuilder.Transformer transformer() {
+diff --git a/pkg/internal/java/agent/src/test/java/io/opentelemetry/obi/java/instrumentations/NettySSLHandlerInstTest.java b/pkg/internal/java/agent/src/test/java/io/opentelemetry/obi/java/instrumentations/NettySSLHandlerInstTest.java
+new file mode 100644
+index 0000000..c7f5245
+--- /dev/null
++++ b/pkg/internal/java/agent/src/test/java/io/opentelemetry/obi/java/instrumentations/NettySSLHandlerInstTest.java
+@@ -0,0 +1,37 @@
++/*
++ * Copyright The OpenTelemetry Authors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++package io.opentelemetry.obi.java.instrumentations;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++
++import net.bytebuddy.ByteBuddy;
++import net.bytebuddy.description.type.TypeDescription;
++import net.bytebuddy.dynamic.loading.ClassLoadingStrategy;
++import org.junit.jupiter.api.Test;
++
++class NettySSLHandlerInstTest {
++  @Test
++  void discoversAndRetransformsBothNettyPackages() {
++    for (String name :
++        new String[] {
++          "io.netty.handler.ssl.SslHandler",
++          "io.grpc.netty.shaded.io.netty.handler.ssl.SslHandler",
++          "example.io.netty.handler.ssl.SslHandler"
++        }) {
++      Class<?> type =
++          new ByteBuddy()
++              .subclass(Object.class)
++              .name(name)
++              .make()
++              .load(getClass().getClassLoader(), ClassLoadingStrategy.Default.WRAPPER)
++              .getLoaded();
++      boolean expected = !name.startsWith("example.");
++      assertEquals(
++          expected, NettySSLHandlerInst.type().matches(new TypeDescription.ForLoadedType(type)));
++      assertEquals(expected, NettySSLHandlerInst.matches(type));
++    }
++  }
 +}

@@ -56,7 +56,7 @@ OBI 保持 `exclude_otel_instrumented_services=true`；其 OTel 导出检测不�
 
 新增 autoapm 插件，复用现有 Manager 插件配置、鉴权 tunnel、心跳及 subprocess 生命周期。enabled 表示整个自动 APM 开关；targets 为空只运行监听进程发现。心跳及界面候选最多 200 组，已选目标的资源采集不受候选展示上限限制；目标最多 100 组，只上报路径/端口/PID，不采集进程参数或环境变量。目标必须为确定的绝对路径和非零端口；不接受 glob、正则配置或环境替换符。
 
-选择进程后启动固定版本 OBI 0.14.0-ongrid.4 与私有 Collector 0.157.0。OBI 使用 v1 services 的转义完整路径正则与端口 AND 匹配，保留逐目标服务名称；其 v2 迁移不支持逐目标名称，独立 `config validate` 命令也只接受 v2。因此 v1 由 OBI 启动时校验，复用 subprocess readiness 检测启动错误并回滚。所需系统能力设为强制检查，禁止缺权限仍显示成功启动。
+选择进程后启动固定版本 OBI 0.14.0-ongrid.5 与私有 Collector 0.157.0。OBI 使用 v1 services 的转义完整路径正则与端口 AND 匹配，保留逐目标服务名称；其 v2 迁移不支持逐目标名称，独立 `config validate` 命令也只接受 v2。因此 v1 由 OBI 启动时校验，复用 subprocess readiness 检测启动错误并回滚。所需系统能力设为强制检查，禁止缺权限仍显示成功启动。
 
 OBI 仅向 loopback 的 OTLP 14317/14318 导出。Collector 健康端口 14333、自监控 18888、应用指标 exporter 9465，避免影响已有 SDK Collector。Trace 经现有 Manager URL 与鉴权写入 Tempo；指标复用 custommetrics scraper，经 push_prom_samples 上报，source=obi。环境、device_id、可用的 cluster_id 和 ongrid.instrumentation.source 在 Collector 设置。未添加新的公开接收端口、存储或 spanmetrics 管线。自动 APM 采集统一使用 Trace 采样比例 1，并允许 Manager 自签名证书（跳过证书验证）。由 Manager 在下发时覆盖历史采样和证书选项，普通设备与 Kubernetes 一致；旧 API 字段保留以兼容旧配置。
 
@@ -165,7 +165,7 @@ OBI v0.12.1 的本地 OrbStack 验收发现嵌套 PID 命名空间会影响 Go �
 
 ### OBI 补丁交付边界（2026-10-11）
 
-完整混合链路修复使用独立版本 `0.14.0-ongrid.4`。来源为上游 v0.14.0 的固定 commit 与 [patches/obi](../../patches/obi/README.md) 中的补丁；构建脚本输出双架构 Linux 二进制、完整修改源码、许可证及校验和。本地构建后装入原有双架构 Edge 完整依赖包，直接上传 CNB，不单独发布 OBI 二进制，也不新增 CI 发布流程。
+完整混合链路修复使用独立版本 `0.14.0-ongrid.5`。来源为上游 v0.14.0 的固定 commit 与 [patches/obi](../../patches/obi/README.md) 中的补丁；构建脚本输出双架构 Linux 二进制、完整修改源码、许可证及校验和。本地构建后装入原有双架构 Edge 完整依赖包，直接上传 CNB，不单独发布 OBI 二进制，也不新增 CI 发布流程。
 
 `OBI_VERSION`、Edge Dockerfile 与补丁清单保持一致，`scripts/fetch-obi.sh` 统一校验并安装。CNB 公共依赖标签包含完整补丁版本，宿主机安装/升级与 Kubernetes 镜像均使用相同产物。版本和发布资产不可复用覆盖；后续修改递增补丁版本。
 

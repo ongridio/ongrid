@@ -1,9 +1,9 @@
 # OBI Trace 连续性补丁
 
-完整的 SDK/OBI 混合链路修复依赖本目录的 OBI 源码补丁。仅部署 Ongrid 侧修改和官方 OBI v0.14.0，不能得到本补丁的完整行为。补丁随 Ongrid 代码一起审查、保存和推送，构建为独立版本 `0.14.0-ongrid.4`。Make 和 Edge 镜像的默认依赖均使用这个补丁版本。
+完整的 SDK/OBI 混合链路修复依赖本目录的 OBI 源码补丁。仅部署 Ongrid 侧修改和官方 OBI v0.14.0，不能得到本补丁的完整行为。补丁随 Ongrid 代码一起审查、保存和推送，构建为独立版本 `0.14.0-ongrid.5`。Make 和 Edge 镜像的默认依赖均使用这个补丁版本。
 
 - 上游：[OpenTelemetry eBPF Instrumentation](https://github.com/open-telemetry/opentelemetry-ebpf-instrumentation)，`v0.14.0`，commit `13d9b0c3f600a060bd78820a63ebec882b10757e`。
-- 补丁：[v0.14.0-trace-continuity.patch](v0.14.0-trace-continuity.patch)，包含 32 个源码和测试文件。
+- 补丁：[v0.14.0-trace-continuity.patch](v0.14.0-trace-continuity.patch)，包含 42 个源码和测试文件。
 - 版本、哈希、工具链和验收计数：[manifest.json](manifest.json)。补丁 SHA256 与实际验收版本一致。
 - 上游 [LICENSE](LICENSE) 和 [NOTICE](NOTICE) 原样保留。差异文件明确列出 Ongrid 对上游的修改；这不是上游官方发布。
 
@@ -17,6 +17,10 @@ Go 探针读取 SDK recording span 上下文，识别 SDK 已覆盖的操作，�
 
 `0.14.0-ongrid.4` 修复自定义 SDK CLIENT Span 吞掉内部未插桩 SQL、HTTP 等子操作的问题。子调用先创建自己的 Span；HTTP/gRPC 仅在具体请求与 SDK 上下文关联后才去重。HTTP 的传播头匹配还会更新同连接的备用上下文，确保大请求头下的服务端仍连接到真实 SDK Span。自定义 CLIENT 包装与内部原始 SQL 调用保留为两个有父子关系的 Span，不能仅凭 SpanKind 相同合并。 gRPC 服务端和 SQL 入口保留同一调用的首次上下文，防止 Go 扩栈后重入探针覆盖已生成的 Span；SQL 使用相对栈位置区分重入与真正的嵌套调用。
 
+`0.14.0-ongrid.5` 修复 HTTPS 入站请求在已有连接上下文时跳过 `traceparent` 的问题，使实际请求头优先于备用上下文。通用 HTTP/2 请求捕获从 256 扩至 512 字节，覆盖所测 Python gRPC 元数据后的传播头；纯文本值解析也先于连接备用上下文。支持 `bpf_loop` 的内核复用独立扫描程序遍历完整捕获区，避免 BPF 验证器复杂度超限；旧内核保留有界扫描路径。较大的注入暂存区复用现有 per-CPU 存储，避免超过 BPF 栈限制。Java 探针同时匹配 gRPC shaded Netty 的 `SslHandler`，恢复所测 JDK TLS 引擎的连接识别。
+
+这次修复覆盖已验证的入站路径；无 SDK 应用的完整出站传播及跨线程关联仍有限制，详见“发布边界”。
+
 Manager 的接入地址查询同时修复串行探测耗尽请求时间的问题。每阶段按去重后的目标并发探测，上限受 100 个实例限制；阶段预算最多 8 秒，且不超过剩余请求时间的一半。探测超时只影响对应目标，可选 Pod 元数据超时保留已确认的接收地址；调用者取消仍返回取消错误。
 
 ## 构建、下载与安装
@@ -27,7 +31,7 @@ Manager 的接入地址查询同时修复串行探测耗尽请求时间的问题
 bash scripts/build-patched-obi.sh /tmp/obi-release-output
 ```
 
-输出目录必须为空。脚本需要 Docker、Git、jq 和 sha256sum；读取 `manifest.json`，校验上游 commit、补丁和内嵌 Java 代理的哈希，重新生成全部 BPF，再构建 Linux amd64/arm64。生成镜像按 digest 固定。Java 代理及双架构本地库复用上游 tag 的原始产物，不重新构建无关的 Java 代码。
+输出目录必须为空。脚本需要 Docker、Git、jq 和 sha256sum；读取 `manifest.json`，校验上游 commit、补丁和内嵌 Java 代理的哈希，使用上游固定的 `javaagent.Dockerfile` 重建修改后的 Java 代理和双架构本地库，再生成全部 BPF 并构建 Linux amd64/arm64。生成镜像及 Java 构建基础镜像按 digest 固定。`embedded_java_agent_sha256` 校验上游原始输入；`JAVA-AGENT.sha256` 记录实际嵌入的重建产物。
 
 产物包含双架构压缩包、带生成对象的完整修改源码、补丁、来源清单和 `SHA256SUMS`。二进制携带补丁版本和补丁 SHA；分发包保留上游及依赖许可证，并在 NOTICE 标明 Ongrid 修改。
 
@@ -51,6 +55,23 @@ make verify-edge-deps-release
 `manifest.json` 中 `historical_candidate_acceptance` 标识此前完成矩阵的本地候选；发布产物以 CNB 整包的 `.sha256` 和包内 `MANIFEST.sha256` 为准，不承诺不同环境重建后逐字节相同。
 
 ## 验证
+
+### 0.14.0-ongrid.5 HTTPS 与 gRPC 修复验收
+
+最终产物使用真实 Linux 6.8 ARM64 和 AMD64 内核加载 BPF。Java/Python 夹具为 Java 21.0.12、OTel Java Agent 2.31.1、gRPC Java 1.75，以及 Python 3.14.7、grpcio 1.83.1、OTel Python 1.44.0/0.65b0。
+
+| 范围 | 结果 |
+| --- | ---: |
+| SDK → 无 SDK 的 Java/Python HTTPS | 100/100 |
+| SDK → 无 SDK 的 Java/Python 明文 gRPC | 100/100 |
+| SDK → 无 SDK 的 Java gRPC TLS（JDK TLS） | 50/50 |
+| SDK → SDK 对照 | 150/150 |
+| Go ARM64 HTTP/gRPC/SQL 与边界回归 | 610/610 |
+| Go AMD64 HTTP/gRPC/SQL 与边界回归 | 610/610 |
+
+Java/Python 验收覆盖首个请求、连接复用、并发和无外部父上下文的根请求，逐条检查传播头、父引用、SDK Span 保留、Span 数量以及孤立/重复 Span。另有 10 个 Python 无 SDK gRPC TLS 对照仍缺服务端 Span，属于明确保留的支持边界，不计入上述通过数。
+
+Go 两组各含 420 个矩阵请求与 190 个边界请求；共 1220 条请求完成原始 Trace 离线复验。此次未重跑 Docker bridge、Kubernetes 或插件生命周期矩阵，上一版结果单独保留如下。9 个相关 BPF 回归、解析边界测试、C 格式/静态检查、Java 构建测试、OBI 相关包 race 及下载/发布脚本检查通过。原始证据保存在忽略目录 `output/obi-runtime/protocol-fixes-20261011/`。
 
 ### 0.14.0-ongrid.4 审查修复验收
 
@@ -104,7 +125,9 @@ done
 
 ## 发布边界
 
-未完成其他语言、TLS、Linux 5.15、故障/容量压力及其他 SDK/Go ABI 的现场验收。Redis、MongoDB、Kafka 仅通过上下文转换单元测试。最终候选未重跑移除 CAP_SYS_ADMIN 的矩阵；Docker 夹具缺少 tracefs，验收覆盖 Go 库级传播，未覆盖网络注入回退。
+Java/Python 的实测只覆盖下述版本及路径，不能推导为所有语言、TLS 实现或框架均支持。无 SDK 的 Java/Python 出站 TLS 尚未注入 W3C 请求头；gRPC 跨线程处理仍可能丢失或复用旧上下文。Python grpcio 1.83.1 的发行 wheel 内置无可附加 SSL 符号的 BoringSSL，所测无 SDK gRPC-TLS 服务端仍缺 Span。Java gRPC-TLS 验收使用 gRPC Java 1.75（shaded Netty）与 JDK TLS，不涵盖 Netty native OpenSSL。未采样 `00` 在 Java/Python 无 SDK 出站中变为 `01` 的已知问题按本次范围保留。
+
+未完成 Linux 5.15、故障/容量压力及其他 SDK/Go ABI 的现场验收。Redis、MongoDB、Kafka 仅通过上下文转换单元测试。最终候选未重跑移除 CAP_SYS_ADMIN 的矩阵；Docker 夹具缺少 tracefs，验收覆盖 Go 库级传播，未覆盖网络注入回退。
 
 HTTP/1 提前检查最多 512 个头名称；HTTP/2 保留现有 65535 字节帧缓冲边界。本次验收未覆盖更大边界、SDK 导出故障和异步跨 goroutine 上下文。
 

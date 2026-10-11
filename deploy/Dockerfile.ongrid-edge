@@ -11,8 +11,8 @@
 ARG VERSION=dev
 ARG NODE_EXPORTER_VERSION=1.8.2
 ARG PROCESS_EXPORTER_VERSION=0.8.4
-ARG OBI_VERSION=0.14.0-ongrid.4
-ARG EDGE_DEPS_TAG=edge-deps-layout2-obi0.14.0-ongrid.4-o0.157.0-n1.8.2-pr0.8.4-my0.19.0-pg0.19.1-r1.86.0-m0.51.0
+ARG OBI_VERSION=0.14.0-ongrid.5
+ARG EDGE_DEPS_TAG=edge-deps-layout2-obi0.14.0-ongrid.5-o0.157.0-n1.8.2-pr0.8.4-my0.19.0-pg0.19.1-r1.86.0-m0.51.0
 ARG OTELCOL_VERSION=0.157.0
 
 # ---------- Stage 1: builder ----------
