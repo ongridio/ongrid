@@ -274,6 +274,7 @@ ongrid_normalize_shared_asset_modes() {
         "$install_dir"/prometheus*.yml \
         "$install_dir/loki-config.yaml" \
         "$install_dir/tempo-config.yaml" \
+        "$install_dir/profiles-gateway.yaml" \
         "$install_dir/frontier.yaml" \
         "$install_dir/nginx.conf" \
         "$install_dir/VERSION"; do

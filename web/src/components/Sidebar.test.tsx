@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { http, HttpResponse } from 'msw';
@@ -24,6 +24,31 @@ describe('Sidebar configurable sections', () => {
       http.get('/api/v1/chat/sessions', () => HttpResponse.json({ items: [], total: 0 })),
       http.get('/api/v1/system-settings', () => HttpResponse.json({ items: [], total: 0 })),
     );
+  });
+
+  it('uses the icon rail on narrow screens without overwriting desktop preferences', () => {
+    let matches = true;
+    let notify: (() => void) | undefined;
+    const media = {
+      get matches() { return matches; },
+      media: '(max-width: 767px)', onchange: null,
+      addEventListener: vi.fn((_event: string, listener: () => void) => { notify = listener; }),
+      removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn(),
+    };
+    vi.stubGlobal('matchMedia', vi.fn(() => media));
+    try {
+      const view = render(<MemoryRouter><Sidebar /></MemoryRouter>);
+      fireEvent.click(screen.getAllByRole('button', { name: '展开侧边栏' })[0]);
+      expect(screen.getByRole('button', { name: '折叠侧边栏' })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: '折叠侧边栏' }));
+      expect(useUi.getState().sidebarCollapsed).toBe(false);
+      act(() => { matches = false; notify?.(); });
+      expect(screen.getByRole('button', { name: '折叠侧边栏' })).toBeInTheDocument();
+      act(() => useUi.getState().setSidebarCollapsed(true));
+      expect(screen.getAllByRole('button', { name: '展开侧边栏' })).toHaveLength(2);
+      view.unmount();
+      expect(media.removeEventListener).toHaveBeenCalledWith('change', expect.any(Function));
+    } finally { vi.unstubAllGlobals(); }
   });
 
   it('隐藏子菜单并从父菜单管理入口恢复', async () => {

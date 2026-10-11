@@ -200,13 +200,21 @@ type dockerNetwork struct {
 	Options map[string]string
 }
 
-func discoverDockerBridgeAddresses(ctx context.Context) ([]string, error) {
+func dockerSocketPath() (string, error) {
 	socket := "/var/run/docker.sock"
 	if host := os.Getenv("DOCKER_HOST"); host != "" {
 		if !strings.HasPrefix(host, "unix://") {
-			return nil, fmt.Errorf("Docker bridge discovery requires a local unix socket")
+			return "", fmt.Errorf("Docker discovery requires a local unix socket")
 		}
 		socket = strings.TrimPrefix(host, "unix://")
+	}
+	return socket, nil
+}
+
+func discoverDockerBridgeAddresses(ctx context.Context) ([]string, error) {
+	socket, err := dockerSocketPath()
+	if err != nil {
+		return nil, err
 	}
 	if _, err := os.Stat(socket); os.IsNotExist(err) {
 		return nil, nil // Docker is optional on ordinary hosts.
@@ -223,27 +231,37 @@ func discoverDockerBridgeAddresses(ctx context.Context) ([]string, error) {
 }
 
 func listDockerNetworks(ctx context.Context, socket string) ([]dockerNetwork, error) {
+	var networks []dockerNetwork
+	if err := readDockerJSON(ctx, socket, "/networks", &networks); err != nil {
+		return nil, fmt.Errorf("list Docker networks: %w", err)
+	}
+	return networks, nil
+}
+
+func readDockerJSON(ctx context.Context, socket, path string, result any) error {
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
 	}}
 	defer transport.CloseIdleConnections()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://docker/networks", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://docker"+path, nil)
 	if err != nil {
-		return nil, fmt.Errorf("build Docker networks request: %w", err)
+		return fmt.Errorf("build Docker request: %w", err)
 	}
 	resp, err := (&http.Client{Transport: transport}).Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("list Docker networks: %w", err)
+		return err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return fmt.Errorf("Docker API HTTP 404: %w", os.ErrNotExist)
+	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("list Docker networks: HTTP %d", resp.StatusCode)
+		return fmt.Errorf("Docker API HTTP %d", resp.StatusCode)
 	}
-	var networks []dockerNetwork
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&networks); err != nil {
-		return nil, fmt.Errorf("decode Docker networks: %w", err)
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(result); err != nil {
+		return fmt.Errorf("decode Docker response: %w", err)
 	}
-	return networks, nil
+	return nil
 }
 
 func dockerBridgeAddresses(ctx context.Context, networks []dockerNetwork, interfaceAddresses func(string) ([]net.Addr, error)) ([]string, error) {

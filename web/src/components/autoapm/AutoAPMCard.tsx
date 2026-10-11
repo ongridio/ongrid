@@ -7,7 +7,7 @@ import { listEdgePlugins, type PluginRow, type PluginHealth } from '@/api/integr
 import { useAutoAPMOptions } from './useAutoAPMOptions';
 import { groupDiscoveredProcesses, matchesProcess } from './hostProcesses';
 
-type Target = { executable: string; port: number; service_name: string; service_namespace?: string; environment?: string; log_path?: string };
+type Target = { target_id?: string; executable: string; port: number; service_name: string; service_namespace?: string; environment?: string; log_path?: string };
 type Spec = { environment?: string; targets?: Target[] };
 type Props = {
   edgeId: number;
@@ -66,7 +66,7 @@ export function AutoAPMCard({ edgeId, deviceName, online, row, canEdit = true, o
     if (saving || !canEdit) return;
     setSaving(true); setError(''); setSaved(false);
     const nextSpec = { ...spec, environment: undefined, sample_ratio: 1, tls_insecure_skip_verify: true, targets: next };
-    try { await onSave({ enabled: true, spec: nextSpec }); setSpec(nextSpec); setEditor(undefined); setSaved(true); }
+    try { const saved = await onSave({ enabled: true, spec: nextSpec }); setSpec(saved?.spec ?? nextSpec); setEditor(undefined); setSaved(true); }
     catch (e) { setError((e as Error).message); }
     finally { setSaving(false); }
   };

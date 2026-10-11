@@ -33,6 +33,8 @@ const (
 	MethodGetHostLoad          = "get_host_load"
 	MethodGetProcessList       = "get_process_list"
 	MethodGetNetstat           = "get_netstat"
+
+	MethodGetApplicationReceiver = "get_application_receiver"
 	// MethodExecuteSkill is the single dispatcher RPC for the skill
 	// framework. Edge agent registers one handler that looks up the
 	// skill key in its local registry — no per-skill wire method.
@@ -96,6 +98,24 @@ const (
 	// agent_version on next register".
 	MethodApplyPackage = "apply_package"
 )
+
+// ApplicationReceiver resolves the actual local OTLP listener reachable from
+// one observed process's network namespace. No application environment is read.
+type ApplicationReceiverRequest struct {
+	ProcessID     int32  `json:"process_id"`
+	ContainerName string `json:"container_name,omitempty"`
+	InstanceID    string `json:"instance_id,omitempty"`
+	ServiceName   string `json:"service_name,omitempty"`
+	Namespace     string `json:"service_namespace,omitempty"`
+	Environment   string `json:"environment,omitempty"`
+}
+type ApplicationReceiverResponse struct {
+	Endpoint string `json:"endpoint"`
+	Location string `json:"location"`
+	Metrics  bool   `json:"metrics"`
+	Reason   string `json:"reason,omitempty"`
+	TargetID string `json:"target_id,omitempty"`
+}
 
 // ---------------------------------------------------------------------
 // webssh

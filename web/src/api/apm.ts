@@ -93,6 +93,8 @@ export type ApmDiagnostics = {
     pod: string;
     version: string;
     namespace?: string;
+    container_name?: string;
+    target_id?: string;
   }[];
   trace_ids: string[];
   sampled_traces: number;
@@ -107,6 +109,18 @@ export type ApmRuntime = {
     value: number | null;
     version?: string;
     points?: { timestamp: number; value: number | null }[];
+  }[];
+};
+export type ApmIngestion = {
+  identity: ServiceIdentity;
+  targets: {
+    instance: ApmDiagnostics['instances'][number];
+    endpoint: string;
+    location: 'host' | 'docker' | 'kubernetes';
+    metrics: boolean;
+    reason?: string;
+    version_field_path?: string;
+    target_id?: string;
   }[];
 };
 export type ApmAlertTemplate = {
@@ -150,6 +164,7 @@ type Endpoints = {
   diagnostics: ApmDiagnostics;
   runtime: ApmRuntime;
   instances: ApmRuntime;
+  ingestion: ApmIngestion;
   'error-groups': ApmErrorGroups;
   'alert-template': ApmAlertTemplate;
 };

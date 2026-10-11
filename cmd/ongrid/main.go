@@ -1267,6 +1267,7 @@ func main() {
 	// exists. Until this point UpgradeAgent surfaced a "not wired" error
 	// — by design, because we don't accept HTTP traffic until later.
 	edgeSvc.SetEdgeCaller(fbClient)
+	apmService.WithReceivers(apmReceiverResolver{clusters: k8sUC, hosts: edgeDeviceRepo, caller: fbClient}, log.With(slog.String("comp", "apm")))
 	networkDiscoveryUC.SetEdgeCaller(fbClient)
 
 	// promIngester for the Wiring is typed as the interface; passing a

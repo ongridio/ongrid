@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ongridio/ongrid/internal/edgeagent/plugins/traces"
 	contract "github.com/ongridio/ongrid/internal/pkg/autoapm"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 	"github.com/prometheus/procfs"
@@ -26,10 +27,11 @@ func resourceProc(t *testing.T, root string, pid int, cgroup string) {
 		fields[field-3] = value
 	}
 	for name, body := range map[string]string{
-		"stat":   fmt.Sprintf("%d (python worker) %s\n", pid, strings.Join(fields, " ")),
-		"io":     "rchar: 0\nwchar: 0\nsyscr: 0\nsyscw: 0\nread_bytes: 100\nwrite_bytes: 200\ncancelled_write_bytes: 0\n",
-		"cgroup": cgroup,
-		"fd/0":   "",
+		"stat":    fmt.Sprintf("%d (python worker) %s\n", pid, strings.Join(fields, " ")),
+		"io":      "rchar: 0\nwchar: 0\nsyscr: 0\nsyscw: 0\nread_bytes: 100\nwrite_bytes: 200\ncancelled_write_bytes: 0\n",
+		"cgroup":  cgroup,
+		"fd/0":    "",
+		"environ": "",
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0600); err != nil {
 			t.Fatal(err)
@@ -54,7 +56,7 @@ func TestResourcesMatchProcessNotInterpreterOrPort(t *testing.T) {
 		{Executable: "/usr/bin/python3", Port: 9090, ServiceName: "orders", ServiceNamespace: "shop"},
 	}}
 	candidates := []contract.Candidate{{Executable: "/usr/bin/python3", PID: 21, Port: 8080}, {Executable: "/usr/bin/python3", PID: 21, Port: 9090}, {Executable: "/usr/bin/python3", PID: 22, Port: 8180}}
-	got, err := collectProcessResources(t.Context(), fs, spec, []map[string]string{identity, identity}, candidates, nil)
+	got, err := collectProcessResources(t.Context(), fs, spec, []map[string]string{identity, identity}, candidates, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,17 +75,17 @@ func TestResourcesMatchProcessNotInterpreterOrPort(t *testing.T) {
 	if err := os.Remove(filepath.Join(root, "21/io")); err != nil {
 		t.Fatal(err)
 	}
-	partial, err := collectProcessResources(t.Context(), fs, spec, []map[string]string{identity}, candidates, nil)
+	partial, err := collectProcessResources(t.Context(), fs, spec, []map[string]string{identity}, candidates, nil, nil)
 	if err == nil || len(partial) != 6 || partial[len(partial)-1].Value != 0 {
 		t.Fatalf("partial error hidden: %v %v", partial, err)
 	}
 	wrong := maps.Clone(identity)
 	wrong["service_instance_id"] = "host:22"
-	got, err = collectProcessResources(t.Context(), fs, spec, []map[string]string{wrong}, candidates, nil)
+	got, err = collectProcessResources(t.Context(), fs, spec, []map[string]string{wrong}, candidates, nil, nil)
 	if err != nil || len(got) != 0 {
 		t.Fatalf("another Python service was included: %v %v", got, err)
 	}
-	got, err = collectProcessResources(t.Context(), fs, contract.Spec{}, []map[string]string{identity}, candidates, nil)
+	got, err = collectProcessResources(t.Context(), fs, contract.Spec{}, []map[string]string{identity}, candidates, nil, nil)
 	if err != nil || len(got) != 0 {
 		t.Fatal("empty selection collected resources")
 	}
@@ -100,7 +102,7 @@ func TestResourcesResolveOnlySelectedKubernetesContainer(t *testing.T) {
 	}
 	identity := map[string]string{"service_name": "orders", "service_namespace": "shop", "service_instance_id": "shop.pod.app", "k8s_pod_uid": "uid", "k8s_namespace_name": "shop", "k8s_container_name": "app", "k8s_deployment_name": "orders"}
 	spec := contract.Spec{Kubernetes: &contract.Kubernetes{Rules: []contract.KubernetesRule{{Namespace: "shop", WorkloadKind: "Deployment", WorkloadName: "orders"}}}}
-	got, err := collectProcessResources(t.Context(), fs, spec, []map[string]string{identity}, nil, map[string]string{"uid/app": "abc"})
+	got, err := collectProcessResources(t.Context(), fs, spec, []map[string]string{identity}, nil, map[string]string{"uid/app": "abc"}, nil)
 	if err != nil || len(got) != 16 {
 		t.Fatalf("container processes: %d %v", len(got), err)
 	}
@@ -109,14 +111,52 @@ func TestResourcesResolveOnlySelectedKubernetesContainer(t *testing.T) {
 			t.Fatal("unselected sidecar included")
 		}
 	}
-	got, err = collectProcessResources(t.Context(), fs, spec, []map[string]string{identity}, nil, map[string]string{"uid/app": "replacement"})
+	got, err = collectProcessResources(t.Context(), fs, spec, []map[string]string{identity}, nil, map[string]string{"uid/app": "replacement"}, nil)
 	if err != nil || len(got) != 0 {
 		t.Fatal("old container associated with replacement")
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if _, err := collectProcessResources(ctx, fs, spec, []map[string]string{identity}, nil, map[string]string{"uid/app": "abc"}); err == nil {
+	if _, err := collectProcessResources(ctx, fs, spec, []map[string]string{identity}, nil, map[string]string{"uid/app": "abc"}, nil); err == nil {
 		t.Fatal("cancellation ignored")
+	}
+}
+
+func TestResourcesResolveLiveDockerContainerWithStableInstanceID(t *testing.T) {
+	root := t.TempDir()
+	id := strings.Repeat("a", 64)
+	resourceProc(t, root, 21, "0::/system.slice/docker-"+id+".scope\n")
+	resourceProc(t, root, 22, "0::/docker/"+id+"\n")
+	resourceProc(t, root, 23, "0::/system.slice/docker-"+strings.Repeat("b", 64)+".scope\n")
+	if err := os.WriteFile(filepath.Join(root, "22/environ"), []byte("OTEL_RESOURCE_ATTRIBUTES=service.instance.id=shop.orders.app-blue\x00"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	fs, err := procfs.NewFS(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := resourceIdentities([]tunnel.PromSample{{Name: "target_info", Value: 1, Labels: map[string]string{
+		"ongrid_instrumentation_source": "obi", "service_name": "orders", "service_namespace": "shop", "deployment_environment_name": "test", "service_instance_id": "shop.orders.app-blue", "host_name": "host", "container_name": "app-blue", "container_id": "old-short-id",
+	}}})
+	spec := contract.Spec{Environment: "test", Targets: []contract.Target{{Executable: "/usr/bin/python3", Port: 8080, ServiceName: "orders", ServiceNamespace: "shop"}}}
+	// Docker's init PID need not be the selected application listener.
+	candidates := []contract.Candidate{{Executable: "/usr/bin/python3", PID: 22, Port: 8080}}
+	docker := map[string]traces.DockerProcess{"app-blue": {ID: id, PID: 21}}
+	got, err := collectProcessResources(t.Context(), fs, spec, identity, candidates, nil, docker)
+	if err != nil || len(got) != 16 {
+		t.Fatalf("expected both current container processes: %d %v", len(got), err)
+	}
+	for _, sample := range got {
+		if sample.Labels["process_pid"] == "23" || sample.Labels["service_instance_id"] != "shop.orders.app-blue" {
+			t.Fatalf("wrong container or service identity: %+v", sample)
+		}
+	}
+	for _, invalid := range []traces.DockerProcess{{ID: id}, {ID: strings.Repeat("b", 64), PID: 23}, {ID: strings.Repeat("c", 64), PID: 21}} {
+		docker["app-blue"] = invalid
+		got, err := collectProcessResources(t.Context(), fs, spec, identity, candidates, nil, docker)
+		if err != nil || len(got) != 0 {
+			t.Fatalf("stopped, unselected, or replaced container included: %+v %v", got, err)
+		}
 	}
 }
 
@@ -125,6 +165,46 @@ func TestResourceIdentitiesUseOBIResourceMetadata(t *testing.T) {
 	got := resourceIdentities([]tunnel.PromSample{{Name: "target_info", Value: 1, Labels: labels}, {Name: "target_info", Value: 1, Labels: labels}, {Name: "http_server_request_duration_seconds_count", Value: 1, Labels: labels}})
 	if len(got) != 1 || got[0]["service_name"] != "orders" || got[0]["service_namespace"] != "shop" || got[0]["service_instance_id"] != "host:21" || got[0]["cluster_id"] != "48" || got[0]["http_route"] != "" {
 		t.Fatalf("wrong resource metadata: %v", got)
+	}
+}
+
+func TestDockerRestartDoesNotAttachRetiredInstanceToNewProcess(t *testing.T) {
+	root := t.TempDir()
+	fullID := strings.Repeat("a", 64)
+	resourceProc(t, root, 22, "0::/docker/"+fullID+"\n")
+	if err := os.WriteFile(filepath.Join(root, "22/environ"), []byte("OTEL_RESOURCE_ATTRIBUTES=service.instance.id=current-opaque-id\x00"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	fs, err := procfs.NewFS(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := map[string]string{"service_name": "orders", "service_namespace": "shop", "deployment_environment_name": "test", "container_name": "app-blue", "service_instance_id": "current-opaque-id"}
+	retired := maps.Clone(identity)
+	retired["service_instance_id"] = "retired-opaque-id"
+	target := contract.Target{Executable: "/usr/bin/python3", Port: 8080, ServiceName: "orders", ServiceNamespace: "shop"}
+	samples, err := collectProcessResources(t.Context(), fs, contract.Spec{Environment: "test", Targets: []contract.Target{target}}, []map[string]string{identity, retired}, []contract.Candidate{{Executable: target.Executable, Port: target.Port, PID: 22}}, nil, map[string]traces.DockerProcess{"app-blue": {ID: fullID, PID: 22}})
+	if err != nil || len(samples) != 8 {
+		t.Fatalf("current container resources: %d %v", len(samples), err)
+	}
+	for _, sample := range samples {
+		if sample.Labels["service_instance_id"] != "current-opaque-id" || sample.Labels["ongrid_target_id"] != target.ID() {
+			t.Fatalf("retired SDK identity associated with live container: %+v", sample)
+		}
+	}
+	// Baseline OBI identities can survive in target_info after a container is replaced.
+	if err := os.WriteFile(filepath.Join(root, "22/environ"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	current := maps.Clone(identity)
+	current["service_instance_id"], current["instance"], current["container_id"] = "shop.orders.app-blue", "shop.orders.app-blue", fullID[:12]
+	old := maps.Clone(current)
+	old["container_id"] = strings.Repeat("b", 12)
+	old["ongrid_instrumentation_source"], current["ongrid_instrumentation_source"] = "obi", "obi"
+	identities := resourceIdentities([]tunnel.PromSample{{Name: "target_info", Value: 1, Labels: old}, {Name: "target_info", Value: 1, Labels: current}})
+	samples, err = collectProcessResources(t.Context(), fs, contract.Spec{Environment: "test", Targets: []contract.Target{target}}, identities, []contract.Candidate{{Executable: target.Executable, Port: target.Port, PID: 22}}, nil, map[string]traces.DockerProcess{"app-blue": {ID: fullID, PID: 22}})
+	if err != nil || len(samples) != 8 || samples[0].Labels["container_id"] != fullID {
+		t.Fatalf("fresh baseline container identity lost behind cached metadata: %d %v", len(samples), err)
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -28,7 +29,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// Run in an isolated Linux PID/network namespace with BPF capabilities and
+// Run with host PIDs in isolated Linux network/mount namespaces, BPF capabilities and
 // ONGRID_TEST_AUTOAPM_BIN_DIR pointing to the pinned OBI/Collector binaries.
 func TestOBIFixtureProcess(t *testing.T) {
 	port := os.Getenv("ONGRID_TEST_AUTOAPM_APP_PORT")
@@ -49,6 +50,9 @@ func TestOBIFixtureProcess(t *testing.T) {
 		}()
 	}
 	err := http.ListenAndServe("127.0.0.1:"+port, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/gc" {
+			runtime.GC()
+		}
 		if r.URL.Path == "/error" {
 			w.WriteHeader(500)
 		}
@@ -85,20 +89,39 @@ func (p *capturePusher) count(metric string) float64 {
 	}
 	return count
 }
+
+func (p *capturePusher) hasGoRuntime(instance string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	found := map[string]bool{}
+	for _, s := range p.samples {
+		if s.Labels["service_name"] == "orders" && s.Labels["service_namespace"] == "trade" && s.Labels["service_instance_id"] == instance && s.Labels["ongrid_instrumentation_source"] == "obi" {
+			found[s.Name] = true
+		}
+	}
+	for _, name := range []string{"go_goroutine_count", "go_processor_limit", "go_config_gogc_percent", "go_memory_gc_goal_bytes", "go_memory_used_bytes", "go_memory_gc_cycles_total"} {
+		if !found[name] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestOBISelectiveIntegration(t *testing.T) {
 	bin := os.Getenv("ONGRID_TEST_AUTOAPM_BIN_DIR")
 	if bin == "" {
 		t.Skip("requires isolated Linux and pinned OBI/Collector binaries")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, port := range []string{"18080", "18081"} {
+	startFixture := func(port, instance string) *exec.Cmd {
+		t.Helper()
 		cmd := exec.CommandContext(ctx, exe, "-test.run=^TestOBIFixtureProcess$")
-		cmd.Env = append(os.Environ(), "ONGRID_TEST_AUTOAPM_APP_PORT="+port)
+		cmd.Env = append(os.Environ(), "ONGRID_TEST_AUTOAPM_APP_PORT="+port, "OTEL_RESOURCE_ATTRIBUTES=service.instance.id="+instance)
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
 		}
@@ -108,7 +131,10 @@ func TestOBISelectiveIntegration(t *testing.T) {
 			}
 			_ = cmd.Wait() /* killed test helper */
 		})
+		return cmd
 	}
+	selected := startFixture("18080", "orders-initial")
+	startFixture("18081", "unselected")
 	rpc, err := grpc.NewClient("127.0.0.1:18082", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatal(err)
@@ -247,6 +273,27 @@ func TestOBISelectiveIntegration(t *testing.T) {
 		case <-ticker.C:
 		}
 	}
+	obiPID := p.obi.HealthSnapshot().PID
+	for round := 1; round <= 3; round++ {
+		if err := selected.Process.Kill(); err != nil {
+			t.Fatal(err)
+		}
+		_ = selected.Wait() // killed fixture
+		instance := fmt.Sprintf("orders-restart-%d", round)
+		selected = startFixture("18080", instance)
+		for !push.hasGoRuntime(instance) {
+			request("18080", "/gc")
+			requestRPC()
+			if h := p.obi.HealthSnapshot(); h.PID != obiPID || h.State != plugins.StateRunning {
+				t.Fatalf("OBI restarted during application restart: %+v", h)
+			}
+			select {
+			case <-ctx.Done():
+				t.Fatalf("no Go runtime metrics for restarted instance %s", instance)
+			case <-ticker.C:
+			}
+		}
+	}
 	stop, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	if err := p.Stop(stop); err != nil {
 		t.Fatal(err)
@@ -284,5 +331,5 @@ func TestOBISelectiveIntegration(t *testing.T) {
 	if after != before {
 		t.Fatalf("zero sampling exported %d new traces", after-before)
 	}
-	t.Log("native HTTP/gRPC traces, independent RED, service identity, authenticated export, selective/off and resume verified")
+	t.Log("native HTTP/gRPC traces, independent RED, service identity, authenticated export, runtime reattachment after three application restarts, selective/off and resume verified")
 }

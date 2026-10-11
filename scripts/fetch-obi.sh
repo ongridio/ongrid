@@ -5,12 +5,15 @@ version=${1:?version}
 arch=${2:?amd64 or arm64}
 dest=${3:?destination directory}
 case "$arch" in amd64|arm64) ;; *) echo 'unsupported OBI architecture' >&2; exit 1 ;; esac
-[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'invalid OBI version' >&2; exit 1; }
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-ongrid\.[1-9][0-9]*)?$ ]] || { echo 'invalid OBI version' >&2; exit 1; }
 mkdir -p "$dest"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 asset="obi-v${version}-linux-${arch}.tar.gz"
 base="https://github.com/open-telemetry/opentelemetry-ebpf-instrumentation/releases/download/v${version}"
+if [[ "$version" == *-ongrid.* ]]; then
+    base="https://github.com/ongridio/ongrid/releases/download/obi-v${version}"
+fi
 curl -fL --retry 3 --connect-timeout 15 -o "$work/$asset" "$base/$asset"
 curl -fL --retry 3 --connect-timeout 15 -o "$work/SHA256SUMS" "$base/SHA256SUMS"
 expected=$(awk -v asset="$asset" '$2 == asset {print $1}' "$work/SHA256SUMS")

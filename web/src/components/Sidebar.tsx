@@ -82,6 +82,17 @@ export function Sidebar() {
   const displayName = (me?.display_name?.trim() || email) ?? tr('Ongrid 用户', 'Ongrid user');
   const navigate = useNavigate();
   const location = useLocation();
+  const [narrow, setNarrow] = useState(() => window.matchMedia?.('(max-width: 767px)').matches ?? false);
+  const [mobileExpanded, setMobileExpanded] = useState(false);
+  useEffect(() => {
+    const media = window.matchMedia?.('(max-width: 767px)');
+    if (!media) return;
+    const update = () => { setNarrow(media.matches); setMobileExpanded(false); };
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+  useEffect(() => { setMobileExpanded(false); }, [location.pathname]);
+  const toggleNavigation = () => narrow ? setMobileExpanded(value => !value) : toggleSidebar();
 
   const sessions = useChatSessions((s) => s.sessions);
   const refreshSessions = useChatSessions((s) => s.refresh);
@@ -216,14 +227,14 @@ export function Sidebar() {
     void refreshSessions();
   }, [location.pathname, refreshSessions]);
 
-  if (sidebarCollapsed) {
+  if (narrow ? !mobileExpanded : sidebarCollapsed) {
     return (
       <aside className="flex h-full min-h-0 w-14 shrink-0 flex-col items-center gap-2 overflow-hidden border-r border-zinc-800/60 bg-zinc-900 py-3">
         {/* Brand mark + expand toggle: logo doubles as the expand
             affordance — saves a row in the narrow column. */}
         <Hint content={tr('Ongrid · 点击展开', 'Ongrid · click to expand')}><Button variant="subtle" size="sm"
           type="button"
-          onClick={toggleSidebar}
+          onClick={toggleNavigation}
           aria-label={tr('展开侧边栏', 'Expand sidebar')}
 
           className="p-1"
@@ -232,7 +243,7 @@ export function Sidebar() {
         </Button></Hint>
         <Button variant="subtle" size="sm"
           type="button"
-          onClick={toggleSidebar}
+          onClick={toggleNavigation}
           aria-label={tr('展开侧边栏', 'Expand sidebar')}
           className="p-2"
         >
@@ -354,7 +365,7 @@ export function Sidebar() {
         </DropdownMenuTrigger>
         <Button variant="subtle" size="sm"
           type="button"
-          onClick={toggleSidebar}
+          onClick={toggleNavigation}
           aria-label={tr('折叠侧边栏', 'Collapse sidebar')}
           className="p-1.5"
         >

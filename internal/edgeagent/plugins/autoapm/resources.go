@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/url"
 	"os"
 	"slices"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ongridio/ongrid/internal/edgeagent/k8s"
+	"github.com/ongridio/ongrid/internal/edgeagent/plugins/traces"
 	contract "github.com/ongridio/ongrid/internal/pkg/autoapm"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 	"github.com/prometheus/procfs"
@@ -26,11 +28,15 @@ func (p *Plugin) Call(ctx context.Context, method string, req, resp any) error {
 	if batch, ok := req.(tunnel.PushPromSamplesRequest); ok && method == tunnel.MethodPushPromSamples && batch.Source == "obi" {
 		p.mu.Lock()
 		spec := p.resourceSpec
+		generation := p.resourceGeneration
 		p.mu.Unlock()
 		rctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		samples, err := p.collectResources(rctx, spec, batch.Samples)
 		cancel()
 		p.mu.Lock()
+		if p.resourceGeneration == generation {
+			p.bindings = resourceBindings(samples)
+		}
 		p.resourceError = ""
 		if err != nil {
 			p.resourceError = "process resources: " + err.Error()
@@ -82,30 +88,55 @@ func (p *Plugin) collectResources(ctx context.Context, spec contract.Spec, sampl
 	if err != nil {
 		return nil, err
 	}
+	bootID, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	if err != nil {
+		return nil, fmt.Errorf("read process boot identity: %w", err)
+	}
+	for _, labels := range identities {
+		labels["process_boot_id"] = strings.TrimSpace(string(bootID))
+	}
 	var candidates []contract.Candidate
 	var containers map[string]string
+	var dockerErr error
+	docker := map[string]traces.DockerProcess{}
 	if spec.Kubernetes == nil {
 		candidates, err = p.discover(ctx)
+		if err == nil {
+			for _, labels := range identities {
+				name := labels["container_name"]
+				if _, seen := docker[name]; name == "" || seen {
+					continue
+				}
+				process, lookupErr := traces.DockerContainerProcess(ctx, name)
+				if lookupErr != nil && !errors.Is(lookupErr, os.ErrNotExist) {
+					if dockerErr == nil {
+						dockerErr = lookupErr
+					}
+				}
+				docker[name] = process
+			}
+		}
 	} else {
 		containers, err = k8s.NodeContainerIDs(ctx, os.Getenv("ONGRID_K8S_NODE_NAME"))
 	}
 	if err != nil {
 		return nil, err
 	}
-	return collectProcessResources(ctx, fs, spec, identities, candidates, containers)
+	out, err := collectProcessResources(ctx, fs, spec, identities, candidates, containers, docker)
+	return out, errors.Join(err, dockerErr)
 }
 
 // Retain resource identity only, never request paths, PID guesses from process
 // names, or SDK/runtime dimensions. target_info also exists for idle services.
 func resourceIdentities(samples []tunnel.PromSample) []map[string]string {
 	out := []map[string]string{}
-	seen := map[[5]string]bool{}
+	seen := map[[7]string]bool{}
 	for _, sample := range samples {
 		if sample.Name != "target_info" || sample.Value <= 0 || sample.Labels["ongrid_instrumentation_source"] != "obi" {
 			continue
 		}
 		labels := map[string]string{}
-		for _, key := range []string{"service_name", "service_namespace", "deployment_environment_name", "service_instance_id", "service_version", "instance", "host_name", "cluster_id", "k8s_cluster_id", "k8s_pod_uid", "k8s_pod_name", "k8s_namespace_name", "k8s_container_name", "k8s_node_name", "k8s_deployment_name", "k8s_statefulset_name", "k8s_daemonset_name", "k8s_job_name", "k8s_cronjob_name"} {
+		for _, key := range []string{"service_name", "service_namespace", "deployment_environment_name", "service_instance_id", "service_version", "instance", "host_name", "container_name", "container_id", "cluster_id", "k8s_cluster_id", "k8s_pod_uid", "k8s_pod_name", "k8s_namespace_name", "k8s_container_name", "k8s_node_name", "k8s_deployment_name", "k8s_statefulset_name", "k8s_daemonset_name", "k8s_job_name", "k8s_cronjob_name"} {
 			if v := sample.Labels[key]; v != "" {
 				labels[key] = v
 			}
@@ -127,8 +158,7 @@ func resourceIdentities(samples []tunnel.PromSample) []map[string]string {
 		if labels["service_name"] == "" || labels["service_instance_id"] == "" {
 			continue
 		}
-		labels["instance"] = labels["service_instance_id"]
-		key := [5]string{labels["service_name"], labels["service_namespace"], labels["service_instance_id"], labels["service_version"], labels["deployment_environment_name"]}
+		key := [7]string{labels["service_name"], labels["service_namespace"], labels["service_instance_id"], labels["service_version"], labels["deployment_environment_name"], labels["instance"], labels["container_id"]}
 		if !seen[key] {
 			seen[key] = true
 			out = append(out, labels)
@@ -137,7 +167,10 @@ func resourceIdentities(samples []tunnel.PromSample) []map[string]string {
 	return out
 }
 
-func collectProcessResources(ctx context.Context, fs procfs.FS, spec contract.Spec, identities []map[string]string, candidates []contract.Candidate, containers map[string]string) ([]tunnel.PromSample, error) {
+func collectProcessResources(ctx context.Context, fs procfs.FS, spec contract.Spec, identities []map[string]string, candidates []contract.Candidate, containers map[string]string, docker map[string]traces.DockerProcess) ([]tunnel.PromSample, error) {
+	var firstErr error
+	processIDs := map[int]string{}
+	processErrors := map[int]error{}
 	selected := map[int]map[string]string{}
 	executables := map[int]string{}
 	byContainer := map[string]map[string]string{}
@@ -157,14 +190,8 @@ func collectProcessResources(ctx context.Context, fs procfs.FS, spec contract.Sp
 			}
 			continue
 		}
-		// Host instance IDs are emitted by OBI as hostname:PID. Cross-check the
-		// PID against fresh executable+port discovery, including interpreter apps.
-		host := labels["host_name"]
-		if host == "" || !strings.HasPrefix(labels["service_instance_id"], host+":") {
-			continue
-		}
-		pid, err := strconv.Atoi(strings.TrimPrefix(labels["service_instance_id"], host+":"))
-		if err != nil || pid <= 0 {
+		container := docker[labels["container_name"]]
+		if labels["container_name"] != "" && container.PID <= 0 {
 			continue
 		}
 		for _, target := range spec.Targets {
@@ -179,8 +206,62 @@ func collectProcessResources(ctx context.Context, fs procfs.FS, spec contract.Sp
 				continue
 			}
 			for _, candidate := range candidates {
-				if int(candidate.PID) == pid && candidate.Executable == target.Executable && candidate.Port == target.Port {
-					selected[pid] = labels
+				pid := int(candidate.PID)
+				if candidate.Executable != target.Executable || candidate.Port != target.Port {
+					continue
+				}
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+				if container.ID != "" {
+					proc, err := fs.Proc(pid)
+					matches := false
+					if err == nil {
+						matches, err = processInContainer(proc, container.ID)
+					}
+					if err != nil && !errors.Is(err, os.ErrNotExist) && firstErr == nil {
+						firstErr = fmt.Errorf("read PID %d container identity: %w", pid, err)
+					}
+					if err != nil || !matches {
+						continue
+					}
+				}
+				instanceID, read := processIDs[pid]
+				if !read {
+					proc, err := fs.Proc(pid)
+					if err == nil {
+						instanceID, err = processInstanceID(proc)
+					}
+					processIDs[pid], processErrors[pid] = instanceID, err
+				}
+				if err := processErrors[pid]; err != nil {
+					if !errors.Is(err, os.ErrNotExist) && firstErr == nil {
+						firstErr = fmt.Errorf("read PID %d resource identity: %w", pid, err)
+					}
+					continue
+				}
+				if instanceID != "" {
+					if instanceID != labels["service_instance_id"] {
+						continue
+					}
+				} else if container.PID == 0 {
+					// OBI v0.12 exposes its process locator in instance; a custom
+					// service.instance.id is opaque and must match the live environment.
+					if labels["host_name"] == "" || labels["instance"] != fmt.Sprintf("%s:%d", labels["host_name"], pid) || labels["service_instance_id"] != labels["instance"] {
+						continue
+					}
+				} else if labels["service_instance_id"] != labels["instance"] || (labels["container_id"] != "" && !strings.HasPrefix(container.ID, labels["container_id"])) {
+					continue
+				}
+				bound := maps.Clone(labels)
+				bound["instance"] = labels["service_instance_id"]
+				bound["ongrid_target_id"] = target.ID()
+				if container.ID != "" {
+					// Resolve the live full ID; OBI target_info may retain a replaced container's short ID.
+					bound["container_id"] = container.ID
+					byContainer[container.ID] = bound
+				} else if labels["container_name"] == "" {
+					selected[pid] = bound
 					executables[pid] = target.Executable
 				}
 			}
@@ -206,10 +287,7 @@ func collectProcessResources(ctx context.Context, fs procfs.FS, spec contract.Sp
 				for _, part := range strings.Split(group.Path, "/") {
 					// Both cgroupfs and systemd scope layouts; match a full runtime
 					// container ID, never a pod-level cgroup or a name prefix.
-					id := strings.TrimSuffix(part, ".scope")
-					if at := strings.LastIndexByte(id, '-'); at >= 0 {
-						id = id[at+1:]
-					}
+					id := containerCgroupID(part)
 					if labels := byContainer[id]; labels != nil {
 						selected[proc.PID] = labels
 					}
@@ -221,7 +299,6 @@ func collectProcessResources(ctx context.Context, fs procfs.FS, spec contract.Sp
 		return nil, fmt.Errorf("process resource limit exceeded: %d", len(selected))
 	}
 	out := []tunnel.PromSample{}
-	var firstErr error
 	now := time.Now().UnixMilli()
 	for pid, labels := range selected {
 		if err := ctx.Err(); err != nil {
@@ -249,6 +326,55 @@ func collectProcessResources(ctx context.Context, fs procfs.FS, spec contract.Sp
 	return out, firstErr
 }
 
+func containerCgroupID(part string) string {
+	id := strings.TrimSuffix(part, ".scope")
+	if at := strings.LastIndexByte(id, '-'); at >= 0 {
+		id = id[at+1:]
+	}
+	return id
+}
+
+func processInContainer(proc procfs.Proc, id string) (bool, error) {
+	groups, err := proc.Cgroups()
+	if err != nil {
+		return false, err
+	}
+	for _, group := range groups {
+		for _, part := range strings.Split(group.Path, "/") {
+			if containerCgroupID(part) == id {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+// Inspect only the SDK resource identity; never return or log application environment values.
+func processInstanceID(proc procfs.Proc) (string, error) {
+	environment, err := proc.Environ()
+	if err != nil {
+		return "", err
+	}
+	instanceID := ""
+	for _, item := range environment {
+		attributes, ok := strings.CutPrefix(item, "OTEL_RESOURCE_ATTRIBUTES=")
+		if !ok {
+			continue
+		}
+		for _, attribute := range strings.Split(attributes, ",") {
+			key, value, ok := strings.Cut(attribute, "=")
+			if ok && strings.TrimSpace(key) == "service.instance.id" {
+				id, err := url.PathUnescape(strings.TrimSpace(value))
+				if err != nil || len(id) > 1024 || strings.ContainsAny(id, "\x00\r\n") {
+					return "", fmt.Errorf("invalid SDK service instance identity")
+				}
+				instanceID = id
+			}
+		}
+	}
+	return instanceID, nil
+}
+
 func readProcessResources(ctx context.Context, proc procfs.Proc, identity map[string]string, now int64) ([]tunnel.PromSample, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -261,6 +387,7 @@ func readProcessResources(ctx context.Context, proc procfs.Proc, identity map[st
 		return nil, err
 	}
 	labels := maps.Clone(identity)
+	labels["instance"] = labels["service_instance_id"]
 	labels["process_pid"] = strconv.Itoa(proc.PID)
 	// A reused PID must start a different counter series, including when a
 	// container keeps the same service instance name across a process restart.

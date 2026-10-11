@@ -1,0 +1,82 @@
+{
+  "upstream_repository": "https://github.com/open-telemetry/opentelemetry-ebpf-instrumentation",
+  "upstream_tag": "v0.14.0",
+  "upstream_commit": "13d9b0c3f600a060bd78820a63ebec882b10757e",
+  "source_archive_sha256": "a1c1184837c93cf83d6bc3065511902daa1aaa09e2a899a41f7af644e5316c6b",
+  "patch": "v0.14.0-trace-continuity.patch",
+  "patch_sha256": "53438156462abe3d1fbceeae87393dcc19998e10ab50c839eeb533d088bc30e8",
+  "candidate_version": "0.14.0-local-sdk-context9",
+  "accepted_linux_arm64_binary_sha256": "4bfaa4d3850ae16e014c4b87afa9acb96bc26368a641569103e7fa41b427c294",
+  "build_tools": {
+    "go": "go1.27.0 linux/arm64",
+    "clang": "Alpine 22.1.8",
+    "bpf2go": "v0.22.0",
+    "generator_image": "ghcr.io/open-telemetry/obi-generator:0.2.16",
+    "generator_image_digest": "sha256:3a8959e5253f2445b782b4f720ed54f6396fce350082486442e0b71ac02ff106"
+  },
+  "changed_source_files": [
+    "bpf/common/tp_info.h",
+    "bpf/gotracer/go_common.h",
+    "bpf/gotracer/go_grpc.c",
+    "bpf/gotracer/go_kafka_go.c",
+    "bpf/gotracer/go_mongo.c",
+    "bpf/gotracer/go_nethttp.c",
+    "bpf/gotracer/go_observer_pid.h",
+    "bpf/gotracer/go_offsets.h",
+    "bpf/gotracer/go_redis.c",
+    "bpf/gotracer/go_sdk.c",
+    "bpf/gotracer/go_sql.c",
+    "bpf/gotracer/gotracer.c",
+    "bpf/gotracer/maps/nethttp.h",
+    "bpf/gotracer/types/go_h2.h",
+    "bpf/tests/bpf_go_client_trace_parent.c",
+    "bpf/tests/bpf_go_observer_pid.c",
+    "bpf/tests/bpfcore/vmlinux.h",
+    "configs/offsets/recordingsdk/inspect.go",
+    "configs/offsets/tracker_input.json",
+    "pkg/appolly/app/request/span.go",
+    "pkg/ebpf/common/go_kafka_transform.go",
+    "pkg/ebpf/common/mongo_detect_transform.go",
+    "pkg/ebpf/common/redis_detect_transform.go",
+    "pkg/ebpf/common/spanner.go",
+    "pkg/ebpf/common/spanner_test.go",
+    "pkg/export/otel/tracesgen/tracesgen.go",
+    "pkg/export/otel/tracesgen/tracesgen_test.go",
+    "pkg/internal/ebpf/gotracer/gotracer.go",
+    "pkg/internal/goexec/offsets.json",
+    "pkg/internal/goexec/structmembers.go",
+    "pkg/internal/goexec/structmembers_test.go"
+  ],
+  "acceptance": {
+    "native": {
+      "architecture": "arm64",
+      "kernel": "6.8.0-142-generic",
+      "matrix_requests": 360,
+      "boundary_requests": 152,
+      "passed": 512
+    },
+    "docker": {
+      "architecture": "arm64",
+      "kernel": "6.19.13-orbstack-gbd1dc07b8cf4",
+      "matrix_requests": 360,
+      "boundary_requests": 152,
+      "passed": 512
+    },
+    "kubernetes": {
+      "architecture": "arm64",
+      "kernel": "6.8.0-142-generic",
+      "matrix_requests": 360,
+      "boundary_requests": 152,
+      "passed": 512
+    }
+  },
+  "production_dependency_changed": true,
+  "clean_source_rebuild": {
+    "status": "passed",
+    "architecture": "arm64",
+    "binary_sha256": "a9b80705f773f8cabf84b89b480a38bb8c3f74d0423c3353846da39804e2ee2a",
+    "runtime_matrix_repeated": false
+  },
+  "release_version": "0.14.0-ongrid.2",
+  "embedded_java_agent_sha256": "9d499797e42f96058a2b9fb9b75c29369f72debc35d32a92119463bb9567bd61"
+}

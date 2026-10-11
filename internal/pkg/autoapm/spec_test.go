@@ -2,6 +2,24 @@ package autoapm
 
 import "testing"
 
+func TestTargetIdentitySurvivesParseAndSelectorEdits(t *testing.T) {
+	target := Target{Executable: "/opt/orders", Port: 8080, ServiceName: "orders"}
+	spec, err := Parse(Spec{Targets: []Target{target}}.Map())
+	if err != nil || spec.Targets[0].TargetID == "" || spec.Targets[0].TargetID != target.ID() {
+		t.Fatalf("legacy target identity: %+v %v", spec, err)
+	}
+	id := spec.Targets[0].TargetID
+	spec.Targets[0].Executable, spec.Targets[0].Port = "/opt/orders-v2", 9090
+	updated, err := Parse(spec.Map())
+	if err != nil || updated.Targets[0].TargetID != id {
+		t.Fatalf("saved target identity changed: %+v %v", updated, err)
+	}
+	updated.Targets[0].TargetID = "arbitrary"
+	if _, err := Parse(updated.Map()); err == nil {
+		t.Fatal("invalid target ID accepted")
+	}
+}
+
 func TestSelectiveContract(t *testing.T) {
 	if s, err := Parse(nil); err != nil || len(s.Targets) != 0 {
 		t.Fatalf("empty selection must remain empty: %v %v", s, err)
