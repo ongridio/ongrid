@@ -1,0 +1,119 @@
+{
+  "date": "2026-10-11",
+  "status": "passed",
+  "release_version": "0.14.0-ongrid.4",
+  "publication": "local CNB complete Edge dependency archives",
+  "source_commit": "126b474a8bc1f8b024505c665edd085c2b6b2654",
+  "source_tag": "obi-v0.14.0-ongrid.4",
+  "patch_sha256": "046d4de7076aed7aa6d7ac997f4f7c45fba1606e9612dcd97e09918d24243b29",
+  "matching_source_files": 32,
+  "generated_bpf_objects": 30,
+  "cnb_tag": "edge-deps-layout2-obi0.14.0-ongrid.4-o0.157.0-n1.8.2-pr0.8.4-my0.19.0-pg0.19.1-r1.86.0-m0.51.0",
+  "cnb_release_url": "https://cnb.cool/ongridio/ongrid-edge/-/releases/tag/edge-deps-layout2-obi0.14.0-ongrid.4-o0.157.0-n1.8.2-pr0.8.4-my0.19.0-pg0.19.1-r1.86.0-m0.51.0",
+  "artifacts": {
+    "amd64": {
+      "filename": "edge-deps-linux-amd64.tar.xz",
+      "sha256": "b7d8f3461abc4864b2fff99269a3659432aa97fa2a0bd7c8444bbfe6d3e84026",
+      "obi_sha256": "41ac709f65c15b9dd47d058db442afb2832410758804c2ff08c7b73e2a916a2d",
+      "unchanged_components": [
+        "otelcol-contrib",
+        "node_exporter",
+        "process_exporter",
+        "mysqld_exporter",
+        "postgres_exporter",
+        "redis_exporter",
+        "mongodb_exporter"
+      ],
+      "edge_image_verified": true,
+      "image_id": "sha256:b30e006b1f58b17d5b026a8b70de2f5fb789ada8320970f7d88ddb671cf252d1",
+      "default_fetch_verified": true
+    },
+    "arm64": {
+      "filename": "edge-deps-linux-arm64.tar.xz",
+      "sha256": "ab713ff675e1e78fb286e4f836181d9f0cac9d1ff3c0e0aec5d1861d4dc9c1a2",
+      "obi_sha256": "57066674f5271ed3a598ddca201f12c984dee0c67d675d6c3204da1c45f69a0a",
+      "unchanged_components": [
+        "otelcol-contrib",
+        "node_exporter",
+        "process_exporter",
+        "mysqld_exporter",
+        "postgres_exporter",
+        "redis_exporter",
+        "mongodb_exporter"
+      ],
+      "edge_image_verified": true,
+      "image_id": "sha256:a32bd37b46a2f3a8f66105f6bbe1d239d3649d628e24220434f8f3f2e9c65ba1",
+      "default_fetch_verified": true
+    }
+  },
+  "acceptance": {
+    "native": {
+      "architecture": "arm64",
+      "kernel": "6.8.0-142-generic",
+      "matrix": 420,
+      "boundaries": 190,
+      "passed": 610,
+      "offline_replay": "PASS"
+    },
+    "docker": {
+      "architecture": "arm64",
+      "kernel": "6.19.13-orbstack-gbd1dc07b8cf4",
+      "matrix": 420,
+      "boundaries": 190,
+      "passed": 610,
+      "offline_replay": "PASS"
+    },
+    "kubernetes": {
+      "architecture": "arm64",
+      "kernel": "6.8.0-142-generic",
+      "matrix": 420,
+      "boundaries": 190,
+      "passed": 610,
+      "offline_replay": "PASS"
+    },
+    "amd64": {
+      "architecture": "amd64",
+      "kernel": "6.8.0-146-generic",
+      "matrix": 420,
+      "boundaries": 190,
+      "passed": 610,
+      "offline_replay": "PASS"
+    }
+  },
+  "plugin_integration": {
+    "arm64": {
+      "status": "PASS",
+      "seconds": 155.81
+    },
+    "amd64": {
+      "status": "PASS",
+      "seconds": 250.4
+    }
+  },
+  "checks": {
+    "go_test_all_linux_nonroot": "PASS",
+    "autoapm_go_test_race": "PASS",
+    "release_package": "PASS",
+    "release_workflow_and_fetch": "PASS",
+    "trace_verifier_self_tests": 7,
+    "focused_bpf_tests": 5,
+    "manager_apm_go_test_race": "PASS",
+    "manager_slow_target_and_metadata_budgets": "PASS",
+    "caller_cancellation": "PASS",
+    "sdk_client_wrapper_and_probe_reentry": "PASS",
+    "kubernetes_running_obi_sha256": "PASS"
+  },
+  "limitations": [
+    "Go 1.25.11 fixture; OTel SDK 1.43.0, Auto SDK 1.2.1, otelhttp/otelgrpc 0.68.0",
+    "No TLS, other language, Linux 5.15, or capacity/failure acceptance",
+    "Redis, MongoDB, Kafka context transformations have unit coverage only",
+    "Docker fixture validates Go library propagation; tracefs/network-injection fallback is unavailable",
+    "CAP_SYS_ADMIN removal was not validated",
+    "Full upstream BPF suite was not rerun; the prior attempt fails in existing test_failed_connect_event due to missing __always_inline in test headers"
+  ],
+  "ongrid_application_release": false,
+  "pull_request": "https://github.com/ongridio/ongrid/pull/489",
+  "total_requests": 2440,
+  "sampled_traces": 2380,
+  "unsampled_requests": 60
+}

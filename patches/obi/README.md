@@ -52,6 +52,23 @@ make verify-edge-deps-release
 
 ## 验证
 
+### 0.14.0-ongrid.4 审查修复验收
+
+完整交付结果见 [delivery-20261011-review-fixes.json](delivery-20261011-review-fixes.json)。公开 CNB 整包、Make 默认安装、双架构 Edge 镜像和 Kubernetes 运行中 OBI 的哈希均与验收产物一致。
+
+| 环境 | HTTP/gRPC 矩阵 | 边界请求 | 合计 |
+| --- | ---: | ---: | ---: |
+| Linux 6.8 ARM64 原生进程 | 420/420 | 190/190 | 610/610 |
+| OrbStack 6.19 ARM64 Docker bridge | 420/420 | 190/190 | 610/610 |
+| Linux 6.8 ARM64 Kubernetes（最终 Edge 镜像） | 420/420 | 190/190 | 610/610 |
+| Linux 6.8 AMD64 原生进程（QEMU x86_64 内核） | 420/420 | 190/190 | 610/610 |
+
+新增自定义 SDK CLIENT 包装场景，确认内部未覆盖的 HTTP、gRPC、SQL 操作保留独立 Span 和正确父引用，同时保持已有 HTTP/gRPC SDK 操作去重。四组共 2440/2440 条请求；2380 条采样 Trace 与 60 条未采样空结果均已保存并完成离线复验。真实双架构插件生命周期、三次应用重启、身份、认证导出、RED/运行时指标、零采样与恢复通过。
+
+Manager 回归覆盖 5/100 个实例、健康目标排在最后、集群去重、可选元数据超时、目标优先级与主动取消；相关包 race、Linux 非 root 全量 Go 测试和安装/发布检查通过。五个相关 BPF 回归包含 CLIENT 包装和 gRPC/SQL 扩栈重入保护。原始证据保存在忽略目录 `output/obi-runtime/edge-review-fixes-20261011/`。
+
+### 0.14.0-ongrid.3 历史验收
+
 `0.14.0-ongrid.3` 的历史完整交付结果见 [delivery-20261011.json](delivery-20261011.json)。下表保留该版本的验收记录；公开校验和、Make 默认下载、双架构 Edge 镜像内 OBI 均与已测二进制一致。测试夹具为移除符号表的 Go 1.25.11，使用 OTel SDK 1.43.0、Auto SDK 1.2.1 和 otelhttp/otelgrpc 0.68.0。
 
 | 环境 | HTTP/gRPC 矩阵 | 边界请求 | 合计 |
