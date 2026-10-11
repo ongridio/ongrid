@@ -207,11 +207,24 @@ func collectProcessResources(ctx context.Context, fs procfs.FS, spec contract.Sp
 			}
 			for _, candidate := range candidates {
 				pid := int(candidate.PID)
-				if candidate.Executable != target.Executable || candidate.Port != target.Port || (container.PID > 0 && candidate.PID != container.PID) {
+				if candidate.Executable != target.Executable || candidate.Port != target.Port {
 					continue
 				}
 				if err := ctx.Err(); err != nil {
 					return nil, err
+				}
+				if container.ID != "" {
+					proc, err := fs.Proc(pid)
+					matches := false
+					if err == nil {
+						matches, err = processInContainer(proc, container.ID)
+					}
+					if err != nil && !errors.Is(err, os.ErrNotExist) && firstErr == nil {
+						firstErr = fmt.Errorf("read PID %d container identity: %w", pid, err)
+					}
+					if err != nil || !matches {
+						continue
+					}
 				}
 				instanceID, read := processIDs[pid]
 				if !read {
@@ -274,10 +287,7 @@ func collectProcessResources(ctx context.Context, fs procfs.FS, spec contract.Sp
 				for _, part := range strings.Split(group.Path, "/") {
 					// Both cgroupfs and systemd scope layouts; match a full runtime
 					// container ID, never a pod-level cgroup or a name prefix.
-					id := strings.TrimSuffix(part, ".scope")
-					if at := strings.LastIndexByte(id, '-'); at >= 0 {
-						id = id[at+1:]
-					}
+					id := containerCgroupID(part)
 					if labels := byContainer[id]; labels != nil {
 						selected[proc.PID] = labels
 					}
@@ -314,6 +324,29 @@ func collectProcessResources(ctx context.Context, fs procfs.FS, spec contract.Sp
 		}
 	}
 	return out, firstErr
+}
+
+func containerCgroupID(part string) string {
+	id := strings.TrimSuffix(part, ".scope")
+	if at := strings.LastIndexByte(id, '-'); at >= 0 {
+		id = id[at+1:]
+	}
+	return id
+}
+
+func processInContainer(proc procfs.Proc, id string) (bool, error) {
+	groups, err := proc.Cgroups()
+	if err != nil {
+		return false, err
+	}
+	for _, group := range groups {
+		for _, part := range strings.Split(group.Path, "/") {
+			if containerCgroupID(part) == id {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 // Inspect only the SDK resource identity; never return or log application environment values.

@@ -13,11 +13,13 @@ processors:
     error_mode: propagate
     traces:
       span:
-        - 'resource.attributes["ongrid.instrumentation.source"] == "obi" or resource.attributes["telemetry.distro.name"] == "opentelemetry-ebpf-instrumentation"'
+        - '(resource.attributes["ongrid.instrumentation.source"] == "obi" or resource.attributes["telemetry.distro.name"] == "opentelemetry-ebpf-instrumentation") and attributes["obi.sdk.context"] != true'
   filter/preference_candidates:
     error_mode: propagate
     traces:
       span:
+        # The collector at the source has already excluded SDK-owned operations.
+        - 'attributes["obi.sdk.context"] == true'
         # An SDK without an instance identity cannot suppress another process.
         - 'resource.attributes["ongrid.instrumentation.source"] != "obi" and resource.attributes["telemetry.distro.name"] != "opentelemetry-ebpf-instrumentation" and (resource.attributes["service.instance.id"] == nil or resource.attributes["service.instance.id"] == "") and (resource.attributes["k8s.pod.uid"] == nil or resource.attributes["k8s.pod.uid"] == "")'
   transform/preference_key:

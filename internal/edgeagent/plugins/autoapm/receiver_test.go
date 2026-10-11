@@ -2,17 +2,90 @@ package autoapm
 
 import (
 	"errors"
+	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/edgeagent/plugins/traces"
 	contract "github.com/ongridio/ongrid/internal/pkg/autoapm"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 	"github.com/prometheus/procfs"
 )
+
+func TestDockerBindingUsesLiveContainerIdentityBehindInit(t *testing.T) {
+	root := t.TempDir()
+	id := strings.Repeat("a", 64)
+	resourceProc(t, root, 21, "0::/docker/"+id+"\n")
+	resourceProc(t, root, 22, "0::/system.slice/docker-"+id+".scope\n")
+	fs, err := procfs.NewFS(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, err := os.MkdirTemp("/tmp", "autoapm-docker-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(dir); err != nil {
+			t.Error(err)
+		}
+	})
+	socket := filepath.Join(dir, "docker.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var live atomic.Value
+	live.Store(traces.DockerProcess{ID: id, PID: 21})
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/containers/app-blue/json" {
+			t.Errorf("unexpected Docker request: %s %s", r.Method, r.URL)
+		}
+		current := live.Load().(traces.DockerProcess)
+		if _, err := fmt.Fprintf(w, `{"Id":%q,"State":{"Running":true,"Pid":%d}}`, current.ID, current.PID); err != nil {
+			t.Error(err)
+		}
+	})}
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(listener) }()
+	t.Cleanup(func() {
+		if err := server.Close(); err != nil {
+			t.Error(err)
+		}
+		if err := <-done; !errors.Is(err, http.ErrServerClosed) {
+			t.Error(err)
+		}
+	})
+	t.Setenv("DOCKER_HOST", "unix://"+socket)
+	// The init process may lack readable I/O; a verified application binding is sufficient.
+	p := Plugin{bindings: resourceBindings([]tunnel.PromSample{{Name: "ongrid_apm_process_scrape_success", Value: 1, TsMs: time.Now().UnixMilli(), Labels: map[string]string{
+		"service_name": "orders", "service_namespace": "shop", "deployment_environment_name": "test", "service_instance_id": "opaque-app",
+		"container_name": "app-blue", "container_id": id, "process_pid": "22", "process_start_ticks": "1000", "ongrid_target_id": "selected-target",
+	}}})}
+	request := tunnel.ApplicationReceiverRequest{ServiceName: "orders", Namespace: "shop", Environment: "test", InstanceID: "opaque-app", ContainerName: "app-blue"}
+	pid, target, _, err := p.receiverProcess(t.Context(), fs, request)
+	if err != nil || pid != 22 || target != "selected-target" {
+		t.Fatalf("application behind init not linked: pid=%d target=%q err=%v", pid, target, err)
+	}
+	live.Store(traces.DockerProcess{ID: strings.Repeat("b", 64), PID: 21})
+	if _, _, _, err := p.receiverProcess(t.Context(), fs, request); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("replaced container accepted: %v", err)
+	}
+	live.Store(traces.DockerProcess{ID: id, PID: 21})
+	if err := os.WriteFile(filepath.Join(root, "22/cgroup"), []byte("0::/docker/"+strings.Repeat("b", 64)+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := p.receiverProcess(t.Context(), fs, request); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("process outside the live container accepted: %v", err)
+	}
+}
 
 func TestNativeBindingFollowsOpaqueInstanceAcrossRestarts(t *testing.T) {
 	root := t.TempDir()

@@ -18,6 +18,7 @@ type processBinding struct {
 	StartTicks    uint64
 	TargetID      string
 	ContainerName string
+	ContainerID   string
 	ObservedAt    int64
 }
 
@@ -34,7 +35,7 @@ func resourceBindings(samples []tunnel.PromSample) map[[4]string][]processBindin
 			continue
 		}
 		key := [4]string{labels["service_name"], labels["service_namespace"], labels["deployment_environment_name"], labels["service_instance_id"]}
-		out[key] = append(out[key], processBinding{PID: int32(pid), StartTicks: start, TargetID: labels["ongrid_target_id"], ContainerName: labels["container_name"], ObservedAt: sample.TsMs})
+		out[key] = append(out[key], processBinding{PID: int32(pid), StartTicks: start, TargetID: labels["ongrid_target_id"], ContainerName: labels["container_name"], ContainerID: labels["container_id"], ObservedAt: sample.TsMs})
 	}
 	return out
 }
@@ -96,19 +97,37 @@ func (p *Plugin) receiverProcess(ctx context.Context, fs procfs.FS, request tunn
 		if err != nil {
 			return 0, "", 0, err
 		}
+		if container.PID <= 0 {
+			return 0, "", 0, os.ErrNotExist
+		}
 	} else if len(bindings) != 1 {
 		// A shared SDK instance ID cannot identify independent native workers.
 		return 0, "", 0, os.ErrNotExist
 	}
 	for _, binding := range bindings {
-		if binding.ContainerName != containerName || (containerName != "" && container.PID != binding.PID) || time.Since(time.UnixMilli(binding.ObservedAt)) > 30*time.Second {
+		if binding.ContainerName != containerName || (containerName != "" && binding.ContainerID != container.ID) || time.Since(time.UnixMilli(binding.ObservedAt)) > 30*time.Second {
 			continue
 		}
 		proc, err := fs.Proc(int(binding.PID))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
 		if err != nil {
 			return 0, "", 0, err
 		}
+		if containerName != "" {
+			matches, err := processInContainer(proc, container.ID)
+			if errors.Is(err, os.ErrNotExist) || err == nil && !matches {
+				continue
+			}
+			if err != nil {
+				return 0, "", 0, err
+			}
+		}
 		stat, err := proc.Stat()
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
 		if err != nil {
 			return 0, "", 0, err
 		}

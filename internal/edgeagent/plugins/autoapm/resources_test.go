@@ -128,7 +128,7 @@ func TestResourcesResolveLiveDockerContainerWithStableInstanceID(t *testing.T) {
 	resourceProc(t, root, 21, "0::/system.slice/docker-"+id+".scope\n")
 	resourceProc(t, root, 22, "0::/docker/"+id+"\n")
 	resourceProc(t, root, 23, "0::/system.slice/docker-"+strings.Repeat("b", 64)+".scope\n")
-	if err := os.WriteFile(filepath.Join(root, "21/environ"), []byte("OTEL_RESOURCE_ATTRIBUTES=service.instance.id=shop.orders.app-blue\x00"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "22/environ"), []byte("OTEL_RESOURCE_ATTRIBUTES=service.instance.id=shop.orders.app-blue\x00"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	fs, err := procfs.NewFS(root)
@@ -139,7 +139,8 @@ func TestResourcesResolveLiveDockerContainerWithStableInstanceID(t *testing.T) {
 		"ongrid_instrumentation_source": "obi", "service_name": "orders", "service_namespace": "shop", "deployment_environment_name": "test", "service_instance_id": "shop.orders.app-blue", "host_name": "host", "container_name": "app-blue", "container_id": "old-short-id",
 	}}})
 	spec := contract.Spec{Environment: "test", Targets: []contract.Target{{Executable: "/usr/bin/python3", Port: 8080, ServiceName: "orders", ServiceNamespace: "shop"}}}
-	candidates := []contract.Candidate{{Executable: "/usr/bin/python3", PID: 21, Port: 8080}}
+	// Docker's init PID need not be the selected application listener.
+	candidates := []contract.Candidate{{Executable: "/usr/bin/python3", PID: 22, Port: 8080}}
 	docker := map[string]traces.DockerProcess{"app-blue": {ID: id, PID: 21}}
 	got, err := collectProcessResources(t.Context(), fs, spec, identity, candidates, nil, docker)
 	if err != nil || len(got) != 16 {

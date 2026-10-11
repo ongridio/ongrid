@@ -199,14 +199,31 @@ func (s *Service) runtimeInstances(ctx context.Context, q Query) ([]Instance, er
 		return nil, err
 	}
 	instances := []Instance{}
-	seen := map[Instance]int{}
+	seen := map[[5]string]int{}
 	for _, item := range series {
 		labels := item.Metric
 		if labels["service_instance_id"] == "" && labels["k8s_pod_name"] == "" {
 			continue
 		}
 		key := Instance{InstanceID: labels["service_instance_id"], DeviceID: labels["device_id"], ClusterID: labels["cluster_id"], K8sClusterID: labels["k8s_cluster_id"], Pod: labels["k8s_pod_name"], Version: labels["service_version"], Namespace: labels["k8s_namespace_name"]}
-		if index, ok := seen[key]; ok {
+		identity := [5]string{key.InstanceID, key.DeviceID, key.ClusterID, key.K8sClusterID, key.Version}
+		// A Pod UID is cluster-scoped; SDK gateways need not know its node device.
+		if key.K8sClusterID != "" && key.InstanceID != "" {
+			identity[1] = ""
+		}
+		if key.InstanceID == "" {
+			identity[0] = key.Namespace + "/" + key.Pod
+		}
+		if index, ok := seen[identity]; ok {
+			if instances[index].DeviceID == "" {
+				instances[index].DeviceID = key.DeviceID
+			}
+			if instances[index].Pod == "" {
+				instances[index].Pod = key.Pod
+			}
+			if instances[index].Namespace == "" {
+				instances[index].Namespace = key.Namespace
+			}
 			if instances[index].ContainerName == "" {
 				instances[index].ContainerName = labels["container_name"]
 			}
@@ -215,7 +232,7 @@ func (s *Service) runtimeInstances(ctx context.Context, q Query) ([]Instance, er
 			}
 			continue
 		}
-		seen[key] = len(instances)
+		seen[identity] = len(instances)
 		key.ContainerName = labels["container_name"]
 		key.TargetID = labels["ongrid_target_id"]
 		instances = append(instances, key)

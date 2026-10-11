@@ -66,6 +66,8 @@ OBI 仅向 loopback 的 OTLP 14317/14318 导出。Collector 健康端口 14333�
 
 用户确认等待窗口为 30 秒。内置 nginx `/v1/traces` 保留原认证、限流和请求上限，改为进入已有 `profiles-gateway` 的官方 Collector 0.157.0；复用其现有 OTLP 接收端及镜像，不新增服务、依赖、公开端口、OBI 源码补丁或 Manager Go 数据流。Profiles 管线保留。SDK Trace 直接转发；另一路同时观察 SDK 与 OBI，在首次收到每组 Trace 后等待 30 秒。组内出现 SDK 时丢弃该组的 OBI；否则输出 OBI。因此无 SDK 时仍有 Trace，延迟约 30 秒加出口批处理时间。
 
+Tempo 指标生成的接收时间窗口设为 2 分钟，服务图的客户端/服务端 Span 配对等待设为 1 分钟，覆盖入口的 30 秒等待、1 秒批处理及后续导出延迟。Tempo 2.10.0 默认的 30 秒接收窗口会拒绝延迟 OBI Span 的指标生成，但仍保存 Trace；默认 10 秒配对等待也不能覆盖 SDK 直通与 OBI 缓冲的到达差。`TestGatewayTempoTiming` 检查这两个配置均大于入口等待加批处理时间。更新后重启 Tempo 生效；回滚这两个时间窗口前须先恢复 nginx 直写 Tempo，否则地图连线仍会缺失。
+
 Collector 的 tail sampling 只能按 TraceID 分组。仅在私有候选管线中，将 TraceID 临时映射为原 TraceID 加身份的 SHA256 前 128 位；身份包含设备或统一集群、服务名称、命名空间、环境和实例。每个身份部分先分别散列，避免分隔符碰撞。Kubernetes 优先用实际 `k8s.pod.uid` 对齐 SDK Pod UID 和 OBI 容器实例名，并沿用服务名称区分同 Pod 的服务。输出 OBI 前恢复原 TraceID、删除临时属性；SDK 直通管线不修改原数据。SpanID、父 SpanID、事件、状态和业务属性保留。同一分布式 Trace 中其他实例或服务的 OBI 不会因上游 SDK 被删除。缺少实例及 Pod UID 的 SDK 不参与抑制。
 
 内存限制 384 MiB、尖峰 64 MiB，候选上限 10000 组、单组 1 MiB，保留与丢弃决定缓存各 100000 项；超出容量可能拒收或淘汰候选，不能把此上限当作无损吞吐承诺。Collector 自监控由内网 Prometheus 抓取，应观察拒收、提前淘汰、采样丢弃和出口失败；在代表性负载下验证容量后才能扩容。共享 Collector 同时承载 Profiles，其内存也计入限制检查。
@@ -77,6 +79,32 @@ Collector 的 tail sampling 只能按 TraceID 分组。仅在私有候选管线�
 本地 30 秒配置验收：普通 Linux 设备上的原生二进制和 Docker bridge 应用各重启三轮，启动脚本和环境配置不变；每轮 PID 与实例 UUID 更新，目标 UUID 保持。共 320 个冷启动请求（各 160 个）均只保留对应 SDK 服务端 Span，SpanID 和父 SpanID 正确，SDK 请求指标和当前进程资源归属通过。另用完全不含 OTel SDK 的 Go 标准库容器发送 20 个请求，15 秒时均未输出，窗口结束后全部由 OBI 输出且每次只有一个服务端 Span。真实 Collector 的 traces 包 race 检查、双架构安装包配置打包检查通过；入口拒收和提前淘汰计数为零。这不是容量压测或 Kubernetes 现场验收。
 
 升级前的运行时指标单独记录：OBI v0.12.1 第一轮和第三轮当前实例的六类 Go 运行时指标通过；第二轮原生进程在新 GC 后等待 90 秒仍未收到 Go 指标，BPF 检查显示该进程的 Go 探针未附着，Docker 同轮正常。第三轮两个进程均恢复，期间未重启 OBI。该三轮记录只证明 Trace 去重，重新附着修复及后续验收见下文。
+
+## Trace 连续性最终验收目标（2026-10-10）
+
+SDK、OBI 及混合接入共用同一验收标准：同一次请求保持一个 TraceID，链内父子引用有效，每个预期操作恰好一份 Span，自定义内部 Span 和 SDK 未覆盖但 OBI 支持的操作不丢失。自动识别覆盖关系，不增加用户配置。客户端和服务端是两个不同操作，不能相互去重。仅有同名、相近时间或相同 URL 不足以证明重复。
+
+验收在采集器就绪、各段已纳入采集且采样一致时进行。矩阵包含纯 SDK、纯 OBI、SDK→OBI、OBI→SDK、同进程混用和仅部分操作使用 SDK；覆盖普通二进制、Docker bridge、Kubernetes、首次请求、长连接及重启，并分别验证 HTTP/1、HTTP/2 和 gRPC。故障、采样丢弃和未支持协议必须单独记录，不能归入通过。检查真实传播头、原始 SpanID、父 SpanID、预期操作数和自定义 Span；不能以页面有数据或服务端 Span 数量减少代替完整链路验收。
+
+官方 OBI v0.14.0 的本地单探针 HTTP/1 实测发现：Go 探针识别已有 SDK `traceparent` 后未清理网络探针待注入状态，网络探针再次写入不同父 SpanID，20/20 请求携带两个传播头。另一个无完整 SDK Provider、仅使用 Go OTel API 的样本同时产生 OBI 和 Auto SDK 服务端 Span。现有按实例丢弃全部 OBI 的入口策略及 OBI 自身按进程排除 SDK 的策略，均不能单独保证上述完整性目标。
+
+用户已授权为此目标进行本地 OBI 补丁构建和验收。候选补丁与测试二进制不进入正式发布依赖；正式发布仍使用官方 Release。补丁构建成功或局部用例通过不代表最终验收通过。原始 Trace 的可重复检查入口为 `python3 scripts/apm-test/trace-continuity.py TRACE.json EXPECTATION.json`；用 `--self-test` 检查断链、重复操作、缺失内部 Span、循环父引用和传播头重复的判定。
+
+第一阶段本地候选补丁已编译双架构 BPF 对象，并在 Linux 6.8 ARM64 实际加载。Kubernetes SDK Pod→原生 OBI 服务在正常权限及移除 CAP_SYS_ADMIN 两种情况下各 20/20 请求通过：传播头唯一、SDK 客户端 SpanID 与线上父 ID 一致、全部父引用有效且预期操作和自定义 Span 保留。移除权限时确认走网络传播回退路径。
+
+第一阶段原生矩阵中，SDK→SDK、SDK→OBI、OBI→SDK、OBI→OBI 共 240/240 请求通过，Auto SDK 及部分 SDK 覆盖共 120/120 请求失败。前者重复服务端与客户端操作；后者丢失 OBI 客户端 Span 并产生下游孤立父引用。该结果作为修复前证据保留。
+
+最终本地候选 `0.14.0-local-sdk-context9` 在已有 Go 探针内读取完整 SDK 的 recording span 上下文，区分 SDK 已覆盖的操作和 SDK 未覆盖的子操作；保留自定义内部 Span，取消对这些子操作的进程级排除。后者携带 `obi.sdk.context=true`，入口 Collector 直接保留，不再因同实例存在 SDK 而整组丢弃。此标记由采集器生成，不增加用户配置；未带标记的官方 OBI 仍使用现有 30 秒决策。回归测试覆盖该标记与 SDK 原始父引用。
+
+候选同时修正 HTTP/1 在大请求头刷新前的传播交接、HTTP/2 协商帧大小和 h2c 服务端起始时间、嵌套 PID 命名空间下的 Go 探针身份与 Auto SDK 激活，以及 parent-based 采样的父上下文。完整 SDK 通过具体构造函数返回值识别 recording span，支持本次移除符号表的 Go 1.25.11 样本。
+
+2026-10-10 完成同一二进制的最终矩阵：Linux 6.8 ARM64 原生进程、OrbStack 6.19 ARM64 Docker bridge、Linux 6.8 ARM64 Kubernetes 各 512/512，共 1536/1536 请求通过。每种环境包含上述四组及 Auto SDK→OBI、部分 SDK→OBI 六组，分别请求 HTTP/1、HTTP/2 h2c、gRPC 下游，各保留首次请求并复用连接、四路并发；另覆盖 SQLite 查询、20 秒请求、8/32/64 KiB 填充头和未采样传播。应用使用 SDK 1.43.0、Auto SDK 1.2.1，候选实际加载于两个 ARM64 内核，BPF 对象生成覆盖 amd64 和 arm64。
+
+验收逐请求比对线上唯一传播头、导出的客户端 SpanID、自定义 Span 的直接父子关系、操作数量和有效时间戳；36 个未采样请求维持 flags=00 且后端无 Span。原生进程已重启，Docker 应用已重新启动，Kubernetes Pod 已重建。本轮误用旧原生配置导致未启用 SQL 的一次失败另行保留；修正测试配置后重跑全部 512 项通过，未通过修改候选代码消除该失败。最终临时探针与测试应用已停止，原五条采集规则已恢复。
+
+补丁、候选二进制、哈希、夹具、原始 Trace、传播日志及离线检查器保存在 Git/Docker 构建上下文均忽略的 `output/obi-runtime/trace-continuity-20261010/`，入口为该目录的 `README.md`。受影响 Go 包 race、ABI 检查、四个针对性 BPF 测试、静态检查及真实 Collector 回归通过。BPF 全套测试在不相关的 `test_failed_connect_event` 上因测试头文件缺少 `__always_inline` 定义而编译失败；不能记为全套通过。
+
+此结果只证明上述本地候选和样本。其他语言、TLS、amd64 实际运行、Linux 5.15、故障/容量压力及其他 SDK/Go ABI 未完成本轮验收；Redis、MongoDB、Kafka 仅验证上下文转换单元测试，未做真实服务端链路验收。最终候选未重跑移除 CAP_SYS_ADMIN 的矩阵；早期 20 请求回退结果不能替代最终候选验证。正式依赖仍是官方 OBI Release，不能将该本地补丁打入发布包或宣称官方版本已修复；发布前需上游修复进入官方 Release，并用该原版重跑矩阵。
 
 ## Go 探针重新附着（2026-10-10）
 

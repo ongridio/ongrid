@@ -32,6 +32,8 @@ compactor:
 # remote_write target is the docker-internal Prom which has
 # --web.enable-remote-write-receiver enabled per ADR-009.
 metrics_generator:
+  # Include the gateway's 30s SDK/OBI decision and downstream export delay.
+  metrics_ingestion_time_range_slack: 2m
   registry:
     external_labels:
       source: tempo
@@ -57,6 +59,8 @@ metrics_generator:
         - http.request.method
         - http.method
     service_graphs:
+      # SDK spans can arrive before their buffered OBI peer.
+      wait: 1m
       max_items: 10000
       enable_client_server_prefix: true
       dimensions:

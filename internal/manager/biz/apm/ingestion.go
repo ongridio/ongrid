@@ -51,35 +51,14 @@ func (s *Service) Ingestion(ctx context.Context, q Query) (*Ingestion, error) {
 	if err != nil {
 		return nil, err
 	}
-	unique := []Instance{}
-	seen := map[[5]string]int{}
-	for _, instance := range instances {
-		key := [5]string{instance.InstanceID, instance.DeviceID, instance.ClusterID, instance.K8sClusterID, instance.Version}
-		if index, ok := seen[key]; ok {
-			if unique[index].Pod == "" {
-				unique[index].Pod = instance.Pod
-			}
-			if unique[index].Namespace == "" {
-				unique[index].Namespace = instance.Namespace
-			}
-			if unique[index].ContainerName == "" {
-				unique[index].ContainerName = instance.ContainerName
-			}
-			if unique[index].TargetID == "" {
-				unique[index].TargetID = instance.TargetID
-			}
-			continue
-		}
-		seen[key] = len(unique)
-		unique = append(unique, instance)
-	}
-	instances = unique
 	if len(instances) > 100 {
 		return nil, fmt.Errorf("%w: narrow the service resource scope", errs.ErrBudgetExceeded)
 	}
 	out := &Ingestion{Identity: q.Identity(), Targets: []IngestionTarget{}}
 	receivers := map[string]Receiver{}
 	versions := map[[3]string]string{}
+	unverified := map[[3]string]bool{}
+	deferred := []IngestionTarget{}
 	for _, instance := range instances {
 		key := "host:" + instance.DeviceID + ":" + instance.InstanceID
 		if instance.K8sClusterID != "" {
@@ -90,8 +69,12 @@ func (s *Service) Ingestion(ctx context.Context, q Query) (*Ingestion, error) {
 		receiver, ok := receivers[key]
 		if !ok {
 			receiver, err = s.receivers.ResolveReceiver(ctx, q.Identity(), instance)
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			if err != nil {
-				return nil, fmt.Errorf("resolve application receiver: %w", err)
+				s.log.WarnContext(ctx, "APM ingestion receiver unavailable", "device_id", instance.DeviceID, "cluster_id", instance.ClusterID, "instance_id", instance.InstanceID, "error", err)
+				receiver = Receiver{Reason: "receiver_unavailable"}
 			}
 			receivers[key] = receiver
 		}
@@ -106,10 +89,17 @@ func (s *Service) Ingestion(ctx context.Context, q Query) (*Ingestion, error) {
 				// Historical Pods can be deleted; optional version metadata must not block a verified receiver.
 				s.log.WarnContext(ctx, "APM ingestion version metadata unavailable", "pod", instance.Pod, "namespace", instance.Namespace, "error", err)
 				version = ""
+				unverified[versionKey] = true
 			}
 			versions[versionKey] = version
 		}
-		out.Targets = append(out.Targets, IngestionTarget{Instance: instance, Receiver: receiver, VersionFieldPath: version})
+		target := IngestionTarget{Instance: instance, Receiver: receiver, VersionFieldPath: version}
+		if unverified[versionKey] {
+			deferred = append(deferred, target)
+		} else {
+			out.Targets = append(out.Targets, target)
+		}
 	}
+	out.Targets = append(out.Targets, deferred...)
 	return out, nil
 }

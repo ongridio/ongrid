@@ -363,3 +363,25 @@ func TestRuntimeMetricsIntegration(t *testing.T) {
 		})
 	}
 }
+
+func TestInstancesMergeKubernetesGatewayAndNodeObservations(t *testing.T) {
+	p := &fakeProm{result: `[
+		{"metric":{"service_instance_id":"uid-1","cluster_id":"132","k8s_cluster_id":"50","service_version":"v1"},"value":[1600,"1"]},
+		{"metric":{"service_instance_id":"uid-1","device_id":"42","cluster_id":"132","k8s_cluster_id":"50","k8s_namespace_name":"business","k8s_pod_name":"api-1","service_version":"v1","container_name":"api"},"value":[1600,"1"]},
+		{"metric":{"service_instance_id":"uid-1","device_id":"43","cluster_id":"133","k8s_cluster_id":"51","service_version":"v1"},"value":[1600,"1"]},
+		{"metric":{"service_instance_id":"uid-1","device_id":"42","cluster_id":"132","k8s_cluster_id":"50","service_version":"v2"},"value":[1600,"1"]},
+		{"metric":{"service_instance_id":"host-process","device_id":"42"},"value":[1600,"1"]},
+		{"metric":{"service_instance_id":"host-process","device_id":"43"},"value":[1600,"1"]}
+	]`}
+	out, err := New(p, nil, nil).Instances(t.Context(), testQuery())
+	if err != nil || len(out.Instances) != 5 {
+		t.Fatalf("instances=%+v err=%v", out, err)
+	}
+	for _, in := range out.Instances {
+		if in.InstanceID == "uid-1" && in.K8sClusterID == "50" && in.Version == "v1" {
+			if in.DeviceID != "42" || in.Pod != "api-1" || in.Namespace != "business" || in.ContainerName != "api" {
+				t.Fatalf("lost merged Pod metadata: %+v", in)
+			}
+		}
+	}
+}

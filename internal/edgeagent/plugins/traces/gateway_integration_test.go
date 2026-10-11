@@ -21,7 +21,48 @@ import (
 	resource "go.opentelemetry.io/proto/otlp/resource/v1"
 	trace "go.opentelemetry.io/proto/otlp/trace/v1"
 	"google.golang.org/protobuf/proto"
+	"gopkg.in/yaml.v3"
 )
+
+func TestGatewayTempoTiming(t *testing.T) {
+	var gateway struct {
+		Processors map[string]struct {
+			DecisionWait time.Duration `yaml:"decision_wait"`
+			Timeout      time.Duration `yaml:"timeout"`
+		} `yaml:"processors"`
+	}
+	var tempo struct {
+		MetricsGenerator struct {
+			IngestionSlack time.Duration `yaml:"metrics_ingestion_time_range_slack"`
+			Processor      struct {
+				ServiceGraphs struct {
+					Wait time.Duration `yaml:"wait"`
+				} `yaml:"service_graphs"`
+			} `yaml:"processor"`
+		} `yaml:"metrics_generator"`
+	}
+	for name, target := range map[string]any{"profiles-gateway.yaml": &gateway, "tempo-config.yaml": &tempo} {
+		raw, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "deploy", "install", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := yaml.Unmarshal(raw, target); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	decision := gateway.Processors["tail_sampling/sdk_preference"].DecisionWait
+	batch := gateway.Processors["batch/traces"].Timeout
+	if decision <= 0 || batch <= 0 {
+		t.Fatal("missing gateway decision or batch timing")
+	}
+	delay := decision + batch
+	if tempo.MetricsGenerator.IngestionSlack <= delay {
+		t.Errorf("Tempo ingestion slack %s must exceed the gateway delay %s", tempo.MetricsGenerator.IngestionSlack, delay)
+	}
+	if tempo.MetricsGenerator.Processor.ServiceGraphs.Wait <= delay {
+		t.Errorf("Tempo service graph wait %s must exceed the SDK/OBI delivery difference %s", tempo.MetricsGenerator.Processor.ServiceGraphs.Wait, delay)
+	}
+}
 
 // Use the bundled official Collector; no replacement implementation can prove
 // that fan-out cloning, OTTL transforms and tail-sampling preserve the wire data.
@@ -174,6 +215,13 @@ func TestGatewaySDKPreference(t *testing.T) {
 		makeSpan("different-cluster", true, map[string]string{"cluster_id": "132"}),
 		makeSpan("missing-identity-obi", true, map[string]string{"service.instance.id": ""}),
 	}
+	uncovered := makeSpan("sdk-uncovered-client", true, nil)
+	uncoveredSpan := uncovered.ScopeSpans[0].Spans[0]
+	uncoveredSpan.Kind = trace.Span_SPAN_KIND_CLIENT
+	parentID := sha256.Sum256([]byte("startup-sdk"))
+	uncoveredSpan.ParentSpanId = parentID[:8]
+	uncoveredSpan.Attributes = []*common.KeyValue{{Key: "obi.sdk.context", Value: &common.AnyValue{Value: &common.AnyValue_BoolValue{BoolValue: true}}}}
+	kept = append(kept, uncovered)
 	podOBI := makeSpan("pod-startup-obi", true, map[string]string{"k8s.pod.uid": "pod-uid", "cluster_id": "132", "service.instance.id": "namespace.pod.container"})
 	send(append([]*trace.ResourceSpans{obi, podOBI}, kept...)...)
 	// The first OBI export is received before the SDK's first export.
