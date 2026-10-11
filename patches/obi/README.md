@@ -1,9 +1,9 @@
 # OBI Trace 连续性补丁
 
-完整的 SDK/OBI 混合链路修复依赖本目录的 OBI 源码补丁。仅部署 Ongrid 侧修改和官方 OBI v0.14.0，不能得到本补丁的完整行为。补丁随 Ongrid 代码一起审查、保存和推送，构建为独立版本 `0.14.0-ongrid.2`。Make 和 Edge 镜像的默认依赖均使用这个补丁版本。
+完整的 SDK/OBI 混合链路修复依赖本目录的 OBI 源码补丁。仅部署 Ongrid 侧修改和官方 OBI v0.14.0，不能得到本补丁的完整行为。补丁随 Ongrid 代码一起审查、保存和推送，构建为独立版本 `0.14.0-ongrid.3`。Make 和 Edge 镜像的默认依赖均使用这个补丁版本。
 
 - 上游：[OpenTelemetry eBPF Instrumentation](https://github.com/open-telemetry/opentelemetry-ebpf-instrumentation)，`v0.14.0`，commit `13d9b0c3f600a060bd78820a63ebec882b10757e`。
-- 补丁：[v0.14.0-trace-continuity.patch](v0.14.0-trace-continuity.patch)，包含 31 个源码和测试文件。
+- 补丁：[v0.14.0-trace-continuity.patch](v0.14.0-trace-continuity.patch)，包含 35 个源码和测试文件。
 - 版本、哈希、工具链和验收计数：[manifest.json](manifest.json)。补丁 SHA256 与实际验收版本一致。
 - 上游 [LICENSE](LICENSE) 和 [NOTICE](NOTICE) 原样保留。差异文件明确列出 Ongrid 对上游的修改；这不是上游官方发布。
 
@@ -11,7 +11,9 @@
 
 Go 探针读取 SDK recording span 上下文，识别 SDK 已覆盖的操作，保留 SDK 未覆盖的子操作及自定义 Span。未覆盖操作携带 `obi.sdk.context=true`，由 Ongrid 的入口 Collector 保留，避免按实例删除全部 OBI Span。
 
-补丁也修复 HTTP/1 大请求头的传播交接、HTTP/2 协商帧大小及 h2c 服务端时间戳、嵌套 PID 命名空间内的探针身份和 Auto SDK 激活，以及 parent-based 采样的父上下文。不增加用户配置项。
+补丁也修复 HTTP/1 大请求头的传播交接、HTTP/2 协商帧大小及 h2c 服务端时间戳、嵌套 PID 命名空间内的探针身份和 Auto SDK 激活，以及 parent-based 采样的父上下文。不增加用户配置项。Ongrid 的 Trace 导出配置同时启用 HTTP、gRPC、SQL、Redis、Kafka、MongoDB，避免补丁采集到的非 HTTP 子操作在出口被关闭；真实服务端验收范围仍以下表和发布边界为准。
+
+`0.14.0-ongrid.3` 还将 gRPC 服务端的 stream/transport 缓存按进程隔离，并在删除缓存项前复制父上下文，避免并发插入复用 LRU 槽位。回归测试模拟删除时立即覆盖槽位，并验证相同指针和 stream ID 在不同进程之间不会串联。Ongrid 在 `sample_ratio=0` 时使用 `always_off`，保留仅采集指标的行为；其他比例继续尊重父级采样标志。
 
 ## 构建、下载与安装
 
@@ -25,22 +27,28 @@ bash scripts/build-patched-obi.sh /tmp/obi-release-output
 
 产物包含双架构压缩包、带生成对象的完整修改源码、补丁、来源清单和 `SHA256SUMS`。二进制携带补丁版本和补丁 SHA；分发包保留上游及依赖许可证，并在 NOTICE 标明 Ongrid 修改。
 
-发布使用 Ongrid 仓库独立的 `obi-v0.14.0-ongrid.2` 标签，触发 `.github/workflows/release-obi.yml`。该流程构建并上传双架构 OBI，再复用现有 CNB 发布器创建公共 Edge 依赖附件并验证公开下载。OBI Release 初始标记为预发布，完成运行验收后再转为正式依赖；不设置为 Ongrid 最新应用版本，不覆盖官方 OBI Release。同一标签的既有资产不得覆盖，重跑先校验已发布资产，修改补丁必须递增 `-ongrid.N`。
+发布沿用 CNB 的完整 Edge 依赖附件：`edge-deps-linux-amd64.tar.xz` 和 `edge-deps-linux-arm64.tar.xz`。OBI 与 Collector、各 exporter 一起打包，不单独发布 OBI 二进制 Release。构建和上传在本地执行，不使用新增 CI 发布流程。
+
+本地构建输出的 OBI 压缩包仅作为打包输入。将两个架构的 `obi` 和汇总后的 `obi.NOTICES` 放入 `bin/linux-<arch>/`，然后执行：
 
 ```sh
-make fetch-obi EDGE_PLUGIN_ARCHES='linux-amd64 linux-arm64'
-make build-edge-deps-attachments
+# 本地 OBI 已完成源码/补丁/构建校验；其余依赖仍由现有下载步骤准备。
+make -o fetch-obi build-edge-deps-attachments
+make -o fetch-obi publish-edge-deps-attachments
+make verify-edge-deps-release
 ```
 
-`scripts/fetch-obi.sh` 对 `-ongrid.N` 版本使用 Ongrid Release，纯上游版本仍使用 OpenTelemetry Release。两条路径均下载 `SHA256SUMS` 并校验后安装。Make、Edge Dockerfile 与本目录清单必须保持版本一致，CI 检查这三处。依赖标签包含完整 `OBI_VERSION`，因此不会复用之前不带补丁的 CNB 依赖包。
+上传复用现有 CNB 发布器和 `CNB_TOKEN`，以新依赖标签发布，不覆盖已有资产。源码补丁和来源清单随 Ongrid 仓库保存。修改补丁或交付产物时必须递增 `-ongrid.N`。
+
+`scripts/fetch-obi.sh` 对 `-ongrid.N` 版本从对应 CNB 整包提取 OBI；先验证外层校验和，再验证包内清单、目标架构、依赖标签和 OBI 版本。纯上游版本仍使用 OpenTelemetry Release 及其 `SHA256SUMS`。Make、Edge Dockerfile 与本目录清单必须保持版本一致。依赖标签包含完整 `OBI_VERSION`，因此不会复用之前不带补丁的 CNB 依赖包。
 
 后续 Ongrid 应用发布沿用现有 CNB 依赖附件、宿主机安装/升级包及 Kubernetes Edge 镜像流程。发布 OBI 依赖本身不等于 Ongrid PR 已合并，也不等于已发布新的 Ongrid 应用版本。回滚时恢复上一版 Edge 镜像或依赖附件；回到官方 `0.14.0` 会失去本次混合链路修复。
 
-`manifest.json` 中 `candidate_version` 和 `accepted_linux_arm64_binary_sha256` 标识此前完成矩阵的本地候选；发布产物以该 Release 的 `SHA256SUMS` 为准，不承诺不同环境重建后逐字节相同。
+`manifest.json` 中 `historical_candidate_acceptance` 标识此前完成矩阵的本地候选；发布产物以 CNB 整包的 `.sha256` 和包内 `MANIFEST.sha256` 为准，不承诺不同环境重建后逐字节相同。
 
 ## 验证
 
-同一候选二进制的现场结果如下。测试夹具为移除符号表的 Go 1.25.11，使用 OTel SDK 1.43.0、Auto SDK 1.2.1 和 otelhttp/otelgrpc 0.68.0。
+此前 `0.14.0-local-sdk-context9` 候选二进制的现场结果如下，不代表后续发布包的验收结果。测试夹具为移除符号表的 Go 1.25.11，使用 OTel SDK 1.43.0、Auto SDK 1.2.1 和 otelhttp/otelgrpc 0.68.0。
 
 | 环境 | HTTP/gRPC 矩阵 | 边界请求 | 合计 |
 | --- | ---: | ---: | ---: |
@@ -61,9 +69,9 @@ CGO_ENABLED=1 go test -race ./pkg/ebpf ./pkg/ebpf/common \
 go test ./pkg/internal/goexec \
   -run 'TestSDKRecordingContextOffsets|TestHTTPHeaderSortedValuesABI' -count=1
 make -C bpf/tests CC=clang bpf_go_client_trace_parent bpf_go_observer_pid \
-  bpf_go_h2_owned_stream bpf_go_h2_write_transaction
+  bpf_go_h2_owned_stream bpf_go_h2_write_transaction bpf_go_grpc_server_trace_parent
 for check in bpf_go_client_trace_parent bpf_go_observer_pid \
-  bpf_go_h2_owned_stream bpf_go_h2_write_transaction; do
+  bpf_go_h2_owned_stream bpf_go_h2_write_transaction bpf_go_grpc_server_trace_parent; do
   "bpf/tests/$check"
 done
 ```

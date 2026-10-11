@@ -12,7 +12,7 @@ ebpf:
 otel_traces_export:
   endpoint: http://127.0.0.1:14318/v1/traces
   protocol: http/protobuf
-  instrumentations: [http, grpc]
+  instrumentations: [http, grpc, sql, redis, kafka, mongo]
   sampler:
     name: parentbased_traceidratio
     arg: '0.01'

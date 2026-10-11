@@ -180,6 +180,19 @@ func TestRenderLiteralSelectionAndIndependentSampling(t *testing.T) {
 	if strings.Contains(string(body), "application_span") {
 		t.Fatal("duplicate spanmetrics enabled")
 	}
+	cfg.Spec["sample_ratio"] = 0.0
+	body, err = render(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v = nil
+	if err := yaml.Unmarshal(body, &v); err != nil {
+		t.Fatal(err)
+	}
+	sampler := v["otel_traces_export"].(map[string]interface{})["sampler"]
+	if !reflect.DeepEqual(sampler, map[string]interface{}{"name": "always_off"}) {
+		t.Fatalf("zero sampling must disable traces even with a sampled parent: %v", sampler)
+	}
 	t.Setenv("OTEL_EBPF_OPEN_PORT", "1-65535")
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "https://unrelated")
 	for _, entry := range obiEnvironment(cfg) {

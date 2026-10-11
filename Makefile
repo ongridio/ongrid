@@ -45,7 +45,7 @@ K8S_EDGE_IMAGE_REF ?= $(K8S_EDGE_IMAGE_REPO):$(K8S_EDGE_IMAGE_TAG)
 # dependencies use an immutable tag derived from every upstream version and
 # are uploaded only once; the small self-developed binary follows VERSION.
 EDGE_ATTACHMENT_TARGETS ?= linux-amd64 linux-arm64
-OBI_VERSION ?= 0.14.0-ongrid.2
+OBI_VERSION ?= 0.14.0-ongrid.3
 EDGE_DEPS_TAG ?= edge-deps-layout2-obi$(OBI_VERSION)-o$(OTELCOL_VERSION)-n$(NODE_EXPORTER_VERSION)-pr$(PROCESS_EXPORTER_VERSION)-my$(MYSQLD_EXPORTER_VERSION)-pg$(POSTGRES_EXPORTER_VERSION)-r$(REDIS_EXPORTER_VERSION)-m$(MONGODB_EXPORTER_VERSION)
 EDGE_ATTACHMENTS_OUT ?= $(OUT)/edge-attachments
 CNB_RELEASE_BASE_URL ?= https://cnb.cool/ongridio/ongrid-edge/-/releases/download
@@ -213,6 +213,7 @@ docker-ongrid-edge: ## 构建 ongrid-edge 镜像
 		--build-arg NODE_EXPORTER_VERSION=$(NODE_EXPORTER_VERSION) \
 		--build-arg PROCESS_EXPORTER_VERSION=$(PROCESS_EXPORTER_VERSION) \
 		--build-arg OBI_VERSION=$(OBI_VERSION) \
+		--build-arg EDGE_DEPS_TAG=$(EDGE_DEPS_TAG) \
 		--build-arg OTELCOL_VERSION=$(OTELCOL_VERSION) \
 		-t ongrid-edge:$(VERSION) \
 		-f deploy/Dockerfile.ongrid-edge .
@@ -389,6 +390,7 @@ docker-build-k8s-edge: ## [dev] 构建本地 Kubernetes ongrid-edge 镜像（默
 		--build-arg NODE_EXPORTER_VERSION=$(NODE_EXPORTER_VERSION) \
 		--build-arg PROCESS_EXPORTER_VERSION=$(PROCESS_EXPORTER_VERSION) \
 		--build-arg OBI_VERSION=$(OBI_VERSION) \
+		--build-arg EDGE_DEPS_TAG=$(EDGE_DEPS_TAG) \
 		--build-arg OTELCOL_VERSION=$(OTELCOL_VERSION) \
 		-t ongrid-edge:$(VERSION) \
 		-t $(K8S_EDGE_IMAGE_REF) \
@@ -405,6 +407,7 @@ docker-push-k8s-edge: ## [release] 发布 Kubernetes ongrid-edge 多架构镜像
 		--build-arg NODE_EXPORTER_VERSION=$(NODE_EXPORTER_VERSION) \
 		--build-arg PROCESS_EXPORTER_VERSION=$(PROCESS_EXPORTER_VERSION) \
 		--build-arg OBI_VERSION=$(OBI_VERSION) \
+		--build-arg EDGE_DEPS_TAG=$(EDGE_DEPS_TAG) \
 		--build-arg OTELCOL_VERSION=$(OTELCOL_VERSION) \
 		-t $(K8S_EDGE_IMAGE_REF) \
 		-f deploy/Dockerfile.ongrid-edge \
@@ -879,7 +882,7 @@ clean: ## 清理构建产物
 fetch-obi: ## [release] 下载并校验 Linux OBI 自动 APM 运行时
 	@for target in $(EDGE_PLUGIN_ARCHES); do \
 		arch=$${target#linux-}; \
-		bash scripts/fetch-obi.sh "$(OBI_VERSION)" "$$arch" "$(BIN_DIR)/$$target" || exit 1; \
+		bash scripts/fetch-obi.sh "$(OBI_VERSION)" "$$arch" "$(BIN_DIR)/$$target" "$(EDGE_DEPS_TAG)" "$(CNB_RELEASE_BASE_URL)" || exit 1; \
 	done
 
 .PHONY: test-commit-policy

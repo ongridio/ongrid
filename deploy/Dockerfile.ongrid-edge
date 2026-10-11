@@ -11,7 +11,8 @@
 ARG VERSION=dev
 ARG NODE_EXPORTER_VERSION=1.8.2
 ARG PROCESS_EXPORTER_VERSION=0.8.4
-ARG OBI_VERSION=0.14.0-ongrid.2
+ARG OBI_VERSION=0.14.0-ongrid.3
+ARG EDGE_DEPS_TAG=edge-deps-layout2-obi0.14.0-ongrid.3-o0.157.0-n1.8.2-pr0.8.4-my0.19.0-pg0.19.1-r1.86.0-m0.51.0
 ARG OTELCOL_VERSION=0.157.0
 
 # ---------- Stage 1: builder ----------
@@ -114,10 +115,12 @@ RUN set -eux; \
 
 FROM --platform=$BUILDPLATFORM alpine:3.20 AS obi
 ARG OBI_VERSION
+ARG EDGE_DEPS_TAG
 ARG TARGETARCH
-RUN apk add --no-cache bash curl tar coreutils
-COPY scripts/fetch-obi.sh /fetch-obi.sh
-RUN bash /fetch-obi.sh "$OBI_VERSION" "$TARGETARCH" /out
+RUN apk add --no-cache bash curl tar coreutils xz
+COPY scripts/fetch-obi.sh scripts/verify-cnb-release-attachments.sh /scripts/
+COPY deploy/install/edge/verify-edge-deps-archive.sh /deploy/install/edge/verify-edge-deps-archive.sh
+RUN bash /scripts/fetch-obi.sh "$OBI_VERSION" "$TARGETARCH" /out "$EDGE_DEPS_TAG"
 
 # ---------- Stage 5: runtime (distroless, nonroot) ----------
 FROM gcr.io/distroless/base-debian12:nonroot

@@ -56,7 +56,7 @@ OBI 保持 `exclude_otel_instrumented_services=true`；其 OTel 导出检测不�
 
 新增 autoapm 插件，复用现有 Manager 插件配置、鉴权 tunnel、心跳及 subprocess 生命周期。enabled 表示整个自动 APM 开关；targets 为空只运行监听进程发现。心跳及界面候选最多 200 组，已选目标的资源采集不受候选展示上限限制；目标最多 100 组，只上报路径/端口/PID，不采集进程参数或环境变量。目标必须为确定的绝对路径和非零端口；不接受 glob、正则配置或环境替换符。
 
-选择进程后启动固定版本 OBI 0.14.0-ongrid.2 与私有 Collector 0.157.0。OBI 使用 v1 services 的转义完整路径正则与端口 AND 匹配，保留逐目标服务名称；其 v2 迁移不支持逐目标名称，独立 `config validate` 命令也只接受 v2。因此 v1 由 OBI 启动时校验，复用 subprocess readiness 检测启动错误并回滚。所需系统能力设为强制检查，禁止缺权限仍显示成功启动。
+选择进程后启动固定版本 OBI 0.14.0-ongrid.3 与私有 Collector 0.157.0。OBI 使用 v1 services 的转义完整路径正则与端口 AND 匹配，保留逐目标服务名称；其 v2 迁移不支持逐目标名称，独立 `config validate` 命令也只接受 v2。因此 v1 由 OBI 启动时校验，复用 subprocess readiness 检测启动错误并回滚。所需系统能力设为强制检查，禁止缺权限仍显示成功启动。
 
 OBI 仅向 loopback 的 OTLP 14317/14318 导出。Collector 健康端口 14333、自监控 18888、应用指标 exporter 9465，避免影响已有 SDK Collector。Trace 经现有 Manager URL 与鉴权写入 Tempo；指标复用 custommetrics scraper，经 push_prom_samples 上报，source=obi。环境、device_id、可用的 cluster_id 和 ongrid.instrumentation.source 在 Collector 设置。未添加新的公开接收端口、存储或 spanmetrics 管线。自动 APM 采集统一使用 Trace 采样比例 1，并允许 Manager 自签名证书（跳过证书验证）。由 Manager 在下发时覆盖历史采样和证书选项，普通设备与 Kubernetes 一致；旧 API 字段保留以兼容旧配置。
 
@@ -104,13 +104,13 @@ SDK、OBI 及混合接入共用同一验收标准：同一次请求保持一个 
 
 2026-10-11 按用户要求将必要的 OBI 源码补丁纳入版本管理：[patches/obi](../../patches/obi/README.md) 包含完整补丁、上游 commit、哈希、构建步骤、许可证和验收摘要。仅部署 Ongrid 侧修改与官方 OBI v0.14.0，不能得到该候选的完整混合链路行为。全新官方 tag 应用补丁后，全部 31 个源码/测试文件与实际验收版本逐字节相同。候选二进制、夹具、原始 Trace、传播日志及离线检查器继续保存在 Git/Docker 构建上下文均忽略的 `output/obi-runtime/trace-continuity-20261010/`。受影响 Go 包 race、ABI 检查、四个针对性 BPF 测试、静态检查及真实 Collector 回归通过。BPF 全套测试在不相关的 `test_failed_connect_event` 上因测试头文件缺少 `__always_inline` 定义而编译失败；不能记为全套通过。
 
-此结果只证明上述本地候选和样本。其他语言、TLS、amd64 实际运行、Linux 5.15、故障/容量压力及其他 SDK/Go ABI 未完成本轮验收；Redis、MongoDB、Kafka 仅验证上下文转换单元测试，未做真实服务端链路验收。最终候选未重跑移除 CAP_SYS_ADMIN 的矩阵；早期 20 请求回退结果不能替代最终候选验证。补丁以独立的 `0.14.0-ongrid.2` 发布；交付检查必须使用实际发布产物，不能用本地候选结果宣称官方原版或未测平台已通过。
+此结果只证明上述本地候选和样本。其他语言、TLS、amd64 实际运行、Linux 5.15、故障/容量压力及其他 SDK/Go ABI 未完成本轮验收；Redis、MongoDB、Kafka 仅验证上下文转换单元测试，未做真实服务端链路验收。最终候选未重跑移除 CAP_SYS_ADMIN 的矩阵；早期 20 请求回退结果不能替代最终候选验证。补丁以独立的 `0.14.0-ongrid.3` 发布；交付检查必须使用实际发布产物，不能用本地候选结果宣称官方原版或未测平台已通过。
 
 ## Go 探针重新附着（2026-10-10）
 
 升级固定版本至官方 OBI v0.14.0。v0.12.1 的 `NewExecutable` 查找可复用探针后先释放锁，再提交新进程；并发的 `UnlinkExecutable` 可在两者之间关闭该探针，新进程随后复用已关闭的链接。该竞态与现场“新进程元数据已注册，但 Go uprobes 缺失”的故障一致。v0.14.0 对整个附着过程持有与卸载相同的锁，避免关闭后再提交；同时统一探针关闭的所有权。参见 [v0.12.1 实现](https://github.com/open-telemetry/opentelemetry-ebpf-instrumentation/blob/v0.12.1/pkg/ebpf/tracer_linux.go)、[v0.14.0 实现](https://github.com/open-telemetry/opentelemetry-ebpf-instrumentation/blob/v0.14.0/pkg/ebpf/tracer_linux.go)和 [上游修改](https://github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pull/3418)。
 
-Make 与 Edge Docker 构建使用同一版本，依赖附件标签随 `OBI_VERSION` 更新；通过共用下载脚本获取补丁版 Release，校验双架构发布包并分发许可证。现有 v1 目标匹配、SDK 自动排除、Collector、服务身份和应用启动配置继续使用。应用重启由 OBI 自动处理，Ongrid 不增加按应用重启探针的逻辑。
+Make 与 Edge Docker 构建使用同一版本，依赖附件标签随 `OBI_VERSION` 更新；通过共用下载脚本从 CNB 整体依赖包获取 OBI，校验外层与包内清单并分发许可证。现有 v1 目标匹配、SDK 自动排除、Collector、服务身份和应用启动配置继续使用。应用重启由 OBI 自动处理，Ongrid 不增加按应用重启探针的逻辑。
 
 官方原版在 Lima Linux 6.8 ARM64 上完成六轮现场验收：原生二进制和 Docker bridge 容器原地重启四轮、容器重建一轮，以及两种应用各连续重启八次后的最终检查一轮。连续重启间隔为 3 秒，遵守测试服务的 systemd 启动限频。OBI PID 全程为 27260；应用启动脚本和环境配置校验和不变，每轮实例 UUID 更新、目标 UUID 保持。每个当前实例均有六类 Go 指标（345 条原始运行时序列）和八条身份正确的进程资源序列；重建后的容器 ID 更新。共 480 个 SDK 请求均无重复服务端 Span，SpanID、父 SpanID、请求数、错误数和业务计数器正确。
 
@@ -165,7 +165,7 @@ OBI v0.12.1 的本地 OrbStack 验收发现嵌套 PID 命名空间会影响 Go �
 
 ### OBI 补丁交付边界（2026-10-11）
 
-完整混合链路修复使用独立版本 `0.14.0-ongrid.2`。来源为上游 v0.14.0 的固定 commit 与 [patches/obi](../../patches/obi/README.md) 中的补丁；构建脚本输出双架构 Linux 二进制、完整修改源码、许可证及校验和。Ongrid GitHub Release 使用独立的 `obi-v` 标签，不替换上游 Release，也不改变 Ongrid 应用的最新版本。
+完整混合链路修复使用独立版本 `0.14.0-ongrid.3`。来源为上游 v0.14.0 的固定 commit 与 [patches/obi](../../patches/obi/README.md) 中的补丁；构建脚本输出双架构 Linux 二进制、完整修改源码、许可证及校验和。本地构建后装入原有双架构 Edge 完整依赖包，直接上传 CNB，不单独发布 OBI 二进制，也不新增 CI 发布流程。
 
 `OBI_VERSION`、Edge Dockerfile 与补丁清单保持一致，`scripts/fetch-obi.sh` 统一校验并安装。CNB 公共依赖标签包含完整补丁版本，宿主机安装/升级与 Kubernetes 镜像均使用相同产物。版本和发布资产不可复用覆盖；后续修改递增补丁版本。
 
