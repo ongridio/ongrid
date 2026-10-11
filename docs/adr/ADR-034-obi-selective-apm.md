@@ -102,7 +102,7 @@ SDK、OBI 及混合接入共用同一验收标准：同一次请求保持一个 
 
 验收逐请求比对线上唯一传播头、导出的客户端 SpanID、自定义 Span 的直接父子关系、操作数量和有效时间戳；36 个未采样请求维持 flags=00 且后端无 Span。原生进程已重启，Docker 应用已重新启动，Kubernetes Pod 已重建。本轮误用旧原生配置导致未启用 SQL 的一次失败另行保留；修正测试配置后重跑全部 512 项通过，未通过修改候选代码消除该失败。最终临时探针与测试应用已停止，原五条采集规则已恢复。
 
-补丁、候选二进制、哈希、夹具、原始 Trace、传播日志及离线检查器保存在 Git/Docker 构建上下文均忽略的 `output/obi-runtime/trace-continuity-20261010/`，入口为该目录的 `README.md`。受影响 Go 包 race、ABI 检查、四个针对性 BPF 测试、静态检查及真实 Collector 回归通过。BPF 全套测试在不相关的 `test_failed_connect_event` 上因测试头文件缺少 `__always_inline` 定义而编译失败；不能记为全套通过。
+2026-10-11 按用户要求将必要的 OBI 源码补丁纳入版本管理：[patches/obi](../../patches/obi/README.md) 包含完整补丁、上游 commit、哈希、构建步骤、许可证和验收摘要。仅部署 Ongrid 侧修改与官方 OBI v0.14.0，不能得到该候选的完整混合链路行为。全新官方 tag 应用补丁后，全部 31 个源码/测试文件与实际验收版本逐字节相同。候选二进制、夹具、原始 Trace、传播日志及离线检查器继续保存在 Git/Docker 构建上下文均忽略的 `output/obi-runtime/trace-continuity-20261010/`。受影响 Go 包 race、ABI 检查、四个针对性 BPF 测试、静态检查及真实 Collector 回归通过。BPF 全套测试在不相关的 `test_failed_connect_event` 上因测试头文件缺少 `__always_inline` 定义而编译失败；不能记为全套通过。
 
 此结果只证明上述本地候选和样本。其他语言、TLS、amd64 实际运行、Linux 5.15、故障/容量压力及其他 SDK/Go ABI 未完成本轮验收；Redis、MongoDB、Kafka 仅验证上下文转换单元测试，未做真实服务端链路验收。最终候选未重跑移除 CAP_SYS_ADMIN 的矩阵；早期 20 请求回退结果不能替代最终候选验证。正式依赖仍是官方 OBI Release，不能将该本地补丁打入发布包或宣称官方版本已修复；发布前需上游修复进入官方 Release，并用该原版重跑矩阵。
 
@@ -167,7 +167,7 @@ OBI v0.12.1 的本地 OrbStack 验收发现嵌套 PID 命名空间会影响 Go �
 
 正式发布使用 OpenTelemetry 官方 OBI Release 原版二进制，不修改 OBI 源码、不应用兼容补丁、不发布自维护 fork。版本由 `OBI_VERSION` 固定（当前 0.14.0），通过 `scripts/fetch-obi.sh` 从官方 Release 下载并校验 `SHA256SUMS`；Edge 镜像及依赖附件构建均沿用该入口。
 
-OrbStack PID 命名空间补丁仅用于本地测试，补丁、源码副本和测试产物保留在已被 Git 与 Docker 构建上下文忽略的 `output/obi-runtime/`，不得复制到发布依赖目录或复用为发布镜像。补丁环境的验收结果不能作为官方原版的兼容性证明；正式支持范围以原版实测为准，遇到兼容问题优先跟进官方修复或升级官方版本。Ongrid 的进程基础资源采集及页面适配继续保留，它们不修改 OBI 源码。
+早期 OrbStack PID 命名空间补丁及测试产物保留在已被 Git 与 Docker 构建上下文忽略的 `output/obi-runtime/`。后续 Trace 连续性所需源码补丁按 2026-10-11 的要求保存于 [patches/obi](../../patches/obi/README.md)，用于审查、重建和上游修复；不会自动复制到发布依赖目录或复用为发布镜像。补丁环境的验收结果不能作为官方原版的兼容性证明；正式支持范围以原版实测为准。Ongrid 的进程基础资源采集及页面适配继续保留，它们不修改 OBI 源码。
 
 ## 实例基础资源（2026-09-20）
 

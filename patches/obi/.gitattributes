@@ -1,0 +1,3 @@
+# Preserve unified diff context prefixes and the upstream notice verbatim.
+*.patch -whitespace
+NOTICE -whitespace
