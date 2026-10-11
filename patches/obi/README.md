@@ -58,7 +58,9 @@ make verify-edge-deps-release
 
 ### 0.14.0-ongrid.5 HTTPS 与 gRPC 修复验收
 
-最终产物使用真实 Linux 6.8 ARM64 和 AMD64 内核加载 BPF。Java/Python 夹具为 Java 21.0.12、OTel Java Agent 2.31.1、gRPC Java 1.75，以及 Python 3.14.7、grpcio 1.83.1、OTel Python 1.44.0/0.65b0。
+完整交付结果见 [delivery-20261011-protocol-fixes.json](delivery-20261011-protocol-fixes.json)。CNB 公开校验和、Make 默认安装与双架构 Edge 镜像中的 OBI 和许可证均与验收产物一致。
+
+最终产物使用真实 Linux 6.8 ARM64 和 AMD64 内核加载 BPF。Java/Python 夹具运行在 ARM64，版本为 Java 21.0.12、OTel Java Agent 2.31.1、gRPC Java 1.75，以及 Python 3.14.7、grpcio 1.83.1、OTel Python 1.44.0/0.65b0。
 
 | 范围 | 结果 |
 | --- | ---: |

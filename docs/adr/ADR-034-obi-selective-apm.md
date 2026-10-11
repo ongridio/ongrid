@@ -179,6 +179,8 @@ OBI v0.12.1 的本地 OrbStack 验收发现嵌套 PID 命名空间会影响 Go �
 
 `.4` 的完整交付结果见 [delivery-20261011-review-fixes.json](../../patches/obi/delivery-20261011-review-fixes.json)。ARM64 原生、Docker、Kubernetes 最终 Edge 镜像和真实 AMD64 Linux 内核各通过 610/610，共 2440/2440；新增 SDK CLIENT 包装内未覆盖操作的验收，2380 条采样 Trace 与 60 条未采样空结果全部离线复验通过。双架构插件生命周期及重启、Manager 超时/取消 race、五个 BPF 回归和安装/发布检查通过。公开 CNB 完整包、Make 默认下载、双架构镜像及运行中 Kubernetes 采集器均匹配已测 OBI 字节。该版本包含 32 个源码/测试文件与重新生成的 30 个 BPF 对象；未扩大上述平台与协议验证边界。
 
+`.5` 修复 HTTPS 入站父上下文、较长 gRPC 元数据后的传播头和 shaded Netty TLS 连接识别，验收见 [delivery-20261011-protocol-fixes.json](../../patches/obi/delivery-20261011-protocol-fixes.json)。ARM64 Java/Python 支持范围内 400/400 请求通过；10 个 Python 内嵌 BoringSSL gRPC TLS 对照仍缺 Span。Go 在 ARM64 与真实 AMD64 Linux 6.8 内核各通过 610/610，且完成离线复验。两个架构的 CNB 整包、默认下载及 Edge 镜像均匹配已测字节。无 SDK 的出站 TLS、异步 gRPC 关联及 Java/Python 未采样传播不在本次完成范围；本版未重跑 Docker/Kubernetes 与插件生命周期验收。
+
 早期候选的原始测试产物继续保存在 Git 和 Docker 忽略的 `output/obi-runtime/`。候选通过、发布产物通过、Ongrid PR 合并及应用版本发布分别报告。补丁版的验收不能作为官方原版兼容性证明；支持范围以实际产物和环境的验证为准。回滚恢复旧 Edge 镜像或依赖包，会同时撤回混合链路修复。
 
 ## 实例基础资源（2026-09-20）

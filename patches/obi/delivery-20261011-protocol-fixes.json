@@ -1,0 +1,119 @@
+{
+  "date": "2026-10-11",
+  "status": "passed_with_documented_support_limits",
+  "release_version": "0.14.0-ongrid.5",
+  "publication": "local CNB complete Edge dependency archives",
+  "source_commit": "14b3f634f1843f85435d127313db2001fce8dee2",
+  "source_tag": "obi-v0.14.0-ongrid.5",
+  "matching_source_files": 42,
+  "generated_bpf_objects": 30,
+  "java_agent_sha256": "f134d180b7374ebaaddcf5ab5ba74fcc76201f165638481e149e89027c5d85da",
+  "patch_sha256": "06ded7981154c8df0e7cade94a3d521cdfee1cb8cdac936dde36a95433c1b8bd",
+  "cnb_tag": "edge-deps-layout2-obi0.14.0-ongrid.5-o0.157.0-n1.8.2-pr0.8.4-my0.19.0-pg0.19.1-r1.86.0-m0.51.0",
+  "cnb_release_url": "https://cnb.cool/ongridio/ongrid-edge/-/releases/tag/edge-deps-layout2-obi0.14.0-ongrid.5-o0.157.0-n1.8.2-pr0.8.4-my0.19.0-pg0.19.1-r1.86.0-m0.51.0",
+  "artifacts": {
+    "amd64": {
+      "filename": "edge-deps-linux-amd64.tar.xz",
+      "sha256": "96c1345b4a25d45a554b16949b0cd6ce1f248b5cad439ce340c7a682f4822aec",
+      "obi_sha256": "064bd60cbc6b82ad901bfacb36f0fb9fca596a4fcf76442ae7a1cceb71a5fb73",
+      "unchanged_components": [
+        "otelcol-contrib",
+        "node_exporter",
+        "process_exporter",
+        "mysqld_exporter",
+        "postgres_exporter",
+        "redis_exporter",
+        "mongodb_exporter"
+      ],
+      "default_fetch_verified": true,
+      "edge_image_verified": true,
+      "image_id": "sha256:7e98dc2452552e3013d40f21fb9ca94884110f2eddde3b697769bf346975dc64"
+    },
+    "arm64": {
+      "filename": "edge-deps-linux-arm64.tar.xz",
+      "sha256": "a4abfb140d414713897cb3b0295e044c960dc8c46d0603157a3c3ef92a72da58",
+      "obi_sha256": "6fcdbfa150cff6c01c0d543cf77fa2fd3a217c1b002ae1e6d615090e09ca998e",
+      "unchanged_components": [
+        "otelcol-contrib",
+        "node_exporter",
+        "process_exporter",
+        "mysqld_exporter",
+        "postgres_exporter",
+        "redis_exporter",
+        "mongodb_exporter"
+      ],
+      "default_fetch_verified": true,
+      "edge_image_verified": true,
+      "image_id": "sha256:123667414b8abfe2d89577f61bcc74499adfe873f434f60220028fa37ba3d8bd"
+    }
+  },
+  "acceptance": {
+    "java_python": {
+      "architecture": "arm64",
+      "kernel": "6.8.0-124-generic",
+      "total": 410,
+      "passed": 400,
+      "known_unsupported": 10,
+      "supported_groups": {
+        "https": 100,
+        "sdk-reference": 150,
+        "grpc": 100,
+        "grpcs": 50
+      },
+      "known_unsupported_reason": "grpcio 1.83.1 wheel embeds stripped static BoringSSL; no attachable SSL symbols",
+      "versions": {
+        "java": "21.0.12",
+        "java_agent": "2.31.1",
+        "grpc_java": "1.75.0 shaded Netty with JDK TLS",
+        "python": "3.14.7",
+        "grpcio": "1.83.1",
+        "otel_python": "1.44.0 / 0.65b0"
+      }
+    },
+    "go": {
+      "arm64": {
+        "kernel": "Linux lima-ongrid-jpt-fix 6.8.0-124-generic #124-Ubuntu SMP PREEMPT_DYNAMIC Tue May 26 12:38:50 UTC 2026 aarch64 aarch64 aarch64 GNU/Linux",
+        "matrix": 420,
+        "boundaries": 190,
+        "passed": 610,
+        "offline_replay": "PASS",
+        "bpf_debug": true
+      },
+      "amd64": {
+        "kernel": "Linux (none) 6.8.0-146-generic #146-Ubuntu SMP PREEMPT_DYNAMIC Thu Sep  3 16:12:30 UTC 2026 x86_64 GNU/Linux",
+        "matrix": 420,
+        "boundaries": 190,
+        "passed": 610,
+        "offline_replay": "PASS",
+        "bpf_debug": true
+      }
+    }
+  },
+  "checks": {
+    "clean_source_build": "PASS",
+    "java_agent_build_tests_and_spotless": "PASS",
+    "focused_bpf_regressions": 9,
+    "c_format_and_clang_tidy": "PASS",
+    "obi_go_race_packages": [
+      "pkg/ebpf/common",
+      "pkg/internal/ebpf/generictracer"
+    ],
+    "obi_go_race": "PASS (TestLockdownParsing skipped for root-only unreadable-file assumption)",
+    "release_workflow_and_fetch": "PASS",
+    "public_download_checksums": "PASS",
+    "source_commit_ci": "10 checks passed"
+  },
+  "limitations": [
+    "Java/Python runtime acceptance is ARM64 only; AMD64 runtime acceptance covers the Go matrix and BPF load.",
+    "No-SDK Java/Python outbound TLS does not inject W3C headers; asynchronous gRPC context can be missing or stale.",
+    "No-SDK grpcio 1.83.1 wheel with stripped embedded BoringSSL still lacks gRPC-TLS server spans (10 explicit unsupported cases).",
+    "Java gRPC-TLS coverage uses JDK TLS, not Netty native OpenSSL.",
+    "Java/Python unsampled 00 promotion is explicitly deferred.",
+    "Docker bridge, Kubernetes and plugin lifecycle were not rerun for .5; .4 records remain separate.",
+    "Linux 5.15, capacity/failure scenarios and other Go/SDK ABIs were not validated.",
+    "Redis/MongoDB/Kafka remain covered by context-conversion unit tests only.",
+    "Full upstream BPF suite was not rerun; prior unrelated test-header compile failure remains."
+  ],
+  "ongrid_application_release": false,
+  "pull_request": "https://github.com/ongridio/ongrid/pull/489"
+}
