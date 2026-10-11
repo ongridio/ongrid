@@ -1,0 +1,52 @@
+# Ongrid dogfooding 环境变量模板
+#
+# 这是 systemd drop-in 配置文件模板，供 operator 填入真 LLM API key 后部署到 manager 主机。
+# 文件后缀 .example 确保不会被误认为是可直接运行的配置——operator 必须填入真值。
+#
+# operator 部署步骤（operator 手动执行）：
+#   1. scp deploy/install/systemd/ongrid-dogfood-env.example manager-host:/tmp/llm-env.conf
+#   2. 在 manager 主机编辑文件，填入真 LLM API key（替换 <REPLACE_WITH_REAL_KEY>）
+#   3. mv /tmp/llm-env.conf /etc/systemd/system/ongrid.service.d/llm-env.conf
+#   4. 设置权限（安全红线）：chown root:ongrid /etc/systemd/system/ongrid.service.d/llm-env.conf && chmod 640 /etc/systemd/system/ongrid.service.d/llm-env.conf
+#   5. systemctl daemon-reload && systemctl restart ongrid
+#   6. 验证 key 生效：curl http://127.0.0.1:9100/metrics | grep ongrid_llm_router_tokens_total（触发一次 RCA 后应非零）
+#
+# 安全红线：
+#   - key 文件权限必须 0640 root:ongrid（不是 0644，不是 0666）
+#   - key 禁止进代码 / 日志 / audit log / commit
+#   - key 禁止写入 .env 文件提交到 git（本 .example 模板只含占位符）
+#   - 使用 systemd drop-in Environment= 指令（非 EnvironmentFile= 引用外部文件）
+#   - 权限 0640 root:ongrid（manager 以 ongrid 用户跑，需 group 可读）
+#
+# LLM 成本控制（单 cap — 仅有日维度 token cap）：
+#   - ONGRID_LLM_DAILY_TOKEN_LIMIT 日 token 上限（config.go 消费路径）
+#   - 注意：Go 代码无月度美元 cap 实现（LLM_MONTHLY_BUDGET_USD 不存在）
+#   - 月度成本控制依赖 Grafana alert（80%/95% 阈值）+ 人工介入
+#   - cap 触发后 BudgetChecker 返回 ErrBudgetExceeded，RCA worker 收到错误
+#   - 复用既有 ongrid_llm_router_tokens_total 80%/95% Grafana alert rule
+# 三重风险防御：
+#   - ① for: 5m + severity warning+ 噪声过滤（在 ongrid-dogfood-alerts.yml 配置）
+#   - ② 审批策略（非 env 配置，见下方注释说明）
+#   - ③ 日 token cap（ONGRID_LLM_DAILY_TOKEN_LIMIT，本文件配置）
+#
+#  ② 审批策略说明（非 env 配置）：
+#   ReviewGate（review_gate.go）对工具调用的审批策略：
+#   - RiskMutating / RiskDangerous 类工具：强制创建 proposal + ErrProposalPending（硬编码）
+#     operator 必须在 UI 手动审批才能执行（如 restart_service / 写文件）
+#   - RiskSafe 类工具：直接 pass-through（不创建 proposal），此行为不可通过 env 关闭
+#     safe 类工具是纯读操作（bash 只读 / host_files 读取 / 网络探测），无副作用
+#   - 如需对 safe 类工具也强制审批，需修改 proposal.Evaluate 分类策略（代码变更）
+
+[Service]
+# 真 LLM API key（operator 填入真值）
+# Go 代码按 provider 分别消费 key（config.go），无统一 ONGRID_LLM_API_KEY 变量
+# 试用/评估期建议用 GLM-4-Flash（最廉价，Zhipu 智谱）：
+Environment="ONGRID_ZHIPU_API_KEY=<REPLACE_WITH_REAL_KEY>"
+# 如用其他 provider，注释上面一行 + 取消注释下面对应行：
+# Environment="ONGRID_OPENAI_API_KEY=<REPLACE_WITH_REAL_KEY>"
+# Environment="ONGRID_DEEPSEEK_API_KEY=<REPLACE_WITH_REAL_KEY>"
+
+# 日 token 上限（config.go ONGRID_LLM_DAILY_TOKEN_LIMIT 消费路径）
+# 500K token/天，BudgetChecker 在 main.go 装配
+# 注意：无月度美元 cap 实现，月度成本控制依赖 Grafana alert + 人工介入
+Environment="ONGRID_LLM_DAILY_TOKEN_LIMIT=500000"

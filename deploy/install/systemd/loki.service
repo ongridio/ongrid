@@ -1,0 +1,33 @@
+[Unit]
+Description=Loki (ongrid log store)
+Documentation=https://grafana.com/docs/loki/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ongrid-loki
+Group=ongrid-loki
+ExecStart=/usr/local/bin/loki \
+  -config.file=/etc/ongrid/loki-config.yaml
+KillMode=mixed
+TimeoutStopSec=30s
+Restart=always
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ongrid-loki
+
+NoNewPrivileges=true
+ProtectSystem=true
+ProtectHome=true
+PrivateTmp=true
+# loki-config.yaml common.path_prefix=/loki（install-deps.sh 创建
+# 并 chown ongrid-loki:ongrid-loki 0750）。ProtectSystem=true 下必须把数据目录
+# 显式加入 ReadWritePaths，否则 loki 写入报 EROFS。不再用 StateDirectory=
+# ongrid-loki，因为数据不在 /var/lib/ongrid-loki（避免创建无用空目录）。
+ReadWritePaths=/loki
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
