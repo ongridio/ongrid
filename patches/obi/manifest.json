@@ -70,11 +70,13 @@
       "passed": 512
     }
   },
-  "production_dependency_changed": false,
+  "production_dependency_changed": true,
   "clean_source_rebuild": {
     "status": "passed",
     "architecture": "arm64",
     "binary_sha256": "a9b80705f773f8cabf84b89b480a38bb8c3f74d0423c3353846da39804e2ee2a",
     "runtime_matrix_repeated": false
-  }
+  },
+  "release_version": "0.14.0-ongrid.1",
+  "embedded_java_agent_sha256": "9d499797e42f96058a2b9fb9b75c29369f72debc35d32a92119463bb9567bd61"
 }

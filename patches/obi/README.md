@@ -1,6 +1,6 @@
 # OBI Trace 连续性补丁
 
-完整的 SDK/OBI 混合链路修复依赖本目录的 OBI 源码补丁。仅部署 Ongrid 侧修改和官方 OBI v0.14.0，不能得到本补丁的完整行为。补丁随 Ongrid 代码一起审查、保存和推送；正式安装器仍下载官方 Release，没有自动应用本补丁。
+完整的 SDK/OBI 混合链路修复依赖本目录的 OBI 源码补丁。仅部署 Ongrid 侧修改和官方 OBI v0.14.0，不能得到本补丁的完整行为。补丁随 Ongrid 代码一起审查、保存和推送，构建为独立版本 `0.14.0-ongrid.1`。Make 和 Edge 镜像的默认依赖均使用这个补丁版本。
 
 - 上游：[OpenTelemetry eBPF Instrumentation](https://github.com/open-telemetry/opentelemetry-ebpf-instrumentation)，`v0.14.0`，commit `13d9b0c3f600a060bd78820a63ebec882b10757e`。
 - 补丁：[v0.14.0-trace-continuity.patch](v0.14.0-trace-continuity.patch)，包含 31 个源码和测试文件。
@@ -13,41 +13,30 @@ Go 探针读取 SDK recording span 上下文，识别 SDK 已覆盖的操作，�
 
 补丁也修复 HTTP/1 大请求头的传播交接、HTTP/2 协商帧大小及 h2c 服务端时间戳、嵌套 PID 命名空间内的探针身份和 Auto SDK 激活，以及 parent-based 采样的父上下文。不增加用户配置项。
 
-## 获取和构建
+## 构建、下载与安装
 
-在 Ongrid 仓库中执行，产物只写入新建的临时目录：
+在 Ongrid 仓库中执行：
 
 ```sh
-ongrid_root=$(git rev-parse --show-toplevel)
-obi_work=$(mktemp -d)
-git clone --depth 1 --branch v0.14.0 \
-  https://github.com/open-telemetry/opentelemetry-ebpf-instrumentation.git \
-  "$obi_work/source"
-test "$(git -C "$obi_work/source" rev-parse HEAD)" = \
-  13d9b0c3f600a060bd78820a63ebec882b10757e
-git -C "$obi_work/source" apply --check \
-  "$ongrid_root/patches/obi/v0.14.0-trace-continuity.patch"
-git -C "$obi_work/source" apply \
-  "$ongrid_root/patches/obi/v0.14.0-trace-continuity.patch"
-
-docker run --rm --platform linux/arm64 \
-  -v "$obi_work/source:/src" -w /src --entrypoint /bin/sh \
-  ghcr.io/open-telemetry/obi-generator@sha256:3a8959e5253f2445b782b4f720ed54f6396fce350082486442e0b71ac02ff106 \
-  -ec '
-    export PATH="/usr/lib/llvm22/bin:$PATH"
-    export BPF2GO=/go/bin/bpf2go
-    make generate/all
-    BPF_CLANG=clang BPF_CFLAGS="-O2 -g -Wall -Werror" \
-      go generate ./pkg/internal/ebpf/gotracer
-    GOFLAGS=-buildvcs=false make compile GOOS=linux GOARCH=arm64 \
-      RELEASE_VERSION=0.14.0-local-sdk-context9 \
-      RELEASE_REVISION=local-continuity
-  '
+bash scripts/build-patched-obi.sh /tmp/obi-release-output
 ```
 
-候选二进制位于 `$obi_work/source/bin/obi`。显式生成全部 BPF 产物，再重新生成修改过的 Go 探针，避免增量构建复用旧对象。`manifest.json` 中的二进制哈希标识实际接受验收的 ARM64 产物，不承诺不同环境重建后逐字节相同。
+输出目录必须为空。脚本需要 Docker、Git、jq 和 sha256sum；读取 `manifest.json`，校验上游 commit、补丁和内嵌 Java 代理的哈希，重新生成全部 BPF，再构建 Linux amd64/arm64。生成镜像按 digest 固定。Java 代理及双架构本地库复用上游 tag 的原始产物，不重新构建无关的 Java 代码。
 
-已从全新官方 tag 检出验证 `git apply --check`；应用补丁后的全部 31 个文件与实际验收源码逐字节相同。补丁未包含生成的 BPF 对象、二进制、诊断程序或本机配置。 上述命令已在干净源码上重新生成双架构 BPF 并成功编译 ARM64 二进制；重建产物哈希单独记录，本轮未对该重建产物重跑现场矩阵。
+产物包含双架构压缩包、带生成对象的完整修改源码、补丁、来源清单和 `SHA256SUMS`。二进制携带补丁版本和补丁 SHA；分发包保留上游及依赖许可证，并在 NOTICE 标明 Ongrid 修改。
+
+发布使用 Ongrid 仓库独立的 `obi-v0.14.0-ongrid.1` 标签，不设置为 Ongrid 最新应用版本，不覆盖官方 OBI Release。产物经过验收后上传到该标签对应的 GitHub Release；同一标签的既有资产不得覆盖，修改补丁必须递增 `-ongrid.N`。
+
+```sh
+make fetch-obi EDGE_PLUGIN_ARCHES='linux-amd64 linux-arm64'
+make build-edge-deps-attachments
+```
+
+`scripts/fetch-obi.sh` 对 `-ongrid.N` 版本使用 Ongrid Release，纯上游版本仍使用 OpenTelemetry Release。两条路径均下载 `SHA256SUMS` 并校验后安装。Make、Edge Dockerfile 与本目录清单必须保持版本一致，CI 检查这三处。依赖标签包含完整 `OBI_VERSION`，因此不会复用之前不带补丁的 CNB 依赖包。
+
+后续 Ongrid 应用发布沿用现有 CNB 依赖附件、宿主机安装/升级包及 Kubernetes Edge 镜像流程。发布 OBI 依赖本身不等于 Ongrid PR 已合并，也不等于已发布新的 Ongrid 应用版本。回滚时恢复上一版 Edge 镜像或依赖附件；回到官方 `0.14.0` 会失去本次混合链路修复。
+
+`manifest.json` 中 `candidate_version` 和 `accepted_linux_arm64_binary_sha256` 标识此前完成矩阵的本地候选；发布产物以该 Release 的 `SHA256SUMS` 为准，不承诺不同环境重建后逐字节相同。
 
 ## 验证
 
@@ -87,4 +76,4 @@ done
 
 HTTP/1 提前检查最多 512 个头名称；HTTP/2 保留现有 65535 字节帧缓冲边界。本次验收未覆盖更大边界、SDK 导出故障和异步跨 goroutine 上下文。
 
-`OBI_VERSION`、`scripts/fetch-obi.sh` 和正式发布依赖保持不变。当前上传使修复可以审查和重建，不代表正式安装已包含补丁。按当前发布约束，仍需修复进入官方 OBI Release，并用该原版重新验收后才能随正式依赖交付。
+按 2026-10-11 的交付要求，Ongrid 使用可追溯的补丁版 OBI；此前“只能使用官方原版”的限制不再适用。该版本属于 Ongrid 维护的派生构建，不能将其测试结果归于官方原版。
