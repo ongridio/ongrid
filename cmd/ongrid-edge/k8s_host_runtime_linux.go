@@ -133,7 +133,16 @@ func linuxLastCapability() int {
 }
 
 func dropToHostEdgeUser(uid, gid, lastCapability int) error {
-	capabilities := k8sHostCapabilities
+	// Filter before both capset and ambient raises; older kernels lack newer APM capabilities.
+	capabilities := make([]int, 0, len(k8sHostCapabilities))
+	for _, capability := range k8sHostCapabilities {
+		if capability > lastCapability {
+			slog.Warn("kernel does not support optional host edge capability; skipping",
+				"capability", capability, "cap_last_cap", lastCapability)
+			continue
+		}
+		capabilities = append(capabilities, capability)
+	}
 	for capability := 0; capability <= lastCapability; capability++ {
 		if isK8sHostCapability(capability) {
 			continue
