@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	model "github.com/ongridio/ongrid/internal/manager/model/alert"
@@ -23,8 +24,11 @@ type RetryWorkerOpts struct {
 	MaxAttempts       uint32
 	BackoffPerAttempt time.Duration
 	Tick              time.Duration
-	Log               *slog.Logger
-	Now               func() time.Time
+	// ConsoleURL is the public console base injected into retry payloads so
+	// Feishu cards retain the same deep-link buttons as first-send notifies.
+	ConsoleURL string
+	Log        *slog.Logger
+	Now        func() time.Time
 }
 
 // RetryWorker drains failed notification_deliveries, re-runs the underlying
@@ -38,6 +42,7 @@ type RetryWorker struct {
 	maxAttempts       uint32
 	backoffPerAttempt time.Duration
 	tick              time.Duration
+	consoleURL        string
 	log               *slog.Logger
 	now               func() time.Time
 }
@@ -67,6 +72,7 @@ func NewRetryWorker(opts RetryWorkerOpts) *RetryWorker {
 		maxAttempts:       opts.MaxAttempts,
 		backoffPerAttempt: opts.BackoffPerAttempt,
 		tick:              opts.Tick,
+		consoleURL:        strings.TrimRight(strings.TrimSpace(opts.ConsoleURL), "/"),
 		log:               opts.Log,
 		now:               opts.Now,
 	}
@@ -158,7 +164,7 @@ func (w *RetryWorker) retryOne(ctx context.Context, d *model.Delivery, now time.
 		return
 	}
 
-	msg := buildIncidentMessage(incident, now)
+	msg := buildIncidentMessage(incident, now, w.consoleURL)
 	sentAt := now
 	finished := now
 	sendErr := w.notifier.Send(ctx, msg, channel.Name)
@@ -200,14 +206,24 @@ func (w *RetryWorker) retryOne(ctx context.Context, d *model.Delivery, now time.
 	}
 }
 
-func buildIncidentMessage(incident *model.Incident, now time.Time) notify.Message {
+func buildIncidentMessage(incident *model.Incident, now time.Time, consoleURL string) notify.Message {
 	severity := notify.Severity(incident.Severity)
 	if severity == "" {
 		severity = notify.SeverityWarning
 	}
 	labels := map[string]string{
 		"rule":        incident.Rule,
+		"status":      incident.Status,
 		"incident_id": fmt.Sprintf("%d", incident.ID),
+	}
+	if incident.RuleName != "" {
+		labels["rule_name"] = incident.RuleName
+	}
+	if incident.RunbookURL != "" {
+		labels["runbook_url"] = incident.RunbookURL
+	}
+	if consoleURL != "" {
+		labels["console_url"] = consoleURL
 	}
 	if incident.DeviceID != nil {
 		labels["device_id"] = fmt.Sprintf("%d", *incident.DeviceID)

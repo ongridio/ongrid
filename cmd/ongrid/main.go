@@ -2945,6 +2945,7 @@ func main() {
 			PromQuerier:     alertPromQuerier,
 			LogQuerier:      lokiLogClient,
 			LogSearcher:     logsBackendSvc,
+			ConsoleURL:      cfg.PublicURL,
 			DeviceIdentityResolver: func(ctx context.Context, deviceID uint64) (managerbizalert.DeviceIdentity, error) {
 				device, err := deviceUC.Get(ctx, deviceID)
 				if err != nil {
@@ -2969,6 +2970,7 @@ func main() {
 			Usecase:     alertUC,
 			MaxAttempts: 5,
 			Tick:        cfg.Alert.EvaluatorInterval,
+			ConsoleURL:  cfg.PublicURL,
 			Log:         log.With(slog.String("comp", "alert-retry")),
 		})
 		eg.Go(func() error { return retryWorker.Loop(egCtx) })

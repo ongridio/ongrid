@@ -138,12 +138,12 @@ func nonEmpty(v, fallback string) string {
 	return fallback
 }
 
-// NewFeishuSender posts a text payload compatible with Feishu/Lark custom bots.
+// NewFeishuSender posts an interactive card payload compatible with Feishu/Lark custom bots.
 func NewFeishuSender(name, endpoint, secret string, client *http.Client) Sender {
 	return newWebhookSender(name, endpoint, secret, client, func(msg Message) (any, error) {
 		payload := map[string]any{
-			"msg_type": "text",
-			"content":  map[string]string{"text": formatText(msg)},
+			"msg_type": "interactive",
+			"card":     formatFeishuCard(msg),
 		}
 		if secret != "" {
 			ts := fmt.Sprintf("%d", time.Now().Unix())
@@ -154,14 +154,471 @@ func NewFeishuSender(name, endpoint, secret string, client *http.Client) Sender 
 	}, nil)
 }
 
-// NewDingTalkSender posts a text payload compatible with DingTalk custom bots.
+// formatFeishuCard renders a Message as a Feishu interactive message card (Card 2.0).
+// It maps severity onto card header colors (red for critical, orange for warning,
+// green for resolved/info) and formats structured Chinese fields and action buttons.
+func formatFeishuCard(msg Message) map[string]any {
+	colorTemplate := "grey"
+	prefix := "🔔【系统通知】"
+
+	// Recovery / lifecycle presentation must follow structured status labels
+	// only. Never infer "resolved" from subject text — subjects can contain
+	// substrings like "unresolved" or service names like "systemd-resolved".
+	statusLower := strings.ToLower(strings.TrimSpace(msg.Labels["status"]))
+	isResolved := statusLower == "resolved"
+	isActive := statusLower == "open" || statusLower == "firing"
+
+	if isResolved {
+		colorTemplate = "green"
+		prefix = "✅【告警恢复】"
+	} else if statusLower == "acknowledged" || statusLower == "ack" {
+		colorTemplate = "yellow"
+		prefix = "🟡【告警认领】"
+	} else if statusLower == "silenced" {
+		colorTemplate = "grey"
+		prefix = "⚪【告警静音】"
+	} else {
+		switch strings.ToLower(strings.TrimSpace(string(msg.Severity))) {
+		case "critical", "fatal", "emergency", "high", "p0", "p1":
+			colorTemplate = "red"
+			prefix = "🚨【严重告警】"
+		case "warning", "warn", "medium", "p2":
+			colorTemplate = "orange"
+			prefix = "⚠️【预警提示】"
+		case "info", "notice", "low", "p3":
+			colorTemplate = "blue"
+			prefix = "ℹ️【通知提醒】"
+		default:
+			colorTemplate = "grey"
+			prefix = "🔔【系统通知】"
+		}
+	}
+
+	ruleTitle := msg.Subject
+	if rn, ok := msg.Labels["rule_name"]; ok && rn != "" {
+		if dn, ok2 := msg.Labels["device_name"]; ok2 && dn != "" {
+			ruleTitle = fmt.Sprintf("%s - %s", rn, dn)
+		} else {
+			ruleTitle = rn
+		}
+	}
+	if ruleTitle == "" {
+		ruleTitle = "告警事件通知"
+	}
+
+	header := map[string]any{
+		"template": colorTemplate,
+		"title": map[string]any{
+			"tag":     "plain_text",
+			"content": prefix + ruleTitle,
+		},
+	}
+
+	elements := make([]any, 0, 6)
+
+	// Fields grid (2 columns)
+	fields := make([]map[string]any, 0, 6)
+	addField := func(title, val string) {
+		if val == "" {
+			return
+		}
+		fields = append(fields, map[string]any{
+			"is_short": true,
+			"text": map[string]any{
+				"tag":     "lark_md",
+				"content": fmt.Sprintf("**%s**：\n%s", title, val),
+			},
+		})
+	}
+
+	// 1. 告警级别 (适配所有告警级别)
+	sevStr := strings.ToLower(strings.TrimSpace(string(msg.Severity)))
+	switch sevStr {
+	case "critical", "fatal", "emergency", "high", "p0", "p1":
+		addField("告警级别", "<font color='red'>CRITICAL (严重)</font>")
+	case "warning", "warn", "medium", "p2":
+		addField("告警级别", "<font color='orange'>WARNING (警告)</font>")
+	case "info", "notice", "low", "p3":
+		addField("告警级别", "<font color='blue'>INFO (信息)</font>")
+	default:
+		if sevStr != "" {
+			addField("告警级别", strings.ToUpper(sevStr))
+		}
+	}
+
+	// 2. 告警状态 (生命周期状态跟踪)
+	// Domain active status is "open" (see alert model); "firing" is the event
+	// type / legacy label. Localize both as an active incident.
+	if isResolved {
+		addField("告警状态", "<font color='green'>RESOLVED (已恢复)</font>")
+	} else if isActive {
+		addField("告警状态", "<font color='red'>OPEN (发生中)</font>")
+	} else if statusLower != "" {
+		switch statusLower {
+		case "acknowledged", "ack":
+			addField("告警状态", "<font color='orange'>ACKNOWLEDGED (已认领)</font>")
+		case "silenced":
+			addField("告警状态", "<font color='grey'>SILENCED (已静音)</font>")
+		default:
+			addField("告警状态", strings.ToUpper(statusLower))
+		}
+	}
+
+	// Incident identity — keep a concise visible reference (not the long dedupe key).
+	if iid, ok := msg.Labels["incident_id"]; ok && iid != "" {
+		addField("事件 ID", "#"+iid)
+	}
+
+	// 3. 告警对象
+	if dn, ok := msg.Labels["device_name"]; ok && dn != "" {
+		if did, ok2 := msg.Labels["device_id"]; ok2 && did != "" {
+			addField("告警对象", fmt.Sprintf("%s (ID: %s)", dn, did))
+		} else {
+			addField("告警对象", dn)
+		}
+	} else if did, ok := msg.Labels["device_id"]; ok && did != "" {
+		addField("告警对象", "设备 #"+did)
+	} else if svc, ok := msg.Labels["service"]; ok && svc != "" {
+		addField("告警服务", svc)
+	}
+
+	// 4. 规则名称
+	if rn, ok := msg.Labels["rule_name"]; ok && rn != "" {
+		if rk, ok2 := msg.Labels["rule"]; ok2 && rk != "" && rk != rn {
+			addField("规则名称", fmt.Sprintf("%s (`%s`)", rn, rk))
+		} else {
+			addField("规则名称", rn)
+		}
+	} else if rk, ok := msg.Labels["rule"]; ok && rk != "" {
+		addField("规则名称", fmt.Sprintf("`%s`", rk))
+	}
+
+	// 5. 触发时间 (自动转为北京时间 CST / UTC+8，消除 Linux / Docker 容器默认 UTC 导致的 8 小时偏差)
+	occurredAt := msg.OccurredAt
+	if occurredAt.IsZero() {
+		occurredAt = time.Now()
+	}
+	loc := time.FixedZone("CST", 8*3600)
+	if tzName, ok := msg.Labels["timezone"]; ok && tzName != "" {
+		if l, err := time.LoadLocation(tzName); err == nil {
+			loc = l
+		}
+	} else if l, err := time.LoadLocation("Asia/Shanghai"); err == nil {
+		loc = l
+	}
+	addField("发生时间", occurredAt.In(loc).Format("2006-01-02 15:04:05"))
+
+	if len(fields) > 0 {
+		elements = append(elements, map[string]any{
+			"tag":    "div",
+			"fields": fields,
+		})
+	}
+
+	// 5. 详细描述 / 触发条件
+	descContent := ""
+	if msg.Body != "" {
+		descContent = msg.Body
+	} else if expr, ok := msg.Labels["rule_expr"]; ok && expr != "" {
+		descContent = fmt.Sprintf("**触发条件**：`%s`\n%s", expr, msg.Subject)
+	} else if msg.Subject != "" && msg.Subject != ruleTitle {
+		descContent = fmt.Sprintf("**详情**：%s", msg.Subject)
+	}
+
+	if descContent != "" {
+		elements = append(elements, map[string]any{
+			"tag": "div",
+			"text": map[string]any{
+				"tag":     "lark_md",
+				"content": descContent,
+			},
+		})
+	}
+
+	// 6. 排查建议 (Runbook)
+	if rb, ok := msg.Labels["runbook_url"]; ok && rb != "" {
+		elements = append(elements, map[string]any{
+			"tag": "div",
+			"text": map[string]any{
+				"tag":     "lark_md",
+				"content": fmt.Sprintf("📖 **运维手册**：[点击查看处理指引](%s)", rb),
+			},
+		})
+	}
+
+	// 7. 操作按钮 (Actions) - 仅在提供控制台根路径时生成跳转按钮，避免硬编码地址
+	baseURL := strings.TrimRight(strings.TrimSpace(msg.Labels["console_url"]), "/")
+	if baseURL != "" {
+		actions := make([]map[string]any, 0, 2)
+		if did, ok := msg.Labels["device_id"]; ok && did != "" {
+			actions = append(actions, map[string]any{
+				"tag":  "button",
+				"text": map[string]any{"tag": "plain_text", "content": "🔍 查看设备详情"},
+				"type": "primary",
+				"url":  fmt.Sprintf("%s/devices/%s", baseURL, did),
+			})
+		}
+		if iid, ok := msg.Labels["incident_id"]; ok && iid != "" {
+			actions = append(actions, map[string]any{
+				"tag":  "button",
+				"text": map[string]any{"tag": "plain_text", "content": "📋 告警事件"},
+				"type": "default",
+				"url":  fmt.Sprintf("%s/alerts/incidents/%s", baseURL, iid),
+			})
+		} else {
+			actions = append(actions, map[string]any{
+				"tag":  "button",
+				"text": map[string]any{"tag": "plain_text", "content": "📋 告警事件"},
+				"type": "default",
+				"url":  fmt.Sprintf("%s/alerts", baseURL),
+			})
+		}
+
+		if len(actions) > 0 {
+			elements = append(elements, map[string]any{"tag": "hr"})
+			elements = append(elements, map[string]any{
+				"tag":     "action",
+				"actions": actions,
+			})
+		}
+	}
+
+	// 8. 备注 (Note)
+	source := msg.Source
+	if source == "" {
+		source = "global"
+	}
+	elements = append(elements, map[string]any{
+		"tag": "note",
+		"elements": []any{
+			map[string]any{
+				"tag":     "plain_text",
+				"content": fmt.Sprintf("推送来源：Ongrid AIOps 智能运维平台 | 来源: %s", source),
+			},
+		},
+	})
+
+	return map[string]any{
+		"config": map[string]any{
+			"wide_screen_mode": true,
+		},
+		"header":   header,
+		"elements": elements,
+	}
+}
+
+// NewDingTalkSender posts an ActionCard or Markdown payload compatible with DingTalk custom bots.
 func NewDingTalkSender(name, endpoint, secret string, client *http.Client) Sender {
 	return newWebhookSender(name, endpoint, secret, client, func(msg Message) (any, error) {
-		return map[string]any{
-			"msgtype": "text",
-			"text":    map[string]string{"content": formatText(msg)},
-		}, nil
+		return formatDingTalkMessage(msg), nil
 	}, signDingTalkURL)
+}
+
+// formatDingTalkMessage renders a Message as a DingTalk ActionCard or Markdown message.
+// When action buttons are available, it uses msgtype "actionCard" with horizontal buttons;
+// otherwise it falls back to msgtype "markdown". It supports Chinese alert titles,
+// colored severity/status tags, CST time conversion, structured fields, and runbook links.
+func formatDingTalkMessage(msg Message) map[string]any {
+	prefix := "🔔【系统通知】"
+
+	// Recovery / lifecycle presentation must follow structured status labels
+	// only. Never infer "resolved" from subject text — subjects can contain
+	// substrings like "unresolved" or service names like "systemd-resolved".
+	statusLower := strings.ToLower(strings.TrimSpace(msg.Labels["status"]))
+	isResolved := statusLower == "resolved"
+	isActive := statusLower == "open" || statusLower == "firing"
+
+	var sevColor, statusColor, sevText, statusText string
+
+	switch strings.ToLower(strings.TrimSpace(string(msg.Severity))) {
+	case "critical", "fatal", "emergency", "high", "p0", "p1":
+		sevColor, sevText = "#EA3323", "CRITICAL (严重)"
+	case "warning", "warn", "medium", "p2":
+		sevColor, sevText = "#FF7700", "WARNING (警告)"
+	case "info", "notice", "low", "p3":
+		sevColor, sevText = "#1E80FF", "INFO (信息)"
+	default:
+		if s := strings.TrimSpace(string(msg.Severity)); s != "" {
+			sevColor, sevText = "#888888", strings.ToUpper(s)
+		}
+	}
+
+	if isResolved {
+		prefix = "✅【告警恢复】"
+		statusColor = "#00AA00"
+		statusText = "RESOLVED (已恢复)"
+	} else if statusLower == "acknowledged" || statusLower == "ack" {
+		prefix = "🟡【告警认领】"
+		statusColor = "#FFB800"
+		statusText = "ACKNOWLEDGED (已认领)"
+	} else if statusLower == "silenced" {
+		prefix = "⚪【告警静音】"
+		statusColor = "#888888"
+		statusText = "SILENCED (已静音)"
+	} else {
+		switch strings.ToLower(strings.TrimSpace(string(msg.Severity))) {
+		case "critical", "fatal", "emergency", "high", "p0", "p1":
+			prefix = "🚨【严重告警】"
+		case "warning", "warn", "medium", "p2":
+			prefix = "⚠️【预警提示】"
+		case "info", "notice", "low", "p3":
+			prefix = "ℹ️【通知提醒】"
+		default:
+			prefix = "🔔【系统通知】"
+		}
+		// Domain active status is "open"; "firing" is legacy / event-type label.
+		if isActive {
+			statusColor = "#EA3323"
+			statusText = "OPEN (发生中)"
+		} else if statusLower != "" {
+			statusColor = "#888888"
+			statusText = strings.ToUpper(statusLower)
+		}
+	}
+
+	ruleTitle := msg.Subject
+	if rn, ok := msg.Labels["rule_name"]; ok && rn != "" {
+		if dn, ok2 := msg.Labels["device_name"]; ok2 && dn != "" {
+			ruleTitle = fmt.Sprintf("%s - %s", rn, dn)
+		} else {
+			ruleTitle = rn
+		}
+	}
+	if ruleTitle == "" {
+		ruleTitle = "告警事件通知"
+	}
+	fullTitle := prefix + ruleTitle
+
+	// Construct markdown content
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("### %s\n\n---\n", fullTitle))
+
+	if sevText != "" {
+		sb.WriteString(fmt.Sprintf("- **告警级别**：<font color=\"%s\">%s</font>\n", sevColor, sevText))
+	}
+	if statusText != "" {
+		sb.WriteString(fmt.Sprintf("- **告警状态**：<font color=\"%s\">%s</font>\n", statusColor, statusText))
+	}
+
+	if iid, ok := msg.Labels["incident_id"]; ok && iid != "" {
+		sb.WriteString(fmt.Sprintf("- **事件 ID**：#%s\n", iid))
+	}
+
+	// 告警对象
+	if dn, ok := msg.Labels["device_name"]; ok && dn != "" {
+		if did, ok2 := msg.Labels["device_id"]; ok2 && did != "" {
+			sb.WriteString(fmt.Sprintf("- **告警对象**：%s (ID: %s)\n", dn, did))
+		} else {
+			sb.WriteString(fmt.Sprintf("- **告警对象**：%s\n", dn))
+		}
+	} else if did, ok := msg.Labels["device_id"]; ok && did != "" {
+		sb.WriteString(fmt.Sprintf("- **告警对象**：设备 #%s\n", did))
+	} else if svc, ok := msg.Labels["service"]; ok && svc != "" {
+		sb.WriteString(fmt.Sprintf("- **告警服务**：%s\n", svc))
+	}
+
+	// 规则名称
+	if rn, ok := msg.Labels["rule_name"]; ok && rn != "" {
+		if rk, ok2 := msg.Labels["rule"]; ok2 && rk != "" && rk != rn {
+			sb.WriteString(fmt.Sprintf("- **规则名称**：%s (`%s`)\n", rn, rk))
+		} else {
+			sb.WriteString(fmt.Sprintf("- **规则名称**：%s\n", rn))
+		}
+	} else if rk, ok := msg.Labels["rule"]; ok && rk != "" {
+		sb.WriteString(fmt.Sprintf("- **规则名称**：`%s`\n", rk))
+	}
+
+	// 时间转换 (北京时间 CST / UTC+8)
+	occurredAt := msg.OccurredAt
+	if occurredAt.IsZero() {
+		occurredAt = time.Now()
+	}
+	loc := time.FixedZone("CST", 8*3600)
+	if tzName, ok := msg.Labels["timezone"]; ok && tzName != "" {
+		if l, err := time.LoadLocation(tzName); err == nil {
+			loc = l
+		}
+	} else if l, err := time.LoadLocation("Asia/Shanghai"); err == nil {
+		loc = l
+	}
+	timeLabel := "发生时间"
+	if isResolved {
+		timeLabel = "恢复时间"
+	}
+	sb.WriteString(fmt.Sprintf("- **%s**：%s\n", timeLabel, occurredAt.In(loc).Format("2006-01-02 15:04:05")))
+
+	// 详细描述 / 触发条件
+	if msg.Body != "" {
+		sb.WriteString(fmt.Sprintf("- **告警详情**：%s\n", msg.Body))
+	} else if expr, ok := msg.Labels["rule_expr"]; ok && expr != "" {
+		sb.WriteString(fmt.Sprintf("- **触发条件**：`%s`\n", expr))
+		if msg.Subject != "" && msg.Subject != ruleTitle {
+			sb.WriteString(fmt.Sprintf("- **告警详情**：%s\n", msg.Subject))
+		}
+	} else if msg.Subject != "" && msg.Subject != ruleTitle {
+		sb.WriteString(fmt.Sprintf("- **告警详情**：%s\n", msg.Subject))
+	}
+
+	// 运维手册
+	if rb, ok := msg.Labels["runbook_url"]; ok && rb != "" {
+		sb.WriteString(fmt.Sprintf("- **运维手册**：[点击查看处理指引](%s)\n", rb))
+	}
+
+	// 来源落款
+	source := msg.Source
+	if source == "" {
+		source = "global"
+	}
+	sb.WriteString(fmt.Sprintf("\n> 推送来源：Ongrid AIOps 智能运维平台 | 来源: %s", source))
+
+	// 操作按钮 (btns)
+	baseURL := strings.TrimRight(strings.TrimSpace(msg.Labels["console_url"]), "/")
+	btns := make([]map[string]string, 0, 3)
+	if baseURL != "" {
+		if did, ok := msg.Labels["device_id"]; ok && did != "" {
+			btns = append(btns, map[string]string{
+				"title":     "🔍 查看设备",
+				"actionURL": fmt.Sprintf("%s/devices/%s", baseURL, did),
+			})
+		}
+		if iid, ok := msg.Labels["incident_id"]; ok && iid != "" {
+			btns = append(btns, map[string]string{
+				"title":     "📋 告警事件",
+				"actionURL": fmt.Sprintf("%s/alerts/incidents/%s", baseURL, iid),
+			})
+		} else {
+			btns = append(btns, map[string]string{
+				"title":     "📋 告警事件",
+				"actionURL": fmt.Sprintf("%s/alerts", baseURL),
+			})
+		}
+	}
+	if rb, ok := msg.Labels["runbook_url"]; ok && rb != "" && len(btns) > 0 && len(btns) < 3 {
+		btns = append(btns, map[string]string{
+			"title":     "📖 运维手册",
+			"actionURL": rb,
+		})
+	}
+
+	if len(btns) > 0 {
+		return map[string]any{
+			"msgtype": "actionCard",
+			"actionCard": map[string]any{
+				"title":          fullTitle,
+				"text":           sb.String(),
+				"btnOrientation": "1",
+				"btns":           btns,
+			},
+		}
+	}
+
+	return map[string]any{
+		"msgtype": "markdown",
+		"markdown": map[string]any{
+			"title": fullTitle,
+			"text":  sb.String(),
+		},
+	}
 }
 
 // NewWeComSender posts a text payload compatible with 企业微信 (WeCom) group
