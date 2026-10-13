@@ -78,8 +78,11 @@ func TestFeishuSenderSignsPayload(t *testing.T) {
 		if payload["sign"] == "" {
 			t.Errorf("sign missing")
 		}
-		if payload["msg_type"] != "text" {
-			t.Errorf("msg_type = %v", payload["msg_type"])
+		if payload["msg_type"] != "interactive" {
+			t.Errorf("msg_type = %v, want interactive", payload["msg_type"])
+		}
+		if payload["card"] == nil {
+			t.Errorf("card missing in payload")
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -89,6 +92,171 @@ func TestFeishuSenderSignsPayload(t *testing.T) {
 	err := sender.Send(context.Background(), Message{Subject: "edge offline"})
 	if err != nil {
 		t.Fatalf("Send: %v", err)
+	}
+}
+
+func TestFeishuSenderEmitsInteractiveCard(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Errorf("decode payload: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	sender := NewFeishuSender("feishu-ops", srv.URL, "", srv.Client())
+	occurred := time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC)
+	err := sender.Send(context.Background(), Message{
+		Subject:    "设备离线: 阿里云ECS01 心跳超时",
+		Severity:   SeverityCritical,
+		Source:     "global",
+		DedupeKey:  "pipeline:device_offline:1",
+		OccurredAt: occurred,
+		Labels: map[string]string{
+			"rule":        "device_offline",
+			"rule_name":   "设备离线",
+			"device_id":   "1",
+			"device_name": "阿里云ECS01",
+			"incident_id": "88",
+			"runbook_url": "https://wiki.ops/runbook/device_offline",
+			"console_url": "https://ongrid.example.com",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	if got["msg_type"] != "interactive" {
+		t.Fatalf("msg_type = %v, want interactive", got["msg_type"])
+	}
+
+	card, ok := got["card"].(map[string]any)
+	if !ok {
+		t.Fatalf("card not a map: %v", got["card"])
+	}
+
+	header, ok := card["header"].(map[string]any)
+	if !ok || header["template"] != "red" {
+		t.Errorf("header template = %v, want red", header["template"])
+	}
+
+	elements, ok := card["elements"].([]any)
+	if !ok || len(elements) == 0 {
+		t.Fatalf("elements missing or empty")
+	}
+
+	// Verify action buttons are rendered when console_url is provided
+	hasActions := false
+	for _, el := range elements {
+		if elm, ok := el.(map[string]any); ok && elm["tag"] == "action" {
+			hasActions = true
+			break
+		}
+	}
+	if !hasActions {
+		t.Errorf("expected action element in card elements, got %v", elements)
+	}
+
+	// Verify timezone is converted to Beijing time (+8 hours from UTC)
+	// occurred is 2026-09-29 10:00:00 UTC => 2026-09-29 18:00:00 CST
+	fieldsElem := elements[0].(map[string]any)["fields"].([]any)
+	foundTime := false
+	for _, f := range fieldsElem {
+		fMap := f.(map[string]any)
+		textMap := fMap["text"].(map[string]any)
+		content := textMap["content"].(string)
+		if strings.Contains(content, "发生时间") {
+			foundTime = true
+			if !strings.Contains(content, "2026-09-29 18:00:00") {
+				t.Errorf("expected occurredAt in CST '2026-09-29 18:00:00', got %s", content)
+			}
+		}
+	}
+	if !foundTime {
+		t.Errorf("time field not found in card")
+	}
+
+	// Verify all severities & status mappings
+	severityCases := []struct {
+		severity Severity
+		status   string
+		wantTpl  string
+	}{
+		{SeverityWarning, "firing", "orange"},
+		{SeverityWarning, "open", "orange"},
+		{SeverityInfo, "firing", "blue"},
+		{SeverityCritical, "acknowledged", "yellow"},
+		{SeverityCritical, "resolved", "green"},
+	}
+
+	for _, sc := range severityCases {
+		err = sender.Send(context.Background(), Message{
+			Subject:  "状态测试",
+			Severity: sc.severity,
+			Labels: map[string]string{
+				"status": sc.status,
+			},
+		})
+		if err != nil {
+			t.Fatalf("Send severity %v status %v: %v", sc.severity, sc.status, err)
+		}
+		c := got["card"].(map[string]any)
+		h := c["header"].(map[string]any)
+		if h["template"] != sc.wantTpl {
+			t.Errorf("severity=%s status=%s got template %v, want %v", sc.severity, sc.status, h["template"], sc.wantTpl)
+		}
+	}
+}
+
+func TestFeishuCardIgnoresResolvedSubstringInSubject(t *testing.T) {
+	card := formatFeishuCard(Message{
+		Subject:  "unresolved errors above threshold on systemd-resolved",
+		Severity: SeverityCritical,
+		Labels: map[string]string{
+			"status":      "open",
+			"incident_id": "42",
+			"console_url": "https://console.example",
+			"device_id":   "7",
+		},
+	})
+
+	header, ok := card["header"].(map[string]any)
+	if !ok {
+		t.Fatalf("header missing: %#v", card["header"])
+	}
+	if header["template"] != "red" {
+		t.Fatalf("template = %v, want red (open critical must not be treated as recovery)", header["template"])
+	}
+
+	raw, err := json.Marshal(card)
+	if err != nil {
+		t.Fatalf("marshal card: %v", err)
+	}
+	payload := string(raw)
+	if !strings.Contains(payload, "OPEN (发生中)") {
+		t.Errorf("expected OPEN status localization in card, got %s", payload)
+	}
+	if strings.Contains(payload, "RESOLVED (已恢复)") {
+		t.Errorf("status must not be marked resolved when Labels[status]=open: %s", payload)
+	}
+	if !strings.Contains(payload, "#42") || !strings.Contains(payload, "事件 ID") {
+		t.Errorf("expected visible incident ID #42 in card: %s", payload)
+	}
+	if !strings.Contains(payload, "https://console.example/alerts/incidents/42") {
+		t.Errorf("expected incident deep link /alerts/incidents/42 in card: %s", payload)
+	}
+}
+
+func TestFeishuCardResolvedOnlyFromStatusLabel(t *testing.T) {
+	card := formatFeishuCard(Message{
+		Subject:  "CPU high",
+		Severity: SeverityCritical,
+		Labels:   map[string]string{"status": "resolved"},
+	})
+	header := card["header"].(map[string]any)
+	if header["template"] != "green" {
+		t.Fatalf("resolved status template = %v, want green", header["template"])
 	}
 }
 

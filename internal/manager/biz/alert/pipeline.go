@@ -91,6 +91,10 @@ type PipelineEvaluatorOpts struct {
 
 	DeviceIdentityResolver DeviceIdentityResolver
 
+	// ConsoleURL is the public console base used for Feishu card deep links
+	// (devices / incidents). Empty disables action buttons.
+	ConsoleURL string
+
 	Log *slog.Logger
 	Now func() time.Time
 }
@@ -117,6 +121,7 @@ type PipelineEvaluator struct {
 	logq           LogQuerier
 	logSearcher    logquery.Searcher
 	deviceIdentity DeviceIdentityResolver
+	consoleURL     string
 
 	// gaugeSnapshot is the previous tick's (device_id, device_name) set
 	// used by refreshDeviceStalenessGauge to garbage-collect series for
@@ -166,6 +171,7 @@ func NewPipelineEvaluator(opts PipelineEvaluatorOpts) *PipelineEvaluator {
 		logq:           opts.LogQuerier,
 		logSearcher:    opts.LogSearcher,
 		deviceIdentity: opts.DeviceIdentityResolver,
+		consoleURL:     strings.TrimRight(strings.TrimSpace(opts.ConsoleURL), "/"),
 		log:            opts.Log,
 		now:            opts.Now,
 	}
@@ -426,16 +432,24 @@ func (e *PipelineEvaluator) notify(ctx context.Context, res *FiringResult, summa
 		OccurredAt: at,
 		Labels: map[string]string{
 			"rule":        res.Incident.Rule,
+			"rule_name":   res.Incident.RuleName,
+			"status":      res.Incident.Status,
 			"incident_id": fmt.Sprintf("%d", res.Incident.ID),
 		},
+	}
+	if res.Incident.RunbookURL != "" {
+		msg.Labels["runbook_url"] = res.Incident.RunbookURL
+	}
+	if e.consoleURL != "" {
+		msg.Labels["console_url"] = e.consoleURL
 	}
 	// Preserve application identity for notification routing and correlation.
 	// Control labels such as incident_id/rule still come from the incident.
 	if labels, err := res.Incident.Labels(); err != nil {
 		e.log.Warn("alert: decode notification identity failed", slog.Uint64("incident_id", res.Incident.ID), slog.Any("err", err))
 	} else {
-		for _, key := range []string{"service", "service_namespace", "deployment_environment_name", "service_instance_id", "span_name"} {
-			if value, ok := labels[key]; ok {
+		for _, key := range []string{"service", "service_namespace", "deployment_environment_name", "service_instance_id", "span_name", "rule_name", "rule_expr"} {
+			if value, ok := labels[key]; ok && msg.Labels[key] == "" {
 				msg.Labels[key] = value
 			}
 		}
@@ -449,6 +463,7 @@ func (e *PipelineEvaluator) notify(ctx context.Context, res *FiringResult, summa
 				e.log.Warn("alert: resolve device identity for notification failed",
 					slog.Uint64("device_id", deviceID), slog.Any("err", err))
 			} else if display := deviceDisplay(identity); display != "" {
+				msg.Labels["device_name"] = display
 				msg.Subject = strings.ReplaceAll(msg.Subject,
 					fmt.Sprintf("device_id=%d", deviceID), "device="+display)
 				if identity.Hostname != "" {
