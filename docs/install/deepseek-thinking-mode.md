@@ -2,7 +2,7 @@
 
 对应问题：ongridio/ongrid#400。
 
-工具调用续接以及后续用户轮次需要回传提供方返回的 reasoning_content。本修复在 SDK、内部消息、Eino 和持久化历史之间保留原值，不将该字段作为前端消息 JSON 输出。
+工具调用续接以及后续用户轮次需要回传提供方返回的 reasoning_content。本修复在 SDK、内部消息、Eino 和持久化历史之间保留原值；消息历史接口以 `reasoning_content` 返回该字段，供前端折叠展示，不回写到用户可见回答正文。
 
 ## 升级与回退
 

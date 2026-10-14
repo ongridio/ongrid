@@ -633,6 +633,13 @@ func translateRuntimeEvent(ev chatruntime.Event) agent.Event {
 			PendingToolCalls: ev.Assistant.PendingToolCalls,
 		}
 	}
+	if ev.Delta != nil {
+		out.Delta = &agent.AssistantDeltaEvent{
+			Iteration: ev.Delta.Iteration,
+			Content:   ev.Delta.Content,
+			Kind:      ev.Delta.Kind,
+		}
+	}
 	if ev.Tool != nil {
 		out.Tool = &agent.ToolEvent{
 			ToolCallID: ev.Tool.ToolCallID,

@@ -29,6 +29,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
@@ -368,14 +369,101 @@ func (c *clientChatModel) Generate(ctx context.Context, input []*schema.Message,
 	return einoMessageFromChatResp(resp), nil
 }
 
-// Stream wraps Generate behind an array-backed StreamReader. PR-1 is
-// scaffolding only — real token-by-token streaming lands in a later PR.
+// Stream forwards provider streaming chunks when the underlying Client
+// supports ChatStream. Otherwise it keeps the historical single-chunk
+// fallback so background callers and test doubles remain valid.
 func (c *clientChatModel) Stream(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
-	msg, err := c.Generate(ctx, input, opts...)
+	common := model.GetCommonOptions(&model.Options{}, opts...)
+	req, err := c.buildChatReq(input, common)
 	if err != nil {
 		return nil, err
 	}
-	return schema.StreamReaderFromArray([]*schema.Message{msg}), nil
+	streamer, ok := c.inner.(StreamingClient)
+	if !ok {
+		resp, err := c.inner.Chat(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		return schema.StreamReaderFromArray([]*schema.Message{einoMessageFromChatResp(resp)}), nil
+	}
+
+	reader, err := streamer.ChatStream(ctx, req)
+	if err != nil {
+		if errors.Is(err, ErrStreamingUnsupported) {
+			resp, chatErr := c.inner.Chat(ctx, req)
+			if chatErr != nil {
+				return nil, chatErr
+			}
+			return schema.StreamReaderFromArray([]*schema.Message{einoMessageFromChatResp(resp)}), nil
+		}
+		return nil, err
+	}
+	out, writer := schema.Pipe[*schema.Message](1)
+	go func() {
+		defer reader.Close()
+		defer writer.Close()
+		sawReasoning := false
+		for {
+			chunk, err := reader.Recv()
+			if errors.Is(err, io.EOF) {
+				return
+			}
+			if err != nil {
+				writer.Send(nil, fmt.Errorf("llm: read stream: %w", err))
+				return
+			}
+			if chunk == nil {
+				continue
+			}
+			if chunk.Message.ReasoningContent != "" {
+				sawReasoning = true
+				if writer.Send(&schema.Message{
+					Role:             schema.Assistant,
+					ReasoningContent: chunk.Message.ReasoningContent,
+				}, nil) {
+					return
+				}
+			}
+			if chunk.Message.Content != "" && writer.Send(&schema.Message{
+				Role:    schema.Assistant,
+				Content: chunk.Message.Content,
+			}, nil) {
+				return
+			}
+			if chunk.Usage == nil {
+				continue
+			}
+
+			final := &schema.Message{
+				Role:      schema.Assistant,
+				ToolCalls: make([]schema.ToolCall, 0, len(chunk.Message.ToolCalls)),
+			}
+			if chunk.Message.ReasoningContent != "" && !sawReasoning {
+				final.ReasoningContent = chunk.Message.ReasoningContent
+			}
+			for _, call := range chunk.Message.ToolCalls {
+				final.ToolCalls = append(final.ToolCalls, schema.ToolCall{
+					ID:   call.ID,
+					Type: "function",
+					Function: schema.FunctionCall{
+						Name:      call.Name,
+						Arguments: string(call.Args),
+					},
+				})
+			}
+			final.ResponseMeta = &schema.ResponseMeta{
+				Usage: &schema.TokenUsage{
+					PromptTokens:     chunk.Usage.PromptTokens,
+					CompletionTokens: chunk.Usage.CompletionTokens,
+					TotalTokens:      chunk.Usage.TotalTokens,
+				},
+			}
+			if writer.Send(final, nil) {
+				return
+			}
+		}
+	}()
+	return out, nil
 }
 
 // BindTools stores the tool list on the adapter; it is forwarded into

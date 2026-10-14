@@ -266,7 +266,8 @@ func (h *PersistenceHandler) Needed(_ context.Context, info *callbacks.RunInfo, 
 	}
 	switch info.Component {
 	case components.ComponentOfChatModel:
-		return timing == callbacks.TimingOnStart || timing == callbacks.TimingOnEnd
+		return timing == callbacks.TimingOnStart || timing == callbacks.TimingOnEnd ||
+			timing == callbacks.TimingOnEndWithStreamOutput
 	case components.ComponentOfTool:
 		if h.directToolPersistence {
 			return false
@@ -462,14 +463,24 @@ func (h *PersistenceHandler) OnStartWithStreamInput(ctx context.Context, _ *call
 	return ctx
 }
 
-// OnEndWithStreamOutput is a no-op for PR-6. token-level streaming
-// persistence (writing the final assembled message at stream-end) is
-// owned by the cutover layer in PR-7; for now we drain + close so we
-// don't leak goroutines.
+// OnEndWithStreamOutput assembles the handler's independent stream copy and
+// persists the final assistant message. Token deltas are UI-only; the DB row
+// remains the authoritative full content and tool-call snapshot.
 func (h *PersistenceHandler) OnEndWithStreamOutput(ctx context.Context, _ *callbacks.RunInfo, out *schema.StreamReader[callbacks.CallbackOutput]) context.Context {
-	if out != nil {
-		out.Close()
+	if h == nil || out == nil {
+		return ctx
 	}
+	defer h.assistantIDRelay.complete()
+	msg, err := concatModelCallbackStream(out)
+	if err != nil {
+		h.recordErr("assistant_stream_concat", err)
+		return ctx
+	}
+	if msg == nil {
+		return ctx
+	}
+	h.trace(ctx, "chat_model_end_stream", &callbacks.RunInfo{Component: components.ComponentOfChatModel}, "")
+	h.persistAssistant(ctx, &einomodel.CallbackOutput{Message: msg})
 	return ctx
 }
 

@@ -46,6 +46,46 @@ describe('MessageBubble image preview', () => {
   });
 });
 
+describe('MessageBubble reasoning', () => {
+  it('keeps completed reasoning available and lets the user collapse and reopen it', async () => {
+    const message: ChatMessage = {
+      id: 'assistant-1',
+      role: 'assistant',
+      content: '磁盘压力导致写入延迟升高。',
+      reasoning: '先确认磁盘利用率，再检查 I/O 等待。',
+      pending: true,
+    };
+    const { rerender } = render(<MessageBubble message={message} />);
+
+    const toggle = screen.getByRole('button', { name: '思考过程' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText(message.reasoning!)).toBeVisible();
+
+    rerender(<MessageBubble message={{ ...message, pending: false }} />);
+
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-expanded', 'false'));
+    expect(screen.getByText(message.reasoning!)).not.toBeVisible();
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText(message.reasoning!)).toBeVisible();
+  });
+
+  it('renders persisted reasoning_content from message history', async () => {
+    render(<MessageBubble message={{
+      id: 'assistant-history-1',
+      role: 'assistant',
+      content: '最终回答',
+      reasoning_content: '历史思考内容',
+      pending: false,
+    }} />);
+
+    expect(screen.getByText('历史思考内容')).not.toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '思考过程' }));
+    expect(screen.getByText('历史思考内容')).toBeVisible();
+  });
+});
+
 describe('MessageBubble shared approval card', () => {
   it.each([
     ['zh-CN', '需要你确认才能执行 capture_pcap'],

@@ -66,6 +66,53 @@ func (s *scriptedChatModel) WithTools(_ []*schema.ToolInfo) (einomodel.ToolCalli
 	return s, nil
 }
 
+func TestDirectStreamChatModelEmitsBeforeGraphDrain(t *testing.T) {
+	scripted := newScriptedChatModel(&schema.Message{
+		Role:    schema.Assistant,
+		Content: "streamed answer",
+		ResponseMeta: &schema.ResponseMeta{Usage: &schema.TokenUsage{
+			PromptTokens: 3, CompletionTokens: 2, TotalTokens: 5,
+		}},
+	})
+	events := make(chan Event, 1)
+	streamingModel := &directStreamChatModel{
+		inner: scripted,
+		emit: func(event Event) {
+			select {
+			case events <- event:
+			default:
+			}
+		},
+	}
+
+	graphStream, err := streamingModel.Stream(context.Background(), []*schema.Message{
+		{Role: schema.User, Content: "stream please"},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+
+	select {
+	case event := <-events:
+		if event.Type != EventAssistantDelta || event.Delta == nil {
+			t.Fatalf("event = %+v", event)
+		}
+		if event.Delta.Content != "streamed answer" || event.Delta.Kind != "content" {
+			t.Fatalf("assistant delta = %+v", event.Delta)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for direct assistant delta")
+	}
+
+	msg, err := schema.ConcatMessageStream(graphStream)
+	if err != nil {
+		t.Fatalf("concat graph stream: %v", err)
+	}
+	if msg == nil || msg.Content != "streamed answer" {
+		t.Fatalf("graph message = %+v", msg)
+	}
+}
+
 // memSessions is an in-memory SessionRepo for runtime tests. Only the
 // methods runtime.Handle exercises are implemented; the rest panic on
 // purpose so a future refactor can't silently slip past coverage.

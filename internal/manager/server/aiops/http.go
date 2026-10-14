@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -446,6 +447,7 @@ type messageDTO struct {
 	ID          string             `json:"id"`
 	Role        string             `json:"role"`
 	Content     string             `json:"content,omitempty"`
+	Reasoning   string             `json:"reasoning_content,omitempty"`
 	Attachments []model.Attachment `json:"attachments,omitempty"`
 	ToolCallID  string             `json:"tool_call_id,omitempty"`
 	ToolName    string             `json:"tool_name,omitempty"`
@@ -821,13 +823,33 @@ func (h *Handler) postMessageStream(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(": ok\n\n"))
 	flusher.Flush()
 
+	requestCtx := r.Context()
+	requestDone := make(chan struct{})
+	defer close(requestDone)
+	var emitMu sync.Mutex
+	var emitWG sync.WaitGroup
+	writeEvent := func(name string, payload any) {
+		select {
+		case <-requestDone:
+			return
+		case <-requestCtx.Done():
+			return
+		default:
+		}
+		emitMu.Lock()
+		defer emitMu.Unlock()
+		writeSSE(w, flusher, name, payload)
+	}
 	emit := func(e agent.Event) {
-		writeSSE(w, flusher, eventName(e.Type), eventPayload(id, e))
+		emitWG.Add(1)
+		defer emitWG.Done()
+		writeEvent(eventName(e.Type), eventPayload(id, e))
 	}
 
 	reply, err := h.svc.PostMessageStreamWithOpts(r.Context(), caller, id, req.Content, emit, opts)
+	emitWG.Wait()
 	if err != nil {
-		writeSSE(w, flusher, "error", map[string]string{
+		writeEvent("error", map[string]string{
 			"error": err.Error(),
 			"code":  errCode(err),
 		})
@@ -837,7 +859,7 @@ func (h *Handler) postMessageStream(w http.ResponseWriter, r *http.Request) {
 	// terminal "done" (shouldn't happen on the success path), backfill so
 	// the client still resolves cleanly.
 	if reply != nil {
-		writeSSE(w, flusher, "summary", toPostMessageResp(id, reply))
+		writeEvent("summary", toPostMessageResp(id, reply))
 	}
 }
 
@@ -845,6 +867,8 @@ func eventName(t agent.EventType) string {
 	switch t {
 	case agent.EventAssistant:
 		return "assistant"
+	case agent.EventAssistantDelta:
+		return "assistant_delta"
 	case agent.EventToolStart:
 		return "tool_start"
 	case agent.EventToolEnd:
@@ -862,6 +886,16 @@ func eventName(t agent.EventType) string {
 
 func eventPayload(sessionID string, e agent.Event) any {
 	switch e.Type {
+	case agent.EventAssistantDelta:
+		if e.Delta == nil {
+			return map[string]any{"session_id": sessionID}
+		}
+		return map[string]any{
+			"session_id": sessionID,
+			"iteration":  e.Delta.Iteration,
+			"content":    e.Delta.Content,
+			"kind":       e.Delta.Kind,
+		}
 	case agent.EventAssistant:
 		if e.Assistant == nil {
 			return map[string]any{"session_id": sessionID}
@@ -965,6 +999,11 @@ func eventPayload(sessionID string, e agent.Event) any {
 // if the client closed the connection there is nothing useful to do
 // mid-stream, and the next Flush will surface the failure to the agent.
 func writeSSE(w http.ResponseWriter, f http.Flusher, name string, payload any) {
+	// A detached agent turn can outlive the browser connection. Some wrapped
+	// ResponseWriter implementations panic on Write/Flush after the request is
+	// complete; a disconnect is expected and must not kill the manager.
+	defer func() { _ = recover() }()
+
 	body, err := json.Marshal(payload)
 	if err != nil {
 		body = []byte(`{}`)
@@ -1213,10 +1252,10 @@ func (h *Handler) listModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type providerDTO struct {
-		ID          string   `json:"id"`
-		Label       string   `json:"label"`
-		Models      []string `json:"models"`
-		Model       string   `json:"model,omitempty"`
+		ID     string   `json:"id"`
+		Label  string   `json:"label"`
+		Models []string `json:"models"`
+		Model  string   `json:"model,omitempty"`
 	}
 	type defaultDTO struct {
 		Provider string `json:"provider"`
@@ -1230,10 +1269,10 @@ func (h *Handler) listModels(w http.ResponseWriter, r *http.Request) {
 	if h.catalog != nil {
 		for _, p := range h.catalog.Providers() {
 			out.Providers = append(out.Providers, providerDTO{
-				ID:          p.ID,
-				Label:       p.Label,
-				Models:      p.Models,
-				Model:       p.Model,
+				ID:     p.ID,
+				Label:  p.Label,
+				Models: p.Models,
+				Model:  p.Model,
 			})
 		}
 		defID, defModel := h.catalog.Default()
@@ -1276,6 +1315,9 @@ func toMessageDTO(m *model.Message) messageDTO {
 	}
 	if m.Content != nil {
 		out.Content = *m.Content
+	}
+	if m.ReasoningContent != nil {
+		out.Reasoning = *m.ReasoningContent
 	}
 	if m.ToolCallID != nil {
 		out.ToolCallID = *m.ToolCallID

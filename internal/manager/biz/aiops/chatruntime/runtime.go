@@ -41,6 +41,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -76,18 +77,16 @@ type MentionResolver interface {
 	Resolve(ctx context.Context, mentions []Mention) []string
 }
 
-// EventType enumerates streaming events emitted by the runtime. The
-// values are byte-equal to the legacy agent.EventType strings so the
-// SSE adapter at the service layer can route both kernels through
-// the same wire format. New event names introduced in PR-6
-// (assistant_start / assistant_delta / assistant_end) are NOT
-// surfaced through this enum yet — the cutover keeps the legacy
-// frame names so the SPA round-trips without changes.
+// EventType enumerates streaming events emitted by the runtime. The values
+// are byte-equal to the agent.EventType strings so the SSE adapter routes
+// both kernels through the same wire format.
 type EventType string
 
 const (
 	// EventAssistant fires after every assistant turn is persisted.
 	EventAssistant EventType = "assistant"
+	// EventAssistantDelta carries an incremental user-visible content chunk.
+	EventAssistantDelta EventType = "assistant_delta"
 	// EventToolStart fires after a tool_call row is persisted as
 	// pending, before the tool actually runs.
 	EventToolStart EventType = "tool_start"
@@ -107,6 +106,12 @@ type AssistantEvent struct {
 	Content          string
 	CreatedAt        time.Time
 	PendingToolCalls int
+}
+
+type AssistantDeltaEvent struct {
+	Iteration int
+	Content   string
+	Kind      string
 }
 
 // ToolEvent describes one tool_call lifecycle event. Same shape as
@@ -134,6 +139,7 @@ type ToolEvent struct {
 type Event struct {
 	Type         EventType
 	Assistant    *AssistantEvent
+	Delta        *AssistantDeltaEvent
 	Tool         *ToolEvent
 	Done         *Reply
 	Error        string
@@ -241,6 +247,10 @@ type Config struct {
 	// stripped before the LLM sees it. nil = always enabled (no gate), so an
 	// unwired runtime keeps full behaviour.
 	AgentWriteEnabled func(ctx context.Context) bool
+
+	// TokenStreaming enables g.Stream for coordinator requests that carry an
+	// Emit sink. Blocking/background callers continue using g.Invoke.
+	TokenStreaming bool
 
 	// Logger may be nil.
 	Logger *slog.Logger
@@ -740,9 +750,16 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (*Reply, error) {
 		deps.SSE = nil
 	}
 	handlers := callbacks.NewDefaultHandlers(deps)
+	if sseHandler := callbacks.SSEHandlerFromHandlers(handlers); sseHandler != nil {
+		defer sseHandler.Wait()
+	}
 	toolPersistence := callbacks.EnableSynchronousToolPersistence(handlers)
 	graphCfg.ToolPersistence = toolPersistence
-	g, err := graph.BuildReActGraph(rt.cfg.ChatModel, sessionToolBag, graphCfg)
+	graphModel := rt.cfg.ChatModel
+	if rt.cfg.TokenStreaming && req.Emit != nil {
+		graphModel = &directStreamChatModel{inner: rt.cfg.ChatModel, emit: req.Emit}
+	}
+	g, err := graph.BuildReActGraph(graphModel, sessionToolBag, graphCfg)
 	if err != nil {
 		return nil, fmt.Errorf("chatruntime: build graph: %w", err)
 	}
@@ -832,7 +849,7 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (*Reply, error) {
 		flushCtx := context.WithoutCancel(ctx)
 		callbacks.FinalizeBatches(flushCtx, handlers)
 	}()
-	out, invokeErr := g.Invoke(ctx, &graph.Input{
+	out, invokeErr := rt.invokeGraph(ctx, req.Emit != nil, g, &graph.Input{
 		SystemPrompt:     systemPrompt,
 		History:          einoHistory,
 		UserText:         req.UserText,
@@ -915,6 +932,59 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (*Reply, error) {
 	// exactly once at terminal success".
 	emit(Event{Type: EventDone, Done: reply})
 	return reply, nil
+}
+
+func (rt *Runtime) invokeGraph(
+	ctx context.Context,
+	streaming bool,
+	g compose.Runnable[*graph.Input, *graph.Output],
+	input *graph.Input,
+	opts ...compose.Option,
+) (*graph.Output, error) {
+	if rt == nil || !streaming || !rt.cfg.TokenStreaming {
+		return g.Invoke(ctx, input, opts...)
+	}
+	stream, err := g.Stream(ctx, input, opts...)
+	if err != nil {
+		if rt.log != nil {
+			rt.log.Warn("chatruntime: graph stream unavailable; falling back to invoke",
+				slog.String("err", err.Error()))
+		}
+		return g.Invoke(ctx, input, opts...)
+	}
+	defer stream.Close()
+
+	var (
+		messages   []*schema.Message
+		usage      llm.Usage
+		iterations int
+	)
+	for {
+		output, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		if output == nil {
+			continue
+		}
+		usage = output.Usage
+		iterations = output.Iterations
+		if output.AssistantMessage != nil {
+			messages = append(messages, output.AssistantMessage)
+		}
+	}
+	msg, err := schema.ConcatMessages(messages)
+	if err != nil {
+		return nil, err
+	}
+	return &graph.Output{
+		AssistantMessage: msg,
+		Iterations:       iterations,
+		Usage:            usage,
+	}, nil
 }
 
 func confirmedDeviceIDs(mentions []Mention) []uint64 {
@@ -1050,13 +1120,26 @@ func isCancelIntent(userText string) bool {
 
 // toCallbackEmitter adapts a chatruntime.Emit into the
 // callbacks.SSEEmitter the persistence/SSE chain consumes. The
-// adapter normalises the new event names back to the legacy ones
-// (SSEEventAssistantStart / SSEEventAssistantEnd → "assistant";
-// SSEEventAssistantDelta dropped — see PR-9 spec note about
-// IncludeDelta=false until the SPA catches up).
+// adapter keeps the wire frame names stable: assistant_start is internal-only,
+// while assistant_delta and assistant_end become user-visible SSE frames.
 func (rt *Runtime) toCallbackEmitter(emit Emit, sessionID string) callbacks.SSEEmitter {
 	return func(ev callbacks.SSEEvent) {
 		switch ev.Type {
+		case callbacks.SSEEventAssistantDelta:
+			// directStreamChatModel emits deltas before the ReAct tool-call
+			// checker drains the model stream. Suppress this later callback copy
+			// to avoid sending every chunk twice.
+			if rt.cfg.TokenStreaming || ev.Delta == nil {
+				return
+			}
+			emit(Event{
+				Type: EventAssistantDelta,
+				Delta: &AssistantDeltaEvent{
+					Iteration: ev.Delta.Iteration,
+					Content:   ev.Delta.Content,
+					Kind:      ev.Delta.Kind,
+				},
+			})
 		case callbacks.SSEEventAssistantEnd:
 			if ev.Assistant == nil {
 				return
@@ -1074,10 +1157,6 @@ func (rt *Runtime) toCallbackEmitter(emit Emit, sessionID string) callbacks.SSEE
 			// empty assistant bubble. The assistant_end frame
 			// (above) carries the full content + pending tool
 			// count which matches the legacy "assistant" frame.
-			return
-		case callbacks.SSEEventAssistantDelta:
-			// Token-level streaming is gated behind a feature flag
-			// pending SPA support. Drop for now — see PR-9 spec.
 			return
 		case callbacks.SSEEventToolStart:
 			if ev.Tool == nil {

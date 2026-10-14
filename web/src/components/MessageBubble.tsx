@@ -1,5 +1,5 @@
 import { Hint } from '@/components/ui/Tooltip';
-import { useState, useEffect } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -76,11 +76,16 @@ export function MessageBubble({ message, sessionId, onConfirmConfigDraft, hideAc
   if (
     message.role === 'assistant' &&
     (!message.content || message.content.length === 0) &&
+    !reasoningText(message) &&
     !message.pending
   ) {
     return null;
   }
   return <AssistantBubble message={message} onConfirmConfigDraft={onConfirmConfigDraft} hideActiveOperations={hideActiveOperations} />;
+}
+
+function reasoningText(message: ChatMessage): string | undefined {
+  return message.reasoning ?? message.reasoning_content;
 }
 
 // fromSummary maps the wire-level ToolCallSummary (server SSE shape) to
@@ -180,21 +185,65 @@ function compactUserContent(
 }
 
 function AssistantBubble({ message, onConfirmConfigDraft, hideActiveOperations }: Props) {
+  const { tr } = useI18n();
+  const reasoning = reasoningText(message);
+  const reasoningID = useId();
+  const [reasoningOpen, setReasoningOpen] = useState(message.pending === true);
+  const wasPendingRef = useRef(message.pending === true);
+
+  useEffect(() => {
+    if (wasPendingRef.current && message.pending === false) {
+      setReasoningOpen(false);
+    }
+    wasPendingRef.current = message.pending === true;
+  }, [message.pending]);
+
   // Codex-style: no rounded card around assistant prose. Render markdown
   // flush against the column so headings/lists/code blocks read like a
   // document. Tool calls (when attached) appear as their own rows inside
   // the same column, matching the doc-card aesthetic.
   return (
     <div className="flex flex-col items-stretch gap-2">
-      {message.pending ? (
+      {reasoning && (
+        <div className="border-l border-border pl-3">
+          <button
+            type="button"
+            aria-expanded={reasoningOpen}
+            aria-controls={reasoningID}
+            onClick={() => setReasoningOpen((open) => !open)}
+            className="-ml-1 flex items-center gap-1 rounded px-1 py-0.5 text-[11px] font-medium text-text-muted hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/60"
+          >
+            {reasoningOpen ? (
+              <ChevronDown size={13} aria-hidden="true" />
+            ) : (
+              <ChevronRight size={13} aria-hidden="true" />
+            )}
+            <span>{tr('思考过程', 'Reasoning')}</span>
+          </button>
+          <div
+            id={reasoningID}
+            hidden={!reasoningOpen}
+            className="mt-1 whitespace-pre-wrap text-[13px] leading-6 text-text-muted"
+          >
+            {reasoning}
+          </div>
+        </div>
+      )}
+      {message.pending && !reasoning && !message.content ? (
         <span className="text-zinc-500">
           <PendingDots />
         </span>
-      ) : (
+      ) : null}
+      {message.content ? (
         <div className="md-body text-zinc-100">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
         </div>
-      )}
+      ) : null}
+      {message.pending && reasoning && !message.content ? (
+        <span className="text-zinc-500">
+          <PendingDots />
+        </span>
+      ) : null}
       {message.tool_calls?.map((tc, i) => (
         <ToolCallSummaryBlock key={`${tc.name}-${i}`} call={tc} onConfirmConfigDraft={onConfirmConfigDraft} hideActiveOperations={hideActiveOperations} />
       ))}
@@ -233,8 +282,8 @@ function ToolCallSummaryBlock({
     result?: unknown;
     duration_ms?: number;
     error?: string;
-	  };
-	  onConfirmConfigDraft?: ConfirmConfigDraft;
+  };
+  onConfirmConfigDraft?: ConfirmConfigDraft;
     hideActiveOperations?: boolean;
 	}) {
   const { tr } = useI18n();
@@ -440,7 +489,6 @@ export function OperationCard({ operation, onTerminal }: { operation: OperationC
       cancelled = true;
       window.clearInterval(timer);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [operation.id, operation.legacySessionID, terminal, tr]);
 
   function applyOperationUpdate(updated: Operation, artifactURL?: string) {
@@ -742,9 +790,9 @@ function ConfigDraftCard({
               <span className="truncate text-[11px] text-zinc-500">{draft.target.name}</span>
             )}
           </div>
-		  <div className="text-sm font-medium text-zinc-100">
-			{proposal?.title || draft.summary || tr('配置草案', 'Configuration draft')}
-		  </div>
+      <div className="text-sm font-medium text-zinc-100">
+        {proposal?.title || draft.summary || tr('配置草案', 'Configuration draft')}
+      </div>
           {scope && <div className="text-[11px] leading-5 text-zinc-300">{scope}</div>}
           {draft.confirmation_prompt && (
             <div className="text-[11px] leading-5 text-zinc-400">{draft.confirmation_prompt}</div>

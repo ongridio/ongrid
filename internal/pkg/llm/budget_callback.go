@@ -91,7 +91,7 @@ func (h *BudgetCallbackHandler) Needed(_ context.Context, info *callbacks.RunInf
 		return false
 	}
 	switch timing {
-	case callbacks.TimingOnStart, callbacks.TimingOnEnd:
+	case callbacks.TimingOnStart, callbacks.TimingOnEnd, callbacks.TimingOnEndWithStreamOutput:
 		return true
 	default:
 		return false
@@ -145,8 +145,8 @@ func (h *BudgetCallbackHandler) OnEnd(ctx context.Context, info *callbacks.RunIn
 	return ctx
 }
 
-// OnError, OnStartWithStreamInput, OnEndWithStreamOutput are no-ops in
-// PR-1. Stream accounting lands in a later PR.
+// OnError and streaming input are no-ops. Stream output accounting drains the
+// handler's independent copy and records the assembled message usage.
 func (h *BudgetCallbackHandler) OnError(ctx context.Context, _ *callbacks.RunInfo, _ error) context.Context {
 	return ctx
 }
@@ -161,9 +161,30 @@ func (h *BudgetCallbackHandler) OnStartWithStreamInput(ctx context.Context, _ *c
 
 func (h *BudgetCallbackHandler) OnEndWithStreamOutput(ctx context.Context, _ *callbacks.RunInfo, out *schema.StreamReader[callbacks.CallbackOutput]) context.Context {
 	if out != nil {
-		out.Close()
+		messages := schema.StreamReaderWithConvert(out, func(item callbacks.CallbackOutput) (*schema.Message, error) {
+			mo := einomodel.ConvCallbackOutput(item)
+			if mo == nil || mo.Message == nil {
+				return nil, schema.ErrNoValue
+			}
+			return mo.Message, nil
+		})
+		msg, err := schema.ConcatMessageStream(messages)
+		if err != nil {
+			return ctx
+		}
+		h.recordUsage(ctx, &einomodel.CallbackOutput{Message: msg})
 	}
 	return ctx
+}
+
+func (h *BudgetCallbackHandler) recordUsage(ctx context.Context, mo *einomodel.CallbackOutput) {
+	usage := extractUsage(mo)
+	if usage == nil {
+		return
+	}
+	h.records.Add(1)
+	h.tokensIn.Add(uint64(usage.TotalTokens))
+	_ = h.checker.Record(ctx, h.userID, *usage)
 }
 
 // Stats returns a snapshot of the handler counters. Exposed for tests
