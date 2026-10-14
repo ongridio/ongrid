@@ -164,7 +164,7 @@ func (e *streamEditor) flush() error {
 // can just take it.
 func assistantText(ev chatprotocol.Event) string {
 	// chatprotocol.Event.Assistant is set on assistant events — see
-	// internal/manager/biz/aiops/agent/chatprotocol.go. We avoid a direct
+	// internal/manager/biz/aiops/chatprotocol/types.go. We avoid a direct
 	// type assertion on the field shape to stay forward-compatible:
 	// if the runtime adds richer payloads (citations, attachments)
 	// they live on the same Event struct.

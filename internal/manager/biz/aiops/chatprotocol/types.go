@@ -32,16 +32,12 @@ const (
 	EventToolEnd EventType = "tool_end"
 	// EventDone fires once at terminal success with the final Reply.
 	EventDone EventType = "done"
-	// EventTaskNotification fires when a background sub-agent worker
-	// reaches a terminal state. The legacy agent itself
-	// never spawns workers, so this constant exists purely so the SSE
-	// layer can carry the chatruntime kernel's task_notification frame
-	// through the same eventName / eventPayload translation as the rest.
+	// EventTaskNotification carries completed background-worker events.
 	EventTaskNotification EventType = "task_notification"
 	// EventApprovalPending fires when a synchronous-blocking tool
 	// (HLD-021, e.g. execute_k8s_action) queues a human-approval proposal and is
 	// about to block on the decision. Carries the live approve/reject card
-	// payload. Both kernels translate this shape through the same SSE frame.
+	// payload. The runtime adapter preserves the existing SSE frame.
 	EventApprovalPending EventType = "approval_pending"
 )
 

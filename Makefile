@@ -912,3 +912,7 @@ test-web-ci-platform: ## Run the serial platform frontend CI tests (requires npm
 		src/pages/settings/LLM.test.tsx src/pages/settings/CommunicationProviders.test.tsx \
 		src/components/icons/Provider.test.tsx src/pages/kubernetes/edgeAttachments.test.ts \
 		src/pages/kubernetes/registryCommands.test.ts
+
+.PHONY: test-agent-runtime
+test-agent-runtime: ## 统一 Agent runtime 回归（tools 依赖 Linux cmdpolicy）
+	go test -race ./internal/manager/biz/aiops/... ./internal/manager/service/aiops ./internal/manager/server/aiops ./internal/manager/biz/imbridge ./internal/skill/... ./cmd/ongrid

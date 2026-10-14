@@ -401,3 +401,9 @@ sudo docker exec ongrid-prometheus wget -qO- \
 `/opt/ongrid/prometheus.yml` 是 bind-mounted scrape config，改完跑 `docker compose restart prometheus` 或 `curl -XPOST http://prometheus:9090/-/reload`（`--web.enable-lifecycle` 已开）。
 
 **备份**已迁移到宿主机目录（v0.7.45+），见上文「数据存储 → 数据备份」小节，不再需要 `docker run --rm -v prometheus_data:/data`。
+
+### Agent runtime 迁移（统一 Graph）
+
+统一运行时版本仅使用 Graph/Eino。删除旧 `.env` 中的 `ONGRID_AGENT_KERNEL`；不再支持切换 legacy。手动设置旧变量的裸二进制部署会记录迁移告警并使用 Graph，Compose 不再向容器传递该变量。
+
+升级前验证联网搜索、诊断工具、专家任务、IM、审批和历史会话续聊。Graph 初始化失败时聊天返回明确的不可用错误，其他 Manager 功能继续运行；根据启动日志修复配置并重启，不再隐式回退旧循环。首次发布先金丝雀验证，不变更会话表结构。回滚恢复上一版 Manager 镜像和对应 Compose 配置。

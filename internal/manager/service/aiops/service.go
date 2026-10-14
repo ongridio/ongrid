@@ -7,23 +7,12 @@
 // existence. Admins bypass the ownership check — the handler passes the
 // caller's role through, and the service re-reads the session to pick the
 // owning user_id for the agent call.
-//
-// PR-9 of introduces the kernel switch. The service holds:
-//
-//   - legacyAgent: the pre-PR-9 agent.Agent for-loop kernel.
-//   - runtime: the new chatruntime.Runtime graph kernel.
-//   - kernel: "legacy" | "graph" — picks which kernel runs.
-//
-// Default = "legacy" so the cutover is opt-in via ONGRID_AGENT_KERNEL.
-// The HTTP handler is unchanged: the SSE frame names emitted by both
-// kernels are byte-equal so the SPA round-trips without changes.
 package aiops
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/ongridio/ongrid/internal/manager/biz/aiops/agent"
 	"io"
 	"log/slog"
 	"reflect"
@@ -48,31 +37,6 @@ const (
 	RoleViewer = "viewer"
 )
 
-// Kernel enumerates the two agent kernels the service can dispatch
-// to. The graph runtime is the default; legacy remains an explicit rollback.
-type Kernel string
-
-const (
-	// KernelLegacy is the pre-PR-9 agent.Agent for-loop (chatprotocol.go).
-	KernelLegacy Kernel = "legacy"
-	// KernelGraph is the new eino + chatruntime + graph kernel
-	// (PR-1..PR-7 of).
-	KernelGraph Kernel = "graph"
-)
-
-// ParseKernel normalises a string env value into a Kernel. Empty or
-// unrecognised values default to KernelGraph. Used by cmd/ongrid/main.go.
-func ParseKernel(s string) Kernel {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "legacy":
-		return KernelLegacy
-	case "graph":
-		return KernelGraph
-	default:
-		return KernelGraph
-	}
-}
-
 // Service bundles the agent + session repo. Handlers call into it with the
 // caller's user-id + role; ownership enforcement lives here.
 type APMSourceResolver interface {
@@ -81,9 +45,7 @@ type APMSourceResolver interface {
 
 type Service struct {
 	apmSource    APMSourceResolver
-	legacyAgent  *agent.Agent
 	runtime      RuntimeHandler
-	kernel       Kernel
 	sessions     biz.SessionRepo
 	attachments  biz.AttachmentRepo
 	modelCatalog modelCapabilityCatalog
@@ -93,7 +55,7 @@ type Service struct {
 
 	// cancels maps an in-flight turn's session id to its cancel func, so an
 	// explicit user "stop" (Esc) can interrupt the turn. This is needed
-	// BECAUSE runWithKernel detaches the turn from the HTTP request ctx
+	// BECAUSE runChat detaches the turn from the HTTP request ctx
 	// (WithoutCancel, so a refresh doesn't kill it, HLD-021) — passive
 	// disconnect no longer cancels, so stopping requires an explicit signal.
 	cancelMu sync.Mutex
@@ -108,37 +70,13 @@ type RuntimeHandler interface {
 	Handle(ctx context.Context, req *chatruntime.Request) (*chatruntime.Reply, error)
 }
 
-// New builds the Service. runtime + kernel may be zero-valued; in
-// that case the legacy kernel is the only path. NewWithKernel is the
-// kernel-aware constructor introduced by PR-9 of
-func New(a *agent.Agent, sessions biz.SessionRepo, usage *biz.UsageUsecase, log *slog.Logger) *Service {
-	return NewWithKernel(a, nil, KernelLegacy, sessions, usage, log)
+// New 构造唯一 Graph 聊天入口；runtime 不可用时调用明确失败，不回退旧循环。
+func New(runtime RuntimeHandler, sessions biz.SessionRepo, usage *biz.UsageUsecase, log *slog.Logger) *Service {
+	return &Service{runtime: runtime, sessions: sessions, usage: usage, log: log, cancels: map[string]context.CancelFunc{}}
 }
-
-// NewWithKernel is the kernel-aware constructor. When kernel == graph
-// AND runtime != nil, every chat-send path runs through
-// chatruntime.Runtime; otherwise the legacy agent.Agent for-loop is
-// used. Mismatched configurations (kernel=graph but runtime=nil) fall
-// back to legacy with a logger warning at first PostMessage call.
-func NewWithKernel(a *agent.Agent, runtime RuntimeHandler, kernel Kernel, sessions biz.SessionRepo, usage *biz.UsageUsecase, log *slog.Logger) *Service {
-	return &Service{
-		legacyAgent: a,
-		runtime:     runtime,
-		kernel:      kernel,
-		sessions:    sessions,
-		usage:       usage,
-		log:         log,
-		cancels:     map[string]context.CancelFunc{},
-	}
-}
-
-// Kernel returns the active kernel. Exposed so cmd/ongrid/main.go can
-// log the resolved value at boot.
-func (s *Service) Kernel() Kernel { return s.kernel }
 
 // SetMutatingProposalRepo wires the ReviewGate proposal audit reader after
-// the repo has been constructed in cmd. It is optional so legacy tests and
-// deployments without graph ReviewGate keep starting; the HTTP endpoint fails
+// the repo has been constructed in cmd. Without the dependency the HTTP endpoint fails
 // closed with ErrNotWiredYet until wired.
 func (s *Service) SetMutatingProposalRepo(repo biz.MutatingProposalRepo) {
 	s.proposals = repo
@@ -396,7 +334,7 @@ func (s *Service) PostMessage(ctx context.Context, caller Caller, sessionID stri
 // PostMessageWithOpts is the override-aware sibling of PostMessage. Per-
 // call provider/model + mentions flow into the agent unchanged.
 func (s *Service) PostMessageWithOpts(ctx context.Context, caller Caller, sessionID string, content string, opts chatprotocol.RunOptions) (*chatprotocol.Reply, error) {
-	return s.runWithKernel(ctx, caller, sessionID, content, nil, opts)
+	return s.runChat(ctx, caller, sessionID, content, nil, opts)
 }
 
 // PostMessageStream is the SSE variant of PostMessage. emit fires once per
@@ -411,14 +349,11 @@ func (s *Service) PostMessageStream(ctx context.Context, caller Caller, sessionI
 // provider/model + mention overrides. Empty opts behaves identically to
 // PostMessageStream.
 func (s *Service) PostMessageStreamWithOpts(ctx context.Context, caller Caller, sessionID string, content string, emit chatprotocol.Emit, opts chatprotocol.RunOptions) (*chatprotocol.Reply, error) {
-	return s.runWithKernel(ctx, caller, sessionID, content, emit, opts)
+	return s.runChat(ctx, caller, sessionID, content, emit, opts)
 }
 
-// runWithKernel is the single chokepoint that decides which kernel
-// runs for this request. Both legacy and graph paths return the same
-// chatprotocol.Reply DTO so the HTTP layer doesn't care which path served
-// the response.
-func (s *Service) runWithKernel(ctx context.Context, caller Caller, sessionID string, content string, emit chatprotocol.Emit, opts chatprotocol.RunOptions) (*chatprotocol.Reply, error) {
+// runChat 是聊天请求的统一入口，完成鉴权、取消管理后调用 Graph runtime。
+func (s *Service) runChat(ctx context.Context, caller Caller, sessionID string, content string, emit chatprotocol.Emit, opts chatprotocol.RunOptions) (*chatprotocol.Reply, error) {
 	content = strings.TrimSpace(content)
 	if content == "" && len(opts.Attachments) == 0 {
 		return nil, fmt.Errorf("%w: content required", errs.ErrInvalid)
@@ -474,20 +409,10 @@ func (s *Service) runWithKernel(ctx context.Context, caller Caller, sessionID st
 	s.registerCancel(sess.ID, cancel)
 	defer s.unregisterCancel(sess.ID, cancel)
 
-	// Graph kernel — only when explicitly enabled AND wired.
-	if s.kernel == KernelGraph && s.runtime != nil {
-		return s.runGraph(ctx, sess, content, emit, opts)
+	if s.runtime == nil {
+		return nil, fmt.Errorf("chat runtime unavailable: %w", errs.ErrNotWiredYet)
 	}
-	// Legacy fallback. Logs once if kernel=graph but runtime is nil
-	// — ops misconfig that we want to be visible.
-	if s.kernel == KernelGraph && s.runtime == nil && s.log != nil {
-		s.log.Warn("aiops kernel=graph but runtime is nil — falling back to legacy agent",
-			slog.String("session_id", sess.ID))
-	}
-	if s.legacyAgent == nil {
-		return nil, errs.ErrNotWiredYet
-	}
-	return s.legacyAgent.RunStreamWithOpts(ctx, sessionID, sess.UserID, content, emit, opts)
+	return s.runGraph(ctx, sess, content, emit, opts)
 }
 
 func (s *Service) validateImageContext(ctx context.Context, sessionID string, opts *chatprotocol.RunOptions) error {
@@ -674,7 +599,7 @@ func translateRuntimeEvent(ev chatruntime.Event) chatprotocol.Event {
 	return out
 }
 
-// translateMentionsToRuntime copies the legacy chatprotocol.Mention shape
+// translateMentionsToRuntime copies the shared chatprotocol.Mention shape
 // into the chatruntime.Mention shape. One alloc per turn — fine.
 func translateMentionsToRuntime(in []chatprotocol.Mention) []chatruntime.Mention {
 	if len(in) == 0 {
@@ -688,7 +613,7 @@ func translateMentionsToRuntime(in []chatprotocol.Mention) []chatruntime.Mention
 }
 
 // runtimeReplyToAgentReply translates the graph kernel's Reply back
-// into the legacy chatprotocol.Reply shape so the HTTP handler's DTO
+// into the shared chatprotocol.Reply shape so the HTTP handler's DTO
 // transformer (toPostMessageResp) doesn't care which kernel produced
 // the answer.
 func runtimeReplyToAgentReply(r *chatruntime.Reply) *chatprotocol.Reply {

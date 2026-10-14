@@ -100,7 +100,6 @@ import (
 	managermodeledge "github.com/ongridio/ongrid/internal/manager/model/edge"
 
 	managerbizaiops "github.com/ongridio/ongrid/internal/manager/biz/aiops"
-	aiopsagent "github.com/ongridio/ongrid/internal/manager/biz/aiops/agent"
 	aiopschatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/chatruntime"
 	aiopsgraph "github.com/ongridio/ongrid/internal/manager/biz/aiops/graph"
 	aiopsgraphcb "github.com/ongridio/ongrid/internal/manager/biz/aiops/graph/callbacks"
@@ -1470,33 +1469,12 @@ func main() {
 	// find_topology_node show up in the BaseTool roster. nil-safe — the
 	// two BaseTools are gated on this exact field.
 	toolsReg.SetTopologyGraph(topologyUC)
-	aiopsAgent := aiopsagent.New(
-		llmClient,
-		toolsReg,
-		aiopsRepo,
-		aiopsagent.Config{Model: cfg.OpenAI.Model, Temperature: 0.1, MaxIterations: 30},
-		log,
-	)
-	aiopsAgent.SetAgentWriteEnabledProvider(func(ctx context.Context) bool {
-		return settingSvc.AgentWriteEnabled(ctx)
-	})
 	aiopsUsage := managerbizaiops.NewUsageUsecase(aiopsRepo, log)
 
-	// The graph-based AgentLoop is the default execution path. Operators can
-	// set ONGRID_AGENT_KERNEL=legacy for an explicit rollback while migration
-	// issues are investigated.
-	// When the env is set we build:
-	//   - RoutingChatModel (PR-1) wrapping the existing llmRouter, one
-	//     per provider id.
-	//   - Decorated BaseTool slice via Registry.BuildBaseTools +
-	//     AppendHostFilesTools, then Wrap'd with the standard chain.
-	//   - SkillRegistry / AgentRegistry from ./skills + ./agents
-	//     (silent on missing dirs — fresh installs boot fine).
-	//   - chatruntime.Runtime, the cutover entry the service routes to.
-	// Mismatch / build errors fall back to legacy with a logged warning.
-	kernel := managersvcaiops.ParseKernel(os.Getenv("ONGRID_AGENT_KERNEL"))
-	log.Info("aiops agent kernel selected", slog.String("kernel", string(kernel)))
-
+	// Graph 是唯一聊天运行时，旧配置保留一个版本的明确迁移提示。
+	if old := strings.TrimSpace(os.Getenv("ONGRID_AGENT_KERNEL")); old != "" && old != "graph" {
+		log.Warn("ONGRID_AGENT_KERNEL is obsolete; using graph runtime", slog.String("configured", old))
+	}
 	// Knowledge base + git-repo integration (RAG Phase-1). Wire BEFORE
 	// buildAIOpsRuntime so the BaseTool bag picks up query_knowledge —
 	// SetKnowledgeSearcher only affects subsequent BuildBaseTools calls.
@@ -1610,6 +1588,45 @@ func main() {
 		}
 	}
 
+	// L2 skill framework: builtin Executors registered via init() in
+	// internal/skill/builtin (imported above). Service dispatches via
+	// frontierbound.Client; audit goes to MySQL skill_executions.
+	skillSvc := managerbizskill.New(
+		fbClient,
+		managerbizskill.NewGormAuditSink(db),
+		log.With(slog.String("comp", "skill")),
+	)
+	// Wire the multi-provider config resolver into the manager-scoped
+	// web_search built-in. Default provider is SearXNG (zero-config,
+	// docker-internal). The skill returns a skipped_reason envelope
+	// when the chosen provider is missing a key / unreachable, so this
+	// is safe to call even before any operator configures the integration.
+	skillbuiltin.SetWebSearchConfigResolver(managerbizsetting.NewWebSearchResolver(settingSvc))
+
+	// Subprocess skill loader: walks each allowlist root and registers
+	// SubprocessSkills for every skill.json found. Empty dir list =
+	// nothing loaded; missing dirs are logged and skipped so a fresh
+	// install with no /etc/ongrid/skills boots cleanly.
+	if loaded, err := skillcore.LoadDirs(skillcore.LoaderConfig{
+		Dirs: cfg.Skills.ExternalDirs,
+		Logger: func(format string, args ...any) {
+			log.Info(fmt.Sprintf(format, args...), slog.String("comp", "skill-loader"))
+		},
+	}); err != nil {
+		log.Warn("skill loader returned error",
+			slog.Int("loaded", loaded),
+			slog.Any("err", err),
+		)
+	} else if loaded > 0 {
+		log.Info("subprocess skills loaded", slog.Int("count", loaded))
+	}
+
+	// Auto-register safe skills as LLM function-calling tools so the AI
+	// agent can invoke them through the same audit + permission path
+	// the HTTP layer uses. Mutating / dangerous classes are gated behind
+	// PR-G4 SOP signing and never auto-registered for the LLM.
+	toolsReg.SetSkillRunner(skillSvc)
+
 	// AgentRegistry + SkillRegistry are loaded UNCONDITIONALLY from
 	// ./agents + ./skills + the marketplace root. They're metadata — a
 	// persona description is just YAML+markdown — so the /v1/agents
@@ -1632,11 +1649,10 @@ func main() {
 		chatRT *aiopschatruntime.Runtime
 	)
 	humanApprovalBroker := newHumanApprovalBroker()
-	if kernel == managersvcaiops.KernelGraph {
+	{
 		rt, rterr := buildAIOpsRuntime(rootCtx, cfg, llmClient, llmRouter, toolsReg, aiopsRepo, mutatingProposalRepo, fbClient, edgeUC, deviceUC, reg, log, bootstrapSkillReg, bootstrapAgentReg, llmSettingsResolver, humanApprovalBroker)
 		if rterr != nil {
-			log.Warn("aiops runtime build failed — falling back to legacy kernel", slog.Any("err", rterr))
-			kernel = managersvcaiops.KernelLegacy
+			log.Error("chat runtime unavailable; fix configuration and restart Manager", slog.Any("err", rterr))
 		} else {
 			aiopsRuntime = rt
 			chatRT = rt
@@ -1690,7 +1706,7 @@ func main() {
 		}
 	}
 
-	aiopsSvc := managersvcaiops.NewWithKernel(aiopsAgent, aiopsRuntime, kernel, aiopsRepo, aiopsUsage, log)
+	aiopsSvc := managersvcaiops.New(aiopsRuntime, aiopsRepo, aiopsUsage, log)
 	aiopsSvc.SetMutatingProposalRepo(mutatingProposalRepo)
 	aiopsSvc.WithAPMSourceResolver(apmService)
 	aiopsSvc.SetAttachmentRepo(aiopsRepo)
@@ -1819,13 +1835,8 @@ func main() {
 		aiopsHandler.SetUserAgentManager(userAgentSvc)
 	}
 	// Hand the agent the mention resolver so @-mentions get inlined
-	// into the user message prelude on each Run. The agent uses its
-	// own Mention type to keep the agent package dep-light; an adapter
-	// shuttles between the two shapes here at the wiring site.
-	aiopsAgent.SetMentionResolver(mentionResolverAdapter{inner: mentionSearcher})
-	// Mirror the same wiring on the new graph kernel runtime when it
-	// was successfully constructed. Same searcher, two adapter shapes
-	// — see the type definitions at the bottom of this file.
+	// into the user message prelude. The adapter converts the shared
+	// mention search types into the runtime request shape.
 	if rt, ok := aiopsRuntime.(*aiopschatruntime.Runtime); ok && rt != nil {
 		rt.SetMentionResolver(chatruntimeMentionAdapter{inner: mentionSearcher})
 	}
@@ -1851,7 +1862,7 @@ func main() {
 	if hasConfiguredLLMProvider(llmRouter) {
 		legacy := aiopsinvestigator.New(
 			llmClient,
-			toolsReg,
+			backgroundToolInvoker{reg: toolsReg},
 			alertRepo,
 			aiopsinvestigator.Config{},
 			log,
@@ -2081,14 +2092,6 @@ func main() {
 		knowledgeHandler.SetAuthz(authzMW)
 	}
 
-	// L2 skill framework: builtin Executors registered via init() in
-	// internal/skill/builtin (imported above). Service dispatches via
-	// frontierbound.Client; audit goes to MySQL skill_executions.
-	skillSvc := managerbizskill.New(
-		fbClient,
-		managerbizskill.NewGormAuditSink(db),
-		log.With(slog.String("comp", "skill")),
-	)
 	// HLD-017: surface chatruntime SKILL.md skills (built-in + marketplace-
 	// installed) in the /v1/skills catalog. They live in a separate registry
 	// from skillcore, so without this an installed pack (e.g. terrashark) is
@@ -2461,8 +2464,7 @@ func main() {
 					graphTools = append(graphTools, aiopstoolsdec.Wrap(raw, deps))
 				}
 			}
-			chatRT.ReplaceCatalogToolsByNamePrefix(prefix, rawTools)
-			chatRT.ReplaceToolsByNamePrefix(prefix, graphTools)
+			chatRT.ReplaceToolSource(prefix, rawTools, graphTools)
 			log.Info("mcp tools refreshed in chat runtime",
 				slog.String("server", serverName),
 				slog.Int("tools", len(graphTools)),
@@ -2507,44 +2509,13 @@ func main() {
 		slog.Bool("pinned_pubkey", mpPinnedKey != ""),
 	)
 
-	// Wire the multi-provider config resolver into the manager-scoped
-	// web_search built-in. Default provider is SearXNG (zero-config,
-	// docker-internal). The skill returns a skipped_reason envelope
-	// when the chosen provider is missing a key / unreachable, so this
-	// is safe to call even before any operator configures the integration.
-	skillbuiltin.SetWebSearchConfigResolver(managerbizsetting.NewWebSearchResolver(settingSvc))
-
-	// Subprocess skill loader: walks each allowlist root and registers
-	// SubprocessSkills for every skill.json found. Empty dir list =
-	// nothing loaded; missing dirs are logged and skipped so a fresh
-	// install with no /etc/ongrid/skills boots cleanly.
-	if loaded, err := skillcore.LoadDirs(skillcore.LoaderConfig{
-		Dirs: cfg.Skills.ExternalDirs,
-		Logger: func(format string, args ...any) {
-			log.Info(fmt.Sprintf(format, args...), slog.String("comp", "skill-loader"))
-		},
-	}); err != nil {
-		log.Warn("skill loader returned error",
-			slog.Int("loaded", loaded),
-			slog.Any("err", err),
-		)
-	} else if loaded > 0 {
-		log.Info("subprocess skills loaded", slog.Int("count", loaded))
-	}
-
-	// Auto-register safe skills as LLM function-calling tools so the AI
-	// agent can invoke them through the same audit + permission path
-	// the HTTP layer uses. Mutating / dangerous classes are gated behind
-	// PR-G4 SOP signing and never auto-registered for the LLM.
-	toolsReg.RegisterSafeSkills(skillSvc)
 	// Inventory bridge: register every BaseTool in the bag as a skill so
 	// /skills surfaces the complete cloud-side capability inventory.
-	// Runs regardless of agent kernel (legacy / graph) so the page is
+	// Runs independently of runtime initialization so the page is
 	// populated either way. Skipped tools (already exist as skills via
 	// skill_bridge) are silently bypassed. Idempotent.
 	{
 		invBag := toolsReg.BuildBaseTools()
-		invBag = aiopstools.AppendHostFilesTools(invBag, fbClient, edgeUC, deviceUC, log)
 		toolsReg.RegisterBaseToolsAsSkills(invBag, log.With(slog.String("comp", "inventory-bridge")))
 		// Re-merge so flow `tool` nodes can run tools registered after the
 		// invoker was first built — cloud_bash (its proposer is wired above)
@@ -3497,34 +3468,7 @@ func (c investigatorChain) InvestigateAsync(in *managermodelalert.Incident) {
 	}
 }
 
-// mentionResolverAdapter shuttles between agent.Mention (the type
-// agent.go uses internally to keep its dependency surface narrow) and
-// mentions.Mention (the biz layer's type). One copy on each Run is
-// negligible; the alternative — leaking biz/aiops/mentions into the
-// agent package — would invert the dep direction.
-type mentionResolverAdapter struct {
-	inner *managerbizaiopsmentions.Searcher
-}
-
-func (a mentionResolverAdapter) Resolve(ctx context.Context, in []aiopsagent.Mention) []string {
-	if a.inner == nil || len(in) == 0 {
-		return nil
-	}
-	out := make([]managerbizaiopsmentions.Mention, 0, len(in))
-	for _, m := range in {
-		out = append(out, managerbizaiopsmentions.Mention{
-			Type:  managerbizaiopsmentions.Type(m.Type),
-			ID:    m.ID,
-			Label: m.Label,
-		})
-	}
-	return a.inner.Resolve(ctx, out)
-}
-
-// chatruntimeMentionAdapter is the same translation as
-// mentionResolverAdapter but for the chatruntime.Mention shape (the
-// new graph kernel's local type — kept separate from agent.Mention so
-// chatruntime doesn't import agent).
+// chatruntimeMentionAdapter 将共享 mention 查询结果传给聊天运行时。
 type chatruntimeMentionAdapter struct {
 	inner *managerbizaiopsmentions.Searcher
 }
@@ -3968,9 +3912,8 @@ func loadBootstrapRegistries(log *slog.Logger) (*aiopschatruntime.SkillRegistry,
 	return skillReg, agentReg
 }
 
-// buildAIOpsRuntime builds the chatruntime.Runtime when
-// ONGRID_AGENT_KERNEL=graph. Returns (nil, err) on failure so the
-// caller can fall back to the legacy kernel without a panic.
+// buildAIOpsRuntime 构建唯一聊天运行时；失败时返回错误，
+// 由调用方将聊天标记为不可用，不中断 Manager 的其他服务。
 //
 // Keep the default persona aligned with graph.DefaultConfig's hard ceiling.
 // A persona override must never silently reopen a loop budget that the graph
@@ -4123,7 +4066,6 @@ func buildAIOpsRuntime(
 	//    threshold the specialty tier auto-redacts and the LLM
 	//    fetches schemas via the always-loaded ToolSearch tool.
 	bag := toolsReg.BuildBaseTools()
-	bag = aiopstools.AppendHostFilesTools(bag, fbClient, edgeUC, deviceUC, log)
 	baseTools := bag.SchemasForLLM()
 	reviewSpawner := &chatruntimeReviewSpawner{}
 	reviewSink := newMutatingProposalSink(mutatingProposals)
@@ -4864,17 +4806,6 @@ func (s k8sActionProposerShim) ProposeAndAwait(ctx context.Context, args aiopsto
 				Command:    command,
 			},
 		})
-	} else if emit := aiopsagent.EmitFromContext(ctx); emit != nil {
-		emit(aiopsagent.Event{
-			Type: aiopsagent.EventApprovalPending,
-			Approval: &aiopsagent.ApprovalPendingEvent{
-				ApprovalID: a.ID,
-				ToolCallID: toolCallID,
-				Kind:       aiopstools.ToolNameExecuteK8sAction,
-				ToolName:   aiopstools.ToolNameExecuteK8sAction,
-				Command:    command,
-			},
-		})
 	}
 	return cloudBashProposerShim{uc: s.uc}.awaitDecision(ctx, a.ID)
 }
@@ -5025,14 +4956,6 @@ func (s mcpProposerShim) ProposeMCPCallAndAwait(ctx context.Context, server, too
 				ToolName: aiopstools.MCPToolName(server, tool), Command: cmd,
 			},
 		})
-	} else if emit := aiopsagent.EmitFromContext(ctx); emit != nil {
-		emit(aiopsagent.Event{
-			Type: aiopsagent.EventApprovalPending,
-			Approval: &aiopsagent.ApprovalPendingEvent{
-				ApprovalID: a.ID, ToolCallID: toolCallID, Kind: "mcp_call",
-				ToolName: aiopstools.MCPToolName(server, tool), Command: cmd,
-			},
-		})
 	}
 	return cloudBashProposerShim{uc: s.uc}.awaitDecision(ctx, a.ID)
 }
@@ -5092,6 +5015,8 @@ func (s *flowToolInvoker) InvokeTool(ctx context.Context, name string, args json
 	// Tag any artifact a tool node produces (serve_page) as workflow-sourced so
 	// the operations UI's 生成来源 column distinguishes it from chat-generated pages.
 	ctx = aiopstoolsbase.WithArtifactSource(ctx, aiopstoolsbase.ArtifactSourceWorkflow)
+	// 发布工作流中的显式工具节点即授权该步骤联网；聊天不使用此入口。
+	ctx = aiopstoolsbase.WithWebSearchAllowed(ctx, true)
 	// MCP tool nodes dispatch LIVE through the mcp source (resolve the current
 	// server/tool, run directly without an approval card — placing the node in
 	// a published flow IS the human authorization; a per-run inbox approval is
@@ -6087,4 +6012,28 @@ func seedInfrastructureMenuDefaults(ctx context.Context, db *gorm.DB, settings *
 	if err := settings.SetIfAbsent(ctx, "ui", "infrastructure_menu_upgrade_v0_10", string(value), false); err != nil {
 		log.Warn("seed infrastructure menu defaults", slog.Any("err", err))
 	}
+}
+
+// backgroundToolInvoker 让确定性的告警初查复用统一工具目录，不依赖旧循环注册表。
+type backgroundToolInvoker struct{ reg *aiopstools.Registry }
+
+func (i backgroundToolInvoker) Invoke(ctx context.Context, name string, args json.RawMessage) (aiopstools.ExecuteResult, error) {
+	for _, t := range i.reg.BuildBaseTools().AllTools() {
+		info, err := t.Info(ctx)
+		if err != nil {
+			return aiopstools.ExecuteResult{}, err
+		}
+		if info == nil || info.Name != name {
+			continue
+		}
+		if info.Class != "read" {
+			return aiopstools.ExecuteResult{}, fmt.Errorf("background tool %q is not read-only", name)
+		}
+		result, err := t.InvokableRun(ctx, string(args))
+		if err != nil {
+			return aiopstools.ExecuteResult{}, err
+		}
+		return aiopstools.ExecuteResult{ResultJSON: json.RawMessage(result)}, nil
+	}
+	return aiopstools.ExecuteResult{}, fmt.Errorf("background tool %q unavailable", name)
 }

@@ -115,13 +115,7 @@ services:
       # default chat provider's model — no separate model config needed.
       ONGRID_INVESTIGATOR_ENABLED: ${ONGRID_INVESTIGATOR_ENABLED:-true}
       ONGRID_INVESTIGATOR_MIN_SEVERITY: ${ONGRID_INVESTIGATOR_MIN_SEVERITY:-warning}
-      # AIOps agent kernel. "graph" enables the eino graph kernel +
-      # SkillRegistry.Resolve activation-keyword filter (skills with
-      # activation:keyword stay out of the prompt unless the user query
-      # mentions a keyword) + ToolBag deferral pipeline. "legacy" =
-      # historical for-loop runner with all tools always full-schema.
-      # Default flipped to graph 2026-05-08; flip to legacy to bisect.
-      ONGRID_AGENT_KERNEL: ${ONGRID_AGENT_KERNEL:-graph}
+      # Graph/Eino is the only Agent runtime (RFC-005).
       # ToolBag deferral threshold. When tool count > this, specialty-tier
       # tools get redacted schemas (LLM must call ToolSearch to expand).
       # Default 30 is fine until marketplace grows the bag past it.

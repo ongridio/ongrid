@@ -30,7 +30,7 @@ func (f *fakeMutatingProposalRepo) CountMutatingProposals(_ context.Context, fil
 }
 
 func TestServiceListMutatingProposalsRequiresAdmin(t *testing.T) {
-	s := NewWithKernel(nil, nil, KernelLegacy, nil, nil, nil)
+	s := New(nil, nil, nil, nil)
 	s.SetMutatingProposalRepo(&fakeMutatingProposalRepo{})
 
 	_, _, err := s.ListMutatingProposals(context.Background(), Caller{UserID: 2, Role: "user"}, biz.MutatingProposalFilter{})
@@ -44,7 +44,7 @@ func TestServiceListMutatingProposalsNormalizesFilter(t *testing.T) {
 		items: []*model.MutatingProposal{{ID: "proposal-1", ToolName: "execute_k8s_action"}},
 		total: 1,
 	}
-	s := NewWithKernel(nil, nil, KernelLegacy, nil, nil, nil)
+	s := New(nil, nil, nil, nil)
 	s.SetMutatingProposalRepo(repo)
 
 	items, total, err := s.ListMutatingProposals(context.Background(), Caller{UserID: 1, Role: "admin"}, biz.MutatingProposalFilter{

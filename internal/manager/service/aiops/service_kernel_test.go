@@ -119,57 +119,7 @@ func newSeededSessions(uid uint64) (*memSessions, string) {
 	return store, id
 }
 
-// TestParseKernel_Defaults exercises the env→Kernel parsing.
-//
-//	unset / empty / garbage → legacy
-//	"graph"                 → graph
-func TestParseKernel_Defaults(t *testing.T) {
-	cases := []struct {
-		in   string
-		want Kernel
-	}{
-		{"", KernelGraph},
-		{"legacy", KernelLegacy},
-		{"GRAPH", KernelGraph},
-		{"  graph  ", KernelGraph},
-		{"garbage", KernelGraph},
-	}
-	for _, c := range cases {
-		if got := ParseKernel(c.in); got != c.want {
-			t.Errorf("ParseKernel(%q) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
-
-// TestService_KernelLegacy_DispatchesToAgent verifies the default
-// kernel routes through the legacy agent.Agent path. We can't easily
-// stand up a real agent here (it needs an LLM client + tools.Registry)
-// — instead, the test confirms the runtime is NOT consulted and the
-// legacy path runs (errors with ErrNotWiredYet because we pass a nil
-// agent on purpose).
-func TestService_KernelLegacy_DispatchesToAgent(t *testing.T) {
-	store, sid := newSeededSessions(7)
-	rt := &fakeRuntime{}
-	svc := NewWithKernel(nil, rt, KernelLegacy, store, nil, nil)
-
-	caller := Caller{UserID: 7}
-	_, err := svc.PostMessage(context.Background(), caller, sid, "hello")
-	// Legacy path is not wired (nil agent) — we expect a panic-free
-	// failure that is NOT runtime.Handle (rt.calls must stay 0).
-	if rt.calls.Load() != 0 {
-		t.Errorf("legacy kernel must NOT consult runtime, got %d calls", rt.calls.Load())
-	}
-	if err == nil {
-		t.Errorf("expected error from nil legacy agent path")
-	}
-}
-
-// TestService_KernelGraph_DispatchesToRuntime asserts that when
-// kernel=graph and runtime != nil, every chat-send path goes through
-// runtime.Handle. The fakeRuntime emits one of each event; we
-// translate them to legacy frame names through the service's SSE
-// adapter and assert the names + sequence.
-func TestService_KernelGraph_DispatchesToRuntime(t *testing.T) {
+func TestService_Graph_DispatchesToRuntime(t *testing.T) {
 	store, sid := newSeededSessions(7)
 	body := "all done"
 	rt := &fakeRuntime{
@@ -184,7 +134,7 @@ func TestService_KernelGraph_DispatchesToRuntime(t *testing.T) {
 			Iterations: 2,
 		},
 	}
-	svc := NewWithKernel(nil, rt, KernelGraph, store, nil, nil)
+	svc := New(rt, store, nil, nil)
 
 	var (
 		evtMu sync.Mutex
@@ -238,30 +188,27 @@ func TestService_KernelGraph_DispatchesToRuntime(t *testing.T) {
 	}
 }
 
-// TestService_KernelGraph_NilRuntime_FallsBackToLegacy guards
+// TestService_MissingRuntimeFailsExplicitly guards
 // against the misconfig where ONGRID_AGENT_KERNEL=graph but the
 // runtime fails to build. We must fall back to legacy; the test
 // confirms runtime is never called.
-func TestService_KernelGraph_NilRuntime_FallsBackToLegacy(t *testing.T) {
+// 运行时不可用时应返回稳定错误，不能隐式执行另一套循环。
+func TestService_MissingRuntimeFailsExplicitly(t *testing.T) {
 	store, sid := newSeededSessions(7)
-	svc := NewWithKernel(nil, nil, KernelGraph, store, nil, nil)
-	caller := Caller{UserID: 7}
-	_, err := svc.PostMessage(context.Background(), caller, sid, "hello")
-	if err == nil {
-		t.Errorf("expected error from nil legacy agent path with graph kernel + nil runtime")
+	svc := New(nil, store, nil, nil)
+	_, err := svc.PostMessage(context.Background(), Caller{UserID: 7}, sid, "hello")
+	if !errors.Is(err, errs.ErrNotWiredYet) {
+		t.Fatalf("error=%v, want runtime unavailable", err)
 	}
-	// Defensive: a fakeRuntime that's nil on the service AND a
-	// legacy agent that's nil yields a panic-free error path.
-	_ = errors.Is(err, errs.ErrNotWiredYet) // tolerate either err shape
 }
 
-// TestService_KernelGraph_Ownership respects the owner check in
+// TestService_Graph_Ownership respects the owner check in
 // the GetSession indirection — non-owner gets ErrNotFound BEFORE the
 // runtime is consulted.
-func TestService_KernelGraph_Ownership(t *testing.T) {
+func TestService_Graph_Ownership(t *testing.T) {
 	store, sid := newSeededSessions(7)
 	rt := &fakeRuntime{}
-	svc := NewWithKernel(nil, rt, KernelGraph, store, nil, nil)
+	svc := New(rt, store, nil, nil)
 
 	caller := Caller{UserID: 99}
 	_, err := svc.PostMessage(context.Background(), caller, sid, "hello")
