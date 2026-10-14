@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -13,6 +14,8 @@ import (
 	"time"
 
 	aiopstools "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
+	alertbiz "github.com/ongridio/ongrid/internal/manager/biz/alert"
 	model "github.com/ongridio/ongrid/internal/manager/model/alert"
 	"github.com/ongridio/ongrid/internal/pkg/llm"
 )
@@ -52,12 +55,13 @@ func (f *fakeLLM) Chat(ctx context.Context, req llm.ChatReq) (*llm.ChatResp, err
 
 // fakeTools stubs ToolInvoker; returns a canned bundle.
 type fakeTools struct {
-	mu        sync.Mutex
-	bundle    json.RawMessage
-	err       error
-	gotName   string
-	gotArgs   json.RawMessage
-	callCount int
+	mu          sync.Mutex
+	bundle      json.RawMessage
+	rawResponse json.RawMessage
+	err         error
+	gotName     string
+	gotArgs     json.RawMessage
+	callCount   int
 }
 
 func (f *fakeTools) Invoke(_ context.Context, name string, args json.RawMessage) (aiopstools.ExecuteResult, error) {
@@ -69,7 +73,18 @@ func (f *fakeTools) Invoke(_ context.Context, name string, args json.RawMessage)
 	if f.err != nil {
 		return aiopstools.ExecuteResult{}, f.err
 	}
-	return aiopstools.ExecuteResult{ResultJSON: f.bundle}, nil
+	if f.rawResponse != nil {
+		return aiopstools.ExecuteResult{ResultJSON: f.rawResponse}, nil
+	}
+	var input aiopstools.CorrelateIncidentBatchArgs
+	if err := json.Unmarshal(args, &input); err != nil {
+		return aiopstools.ExecuteResult{}, err
+	}
+	if len(input.IncidentIDs) != 1 {
+		return aiopstools.ExecuteResult{}, errors.New("expected one incident_ids entry")
+	}
+	response := fmt.Sprintf(`{"success_count":1,"results":[{"incident_id":%d,"bundle":%s}]}`, input.IncidentIDs[0], f.bundle)
+	return aiopstools.ExecuteResult{ResultJSON: json.RawMessage(response)}, nil
 }
 
 // fakeWriter captures CreateEvent calls.
@@ -153,10 +168,12 @@ func TestInvestigateAsyncWritesEvent(t *testing.T) {
 	if toolsFake.gotName != aiopstools.ToolNameCorrelateIncident {
 		t.Errorf("tool name=%q, want %q", toolsFake.gotName, aiopstools.ToolNameCorrelateIncident)
 	}
-	var argMap map[string]any
-	_ = json.Unmarshal(toolsFake.gotArgs, &argMap)
-	if argMap["incident_id"] != float64(7) {
-		t.Errorf("expected incident_id=7 in args, got %v", argMap["incident_id"])
+	var input aiopstools.CorrelateIncidentBatchArgs
+	if err := json.Unmarshal(toolsFake.gotArgs, &input); err != nil {
+		t.Fatal(err)
+	}
+	if len(input.IncidentIDs) != 1 || input.IncidentIDs[0] != 7 {
+		t.Errorf("expected incident_ids=[7], got %v", input.IncidentIDs)
 	}
 
 	// LLM round-trip sanity: system prompt + user bundle.
@@ -322,5 +339,59 @@ func TestConcurrencyMultipleWorkers(t *testing.T) {
 
 	if got := len(writer.snapshot()); got != int(enqueued.Load()) {
 		t.Errorf("expected %d events, got %d", enqueued.Load(), got)
+	}
+}
+
+func TestInvestigatorRejectsFailedOrMismatchedBatch(t *testing.T) {
+	for _, response := range []string{
+		`{"error_count":1,"results":[{"incident_id":7,"error":"source unavailable"}]}`,
+		`{"results":[{"incident_id":8,"bundle":{}}]}`,
+		`{"results":[{"incident_id":7}]}`,
+		`{}`, `not json`,
+	} {
+		t.Run(response, func(t *testing.T) {
+			llmStub := &fakeLLM{content: "must not diagnose a missing bundle"}
+			writer := &fakeWriter{}
+			inv := New(llmStub, &fakeTools{rawResponse: json.RawMessage(response)}, writer, Config{Workers: 1}, newQuietLogger())
+			inv.InvestigateAsync(&model.Incident{ID: 7})
+			inv.Close()
+			if llmStub.calls != 0 || len(writer.snapshot()) != 0 {
+				t.Fatal("invalid bundle produced a diagnosis")
+			}
+		})
+	}
+}
+
+// 真实 BaseTool 契约回归：防止 fake 接受旧参数而掩盖运行时迁移错误。
+type realCorrelationInvoker struct{ tool basetool.BaseTool }
+
+func (i realCorrelationInvoker) Invoke(ctx context.Context, name string, args json.RawMessage) (aiopstools.ExecuteResult, error) {
+	if name != aiopstools.ToolNameCorrelateIncident {
+		return aiopstools.ExecuteResult{}, fmt.Errorf("unexpected tool %s", name)
+	}
+	result, err := i.tool.InvokableRun(ctx, string(args))
+	return aiopstools.ExecuteResult{ResultJSON: json.RawMessage(result)}, err
+}
+
+type correlationAlerts struct{ aiopstools.AlertUsecase }
+
+func (correlationAlerts) GetIncident(context.Context, uint64) (*model.Incident, error) {
+	return &model.Incident{ID: 7, Title: "batch contract incident", Rule: "cpu_high", FirstFiredAt: time.Now(), LabelsJSON: "{}", AnnotationsJSON: "{}"}, nil
+}
+func (correlationAlerts) ListIncidents(context.Context, alertbiz.IncidentFilter) ([]*model.Incident, error) {
+	return nil, nil
+}
+func TestInvestigatorUsesRealCorrelationToolContract(t *testing.T) {
+	llmStub := &fakeLLM{content: "diagnosis from real bundle"}
+	writer := &fakeWriter{}
+	tool := aiopstools.NewCorrelateIncidentTool(correlationAlerts{}, nil, nil, nil, nil, nil, newQuietLogger())
+	inv := New(llmStub, realCorrelationInvoker{tool: tool}, writer, Config{Workers: 1}, newQuietLogger())
+	inv.InvestigateAsync(&model.Incident{ID: 7})
+	inv.Close()
+	if len(writer.snapshot()) != 1 || len(llmStub.gotMsgs) != 2 {
+		t.Fatal("real correlation did not produce a diagnosis")
+	}
+	if !strings.Contains(llmStub.gotMsgs[1].Content, "batch contract incident") {
+		t.Fatal("incident bundle missing from prompt")
 	}
 }

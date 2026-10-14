@@ -5,13 +5,13 @@
 //   - Tool name = skill metadata Key (lower_snake, already unique)
 //   - Tool description = skill Description
 //   - Tool schema = skill.ParamSchema.ToJSONSchema() with one extra
-//                        property `edge_id` (uint64) prepended — every
-//                        skill execution targets a specific edge, so the
-//                        LLM must always supply it.
+//     property `edge_id` (uint64) prepended — every
+//     skill execution targets a specific edge, so the
+//     LLM must always supply it.
 //   - Tool execute = unmarshal args -> {edge_id, ...skillParams},
-//                        call manager/biz/skill.Service.Execute, return
-//                        the raw result JSON (or an error envelope) so
-//                        the LLM sees structured output.
+//     call manager/biz/skill.Service.Execute, return
+//     the raw result JSON (or an error envelope) so
+//     the LLM sees structured output.
 //
 // Only ClassSafe skills are registered; mutating / dangerous require a
 // human-in-the-loop workflow (PR-G4) before the agent can invoke them.
@@ -128,7 +128,7 @@ func buildSkillToolSchema(e skillcore.Executor) (json.RawMessage, error) {
 			"type":        "integer",
 			"description": "Device id to run this skill on (required). Same id as the @-mention chip and the Prom device_id label.",
 		}
-		required, _ := base["required"].([]string)
+		required, _ := base["required"].([]any)
 		hasDeviceID := false
 		for _, name := range required {
 			if name == "device_id" {

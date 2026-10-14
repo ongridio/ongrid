@@ -296,8 +296,8 @@ func (i *Investigator) runOne(incident *model.Incident) {
 // going through the chat session abstraction) and returns its raw JSON
 // result. Failures are surfaced so runOne can log + abort.
 func (i *Investigator) gatherBundle(ctx context.Context, incidentID uint64) ([]byte, error) {
-	args, err := json.Marshal(map[string]any{
-		"incident_id": incidentID,
+	args, err := json.Marshal(aiopstools.CorrelateIncidentBatchArgs{
+		IncidentIDs: []uint64{incidentID},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("marshal correlate args: %w", err)
@@ -306,10 +306,25 @@ func (i *Investigator) gatherBundle(ctx context.Context, incidentID uint64) ([]b
 	if err != nil {
 		return nil, fmt.Errorf("invoke %s: %w", aiopstools.ToolNameCorrelateIncident, err)
 	}
-	if len(res.ResultJSON) == 0 {
-		return nil, errors.New("correlate_incident returned empty result")
+	var batch aiopstools.CorrelateIncidentBatchResponse
+	if err := json.Unmarshal(res.ResultJSON, &batch); err != nil {
+		return nil, fmt.Errorf("decode correlate_incident batch: %w", err)
 	}
-	return []byte(res.ResultJSON), nil
+	if len(batch.Results) != 1 || batch.Results[0].IncidentID != incidentID {
+		return nil, errors.New("correlate_incident returned unexpected incident results")
+	}
+	entry := batch.Results[0]
+	if entry.Error != "" {
+		return nil, fmt.Errorf("correlate_incident incident %d: %s", incidentID, entry.Error)
+	}
+	if entry.Bundle == nil {
+		return nil, errors.New("correlate_incident returned empty bundle")
+	}
+	bundle, err := json.Marshal(entry.Bundle)
+	if err != nil {
+		return nil, fmt.Errorf("marshal incident bundle: %w", err)
+	}
+	return bundle, nil
 }
 
 // capUserMessage trims the bundle JSON if it exceeds the configured

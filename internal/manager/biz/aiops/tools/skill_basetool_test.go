@@ -124,3 +124,39 @@ func writeCatalogFixture(t *testing.T, dir string) {
 		t.Fatal(err)
 	}
 }
+
+func TestHostSkillSchemaPreservesRequiredParameters(t *testing.T) {
+	for _, executor := range skillcore.AllByClass(skillcore.ClassSafe) {
+		if executor.Metadata().EffectiveScope() != skillcore.ScopeHost {
+			continue
+		}
+		t.Run(executor.Metadata().Key, func(t *testing.T) {
+			original, err := skillcore.BuildSchema(executor)
+			if err != nil {
+				t.Fatal(err)
+			}
+			adapted, err := buildSkillToolSchema(executor)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var before, after struct {
+				Required []string `json:"required"`
+			}
+			if err := json.Unmarshal(original, &before); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(adapted, &after); err != nil {
+				t.Fatal(err)
+			}
+			counts := map[string]int{}
+			for _, field := range after.Required {
+				counts[field]++
+			}
+			for _, field := range append(before.Required, "device_id") {
+				if counts[field] != 1 {
+					t.Errorf("required %s count=%d, schema=%s", field, counts[field], adapted)
+				}
+			}
+		})
+	}
+}
