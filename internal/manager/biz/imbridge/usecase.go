@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ongridio/ongrid/internal/pkg/errs"
 	model "github.com/ongridio/ongrid/internal/manager/model/imbridge"
+	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
 
 // AdminRepo is the surface UC needs from the data layer. The webhook
@@ -154,7 +154,7 @@ func (in *AppInput) validate() error {
 	// Allowlist semantics mirror Telegram: a Slack workspace bot accepts
 	// messages from any workspace member by default, which on a public
 	// or guest-rich workspace would let surprise users command the
-	// agent. Require at least one Slack user_id (U…) in allow_from so
+	// chatprotocol. Require at least one Slack user_id (U…) in allow_from so
 	// the operator must consciously open the door.
 	if provider == model.ProviderSlack {
 		if mode != model.ModeStream {

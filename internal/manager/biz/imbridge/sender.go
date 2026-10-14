@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ongridio/ongrid/internal/manager/biz/aiops/agent"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/chatprotocol"
 )
 
 // Sender is the minimum platform-agnostic outbound surface. Providers
@@ -25,7 +25,7 @@ type MessageEditor interface {
 	EditText(ctx context.Context, messageID, text string) error
 }
 
-// streamEditor turns the SSE-shape agent.Event stream into throttled
+// streamEditor turns the SSE-shape chatprotocol.Event stream into throttled
 // EditText calls on the platform. It assumes the assistant text grows
 // monotonically — we always send the full accumulated buffer, never
 // deltas, because Feishu / DingTalk both replace rather than append on
@@ -65,15 +65,15 @@ func newStreamEditor(ctx context.Context, sender Sender, chatID, receiveIDType, 
 	}
 }
 
-// OnEvent is wired as the emit callback for agent.RunStreamWithOpts.
+// OnEvent is wired as the emit callback for chatprotocol.RunStreamWithOpts.
 // We only care about EventAssistant (text chunks) and EventDone
 // (terminal — force-flush). Tool calls / task notifications are
 // suppressed in IM for now; they'd be too noisy as inline chat
 // messages.
-func (e *streamEditor) OnEvent(ev agent.Event) {
+func (e *streamEditor) OnEvent(ev chatprotocol.Event) {
 	switch ev.Type {
-	case agent.EventAssistant:
-		// Pull the text content out of the event. agent.Event for
+	case chatprotocol.EventAssistant:
+		// Pull the text content out of the event. chatprotocol.Event for
 		// assistant carries the persisted assistant turn — we
 		// concatenate its Content field. If the runtime later
 		// exposes a per-chunk delta we should switch to that to
@@ -89,7 +89,7 @@ func (e *streamEditor) OnEvent(ev agent.Event) {
 		if shouldFlush {
 			e.flush()
 		}
-	case agent.EventDone:
+	case chatprotocol.EventDone:
 		e.flush() // terminal: ensure last chunk lands
 	default:
 		// EventToolStart / EventToolEnd / EventTaskNotification —
@@ -162,9 +162,9 @@ func (e *streamEditor) flush() error {
 // EventAssistant payload. The agent runtime stores the full
 // accumulated assistant turn (not per-token deltas) on the event so we
 // can just take it.
-func assistantText(ev agent.Event) string {
-	// agent.Event.Assistant is set on assistant events — see
-	// internal/manager/biz/aiops/agent/agent.go. We avoid a direct
+func assistantText(ev chatprotocol.Event) string {
+	// chatprotocol.Event.Assistant is set on assistant events — see
+	// internal/manager/biz/aiops/agent/chatprotocol.go. We avoid a direct
 	// type assertion on the field shape to stay forward-compatible:
 	// if the runtime adds richer payloads (citations, attachments)
 	// they live on the same Event struct.

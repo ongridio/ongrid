@@ -14,7 +14,7 @@ import (
 )
 
 // StreamClient is the long-connection variant of the Feishu provider
-//manager dials out to Feishu's WebSocket-based event
+// manager dials out to Feishu's WebSocket-based event
 // service via the official larksuite/oapi-sdk-go ws.Client; events
 // land via the dispatcher and are bridged into the agent runtime.
 // No public webhook URL is required.

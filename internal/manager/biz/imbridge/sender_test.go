@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/ongridio/ongrid/internal/manager/biz/aiops/agent"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/chatprotocol"
 )
 
 type oneShotSender struct {
@@ -23,9 +23,9 @@ func TestStreamEditor_WhenSenderCannotEdit_SendsFinalMessageOnce(t *testing.T) {
 	editor := newStreamEditor(context.Background(), sender, "chat", "chat_id", "", "en",
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 
-	editor.OnEvent(agent.Event{Type: agent.EventAssistant, Assistant: &agent.AssistantEvent{Content: "partial"}})
-	editor.OnEvent(agent.Event{Type: agent.EventAssistant, Assistant: &agent.AssistantEvent{Content: "final"}})
-	editor.OnEvent(agent.Event{Type: agent.EventDone})
+	editor.OnEvent(chatprotocol.Event{Type: chatprotocol.EventAssistant, Assistant: &chatprotocol.AssistantEvent{Content: "partial"}})
+	editor.OnEvent(chatprotocol.Event{Type: chatprotocol.EventAssistant, Assistant: &chatprotocol.AssistantEvent{Content: "final"}})
+	editor.OnEvent(chatprotocol.Event{Type: chatprotocol.EventDone})
 	if err := editor.Flush(); err != nil {
 		t.Fatalf("Flush() error = %v", err)
 	}

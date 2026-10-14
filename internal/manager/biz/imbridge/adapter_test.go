@@ -21,7 +21,7 @@ func (f *fakeDefaults) ResolveProviders(_ context.Context) ([]llm.ProviderConfig
 
 // TestAdapter_runOptions_picksResolverDefault covers the v0.7.169 fix:
 // IM bridge must thread the cluster default_provider + <provider>_default_model
-// into agent.RunOptions instead of leaving them empty (which made agent.New
+// into chatprotocol.RunOptions instead of leaving them empty (which made chatprotocol.New
 // fall back to the hard-coded "gpt-5.4" model and end users saw
 // "助手执行失败" in Lark/Slack/Telegram).
 func TestAdapter_runOptions_picksResolverDefault(t *testing.T) {

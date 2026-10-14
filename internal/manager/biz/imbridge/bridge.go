@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ongridio/ongrid/internal/manager/biz/aiops/agent"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/chatprotocol"
 	model "github.com/ongridio/ongrid/internal/manager/model/imbridge"
 )
 
@@ -44,7 +44,7 @@ type AgentSession interface {
 	// EventAssistant (which carries the assistant text chunks) and
 	// EventDone (terminal). This is a thin wrapper over
 	// service.Service.PostMessageStreamWithOpts.
-	StreamMessage(ctx context.Context, sessionID string, userContent string, emit agent.Emit) error
+	StreamMessage(ctx context.Context, sessionID string, userContent string, emit chatprotocol.Emit) error
 }
 
 // Bridge is the singleton wired into manager main.go. Exported methods
@@ -221,7 +221,7 @@ func (b *Bridge) HandleInbound(ctx context.Context, sender Sender, msg InboundMe
 	//    language regardless of persona / model defaults. Empty locale =
 	//    auto = LLM mirrors the user. See [[feedback_ai_output_locale]].
 	editor := newStreamEditor(ctx, sender, msg.ChatID, msg.ReceiveIDType, placeholder, app.DefaultLocale, b.log)
-	emit := func(e agent.Event) {
+	emit := func(e chatprotocol.Event) {
 		editor.OnEvent(e)
 	}
 	userContent := msg.Text
@@ -236,7 +236,7 @@ func (b *Bridge) HandleInbound(ctx context.Context, sender Sender, msg InboundMe
 }
 
 // localeDirective renders the language hint we append to the user content
-// before handing to the agent. Empty locale = "" (no directive, LLM
+// before handing to the chatprotocol. Empty locale = "" (no directive, LLM
 // mirrors). Mirrors the RCA-side helper in alert/investigator but framed
 // for chat replies, not RCA reports — see [[feedback_ai_output_locale]].
 func localeDirective(locale string) string {

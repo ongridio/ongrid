@@ -9,7 +9,7 @@ import (
 	"time"
 
 	biz "github.com/ongridio/ongrid/internal/manager/biz/aiops"
-	"github.com/ongridio/ongrid/internal/manager/biz/aiops/agent"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/chatprotocol"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/chatruntime"
 	model "github.com/ongridio/ongrid/internal/manager/model/aiops"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
@@ -28,7 +28,7 @@ func (f *fakeRuntime) Handle(_ context.Context, req *chatruntime.Request) (*chat
 	f.calls.Add(1)
 	// Drive the SSE adapter through one full sequence so the frame
 	// translation is exercised end-to-end. The call site asserts on
-	// the resulting agent.Event slice.
+	// the resulting chatprotocol.Event slice.
 	if req.Emit != nil {
 		now := time.Now().UTC()
 		end := now.Add(20 * time.Millisecond)
@@ -188,9 +188,9 @@ func TestService_KernelGraph_DispatchesToRuntime(t *testing.T) {
 
 	var (
 		evtMu sync.Mutex
-		evts  []agent.Event
+		evts  []chatprotocol.Event
 	)
-	emit := func(ev agent.Event) {
+	emit := func(ev chatprotocol.Event) {
 		evtMu.Lock()
 		defer evtMu.Unlock()
 		evts = append(evts, ev)
@@ -212,10 +212,10 @@ func TestService_KernelGraph_DispatchesToRuntime(t *testing.T) {
 
 	evtMu.Lock()
 	defer evtMu.Unlock()
-	wantSequence := []agent.EventType{
-		agent.EventAssistant,
-		agent.EventToolStart,
-		agent.EventToolEnd,
+	wantSequence := []chatprotocol.EventType{
+		chatprotocol.EventAssistant,
+		chatprotocol.EventToolStart,
+		chatprotocol.EventToolEnd,
 	}
 	if len(evts) < len(wantSequence) {
 		t.Fatalf("got %d events, want at least %d (got %#v)", len(evts), len(wantSequence), evts)

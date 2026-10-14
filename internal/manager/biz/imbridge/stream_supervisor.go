@@ -42,13 +42,13 @@ type StreamRepo interface {
 // parent is the supervisor's own context. Cancelling the supervisor
 // (manager shutdown) propagates a graceful Stop to every client.
 type StreamSupervisor struct {
-	repo       StreamRepo
-	bridge     *Bridge
-	factories  map[string]StreamClientFactory // provider -> factory
-	log        *slog.Logger
-	mu         sync.Mutex
-	running    map[uint64]*streamSlot // im_app.id -> running slot
-	reconcile  time.Duration
+	repo      StreamRepo
+	bridge    *Bridge
+	factories map[string]StreamClientFactory // provider -> factory
+	log       *slog.Logger
+	mu        sync.Mutex
+	running   map[uint64]*streamSlot // im_app.id -> running slot
+	reconcile time.Duration
 }
 
 type streamSlot struct {

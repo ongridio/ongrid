@@ -30,7 +30,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	biz "github.com/ongridio/ongrid/internal/manager/biz/aiops"
-	"github.com/ongridio/ongrid/internal/manager/biz/aiops/agent"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/chatprotocol"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/chatruntime"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/mentions"
 	model "github.com/ongridio/ongrid/internal/manager/model/aiops"
@@ -50,10 +50,10 @@ type AIOpsService interface {
 	DeleteSession(ctx context.Context, caller svc.Caller, sessionID string) error
 	RenameSession(ctx context.Context, caller svc.Caller, sessionID string, title string) error
 	UpdateSessionModel(ctx context.Context, caller svc.Caller, sessionID string, provider string, model string) error
-	PostMessage(ctx context.Context, caller svc.Caller, sessionID string, content string) (*agent.Reply, error)
-	PostMessageWithOpts(ctx context.Context, caller svc.Caller, sessionID string, content string, opts agent.RunOptions) (*agent.Reply, error)
-	PostMessageStream(ctx context.Context, caller svc.Caller, sessionID string, content string, emit agent.Emit) (*agent.Reply, error)
-	PostMessageStreamWithOpts(ctx context.Context, caller svc.Caller, sessionID string, content string, emit agent.Emit, opts agent.RunOptions) (*agent.Reply, error)
+	PostMessage(ctx context.Context, caller svc.Caller, sessionID string, content string) (*chatprotocol.Reply, error)
+	PostMessageWithOpts(ctx context.Context, caller svc.Caller, sessionID string, content string, opts chatprotocol.RunOptions) (*chatprotocol.Reply, error)
+	PostMessageStream(ctx context.Context, caller svc.Caller, sessionID string, content string, emit chatprotocol.Emit) (*chatprotocol.Reply, error)
+	PostMessageStreamWithOpts(ctx context.Context, caller svc.Caller, sessionID string, content string, emit chatprotocol.Emit, opts chatprotocol.RunOptions) (*chatprotocol.Reply, error)
 	StopSession(ctx context.Context, caller svc.Caller, sessionID string) (bool, error)
 	UsageToday(ctx context.Context) (*biz.DailyUsage, error)
 	ListMutatingProposals(ctx context.Context, caller svc.Caller, f biz.MutatingProposalFilter) ([]*model.MutatingProposal, int64, error)
@@ -174,7 +174,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Delete("/v1/agents/custom/{name}", h.deleteUserAgent)
 	r.Get("/v1/operations/{id}", h.getOperation)
 	r.Post("/v1/operations/{id}/actions/{action}", h.executeOperationAction)
-	// Generic delete: works on any non-builtin / non-default agent.
+	// Generic delete: works on any non-builtin / non-default chatprotocol.
 	// Disk-source agents (loaded from agents/*.md) get session-scoped
 	// removal — the in-memory registry drops them, but the .md file
 	// stays and they re-appear on restart. User-source agents go
@@ -399,15 +399,15 @@ type mentionInput struct {
 	Label string `json:"label"`
 }
 
-func (m mentionInput) toAgent() agent.Mention {
-	return agent.Mention{Type: m.Type, ID: m.ID, Label: m.Label}
+func (m mentionInput) toAgent() chatprotocol.Mention {
+	return chatprotocol.Mention{Type: m.Type, ID: m.ID, Label: m.Label}
 }
 
-func toAgentMentions(in []mentionInput) []agent.Mention {
+func toAgentMentions(in []mentionInput) []chatprotocol.Mention {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]agent.Mention, 0, len(in))
+	out := make([]chatprotocol.Mention, 0, len(in))
 	for _, m := range in {
 		out = append(out, m.toAgent())
 	}
@@ -737,7 +737,7 @@ func (h *Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	opts := agent.RunOptions{
+	opts := chatprotocol.RunOptions{
 		Provider:         req.Provider,
 		Model:            req.Model,
 		Mentions:         toAgentMentions(req.Mentions),
@@ -791,7 +791,7 @@ func (h *Handler) postMessageStream(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	opts := agent.RunOptions{
+	opts := chatprotocol.RunOptions{
 		Provider:         req.Provider,
 		Model:            req.Model,
 		Mentions:         toAgentMentions(req.Mentions),
@@ -821,7 +821,7 @@ func (h *Handler) postMessageStream(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(": ok\n\n"))
 	flusher.Flush()
 
-	emit := func(e agent.Event) {
+	emit := func(e chatprotocol.Event) {
 		writeSSE(w, flusher, eventName(e.Type), eventPayload(id, e))
 	}
 
@@ -841,28 +841,28 @@ func (h *Handler) postMessageStream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func eventName(t agent.EventType) string {
+func eventName(t chatprotocol.EventType) string {
 	switch t {
-	case agent.EventAssistant:
+	case chatprotocol.EventAssistant:
 		return "assistant"
-	case agent.EventToolStart:
+	case chatprotocol.EventToolStart:
 		return "tool_start"
-	case agent.EventToolEnd:
+	case chatprotocol.EventToolEnd:
 		return "tool_end"
-	case agent.EventDone:
+	case chatprotocol.EventDone:
 		return "done"
-	case agent.EventTaskNotification:
+	case chatprotocol.EventTaskNotification:
 		return "task_notification"
-	case agent.EventApprovalPending:
+	case chatprotocol.EventApprovalPending:
 		return "approval_pending"
 	default:
 		return string(t)
 	}
 }
 
-func eventPayload(sessionID string, e agent.Event) any {
+func eventPayload(sessionID string, e chatprotocol.Event) any {
 	switch e.Type {
-	case agent.EventAssistant:
+	case chatprotocol.EventAssistant:
 		if e.Assistant == nil {
 			return map[string]any{"session_id": sessionID}
 		}
@@ -874,7 +874,7 @@ func eventPayload(sessionID string, e agent.Event) any {
 			"created_at":         e.Assistant.CreatedAt,
 			"pending_tool_calls": e.Assistant.PendingToolCalls,
 		}
-	case agent.EventToolStart, agent.EventToolEnd:
+	case chatprotocol.EventToolStart, chatprotocol.EventToolEnd:
 		if e.Tool == nil {
 			return map[string]any{"session_id": sessionID}
 		}
@@ -915,12 +915,12 @@ func eventPayload(sessionID string, e agent.Event) any {
 			}
 		}
 		return out
-	case agent.EventDone:
+	case chatprotocol.EventDone:
 		if e.Done == nil {
 			return map[string]any{"session_id": sessionID}
 		}
 		return toPostMessageResp(sessionID, e.Done)
-	case agent.EventTaskNotification:
+	case chatprotocol.EventTaskNotification:
 		if e.Notification == nil {
 			return map[string]any{"session_id": sessionID}
 		}
@@ -940,7 +940,7 @@ func eventPayload(sessionID string, e agent.Event) any {
 			out["usage"] = e.Notification.Usage
 		}
 		return out
-	case agent.EventApprovalPending:
+	case chatprotocol.EventApprovalPending:
 		if e.Approval == nil {
 			return map[string]any{"session_id": sessionID}
 		}
@@ -963,7 +963,7 @@ func eventPayload(sessionID string, e agent.Event) any {
 
 // writeSSE serialises one event frame. Errors are intentionally swallowed:
 // if the client closed the connection there is nothing useful to do
-// mid-stream, and the next Flush will surface the failure to the agent.
+// mid-stream, and the next Flush will surface the failure to the chatprotocol.
 func writeSSE(w http.ResponseWriter, f http.Flusher, name string, payload any) {
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -1213,10 +1213,10 @@ func (h *Handler) listModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type providerDTO struct {
-		ID          string   `json:"id"`
-		Label       string   `json:"label"`
-		Models      []string `json:"models"`
-		Model       string   `json:"model,omitempty"`
+		ID     string   `json:"id"`
+		Label  string   `json:"label"`
+		Models []string `json:"models"`
+		Model  string   `json:"model,omitempty"`
 	}
 	type defaultDTO struct {
 		Provider string `json:"provider"`
@@ -1230,10 +1230,10 @@ func (h *Handler) listModels(w http.ResponseWriter, r *http.Request) {
 	if h.catalog != nil {
 		for _, p := range h.catalog.Providers() {
 			out.Providers = append(out.Providers, providerDTO{
-				ID:          p.ID,
-				Label:       p.Label,
-				Models:      p.Models,
-				Model:       p.Model,
+				ID:     p.ID,
+				Label:  p.Label,
+				Models: p.Models,
+				Model:  p.Model,
 			})
 		}
 		defID, defModel := h.catalog.Default()
@@ -1289,7 +1289,7 @@ func toMessageDTO(m *model.Message) messageDTO {
 	return out
 }
 
-func toPostMessageResp(sessionID string, reply *agent.Reply) postMessageResp {
+func toPostMessageResp(sessionID string, reply *chatprotocol.Reply) postMessageResp {
 	if reply == nil {
 		return postMessageResp{SessionID: sessionID}
 	}

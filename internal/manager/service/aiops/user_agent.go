@@ -1,4 +1,4 @@
-// Package aiops's user_agent.go is the Phase-3 user-defined persona
+// Package aiops's user_chatprotocol.go is the Phase-3 user-defined persona
 // service. It persists each user-created agent to user_agents table
 // AND mirrors it into the live chatruntime.AgentRegistry so creates /
 // updates / deletes take effect immediately (no manager restart).
@@ -137,7 +137,7 @@ func (s *UserAgentService) Create(ctx context.Context, in CreateUserAgentInput) 
 			return nil, fmt.Errorf("%w: name %q already used by a built-in persona", errs.ErrInvalid, name)
 		}
 	}
-	// Collision with existing user agent.
+	// Collision with existing user chatprotocol.
 	if existing, _ := s.repo.GetByName(ctx, name); existing != nil {
 		return nil, fmt.Errorf("%w: name %q already taken", errs.ErrInvalid, name)
 	}
@@ -240,7 +240,7 @@ func (s *UserAgentService) Update(ctx context.Context, caller Caller, name strin
 	return updated, nil
 }
 
-// Delete removes a user agent. Returns ErrNotFound when no user-defined
+// Delete removes a user chatprotocol. Returns ErrNotFound when no user-defined
 // row matches. Disk-loaded personas can't be deleted via this path —
 // they live as files and survive a restart.
 //

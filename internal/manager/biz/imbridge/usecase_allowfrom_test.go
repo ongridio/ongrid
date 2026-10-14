@@ -70,7 +70,7 @@ func TestValidateTelegramRequiresAllowFrom(t *testing.T) {
 }
 
 // Slack mirrors the Telegram safety contract: any workspace member could
-// otherwise talk to a tool-equipped agent. Format check rejects obvious
+// otherwise talk to a tool-equipped chatprotocol. Format check rejects obvious
 // typos (numeric or short tokens) so the operator notices, instead of a
 // silently-empty allowlist that ignores everyone.
 func TestValidateSlackRequiresAllowFrom(t *testing.T) {

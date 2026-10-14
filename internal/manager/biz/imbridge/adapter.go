@@ -5,15 +5,15 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/ongridio/ongrid/internal/manager/biz/aiops/agent"
-	"github.com/ongridio/ongrid/internal/pkg/llm"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/chatprotocol"
 	svcaiops "github.com/ongridio/ongrid/internal/manager/service/aiops"
+	"github.com/ongridio/ongrid/internal/pkg/llm"
 )
 
 // LLMDefaultProvider returns the cluster-wide default LLM provider id +
 // model that web/SPA chats would pick. The IM path uses this so it
 // stays in sync with whatever the operator selected in the UI picker;
-// otherwise agent.New's internal "" → "gpt-5.4" fallback would route IM
+// otherwise chatprotocol.New's internal "" → "gpt-5.4" fallback would route IM
 // traffic to a model that's not in the catalog and the LLM router
 // rejects it ("this model has beta-limitations…"), which surfaces in
 // chat apps as "助手执行失败".
@@ -38,7 +38,7 @@ type AiopsServiceAdapter struct {
 }
 
 // NewAiopsAdapter wires the adapter. defaults is optional — when nil
-// the adapter falls back to agent.RunOptions{} (which puts agent.New's
+// the adapter falls back to chatprotocol.RunOptions{} (which puts chatprotocol.New's
 // hard-coded model default in charge). Pass the LLMSettingsResolver
 // so the IM path picks up the same default the SPA picker writes.
 func NewAiopsAdapter(svc *svcaiops.Service, serviceUserID uint64, defaults LLMDefaultProvider, log *slog.Logger) *AiopsServiceAdapter {
@@ -78,10 +78,10 @@ func (a *AiopsServiceAdapter) EnsureSession(ctx context.Context, ownerUserID uin
 }
 
 // StreamMessage posts user content to the session and forwards each
-// agent.Event to emit. The agent loop runs synchronously on the
+// chatprotocol.Event to emit. The agent loop runs synchronously on the
 // caller's goroutine — the bridge calls this from its own goroutine
 // (the webhook handler returns 200 immediately).
-func (a *AiopsServiceAdapter) StreamMessage(ctx context.Context, sessionID string, userContent string, emit agent.Emit) error {
+func (a *AiopsServiceAdapter) StreamMessage(ctx context.Context, sessionID string, userContent string, emit chatprotocol.Emit) error {
 	opts := a.runOptions(ctx)
 	_, err := a.svc.PostMessageStreamWithOpts(ctx, a.caller(), sessionID, userContent, emit, opts)
 	return err
@@ -91,10 +91,10 @@ func (a *AiopsServiceAdapter) StreamMessage(ctx context.Context, sessionID strin
 // uses the same LLM the SPA picker writes. On any resolver error or
 // missing catalog, returns zero RunOptions and lets the agent layer
 // apply its own fallback (which currently lands on gpt-5.4 — see
-// agent.New).
-func (a *AiopsServiceAdapter) runOptions(ctx context.Context) agent.RunOptions {
+// chatprotocol.New).
+func (a *AiopsServiceAdapter) runOptions(ctx context.Context) chatprotocol.RunOptions {
 	if a.defaults == nil {
-		return agent.RunOptions{}
+		return chatprotocol.RunOptions{}
 	}
 	providers, defID, err := a.defaults.ResolveProviders(ctx)
 	if err != nil || len(providers) == 0 {
@@ -102,7 +102,7 @@ func (a *AiopsServiceAdapter) runOptions(ctx context.Context) agent.RunOptions {
 			a.log.Warn("imbridge: llm resolver failed; using agent fallback model",
 				slog.Any("err", err))
 		}
-		return agent.RunOptions{}
+		return chatprotocol.RunOptions{}
 	}
 	// If a default provider is set, look it up; otherwise take the
 	// first catalog entry (alphabetical by id — same order the SPA
@@ -120,7 +120,7 @@ func (a *AiopsServiceAdapter) runOptions(ctx context.Context) agent.RunOptions {
 	if pick == nil {
 		pick = &providers[0]
 	}
-	return agent.RunOptions{
+	return chatprotocol.RunOptions{
 		Provider: pick.ID,
 		Model:    pick.Model,
 	}

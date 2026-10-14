@@ -13,7 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	biz "github.com/ongridio/ongrid/internal/manager/biz/aiops"
-	"github.com/ongridio/ongrid/internal/manager/biz/aiops/agent"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/chatprotocol"
 	model "github.com/ongridio/ongrid/internal/manager/model/aiops"
 	svc "github.com/ongridio/ongrid/internal/manager/service/aiops"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
@@ -34,7 +34,7 @@ type fakeService struct {
 
 	closeErr error
 
-	postReply *agent.Reply
+	postReply *chatprotocol.Reply
 	postErr   error
 
 	usageResp *biz.DailyUsage
@@ -129,29 +129,29 @@ func (f *fakeService) UpdateSessionModel(_ context.Context, _ svc.Caller, _, pro
 	f.lastUpdateModel = selectedModel
 	return nil
 }
-func (f *fakeService) PostMessage(_ context.Context, c svc.Caller, _ string, content string) (*agent.Reply, error) {
+func (f *fakeService) PostMessage(_ context.Context, c svc.Caller, _ string, content string) (*chatprotocol.Reply, error) {
 	f.lastCaller = c
 	f.lastPostCt = content
 	return f.postReply, f.postErr
 }
-func (f *fakeService) PostMessageWithOpts(_ context.Context, c svc.Caller, _ string, content string, _ agent.RunOptions) (*agent.Reply, error) {
+func (f *fakeService) PostMessageWithOpts(_ context.Context, c svc.Caller, _ string, content string, _ chatprotocol.RunOptions) (*chatprotocol.Reply, error) {
 	f.lastCaller = c
 	f.lastPostCt = content
 	return f.postReply, f.postErr
 }
-func (f *fakeService) PostMessageStream(_ context.Context, c svc.Caller, _ string, content string, emit agent.Emit) (*agent.Reply, error) {
+func (f *fakeService) PostMessageStream(_ context.Context, c svc.Caller, _ string, content string, emit chatprotocol.Emit) (*chatprotocol.Reply, error) {
 	f.lastCaller = c
 	f.lastPostCt = content
 	if emit != nil && f.postReply != nil {
-		emit(agent.Event{Type: agent.EventDone, Done: f.postReply})
+		emit(chatprotocol.Event{Type: chatprotocol.EventDone, Done: f.postReply})
 	}
 	return f.postReply, f.postErr
 }
-func (f *fakeService) PostMessageStreamWithOpts(_ context.Context, c svc.Caller, _ string, content string, emit agent.Emit, _ agent.RunOptions) (*agent.Reply, error) {
+func (f *fakeService) PostMessageStreamWithOpts(_ context.Context, c svc.Caller, _ string, content string, emit chatprotocol.Emit, _ chatprotocol.RunOptions) (*chatprotocol.Reply, error) {
 	f.lastCaller = c
 	f.lastPostCt = content
 	if emit != nil && f.postReply != nil {
-		emit(agent.Event{Type: agent.EventDone, Done: f.postReply})
+		emit(chatprotocol.Event{Type: chatprotocol.EventDone, Done: f.postReply})
 	}
 	return f.postReply, f.postErr
 }
@@ -228,7 +228,7 @@ func TestPostMessageHappyPath(t *testing.T) {
 	startedAt := time.Now().UTC()
 	endedAt := startedAt.Add(180 * time.Millisecond)
 	edgeID := uint64(5)
-	reply := &agent.Reply{
+	reply := &chatprotocol.Reply{
 		Message: &model.Message{
 			ID:        "101",
 			Role:      "assistant",
