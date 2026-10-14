@@ -268,6 +268,7 @@ type ToolBagProvider interface {
 // keeps ToolSearch aligned with runtime-discovered MCP tools.
 type mutableToolBagProvider interface {
 	ToolBagProvider
+	UpsertTools([]basetool.BaseTool)
 	ReplaceToolsByNamePrefix(prefix string, replacements []basetool.BaseTool)
 }
 
@@ -302,7 +303,9 @@ type Runtime struct {
 	// when the caller wires the runtime without calling SetToolBag —
 	// not all code paths need it (legacy callers only feed
 	// cfg.ToolBag through the graph).
-	bag ToolBagProvider
+	bag             ToolBagProvider
+	toolVersions    map[string]uint64
+	nextToolVersion uint64
 }
 
 // NewRuntime builds a Runtime. Returns an error when required deps
@@ -321,7 +324,11 @@ func NewRuntime(cfg Config) (*Runtime, error) {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Runtime{cfg: cfg, log: log}, nil
+	initial := cfg.ToolBag
+	cfg.ToolBag = nil
+	rt := &Runtime{cfg: cfg, log: log, toolVersions: map[string]uint64{}}
+	rt.AppendToolBag(initial)
+	return rt, nil
 }
 
 // SetMentionResolver wires the @-mention hydrator post-construction.
@@ -373,23 +380,20 @@ func (rt *Runtime) SetToolBag(bag ToolBagProvider) {
 	rt.bag = bag
 }
 
-// AppendToolBag appends extra BaseTools to the coordinator tool bag.
-// — used by main.go to bolt the coordinator-only AgentTool
-// / SendMessageTool / TaskStopTool onto the Runtime AFTER construction
-// (the chicken-and-egg: those tools need the Runtime as their spawner,
-// the Runtime needs the tool bag at NewRuntime time). Workers do NOT
-// observe these added tools — filterToolsForAgent strips them
-// unconditionally via coordinatorOnlyTools (see worker.go).
-//
-// This is intentionally distinct from a generic "AddTool" method: it
-// signals "these are coordinator-only" so a future reader of main.go
-// understands why three more tools appear after NewRuntime returned.
+// AppendToolBag 按名称注册或替换后初始化工具，并同步搜索目录。
+// Coordinator 专属工具仍由 worker 的角色过滤器排除。
 func (rt *Runtime) AppendToolBag(tools []basetool.BaseTool) {
 	if rt == nil || len(tools) == 0 {
 		return
 	}
 	rt.toolMu.Lock()
 	defer rt.toolMu.Unlock()
+	if rt.toolVersions == nil {
+		rt.toolVersions = map[string]uint64{}
+	}
+	if bag, ok := rt.bag.(mutableToolBagProvider); ok {
+		bag.UpsertTools(tools)
+	}
 	index := map[string]int{}
 	for i, t := range rt.cfg.ToolBag {
 		if t == nil {
@@ -405,6 +409,7 @@ func (rt *Runtime) AppendToolBag(tools []basetool.BaseTool) {
 		}
 		info, err := t.Info(context.Background())
 		if err == nil && info != nil {
+			t = rt.versionedToolLocked(info.Name, t)
 			if i, ok := index[info.Name]; ok {
 				rt.cfg.ToolBag[i] = t
 				continue
@@ -418,32 +423,45 @@ func (rt *Runtime) AppendToolBag(tools []basetool.BaseTool) {
 // ReplaceToolsByNamePrefix replaces tools in the graph-facing bag whose wire
 // names share prefix. MCP uses one prefix per server, preventing a refresh of
 // one registration from removing tools offered by other servers.
+// ReplaceToolsByNamePrefix 是同 schema 工具的便捷更新入口。
 func (rt *Runtime) ReplaceToolsByNamePrefix(prefix string, replacements []basetool.BaseTool) {
+	rt.ReplaceToolSource(prefix, replacements, replacements)
+}
+
+// ReplaceToolSource 在同一更新中替换执行视图与完整 schema 目录。
+func (rt *Runtime) ReplaceToolSource(prefix string, raw, decorated []basetool.BaseTool) {
 	if rt == nil || strings.TrimSpace(prefix) == "" {
 		return
 	}
 	rt.toolMu.Lock()
 	defer rt.toolMu.Unlock()
-	next := make([]basetool.BaseTool, 0, len(rt.cfg.ToolBag)+len(replacements))
-	for _, tool := range rt.cfg.ToolBag {
-		if toolNameHasPrefix(tool, prefix) {
+	if rt.toolVersions == nil {
+		rt.toolVersions = map[string]uint64{}
+	}
+	next := make([]basetool.BaseTool, 0, len(rt.cfg.ToolBag)+len(decorated))
+	for _, t := range rt.cfg.ToolBag {
+		if toolNameHasPrefix(t, prefix) {
+			if info, err := t.Info(context.Background()); err == nil && info != nil {
+				delete(rt.toolVersions, info.Name)
+			}
 			continue
 		}
-		next = append(next, tool)
+		next = append(next, t)
 	}
-	rt.cfg.ToolBag = append(next, replacements...)
-}
-
-// ReplaceCatalogToolsByNamePrefix updates the unredacted catalog used by
-// ToolSearch. It is separate from ReplaceToolsByNamePrefix because the graph
-// sees decorated tools while ToolSearch must retain raw schemas.
-func (rt *Runtime) ReplaceCatalogToolsByNamePrefix(prefix string, replacements []basetool.BaseTool) {
-	if rt == nil || strings.TrimSpace(prefix) == "" {
-		return
+	for _, t := range decorated {
+		if t == nil {
+			continue
+		}
+		info, err := t.Info(context.Background())
+		if err != nil || info == nil || !strings.HasPrefix(info.Name, prefix) {
+			continue
+		}
+		next = append(next, rt.versionedToolLocked(info.Name, t))
 	}
 	if bag, ok := rt.bag.(mutableToolBagProvider); ok {
-		bag.ReplaceToolsByNamePrefix(prefix, replacements)
+		bag.ReplaceToolsByNamePrefix(prefix, raw)
 	}
+	rt.cfg.ToolBag = next
 }
 
 func (rt *Runtime) toolBagSnapshot() []basetool.BaseTool {
@@ -534,6 +552,7 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (*Reply, error) {
 	// (deep inside the graph) can fire a task_notification SSE frame
 	// when a background worker terminates. /
 	ctx = withEmit(ctx, req.Emit)
+	ctx = basetool.WithWebSearchAllowed(ctx, req.WebSearchEnabled)
 
 	// 1. Ownership check.
 	sess, err := rt.cfg.Sessions.GetSession(ctx, req.SessionID)
@@ -624,7 +643,7 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (*Reply, error) {
 	// the coordinator path now honors it too. Stale agent ids fall back
 	// to the global default with a log line — never crash a session.
 	basePrompt := rt.cfg.BasePrompt
-	runtimeToolBag := rt.toolBagSnapshot()
+	runtimeToolBag := basetool.FilterWebSearch(ctx, rt.toolBagSnapshot())
 	sessionToolBag := runtimeToolBag
 	agentReminderForPersona := ""
 	// Coordinator iff session is pinned to "default" or has no

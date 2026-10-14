@@ -344,7 +344,7 @@ func (rt *Runtime) SpawnWorker(ctx context.Context, req SpawnRequest) (*Worker, 
 	// Sync spawn inherits the caller's ctx so a cancel propagates.
 	parent := ctx
 	if req.Background {
-		parent = context.Background()
+		parent = context.WithoutCancel(ctx)
 	}
 	workerCtx, cancel := context.WithCancel(parent)
 
@@ -587,7 +587,7 @@ func (rt *Runtime) runWorker(ctx context.Context, agentDef *Agent, sessID, userT
 	// Workers are not an authorization bypass. The coordinator stamps the
 	// resolved gate on context; absent wiring fails closed so a direct spawn
 	// cannot expose mutating tools unexpectedly.
-	workerTools := filterToolsForAgentRole(rt.toolBagSnapshot(), agentDef, false, !basetool.AgentWriteAllowedFromContext(ctx))
+	workerTools := filterToolsForAgentRole(basetool.FilterWebSearch(ctx, rt.toolBagSnapshot()), agentDef, false, !basetool.AgentWriteAllowedFromContext(ctx))
 
 	// Thread the persona-filtered tool view onto ctx so ToolSearch
 	// (which runs inside the worker graph) only returns tools the
@@ -688,10 +688,11 @@ func (rt *Runtime) runWorker(ctx context.Context, agentDef *Agent, sessID, userT
 		callbacks.FinalizeBatches(flushCtx, handlers)
 	}()
 	out, err := g.Invoke(workerCtx, &graph.Input{
-		SystemPrompt: systemPrompt,
-		History:      nil,
-		UserText:     userText,
-		Locale:       locale,
+		SystemPrompt:     systemPrompt,
+		WebSearchEnabled: basetool.WebSearchAllowed(ctx),
+		History:          nil,
+		UserText:         userText,
+		Locale:           locale,
 	}, invokeOpts...)
 	if err != nil {
 		return "", err
