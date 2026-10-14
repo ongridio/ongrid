@@ -71,3 +71,4 @@ Graph 默认运行路径与旧循环维护独立工具列表，安全 Skill 注�
 - 上述新增用例及 `make test-agent-runtime` 的 Linux race 回归通过。首版提交的 GitHub CI 已通过全仓 build/vet/race、部署清单及前端检查；补充提交需重新检查 CI。
 - 本地全仓测试尝试未通过：只读模块缓存缺少 APM 示例依赖，且 Docker amd64 仿真环境的 autoapm 进程发现测试失败。不能把本地全仓测试记为通过；原生 Ubuntu CI 的同项已通过。
 - 已在临时目录安装 `go-arch-lint v1.19.0` 并执行 `make arch-lint`：检查被原有配置错误阻断（不存在的 `internal/edgeagent/data/**`，以及 `shared_pkg`/`api` 的空依赖声明）。`.go-arch-lint.yml` 与基线相同；这替代此前“未安装工具”的原因，仍不能声称架构 lint 通过。
+- 告警初查使用启动时的 BaseTool 快照，避免后台任务与后续 Registry 装配并发读写；Manager 装配包 `go test -race ./cmd/ongrid` 通过。

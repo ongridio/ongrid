@@ -1845,7 +1845,7 @@ func main() {
 
 	// Two-tier proactive investigation wiring:
 	//
-	//   1. The legacy ai_initial_diagnosis emitter (~3 paragraphs on
+	//   1. The ai_initial_diagnosis emitter (~3 paragraphs on
 	//      the alert timeline, lightweight, single LLM call via
 	//      correlate_incident) — fast read for operators glancing at
 	//      the incident timeline.
@@ -1860,21 +1860,21 @@ func main() {
 	// Both share the alert.Investigator interface and chain via
 	// investigatorChain so each new-fire fans out to both. Either side
 	// can be nil — the chain skips nil.
-	var legacyInv managerbizalert.Investigator
+	var initialInv managerbizalert.Investigator
 	if hasConfiguredLLMProvider(llmRouter) {
-		legacy := aiopsinvestigator.New(
+		initial := aiopsinvestigator.New(
 			llmClient,
-			backgroundToolInvoker{reg: toolsReg},
+			backgroundToolInvoker{tools: toolsReg.BuildBaseTools().AllTools()},
 			alertRepo,
 			aiopsinvestigator.Config{},
 			log,
 		)
-		defer legacy.Close()
-		legacyInv = legacy
-		log.Info("alert: legacy AI initial-diagnosis investigator wired",
+		defer initial.Close()
+		initialInv = initial
+		log.Info("alert: AI initial-diagnosis investigator wired",
 			slog.String("model_source", "llm_default"))
 	} else {
-		log.Info("alert: legacy AI investigator disabled (no LLM provider)")
+		log.Info("alert: AI initial-diagnosis investigator disabled (no LLM provider)")
 	}
 
 	var (
@@ -1940,7 +1940,7 @@ func main() {
 		}
 	}
 
-	if chained := chainInvestigators(legacyInv, rcaInv); chained != nil {
+	if chained := chainInvestigators(initialInv, rcaInv); chained != nil {
 		alertUC.SetInvestigator(chained)
 	}
 
@@ -6022,10 +6022,11 @@ func seedInfrastructureMenuDefaults(ctx context.Context, db *gorm.DB, settings *
 }
 
 // backgroundToolInvoker 让确定性的告警初查复用统一工具目录，不依赖旧循环注册表。
-type backgroundToolInvoker struct{ reg *aiopstools.Registry }
+// tools 是启动时快照，后台任务不读取后续装配仍在修改的 Registry。
+type backgroundToolInvoker struct{ tools []aiopstoolsbase.BaseTool }
 
 func (i backgroundToolInvoker) Invoke(ctx context.Context, name string, args json.RawMessage) (aiopstools.ExecuteResult, error) {
-	for _, t := range i.reg.BuildBaseTools().AllTools() {
+	for _, t := range i.tools {
 		info, err := t.Info(ctx)
 		if err != nil {
 			return aiopstools.ExecuteResult{}, err
