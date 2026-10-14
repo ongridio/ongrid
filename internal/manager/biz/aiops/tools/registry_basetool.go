@@ -246,6 +246,12 @@ func (r *Registry) BuildBaseTools() *ToolBag {
 		out = append(out, NewServePageTool(r.pageStore, r.log))
 	}
 
+	// 所有消费方共用完整静态目录，避免工作流画布漏掉 host-files。
+	if r.caller != nil && r.edges != nil && r.devices != nil {
+		out = append(out, NewFindLargeFilesTool(r.caller, r.edges, r.devices, r.log), NewDuSummaryTool(r.caller, r.edges, r.devices, r.log), NewStatFileTool(r.caller, r.edges, r.devices, r.log))
+	}
+	out = r.appendSafeSkillTools(out)
+
 	threshold := envIntDefault("ONGRID_TOOLBAG_DEFERRAL_THRESHOLD", defaultDeferralThreshold)
 	bag := NewToolBag(out, threshold)
 

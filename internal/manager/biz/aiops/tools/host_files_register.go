@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"log/slog"
 
 	devicebiz "github.com/ongridio/ongrid/internal/manager/biz/device"
@@ -34,6 +35,11 @@ func AppendHostFilesTools(bag *ToolBag, c Caller, e *edgebiz.Usecase, d *deviceb
 	}
 	if log == nil {
 		log = slog.Default()
+	}
+	for _, tool := range bag.AllTools() {
+		if info, err := tool.Info(context.Background()); err == nil && info != nil && info.Name == ToolNameFindLargeFiles {
+			return bag
+		}
 	}
 	bag.Append(NewFindLargeFilesTool(c, e, d, log))
 	bag.Append(NewDuSummaryTool(c, e, d, log))

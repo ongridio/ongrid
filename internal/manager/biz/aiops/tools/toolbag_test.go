@@ -380,3 +380,22 @@ func countNameString(values []string, want string) int {
 	}
 	return count
 }
+
+func TestToolBagUpsertReplacesWithoutDuplicatesAndSearchUsesNewSchema(t *testing.T) {
+	old := newStub("host_test", "old")
+	bag := NewToolBag([]basetool.BaseTool{old}, 0)
+	replacement := newStub("host_test", "new")
+	bag.UpsertTools([]basetool.BaseTool{replacement, newStub("host_other", "other")})
+	bag.UpsertTools([]basetool.BaseTool{replacement})
+	all := bag.AllTools()
+	if len(all) != 2 {
+		t.Fatalf("count=%d want=2", len(all))
+	}
+	result, err := NewToolSearchTool(bag, nil).InvokableRun(context.Background(), `{"query":"select:host_test"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, `"description":"new"`) {
+		t.Fatalf("stale search result: %s", result)
+	}
+}

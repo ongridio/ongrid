@@ -417,3 +417,45 @@ func (r redactedTool) InvokableRun(ctx context.Context, argsJSON string, opts ..
 	}
 	return r.inner.InvokableRun(ctx, argsJSON, opts...)
 }
+
+// UpsertTools 同步后注册工具的完整目录，同名项替换，不生成重复条目。
+func (b *ToolBag) UpsertTools(tools []basetool.BaseTool) {
+	if b == nil {
+		return
+	}
+	updates := map[string]basetool.BaseTool{}
+	order := []string{}
+	for _, tool := range tools {
+		if tool == nil {
+			continue
+		}
+		info, err := tool.Info(context.Background())
+		if err != nil || info == nil || info.Name == "" {
+			continue
+		}
+		if _, ok := updates[info.Name]; !ok {
+			order = append(order, info.Name)
+		}
+		updates[info.Name] = tool
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	all := append(append([]basetool.BaseTool{}, b.core...), b.deferred...)
+	for i, t := range all {
+		info, err := t.Info(context.Background())
+		if err != nil || info == nil {
+			continue
+		}
+		if replacement, ok := updates[info.Name]; ok {
+			all[i] = replacement
+			delete(updates, info.Name)
+		}
+	}
+	for _, name := range order {
+		if t, ok := updates[name]; ok {
+			all = append(all, t)
+		}
+	}
+	updated := NewToolBag(all, b.threshold)
+	b.core, b.deferred, b.deferring = updated.core, updated.deferred, updated.deferring
+}

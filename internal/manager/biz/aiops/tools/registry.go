@@ -70,13 +70,14 @@ type Tool struct {
 // without that signal). alertUC is a narrow interface (AlertUsecase) so
 // tests can inject a fake without standing up the full alert biz repo.
 type Registry struct {
-	caller     Caller
-	edges      *edgebiz.Usecase
-	devices    *devicebiz.Usecase
-	alertUC    AlertUsecase
-	promQuery  PromQuerier
-	logQuery   LogQuerier
-	traceQuery TraceQuerier
+	skillRunner SkillRunner
+	caller      Caller
+	edges       *edgebiz.Usecase
+	devices     *devicebiz.Usecase
+	alertUC     AlertUsecase
+	promQuery   PromQuerier
+	logQuery    LogQuerier
+	traceQuery  TraceQuerier
 	// knowledge is the user-curated knowledge base + git repo searcher.
 	// nil-safe — when nil the query_knowledge tool isn't registered.
 	knowledge KnowledgeSearcher
