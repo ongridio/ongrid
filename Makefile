@@ -130,6 +130,15 @@ test-k8s-capabilities: ## 隔离 Linux 环境验证节点 JVM attach 权限（�
 		sudo env ONGRID_TEST_K8S_CAPABILITIES=1 "$$tmp_dir/edge.test" -test.v -test.timeout=45s -test.run='^TestK8sHostCapabilitiesSurviveJVMAttach$$'; \
 	fi
 
+.PHONY: test-k8s-autoapm
+test-k8s-autoapm: ## 隔离 Linux 环境验证 Chart 权限与非 root OBI 采集（需要 root 和固定版插件）
+	@test "$$(uname -s)" = Linux && test "$$(id -u)" = 0 || { echo 'Run as root in isolated Linux with the Chart capabilities'; exit 1; }
+	@test -x "$${ONGRID_TEST_AUTOAPM_BIN_DIR}/obi" && test -x "$${ONGRID_TEST_AUTOAPM_BIN_DIR}/otelcol-contrib"
+	@set -eu; tmp_dir=$$(mktemp -d); trap 'rm -rf "$$tmp_dir"' EXIT; \
+	go test -race -c -o "$$tmp_dir/edge.test" ./cmd/ongrid-edge; \
+	go test -race -c -o "$$tmp_dir/autoapm.test" ./internal/edgeagent/plugins/autoapm; \
+	env ONGRID_TEST_K8S_AUTOAPM_BINARY="$$tmp_dir/autoapm.test" "$$tmp_dir/edge.test" -test.v -test.timeout=7m -test.run='^TestK8sHostAutoAPMIntegration$$'
+
 .PHONY: test-edge-metrics-env
 test-edge-metrics-env: ## Edge 诊断端口安装配置保留检查
 	bash -n deploy/install/edge/install.sh deploy/install/edge/install-edge.sh

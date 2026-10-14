@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -24,7 +25,7 @@ const (
 	securebitNoSetUIDFixup = 1 << 2
 )
 
-// Keep the Chart's node capabilities across the non-root host identity transition.
+// Keep granted node capabilities across the non-root host identity transition.
 // OBI needs SYS_ADMIN for Go propagation, setns and restrictive perf policies;
 // JVM attach also needs SYS_CHROOT and SETUID/SETGID for target credentials.
 var k8sHostCapabilities = []int{
@@ -133,6 +134,11 @@ func linuxLastCapability() int {
 }
 
 func dropToHostEdgeUser(uid, gid, lastCapability int) error {
+	var granted [2]unix.CapUserData
+	header := unix.CapUserHeader{Version: unix.LINUX_CAPABILITY_VERSION_3}
+	if err := unix.Capget(&header, &granted[0]); err != nil {
+		return fmt.Errorf("read host edge capabilities: %w", err)
+	}
 	// Filter before both capset and ambient raises; older kernels lack newer APM capabilities.
 	capabilities := make([]int, 0, len(k8sHostCapabilities))
 	for _, capability := range k8sHostCapabilities {
@@ -141,10 +147,23 @@ func dropToHostEdgeUser(uid, gid, lastCapability int) error {
 				"capability", capability, "cap_last_cap", lastCapability)
 			continue
 		}
+		switch capability {
+		case unix.CAP_BPF, unix.CAP_PERFMON, unix.CAP_CHECKPOINT_RESTORE:
+			// SYS_ADMIN already covers these operations, including on modern kernels.
+			bounded, err := unix.PrctlRetInt(unix.PR_CAPBSET_READ, uintptr(capability), 0, 0, 0)
+			if err != nil {
+				return fmt.Errorf("read host edge bounding capability %d: %w", capability, err)
+			}
+			if bounded == 0 || granted[capability/32].Permitted&(uint32(1)<<uint(capability%32)) == 0 {
+				slog.Debug("container did not grant optional host edge capability; using SYS_ADMIN",
+					"capability", capability)
+				continue
+			}
+		}
 		capabilities = append(capabilities, capability)
 	}
 	for capability := 0; capability <= lastCapability; capability++ {
-		if isK8sHostCapability(capability) {
+		if slices.Contains(capabilities, capability) {
 			continue
 		}
 		if err := unix.Prctl(unix.PR_CAPBSET_DROP, uintptr(capability), 0, 0, 0); err != nil && !errors.Is(err, unix.EINVAL) {
@@ -180,7 +199,6 @@ func dropToHostEdgeUser(uid, gid, lastCapability int) error {
 		capabilityData[index].Permitted |= mask
 		capabilityData[index].Inheritable |= mask
 	}
-	header := unix.CapUserHeader{Version: unix.LINUX_CAPABILITY_VERSION_3}
 	if err := unix.Capset(&header, &capabilityData[0]); err != nil {
 		return fmt.Errorf("retain host edge capabilities: %w", err)
 	}

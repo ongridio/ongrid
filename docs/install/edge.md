@@ -38,6 +38,27 @@ fixed diagnostics listeners and HTTP probes. Logs, OBI, OTLP, pprof, and exporte
 listeners are not changed by this fallback. If automatic allocation also fails,
 startup fails with the bind errors; no existing process is stopped or reused.
 
+## Kubernetes node capabilities
+
+The node Chart uses its existing `SYS_ADMIN` capability for BPF, performance
+monitoring, and process map access. It omits the newer `BPF`, `PERFMON`, and
+`CHECKPOINT_RESTORE` capability names so older container runtimes can create
+the container. This also supports OBI on modern kernels without privileged mode.
+The host launcher retains these optional capabilities when both the kernel and
+the container grant them; missing required capabilities still stop startup.
+Kernel support for a particular APM probe remains a separate requirement.
+
+Upgrade or roll back the Chart and Edge image together. An older Edge image can
+still request the omitted capabilities internally and fail on a modern kernel.
+Ordinary host Edge and the Kubernetes controller do not use this launcher path.
+
+For regression checks, run `make test-k8s-chart`. In isolated Linux with the
+node launcher's permissions, run `make test-k8s-capabilities`. To verify actual
+non-root OBI collection with the Chart capability set and host PID visibility, run
+`make test-k8s-autoapm` as root with `ONGRID_TEST_AUTOAPM_BIN_DIR` pointing to the
+pinned `obi` and `otelcol-contrib` binaries. The test covers HTTP/gRPC telemetry,
+application restarts, target selection, and trace sampling independent of metrics.
+
 ## Kubernetes resource budgets
 
 Each Edge container and its subprocesses share one CPU/memory budget. Auto APM,

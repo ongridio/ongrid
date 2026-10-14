@@ -292,7 +292,7 @@ expect_template_failure 'upgrade.migrationHook.timeout must be a whole second, m
 # Published Chart defaults prepare node capture without an extra install/upgrade flag.
 grep -q 'name: ongrid-edge-node-autoapm' "$tmp_dir/default.yaml"
 grep -q 'resources: \["replicasets"\]' "$tmp_dir/default.yaml"
-for capability in BPF PERFMON SYS_PTRACE CHECKPOINT_RESTORE NET_RAW SYS_ADMIN SYS_RESOURCE DAC_READ_SEARCH NET_ADMIN; do
+for capability in SYS_PTRACE NET_RAW SYS_ADMIN SYS_RESOURCE DAC_READ_SEARCH NET_ADMIN SETGID SETPCAP SETUID SYS_CHROOT; do
   grep -q "\"$capability\"" "$tmp_dir/default-node.yaml"
 done
 ! grep -q 'privileged: true' "$tmp_dir/default.yaml"
@@ -308,8 +308,14 @@ helm template ongrid-edge "$chart_package" "${common_args[@]}" --is-upgrade \
   --set node.autoAPM.allowBPF=false >"$tmp_dir/autoapm-legacy-false.yaml"
 grep -A1 'name: ONGRID_AUTO_APM_ALLOW_BPF' "$tmp_dir/autoapm-legacy-false.yaml" | grep -q 'value: "true"'
 grep -q 'name: ongrid-edge-node-autoapm' "$tmp_dir/autoapm-legacy-false.yaml"
-for capability in BPF PERFMON SYS_PTRACE CHECKPOINT_RESTORE NET_RAW SYS_ADMIN SYS_RESOURCE; do
+for capability in SYS_PTRACE NET_RAW SYS_ADMIN SYS_RESOURCE; do
   grep -q "\"$capability\"" "$tmp_dir/autoapm-legacy-false.yaml"
+done
+for rendered in "$tmp_dir/default-node.yaml" "$tmp_dir/autoapm-legacy.yaml" "$tmp_dir/autoapm-modern.yaml" "$tmp_dir/autoapm-legacy-false.yaml"; do
+  if grep -Eq '"(BPF|PERFMON|CHECKPOINT_RESTORE)"' "$rendered"; then
+    echo "Node capabilities must support older container runtimes: $rendered" >&2
+    exit 1
+  fi
 done
 ! grep -q 'privileged: true' "$tmp_dir/autoapm-legacy-false.yaml"
 
