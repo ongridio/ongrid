@@ -198,6 +198,14 @@ func (t *ToolSearchTool) fullToolsAllowedByContext(ctx context.Context) []baseto
 			continue
 		}
 		seen[info.Name] = struct{}{}
+		if snapshot, ok := tool.(interface {
+			FullInfo(context.Context) (*basetool.ToolInfo, error)
+		}); ok {
+			if full, err := snapshot.FullInfo(ctx); err == nil && full != nil {
+				out = append(out, &searchSchemaTool{BaseTool: tool, info: full})
+			}
+			continue
+		}
 		if full, ok := byName[info.Name]; ok {
 			out = append(out, full)
 			continue
@@ -308,3 +316,11 @@ func splitNonEmpty(s, sep string) []string {
 	}
 	return out
 }
+
+// searchSchemaTool 只供 ToolSearch 读取完整元数据，执行仍委托受控引用。
+type searchSchemaTool struct {
+	basetool.BaseTool
+	info *basetool.ToolInfo
+}
+
+func (t *searchSchemaTool) Info(context.Context) (*basetool.ToolInfo, error) { return t.info, nil }

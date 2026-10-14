@@ -1,38 +1,7 @@
-// runtime.go is the in-process orchestration entry the new graph-based
-// agent path goes through. PR-9 of — the cutover layer that
-// pre-PR-9 callers (legacy agent.go) bypass entirely. After this PR
-// the manager's HTTP service can pick which path runs based on the
-// ONGRID_AGENT_KERNEL feature flag (default = legacy).
-//
-// Responsibilities:
-//
-//  1. Ownership check (caller user_id == session.user_id; admin bypass
-//     happens upstream — by the time Handle is called the service has
-//     already resolved the owning user_id).
-//  2. Skill resolution against the user query (SkillRegistry.Resolve)
-//     — the active skills shape the system prompt.
-//  3. System prompt assembly via ComposeSystemPrompt — base prompt +
-//     active skill prompts + (optional) agent persona.
-//  4. @-mention inlining — same markdown-bullet preamble the legacy
-//     agent.go produces, so chat history replay is byte-identical
-//     across kernels (legacy mention text persists into the new path
-//     unchanged).
-//  5. User-message persistence (chat_messages role=user). Mirrors the
-//     legacy "persist before LLM call" invariant from agent.go so a
-//     downstream crash leaves the user turn on disk.
-//  6. Graph invoke with the default callback chain
-//     (callbacks.NewDefaultHandlers) wired via compose.WithCallbacks.
-//     The callback chain handles persistence (assistant + tool rows),
-//     SSE streaming, audit, metrics, and budget gating.
-//  7. Reply translation — a chatruntime.Reply that the service layer
-//     translates back to agent.Reply for HTTP response shape parity.
-//
-// Behaviour parity with legacy agent.go is the explicit goal — the
-// SPA, the persistence schema, and downstream reports must not see
-// the kernel switch. Where exact parity isn't reachable (e.g. eino's
-// graph runs the loop internally so we don't see per-iteration
-// AssistantEvent counts), the value is best-effort and documented
-// inline.
+// runtime.go 是唯一聊天运行时入口，负责会话归属校验、技能与 persona
+// 解析、提示词与 mention 装配、用户消息持久化和 Graph 调用。
+// callbacks 处理 assistant/tool 持久化、SSE、审计、指标与预算；Service
+// 将内部事件映射为 chatprotocol，保持既有 HTTP/SSE/IM 协议兼容。
 package chatruntime
 
 import (
@@ -61,17 +30,14 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/llm"
 )
 
-// Mention mirrors the legacy agent.Mention shape so chatruntime can
-// be called without dragging the manager/biz/aiops/agent package as
-// a dependency. The service-layer adapter does the type translation.
+// Mention 是运行时的 mention 输入；Service 从 chatprotocol 转换。
 type Mention struct {
 	Type  string
 	ID    string
 	Label string
 }
 
-// MentionResolver hydrates a list of @-mentions into one bullet line
-// each. Mirrors agent.MentionResolver. nil = no inlining.
+// MentionResolver hydrates each @-mention into one bullet line. nil disables inlining.
 type MentionResolver interface {
 	Resolve(ctx context.Context, mentions []Mention) []string
 }
@@ -327,7 +293,9 @@ func NewRuntime(cfg Config) (*Runtime, error) {
 	initial := cfg.ToolBag
 	cfg.ToolBag = nil
 	rt := &Runtime{cfg: cfg, log: log, toolVersions: map[string]uint64{}}
-	rt.AppendToolBag(initial)
+	if err := rt.AppendToolBag(initial); err != nil {
+		return nil, fmt.Errorf("initialize tool catalog: %w", err)
+	}
 	return rt, nil
 }
 
@@ -377,91 +345,27 @@ func (rt *Runtime) SetToolBag(bag ToolBagProvider) {
 	if rt == nil {
 		return
 	}
+	rt.toolMu.Lock()
+	defer rt.toolMu.Unlock()
 	rt.bag = bag
-}
-
-// AppendToolBag 按名称注册或替换后初始化工具，并同步搜索目录。
-// Coordinator 专属工具仍由 worker 的角色过滤器排除。
-func (rt *Runtime) AppendToolBag(tools []basetool.BaseTool) {
-	if rt == nil || len(tools) == 0 {
+	if bag == nil {
 		return
 	}
-	rt.toolMu.Lock()
-	defer rt.toolMu.Unlock()
-	if rt.toolVersions == nil {
-		rt.toolVersions = map[string]uint64{}
-	}
-	if bag, ok := rt.bag.(mutableToolBagProvider); ok {
-		bag.UpsertTools(tools)
-	}
-	index := map[string]int{}
-	for i, t := range rt.cfg.ToolBag {
-		if t == nil {
-			continue
-		}
+	full := map[string]*basetool.ToolInfo{}
+	for _, t := range bag.AllTools() {
 		if info, err := t.Info(context.Background()); err == nil && info != nil {
-			index[info.Name] = i
+			full[info.Name] = info
 		}
 	}
-	for _, t := range tools {
-		if t == nil {
-			continue
-		}
-		info, err := t.Info(context.Background())
-		if err == nil && info != nil {
-			t = rt.versionedToolLocked(info.Name, t)
-			if i, ok := index[info.Name]; ok {
-				rt.cfg.ToolBag[i] = t
-				continue
+	for i, t := range rt.cfg.ToolBag {
+		if current, ok := t.(*runtimeTool); ok {
+			if info := full[current.name]; info != nil {
+				copy := *current
+				copy.fullInfo = cloneToolInfo(info)
+				rt.cfg.ToolBag[i] = &copy
 			}
-			index[info.Name] = len(rt.cfg.ToolBag)
 		}
-		rt.cfg.ToolBag = append(rt.cfg.ToolBag, t)
 	}
-}
-
-// ReplaceToolsByNamePrefix replaces tools in the graph-facing bag whose wire
-// names share prefix. MCP uses one prefix per server, preventing a refresh of
-// one registration from removing tools offered by other servers.
-// ReplaceToolsByNamePrefix 是同 schema 工具的便捷更新入口。
-func (rt *Runtime) ReplaceToolsByNamePrefix(prefix string, replacements []basetool.BaseTool) {
-	rt.ReplaceToolSource(prefix, replacements, replacements)
-}
-
-// ReplaceToolSource 在同一更新中替换执行视图与完整 schema 目录。
-func (rt *Runtime) ReplaceToolSource(prefix string, raw, decorated []basetool.BaseTool) {
-	if rt == nil || strings.TrimSpace(prefix) == "" {
-		return
-	}
-	rt.toolMu.Lock()
-	defer rt.toolMu.Unlock()
-	if rt.toolVersions == nil {
-		rt.toolVersions = map[string]uint64{}
-	}
-	next := make([]basetool.BaseTool, 0, len(rt.cfg.ToolBag)+len(decorated))
-	for _, t := range rt.cfg.ToolBag {
-		if toolNameHasPrefix(t, prefix) {
-			if info, err := t.Info(context.Background()); err == nil && info != nil {
-				delete(rt.toolVersions, info.Name)
-			}
-			continue
-		}
-		next = append(next, t)
-	}
-	for _, t := range decorated {
-		if t == nil {
-			continue
-		}
-		info, err := t.Info(context.Background())
-		if err != nil || info == nil || !strings.HasPrefix(info.Name, prefix) {
-			continue
-		}
-		next = append(next, rt.versionedToolLocked(info.Name, t))
-	}
-	if bag, ok := rt.bag.(mutableToolBagProvider); ok {
-		bag.ReplaceToolsByNamePrefix(prefix, raw)
-	}
-	rt.cfg.ToolBag = next
 }
 
 func (rt *Runtime) toolBagSnapshot() []basetool.BaseTool {
@@ -471,14 +375,6 @@ func (rt *Runtime) toolBagSnapshot() []basetool.BaseTool {
 	rt.toolMu.RLock()
 	defer rt.toolMu.RUnlock()
 	return append([]basetool.BaseTool(nil), rt.cfg.ToolBag...)
-}
-
-func toolNameHasPrefix(tool basetool.BaseTool, prefix string) bool {
-	if tool == nil {
-		return false
-	}
-	info, err := tool.Info(context.Background())
-	return err == nil && info != nil && strings.HasPrefix(info.Name, prefix)
 }
 
 // AgentRegistry exposes the registry for narrow read-only callers
@@ -503,7 +399,7 @@ func (rt *Runtime) SkillRegistry() *SkillRegistry {
 
 // ToolCount returns how many tools are bound into the toolBag. Used
 // at boot time + tests for visibility (the spec asks us to log this
-// when ONGRID_AGENT_KERNEL=graph).
+// when the runtime is available).
 func (rt *Runtime) ToolCount() int {
 	if rt == nil {
 		return 0

@@ -628,9 +628,11 @@ func TestRuntime_ReplaceToolsByNamePrefix(t *testing.T) {
 		t.Fatalf("NewRuntime: %v", err)
 	}
 
-	rt.ReplaceToolsByNamePrefix("mcp__github__", []basetool.BaseTool{
+	if err := rt.ReplaceToolsByNamePrefix("mcp__github__", []basetool.BaseTool{
 		&fakeTool{name: "mcp__github__code_search", schema: `{"type":"object"}`},
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 	names := rt.ToolNames(context.Background())
 	got := map[string]bool{}
 	for _, name := range names {

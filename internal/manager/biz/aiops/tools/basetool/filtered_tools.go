@@ -16,10 +16,10 @@ var filteredToolsCtxKey = filteredToolsCtxKeyT{}
 // WithFilteredTools returns ctx augmented with the persona-filtered tool
 // slice. The runtime calls this before graph.Invoke so ToolSearch (which
 // runs inside the graph) can scope its search to only whitelist-surviving
-// tools. nil/empty is a no-op.
+// tools. An empty view explicitly denies all tools, including inherited ones.
 func WithFilteredTools(ctx context.Context, tools []BaseTool) context.Context {
-	if len(tools) == 0 {
-		return ctx
+	if tools == nil {
+		tools = []BaseTool{}
 	}
 	return context.WithValue(ctx, filteredToolsCtxKey, tools)
 }

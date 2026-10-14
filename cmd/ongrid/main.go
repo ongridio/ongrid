@@ -1698,7 +1698,9 @@ func main() {
 				aiopstoolsdec.Wrap(aiopstools.NewSendMessageTool(chatruntimeSpawnerShim{rt: rt}, log), coordDepsFast),
 				aiopstoolsdec.Wrap(aiopstools.NewTaskStopTool(chatruntimeSpawnerShim{rt: rt}, log), coordDepsFast),
 			}
-			rt.AppendToolBag(wrappedCoord)
+			if err := rt.AppendToolBag(wrappedCoord); err != nil {
+				log.Error("register coordinator tools", slog.Any("err", err))
+			}
 			log.Info("aiops runtime wired",
 				slog.Int("tool_count", rt.ToolCount()),
 				slog.Any("tool_names", rt.ToolNames(rootCtx)),
@@ -2411,14 +2413,16 @@ func main() {
 			Registerer:    reg,
 			HumanApproval: humanApprovalBroker,
 		}
-		chatRT.AppendToolBag([]aiopstoolsbase.BaseTool{
+		if err := chatRT.AppendToolBag([]aiopstoolsbase.BaseTool{
 			aiopstoolsdec.Wrap(aiopstools.NewBashToolWithProposer(fbClient, edgeUC, deviceUC, hostBashProposerShim{uc: approvalUC}, log), cbDeps),
 			aiopstoolsdec.Wrap(aiopstools.NewCloudBashTool(cloudBashProposerShim{uc: approvalUC}, log), cbDeps),
 			aiopstoolsdec.Wrap(aiopstools.NewInstallSkillTool(installSkillProposerShim{uc: approvalUC}, log), cbDeps),
 			aiopstoolsdec.Wrap(aiopstools.NewServePageTool(pageStore, log), quickDeps),
 			aiopstoolsdec.Wrap(aiopstools.NewSendNotificationTool(notificationSenderShim{channels: alertRepo, router: notifyRouter}, log), quickDeps),
 			aiopstoolsdec.Wrap(aiopstools.NewSendIMMessageTool(imMessageSenderShim{apps: imbridgeRepo}, log), quickDeps),
-		})
+		}); err != nil {
+			log.Error("register late tools", slog.Any("err", err))
+		}
 		log.Info("host_bash + cloud_bash + install_skill + serve_page + messaging tools bolted onto chat runtime bag", slog.Int("tool_count", chatRT.ToolCount()))
 		// HLD-017: wire the active-skill → bound-credentials resolver so
 		// cloud_bash auto-injects the credentials an active skill was bound
@@ -2464,7 +2468,10 @@ func main() {
 					graphTools = append(graphTools, aiopstoolsdec.Wrap(raw, deps))
 				}
 			}
-			chatRT.ReplaceToolSource(prefix, rawTools, graphTools)
+			if err := chatRT.ReplaceToolSource(prefix, rawTools, graphTools); err != nil {
+				log.Error("refresh MCP tool source", slog.String("server", serverName), slog.Any("err", err))
+				return
+			}
 			log.Info("mcp tools refreshed in chat runtime",
 				slog.String("server", serverName),
 				slog.Int("tools", len(graphTools)),

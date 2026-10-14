@@ -61,3 +61,13 @@ Graph 默认运行路径与旧循环维护独立工具列表，安全 Skill 注�
 - `make arch-lint` 未完成：本机缺少 `go-arch-lint`；目标虽打印 skipping，后续 recipe 仍调用缺失命令。未改动该既有行为，合并前需在已安装工具的环境补验。
 - 尚未执行生产 legacy 配置盘点、真实模型/MCP 集成冒烟、金丝雀升级与镜像回滚演练；这些是发布验收项，不能用单元测试替代。
 - 旧 Registry 中供审批兼容及既有测试使用的闭包适配器暂留；生产聊天只调用 Graph，告警初查也已改用 BaseTool。退役旧循环不等于删除历史审批协议。
+
+### 集中复核补充
+
+- 修复告警初查的批量参数迁移：使用 `incident_ids`，展开对应结果，拒绝失败/错配/空 bundle；用真实 `CorrelateIncidentTool` 验证诊断链路。
+- 修复安全 Skill schema 合并丢失原有 `required` 字段；覆盖全部内置 host-scope safe skills。
+- 工具注册整批校验名称唯一性、来源前缀以及目录/执行列表一致性；失败保留原有工具与目录。ToolSearch 读取本回合对应执行版本的完整 schema，不混用动态刷新的新参数。
+- 显式空工具视图清除继承的父回合权限列表。
+- 上述新增用例及 `make test-agent-runtime` 的 Linux race 回归通过。首版提交的 GitHub CI 已通过全仓 build/vet/race、部署清单及前端检查；补充提交需重新检查 CI。
+- 本地全仓测试尝试未通过：只读模块缓存缺少 APM 示例依赖，且 Docker amd64 仿真环境的 autoapm 进程发现测试失败。不能把本地全仓测试记为通过；原生 Ubuntu CI 的同项已通过。
+- 已在临时目录安装 `go-arch-lint v1.19.0` 并执行 `make arch-lint`：检查被原有配置错误阻断（不存在的 `internal/edgeagent/data/**`，以及 `shared_pkg`/`api` 的空依赖声明）。`.go-arch-lint.yml` 与基线相同；这替代此前“未安装工具”的原因，仍不能声称架构 lint 通过。
