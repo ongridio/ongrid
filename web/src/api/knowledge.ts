@@ -65,7 +65,15 @@ export function isBuiltinVault(repo: Pick<KnowledgeRepo, 'url' | 'is_builtin'>):
   return u.startsWith('builtin://') || u.includes('ongridio/vault');
 }
 
-export type SearchHit = { doc: KnowledgeDoc; score: number };
+export type SearchHit = {
+  doc: KnowledgeDoc;
+  score: number;
+  layer?: 'raw' | 'wiki';
+  page_type?: WikiPageType;
+  page_id?: string;
+  source_version_id?: string;
+  matched_node?: string;
+};
 
 export type PathRow = { path: string; count: number };
 
@@ -123,11 +131,18 @@ export function moveDoc(id: string, path: string) {
 
 export function searchKnowledge(
   q: string,
-  opts?: { limit?: number; path?: string; pathPrefix?: string; tags?: string[] },
+  opts?: {
+    limit?: number;
+    path?: string;
+    pathPrefix?: string;
+    tags?: string[];
+    mode?: 'hybrid' | 'rag' | 'wiki';
+  },
 ) {
   const params = new URLSearchParams();
   params.set('q', q);
   params.set('limit', String(opts?.limit ?? 10));
+  if (opts?.mode) params.set('mode', opts.mode);
   if (opts?.path) params.set('path', opts.path);
   if (opts?.pathPrefix) params.set('path_prefix', opts.pathPrefix);
   for (const t of opts?.tags ?? []) params.append('tag', t);
@@ -203,6 +218,152 @@ export async function uploadDoc(
 
 export function deleteRepo(id: number) {
   return request<void>('DELETE', `/knowledge/repos/${id}`);
+}
+
+// ----- LLM Wiki -----
+//
+// LLM Wiki deliberately has its own source/version lifecycle. It is not an
+// alternative view of knowledge_docs: raw files remain inspectable and an
+// explicit compile job publishes the derived Wiki pages.
+export type WikiPageType = 'generated';
+
+export type LLMWikiNode = {
+  id: string;
+  parent_id: string;
+  layer: 'raw' | 'wiki';
+  kind: 'file' | 'folder';
+  name: string;
+  relative_path: string;
+  has_children: boolean;
+  child_count: number;
+  document_count: number;
+  source_id?: string;
+  page_id?: string;
+  page_type?: WikiPageType;
+  status?: string;
+  updated_at?: string;
+  content?: string;
+  metadata?: LLMWikiNodeMetadata;
+};
+
+export type LLMWikiSourceReference = {
+  path: string;
+  node_id?: string;
+  version_id?: string;
+};
+
+export type LLMWikiReference = {
+  title: string;
+  path: string;
+  node_id?: string;
+  page_id?: string;
+};
+
+export type LLMWikiNodeMetadata = {
+  source_files?: LLMWikiSourceReference[];
+  source_file?: string;
+  source_node_id?: string;
+  source_version?: string;
+  wiki_files?: LLMWikiReference[];
+  page_type?: WikiPageType;
+  sha256?: string;
+};
+
+export type LLMWikiSource = {
+  id: string;
+  source_key: string;
+  source_type: string;
+  raw_path: string;
+  status: 'pending' | 'succeeded' | 'stale' | 'failed';
+  current_version_id?: string;
+  updated_at: string;
+};
+
+export type LLMWikiJob = {
+  id: string;
+  status: 'pending' | 'running' | 'succeeded' | 'skipped' | 'failed' | 'cancelled';
+  stage: string;
+  error?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+// The legacy Knowledge endpoints return their payload directly; the newer
+// Wiki handler follows the standard { code, message, data } envelope.
+async function wikiRequest<T>(method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown): Promise<T> {
+  const result = await request<{ data: T }>(method, path, body);
+  return result.data;
+}
+
+async function wikiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers);
+  const token = getToken();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const res = await fetch(`/api/v1${path}`, { ...init, headers });
+  if (res.ok) return res;
+
+  let message = `request failed (${res.status})`;
+  try {
+    const body = await res.json();
+    message = body.message || body.error || message;
+  } catch {
+    // Keep the HTTP fallback when a proxy returns a non-JSON error.
+  }
+  throw new Error(message);
+}
+
+async function wikiBlobRequest(path: string): Promise<Blob> {
+  return (await wikiFetch(path)).blob();
+}
+
+export function listLLMWikiTree(layer: LLMWikiNode['layer'], parentID?: string) {
+  const q = new URLSearchParams({ layer });
+  if (parentID) q.set('parent_id', parentID);
+  return wikiRequest<{ items: LLMWikiNode[]; total: number; document_count: number }>(
+    'GET',
+    `/knowledge/llm-wiki/tree?${q.toString()}`,
+  );
+}
+
+export function getLLMWikiNode(id: string) {
+  return wikiRequest<LLMWikiNode>('GET', `/knowledge/llm-wiki/nodes/${encodeURIComponent(id)}`);
+}
+
+export function deleteLLMWikiNode(id: string) {
+  return wikiRequest<{ deleted: boolean }>('DELETE', `/knowledge/llm-wiki/nodes/${encodeURIComponent(id)}`);
+}
+
+export async function getLLMWikiNodePreview(id: string): Promise<Blob> {
+  return wikiBlobRequest(`/knowledge/llm-wiki/nodes/${encodeURIComponent(id)}/preview`);
+}
+
+export function listLLMWikiSources() {
+  return wikiRequest<{ items: LLMWikiSource[]; total: number }>('GET', '/knowledge/llm-wiki/sources');
+}
+
+export function listLLMWikiJobs() {
+  return wikiRequest<{ items: LLMWikiJob[]; total: number }>('GET', '/knowledge/llm-wiki/jobs');
+}
+
+export function compileLLMWiki(force = false, sourceIds?: string[]) {
+  return wikiRequest<LLMWikiJob>('POST', '/knowledge/llm-wiki/compile', {
+    force,
+    source_ids: sourceIds,
+  });
+}
+
+export function retryLLMWikiJob(id: string) {
+  return wikiRequest<LLMWikiJob>('POST', `/knowledge/llm-wiki/jobs/${id}/retry`, {});
+}
+
+export function cancelLLMWikiJob(id: string) {
+  return wikiRequest<LLMWikiJob>('POST', `/knowledge/llm-wiki/jobs/${id}/cancel`, {});
+}
+
+export type LLMWikiSyncResult = { created: number; updated: number; unchanged: number; deleted: number; total: number };
+
+export function syncLLMWikiSources() {
+  return wikiRequest<LLMWikiSyncResult>('POST', '/knowledge/llm-wiki/sync', {});
 }
 
 // ----- SSH identities -----

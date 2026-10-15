@@ -161,7 +161,7 @@ sudo ./uninstall.sh --purge --yes
 
 ## 数据存储
 
-v0.7.45 起所有有状态服务（MySQL / Prometheus / Loki / Tempo / qdrant / Grafana）的数据卷**直接 bind-mount 到宿主机**，默认根路径 `/var/lib/ongrid`，可通过 `ONGRID_DATA_DIR` 覆盖：
+v0.7.45 起所有有状态服务和 Manager 持久数据目录都**直接 bind-mount 到宿主机**，默认根路径 `/var/lib/ongrid`，可通过 `ONGRID_DATA_DIR` 覆盖：
 
 ```text
 /var/lib/ongrid/
@@ -170,7 +170,8 @@ v0.7.45 起所有有状态服务（MySQL / Prometheus / Loki / Tempo / qdrant / 
 ├── loki/         # Loki chunks (uid 10001)
 ├── tempo/        # Tempo blocks (uid 10001)
 ├── qdrant/       # 向量 collection (root)
-└── grafana/      # Grafana SQLite + plugins (uid 472)
+├── grafana/      # Grafana SQLite + plugins (uid 472)
+└── llm-wiki/     # 原始资料、不可变版本快照和 build 页面 artifact (uid 65532)
 
 /var/log/ongrid/  # manager slog 输出，可被宿主机 Collector / Vector / Fluent Bit 直接抓取
 ```
@@ -198,6 +199,7 @@ sudo tar czf /backup/prom-$(date +%F).tar.gz -C /var/lib/ongrid/prometheus .
 sudo tar czf /backup/loki-$(date +%F).tar.gz   -C /var/lib/ongrid/loki .
 sudo tar czf /backup/tempo-$(date +%F).tar.gz  -C /var/lib/ongrid/tempo .
 sudo tar czf /backup/qdrant-$(date +%F).tar.gz -C /var/lib/ongrid/qdrant .
+sudo tar czf /backup/llm-wiki-$(date +%F).tar.gz -C /var/lib/ongrid/llm-wiki .
 ```
 
 ### 数据卷迁移（v0.7.45 前的安装升级到 v0.7.45+ 必读）

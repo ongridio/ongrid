@@ -37,7 +37,7 @@ func newMemVec() *memVec { return &memVec{points: map[uint64]qdrantx.SearchHit{}
 
 func (m *memVec) count() int { return len(m.points) }
 
-func (m *memVec) EnsureCollection(context.Context, string, int) error             { return nil }
+func (m *memVec) EnsureCollection(context.Context, string, int) error              { return nil }
 func (m *memVec) EnsurePayloadIndex(context.Context, string, string, string) error { return nil }
 
 func (m *memVec) Upsert(_ context.Context, _ string, pts []qdrantx.Point) error {
@@ -206,6 +206,55 @@ func newE2E(t *testing.T) (http.Handler, *memVec) {
 	r := chi.NewRouter()
 	NewHandler(uc).Register(r)
 	return r, store
+}
+
+type mixedSearchStub struct {
+	got biz.SearchOptions
+}
+
+func (s *mixedSearchStub) Search(_ context.Context, _ string, opts biz.SearchOptions) ([]biz.SearchHit, error) {
+	s.got = opts
+	return []biz.SearchHit{
+		{Doc: &model.Doc{ID: 1, SourceType: "wiki", Title: "RAG Wiki", Content: "wiki preview"}, Score: 0.9, Layer: "wiki", PageType: "topic", PageID: "topic-rag", SourceVersionID: "7", MatchedNode: "HNSW"},
+		{Doc: &model.Doc{ID: 2, SourceType: "upload", Title: "RAG Source", Content: "raw preview"}, Score: 0.8, Layer: "raw"},
+	}, nil
+}
+
+func TestSearch_ReturnsMixedHitMetadata(t *testing.T) {
+	store := newMemVec()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	uc, err := biz.New(context.Background(), nil, store, idEmbed{}, t.TempDir(), log)
+	if err != nil {
+		t.Fatalf("biz.New: %v", err)
+	}
+	searcher := &mixedSearchStub{}
+	handler := NewHandler(uc)
+	handler.SetSearchService(searcher)
+	router := chi.NewRouter()
+	handler.Register(router)
+
+	rec := req(t, router, http.MethodGet, "/v1/knowledge/search?q=rag&limit=2&mode=hybrid", "", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("search: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Items []struct {
+			Doc             docDTO `json:"doc"`
+			Layer           string `json:"layer"`
+			PageID          string `json:"page_id"`
+			SourceVersionID string `json:"source_version_id"`
+			MatchedNode     string `json:"matched_node"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Items) != 2 || body.Items[0].Layer != "wiki" || body.Items[0].PageID != "topic-rag" || body.Items[0].SourceVersionID != "7" || body.Items[0].MatchedNode != "HNSW" || body.Items[1].Layer != "raw" {
+		t.Fatalf("mixed search response = %+v", body.Items)
+	}
+	if searcher.got.Mode != "hybrid" || searcher.got.Limit != 2 {
+		t.Fatalf("search options = %+v", searcher.got)
+	}
 }
 
 // req fires one request and returns the recorder. body==nil sends no body;
