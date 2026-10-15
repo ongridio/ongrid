@@ -482,11 +482,19 @@ func (r *Registry) Invoke(ctx context.Context, name string, args json.RawMessage
 		return ExecuteResult{}, fmt.Errorf("%w: tool %q", errs.ErrNotFound, name)
 	}
 	ctx, span := otel.Tracer("github.com/ongridio/ongrid/internal/manager/biz/aiops/tools").Start(ctx, "aiops.Tool."+name,
-		trace.WithAttributes(attribute.String("aiops.tool.name", name)),
+		trace.WithAttributes(attribute.String("aiops.tool.name", name),
+			attribute.String("gen_ai.operation.name", "execute_tool"),
+			attribute.String("gen_ai.tool.name", name)),
 	)
-	defer func() { tracing.EndSpan(span, retErr) }()
+	defer func() {
+		if len(result.ResultJSON) != 0 {
+			tracing.RecordAgentContent(span, "output.value", result.ResultJSON)
+		}
+		tracing.EndSpan(span, retErr)
+	}()
 	if len(args) == 0 {
 		args = json.RawMessage(`{}`)
 	}
+	tracing.RecordAgentContent(span, "input.value", args)
 	return t.Execute(ctx, args)
 }

@@ -172,6 +172,7 @@ func (h *Handler) getTrace(w http.ResponseWriter, r *http.Request) {
 	// Tempo returns OTLP-shaped JSON; pass it through verbatim so the SPA
 	// can walk resourceSpans / scopeSpans / spans without a re-encode.
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(out.Body)
 }
@@ -220,6 +221,7 @@ func parseTime(s string) (time.Time, error) {
 
 func writeJSON(w http.ResponseWriter, code int, body any) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(body)
 }

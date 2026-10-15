@@ -1,0 +1,651 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "telemetry.sdk.language",
+            "value": {
+              "stringValue": "python"
+            }
+          },
+          {
+            "key": "telemetry.sdk.name",
+            "value": {
+              "stringValue": "opentelemetry"
+            }
+          },
+          {
+            "key": "telemetry.sdk.version",
+            "value": {
+              "stringValue": "1.45.1"
+            }
+          },
+          {
+            "key": "service.instance.id",
+            "value": {
+              "stringValue": "2fefe0f8-a9f8-4d35-9d71-58ae1523bc21"
+            }
+          },
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "support-agent"
+            }
+          },
+          {
+            "key": "service.namespace",
+            "value": {
+              "stringValue": "agent-sdk-fixtures"
+            }
+          },
+          {
+            "key": "deployment.environment.name",
+            "value": {
+              "stringValue": "test"
+            }
+          }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": {
+            "name": "langsmith"
+          },
+          "spans": [
+            {
+              "traceId": "n2n0YoD8oY3kpZaiu1WipQ==",
+              "spanId": "c6HwvZJdUI0=",
+              "name": "LangGraph",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1791949713771929856",
+              "endTimeUnixNano": "1791949714065423104",
+              "attributes": [
+                {
+                  "key": "langsmith.span.kind",
+                  "value": {
+                    "stringValue": "chain"
+                  }
+                },
+                {
+                  "key": "langsmith.trace.name",
+                  "value": {
+                    "stringValue": "LangGraph"
+                  }
+                },
+                {
+                  "key": "langsmith.trace.session_name",
+                  "value": {
+                    "stringValue": "default"
+                  }
+                },
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "chain"
+                  }
+                },
+                {
+                  "key": "gen_ai.system",
+                  "value": {
+                    "stringValue": "langchain"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.thread_id",
+                  "value": {
+                    "stringValue": "fixture-session"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.ls_integration",
+                  "value": {
+                    "stringValue": "langgraph"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.revision_id",
+                  "value": {
+                    "stringValue": "v0.18.1-1-g4d215904-dirty"
+                  }
+                },
+                {
+                  "key": "gen_ai.prompt",
+                  "value": {
+                    "stringValue": "{\"question\":\"Can I return an order?\",\"context\":\"\",\"answer\":\"\"}"
+                  }
+                },
+                {
+                  "key": "gen_ai.completion",
+                  "value": {
+                    "stringValue": "{\"question\":\"Can I return an order?\",\"context\":\"Returns are accepted within 30 days with a receipt.\",\"answer\":\"You can return the order within 30 days with your receipt.\"}"
+                  }
+                }
+              ],
+              "status": {
+                "code": "STATUS_CODE_OK"
+              },
+              "flags": 256
+            },
+            {
+              "traceId": "n2n0YoD8oY3kpZaiu1WipQ==",
+              "spanId": "EG4w+zjfASU=",
+              "parentSpanId": "c6HwvZJdUI0=",
+              "name": "retrieve",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1791949714061427200",
+              "endTimeUnixNano": "1791949714062896896",
+              "attributes": [
+                {
+                  "key": "langsmith.span.kind",
+                  "value": {
+                    "stringValue": "chain"
+                  }
+                },
+                {
+                  "key": "langsmith.trace.name",
+                  "value": {
+                    "stringValue": "retrieve"
+                  }
+                },
+                {
+                  "key": "langsmith.trace.session_name",
+                  "value": {
+                    "stringValue": "default"
+                  }
+                },
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "chain"
+                  }
+                },
+                {
+                  "key": "gen_ai.system",
+                  "value": {
+                    "stringValue": "langchain"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.thread_id",
+                  "value": {
+                    "stringValue": "fixture-session"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.ls_integration",
+                  "value": {
+                    "stringValue": "langgraph"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.langgraph_step",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.langgraph_node",
+                  "value": {
+                    "stringValue": "retrieve"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.langgraph_triggers",
+                  "value": {
+                    "stringValue": "[\"branch:to:retrieve\"]"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.langgraph_path",
+                  "value": {
+                    "stringValue": "[\"__pregel_pull\",\"retrieve\"]"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.langgraph_checkpoint_ns",
+                  "value": {
+                    "stringValue": "retrieve:0a62c6bb-4bc4-f2f5-d379-f1b53a866a72"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.revision_id",
+                  "value": {
+                    "stringValue": "v0.18.1-1-g4d215904-dirty"
+                  }
+                },
+                {
+                  "key": "langsmith.span.tags",
+                  "value": {
+                    "stringValue": "graph:step:1"
+                  }
+                },
+                {
+                  "key": "gen_ai.prompt",
+                  "value": {
+                    "stringValue": "{\"question\":\"Can I return an order?\",\"context\":\"\",\"answer\":\"\"}"
+                  }
+                },
+                {
+                  "key": "gen_ai.completion",
+                  "value": {
+                    "stringValue": "{\"context\":\"Returns are accepted within 30 days with a receipt.\"}"
+                  }
+                }
+              ],
+              "status": {
+                "code": "STATUS_CODE_OK"
+              },
+              "flags": 256
+            },
+            {
+              "traceId": "n2n0YoD8oY3kpZaiu1WipQ==",
+              "spanId": "Um+ZFbIBDjg=",
+              "parentSpanId": "EG4w+zjfASU=",
+              "name": "search_knowledge",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1791949714062354944",
+              "endTimeUnixNano": "1791949714062808064",
+              "attributes": [
+                {
+                  "key": "langsmith.span.kind",
+                  "value": {
+                    "stringValue": "tool"
+                  }
+                },
+                {
+                  "key": "langsmith.trace.name",
+                  "value": {
+                    "stringValue": "search_knowledge"
+                  }
+                },
+                {
+                  "key": "langsmith.trace.session_name",
+                  "value": {
+                    "stringValue": "default"
+                  }
+                },
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "execute_tool"
+                  }
+                },
+                {
+                  "key": "gen_ai.system",
+                  "value": {
+                    "stringValue": "langchain"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "search_knowledge"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.thread_id",
+                  "value": {
+                    "stringValue": "fixture-session"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.ls_integration",
+                  "value": {
+                    "stringValue": "langgraph"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.langgraph_step",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.langgraph_node",
+                  "value": {
+                    "stringValue": "retrieve"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.langgraph_triggers",
+                  "value": {
+                    "stringValue": "[\"branch:to:retrieve\"]"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.langgraph_path",
+                  "value": {
+                    "stringValue": "[\"__pregel_pull\",\"retrieve\"]"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.langgraph_checkpoint_ns",
+                  "value": {
+                    "stringValue": "retrieve:0a62c6bb-4bc4-f2f5-d379-f1b53a866a72"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.checkpoint_ns",
+                  "value": {
+                    "stringValue": "retrieve:0a62c6bb-4bc4-f2f5-d379-f1b53a866a72"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.revision_id",
+                  "value": {
+                    "stringValue": "v0.18.1-1-g4d215904-dirty"
+                  }
+                },
+                {
+                  "key": "langsmith.span.tags",
+                  "value": {
+                    "stringValue": "seq:step:1"
+                  }
+                },
+                {
+                  "key": "gen_ai.prompt",
+                  "value": {
+                    "stringValue": "{\"question\":\"Can I return an order?\"}"
+                  }
+                },
+                {
+                  "key": "gen_ai.completion",
+                  "value": {
+                    "stringValue": "{\"output\":\"Returns are accepted within 30 days with a receipt.\"}"
+                  }
+                }
+              ],
+              "status": {
+                "code": "STATUS_CODE_OK"
+              },
+              "flags": 256
+            },
+            {
+              "traceId": "n2n0YoD8oY3kpZaiu1WipQ==",
+              "spanId": "7eknvSvJVxs=",
+              "parentSpanId": "c6HwvZJdUI0=",
+              "name": "answer",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1791949714063111936",
+              "endTimeUnixNano": "1791949714065249024",
+              "attributes": [
+                {
+                  "key": "langsmith.span.kind",
+                  "value": {
+                    "stringValue": "chain"
+                  }
+                },
+                {
+                  "key": "langsmith.trace.name",
+                  "value": {
+                    "stringValue": "answer"
+                  }
+                },
+                {
+                  "key": "langsmith.trace.session_name",
+                  "value": {
+                    "stringValue": "default"
+                  }
+                },
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "chain"
+                  }
+                },
+                {
+                  "key": "gen_ai.system",
+                  "value": {
+                    "stringValue": "langchain"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.thread_id",
+                  "value": {
+                    "stringValue": "fixture-session"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.ls_integration",
+                  "value": {
+                    "stringValue": "langgraph"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.langgraph_step",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.langgraph_node",
+                  "value": {
+                    "stringValue": "answer"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.langgraph_triggers",
+                  "value": {
+                    "stringValue": "[\"branch:to:answer\"]"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.langgraph_path",
+                  "value": {
+                    "stringValue": "[\"__pregel_pull\",\"answer\"]"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.langgraph_checkpoint_ns",
+                  "value": {
+                    "stringValue": "answer:e30d0989-b601-7c24-9010-ee77c55ba144"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.revision_id",
+                  "value": {
+                    "stringValue": "v0.18.1-1-g4d215904-dirty"
+                  }
+                },
+                {
+                  "key": "langsmith.span.tags",
+                  "value": {
+                    "stringValue": "graph:step:2"
+                  }
+                },
+                {
+                  "key": "gen_ai.prompt",
+                  "value": {
+                    "stringValue": "{\"question\":\"Can I return an order?\",\"context\":\"Returns are accepted within 30 days with a receipt.\",\"answer\":\"\"}"
+                  }
+                },
+                {
+                  "key": "gen_ai.completion",
+                  "value": {
+                    "stringValue": "{\"answer\":\"You can return the order within 30 days with your receipt.\"}"
+                  }
+                }
+              ],
+              "status": {
+                "code": "STATUS_CODE_OK"
+              },
+              "flags": 256
+            },
+            {
+              "traceId": "n2n0YoD8oY3kpZaiu1WipQ==",
+              "spanId": "BexpFC7cNAM=",
+              "parentSpanId": "7eknvSvJVxs=",
+              "name": "FakeMessagesListChatModel",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1791949714064182016",
+              "endTimeUnixNano": "1791949714065048832",
+              "attributes": [
+                {
+                  "key": "langsmith.span.kind",
+                  "value": {
+                    "stringValue": "llm"
+                  }
+                },
+                {
+                  "key": "langsmith.trace.name",
+                  "value": {
+                    "stringValue": "FakeMessagesListChatModel"
+                  }
+                },
+                {
+                  "key": "langsmith.trace.session_name",
+                  "value": {
+                    "stringValue": "default"
+                  }
+                },
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "chat"
+                  }
+                },
+                {
+                  "key": "gen_ai.system",
+                  "value": {
+                    "stringValue": "langchain"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.thread_id",
+                  "value": {
+                    "stringValue": "fixture-session"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.ls_integration",
+                  "value": {
+                    "stringValue": "langchain_chat_model"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.langgraph_step",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.langgraph_node",
+                  "value": {
+                    "stringValue": "answer"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.langgraph_triggers",
+                  "value": {
+                    "stringValue": "[\"branch:to:answer\"]"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.langgraph_path",
+                  "value": {
+                    "stringValue": "[\"__pregel_pull\",\"answer\"]"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.langgraph_checkpoint_ns",
+                  "value": {
+                    "stringValue": "answer:e30d0989-b601-7c24-9010-ee77c55ba144"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.checkpoint_ns",
+                  "value": {
+                    "stringValue": "answer:e30d0989-b601-7c24-9010-ee77c55ba144"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.ls_provider",
+                  "value": {
+                    "stringValue": "fakemessageslistchatmodel"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.ls_model_type",
+                  "value": {
+                    "stringValue": "chat"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.lc_versions",
+                  "value": {
+                    "stringValue": "{\"langchain-core\":\"1.6.10\"}"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata._type",
+                  "value": {
+                    "stringValue": "fake-messages-list-chat-model"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.usage_metadata",
+                  "value": {
+                    "stringValue": "{\"input_tokens\":42,\"output_tokens\":16,\"total_tokens\":58}"
+                  }
+                },
+                {
+                  "key": "langsmith.metadata.revision_id",
+                  "value": {
+                    "stringValue": "v0.18.1-1-g4d215904-dirty"
+                  }
+                },
+                {
+                  "key": "langsmith.span.tags",
+                  "value": {
+                    "stringValue": "seq:step:1"
+                  }
+                },
+                {
+                  "key": "gen_ai.serialized.name",
+                  "value": {
+                    "stringValue": "FakeMessagesListChatModel"
+                  }
+                },
+                {
+                  "key": "gen_ai.prompt",
+                  "value": {
+                    "stringValue": "{\"messages\":[[{\"lc\":1,\"type\":\"constructor\",\"id\":[\"langchain\",\"schema\",\"messages\",\"HumanMessage\"],\"kwargs\":{\"content\":\"Can I return an order?\\nReturns are accepted within 30 days with a receipt.\",\"type\":\"human\"}}]]}"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.input_tokens",
+                  "value": {
+                    "intValue": "42"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.output_tokens",
+                  "value": {
+                    "intValue": "16"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.total_tokens",
+                  "value": {
+                    "intValue": "58"
+                  }
+                },
+                {
+                  "key": "gen_ai.completion",
+                  "value": {
+                    "stringValue": "{\"generations\":[[{\"text\":\"You can return the order within 30 days with your receipt.\",\"generation_info\":null,\"type\":\"ChatGeneration\",\"message\":{\"lc\":1,\"type\":\"constructor\",\"id\":[\"langchain\",\"schema\",\"messages\",\"AIMessage\"],\"kwargs\":{\"content\":\"You can return the order within 30 days with your receipt.\",\"response_metadata\":{\"model_name\":\"fixture-model\"},\"type\":\"ai\",\"id\":\"lc_run--01a13886-b290-7cd1-8877-91ce9e4849bb-0\",\"usage_metadata\":{\"input_tokens\":42,\"output_tokens\":16,\"total_tokens\":58},\"tool_calls\":[],\"invalid_tool_calls\":[]}}}]],\"llm_output\":null,\"run\":null,\"type\":\"LLMResult\"}"
+                  }
+                }
+              ],
+              "status": {
+                "code": "STATUS_CODE_OK"
+              },
+              "flags": 256
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

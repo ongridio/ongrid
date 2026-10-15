@@ -16,6 +16,7 @@ const LogsPage = lazy(() => import('@/pages/Logs'));
 const ApmCapturePage = lazy(() => import('@/pages/ApmCapture'));
 const ApmPage = lazy(() => import('@/pages/Apm'));
 const TracesPage = lazy(() => import('@/pages/Traces'));
+const AgentObservabilityPage = lazy(() => import('@/pages/AgentObservability'));
 const KubernetesClusterDetailPage = lazy(() =>
   import('@/pages/Kubernetes').then((m) => ({ default: m.KubernetesClusterDetailPage })),
 );
@@ -125,6 +126,7 @@ export default function App() {
         <Route path="/apm/capture/:kind/:id" element={<ApmCapturePage />} />
         <Route path="/apm/service" element={<ApmPage />} />
         <Route path="/traces" element={<TracesPage />} />
+        <Route path="/agent-observability" element={<AgentObservabilityPage />} />
         <Route path="/traces/:traceId" element={<TracesPage />} />
         <Route path="/kubernetes" element={<Navigate to="/clusters" replace />} />
         <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />

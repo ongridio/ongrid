@@ -1,0 +1,230 @@
+syntax = "proto3";
+
+package ongrid.manager.agenttrace.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/ongridio/ongrid/api/gen/manager/agenttrace/v1;agenttracev1";
+
+// Authenticated REST query plane at /api/v1/agent-observability. No ingestion.
+service AgentTraceService {
+  rpc ListRuns(ListRunsRequest) returns (ListRunsResponse);
+  rpc GetTrace(GetTraceRequest) returns (GetTraceResponse);
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+  rpc GetSession(GetSessionRequest) returns (GetSessionResponse);
+  rpc GetFacets(GetFacetsRequest) returns (GetFacetsResponse);
+  rpc GetDiagnostics(GetDiagnosticsRequest) returns (GetDiagnosticsResponse);
+  rpc GetIngestion(GetIngestionRequest) returns (GetIngestionResponse);
+}
+
+message Identity {
+  string service_name = 1;
+  string service_namespace = 2;
+  string environment = 3;
+}
+
+message Query {
+  google.protobuf.Timestamp start = 1;
+  google.protobuf.Timestamp end = 2;
+  string service_name = 3;
+  // Absent means all; present empty means a missing/empty identity attribute.
+  optional string service_namespace = 4;
+  optional string environment = 5;
+  string sdk = 6;
+  string model = 7;
+  string kind = 8;
+  string status = 9;
+  // Requires all three identity components, including explicit empty values.
+  string session_id = 10;
+  string search = 11;
+}
+
+message Content {
+  // available, not_recorded or capture_disabled. Missing content does not imply redaction.
+  string state = 1;
+  string source = 2;
+  google.protobuf.Value value = 3;
+  bool truncated = 4;
+  int64 original_bytes = 5;
+  repeated string omitted = 6;
+}
+
+message Usage {
+  // The REST DTO emits null for unreported or ambiguous aggregates.
+  optional int64 input_tokens = 1;
+  optional int64 output_tokens = 2;
+  optional int64 total_tokens = 3;
+  optional int64 cached_tokens = 4;
+  optional double reported_cost = 5;
+  string currency = 6;
+  bool conflict = 7;
+  bool complete = 8;
+}
+
+message Scope {
+  string name = 1;
+  string version = 2;
+  google.protobuf.Struct attributes = 3;
+}
+
+message Event {
+  string name = 1;
+  string time_unix_nano = 2;
+  google.protobuf.Struct attributes = 3;
+}
+
+message Link {
+  string trace_id = 1;
+  string span_id = 2;
+  google.protobuf.Struct attributes = 3;
+}
+
+message Step {
+  string span_id = 1;
+  // Display parent; malformed/missing edges are removed and diagnosed.
+  string parent_span_id = 2;
+  string name = 3;
+  string kind = 4;
+  string sdk = 5;
+  Identity identity = 6;
+  google.protobuf.Timestamp start = 7;
+  double duration_ms = 8;
+  string status = 9;
+  string model = 10;
+  string provider = 11;
+  string session_id = 12;
+  Content input = 13;
+  Content output = 14;
+  Usage usage = 15;
+  Scope scope = 16;
+  google.protobuf.Struct attributes = 17;
+  google.protobuf.Struct resource = 18;
+  repeated Event events = 19;
+  repeated Link links = 20;
+  repeated string issues = 21;
+  // Original OTLP span, including the unmodified parent and unknown fields.
+  google.protobuf.Struct raw = 22;
+  string chat_session_id = 23;
+}
+
+message Run {
+  string trace_id = 1;
+  string entry_span_id = 2;
+  Identity identity = 3;
+  string name = 4;
+  repeated string sdks = 5;
+  google.protobuf.Timestamp start = 6;
+  double duration_ms = 7;
+  string status = 8;
+  repeated string models = 9;
+  repeated string kinds = 10;
+  string session_id = 11;
+  int32 step_count = 12;
+  int32 error_count = 13;
+  string input_preview = 14;
+  string output_preview = 15;
+  Usage usage = 16;
+  repeated string issues = 17;
+  bool content_available = 18;
+  string input_state = 19;
+  string output_state = 20;
+  string chat_session_id = 21;
+}
+
+message Trace {
+  string trace_id = 1;
+  repeated Run runs = 2;
+  repeated Step steps = 3;
+  repeated string issues = 4;
+}
+
+message Failure {
+  string trace_id = 1;
+  string reason = 2;
+}
+
+message Metadata {
+  google.protobuf.Timestamp start = 1;
+  google.protobuf.Timestamp end = 2;
+  int32 candidate_limit = 3;
+  int32 candidate_traces = 4;
+  int32 read_traces = 5;
+  bool partial = 6;
+  repeated string reasons = 7;
+  repeated Failure failures = 8;
+  // Upstream sampling cannot be inferred from query results.
+  string sampling = 9;
+}
+
+message Session {
+  string session_id = 1;
+  Identity identity = 2;
+  int32 run_count = 3;
+  int32 error_count = 4;
+  google.protobuf.Timestamp first_seen = 5;
+  google.protobuf.Timestamp last_seen = 6;
+  string input_preview = 7;
+  string output_preview = 8;
+}
+
+message Check {
+  string key = 1;
+  string status = 2;
+  int32 count = 3;
+}
+
+message Facets {
+  repeated Identity applications = 1;
+  repeated string sdks = 2;
+  repeated string models = 3;
+}
+
+// One bounded result is retained by the client for stable local pagination.
+// Sessions, facets and diagnostics share that exact set of runs.
+message ListResult {
+  repeated Run items = 1;
+  repeated Session sessions = 2;
+  Facets facets = 3;
+  repeated Check checks = 4;
+  Metadata metadata = 5;
+}
+
+message ListRunsRequest { Query query = 1; }
+message ListRunsResponse { int32 code = 1; string message = 2; ListResult data = 3; }
+message GetTraceRequest { string trace_id = 1; string entry_span_id = 2; }
+message GetTraceResponse { int32 code = 1; string message = 2; Trace data = 3; }
+message ListSessionsRequest { Query query = 1; }
+message SessionList { repeated Session items = 1; Metadata metadata = 2; }
+message ListSessionsResponse { int32 code = 1; string message = 2; SessionList data = 3; }
+// GET /sessions/detail; query.session_id and full application identity required.
+message GetSessionRequest { Query query = 1; }
+message GetSessionResponse { int32 code = 1; string message = 2; ListResult data = 3; }
+message GetFacetsRequest { Query query = 1; }
+message FacetResult { Facets facets = 1; Metadata metadata = 2; }
+message GetFacetsResponse { int32 code = 1; string message = 2; FacetResult data = 3; }
+message GetDiagnosticsRequest { Query query = 1; }
+message Diagnostics { repeated Check checks = 1; Metadata metadata = 2; }
+message GetDiagnosticsResponse { int32 code = 1; string message = 2; Diagnostics data = 3; }
+
+message ReceiverTarget {
+  string location = 1;
+  string cluster_id = 2;
+  string device_id = 3;
+  string instance_id = 4;
+  string container_name = 5;
+}
+message Receiver { string endpoint = 1; string location = 2; string reason = 3; }
+message Ingestion {
+  string sdk = 1;
+  Identity identity = 2;
+  Receiver receiver = 3;
+  map<string, string> environment = 4;
+}
+message GetIngestionRequest {
+  string sdk = 1;
+  Identity identity = 2;
+  string endpoint = 3;
+  ReceiverTarget target = 4;
+}
+message GetIngestionResponse { int32 code = 1; string message = 2; Ingestion data = 3; }

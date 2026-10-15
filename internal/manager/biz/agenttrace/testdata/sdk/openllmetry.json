@@ -1,0 +1,886 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "telemetry.sdk.language",
+            "value": {
+              "stringValue": "python"
+            }
+          },
+          {
+            "key": "telemetry.sdk.name",
+            "value": {
+              "stringValue": "opentelemetry"
+            }
+          },
+          {
+            "key": "telemetry.sdk.version",
+            "value": {
+              "stringValue": "1.45.1"
+            }
+          },
+          {
+            "key": "service.instance.id",
+            "value": {
+              "stringValue": "c87226ee-81a8-46ca-a841-7d9832725538"
+            }
+          },
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "support-agent"
+            }
+          },
+          {
+            "key": "service.namespace",
+            "value": {
+              "stringValue": "agent-sdk-fixtures"
+            }
+          },
+          {
+            "key": "deployment.environment.name",
+            "value": {
+              "stringValue": "test"
+            }
+          }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": {
+            "name": "opentelemetry.instrumentation.langchain",
+            "version": "0.62.4"
+          },
+          "spans": [
+            {
+              "traceId": "ibwWmAiUlHoEW+o4bd84ug==",
+              "spanId": "aJ4j8Nfdfck=",
+              "parentSpanId": "yI2pkP/od8w=",
+              "name": "execute_tool search_knowledge",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1791949715432638000",
+              "endTimeUnixNano": "1791949715432879000",
+              "attributes": [
+                {
+                  "key": "traceloop.association.properties.session_id",
+                  "value": {
+                    "stringValue": "fixture-session"
+                  }
+                },
+                {
+                  "key": "traceloop.workflow.name",
+                  "value": {
+                    "stringValue": "LangGraph"
+                  }
+                },
+                {
+                  "key": "traceloop.entity.path",
+                  "value": {
+                    "stringValue": "retrieve"
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.thread_id",
+                  "value": {
+                    "stringValue": "fixture-session"
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.ls_integration",
+                  "value": {
+                    "stringValue": "langgraph"
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.langgraph_step",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.langgraph_node",
+                  "value": {
+                    "stringValue": "retrieve"
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.langgraph_triggers",
+                  "value": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "stringValue": "branch:to:retrieve"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.langgraph_path",
+                  "value": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "stringValue": "__pregel_pull"
+                        },
+                        {
+                          "stringValue": "retrieve"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.langgraph_checkpoint_ns",
+                  "value": {
+                    "stringValue": "retrieve:1c51c57d-a39b-bb56-7454-25b60b8dad6c"
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.checkpoint_ns",
+                  "value": {
+                    "stringValue": "retrieve:1c51c57d-a39b-bb56-7454-25b60b8dad6c"
+                  }
+                },
+                {
+                  "key": "traceloop.span.kind",
+                  "value": {
+                    "stringValue": "tool"
+                  }
+                },
+                {
+                  "key": "traceloop.entity.name",
+                  "value": {
+                    "stringValue": "search_knowledge"
+                  }
+                },
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "langgraph"
+                  }
+                },
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "execute_tool"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "search_knowledge"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.type",
+                  "value": {
+                    "stringValue": "function"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.description",
+                  "value": {
+                    "stringValue": "Find the synthetic returns policy."
+                  }
+                },
+                {
+                  "key": "traceloop.entity.input",
+                  "value": {
+                    "stringValue": "{\"input_str\": \"{'question': 'Can I return an order?'}\", \"tags\": [\"seq:step:1\"], \"metadata\": {\"thread_id\": \"fixture-session\", \"ls_integration\": \"langgraph\", \"langgraph_step\": 1, \"langgraph_node\": \"retrieve\", \"langgraph_triggers\": [\"branch:to:retrieve\"], \"langgraph_path\": [\"__pregel_pull\", \"retrieve\"], \"langgraph_checkpoint_ns\": \"retrieve:1c51c57d-a39b-bb56-7454-25b60b8dad6c\", \"checkpoint_ns\": \"retrieve:1c51c57d-a39b-bb56-7454-25b60b8dad6c\"}, \"inputs\": {\"question\": \"Can I return an order?\"}, \"kwargs\": {\"color\": \"green\", \"name\": null, \"tool_call_id\": null}}"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.arguments",
+                  "value": {
+                    "stringValue": "{\"input_str\": \"{'question': 'Can I return an order?'}\", \"tags\": [\"seq:step:1\"], \"metadata\": {\"thread_id\": \"fixture-session\", \"ls_integration\": \"langgraph\", \"langgraph_step\": 1, \"langgraph_node\": \"retrieve\", \"langgraph_triggers\": [\"branch:to:retrieve\"], \"langgraph_path\": [\"__pregel_pull\", \"retrieve\"], \"langgraph_checkpoint_ns\": \"retrieve:1c51c57d-a39b-bb56-7454-25b60b8dad6c\", \"checkpoint_ns\": \"retrieve:1c51c57d-a39b-bb56-7454-25b60b8dad6c\"}, \"inputs\": {\"question\": \"Can I return an order?\"}, \"kwargs\": {\"color\": \"green\", \"name\": null, \"tool_call_id\": null}}"
+                  }
+                },
+                {
+                  "key": "gen_ai.task.status",
+                  "value": {
+                    "stringValue": "success"
+                  }
+                },
+                {
+                  "key": "traceloop.entity.output",
+                  "value": {
+                    "stringValue": "{\"output\": \"Returns are accepted within 30 days with a receipt.\", \"kwargs\": {\"tags\": [\"seq:step:1\"], \"color\": \"green\", \"name\": \"search_knowledge\"}}"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.result",
+                  "value": {
+                    "stringValue": "{\"output\": \"Returns are accepted within 30 days with a receipt.\", \"kwargs\": {\"tags\": [\"seq:step:1\"], \"color\": \"green\", \"name\": \"search_knowledge\"}}"
+                  }
+                }
+              ],
+              "status": {},
+              "flags": 256
+            },
+            {
+              "traceId": "ibwWmAiUlHoEW+o4bd84ug==",
+              "spanId": "yI2pkP/od8w=",
+              "parentSpanId": "6LgHL5SDCeM=",
+              "name": "execute_task retrieve",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1791949715432417000",
+              "endTimeUnixNano": "1791949715432929000",
+              "attributes": [
+                {
+                  "key": "traceloop.association.properties.session_id",
+                  "value": {
+                    "stringValue": "fixture-session"
+                  }
+                },
+                {
+                  "key": "traceloop.workflow.name",
+                  "value": {
+                    "stringValue": "LangGraph"
+                  }
+                },
+                {
+                  "key": "traceloop.entity.path",
+                  "value": {
+                    "stringValue": ""
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.thread_id",
+                  "value": {
+                    "stringValue": "fixture-session"
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.ls_integration",
+                  "value": {
+                    "stringValue": "langgraph"
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.langgraph_step",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.langgraph_node",
+                  "value": {
+                    "stringValue": "retrieve"
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.langgraph_triggers",
+                  "value": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "stringValue": "branch:to:retrieve"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.langgraph_path",
+                  "value": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "stringValue": "__pregel_pull"
+                        },
+                        {
+                          "stringValue": "retrieve"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.langgraph_checkpoint_ns",
+                  "value": {
+                    "stringValue": "retrieve:1c51c57d-a39b-bb56-7454-25b60b8dad6c"
+                  }
+                },
+                {
+                  "key": "traceloop.span.kind",
+                  "value": {
+                    "stringValue": "task"
+                  }
+                },
+                {
+                  "key": "traceloop.entity.name",
+                  "value": {
+                    "stringValue": "retrieve"
+                  }
+                },
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "langgraph"
+                  }
+                },
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "execute_task"
+                  }
+                },
+                {
+                  "key": "gen_ai.task.name",
+                  "value": {
+                    "stringValue": "retrieve"
+                  }
+                },
+                {
+                  "key": "gen_ai.task.id",
+                  "value": {
+                    "stringValue": "01a13886-b7e8-7551-8507-cbd54f32a4cd"
+                  }
+                },
+                {
+                  "key": "gen_ai.task.parent.id",
+                  "value": {
+                    "stringValue": "01a13886-b7e7-7b21-bf1c-15de36aca4a0"
+                  }
+                },
+                {
+                  "key": "traceloop.entity.input",
+                  "value": {
+                    "stringValue": "{\"inputs\": {\"question\": \"Can I return an order?\", \"context\": \"\", \"answer\": \"\"}, \"tags\": [\"graph:step:1\"], \"metadata\": {\"thread_id\": \"fixture-session\", \"ls_integration\": \"langgraph\", \"langgraph_step\": 1, \"langgraph_node\": \"retrieve\", \"langgraph_triggers\": [\"branch:to:retrieve\"], \"langgraph_path\": [\"__pregel_pull\", \"retrieve\"], \"langgraph_checkpoint_ns\": \"retrieve:1c51c57d-a39b-bb56-7454-25b60b8dad6c\"}, \"kwargs\": {\"name\": \"retrieve\"}}"
+                  }
+                },
+                {
+                  "key": "gen_ai.task.input",
+                  "value": {
+                    "stringValue": "{\"inputs\": {\"question\": \"Can I return an order?\", \"context\": \"\", \"answer\": \"\"}, \"tags\": [\"graph:step:1\"], \"metadata\": {\"thread_id\": \"fixture-session\", \"ls_integration\": \"langgraph\", \"langgraph_step\": 1, \"langgraph_node\": \"retrieve\", \"langgraph_triggers\": [\"branch:to:retrieve\"], \"langgraph_path\": [\"__pregel_pull\", \"retrieve\"], \"langgraph_checkpoint_ns\": \"retrieve:1c51c57d-a39b-bb56-7454-25b60b8dad6c\"}, \"kwargs\": {\"name\": \"retrieve\"}}"
+                  }
+                },
+                {
+                  "key": "gen_ai.task.status",
+                  "value": {
+                    "stringValue": "success"
+                  }
+                },
+                {
+                  "key": "traceloop.entity.output",
+                  "value": {
+                    "stringValue": "{\"outputs\": {\"context\": \"Returns are accepted within 30 days with a receipt.\"}, \"kwargs\": {\"tags\": [\"graph:step:1\"]}}"
+                  }
+                },
+                {
+                  "key": "gen_ai.task.output",
+                  "value": {
+                    "stringValue": "{\"outputs\": {\"context\": \"Returns are accepted within 30 days with a receipt.\"}, \"kwargs\": {\"tags\": [\"graph:step:1\"]}}"
+                  }
+                }
+              ],
+              "status": {},
+              "flags": 256
+            },
+            {
+              "traceId": "ibwWmAiUlHoEW+o4bd84ug==",
+              "spanId": "6bUMUXaivRQ=",
+              "parentSpanId": "mVoZwkSKyr8=",
+              "name": "FakeMessagesListChatModel.chat",
+              "kind": "SPAN_KIND_CLIENT",
+              "startTimeUnixNano": "1791949715433592000",
+              "endTimeUnixNano": "1791949715433954000",
+              "attributes": [
+                {
+                  "key": "traceloop.association.properties.session_id",
+                  "value": {
+                    "stringValue": "fixture-session"
+                  }
+                },
+                {
+                  "key": "traceloop.workflow.name",
+                  "value": {
+                    "stringValue": "LangGraph"
+                  }
+                },
+                {
+                  "key": "traceloop.entity.path",
+                  "value": {
+                    "stringValue": "answer"
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.thread_id",
+                  "value": {
+                    "stringValue": "fixture-session"
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.ls_integration",
+                  "value": {
+                    "stringValue": "langchain_chat_model"
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.langgraph_step",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.langgraph_node",
+                  "value": {
+                    "stringValue": "answer"
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.langgraph_triggers",
+                  "value": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "stringValue": "branch:to:answer"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.langgraph_path",
+                  "value": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "stringValue": "__pregel_pull"
+                        },
+                        {
+                          "stringValue": "answer"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.langgraph_checkpoint_ns",
+                  "value": {
+                    "stringValue": "answer:dabe2200-7e7d-d828-28e6-d3095c29210d"
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.checkpoint_ns",
+                  "value": {
+                    "stringValue": "answer:dabe2200-7e7d-d828-28e6-d3095c29210d"
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.ls_provider",
+                  "value": {
+                    "stringValue": "fakemessageslistchatmodel"
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.ls_model_type",
+                  "value": {
+                    "stringValue": "chat"
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.lc_versions",
+                  "value": {
+                    "stringValue": "{\"langchain-core\": \"1.6.10\"}"
+                  }
+                },
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "langchain"
+                  }
+                },
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "chat"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "unknown"
+                  }
+                },
+                {
+                  "key": "gen_ai.response.model",
+                  "value": {
+                    "stringValue": "unknown"
+                  }
+                },
+                {
+                  "key": "gen_ai.input.messages",
+                  "value": {
+                    "stringValue": "[{\"role\": \"user\", \"parts\": [{\"type\": \"text\", \"content\": \"Can I return an order?\\nReturns are accepted within 30 days with a receipt.\"}]}]"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.input_tokens",
+                  "value": {
+                    "intValue": "42"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.output_tokens",
+                  "value": {
+                    "intValue": "16"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.total_tokens",
+                  "value": {
+                    "intValue": "58"
+                  }
+                },
+                {
+                  "key": "gen_ai.output.messages",
+                  "value": {
+                    "stringValue": "[{\"role\": \"assistant\", \"parts\": [{\"type\": \"text\", \"content\": \"You can return the order within 30 days with your receipt.\"}], \"finish_reason\": \"\"}]"
+                  }
+                }
+              ],
+              "status": {},
+              "flags": 256
+            },
+            {
+              "traceId": "ibwWmAiUlHoEW+o4bd84ug==",
+              "spanId": "mVoZwkSKyr8=",
+              "parentSpanId": "6LgHL5SDCeM=",
+              "name": "execute_task answer",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1791949715433137000",
+              "endTimeUnixNano": "1791949715434001000",
+              "attributes": [
+                {
+                  "key": "traceloop.association.properties.session_id",
+                  "value": {
+                    "stringValue": "fixture-session"
+                  }
+                },
+                {
+                  "key": "traceloop.workflow.name",
+                  "value": {
+                    "stringValue": "LangGraph"
+                  }
+                },
+                {
+                  "key": "traceloop.entity.path",
+                  "value": {
+                    "stringValue": ""
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.thread_id",
+                  "value": {
+                    "stringValue": "fixture-session"
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.ls_integration",
+                  "value": {
+                    "stringValue": "langgraph"
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.langgraph_step",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.langgraph_node",
+                  "value": {
+                    "stringValue": "answer"
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.langgraph_triggers",
+                  "value": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "stringValue": "branch:to:answer"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.langgraph_path",
+                  "value": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "stringValue": "__pregel_pull"
+                        },
+                        {
+                          "stringValue": "answer"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.langgraph_checkpoint_ns",
+                  "value": {
+                    "stringValue": "answer:dabe2200-7e7d-d828-28e6-d3095c29210d"
+                  }
+                },
+                {
+                  "key": "traceloop.span.kind",
+                  "value": {
+                    "stringValue": "task"
+                  }
+                },
+                {
+                  "key": "traceloop.entity.name",
+                  "value": {
+                    "stringValue": "answer"
+                  }
+                },
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "langgraph"
+                  }
+                },
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "execute_task"
+                  }
+                },
+                {
+                  "key": "gen_ai.task.name",
+                  "value": {
+                    "stringValue": "answer"
+                  }
+                },
+                {
+                  "key": "gen_ai.task.id",
+                  "value": {
+                    "stringValue": "01a13886-b7e9-7cf0-af59-b7d0cdf2c1ec"
+                  }
+                },
+                {
+                  "key": "gen_ai.task.parent.id",
+                  "value": {
+                    "stringValue": "01a13886-b7e7-7b21-bf1c-15de36aca4a0"
+                  }
+                },
+                {
+                  "key": "traceloop.entity.input",
+                  "value": {
+                    "stringValue": "{\"inputs\": {\"question\": \"Can I return an order?\", \"context\": \"Returns are accepted within 30 days with a receipt.\", \"answer\": \"\"}, \"tags\": [\"graph:step:2\"], \"metadata\": {\"thread_id\": \"fixture-session\", \"ls_integration\": \"langgraph\", \"langgraph_step\": 2, \"langgraph_node\": \"answer\", \"langgraph_triggers\": [\"branch:to:answer\"], \"langgraph_path\": [\"__pregel_pull\", \"answer\"], \"langgraph_checkpoint_ns\": \"answer:dabe2200-7e7d-d828-28e6-d3095c29210d\"}, \"kwargs\": {\"name\": \"answer\"}}"
+                  }
+                },
+                {
+                  "key": "gen_ai.task.input",
+                  "value": {
+                    "stringValue": "{\"inputs\": {\"question\": \"Can I return an order?\", \"context\": \"Returns are accepted within 30 days with a receipt.\", \"answer\": \"\"}, \"tags\": [\"graph:step:2\"], \"metadata\": {\"thread_id\": \"fixture-session\", \"ls_integration\": \"langgraph\", \"langgraph_step\": 2, \"langgraph_node\": \"answer\", \"langgraph_triggers\": [\"branch:to:answer\"], \"langgraph_path\": [\"__pregel_pull\", \"answer\"], \"langgraph_checkpoint_ns\": \"answer:dabe2200-7e7d-d828-28e6-d3095c29210d\"}, \"kwargs\": {\"name\": \"answer\"}}"
+                  }
+                },
+                {
+                  "key": "gen_ai.task.status",
+                  "value": {
+                    "stringValue": "success"
+                  }
+                },
+                {
+                  "key": "traceloop.entity.output",
+                  "value": {
+                    "stringValue": "{\"outputs\": {\"answer\": \"You can return the order within 30 days with your receipt.\"}, \"kwargs\": {\"tags\": [\"graph:step:2\"]}}"
+                  }
+                },
+                {
+                  "key": "gen_ai.task.output",
+                  "value": {
+                    "stringValue": "{\"outputs\": {\"answer\": \"You can return the order within 30 days with your receipt.\"}, \"kwargs\": {\"tags\": [\"graph:step:2\"]}}"
+                  }
+                }
+              ],
+              "status": {},
+              "flags": 256
+            },
+            {
+              "traceId": "ibwWmAiUlHoEW+o4bd84ug==",
+              "spanId": "6LgHL5SDCeM=",
+              "parentSpanId": "U5HXbKkGtj4=",
+              "name": "LangGraph.workflow",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1791949715431904000",
+              "endTimeUnixNano": "1791949715434095000",
+              "attributes": [
+                {
+                  "key": "traceloop.association.properties.session_id",
+                  "value": {
+                    "stringValue": "fixture-session"
+                  }
+                },
+                {
+                  "key": "traceloop.workflow.name",
+                  "value": {
+                    "stringValue": "LangGraph"
+                  }
+                },
+                {
+                  "key": "traceloop.entity.path",
+                  "value": {
+                    "stringValue": ""
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.thread_id",
+                  "value": {
+                    "stringValue": "fixture-session"
+                  }
+                },
+                {
+                  "key": "traceloop.association.properties.ls_integration",
+                  "value": {
+                    "stringValue": "langgraph"
+                  }
+                },
+                {
+                  "key": "traceloop.span.kind",
+                  "value": {
+                    "stringValue": "workflow"
+                  }
+                },
+                {
+                  "key": "traceloop.entity.name",
+                  "value": {
+                    "stringValue": "LangGraph"
+                  }
+                },
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "langgraph"
+                  }
+                },
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "invoke_agent"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "LangGraph"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.id",
+                  "value": {
+                    "stringValue": "01a13886-b7e7-7b21-bf1c-15de36aca4a0"
+                  }
+                },
+                {
+                  "key": "traceloop.entity.input",
+                  "value": {
+                    "stringValue": "{\"inputs\": {\"question\": \"Can I return an order?\", \"context\": \"\", \"answer\": \"\"}, \"tags\": [], \"metadata\": {\"thread_id\": \"fixture-session\", \"ls_integration\": \"langgraph\"}, \"kwargs\": {\"name\": \"LangGraph\"}}"
+                  }
+                },
+                {
+                  "key": "gen_ai.task.input",
+                  "value": {
+                    "stringValue": "{\"inputs\": {\"question\": \"Can I return an order?\", \"context\": \"\", \"answer\": \"\"}, \"tags\": [], \"metadata\": {\"thread_id\": \"fixture-session\", \"ls_integration\": \"langgraph\"}, \"kwargs\": {\"name\": \"LangGraph\"}}"
+                  }
+                },
+                {
+                  "key": "gen_ai.task.status",
+                  "value": {
+                    "stringValue": "success"
+                  }
+                },
+                {
+                  "key": "traceloop.entity.output",
+                  "value": {
+                    "stringValue": "{\"outputs\": {\"question\": \"Can I return an order?\", \"context\": \"Returns are accepted within 30 days with a receipt.\", \"answer\": \"You can return the order within 30 days with your receipt.\"}, \"kwargs\": {\"tags\": []}}"
+                  }
+                },
+                {
+                  "key": "gen_ai.task.output",
+                  "value": {
+                    "stringValue": "{\"outputs\": {\"question\": \"Can I return an order?\", \"context\": \"Returns are accepted within 30 days with a receipt.\", \"answer\": \"You can return the order within 30 days with your receipt.\"}, \"kwargs\": {\"tags\": []}}"
+                  }
+                }
+              ],
+              "status": {},
+              "flags": 256
+            },
+            {
+              "traceId": "ibwWmAiUlHoEW+o4bd84ug==",
+              "spanId": "U5HXbKkGtj4=",
+              "name": "invoke_agent LangGraph",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1791949715427693000",
+              "endTimeUnixNano": "1791949715434110000",
+              "attributes": [
+                {
+                  "key": "traceloop.association.properties.session_id",
+                  "value": {
+                    "stringValue": "fixture-session"
+                  }
+                },
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "langgraph"
+                  }
+                },
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "invoke_agent"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "LangGraph"
+                  }
+                },
+                {
+                  "key": "gen_ai.workflow.nodes",
+                  "value": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "stringValue": "retrieve"
+                        },
+                        {
+                          "stringValue": "answer"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "key": "gen_ai.workflow.edges",
+                  "value": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "stringValue": "retrieve -> answer"
+                        }
+                      ]
+                    }
+                  }
+                }
+              ],
+              "status": {},
+              "flags": 256
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

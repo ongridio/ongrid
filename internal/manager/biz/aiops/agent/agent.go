@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 
 	biz "github.com/ongridio/ongrid/internal/manager/biz/aiops"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/toolreplay"
@@ -345,7 +346,12 @@ func (a *Agent) RunStream(ctx context.Context, sessionID string, userID uint64, 
 
 func (a *Agent) runInternal(ctx context.Context, sessionID string, userID uint64, userContent string, emit Emit, opts RunOptions) (reply *Reply, retErr error) {
 	ctx, span := agentTracer.Start(ctx, "aiops.Agent.Run")
-	defer func() { tracing.EndSpan(span, retErr) }()
+	defer func() {
+		if reply != nil && reply.Message != nil && reply.Message.Content != nil {
+			tracing.RecordAgentContent(span, "output.value", *reply.Message.Content)
+		}
+		tracing.EndSpan(span, retErr)
+	}()
 	if a.sessions == nil || a.llm == nil || a.tools == nil {
 		return nil, errs.ErrNotWiredYet
 	}
@@ -365,6 +371,18 @@ func (a *Agent) runInternal(ctx context.Context, sessionID string, userID uint64
 		// layer wants 404 not 403 per spec).
 		return nil, errs.ErrNotFound
 	}
+	name, conversationID := "default", sess.ID
+	if sess.AgentID != nil && *sess.AgentID != "" {
+		name = *sess.AgentID
+	}
+	if sess.RootSessionID != nil && *sess.RootSessionID != "" {
+		conversationID = *sess.RootSessionID
+	}
+	span.SetAttributes(attribute.String("gen_ai.operation.name", "invoke_agent"),
+		attribute.String("gen_ai.agent.name", name), attribute.String("gen_ai.conversation.id", conversationID),
+		attribute.String("ongrid.agent.session.id", sess.ID), attribute.String("ongrid.agent.kernel", "legacy"),
+		attribute.Bool("ongrid.agent.content.capture", tracing.AgentContentEnabled()))
+	tracing.RecordAgentContent(span, "input.value", userContent)
 	ctx = basetool.WithSessionID(ctx, sess.ID)
 	ctx = basetool.WithAPMSource(ctx, sess.APMSource)
 	writeEnabled := false

@@ -65,6 +65,20 @@ type Shutdown func(context.Context) error
 
 type suppressHTTPClientTracingKey struct{}
 
+type modelCallbackSpanKey struct{}
+
+// WithModelCallbackSpan identifies the model span owned by Eino's callback.
+func WithModelCallbackSpan(ctx context.Context) context.Context {
+	return context.WithValue(ctx, modelCallbackSpanKey{}, trace.SpanContextFromContext(ctx).SpanID())
+}
+
+// ModelCallbackSpan prevents a second model span and duplicate token accounting.
+func ModelCallbackSpan(ctx context.Context) (trace.Span, bool) {
+	span := trace.SpanFromContext(ctx)
+	id, ok := ctx.Value(modelCallbackSpanKey{}).(trace.SpanID)
+	return span, ok && id.IsValid() && id == span.SpanContext().SpanID()
+}
+
 // WithoutHTTPClientTracing prevents InstrumentHTTPClient from creating a
 // client span for requests derived from ctx.
 func WithoutHTTPClientTracing(ctx context.Context) context.Context {

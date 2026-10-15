@@ -288,6 +288,7 @@ func (m *MultiClient) Chat(ctx context.Context, req ChatReq) (*ChatResp, error) 
 	if id == "" {
 		id = defID
 	}
+	req.Provider = id
 
 	start := time.Now()
 	var (

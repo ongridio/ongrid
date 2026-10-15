@@ -170,10 +170,11 @@ arch-lint: ## 运行 go-arch-lint（校验 BC 边界）
 # ----------------------------------------------------------------------------
 
 .PHONY: proto lint-proto
-lint-proto: ## [api] 校验 Kubernetes 和设置 API，解析模块内引用
+lint-proto: ## [api] 校验 Kubernetes、设置和 Agent 观测 API
 	cd api && buf lint \
 		--config '{"version":"v2","lint":{"use":["STANDARD"],"except":["PACKAGE_DIRECTORY_MATCH"]}}' \
-		--path manager/k8s/v1/k8s.proto --path manager/setting/v1/setting.proto
+		--path manager/k8s/v1/k8s.proto --path manager/setting/v1/setting.proto \
+		--path manager/agenttrace/v1/agenttrace.proto
 
 proto: ## [api] 重新生成 proto（优先 buf，回退 protoc + protoc-gen-go/grpc）
 	@if command -v buf >/dev/null 2>&1; then \

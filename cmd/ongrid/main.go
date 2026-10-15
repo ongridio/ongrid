@@ -81,6 +81,7 @@ import (
 	iamserver "github.com/ongridio/ongrid/internal/iam/server"
 	iamservice "github.com/ongridio/ongrid/internal/iam/service"
 
+	managerbizagenttrace "github.com/ongridio/ongrid/internal/manager/biz/agenttrace"
 	managerbizapm "github.com/ongridio/ongrid/internal/manager/biz/apm"
 	managerbizdevice "github.com/ongridio/ongrid/internal/manager/biz/device"
 	managerbizedge "github.com/ongridio/ongrid/internal/manager/biz/edge"
@@ -159,6 +160,7 @@ import (
 	manageraiopsmodel "github.com/ongridio/ongrid/internal/manager/model/aiops"
 	managerapprovalmodel "github.com/ongridio/ongrid/internal/manager/model/approval"
 	managermodelmcp "github.com/ongridio/ongrid/internal/manager/model/mcp"
+	managerserveragenttrace "github.com/ongridio/ongrid/internal/manager/server/agenttrace"
 	managerserveraiops "github.com/ongridio/ongrid/internal/manager/server/aiops"
 	managerserveralert "github.com/ongridio/ongrid/internal/manager/server/alert"
 	managerserverapm "github.com/ongridio/ongrid/internal/manager/server/apm"
@@ -266,6 +268,19 @@ func main() {
 		defer c()
 		_ = otelShutdown(shutCtx)
 	}()
+	agentTraceCallback, err := aiopsgraphcb.NewTraceHandler(rootCtx)
+	if err != nil {
+		log.Warn("agent tracing: init failed", slog.Any("err", err))
+	}
+	if agentTraceCallback != nil {
+		defer func() {
+			shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := agentTraceCallback.Shutdown(shutCtx); err != nil {
+				log.Warn("agent tracing: shutdown failed", slog.Any("err", err))
+			}
+		}()
+	}
 
 	// Open the configured DB backend (MySQL by default, SQLite opt-in) and
 	// run AutoMigrate-based schema management. Each data package exposes a
@@ -1231,6 +1246,8 @@ func main() {
 	}
 	apmService := managerbizapm.New(apmProm, apmTraces, logsBackendSvc).WithClusterScopes(topologyUC)
 	apmHandler := managerserverapm.NewHandler(apmService, log)
+	agentTraceService := managerbizagenttrace.New(apmTraces)
+	agentTraceHandler := managerserveragenttrace.NewHandler(agentTraceService, log)
 
 	// Frontierbound service-end SDK: opens a long-lived service connection
 	// to the upstream frontier broker (a separate docker container) and
@@ -1268,6 +1285,7 @@ func main() {
 	// — by design, because we don't accept HTTP traffic until later.
 	edgeSvc.SetEdgeCaller(fbClient)
 	apmService.WithReceivers(apmReceiverResolver{clusters: k8sUC, hosts: edgeDeviceRepo, caller: fbClient}, log.With(slog.String("comp", "apm")))
+	agentTraceService.WithReceivers(agentReceiverResolver{apm: apmReceiverResolver{clusters: k8sUC, hosts: edgeDeviceRepo, caller: fbClient}})
 	networkDiscoveryUC.SetEdgeCaller(fbClient)
 
 	// promIngester for the Wiring is typed as the interface; passing a
@@ -1633,7 +1651,7 @@ func main() {
 	)
 	humanApprovalBroker := newHumanApprovalBroker()
 	if kernel == managersvcaiops.KernelGraph {
-		rt, rterr := buildAIOpsRuntime(rootCtx, cfg, llmClient, llmRouter, toolsReg, aiopsRepo, mutatingProposalRepo, fbClient, edgeUC, deviceUC, reg, log, bootstrapSkillReg, bootstrapAgentReg, llmSettingsResolver, humanApprovalBroker)
+		rt, rterr := buildAIOpsRuntime(rootCtx, cfg, llmClient, llmRouter, toolsReg, aiopsRepo, mutatingProposalRepo, fbClient, edgeUC, deviceUC, reg, log, bootstrapSkillReg, bootstrapAgentReg, llmSettingsResolver, humanApprovalBroker, agentTraceCallback)
 		if rterr != nil {
 			log.Warn("aiops runtime build failed — falling back to legacy kernel", slog.Any("err", rterr))
 			kernel = managersvcaiops.KernelLegacy
@@ -2716,6 +2734,7 @@ func main() {
 			logsHandler.Register(protected)
 			tracesHandler.Register(protected)
 			apmHandler.Register(protected)
+			agentTraceHandler.Register(protected)
 			profilesHandler.Register(protected)
 			aiopsHandler.Register(protected)
 			alertHandler.Register(protected)
@@ -2999,7 +3018,9 @@ func shouldTraceHTTPRequest(r *http.Request) bool {
 		path != "/readyz" &&
 		path != "/api/v1/prometheus/auth" &&
 		path != "/api/v1/traces" &&
-		!strings.HasPrefix(path, "/api/v1/traces/")
+		!strings.HasPrefix(path, "/api/v1/traces/") &&
+		path != "/api/v1/agent-observability" &&
+		!strings.HasPrefix(path, "/api/v1/agent-observability/")
 }
 
 // llmResolverFunc is a tiny adapter from biz/setting.Service to the
@@ -3997,6 +4018,7 @@ func buildAIOpsRuntime(
 	agentReg *aiopschatruntime.AgentRegistry,
 	resolver *managerbizsetting.LLMSettingsResolver,
 	humanApproval aiopstoolsdec.HumanApprovalProposer,
+	traceCallback *aiopsgraphcb.TraceHandler,
 ) (*aiopschatruntime.Runtime, error) {
 	// 1. RoutingChatModel — one inner per provider that exists. We
 	//    layer providerInjectingClient around the existing
@@ -4195,6 +4217,9 @@ func buildAIOpsRuntime(
 		Metrics: aiopsgraphcb.MetricsDeps{
 			Registerer: reg,
 		},
+	}
+	if traceCallback != nil {
+		cbDeps.Tracing = traceCallback
 	}
 	if cfg.LLM.DailyTokenLimit > 0 {
 		cbDeps.BudgetChecker = llm.NewInMemoryBudget(cfg.LLM.DailyTokenLimit)

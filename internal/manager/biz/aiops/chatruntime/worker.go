@@ -49,12 +49,15 @@ import (
 	einocallbacks "github.com/cloudwego/eino/callbacks"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/compose"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/graph"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/graph/callbacks"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	aiopsmodel "github.com/ongridio/ongrid/internal/manager/model/aiops"
 	"github.com/ongridio/ongrid/internal/pkg/llm"
+	"github.com/ongridio/ongrid/internal/pkg/tracing"
 )
 
 // WorkerStatus enumerates the worker state machine. See package header
@@ -344,7 +347,8 @@ func (rt *Runtime) SpawnWorker(ctx context.Context, req SpawnRequest) (*Worker, 
 	// Sync spawn inherits the caller's ctx so a cancel propagates.
 	parent := ctx
 	if req.Background {
-		parent = context.Background()
+		// Keep trace ancestry without inheriting cancellation or callback state.
+		parent = trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(ctx))
 	}
 	workerCtx, cancel := context.WithCancel(parent)
 
@@ -575,14 +579,25 @@ func (rt *Runtime) GetWorker(workerID string) (*Worker, bool) {
 // coordinator's). The user-role prompt is persisted up-front here,
 // matching Handle()'s "user message lands on disk before the LLM call"
 // invariant — same survival semantics on a graph crash.
-func (rt *Runtime) runWorker(ctx context.Context, agentDef *Agent, sessID, userText, locale string, parentEmit Emit, workerID string) (string, error) {
+func (rt *Runtime) runWorker(ctx context.Context, agentDef *Agent, sessID, userText, locale string, parentEmit Emit, workerID string) (result string, retErr error) {
+	session := &aiopsmodel.Session{ID: sessID}
 	if rt.cfg.Sessions != nil && sessID != "" {
-		session, err := rt.cfg.Sessions.GetSession(ctx, sessID)
+		var err error
+		session, err = rt.cfg.Sessions.GetSession(ctx, sessID)
 		if err != nil {
 			return "", fmt.Errorf("chatruntime: load worker source scope: %w", err)
 		}
 		ctx = basetool.WithAPMSource(ctx, session.APMSource)
 	}
+	ctx, span := startAgentSpan(ctx, session, agentDef.Name)
+	span.SetAttributes(attribute.String("ongrid.agent.kernel", "graph"), attribute.String("ongrid.agent.worker.id", workerID))
+	tracing.RecordAgentContent(span, "input.value", userText)
+	defer func() {
+		if retErr == nil {
+			tracing.RecordAgentContent(span, "output.value", result)
+		}
+		tracing.EndSpan(span, retErr)
+	}()
 
 	// Workers are not an authorization bypass. The coordinator stamps the
 	// resolved gate on context; absent wiring fails closed so a direct spawn

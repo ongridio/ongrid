@@ -22,7 +22,11 @@ import (
 	openai "github.com/sashabaranov/go-openai"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
+	"github.com/ongridio/ongrid/internal/pkg/tracing"
 	"github.com/ongridio/ongrid/internal/pkg/zhipuauth"
 )
 
@@ -398,18 +402,25 @@ func (t *zhipuJWTTransport) RoundTrip(req *http.Request) (*http.Response, error)
 }
 
 // Chat implements Client.
-func (c *openaiClient) Chat(ctx context.Context, req ChatReq) (*ChatResp, error) {
+func (c *openaiClient) Chat(ctx context.Context, req ChatReq) (result *ChatResp, retErr error) {
 	// Resolve effective credentials for this call. Resolver overrides cfg;
 	// empty fields fall back to cfg (env-seeded at startup).
 	apiKey, defaultModel, baseURL, _ := c.effectiveCreds(ctx)
-	if apiKey == "" {
-		// No env key, no DB-seeded key. Match the noop-client contract so
-		// the caller sees a single sentinel.
-		return nil, ErrNoAPIKey
-	}
 	model := req.Model
 	if model == "" {
 		model = defaultModel
+	}
+	span, callbackOwned := tracing.ModelCallbackSpan(ctx)
+	if !callbackOwned {
+		ctx, span = otel.Tracer("github.com/ongridio/ongrid/internal/pkg/llm").Start(ctx, "chat "+model, trace.WithSpanKind(trace.SpanKindClient))
+		defer func() { tracing.EndSpan(span, retErr) }()
+	}
+	span.SetAttributes(attribute.String("gen_ai.operation.name", "chat"), attribute.String("gen_ai.request.model", model))
+	if req.Provider != "" {
+		span.SetAttributes(attribute.String("gen_ai.provider.name", req.Provider))
+	}
+	if apiKey == "" {
+		return nil, ErrNoAPIKey
 	}
 
 	// 1. Budget gate BEFORE any network call.
@@ -429,6 +440,9 @@ func (c *openaiClient) Chat(ctx context.Context, req ChatReq) (*ChatResp, error)
 	sdkReq, err := c.toOpenAIReq(req, model)
 	if err != nil {
 		return nil, fmt.Errorf("llm: build request: %w", err)
+	}
+	if !callbackOwned {
+		tracing.RecordAgentContent(span, "input.value", sdkReq.Messages)
 	}
 
 	// 3. Bound ctx to cfg.Timeout if caller provided no deadline.
@@ -494,6 +508,11 @@ func (c *openaiClient) Chat(ctx context.Context, req ChatReq) (*ChatResp, error)
 		CompletionTokens: sdkResp.Usage.CompletionTokens,
 		TotalTokens:      sdkResp.Usage.TotalTokens,
 	}
+	span.SetAttributes(attribute.String("gen_ai.response.model", sdkResp.Model),
+		attribute.String("gen_ai.response.id", sdkResp.ID),
+		attribute.Int("gen_ai.usage.input_tokens", usage.PromptTokens),
+		attribute.Int("gen_ai.usage.output_tokens", usage.CompletionTokens),
+		attribute.Int("gen_ai.usage.total_tokens", usage.TotalTokens))
 
 	c.metrics.tokensTotal.WithLabelValues(model, "prompt").Add(float64(usage.PromptTokens))
 	c.metrics.tokensTotal.WithLabelValues(model, "completion").Add(float64(usage.CompletionTokens))
@@ -521,6 +540,9 @@ func (c *openaiClient) Chat(ctx context.Context, req ChatReq) (*ChatResp, error)
 		slog.Duration("duration", dur),
 	)
 
+	if !callbackOwned && len(sdkResp.Choices) > 0 {
+		tracing.RecordAgentContent(span, "output.value", sdkResp.Choices[0].Message)
+	}
 	return &ChatResp{Assistant: assistant, Usage: usage}, nil
 }
 

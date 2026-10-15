@@ -41,6 +41,7 @@ const ROUTE_DEFS: RouteDef[] = [
   { path: '/logs', zh: '日志', en: 'Logs', keywords: ['logs', 'rizhi'], group: '监控告警' },
   { path: '/apm', zh: '服务', en: 'Services', keywords: ['apm', 'services', 'performance', '应用性能'], group: '监控告警' },
   { path: '/traces', zh: '链路', en: 'Traces', keywords: ['traces', 'tracing', 'lianlu'], group: '监控告警' },
+  { path: '/agent-observability', zh: 'Agent', en: 'Agent', keywords: ['agent', 'llm', 'langsmith', 'langfuse', '观测', 'tokens'], group: '监控告警' },
   { path: '/alerts', zh: '告警', en: 'Alerts', keywords: ['alerts', 'incidents', 'gaojing'], group: '监控告警' },
   { path: '/alerts/rules', zh: '告警规则', en: 'Alert rules', keywords: ['rules', 'guize'], group: '监控告警' },
 
