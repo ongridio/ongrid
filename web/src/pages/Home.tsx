@@ -252,12 +252,12 @@ export default function HomePage() {
   const showEmptyState = deviceTotal === 0;
 
   return (
-    <main className="flex flex-1 flex-col overflow-hidden">
+    <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-4xl flex-col items-stretch px-6 pb-16 pt-16 sm:pt-20">
+        <div className="mx-auto flex w-full max-w-4xl flex-col items-stretch px-4 pb-16 pt-10 sm:px-8 lg:pt-[clamp(4rem,12vh,9rem)]">
           <StatusRow />
 
-          <h1 className="mb-8 mt-8 text-center text-3xl font-semibold tracking-tight text-zinc-100">
+          <h1 className="mb-6 mt-6 text-2xl font-semibold tracking-tight text-zinc-100 sm:text-3xl">
             {greeting}
           </h1>
 
@@ -287,7 +287,7 @@ export default function HomePage() {
             </div>
           )}
 
-          <div className="mt-10">
+          <div className="mt-6">
             {showEmptyState ? (
               <button
                 type="button"

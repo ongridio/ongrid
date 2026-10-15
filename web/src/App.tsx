@@ -1,6 +1,7 @@
 import { lazy, type ReactNode } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { Layout } from '@/components/Layout';
+import { ChatLayout } from '@/components/ChatLayout';
 import { useAuth } from '@/store/auth';
 
 const LoginPage = lazy(() => import('@/pages/Login'));
@@ -85,6 +86,7 @@ function PublicOnly({ children }: { children: ReactNode }) {
 }
 
 export default function App() {
+  const location = useLocation();
   return (
     <Routes>
       <Route
@@ -102,9 +104,11 @@ export default function App() {
           </RequireAuth>
         }
       >
-        <Route path="/" element={<HomePage />} />
+        <Route element={<ChatLayout />}>
+          <Route path="/" element={<HomePage key={location.key} />} />
+          <Route path="/chat/:sessionId" element={<ChatThreadPage />} />
+        </Route>
         <Route path="/dashboard" element={<DashboardPage />} />
-        <Route path="/chat/:sessionId" element={<ChatThreadPage />} />
         {/* /edges is the legacy route, kept as an alias to /devices for
             backward-compatible bookmarks; the canonical name post-split
             is /devices. */}

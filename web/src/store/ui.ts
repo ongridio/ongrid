@@ -5,6 +5,8 @@ type UiState = {
   sidebarCollapsed: boolean;
   toggleSidebar(): void;
   setSidebarCollapsed(v: boolean): void;
+  sessionsCollapsed: boolean;
+  toggleSessions(): void;
   // Command palette (⌘P) — keyed in store so Sidebar's search button
   // and the global keyboard handler in Layout can both flip it.
   paletteOpen: boolean;
@@ -22,6 +24,8 @@ export const useUi = create<UiState>()(
       sidebarCollapsed: false,
       toggleSidebar: () => set({ sidebarCollapsed: !get().sidebarCollapsed }),
       setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
+      sessionsCollapsed: false,
+      toggleSessions: () => set({ sessionsCollapsed: !get().sessionsCollapsed }),
       paletteOpen: false,
       setPaletteOpen: (v) => set({ paletteOpen: v }),
       agentPanelOpen: false,
@@ -31,8 +35,8 @@ export const useUi = create<UiState>()(
       name: 'ongrid.ui',
       storage: createJSONStorage(() => localStorage),
       // Don't persist transient overlay state; only the structural
-      // sidebar collapse should survive reload.
-      partialize: (s) => ({ sidebarCollapsed: s.sidebarCollapsed }),
+      // sidebar preferences should survive reload.
+      partialize: (s) => ({ sidebarCollapsed: s.sidebarCollapsed, sessionsCollapsed: s.sessionsCollapsed }),
     }
   )
 );

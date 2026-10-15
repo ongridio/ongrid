@@ -919,5 +919,6 @@ test-web-ci-platform: ## Run the serial platform frontend CI tests (requires npm
 		src/pages/Kubernetes.test.tsx src/pages/Edges.test.tsx \
 		src/pages/Dashboard.test.tsx src/pages/settings/Upgrade.test.tsx \
 		src/pages/settings/LLM.test.tsx src/pages/settings/CommunicationProviders.test.tsx \
+		src/components/ChatLayout.test.tsx src/components/Sidebar.test.tsx \
 		src/components/icons/Provider.test.tsx src/pages/kubernetes/edgeAttachments.test.ts \
 		src/pages/kubernetes/registryCommands.test.ts
