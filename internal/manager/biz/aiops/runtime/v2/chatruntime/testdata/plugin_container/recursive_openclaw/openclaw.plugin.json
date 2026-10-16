@@ -1,0 +1,7 @@
+{
+  "id": "openclaw-recursive",
+  "name": "OpenClaw Recursive",
+  "version": "0.1.0",
+  "description": "OpenClaw bundle declaring its skills via the manifest skills[] array.",
+  "skills": ["./skills/foo", "./skills/bar"]
+}

@@ -1,7 +1,7 @@
 package skill
 
 import (
-	"github.com/ongridio/ongrid/internal/manager/biz/aiops/chatruntime"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/chatruntime"
 	managerbizskill "github.com/ongridio/ongrid/internal/manager/biz/skill"
 	skillcore "github.com/ongridio/ongrid/internal/skill"
 )

@@ -3,7 +3,7 @@ package aiops
 import (
 	"context"
 	"encoding/json"
-	"github.com/ongridio/ongrid/internal/manager/biz/aiops/chatruntime"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/chatruntime"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/decorators"
 	mcpmodel "github.com/ongridio/ongrid/internal/manager/model/mcp"

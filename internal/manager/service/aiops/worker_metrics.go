@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	aiopschatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/chatruntime"
+	aiopschatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/chatruntime"
 	"github.com/ongridio/ongrid/internal/pkg/prom"
 )
 

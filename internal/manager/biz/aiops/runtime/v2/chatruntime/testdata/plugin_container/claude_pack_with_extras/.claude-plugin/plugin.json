@@ -1,0 +1,7 @@
+{
+  "id": "acme-extras",
+  "name": "Acme Extras",
+  "version": "1.0.0",
+  "description": "Bundle that ships hooks and an MCP config.",
+  "configSchema": {}
+}

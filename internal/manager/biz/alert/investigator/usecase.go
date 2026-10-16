@@ -26,7 +26,7 @@ import (
 	"sync"
 	"time"
 
-	chatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/chatruntime"
+	chatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/chatruntime"
 	aiopsmodel "github.com/ongridio/ongrid/internal/manager/model/aiops"
 	alertmodel "github.com/ongridio/ongrid/internal/manager/model/alert"
 )

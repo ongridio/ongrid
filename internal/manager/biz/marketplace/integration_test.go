@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	chatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/chatruntime"
+	chatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/chatruntime"
 )
 
 // TestIntegration_InstallReloadVisibleInRealRegistry exercises the

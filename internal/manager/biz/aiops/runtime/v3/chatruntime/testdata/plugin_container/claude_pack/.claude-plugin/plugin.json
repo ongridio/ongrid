@@ -1,0 +1,13 @@
+{
+  "id": "acme-tools",
+  "name": "Acme Tools",
+  "version": "1.0.0",
+  "description": "A bundle of acme tools.",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "endpoint": { "type": "string" }
+    },
+    "required": ["endpoint"]
+  }
+}

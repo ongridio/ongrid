@@ -1,0 +1,451 @@
+{
+  "release": "v0.18.2",
+  "commit": "ad9e52f670aa8a23976942954acbf103e1a6ef2d",
+  "files": [
+    {
+      "path": "chatruntime/agent_parser.go",
+      "source_blob": "3d6fd34deb5ee03071d928b18757bdf40e13b1a5",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/agent_parser_test.go",
+      "source_blob": "dc92fd7639b917990429afc2350ba9c7a0bdbfdb",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/agent_registry.go",
+      "source_blob": "c6ca9c8d92fcc545b75b90be1c4bd571696d5cbb",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/agent_registry_test.go",
+      "source_blob": "bbf811b7de9dc8d81c3907f1abab6d2f3b49654f",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/bare_skills_test.go",
+      "source_blob": "390c0df30112b32a2987d1d08565fb99f7b3602d",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/chatmodelopts_test.go",
+      "source_blob": "dcfd314dc03f42faeb82b2a29d03c45c7cebf63f",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/command_parser.go",
+      "source_blob": "a294aa1283d3dd5c7897495e4a7052fd1baa9e85",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/command_parser_test.go",
+      "source_blob": "19534a03fb3160d0dad4d5694f7548626d0a2f51",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/config_confirm.go",
+      "source_blob": "173c8aaf00280911b54905417c20b4327693cc51",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/decision.go",
+      "source_blob": "59554ebd5b1a257070db69575e7834145837fef3",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/decision_test.go",
+      "source_blob": "e11fbb347b07b23c1e78c09bdfcf540a7ff4a802",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/k8s_action_e2e_test.go",
+      "source_blob": "203e91bb7a0c7d64a106b4a834213989ec59433f",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/load_all.go",
+      "source_blob": "304ef393320a1f290576f691c572208d0d0b394f",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/load_all_test.go",
+      "source_blob": "bebe1581af2035f6073b51ed70409543ead883a7",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/plugin_container.go",
+      "source_blob": "896cb8c758d6d6f308db9e62c313af1008d93cff",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/plugin_container_test.go",
+      "source_blob": "93fc67b3e2d885b47ed2fbf2e3b3074dfa5aaae5",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/reasoning_test.go",
+      "source_blob": "77ab5b2e448d9f0916d7c03ab52594cb307ed572",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/runtime.go",
+      "source_blob": "e2c958ea31047274471f1e5a44227b22b73d42d5",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/runtime_test.go",
+      "source_blob": "04cf4a87567c025b77953509113b908f18a458b5",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/runtime_worker_test.go",
+      "source_blob": "c26286dea2fe2719214a96cb6bbb28aa513348c0",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/skill_parser.go",
+      "source_blob": "0aa1f698962db68ce06356cd611a72c22ec93c32",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/skill_parser_test.go",
+      "source_blob": "abe27da3b74fa13750101a645d5f881fd5288290",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/skill_registry.go",
+      "source_blob": "d7ffc79c986c7575c4e8f6bfc08982864a3a6290",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/skill_registry_test.go",
+      "source_blob": "20496349467411cd59082d37002efa4a616600e1",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/system_prompt.go",
+      "source_blob": "032edaa61590bc33476eb6987417744b24e8227e",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/system_prompt_test.go",
+      "source_blob": "b311121fe6492b58559dd7d3ad1656784978289d",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/agent_parser/minimal/incident-investigator.md",
+      "source_blob": "0ab578a58dd808b8d932f9a412f086eef80aade2",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/agent_parser/missing_when_to_use/foo.md",
+      "source_blob": "a8a7d82cf5e3186519c0b1600f3fc45fcbec350a",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/agent_parser/with_critical_reminder/auditor.md",
+      "source_blob": "ac8e534216a81e1281ae586bf3faf297152977d1",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/agent_parser/with_disallowed_tools/reviewer.md",
+      "source_blob": "6126be6350121eaa920551219a8512a075e25dac",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/agent_registry/multi/README.md",
+      "source_blob": "fe1b6dbad2476cb6ca521af1e51416325f348eec",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/agent_registry/multi/incident-investigator.md",
+      "source_blob": "3e9cd127eb07d1b576e6f702a72b29a4a42bf7f3",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/agent_registry/multi/reviewer.md",
+      "source_blob": "2b5b7571f4e6a37ae953da9f821dbb6df3736334",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/plugin_container/claude_pack/.claude-plugin/plugin.json",
+      "source_blob": "35a928395bf934cb1ea3c5da3d66708cc37b1cae",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/plugin_container/claude_pack_with_extras/.claude-plugin/plugin.json",
+      "source_blob": "7c92e55c3a2fefdde62ef3a49151e99158da9b25",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/plugin_container/claude_pack_with_extras/.mcp.json",
+      "source_blob": "da39e4ffafe816be90259a3f68b763a3f71b93ed",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/plugin_container/claude_pack_with_extras/hooks/PRE_PROMPT.md",
+      "source_blob": "2f5cd59517e9ac7c24259f30dcbb2d386af164b4",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/plugin_container/openclaw_pack/openclaw.plugin.json",
+      "source_blob": "90566062121c9cc4af73a1fc2b48aa8e193c443f",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/plugin_container/path_traversal/.claude-plugin/plugin.json",
+      "source_blob": "90b0c506aefd8bc4ba2f65a9fd67ddb3dfc3e379",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/plugin_container/path_traversal/skills/pwned",
+      "source_blob": "6998f20a07b1d03c62a19b010d26e3844be24112",
+      "mode": "120000"
+    },
+    {
+      "path": "chatruntime/testdata/plugin_container/path_traversal_target/SKILL.md",
+      "source_blob": "dba27c4eb35eb7bb75233992c014a4cec75bbba5",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/plugin_container/recursive_claude/.claude-plugin/plugin.json",
+      "source_blob": "b4853c2c112529ca01548882e3ace065c7c4978e",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/plugin_container/recursive_claude/.mcp.json",
+      "source_blob": "5392ca626579dde6e2b956e632f557d162fc9b83",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/plugin_container/recursive_claude/agents/pr-summary.md",
+      "source_blob": "0265b69d1e3f28d934912f51041404b1ef569d07",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/plugin_container/recursive_claude/commands/commit.md",
+      "source_blob": "a38e3afedc44973b49226263f88571122bf64345",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/plugin_container/recursive_claude/hooks/pre-prompt/HOOK.md",
+      "source_blob": "2f5cd59517e9ac7c24259f30dcbb2d386af164b4",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/plugin_container/recursive_claude/skills/hello-world/SKILL.md",
+      "source_blob": "14870376331ae58968a2ade178201029ae684cdb",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/plugin_container/recursive_openclaw/openclaw.plugin.json",
+      "source_blob": "72b2c845b9b1b346754d47cbb17c0e3dce936d35",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/plugin_container/recursive_openclaw/skills/bar/SKILL.md",
+      "source_blob": "b820c41153888824658ad32a49d1d65b3e81f513",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/plugin_container/recursive_openclaw/skills/foo/SKILL.md",
+      "source_blob": "baf6620bd2f182e8fd49223c4c2e1aaecc8c419d",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/skill_parser/minimal/SKILL.md",
+      "source_blob": "14870376331ae58968a2ade178201029ae684cdb",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/skill_parser/missing_description/SKILL.md",
+      "source_blob": "a517a9e42c235a311ef34f9a0798f30f19bfaa65",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/skill_parser/name_with_dash/SKILL.md",
+      "source_blob": "7b9cb73116176c3cad3ade313ef3f84105b7b73b",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/skill_parser/typical/SKILL.md",
+      "source_blob": "60ce5c8422705cf8b27c2446f09cc326e204addf",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/skill_parser/with_ongrid_ext/SKILL.md",
+      "source_blob": "b5143a6a10f9b10ad2769863c918d9f8ebc5e22d",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/skill_parser/with_unknown_fields/SKILL.md",
+      "source_blob": "c428a8e0cddf8e21e89c5c74ab874dce223f0d86",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/skill_parser/with_when_to_use/SKILL.md",
+      "source_blob": "e935d3aaac26cbf723acf72bde3bd1f39a3e2e5a",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/skill_registry/multi/always_skill/SKILL.md",
+      "source_blob": "1b5ea8da6600914beecb051517fd998da5c1711b",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/skill_registry/multi/keyword_skill/SKILL.md",
+      "source_blob": "82023343213f597789836b8de5263a4a2912d7b0",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/skill_registry/multi/nested/deeper/buried_skill/SKILL.md",
+      "source_blob": "a1f04f7194c7505bf096285e9f5fc6cdcfa2c81e",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/skill_registry/with_bad_skill/bad/SKILL.md",
+      "source_blob": "e038d9d44835a98ca2300d95326efd1baa1b8a0f",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/testdata/skill_registry/with_bad_skill/good/SKILL.md",
+      "source_blob": "9412ba7d741aa3052fd82d77b83dc060d1a24f1b",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/tracing.go",
+      "source_blob": "1221905213e64235588fc0227008ac5d55e2760a",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/tracing_test.go",
+      "source_blob": "a3dcb67f60cddffbb18cf1cc4f4749925bb7f327",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/types.go",
+      "source_blob": "81c2a78e65efcc443db2ac427ede67b803ed0458",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/worker.go",
+      "source_blob": "f7ddcd89d786f7e1c318515287323bb55777205e",
+      "mode": "100644"
+    },
+    {
+      "path": "chatruntime/worker_filter_test.go",
+      "source_blob": "038eb61b1aec33cf7074d50f236ec47a0bf6c996",
+      "mode": "100644"
+    },
+    {
+      "path": "graph/budget_stop_model.go",
+      "source_blob": "828ff306d86bd9ec5a3a54ebc9e4a4323a0afa1f",
+      "mode": "100644"
+    },
+    {
+      "path": "graph/callbacks/alert_draft_guard.go",
+      "source_blob": "7c769fad1c9b9476dc4083dd98cfc46f5d635777",
+      "mode": "100644"
+    },
+    {
+      "path": "graph/callbacks/alert_draft_guard_test.go",
+      "source_blob": "9777a3de243413562ebfd3e344bff61798cc8f86",
+      "mode": "100644"
+    },
+    {
+      "path": "graph/callbacks/audit.go",
+      "source_blob": "fd990b8c22a1d60a418c0e5c5be5d0ae549335d3",
+      "mode": "100644"
+    },
+    {
+      "path": "graph/callbacks/audit_test.go",
+      "source_blob": "10d0689b2d8696541d1d0d5f07db2318a0ca0e78",
+      "mode": "100644"
+    },
+    {
+      "path": "graph/callbacks/chain.go",
+      "source_blob": "3a6865fe2bf433db56e7f50e2d80afcb72fc389e",
+      "mode": "100644"
+    },
+    {
+      "path": "graph/callbacks/chain_test.go",
+      "source_blob": "0b6f2ab7b1e189b2cafb75f71c3bad14a98368aa",
+      "mode": "100644"
+    },
+    {
+      "path": "graph/callbacks/metrics.go",
+      "source_blob": "01736ea520bf373678ad3aba0ffc00ff7eb9d9ef",
+      "mode": "100644"
+    },
+    {
+      "path": "graph/callbacks/metrics_test.go",
+      "source_blob": "23369d42cf58d06f9c76cb071c2a742885aca218",
+      "mode": "100644"
+    },
+    {
+      "path": "graph/callbacks/persistence.go",
+      "source_blob": "1636939cf7e08b5fbdc49f1f23508ec09e87785d",
+      "mode": "100644"
+    },
+    {
+      "path": "graph/callbacks/persistence_test.go",
+      "source_blob": "bf5881c396a95be2f9ac2144db56dd6647685cad",
+      "mode": "100644"
+    },
+    {
+      "path": "graph/callbacks/reasoning_test.go",
+      "source_blob": "340ea398eaec369ded46ef5348f5a7894718908d",
+      "mode": "100644"
+    },
+    {
+      "path": "graph/callbacks/sse.go",
+      "source_blob": "99432f8be298de0134c337e618ec174f88d8cbc7",
+      "mode": "100644"
+    },
+    {
+      "path": "graph/callbacks/sse_test.go",
+      "source_blob": "39779c1a0dee9b4f6cfaec5b110347b080275a30",
+      "mode": "100644"
+    },
+    {
+      "path": "graph/callbacks/tracing.go",
+      "source_blob": "09e4d86f228e6976a6e9fd9a3d00f3cbdcb32502",
+      "mode": "100644"
+    },
+    {
+      "path": "graph/callbacks/tracing_test.go",
+      "source_blob": "00fc520fa6548a068b2dcb7556a8dc7e06668a3e",
+      "mode": "100644"
+    },
+    {
+      "path": "graph/react.go",
+      "source_blob": "a1a741d22499d073959e80758b4d4dcaffbec11f",
+      "mode": "100644"
+    },
+    {
+      "path": "graph/react_test.go",
+      "source_blob": "603c4f30b0fb5454fbf227dcfb2764e49f4e3eaf",
+      "mode": "100644"
+    },
+    {
+      "path": "graph/token_budget_test.go",
+      "source_blob": "496b8ecd1c6811f4616cf953eb466d1d0994ce6b",
+      "mode": "100644"
+    },
+    {
+      "path": "graph/tool_adapter.go",
+      "source_blob": "80e9d9744fdd6b7b53e13c0ca7eb49ec1c2b3137",
+      "mode": "100644"
+    },
+    {
+      "path": "graph/tool_adapter_test.go",
+      "source_blob": "33eeccb0ac8a3f04f782376c5d2eeeab5990eb3a",
+      "mode": "100644"
+    },
+    {
+      "path": "graph/types.go",
+      "source_blob": "483774abb656b3df2500632439dbf4147acbf19c",
+      "mode": "100644"
+    }
+  ]
+}

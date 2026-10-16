@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ongridio/ongrid/internal/manager/biz/aiops/chatruntime"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/chatruntime"
 )
 
 // TestBuildCapabilityDeclaration_BareSkillCredentials guards the terraform-runner

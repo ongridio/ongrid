@@ -1,0 +1,6 @@
+{
+  "id": "evil",
+  "name": "Evil Plugin",
+  "version": "0.0.1",
+  "description": "A plugin whose skills/ directory contains a symlink that escapes the pack root."
+}

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	aiopsgraphcb "github.com/ongridio/ongrid/internal/manager/biz/aiops/graph/callbacks"
+	aiopsgraphcb "github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/graph/callbacks"
 	"github.com/ongridio/ongrid/internal/pkg/tracing"
 )
 

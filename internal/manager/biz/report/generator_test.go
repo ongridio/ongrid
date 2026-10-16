@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ongridio/ongrid/internal/manager/biz/aiops/chatruntime"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/chatruntime"
 	model "github.com/ongridio/ongrid/internal/manager/model/report"
 )
 
@@ -22,10 +22,10 @@ func (f fakeFacts) Collect(context.Context, Period, Period, Scope) (*ReportFacts
 
 // fakeSpawner returns a canned worker (Result / Err).
 type fakeSpawner struct {
-	result string
-	werr   string
+	result   string
+	werr     string
 	spawnErr error
-	gotReq chatruntime.SpawnRequest
+	gotReq   chatruntime.SpawnRequest
 }
 
 func (s *fakeSpawner) SpawnWorker(_ context.Context, req chatruntime.SpawnRequest) (*chatruntime.Worker, error) {
@@ -247,10 +247,10 @@ func TestGenerator_NonPendingIsNoOp(t *testing.T) {
 
 func TestExtractJSON(t *testing.T) {
 	cases := map[string]string{
-		`{"a":1}`:                              `{"a":1}`,
-		"```json\n{\"a\":1}\n```":              `{"a":1}`,
-		"```\n{\"a\":1}\n```":                  `{"a":1}`,
-		"here you go:\n{\"a\":1}\nthat's it":   `{"a":1}`,
+		`{"a":1}`:                            `{"a":1}`,
+		"```json\n{\"a\":1}\n```":            `{"a":1}`,
+		"```\n{\"a\":1}\n```":                `{"a":1}`,
+		"here you go:\n{\"a\":1}\nthat's it": `{"a":1}`,
 	}
 	for in, want := range cases {
 		if got := extractJSON(in); got != want {

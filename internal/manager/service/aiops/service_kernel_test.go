@@ -10,7 +10,7 @@ import (
 
 	biz "github.com/ongridio/ongrid/internal/manager/biz/aiops"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/chatprotocol"
-	"github.com/ongridio/ongrid/internal/manager/biz/aiops/chatruntime"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/chatruntime"
 	model "github.com/ongridio/ongrid/internal/manager/model/aiops"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 )

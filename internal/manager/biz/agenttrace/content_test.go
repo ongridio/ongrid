@@ -14,7 +14,7 @@ func TestCapturedContentIsDecodedOnlyFromTrace(t *testing.T) {
 	raw, _ := json.Marshal(strings.Repeat("执行快照😀", 10000))
 	snapshot := tracing.MaskAgentContent(string(raw))
 	body := testBody(t, testSpan(1, 0, map[string]any{"gen_ai.operation.name": "invoke_agent", "input.value": `"本轮问题"`, "output.value": snapshot, "ongrid.agent.session.id": "deleted-chat", "ongrid.agent.content.capture": true}))
-	body = bytes.ReplaceAll(body, []byte(`"name":"fixture"`), []byte(`"name":"github.com/ongridio/ongrid/internal/manager/biz/aiops/chatruntime"`))
+	body = bytes.ReplaceAll(body, []byte(`"name":"fixture"`), []byte(`"name":"github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/chatruntime"`))
 	trace, err := Normalize(fixtureTraceID, body)
 	if err != nil {
 		t.Fatal(err)

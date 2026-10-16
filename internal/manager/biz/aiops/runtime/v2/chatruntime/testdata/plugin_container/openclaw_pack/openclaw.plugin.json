@@ -1,0 +1,18 @@
+{
+  "id": "openclaw-bundle",
+  "name": "OpenClaw Bundle",
+  "version": "2.3.4",
+  "description": "OpenClaw plugin with provider-specific extras.",
+  "providers": {
+    "openai": { "baseUrl": "https://api.openai.com/v1" },
+    "anthropic": { "baseUrl": "https://api.anthropic.com" }
+  },
+  "channels": ["feishu", "cli"],
+  "cliBackends": ["claude", "codex"],
+  "providerAuthChoices": {
+    "preferred": "cliFlag"
+  },
+  "configSchema": {
+    "type": "object"
+  }
+}

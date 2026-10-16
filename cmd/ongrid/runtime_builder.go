@@ -10,9 +10,9 @@ import (
 
 	einomodel "github.com/cloudwego/eino/components/model"
 	managerbizaiops "github.com/ongridio/ongrid/internal/manager/biz/aiops"
-	aiopschatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/chatruntime"
-	aiopsgraph "github.com/ongridio/ongrid/internal/manager/biz/aiops/graph"
-	aiopsgraphcb "github.com/ongridio/ongrid/internal/manager/biz/aiops/graph/callbacks"
+	aiopschatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/chatruntime"
+	aiopsgraph "github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/graph"
+	aiopsgraphcb "github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/graph/callbacks"
 	aiopstools "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools"
 	aiopstoolsbase "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	aiopstoolsdec "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/decorators"

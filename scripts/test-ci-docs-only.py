@@ -21,7 +21,7 @@ assert docs_only([".github/ISSUE_TEMPLATE/legacy.md"])
 assert docs_only([".github/ISSUE_TEMPLATE/config.yml", ".github/ISSUE_TEMPLATE/bug.yaml"])
 for paths in [[], ["main.go"], ["Makefile"], [".github/workflows/ci.yml"],
               ["internal/manager/biz/knowledge/builtin_vault/guide.md"],
-              ["internal/manager/biz/aiops/chatruntime/testdata/agent_registry/multi/README.md"],
+              ["internal/manager/biz/aiops/runtime/v3/chatruntime/testdata/agent_registry/multi/README.md"],
               ["examples/apm-languages/README.md"], ["agents/reviewer.md"],
               ["web/src/guide.md"], ["web/public/logo.svg"], ["new-package/README.md"],
               ["docs/config.yml"], ["docs/assets/app.js"], ["docs/example.go"],

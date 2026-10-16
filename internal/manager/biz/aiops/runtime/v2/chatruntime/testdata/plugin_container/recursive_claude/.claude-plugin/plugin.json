@@ -1,0 +1,6 @@
+{
+  "id": "recursive-test",
+  "name": "Recursive Test",
+  "version": "1.0.0",
+  "description": "Bundle that ships skills, agents, commands, hooks and an MCP config; used to test recursive sub-tree load."
+}

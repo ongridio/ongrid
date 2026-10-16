@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	chatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/chatruntime"
+	chatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/chatruntime"
 	model "github.com/ongridio/ongrid/internal/manager/model/marketplace"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
@@ -124,7 +124,6 @@ func (r *fakeRepo) SetBindings(_ context.Context, tenantID uint64, packID, bindi
 	}
 	return errs.ErrNotFound
 }
-
 
 // ----- in-memory registries -------------------------------------------
 

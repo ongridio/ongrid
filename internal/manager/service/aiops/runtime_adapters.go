@@ -3,8 +3,8 @@ package aiops
 import (
 	"context"
 	"fmt"
-	aiopschatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/chatruntime"
 	managerbizaiopsmentions "github.com/ongridio/ongrid/internal/manager/biz/aiops/mentions"
+	aiopschatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/chatruntime"
 	aiopstools "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools"
 	aiopstoolsdec "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/decorators"
 	"github.com/ongridio/ongrid/internal/pkg/llm"

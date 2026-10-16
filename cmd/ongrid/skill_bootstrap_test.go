@@ -9,7 +9,7 @@ import (
 )
 
 func TestLoadBootstrapRegistriesSkillRoots(t *testing.T) {
-	fixtures, err := filepath.Abs("../../internal/manager/biz/aiops/chatruntime/testdata")
+	fixtures, err := filepath.Abs("../../internal/manager/biz/aiops/runtime/v3/chatruntime/testdata")
 	if err != nil {
 		t.Fatal(err)
 	}

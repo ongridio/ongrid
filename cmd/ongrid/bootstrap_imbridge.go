@@ -5,8 +5,8 @@ import (
 	managersvcimbridge "github.com/ongridio/ongrid/internal/manager/service/imbridge"
 	"log/slog"
 
-	aiopschatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/chatruntime"
 	managerbizaiopsmentions "github.com/ongridio/ongrid/internal/manager/biz/aiops/mentions"
+	aiopschatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/chatruntime"
 	managerbizimbridge "github.com/ongridio/ongrid/internal/manager/biz/imbridge"
 	managerbizimbridgedingtalk "github.com/ongridio/ongrid/internal/manager/biz/imbridge/provider/dingtalk"
 	managerbizimbridgefeishu "github.com/ongridio/ongrid/internal/manager/biz/imbridge/provider/feishu"

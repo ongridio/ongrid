@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	aiopschatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/chatruntime"
+	aiopschatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/chatruntime"
 	managerbizalert "github.com/ongridio/ongrid/internal/manager/biz/alert"
 	managermodelalert "github.com/ongridio/ongrid/internal/manager/model/alert"
 	"github.com/ongridio/ongrid/internal/pkg/llm"

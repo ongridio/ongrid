@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	aiopschatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/chatruntime"
 	aiopsinvestigator "github.com/ongridio/ongrid/internal/manager/biz/aiops/investigator"
+	aiopschatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/chatruntime"
 	managerbizalert "github.com/ongridio/ongrid/internal/manager/biz/alert"
 	"github.com/ongridio/ongrid/internal/manager/biz/alert/investigator"
 	managerbizflow "github.com/ongridio/ongrid/internal/manager/biz/flow"
