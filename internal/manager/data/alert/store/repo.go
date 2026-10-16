@@ -361,10 +361,12 @@ func (r *Repo) CreateEvent(ctx context.Context, ev *model.Event) error {
 	return r.db.WithContext(ctx).Create(ev).Error
 }
 
-// CountEventsByType returns the number of alert_events whose event_type
-// matches and which were created at or after `since`. Optional filters
-// narrow by the parent incident's severity / rule key.
-func (r *Repo) CountEventsByType(ctx context.Context, eventType string, since time.Time, filterRule, filterSeverity string) (int64, error) {
+// CountEventsByType counts up to limit matching events created at or after since.
+// Optional filters narrow by event severity and the parent incident's rule key.
+func (r *Repo) CountEventsByType(ctx context.Context, eventType string, since time.Time, filterRule, filterSeverity string, limit int) (int64, error) {
+	if limit <= 0 {
+		return 0, errs.ErrInvalid
+	}
 	tx := r.db.WithContext(ctx).Model(&model.Event{}).
 		Where("event_type = ? AND created_at >= ?", eventType, since)
 	if filterSeverity != "" {
@@ -377,7 +379,8 @@ func (r *Repo) CountEventsByType(ctx context.Context, eventType string, since ti
 			Model(&model.Incident{}).Select("id").Where("rule = ?", filterRule))
 	}
 	var n int64
-	if err := tx.Count(&n).Error; err != nil {
+	// Limit the input rows: LIMIT on COUNT(*) itself would still count every match.
+	if err := r.db.WithContext(ctx).Table("(?) AS matching_events", tx.Select("1").Limit(limit)).Count(&n).Error; err != nil {
 		return 0, err
 	}
 	return n, nil

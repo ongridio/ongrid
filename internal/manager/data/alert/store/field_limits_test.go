@@ -22,7 +22,7 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/promquery"
 )
 
-func newFieldLimitsRepo(t *testing.T, dialect string) *Repo {
+func newDialectTestRepo(t *testing.T, dialect string) *Repo {
 	t.Helper()
 	if dialect == "sqlite" {
 		repo := newTestRepo(t)
@@ -33,7 +33,7 @@ func newFieldLimitsRepo(t *testing.T, dialect string) *Repo {
 	}
 	dsn := os.Getenv("ONGRID_TEST_MYSQL_DSN")
 	if dsn == "" {
-		t.Skip("set ONGRID_TEST_MYSQL_DSN to run MySQL field length regression")
+		t.Skip("set ONGRID_TEST_MYSQL_DSN to run MySQL alert store tests")
 	}
 	cfg, err := driver.ParseDSN(dsn)
 	require.NoError(t, err)
@@ -66,7 +66,7 @@ func newFieldLimitsRepo(t *testing.T, dialect string) *Repo {
 func TestAlertFieldLimits(t *testing.T) {
 	for _, dialect := range []string{"sqlite", "mysql"} {
 		t.Run(dialect, func(t *testing.T) {
-			repo := newFieldLimitsRepo(t, dialect)
+			repo := newDialectTestRepo(t, dialect)
 			for _, tc := range []struct {
 				name, title, key, wantTitle string
 			}{
@@ -137,7 +137,7 @@ func (n *fieldLimitsNotifier) SendVia(ctx context.Context, msg notify.Message, _
 func TestPipelineLongLabelsLifecycle(t *testing.T) {
 	for _, dialect := range []string{"sqlite", "mysql"} {
 		t.Run(dialect, func(t *testing.T) {
-			repo := newFieldLimitsRepo(t, dialect)
+			repo := newDialectTestRepo(t, dialect)
 			uc := biz.NewUsecase(repo, nil)
 			now := time.Now().UTC()
 			// Synthetic GPU labels reproduce #510 without using production identifiers.
@@ -228,7 +228,7 @@ func TestPipelineLongLabelsLifecycle(t *testing.T) {
 }
 
 func TestLegacyLongDedupeKeyRemainsReachable(t *testing.T) {
-	repo := newFieldLimitsRepo(t, "sqlite")
+	repo := newDialectTestRepo(t, "sqlite")
 	ctx := t.Context()
 	key := "pipeline:gpu_xid:" + strings.Repeat("legacy-label", 30)
 	legacy := &model.Incident{Title: strings.Repeat("旧", 300), Rule: "gpu_xid", ScopeType: "global", Severity: "critical",
