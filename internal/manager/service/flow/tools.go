@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	aiopstools "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools"
 	aiopstoolsbase "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
@@ -28,7 +27,6 @@ func NewToolInvoker(reg *aiopstools.Registry, registerer prometheus.Registerer) 
 	inv := &ToolInvoker{
 		Registry: reg,
 		deps: aiopstoolsdec.Deps{
-			Timeout:    15 * time.Second,
 			Limiter:    aiopstoolsdec.NewTokenBucketLimiter(0),
 			Registerer: registerer,
 		},

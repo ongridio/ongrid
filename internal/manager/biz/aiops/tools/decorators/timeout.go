@@ -19,12 +19,6 @@ import (
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 )
 
-// DefaultTimeout is the per-call timeout applied when WithTimeout is
-// constructed without an explicit duration. cites 15s
-// ("TimeoutTool 15s per-call ToolTimeout"); tools that legitimately
-// need more (e.g. correlate_incident) override at registration.
-const DefaultTimeout = 15 * time.Second
-
 // ErrToolTimeout wraps the inner tool's error when the parent context's
 // deadline (set by this decorator) fires. Callers can errors.Is() it to
 // distinguish a decorator-imposed timeout from a tool-level error.
@@ -38,10 +32,11 @@ type TimeoutTool struct {
 }
 
 // WithTimeout returns inner wrapped so InvokableRun is bounded by d.
-// Zero or negative d falls back to DefaultTimeout.
+// Zero or negative d adds no deadline; the caller and tool retain ownership
+// of cancellation and operation-specific budgets.
 func WithTimeout(inner basetool.BaseTool, d time.Duration) basetool.BaseTool {
 	if d <= 0 {
-		d = DefaultTimeout
+		return inner
 	}
 	return &TimeoutTool{inner: inner, timeout: d}
 }

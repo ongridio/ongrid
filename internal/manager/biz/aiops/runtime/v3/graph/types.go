@@ -159,10 +159,9 @@ type Config struct {
 	// breaker for cross-tool loops.
 	MaxIterations int
 
-	// ToolTimeout is the per-tool wall clock ceiling. 0 -> 15s
-	// (agent.go default). Enforced by the BaseTool decorator chain
-	// (PR-3); this field is kept here so the cutover PR can pass the
-	// value through to chatruntime when it builds the toolBag.
+	// ToolTimeout is retained for source compatibility. Graph execution does
+	// not consume it; explicit operation budgets belong to the tool chain.
+	// Deprecated: configure the tool itself instead.
 	ToolTimeout time.Duration
 }
 
@@ -172,9 +171,6 @@ type Config struct {
 func (c Config) applyDefaults() Config {
 	if c.MaxIterations <= 0 {
 		c.MaxIterations = 12
-	}
-	if c.ToolTimeout <= 0 {
-		c.ToolTimeout = 15 * time.Second
 	}
 	return c
 }

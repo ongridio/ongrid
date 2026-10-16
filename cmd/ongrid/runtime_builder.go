@@ -214,7 +214,6 @@ func buildAIOpsRuntime(
 	reviewSpawner := &managersvcaiops.ReviewSpawner{}
 	reviewSink := managersvcaiops.NewMutatingProposalSink(mutatingProposals)
 	deps := aiopstoolsdec.Deps{
-		Timeout:       15 * time.Second,
 		Limiter:       aiopstoolsdec.NewTokenBucketLimiter(0),
 		Registerer:    reg,
 		ReviewSpawner: reviewSpawner,
@@ -226,8 +225,8 @@ func buildAIOpsRuntime(
 		toolDeps := deps
 		if info, err := t.Info(context.Background()); err == nil && info != nil && info.Name == aiopstools.ToolNameCapturePCAP {
 			// A short capture includes capture duration plus parser work. Keep
-			// the normal 15s ceiling for every other tool, but let this bounded
-			// evidence collection finish in the same chat turn.
+			// this operation-specific ceiling; other tools own their execution
+			// budgets without a blanket runtime deadline.
 			toolDeps.Timeout = 45 * time.Second
 		}
 		wrapped = append(wrapped, aiopstoolsdec.Wrap(t, toolDeps))
@@ -311,7 +310,6 @@ func buildAIOpsRuntime(
 			Model:         cfg.OpenAI.Model,
 			Temperature:   0.1,
 			MaxIterations: 30,
-			ToolTimeout:   15 * time.Second,
 		},
 		CallbackDeps: cbDeps,
 		Logger:       log.With(slog.String("comp", "chatruntime")),

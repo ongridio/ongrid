@@ -9,14 +9,14 @@ import (
 )
 
 // Deps bundles the cross-cutting dependencies a decorator chain needs.
-// Zero values fall back to safe defaults (DefaultTimeout, no audit,
+// Zero values fall back to safe defaults (no added deadline, no audit,
 // NoopLimiter, prometheus.DefaultRegisterer) so a minimal Wrap call
 // still produces a well-behaved tool.
 //
 // ASCII diagram — these are the inputs to the standard
 // decorator stack.
 type Deps struct {
-	// Timeout is the per-call ceiling. Zero -> DefaultTimeout (15s).
+	// Timeout is an optional per-call ceiling. Non-positive adds no deadline.
 	Timeout time.Duration
 
 	// Audit is the seam to chat_tool_calls. Nil -> audit disabled.
@@ -74,11 +74,10 @@ type Deps struct {
 //     user_id on the proposal).
 //   - review_gate OUTSIDE timeout because the reviewer worker is
 //     itself a graph.Invoke against an LLM with its own multi-turn
-//     budget; constraining it to the inner tool's 15s timeout is
+//     budget; constraining it to an optional inner-tool timeout is
 //     unrealistic. ReviewGate carries its own independent Timeout
 //     (default 60s) for the reviewer round-trip; once approve fires,
-//     the inner tool runs under the timeout decorator's 15s budget
-//     normally.
+//     the inner tool runs under an explicitly configured timeout, if any.
 //   - review_gate OUTSIDE audit because a rejected proposal has no
 //     execution to audit — chat_tool_calls is the **execution** log,
 //     chat_mutating_proposals is the **decision** log. Putting

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -96,11 +97,47 @@ func TestTimeout_PassesThroughOnFastTool(t *testing.T) {
 	}
 }
 
-func TestTimeout_DefaultWhenZero(t *testing.T) {
-	inner := &fakeTool{name: "x"}
-	tt := WithTimeout(inner, 0).(*TimeoutTool)
-	if tt.timeout != DefaultTimeout {
-		t.Errorf("got %v, want %v", tt.timeout, DefaultTimeout)
+func TestTimeout_UnsetAddsNoDeadline(t *testing.T) {
+	for _, d := range []time.Duration{0, -time.Second} {
+		inner := &fakeTool{name: "x"}
+		if got := WithTimeout(inner, d); got != inner {
+			t.Fatalf("timeout %s unexpectedly wrapped tool", d)
+		}
+	}
+}
+
+// A real execution beyond the previous 15s cutoff guards the default chain,
+// including callers that do not explicitly populate Deps.Timeout.
+func TestWrap_LongToolWithoutImplicitDeadline(t *testing.T) {
+	t.Parallel()
+	inner := &fakeTool{name: "long_scan", delay: 16 * time.Second, respectCtx: true, result: "scan complete"}
+	wrapped := Wrap(inner, Deps{Registerer: prometheus.NewRegistry()})
+	out, err := wrapped.InvokableRun(context.Background(), "{}")
+	if err != nil || out != "scan complete" {
+		t.Fatalf("long scan = %q, %v", out, err)
+	}
+}
+
+func TestWrap_UnsetTimeoutPreservesCallerCancellation(t *testing.T) {
+	for _, deadline := range []bool{false, true} {
+		t.Run(fmt.Sprint("deadline=", deadline), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			want := context.Canceled
+			if deadline {
+				cancel()
+				ctx, cancel = context.WithTimeout(context.Background(), 5*time.Millisecond)
+				want = context.DeadlineExceeded
+			} else {
+				cancel()
+			}
+			defer cancel()
+			inner := &fakeTool{name: "cancel_scan", delay: time.Hour, respectCtx: true}
+			wrapped := Wrap(inner, Deps{Registerer: prometheus.NewRegistry()})
+			_, err := wrapped.InvokableRun(ctx, "{}")
+			if !errors.Is(err, want) || errors.Is(err, ErrToolTimeout) {
+				t.Fatalf("caller cancellation = %v, want %v", err, want)
+			}
+		})
 	}
 }
 
