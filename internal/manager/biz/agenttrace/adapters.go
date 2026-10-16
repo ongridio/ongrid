@@ -50,7 +50,7 @@ func adapt(s *Step) {
 	s.Provider = stringAttr(a, "gen_ai.provider.name", "llm.provider", "gen_ai.system", "llm.system")
 	// LangSmith trace.session_id identifies a project, not a conversation.
 	s.SessionID = stringAttr(a, "gen_ai.conversation.id", "session.id", "langsmith.metadata.thread_id", "langsmith.metadata.session_id", "langsmith.metadata.conversation_id", "traceloop.association.properties.session_id", "traceloop.association.properties.thread_id")
-	if s.Scope.Name == "github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/chatruntime" || s.Scope.Name == "github.com/ongridio/ongrid/internal/manager/biz/aiops/agent" {
+	if s.Scope.Name == "github.com/ongridio/ongrid/internal/manager/biz/aiops/chatruntime" || s.Scope.Name == "github.com/ongridio/ongrid/internal/manager/biz/aiops/agent" {
 		s.ChatSessionID = stringAttr(a, "ongrid.agent.session.id")
 	}
 	if s.Identity.Environment == "" {
