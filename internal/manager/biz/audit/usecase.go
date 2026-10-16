@@ -10,8 +10,8 @@ import (
 	"log/slog"
 	"time"
 
-	store "github.com/ongridio/ongrid/internal/manager/data/audit/store"
 	model "github.com/ongridio/ongrid/internal/manager/model/audit"
+	"github.com/ongridio/ongrid/internal/pkg/auditctx"
 )
 
 // Repo is the persistence seam the usecase consumes. Implemented by
@@ -22,38 +22,12 @@ type Repo interface {
 	DeleteOlderThan(ctx context.Context, cutoff time.Time) (int64, error)
 }
 
-// ListFilters is an alias to the store-level filter struct so handlers
-// can depend only on biz/audit without importing data/audit/store.
-type ListFilters = store.ListFilters
+// ListFilters shares the model contract without depending on persistence.
+type ListFilters = model.ListFilters
 
 // Event is the input shape for Emit. Caller fills what it knows; the
 // usecase stamps OccurredAt and serialises Payload.
-type Event struct {
-	// Actor — filled by the middleware from JWT claims, by handlers
-	// for failed-auth or anon paths.
-	UserID    *uint64
-	UserEmail string
-	Role      string
-	IP        string
-	UserAgent string
-	RequestID string
-
-	// Action — must be one of the canonical model.Action* constants.
-	Action       string
-	ResourceType string
-	ResourceID   string
-	ResourceName string
-
-	// Outcome.
-	Status       string // success|failure|denied
-	ErrorCode    string
-	ErrorMessage string
-
-	// Free-form structured detail. Caller is responsible for redacting
-	// secrets BEFORE passing in (LLM keys, passwords, tokens). Pass a
-	// map or struct; the usecase JSON-encodes.
-	Payload any
-}
+type Event = auditctx.Event
 
 // Usecase is the BC façade.
 type Usecase struct {

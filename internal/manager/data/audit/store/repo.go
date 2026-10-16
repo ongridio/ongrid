@@ -35,16 +35,7 @@ func (r *Repo) Insert(ctx context.Context, log *model.Log) error {
 // ListFilters captures all the GET /v1/admin/audit-logs querystring
 // knobs in one struct so the http layer doesn't have to wire 7 args.
 // Zero values mean "no filter on this column".
-type ListFilters struct {
-	UserEmail    string
-	Action       string
-	ResourceType string
-	Status       string
-	From         time.Time
-	To           time.Time
-	Limit        int // capped at 500 by the repo to bound payload size
-	Offset       int
-}
+type ListFilters = model.ListFilters
 
 // List returns matching rows newest-first plus the total count for the
 // same filters (excluding limit/offset) so the UI can render

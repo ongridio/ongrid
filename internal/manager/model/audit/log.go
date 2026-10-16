@@ -5,7 +5,10 @@
 // delete rows except via the retention job.
 package audit
 
-import "time"
+import (
+	"github.com/ongridio/ongrid/internal/pkg/auditctx"
+	"time"
+)
 
 // Log is one audit observation.
 //
@@ -50,87 +53,47 @@ type Log struct {
 // parallel empty table.
 func (Log) TableName() string { return "audit_logs" }
 
-// Status enum — bounded set used by both the writer and the list filter.
+// 审计枚举沿用共享契约；兼容现有 Manager 调用方。
 const (
-	StatusSuccess = "success"
-	StatusFailure = "failure"
-	StatusDenied  = "denied"
-)
-
-// Canonical actions. The naming convention is verb_resource in
-// snake_case — kept deliberately small. Sub-flavours (enable vs disable,
-// role-change vs password-reset, single vs bulk) live in the payload,
-// not the action name, so the UI's action dropdown stays short and the
-// audit row's payload tells the operator exactly what changed.
-//
-// Operator feedback 2026-05-20: the prior 38-action enum mixed
-// CRUD verbs with state-transition flavours (rule_enable / rule_disable)
-// and per-setting names (llm_key_set / grafana_config_set), which made
-// the action filter sprawl. The current set collapses those to the
-// underlying verb + a payload that carries the specifics.
-const (
-	// Note 2026-05-21: auth_login / auth_logout / audit_view dropped.
-	// Operator flagged read-only / session-bookkeeping rows as drowning
-	// out the mutation signal. We keep auth_login_failed because a
-	// brute-force pattern still wants to be visible.
-	ActionAuthLoginFailed = "auth_login_failed"
-
-	// User CRUD. role / password / profile field changes all surface as
-	// user_update — the payload field carries which field flipped.
-	ActionUserCreate = "user_create"
-	ActionUserUpdate = "user_update"
-	ActionUserDelete = "user_delete"
-	ActionUserExport = "user_export"
-
-	// Device CRUD. enable / disable / bulk-delete fold into update /
-	// delete + a payload (e.g. {"enabled": false, "count": 3}).
-	ActionDeviceUpdate = "device_update"
-	ActionDeviceDelete = "device_delete"
-
-	// Alert rule CRUD. enable / disable fold into update with payload
-	// {"enabled": <bool>}.
-	ActionRuleCreate = "rule_create"
-	ActionRuleUpdate = "rule_update"
-	ActionRuleDelete = "rule_delete"
-
-	ActionIncidentAck     = "incident_ack"
-	ActionIncidentResolve = "incident_resolve"
-	ActionIncidentSilence = "incident_silence"
-
-	// Settings umbrella. LLM key / Grafana config / SSH key writes all
-	// land here; payload carries {"key": "...", "category": "..."}.
-	// Sensitive values are redacted upstream.
-	ActionSettingUpdate = "setting_update"
-	ActionSettingDelete = "setting_delete"
-
-	ActionChannelCreate = "channel_create"
-	ActionChannelUpdate = "channel_update"
-	ActionChannelDelete = "channel_delete"
-
-	ActionRepoCreate = "repo_create"
-	ActionRepoUpdate = "repo_update"
-	ActionRepoDelete = "repo_delete"
-	ActionRepoSync   = "repo_sync"
-
-	ActionSkillInstall   = "skill_install"
-	ActionSkillUninstall = "skill_uninstall"
-)
-
-// ResourceType buckets used in the resource_type column. Same flat-list
-// convention as Action — group in the UI, not the data.
-const (
-	ResourceUser     = "user"
-	ResourceDevice   = "device"
-	ResourceIncident = "incident"
-	ResourceSetting  = "setting"
-	ResourceRule     = "rule"
-	ResourceChannel  = "channel"
-	ResourceRepo     = "repo"
-	ResourceSkill    = "skill"
-	ResourceLLM      = "llm"
-	ResourceGitKey   = "git_ssh_key"
-	ResourceGrafana  = "grafana"
-	ResourceRAG      = "rag"
-	ResourceAudit    = "audit"
-	ResourceAuth     = "auth"
+	StatusSuccess         = auditctx.StatusSuccess
+	StatusFailure         = auditctx.StatusFailure
+	StatusDenied          = auditctx.StatusDenied
+	ActionAuthLoginFailed = auditctx.ActionAuthLoginFailed
+	ActionUserCreate      = auditctx.ActionUserCreate
+	ActionUserUpdate      = auditctx.ActionUserUpdate
+	ActionUserDelete      = auditctx.ActionUserDelete
+	ActionUserExport      = auditctx.ActionUserExport
+	ActionDeviceUpdate    = auditctx.ActionDeviceUpdate
+	ActionDeviceDelete    = auditctx.ActionDeviceDelete
+	ActionRuleCreate      = auditctx.ActionRuleCreate
+	ActionRuleUpdate      = auditctx.ActionRuleUpdate
+	ActionRuleDelete      = auditctx.ActionRuleDelete
+	ActionIncidentAck     = auditctx.ActionIncidentAck
+	ActionIncidentResolve = auditctx.ActionIncidentResolve
+	ActionIncidentSilence = auditctx.ActionIncidentSilence
+	ActionSettingUpdate   = auditctx.ActionSettingUpdate
+	ActionSettingDelete   = auditctx.ActionSettingDelete
+	ActionChannelCreate   = auditctx.ActionChannelCreate
+	ActionChannelUpdate   = auditctx.ActionChannelUpdate
+	ActionChannelDelete   = auditctx.ActionChannelDelete
+	ActionRepoCreate      = auditctx.ActionRepoCreate
+	ActionRepoUpdate      = auditctx.ActionRepoUpdate
+	ActionRepoDelete      = auditctx.ActionRepoDelete
+	ActionRepoSync        = auditctx.ActionRepoSync
+	ActionSkillInstall    = auditctx.ActionSkillInstall
+	ActionSkillUninstall  = auditctx.ActionSkillUninstall
+	ResourceUser          = auditctx.ResourceUser
+	ResourceDevice        = auditctx.ResourceDevice
+	ResourceIncident      = auditctx.ResourceIncident
+	ResourceSetting       = auditctx.ResourceSetting
+	ResourceRule          = auditctx.ResourceRule
+	ResourceChannel       = auditctx.ResourceChannel
+	ResourceRepo          = auditctx.ResourceRepo
+	ResourceSkill         = auditctx.ResourceSkill
+	ResourceLLM           = auditctx.ResourceLLM
+	ResourceGitKey        = auditctx.ResourceGitKey
+	ResourceGrafana       = auditctx.ResourceGrafana
+	ResourceRAG           = auditctx.ResourceRAG
+	ResourceAudit         = auditctx.ResourceAudit
+	ResourceAuth          = auditctx.ResourceAuth
 )

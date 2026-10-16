@@ -78,10 +78,7 @@ func (r *Repo) DeleteByUser(ctx context.Context, userID uint64) error {
 
 // ListByOrg returns every membership in the given org with the
 // embedded user pre-joined.
-type MembershipWithUser struct {
-	model.OrgMembership
-	User model.User `gorm:"-"`
-}
+type MembershipWithUser = model.MembershipWithUser
 
 // ListByOrg lists memberships joined to user rows.
 func (r *Repo) ListByOrg(ctx context.Context, orgID uint64) ([]MembershipWithUser, error) {
@@ -116,10 +113,7 @@ func (r *Repo) ListByOrg(ctx context.Context, orgID uint64) ([]MembershipWithUse
 
 // ListByUser returns every org the user is a member of, with the
 // embedded org row.
-type MembershipWithOrg struct {
-	model.OrgMembership
-	Org model.Org `gorm:"-"`
-}
+type MembershipWithOrg = model.MembershipWithOrg
 
 // ListByUser lists memberships joined to org rows.
 func (r *Repo) ListByUser(ctx context.Context, userID uint64) ([]MembershipWithOrg, error) {

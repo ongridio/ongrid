@@ -13,7 +13,7 @@ import (
 // LLMDefaultProvider returns the cluster-wide default LLM provider id +
 // model that web/SPA chats would pick. The IM path uses this so it
 // stays in sync with whatever the operator selected in the UI picker;
-// otherwise chatprotocol.New's internal "" → "gpt-5.4" fallback would route IM
+// otherwise a stale hard-coded fallback would route IM
 // traffic to a model that's not in the catalog and the LLM router
 // rejects it ("this model has beta-limitations…"), which surfaces in
 // chat apps as "助手执行失败".
@@ -38,8 +38,7 @@ type AiopsServiceAdapter struct {
 }
 
 // NewAiopsAdapter wires the adapter. defaults is optional — when nil
-// the adapter falls back to chatprotocol.RunOptions{} (which puts chatprotocol.New's
-// hard-coded model default in charge). Pass the LLMSettingsResolver
+// the adapter uses empty RunOptions and follows the router default. Pass the LLMSettingsResolver
 // so the IM path picks up the same default the SPA picker writes.
 func NewAiopsAdapter(svc *svcaiops.Service, serviceUserID uint64, defaults LLMDefaultProvider, log *slog.Logger) *AiopsServiceAdapter {
 	if log == nil {
@@ -90,8 +89,7 @@ func (a *AiopsServiceAdapter) StreamMessage(ctx context.Context, sessionID strin
 // runOptions resolves the cluster default provider+model so IM traffic
 // uses the same LLM the SPA picker writes. On any resolver error or
 // missing catalog, returns zero RunOptions and lets the agent layer
-// apply its own fallback (which currently lands on gpt-5.4 — see
-// chatprotocol.New).
+// resolve the configured default.
 func (a *AiopsServiceAdapter) runOptions(ctx context.Context) chatprotocol.RunOptions {
 	if a.defaults == nil {
 		return chatprotocol.RunOptions{}

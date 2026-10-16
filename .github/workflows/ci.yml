@@ -80,6 +80,12 @@ jobs:
         if: steps.changes.outputs.docs_only != 'true'
         run: make lint-proto
 
+      - name: Architecture boundaries
+        if: steps.changes.outputs.docs_only != 'true'
+        run: |
+          make tools-arch
+          make arch-lint test-arch-policy
+
       - name: go build
         if: steps.changes.outputs.docs_only != 'true'
         run: go build ./...

@@ -7,11 +7,16 @@
 #   - 同一 BC 内部 service 层禁止越过 biz 直接 import 同 BC 的 data 层
 #     （go-arch-lint v3 支持以独立组件 + deps 表达，见下方 iam_service / manager_service 等）
 #
-# ADR-005 枢轴备注：iam 下只剩 user 子域（org/membership 已删）；data 目录
-# 由 mysql/ 重命名为 sqlite/。组件 glob 使用 `**`，无需逐级更新。
+# v1.19.0 / schema v3。检查生产代码的 import 边界；测试允许组装真实 fixture。
+# deepScan 的实现类型流分析会把构造函数注入判为反向依赖；项目允许
+# 消费方接口 + cmd 装配，因此不启用该模式，禁止 import 的规则仍完整执行。
 
 version: 3
 workdir: .
+
+allow:
+  depOnAnyVendor: true
+  deepScan: false
 
 components:
   iam_service:     { in: internal/iam/service/** }
@@ -28,81 +33,97 @@ components:
 
   edgeagent_service: { in: internal/edgeagent/service/** }
   edgeagent_biz:     { in: internal/edgeagent/biz/** }
-  edgeagent_data:    { in: internal/edgeagent/data/** }
   edgeagent_model:   { in: internal/edgeagent/model/** }
+
+  examples: { in: examples/** }
+  test_harness: { in: tests/** }
+  shared_skill: { in: internal/skill/** }
+  edgeagent_runtime:
+    in:
+      - internal/edgeagent/bash/**
+      - internal/edgeagent/cmdpolicy/**
+      - internal/edgeagent/collector/**
+      - internal/edgeagent/config/**
+      - internal/edgeagent/dpapi/**
+      - internal/edgeagent/edgedirs/**
+      - internal/edgeagent/host_files/**
+      - internal/edgeagent/install/**
+      - internal/edgeagent/k8s/**
+      - internal/edgeagent/operator/**
+      - internal/edgeagent/packetcapture/**
+      - internal/edgeagent/plugins/**
+      - internal/edgeagent/restart_service/**
+      - internal/edgeagent/skill/**
+      - internal/edgeagent/streamrouter/**
+      - internal/edgeagent/supervisorhealth/**
+      - internal/edgeagent/upgradebundle/**
+      - internal/edgeagent/upgrademachine/**
+      - internal/edgeagent/webshell/**
 
   shared_pkg: { in: internal/pkg/** }
   api:        { in: api/** }
-  cmd:        { in: cmd/** }
+  cmd_manager: { in: cmd/ongrid/** }
+  cmd_edge: { in: [cmd/ongrid-edge/**, cmd/ongrid-edge-supervisor/**] }
 
 # 允许依赖的正向清单（未列出 = 禁止）
 deps:
+  examples:
+    anyVendorDeps: true
+  test_harness:
+    anyProjectDeps: true
   # ---------------- iam BC ----------------
   iam_server:
-    mayDependOn: [iam_service, iam_biz, iam_model, shared_pkg, api]
+    mayDependOn: [iam_server, iam_service, iam_biz, iam_model, shared_pkg, api]
   iam_service:
     # 关键：service 不得直接依赖 iam_data（必须走 biz）
-    mayDependOn: [iam_biz, iam_model, shared_pkg, api]
+    mayDependOn: [iam_service, iam_biz, iam_model, shared_pkg, api]
   iam_biz:
-    mayDependOn: [iam_model, shared_pkg]
-  iam_data:
     mayDependOn: [iam_biz, iam_model, shared_pkg]
+  iam_data:
+    mayDependOn: [iam_data, iam_biz, iam_model, shared_pkg]
   iam_model:
-    mayDependOn: [shared_pkg]
+    mayDependOn: [iam_model, shared_pkg]
 
   # ---------------- manager BC ----------------
   manager_server:
-    mayDependOn: [manager_service, manager_biz, manager_model, shared_pkg, api]
+    mayDependOn: [manager_server, manager_service, manager_biz, manager_model, shared_pkg, api]
   manager_service:
-    mayDependOn: [manager_biz, manager_model, shared_pkg, api]
+    mayDependOn: [manager_service, manager_biz, manager_model, shared_pkg, api]
   manager_biz:
-    mayDependOn: [manager_model, shared_pkg]
+    mayDependOn: [manager_biz, manager_model, shared_pkg, shared_skill]
   manager_data:
-    mayDependOn: [manager_biz, manager_model, shared_pkg]
+    mayDependOn: [manager_data, manager_biz, manager_model, shared_pkg]
   manager_model:
-    mayDependOn: [shared_pkg]
+    mayDependOn: [manager_model, shared_pkg]
 
   # ---------------- edgeagent BC ----------------
   edgeagent_service:
-    mayDependOn: [edgeagent_biz, edgeagent_model, shared_pkg, api]
+    mayDependOn: [edgeagent_service, edgeagent_biz, edgeagent_model, shared_pkg, api]
   edgeagent_biz:
-    mayDependOn: [edgeagent_model, shared_pkg]
-  edgeagent_data:
-    mayDependOn: [edgeagent_biz, edgeagent_model, shared_pkg]
+    mayDependOn: [edgeagent_biz, edgeagent_model, edgeagent_runtime, shared_skill, shared_pkg]
   edgeagent_model:
-    mayDependOn: [shared_pkg]
+    mayDependOn: [edgeagent_model, shared_pkg]
+
+  edgeagent_runtime:
+    mayDependOn: [edgeagent_runtime, edgeagent_biz, edgeagent_model, shared_pkg, shared_skill, api]
+  shared_skill:
+    mayDependOn: [shared_skill, shared_pkg]
 
   # ---------------- 共享 ----------------
   shared_pkg:
     # 不得依赖任何 BC（业务无关）
-    mayDependOn: []
+    mayDependOn: [shared_pkg]
+    anyVendorDeps: true
   api:
-    mayDependOn: []
+    anyVendorDeps: true
 
-  # ---------------- 装配层 ----------------
-  # cmd/ongrid 装配 iam + manager，cmd/ongrid-edge 装配 edgeagent；
-  # go-arch-lint v3 无"按子目录分 cmd"的原生表达，这里合并授权，
-  # 由人工 review 与 CODEOWNERS 把住"cmd/ongrid-edge 不 import iam/manager"。
-  cmd:
-    mayDependOn:
-      - iam_server
-      - iam_service
-      - iam_biz
-      - iam_data
-      - iam_model
-      - manager_server
-      - manager_service
-      - manager_biz
-      - manager_data
-      - manager_model
-      - edgeagent_service
-      - edgeagent_biz
-      - edgeagent_data
-      - edgeagent_model
-      - shared_pkg
-      - api
+  # Manager 与 Edge 分别装配，禁止两个入口互相 import 对方业务域。
+  cmd_manager:
+    mayDependOn: [cmd_manager, iam_server, iam_service, iam_biz, iam_data, iam_model, manager_server, manager_service, manager_biz, manager_data, manager_model, shared_pkg, shared_skill, api]
+  cmd_edge:
+    mayDependOn: [cmd_edge, edgeagent_service, edgeagent_biz, edgeagent_model, edgeagent_runtime, shared_pkg, shared_skill, api]
 
-# 注：go-arch-lint 的 schema 字段（version / components / deps）按 v3
-# 主流文档书写；若 CI 报 schema 错，按实际版本微调字段名即可。
 commonComponents: []
-excludeFiles: []
+# 包内测试允许组装真实存储/跨域 fixture；生产文件仍严格执行分层。
+excludeFiles:
+  - "_test\\.go$"

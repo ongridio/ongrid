@@ -16,9 +16,7 @@ import (
 
 	"github.com/ongridio/ongrid/internal/iam/model"
 	"github.com/ongridio/ongrid/internal/iam/service"
-	bizaudit "github.com/ongridio/ongrid/internal/manager/biz/audit"
-	auditmodel "github.com/ongridio/ongrid/internal/manager/model/audit"
-	auditmw "github.com/ongridio/ongrid/internal/manager/server/middleware"
+	"github.com/ongridio/ongrid/internal/pkg/auditctx"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/tenantctx"
 )
@@ -43,8 +41,8 @@ type throttleSlot struct {
 const (
 	// IP-level limit: looser, since one IP may legitimately host multiple
 	// users (NAT, office gateway).
-	loginIPLimit       = 20
-	loginIPWindow      = 5 * time.Minute
+	loginIPLimit  = 20
+	loginIPWindow = 5 * time.Minute
 	// Email-level limit: tighter — anyone trying 6+ passwords against
 	// admin@x in 15min is hostile.
 	loginEmailLimit  = 6
@@ -135,9 +133,9 @@ func clientIP(r *http.Request) string {
 
 // Handler bundles the Service with its logger and exposes chi routers.
 type Handler struct {
-	svc       *service.Service
-	log       *slog.Logger
-	throttle  *loginThrottle
+	svc      *service.Service
+	log      *slog.Logger
+	throttle *loginThrottle
 }
 
 // NewHandler builds the iam HTTP handler bundle. Callers register routes
@@ -227,12 +225,12 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	ip := clientIP(r)
 	emailKey := strings.ToLower(strings.TrimSpace(in.Email))
 	if err := h.throttle.check(ip, emailKey); err != nil {
-		auditmw.SetAuditEvent(r, bizaudit.Event{
-			Action:       auditmodel.ActionAuthLoginFailed,
-			ResourceType: auditmodel.ResourceAuth,
+		auditctx.SetAuditEvent(r, auditctx.Event{
+			Action:       auditctx.ActionAuthLoginFailed,
+			ResourceType: auditctx.ResourceAuth,
 			ResourceID:   emailKey,
 			UserEmail:    emailKey,
-			Status:       auditmodel.StatusFailure,
+			Status:       auditctx.StatusFailure,
 			ErrorMessage: "rate limited",
 		})
 		writeErr(w, err)
@@ -243,12 +241,12 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		h.throttle.recordFailure(ip, emailKey)
 		// HLD-010: record failed login. UserID stays nil; email comes
 		// from request body so we can spot password-spraying patterns.
-		auditmw.SetAuditEvent(r, bizaudit.Event{
-			Action:       auditmodel.ActionAuthLoginFailed,
-			ResourceType: auditmodel.ResourceAuth,
+		auditctx.SetAuditEvent(r, auditctx.Event{
+			Action:       auditctx.ActionAuthLoginFailed,
+			ResourceType: auditctx.ResourceAuth,
 			ResourceID:   emailKey,
 			UserEmail:    emailKey,
-			Status:       auditmodel.StatusFailure,
+			Status:       auditctx.StatusFailure,
 			ErrorMessage: err.Error(),
 		})
 		writeErr(w, err)
@@ -301,12 +299,12 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	auditmw.SetAuditEvent(r, bizaudit.Event{
-		Action:       auditmodel.ActionUserCreate,
-		ResourceType: auditmodel.ResourceUser,
+	auditctx.SetAuditEvent(r, auditctx.Event{
+		Action:       auditctx.ActionUserCreate,
+		ResourceType: auditctx.ResourceUser,
 		ResourceID:   strconv.FormatUint(u.ID, 10),
 		ResourceName: u.Email,
-		Status:       auditmodel.StatusSuccess,
+		Status:       auditctx.StatusSuccess,
 		Payload:      map[string]any{"role": u.Role},
 	})
 	writeJSON(w, http.StatusCreated, userDTO{ID: u.ID, Email: u.Email, Role: u.Role})
@@ -355,11 +353,11 @@ func (h *Handler) deleteUser(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	auditmw.SetAuditEvent(r, bizaudit.Event{
-		Action:       auditmodel.ActionUserDelete,
-		ResourceType: auditmodel.ResourceUser,
+	auditctx.SetAuditEvent(r, auditctx.Event{
+		Action:       auditctx.ActionUserDelete,
+		ResourceType: auditctx.ResourceUser,
 		ResourceID:   strconv.FormatUint(id, 10),
-		Status:       auditmodel.StatusSuccess,
+		Status:       auditctx.StatusSuccess,
 	})
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -382,11 +380,11 @@ func (h *Handler) setRole(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	auditmw.SetAuditEvent(r, bizaudit.Event{
-		Action:       auditmodel.ActionUserUpdate,
-		ResourceType: auditmodel.ResourceUser,
+	auditctx.SetAuditEvent(r, auditctx.Event{
+		Action:       auditctx.ActionUserUpdate,
+		ResourceType: auditctx.ResourceUser,
 		ResourceID:   strconv.FormatUint(id, 10),
-		Status:       auditmodel.StatusSuccess,
+		Status:       auditctx.StatusSuccess,
 		Payload:      map[string]any{"field": "role", "new_role": in.Role},
 	})
 	w.WriteHeader(http.StatusNoContent)

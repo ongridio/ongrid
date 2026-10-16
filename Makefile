@@ -152,9 +152,17 @@ test-e2e-live: ## E2E live mode（用 tests/e2e/secrets.local.env 打通真实�
 lint: ## 运行 golangci-lint
 	golangci-lint run
 
-arch-lint: ## 运行 go-arch-lint（校验 BC 边界）
-	@command -v go-arch-lint >/dev/null 2>&1 || { echo "go-arch-lint not installed; skipping"; exit 0; }
-	go-arch-lint check
+ARCH_LINT ?= go-arch-lint
+.PHONY: tools-arch test-arch-policy
+tools-arch: ## 安装固定版本的架构检查工具
+	go install github.com/fe3dback/go-arch-lint@v1.19.0
+
+arch-lint: ## 校验生产代码 BC 边界（缺少工具时明确失败）
+	@command -v $(ARCH_LINT) >/dev/null 2>&1 || { echo "go-arch-lint not installed; run make tools-arch" >&2; exit 1; }
+	$(ARCH_LINT) check
+
+test-arch-policy: ## 验证架构规则确实拒绝跨域和跨层 import
+	python3 scripts/test-arch-policy.py --binary $(ARCH_LINT)
 
 # ----------------------------------------------------------------------------
 # proto
@@ -915,4 +923,4 @@ test-web-ci-platform: ## Run the serial platform frontend CI tests (requires npm
 
 .PHONY: test-agent-runtime
 test-agent-runtime: ## 统一 Agent runtime 回归（tools 依赖 Linux cmdpolicy）
-	go test -race ./internal/manager/biz/aiops/... ./internal/manager/service/aiops ./internal/manager/server/aiops ./internal/manager/biz/imbridge ./internal/skill/... ./cmd/ongrid
+	go test -race ./internal/manager/biz/aiops/... ./internal/manager/service/aiops ./internal/manager/server/aiops ./internal/manager/biz/imbridge ./internal/manager/service/imbridge ./internal/skill/... ./cmd/ongrid

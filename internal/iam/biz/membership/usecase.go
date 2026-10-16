@@ -8,7 +8,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ongridio/ongrid/internal/iam/data/membership/store"
 	"github.com/ongridio/ongrid/internal/iam/model"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
@@ -19,8 +18,8 @@ type Repo interface {
 	Delete(ctx context.Context, userID, orgID uint64) error
 	DeleteByOrg(ctx context.Context, orgID uint64) error
 	DeleteByUser(ctx context.Context, userID uint64) error
-	ListByOrg(ctx context.Context, orgID uint64) ([]store.MembershipWithUser, error)
-	ListByUser(ctx context.Context, userID uint64) ([]store.MembershipWithOrg, error)
+	ListByOrg(ctx context.Context, orgID uint64) ([]model.MembershipWithUser, error)
+	ListByUser(ctx context.Context, userID uint64) ([]model.MembershipWithOrg, error)
 	All(ctx context.Context) ([]model.OrgMembership, error)
 }
 
@@ -73,12 +72,12 @@ func (s *Service) Remove(ctx context.Context, userID, orgID uint64) error {
 }
 
 // ListByOrg returns members of an org, joined with user rows.
-func (s *Service) ListByOrg(ctx context.Context, orgID uint64) ([]store.MembershipWithUser, error) {
+func (s *Service) ListByOrg(ctx context.Context, orgID uint64) ([]model.MembershipWithUser, error) {
 	return s.repo.ListByOrg(ctx, orgID)
 }
 
 // ListByUser returns orgs the user belongs to, joined with org rows.
-func (s *Service) ListByUser(ctx context.Context, userID uint64) ([]store.MembershipWithOrg, error) {
+func (s *Service) ListByUser(ctx context.Context, userID uint64) ([]model.MembershipWithOrg, error) {
 	return s.repo.ListByUser(ctx, userID)
 }
 

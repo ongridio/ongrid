@@ -17,7 +17,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	iammodel "github.com/ongridio/ongrid/internal/iam/model"
 	bizbridge "github.com/ongridio/ongrid/internal/manager/biz/imbridge"
 	"github.com/ongridio/ongrid/internal/manager/biz/imbridge/provider/dingtalk"
 	"github.com/ongridio/ongrid/internal/manager/biz/imbridge/provider/feishu"
@@ -37,7 +36,7 @@ func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 		http.Error(w, errs.ErrUnauthorized.Error(), errs.HTTPStatus(errs.ErrUnauthorized))
 		return false
 	}
-	if t.Role != iammodel.RoleAdmin {
+	if t.Role != "admin" {
 		http.Error(w, errs.ErrForbidden.Error(), errs.HTTPStatus(errs.ErrForbidden))
 		return false
 	}
