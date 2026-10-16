@@ -27,11 +27,9 @@ type LoadAllConfig struct {
 	AgentsRoot string
 
 	// ExtraSkillsRoots is a list of additional directories to walk
-	// alongside SkillsRoot. Used to keep image-baked built-in skills
-	// in one root and marketplace-installed packs in another, so
-	// marketplace Reload() doesn't have to drop the built-ins to refresh
-	// the user-installed set. Empty / non-existent entries are skipped
-	// silently.
+	// alongside SkillsRoot. Keeps separately configured skills and
+	// marketplace-installed packs available together during Reload().
+	// Empty / non-existent entries are skipped silently.
 	ExtraSkillsRoots []string
 
 	// ExtraAgentsRoots mirrors ExtraSkillsRoots for the agents side —

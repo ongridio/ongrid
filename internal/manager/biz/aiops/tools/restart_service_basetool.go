@@ -98,10 +98,9 @@ var RestartServiceSchema = json.RawMessage(`{
   "required": ["device_id", "service"]
 }`)
 
-// AllowedRestartServices is the canonical allow-list mirrored from
-// skills/restart-service/SKILL.md and the edge sandbox. Exported so the
-// reviewer / SPA approval UI can render the same list without
-// duplicating the literal.
+// AllowedRestartServices is the manager allow-list, matching the edge
+// sandbox. Exported so the reviewer / SPA approval UI can render the
+// same list without duplicating the literal.
 var AllowedRestartServices = []string{
 	"nginx", "redis", "prometheus", "loki", "tempo", "grafana", "mysql", "ongrid",
 }
