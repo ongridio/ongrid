@@ -61,7 +61,7 @@ type RankEdgeRow struct {
 	Metric   string  `json:"metric"`
 }
 
-const rankEdgesCallTimeout = 30 * time.Second
+const rankEdgesCallTimeout = 60 * time.Second
 
 // rankMetricExpr returns the PromQL fragment that yields a per-edge
 // scalar for the requested rank-by name. The closed set must stay in

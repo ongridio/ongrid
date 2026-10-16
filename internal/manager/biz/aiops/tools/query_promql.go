@@ -46,7 +46,7 @@ type QueryPromQLArgs struct {
 
 // queryPromqlCallTimeout caps how long a single dispatch may wait. Same
 // rationale as the other tool timeouts.
-const queryPromqlCallTimeout = 30 * time.Second
+const queryPromqlCallTimeout = 60 * time.Second
 
 const maxQueryPromQLLookbackSeconds = 7 * 24 * 3600
 

@@ -115,7 +115,7 @@ func makeHandler(sandbox *cmdpolicy.Sandbox, log *slog.Logger) tunnel.Handler {
 
 		// Optional per-call timeout override. We bound the override at
 		// 5 min just so a runaway agent call can't park a tunnel slot
-		// indefinitely; the policy default (30s) is the more useful
+		// indefinitely; the policy default (300s) is the more useful
 		// number.
 		callCtx := ctx
 		if req.Timeout > 0 {

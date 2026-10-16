@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
-	"time"
 
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	devicebiz "github.com/ongridio/ongrid/internal/manager/biz/device"
@@ -35,11 +34,8 @@ import (
 // closure-style legacy registry path (registry.go::Tool) is NOT used —
 // these tools are BaseTool-native from day one (改进点 #1).
 
-// hostFilesCallTimeout caps a single tunnel round-trip. The edge runs
-// up to 4 paths concurrently with a 30 s per-path budget and a 60 s
-// whole-batch ceiling, so we mirror 60 s here. Stat is always cheap;
-// find/du can saturate this budget on a large tree.
-const hostFilesCallTimeout = 60 * time.Second
+// Allow all scan waves, metadata collection and response delivery to finish.
+const hostFilesCallTimeout = tunnel.HostFilesCallTimeout
 
 // hostFilesMaxBatchPaths is the manager-side hard upper bound on
 // len(paths). Mirrored at the edge in internal/edgeagent/host_files

@@ -33,7 +33,7 @@ import (
 
 // edgeSummaryBatchTimeout caps the whole batched run. Wider than the
 // per-id ceiling so up to batchConcurrency stitches can finish.
-const edgeSummaryBatchTimeout = 90 * time.Second
+const edgeSummaryBatchTimeout = ((batchMaxIDs+batchConcurrency-1)/batchConcurrency)*edgeSummaryCallTimeout + 30*time.Second
 
 // GetEdgeSummaryTool is the BaseTool form of get_edge_summary.
 type GetEdgeSummaryTool struct {

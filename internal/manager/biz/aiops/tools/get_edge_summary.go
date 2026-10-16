@@ -62,7 +62,7 @@ type GetEdgeSummaryArgs struct {
 // edgeSummaryCallTimeout caps the whole multi-step round trip. It must
 // be larger than hostLoadCallTimeout so a slow edge doesn't blow the
 // outer ctx before the incident query runs.
-const edgeSummaryCallTimeout = 30 * time.Second
+const edgeSummaryCallTimeout = 60 * time.Second
 
 // EdgeSummaryIncidentRow is the trimmed incident envelope embedded in
 // the summary. Mirrors fields the LLM most likely needs to talk about

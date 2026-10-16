@@ -19,7 +19,7 @@ const (
 	// one shot — anything more is noise that crowds out reasoning.
 	findTopologyNodeMaxLimit     = 50
 	findTopologyNodeDefaultLimit = 20
-	findTopologyNodeCallTimeout  = 5 * time.Second
+	findTopologyNodeCallTimeout  = 60 * time.Second
 )
 
 const findTopologyNodeDescription = "Search the business topology by name substring (case-insensitive). " +

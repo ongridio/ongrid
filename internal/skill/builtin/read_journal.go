@@ -60,7 +60,7 @@ type readJournalResult struct {
 }
 
 // Execute runs journalctl with the configured filters and returns its
-// stdout split by newline. Hard 30s timeout protects the dispatcher from
+// stdout split by newline. Hard 2m timeout protects the dispatcher from
 // a hanging journal.
 func (ReadJournal) Execute(ctx context.Context, params json.RawMessage) (json.RawMessage, error) {
 	var p readJournalParams
@@ -83,7 +83,7 @@ func (ReadJournal) Execute(ctx context.Context, params json.RawMessage) (json.Ra
 		return json.Marshal(res)
 	}
 
-	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	cctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
 	args := []string{"--no-pager", "--output=short-iso", "-n", strconv.Itoa(p.Lines)}

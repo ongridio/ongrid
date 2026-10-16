@@ -28,7 +28,7 @@ import (
 const (
 	defaultStdoutCap = 64 * 1024
 	defaultStderrCap = 16 * 1024
-	defaultTimeout   = 30 * time.Second
+	defaultTimeout   = 5 * time.Minute
 	defaultMaxArgs   = 32
 )
 

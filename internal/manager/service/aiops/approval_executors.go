@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	aiopstools "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools"
 	managerbizapproval "github.com/ongridio/ongrid/internal/manager/biz/approval"
@@ -94,7 +95,7 @@ func (e ApprovalExecutors) Register(approvalUC *managerbizapproval.Usecase) {
 		if workdir != "" {
 			env["HOME"] = workdir
 		}
-		res, err := e.Runner.Run(ctx, runner.Spec{Script: p.Command, Env: env, Workdir: workdir})
+		res, err := e.Runner.Run(ctx, runner.Spec{Script: p.Command, Env: env, Workdir: workdir, Timeout: 10 * time.Minute})
 		if err != nil {
 			return "", err
 		}

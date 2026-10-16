@@ -81,7 +81,7 @@ const queryK8sLogsWhenToUse = "Use when the user asks for recent Pod logs, Crash
 	"This is a bounded live Kubernetes pods/log fallback; prefer query_logql for production log search and query_k8s_snapshot for counts/lists. " +
 	"Never use this for kubectl exec, Secret reads, arbitrary files, or high-volume log export."
 
-const queryK8sLogsCallTimeout = 20 * time.Second
+const queryK8sLogsCallTimeout = 60 * time.Second
 
 type QueryK8sLogsTool struct {
 	caller Caller

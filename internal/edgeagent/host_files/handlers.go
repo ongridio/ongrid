@@ -55,18 +55,9 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
 
-// hostFilesPerPathTimeout caps a single path's handler work (one find,
-// one du, one stat). 30 s is generous for stat / du -d 1 but means a
-// `find /` with a deep tree may be cut short — that is intentional. The
-// manager BaseTool uses a 60 s tunnel timeout (matching
-// hostFilesBatchTimeout below) so this 30 s budget keeps any single
-// path from monopolising the tunnel slot.
-const hostFilesPerPathTimeout = 30 * time.Second
-
-// hostFilesBatchTimeout caps the whole batch (all paths together). The
-// manager-side BaseTool uses the same value for its tunnel.Caller call
-// timeout so the LLM-visible upper bound is uniform.
-const hostFilesBatchTimeout = 60 * time.Second
+// Scans may traverse large trees; keep budgets aligned with the caller.
+const hostFilesPerPathTimeout = tunnel.HostFilesPerPathTimeout
+const hostFilesBatchTimeout = tunnel.HostFilesBatchTimeout
 
 // hostFilesBatchConcurrency caps how many paths run in parallel inside
 // a single batch. Set deliberately low because each find/du subprocess
@@ -449,7 +440,7 @@ func collectFilesystems(ctx context.Context, sb *SandboxConfig, paths []string) 
 		seen[clean] = struct{}{}
 		wanted = append(wanted, clean)
 	}
-	cctx, cancel := context.WithTimeout(ctx, hostFilesPerPathTimeout)
+	cctx, cancel := context.WithTimeout(ctx, tunnel.HostFilesMetadataTimeout)
 	defer cancel()
 	out := make([]tunnel.HostFilesystem, 0, 2)
 	seenMount := map[string]struct{}{}

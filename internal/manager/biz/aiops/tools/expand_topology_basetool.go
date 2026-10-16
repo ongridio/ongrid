@@ -23,7 +23,7 @@ const (
 	// something silly.
 	expandTopologyDefaultDepth = 2
 	expandTopologyMaxDepth     = 5
-	expandTopologyCallTimeout  = 8 * time.Second
+	expandTopologyCallTimeout  = 60 * time.Second
 )
 
 const expandTopologyDescription = "Walk the business topology graph outward from a starting node (or a device's node). " +

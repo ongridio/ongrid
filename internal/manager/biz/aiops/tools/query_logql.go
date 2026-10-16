@@ -152,7 +152,7 @@ func logQLStreamSelectorEnd(query string) (int, bool) {
 
 // queryLogqlCallTimeout caps how long a single dispatch may wait. Mirrors
 // query_promql for symmetry across signal types.
-const queryLogqlCallTimeout = 30 * time.Second
+const queryLogqlCallTimeout = 60 * time.Second
 
 // executeQueryLogQL runs the query against the selected backend and hands its
 // compact backend-specific result shape back to the LLM via ResultJSON.

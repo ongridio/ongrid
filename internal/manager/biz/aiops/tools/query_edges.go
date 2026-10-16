@@ -90,7 +90,7 @@ type EdgeRow struct {
 }
 
 // queryEdgesCallTimeout caps the biz call.
-const queryEdgesCallTimeout = 10 * time.Second
+const queryEdgesCallTimeout = 60 * time.Second
 
 // executeQueryEdges resolves the filter and lists matching devices.
 func (r *Registry) executeQueryEdges(ctx context.Context, args json.RawMessage) (ExecuteResult, error) {

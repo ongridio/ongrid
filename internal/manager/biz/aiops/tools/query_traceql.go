@@ -192,7 +192,7 @@ func traceQLSearchFilters(in QueryTraceQLArgs) (string, map[string]string, error
 
 // queryTraceqlCallTimeout caps how long a single dispatch may wait. Mirrors
 // query_promql for symmetry across signal types.
-const queryTraceqlCallTimeout = 30 * time.Second
+const queryTraceqlCallTimeout = 60 * time.Second
 
 // executeQueryTraceQL runs the TraceQL search and hands the raw Tempo
 // response back to the LLM via ResultJSON.

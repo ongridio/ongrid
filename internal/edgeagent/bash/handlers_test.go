@@ -147,3 +147,27 @@ func TestHandler_RejectsForbiddenSyntax(t *testing.T) {
 		}
 	}
 }
+
+// Exercise the real shell path past the old sandbox ceiling; no fake clock
+// can establish that the command survives all handler/sandbox deadlines.
+func TestHandler_DefaultAllowsCommandBeyondThirtySeconds(t *testing.T) {
+	t.Parallel()
+	sb := &cmdpolicy.Sandbox{Policy: cmdpolicy.DefaultReadOnly()}
+	resp := invokeHandler(t, makeHandler(sb, nil), tunnel.BashExecRequest{
+		Cmd: "sleep 31; printf completed", Unrestricted: true,
+	})
+	if resp.ExitCode != 0 || resp.Stdout != "completed" {
+		t.Fatalf("long command failed: %+v", resp)
+	}
+}
+
+func TestHandler_ExplicitShortTimeoutStillStopsCommand(t *testing.T) {
+	t.Parallel()
+	sb := &cmdpolicy.Sandbox{Policy: cmdpolicy.DefaultReadOnly()}
+	resp := invokeHandler(t, makeHandler(sb, nil), tunnel.BashExecRequest{
+		Cmd: "exec sleep 10", Unrestricted: true, Timeout: 1,
+	})
+	if resp.ExitCode == 0 {
+		t.Fatalf("explicit timeout did not stop command: %+v", resp)
+	}
+}

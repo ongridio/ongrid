@@ -37,7 +37,7 @@ type GetHostLoadArgs struct {
 // hostLoadCallTimeout caps how long a single tool dispatch may wait on
 // the frontier round-trip. We derive a child ctx with this deadline so
 // long-running edge calls cannot wedge the agent loop.
-const hostLoadCallTimeout = 15 * time.Second
+const hostLoadCallTimeout = 60 * time.Second
 
 // executeGetHostLoad resolves edge_name -> edge.ID via manager/biz/edge and
 // dispatches a get_host_load reverse call through the frontier.

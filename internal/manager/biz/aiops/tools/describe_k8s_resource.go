@@ -59,7 +59,7 @@ const describeK8sResourceWhenToUse = "When the user explicitly asks to describe 
 	"or needs current Events for one named object. NOT for counts/lists/overview (use query_k8s_snapshot). " +
 	"Read-only only; does not execute kubectl, exec, logs, scale, restart, or delete."
 
-const describeK8sResourceCallTimeout = 15 * time.Second
+const describeK8sResourceCallTimeout = 60 * time.Second
 
 type DescribeK8sResourceTool struct {
 	caller Caller

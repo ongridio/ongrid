@@ -40,7 +40,7 @@ type SkillManifest struct {
 	EnvAllow []string `json:"env_allow,omitempty"`
 
 	// TimeoutSeconds caps the subprocess runtime. Zero falls back to
-	// DefaultSubprocessTimeout (30s).
+	// DefaultSubprocessTimeout (5m).
 	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
 
 	// Class follows the same {safe, mutating, dangerous} taxonomy as

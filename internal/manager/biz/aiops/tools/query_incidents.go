@@ -85,7 +85,7 @@ type IncidentRow struct {
 	ResolvedAt     *time.Time `json:"resolved_at,omitempty"`
 }
 
-const queryIncidentsCallTimeout = 15 * time.Second
+const queryIncidentsCallTimeout = 60 * time.Second
 
 func (r *Registry) executeQueryIncidents(ctx context.Context, args json.RawMessage) (ExecuteResult, error) {
 	if r.alertUC == nil {

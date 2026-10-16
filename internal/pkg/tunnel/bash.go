@@ -27,7 +27,7 @@ type BashExecRequest struct {
 	Cmd string `json:"cmd"`
 
 	// Timeout overrides the policy default per-call ceiling. 0 → use
-	// the sandbox default (30s). Negative is treated as 0.
+	// the sandbox default (300s). Negative is treated as 0.
 	Timeout int `json:"timeout_seconds,omitempty"`
 
 	// Unrestricted, when true, tells the edge to BYPASS cmdpolicy entirely

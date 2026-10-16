@@ -65,7 +65,7 @@ type AlertRuleRow struct {
 	UpdatedAt  time.Time `json:"updated_at"`
 }
 
-const queryAlertRulesCallTimeout = 10 * time.Second
+const queryAlertRulesCallTimeout = 60 * time.Second
 
 func (r *Registry) executeQueryAlertRules(ctx context.Context, args json.RawMessage) (ExecuteResult, error) {
 	if r.alertUC == nil {

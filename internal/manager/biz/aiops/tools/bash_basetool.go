@@ -128,7 +128,7 @@ var BashSchema = json.RawMessage(`{
       "description": "兼容旧参数：单台设备 id。优先使用 device_ids。"
     },
     "cmd": {"type": "string", "description": "**单条** shell-like 命令，跑在每个 device_id 上。读命令直接走只读 sandbox；写命令只在用户明确要求时触发内置确认卡，批准后才执行。支持 pipes (|)；读路径不支持 redirects / ; && || $() <() heredocs / backticks。如果想跑两条不同命令，分两次调用。"},
-    "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 300, "description": "Optional per-device timeout override. Default 30s; max 300s. 共享给所有 device。"}
+    "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 300, "description": "Optional per-device timeout override. Default 300s; max 300s. 共享给所有 device。"}
   },
   "required": ["cmd"]
 }`)
@@ -136,11 +136,11 @@ var BashSchema = json.RawMessage(`{
 // bashCallTimeout caps the manager → edge round-trip. The edge
 // enforces its own (shorter) timeout from the policy; this is the
 // outer ceiling per inner call so a hung tunnel can't park a slot.
-const bashCallTimeout = 60 * time.Second
+const bashCallTimeout = 5*time.Minute + 30*time.Second
 
 // bashBatchTimeout caps the whole batched run. Wider than the per-id
-// ceiling so up to batchConcurrency calls can finish.
-const bashBatchTimeout = 120 * time.Second
+// ceiling so all four waves of a 16-device batch can finish.
+const bashBatchTimeout = ((batchMaxIDs+batchConcurrency-1)/batchConcurrency)*bashCallTimeout + 30*time.Second
 
 // bashBatchArgs is the typed form of BashSchema.
 type bashBatchArgs struct {

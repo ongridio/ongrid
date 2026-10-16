@@ -98,7 +98,7 @@ const queryK8sSnapshotWhenToUse = "When the user asks Kubernetes inventory quest
 	"collect workloads, pods, and warning Events once, then use describe_k8s_resource only for ambiguous Pods and query_k8s_logs only for containers that actually start or restart. " +
 	"This reads the manager DB snapshot by design. NOT for live describe/logs/exec/restart/scale/delete; use the live K8s/controller tools when those exist."
 
-const queryK8sSnapshotCallTimeout = 10 * time.Second
+const queryK8sSnapshotCallTimeout = 60 * time.Second
 
 type K8sSnapshotReader interface {
 	ListClusters(ctx context.Context, f k8sbiz.ListClustersFilter) ([]*k8smodel.Cluster, error)

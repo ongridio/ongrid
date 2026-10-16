@@ -48,7 +48,7 @@ type GetProcessListArgs struct {
 
 // processListCallTimeout caps how long a single dispatch may wait. Same
 // rationale as hostLoadCallTimeout.
-const processListCallTimeout = 15 * time.Second
+const processListCallTimeout = 60 * time.Second
 
 // executeGetProcessList resolves edge_name -> edge.ID and dispatches a
 // get_process_list reverse call through the frontier. TopN defaults to

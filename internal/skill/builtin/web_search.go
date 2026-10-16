@@ -240,7 +240,7 @@ func (s *webSearchSkill) Execute(ctx context.Context, params json.RawMessage) (j
 		braveURL = "https://api.search.brave.com/res/v1/web/search"
 	}
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		client = &http.Client{Timeout: 60 * time.Second}
 	}
 
 	var p webSearchParams

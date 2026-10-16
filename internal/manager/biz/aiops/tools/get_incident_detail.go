@@ -48,7 +48,7 @@ type IncidentEventRow struct {
 	OccurredAt  time.Time `json:"occurred_at"`
 }
 
-const incidentDetailCallTimeout = 10 * time.Second
+const incidentDetailCallTimeout = 60 * time.Second
 
 func (r *Registry) executeGetIncidentDetail(ctx context.Context, args json.RawMessage) (ExecuteResult, error) {
 	if r.alertUC == nil {

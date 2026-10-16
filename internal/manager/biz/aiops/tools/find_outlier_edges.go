@@ -50,7 +50,7 @@ type OutlierEdgeRow struct {
 	Metric   string  `json:"metric"`
 }
 
-const outlierCallTimeout = 30 * time.Second
+const outlierCallTimeout = 60 * time.Second
 
 // executeFindOutlierEdges builds a z-score PromQL of the shape
 //

@@ -156,7 +156,7 @@ func (HostNetnsInspect) Execute(ctx context.Context, params json.RawMessage) (js
 		includeRoutes = *p.IncludeRoutes
 	}
 
-	cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
 	var names []string

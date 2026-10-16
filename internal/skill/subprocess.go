@@ -24,8 +24,9 @@ const MaxSubprocessStdout = 16 * 1024 * 1024
 const MaxSubprocessStderrTail = 4 * 1024
 
 // DefaultSubprocessTimeout is the deadline applied when a manifest does
-// not specify timeout_seconds. 30s mirrors most LLM tool deadlines.
-const DefaultSubprocessTimeout = 30 * time.Second
+// not specify timeout_seconds. Allow longer diagnostic subprocesses while
+// retaining explicit manifest deadlines and caller cancellation.
+const DefaultSubprocessTimeout = 5 * time.Minute
 
 // SubprocessSkill runs an external executable per invocation. The skill
 // body lives in a separate process: ongrid pipes a JSON args blob to its

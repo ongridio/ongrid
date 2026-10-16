@@ -19,7 +19,7 @@ const (
 	ToolNameQueryNetworkDevices    = "query_network_devices"
 	ToolNameGetNetworkNeighbors    = "get_network_neighbors"
 	ToolNameQueryNetworkInterfaces = "query_network_interfaces"
-	networkInventoryCallTimeout    = 8 * time.Second
+	networkInventoryCallTimeout    = 60 * time.Second
 	networkInventoryDefaultLimit   = 50
 	networkInventoryMaxLimit       = 100
 )

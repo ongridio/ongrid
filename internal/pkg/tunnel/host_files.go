@@ -2,6 +2,15 @@ package tunnel
 
 import "time"
 
+// Filesystem scan budgets are shared by Manager and Edge so transport waits
+// outlast all four waves of a maximum-size batch plus the df snapshot.
+const (
+	HostFilesPerPathTimeout  = 5 * time.Minute
+	HostFilesBatchTimeout    = 4 * HostFilesPerPathTimeout
+	HostFilesMetadataTimeout = 30 * time.Second
+	HostFilesCallTimeout     = HostFilesBatchTimeout + HostFilesMetadataTimeout + 30*time.Second
+)
+
 // host_files RPC method names. These are the wire constants the manager
 // (Caller) and edge (RegisterHandler) use to address the three filesystem
 // inspection tools. The LLM calls these via the BaseTool

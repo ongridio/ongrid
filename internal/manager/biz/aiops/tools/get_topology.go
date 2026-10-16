@@ -48,7 +48,7 @@ type TopologyInfo struct {
 	ChannelCounter func(ctx context.Context) (int, error)
 }
 
-const topologyCallTimeout = 10 * time.Second
+const topologyCallTimeout = 60 * time.Second
 
 func (r *Registry) executeGetTopology(ctx context.Context, _ json.RawMessage) (ExecuteResult, error) {
 	callCtx, cancel := context.WithTimeout(ctx, topologyCallTimeout)
