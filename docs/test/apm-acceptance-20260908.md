@@ -1,5 +1,7 @@
 # APM 补齐验收：2026-09-08
 
+> 历史记录：2026-10-16 已移除演示应用及专用验收代码。本文中的演示部署、语言测试和 SDK 开销命令仅适用于[清理前版本](https://github.com/ongridio/ongrid/blob/0d5c341dfeb9ad6427798ccb67857cf9504fddd3/docs/test/apm-acceptance-20260908.md)，不再是当前维护入口；当前保留的验收见[运行手册](../runbooks/apm-service-performance.md)。
+
 范围：功能分支 `feat/application-performance-monitoring`，补齐多语言真实请求、实例发现、ES 日志关联、告警生命周期和本地容量/SDK 开销验证。保留官方 OpenTelemetry 接入和现有日志后端，不增加存储或自研探针。
 
 ## 可重复执行
@@ -12,7 +14,7 @@ make test-apm-acceptance
 
 后端变更另通过五个相关包的 `-race` 测试、`go vet`、Proto 生成检查；三个修改的前端文件通过 ESLint。Manager/前端 ARM64 生产镜像构建通过。前端测试仍输出已有 React act、Router future 和故障用例日志，不影响 52 项通过结果。
 
-环境要求与独立运行选项见 [语言示例](../../examples/apm-languages/README.md)。测试容器与卷退出清理，构建依赖缓存留在 `/tmp/ongrid-apm-languages`，报告数据留在 `output/apm-acceptance`。不要把集成测试的 Prometheus 地址指向业务环境。
+环境要求与独立运行选项见 [语言示例](https://github.com/ongridio/ongrid/blob/0d5c341dfeb9ad6427798ccb67857cf9504fddd3/examples/apm-languages/README.md)。测试容器与卷退出清理，构建依赖缓存留在 `/tmp/ongrid-apm-languages`，报告数据留在 `output/apm-acceptance`。不要把集成测试的 Prometheus 地址指向业务环境。
 
 ## 验收内容
 
@@ -68,7 +70,7 @@ VERSION=dev docker compose -p ongrid-native-deps \
 
 ## 九语言接入扩展（2026-09-08）
 
-新增 C# / .NET、PHP、C++、Rust、Ruby，复用官方 SDK 与现有 Edge → Prometheus / Tempo / Elasticsearch。Linux ARM64 镜像构建、锁定依赖和实际运行均验证；新增五语言当前只验收 HTTP，原四语言继续保留 gRPC 示例。详细能力边界见 [示例说明](../../examples/apm-languages/README.md)。
+新增 C# / .NET、PHP、C++、Rust、Ruby，复用官方 SDK 与现有 Edge → Prometheus / Tempo / Elasticsearch。Linux ARM64 镜像构建、锁定依赖和实际运行均验证；新增五语言当前只验收 HTTP，原四语言继续保留 gRPC 示例。详细能力边界见 [示例说明](https://github.com/ongridio/ongrid/blob/0d5c341dfeb9ad6427798ccb67857cf9504fddd3/examples/apm-languages/README.md)。
 
 执行 `scripts/apm-test/run-more-languages.sh`，隔离栈使用正式 Edge Collector 配置生成器。每种语言分别运行开启/关闭 Trace 采样的实例，每实例 40 次业务 HTTP 请求，包含 10 次 500、10 次约 80ms 慢请求；共 400 次。等待全部已采样请求进入 Tempo 后清理测试容器与卷。
 

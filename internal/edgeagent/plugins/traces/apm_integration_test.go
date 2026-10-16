@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// run.sh starts the actual rendered Collector before SDK acceptance requests.
+// run.sh starts the actual rendered Collector in the isolated acceptance stack.
 func TestAPMMetricsCollectorConfig(t *testing.T) {
 	path := os.Getenv("APM_TEST_COLLECTOR_CONFIG")
 	if path == "" {

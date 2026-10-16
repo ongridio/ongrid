@@ -1,5 +1,7 @@
 # Go 双版本错误 Trace 与源码定位验证
 
+> 历史记录：2026-10-16 已移除演示应用及专用验收代码。本文中的演示部署、语言测试和 SDK 开销命令仅适用于[清理前版本](https://github.com/ongridio/ongrid/blob/0d5c341dfeb9ad6427798ccb67857cf9504fddd3/docs/test/apm-go-version-analysis-20260909.md)，不再是当前维护入口；当前保留的验收见[运行手册](../runbooks/apm-service-performance.md)。
+
 日期：2026-09-09。范围：本机私有 apm-demo Git、Ubuntu 的两个 Go 演示实例、本地 Ongrid/Tempo/Prometheus/ES；不代表生产验收。
 
 ## 真实版本与构建
@@ -11,7 +13,7 @@
 
 两个 Tag 已发布到本机私有 `apm-demo` 仓库，没有移动原有 `1.0.0` / `1.1.0-demo` Tag。两个 Linux ARM64 二进制从各自确切提交交叉编译，版本和 Commit 经链接参数写入；`/build`、Trace Resource、JSON 响应和日志携带构建标识。Trace 与指标使用同一个 OTel Resource，优先使用编译版本覆盖环境声明。
 
-当前源码是第二版，含用于演示的地区匹配缺陷；不要用于真实支付或生产订单。所有目录、价格和授权都是内存演示数据，没有真实扣款。
+当时的源码是第二版，含用于演示的地区匹配缺陷；不要用于真实支付或生产订单。所有目录、价格和授权都是内存演示数据，没有真实扣款。
 
 ## 相同请求，不同错误
 
@@ -30,7 +32,7 @@
 
 发生时间：07:46:45 UTC / 15:46:45 上海时间。两条 Trace 均已从 Tempo 实际读取。Prometheus 按 `service_instance_id` / `service_version` 查得两条实例分组，与 Trace 和 `/build` 一致。Ongrid 已配置的日志工具各命中一条同 Trace 的 ERROR 日志。
 
-Go 服务现绑定 repo_id=1、目录 `examples/apm-go`、Tag 规则 `{version}`。首次 AI 分析从 Span 的完整构建 SHA 读取正确版本代码，分别命中折扣公式和地区匹配问题。首次回答存在引用行号偏差，且新版回答曾从聚合 500 比例相似错误推断缺陷在发布前已存在；这些不构成版本回归证据，需以两个 Tag 源码和具体操作对比为准。
+当时 Go 服务绑定 repo_id=1、目录 `examples/apm-go`、Tag 规则 `{version}`。首次 AI 分析从 Span 的完整构建 SHA 读取正确版本代码，分别命中折扣公式和地区匹配问题。首次回答存在引用行号偏差，且新版回答曾从聚合 500 比例相似错误推断缺陷在发布前已存在；这些不构成版本回归证据，需以两个 Tag 源码和具体操作对比为准。
 
 补充复核通过：两个分析会话分别实际使用 `refs/tags/2.0.0-demo` / `refs/tags/2.1.0-demo` 读取源码，工具响应 SHA 与上述构建 SHA 完全一致。旧版折扣引用纠正为 `pricing.go:19`，新版匹配引用为 `shipping.go:18`；两份回答均撤回无源码对比支持的缺陷引入时间断言。保存的工具结果见 `tag-tool-p1.txt` / `tag-tool-p2.txt`。
 

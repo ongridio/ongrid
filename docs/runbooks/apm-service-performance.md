@@ -18,38 +18,16 @@
 
 新增 bridge 监听前会检查端口可用性。端口冲突时仅跳过该地址上的对应协议并记录告警，localhost 和其他可用监听继续接收；下一轮配置检查会重试被跳过的端口。如果检查后发生端口竞争导致 Collector 启动失败，会先退回保留显式配置的 localhost 默认接收器，再在后续检查中恢复可用的 bridge 监听。
 
-在「接入管理」填写语言、目标地址、服务、业务命名空间和环境，复制配置。应用身份为 `(environment, service.namespace, service.name)`；service.namespace 不等同于 K8s namespace。缺失属性会进入“未设置”。接收端将旧 deployment.environment 补为 deployment.environment.name，已有规范属性优先。身份保持稳定，路由使用 `/orders/{id}`，不要使用带参数的原始 URL、用户 ID 或 SQL 作为指标标签。
+在服务列表打开目标服务的「接入配置」，选择语言和接入实例后复制配置；语言接入方式见弹窗中的 OpenTelemetry 官方文档。应用身份为 `(environment, service.namespace, service.name)`；service.namespace 不等同于 K8s namespace。缺失属性会进入“未设置”。接收端将旧 deployment.environment 补为 deployment.environment.name，已有规范属性优先。身份保持稳定，路由使用 `/orders/{id}`，不要使用带参数的原始 URL、用户 ID 或 SQL 作为指标标签。
 
 多副本部署须在 `OTEL_RESOURCE_ATTRIBUTES` 中额外设置每个实例唯一的 `service.instance.id`，例如由部署系统注入 Pod UID。不要把同一个固定示例值复制到所有副本；仅有 `device_id` 只能关联设备，无法区分同机的多个应用实例。用实际部署清单与观测列表逐项核对接入覆盖。
 
 - Java：下载官方 [Java Agent](https://opentelemetry.io/docs/zero-code/java/agent/)，将其路径传给 `-javaagent`。
 - Node.js：安装 `@opentelemetry/api` 和 `@opentelemetry/auto-instrumentations-node`，在框架加载前注册。页面命令针对 CommonJS；ESM 按[官方指引](https://github.com/open-telemetry/opentelemetry-js/blob/main/doc/esm-support.md)使用 loader。
 - Python：安装 `opentelemetry-distro`、`opentelemetry-exporter-otlp`，执行 `opentelemetry-bootstrap -a install`，使用 `opentelemetry-instrument` 启动应用。
-- Go：在现有项目初始化官方 SDK，HTTP/gRPC/DB 客户端分别接入对应 instrumentation。仓库中的 `examples/apm-go` 是最小可运行应用示例，不是新的 SDK。
+- Go：按 [官方接入文档](https://opentelemetry.io/docs/languages/go/instrumentation/) 在现有项目初始化 TracerProvider、MeterProvider 和 exporter，HTTP/gRPC/DB 客户端分别接入对应 instrumentation；仅设置环境变量不能替代 SDK 初始化。
 
-Go 示例，从仓库根目录执行：
-
-```bash
-export OTEL_SERVICE_NAME=apm-go-example
-export OTEL_RESOURCE_ATTRIBUTES='service.namespace=trade,deployment.environment.name=development'
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318
-export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
-export OTEL_METRICS_EXPORTER=otlp
-export OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=cumulative
-export OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION=explicit_bucket_histogram
-export OTEL_SEMCONV_STABILITY_OPT_IN=http,rpc
-export OTEL_METRIC_EXPORT_INTERVAL=5000
-# 示例支持 0..1；0 会关闭本地根 Span 采样，Metrics 继续记录。
-export OTEL_TRACES_SAMPLER_ARG=0
-export OTEL_LOGS_EXPORTER=none
-go run ./examples/apm-go
-# 另一个终端：
-curl http://127.0.0.1:18080/orders/42
-curl 'http://127.0.0.1:18080/orders/42?fail=1'
-curl 'http://127.0.0.1:18080/orders/42?slow=1'
-```
-
-示例将 JSON 日志写到标准输出。环境示例固定为 development/trade；在业务应用中应让日志和 Trace 使用同一资源配置。默认 ParentBased 采样会尊重上游 sampled 标志；即使本服务 AlwaysSample，也不能据此确认全链路无采样。示例同时初始化 TracerProvider、MeterProvider 和官方 HTTP/gRPC instrumentation；仅设置环境变量不能替代 Go SDK 初始化。gRPC 标准 Health 服务监听 `127.0.0.1:18081`，空 service 的 Check 成功，未知 service 返回 NotFound。Logs 仍走现有文件采集。
+应用日志、Metrics 和 Trace 使用相同的资源身份。ParentBased 采样会尊重上游 sampled 标志，不能仅凭本服务的采样设置确认全链路无采样。文件日志继续通过现有采集通道上报。仓库已移除演示应用，验证应使用实际接入的测试服务。
 
 ## 2. 已有埋点 / 双目标迁移
 
@@ -111,31 +89,31 @@ OTLP 日志使用标准 trace_id/span_id；文件或 CRI 日志可写单行 JSON
 
 四种格式分别查询 `_count` 和 `_bucket`。必需资源标签为 `service_name`，环境与命名空间使用 `deployment_environment_name`、`service_namespace`。HTTP/RPC 分别计算指标后按完整服务身份分组；只有请求速率和按请求量加权的错误率可以跨协议汇总，分位数保持协议独立。新旧格式不混合，不回退到 Trace 指标。不同语言版本可能尚未实现当前 RPC 约定，需检查实际导出名称；任意自定义 RPC 指标不能直接套用。
 
-已验证的语言兼容性（2026-09-08）：
+历史验证的语言兼容性（2026-09-08；对应演示应用已移除，不代表当前 SDK 版本的兼容性承诺）：
 
 | 接入组件 | HTTP 请求指标 | gRPC 请求指标 | HTTP/gRPC Trace 和 JSON 日志关联 |
 |---|---|---|---|
 | Go 官方 SDK 1.43 / instrumentation 0.68 | 支持 | 支持 | 支持 |
 | Java Agent 2.31.1 | 支持 | 支持 | 支持 |
-| Node auto-instrumentations 0.80.0 / grpc instrumentation 0.222.0 | 支持 | 注册示例 gRPC 拦截器，使用官方 Metrics API | 支持 |
+| Node auto-instrumentations 0.80.0 / grpc instrumentation 0.222.0 | 支持 | 当时通过自定义 gRPC 拦截器，使用官方 Metrics API | 支持 |
 | Python distro / instrumentation 0.65b0 / SDK 1.44.0 | 支持 | 额外注册官方 grpcio-observability 1.83.1 | 支持 |
-| .NET SDK / ASP.NET Core instrumentation 1.18.0 | 支持 | 本示例未验证 | HTTP 支持 |
-| PHP SDK 1.15.0 / Slim instrumentation 1.5.0 | 官方 Metrics API 显式记录 | 本示例未验证 | HTTP 支持 |
-| C++ SDK 1.28.0 | 官方 Metrics API 显式记录 | 本示例未验证 | HTTP 支持 |
-| Rust SDK 0.32.0（Beta） | 官方 Metrics API 显式记录 | 本示例未验证 | HTTP 支持 |
+| .NET SDK / ASP.NET Core instrumentation 1.18.0 | 支持 | 当时未验证 | HTTP 支持 |
+| PHP SDK 1.15.0 / Slim instrumentation 1.5.0 | 官方 Metrics API 显式记录 | 当时未验证 | HTTP 支持 |
+| C++ SDK 1.28.0 | 官方 Metrics API 显式记录 | 当时未验证 | HTTP 支持 |
+| Rust SDK 0.32.0（Beta） | 官方 Metrics API 显式记录 | 当时未验证 | HTTP 支持 |
 | Ruby SDK 1.13.0 / Sinatra instrumentation 0.30.0 | 未提供 | 未提供 | HTTP 支持 |
 
-Node.js/Python 的 gRPC 全量请求指标需按 [接入示例](../../examples/apm-languages/README.md#python--nodejs-grpc-指标接入) 注册拦截器或官方插件，不能只设置环境变量。Python 官方插件的 `grpc.server.call.duration` 经更新后的 Edge / Gateway Collector 映射为 `rpc.server.call.duration`，`grpc.method` / `grpc.status` 映射为 `rpc.method` / `rpc.response.status_code`，单位和桶保持不变；绕过该 Collector 的外部路径需同等映射。指标独立于 Trace 采样，未注册时仍只有 gRPC Trace。样例与锁定依赖在 `examples/apm-languages`，使用官方 SDK/自动埋点，不手工拼造 OTLP 数据。PHP 使用长驻 worker 保持累计计数；普通 PHP-FPM 需另行设计指标聚合，不能直接照搬。C++/Rust 需在请求处理处初始化并调用官方 SDK，环境变量本身不会自动埋点。
+上述 Node.js/Python 版本的 gRPC 全量请求指标需要显式注册指标拦截器或官方插件，不能只设置环境变量。Python 官方插件的 `grpc.server.call.duration` 经 Edge / Gateway Collector 映射为 `rpc.server.call.duration`，`grpc.method` / `grpc.status` 映射为 `rpc.method` / `rpc.response.status_code`，单位和桶保持不变；绕过该 Collector 的外部路径需同等映射。指标独立于 Trace 采样，未注册时仍只有 gRPC Trace。普通 PHP-FPM 需按进程生命周期设计指标聚合。C++/Rust 需在请求处理处初始化并调用官方 SDK，环境变量本身不会自动埋点。接入时按所用版本的官方文档核对。
 
 Ruby 的官方指标 SDK 尚未稳定。服务列表通过 SERVER Span 指标发现此类服务。没有原生请求指标时，HTTP 列表、概览、趋势和接口统计回退到 Tempo span-metrics，标注“Trace 样本”；RPS 是样本速率，错误率与延迟只覆盖已采样请求，不推算全量请求或采样比例。已有原生指标时始终优先使用，不叠加样本数据。仅使用包含 `http.request.method` 或 `http.method` 的 SERVER Span（两种属性同时存在也只计一次），排除 RPC、内部和消息消费 Span。发现需 Tempo span-metrics 处理器，并配置上述 HTTP 维度与 `telemetry.sdk.language`；新维度只影响后续 Span，旧数据不会自动补齐。若未启用该处理器，仍可直接在链路页面查询。请求级告警应先接入真实业务指标。
 
-新增五语言示例、能力边界、持续运行与隔离验收命令见 [示例说明](../../examples/apm-languages/README.md)。`scripts/apm-test/run-more-languages.sh` 检查开启/关闭采样实例各 40 个真实请求、25% 错误、慢请求、Histogram、Trace/JSON 日志关联与正式 APM 查询适配器。
+演示应用及其多语言、SDK 开销和固定实例验收已停止维护。历史结果保留在 [验收记录](../test/apm-acceptance-20260908.md)，不作为当前可执行入口。
 
 自动化验收：
 
 ```bash
-# 完整验收含多语言、ES、本地 Webhook、容量及埋点开销：
-# 需 Docker、Go、Node.js/npm、Python3、JDK17+；首次自动下载固定测试依赖。
+# APM 查询、日志关联、告警、容量、Profiling 及前端回归：
+# 需 Docker、Go、Node.js/npm；先安装 web 的锁定依赖。
 make test-apm-acceptance
 # 独立容器、仅本机端口；退出清理测试容器/卷。需 Docker + Go。
 scripts/apm-test/run.sh
@@ -164,7 +142,7 @@ Gauge 取结束时间前 5 分钟内的最近值；CPU、分配速率和 GC 使�
 
 来源：[JVM 官方指标语义](https://opentelemetry.io/docs/specs/semconv/runtime/jvm-metrics/)、[Prometheus Go collector](https://github.com/prometheus/client_golang/tree/main/prometheus/collectors)。上述查询结果名称是页面内部标识，不是要求用户额外上报的新指标。
 
-验证：`APM_TEST_PROMTOOL="$PWD/scripts/apm-test/promtool.sh" go test -race -run TestRuntimePromQL ./internal/manager/biz/apm` 检查真实 PromQL 的重置计数、内存池汇总和实例隔离。`APM_RUNTIME_PROMETHEUS=<Prometheus 基础地址> go test -race -v -run TestRuntimeMetricsIntegration ./internal/manager/biz/apm` 只读验证两副本 Go/Java 演示数据；Java 已停止时可用 `APM_RUNTIME_JAVA_END=<Unix 秒>` 明确选取历史窗口，不能把历史验收写成当前在线状态。
+验证：`APM_TEST_PROMTOOL="$PWD/scripts/apm-test/promtool.sh" go test -race -run TestRuntimePromQL ./internal/manager/biz/apm` 检查真实 PromQL 的重置计数、内存池汇总和实例隔离。运行时端到端验收需使用实际测试服务的指标，核对单位、实例和版本筛选；不能把历史演示验收写成当前在线状态。
 
 实例页合并所选时段内原生请求指标与 Trace 样本中的实例身份，因此关闭 Trace 采样的实例仍可出现。缺少实例 ID 时只使用实际上报的设备/Pod 字段，不按同名补猜；这不是部署实例清单，全部实例是否完成接入还需与业务部署清单核对。
 
@@ -207,7 +185,7 @@ Trace 详情按完整 Span 分页，默认 50 条、最多 100 条，同时限�
 
 开发 Compose 使用 `ongrid_repos` 卷保存 `/var/lib/ongrid/repos`。从未挂载仓库目录的旧容器升级时，先备份已有克隆，或升级后重新同步目标 Tag；数据库里的仓库登记和服务绑定不会自动重建 Git 对象。
 
-2026-09-09 本地验收：24 项前端回归、TypeScript/Vite 构建和相关 Go `-race` 测试通过；凭证折叠状态刷新显示真实数量，仓库卡片短名称及绑定弹窗经明暗主题截图检查。Java 服务保存绑定后刷新与 Manager 重建仍可读取；持久化卷中的目标 Tag 在容器重建后保留。只读 AI 会话 `56695614-d3f2-4e5b-add4-0fc494959192` 实际通过 `grep_source` / `read_source` 返回提交 `9cf93884fa5d2f851dec73526bf5774c0e7d3731`，定位 `examples/apm-languages/java/src/main/java/App.java:33` 的显式 500 分支。首次源码读取因旧部署未持久化克隆失败，补充卷并同步后续查成功；日志和运行时指标缺口仍按证据报告，本验收不代表生产容量或完整遥测闭环。
+2026-09-09 本地验收：24 项前端回归、TypeScript/Vite 构建和相关 Go `-race` 测试通过；凭证折叠状态刷新显示真实数量，仓库卡片短名称及绑定弹窗经明暗主题截图检查。Java 服务保存绑定后刷新与 Manager 重建仍可读取；持久化卷中的目标 Tag 在容器重建后保留。只读 AI 会话 `56695614-d3f2-4e5b-add4-0fc494959192` 实际通过 `grep_source` / `read_source` 返回提交 `9cf93884fa5d2f851dec73526bf5774c0e7d3731`，定位当时 Java 演示应用 `App.java:33` 的显式 500 分支。首次源码读取因旧部署未持久化克隆失败，补充卷并同步后续查成功；日志和运行时指标缺口仍按证据报告，本验收不代表生产容量或完整遥测闭环。
 
 ## 接入诊断与日志范围
 
@@ -217,7 +195,7 @@ Trace 详情按完整 Span 分页，默认 50 条、最多 100 条，同时限�
 
 服务日志已支持 `service_version` / `instance_id` 精确筛选，对应 `service.version` / `service.instance.id`。Loki 使用结构化元数据，Elasticsearch 使用 OTel 资源属性；缺失字段不匹配非空筛选。文件日志需要更新 Edge Collector 配置，将 JSON 中这两个字段提升为资源属性；历史日志不会被回填。筛选无结果时，应先检查实际日志字段。
 
-Java Agent 2.31.1 的 RPC 秒级桶配置见 [语言示例](../../examples/apm-languages/README.md#java-rpc-延迟桶)。扩展随应用重启生效；已有应用需主动更新，不能只更新 Manager。回滚时移除 `OTEL_JAVAAGENT_EXTENSIONS` 或对应 JVM 参数；界面与 Manager 可回退到上一镜像，新字段均为向后兼容的可选字段。
+Java RPC 延迟桶由应用所用 Agent / SDK 的 View 配置决定。修改已有扩展后需重启应用并重新验证实际导出的桶；只更新 Manager 不会改变应用埋点。仓库不再分发演示用 Java 扩展。
 
 配置文件接入见 [应用配置文件指南](../guides/apm-configuration-files.md)，包含配置读取者、覆盖优先级及容器挂载说明。
 

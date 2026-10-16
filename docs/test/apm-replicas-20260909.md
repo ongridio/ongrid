@@ -1,5 +1,7 @@
 # APM 双实例与资源指标本地验收（2026-09-09）
 
+> 历史记录：2026-10-16 已移除演示应用及专用验收代码。本文中的演示部署、语言测试和 SDK 开销命令仅适用于[清理前版本](https://github.com/ongridio/ongrid/blob/0d5c341dfeb9ad6427798ccb67857cf9504fddd3/docs/test/apm-replicas-20260909.md)，不再是当前维护入口；当前保留的验收见[运行手册](../runbooks/apm-service-performance.md)。
+
 Ubuntu Edge（设备 650）持续运行 Go、Java、Python 各两个实例；其他语言演示容器已停止，历史观测数据保留。版本为 `1.0.0` / `1.1.0-demo`，实例为 `ubuntu-<language>-1` / `ubuntu-<language>-2`。两个版本来自同一示例构建，分别施加约 5% / 20% 失败的真实请求流量。
 
 ## 已验证

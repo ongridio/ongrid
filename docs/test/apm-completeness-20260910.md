@@ -1,5 +1,7 @@
 # APM 接入完整性、Java RPC 桶与日志范围验收
 
+> 历史记录：2026-10-16 已移除演示应用及专用验收代码。本文中的演示部署、语言测试和 SDK 开销命令仅适用于[清理前版本](https://github.com/ongridio/ongrid/blob/0d5c341dfeb9ad6427798ccb67857cf9504fddd3/docs/test/apm-completeness-20260910.md)，不再是当前维护入口；当前保留的验收见[运行手册](../runbooks/apm-service-performance.md)。
+
 2026-09-10，本地隔离验收。范围为 Java RPC 延迟桶、接入诊断，以及服务日志版本/实例精确筛选。
 
 ## 实现与结果

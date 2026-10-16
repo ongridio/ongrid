@@ -40,7 +40,7 @@ APM 请求、错误率、延迟和运行时查询排除此原始抓取来源，�
 OBI 保持 `exclude_otel_instrumented_services=true`；其 OTel 导出检测不等同于
 识别任意 Prometheus `/metrics` 与 OBI 的指标重叠。
 
-验证示例位于 [examples/prometheus-go](../../examples/prometheus-go/README.md)。
+验收时使用带 Prometheus 抓取注解的测试工作负载，分别验证 Namespace、工作负载和空选择的采集范围，并单独检查原生指标与 OBI 指标；仓库不再维护演示应用。
 设置 `ONGRID_TEST_OTELCOL_BINARY` 为随 Edge 分发的 Collector 路径后，运行
 `go test -race ./cmd/ongrid-edge -run TestPodMetricsPreservesTargetInfo`，
 可验证真实抓取和 remote_write 转发后的元数据与关联标签。

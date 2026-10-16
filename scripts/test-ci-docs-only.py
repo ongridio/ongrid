@@ -14,6 +14,7 @@ docs_only = runpy.run_path(str(script))["docs_only"]
 assert docs_only(["AGENTS.md", "README_zh.md", "docs/design/guide.md"])
 assert docs_only(["CHANGELOG.md", "ROADMAP.zh-CN.md", "LICENSE", "docs/guide.rst"])
 assert docs_only(["web/README.md", "deploy/install/README.md", "api/README.md", "web/e2e/README.md"])
+assert docs_only(["docs/guides/apm-configuration-files.md"])
 assert docs_only(["docs/assets/demo.gif", "docs/assets/integrations/openai.svg", "docs/assets/guide.pdf"])
 assert docs_only([".github/pull_request_template.md", ".github/PULL_REQUEST_TEMPLATE/feature.md"])
 assert docs_only([".github/ISSUE_TEMPLATE/legacy.md"])
@@ -21,7 +22,7 @@ assert docs_only([".github/ISSUE_TEMPLATE/config.yml", ".github/ISSUE_TEMPLATE/b
 for paths in [[], ["main.go"], ["Makefile"], [".github/workflows/ci.yml"],
               ["internal/manager/biz/knowledge/builtin_vault/guide.md"],
               ["internal/manager/biz/aiops/chatruntime/testdata/agent_registry/multi/README.md"],
-              ["docs/guides/apm-configuration-files.md"], ["agents/reviewer.md"], ["skills/bash/SKILL.md"],
+              ["examples/apm-languages/README.md"], ["agents/reviewer.md"], ["skills/bash/SKILL.md"],
               ["web/src/guide.md"], ["web/public/logo.svg"], ["new-package/README.md"],
               ["docs/config.yml"], ["docs/assets/app.js"], ["docs/example.go"],
               ["go.sum"], ["web/package-lock.json"], ["deploy/install/install.sh"], ["VERSION"],
