@@ -522,3 +522,12 @@ func TestValidateUploadedImageWebPDimensions(t *testing.T) {
 // string reaching the handler is forwarded to the service layer (which
 // returns ErrNotFound on miss). The previous test relied on numeric
 // "0" being a sentinel invalid id, which no longer makes sense.
+
+func TestSessionDTO_RuntimeVersion(t *testing.T) {
+	for _, version := range []string{"", "v2", "v3"} {
+		got := toSessionDTO(&model.Session{ID: "s", RuntimeVersion: version})
+		if got.RuntimeVersion != version {
+			t.Fatalf("runtime=%q, want %q", got.RuntimeVersion, version)
+		}
+	}
+}

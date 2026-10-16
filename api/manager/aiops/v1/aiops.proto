@@ -56,6 +56,8 @@ message ChatSession {
     string provider = 8 [json_name = "provider"];
     string model = 9 [json_name = "model"];
     APMSourceScope apm_source = 10 [json_name = "apm_source"];
+    // Server-assigned execution version. Empty for unclassified historical sessions.
+    string runtime_version = 11 [json_name = "runtime_version"];
 }
 
 // ToolCall 一次 LLM 发起的工具调用（OpenAI tool_calls 的投影）。

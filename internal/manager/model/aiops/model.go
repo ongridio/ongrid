@@ -68,6 +68,10 @@ type APMSourceScope struct {
 }
 
 type Session struct {
+	// RuntimeVersion pins execution policy. Empty means historical provenance
+	// has not been classified; migrations must not guess v2 versus v3.
+	RuntimeVersion string `gorm:"size:16;column:runtime_version"`
+
 	APMSource *APMSourceScope `gorm:"serializer:json;type:text;column:apm_source"`
 
 	ID        string  `gorm:"primaryKey;type:char(36);column:id"`

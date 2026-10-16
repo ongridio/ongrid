@@ -105,6 +105,10 @@ func (rt *Runtime) SpawnWorker(ctx context.Context, req SpawnRequest) (*Worker, 
 	if rt == nil {
 		return nil, errors.New("chatruntime: nil runtime")
 	}
+	if version := contract.VersionFromContext(ctx); version != "" && version != contract.V3 {
+		return nil, fmt.Errorf("chatruntime: worker runtime mismatch")
+	}
+	ctx = contract.WithVersion(ctx, contract.V3)
 	if rt.cfg.ChatModel == nil {
 		return nil, errors.New("chatruntime: ChatModel is required")
 	}
@@ -133,6 +137,9 @@ func (rt *Runtime) SpawnWorker(ctx context.Context, req SpawnRequest) (*Worker, 
 	if req.ParentSession != "" && rt.cfg.Sessions != nil {
 		parentSess, err := rt.cfg.Sessions.GetSession(ctx, req.ParentSession)
 		if err == nil && parentSess != nil {
+			if parentSess.RuntimeVersion != "" && parentSess.RuntimeVersion != string(contract.V3) {
+				return nil, fmt.Errorf("chatruntime: parent runtime mismatch")
+			}
 			if parentSess.ParentSessionID != nil && *parentSess.ParentSessionID != "" {
 				return nil, fmt.Errorf("chatruntime: delegation depth exceeded for parent session %q", req.ParentSession)
 			}
@@ -174,6 +181,7 @@ func (rt *Runtime) SpawnWorker(ctx context.Context, req SpawnRequest) (*Worker, 
 			effectiveOwner = req.OwnerUserID
 		}
 		row := &aiopsmodel.Session{
+			RuntimeVersion:  string(contract.V3),
 			ID:              sessID,
 			APMSource:       sourceScope,
 			UserID:          effectiveOwner,

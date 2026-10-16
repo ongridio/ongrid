@@ -49,6 +49,7 @@ export type ChatMessage = {
 };
 
 export type ChatSession = {
+  runtime_version?: string;
  apm_source?: { trace_id: string; repo_id: string; source_directory: string; revision: string; commit_sha: string; error?: string };
   id: string;
   user_id: number;

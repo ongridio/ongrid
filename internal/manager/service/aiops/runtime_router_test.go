@@ -66,7 +66,7 @@ func TestRuntimeRouterPreservesRequestEventsAndResult(t *testing.T) {
 		}
 		return reply, nil
 	}}
-	router, err := NewRuntimeRouter(contract.V3, map[contract.Version]RuntimeEngine{contract.V3: engine})
+	router, err := NewRuntimeRouter(nil, contract.V3, map[contract.Version]RuntimeEngine{contract.V3: engine})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestRuntimeRouterRejectsUnavailableVersionWithoutFallback(t *testing.T) {
 	var calls atomic.Int32
 	engine := &routerEngine{handle: func(context.Context, *contract.Request) (*contract.Reply, error) { calls.Add(1); return nil, nil }}
 	registry := map[contract.Version]RuntimeEngine{contract.V3: engine}
-	router, err := NewRuntimeRouter(contract.V3, registry)
+	router, err := NewRuntimeRouter(nil, contract.V3, registry)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestRuntimeRouterRejectsUnavailableVersionWithoutFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, registry := range []map[contract.Version]RuntimeEngine{nil, {contract.V3: nil}, {contract.V3: (*routerEngine)(nil)}, {"v99": engine}} {
-		if _, err := NewRuntimeRouter(contract.V3, registry); err == nil {
+		if _, err := NewRuntimeRouter(nil, contract.V3, registry); err == nil {
 			t.Fatal("invalid registry accepted")
 		}
 	}
@@ -125,7 +125,7 @@ func TestRuntimeRouterRoutesWorkerControlToOwner(t *testing.T) {
 		stops.Add(1)
 		return nil
 	}
-	router, err := NewRuntimeRouter(contract.V3, map[contract.Version]RuntimeEngine{contract.V2: first, contract.V3: second})
+	router, err := NewRuntimeRouter(nil, contract.V3, map[contract.Version]RuntimeEngine{contract.V2: first, contract.V3: second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,7 @@ func TestRuntimeRouterPreservesWorkerSpawnAndErrors(t *testing.T) {
 		}
 		return want, nil
 	}, handle: func(context.Context, *contract.Request) (*contract.Reply, error) { return nil, sentinel }}
-	router, err := NewRuntimeRouter(contract.V3, map[contract.Version]RuntimeEngine{contract.V3: engine})
+	router, err := NewRuntimeRouter(nil, contract.V3, map[contract.Version]RuntimeEngine{contract.V3: engine})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestRuntimeRouterPreservesWorkerSpawnAndErrors(t *testing.T) {
 
 func TestRuntimeRouterRejectsAmbiguousWorkerIdentity(t *testing.T) {
 	engine := func() *routerEngine { return &routerEngine{worker: &contract.Worker{ID: "collision"}} }
-	router, err := NewRuntimeRouter(contract.V3, map[contract.Version]RuntimeEngine{contract.V2: engine(), contract.V3: engine()})
+	router, err := NewRuntimeRouter(nil, contract.V3, map[contract.Version]RuntimeEngine{contract.V2: engine(), contract.V3: engine()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,5 +209,84 @@ func TestRuntimeRouterRejectsAmbiguousWorkerIdentity(t *testing.T) {
 	}
 	if err := router.StopWorker(t.Context(), "collision"); err == nil {
 		t.Fatal("ambiguous worker controlled")
+	}
+}
+
+func TestRuntimeRouter_DurableSessionVersion(t *testing.T) {
+	for _, tc := range []struct {
+		name, stored string
+		requested    contract.Version
+		want         contract.Version
+		fail         bool
+	}{
+		{name: "pinned overrides default", stored: "v2", want: contract.V2},
+		{name: "historical retains current default", want: contract.V3},
+		{name: "matching context", stored: "v2", requested: contract.V2, want: contract.V2},
+		{name: "conflict rejected", stored: "v2", requested: contract.V3, fail: true},
+		{name: "unavailable rejected", stored: "v1", fail: true},
+		{name: "unknown rejected", stored: "v99", fail: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &memSessions{sessions: map[string]*model.Session{"s": {ID: "s", RuntimeVersion: tc.stored}}}
+			calls := 0
+			engine := func(version contract.Version) *routerEngine {
+				return &routerEngine{
+					handle: func(ctx context.Context, _ *contract.Request) (*contract.Reply, error) {
+						calls++
+						if version != tc.want || contract.VersionFromContext(ctx) != version {
+							t.Fatalf("wrong engine: %s", version)
+						}
+						return &contract.Reply{}, nil
+					},
+					spawn: func(ctx context.Context, _ contract.SpawnRequest) (*contract.Worker, error) {
+						calls++
+						if version != tc.want || contract.VersionFromContext(ctx) != version {
+							t.Fatalf("wrong worker engine: %s", version)
+						}
+						return &contract.Worker{ID: "w"}, nil
+					},
+				}
+			}
+			router, err := NewRuntimeRouter(repo, contract.V3, map[contract.Version]RuntimeEngine{contract.V2: engine(contract.V2), contract.V3: engine(contract.V3)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := contract.WithVersion(context.Background(), tc.requested)
+			_, err = router.Handle(ctx, &contract.Request{SessionID: "s"})
+			if (err != nil) != tc.fail {
+				t.Fatalf("Handle error=%v", err)
+			}
+			_, err = router.SpawnWorker(ctx, contract.SpawnRequest{ParentSession: "s"})
+			if (err != nil) != tc.fail {
+				t.Fatalf("SpawnWorker error=%v", err)
+			}
+			if tc.fail && calls != 0 {
+				t.Fatal("rejected request executed")
+			}
+			if !tc.fail && calls != 2 {
+				t.Fatalf("calls=%d", calls)
+			}
+			_, err = router.Handle(ctx, &contract.Request{SessionID: "missing"})
+			if !errors.Is(err, errs.ErrNotFound) {
+				t.Fatalf("missing session=%v", err)
+			}
+		})
+	}
+}
+
+func TestCreateSession_PinsValidatedRuntimeDefault(t *testing.T) {
+	repo := &memSessions{sessions: map[string]*model.Session{}}
+	router, err := NewRuntimeRouter(repo, contract.V2, map[contract.Version]RuntimeEngine{contract.V2: &routerEngine{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := &Service{sessions: repo, runtime: router}
+	row, err := svc.CreateSession(context.Background(), Caller{UserID: 7}, CreateSessionInput{Title: "pinned"})
+	if err != nil || row.RuntimeVersion != "v2" {
+		t.Fatalf("create=%+v %v", row, err)
+	}
+	_, err = svc.CreateSession(contract.WithVersion(context.Background(), contract.V3), Caller{UserID: 7}, CreateSessionInput{})
+	if !errors.Is(err, errs.ErrNotWiredYet) {
+		t.Fatalf("unavailable version=%v", err)
 	}
 }

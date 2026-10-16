@@ -201,7 +201,20 @@ func (s *Service) CreateSession(ctx context.Context, caller Caller, in CreateSes
 	if (provider == "") != (selectedModel == "") {
 		return nil, fmt.Errorf("%w: provider and model must be supplied together", errs.ErrInvalid)
 	}
+	// The current direct-runtime compatibility path is v3. Production uses
+	// the router's validated default; no caller-facing version override yet.
+	version := chatruntime.V3
+	if selector, ok := s.runtime.(interface {
+		SessionVersion(context.Context) (chatruntime.Version, error)
+	}); ok {
+		var err error
+		version, err = selector.SessionVersion(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
 	sess := &model.Session{
+		RuntimeVersion:    string(version),
 		UserID:            caller.UserID,
 		Title:             title,
 		RelatedIncidentID: in.RelatedIncidentID,

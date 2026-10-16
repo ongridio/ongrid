@@ -1074,6 +1074,9 @@ func createChatSession(t *testing.T, env *testenv.Env, token, title string) stri
 	if err != nil || status != http.StatusCreated {
 		t.Fatalf("create chat session: status=%d body=%v err=%v", status, body, err)
 	}
+	if body["runtime_version"] != "v3" {
+		t.Fatalf("new session runtime = %v, want v3", body["runtime_version"])
+	}
 	id, _ := body["id"].(string)
 	if id == "" {
 		t.Fatalf("create chat session returned empty id: %v", body)

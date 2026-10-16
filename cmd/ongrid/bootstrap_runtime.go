@@ -52,7 +52,7 @@ func bootstrapRuntime(rootCtx context.Context, cfg *config.Config, log *slog.Log
 		if rterr != nil {
 			log.Error("aiops runtime unavailable", slog.Any("err", rterr))
 		} else {
-			router, err := managersvcaiops.NewRuntimeRouter(contract.V3, map[contract.Version]managersvcaiops.RuntimeEngine{contract.V3: rt})
+			router, err := managersvcaiops.NewRuntimeRouter(aiops.aiopsRepo, contract.V3, map[contract.Version]managersvcaiops.RuntimeEngine{contract.V3: rt})
 			if err != nil {
 				log.Error("aiops runtime routing unavailable", slog.Any("err", err))
 			} else {

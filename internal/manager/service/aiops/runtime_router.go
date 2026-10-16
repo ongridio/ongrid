@@ -6,6 +6,7 @@ import (
 	"reflect"
 
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/contract"
+	model "github.com/ongridio/ongrid/internal/manager/model/aiops"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
 
@@ -24,15 +25,21 @@ type RuntimeEngine interface {
 	CountWorkersByStatus() (running, pending int)
 }
 
+// RuntimeSessionReader supplies durable execution ownership to the router.
+type RuntimeSessionReader interface {
+	GetSession(context.Context, string) (*model.Session, error)
+}
+
 // RuntimeRouter owns execution dispatch, never tool or persona policy.
-// The engine registry and default are immutable. A live default-setting change
-// will require durable session binding before it can be exposed to operators.
+// Its registry and default are immutable; historical-session classification
+// is still required before exposing a live default-version setting.
 type RuntimeRouter struct {
+	sessions       RuntimeSessionReader
 	engines        map[contract.Version]RuntimeEngine
 	defaultVersion contract.Version
 }
 
-func NewRuntimeRouter(defaultVersion contract.Version, engines map[contract.Version]RuntimeEngine) (*RuntimeRouter, error) {
+func NewRuntimeRouter(sessions RuntimeSessionReader, defaultVersion contract.Version, engines map[contract.Version]RuntimeEngine) (*RuntimeRouter, error) {
 	copy := make(map[contract.Version]RuntimeEngine, len(engines))
 	for version, engine := range engines {
 		if version != contract.V1 && version != contract.V2 && version != contract.V3 {
@@ -46,7 +53,7 @@ func NewRuntimeRouter(defaultVersion contract.Version, engines map[contract.Vers
 	if copy[defaultVersion] == nil {
 		return nil, fmt.Errorf("%w: default runtime %q unavailable", errs.ErrNotWiredYet, defaultVersion)
 	}
-	return &RuntimeRouter{engines: copy, defaultVersion: defaultVersion}, nil
+	return &RuntimeRouter{sessions: sessions, engines: copy, defaultVersion: defaultVersion}, nil
 }
 
 func (r *RuntimeRouter) resolve(ctx context.Context) (context.Context, RuntimeEngine, contract.Version, error) {
@@ -64,9 +71,45 @@ func (r *RuntimeRouter) resolve(ctx context.Context) (context.Context, RuntimeEn
 	return contract.WithVersion(ctx, version), engine, version, nil
 }
 
+// SessionVersion resolves new-session policy once, before persistence.
+func (r *RuntimeRouter) SessionVersion(ctx context.Context) (contract.Version, error) {
+	_, _, version, err := r.resolve(ctx)
+	return version, err
+}
+
+// sessionContext honors durable ownership. Empty historical values retain
+// the current single-version behavior until a provenance migration is ready.
+func (r *RuntimeRouter) sessionContext(ctx context.Context, id string) (context.Context, error) {
+	if r == nil {
+		return ctx, errs.ErrNotWiredYet
+	}
+	if r.sessions == nil || id == "" {
+		return ctx, nil
+	}
+	session, err := r.sessions.GetSession(ctx, id)
+	if err != nil {
+		return ctx, fmt.Errorf("runtime session: %w", err)
+	}
+	if session == nil {
+		return ctx, errs.ErrNotFound
+	}
+	if session.RuntimeVersion == "" {
+		return ctx, nil
+	}
+	version := contract.Version(session.RuntimeVersion)
+	if requested := contract.VersionFromContext(ctx); requested != "" && requested != version {
+		return ctx, fmt.Errorf("%w: session runtime mismatch", errs.ErrInvalid)
+	}
+	return contract.WithVersion(ctx, version), nil
+}
+
 func (r *RuntimeRouter) Handle(ctx context.Context, req *contract.Request) (*contract.Reply, error) {
 	if req == nil {
 		return nil, fmt.Errorf("%w: request required", errs.ErrInvalid)
+	}
+	ctx, err := r.sessionContext(ctx, req.SessionID)
+	if err != nil {
+		return nil, err
 	}
 	ctx, engine, _, err := r.resolve(ctx)
 	if err != nil {
@@ -76,6 +119,10 @@ func (r *RuntimeRouter) Handle(ctx context.Context, req *contract.Request) (*con
 }
 
 func (r *RuntimeRouter) SpawnWorker(ctx context.Context, req contract.SpawnRequest) (*contract.Worker, error) {
+	ctx, err := r.sessionContext(ctx, req.ParentSession)
+	if err != nil {
+		return nil, err
+	}
 	ctx, engine, version, err := r.resolve(ctx)
 	if err != nil {
 		return nil, err

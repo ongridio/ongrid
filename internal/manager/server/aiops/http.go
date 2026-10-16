@@ -327,6 +327,7 @@ type createSessionReq struct {
 }
 
 type sessionDTO struct {
+	RuntimeVersion    string                `json:"runtime_version,omitempty"`
 	APMSource         *model.APMSourceScope `json:"apm_source,omitempty"`
 	ID                string                `json:"id"`
 	UserID            uint64                `json:"user_id"`
@@ -1246,6 +1247,7 @@ func (h *Handler) listModels(w http.ResponseWriter, r *http.Request) {
 
 func toSessionDTO(s *model.Session) sessionDTO {
 	out := sessionDTO{
+		RuntimeVersion:    s.RuntimeVersion,
 		ID:                s.ID,
 		UserID:            s.UserID,
 		Title:             s.Title,

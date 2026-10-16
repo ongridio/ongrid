@@ -52,3 +52,39 @@ func TestAPMSourceScopeSurvivesReload(t *testing.T) {
 		t.Fatalf("reload: %+v %v", got, err)
 	}
 }
+
+func TestSessionRuntimeVersion_PersistsWithoutChangingHistoricalRows(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	legacy := &model.Session{UserID: 1, Title: "historical"}
+	if err := repo.CreateSession(ctx, legacy); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a pre-feature database, then run the real migration twice.
+	if err := repo.db.Migrator().DropColumn(&model.Session{}, "RuntimeVersion"); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := Migrate(repo.db); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old, err := repo.GetSession(ctx, legacy.ID)
+	if err != nil || old.RuntimeVersion != "" {
+		t.Fatalf("historical version fabricated: %+v %v", old, err)
+	}
+	pinned := &model.Session{UserID: 1, Title: "new", RuntimeVersion: "v3"}
+	if err := repo.CreateSession(ctx, pinned); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateSessionModel(ctx, pinned.ID, "custom", "model"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.RenameSession(ctx, pinned.ID, "renamed"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := NewSessionRepoWithAttachmentRoot(repo.db, t.TempDir()).GetSession(ctx, pinned.ID)
+	if err != nil || got.RuntimeVersion != "v3" {
+		t.Fatalf("runtime pin lost: %+v %v", got, err)
+	}
+}

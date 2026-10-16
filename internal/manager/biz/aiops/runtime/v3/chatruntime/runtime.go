@@ -368,6 +368,13 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (result *Reply, ret
 		// ErrForbidden) so non-owners can't fingerprint sessions.
 		return nil, errs.ErrNotFound
 	}
+	if version := contract.VersionFromContext(ctx); version != "" && version != contract.V3 {
+		return nil, fmt.Errorf("%w: request runtime mismatch", errs.ErrInvalid)
+	}
+	if sess.RuntimeVersion != "" && sess.RuntimeVersion != string(contract.V3) {
+		return nil, fmt.Errorf("%w: session runtime mismatch", errs.ErrInvalid)
+	}
+	ctx = contract.WithVersion(ctx, contract.V3)
 	ctx, span := startAgentSpan(ctx, sess, "default")
 	tracing.RecordAgentContent(span, "input.value", req.UserText)
 	var runErr error
