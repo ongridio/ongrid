@@ -1,6 +1,6 @@
 # RFC-005：统一 Agent runtime 与可执行工具目录
 
-- 状态：实施中（用户已确认分阶段方案）
+- 状态：代码与自动化验证持续收尾；草稿 PR，禁止自动合并/部署
 - 日期：2026-10-14
 - 关联：#499、#498、ADR-035
 - 基线：v0.18.1 / a6bc1039
@@ -58,7 +58,7 @@ Graph 默认运行路径与旧循环维护独立工具列表，安全 Skill 注�
 - `make test-agent-runtime`：在本地已有 Linux/amd64 构建镜像中通过，Go 1.25.12，启用 `-race`；覆盖 AIOps 全部子包、Service、HTTP、IM、Skill 和 Manager 装配。
 - 新增确定性用例：真实 Graph 调用的联网开关、同步/后台 worker 权限继承、动态工具更新并发与旧引用拒绝、真实外部 subprocess Skill 执行、工作流文件工具目录与执行器一致性。
 - `make build-ongrid`、`git diff --check` 通过。
-- `make arch-lint` 未完成：本机缺少 `go-arch-lint`；目标虽打印 skipping，后续 recipe 仍调用缺失命令。未改动该既有行为，合并前需在已安装工具的环境补验。
+- 首轮架构检查因工具缺失未完成；后续补装后暴露配置与依赖问题，现已修复，见下方收尾记录。
 - 尚未执行生产 legacy 配置盘点、真实模型/MCP 集成冒烟、金丝雀升级与镜像回滚演练；这些是发布验收项，不能用单元测试替代。
 - 旧 Registry 中供审批兼容及既有测试使用的闭包适配器暂留；生产聊天只调用 Graph，告警初查也已改用 BaseTool。退役旧循环不等于删除历史审批协议。
 
@@ -68,7 +68,43 @@ Graph 默认运行路径与旧循环维护独立工具列表，安全 Skill 注�
 - 修复安全 Skill schema 合并丢失原有 `required` 字段；覆盖全部内置 host-scope safe skills。
 - 工具注册整批校验名称唯一性、来源前缀以及目录/执行列表一致性；失败保留原有工具与目录。ToolSearch 读取本回合对应执行版本的完整 schema，不混用动态刷新的新参数。
 - 显式空工具视图清除继承的父回合权限列表。
-- 上述新增用例及 `make test-agent-runtime` 的 Linux race 回归通过。首版提交的 GitHub CI 已通过全仓 build/vet/race、部署清单及前端检查；补充提交需重新检查 CI。
+- 上述新增用例及 `make test-agent-runtime` 的 Linux race 回归通过。`be50baba` 的 GitHub CI 已通过全仓 build/vet/race、部署清单及前端检查；后续架构修复提交仍须重新检查 CI。
 - 本地全仓测试尝试未通过：只读模块缓存缺少 APM 示例依赖，且 Docker amd64 仿真环境的 autoapm 进程发现测试失败。不能把本地全仓测试记为通过；原生 Ubuntu CI 的同项已通过。
 - 已在临时目录安装 `go-arch-lint v1.19.0` 并执行 `make arch-lint`：检查被原有配置错误阻断（不存在的 `internal/edgeagent/data/**`，以及 `shared_pkg`/`api` 的空依赖声明）。`.go-arch-lint.yml` 与基线相同；这替代此前“未安装工具”的原因，仍不能声称架构 lint 通过。
 - 告警初查使用启动时的 BaseTool 快照，避免后台任务与后续 Registry 装配并发读写；Manager 装配包 `go test -race ./cmd/ongrid` 通过。
+
+
+## 架构与验收收尾（2026-10-16）
+
+- 修复 `.go-arch-lint.yml`：补齐共享 Skill、Edge 运行时、示例和测试装配分类；删除不存在的 Edge data 目录；显式允许同层内部引用。Manager / Edge 命令分别装配，不能互相 import 对方业务域。
+- 生产 import 边界保留：三个业务域相互隔离、共享包不依赖业务、Service/Biz 不依赖 Data。包内 `_test.go` 允许组装存储 fixture，集成测试归独立测试组件；第三方库版本/漏洞由依赖检查管理。
+- `deepScan` 的实现类型流分析会将合法的消费方接口注入判为反向依赖，因此关闭该分析，使用 import 检查；不是给生产跨域依赖加白名单。新增 11 个正反向用例验证规则能拒绝越界，包括命令入口、共享包、业务层和服务层。
+- 修复实际逆向依赖：成员查询 DTO 与审计过滤类型下移到模型层；跨域审计事件、枚举和请求槽移入 `internal/pkg/auditctx`；保留旧 Manager 类型别名/函数封装以兼容调用方。IM 的 AIOps Service 适配器移至 Service 层。HTTP、数据库表和审计事件值不变。
+- `make arch-lint test-arch-policy` 通过（固定 `go-arch-lint v1.19.0`）；缺少工具时目标明确失败，不再打印虚假的 skipping。CI 安装固定版本并执行同样入口。
+- IAM、审计、IM、Manager 装配及 `make test-agent-runtime` 的 Linux race 回归通过。新增跨域审计事件在包装后的请求中仍正确持久化的回归。
+
+### 能力验收矩阵
+
+| 能力/入口 | 自动化证据 | 真实环境剩余验收 |
+| --- | --- | --- |
+| 默认聊天、安全内置 Skill | `TestGraphCatalogIncludesAndExecutesSafeSkills`；Graph 调用路径 | 真实模型正确选择并调用工具 |
+| 联网开关 | `TestRuntimeWebSearchToggleControlsActualDispatch`：关闭时零调用；直接旧引用也拒绝 | 配置搜索服务，开/关各一轮 |
+| Host Skill 参数 | `TestHostSkillSchemaPreservesRequiredParameters`：保留原必填项并添加 device_id | 测试 Edge 执行 DNS/TCP/HTTP/ping、日志与文件只读能力 |
+| 外部安全 Skill | `TestGraphCatalogAdaptsExternalSubprocessSkill`：真实 manifest + 子进程 | 安装一个测试包，确认审计结果；危险类不自动注册 |
+| 工作流文件工具 | `TestWorkflowPaletteAndInvokerIncludeHostFiles` | 画布选取、发布、运行、结果核对；K8s 审批动作仍明确排除 |
+| 专家/后台子任务 | `TestWorkerInheritsWebSearchGate`；`TestSpawnWorker_*` | 真实专家路由、前后台联网权限一致 |
+| MCP 生命周期 | `TestRuntimeRemovedOrReplacedToolRejectsStaleReference`；`TestToolSearchKeepsTurnSchemaAcrossRefresh`；`TestInvalidToolSourceUpdatePreservesExistingViews` | 实际 MCP 增删/禁用/替换，验证当前与下轮行为 |
+| 只读/写开关/审批 | `TestFilterToolsForAgentRole_ViewerDropsSensitiveReadTool`；HumanApprovalGate/ReviewGate 测试 | 测试账号拒绝写操作；沙箱动作批准/拒绝/超时 |
+| 停止与历史消息 | `TestStopWorker_Idempotent`；`TestBuildEinoHistory_*` | 停止长调用、重启后继续旧会话；核对 SSE 终止语义 |
+| HTTP/IM 协议 | HTTP happy-path / stable DTO 测试；IM adapter/sender 回归 | 测试 IM 消息流完整、只发送一次终态 |
+| 告警初查 | `TestInvestigatorUsesRealCorrelationToolContract`；失败/错配 batch 测试 | 测试告警生成正确初查记录 |
+| 初始化失败 | `TestService_MissingRuntimeFailsExplicitly` | 确认聊天明确不可用、不切旧循环、其他 API 健康 |
+| 架构与审计 | `make arch-lint test-arch-policy`；`TestSharedAuditEventSurvivesWrappedRequest` | 确认登录失败与用户修改的审计内容连续 |
+
+### 发布前仍需现场证据
+
+1. 在指定测试环境记录 Manager 版本、模型/MCP 服务和测试账号；密钥留在环境配置，不写入报告。
+2. 按矩阵执行真实模型、测试 Edge 和 IM 冒烟，记录会话/工具调用/审计 ID，清理测试数据。
+3. 盘点部署中的 `ONGRID_AGENT_KERNEL=legacy`；确认已迁移到 Graph 及新版配置。
+4. 在隔离部署演练旧镜像升级到候选镜像，再恢复旧镜像与其 Compose 配置，检查会话可读、审批可查询、健康检查恢复。无数据库迁移。
+5. 仅在上述证据齐全后提交最终验收结论；当前不合并、不部署，不将模拟模型测试称为真实模型验收。
