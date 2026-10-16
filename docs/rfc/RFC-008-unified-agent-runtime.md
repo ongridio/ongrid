@@ -118,3 +118,15 @@ Graph 默认运行路径与旧循环维护独立工具列表，安全 Skill 注�
 - 真实模型/MCP、线上配置盘点与升级回滚仍未执行，PR 保持草稿且禁止合并。
 
 - 最终定向 E2E 通过（25.167s）：真实 Manager + 临时 MySQL，覆盖 `TestAssistantChat_*`、`TestMCP_CRUD`、`TestSkills_Registry`；模型及外部服务为测试替身，不能视为真实模型验收。
+
+## 变更记录
+
+- 2026-10-16：用户新增 v2/v3 显式切换与代码隔离需求，见 RFC-009 / PRD-009（提议）。原文“唯一实现、不保留双版本”的范围需随新方案调整；当前 PR 尚未交付版本选择。旧 legacy for-loop 仍退役。
+
+### 审批退役修正（2026-10-16）
+
+- 当前 Graph 使用的 shell/MCP/安装 Skill 执行器保留；删除 legacy K8s proposer、旧 Registry 注册/执行入口及专用批准后执行方法，Graph 的 dry-run/preflight/ReviewGate 路径不变。
+- `K8sActionPayload` 仍供历史动作审计读取，已完成审批数据不删除。旧待审批动作在缺少执行器时明确落为 failed，要求重新提交。
+- 更正此前分析：旧 K8s token 在创建审批前消费，旧 RunApproved 并不再次校验内存 grant；不能将其描述为重启必然失效。删除该执行路径是明确的退役政策。
+- 取消/等待超时通过 pending 条件更新使审批失效，不覆盖已批准或已拒绝的结果；并发批准只执行一次。执行结果保存失败向上返回错误，不再静默成功。
+- 本地审批/适配器/历史审计 race、完整 Agent Linux race、架构基线和 11 个边界 fixture 均通过。版本选择实现另见 RFC-009 提议，尚未完成。
