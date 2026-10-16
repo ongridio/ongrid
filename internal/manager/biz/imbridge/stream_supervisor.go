@@ -31,6 +31,8 @@ type StreamRepo interface {
 	ListEnabledStreamApps(ctx context.Context) ([]*model.ImApp, error)
 }
 
+const streamStopTimeout = 10 * time.Second
+
 // StreamSupervisor owns one long-running goroutine per
 // (enabled, stream-mode) ImApp. On a reconcile interval (default 30s)
 // it diffs DB state vs. running clients:
@@ -42,17 +44,17 @@ type StreamRepo interface {
 // parent is the supervisor's own context. Cancelling the supervisor
 // (manager shutdown) propagates a graceful Stop to every client.
 type StreamSupervisor struct {
-	repo       StreamRepo
-	bridge     *Bridge
-	factories  map[string]StreamClientFactory // provider -> factory
-	log        *slog.Logger
-	mu         sync.Mutex
-	running    map[uint64]*streamSlot // im_app.id -> running slot
-	reconcile  time.Duration
+	repo      StreamRepo
+	bridge    *Bridge
+	factories map[string]StreamClientFactory // provider -> factory
+	log       *slog.Logger
+	mu        sync.Mutex
+	running   map[uint64]*streamSlot // im_app.id -> running slot
+	reconcile time.Duration
 }
 
 type streamSlot struct {
-	app    *model.ImApp
+	app    *model.ImApp // Immutable snapshot for this client's lifetime.
 	cancel context.CancelFunc
 	done   chan struct{}
 }
@@ -77,8 +79,7 @@ func (s *StreamSupervisor) RegisterFactory(provider string, f StreamClientFactor
 	s.factories[provider] = f
 }
 
-// Run starts the reconcile loop. Cancelled when ctx is done; the
-// outer caller is errgroup.Run / similar.
+// Run starts the reconcile loop and stops clients when ctx is done.
 func (s *StreamSupervisor) Run(ctx context.Context) {
 	s.reconcileOnce(ctx) // initial apply
 
@@ -107,24 +108,26 @@ func (s *StreamSupervisor) reconcileOnce(ctx context.Context) {
 	}
 
 	s.mu.Lock()
+	stopping := make(map[uint64]*streamSlot)
 	// Stop slots whose app row vanished, got disabled, or had its
-	// credentials rotated (we compare by AppID + secret tail).
+	// credentials rotated.
 	for id, slot := range s.running {
 		nxt, ok := wantByID[id]
 		stale := !ok || nxt.AppID != slot.app.AppID || nxt.AppSecret != slot.app.AppSecret
 		if stale {
 			s.log.Info("stopping stream client", slog.Uint64("im_app_id", id))
-			slot.cancel()
-			s.mu.Unlock()
-			<-slot.done
-			s.mu.Lock()
+			stopping[id] = slot
 			delete(s.running, id)
-		} else {
-			// Refresh the cached app pointer so display labels / etc.
-			// reflect the latest row without restarting the client.
-			slot.app = nxt
 		}
 	}
+	s.mu.Unlock()
+	s.stopClients(ctx, stopping)
+	if ctx.Err() != nil {
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	// Spawn slots for newly-arriving apps.
 	for id, app := range wantByID {
 		if _, ok := s.running[id]; ok {
@@ -145,7 +148,7 @@ func (s *StreamSupervisor) reconcileOnce(ctx context.Context) {
 				slog.Any("err", err))
 			continue
 		}
-		runCtx, cancel := context.WithCancel(context.Background())
+		runCtx, cancel := context.WithCancel(ctx)
 		slot := &streamSlot{app: app, cancel: cancel, done: make(chan struct{})}
 		s.running[id] = slot
 
@@ -156,7 +159,6 @@ func (s *StreamSupervisor) reconcileOnce(ctx context.Context) {
 
 		go s.runClientWithRestart(runCtx, slot, client)
 	}
-	s.mu.Unlock()
 }
 
 // runClientWithRestart wraps the client.Run call with exponential
@@ -167,7 +169,7 @@ func (s *StreamSupervisor) runClientWithRestart(ctx context.Context, slot *strea
 	defer close(slot.done)
 	backoff := time.Second
 	const maxBackoff = 60 * time.Second
-	for {
+	for ctx.Err() == nil {
 		if err := client.Run(ctx); err != nil && ctx.Err() == nil {
 			s.log.Warn("stream client exited; reconnect",
 				slog.String("provider", client.ProviderName()),
@@ -192,10 +194,36 @@ func (s *StreamSupervisor) runClientWithRestart(ctx context.Context, slot *strea
 
 func (s *StreamSupervisor) shutdown() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	for id, slot := range s.running {
+	stopping := s.running
+	s.running = make(map[uint64]*streamSlot)
+	s.mu.Unlock()
+	// Shutdown gets its own grace period after the parent context is cancelled.
+	s.stopClients(context.Background(), stopping)
+}
+
+func (s *StreamSupervisor) stopClients(ctx context.Context, slots map[uint64]*streamSlot) {
+	if len(slots) == 0 {
+		return
+	}
+	// Cancel the entire batch before waiting; one broken provider must not
+	// delay cancellation of the others or multiply the shutdown deadline.
+	for _, slot := range slots {
 		slot.cancel()
-		<-slot.done
-		delete(s.running, id)
+	}
+	stopCtx, cancel := context.WithTimeout(ctx, streamStopTimeout)
+	defer cancel()
+	for id, slot := range slots {
+		select {
+		case <-slot.done:
+			continue
+		default:
+		}
+		select {
+		case <-slot.done:
+		case <-stopCtx.Done():
+			s.log.Warn("stream client did not stop",
+				slog.Uint64("im_app_id", id),
+				slog.Any("err", stopCtx.Err()))
+		}
 	}
 }
