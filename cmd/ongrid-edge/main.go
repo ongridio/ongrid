@@ -143,7 +143,7 @@ func run() error {
 		return nil
 	}
 
-	k8sInfo, err := edgek8s.EnsureEnrollment(rootCtx, cfg, version, log)
+	k8sInfo, enrollmentPending, err := edgek8s.EnsureEnrollment(rootCtx, cfg, version, log)
 	if err != nil {
 		log.Error("kubernetes enrollment failed", slog.Any("err", err))
 		return err
@@ -163,6 +163,10 @@ func run() error {
 	})
 
 	eg, egCtx := errgroup.WithContext(rootCtx)
+	if enrollmentPending {
+		recoveryCfg := *cfg
+		eg.Go(func() error { return edgek8s.RetryNodeEnrollment(egCtx, recoveryCfg, version, log) })
+	}
 	if edgek8s.IsController(k8sInfo) && strings.TrimSpace(os.Getenv("ONGRID_K8S_TELEMETRY_SECRET")) != "" {
 		eg.Go(func() error { return edgek8s.RunTelemetryConfigSync(egCtx, cfg, k8sInfo, log) })
 	}

@@ -27,6 +27,9 @@ service KubernetesService {
     // Internal bootstrap API. It is authenticated with the one-time cluster
     // bootstrap token instead of a user JWT.
     rpc Enroll(EnrollRequest) returns (EnrollResponse);
+    // POST /internal/k8s/reconcile-node. Node bootstrap token required.
+    // A separate route prevents older Managers from rotating cached credentials.
+    rpc ReconcileNode(ReconcileNodeRequest) returns (ReconcileNodeResponse);
 }
 
 enum KubernetesClusterStatus {
@@ -390,6 +393,32 @@ message EnrollResponse {
     string secret_key = 6 [json_name = "secret_key"];
     string cloud_addr = 7 [json_name = "cloud_addr"];
     string manager_public_url = 8 [json_name = "manager_public_url"];
+}
+
+message ReconcileNodeRequest {
+    uint64 cluster_id = 1 [json_name = "cluster_id"];
+    string cluster_uid = 2 [json_name = "cluster_uid"];
+    string role = 3 [json_name = "role"];
+    string node_name = 4 [json_name = "node_name"];
+    string node_uid = 5 [json_name = "node_uid"];
+    uint64 cached_edge_id = 6 [json_name = "cached_edge_id"];
+    string provider_id = 7 [json_name = "provider_id"];
+    string namespace = 8 [json_name = "namespace"];
+    string agent_version = 9 [json_name = "agent_version"];
+    repeated string capabilities = 10 [json_name = "capabilities"];
+}
+
+message ReconcileNodeResponse {
+    uint64 cluster_id = 1 [json_name = "cluster_id"];
+    string role = 2 [json_name = "role"];
+    string mode = 3 [json_name = "mode"];
+    uint64 edge_id = 4 [json_name = "edge_id"];
+    string access_key = 5 [json_name = "access_key"];
+    string secret_key = 6 [json_name = "secret_key"];
+    string cloud_addr = 7 [json_name = "cloud_addr"];
+    string manager_public_url = 8 [json_name = "manager_public_url"];
+    // The supplied cached Edge is still bound. No secret is returned or rotated.
+    bool reuse_credentials = 9 [json_name = "reuse_credentials"];
 }
 
 // GET/PUT /v1/k8s/clusters/{cluster_id}/autoapm. PUT requires admin.

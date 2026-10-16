@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"os"
@@ -23,6 +24,7 @@ import (
 )
 
 type k8sEnrollRequest struct {
+	CachedEdgeID uint64   `json:"cached_edge_id,omitempty"`
 	ClusterID    uint64   `json:"cluster_id"`
 	ClusterUID   string   `json:"cluster_uid"`
 	Role         string   `json:"role"`
@@ -35,6 +37,7 @@ type k8sEnrollRequest struct {
 }
 
 type k8sEnrollResponse struct {
+	ReuseCredentials bool                `json:"reuse_credentials,omitempty"`
 	ClusterID        uint64              `json:"cluster_id"`
 	Role             string              `json:"role"`
 	Mode             string              `json:"mode"`
@@ -72,22 +75,23 @@ type k8sTelemetryConfig struct {
 }
 
 // EnsureEnrollment discovers cluster identity and loads or enrolls Edge credentials.
-func EnsureEnrollment(ctx context.Context, cfg *config.Config, version string, log *slog.Logger) (*tunnel.KubernetesInfo, error) {
+// A true second result requires RetryNodeEnrollment while the cached identity runs.
+func EnsureEnrollment(ctx context.Context, cfg *config.Config, version string, log *slog.Logger) (*tunnel.KubernetesInfo, bool, error) {
 	edgeMode := strings.TrimSpace(os.Getenv("ONGRID_EDGE_MODE"))
 	clusterIDRaw := strings.TrimSpace(os.Getenv("ONGRID_K8S_CLUSTER_ID"))
 	bootstrapToken := strings.TrimSpace(os.Getenv("ONGRID_K8S_BOOTSTRAP_TOKEN"))
 	if clusterIDRaw == "" && bootstrapToken == "" && !strings.HasPrefix(edgeMode, "k8s-") {
-		return nil, nil
+		return nil, false, nil
 	}
 	if clusterIDRaw == "" {
-		return nil, fmt.Errorf("ONGRID_K8S_CLUSTER_ID is required in Kubernetes mode")
+		return nil, false, fmt.Errorf("ONGRID_K8S_CLUSTER_ID is required in Kubernetes mode")
 	}
 	clusterID, err := strconv.ParseUint(clusterIDRaw, 10, 64)
 	if err != nil || clusterID == 0 {
 		if err == nil {
 			err = errors.New("cluster id must be non-zero")
 		}
-		return nil, fmt.Errorf("parse ONGRID_K8S_CLUSTER_ID: %w", err)
+		return nil, false, fmt.Errorf("parse ONGRID_K8S_CLUSTER_ID: %w", err)
 	}
 	role := strings.TrimSpace(os.Getenv("ONGRID_K8S_ROLE"))
 	if role == "" {
@@ -104,83 +108,81 @@ func EnsureEnrollment(ctx context.Context, cfg *config.Config, version string, l
 	}
 	identityCtx, cancelIdentity := context.WithTimeout(ctx, 10*time.Second)
 	clusterUID, err := DiscoverClusterUID(identityCtx)
+	if err == nil && IsNode(info) {
+		info.NodeUID, err = DiscoverNodeUID(identityCtx, info.NodeName)
+	}
 	cancelIdentity()
 	if err != nil {
-		return nil, fmt.Errorf("discover kubernetes cluster UID: %w", err)
+		return nil, false, fmt.Errorf("discover kubernetes identity: %w", err)
 	}
 	info.ClusterUID = clusterUID
 	loaded, err := loadStoredK8sCredential(ctx, cfg, info, log)
 	if err != nil {
 		if bootstrapToken == "" {
-			return nil, err
+			return nil, false, err
 		}
 		log.Warn("load kubernetes edge credentials failed; falling back to bootstrap enrollment", slog.Any("err", err))
 	}
-	if loaded {
+	if loaded != nil && !IsNode(info) {
 		if IsController(info) && strings.TrimSpace(os.Getenv("ONGRID_K8S_TELEMETRY_SECRET")) != "" {
 			refreshErr := refreshAndStoreK8sTelemetryConfig(ctx, cfg, info)
 			if refreshErr != nil {
 				if edgeconfig.EnvBool("ONGRID_K8S_TELEMETRY_REQUIRED", false) {
-					return nil, fmt.Errorf("refresh required kubernetes telemetry config: %w", refreshErr)
+					return nil, false, fmt.Errorf("refresh required kubernetes telemetry config: %w", refreshErr)
 				}
 				log.Warn("refresh kubernetes telemetry config failed; control plane will continue", slog.Any("err", refreshErr))
 			}
 		}
-		return info, nil
+		return info, false, nil
 	}
 	if bootstrapToken == "" {
-		return info, nil
+		if loaded != nil && IsNode(info) && loaded.NodeUID != "" && loaded.NodeUID != info.NodeUID {
+			return nil, false, fmt.Errorf("node UID changed; bootstrap token is required to recover credentials")
+		}
+		if loaded != nil && loaded.NodeUID == "" {
+			info.NodeUID = ""
+		}
+		return info, false, nil
 	}
-	managerURL := strings.TrimRight(edgeconfig.EnvOr("ONGRID_MANAGER_PUBLIC_URL", cfg.PublicURL), "/")
-	if managerURL == "" {
-		return nil, fmt.Errorf("ONGRID_MANAGER_PUBLIC_URL is required for Kubernetes enrollment")
+	var cachedEdgeID uint64
+	if loaded != nil {
+		cachedEdgeID = loaded.EdgeID
+		if cachedEdgeID == 0 {
+			return nil, false, fmt.Errorf("stored kubernetes node credential is missing edge ID")
+		}
 	}
-	endpoint, err := url.JoinPath(managerURL, "/internal/k8s/enroll")
+	out, err := requestK8sEnrollment(ctx, cfg, info, version, bootstrapToken, cachedEdgeID)
 	if err != nil {
-		return nil, fmt.Errorf("build k8s enroll URL: %w", err)
+		if loaded != nil && (loaded.NodeUID == "" || loaded.NodeUID == info.NodeUID) && ctx.Err() == nil {
+			// Keep an unchanged or unknown Node identity usable during a Manager outage.
+			log.Warn("node credential reconciliation unavailable; retaining cached credentials", slog.Any("err", err))
+			info.NodeUID = loaded.NodeUID
+			return info, retryableK8sEnrollmentError(err), nil
+		}
+		return nil, false, err
 	}
-	reqBody := k8sEnrollRequest{
-		ClusterID:    clusterID,
-		ClusterUID:   info.ClusterUID,
-		Role:         role,
-		NodeName:     info.NodeName,
-		NodeUID:      info.NodeUID,
-		ProviderID:   strings.TrimSpace(os.Getenv("ONGRID_K8S_PROVIDER_ID")),
-		Namespace:    info.Namespace,
-		AgentVersion: version,
-		Capabilities: k8sCapabilities(role),
-	}
-	if edgeconfig.EnvBool("ONGRID_K8S_TELEMETRY_GATEWAY_ENABLED", false) {
-		reqBody.Capabilities = append(reqBody.Capabilities, "otel_gateway")
-	}
-	payload, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("marshal k8s enroll request: %w", err)
-	}
-	reqCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint, bytes.NewReader(payload))
-	if err != nil {
-		return nil, fmt.Errorf("new k8s enroll request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+bootstrapToken)
-	req.Header.Set("Content-Type", "application/json")
-	hc := k8sManagerHTTPClient()
-	resp, err := hc.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("k8s enroll request: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("k8s enroll failed: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-	var out k8sEnrollResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, fmt.Errorf("decode k8s enroll response: %w", err)
+	if out.ReuseCredentials {
+		if loaded == nil || out.EdgeID != loaded.EdgeID {
+			return nil, false, fmt.Errorf("k8s reconciliation response does not match cached edge")
+		}
+		out.AccessKey, out.SecretKey = loaded.AccessKey, loaded.SecretKey
+		out.CloudAddr, out.ManagerPublicURL = loaded.CloudAddr, loaded.ManagerPublicURL
 	}
 	if out.AccessKey == "" || out.SecretKey == "" {
-		return nil, fmt.Errorf("k8s enroll response missing edge credentials")
+		return nil, false, fmt.Errorf("k8s enroll response missing edge credentials")
+	}
+	if cachedEdgeID != 0 && (out.ClusterID != info.ClusterID || out.Role != info.Role || out.EdgeID == 0) {
+		return nil, false, fmt.Errorf("k8s reconciliation response does not match current node")
+	}
+	if out.ReuseCredentials && loaded.NodeUID == info.NodeUID {
+		return info, false, nil
+	}
+	if err := storeK8sCredential(ctx, info, out, cfg); err != nil {
+		if out.ReuseCredentials {
+			log.Warn("node UID could not be persisted; retaining confirmed credentials", slog.Any("err", err))
+			return info, false, nil
+		}
+		return nil, false, fmt.Errorf("store kubernetes edge credentials: %w", err)
 	}
 	cfg.Edge.AccessKey = out.AccessKey
 	cfg.Edge.SecretKey = out.SecretKey
@@ -194,15 +196,124 @@ func EnsureEnrollment(ctx context.Context, cfg *config.Config, version string, l
 	if out.Mode != "" {
 		info.Mode = out.Mode
 	}
-	if err := storeK8sCredential(ctx, info, out, cfg); err != nil {
-		return nil, fmt.Errorf("store kubernetes edge credentials: %w", err)
-	}
 	log.Info("kubernetes enrollment completed",
 		slog.Uint64("cluster_id", clusterID),
 		slog.Uint64("edge_id", out.EdgeID),
 		slog.String("role", info.Role),
 	)
-	return info, nil
+	return info, false, nil
+}
+
+// ErrNodeCredentialsRecovered asks the process supervisor to restart the Agent
+// after its replacement credentials have been safely persisted.
+var ErrNodeCredentialsRecovered = errors.New("kubernetes node credentials recovered; restart required")
+
+// RetryNodeEnrollment reconciles a pending identity without changing the running
+// Agent's config or tunnel. Each request is bounded; retries stop on cancellation.
+func RetryNodeEnrollment(ctx context.Context, cfg config.Config, version string, log *slog.Logger) error {
+	accessKey, secretKey := cfg.Edge.AccessKey, cfg.Edge.SecretKey
+	backoff := time.Second
+	for {
+		timer := time.NewTimer(backoff/2 + time.Duration(rand.Int64N(int64(backoff/2)+1)))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil
+		case <-timer.C:
+		}
+		_, pending, err := EnsureEnrollment(ctx, &cfg, version, log)
+		if ctx.Err() != nil {
+			return nil
+		}
+		if err == nil && !pending {
+			if cfg.Edge.AccessKey != accessKey || cfg.Edge.SecretKey != secretKey {
+				return ErrNodeCredentialsRecovered
+			}
+			return nil
+		}
+		if err != nil {
+			log.Warn("node credential recovery failed; retaining running identity", slog.Any("err", err))
+			if !retryableK8sEnrollmentError(err) {
+				return nil
+			}
+		}
+		backoff = min(2*backoff, time.Minute)
+	}
+}
+
+type k8sEnrollmentHTTPError struct {
+	status int
+	body   string
+}
+
+func (e *k8sEnrollmentHTTPError) Error() string {
+	return fmt.Sprintf("k8s enroll failed: status=%d body=%s", e.status, e.body)
+}
+
+func retryableK8sEnrollmentError(err error) bool {
+	var response *k8sEnrollmentHTTPError
+	if errors.As(err, &response) {
+		return response.status == http.StatusNotFound || response.status == http.StatusTooManyRequests || response.status >= 500
+	}
+	return true
+}
+
+func requestK8sEnrollment(ctx context.Context, cfg *config.Config, info *tunnel.KubernetesInfo, version, bootstrapToken string, cachedEdgeID uint64) (k8sEnrollResponse, error) {
+	managerURL := strings.TrimRight(edgeconfig.EnvOr("ONGRID_MANAGER_PUBLIC_URL", cfg.PublicURL), "/")
+	if managerURL == "" {
+		return k8sEnrollResponse{}, fmt.Errorf("ONGRID_MANAGER_PUBLIC_URL is required for Kubernetes enrollment")
+	}
+	enrollPath := "/internal/k8s/enroll"
+	if cachedEdgeID != 0 {
+		// A separate route prevents older Managers from rotating a cached identity.
+		enrollPath = "/internal/k8s/reconcile-node"
+	}
+	endpoint, err := url.JoinPath(managerURL, enrollPath)
+	if err != nil {
+		return k8sEnrollResponse{}, fmt.Errorf("build k8s enroll URL: %w", err)
+	}
+	reqBody := k8sEnrollRequest{
+		ClusterID:    info.ClusterID,
+		CachedEdgeID: cachedEdgeID,
+		ClusterUID:   info.ClusterUID,
+		Role:         info.Role,
+		NodeName:     info.NodeName,
+		NodeUID:      info.NodeUID,
+		ProviderID:   strings.TrimSpace(os.Getenv("ONGRID_K8S_PROVIDER_ID")),
+		Namespace:    info.Namespace,
+		AgentVersion: version,
+		Capabilities: k8sCapabilities(info.Role),
+	}
+	if edgeconfig.EnvBool("ONGRID_K8S_TELEMETRY_GATEWAY_ENABLED", false) {
+		reqBody.Capabilities = append(reqBody.Capabilities, "otel_gateway")
+	}
+	payload, err := json.Marshal(reqBody)
+	if err != nil {
+		return k8sEnrollResponse{}, fmt.Errorf("marshal k8s enroll request: %w", err)
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return k8sEnrollResponse{}, fmt.Errorf("new k8s enroll request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+bootstrapToken)
+	req.Header.Set("Content-Type", "application/json")
+	hc := k8sManagerHTTPClient()
+	resp, err := hc.Do(req)
+	if err != nil {
+		return k8sEnrollResponse{}, fmt.Errorf("k8s enroll request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return k8sEnrollResponse{}, &k8sEnrollmentHTTPError{status: resp.StatusCode, body: strings.TrimSpace(string(body))}
+	}
+	var out k8sEnrollResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return k8sEnrollResponse{}, fmt.Errorf("decode k8s enroll response: %w", err)
+	}
+	return out, nil
 }
 
 func refreshK8sTelemetryConfig(ctx context.Context, cfg *config.Config, managerURL, currentAccessKey, currentSecretKey string) (*k8sTelemetryConfig, error) {

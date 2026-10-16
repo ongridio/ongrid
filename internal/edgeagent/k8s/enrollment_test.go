@@ -41,6 +41,10 @@ func TestEnsureEnrollmentReusesStoredIdentity(t *testing.T) {
 	for _, role := range []string{"node", "controller"} {
 		t.Run(role, func(t *testing.T) {
 			api := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/nodes/node-a" {
+					_, _ = io.WriteString(w, `{"metadata":{"uid":"node-uid"}}`)
+					return
+				}
 				if r.URL.Path != "/api/v1/namespaces/kube-system" || r.Header.Get("Authorization") != "Bearer kube-token" {
 					t.Errorf("unexpected identity request: %s", r.URL.Path)
 					http.Error(w, "unexpected request", http.StatusBadRequest)
@@ -95,7 +99,7 @@ func TestEnsureEnrollmentReusesStoredIdentity(t *testing.T) {
 				t.Setenv(key, value)
 			}
 			cfg := &config.Config{Edge: config.EdgeConfig{CloudAddr: "configured-manager:40012"}}
-			info, err := EnsureEnrollment(t.Context(), cfg, "test-version", log)
+			info, _, err := EnsureEnrollment(t.Context(), cfg, "test-version", log)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -104,7 +108,7 @@ func TestEnsureEnrollmentReusesStoredIdentity(t *testing.T) {
 			}
 			t.Setenv("ONGRID_K8S_BOOTSTRAP_TOKEN", "")
 			restored := &config.Config{}
-			if _, err := EnsureEnrollment(t.Context(), restored, "test-version", log); err != nil {
+			if _, _, err := EnsureEnrollment(t.Context(), restored, "test-version", log); err != nil {
 				t.Fatal(err)
 			}
 			if calls.Load() != 1 || restored.Edge.AccessKey != "access" || restored.Edge.CloudAddr != "new-manager:40012" || restored.Edge.ManagerPublicURL != "https://canonical.example" {
@@ -113,11 +117,11 @@ func TestEnsureEnrollmentReusesStoredIdentity(t *testing.T) {
 			if role == "controller" {
 				t.Setenv("ONGRID_K8S_TELEMETRY_SECRET", "telemetry")
 				t.Setenv("ONGRID_K8S_TELEMETRY_REQUIRED", "false")
-				if _, err := EnsureEnrollment(t.Context(), restored, "test-version", log); err != nil {
+				if _, _, err := EnsureEnrollment(t.Context(), restored, "test-version", log); err != nil {
 					t.Fatalf("optional telemetry blocked control plane: %v", err)
 				}
 				t.Setenv("ONGRID_K8S_TELEMETRY_REQUIRED", "true")
-				if _, err := EnsureEnrollment(t.Context(), restored, "test-version", log); err == nil || !strings.Contains(err.Error(), "refresh required kubernetes telemetry config") {
+				if _, _, err := EnsureEnrollment(t.Context(), restored, "test-version", log); err == nil || !strings.Contains(err.Error(), "refresh required kubernetes telemetry config") {
 					t.Fatalf("required telemetry error = %v", err)
 				}
 			}
@@ -130,13 +134,13 @@ func TestEnsureEnrollmentModeValidationAndCancellation(t *testing.T) {
 	for key, value := range map[string]string{"ONGRID_EDGE_MODE": "", "ONGRID_K8S_CLUSTER_ID": "", "ONGRID_K8S_BOOTSTRAP_TOKEN": ""} {
 		t.Setenv(key, value)
 	}
-	if info, err := EnsureEnrollment(t.Context(), &config.Config{}, "test", log); info != nil || err != nil {
+	if info, _, err := EnsureEnrollment(t.Context(), &config.Config{}, "test", log); info != nil || err != nil {
 		t.Fatalf("host mode: info=%+v err=%v", info, err)
 	}
 	t.Setenv("ONGRID_EDGE_MODE", "k8s-node")
 	for _, id := range []string{"", "0", "bad"} {
 		t.Setenv("ONGRID_K8S_CLUSTER_ID", id)
-		if _, err := EnsureEnrollment(t.Context(), &config.Config{}, "test", log); err == nil {
+		if _, _, err := EnsureEnrollment(t.Context(), &config.Config{}, "test", log); err == nil {
 			t.Fatalf("accepted cluster id %q", id)
 		}
 	}

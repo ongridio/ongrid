@@ -39,6 +39,33 @@ func TestK8sCredentialKey(t *testing.T) {
 	}
 }
 
+func TestK8sSecretCredentialReadsLegacyNodeKey(t *testing.T) {
+	info := &tunnel.KubernetesInfo{ClusterID: 7, Role: "node", NodeName: "node-a", NodeUID: "uid-new"}
+	legacy := *info
+	legacy.NodeUID = ""
+	for _, current := range []bool{false, true} {
+		t.Run(map[bool]string{false: "legacy", true: "prefer current"}[current], func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				data := map[string]string{k8sCredentialKey(&legacy): base64.StdEncoding.EncodeToString([]byte("legacy-credential"))}
+				if current {
+					data[k8sCredentialKey(info)] = base64.StdEncoding.EncodeToString([]byte("current-credential"))
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
+			}))
+			defer server.Close()
+			client := &k8sSecretClient{baseURL: server.URL, namespace: "ongrid", secretName: "credentials", client: server.Client()}
+			raw, key, err := client.getCredential(t.Context(), info)
+			want, wantKey := "legacy-credential", k8sCredentialKey(&legacy)
+			if current {
+				want, wantKey = "current-credential", k8sCredentialKey(info)
+			}
+			if err != nil || string(raw) != want || key != wantKey {
+				t.Fatalf("read credential key=%q error=%v", key, err)
+			}
+		})
+	}
+}
+
 func TestK8sCredentialFileRoundTrip(t *testing.T) {
 	filePath := filepath.Join(t.TempDir(), "node-credential.json")
 	info := &tunnel.KubernetesInfo{ClusterID: 7, Role: "node", NodeName: "worker-a"}
@@ -66,7 +93,7 @@ func TestK8sCredentialFileRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadStoredK8sCredentialFile: %v", err)
 	}
-	if !loaded || loadedCfg.Edge.AccessKey != "access" || loadedCfg.Edge.SecretKey != "secret" ||
+	if loaded == nil || loadedCfg.Edge.AccessKey != "access" || loadedCfg.Edge.SecretKey != "secret" ||
 		loadedCfg.Edge.CloudAddr != "manager:40012" || loadedCfg.Edge.ManagerPublicURL != "https://manager.example" {
 		t.Fatalf("loaded=%v cfg=%+v", loaded, loadedCfg.Edge)
 	}
@@ -104,7 +131,7 @@ func TestK8sCredentialFileRejectsDifferentNode(t *testing.T) {
 		t.Fatalf("storeK8sCredentialFile: %v", err)
 	}
 	loaded, err := loadStoredK8sCredentialFile(&config.Config{}, &tunnel.KubernetesInfo{ClusterID: 7, Role: "node", NodeName: "worker-b"}, filePath, nil)
-	if err == nil || loaded {
+	if err == nil || loaded != nil {
 		t.Fatalf("loaded=%v err=%v, want node mismatch", loaded, err)
 	}
 }
@@ -255,12 +282,12 @@ func TestK8sSecretClientDataKeyRoundTrip(t *testing.T) {
 		client:     server.Client(),
 	}
 
-	raw, found, err := client.getDataKey(context.Background(), "controller")
+	raw, key, err := client.getCredential(context.Background(), &tunnel.KubernetesInfo{Role: "controller"})
 	if err != nil {
-		t.Fatalf("getDataKey: %v", err)
+		t.Fatalf("getCredential: %v", err)
 	}
-	if !found || string(raw) != `{"access_key":"ak","secret_key":"sk"}` {
-		t.Fatalf("getDataKey found=%v raw=%q", found, string(raw))
+	if key != "controller" || string(raw) != `{"access_key":"ak","secret_key":"sk"}` {
+		t.Fatalf("getCredential key=%q raw=%q", key, string(raw))
 	}
 
 	if err := client.patchDataKey(context.Background(), "controller", []byte(`{"access_key":"new"}`)); err != nil {

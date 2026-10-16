@@ -171,6 +171,7 @@ func (h *Handler) getClusterHealth(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) RegisterInternal(r chi.Router) {
 	r.Post("/internal/k8s/enroll", h.enroll)
+	r.Post("/internal/k8s/reconcile-node", h.reconcileNode)
 	r.Post("/internal/k8s/telemetry-config", h.refreshTelemetryConfig)
 }
 
@@ -489,6 +490,17 @@ func (h *Handler) deleteCluster(w http.ResponseWriter, r *http.Request) {
 // @Router /internal/k8s/enroll [post]
 // @Success 200 {object} enrollResponse
 func (h *Handler) enroll(w http.ResponseWriter, r *http.Request) {
+	h.handleEnroll(w, r, false)
+}
+
+// @Summary Reconcile cached node credentials using a node bootstrap token
+// @Router /internal/k8s/reconcile-node [post]
+// @Success 200 {object} enrollResponse
+func (h *Handler) reconcileNode(w http.ResponseWriter, r *http.Request) {
+	h.handleEnroll(w, r, true)
+}
+
+func (h *Handler) handleEnroll(w http.ResponseWriter, r *http.Request, reconcile bool) {
 	select {
 	case h.enrollSlots <- struct{}{}:
 		defer func() { <-h.enrollSlots }()
@@ -507,8 +519,16 @@ func (h *Handler) enroll(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	if reconcile && (req.Role != model.RoleNode || req.CachedEdgeID == 0 || strings.TrimSpace(req.NodeUID) == "" || strings.TrimSpace(req.NodeName) == "") {
+		writeErr(w, errs.ErrInvalid)
+		return
+	}
+	if !reconcile {
+		req.CachedEdgeID = 0
+	}
 	out, err := h.svc.Enroll(r.Context(), biz.EnrollInput{
 		BootstrapToken: token,
+		CachedEdgeID:   req.CachedEdgeID,
 		ClusterID:      req.ClusterID,
 		ClusterUID:     req.ClusterUID,
 		Role:           req.Role,
@@ -525,6 +545,7 @@ func (h *Handler) enroll(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, enrollResponse{
 		ClusterID:        out.ClusterID,
+		ReuseCredentials: out.ReuseCredentials,
 		Role:             out.Role,
 		Mode:             out.Mode,
 		EdgeID:           out.EdgeID,
@@ -579,6 +600,7 @@ type createClusterRequest struct {
 }
 
 type enrollRequest struct {
+	CachedEdgeID uint64   `json:"cached_edge_id,omitempty"`
 	ClusterID    uint64   `json:"cluster_id"`
 	ClusterUID   string   `json:"cluster_uid,omitempty"`
 	Role         string   `json:"role"`
@@ -779,6 +801,7 @@ type eventDTO struct {
 }
 
 type enrollResponse struct {
+	ReuseCredentials bool                     `json:"reuse_credentials,omitempty"`
 	ClusterID        uint64                   `json:"cluster_id"`
 	Role             string                   `json:"role"`
 	Mode             string                   `json:"mode"`

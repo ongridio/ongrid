@@ -53,34 +53,33 @@ type k8sSecretClient struct {
 	client     *http.Client
 }
 
-func loadStoredK8sCredential(ctx context.Context, cfg *config.Config, info *tunnel.KubernetesInfo, log *slog.Logger) (bool, error) {
+func loadStoredK8sCredential(ctx context.Context, cfg *config.Config, info *tunnel.KubernetesInfo, log *slog.Logger) (*k8sStoredCredential, error) {
 	if filePath := strings.TrimSpace(os.Getenv("ONGRID_K8S_CREDENTIAL_FILE")); filePath != "" {
 		return loadStoredK8sCredentialFile(cfg, info, filePath, log)
 	}
 	client, err := newK8sSecretClient(info)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	if client == nil {
-		return false, nil
+		return nil, nil
 	}
-	key := k8sCredentialKey(info)
-	raw, found, err := client.getDataKey(ctx, key)
+	raw, key, err := client.getCredential(ctx, info)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	if !found || len(raw) == 0 {
-		return false, nil
+	if len(raw) == 0 {
+		return nil, nil
 	}
 	var stored k8sStoredCredential
 	if err := json.Unmarshal(raw, &stored); err != nil {
-		return false, fmt.Errorf("decode k8s stored credential %q: %w", key, err)
+		return nil, fmt.Errorf("decode k8s stored credential %q: %w", key, err)
 	}
-	if stored.ClusterID != info.ClusterID || stored.Role != info.Role {
-		return false, fmt.Errorf("stored k8s credential %q does not match current cluster/role", key)
+	if stored.ClusterID != info.ClusterID || stored.Role != info.Role || (IsNode(info) && stored.NodeName != info.NodeName) {
+		return nil, fmt.Errorf("stored k8s credential %q does not match current cluster/role", key)
 	}
 	if stored.AccessKey == "" || stored.SecretKey == "" {
-		return false, fmt.Errorf("stored k8s credential %q is missing access key or secret key", key)
+		return nil, fmt.Errorf("stored k8s credential %q is missing access key or secret key", key)
 	}
 	cfg.Edge.AccessKey = stored.AccessKey
 	cfg.Edge.SecretKey = stored.SecretKey
@@ -97,7 +96,7 @@ func loadStoredK8sCredential(ctx context.Context, cfg *config.Config, info *tunn
 			slog.String("key", key),
 		)
 	}
-	return true, nil
+	return &stored, nil
 }
 
 func storeK8sCredential(ctx context.Context, info *tunnel.KubernetesInfo, out k8sEnrollResponse, cfg *config.Config) error {
@@ -199,24 +198,24 @@ func loadK8sTelemetryCredential(ctx context.Context, info *tunnel.KubernetesInfo
 	return strings.TrimSpace(string(accessKey)), strings.TrimSpace(string(secretKey)), true, nil
 }
 
-func loadStoredK8sCredentialFile(cfg *config.Config, info *tunnel.KubernetesInfo, filePath string, log *slog.Logger) (bool, error) {
+func loadStoredK8sCredentialFile(cfg *config.Config, info *tunnel.KubernetesInfo, filePath string, log *slog.Logger) (*k8sStoredCredential, error) {
 	raw, err := os.ReadFile(filePath)
 	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
+		return nil, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("read k8s credential file: %w", err)
+		return nil, fmt.Errorf("read k8s credential file: %w", err)
 	}
 	var stored k8sStoredCredential
 	if err := json.Unmarshal(raw, &stored); err != nil {
-		return false, fmt.Errorf("decode k8s credential file: %w", err)
+		return nil, fmt.Errorf("decode k8s credential file: %w", err)
 	}
 	if stored.ClusterID != info.ClusterID || stored.Role != info.Role || stored.NodeName != info.NodeName ||
-		(info.NodeUID != "" && stored.NodeUID != info.NodeUID) {
-		return false, fmt.Errorf("stored k8s credential does not match current cluster/role/node")
+		(!IsNode(info) && info.NodeUID != "" && stored.NodeUID != info.NodeUID) {
+		return nil, fmt.Errorf("stored k8s credential does not match current cluster/role/node")
 	}
 	if stored.AccessKey == "" || stored.SecretKey == "" {
-		return false, fmt.Errorf("stored k8s credential is missing access key or secret key")
+		return nil, fmt.Errorf("stored k8s credential is missing access key or secret key")
 	}
 	cfg.Edge.AccessKey = stored.AccessKey
 	cfg.Edge.SecretKey = stored.SecretKey
@@ -232,7 +231,7 @@ func loadStoredK8sCredentialFile(cfg *config.Config, info *tunnel.KubernetesInfo
 			slog.String("file", filePath),
 		)
 	}
-	return true, nil
+	return &stored, nil
 }
 
 func storeK8sCredentialFile(info *tunnel.KubernetesInfo, out k8sEnrollResponse, cfg *config.Config, filePath string) error {
@@ -365,16 +364,16 @@ func newK8sSecretClient(info *tunnel.KubernetesInfo) (*k8sSecretClient, error) {
 	}, nil
 }
 
-func (c *k8sSecretClient) getDataKey(ctx context.Context, key string) ([]byte, bool, error) {
-	data, found, err := c.getData(ctx)
-	if err != nil || !found {
-		return nil, false, err
+func (c *k8sSecretClient) getCredential(ctx context.Context, info *tunnel.KubernetesInfo) ([]byte, string, error) {
+	data, _, err := c.getData(ctx)
+	key := k8sCredentialKey(info)
+	if len(data[key]) == 0 && IsNode(info) && info.NodeUID != "" {
+		// Older Agents keyed node Secrets by name because NodeUID was unavailable.
+		legacy := *info
+		legacy.NodeUID = ""
+		key = k8sCredentialKey(&legacy)
 	}
-	raw, ok := data[key]
-	if !ok || len(raw) == 0 {
-		return nil, false, nil
-	}
-	return raw, true, nil
+	return data[key], key, err
 }
 
 func (c *k8sSecretClient) getData(ctx context.Context) (map[string][]byte, bool, error) {

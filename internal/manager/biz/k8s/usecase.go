@@ -1330,6 +1330,7 @@ func (u *Usecase) deleteClusterEdges(ctx context.Context, edgeIDs []uint64) erro
 }
 
 type EnrollInput struct {
+	CachedEdgeID   uint64
 	BootstrapToken string
 	ClusterID      uint64
 	ClusterUID     string
@@ -1343,6 +1344,7 @@ type EnrollInput struct {
 }
 
 type EnrollResult struct {
+	ReuseCredentials bool
 	ClusterID        uint64
 	Role             string
 	Mode             string
@@ -1417,6 +1419,26 @@ func (u *Usecase) Enroll(ctx context.Context, in EnrollInput) (*EnrollResult, er
 	now := time.Now()
 	switch role {
 	case model.RoleNode:
+		if in.CachedEdgeID != 0 {
+			// Inventory can replace the Node and delete its old Edge concurrently.
+			unlockInventory := u.lockEnrollment(in.ClusterID, "inventory", "")
+			defer unlockInventory()
+			node, err := u.repo.GetNodeByClusterUID(ctx, c.ID, strings.TrimSpace(in.NodeUID))
+			if err != nil {
+				return nil, fmt.Errorf("get inventoried node for credential recovery: %w", err)
+			}
+			if node.NodeName != strings.TrimSpace(in.NodeName) || strings.HasPrefix(node.NodeUID, "name:") {
+				return nil, errors.Join(errs.ErrConflict, fmt.Errorf("node identity has not been confirmed by inventory"))
+			}
+			if node.EdgeID != nil && *node.EdgeID == in.CachedEdgeID {
+				out := u.enrollResult(c.ID, model.RoleNode, c.Mode, &EdgeCredential{EdgeID: in.CachedEdgeID})
+				out.ReuseCredentials = true
+				return out, nil
+			}
+			if node.DeviceID != nil && *node.DeviceID != 0 {
+				return nil, errors.Join(errs.ErrConflict, fmt.Errorf("k8s node %q is already registered", node.NodeName))
+			}
+		}
 		return u.enrollNode(ctx, c, in, now)
 	case model.RoleController:
 		return u.enrollController(ctx, c, in, now)
