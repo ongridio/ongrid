@@ -120,7 +120,7 @@ func (b *HumanApprovalBroker) ProposeAndAwait(ctx context.Context, req aiopstool
 				if err := invalidateApproval(ctx, uc, a.ID, "The approval wait expired; submit a new request."); err != nil {
 					return "", err
 				}
-				return `{"status":"timeout","message":"No approval within 30 minutes; the action was not run."}`, nil
+				return `{"status":"timeout","message":"The approval wait expired. Check the approval record for the final execution status."}`, nil
 			}
 		}
 	}

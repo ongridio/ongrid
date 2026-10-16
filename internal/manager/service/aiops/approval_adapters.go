@@ -239,7 +239,7 @@ func (s CloudBashProposer) awaitDecision(ctx context.Context, id string) (string
 				if err := invalidateApproval(ctx, s.Usecase, id, "The approval wait expired; submit a new request."); err != nil {
 					return "", err
 				}
-				return `{"status":"timeout","message":"No approval within 30 minutes; the command was not run."}`, nil
+				return `{"status":"timeout","message":"The approval wait expired. Check the approval record for the final execution status."}`, nil
 			}
 		}
 	}
