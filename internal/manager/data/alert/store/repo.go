@@ -116,6 +116,8 @@ func (r *Repo) UpdateIncident(ctx context.Context, in *model.Incident) error {
 	if in == nil {
 		return errs.ErrInvalid
 	}
+	in.Title = limitAlertTitle(in.Title)
+	in.DedupeKey = normalizeAlertDedupeKey(in.DedupeKey)
 	res := r.db.WithContext(ctx).Model(&model.Incident{}).Where("id = ?", in.ID).Updates(in)
 	if res.Error != nil {
 		return res.Error
@@ -130,12 +132,19 @@ func (r *Repo) CreateAlertIncident(ctx context.Context, in *model.Incident) erro
 	if in == nil {
 		return errs.ErrInvalid
 	}
+	in.Title = limitAlertTitle(in.Title)
+	in.DedupeKey = normalizeAlertDedupeKey(in.DedupeKey)
 	return r.db.WithContext(ctx).Create(in).Error
 }
 
 func (r *Repo) GetIncidentByDedupeKey(ctx context.Context, dedupeKey string) (*model.Incident, error) {
+	// Keep legacy long keys reachable in databases that accepted them (SQLite).
+	keys := []string{dedupeKey}
+	if normalized := normalizeAlertDedupeKey(dedupeKey); normalized != dedupeKey {
+		keys = append(keys, normalized)
+	}
 	var in model.Incident
-	if err := r.db.WithContext(ctx).Where("dedupe_key = ?", dedupeKey).First(&in).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("dedupe_key IN ?", keys).First(&in).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errs.ErrNotFound
 		}
@@ -348,6 +357,7 @@ func (r *Repo) CreateEvent(ctx context.Context, ev *model.Event) error {
 	if ev == nil {
 		return errs.ErrInvalid
 	}
+	ev.Title = limitAlertTitle(ev.Title)
 	return r.db.WithContext(ctx).Create(ev).Error
 }
 
