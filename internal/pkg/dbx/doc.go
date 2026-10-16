@@ -2,8 +2,8 @@ package dbx
 
 // Schema management
 //
-// Ongrid uses GORM's AutoMigrate (dialect-agnostic) rather than hand-
-// written .up.sql / .down.sql files. Each data-layer package exposes a
+// Ongrid uses GORM's AutoMigrate (dialect-agnostic) to manage schema at startup.
+// Each data-layer package exposes a
 // Migrator function (type Migrator func(*gorm.DB) error) that registers
 // its own models:
 //

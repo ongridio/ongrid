@@ -70,9 +70,6 @@ RELEASE_IMAGE_DIGEST_FILE ?= $(RELEASE_IMAGE_DIGEST_DIR)/manager-$(subst /,-,$(R
 RELEASE_MANAGER_AMD64_DIGEST_FILE ?= $(RELEASE_IMAGE_DIGEST_DIR)/manager-linux-amd64.digest
 RELEASE_MANAGER_ARM64_DIGEST_FILE ?= $(RELEASE_IMAGE_DIGEST_DIR)/manager-linux-arm64.digest
 
-DB_DSN     ?= root:root@tcp(127.0.0.1:3306)/ongrid?charset=utf8mb4&parseTime=true&loc=Local
-MIGRATIONS := db/migrations
-
 .DEFAULT_GOAL := help
 
 # ----------------------------------------------------------------------------
@@ -191,17 +188,6 @@ proto: ## [api] 重新生成 proto（优先 buf，回退 protoc + protoc-gen-go/
 			--go-grpc_opt=require_unimplemented_servers=true \
 			$$(find . -name '*.proto' -not -path './gen/*' -print); \
 	fi
-
-# ----------------------------------------------------------------------------
-# migrate
-# ----------------------------------------------------------------------------
-
-.PHONY: migrate-up migrate-down
-migrate-up: ## DB migrate up（DB_DSN 可覆盖）
-	migrate -path $(MIGRATIONS) -database "mysql://$(DB_DSN)" up
-
-migrate-down: ## DB migrate down 1 步
-	migrate -path $(MIGRATIONS) -database "mysql://$(DB_DSN)" down 1
 
 # ----------------------------------------------------------------------------
 # docker
