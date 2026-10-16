@@ -75,7 +75,7 @@ func TestMCPApprovalRuntimeResumesWithResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	uc := approval.NewUsecase(approvalstore.NewRepo(db), nil)
-	uc.RegisterExecutor("mcp_call", func(context.Context, string) (string, error) { return `{"clusters":["test"]}`, nil })
+	uc.RegisterRuntimeExecutor("mcp_call", "v3", func(context.Context, string) (string, error) { return `{"clusters":["test"]}`, nil })
 	repo := chatstore.NewSessionRepoWithAttachmentRoot(db, t.TempDir())
 	sess := &chatmodel.Session{ID: "session-445", UserID: 7}
 	if err := repo.CreateSession(context.Background(), sess); err != nil {

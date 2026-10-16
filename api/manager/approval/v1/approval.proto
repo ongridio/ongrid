@@ -1,0 +1,26 @@
+syntax = "proto3";
+package ongrid.manager.approval.v1;
+import "google/protobuf/timestamp.proto";
+option go_package = "github.com/ongridio/ongrid/api/gen/manager/approval/v1;approvalv1";
+
+// Approval is the read-only record returned by the existing approval inbox.
+// Runtime ownership is assigned by the producer, never by the approver.
+message Approval {
+  string id = 1;
+  string kind = 2;
+  string title = 3;
+  string summary = 4;
+  string payload = 5;
+  string source = 6;
+  string session_id = 7;
+  string status = 8;
+  uint64 proposed_by = 9;
+  optional uint64 approved_by = 10;
+  optional string reason = 11;
+  optional string result = 12;
+  google.protobuf.Timestamp created_at = 13;
+  google.protobuf.Timestamp decided_at = 14;
+  google.protobuf.Timestamp executed_at = 15;
+  // Empty for historical or non-runtime proposals; never inferred at approval.
+  string runtime_version = 16;
+}

@@ -17,7 +17,9 @@ import (
 
 // Approval is one pending/decided dangerous action.
 type Approval struct {
-	ID string `gorm:"primaryKey;type:char(36);column:id" json:"id"`
+	// RuntimeVersion is immutable execution ownership, independent of the current default.
+	RuntimeVersion string `gorm:"size:16;column:runtime_version" json:"runtime_version,omitempty"`
+	ID             string `gorm:"primaryKey;type:char(36);column:id" json:"id"`
 
 	// Kind routes execution on approve (biz registers an executor per kind),
 	// e.g. "shell_command", "restart_service". Also the UI category.

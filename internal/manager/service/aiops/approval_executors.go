@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/contract"
 	aiopstools "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools"
 	managerbizapproval "github.com/ongridio/ongrid/internal/manager/biz/approval"
 	managerbizdevice "github.com/ongridio/ongrid/internal/manager/biz/device"
@@ -35,8 +36,25 @@ type ApprovalExecutors struct {
 	Log         *slog.Logger
 }
 
+// RegisterRuntimeApprovalExecutor restores the recorded origin at execution.
+// It never reads the administrator's current default runtime.
+func RegisterRuntimeApprovalExecutor(uc *managerbizapproval.Usecase, kind string, version contract.Version, execute managerbizapproval.Executor) {
+	if execute == nil {
+		uc.RegisterRuntimeExecutor(kind, string(version), nil)
+		return
+	}
+	uc.RegisterRuntimeExecutor(kind, string(version), func(ctx context.Context, payload string) (string, error) {
+		return execute(contract.WithVersion(ctx, version), payload)
+	})
+}
+
 func (e ApprovalExecutors) Register(approvalUC *managerbizapproval.Usecase) {
-	approvalUC.RegisterExecutor("cloud_bash", func(ctx context.Context, payloadJSON string) (string, error) {
+	register := func(kind string, execute managerbizapproval.Executor) {
+		// Preserve the existing unversioned route for historical/non-runtime proposals.
+		approvalUC.RegisterExecutor(kind, execute)
+		RegisterRuntimeApprovalExecutor(approvalUC, kind, contract.V3, execute)
+	}
+	register("cloud_bash", func(ctx context.Context, payloadJSON string) (string, error) {
 		var p cloudBashPayload
 		if err := json.Unmarshal([]byte(payloadJSON), &p); err != nil {
 			return "", err
@@ -105,7 +123,7 @@ func (e ApprovalExecutors) Register(approvalUC *managerbizapproval.Usecase) {
 		})
 		return string(out), nil
 	})
-	approvalUC.RegisterExecutor("host_bash", func(ctx context.Context, payloadJSON string) (string, error) {
+	register("host_bash", func(ctx context.Context, payloadJSON string) (string, error) {
 		var p hostBashPayload
 		if err := json.Unmarshal([]byte(payloadJSON), &p); err != nil {
 			return "", err
@@ -115,7 +133,7 @@ func (e ApprovalExecutors) Register(approvalUC *managerbizapproval.Usecase) {
 	})
 	// HLD-018 P2: mcp_call executor — on approve, connect the server and run
 	// the tool. Trusted servers skip this and run synchronously in the tool.
-	approvalUC.RegisterExecutor("mcp_call", func(ctx context.Context, payloadJSON string) (string, error) {
+	register("mcp_call", func(ctx context.Context, payloadJSON string) (string, error) {
 		var p mcpCallPayload
 		if err := json.Unmarshal([]byte(payloadJSON), &p); err != nil {
 			return "", err
@@ -133,7 +151,7 @@ func (e ApprovalExecutors) Register(approvalUC *managerbizapproval.Usecase) {
 	// Class=destructive — a skill can ship a binary cloud_bash later runs, so
 	// this only runs after a human approves. The approval IS the authorization,
 	// so the install runs with admin authority; installed_by = proposing user.
-	approvalUC.RegisterExecutor("install_skill", func(ctx context.Context, payloadJSON string) (string, error) {
+	register("install_skill", func(ctx context.Context, payloadJSON string) (string, error) {
 		var p installSkillPayload
 		if err := json.Unmarshal([]byte(payloadJSON), &p); err != nil {
 			return "", err

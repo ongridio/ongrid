@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/contract"
 	aiopstools "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools"
 	aiopstoolsbase "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	aiopstoolsdec "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/decorators"
@@ -138,6 +139,7 @@ func bootstrapExtensions(rootCtx context.Context, cfg *config.Config, log *slog.
 	approvalUC := managerbizapproval.NewUsecase(managerapprovaldata.NewRepo(storage.db), log.With(slog.String("comp", "approval")))
 	runtime.humanApprovalBroker.SetUsecase(approvalUC)
 	approvalUC.RegisterExecutor(managersvcaiops.GenericToolApprovalKind, runtime.humanApprovalBroker.Execute)
+	managersvcaiops.RegisterRuntimeApprovalExecutor(approvalUC, managersvcaiops.GenericToolApprovalKind, contract.V3, runtime.humanApprovalBroker.Execute)
 	approvalHandler := managerserverapproval.NewHandler(approvalUC)
 	// HLD-017 cloud_bash producer: register the execute-on-approve executor
 	// (resolve the bound credential → inject into the Runner sandbox → run)

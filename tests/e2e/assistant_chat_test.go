@@ -1219,7 +1219,11 @@ func TestAssistantChat_CaptureRequiresHumanApproval(t *testing.T) {
 			if proposal.ApprovalID == "" || proposal.ToolName != "capture_pcap" {
 				t.Fatalf("unexpected approval: %s", line)
 			}
-			status, _, err := env.DoJSON("POST", "/api/v1/approvals/"+proposal.ApprovalID+"/reject", map[string]string{"reason": "E2E denies capture"}, admin.AccessToken)
+			status, row, err := env.DoJSON("GET", "/api/v1/approvals/"+proposal.ApprovalID, nil, admin.AccessToken)
+			if err != nil || status != http.StatusOK || row["runtime_version"] != "v3" {
+				t.Fatalf("approval origin lost: status=%d row=%v err=%v", status, row, err)
+			}
+			status, _, err = env.DoJSON("POST", "/api/v1/approvals/"+proposal.ApprovalID+"/reject", map[string]string{"reason": "E2E denies capture"}, admin.AccessToken)
 			if err != nil || status != http.StatusOK {
 				t.Fatalf("reject status=%d err=%v", status, err)
 			}

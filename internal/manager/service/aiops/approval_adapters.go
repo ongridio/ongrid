@@ -4,15 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
 	aiopschatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/contract"
 	aiopstools "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools"
 	managerbizapproval "github.com/ongridio/ongrid/internal/manager/biz/approval"
 	managerbizmcp "github.com/ongridio/ongrid/internal/manager/biz/mcp"
 	managerbizsecret "github.com/ongridio/ongrid/internal/manager/biz/secret"
-	"os"
-	"path/filepath"
-	"strings"
-	"time"
 )
 
 // cloudBashPayload is the approval payload for a queued cloud_bash command.
@@ -135,13 +136,14 @@ func (s CloudBashProposer) ProposeAndAwait(ctx context.Context, command string, 
 		title = title[:100] + "…"
 	}
 	a, err := s.Usecase.Propose(ctx, managerbizapproval.ProposeInput{
-		Kind:       "cloud_bash",
-		Title:      title,
-		Summary:    strings.Join(credentials, ", "), // plain names; card shows them
-		Payload:    cloudBashPayload{Command: command, Credentials: credentials, SessionID: sessionID},
-		Source:     "agent",
-		SessionID:  sessionID,
-		ProposedBy: userID,
+		RuntimeVersion: string(aiopschatruntime.VersionFromContext(ctx)),
+		Kind:           "cloud_bash",
+		Title:          title,
+		Summary:        strings.Join(credentials, ", "), // plain names; card shows them
+		Payload:        cloudBashPayload{Command: command, Credentials: credentials, SessionID: sessionID},
+		Source:         "agent",
+		SessionID:      sessionID,
+		ProposedBy:     userID,
 	})
 	if err != nil {
 		return "", err
@@ -179,13 +181,14 @@ func (s HostBashProposer) ProposeAndAwait(ctx context.Context, deviceIDs []uint6
 		title = title[:100] + "…"
 	}
 	a, err := s.Usecase.Propose(ctx, managerbizapproval.ProposeInput{
-		Kind:       "host_bash",
-		Title:      title,
-		Summary:    fmt.Sprintf("device_ids=%v", deviceIDs),
-		Payload:    hostBashPayload{DeviceIDs: deviceIDs, Command: command, TimeoutSeconds: timeoutSeconds},
-		Source:     "agent",
-		SessionID:  sessionID,
-		ProposedBy: userID,
+		RuntimeVersion: string(aiopschatruntime.VersionFromContext(ctx)),
+		Kind:           "host_bash",
+		Title:          title,
+		Summary:        fmt.Sprintf("device_ids=%v", deviceIDs),
+		Payload:        hostBashPayload{DeviceIDs: deviceIDs, Command: command, TimeoutSeconds: timeoutSeconds},
+		Source:         "agent",
+		SessionID:      sessionID,
+		ProposedBy:     userID,
 	})
 	if err != nil {
 		return "", err
@@ -265,13 +268,14 @@ func (s InstallSkillProposer) ProposeInstall(ctx context.Context, url, sourceTyp
 		title = title[:120] + "…"
 	}
 	a, err := s.Usecase.Propose(ctx, managerbizapproval.ProposeInput{
-		Kind:       "install_skill",
-		Title:      title,
-		Summary:    sourceType,
-		Payload:    installSkillPayload{URL: url, Type: sourceType, Ref: ref, UserID: userID},
-		Source:     "agent",
-		SessionID:  sessionID,
-		ProposedBy: userID,
+		RuntimeVersion: string(aiopschatruntime.VersionFromContext(ctx)),
+		Kind:           "install_skill",
+		Title:          title,
+		Summary:        sourceType,
+		Payload:        installSkillPayload{URL: url, Type: sourceType, Ref: ref, UserID: userID},
+		Source:         "agent",
+		SessionID:      sessionID,
+		ProposedBy:     userID,
 	})
 	if err != nil {
 		return "", err
@@ -310,12 +314,13 @@ func (s MCPProposer) ProposeMCPCallAndAwait(ctx context.Context, server, tool st
 		cmd = cmd[:200] + "…"
 	}
 	a, err := s.Usecase.Propose(ctx, managerbizapproval.ProposeInput{
-		Kind:       "mcp_call",
-		Title:      cmd,
-		Payload:    mcpCallPayload{Server: server, Tool: tool, Arguments: args, Command: cmd},
-		Source:     "agent",
-		SessionID:  sessionID,
-		ProposedBy: userID,
+		RuntimeVersion: string(aiopschatruntime.VersionFromContext(ctx)),
+		Kind:           "mcp_call",
+		Title:          cmd,
+		Payload:        mcpCallPayload{Server: server, Tool: tool, Arguments: args, Command: cmd},
+		Source:         "agent",
+		SessionID:      sessionID,
+		ProposedBy:     userID,
 	})
 	if err != nil {
 		return "", err

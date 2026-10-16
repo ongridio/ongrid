@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/glebarez/sqlite"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/contract"
 	"github.com/ongridio/ongrid/internal/manager/biz/approval"
 	"github.com/ongridio/ongrid/internal/manager/data/approval/store"
 	"gorm.io/gorm"
@@ -39,7 +40,10 @@ func TestMCPApprovalLifecycle(t *testing.T) {
 			}
 			uc := approval.NewUsecase(store.NewRepo(db), nil)
 			var executions atomic.Int32
-			uc.RegisterExecutor("mcp_call", func(_ context.Context, payload string) (string, error) {
+			RegisterRuntimeApprovalExecutor(uc, "mcp_call", contract.V3, func(execCtx context.Context, payload string) (string, error) {
+				if contract.VersionFromContext(execCtx) != contract.V3 {
+					return "", errors.New("approval execution lost origin")
+				}
 				executions.Add(1)
 				var p mcpCallPayload
 				if err := json.Unmarshal([]byte(payload), &p); err != nil {
@@ -55,6 +59,7 @@ func TestMCPApprovalLifecycle(t *testing.T) {
 			})
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
+			ctx = contract.WithVersion(ctx, contract.V3)
 			type outcome struct {
 				result string
 				err    error
@@ -71,7 +76,7 @@ func TestMCPApprovalLifecycle(t *testing.T) {
 					t.Fatal(err)
 				}
 				if len(rows) > 0 {
-					if rows[0].SessionID != "session-445" || rows[0].ProposedBy != 7 {
+					if rows[0].RuntimeVersion != "v3" || rows[0].SessionID != "session-445" || rows[0].ProposedBy != 7 {
 						t.Fatalf("proposal lost session/user: %+v", rows[0])
 					}
 					id = rows[0].ID
@@ -101,10 +106,10 @@ func TestMCPApprovalLifecycle(t *testing.T) {
 				cancel()
 				want = `"status":"cancelled"`
 			default:
-				if _, err := uc.Approve(ctx, 7, id); err != nil {
+				if _, err := uc.Approve(contract.WithVersion(ctx, contract.V2), 7, id); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := uc.Approve(ctx, 7, id); err == nil {
+				if _, err := uc.Approve(contract.WithVersion(ctx, contract.V2), 7, id); err == nil {
 					t.Fatal("duplicate approval accepted")
 				}
 				if decision == "failure" {

@@ -27,14 +27,19 @@ type genericAgentToolApprovalPayload struct {
 // an in-memory, single-use executor that closes over the exact wrapped tool,
 // arguments and request context. A manager restart loses that capability and
 // therefore fails closed; it can never execute an unapproved reconstruction.
+type pendingToolExecution struct {
+	version aiopschatruntime.Version
+	execute aiopstoolsdec.HumanApprovalExecutor
+}
+
 type HumanApprovalBroker struct {
 	mu      sync.Mutex
 	uc      *managerbizapproval.Usecase
-	pending map[string]aiopstoolsdec.HumanApprovalExecutor
+	pending map[string]pendingToolExecution
 }
 
 func NewHumanApprovalBroker() *HumanApprovalBroker {
-	return &HumanApprovalBroker{pending: make(map[string]aiopstoolsdec.HumanApprovalExecutor)}
+	return &HumanApprovalBroker{pending: make(map[string]pendingToolExecution)}
 }
 
 func (b *HumanApprovalBroker) SetUsecase(uc *managerbizapproval.Usecase) {
@@ -51,7 +56,7 @@ func (b *HumanApprovalBroker) ProposeAndAwait(ctx context.Context, req aiopstool
 	b.mu.Lock()
 	uc := b.uc
 	if uc != nil {
-		b.pending[token] = execute
+		b.pending[token] = pendingToolExecution{version: aiopschatruntime.VersionFromContext(ctx), execute: execute}
 	}
 	b.mu.Unlock()
 	if uc == nil {
@@ -63,13 +68,14 @@ func (b *HumanApprovalBroker) ProposeAndAwait(ctx context.Context, req aiopstool
 		b.mu.Unlock()
 	}
 	a, err := uc.Propose(ctx, managerbizapproval.ProposeInput{
-		Kind:       GenericToolApprovalKind,
-		Title:      truncateApprovalTitle(req.ToolName + " confirmation"),
-		Summary:    req.Summary,
-		Payload:    genericAgentToolApprovalPayload{ExecutionToken: token, ToolName: req.ToolName, ArgsJSON: req.ArgsJSON, Summary: req.Summary},
-		Source:     "agent",
-		SessionID:  req.SessionID,
-		ProposedBy: req.UserID,
+		RuntimeVersion: string(aiopschatruntime.VersionFromContext(ctx)),
+		Kind:           GenericToolApprovalKind,
+		Title:          truncateApprovalTitle(req.ToolName + " confirmation"),
+		Summary:        req.Summary,
+		Payload:        genericAgentToolApprovalPayload{ExecutionToken: token, ToolName: req.ToolName, ArgsJSON: req.ArgsJSON, Summary: req.Summary},
+		Source:         "agent",
+		SessionID:      req.SessionID,
+		ProposedBy:     req.UserID,
 	})
 	if err != nil {
 		cleanup()
@@ -132,13 +138,16 @@ func (b *HumanApprovalBroker) Execute(ctx context.Context, payloadJSON string) (
 		return "", fmt.Errorf("decode generic tool approval: %w", err)
 	}
 	b.mu.Lock()
-	execute := b.pending[payload.ExecutionToken]
+	pending := b.pending[payload.ExecutionToken]
 	delete(b.pending, payload.ExecutionToken)
 	b.mu.Unlock()
-	if execute == nil {
+	if pending.execute == nil {
 		return "", fmt.Errorf("approved tool execution is no longer available; retry the request")
 	}
-	return execute(ctx)
+	if pending.version != aiopschatruntime.VersionFromContext(ctx) {
+		return "", fmt.Errorf("approved tool runtime mismatch; submit a new request")
+	}
+	return pending.execute(ctx)
 }
 
 func truncateApprovalTitle(title string) string {
