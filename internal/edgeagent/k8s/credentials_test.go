@@ -1,4 +1,4 @@
-package main
+package k8s
 
 import (
 	"context"
@@ -116,10 +116,10 @@ func TestTelemetrySecretDataContainsOnlyPublishedDataPlaneFields(t *testing.T) {
 		AccessKey:              "kt_access",
 		SecretKey:              "ks_secret",
 		TracesEndpoint:         "https://manager.example/v1/traces",
-		TracesAuthMode:         telemetrySignalAuthTelemetry,
+		TracesAuthMode:         "telemetry",
 		TracesTLSInsecure:      true,
 		LogsEndpoint:           "https://manager.example/loki/api/v1/push",
-		LogsAuthMode:           telemetrySignalAuthBackend,
+		LogsAuthMode:           "backend",
 		LogsBasicUser:          "loki-user",
 		LogsBasicPass:          "loki-pass",
 		RemoteWriteEndpoint:    "https://manager.example/prometheus/api/v1/write",
@@ -135,10 +135,10 @@ func TestTelemetrySecretDataContainsOnlyPublishedDataPlaneFields(t *testing.T) {
 		"telemetry-access-key":                "kt_access",
 		"telemetry-secret-key":                "ks_secret",
 		"telemetry-traces-endpoint":           "https://manager.example/v1/traces",
-		"telemetry-traces-auth-mode":          telemetrySignalAuthTelemetry,
+		"telemetry-traces-auth-mode":          "telemetry",
 		"telemetry-traces-tls-insecure":       "true",
 		"telemetry-logs-endpoint":             "https://manager.example/loki/api/v1/push",
-		"telemetry-logs-auth-mode":            telemetrySignalAuthBackend,
+		"telemetry-logs-auth-mode":            "backend",
 		"telemetry-logs-basic-user":           "loki-user",
 		"telemetry-logs-basic-pass":           "loki-pass",
 		"telemetry-remote-write-endpoint":     "https://manager.example/prometheus/api/v1/write",

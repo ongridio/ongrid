@@ -1,4 +1,4 @@
-package main
+package k8s
 
 import (
 	"bytes"
@@ -22,6 +22,8 @@ import (
 	"strings"
 	"time"
 
+	edgeconfig "github.com/ongridio/ongrid/internal/edgeagent/config"
+	"github.com/ongridio/ongrid/internal/pkg/autoapm"
 	"github.com/ongridio/ongrid/internal/pkg/config"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
@@ -490,7 +492,7 @@ func dataContainsValues(current, desired map[string][]byte) bool {
 // Manager-origin signals only. External backends keep the TLS policy resolved
 // by Manager from their integration settings.
 func applyManagerTelemetryTLS(in *k8sTelemetryConfig, managerURLs ...string) {
-	if in == nil || !parseBoolEnv("ONGRID_K8S_ENROLL_TLS_INSECURE", false) {
+	if in == nil || !edgeconfig.EnvBool("ONGRID_K8S_ENROLL_TLS_INSECURE", false) {
 		return
 	}
 	managerOrigins := make([]*url.URL, 0, len(managerURLs))
@@ -537,4 +539,21 @@ func (c *k8sSecretClient) setAuth(req *http.Request) {
 
 func pathEscape(value string) string {
 	return url.PathEscape(value)
+}
+
+// LoadAppMetricsScope reads discovery limits from the controller telemetry Secret.
+func LoadAppMetricsScope(ctx context.Context, info *tunnel.KubernetesInfo) (autoapm.MetricsScope, error) {
+	client, err := newK8sSecretClient(info)
+	if err != nil {
+		return autoapm.MetricsScope{}, err
+	}
+	if client == nil {
+		return autoapm.MetricsScope{}, nil
+	}
+	client.secretName = edgeconfig.EnvOr("ONGRID_K8S_TELEMETRY_SECRET", client.secretName)
+	data, _, err := client.getData(ctx)
+	if err != nil {
+		return autoapm.MetricsScope{}, err
+	}
+	return autoapm.ParseMetricsScope(data["telemetry-app-metrics-scope"])
 }

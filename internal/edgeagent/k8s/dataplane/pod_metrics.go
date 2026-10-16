@@ -1,4 +1,4 @@
-package main
+package dataplane
 
 import (
 	"context"
@@ -11,19 +11,18 @@ import (
 	"strings"
 	"time"
 
-	"gopkg.in/yaml.v3"
-
+	edgeconfig "github.com/ongridio/ongrid/internal/edgeagent/config"
 	"github.com/ongridio/ongrid/internal/edgeagent/plugins"
 	"github.com/ongridio/ongrid/internal/pkg/autoapm"
-	"github.com/ongridio/ongrid/internal/pkg/tunnel"
+	"gopkg.in/yaml.v3"
 )
 
 const podMetricsPlugin = "k8s-pod-metrics"
 
 // One Collector runs in the single-replica Scraper, never in the scaled gateway.
 func newPodMetricsSupervisor(dir string, log *slog.Logger) *plugins.Supervisor {
-	binary := filepath.Join(envOr("ONGRID_EDGE_PLUGIN_BIN_DIR", "/usr/local/lib/ongrid-edge"), "otelcol-contrib")
-	root := filepath.Join(envOr("ONGRID_EDGE_PLUGIN_WORK_DIR", "/var/lib/ongrid-edge/plugins"), podMetricsPlugin)
+	binary := filepath.Join(edgeconfig.EnvOr("ONGRID_EDGE_PLUGIN_BIN_DIR", "/usr/local/lib/ongrid-edge"), "otelcol-contrib")
+	root := filepath.Join(edgeconfig.EnvOr("ONGRID_EDGE_PLUGIN_WORK_DIR", "/var/lib/ongrid-edge/plugins"), podMetricsPlugin)
 	supervisor := plugins.NewSupervisor(plugins.SupervisorOpts{
 		Fetcher: &podMetricsFetcher{dir: dir}, ReloadInterval: 10 * time.Second, Log: log,
 	})
@@ -46,22 +45,6 @@ func renderPodMetrics(cfg plugins.PluginConfig) ([]byte, error) {
 }
 
 type podMetricsFetcher struct{ dir string }
-
-func loadK8sAppMetricsScope(ctx context.Context, info *tunnel.KubernetesInfo) (autoapm.MetricsScope, error) {
-	client, err := newK8sSecretClient(info)
-	if err != nil {
-		return autoapm.MetricsScope{}, err
-	}
-	if client == nil {
-		return autoapm.MetricsScope{}, nil
-	}
-	client.secretName = envOr("ONGRID_K8S_TELEMETRY_SECRET", client.secretName)
-	data, _, err := client.getData(ctx)
-	if err != nil {
-		return autoapm.MetricsScope{}, err
-	}
-	return autoapm.ParseMetricsScope(data["telemetry-app-metrics-scope"])
-}
 
 func (f *podMetricsFetcher) Fetch(ctx context.Context) (map[string]plugins.PluginConfig, error) {
 	rawScope, err := readTelemetryFile(ctx, f.dir, "telemetry-app-metrics-scope", false)
@@ -94,10 +77,10 @@ func (f *podMetricsFetcher) Fetch(ctx context.Context) (map[string]plugins.Plugi
 		"source_labels": []string{"__meta_kubernetes_namespace", "__meta_kubernetes_pod_uid"},
 		"action":        "keep", "regex": strings.Join(allowed, "|"),
 	}}, scrape["relabel_configs"].([]interface{})...)
-	interval := parseDurationEnv("ONGRID_K8S_METRICS_INTERVAL", 30*time.Second)
-	timeout := min(parseDurationEnv("ONGRID_K8S_METRICS_TIMEOUT", 15*time.Second), interval)
+	interval := edgeconfig.EnvDuration("ONGRID_K8S_METRICS_INTERVAL", 30*time.Second)
+	timeout := min(edgeconfig.EnvDuration("ONGRID_K8S_METRICS_TIMEOUT", 15*time.Second), interval)
 	scrape["scrape_interval"], scrape["scrape_timeout"] = interval.String(), timeout.String()
-	scrape["sample_limit"] = parseIntEnv("ONGRID_K8S_METRICS_SAMPLE_LIMIT", 250000)
+	scrape["sample_limit"] = edgeconfig.EnvInt("ONGRID_K8S_METRICS_SAMPLE_LIMIT", 250000)
 	labels := []interface{}{
 		map[string]interface{}{"action": "replace", "target_label": "cluster_id", "replacement": strconv.FormatUint(files.clusterID, 10)},
 		map[string]interface{}{"action": "replace", "target_label": "ongrid_source", "replacement": "k8s:app-metrics"},
@@ -110,7 +93,7 @@ func (f *podMetricsFetcher) Fetch(ctx context.Context) (map[string]plugins.Plugi
 	}
 	exporter := config["exporters"].(map[string]interface{})["prometheusremotewrite"].(map[string]interface{})
 	exporter["endpoint"] = files.remoteWriteEndpoint
-	exporter["timeout"] = parseDurationEnv("ONGRID_K8S_METRICS_PUSH_TIMEOUT", 30*time.Second).String()
+	exporter["timeout"] = edgeconfig.EnvDuration("ONGRID_K8S_METRICS_PUSH_TIMEOUT", 30*time.Second).String()
 	auth := ""
 	if files.remoteWriteBearer != "" {
 		auth = "Bearer " + files.remoteWriteBearer

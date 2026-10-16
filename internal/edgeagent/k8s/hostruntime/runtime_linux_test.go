@@ -1,6 +1,6 @@
 //go:build linux
 
-package main
+package hostruntime
 
 import (
 	"context"
@@ -21,7 +21,7 @@ func TestOBIFilesystemWithoutBPFFSDoesNotBlockNodeStartup(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := prepareK8sOBIFilesystem(context.Background(), root, os.Getuid(), os.Getgid()); err != nil {
+			if err := PrepareOBIFilesystem(context.Background(), root, os.Getuid(), os.Getgid()); err != nil {
 				t.Fatalf("optional bpffs blocks node startup: %v", err)
 			}
 			if _, err := os.Stat(filepath.Join(base, "ongrid")); !os.IsNotExist(err) {

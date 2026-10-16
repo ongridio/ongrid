@@ -1,6 +1,6 @@
 //go:build linux
 
-package main
+package hostruntime
 
 import (
 	"context"
@@ -45,7 +45,7 @@ var k8sHostCapabilities = []int{
 
 // Give non-root OBI its own bpffs directory; never change ownership or mode of
 // the host's bpffs root, which may also be used by the CNI and other agents.
-func prepareK8sOBIFilesystem(ctx context.Context, root string, uid, gid int) error {
+func PrepareOBIFilesystem(ctx context.Context, root string, uid, gid int) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -65,7 +65,8 @@ func prepareK8sOBIFilesystem(ctx context.Context, root string, uid, gid int) err
 	return ensureOwnedDirectory(filepath.Join(base, "ongrid"), uid, gid, 0750)
 }
 
-func enterK8sHost(ctx context.Context, hostRoot string, uid, gid int) error {
+// Enter switches to the host root and Edge user, retaining the node capabilities.
+func Enter(ctx context.Context, hostRoot string, uid, gid int) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}

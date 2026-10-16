@@ -119,7 +119,7 @@ test-race: ## 单元测试 + race
 test-k8s-capabilities: ## 隔离 Linux 环境验证节点 JVM attach 权限（需要 root/sudo）
 	@test "$$(uname -s)" = Linux || { echo 'Linux is required'; exit 1; }
 	@set -eu; tmp_dir=$$(mktemp -d); trap 'rm -rf "$$tmp_dir"' EXIT; \
-	go test -race -c -o "$$tmp_dir/edge.test" ./cmd/ongrid-edge; \
+	go test -race -c -o "$$tmp_dir/edge.test" ./internal/edgeagent/k8s/hostruntime; \
 	if [ "$$(id -u)" = 0 ]; then \
 		env ONGRID_TEST_K8S_CAPABILITIES=1 "$$tmp_dir/edge.test" -test.v -test.timeout=45s -test.run='^TestK8sHostCapabilitiesSurviveJVMAttach$$'; \
 	else \
@@ -131,7 +131,7 @@ test-k8s-autoapm: ## 隔离 Linux 环境验证 Chart 权限与非 root OBI 采�
 	@test "$$(uname -s)" = Linux && test "$$(id -u)" = 0 || { echo 'Run as root in isolated Linux with the Chart capabilities'; exit 1; }
 	@test -x "$${ONGRID_TEST_AUTOAPM_BIN_DIR}/obi" && test -x "$${ONGRID_TEST_AUTOAPM_BIN_DIR}/otelcol-contrib"
 	@set -eu; tmp_dir=$$(mktemp -d); trap 'rm -rf "$$tmp_dir"' EXIT; \
-	go test -race -c -o "$$tmp_dir/edge.test" ./cmd/ongrid-edge; \
+	go test -race -c -o "$$tmp_dir/edge.test" ./internal/edgeagent/k8s/hostruntime; \
 	go test -race -c -o "$$tmp_dir/autoapm.test" ./internal/edgeagent/plugins/autoapm; \
 	env ONGRID_TEST_K8S_AUTOAPM_BINARY="$$tmp_dir/autoapm.test" "$$tmp_dir/edge.test" -test.v -test.timeout=7m -test.run='^TestK8sHostAutoAPMIntegration$$'
 

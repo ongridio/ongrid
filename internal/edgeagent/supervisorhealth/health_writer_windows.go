@@ -6,7 +6,7 @@
 // This file is compiled on Windows only. Other platforms use the no-op
 // stub in health_writer_other.go (a Linux edge has no supervisor parent).
 
-package main
+package supervisorhealth
 
 import (
 	"context"
@@ -15,36 +15,35 @@ import (
 	"time"
 
 	"github.com/ongridio/ongrid/internal/edgeagent/edgedirs"
-	"github.com/ongridio/ongrid/internal/edgeagent/supervisorhealth"
 )
 
-// startHeartbeatWriter periodically writes health.json. It returns nil
+// RunWriter periodically writes health.json. It returns nil
 // immediately when ctx is cancelled (no stopping state is written; the
 // supervisor learns about worker exit via cmd.Wait).
 //
 // A failed write is logged but not returned as an error: a lost heartbeat
 // makes the supervisor watchdog kill this process after HeartbeatTimeout,
 // which is the intended fail-safe behavior.
-func startHeartbeatWriter(ctx context.Context, log *slog.Logger) error {
+func RunWriter(ctx context.Context, log *slog.Logger) error {
 	pid := os.Getpid()
 	startedAt := time.Now()
 
 	// Write the starting state immediately so the supervisor sees the
 	// worker early.
-	h := supervisorhealth.Health{
-		Version:       supervisorhealth.HealthSchemaVersion,
+	h := Health{
+		Version:       HealthSchemaVersion,
 		WorkerPID:     pid,
 		StartedAt:     startedAt,
 		LastHeartbeat: time.Now(),
-		Status:        supervisorhealth.StatusStarting,
+		Status:        StatusStarting,
 	}
 	writeHeartbeat(h, log)
 
 	// Move to healthy.
-	h.Status = supervisorhealth.StatusHealthy
+	h.Status = StatusHealthy
 	writeHeartbeat(h, log)
 
-	ticker := time.NewTicker(supervisorhealth.HeartbeatInterval)
+	ticker := time.NewTicker(HeartbeatInterval)
 	defer ticker.Stop()
 
 	for {
@@ -58,8 +57,8 @@ func startHeartbeatWriter(ctx context.Context, log *slog.Logger) error {
 	}
 }
 
-func writeHeartbeat(h supervisorhealth.Health, log *slog.Logger) {
-	if err := supervisorhealth.Write(edgedirs.HealthFile, h); err != nil {
+func writeHeartbeat(h Health, log *slog.Logger) {
+	if err := Write(edgedirs.HealthFile, h); err != nil {
 		log.Error("heartbeat write failed", "path", edgedirs.HealthFile, "err", err)
 	}
 }
