@@ -12,8 +12,7 @@ import (
 
 // TestDefaultSandbox_DenylistShape pins the default denylist (revised
 // 2026-05-08: read defaults to allow-everything-except-denylist instead
-// of an explicit allow-list). If the manifest adds / removes deny prefixes
-// without updating the default this fails so we see the gap.
+// of an explicit allow-list).
 func TestDefaultSandbox_DenylistShape(t *testing.T) {
 	sb := DefaultSandboxConfig()
 	mustDeny := []string{"/proc", "/sys", "/dev", "/run", "/etc/shadow", "/etc/sudoers"}

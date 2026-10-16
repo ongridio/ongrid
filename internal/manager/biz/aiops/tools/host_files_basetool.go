@@ -14,9 +14,8 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
 
-// host_files_basetool.go is PR-8 of the manager-side BaseTool
-// implementations of the three edge-scope filesystem inspection tools
-// declared in skills/host-files/SKILL.md. Each tool unmarshals the LLM
+// host_files_basetool.go implements the three edge-scope filesystem
+// inspection BaseTools. Each tool unmarshals the LLM
 // argsJSON, resolves device_id → host edge_id via the edge_devices
 // junction (devicebiz.EdgeDeviceRepo + EdgeDeviceRelationHost), forwards
 // the request through the frontier tunnel (Caller.Call), and returns the
@@ -135,8 +134,7 @@ const findLargeFilesWhenToUse = "When the user asks 'find large files' / 'top N 
 	"those answer 'how full is the disk', this answers 'which files are filling it'."
 
 // FindLargeFilesSchema is the JSON Schema of the tool's argument object.
-// Mirrors skills/host-files/SKILL.md's 调用规则 section verbatim. The
-// `paths` array is the batch knob — minItems=1, maxItems=16; the LLM
+// The `paths` array is the batch knob — minItems=1, maxItems=16; the LLM
 // is nudged via description to send 5..8 related paths per call.
 var FindLargeFilesSchema = json.RawMessage(`{
   "type": "object",

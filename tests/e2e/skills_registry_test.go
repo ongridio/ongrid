@@ -11,9 +11,7 @@
 //     ~18 个 BaseTool(query_promql / query_logql / query_traceql /
 //     host_bash / get_edge_summary / ...)也桥接进同一个 registry,所以
 //     线上数量 = 8 + bridged ≈ 20+ 条。
-//   - testenv 已经把 ONGRID_BUILTIN_SKILLS_ROOT 指到 repo 根 skills/
-//     目录,但那个目录里只有 SKILL.md (markdown),没有 skill.json
-//     (manifest),所以 SubprocessSkill loader 不会再追加任何条目。
+//   - testenv 不加载额外的 SKILL.md；内置工具目录由 Go 注册提供。
 //
 // 我们用 >= 10 这个阈值,既贴近 catalog "~18" 的预期,又留余量,
 // 哪怕未来某次重命名 / 删一个 BaseTool 也不会撞红。
@@ -31,7 +29,7 @@ import (
 )
 
 func TestSkills_RegistryListed_L1(t *testing.T) {
-	env := testenv.Start(t)
+	env := testenv.Start(t, testenv.WithEnv("ONGRID_SKILLS_ROOT", t.TempDir()))
 	pair := env.LoginAdmin()
 
 	// ─── unauth: bearer-less GET must 401 ─────────────────────────────────
@@ -101,6 +99,11 @@ func TestSkills_RegistryListed_L1(t *testing.T) {
 			t.Fatalf("GET /v1/skills: item missing 'key' field: %v", item)
 		}
 		seen[key] = item
+	}
+	for _, key := range []string{"host_bash", "host_find_large_files", "host_du_summary", "host_stat_file", "host_restart_service"} {
+		if _, ok := seen[key]; !ok {
+			t.Errorf("builtin tool %q missing from catalog without SKILL.md prompts", key)
+		}
 	}
 	matched := 0
 	matchedKeys := []string{}

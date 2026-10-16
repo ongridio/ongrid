@@ -10,17 +10,10 @@
 //     bare relative paths all reject. Empty path also rejects — every
 //     handler that accepts a path requires it explicitly.
 //
-//  2. Binary allow-list: only the three commands declared in
-//     skills/host-files/SKILL.md (find / du / stat — plus ls reserved
-//     for future use) are resolvable. The handler asks the sandbox for
+//  2. Binary allow-list: only commands in AllowedBinaries are resolvable.
+//     The handler asks the sandbox for
 //     a binary by short name; the sandbox returns the absolute path
 //     resolved at startup. Anything not in the allow-list errors.
-//
-// Default allow-list mirrors `edge_capabilities.filesystem.read.path` in
-// SKILL.md verbatim (/data /var /opt /home /tmp /srv) so the manifest is
-// the single source of truth in spirit; if the two ever drift the unit
-// test in sandbox_test.go::TestDefaultSandbox_MatchesSkillManifest will
-// fail to remind us to bring them back into sync.
 package host_files
 
 import (
@@ -32,8 +25,7 @@ import (
 )
 
 // SandboxConfig defines what the host_files plugin is allowed to access.
-// Sourced from the SKILL.md edge_capabilities or operator override at
-// edge boot.
+// Defaults are defined below and may be overridden at edge boot.
 //
 // Path policy (revised 2026-05-08): read operations default to "ALLOW
 // everything except DeniedReadPaths". The previous allowlist semantics
@@ -91,9 +83,7 @@ var DefaultDeniedReadPaths = []string{
 	// uninteresting; not denied — operators may want to inspect.
 }
 
-// DefaultSandboxConfig returns the default config matching
-// skills/host-files/SKILL.md's `edge_capabilities` block. Read defaults
-// to allow-everything-except-denylist (see DefaultDeniedReadPaths).
+// DefaultSandboxConfig allows reads except for DefaultDeniedReadPaths.
 // Binary discovery best-efforts each candidate; missing binaries simply
 // do not appear in AllowedBinaries (calls to ResolveBinary then error
 // cleanly with a message the LLM can render).

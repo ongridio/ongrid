@@ -72,8 +72,8 @@ func (r *SkillRegistry) Load(skillsRoot string) error {
 // All() observes "nothing"). A non-existent skillsRoot is not an error
 // — same convention as Load.
 //
-// Variadic extras lets the marketplace pass (builtinRoot, userRoot) so
-// the image-baked built-in skills survive a hot-reload triggered by a
+// Variadic extras lets the marketplace pass additional roots so
+// separately configured skills survive a hot-reload triggered by a
 // pack install — a single-root Reload would otherwise drop them.
 func (r *SkillRegistry) Reload(skillsRoot string, extras ...string) error {
 	res, err := LoadAll(LoadAllConfig{SkillsRoot: skillsRoot, ExtraSkillsRoots: extras})

@@ -29,12 +29,10 @@ type Config struct {
 	// TenantSkillsRoot nil.
 	SystemSkillsRoot string
 
-	// BuiltinSkillsRoots / BuiltinAgentsRoots are the image-baked
-	// directories the manager loaded at boot (`/skills`, `/agents` in
-	// the production container). They're passed back to the skill /
-	// agent registries on every Reload so a marketplace install doesn't
-	// drop the built-in skills (host_files, restart_service, bash) just
-	// because Reload's primary arg is the user-pack root.
+	// BuiltinSkillsRoots / BuiltinAgentsRoots are additional directories
+	// loaded at boot (optional skill roots and the image-baked /agents).
+	// Pass them on every Reload so installing a marketplace pack preserves
+	// the separately configured skills and agent personas.
 	BuiltinSkillsRoots []string
 	BuiltinAgentsRoots []string
 
@@ -518,9 +516,8 @@ func (uc *Usecase) Registries(_ context.Context, _ Caller) AllowedRegistries {
 // uninstall already mutated disk + DB, the operator deserves to see
 // the success even if the next chat needs a manual restart.
 //
-// Both reloads pass the builtin roots so the image-baked
-// skills/agents (host_files, restart_service, bash, default agent
-// personas) survive the hot-reload triggered by a pack change.
+// Both reloads pass the additional roots so configured skills and agent
+// personas survive the hot-reload triggered by a pack change.
 func (uc *Usecase) reloadRegistries() {
 	if uc.skillReg != nil && uc.cfg.SystemSkillsRoot != "" {
 		// SkillRegistry.Reload extras are walked as skills roots; the

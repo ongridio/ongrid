@@ -23,8 +23,7 @@
 //   - Real `systemctl` requires root + dbus + a real failing service
 //     to test the failure path — out of scope for the SOP gating PR.
 //
-// The Default allow-list mirrors the SKILL.md `edge_capabilities`
-// process.exec entry plus the operator-curated unit list. Operators may
+// The default unit allow-list matches the manager-side BaseTool. Operators may
 // override at edge boot by constructing a SandboxConfig directly; the
 // Default is the one we ship.
 package restart_service
@@ -69,7 +68,7 @@ type SandboxConfig struct {
 }
 
 // DefaultSandboxConfig returns the production-default config. The unit
-// list mirrors the SKILL.md `[能力: restart_service]` body block:
+// list matches the manager-side BaseTool:
 // nginx / redis / prometheus / loki / tempo / grafana / mysql / ongrid.
 // Mocked = true while the real systemctl path is still TODO (PR-7
 // stub posture). The allow-list is intentionally narrow — the worst

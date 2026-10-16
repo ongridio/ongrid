@@ -43,8 +43,7 @@ import (
 	"github.com/ongridio/ongrid/internal/skill"
 )
 
-// Key is the skill's stable identifier. Lowercase-snake; same string
-// the SKILL.md frontmatter declares. Manager-side BaseTool routes by
+// Key is the skill's stable identifier. Manager-side BaseTool routes by
 // the wire tool name (ToolNameRestartService = "host_restart_service"); the
 // two are deliberately equal so audit logs and catalogs cross-link.
 const Key = "host_restart_service"

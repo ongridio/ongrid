@@ -1508,7 +1508,7 @@ func main() {
 	//     per provider id.
 	//   - Decorated BaseTool slice via Registry.BuildBaseTools +
 	//     AppendHostFilesTools, then Wrap'd with the standard chain.
-	//   - SkillRegistry / AgentRegistry from ./skills + ./agents
+	//   - SkillRegistry / AgentRegistry from configured skill roots + ./agents
 	//     (silent on missing dirs — fresh installs boot fine).
 	//   - chatruntime.Runtime, the cutover entry the service routes to.
 	// Mismatch / build errors fall back to legacy with a logged warning.
@@ -1629,8 +1629,8 @@ func main() {
 	}
 
 	// AgentRegistry + SkillRegistry are loaded UNCONDITIONALLY from
-	// ./agents + ./skills + the marketplace root. They're metadata — a
-	// persona description is just YAML+markdown — so the /v1/agents
+	// ./agents + configured skill roots + the marketplace root. These are
+	// YAML+markdown metadata, so the /v1/agents
 	// endpoint should populate even when the chat runtime can't build
 	// (no LLM provider configured yet, etc). This also lets the SPA
 	// render the assistant list on a fresh install so the operator can
@@ -2173,7 +2173,7 @@ func main() {
 	// Skill roots — see boot LoadAll block downstream for the full
 	// rationale. Defined here too because marketplace UC is wired
 	// before that block runs.
-	builtinSkillsRoot := firstNonEmpty(os.Getenv("ONGRID_BUILTIN_SKILLS_ROOT"), "./skills")
+	builtinSkillsRoot := os.Getenv("ONGRID_BUILTIN_SKILLS_ROOT")
 	builtinAgentsRoot := firstNonEmpty(os.Getenv("ONGRID_BUILTIN_AGENTS_ROOT"), "./agents")
 	marketplaceSkillsRoot := firstNonEmpty(os.Getenv("ONGRID_SKILLS_ROOT"), "/var/lib/ongrid/skills")
 	if err := os.MkdirAll(marketplaceSkillsRoot, 0o755); err != nil {
@@ -3946,7 +3946,7 @@ func (p *providerInjectingClient) Chat(ctx context.Context, req llm.ChatReq) (*l
 	return p.inner.Chat(ctx, req)
 }
 
-// loadBootstrapRegistries walks ./agents + ./skills + the marketplace
+// loadBootstrapRegistries walks ./agents + configured skills + the marketplace
 // skill root and returns populated registries. Called once at boot
 // regardless of kernel choice, so /v1/agents has data to render even
 // when the chat runtime can't build (no LLM provider, build failure).
@@ -3954,10 +3954,10 @@ func (p *providerInjectingClient) Chat(ctx context.Context, req llm.ChatReq) (*l
 // Env knobs mirror the values buildAIOpsRuntime used to read inline:
 //
 //	ONGRID_BUILTIN_AGENTS_ROOT  default ./agents
-//	ONGRID_BUILTIN_SKILLS_ROOT  default ./skills
+//	ONGRID_BUILTIN_SKILLS_ROOT  optional extra skills directory (no default)
 //	ONGRID_SKILLS_ROOT          default /var/lib/ongrid/skills (marketplace mutable root)
 func loadBootstrapRegistries(log *slog.Logger) (*aiopschatruntime.SkillRegistry, *aiopschatruntime.AgentRegistry) {
-	builtinSkillsRoot := firstNonEmpty(os.Getenv("ONGRID_BUILTIN_SKILLS_ROOT"), "./skills")
+	builtinSkillsRoot := os.Getenv("ONGRID_BUILTIN_SKILLS_ROOT")
 	builtinAgentsRoot := firstNonEmpty(os.Getenv("ONGRID_BUILTIN_AGENTS_ROOT"), "./agents")
 	marketplaceSkillsRoot := firstNonEmpty(os.Getenv("ONGRID_SKILLS_ROOT"), "/var/lib/ongrid/skills")
 	skillReg := aiopschatruntime.NewSkillRegistry()
