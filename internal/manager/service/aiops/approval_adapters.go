@@ -205,76 +205,6 @@ func (s HostBashProposer) ProposeAndAwait(ctx context.Context, deviceIDs []uint6
 	return CloudBashProposer{Usecase: s.Usecase}.awaitDecision(ctx, a.ID)
 }
 
-// K8sActionProposer gives the default legacy kernel the same synchronous
-// propose-confirm UX used by host_bash. The tool has already consumed a
-// matching dry-run token before this method is called; no Kubernetes write is
-// dispatched until the approval executor runs.
-type K8sActionProposer struct{ Usecase *managerbizapproval.Usecase }
-
-func (s K8sActionProposer) ProposeAndAwait(ctx context.Context, args aiopstools.ExecuteK8sActionArgs, sessionID, toolCallID string, userID uint64) (string, error) {
-	command := formatK8sActionApproval(args)
-	title := aiopstools.ToolNameExecuteK8sAction + " " + command
-	if len(title) > 120 {
-		title = title[:120] + "…"
-	}
-	summary := command
-	if reason := strings.TrimSpace(args.Reason); reason != "" {
-		summary += " reason=" + reason
-	}
-	a, err := s.Usecase.Propose(ctx, managerbizapproval.ProposeInput{
-		Kind:       aiopstools.ToolNameExecuteK8sAction,
-		Title:      title,
-		Summary:    summary,
-		Payload:    K8sActionPayload{Args: args, UserID: userID, SessionID: sessionID},
-		Source:     "agent",
-		SessionID:  sessionID,
-		ProposedBy: userID,
-	})
-	if err != nil {
-		return "", err
-	}
-	if emit := aiopschatruntime.EmitFromContext(ctx); emit != nil {
-		emit(aiopschatruntime.Event{
-			Type: aiopschatruntime.EventApprovalPending,
-			Approval: &aiopschatruntime.ApprovalPending{
-				ApprovalID: a.ID,
-				ToolCallID: toolCallID,
-				Kind:       aiopstools.ToolNameExecuteK8sAction,
-				ToolName:   aiopstools.ToolNameExecuteK8sAction,
-				Command:    command,
-			},
-		})
-	}
-	return CloudBashProposer{Usecase: s.Usecase}.awaitDecision(ctx, a.ID)
-}
-
-func formatK8sActionApproval(args aiopstools.ExecuteK8sActionArgs) string {
-	target := strings.TrimSpace(args.Name)
-	if namespace := strings.TrimSpace(args.Namespace); namespace != "" {
-		target = namespace + "/" + target
-	}
-	parts := []string{fmt.Sprintf("cluster_id=%d", args.ClusterID)}
-	for _, value := range []string{args.Action, args.Kind, target} {
-		if value = strings.TrimSpace(value); value != "" {
-			parts = append(parts, value)
-		}
-	}
-	if args.Replicas != nil {
-		parts = append(parts, fmt.Sprintf("replicas=%d", *args.Replicas))
-	}
-	if rv := strings.TrimSpace(args.ExpectedResourceVersion); rv != "" {
-		parts = append(parts, "resource_version="+rv)
-	}
-	return strings.Join(parts, " ")
-}
-
-// awaitDecision blocks until the approval row reaches a terminal state, then
-// returns the tool result string the ReAct loop continues with. The approve
-// REST handler runs the executor synchronously and records the result, so a
-// poll only ever reads it back — there is no double execution. "approved"
-// (executor mid-run, result not yet stored) is treated as non-terminal:
-// cloud_bash always has an executor, so it transitions to executed/failed
-// shortly; the timeout is the backstop.
 func (s CloudBashProposer) awaitDecision(ctx context.Context, id string) (string, error) {
 	deadline := time.Now().Add(ApprovalWaitTimeout)
 	ticker := time.NewTicker(approvalPollInterval)
@@ -282,9 +212,10 @@ func (s CloudBashProposer) awaitDecision(ctx context.Context, id string) (string
 	for {
 		select {
 		case <-ctx.Done():
-			// Stream closed (user navigated away) — stop waiting. The
-			// approval remains pending in the inbox for later decision.
-			return `{"status":"cancelled","message":"The approval wait was interrupted; the command was not run."}`, nil
+			if err := invalidateApproval(ctx, s.Usecase, id, "The originating request was cancelled; submit a new request."); err != nil {
+				return "", err
+			}
+			return `{"status":"cancelled","message":"The approval wait was interrupted. Check the approval record for the final execution status."}`, nil
 		case <-ticker.C:
 			a, err := s.Usecase.Get(ctx, id)
 			if err != nil {
@@ -305,6 +236,9 @@ func (s CloudBashProposer) awaitDecision(ctx context.Context, id string) (string
 				return `{"status":"rejected","message":"The user rejected this command; it was not run. Do not retry it without new instructions."}`, nil
 			}
 			if time.Now().After(deadline) {
+				if err := invalidateApproval(ctx, s.Usecase, id, "The approval wait expired; submit a new request."); err != nil {
+					return "", err
+				}
 				return `{"status":"timeout","message":"No approval within 30 minutes; the command was not run."}`, nil
 			}
 		}

@@ -168,103 +168,6 @@ func TestExecuteK8sActionToolCallsControllerEdge(t *testing.T) {
 	}
 }
 
-type recordingK8sActionProposer struct {
-	calls      int
-	args       ExecuteK8sActionArgs
-	sessionID  string
-	toolCallID string
-	userID     uint64
-	result     string
-}
-
-func (p *recordingK8sActionProposer) ProposeAndAwait(_ context.Context, args ExecuteK8sActionArgs, sessionID, toolCallID string, userID uint64) (string, error) {
-	p.calls++
-	p.args = args
-	p.sessionID = sessionID
-	p.toolCallID = toolCallID
-	p.userID = userID
-	return p.result, nil
-}
-
-func TestExecuteK8sActionToolLegacyRequiresDryRunThenHumanApproval(t *testing.T) {
-	fc := &fakeCaller{respBody: mustMarshal(tunnel.KubernetesActionResponse{
-		ClusterID: 1, Action: "scale", Kind: "Deployment", APIVersion: "apps/v1",
-		Namespace: "default", Name: "api", DryRun: true,
-		Preflight: tunnel.KubernetesActionPreflight{
-			Kind: "Deployment", APIVersion: "apps/v1", Namespace: "default", Name: "api",
-			UID: "deploy-uid", ResourceVersion: "10", Exists: true,
-		},
-	})}
-	proposer := &recordingK8sActionProposer{result: `{"status":"executed","result":"approved"}`}
-	tool := NewExecuteK8sActionToolWithProposer(fc, newFakeK8sSnapshotReader(), proposer, slog.Default())
-	ctx := tenantctx.With(context.Background(), tenantctx.Tenant{UserID: 7, Role: "admin"})
-	ctx = basetool.WithSessionID(ctx, "session-1")
-	ctx = basetool.WithToolCallID(ctx, "tool-row-1")
-
-	dryRunOut, err := tool.InvokableRun(ctx, `{"cluster_id":1,"action":"scale","kind":"Deployment","namespace":"default","name":"api","replicas":3,"dry_run":true,"reason":"capacity"}`)
-	if err != nil {
-		t.Fatalf("dry-run InvokableRun: %v", err)
-	}
-	var preflight executeK8sActionResponse
-	if err := json.Unmarshal([]byte(dryRunOut), &preflight); err != nil {
-		t.Fatalf("decode preflight: %v", err)
-	}
-	if preflight.PreflightToken == "" || preflight.ExpectedResourceVersion != "10" {
-		t.Fatalf("missing preflight grant: %+v", preflight)
-	}
-
-	replicas := 3
-	applyArgs := ExecuteK8sActionArgs{
-		ClusterID: 1, Action: "scale", Kind: "Deployment", Namespace: "default", Name: "api",
-		Replicas: &replicas, ExpectedResourceVersion: preflight.ExpectedResourceVersion,
-		PreflightToken: preflight.PreflightToken, Reason: "capacity",
-	}
-	applyBody := mustMarshal(applyArgs)
-
-	blocked, err := tool.InvokableRun(ctx, string(applyBody))
-	if err != nil {
-		t.Fatalf("write-disabled invocation: %v", err)
-	}
-	if !strings.Contains(blocked, `"status":"blocked"`) || proposer.calls != 0 || fc.calls != 1 {
-		t.Fatalf("write-disabled result=%s proposer.calls=%d controller.calls=%d", blocked, proposer.calls, fc.calls)
-	}
-
-	ctx = basetool.WithHostWriteAllowed(ctx, true)
-	result, err := tool.InvokableRun(ctx, string(applyBody))
-	if err != nil {
-		t.Fatalf("approval proposal: %v", err)
-	}
-	if result != proposer.result || proposer.calls != 1 {
-		t.Fatalf("proposal result=%s calls=%d", result, proposer.calls)
-	}
-	if proposer.sessionID != "session-1" || proposer.toolCallID != "tool-row-1" || proposer.userID != 7 {
-		t.Fatalf("proposal metadata: session=%q tool=%q user=%d", proposer.sessionID, proposer.toolCallID, proposer.userID)
-	}
-	if fc.calls != 1 {
-		t.Fatalf("write dispatched before approval: controller.calls=%d", fc.calls)
-	}
-	if _, err := tool.InvokableRun(ctx, string(applyBody)); err == nil || !strings.Contains(err.Error(), "already used") {
-		t.Fatalf("reused preflight error=%v", err)
-	}
-
-	fc.respBody = mustMarshal(tunnel.KubernetesActionResponse{
-		ClusterID: 1, Action: "scale", Kind: "Deployment", APIVersion: "apps/v1",
-		Namespace: "default", Name: "api", Applied: true,
-		Preflight: tunnel.KubernetesActionPreflight{
-			Kind: "Deployment", APIVersion: "apps/v1", Namespace: "default", Name: "api",
-			UID: "deploy-uid", ResourceVersion: "10", Exists: true,
-		},
-		ResultResourceVersion: "11",
-	})
-	approvedOut, err := tool.RunApproved(ctx, proposer.args, proposer.userID, proposer.sessionID)
-	if err != nil {
-		t.Fatalf("RunApproved: %v", err)
-	}
-	if !strings.Contains(approvedOut, `"applied":true`) || fc.calls != 2 {
-		t.Fatalf("approved output=%s controller.calls=%d", approvedOut, fc.calls)
-	}
-}
-
 func TestExecuteK8sActionToolRejectsWriteWithoutPreflight(t *testing.T) {
 	fc := &fakeCaller{}
 	tool := NewExecuteK8sActionTool(fc, newFakeK8sSnapshotReader(), slog.Default())
@@ -422,17 +325,14 @@ func TestNormalizeExecuteK8sActionRejectsDrainOptionBounds(t *testing.T) {
 	}
 }
 
-func TestExecuteK8sActionRegisteredForLegacyOnlyWithApprovalProposer(t *testing.T) {
+func TestExecuteK8sActionOnlyRegisteredInGraphCatalog(t *testing.T) {
 	reg := NewRegistry(&fakeCaller{}, nil, nil, nil, nil, nil, nil, slog.Default())
 	reg.SetK8sSnapshotReader(newFakeK8sSnapshotReader())
 
 	if containsName(schemaNames(reg.Schemas()), ToolNameExecuteK8sAction) {
 		t.Fatalf("legacy closure registry exposed %q without approval proposer", ToolNameExecuteK8sAction)
 	}
-	reg.SetK8sActionProposer(&recordingK8sActionProposer{})
-	if !containsName(schemaNames(reg.Schemas()), ToolNameExecuteK8sAction) {
-		t.Fatalf("legacy closure registry missing approval-protected %q", ToolNameExecuteK8sAction)
-	}
+
 	names := toolInfoNames(t, reg.BuildBaseTools().AllTools())
 	if !containsName(names, ToolNameExecuteK8sAction) {
 		t.Fatalf("base tool registry missing %q: %v", ToolNameExecuteK8sAction, names)

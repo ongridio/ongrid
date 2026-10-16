@@ -161,15 +161,12 @@ func bootstrapExtensions(rootCtx context.Context, cfg *config.Config, log *slog.
 		Frontier:    tunnel.fbClient,
 		Edges:       devices.edgeUC,
 		Devices:     devices.deviceUC,
-		Settings:    settings.settingSvc,
-		Tools:       aiops.toolsReg,
 		Marketplace: mpUC,
 		MCP:         mcpUC,
 		Log:         log,
 	}).Register(approvalUC)
 	aiops.toolsReg.SetCloudBashProposer(managersvcaiops.CloudBashProposer{Usecase: approvalUC})
 	aiops.toolsReg.SetHostBashProposer(managersvcaiops.HostBashProposer{Usecase: approvalUC})
-	aiops.toolsReg.SetK8sActionProposer(managersvcaiops.K8sActionProposer{Usecase: approvalUC})
 	// The Actions page is a read-only projection over two immutable audit
 	// sources: graph ReviewGate decisions and legacy human approvals.
 	k8sHandler := managerserverk8s.NewHandler(devices.k8sSvc, managersvck8s.NewActionAuditReader(aiops.mutatingProposalRepo, approvalUC))

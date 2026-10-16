@@ -9,6 +9,7 @@ package approval
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -31,8 +32,8 @@ type Repo interface {
 
 // Executor runs an approved action's payload and returns a result blob.
 // Registered per Kind by the producer (e.g. cloud-shell registers
-// "shell_command"). Absent executor → Approve just marks the row approved
-// (no execution), which is safe.
+// "shell_command"). Missing executors fail the action explicitly; historical
+// approval records never imply that an unavailable action was executed.
 type Executor func(ctx context.Context, payloadJSON string) (resultJSON string, err error)
 
 // Usecase is the inbox facade.
@@ -119,21 +120,32 @@ func (u *Usecase) Approve(ctx context.Context, approverID uint64, id string) (*m
 	if err != nil {
 		return nil, err
 	}
-	exec, ok := u.executors[a.Kind]
-	if !ok {
-		u.log.Warn("approved but no executor for kind", slog.String("id", id), slog.String("kind", a.Kind))
-		return a, nil
+	exec := u.executors[a.Kind]
+	var res string
+	var runErr error
+	if exec == nil {
+		runErr = fmt.Errorf("approval executor for %q is unavailable; submit a new request", a.Kind)
+	} else {
+		res, runErr = exec(ctx, a.PayloadJSON)
 	}
-	res, runErr := exec(ctx, a.PayloadJSON)
 	status := model.StatusExecuted
 	if runErr != nil {
 		status = model.StatusFailed
-		res = fmt.Sprintf(`{"error":%q}`, runErr.Error())
+		payload, err := json.Marshal(struct {
+			Error string `json:"error"`
+		}{Error: runErr.Error()})
+		if err != nil {
+			return nil, fmt.Errorf("encode approval failure: %w", err)
+		}
+		res = string(payload)
 	}
 	if err := u.repo.SetResult(ctx, id, status, res, time.Now().UTC()); err != nil {
-		u.log.Warn("set approval result failed", slog.String("id", id), slog.Any("err", err))
+		return nil, fmt.Errorf("persist approval execution result: %w", err)
 	}
-	a, _ = u.repo.Get(ctx, id)
+	a, err = u.repo.Get(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("read completed approval: %w", err)
+	}
 	return a, nil
 }
 
@@ -144,4 +156,29 @@ func (u *Usecase) Reject(ctx context.Context, approverID uint64, id, reason stri
 		"status": model.StatusRejected, "approved_by": approverID,
 		"reason": strings.TrimSpace(reason), "decided_at": now,
 	})
+}
+
+// InvalidatePending retires a proposal whose originating request can no longer
+// execute. The conditional decision never overwrites approval or rejection.
+func (u *Usecase) InvalidatePending(ctx context.Context, id, reason string) error {
+	result, err := json.Marshal(struct {
+		Error string `json:"error"`
+	}{Error: reason})
+	if err != nil {
+		return fmt.Errorf("encode invalidated approval: %w", err)
+	}
+	err = u.repo.Decide(ctx, id, map[string]any{"status": model.StatusFailed, "reason": reason, "result_json": string(result), "decided_at": time.Now().UTC()})
+	if errors.Is(err, errs.ErrNotFound) {
+		row, readErr := u.repo.Get(ctx, id)
+		if readErr != nil {
+			return fmt.Errorf("read invalidated approval: %w", readErr)
+		}
+		if row.Status != model.StatusPending {
+			return nil
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("invalidate pending approval: %w", err)
+	}
+	return nil
 }

@@ -119,6 +119,16 @@ func TestMCPApprovalLifecycle(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatal("approval did not complete")
 			}
+
+			if decision == "cancel" {
+				row, err := uc.Get(context.Background(), id)
+				if err != nil || row.Status != "failed" {
+					t.Fatalf("cancelled approval=%+v err=%v", row, err)
+				}
+				if _, err := uc.Approve(context.Background(), 7, id); err == nil {
+					t.Fatal("cancelled proposal accepted a late approval")
+				}
+			}
 			wantCalls := int32(1)
 			if decision == "reject" || decision == "cancel" {
 				wantCalls = 0

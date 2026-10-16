@@ -95,7 +95,10 @@ func (b *HumanApprovalBroker) ProposeAndAwait(ctx context.Context, req aiopstool
 		select {
 		case <-ctx.Done():
 			cleanup()
-			return `{"status":"cancelled","message":"The approval wait was interrupted; the action was not run."}`, nil
+			if err := invalidateApproval(ctx, uc, a.ID, "The originating request was cancelled; submit a new request."); err != nil {
+				return "", err
+			}
+			return `{"status":"cancelled","message":"The approval wait was interrupted. Check the approval record for the final execution status."}`, nil
 		case <-ticker.C:
 			row, getErr := uc.Get(ctx, a.ID)
 			if getErr != nil {
@@ -114,6 +117,9 @@ func (b *HumanApprovalBroker) ProposeAndAwait(ctx context.Context, req aiopstool
 			}
 			if time.Now().After(deadline) {
 				cleanup()
+				if err := invalidateApproval(ctx, uc, a.ID, "The approval wait expired; submit a new request."); err != nil {
+					return "", err
+				}
 				return `{"status":"timeout","message":"No approval within 30 minutes; the action was not run."}`, nil
 			}
 		}
@@ -140,4 +146,10 @@ func truncateApprovalTitle(title string) string {
 		return title[:100] + "…"
 	}
 	return title
+}
+
+func invalidateApproval(ctx context.Context, uc *managerbizapproval.Usecase, id, reason string) error {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	return uc.InvalidatePending(cleanupCtx, id, reason)
 }

@@ -15,7 +15,6 @@ import (
 	managerbizmarketplace "github.com/ongridio/ongrid/internal/manager/biz/marketplace"
 	managerbizmcp "github.com/ongridio/ongrid/internal/manager/biz/mcp"
 	managerbizsecret "github.com/ongridio/ongrid/internal/manager/biz/secret"
-	managerbizsetting "github.com/ongridio/ongrid/internal/manager/biz/setting"
 	managersvcfb "github.com/ongridio/ongrid/internal/manager/service/frontierbound"
 	"github.com/ongridio/ongrid/internal/pkg/runner"
 	"github.com/ongridio/ongrid/internal/pkg/workspace"
@@ -30,8 +29,6 @@ type ApprovalExecutors struct {
 	Frontier    *managersvcfb.Client
 	Edges       *managerbizedge.Usecase
 	Devices     *managerbizdevice.Usecase
-	Settings    *managerbizsetting.Service
-	Tools       *aiopstools.Registry
 	Marketplace *managerbizmarketplace.Usecase
 	MCP         *managerbizmcp.Usecase
 	Log         *slog.Logger
@@ -114,16 +111,6 @@ func (e ApprovalExecutors) Register(approvalUC *managerbizapproval.Usecase) {
 		}
 		tool := aiopstools.NewBashToolWithProposer(e.Frontier, e.Edges, e.Devices, nil, e.Log)
 		return tool.RunApproved(ctx, p.DeviceIDs, p.Command, p.TimeoutSeconds)
-	})
-	approvalUC.RegisterExecutor(aiopstools.ToolNameExecuteK8sAction, func(ctx context.Context, payloadJSON string) (string, error) {
-		var p K8sActionPayload
-		if err := json.Unmarshal([]byte(payloadJSON), &p); err != nil {
-			return "", fmt.Errorf("decode %s approval payload: %w", aiopstools.ToolNameExecuteK8sAction, err)
-		}
-		if !e.Settings.AgentWriteEnabled(ctx) {
-			return "", fmt.Errorf("%s: Agent write actions are disabled", aiopstools.ToolNameExecuteK8sAction)
-		}
-		return e.Tools.RunApprovedK8sAction(ctx, p.Args, p.UserID, p.SessionID)
 	})
 	// HLD-018 P2: mcp_call executor — on approve, connect the server and run
 	// the tool. Trusted servers skip this and run synchronously in the tool.

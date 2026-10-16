@@ -139,8 +139,6 @@ type Registry struct {
 	// k8sSnapshot feeds query_k8s_snapshot. It reads manager DB snapshots,
 	// not the live Kubernetes API.
 	k8sSnapshot           K8sSnapshotReader
-	k8sActionProposer     K8sActionProposer
-	legacyK8sActionTool   *ExecuteK8sActionTool
 	packetCapture         PacketCaptureCreator
 	packetOperationCreate PacketCaptureOperationCreator
 
@@ -154,15 +152,6 @@ func (r *Registry) SetCloudBashProposer(p CloudBashProposer) { r.cloudBashPropos
 
 // SetHostBashProposer wires mutating host_bash commands to the approval inbox.
 func (r *Registry) SetHostBashProposer(p HostBashProposer) { r.hostBashProposer = p }
-
-// SetK8sActionProposer wires the default legacy kernel to the human approval
-// inbox. The tool is registered only when caller, snapshot reader, and
-// proposer are all available, so a partial boot never exposes an unfulfillable
-// or approval-bypassing Kubernetes write surface.
-func (r *Registry) SetK8sActionProposer(p K8sActionProposer) {
-	r.k8sActionProposer = p
-	r.registerLegacyK8sAction()
-}
 
 // SetNotificationSender wires send_notification → channel store + notify router.
 func (r *Registry) SetNotificationSender(s NotificationSender) { r.notificationSender = s }
@@ -185,7 +174,6 @@ func (r *Registry) SetPacketCaptureOperationCreator(create PacketCaptureOperatio
 // NewRegistry's already-heavy constructor.
 func (r *Registry) SetK8sSnapshotReader(k K8sSnapshotReader) {
 	r.k8sSnapshot = k
-	r.registerLegacyK8sAction()
 	if k != nil {
 		r.Register(Tool{
 			Name:        ToolNameQueryK8sSnapshot,
@@ -208,38 +196,6 @@ func (r *Registry) SetK8sSnapshotReader(k K8sSnapshotReader) {
 			})
 		}
 	}
-}
-
-func (r *Registry) registerLegacyK8sAction() {
-	delete(r.tools, ToolNameExecuteK8sAction)
-	r.legacyK8sActionTool = nil
-	if r.caller == nil || r.k8sSnapshot == nil || r.k8sActionProposer == nil {
-		return
-	}
-	tool := NewExecuteK8sActionToolWithProposer(r.caller, r.k8sSnapshot, r.k8sActionProposer, r.log)
-	r.legacyK8sActionTool = tool
-	r.Register(Tool{
-		Name:        ToolNameExecuteK8sAction,
-		Description: ExecuteK8sActionDescription,
-		Schema:      ExecuteK8sActionSchema,
-		Execute: func(ctx context.Context, args json.RawMessage) (ExecuteResult, error) {
-			out, err := tool.InvokableRun(ctx, string(args))
-			if err != nil {
-				return ExecuteResult{}, err
-			}
-			return ExecuteResult{ResultJSON: json.RawMessage(out)}, nil
-		},
-	})
-}
-
-// RunApprovedK8sAction executes an exact payload after the approval usecase
-// has recorded an admin decision. It deliberately reuses the same tool object
-// that issued and consumed the legacy preflight grant.
-func (r *Registry) RunApprovedK8sAction(ctx context.Context, args ExecuteK8sActionArgs, userID uint64, sessionID string) (string, error) {
-	if r.legacyK8sActionTool == nil {
-		return "", fmt.Errorf("%s: legacy approval executor is not configured", ToolNameExecuteK8sAction)
-	}
-	return r.legacyK8sActionTool.RunApproved(ctx, args, userID, sessionID)
 }
 
 // SetAuditLister wires the audit query seam consumed by
