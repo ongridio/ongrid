@@ -4,12 +4,11 @@ import (
 	"context"
 	"time"
 
-	aiopschatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/chatruntime"
 	"github.com/ongridio/ongrid/internal/pkg/prom"
 )
 
 // RunWorkerMetrics samples active worker sessions until shutdown.
-func RunWorkerMetrics(ctx context.Context, runtime *aiopschatruntime.Runtime) error {
+func RunWorkerMetrics(ctx context.Context, runtime interface{ CountWorkersByStatus() (running, pending int) }) error {
 	t := time.NewTicker(15 * time.Second)
 	defer t.Stop()
 	for {

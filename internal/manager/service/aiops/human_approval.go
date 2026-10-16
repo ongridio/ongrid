@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	aiopschatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/chatruntime"
+	aiopschatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/contract"
 	aiopstoolsdec "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/decorators"
 	managerbizapproval "github.com/ongridio/ongrid/internal/manager/biz/approval"
 )

@@ -54,8 +54,8 @@ func runWorkers(rootCtx context.Context, cfg *config.Config, log *slog.Logger, n
 	// would have lit up here at running > 10 for hours. Interval is 15s
 	// because workers are short-lived and an orphan is unusual; faster
 	// polling would just thrash the mutex.
-	if runtime.chatRT != nil {
-		eg.Go(func() error { return managersvcaiops.RunWorkerMetrics(egCtx, runtime.chatRT) })
+	if runtime.aiopsRuntime != nil {
+		eg.Go(func() error { return managersvcaiops.RunWorkerMetrics(egCtx, runtime.aiopsRuntime) })
 	}
 
 	// Packet captures outlive the HTTP/SSE turn that created them. Register

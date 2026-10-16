@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	aiopschatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/chatruntime"
 	aiopstools "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools"
 	aiopstoolsbase "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	aiopstoolsdec "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/decorators"
@@ -70,7 +69,7 @@ func bootstrapExtensions(rootCtx context.Context, cfg *config.Config, log *slog.
 	// the next chatruntime construction picks the disk state up.
 	var mpSkillReg managerbizmarketplace.SkillRegistry
 	var mpAgentReg managerbizmarketplace.AgentRegistry
-	if rt, ok := runtime.aiopsRuntime.(*aiopschatruntime.Runtime); ok && rt != nil {
+	if rt := runtime.chatRT; rt != nil {
 		if sk := rt.SkillRegistry(); sk != nil {
 			mpSkillReg = sk
 		}

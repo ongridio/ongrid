@@ -22,6 +22,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	biz "github.com/ongridio/ongrid/internal/manager/biz/aiops"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/contract"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/graph"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/graph/callbacks"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/toolreplay"
@@ -32,119 +33,24 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/tracing"
 )
 
-// Mention 是运行时的 mention 输入；Service 从 chatprotocol 转换。
-type Mention struct {
-	Type  string
-	ID    string
-	Label string
-}
-
-// MentionResolver hydrates each @-mention into one bullet line. nil disables inlining.
-type MentionResolver interface {
-	Resolve(ctx context.Context, mentions []Mention) []string
-}
-
-// EventType enumerates streaming events emitted by the runtime. The
-// values are byte-equal to the legacy agent.EventType strings so the
-// SSE adapter at the service layer can route both kernels through
-// the same wire format. New event names introduced in PR-6
-// (assistant_start / assistant_delta / assistant_end) are NOT
-// surfaced through this enum yet — the cutover keeps the legacy
-// frame names so the SPA round-trips without changes.
-type EventType string
+// Public protocol aliases preserve existing callers while ownership moves to contract.
+type Mention = contract.Mention
+type MentionResolver = contract.MentionResolver
+type EventType = contract.EventType
+type AssistantEvent = contract.AssistantEvent
+type ToolEvent = contract.ToolEvent
+type Event = contract.Event
+type Emit = contract.Emit
+type Request = contract.Request
+type Reply = contract.Reply
 
 const (
-	// EventAssistant fires after every assistant turn is persisted.
-	EventAssistant EventType = "assistant"
-	// EventToolStart fires after a tool_call row is persisted as
-	// pending, before the tool actually runs.
-	EventToolStart EventType = "tool_start"
-	// EventToolEnd fires once the tool finishes (success/error/timeout).
-	EventToolEnd EventType = "tool_end"
-	// EventDone fires once at terminal success with the final Reply.
-	EventDone EventType = "done"
-	// EventError fires on terminal failure.
-	EventError EventType = "error"
+	EventAssistant = contract.EventAssistant
+	EventToolStart = contract.EventToolStart
+	EventToolEnd   = contract.EventToolEnd
+	EventDone      = contract.EventDone
+	EventError     = contract.EventError
 )
-
-// AssistantEvent describes one assistant turn's persisted row. Same
-// shape as legacy agent.AssistantEvent.
-type AssistantEvent struct {
-	Iteration        int
-	MessageID        string
-	Content          string
-	CreatedAt        time.Time
-	PendingToolCalls int
-}
-
-// ToolEvent describes one tool_call lifecycle event. Same shape as
-// legacy agent.ToolEvent.
-type ToolEvent struct {
-	ToolCallID string
-	Name       string
-	DeviceID   *uint64
-	Status     string
-	StartedAt  time.Time
-	EndedAt    *time.Time
-	DurationMs int64
-	Error      string
-	ArgsJSON   string
-	ResultJSON string
-}
-
-// Event is the streaming envelope. Mirrors legacy agent.Event so the
-// service-layer adapter can copy fields one-to-one without a switch.
-//
-// Notification carries the task_notification payload — set when
-// Type == EventTaskNotification and a background worker reaches a
-// terminal state. The SPA / SSE adapter renders it as a separate frame
-// type next to assistant / tool / done.
-type Event struct {
-	Type         EventType
-	Assistant    *AssistantEvent
-	Tool         *ToolEvent
-	Done         *Reply
-	Error        string
-	Notification *TaskNotification
-	// Approval carries the approval_pending payload — set when
-	// Type == EventApprovalPending and a blocking tool (cloud_bash) has
-	// queued a proposal and is awaiting the human decision (HLD-021).
-	Approval *ApprovalPending
-}
-
-// Emit is the streaming callback. nil-safe.
-type Emit func(Event)
-
-// Request bundles every per-call input the runtime needs.
-type Request struct {
-	SessionID string
-	UserID    uint64
-	// Role is the caller's system role (admin | user | viewer).
-	// gates the toolbag against this — viewer drops Class!=read so the
-	// LLM cannot reach mutating tools no matter what the persona allows.
-	Role             string
-	UserText         string
-	Attachments      []aiopsmodel.Attachment
-	Mentions         []Mention
-	Provider         string
-	Model            string
-	WebSearchEnabled bool
-	// Locale is the UI language ("en-US"/"zh-CN") the reply should use;
-	// threaded into graph.Input so the assembler adds a language directive.
-	Locale string
-	// Emit is the streaming sink. nil = no streaming (blocking call).
-	Emit Emit
-}
-
-// Reply is the terminal result returned by Handle. Mirrors the
-// legacy agent.Reply shape so the service layer can fan it back out
-// through the same DTO without translation losses.
-type Reply struct {
-	Message    *aiopsmodel.Message
-	Usage      llm.Usage
-	Iterations int
-	ToolCalls  []*aiopsmodel.ToolCall
-}
 
 // Config tunes runtime behaviour. ToolBag is the wrapped (decorated)
 // tool list; the runtime does NOT wrap tools itself — that's the
@@ -261,7 +167,7 @@ type Runtime struct {
 	log *slog.Logger
 
 	workersMu sync.Mutex
-	workers   map[string]*Worker
+	workers   map[string]*workerState
 
 	// toolMu protects cfg.ToolBag, which is updated when an MCP server is
 	// verified, edited, disabled, or deleted while chats are in flight.

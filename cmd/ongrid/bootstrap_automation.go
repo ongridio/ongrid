@@ -10,7 +10,6 @@ import (
 
 	"github.com/google/uuid"
 	aiopsinvestigator "github.com/ongridio/ongrid/internal/manager/biz/aiops/investigator"
-	aiopschatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/chatruntime"
 	managerbizalert "github.com/ongridio/ongrid/internal/manager/biz/alert"
 	"github.com/ongridio/ongrid/internal/manager/biz/alert/investigator"
 	managerbizflow "github.com/ongridio/ongrid/internal/manager/biz/flow"
@@ -81,7 +80,7 @@ func bootstrapAutomation(rootCtx context.Context, cfg *config.Config, log *slog.
 		rcaInvConcrete *investigator.Usecase
 	)
 	if os.Getenv("ONGRID_INVESTIGATOR_ENABLED") == "true" {
-		concreteRt, _ := runtime.aiopsRuntime.(*aiopschatruntime.Runtime)
+		concreteRt := runtime.aiopsRuntime
 		if concreteRt == nil {
 			log.Warn("structured RCA investigator skipped: chatruntime runtime not available")
 		} else {
@@ -145,7 +144,7 @@ func bootstrapAutomation(rootCtx context.Context, cfg *config.Config, log *slog.
 	reportRepo := managerreportdata.NewRepo(storage.db)
 	var reportGen managerbizreport.Generator
 	reportSchedulerReady := false
-	if reportRT, ok := runtime.aiopsRuntime.(*aiopschatruntime.Runtime); ok && reportRT != nil {
+	if reportRT := runtime.aiopsRuntime; reportRT != nil {
 		// Pass the prom query client for fleet resource trends; a typed-nil
 		// guard mirrors the tools wiring so a missing client stays a clean
 		// untyped nil (collector degrades Resource.Available=false).
@@ -195,7 +194,7 @@ func bootstrapAutomation(rootCtx context.Context, cfg *config.Config, log *slog.
 		Notify: managersvcflow.Notifier{Channels: alerts.alertRepo, Router: notifyRouter},
 		LLM:    managersvcflow.LLMRunner{Client: models.llmClient},
 	}
-	if flowRT, ok := runtime.aiopsRuntime.(*aiopschatruntime.Runtime); ok && flowRT != nil {
+	if flowRT := runtime.aiopsRuntime; flowRT != nil {
 		flowExec.Agent = managersvcflow.AgentRunner{Runtime: flowRT}
 	}
 	flowUC := managerbizflow.NewUsecase(flowRepo, flowRunRepo,

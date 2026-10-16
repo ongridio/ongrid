@@ -18,7 +18,7 @@ import (
 // Versioned policies must never silently delegate to another generation.
 func TestRuntimeVersionsDoNotImportEachOther(t *testing.T) {
 	const base = "github.com/ongridio/ongrid/internal/manager/biz/aiops/"
-	for _, version := range []string{"v1", "v2", "v3"} {
+	for _, version := range []string{"v1", "v2", "v3", "contract"} {
 		t.Run(version, func(t *testing.T) {
 			err := filepath.WalkDir(version, func(path string, entry fs.DirEntry, err error) error {
 				if err != nil {
@@ -36,7 +36,7 @@ func TestRuntimeVersionsDoNotImportEachOther(t *testing.T) {
 					if err != nil {
 						return err
 					}
-					if strings.HasPrefix(imported, base+"runtime/") && !strings.HasPrefix(imported, base+"runtime/"+version+"/") {
+					if strings.HasPrefix(imported, base+"runtime/") && imported != base+"runtime/contract" && !strings.HasPrefix(imported, base+"runtime/"+version+"/") {
 						t.Errorf("%s imports another runtime: %s", path, imported)
 					}
 					if imported == base+"graph" || strings.HasPrefix(imported, base+"graph/") || imported == base+"chatruntime" {

@@ -10,4 +10,4 @@
 
 每个版本独立持有 `chatruntime`（上下文、prompt、Worker、目录策略）和 `graph`（Eino 编排、工具适配、回调）。禁止版本间 import，`isolation_test.go` 在标准 Go 测试中检查该边界，并验证三版本指标注册共存。业务执行能力与基础设施继续共享；尚未声称三版本已可切换。
 
-验证：Linux 环境执行 `make test-agent-runtime`。不新增 schema/API/设置，不改变当前运行时选择；需要撤销本次隔离时回退该源码迁移提交即可。版本路由及管理设置的后续方案见 [RFC-009](../../../../../docs/rfc/RFC-009-agent-runtime-versions.md)。
+验证：Linux 环境执行 `make test-agent-runtime`。不新增 schema/API/设置，不改变当前运行时选择；需要撤销本次隔离时回退该源码迁移提交即可。执行入口已通过统一契约和路由，当前只注册 v3。会话持久化版本、旧版本装配及管理设置的后续方案见 [RFC-009](../../../../../docs/rfc/RFC-009-agent-runtime-versions.md)。

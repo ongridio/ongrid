@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	aiopschatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/chatruntime"
+	aiopschatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/contract"
 	aiopstools "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools"
 	managerbizapproval "github.com/ongridio/ongrid/internal/manager/biz/approval"
 	managerbizmcp "github.com/ongridio/ongrid/internal/manager/biz/mcp"

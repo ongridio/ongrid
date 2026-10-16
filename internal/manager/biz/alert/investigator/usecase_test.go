@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	chatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/chatruntime"
+	chatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/contract"
 	alertmodel "github.com/ongridio/ongrid/internal/manager/model/alert"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 )

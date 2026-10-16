@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/contract"
 	aiopschatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/chatruntime"
 	aiopstools "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools"
 	aiopstoolsbase "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
@@ -18,7 +19,7 @@ import (
 type runtimeModule struct {
 	bootstrapSkillReg   *aiopschatruntime.SkillRegistry
 	bootstrapAgentReg   *aiopschatruntime.AgentRegistry
-	aiopsRuntime        managersvcaiops.RuntimeHandler
+	aiopsRuntime        *managersvcaiops.RuntimeRouter
 	chatRT              *aiopschatruntime.Runtime
 	humanApprovalBroker *managersvcaiops.HumanApprovalBroker
 	aiopsSvc            *managersvcaiops.Service
@@ -40,11 +41,9 @@ func bootstrapRuntime(rootCtx context.Context, cfg *config.Config, log *slog.Log
 	bootstrapSkillReg, bootstrapAgentReg := loadBootstrapRegistries(log)
 
 	var (
-		aiopsRuntime managersvcaiops.RuntimeHandler
-		// chatRT keeps the concrete runtime handle so the ADR-026
-		// self-obs sampler ticker (eg.Go in the goroutine wiring below)
-		// can call CountWorkersByStatus. The interface-typed
-		// aiopsRuntime is what the chat service consumes.
+		aiopsRuntime *managersvcaiops.RuntimeRouter
+		// chatRT owns version-local catalog, persona and credential assembly.
+		// All external execution and worker metrics use aiopsRuntime.
 		chatRT *aiopschatruntime.Runtime
 	)
 	humanApprovalBroker := managersvcaiops.NewHumanApprovalBroker()
@@ -53,7 +52,12 @@ func bootstrapRuntime(rootCtx context.Context, cfg *config.Config, log *slog.Log
 		if rterr != nil {
 			log.Error("aiops runtime unavailable", slog.Any("err", rterr))
 		} else {
-			aiopsRuntime = rt
+			router, err := managersvcaiops.NewRuntimeRouter(contract.V3, map[contract.Version]managersvcaiops.RuntimeEngine{contract.V3: rt})
+			if err != nil {
+				log.Error("aiops runtime routing unavailable", slog.Any("err", err))
+			} else {
+				aiopsRuntime = router
+			}
 			chatRT = rt
 			// — wire the coordinator-only AgentTool /
 			// SendMessage / TaskStop trio. Two-step because of the
@@ -68,7 +72,7 @@ func bootstrapRuntime(rootCtx context.Context, cfg *config.Config, log *slog.Log
 			// unconditionally via coordinatorOnlyTools (see
 			// chatruntime/worker.go).
 			aiops.toolsReg.SetWorkerSpawner(
-				managersvcaiops.WorkerSpawner{Runtime: rt},
+				managersvcaiops.WorkerSpawner{Runtime: aiopsRuntime},
 				managersvcaiops.AgentRegistry{Inner: rt.AgentRegistry()},
 			)
 			// SendMessage / TaskStop are control-plane micro-ops; 15s
@@ -93,9 +97,9 @@ func bootstrapRuntime(rootCtx context.Context, cfg *config.Config, log *slog.Log
 				HumanApproval: humanApprovalBroker,
 			}
 			wrappedCoord := []aiopstoolsbase.BaseTool{
-				aiopstoolsdec.Wrap(aiopstools.NewAgentTool(managersvcaiops.WorkerSpawner{Runtime: rt}, managersvcaiops.AgentRegistry{Inner: rt.AgentRegistry()}, log), coordDepsDispatch),
-				aiopstoolsdec.Wrap(aiopstools.NewSendMessageTool(managersvcaiops.WorkerSpawner{Runtime: rt}, log), coordDepsFast),
-				aiopstoolsdec.Wrap(aiopstools.NewTaskStopTool(managersvcaiops.WorkerSpawner{Runtime: rt}, log), coordDepsFast),
+				aiopstoolsdec.Wrap(aiopstools.NewAgentTool(managersvcaiops.WorkerSpawner{Runtime: aiopsRuntime}, managersvcaiops.AgentRegistry{Inner: rt.AgentRegistry()}, log), coordDepsDispatch),
+				aiopstoolsdec.Wrap(aiopstools.NewSendMessageTool(managersvcaiops.WorkerSpawner{Runtime: aiopsRuntime}, log), coordDepsFast),
+				aiopstoolsdec.Wrap(aiopstools.NewTaskStopTool(managersvcaiops.WorkerSpawner{Runtime: aiopsRuntime}, log), coordDepsFast),
 			}
 			if err := rt.AppendToolBag(wrappedCoord); err != nil {
 				log.Error("append coordinator tools failed", slog.Any("err", err))

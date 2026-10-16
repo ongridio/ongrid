@@ -6,7 +6,6 @@ import (
 	"log/slog"
 
 	managerbizaiopsmentions "github.com/ongridio/ongrid/internal/manager/biz/aiops/mentions"
-	aiopschatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/chatruntime"
 	managerbizimbridge "github.com/ongridio/ongrid/internal/manager/biz/imbridge"
 	managerbizimbridgedingtalk "github.com/ongridio/ongrid/internal/manager/biz/imbridge/provider/dingtalk"
 	managerbizimbridgefeishu "github.com/ongridio/ongrid/internal/manager/biz/imbridge/provider/feishu"
@@ -97,7 +96,7 @@ func bootstrapIMBridge(rootCtx context.Context, log *slog.Logger, storage *stora
 	// Mirror the same wiring on the new graph kernel runtime when it
 	// was successfully constructed. Same searcher, two adapter shapes
 	// — see the type definitions at the bottom of this file.
-	if rt, ok := runtime.aiopsRuntime.(*aiopschatruntime.Runtime); ok && rt != nil {
+	if rt := runtime.chatRT; rt != nil {
 		rt.SetMentionResolver(managersvcaiops.ChatMentionResolver{Inner: mentionSearcher})
 	}
 

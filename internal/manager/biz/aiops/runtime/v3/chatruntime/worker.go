@@ -53,6 +53,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/contract"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/graph"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/graph/callbacks"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
@@ -63,180 +64,30 @@ import (
 
 // WorkerStatus enumerates the worker state machine. See package header
 // for the transition diagram.
-type WorkerStatus string
+type WorkerStatus = contract.WorkerStatus
+type Worker = contract.Worker
+type SpawnRequest = contract.SpawnRequest
+type TaskNotification = contract.TaskNotification
+type ApprovalPending = contract.ApprovalPending
 
 const (
-	// WorkerStatusPending — accepted but not yet started. Observable
-	// only in tests that intercept between SpawnWorker accept and goroutine
-	// scheduling; in production this state is essentially transient.
-	WorkerStatusPending WorkerStatus = "pending"
-	// WorkerStatusRunning — graph.Invoke is in flight.
-	WorkerStatusRunning WorkerStatus = "running"
-	// WorkerStatusCompleted — graph.Invoke returned a final assistant
-	// message with no error.
-	WorkerStatusCompleted WorkerStatus = "completed"
-	// WorkerStatusFailed — graph.Invoke returned an error, or the agent
-	// name was unknown.
-	WorkerStatusFailed WorkerStatus = "failed"
-	// WorkerStatusKilled — explicitly stopped via StopWorker.
-	WorkerStatusKilled WorkerStatus = "killed"
+	WorkerStatusPending   = contract.WorkerStatusPending
+	WorkerStatusRunning   = contract.WorkerStatusRunning
+	WorkerStatusCompleted = contract.WorkerStatusCompleted
+	WorkerStatusFailed    = contract.WorkerStatusFailed
+	WorkerStatusKilled    = contract.WorkerStatusKilled
+	EventTaskNotification = contract.EventTaskNotification
+	EventApprovalPending  = contract.EventApprovalPending
 )
 
-// Worker tracks a spawned sub-agent. Unique by ID within a Runtime
-// instance.
-type Worker struct {
-	// ID is "agent-<8 hex>" — unique per Runtime, stable for the
-	// worker's lifetime.
-	ID string
-	// AgentName is the persona name (frontmatter `name` field).
-	AgentName string
-	// SessionID is the worker's own session id (distinct from the
-	// coordinator's session). For PR-1 of this is a synthetic
-	// in-memory id; the chat_sessions row + parent_session_id column
-	// migration is follow-up.
-	SessionID string
-	// ParentSessionID is the coordinator session that requested the
-	// spawn. Tracked here so a future audit query can rebuild the parent
-	// → worker tree without a schema change.
-	ParentSessionID string
-	// Prompt is the initial user message handed to the worker.
-	Prompt string
-	// Status is the lifecycle state. Read-only outside the runtime;
-	// callers should always pull through GetWorker for a snapshot.
-	Status WorkerStatus
-	// Background indicates whether this is a fire-and-forget spawn.
-	Background bool
-	// StartedAt is the wall time the worker entered "running".
-	StartedAt time.Time
-	// EndedAt is the wall time of any terminal transition. nil while
-	// running.
-	EndedAt *time.Time
-	// Result is the worker's final assistant content (when terminal =
-	// completed). Empty for failed / killed.
-	Result string
-	// Err is the failure reason (when terminal = failed / killed).
-	Err string
-
-	// Internal fields — not surfaced to callers via copies.
+type workerState struct {
+	Worker
 	cancel context.CancelFunc
 	mu     sync.Mutex
 }
 
-// SpawnRequest describes a worker to spawn. See AgentTool.InvokableRun
-// for the LLM-facing argument shape that produces this struct.
-type SpawnRequest struct {
-	// AgentName is the persona name (frontmatter `name`). Must be
-	// resolvable through the Runtime's AgentRegistry.
-	AgentName string
-	// Prompt is the initial user message for the worker.
-	Prompt string
-	// Background = true: fire-and-forget; SpawnWorker returns immediately
-	// with status=running. Background = false: SpawnWorker blocks until
-	// the worker reaches a terminal state.
-	Background bool
-	// ParentSession is the coordinator's chat session id.
-	ParentSession string
-	// ParentEmit is the SSE emitter the coordinator runtime threads
-	// through. Used to deliver the task_notification frame when the
-	// worker (background=true) finishes. nil = no notification (sync
-	// callers don't need it).
-	ParentEmit Emit
-	// SessionKind overrides the persisted chat_sessions.kind for the
-	// worker session. Empty = "work". The investigator usecase
-	// sets "investigation" so auto-spawned RCA transcripts stay out of
-	// the /chat list.
-	SessionKind string
-	// OwnerUserID overrides the persisted chat_sessions.user_id when
-	// the worker has no ParentSession to inherit from. The investigator
-	// usecase passes 0 to mark these rows as "system-owned" — they
-	// don't belong to any operator and the internal audience prevents
-	// them from appearing in the primary chat list.
-	OwnerUserID uint64
-	// Locale is the UI language ("en", "zh-CN", ...) the worker's reply
-	// should use. Threaded from the parent coordinator's request so a
-	// sub-agent answers in the same language the user is typing in
-	// (otherwise GLM defaults to zh on English questions). Empty = no
-	// directive, back-compat with investigator/auto-spawned workers.
-	Locale string
-	// Provider + Model are the coordinator's resolved LLM choice. Threaded
-	// into runWorker's g.Invoke as chatModelOpts so the sub-agent runs
-	// against the same LLM the user picked for the coordinator — without
-	// this, runWorker falls through to the RoutingChatModel default and
-	// installs without an OpenAI key see specialists fail with
-	// `provider "openai" not configured`. Empty = no override; the worker
-	// uses whatever the routing default is.
-	Provider string
-	Model    string
-}
-
-// TaskNotification is the payload of a task_notification streaming
-// frame. Mirrors the schema laid out in — coordinator's
-// SSE listener fans this back through the legacy SSE envelope so the
-// SPA only needs to learn one new event type.
-type TaskNotification struct {
-	TaskID  string         `json:"task_id"`
-	Status  WorkerStatus   `json:"status"`
-	Summary string         `json:"summary"`
-	Result  string         `json:"result,omitempty"`
-	Err     string         `json:"error,omitempty"`
-	Usage   map[string]any `json:"usage,omitempty"`
-}
-
-// EventTaskNotification is the new streaming event type the runtime
-// emits when a background worker reaches a terminal state. The SPA
-// listens for this in addition to the existing assistant / tool /
-// done frames.
-const EventTaskNotification EventType = "task_notification"
-
-// EventApprovalPending fires when a synchronous-blocking tool (HLD-021,
-// e.g. cloud_bash) has queued a human-approval proposal and is about to
-// block waiting for the decision. The frame surfaces the inline approve/
-// reject card LIVE — the tool no longer returns a pending_approval result
-// blob (it blocks, then returns the real executor result), so the card
-// must be driven by this frame instead. ToolCallID ties the card to the
-// tool call's existing streaming card so the UI shows a single card.
-const EventApprovalPending EventType = "approval_pending"
-
-// ApprovalPending is the EventApprovalPending payload. Emitted by the
-// proposer shim (cmd/main.go) via EmitFromContext while a blocking tool
-// awaits the human decision.
-type ApprovalPending struct {
-	ApprovalID  string
-	ToolCallID  string
-	Kind        string
-	ToolName    string
-	Command     string
-	Credentials []string
-}
-
-// emitCtxKey is the unexported context key that threads the active
-// per-request Emit through the graph layer down into AgentTool's
-// InvokableRun via the WorkerSpawner shim. The shim reads it through
-// EmitFromContext to populate SpawnRequest.ParentEmit so a background
-// worker can fire its task_notification through the SSE channel that
-// owns the user's chat session.
-type emitCtxKeyT struct{}
-
-var emitCtxKey = emitCtxKeyT{}
-
-// withEmit returns ctx augmented with emit. Internal — Handle threads
-// the request emitter in before invoking the graph.
-func withEmit(ctx context.Context, emit Emit) context.Context {
-	if emit == nil {
-		return ctx
-	}
-	return context.WithValue(ctx, emitCtxKey, emit)
-}
-
-// EmitFromContext retrieves the active streaming Emit from ctx, if any.
-// Returns nil when no emitter was attached (e.g. blocking call without
-// SSE). The wiring shim at the cmd/main.go boundary uses this to thread
-// task_notification frames through the same SSE channel that owns the
-// coordinator's chat session.
-func EmitFromContext(ctx context.Context) Emit {
-	v, _ := ctx.Value(emitCtxKey).(Emit)
-	return v
-}
+func withEmit(ctx context.Context, emit Emit) context.Context { return contract.WithEmit(ctx, emit) }
+func EmitFromContext(ctx context.Context) Emit                { return contract.EmitFromContext(ctx) }
 
 // Locale ctx propagation lives in the tools package (next to AgentTool,
 // the consumer). Runtime calls tools.WithLocale before g.Invoke; the
@@ -352,7 +203,7 @@ func (rt *Runtime) SpawnWorker(ctx context.Context, req SpawnRequest) (*Worker, 
 	}
 	workerCtx, cancel := context.WithCancel(parent)
 
-	w := &Worker{
+	w := &workerState{Worker: Worker{
 		ID:              id,
 		AgentName:       agentDef.Name,
 		SessionID:       sessID,
@@ -360,12 +211,13 @@ func (rt *Runtime) SpawnWorker(ctx context.Context, req SpawnRequest) (*Worker, 
 		Prompt:          req.Prompt,
 		Status:          WorkerStatusPending,
 		Background:      req.Background,
-		cancel:          cancel,
+	},
+		cancel: cancel,
 	}
 
 	rt.workersMu.Lock()
 	if rt.workers == nil {
-		rt.workers = map[string]*Worker{}
+		rt.workers = map[string]*workerState{}
 	}
 	rt.workers[id] = w
 	rt.workersMu.Unlock()
@@ -765,7 +617,7 @@ func scopedWorkerToolCallID(workerID, toolCallID string) string {
 
 // notificationFor produces a task_notification Event for the given
 // terminal worker. Field shape mirrors
-func (rt *Runtime) notificationFor(w *Worker) Event {
+func (rt *Runtime) notificationFor(w *workerState) Event {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	summary := fmt.Sprintf("Agent %s %s", w.AgentName, w.Status)
@@ -918,7 +770,7 @@ func matchesAny(name string, patterns []string) bool {
 // snapshotWorker returns a copy of w safe to publish to a caller. The
 // internal lock + cancel func are not copied — the returned *Worker is
 // strictly read-only.
-func (rt *Runtime) snapshotWorker(w *Worker) *Worker {
+func (rt *Runtime) snapshotWorker(w *workerState) *Worker {
 	if w == nil {
 		return nil
 	}
@@ -1084,6 +936,7 @@ func workerChatModelOpts(ctx context.Context) []model.Option {
 // request cancellation, callback handlers, or mutable request slots.
 func detachedWorkerContext(ctx context.Context) context.Context {
 	parent := trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(ctx))
+	parent = contract.WithVersion(parent, contract.VersionFromContext(ctx))
 	parent = basetool.WithWebSearchAllowed(parent, basetool.WebSearchAllowed(ctx))
 	parent = basetool.WithAgentWriteAllowed(parent, basetool.AgentWriteAllowedFromContext(ctx))
 	if tenant, ok := tenantctx.From(ctx); ok {

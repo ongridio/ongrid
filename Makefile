@@ -914,4 +914,4 @@ test-web-ci-platform: ## Run the serial platform frontend CI tests (requires npm
 
 .PHONY: test-agent-runtime
 test-agent-runtime: ## 统一 Agent runtime 回归（tools 依赖 Linux cmdpolicy）
-	go test -race ./internal/manager/biz/aiops/... ./internal/manager/biz/approval ./internal/manager/service/aiops ./internal/manager/server/aiops ./internal/manager/biz/imbridge ./internal/manager/service/imbridge ./internal/manager/service/flow ./internal/skill/... ./cmd/ongrid
+	go test -race ./internal/manager/biz/aiops/... ./internal/manager/biz/approval ./internal/manager/service/aiops ./internal/manager/server/aiops ./internal/manager/biz/imbridge ./internal/manager/service/imbridge ./internal/manager/service/flow ./internal/manager/biz/report ./internal/manager/biz/alert/investigator ./internal/manager/biz/marketplace ./internal/manager/biz/agenttrace ./internal/manager/service/skill ./internal/skill/... ./cmd/ongrid

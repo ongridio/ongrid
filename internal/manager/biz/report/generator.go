@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/chatruntime"
+	chatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/contract"
 	model "github.com/ongridio/ongrid/internal/manager/model/report"
 )
 

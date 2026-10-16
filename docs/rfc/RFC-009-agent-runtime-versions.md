@@ -73,4 +73,26 @@ v1 固定为 GitHub 最早正式 release `v0.7.158`（2026-05-27，`04b279631978
 
 已完成：`runtime/v1/{chatruntime,graph}` 提取首个 release；`runtime/v2/{chatruntime,graph}` 提取 v0.18.2；当前实现及测试迁移至 `runtime/v3/{chatruntime,graph}`，现有调用方指向 v3。v1/v2 保留源提交、文件 blob 清单和兼容改动说明。三版本均参与标准测试，禁止直接跨版本 import。
 
-本次仅完成源码隔离。版本契约、生产路由、会话版本字段、版本化工具装配及管理员设置仍未实现。外部 persona/skills、业务工具和依赖仍共享，不能将源码提取理解为完整复现旧 release，v1 接入前必须补齐现行安全与审批验收。
+本次仅完成源码隔离。版本契约和单版本生产路由已接入（见下节）；会话版本字段、历史版本适配、版本化工具装配及管理员设置仍未实现。外部 persona/skills、业务工具和依赖仍共享，不能将源码提取理解为完整复现旧 release，v1 接入前必须补齐现行安全与审批验收。
+
+## 统一契约与路由：能力保留检查（2026-10-16）
+
+已抽取 `runtime/contract` 的完整请求、回复、流事件、Worker 快照与上下文载体。v3 使用类型别名保持调用兼容，Worker 锁和 cancel 仍留在 v3 私有状态，v1/v2 冻结源码不变。Service 侧 `RuntimeRouter` 接管聊天与外部 Worker 调用；当前只注册 v3，默认版本和注册表不可变，未开放用户切换，也没有会话版本迁移。未知或未装配版本明确拒绝，不自动降级。
+
+Worker 查询、继续、停止按实例实际归属分派，覆盖内部 reviewer 创建的 Worker；重名导致归属不明确时拒绝控制。后台 Worker 保留版本和权限快照，不继承请求取消和 SSE callback 状态。此处的版本上下文是进程内执行归属，不替代未来的会话/审批持久化版本。
+
+| 必须保留的能力 | 迁移措施与回归 |
+| --- | --- |
+| 普通聊天、模型/语言选择、附件、mentions、联网开关 | 原样透传完整 Request；Router 请求/结果回归、AssistantChat E2E |
+| SSE、工具起止、审批卡片、后台完成事件 | 共享完整 Event 协议，路由不重写 payload；完整事件序列回归 |
+| Worker 同步/后台、查询、继续、停止、指标 | 保留原状态机，路由查询归属；并发控制/错误分派/快照回归 |
+| 报告、告警调查、工作流 Agent 节点 | 移除对具体 v3 Runtime 的类型断言，改依赖契约；相关包纳入标准 Agent race 目标 |
+| IM、mention 解析 | Service 使用路由，hydrator 仍注入实际 v3 实例；IM 回归 |
+| Skills、marketplace、persona 热加载 | 保留实际 v3 注册器的装配与热更新，避免路由包装后断言失败导致能力静默关闭 |
+| MCP、shell、安装 Skill、页面产物、消息工具 | 原装配和装饰器保留；MCP 刷新仅依赖消费方的窄目录接口；MCP/Skills/Flow E2E |
+| 人工审批及 reviewer | 保留独立审批域和执行器；事件上下文改用共享契约，reviewer 仍由所属实例执行 |
+| Trace 会话关联 | 保持原 instrumentation scope；agenttrace 纳入标准 Agent race 目标 |
+
+验收：扩展后的 `make test-agent-runtime`（Linux，含 race）、架构检查及 11 个边界样例通过；真实 Manager + 临时 MySQL 的 AssistantChat、MCP CRUD、Skills registry 和 Flow MCP 节点 E2E 通过（39.771s）；额外的 RCA 调查、工作流页面产物和 Edge 概览 E2E 通过（32.953s）。模型和 MCP endpoint 为测试替身，不代表真实模型验收。
+
+下一阶段在不改变上述能力的前提下增加持久化会话版本、旧版本适配及独立目录装配，之后才开放管理员切换。回滚本阶段只需回退代码；本阶段没有 API/schema/配置格式变更。

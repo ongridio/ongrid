@@ -22,7 +22,7 @@ import (
 
 	biz "github.com/ongridio/ongrid/internal/manager/biz/aiops"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/chatprotocol"
-	"github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/chatruntime"
+	chatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/contract"
 	model "github.com/ongridio/ongrid/internal/manager/model/aiops"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/llm"
@@ -63,7 +63,7 @@ type Service struct {
 }
 
 // RuntimeHandler is the narrow contract the service depends on for the
-// graph kernel. *chatruntime.Runtime satisfies it by structural typing.
+// runtime router. Version implementations satisfy it by structural typing.
 // The seam is a service-private interface so unit tests can inject a
 // fake without standing up the full graph + tool decorator chain.
 type RuntimeHandler interface {

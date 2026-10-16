@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"time"
 
-	aiopschatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/chatruntime"
 	aiopstools "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools"
 	aiopstoolsbase "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	aiopstoolsdec "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/decorators"
@@ -14,16 +13,21 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/mcpclient"
 )
 
+type toolSourceRuntime interface {
+	ReplaceToolSource(string, []aiopstoolsbase.BaseTool, []aiopstoolsbase.BaseTool) error
+	ToolCount() int
+}
+
 // MCPToolRefresher keeps runtime tools and the unredacted search catalog in sync.
 type MCPToolRefresher struct {
-	runtime  *aiopschatruntime.Runtime
+	runtime  toolSourceRuntime
 	deps     aiopstoolsdec.Deps
 	caller   MCPCaller
 	proposer MCPProposer
 	log      *slog.Logger
 }
 
-func NewMCPToolRefresher(runtime *aiopschatruntime.Runtime, deps aiopstoolsdec.Deps, caller MCPCaller, proposer MCPProposer, log *slog.Logger) *MCPToolRefresher {
+func NewMCPToolRefresher(runtime toolSourceRuntime, deps aiopstoolsdec.Deps, caller MCPCaller, proposer MCPProposer, log *slog.Logger) *MCPToolRefresher {
 	return &MCPToolRefresher{runtime: runtime, deps: deps, caller: caller, proposer: proposer, log: log}
 }
 

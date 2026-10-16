@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	aiopschatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/chatruntime"
+	aiopschatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/contract"
 	managerbizalert "github.com/ongridio/ongrid/internal/manager/biz/alert"
 	managermodelalert "github.com/ongridio/ongrid/internal/manager/model/alert"
 	"github.com/ongridio/ongrid/internal/pkg/llm"
@@ -20,7 +20,10 @@ type channelGetter interface {
 // AgentRunner implements bizflow.AgentRunner over the chatruntime —
 // one synchronous worker per agent node (mirrors the RCA investigator's
 // WorkerSpawner usage).
-type AgentRunner struct{ Runtime *aiopschatruntime.Runtime }
+type agentWorkerSpawner interface {
+	SpawnWorker(context.Context, aiopschatruntime.SpawnRequest) (*aiopschatruntime.Worker, error)
+}
+type AgentRunner struct{ Runtime agentWorkerSpawner }
 
 func (s AgentRunner) RunAgent(ctx context.Context, persona, prompt string) (string, error) {
 	w, err := s.Runtime.SpawnWorker(ctx, aiopschatruntime.SpawnRequest{
