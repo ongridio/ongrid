@@ -265,7 +265,10 @@ func (r *fakeRepo) ListEventsByIncident(_ context.Context, _ uint64, _ int) ([]*
 	return nil, nil
 }
 
-func (r *fakeRepo) CountEventsByType(_ context.Context, eventType string, since time.Time, filterRule, filterSeverity string) (int64, error) {
+func (r *fakeRepo) CountEventsByType(_ context.Context, eventType string, since time.Time, filterRule, filterSeverity string, limit int) (int64, error) {
+	if limit <= 0 {
+		return 0, errs.ErrInvalid
+	}
 	var n int64
 	for _, ev := range r.events {
 		if ev.EventType != eventType {
@@ -284,6 +287,9 @@ func (r *fakeRepo) CountEventsByType(_ context.Context, eventType string, since 
 			}
 		}
 		n++
+		if n == int64(limit) {
+			break
+		}
 	}
 	return n, nil
 }

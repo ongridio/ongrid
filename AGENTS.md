@@ -35,7 +35,7 @@
 - 修改 API 时同步对应的 `api/**/*.proto`、HTTP DTO、前端调用和相关测试；生成内容通过 `make proto` 更新，禁止手改生成代码。新增接口先检查所在模块的契约和生成方式。
 - 保持现有 HTTP 状态码、响应结构和错误结构。例如 Edge 列表使用 `{items, total}`，不要在局部修复中加上 `{code, message, data}` 包装。破坏性变更需要版本或迁移方案。
 - Handler 说明方法、路由、权限、请求和响应；接入 Swagger 的模块沿用其注释与生成流程。
-- 数据库变更沿用 `internal/<domain>/data/**/migrate.go` 和 `dbx.RunMigrations` 入口。提交迁移或回填代码，检查幂等性、旧数据兼容和回滚限制；不要在普通修复中引入第二套迁移框架。
+- 数据库 schema 统一由启动时的 GORM AutoMigrate 和各模块 `Migrate` 管理，沿用 `internal/<domain>/data/**/migrate.go` 和 `dbx.RunMigrations` 入口，不维护独立 SQL 迁移文件或手工 up/down 命令。提交迁移或回填代码，检查幂等性、旧数据兼容和回滚限制；不要在普通修复中引入第二套迁移框架。
 - MySQL schema 变更兼容滚动发布；大表变更评估锁表和在线 DDL。SQLite 是可选后端，修改共享存储逻辑时检查两种方言的适用范围。
 - 仅在实际使用对应存储的路径应用其约束：Redis 缓存 key 设 TTL，持久状态说明生命周期，限制 key/value 大小，分布式锁校验 owner；ClickHouse 批量写入，复制与排序键按部署拓扑和查询设计；InfluxDB 控制 tag 基数并设置 retention。不要为满足模板引入存储依赖。
 

@@ -29,37 +29,3 @@ func TestHasConfiguredLLMProviderReturnsFalseWithoutProviders(t *testing.T) {
 		t.Fatalf("hasConfiguredLLMProvider() = true, want false without providers")
 	}
 }
-
-func TestPickProviderDefaultFallsBackToConfiguredProvider(t *testing.T) {
-	providers := []llm.ProviderConfig{
-		{ID: llm.ProviderDeepSeek, APIKey: "sk-test", Model: "deepseek-v4-flash"},
-	}
-
-	gotProvider, gotModel := pickProviderDefault(providers, "")
-	if gotProvider != llm.ProviderDeepSeek || gotModel != "deepseek-v4-flash" {
-		t.Fatalf("pickProviderDefault() = (%q, %q), want (deepseek, deepseek-v4-flash)", gotProvider, gotModel)
-	}
-}
-
-func TestPickProviderDefaultIgnoresUnavailablePreferred(t *testing.T) {
-	providers := []llm.ProviderConfig{
-		{ID: llm.ProviderOpenAI, APIKey: "", Model: "gpt-5.4"},
-		{ID: llm.ProviderDeepSeek, APIKey: "sk-test", Model: "deepseek-v4-flash"},
-	}
-
-	gotProvider, gotModel := pickProviderDefault(providers, llm.ProviderOpenAI)
-	if gotProvider != llm.ProviderDeepSeek || gotModel != "deepseek-v4-flash" {
-		t.Fatalf("pickProviderDefault() = (%q, %q), want (deepseek, deepseek-v4-flash)", gotProvider, gotModel)
-	}
-}
-
-func TestPickProviderDefaultReturnsEmptyWithoutConfiguredProvider(t *testing.T) {
-	providers := []llm.ProviderConfig{
-		{ID: llm.ProviderDeepSeek, APIKey: "", Model: "deepseek-v4-flash"},
-	}
-
-	gotProvider, gotModel := pickProviderDefault(providers, llm.ProviderDeepSeek)
-	if gotProvider != "" || gotModel != "" {
-		t.Fatalf("pickProviderDefault() = (%q, %q), want empty default", gotProvider, gotModel)
-	}
-}

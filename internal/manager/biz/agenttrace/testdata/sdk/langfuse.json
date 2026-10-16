@@ -1,0 +1,222 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "telemetry.sdk.language",
+            "value": {
+              "stringValue": "python"
+            }
+          },
+          {
+            "key": "telemetry.sdk.name",
+            "value": {
+              "stringValue": "opentelemetry"
+            }
+          },
+          {
+            "key": "telemetry.sdk.version",
+            "value": {
+              "stringValue": "1.45.1"
+            }
+          },
+          {
+            "key": "service.instance.id",
+            "value": {
+              "stringValue": "eea01676-c357-4806-926a-ad931048eb48"
+            }
+          },
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "support-agent"
+            }
+          },
+          {
+            "key": "service.namespace",
+            "value": {
+              "stringValue": "agent-sdk-fixtures"
+            }
+          },
+          {
+            "key": "deployment.environment.name",
+            "value": {
+              "stringValue": "test"
+            }
+          }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": {
+            "name": "langfuse-sdk",
+            "version": "4.17.0",
+            "attributes": [
+              {
+                "key": "public_key",
+                "value": {
+                  "stringValue": "pk-lf-local-fixture"
+                }
+              }
+            ]
+          },
+          "spans": [
+            {
+              "traceId": "kdyW84lu1OMzb2yw9xqpGA==",
+              "spanId": "gyMvR2k0irs=",
+              "parentSpanId": "AaF7UvtjIkY=",
+              "name": "search_knowledge",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1791949788273944000",
+              "endTimeUnixNano": "1791949788274024000",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "fixture-session"
+                  }
+                },
+                {
+                  "key": "langfuse.environment",
+                  "value": {
+                    "stringValue": "test"
+                  }
+                },
+                {
+                  "key": "langfuse.observation.input",
+                  "value": {
+                    "stringValue": "Can I return an order?"
+                  }
+                },
+                {
+                  "key": "langfuse.observation.type",
+                  "value": {
+                    "stringValue": "tool"
+                  }
+                },
+                {
+                  "key": "langfuse.observation.output",
+                  "value": {
+                    "stringValue": "Returns are accepted within 30 days."
+                  }
+                }
+              ],
+              "status": {},
+              "flags": 256
+            },
+            {
+              "traceId": "kdyW84lu1OMzb2yw9xqpGA==",
+              "spanId": "emUvbKzIvzk=",
+              "parentSpanId": "AaF7UvtjIkY=",
+              "name": "answer",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1791949788274055000",
+              "endTimeUnixNano": "1791949788274131000",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "fixture-session"
+                  }
+                },
+                {
+                  "key": "langfuse.environment",
+                  "value": {
+                    "stringValue": "test"
+                  }
+                },
+                {
+                  "key": "langfuse.observation.input",
+                  "value": {
+                    "stringValue": "Can I return an order?"
+                  }
+                },
+                {
+                  "key": "langfuse.observation.model.name",
+                  "value": {
+                    "stringValue": "fixture-model"
+                  }
+                },
+                {
+                  "key": "langfuse.observation.type",
+                  "value": {
+                    "stringValue": "generation"
+                  }
+                },
+                {
+                  "key": "langfuse.observation.output",
+                  "value": {
+                    "stringValue": "You can return your order within 30 days."
+                  }
+                },
+                {
+                  "key": "langfuse.observation.usage_details",
+                  "value": {
+                    "stringValue": "{\"input\": 42, \"output\": 16, \"total\": 58}"
+                  }
+                },
+                {
+                  "key": "langfuse.observation.cost_details",
+                  "value": {
+                    "stringValue": "{\"total\": 0.0001}"
+                  }
+                }
+              ],
+              "status": {},
+              "flags": 256
+            },
+            {
+              "traceId": "kdyW84lu1OMzb2yw9xqpGA==",
+              "spanId": "AaF7UvtjIkY=",
+              "name": "support-agent",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1791949788273747000",
+              "endTimeUnixNano": "1791949788274163000",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "fixture-session"
+                  }
+                },
+                {
+                  "key": "langfuse.internal.is_app_root",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "langfuse.environment",
+                  "value": {
+                    "stringValue": "test"
+                  }
+                },
+                {
+                  "key": "langfuse.observation.input",
+                  "value": {
+                    "stringValue": "{\"args\": [\"Can I return an order?\"], \"kwargs\": {}}"
+                  }
+                },
+                {
+                  "key": "langfuse.observation.type",
+                  "value": {
+                    "stringValue": "agent"
+                  }
+                },
+                {
+                  "key": "langfuse.observation.output",
+                  "value": {
+                    "stringValue": "You can return your order within 30 days."
+                  }
+                }
+              ],
+              "status": {},
+              "flags": 256
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

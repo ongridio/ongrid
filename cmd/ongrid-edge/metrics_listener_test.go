@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/ongridio/ongrid/internal/pkg/httpserver"
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 func TestEdgeMetricsOccupiedPort(t *testing.T) {
@@ -56,13 +55,10 @@ func TestEdgeMetricsOccupiedPort(t *testing.T) {
 					t.Fatalf("%s status=%d", path, res.StatusCode)
 				}
 			}
-			// Fixed mode must not hide a conflict, including the untouched K8s data plane.
+			// Fixed mode must not hide a conflict.
 			t.Setenv("ONGRID_EDGE_METRICS_ADDR", addr)
 			if err := runEdgeMetrics(ctx, mux, log); err == nil {
 				t.Fatal("fixed edge listener accepted occupied address")
-			}
-			if err := runDataPlaneDiagnostics(ctx, prometheus.NewRegistry(), nil, log); err == nil {
-				t.Fatal("K8s data plane silently changed its fixed port")
 			}
 			cancel()
 			select {

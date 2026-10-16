@@ -116,6 +116,8 @@ func (r *Repo) UpdateIncident(ctx context.Context, in *model.Incident) error {
 	if in == nil {
 		return errs.ErrInvalid
 	}
+	in.Title = limitAlertTitle(in.Title)
+	in.DedupeKey = normalizeAlertDedupeKey(in.DedupeKey)
 	res := r.db.WithContext(ctx).Model(&model.Incident{}).Where("id = ?", in.ID).Updates(in)
 	if res.Error != nil {
 		return res.Error
@@ -130,12 +132,19 @@ func (r *Repo) CreateAlertIncident(ctx context.Context, in *model.Incident) erro
 	if in == nil {
 		return errs.ErrInvalid
 	}
+	in.Title = limitAlertTitle(in.Title)
+	in.DedupeKey = normalizeAlertDedupeKey(in.DedupeKey)
 	return r.db.WithContext(ctx).Create(in).Error
 }
 
 func (r *Repo) GetIncidentByDedupeKey(ctx context.Context, dedupeKey string) (*model.Incident, error) {
+	// Keep legacy long keys reachable in databases that accepted them (SQLite).
+	keys := []string{dedupeKey}
+	if normalized := normalizeAlertDedupeKey(dedupeKey); normalized != dedupeKey {
+		keys = append(keys, normalized)
+	}
 	var in model.Incident
-	if err := r.db.WithContext(ctx).Where("dedupe_key = ?", dedupeKey).First(&in).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("dedupe_key IN ?", keys).First(&in).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errs.ErrNotFound
 		}
@@ -348,13 +357,16 @@ func (r *Repo) CreateEvent(ctx context.Context, ev *model.Event) error {
 	if ev == nil {
 		return errs.ErrInvalid
 	}
+	ev.Title = limitAlertTitle(ev.Title)
 	return r.db.WithContext(ctx).Create(ev).Error
 }
 
-// CountEventsByType returns the number of alert_events whose event_type
-// matches and which were created at or after `since`. Optional filters
-// narrow by the parent incident's severity / rule key.
-func (r *Repo) CountEventsByType(ctx context.Context, eventType string, since time.Time, filterRule, filterSeverity string) (int64, error) {
+// CountEventsByType counts up to limit matching events created at or after since.
+// Optional filters narrow by event severity and the parent incident's rule key.
+func (r *Repo) CountEventsByType(ctx context.Context, eventType string, since time.Time, filterRule, filterSeverity string, limit int) (int64, error) {
+	if limit <= 0 {
+		return 0, errs.ErrInvalid
+	}
 	tx := r.db.WithContext(ctx).Model(&model.Event{}).
 		Where("event_type = ? AND created_at >= ?", eventType, since)
 	if filterSeverity != "" {
@@ -367,7 +379,8 @@ func (r *Repo) CountEventsByType(ctx context.Context, eventType string, since ti
 			Model(&model.Incident{}).Select("id").Where("rule = ?", filterRule))
 	}
 	var n int64
-	if err := tx.Count(&n).Error; err != nil {
+	// Limit the input rows: LIMIT on COUNT(*) itself would still count every match.
+	if err := r.db.WithContext(ctx).Table("(?) AS matching_events", tx.Select("1").Limit(limit)).Count(&n).Error; err != nil {
 		return 0, err
 	}
 	return n, nil

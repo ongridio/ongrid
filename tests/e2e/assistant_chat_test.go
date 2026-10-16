@@ -6,7 +6,7 @@
 // manager process. Unit tests cover individual state transitions; this file
 // protects the joins that previously regressed in production: session
 // ownership, direct tool execution, progressive ToolSearch disclosure,
-// streaming, and pre-execution clarification.
+// streaming, semantic clarification, and human approval.
 package e2e
 
 import (
@@ -140,13 +140,14 @@ func TestAssistantChat_UserVisibleLoop(t *testing.T) {
 		}
 	})
 
-	t.Run("capture without an explicit target clarifies before model or tool execution", func(t *testing.T) {
+	t.Run("capture without an explicit target allows semantic clarification", func(t *testing.T) {
 		for _, prompt := range []string{
 			"抓 60 秒 tcp port 443 的包",
 			"抓 HTTPS 流量，持续一分钟",
 			"帮我抓一下数据包",
 		} {
 			t.Run(prompt, func(t *testing.T) {
+				env.FakeLLM().SetScript(testenv.LLMReply{Content: "请先明确目标设备，再提出抓包方案。"})
 				before := env.FakeLLM().CallCount()
 				sessionID := createChatSession(t, env, admin.AccessToken, "E2E capture clarification")
 				status, body, err := env.DoJSON("POST", chatMessagesPath(sessionID), map[string]any{
@@ -158,8 +159,8 @@ func TestAssistantChat_UserVisibleLoop(t *testing.T) {
 				if got := nestedString(body, "assistant_message", "content"); !strings.Contains(got, "设备") {
 					t.Fatalf("clarification=%q, want explicit device question", got)
 				}
-				if after := env.FakeLLM().CallCount(); after != before {
-					t.Fatalf("clarification called LLM: before=%d after=%d", before, after)
+				if after := env.FakeLLM().CallCount(); after != before+1 {
+					t.Fatalf("clarification must use the semantic model: before=%d after=%d", before, after)
 				}
 				if calls, _ := body["tool_calls"].([]any); len(calls) != 0 {
 					t.Fatalf("clarification executed tools: %v", calls)
@@ -225,7 +226,8 @@ func TestAssistantChat_UserVisibleLoop(t *testing.T) {
 		}
 	})
 
-	t.Run("missing host target for disk work clarifies before model or tool execution", func(t *testing.T) {
+	t.Run("missing host target for disk work allows semantic clarification", func(t *testing.T) {
+		env.FakeLLM().SetScript(testenv.LLMReply{Content: "请先选择目标设备。"})
 		before := env.FakeLLM().CallCount()
 		sessionID := createChatSession(t, env, admin.AccessToken, "E2E disk clarification")
 		status, body, err := env.DoJSON("POST", chatMessagesPath(sessionID), map[string]any{
@@ -237,8 +239,8 @@ func TestAssistantChat_UserVisibleLoop(t *testing.T) {
 		if got := nestedString(body, "assistant_message", "content"); !strings.Contains(got, "目标设备") {
 			t.Fatalf("disk clarification=%q, want target device question", got)
 		}
-		if after := env.FakeLLM().CallCount(); after != before {
-			t.Fatalf("disk clarification called LLM: before=%d after=%d", before, after)
+		if after := env.FakeLLM().CallCount(); after != before+1 {
+			t.Fatalf("disk clarification must use the semantic model: before=%d after=%d", before, after)
 		}
 		if calls, _ := body["tool_calls"].([]any); len(calls) != 0 {
 			t.Fatalf("disk clarification executed tools: %v", calls)
@@ -502,6 +504,7 @@ func TestAssistantChat_OpsScenarioCoverage(t *testing.T) {
 		{id: "O30", prompt: "检查网络接口错误包", want: "目标设备"},
 	} {
 		t.Run(tc.id+" requires target", func(t *testing.T) {
+			env.FakeLLM().SetScript(testenv.LLMReply{Content: "请先明确目标设备。"})
 			before := env.FakeLLM().CallCount()
 			sessionID := createChatSession(t, env, admin.AccessToken, "E2E "+tc.id)
 			status, body, err := env.DoJSON("POST", chatMessagesPath(sessionID), map[string]any{"content": tc.prompt}, admin.AccessToken)
@@ -511,8 +514,8 @@ func TestAssistantChat_OpsScenarioCoverage(t *testing.T) {
 			if got := nestedString(body, "assistant_message", "content"); !strings.Contains(got, tc.want) {
 				t.Fatalf("%s clarification=%q missing %q; body=%v", tc.id, got, tc.want, body)
 			}
-			if after := env.FakeLLM().CallCount(); after != before {
-				t.Fatalf("%s clarification called LLM: before=%d after=%d", tc.id, before, after)
+			if after := env.FakeLLM().CallCount(); after != before+1 {
+				t.Fatalf("%s clarification must use the semantic model: before=%d after=%d", tc.id, before, after)
 			}
 			if calls, _ := body["tool_calls"].([]any); len(calls) != 0 {
 				t.Fatalf("%s clarification executed tools: %v", tc.id, calls)
@@ -867,13 +870,38 @@ func TestAssistantChat_RemainingScenarioCoverage(t *testing.T) {
 		}
 	})
 
+	t.Run("O18 dynamic log backend reports unconfigured at execution", func(t *testing.T) {
+		env.FakeLLM().SetScript(
+			testenv.LLMReply{ToolCalls: []testenv.LLMToolCall{{ID: "o18-log", Name: "query_logql", Arguments: `{"query":"{job=\"nginx\"}","start":"now-5m","limit":10}`}}},
+			testenv.LLMReply{Content: "当前日志后端未配置，不能编造日志内容。"},
+		)
+		sessionID := createChatSession(t, env, admin.AccessToken, "E2E O18")
+		status, body, err := env.DoJSON("POST", chatMessagesPath(sessionID), map[string]any{"content": "查一下 nginx 最近的错误日志"}, admin.AccessToken)
+		if err != nil || status != http.StatusOK {
+			t.Fatalf("post status=%d body=%v err=%v", status, body, err)
+		}
+		if !containsToolCall(body["tool_calls"], "query_logql") {
+			t.Fatalf("missing dynamic log tool call: %v", body)
+		}
+		status, messages, err := env.DoJSON("GET", chatMessagesPath(sessionID), nil, admin.AccessToken)
+		if err != nil || status != http.StatusOK {
+			t.Fatalf("messages status=%d err=%v", status, err)
+		}
+		raw, err := json.Marshal(messages)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(raw), "Loki endpoint URL is empty") {
+			t.Fatalf("missing explicit backend failure: %s", raw)
+		}
+	})
+
 	for _, tc := range []struct {
 		id            string
 		prompt        string
 		forbiddenTool string
 		answer        string
 	}{
-		{id: "O18", prompt: "查一下 nginx 最近的错误日志", forbiddenTool: "query_logql", answer: "当前日志后端未配置，不能编造日志内容。"},
 		{id: "O19", prompt: "查一下 checkout 请求的 trace 慢在哪里", forbiddenTool: "query_traceql", answer: "当前 trace 后端未配置，不能编造链路数据。"},
 	} {
 		t.Run(tc.id+" unavailable signal capability is not disclosed", func(t *testing.T) {
@@ -930,19 +958,6 @@ func TestAssistantChat_RemainingScenarioCoverage(t *testing.T) {
 			},
 			wantTools:    []string{"ToolSearch"},
 			wantContains: []string{"不会直接执行"},
-		},
-		{
-			id:       "O32",
-			title:    "single capture uses explicit device target",
-			prompt:   "在这台设备上抓 60 秒 tcp port 443 的包，接口 eth0",
-			mentions: []map[string]string{{"type": "device", "id": fmt.Sprintf("%d", deviceID), "label": "capture-001"}},
-			script: []testenv.LLMReply{
-				{ToolCalls: []testenv.LLMToolCall{{ID: "o32-search", Name: "ToolSearch", Arguments: `{"query":"select:capture_pcap"}`}}},
-				{ToolCalls: []testenv.LLMToolCall{{ID: "o32-capture", Name: "capture_pcap", Arguments: fmt.Sprintf(`{"device_id":%d,"interface":"eth0","duration_seconds":60,"filter":"tcp port 443","session_name":"HTTPS 排障抓包"}`, deviceID)}}},
-				{Content: "抓包任务已进入可跟踪状态；如果 edge 不可用会在同一会话返回错误。"},
-			},
-			wantTools:    []string{"ToolSearch", "capture_pcap"},
-			wantContains: []string{"可跟踪状态"},
 		},
 		{
 			id:       "O33",
@@ -1066,7 +1081,7 @@ func createChatSession(t *testing.T, env *testenv.Env, token, title string) stri
 	t.Cleanup(func() {
 		status, _, err := env.DoJSON("DELETE", "/api/v1/chat/sessions/"+id, nil, token)
 		if err != nil || status != http.StatusNoContent {
-			t.Logf("cleanup chat session %s: status=%d err=%v", id, status, err)
+			t.Errorf("cleanup chat session %s: status=%d err=%v", id, status, err)
 		}
 	})
 	return id
@@ -1136,4 +1151,86 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// O32 exercises the public approval path; merely mentioning a device must not
+// authorize sensitive packet capture. Rejecting the proposal must unblock chat.
+func TestAssistantChat_CaptureRequiresHumanApproval(t *testing.T) {
+	env := testenv.Start(t, testenv.WithEnv("ONGRID_TOOLBAG_DEFERRAL_THRESHOLD", "1"))
+	admin := env.LoginAdmin()
+	status, setting, err := env.DoJSON("PUT", "/api/v1/system-settings/agent/write_enabled", map[string]any{"value": "true", "sensitive": false}, admin.AccessToken)
+	if err != nil || status != http.StatusOK {
+		t.Fatalf("enable approval gate: status=%d body=%v err=%v", status, setting, err)
+	}
+
+	deviceID := env.SeedDevice(testenv.DeviceFixture{Name: "capture-approval", Hostname: "capture-approval", Online: true, Roles: devicemodel.RoleBitServer})
+	env.FakeLLM().SetScript(
+		testenv.LLMReply{ToolCalls: []testenv.LLMToolCall{{ID: "capture-search", Name: "ToolSearch", Arguments: `{"query":"select:capture_pcap"}`}}},
+		testenv.LLMReply{ToolCalls: []testenv.LLMToolCall{{ID: "capture-proposal", Name: "capture_pcap", Arguments: fmt.Sprintf(`{"device_id":%d,"interface":"eth0","duration_seconds":60,"filter":"tcp port 443","session_name":"approval test"}`, deviceID)}}},
+		testenv.LLMReply{Content: "抓包申请已拒绝，未执行抓包。"},
+	)
+	sessionID := createChatSession(t, env, admin.AccessToken, "E2E O32 approval")
+	payload, err := json.Marshal(map[string]any{"content": "在这台设备上抓 60 秒 tcp port 443 的包，接口 eth0", "mentions": []map[string]string{{"type": "device", "id": fmt.Sprint(deviceID), "label": "capture-approval"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, env.BaseURL()+chatMessagesPath(sessionID)+"/stream", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+admin.AccessToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("stream status=%d", resp.StatusCode)
+	}
+	scanner := bufio.NewScanner(resp.Body)
+	var event string
+	var rejected, done bool
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "event: ") {
+			event = strings.TrimPrefix(line, "event: ")
+			continue
+		}
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		if event == "approval_pending" {
+			if rejected {
+				t.Fatal("duplicate approval")
+			}
+			var proposal struct {
+				ApprovalID string `json:"approval_id"`
+				ToolName   string `json:"tool_name"`
+			}
+			if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &proposal); err != nil {
+				t.Fatal(err)
+			}
+			if proposal.ApprovalID == "" || proposal.ToolName != "capture_pcap" {
+				t.Fatalf("unexpected approval: %s", line)
+			}
+			status, _, err := env.DoJSON("POST", "/api/v1/approvals/"+proposal.ApprovalID+"/reject", map[string]string{"reason": "E2E denies capture"}, admin.AccessToken)
+			if err != nil || status != http.StatusOK {
+				t.Fatalf("reject status=%d err=%v", status, err)
+			}
+			rejected = true
+		}
+		if event == "done" {
+			done = true
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if !rejected || !done {
+		t.Log(env.ManagerLogs())
+		t.Fatalf("rejected=%t, terminal=%t", rejected, done)
+	}
 }

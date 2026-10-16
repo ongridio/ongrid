@@ -55,12 +55,10 @@ type Repo interface {
 	UpdateIncidentStatus(ctx context.Context, id uint64, status string, actorID *uint64, occurredAt time.Time) error
 	CreateEvent(ctx context.Context, ev *model.Event) error
 	ListEventsByIncident(ctx context.Context, incidentID uint64, limit int) ([]*model.Event, error)
-	// CountEventsByType counts alert_events of a given type since `since`.
+	// CountEventsByType counts up to limit alert_events of a given type since `since`.
 	// Optional filterRule narrows to events whose parent incident.rule
-	// matches; filterSeverity narrows by incident severity. Used by the
-	// event_internal evaluator to detect e.g. "≥5 silenced
-	// events in the last hour".
-	CountEventsByType(ctx context.Context, eventType string, since time.Time, filterRule, filterSeverity string) (int64, error)
+	// matches; filterSeverity narrows by event severity. Limit must be positive.
+	CountEventsByType(ctx context.Context, eventType string, since time.Time, filterRule, filterSeverity string, limit int) (int64, error)
 	CreateSilence(ctx context.Context, in *model.Silence) error
 
 	// Firing path.

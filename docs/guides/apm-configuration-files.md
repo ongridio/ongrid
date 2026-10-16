@@ -17,7 +17,7 @@ Ongrid 接收标准 OTLP 数据，应用可以使用环境变量、Agent 配置�
 
 ## Java Agent：otel.properties
 
-适用于仓库示例锁定的官方 Agent 2.31.1。保存为 `/etc/myapp/otel.properties`，值不加 shell 引号，也不写 `export`：
+以下配置曾使用官方 Agent 2.31.1 验证；其他版本需按其官方文档核对。保存为 `/etc/myapp/otel.properties`，值不加 shell 引号，也不写 `export`：
 
 ```properties
 otel.service.name=order-api
@@ -45,13 +45,7 @@ java -javaagent:/opt/otel/opentelemetry-javaagent.jar \
 
 普通 Agent 配置的优先级为 **JVM `-D` > 环境变量 > properties 文件 > SPI 提供的默认属性**。因此，原来的 `OTEL_SERVICE_NAME` 或 `OTEL_RESOURCE_ATTRIBUTES` 仍可能覆盖文件。排查时检查启动参数、容器注入的环境变量和文件路径，不要只检查文件内容。[官方 Agent 配置](https://opentelemetry.io/docs/zero-code/java/agent/configuration/)
 
-需要精确 Java RPC 延迟桶时，另按 [Java RPC View 说明](../../examples/apm-languages/README.md#java-rpc-延迟桶) 构建扩展，并在上述命令中、`-jar` 前追加：
-
-```text
--Dotel.javaagent.extensions=/opt/otel/apm-java-1.0.jar
-```
-
-配置文件只改变配置来源，不会自动补上该 View。已有其他扩展时保留原扩展列表。
+RPC 延迟桶需与实际请求耗时匹配。配置文件只改变配置来源，不会自动补上自定义 SDK View；已有 View 或 Agent 扩展时保留其配置，并在升级后重新验证。
 
 ## Spring Boot Starter：application.yaml
 
@@ -108,7 +102,7 @@ java -jar app.jar --spring.config.additional-location=file:/etc/myapp/applicatio
 }
 ```
 
-`Program.cs` 中替换已有 SDK 注册块；保留应用路由及其他需要的埋点，不额外注册第二套 Provider。需要官方 Hosting、OTLP exporter、ASP.NET Core instrumentation 包，参见 [现有 .NET 示例](../../examples/apm-languages/dotnet/Program.cs)。以下 `Resource` 字段为应用自定义键，必须显式映射：
+`Program.cs` 中替换已有 SDK 注册块；保留应用路由及其他需要的埋点，不额外注册第二套 Provider。需要官方 Hosting、OTLP exporter、ASP.NET Core instrumentation 包，参见 [.NET 官方接入文档](https://opentelemetry.io/docs/languages/dotnet/instrumentation/)。以下 `Resource` 字段为应用自定义键，必须显式映射：
 
 ```csharp
 using OpenTelemetry.Exporter;
@@ -161,12 +155,12 @@ builder.Services.AddOpenTelemetry()
 
 | 语言 | 对接现有 SDK 的位置 |
 | --- | --- |
-| Go | 配置传给 `otlptracehttp` / `otlpmetrichttp` exporter options 和 `resource.WithAttributes`；沿用 [Go 示例](../../examples/apm-go/main.go) 的初始化及退出处理 |
+| Go | 配置传给 `otlptracehttp` / `otlpmetrichttp` exporter options 和 `resource.WithAttributes`；按官方 SDK 接入方式初始化并在退出时关闭 Provider |
 | Node.js | 在业务模块加载前读取配置，传给官方 `NodeSDK` 的 Resource、trace exporter、metric reader；选择程序化启动后，不再重复加载自动初始化入口 |
 | Python | 配置传给官方 Resource、Trace/MeterProvider 和 OTLP exporters；选择手动初始化时，不再由 `opentelemetry-instrument` 先创建全局 Provider |
-| PHP / C++ / Rust / Ruby | 复用项目已有配置读取代码，在官方 SDK 初始化处传入资源和 exporter 配置；对应接入示例见 [语言目录](../../examples/apm-languages/) |
+| PHP / C++ / Rust / Ruby | 复用项目已有配置读取代码，在官方 SDK 初始化处传入资源和 exporter 配置 |
 
-程序化初始化方式见 [JavaScript](https://opentelemetry.io/docs/languages/js/instrumentation/)、[Python](https://opentelemetry.io/docs/languages/python/instrumentation/)、[Go](https://opentelemetry.io/docs/languages/go/instrumentation/)。各语言支持的信号和指标边界不因配置文件而改变；Python 的 gRPC 插件、Node.js 的 gRPC 拦截器和 Ruby 示例的 Trace 样本限制仍按 [现有说明](../../examples/apm-languages/README.md) 处理。
+程序化初始化方式见 [JavaScript](https://opentelemetry.io/docs/languages/js/instrumentation/)、[Python](https://opentelemetry.io/docs/languages/python/instrumentation/)、[Go](https://opentelemetry.io/docs/languages/go/instrumentation/)。各语言支持的信号和指标边界不因配置文件而改变；按所用 SDK 版本核对 HTTP/RPC 指标和 Trace 支持，只有 Trace 样本时不能推断全量请求统计。
 
 ## OTEL_CONFIG_FILE 与 Collector YAML
 
@@ -180,4 +174,4 @@ builder.Services.AddOpenTelemetry()
 - 修改配置后重启应用，发送真实成功、失败和慢请求，在「服务 → 接入管理」核对身份、实例、指标和链路；按版本/实例检索日志。指标应独立于 Trace 采样，关闭采样不会使请求数归零。
 - 配置文件加载失败、权限错误、环境变量覆盖、HTTP 路径错误和重复 SDK 初始化应先排查。恢复上一版文件和启动参数并重启即可回滚。
 
-验证范围：Agent 2.31.1 已通过本地隔离 OTLP 接收器验证 properties 中的资源身份，以及文件、环境变量、JVM 参数三种覆盖结果。运行 `/tmp/ongrid-apm-languages/python/bin/python scripts/apm-test/check-java-properties.py` 可复验（先按语言示例准备 Agent、Java 与 Python 缓存）；测试仅发送探测 Span，不代表完整应用接入。Spring/.NET 配置依据上述官方文档，尚未在本仓库针对文件方式做运行验收，需在应用实际依赖版本上验证。配置文件不会补回历史日志资源属性，也不会自动补齐尚未安装的埋点。
+历史验证范围：Agent 2.31.1 曾通过本地隔离 OTLP 接收器验证 properties 中的资源身份，以及文件、环境变量、JVM 参数三种覆盖结果；测试仅发送探测 Span，不代表完整应用接入。相关演示应用和专用验证脚本已停止维护并移除。Spring/.NET 配置依据上述官方文档，尚未在本仓库针对文件方式做运行验收，需在应用实际依赖版本上验证。配置文件不会补回历史日志资源属性，也不会自动补齐尚未安装的埋点。

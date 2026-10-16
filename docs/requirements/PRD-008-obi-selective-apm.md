@@ -32,7 +32,7 @@
 - Kubernetes 环境直接继承集群默认环境，服务命名空间取实际 Kubernetes Namespace，不允许额外覆盖；Namespace 全选保留各工作负载服务名称。
 - 节点状态显示真实心跳与错误，配置保存、运行状态不等同于已收到服务数据。清空规则停止 OBI；集群基础设施清单同步仍由既有控制器维护。
 - Helm Chart 统一准备节点 OBI 能力及读取 pods/nodes/replicasets 元数据的权限，不再提供 `node.autoAPM.allowBPF` 开关。用户保存采集目标后启动探针，清空目标停止采集；普通安装和升级命令无需追加参数。
-- MySQL 生产发布先执行 `20260916160000_add_k8s_autoapm_config.up.sql`。回滚前清空集群规则，再回滚 Edge 和 Manager；新增列可保留，避免丢失配置。
+- MySQL 的 `auto_apm_config_json` 列由 Manager 启动时的 GORM AutoMigrate 管理。回滚前清空集群规则，再回滚 Edge 和 Manager；新增列可保留，避免丢失配置。
 
 ### Kubernetes 容器日志按服务范围采集（2026-09-20）
 

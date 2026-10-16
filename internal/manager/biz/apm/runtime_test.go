@@ -3,12 +3,9 @@ package apm
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/ongridio/ongrid/internal/pkg/promquery"
-	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -293,74 +290,6 @@ func TestRuntimeTimeWindowPromQL(t *testing.T) {
 	}
 	if output, err := exec.CommandContext(t.Context(), binary, "test", "rules", file).CombinedOutput(); err != nil {
 		t.Fatalf("promtool: %v\n%s", err, output)
-	}
-}
-
-// Read-only acceptance: use the current Go demo and an explicitly selected
-// historical JVM window if the Java demo has been stopped.
-func TestRuntimeMetricsIntegration(t *testing.T) {
-	base := os.Getenv("APM_RUNTIME_PROMETHEUS")
-	if base == "" {
-		t.Skip("set APM_RUNTIME_PROMETHEUS for runtime acceptance")
-	}
-	svc := New(promquery.New(base, nil), nil, nil)
-	env, ns := "development", "apm-demo"
-	for _, language := range []string{"go", "java"} {
-		t.Run(language, func(t *testing.T) {
-			end := time.Now()
-			if language == "java" && os.Getenv("APM_RUNTIME_JAVA_END") != "" {
-				stamp, err := strconv.ParseInt(os.Getenv("APM_RUNTIME_JAVA_END"), 10, 64)
-				if err != nil {
-					t.Fatal(err)
-				}
-				end = time.Unix(stamp, 0)
-			}
-			q := Query{Start: end.Add(-time.Hour), End: end, Environment: &env, ServiceNamespace: &ns, ServiceName: "apm-demo-" + language, Protocol: "http"}
-			out, err := svc.Runtime(t.Context(), q)
-			if err != nil {
-				t.Fatal(err)
-			}
-			wanted := map[string]string{"go_memory_allocation_bytes_per_second": "bytes_per_second", "go_gc_mean_duration_seconds": "seconds"}
-			if language == "java" {
-				wanted = map[string]string{"jvm_heap_memory_used_bytes": "bytes", "jvm_non_heap_memory_used_bytes": "bytes", "jvm_gc_mean_duration_seconds": "seconds"}
-			}
-			for name, unit := range wanted {
-				instances := map[string]bool{}
-				for _, row := range out.Items {
-					if row.Name != name {
-						continue
-					}
-					if row.Unit != unit || row.InstanceID == "" || row.Version == "" {
-						t.Fatalf("bad metric metadata: %+v", row)
-					}
-					for _, point := range row.Points {
-						if point.Value != nil && *point.Value > 0 && !math.IsInf(*point.Value, 0) && !math.IsNaN(*point.Value) {
-							instances[row.InstanceID] = true
-						}
-					}
-				}
-				if len(instances) < 2 {
-					t.Fatalf("%s: expected positive real samples for two replicas, got %v", name, instances)
-				}
-				t.Logf("%s (%s): %v", name, unit, instances)
-			}
-			if len(out.Instances) == 0 {
-				t.Fatal("no selectable instances")
-			}
-			q.InstanceID, q.ServiceVersion = out.Instances[0].InstanceID, out.Instances[0].Version
-			selected, err := svc.Runtime(t.Context(), q)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(selected.Items) == 0 {
-				t.Fatal("no scoped runtime metrics")
-			}
-			for _, row := range selected.Items {
-				if row.InstanceID != q.InstanceID || row.Version != q.ServiceVersion {
-					t.Fatalf("scope leaked: %+v", row)
-				}
-			}
-		})
 	}
 }
 

@@ -172,7 +172,9 @@ spec:
             {{- end }}
             capabilities:
               drop: ["ALL"]
-              add: ["DAC_READ_SEARCH", "NET_ADMIN", "SETGID", "SETPCAP", "SETUID", "SYS_CHROOT", "BPF", "PERFMON", "SYS_PTRACE", "CHECKPOINT_RESTORE", "NET_RAW", "SYS_ADMIN", "SYS_RESOURCE"]
+              # SYS_ADMIN also covers BPF, PERFMON and CHECKPOINT_RESTORE operations.
+              # Omit those newer names so older container runtimes can create the Pod.
+              add: ["DAC_READ_SEARCH", "NET_ADMIN", "SETGID", "SETPCAP", "SETUID", "SYS_CHROOT", "SYS_PTRACE", "NET_RAW", "SYS_ADMIN", "SYS_RESOURCE"]
           volumeMounts:
             - name: host-root
               mountPath: /host/root

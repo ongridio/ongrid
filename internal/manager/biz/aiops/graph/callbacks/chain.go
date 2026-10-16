@@ -50,6 +50,9 @@ func (r *assistantIDRelay) load() string {
 //
 // Reference: Callback 链 + 主参考图 callback 链.
 type Deps struct {
+	// Tracing shares one process-scoped Eino callback and exporter.
+	Tracing callbacks.Handler
+
 	// AlertDraftGuard blocks model-only alert-rule drafts before they are
 	// persisted or streamed. It must run before Persistence/SSE.
 	AlertDraftGuard AlertDraftGuardDeps
@@ -87,6 +90,9 @@ type Deps struct {
 // is bounded by the request lifetime).
 func NewDefaultHandlers(deps Deps) []callbacks.Handler {
 	out := make([]callbacks.Handler, 0, 6)
+	if deps.Tracing != nil {
+		out = append(out, deps.Tracing)
+	}
 
 	if h := NewAlertDraftGuardHandler(deps.AlertDraftGuard); h != nil {
 		out = append(out, h)

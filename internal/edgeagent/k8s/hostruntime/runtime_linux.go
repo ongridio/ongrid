@@ -1,0 +1,221 @@
+//go:build linux
+
+package hostruntime
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"runtime"
+	"slices"
+	"strconv"
+	"strings"
+
+	"golang.org/x/sys/unix"
+)
+
+const (
+	defaultLinuxLastCapability = 63
+	procHostRoot               = "/proc/1/root"
+	procHostMountNamespace     = "/proc/1/ns/mnt"
+	// SECBIT_NO_SETUID_FIXUP from linux/securebits.h.
+	securebitNoSetUIDFixup = 1 << 2
+)
+
+// Keep granted node capabilities across the non-root host identity transition.
+// OBI needs SYS_ADMIN for Go propagation, setns and restrictive perf policies;
+// JVM attach also needs SYS_CHROOT and SETUID/SETGID for target credentials.
+var k8sHostCapabilities = []int{
+	unix.CAP_DAC_READ_SEARCH,
+	unix.CAP_NET_ADMIN,
+	unix.CAP_BPF,
+	unix.CAP_PERFMON,
+	unix.CAP_SYS_PTRACE,
+	unix.CAP_CHECKPOINT_RESTORE,
+	unix.CAP_NET_RAW,
+	unix.CAP_SYS_ADMIN,
+	unix.CAP_SYS_RESOURCE,
+	unix.CAP_SYS_CHROOT,
+	unix.CAP_SETUID,
+	unix.CAP_SETGID,
+}
+
+// Give non-root OBI its own bpffs directory; never change ownership or mode of
+// the host's bpffs root, which may also be used by the CNI and other agents.
+func PrepareOBIFilesystem(ctx context.Context, root string, uid, gid int) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	base := hostPath(root, "/sys/fs/bpf")
+	var stat unix.Statfs_t
+	err := unix.Statfs(base, &stat)
+	if errors.Is(err, os.ErrNotExist) || (err == nil && stat.Type != unix.BPF_FS_MAGIC) {
+		// OBI can capture without pinned maps. Do not turn an optional APM
+		// facility into a startup requirement for metrics and logs, or create
+		// a pin directory on a filesystem that cannot hold BPF objects.
+		slog.WarnContext(ctx, "host bpffs is not mounted; skipping optional OBI map pinning directory")
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect host bpffs at /sys/fs/bpf: %w", err)
+	}
+	return ensureOwnedDirectory(filepath.Join(base, "ongrid"), uid, gid, 0750)
+}
+
+// Enter switches to the host root and Edge user, retaining the node capabilities.
+func Enter(ctx context.Context, hostRoot string, uid, gid int) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	rootFD, err := unix.Open(hostRoot, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return fmt.Errorf("open host root: %w", err)
+	}
+	defer unix.Close(rootFD)
+
+	mountNSFD := -1
+	if requiresHostMountNamespace(hostRoot) {
+		mountNSFD, err = unix.Open(procHostMountNamespace, unix.O_RDONLY|unix.O_CLOEXEC, 0)
+		if err != nil {
+			return fmt.Errorf("open host mount namespace: %w", err)
+		}
+		defer unix.Close(mountNSFD)
+	}
+	lastCapability := linuxLastCapability()
+
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	if err := unix.Unshare(unix.CLONE_FS); err != nil {
+		return fmt.Errorf("isolate host launcher filesystem context: %w", err)
+	}
+	if mountNSFD >= 0 {
+		if err := unix.Setns(mountNSFD, unix.CLONE_NEWNS); err != nil {
+			return fmt.Errorf("enter host mount namespace: %w", err)
+		}
+	}
+	if err := unix.Fchdir(rootFD); err != nil {
+		return fmt.Errorf("select host root: %w", err)
+	}
+	if err := unix.Chroot("."); err != nil {
+		return fmt.Errorf("switch to host root: %w", err)
+	}
+	if err := unix.Chdir("/"); err != nil {
+		return fmt.Errorf("change host working directory: %w", err)
+	}
+	if err := dropToHostEdgeUser(uid, gid, lastCapability); err != nil {
+		return err
+	}
+	if err := unix.Exec(k8sHostEdgeBinary, []string{k8sHostEdgeBinary}, os.Environ()); err != nil {
+		return fmt.Errorf("start host edge: %w", err)
+	}
+	return nil
+}
+
+// requiresHostMountNamespace preserves compatibility with older charts that
+// reached the host through hostPID's /proc/1/root. New charts pass the explicit
+// /host/root hostPath mount, which can be chrooted directly without procfs
+// ptrace checks or setns.
+func requiresHostMountNamespace(hostRoot string) bool {
+	return filepath.Clean(hostRoot) == procHostRoot
+}
+
+func linuxLastCapability() int {
+	raw, err := os.ReadFile("/proc/sys/kernel/cap_last_cap")
+	if err != nil {
+		return defaultLinuxLastCapability
+	}
+	value, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil || value < 0 {
+		return defaultLinuxLastCapability
+	}
+	return value
+}
+
+func dropToHostEdgeUser(uid, gid, lastCapability int) error {
+	var granted [2]unix.CapUserData
+	header := unix.CapUserHeader{Version: unix.LINUX_CAPABILITY_VERSION_3}
+	if err := unix.Capget(&header, &granted[0]); err != nil {
+		return fmt.Errorf("read host edge capabilities: %w", err)
+	}
+	// Filter before both capset and ambient raises; older kernels lack newer APM capabilities.
+	capabilities := make([]int, 0, len(k8sHostCapabilities))
+	for _, capability := range k8sHostCapabilities {
+		if capability > lastCapability {
+			slog.Warn("kernel does not support optional host edge capability; skipping",
+				"capability", capability, "cap_last_cap", lastCapability)
+			continue
+		}
+		switch capability {
+		case unix.CAP_BPF, unix.CAP_PERFMON, unix.CAP_CHECKPOINT_RESTORE:
+			// SYS_ADMIN already covers these operations, including on modern kernels.
+			bounded, err := unix.PrctlRetInt(unix.PR_CAPBSET_READ, uintptr(capability), 0, 0, 0)
+			if err != nil {
+				return fmt.Errorf("read host edge bounding capability %d: %w", capability, err)
+			}
+			if bounded == 0 || granted[capability/32].Permitted&(uint32(1)<<uint(capability%32)) == 0 {
+				slog.Debug("container did not grant optional host edge capability; using SYS_ADMIN",
+					"capability", capability)
+				continue
+			}
+		}
+		capabilities = append(capabilities, capability)
+	}
+	for capability := 0; capability <= lastCapability; capability++ {
+		if slices.Contains(capabilities, capability) {
+			continue
+		}
+		if err := unix.Prctl(unix.PR_CAPBSET_DROP, uintptr(capability), 0, 0, 0); err != nil && !errors.Is(err, unix.EINVAL) {
+			return fmt.Errorf("drop capability %d from bounding set: %w", capability, err)
+		}
+	}
+	// JVM attach changes the effective UID process-wide, including concurrent
+	// collector threads. KEEP_CAPS is cleared by exec and does not preserve the
+	// effective set during UID changes. NO_SETUID_FIXUP survives exec; capset
+	// below still limits the node and its children to the existing capability list.
+	securebits, err := unix.PrctlRetInt(unix.PR_GET_SECUREBITS, 0, 0, 0, 0)
+	if err != nil {
+		return fmt.Errorf("read host edge securebits: %w", err)
+	}
+	if err := unix.Prctl(unix.PR_SET_SECUREBITS, uintptr(securebits)|securebitNoSetUIDFixup, 0, 0, 0); err != nil {
+		return fmt.Errorf("preserve host edge capabilities across uid changes: %w", err)
+	}
+	if err := unix.Setgroups(nil); err != nil {
+		return fmt.Errorf("clear supplementary groups: %w", err)
+	}
+	if err := unix.Setresgid(gid, gid, gid); err != nil {
+		return fmt.Errorf("set host edge gid: %w", err)
+	}
+	if err := unix.Setresuid(uid, uid, uid); err != nil {
+		return fmt.Errorf("set host edge uid: %w", err)
+	}
+
+	capabilityData := [2]unix.CapUserData{}
+	for _, capability := range capabilities {
+		mask := uint32(1) << (uint(capability) % 32)
+		index := uint(capability) / 32
+		capabilityData[index].Effective |= mask
+		capabilityData[index].Permitted |= mask
+		capabilityData[index].Inheritable |= mask
+	}
+	if err := unix.Capset(&header, &capabilityData[0]); err != nil {
+		return fmt.Errorf("retain host edge capabilities: %w", err)
+	}
+	for _, capability := range capabilities {
+		if err := unix.Prctl(unix.PR_CAP_AMBIENT, unix.PR_CAP_AMBIENT_RAISE, uintptr(capability), 0, 0); err != nil {
+			return fmt.Errorf("raise ambient capability %d: %w", capability, err)
+		}
+	}
+	return nil
+}
+
+func isK8sHostCapability(capability int) bool {
+	for _, allowed := range k8sHostCapabilities {
+		if capability == allowed {
+			return true
+		}
+	}
+	return false
+}

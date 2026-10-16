@@ -3,7 +3,6 @@ package alert
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	model "github.com/ongridio/ongrid/internal/manager/model/alert"
 )
@@ -51,7 +50,7 @@ func (i *BuiltinInhibitor) Suppress(ctx context.Context, incident *model.Inciden
 		if active, ok := i.activeIncident(ctx, dedupeKey); ok {
 			return fmt.Sprintf("inhibited by edge_offline incident #%d", active.ID), true
 		}
-	case incident.ScopeType == model.RuleScopeMonitoringPipeline && strings.HasPrefix(incident.DedupeKey, "pipeline:scrape_down:"):
+	case incident.ScopeType == model.RuleScopeMonitoringPipeline && incident.Rule == "scrape_down":
 		if active, ok := i.activeIncident(ctx, "pipeline:prom_ingest_fail"); ok {
 			return fmt.Sprintf("inhibited by prom_ingest_fail incident #%d", active.ID), true
 		}

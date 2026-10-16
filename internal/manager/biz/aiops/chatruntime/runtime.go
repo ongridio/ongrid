@@ -19,6 +19,7 @@ import (
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
+	"go.opentelemetry.io/otel/attribute"
 
 	biz "github.com/ongridio/ongrid/internal/manager/biz/aiops"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/graph"
@@ -28,6 +29,7 @@ import (
 	aiopsmodel "github.com/ongridio/ongrid/internal/manager/model/aiops"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/llm"
+	"github.com/ongridio/ongrid/internal/pkg/tracing"
 )
 
 // Mention 是运行时的 mention 输入；Service 从 chatprotocol 转换。
@@ -432,7 +434,7 @@ func (rt *Runtime) ToolNames(ctx context.Context) []string {
 // Handle runs one user turn end-to-end. Mirrors legacy
 // agent.runInternal: ownership check → mention inline → user message
 // persistence → graph invoke with callback chain → reply.
-func (rt *Runtime) Handle(ctx context.Context, req *Request) (*Reply, error) {
+func (rt *Runtime) Handle(ctx context.Context, req *Request) (result *Reply, retErr error) {
 	if rt == nil || rt.cfg.Sessions == nil || rt.cfg.ChatModel == nil {
 		return nil, errs.ErrNotWiredYet
 	}
@@ -460,6 +462,19 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (*Reply, error) {
 		// ErrForbidden) so non-owners can't fingerprint sessions.
 		return nil, errs.ErrNotFound
 	}
+	ctx, span := startAgentSpan(ctx, sess, "default")
+	tracing.RecordAgentContent(span, "input.value", req.UserText)
+	var runErr error
+	defer func() {
+		if result != nil && result.Message != nil && result.Message.Content != nil {
+			tracing.RecordAgentContent(span, "output.value", *result.Message.Content)
+		}
+		if runErr == nil {
+			runErr = retErr
+		}
+		tracing.EndSpan(span, runErr)
+	}()
+	span.SetAttributes(attribute.String("ongrid.agent.kernel", "graph"))
 
 	// 2. Render @-mention bullets.
 	mentionsRendered := ""
@@ -759,6 +774,7 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (*Reply, error) {
 		Locale:           req.Locale,
 	}, invokeOpts...)
 	if invokeErr != nil {
+		runErr = invokeErr
 		// Soft-fail graph-level errors: write an apology assistant
 		// message, emit it like a normal turn, and emit Done. Keeps
 		// SPA experience consistent with legacy agent.go's

@@ -99,8 +99,7 @@ type Bucket1h struct {
 // GORM row types. One per physical table.
 // ---------------------------------------------------------------------
 
-// HostMetric is the host_metrics_raw row. Matches
-// db/migrations/0003_init_manager_metric.up.sql exactly.
+// HostMetric is the host_metrics_raw row, managed by GORM AutoMigrate.
 type HostMetric struct {
 	ID          uint64    `gorm:"primaryKey;autoIncrement;column:id"`
 	EdgeID      uint64    `gorm:"index:idx_host_metrics_raw_edge_ts,priority:1;column:edge_id;not null"`

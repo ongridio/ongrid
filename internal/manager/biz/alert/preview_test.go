@@ -124,14 +124,14 @@ func TestPreviewHostLogSearchUsesGroupedCurrentWindow(t *testing.T) {
 	}
 }
 
-func (f *fakeEventCounter) CountEventsByType(_ context.Context, _ string, _ time.Time, _, _ string) (int64, error) {
+func (f *fakeEventCounter) CountEventsByType(_ context.Context, _ string, _ time.Time, _, _ string, limit int) (int64, error) {
 	if f.calls >= len(f.answers) {
 		f.calls++
 		return 0, nil
 	}
 	v := f.answers[f.calls]
 	f.calls++
-	return v, nil
+	return min(v, int64(limit)), nil
 }
 
 // matrix builds a synthetic Prom matrix payload with one series per

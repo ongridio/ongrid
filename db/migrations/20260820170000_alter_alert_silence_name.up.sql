@@ -1,2 +1,0 @@
-ALTER TABLE alert_silences
-    MODIFY COLUMN name VARCHAR(256) NOT NULL DEFAULT '';

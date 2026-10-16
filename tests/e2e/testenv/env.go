@@ -149,6 +149,7 @@ func Start(t *testing.T, opts ...Option) *Env {
 		"ONGRID_ADMIN_PASSWORD":      env.AdminPassword,
 		"ONGRID_PUBLIC_URL":          env.httpBase,
 		"ONGRID_PAGES_DIR":           pagesDir,
+		"ONGRID_CHAT_ATTACHMENT_DIR": t.TempDir(),
 		"ONGRID_PROM_ENABLED":        "true",
 		"ONGRID_PROM_URL":            env.prom.URL(),
 		"ONGRID_PROM_QUERY_URL":      env.prom.URL(),
@@ -164,19 +165,13 @@ func Start(t *testing.T, opts ...Option) *Env {
 		"ONGRID_ZHIPU_BASE_URL":      env.llm.URL() + "/v1",
 		"ONGRID_ZHIPU_MODEL":         "glm-fake",
 		"ONGRID_ALERT_EVAL_INTERVAL": "30s",
-		// Graph kernel is the live runtime (memory: chat quality
-		// 2026-05-25). The legacy kernel doesn't build chatruntime, so
-		// investigator / agent paths look "not wired". Default the
-		// harness to the same kernel production runs on.
-		"ONGRID_AGENT_KERNEL": "graph",
-		// Tell the chatruntime loader where to find the agent + skill
-		// markdown files. The manager binary is spawned in a tempdir so
-		// the default `./agents` / `./skills` relative paths don't
-		// resolve to the repo. Without this, personas like
-		// "incident-investigator" fail to register and the RCA worker
+		// Tell the chatruntime loader where to find the agent markdown.
+		// The manager binary is spawned in a tempdir so the default
+		// `./agents` path doesn't resolve to the repo. Without this,
+		// "incident-investigator" fails to register and the RCA worker
 		// errors out with "agent ... not found".
 		"ONGRID_BUILTIN_AGENTS_ROOT": filepath.Join(repoRoot(), "agents"),
-		"ONGRID_BUILTIN_SKILLS_ROOT": filepath.Join(repoRoot(), "skills"),
+		"ONGRID_BUILTIN_SKILLS_ROOT": "",
 		// No frontier broker in the harness — disable the geminio dial
 		// so manager comes up without waiting on a non-existent broker.
 		// Edge-tunnel-only features (webssh, edge reverse calls) error

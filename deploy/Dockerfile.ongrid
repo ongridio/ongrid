@@ -117,12 +117,8 @@ ENV ONNX_PATH=/usr/lib/libonnxruntime.so
 
 COPY --from=builder /out/ongrid /ongrid
 
-# chatruntime.LoadAll reads from `./skills` and `./agents` relative to
-# the binary's working directory. Ship the in-tree persona / SKILL.md
-# bundles into the image so they're available at runtime; users can
-# still install more via the marketplace at /var/lib/ongrid/marketplace
-# (separate root, separate loader).
-COPY --from=builder /app/skills /skills
+# Ship the agent personas read by chatruntime.LoadAll from `./agents`.
+# Skill packs are installed separately at /var/lib/ongrid/skills.
 COPY --from=builder /app/agents /agents
 
 # ADR-024 edge upgrade bundles are bind-mounted from the host at

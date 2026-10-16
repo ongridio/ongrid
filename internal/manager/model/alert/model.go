@@ -254,8 +254,8 @@ func (Incident) TableName() string { return "alert_incidents" }
 
 type Event struct {
 	ID             uint64         `gorm:"column:id;primaryKey;autoIncrement"`
-	IncidentID     uint64         `gorm:"column:incident_id;not null;index:idx_alert_events_incident_created,priority:1"`
-	EventType      string         `gorm:"column:event_type;size:24;not null;default:''"`
+	IncidentID     uint64         `gorm:"column:incident_id;not null;index:idx_alert_events_incident_created,priority:1;index:idx_alert_events_type_created,priority:4"`
+	EventType      string         `gorm:"column:event_type;size:24;not null;default:'';index:idx_alert_events_type_created,priority:1"`
 	StatusAfter    string         `gorm:"column:status_after;size:16;not null;default:''"`
 	Severity       string         `gorm:"column:severity;size:16;not null;default:''"`
 	Title          string         `gorm:"column:title;size:256;not null;default:''"`
@@ -266,9 +266,9 @@ type Event struct {
 	SnapshotJSON   string         `gorm:"column:snapshot_json;type:text;not null"`
 	Reason         string         `gorm:"column:reason;type:text;not null"`
 	OccurredAt     time.Time      `gorm:"column:occurred_at"`
-	CreatedAt      time.Time      `gorm:"column:created_at;autoCreateTime;index:idx_alert_events_incident_created,priority:2"`
+	CreatedAt      time.Time      `gorm:"column:created_at;autoCreateTime;index:idx_alert_events_incident_created,priority:2;index:idx_alert_events_type_created,priority:3"`
 	UpdatedAt      time.Time      `gorm:"column:updated_at;autoUpdateTime"`
-	DeletedAt      gorm.DeletedAt `gorm:"column:deleted_at;index"`
+	DeletedAt      gorm.DeletedAt `gorm:"column:deleted_at;index;index:idx_alert_events_type_created,priority:2"`
 }
 
 func (Event) TableName() string { return "alert_events" }

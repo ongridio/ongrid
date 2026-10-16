@@ -1,5 +1,7 @@
 # Python / Node.js gRPC 全量指标验收
 
+> 历史记录：2026-10-16 已移除演示应用及专用验收代码。本文中的演示部署、语言测试和 SDK 开销命令仅适用于[清理前版本](https://github.com/ongridio/ongrid/blob/0d5c341dfeb9ad6427798ccb67857cf9504fddd3/docs/test/apm-grpc-native-20260910.md)，不再是当前维护入口；当前保留的验收见[运行手册](../runbooks/apm-service-performance.md)。
+
 2026-09-10，本地隔离环境通过。范围为 Python 和 Node.js 的 gRPC 服务端请求指标、Collector 归一化、APM 查询及接入提示；未更新现有部署。
 
 ## 实现
@@ -7,7 +9,7 @@
 - Python：`grpcio-observability==1.83.1` 官方插件；官方 SDK View 配置 5ms–10s 的秒级直方图桶。自动埋点已初始化的 Provider 无法追加 View，因此示例另建一个仅供插件使用的官方 Provider，保持相同 Resource 和 OTLP HTTP 环境配置。
 - Node.js：`@grpc/grpc-js==1.14.4` 服务端拦截器调用官方 Metrics API；每次调用记录终态一次，与 Trace 采样无关。无需新增 npm 依赖。
 - Collector 0.157.0：仅将 `grpc.server.call.duration` 及其方法、状态属性映射到已有 RPC 查询模型，保留单位、桶和资源身份；无需修改 APM 生产查询实现。
-- [接入说明](../../examples/apm-languages/README.md#python--nodejs-grpc-指标接入) 和中英文接入提示已更新。
+- [接入说明](https://github.com/ongridio/ongrid/blob/0d5c341dfeb9ad6427798ccb67857cf9504fddd3/examples/apm-languages/README.md#python--nodejs-grpc-指标接入) 和中英文接入提示已更新。
 
 ## 结果
 

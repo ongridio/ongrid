@@ -70,9 +70,6 @@ RELEASE_IMAGE_DIGEST_FILE ?= $(RELEASE_IMAGE_DIGEST_DIR)/manager-$(subst /,-,$(R
 RELEASE_MANAGER_AMD64_DIGEST_FILE ?= $(RELEASE_IMAGE_DIGEST_DIR)/manager-linux-amd64.digest
 RELEASE_MANAGER_ARM64_DIGEST_FILE ?= $(RELEASE_IMAGE_DIGEST_DIR)/manager-linux-arm64.digest
 
-DB_DSN     ?= root:root@tcp(127.0.0.1:3306)/ongrid?charset=utf8mb4&parseTime=true&loc=Local
-MIGRATIONS := db/migrations
-
 .DEFAULT_GOAL := help
 
 # ----------------------------------------------------------------------------
@@ -105,10 +102,9 @@ build-ongrid-edge: ## 构建边端 ongrid-edge
 
 .PHONY: test test-race test-integration test-e2e test-e2e-live
 .PHONY: test-apm-acceptance
-test-apm-acceptance: ## APM 真实多语言、ES 关联、告警、容量和按需 Profiling 验收（独立 Docker）
-	APM_TEST_LOAD=1 APM_TEST_OVERHEAD="$${APM_TEST_OVERHEAD:-1}" scripts/apm-test/run-languages.sh
-	APM_TEST_LANGUAGE_LOG_DIR="$${APM_ACCEPTANCE_OUTPUT:-$(CURDIR)/output/apm-acceptance}" scripts/apm-test/run-logs.sh
-	scripts/apm-test/run.sh
+test-apm-acceptance: ## APM 查询、日志关联、告警、容量和按需 Profiling 验收（独立 Docker）
+	APM_TEST_LOAD=1 scripts/apm-test/run.sh
+	scripts/apm-test/run-logs.sh
 	scripts/apm-test/run-profiles.sh
 	npm run typecheck --prefix web
 	npm test --prefix web -- --run src/api/apm.test.ts src/pages/Apm.test.tsx src/pages/Logs.test.tsx src/pages/DailyTools.test.tsx src/pages/Traces.test.tsx --maxWorkers=2 --minWorkers=2 --testTimeout=20000
@@ -123,12 +119,21 @@ test-race: ## 单元测试 + race
 test-k8s-capabilities: ## 隔离 Linux 环境验证节点 JVM attach 权限（需要 root/sudo）
 	@test "$$(uname -s)" = Linux || { echo 'Linux is required'; exit 1; }
 	@set -eu; tmp_dir=$$(mktemp -d); trap 'rm -rf "$$tmp_dir"' EXIT; \
-	go test -race -c -o "$$tmp_dir/edge.test" ./cmd/ongrid-edge; \
+	go test -race -c -o "$$tmp_dir/edge.test" ./internal/edgeagent/k8s/hostruntime; \
 	if [ "$$(id -u)" = 0 ]; then \
 		env ONGRID_TEST_K8S_CAPABILITIES=1 "$$tmp_dir/edge.test" -test.v -test.timeout=45s -test.run='^TestK8sHostCapabilitiesSurviveJVMAttach$$'; \
 	else \
 		sudo env ONGRID_TEST_K8S_CAPABILITIES=1 "$$tmp_dir/edge.test" -test.v -test.timeout=45s -test.run='^TestK8sHostCapabilitiesSurviveJVMAttach$$'; \
 	fi
+
+.PHONY: test-k8s-autoapm
+test-k8s-autoapm: ## 隔离 Linux 环境验证 Chart 权限与非 root OBI 采集（需要 root 和固定版插件）
+	@test "$$(uname -s)" = Linux && test "$$(id -u)" = 0 || { echo 'Run as root in isolated Linux with the Chart capabilities'; exit 1; }
+	@test -x "$${ONGRID_TEST_AUTOAPM_BIN_DIR}/obi" && test -x "$${ONGRID_TEST_AUTOAPM_BIN_DIR}/otelcol-contrib"
+	@set -eu; tmp_dir=$$(mktemp -d); trap 'rm -rf "$$tmp_dir"' EXIT; \
+	go test -race -c -o "$$tmp_dir/edge.test" ./internal/edgeagent/k8s/hostruntime; \
+	go test -race -c -o "$$tmp_dir/autoapm.test" ./internal/edgeagent/plugins/autoapm; \
+	env ONGRID_TEST_K8S_AUTOAPM_BINARY="$$tmp_dir/autoapm.test" "$$tmp_dir/edge.test" -test.v -test.timeout=7m -test.run='^TestK8sHostAutoAPMIntegration$$'
 
 .PHONY: test-edge-metrics-env
 test-edge-metrics-env: ## Edge 诊断端口安装配置保留检查
@@ -169,10 +174,11 @@ test-arch-policy: ## 验证架构规则确实拒绝跨域和跨层 import
 # ----------------------------------------------------------------------------
 
 .PHONY: proto lint-proto
-lint-proto: ## [api] 校验 Kubernetes 和设置 API，解析模块内引用
+lint-proto: ## [api] 校验 Kubernetes、设置和 Agent 观测 API
 	cd api && buf lint \
 		--config '{"version":"v2","lint":{"use":["STANDARD"],"except":["PACKAGE_DIRECTORY_MATCH"]}}' \
-		--path manager/k8s/v1/k8s.proto --path manager/setting/v1/setting.proto
+		--path manager/k8s/v1/k8s.proto --path manager/setting/v1/setting.proto \
+		--path manager/agenttrace/v1/agenttrace.proto
 
 proto: ## [api] 重新生成 proto（优先 buf，回退 protoc + protoc-gen-go/grpc）
 	@if command -v buf >/dev/null 2>&1; then \
@@ -190,17 +196,6 @@ proto: ## [api] 重新生成 proto（优先 buf，回退 protoc + protoc-gen-go/
 			--go-grpc_opt=require_unimplemented_servers=true \
 			$$(find . -name '*.proto' -not -path './gen/*' -print); \
 	fi
-
-# ----------------------------------------------------------------------------
-# migrate
-# ----------------------------------------------------------------------------
-
-.PHONY: migrate-up migrate-down
-migrate-up: ## DB migrate up（DB_DSN 可覆盖）
-	migrate -path $(MIGRATIONS) -database "mysql://$(DB_DSN)" up
-
-migrate-down: ## DB migrate down 1 步
-	migrate -path $(MIGRATIONS) -database "mysql://$(DB_DSN)" down 1
 
 # ----------------------------------------------------------------------------
 # docker
@@ -229,11 +224,6 @@ docker-ongrid-edge: ## 构建 ongrid-edge 镜像
 # ----------------------------------------------------------------------------
 # compose
 # ----------------------------------------------------------------------------
-
-APM_GO_SOURCE ?= .
-.PHONY: build-apm-go
-build-apm-go: ## 构建 Go APM 示例（版本与提交写入二进制）
-	cd "$(APM_GO_SOURCE)" && $(GO_BUILD) -o "$(abspath $(BIN_DIR))/apm-go" ./examples/apm-go
 
 COMPOSE ?= docker compose
 COMPOSE_ARGS ?= -f deploy/docker-compose.yml
@@ -918,6 +908,7 @@ test-web-ci-platform: ## Run the serial platform frontend CI tests (requires npm
 		src/pages/Kubernetes.test.tsx src/pages/Edges.test.tsx \
 		src/pages/Dashboard.test.tsx src/pages/settings/Upgrade.test.tsx \
 		src/pages/settings/LLM.test.tsx src/pages/settings/CommunicationProviders.test.tsx \
+		src/components/ChatLayout.test.tsx src/components/Sidebar.test.tsx \
 		src/components/icons/Provider.test.tsx src/pages/kubernetes/edgeAttachments.test.ts \
 		src/pages/kubernetes/registryCommands.test.ts
 

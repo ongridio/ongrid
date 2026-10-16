@@ -14,9 +14,6 @@ import (
 // adds new columns (it never drops or changes existing ones — ),
 // we run any backfills the new schema expects so a v0.2.0 -> v0.3.0 upgrade
 // keeps existing rule rows usable.
-//
-// Production schema evolution should still move to versioned SQL migrations
-// when the alert control-plane is wired into rollout paths.
 func Migrate(db *gorm.DB) error {
 	if err := db.AutoMigrate(
 		&model.Incident{},

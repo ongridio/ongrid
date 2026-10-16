@@ -18,7 +18,7 @@
 
 ## 回滚
 
-新增字段为兼容性扩展，回滚应用镜像时保留列。SQL 位于 `db/migrations/20260909180000_add_repo_source_stats.*.sql`。本地部署前备份镜像，沿用 `ongrid-native-deps` Compose 项目与原有数据卷。
+新增字段由启动时的 GORM AutoMigrate 管理，属于兼容性扩展，回滚应用镜像时保留列。本地部署前备份镜像，沿用 `ongrid-native-deps` Compose 项目与原有数据卷。
 
 ## 本地运行
 

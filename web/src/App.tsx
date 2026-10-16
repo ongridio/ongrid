@@ -1,6 +1,7 @@
 import { lazy, type ReactNode } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { Layout } from '@/components/Layout';
+import { ChatLayout } from '@/components/ChatLayout';
 import { useAuth } from '@/store/auth';
 
 const LoginPage = lazy(() => import('@/pages/Login'));
@@ -15,6 +16,7 @@ const LogsPage = lazy(() => import('@/pages/Logs'));
 const ApmCapturePage = lazy(() => import('@/pages/ApmCapture'));
 const ApmPage = lazy(() => import('@/pages/Apm'));
 const TracesPage = lazy(() => import('@/pages/Traces'));
+const AgentObservabilityPage = lazy(() => import('@/pages/AgentObservability'));
 const KubernetesClusterDetailPage = lazy(() =>
   import('@/pages/Kubernetes').then((m) => ({ default: m.KubernetesClusterDetailPage })),
 );
@@ -85,6 +87,7 @@ function PublicOnly({ children }: { children: ReactNode }) {
 }
 
 export default function App() {
+  const location = useLocation();
   return (
     <Routes>
       <Route
@@ -102,9 +105,11 @@ export default function App() {
           </RequireAuth>
         }
       >
-        <Route path="/" element={<HomePage />} />
+        <Route element={<ChatLayout />}>
+          <Route path="/" element={<HomePage key={location.key} />} />
+          <Route path="/chat/:sessionId" element={<ChatThreadPage />} />
+        </Route>
         <Route path="/dashboard" element={<DashboardPage />} />
-        <Route path="/chat/:sessionId" element={<ChatThreadPage />} />
         {/* /edges is the legacy route, kept as an alias to /devices for
             backward-compatible bookmarks; the canonical name post-split
             is /devices. */}
@@ -121,6 +126,7 @@ export default function App() {
         <Route path="/apm/capture/:kind/:id" element={<ApmCapturePage />} />
         <Route path="/apm/service" element={<ApmPage />} />
         <Route path="/traces" element={<TracesPage />} />
+        <Route path="/agent-observability" element={<AgentObservabilityPage />} />
         <Route path="/traces/:traceId" element={<TracesPage />} />
         <Route path="/kubernetes" element={<Navigate to="/clusters" replace />} />
         <Route path="/kubernetes/:clusterId" element={<KubernetesClusterDetailPage />} />

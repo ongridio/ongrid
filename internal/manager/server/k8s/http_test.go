@@ -186,6 +186,33 @@ func TestRefreshTelemetryConfigRejectsMissingAuthenticatedIdentity(t *testing.T)
 	}
 }
 
+func TestReconcileNodeRequiresBootstrapAndCompleteNodeIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name, token, body string
+		status            int
+	}{
+		{name: "no bootstrap", body: `{}`, status: http.StatusUnauthorized},
+		{name: "controller", token: "bootstrap", body: `{"role":"controller","cached_edge_id":1,"node_uid":"uid","node_name":"node"}`, status: http.StatusBadRequest},
+		{name: "no cached edge", token: "bootstrap", body: `{"role":"node","node_uid":"uid","node_name":"node"}`, status: http.StatusBadRequest},
+		{name: "no UID", token: "bootstrap", body: `{"role":"node","cached_edge_id":1,"node_name":"node"}`, status: http.StatusBadRequest},
+		{name: "no name", token: "bootstrap", body: `{"role":"node","cached_edge_id":1,"node_uid":"uid"}`, status: http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			router := chi.NewRouter()
+			NewHandler(nil).RegisterInternal(router)
+			req := httptest.NewRequest(http.MethodPost, "/internal/k8s/reconcile-node", strings.NewReader(tc.body))
+			if tc.token != "" {
+				req.Header.Set("Authorization", "Bearer "+tc.token)
+			}
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, req)
+			if response.Code != tc.status {
+				t.Fatalf("status=%d, want %d", response.Code, tc.status)
+			}
+		})
+	}
+}
+
 func TestWorkloadDTOFromModelIncludesExecutionCounts(t *testing.T) {
 	dto := workloadDTOFromModel(&model.Workload{
 		ClusterID:       48,

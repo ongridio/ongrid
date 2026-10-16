@@ -19,7 +19,7 @@ def main():
         root = pathlib.Path(directory)
         for filename in ('go.mod', '.go-arch-lint.yml'):
             shutil.copy2(source / filename, root / filename)
-        for area in ('internal', 'cmd', 'api', 'examples', 'tests'):
+        for area in ('internal', 'cmd', 'api', 'scripts', 'tests'):
             (root / area).mkdir(parents=True, exist_ok=True)
             for directory in (source / area).rglob('*'):
                 if directory.is_dir():

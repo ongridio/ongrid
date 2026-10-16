@@ -29,7 +29,7 @@ func TestBuiltinInhibitorEdgeOfflineSuppressesHostRules(t *testing.T) {
 		ID:        100,
 		ScopeType: model.RuleScopeHost,
 		Rule:      "cpu_high",
-		DeviceID:    &edge,
+		DeviceID:  &edge,
 		DedupeKey: "host:42:cpu_high",
 	}
 	reason, suppressed := inh.Suppress(context.Background(), cpuIncident)
@@ -51,7 +51,7 @@ func TestBuiltinInhibitorIgnoresEdgeOfflineItself(t *testing.T) {
 	offline := &model.Incident{
 		ScopeType: model.RuleScopeHost,
 		Rule:      "edge_offline",
-		DeviceID:    &edge,
+		DeviceID:  &edge,
 		DedupeKey: "host:42:edge_offline",
 	}
 	if _, suppressed := inh.Suppress(context.Background(), offline); suppressed {
@@ -65,13 +65,21 @@ func TestBuiltinInhibitorPromIngestSuppressesScrapeDown(t *testing.T) {
 	}}
 	inh := NewBuiltinInhibitor(lookup)
 
-	scrape := &model.Incident{
-		ScopeType: model.RuleScopeMonitoringPipeline,
-		Rule:      "scrape_down",
-		DedupeKey: "pipeline:scrape_down:127.0.0.1:9100:node",
-	}
-	if _, suppressed := inh.Suppress(context.Background(), scrape); !suppressed {
-		t.Errorf("scrape_down should be inhibited when prom_ingest_fail is active")
+	for _, key := range []string{"pipeline:scrape_down:127.0.0.1:9100:node", "sha256:long-label-digest"} {
+		t.Run(key, func(t *testing.T) {
+			scrape := &model.Incident{
+				ScopeType: model.RuleScopeMonitoringPipeline,
+				Rule:      "scrape_down",
+				DedupeKey: key,
+			}
+			if _, suppressed := inh.Suppress(context.Background(), scrape); !suppressed {
+				t.Errorf("scrape_down should be inhibited when prom_ingest_fail is active")
+			}
+			scrape.Rule = "cpu_high"
+			if _, suppressed := inh.Suppress(context.Background(), scrape); suppressed {
+				t.Error("unrelated rules must not be inhibited by prom_ingest_fail")
+			}
+		})
 	}
 }
 
@@ -85,7 +93,7 @@ func TestBuiltinInhibitorIgnoresResolvedRoot(t *testing.T) {
 	cpuIncident := &model.Incident{
 		ScopeType: model.RuleScopeHost,
 		Rule:      "cpu_high",
-		DeviceID:    &edge,
+		DeviceID:  &edge,
 		DedupeKey: "host:42:cpu_high",
 	}
 	if _, suppressed := inh.Suppress(context.Background(), cpuIncident); suppressed {

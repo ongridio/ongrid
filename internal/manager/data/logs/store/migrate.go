@@ -7,8 +7,7 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/dbx"
 )
 
-// Migrate creates the additive log backend control-plane tables for local and
-// fresh installations. Production MySQL upgrades use db/migrations as well.
+// Migrate creates and updates the log backend control-plane tables at startup.
 func Migrate(db *gorm.DB) error {
 	if dbx.NeedsDeleteMarkerMigration(db, model.Backend{}.TableName()) {
 		if err := dbx.DropIndexes(db, &model.Backend{}, "uk_log_backend_name"); err != nil {

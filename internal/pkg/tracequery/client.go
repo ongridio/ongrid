@@ -50,6 +50,11 @@ type Client struct {
 // on cold blocks (filesystem backend); 30s matches what we use for promquery.
 const defaultTimeout = 30 * time.Second
 
+// MaxResponseBytes bounds decoded query payloads independently of Tempo storage.
+const MaxResponseBytes = 16 * 1024 * 1024
+
+var ErrResponseTooLarge = errors.New("tracequery: response exceeds 16 MiB query limit")
+
 type staticBase struct{ url string }
 
 func (s staticBase) ResolveBaseURL(_ context.Context) (string, error) {
@@ -236,9 +241,12 @@ func (c *Client) do(ctx context.Context, path string, q url.Values) ([]byte, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 16*1024*1024)) // 16 MiB cap (single trace can be big)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("tracequery: read body: %w", err)
+	}
+	if len(body) > MaxResponseBytes {
+		return nil, ErrResponseTooLarge
 	}
 	if resp.StatusCode == http.StatusNotFound {
 		return nil, fmt.Errorf("tracequery: %s: not found", path)

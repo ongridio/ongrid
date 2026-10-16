@@ -2,6 +2,7 @@ package tracequery
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net"
 	"net/http"
@@ -13,6 +14,24 @@ import (
 
 	"golang.org/x/sync/errgroup"
 )
+
+func TestClientResponseSizeBoundary(t *testing.T) {
+	for _, size := range []int{MaxResponseBytes, MaxResponseBytes + 1} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(strings.Repeat(" ", size)))
+		}))
+		c := New(srv.URL, nil)
+		result, err := c.GetTrace(t.Context(), "abc")
+		srv.Close()
+		if size > MaxResponseBytes {
+			if !errors.Is(err, ErrResponseTooLarge) {
+				t.Fatalf("expected explicit capacity error, got %v", err)
+			}
+		} else if err != nil || len(result.Body) != size {
+			t.Fatalf("limit boundary rejected: %v", err)
+		}
+	}
+}
 
 func TestClientReusesParallelTraceConnections(t *testing.T) {
 	var connections, requests atomic.Int32

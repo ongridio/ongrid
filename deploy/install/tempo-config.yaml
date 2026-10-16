@@ -8,6 +8,8 @@ server:
   grpc_listen_port: 9095
 
 distributor:
+  # Keep bounded Agent snapshots intact; SDK content is capped at 8 KiB per value.
+  max_attribute_bytes: 16384
   receivers:
     otlp:
       protocols:

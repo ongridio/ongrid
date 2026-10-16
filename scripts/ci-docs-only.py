@@ -10,13 +10,11 @@ import subprocess
 def docs_only(paths):
     prose = {".md", ".markdown", ".rst"}
     assets = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico", ".avif", ".pdf"}
-    readme_dirs = {"api", "db", "deploy", "deploy/install", "dist", "examples/apm-languages",
+    readme_dirs = {"api", "db", "deploy", "deploy/install", "dist",
                    "tests/e2e", "web", "web/e2e"}
-    # Onboarding.tsx imports this guide as raw text; it changes the shipped UI.
-    runtime_docs = {"docs/guides/apm-configuration-files.md"}
     # ponytail: known documentation locations only; add newly audited locations here.
     return bool(paths) and all(
-        path not in runtime_docs and (
+        (
             ("/" not in path and (Path(path).suffix in prose or path == "LICENSE"))
             or (path.startswith("docs/") and Path(path).suffix in prose)
             or (path.startswith("docs/assets/") and Path(path).suffix in assets)

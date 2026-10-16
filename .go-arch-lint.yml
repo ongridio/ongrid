@@ -35,7 +35,7 @@ components:
   edgeagent_biz:     { in: internal/edgeagent/biz/** }
   edgeagent_model:   { in: internal/edgeagent/model/** }
 
-  examples: { in: examples/** }
+  observability_preview: { in: scripts/agent-observability/** }
   test_harness: { in: tests/** }
   shared_skill: { in: internal/skill/** }
   edgeagent_runtime:
@@ -45,6 +45,7 @@ components:
       - internal/edgeagent/collector/**
       - internal/edgeagent/config/**
       - internal/edgeagent/dpapi/**
+      - internal/edgeagent/enrollment/**
       - internal/edgeagent/edgedirs/**
       - internal/edgeagent/host_files/**
       - internal/edgeagent/install/**
@@ -67,8 +68,8 @@ components:
 
 # 允许依赖的正向清单（未列出 = 禁止）
 deps:
-  examples:
-    anyVendorDeps: true
+  observability_preview:
+    mayDependOn: [manager_biz, manager_server, shared_pkg]
   test_harness:
     anyProjectDeps: true
   # ---------------- iam BC ----------------
@@ -88,7 +89,7 @@ deps:
   manager_server:
     mayDependOn: [manager_server, manager_service, manager_biz, manager_model, shared_pkg, api]
   manager_service:
-    mayDependOn: [manager_service, manager_biz, manager_model, shared_pkg, api]
+    mayDependOn: [manager_service, manager_biz, manager_model, shared_pkg, shared_skill, api]
   manager_biz:
     mayDependOn: [manager_biz, manager_model, shared_pkg, shared_skill]
   manager_data:

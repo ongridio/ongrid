@@ -1,9 +1,9 @@
-import { Input, Label } from '@/components/ui';
+import { Label } from '@/components/ui';
 import { Hint } from '@/components/ui/Tooltip';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/DropdownMenu';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/Popover';
 import { Checkbox } from '@/components/ui/Checkbox';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { NavLink, Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   Bell,
@@ -29,22 +29,16 @@ import {
   Hammer,
   BookOpen,
   GitBranch,
-  ChevronUp,
   ChevronRight,
-  Pencil,
-  Trash2,
   Share2,
   Plug,
   Layers3,
   Network,
   PinOff,
   Settings2,
-  ListChecks,
 } from 'lucide-react';
 import { Avatar } from './Avatar';
-import { AgentBadge } from './AgentBadge';
 import { OngridLogo } from './OngridLogo';
-import { Modal } from './Modal';
 import { Button } from './ui';
 import { useI18n } from '@/i18n/locale';
 import { useThemeMode } from '@/store/mode';
@@ -55,8 +49,6 @@ import { useAuth } from '@/store/auth';
 import { useUi } from '@/store/ui';
 import { useIncidentBadge } from '@/store/incidentBadge';
 import { useMe, usePermissions } from '@/store/me';
-import { useChatSessions, invalidateChatSessions } from '@/store/chatSessions';
-import { deleteSession, renameSession, type ChatSession } from '@/api/chat';
 import { listSettings } from '@/api/settings';
 
 type SidebarSectionItem = {
@@ -94,15 +86,9 @@ export function Sidebar() {
   useEffect(() => { setMobileExpanded(false); }, [location.pathname]);
   const toggleNavigation = () => narrow ? setMobileExpanded(value => !value) : toggleSidebar();
 
-  const sessions = useChatSessions((s) => s.sessions);
-  const refreshSessions = useChatSessions((s) => s.refresh);
   // Unack'd incident count drives the red pill on 告警 items + a dot on
   // the collapsed icon-rail. Polled by useIncidentBadge in Layout.
   const incidentOpen = useIncidentBadge((s) => s.openCount);
-  const [showAllSessions, setShowAllSessions] = useState(false);
-  const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<ChatSession | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
 	const [upgradeHiddenResources, setUpgradeHiddenResources] = useState<string[]>([]);
 	useEffect(() => {
 		if (localStorage.getItem('sidebar.infrastructure.upgrade.v0_10')) return;
@@ -119,31 +105,7 @@ export function Sidebar() {
   // Version + upgrade check moved to Settings → About / Upgrade (the brand mark
   // stays clean), so the sidebar no longer fetches version here.
 
-  async function confirmDelete(target: ChatSession) {
-    setDeletingId(target.id);
-    try {
-      await deleteSession(target.id);
-      invalidateChatSessions();
-      // If the user is currently viewing the deleted session, bounce to
-      // /chat (the new-session entry point) so they're not stuck on a
-      // 404 thread.
-      if (location.pathname === `/chat/${target.id}`) {
-        navigate('/');
-      }
-    } finally {
-      setDeletingId(null);
-      setDeleteTarget(null);
-    }
-  }
-
-  function handleBatchDeleted(ids: string[]) {
-    invalidateChatSessions();
-    if (ids.some((id) => location.pathname === `/chat/${id}`)) navigate('/');
-  }
   const [userMenuOpen, setUserMenuOpen] = useState(false);
-
-  const visibleSessions = showAllSessions ? sessions : sessions.slice(0, 5);
-  const hasMoreSessions = sessions.length > 5;
 
   const handleLogout = () => {
     setUserMenuOpen(false);
@@ -219,13 +181,6 @@ export function Sidebar() {
       </DropdownMenuItem>
     </DropdownMenuContent>
   );
-
-  // Refresh on mount and on every route change. Route changes happen when
-  // Home creates a new session and navigates to /chat/:id, so the new row
-  // shows up in the sidebar without a manual reload.
-  useEffect(() => {
-    void refreshSessions();
-  }, [location.pathname, refreshSessions]);
 
   if (narrow ? !mobileExpanded : sidebarCollapsed) {
     return (
@@ -447,11 +402,13 @@ export function Sidebar() {
           storageKey="observability"
           title={tr('监控告警', 'Observability')}
           defaultOpen={false}
+          initialHiddenKeys={['agent-observability']}
           items={[
             { key: 'monitor', to: '/monitor', icon: ChartLine, label: tr('监控', 'Monitor') },
             { key: 'apm', to: '/apm', icon: Boxes, label: tr('服务', 'Services') },
             { key: 'logs', to: '/logs', icon: FileText, label: tr('日志', 'Logs') },
             { key: 'traces', to: '/traces', icon: Waypoints, label: tr('链路', 'Traces') },
+            { key: 'agent-observability', to: '/agent-observability', icon: Bot, label: tr('Agent', 'Agent') },
             { key: 'alerts', to: '/alerts', icon: Siren, label: tr('告警', 'Alerts'), badge: incidentOpen },
           ]}
         />
@@ -467,44 +424,6 @@ export function Sidebar() {
           ]}
         />
 
-        <div className="mt-5 flex items-center justify-between px-2 pb-1.5">
-          <div className="text-[13px] font-semibold text-zinc-300">{tr('会话', 'Sessions')}</div>
-          {sessions.length > 0 ? (
-            <Button variant="subtle" size="sm"
-              type="button"
-              onClick={() => setBatchDeleteOpen(true)}
-              aria-label={tr('批量删除会话', 'Delete multiple sessions')}
-              className="flex items-center gap-1 px-1.5 py-1 font-medium"
-            >
-              <ListChecks size={12} />
-              <span>{tr('批量删除', 'Batch delete')}</span>
-            </Button>
-          ) : null}
-        </div>
-        <div className="ml-2 space-y-0.5">
-          {sessions.length === 0 ? (
-            <div className="px-2 py-1.5 text-[12px] text-zinc-600">{tr('暂无会话', 'No sessions yet')}</div>
-          ) : (
-            visibleSessions.map((s, index) => (
-              <SessionRow
-                key={s.id}
-                session={s}
-                index={index}
-                onDelete={() => setDeleteTarget(s)}
-              />
-            ))
-          )}
-          {hasMoreSessions ? (
-            <Button variant="subtle" size="sm"
-              type="button"
-              onClick={() => setShowAllSessions((v) => !v)}
-              className="flex items-center gap-1 px-2 py-1.5 transition-colors"
-            >
-              {showAllSessions ? <ChevronUp size={14} /> : <ChevronRight size={14} />}
-              <span>{showAllSessions ? tr('收起', 'Collapse') : tr(`展开剩余 ${sessions.length - 5} 条`, `Show ${sessions.length - 5} more`)}</span>
-            </Button>
-          ) : null}
-        </div>
       </nav>
 
       {/* admin / settings entries 仅 admin 可见。user / viewer
@@ -518,306 +437,7 @@ export function Sidebar() {
         </div>
       )}
 
-      {deleteTarget && (
-        <DeleteSessionModal
-          target={deleteTarget}
-          deleting={deletingId === deleteTarget.id}
-          onCancel={() => setDeleteTarget(null)}
-          onConfirm={() => void confirmDelete(deleteTarget)}
-        />
-      )}
-      <BatchDeleteSessionsModal
-        open={batchDeleteOpen}
-        sessions={sessions}
-        onClose={() => setBatchDeleteOpen(false)}
-        onDeleted={handleBatchDeleted}
-      />
     </aside>
-  );
-}
-
-function SessionRow({
-  session,
-  index,
-  onDelete,
-}: {
-  session: ChatSession;
-  index: number;
-  onDelete: () => void;
-}) {
-  const { tr } = useI18n();
-  const fallbackTitle = tr(`会话 ${index + 1}`, `Session ${index + 1}`);
-  const displayTitle = session.title || fallbackTitle;
-  const [renaming, setRenaming] = useState(false);
-  const [draft, setDraft] = useState(session.title || '');
-  const [saving, setSaving] = useState(false);
-  const inputRef = useRef<HTMLInputElement | null>(null);
-
-  // When external session title changes (e.g. another tab renamed it
-  // and invalidateChatSessions refetched) sync the draft so the next
-  // edit starts from the latest value rather than a stale string.
-  useEffect(() => {
-    if (!renaming) setDraft(session.title || '');
-  }, [session.title, renaming]);
-
-  const enterRename = () => {
-    setDraft(session.title || '');
-    setRenaming(true);
-    // focus + select on next tick so the input is mounted.
-    setTimeout(() => inputRef.current?.select(), 0);
-  };
-
-  const cancelRename = () => {
-    setRenaming(false);
-    setDraft(session.title || '');
-  };
-
-  const commit = async () => {
-    const t = draft.trim();
-    if (t === '' || t === (session.title || '')) {
-      cancelRename();
-      return;
-    }
-    setSaving(true);
-    try {
-      await renameSession(session.id, t);
-      invalidateChatSessions();
-      setRenaming(false);
-    } catch {
-      // Keep editor open on failure so the user can retry.
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  if (renaming) {
-    return (
-      <div className="group relative">
-        <div className="flex items-center gap-1.5 rounded-md bg-zinc-800/80 py-1 pl-2 pr-7">
-          <Input variant="inset"
-            ref={inputRef}
-            value={draft}
-            disabled={saving}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={() => void commit()}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                void commit();
-              } else if (e.key === 'Escape') {
-                e.preventDefault();
-                cancelRename();
-              }
-            }}
-            className="w-full outline-none"
-            placeholder={fallbackTitle}
-            maxLength={256}
-          />
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="group relative">
-      <Hint content={displayTitle}><NavLink
-        to={`/chat/${session.id}`}
-
-        onDoubleClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          enterRename();
-        }}
-        className={({ isActive }) =>
-          cn(
-            'flex items-center gap-1.5 truncate rounded-md py-1.5 pl-2 pr-12 text-[13px] text-zinc-400 transition-colors',
-            'hover:bg-zinc-800/60 hover:text-zinc-100',
-            isActive && 'bg-zinc-800/80 text-zinc-100'
-          )
-        }
-      >
-        <span className="truncate">{displayTitle}</span>
-        <AgentBadge agentId={session.agent_id} />
-      </NavLink></Hint>
-      <Hint content={tr('双击会话名也可重命名', 'Double-click the title to rename')}><Button variant="subtle" size="sm"
-        type="button"
-        aria-label={tr('重命名会话', 'Rename session')}
-
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          enterRename();
-        }}
-        className={cn(
-          'absolute right-7 top-1/2 -translate-y-1/2 rounded p-1 text-zinc-600 transition-opacity',
-          'opacity-0 hover:bg-zinc-800 hover:text-zinc-200 focus:opacity-100 group-hover:opacity-100'
-        )}
-      >
-        <Pencil size={12} />
-      </Button></Hint>
-      <Button variant="dangerGhost" size="sm"
-        type="button"
-        aria-label={tr('删除会话', 'Delete session')}
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          onDelete();
-        }}
-        className={cn(
-          'absolute right-1 top-1/2 -translate-y-1/2 rounded p-1 text-zinc-600 transition-opacity',
-          'opacity-0 hover:bg-red-900/30 hover:text-red-300 focus:opacity-100 group-hover:opacity-100'
-        )}
-      >
-        <Trash2 size={12} />
-      </Button>
-    </div>
-  );
-}
-
-function DeleteSessionModal({
-  target,
-  deleting,
-  onCancel,
-  onConfirm,
-}: {
-  target: ChatSession;
-  deleting: boolean;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  const { tr } = useI18n();
-  return (
-    <Modal open onClose={onCancel} title={tr('删除会话', 'Delete session')} size="sm">
-        <div className="mt-2 text-[13px] text-zinc-400">
-          {tr('确定要删除会话 ', 'Delete session ')}<span className="text-zinc-100">{target.title || tr('未命名会话', 'Untitled session')}</span>
-          {tr(' 吗？此操作会一并删除所有消息和工具调用记录，无法恢复。', '? All messages and tool-call records will be removed and cannot be recovered.')}
-        </div>
-        <div className="mt-5 flex justify-end gap-2">
-          <Button variant="outline" size="sm"
-            type="button"
-            onClick={onCancel}
-            disabled={deleting}
-            className="px-3 py-1.5"
-          >
-            {tr('取消', 'Cancel')}
-          </Button>
-          <Button variant="danger" size="sm"
-            type="button"
-            onClick={onConfirm}
-            disabled={deleting}
-            className="px-3 py-1.5 font-medium"
-          >
-            {deleting ? tr('删除中…', 'Deleting…') : tr('删除', 'Delete')}
-          </Button>
-        </div>
-    </Modal>
-  );
-}
-
-function BatchDeleteSessionsModal({
-  open,
-  sessions,
-  onClose,
-  onDeleted,
-}: {
-  open: boolean;
-  sessions: ChatSession[];
-  onClose: () => void;
-  onDeleted: (ids: string[]) => void;
-}) {
-  const { tr } = useI18n();
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [deleting, setDeleting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    setSelected(new Set());
-    setError(null);
-  }, [open]);
-
-  const allSelected = sessions.length > 0 && selected.size === sessions.length;
-  const close = () => {
-    if (!deleting) onClose();
-  };
-  const toggle = (id: string) => {
-    setSelected((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-  const confirm = async () => {
-    const ids = Array.from(selected);
-    if (ids.length === 0) return;
-    setDeleting(true);
-    setError(null);
-    const results = await Promise.allSettled(ids.map(deleteSession));
-    const succeeded = ids.filter((_, index) => results[index].status === 'fulfilled');
-    const failed = ids.filter((_, index) => results[index].status === 'rejected');
-    if (succeeded.length > 0) onDeleted(succeeded);
-    if (failed.length === 0) onClose();
-    else {
-      setSelected(new Set(failed));
-      setError(tr(
-        `${succeeded.length} 条已删除，${failed.length} 条失败，请重试。`,
-        `${succeeded.length} deleted; ${failed.length} failed. Try again.`,
-      ));
-    }
-    setDeleting(false);
-  };
-
-  return (
-    <Modal
-      open={open}
-      onClose={close}
-      title={tr('批量删除会话', 'Delete multiple sessions')}
-      footer={(
-        <>
-          <Button onClick={close} disabled={deleting}>{tr('取消', 'Cancel')}</Button>
-          <Button variant="danger" onClick={() => void confirm()} disabled={deleting || selected.size === 0}>
-            <Trash2 size={13} />
-            {deleting
-              ? tr('删除中…', 'Deleting…')
-              : tr(`删除 ${selected.size} 条`, `Delete ${selected.size}`)}
-          </Button>
-        </>
-      )}
-    >
-      <p className="text-[13px] leading-5 text-zinc-400">
-        {tr('所选会话的消息和工具调用记录会被一并删除，且无法恢复。', 'Messages and tool-call records in selected sessions will be permanently deleted.')}
-      </p>
-      <Label className="mt-3 flex cursor-pointer items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950/30 px-3 py-2 text-[13px] text-zinc-300">
-        <Checkbox
-
-          aria-label={tr('全选会话', 'Select all sessions')}
-          checked={allSelected}
-          onCheckedChange={() => setSelected(allSelected ? new Set() : new Set(sessions.map((session) => session.id)))}
-
-        />
-        <span className="flex-1">{tr('全选', 'Select all')}</span>
-        <span className="text-[11px] text-zinc-500">{selected.size}/{sessions.length}</span>
-      </Label>
-      <div className="mt-2 max-h-80 divide-y divide-zinc-800 overflow-y-auto rounded-lg border border-zinc-800">
-        {sessions.map((session, index) => {
-          const title = session.title || tr(`会话 ${index + 1}`, `Session ${index + 1}`);
-          return (
-            <Label key={session.id} className={cn('flex cursor-pointer items-center gap-2 px-3 py-2.5 transition-colors', selected.has(session.id) ? 'bg-zinc-800/60' : 'hover:bg-zinc-800/40')}>
-              <Checkbox
-
-                aria-label={tr(`选择会话 ${title}`, `Select session ${title}`)}
-                checked={selected.has(session.id)}
-                onCheckedChange={() => toggle(session.id)}
-
-              />
-              <Hint content={title}><span className="min-w-0 flex-1 truncate text-[13px] text-zinc-300" >{title}</span></Hint>
-            </Label>
-          );
-        })}
-      </div>
-      {error ? <p role="alert" className="mt-3 text-[12px] text-red-400">{error}</p> : null}
-    </Modal>
   );
 }
 
@@ -858,12 +478,12 @@ function CollapsibleSection({
   const [hiddenKeys, setHiddenKeys] = useState<string[]>(() => {
     try {
       const raw = localStorage.getItem(`sidebar.section.${storageKey}.hidden`);
-      const parsed: unknown = raw ? JSON.parse(raw) : [];
+      const parsed: unknown = raw ? JSON.parse(raw) : initialHiddenKeys;
       return Array.isArray(parsed)
         ? parsed.filter((value): value is string => typeof value === 'string')
-        : [];
+        : initialHiddenKeys;
     } catch {
-      return [];
+      return initialHiddenKeys;
     }
   });
   const hasActiveItem = items.some((item) => {

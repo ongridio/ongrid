@@ -1369,7 +1369,7 @@ func (u *Usecase) MaybeNotify(ctx context.Context, res *FiringResult, msg notify
 	if rule := u.lookupRuleForIncident(ctx, res.Incident); rule != nil &&
 		rule.NotifyWindowSeconds > 0 && rule.NotifyMinFires > 0 {
 		since := occurredAt.Add(-time.Duration(rule.NotifyWindowSeconds) * time.Second)
-		count, err := u.repo.CountEventsByType(ctx, model.EventTypeFiring, since, res.Incident.Rule, "")
+		count, err := u.repo.CountEventsByType(ctx, model.EventTypeFiring, since, res.Incident.Rule, "", rule.NotifyMinFires)
 		if err != nil {
 			u.log.Warn("alert: count firing events for dampening failed",
 				slog.String("rule", res.Incident.Rule),
