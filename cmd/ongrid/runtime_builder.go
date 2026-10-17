@@ -215,7 +215,6 @@ func buildAIOpsRuntime(
 	reviewSpawner := &managersvcaiops.ReviewSpawner{}
 	reviewSink := managersvcaiops.NewMutatingProposalSink(mutatingProposals)
 	deps := aiopstoolsdec.Deps{
-		Timeout:       15 * time.Second,
 		Limiter:       aiopstoolsdec.NewTokenBucketLimiter(0),
 		Registerer:    reg,
 		ReviewSpawner: reviewSpawner,
@@ -312,7 +311,6 @@ func buildAIOpsRuntime(
 			Model:         cfg.OpenAI.Model,
 			Temperature:   0.1,
 			MaxIterations: 30,
-			ToolTimeout:   15 * time.Second,
 		},
 		CallbackDeps: cbDeps,
 		Logger:       log.With(slog.String("comp", "chatruntime")),

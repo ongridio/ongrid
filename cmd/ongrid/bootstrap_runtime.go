@@ -82,7 +82,6 @@ func bootstrapRuntime(rootCtx context.Context, cfg *config.Config, log *slog.Log
 			// after 15s" and the coordinator loops trying to
 			// re-dispatch.
 			coordDepsFast := aiopstoolsdec.Deps{
-				Timeout:       15 * time.Second,
 				Limiter:       aiopstoolsdec.NewTokenBucketLimiter(0),
 				Registerer:    reg,
 				HumanApproval: humanApprovalBroker,
