@@ -398,6 +398,20 @@ mkdir -p "$INSTALL_DIR"
 chmod 755 "$INSTALL_DIR"
 ongrid_prune_stale_edge_staging "$INSTALL_DIR"
 
+# ---------- .env: create or reuse before resolving bind-mount targets ----------
+if [[ -f "$INSTALL_DIR/.env" && $FORCE -eq 0 ]]; then
+    log_info ".env exists; reusing (use --force to re-copy template if needed)"
+elif [[ -f "$INSTALL_DIR/.env" && $FORCE -eq 1 ]]; then
+    log_info ".env exists; preserving operator customizations (--force does not overwrite .env)"
+else
+    log_info "creating $INSTALL_DIR/.env from template"
+    cp "$SCRIPT_DIR/.env.example" "$INSTALL_DIR/.env"
+fi
+
+ENV_FILE="$INSTALL_DIR/.env"
+chmod 600 "$ENV_FILE"
+ongrid_resolve_data_directories "$ENV_FILE" "$INSTALL_DIR" || exit 1
+
 EDGE_ASSET_VERSION=$(tr -d '[:space:]' < "$SCRIPT_DIR/VERSION" 2>/dev/null || true)
 if [[ -z "$EDGE_ASSET_VERSION" ]]; then
     EDGE_ASSET_VERSION=$(grep -E '^ONGRID_VERSION=' "$SCRIPT_DIR/.env.example" | cut -d= -f2- | tr -d '[:space:]' || true)
@@ -546,8 +560,6 @@ fi
 # We chown each subdir to the uid the container image runs as — missing
 # this on first boot makes prom/loki/tempo/grafana crash with "permission
 # denied on /<datadir>".
-ONGRID_DATA_DIR="${ONGRID_DATA_DIR:-/var/lib/ongrid}"
-ONGRID_LOG_DIR="${ONGRID_LOG_DIR:-/var/log/ongrid}"
 log_info "data dir: $ONGRID_DATA_DIR  (override via ONGRID_DATA_DIR)"
 log_info "log dir:  $ONGRID_LOG_DIR  (override via ONGRID_LOG_DIR)"
 
@@ -639,10 +651,6 @@ chown -R 472:472       "$ONGRID_DATA_DIR/grafana"    2>/dev/null || true   # gra
 # manager log dir: container's ongrid user writes here.
 chmod 755 "$ONGRID_DATA_DIR" "$ONGRID_LOG_DIR"
 
-# Export so the docker compose subprocess inherits — compose substitutes
-# ${ONGRID_DATA_DIR:-...} into the bind paths at up time.
-export ONGRID_DATA_DIR ONGRID_LOG_DIR
-
 # ---------- nginx config + TLS certs (ADR-008) ----------
 # nginx.conf is bind-mounted into the nginx container; certs/ holds the
 # TLS material. install.sh always refreshes nginx.conf from the tarball
@@ -685,21 +693,9 @@ gen_secret() {
     printf '%s' "$out"
 }
 
-# ---------- .env: create or reuse ----------
+# ---------- .env: fill generated credentials ----------
 GENERATED_ADMIN_PASSWORD=""
 ADMIN_PASSWORD_NEWLY_GENERATED=0
-
-if [[ -f "$INSTALL_DIR/.env" && $FORCE -eq 0 ]]; then
-    log_info ".env exists; reusing (use --force to re-copy template if needed)"
-elif [[ -f "$INSTALL_DIR/.env" && $FORCE -eq 1 ]]; then
-    log_info ".env exists; preserving operator customizations (--force does not overwrite .env)"
-else
-    log_info "creating $INSTALL_DIR/.env from template"
-    cp "$SCRIPT_DIR/.env.example" "$INSTALL_DIR/.env"
-fi
-
-ENV_FILE="$INSTALL_DIR/.env"
-chmod 600 "$ENV_FILE"
 
 # Fill blanks in-place (portable sed: use .bak suffix then rm).
 fill_blank() {
