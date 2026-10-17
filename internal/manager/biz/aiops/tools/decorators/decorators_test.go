@@ -96,11 +96,10 @@ func TestTimeout_PassesThroughOnFastTool(t *testing.T) {
 	}
 }
 
-func TestTimeout_DefaultWhenZero(t *testing.T) {
+func TestTimeout_NoDeadlineWhenZero(t *testing.T) {
 	inner := &fakeTool{name: "x"}
-	tt := WithTimeout(inner, 0).(*TimeoutTool)
-	if tt.timeout != DefaultTimeout {
-		t.Errorf("got %v, want %v", tt.timeout, DefaultTimeout)
+	if got := WithTimeout(inner, 0); got != basetool.BaseTool(inner) {
+		t.Errorf("zero timeout should return inner unchanged, got %T", got)
 	}
 }
 

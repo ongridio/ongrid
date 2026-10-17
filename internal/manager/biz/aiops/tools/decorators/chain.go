@@ -9,14 +9,14 @@ import (
 )
 
 // Deps bundles the cross-cutting dependencies a decorator chain needs.
-// Zero values fall back to safe defaults (DefaultTimeout, no audit,
+// Zero values fall back to safe defaults (no timeout, no audit,
 // NoopLimiter, prometheus.DefaultRegisterer) so a minimal Wrap call
 // still produces a well-behaved tool.
 //
 // ASCII diagram — these are the inputs to the standard
 // decorator stack.
 type Deps struct {
-	// Timeout is the per-call ceiling. Zero -> DefaultTimeout (15s).
+	// Timeout is the per-call ceiling. Zero -> no deadline.
 	Timeout time.Duration
 
 	// Audit is the seam to chat_tool_calls. Nil -> audit disabled.

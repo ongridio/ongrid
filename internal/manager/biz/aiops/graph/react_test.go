@@ -664,7 +664,7 @@ func TestConfig_Defaults(t *testing.T) {
 	if c.MaxIterations != 12 {
 		t.Errorf("MaxIterations default = %d, want 12", c.MaxIterations)
 	}
-	if c.ToolTimeout.Seconds() != 15 {
-		t.Errorf("ToolTimeout default = %v, want 15s", c.ToolTimeout)
+	if c.ToolTimeout != 0 {
+		t.Errorf("ToolTimeout default = %v, want 0 (no implicit deadline)", c.ToolTimeout)
 	}
 }
