@@ -4,7 +4,7 @@ import { getToken } from '@/store/auth';
 export type ChatRole = 'user' | 'assistant' | 'tool' | 'system';
 
 export type ImageAttachment = {
-	 id: string;
+  id: string;
   name: string;
   mime_type: string;
   size: number;
@@ -351,7 +351,7 @@ export async function streamMessage(
   const decoder = new TextDecoder();
   let buf = '';
 
-  while (true) {
+  for (;;) {
     const { value, done } = await reader.read();
     if (done) break;
     buf += decoder.decode(value, { stream: true });

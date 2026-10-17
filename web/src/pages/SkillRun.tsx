@@ -411,7 +411,7 @@ function ParamField({
             onCheckedChange={(checkedValue) => onChange(checkedValue)}
             className="h-3.5 w-3.5"
           />
-          <span>{Boolean(value) ? 'true' : 'false'}</span>
+          <span>{value ? 'true' : 'false'}</span>
         </Label>
       );
       break;

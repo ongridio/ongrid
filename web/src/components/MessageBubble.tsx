@@ -233,10 +233,10 @@ function ToolCallSummaryBlock({
     result?: unknown;
     duration_ms?: number;
     error?: string;
-	  };
-	  onConfirmConfigDraft?: ConfirmConfigDraft;
-    hideActiveOperations?: boolean;
-	}) {
+  };
+  onConfirmConfigDraft?: ConfirmConfigDraft;
+  hideActiveOperations?: boolean;
+}) {
   const { tr } = useI18n();
   const [open, setOpen] = useState(false);
   const status = call.status ?? (call.error ? 'error' : 'success');
@@ -440,7 +440,6 @@ export function OperationCard({ operation, onTerminal }: { operation: OperationC
       cancelled = true;
       window.clearInterval(timer);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [operation.id, operation.legacySessionID, terminal, tr]);
 
   function applyOperationUpdate(updated: Operation, artifactURL?: string) {
@@ -742,9 +741,9 @@ function ConfigDraftCard({
               <span className="truncate text-[11px] text-zinc-500">{draft.target.name}</span>
             )}
           </div>
-		  <div className="text-sm font-medium text-zinc-100">
-			{proposal?.title || draft.summary || tr('配置草案', 'Configuration draft')}
-		  </div>
+          <div className="text-sm font-medium text-zinc-100">
+            {proposal?.title || draft.summary || tr('配置草案', 'Configuration draft')}
+          </div>
           {scope && <div className="text-[11px] leading-5 text-zinc-300">{scope}</div>}
           {draft.confirmation_prompt && (
             <div className="text-[11px] leading-5 text-zinc-400">{draft.confirmation_prompt}</div>

@@ -22,7 +22,7 @@ export type PacketCapture = {
   state: PacketCaptureState;
   edge_id: number;
   device_id: number;
-	  session_id?: number;
+  session_id?: number;
   interface_name: string;
   network_namespace?: string;
   canonical_filter: string;
