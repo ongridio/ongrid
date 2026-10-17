@@ -24,10 +24,19 @@ type AdminRepo interface {
 
 // UC bundles the admin operations consumed by the HTTP handler.
 type UC struct {
-	repo AdminRepo
+	repo   AdminRepo
+	health *StreamHealthStore
 }
 
-func NewUC(repo AdminRepo) *UC { return &UC{repo: repo} }
+// NewUC builds the admin usecase. health carries the supervisor's
+// last-known stream state for the app list; nil is replaced by an empty
+// store so callers that do not track health still work.
+func NewUC(repo AdminRepo, health *StreamHealthStore) *UC {
+	if health == nil {
+		health = NewStreamHealthStore()
+	}
+	return &UC{repo: repo, health: health}
+}
 
 // AppInput is the mutation payload.
 type AppInput struct {
@@ -180,6 +189,14 @@ func (in *AppInput) validate() error {
 
 func (uc *UC) ListApps(ctx context.Context, provider string) ([]*model.ImApp, error) {
 	return uc.repo.ListApps(ctx, provider)
+}
+
+// StreamHealth returns the last-known runtime health of one app's stream
+// client. ok is false when the store has not observed the app yet — a
+// manager that just booted, or an app the first reconcile tick has not
+// reached. Callers must render that as unknown, not as stopped.
+func (uc *UC) StreamHealth(appID uint64) (StreamHealth, bool) {
+	return uc.health.Get(appID)
 }
 
 func (uc *UC) GetApp(ctx context.Context, id uint64) (*model.ImApp, error) {

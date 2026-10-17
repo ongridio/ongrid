@@ -2,6 +2,7 @@ package imbridge
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -43,9 +44,14 @@ const streamStopTimeout = 10 * time.Second
 // Lifecycle of an individual client: it lives inside a context whose
 // parent is the supervisor's own context. Cancelling the supervisor
 // (manager shutdown) propagates a graceful Stop to every client.
+//
+// Every transition it observes is mirrored into a StreamHealthStore so an
+// operator can see whether a client is attached at all — the credentials
+// probe on Settings → Channels cannot answer that.
 type StreamSupervisor struct {
 	repo      StreamRepo
 	bridge    *Bridge
+	health    *StreamHealthStore
 	factories map[string]StreamClientFactory // provider -> factory
 	log       *slog.Logger
 	mu        sync.Mutex
@@ -59,13 +65,14 @@ type streamSlot struct {
 	done   chan struct{}
 }
 
-func NewStreamSupervisor(repo StreamRepo, bridge *Bridge, log *slog.Logger) *StreamSupervisor {
+func NewStreamSupervisor(repo StreamRepo, bridge *Bridge, health *StreamHealthStore, log *slog.Logger) *StreamSupervisor {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &StreamSupervisor{
 		repo:      repo,
 		bridge:    bridge,
+		health:    health,
 		factories: map[string]StreamClientFactory{},
 		log:       log.With(slog.String("comp", "imbridge.stream")),
 		running:   map[uint64]*streamSlot{},
@@ -122,6 +129,11 @@ func (s *StreamSupervisor) reconcileOnce(ctx context.Context) {
 	}
 	s.mu.Unlock()
 	s.stopClients(ctx, stopping)
+	// Record outside the lock: the store carries its own lock, and calling
+	// into it while holding s.mu would couple the two.
+	for id := range stopping {
+		s.health.Record(id, StreamHealth{State: StreamStateStopped})
+	}
 	if ctx.Err() != nil {
 		return
 	}
@@ -167,10 +179,38 @@ func (s *StreamSupervisor) reconcileOnce(ctx context.Context) {
 // cancellation.
 func (s *StreamSupervisor) runClientWithRestart(ctx context.Context, slot *streamSlot, client StreamClient) {
 	defer close(slot.done)
+	// A provider client that panics must not take the manager down with it.
+	// The recovered goroutine leaves nothing behind, so the slot is dropped
+	// and reported as retrying: keeping it would leave an entry that reads
+	// as running while no client exists.
+	defer func() {
+		if r := recover(); r != nil {
+			s.log.Error("stream client panic",
+				slog.String("provider", client.ProviderName()),
+				slog.Uint64("im_app_id", slot.app.ID),
+				slog.Any("panic", r))
+			s.health.Record(slot.app.ID, StreamHealth{
+				State:     StreamStateRetrying,
+				LastError: fmt.Sprintf("panic: %v", r),
+			})
+			s.mu.Lock()
+			if s.running[slot.app.ID] == slot {
+				delete(s.running, slot.app.ID)
+			}
+			s.mu.Unlock()
+		}
+	}()
 	backoff := time.Second
 	const maxBackoff = 60 * time.Second
 	for ctx.Err() == nil {
+		// Process-level state: an attempt is in flight. This does not prove
+		// the long connection is established — see StreamStateRunning.
+		s.health.Record(slot.app.ID, StreamHealth{State: StreamStateRunning})
 		if err := client.Run(ctx); err != nil && ctx.Err() == nil {
+			s.health.Record(slot.app.ID, StreamHealth{
+				State:     StreamStateRetrying,
+				LastError: err.Error(),
+			})
 			s.log.Warn("stream client exited; reconnect",
 				slog.String("provider", client.ProviderName()),
 				slog.Uint64("im_app_id", slot.app.ID),

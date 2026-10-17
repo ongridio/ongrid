@@ -323,6 +323,11 @@ type appDTO struct {
 	IdleTimeoutSeconds int    `json:"idle_timeout_seconds"`
 	CreatedAt          string `json:"created_at"`
 	UpdatedAt          string `json:"updated_at"`
+
+	// Stream is the supervisor's last-known runtime state for this app's
+	// long connection. It is omitted when the supervisor has not observed
+	// the app yet, which the SPA renders as unknown rather than stopped.
+	Stream *bizbridge.StreamHealth `json:"stream,omitempty"`
 }
 
 func toAppDTO(a *model.ImApp) appDTO {
@@ -342,6 +347,25 @@ func toAppDTO(a *model.ImApp) appDTO {
 		CreatedAt:          a.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 		UpdatedAt:          a.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 	}
+}
+
+// toAppDTOWithStream is toAppDTO plus the runtime state the supervisor
+// recorded for the app. known=false means the supervisor has not observed
+// the app yet (manager just booted, or the first reconcile tick has not
+// run), so the field is left out instead of defaulting to "stopped".
+func toAppDTOWithStream(a *model.ImApp, st bizbridge.StreamHealth, known bool) appDTO {
+	dto := toAppDTO(a)
+	if known {
+		dto.Stream = &st
+	}
+	return dto
+}
+
+// appDTOWithStream renders one app row for the admin API, attaching the
+// stream runtime state when the supervisor has one.
+func (h *Handler) appDTOWithStream(a *model.ImApp) appDTO {
+	st, known := h.uc.StreamHealth(a.ID)
+	return toAppDTOWithStream(a, st, known)
 }
 
 type appPayload struct {
@@ -384,7 +408,7 @@ func (h *Handler) listApps(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]appDTO, 0, len(rows))
 	for _, a := range rows {
-		items = append(items, toAppDTO(a))
+		items = append(items, h.appDTOWithStream(a))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items)})
 }
@@ -403,7 +427,7 @@ func (h *Handler) getApp(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	writeJSON(w, http.StatusOK, toAppDTO(app))
+	writeJSON(w, http.StatusOK, h.appDTOWithStream(app))
 }
 
 func (h *Handler) createApp(w http.ResponseWriter, r *http.Request) {

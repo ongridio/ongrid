@@ -42,7 +42,7 @@ func bootstrapIMBridge(rootCtx context.Context, log *slog.Logger, storage *stora
 	// RegisterFactory hook. Without a factory the supervisor just
 	// logs "no factory for provider — skipping" and the webhook path
 	// is still available as fallback.
-	imbridgeStreamSupervisor := managerbizimbridge.NewStreamSupervisor(aiops.imbridgeRepo, imbridgeSvc, log)
+	imbridgeStreamSupervisor := managerbizimbridge.NewStreamSupervisor(aiops.imbridgeRepo, imbridgeSvc, aiops.imbridgeStreamHealth, log)
 	// Register long-connection providers. All connections dial out, so
 	// operators do not need to expose public webhook endpoints.
 	imbridgeStreamSupervisor.RegisterFactory("feishu", managerbizimbridgefeishu.NewStreamFactory(log))

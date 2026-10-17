@@ -77,4 +77,25 @@ describe('communication provider settings', () => {
     expect(dialog).toHaveTextContent('平台Slack');
     expect(within(dialog).queryByRole('combobox', { name: '平台' })).not.toBeInTheDocument();
   });
+
+  it('shows the stream state the manager reports, and stays silent when it has none', async () => {
+    server.use(
+      http.get('/api/v1/im/apps', () => HttpResponse.json({
+        items: [
+          { id: 1, provider: 'feishu', mode: 'stream', name: '在跑', app_id: 'cli_1', has_secret: true, enabled: true, idle_timeout_seconds: 0, created_at: now, updated_at: now, stream: { state: 'running', updated_at: now } },
+          { id: 2, provider: 'feishu', mode: 'stream', name: '在重试', app_id: 'cli_2', has_secret: true, enabled: true, idle_timeout_seconds: 0, created_at: now, updated_at: now, stream: { state: 'retrying', last_error: 'dial tcp: connection refused', updated_at: now } },
+          // No stream block: the supervisor has not observed this app yet.
+          { id: 3, provider: 'feishu', mode: 'stream', name: '未观测', app_id: 'cli_3', has_secret: true, enabled: true, idle_timeout_seconds: 0, created_at: now, updated_at: now },
+        ],
+        total: 3,
+      })),
+    );
+
+    render(<MemoryRouter><SettingsChannels /></MemoryRouter>);
+    const card = await screen.findByTestId('im-provider-feishu');
+    expect(card).toHaveTextContent('运行中');
+    expect(card).toHaveTextContent('重连中');
+    // An app the supervisor has not observed must not be labelled stopped.
+    expect(within(card).queryByText('已停止')).not.toBeInTheDocument();
+  });
 });

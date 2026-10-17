@@ -11,6 +11,19 @@ import { request } from './client';
 export type IMProvider = 'feishu' | 'dingtalk' | 'telegram' | 'slack';
 export type IMMode = 'stream' | 'webhook';
 
+// What the manager's stream supervisor last observed for one app's long
+// connection. Deliberately process-level: "running" means an attempt is in
+// flight, not that the connection is established. The `stream` field below is
+// absent until the supervisor has observed the app (a manager that just
+// booted), which the UI must render as unknown rather than stopped.
+export type IMStreamState = 'running' | 'retrying' | 'stopped';
+
+export type IMStreamHealth = {
+  state: IMStreamState;
+  last_error?: string;
+  updated_at: string;
+};
+
 export type IMApp = {
   id: number;
   provider: IMProvider;
@@ -30,6 +43,10 @@ export type IMApp = {
   idle_timeout_seconds: number;
   created_at: string;
   updated_at: string;
+  // Runtime state reported by the stream supervisor. Absent until it has
+  // observed the app (e.g. right after a manager restart) — the SPA renders
+  // that as unknown rather than as a stopped client.
+  stream?: IMStreamHealth;
 };
 
 export type IMAppPayload = {

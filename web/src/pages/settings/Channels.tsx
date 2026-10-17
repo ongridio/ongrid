@@ -25,6 +25,7 @@ import {
   type IMAppTestResult,
   type IMMode,
   type IMProvider,
+  type IMStreamHealth,
 } from '@/api/imbridge';
 import { SettingsProviderPicker } from '@/components/SettingsProviderPicker';
 import { Button, Card, Chip } from '@/components/ui';
@@ -211,6 +212,40 @@ export default function SettingsChannels() {
   );
 }
 
+// StreamStateBadge shows what the manager's stream supervisor last observed for
+// this app's long connection. "running" is the expected state, so it stays a
+// quiet dot; only a client that keeps failing earns colour. An app the
+// supervisor has not observed yet renders nothing — claiming "stopped" there
+// would raise a false alarm on every manager restart.
+function StreamStateBadge({ health }: { health?: IMStreamHealth }) {
+  const { tr } = useI18n();
+  if (!health) return null;
+
+  switch (health.state) {
+    case 'running':
+      return (
+        <span className="inline-flex items-center gap-1.5 text-[11px] text-zinc-500">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+          {tr('运行中', 'Running')}
+        </span>
+      );
+    case 'retrying': {
+      const reason = health.last_error || tr('正在重连', 'Reconnecting');
+      // Hint renders its trigger *as* the child, so the child must forward a
+      // ref: Chip is a plain function component, hence the span wrapper.
+      return (
+        <Hint content={reason}>
+          <span className="inline-flex">
+            <Chip tone="warning">{tr('重连中', 'Retrying')}</Chip>
+          </span>
+        </Hint>
+      );
+    }
+    default:
+      return <Chip tone="default">{tr('已停止', 'Stopped')}</Chip>;
+  }
+}
+
 function IMProviderCard({
   provider,
   apps,
@@ -253,6 +288,7 @@ function IMProviderCard({
                     {app.enabled ? tr('已启用', 'Enabled') : tr('已停用', 'Disabled')}
                   </Chip>
                   <Chip tone={app.mode === 'stream' ? 'info' : 'warning'}>{app.mode}</Chip>
+                  <StreamStateBadge health={app.stream} />
                   {!app.has_secret && <Chip tone="warning">{tr('缺凭证', 'No secret')}</Chip>}
                 </div>
                 <div className="mt-1 truncate font-mono text-[11px] text-zinc-500">{app.app_id}</div>
