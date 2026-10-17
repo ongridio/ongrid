@@ -17,6 +17,7 @@ import (
 type AgentRegistry struct {
 	mu       sync.RWMutex
 	agents   []*Agent
+	builtins []*Agent
 	warnings []LoadWarning
 }
 
@@ -42,7 +43,7 @@ func (r *AgentRegistry) Load(agentsRoot string) error {
 		return fmt.Errorf("chatruntime: agent registry load: %w", err)
 	}
 	r.mu.Lock()
-	r.agents = append([]*Agent(nil), res.Agents...)
+	r.agents = r.withBuiltinsLocked(res.Agents)
 	r.warnings = append([]LoadWarning(nil), res.Warnings...)
 	r.mu.Unlock()
 	return nil
@@ -69,7 +70,7 @@ func (r *AgentRegistry) Reload(agentsRoot string, extras ...string) error {
 	newAgents := append([]*Agent(nil), res.Agents...)
 	newWarnings := append([]LoadWarning(nil), res.Warnings...)
 	r.mu.Lock()
-	r.agents = newAgents
+	r.agents = r.withBuiltinsLocked(newAgents)
 	r.warnings = newWarnings
 	r.mu.Unlock()
 	return nil
@@ -142,6 +143,42 @@ func (r *AgentRegistry) Add(ag *Agent) {
 	r.mu.Lock()
 	r.agents = append(r.agents, ag)
 	r.mu.Unlock()
+}
+
+// AddBuiltin 注册代码内置角色，磁盘热加载不能删除或覆盖这些保留名称。
+func (r *AgentRegistry) AddBuiltin(ag *Agent) {
+	if ag == nil || ag.Name == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	replaced := false
+	for i, old := range r.builtins {
+		if old.Name == ag.Name {
+			r.builtins[i] = ag
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		r.builtins = append(r.builtins, ag)
+	}
+	r.agents = r.withBuiltinsLocked(r.agents)
+}
+
+// 调用方持有写锁。只保留显式注册的内置角色，已卸载插件不能残留。
+func (r *AgentRegistry) withBuiltinsLocked(loaded []*Agent) []*Agent {
+	out := append([]*Agent(nil), r.builtins...)
+	reserved := make(map[string]bool, len(r.builtins))
+	for _, ag := range r.builtins {
+		reserved[ag.Name] = true
+	}
+	for _, ag := range loaded {
+		if ag != nil && !reserved[ag.Name] {
+			out = append(out, ag)
+		}
+	}
+	return out
 }
 
 // AddAll inserts a batch of agents. Nil entries are skipped. Used by

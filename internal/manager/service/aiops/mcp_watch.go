@@ -80,6 +80,8 @@ func (r *MCPToolRefresher) RunRefresh(ctx context.Context, uc *managerbizmcp.Use
 		select {
 		case <-ctx.Done():
 			return
+		case <-uc.RegistrationChanges():
+			reconcile()
 		case <-timer.C:
 			reconcile()
 		}

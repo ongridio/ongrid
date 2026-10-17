@@ -208,15 +208,15 @@ export default function SettingsAgent() {
         >
           <option value="release">{tr('跟随 Release 默认（当前 v3）', 'Follow release default (currently v3)')}</option>
           <option value="v3">{tr('v3 · 固定版本', 'v3 · Pinned version')}</option>
-          <option value="v2" disabled>{tr('v2 · 尚未接入', 'v2 · Not available yet')}</option>
-          <option value="v1" disabled>{tr('v1 · 尚未接入', 'v1 · Not available yet')}</option>
+          <option value="v2">{tr('v2 · 固定版本', 'v2 · Pinned version')}</option>
+          <option value="v1" disabled>{tr('v1 · 不再支持', 'v1 · No longer supported')}</option>
           {!['release', 'v1', 'v2', 'v3'].includes(runtimeVersion) && (
             <option value={runtimeVersion} disabled>{tr('不支持的已保存版本', 'Unsupported saved version')}: {runtimeVersion}</option>
           )}
         </Select>
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <Button variant="primary"
-            disabled={loading || loadFailed || savingRuntime || runtimeVersion === savedRuntimeVersion || !['release', 'v3'].includes(runtimeVersion)}
+            disabled={loading || loadFailed || savingRuntime || runtimeVersion === savedRuntimeVersion || !['release', 'v3', 'v2'].includes(runtimeVersion)}
             onClick={() => void onSaveRuntime()}>
             <Save size={14} />
             {savingRuntime ? tr('保存中…', 'Saving…') : tr('保存版本', 'Save runtime')}
@@ -226,8 +226,8 @@ export default function SettingsAgent() {
           </span>
         </div>
         <p className="mt-4 text-[11px] leading-relaxed text-zinc-600">
-          {tr('当前构建仅接入 v3。v1、v2 源码已隔离，完成执行适配前不可选择。跟随 Release 默认会在升级后使用该发行版的默认运行时。',
-            'This build runs v3 only. v1 and v2 source is isolated, but execution adapters are not available yet. Following the release default uses the default runtime shipped with each upgrade.')}
+          {tr('可选择 v3 或切回 v2，新会话生效。v1 不再支持，源码保留归档。跟随 Release 默认会在升级后使用该发行版的默认运行时。',
+            'Choose v3 or switch back to v2 for new conversations. v1 is no longer supported; its source remains archived. Following the release default uses the default runtime shipped with each upgrade.')}
         </p>
       </Card>
 

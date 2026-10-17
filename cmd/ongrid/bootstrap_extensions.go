@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -20,6 +21,7 @@ import (
 	managermarketplacedata "github.com/ongridio/ongrid/internal/manager/data/marketplace/store"
 	managermcpdata "github.com/ongridio/ongrid/internal/manager/data/mcp/store"
 	pagesdata "github.com/ongridio/ongrid/internal/manager/data/pages"
+	managermodelmcp "github.com/ongridio/ongrid/internal/manager/model/mcp"
 	managerserverapproval "github.com/ongridio/ongrid/internal/manager/server/approval"
 	managerserverk8s "github.com/ongridio/ongrid/internal/manager/server/k8s"
 	managerservermarketplace "github.com/ongridio/ongrid/internal/manager/server/marketplace"
@@ -33,6 +35,7 @@ import (
 	managersvck8s "github.com/ongridio/ongrid/internal/manager/service/k8s"
 	managersvcskill "github.com/ongridio/ongrid/internal/manager/service/skill"
 	"github.com/ongridio/ongrid/internal/pkg/config"
+	"github.com/ongridio/ongrid/internal/pkg/mcpclient"
 	"github.com/ongridio/ongrid/internal/pkg/notify"
 	"github.com/ongridio/ongrid/internal/pkg/runner"
 	"github.com/ongridio/ongrid/internal/pkg/secretbox"
@@ -64,22 +67,11 @@ func bootstrapExtensions(rootCtx context.Context, cfg *config.Config, log *slog.
 	// marketplace wiring. Install / List / Uninstall on
 	// /v1/marketplace/*. The usecase reloads the chatruntime registries
 	// after every mutation so newly installed skills appear in the next
-	// chat without a restart. When the graph kernel didn't build (no
-	// LLM provider configured) the registries are nil, the marketplace
-	// still works for List/Install but the hot-reload is a no-op until
-	// the next chatruntime construction picks the disk state up.
-	var mpSkillReg managerbizmarketplace.SkillRegistry
-	var skillAssetLeaser managersvcaiops.SkillAssetLeaser
-	var mpAgentReg managerbizmarketplace.AgentRegistry
-	if rt := runtime.chatRT; rt != nil {
-		if sk := rt.SkillRegistry(); sk != nil {
-			mpSkillReg = sk
-			skillAssetLeaser = sk
-		}
-		if ag := rt.AgentRegistry(); ag != nil {
-			mpAgentReg = ag
-		}
-	}
+	// chat without a restart. Registries exist independently of runtime assembly.
+	// Reload both version-local registries, even when LLM assembly is unavailable.
+	var mpSkillReg managerbizmarketplace.SkillRegistry = registryReloaders{runtime.bootstrapSkillReg, runtime.bootstrapV2SkillReg}
+	var mpAgentReg managerbizmarketplace.AgentRegistry = registryReloaders{runtime.bootstrapAgentReg, runtime.bootstrapV2AgentReg}
+	var skillAssetLeaser managersvcaiops.SkillAssetLeaser = runtime.bootstrapSkillReg
 	mpRepo := managermarketplacedata.NewRepo(storage.db)
 	mpDevMode := strings.EqualFold(os.Getenv("ONGRID_MARKETPLACE_DEVMODE"), "true") ||
 		os.Getenv("ONGRID_MARKETPLACE_DEVMODE") == ""
@@ -142,6 +134,7 @@ func bootstrapExtensions(rootCtx context.Context, cfg *config.Config, log *slog.
 	runtime.humanApprovalBroker.SetUsecase(approvalUC)
 	approvalUC.RegisterExecutor(managersvcaiops.GenericToolApprovalKind, runtime.humanApprovalBroker.Execute)
 	managersvcaiops.RegisterRuntimeApprovalExecutor(approvalUC, managersvcaiops.GenericToolApprovalKind, contract.V3, runtime.humanApprovalBroker.Execute)
+	managersvcaiops.RegisterRuntimeApprovalExecutor(approvalUC, managersvcaiops.GenericToolApprovalKind, contract.V2, runtime.humanApprovalBroker.Execute)
 	approvalHandler := managerserverapproval.NewHandler(approvalUC)
 	// HLD-017 cloud_bash producer: register the execute-on-approve executor
 	// (resolve the bound credential → inject into the Runner sandbox → run)
@@ -204,7 +197,17 @@ func bootstrapExtensions(rootCtx context.Context, cfg *config.Config, log *slog.
 	// live bag here, exactly like the AgentTool trio above. The coordinator
 	// (coordinatorToolNames) and specialist-ops (persona Tools list) filters
 	// both whitelist cloud_bash, so this single append reaches both.
+	var runtimes []extensionRuntime
 	if runtime.chatRT != nil {
+		runtime.chatRT.SetCredentialBinder(mpUC)
+		runtimes = append(runtimes, runtime.chatRT)
+	}
+	if runtime.chatV2 != nil {
+		runtime.chatV2.SetCredentialBinder(mpUC)
+		runtimes = append(runtimes, runtime.chatV2)
+	}
+	var refreshers []*managersvcaiops.MCPToolRefresher
+	for _, rt := range runtimes {
 		cbDeps := aiopstoolsdec.Deps{
 			// HLD-021: cloud_bash now BLOCKS in-tool until the human approves
 			// (synchronous propose-confirm), so the per-call timeout must
@@ -230,7 +233,7 @@ func bootstrapExtensions(rootCtx context.Context, cfg *config.Config, log *slog.
 			Registerer:    reg,
 			HumanApproval: runtime.humanApprovalBroker,
 		}
-		if err := runtime.chatRT.AppendToolBag([]aiopstoolsbase.BaseTool{
+		if err := rt.AppendToolBag([]aiopstoolsbase.BaseTool{
 			aiopstoolsdec.Wrap(aiopstools.NewBashToolWithProposer(tunnel.fbClient, devices.edgeUC, devices.deviceUC, managersvcaiops.HostBashProposer{Usecase: approvalUC}, log), cbDeps),
 			aiopstoolsdec.Wrap(aiopstools.NewCloudBashTool(managersvcaiops.CloudBashProposer{Usecase: approvalUC}, log), cbDeps),
 			aiopstoolsdec.Wrap(aiopstools.NewInstallSkillTool(managersvcaiops.InstallSkillProposer{Usecase: approvalUC}, log), cbDeps),
@@ -240,16 +243,12 @@ func bootstrapExtensions(rootCtx context.Context, cfg *config.Config, log *slog.
 		}); err != nil {
 			log.Error("append runtime extension tools failed", slog.Any("err", err))
 		}
-		log.Info("host_bash + cloud_bash + install_skill + serve_page + messaging tools bolted onto chat runtime bag", slog.Int("tool_count", runtime.chatRT.ToolCount()))
-		// HLD-017: wire the active-skill → bound-credentials resolver so
-		// cloud_bash auto-injects the credentials an active skill was bound
-		// to at install time (design-time binding, no run-time choice).
-		runtime.chatRT.SetCredentialBinder(mpUC)
+		log.Info("host_bash + cloud_bash + install_skill + serve_page + messaging tools bolted onto chat runtime bag", slog.Int("tool_count", rt.ToolCount()))
 		// Admin write-action gate: consult the agent/write_enabled system
 		// setting live on every chat request. When an admin turns it off the
 		// agent goes read-only (all non-read tools stripped from the LLM's
-		// toolbag). Default (unset) resolves to enabled, preserving behaviour.
-		runtime.chatRT.SetAgentWriteEnabledProvider(func(ctx context.Context) bool {
+		// toolbag). Missing settings fail closed.
+		rt.SetAgentWriteEnabledProvider(func(ctx context.Context) bool {
 			return settings.settingSvc.AgentWriteEnabled(ctx)
 		})
 		// HLD-018 P2: connect each enabled MCP server, pull its tools, and
@@ -268,19 +267,24 @@ func bootstrapExtensions(rootCtx context.Context, cfg *config.Config, log *slog.
 		// Keep the graph-facing decorators and ToolSearch's unredacted catalog
 		// in sync. Registration changes call this with one server's fresh test
 		// result, so an admin save never reconnects every MCP endpoint.
-		mcpTools := managersvcaiops.NewMCPToolRefresher(runtime.chatRT, mcpDeps, mcpCaller, mcpProposer, log)
-		mcpUC.SetToolChangeHook(mcpTools.Refresh)
-
-		// Chat path: load enabled servers at boot; later changes use the same
-		// per-server refresh hook. The FLOW path uses LIVE managersvcflow.MCPSource.
-		mcpTools.LoadEnabled(rootCtx, mcpUC)
+		mcpTools := managersvcaiops.NewMCPToolRefresher(rt, mcpDeps, mcpCaller, mcpProposer, log)
+		refreshers = append(refreshers, mcpTools)
+	}
+	mcpUC.SetToolChangeHook(func(ctx context.Context, name string, srv *managermodelmcp.Server, discovered []mcpclient.Tool) {
+		for _, refresher := range refreshers {
+			refresher.Refresh(ctx, name, srv, discovered)
+		}
+	})
+	if len(refreshers) > 0 {
+		// Discovery has one supervisor; every change fans out to both catalogs.
+		refreshers[0].LoadEnabled(rootCtx, mcpUC)
 		go func() {
 			defer func() {
 				if recovered := recover(); recovered != nil {
 					log.Error("MCP refresh supervisor panic", slog.Any("panic", recovered))
 				}
 			}()
-			mcpTools.RunRefresh(rootCtx, mcpUC, time.Minute)
+			refreshers[0].RunRefresh(rootCtx, mcpUC, time.Minute)
 		}()
 	}
 
@@ -318,4 +322,26 @@ func bootstrapExtensions(rootCtx context.Context, cfg *config.Config, log *slog.
 		k8sHandler:         k8sHandler,
 		pageStore:          pageStore,
 	}
+}
+
+// extensionRuntime exposes only version-independent startup hooks.
+type extensionRuntime interface {
+	AppendToolBag([]aiopstoolsbase.BaseTool) error
+	ReplaceToolSource(string, []aiopstoolsbase.BaseTool, []aiopstoolsbase.BaseTool) error
+	ToolCount() int
+	SetAgentWriteEnabledProvider(func(context.Context) bool)
+}
+type registryReloader interface{ Reload(string, ...string) error }
+type registryReloaders []registryReloader
+
+func (rs registryReloaders) Reload(root string, extras ...string) error {
+	var errs []error
+	for _, r := range rs {
+		if r != nil {
+			if err := r.Reload(root, extras...); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	return errors.Join(errs...)
 }

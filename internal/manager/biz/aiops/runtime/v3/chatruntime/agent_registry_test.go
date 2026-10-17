@@ -1,6 +1,7 @@
 package chatruntime
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -60,5 +61,40 @@ func TestAgentRegistryCapabilityCardsCarryOwner(t *testing.T) {
 	cards[0].Tools[0] = "changed"
 	if got := r.All()[0].Capabilities[0].Tools[0]; got != "host_du_summary" {
 		t.Errorf("registry card mutated through snapshot: %q", got)
+	}
+}
+
+func TestAgentRegistryReloadPreservesBuiltinAndRemovesUninstalledPersona(t *testing.T) {
+	r := NewAgentRegistry()
+	builtin := &Agent{Name: "default", Source: "builtin", MaxTurns: 30, Capabilities: []AgentCapability{{ID: "operate"}}}
+	r.AddBuiltin(builtin)
+	root := t.TempDir()
+	body := "---\nname: default\ndescription: shadow\nwhen_to_use: shadow\n---\nshadow"
+	if err := os.WriteFile(filepath.Join(root, "default.md"), []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Reload(root, fixtureAgentRoot("multi")); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := r.ByName("default"); got != builtin {
+		t.Fatal("plugin replaced builtin persona")
+	}
+	if _, ok := r.ByName("reviewer"); !ok {
+		t.Fatal("plugin persona was not loaded")
+	}
+	if err := r.Reload(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := r.ByName("default"); got != builtin || got.MaxTurns != 30 {
+		t.Fatal("reload lost builtin configuration")
+	}
+	if len(r.All()) != 1 || len(r.CapabilityCards()) != 1 {
+		t.Fatal("uninstall left stale personas or removed builtin capabilities")
+	}
+	if err := r.Load(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := r.ByName("default"); got != builtin {
+		t.Fatal("load lost builtin persona")
 	}
 }

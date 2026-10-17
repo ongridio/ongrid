@@ -6,7 +6,7 @@ option go_package = "github.com/ongridio/ongrid/api/gen/manager/setting/v1;setti
 
 // SettingService 管理管理员可编辑的运行时配置。
 // agent.runtime_version accepts "release" (follow this release default) or
-// "v3" (pin new sessions to v3). v1/v2 are not wired and are rejected.
+// "v3" or "v2" (pin new sessions). v1 is no longer supported and is rejected.
 // Existing sessions retain their runtime; legacy unversioned sessions stay v3.
 // Read/write via the existing system-settings category/key API.
 // Legacy platform.auto_apm_enabled values are retained but no longer affect discovery.

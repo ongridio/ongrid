@@ -94,8 +94,8 @@ func (s *Service) AgentRuntimeVersion(ctx context.Context) (string, error) {
 func validateAgentSetting(key, value string) error {
 	switch key {
 	case model.KeyAgentRuntimeVersion:
-		if value != "release" && value != "v3" {
-			return fmt.Errorf("%w: runtime_version must be release or v3; v1/v2 are not available", errs.ErrInvalid)
+		if value != "release" && value != "v3" && value != "v2" {
+			return fmt.Errorf("%w: runtime_version must be release, v3 or v2; v1 is no longer supported", errs.ErrInvalid)
 		}
 		return nil
 	case model.KeyAgentOutputLocale:

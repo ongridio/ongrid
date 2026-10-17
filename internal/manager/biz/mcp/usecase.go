@@ -50,15 +50,17 @@ type ToolChangeHook func(ctx context.Context, serverName string, server *model.S
 
 // Usecase is the MCP-server-registration facade.
 type Usecase struct {
-	repo          Repo
-	secrets       SecretResolver
-	log           *slog.Logger
-	onToolsChange ToolChangeHook
+	repo                Repo
+	secrets             SecretResolver
+	log                 *slog.Logger
+	onToolsChange       ToolChangeHook
+	registrationChanges chan struct{}
 	// commitGate serializes registration changes and discovery publication.
 	// Remote MCP requests never hold it; waiting respects request cancellation.
 	commitGate    chan struct{}
 	probeSequence uint64
 	latestProbe   map[uint64]uint64
+	manualProbes  map[uint64]int
 }
 
 // SetToolChangeHook wires the optional runtime catalog updater. It is set
@@ -80,7 +82,18 @@ func NewUsecase(repo Repo, secrets SecretResolver, log *slog.Logger) *Usecase {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Usecase{repo: repo, secrets: secrets, log: log, commitGate: make(chan struct{}, 1), latestProbe: make(map[uint64]uint64)}
+	return &Usecase{repo: repo, secrets: secrets, log: log, registrationChanges: make(chan struct{}, 1), commitGate: make(chan struct{}, 1), latestProbe: make(map[uint64]uint64), manualProbes: make(map[uint64]int)}
+}
+
+// RegistrationChanges 唤醒唯一的发现 supervisor。合并连续变更，由消费者重新读取
+// 最新注册表；不在 HTTP 请求中等待远端连接，也不为每次保存启动 goroutine。
+func (u *Usecase) RegistrationChanges() <-chan struct{} { return u.registrationChanges }
+
+func (u *Usecase) notifyRegistrationChanged() {
+	select {
+	case u.registrationChanges <- struct{}{}:
+	default:
+	}
 }
 
 func (u *Usecase) enterCommit(ctx context.Context) error {
@@ -105,6 +118,7 @@ func (u *Usecase) Create(ctx context.Context, s *model.Server) (*model.Server, e
 	if err := u.repo.Create(ctx, s); err != nil {
 		return nil, err
 	}
+	u.notifyRegistrationChanged()
 	return s, nil
 }
 
@@ -127,6 +141,7 @@ func (u *Usecase) Update(ctx context.Context, id uint64, patch *model.Server) er
 	if err := u.repo.Update(ctx, id, patch); err != nil {
 		return err
 	}
+	defer u.notifyRegistrationChanged()
 	// Invalidate discoveries started before this change, including disable/re-enable.
 	delete(u.latestProbe, id)
 	updated, err := u.repo.Get(ctx, id)
@@ -168,6 +183,7 @@ func (u *Usecase) Delete(ctx context.Context, id uint64) error {
 	if err := u.repo.Delete(ctx, id); err != nil {
 		return err
 	}
+	defer u.notifyRegistrationChanged()
 	delete(u.latestProbe, id)
 	u.notifyToolsChanged(ctx, server.Name, nil, nil)
 	return nil
@@ -329,6 +345,24 @@ func (u *Usecase) RefreshConnection(ctx context.Context, id uint64) ([]mcpclient
 func (u *Usecase) refreshConnection(ctx context.Context, id uint64, forcePublish bool) ([]mcpclient.Tool, error) {
 	if err := u.enterCommit(ctx); err != nil {
 		return nil, err
+	}
+	// 后台刷新不能废弃用户正在执行的连接验证。手动验证负责发布结果，
+	// 后台稍后仍会轮询；重复手动请求继续沿用最新请求优先的语义。
+	if !forcePublish && u.manualProbes[id] > 0 {
+		u.leaveCommit()
+		return nil, nil
+	}
+	if forcePublish {
+		u.manualProbes[id]++
+		defer func() {
+			// 这是内存锁的资源清理，不执行 IO；请求取消后也必须归还计数。
+			u.commitGate <- struct{}{}
+			defer u.leaveCommit()
+			u.manualProbes[id]--
+			if u.manualProbes[id] == 0 {
+				delete(u.manualProbes, id)
+			}
+		}()
 	}
 	s, err := u.repo.Get(ctx, id)
 	if err != nil {

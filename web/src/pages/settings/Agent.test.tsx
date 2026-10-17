@@ -129,7 +129,7 @@ describe('SettingsAgent output language', () => {
 });
 
 describe('SettingsAgent runtime selection', () => {
-  it('persists a pinned runtime and can return to release defaults', async () => {
+  it.each(['v2', 'v3'])('persists %s and can return to release defaults', async (version) => {
     const saved: unknown[] = [];
     server.use(
       http.get('/api/v1/system-settings', () => HttpResponse.json({ items: [], total: 0 })),
@@ -141,13 +141,13 @@ describe('SettingsAgent runtime selection', () => {
     const user = userEvent.setup();
     render(<MemoryRouter><SettingsAgent /></MemoryRouter>);
     await waitFor(() => expect(screen.getByRole('combobox', { name: 'Runtime version' })).toBeEnabled());
-    await selectOption(screen.getByRole('combobox', { name: 'Runtime version' }), 'v3 · Pinned version');
+    await selectOption(screen.getByRole('combobox', { name: 'Runtime version' }), `${version} · Pinned version`);
     await user.click(screen.getByRole('button', { name: 'Save runtime' }));
     await screen.findByText('Saved. Applies to new conversations.');
-    expect(saved).toEqual([{ value: 'v3', sensitive: false }]);
+    expect(saved).toEqual([{ value: version, sensitive: false }]);
     await selectOption(screen.getByRole('combobox', { name: 'Runtime version' }), 'Follow release default (currently v3)');
     await user.click(screen.getByRole('button', { name: 'Save runtime' }));
-    await waitFor(() => expect(saved).toEqual([{ value: 'v3', sensitive: false }, { value: 'release', sensitive: false }]));
+    await waitFor(() => expect(saved).toEqual([{ value: version, sensitive: false }, { value: 'release', sensitive: false }]));
   });
 
   it('retains the selection and shows an error when saving fails', async () => {

@@ -21,7 +21,7 @@ test.describe('live frontend interaction', () => {
   const routes: Array<[string, RegExp]> = [
     ['/dashboard', /仪表盘|Dashboard/],
     ['/devices', /全部设备|All devices/],
-    ['/kubernetes', /Kubernetes 集群|Kubernetes clusters/],
+    ['/kubernetes', /^集群$|^Clusters$/],
     ['/topology', /拓扑|Topology/],
     ['/monitor', /监控|Monitor/],
     ['/logs', /日志|Logs/],
@@ -52,32 +52,36 @@ test.describe('live frontend interaction', () => {
     await expect(rows.first()).toBeVisible();
     await rows.first().click();
     await expect(page).toHaveURL(/\/devices\/\d+/);
-    await expect(page.getByRole('button', { name: /指标|Metrics/ })).toBeVisible();
-    await page.getByRole('button', { name: /插件|Plugins/ }).click();
-    for (const plugin of ['metrics', 'logs', 'traces', 'profiles']) {
+    await expect(page.getByRole('tab', { name: /指标|Metrics/ })).toBeVisible();
+    await page.getByRole('tab', { name: /插件|Plugins/ }).click();
+    for (const plugin of ['metrics', 'logs', 'traces']) {
       await expect(page.getByText(plugin, { exact: true }).first()).toBeVisible();
     }
-    await expect(page.getByText(/subprocess otelcol-contrib/)).toBeVisible();
+    // profiles/autoapm 已移到 APM 入口，不再是设备插件页的顶层行。
+    await expect(page.getByText(/subprocess otelcol-contrib/).first()).toBeVisible();
   });
 
   test('Kubernetes cluster detail switches every resource view', async ({ page }) => {
-    await page.goto('/kubernetes');
-    const details = page.getByRole('link', { name: /详情|Details/ });
-    await expect(details.first()).toBeVisible();
-    await details.first().click();
-    await expect(page).toHaveURL(/\/kubernetes\/\d+/);
+    await page.goto('/clusters');
+    const token = await page.evaluate(() => JSON.parse(localStorage.getItem('ongrid.auth')!).state.token);
+    const response = await page.request.get('/api/v1/k8s/clusters', { headers: { Authorization: `Bearer ${token}` } });
+    expect(response.ok()).toBe(true);
+    const { items } = await response.json();
+    expect(Array.isArray(items)).toBe(true);
+    test.skip(items.length === 0, '测试环境没有已接入的 Kubernetes 集群，资源页需在具备该前置条件的环境验收');
+    await page.goto(`/kubernetes/${items[0].id}`);
 
     for (const tab of ['Nodes', 'Workloads', 'Pods', 'Events', 'Namespaces', 'Actions']) {
-      await page.getByRole('button', { name: new RegExp(`^${tab}\\s+\\d+`) }).click();
+      await page.getByRole('tab', { name: new RegExp(`^${tab}\\s+\\d+`) }).click();
       await expect(page).toHaveURL(new RegExp(`tab=${tab.toLowerCase()}`));
-      await expect(page.getByRole('button', { name: new RegExp(`^${tab}\\s+\\d+`) })).toHaveClass(/bg-zinc-100/);
+      await expect(page.getByRole('tab', { name: new RegExp(`^${tab}\\s+\\d+`) })).toHaveAttribute('aria-selected', 'true');
     }
   });
 
   test('topology view switches graph, nodes, and type management', async ({ page }) => {
     await page.goto('/topology');
     for (const tab of [/图谱|Graph/, /节点 \+ 关系|Nodes \+ relations/, /类型管理|Types/]) {
-      await page.getByRole('button', { name: tab }).click();
+      await page.getByRole('tab', { name: tab }).click();
     }
     await expect(page.getByText(/节点类型|Node types/).first()).toBeVisible();
   });

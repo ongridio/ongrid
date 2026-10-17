@@ -382,7 +382,7 @@ func TestAgentRuntimeVersionSelection(t *testing.T) {
 	if got, err := svc.AgentRuntimeVersion(ctx); err != nil || got != "" {
 		t.Fatalf("default: %q %v", got, err)
 	}
-	for _, value := range []string{"v3", "release", "v3"} {
+	for _, value := range []string{"v3", "v2", "release", "v3"} {
 		if err := svc.Set(ctx, model.CategoryAgent, model.KeyAgentRuntimeVersion, value, false); err != nil {
 			t.Fatal(err)
 		}
@@ -394,7 +394,7 @@ func TestAgentRuntimeVersionSelection(t *testing.T) {
 			t.Fatalf("saved: %q %v", got, err)
 		}
 	}
-	for _, value := range []string{"v1", "v2", "v99", "", "V3"} {
+	for _, value := range []string{"v1", "v99", "", "V3"} {
 		if err := svc.Set(ctx, model.CategoryAgent, model.KeyAgentRuntimeVersion, value, false); !errors.Is(err, errs.ErrInvalid) {
 			t.Fatalf("accepted %q: %v", value, err)
 		}
@@ -409,7 +409,7 @@ func TestAgentRuntimeVersionSelection(t *testing.T) {
 		t.Fatalf("deleted: %q %v", got, err)
 	}
 	// Unsupported persisted values cannot silently fall back to v3.
-	if _, err := repo.Set(ctx, model.CategoryAgent, model.KeyAgentRuntimeVersion, "v2", false); err != nil {
+	if _, err := repo.Set(ctx, model.CategoryAgent, model.KeyAgentRuntimeVersion, "v1", false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.AgentRuntimeVersion(ctx); !errors.Is(err, errs.ErrInvalid) {

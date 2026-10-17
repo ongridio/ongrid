@@ -9,9 +9,9 @@
 //	credential injection: header_template_json {{field}} is filled from the
 //	bound vault credential and actually reaches the MCP server's HTTP headers.
 //
-// The Agent-calls-an-MCP-tool path (P2) is boot-time tool registration and is
-// validated on the live deploy instead; here we pin the deterministic API +
-// the protocol round-trip + the credential→header injection.
+// Runtime hot registration, discovery/execution consistency and background
+// refresh are covered in dynamic_capabilities_test.go. This file protects
+// CRUD, protocol round-trips and credential-to-header injection.
 package e2e
 
 import (

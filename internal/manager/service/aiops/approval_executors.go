@@ -61,6 +61,7 @@ func (e ApprovalExecutors) Register(approvalUC *managerbizapproval.Usecase) {
 		// Preserve the existing unversioned route for historical/non-runtime proposals.
 		approvalUC.RegisterExecutor(kind, execute)
 		RegisterRuntimeApprovalExecutor(approvalUC, kind, contract.V3, execute)
+		RegisterRuntimeApprovalExecutor(approvalUC, kind, contract.V2, execute)
 	}
 	register("cloud_bash", func(ctx context.Context, payloadJSON string) (string, error) {
 		var p cloudBashPayload
@@ -191,7 +192,7 @@ func (e ApprovalExecutors) Register(approvalUC *managerbizapproval.Usecase) {
 		if err := json.Unmarshal([]byte(payloadJSON), &p); err != nil {
 			return "", err
 		}
-		if contract.VersionFromContext(ctx) == contract.V3 && p.Revision == "" {
+		if (contract.VersionFromContext(ctx) == contract.V3 || contract.VersionFromContext(ctx) == contract.V2) && p.Revision == "" {
 			return "", fmt.Errorf("MCP approval has no registration revision; submit a new request")
 		}
 		out, err := e.MCP.CallToolRevision(ctx, p.Server, p.Tool, p.Arguments, p.Revision)

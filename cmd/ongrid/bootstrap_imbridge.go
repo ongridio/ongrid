@@ -99,6 +99,9 @@ func bootstrapIMBridge(rootCtx context.Context, log *slog.Logger, storage *stora
 	if rt := runtime.chatRT; rt != nil {
 		rt.SetMentionResolver(managersvcaiops.ChatMentionResolver{Inner: mentionSearcher})
 	}
+	if rt := runtime.chatV2; rt != nil {
+		rt.SetMentionResolver(managersvcaiops.ChatMentionResolver{Inner: mentionSearcher})
+	}
 
 	return &imbridgeModule{
 		imbridgeHandler: imbridgeHandler,

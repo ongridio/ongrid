@@ -1070,12 +1070,17 @@ func TestAssistantChat_RemainingScenarioCoverage(t *testing.T) {
 
 func createChatSession(t *testing.T, env *testenv.Env, token, title string) string {
 	t.Helper()
+	return createVersionedChatSession(t, env, token, title, "v3")
+}
+
+func createVersionedChatSession(t *testing.T, env *testenv.Env, token, title, version string) string {
+	t.Helper()
 	status, body, err := env.DoJSON("POST", "/api/v1/chat/sessions", map[string]any{"title": title}, token)
 	if err != nil || status != http.StatusCreated {
 		t.Fatalf("create chat session: status=%d body=%v err=%v", status, body, err)
 	}
-	if body["runtime_version"] != "v3" {
-		t.Fatalf("new session runtime = %v, want v3", body["runtime_version"])
+	if body["runtime_version"] != version {
+		t.Fatalf("new session runtime = %v, want %s", body["runtime_version"], version)
 	}
 	id, _ := body["id"].(string)
 	if id == "" {

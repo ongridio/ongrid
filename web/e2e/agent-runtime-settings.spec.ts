@@ -31,14 +31,14 @@ for (const theme of ['light', 'dark']) {
       await expect(selector).toBeEnabled();
       await selector.scrollIntoViewIfNeeded();
       await selector.click();
-      await expect(page.getByRole('option', { name: /v2/ })).toBeDisabled();
-      await expect(page.getByRole('option', { name: /v1/ })).toBeDisabled();
+      await expect(page.getByRole('option', { name: /v2/ })).toBeEnabled();
+      await expect(page.getByRole('option', { name: english ? 'v1 · No longer supported' : 'v1 · 不再支持' })).toBeDisabled();
       await page.screenshot({ path: `/tmp/ongrid-runtime-${theme}-${width}.png`, fullPage: true });
-      await page.getByRole('option', { name: english ? 'v3 · Pinned version' : 'v3 · 固定版本', exact: true }).click();
+      await page.getByRole('option', { name: english ? 'v2 · Pinned version' : 'v2 · 固定版本', exact: true }).click();
       await page.getByRole('button', { name: english ? 'Save runtime' : '保存版本', exact: true }).click();
       await expect(page.getByRole('status')).toContainText(english ? 'Saved.' : '已保存');
       await page.reload();
-      await expect(selector).toContainText(english ? 'v3 · Pinned version' : 'v3 · 固定版本');
+      await expect(selector).toContainText(english ? 'v2 · Pinned version' : 'v2 · 固定版本');
       const box = await selector.boundingBox();
       expect(box).not.toBeNull();
       expect(box!.x).toBeGreaterThanOrEqual(0);

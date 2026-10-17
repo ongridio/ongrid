@@ -55,10 +55,13 @@ func TestSpawnWorker_Sync(t *testing.T) {
 		t.Errorf("session_id = %q, want worker-* prefix", w.SessionID)
 	}
 
-	// chat_sessions audit row — assert all three columns are set.
+	// chat_sessions audit row — assert version and ownership are preserved.
 	row, err := store.GetSession(context.Background(), w.SessionID)
 	if err != nil || row == nil {
 		t.Fatalf("worker chat_sessions row missing: %v", err)
+	}
+	if row.RuntimeVersion != "v2" {
+		t.Fatalf("worker runtime = %q, want v2", row.RuntimeVersion)
 	}
 	if row.AgentID == nil || *row.AgentID != "incident-investigator" {
 		t.Errorf("row.AgentID = %v, want incident-investigator", row.AgentID)
@@ -630,4 +633,17 @@ func newSeededRuntimeStore(t *testing.T, userID uint64) (*memSessions, string) {
 	owner := model.DefaultSessionOwnerAgent
 	store := newMemSessions(&model.Session{ID: parentID, UserID: userID, Title: "parent", RootSessionID: &rootID, OwnerAgentID: &owner})
 	return store, parentID
+}
+
+func TestSpawnWorker_RejectsParentFromAnotherRuntime(t *testing.T) {
+	store := newMemSessions(&model.Session{ID: "parent", UserID: 7, RuntimeVersion: "v3"})
+	rt := newRuntimeWithStore(t, "incident-investigator", newScriptedChatModel(&schema.Message{Role: schema.Assistant, Content: "must not run"}), nil, store)
+	_, err := rt.SpawnWorker(context.Background(), SpawnRequest{AgentName: "incident-investigator", Prompt: "work", ParentSession: "parent"})
+	if err == nil || !strings.Contains(err.Error(), "runtime mismatch") {
+		t.Fatalf("cross-runtime spawn = %v", err)
+	}
+	children, listErr := store.ListByParent(context.Background(), "parent")
+	if listErr != nil || len(children) != 0 {
+		t.Fatalf("rejected spawn persisted children: %+v %v", children, listErr)
+	}
 }

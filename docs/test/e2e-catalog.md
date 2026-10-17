@@ -162,7 +162,7 @@
 |---|---|---|---|---|---|
 | L1 | 加载内置 skill registry | `GET /v1/skills` | 列出 ~18 内置 | P1 | ✅ `tests/e2e/skills_registry_test.go` |
 | L2 | skill execute(read-only) | `POST /skills/{key}/execute` | edge 跑 + 返结果 | P1 | |
-| L3 | marketplace install | `POST /marketplace/install` | pack 下载、registry 行 | P2 | |
+| L3 | marketplace 本地安装 / 热加载 / 卸载 | `POST /marketplace/install` + 聊天 `load_skill` | 已有会话立即可见；按需正文与版本持久化；卸载撤销旧回合加载 | P2 | ✅ `tests/e2e/dynamic_skills_test.go`（本地包；远程下载未覆盖） |
 
 ## 域 M — Webshell
 
@@ -225,3 +225,70 @@
 > - 写操作通过浏览器侧 API stub 验证交互和请求体,不写入本地环境数据
 
 详见 `tests/e2e/README.md` 和 `web/e2e/README.md`。
+
+
+## v3 动态能力回归
+
+全部经真实 Manager 的公开 HTTP API、真实临时 MySQL 和脚本化 LLM/MCP 服务执行；不重启 Manager、不直接修改运行时注册表。测试注册聊天、MCP、安装包的清理；文件使用临时目录。
+
+| 场景 | 关键断言 | 测试 |
+|---|---|---|
+| 启动后注册 MCP / 分页发现 | 同一个已有会话通过 ToolSearch 取得第二页工具 schema；真实工具调用及结果进入模型上下文 | `TestDynamicMCP_HotRegistrationLifecycle` |
+| 发现临时失败 | API 报错，最后验证的工具仍可发现和执行 | 同上 |
+| 工具列表替换 | 新工具可用；旧工具 schema 消失，强制输出旧调用也不能到达 MCP endpoint | 同上 |
+| 禁用 / 重新启用 | 禁用立即撤销目录与执行，重新启用恢复有效工具 | 同上 |
+| 替换端点 / 删除 | 旧工具不能执行；新端点验证后可执行；删除后再次撤销 | 同上 |
+| 后台首次发现 | 不调用手动连接测试，按生产一分钟周期发现新注册服务 | `TestDynamicMCP_BackgroundDiscoveryNotificationAndPolling` |
+| MCP 列表变更通知 | 服务端 SSE 通知后 12 秒内更新；新工具可调用，旧工具撤销 | 同上 |
+| 无通知的轮询兜底 | 不发送通知，85 秒内发现新目录并更新执行能力 | 同上 |
+| Skill 安装 / 按需加载 | 已有会话目录热更新，正文不提前注入；load_skill 返回版本、revision 和资源目录，工具消息持久化 | `TestDynamicSkills_InstallLoadAndUninstall` |
+| 回合内卸载 Skill | 模型请求阻塞期间卸载，旧回合 load_skill 返回失败观察，正文不得进入模型；后续目录不含该 Skill | 同上 |
+
+运行：
+
+```bash
+go test -race -tags=e2e -count=1 -timeout=8m ./tests/e2e -run TestDynamic
+```
+
+后台测试保留真实一分钟刷新周期，通常需要约两分钟。MCP 执行场景使用 trusted 注册的只读工具；外部服务是测试替身，不代表真实供应商互操作性验收；审批期间配置/凭据变化、Skill 执行中资源引用与重启恢复边界仍由已有单元/集成测试覆盖，不将其计入这些 E2E 的覆盖范围。
+
+本轮验证（2026-10-17）：上述动态能力专项通过；`go test -race -tags=e2e -count=1 -timeout=12m -json ./tests/e2e/...` 全量通过，29 个顶层测试、含子测试共 93 项，零失败 / 跳过，耗时约 180.6 秒。
+
+
+## v2/v3 版本切换回归
+
+| 场景 | 关键断言 | 测试 |
+|---|---|---|
+| release → v2 → release | 新会话选择生效，既有 v2/v3 会话继续各自运行 | `TestRuntimeVersions_SwitchAndDynamicMCP` |
+| 双版本动态 MCP | 同一注册更新两套目录；真实结果进入模型；禁用后两边均不能执行 | 同上 |
+| 待审批期间切换默认 | v2 审批仍标记 v2，批准后实际 MCP 调用一次，结果回到 v2；子任务仍可委派 | 同上 |
+| Skill / persona 热加载 | 安装后两版 Skill 正文与专家 prompt 实际进入模型，卸载后不能再调用；v3 原生 load_skill 不泄露到 v2 | `TestRuntimeVersions_SkillAndPersonaReload` |
+| 设置 UI | v2/v3 保存与恢复 release；v1「不再支持」禁用；深浅主题、四宽度、中英文 | `web/e2e/agent-runtime-settings.spec.ts`、`web/src/pages/settings/Agent.test.tsx` |
+
+后端专项：`go test -race -tags=e2e -count=1 -timeout=8m ./tests/e2e -run TestRuntimeVersions`。使用真实 Manager/MySQL、脚本模型/MCP；不操作测试部署环境。新建会话、MCP 注册、安装包与临时文件均清理。
+
+本轮双版本验证（2026-10-17）：全量 `go test -race -tags=e2e -count=1 -timeout=12m -json ./tests/e2e/...` 通过，31 个顶层测试、含子测试共 95 项，零失败 / 跳过，耗时约 191.8 秒。
+
+### 2026-10-17 收尾复验（Manager .7）
+
+新增注册无需 `/test`，要求 10 秒内自动发现，并分别用已有 v2/v3 会话调用；保留一分钟通知/轮询兜底验证。两版 AgentRegistry 增加内置角色热加载保留、同名插件隔离、卸载删除外部角色测试。全量后端 E2E（race）95 项通过，约 124.4 秒。
+
+真实 Chrome 页面回归：21 通过、1 跳过、0 失败。旧 Kubernetes 路由跳转到统一集群页；设备与拓扑用 `tab` 角色定位；profiles 不属于设备页顶层插件。Kubernetes 资源页从真实 API 选择集群，环境无集群时明确跳过，不伪造通过。
+
+现场 SSE 断线后继续执行并重读历史、v3 主动停止后继续对话、v2 MCP 待审批跨 Manager 更新后执行均通过。未将这些结果外推为所有 Worker/Skill 内存资源的跨进程续跑；详见 RFC-009 最新阶段。
+
+
+### 2026-10-17 Worker 与版本边界现场复验（Manager .8）
+
+真实模型、Manager/MySQL 和临时只读 MCP：6 个场景通过，零失败。
+
+| 场景 | 关键断言 |
+|---|---|
+| v2/v3 委派取消（2 项） | 子 Worker 会话关闭，父会话后续 query_devices 成功 |
+| v2 on_demand Skill 兼容 | 正文中的私有证据标记可用，无 load_skill 调用 |
+| 历史空版本 | 新会话默认改为 v2，既有空版本会话仍执行 v3 load_skill |
+| v2/v3 工作流 Worker 重启（2 项） | 工作流失败、Worker 关闭、pending 工具清零、唯一中断记录、零外部重放 |
+
+脚本与 JSON 证据：测试主机 `/opt/ongrid/test-deploy-20261017-worker-recovery-8/ongrid-worker-environment8.py`、`worker-environment.json`。脚本会重启 Manager，仅用于授权测试环境；临时会话、工作流、注册和安装包全部清理，默认设置恢复。`.7` 首次现场复现的未关闭 Worker 问题已在 `.8` 修复；存储层回归见 `session_recovery_test.go`，覆盖范围、幂等和事务失败回滚，race 通过。
+
+Kubernetes 按用户要求完成代码验收：前端 51 项，Go 四层 race 通过；真实集群验收仍未执行。聊天 AgentTool 没有开放 background=true，本次后台场景来自工作流 Agent 节点；不把中断收尾表述为自动续跑。

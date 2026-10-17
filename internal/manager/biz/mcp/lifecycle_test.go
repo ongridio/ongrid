@@ -15,7 +15,7 @@ import (
 )
 
 func TestDiscoveryCannotRestoreDisabledOrDeletedServer(t *testing.T) {
-	for _, action := range []string{"disable", "delete", "replace", "refresh"} {
+	for _, action := range []string{"disable", "delete", "replace", "refresh", "background"} {
 		t.Run(action, func(t *testing.T) {
 			entered, release := make(chan struct{}), make(chan struct{})
 			first := true // httptest requests are sequential until the first tools/list blocks.
@@ -72,6 +72,8 @@ func TestDiscoveryCannotRestoreDisabledOrDeletedServer(t *testing.T) {
 				err = uc.Delete(ctx, row.ID)
 			case "refresh":
 				_, err = uc.TestConnection(ctx, row.ID)
+			case "background":
+				_, err = uc.RefreshConnection(ctx, row.ID)
 			default:
 				patch := *row
 				if action == "disable" {
@@ -85,11 +87,19 @@ func TestDiscoveryCannotRestoreDisabledOrDeletedServer(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := <-done; !errors.Is(err, errs.ErrConflict) {
-				t.Fatalf("stale discovery: %v", err)
+			probeErr := <-done
+			if action == "background" {
+				if probeErr != nil {
+					t.Fatalf("background refresh superseded manual verification: %v", probeErr)
+				}
+			} else if !errors.Is(probeErr, errs.ErrConflict) {
+				t.Fatalf("stale discovery: %v", probeErr)
+			}
+			if len(uc.manualProbes) != 0 {
+				t.Fatal("manual discovery ownership leaked")
 			}
 			want := 0
-			if action == "refresh" {
+			if action == "refresh" || action == "background" {
 				want = 1
 			}
 			if published != want {
@@ -143,5 +153,52 @@ func TestApprovalRevisionRejectsChangedEndpointAndCredential(t *testing.T) {
 				t.Fatalf("expected revision conflict before connection, got %v", err)
 			}
 		})
+	}
+}
+
+func TestRegistrationChangesWakeDiscoveryWithoutConnecting(t *testing.T) {
+	ctx := t.Context()
+	repo := newFakeRepo()
+	uc := NewUsecase(repo, nil, nil)
+	// 无可连接的端点：注册保存不能被远端网络阻塞。
+	server, err := uc.Create(ctx, &model.Server{Name: "wake", Transport: TransportHTTP, Endpoint: "http://127.0.0.1:1/mcp", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertWake := func() {
+		t.Helper()
+		select {
+		case <-uc.RegistrationChanges():
+		default:
+			t.Fatal("registration change did not wake discovery")
+		}
+	}
+	assertWake()
+	for _, enabled := range []bool{false, true} {
+		if err := uc.Update(ctx, server.ID, &model.Server{Name: "wake", Transport: TransportHTTP, Endpoint: "http://127.0.0.1:2/mcp", Enabled: enabled}); err != nil {
+			t.Fatal(err)
+		}
+		assertWake()
+	}
+	// 消费者暂停时连续写入仍能完成，唤醒合并后由 supervisor 读取最新状态。
+	for i := 0; i < 3; i++ {
+		if err := uc.Update(ctx, server.ID, &model.Server{Name: "wake", Transport: TransportHTTP, Endpoint: "http://127.0.0.1:2/mcp", Enabled: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := uc.Delete(ctx, server.ID); err != nil {
+		t.Fatal(err)
+	}
+	assertWake()
+	if _, err := uc.Get(ctx, server.ID); !errors.Is(err, errs.ErrNotFound) {
+		t.Fatalf("latest registration state: %v", err)
+	}
+	if err := uc.Delete(ctx, server.ID); !errors.Is(err, errs.ErrNotFound) {
+		t.Fatalf("missing delete: %v", err)
+	}
+	select {
+	case <-uc.RegistrationChanges():
+		t.Fatal("failed mutation woke discovery")
+	default:
 	}
 }

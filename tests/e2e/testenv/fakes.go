@@ -53,10 +53,18 @@ type LLMReply struct {
 	ToolCalls []LLMToolCall
 }
 
+// LLMMessage captures model input so lifecycle tests assert actual tool evidence,
+// rather than trusting the fake model's scripted final answer.
+type LLMMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
 // LLMRequest is the observable subset of an OpenAI completion request used
 // by E2E assertions. ToolNames establishes what schemas the agent exposed to
 // the model on that turn without binding tests to provider wire details.
 type LLMRequest struct {
+	Messages  []LLMMessage
 	Model     string
 	ToolNames []string
 }
@@ -161,13 +169,17 @@ func (f *FakeLLM) Requests() []LLMRequest {
 	defer f.mu.Unlock()
 	out := make([]LLMRequest, len(f.requests))
 	for i, req := range f.requests {
-		out[i] = LLMRequest{Model: req.Model, ToolNames: append([]string(nil), req.ToolNames...)}
+		out[i] = LLMRequest{Model: req.Model, ToolNames: append([]string(nil), req.ToolNames...), Messages: append([]LLMMessage(nil), req.Messages...)}
 	}
 	return out
 }
 
 func (f *FakeLLM) openaiChat(w http.ResponseWriter, r *http.Request) {
 	var req struct {
+		Messages []struct {
+			Role    string          `json:"role"`
+			Content json.RawMessage `json:"content"`
+		} `json:"messages"`
 		Model string `json:"model"`
 		Tools []struct {
 			Function struct {
@@ -188,7 +200,16 @@ func (f *FakeLLM) openaiChat(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	f.calls++
 	f.gotModels = append(f.gotModels, req.Model)
-	f.requests = append(f.requests, LLMRequest{Model: req.Model, ToolNames: toolNames})
+	messages := make([]LLMMessage, 0, len(req.Messages))
+	for _, message := range req.Messages {
+		content := string(message.Content)
+		var plain string
+		if json.Unmarshal(message.Content, &plain) == nil {
+			content = plain
+		}
+		messages = append(messages, LLMMessage{Role: message.Role, Content: content})
+	}
+	f.requests = append(f.requests, LLMRequest{Model: req.Model, ToolNames: toolNames, Messages: messages})
 	reply := LLMReply{Content: f.reply}
 	if len(f.script) > 0 {
 		reply = f.script[0]

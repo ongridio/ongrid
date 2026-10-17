@@ -14,3 +14,5 @@ The test runner reads `ONGRID_ADMIN_EMAIL` and `ONGRID_ADMIN_PASSWORD` from the 
 Read-only navigation and resource views run against the live local environment. Deterministic create/test workflows intercept their API calls in the browser, so they validate UI behavior and request payloads without changing local data or calling external Slack services.
 
 Reports, screenshots, traces, videos, and the temporary login state are written to `output/playwright/`.
+
+Live navigation follows the `/kubernetes` redirect to `/clusters` and uses tab roles for device/topology panels. The Kubernetes detail test requires an enrolled cluster from the real `/api/v1/k8s/clusters` API; an empty list produces an explicit skip. Report that skip separately from passing tests. The device plugin page intentionally excludes top-level `profiles` and `autoapm` rows.
