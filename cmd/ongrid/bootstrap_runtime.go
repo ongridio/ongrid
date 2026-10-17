@@ -79,17 +79,10 @@ func bootstrapRuntime(rootCtx context.Context, cfg *config.Config, log *slog.Log
 				managersvcaiops.WorkerSpawner{Runtime: aiopsRuntime},
 				managersvcaiops.AgentRegistry{Inner: rt.AgentRegistry()},
 			)
-			// SendMessage / TaskStop are control-plane micro-ops; 15s
-			// is plenty. AgentTool is the odd one out: synchronous
-			// dispatch blocks until the worker LLM finishes its full
-			// ReAct loop, which can legitimately take 60-120s on
-			// non-trivial diagnoses. Use a separate deps with a much
-			// larger timeout so AgentTool isn't killed mid-worker —
-			// without this, every dispatch returns "tool timed out
-			// after 15s" and the coordinator loops trying to
-			// re-dispatch.
+			// SendMessage / TaskStop follow caller cancellation without an added
+			// blanket deadline. Synchronous AgentTool dispatch waits for the full
+			// worker loop, so it retains its explicit 180s operation budget.
 			coordDepsFast := aiopstoolsdec.Deps{
-				Timeout:       15 * time.Second,
 				Limiter:       aiopstoolsdec.NewTokenBucketLimiter(0),
 				Registerer:    reg,
 				HumanApproval: humanApprovalBroker,
