@@ -26,7 +26,7 @@ type runtimeModule struct {
 	aiopsHandler        *managerserveraiops.Handler
 }
 
-func bootstrapRuntime(rootCtx context.Context, cfg *config.Config, log *slog.Logger, reg *prometheus.Registry, tracing *tracingModule, models *modelsModule, devices *devicesModule, telemetry *telemetryModule, tunnel *tunnelModule, aiops *aiopsModule) *runtimeModule {
+func bootstrapRuntime(rootCtx context.Context, cfg *config.Config, log *slog.Logger, reg *prometheus.Registry, tracing *tracingModule, models *modelsModule, devices *devicesModule, telemetry *telemetryModule, tunnel *tunnelModule, aiops *aiopsModule, settings *settingsModule) *runtimeModule {
 	// AgentRegistry + SkillRegistry are loaded UNCONDITIONALLY from
 	// ./agents + configured skill roots + the marketplace root. These are
 	// YAML+markdown metadata, so the /v1/agents
@@ -52,7 +52,11 @@ func bootstrapRuntime(rootCtx context.Context, cfg *config.Config, log *slog.Log
 		if rterr != nil {
 			log.Error("aiops runtime unavailable", slog.Any("err", rterr))
 		} else {
-			router, err := managersvcaiops.NewRuntimeRouter(aiops.aiopsRepo, contract.V3, map[contract.Version]managersvcaiops.RuntimeEngine{contract.V3: rt})
+			router, err := managersvcaiops.NewRuntimeRouter(aiops.aiopsRepo, contract.V3, map[contract.Version]managersvcaiops.RuntimeEngine{contract.V3: rt},
+				managersvcaiops.WithRuntimeDefaultProvider(func(ctx context.Context) (contract.Version, error) {
+					version, err := settings.settingSvc.AgentRuntimeVersion(ctx)
+					return contract.Version(version), err
+				}))
 			if err != nil {
 				log.Error("aiops runtime routing unavailable", slog.Any("err", err))
 			} else {

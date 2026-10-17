@@ -73,6 +73,8 @@ const (
 	// tools. Only "true" enables write tools; unset / any other value keeps the
 	// agent read-only (only Class=="read" tools exposed to the LLM).
 	KeyAgentWriteEnabled = "write_enabled"
+	// KeyAgentRuntimeVersion selects the runtime for new sessions only.
+	KeyAgentRuntimeVersion = "runtime_version"
 	// KeyAgentLLMTimeoutSeconds bounds an assistant LLM request and report
 	// generation in seconds. The typed setting accessor owns its default and
 	// range validation so callers cannot accidentally accept an unbounded value.
@@ -246,10 +248,14 @@ const (
 // Empty / unset provider falls through to "searxng" (the zero-config
 // baseline). Tavily / Brave are opt-in via UI.
 const (
-	KeyWebSearchProvider = "provider"       // "searxng" | "tavily" | "brave"
-	KeySearxngURL        = "searxng_url"    // e.g. http://searxng:8080 (default)
-	KeyTavilyAPIKey      = "tavily_api_key" // sensitive — Tavily Search API key
-	KeyBraveAPIKey       = "brave_api_key"  // sensitive — Brave Search API key
+	KeyWebSearchFallbackProvider = "fallback_provider"
+	KeySearxngEngines            = "searxng_engines"
+	KeyWebSearchRequestTimeout   = "request_timeout_seconds"
+	KeyWebSearchTotalTimeout     = "total_timeout_seconds"
+	KeyWebSearchProvider         = "provider"       // "searxng" | "tavily" | "brave"
+	KeySearxngURL                = "searxng_url"    // e.g. http://searxng:8080 (default)
+	KeyTavilyAPIKey              = "tavily_api_key" // sensitive — Tavily Search API key
+	KeyBraveAPIKey               = "brave_api_key"  // sensitive — Brave Search API key
 )
 
 // WebSearch provider names, exported as constants so callers don't pass

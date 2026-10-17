@@ -529,3 +529,29 @@ func TestLLMConfigurationValidateAndSaveUsesOneDraftAndInvalidatesRouter(t *test
 		t.Fatalf("response = %s", rec.Body.String())
 	}
 }
+
+type searchConfigurationSaver struct{ calls int }
+
+func (s *searchConfigurationSaver) ProbeConfiguration(context.Context, bizsetting.WebSearchProbeInput) (string, string, error) {
+	return "searxng", "sample", nil
+}
+func (s *searchConfigurationSaver) ValidateAndSaveConfiguration(_ context.Context, in bizsetting.WebSearchProbeInput) (string, string, error) {
+	s.calls++
+	return in.Provider, "sample", nil
+}
+func TestSearchConfigurationSaveRequiresAdmin(t *testing.T) {
+	saver := &searchConfigurationSaver{}
+	h := NewHandler(nil, nil, nil, nil, saver)
+	for _, role := range []string{"viewer", "admin"} {
+		req := httptest.NewRequest(http.MethodPost, "/v1/integrations/websearch/validate-and-save", strings.NewReader(`{"provider":"searxng","fallback_provider":"brave"}`))
+		req = req.WithContext(tenantctx.With(t.Context(), tenantctx.Tenant{UserID: 7, Role: role}))
+		rec := httptest.NewRecorder()
+		newRouter(h).ServeHTTP(rec, req)
+		if role == "viewer" && (rec.Code != http.StatusForbidden || saver.calls != 0) {
+			t.Fatal("non-admin saved settings")
+		}
+		if role == "admin" && (rec.Code != http.StatusOK || saver.calls != 1) {
+			t.Fatalf("admin save failed: %d %s", rec.Code, rec.Body.String())
+		}
+	}
+}

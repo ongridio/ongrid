@@ -55,6 +55,7 @@ import (
 // ToolSearch sits in the same flat slice as everything else.
 var tierByName = map[string]string{
 	// core (always full schema).
+	"load_skill":              "core",
 	"get_host_load":           "core",
 	"get_host_processes":      "core",
 	"query_promql":            "core",

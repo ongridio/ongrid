@@ -124,6 +124,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Post("/v1/integrations/loki/test", h.testLoki)
 	r.Post("/v1/integrations/tempo/test", h.testTempo)
 	r.Post("/v1/integrations/websearch/test", h.testWebSearch)
+	r.Post("/v1/integrations/websearch/validate-and-save", h.saveWebSearch)
 	r.Post("/v1/integrations/llm/test", h.testLLMConfiguration)
 	r.Post("/v1/integrations/llm/models", h.fetchLLMModels)
 	r.Post("/v1/integrations/llm/validate-and-save", h.validateAndSaveLLMConfiguration)
@@ -579,4 +580,33 @@ func writeErr(w http.ResponseWriter, err error) {
 		status, slug = http.StatusBadGateway, "upstream"
 	}
 	writeJSON(w, status, errorBody{Error: err.Error(), Code: slug})
+}
+
+// @Summary Validate and atomically save search providers (admin only)
+// @Router /api/v1/integrations/websearch/validate-and-save [post]
+// @Accept json
+// @Produce json
+// @Param body body bizsetting.WebSearchProbeInput true "Complete search configuration"
+// @Success 200 {object} map[string]string
+func (h *Handler) saveWebSearch(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	saver, ok := h.webSearch.(interface {
+		ValidateAndSaveConfiguration(context.Context, bizsetting.WebSearchProbeInput) (string, string, error)
+	})
+	if !ok {
+		writeJSON(w, http.StatusServiceUnavailable, errorBody{Error: "search settings not wired", Code: "websearch-disabled"})
+		return
+	}
+	in, ok := decodeDraft[bizsetting.WebSearchProbeInput](w, r)
+	if !ok {
+		return
+	}
+	provider, sample, err := saver.ValidateAndSaveConfiguration(r.Context(), in)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "saved", "provider": provider, "sample": sample})
 }

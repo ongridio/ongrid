@@ -443,10 +443,16 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (result *Reply, ret
 
 	// 5. Resolve active skills + compose the system prompt.
 	policy := Policy{AllowedClasses: []string{"*"}}
-	var activeSkills []*Skill
-	if rt.cfg.SkillRegistry != nil {
-		activeSkills = rt.cfg.SkillRegistry.Resolve(req.UserText, policy)
+	activeSkills, skillLoader, skillCatalog := rt.cfg.SkillRegistry.catalog(req.UserText, policy)
+	if skillLoader != nil {
+		defer skillLoader.close()
+		for _, sk := range activeSkills {
+			if _, err := skillLoader.load(ctx, sk); err != nil {
+				return nil, err
+			}
+		}
 	}
+
 	// 5·HLD-017: attach the active skills' design-time bound credentials to
 	// ctx so cloud_bash queues them for injection at approve time. The
 	// binding was chosen at install time; nothing is decided at run time.
@@ -468,6 +474,9 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (result *Reply, ret
 	// to the global default with a log line — never crash a session.
 	basePrompt := rt.cfg.BasePrompt
 	runtimeToolBag := basetool.FilterWebSearch(ctx, rt.toolBagSnapshot())
+	if skillLoader != nil {
+		runtimeToolBag = append(runtimeToolBag, skillLoader)
+	}
 	sessionToolBag := runtimeToolBag
 	agentReminderForPersona := ""
 	// Coordinator iff session is pinned to "default" or has no
@@ -544,7 +553,11 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (result *Reply, ret
 	if digest := buildToolCapabilityDigest(sessionToolBag); digest != "" {
 		basePrompt = basePrompt + "\n\n" + digest
 	}
-	systemPrompt := ComposeSystemPrompt(basePrompt, activeSkills, nil)
+	if skillLoader != nil && toolBagContains(sessionToolBag, "load_skill") {
+		basePrompt += "\n\n" + skillCatalog
+	}
+	systemPrompt := ComposeSystemPrompt(basePrompt, activeSkills, nil) + skillLoader.activePrompt()
+	span.SetAttributes(attribute.String("ongrid.skills.active", skillLoader.activePrompt()))
 
 	// 6. Build the eino history slice. Convert persisted rows into
 	//    schema.Message so the graph assembler can replay them.
@@ -585,6 +598,7 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (result *Reply, ret
 	handlers := callbacks.NewDefaultHandlers(deps)
 	toolPersistence := callbacks.EnableSynchronousToolPersistence(handlers)
 	graphCfg.ToolPersistence = toolPersistence
+	sessionToolBag = skillLoader.bind(sessionToolBag, rt.cfg.CredentialBinder)
 	g, err := graph.BuildReActGraph(rt.cfg.ChatModel, sessionToolBag, graphCfg)
 	if err != nil {
 		return nil, fmt.Errorf("chatruntime: build graph: %w", err)

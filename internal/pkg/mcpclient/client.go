@@ -22,15 +22,16 @@ import (
 )
 
 // ProtocolVersion is the MCP revision ongrid advertises at initialize.
-const ProtocolVersion = "2024-11-05"
+const ProtocolVersion = "2025-03-26"
 
 // Client is an MCP client bound to one server endpoint.
 type Client struct {
-	endpoint  string
-	headers   map[string]string // static auth headers (credential-injected)
-	http      *http.Client
-	sessionID string // captured from initialize, echoed afterwards
-	nextID    int
+	endpoint    string
+	headers     map[string]string // static auth headers (credential-injected)
+	http        *http.Client
+	sessionID   string // captured from initialize, echoed afterwards
+	nextID      int
+	listChanged bool
 }
 
 // NewHTTP builds a Streamable-HTTP MCP client. headers carries any
@@ -92,27 +93,59 @@ func (c *Client) Initialize(ctx context.Context) error {
 		"capabilities":    map[string]any{},
 		"clientInfo":      map[string]any{"name": "ongrid", "version": "1"},
 	}
-	if _, err := c.call(ctx, "initialize", params); err != nil {
+	raw, err := c.call(ctx, "initialize", params)
+	if err != nil {
 		return err
 	}
+	var result struct {
+		Capabilities struct {
+			Tools struct {
+				ListChanged bool `json:"listChanged"`
+			} `json:"tools"`
+		} `json:"capabilities"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return fmt.Errorf("decode MCP initialize: %w", err)
+	}
+	c.listChanged = result.Capabilities.Tools.ListChanged
 	// initialized is a notification (no id, no response expected).
-	_ = c.notify(ctx, "notifications/initialized", map[string]any{})
-	return nil
+	return c.notify(ctx, "notifications/initialized", map[string]any{})
 }
 
 // ListTools returns the server's advertised tools.
 func (c *Client) ListTools(ctx context.Context) ([]Tool, error) {
-	raw, err := c.call(ctx, "tools/list", map[string]any{})
-	if err != nil {
-		return nil, err
+	var tools []Tool
+	cursor := ""
+	seen := map[string]bool{}
+	for {
+		params := map[string]any{}
+		if cursor != "" {
+			params["cursor"] = cursor
+		}
+		raw, err := c.call(ctx, "tools/list", params)
+		if err != nil {
+			return nil, err
+		}
+		var page struct {
+			Tools []Tool `json:"tools"`
+			Next  string `json:"nextCursor"`
+		}
+		if err := json.Unmarshal(raw, &page); err != nil {
+			return nil, fmt.Errorf("mcp: decode tools/list: %w", err)
+		}
+		tools = append(tools, page.Tools...)
+		if len(tools) > 10000 {
+			return nil, fmt.Errorf("mcp: tool catalog exceeds 10000 entries")
+		}
+		if page.Next == "" {
+			return tools, nil
+		}
+		if seen[page.Next] || len(seen) >= 100 {
+			return nil, fmt.Errorf("mcp: invalid or excessive tools/list pagination")
+		}
+		seen[page.Next] = true
+		cursor = page.Next
 	}
-	var out struct {
-		Tools []Tool `json:"tools"`
-	}
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, fmt.Errorf("mcp: decode tools/list: %w", err)
-	}
-	return out.Tools, nil
 }
 
 // CallTool invokes a tool by name with JSON arguments.

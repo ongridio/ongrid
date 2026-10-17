@@ -24,6 +24,7 @@ type SkillRegistry struct {
 	mu       sync.RWMutex
 	skills   []*Skill
 	warnings []LoadWarning
+	assets   map[string]*skillAssetLease
 }
 
 // NewSkillRegistry returns an empty registry.
@@ -52,6 +53,7 @@ func (r *SkillRegistry) Load(skillsRoot string) error {
 	r.mu.Lock()
 	r.skills = append([]*Skill(nil), res.Skills...)
 	r.warnings = append([]LoadWarning(nil), res.Warnings...)
+	r.revokeRemovedAssets()
 	r.mu.Unlock()
 	return nil
 }
@@ -85,6 +87,7 @@ func (r *SkillRegistry) Reload(skillsRoot string, extras ...string) error {
 	r.mu.Lock()
 	r.skills = newSkills
 	r.warnings = newWarnings
+	r.revokeRemovedAssets()
 	r.mu.Unlock()
 	return nil
 }
@@ -95,7 +98,12 @@ func (r *SkillRegistry) All() []*Skill {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := make([]*Skill, len(r.skills))
-	copy(out, r.skills)
+	for i, sk := range r.skills {
+		clone := *sk
+		clone.Tools = append([]ToolDecl(nil), sk.Tools...)
+		clone.Activation.Keywords = append([]string(nil), sk.Activation.Keywords...)
+		out[i] = &clone
+	}
 	return out
 }
 
@@ -181,6 +189,8 @@ func activationMatches(a Activation, queryLower string) bool {
 	switch mode {
 	case "", "always":
 		return true
+	case "on_demand":
+		return false
 	case "keyword":
 		for _, kw := range a.Keywords {
 			kw = strings.ToLower(strings.TrimSpace(kw))

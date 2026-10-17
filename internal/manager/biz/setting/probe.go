@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -144,29 +145,33 @@ func (p *TempoReadinessProbe) Probe(ctx context.Context) error {
 // here rather than going through the skill registry — the registry
 // path adds the agent-loop audit pipeline + JSON envelope that we
 // don't want for an admin probe. The provider URLs / keys are read
-// from the same WebSearchResolver the skill uses, so a successful
-// probe means the skill itself will work.
+// from the same WebSearchResolver the skill uses. A successful probe
+// confirms usable results at that moment, not future availability.
 type WebSearchProbe struct {
 	resolver *WebSearchResolver
 	timeout  time.Duration
 }
 
 type WebSearchProbeInput struct {
-	Provider     string `json:"provider"`
-	SearxngURL   string `json:"searxng_url"`
-	TavilyAPIKey string `json:"tavily_api_key"`
-	BraveAPIKey  string `json:"brave_api_key"`
+	Provider              string `json:"provider"`
+	SearxngURL            string `json:"searxng_url"`
+	TavilyAPIKey          string `json:"tavily_api_key"`
+	BraveAPIKey           string `json:"brave_api_key"`
+	FallbackProvider      string `json:"fallback_provider"`
+	SearxngEngines        string `json:"searxng_engines"`
+	RequestTimeoutSeconds string `json:"request_timeout_seconds"`
+	TotalTimeoutSeconds   string `json:"total_timeout_seconds"`
 }
 
 // NewWebSearchProbe builds the probe. resolver must be non-nil; the
 // probe Probe() returns an error otherwise.
 func NewWebSearchProbe(r *WebSearchResolver) *WebSearchProbe {
-	return &WebSearchProbe{resolver: r, timeout: 8 * time.Second}
+	return &WebSearchProbe{resolver: r, timeout: 20 * time.Second}
 }
 
 // Probe runs a 1-result query against the selected provider. Returns
 // (provider, sample-title, nil) on success; sample is the first
-// result's title if any (empty when the provider returned zero hits).
+// result's title; zero usable results is a failed health probe.
 func (p *WebSearchProbe) Probe(ctx context.Context) (string, string, error) {
 	if p == nil || p.resolver == nil {
 		return "", "", fmt.Errorf("web_search probe not wired")
@@ -174,6 +179,7 @@ func (p *WebSearchProbe) Probe(ctx context.Context) (string, string, error) {
 	return p.ProbeConfiguration(ctx, WebSearchProbeInput{
 		Provider: p.resolver.Provider(ctx), SearxngURL: p.resolver.SearxngURL(ctx),
 		TavilyAPIKey: p.resolver.TavilyAPIKey(ctx), BraveAPIKey: p.resolver.BraveAPIKey(ctx),
+		FallbackProvider: p.resolver.FallbackProvider(ctx), SearxngEngines: p.resolver.SearxngEngines(ctx),
 	})
 }
 
@@ -181,22 +187,53 @@ func (p *WebSearchProbe) ProbeConfiguration(ctx context.Context, in WebSearchPro
 	if p == nil {
 		return "", "", fmt.Errorf("web_search probe not wired")
 	}
-	provider := strings.ToLower(strings.TrimSpace(in.Provider))
-	cctx, cancel := context.WithTimeout(ctx, p.timeout)
-	defer cancel()
-	switch provider {
-	case model.ProviderSearxng:
-		return p.probeSearxng(cctx, in.SearxngURL)
-	case model.ProviderTavily:
-		return p.probeTavily(cctx, in.TavilyAPIKey)
-	case model.ProviderBrave:
-		return p.probeBrave(cctx, in.BraveAPIKey)
-	default:
-		return "", "", fmt.Errorf("unsupported web search provider %q", in.Provider)
+	for key, value := range map[string]string{
+		model.KeyWebSearchProvider: in.Provider, model.KeyWebSearchFallbackProvider: in.FallbackProvider,
+		model.KeySearxngEngines: in.SearxngEngines, model.KeyWebSearchRequestTimeout: in.RequestTimeoutSeconds, model.KeyWebSearchTotalTimeout: in.TotalTimeoutSeconds,
+	} {
+		if err := validateWebSearchSetting(key, value); err != nil {
+			return "", "", err
+		}
 	}
+	total := 45 * time.Second
+	if n, err := strconv.Atoi(in.TotalTimeoutSeconds); err == nil {
+		total = time.Duration(n) * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, total)
+	defer cancel()
+	per := p.timeout
+	if n, err := strconv.Atoi(in.RequestTimeoutSeconds); err == nil {
+		per = time.Duration(n) * time.Second
+	}
+	provider := strings.ToLower(strings.TrimSpace(in.Provider))
+	probe := func(name string) (string, string, error) {
+		cctx, stop := context.WithTimeout(ctx, per)
+		defer stop()
+		switch name {
+		case model.ProviderSearxng:
+			return p.probeSearxng(cctx, in.SearxngURL, in.SearxngEngines)
+		case model.ProviderTavily:
+			return p.probeTavily(cctx, in.TavilyAPIKey)
+		case model.ProviderBrave:
+			return p.probeBrave(cctx, in.BraveAPIKey)
+		default:
+			return "", "", fmt.Errorf("unsupported web search provider %q", name)
+		}
+	}
+	name, sample, err := probe(provider)
+	if err != nil {
+		return name, sample, err
+	}
+	if in.FallbackProvider != "" && in.FallbackProvider != provider {
+		_, _, err = probe(in.FallbackProvider)
+		if err != nil {
+			return name, "", fmt.Errorf("backup %s: %w", in.FallbackProvider, err)
+		}
+	}
+	return name, sample, nil
 }
 
-func (p *WebSearchProbe) probeSearxng(ctx context.Context, rawURL string) (string, string, error) {
+func (p *WebSearchProbe) probeSearxng(ctx context.Context, rawURL string, engines ...string) (string, string, error) {
 	base := strings.TrimRight(strings.TrimSpace(rawURL), "/")
 	if base == "" {
 		base = model.DefaultSearxngURL
@@ -205,10 +242,13 @@ func (p *WebSearchProbe) probeSearxng(ctx context.Context, rawURL string) (strin
 		return model.ProviderSearxng, "", fmt.Errorf("searxng url: %w", err)
 	}
 	q := url.Values{}
-	q.Set("q", "ongrid web search probe")
+	q.Set("q", "Kubernetes")
 	q.Set("format", "json")
 	q.Set("safesearch", "1")
 	q.Set("pageno", "1")
+	if len(engines) > 0 && engines[0] != "" {
+		q.Set("engines", engines[0])
+	}
 	full := base + "/search?" + q.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, full, nil)
@@ -217,18 +257,19 @@ func (p *WebSearchProbe) probeSearxng(ctx context.Context, rawURL string) (strin
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "ongrid-web-search-probe/1.0")
-	resp, err := newHTTPClient(p.timeout, false).Do(req)
+	resp, err := newHTTPClient(0, false).Do(req)
 	if err != nil {
 		return model.ProviderSearxng, "", fmt.Errorf("dial %s: %w", base, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 200))
-		return model.ProviderSearxng, "", fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return model.ProviderSearxng, "", fmt.Errorf("search provider returned HTTP %d", resp.StatusCode)
 	}
 	var out struct {
-		Results []struct {
+		UnresponsiveEngines [][]string `json:"unresponsive_engines"`
+		Results             []struct {
 			Title string `json:"title"`
+			URL   string `json:"url"`
 		} `json:"results"`
 	}
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -236,8 +277,14 @@ func (p *WebSearchProbe) probeSearxng(ctx context.Context, rawURL string) (strin
 		return model.ProviderSearxng, "", fmt.Errorf("decode: %w", err)
 	}
 	sample := ""
-	if len(out.Results) > 0 {
-		sample = out.Results[0].Title
+	for _, result := range out.Results {
+		if validProbeResult(result.Title, result.URL) {
+			sample = result.Title
+			break
+		}
+	}
+	if sample == "" {
+		return "", "", fmt.Errorf("search probe returned no usable links; engine failures: %.300s", fmt.Sprint(out.UnresponsiveEngines))
 	}
 	return model.ProviderSearxng, sample, nil
 }
@@ -249,7 +296,7 @@ func (p *WebSearchProbe) probeTavily(ctx context.Context, rawAPIKey string) (str
 	}
 	body, _ := json.Marshal(map[string]any{
 		"api_key":     apiKey,
-		"query":       "ongrid web search probe",
+		"query":       "Kubernetes",
 		"max_results": 1,
 	})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
@@ -259,18 +306,18 @@ func (p *WebSearchProbe) probeTavily(ctx context.Context, rawAPIKey string) (str
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	resp, err := newHTTPClient(p.timeout, false).Do(req)
+	resp, err := newHTTPClient(0, false).Do(req)
 	if err != nil {
 		return model.ProviderTavily, "", err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		buf, _ := io.ReadAll(io.LimitReader(resp.Body, 200))
-		return model.ProviderTavily, "", fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(buf)))
+		return model.ProviderTavily, "", fmt.Errorf("search provider returned HTTP %d", resp.StatusCode)
 	}
 	var out struct {
 		Results []struct {
 			Title string `json:"title"`
+			URL   string `json:"url"`
 		} `json:"results"`
 	}
 	buf, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -278,8 +325,14 @@ func (p *WebSearchProbe) probeTavily(ctx context.Context, rawAPIKey string) (str
 		return model.ProviderTavily, "", err
 	}
 	sample := ""
-	if len(out.Results) > 0 {
-		sample = out.Results[0].Title
+	for _, result := range out.Results {
+		if validProbeResult(result.Title, result.URL) {
+			sample = result.Title
+			break
+		}
+	}
+	if sample == "" {
+		return "", "", fmt.Errorf("search probe returned no usable links; check engine failures, CAPTCHA or network access")
 	}
 	return model.ProviderTavily, sample, nil
 }
@@ -290,7 +343,7 @@ func (p *WebSearchProbe) probeBrave(ctx context.Context, rawAPIKey string) (stri
 		return model.ProviderBrave, "", fmt.Errorf("brave api key not configured")
 	}
 	q := url.Values{}
-	q.Set("q", "ongrid web search probe")
+	q.Set("q", "Kubernetes")
 	q.Set("count", "1")
 	full := "https://api.search.brave.com/res/v1/web/search?" + q.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, full, nil)
@@ -299,19 +352,19 @@ func (p *WebSearchProbe) probeBrave(ctx context.Context, rawAPIKey string) (stri
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("X-Subscription-Token", apiKey)
-	resp, err := newHTTPClient(p.timeout, false).Do(req)
+	resp, err := newHTTPClient(0, false).Do(req)
 	if err != nil {
 		return model.ProviderBrave, "", err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		buf, _ := io.ReadAll(io.LimitReader(resp.Body, 200))
-		return model.ProviderBrave, "", fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(buf)))
+		return model.ProviderBrave, "", fmt.Errorf("search provider returned HTTP %d", resp.StatusCode)
 	}
 	var out struct {
 		Web struct {
 			Results []struct {
 				Title string `json:"title"`
+				URL   string `json:"url"`
 			} `json:"results"`
 		} `json:"web"`
 	}
@@ -320,8 +373,14 @@ func (p *WebSearchProbe) probeBrave(ctx context.Context, rawAPIKey string) (stri
 		return model.ProviderBrave, "", err
 	}
 	sample := ""
-	if len(out.Web.Results) > 0 {
-		sample = out.Web.Results[0].Title
+	for _, result := range out.Web.Results {
+		if validProbeResult(result.Title, result.URL) {
+			sample = result.Title
+			break
+		}
+	}
+	if sample == "" {
+		return model.ProviderBrave, "", fmt.Errorf("search probe returned no usable links")
 	}
 	return model.ProviderBrave, sample, nil
 }
@@ -393,4 +452,35 @@ func probeOTLPHTTPTraceEndpoint(ctx context.Context, fullURL, user, pass string,
 	}
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 200))
 	return fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+}
+
+func validProbeResult(title, rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	return err == nil && strings.TrimSpace(title) != "" && u.Host != "" && (u.Scheme == "http" || u.Scheme == "https")
+}
+
+// ValidateAndSaveConfiguration prevents a partially saved provider/credential
+// tuple from rerouting live queries. Failed probes leave all settings intact.
+func (p *WebSearchProbe) ValidateAndSaveConfiguration(ctx context.Context, in WebSearchProbeInput) (string, string, error) {
+	if p == nil || p.resolver == nil || p.resolver.svc == nil {
+		return "", "", fmt.Errorf("search settings store not wired")
+	}
+	provider, sample, err := p.ProbeConfiguration(ctx, in)
+	if err != nil {
+		return provider, sample, err
+	}
+	rows := []model.Setting{
+		{Category: model.CategoryWebSearch, Key: model.KeyWebSearchProvider, Value: in.Provider},
+		{Category: model.CategoryWebSearch, Key: model.KeyWebSearchFallbackProvider, Value: in.FallbackProvider},
+		{Category: model.CategoryWebSearch, Key: model.KeySearxngURL, Value: in.SearxngURL},
+		{Category: model.CategoryWebSearch, Key: model.KeySearxngEngines, Value: in.SearxngEngines},
+		{Category: model.CategoryWebSearch, Key: model.KeyWebSearchRequestTimeout, Value: in.RequestTimeoutSeconds},
+		{Category: model.CategoryWebSearch, Key: model.KeyWebSearchTotalTimeout, Value: in.TotalTimeoutSeconds},
+		{Category: model.CategoryWebSearch, Key: model.KeyTavilyAPIKey, Value: in.TavilyAPIKey, Sensitive: true},
+		{Category: model.CategoryWebSearch, Key: model.KeyBraveAPIKey, Value: in.BraveAPIKey, Sensitive: true},
+	}
+	if err := p.resolver.svc.SetBatch(ctx, rows); err != nil {
+		return provider, "", fmt.Errorf("save search configuration: %w", err)
+	}
+	return provider, sample, nil
 }

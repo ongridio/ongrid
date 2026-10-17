@@ -290,3 +290,46 @@ func TestCreateSession_PinsValidatedRuntimeDefault(t *testing.T) {
 		t.Fatalf("unavailable version=%v", err)
 	}
 }
+
+func TestRuntimeDefaultSettingDoesNotMoveExistingSessions(t *testing.T) {
+	repo := &memSessions{sessions: map[string]*model.Session{
+		"legacy": {ID: "legacy"}, "pinned": {ID: "pinned", RuntimeVersion: "v3"},
+	}}
+	providerCalls := 0
+	selected := contract.V2
+	providerErr := error(nil)
+	engine := &routerEngine{handle: func(ctx context.Context, _ *contract.Request) (*contract.Reply, error) {
+		if contract.VersionFromContext(ctx) != contract.V3 {
+			t.Fatal("existing session moved")
+		}
+		return &contract.Reply{}, nil
+	}}
+	router, err := NewRuntimeRouter(repo, contract.V3, map[contract.Version]RuntimeEngine{contract.V3: engine},
+		WithRuntimeDefaultProvider(func(context.Context) (contract.Version, error) { providerCalls++; return selected, providerErr }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.SessionVersion(t.Context()); !errors.Is(err, errs.ErrNotWiredYet) {
+		t.Fatalf("unavailable selection: %v", err)
+	}
+	providerErr = errors.New("settings unavailable")
+	if _, err := router.SessionVersion(t.Context()); !errors.Is(err, providerErr) {
+		t.Fatalf("lost settings error: %v", err)
+	}
+	before := providerCalls
+	for _, id := range []string{"legacy", "pinned"} {
+		if _, err := router.Handle(t.Context(), &contract.Request{SessionID: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if providerCalls != before {
+		t.Fatal("existing sessions consulted new-session policy")
+	}
+	providerErr = nil
+	for _, value := range []contract.Version{"", contract.V3} {
+		selected = value
+		if got, err := router.SessionVersion(t.Context()); err != nil || got != contract.V3 {
+			t.Fatalf("selection %q: %q %v", value, got, err)
+		}
+	}
+}

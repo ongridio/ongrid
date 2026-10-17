@@ -85,7 +85,7 @@ func run() (runErr error) {
 	}
 	aiops := bootstrapAIOps(cfg, log, notifyRouter, storage, settings, models, devices, alerts, telemetry, tunnel)
 	knowledge := bootstrapKnowledge(rootCtx, cfg, log, storage, settings, telemetry, aiops)
-	runtime := bootstrapRuntime(rootCtx, cfg, log, reg, tracing, models, devices, telemetry, tunnel, aiops)
+	runtime := bootstrapRuntime(rootCtx, cfg, log, reg, tracing, models, devices, telemetry, tunnel, aiops, settings)
 	imbridge := bootstrapIMBridge(rootCtx, log, storage, models, devices, alerts, telemetry, aiops, runtime)
 	automation := bootstrapAutomation(rootCtx, cfg, log, reg, notifyRouter, &cleanup, storage, settings, models, alerts, telemetry, aiops, runtime)
 	system := bootstrapSystem(cfg, storage, iam, settings, models, telemetry, aiops, knowledge, automation)

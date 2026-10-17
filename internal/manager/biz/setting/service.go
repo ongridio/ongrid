@@ -167,6 +167,8 @@ func validateSetting(category, key, value string) error {
 			return fmt.Errorf("%w: auto_apm_enabled must be true or false", errs.ErrInvalid)
 		}
 		return nil
+	case model.CategoryWebSearch:
+		return validateWebSearchSetting(key, value)
 	case model.CategoryAgent:
 		return validateAgentSetting(key, value)
 	case model.CategoryObservability:

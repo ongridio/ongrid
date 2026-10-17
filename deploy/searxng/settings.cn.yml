@@ -1,0 +1,13 @@
+# Optional profile for environments where the global engines are unreachable.
+# Overlay these keys onto settings.yml; retain server/security configuration.
+# Availability must be verified from the actual deployment before use.
+use_default_settings:
+  engines:
+    keep_only:
+      - 360search
+      - sogou
+engines:
+  - name: 360search
+    disabled: false
+  - name: sogou
+    disabled: false

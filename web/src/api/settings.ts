@@ -142,6 +142,10 @@ export type WebSearchProbeResult = {
 };
 
 export type WebSearchConfigurationProbeInput = {
+  fallback_provider?: string;
+  searxng_engines?: string;
+  request_timeout_seconds?: string;
+  total_timeout_seconds?: string;
   provider: string;
   searxng_url: string;
   tavily_api_key: string;
@@ -202,4 +206,8 @@ export function saveLLMConfiguration(
   input: LLMConfigurationProbeInput,
 ): Promise<LLMConfigurationProbeResult> {
   return request<LLMConfigurationProbeResult>('POST', '/integrations/llm/validate-and-save', input);
+}
+
+export function saveWebSearchConfiguration(input: WebSearchConfigurationProbeInput): Promise<WebSearchProbeResult> {
+  return request<WebSearchProbeResult>('POST', '/integrations/websearch/validate-and-save', input);
 }

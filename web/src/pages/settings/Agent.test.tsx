@@ -127,3 +127,40 @@ describe('SettingsAgent output language', () => {
     await waitFor(() => expect(saved).toEqual({ value: 'zh', sensitive: false }));
   });
 });
+
+describe('SettingsAgent runtime selection', () => {
+  it('persists a pinned runtime and can return to release defaults', async () => {
+    const saved: unknown[] = [];
+    server.use(
+      http.get('/api/v1/system-settings', () => HttpResponse.json({ items: [], total: 0 })),
+      http.put('/api/v1/system-settings/agent/runtime_version', async ({ request }) => {
+        saved.push(await request.json());
+        return HttpResponse.json({});
+      }),
+    );
+    const user = userEvent.setup();
+    render(<MemoryRouter><SettingsAgent /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Runtime version' })).toBeEnabled());
+    await selectOption(screen.getByRole('combobox', { name: 'Runtime version' }), 'v3 · Pinned version');
+    await user.click(screen.getByRole('button', { name: 'Save runtime' }));
+    await screen.findByText('Saved. Applies to new conversations.');
+    expect(saved).toEqual([{ value: 'v3', sensitive: false }]);
+    await selectOption(screen.getByRole('combobox', { name: 'Runtime version' }), 'Follow release default (currently v3)');
+    await user.click(screen.getByRole('button', { name: 'Save runtime' }));
+    await waitFor(() => expect(saved).toEqual([{ value: 'v3', sensitive: false }, { value: 'release', sensitive: false }]));
+  });
+
+  it('retains the selection and shows an error when saving fails', async () => {
+    server.use(
+      http.get('/api/v1/system-settings', () => HttpResponse.json({ items: [{ key: 'runtime_version', value: 'v3' }], total: 1 })),
+      http.put('/api/v1/system-settings/agent/runtime_version', () => HttpResponse.json({ error: 'Runtime save failed' }, { status: 500 })),
+    );
+    const user = userEvent.setup();
+    render(<MemoryRouter><SettingsAgent /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Runtime version' })).toHaveTextContent('v3 · Pinned version'));
+    await selectOption(screen.getByRole('combobox', { name: 'Runtime version' }), 'Follow release default (currently v3)');
+    await user.click(screen.getByRole('button', { name: 'Save runtime' }));
+    await screen.findByText('Runtime save failed');
+    expect(screen.getByRole('button', { name: 'Save runtime' })).toBeEnabled();
+  });
+});

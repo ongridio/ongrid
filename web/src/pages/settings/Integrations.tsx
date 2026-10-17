@@ -1,4 +1,4 @@
-import { Label, Input, Radio } from '@/components/ui';
+import { Label, Input, Radio, Select } from '@/components/ui';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -39,6 +39,7 @@ import {
   testLokiConnection,
   testTempoConnection,
   testWebSearchConnection,
+  saveWebSearchConfiguration,
   type SystemSetting,
   type GrafanaSyncResult,
 } from '@/api/settings';
@@ -1948,6 +1949,10 @@ function PluginCountLine({ label, count }: { label: string; count: number | null
 // a 1-result probe to the unsaved draft before the save button is enabled.
 
 type WebSearchForm = {
+  fallback_provider: string;
+  searxng_engines: string;
+  request_timeout_seconds: string;
+  total_timeout_seconds: string;
   provider: string; // "searxng" | "tavily" | "brave"
   searxng_url: string;
   tavily_api_key: string;
@@ -1955,6 +1960,7 @@ type WebSearchForm = {
 };
 
 const WEBSEARCH_KEYS: (keyof WebSearchForm)[] = [
+  'fallback_provider', 'searxng_engines', 'request_timeout_seconds', 'total_timeout_seconds',
   'provider',
   'searxng_url',
   'tavily_api_key',
@@ -1965,6 +1971,10 @@ const WEBSEARCH_SENSITIVE: Set<keyof WebSearchForm> = new Set([
   'brave_api_key',
 ]);
 const emptyWebSearchForm: WebSearchForm = {
+  fallback_provider: '',
+  searxng_engines: '',
+  request_timeout_seconds: '20',
+  total_timeout_seconds: '45',
   provider: 'searxng',
   searxng_url: 'http://searxng:8080',
   tavily_api_key: '',
@@ -2036,6 +2046,7 @@ function WebSearchCard() {
 
   const dirty = WEBSEARCH_KEYS.some((k) => draft[k] !== server[k]);
   const update = (k: keyof WebSearchForm, v: string) => {
+    if (saving) return;
     probeRequest.current += 1;
     setProbe({ kind: 'idle' });
     setSavedOk(false);
@@ -2047,10 +2058,7 @@ function WebSearchCard() {
     setSaving(true);
     setErr(null);
     try {
-      for (const k of WEBSEARCH_KEYS) {
-        if (draft[k] === server[k]) continue;
-        await setSetting('websearch', k, draft[k], WEBSEARCH_SENSITIVE.has(k));
-      }
+      await saveWebSearchConfiguration(draft);
       await refresh();
       setSavedOk(true);
     } catch (e) {
@@ -2066,6 +2074,10 @@ function WebSearchCard() {
     try {
       const r = await testWebSearchConnection(draft);
       if (requestID !== probeRequest.current) return;
+      if (!r.sample) {
+        setProbe({ kind: 'error', msg: tr('测试未返回有效搜索结果，不能确认来源可用。', 'The probe returned no usable results; availability is unconfirmed.') });
+        return;
+      }
       setProbe({ kind: 'ok', provider: r.provider, sample: r.sample });
     } catch (e) {
       if (requestID !== probeRequest.current) return;
@@ -2113,15 +2125,29 @@ function WebSearchCard() {
         </div>
       ) : (
         <div className="space-y-4">
+          <div className="space-y-3">
+            <Label htmlFor="websearch-fallback">{tr('备用搜索来源', 'Backup search provider')}</Label>
+            <Select id="websearch-fallback" value={draft.fallback_provider} onValueChange={(v) => update('fallback_provider', v)} className="w-full">
+              <option value="">{tr('不启用', 'Disabled')}</option>
+              <option value="searxng">SearXNG</option>
+              <option value="tavily">Tavily</option>
+              <option value="brave">Brave</option>
+            </Select>
+            <p className="text-xs text-zinc-500">{tr('主来源失败或返回空结果时，最多向所选备用来源查询一次。查询内容会发送给该来源；API 服务需要先配置密钥。测试会分别验证主备来源。', 'If the primary fails or returns no results, query the selected backup at most once. Queries are sent to this provider; API providers require a configured key. Testing verifies both providers.')}</p>
+            <PromField label={tr('单来源超时（秒）', 'Per-provider timeout (seconds)')} hint={tr('2–60 秒，默认 20 秒', '2–60 seconds; default 20')} value={draft.request_timeout_seconds} onChange={(v) => update('request_timeout_seconds', v)} />
+            <PromField label={tr('搜索总预算（秒）', 'Total search budget (seconds)')} hint={tr('5–120 秒，默认 45 秒；总预算优先', '5–120 seconds; default 45; caps all attempts')} value={draft.total_timeout_seconds} onChange={(v) => update('total_timeout_seconds', v)} />
+            <PromField label={tr('SearXNG 引擎', 'SearXNG engines')} hint={tr('留空使用服务端配置；可填 360search,sogou。不同部署的可用引擎不同，保存前请实际测试。', 'Leave empty for server defaults; for example 360search,sogou. Availability varies by deployment; test before saving.')} value={draft.searxng_engines} onChange={(v) => update('searxng_engines', v)} />
+          </div>
           <ProviderBlock
             id="searxng"
             label="SearXNG"
             badge={tr('自托管，零成本默认', 'Self-hosted, zero-cost default')}
             checked={draft.provider === 'searxng'}
+            expanded={draft.fallback_provider === 'searxng'}
             onSelect={() => update('provider', 'searxng')}
             description={tr(
-              'docker-compose 里跟 Loki/Tempo/Prom 一起跑的元搜索聚合器，把查询发到 Bing/DuckDuckGo/Brave/百度/搜狗 等，再合并结果。无 API key、无额度限制。',
-              'Meta-search aggregator that runs alongside Loki/Tempo/Prom in docker-compose; fans a query out to Bing/DuckDuckGo/Brave/Baidu/Sogou and merges the results. No API key, no quota.',
+              '自托管的元搜索服务，无需 API key。引擎可用性受网络、验证码和上游网页变化影响，请通过实际搜索验证。',
+              'Self-hosted meta-search without API keys. Engine availability depends on network access, CAPTCHA and upstream changes. Test actual search results before using it.',
             )}
           >
             <PromField
@@ -2138,6 +2164,7 @@ function WebSearchCard() {
             label="Tavily"
             badge={tr('需 API key · 1000 次/月免费', 'API key required · 1000 calls/month free')}
             checked={draft.provider === 'tavily'}
+            expanded={draft.fallback_provider === 'tavily'}
             onSelect={() => update('provider', 'tavily')}
             description={
               <>
@@ -2173,6 +2200,7 @@ function WebSearchCard() {
             label="Brave Search"
             badge={tr('需 API key · 2000 次/月免费', 'API key required · 2000 calls/month free')}
             checked={draft.provider === 'brave'}
+            expanded={draft.fallback_provider === 'brave'}
             onSelect={() => update('provider', 'brave')}
             description={
               <>
@@ -2208,7 +2236,7 @@ function WebSearchCard() {
       <div className="mt-5 flex flex-wrap items-center gap-3">
         <Button
           onClick={probeWebSearch}
-          disabled={probe.kind === 'testing'}
+          disabled={saving || probe.kind === 'testing'}
           variant="ghost"
         >
           {probe.kind === 'testing' ? <Loader2 size={14} className="animate-spin" /> : <PlugZap size={14} />}
@@ -2236,6 +2264,7 @@ function ProviderBlock({
   label,
   badge,
   checked,
+  expanded = false,
   onSelect,
   description,
   children,
@@ -2244,6 +2273,7 @@ function ProviderBlock({
   label: string;
   badge: string;
   checked: boolean;
+  expanded?: boolean;
   onSelect: () => void;
   description: ReactNode;
   children: ReactNode;
@@ -2274,7 +2304,7 @@ function ProviderBlock({
           <p className="mt-1 text-[11px] text-zinc-500">{description}</p>
         </div>
       </Label>
-      {checked && <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">{children}</div>}
+      {(checked || expanded) && <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">{children}</div>}
     </div>
   );
 }
@@ -2304,7 +2334,7 @@ function WebSearchProbeLine({
               {tr('· 示例结果：', '· Sample result: ')}<span className="text-zinc-300">{probe.sample}</span>
             </>
           ) : (
-            tr(' · 上游返回 0 结果（key 工作正常，但探针 query 没匹配到）', ' · Upstream returned 0 results (key works, but probe query found no matches)')
+            tr(' · 未验证有效结果', ' · Usable results not verified')
           )}
         </p>
       );

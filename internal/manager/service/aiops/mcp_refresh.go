@@ -63,20 +63,12 @@ func (r *MCPToolRefresher) LoadEnabled(ctx context.Context, mcpUC *managerbizmcp
 	if servers, err := mcpUC.ListEnabled(ctx); err == nil {
 		for _, srv := range servers {
 			connCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-			cli, berr := mcpUC.BuildClient(connCtx, srv)
-			if berr == nil {
-				berr = cli.Initialize(connCtx)
-			}
-			var mtools []mcpclient.Tool
-			if berr == nil {
-				mtools, berr = cli.ListTools(connCtx)
-			}
+			mtools, berr := mcpUC.TestConnection(connCtx, srv.ID)
 			cancel()
 			if berr != nil {
 				r.log.Warn("mcp: connect failed, skipping server", slog.String("server", srv.Name), slog.Any("err", berr))
 				continue
 			}
-			r.Refresh(ctx, srv.Name, srv, mtools)
 			r.log.Info("mcp: server connected", slog.String("server", srv.Name), slog.Int("tools", len(mtools)), slog.Bool("trusted", srv.Trusted))
 		}
 	} else {

@@ -2,6 +2,7 @@ package setting
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -68,10 +69,35 @@ func (s *Service) AgentOutputLocale(ctx context.Context) (string, bool, error) {
 	return v, true, nil
 }
 
+// AgentRuntimeVersion reads new-session policy without a cache: selection is
+// infrequent and must observe the latest persisted administrator choice.
+// Empty means follow the release default. Errors must not silently reroute work.
+func (s *Service) AgentRuntimeVersion(ctx context.Context) (string, error) {
+	row, err := s.repo.Get(ctx, model.CategoryAgent, model.KeyAgentRuntimeVersion)
+	if errors.Is(err, errs.ErrNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read agent runtime version: %w", err)
+	}
+	if err := validateAgentSetting(model.KeyAgentRuntimeVersion, row.Value); err != nil {
+		return "", err
+	}
+	if row.Value == "release" {
+		return "", nil
+	}
+	return row.Value, nil
+}
+
 // validateAgentSetting validates typed settings before persistence. Other
 // agent keys remain backwards-compatible with the generic setting store.
 func validateAgentSetting(key, value string) error {
 	switch key {
+	case model.KeyAgentRuntimeVersion:
+		if value != "release" && value != "v3" {
+			return fmt.Errorf("%w: runtime_version must be release or v3; v1/v2 are not available", errs.ErrInvalid)
+		}
+		return nil
 	case model.KeyAgentOutputLocale:
 		locale := strings.ToLower(strings.TrimSpace(value))
 		if locale != "" && locale != "zh" && locale != "en" {

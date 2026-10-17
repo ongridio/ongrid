@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/contract"
 	aiopstools "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	managerbizapproval "github.com/ongridio/ongrid/internal/manager/biz/approval"
 	managerbizdevice "github.com/ongridio/ongrid/internal/manager/biz/device"
 	managerbizedge "github.com/ongridio/ongrid/internal/manager/biz/edge"
@@ -22,12 +24,18 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/workspace"
 )
 
+// SkillAssetLeaser validates runtime-owned package snapshots at execution time.
+type SkillAssetLeaser interface {
+	AcquireSkillAssets(context.Context, []basetool.SkillAssetRef) (func(), error)
+}
+
 // ApprovalExecutors supplies the existing execution paths for approved actions.
 type ApprovalExecutors struct {
 	Secrets     *managerbizsecret.Usecase
 	Runner      runner.Runner
 	Workspace   *workspace.Manager
 	SkillsRoot  string
+	SkillAssets SkillAssetLeaser
 	Frontier    *managersvcfb.Client
 	Edges       *managerbizedge.Usecase
 	Devices     *managerbizdevice.Usecase
@@ -59,6 +67,35 @@ func (e ApprovalExecutors) Register(approvalUC *managerbizapproval.Usecase) {
 		if err := json.Unmarshal([]byte(payloadJSON), &p); err != nil {
 			return "", err
 		}
+		if len(p.SkillAssets) > 0 {
+			if e.SkillAssets == nil {
+				return "", fmt.Errorf("skill snapshot runtime unavailable; submit a new request")
+			}
+			release, err := e.SkillAssets.AcquireSkillAssets(ctx, p.SkillAssets)
+			if err != nil {
+				return "", err
+			}
+			defer release()
+		}
+		if len(p.SkillCredentials) > 0 && len(p.SkillAssets) > 0 {
+			if e.Marketplace == nil {
+				return "", fmt.Errorf("skill credential bindings unavailable")
+			}
+			skillNames := make([]string, 0, len(p.SkillAssets))
+			for _, ref := range p.SkillAssets {
+				skillNames = append(skillNames, ref.Name)
+			}
+			current := e.Marketplace.BoundCredentialNamesForSkills(ctx, skillNames)
+			allowed := make(map[string]bool, len(current))
+			for _, name := range current {
+				allowed[name] = true
+			}
+			for _, name := range p.SkillCredentials {
+				if !allowed[name] {
+					return "", fmt.Errorf("skill credential binding was revoked; submit a new request")
+				}
+			}
+		}
 		names := append([]string(nil), p.Credentials...)
 		if p.Credential != "" { // legacy single-credential approvals
 			names = append(names, p.Credential)
@@ -87,6 +124,22 @@ func (e ApprovalExecutors) Register(approvalUC *managerbizapproval.Usecase) {
 		// bin dir go on PATH. PIP_BREAK_SYSTEM_PACKAGES sidesteps PEP 668 so a
 		// non-root --user install isn't refused.
 		env["PATH"] = cloudBashToolsDir + "/bin:" + skillBinPATH(e.SkillsRoot)
+		if len(p.SkillAssets) > 0 {
+			var bins []string
+			for _, ref := range p.SkillAssets {
+				if ref.Directory != "" {
+					bins = append(bins, filepath.Join(ref.Directory, "bin"))
+					if ref.PackageDirectory != "" && ref.PackageDirectory != ref.Directory {
+						bins = append(bins, filepath.Join(ref.PackageDirectory, "bin"))
+					}
+				}
+			}
+			// Pinned packages precede legacy installed bins. Explicit absolute paths
+			// from load_skill also point into the same immutable snapshot.
+			if len(bins) > 0 {
+				env["PATH"] = strings.Join(bins, ":") + ":" + env["PATH"]
+			}
+		}
 		env["PYTHONUSERBASE"] = cloudBashToolsDir
 		env["PIP_USER"] = "1"
 		env["PIP_BREAK_SYSTEM_PACKAGES"] = "1"
@@ -138,7 +191,10 @@ func (e ApprovalExecutors) Register(approvalUC *managerbizapproval.Usecase) {
 		if err := json.Unmarshal([]byte(payloadJSON), &p); err != nil {
 			return "", err
 		}
-		out, err := e.MCP.CallTool(ctx, p.Server, p.Tool, p.Arguments)
+		if contract.VersionFromContext(ctx) == contract.V3 && p.Revision == "" {
+			return "", fmt.Errorf("MCP approval has no registration revision; submit a new request")
+		}
+		out, err := e.MCP.CallToolRevision(ctx, p.Server, p.Tool, p.Arguments, p.Revision)
 		if err != nil {
 			return "", err
 		}

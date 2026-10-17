@@ -2,7 +2,12 @@ package setting
 
 import (
 	"context"
+	"fmt"
+	"github.com/ongridio/ongrid/internal/pkg/errs"
+	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	model "github.com/ongridio/ongrid/internal/manager/model/setting"
 )
@@ -90,4 +95,56 @@ func (r *WebSearchResolver) TavilyAPIKey(ctx context.Context) string {
 // BraveAPIKey returns the trimmed Brave Search API key. "" when unset.
 func (r *WebSearchResolver) BraveAPIKey(ctx context.Context) string {
 	return r.get(ctx, model.KeyBraveAPIKey)
+}
+
+// Fallback is opt-in; merely storing an API key does not authorize queries.
+func (r *WebSearchResolver) FallbackProvider(ctx context.Context) string {
+	v := r.get(ctx, model.KeyWebSearchFallbackProvider)
+	if v == model.ProviderSearxng || v == model.ProviderTavily || v == model.ProviderBrave {
+		return v
+	}
+	return ""
+}
+func (r *WebSearchResolver) SearxngEngines(ctx context.Context) string {
+	return r.get(ctx, model.KeySearxngEngines)
+}
+func (r *WebSearchResolver) SearchTimeouts(ctx context.Context) (time.Duration, time.Duration) {
+	per, total := 20, 45
+	if v, err := strconv.Atoi(r.get(ctx, model.KeyWebSearchRequestTimeout)); err == nil && v >= 2 && v <= 60 {
+		per = v
+	}
+	if v, err := strconv.Atoi(r.get(ctx, model.KeyWebSearchTotalTimeout)); err == nil && v >= 5 && v <= 120 {
+		total = v
+	}
+	return time.Duration(per) * time.Second, time.Duration(total) * time.Second
+}
+func validateWebSearchSetting(key, value string) error {
+	switch key {
+	case model.KeyWebSearchProvider, model.KeyWebSearchFallbackProvider:
+		if value != "" && value != model.ProviderSearxng && value != model.ProviderTavily && value != model.ProviderBrave {
+			return fmt.Errorf("%w: unsupported search provider", errs.ErrInvalid)
+		}
+	case model.KeySearxngEngines:
+		if len(value) > 200 {
+			return fmt.Errorf("%w: engine list too long", errs.ErrInvalid)
+		}
+		for _, name := range strings.Split(value, ",") {
+			if name != "" && !regexp.MustCompile(`^[a-zA-Z0-9 _-]+$`).MatchString(name) {
+				return fmt.Errorf("%w: invalid engine name", errs.ErrInvalid)
+			}
+		}
+	case model.KeyWebSearchRequestTimeout, model.KeyWebSearchTotalTimeout:
+		if value == "" {
+			return nil
+		}
+		min, max := 2, 60
+		if key == model.KeyWebSearchTotalTimeout {
+			min, max = 5, 120
+		}
+		n, err := strconv.Atoi(value)
+		if err != nil || n < min || n > max {
+			return fmt.Errorf("%w: %s must be %d..%d seconds", errs.ErrInvalid, key, min, max)
+		}
+	}
+	return nil
 }

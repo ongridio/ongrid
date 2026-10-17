@@ -19,6 +19,7 @@ const CATEGORY = 'agent';
 const KEY = 'write_enabled';
 const LLM_TIMEOUT_KEY = 'llm_timeout_seconds';
 const OUTPUT_LOCALE_KEY = 'output_locale';
+const RUNTIME_VERSION_KEY = 'runtime_version';
 const DEFAULT_LLM_TIMEOUT_SECONDS = 120;
 const MIN_LLM_TIMEOUT_SECONDS = 30;
 const MAX_LLM_TIMEOUT_SECONDS = 900;
@@ -28,6 +29,11 @@ export default function SettingsAgent() {
   const [writeEnabled, setWriteEnabled] = useState(false);
   const [llmTimeoutSeconds, setLLMTimeoutSeconds] = useState(String(DEFAULT_LLM_TIMEOUT_SECONDS));
   const [outputLocale, setOutputLocale] = useState<'' | 'zh' | 'en'>('');
+  const [runtimeVersion, setRuntimeVersion] = useState('release');
+  const [savedRuntimeVersion, setSavedRuntimeVersion] = useState('release');
+  const [savingRuntime, setSavingRuntime] = useState(false);
+  const [runtimeSaved, setRuntimeSaved] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savingTimeout, setSavingTimeout] = useState(false);
@@ -39,6 +45,10 @@ export default function SettingsAgent() {
       const res = await listSettings(CATEGORY);
       const row = res.items.find((i) => i.key === KEY);
       const timeoutRow = res.items.find((i) => i.key === LLM_TIMEOUT_KEY);
+      const runtimeRow = res.items.find((i) => i.key === RUNTIME_VERSION_KEY);
+      setRuntimeVersion(runtimeRow?.value ?? 'release');
+      setSavedRuntimeVersion(runtimeRow?.value ?? 'release');
+      setLoadFailed(false);
       const localeRow = res.items.find((i) => i.key === OUTPUT_LOCALE_KEY);
       // Missing row → server default is DISABLED (fail-safe).
       setWriteEnabled(row ? row.value === 'true' : false);
@@ -47,6 +57,7 @@ export default function SettingsAgent() {
       setOutputLocale(localeRow?.value === 'zh' || localeRow?.value === 'en' ? localeRow.value : '');
       setErr(null);
     } catch (e) {
+      setLoadFailed(true);
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
@@ -110,6 +121,21 @@ export default function SettingsAgent() {
     }
   }, [outputLocale]);
 
+  const onSaveRuntime = async () => {
+    setSavingRuntime(true);
+    setRuntimeSaved(false);
+    setErr(null);
+    try {
+      await setSetting(CATEGORY, RUNTIME_VERSION_KEY, runtimeVersion, false);
+      setSavedRuntimeVersion(runtimeVersion);
+      setRuntimeSaved(true);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingRuntime(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       {err && <div className="text-xs text-red-400">{err}</div>}
@@ -158,6 +184,50 @@ export default function SettingsAgent() {
             '提示：改动立即生效，对所有用户的新对话轮次生效，无需重启。已在进行中的工具调用不受影响。',
             'Note: takes effect immediately on the next chat turn for every user, no restart needed. Tool calls already in flight are unaffected.',
           )}
+        </p>
+      </Card>
+
+      <Card className="p-5">
+        <div className="mb-3 flex items-center gap-2">
+          <Bot size={14} className="text-zinc-400" />
+          <h2 className="text-sm font-medium text-zinc-100">{tr('Agent 运行时版本', 'Agent runtime version')}</h2>
+        </div>
+        <p className="mb-4 text-xs leading-relaxed text-zinc-500">
+          {tr('选择所有用户新会话使用的 Agent 运行时。已有会话及其子任务继续使用原来的版本。',
+            'Choose the Agent runtime for new conversations for all users. Existing conversations and their workers retain their original runtime.')}
+        </p>
+        <Label className="mb-1 block text-xs text-zinc-400" htmlFor="agent-runtime-version">
+          {tr('运行时版本', 'Runtime version')}
+        </Label>
+        <Select
+          id="agent-runtime-version"
+          value={runtimeVersion}
+          onValueChange={(value) => { setRuntimeVersion(value); setRuntimeSaved(false); }}
+          disabled={loading || loadFailed || savingRuntime}
+          className="w-full max-w-sm"
+        >
+          <option value="release">{tr('跟随 Release 默认（当前 v3）', 'Follow release default (currently v3)')}</option>
+          <option value="v3">{tr('v3 · 固定版本', 'v3 · Pinned version')}</option>
+          <option value="v2" disabled>{tr('v2 · 尚未接入', 'v2 · Not available yet')}</option>
+          <option value="v1" disabled>{tr('v1 · 尚未接入', 'v1 · Not available yet')}</option>
+          {!['release', 'v1', 'v2', 'v3'].includes(runtimeVersion) && (
+            <option value={runtimeVersion} disabled>{tr('不支持的已保存版本', 'Unsupported saved version')}: {runtimeVersion}</option>
+          )}
+        </Select>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <Button variant="primary"
+            disabled={loading || loadFailed || savingRuntime || runtimeVersion === savedRuntimeVersion || !['release', 'v3'].includes(runtimeVersion)}
+            onClick={() => void onSaveRuntime()}>
+            <Save size={14} />
+            {savingRuntime ? tr('保存中…', 'Saving…') : tr('保存版本', 'Save runtime')}
+          </Button>
+          <span role="status" className="text-xs text-zinc-500">
+            {runtimeSaved ? tr('已保存，对新会话生效', 'Saved. Applies to new conversations.') : tr('无需重启', 'No restart required')}
+          </span>
+        </div>
+        <p className="mt-4 text-[11px] leading-relaxed text-zinc-600">
+          {tr('当前构建仅接入 v3。v1、v2 源码已隔离，完成执行适配前不可选择。跟随 Release 默认会在升级后使用该发行版的默认运行时。',
+            'This build runs v3 only. v1 and v2 source is isolated, but execution adapters are not available yet. Following the release default uses the default runtime shipped with each upgrade.')}
         </p>
       </Card>
 

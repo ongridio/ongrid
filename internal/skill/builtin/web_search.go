@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/ongridio/ongrid/internal/skill"
 )
@@ -156,6 +155,7 @@ type webSearchSkill struct {
 	braveEndpoint  string
 	cfgResolver    WebSearchConfigResolver
 	httpClient     *http.Client
+	health         map[string]searchProviderHealth
 }
 
 // Metadata returns the framework-visible spec.
@@ -163,7 +163,7 @@ func (s *webSearchSkill) Metadata() skill.Metadata {
 	return skill.Metadata{
 		Key:         "web_search",
 		Name:        "联网搜索",
-		Description: "Search the public web and return top results with title + url + snippet. Default provider is SearXNG (self-hosted, zero-key); operators may switch to Tavily or Brave Search via Settings → Integrations. When the provider supports it (Tavily) an auto-generated `answer` field is also returned.",
+		Description: "Search the public web and return top results with title + url + snippet. Check status and engine_failures: failed is not no_results; partial results remain usable. Cite returned URLs, prefer official sources, and use context to disambiguate short acronyms. Do not claim no public information exists after a failed search. Default provider is SearXNG (self-hosted, zero-key); operators may switch to Tavily or Brave Search via Settings → Integrations. When the provider supports it (Tavily) an auto-generated `answer` field is also returned.",
 		Class:       skill.ClassSafe,
 		Scope:       skill.ScopeManager,
 		Category:    "web",
@@ -190,7 +190,7 @@ func (s *webSearchSkill) Metadata() skill.Metadata {
 				Desc: "强制使用哪个 provider；留空 = 走系统设置选择",
 			}},
 		},
-		ResultPreview: "{provider, results:[{title,url,snippet,published_date}], answer?, skipped_reason?}",
+		ResultPreview: "{provider,status:success|partial|no_results|failed,results:[{title,url,snippet,published_date}],engine_failures?,attempts?,skipped_reason?}",
 	}
 }
 
@@ -216,10 +216,13 @@ type WebSearchResult struct {
 // providers that support it (Tavily). `skipped_reason` is set when the
 // skill cannot run — empty results, no error.
 type webSearchResponse struct {
-	Provider      string            `json:"provider"`
-	Results       []WebSearchResult `json:"results"`
-	Answer        string            `json:"answer,omitempty"`
-	SkippedReason string            `json:"skipped_reason,omitempty"`
+	Provider       string            `json:"provider"`
+	Results        []WebSearchResult `json:"results"`
+	Answer         string            `json:"answer,omitempty"`
+	SkippedReason  string            `json:"skipped_reason,omitempty"`
+	Status         string            `json:"status"`
+	EngineFailures [][]string        `json:"engine_failures,omitempty"`
+	Attempts       []searchAttempt   `json:"attempts,omitempty"`
 }
 
 // Execute dispatches to the chosen provider and packages the result.
@@ -240,7 +243,7 @@ func (s *webSearchSkill) Execute(ctx context.Context, params json.RawMessage) (j
 		braveURL = "https://api.search.brave.com/res/v1/web/search"
 	}
 	if client == nil {
-		client = &http.Client{Timeout: 60 * time.Second}
+		client = s.defaultSearchHTTPClient()
 	}
 
 	var p webSearchParams
@@ -270,16 +273,7 @@ func (s *webSearchSkill) Execute(ctx context.Context, params json.RawMessage) (j
 		provider = providerSearxng
 	}
 
-	switch provider {
-	case providerTavily:
-		return s.searchTavily(ctx, client, tavilyURL, resolver, p)
-	case providerBrave:
-		return s.searchBrave(ctx, client, braveURL, resolver, p)
-	case providerSearxng:
-		return s.searchSearxng(ctx, client, resolver, p)
-	default:
-		return nil, fmt.Errorf("web_search: unknown provider %q", provider)
-	}
+	return s.searchWithPolicy(ctx, client, resolver, provider, tavilyURL, braveURL, p)
 }
 
 // ---- SearXNG sub-fn -------------------------------------------------
@@ -313,6 +307,11 @@ func (s *webSearchSkill) searchSearxng(
 	q.Set("format", "json")
 	q.Set("safesearch", "1")
 	q.Set("pageno", "1")
+	if policy, ok := resolver.(webSearchPolicyResolver); ok {
+		if engines := policy.SearxngEngines(ctx); engines != "" {
+			q.Set("engines", engines)
+		}
+	}
 	full := base + "/search?" + q.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, full, nil)
@@ -333,19 +332,25 @@ func (s *webSearchSkill) searchSearxng(
 			Results:  []WebSearchResult{},
 			SkippedReason: fmt.Sprintf(
 				"SearXNG 不可达 (%s) — 检查 docker-compose 是否启动 searxng 服务，或在设置 → 集成 → 联网搜索 改为 Tavily / Brave。原始错误: %v",
-				base, err,
+				"configured endpoint", safeSearchError(err),
 			),
 		})
 	}
 	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4*1024*1024))
+	respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 4*1024*1024+1))
+	if readErr != nil {
+		return nil, fmt.Errorf("web_search: read response: %w", readErr)
+	}
+	if len(respBody) > 4*1024*1024 {
+		return nil, errors.New("web_search: response exceeds 4 MiB")
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return json.Marshal(webSearchResponse{
 			Provider: providerSearxng,
 			Results:  []WebSearchResult{},
 			SkippedReason: fmt.Sprintf(
-				"SearXNG 返回 %d: %s",
-				resp.StatusCode, truncate(string(respBody), 200),
+				"SearXNG 返回 HTTP %d",
+				resp.StatusCode,
 			),
 		})
 	}
@@ -355,8 +360,9 @@ func (s *webSearchSkill) searchSearxng(
 		return nil, fmt.Errorf("web_search: decode searxng response: %w", err)
 	}
 	out := webSearchResponse{
-		Provider: providerSearxng,
-		Results:  make([]WebSearchResult, 0, len(sr.Results)),
+		Provider:       providerSearxng,
+		Results:        make([]WebSearchResult, 0, len(sr.Results)),
+		EngineFailures: sr.UnresponsiveEngines,
 	}
 	limit := p.MaxResults
 	for i, r := range sr.Results {
@@ -375,10 +381,11 @@ func (s *webSearchSkill) searchSearxng(
 
 // searxngResponse is the subset of SearXNG's JSON output we consume.
 // The full upstream shape carries a lot more (suggestions, infoboxes,
-// engine timings); we only need results[].
+// engine timings); preserve engine failures as well as results.
 type searxngResponse struct {
-	Query   string `json:"query"`
-	Results []struct {
+	Query               string     `json:"query"`
+	UnresponsiveEngines [][]string `json:"unresponsive_engines"`
+	Results             []struct {
 		Title         string `json:"title"`
 		URL           string `json:"url"`
 		Content       string `json:"content"`
@@ -426,12 +433,18 @@ func (s *webSearchSkill) searchTavily(
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("web_search: call Tavily: %w", err)
+		return nil, fmt.Errorf("web_search: Tavily transport: %w", safeSearchError(err))
 	}
 	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4*1024*1024))
+	respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 4*1024*1024+1))
+	if readErr != nil {
+		return nil, fmt.Errorf("web_search: read response: %w", readErr)
+	}
+	if len(respBody) > 4*1024*1024 {
+		return nil, errors.New("web_search: response exceeds 4 MiB")
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("web_search: Tavily returned %d: %s", resp.StatusCode, truncate(string(respBody), 200))
+		return nil, fmt.Errorf("web_search: Tavily returned HTTP %d", resp.StatusCode)
 	}
 
 	var tr tavilyResponse
@@ -515,12 +528,18 @@ func (s *webSearchSkill) searchBrave(
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("web_search: call Brave: %w", err)
+		return nil, fmt.Errorf("web_search: Brave transport: %w", safeSearchError(err))
 	}
 	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4*1024*1024))
+	respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 4*1024*1024+1))
+	if readErr != nil {
+		return nil, fmt.Errorf("web_search: read response: %w", readErr)
+	}
+	if len(respBody) > 4*1024*1024 {
+		return nil, errors.New("web_search: response exceeds 4 MiB")
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("web_search: Brave returned %d: %s", resp.StatusCode, truncate(string(respBody), 200))
+		return nil, fmt.Errorf("web_search: Brave returned HTTP %d", resp.StatusCode)
 	}
 
 	var br braveResponse

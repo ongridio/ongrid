@@ -462,15 +462,43 @@ func (rt *Runtime) runWorker(ctx context.Context, agentDef *Agent, sessID, userT
 	// Workers are not an authorization bypass. The coordinator stamps the
 	// resolved gate on context; absent wiring fails closed so a direct spawn
 	// cannot expose mutating tools unexpectedly.
-	workerTools := filterToolsForAgentRole(basetool.FilterWebSearch(ctx, rt.toolBagSnapshot()), agentDef, false, !basetool.AgentWriteAllowedFromContext(ctx))
+	workerBag := basetool.FilterWebSearch(ctx, rt.toolBagSnapshot())
+	activeSkills, skillLoader, skillCatalog := rt.cfg.SkillRegistry.catalog(userText, Policy{AllowedClasses: []string{"*"}})
+	ctx = basetool.WithBoundCredentials(ctx, nil)
+	ctx = basetool.WithSkillAssets(ctx, nil)
+	if skillLoader != nil {
+		defer skillLoader.close()
+		for _, sk := range activeSkills {
+			if _, err := skillLoader.load(ctx, sk); err != nil {
+				return "", err
+			}
+		}
+	}
+
+	if skillLoader != nil {
+		workerBag = append(workerBag, skillLoader)
+	}
+	workerTools := filterToolsForAgentRole(workerBag, agentDef, false, !basetool.AgentWriteAllowedFromContext(ctx))
+	if rt.cfg.CredentialBinder != nil && len(activeSkills) > 0 {
+		names := make([]string, 0, len(activeSkills))
+		for _, sk := range activeSkills {
+			names = append(names, sk.Name)
+		}
+		ctx = basetool.WithBoundCredentials(ctx, rt.cfg.CredentialBinder.BoundCredentialNamesForSkills(ctx, names))
+	}
 
 	// Thread the persona-filtered tool view onto ctx so ToolSearch
 	// (which runs inside the worker graph) only returns tools the
 	// worker persona is allowed to see. ctx is per-request (each
 	// worker has its own), so concurrent workers don't race.
+	workerTools = skillLoader.bind(workerTools, rt.cfg.CredentialBinder)
 	ctx = basetool.WithFilteredTools(ctx, workerTools)
 
-	systemPrompt := ComposeSystemPrompt(rt.cfg.BasePrompt, nil, agentDef)
+	systemPrompt := ComposeSystemPrompt(rt.cfg.BasePrompt, activeSkills, agentDef) + skillLoader.activePrompt()
+	span.SetAttributes(attribute.String("ongrid.skills.active", skillLoader.activePrompt()))
+	if skillLoader != nil && toolBagContains(workerTools, "load_skill") {
+		systemPrompt += "\n\n" + skillCatalog
+	}
 	if digest := buildToolCapabilityDigest(workerTools); digest != "" {
 		systemPrompt = systemPrompt + "\n\n" + digest
 	}

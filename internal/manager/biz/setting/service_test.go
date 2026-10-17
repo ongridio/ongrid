@@ -374,3 +374,45 @@ func TestServiceDeleteInvalidatesCache(t *testing.T) {
 		t.Fatalf("post-Delete Get = (%q,%v); want (\"\", false)", v, ok)
 	}
 }
+
+func TestAgentRuntimeVersionSelection(t *testing.T) {
+	repo := newFakeRepo()
+	svc := New(repo, nil)
+	ctx := t.Context()
+	if got, err := svc.AgentRuntimeVersion(ctx); err != nil || got != "" {
+		t.Fatalf("default: %q %v", got, err)
+	}
+	for _, value := range []string{"v3", "release", "v3"} {
+		if err := svc.Set(ctx, model.CategoryAgent, model.KeyAgentRuntimeVersion, value, false); err != nil {
+			t.Fatal(err)
+		}
+		want := value
+		if want == "release" {
+			want = ""
+		}
+		if got, err := svc.AgentRuntimeVersion(ctx); err != nil || got != want {
+			t.Fatalf("saved: %q %v", got, err)
+		}
+	}
+	for _, value := range []string{"v1", "v2", "v99", "", "V3"} {
+		if err := svc.Set(ctx, model.CategoryAgent, model.KeyAgentRuntimeVersion, value, false); !errors.Is(err, errs.ErrInvalid) {
+			t.Fatalf("accepted %q: %v", value, err)
+		}
+		if err := svc.SetBatch(ctx, []model.Setting{{Category: model.CategoryAgent, Key: model.KeyAgentRuntimeVersion, Value: value}}); !errors.Is(err, errs.ErrInvalid) {
+			t.Fatalf("batch accepted %q: %v", value, err)
+		}
+	}
+	if err := svc.Delete(ctx, model.CategoryAgent, model.KeyAgentRuntimeVersion); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := svc.AgentRuntimeVersion(ctx); err != nil || got != "" {
+		t.Fatalf("deleted: %q %v", got, err)
+	}
+	// Unsupported persisted values cannot silently fall back to v3.
+	if _, err := repo.Set(ctx, model.CategoryAgent, model.KeyAgentRuntimeVersion, "v2", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.AgentRuntimeVersion(ctx); !errors.Is(err, errs.ErrInvalid) {
+		t.Fatalf("invalid persisted version: %v", err)
+	}
+}

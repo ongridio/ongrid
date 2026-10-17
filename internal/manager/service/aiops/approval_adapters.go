@@ -11,6 +11,7 @@ import (
 
 	aiopschatruntime "github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/contract"
 	aiopstools "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	managerbizapproval "github.com/ongridio/ongrid/internal/manager/biz/approval"
 	managerbizmcp "github.com/ongridio/ongrid/internal/manager/biz/mcp"
 	managerbizsecret "github.com/ongridio/ongrid/internal/manager/biz/secret"
@@ -21,9 +22,11 @@ import (
 // TYPE inject rule into env vars at approve time. Credential (singular) is a
 // legacy field kept so an in-flight pre-upgrade approval still resolves.
 type cloudBashPayload struct {
-	Command     string   `json:"command"`
-	Credentials []string `json:"credentials,omitempty"`
-	Credential  string   `json:"credential,omitempty"` // legacy single
+	SkillAssets      []basetool.SkillAssetRef `json:"skill_assets,omitempty"`
+	SkillCredentials []string                 `json:"skill_credentials,omitempty"`
+	Command          string                   `json:"command"`
+	Credentials      []string                 `json:"credentials,omitempty"`
+	Credential       string                   `json:"credential,omitempty"` // legacy single
 	// SessionID is the chat session that proposed the command (HLD-019). The
 	// executor maps it to a persistent per-session working directory so files
 	// a tool writes in one command survive to the next, instead of running in
@@ -140,7 +143,7 @@ func (s CloudBashProposer) ProposeAndAwait(ctx context.Context, command string, 
 		Kind:           "cloud_bash",
 		Title:          title,
 		Summary:        strings.Join(credentials, ", "), // plain names; card shows them
-		Payload:        cloudBashPayload{Command: command, Credentials: credentials, SessionID: sessionID},
+		Payload:        cloudBashPayload{SkillCredentials: basetool.BoundCredentialsFromContext(ctx), SkillAssets: basetool.SkillAssetsFromContext(ctx), Command: command, Credentials: credentials, SessionID: sessionID},
 		Source:         "agent",
 		SessionID:      sessionID,
 		ProposedBy:     userID,
@@ -287,6 +290,7 @@ func (s InstallSkillProposer) ProposeInstall(ctx context.Context, url, sourceTyp
 // P2). Server/Tool/Arguments drive the executor; Command is a human-readable
 // one-liner the inline approval card shows (reuses the cloud_bash card).
 type mcpCallPayload struct {
+	Revision  string         `json:"revision,omitempty"`
 	Server    string         `json:"server"`
 	Tool      string         `json:"tool"`
 	Arguments map[string]any `json:"arguments,omitempty"`
@@ -302,9 +306,20 @@ func (s MCPCaller) CallMCPTool(ctx context.Context, server, tool string, args ma
 
 // MCPProposer queues an MCP call into the human approval inbox (default,
 // untrusted path) — same propose-confirm model as cloud_bash.
-type MCPProposer struct{ Usecase *managerbizapproval.Usecase }
+type MCPProposer struct {
+	Usecase *managerbizapproval.Usecase
+	MCP     *managerbizmcp.Usecase
+}
 
 func (s MCPProposer) ProposeMCPCallAndAwait(ctx context.Context, server, tool string, args map[string]any, sessionID, toolCallID string, userID uint64) (string, error) {
+	var revision string
+	if s.MCP != nil {
+		var err error
+		revision, err = s.MCP.Revision(ctx, server)
+		if err != nil {
+			return "", err
+		}
+	}
 	argsJSON, err := json.Marshal(args)
 	if err != nil {
 		return "", fmt.Errorf("marshal MCP approval arguments: %w", err)
@@ -317,7 +332,7 @@ func (s MCPProposer) ProposeMCPCallAndAwait(ctx context.Context, server, tool st
 		RuntimeVersion: string(aiopschatruntime.VersionFromContext(ctx)),
 		Kind:           "mcp_call",
 		Title:          cmd,
-		Payload:        mcpCallPayload{Server: server, Tool: tool, Arguments: args, Command: cmd},
+		Payload:        mcpCallPayload{Revision: revision, Server: server, Tool: tool, Arguments: args, Command: cmd},
 		Source:         "agent",
 		SessionID:      sessionID,
 		ProposedBy:     userID,

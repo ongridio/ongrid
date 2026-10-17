@@ -5,6 +5,10 @@ package ongrid.manager.setting.v1;
 option go_package = "github.com/ongridio/ongrid/api/gen/manager/setting/v1;settingv1";
 
 // SettingService 管理管理员可编辑的运行时配置。
+// agent.runtime_version accepts "release" (follow this release default) or
+// "v3" (pin new sessions to v3). v1/v2 are not wired and are rejected.
+// Existing sessions retain their runtime; legacy unversioned sessions stay v3.
+// Read/write via the existing system-settings category/key API.
 // Legacy platform.auto_apm_enabled values are retained but no longer affect discovery.
 service SettingService {
     // ApplyBuiltInObservabilityLimits saves storage limits and recreates only
@@ -28,6 +32,9 @@ service SettingService {
     // ValidateWebSearchConfiguration 使用未落库的 provider 配置执行最小查询。
     // HTTP 实现：POST /api/v1/integrations/websearch/test。
     rpc ValidateWebSearchConfiguration(ValidateWebSearchConfigurationRequest) returns (ValidateWebSearchConfigurationResponse);
+    // POST /api/v1/integrations/websearch/validate-and-save; admin only.
+    // Validates primary and backup, then atomically saves the complete draft.
+    rpc ValidateAndSaveWebSearchConfiguration(ValidateAndSaveWebSearchConfigurationRequest) returns (ValidateAndSaveWebSearchConfigurationResponse);
     // ValidateLLMConfiguration 使用未落库的草稿配置发起最小模型请求，
     // 返回可机器识别的失败原因。HTTP 实现：
     // POST /api/v1/integrations/llm/test。
@@ -96,14 +103,38 @@ message ValidateTempoConfigurationResponse {
     string status = 1 [json_name = "status"];
 }
 
+// websearch settings also accept fallback_provider (empty disables fallback),
+// searxng_engines (comma-separated names), request_timeout_seconds (2..60),
+// and total_timeout_seconds (5..120). Fallback requires explicit admin selection.
 message ValidateWebSearchConfigurationRequest {
     string provider = 1 [json_name = "provider"];
     string searxng_url = 2 [json_name = "searxng_url"];
     string tavily_api_key = 3 [json_name = "tavily_api_key"];
     string brave_api_key = 4 [json_name = "brave_api_key"];
+    string fallback_provider = 5 [json_name = "fallback_provider"];
+    string searxng_engines = 6 [json_name = "searxng_engines"];
+    string request_timeout_seconds = 7 [json_name = "request_timeout_seconds"];
+    string total_timeout_seconds = 8 [json_name = "total_timeout_seconds"];
 }
 
 message ValidateWebSearchConfigurationResponse {
+    string status = 1 [json_name = "status"];
+    string provider = 2 [json_name = "provider"];
+    string sample = 3 [json_name = "sample"];
+}
+
+message ValidateAndSaveWebSearchConfigurationRequest {
+    string provider = 1 [json_name = "provider"];
+    string searxng_url = 2 [json_name = "searxng_url"];
+    string tavily_api_key = 3 [json_name = "tavily_api_key"];
+    string brave_api_key = 4 [json_name = "brave_api_key"];
+    string fallback_provider = 5 [json_name = "fallback_provider"];
+    string searxng_engines = 6 [json_name = "searxng_engines"];
+    string request_timeout_seconds = 7 [json_name = "request_timeout_seconds"];
+    string total_timeout_seconds = 8 [json_name = "total_timeout_seconds"];
+}
+
+message ValidateAndSaveWebSearchConfigurationResponse {
     string status = 1 [json_name = "status"];
     string provider = 2 [json_name = "provider"];
     string sample = 3 [json_name = "sample"];

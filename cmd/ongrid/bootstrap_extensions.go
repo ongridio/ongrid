@@ -69,10 +69,12 @@ func bootstrapExtensions(rootCtx context.Context, cfg *config.Config, log *slog.
 	// still works for List/Install but the hot-reload is a no-op until
 	// the next chatruntime construction picks the disk state up.
 	var mpSkillReg managerbizmarketplace.SkillRegistry
+	var skillAssetLeaser managersvcaiops.SkillAssetLeaser
 	var mpAgentReg managerbizmarketplace.AgentRegistry
 	if rt := runtime.chatRT; rt != nil {
 		if sk := rt.SkillRegistry(); sk != nil {
 			mpSkillReg = sk
+			skillAssetLeaser = sk
 		}
 		if ag := rt.AgentRegistry(); ag != nil {
 			mpAgentReg = ag
@@ -159,6 +161,7 @@ func bootstrapExtensions(rootCtx context.Context, cfg *config.Config, log *slog.
 		Runner:      cloudBashRunner,
 		Workspace:   wsMgr,
 		SkillsRoot:  marketplaceSkillsRoot,
+		SkillAssets: skillAssetLeaser,
 		Frontier:    tunnel.fbClient,
 		Edges:       devices.edgeUC,
 		Devices:     devices.deviceUC,
@@ -261,7 +264,7 @@ func bootstrapExtensions(rootCtx context.Context, cfg *config.Config, log *slog.
 			HumanApproval: runtime.humanApprovalBroker,
 		}
 		mcpCaller := managersvcaiops.MCPCaller{Usecase: mcpUC}
-		mcpProposer := managersvcaiops.MCPProposer{Usecase: approvalUC}
+		mcpProposer := managersvcaiops.MCPProposer{Usecase: approvalUC, MCP: mcpUC}
 		// Keep the graph-facing decorators and ToolSearch's unredacted catalog
 		// in sync. Registration changes call this with one server's fresh test
 		// result, so an admin save never reconnects every MCP endpoint.
@@ -271,6 +274,14 @@ func bootstrapExtensions(rootCtx context.Context, cfg *config.Config, log *slog.
 		// Chat path: load enabled servers at boot; later changes use the same
 		// per-server refresh hook. The FLOW path uses LIVE managersvcflow.MCPSource.
 		mcpTools.LoadEnabled(rootCtx, mcpUC)
+		go func() {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					log.Error("MCP refresh supervisor panic", slog.Any("panic", recovered))
+				}
+			}()
+			mcpTools.RunRefresh(rootCtx, mcpUC, time.Minute)
+		}()
 	}
 
 	if secretbox.KeyIsWeak() {
