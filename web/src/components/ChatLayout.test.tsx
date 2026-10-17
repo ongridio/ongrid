@@ -2,8 +2,9 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import { Link, MemoryRouter, Route, Routes } from 'react-router-dom';
 import { delay, http, HttpResponse } from 'msw';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, afterAll, describe, expect, it, vi } from 'vitest';
 import { ChatLayout } from './ChatLayout';
+import { SessionRevealRegion } from './SessionRevealRegion';
 import { useChatSessions } from '@/store/chatSessions';
 import { useUi } from '@/store/ui';
 import { setLocale } from '@/i18n/locale';
@@ -12,6 +13,7 @@ import { server } from '@/test/msw-server';
 function renderChatLayout(path = '/') {
   return render(
     <MemoryRouter initialEntries={[path]}>
+      <SessionRevealRegion>Brand</SessionRevealRegion>
       <Routes>
         <Route element={<ChatLayout />}>
           <Route path="/" element={<main>Home content<Link to="/devices">Devices</Link></main>} />
@@ -24,11 +26,18 @@ function renderChatLayout(path = '/') {
 }
 
 describe('Chat workspace sessions', () => {
+  afterAll(() => { vi.unstubAllGlobals(); });
   beforeEach(() => {
+    // jsdom 不计算布局；真实溢出与滚动效果在 Chrome 中验证。
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+    });
     localStorage.clear();
     localStorage.setItem('ongrid-locale', 'zh-CN');
     useChatSessions.setState({ sessions: [], loading: false, error: false });
-    useUi.setState({ sidebarCollapsed: false, sessionsCollapsed: false });
+    useUi.setState({ sidebarCollapsed: false, sessionsCollapsed: false, sessionsPreviewOpen: false, sessionsTriggerHovered: false });
     server.use(http.get('/api/v1/chat/sessions', () => HttpResponse.json({ items: [], total: 0 })));
   });
 
@@ -47,6 +56,44 @@ describe('Chat workspace sessions', () => {
     expect(await screen.findByText('测试会话 1')).toBeInTheDocument();
 
     expect(screen.getByText('测试会话 12')).toBeInTheDocument();
+  });
+
+  it('filters titles without changing session identities and restores the list with Escape', async () => {
+    server.use(http.get('/api/v1/chat/sessions', () => HttpResponse.json({ items: [
+      { id: '1', user_id: 1, title: '排查 MCP 配置' },
+      { id: '2', user_id: 1, title: '数据库状态' },
+      { id: '3', user_id: 1, title: '' },
+    ] })));
+    renderChatLayout('/chat/2');
+    await screen.findByRole('link', { name: '数据库状态' });
+    const searchButton = screen.getByRole('button', { name: '搜索会话' });
+    fireEvent.click(searchButton);
+    const search = screen.getByRole('searchbox', { name: '按标题搜索会话' });
+    expect(search).toHaveFocus();
+    expect(screen.getByRole('button', { name: '会话' })).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.change(search, { target: { value: ' mcp ' } });
+    expect(screen.getByRole('link', { name: '排查 MCP 配置' })).toHaveAttribute('href', '/chat/1');
+    expect(screen.queryByRole('link', { name: '数据库状态' })).not.toBeInTheDocument();
+    expect(screen.getByText('Chat content')).toBeInTheDocument();
+    fireEvent.change(search, { target: { value: '会话 3' } });
+    expect(screen.getByRole('link', { name: '会话 3' })).toHaveAttribute('href', '/chat/3');
+    fireEvent.change(search, { target: { value: '不存在' } });
+    expect(screen.getByRole('status')).toHaveTextContent('没有匹配的会话');
+    fireEvent.keyDown(search, { key: 'Escape' });
+    expect(screen.queryByRole('searchbox')).not.toBeInTheDocument();
+    expect(searchButton).toHaveFocus();
+    expect(screen.getByRole('link', { name: '数据库状态' })).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('translates search and clears its query when closed', async () => {
+    renderChatLayout();
+    await screen.findByText('暂无会话');
+    act(() => setLocale('en-US'));
+    fireEvent.click(screen.getByRole('button', { name: 'Search chats' }));
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search chats by title' }), { target: { value: 'old query' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Close search' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Search chats' }));
+    expect(screen.getByRole('searchbox')).toHaveValue('');
   });
 
   it('distinguishes a failed initial load from an empty list and retries', async () => {
@@ -142,32 +189,73 @@ describe('Chat workspace sessions', () => {
     const draft = screen.getByRole('textbox', { name: 'Draft' });
     fireEvent.change(draft, { target: { value: 'Keep this draft' } });
 
-    fireEvent.click(screen.getByRole('button', { name: '收起会话栏' }));
-    expect(screen.getByRole('button', { name: '展开会话栏' })).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(screen.getByRole('button', { name: '显示/隐藏会话栏' }));
+    expect(useUi.getState().sessionsPreviewOpen).toBe(false);
+    expect(screen.queryByRole('button', { name: '展开会话栏' })).not.toBeInTheDocument();
     expect(draft).toHaveValue('Keep this draft');
     expect(screen.getByText('Chat content')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '展开会话栏' }));
-    expect(screen.getByRole('button', { name: '收起会话栏' })).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.pointerEnter(screen.getByLabelText('会话栏预览区域'), { pointerType: 'mouse' });
+    expect(useUi.getState().sessionsCollapsed).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: '显示/隐藏会话栏' }));
+    expect(screen.getByRole('button', { name: '显示/隐藏会话栏' })).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('textbox', { name: 'Draft' })).toBe(draft);
+    expect(draft).toHaveValue('Keep this draft');
+  });
+
+  it('previews on hover, closes after leaving, and persists only the pin preference', async () => {
+    renderChatLayout('/chat/1');
+    fireEvent.click(screen.getByRole('button', { name: '显示/隐藏会话栏' }));
+    const trigger = screen.getByLabelText('会话栏预览区域');
+    fireEvent.pointerEnter(trigger, { pointerType: 'mouse' });
+    expect(useUi.getState().sessionsPreviewOpen).toBe(true);
+    expect(useUi.getState().sessionsCollapsed).toBe(true);
+    const panel = screen.getByRole('complementary', { name: '会话' });
+    fireEvent.pointerLeave(trigger);
+    fireEvent.pointerEnter(panel, { pointerType: 'mouse' });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 350)); });
+    expect(useUi.getState().sessionsPreviewOpen).toBe(true);
+    fireEvent.pointerLeave(panel);
+    await waitFor(() => expect(useUi.getState().sessionsPreviewOpen).toBe(false));
+    fireEvent.keyDown(trigger, { key: 'ArrowRight' });
+    fireEvent.click(screen.getByRole('button', { name: '显示/隐藏会话栏' }));
+    expect(useUi.getState().sessionsCollapsed).toBe(false);
+    expect(JSON.parse(localStorage.getItem('ongrid.ui')!).state).toEqual({ sidebarCollapsed: false, sessionsCollapsed: false });
+  });
+
+  it('dismisses a preview with Escape or an outside click without losing the draft', () => {
+    renderChatLayout('/chat/1');
+    const draft = screen.getByRole('textbox', { name: 'Draft' });
+    fireEvent.change(draft, { target: { value: 'Keep this draft' } });
+    fireEvent.click(screen.getByRole('button', { name: '显示/隐藏会话栏' }));
+    const trigger = screen.getByLabelText('会话栏预览区域');
+    fireEvent.keyDown(trigger, { key: 'ArrowRight' });
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(useUi.getState().sessionsPreviewOpen).toBe(false);
+    expect(trigger).toHaveFocus();
+    fireEvent.keyDown(trigger, { key: 'ArrowRight' });
+    fireEvent.pointerDown(draft);
+    expect(useUi.getState().sessionsPreviewOpen).toBe(false);
     expect(draft).toHaveValue('Keep this draft');
   });
 
   it('remembers desktop collapse across routes and storage hydration without changing mobile disclosure', async () => {
     renderChatLayout();
-    fireEvent.click(screen.getByRole('button', { name: '收起会话栏' }));
+    fireEvent.click(screen.getByRole('button', { name: '显示/隐藏会话栏' }));
     const saved = localStorage.getItem('ongrid.ui')!;
     expect(JSON.parse(saved).state).toEqual({ sidebarCollapsed: false, sessionsCollapsed: true });
     fireEvent.click(screen.getByRole('link', { name: 'Devices' }));
     fireEvent.click(screen.getByRole('link', { name: 'Home' }));
-    expect(screen.getByRole('button', { name: '展开会话栏' })).toHaveAttribute('aria-expanded', 'false');
+    expect(useUi.getState().sessionsPreviewOpen).toBe(false);
+    expect(screen.queryByRole('button', { name: '展开会话栏' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '会话' }));
     expect(screen.getByRole('button', { name: '会话' })).toHaveAttribute('aria-expanded', 'true');
     expect(useUi.getState().sessionsCollapsed).toBe(true);
     act(() => useUi.setState({ sessionsCollapsed: false }));
     localStorage.setItem('ongrid.ui', saved);
     await act(() => useUi.persist.rehydrate());
-    expect(screen.getByRole('button', { name: '展开会话栏' })).toHaveAttribute('aria-expanded', 'false');
+    expect(useUi.getState().sessionsPreviewOpen).toBe(false);
+    expect(screen.queryByRole('button', { name: '展开会话栏' })).not.toBeInTheDocument();
     expect(useUi.getState().sidebarCollapsed).toBe(false);
   });
 
@@ -295,9 +383,10 @@ describe('Chat workspace sessions', () => {
     act(() => setLocale('en-US'));
     expect(screen.getByRole('complementary', { name: 'Sessions' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'New chat' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Collapse sessions' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Collapse sessions' }));
-    expect(screen.getByRole('button', { name: 'Expand sessions' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Toggle sessions sidebar' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle sessions sidebar' }));
+    expect(screen.queryByRole('button', { name: 'Expand sessions' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Session preview area')).toBeInTheDocument();
     expect(screen.getByText('No sessions yet')).toBeInTheDocument();
   });
 

@@ -253,11 +253,11 @@ export default function HomePage() {
 
   return (
     <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-      <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-4xl flex-col items-stretch px-4 pb-16 pt-10 sm:px-8 lg:pt-[clamp(4rem,12vh,9rem)]">
+      <div className="flex flex-1 flex-col overflow-y-auto px-0 py-8 sm:pb-[10vh] sm:pt-8">
+        <div className="mx-auto my-auto flex w-full max-w-4xl shrink-0 flex-col items-stretch px-6">
           <StatusRow />
 
-          <h1 className="mb-6 mt-6 text-2xl font-semibold tracking-tight text-zinc-100 sm:text-3xl">
+          <h1 className="mb-8 mt-8 text-center text-3xl font-semibold tracking-tight text-zinc-100">
             {greeting}
           </h1>
 
@@ -287,7 +287,7 @@ export default function HomePage() {
             </div>
           )}
 
-          <div className="mt-6">
+          <div className="mt-10">
             {showEmptyState ? (
               <button
                 type="button"

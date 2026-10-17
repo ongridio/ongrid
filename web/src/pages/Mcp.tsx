@@ -32,7 +32,7 @@ import {
 } from '@/api/mcp';
 import { listSecrets, type SecretView } from '@/api/secrets';
 import { Modal } from '@/components/Modal';
-import { Button, Card, Chip, EmptyState, PageHeader } from '@/components/ui';
+import { Button, Card, Chip, EmptyStateCard, PageHeader } from '@/components/ui';
 import { cn } from '@/lib/cn';
 import { useI18n } from '@/i18n/locale';
 
@@ -42,7 +42,7 @@ import { useI18n } from '@/i18n/locale';
 //
 // Admin-only for create / update / delete; non-admins see the list read-only.
 // Style mirrors settings/Marketplace.tsx + settings/Secrets.tsx (Card /
-// Button / Chip / EmptyState, zinc palette, tr() for every string).
+// Button / Chip / EmptyStateCard, zinc palette, tr() for every string).
 
 const inputClass =
   "w-full";
@@ -227,23 +227,21 @@ export default function McpPage() {
         <Card className="flex h-24 items-center justify-center text-sm text-zinc-500">
           <Loader2 size={14} className="mr-2 animate-spin" /> {tr('加载中…', 'Loading…')}
         </Card>
-      ) : servers.length === 0 ? (
-        <Card>
-          <EmptyState
+      ) : err && servers.length === 0 ? null : servers.length === 0 ? (
+        <EmptyStateCard
             icon={Server}
             title={tr('还没有注册任何 MCP 服务', 'No MCP servers registered yet')}
+            action={isAdmin && <Button variant="primary" onClick={() => setEditing({ id: null, input: emptyInput() })}><Plus size={12} />{tr('接入 MCP', 'Connect MCP')}</Button>}
             hint={
               isAdmin
-                ? tr('点右上「新建」接入一个外部 MCP server', 'Use "New server" above to register an external MCP server')
+                ? tr('接入外部 MCP 服务，让助理使用更多工具。', 'Connect an external MCP server to give assistants more tools.')
                 : tr('请联系 admin 接入 MCP 服务', 'Ask an admin to register an MCP server')
             }
-            className="flex h-40 flex-col items-center justify-center gap-2 text-center"
-          />
-        </Card>
+        />
       ) : (
         <div className="space-y-3">
           {shownServers.length === 0 ? (
-            <div className="py-10 text-center text-xs text-zinc-500">{tr('无匹配的服务', 'No matching servers')}</div>
+            <EmptyStateCard icon={Server} title={tr('无匹配的服务', 'No matching servers')} action={<Button onClick={() => setSearch('')}>{tr('清除筛选', 'Clear filters')}</Button>} />
           ) : (
             shownServers.map((s) => (
               <ServerRow

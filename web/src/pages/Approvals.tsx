@@ -1,3 +1,4 @@
+import { EmptyStateCard } from '@/components/ui';
 import { Button } from '@/components/ui';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { useCallback, useEffect, useState } from 'react';
@@ -105,10 +106,7 @@ export default function ApprovalsPage() {
         {loading ? (
           <div className="flex h-40 items-center justify-center text-sm text-zinc-500">{tr('加载中…', 'Loading…')}</div>
         ) : items.length === 0 ? (
-          <div className="flex h-40 flex-col items-center justify-center gap-2 text-zinc-600">
-            <ShieldCheck size={28} className="text-zinc-700" />
-            <div className="text-[13px]">{status === 'pending' ? tr('没有待确认的操作', 'No actions awaiting approval') : tr('暂无记录', 'Nothing here')}</div>
-          </div>
+          <EmptyStateCard icon={ShieldCheck} title={status === 'pending' ? tr('没有待确认的操作', 'No actions awaiting approval') : tr('暂无记录', 'Nothing here')} />
         ) : (
           <div className="space-y-2">
             {items.map((a) => (

@@ -1,3 +1,4 @@
+import { usePermissions } from '@/store/me';
 import { Input, Label, Textarea } from '@/components/ui';
 import { Hint } from '@/components/ui/Tooltip';
 // Knowledge page — folder-tree view of the RAG knowledge base.
@@ -33,7 +34,7 @@ import { cn } from '@/lib/cn';
 import { fullDateTime } from '@/lib/format';
 import { splitFrontmatter, stripFrontmatter } from '@/lib/frontmatter';
 import { Modal } from '@/components/Modal';
-import { Button, Card, EmptyState, PageHeader } from '@/components/ui';
+import { Button, Card, EmptyStateCard, PageHeader } from '@/components/ui';
 import {
   createDoc,
   deleteDoc,
@@ -97,6 +98,7 @@ function buildTree(rows: PathRow[]): TreeNode {
 
 export default function KnowledgePage() {
   const { tr } = useI18n();
+  const { canMutate } = usePermissions();
   const [items, setItems] = useState<KnowledgeDoc[]>([]);
   // Two trees by source (ADR-028): 'builtin' = the read-only platform vault
   // (source_type=vault); 'org' = the organization's own content
@@ -390,7 +392,7 @@ export default function KnowledgePage() {
             activePath={activePath}
             onPick={(p) => pickFolder('org', p)}
             onMoveDoc={onMoveDoc}
-            actions={
+            actions={canMutate && (
               <>
                 <Hint content={tr('上传文件 (.md/.txt/.pdf/.docx)', 'Upload file (.md/.txt/.pdf/.docx)')}><Button variant="subtle" size="sm"
                   type="button"
@@ -417,7 +419,7 @@ export default function KnowledgePage() {
                   <Plus size={13} />
                 </Button></Hint>
               </>
-            }
+            )}
           />
           <div className="my-2 border-t border-zinc-800/60" />
           <ScopeTreeSection
@@ -442,7 +444,7 @@ export default function KnowledgePage() {
                   e.stopPropagation();
                   void onSyncBuiltin();
                 }}
-                disabled={syncingBuiltin}
+                disabled={syncingBuiltin || !canMutate}
 
                 className="p-1"
               >
@@ -459,8 +461,8 @@ export default function KnowledgePage() {
           )}
           {loading ? (
             <div className="flex h-40 items-center justify-center text-sm text-zinc-500">{tr('加载中…', 'Loading…')}</div>
-          ) : visibleDocs.length === 0 ? (
-            <EmptyState
+          ) : err && visibleDocs.length === 0 ? null : visibleDocs.length === 0 ? (
+            <EmptyStateCard
               icon={BookOpen}
               title={
                 activePath
@@ -469,9 +471,10 @@ export default function KnowledgePage() {
                     ? tr('内置知识库为空', 'Built-in knowledge base is empty')
                     : tr('组织知识库还没有内容', 'No organization docs yet')
               }
-              action={
+              hint={!canMutate ? tr('请联系管理员添加或同步知识库。', 'Ask an admin to add or sync knowledge.') : undefined}
+              action={canMutate && (
                 sourceScope === 'builtin' ? (
-                  <Button variant="ghost" onClick={() => void onSyncBuiltin()} disabled={syncingBuiltin}>
+                  <Button variant="ghost" onClick={() => void onSyncBuiltin()} disabled={syncingBuiltin || !canMutate}>
                     <DownloadCloud size={12} /> {tr('从云端同步内置知识库', 'Sync built-in vault from cloud')}
                   </Button>
                 ) : (
@@ -484,7 +487,7 @@ export default function KnowledgePage() {
                     </Button>
                   </div>
                 )
-              }
+              )}
             />
           ) : (
             <div className="flex flex-col gap-1.5">

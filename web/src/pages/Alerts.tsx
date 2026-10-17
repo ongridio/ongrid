@@ -1,4 +1,4 @@
-import { Button, Label, Textarea, PageHeader } from '@/components/ui';
+import { Button, Label, Textarea, PageHeader, EmptyStateCard } from '@/components/ui';
 import { Hint } from '@/components/ui/Tooltip';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -210,9 +210,14 @@ export default function AlertsPage() {
           {loading ? (
             <div className="flex h-40 items-center justify-center text-sm text-zinc-500">{tr('加载中…', 'Loading…')}</div>
           ) : items.length === 0 ? (
-            <EmptyState />
+            <EmptyStateCard className="mx-6 my-4"
+              icon={CheckCircle2}
+              title={tr('当前没有匹配的告警', 'No matching alerts right now')}
+              hint={tr('所有规则未触发，或当前筛选下没有告警', 'No rules have fired, or no alerts match the current filter')}
+              action={(statusFilter || severityFilter || page > 0) && <Button onClick={() => { setStatusFilter(''); setSeverityFilter(''); setPage(0); }}>{tr('清除筛选', 'Clear filters')}</Button>}
+            />
           ) : (
-            <table className="w-full text-sm">
+            <table className="w-full text-xs">
               <thead className="sticky top-0 bg-zinc-950 text-left text-[11px] uppercase tracking-wider text-zinc-500">
                 <tr className="border-b border-zinc-800">
                   <th className="px-4 py-2 font-medium">{tr('级别', 'Severity')}</th>
@@ -523,16 +528,5 @@ function StatusBadge({ status }: { status: IncidentStatus }) {
       {status === 'resolved' ? <CheckCircle2 size={11} /> : status === 'silenced' ? <X size={11} /> : <span className="h-1.5 w-1.5 rounded-full bg-current" />}
       {status}
     </span>
-  );
-}
-
-function EmptyState() {
-  const { tr } = useI18n();
-  return (
-    <div className="flex h-60 flex-col items-center justify-center gap-2 text-zinc-500">
-      <CheckCircle2 size={28} className="text-emerald-500/60" />
-      <div className="text-sm">{tr('当前没有匹配的告警', 'No matching alerts right now')}</div>
-      <div className="text-[11px] text-zinc-600">{tr('所有规则未触发，或当前筛选下没有 incident', 'No rules have fired, or no incidents match the current filter')}</div>
-    </div>
   );
 }

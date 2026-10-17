@@ -1,13 +1,23 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { http, HttpResponse } from 'msw';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { server } from '@/test/msw-server';
 import { repositoryName } from '@/api/knowledge';
 import KnowledgeRepos from './KnowledgeRepos';
 
+const permissions = vi.hoisted(() => ({ canMutate: true }));
+vi.mock('@/store/me', () => ({ usePermissions: () => permissions }));
+
 describe('Repository cards and SSH summary', () => {
-  beforeEach(() => localStorage.setItem('ongrid-locale', 'zh-CN'));
+  beforeEach(() => { permissions.canMutate = true; localStorage.setItem('ongrid-locale', 'zh-CN'); });
+  it('hides repository creation for read-only users', async () => {
+    permissions.canMutate = false;
+    server.use(http.get('/api/v1/knowledge/repos', () => HttpResponse.json({ items: [] })), http.get('/api/v1/knowledge/ssh-identities', () => HttpResponse.json({ items: [] })));
+    render(<MemoryRouter><KnowledgeRepos /></MemoryRouter>);
+    await screen.findByText('还没添加仓库');
+    expect(screen.queryByRole('button', { name: '添加仓库' })).not.toBeInTheDocument();
+  });
   it('loads credential count while collapsed and shows a short repository heading', async () => {
     let release!: () => void;
     const ready = new Promise<void>((resolve) => { release = resolve; });

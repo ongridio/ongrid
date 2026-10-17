@@ -1,3 +1,5 @@
+import { usePermissions } from '@/store/me';
+import { EmptyStateCard } from '@/components/ui';
 import { Button, Label, Input, Textarea } from '@/components/ui';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { Hint } from '@/components/ui/Tooltip';
@@ -96,6 +98,7 @@ function gitErrorHint(raw: string, url: string, tr: (zh: string, en: string) => 
 
 export default function KnowledgeReposPage() {
   const { tr } = useI18n();
+  const { canMutate } = usePermissions();
   const [items, setItems] = useState<KnowledgeRepo[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -174,13 +177,13 @@ export default function KnowledgeReposPage() {
               <RefreshCw size={12} className={cn(refreshing && 'animate-spin')} />
               {tr('刷新', 'Refresh')}
             </Button>
-            <Button variant="primary" size="sm"
+            {canMutate && <Button variant="primary" size="sm"
               type="button"
               onClick={() => setCreating(true)}
               className="inline-flex items-center gap-1.5 px-2.5 py-1.5 font-medium text-accent-fg"
             >
               <Plus size={12} /> {tr('添加仓库', 'Add repo')}
-            </Button>
+            </Button>}
           </div>
         </div>
       </header>
@@ -196,10 +199,8 @@ export default function KnowledgeReposPage() {
 
         {loading ? (
           <div className="flex h-40 items-center justify-center text-sm text-zinc-500">{tr('加载中…', 'Loading…')}</div>
-        ) : items.length === 0 ? (
-          <div className="flex h-60 flex-col items-center justify-center gap-2 text-zinc-500">
-            <GitBranch size={28} className="text-zinc-600" />
-            <div className="text-sm">{tr('还没添加仓库', 'No repos added yet')}</div>
+        ) : err && items.length === 0 ? null : items.length === 0 ? (
+          <EmptyStateCard icon={GitBranch} title={tr('还没添加仓库', 'No repos added yet')} hint={!canMutate ? tr('请联系管理员添加仓库。', 'Ask an admin to add a repository.') : undefined} action={canMutate &&
             <Button variant="primary" size="sm"
               type="button"
               onClick={() => setCreating(true)}
@@ -207,7 +208,7 @@ export default function KnowledgeReposPage() {
             >
               <Plus size={12} /> {tr('添加仓库', 'Add repo')}
             </Button>
-          </div>
+          } />
         ) : (
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {items.map((r) => (

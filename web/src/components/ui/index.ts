@@ -3,7 +3,7 @@
 // /ui/* for the implementations.
 export { Card } from './Card';
 export { Chip } from './Chip';
-export { EmptyState } from './EmptyState';
+export { EmptyState, EmptyStateCard } from './EmptyState';
 export { PageHeader } from './PageHeader';
 export { PaginationFooter } from './PaginationFooter';
 export { Button } from './Button';

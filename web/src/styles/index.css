@@ -864,3 +864,61 @@ html.light .og-chip[data-tone="warning"] { color: rgb(180 83 9); }
 html.light .og-chip[data-tone="danger"] { color: rgb(185 28 28); }
 html.light .og-chip[data-tone="info"] { color: rgb(3 105 161); }
 html.light .og-chip[data-tone="accent"] { color: rgb(67 56 202); }
+
+
+/* 标题自然裁切，悬停时缓慢滚动，不使用渐隐或省略号。 */
+.chat-session-row:has(.chat-session-link[aria-current="page"]) .chat-session-actions,
+.chat-session-row:hover .chat-session-actions,
+.chat-session-row:focus-within .chat-session-actions,
+.chat-session-actions[data-popup-open] {
+  background-color: rgb(var(--card));
+}
+.chat-session-row:hover .chat-session-link,
+.chat-session-row:focus-within .chat-session-link,
+.chat-session-row:has([data-popup-open]) .chat-session-link {
+  background-color: rgb(var(--card));
+}
+@media (min-width: 1024px) {
+  .chat-session-row:hover .chat-session-link,
+  .chat-session-row:focus-within .chat-session-link,
+  .chat-session-row:has([data-popup-open]) .chat-session-link {
+    padding-right: 40px;
+  }
+}
+.chat-session-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  scrollbar-gutter: stable;
+}
+.chat-session-scroll:hover,
+.chat-session-scroll:focus-within { scrollbar-color: rgb(var(--text-muted) / .35) transparent; }
+.chat-session-scroll::-webkit-scrollbar { width: 6px; }
+.chat-session-scroll::-webkit-scrollbar-track { background: transparent; }
+.chat-session-scroll::-webkit-scrollbar-thumb { background-color: transparent; border-radius: 999px; }
+.chat-session-scroll:hover::-webkit-scrollbar-thumb,
+.chat-session-scroll:focus-within::-webkit-scrollbar-thumb { background-color: rgb(var(--text-muted) / .35); }
+.chat-session-scroll::-webkit-scrollbar-thumb:hover { background-color: rgb(var(--text-muted) / .6); }
+@media (hover: none) {
+  .chat-session-scroll { scrollbar-color: rgb(var(--text-muted) / .35) transparent; }
+  .chat-session-scroll::-webkit-scrollbar-thumb { background-color: rgb(var(--text-muted) / .35); }
+}
+@media (forced-colors: active) {
+  .chat-session-scroll { scrollbar-color: auto; }
+}
+/* 关闭按钮同时清空筛选，避免与浏览器原生搜索清除按钮重复。 */
+.chat-session-search::-webkit-search-cancel-button { -webkit-appearance: none; }
+
+.chat-session-row:hover .chat-session-title[data-overflow] .chat-session-title-text,
+.chat-session-link:focus-visible .chat-session-title[data-overflow] .chat-session-title-text {
+  animation: chat-title-scroll var(--title-duration) linear .6s infinite alternate;
+}
+@keyframes chat-title-scroll {
+  0%, 15% { transform: translateX(0); }
+  85%, 100% { transform: translateX(var(--title-travel)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-session-row:hover .chat-session-title .chat-session-title-text,
+  .chat-session-link:focus-visible .chat-session-title .chat-session-title-text { animation: none; }
+  .chat-session-row:hover .chat-session-title,
+  .chat-session-link:focus-visible .chat-session-title { white-space: normal; overflow-wrap: anywhere; }
+}

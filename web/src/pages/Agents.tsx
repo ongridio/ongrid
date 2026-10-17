@@ -1,3 +1,4 @@
+import { usePermissions } from '@/store/me';
 import { Label, Input, Textarea } from '@/components/ui';
 import { Hint } from '@/components/ui/Tooltip';
 import { Checkbox } from '@/components/ui/Checkbox';
@@ -35,7 +36,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { Modal } from '@/components/Modal';
-import { Button, Card, EmptyState, PageHeader } from '@/components/ui';
+import { Button, Card, EmptyStateCard, PageHeader } from '@/components/ui';
 import {
   createUserAgent,
   deleteAgent,
@@ -54,6 +55,7 @@ import { tr as trInline, useI18n } from '@/i18n/locale';
 
 export default function AgentsPage() {
   const { tr } = useI18n();
+  const { canMutate } = usePermissions();
   const [items, setItems] = useState<AgentSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -125,9 +127,9 @@ export default function AgentsPage() {
               <RefreshCw size={12} className={cn(refreshing && 'animate-spin')} />
               {tr('刷新', 'Refresh')}
             </Button>
-            <Button onClick={() => setEditing({ mode: 'create' })} variant="primary">
+            {canMutate && <Button onClick={() => setEditing({ mode: 'create' })} variant="primary">
               <Plus size={12} /> {tr('新建助理', 'New assistant')}
-            </Button>
+            </Button>}
           </>
         }
       />
@@ -154,8 +156,8 @@ export default function AgentsPage() {
         )}
         {loading ? (
           <div className="flex h-40 items-center justify-center text-sm text-zinc-500">{tr('加载中…', 'Loading…')}</div>
-        ) : filtered.length === 0 ? (
-          <AgentsEmpty hasItems={items.length > 0} onCreate={() => setEditing({ mode: 'create' })} />
+        ) : err && items.length === 0 ? null : filtered.length === 0 ? (
+          <AgentsEmpty canCreate={canMutate} hasItems={!!query.trim()} onClear={() => setQuery('')} onCreate={() => setEditing({ mode: 'create' })} />
         ) : (
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
             {filtered.map((a) => (
@@ -567,14 +569,15 @@ function DetailSection({ label, children }: { label: string; children: React.Rea
   );
 }
 
-function AgentsEmpty({ hasItems, onCreate }: { hasItems: boolean; onCreate: () => void }) {
+function AgentsEmpty({ hasItems, onCreate, onClear, canCreate }: { canCreate: boolean; hasItems: boolean; onCreate: () => void; onClear: () => void }) {
   const { tr } = useI18n();
   return (
-    <EmptyState
+    <EmptyStateCard
       icon={Users}
       title={hasItems ? tr('没有匹配的助理', 'No matching assistants') : tr('还没有助理注册', 'No assistants registered yet')}
+      hint={!hasItems && !canCreate ? tr('请联系管理员创建助理。', 'Ask an admin to create an assistant.') : undefined}
       action={
-        !hasItems && (
+        hasItems ? <Button onClick={onClear}>{tr('清除筛选', 'Clear filters')}</Button> : canCreate && (
           <Button variant="primary" onClick={onCreate}>
             <Plus size={12} /> {tr('新建助理', 'New assistant')}
           </Button>

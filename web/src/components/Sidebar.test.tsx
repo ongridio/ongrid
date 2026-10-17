@@ -19,11 +19,27 @@ describe('Sidebar configurable sections', () => {
     localStorage.clear();
     localStorage.setItem('ongrid-locale', 'zh-CN');
     useAuth.setState({ token: null, refreshToken: null, email: 'user@example.com', role: 'user' });
-    useUi.getState().setSidebarCollapsed(false);
+    useUi.setState({ sidebarCollapsed: false, sessionsCollapsed: false, sessionsPreviewOpen: false, sessionsTriggerHovered: false });
     server.use(
       http.get('/api/v1/chat/sessions', () => HttpResponse.json({ items: [], total: 0 })),
       http.get('/api/v1/system-settings', () => HttpResponse.json({ items: [], total: 0 })),
     );
+  });
+
+  it('reveals auto-hidden sessions from the menu header only on chat routes', () => {
+    useUi.setState({ sessionsCollapsed: true });
+    const view = render(<MemoryRouter><Sidebar /></MemoryRouter>);
+    expect(screen.queryByRole('button', { name: '展开会话栏' })).not.toBeInTheDocument();
+    const trigger = screen.getByLabelText('会话栏预览区域');
+    fireEvent.pointerEnter(trigger.closest('[data-session-reveal]')!, { pointerType: 'mouse' });
+    expect(useUi.getState().sessionsPreviewOpen).toBe(true);
+    expect(useUi.getState().sessionsCollapsed).toBe(true);
+    view.unmount();
+    useUi.setState({ sessionsPreviewOpen: false, sessionsTriggerHovered: false });
+    render(<MemoryRouter initialEntries={['/devices']}><Sidebar /></MemoryRouter>);
+    expect(screen.queryByRole('button', { name: '展开会话栏' })).not.toBeInTheDocument();
+    fireEvent.pointerEnter(screen.getByRole('link', { name: 'Ongrid 首页' }).closest('[data-session-reveal]')!, { pointerType: 'mouse' });
+    expect(useUi.getState().sessionsPreviewOpen).toBe(false);
   });
 
   it('uses the icon rail on narrow screens without overwriting desktop preferences', () => {

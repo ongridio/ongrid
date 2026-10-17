@@ -310,7 +310,7 @@ export default function SettingsOrgs() {
           ) : filteredOrgs.length === 0 ? (
             <EmptyState
               title={search ? tr('没有匹配的组织', 'No matching organizations') : tr('还没有组织', 'No organizations yet')}
-              hint={search ? undefined : tr('点上方「新建组织」', 'Click "New org" above')}
+              action={search ? <Button onClick={() => setSearch('')}>{tr('清除筛选', 'Clear filters')}</Button> : <Button variant="primary" onClick={() => setCreateOrgOpen(true)}>{tr('新建组织', 'New org')}</Button>}
               className="flex h-32 flex-col items-center justify-center gap-2 text-center"
             />
           ) : (
@@ -427,7 +427,7 @@ export default function SettingsOrgs() {
               ) : members.length === 0 ? (
                 <EmptyState
                   title={tr('还没有成员', 'No members yet')}
-                  hint={tr('点右上角「添加成员」从用户列表挑选', 'Use "Add member" in the top right to pick from the user list')}
+                  action={<Button variant="primary" onClick={() => setAddMemberOpen(true)}>{tr('添加成员', 'Add member')}</Button>}
                   className="flex h-40 flex-col items-center justify-center gap-2 text-center"
                 />
               ) : (

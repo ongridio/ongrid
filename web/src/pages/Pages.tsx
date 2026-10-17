@@ -17,7 +17,7 @@ import { downloadPacketCapture, listPacketCaptureSessions, packetCaptureArtifact
 import { cn } from '@/lib/cn';
 import { useI18n } from '@/i18n/locale';
 import { useAuth } from '@/store/auth';
-import { PageHeader, Button, EmptyState, PaginationFooter } from '@/components/ui';
+import { PageHeader, Button, EmptyStateCard, PaginationFooter } from '@/components/ui';
 import { Modal } from '@/components/Modal';
 import { ReportCards } from '@/components/ReportCards';
 import { PcapFileIcon } from '@/components/PcapFileIcon';
@@ -290,13 +290,12 @@ export default function PagesPage() {
         {loading ? (
           <div className="py-16 text-center text-xs text-zinc-500">{tr('加载中…', 'Loading…')}</div>
         ) : items.length === 0 ? (
-          <EmptyState
+          <EmptyStateCard
             title={tr('还没有生成的页面', 'No generated pages yet')}
             hint={tr('让工作流或助理用 serve_page 生成一个网页报告，它会出现在这里。', 'Have a workflow or the assistant generate a web report via serve_page — it shows up here.')}
-            className="flex flex-col items-center gap-2 py-20 text-center"
           />
         ) : shown.length === 0 ? (
-          <div className="py-16 text-center text-xs text-zinc-500">{tr('无匹配的页面', 'No matching pages')}</div>
+          <EmptyStateCard title={tr('无匹配的页面', 'No matching pages')} action={<Button onClick={() => setSearch('')}>{tr('清除筛选', 'Clear filters')}</Button>} />
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {shown.map((p) => (
@@ -435,11 +434,9 @@ function PacketCaptureSessionsView() {
       {loading ? (
         <div className="py-16 text-center text-sm text-zinc-500">{tr('加载中…', 'Loading…')}</div>
       ) : items.length === 0 ? (
-        <div className="py-16 text-center text-sm text-zinc-500">
-          {page > 0
+        <EmptyStateCard action={page > 0 && <Button onClick={() => setPage(0)}>{tr('返回第一页', 'Back to first page')}</Button>} title={page > 0
             ? tr('这一页没有抓包会话。', 'No capture sessions on this page.')
-            : tr('暂无抓包会话。让助理对多个 Edge 发起抓包后，会话会在这里汇总成员 PCAP、关联流和时间线。', 'No capture sessions yet. Ask the assistant to capture on multiple edges; sessions summarize member PCAPs, correlated flows, and timelines here.')}
-        </div>
+            : tr('暂无抓包会话。让助理对多个 Edge 发起抓包后，会话会在这里汇总成员 PCAP、关联流和时间线。', 'No capture sessions yet. Ask the assistant to capture on multiple edges; sessions summarize member PCAPs, correlated flows, and timelines here.')} />
       ) : (
         <>
           <section className="overflow-hidden rounded-xl border border-zinc-800/60 bg-zinc-900/40">

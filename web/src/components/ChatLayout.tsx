@@ -1,6 +1,6 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type CSSProperties } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { ChevronDown, ChevronLeft, ChevronRight, ListChecks, MoreHorizontal, Pencil, SquarePen, Trash2 } from 'lucide-react';
+import { ChevronDown, PanelLeftClose, Search, X, ListChecks, MoreHorizontal, Pencil, SquarePen, Trash2 } from 'lucide-react';
 import { Button, Input, Label } from './ui';
 import { Checkbox } from './ui/Checkbox';
 import { Hint } from './ui/Tooltip';
@@ -22,8 +22,33 @@ export function ChatLayout() {
   const loading = useChatSessions((s) => s.loading);
   const loadError = useChatSessions((s) => s.error);
   const [mobileExpanded, setMobileExpanded] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const searchRef = useRef<HTMLInputElement>(null);
+  const searchButtonRef = useRef<HTMLButtonElement>(null);
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const visibleSessions = sessions.map((session, index) => ({ session, index })).filter(({ session, index }) =>
+    (session.title || tr(`会话 ${index + 1}`, `Session ${index + 1}`)).toLocaleLowerCase().includes(normalizedQuery),
+  );
+
+  useEffect(() => {
+    if (searchOpen) searchRef.current?.focus();
+  }, [searchOpen]);
+
+  function closeSearch() {
+    setQuery('');
+    setSearchOpen(false);
+    searchButtonRef.current?.focus();
+  }
   const collapsed = useUi((s) => s.sessionsCollapsed);
   const toggleSessions = useUi((s) => s.toggleSessions);
+  const previewOpen = useUi((s) => s.sessionsPreviewOpen);
+  const setPreviewOpen = useUi((s) => s.setSessionsPreviewOpen);
+  const triggerHovered = useUi((s) => s.sessionsTriggerHovered);
+  const setTriggerHovered = useUi((s) => s.setSessionsTriggerHovered);
+  const panelRef = useRef<HTMLElement>(null);
+  const [panelHovered, setPanelHovered] = useState(false);
+  const [panelFocused, setPanelFocused] = useState(false);
   const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ChatSession | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -32,7 +57,42 @@ export function ChatLayout() {
   useEffect(() => {
     void refreshSessions();
     setMobileExpanded(false);
+    setSearchOpen(false);
+    setQuery('');
   }, [location.pathname, refreshSessions]);
+
+  // 给鼠标从菜单顶部移入浮层留出时间；输入、菜单和确认弹窗交互期间不收回。
+  useEffect(() => {
+    if (!collapsed || !previewOpen || triggerHovered || panelHovered || panelFocused || batchDeleteOpen || deleteTarget) return;
+    const timer = window.setTimeout(() => setPreviewOpen(false), 300);
+    return () => window.clearTimeout(timer);
+  }, [collapsed, previewOpen, triggerHovered, panelHovered, panelFocused, batchDeleteOpen, deleteTarget, setPreviewOpen]);
+
+  useEffect(() => {
+    setPreviewOpen(false);
+    setTriggerHovered(false);
+    setPanelHovered(false);
+    setPanelFocused(false);
+  }, [location.pathname, setPreviewOpen, setTriggerHovered]);
+
+  useEffect(() => {
+    if (!collapsed || !previewOpen) return;
+    const dismiss = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element) || panelRef.current?.contains(target) || target.closest('[data-session-reveal], [role="menu"], [role="dialog"]')) return;
+      setPreviewOpen(false);
+      setPanelFocused(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || searchOpen || deleteTarget || batchDeleteOpen) return;
+      setPreviewOpen(false);
+      setPanelFocused(false);
+      document.querySelector<HTMLElement>('[data-session-reveal]')?.focus();
+    };
+    document.addEventListener('pointerdown', dismiss);
+    document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('pointerdown', dismiss); document.removeEventListener('keydown', escape); };
+  }, [collapsed, previewOpen, searchOpen, deleteTarget, batchDeleteOpen, setPreviewOpen]);
 
   async function confirmDelete(target: ChatSession) {
     if (deletingId) return;
@@ -59,23 +119,64 @@ export function ChatLayout() {
   }
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
-      <aside aria-label={tr('会话', 'Sessions')} className={cn('relative flex min-h-0 min-w-0 max-h-[50vh] w-full shrink-0 flex-col border-b border-border/60 bg-bg lg:max-h-none lg:border-b-0', collapsed ? 'lg:w-0' : 'lg:w-64 lg:border-r')}>
-        {/* Match the main sidebar's brand, account, search, and first navigation row. */}
-        <h2 className={cn('hidden h-16 shrink-0 items-center px-6 text-xl font-semibold text-text lg:h-[65px]', !collapsed && 'lg:flex')}>
-          {tr('会话', 'Chat')}
-        </h2>
-        <div className={cn('flex h-16 shrink-0 items-center px-3 lg:h-[68px] lg:px-6 lg:pb-4', collapsed && 'lg:hidden')}>
+    <div className="relative flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
+      <aside ref={panelRef} id="chat-session-panel" aria-label={tr('会话', 'Sessions')}
+        onPointerEnter={(event) => { if (event.pointerType !== 'touch') setPanelHovered(true); }}
+        onPointerLeave={() => setPanelHovered(false)}
+        onFocusCapture={() => setPanelFocused(true)}
+        onBlurCapture={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setPanelFocused(false); }}
+        className={cn('relative flex min-h-0 min-w-0 max-h-[50vh] w-full shrink-0 flex-col border-b border-border/60 bg-bg lg:max-h-none lg:border-b-0 lg:w-[272px] lg:border-r',
+          collapsed && 'lg:absolute lg:inset-y-0 lg:left-0 lg:z-40', collapsed && !previewOpen && 'lg:invisible lg:pointer-events-none')}
+      >
+        <div className="flex h-14 shrink-0 items-center gap-1 pl-5 pr-3 lg:h-[65px]">
+          <h2 className="min-w-0 flex-1 text-base font-semibold text-text">{tr('会话', 'Chat')}</h2>
+            <Button ref={searchButtonRef} variant="subtle" size="sm" className="shrink-0 p-1.5"
+              title={tr('搜索会话', 'Search chats')}
+              aria-label={tr('搜索会话', 'Search chats')}
+              aria-expanded={searchOpen}
+              aria-controls="chat-session-search"
+              onClick={() => { if (searchOpen) closeSearch(); else { setSearchOpen(true); setMobileExpanded(true); } }}
+            ><Search size={15} /></Button>
+            <Button variant="subtle" size="sm"
+              className="hidden shrink-0 p-1.5 lg:inline-flex"
+              aria-label={tr('显示/隐藏会话栏', 'Toggle sessions sidebar')}
+              title={tr('显示/隐藏会话栏', 'Toggle sessions sidebar')}
+              data-session-pin
+              aria-pressed={!collapsed}
+              aria-expanded={!collapsed}
+              aria-controls="chat-session-list"
+              onClick={() => {
+                toggleSessions(); setPanelFocused(false); setPanelHovered(false);
+                if (!collapsed) requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-session-reveal]')?.focus());
+              }}
+            >
+              <PanelLeftClose size={15} />
+            </Button>
+        </div>
+        <div className="flex shrink-0 items-center px-3 pb-1">
           <Link to="/" onClick={() => setMobileExpanded(false)}
-            data-slot="button" data-variant="plain" data-size="default"
-            className="og-button min-w-0 flex-1 justify-start gap-3 rounded-lg bg-transparent text-sm text-text hover:text-text-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:!outline-text-muted lg:h-12"
+            data-slot="button" data-variant="plain" data-size="sm"
+            className="og-button min-w-0 flex-1 justify-start gap-2 rounded-lg bg-transparent px-2 text-[13px] font-normal text-zinc-300 hover:bg-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:!outline-text-muted"
           >
-            <SquarePen size={20} className="shrink-0" aria-hidden="true" />
+            <SquarePen size={16} className="shrink-0" aria-hidden="true" />
             {tr('新建会话', 'New chat')}
           </Link>
         </div>
-        <div className={cn('flex h-10 shrink-0 items-center justify-between gap-2 px-4 lg:h-[33px] lg:pl-6', collapsed && 'lg:hidden')}>
-          <h3 className="hidden text-xs font-medium text-text-muted lg:block">{tr('最近会话', 'Recent chats')}</h3>
+        {searchOpen && (
+          <div id="chat-session-search" className="relative mx-3 mb-2 shrink-0">
+            <Input ref={searchRef} type="search" value={query}
+              aria-label={tr('按标题搜索会话', 'Search chats by title')}
+              placeholder={tr('搜索当前列表…', 'Search listed chats…')}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); closeSearch(); } }}
+              className="chat-session-search pr-9 text-sm"
+            />
+            <Button variant="subtle" size="icon" className="absolute right-0 top-0"
+              aria-label={tr('关闭搜索', 'Close search')} onClick={closeSearch}><X size={14} /></Button>
+          </div>
+        )}
+        <div className="flex h-10 shrink-0 items-center justify-between gap-2 px-5">
+          <h3 className="hidden text-xs font-medium text-text-muted lg:block">{tr('最近', 'Recent')}</h3>
           <Button variant="subtle" size="sm" className="lg:hidden"
             aria-expanded={mobileExpanded}
             aria-controls="chat-session-list"
@@ -94,7 +195,7 @@ export function ChatLayout() {
           )}
         </div>
         <nav id="chat-session-list" aria-label={tr('会话列表', 'Session list')} aria-busy={loading}
-          className={cn('min-h-0 flex-1 space-y-0.5 overflow-y-auto px-3 pb-4 lg:pt-2', collapsed ? 'lg:hidden' : 'lg:block', !mobileExpanded && 'hidden')}
+          className={cn('chat-session-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-4', 'lg:block', !mobileExpanded && 'hidden')}
         >
           {loadError && (
             <div className="px-3 py-3">
@@ -108,21 +209,12 @@ export function ChatLayout() {
             <div role="status" className="px-3 py-3 text-xs text-text-muted">
               {loading ? tr('加载中…', 'Loading…') : tr('暂无会话', 'No sessions yet')}
             </div>
-          ) : sessions.map((session, index) => (
+          ) : visibleSessions.length === 0 ? (
+            <div role="status" className="px-2 py-3 text-sm text-text-muted">{tr('没有匹配的会话', 'No matching chats')}</div>
+          ) : visibleSessions.map(({ session, index }) => (
             <SessionRow key={session.id} session={session} index={index} onDelete={() => { setDeleteError(false); setDeleteTarget(session); }} />
           ))}
         </nav>
-        <Hint content={collapsed ? tr('展开会话栏', 'Expand sessions') : tr('收起会话栏', 'Collapse sessions')}>
-          <Button variant="subtle" size="icon"
-            className={cn('absolute left-full top-1/2 z-20 hidden -translate-y-1/2 lg:inline-flex', !collapsed && '-translate-x-1/2')}
-            aria-label={collapsed ? tr('展开会话栏', 'Expand sessions') : tr('收起会话栏', 'Collapse sessions')}
-            aria-expanded={!collapsed}
-            aria-controls="chat-session-list"
-            onClick={toggleSessions}
-          >
-            {collapsed ? <ChevronRight size={16} strokeWidth={2.5} className="bg-bg text-text" /> : <ChevronLeft size={16} strokeWidth={2.5} className="bg-bg text-text" />}
-          </Button>
-        </Hint>
       </aside>
       <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
         <Outlet />
@@ -212,8 +304,8 @@ function SessionRow({
 
   if (renaming) {
     return (
-      <div className="group relative">
-        <div className="flex items-center rounded-lg bg-card px-3 py-3">
+      <div className="chat-session-row group relative">
+        <div className="flex items-center rounded-lg bg-card px-2 py-1">
           <Input variant="inset"
             ref={inputRef}
             value={draft}
@@ -252,8 +344,8 @@ function SessionRow({
   }
 
   return (
-    <div className="group relative">
-      <Hint content={displayTitle}><NavLink
+    <div className="chat-session-row group relative">
+      <NavLink
         to={`/chat/${session.id}`}
         aria-label={displayTitle}
         onDoubleClick={(e) => {
@@ -263,23 +355,23 @@ function SessionRow({
         }}
         className={({ isActive }) =>
           cn(
-            'block rounded-lg py-2.5 pl-3 pr-10 text-[13px] text-text-muted transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500',
-            isActive ? 'bg-card text-text shadow-sm' : 'hover:bg-card hover:text-text'
+            'chat-session-link block rounded-lg py-2 pl-2 pr-10 text-sm text-zinc-400 transition-colors lg:pr-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500',
+            isActive ? 'bg-card text-zinc-300' : 'hover:bg-card'
           )
         }
       >
-        <span className="block truncate font-medium leading-5">{displayTitle}</span>
+        <SessionTitle title={displayTitle} />
         {showAgent && (
           <span className="mt-1 block">
             <AgentBadge agentId={session.agent_id} />
           </span>
         )}
-      </NavLink></Hint>
+      </NavLink>
       <DropdownMenu>
         <DropdownMenuTrigger render={
           <Button variant="subtle" size="icon"
             aria-label={tr(`会话操作：${displayTitle}`, `Session actions: ${displayTitle}`)}
-            className="absolute right-1 top-0.5 transition-opacity lg:opacity-0 lg:group-hover:opacity-100 lg:group-focus-within:opacity-100 data-[popup-open]:opacity-100"
+            className="chat-session-actions absolute right-0.5 top-0.5 bg-bg transition-opacity lg:opacity-0 lg:group-hover:opacity-100 lg:group-focus-within:opacity-100 data-[popup-open]:opacity-100"
           >
             <MoreHorizontal size={16} />
           </Button>
@@ -294,6 +386,34 @@ function SessionRow({
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
+  );
+}
+
+// 只在实际溢出时滚动；容器宽度、标题和字体变化后重新测量。
+function SessionTitle({ title }: { title: string }) {
+  const viewportRef = useRef<HTMLSpanElement>(null);
+  const textRef = useRef<HTMLSpanElement>(null);
+  const [distance, setDistance] = useState(0);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    const text = textRef.current;
+    if (!viewport || !text) return;
+    const measure = () => setDistance(Math.max(0, text.offsetWidth - viewport.clientWidth));
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(viewport);
+    observer.observe(text);
+    return () => observer.disconnect();
+  }, [title]);
+
+  return (
+    <span ref={viewportRef} className="chat-session-title block overflow-hidden whitespace-nowrap font-normal leading-5"
+      data-overflow={distance > 0 || undefined}
+      style={{ '--title-travel': `-${distance}px`, '--title-duration': `${Math.max(4, distance / 30 + 2)}s` } as CSSProperties}
+    >
+      <span ref={textRef} className="chat-session-title-text inline-block">{title}</span>
+    </span>
   );
 }
 

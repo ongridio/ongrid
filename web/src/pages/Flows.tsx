@@ -11,7 +11,7 @@ import { Loader2, Play, Plus, Route as WorkflowIcon, Search, Sparkles, Trash2 } 
 import { createFlow, deleteFlow, generateFlow, listFlows, runFlow, toggleFlow, type Flow } from '@/api/flows';
 import { useI18n } from '@/i18n/locale';
 import { useAuth } from '@/store/auth';
-import { PageHeader, Button, PaginationFooter } from '@/components/ui';
+import { PageHeader, Button, PaginationFooter, EmptyStateCard } from '@/components/ui';
 import { Modal } from '@/components/Modal';
 import { cn } from '@/lib/cn';
 
@@ -163,15 +163,15 @@ export default function FlowsPage() {
 
       {loading ? (
         <div className="py-16 text-center text-xs text-zinc-500">{tr('加载中…', 'Loading…')}</div>
-      ) : items.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-zinc-800 py-16">
-          <WorkflowIcon size={28} className="text-zinc-600" />
-          <div className="text-xs text-zinc-500">
-            {tr('还没有工作流。新建一个，把告警处置 / 巡检 / 通知串成自动化。', 'No workflows yet. Create one to automate remediation, inspection, or notification chains.')}
-          </div>
-        </div>
+      ) : error && items.length === 0 ? null : items.length === 0 ? (
+        <EmptyStateCard
+          icon={WorkflowIcon}
+          title={tr('还没有工作流', 'No workflows yet')}
+          hint={canWrite ? tr('新建一个工作流，把告警处置、巡检和通知串成自动化。', 'Create a workflow to automate remediation, inspection, and notifications.') : tr('请联系管理员创建工作流。', 'Ask an admin to create a workflow.')}
+          action={page > 0 ? <Button onClick={() => setPage(0)}>{tr('返回第一页', 'Back to first page')}</Button> : canWrite && <Button variant="primary" onClick={() => setCreating(true)}><Plus size={12} />{tr('新建工作流', 'New workflow')}</Button>}
+        />
       ) : shown.length === 0 ? (
-        <div className="py-16 text-center text-xs text-zinc-500">{tr('无匹配的工作流', 'No matching workflows')}</div>
+        <EmptyStateCard icon={WorkflowIcon} title={tr('无匹配的工作流', 'No matching workflows')} action={<Button onClick={() => { setSearch(''); setPage(0); }}>{tr('清除筛选', 'Clear filters')}</Button>} />
       ) : (
         <div className="space-y-2">
           {shown.map((f) => (

@@ -28,7 +28,7 @@ export function PageHeader({ title, subtitle, actions, extra, navigation, leadin
         className,
       )}
     >
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 flex-1">
           {leading && <div className="mb-1 text-xs text-zinc-500">{leading}</div>}
           <h1 className="text-base font-semibold text-zinc-100">{title}</h1>

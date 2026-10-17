@@ -1,3 +1,4 @@
+import { EmptyStateCard } from '@/components/ui';
 import { TimeRangePicker } from '@/components/ui/TimeRangePicker';
 import { FilterField } from '@/components/ui/FilterField';
 import { Label, Input } from '@/components/ui';
@@ -608,27 +609,16 @@ export default function TracesPage() {
           </div>
         )}
         {!selectedRow && !hasSearched && !loading && rows.length === 0 && !err && (
-          <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-dashed border-zinc-800 bg-zinc-950/40 px-4 py-12 text-center">
-            <SearchIcon size={26} className="text-zinc-600" />
-            <div className="text-sm text-zinc-500">{tr('设好上面的筛选再点查询；填了 trace_id 会直接返回那一条', 'Set the filters above and click Search; filling in a trace_id returns just that one trace.')}</div>
-            <div className="text-xs text-zinc-600">
-              {tr(
-                '默认不主动查询 — Tempo 搜索吃资源；也可以点上方"快捷"chip 一键运行常用 TraceQL',
-                'No query runs by default — Tempo search is expensive. Click a Quick chip above to run a common TraceQL.',
-              )}
-            </div>
-          </div>
+          <EmptyStateCard icon={SearchIcon}
+            title={tr('设好上面的筛选再点查询；填了 trace_id 会直接返回那一条', 'Set the filters above and click Search; filling in a trace_id returns just that one trace.')}
+            hint={tr('默认不主动查询 — Tempo 搜索吃资源；也可以点上方"快捷"chip 一键运行常用 TraceQL', 'No query runs by default — Tempo search is expensive. Click a Quick chip above to run a common TraceQL.')}
+          />
         )}
         {!selectedRow && hasSearched && !loading && rows.length === 0 && !err && (
-          <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-zinc-800 bg-zinc-950/40 px-4 py-12 text-center">
-            <SearchIcon size={26} className="text-zinc-600" />
-            <div className="text-sm text-zinc-500">{tr('该时间窗内没有匹配的 trace', 'No traces matched this time window')}</div>
-            <div className="text-xs text-zinc-600">
-              {tr(
-                '试试以下任一项 — 多数情况下是时间窗或 TraceQL 收得太紧',
-                'Try one of the following — usually the time window or TraceQL is too tight',
-              )}
-            </div>
+          <EmptyStateCard icon={SearchIcon}
+            title={tr('该时间窗内没有匹配的 trace', 'No traces matched this time window')}
+            hint={tr('试试以下任一项 — 多数情况下是时间窗或 TraceQL 收得太紧', 'Try one of the following — usually the time window or TraceQL is too tight')}
+            action={
             <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
               <Button variant="outline" size="sm"
                 type="button"
@@ -668,7 +658,7 @@ export default function TracesPage() {
                 </Button>
               )}
             </div>
-          </div>
+            } />
         )}
         {!selectedRow && rows.length > 0 && (
           <div className="overflow-hidden rounded-xl border border-zinc-800/60 bg-zinc-900/40">

@@ -187,7 +187,7 @@ export default function PacketCapturesPage() {
               ) : items.length === 0 ? (
                 <tr>
                   <td colSpan={9} className="px-4 py-10">
-                    <EmptyState icon={Camera} title={tr('暂无抓包任务', 'No packet captures')} hint={tr('从在线主机创建一个短时抓包任务，或让助理/工作流调用 capture_pcap。', 'Create a short capture from an online host, or let an assistant/workflow call capture_pcap.')} />
+                    <EmptyState icon={Camera} title={tr('暂无抓包任务', 'No packet captures')} hint={tr('从在线主机创建一个短时抓包任务，或让助理/工作流调用 capture_pcap。', 'Create a short capture from an online host, or let an assistant/workflow call capture_pcap.')} action={state || page > 0 ? <Button onClick={() => { setState(''); setPage(0); }}>{tr('清除筛选', 'Clear filters')}</Button> : canMutate && <Button variant="primary" onClick={() => setCreateOpen(true)}>{tr('新建抓包', 'New capture')}</Button>} />
                   </td>
                 </tr>
               ) : (

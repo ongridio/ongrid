@@ -272,7 +272,7 @@ export default function ClustersPage() {
                       )
                 }
                 action={
-                  isAdmin && !query ? createMenu : undefined
+                  query ? <Button onClick={() => setQuery('')}>{tr('清除筛选', 'Clear filters')}</Button> : isAdmin ? createMenu : undefined
                 }
               />
             ) : (

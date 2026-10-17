@@ -1,3 +1,4 @@
+import { EmptyStateCard } from '@/components/ui';
 import { TimeRangePicker } from '@/components/ui/TimeRangePicker';
 import { FilterField } from '@/components/ui/FilterField';
 import { Hint, Input, Label } from '@/components/ui';
@@ -991,11 +992,11 @@ export default function LogsPage() {
           {error && <div className="m-3 flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300"><AlertTriangle size={13} className="mt-0.5 shrink-0" /><span>{error}</span></div>}
           {loading && records.length === 0 && <div className="flex h-40 items-center justify-center text-xs text-zinc-500"><Loader2 size={16} className="mr-2 animate-spin" />{tr('正在检索日志…', 'Searching logs…')}</div>}
           {!loading && !error && records.length === 0 && (
-            <div className="flex h-56 flex-col items-center justify-center text-center">
-              <FileSearch size={30} className="mb-3 text-zinc-700" />
-              <p className="text-sm text-zinc-300">{tr('该时间窗内没有匹配日志', 'No matching logs in this time range')}</p>
-              <p className="mt-1 max-w-lg text-xs text-zinc-600">{tr('可以扩大时间窗、减少筛选条件，或检查 Edge 日志采集配置。', 'Try a wider time range, fewer filters, or check Edge log collection settings.')}</p>
-            </div>
+            <EmptyStateCard className="m-4" icon={FileSearch}
+              title={tr('该时间窗内没有匹配日志', 'No matching logs in this time range')}
+              action={(committedQuery || committedExclude) && <Button onClick={() => { setQuery(''); setCommittedQuery(''); setExclude(''); setCommittedExclude(''); }}>{tr('清除关键词', 'Clear keywords')}</Button>}
+              hint={tr('可以扩大时间窗、减少筛选条件，或检查 Edge 日志采集配置。', 'Try a wider time range, fewer filters, or check Edge log collection settings.')}
+            />
           )}
           {viewMode === 'raw' ? (
             <div role="list" className={cn('divide-y divide-zinc-800/40 font-mono text-[11px] leading-snug', !wrapLines && 'overflow-x-auto')}>

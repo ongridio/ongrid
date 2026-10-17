@@ -14,7 +14,7 @@ import { Link } from 'react-router-dom';
 import { Network, Plus, RefreshCw, Search, Trash2, X } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { Modal } from '@/components/Modal';
-import { Button, Card, EmptyState, PageHeader } from '@/components/ui';
+import { Button, Card, EmptyStateCard, PageHeader } from '@/components/ui';
 import { TopologyGraph } from '@/components/topology/Graph';
 import { ApiError } from '@/api/client';
 import { useAuth } from '@/store/auth';
@@ -253,7 +253,7 @@ function NodesTab({ isAdmin }: { isAdmin: boolean }) {
           {loading && items.length === 0 ? (
             <div className="text-xs text-zinc-500">{tr('加载中…', 'Loading…')}</div>
           ) : items.length === 0 ? (
-            <EmptyState
+            <EmptyStateCard
               title={tr('没有节点', 'No nodes yet')}
               hint={isAdmin
                 ? tr('录入第一个开始', 'Add your first node to get started')
@@ -1246,7 +1246,7 @@ function RelationTypesTab({ isAdmin }: { isAdmin: boolean }) {
         {loading && items.length === 0 ? (
           <div className="text-xs text-zinc-500">{tr('加载中…', 'Loading…')}</div>
         ) : items.length === 0 ? (
-          <EmptyState title={tr('没有关系类型', 'No relation types')} hint={tr('正常情况下 6 个 builtin 会自动种入', 'Normally 6 builtin types auto-seed')} />
+          <EmptyStateCard title={tr('没有关系类型', 'No relation types')} hint={tr('内置关系类型通常由系统初始化，也可以添加自定义类型。', 'Built-in relation types are normally initialized by the system. Custom types can also be added.')} action={isAdmin && <Button variant="primary" onClick={() => setCreating(true)}><Plus size={12} />{tr('新建关系类型', 'New relation type')}</Button>} />
         ) : (
           <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
             {items.map((rt) => (
@@ -1709,7 +1709,7 @@ function GraphTab({ isAdmin }: { isAdmin: boolean }) {
           {loading && nodes.length === 0 ? (
             <div className="p-6 text-xs text-zinc-500">{tr('加载中…', 'Loading…')}</div>
           ) : nodes.length === 0 ? (
-            <EmptyState
+            <EmptyStateCard className="m-4"
               title={tr('还没有节点', 'No nodes yet')}
               hint={isAdmin
                 ? tr('录入第一个开始', 'Add your first node to get started')
@@ -1721,7 +1721,7 @@ function GraphTab({ isAdmin }: { isAdmin: boolean }) {
               ) : undefined}
             />
           ) : displayedNodes.length === 0 ? (
-            <EmptyState
+            <EmptyStateCard className="m-4"
               title={tr('此应用下还没有节点', 'No nodes under this app')}
               hint={tr(
                 '给应用挂 member_of / depends_on 关系后再查看',

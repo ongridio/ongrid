@@ -1,3 +1,4 @@
+import { EmptyStateCard } from '@/components/ui';
 import { Label, Input, Button } from '@/components/ui';
 import { Hint } from '@/components/ui/Tooltip';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
@@ -353,8 +354,8 @@ function CatalogTab() {
           )}
           {loading ? (
             <div className="flex h-40 items-center justify-center text-sm text-zinc-500">{tr('加载中…', 'Loading…')}</div>
-          ) : filtered.length === 0 ? (
-            <EmptyState hasItems={items.length > 0} />
+          ) : err && items.length === 0 ? null : filtered.length === 0 ? (
+            <EmptyState hasItems={!!(query.trim() || category || scope)} onClear={() => { setQuery(''); setCategory(''); setScope(''); }} />
           ) : (
             <div className="overflow-hidden rounded-xl border border-zinc-800/60 bg-zinc-900/30">
               <table className="w-full text-sm">
@@ -639,15 +640,13 @@ function SkillDetailModal({ skill, onClose }: { skill: SkillSummary; onClose(): 
   );
 }
 
-function EmptyState({ hasItems }: { hasItems: boolean }) {
+function EmptyState({ hasItems, onClear }: { hasItems: boolean; onClear: () => void }) {
   const { tr } = useI18n();
   return (
-    <div className="flex h-60 flex-col items-center justify-center gap-2 text-zinc-500">
-      <Wrench size={28} className="text-zinc-600" />
-      <div className="text-sm">{hasItems ? tr('没有匹配的技能', 'No matching skills') : tr('还没有 skill 注册', 'No skills registered yet')}</div>
-      <div className="text-[11px] text-zinc-600">
-        {hasItems ? tr('换个关键字或清除分类筛选', 'Try a different keyword or clear filters') : tr('设备注册自己的 capability 后会出现在这里', 'Skills appear here once a device registers its capabilities')}
-      </div>
-    </div>
+    <EmptyStateCard icon={Wrench}
+      action={hasItems && <Button onClick={onClear}>{tr('清除筛选', 'Clear filters')}</Button>}
+      title={hasItems ? tr('没有匹配的技能', 'No matching skills') : tr('还没有 skill 注册', 'No skills registered yet')}
+      hint={hasItems ? tr('换个关键字或清除分类筛选', 'Try a different keyword or clear filters') : tr('设备注册自己的 capability 后会出现在这里', 'Skills appear here once a device registers its capabilities')}
+    />
   );
 }

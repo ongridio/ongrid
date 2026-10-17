@@ -859,6 +859,7 @@ export default function EdgesPage() {
                             '暂无设备。点击右上角"新建"创建一个。',
                             'No devices yet. Click "New" in the top right to create one.',
                           )}
+                      {!rolesFilter && canMutate && <div className="mt-3"><Button variant="primary" onClick={() => setCreateOpen(true)}><Plus size={12} />{tr('新建设备', 'New device')}</Button></div>}
                     </td>
                   </tr>
                 ) : (

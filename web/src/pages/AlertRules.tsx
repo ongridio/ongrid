@@ -1,3 +1,4 @@
+import { EmptyStateCard } from '@/components/ui';
 import { CommunicationProviderIcon } from '@/components/icons/Provider';
 import { Button, Input, Label, Textarea } from '@/components/ui';
 import { useDialogs } from '@/components/ui/useDialogs';
@@ -339,8 +340,7 @@ export default function AlertRulesPage() {
           {loading ? (
             <div className="flex h-40 items-center justify-center text-sm text-zinc-500">{tr('加载中…', 'Loading…')}</div>
           ) : items.length === 0 ? (
-            <div className="flex h-60 flex-col items-center justify-center gap-2">
-              <div className="text-sm text-zinc-500">{tr('还没有规则', 'No rules yet')}</div>
+            <EmptyStateCard className="mx-6 my-4" title={tr('还没有规则', 'No rules yet')} hint={!isAdmin ? tr('请联系管理员创建告警规则。', 'Ask an admin to create alert rules.') : undefined} action={isAdmin &&
               <Hint content={adminTip}><Button variant="primary" size="sm"
                 type="button"
                 onClick={() => setEditing({ mode: 'create' })}
@@ -350,7 +350,7 @@ export default function AlertRulesPage() {
               >
                 <Plus size={12} /> {tr('创建第一条规则', 'Create your first rule')}
               </Button></Hint>
-            </div>
+            } />
           ) : (
             <table className="w-full text-sm">
               <thead className="sticky top-0 border-b border-zinc-800/60 bg-zinc-950/40 text-left text-[11px] uppercase tracking-wider text-zinc-500">

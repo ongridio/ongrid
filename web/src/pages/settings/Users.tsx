@@ -195,7 +195,7 @@ export default function SettingsUsers() {
         ) : items.length === 0 ? (
           <EmptyState
             title={tr('还没有用户', 'No users yet')}
-            hint={tr('点右上角「新建用户」添加第一个', 'Click "New user" in the top right to add your first one')}
+            action={<Button variant="primary" onClick={() => setCreateOpen(true)}>{tr('新建用户', 'New user')}</Button>}
             className="flex h-40 flex-col items-center justify-center gap-2 text-center"
           />
         ) : (

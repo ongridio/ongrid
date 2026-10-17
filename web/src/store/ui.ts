@@ -7,6 +7,10 @@ type UiState = {
   setSidebarCollapsed(v: boolean): void;
   sessionsCollapsed: boolean;
   toggleSessions(): void;
+  sessionsPreviewOpen: boolean;
+  setSessionsPreviewOpen(v: boolean): void;
+  sessionsTriggerHovered: boolean;
+  setSessionsTriggerHovered(v: boolean): void;
   // Command palette (⌘P) — keyed in store so Sidebar's search button
   // and the global keyboard handler in Layout can both flip it.
   paletteOpen: boolean;
@@ -25,7 +29,11 @@ export const useUi = create<UiState>()(
       toggleSidebar: () => set({ sidebarCollapsed: !get().sidebarCollapsed }),
       setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
       sessionsCollapsed: false,
-      toggleSessions: () => set({ sessionsCollapsed: !get().sessionsCollapsed }),
+      toggleSessions: () => set({ sessionsCollapsed: !get().sessionsCollapsed, sessionsPreviewOpen: false, sessionsTriggerHovered: false }),
+      sessionsPreviewOpen: false,
+      setSessionsPreviewOpen: (v) => set({ sessionsPreviewOpen: v }),
+      sessionsTriggerHovered: false,
+      setSessionsTriggerHovered: (v) => set({ sessionsTriggerHovered: v, ...(v && get().sessionsCollapsed ? { sessionsPreviewOpen: true } : {}) }),
       paletteOpen: false,
       setPaletteOpen: (v) => set({ paletteOpen: v }),
       agentPanelOpen: false,
