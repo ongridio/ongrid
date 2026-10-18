@@ -1,0 +1,208 @@
+{
+  "run": "e2e-host-identity-176930cd9b50",
+  "results": [
+    {
+      "name": "Host and Edge IDs are independently resolved",
+      "status": "passed",
+      "evidence": {
+        "host_id": 116,
+        "edge_id": 10,
+        "different_ids": true
+      },
+      "seconds": 0.01
+    },
+    {
+      "name": "Plugin configuration carries explicit Host identity",
+      "status": "passed",
+      "evidence": {
+        "host_id": 116
+      },
+      "seconds": 0.01
+    },
+    {
+      "name": "Host summary dispatches current tunnel",
+      "status": "passed",
+      "evidence": {
+        "host_id": 116
+      },
+      "seconds": 0.01
+    },
+    {
+      "name": "Skill execution accepts Host identity",
+      "status": "passed",
+      "evidence": {
+        "installation": "installation-one"
+      },
+      "seconds": 0.01
+    },
+    {
+      "name": "Same fingerprint reinstall preserves Host and advances binding",
+      "status": "passed",
+      "evidence": {
+        "host_id": 116,
+        "old_edge": 10,
+        "current_edge": 11
+      },
+      "seconds": 0.01
+    },
+    {
+      "name": "Skill follows new installation",
+      "status": "passed",
+      "evidence": {
+        "installation": "installation-two"
+      },
+      "seconds": 0.01
+    },
+    {
+      "name": "Old explicit Edge skill target is rejected",
+      "status": "passed",
+      "evidence": {
+        "error": "invalid argument: superseded edge installation",
+        "code": "invalid"
+      },
+      "seconds": 0.01
+    },
+    {
+      "name": "Old registration cannot steal Host binding",
+      "status": "passed",
+      "evidence": {
+        "current_edge": 11
+      },
+      "seconds": 0.02
+    },
+    {
+      "name": "Old heartbeat cannot revive Host after current instance disconnects",
+      "status": "passed",
+      "evidence": {
+        "online": false
+      },
+      "seconds": 0.01
+    },
+    {
+      "name": "Old disconnect preserves current Host presence",
+      "status": "passed",
+      "evidence": {
+        "online": true
+      },
+      "seconds": 2.01
+    },
+    {
+      "name": "Saved legacy tool name resolves to Host summary",
+      "status": "passed",
+      "evidence": {
+        "alias": "get_edge_summary"
+      },
+      "seconds": 0.01
+    },
+    {
+      "name": "Workflow tool rank_hosts",
+      "status": "passed",
+      "evidence": {
+        "by": "mem",
+        "direction": "topk",
+        "metric": "mem_pct",
+        "results": [
+          {
+            "device_id": 1,
+            "device_name": "VM-4-17-ubuntu",
+            "metric": "mem_pct",
+            "value": 60.29335406091769
+          },
+          {
+            "device_id": 2,
+            "device_name": "VM-0-10-ubuntu",
+            "metric": "mem_pct",
+            "value": 31.385408078277855
+          }
+        ]
+      },
+      "seconds": 0.01
+    },
+    {
+      "name": "Workflow tool rank_edges",
+      "status": "passed",
+      "evidence": {
+        "by": "mem",
+        "direction": "topk",
+        "metric": "mem_pct",
+        "results": [
+          {
+            "device_id": 1,
+            "device_name": "VM-4-17-ubuntu",
+            "metric": "mem_pct",
+            "value": 60.29335406091769
+          },
+          {
+            "device_id": 2,
+            "device_name": "VM-0-10-ubuntu",
+            "metric": "mem_pct",
+            "value": 31.385408078277855
+          }
+        ]
+      },
+      "seconds": 0.02
+    },
+    {
+      "name": "Workflow tool find_outlier_hosts",
+      "status": "passed",
+      "evidence": {
+        "metric": "mem",
+        "outliers": [],
+        "sigma": 2
+      },
+      "seconds": 0.01
+    },
+    {
+      "name": "Workflow tool find_outlier_edges",
+      "status": "passed",
+      "evidence": {
+        "metric": "mem",
+        "outliers": [],
+        "sigma": 2
+      },
+      "seconds": 0.01
+    },
+    {
+      "name": "Topology distinguishes Hosts and Edge installations",
+      "status": "passed",
+      "evidence": {
+        "separate_counts": true
+      },
+      "seconds": 0.01
+    },
+    {
+      "name": "Offline summary retains Host with unavailable execution",
+      "status": "passed",
+      "evidence": {
+        "host_id": 116
+      },
+      "seconds": 0.01
+    },
+    {
+      "name": "Deleting all installations preserves Host and summary",
+      "status": "passed",
+      "evidence": {
+        "host_id": 116
+      },
+      "seconds": 0.02
+    },
+    {
+      "name": "Manager restart preserves Host without live installations",
+      "status": "passed",
+      "evidence": {
+        "host_id": 116
+      },
+      "seconds": 0.02
+    },
+    {
+      "name": "Migration never creates Host from unregistered same-number Edge",
+      "status": "passed",
+      "evidence": {
+        "unregistered_edge": 9
+      },
+      "seconds": 0.01
+    }
+  ],
+  "cleanup_errors": [],
+  "scope": "real Manager API and authenticated tunnel; synthetic Edge handlers, no shell execution"
+}

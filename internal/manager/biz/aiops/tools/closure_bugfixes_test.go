@@ -13,17 +13,17 @@ import (
 	edgemodel "github.com/ongridio/ongrid/internal/manager/model/edge"
 )
 
-// TestExecuteFindOutlierEdges_RejectsLoadMetric guards Bug 2: previously
+// TestExecuteFindOutlierHosts_RejectsLoadMetric guards Bug 2: previously
 // `if !ok || metric == "load" || ...` looked correct but the !ok branch
 // never fired for cpu/mem/disk because rankMetricExpr also returns ok=true
 // for "load"/"composite" — the user-facing error was right by accident
 // only because of the subsequent equality checks. After the whitelist
 // rewrite the rejection is explicit, so we lock that in.
-func TestExecuteFindOutlierEdges_RejectsLoadMetric(t *testing.T) {
+func TestExecuteFindOutlierHosts_RejectsLoadMetric(t *testing.T) {
 	uc := edgebiz.NewUsecase(newFakeEdgeRepo(), nil, nil, slog.Default())
-	reg := NewRegistry(&fakeCaller{}, uc, nil, &fakePromQuerier{}, nil, nil, nil, slog.Default())
+	reg := NewRegistry(&fakeCaller{}, uc, testHostInventory(t, uc), &fakePromQuerier{}, nil, nil, nil, slog.Default())
 
-	_, err := reg.Invoke(context.Background(), ToolNameFindOutlierEdges, json.RawMessage(`{"metric":"load"}`))
+	_, err := reg.Invoke(context.Background(), ToolNameFindOutlierHosts, json.RawMessage(`{"metric":"load"}`))
 	if err == nil {
 		t.Fatalf("expected error for metric=load, got nil")
 	}
@@ -33,26 +33,26 @@ func TestExecuteFindOutlierEdges_RejectsLoadMetric(t *testing.T) {
 	}
 
 	// Same for composite.
-	if _, err := reg.Invoke(context.Background(), ToolNameFindOutlierEdges, json.RawMessage(`{"metric":"composite"}`)); err == nil {
+	if _, err := reg.Invoke(context.Background(), ToolNameFindOutlierHosts, json.RawMessage(`{"metric":"composite"}`)); err == nil {
 		t.Fatalf("expected error for metric=composite, got nil")
 	}
 
 	// And cpu must NOT be rejected by the whitelist guard. (We don't
 	// assert success — the fake prom returns nil — only that the error
 	// path is *not* the whitelist one.)
-	_, err = reg.Invoke(context.Background(), ToolNameFindOutlierEdges, json.RawMessage(`{"metric":"cpu"}`))
+	_, err = reg.Invoke(context.Background(), ToolNameFindOutlierHosts, json.RawMessage(`{"metric":"cpu"}`))
 	if err != nil && strings.Contains(err.Error(), "cpu, mem or disk") {
 		t.Errorf("metric=cpu unexpectedly hit whitelist guard: %v", err)
 	}
 }
 
-// TestExecuteGetEdgeSummary_IncludesAckedAndResolvedIncidents24h locks in
+// TestExecuteGetHostSummary_IncludesAckedAndResolvedIncidents24h locks in
 // Bug 3: previously the repo-level filter was Status=open, which silently
 // dropped acknowledged / silenced / resolved incidents from the last 24h.
 // After the fix, ListIncidents is invoked WITHOUT a Status filter and the
 // in-memory pass keeps everything within 24h whose severity is at least
 // warning. So an acknowledged warning incident in the window must show up.
-func TestExecuteGetEdgeSummary_IncludesAckedAndResolvedIncidents24h(t *testing.T) {
+func TestExecuteGetHostSummary_IncludesAckedAndResolvedIncidents24h(t *testing.T) {
 	now := time.Now().UTC()
 	edge := &edgemodel.Edge{ID: 7, Name: "host-7", Status: edgemodel.StatusOffline}
 	uc := edgebiz.NewUsecase(newFakeEdgeRepo(edge), nil, nil, slog.Default())
@@ -113,9 +113,9 @@ func TestExecuteGetEdgeSummary_IncludesAckedAndResolvedIncidents24h(t *testing.T
 	}
 	auc := &fakeAlertUC{listIncidents: incidents}
 
-	reg := NewRegistry(nil, uc, nil, nil, nil, nil, auc, slog.Default())
+	reg := NewRegistry(nil, uc, testHostInventory(t, uc), nil, nil, nil, auc, slog.Default())
 
-	out, err := reg.Invoke(context.Background(), ToolNameGetEdgeSummary, json.RawMessage(`{"device_id":7}`))
+	out, err := reg.Invoke(context.Background(), ToolNameGetHostSummary, json.RawMessage(`{"device_id":7}`))
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}
@@ -130,6 +130,8 @@ func TestExecuteGetEdgeSummary_IncludesAckedAndResolvedIncidents24h(t *testing.T
 	if err := json.Unmarshal(out.ResultJSON, &got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
+	results := got["results"].([]any)
+	got = results[0].(map[string]any)["summary"].(map[string]any)
 	rows, ok := got["recent_incidents"].([]any)
 	if !ok {
 		t.Fatalf("recent_incidents missing or wrong shape: %T %v", got["recent_incidents"], got["recent_incidents"])

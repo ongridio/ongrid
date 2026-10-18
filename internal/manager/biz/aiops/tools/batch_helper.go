@@ -9,7 +9,7 @@ import (
 // batch_helper.go is N+15 of the batch-first BaseTool refactor — see
 // MEMORY.md "Project:" + N+14 host_files batch landing.
 // Six per-id BaseTools (get_host_load / get_process_list /
-// get_edge_summary / get_incident_detail / correlate_incident / bash)
+// get_host_summary / get_incident_detail / correlate_incident / bash)
 // were upgraded to take an ID array and fan out manager-side; this file
 // is the shared concurrency primitive.
 //
@@ -64,7 +64,7 @@ const batchConcurrency = 4
 //
 // Cancellation: the helper does not propagate ctx.Done() into a fast
 // shutdown — fn already runs under a derived ctx in the caller, and the
-// per-tool timeout (e.g. edgeSummaryCallTimeout) governs how long each
+// per-tool timeout (e.g. hostSummaryCallTimeout) governs how long each
 // child can take. The wait-group join is unconditional so the slice is
 // always written to before we return.
 func runBatch[ID any, R any](

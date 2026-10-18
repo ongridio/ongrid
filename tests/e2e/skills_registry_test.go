@@ -9,7 +9,7 @@
 //     host_restart_service / web_search),manager 一进程就有这 8 条。
 //   - inventory_bridge.RegisterBaseToolsAsSkills 把 AIOps ToolBag 里的
 //     ~18 个 BaseTool(query_promql / query_logql / query_traceql /
-//     host_bash / get_edge_summary / ...)也桥接进同一个 registry,所以
+//     host_bash / get_host_summary / ...)也桥接进同一个 registry,所以
 //     线上数量 = 8 + bridged ≈ 20+ 条。
 //   - testenv 不加载额外的 SKILL.md；内置工具目录由 Go 注册提供。
 //

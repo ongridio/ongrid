@@ -91,9 +91,8 @@ type Wiring struct {
 	WebshellRouter WebshellRouter
 	// DeviceResolver, when non-nil, is consulted on every push to map
 	// the tunnel session's edge_id to the host device_id used as the
-	// metric/log/trace label. nil falls back to edge_id == device_id
-	// (correct for pre-launch data; explicitly resolving here is the
-	// future-proof path for multi-agent hosts).
+	// metric/log/trace label. Missing or unresolved bindings return zero;
+	// callers drop the data instead of substituting an Edge ID.
 	DeviceResolver   DeviceResolver
 	K8sRegistry      KubernetesRegistry
 	K8sInventory     KubernetesInventoryIngester
@@ -613,8 +612,9 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 			// types so internal/pkg/tunnel stays biz-free).
 			labelDeviceID := resolveDeviceID(rpcCtx, w.DeviceResolver, canonicalEdgeID)
 			out := tunnel.GetPluginConfigsResponse{
-				EdgeID:  labelDeviceID,
-				Configs: make(map[string]tunnel.GetPluginConfigsEntry, len(snap.Configs)),
+				EdgeID:   labelDeviceID,
+				DeviceID: labelDeviceID,
+				Configs:  make(map[string]tunnel.GetPluginConfigsEntry, len(snap.Configs)),
 			}
 			for name, cfg := range snap.Configs {
 				out.Configs[name] = tunnel.GetPluginConfigsEntry{

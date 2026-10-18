@@ -16,6 +16,7 @@ import (
 type SkillExecution struct {
 	ID         uint64          `gorm:"column:id;primaryKey;autoIncrement"`
 	SkillKey   string          `gorm:"column:skill_key;size:128;not null;index:idx_skill_executions_key"`
+	DeviceID   uint64          `gorm:"column:device_id;index"`
 	EdgeID     uint64          `gorm:"column:edge_id;not null;index:idx_skill_executions_edge"`
 	CallerID   uint64          `gorm:"column:caller_id;not null"`
 	CallerRole string          `gorm:"column:caller_role;size:16;not null"`
@@ -51,6 +52,7 @@ func (g *GormAuditSink) Record(ctx context.Context, ev AuditEvent) error {
 	row := SkillExecution{
 		SkillKey:   ev.SkillKey,
 		EdgeID:     ev.EdgeID,
+		DeviceID:   ev.DeviceID,
 		CallerID:   ev.CallerID,
 		CallerRole: ev.CallerRole,
 		Class:      ev.Class,

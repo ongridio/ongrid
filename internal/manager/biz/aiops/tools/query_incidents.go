@@ -17,7 +17,7 @@ const ToolNameQueryIncidents = "query_incidents"
 // the question is "how many / which incidents matched X".
 const QueryIncidentsDescription = "List ongrid alert incidents filtered by severity, status, edge, rule_key and a since-window (in minutes). " +
 	"Use this for questions like '过去 24h 有几条 critical incident' or 'show open incidents on edge X'. " +
-	"Returns array of {id, title, severity, status, rule, edge_id, first_fired_at, last_fired_at}."
+	"Returns array of {id, title, severity, status, rule, device_id, first_fired_at, last_fired_at}."
 
 // QueryIncidentsSchema is the JSON Schema of the tool's argument object.
 var QueryIncidentsSchema = json.RawMessage(`{
@@ -38,9 +38,9 @@ var QueryIncidentsSchema = json.RawMessage(`{
       "minimum": 1,
       "description": "Only return incidents whose last_fired_at is within the last N minutes. Default 1440 (24h)."
     },
-    "edge_id": {
+    "device_id": {
       "type": "integer",
-      "description": "Filter to incidents on a specific edge. Optional."
+      "description": "Filter to incidents on a specific host. Optional."
     },
     "rule_key": {
       "type": "string",
@@ -131,8 +131,8 @@ func (r *Registry) executeQueryIncidents(ctx context.Context, args json.RawMessa
 		Limit: in.Limit * 4,
 	}
 	devID := in.DeviceID
-	if devID == 0 {
-		devID = in.EdgeID
+	if in.EdgeID != 0 {
+		return ExecuteResult{}, fmt.Errorf("query_incidents: use device_id, not edge_id")
 	}
 	if devID > 0 {
 		f.DeviceID = &devID

@@ -1,0 +1,119 @@
+{
+  "host_id": 1,
+  "edge_id": 14,
+  "host_name": "VM-4-17-ubuntu",
+  "metric_device_labels": [
+    1,
+    2
+  ],
+  "edge_metric_history_points": 121,
+  "plugins": [
+    {
+      "name": "metrics",
+      "enabled": true,
+      "health": {
+        "state": "running",
+        "last_error": "http: Get \"http://127.0.0.1:9464/metrics\": dial tcp 127.0.0.1:9464: connect: connection refused",
+        "started_at": "2026-10-18T05:13:45Z",
+        "updated_at": "2026-10-18T05:14:11Z",
+        "reported_at": "2026-10-18T05:14:11.169070447Z"
+      }
+    },
+    {
+      "name": "logs",
+      "enabled": true,
+      "health": {
+        "state": "running",
+        "started_at": "2026-10-18T05:13:44Z",
+        "updated_at": "2026-10-18T05:14:11Z",
+        "reported_at": "2026-10-18T05:14:11.169070447Z"
+      }
+    },
+    {
+      "name": "traces",
+      "enabled": true,
+      "health": {
+        "state": "running",
+        "started_at": "2026-10-18T05:13:46Z",
+        "updated_at": "2026-10-18T05:14:11Z",
+        "reported_at": "2026-10-18T05:14:11.169070447Z"
+      }
+    },
+    {
+      "name": "profiles",
+      "enabled": false,
+      "health": {
+        "state": "stopped",
+        "updated_at": "2026-10-18T05:14:11Z",
+        "reported_at": "2026-10-18T05:14:11.169070447Z"
+      }
+    },
+    {
+      "name": "autoapm",
+      "enabled": true,
+      "health": {
+        "state": "running",
+        "started_at": "2026-10-18T05:13:48Z",
+        "updated_at": "2026-10-18T05:13:48Z",
+        "reported_at": "2026-10-18T05:14:11.169070447Z"
+      }
+    },
+    {
+      "name": "hostmetrics",
+      "enabled": true,
+      "health": {
+        "state": "running",
+        "started_at": "2026-10-18T05:13:48Z",
+        "updated_at": "2026-10-18T05:14:11Z",
+        "reported_at": "2026-10-18T05:14:11.169070447Z"
+      }
+    },
+    {
+      "name": "procmetrics",
+      "enabled": true,
+      "health": {
+        "state": "running",
+        "started_at": "2026-10-18T05:13:45Z",
+        "updated_at": "2026-10-18T05:14:11Z",
+        "reported_at": "2026-10-18T05:14:11.169070447Z"
+      }
+    },
+    {
+      "name": "custommetrics",
+      "enabled": false,
+      "health": {
+        "state": "stopped",
+        "updated_at": "2026-10-18T05:14:11Z",
+        "reported_at": "2026-10-18T05:14:11.169070447Z"
+      }
+    },
+    {
+      "name": "databasemetrics",
+      "enabled": false,
+      "health": {
+        "state": "stopped",
+        "updated_at": "2026-10-18T05:14:11Z",
+        "reported_at": "2026-10-18T05:14:11.169070447Z"
+      }
+    }
+  ],
+  "health": {
+    "/healthz": 200,
+    "/readyz": 200,
+    "/": 200
+  },
+  "edges": [
+    {
+      "id": 14,
+      "device_id": 1,
+      "status": "online",
+      "agent_version": "v0.18.2-host.20261018.1"
+    },
+    {
+      "id": 2,
+      "device_id": 2,
+      "status": "online",
+      "agent_version": "v0.15.0"
+    }
+  ]
+}

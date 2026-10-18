@@ -77,6 +77,7 @@ func (s *ToolInvoker) InvokeTool(ctx context.Context, name string, args json.Raw
 	if s.MCP != nil && strings.HasPrefix(name, aiopstools.MCPToolNamePrefix) {
 		return s.MCP.call(ctx, name, args)
 	}
+	name = aiopstoolsbase.CanonicalName(name)
 	t, ok := s.tools[name]
 	if !ok {
 		return nil, fmt.Errorf("unknown tool %q", name)

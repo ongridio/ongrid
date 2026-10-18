@@ -160,10 +160,6 @@ type deletedTopologyDeviceLister interface {
 	ListDeletedWithNodeID(ctx context.Context, limit int) ([]*model.Device, error)
 }
 
-type orphanDeviceLister interface {
-	ListWithoutLiveEdges(ctx context.Context, limit int) ([]*model.Device, error)
-}
-
 // ReconcileDeletedTopology removes topology nodes that belong to devices
 // deleted before the topology cleanup hook existed.
 func (u *Usecase) ReconcileDeletedTopology(ctx context.Context) (int, error) {
@@ -197,38 +193,11 @@ func (u *Usecase) ReconcileDeletedTopology(ctx context.Context) (int, error) {
 	return cleaned, nil
 }
 
-// ReconcileOrphanDevices removes live device rows that no longer have any
-// live edge bound to them. This heals devices left behind by the older
-// DELETE /edges path used by the devices page.
+// ReconcileOrphanDevices only reconciles presence. A missing installation is
+// not authorization to delete durable Host identity or its topology.
 func (u *Usecase) ReconcileOrphanDevices(ctx context.Context) (int, error) {
-	if u.repo == nil {
-		return 0, errs.ErrNotWiredYet
-	}
-	lister, ok := u.repo.(orphanDeviceLister)
-	if !ok {
-		return 0, nil
-	}
-	if _, err := u.ReconcilePresence(ctx); err != nil {
-		return 0, err
-	}
-	rows, err := lister.ListWithoutLiveEdges(ctx, 5000)
-	if err != nil {
-		return 0, err
-	}
-	cleaned := 0
-	for _, d := range rows {
-		if d == nil {
-			continue
-		}
-		if err := u.Delete(ctx, d.ID); err != nil {
-			return cleaned, err
-		}
-		cleaned++
-	}
-	if cleaned > 0 && u.log != nil {
-		u.log.Info("device reconcile: removed devices without live edges", "count", cleaned)
-	}
-	return cleaned, nil
+	n, err := u.ReconcilePresence(ctx)
+	return int(n), err
 }
 
 func (u *Usecase) deleteTopologyNode(ctx context.Context, d *model.Device) error {

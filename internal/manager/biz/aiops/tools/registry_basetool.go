@@ -48,12 +48,12 @@ const defaultDeferralThreshold = 30
 // nil-gating mirrors NewRegistry exactly:
 //
 //   - get_host_load / get_process_list / get_topology / query_devices /
-//     get_edge_summary always present (they only need the always-wired
+//     get_host_summary always present (they only need the always-wired
 //     edges + caller, with best-effort degradation when one is nil).
 //   - query_promql gated on r.promQuery.
 //   - query_logql gated on r.logQuery.
 //   - query_traceql gated on r.traceQuery.
-//   - rank_edges / find_outlier_edges gated on r.promQuery && r.edges.
+//   - rank_hosts requires Prom + devices; find_outlier_hosts requires Prom + edges.
 //   - query_incidents / get_incident_detail / query_alert_rules gated on
 //     r.alertUC.
 //   - correlate_incident gated on alertUC + prom + log + trace ALL set
@@ -140,12 +140,14 @@ func (r *Registry) BuildBaseTools() *ToolBag {
 		out = append(out, NewQueryNetworkInterfacesTool(r.devices, r.devices.NetworkDiscovery(), r.log))
 	}
 	if r.edges != nil {
-		out = append(out, NewGetTopologyTool(r.edges, r.alertUC, r.topology, r.log))
+		out = append(out, NewGetTopologyTool(r.edges, r.alertUC, r.topology, r.log).WithDevices(r.devices))
 	}
-	// 8: rank_edges — gated on Prom + edges (same as NewRegistry).
-	if r.promQuery != nil && r.edges != nil {
-		out = append(out, NewRankEdgesTool(r.promQuery, r.edges, r.log))
-		out = append(out, NewFindOutlierEdgesTool(r.promQuery, r.edges, r.log))
+	// 8: host ranking requires device identity, independent of Edge availability.
+	if r.promQuery != nil && r.devices != nil {
+		out = append(out, NewRankHostsTool(r.promQuery, r.devices, r.log))
+	}
+	if r.promQuery != nil && r.devices != nil {
+		out = append(out, NewFindOutlierHostsTool(r.promQuery, r.devices, r.log))
 	}
 	// 9-11: alert-flavoured tools — gated on alertUC.
 	if r.alertUC != nil {
@@ -158,10 +160,10 @@ func (r *Registry) BuildBaseTools() *ToolBag {
 	if r.auditLister != nil {
 		out = append(out, NewQueryChangeEventsTool(r.auditLister, r.log))
 	}
-	// 12: get_edge_summary — gated on edges (alert/devices/caller are
+	// 12: get_host_summary — gated on edges (alert/devices/caller are
 	// best-effort, mirroring the closure executor's defensive checks).
-	if r.edges != nil {
-		out = append(out, NewGetEdgeSummaryTool(r.caller, r.edges, r.devices, r.alertUC, r.log))
+	if r.devices != nil {
+		out = append(out, NewGetHostSummaryTool(r.caller, r.edges, r.devices, r.alertUC, r.log))
 	}
 	// 13: correlate_incident — needs ALL four signal sources, same as
 	// the closure path (NewRegistry).

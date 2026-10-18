@@ -499,8 +499,8 @@ func (u *Usecase) RecordFiring(ctx context.Context, in FiringInput) (*FiringResu
 		if incident.LabelsJSON != "" {
 			_ = json.Unmarshal([]byte(incident.LabelsJSON), &labels)
 		}
-		// edge_id == device_id 1:1 post entity-split (see model comment).
-		u.workflowDispatcher.OnAlertFired(incident.ID, incident.Rule, incident.RuleName, incident.Severity, devID, devID, labels, occurredAt)
+		// Host identity is durable; execution resolves the current Edge at dispatch.
+		u.workflowDispatcher.OnAlertFired(incident.ID, incident.Rule, incident.RuleName, incident.Severity, 0, devID, labels, occurredAt)
 	}
 
 	return &FiringResult{

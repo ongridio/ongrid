@@ -1,0 +1,161 @@
+{
+  "results": [
+    {
+      "name": "Existing Host summary and Edge metric API 2",
+      "status": "passed",
+      "evidence": {
+        "host_id": 2,
+        "current_edge_id": 2,
+        "metric_keys": [
+          "resolution",
+          "from",
+          "to",
+          "points"
+        ],
+        "points": 61
+      }
+    },
+    {
+      "name": "Existing Host summary and Edge metric API 1",
+      "status": "passed",
+      "evidence": {
+        "host_id": 1,
+        "current_edge_id": 1,
+        "metric_keys": [
+          "resolution",
+          "from",
+          "to",
+          "points"
+        ],
+        "points": 61
+      }
+    },
+    {
+      "name": "Live metric series use persistent Host labels",
+      "status": "passed",
+      "evidence": {
+        "device_ids": [
+          1,
+          2
+        ],
+        "series": 2
+      }
+    },
+    {
+      "name": "Current Host metric sample freshness",
+      "status": "passed",
+      "evidence": {
+        "1": 11.5,
+        "2": 5.7
+      }
+    },
+    {
+      "name": "Real Edge ping skill through Host identity",
+      "status": "passed",
+      "evidence": {
+        "host_id": 1,
+        "result": {
+          "result": {
+            "ok": true,
+            "exit_code": 0,
+            "duration_ms": 3069,
+            "stdout": "PING 127.0.0.1 (127.0.0.1) 56(84) bytes of data.\n64 bytes from 127.0.0.1: icmp_seq=1 ttl=64 time=0.030 ms\n64 bytes from 127.0.0.1: icmp_seq=2 ttl=64 time=0.052 ms\n64 bytes from 127.0.0.1: icmp_seq=3 ttl=64 time=0.065 ms\n64 bytes from 127.0.0.1: icmp_seq=4 ttl=64 time=0.064 ms\n\n--- 127.0.0.1 ping statistics ---\n4 packets transmitted, 4 received, 0% packet loss, time 3067ms\nrtt min/avg/max/mdev = 0.030/0.052/0.065/0.014 ms\n"
+          }
+        }
+      }
+    },
+    {
+      "name": "Incident correlation resolves Host 5",
+      "status": "passed",
+      "evidence": {
+        "incident_id": 5,
+        "host_id": 1
+      }
+    },
+    {
+      "name": "Incident correlation resolves Host 4",
+      "status": "passed",
+      "evidence": {
+        "incident_id": 4,
+        "host_id": 1
+      }
+    },
+    {
+      "name": "query_logql Host scope",
+      "status": "passed",
+      "evidence": {
+        "response_keys": [
+          "result",
+          "resultType"
+        ],
+        "counts": {
+          "result": 5
+        },
+        "summary": {},
+        "stream_device_ids": [
+          "1"
+        ]
+      }
+    },
+    {
+      "name": "query_traceql Host scope",
+      "status": "passed",
+      "evidence": {
+        "response_keys": [
+          "metrics",
+          "traces"
+        ],
+        "counts": {
+          "traces": 0
+        },
+        "summary": {},
+        "stream_device_ids": []
+      }
+    },
+    {
+      "name": "query_logql conflicting Host scope rejected",
+      "status": "passed",
+      "evidence": {
+        "error": "tool query_logql: query_logql: device_id conflicts with the LogQL selector"
+      }
+    },
+    {
+      "name": "query_traceql conflicting Host scope rejected",
+      "status": "passed",
+      "evidence": {
+        "error": "tool query_traceql: query_traceql: device_id conflicts with the TraceQL selector"
+      }
+    },
+    {
+      "name": "list_database_sources",
+      "status": "passed",
+      "evidence": {
+        "status": "empty",
+        "count": 0,
+        "errors": []
+      }
+    },
+    {
+      "name": "analyze_database_status",
+      "status": "passed",
+      "evidence": {
+        "status": "unknown",
+        "count": 0,
+        "errors": [
+          "no database metric sources found"
+        ]
+      }
+    },
+    {
+      "name": "Topology counts separate Hosts from runtime installations",
+      "status": "passed",
+      "evidence": {
+        "host_count": 2,
+        "online_host_count": 2,
+        "edge_count": 2,
+        "online_edge_count": 2
+      }
+    }
+  ],
+  "flow_cleaned": true
+}

@@ -1,0 +1,35 @@
+{
+  "health": {
+    "/healthz": 200,
+    "/readyz": 200,
+    "/": 200
+  },
+  "hosts": [
+    {
+      "id": 2,
+      "name": "VM-0-10-ubuntu",
+      "current_edge_id": 2,
+      "online": true
+    },
+    {
+      "id": 1,
+      "name": "VM-4-17-ubuntu",
+      "current_edge_id": 1,
+      "online": true
+    }
+  ],
+  "edges": [
+    {
+      "id": 2,
+      "device_id": 2,
+      "agent_version": "v0.15.0",
+      "status": "online"
+    },
+    {
+      "id": 1,
+      "device_id": 1,
+      "agent_version": "v0.18.2-host.20261018.1",
+      "status": "online"
+    }
+  ]
+}

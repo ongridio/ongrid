@@ -75,8 +75,8 @@ var tierByName = map[string]string{
 	"get_topology":            "core",
 	"query_incidents":         "core",
 	"query_change_events":     "core",
-	"get_edge_summary":        "core",
-	"rank_edges":              "core",
+	"get_host_summary":        "core",
+	"rank_hosts":              "core",
 	"correlate_incident":      "core",
 	"AgentTool":               "core",
 	"SendMessage":             "core",
@@ -95,7 +95,7 @@ var tierByName = map[string]string{
 	// diagnostic exploration — most chats don't need it, and its
 	// when_to_use blob is large enough to want defer-loading once
 	// the marketplace pushes the bag past threshold.
-	"find_outlier_edges":    "specialty",
+	"find_outlier_hosts":    "specialty",
 	"get_incident_detail":   "specialty",
 	"query_alert_rules":     "specialty",
 	"host_find_large_files": "specialty",

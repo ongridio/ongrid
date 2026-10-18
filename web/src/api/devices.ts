@@ -32,6 +32,7 @@ export type Device = {
   // — points at the row in topology.nodes that fronts this
   // device. Null until topology.Migrate's backfill has run.
   node_id?: number | null;
+  current_edge_id?: number | null;
 };
 
 export type DeviceEdgeLink = {

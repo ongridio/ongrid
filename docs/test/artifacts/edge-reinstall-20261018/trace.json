@@ -1,0 +1,7 @@
+{
+  "trace_id": "86f8214adf9e4ce78cfcb24c6450b136",
+  "host_id": 1,
+  "edge_id": 14,
+  "device_label_overwrites_untrusted_input": true,
+  "spans": 1
+}

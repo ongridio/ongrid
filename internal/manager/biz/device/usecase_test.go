@@ -56,7 +56,7 @@ func TestReconcileDeletedTopologyCleansHistoricalRows(t *testing.T) {
 	}
 }
 
-func TestReconcileOrphanDevicesDeletesRowsWithoutLiveEdges(t *testing.T) {
+func TestReconcileOrphanDevicesPreservesHostWithoutLiveEdges(t *testing.T) {
 	ctx := context.Background()
 	nodeID := uint64(99)
 	repo := &fakeRepo{
@@ -75,14 +75,8 @@ func TestReconcileOrphanDevicesDeletesRowsWithoutLiveEdges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReconcileOrphanDevices() error = %v", err)
 	}
-	if cleaned != 1 {
-		t.Fatalf("cleaned = %d, want 1", cleaned)
-	}
-	if !repo.deleted[9] {
-		t.Fatalf("orphan device was not deleted")
-	}
-	if len(mirror.deleted) != 1 || mirror.deleted[0] != [2]uint64{9, 99} {
-		t.Fatalf("topology deletes = %#v, want device/node 9/99", mirror.deleted)
+	if cleaned != 0 || repo.deleted[9] || len(mirror.deleted) != 0 {
+		t.Fatalf("host must survive missing Edge: changed=%d deleted=%v topology=%v", cleaned, repo.deleted, mirror.deleted)
 	}
 }
 

@@ -19,16 +19,16 @@ when_to_use: |
 capabilities:
   - id: compute_diagnosis
     description: Diagnose CPU, memory, load, process, and kernel resource pressure.
-    tools: [get_host_load, get_host_processes, rank_edges, find_outlier_edges, query_promql, host_bash]
+    tools: [get_host_load, get_host_processes, rank_hosts, find_outlier_hosts, query_promql, host_bash]
     max_tool_calls: 12
 can_delegate: true
 tools:
   - query_knowledge
   - get_host_load
   - get_host_processes
-  - get_edge_summary
-  - rank_edges
-  - find_outlier_edges
+  - get_host_summary
+  - rank_hosts
+  - find_outlier_hosts
   - query_promql
   - host_bash
 permission_mode: read-only
@@ -51,9 +51,9 @@ max_turns: 15
 ## 工作方式
 
 1. **入口先用结构化工具**：
-   - 单台机看全貌 → `get_edge_summary(device_id)`
+   - 单台机看全貌 → `get_host_summary(device_id)`
    - 谁在吃 CPU / 内存 → `get_host_processes(device_id)`（按 CPU 排序拿 top N）
-   - 整片机器哪台异常 → `rank_edges(metric=cpu|mem|composite)` 或 `find_outlier_edges`
+   - 整片机器哪台异常 → `rank_hosts(by=cpu|mem|composite)` 或 `find_outlier_hosts`
    - 这些一次拉全；只有更细的内核 / 调度信号（vmstat / mpstat / pidstat / numactl）才退回 `host_bash`
 
 2. **CPU 诊断套路**：

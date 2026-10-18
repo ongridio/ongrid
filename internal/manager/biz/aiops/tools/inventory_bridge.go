@@ -15,7 +15,7 @@
 //
 //  1. ScopeHost skills (host_probe_http, host_tail_file, ...) — declarative
 //     metadata, auto-routed via tunnel, surfaced on /skills.
-//  2. Hand-written BaseTools (correlate_incident, get_edge_summary,
+//  2. Hand-written BaseTools (correlate_incident, get_host_summary,
 //     batch fan-out tools, bash, host_restart_service, host_files batch,
 //     AgentTool/SendMessage/TaskStop) — JSON-schema'd, manager-side
 //     execution, NOT surfaced on /skills.
@@ -186,9 +186,9 @@ func classifyToolCategory(name string) string {
 		return "system"
 	case "host_find_large_files", "host_du_summary", "host_stat_file":
 		return "filesystem"
-	case "get_edge_summary", "get_topology", "query_devices",
+	case "get_host_summary", "get_topology", "query_devices",
 		"query_alert_rules", "query_incidents", "get_incident_detail",
-		"rank_edges", "find_outlier_edges", "correlate_incident":
+		"rank_hosts", "find_outlier_hosts", "correlate_incident":
 		return "diagnostic"
 	case "query_promql", "list_metric_catalog", "query_logql", "query_traceql",
 		"query_k8s_snapshot", "describe_k8s_resource", "query_k8s_logs":

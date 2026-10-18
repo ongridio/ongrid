@@ -16,3 +16,10 @@ message DeviceEnvironment {
   string cluster_name = 4;
   string source = 5; // device, cluster, or unset
 }
+
+// Additive fields on the GET /v1/devices list/detail HTTP item.
+// current_edge_id identifies the current installation; device_id remains durable.
+message HostRuntimeBinding {
+ uint64 device_id = 1;
+ optional uint64 current_edge_id = 2;
+}

@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/contract"
 	aiopstools "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 )
@@ -81,6 +82,7 @@ func ComposeSystemPrompt(basePrompt string, activeSkills []*Skill, agentProfile 
 		parts = append(parts, header+"\n\n"+body)
 	}
 
+	parts = append(parts, contract.RuntimeIdentityPrompt("v2"))
 	return strings.Join(parts, "\n\n")
 }
 

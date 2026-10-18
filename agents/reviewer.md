@@ -13,7 +13,7 @@ when_to_use: |
 
 tools:
   - get_incident_detail
-  - get_edge_summary
+  - get_host_summary
   - query_promql
   - query_logql
 
@@ -62,7 +62,7 @@ metadata:
 1. **查 SOP / 规则依据**
    - 当前没有专用 `get_sop_text` 工具时，基于 proposal、告警上下文和通用 SRE 门控判断
    - 找不到明确 SOP / 回滚路径 → 直接 reject："no SOP or rollback path for action <X>"
-2. **查目标设备状态**（用 `get_edge_summary(device_id)`）
+2. **查目标设备状态**（用 `get_host_summary(device_id)`）
    - 设备 offline / 已经在重启循环 / 上次 mutating 操作 < 5 分钟内 → reject
 3. **查并行操作**（用 `query_logql` 在最近 10 分钟内检索 `audit:` 和同 target 的 mutating 记录）
    - 有并行 → reject："并行操作检测到，等 X 完成"

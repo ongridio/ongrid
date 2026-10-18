@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	edgemodel "github.com/ongridio/ongrid/internal/manager/model/edge"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -29,20 +30,42 @@ func (r *EdgeDeviceRepo) Link(ctx context.Context, edgeID, deviceID uint64, t mo
 	if edgeID == 0 || deviceID == 0 {
 		return errs.ErrInvalid
 	}
-	if t == model.EdgeDeviceRelationHost {
-		if err := r.db.WithContext(ctx).
-			Where("edge_id = ? AND type = ? AND device_id <> ?", edgeID, t, deviceID).
-			Delete(&model.EdgeDevice{}).Error; err != nil {
-			return err
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if t == model.EdgeDeviceRelationHost {
+			if tx.Migrator().HasTable("edges") {
+				var edge edgemodel.Edge
+				if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&edge, edgeID).Error; err != nil {
+					return err
+				}
+				if edge.DeviceID != nil && *edge.DeviceID != deviceID {
+					return errs.ErrInvalid
+				}
+				if err := tx.Model(&edgemodel.Edge{}).Where("id = ?", edgeID).Update("device_id", deviceID).Error; err != nil {
+					return err
+				}
+			}
+			// Lock the Host before changing its current installation and reverse link.
+			var host model.Device
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&host, deviceID).Error; err != nil {
+				return err
+			}
+			var existing model.EdgeDevice
+			err := tx.Where("edge_id = ? AND type = ?", edgeID, t).First(&existing).Error
+			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			if err == nil && existing.DeviceID != deviceID {
+				return errs.ErrInvalid
+			}
+			if host.CurrentEdgeID == nil || *host.CurrentEdgeID < edgeID {
+				if err := tx.Model(&model.Device{}).Where("id = ?", deviceID).Update("current_edge_id", edgeID).Error; err != nil {
+					return err
+				}
+			}
 		}
-	}
-	row := model.EdgeDevice{EdgeID: edgeID, DeviceID: deviceID, Type: t}
-	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns: []clause.Column{
-			{Name: "edge_id"}, {Name: "device_id"}, {Name: "type"}, {Name: "delete_marker"},
-		},
-		DoNothing: true,
-	}).Create(&row).Error
+		row := model.EdgeDevice{EdgeID: edgeID, DeviceID: deviceID, Type: t}
+		return tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "edge_id"}, {Name: "device_id"}, {Name: "type"}, {Name: "delete_marker"}}, DoNothing: true}).Create(&row).Error
+	})
 }
 
 // Unlink soft-deletes the (edge, device, type) row. Idempotent.
@@ -72,11 +95,30 @@ func (r *EdgeDeviceRepo) LookupHostDevice(ctx context.Context, edgeID uint64) (u
 	return row.DeviceID, nil
 }
 
-// LookupEdgeForDevice resolves device_id → owning edge_id (for the given
-// relation type). When more than one edge has a junction to the same
-// device under the same type (a multi-agent host), the most recently
-// created junction wins.
+// LookupEdgeForDevice uses the authoritative current binding for Host execution.
+// Historical reverse links never determine the current installation.
 func (r *EdgeDeviceRepo) LookupEdgeForDevice(ctx context.Context, deviceID uint64, t model.EdgeDeviceRelationType) (uint64, error) {
+	if t == model.EdgeDeviceRelationHost {
+		var host model.Device
+		if err := r.db.WithContext(ctx).First(&host, deviceID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return 0, errs.ErrNotFound
+			}
+			return 0, err
+		}
+		if host.CurrentEdgeID == nil || *host.CurrentEdgeID == 0 {
+			return 0, errs.ErrNotFound
+		}
+		var link model.EdgeDevice
+		if err := r.db.WithContext(ctx).Where("edge_id = ? AND device_id = ? AND type = ?", *host.CurrentEdgeID, deviceID, t).First(&link).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return 0, errs.ErrNotFound
+			}
+			return 0, err
+		}
+		return link.EdgeID, nil
+	}
+
 	var row model.EdgeDevice
 	if err := r.db.WithContext(ctx).
 		Where("device_id = ? AND type = ?", deviceID, t).

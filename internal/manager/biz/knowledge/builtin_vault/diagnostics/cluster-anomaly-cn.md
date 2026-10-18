@@ -146,7 +146,7 @@ ongrid 平台：
 - `specialist-sre`：专门看集群健康度 / 告警优先级 / 趋势异常
 - `incident-investigator`：单条 incident 端到端关联分析
 - `correlate_incident(incident_id)`：一次拉 metric / log / trace 三件套
-- `find_outlier_edges` / `rank_edges`：找集群里"不一样"的那台
+- `find_outlier_hosts` / `rank_hosts`：找集群里"不一样"的那台
 
 ## 决策树
 

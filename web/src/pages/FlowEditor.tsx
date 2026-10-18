@@ -178,7 +178,7 @@ const EDGE_COLOR: Record<string, string> = {
 // ---------- graph <-> canvas conversion -----------------------------------
 
 // graphNodeLabel picks the most descriptive label for a flow node: its given
-// name, else the specific tool it runs (config.tool, e.g. "get_edge_summary"),
+// name, else the specific tool it runs (config.tool, e.g. "get_host_summary"),
 // else the bare node type. Keeps AI-generated graphs (which often leave name
 // empty + use single-letter ids) readable on the canvas and in run detail.
 function graphNodeLabel(n: { name?: string; type: string; config?: Record<string, unknown> }): string {
@@ -654,7 +654,7 @@ export default function FlowEditorPage() {
   }, [flow, dirty, onSave, pollRun, runInputText, tr]);
 
   const hasManualTrigger = useMemo(() => nodes.some((n) => n.data.flowType === 'trigger.manual'), [nodes]);
-  // node id → descriptive canvas label, so the run detail shows "get_edge_summary"
+  // node id → descriptive canvas label, so the run detail shows "get_host_summary"
   // instead of the bare graph id ("a"/"b"/…) for unnamed AI-generated nodes.
   const nodeLabelByID = useMemo(() => new Map(nodes.map((n) => [n.id, n.data.label])), [nodes]);
 

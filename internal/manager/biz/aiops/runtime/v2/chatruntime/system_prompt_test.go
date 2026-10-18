@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/contract"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 )
 
@@ -12,14 +13,14 @@ func TestComposeSystemPrompt_Empty(t *testing.T) {
 	// agentProfile==nil ⇒ coordinator ⇒ the coordinatorToolRouting block is
 	// injected, so even an otherwise-empty compose carries it.
 	got := ComposeSystemPrompt("", nil, nil)
-	if got != coordinatorToolRouting {
+	if got != coordinatorToolRouting+"\n\n"+contract.RuntimeIdentityPrompt("v2") {
 		t.Errorf("expected just the routing block, got %q", got)
 	}
 }
 
 func TestComposeSystemPrompt_BaseOnly(t *testing.T) {
 	got := ComposeSystemPrompt("you are ongrid.", nil, nil)
-	if got != "you are ongrid.\n\n"+coordinatorToolRouting {
+	if got != "you are ongrid.\n\n"+coordinatorToolRouting+"\n\n"+contract.RuntimeIdentityPrompt("v2") {
 		t.Errorf("got %q", got)
 	}
 }
@@ -102,7 +103,7 @@ func TestComposeSystemPrompt_EmptyPromptBody(t *testing.T) {
 	skills := []*Skill{{Name: "empty"}}
 	got := ComposeSystemPrompt("", skills, nil)
 	// nil agentProfile ⇒ coordinator routing block precedes the skill header.
-	if got != coordinatorToolRouting+"\n\n[能力: empty]" {
+	if got != coordinatorToolRouting+"\n\n[能力: empty]"+"\n\n"+contract.RuntimeIdentityPrompt("v2") {
 		t.Errorf("got %q", got)
 	}
 }
@@ -147,5 +148,19 @@ func TestBuildToolCapabilityDigest_TruncatesLargeDynamicSets(t *testing.T) {
 	got := buildToolCapabilityDigest(bag)
 	if !strings.Contains(got, "more; use ToolSearch") {
 		t.Fatalf("digest should truncate and point to ToolSearch, got:\n%s", got)
+	}
+}
+
+func TestComposeSystemPrompt_RuntimeIdentityAndUnknownTelemetry(t *testing.T) {
+	for _, profile := range []*Agent{nil, {Name: "worker", SystemPrompt: "worker persona"}} {
+		got := ComposeSystemPrompt("custom persona", nil, profile)
+		for _, want := range []string{"agent_runtime_version=v2", "current_edge.agent_version", "Edge 版本", "manager_version", "plugin_status=not_queried", "历史占位值"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("missing identity/evidence rule %q", want)
+			}
+		}
+		if strings.Contains(got, "agent_runtime_version=v3") {
+			t.Fatal("wrong runtime identity")
+		}
 	}
 }

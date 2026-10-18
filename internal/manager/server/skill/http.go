@@ -50,8 +50,9 @@ type listResp struct {
 }
 
 type executeReq struct {
-	EdgeID uint64          `json:"edge_id"`
-	Params json.RawMessage `json:"params,omitempty"`
+	DeviceID uint64          `json:"device_id"`
+	EdgeID   uint64          `json:"edge_id"`
+	Params   json.RawMessage `json:"params,omitempty"`
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
@@ -79,6 +80,10 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, item)
 }
 
+// execute 执行技能，以 Host 身份解析当前通道。
+// @Summary Execute a skill on a host or manager
+// @Router /v1/skills/{key}/execute [post]
+// @Success 200 {object} svc.ExecuteOutput
 func (h *Handler) execute(w http.ResponseWriter, r *http.Request) {
 	caller, ok := callerFromRequest(r)
 	if !ok {
@@ -99,9 +104,10 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request) {
 	// decide. ScopeManager skills (web_search / subprocess packs) skip
 	// the check there; ScopeHost skills still 400 when edge_id == 0.
 	out, err := h.svc.Execute(r.Context(), caller, svc.ExecuteInput{
-		Key:    key,
-		EdgeID: req.EdgeID,
-		Params: req.Params,
+		Key:      key,
+		EdgeID:   req.EdgeID,
+		DeviceID: req.DeviceID,
+		Params:   req.Params,
 	})
 	if err != nil {
 		writeErr(w, err)

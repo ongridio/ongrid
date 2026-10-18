@@ -253,27 +253,27 @@ const BUILTIN_SKILL_I18N: Record<string, { name: string; desc: { zh: string; en:
     },
     category: { zh: '平台', en: 'Platform' },
   },
-  get_edge_summary: {
-    name: 'get_edge_summary',
+  get_host_summary: {
+    name: 'get_host_summary',
     desc: {
       zh: '获取一台 edge 的概览（在线状态 / 角色 / 最近指标 / 最近事件）。',
       en: 'Get an overview of one edge (online status / roles / recent metrics / recent events).',
     },
     category: { zh: '平台', en: 'Platform' },
   },
-  find_outlier_edges: {
-    name: 'find_outlier_edges',
+  find_outlier_hosts: {
+    name: 'find_outlier_hosts',
     desc: {
       zh: '基于 z-score 找出指标偏离基线最远的设备（异常 outlier）。',
       en: 'Find devices whose metrics drift farthest from baseline by z-score (outliers).',
     },
     category: { zh: '主机', en: 'Host' },
   },
-  rank_edges: {
-    name: 'rank_edges',
+  rank_hosts: {
+    name: 'rank_hosts',
     desc: {
-      zh: '按指标对设备排序（top-N，多指标加权）。',
-      en: 'Rank devices by metric (top-N, optionally weighted).',
+      zh: '按 CPU、内存、磁盘、负载或综合指标对主机排名（最高或最低 N 台）。',
+      en: 'Rank hosts by CPU, memory, disk, load or composite usage (top/bottom N).',
     },
     category: { zh: '主机', en: 'Host' },
   },
@@ -302,13 +302,13 @@ export function localizedSkill(s: SkillSummary): SkillSummary {
 
 export function executeSkill(
   key: string,
-  // null = manager-scope skill (no edge_id required)
-  edgeID: string | number | null,
+  // null = manager-scope skill (no device_id required)
+  deviceID: string | number | null,
   params: Record<string, unknown>,
 ) {
   const body: Record<string, unknown> = { params };
-  if (edgeID !== null && edgeID !== '' && edgeID !== undefined) {
-    body.edge_id = typeof edgeID === 'string' ? Number(edgeID) : edgeID;
+  if (deviceID !== null && deviceID !== '' && deviceID !== undefined) {
+    body.device_id = typeof deviceID === 'string' ? Number(deviceID) : deviceID;
   }
   return request<ExecuteResult>('POST', `/skills/${encodeURIComponent(key)}/execute`, body);
 }

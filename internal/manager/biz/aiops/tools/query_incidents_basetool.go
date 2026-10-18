@@ -90,8 +90,8 @@ func (t *QueryIncidentsTool) InvokableRun(ctx context.Context, argsJSON string, 
 		Limit:    in.Limit * 4,
 	}
 	devID := in.DeviceID
-	if devID == 0 {
-		devID = in.EdgeID
+	if in.EdgeID != 0 {
+		return "", fmt.Errorf("query_incidents: use device_id, not edge_id")
 	}
 	if devID > 0 {
 		f.DeviceID = &devID

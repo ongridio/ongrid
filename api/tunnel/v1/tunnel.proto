@@ -549,3 +549,16 @@ message ProbeNetworkSNMPResponse {
     repeated NetworkInterfaceReport interfaces = 8 [json_name = "interfaces"];
     repeated NetworkLinkReport links = 9 [json_name = "links"];
 }
+
+// 插件配置使用 Host 身份标记采集数据；Edge 身份来自已认证隧道。
+message GetPluginConfigsResponse {
+  // 历史 wire 字段，值始终为 Host ID，仅供旧 Edge 兼容。
+  uint64 edge_id = 1 [deprecated = true];
+  map<string, GetPluginConfigsEntry> configs = 2;
+  uint64 device_id = 3;
+}
+message GetPluginConfigsEntry {
+  bool enabled = 1;
+  string endpoint = 2;
+  google.protobuf.Struct spec = 3;
+}

@@ -730,7 +730,7 @@ func filterToolsForAgentRole(bag []basetool.BaseTool, agentDef *Agent, isCoordin
 	blacklist := []string(nil)
 	if agentDef != nil {
 		for _, n := range agentDef.Tools {
-			whitelist[strings.TrimSpace(n)] = true
+			whitelist[basetool.CanonicalName(strings.TrimSpace(n))] = true
 		}
 		blacklist = agentDef.DisallowedTools
 	}
@@ -801,18 +801,21 @@ func filterToolsForAgentRole(bag []basetool.BaseTool, agentDef *Agent, isCoordin
 // matchesAny returns true when name matches any pattern in patterns.
 // Patterns: exact name, or "*<suffix>" / "<prefix>*" wildcard.
 func matchesAny(name string, patterns []string) bool {
-	for _, p := range patterns {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		switch {
-		case p == name:
-			return true
-		case strings.HasPrefix(p, "*") && strings.HasSuffix(name, p[1:]):
-			return true
-		case strings.HasSuffix(p, "*") && strings.HasPrefix(name, p[:len(p)-1]):
-			return true
+	for _, candidate := range basetool.PolicyNames(name) {
+		name := candidate
+		for _, p := range patterns {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			switch {
+			case p == name:
+				return true
+			case strings.HasPrefix(p, "*") && strings.HasSuffix(name, p[1:]):
+				return true
+			case strings.HasSuffix(p, "*") && strings.HasPrefix(name, p[:len(p)-1]):
+				return true
+			}
 		}
 	}
 	return false

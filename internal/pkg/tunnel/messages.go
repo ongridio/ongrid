@@ -202,8 +202,9 @@ type GetPluginConfigsResponse struct {
 	// EdgeID is a legacy wire name. Manager writes the resolved host
 	// device_id here because plugin configs bake it into telemetry labels;
 	// the authenticated tunnel session remains the source of Edge identity.
-	EdgeID  uint64                           `json:"edge_id"`
-	Configs map[string]GetPluginConfigsEntry `json:"configs"`
+	EdgeID   uint64                           `json:"edge_id"`
+	DeviceID uint64                           `json:"device_id"`
+	Configs  map[string]GetPluginConfigsEntry `json:"configs"`
 }
 
 // GetPluginConfigsEntry is one plugin's slice of the snapshot.

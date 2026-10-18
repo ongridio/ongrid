@@ -32,8 +32,9 @@ import (
 // /etc/machine-id or platform UUID for true stability across hostname
 // renames).
 type Device struct {
-	ID          uint64 `gorm:"primaryKey;autoIncrement"`
-	Fingerprint string `gorm:"size:128;not null;column:fingerprint;uniqueIndex:idx_devices_fingerprint,priority:1"`
+	ID            uint64  `gorm:"primaryKey;autoIncrement"`
+	CurrentEdgeID *uint64 `gorm:"column:current_edge_id;index"`
+	Fingerprint   string  `gorm:"size:128;not null;column:fingerprint;uniqueIndex:idx_devices_fingerprint,priority:1"`
 	// UserID records the owner / who registered the first edge on this
 	// host. nullable to mirror Edge.CreatedBy (audit-only field).
 	UserID *uint64 `gorm:"column:user_id"`

@@ -116,7 +116,7 @@ func categorizeFlowTool(name string) string {
 		return "messaging"
 	case "correlate_incident", "get_incident_detail", "query_incidents", "query_alert_rules":
 		return "incident"
-	case "get_edge_summary", "query_devices", "query_edges", "query_change_events", "rank_edges", "find_outlier_edges":
+	case "get_host_summary", "query_devices", "query_edges", "query_change_events", "rank_hosts", "find_outlier_hosts":
 		return "sre"
 	case "get_topology", "find_topology_node", "expand_topology":
 		return "topology"
@@ -182,11 +182,11 @@ var flowToolLabelZhMap = map[string]string{
 	"query_incidents":     "查询事件",
 	"query_alert_rules":   "查询告警规则",
 	// sre
-	"get_edge_summary":    "边端概览",
+	"get_host_summary":    "边端概览",
 	"query_devices":       "查询设备",
 	"query_change_events": "查询变更事件",
-	"rank_edges":          "边端排名",
-	"find_outlier_edges":  "离群边端",
+	"rank_hosts":          "主机排名",
+	"find_outlier_hosts":  "离群边端",
 	// knowledge
 	"query_knowledge":   "知识库检索",
 	"list_repo_sources": "列出代码仓",
@@ -228,11 +228,11 @@ var flowToolDescZhMap = map[string]string{
 	"get_incident_detail":     "获取单条事件详情。",
 	"query_incidents":         "查询事件列表。",
 	"query_alert_rules":       "查询告警规则。",
-	"get_edge_summary":        "按边端聚合健康概览。",
+	"get_host_summary":        "按边端聚合健康概览。",
 	"query_devices":           "查询设备 / 边端清单。",
 	"query_change_events":     "查询某时刻附近的变更事件（审计）。",
-	"rank_edges":              "按某个 PromQL 指标给边端排名。",
-	"find_outlier_edges":      "基于统计找出离群边端。",
+	"rank_hosts":              "按某个 PromQL 指标给主机排名。",
+	"find_outlier_hosts":      "基于统计找出离群边端。",
 	"query_knowledge":         "在 playbook + 代码仓里做语义检索。",
 	"list_repo_sources":       "列出已注册的代码仓来源。",
 	"read_source":             "读取代码仓里的源文件。",

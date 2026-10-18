@@ -461,12 +461,16 @@ func (r *fakeEdgeDeviceRepo) LookupEdgeForDevice(_ context.Context, deviceID uin
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	var current uint64
 	for edgeID, linkedDeviceID := range r.links {
-		if linkedDeviceID == deviceID {
-			return edgeID, nil
+		if linkedDeviceID == deviceID && edgeID > current {
+			current = edgeID
 		}
 	}
-	return 0, errs.ErrNotFound
+	if current == 0 {
+		return 0, errs.ErrNotFound
+	}
+	return current, nil
 }
 
 func (r *fakeEdgeDeviceRepo) ListDevicesForEdge(_ context.Context, edgeID uint64) ([]*devicemodel.EdgeDevice, error) {
@@ -655,7 +659,7 @@ func TestAuthenticateSuccessReturnsSession(t *testing.T) {
 func TestHandleRegisterUpsertsDeviceAndLinksEdge(t *testing.T) {
 	repo := newFakeRepo()
 	devices := newFakeDeviceRepo()
-	uc := NewUsecase(repo, devices, nil, nil)
+	uc := NewUsecase(repo, devices, newFakeEdgeDeviceRepo(), nil)
 	ctx := context.Background()
 
 	res, err := uc.Create(ctx, "edge-reg", nil)
@@ -737,12 +741,12 @@ func TestClearHostDeviceLinkRemovesControllerDeviceAssociation(t *testing.T) {
 	if _, err := links.LookupHostDevice(ctx, res.Edge.ID); !errors.Is(err, errs.ErrNotFound) {
 		t.Fatalf("LookupHostDevice after clear err = %v, want ErrNotFound", err)
 	}
-	if _, err := devices.Get(ctx, deviceID); !errors.Is(err, errs.ErrNotFound) {
-		t.Fatalf("Get device after clear err = %v, want ErrNotFound", err)
+	if _, err := devices.Get(ctx, deviceID); err != nil {
+		t.Fatalf("host must survive unlink: %v", err)
 	}
 }
 
-func TestDeleteRemovesLastDeviceTopologyAndLinks(t *testing.T) {
+func TestDeletePreservesHostTopologyAndHistory(t *testing.T) {
 	repo := newFakeRepo()
 	devices := newFakeDeviceRepo()
 	links := newFakeEdgeDeviceRepo()
@@ -775,13 +779,13 @@ func TestDeleteRemovesLastDeviceTopologyAndLinks(t *testing.T) {
 	if _, err := uc.Get(ctx, res.Edge.ID); !errors.Is(err, errs.ErrNotFound) {
 		t.Fatalf("edge after delete err = %v, want ErrNotFound", err)
 	}
-	if _, err := devices.Get(ctx, deviceID); !errors.Is(err, errs.ErrNotFound) {
-		t.Fatalf("device after delete err = %v, want ErrNotFound", err)
+	if _, err := devices.Get(ctx, deviceID); err != nil {
+		t.Fatalf("host must survive edge delete: %v", err)
 	}
-	if _, err := links.LookupHostDevice(ctx, res.Edge.ID); !errors.Is(err, errs.ErrNotFound) {
-		t.Fatalf("edge_device link after delete err = %v, want ErrNotFound", err)
+	if hostID, err := links.LookupHostDevice(ctx, res.Edge.ID); err != nil || hostID != deviceID {
+		t.Fatalf("history missing: %d %v", hostID, err)
 	}
-	if len(mirror.deletes) != 1 || mirror.deletes[0] != [2]uint64{deviceID, nodeID} {
+	if len(mirror.deletes) != 0 {
 		t.Fatalf("mirror deletes = %#v, want device/node %d/%d", mirror.deletes, deviceID, nodeID)
 	}
 }
@@ -824,8 +828,8 @@ func TestDeleteKeepsDeviceWhenAnotherLiveEdgeUsesIt(t *testing.T) {
 	if _, err := devices.Get(ctx, deviceID); err != nil {
 		t.Fatalf("device should remain, got %v", err)
 	}
-	if _, err := links.LookupHostDevice(ctx, first.Edge.ID); !errors.Is(err, errs.ErrNotFound) {
-		t.Fatalf("first link after delete err = %v, want ErrNotFound", err)
+	if _, err := links.LookupHostDevice(ctx, first.Edge.ID); err != nil {
+		t.Fatalf("old edge history missing: %v", err)
 	}
 	if got, err := links.LookupHostDevice(ctx, second.Edge.ID); err != nil || got != deviceID {
 		t.Fatalf("second link = %d err=%v, want %d", got, err, deviceID)
@@ -838,7 +842,7 @@ func TestDeleteKeepsDeviceWhenAnotherLiveEdgeUsesIt(t *testing.T) {
 func TestHandleRegisterIsIdempotentForSameHost(t *testing.T) {
 	repo := newFakeRepo()
 	devices := newFakeDeviceRepo()
-	uc := NewUsecase(repo, devices, nil, nil)
+	uc := NewUsecase(repo, devices, newFakeEdgeDeviceRepo(), nil)
 	ctx := context.Background()
 
 	res, err := uc.Create(ctx, "edge-idemp", nil)
@@ -860,7 +864,7 @@ func TestHandleRegisterIsIdempotentForSameHost(t *testing.T) {
 func TestHandleHeartbeatBumpsLinkedDeviceLastSeen(t *testing.T) {
 	repo := newFakeRepo()
 	devices := newFakeDeviceRepo()
-	uc := NewUsecase(repo, devices, nil, nil)
+	uc := NewUsecase(repo, devices, newFakeEdgeDeviceRepo(), nil)
 	ctx := context.Background()
 
 	res, err := uc.Create(ctx, "edge-hb", nil)
@@ -901,7 +905,7 @@ func TestHandleHeartbeatBumpsLinkedDeviceLastSeen(t *testing.T) {
 func TestDeleteMarksLinkedDeviceOffline(t *testing.T) {
 	repo := newFakeRepo()
 	devices := newFakeDeviceRepo()
-	uc := NewUsecase(repo, devices, nil, nil)
+	uc := NewUsecase(repo, devices, newFakeEdgeDeviceRepo(), nil)
 	ctx := context.Background()
 
 	res, err := uc.Create(ctx, "edge-del", nil)
@@ -1062,7 +1066,7 @@ func TestHandleRegisterMirrorsDeviceToNode(t *testing.T) {
 	repo := newFakeRepo()
 	devices := newFakeDeviceRepo()
 	mirror := &stubMirror{}
-	uc := NewUsecase(repo, devices, nil, nil)
+	uc := NewUsecase(repo, devices, newFakeEdgeDeviceRepo(), nil)
 	uc.SetNodeMirror(mirror)
 	ctx := context.Background()
 
@@ -1105,7 +1109,7 @@ func TestHandleRegisterFinalizesEnrollmentWithDeviceNode(t *testing.T) {
 	devices := newFakeDeviceRepo()
 	mirror := &stubMirror{}
 	finalizer := &stubEnrollmentFinalizer{}
-	uc := NewUsecase(repo, devices, nil, nil)
+	uc := NewUsecase(repo, devices, newFakeEdgeDeviceRepo(), nil)
 	uc.SetNodeMirror(mirror)
 	uc.SetEnrollmentFinalizer(finalizer)
 	ctx := context.Background()
@@ -1149,7 +1153,7 @@ func TestDeviceFingerprintDistinguishesClonedVMs(t *testing.T) {
 func TestHandleRegisterMigratesLegacyFingerprintInPlace(t *testing.T) {
 	repo := newFakeRepo()
 	devices := newFakeDeviceRepo()
-	uc := NewUsecase(repo, devices, nil, nil)
+	uc := NewUsecase(repo, devices, newFakeEdgeDeviceRepo(), nil)
 	ctx := context.Background()
 
 	res, err := uc.Create(ctx, "edge-mig", nil)

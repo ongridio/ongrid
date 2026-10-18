@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	"log/slog"
 
 	"go.opentelemetry.io/otel"
@@ -40,15 +41,7 @@ type Caller interface {
 	Call(ctx context.Context, edgeID uint64, method string, body []byte) ([]byte, error)
 }
 
-// ExecuteResult is what a tool executor returns: the JSON payload to feed
-// back into the LLM plus (optionally) the device id the call targeted,
-// which the agent uses to populate the chat_tool_calls.device_id audit
-// column.
-//
-// Post-split (May 2026): renamed EdgeID → DeviceID. Numerically the
-// values are the same — the legacy chat_tool_calls.edge_id column is
-// kept as the storage column name (audit-only) but the semantic
-// interpretation is the host device id.
+// ExecuteResult carries the tool output and its durable Host audit identity.
 type ExecuteResult struct {
 	ResultJSON json.RawMessage
 	DeviceID   *uint64
@@ -298,7 +291,7 @@ func NewRegistry(caller Caller, edges *edgebiz.Usecase, devices *devicebiz.Useca
 	}
 	// Read-only ongrid business-data tools. query_edges + get_topology are
 	// always registered (only need the edge usecase, which is required).
-	// rank_edges / find_outlier_edges are gated on promQuery because they
+	// rank_hosts / find_outlier_hosts are gated on promQuery because they
 	// build PromQL under the hood. The alert-flavored tools are gated on
 	// alertUC so unit tests that pass nil alertUC don't see them.
 	if edges != nil {
@@ -315,18 +308,20 @@ func NewRegistry(caller Caller, edges *edgebiz.Usecase, devices *devicebiz.Useca
 			Execute:     r.executeGetTopology,
 		})
 	}
-	if edges != nil && promQuery != nil {
+	if devices != nil && promQuery != nil {
 		r.Register(Tool{
-			Name:        ToolNameRankEdges,
-			Description: RankEdgesDescription,
-			Schema:      RankEdgesSchema,
-			Execute:     r.executeRankEdges,
+			Name:        ToolNameRankHosts,
+			Description: RankHostsDescription,
+			Schema:      RankHostsSchema,
+			Execute:     r.executeRankHosts,
 		})
+	}
+	if devices != nil && promQuery != nil {
 		r.Register(Tool{
-			Name:        ToolNameFindOutlierEdges,
-			Description: FindOutlierEdgesDescription,
-			Schema:      FindOutlierEdgesSchema,
-			Execute:     r.executeFindOutlierEdges,
+			Name:        ToolNameFindOutlierHosts,
+			Description: FindOutlierHostsDescription,
+			Schema:      FindOutlierHostsSchema,
+			Execute:     r.executeFindOutlierHosts,
 		})
 	}
 	if alertUC != nil {
@@ -349,12 +344,12 @@ func NewRegistry(caller Caller, edges *edgebiz.Usecase, devices *devicebiz.Useca
 			Execute:     r.executeQueryAlertRules,
 		})
 	}
-	if edges != nil {
+	if devices != nil {
 		r.Register(Tool{
-			Name:        ToolNameGetEdgeSummary,
-			Description: GetEdgeSummaryDescription,
-			Schema:      GetEdgeSummarySchema,
-			Execute:     r.executeGetEdgeSummary,
+			Name:        ToolNameGetHostSummary,
+			Description: GetHostSummaryDescription,
+			Schema:      GetHostSummarySchema,
+			Execute:     r.executeGetHostSummary,
 		})
 	}
 	// correlate_incident is the AIOps killer composite — it pulls
@@ -434,6 +429,7 @@ func (r *Registry) Schemas() []llm.ToolSchema {
 // arguments (matches OpenAI's tool_call shape when the model decides to call
 // a zero-arg tool).
 func (r *Registry) Invoke(ctx context.Context, name string, args json.RawMessage) (result ExecuteResult, retErr error) {
+	name = basetool.CanonicalName(name)
 	t, ok := r.tools[name]
 	if !ok {
 		return ExecuteResult{}, fmt.Errorf("%w: tool %q", errs.ErrNotFound, name)

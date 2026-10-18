@@ -3,11 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"time"
-
-	edgebiz "github.com/ongridio/ongrid/internal/manager/biz/edge"
-	edgemodel "github.com/ongridio/ongrid/internal/manager/model/edge"
 )
 
 // ToolNameGetTopology is the stable wire name the LLM sees.
@@ -16,7 +12,7 @@ const ToolNameGetTopology = "get_topology"
 // GetTopologyDescription pushes the model toward this tool when the
 // question is about the deployment as a whole — version, fleet size,
 // which observability backends are wired in.
-const GetTopologyDescription = "Return high-level deployment topology: manager version, edge fleet size + online count, configured Prom/Loki/Tempo URLs, channel count, enabled rule count. " +
+const GetTopologyDescription = "Return high-level deployment topology: manager version, separate Host counts and Edge installation counts, configured Prom/Loki/Tempo URLs, channel count, enabled rule count. " +
 	"Use this for questions like 'how big is the fleet' or 'is loki configured'."
 
 // GetTopologySchema is the JSON Schema of the tool's argument object.
@@ -51,56 +47,9 @@ type TopologyInfo struct {
 const topologyCallTimeout = 60 * time.Second
 
 func (r *Registry) executeGetTopology(ctx context.Context, _ json.RawMessage) (ExecuteResult, error) {
-	callCtx, cancel := context.WithTimeout(ctx, topologyCallTimeout)
-	defer cancel()
-
-	out := map[string]any{
-		"manager_version":      r.topology.ManagerVersion,
-		"configured_prom_url":  r.topology.ConfiguredPromURL,
-		"configured_loki_url":  r.topology.ConfiguredLokiURL,
-		"configured_tempo_url": r.topology.ConfiguredTempoURL,
-	}
-
-	// Edge fleet size + online count.
-	if r.edges != nil {
-		all, err := r.edges.List(callCtx, edgebiz.ListFilter{Limit: 5000})
-		if err == nil {
-			online := 0
-			for _, e := range all {
-				if e.Status == edgemodel.StatusOnline {
-					online++
-				}
-			}
-			out["edge_count"] = len(all)
-			out["online_count"] = online
-		}
-	}
-
-	// Enabled rule count.
-	if r.alertUC != nil {
-		rules, err := r.alertUC.ListRules(callCtx, "")
-		if err == nil {
-			enabled := 0
-			for _, rule := range rules {
-				if rule.Enabled {
-					enabled++
-				}
-			}
-			out["enabled_rule_count"] = enabled
-			out["rule_count"] = len(rules)
-		}
-	}
-
-	// Channel count via callback.
-	if r.topology.ChannelCounter != nil {
-		if n, err := r.topology.ChannelCounter(callCtx); err == nil {
-			out["channel_count"] = n
-		}
-	}
-
-	body, err := json.Marshal(out)
+	out, err := NewGetTopologyTool(r.edges, r.alertUC, r.topology, r.log).WithDevices(r.devices).InvokableRun(ctx, "{}")
 	if err != nil {
-		return ExecuteResult{}, fmt.Errorf("get_topology: marshal: %w", err)
+		return ExecuteResult{}, err
 	}
-	return ExecuteResult{ResultJSON: body}, nil
+	return ExecuteResult{ResultJSON: json.RawMessage(out)}, nil
 }

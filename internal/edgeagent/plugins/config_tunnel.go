@@ -148,7 +148,11 @@ func (t *TunnelConfigFetcher) Fetch(ctx context.Context) (map[string]PluginConfi
 	// the tunnel-side edge id would create immutable telemetry with a bogus
 	// device_id label. ONGRID_EDGE_DEVICE_ID is an explicit dev/offline
 	// escape hatch only; production snapshots always use Manager's value.
-	deviceID := resp.EdgeID
+	deviceID := resp.DeviceID
+	if deviceID == 0 {
+		// Older managers explicitly used this wire field for Host identity.
+		deviceID = resp.EdgeID
+	}
 	if deviceID == 0 {
 		deviceID = t.deviceID
 	}

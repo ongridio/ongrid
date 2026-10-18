@@ -1,0 +1,63 @@
+{
+  "rounds": [
+    {
+      "round": 1,
+      "old_edge_id": 1,
+      "start": 1792300171.1109555,
+      "uninstall_verified": true,
+      "new_edge_id": 12,
+      "identity_verified": true,
+      "config_drift": [],
+      "metrics_new_and_history": true,
+      "logs_new_and_history": true,
+      "skill_ping": true,
+      "incidents_preserved": true,
+      "old_edge_offline": true,
+      "completed_at": 1792300274.4326143
+    },
+    {
+      "round": 2,
+      "old_edge_id": 12,
+      "start": 1792300274.4379134,
+      "uninstall_verified": true,
+      "new_edge_id": 13,
+      "identity_verified": true,
+      "config_drift": [],
+      "metrics_new_and_history": true,
+      "logs_new_and_history": true,
+      "skill_ping": true,
+      "incidents_preserved": true,
+      "old_edge_offline": true,
+      "completed_at": 1792300360.3881922
+    },
+    {
+      "round": 3,
+      "old_edge_id": 13,
+      "start": 1792300360.393677,
+      "uninstall_verified": true,
+      "new_edge_id": 14,
+      "identity_verified": true,
+      "config_drift": [],
+      "metrics_new_and_history": true,
+      "logs_new_and_history": true,
+      "skill_ping": true,
+      "incidents_preserved": true,
+      "old_edge_offline": true,
+      "completed_at": 1792300449.4162965
+    }
+  ],
+  "issues": [],
+  "host_id": 1,
+  "initial_edge_id": 1,
+  "initial_host_count": 2,
+  "started_at": 1792300171.0000567,
+  "baseline_incident_ids": [
+    3,
+    4,
+    5
+  ],
+  "flow_cleaned": true,
+  "harness_note": "All three rounds passed. Removed unsupported PATCH Edge rename from cleanup; final installation name retains reinstall suffix, Host name unchanged.",
+  "final_edge_id": 14,
+  "obsolete_edges_cleaned": true
+}

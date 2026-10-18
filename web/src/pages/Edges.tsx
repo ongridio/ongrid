@@ -268,7 +268,7 @@ export default function EdgesPage() {
         ]);
       const allEdges = edgeResp.items ?? [];
       const edgeByDeviceID = selectHostEdgesByDevice(
-        filterVisibleDeviceEdges(allEdges, attachments),
+        filterVisibleDeviceEdges(allEdges, attachments), deviceResp.items ?? [],
       );
       const controllerDeviceIDs = new Set(
         allEdges

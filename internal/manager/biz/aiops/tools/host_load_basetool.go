@@ -39,7 +39,7 @@ type GetHostLoadTool struct {
 
 // NewGetHostLoadTool builds the BaseTool variant. log may be nil
 // (degrades to slog.Default()). devices is required for device_id →
-// edge_id resolution; edges is consulted as the legacy fallback path
+// edge_id resolution through the current Host binding; no numerical fallback
 // when a device row has no junction link.
 func NewGetHostLoadTool(caller Caller, edges *edgebiz.Usecase, devices *devicebiz.Usecase, log *slog.Logger) *GetHostLoadTool {
 	if log == nil {

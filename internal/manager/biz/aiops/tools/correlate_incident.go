@@ -3,9 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"log/slog"
 	"math"
 	"sort"
 	"strconv"
@@ -69,7 +67,7 @@ const correlateMaxResponseBytes = 100 * 1024 // 100 KB
 
 // AlertUsecase is the narrow surface this and the other alert-flavoured
 // tools (query_incidents / query_alert_rules / get_incident_detail /
-// get_edge_summary / get_topology) need from the manager/alert biz layer.
+// get_host_summary / get_topology) need from the manager/alert biz layer.
 // *alertbiz.Usecase satisfies it; tests inject a fake.
 //
 // Declared once here so registry.alertUC can stay a single field across
@@ -92,7 +90,7 @@ type correlateIncidentBundle struct {
 	MetricPanel []metricSeries    `json:"metric_panel,omitempty"`
 	LogPanel    []logEntry        `json:"log_panel,omitempty"`
 	TracePanel  []traceEntry      `json:"trace_panel,omitempty"`
-	Edge        *edgeSnapshot     `json:"edge,omitempty"`
+	Edge        *hostSnapshot     `json:"host,omitempty"`
 	Skipped     map[string]string `json:"skipped,omitempty"`
 	Truncated   map[string]int    `json:"truncated,omitempty"`
 }
@@ -139,7 +137,8 @@ type traceEntry struct {
 	StartTime  string `json:"start_time,omitempty"`
 }
 
-type edgeSnapshot struct {
+type hostSnapshot struct {
+	CurrentEdgeID      *uint64      `json:"current_edge_id,omitempty"`
 	ID                 uint64       `json:"id"`
 	Name               string       `json:"name"`
 	Status             string       `json:"status"`
@@ -254,7 +253,7 @@ func (r *Registry) executeCorrelateIncident(ctx context.Context, args json.RawMe
 				bundle.LogPanel = entries
 			}
 		} else {
-			bundle.Skipped["log_panel"] = "incident has no edge_id"
+			bundle.Skipped["log_panel"] = "incident has no device_id"
 		}
 	} else {
 		bundle.Skipped["log_panel"] = "log query client not configured"
@@ -282,9 +281,9 @@ func (r *Registry) executeCorrelateIncident(ctx context.Context, args json.RawMe
 		bundle.Skipped["trace_panel"] = "trace query client not configured"
 	}
 
-	// Edge state — best-effort. Skip silently when no edge_id.
-	if inc.DeviceID != nil && r.edges != nil {
-		snap := r.queryEdgeSnapshot(callCtx, *inc.DeviceID, inc.FirstFiredAt)
+	// Edge state — best-effort. Skip silently when no device_id.
+	if inc.DeviceID != nil && r.devices != nil {
+		snap := r.queryHostSnapshot(callCtx, *inc.DeviceID, inc.FirstFiredAt)
 		bundle.Edge = snap
 	}
 
@@ -312,20 +311,20 @@ func (r *Registry) executeCorrelateIncident(ctx context.Context, args json.RawMe
 func promExprForIncident(inc *alertmodel.Incident) (string, bool) {
 	// Heuristic 1 — rule_key happens to match the closed-set name.
 	if expr, ok := metricExprFor(inc.Rule); ok {
-		return wrapPerEdge(expr, inc.DeviceID), true
+		return wrapPerHost(expr, inc.DeviceID), true
 	}
 	// Heuristic 2 — label / annotation hint.
 	if labels, _ := inc.Labels(); labels != nil {
 		if name := strings.TrimSpace(labels["metric"]); name != "" {
 			if expr, ok := metricExprFor(name); ok {
-				return wrapPerEdge(expr, inc.DeviceID), true
+				return wrapPerHost(expr, inc.DeviceID), true
 			}
 		}
 	}
 	if ann, _ := inc.Annotations(); ann != nil {
 		if name := strings.TrimSpace(ann["metric"]); name != "" {
 			if expr, ok := metricExprFor(name); ok {
-				return wrapPerEdge(expr, inc.DeviceID), true
+				return wrapPerHost(expr, inc.DeviceID), true
 			}
 		}
 	}
@@ -339,7 +338,7 @@ func promExprForIncident(inc *alertmodel.Incident) (string, bool) {
 func metricExprFor(metric string) (string, bool) {
 	switch metric {
 	case "cpu_pct":
-		return `100 * (1 - avg by (edge_id) (rate(node_cpu_seconds_total{mode="idle"}[5m])))`, true
+		return `100 * (1 - avg by (device_id) (rate(node_cpu_seconds_total{mode="idle"}[5m])))`, true
 	case "mem_pct":
 		return `100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)`, true
 	case "disk_used_pct":
@@ -353,31 +352,31 @@ func metricExprFor(metric string) (string, bool) {
 	case "load15":
 		return `node_load15`, true
 	case "net_rx_bps":
-		return `sum by (edge_id) (rate(node_network_receive_bytes_total[1m]))`, true
+		return `sum by (device_id) (rate(node_network_receive_bytes_total[1m]))`, true
 	case "net_tx_bps":
-		return `sum by (edge_id) (rate(node_network_transmit_bytes_total[1m]))`, true
+		return `sum by (device_id) (rate(node_network_transmit_bytes_total[1m]))`, true
 	}
 	return "", false
 }
 
-// wrapPerEdge restricts a closed-set metric expression to a single
-// edge_id by intersecting it with a label-only selector on that id.
-// Returns expr unchanged when edgeID is nil. The intersection form
-// `(<expr>) and on(edge_id) (group by (edge_id) ({edge_id="<id>"}))`
-// works for both raw selectors and `… by (edge_id) …` aggregations, so
+// wrapPerHost restricts a closed-set metric expression to a single
+// device_id by intersecting it with a label-only selector on that id.
+// Returns expr unchanged when deviceID is nil. The intersection form
+// `(<expr>) and on(device_id) (group by (device_id) ({device_id="<id>"}))`
+// works for both raw selectors and `… by (device_id) …` aggregations, so
 // callers don't need to know the expression's shape.
-func wrapPerEdge(expr string, edgeID *uint64) string {
-	if edgeID == nil {
+func wrapPerHost(expr string, deviceID *uint64) string {
+	if deviceID == nil {
 		return expr
 	}
-	return fmt.Sprintf(`(%s) and on(edge_id) (group by (edge_id) ({edge_id="%d"}))`, expr, *edgeID)
+	return fmt.Sprintf(`(%s) and on(device_id) (group by (device_id) ({device_id="%d"}))`, expr, *deviceID)
 }
 
 // queryMetricPanel runs a range query and reduces the result to top-3 series
 // by max magnitude. The series are returned with timestamps in unix-seconds
 // and values as strings (Prom's wire format) so the LLM can reason without
 // secondary float parsing.
-func (r *Registry) queryMetricPanel(ctx context.Context, expr string, edgeID *uint64, start, end time.Time) ([]metricSeries, error) {
+func (r *Registry) queryMetricPanel(ctx context.Context, expr string, deviceID *uint64, start, end time.Time) ([]metricSeries, error) {
 	step := stepFor(int(end.Sub(start).Seconds()))
 	res, err := r.promQuery.QueryRange(ctx, expr, start, end, step)
 	if err != nil {
@@ -432,8 +431,8 @@ func seriesMagnitude(s metricSeries) float64 {
 
 // queryLogPanel asks the selected log backend for the 50 most recent
 // error-ish lines from the device's stream.
-func (r *Registry) queryLogPanel(ctx context.Context, edgeID uint64, start, end time.Time) ([]logEntry, error) {
-	q := fmt.Sprintf(`{device_id="%d"} |~ "(?i)error|panic|oom|fatal|fail"`, edgeID)
+func (r *Registry) queryLogPanel(ctx context.Context, deviceID uint64, start, end time.Time) ([]logEntry, error) {
+	q := fmt.Sprintf(`{device_id="%d"} |~ "(?i)error|panic|oom|fatal|fail"`, deviceID)
 	res, err := r.logQuery.QueryLogQL(ctx, logquery.QueryRangeOptions{
 		Query:     q,
 		Start:     start,
@@ -594,32 +593,25 @@ func (r *Registry) queryTracePanel(ctx context.Context, service string, deviceID
 	return entries, nil
 }
 
-// queryEdgeSnapshot resolves the edge row + (when Prom is available)
+// queryHostSnapshot resolves the edge row + (when Prom is available)
 // current cpu_pct / mem_pct / up + a 24h flap counter. All sub-calls are
 // best-effort: a slow Prom probe MUST NOT block the whole bundle, so each
 // gets its own short deadline.
-func (r *Registry) queryEdgeSnapshot(ctx context.Context, edgeID uint64, firedAt time.Time) *edgeSnapshot {
-	snap := &edgeSnapshot{ID: edgeID}
+func (r *Registry) queryHostSnapshot(ctx context.Context, deviceID uint64, firedAt time.Time) *hostSnapshot {
+	snap := &hostSnapshot{ID: deviceID}
 	edgeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	edge, err := r.edges.Get(edgeCtx, edgeID)
-	if err == nil && edge != nil {
-		snap.Name = edge.Name
-		snap.Status = edge.Status
-		snap.LastSeenAt = edge.LastSeenAt
-		// Roles now live on the host Device (post device-split). Look it
-		// up best-effort; bundle stays useful even when device repo is
-		// missing or the device row hasn't been created yet.
-		if r.devices != nil && edge.DeviceID != nil {
-			if d, derr := r.devices.Get(edgeCtx, *edge.DeviceID); derr == nil && d != nil {
-				snap.Roles = devicemodel.DecodeRoles(d.Roles)
+	if r.devices != nil {
+		host, err := r.devices.Get(edgeCtx, deviceID)
+		if err == nil && host != nil {
+			snap.Name = host.Name
+			snap.LastSeenAt = host.LastSeenAt
+			snap.Roles = devicemodel.DecodeRoles(host.Roles)
+			snap.Status = "offline"
+			if host.Online {
+				snap.Status = "online"
 			}
-		}
-	} else if err != nil && !errors.Is(err, context.Canceled) {
-		// Don't surface as fatal; bundle stays useful even with edge name missing.
-		if r.log != nil {
-			r.log.Debug("correlate_incident: edge lookup failed",
-				slog.Uint64("edge_id", edgeID), slog.Any("err", err))
+			snap.CurrentEdgeID = host.CurrentEdgeID
 		}
 	}
 
@@ -637,9 +629,9 @@ func (r *Registry) queryEdgeSnapshot(ctx context.Context, edgeID uint64, firedAt
 				*sink = &vc
 			}
 		}
-		probe(fmt.Sprintf(`(100 * (1 - avg by (edge_id) (rate(node_cpu_seconds_total{mode="idle"}[5m])))) and on(edge_id) (group by (edge_id) ({edge_id="%d"}))`, edgeID), &load.CPUPct)
-		probe(fmt.Sprintf(`(100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) and on(edge_id) (group by (edge_id) ({edge_id="%d"}))`, edgeID), &load.MemPct)
-		probe(fmt.Sprintf(`up{edge_id="%d"}`, edgeID), &load.Up)
+		probe(fmt.Sprintf(`(100 * (1 - avg by (device_id) (rate(node_cpu_seconds_total{mode="idle"}[5m])))) and on(device_id) (group by (device_id) ({device_id="%d"}))`, deviceID), &load.CPUPct)
+		probe(fmt.Sprintf(`(100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) and on(device_id) (group by (device_id) ({device_id="%d"}))`, deviceID), &load.MemPct)
+		probe(fmt.Sprintf(`up{device_id="%d"}`, deviceID), &load.Up)
 		if load.CPUPct != nil || load.MemPct != nil || load.Up != nil {
 			snap.CurrentLoad = load
 		}
@@ -656,7 +648,7 @@ func (r *Registry) queryEdgeSnapshot(ctx context.Context, edgeID uint64, firedAt
 		func() {
 			listCtx, lcancel := context.WithTimeout(ctx, 5*time.Second)
 			defer lcancel()
-			eid := edgeID
+			eid := deviceID
 			recent, err := r.alertUC.ListIncidents(listCtx, alertbiz.IncidentFilter{
 				DeviceID: &eid,
 				Limit:    100,

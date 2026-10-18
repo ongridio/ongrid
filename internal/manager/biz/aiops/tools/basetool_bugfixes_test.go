@@ -13,16 +13,16 @@ import (
 	edgemodel "github.com/ongridio/ongrid/internal/manager/model/edge"
 )
 
-// TestFindOutlierEdgesTool_RejectsLoadMetric is the BaseTool sibling of
-// TestExecuteFindOutlierEdges_RejectsLoadMetric (closure_bugfixes_test.go).
+// TestFindOutlierHostsTool_RejectsLoadMetric is the BaseTool sibling of
+// TestExecuteFindOutlierHosts_RejectsLoadMetric (closure_bugfixes_test.go).
 // Locks in Bug 2 on the BaseTool path: previously
 // `if !ok || metric == "load" || ...` looked correct but the !ok branch
 // never fired for cpu/mem/disk because rankMetricExpr also returns ok=true
 // for "load"/"composite". After the whitelist rewrite the rejection is
 // explicit, so we lock that in.
-func TestFindOutlierEdgesTool_RejectsLoadMetric(t *testing.T) {
-	uc := edgebiz.NewUsecase(newFakeEdgeRepo(), nil, nil, slog.Default())
-	tool := NewFindOutlierEdgesTool(&fakePromQuerier{}, uc, nil)
+func TestFindOutlierHostsTool_RejectsLoadMetric(t *testing.T) {
+	uc := rankHostTestDevices{}
+	tool := NewFindOutlierHostsTool(&fakePromQuerier{}, uc, nil)
 
 	_, err := tool.InvokableRun(context.Background(), `{"metric":"load"}`)
 	if err == nil {
@@ -43,15 +43,15 @@ func TestFindOutlierEdgesTool_RejectsLoadMetric(t *testing.T) {
 	}
 }
 
-// TestGetEdgeSummaryTool_IncludesAckedAndResolvedIncidents24h is the
-// BaseTool sibling of TestExecuteGetEdgeSummary_IncludesAckedAndResolvedIncidents24h.
+// TestGetHostSummaryTool_IncludesAckedAndResolvedIncidents24h is the
+// BaseTool sibling of TestExecuteGetHostSummary_IncludesAckedAndResolvedIncidents24h.
 // Locks in Bug 3: previously the repo-level filter was Status=open, which
 // silently dropped acknowledged / silenced / resolved incidents from the
 // last 24h. After the fix, ListIncidents is invoked WITHOUT a Status
 // filter and the in-memory pass keeps everything within 24h whose severity
 // is at least warning. So an acknowledged warning incident in the window
 // must show up.
-func TestGetEdgeSummaryTool_IncludesAckedAndResolvedIncidents24h(t *testing.T) {
+func TestGetHostSummaryTool_IncludesAckedAndResolvedIncidents24h(t *testing.T) {
 	now := time.Now().UTC()
 	edge := &edgemodel.Edge{ID: 7, Name: "host-7", Status: edgemodel.StatusOffline}
 	uc := edgebiz.NewUsecase(newFakeEdgeRepo(edge), nil, nil, slog.Default())
@@ -112,11 +112,11 @@ func TestGetEdgeSummaryTool_IncludesAckedAndResolvedIncidents24h(t *testing.T) {
 	}
 	auc := &fakeAlertUC{listIncidents: incidents}
 
-	tool := NewGetEdgeSummaryTool(nil, uc, nil, auc, nil)
+	tool := NewGetHostSummaryTool(nil, uc, testHostInventory(t, uc), auc, nil)
 
 	// N+15: schema is device_ids[]; the same incident-filter semantics
 	// apply to each fan-out child, so the ack/resolved/info filtering
-	// rule lives inside singleEdgeSummary.
+	// rule lives inside singleHostSummary.
 	out, err := tool.InvokableRun(context.Background(), `{"device_ids":[7]}`)
 	if err != nil {
 		t.Fatalf("InvokableRun: %v", err)
@@ -128,7 +128,7 @@ func TestGetEdgeSummaryTool_IncludesAckedAndResolvedIncidents24h(t *testing.T) {
 		t.Errorf("ListIncidents called with Status=%q, want empty (any-status)", auc.lastIncidentFilter.Status)
 	}
 
-	var env EdgeSummaryBatchResponse
+	var env HostSummaryBatchResponse
 	if err := json.Unmarshal([]byte(out), &env); err != nil {
 		t.Fatalf("decode: %v", err)
 	}

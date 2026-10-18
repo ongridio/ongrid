@@ -46,7 +46,7 @@ export function toolGroupKey(wire: string, source?: string, category?: string): 
     wire === 'describe_k8s_resource' ||
     wire === 'query_k8s_logs'
   ) return 'observe';
-  if (wire.includes('topology') || wire === 'query_devices' || wire === 'query_edges' || wire === 'rank_edges' || wire === 'find_outlier_edges' || wire === 'get_edge_summary') return 'fleet';
+  if (wire.includes('topology') || wire === 'query_devices' || wire === 'query_edges' || wire === 'rank_hosts' || wire === 'find_outlier_hosts' || wire === 'get_host_summary') return 'fleet';
   if (wire.includes('incident') || wire.includes('alert') || wire === 'query_change_events') return 'incident';
   if (wire === 'query_knowledge' || wire === 'web_search' || wire.includes('source')) return 'knowledge';
   if (wire === 'send_notification' || wire === 'send_im_message') return 'messaging';

@@ -102,7 +102,7 @@ func registerBuiltins() {
 			{Key: "rule", LabelZh: "规则名包含（留空=所有告警）", LabelEn: "Rule name contains (blank = all alerts)", Kind: "text", Placeholder: "如 disk / cpu"},
 			{Key: "min_severity", LabelZh: "最低严重度（warning/error/critical，留空=不限）", LabelEn: "Min severity (warning/error/critical; blank = any)", Kind: "text", Placeholder: "critical"},
 		},
-		OutputShape: []string{"incident_id", "rule", "severity", "edge_id", "device_id", "labels", "fired_at"},
+		OutputShape: []string{"incident_id", "rule", "severity", "device_id", "labels", "fired_at"},
 		Execute:     execTrigger,
 	})
 	RegisterNode(&NodeSpec{

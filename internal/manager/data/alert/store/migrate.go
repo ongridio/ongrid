@@ -147,13 +147,7 @@ func Migrate(db *gorm.DB) error {
 		return err
 	}
 
-	// May 2026 entity split: rename edge_id → device_id on alert_incidents
-	// + alert_silences (and best-effort chat_tool_calls). AutoMigrate above
-	// has added device_id where the gorm tag asks for it; this step
-	// migrates data over and drops the legacy edge_id column.
-	if err := renameLegacyEdgeIDColumns(db); err != nil {
-		return err
-	}
+	// Host identity is never inferred by renaming an Edge ID column.
 
 	// Same split, rule_key side: built-in rule key edge_offline →
 	// device_offline. The displayed name was already "设备离线" all
@@ -188,68 +182,6 @@ func Migrate(db *gorm.DB) error {
 		return err
 	}
 
-	return nil
-}
-
-// renameLegacyEdgeIDColumns runs ALTER TABLE RENAME COLUMN to migrate
-// alert_incidents.edge_id → device_id and alert_silences.edge_id →
-// device_id (May 2026 entity split). Pre-launch we drop the old column
-// outright; idempotent because RENAME COLUMN no-ops when the column is
-// already gone (we check HasColumn first).
-//
-// On SQLite this requires 3.25.0+ (we run 3.40+); on MySQL it's 8.0+.
-//
-// Also kept here so the migration runs after AutoMigrate adds the new
-// column — gorm's AutoMigrate will create device_id on the existing
-// table without touching edge_id, so we rename data over and then drop
-// the legacy column.
-func renameLegacyEdgeIDColumns(db *gorm.DB) error {
-	type tbl struct {
-		name string
-	}
-	for _, t := range []tbl{{"alert_incidents"}, {"alert_silences"}} {
-		if !db.Migrator().HasTable(t.name) {
-			continue
-		}
-		hasOld := db.Migrator().HasColumn(t.name, "edge_id")
-		hasNew := db.Migrator().HasColumn(t.name, "device_id")
-		switch {
-		case hasOld && !hasNew:
-			// Rename the column outright.
-			if err := db.Migrator().RenameColumn(t.name, "edge_id", "device_id"); err != nil {
-				// Some dialects (sqlite older than 3.25) don't support
-				// rename — fall back to ALTER ADD + UPDATE + DROP.
-				if err2 := db.Exec("ALTER TABLE " + t.name + " ADD COLUMN device_id INTEGER").Error; err2 != nil {
-					return err
-				}
-				_ = db.Exec("UPDATE " + t.name + " SET device_id = edge_id").Error
-				_ = db.Migrator().DropColumn(t.name, "edge_id")
-			}
-		case hasOld && hasNew:
-			// Both exist (re-run on a partially-migrated DB). Backfill
-			// any NULLs from the legacy column and drop edge_id.
-			_ = db.Exec("UPDATE " + t.name + " SET device_id = edge_id WHERE device_id IS NULL AND edge_id IS NOT NULL").Error
-			_ = db.Migrator().DropColumn(t.name, "edge_id")
-		default:
-			// new only or neither — nothing to do.
-		}
-	}
-	// Same for chat_tool_calls (aiops audit), best-effort.
-	if db.Migrator().HasTable("chat_tool_calls") {
-		hasOld := db.Migrator().HasColumn("chat_tool_calls", "edge_id")
-		hasNew := db.Migrator().HasColumn("chat_tool_calls", "device_id")
-		switch {
-		case hasOld && !hasNew:
-			if err := db.Migrator().RenameColumn("chat_tool_calls", "edge_id", "device_id"); err != nil {
-				_ = db.Exec("ALTER TABLE chat_tool_calls ADD COLUMN device_id INTEGER").Error
-				_ = db.Exec("UPDATE chat_tool_calls SET device_id = edge_id").Error
-				_ = db.Migrator().DropColumn("chat_tool_calls", "edge_id")
-			}
-		case hasOld && hasNew:
-			_ = db.Exec("UPDATE chat_tool_calls SET device_id = edge_id WHERE device_id IS NULL AND edge_id IS NOT NULL").Error
-			_ = db.Migrator().DropColumn("chat_tool_calls", "edge_id")
-		}
-	}
 	return nil
 }
 

@@ -27,7 +27,7 @@ tools:
   - query_promql
   - query_logql
   - query_traceql
-  - get_edge_summary
+  - get_host_summary
   - query_alert_rules
   - query_devices
   - get_host_load

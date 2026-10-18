@@ -95,7 +95,20 @@ func (r *Repo) RebindFingerprint(ctx context.Context, oldFP, newFP string) error
 // don't include online/last_seen_at here — those have a separate
 // lifecycle (MarkOnline / MarkOffline).
 func (r *Repo) UpdateHostFacts(ctx context.Context, id uint64, f biz.HostFacts) error {
-	res := r.db.WithContext(ctx).Model(&model.Device{}).Where("id = ?", id).Updates(map[string]any{
+	return r.updateHostFacts(ctx, id, nil, f)
+}
+
+// UpdateCurrentHostFacts prevents a superseded registration from overwriting Host facts.
+func (r *Repo) UpdateCurrentHostFacts(ctx context.Context, id, edgeID uint64, f biz.HostFacts) error {
+	return r.updateHostFacts(ctx, id, &edgeID, f)
+}
+
+func (r *Repo) updateHostFacts(ctx context.Context, id uint64, edgeID *uint64, f biz.HostFacts) error {
+	q := r.db.WithContext(ctx).Model(&model.Device{}).Where("id = ?", id)
+	if edgeID != nil {
+		q = q.Where("current_edge_id = ?", *edgeID)
+	}
+	res := q.Updates(map[string]any{
 		"hostname":         f.Hostname,
 		"os":               f.OS,
 		"os_version":       f.OSVersion,
@@ -110,7 +123,14 @@ func (r *Repo) UpdateHostFacts(ctx context.Context, id uint64, f biz.HostFacts) 
 		return res.Error
 	}
 	if res.RowsAffected == 0 {
-		return errs.ErrNotFound
+		// MySQL may report no changed rows for an identical re-registration.
+		var count int64
+		if err := q.Count(&count).Error; err != nil {
+			return err
+		}
+		if count == 0 {
+			return errs.ErrNotFound
+		}
 	}
 	return nil
 }
@@ -238,6 +258,7 @@ WHERE delete_marker = 0 AND online = ?
     SELECT 1 FROM edge_devices ed
     JOIN edges e ON e.id = ed.edge_id
     WHERE ed.device_id = devices.id
+      AND ed.edge_id = devices.current_edge_id
       AND ed.delete_marker = 0
       AND e.delete_marker = 0
       AND e.status = ?
@@ -354,6 +375,7 @@ func (r *Repo) ListWithoutLiveEdges(ctx context.Context, limit int) ([]*model.De
 			FROM edge_devices ed
 			JOIN edges e ON e.id = ed.edge_id
 			WHERE ed.device_id = devices.id
+      AND ed.edge_id = devices.current_edge_id
 			  AND ed.delete_marker = 0
 			  AND e.delete_marker = 0
 		)`).
@@ -457,4 +479,13 @@ func uniqueEdgeIDs(links []*model.EdgeDevice) []uint64 {
 		out = append(out, link.EdgeID)
 	}
 	return out
+}
+
+// UpdateHostPresence applies events only while this installation still owns the Host.
+func (r *Repo) UpdateHostPresence(ctx context.Context, hostID, edgeID uint64, online bool) error {
+	updates := map[string]any{"online": online}
+	if online {
+		updates["last_seen_at"] = time.Now().UTC()
+	}
+	return r.db.WithContext(ctx).Model(&model.Device{}).Where("id = ? AND current_edge_id = ?", hostID, edgeID).Updates(updates).Error
 }

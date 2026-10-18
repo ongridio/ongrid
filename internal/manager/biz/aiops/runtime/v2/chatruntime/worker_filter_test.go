@@ -45,7 +45,7 @@ func toolbagHas(tools []basetool.BaseTool, name string) bool {
 // weak deployed model — see worker.go history note — so they're back.)
 func TestFilterToolsForAgentRole_DynamicReadTools(t *testing.T) {
 	bag := []basetool.BaseTool{
-		&originTool{name: "rank_edges", class: "read", origin: basetool.OriginBuiltin},
+		&originTool{name: "rank_hosts", class: "read", origin: basetool.OriginBuiltin},
 		&originTool{name: "mcp__k8s__namespaces_list", class: "read", origin: basetool.OriginMCP},
 		&originTool{name: "mcp__k8s__nodes_drain", class: "destructive", origin: basetool.OriginMCP},
 		&originTool{name: "skill__custom__foo", class: "read", origin: basetool.OriginSkill},
@@ -54,7 +54,7 @@ func TestFilterToolsForAgentRole_DynamicReadTools(t *testing.T) {
 	// coordinator + specialist both keep dynamic READ tools (so MCP is reachable)
 	for _, isCoord := range []bool{true, false} {
 		got := filterToolsForAgentRole(bag, nil, isCoord, false)
-		for _, n := range []string{"rank_edges", "mcp__k8s__namespaces_list", "skill__custom__foo"} {
+		for _, n := range []string{"rank_hosts", "mcp__k8s__namespaces_list", "skill__custom__foo"} {
 			if !toolbagHas(got, n) {
 				t.Errorf("isCoordinator=%v should keep %s", isCoord, n)
 			}

@@ -3,6 +3,7 @@ package graph
 import (
 	"context"
 	"encoding/json"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	"regexp"
 	"strconv"
 	"strings"
@@ -98,7 +99,8 @@ func pruneToolCallsForBudget(history []*schema.Message, msg *schema.Message) (*s
 	kept := make([]schema.ToolCall, 0, len(msg.ToolCalls))
 	exhaustedTool := ""
 	for _, call := range msg.ToolCalls {
-		name := strings.TrimSpace(call.Function.Name)
+		name := basetool.CanonicalName(strings.TrimSpace(call.Function.Name))
+		call.Function.Name = name
 		if name == "" {
 			continue
 		}
@@ -201,7 +203,7 @@ func priorToolCounts(messages []*schema.Message) map[string]int {
 		if msg.Role != schema.Tool {
 			continue
 		}
-		name := strings.TrimSpace(msg.ToolName)
+		name := basetool.CanonicalName(strings.TrimSpace(msg.ToolName))
 		if name == "" {
 			continue
 		}
@@ -254,7 +256,7 @@ func summarizeToolMessage(toolName, content string) string {
 		toolName = "tool"
 	}
 	switch toolName {
-	case "ToolSearch", "get_edge_summary", "query_knowledge", "grep_source", "list_repo_sources":
+	case "ToolSearch", "get_host_summary", "query_knowledge", "grep_source", "list_repo_sources":
 		return ""
 	}
 	var payload map[string]any

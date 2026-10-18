@@ -14,7 +14,6 @@ import (
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	devicebiz "github.com/ongridio/ongrid/internal/manager/biz/device"
 	edgebiz "github.com/ongridio/ongrid/internal/manager/biz/edge"
-	edgemodel "github.com/ongridio/ongrid/internal/manager/model/edge"
 	"github.com/ongridio/ongrid/internal/pkg/promquery"
 )
 
@@ -549,8 +548,11 @@ func (r databaseStatusRunner) resolveCandidates(ctx context.Context, deviceIDs [
 			if d == nil || d.ID == 0 {
 				continue
 			}
-			edgeID, err := r.devices.LookupEdgeForDevice(ctx, d.ID)
-			if err != nil || edgeID == 0 {
+			edgeID, err := NewDeviceResolver(r.devices, r.edges).ResolveEdgeID(ctx, d.ID)
+			if err != nil {
+				return nil, fmt.Errorf("resolve host %d: %w", d.ID, err)
+			}
+			if edgeID == 0 {
 				continue
 			}
 			name := firstNonEmpty(d.Name, d.Hostname)
@@ -559,52 +561,25 @@ func (r databaseStatusRunner) resolveCandidates(ctx context.Context, deviceIDs [
 		return out, nil
 	}
 
-	edges, err := r.edges.List(ctx, edgebiz.ListFilter{Limit: 500})
-	if err != nil {
-		return nil, fmt.Errorf("%s: list edges: %w", ToolNameAnalyzeDatabaseStatus, err)
-	}
-	out := make([]databaseDeviceCandidate, 0, len(edges))
-	for _, e := range edges {
-		if e == nil {
-			continue
-		}
-		deviceID := e.ID
-		if e.DeviceID != nil && *e.DeviceID != 0 {
-			deviceID = *e.DeviceID
-		}
-		out = append(out, databaseDeviceCandidate{DeviceID: deviceID, EdgeID: e.ID, DeviceName: e.Name})
-	}
-	return out, nil
+	return nil, fmt.Errorf("%s: host inventory not configured", ToolNameAnalyzeDatabaseStatus)
 }
 
 func (r databaseStatusRunner) resolveCandidate(ctx context.Context, deviceID uint64) (databaseDeviceCandidate, error) {
-	if r.devices != nil {
-		if edgeID, err := r.devices.LookupEdgeForDevice(ctx, deviceID); err == nil && edgeID != 0 {
-			name := ""
-			if d, derr := r.devices.Get(ctx, deviceID); derr == nil && d != nil {
-				name = firstNonEmpty(d.Name, d.Hostname)
-			}
-			return databaseDeviceCandidate{DeviceID: deviceID, EdgeID: edgeID, DeviceName: name}, nil
-		}
-		if d, err := r.devices.Get(ctx, deviceID); err == nil && d != nil {
-			return databaseDeviceCandidate{}, fmt.Errorf("%s: device_id=%d has no host-edge link", ToolNameAnalyzeDatabaseStatus, deviceID)
-		}
+	if r.devices == nil {
+		return databaseDeviceCandidate{}, fmt.Errorf("host inventory not configured")
 	}
-	if r.edges != nil {
-		e, err := r.edges.Get(ctx, deviceID)
-		if err == nil && e != nil {
-			return candidateFromEdge(e), nil
-		}
+	host, err := r.devices.Get(ctx, deviceID)
+	if err != nil {
+		return databaseDeviceCandidate{}, fmt.Errorf("get host: %w", err)
 	}
-	return databaseDeviceCandidate{}, fmt.Errorf("%s: device_id=%d not found", ToolNameAnalyzeDatabaseStatus, deviceID)
-}
-
-func candidateFromEdge(e *edgemodel.Edge) databaseDeviceCandidate {
-	deviceID := e.ID
-	if e.DeviceID != nil && *e.DeviceID != 0 {
-		deviceID = *e.DeviceID
+	edgeID, err := NewDeviceResolver(r.devices, r.edges).ResolveEdgeID(ctx, deviceID)
+	if err != nil {
+		return databaseDeviceCandidate{}, err
 	}
-	return databaseDeviceCandidate{DeviceID: deviceID, EdgeID: e.ID, DeviceName: e.Name}
+	if edgeID == 0 {
+		return databaseDeviceCandidate{}, fmt.Errorf("host %d has no current Edge", deviceID)
+	}
+	return databaseDeviceCandidate{DeviceID: host.ID, EdgeID: edgeID, DeviceName: firstNonEmpty(host.Name, host.Hostname)}, nil
 }
 
 func (r databaseStatusRunner) discoverSources(ctx context.Context, candidates []databaseDeviceCandidate, dbTypes, sourceIDs map[string]struct{}, includeCustom, includeDisabled bool) ([]databaseMetricSource, []string) {

@@ -10,7 +10,7 @@ import (
 
 // fakeAlertUC is a minimal AlertUsecase used by the BaseTool tests for
 // the alert-flavoured tools (query_incidents / get_incident_detail /
-// query_alert_rules / get_edge_summary / correlate_incident).
+// query_alert_rules / get_host_summary / correlate_incident).
 //
 // Each method records the last filter / id and returns a planted
 // response. Errors plant per-method via the *Err fields.

@@ -1,0 +1,11 @@
+syntax = "proto3";
+package ongrid.manager.skill.v1;
+import "google/protobuf/struct.proto";
+option go_package = "github.com/ongridio/ongrid/api/gen/manager/skill/v1;skillv1";
+// POST /v1/skills/{key}/execute。Host 技能通过当前绑定的 Edge 执行。
+message ExecuteRequest {
+  uint64 device_id = 1;
+  google.protobuf.Struct params = 2;
+  // 兼容旧客户端的真实 Edge ID；必须反查 Host 并验证仍为当前实例。
+  uint64 edge_id = 3 [deprecated = true];
+}

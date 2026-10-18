@@ -50,7 +50,7 @@ func TestToolBag_BelowThreshold(t *testing.T) {
 	tools := []basetool.BaseTool{
 		newStub("get_host_load", "live host metrics"),
 		newStub("query_promql", "PromQL query"),
-		newStub("rank_edges", "rank edges by metric"),
+		newStub("rank_hosts", "rank edges by metric"),
 	}
 	bag := NewToolBag(tools, 30)
 	if bag.IsDeferring() {
@@ -84,14 +84,14 @@ func TestToolBag_OverThresholdSplits(t *testing.T) {
 		newStub("get_topology", ""),
 		newStub("query_incidents", ""),
 		newStub("query_change_events", ""),
-		newStub("get_edge_summary", ""),
+		newStub("get_host_summary", ""),
 		newStub("correlate_incident", ""),
 		newStub("AgentTool", ""),
 		newStub("SendMessage", ""),
 		newStub("TaskStop", ""),
 		// 14 core entries.
-		newStub("rank_edges", ""),
-		newStub("find_outlier_edges", ""),
+		newStub("rank_hosts", ""),
+		newStub("find_outlier_hosts", ""),
 		newStub("get_incident_detail", ""),
 		newStub("query_alert_rules", ""),
 		newStub("host_find_large_files", ""),

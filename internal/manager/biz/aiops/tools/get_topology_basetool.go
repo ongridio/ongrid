@@ -7,6 +7,7 @@ import (
 	"log/slog"
 
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
+	devicebiz "github.com/ongridio/ongrid/internal/manager/biz/device"
 	edgebiz "github.com/ongridio/ongrid/internal/manager/biz/edge"
 	edgemodel "github.com/ongridio/ongrid/internal/manager/model/edge"
 )
@@ -14,6 +15,7 @@ import (
 // GetTopologyTool is the BaseTool form of get_topology. Mirrors
 // executeGetTopology in get_topology.go.
 type GetTopologyTool struct {
+	devices  *devicebiz.Usecase
 	edges    *edgebiz.Usecase
 	alertUC  AlertUsecase
 	topology TopologyInfo
@@ -31,11 +33,16 @@ func NewGetTopologyTool(edges *edgebiz.Usecase, alertUC AlertUsecase, topology T
 	return &GetTopologyTool{edges: edges, alertUC: alertUC, topology: topology, log: log}
 }
 
+func (t *GetTopologyTool) WithDevices(devices *devicebiz.Usecase) *GetTopologyTool {
+	t.devices = devices
+	return t
+}
+
 // getTopologyWhenToUse — reverse-guard against using this for per-host or
 // per-incident questions.
 const getTopologyWhenToUse = "When the user asks 'how big is the fleet', 'is loki configured', " +
 	"'what version of manager is this', or any cluster-wide deployment fact. " +
-	"NOT for a single host (use get_edge_summary). NOT for a specific incident (use get_incident_detail). " +
+	"NOT for a single host (use get_host_summary). NOT for a specific incident (use get_incident_detail). " +
 	"NOT for actual metric values (use query_promql)."
 
 // Info returns metadata. Class=read.
@@ -63,6 +70,22 @@ func (t *GetTopologyTool) InvokableRun(ctx context.Context, _ string, _ ...baset
 		"configured_tempo_url": t.topology.ConfiguredTempoURL,
 	}
 
+	if t.devices != nil {
+		hosts, err := t.devices.List(callCtx, devicebiz.ListFilter{Limit: 5000})
+		if err != nil {
+			out["host_inventory_error"] = err.Error()
+		} else {
+			online := 0
+			for _, host := range hosts {
+				if host.Online {
+					online++
+				}
+			}
+			out["host_count"] = len(hosts)
+			out["online_host_count"] = online
+		}
+	}
+
 	if t.edges != nil {
 		all, err := t.edges.List(callCtx, edgebiz.ListFilter{Limit: 5000})
 		if err == nil {
@@ -73,7 +96,8 @@ func (t *GetTopologyTool) InvokableRun(ctx context.Context, _ string, _ ...baset
 				}
 			}
 			out["edge_count"] = len(all)
-			out["online_count"] = online
+			out["online_count"] = online // legacy: Edge installations, not Hosts
+			out["online_edge_count"] = online
 		}
 	}
 

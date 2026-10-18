@@ -161,7 +161,7 @@ func bootstrapAIOps(cfg *config.Config, log *slog.Logger, notifyRouter *notify.R
 		tunnel.fbClient,
 		managerbizskill.NewGormAuditSink(storage.db),
 		log.With(slog.String("comp", "skill")),
-	)
+	).WithHostRouter(devices.deviceUC)
 	// Wire the multi-provider config resolver into the manager-scoped
 	// web_search built-in. Default provider is SearXNG (zero-config,
 	// docker-internal). The skill returns a skipped_reason envelope

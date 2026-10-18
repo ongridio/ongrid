@@ -1,0 +1,8 @@
+{
+  "old_edge_id": 12,
+  "http_status": 400,
+  "error": {
+    "error": "invalid argument: superseded edge installation",
+    "code": "invalid"
+  }
+}

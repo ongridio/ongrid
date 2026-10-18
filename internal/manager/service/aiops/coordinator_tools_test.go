@@ -40,7 +40,7 @@ func TestBasePromptRoutesSimpleTraceQueriesDirectly(t *testing.T) {
 			t.Fatalf("base prompt missing trace direct-routing guidance %q", want)
 		}
 	}
-	for _, want := range []string{"按指标排序", "目录/文件/进程/日志等主机归因", "rank_edges(by=\"disk\")"} {
+	for _, want := range []string{"按指标排序", "目录/文件/进程/日志等主机归因", "rank_hosts(by=\"disk\")"} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("base prompt missing filesystem delegation guidance %q", want)
 		}

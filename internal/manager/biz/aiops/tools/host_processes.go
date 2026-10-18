@@ -14,15 +14,16 @@ const ToolNameGetProcessList = "get_host_processes"
 
 // GetProcessListDescription is the single-sentence description the model
 // reads when deciding whether to call this tool.
-const GetProcessListDescription = "Return the top-N processes on the named edge host, sorted by CPU or memory usage."
+const GetProcessListDescription = "Return the top-N processes on the specified Host, sorted by CPU or memory usage."
 
 // GetProcessListSchema is the JSON Schema of the tool's argument object.
 var GetProcessListSchema = json.RawMessage(`{
   "type": "object",
   "properties": {
-    "edge_name": {
+    "device_id": {"type": "integer", "minimum": 1},
+    "device_name": {
       "type": "string",
-      "description": "Name of the edge as set when the edge was created."
+      "description": "Host display name or hostname. Prefer device_id when available."
     },
     "top_n": {
       "type": "integer",
@@ -36,14 +37,16 @@ var GetProcessListSchema = json.RawMessage(`{
       "description": "Sort key: cpu or mem (default cpu)."
     }
   },
-  "required": ["edge_name"]
+  "anyOf": [{"required": ["device_id"]}, {"required": ["device_name"]}]
 }`)
 
 // GetProcessListArgs is the typed form of GetProcessListSchema.
 type GetProcessListArgs struct {
-	EdgeName string `json:"edge_name"`
-	TopN     uint32 `json:"top_n"`
-	SortBy   string `json:"sort_by"`
+	DeviceID   uint64 `json:"device_id"`
+	DeviceName string `json:"device_name"`
+	EdgeName   string `json:"edge_name"`
+	TopN       uint32 `json:"top_n"`
+	SortBy     string `json:"sort_by"`
 }
 
 // processListCallTimeout caps how long a single dispatch may wait. Same
@@ -58,8 +61,8 @@ func (r *Registry) executeGetProcessList(ctx context.Context, args json.RawMessa
 	if err := json.Unmarshal(args, &in); err != nil {
 		return ExecuteResult{}, fmt.Errorf("get_process_list: bad args: %w", err)
 	}
-	if in.EdgeName == "" {
-		return ExecuteResult{}, fmt.Errorf("get_process_list: edge_name required")
+	if in.DeviceID == 0 && in.DeviceName == "" && in.EdgeName == "" {
+		return ExecuteResult{}, fmt.Errorf("get_process_list: device_id or device_name required")
 	}
 	if in.TopN == 0 {
 		in.TopN = 10
@@ -73,7 +76,7 @@ func (r *Registry) executeGetProcessList(ctx context.Context, args json.RawMessa
 		return ExecuteResult{}, fmt.Errorf("get_process_list: sort_by must be cpu or mem (got %q)", in.SortBy)
 	}
 
-	edge, err := r.edges.GetByName(ctx, in.EdgeName)
+	edge, err := resolveHostToolTarget(ctx, r, in.DeviceID, in.DeviceName, in.EdgeName)
 	if err != nil {
 		return ExecuteResult{}, fmt.Errorf("get_process_list: resolve edge: %w", err)
 	}
@@ -81,21 +84,21 @@ func (r *Registry) executeGetProcessList(ctx context.Context, args json.RawMessa
 	req := tunnel.GetProcessListRequest{TopN: in.TopN, SortBy: in.SortBy}
 	body, err := json.Marshal(req)
 	if err != nil {
-		return ExecuteResult{DeviceID: &edge.ID}, fmt.Errorf("get_process_list: marshal req: %w", err)
+		return ExecuteResult{DeviceID: edge.DeviceID}, fmt.Errorf("get_process_list: marshal req: %w", err)
 	}
 	callCtx, cancel := context.WithTimeout(ctx, processListCallTimeout)
 	defer cancel()
 	respBody, err := r.caller.Call(callCtx, edge.ID, tunnel.MethodGetProcessList, body)
 	if err != nil {
-		return ExecuteResult{DeviceID: &edge.ID}, fmt.Errorf("get_process_list: dispatch: %w", err)
+		return ExecuteResult{DeviceID: edge.DeviceID}, fmt.Errorf("get_process_list: dispatch: %w", err)
 	}
 	var resp tunnel.GetProcessListResponse
 	if err := json.Unmarshal(respBody, &resp); err != nil {
-		return ExecuteResult{DeviceID: &edge.ID}, fmt.Errorf("get_process_list: decode resp: %w", err)
+		return ExecuteResult{DeviceID: edge.DeviceID}, fmt.Errorf("get_process_list: decode resp: %w", err)
 	}
 	out, err := json.Marshal(resp)
 	if err != nil {
-		return ExecuteResult{DeviceID: &edge.ID}, fmt.Errorf("get_process_list: marshal response: %w", err)
+		return ExecuteResult{DeviceID: edge.DeviceID}, fmt.Errorf("get_process_list: marshal response: %w", err)
 	}
-	return ExecuteResult{ResultJSON: out, DeviceID: &edge.ID}, nil
+	return ExecuteResult{ResultJSON: out, DeviceID: edge.DeviceID}, nil
 }

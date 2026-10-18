@@ -909,16 +909,21 @@ func parseUintParam(r *http.Request, name string) (uint64, error) {
 }
 
 func (h *Handler) onlineEdge(ctx context.Context, deviceID uint64) (*edgemodel.Edge, error) {
-	edges, err := h.edges.List(ctx, edgebiz.ListFilter{Limit: 1000})
+	host, err := h.devices.Get(ctx, deviceID)
 	if err != nil {
-		return nil, fmt.Errorf("list edges: %w", err)
+		return nil, fmt.Errorf("resolve host runtime: %w", err)
 	}
-	for _, edge := range edges {
-		if edge.DeviceID != nil && *edge.DeviceID == deviceID && edge.Status == edgemodel.StatusOnline {
-			return edge, nil
-		}
+	if host.CurrentEdgeID == nil {
+		return nil, errs.ErrEdgeOffline
 	}
-	return nil, fmt.Errorf("%w: device offline or unknown", errs.ErrEdgeOffline)
+	edge, err := h.edges.GetByID(ctx, *host.CurrentEdgeID)
+	if err != nil {
+		return nil, err
+	}
+	if edge.DeviceID == nil || *edge.DeviceID != deviceID || edge.Status != edgemodel.StatusOnline {
+		return nil, errs.ErrEdgeOffline
+	}
+	return edge, nil
 }
 
 func (h *Handler) mintTicket(ticket shellTicket) (string, time.Time, error) {

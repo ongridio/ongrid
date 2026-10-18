@@ -115,7 +115,8 @@ type deviceItem struct {
 	// the SPA's device-detail Topology tab resolve neighbours without
 	// a separate /v1/topology lookup. Nullable until topology.Migrate
 	// has run its backfill for this row.
-	NodeID *uint64 `json:"node_id,omitempty"`
+	NodeID        *uint64 `json:"node_id,omitempty"`
+	CurrentEdgeID *uint64 `json:"current_edge_id,omitempty"`
 }
 
 type listResp struct {
@@ -582,6 +583,7 @@ func devToItem(d *devicemodel.Device) deviceItem {
 		LastSeenAt:     d.LastSeenAt,
 		CreatedAt:      d.CreatedAt,
 		NodeID:         d.NodeID,
+		CurrentEdgeID:  d.CurrentEdgeID,
 	}
 }
 

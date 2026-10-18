@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -201,7 +200,7 @@ func (t *CorrelateIncidentTool) singleCorrelate(ctx context.Context, incidentID 
 				bundle.LogPanel = entries
 			}
 		} else {
-			bundle.Skipped["log_panel"] = "incident has no edge_id"
+			bundle.Skipped["log_panel"] = "incident has no device_id"
 		}
 	} else {
 		bundle.Skipped["log_panel"] = "log query client not configured"
@@ -226,8 +225,8 @@ func (t *CorrelateIncidentTool) singleCorrelate(ctx context.Context, incidentID 
 		bundle.Skipped["trace_panel"] = "trace query client not configured"
 	}
 
-	if inc.DeviceID != nil && t.edges != nil {
-		snap := t.queryEdgeSnapshot(callCtx, *inc.DeviceID, inc.FirstFiredAt)
+	if inc.DeviceID != nil && t.devices != nil {
+		snap := t.queryHostSnapshot(callCtx, *inc.DeviceID, inc.FirstFiredAt)
 		bundle.Edge = snap
 	}
 
@@ -311,8 +310,8 @@ func (t *CorrelateIncidentTool) queryMetricPanel(ctx context.Context, expr strin
 }
 
 // queryLogPanel mirrors Registry.queryLogPanel.
-func (t *CorrelateIncidentTool) queryLogPanel(ctx context.Context, edgeID uint64, start, end time.Time) ([]logEntry, error) {
-	q := fmt.Sprintf(`{device_id="%d"} |~ "(?i)error|panic|oom|fatal|fail"`, edgeID)
+func (t *CorrelateIncidentTool) queryLogPanel(ctx context.Context, deviceID uint64, start, end time.Time) ([]logEntry, error) {
+	q := fmt.Sprintf(`{device_id="%d"} |~ "(?i)error|panic|oom|fatal|fail"`, deviceID)
 	res, err := t.logQuery.QueryLogQL(ctx, logquery.QueryRangeOptions{
 		Query:     q,
 		Start:     start,
@@ -372,25 +371,22 @@ func (t *CorrelateIncidentTool) queryTracePanel(ctx context.Context, service str
 	return entries, nil
 }
 
-// queryEdgeSnapshot mirrors Registry.queryEdgeSnapshot.
-func (t *CorrelateIncidentTool) queryEdgeSnapshot(ctx context.Context, edgeID uint64, firedAt time.Time) *edgeSnapshot {
-	snap := &edgeSnapshot{ID: edgeID}
+// queryHostSnapshot mirrors Registry.queryHostSnapshot.
+func (t *CorrelateIncidentTool) queryHostSnapshot(ctx context.Context, deviceID uint64, firedAt time.Time) *hostSnapshot {
+	snap := &hostSnapshot{ID: deviceID}
 	edgeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	edge, err := t.edges.Get(edgeCtx, edgeID)
-	if err == nil && edge != nil {
-		snap.Name = edge.Name
-		snap.Status = edge.Status
-		snap.LastSeenAt = edge.LastSeenAt
-		if t.devices != nil && edge.DeviceID != nil {
-			if d, derr := t.devices.Get(edgeCtx, *edge.DeviceID); derr == nil && d != nil {
-				snap.Roles = devicemodel.DecodeRoles(d.Roles)
+	if t.devices != nil {
+		host, err := t.devices.Get(edgeCtx, deviceID)
+		if err == nil && host != nil {
+			snap.Name = host.Name
+			snap.LastSeenAt = host.LastSeenAt
+			snap.Roles = devicemodel.DecodeRoles(host.Roles)
+			snap.Status = "offline"
+			if host.Online {
+				snap.Status = "online"
 			}
-		}
-	} else if err != nil && !errors.Is(err, context.Canceled) {
-		if t.log != nil {
-			t.log.Debug("correlate_incident: edge lookup failed",
-				slog.Uint64("edge_id", edgeID), slog.Any("err", err))
+			snap.CurrentEdgeID = host.CurrentEdgeID
 		}
 	}
 
@@ -408,9 +404,9 @@ func (t *CorrelateIncidentTool) queryEdgeSnapshot(ctx context.Context, edgeID ui
 				*sink = &vc
 			}
 		}
-		probe(fmt.Sprintf(`(100 * (1 - avg by (edge_id) (rate(node_cpu_seconds_total{mode="idle"}[5m])))) and on(edge_id) (group by (edge_id) ({edge_id="%d"}))`, edgeID), &load.CPUPct)
-		probe(fmt.Sprintf(`(100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) and on(edge_id) (group by (edge_id) ({edge_id="%d"}))`, edgeID), &load.MemPct)
-		probe(fmt.Sprintf(`up{edge_id="%d"}`, edgeID), &load.Up)
+		probe(fmt.Sprintf(`(100 * (1 - avg by (device_id) (rate(node_cpu_seconds_total{mode="idle"}[5m])))) and on(device_id) (group by (device_id) ({device_id="%d"}))`, deviceID), &load.CPUPct)
+		probe(fmt.Sprintf(`(100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) and on(device_id) (group by (device_id) ({device_id="%d"}))`, deviceID), &load.MemPct)
+		probe(fmt.Sprintf(`up{device_id="%d"}`, deviceID), &load.Up)
 		if load.CPUPct != nil || load.MemPct != nil || load.Up != nil {
 			snap.CurrentLoad = load
 		}
@@ -422,7 +418,7 @@ func (t *CorrelateIncidentTool) queryEdgeSnapshot(ctx context.Context, edgeID ui
 		func() {
 			listCtx, lcancel := context.WithTimeout(ctx, 5*time.Second)
 			defer lcancel()
-			eid := edgeID
+			eid := deviceID
 			recent, err := t.alertUC.ListIncidents(listCtx, alertbiz.IncidentFilter{
 				DeviceID: &eid,
 				Limit:    100,

@@ -20,7 +20,7 @@ export const paramDescEn: Record<string, Record<string, string>> = {
     cmd: 'A SINGLE read-only shell-like command run on each device_id. Pipes (|) supported, but no redirects / ; && || $() <() heredocs / backticks. To run two different commands, make two calls.',
     timeout_seconds: 'Optional per-device timeout override. Default 30s; max 300s. Shared across all devices.',
   },
-  get_edge_summary: {
+  get_host_summary: {
     device_ids:
       'Device id list, up to 16 at once. Pull metadata + host_load + 24h incidents for multiple device_ids in one shot.',
   },

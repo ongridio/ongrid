@@ -13,14 +13,14 @@ import {
   type SkillParamDef,
   type SkillSummary,
 } from '@/api/skills';
-import { listEdges, type Edge } from '@/api/edges';
+import { listDevices, type Device } from '@/api/devices';
 import { ApiError } from '@/api/client';
 import { ClassBadge } from './Skills';
 import { tr as trInline, useI18n } from '@/i18n/locale';
 
 type RunRecord = {
   at: string;
-  edgeID: string;
+  deviceID: string;
   ok: boolean;
   result?: unknown;
   error?: string;
@@ -35,9 +35,9 @@ export default function SkillRunPage() {
   const [skillErr, setSkillErr] = useState<string | null>(null);
   const [skillLoading, setSkillLoading] = useState(true);
 
-  const [edges, setEdges] = useState<Edge[]>([]);
-  const [edgesErr, setEdgesErr] = useState<string | null>(null);
-  const [edgeID, setEdgeID] = useState<string>('');
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [devicesErr, setDevicesErr] = useState<string | null>(null);
+  const [deviceID, setDeviceID] = useState<string>('');
 
   const [formValues, setFormValues] = useState<Record<string, unknown>>({});
   const [executing, setExecuting] = useState(false);
@@ -60,17 +60,17 @@ export default function SkillRunPage() {
     }
   }, [skillKey]);
 
-  const fetchEdges = useCallback(async () => {
+  const fetchDevices = useCallback(async () => {
     try {
-      const r = await listEdges();
-      const items = r.items ?? [];
-      setEdges(items);
-      setEdgesErr(null);
+      const r = await listDevices();
+      const items = (r.items ?? []).filter((device) => device.current_edge_id != null);
+      setDevices(items);
+      setDevicesErr(null);
       if (items.length > 0) {
-        setEdgeID((current) => current || String(items[0].id));
+        setDeviceID((current) => current || String(items[0].id));
       }
     } catch (e) {
-      setEdgesErr(e instanceof ApiError ? e.message : (e as Error).message);
+      setDevicesErr(e instanceof ApiError ? e.message : (e as Error).message);
     }
   }, []);
 
@@ -79,8 +79,8 @@ export default function SkillRunPage() {
   }, [fetchSkill]);
 
   useEffect(() => {
-    fetchEdges();
-  }, [fetchEdges]);
+    fetchDevices();
+  }, [fetchDevices]);
 
   const dangerous = skill?.class === 'dangerous';
   const mutating = skill?.class === 'mutating';
@@ -93,7 +93,7 @@ export default function SkillRunPage() {
 
   const validate = (): string | null => {
     if (!skill) return tr('技能未加载', 'Skill not loaded');
-    if (!isManagerScope && !edgeID) return tr('请选择设备', 'Please select a device');
+    if (!isManagerScope && !deviceID) return tr('请选择设备', 'Please select a device');
     for (const p of skill.params) {
       if (p.required) {
         const v = formValues[p.name];
@@ -116,13 +116,13 @@ export default function SkillRunPage() {
     setLatest(null);
     const payload = serializeParams(skill.params, formValues);
     try {
-      const r = await executeSkill(skill.key, isManagerScope ? null : edgeID, payload);
+      const r = await executeSkill(skill.key, isManagerScope ? null : deviceID, payload);
       setLatest(r);
       setHistory((prev) =>
         [
           {
             at: new Date().toISOString(),
-            edgeID: isManagerScope ? '' : edgeID,
+            deviceID: isManagerScope ? '' : deviceID,
             ok: !r.error,
             result: r.result,
             error: r.error,
@@ -137,7 +137,7 @@ export default function SkillRunPage() {
         [
           {
             at: new Date().toISOString(),
-            edgeID: isManagerScope ? '' : edgeID,
+            deviceID: isManagerScope ? '' : deviceID,
             ok: false,
             error: msg,
           },
@@ -227,19 +227,19 @@ export default function SkillRunPage() {
                 ) : (
                   <Field label={<span>{tr('目标设备', 'Target device')}<RequiredMark /></span>}>
                     <Select label={tr('目标设备', 'Target device')}
-                      value={edgeID}
-                      onValueChange={(selectedValue) => setEdgeID(selectedValue)}
+                      value={deviceID}
+                      onValueChange={(selectedValue) => setDeviceID(selectedValue)}
                       className="w-full"
                     >
-                      {edges.length === 0 && <option value="">{tr('无设备可选', 'No device available')}</option>}
-                      {edges.map((e) => (
+                      {devices.length === 0 && <option value="">{tr('无设备可选', 'No device available')}</option>}
+                      {devices.map((e) => (
                         <option key={e.id} value={String(e.id)}>
-                          #{e.id} · {e.name} ({e.status})
+                          #{e.id} · {e.name} ({e.online ? tr('在线', 'Online') : tr('离线', 'Offline')})
                         </option>
                       ))}
                     </Select>
-                    {edgesErr && (
-                      <div className="mt-1 text-[11px] text-red-300">{tr('设备列表加载失败：', 'Device list failed: ')}{edgesErr}</div>
+                    {devicesErr && (
+                      <div className="mt-1 text-[11px] text-red-300">{tr('设备列表加载失败：', 'Device list failed: ')}{devicesErr}</div>
                     )}
                   </Field>
                 )}
@@ -278,7 +278,7 @@ export default function SkillRunPage() {
                   <Button variant="plain" size="sm"
                     type="button"
                     onClick={onExecute}
-                    disabled={executing || isInventoryOnly || (!isManagerScope && !edgeID)}
+                    disabled={executing || isInventoryOnly || (!isManagerScope && !deviceID)}
                     className={cn(
                       'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50',
                       dangerous
@@ -368,7 +368,7 @@ function HistoryItem({ record }: { record: RunRecord }) {
       )}
     >
       <div className="flex items-center justify-between text-[10px] text-zinc-500">
-        <span>{time}{record.edgeID ? tr(` · 设备 ${record.edgeID}`, ` · device ${record.edgeID}`) : tr(' · ☁️ 云端', ' · ☁️ cloud')}</span>
+        <span>{time}{record.deviceID ? tr(` · 设备 ${record.deviceID}`, ` · device ${record.deviceID}`) : tr(' · ☁️ 云端', ' · ☁️ cloud')}</span>
         <span className={record.ok ? 'text-emerald-400' : 'text-red-300'}>
           {record.ok ? 'ok' : 'error'}
         </span>

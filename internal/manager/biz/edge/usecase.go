@@ -227,92 +227,26 @@ func (u *Usecase) List(ctx context.Context, f ListFilter) ([]*model.Edge, error)
 	return u.repo.List(ctx, f)
 }
 
-// Delete soft-deletes an edge. When this edge is the last live agent for its
-// host device, the device-owned topology node and device row are deleted too;
-// otherwise the device is only kept offline for the current edge transition.
+// Delete removes an installation while preserving its Host and history.
 func (u *Usecase) Delete(ctx context.Context, id uint64) error {
 	if u.repo == nil {
 		return errs.ErrNotWiredYet
 	}
-	edge, err := u.repo.GetByID(ctx, id)
-	if err != nil {
+	if _, err := u.repo.GetByID(ctx, id); err != nil {
 		return err
 	}
-	if u.devices != nil && edge.DeviceID != nil {
-		removed, handled, err := u.deleteDeviceIfLastEdge(ctx, id, *edge.DeviceID)
-		if err != nil {
+	// Removing an installation never removes its Host or historical identity.
+	if hostID, current, err := u.currentHostForEdge(ctx, id); err != nil {
+		return err
+	} else if current && u.devices != nil {
+		if err := u.updateHostPresence(ctx, hostID, id, false); err != nil {
 			return err
 		}
-		if !removed && !handled {
-			if derr := u.devices.MarkOffline(ctx, *edge.DeviceID); derr != nil && u.log != nil {
-				u.log.Warn("delete edge: device mark-offline failed", "edge_id", id, "device_id", *edge.DeviceID, "err", derr)
-			}
-		}
 	}
+
 	return u.repo.Delete(ctx, id)
 }
 
-func (u *Usecase) deleteDeviceIfLastEdge(ctx context.Context, edgeID, deviceID uint64) (removed bool, handled bool, err error) {
-	if u.links == nil {
-		return false, false, nil
-	}
-	links, err := u.links.ListEdgesForDevice(ctx, deviceID)
-	if err != nil {
-		return false, true, fmt.Errorf("list device edge links: %w", err)
-	}
-	for _, link := range links {
-		if link == nil || link.EdgeID == edgeID {
-			continue
-		}
-		if _, err := u.repo.GetByID(ctx, link.EdgeID); err == nil {
-			return false, true, u.unlinkCurrentEdgeDeviceLinks(ctx, edgeID, links)
-		} else if !errors.Is(err, errs.ErrNotFound) {
-			return false, true, err
-		}
-	}
-	dev, err := u.devices.Get(ctx, deviceID)
-	if err != nil {
-		if errors.Is(err, errs.ErrNotFound) {
-			return false, true, nil
-		}
-		return false, true, err
-	}
-	if u.mirror != nil && dev.NodeID != nil && *dev.NodeID != 0 {
-		if err := u.mirror.DeleteNodeForDevice(ctx, dev.ID, *dev.NodeID); err != nil && !errors.Is(err, errs.ErrNotFound) {
-			return false, true, fmt.Errorf("delete topology node for device %d: %w", dev.ID, err)
-		}
-	}
-	for _, link := range links {
-		if link == nil {
-			continue
-		}
-		if err := u.links.Unlink(ctx, link.EdgeID, link.DeviceID, link.Type); err != nil {
-			return false, true, fmt.Errorf("unlink device edge %d/%d: %w", link.EdgeID, link.DeviceID, err)
-		}
-	}
-	if err := u.devices.Delete(ctx, deviceID); err != nil {
-		return false, true, err
-	}
-	return true, true, nil
-}
-
-func (u *Usecase) unlinkCurrentEdgeDeviceLinks(ctx context.Context, edgeID uint64, links []*devicemodel.EdgeDevice) error {
-	for _, link := range links {
-		if link == nil || link.EdgeID != edgeID {
-			continue
-		}
-		if err := u.links.Unlink(ctx, link.EdgeID, link.DeviceID, link.Type); err != nil {
-			return fmt.Errorf("unlink device edge %d/%d: %w", link.EdgeID, link.DeviceID, err)
-		}
-	}
-	return nil
-}
-
-// RotateSecret generates a new SecretKey, replaces the stored hash, and
-// returns the plaintext ONCE. The previous secret is immediately invalid
-// (any running tunnel session authenticated with the old secret stays up
-// because geminio only validates on handshake — that's acceptable for MVP;
-// document in runbook that the operator should kick the edge).
 func (u *Usecase) RotateSecret(ctx context.Context, id uint64) (string, error) {
 	if u.repo == nil {
 		return "", errs.ErrNotWiredYet
@@ -385,7 +319,20 @@ func (u *Usecase) HandleRegister(ctx context.Context, edgeID uint64, info tunnel
 	if err != nil {
 		return fmt.Errorf("upsert device: %w", err)
 	}
-	if err := u.devices.UpdateHostFacts(ctx, dev.ID, devicebiz.HostFacts{
+	if u.links == nil {
+		return errs.ErrNotWiredYet
+	}
+	if err := u.links.Link(ctx, edgeID, dev.ID, devicemodel.EdgeDeviceRelationHost); err != nil {
+		return fmt.Errorf("link edge to host: %w", err)
+	}
+	current, err := u.links.LookupEdgeForDevice(ctx, dev.ID, devicemodel.EdgeDeviceRelationHost)
+	if err != nil {
+		return err
+	}
+	if current != edgeID {
+		return fmt.Errorf("%w: edge %d superseded by %d for host %d", errs.ErrInvalid, edgeID, current, dev.ID)
+	}
+	if err := u.updateCurrentHostFacts(ctx, dev.ID, edgeID, devicebiz.HostFacts{
 		Hostname:      info.Hostname,
 		OS:            info.OS,
 		Arch:          info.Arch,
@@ -396,7 +343,7 @@ func (u *Usecase) HandleRegister(ctx context.Context, edgeID uint64, info tunnel
 	}); err != nil {
 		return fmt.Errorf("update device host facts: %w", err)
 	}
-	if err := u.devices.MarkOnline(ctx, dev.ID); err != nil {
+	if err := u.updateHostPresence(ctx, dev.ID, edgeID, true); err != nil {
 		return fmt.Errorf("mark device online: %w", err)
 	}
 	// device→topology mirror. Best-effort: a mirror failure
@@ -416,10 +363,10 @@ func (u *Usecase) HandleRegister(ctx context.Context, edgeID uint64, info tunnel
 			dev.NodeID = &nodeID
 		}
 	}
-	if u.links != nil {
-		if err := u.links.Link(ctx, edgeID, dev.ID, devicemodel.EdgeDeviceRelationHost); err != nil {
-			return fmt.Errorf("link edge<->device(host): %w", err)
-		}
+
+	edge, err = u.repo.GetByID(ctx, edgeID)
+	if err != nil {
+		return err
 	}
 	if edge.DeviceID == nil || *edge.DeviceID != dev.ID {
 		if err := u.repo.SetDeviceID(ctx, edgeID, dev.ID); err != nil {
@@ -489,31 +436,15 @@ func (u *Usecase) ClearHostDeviceLink(ctx context.Context, edgeID uint64) error 
 	}
 
 	for _, deviceID := range deviceIDs {
-		removed, handled, err := u.deleteDeviceIfLastEdge(ctx, edgeID, deviceID)
-		if err != nil {
-			return fmt.Errorf("delete stale controller device %d: %w", deviceID, err)
-		}
-		if handled {
-			if removed && u.log != nil {
-				u.log.Info("clear host device link: removed stale controller device",
-					slog.Uint64("edge_id", edgeID),
-					slog.Uint64("device_id", deviceID),
-				)
+		// Check ownership before unlinking; obsolete installations cannot change presence.
+		if u.devices != nil {
+			if err := u.updateHostPresence(ctx, deviceID, edgeID, false); err != nil && !errors.Is(err, errs.ErrNotFound) {
+				return fmt.Errorf("clear host presence: %w", err)
 			}
-			continue
 		}
 		if u.links != nil {
 			if err := u.links.Unlink(ctx, edgeID, deviceID, devicemodel.EdgeDeviceRelationHost); err != nil {
 				return fmt.Errorf("unlink edge<->device(host): %w", err)
-			}
-		}
-		if u.devices != nil {
-			if err := u.devices.MarkOffline(ctx, deviceID); err != nil && !errors.Is(err, errs.ErrNotFound) && u.log != nil {
-				u.log.Warn("clear host device link: mark device offline failed",
-					slog.Uint64("edge_id", edgeID),
-					slog.Uint64("device_id", deviceID),
-					slog.Any("err", err),
-				)
 			}
 		}
 	}
@@ -599,14 +530,12 @@ func (u *Usecase) HandleHeartbeat(ctx context.Context, edgeID uint64, ts time.Ti
 	// Best-effort device mirror: a stale device last_seen must not fail the
 	// heartbeat. MarkOnline sets online=true + bumps last_seen_at, which is
 	// exactly the right semantics for a live heartbeat.
-	if u.devices != nil {
-		edge, err := u.repo.GetByID(ctx, edgeID)
-		if err == nil && edge.DeviceID != nil {
-			if derr := u.devices.MarkOnline(ctx, *edge.DeviceID); derr != nil && u.log != nil {
-				u.log.Warn("heartbeat: device last_seen bump failed", "edge_id", edgeID, "device_id", *edge.DeviceID, "err", derr)
-			}
-		}
+	if hostID, current, err := u.currentHostForEdge(ctx, edgeID); err != nil {
+		return err
+	} else if current && u.devices != nil {
+		return u.updateHostPresence(ctx, hostID, edgeID, true)
 	}
+
 	return nil
 }
 
@@ -639,12 +568,12 @@ func (u *Usecase) HandleOffline(ctx context.Context, edgeID uint64, at time.Time
 	if err := u.repo.UpdateStatus(ctx, edgeID, model.StatusOffline, at); err != nil {
 		return err
 	}
-	if u.devices != nil {
-		edge, err := u.repo.GetByID(ctx, edgeID)
-		if err == nil && edge.DeviceID != nil {
-			_ = u.devices.MarkOffline(ctx, *edge.DeviceID)
-		}
+	if hostID, current, err := u.currentHostForEdge(ctx, edgeID); err != nil {
+		return err
+	} else if current && u.devices != nil {
+		return u.updateHostPresence(ctx, hostID, edgeID, false)
 	}
+
 	return nil
 }
 
@@ -655,4 +584,59 @@ func randomURLSafe(nBytes int) (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// currentHostForEdge checks both directions before changing Host state.
+func (u *Usecase) currentHostForEdge(ctx context.Context, edgeID uint64) (uint64, bool, error) {
+	if u.links == nil {
+		return 0, false, nil
+	}
+	hostID, err := u.links.LookupHostDevice(ctx, edgeID)
+	if errors.Is(err, errs.ErrNotFound) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	current, err := u.links.LookupEdgeForDevice(ctx, hostID, devicemodel.EdgeDeviceRelationHost)
+	if errors.Is(err, errs.ErrNotFound) {
+		return hostID, false, nil
+	}
+	return hostID, current == edgeID && err == nil, err
+}
+
+func (u *Usecase) updateHostPresence(ctx context.Context, hostID, edgeID uint64, online bool) error {
+	if writer, ok := u.devices.(interface {
+		UpdateHostPresence(context.Context, uint64, uint64, bool) error
+	}); ok {
+		return writer.UpdateHostPresence(ctx, hostID, edgeID, online)
+	}
+	// Repository adapters without conditional persistence still enforce the binding.
+	_, current, err := u.currentHostForEdge(ctx, edgeID)
+	if err != nil {
+		return err
+	}
+	if !current {
+		return nil
+	}
+	if online {
+		return u.devices.MarkOnline(ctx, hostID)
+	}
+	return u.devices.MarkOffline(ctx, hostID)
+}
+
+func (u *Usecase) updateCurrentHostFacts(ctx context.Context, hostID, edgeID uint64, facts devicebiz.HostFacts) error {
+	if writer, ok := u.devices.(interface {
+		UpdateCurrentHostFacts(context.Context, uint64, uint64, devicebiz.HostFacts) error
+	}); ok {
+		return writer.UpdateCurrentHostFacts(ctx, hostID, edgeID, facts)
+	}
+	_, current, err := u.currentHostForEdge(ctx, edgeID)
+	if err != nil {
+		return err
+	}
+	if !current {
+		return errs.ErrInvalid
+	}
+	return u.devices.UpdateHostFacts(ctx, hostID, facts)
 }

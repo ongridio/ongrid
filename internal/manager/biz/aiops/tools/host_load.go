@@ -15,23 +15,26 @@ const ToolNameGetHostLoad = "get_host_load"
 // GetHostLoadDescription is the single-sentence description the model reads
 // when deciding whether to call this tool. Accuracy here directly affects
 // dispatch quality; keep it concrete.
-const GetHostLoadDescription = "Return current CPU percent, memory percent, and 1/5/15-minute load averages of the named edge host."
+const GetHostLoadDescription = "Return current CPU percent, memory percent, and 1/5/15-minute load averages of the specified Host."
 
 // GetHostLoadSchema is the JSON Schema of the tool's argument object.
 var GetHostLoadSchema = json.RawMessage(`{
   "type": "object",
   "properties": {
-    "edge_name": {
+    "device_id": {"type": "integer", "minimum": 1},
+    "device_name": {
       "type": "string",
-      "description": "Name of the edge as set when the edge was created."
+      "description": "Host display name or hostname. Prefer device_id when available."
     }
   },
-  "required": ["edge_name"]
+  "anyOf": [{"required": ["device_id"]}, {"required": ["device_name"]}]
 }`)
 
 // GetHostLoadArgs is the typed form of GetHostLoadSchema.
 type GetHostLoadArgs struct {
-	EdgeName string `json:"edge_name"`
+	DeviceID   uint64 `json:"device_id"`
+	DeviceName string `json:"device_name"`
+	EdgeName   string `json:"edge_name"`
 }
 
 // hostLoadCallTimeout caps how long a single tool dispatch may wait on
@@ -46,32 +49,32 @@ func (r *Registry) executeGetHostLoad(ctx context.Context, args json.RawMessage)
 	if err := json.Unmarshal(args, &in); err != nil {
 		return ExecuteResult{}, fmt.Errorf("get_host_load: bad args: %w", err)
 	}
-	if in.EdgeName == "" {
-		return ExecuteResult{}, fmt.Errorf("get_host_load: edge_name required")
+	if in.DeviceID == 0 && in.DeviceName == "" && in.EdgeName == "" {
+		return ExecuteResult{}, fmt.Errorf("get_host_load: device_id or device_name required")
 	}
 
-	edge, err := r.edges.GetByName(ctx, in.EdgeName)
+	edge, err := resolveHostToolTarget(ctx, r, in.DeviceID, in.DeviceName, in.EdgeName)
 	if err != nil {
 		return ExecuteResult{}, fmt.Errorf("get_host_load: resolve edge: %w", err)
 	}
 
 	body, err := json.Marshal(tunnel.GetHostLoadRequest{})
 	if err != nil {
-		return ExecuteResult{DeviceID: &edge.ID}, fmt.Errorf("get_host_load: marshal req: %w", err)
+		return ExecuteResult{DeviceID: edge.DeviceID}, fmt.Errorf("get_host_load: marshal req: %w", err)
 	}
 	callCtx, cancel := context.WithTimeout(ctx, hostLoadCallTimeout)
 	defer cancel()
 	respBody, err := r.caller.Call(callCtx, edge.ID, tunnel.MethodGetHostLoad, body)
 	if err != nil {
-		return ExecuteResult{DeviceID: &edge.ID}, fmt.Errorf("get_host_load: dispatch: %w", err)
+		return ExecuteResult{DeviceID: edge.DeviceID}, fmt.Errorf("get_host_load: dispatch: %w", err)
 	}
 	var resp tunnel.GetHostLoadResponse
 	if err := json.Unmarshal(respBody, &resp); err != nil {
-		return ExecuteResult{DeviceID: &edge.ID}, fmt.Errorf("get_host_load: decode resp: %w", err)
+		return ExecuteResult{DeviceID: edge.DeviceID}, fmt.Errorf("get_host_load: decode resp: %w", err)
 	}
 	out, err := json.Marshal(resp)
 	if err != nil {
-		return ExecuteResult{DeviceID: &edge.ID}, fmt.Errorf("get_host_load: marshal response: %w", err)
+		return ExecuteResult{DeviceID: edge.DeviceID}, fmt.Errorf("get_host_load: marshal response: %w", err)
 	}
-	return ExecuteResult{ResultJSON: out, DeviceID: &edge.ID}, nil
+	return ExecuteResult{ResultJSON: out, DeviceID: edge.DeviceID}, nil
 }

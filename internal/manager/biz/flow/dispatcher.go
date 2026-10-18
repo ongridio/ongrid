@@ -53,7 +53,6 @@ func (d *Dispatcher) dispatch(incidentID uint64, ruleKey, ruleName, severity str
 		"incident_id": incidentID,
 		"rule":        ruleName,
 		"severity":    severity,
-		"edge_id":     edgeID,
 		"device_id":   deviceID,
 		"labels":      labels,
 		"fired_at":    firedAt.UTC().Format(time.RFC3339),

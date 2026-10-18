@@ -1,28 +1,13 @@
 import type { Edge } from '@/api/edges';
+import type { Device } from '@/api/devices';
 
-// One row per device: prefer an online collector, then the latest heartbeat.
-export function selectHostEdgesByDevice(edges: Edge[]): Map<number, Edge> {
+// Only the server-owned binding selects the host execution installation.
+export function selectHostEdgesByDevice(edges: Edge[], devices: Pick<Device, 'id' | 'current_edge_id'>[]): Map<number, Edge> {
+  const byID = new Map(edges.map(edge => [edge.id, edge]));
   const out = new Map<number, Edge>();
-  for (const edge of edges) {
-    const deviceID = edge.device_id;
-    if (!deviceID) continue;
-    const current = out.get(deviceID);
-    if (!current || isBetterHostEdge(edge, current)) {
-      out.set(deviceID, edge);
-    }
+  for (const device of devices) {
+    const edge = device.current_edge_id ? byID.get(device.current_edge_id) : undefined;
+    if (edge?.device_id === device.id) out.set(device.id, edge);
   }
   return out;
-}
-
-function isBetterHostEdge(candidate: Edge, current: Edge): boolean {
-  if (candidate.status !== current.status) {
-    return candidate.status === "online";
-  }
-  return edgeSeenAt(candidate) > edgeSeenAt(current);
-}
-
-function edgeSeenAt(edge: Edge): number {
-  if (!edge.last_seen_at) return 0;
-  const ts = Date.parse(edge.last_seen_at);
-  return Number.isFinite(ts) ? ts : 0;
 }

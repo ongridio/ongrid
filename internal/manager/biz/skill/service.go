@@ -48,6 +48,7 @@ type AuditSink interface {
 type AuditEvent struct {
 	SkillKey   string
 	EdgeID     uint64
+	DeviceID   uint64
 	CallerID   uint64
 	CallerRole string
 	Class      skillcore.Class
@@ -62,6 +63,7 @@ type AuditEvent struct {
 // consume. It is stateless apart from its dependencies; safe for
 // concurrent use.
 type Service struct {
+	hosts  HostRouter
 	caller EdgeCaller
 	audit  AuditSink
 	log    *slog.Logger
@@ -79,6 +81,56 @@ func New(caller EdgeCaller, audit AuditSink, log *slog.Logger) *Service {
 		log = slog.Default()
 	}
 	return &Service{caller: caller, audit: audit, log: log}
+}
+
+// HostRouter provides explicit bidirectional identity resolution.
+type HostRouter interface {
+	LookupEdgeForDevice(context.Context, uint64) (uint64, error)
+	LookupHostDevice(context.Context, uint64) (uint64, error)
+}
+
+// WithHostRouter is wired once at construction before serving requests.
+func (s *Service) WithHostRouter(hosts HostRouter) *Service { s.hosts = hosts; return s }
+
+func (s *Service) resolveHostTarget(ctx context.Context, in ExecuteInput) (uint64, uint64, error) {
+	if in.DeviceID == 0 && in.EdgeID == 0 {
+		return 0, 0, fmt.Errorf("%w: device_id required", errs.ErrInvalid)
+	}
+	if s.hosts == nil {
+		return 0, 0, errs.ErrNotWiredYet
+	}
+	hostID := in.DeviceID
+	if in.EdgeID != 0 {
+		linked, err := s.hosts.LookupHostDevice(ctx, in.EdgeID)
+		if err != nil {
+			return 0, 0, fmt.Errorf("resolve edge host: %w", err)
+		}
+		if hostID != 0 && hostID != linked {
+			return 0, 0, fmt.Errorf("%w: host/edge mismatch", errs.ErrInvalid)
+		}
+		hostID = linked
+	}
+	if hostID == 0 {
+		return 0, 0, errs.ErrNotFound
+	}
+	edgeID, err := s.hosts.LookupEdgeForDevice(ctx, hostID)
+	if err != nil {
+		return 0, 0, fmt.Errorf("resolve current host edge: %w", err)
+	}
+	if edgeID == 0 {
+		return 0, 0, errs.ErrNotFound
+	}
+	if in.EdgeID != 0 && in.EdgeID != edgeID {
+		return 0, 0, fmt.Errorf("%w: superseded edge installation", errs.ErrInvalid)
+	}
+	reverse, err := s.hosts.LookupHostDevice(ctx, edgeID)
+	if err != nil {
+		return 0, 0, fmt.Errorf("verify edge host: %w", err)
+	}
+	if reverse != hostID {
+		return 0, 0, fmt.Errorf("%w: host/edge mismatch", errs.ErrInvalid)
+	}
+	return hostID, edgeID, nil
 }
 
 // WithExtraSkills wires a provider of catalog entries not in skillcore
@@ -171,9 +223,10 @@ func (s *Service) Get(_ context.Context, _ Caller, key string) (*SkillSummary, e
 
 // ExecuteInput is the body of an Execute call.
 type ExecuteInput struct {
-	Key    string
-	EdgeID uint64
-	Params json.RawMessage
+	Key      string
+	DeviceID uint64
+	EdgeID   uint64
+	Params   json.RawMessage
 }
 
 // ExecuteOutput is the response. Result is the JSON the skill returned;
@@ -214,8 +267,15 @@ func (s *Service) Execute(ctx context.Context, caller Caller, in ExecuteInput) (
 	}
 
 	scope := meta.EffectiveScope()
-	if scope == skillcore.ScopeHost && in.EdgeID == 0 {
-		return nil, fmt.Errorf("%w: edge_id required", errs.ErrInvalid)
+	if scope == skillcore.ScopeHost {
+		hostID, edgeID, err := s.resolveHostTarget(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+		in.DeviceID, in.EdgeID = hostID, edgeID
+		if s.caller == nil {
+			return nil, errs.ErrNotWiredYet
+		}
 	}
 
 	startedAt := time.Now().UTC()
@@ -264,6 +324,7 @@ func (s *Service) Execute(ctx context.Context, caller Caller, in ExecuteInput) (
 		if err := s.audit.Record(ctx, AuditEvent{
 			SkillKey:   in.Key,
 			EdgeID:     in.EdgeID,
+			DeviceID:   in.DeviceID,
 			CallerID:   caller.UserID,
 			CallerRole: caller.Role,
 			Class:      meta.EffectiveClass(),

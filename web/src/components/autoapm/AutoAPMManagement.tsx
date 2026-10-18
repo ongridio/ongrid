@@ -44,7 +44,7 @@ export function AutoAPMManagement({ canEdit, initialEdgeId, initialScope }: Prop
     void Promise.all([listEdges(), loadK8sEdgeAttachments(), listDevices(), loadTopologyClusters()]).then(([result, attachments, devices, memberships]) => {
       if (!cancelled) {
         const devicesByID = new Map(devices.items.map(device => [device.id, device]));
-        setEdges([...selectHostEdgesByDevice(result.items.filter(edge => !attachments[edge.id]?.length)).values()].map(edge => {
+        setEdges([...selectHostEdgesByDevice(result.items.filter(edge => !attachments[edge.id]?.length), devices.items).values()].map(edge => {
           const device = edge.device_id ? devicesByID.get(edge.device_id) : undefined;
           return { ...edge, device, clusters: device?.node_id ? memberships.get(device.node_id) ?? [] : [] };
         }));

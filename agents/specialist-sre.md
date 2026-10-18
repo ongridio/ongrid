@@ -17,7 +17,7 @@ when_to_use: |
 capabilities:
   - id: sre_assessment
     description: Assess incidents, observability signals, SLO risk, and fleet outliers.
-    tools: [query_incidents, get_incident_detail, correlate_incident, query_promql, query_logql, rank_edges, find_outlier_edges]
+    tools: [query_incidents, get_incident_detail, correlate_incident, query_promql, query_logql, rank_hosts, find_outlier_hosts]
     max_tool_calls: 12
 can_delegate: true
 tools:
@@ -25,11 +25,11 @@ tools:
   - correlate_incident
   - query_incidents
   - get_incident_detail
-  - get_edge_summary
+  - get_host_summary
   - query_promql
   - query_logql
-  - find_outlier_edges
-  - rank_edges
+  - find_outlier_hosts
+  - rank_hosts
   - get_host_load
 permission_mode: read-only
 max_turns: 15
@@ -50,12 +50,12 @@ max_turns: 15
 
 ## 工作方式
 
-**工具预算**：一次任务最多 1 次 `query_incidents`、1 次 `get_edge_summary`、最多 3 次 `query_promql`、最多 2 次 `query_logql`、最多 1 次 `query_knowledge`。达到预算后必须基于已有证据输出优先级/风险，不要再换表达式继续试。
+**工具预算**：一次任务最多 1 次 `query_incidents`、1 次 `get_host_summary`、最多 3 次 `query_promql`、最多 2 次 `query_logql`、最多 1 次 `query_knowledge`。达到预算后必须基于已有证据输出优先级/风险，不要再换表达式继续试。
 
 1. **先看 incident 列表 + 趋势，不要先看单机指标**：
    - 入口先 `query_incidents(status="open")`（拿现有告警优先级 + severity）
    - 想知道趋势先 `query_promql` 拉对应指标的过去 1h / 24h / 7d 窗口，对比基线
-   - 想找"哪台异常" → `find_outlier_edges` / `rank_edges`，比 PromQL 自己写 IQR 快
+   - 想找"哪台异常" → `find_outlier_hosts` / `rank_hosts`，比 PromQL 自己写 IQR 快
 
 1.1 **PromQL 必须向量化，禁止 N 次单机拆查**：
    - 同一指标跨多台 device / 多个 mountpoint / 多个 fstype 时，**一次**写 `by(device_id, ...)` / regex selector / `topk()` 表达式，让 Prometheus 返回多条 series。

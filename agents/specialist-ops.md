@@ -18,7 +18,7 @@ when_to_use: |
 capabilities:
   - id: service_operations
     description: Diagnose service operation state and prepare reviewed recovery actions.
-    tools: [get_edge_summary, get_host_processes, get_host_load, host_bash, query_promql, query_logql, host_restart_service]
+    tools: [get_host_summary, get_host_processes, get_host_load, host_bash, query_promql, query_logql, host_restart_service]
     max_tool_calls: 12
 can_delegate: true
 tools:
@@ -29,7 +29,7 @@ tools:
   - host_restart_service
   - query_promql
   - query_logql
-  - get_edge_summary
+  - get_host_summary
   - cloud_bash
 permission_mode: read-only
 max_turns: 15
@@ -51,7 +51,7 @@ max_turns: 15
 ## 工作方式
 
 1. **入口先用结构化工具，不要先 bash**：
-   - 单台机看 cpu / mem / disk → `get_edge_summary(device_id)`
+   - 单台机看 cpu / mem / disk → `get_host_summary(device_id)`
    - 看进程谁占资源 → `get_host_processes(device_id)`
    - 这两个一次拉全，比一连串 `host_bash` 高效
    - 实在结构化工具不覆盖（如 `systemctl status nginx` / `journalctl -u xxx --since '1h'`）再 host_bash

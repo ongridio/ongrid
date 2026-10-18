@@ -103,7 +103,8 @@ func TestTunnelConfigFetcherAppliesKubernetesLogsDefaults(t *testing.T) {
 	t.Setenv("ONGRID_K8S_ENROLL_TLS_INSECURE", "true")
 
 	client := &fakeTunnelClient{resp: tunnel.GetPluginConfigsResponse{
-		EdgeID: 100,
+		EdgeID:   999,
+		DeviceID: 100,
 		Configs: map[string]tunnel.GetPluginConfigsEntry{
 			"logs": {
 				Enabled: true, Endpoint: "https://127.0.0.1/loki/api/v1/push",

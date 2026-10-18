@@ -50,9 +50,9 @@ ongrid 工作流把「触发器 → 节点」连成可视化自动化：定时 /
 | 工具 | 说明 | 状态 |
 | --- | --- | --- |
 | `query_devices` | 查询设备 / 边端清单 | ✅ |
-| `get_edge_summary` | 按边端聚合健康概览 | ✅ |
-| `rank_edges` | 按 cpu/mem/disk 给边端排名 | ✅ |
-| `find_outlier_edges` | 按 cpu/mem/disk 找离群边端 | ✅ |
+| `get_host_summary` | 按边端聚合健康概览 | ✅ |
+| `rank_hosts` | 按 cpu/mem/disk 给主机排名 | ✅ |
+| `find_outlier_hosts` | 按 cpu/mem/disk 找离群边端 | ✅ |
 | `get_topology` | 拉取业务拓扑概览 | ✅ |
 | `expand_topology` | 从某节点 BFS 扩散，算故障爆炸半径 | ✅ |
 | `find_topology_node` | 按名称搜索拓扑节点 | ✅ |
@@ -102,7 +102,7 @@ ongrid 工作流把「触发器 → 节点」连成可视化自动化：定时 /
 | --- | --- | --- |
 | **平台快照** | `query_promql(up)` → `query_devices` → `get_topology` | 一屏看平台全貌 |
 | **k8s 集群巡检** | `namespaces_list` → `pods_list` → `events_list` | 快速看集群状态 |
-| **主机健康巡检** | `get_host_load` → `get_host_processes` → `get_edge_summary` | 单机健康三连查 |
+| **主机健康巡检** | `get_host_load` → `get_host_processes` → `get_host_summary` | 单机健康三连查 |
 | **告警与变更审计** | `query_alert_rules` → `query_incidents` → `query_change_events` | 巡检告警面 + 变更 |
 | **事件关联诊断** | `query_incidents` → `correlate_incident` | 对事件融合多维证据 |
 
@@ -113,7 +113,7 @@ ongrid 工作流把「触发器 → 节点」连成可视化自动化：定时 /
 ## 已知问题（待修，不影响上述就绪项）
 
 1. **Agent 节点调工具时可能崩** —— flow 的 Agent 子 worker 编译出的 eino
-   `toolsNode` 缺少部分 inventory 桥接工具（如 `get_edge_summary`），但仍把它们
+   `toolsNode` 缺少部分 inventory 桥接工具（如 `get_host_summary`），但仍把它们
    暴露给 LLM；模型一旦调到缺失工具就 `tool ... not found in toolsNode indexes`。
    纯推理 Agent 正常；调工具的 Agent 节点暂不稳。建议：worker 的 toolsNode 用与
    flow 工具节点一致的全量 toolbag 编译。

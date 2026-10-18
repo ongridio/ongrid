@@ -1,7 +1,7 @@
 //go:build e2e
 
-// Catalog: T2 — get_edge_summary "all edges" (v0.9.0). A flow tool node calling
-// get_edge_summary with NO device_ids must succeed (summarize all edges, capped)
+// Catalog: T2 — get_host_summary "all edges" (v0.9.0). A flow tool node calling
+// get_host_summary with NO device_ids must succeed (summarize all edges, capped)
 // rather than fail with "device_ids: must contain at least 1 element". Run with
 // an empty fleet → empty envelope, node succeeds. This guards the regression a
 // NL-generated workflow hit (the node had no device_ids wired).
@@ -15,7 +15,7 @@ import (
 	"github.com/ongridio/ongrid/tests/e2e/testenv"
 )
 
-func TestFlow_GetEdgeSummaryAllEdges_T2(t *testing.T) {
+func TestFlow_GetHostSummaryAllEdges_T2(t *testing.T) {
 	env := testenv.Start(t)
 	tok := env.LoginAdmin().AccessToken
 
@@ -23,7 +23,7 @@ func TestFlow_GetEdgeSummaryAllEdges_T2(t *testing.T) {
 		"nodes": []any{
 			map[string]any{"id": "t", "type": "trigger.manual", "name": "手动触发", "config": map[string]any{}},
 			map[string]any{"id": "s", "type": "tool", "name": "全边端摘要", "config": map[string]any{
-				"tool": "get_edge_summary",
+				"tool": "get_host_summary",
 				"args": map[string]any{}, // no device_ids → "all edges" mode
 			}},
 		},
@@ -70,7 +70,7 @@ func TestFlow_GetEdgeSummaryAllEdges_T2(t *testing.T) {
 		nodes, _ := body["nodes"].([]any)
 		ns := flowNodeStatus(nodes, "s")
 		if ns != "succeeded" {
-			t.Fatalf("get_edge_summary node status=%q (want succeeded), run.status=%q, run.error=%v", ns, st, run["error"])
+			t.Fatalf("get_host_summary node status=%q (want succeeded), run.status=%q, run.error=%v", ns, st, run["error"])
 		}
 		return
 	}

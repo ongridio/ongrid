@@ -271,7 +271,7 @@ func TestToolSearch_InfoReadClass(t *testing.T) {
 // strictly than just "find").
 func TestToolSearch_KeywordMultiTokenAllMustMatch(t *testing.T) {
 	a := newStub("host_find_large_files", "find large files on a host")
-	b := newStub("find_outlier_edges", "find ranking outliers among edges")
+	b := newStub("find_outlier_hosts", "find ranking outliers among edges")
 	bag := &stubBagProvider{all: []basetool.BaseTool{a, b}}
 	ts := NewToolSearchTool(bag, nil)
 
@@ -287,7 +287,7 @@ func TestToolSearch_KeywordMultiTokenAllMustMatch(t *testing.T) {
 	if !names["host_find_large_files"] {
 		t.Errorf("expected host_find_large_files (matches both tokens)")
 	}
-	if names["find_outlier_edges"] {
-		t.Errorf("find_outlier_edges should not match (no 'files' token)")
+	if names["find_outlier_hosts"] {
+		t.Errorf("find_outlier_hosts should not match (no 'files' token)")
 	}
 }

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -140,6 +141,15 @@ func TestMigrateDetachesLegacyKubernetesControllerDevice(t *testing.T) {
 		t.Fatalf("initial Migrate: %v", err)
 	}
 
+	host := sampleDevice("controller-associated-host")
+	host.ID = 41
+	if err := db.Create(host).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := NewEdgeDeviceRepo(db).Link(context.Background(), edge.ID, host.ID, model.EdgeDeviceRelationHost); err != nil {
+		t.Fatal(err)
+	}
+
 	if err := db.AutoMigrate(&k8smodel.Cluster{}); err != nil {
 		t.Fatalf("AutoMigrate cluster: %v", err)
 	}
@@ -161,6 +171,13 @@ func TestMigrateDetachesLegacyKubernetesControllerDevice(t *testing.T) {
 		t.Fatalf("idempotent Migrate: %v", err)
 	}
 	assertControllerHasNoHostDevice(t, db, edge.ID)
+	var preserved model.Device
+	if err := db.First(&preserved, host.ID).Error; err != nil {
+		t.Fatalf("detaching controller deleted Host: %v", err)
+	}
+	if preserved.CurrentEdgeID != nil || preserved.Online {
+		t.Fatal("controller remained current host runtime")
+	}
 }
 
 func TestMigratePreservesDeviceReferencedByNonControllerEdge(t *testing.T) {
@@ -195,6 +212,10 @@ func TestMigratePreservesDeviceReferencedByNonControllerEdge(t *testing.T) {
 	}).Error; err != nil {
 		t.Fatalf("create stale controller link: %v", err)
 	}
+	if err := NewEdgeDeviceRepo(db).Link(context.Background(), host.ID, device.ID, model.EdgeDeviceRelationHost); err != nil {
+		t.Fatal(err)
+	}
+
 	cluster := &k8smodel.Cluster{
 		Name:                   "shared-cluster",
 		Mode:                   k8smodel.ModeFullNode,
@@ -251,13 +272,7 @@ func assertControllerHasNoHostDevice(t *testing.T, db *gorm.DB, edgeID uint64) {
 	if links != 0 {
 		t.Fatalf("controller host links = %d, want 0", links)
 	}
-	var devices int64
-	if err := db.Model(&model.Device{}).Where("id = ?", edgeID).Count(&devices).Error; err != nil {
-		t.Fatalf("count controller devices: %v", err)
-	}
-	if devices != 0 {
-		t.Fatalf("controller devices = %d, want 0", devices)
-	}
+
 }
 
 func TestFindOrCreateByFingerprintSoftDeleteAllowsReuse(t *testing.T) {
@@ -296,6 +311,14 @@ func TestFindOrCreateByFingerprintSoftDeleteAllowsReuse(t *testing.T) {
 
 func TestEdgeDeviceLinkSoftDeleteAllowsReuse(t *testing.T) {
 	db := newDeviceTestDB(t)
+	for _, id := range []uint64{2, 3} {
+		d := sampleDevice(fmt.Sprintf("host-%d", id))
+		d.ID = id
+		if err := db.Create(d).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	repo := NewEdgeDeviceRepo(db)
 	ctx := context.Background()
 
@@ -328,29 +351,37 @@ func TestEdgeDeviceLinkSoftDeleteAllowsReuse(t *testing.T) {
 	}
 }
 
-func TestEdgeDeviceHostLinkReplacesPreviousHost(t *testing.T) {
+func TestEdgeDeviceHostLinkRejectsIdentityChange(t *testing.T) {
 	db := newDeviceTestDB(t)
+	for _, id := range []uint64{2, 3} {
+		d := sampleDevice(fmt.Sprintf("host-%d", id))
+		d.ID = id
+		if err := db.Create(d).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	repo := NewEdgeDeviceRepo(db)
 	ctx := context.Background()
 
 	if err := repo.Link(ctx, 1, 2, model.EdgeDeviceRelationHost); err != nil {
 		t.Fatalf("first host Link: %v", err)
 	}
-	if err := repo.Link(ctx, 1, 3, model.EdgeDeviceRelationHost); err != nil {
-		t.Fatalf("replace host Link: %v", err)
+	if err := repo.Link(ctx, 1, 3, model.EdgeDeviceRelationHost); !errors.Is(err, errs.ErrInvalid) {
+		t.Fatalf("identity change accepted: %v", err)
 	}
 	got, err := repo.LookupHostDevice(ctx, 1)
 	if err != nil {
 		t.Fatalf("LookupHostDevice: %v", err)
 	}
-	if got != 3 {
-		t.Fatalf("LookupHostDevice = %d, want latest device 3", got)
+	if got != 2 {
+		t.Fatalf("LookupHostDevice = %d, want original device 2", got)
 	}
 	rows, err := repo.ListDevicesForEdge(ctx, 1)
 	if err != nil {
 		t.Fatalf("ListDevicesForEdge: %v", err)
 	}
-	if len(rows) != 1 || rows[0].DeviceID != 3 {
+	if len(rows) != 1 || rows[0].DeviceID != 2 {
 		t.Fatalf("active host rows = %#v, want only device 3", rows)
 	}
 }
@@ -380,7 +411,7 @@ func TestReconcileOfflineOrphans(t *testing.T) {
 		if err := db.Create(e).Error; err != nil {
 			t.Fatalf("create edge %s: %v", ak, err)
 		}
-		if err := db.Create(&model.EdgeDevice{EdgeID: e.ID, DeviceID: deviceID, Type: model.EdgeDeviceRelationHost}).Error; err != nil {
+		if err := NewEdgeDeviceRepo(db).Link(ctx, e.ID, deviceID, model.EdgeDeviceRelationHost); err != nil {
 			t.Fatalf("link edge %s: %v", ak, err)
 		}
 		if deleted {

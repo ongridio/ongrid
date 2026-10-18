@@ -15,7 +15,7 @@ func TestBuildBaseTools_NilGatingMatchesNewRegistry(t *testing.T) {
 
 	// Minimal — only edges + caller. NewRegistry registers exactly:
 	// get_host_load, get_process_list, query_devices, get_topology,
-	// get_edge_summary → 5 tools.
+	// get_host_summary → 5 tools.
 	regMin := NewRegistry(&fakeCaller{}, uc, nil, nil, nil, nil, nil, slog.Default())
 	closureNames := schemaNames(regMin.Schemas())
 
@@ -25,6 +25,16 @@ func TestBuildBaseTools_NilGatingMatchesNewRegistry(t *testing.T) {
 	for _, n := range closureNames {
 		if !containsName(baseNames, n) {
 			t.Errorf("BuildBaseTools is missing closure-side tool %q (closure=%v base=%v)", n, closureNames, baseNames)
+		}
+	}
+}
+
+func TestBuildBaseTools_HostRankingDoesNotRequireEdge(t *testing.T) {
+	devices := devicebiz.NewUsecase(nil, nil, slog.Default())
+	reg := NewRegistry(nil, nil, devices, &fakePromQuerier{}, nil, nil, nil, slog.Default())
+	for _, names := range [][]string{schemaNames(reg.Schemas()), toolInfoNames(t, reg.BuildBaseTools().AllTools())} {
+		if countToolName(names, ToolNameRankHosts) != 1 {
+			t.Fatalf("host ranking missing without an Edge dependency: %v", names)
 		}
 	}
 }

@@ -47,17 +47,13 @@ type HostDeviceResolver interface {
 // Label model (post-Phase-B): samples in Prom carry `device_id`, not
 // `edge_id`. The route URL uses the edge_id (since the SPA navigates
 // by edge_id) so we resolve to the host device's id on the way in and
-// build every PromQL with `device_id="..."`. When the resolver is nil
-// (degraded mode) or fails, we fall back to `edge_id="..."` to preserve
-// the pre-split behaviour for edges where the two ids happen to match.
+// build every PromQL with `device_id="..."`. Missing resolution fails closed.
 type PromHandler struct {
 	q   PromQuerier
 	dev HostDeviceResolver
 }
 
-// NewPromHandler builds the handler. dev may be nil — when so the
-// handler queries by edge_id (legacy path; works only for edges where
-// device_id==edge_id, i.e. those created before the host-device split).
+// NewPromHandler requires a Host resolver for all metric queries.
 func NewPromHandler(q PromQuerier, dev HostDeviceResolver) *PromHandler {
 	return &PromHandler{q: q, dev: dev}
 }
@@ -117,23 +113,28 @@ func (h *PromHandler) queryMetrics(w http.ResponseWriter, r *http.Request) {
 	// backfill silently return empty panels (the bug a fresh-installed
 	// edge hits: edge_id=8, device_id=67, no overlap in labels).
 	//
-	// When the resolver isn't wired (degraded boot) or the edge has no
-	// host device yet (legacy row), fall back to querying by edge_id —
-	// covers edges 1..N where the integers still match by accident.
-	labelName := "edge_id"
-	labelVal := id
-	if h.dev != nil {
-		if devID, derr := h.dev.ResolveHostDeviceID(r.Context(), id); derr == nil && devID != 0 {
-			labelName = "device_id"
-			labelVal = devID
-		}
+	// 未接入解析器或 Edge 尚未关联 Host 时返回错误，禁止用 Edge ID
+	// 代替 Host ID 查询，即使两者数值恰好相同。
+	if h.dev == nil {
+		writeErr(w, errs.ErrNotWiredYet)
+		return
 	}
+	labelVal, err := h.dev.ResolveHostDeviceID(r.Context(), id)
+	if err != nil {
+		writeErr(w, fmt.Errorf("resolve host for edge %d: %w", id, err))
+		return
+	}
+	if labelVal == 0 {
+		writeErr(w, errs.ErrNotFound)
+		return
+	}
+	labelName := "device_id"
 
 	// Run the range queries we need to populate pointDTO. Per-edge label
 	// is enforced server-side so the SPA cannot leak across edges. PromQL
 	// requires every metric's label set to live in a single {…} block —
 	// `metric{a="x"}{b="y"}` is invalid — so each expression embeds the
-	// device_id (or fallback edge_id) label inline alongside any other
+	// device_id label inline alongside any other
 	// matchers.
 	tag := fmt.Sprintf(`%s="%d"`, labelName, labelVal)
 	groupBy := labelName
