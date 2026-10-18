@@ -36,7 +36,11 @@ package metrics
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"net/url"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -62,6 +66,11 @@ type Pusher interface {
 type EdgeIDProvider func() uint64
 
 // Plugin is the in-process metrics scraper. Implements plugins.Plugin.
+type targetErrors struct {
+	scrape string
+	push   string
+}
+
 type Plugin struct {
 	pusher Pusher
 	edgeID EdgeIDProvider
@@ -77,6 +86,7 @@ type Plugin struct {
 	health       plugins.PluginHealth
 	scrapeCount  uint64
 	failureCount uint64
+	targetErrors map[string]targetErrors
 }
 
 // New constructs the metrics plugin. pusher must be a live tunnel client
@@ -89,10 +99,15 @@ func New(pusher Pusher, edgeID EdgeIDProvider, log *slog.Logger) *Plugin {
 	if edgeID == nil {
 		edgeID = func() uint64 { return 0 }
 	}
+	targetHealth := make(map[string]targetErrors, len(defaultURLs))
+	for _, target := range defaultURLs {
+		targetHealth[target] = targetErrors{}
+	}
 	return &Plugin{
-		pusher: pusher,
-		edgeID: edgeID,
-		log:    log.With(slog.String("plugin", Name)),
+		targetErrors: targetHealth,
+		pusher:       pusher,
+		edgeID:       edgeID,
+		log:          log.With(slog.String("plugin", Name)),
 		health: plugins.PluginHealth{
 			Name:      Name,
 			State:     plugins.StateStopped,
@@ -107,11 +122,19 @@ func (p *Plugin) Name() string { return Name }
 // Configure validates and stores the new config. The supervisor decides
 // whether to (re)start based on Enabled and config equality.
 func (p *Plugin) Configure(cfg plugins.PluginConfig) error {
-	if _, err := parseSpec(cfg.Spec); err != nil {
+	spec, err := parseSpec(cfg.Spec)
+	if err != nil {
 		return err
 	}
 	p.mu.Lock()
 	p.cfg = cfg
+	// 配置移除的目标不应继续污染当前健康状态；保留仍在使用的目标错误。
+	active := make(map[string]targetErrors, len(spec.URLs))
+	for _, target := range spec.URLs {
+		active[target] = p.targetErrors[target]
+	}
+	p.targetErrors = active
+	p.refreshTargetErrorsLocked()
 	p.mu.Unlock()
 	p.log.Debug("configure ok",
 		slog.Bool("enabled", cfg.Enabled),
@@ -134,10 +157,14 @@ func (p *Plugin) Start(ctx context.Context) error {
 	p.stoppedCh = make(chan struct{})
 	stopped := p.stoppedCh
 	cfgCopy := p.cfg
+	// 必须先设置状态再启动 goroutine，避免覆盖首轮立即抓取产生的错误。
+	p.health.State = plugins.StateRunning
+	p.health.StartedAt = time.Now()
+	p.health.UpdatedAt = p.health.StartedAt
+	p.refreshTargetErrorsLocked()
 	p.mu.Unlock()
 
 	go p.runLoop(runCtx, cfgCopy, stopped)
-	p.setState(plugins.StateRunning, nil)
 	return nil
 }
 
@@ -167,9 +194,7 @@ func (p *Plugin) Stop(ctx context.Context) error {
 	return nil
 }
 
-// HealthSnapshot returns a copy of the current health record. Counters
-// (scrapes, failures) are encoded into LastError when there have been any
-// failures since startup, so manager-side health surfaces both states.
+// HealthSnapshot 返回当前健康状态；LastError 只汇总尚未恢复的目标错误。
 func (p *Plugin) HealthSnapshot() plugins.PluginHealth {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -229,13 +254,14 @@ func (p *Plugin) scrapeAndPushOne(ctx context.Context, spec specView, targetURL 
 	p.scrapeCount++
 	p.mu.Unlock()
 	if err != nil {
-		p.bumpFailure(err)
+		p.recordTargetResult(ctx, targetURL, false, err)
 		p.log.Warn("scrape failed",
 			slog.String("url", targetURL),
 			slog.Any("err", err),
 		)
 		return
 	}
+	p.recordTargetResult(ctx, targetURL, false, nil)
 	if len(samples) == 0 {
 		// Target returned no metrics — unusual (node_exporter always
 		// emits at least process_*) but not fatal.
@@ -264,7 +290,7 @@ func (p *Plugin) scrapeAndPushOne(ctx context.Context, spec specView, targetURL 
 			Samples: samples,
 		}, &resp)
 	if err != nil {
-		p.bumpFailure(err)
+		p.recordTargetResult(ctx, targetURL, true, err)
 		p.log.Warn("push_prom_samples failed",
 			slog.String("source", source),
 			slog.String("url", targetURL),
@@ -273,6 +299,7 @@ func (p *Plugin) scrapeAndPushOne(ctx context.Context, spec specView, targetURL 
 		)
 		return
 	}
+	p.recordTargetResult(ctx, targetURL, true, nil)
 	p.log.Debug("pushed prom samples",
 		slog.String("source", source),
 		slog.String("url", targetURL),
@@ -289,17 +316,65 @@ func (p *Plugin) setState(st plugins.PluginState, err error) {
 	if err != nil {
 		p.health.LastError = err.Error()
 	} else if st == plugins.StateRunning {
-		p.health.LastError = ""
+		p.refreshTargetErrorsLocked()
 	}
 	if st == plugins.StateRunning {
 		p.health.StartedAt = time.Now()
 	}
 }
 
-func (p *Plugin) bumpFailure(err error) {
+// recordTargetResult 分别记录抓取和上报结果。空响应/尚未注册时没有尝试上报，
+// 因此不能据抓取成功清除已有上报错误。停止时的取消也不是采集故障。
+func (p *Plugin) recordTargetResult(ctx context.Context, target string, push bool, err error) {
+	if ctx.Err() != nil {
+		return
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.failureCount++
-	p.health.LastError = err.Error()
+	state, active := p.targetErrors[target]
+	if !active {
+		return
+	} // 忽略配置移除目标的在途结果。
+	message := ""
+	if err != nil {
+		message = err.Error()
+		p.failureCount++
+	}
+	if push {
+		state.push = message
+	} else {
+		state.scrape = message
+	}
+	p.targetErrors[target] = state
+	p.refreshTargetErrorsLocked()
 	p.health.UpdatedAt = time.Now()
+}
+
+// 调用方持有 p.mu；排序使多目标错误展示稳定。
+func (p *Plugin) refreshTargetErrorsLocked() {
+	targets := make([]string, 0, len(p.targetErrors))
+	for target, state := range p.targetErrors {
+		if state.scrape != "" || state.push != "" {
+			targets = append(targets, target)
+		}
+	}
+	sort.Strings(targets)
+	messages := make([]string, 0, len(targets))
+	for _, target := range targets {
+		label := target
+		if parsed, err := url.Parse(target); err == nil {
+			parsed.User = nil
+			parsed.RawQuery = ""
+			parsed.Fragment = ""
+			label = parsed.String()
+		}
+		state := p.targetErrors[target]
+		if state.scrape != "" {
+			messages = append(messages, fmt.Sprintf("%s scrape: %s", label, state.scrape))
+		}
+		if state.push != "" {
+			messages = append(messages, fmt.Sprintf("%s push: %s", label, state.push))
+		}
+	}
+	p.health.LastError = strings.Join(messages, "; ")
 }

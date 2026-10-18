@@ -1,0 +1,38 @@
+{
+  "host_id": 1,
+  "edge_id": 14,
+  "results": [
+    {
+      "name": "baseline healthy after upgrade",
+      "state": "running",
+      "last_error": ""
+    },
+    {
+      "name": "two target errors reported",
+      "state": "running",
+      "last_error": "http://127.0.0.1:32837/metrics scrape: http status 503; http://127.0.0.1:45343/metrics scrape: http status 503"
+    },
+    {
+      "name": "first recovers while second error remains",
+      "state": "running",
+      "last_error": "http://127.0.0.1:45343/metrics scrape: http status 503"
+    },
+    {
+      "name": "all recover clears last_error",
+      "state": "running",
+      "last_error": ""
+    },
+    {
+      "name": "new failure visible after recovery",
+      "state": "running",
+      "last_error": "http://127.0.0.1:32837/metrics scrape: http status 503"
+    },
+    {
+      "name": "removed failed target no longer pollutes health",
+      "state": "running",
+      "last_error": ""
+    }
+  ],
+  "original_config_restored": true,
+  "temporary_http_servers_stopped": true
+}

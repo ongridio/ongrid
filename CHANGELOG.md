@@ -2,6 +2,14 @@
 
 本文件记录 ongrid 各版本的主要变更。最新在上。
 
+## Unreleased
+
+### 修复
+
+- 统一 Host 持久身份与当前 Edge 安装关联；重装保留设备及可观测历史，旧安装不能抢占当前绑定。
+- 主机工具统一为 `get_host_summary`、`rank_hosts`、`find_outlier_hosts`，区分 Agent runtime 与 Edge 二进制版本。
+- metrics 插件按采集目标分别跟踪 scrape/push 错误，恢复后清除对应 `last_error`。
+
 ## v0.9.0 (2026-06-27)
 
 大版本：统一任务抽象、MCP 客户端、AI 助理写权限治理，外加一整轮工作流编排与可观测打磨。
