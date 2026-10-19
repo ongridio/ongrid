@@ -37,7 +37,7 @@ func (s *chainAuditSink) OnToolEnd(_ context.Context, _ string, ev decorators.To
 }
 
 // TestBaseTool_DecoratedChain_QueryPromQL — verifies that wrapping
-// query_promql_basetool with decorators.Wrap() runs all 5 decorators in
+// query_promql with decorators.Wrap() runs all 5 decorators in
 // order. Mirrors decorators_test.TestChain_RunsAllInOrder but exercises
 // a real BaseTool implementation, satisfying the PR-7 requirement that
 // the new tools play with the standard chain.

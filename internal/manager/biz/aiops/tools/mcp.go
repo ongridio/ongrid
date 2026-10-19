@@ -1,6 +1,6 @@
 package tools
 
-// mcp_basetool.go — adapts one tool of one external MCP server (HLD-018) into
+// mcp.go — adapts one tool of one external MCP server (HLD-018) into
 // an ongrid BaseTool. Wire name: mcp__<server>__<tool>. The runtime bolts
 // these onto the toolbag at boot after connecting each enabled server. A
 // trusted server's tools run synchronously; otherwise the call is queued to

@@ -19,12 +19,12 @@ func (r *recInstallProposer) ProposeInstall(_ context.Context, url, sourceType, 
 
 func TestInferSourceType(t *testing.T) {
 	cases := map[string]string{
-		"https://github.com/owner/repo":         "git",
-		"https://github.com/owner/repo.git":      "git",
-		"git@github.com:owner/repo.git":          "git",
-		"https://example.com/skill.tar.gz":       "tarball",
-		"https://example.com/skill.tgz":          "tarball",
-		"https://example.com/skill.TAR.GZ":       "tarball",
+		"https://github.com/owner/repo":     "git",
+		"https://github.com/owner/repo.git": "git",
+		"git@github.com:owner/repo.git":     "git",
+		"https://example.com/skill.tar.gz":  "tarball",
+		"https://example.com/skill.tgz":     "tarball",
+		"https://example.com/skill.TAR.GZ":  "tarball",
 	}
 	for in, want := range cases {
 		if got := inferSourceType(in); got != want {

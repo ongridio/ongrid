@@ -16,7 +16,7 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
 
-// bash_basetool.go — N+15 batch refactor. The BaseTool form of bash now
+// bash.go — N+15 batch refactor. The BaseTool form of bash now
 // takes `device_ids[]` + a SINGLE `cmd` (one read-only command run on
 // each device). Cmd is NOT an array — fleet semantics ("看每台机器的
 // nginx 状态") is fundamentally one cmd × N devices, and offering

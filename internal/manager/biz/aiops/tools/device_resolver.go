@@ -17,7 +17,7 @@ import (
 //
 // PR-9 of introduces this as a single, testable helper. The
 // previous implementations were copy-pasted between
-// host_files_basetool.go (usecaseDeviceResolver) and skill_bridge.go
+// host_files.go (usecaseDeviceResolver) and skill.go
 // (Registry.resolveEdgeForDeviceID); they are now thin wrappers
 // around DeviceResolver so a single change to the resolution rule
 // (e.g. "prefer junction, then row, then legacy") affects every tool

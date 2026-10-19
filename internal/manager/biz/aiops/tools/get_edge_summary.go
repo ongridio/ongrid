@@ -44,7 +44,7 @@ type EdgeSummaryIncidentRow struct {
 	LastFiredAt  time.Time `json:"last_fired_at"`
 }
 
-// get_edge_summary_basetool.go — N+15 batch refactor. The BaseTool form
+// get_edge_summary.go — N+15 batch refactor. The BaseTool form
 // of get_edge_summary now takes `device_ids[]`. Each inner call still
 // runs the same 3-step stitch (edge meta + best-effort host_load + 24h
 // incidents). The outer ceiling

@@ -6,7 +6,7 @@ import "time"
 // double-sign verification end-to-end (PR-7 of +). The
 // handler restarts an allow-listed systemd service via `systemctl
 // restart <unit>`. Manager dispatches via the manager-side BaseTool in
-// internal/manager/biz/aiops/tools/restart_service_basetool.go, which is
+// internal/manager/biz/aiops/tools/restart_service.go, which is
 // gated through the new ReviewGate decorator (decorators/review_gate.go)
 // so the call is intercepted before reaching the tunnel: the coordinator
 // LLM emits a restart_service tool_call, the decorator spawns a

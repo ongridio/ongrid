@@ -13,7 +13,7 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
 
-// host_files_basetool.go implements the three edge-scope filesystem
+// host_files.go implements the three edge-scope filesystem
 // inspection BaseTools. Each tool unmarshals the LLM
 // argsJSON, resolves device_id → host edge_id via the edge_devices
 // junction (devicebiz.EdgeDeviceRepo + EdgeDeviceRelationHost), forwards

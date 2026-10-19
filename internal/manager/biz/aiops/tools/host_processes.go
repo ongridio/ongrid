@@ -24,7 +24,7 @@ const GetProcessListDescription = "Return the top-N processes on the named edge 
 // rationale as hostLoadCallTimeout.
 const processListCallTimeout = 60 * time.Second
 
-// host_processes_basetool.go — N+15 batch refactor. The BaseTool form
+// host_processes.go — N+15 batch refactor. The BaseTool form
 // of get_process_list now takes a `device_ids[]` array and fans out
 // manager-side. top_n / sort_by are SHARED across all ids (one knob
 // applied per device) — the typical use case is "top 10 cpu procs on

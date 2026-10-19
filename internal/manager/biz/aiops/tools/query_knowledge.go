@@ -1,4 +1,4 @@
-// query_knowledge_basetool.go is the LLM-callable knowledge-base
+// query_knowledge.go is the LLM-callable knowledge-base
 // search tool. The agent uses it to retrieve operator-curated docs +
 // repo-imported markdown / config when the user's question touches
 // "我们之前怎么处理 X" or "<service> 的部署文档说什么". RAG-lite:

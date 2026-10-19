@@ -396,7 +396,7 @@ func marshalBundleWithCap(bundle *correlateIncidentBundle) ([]byte, error) {
 	return json.Marshal(bundle)
 }
 
-// correlate_incident_basetool.go — N+15 batch refactor. Outer fan-out
+// correlate_incident.go — N+15 batch refactor. Outer fan-out
 // is added; the per-incident bundle assembly is unchanged (each inner
 // already runs prom + log + trace probes concurrently inside its own
 // 60s ceiling). schema cap stays at 16 to match the other batch tools,

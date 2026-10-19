@@ -35,7 +35,7 @@ type IncidentEventRow struct {
 
 const incidentDetailCallTimeout = 60 * time.Second
 
-// get_incident_detail_basetool.go — N+15 batch refactor. The BaseTool
+// get_incident_detail.go — N+15 batch refactor. The BaseTool
 // form of get_incident_detail now takes `incident_ids[]` (1..16). Each
 // inner call is a pure DB read (alertUC.GetIncident + ListEvents) so
 // fan-out is essentially free; the LLM commonly correlates 3-5

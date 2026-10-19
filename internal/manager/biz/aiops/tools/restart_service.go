@@ -14,7 +14,7 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
 
-// restart_service_basetool.go is the manager-side BaseTool that pairs
+// restart_service.go is the manager-side BaseTool that pairs
 // with internal/edgeagent/restart_service/handlers.go. It is the FIRST
 // mutating-class BaseTool in ongrid (Class="write" —
 // blast-radius taxonomy and SOP double-sign), and the proof

@@ -79,23 +79,23 @@ type expandTopologyArgs struct {
 // needs to reason about impact. Kept flat (no nested struct per
 // neighbor) so the tool output stays cheap to embed in the prompt.
 type expandTopologyHit struct {
-	NodeID        uint64 `json:"node_id"`
-	NodeName      string `json:"node_name"`
-	NodeType      string `json:"node_type"`
-	Hops          int    `json:"hops"`
-	RelationType  string `json:"relation_type,omitempty"`
-	SemanticsTag  string `json:"semantics_tag,omitempty"`
-	Propagates    bool   `json:"propagates_failure"`
-	ReachedVia    string `json:"reached_via,omitempty"` // "downstream" | "upstream"
-	ViaNodeID     uint64 `json:"via_node_id,omitempty"`
-	ViaNodeName   string `json:"via_node_name,omitempty"`
+	NodeID       uint64 `json:"node_id"`
+	NodeName     string `json:"node_name"`
+	NodeType     string `json:"node_type"`
+	Hops         int    `json:"hops"`
+	RelationType string `json:"relation_type,omitempty"`
+	SemanticsTag string `json:"semantics_tag,omitempty"`
+	Propagates   bool   `json:"propagates_failure"`
+	ReachedVia   string `json:"reached_via,omitempty"` // "downstream" | "upstream"
+	ViaNodeID    uint64 `json:"via_node_id,omitempty"`
+	ViaNodeName  string `json:"via_node_name,omitempty"`
 }
 
 type expandTopologyResult struct {
-	Center  expandTopologyHit   `json:"center"`
-	Hops    int                 `json:"max_hops"`
-	Count   int                 `json:"reachable_count"`
-	Hits    []expandTopologyHit `json:"reachable"`
+	Center expandTopologyHit   `json:"center"`
+	Hops   int                 `json:"max_hops"`
+	Count  int                 `json:"reachable_count"`
+	Hits   []expandTopologyHit `json:"reachable"`
 	// Note tells the LLM about silent fallbacks (depth clamped, no
 	// propagating edges found, etc.) without falling back to error
 	// shape — the tool's output is structurally always valid.

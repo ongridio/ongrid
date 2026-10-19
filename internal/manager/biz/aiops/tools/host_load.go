@@ -26,7 +26,7 @@ const GetHostLoadDescription = "Return current CPU percent, memory percent, and 
 // long-running edge calls cannot wedge the agent loop.
 const hostLoadCallTimeout = 60 * time.Second
 
-// host_load_basetool.go — N+15 batch refactor (2026-05-07). The BaseTool
+// host_load.go — N+15 batch refactor (2026-05-07). The BaseTool
 // form of get_host_load now takes a `device_ids[]` array (1..16) and
 // fans out manager-side via runBatch, returning a per-id envelope with
 // success/error counts. Edge handler / wire types are untouched —

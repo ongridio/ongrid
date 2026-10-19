@@ -118,7 +118,7 @@ func TestBuildBaseTools_GraphKernelToolBagCount(t *testing.T) {
 // fakeDevicesForToolBag stands in for a *devicebiz.Usecase so
 // AppendHostFilesTools' non-nil check passes. The host_files tool
 // only needs a non-nil reference at construction; the actual
-// resolver path is exercised by host_files_basetool_test.go.
+// resolver path is exercised by host_files_test.go.
 type fakeDevicesForToolBag struct{}
 
 func (fakeDevicesForToolBag) usecase() *devicebiz.Usecase {

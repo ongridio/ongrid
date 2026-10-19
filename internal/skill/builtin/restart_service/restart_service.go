@@ -6,7 +6,7 @@
 //     and the actual restart runs on the edge.
 //   - The framework's permission gate refuses to invoke this skill
 //     directly from the LLM. Instead, the manager BaseTool counterpart
-//     (internal/manager/biz/aiops/tools/restart_service_basetool.go) is
+//     (internal/manager/biz/aiops/tools/restart_service.go) is
 //     wrapped by the ReviewGate decorator (decorators/review_gate.go),
 //     which spawns a reviewer worker (agents/reviewer.md) and only
 //     dispatches if the reviewer returns "Decision: approve".
