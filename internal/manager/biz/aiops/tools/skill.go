@@ -1,20 +1,3 @@
-// skill_bridge.go auto-registers every safe skill (internal/skill
-// registry) as an OpenAI function-calling Tool on this aiops Registry.
-//
-// Wiring:
-//   - Tool name = skill metadata Key (lower_snake, already unique)
-//   - Tool description = skill Description
-//   - Tool schema = skill.ParamSchema.ToJSONSchema() with one extra
-//     property `device_id` (uint64) prepended — every
-//     skill execution targets a specific edge, so the
-//     LLM must always supply it.
-//   - Tool execute = unmarshal args -> {device_id, ...skillParams},
-//     call manager/biz/skill.Service.Execute, return
-//     the raw result JSON (or an error envelope) so
-//     the LLM sees structured output.
-//
-// Only ClassSafe skills are registered; mutating / dangerous require a
-// human-in-the-loop workflow (PR-G4) before the agent can invoke them.
 package tools
 
 import (
@@ -22,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	skillsvc "github.com/ongridio/ongrid/internal/manager/biz/skill"
 	skillcore "github.com/ongridio/ongrid/internal/skill"
 )
@@ -32,50 +16,8 @@ type SkillRunner interface {
 	Execute(ctx context.Context, caller skillsvc.Caller, in skillsvc.ExecuteInput) (*skillsvc.ExecuteOutput, error)
 }
 
-// RegisterSafeSkills enumerates every ClassSafe skill in the global
-// registry and adds it as a Tool. Idempotent — re-registration overwrites.
-//
-// The agent caller passes through a system identity (UserID=0,
-// Role="system") because tool calls originate from the LLM, not a human;
-// the audit row records that distinction.
-//
-// Schema shape varies by scope:
-//
-//   - ScopeHost: we inject a required `device_id` integer so the LLM
-//     picks a target host. The Executor closure pulls device_id out
-//     before forwarding the rest as params.
-//   - ScopeManager: no edge_id (the skill runs in-process on the
-//     manager). SubprocessSkills carry their own raw JSON Schema in
-//     SubprocessSkill.Schema; native manager skills use the same
-//     ParamSchema → JSON Schema conversion as edge skills.
-func (r *Registry) RegisterSafeSkills(svc SkillRunner) {
-	if svc == nil {
-		return
-	}
-	for _, e := range skillcore.AllByClass(skillcore.ClassSafe) {
-		meta := e.Metadata()
-		schema, err := buildSkillToolSchema(e)
-		if err != nil {
-			r.log.Warn("aiops/tools: skill schema build failed",
-				"skill", meta.Key, "err", err)
-			continue
-		}
-		desc := meta.Description
-		if meta.ResultPreview != "" {
-			desc = desc + "\n\nReturns: " + meta.ResultPreview
-		}
-		name := meta.Key
-		r.Register(Tool{
-			Name:        name,
-			Description: desc,
-			Schema:      schema,
-			Execute:     r.newSkillExecutor(svc, name, meta.EffectiveScope()),
-		})
-	}
-}
-
 // buildSkillToolSchema generates a JSON-schema-shaped object that
-// matches what llm.ToolSchema expects.
+// matches the BaseTool parameter contract.
 //
 // SubprocessSkill carries its own raw JSON Schema (from skill.json's
 // "schema" field) so we forward it verbatim — manifests should already
@@ -143,9 +85,9 @@ func buildSkillToolSchema(e skillcore.Executor) (json.RawMessage, error) {
 	return json.Marshal(base)
 }
 
-// newSkillExecutor returns a Tool.Execute closure. For edge-scoped
-// skills resolve device_id through the verified current Host binding.
-
+// newSkillExecutor returns the skill execution function. For edge-scoped
+// skills resolve device_id through the current Host binding before invoking the skill. For manager-scoped
+// skills (web_search, subprocess packs) it forwards args verbatim.
 func (r *Registry) newSkillExecutor(svc SkillRunner, key string, scope skillcore.Scope) func(ctx context.Context, args json.RawMessage) (ExecuteResult, error) {
 	return func(ctx context.Context, args json.RawMessage) (ExecuteResult, error) {
 		var envelope map[string]json.RawMessage
@@ -225,4 +167,68 @@ func (r *Registry) newSkillExecutor(svc SkillRunner, key string, scope skillcore
 		}
 		return result, nil
 	}
+}
+
+// SetSkillRunner 在构建目录前注入 Skill 服务，所有入口使用相同适配器。
+func (r *Registry) SetSkillRunner(runner SkillRunner) { r.skillRunner = runner }
+
+func (r *Registry) appendSafeSkillTools(out []basetool.BaseTool) []basetool.BaseTool {
+	if r.skillRunner == nil {
+		return out
+	}
+	seen := make(map[string]bool, len(out))
+	for _, t := range out {
+		if info, err := t.Info(context.Background()); err == nil && info != nil {
+			seen[info.Name] = true
+		}
+	}
+	for _, executor := range skillcore.AllByClass(skillcore.ClassSafe) {
+		// 展示目录的反向桥接不是新的工具来源，否则会递归适配。
+		if _, exported := executor.(*baseToolSkillExecutor); exported {
+			continue
+		}
+		meta := executor.Metadata()
+		// 内置 BaseTool 是同名能力的执行实现（如抓包查询），只保留一份。
+		if seen[meta.Key] {
+			if _, external := executor.(*skillcore.SubprocessSkill); external {
+				r.log.Error("external skill conflicts with built-in tool; registration rejected", "skill", meta.Key)
+			}
+			continue
+		}
+		schema, err := buildSkillToolSchema(executor)
+		if err != nil {
+			r.log.Error("build skill tool schema", "skill", meta.Key, "error", err)
+			continue
+		}
+		origin := basetool.OriginBuiltin
+		if _, external := executor.(*skillcore.SubprocessSkill); external {
+			origin = basetool.OriginSkill
+		}
+		out = append(out, &skillBaseTool{
+			info:    basetool.ToolInfo{Name: meta.Key, Description: meta.Description, Parameters: schema, Class: "read", Origin: origin},
+			execute: r.newSkillExecutor(r.skillRunner, meta.Key, meta.EffectiveScope()),
+		})
+		seen[meta.Key] = true
+	}
+	return out
+}
+
+type skillBaseTool struct {
+	info    basetool.ToolInfo
+	execute func(context.Context, json.RawMessage) (ExecuteResult, error)
+}
+
+func (t *skillBaseTool) Info(context.Context) (*basetool.ToolInfo, error) {
+	info := t.info
+	return &info, nil
+}
+func (t *skillBaseTool) InvokableRun(ctx context.Context, args string, _ ...basetool.InvokeOption) (string, error) {
+	if t.info.Name == basetool.ToolWebSearch && !basetool.WebSearchAllowed(ctx) {
+		return "", fmt.Errorf("web_search disabled for this request")
+	}
+	result, err := t.execute(ctx, json.RawMessage(args))
+	if err != nil {
+		return "", err
+	}
+	return string(result.ResultJSON), nil
 }

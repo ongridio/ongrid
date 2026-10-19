@@ -13,8 +13,6 @@ import (
 	edgemodel "github.com/ongridio/ongrid/internal/manager/model/edge"
 )
 
-// TestFindOutlierHostsTool_RejectsLoadMetric is the BaseTool sibling of
-// TestExecuteFindOutlierHosts_RejectsLoadMetric (closure_bugfixes_test.go).
 // Locks in Bug 2 on the BaseTool path: previously
 // `if !ok || metric == "load" || ...` looked correct but the !ok branch
 // never fired for cpu/mem/disk because rankMetricExpr also returns ok=true
@@ -43,8 +41,6 @@ func TestFindOutlierHostsTool_RejectsLoadMetric(t *testing.T) {
 	}
 }
 
-// TestGetHostSummaryTool_IncludesAckedAndResolvedIncidents24h is the
-// BaseTool sibling of TestExecuteGetHostSummary_IncludesAckedAndResolvedIncidents24h.
 // Locks in Bug 3: previously the repo-level filter was Status=open, which
 // silently dropped acknowledged / silenced / resolved incidents from the
 // last 24h. After the fix, ListIncidents is invoked WITHOUT a Status

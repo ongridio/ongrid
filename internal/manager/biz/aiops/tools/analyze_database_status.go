@@ -296,35 +296,6 @@ func (t *AnalyzeDatabaseStatusTool) InvokableRun(ctx context.Context, argsJSON s
 	return string(out), nil
 }
 
-func (r *Registry) executeListDatabaseSources(ctx context.Context, args json.RawMessage) (ExecuteResult, error) {
-	runner := databaseSourceInventoryRunner{
-		edges:         r.edges,
-		devices:       r.devices,
-		pluginConfigs: r.pluginConfigs,
-		log:           r.log,
-	}
-	out, err := runner.run(ctx, args)
-	if err != nil {
-		return ExecuteResult{}, err
-	}
-	return ExecuteResult{ResultJSON: out}, nil
-}
-
-func (r *Registry) executeAnalyzeDatabaseStatus(ctx context.Context, args json.RawMessage) (ExecuteResult, error) {
-	runner := databaseStatusRunner{
-		promQuery:     r.promQuery,
-		edges:         r.edges,
-		devices:       r.devices,
-		pluginConfigs: r.pluginConfigs,
-		log:           r.log,
-	}
-	out, err := runner.run(ctx, args)
-	if err != nil {
-		return ExecuteResult{}, err
-	}
-	return ExecuteResult{ResultJSON: out}, nil
-}
-
 type databaseStatusRunner struct {
 	promQuery     PromQuerier
 	edges         *edgebiz.Usecase

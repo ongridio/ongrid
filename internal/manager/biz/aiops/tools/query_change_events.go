@@ -12,7 +12,7 @@ import (
 	auditmodel "github.com/ongridio/ongrid/internal/manager/model/audit"
 )
 
-// query_change_events_basetool.go — HLD-013 Phase 2. Gives the RCA
+// query_change_events.go — HLD-013 Phase 2. Gives the RCA
 // investigator a "what changed near time T" signal, sourced from the
 // HLD-010 audit log. Patient-zero is often "someone changed a rule /
 // setting / device right before the symptom"; this exposes those

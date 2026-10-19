@@ -182,12 +182,3 @@ func normalizeDescribeK8sResourceArgs(in DescribeK8sResourceArgs) (tunnel.Kubern
 		EventsLimit:   eventsLimit,
 	}, nil
 }
-
-func (r *Registry) executeDescribeK8sResource(ctx context.Context, args json.RawMessage) (ExecuteResult, error) {
-	tool := NewDescribeK8sResourceTool(r.caller, r.k8sSnapshot, r.log)
-	out, err := tool.InvokableRun(ctx, string(args))
-	if err != nil {
-		return ExecuteResult{}, err
-	}
-	return ExecuteResult{ResultJSON: json.RawMessage(out)}, nil
-}

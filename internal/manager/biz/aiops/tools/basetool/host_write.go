@@ -12,7 +12,7 @@ import "context"
 // set it. Gate OFF (the default) additionally blocks the proposal path.
 //
 // Same leaf-package rationale as session.go / artifact_source.go: both the
-// producer (chatruntime) and the consumer (tools/bash_basetool) depend on
+// producer (chatruntime) and the consumer (tools/bash) depend on
 // basetool without an import cycle.
 
 type hostWriteAllowedCtxKeyT struct{}

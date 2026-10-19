@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	"github.com/ongridio/ongrid/internal/pkg/promquery"
 )
 
@@ -76,24 +78,74 @@ func stepFor(lookbackSeconds int) time.Duration {
 	}
 }
 
-// executeQueryPromQL runs the PromQL range query and hands the raw Prom
-// response back to the LLM via ResultJSON. EdgeID is intentionally left
-// nil — query_promql is not bound to a specific edge.
-func (r *Registry) executeQueryPromQL(ctx context.Context, args json.RawMessage) (ExecuteResult, error) {
-	if r.promQuery == nil {
-		// Should not happen — when promQuery is nil at NewRegistry the
-		// tool is never registered. Defensive guard.
-		return ExecuteResult{}, fmt.Errorf("query_promql: prom query client not configured")
+// PromQuerier is the narrow surface the query_promql executor needs from
+// the promquery client. Declared here so tests can inject a fake.
+//
+// NOTE: this interface is what r.promQuery is typed as. The concrete
+// *promquery.Client satisfies it.
+type PromQuerier interface {
+	QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) (*promquery.InstantResult, error)
+	// Query is the instant form. correlate_incident uses it to grab
+	// a single point-in-time vector for cpu_pct / mem_pct / up. Concrete
+	// *promquery.Client satisfies it.
+	Query(ctx context.Context, expr string, ts time.Time) (*promquery.InstantResult, error)
+}
+
+// QueryPromQLTool runs PromQL queries with a bounded time range.
+type QueryPromQLTool struct {
+	promQuery PromQuerier
+	log       *slog.Logger
+}
+
+// NewQueryPromQLTool builds a new BaseTool-shape query_promql tool. log
+// may be nil (the tool degrades to slog.Default()).
+func NewQueryPromQLTool(p PromQuerier, log *slog.Logger) *QueryPromQLTool {
+	if log == nil {
+		log = slog.Default()
 	}
+	return &QueryPromQLTool{promQuery: p, log: log}
+}
+
+// queryPromQLWhenToUse is the routing hint shown to the LLM under a
+// "When to use" header in the system prompt. + —
+// kept distinct from the Description field so skill manifests can
+// override one without rewriting the other.
+const queryPromQLWhenToUse = "When the user asks about metric values, time-series trends, " +
+	"per-edge resource usage, or anything that boils down to a Prometheus range query. " +
+	"NOT for log content (use query_logql) or filesystem state (use host-level tools). " +
+	"For fleet / multi-device / multi-mountpoint questions, prefer one PromQL call with by(device_id, ...) " +
+	"or topk/ranking over repeated per-device queries. " +
+	"Prefer query_promql over the narrower get_host_load / get_process_list when the " +
+	"question spans more than one host or asks for derivatives / aggregates."
+
+// Info returns the tool metadata. — Info is pure (no I/O).
+// The Class field marks this as "read" — query_promql never mutates
+// state, so it's exempt from any future destructive-action gating.
+func (t *QueryPromQLTool) Info(_ context.Context) (*basetool.ToolInfo, error) {
+	return &basetool.ToolInfo{
+		Name:        ToolNameQueryPromQL,
+		Description: QueryPromQLDescription,
+		WhenToUse:   queryPromQLWhenToUse,
+		Parameters:  QueryPromQLSchema,
+		Class:       "read",
+	}, nil
+}
+
+// InvokableRun runs the PromQL range query and returns its JSON response.
+func (t *QueryPromQLTool) InvokableRun(ctx context.Context, argsJSON string, _ ...basetool.InvokeOption) (string, error) {
+	if t.promQuery == nil {
+		return "", fmt.Errorf("query_promql: prom query client not configured")
+	}
+
 	var in QueryPromQLArgs
-	if err := json.Unmarshal(args, &in); err != nil {
-		return ExecuteResult{}, fmt.Errorf("query_promql: bad args: %w", err)
+	if err := json.Unmarshal([]byte(argsJSON), &in); err != nil {
+		return "", fmt.Errorf("query_promql: bad args: %w", err)
 	}
 	if in.Expr == "" {
-		return ExecuteResult{}, fmt.Errorf("query_promql: expr required")
+		return "", fmt.Errorf("query_promql: expr required")
 	}
 	if in.LookbackSeconds <= 0 {
-		in.LookbackSeconds = 300 // 5 min
+		in.LookbackSeconds = 300
 	}
 	if in.LookbackSeconds > maxQueryPromQLLookbackSeconds {
 		in.LookbackSeconds = maxQueryPromQLLookbackSeconds
@@ -103,29 +155,17 @@ func (r *Registry) executeQueryPromQL(ctx context.Context, args json.RawMessage)
 	start := end.Add(-time.Duration(in.LookbackSeconds) * time.Second)
 	step := stepFor(in.LookbackSeconds)
 
+	// A closer caller deadline still takes precedence over this timeout.
 	callCtx, cancel := context.WithTimeout(ctx, queryPromqlCallTimeout)
 	defer cancel()
 
-	res, err := r.promQuery.QueryRange(callCtx, in.Expr, start, end, step)
+	res, err := t.promQuery.QueryRange(callCtx, in.Expr, start, end, step)
 	if err != nil {
-		return ExecuteResult{}, fmt.Errorf("query_promql: dispatch: %w", err)
+		return "", fmt.Errorf("query_promql: dispatch: %w", err)
 	}
 	out, err := json.Marshal(res)
 	if err != nil {
-		return ExecuteResult{}, fmt.Errorf("query_promql: marshal response: %w", err)
+		return "", fmt.Errorf("query_promql: marshal response: %w", err)
 	}
-	return ExecuteResult{ResultJSON: out}, nil
-}
-
-// PromQuerier is the narrow surface the query_promql executor needs from
-// the promquery client. Declared here so tests can inject a fake.
-//
-// NOTE: this interface is what r.promQuery is typed as. The concrete
-// *promquery.Client satisfies it.
-type PromQuerier interface {
-	QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) (*promquery.InstantResult, error)
-	// Query is the instant form. correlate_incident.go uses it to grab
-	// a single point-in-time vector for cpu_pct / mem_pct / up. Concrete
-	// *promquery.Client satisfies it.
-	Query(ctx context.Context, expr string, ts time.Time) (*promquery.InstantResult, error)
+	return string(out), nil
 }

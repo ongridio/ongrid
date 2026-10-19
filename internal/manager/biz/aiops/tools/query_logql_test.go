@@ -4,15 +4,103 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	edgebiz "github.com/ongridio/ongrid/internal/manager/biz/edge"
 	"github.com/ongridio/ongrid/internal/pkg/logquery"
 )
+
+func TestQueryLogQLTool_Info(t *testing.T) {
+	tool := NewQueryLogQLTool(&fakeLogQuerier{})
+	info, err := tool.Info(context.Background())
+	if err != nil {
+		t.Fatalf("Info: %v", err)
+	}
+	if info.Name != ToolNameQueryLogQL {
+		t.Errorf("Name = %q", info.Name)
+	}
+	if !strings.Contains(strings.ToLower(info.WhenToUse), "not") {
+		t.Errorf("WhenToUse needs reverse guard: %q", info.WhenToUse)
+	}
+	if !strings.Contains(strings.ToLower(info.WhenToUse), "log") {
+		t.Errorf("WhenToUse should mention log content")
+	}
+}
+
+func TestQueryLogQLTool_RoundTrip(t *testing.T) {
+	lq := &fakeLogQuerier{
+		resp: &logquery.QueryRangeResult{
+			ResultType: "streams",
+			Result:     json.RawMessage(`[{"stream":{"device_id":"1"},"values":[["1700000000000000000","oops"]]}]`),
+		},
+	}
+	tool := NewQueryLogQLTool(lq)
+	out, err := tool.InvokableRun(context.Background(),
+		`{"query":"{device_id=\"1\"} |= \"error\"","limit":50,"direction":"forward"}`)
+	if err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+	if lq.got.Query != `{device_id="1"} |= "error"` {
+		t.Errorf("Query = %q", lq.got.Query)
+	}
+	if lq.got.Limit != 50 {
+		t.Errorf("Limit = %d, want 50", lq.got.Limit)
+	}
+	if lq.got.Direction != "forward" {
+		t.Errorf("Direction = %q, want forward", lq.got.Direction)
+	}
+	span := lq.got.End.Sub(lq.got.Start)
+	if span < 59*time.Minute || span > 61*time.Minute {
+		t.Errorf("default range = %v", span)
+	}
+	var qr logquery.QueryRangeResult
+	if err := json.Unmarshal([]byte(out), &qr); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+}
+
+func TestQueryLogQLTool_DeviceIDScopesQuery(t *testing.T) {
+	lq := &fakeLogQuerier{resp: &logquery.QueryRangeResult{ResultType: "streams", Result: json.RawMessage("[]")}}
+	tool := NewQueryLogQLTool(lq)
+	if _, err := tool.InvokableRun(context.Background(), `{"query":"{} |= \"error\"","device_id":24}`); err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+	if got, want := lq.got.Query, `{device_id="24"} |= "error"`; got != want {
+		t.Errorf("Query = %q, want %q", got, want)
+	}
+}
+
+func TestQueryLogQLTool_BadArgs(t *testing.T) {
+	tool := NewQueryLogQLTool(&fakeLogQuerier{})
+	if _, err := tool.InvokableRun(context.Background(), `not json`); err == nil {
+		t.Errorf("expected error for non-JSON")
+	}
+	if _, err := tool.InvokableRun(context.Background(), `{}`); err == nil {
+		t.Errorf("expected error for missing query")
+	}
+	if _, err := tool.InvokableRun(context.Background(),
+		`{"query":"{a=\"b\"}","start":"not-a-time"}`); err == nil {
+		t.Errorf("expected error for bad start")
+	}
+}
+
+func TestQueryLogQLTool_NilQuerier(t *testing.T) {
+	tool := NewQueryLogQLTool(nil)
+	_, err := tool.InvokableRun(context.Background(), `{"query":"{a=\"b\"}"}`)
+	if err == nil {
+		t.Errorf("expected error when logQuery nil")
+	}
+}
+
+func TestQueryLogQLTool_DispatchError(t *testing.T) {
+	tool := NewQueryLogQLTool(&fakeLogQuerier{err: errors.New("loki 5xx")})
+	_, err := tool.InvokableRun(context.Background(), `{"query":"{a=\"b\"}"}`)
+	if err == nil || !strings.Contains(err.Error(), "loki 5xx") {
+		t.Errorf("expected wrapped dispatch error, got %v", err)
+	}
+}
 
 // fakeLogQuerier captures the last QueryLogQL call.
 type fakeLogQuerier struct {
@@ -39,17 +127,11 @@ func TestQueryLogQL_RoundTrip(t *testing.T) {
 			Result:     json.RawMessage(`[{"stream":{"edge_id":"1"},"values":[["1700000000000000000","oops"]]}]`),
 		},
 	}
-	uc := edgebiz.NewUsecase(newFakeEdgeRepo(), nil, nil, slog.Default())
-	reg := NewRegistry(&fakeCaller{}, uc, nil, nil, lq, nil, nil, slog.Default())
+	tool := NewQueryLogQLTool(lq)
 
-	if !containsName(schemaNames(reg.Schemas()), ToolNameQueryLogQL) {
-		t.Errorf("query_logql not registered: %v", schemaNames(reg.Schemas()))
-	}
-
-	out, err := reg.Invoke(context.Background(), ToolNameQueryLogQL,
-		json.RawMessage(`{"query":"{edge_id=\"1\"} |= \"error\"","limit":50,"direction":"forward"}`))
+	out, err := tool.InvokableRun(context.Background(), `{"query":"{edge_id=\"1\"} |= \"error\"","limit":50,"direction":"forward"}`)
 	if err != nil {
-		t.Fatalf("Invoke: %v", err)
+		t.Fatalf("InvokableRun: %v", err)
 	}
 	if lq.got.Query != `{edge_id="1"} |= "error"` {
 		t.Errorf("Query = %q", lq.got.Query)
@@ -66,7 +148,7 @@ func TestQueryLogQL_RoundTrip(t *testing.T) {
 	}
 
 	var qr logquery.QueryRangeResult
-	if err := json.Unmarshal(out.ResultJSON, &qr); err != nil {
+	if err := json.Unmarshal([]byte(out), &qr); err != nil {
 		t.Fatalf("decode result: %v", err)
 	}
 	if qr.ResultType != "streams" {
@@ -110,11 +192,10 @@ func TestQueryLogQL_SchemaKeepsEstablishedPipelineContract(t *testing.T) {
 
 func TestQueryLogQL_DefaultsLimitAndDirection(t *testing.T) {
 	lq := &fakeLogQuerier{resp: &logquery.QueryRangeResult{ResultType: "streams", Result: json.RawMessage("[]")}}
-	uc := edgebiz.NewUsecase(newFakeEdgeRepo(), nil, nil, slog.Default())
-	reg := NewRegistry(&fakeCaller{}, uc, nil, nil, lq, nil, nil, slog.Default())
+	tool := NewQueryLogQLTool(lq)
 
-	if _, err := reg.Invoke(context.Background(), ToolNameQueryLogQL, json.RawMessage(`{"query":"{a=\"b\"}"}`)); err != nil {
-		t.Fatalf("Invoke: %v", err)
+	if _, err := tool.InvokableRun(context.Background(), `{"query":"{a=\"b\"}"}`); err != nil {
+		t.Fatalf("InvokableRun: %v", err)
 	}
 	if lq.got.Limit != 200 {
 		t.Errorf("default limit = %d, want 200", lq.got.Limit)
@@ -126,12 +207,10 @@ func TestQueryLogQL_DefaultsLimitAndDirection(t *testing.T) {
 
 func TestQueryLogQL_DeviceIDScopesStreamSelector(t *testing.T) {
 	lq := &fakeLogQuerier{resp: &logquery.QueryRangeResult{ResultType: "streams", Result: json.RawMessage("[]")}}
-	uc := edgebiz.NewUsecase(newFakeEdgeRepo(), nil, nil, slog.Default())
-	reg := NewRegistry(&fakeCaller{}, uc, nil, nil, lq, nil, nil, slog.Default())
+	tool := NewQueryLogQLTool(lq)
 
-	if _, err := reg.Invoke(context.Background(), ToolNameQueryLogQL,
-		json.RawMessage(`{"query":"{unit=\"nginx.service\"} |= \"error\"","device_id":24}`)); err != nil {
-		t.Fatalf("Invoke: %v", err)
+	if _, err := tool.InvokableRun(context.Background(), `{"query":"{unit=\"nginx.service\"} |= \"error\"","device_id":24}`); err != nil {
+		t.Fatalf("InvokableRun: %v", err)
 	}
 	if got, want := lq.got.Query, `{device_id="24",unit="nginx.service"} |= "error"`; got != want {
 		t.Errorf("Query = %q, want %q", got, want)
@@ -162,8 +241,7 @@ func TestQueryLogQL_DeviceIDScopesEmptyAndExistingSelectors(t *testing.T) {
 
 func TestQueryLogQL_DeviceIDRejectsConflictingOrUnscopableQuery(t *testing.T) {
 	lq := &fakeLogQuerier{resp: &logquery.QueryRangeResult{ResultType: "streams", Result: json.RawMessage("[]")}}
-	uc := edgebiz.NewUsecase(newFakeEdgeRepo(), nil, nil, slog.Default())
-	reg := NewRegistry(&fakeCaller{}, uc, nil, nil, lq, nil, nil, slog.Default())
+	tool := NewQueryLogQLTool(lq)
 
 	for _, args := range []json.RawMessage{
 		json.RawMessage(`{"query":"{device_id=\"7\"} |= \"error\"","device_id":24}`),
@@ -171,20 +249,19 @@ func TestQueryLogQL_DeviceIDRejectsConflictingOrUnscopableQuery(t *testing.T) {
 		json.RawMessage(`{"query":"sum(count_over_time({job=\"syslog\"}[5m]))","device_id":24}`),
 		json.RawMessage(`{"query":"{}","device_id":0}`),
 	} {
-		if _, err := reg.Invoke(context.Background(), ToolNameQueryLogQL, args); err == nil {
-			t.Errorf("Invoke(%s) succeeded, want scope error", args)
+		if _, err := tool.InvokableRun(context.Background(), string(args)); err == nil {
+			t.Errorf("InvokableRun(%s) succeeded, want scope error", args)
 		}
 	}
 }
 
 func TestQueryLogQL_ExplicitTimeWindow(t *testing.T) {
 	lq := &fakeLogQuerier{resp: &logquery.QueryRangeResult{ResultType: "streams", Result: json.RawMessage("[]")}}
-	uc := edgebiz.NewUsecase(newFakeEdgeRepo(), nil, nil, slog.Default())
-	reg := NewRegistry(&fakeCaller{}, uc, nil, nil, lq, nil, nil, slog.Default())
+	tool := NewQueryLogQLTool(lq)
 
 	args := json.RawMessage(`{"query":"{a=\"b\"}","start":"2026-05-01T00:00:00Z","end":"2026-05-01T01:30:00Z"}`)
-	if _, err := reg.Invoke(context.Background(), ToolNameQueryLogQL, args); err != nil {
-		t.Fatalf("Invoke: %v", err)
+	if _, err := tool.InvokableRun(context.Background(), string(args)); err != nil {
+		t.Fatalf("InvokableRun: %v", err)
 	}
 	wantStart, _ := time.Parse(time.RFC3339, "2026-05-01T00:00:00Z")
 	wantEnd, _ := time.Parse(time.RFC3339, "2026-05-01T01:30:00Z")
@@ -198,11 +275,10 @@ func TestQueryLogQL_ExplicitTimeWindow(t *testing.T) {
 
 func TestQueryLogQL_RelativeNowWindow(t *testing.T) {
 	lq := &fakeLogQuerier{resp: &logquery.QueryRangeResult{ResultType: "streams", Result: json.RawMessage("[]")}}
-	uc := edgebiz.NewUsecase(newFakeEdgeRepo(), nil, nil, slog.Default())
-	reg := NewRegistry(&fakeCaller{}, uc, nil, nil, lq, nil, nil, slog.Default())
+	tool := NewQueryLogQLTool(lq)
 
-	if _, err := reg.Invoke(context.Background(), ToolNameQueryLogQL, json.RawMessage(`{"query":"{a=\"b\"}","start":"now-2h","end":"now"}`)); err != nil {
-		t.Fatalf("Invoke: %v", err)
+	if _, err := tool.InvokableRun(context.Background(), `{"query":"{a=\"b\"}","start":"now-2h","end":"now"}`); err != nil {
+		t.Fatalf("InvokableRun: %v", err)
 	}
 	span := lq.got.End.Sub(lq.got.Start)
 	if span < 119*time.Minute || span > 121*time.Minute {
@@ -212,21 +288,18 @@ func TestQueryLogQL_RelativeNowWindow(t *testing.T) {
 
 func TestQueryLogQL_MissingQuery(t *testing.T) {
 	lq := &fakeLogQuerier{}
-	uc := edgebiz.NewUsecase(newFakeEdgeRepo(), nil, nil, slog.Default())
-	reg := NewRegistry(&fakeCaller{}, uc, nil, nil, lq, nil, nil, slog.Default())
+	tool := NewQueryLogQLTool(lq)
 
-	if _, err := reg.Invoke(context.Background(), ToolNameQueryLogQL, json.RawMessage(`{}`)); err == nil {
+	if _, err := tool.InvokableRun(context.Background(), `{}`); err == nil {
 		t.Errorf("expected error for missing query")
 	}
 }
 
 func TestQueryLogQL_BadStart(t *testing.T) {
 	lq := &fakeLogQuerier{resp: &logquery.QueryRangeResult{}}
-	uc := edgebiz.NewUsecase(newFakeEdgeRepo(), nil, nil, slog.Default())
-	reg := NewRegistry(&fakeCaller{}, uc, nil, nil, lq, nil, nil, slog.Default())
+	tool := NewQueryLogQLTool(lq)
 
-	_, err := reg.Invoke(context.Background(), ToolNameQueryLogQL,
-		json.RawMessage(`{"query":"{a=\"b\"}","start":"not-a-time"}`))
+	_, err := tool.InvokableRun(context.Background(), `{"query":"{a=\"b\"}","start":"not-a-time"}`)
 	if err == nil {
 		t.Errorf("expected error for bad start")
 	}
@@ -234,24 +307,10 @@ func TestQueryLogQL_BadStart(t *testing.T) {
 
 func TestQueryLogQL_DispatchError(t *testing.T) {
 	lq := &fakeLogQuerier{err: errors.New("loki 5xx")}
-	uc := edgebiz.NewUsecase(newFakeEdgeRepo(), nil, nil, slog.Default())
-	reg := NewRegistry(&fakeCaller{}, uc, nil, nil, lq, nil, nil, slog.Default())
+	tool := NewQueryLogQLTool(lq)
 
-	_, err := reg.Invoke(context.Background(), ToolNameQueryLogQL, json.RawMessage(`{"query":"{a=\"b\"}"}`))
+	_, err := tool.InvokableRun(context.Background(), `{"query":"{a=\"b\"}"}`)
 	if err == nil {
 		t.Errorf("expected propagated dispatch error")
-	}
-}
-
-func TestQueryLogQL_NotRegisteredWhenNil(t *testing.T) {
-	uc := edgebiz.NewUsecase(newFakeEdgeRepo(), nil, nil, slog.Default())
-	reg := NewRegistry(&fakeCaller{}, uc, nil, nil, nil, nil, nil, slog.Default())
-
-	if containsName(schemaNames(reg.Schemas()), ToolNameQueryLogQL) {
-		t.Errorf("query_logql should NOT be registered when logQuery is nil")
-	}
-	_, err := reg.Invoke(context.Background(), ToolNameQueryLogQL, json.RawMessage(`{"query":"{a=\"b\"}"}`))
-	if err == nil {
-		t.Errorf("expected not-found error when log disabled")
 	}
 }

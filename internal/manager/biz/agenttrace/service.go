@@ -103,6 +103,9 @@ func (s *Service) List(ctx context.Context, q Query) (*ListResult, error) {
 			return nil, fmt.Errorf("agenttrace: decode search: %w", err)
 		}
 	}
+	if result.Partial {
+		out.Metadata.Reasons = append(out.Metadata.Reasons, "upstream_partial")
+	}
 	if len(candidates) >= candidateLimit {
 		out.Metadata.Reasons = append(out.Metadata.Reasons, "candidate_limit")
 	}
@@ -122,7 +125,7 @@ func (s *Service) List(ctx context.Context, q Query) (*ListResult, error) {
 		TotalJobs     int `json:"totalJobs"`
 	}
 	if len(result.Metrics) != 0 && json.Unmarshal(result.Metrics, &metrics) == nil && metrics.CompletedJobs < metrics.TotalJobs {
-		out.Metadata.Reasons = append(out.Metadata.Reasons, "upstream_partial")
+		out.Metadata.Reasons = appendUnique(out.Metadata.Reasons, "upstream_partial")
 	}
 	type readResult struct {
 		id   string
@@ -157,6 +160,9 @@ func (s *Service) List(ctx context.Context, q Query) (*ListResult, error) {
 	bytes := 0
 	for result := range results {
 		if result.err != nil {
+			if errors.Is(result.err, errs.ErrNotFound) {
+				continue // Ownership may change between search and detail reads.
+			}
 			reason := "trace_read_failed"
 			if errors.Is(result.err, tracequery.ErrResponseTooLarge) {
 				reason = "trace_too_large"

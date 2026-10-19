@@ -2,7 +2,7 @@ package tunnel
 
 // bash is the generic shell-execution wire — see
 // internal/edgeagent/bash/handlers.go for the edge implementation and
-// internal/manager/biz/aiops/tools/bash_basetool.go for the manager-side
+// internal/manager/biz/aiops/tools/bash.go for the manager-side
 // BaseTool. v1 ships a read-only policy enforced via cmdpolicy
 // (internal/edgeagent/cmdpolicy); future mutating-bash variants would
 // reuse this same wire under a different policy preset.

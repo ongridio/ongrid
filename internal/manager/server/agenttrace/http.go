@@ -32,8 +32,8 @@ func NewHandler(svc *biz.Service, log *slog.Logger) *Handler {
 	return &Handler{svc: svc, log: log, slots: make(chan struct{}, 4)}
 }
 
-// Register requires the existing authentication middleware. All logged-in
-// users share the deployment's telemetry scope, as on the Traces page.
+// Register requires the existing authentication middleware and a service wired
+// through biz.ScopedQuerier, which enforces built-in chat ownership.
 func (h *Handler) Register(r chi.Router) {
 	r.Get("/v1/agent-observability/runs", h.list)
 	r.Get("/v1/agent-observability/sessions", h.list)

@@ -1,4 +1,4 @@
-// code_source_basetool.go — HLD-012 Phase 1. Three read-only tools that let
+// code_source.go — HLD-012 Phase 1. Three read-only tools that let
 // the Agent read the SOURCE CODE of registered git repos (the on-disk clone
 // Repos-sync already keeps), so an alert/log's file:line / function / error
 // string can be correlated to the actual code. Thin wrappers: all the path

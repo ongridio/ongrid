@@ -142,13 +142,10 @@ func TestNormalizeQueryK8sLogsArgsBounds(t *testing.T) {
 	}
 }
 
-func TestQueryK8sLogsRegisteredInClosureAndBaseToolPaths(t *testing.T) {
+func TestQueryK8sLogsRegisteredInBaseToolCatalog(t *testing.T) {
 	reg := NewRegistry(&fakeCaller{}, nil, nil, nil, nil, nil, nil, slog.Default())
 	reg.SetK8sSnapshotReader(newFakeK8sSnapshotReader())
 
-	if !containsName(schemaNames(reg.Schemas()), ToolNameQueryK8sLogs) {
-		t.Fatalf("closure registry missing %q", ToolNameQueryK8sLogs)
-	}
 	names := toolInfoNames(t, reg.BuildBaseTools().AllTools())
 	if !containsName(names, ToolNameQueryK8sLogs) {
 		t.Fatalf("base tool registry missing %q: %v", ToolNameQueryK8sLogs, names)

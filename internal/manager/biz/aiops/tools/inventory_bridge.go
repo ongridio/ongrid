@@ -1,4 +1,4 @@
-// inventory_bridge.go is the inverse of skill_bridge.go.
+// inventory_bridge.go is the inverse of skill.go.
 //
 // skill_bridge:    skill registry  → aiops Tool registry  (so the LLM
 //

@@ -4,13 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	alertbiz "github.com/ongridio/ongrid/internal/manager/biz/alert"
+	devicebiz "github.com/ongridio/ongrid/internal/manager/biz/device"
+	edgebiz "github.com/ongridio/ongrid/internal/manager/biz/edge"
 	alertmodel "github.com/ongridio/ongrid/internal/manager/model/alert"
 	devicemodel "github.com/ongridio/ongrid/internal/manager/model/device"
 	"github.com/ongridio/ongrid/internal/pkg/logquery"
@@ -26,34 +30,9 @@ const ToolNameCorrelateIncident = "correlate_incident"
 // to the LLM. Phrased so the model picks this whenever it has an
 // incident_id and wants to diagnose without chaining ten round-trips.
 const CorrelateIncidentDescription = "Pull all signals around an incident: " +
-	"the metric series that fired the rule, error logs from the same edge in the same time window, " +
-	"slow/error traces, and recent edge state changes. " +
+	"the metric series that fired the rule, error logs from the same host in the same time window, " +
+	"slow/error traces, and recent host state changes. " +
 	"Returns one bundled JSON the LLM can reason over without further tool calls."
-
-// CorrelateIncidentSchema is the JSON Schema of the tool's argument object.
-var CorrelateIncidentSchema = json.RawMessage(`{
-  "type": "object",
-  "properties": {
-    "incident_id": {
-      "type": "integer",
-      "minimum": 1,
-      "description": "Primary key of the incident in alert_incidents."
-    },
-    "window_minutes": {
-      "type": "integer",
-      "minimum": 1,
-      "maximum": 240,
-      "description": "Total window centered on incident.first_fired_at (default 30, max 240)."
-    }
-  },
-  "required": ["incident_id"]
-}`)
-
-// CorrelateIncidentArgs is the typed form of CorrelateIncidentSchema.
-type CorrelateIncidentArgs struct {
-	IncidentID    uint64 `json:"incident_id"`
-	WindowMinutes int    `json:"window_minutes,omitempty"`
-}
 
 // correlateIncidentTimeout caps the overall tool run. Each sub-call gets
 // a smaller per-step timeout below; this is the umbrella cap so the
@@ -63,7 +42,7 @@ const correlateIncidentTimeout = 60 * time.Second
 // correlateMaxResponseBytes caps the marshalled bundle so a misbehaving
 // upstream can't blow the LLM context. The cap is enforced by trimming
 // the noisiest panels (logs, then traces) before re-marshalling.
-const correlateMaxResponseBytes = 100 * 1024 // 100 KB
+const correlateMaxResponseBytes = 100 * 1024
 
 // AlertUsecase is the narrow surface this and the other alert-flavoured
 // tools (query_incidents / query_alert_rules / get_incident_detail /
@@ -90,7 +69,7 @@ type correlateIncidentBundle struct {
 	MetricPanel []metricSeries    `json:"metric_panel,omitempty"`
 	LogPanel    []logEntry        `json:"log_panel,omitempty"`
 	TracePanel  []traceEntry      `json:"trace_panel,omitempty"`
-	Edge        *hostSnapshot     `json:"host,omitempty"`
+	Host        *hostSnapshot     `json:"host,omitempty"`
 	Skipped     map[string]string `json:"skipped,omitempty"`
 	Truncated   map[string]int    `json:"truncated,omitempty"`
 }
@@ -154,150 +133,6 @@ type currentLoad struct {
 	Up     *float64 `json:"up,omitempty"`
 }
 
-// executeCorrelateIncident assembles the bundle.
-func (r *Registry) executeCorrelateIncident(ctx context.Context, args json.RawMessage) (ExecuteResult, error) {
-	if r.alertUC == nil {
-		return ExecuteResult{}, fmt.Errorf("correlate_incident: alert usecase not configured")
-	}
-	var in CorrelateIncidentArgs
-	if err := json.Unmarshal(args, &in); err != nil {
-		return ExecuteResult{}, fmt.Errorf("correlate_incident: bad args: %w", err)
-	}
-	if in.IncidentID == 0 {
-		return ExecuteResult{}, fmt.Errorf("correlate_incident: incident_id required")
-	}
-	window := in.WindowMinutes
-	if window <= 0 {
-		window = 30
-	}
-	if window > 240 {
-		window = 240
-	}
-
-	callCtx, cancel := context.WithTimeout(ctx, correlateIncidentTimeout)
-	defer cancel()
-
-	inc, err := r.alertUC.GetIncident(callCtx, in.IncidentID)
-	if err != nil {
-		return ExecuteResult{}, fmt.Errorf("correlate_incident: get incident: %w", err)
-	}
-	if inc == nil {
-		return ExecuteResult{}, fmt.Errorf("correlate_incident: incident %d not found", in.IncidentID)
-	}
-
-	half := time.Duration(window) * time.Minute / 2
-	wStart := inc.FirstFiredAt.Add(-half)
-	wEnd := inc.FirstFiredAt.Add(half)
-
-	labels, _ := inc.Labels()
-	annotations, _ := inc.Annotations()
-
-	bundle := &correlateIncidentBundle{
-		Incident: incidentSummary{
-			ID:          inc.ID,
-			Title:       inc.Title,
-			RuleKey:     inc.Rule,
-			RuleName:    inc.RuleName,
-			Severity:    inc.Severity,
-			Status:      inc.Status,
-			ScopeType:   inc.ScopeType,
-			DeviceID:    inc.DeviceID,
-			FiredAt:     inc.FirstFiredAt,
-			LastFiredAt: inc.LastFiredAt,
-			EventCount:  inc.EventCount,
-			Value:       inc.Value,
-			Threshold:   inc.Threshold,
-			Labels:      labels,
-			Annotations: annotations,
-		},
-		Window:    windowRange{Start: wStart, End: wEnd},
-		Skipped:   map[string]string{},
-		Truncated: map[string]int{},
-	}
-
-	var et *uint64
-	if inc.DeviceID != nil {
-		id := *inc.DeviceID
-		et = &id
-	}
-
-	// Metric panel — only when we have a Prom client AND we can synthesize
-	// a meaningful expression. metric_threshold rules embed conditions
-	// keyed by the closed-set metric names (cpu_pct / mem_pct / …); we
-	// translate via the same vocabulary the host evaluator uses (see
-	// alert/evaluators_phaseA.metricExprFor — duplicated here on purpose
-	// to avoid importing a private function and to keep tools/ free of
-	// alert evaluator internals).
-	if r.promQuery != nil {
-		if expr, ok := promExprForIncident(inc); ok {
-			series, err := r.queryMetricPanel(callCtx, expr, inc.DeviceID, wStart, wEnd)
-			if err != nil {
-				bundle.Skipped["metric_panel"] = "prom query failed: " + err.Error()
-			} else {
-				bundle.MetricPanel = series
-			}
-		} else {
-			bundle.Skipped["metric_panel"] = "rule kind unsupported or expression unavailable"
-		}
-	} else {
-		bundle.Skipped["metric_panel"] = "prom query client not configured"
-	}
-
-	// The stable query_logql dependency routes through the selected backend.
-	if r.logQuery != nil {
-		if inc.DeviceID != nil {
-			entries, err := r.queryLogPanel(callCtx, *inc.DeviceID, wStart, wEnd)
-			if err != nil {
-				bundle.Skipped["log_panel"] = "log query failed: " + err.Error()
-			} else {
-				bundle.LogPanel = entries
-			}
-		} else {
-			bundle.Skipped["log_panel"] = "incident has no device_id"
-		}
-	} else {
-		bundle.Skipped["log_panel"] = "log query client not configured"
-	}
-
-	// Trace panel — needs Tempo + a service label on the incident. Keep a
-	// device-scoped incident on that device: service names are commonly shared
-	// by workloads across hosts.
-	if r.traceQuery != nil {
-		service := strings.TrimSpace(labels["service"])
-		if service == "" {
-			service = strings.TrimSpace(annotations["service"])
-		}
-		if service != "" {
-			entries, err := r.queryTracePanel(callCtx, service, inc.DeviceID, wStart, wEnd)
-			if err != nil {
-				bundle.Skipped["trace_panel"] = "tempo query failed: " + err.Error()
-			} else {
-				bundle.TracePanel = entries
-			}
-		} else {
-			bundle.Skipped["trace_panel"] = "no service label on incident"
-		}
-	} else {
-		bundle.Skipped["trace_panel"] = "trace query client not configured"
-	}
-
-	// Edge state — best-effort. Skip silently when no device_id.
-	if inc.DeviceID != nil && r.devices != nil {
-		snap := r.queryHostSnapshot(callCtx, *inc.DeviceID, inc.FirstFiredAt)
-		bundle.Edge = snap
-	}
-
-	if len(bundle.Skipped) == 0 {
-		bundle.Skipped = nil
-	}
-
-	out, err := marshalBundleWithCap(bundle)
-	if err != nil {
-		return ExecuteResult{DeviceID: et}, fmt.Errorf("correlate_incident: marshal: %w", err)
-	}
-	return ExecuteResult{ResultJSON: out, DeviceID: et}, nil
-}
-
 // promExprForIncident builds a PromQL range expression from the incident's
 // rule kind. Returns ("", false) when the kind has no metric source we can
 // reason over (log_match, trace_*).
@@ -311,20 +146,20 @@ func (r *Registry) executeCorrelateIncident(ctx context.Context, args json.RawMe
 func promExprForIncident(inc *alertmodel.Incident) (string, bool) {
 	// Heuristic 1 — rule_key happens to match the closed-set name.
 	if expr, ok := metricExprFor(inc.Rule); ok {
-		return wrapPerHost(expr, inc.DeviceID), true
+		return wrapPerDevice(expr, inc.DeviceID), true
 	}
 	// Heuristic 2 — label / annotation hint.
 	if labels, _ := inc.Labels(); labels != nil {
 		if name := strings.TrimSpace(labels["metric"]); name != "" {
 			if expr, ok := metricExprFor(name); ok {
-				return wrapPerHost(expr, inc.DeviceID), true
+				return wrapPerDevice(expr, inc.DeviceID), true
 			}
 		}
 	}
 	if ann, _ := inc.Annotations(); ann != nil {
 		if name := strings.TrimSpace(ann["metric"]); name != "" {
 			if expr, ok := metricExprFor(name); ok {
-				return wrapPerHost(expr, inc.DeviceID), true
+				return wrapPerDevice(expr, inc.DeviceID), true
 			}
 		}
 	}
@@ -359,53 +194,17 @@ func metricExprFor(metric string) (string, bool) {
 	return "", false
 }
 
-// wrapPerHost restricts a closed-set metric expression to a single
+// wrapPerDevice restricts a closed-set metric expression to a single
 // device_id by intersecting it with a label-only selector on that id.
 // Returns expr unchanged when deviceID is nil. The intersection form
 // `(<expr>) and on(device_id) (group by (device_id) ({device_id="<id>"}))`
 // works for both raw selectors and `… by (device_id) …` aggregations, so
 // callers don't need to know the expression's shape.
-func wrapPerHost(expr string, deviceID *uint64) string {
+func wrapPerDevice(expr string, deviceID *uint64) string {
 	if deviceID == nil {
 		return expr
 	}
 	return fmt.Sprintf(`(%s) and on(device_id) (group by (device_id) ({device_id="%d"}))`, expr, *deviceID)
-}
-
-// queryMetricPanel runs a range query and reduces the result to top-3 series
-// by max magnitude. The series are returned with timestamps in unix-seconds
-// and values as strings (Prom's wire format) so the LLM can reason without
-// secondary float parsing.
-func (r *Registry) queryMetricPanel(ctx context.Context, expr string, deviceID *uint64, start, end time.Time) ([]metricSeries, error) {
-	step := stepFor(int(end.Sub(start).Seconds()))
-	res, err := r.promQuery.QueryRange(ctx, expr, start, end, step)
-	if err != nil {
-		return nil, err
-	}
-	if res == nil || len(res.Result) == 0 {
-		return nil, nil
-	}
-	// Wire shape: [{"metric": {...}, "values": [[ts, "v"], ...]}, ...]
-	var raw []struct {
-		Metric map[string]string `json:"metric"`
-		Values [][2]any          `json:"values"`
-	}
-	if err := json.Unmarshal(res.Result, &raw); err != nil {
-		// Could be a vector with `value` instead of `values`; ignore.
-		return nil, fmt.Errorf("decode prom matrix: %w", err)
-	}
-	series := make([]metricSeries, 0, len(raw))
-	for _, s := range raw {
-		series = append(series, metricSeries{Labels: s.Metric, Values: s.Values})
-	}
-	// Top 3 by magnitude (max abs value across the series).
-	sort.SliceStable(series, func(i, j int) bool {
-		return seriesMagnitude(series[i]) > seriesMagnitude(series[j])
-	})
-	if len(series) > 3 {
-		series = series[:3]
-	}
-	return series, nil
 }
 
 func seriesMagnitude(s metricSeries) float64 {
@@ -427,23 +226,6 @@ func seriesMagnitude(s metricSeries) float64 {
 		}
 	}
 	return max
-}
-
-// queryLogPanel asks the selected log backend for the 50 most recent
-// error-ish lines from the device's stream.
-func (r *Registry) queryLogPanel(ctx context.Context, deviceID uint64, start, end time.Time) ([]logEntry, error) {
-	q := fmt.Sprintf(`{device_id="%d"} |~ "(?i)error|panic|oom|fatal|fail"`, deviceID)
-	res, err := r.logQuery.QueryLogQL(ctx, logquery.QueryRangeOptions{
-		Query:     q,
-		Start:     start,
-		End:       end,
-		Limit:     50,
-		Direction: "backward",
-	})
-	if err != nil {
-		return nil, err
-	}
-	return logEntriesFromQueryLogQLResult(res)
 }
 
 func logEntriesFromQueryLogQLResult(result logquery.QueryLogQLResult) ([]logEntry, error) {
@@ -538,137 +320,6 @@ func truncateLine(s string, n int) string {
 	return s[:n] + "…"
 }
 
-// queryTracePanel runs a Tempo search filtered by service.name and, when the
-// incident has one, its stable device ID. This prevents a shared service name
-// from pulling traces from another host into the incident bundle.
-//
-// The status / latency hint helps surface the kind of traces the LLM cares
-// about. Tempo's response is OTLP-shaped; we lift the few fields that
-// matter and drop the rest to keep the bundle tight.
-func (r *Registry) queryTracePanel(ctx context.Context, service string, deviceID *uint64, start, end time.Time) ([]traceEntry, error) {
-	query, tags, err := traceQLSearchFilters(QueryTraceQLArgs{DeviceID: deviceID, Service: service})
-	if err != nil {
-		return nil, fmt.Errorf("build incident trace filter: %w", err)
-	}
-	res, err := r.traceQuery.SearchTraces(ctx, tracequery.SearchOptions{
-		Query: query,
-		Tags:  tags,
-		Limit: 20,
-		Start: start,
-		End:   end,
-	})
-	if err != nil {
-		return nil, err
-	}
-	if res == nil || len(res.Traces) == 0 {
-		return nil, nil
-	}
-	// Tempo's `traces` field is `[{traceID, rootServiceName, rootTraceName, durationMs, startTimeUnixNano, ...}, ...]`.
-	var raw []struct {
-		TraceID           string `json:"traceID"`
-		RootServiceName   string `json:"rootServiceName"`
-		RootTraceName     string `json:"rootTraceName"`
-		DurationMS        int64  `json:"durationMs"`
-		StartTimeUnixNano string `json:"startTimeUnixNano"`
-	}
-	if err := json.Unmarshal(res.Traces, &raw); err != nil {
-		// Some Tempo versions wrap in {"traces":[...]}; we already pulled
-		// the inner array so this is a best-effort decode. Don't error —
-		// just return empty; the caller logs `skipped`.
-		return nil, nil
-	}
-	entries := make([]traceEntry, 0, len(raw))
-	for _, t := range raw {
-		entries = append(entries, traceEntry{
-			TraceID:    t.TraceID,
-			Service:    t.RootServiceName,
-			RootName:   t.RootTraceName,
-			DurationMS: t.DurationMS,
-			StartTime:  t.StartTimeUnixNano,
-		})
-	}
-	if len(entries) > 20 {
-		entries = entries[:20]
-	}
-	return entries, nil
-}
-
-// queryHostSnapshot resolves the edge row + (when Prom is available)
-// current cpu_pct / mem_pct / up + a 24h flap counter. All sub-calls are
-// best-effort: a slow Prom probe MUST NOT block the whole bundle, so each
-// gets its own short deadline.
-func (r *Registry) queryHostSnapshot(ctx context.Context, deviceID uint64, firedAt time.Time) *hostSnapshot {
-	snap := &hostSnapshot{ID: deviceID}
-	edgeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	if r.devices != nil {
-		host, err := r.devices.Get(edgeCtx, deviceID)
-		if err == nil && host != nil {
-			snap.Name = host.Name
-			snap.LastSeenAt = host.LastSeenAt
-			snap.Roles = devicemodel.DecodeRoles(host.Roles)
-			snap.Status = "offline"
-			if host.Online {
-				snap.Status = "online"
-			}
-			snap.CurrentEdgeID = host.CurrentEdgeID
-		}
-	}
-
-	if r.promQuery != nil {
-		load := &currentLoad{}
-		probe := func(expr string, sink **float64) {
-			pCtx, pCancel := context.WithTimeout(ctx, 3*time.Second)
-			defer pCancel()
-			res, err := r.promQuery.Query(pCtx, expr, time.Now())
-			if err != nil || res == nil {
-				return
-			}
-			if v, ok := singleVectorValue(res); ok {
-				vc := v
-				*sink = &vc
-			}
-		}
-		probe(fmt.Sprintf(`(100 * (1 - avg by (device_id) (rate(node_cpu_seconds_total{mode="idle"}[5m])))) and on(device_id) (group by (device_id) ({device_id="%d"}))`, deviceID), &load.CPUPct)
-		probe(fmt.Sprintf(`(100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) and on(device_id) (group by (device_id) ({device_id="%d"}))`, deviceID), &load.MemPct)
-		probe(fmt.Sprintf(`up{device_id="%d"}`, deviceID), &load.Up)
-		if load.CPUPct != nil || load.MemPct != nil || load.Up != nil {
-			snap.CurrentLoad = load
-		}
-	}
-
-	if r.alertUC != nil {
-		// Recent flap counter — pull a wider page filtered to this edge,
-		// then post-filter by first_fired_at >= firedAt - 24h. The biz
-		// IncidentFilter has no time bound today; cap by limit to keep the
-		// query bounded.
-		//
-		// IIFE so the WithTimeout cancel runs at end of this block instead
-		// of accumulating with the outer edgeCtx defer until function exit.
-		func() {
-			listCtx, lcancel := context.WithTimeout(ctx, 5*time.Second)
-			defer lcancel()
-			eid := deviceID
-			recent, err := r.alertUC.ListIncidents(listCtx, alertbiz.IncidentFilter{
-				DeviceID: &eid,
-				Limit:    100,
-			})
-			if err != nil {
-				return
-			}
-			cutoff := firedAt.Add(-24 * time.Hour)
-			n := 0
-			for _, it := range recent {
-				if it.FirstFiredAt.After(cutoff) {
-					n++
-				}
-			}
-			snap.RecentIncidents24h = n
-		}()
-	}
-	return snap
-}
-
 // singleVectorValue extracts the first sample's float value from an
 // `instant vector` result. Returns (0, false) when the result is empty
 // or non-vector.
@@ -743,4 +394,430 @@ func marshalBundleWithCap(bundle *correlateIncidentBundle) ([]byte, error) {
 		}
 	}
 	return json.Marshal(bundle)
+}
+
+// correlate_incident.go — N+15 batch refactor. Outer fan-out
+// is added; the per-incident bundle assembly is unchanged (each inner
+// already runs prom + log + trace probes concurrently inside its own
+// 60s ceiling). schema cap stays at 16 to match the other batch tools,
+// but the WhenToUse strongly suggests 2-4 — each inner is heavy.
+
+// CorrelateIncidentTool is the BaseTool form of correlate_incident.
+type CorrelateIncidentTool struct {
+	alertUC    AlertUsecase
+	promQuery  PromQuerier
+	logQuery   LogQuerier
+	traceQuery TraceQuerier
+	edges      *edgebiz.Usecase
+	devices    *devicebiz.Usecase
+	log        *slog.Logger
+}
+
+// NewCorrelateIncidentTool builds the BaseTool variant.
+func NewCorrelateIncidentTool(
+	alertUC AlertUsecase,
+	promQuery PromQuerier,
+	logQuery LogQuerier,
+	traceQuery TraceQuerier,
+	edges *edgebiz.Usecase,
+	devices *devicebiz.Usecase,
+	log *slog.Logger,
+) *CorrelateIncidentTool {
+	if log == nil {
+		log = slog.Default()
+	}
+	return &CorrelateIncidentTool{
+		alertUC:    alertUC,
+		promQuery:  promQuery,
+		logQuery:   logQuery,
+		traceQuery: traceQuery,
+		edges:      edges,
+		devices:    devices,
+		log:        log,
+	}
+}
+
+// CorrelateIncidentBatchArgs is the typed form of the batch schema.
+type CorrelateIncidentBatchArgs struct {
+	IncidentIDs   []uint64 `json:"incident_ids"`
+	WindowMinutes int      `json:"window_minutes,omitempty"`
+}
+
+// CorrelateIncidentResultEntry is one slot in the batch envelope. On
+// success Bundle is populated; on failure Error is populated.
+type CorrelateIncidentResultEntry struct {
+	IncidentID uint64                   `json:"incident_id"`
+	Bundle     *correlateIncidentBundle `json:"bundle,omitempty"`
+	Error      string                   `json:"error,omitempty"`
+}
+
+// CorrelateIncidentBatchResponse is the wire envelope.
+type CorrelateIncidentBatchResponse struct {
+	SuccessCount int                            `json:"success_count"`
+	ErrorCount   int                            `json:"error_count"`
+	Results      []CorrelateIncidentResultEntry `json:"results"`
+}
+
+// CorrelateIncidentBatchSchema is the JSON schema for the batched call.
+// Cap stays 16 to match the other batch tools but WhenToUse strongly
+// nudges 2-4 — each inner is already heavy (3 upstream probes).
+var CorrelateIncidentBatchSchema = json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "incident_ids": {
+      "type": "array",
+      "items": {"type": "integer"},
+      "minItems": 1,
+      "maxItems": 16,
+      "description": "告警 id 列表，一次最多 16 个。**典型 2-4 个**——每个 incident 内部已经 3 路并发，给 16 个会成本爆炸。"
+    },
+    "window_minutes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 240,
+      "description": "对每个 incident 的窗口（围绕 first_fired_at），默认 30 分钟，最大 240。共享给所有 id。"
+    }
+  },
+  "required": ["incident_ids"]
+}`)
+
+// correlateIncidentWhenToUse — batch-first routing hint (N+15).
+const correlateIncidentWhenToUse = "对一组 incident_id 各跑完整 metric+log+trace+edge 关联诊断。" +
+	"**典型 2-4 个一次**（每个内部已经 3 路并发）。**别一次给 16 个**——成本爆炸。" +
+	"NOT for: 单纯查 incident 字段（用 get_incident_detail）/ 没 incident_id 的自由查（用 query_promql / query_logql）/ " +
+	"列 incidents（用 query_incidents）。"
+
+// Info returns metadata. Class=read.
+func (t *CorrelateIncidentTool) Info(_ context.Context) (*basetool.ToolInfo, error) {
+	return &basetool.ToolInfo{
+		Name:        ToolNameCorrelateIncident,
+		Description: CorrelateIncidentDescription,
+		WhenToUse:   correlateIncidentWhenToUse,
+		Parameters:  CorrelateIncidentBatchSchema,
+		Class:       "read",
+	}, nil
+}
+
+// singleCorrelate assembles one incident bundle; failures populate ResultEntry.Error.
+func (t *CorrelateIncidentTool) singleCorrelate(ctx context.Context, incidentID uint64, window int) CorrelateIncidentResultEntry {
+	entry := CorrelateIncidentResultEntry{IncidentID: incidentID}
+	if incidentID == 0 {
+		entry.Error = "incident_id must be > 0"
+		return entry
+	}
+
+	callCtx, cancel := context.WithTimeout(ctx, correlateIncidentTimeout)
+	defer cancel()
+
+	inc, err := t.alertUC.GetIncident(callCtx, incidentID)
+	if err != nil {
+		entry.Error = fmt.Sprintf("get incident: %v", err)
+		return entry
+	}
+	if inc == nil {
+		entry.Error = fmt.Sprintf("incident %d not found", incidentID)
+		return entry
+	}
+
+	half := time.Duration(window) * time.Minute / 2
+	wStart := inc.FirstFiredAt.Add(-half)
+	wEnd := inc.FirstFiredAt.Add(half)
+
+	labels, _ := inc.Labels()
+	annotations, _ := inc.Annotations()
+
+	bundle := &correlateIncidentBundle{
+		Incident: incidentSummary{
+			ID:          inc.ID,
+			Title:       inc.Title,
+			RuleKey:     inc.Rule,
+			RuleName:    inc.RuleName,
+			Severity:    inc.Severity,
+			Status:      inc.Status,
+			ScopeType:   inc.ScopeType,
+			DeviceID:    inc.DeviceID,
+			FiredAt:     inc.FirstFiredAt,
+			LastFiredAt: inc.LastFiredAt,
+			EventCount:  inc.EventCount,
+			Value:       inc.Value,
+			Threshold:   inc.Threshold,
+			Labels:      labels,
+			Annotations: annotations,
+		},
+		Window:    windowRange{Start: wStart, End: wEnd},
+		Skipped:   map[string]string{},
+		Truncated: map[string]int{},
+	}
+
+	if t.promQuery != nil {
+		if expr, ok := promExprForIncident(inc); ok {
+			series, err := t.queryMetricPanel(callCtx, expr, wStart, wEnd)
+			if err != nil {
+				bundle.Skipped["metric_panel"] = "prom query failed: " + err.Error()
+			} else {
+				bundle.MetricPanel = series
+			}
+		} else {
+			bundle.Skipped["metric_panel"] = "rule kind unsupported or expression unavailable"
+		}
+	} else {
+		bundle.Skipped["metric_panel"] = "prom query client not configured"
+	}
+
+	if t.logQuery != nil {
+		if inc.DeviceID != nil {
+			entries, err := t.queryLogPanel(callCtx, *inc.DeviceID, wStart, wEnd)
+			if err != nil {
+				bundle.Skipped["log_panel"] = "log query failed: " + err.Error()
+			} else {
+				bundle.LogPanel = entries
+			}
+		} else {
+			bundle.Skipped["log_panel"] = "incident has no device_id"
+		}
+	} else {
+		bundle.Skipped["log_panel"] = "log query client not configured"
+	}
+
+	if t.traceQuery != nil {
+		service := strings.TrimSpace(labels["service"])
+		if service == "" {
+			service = strings.TrimSpace(annotations["service"])
+		}
+		if service != "" {
+			entries, err := t.queryTracePanel(callCtx, service, inc.DeviceID, wStart, wEnd)
+			if err != nil {
+				bundle.Skipped["trace_panel"] = "tempo query failed: " + err.Error()
+			} else {
+				bundle.TracePanel = entries
+			}
+		} else {
+			bundle.Skipped["trace_panel"] = "no service label on incident"
+		}
+	} else {
+		bundle.Skipped["trace_panel"] = "trace query client not configured"
+	}
+
+	if inc.DeviceID != nil && t.devices != nil {
+		snap := t.queryHostSnapshot(callCtx, *inc.DeviceID, inc.FirstFiredAt)
+		bundle.Host = snap
+		if snap == nil {
+			bundle.Skipped["host"] = "host could not be resolved"
+		}
+	} else if inc.DeviceID != nil {
+		bundle.Skipped["host"] = "host service not configured"
+	}
+
+	if len(bundle.Skipped) == 0 {
+		bundle.Skipped = nil
+	}
+	if len(bundle.Truncated) == 0 {
+		bundle.Truncated = nil
+	}
+
+	entry.Bundle = bundle
+	return entry
+}
+
+// InvokableRun parses, validates, fans out, marshals envelope.
+func (t *CorrelateIncidentTool) InvokableRun(ctx context.Context, argsJSON string, _ ...basetool.InvokeOption) (string, error) {
+	if t.alertUC == nil {
+		return "", fmt.Errorf("correlate_incident: alert usecase not configured")
+	}
+	var in CorrelateIncidentBatchArgs
+	if err := json.Unmarshal([]byte(argsJSON), &in); err != nil {
+		return "", fmt.Errorf("correlate_incident: bad args: %w", err)
+	}
+	if err := validateBatchIDs("incident_ids", in.IncidentIDs); err != nil {
+		return "", fmt.Errorf("correlate_incident: %w", err)
+	}
+	window := in.WindowMinutes
+	if window <= 0 {
+		window = 30
+	}
+	if window > 240 {
+		window = 240
+	}
+
+	results := runBatch(ctx, in.IncidentIDs, func(ctx context.Context, id uint64) CorrelateIncidentResultEntry {
+		return t.singleCorrelate(ctx, id, window)
+	})
+	env := CorrelateIncidentBatchResponse{Results: results}
+	for _, r := range results {
+		if r.Error != "" {
+			env.ErrorCount++
+		} else {
+			env.SuccessCount++
+		}
+	}
+	out, err := json.Marshal(env)
+	if err != nil {
+		return "", fmt.Errorf("correlate_incident: marshal: %w", err)
+	}
+	return string(out), nil
+}
+
+// queryMetricPanel returns the top three metric series by magnitude.
+func (t *CorrelateIncidentTool) queryMetricPanel(ctx context.Context, expr string, start, end time.Time) ([]metricSeries, error) {
+	step := stepFor(int(end.Sub(start).Seconds()))
+	res, err := t.promQuery.QueryRange(ctx, expr, start, end, step)
+	if err != nil {
+		return nil, err
+	}
+	if res == nil || len(res.Result) == 0 {
+		return nil, nil
+	}
+	var raw []struct {
+		Metric map[string]string `json:"metric"`
+		Values [][2]any          `json:"values"`
+	}
+	if err := json.Unmarshal(res.Result, &raw); err != nil {
+		return nil, fmt.Errorf("decode prom matrix: %w", err)
+	}
+	series := make([]metricSeries, 0, len(raw))
+	for _, s := range raw {
+		series = append(series, metricSeries{Labels: s.Metric, Values: s.Values})
+	}
+	sort.SliceStable(series, func(i, j int) bool {
+		return seriesMagnitude(series[i]) > seriesMagnitude(series[j])
+	})
+	if len(series) > 3 {
+		series = series[:3]
+	}
+	return series, nil
+}
+
+// queryLogPanel returns recent error logs for the device.
+func (t *CorrelateIncidentTool) queryLogPanel(ctx context.Context, edgeID uint64, start, end time.Time) ([]logEntry, error) {
+	q := fmt.Sprintf(`{device_id="%d"} |~ "(?i)error|panic|oom|fatal|fail"`, edgeID)
+	res, err := t.logQuery.QueryLogQL(ctx, logquery.QueryRangeOptions{
+		Query:     q,
+		Start:     start,
+		End:       end,
+		Limit:     50,
+		Direction: "backward",
+	})
+	if err != nil {
+		return nil, err
+	}
+	return logEntriesFromQueryLogQLResult(res)
+}
+
+// queryTracePanel scopes shared service names to the incident device.
+func (t *CorrelateIncidentTool) queryTracePanel(ctx context.Context, service string, deviceID *uint64, start, end time.Time) ([]traceEntry, error) {
+	query, tags, err := traceQLSearchFilters(QueryTraceQLArgs{DeviceID: deviceID, Service: service})
+	if err != nil {
+		return nil, fmt.Errorf("build incident trace filter: %w", err)
+	}
+	res, err := t.traceQuery.SearchTraces(ctx, tracequery.SearchOptions{
+		Query: query,
+		Tags:  tags,
+		Limit: 20,
+		Start: start,
+		End:   end,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if res == nil || len(res.Traces) == 0 {
+		return nil, nil
+	}
+	var raw []struct {
+		TraceID           string `json:"traceID"`
+		RootServiceName   string `json:"rootServiceName"`
+		RootTraceName     string `json:"rootTraceName"`
+		DurationMS        int64  `json:"durationMs"`
+		StartTimeUnixNano string `json:"startTimeUnixNano"`
+	}
+	if err := json.Unmarshal(res.Traces, &raw); err != nil {
+		return nil, nil
+	}
+	entries := make([]traceEntry, 0, len(raw))
+	for _, x := range raw {
+		entries = append(entries, traceEntry{
+			TraceID:    x.TraceID,
+			Service:    x.RootServiceName,
+			RootName:   x.RootTraceName,
+			DurationMS: x.DurationMS,
+			StartTime:  x.StartTimeUnixNano,
+		})
+	}
+	if len(entries) > 20 {
+		entries = entries[:20]
+	}
+	return entries, nil
+}
+
+// queryHostSnapshot reads Host identity and observations independently of Edge installation.
+func (t *CorrelateIncidentTool) queryHostSnapshot(ctx context.Context, deviceID uint64, firedAt time.Time) *hostSnapshot {
+	snap := &hostSnapshot{ID: deviceID}
+	hostCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if t.devices == nil {
+		return nil
+	}
+	host, err := t.devices.Get(hostCtx, deviceID)
+	if err != nil || host == nil {
+		return nil
+	}
+	snap.Name = host.Name
+	snap.LastSeenAt = host.LastSeenAt
+	snap.Roles = devicemodel.DecodeRoles(host.Roles)
+	snap.Status = "offline"
+	if host.Online {
+		snap.Status = "online"
+	}
+	snap.CurrentEdgeID = host.CurrentEdgeID
+
+	if t.promQuery != nil {
+		load := &currentLoad{}
+		probe := func(expr string, sink **float64) {
+			pCtx, pCancel := context.WithTimeout(ctx, 3*time.Second)
+			defer pCancel()
+			res, err := t.promQuery.Query(pCtx, expr, time.Now())
+			if err != nil || res == nil {
+				return
+			}
+			if v, ok := singleVectorValue(res); ok {
+				vc := v
+				*sink = &vc
+			}
+		}
+		for _, metric := range []struct {
+			name string
+			sink **float64
+		}{{"cpu_pct", &load.CPUPct}, {"mem_pct", &load.MemPct}} {
+			expr, _ := metricExprFor(metric.name)
+			probe(wrapPerDevice(expr, &deviceID), metric.sink)
+		}
+		probe(fmt.Sprintf(`up{device_id="%d"}`, deviceID), &load.Up)
+		if load.CPUPct != nil || load.MemPct != nil || load.Up != nil {
+			snap.CurrentLoad = load
+		}
+	}
+
+	if t.alertUC != nil {
+		// Recent flap counter — pull a wider page filtered to this device,
+		// then post-filter by first_fired_at >= firedAt - 24h.
+		func() {
+			listCtx, lcancel := context.WithTimeout(ctx, 5*time.Second)
+			defer lcancel()
+			recent, err := t.alertUC.ListIncidents(listCtx, alertbiz.IncidentFilter{
+				DeviceID: &deviceID,
+				Limit:    100,
+			})
+			if err != nil {
+				return
+			}
+			cutoff := firedAt.Add(-24 * time.Hour)
+			n := 0
+			for _, it := range recent {
+				if it.FirstFiredAt.After(cutoff) {
+					n++
+				}
+			}
+			snap.RecentIncidents24h = n
+		}()
+	}
+	return snap
 }

@@ -13,7 +13,7 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
 
-// host_files_basetool.go implements the three edge-scope filesystem
+// host_files.go implements the three edge-scope filesystem
 // inspection BaseTools. Each tool unmarshals the LLM
 // argsJSON, resolves device_id → host edge_id via the edge_devices
 // junction (devicebiz.EdgeDeviceRepo + EdgeDeviceRelationHost), forwards
@@ -30,9 +30,7 @@ import (
 // Why a single file for three tools: they share identical wiring (same
 // device→edge resolver, same tunnel.Caller seam, same error envelope) so
 // putting them side-by-side makes the symmetry visible. The edge-side
-// handlers in internal/edgeagent/host_files/ mirror this layout. The
-// closure-style legacy registry path (registry.go::Tool) is NOT used —
-// these tools are BaseTool-native from day one (改进点 #1).
+// handlers in internal/edgeagent/host_files/ mirror this layout.
 
 // Allow all scan waves, metadata collection and response delivery to finish.
 const hostFilesCallTimeout = tunnel.HostFilesCallTimeout

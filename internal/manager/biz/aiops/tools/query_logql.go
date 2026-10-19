@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	"github.com/ongridio/ongrid/internal/pkg/logquery"
 )
 
@@ -154,16 +155,6 @@ func logQLStreamSelectorEnd(query string) (int, bool) {
 // query_promql for symmetry across signal types.
 const queryLogqlCallTimeout = 60 * time.Second
 
-// executeQueryLogQL runs the query against the selected backend and hands its
-// compact backend-specific result shape back to the LLM via ResultJSON.
-func (r *Registry) executeQueryLogQL(ctx context.Context, args json.RawMessage) (ExecuteResult, error) {
-	out, err := runQueryLogQL(ctx, r.logQuery, args)
-	if err != nil {
-		return ExecuteResult{}, err
-	}
-	return ExecuteResult{ResultJSON: out}, nil
-}
-
 func runQueryLogQL(ctx context.Context, querier LogQuerier, args []byte) ([]byte, error) {
 	if querier == nil {
 		return nil, fmt.Errorf("query_logql: log query client not configured")
@@ -241,4 +232,43 @@ func runQueryLogQL(ctx context.Context, querier LogQuerier, args []byte) ([]byte
 // selected-backend logs service. Declared here so tests can inject a fake.
 type LogQuerier interface {
 	QueryLogQL(ctx context.Context, opts logquery.QueryRangeOptions) (logquery.QueryLogQLResult, error)
+}
+
+// QueryLogQLTool queries the configured log backend.
+type QueryLogQLTool struct {
+	logQuery LogQuerier
+}
+
+// NewQueryLogQLTool builds the BaseTool variant.
+func NewQueryLogQLTool(lq LogQuerier) *QueryLogQLTool {
+	return &QueryLogQLTool{logQuery: lq}
+}
+
+// queryLogQLWhenToUse — the canonical reverse-guard for log search.
+// explicit "do NOT use for ..." steers the model away from
+// the metric / trace tools when the question is really about log content.
+const queryLogQLWhenToUse = "When the user asks about log CONTENT — grep error / panic / fatal, see the line text " +
+	"that explains why a service failed, or inspect backend-selected log streams. Use stream selectors and line filters for portable Loki/Elasticsearch queries; metric LogQL is Loki-only. " +
+	"NOT for filesystem state, file names or file sizes (use a host_files skill). " +
+	"NOT for metric trends like cpu/mem (use query_promql). " +
+	"NOT for traces / span timelines (use query_traceql)."
+
+// Info returns metadata. Class=read.
+func (t *QueryLogQLTool) Info(_ context.Context) (*basetool.ToolInfo, error) {
+	return &basetool.ToolInfo{
+		Name:        ToolNameQueryLogQL,
+		Description: QueryLogQLDescription,
+		WhenToUse:   queryLogQLWhenToUse,
+		Parameters:  QueryLogQLSchema,
+		Class:       "read",
+	}, nil
+}
+
+// InvokableRun runs the LogQL range query.
+func (t *QueryLogQLTool) InvokableRun(ctx context.Context, argsJSON string, _ ...basetool.InvokeOption) (string, error) {
+	out, err := runQueryLogQL(ctx, t.logQuery, []byte(argsJSON))
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
 }

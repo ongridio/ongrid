@@ -25,7 +25,6 @@ import (
 	managersvcalert "github.com/ongridio/ongrid/internal/manager/service/alert"
 	"github.com/ongridio/ongrid/internal/pkg/config"
 	"github.com/ongridio/ongrid/internal/pkg/notify"
-	pkgtracequery "github.com/ongridio/ongrid/internal/pkg/tracequery"
 )
 
 type aiopsModule struct {
@@ -87,8 +86,8 @@ func bootstrapAIOps(cfg *config.Config, log *slog.Logger, notifyRouter *notify.R
 	// shape. TraceQL remains conditionally available by URL.
 	var logQuerier aiopstools.LogQuerier = telemetry.logsBackendSvc
 	var traceQuerier aiopstools.TraceQuerier
-	if cfg.Traces.URL != "" {
-		traceQuerier = pkgtracequery.New(cfg.Traces.URL, log.With(slog.String("comp", "aiops-tracequery")))
+	if telemetry.traceQuery != nil {
+		traceQuerier = telemetry.traceQuery
 	}
 	toolsReg := aiopstools.NewRegistry(tunnel.fbClient, devices.edgeUC, devices.deviceUC, promQuerier, logQuerier, traceQuerier, alerts.alertUC, log)
 	packetCaptureUC := managerbizpacketcapture.New(

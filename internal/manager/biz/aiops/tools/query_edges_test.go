@@ -36,24 +36,11 @@ func TestQueryEdgesTool_Info(t *testing.T) {
 	}
 }
 
-func TestQueryEdgesTool_LegacyEdgeFallback(t *testing.T) {
-	// devices nil → falls back to edges path.
-	e1 := &edgemodel.Edge{ID: 1, Name: "alpha", Status: "online"}
-	e2 := &edgemodel.Edge{ID: 2, Name: "beta", Status: "offline"}
-	uc := edgebiz.NewUsecase(newFakeEdgeRepo(e1, e2), nil, nil, slog.Default())
-	tool := NewQueryEdgesTool(nil, uc, nil)
-
-	out, err := tool.InvokableRun(context.Background(), `{}`)
-	if err != nil {
-		t.Fatalf("InvokableRun: %v", err)
-	}
-	var got map[string]any
-	if err := json.Unmarshal([]byte(out), &got); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	devs, _ := got["devices"].([]any)
-	if len(devs) == 0 {
-		t.Errorf("expected devices in response")
+func TestQueryEdgesTool_RejectsEdgeOnlyInventory(t *testing.T) {
+	uc := edgebiz.NewUsecase(newFakeEdgeRepo(&edgemodel.Edge{ID: 42, Name: "unrelated-edge"}), nil, nil, nil)
+	out, err := NewQueryEdgesTool(nil, uc, nil).InvokableRun(context.Background(), `{}`)
+	if err == nil || out != "" {
+		t.Fatalf("must not expose Edge IDs as device IDs: %s %v", out, err)
 	}
 }
 

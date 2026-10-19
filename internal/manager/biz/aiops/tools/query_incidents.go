@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	alertbiz "github.com/ongridio/ongrid/internal/manager/biz/alert"
 	alertmodel "github.com/ongridio/ongrid/internal/manager/model/alert"
 )
@@ -17,7 +19,7 @@ const ToolNameQueryIncidents = "query_incidents"
 // the question is "how many / which incidents matched X".
 const QueryIncidentsDescription = "List ongrid alert incidents filtered by severity, status, edge, rule_key and a since-window (in minutes). " +
 	"Use this for questions like '过去 24h 有几条 critical incident' or 'show open incidents on edge X'. " +
-	"Returns array of {id, title, severity, status, rule, device_id, first_fired_at, last_fired_at}."
+	"Returns array of {id, title, severity, status, rule, edge_id, first_fired_at, last_fired_at}."
 
 // QueryIncidentsSchema is the JSON Schema of the tool's argument object.
 var QueryIncidentsSchema = json.RawMessage(`{
@@ -38,9 +40,9 @@ var QueryIncidentsSchema = json.RawMessage(`{
       "minimum": 1,
       "description": "Only return incidents whose last_fired_at is within the last N minutes. Default 1440 (24h)."
     },
-    "device_id": {
+    "edge_id": {
       "type": "integer",
-      "description": "Filter to incidents on a specific host. Optional."
+      "description": "Filter to incidents on a specific edge. Optional."
     },
     "rule_key": {
       "type": "string",
@@ -87,13 +89,47 @@ type IncidentRow struct {
 
 const queryIncidentsCallTimeout = 60 * time.Second
 
-func (r *Registry) executeQueryIncidents(ctx context.Context, args json.RawMessage) (ExecuteResult, error) {
-	if r.alertUC == nil {
-		return ExecuteResult{}, fmt.Errorf("query_incidents: alert usecase not configured")
+// QueryIncidentsTool lists alert incidents.
+type QueryIncidentsTool struct {
+	alertUC AlertUsecase
+	log     *slog.Logger
+}
+
+// NewQueryIncidentsTool builds the BaseTool variant.
+func NewQueryIncidentsTool(alertUC AlertUsecase, log *slog.Logger) *QueryIncidentsTool {
+	if log == nil {
+		log = slog.Default()
+	}
+	return &QueryIncidentsTool{alertUC: alertUC, log: log}
+}
+
+// queryIncidentsWhenToUse — reverse-guard against using this for the
+// individual incident drilldown.
+const queryIncidentsWhenToUse = "When the user wants to LIST recent alert incidents — '过去 24h 有几条 critical incident', " +
+	"'show open incidents on edge X'. " +
+	"NOT for a specific incident's timeline (use get_incident_detail). " +
+	"NOT for the full diagnostic bundle (use correlate_incident with a specific incident_id). " +
+	"NOT for raw metric/log/trace queries (use query_promql / query_logql / query_traceql)."
+
+// Info returns metadata. Class=read.
+func (t *QueryIncidentsTool) Info(_ context.Context) (*basetool.ToolInfo, error) {
+	return &basetool.ToolInfo{
+		Name:        ToolNameQueryIncidents,
+		Description: QueryIncidentsDescription,
+		WhenToUse:   queryIncidentsWhenToUse,
+		Parameters:  QueryIncidentsSchema,
+		Class:       "read",
+	}, nil
+}
+
+// InvokableRun lists incidents matching the filter.
+func (t *QueryIncidentsTool) InvokableRun(ctx context.Context, argsJSON string, _ ...basetool.InvokeOption) (string, error) {
+	if t.alertUC == nil {
+		return "", fmt.Errorf("query_incidents: alert usecase not configured")
 	}
 	var in QueryIncidentsArgs
-	if err := json.Unmarshal(args, &in); err != nil {
-		return ExecuteResult{}, fmt.Errorf("query_incidents: bad args: %w", err)
+	if err := json.Unmarshal([]byte(argsJSON), &in); err != nil {
+		return "", fmt.Errorf("query_incidents: bad args: %w", err)
 	}
 	if in.Limit <= 0 {
 		in.Limit = 50
@@ -110,7 +146,7 @@ func (r *Registry) executeQueryIncidents(ctx context.Context, args json.RawMessa
 		switch in.Severity {
 		case "info", "warning", "critical":
 		default:
-			return ExecuteResult{}, fmt.Errorf("query_incidents: invalid severity %q", in.Severity)
+			return "", fmt.Errorf("query_incidents: invalid severity %q", in.Severity)
 		}
 	}
 	if in.Status != "" {
@@ -118,7 +154,7 @@ func (r *Registry) executeQueryIncidents(ctx context.Context, args json.RawMessa
 		case alertmodel.IncidentStatusOpen, alertmodel.IncidentStatusAcknowledged,
 			alertmodel.IncidentStatusSilenced, alertmodel.IncidentStatusResolved:
 		default:
-			return ExecuteResult{}, fmt.Errorf("query_incidents: invalid status %q", in.Status)
+			return "", fmt.Errorf("query_incidents: invalid status %q", in.Status)
 		}
 	}
 
@@ -126,13 +162,11 @@ func (r *Registry) executeQueryIncidents(ctx context.Context, args json.RawMessa
 		Status:   in.Status,
 		Severity: in.Severity,
 		RuleKey:  in.RuleKey,
-		// Pull a generous window because IncidentFilter doesn't support
-		// since_minutes natively; we filter in memory.
-		Limit: in.Limit * 4,
+		Limit:    in.Limit * 4,
 	}
 	devID := in.DeviceID
 	if in.EdgeID != 0 {
-		return ExecuteResult{}, fmt.Errorf("query_incidents: use device_id, not edge_id")
+		return "", fmt.Errorf("query_incidents: use device_id, not edge_id")
 	}
 	if devID > 0 {
 		f.DeviceID = &devID
@@ -140,9 +174,9 @@ func (r *Registry) executeQueryIncidents(ctx context.Context, args json.RawMessa
 
 	callCtx, cancel := context.WithTimeout(ctx, queryIncidentsCallTimeout)
 	defer cancel()
-	all, err := r.alertUC.ListIncidents(callCtx, f)
+	all, err := t.alertUC.ListIncidents(callCtx, f)
 	if err != nil {
-		return ExecuteResult{}, fmt.Errorf("query_incidents: list: %w", err)
+		return "", fmt.Errorf("query_incidents: list: %w", err)
 	}
 
 	rows := make([]IncidentRow, 0, len(all))
@@ -175,7 +209,7 @@ func (r *Registry) executeQueryIncidents(ctx context.Context, args json.RawMessa
 		"count":     len(rows),
 	})
 	if err != nil {
-		return ExecuteResult{}, fmt.Errorf("query_incidents: marshal: %w", err)
+		return "", fmt.Errorf("query_incidents: marshal: %w", err)
 	}
-	return ExecuteResult{ResultJSON: out}, nil
+	return string(out), nil
 }

@@ -77,13 +77,10 @@ func TestDescribeK8sResourceToolCallsControllerEdge(t *testing.T) {
 	}
 }
 
-func TestDescribeK8sResourceRegisteredInClosureAndBaseToolPaths(t *testing.T) {
+func TestDescribeK8sResourceRegisteredInBaseToolCatalog(t *testing.T) {
 	reg := NewRegistry(&fakeCaller{}, nil, nil, nil, nil, nil, nil, slog.Default())
 	reg.SetK8sSnapshotReader(newFakeK8sSnapshotReader())
 
-	if !containsName(schemaNames(reg.Schemas()), ToolNameDescribeK8sResource) {
-		t.Fatalf("closure registry missing %q", ToolNameDescribeK8sResource)
-	}
 	names := toolInfoNames(t, reg.BuildBaseTools().AllTools())
 	if !containsName(names, ToolNameDescribeK8sResource) {
 		t.Fatalf("base tool registry missing %q: %v", ToolNameDescribeK8sResource, names)

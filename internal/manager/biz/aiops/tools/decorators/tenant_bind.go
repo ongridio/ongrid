@@ -18,8 +18,7 @@ import (
 // Why we mutate args rather than only setting an InvokeOption: tools
 // authored as plain JSON-Schema-driven structs already declare a
 // tenant_id property (— tools should self-describe);
-// rewriting args keeps the tool impl identical to the closure form and
-// makes the LLM's tool_call.arguments self-contained for replay/audit.
+// rewriting args makes tool_call.arguments self-contained for replay/audit.
 //
 // The tenantctx.Tenant.UserID is also threaded onto the InvokeOption
 // via WithUserID + WithTenant so the audit + ratelimit decorators can

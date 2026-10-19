@@ -30,8 +30,14 @@ context; it cannot supply missing local tool calls, messages or conversation IDs
 
 The new `internal/manager/biz/agenttrace` module uses the existing `tracequery`
 client. The server exposes authenticated GET APIs under
-`/api/v1/agent-observability`. It preserves the current deployment-wide telemetry
-access model: an application or session filter is not a tenant security boundary.
+`/api/v1/agent-observability`. External SDK telemetry retains the deployment-wide
+access model; SDK application/session filters do not identify an Ongrid user.
+Built-in Ongrid chat telemetry is private to its session owner, with the same
+admin read exception as the chat API. A shared querier enforces this boundary for
+Agent, Traces, APM and AI Trace tools before returning summaries or raw content.
+Every referenced built-in session must be authorized; mixed-owner traces are
+withheld as a whole. Unknown, deleted or unresolved built-in sessions fail closed
+for ordinary users. Background callers without a user identity cannot read them.
 
 ## Semantic contract
 
@@ -72,6 +78,17 @@ the tested versions; retained raw data makes future adapter changes possible.
   pages the same response locally; refreshing starts a new query.
 - Return `partial`, reasons and per-trace failures when known limits are reached.
   Sampling remains unknown. Counts and sessions cover retrieved results only.
+- Ownership filtering can return fewer results than the candidate limit. Agent
+  metadata retains its partial flag when the upstream search reaches its bound
+  or a candidate cannot be read, without returning unverified trace IDs.
+  Generic Trace search parameters, response fields and Tempo metrics stay as
+  before; unauthorized built-in Agent summaries are withheld. Ordinary Trace
+  tag dictionaries (including service and operation names) stay deployment-wide.
+  Only built-in conversation/worker IDs, input/output, active skill prompts and
+  Langfuse status/metadata content use authorized traces for suggestions, bounded
+  to 50 recent candidates and 1,000 values of 1,024 bytes each. They are not a
+  complete history. Model names, token counters and other ordinary tags retain
+  the original global dictionary.
 - The existing Tempo HTTP client retains its 16 MiB response limit, now detecting
   overflow explicitly rather than silently truncating JSON. Tempo's configured
   storage limit is separate; larger traces can exist but exceed this query limit.
@@ -104,8 +121,8 @@ collection/redaction at the existing SDK/Collector before production use.
 No database migration is needed. Deploy the Manager and web bundle together
 after review. The bundled Tempo configuration raises the attribute limit to
 16 KiB; built-in content capture remains opt-in as described below. Existing
-`/traces` and `/apm` remain available. The page is named Agent and its navigation
-item is hidden by default; users can enable it in the observability menu settings.
+`/traces` and `/apm` remain available. The Agent page is accessible directly at
+`/agent-observability`, without a sidebar, menu-management or command-palette entry.
 This local acceptance does not deploy either production service.
 
 Defer evaluation, prompt management, automatic injection, all-language SDK
@@ -155,17 +172,20 @@ Eino callback state. Graph errors that produce a successful apology response are
 still marked as trace errors.
 
 Built-in content capture is opt-in with
-`ONGRID_AGENT_TRACE_CAPTURE_CONTENT=true`. It uses the deployment-wide Trace
-access scope, not chat ownership. Enable it only where that telemetry access and
-retention policy is appropriate. It does not change chat permissions. Both query
-APIs return `Cache-Control: no-store`.
+`ONGRID_AGENT_TRACE_CAPTURE_CONTENT=true`. Built-in content follows chat ownership
+on every Manager query path. Administrators retain access to all stored traces.
+Operators must still configure appropriate collection and retention policies.
+Both query APIs return `Cache-Control: no-store`.
 
 With capture enabled, the Agent root records its current question and final
 answer at execution time; the official callback records model and tool snapshots.
 The legacy model/tool path uses the same sanitizer. Querying the observation page
-reads Tempo only. It does not read chat tables, match message timestamps, or
-backfill old traces. Session IDs provide navigation only, and deleting a chat
-does not change its already captured trace.
+reads captured content from Tempo and resolves ownership from chat session rows.
+It does not match message timestamps or backfill old traces. Deleting a chat does
+not erase its captured trace from Tempo, but removes the ownership evidence, so
+ordinary users can no longer query that trace. Administrators retain access until
+the telemetry expires. In-progress built-in traces without their root session
+metadata are also withheld until ownership can be established.
 
 The content policy has explicit, independent bounds:
 

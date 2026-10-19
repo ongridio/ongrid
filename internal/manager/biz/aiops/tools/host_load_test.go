@@ -66,6 +66,9 @@ func TestGetHostLoadTool_BatchHappy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InvokableRun: %v", err)
 	}
+	if fc.lastName != tunnel.MethodGetHostLoad {
+		t.Errorf("caller method = %q, want %q", fc.lastName, tunnel.MethodGetHostLoad)
+	}
 	var env HostLoadBatchResponse
 	if err := json.Unmarshal([]byte(out), &env); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -83,6 +86,8 @@ func TestGetHostLoadTool_BatchHappy(t *testing.T) {
 	for i, r := range env.Results {
 		if r.HostLoad == nil {
 			t.Errorf("entry %d HostLoad nil", i)
+		} else if r.HostLoad.CPUPct != 12.3 || r.HostLoad.MemPct != 45.6 {
+			t.Errorf("entry %d load changed: %+v", i, r.HostLoad)
 		}
 		if r.Error != "" {
 			t.Errorf("entry %d unexpected error: %s", i, r.Error)

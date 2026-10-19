@@ -405,13 +405,11 @@ export function Sidebar() {
           storageKey="observability"
           title={tr('监控告警', 'Observability')}
           defaultOpen={false}
-          initialHiddenKeys={['agent-observability']}
           items={[
             { key: 'monitor', to: '/monitor', icon: ChartLine, label: tr('监控', 'Monitor') },
             { key: 'apm', to: '/apm', icon: Boxes, label: tr('服务', 'Services') },
             { key: 'logs', to: '/logs', icon: FileText, label: tr('日志', 'Logs') },
             { key: 'traces', to: '/traces', icon: Waypoints, label: tr('链路', 'Traces') },
-            { key: 'agent-observability', to: '/agent-observability', icon: Bot, label: tr('Agent', 'Agent') },
             { key: 'alerts', to: '/alerts', icon: Siren, label: tr('告警', 'Alerts'), badge: incidentOpen },
           ]}
         />

@@ -4,15 +4,95 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	edgebiz "github.com/ongridio/ongrid/internal/manager/biz/edge"
 	"github.com/ongridio/ongrid/internal/pkg/tracequery"
 )
+
+func TestQueryTraceQLTool_Info(t *testing.T) {
+	tool := NewQueryTraceQLTool(&fakeTraceQuerier{}, nil)
+	info, err := tool.Info(context.Background())
+	if err != nil {
+		t.Fatalf("Info: %v", err)
+	}
+	if info.Name != ToolNameQueryTraceQL {
+		t.Errorf("Name = %q", info.Name)
+	}
+	if !strings.Contains(strings.ToLower(info.WhenToUse), "not") {
+		t.Errorf("WhenToUse needs reverse guard")
+	}
+}
+
+func TestQueryTraceQLTool_TagMode(t *testing.T) {
+	tq := &fakeTraceQuerier{resp: &tracequery.SearchResult{Traces: json.RawMessage("[]")}}
+	tool := NewQueryTraceQLTool(tq, nil)
+
+	if _, err := tool.InvokableRun(context.Background(),
+		`{"service":"web","operation":"GET /api","max_duration":"5s"}`); err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+	if tq.got.Tags["service.name"] != "web" {
+		t.Errorf("Tags[service.name] = %q", tq.got.Tags["service.name"])
+	}
+	if tq.got.Tags["name"] != "GET /api" {
+		t.Errorf("Tags[name] = %q", tq.got.Tags["name"])
+	}
+	if tq.got.MaxDuration != 5*time.Second {
+		t.Errorf("MaxDuration = %v", tq.got.MaxDuration)
+	}
+	if tq.got.Limit != 50 {
+		t.Errorf("default limit = %d, want 50", tq.got.Limit)
+	}
+}
+
+func TestQueryTraceQLTool_DeviceScope(t *testing.T) {
+	tq := &fakeTraceQuerier{resp: &tracequery.SearchResult{Traces: json.RawMessage("[]")}}
+	tool := NewQueryTraceQLTool(tq, nil)
+
+	if _, err := tool.InvokableRun(context.Background(), `{"device_id":24,"query":"{ resource.service.name = \"web\" }"}`); err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+	if got, want := tq.got.Query, `{ resource.device_id = "24" && resource.service.name = "web" }`; got != want {
+		t.Errorf("Query = %q, want %q", got, want)
+	}
+}
+
+func TestQueryTraceQLTool_RequiresAFilter(t *testing.T) {
+	tool := NewQueryTraceQLTool(&fakeTraceQuerier{}, nil)
+	if _, err := tool.InvokableRun(context.Background(), `{}`); err == nil {
+		t.Errorf("expected error when no filter is given")
+	}
+}
+
+func TestQueryTraceQLTool_BadArgs(t *testing.T) {
+	tool := NewQueryTraceQLTool(&fakeTraceQuerier{resp: &tracequery.SearchResult{}}, nil)
+	if _, err := tool.InvokableRun(context.Background(), `not json`); err == nil {
+		t.Errorf("expected error for non-JSON")
+	}
+	if _, err := tool.InvokableRun(context.Background(),
+		`{"service":"web","min_duration":"not-a-duration"}`); err == nil {
+		t.Errorf("expected error for bad duration")
+	}
+}
+
+func TestQueryTraceQLTool_NilQuerier(t *testing.T) {
+	tool := NewQueryTraceQLTool(nil, nil)
+	_, err := tool.InvokableRun(context.Background(), `{"service":"web"}`)
+	if err == nil {
+		t.Errorf("expected error when traceQuery nil")
+	}
+}
+
+func TestQueryTraceQLTool_DispatchError(t *testing.T) {
+	tool := NewQueryTraceQLTool(&fakeTraceQuerier{err: errors.New("tempo 5xx")}, nil)
+	_, err := tool.InvokableRun(context.Background(), `{"service":"web"}`)
+	if err == nil || !strings.Contains(err.Error(), "tempo 5xx") {
+		t.Errorf("expected wrapped dispatch error, got %v", err)
+	}
+}
 
 // fakeTraceQuerier captures the last SearchTraces call.
 type fakeTraceQuerier struct {
@@ -38,17 +118,12 @@ func TestQueryTraceQL_RoundTrip(t *testing.T) {
 			Traces: json.RawMessage(`[{"traceID":"abc","rootServiceName":"web"}]`),
 		},
 	}
-	uc := edgebiz.NewUsecase(newFakeEdgeRepo(), nil, nil, slog.Default())
-	reg := NewRegistry(&fakeCaller{}, uc, nil, nil, nil, tq, nil, slog.Default())
-
-	if !containsName(schemaNames(reg.Schemas()), ToolNameQueryTraceQL) {
-		t.Errorf("query_traceql not registered: %v", schemaNames(reg.Schemas()))
-	}
+	tool := NewQueryTraceQLTool(tq, nil)
 
 	args := json.RawMessage(`{"query":"{ resource.service.name = \"web\" }","limit":10,"min_duration":"100ms"}`)
-	out, err := reg.Invoke(context.Background(), ToolNameQueryTraceQL, args)
+	out, err := tool.InvokableRun(context.Background(), string(args))
 	if err != nil {
-		t.Fatalf("Invoke: %v", err)
+		t.Fatalf("InvokableRun: %v", err)
 	}
 	if tq.got.Query != `{ resource.service.name = "web" }` {
 		t.Errorf("Query = %q", tq.got.Query)
@@ -65,7 +140,7 @@ func TestQueryTraceQL_RoundTrip(t *testing.T) {
 	}
 
 	var sr tracequery.SearchResult
-	if err := json.Unmarshal(out.ResultJSON, &sr); err != nil {
+	if err := json.Unmarshal([]byte(out), &sr); err != nil {
 		t.Fatalf("decode result: %v", err)
 	}
 	if len(sr.Traces) == 0 {
@@ -73,37 +148,13 @@ func TestQueryTraceQL_RoundTrip(t *testing.T) {
 	}
 }
 
-func TestQueryTraceQL_TagMode(t *testing.T) {
-	tq := &fakeTraceQuerier{resp: &tracequery.SearchResult{Traces: json.RawMessage("[]")}}
-	uc := edgebiz.NewUsecase(newFakeEdgeRepo(), nil, nil, slog.Default())
-	reg := NewRegistry(&fakeCaller{}, uc, nil, nil, nil, tq, nil, slog.Default())
-
-	args := json.RawMessage(`{"service":"web","operation":"GET /api","max_duration":"5s"}`)
-	if _, err := reg.Invoke(context.Background(), ToolNameQueryTraceQL, args); err != nil {
-		t.Fatalf("Invoke: %v", err)
-	}
-	if tq.got.Tags["service.name"] != "web" {
-		t.Errorf("Tags[service.name] = %q", tq.got.Tags["service.name"])
-	}
-	if tq.got.Tags["name"] != "GET /api" {
-		t.Errorf("Tags[name] = %q", tq.got.Tags["name"])
-	}
-	if tq.got.MaxDuration != 5*time.Second {
-		t.Errorf("MaxDuration = %v, want 5s", tq.got.MaxDuration)
-	}
-	if tq.got.Limit != 50 {
-		t.Errorf("default limit = %d, want 50", tq.got.Limit)
-	}
-}
-
 func TestQueryTraceQL_DeviceScope(t *testing.T) {
 	tq := &fakeTraceQuerier{resp: &tracequery.SearchResult{Traces: json.RawMessage("[]")}}
-	uc := edgebiz.NewUsecase(newFakeEdgeRepo(), nil, nil, slog.Default())
-	reg := NewRegistry(&fakeCaller{}, uc, nil, nil, nil, tq, nil, slog.Default())
+	tool := NewQueryTraceQLTool(tq, nil)
 
 	args := json.RawMessage(`{"device_id":24,"service":"web","operation":"GET /api"}`)
-	if _, err := reg.Invoke(context.Background(), ToolNameQueryTraceQL, args); err != nil {
-		t.Fatalf("Invoke: %v", err)
+	if _, err := tool.InvokableRun(context.Background(), string(args)); err != nil {
+		t.Fatalf("InvokableRun: %v", err)
 	}
 	if got, want := tq.got.Query, `{ resource.device_id = "24" && resource.service.name = "web" && name = "GET /api" }`; got != want {
 		t.Errorf("Query = %q, want %q", got, want)
@@ -115,76 +166,10 @@ func TestQueryTraceQL_DeviceScope(t *testing.T) {
 
 func TestQueryTraceQL_DeviceScopeRejectsConflict(t *testing.T) {
 	tq := &fakeTraceQuerier{resp: &tracequery.SearchResult{Traces: json.RawMessage("[]")}}
-	uc := edgebiz.NewUsecase(newFakeEdgeRepo(), nil, nil, slog.Default())
-	reg := NewRegistry(&fakeCaller{}, uc, nil, nil, nil, tq, nil, slog.Default())
+	tool := NewQueryTraceQLTool(tq, nil)
 
-	_, err := reg.Invoke(context.Background(), ToolNameQueryTraceQL,
-		json.RawMessage(`{"device_id":24,"query":"{ resource.device_id = \"7\" }"}`))
+	_, err := tool.InvokableRun(context.Background(), `{"device_id":24,"query":"{ resource.device_id = \"7\" }"}`)
 	if err == nil || !strings.Contains(err.Error(), "conflicts") {
-		t.Fatalf("Invoke error = %v, want device scope conflict", err)
-	}
-}
-
-func TestRegistry_QueryTracePanelScopesToDevice(t *testing.T) {
-	tq := &fakeTraceQuerier{resp: &tracequery.SearchResult{Traces: json.RawMessage("[]")}}
-	reg := &Registry{traceQuery: tq}
-	deviceID := uint64(24)
-
-	if _, err := reg.queryTracePanel(context.Background(), "web", &deviceID, time.Now().Add(-time.Hour), time.Now()); err != nil {
-		t.Fatalf("queryTracePanel: %v", err)
-	}
-	if got, want := tq.got.Query, `{ resource.device_id = "24" && resource.service.name = "web" }`; got != want {
-		t.Errorf("Query = %q, want %q", got, want)
-	}
-	if tq.got.Tags != nil {
-		t.Errorf("Tags = %#v, want nil for device-scoped TraceQL", tq.got.Tags)
-	}
-}
-
-func TestQueryTraceQL_RequiresAFilter(t *testing.T) {
-	tq := &fakeTraceQuerier{}
-	uc := edgebiz.NewUsecase(newFakeEdgeRepo(), nil, nil, slog.Default())
-	reg := NewRegistry(&fakeCaller{}, uc, nil, nil, nil, tq, nil, slog.Default())
-
-	if _, err := reg.Invoke(context.Background(), ToolNameQueryTraceQL, json.RawMessage(`{}`)); err == nil {
-		t.Errorf("expected error when no filter is given")
-	}
-}
-
-func TestQueryTraceQL_BadDuration(t *testing.T) {
-	tq := &fakeTraceQuerier{resp: &tracequery.SearchResult{}}
-	uc := edgebiz.NewUsecase(newFakeEdgeRepo(), nil, nil, slog.Default())
-	reg := NewRegistry(&fakeCaller{}, uc, nil, nil, nil, tq, nil, slog.Default())
-
-	_, err := reg.Invoke(context.Background(), ToolNameQueryTraceQL,
-		json.RawMessage(`{"service":"web","min_duration":"not-a-duration"}`))
-	if err == nil {
-		t.Errorf("expected error for bad min_duration")
-	}
-}
-
-func TestQueryTraceQL_DispatchError(t *testing.T) {
-	tq := &fakeTraceQuerier{err: errors.New("tempo 5xx")}
-	uc := edgebiz.NewUsecase(newFakeEdgeRepo(), nil, nil, slog.Default())
-	reg := NewRegistry(&fakeCaller{}, uc, nil, nil, nil, tq, nil, slog.Default())
-
-	_, err := reg.Invoke(context.Background(), ToolNameQueryTraceQL,
-		json.RawMessage(`{"service":"web"}`))
-	if err == nil {
-		t.Errorf("expected propagated dispatch error")
-	}
-}
-
-func TestQueryTraceQL_NotRegisteredWhenNil(t *testing.T) {
-	uc := edgebiz.NewUsecase(newFakeEdgeRepo(), nil, nil, slog.Default())
-	reg := NewRegistry(&fakeCaller{}, uc, nil, nil, nil, nil, nil, slog.Default())
-
-	if containsName(schemaNames(reg.Schemas()), ToolNameQueryTraceQL) {
-		t.Errorf("query_traceql should NOT be registered when traceQuery is nil")
-	}
-	_, err := reg.Invoke(context.Background(), ToolNameQueryTraceQL,
-		json.RawMessage(`{"service":"web"}`))
-	if err == nil {
-		t.Errorf("expected not-found error when trace disabled")
+		t.Fatalf("InvokableRun error = %v, want device scope conflict", err)
 	}
 }

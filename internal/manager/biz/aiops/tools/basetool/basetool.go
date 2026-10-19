@@ -1,25 +1,5 @@
-// Package basetool defines ongrid's eino-aligned tool surface.
-//
-// (Tool 层) lays out the migration target: each tool becomes
-// an object implementing tool.BaseTool — `Info(ctx) -> ToolInfo` plus
-// `InvokableRun(ctx, argsJSON) -> string` — and the standard decorator
-// chain (tenant_bind / timeout / audit / ratelimit / metric,
-// ASCII diagram and 主参考图 Tool 执行后端区块) wraps each tool
-// uniformly. This package owns the interface + value types so the
-// decorator package and individual tool impls can depend on it without
-// reaching into the closure-style Tool/Registry from registry.go.
-//
-// Why a local interface that mirrors cloudwego/eino:
-//
-//   - PR-1 of owns the cloudwego/eino dep. PR-3 (this PR) MAY
-//     merge first, so we cannot import eino yet.
-//   - Field/method names match eino's tool.BaseTool + InvokableTool so
-//     the later "swap to eino" PR is a one-line type alias change in
-//     this file. Any callsite that consumes basetool.BaseTool keeps
-//     compiling.
-//
-// The closure-style Tool from registry.go stays — both paths coexist
-// for this PR (改进点 #5: 可单测，单文件可测).
+// Package basetool defines the shared tool interface and value types used by
+// AIOps tools, runtime adapters and decorators.
 package basetool
 
 import (
