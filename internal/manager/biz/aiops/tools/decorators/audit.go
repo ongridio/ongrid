@@ -89,8 +89,7 @@ func (a *AuditTool) Info(ctx context.Context) (*basetool.ToolInfo, error) {
 func (a *AuditTool) InvokableRun(ctx context.Context, argsJSON string, opts ...basetool.InvokeOption) (string, error) {
 	resolved := basetool.ResolveOptions(opts)
 
-	// Resolve tool name once (Info must be cheap; the closure-style
-	// tools in registry.go return constant ToolInfo without I/O).
+	// Resolve the tool name once; Info must not perform I/O.
 	name := ""
 	if info, err := a.inner.Info(ctx); err == nil && info != nil {
 		name = info.Name

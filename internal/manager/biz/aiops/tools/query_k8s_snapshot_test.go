@@ -219,13 +219,10 @@ func TestQueryK8sSnapshotPaginatesAllClusters(t *testing.T) {
 	}
 }
 
-func TestQueryK8sSnapshotRegisteredInClosureAndBaseToolPaths(t *testing.T) {
+func TestQueryK8sSnapshotRegisteredInBaseToolCatalog(t *testing.T) {
 	reg := NewRegistry(nil, nil, nil, nil, nil, nil, nil, slog.Default())
 	reg.SetK8sSnapshotReader(newFakeK8sSnapshotReader())
 
-	if !containsName(schemaNames(reg.Schemas()), ToolNameQueryK8sSnapshot) {
-		t.Fatalf("closure registry missing %q", ToolNameQueryK8sSnapshot)
-	}
 	bag := reg.BuildBaseTools()
 	names := toolInfoNames(t, bag.AllTools())
 	if !containsName(names, ToolNameQueryK8sSnapshot) {

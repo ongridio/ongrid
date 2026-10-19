@@ -5,17 +5,41 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 )
+
+// ToolNameGetIncidentDetail is the stable wire name the LLM sees.
+const ToolNameGetIncidentDetail = "get_incident_detail"
+
+// GetIncidentDetailDescription pushes the model toward this tool when the
+// question is about a specific incident's history / timeline.
+const GetIncidentDetailDescription = "Return the full incident row plus its event timeline (firing, ack, resolve, notification_sent/failed). " +
+	"Use this whenever the question is about what happened on a specific incident id."
+
+// IncidentEventRow is the trimmed event envelope embedded in the
+// incident detail timeline.
+type IncidentEventRow struct {
+	ID          uint64    `json:"id"`
+	EventType   string    `json:"event_type"`
+	StatusAfter string    `json:"status_after"`
+	Severity    string    `json:"severity"`
+	Title       string    `json:"title"`
+	Message     *string   `json:"message,omitempty"`
+	ActorType   string    `json:"actor_type"`
+	ActorID     *uint64   `json:"actor_id,omitempty"`
+	Reason      string    `json:"reason,omitempty"`
+	OccurredAt  time.Time `json:"occurred_at"`
+}
+
+const incidentDetailCallTimeout = 60 * time.Second
 
 // get_incident_detail_basetool.go — N+15 batch refactor. The BaseTool
 // form of get_incident_detail now takes `incident_ids[]` (1..16). Each
 // inner call is a pure DB read (alertUC.GetIncident + ListEvents) so
 // fan-out is essentially free; the LLM commonly correlates 3-5
 // incidents at once and was burning rounds doing them sequentially.
-// Closure path (get_incident_detail.go::executeGetIncidentDetail) is
-// untouched.
 
 // GetIncidentDetailTool is the BaseTool form of get_incident_detail.
 type GetIncidentDetailTool struct {

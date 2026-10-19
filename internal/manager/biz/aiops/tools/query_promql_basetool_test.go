@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -129,5 +130,65 @@ func TestQueryPromQLTool_LookbackClamp(t *testing.T) {
 	span := pq.gotEnd.Sub(pq.gotStart)
 	if span < 167*time.Hour || span > 169*time.Hour {
 		t.Errorf("span = %v, want ~7d after clamp", span)
+	}
+}
+
+// fakePromQuerier captures the last QueryRange call.
+type fakePromQuerier struct {
+	mu       sync.Mutex
+	gotExpr  string
+	gotStep  time.Duration
+	gotStart time.Time
+	gotEnd   time.Time
+	resp     *promquery.InstantResult
+	err      error
+}
+
+func (f *fakePromQuerier) QueryRange(_ context.Context, expr string, start, end time.Time, step time.Duration) (*promquery.InstantResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.gotExpr = expr
+	f.gotStart = start
+	f.gotEnd = end
+	f.gotStep = step
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.resp, nil
+}
+
+// Query is the instant-form sibling of QueryRange. The PromQuerier
+// interface grew it so correlate_incident.go can probe a single point
+// in time; the smoke tests in this package don't exercise it, so the
+// stub mirrors QueryRange's response/error behavior without recording
+// timing.
+func (f *fakePromQuerier) Query(_ context.Context, expr string, _ time.Time) (*promquery.InstantResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.gotExpr = expr
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.resp, nil
+}
+
+func TestStepFor(t *testing.T) {
+	cases := []struct {
+		lb   int
+		step time.Duration
+	}{
+		{60, 15 * time.Second},
+		{300, 15 * time.Second},
+		{600, time.Minute},
+		{3600, time.Minute},
+		{6 * 3600, 5 * time.Minute},
+		{12 * 3600, 15 * time.Minute},
+		{24 * 3600, 15 * time.Minute},
+		{48 * 3600, time.Hour},
+	}
+	for _, c := range cases {
+		if got := stepFor(c.lb); got != c.step {
+			t.Errorf("stepFor(%d) = %v, want %v", c.lb, got, c.step)
+		}
 	}
 }

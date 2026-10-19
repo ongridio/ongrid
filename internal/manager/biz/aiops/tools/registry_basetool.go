@@ -45,25 +45,7 @@ const defaultDeferralThreshold = 30
 //     (mirrors the previous slice-append semantics for
 //     AppendHostFilesTools).
 //
-// nil-gating mirrors NewRegistry exactly:
-//
-//   - get_host_load / get_process_list / get_topology / query_devices /
-//     get_edge_summary always present (they only need the always-wired
-//     edges + caller, with best-effort degradation when one is nil).
-//   - query_promql gated on r.promQuery.
-//   - query_logql gated on r.logQuery.
-//   - query_traceql gated on r.traceQuery.
-//   - rank_edges / find_outlier_edges gated on r.promQuery && r.edges.
-//   - query_incidents / get_incident_detail / query_alert_rules gated on
-//     r.alertUC.
-//   - correlate_incident gated on alertUC + prom + log + trace ALL set
-//     (mirrors the four-source rule in NewRegistry).
-//   - AgentTool / SendMessage / TaskStop gated on r.spawner.
-//   - restart_service gated on caller + edges + devices.
-//
-// Order of the slice follows the documented PR-7 list (host_load first,
-// correlate_incident last) so a quick `len()` check or stable index
-// reflects the spec.
+// Tools requiring optional dependencies are omitted when those dependencies are nil.
 //
 // ToolSearch is registered unconditionally (via bag.WithExtra). When
 // deferral is off it's a harmless no-op tool the LLM almost never
@@ -75,8 +57,7 @@ func (r *Registry) BuildBaseTools() *ToolBag {
 	// 1-2: host_load + process_list always paired with the caller +
 	// edge usecase. devices is passed for device_id → edge_id resolution
 	// (post N+15 batch refactor — the schemas now take device_ids[]
-	// rather than edge_name). The closure variants in registry.go still
-	// take edge_name and register unconditionally too.
+	// rather than edge_name).
 	out = append(out, NewGetHostLoadTool(r.caller, r.edges, r.devices, r.log))
 	out = append(out, NewGetProcessListTool(r.caller, r.edges, r.devices, r.log))
 
@@ -130,8 +111,7 @@ func (r *Registry) BuildBaseTools() *ToolBag {
 			out = append(out, NewExecuteK8sActionTool(r.caller, r.k8sSnapshot, r.log))
 		}
 	}
-	// 6-7: query_devices + get_topology gated on edges (matches
-	// NewRegistry — both need the edge usecase or device usecase).
+	// 6-7: query_devices + get_topology require the edge or device usecase.
 	if r.edges != nil || r.devices != nil {
 		out = append(out, NewQueryEdgesTool(r.devices, r.edges, r.log))
 	}
@@ -142,7 +122,7 @@ func (r *Registry) BuildBaseTools() *ToolBag {
 	if r.edges != nil {
 		out = append(out, NewGetTopologyTool(r.edges, r.alertUC, r.topology, r.log))
 	}
-	// 8: rank_edges — gated on Prom + edges (same as NewRegistry).
+	// 8: rank_edges — gated on Prom + edges
 	if r.promQuery != nil && r.edges != nil {
 		out = append(out, NewRankEdgesTool(r.promQuery, r.edges, r.log))
 		out = append(out, NewFindOutlierEdgesTool(r.promQuery, r.edges, r.log))
@@ -159,12 +139,11 @@ func (r *Registry) BuildBaseTools() *ToolBag {
 		out = append(out, NewQueryChangeEventsTool(r.auditLister, r.log))
 	}
 	// 12: get_edge_summary — gated on edges (alert/devices/caller are
-	// best-effort, mirroring the closure executor's defensive checks).
+	// best-effort).
 	if r.edges != nil {
 		out = append(out, NewGetEdgeSummaryTool(r.caller, r.edges, r.devices, r.alertUC, r.log))
 	}
-	// 13: correlate_incident — needs ALL four signal sources, same as
-	// the closure path (NewRegistry).
+	// 13: correlate_incident requires all four signal sources.
 	if r.alertUC != nil && r.promQuery != nil && r.logQuery != nil && r.traceQuery != nil {
 		tool := NewCorrelateIncidentTool(
 			r.alertUC, r.promQuery, r.logQuery, r.traceQuery, r.edges, r.devices, r.log,

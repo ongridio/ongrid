@@ -30,9 +30,7 @@ import (
 // Why a single file for three tools: they share identical wiring (same
 // device→edge resolver, same tunnel.Caller seam, same error envelope) so
 // putting them side-by-side makes the symmetry visible. The edge-side
-// handlers in internal/edgeagent/host_files/ mirror this layout. The
-// closure-style legacy registry path (registry.go::Tool) is NOT used —
-// these tools are BaseTool-native from day one (改进点 #1).
+// handlers in internal/edgeagent/host_files/ mirror this layout.
 
 // Allow all scan waves, metadata collection and response delivery to finish.
 const hostFilesCallTimeout = tunnel.HostFilesCallTimeout

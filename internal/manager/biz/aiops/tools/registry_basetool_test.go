@@ -2,31 +2,30 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	devicebiz "github.com/ongridio/ongrid/internal/manager/biz/device"
 	edgebiz "github.com/ongridio/ongrid/internal/manager/biz/edge"
+	edgemodel "github.com/ongridio/ongrid/internal/manager/model/edge"
+	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
 
-func TestBuildBaseTools_NilGatingMatchesNewRegistry(t *testing.T) {
+func TestBuildBaseTools_MinimalDependencies(t *testing.T) {
 	uc := edgebiz.NewUsecase(newFakeEdgeRepo(), nil, nil, slog.Default())
 
-	// Minimal — only edges + caller. NewRegistry registers exactly:
-	// get_host_load, get_process_list, query_devices, get_topology,
-	// get_edge_summary → 5 tools.
 	regMin := NewRegistry(&fakeCaller{}, uc, nil, nil, nil, nil, nil, slog.Default())
-	closureNames := schemaNames(regMin.Schemas())
-
-	bag := regMin.BuildBaseTools()
-	baseNames := toolInfoNames(t, bag.AllTools())
-
-	for _, n := range closureNames {
-		if !containsName(baseNames, n) {
-			t.Errorf("BuildBaseTools is missing closure-side tool %q (closure=%v base=%v)", n, closureNames, baseNames)
-		}
-	}
+	assertToolNames(t, regMin.BuildBaseTools(), []string{
+		ToolNameGetHostLoad, ToolNameGetProcessList, ToolNameQueryEdges,
+		ToolNameGetTopology, ToolNameGetEdgeSummary, ToolSearchToolName,
+	})
+	assertToolNames(t, NewRegistry(nil, nil, nil, nil, nil, nil, nil, slog.Default()).BuildBaseTools(), []string{
+		ToolNameGetHostLoad, ToolNameGetProcessList, ToolSearchToolName,
+	})
 }
 
 func TestBuildBaseTools_FullSetWithAllDeps(t *testing.T) {
@@ -38,30 +37,42 @@ func TestBuildBaseTools_FullSetWithAllDeps(t *testing.T) {
 
 	reg := NewRegistry(&fakeCaller{}, uc, nil, pq, lq, tq, au, slog.Default())
 	reg.SetPluginConfigLister(fakePluginConfigLister{})
-	closureNames := schemaNames(reg.Schemas())
+	assertToolNames(t, reg.BuildBaseTools(), []string{
+		ToolNameGetHostLoad, ToolNameGetProcessList, ToolNameQueryPromQL,
+		ToolNameListMetricCatalog, ToolNameListDatabaseSources, ToolNameAnalyzeDatabaseStatus,
+		ToolNameQueryLogQL, ToolNameQueryTraceQL, ToolNameQueryEdges, ToolNameGetTopology,
+		ToolNameRankEdges, ToolNameFindOutlierEdges, ToolNameQueryIncidents,
+		ToolNameGetIncidentDetail, ToolNameQueryAlertRules, ToolNameGetEdgeSummary,
+		ToolNameCorrelateIncident, ToolSearchToolName,
+	})
+}
 
-	bag := reg.BuildBaseTools()
-	// Filter out ToolSearch — it's registered unconditionally by
-	// BuildBaseTools as an extras-slot tool and has no
-	// counterpart in the closure-style Schemas() output.
-	baseNames := filterOutTool(toolInfoNames(t, bag.AllTools()), ToolSearchToolName)
-
-	for _, n := range closureNames {
-		if !containsName(baseNames, n) {
-			t.Errorf("BuildBaseTools missing %q (closure=%v base=%v)", n, closureNames, baseNames)
+func assertToolNames(t *testing.T, bag *ToolBag, want []string) {
+	t.Helper()
+	got := toolInfoNames(t, bag.AllTools())
+	if len(got) != len(want) {
+		t.Errorf("tool count = %d, want %d: %v", len(got), len(want), got)
+	}
+	for _, name := range want {
+		if countToolName(got, name) != 1 {
+			t.Errorf("want exactly one %q in %v", name, got)
 		}
 	}
-	for _, n := range baseNames {
-		if !containsName(closureNames, n) {
-			t.Errorf("BuildBaseTools has extra %q not in closure path (base=%v closure=%v)", n, baseNames, closureNames)
+}
+
+func baseToolByName(t *testing.T, bag *ToolBag, name string) basetool.BaseTool {
+	t.Helper()
+	for _, tool := range bag.AllTools() {
+		info, err := tool.Info(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Name == name {
+			return tool
 		}
 	}
-	if containsName(baseNames, "search_logs") || containsName(closureNames, "search_logs") {
-		t.Fatalf("legacy search_logs tool is still exposed (base=%v closure=%v)", baseNames, closureNames)
-	}
-	if countToolName(baseNames, ToolNameQueryLogQL) != 1 || countToolName(closureNames, ToolNameQueryLogQL) != 1 {
-		t.Fatalf("query_logql must be the single log-query tool (base=%v closure=%v)", baseNames, closureNames)
-	}
+	t.Fatalf("tool %q missing from catalog", name)
+	return nil
 }
 
 // TestBuildBaseTools_GraphKernelToolBagCount mirrors the production
@@ -131,20 +142,6 @@ func toolInfoNames(t *testing.T, tools []basetool.BaseTool) []string {
 	return out
 }
 
-// filterOutTool removes a single name from the slice, preserving order.
-// Used by tests that compare BuildBaseTools' output against the closure
-// path — the new ToolSearch entry has no closure-side counterpart so we
-// strip it before the diff.
-func filterOutTool(names []string, drop string) []string {
-	out := make([]string, 0, len(names))
-	for _, n := range names {
-		if n != drop {
-			out = append(out, n)
-		}
-	}
-	return out
-}
-
 func countToolName(names []string, want string) int {
 	count := 0
 	for _, name := range names {
@@ -153,4 +150,120 @@ func countToolName(names []string, want string) int {
 		}
 	}
 	return count
+}
+
+// fakeEdgeRepo is an in-memory edge.Repo for registry tests.
+type fakeEdgeRepo struct {
+	byID   map[uint64]*edgemodel.Edge
+	byName map[string]*edgemodel.Edge
+}
+
+func newFakeEdgeRepo(edges ...*edgemodel.Edge) *fakeEdgeRepo {
+	r := &fakeEdgeRepo{
+		byID:   map[uint64]*edgemodel.Edge{},
+		byName: map[string]*edgemodel.Edge{},
+	}
+	for _, e := range edges {
+		r.byID[e.ID] = e
+		r.byName[e.Name] = e
+	}
+	return r
+}
+
+func (r *fakeEdgeRepo) Create(_ context.Context, _ *edgemodel.Edge) error { return nil }
+
+func (r *fakeEdgeRepo) GetByID(_ context.Context, id uint64) (*edgemodel.Edge, error) {
+	if e, ok := r.byID[id]; ok {
+		return e, nil
+	}
+	return nil, errs.ErrNotFound
+}
+
+func (r *fakeEdgeRepo) GetByAccessKey(_ context.Context, _ string) (*edgemodel.Edge, error) {
+	return nil, errs.ErrNotFound
+}
+
+func (r *fakeEdgeRepo) GetByName(_ context.Context, name string) (*edgemodel.Edge, error) {
+	if e, ok := r.byName[name]; ok {
+		return e, nil
+	}
+	return nil, errs.ErrNotFound
+}
+
+func (r *fakeEdgeRepo) List(_ context.Context, _ edgebiz.ListFilter) ([]*edgemodel.Edge, error) {
+	out := make([]*edgemodel.Edge, 0, len(r.byID))
+	for _, e := range r.byID {
+		out = append(out, e)
+	}
+	return out, nil
+}
+
+func (r *fakeEdgeRepo) UpdateSecretHash(_ context.Context, _ uint64, _ string) error { return nil }
+
+func (r *fakeEdgeRepo) UpdateStatus(_ context.Context, _ uint64, _ string, _ time.Time) error {
+	return nil
+}
+
+func (r *fakeEdgeRepo) MarkStaleOffline(_ context.Context, _ time.Time) (int64, error) {
+	return 0, nil
+}
+
+func (r *fakeEdgeRepo) MarkRegistered(_ context.Context, _ uint64, _ time.Time) error {
+	return nil
+}
+
+func (r *fakeEdgeRepo) UpdateRoles(_ context.Context, _ uint64, _ uint8) error { return nil }
+
+func (r *fakeEdgeRepo) UpdateName(_ context.Context, _ uint64, _ string) error { return nil }
+
+func (r *fakeEdgeRepo) SetDeviceID(_ context.Context, _ uint64, _ uint64) error { return nil }
+
+func (r *fakeEdgeRepo) ClearDeviceID(_ context.Context, _ uint64) error { return nil }
+
+func (r *fakeEdgeRepo) SetAgentVersion(_ context.Context, _ uint64, _ string) error { return nil }
+
+func (r *fakeEdgeRepo) Delete(_ context.Context, _ uint64) error { return nil }
+
+func (r *fakeEdgeRepo) Count(_ context.Context) (int64, error) { return int64(len(r.byID)), nil }
+
+// fakeCaller mimics frontierbound.Client.Call. Tests preload resp / err
+// and inspect the recorded last call.
+type fakeCaller struct {
+	mu       sync.Mutex
+	calls    int
+	lastID   uint64
+	lastName string
+	lastBody []byte
+	respBody []byte
+	respErr  error
+}
+
+func (f *fakeCaller) Call(_ context.Context, edgeID uint64, method string, body []byte) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	f.lastID = edgeID
+	f.lastName = method
+	f.lastBody = append([]byte(nil), body...)
+	if f.respErr != nil {
+		return nil, f.respErr
+	}
+	return f.respBody, nil
+}
+
+func mustMarshal(v any) []byte {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
+
+func containsName(names []string, want string) bool {
+	for _, n := range names {
+		if n == want {
+			return true
+		}
+	}
+	return false
 }

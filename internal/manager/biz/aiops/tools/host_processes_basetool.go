@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	devicebiz "github.com/ongridio/ongrid/internal/manager/biz/device"
@@ -12,15 +13,23 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
 
+// ToolNameGetProcessList is the stable wire name the LLM sees for this tool.
+const ToolNameGetProcessList = "get_host_processes"
+
+// GetProcessListDescription is the single-sentence description the model
+// reads when deciding whether to call this tool.
+const GetProcessListDescription = "Return the top-N processes on the named edge host, sorted by CPU or memory usage."
+
+// processListCallTimeout caps how long a single dispatch may wait. Same
+// rationale as hostLoadCallTimeout.
+const processListCallTimeout = 60 * time.Second
+
 // host_processes_basetool.go — N+15 batch refactor. The BaseTool form
 // of get_process_list now takes a `device_ids[]` array and fans out
 // manager-side. top_n / sort_by are SHARED across all ids (one knob
 // applied per device) — the typical use case is "top 10 cpu procs on
 // each of these 5 nodes" and asking for per-id top_n would clutter the
 // schema for negligible benefit. Edge handler is unchanged.
-//
-// The closure path (host_processes.go::executeGetProcessList) is
-// untouched — see host_load_basetool.go for the same rationale.
 
 // GetProcessListTool is the BaseTool form of get_process_list.
 type GetProcessListTool struct {

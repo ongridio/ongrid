@@ -14,18 +14,94 @@ import (
 	devicemodel "github.com/ongridio/ongrid/internal/manager/model/device"
 )
 
-// QueryEdgesTool is the BaseTool form of query_devices (legacy go id:
-// query_edges). Mirrors executeQueryEdges in query_edges.go: prefers the
-// device usecase, falls back to the edge usecase for older fixtures.
+// ToolNameQueryEdges is the stable wire name the LLM sees.
+//
+// Post-split (May 2026): the tool surfaces "devices" — the boxes being
+// monitored — but we keep the legacy `query_devices` name in the LLM
+// prompt below; the underlying entity is the post-split Device. The
+// historical `query_edges` Go identifier is retained for source-level
+// stability but the prompt-facing name is updated so the LLM uses
+// `device_id` in any PromQL it generates.
+const ToolNameQueryEdges = "query_devices"
+
+// QueryEdgesDescription is the single-sentence description shown to the LLM.
+// Phrased to direct the model here whenever the question is about which
+// devices (machines) match a coarse status / role / freshness filter.
+const QueryEdgesDescription = "List ongrid-managed devices (hosts) filtered by role, online status, last-seen freshness, name substring, or IP address. " +
+	"Use this whenever the question is about which machines exist or which ones match a coarse attribute. " +
+	"Returns an array of {device_id, name, hostname, ip_address, online, roles, last_seen_at}; use device_id (NOT edge_id) in any PromQL/LogQL/TraceQL you generate."
+
+// QueryEdgesSchema is the JSON Schema of the tool's argument object.
+var QueryEdgesSchema = json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "role": {
+      "type": "string",
+      "enum": ["server", "storage", "network", "database", "gpu"],
+      "description": "Filter to devices that carry this role bit. Optional."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["online", "offline"],
+      "description": "Filter by current online status. Optional."
+    },
+    "last_seen_within_minutes": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Only return devices whose last_seen_at is within the last N minutes. Optional."
+    },
+    "name_contains": {
+      "type": "string",
+      "description": "Substring filter against device name (case-sensitive)."
+    },
+    "ip_contains": {
+      "type": "string",
+      "description": "Substring filter against device IP address. Optional."
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 500,
+      "description": "Max rows returned (default 50)."
+    }
+  }
+}`)
+
+// QueryEdgesArgs is the typed form of QueryEdgesSchema.
+type QueryEdgesArgs struct {
+	Role                  string `json:"role,omitempty"`
+	Status                string `json:"status,omitempty"`
+	LastSeenWithinMinutes int    `json:"last_seen_within_minutes,omitempty"`
+	NameContains          string `json:"name_contains,omitempty"`
+	IPContains            string `json:"ip_contains,omitempty"`
+	Limit                 int    `json:"limit,omitempty"`
+}
+
+// EdgeRow is the wire shape for one device in query_devices output.
+//
+// Kept narrow on purpose: the LLM gets only the columns it can reason
+// over without leaking secret_key_hash / access_key_id.
+type EdgeRow struct {
+	ID         uint64     `json:"device_id"`
+	Name       string     `json:"name"`
+	Hostname   string     `json:"hostname,omitempty"`
+	IPAddress  string     `json:"ip_address,omitempty"`
+	Online     bool       `json:"online"`
+	Roles      []string   `json:"roles"`
+	LastSeenAt *time.Time `json:"last_seen_at,omitempty"`
+}
+
+// queryEdgesCallTimeout caps the biz call.
+const queryEdgesCallTimeout = 60 * time.Second
+
+// QueryEdgesTool lists devices, falling back to edges when the device usecase is unavailable.
 type QueryEdgesTool struct {
 	devices *devicebiz.Usecase
 	edges   *edgebiz.Usecase
 	log     *slog.Logger
 }
 
-// NewQueryEdgesTool builds the BaseTool variant. Either dependency may be
-// nil; the tool degrades to whichever is wired (see executeQueryEdges
-// for the reasoning).
+// NewQueryEdgesTool accepts either the device or edge usecase.
 func NewQueryEdgesTool(devices *devicebiz.Usecase, edges *edgebiz.Usecase, log *slog.Logger) *QueryEdgesTool {
 	if log == nil {
 		log = slog.Default()
@@ -52,8 +128,7 @@ func (t *QueryEdgesTool) Info(_ context.Context) (*basetool.ToolInfo, error) {
 	}, nil
 }
 
-// InvokableRun lists devices matching the filter. Mirror of
-// executeQueryEdges; output bytes match for equivalent inputs.
+// InvokableRun lists devices matching the filter.
 func (t *QueryEdgesTool) InvokableRun(ctx context.Context, argsJSON string, _ ...basetool.InvokeOption) (string, error) {
 	if t.devices == nil && t.edges == nil {
 		return "", fmt.Errorf("query_devices: device usecase not configured")

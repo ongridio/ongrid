@@ -270,12 +270,3 @@ func boundedInt64(v, fallback, max int64) int64 {
 	}
 	return v
 }
-
-func (r *Registry) executeQueryK8sLogs(ctx context.Context, args json.RawMessage) (ExecuteResult, error) {
-	tool := NewQueryK8sLogsTool(r.caller, r.k8sSnapshot, r.log)
-	out, err := tool.InvokableRun(ctx, string(args))
-	if err != nil {
-		return ExecuteResult{}, err
-	}
-	return ExecuteResult{ResultJSON: json.RawMessage(out)}, nil
-}

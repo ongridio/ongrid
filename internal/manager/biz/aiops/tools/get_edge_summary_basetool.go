@@ -16,10 +16,38 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
 
+// ToolNameGetEdgeSummary is the stable wire name the LLM sees.
+const ToolNameGetEdgeSummary = "get_edge_summary"
+
+// GetEdgeSummaryDescription is the single-sentence pitch shown to the
+// LLM. Pushes the model toward the one-shot summary when the question is
+// "what's the situation on host X".
+const GetEdgeSummaryDescription = "Return a one-shot snapshot for an edge: registration metadata, current host load (cpu/mem/load), and recent incidents in the last 24h (any status, severity >= warning). " +
+	"Use this whenever the question is about a single named host's overall state."
+
+// edgeSummaryCallTimeout caps the whole multi-step round trip. It must
+// be larger than hostLoadCallTimeout so a slow edge doesn't blow the
+// outer ctx before the incident query runs.
+const edgeSummaryCallTimeout = 60 * time.Second
+
+// EdgeSummaryIncidentRow is the trimmed incident envelope embedded in
+// the summary. Mirrors fields the LLM most likely needs to talk about
+// the incident; the full row is retrievable via get_incident_detail.
+type EdgeSummaryIncidentRow struct {
+	ID           uint64    `json:"id"`
+	Title        string    `json:"title"`
+	Severity     string    `json:"severity"`
+	Status       string    `json:"status"`
+	Rule         string    `json:"rule"`
+	RuleName     string    `json:"rule_name"`
+	FirstFiredAt time.Time `json:"first_fired_at"`
+	LastFiredAt  time.Time `json:"last_fired_at"`
+}
+
 // get_edge_summary_basetool.go — N+15 batch refactor. The BaseTool form
 // of get_edge_summary now takes `device_ids[]`. Each inner call still
 // runs the same 3-step stitch (edge meta + best-effort host_load + 24h
-// incidents) the closure executor performs. The outer ceiling
+// incidents). The outer ceiling
 // (edgeSummaryBatchTimeout) is wider than the per-id timeout so up to 4
 // inner stitches in flight can complete.
 //
@@ -58,9 +86,8 @@ type GetEdgeSummaryBatchArgs struct {
 }
 
 // EdgeSummaryResultEntry is one slot in the batch envelope. On success
-// Summary holds the same map[string]any the closure executor produced
-// (edge meta + host_load + recent_incidents + plugin_status); on
-// failure Error is populated.
+// Summary holds edge metadata, host load, recent incidents and plugin status.
+// On failure Error is populated.
 type EdgeSummaryResultEntry struct {
 	DeviceID uint64         `json:"device_id"`
 	Summary  map[string]any `json:"summary,omitempty"`
@@ -110,7 +137,7 @@ func (t *GetEdgeSummaryTool) Info(_ context.Context) (*basetool.ToolInfo, error)
 	}, nil
 }
 
-// singleEdgeSummary runs the same stitch the closure executor runs:
+// singleEdgeSummary assembles:
 // resolve edge → fetch roles → optional host_load → 24h incidents +
 // plugin_status. Each sub-call is best-effort — a slow Loki / offline
 // edge degrades gracefully into a partial summary, NOT an entry-level
@@ -272,9 +299,7 @@ func (t *GetEdgeSummaryTool) allEdgeDeviceIDs(ctx context.Context) ([]uint64, er
 	return ids, nil
 }
 
-// resolveEdgeForDevice mirrors the closure path's helper but operates
-// on the BaseTool's struct fields. Only the by-id path is exercised in
-// the batch tool — by-name lookups were never exposed in the new schema.
+// resolveEdgeForDevice resolves the host edge for a device ID.
 func (t *GetEdgeSummaryTool) resolveEdgeForDevice(ctx context.Context, deviceID uint64, _ string) (*edgemodel.Edge, error) {
 	tryEdgeForDeviceID := func(id uint64) (*edgemodel.Edge, error) {
 		if t.devices == nil {

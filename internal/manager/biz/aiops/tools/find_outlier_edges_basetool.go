@@ -11,8 +11,51 @@ import (
 	edgebiz "github.com/ongridio/ongrid/internal/manager/biz/edge"
 )
 
-// FindOutlierEdgesTool is the BaseTool form of find_outlier_edges.
-// Mirrors executeFindOutlierEdges in find_outlier_edges.go.
+// ToolNameFindOutlierEdges is the stable wire name the LLM sees.
+const ToolNameFindOutlierEdges = "find_outlier_edges"
+
+// FindOutlierEdgesDescription pushes the model toward this tool when the
+// question is about which edges deviate from the fleet baseline.
+const FindOutlierEdgesDescription = "Find edges whose metric value is more than N standard deviations above the fleet mean. " +
+	"Use this for 'who's an outlier on cpu/mem/disk' style questions. Default sigma is 2."
+
+// FindOutlierEdgesSchema is the JSON Schema of the tool's argument object.
+var FindOutlierEdgesSchema = json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "metric": {
+      "type": "string",
+      "enum": ["cpu", "mem", "disk"],
+      "description": "Which closed-set host metric to compare across the fleet."
+    },
+    "sigma": {
+      "type": "number",
+      "minimum": 0.5,
+      "maximum": 10,
+      "description": "z-score threshold (default 2). Edges with z > sigma are returned."
+    }
+  },
+  "required": ["metric"]
+}`)
+
+// FindOutlierEdgesArgs is the typed form of FindOutlierEdgesSchema.
+type FindOutlierEdgesArgs struct {
+	Metric string  `json:"metric"`
+	Sigma  float64 `json:"sigma,omitempty"`
+}
+
+// OutlierEdgeRow is one outlier hit.
+type OutlierEdgeRow struct {
+	DeviceID uint64  `json:"device_id,omitempty"`
+	EdgeID   uint64  `json:"edge_id,omitempty"`
+	EdgeName string  `json:"edge_name"`
+	ZScore   float64 `json:"z_score"`
+	Metric   string  `json:"metric"`
+}
+
+const outlierCallTimeout = 60 * time.Second
+
+// FindOutlierEdgesTool finds host metric outliers.
 type FindOutlierEdgesTool struct {
 	promQuery PromQuerier
 	edges     *edgebiz.Usecase

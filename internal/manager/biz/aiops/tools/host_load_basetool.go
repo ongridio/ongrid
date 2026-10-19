@@ -5,12 +5,26 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	devicebiz "github.com/ongridio/ongrid/internal/manager/biz/device"
 	edgebiz "github.com/ongridio/ongrid/internal/manager/biz/edge"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
+
+// ToolNameGetHostLoad is the stable wire name the LLM sees for this tool.
+const ToolNameGetHostLoad = "get_host_load"
+
+// GetHostLoadDescription is the single-sentence description the model reads
+// when deciding whether to call this tool. Accuracy here directly affects
+// dispatch quality; keep it concrete.
+const GetHostLoadDescription = "Return current CPU percent, memory percent, and 1/5/15-minute load averages of the named edge host."
+
+// hostLoadCallTimeout caps how long a single tool dispatch may wait on
+// the frontier round-trip. We derive a child ctx with this deadline so
+// long-running edge calls cannot wedge the agent loop.
+const hostLoadCallTimeout = 60 * time.Second
 
 // host_load_basetool.go — N+15 batch refactor (2026-05-07). The BaseTool
 // form of get_host_load now takes a `device_ids[]` array (1..16) and
@@ -24,10 +38,6 @@ import (
 // the model toward fleet-shape questions (which is the actual AIOps
 // workflow) and the runBatch fan-out makes the manager-side latency
 // flat with batchConcurrency in flight.
-//
-// The closure path (host_load.go::executeGetHostLoad) is intentionally
-// NOT changed — the graph kernel doesn't call it; it's a PR-7 residue
-// that we keep building until the cutover PR retires it.
 
 // GetHostLoadTool is the BaseTool form of get_host_load.
 type GetHostLoadTool struct {
@@ -53,7 +63,7 @@ func NewGetHostLoadTool(caller Caller, edges *edgebiz.Usecase, devices *devicebi
 	}
 }
 
-// GetHostLoadBatchArgs is the typed form of GetHostLoadSchema (batch).
+// GetHostLoadBatchArgs is the typed form of GetHostLoadBatchSchema.
 type GetHostLoadBatchArgs struct {
 	DeviceIDs []uint64 `json:"device_ids"`
 }

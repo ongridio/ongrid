@@ -8,18 +8,90 @@ import (
 	"time"
 
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
+	"github.com/ongridio/ongrid/internal/pkg/promquery"
 )
 
-// QueryPromQLTool is the BaseTool 试点 implementation of query_promql,
-// running in parallel with the closure-style executeQueryPromQL on the
-// Registry (see registry.go). 改进点 #1 (每个 tool 是接口
-// 对象 — struct 持依赖) — promQuery is held on the struct rather than
-// captured in a closure.
+// ToolNameQueryPromQL is the stable wire name the LLM sees for the PromQL tool.
+const ToolNameQueryPromQL = "query_promql"
+
+// QueryPromQLDescription is the single-sentence description shown to the LLM.
+// Phrased to push the model toward this tool whenever the host-load /
+// process-list tools are too narrow.
+const QueryPromQLDescription = "Run a PromQL range query against the cluster's Prometheus. " +
+	"Use this when you need any host or container metric beyond the few host-level fields the basic tools return. " +
+	"For fleet or multi-device questions, write one vectorized PromQL expression with by(device_id, ...) / regex selectors / topk instead of one query per device or metric. " +
+	"Returns the raw Prom HTTP API response."
+
+// QueryPromQLSchema is the JSON Schema of the tool's argument object.
+var QueryPromQLSchema = json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "expr": {
+      "type": "string",
+      "description": "PromQL expression. Prefer one vectorized expression for multiple devices/labels. Example: \"avg by (device_id) (rate(node_cpu_seconds_total{mode!=\\\"idle\\\"}[5m]))\". For filesystem percent, combine numerator/denominator in one expression instead of separate used/size queries."
+    },
+    "lookback_seconds": {
+      "type": "integer",
+      "minimum": 60,
+      "maximum": 604800,
+      "description": "How far back to query in seconds (default 300 = 5 minutes; max 604800 = 7d). Use one 7d range query for weekly trends instead of repeating short lookbacks."
+    }
+  },
+  "required": ["expr"]
+}`)
+
+// QueryPromQLArgs is the typed form of QueryPromQLSchema.
+type QueryPromQLArgs struct {
+	Expr            string `json:"expr"`
+	LookbackSeconds int    `json:"lookback_seconds,omitempty"`
+}
+
+// queryPromqlCallTimeout caps how long a single dispatch may wait. Same
+// rationale as the other tool timeouts.
+const queryPromqlCallTimeout = 60 * time.Second
+
+const maxQueryPromQLLookbackSeconds = 7 * 24 * 3600
+
+// stepFor picks a sensible step size for a given lookback. The math
+// targets ~30 datapoints per range, capped at the Prom defaults.
+//   - <= 5min   -> 15s
+//   - <= 1h     -> 1m
+//   - <= 6h     -> 5m
+//   - <= 24h    -> 15m
+//   - <= 7d     -> 1h
+//   - else      -> 1h
 //
-// PR-3 of (this PR) migrates only this one tool to validate the
-// pattern. The closure path stays so existing wiring + tests are
-// unaffected; later PRs migrate the remaining 13 tools (
-// #2 + the PR table in the same doc).
+// The model can override lookback but not step; that keeps the cost
+// envelope predictable.
+func stepFor(lookbackSeconds int) time.Duration {
+	switch {
+	case lookbackSeconds <= 300:
+		return 15 * time.Second
+	case lookbackSeconds <= 3600:
+		return time.Minute
+	case lookbackSeconds <= 6*3600:
+		return 5 * time.Minute
+	case lookbackSeconds <= 24*3600:
+		return 15 * time.Minute
+	default:
+		return time.Hour
+	}
+}
+
+// PromQuerier is the narrow surface the query_promql executor needs from
+// the promquery client. Declared here so tests can inject a fake.
+//
+// NOTE: this interface is what r.promQuery is typed as. The concrete
+// *promquery.Client satisfies it.
+type PromQuerier interface {
+	QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) (*promquery.InstantResult, error)
+	// Query is the instant form. correlate_incident uses it to grab
+	// a single point-in-time vector for cpu_pct / mem_pct / up. Concrete
+	// *promquery.Client satisfies it.
+	Query(ctx context.Context, expr string, ts time.Time) (*promquery.InstantResult, error)
+}
+
+// QueryPromQLTool runs PromQL queries with a bounded time range.
 type QueryPromQLTool struct {
 	promQuery PromQuerier
 	log       *slog.Logger
@@ -59,17 +131,7 @@ func (t *QueryPromQLTool) Info(_ context.Context) (*basetool.ToolInfo, error) {
 	}, nil
 }
 
-// InvokableRun parses argsJSON, runs the PromQL range query, and
-// marshals the response back to a JSON string. The input/output shape
-// matches the closure executor (executeQueryPromQL in query_promql.go)
-// exactly — they consult the same QueryPromQLArgs / stepFor /
-// queryPromqlCallTimeout — so the two paths return identical bytes for
-// equivalent inputs.
-//
-// opts are accepted but ignored: query_promql is tenant-agnostic and
-// not edge-scoped (DeviceID stays nil in the audit row). The decorator
-// chain still consumes them upstream (tenant_bind for ratelimit/audit
-// keying).
+// InvokableRun runs the PromQL range query and returns its JSON response.
 func (t *QueryPromQLTool) InvokableRun(ctx context.Context, argsJSON string, _ ...basetool.InvokeOption) (string, error) {
 	if t.promQuery == nil {
 		return "", fmt.Errorf("query_promql: prom query client not configured")
@@ -93,11 +155,7 @@ func (t *QueryPromQLTool) InvokableRun(ctx context.Context, argsJSON string, _ .
 	start := end.Add(-time.Duration(in.LookbackSeconds) * time.Second)
 	step := stepFor(in.LookbackSeconds)
 
-	// Mirror the closure executor's per-call timeout so behaviour is
-	// identical when this tool is wired without the decorators.Timeout
-	// wrapper. When the wrapper IS present, whichever ctx deadline
-	// fires first wins — context.WithTimeout on a parent that already
-	// has a closer deadline keeps the closer one.
+	// A closer caller deadline still takes precedence over this timeout.
 	callCtx, cancel := context.WithTimeout(ctx, queryPromqlCallTimeout)
 	defer cancel()
 

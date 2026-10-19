@@ -27,7 +27,7 @@ func identityEdges() *edgebiz.Usecase {
 }
 
 func TestDeviceIdentity_RankAndOutliers(t *testing.T) {
-	for _, path := range []string{"base", "registry"} {
+	for _, path := range []string{"base", "catalog"} {
 		for _, toolName := range []string{ToolNameRankEdges, ToolNameFindOutlierEdges} {
 			for _, labels := range []string{`"device_id":"42"`, `"edge_id":"42"`, `"device_id":"42","edge_id":"42"`} {
 				t.Run(path+"/"+toolName+"/"+labels, func(t *testing.T) {
@@ -40,15 +40,9 @@ func TestDeviceIdentity_RankAndOutliers(t *testing.T) {
 					}
 					var out string
 					var err error
-					if path == "registry" {
-						reg := &Registry{edges: edges, promQuery: pq}
-						var res ExecuteResult
-						if toolName == ToolNameRankEdges {
-							res, err = reg.executeRankEdges(context.Background(), json.RawMessage(args))
-						} else {
-							res, err = reg.executeFindOutlierEdges(context.Background(), json.RawMessage(args))
-						}
-						out = string(res.ResultJSON)
+					if path == "catalog" {
+						reg := NewRegistry(nil, edges, nil, pq, nil, nil, nil, nil)
+						out, err = baseToolByName(t, reg.BuildBaseTools(), toolName).InvokableRun(context.Background(), args)
 					} else if toolName == ToolNameRankEdges {
 						out, err = NewRankEdgesTool(pq, edges, nil).InvokableRun(context.Background(), args)
 					} else {
@@ -112,73 +106,61 @@ func (p *identityProm) Query(_ context.Context, expr string, _ time.Time) (*prom
 }
 
 func TestDeviceIdentity_CorrelateIncident(t *testing.T) {
-	for _, path := range []string{"base", "registry"} {
-		for _, scenario := range []struct {
-			name  string
-			links *identityLinks
-		}{
-			{"linked", &identityLinks{edgeID: 7}},
-			{"unlinked", &identityLinks{}},
-			{"lookup-error", &identityLinks{err: errors.New("database unavailable")}},
-			{"missing-edge", &identityLinks{edgeID: 1000}},
-			{"no-device-service", nil},
-		} {
-			t.Run(path+"/"+scenario.name, func(t *testing.T) {
-				deviceID, now := uint64(42), time.Now()
-				alerts := &fakeAlertUC{incidentByID: map[uint64]*alertmodel.Incident{1: {
-					ID: 1, DeviceID: &deviceID, Rule: "cpu_pct", FirstFiredAt: now,
-					LastFiredAt: now, LabelsJSON: "{}", AnnotationsJSON: "{}",
-				}}}
-				var devices *devicebiz.Usecase
-				if scenario.links != nil {
-					devices = devicebiz.NewUsecase(identityDeviceRepo{}, scenario.links, nil)
+	for _, scenario := range []struct {
+		name  string
+		links *identityLinks
+	}{
+		{"linked", &identityLinks{edgeID: 7}},
+		{"unlinked", &identityLinks{}},
+		{"lookup-error", &identityLinks{err: errors.New("database unavailable")}},
+		{"missing-edge", &identityLinks{edgeID: 1000}},
+		{"no-device-service", nil},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			deviceID, now := uint64(42), time.Now()
+			alerts := &fakeAlertUC{incidentByID: map[uint64]*alertmodel.Incident{1: {
+				ID: 1, DeviceID: &deviceID, Rule: "cpu_pct", FirstFiredAt: now,
+				LastFiredAt: now, LabelsJSON: "{}", AnnotationsJSON: "{}",
+			}}}
+			var devices *devicebiz.Usecase
+			if scenario.links != nil {
+				devices = devicebiz.NewUsecase(identityDeviceRepo{}, scenario.links, nil)
+			}
+			pq, edges := &identityProm{}, identityEdges()
+			var bundle *correlateIncidentBundle
+
+			out, err := NewCorrelateIncidentTool(alerts, pq, nil, nil, edges, devices, nil).
+				InvokableRun(context.Background(), `{"incident_ids":[1]}`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var response CorrelateIncidentBatchResponse
+			if err := json.Unmarshal([]byte(out), &response); err != nil || response.SuccessCount != 1 {
+				t.Fatalf("response=%s err=%v", out, err)
+			}
+			bundle = response.Results[0].Bundle
+			t.Logf("edge=%+v skipped=%v", bundle.Edge, bundle.Skipped)
+			if scenario.name != "linked" {
+				if bundle.Edge != nil || bundle.Skipped["edge"] == "" {
+					t.Errorf("unresolved device must omit edge and explain why, got %+v", bundle)
 				}
-				pq, edges := &identityProm{}, identityEdges()
-				var bundle *correlateIncidentBundle
-				if path == "base" {
-					out, err := NewCorrelateIncidentTool(alerts, pq, nil, nil, edges, devices, nil).
-						InvokableRun(context.Background(), `{"incident_ids":[1]}`)
-					if err != nil {
-						t.Fatal(err)
-					}
-					var response CorrelateIncidentBatchResponse
-					if err := json.Unmarshal([]byte(out), &response); err != nil || response.SuccessCount != 1 {
-						t.Fatalf("response=%s err=%v", out, err)
-					}
-					bundle = response.Results[0].Bundle
-				} else {
-					reg := &Registry{alertUC: alerts, promQuery: pq, edges: edges, devices: devices}
-					out, err := reg.executeCorrelateIncident(context.Background(), json.RawMessage(`{"incident_id":1}`))
-					if err != nil {
-						t.Fatal(err)
-					}
-					if err := json.Unmarshal(out.ResultJSON, &bundle); err != nil {
-						t.Fatal(err)
-					}
+				return
+			}
+			if bundle.Edge == nil || bundle.Edge.ID != 7 || bundle.Edge.Name != "host-a" {
+				t.Errorf("wrong edge for device 42: %+v", bundle.Edge)
+			}
+			if alerts.lastIncidentFilter.DeviceID == nil || *alerts.lastIncidentFilter.DeviceID != 42 {
+				t.Errorf("recent incidents must filter device 42: %+v", alerts.lastIncidentFilter)
+			}
+			if len(pq.queries) != 3 {
+				t.Errorf("want cpu/mem/up probes, got %v", pq.queries)
+			}
+			for _, expr := range append(pq.queries, pq.gotExpr) {
+				if !strings.Contains(expr, `device_id="42"`) || strings.Contains(expr, "edge_id") {
+					t.Errorf("metrics must use device 42: %s", expr)
 				}
-				t.Logf("edge=%+v skipped=%v", bundle.Edge, bundle.Skipped)
-				if scenario.name != "linked" {
-					if bundle.Edge != nil || bundle.Skipped["edge"] == "" {
-						t.Errorf("unresolved device must omit edge and explain why, got %+v", bundle)
-					}
-					return
-				}
-				if bundle.Edge == nil || bundle.Edge.ID != 7 || bundle.Edge.Name != "host-a" {
-					t.Errorf("wrong edge for device 42: %+v", bundle.Edge)
-				}
-				if alerts.lastIncidentFilter.DeviceID == nil || *alerts.lastIncidentFilter.DeviceID != 42 {
-					t.Errorf("recent incidents must filter device 42: %+v", alerts.lastIncidentFilter)
-				}
-				if len(pq.queries) != 3 {
-					t.Errorf("want cpu/mem/up probes, got %v", pq.queries)
-				}
-				for _, expr := range append(pq.queries, pq.gotExpr) {
-					if !strings.Contains(expr, `device_id="42"`) || strings.Contains(expr, "edge_id") {
-						t.Errorf("metrics must use device 42: %s", expr)
-					}
-				}
-			})
-		}
+			}
+		})
 	}
 }
 

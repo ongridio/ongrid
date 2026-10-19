@@ -1,35 +1,14 @@
-// Package tools holds the manager/aiops tool registry: JSON-schema
-// definitions + executors that dispatch reverse calls to edges via the
-// frontierbound service-end SDK.
-//
-// Each tool definition is a (name, description, JSON-schema, executor) quad.
-// The registry exposes Schemas() in the llm.ToolSchema shape for passing
-// straight into llm.Chat, and Invoke(name, args) for the agent loop to
-// dispatch after the model returns a tool_call.
-//
-// Cross-subdomain import of manager/biz/edge is explicit and deliberate
-// (same-BC subdomains may import each other). Reverse
-// calls travel through a Caller — concretely the frontierbound.Client
-// wrapping github.com/singchia/frontier — so this package stays free of
-// any geminio / SDK-level types.
+// Package tools assembles and implements the manager AIOps BaseTools.
 package tools
 
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
-
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 
 	devicebiz "github.com/ongridio/ongrid/internal/manager/biz/device"
 	edgebiz "github.com/ongridio/ongrid/internal/manager/biz/edge"
 	topologybiz "github.com/ongridio/ongrid/internal/manager/biz/topology"
-	"github.com/ongridio/ongrid/internal/pkg/errs"
-	"github.com/ongridio/ongrid/internal/pkg/llm"
-	"github.com/ongridio/ongrid/internal/pkg/tracing"
 )
 
 // Caller is the narrow seam this package needs from the frontierbound SDK
@@ -54,18 +33,8 @@ type ExecuteResult struct {
 	DeviceID   *uint64
 }
 
-// Tool is one exposed action: its name, description, JSON Schema of its
-// argument object, and the executor that fulfils a call.
-type Tool struct {
-	Name        string
-	Description string
-	Schema      json.RawMessage
-	Execute     func(ctx context.Context, args json.RawMessage) (ExecuteResult, error)
-}
-
-// Registry bundles the Caller + edge usecase so tool executors can
-// dispatch RPCs to edges. It indexes tools by name. promQuery / logQuery /
-// traceQuery / alertUC are optional; when nil the corresponding query_* /
+// Registry holds dependencies for BuildBaseTools and its tool executors.
+// promQuery, logQuery, traceQuery and alertUC are optional; when nil the corresponding query_* /
 // composite tool is not registered (graceful degradation for deployments
 // without that signal). alertUC is a narrow interface (AlertUsecase) so
 // tests can inject a fake without standing up the full alert biz repo.
@@ -142,8 +111,7 @@ type Registry struct {
 	packetCapture         PacketCaptureCreator
 	packetOperationCreate PacketCaptureOperationCreator
 
-	log   *slog.Logger
-	tools map[string]Tool
+	log *slog.Logger
 }
 
 // SetCloudBashProposer wires the cloud_bash → approval-inbox seam. Call
@@ -169,81 +137,29 @@ func (r *Registry) SetPacketCaptureOperationCreator(create PacketCaptureOperatio
 	r.packetOperationCreate = create
 }
 
-// SetK8sSnapshotReader wires query_k8s_snapshot. Call after NewRegistry
-// because the Kubernetes service is assembled before, but kept out of
-// NewRegistry's already-heavy constructor.
-func (r *Registry) SetK8sSnapshotReader(k K8sSnapshotReader) {
-	r.k8sSnapshot = k
-	if k != nil {
-		r.Register(Tool{
-			Name:        ToolNameQueryK8sSnapshot,
-			Description: QueryK8sSnapshotDescription,
-			Schema:      QueryK8sSnapshotSchema,
-			Execute:     r.executeQueryK8sSnapshot,
-		})
-		if r.caller != nil {
-			r.Register(Tool{
-				Name:        ToolNameDescribeK8sResource,
-				Description: DescribeK8sResourceDescription,
-				Schema:      DescribeK8sResourceSchema,
-				Execute:     r.executeDescribeK8sResource,
-			})
-			r.Register(Tool{
-				Name:        ToolNameQueryK8sLogs,
-				Description: QueryK8sLogsDescription,
-				Schema:      QueryK8sLogsSchema,
-				Execute:     r.executeQueryK8sLogs,
-			})
-		}
-	}
-}
+// SetK8sSnapshotReader wires Kubernetes snapshot access for BaseTools.
+func (r *Registry) SetK8sSnapshotReader(k K8sSnapshotReader) { r.k8sSnapshot = k }
 
 // SetAuditLister wires the audit query seam consumed by
 // query_change_events. Call after NewRegistry (cmd/main.go).
 func (r *Registry) SetAuditLister(a AuditLister) { r.auditLister = a }
 
-// SetPluginConfigLister wires the plugin config source discovery seam used by
-// list_database_sources / analyze_database_status. Call after NewRegistry
-// (cmd/main.go).
-func (r *Registry) SetPluginConfigLister(p PluginConfigLister) {
-	r.pluginConfigs = p
-	if p != nil && r.edges != nil {
-		r.Register(Tool{
-			Name:        ToolNameListDatabaseSources,
-			Description: ListDatabaseSourcesDescription,
-			Schema:      ListDatabaseSourcesSchema,
-			Execute:     r.executeListDatabaseSources,
-		})
-		if r.promQuery != nil {
-			r.Register(Tool{
-				Name:        ToolNameAnalyzeDatabaseStatus,
-				Description: AnalyzeDatabaseStatusDescription,
-				Schema:      AnalyzeDatabaseStatusSchema,
-				Execute:     r.executeAnalyzeDatabaseStatus,
-			})
-		}
-	}
-}
+// SetPluginConfigLister wires database source discovery for BaseTools.
+func (r *Registry) SetPluginConfigLister(p PluginConfigLister) { r.pluginConfigs = p }
 
 // SetConfigManager wires the conversational configuration tools consumed by
-// the graph BaseTool registry. The legacy closure-style registry does not
-// expose these mutating flows.
+// the BaseTool registry.
 func (r *Registry) SetConfigManager(m ConfigManager) { r.configManager = m }
 
 // SetPacketCaptureCreator wires capture_pcap into the BaseTool registry.
 func (r *Registry) SetPacketCaptureCreator(p PacketCaptureCreator) { r.packetCapture = p }
 
-// NewRegistry builds a Registry and auto-registers the two MVP tools
-// (get_host_load, get_process_list). When promQuery / logQuery /
-// traceQuery are non-nil, the matching query_promql / query_logql /
-// query_traceql tool is also registered. The composite correlate_incident
-// tool is registered when prom + log + trace + alertUC are ALL non-nil.
-// Callers may Register additional tools afterwards.
+// NewRegistry stores dependencies used by BuildBaseTools.
 func NewRegistry(caller Caller, edges *edgebiz.Usecase, devices *devicebiz.Usecase,
 	promQuery PromQuerier, logQuery LogQuerier, traceQuery TraceQuerier,
 	alertUC AlertUsecase,
 	log *slog.Logger) *Registry {
-	r := &Registry{
+	return &Registry{
 		caller:     caller,
 		edges:      edges,
 		devices:    devices,
@@ -252,124 +168,7 @@ func NewRegistry(caller Caller, edges *edgebiz.Usecase, devices *devicebiz.Useca
 		logQuery:   logQuery,
 		traceQuery: traceQuery,
 		log:        log,
-		tools:      map[string]Tool{},
 	}
-	r.Register(Tool{
-		Name:        ToolNameGetHostLoad,
-		Description: GetHostLoadDescription,
-		Schema:      GetHostLoadSchema,
-		Execute:     r.executeGetHostLoad,
-	})
-	r.Register(Tool{
-		Name:        ToolNameGetProcessList,
-		Description: GetProcessListDescription,
-		Schema:      GetProcessListSchema,
-		Execute:     r.executeGetProcessList,
-	})
-	if promQuery != nil {
-		r.Register(Tool{
-			Name:        ToolNameQueryPromQL,
-			Description: QueryPromQLDescription,
-			Schema:      QueryPromQLSchema,
-			Execute:     r.executeQueryPromQL,
-		})
-		r.Register(Tool{
-			Name:        ToolNameListMetricCatalog,
-			Description: ListMetricCatalogDescription,
-			Schema:      ListMetricCatalogSchema,
-			Execute:     r.executeListMetricCatalog,
-		})
-	}
-	if logQuery != nil {
-		r.Register(Tool{
-			Name:        ToolNameQueryLogQL,
-			Description: QueryLogQLDescription,
-			Schema:      QueryLogQLSchema,
-			Execute:     r.executeQueryLogQL,
-		})
-	}
-	if traceQuery != nil {
-		r.Register(Tool{
-			Name:        ToolNameQueryTraceQL,
-			Description: QueryTraceQLDescription,
-			Schema:      QueryTraceQLSchema,
-			Execute:     r.executeQueryTraceQL,
-		})
-	}
-	// Read-only ongrid business-data tools. query_edges + get_topology are
-	// always registered (only need the edge usecase, which is required).
-	// rank_edges / find_outlier_edges are gated on promQuery because they
-	// build PromQL under the hood. The alert-flavored tools are gated on
-	// alertUC so unit tests that pass nil alertUC don't see them.
-	if edges != nil {
-		r.Register(Tool{
-			Name:        ToolNameQueryEdges,
-			Description: QueryEdgesDescription,
-			Schema:      QueryEdgesSchema,
-			Execute:     r.executeQueryEdges,
-		})
-		r.Register(Tool{
-			Name:        ToolNameGetTopology,
-			Description: GetTopologyDescription,
-			Schema:      GetTopologySchema,
-			Execute:     r.executeGetTopology,
-		})
-	}
-	if edges != nil && promQuery != nil {
-		r.Register(Tool{
-			Name:        ToolNameRankEdges,
-			Description: RankEdgesDescription,
-			Schema:      RankEdgesSchema,
-			Execute:     r.executeRankEdges,
-		})
-		r.Register(Tool{
-			Name:        ToolNameFindOutlierEdges,
-			Description: FindOutlierEdgesDescription,
-			Schema:      FindOutlierEdgesSchema,
-			Execute:     r.executeFindOutlierEdges,
-		})
-	}
-	if alertUC != nil {
-		r.Register(Tool{
-			Name:        ToolNameQueryIncidents,
-			Description: QueryIncidentsDescription,
-			Schema:      QueryIncidentsSchema,
-			Execute:     r.executeQueryIncidents,
-		})
-		r.Register(Tool{
-			Name:        ToolNameGetIncidentDetail,
-			Description: GetIncidentDetailDescription,
-			Schema:      GetIncidentDetailSchema,
-			Execute:     r.executeGetIncidentDetail,
-		})
-		r.Register(Tool{
-			Name:        ToolNameQueryAlertRules,
-			Description: QueryAlertRulesDescription,
-			Schema:      QueryAlertRulesSchema,
-			Execute:     r.executeQueryAlertRules,
-		})
-	}
-	if edges != nil {
-		r.Register(Tool{
-			Name:        ToolNameGetEdgeSummary,
-			Description: GetEdgeSummaryDescription,
-			Schema:      GetEdgeSummarySchema,
-			Execute:     r.executeGetEdgeSummary,
-		})
-	}
-	// correlate_incident is the AIOps killer composite — it pulls
-	// metrics + logs + traces + edge state in one shot. Only registers
-	// when ALL four sources are wired (prom + log + trace + alertUC) so
-	// it never returns a half-empty bundle that confuses the LLM.
-	if alertUC != nil && promQuery != nil && logQuery != nil && traceQuery != nil {
-		r.Register(Tool{
-			Name:        ToolNameCorrelateIncident,
-			Description: CorrelateIncidentDescription,
-			Schema:      CorrelateIncidentSchema,
-			Execute:     r.executeCorrelateIncident,
-		})
-	}
-	return r
 }
 
 // SetTopologyInfo populates the deployment-level facts surfaced by the
@@ -404,54 +203,4 @@ func (r *Registry) SetKnowledgeSearcher(k KnowledgeSearcher) {
 // built so NewRegistry's signature stays stable.
 func (r *Registry) SetTopologyGraph(t *topologybiz.Usecase) {
 	r.topologyGraph = t
-}
-
-// Register adds (or replaces) a tool in the registry. Re-registration is a
-// silent overwrite; the caller is responsible for uniqueness.
-func (r *Registry) Register(t Tool) {
-	if t.Name == "" || t.Execute == nil {
-		return
-	}
-	r.tools[t.Name] = t
-}
-
-// Schemas returns the tool schemas in the llm.ToolSchema shape. Order is
-// unspecified (map iteration).
-func (r *Registry) Schemas() []llm.ToolSchema {
-	out := make([]llm.ToolSchema, 0, len(r.tools))
-	for _, t := range r.tools {
-		out = append(out, llm.ToolSchema{
-			Name:        t.Name,
-			Description: t.Description,
-			Parameters:  t.Schema,
-		})
-	}
-	return out
-}
-
-// Invoke dispatches a tool call by name. Unknown names return errs.ErrNotFound.
-// Nil args are replaced by an empty object `{}` for tools that take no
-// arguments (matches OpenAI's tool_call shape when the model decides to call
-// a zero-arg tool).
-func (r *Registry) Invoke(ctx context.Context, name string, args json.RawMessage) (result ExecuteResult, retErr error) {
-	t, ok := r.tools[name]
-	if !ok {
-		return ExecuteResult{}, fmt.Errorf("%w: tool %q", errs.ErrNotFound, name)
-	}
-	ctx, span := otel.Tracer("github.com/ongridio/ongrid/internal/manager/biz/aiops/tools").Start(ctx, "aiops.Tool."+name,
-		trace.WithAttributes(attribute.String("aiops.tool.name", name),
-			attribute.String("gen_ai.operation.name", "execute_tool"),
-			attribute.String("gen_ai.tool.name", name)),
-	)
-	defer func() {
-		if len(result.ResultJSON) != 0 {
-			tracing.RecordAgentContent(span, "output.value", result.ResultJSON)
-		}
-		tracing.EndSpan(span, retErr)
-	}()
-	if len(args) == 0 {
-		args = json.RawMessage(`{}`)
-	}
-	tracing.RecordAgentContent(span, "input.value", args)
-	return t.Execute(ctx, args)
 }

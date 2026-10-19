@@ -750,12 +750,3 @@ func eventSnapshotRow(e *k8smodel.Event) k8sEventSnapshotRow {
 		LastSeenAt:        e.LastSeenAt,
 	}
 }
-
-func (r *Registry) executeQueryK8sSnapshot(ctx context.Context, args json.RawMessage) (ExecuteResult, error) {
-	tool := NewQueryK8sSnapshotTool(r.k8sSnapshot, r.log)
-	out, err := tool.InvokableRun(ctx, string(args))
-	if err != nil {
-		return ExecuteResult{}, err
-	}
-	return ExecuteResult{ResultJSON: json.RawMessage(out)}, nil
-}

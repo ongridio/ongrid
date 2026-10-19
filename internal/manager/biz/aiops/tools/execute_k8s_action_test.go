@@ -325,13 +325,9 @@ func TestNormalizeExecuteK8sActionRejectsDrainOptionBounds(t *testing.T) {
 	}
 }
 
-func TestExecuteK8sActionOnlyRegisteredInGraphCatalog(t *testing.T) {
+func TestExecuteK8sActionRegisteredInGraphCatalog(t *testing.T) {
 	reg := NewRegistry(&fakeCaller{}, nil, nil, nil, nil, nil, nil, slog.Default())
 	reg.SetK8sSnapshotReader(newFakeK8sSnapshotReader())
-
-	if containsName(schemaNames(reg.Schemas()), ToolNameExecuteK8sAction) {
-		t.Fatalf("legacy closure registry exposed %q without approval proposer", ToolNameExecuteK8sAction)
-	}
 
 	names := toolInfoNames(t, reg.BuildBaseTools().AllTools())
 	if !containsName(names, ToolNameExecuteK8sAction) {

@@ -127,15 +127,6 @@ func (t *ListMetricCatalogTool) InvokableRun(ctx context.Context, argsJSON strin
 	return string(out), nil
 }
 
-func (r *Registry) executeListMetricCatalog(ctx context.Context, args json.RawMessage) (ExecuteResult, error) {
-	runner := metricCatalogRunner{promQuery: r.promQuery, log: r.log}
-	out, err := runner.run(ctx, args)
-	if err != nil {
-		return ExecuteResult{}, err
-	}
-	return ExecuteResult{ResultJSON: out}, nil
-}
-
 type metricCatalogRunner struct {
 	promQuery PromQuerier
 	log       *slog.Logger
