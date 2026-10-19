@@ -97,26 +97,16 @@ func (t *FindOutlierEdgesTool) InvokableRun(ctx context.Context, argsJSON string
 	if err != nil {
 		return "", fmt.Errorf("find_outlier_edges: decode: %w", err)
 	}
+	decorateRankRows(callCtx, t.edges, rankRows)
 	rows := make([]OutlierEdgeRow, 0, len(rankRows))
 	for _, rr := range rankRows {
 		rows = append(rows, OutlierEdgeRow{
-			EdgeID: rr.EdgeID,
-			ZScore: rr.Value,
-			Metric: rr.Metric,
+			DeviceID: rr.DeviceID,
+			EdgeID:   rr.EdgeID,
+			EdgeName: rr.EdgeName,
+			ZScore:   rr.Value,
+			Metric:   rr.Metric,
 		})
-	}
-
-	edges, err := t.edges.List(callCtx, edgebiz.ListFilter{Limit: 500})
-	if err == nil {
-		nameByID := make(map[uint64]string, len(edges))
-		for _, e := range edges {
-			nameByID[e.ID] = e.Name
-		}
-		for i := range rows {
-			if n, ok := nameByID[rows[i].EdgeID]; ok {
-				rows[i].EdgeName = n
-			}
-		}
 	}
 
 	out, err := json.Marshal(map[string]any{

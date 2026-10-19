@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
-
-	edgebiz "github.com/ongridio/ongrid/internal/manager/biz/edge"
 )
 
 // ToolNameFindOutlierEdges is the stable wire name the LLM sees.
@@ -44,7 +42,8 @@ type FindOutlierEdgesArgs struct {
 
 // OutlierEdgeRow is one outlier hit.
 type OutlierEdgeRow struct {
-	EdgeID   uint64  `json:"edge_id"`
+	DeviceID uint64  `json:"device_id,omitempty"`
+	EdgeID   uint64  `json:"edge_id,omitempty"`
 	EdgeName string  `json:"edge_name"`
 	ZScore   float64 `json:"z_score"`
 	Metric   string  `json:"metric"`
@@ -112,27 +111,16 @@ func (r *Registry) executeFindOutlierEdges(ctx context.Context, args json.RawMes
 	if err != nil {
 		return ExecuteResult{}, fmt.Errorf("find_outlier_edges: decode: %w", err)
 	}
+	decorateRankRows(callCtx, r.edges, rankRows)
 	rows := make([]OutlierEdgeRow, 0, len(rankRows))
 	for _, rr := range rankRows {
 		rows = append(rows, OutlierEdgeRow{
-			EdgeID: rr.EdgeID,
-			ZScore: rr.Value,
-			Metric: rr.Metric,
+			DeviceID: rr.DeviceID,
+			EdgeID:   rr.EdgeID,
+			EdgeName: rr.EdgeName,
+			ZScore:   rr.Value,
+			Metric:   rr.Metric,
 		})
-	}
-
-	// Decorate with edge name.
-	edges, err := r.edges.List(callCtx, edgebiz.ListFilter{Limit: 500})
-	if err == nil {
-		nameByID := make(map[uint64]string, len(edges))
-		for _, e := range edges {
-			nameByID[e.ID] = e.Name
-		}
-		for i := range rows {
-			if n, ok := nameByID[rows[i].EdgeID]; ok {
-				rows[i].EdgeName = n
-			}
-		}
 	}
 
 	out, err := json.Marshal(map[string]any{

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	edgebiz "github.com/ongridio/ongrid/internal/manager/biz/edge"
+	edgemodel "github.com/ongridio/ongrid/internal/manager/model/edge"
 )
 
 // ToolNameRankEdges is the stable wire name the LLM sees.
@@ -63,14 +64,14 @@ type RankEdgeRow struct {
 
 const rankEdgesCallTimeout = 60 * time.Second
 
-// rankMetricExpr returns the PromQL fragment that yields a per-edge
+// rankMetricExpr returns the PromQL fragment that yields a per-device
 // scalar for the requested rank-by name. The closed set must stay in
 // sync with manager/biz/alert.metricExprFor so an LLM-driven rank uses
 // the same vocabulary as alert thresholds.
 func rankMetricExpr(by string) (expr, label string, ok bool) {
 	switch by {
 	case "cpu":
-		return `100 * (1 - avg by (edge_id) (rate(node_cpu_seconds_total{mode="idle"}[5m])))`, "cpu_pct", true
+		return `100 * (1 - avg by (device_id, edge_id) (rate(node_cpu_seconds_total{mode="idle"}[5m])))`, "cpu_pct", true
 	case "mem":
 		return `100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)`, "mem_pct", true
 	case "disk":
@@ -78,15 +79,15 @@ func rankMetricExpr(by string) (expr, label string, ok bool) {
 	case "load":
 		return `node_load1`, "load1", true
 	case "composite":
-		// Mean of cpu/mem/disk in percent. Wrapped with avg by(edge_id)
+		// Mean of cpu/mem/disk in percent. Preserve device_id and legacy edge_id
 		// because the underlying series carry differing label shapes
 		// (cpu has a mode label aggregated away; mem has none; disk
-		// carries a mountpoint filter). Aligning on edge_id collapses
+		// carries a mountpoint filter). Aligning on the identity labels collapses
 		// to one row per host.
 		return `(` +
-			`avg by (edge_id) (100 * (1 - avg by (edge_id, instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))))` +
-			` + avg by (edge_id) (100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes))` +
-			` + avg by (edge_id) (100 * (1 - node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}))` +
+			`avg by (device_id, edge_id) (100 * (1 - avg by (device_id, edge_id, instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))))` +
+			` + avg by (device_id, edge_id) (100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes))` +
+			` + avg by (device_id, edge_id) (100 * (1 - node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}))` +
 			`) / 3`, "composite_pct", true
 	}
 	return "", "", false
@@ -146,20 +147,7 @@ func (r *Registry) executeRankEdges(ctx context.Context, args json.RawMessage) (
 		return ExecuteResult{}, fmt.Errorf("rank_edges: decode: %w", err)
 	}
 
-	// Decorate with edge name. List with a wide limit and build a small
-	// id->name map; cheaper than per-row GetByID for typical fleets.
-	edges, err := r.edges.List(callCtx, edgebiz.ListFilter{Limit: 500})
-	if err == nil {
-		nameByID := make(map[uint64]string, len(edges))
-		for _, e := range edges {
-			nameByID[e.ID] = e.Name
-		}
-		for i := range rows {
-			if n, ok := nameByID[rows[i].EdgeID]; ok {
-				rows[i].EdgeName = n
-			}
-		}
-	}
+	decorateRankRows(callCtx, r.edges, rows)
 
 	out, err := json.Marshal(map[string]any{
 		"results":   rows,
@@ -173,6 +161,33 @@ func (r *Registry) executeRankEdges(ctx context.Context, args json.RawMessage) (
 	return ExecuteResult{ResultJSON: out}, nil
 }
 
+// decorateRankRows keeps telemetry device IDs separate from Edge primary keys.
+func decorateRankRows(ctx context.Context, edges *edgebiz.Usecase, rows []RankEdgeRow) {
+	// shortcut: enrich the first 500 edges; paginate when larger fleets need complete names.
+	items, err := edges.List(ctx, edgebiz.ListFilter{Limit: 500})
+	if err != nil {
+		return // Names and Edge links are best-effort; retain the metric identity.
+	}
+	byEdge := make(map[uint64]*edgemodel.Edge, len(items))
+	byDevice := make(map[uint64]*edgemodel.Edge, len(items))
+	for _, edge := range items {
+		byEdge[edge.ID] = edge
+		if edge.DeviceID != nil {
+			byDevice[*edge.DeviceID] = edge
+		}
+	}
+	for i := range rows {
+		edge := byEdge[rows[i].EdgeID]
+		if rows[i].DeviceID != 0 {
+			edge = byDevice[rows[i].DeviceID]
+		}
+		if edge != nil {
+			rows[i].EdgeID = edge.ID
+			rows[i].EdgeName = edge.Name
+		}
+	}
+}
+
 // promRangeSeries is the per-series envelope inside a Prom matrix
 // response. Decoded only as much as we need.
 type promRangeSeries struct {
@@ -180,9 +195,8 @@ type promRangeSeries struct {
 	Values [][2]any          `json:"values"`
 }
 
-// decodeRankSeries pulls (edge_id, last-value) out of a matrix Prom
-// response. Series without a numeric edge_id label are skipped: we have
-// no way to map them back to an Edge row.
+// decodeRankSeries preserves device_id or legacy edge_id and the last value.
+// Series without either numeric identity cannot be attributed to a host.
 func decodeRankSeries(res interface { /* satisfied by *promquery.InstantResult */
 }, metricLabel string) ([]RankEdgeRow, error) {
 	type irShape struct {

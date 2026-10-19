@@ -98,18 +98,7 @@ func (t *RankEdgesTool) InvokableRun(ctx context.Context, argsJSON string, _ ...
 		return "", fmt.Errorf("rank_edges: decode: %w", err)
 	}
 
-	edges, err := t.edges.List(callCtx, edgebiz.ListFilter{Limit: 500})
-	if err == nil {
-		nameByID := make(map[uint64]string, len(edges))
-		for _, e := range edges {
-			nameByID[e.ID] = e.Name
-		}
-		for i := range rows {
-			if n, ok := nameByID[rows[i].EdgeID]; ok {
-				rows[i].EdgeName = n
-			}
-		}
-	}
+	decorateRankRows(callCtx, t.edges, rows)
 
 	out, err := json.Marshal(map[string]any{
 		"results":   rows,

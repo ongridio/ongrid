@@ -229,6 +229,9 @@ func (t *CorrelateIncidentTool) singleCorrelate(ctx context.Context, incidentID 
 	if inc.DeviceID != nil && t.edges != nil {
 		snap := t.queryEdgeSnapshot(callCtx, *inc.DeviceID, inc.FirstFiredAt)
 		bundle.Edge = snap
+		if snap == nil {
+			bundle.Skipped["edge"] = "device host edge could not be resolved"
+		}
 	}
 
 	if len(bundle.Skipped) == 0 {
@@ -372,26 +375,32 @@ func (t *CorrelateIncidentTool) queryTracePanel(ctx context.Context, service str
 	return entries, nil
 }
 
-// queryEdgeSnapshot mirrors Registry.queryEdgeSnapshot.
-func (t *CorrelateIncidentTool) queryEdgeSnapshot(ctx context.Context, edgeID uint64, firedAt time.Time) *edgeSnapshot {
-	snap := &edgeSnapshot{ID: edgeID}
+// queryEdgeSnapshot resolves a known Device ID without legacy raw-Edge fallback.
+func (t *CorrelateIncidentTool) queryEdgeSnapshot(ctx context.Context, deviceID uint64, firedAt time.Time) *edgeSnapshot {
+	if deviceID == 0 || t.edges == nil || t.devices == nil || t.devices.Links() == nil {
+		return nil
+	}
 	edgeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	edge, err := t.edges.Get(edgeCtx, edgeID)
-	if err == nil && edge != nil {
-		snap.Name = edge.Name
-		snap.Status = edge.Status
-		snap.LastSeenAt = edge.LastSeenAt
-		if t.devices != nil && edge.DeviceID != nil {
-			if d, derr := t.devices.Get(edgeCtx, *edge.DeviceID); derr == nil && d != nil {
-				snap.Roles = devicemodel.DecodeRoles(d.Roles)
-			}
+	edgeID, err := t.devices.Links().LookupEdgeForDevice(edgeCtx, deviceID, devicemodel.EdgeDeviceRelationHost)
+	if err != nil || edgeID == 0 {
+		if err != nil && !errors.Is(err, context.Canceled) && t.log != nil {
+			t.log.Debug("correlate_incident: host edge resolution failed",
+				slog.Uint64("device_id", deviceID), slog.Any("err", err))
 		}
-	} else if err != nil && !errors.Is(err, context.Canceled) {
-		if t.log != nil {
+		return nil
+	}
+	edge, err := t.edges.Get(edgeCtx, edgeID)
+	if err != nil || edge == nil {
+		if err != nil && !errors.Is(err, context.Canceled) && t.log != nil {
 			t.log.Debug("correlate_incident: edge lookup failed",
 				slog.Uint64("edge_id", edgeID), slog.Any("err", err))
 		}
+		return nil
+	}
+	snap := &edgeSnapshot{ID: edge.ID, Name: edge.Name, Status: edge.Status, LastSeenAt: edge.LastSeenAt}
+	if d, err := t.devices.Get(edgeCtx, deviceID); err == nil && d != nil {
+		snap.Roles = devicemodel.DecodeRoles(d.Roles)
 	}
 
 	if t.promQuery != nil {
@@ -408,23 +417,27 @@ func (t *CorrelateIncidentTool) queryEdgeSnapshot(ctx context.Context, edgeID ui
 				*sink = &vc
 			}
 		}
-		probe(fmt.Sprintf(`(100 * (1 - avg by (edge_id) (rate(node_cpu_seconds_total{mode="idle"}[5m])))) and on(edge_id) (group by (edge_id) ({edge_id="%d"}))`, edgeID), &load.CPUPct)
-		probe(fmt.Sprintf(`(100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) and on(edge_id) (group by (edge_id) ({edge_id="%d"}))`, edgeID), &load.MemPct)
-		probe(fmt.Sprintf(`up{edge_id="%d"}`, edgeID), &load.Up)
+		for _, metric := range []struct {
+			name string
+			sink **float64
+		}{{"cpu_pct", &load.CPUPct}, {"mem_pct", &load.MemPct}} {
+			expr, _ := metricExprFor(metric.name)
+			probe(wrapPerDevice(expr, &deviceID), metric.sink)
+		}
+		probe(fmt.Sprintf(`up{device_id="%d"}`, deviceID), &load.Up)
 		if load.CPUPct != nil || load.MemPct != nil || load.Up != nil {
 			snap.CurrentLoad = load
 		}
 	}
 
 	if t.alertUC != nil {
-		// Recent flap counter — pull a wider page filtered to this edge,
+		// Recent flap counter — pull a wider page filtered to this device,
 		// then post-filter by first_fired_at >= firedAt - 24h.
 		func() {
 			listCtx, lcancel := context.WithTimeout(ctx, 5*time.Second)
 			defer lcancel()
-			eid := edgeID
 			recent, err := t.alertUC.ListIncidents(listCtx, alertbiz.IncidentFilter{
-				DeviceID: &eid,
+				DeviceID: &deviceID,
 				Limit:    100,
 			})
 			if err != nil {
