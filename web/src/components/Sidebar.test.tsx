@@ -98,28 +98,16 @@ describe('Sidebar configurable sections', () => {
     expect(localStorage.getItem('sidebar.section.resources.hidden')).toBe('[]');
   }, 20000);
 
-  it.each([null, '{', '{}'])('Agent 默认隐藏，缺失或无效设置不改变默认值：%s', (saved) => {
+  it.each([null, '[]', '["agent-observability"]'])('Agent 观测不再出现在侧栏及菜单管理，兼容旧设置：%s', async (saved) => {
     if (saved !== null) localStorage.setItem('sidebar.section.observability.hidden', saved);
-    render(<MemoryRouter initialEntries={['/agent-observability']}><Sidebar /></MemoryRouter>);
+    const user = userEvent.setup({ skipHover: true });
+    render(<MemoryRouter initialEntries={['/traces']}><Sidebar /></MemoryRouter>);
 
     expect(screen.getByRole('link', { name: '链路' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Agent' })).not.toBeInTheDocument();
-  });
-
-  it('可在菜单管理中显示 Agent，并在重新加载后保留选择', async () => {
-    const user = userEvent.setup({ skipHover: true });
-    const view = render(<MemoryRouter initialEntries={['/agent-observability']}><Sidebar /></MemoryRouter>);
-
     await user.click(screen.getByRole('button', { name: '管理监控告警菜单' }));
-    const checkbox = await screen.findByRole('checkbox', { name: 'Agent' });
-    expect(checkbox).not.toBeChecked();
-    fireEvent.click(checkbox);
-    expect(screen.getByRole('link', { name: 'Agent' })).toHaveAttribute('href', '/agent-observability');
-    expect(localStorage.getItem('sidebar.section.observability.hidden')).toBe('[]');
-
-    view.unmount();
-    render(<MemoryRouter initialEntries={['/agent-observability']}><Sidebar /></MemoryRouter>);
-    expect(screen.getByRole('link', { name: 'Agent' })).toBeInTheDocument();
+    expect(await screen.findByRole('checkbox', { name: '链路' })).toBeChecked();
+    expect(screen.queryByRole('checkbox', { name: 'Agent' })).not.toBeInTheDocument();
   });
 
   it('所有可折叠分组都提供菜单管理入口', () => {

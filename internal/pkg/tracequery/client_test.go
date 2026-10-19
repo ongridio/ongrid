@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -156,8 +157,8 @@ func TestClient_GetTrace_NotFound(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := New(srv.URL, slog.Default())
-	if _, err := c.GetTrace(context.Background(), "deadbeef"); err == nil {
-		t.Errorf("expected not-found error")
+	if _, err := c.GetTrace(context.Background(), "deadbeef"); !errors.Is(err, errs.ErrNotFound) {
+		t.Errorf("expected not-found sentinel, got %v", err)
 	}
 }
 

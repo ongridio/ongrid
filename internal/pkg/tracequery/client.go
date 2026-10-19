@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/pkg/errs"
 	oteltracing "github.com/ongridio/ongrid/internal/pkg/tracing"
 )
 
@@ -22,6 +23,9 @@ import (
 type SearchResult struct {
 	Traces  json.RawMessage `json:"traces"`
 	Metrics json.RawMessage `json:"metrics,omitempty"`
+	// Partial records local filtering limits for Agent observability metadata.
+	// It is not part of the generic Trace API response.
+	Partial bool `json:"-"`
 }
 
 // TraceResult is the unmarshalled response from /api/traces/<id>. Tempo
@@ -249,7 +253,7 @@ func (c *Client) do(ctx context.Context, path string, q url.Values) ([]byte, err
 		return nil, ErrResponseTooLarge
 	}
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("tracequery: %s: not found", path)
+		return nil, fmt.Errorf("tracequery: %s: %w", path, errs.ErrNotFound)
 	}
 	if resp.StatusCode != http.StatusOK {
 		c.log.WarnContext(ctx, "tracequery: non-200",

@@ -10,6 +10,7 @@ import (
 	managerbizlogs "github.com/ongridio/ongrid/internal/manager/biz/logs"
 	managerbizpromwrite "github.com/ongridio/ongrid/internal/manager/biz/promwrite"
 	managerbizsetting "github.com/ongridio/ongrid/internal/manager/biz/setting"
+	manageraiopsdata "github.com/ongridio/ongrid/internal/manager/data/aiops/store"
 	managerdevicedata "github.com/ongridio/ongrid/internal/manager/data/device/store"
 	managerlogsdata "github.com/ongridio/ongrid/internal/manager/data/logs/store"
 	managerserveragenttrace "github.com/ongridio/ongrid/internal/manager/server/agenttrace"
@@ -42,6 +43,7 @@ type telemetryModule struct {
 	logsBackendSvc      *managerbizlogs.Service
 	logsHandler         *managerserverlogs.Handler
 	tracesHandler       *managerservertraces.Handler
+	traceQuery          *managerbizagenttrace.ScopedQuerier
 	profilesHandler     *managerserverprofiles.Handler
 	apmProm             managerbizapm.PromQuerier
 	apmService          *managerbizapm.Service
@@ -152,10 +154,13 @@ func bootstrapTelemetry(rootCtx context.Context, cfg *config.Config, log *slog.L
 	// nginx. The data plane /v1/traces ingest route stays auth_request-
 	// gated for OTLP push only —
 	var tracesHandler *managerservertraces.Handler
+	var traceQuery *managerbizagenttrace.ScopedQuerier
 	if cfg.Traces.URL != "" {
-		tracesHandler = managerservertraces.NewHandler(
+		traceQuery = managerbizagenttrace.NewScopedQuerier(
 			pkgtracequery.New(cfg.Traces.URL, log.With(slog.String("comp", "tracequery"))),
+			manageraiopsdata.NewSessionRepo(storage.db),
 		)
+		tracesHandler = managerservertraces.NewHandler(traceQuery)
 	} else {
 		// Tempo disabled — handler installs but every route returns 503.
 		tracesHandler = managerservertraces.NewHandler(nil)
@@ -166,8 +171,8 @@ func bootstrapTelemetry(rootCtx context.Context, cfg *config.Config, log *slog.L
 		apmProm = promQueryClient
 	}
 	var apmTraces managerbizapm.TraceQuerier
-	if cfg.Traces.URL != "" {
-		apmTraces = pkgtracequery.New(cfg.Traces.URL, log.With(slog.String("comp", "apm-traces")))
+	if traceQuery != nil {
+		apmTraces = traceQuery
 	}
 	apmService := managerbizapm.New(apmProm, apmTraces, logsBackendSvc).WithClusterScopes(devices.topologyUC)
 	apmHandler := managerserverapm.NewHandler(apmService, log)
@@ -186,6 +191,7 @@ func bootstrapTelemetry(rootCtx context.Context, cfg *config.Config, log *slog.L
 		logsBackendSvc:      logsBackendSvc,
 		logsHandler:         logsHandler,
 		tracesHandler:       tracesHandler,
+		traceQuery:          traceQuery,
 		profilesHandler:     profilesHandler,
 		apmProm:             apmProm,
 		apmService:          apmService,
