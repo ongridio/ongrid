@@ -102,3 +102,11 @@ export type PluginCountsResp = { counts: Record<string, number> };
 export function getPluginCounts(): Promise<PluginCountsResp> {
   return request<PluginCountsResp>('GET', '/integrations/plugin-counts');
 }
+
+// Host 配置独立于当前 Edge 安装；健康状态由后端关联当前安装。
+export function listHostPlugins(deviceId: number | string): Promise<PluginListResp> {
+ return request<PluginListResp>('GET', `/devices/${encodeURIComponent(String(deviceId))}/plugins`);
+}
+export function setHostPlugin(deviceId: number | string, name: string, body: { enabled: boolean; spec?: Record<string, unknown> }): Promise<PluginRow> {
+ return request<PluginRow>('PUT', `/devices/${encodeURIComponent(String(deviceId))}/plugins/${encodeURIComponent(name)}`, body);
+}

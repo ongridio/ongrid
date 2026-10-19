@@ -33,3 +33,14 @@ Agent 工具统一为 `get_host_summary`、`rank_hosts`、`find_outlier_hosts`�
 ## 后续连接加固
 
 [Issue #527](https://github.com/ongridio/ongrid/issues/527) 跟踪两个尚未修复的边界：连接映射缺失时底层仍会将 Edge ID 回退为 transport ID；Host 当前绑定的解析与发送之间尚无代次 fencing。当前绑定校验不代表端到端原子执行保证。后续需明确重装切换及在途请求语义，禁止自动重放有副作用的命令。
+
+
+## Host 长期插件配置
+
+`host_plugin_configs` 以 `(device_id, plugin_name)` 唯一保存长期配置。注册及升级只接纳明确绑定的安装配置；已有 Host 配置始终优先，新安装的默认值不能覆盖用户意图。删除使用 tombstone，避免重新注册时复活旧配置。
+
+设备接口 `GET /v1/devices/{id}/plugins` 和 `PUT /v1/devices/{id}/plugins/{name}` 使用 Host ID。旧 Edge 配置接口必须验证当前双向绑定，过期安装不能修改 Host 配置。无安装时仍可编辑长期配置，实际通知仅发送给当前安装。APM 新链接使用 `/apm/capture/devices/{device_id}`；旧 `/hosts/{edge_id}` 链接必须经 Edge 显式关联解析，不做数值回退。
+
+Profiles 是安装级采样会话，不随重装重放。数据库采集配置虽长期保存，但凭据文件仍在 Edge 本地；重装不保证恢复本地密钥，必须重新下发或配置凭据。无当前安装时拒绝数据库采集配置写入。Kubernetes 的集群级策略仍由原集群配置入口管理。
+
+升级前备份数据库，执行 `docs/migrations/20261019_host_plugin_configs.up.sql`，然后启动新 Manager 接纳明确绑定的旧配置。不要混用新旧 Manager 接受配置写入：旧版本不认识 Host 配置表。首次启动失败且没有新写入时，可恢复旧二进制与数据库备份；已有 Host 写入后必须停写并导出配置、核对当前绑定后再制定回退，不能直接删表。Edge 二进制无需随此配置存储变更更新。

@@ -46,6 +46,8 @@ import {
 } from '@/api/edges';
 import {
   listEdgePlugins,
+  listHostPlugins,
+  setHostPlugin,
   setEdgePlugin,
   type PluginTargetHealth,
   type PluginRow,
@@ -532,7 +534,7 @@ export default function EdgeDetailPage() {
             </div>
           )}
 
-          {tab === 'plugins' && edge && <PluginsTab edgeId={edge.id} />}
+          {tab === 'plugins' && (device || edge) && <PluginsTab edgeId={edge?.id ?? 0} deviceId={device?.id ?? edge?.device_id ?? undefined} />}
 
           {tab === 'topology' && <TopologyTab deviceID={deviceID} />}
 
@@ -1352,7 +1354,7 @@ function TopologyTab({ deviceID }: { deviceID: number | null }) {
   );
 }
 
-function PluginsTab({ edgeId }: { edgeId: number }) {
+function PluginsTab({ edgeId, deviceId }: { edgeId: number; deviceId?: number }) {
   const { tr } = useI18n();
   const [rows, setRows] = useState<PluginRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1366,14 +1368,14 @@ function PluginsTab({ edgeId }: { edgeId: number }) {
     setLoading(true);
     setErr(null);
     try {
-      const r = await listEdgePlugins(edgeId);
+      const r = await (deviceId ? listHostPlugins(deviceId) : listEdgePlugins(edgeId));
       setRows(r.items ?? []);
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : (e as Error).message || tr('加载失败', 'Load failed'));
     } finally {
       setLoading(false);
     }
-  }, [edgeId, tr]);
+  }, [edgeId, deviceId, tr]);
 
   useEffect(() => {
     void fetchRows();
@@ -1404,7 +1406,7 @@ function PluginsTab({ edgeId }: { edgeId: number }) {
       )
     );
     try {
-      const updated = await setEdgePlugin(edgeId, name, body);
+      const updated = await (deviceId ? setHostPlugin(deviceId, name, body) : setEdgePlugin(edgeId, name, body));
       setRows((cur) => cur.map((r) => (r.plugin_name === name ? updated : r)));
       setSaveNotice(tr(`${name} 配置已保存，正在推送到 edge。`, `${name} config saved and is being pushed to the edge.`));
       return updated;

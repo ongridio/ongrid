@@ -79,6 +79,7 @@ describe("EdgesPage", () => {
             },
             {
               id: 17,
+              current_edge_id: 5,
               name: "k8s:kind-local:ongrid-k8s-control-plane",
               hostname: "ongrid-k8s-control-plane",
               ip_address: "10.0.0.5",
@@ -88,6 +89,7 @@ describe("EdgesPage", () => {
             },
             {
               id: 19,
+              current_edge_id: 9,
               name: "bare-metal-1",
               hostname: "bm-1",
               ip_address: "10.0.0.9",
@@ -661,9 +663,9 @@ describe("EdgesPage", () => {
       http.get("/api/v1/devices", () =>
         HttpResponse.json({
           items: [
-            { id: 17, name: "k8s-host", hostname: "k8s-host", roles: [], online: true },
-            { id: 19, name: "app-host", hostname: "app-host", roles: ["server"], online: true },
-            { id: 141, name: "storage-host", hostname: "storage-host", roles: ["storage"], online: true },
+            { id: 17, current_edge_id: 5, name: "k8s-host", hostname: "k8s-host", roles: [], online: true },
+            { id: 19, current_edge_id: 9, name: "app-host", hostname: "app-host", roles: ["server"], online: true },
+            { id: 141, current_edge_id: 12, name: "storage-host", hostname: "storage-host", roles: ["storage"], online: true },
             { id: 140, name: "core-switch", hostname: "core-switch", os: "network", roles: ["network"], online: false, reachability_status: "reachable" },
           ],
           total: 4,

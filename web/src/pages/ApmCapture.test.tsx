@@ -1,14 +1,16 @@
-vi.mock('@/api/devices', () => ({ listDevices: vi.fn().mockResolvedValue({ items: [{ id: 1, name: 'host', environment: 'device-only-env' }], total: 1 }) }));
+vi.mock('@/api/devices', () => ({ getDevice: vi.fn(), listDevices: vi.fn().mockResolvedValue({ items: [{ id: 1, name: 'host', environment: 'device-only-env' }], total: 1 }) }));
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, expect, it, vi } from 'vitest';
 import ApmCapturePage from './ApmCapture';
+import { getDevice } from '@/api/devices';
+import { setHostPlugin } from '@/api/integrations';
 import { getEdge } from '@/api/edges';
-import { listEdgePlugins } from '@/api/integrations';
+import { listHostPlugins } from '@/api/integrations';
 import { getKubernetesCluster } from '@/api/kubernetes';
 vi.mock('@/api/edges', () => ({ getEdge: vi.fn() }));
-vi.mock('@/api/integrations', () => ({ listEdgePlugins: vi.fn(), setEdgePlugin: vi.fn(), getAutoAPMOptions: vi.fn().mockResolvedValue({ environments: [], namespaces: [] }) }));
+vi.mock('@/api/integrations', () => ({ listHostPlugins: vi.fn(), setHostPlugin: vi.fn(), getAutoAPMOptions: vi.fn().mockResolvedValue({ environments: [], namespaces: [] }) }));
 vi.mock('@/api/topology', () => ({ listAllNodes: vi.fn().mockResolvedValue([]) }));
 vi.mock('@/api/kubernetes', () => ({ getKubernetesCluster: vi.fn(), getKubernetesCapture: vi.fn().mockResolvedValue({ spec: { kubernetes: { rules: [{ namespace: 'shop' }] } }, defaults: {} }), getKubernetesClusterHealth: vi.fn().mockResolvedValue({ namespaces: [] }) }));
 vi.mock('@/store/me', () => ({ usePermissions: () => ({ isAdmin: true }) }));
@@ -16,8 +18,9 @@ const open = (url: string) => render(<MemoryRouter initialEntries={[url]}><Route
 beforeEach(() => {
   vi.clearAllMocks();
   localStorage.setItem('ongrid-locale', 'en-US');
-  vi.mocked(getEdge).mockResolvedValue({ id: 67, name: 'Ubuntu', status: 'offline', roles: [], access_key_id: '', last_seen_at: null });
-  vi.mocked(listEdgePlugins).mockResolvedValue({ items: [{ plugin_name: 'autoapm', enabled: true, spec: { targets: [{ executable: '/opt/orders', port: 8080, service_name: 'orders' }] } }] });
+  vi.mocked(getDevice).mockResolvedValue({id:650,name:'Ubuntu',current_edge_id:67,online:false});
+  vi.mocked(getEdge).mockResolvedValue({ id: 67, device_id:650, name: 'Ubuntu', status: 'offline', roles: [], access_key_id: '', last_seen_at: null });
+  vi.mocked(listHostPlugins).mockResolvedValue({ items: [{ plugin_name: 'autoapm', enabled: true, spec: { targets: [{ executable: '/opt/orders', port: 8080, service_name: 'orders' }] } }] });
   vi.mocked(getKubernetesCluster).mockResolvedValue({ id: 48, name: 'prod', mode: 'full-node', status: 'online', created_at: '', updated_at: '' });
 });
 it('loads a direct host URL as a page and opens only the editor in a dialog', async () => {
@@ -56,4 +59,14 @@ it('shows a retryable load failure and rejects invalid resource URLs', async () 
   expect(screen.getByText('Invalid capture configuration URL')).toBeInTheDocument();
   expect(getEdge).not.toHaveBeenCalled();
   expect(getKubernetesCluster).not.toHaveBeenCalled();
+});
+
+it('saves a durable device target after its last Edge was removed', async () => {
+ vi.mocked(getDevice).mockResolvedValue({id:650,name:'Ubuntu',online:false});
+ vi.mocked(setHostPlugin).mockResolvedValue({plugin_name:'autoapm',enabled:true,spec:{targets:[]}});
+ const user = userEvent.setup(); open('/apm/capture/devices/650');
+ await user.click(await screen.findByRole('button',{name:'Edit orders'}));
+ await user.click(screen.getByRole('button',{name:'Remove target'}));
+ expect(setHostPlugin).toHaveBeenCalledWith(650,'autoapm',expect.objectContaining({spec:expect.objectContaining({targets:[]})}));
+ expect(getEdge).not.toHaveBeenCalled();
 });

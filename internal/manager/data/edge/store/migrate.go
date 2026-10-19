@@ -24,6 +24,7 @@ func Migrate(db *gorm.DB) error {
 	if err := db.AutoMigrate(
 		&model.Edge{},
 		&model.PluginConfig{},
+		&model.HostPluginConfig{},
 		&model.EnrollmentProfile{},
 		&model.Enrollment{},
 		&model.UpgradeJob{},

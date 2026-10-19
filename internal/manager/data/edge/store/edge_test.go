@@ -285,6 +285,9 @@ func TestSQLiteSoftDeleteHidesRow(t *testing.T) {
 func TestSQLitePluginConfigSoftDeleteAllowsReuse(t *testing.T) {
 	repo := newTestRepo(t)
 	configs := NewPluginConfigRepo(repo.db)
+	if err := repo.db.Create(&model.Edge{ID: 7, AccessKeyID: "plugin-test"}).Error; err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 
 	first, err := configs.Upsert(ctx, &model.PluginConfig{

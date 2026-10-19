@@ -106,6 +106,7 @@ func bootstrapDevices(rootCtx context.Context, cfg *config.Config, log *slog.Log
 	k8sUC.SetTelemetryTargetResolver(pluginEndpointResolver)
 	pluginConfigUC := managerbizedge.NewPluginConfigUC(pluginConfigRepo, nil, pluginEndpointResolver, log)
 	edgeUC.SetPluginSeeder(pluginConfigUC)
+	pluginConfigUC.SetHostConfigTarget(managersvcedge.HostConfigTargetProvider(edgeDeviceRepo, deviceUC))
 
 	edgeHandler := managerserveredge.NewHandler(edgeSvc, deviceRepo, pluginConfigUC)
 	edgeHandler.SetAuthz(iam.authzMW)

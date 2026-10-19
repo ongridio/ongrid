@@ -57,6 +57,16 @@ func (r *EdgeDeviceRepo) Link(ctx context.Context, edgeID, deviceID uint64, t mo
 			if err == nil && existing.DeviceID != deviceID {
 				return errs.ErrInvalid
 			}
+			if host.CurrentEdgeID != nil {
+				if err := adoptHostPluginConfigs(tx, deviceID, *host.CurrentEdgeID); err != nil {
+					return err
+				}
+			}
+			if host.CurrentEdgeID == nil || *host.CurrentEdgeID <= edgeID {
+				if err := adoptHostPluginConfigs(tx, deviceID, edgeID); err != nil {
+					return err
+				}
+			}
 			if host.CurrentEdgeID == nil || *host.CurrentEdgeID < edgeID {
 				if err := tx.Model(&model.Device{}).Where("id = ?", deviceID).Update("current_edge_id", edgeID).Error; err != nil {
 					return err

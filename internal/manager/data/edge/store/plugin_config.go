@@ -27,22 +27,50 @@ func NewPluginConfigRepo(db *gorm.DB) *PluginConfigRepo {
 // ListByEdge returns every plugin config row for one edge, sorted by
 // plugin_name for stable UI rendering.
 func (r *PluginConfigRepo) ListByEdge(ctx context.Context, edgeID uint64) ([]*model.PluginConfig, error) {
+	hostID, err := r.hostForEdge(ctx, edgeID)
+	if err != nil {
+		return nil, err
+	}
 	var out []*model.PluginConfig
 	tx := r.db.WithContext(ctx).Where("edge_id = ?", edgeID).Order("plugin_name ASC")
 	if err := tx.Find(&out).Error; err != nil {
 		return nil, err
+	}
+	if hostID != 0 {
+		hostRows, err := r.ListByHost(ctx, hostID)
+		if err != nil {
+			return nil, err
+		}
+		runtimeRows := out[:0]
+		for _, row := range out {
+			if !model.DurableHostPlugin(row.PluginName) {
+				runtimeRows = append(runtimeRows, row)
+			}
+		}
+		out = append(runtimeRows, hostRows...)
 	}
 	return out, nil
 }
 
 func (r *PluginConfigRepo) ListAutoAPMSpecs(ctx context.Context) ([]string, error) {
 	var specs []string
-	err := r.db.WithContext(ctx).Model(&model.PluginConfig{}).Where("plugin_name = ?", model.PluginNameAutoAPM).Pluck("spec_json", &specs).Error
+	err := r.db.WithContext(ctx).Raw(`SELECT p.spec_json FROM edge_plugin_configs p JOIN edges e ON e.id=p.edge_id AND e.delete_marker=0 WHERE p.plugin_name=? AND p.delete_marker=0 AND e.device_id IS NULL UNION ALL SELECT h.spec_json FROM host_plugin_configs h JOIN devices d ON d.id=h.device_id AND d.delete_marker=0 WHERE h.plugin_name=? AND h.removed=0`, model.PluginNameAutoAPM, model.PluginNameAutoAPM).Scan(&specs).Error
 	return specs, err
 }
 
 // Get returns a single (edge_id, plugin_name) row or errs.ErrNotFound.
 func (r *PluginConfigRepo) Get(ctx context.Context, edgeID uint64, plugin string) (*model.PluginConfig, error) {
+	hostID, resolveErr := r.hostForEdge(ctx, edgeID)
+	if resolveErr != nil {
+		return nil, resolveErr
+	}
+	if hostID != 0 && model.DurableHostPlugin(plugin) {
+		row, err := r.GetByHost(ctx, hostID, plugin)
+		if row != nil {
+			row.EdgeID = edgeID
+		}
+		return row, err
+	}
 	var row model.PluginConfig
 	err := r.db.WithContext(ctx).Where("edge_id = ? AND plugin_name = ?", edgeID, plugin).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -60,12 +88,19 @@ func (r *PluginConfigRepo) Upsert(ctx context.Context, in *model.PluginConfig) (
 	if in == nil {
 		return nil, errs.ErrInvalid
 	}
+	hostID, err := r.hostForEdge(ctx, in.EdgeID)
+	if err != nil {
+		return nil, err
+	}
+	if hostID != 0 && model.DurableHostPlugin(in.PluginName) {
+		return r.UpsertHost(ctx, hostID, in)
+	}
 	now := time.Now().UTC()
 	if in.CreatedAt.IsZero() {
 		in.CreatedAt = now
 	}
 	in.UpdatedAt = now
-	err := r.db.WithContext(ctx).Clauses(clause.OnConflict{
+	err = r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "edge_id"}, {Name: "plugin_name"}, {Name: "delete_marker"}},
 		DoUpdates: clause.AssignmentColumns([]string{"enabled", "spec_json", "updated_at"}),
 	}).Create(in).Error
@@ -78,6 +113,13 @@ func (r *PluginConfigRepo) Upsert(ctx context.Context, in *model.PluginConfig) (
 // Delete removes one (edge_id, plugin_name) row. Idempotent (no error
 // when the row didn't exist).
 func (r *PluginConfigRepo) Delete(ctx context.Context, edgeID uint64, plugin string) error {
+	hostID, err := r.hostForEdge(ctx, edgeID)
+	if err != nil {
+		return err
+	}
+	if hostID != 0 && model.DurableHostPlugin(plugin) {
+		return r.DeleteHost(ctx, hostID, plugin)
+	}
 	return r.db.WithContext(ctx).
 		Where("edge_id = ? AND plugin_name = ?", edgeID, plugin).
 		Delete(&model.PluginConfig{}).Error
@@ -91,13 +133,13 @@ func (r *PluginConfigRepo) CountByPlugin(ctx context.Context) (map[string]int64,
 		N          int64
 	}
 	var rows []row
-	if err := r.db.WithContext(ctx).Model(&model.PluginConfig{}).
-		Select("plugin_name, count(*) as n").
-		Where("enabled = ?", true).
-		Group("plugin_name").
-		Scan(&rows).Error; err != nil {
+	if err := r.db.WithContext(ctx).Raw(`SELECT plugin_name, COUNT(*) AS n FROM (
+ SELECT p.plugin_name FROM edge_plugin_configs p JOIN edges e ON e.id=p.edge_id AND e.delete_marker=0 WHERE p.enabled=? AND p.delete_marker=0 AND (e.device_id IS NULL OR p.plugin_name=?)
+ UNION ALL SELECT h.plugin_name FROM host_plugin_configs h JOIN devices d ON d.id=h.device_id AND d.delete_marker=0 WHERE h.enabled=? AND h.removed=0
+ ) configs GROUP BY plugin_name`, true, model.PluginNameProfiles, true).Scan(&rows).Error; err != nil {
 		return nil, err
 	}
+
 	out := make(map[string]int64, len(rows))
 	for _, r := range rows {
 		out[r.PluginName] = r.N

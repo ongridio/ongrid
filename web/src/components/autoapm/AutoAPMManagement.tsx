@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Boxes, ChevronRight, RefreshCw, Search, Server } from 'lucide-react';
-import { listEdges, type Edge } from '@/api/edges';
+import { listEdges } from '@/api/edges';
 import { listDevices, type Device } from '@/api/devices';
 import type { TopologyNode } from '@/api/topology';
 import { DeviceEnvironment } from '@/components/DeviceEnvironment';
 import { ClusterChipLink } from '@/components/ClusterChipLink';
 import { loadTopologyClusters } from '@/lib/deviceClusters';
-import { listEdgePlugins, type PluginRow } from '@/api/integrations';
+import { listHostPlugins, type PluginRow } from '@/api/integrations';
 import { Button, Card, Chip, EmptyState, FilterField, Input, PaginationFooter, Select, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui';
 import { relativeTime } from '@/lib/format';
 import { selectHostEdgesByDevice } from '@/lib/edgeSelection';
@@ -18,7 +18,7 @@ import { groupDiscoveredProcesses } from './hostProcesses';
 
 const pageSize = 10;
 type Entry = { row?: PluginRow; error?: string };
-type HostEdge = Edge & { device?: Device; clusters: TopologyNode[] };
+type HostEdge = { id: number; name: string; device_id: number; device_name?: string; status: string; device: Device; clusters: TopologyNode[] };
 type Props = { canEdit: boolean; initialEdgeId: string | null; initialScope?: string | null };
 
 export function AutoAPMManagement({ canEdit, initialEdgeId, initialScope }: Props) {
@@ -43,10 +43,11 @@ export function AutoAPMManagement({ canEdit, initialEdgeId, initialScope }: Prop
     setDeviceError('');
     void Promise.all([listEdges(), loadK8sEdgeAttachments(), listDevices(), loadTopologyClusters()]).then(([result, attachments, devices, memberships]) => {
       if (!cancelled) {
-        const devicesByID = new Map(devices.items.map(device => [device.id, device]));
-        setEdges([...selectHostEdgesByDevice(result.items.filter(edge => !attachments[edge.id]?.length), devices.items).values()].map(edge => {
-          const device = edge.device_id ? devicesByID.get(edge.device_id) : undefined;
-          return { ...edge, device, clusters: device?.node_id ? memberships.get(device.node_id) ?? [] : [] };
+        const k8sHosts = new Set(result.items.filter(edge => attachments[edge.id]?.length).map(edge => edge.device_id));
+        const selected = selectHostEdgesByDevice(result.items, devices.items);
+        setEdges(devices.items.filter(device => !k8sHosts.has(device.id) && device.os !== 'network').map(device => {
+          const edge = selected.get(device.id);
+          return { id: edge?.id ?? 0, name: edge?.name ?? device.name, device_id: device.id, status: edge?.status ?? 'offline', device, clusters: device.node_id ? memberships.get(device.node_id) ?? [] : [] };
         }));
         const linkedCluster = initialEdgeId ? attachments[Number(initialEdgeId)]?.[0]?.clusterId : undefined;
         if (linkedCluster) { setScope('kubernetes'); setInitialCluster(linkedCluster); }
@@ -65,9 +66,9 @@ export function AutoAPMManagement({ canEdit, initialEdgeId, initialScope }: Prop
     const poll = async () => {
       const results = await Promise.all(visible.map(async edge => {
         try {
-          const result = await listEdgePlugins(edge.id);
-          return [edge.id, { row: result.items.find(row => row.plugin_name === 'autoapm') }] as const;
-        } catch (e) { return [edge.id, { error: (e as Error).message }] as const; }
+          const result = await listHostPlugins(edge.device_id);
+          return [edge.device_id, { row: result.items.find(row => row.plugin_name === 'autoapm') }] as const;
+        } catch (e) { return [edge.device_id, { error: (e as Error).message }] as const; }
       }));
       if (cancelled) return;
       setEntries(current => ({ ...current, ...Object.fromEntries(results.map(([id, entry]) => [id, 'error' in entry ? { ...current[id], error: entry.error } : entry])) }));
@@ -108,21 +109,21 @@ export function AutoAPMManagement({ canEdit, initialEdgeId, initialScope }: Prop
               </tr></thead>
               <tbody className="divide-y divide-border">{visible.map(edge => {
                 const deviceName = edge.device?.name || edge.device?.hostname || edge.device_name || edge.name;
-                const entry = entries[edge.id];
+                const entry = entries[edge.device_id];
                 const health = entry?.row?.health;
                 const fresh = edge.status === 'online' && !!health?.reported_at && Date.now() - Date.parse(health.reported_at) <= 90000;
                 const failure = entry?.error || (fresh ? health?.last_error || health?.discovery_error || (health?.state === 'crashed' ? tr('采集器运行异常', 'Collector crashed') : '') : '');
                 const count = Array.isArray(entry?.row?.spec?.targets) ? entry.row.spec.targets.length : 0;
                 const discovering = fresh && health?.state === 'running';
                 const status = edge.status !== 'online' ? tr('离线', 'Offline') : !fresh ? tr('等待上报', 'Awaiting report') : discovering ? tr('发现中', 'Discovering') : tr('等待应用配置', 'Applying settings');
-                return <tr key={edge.id}>
+                return <tr key={edge.device_id}>
                   <td className="max-w-md"><div className="flex min-w-0 items-center gap-2"><Server size={14} aria-hidden="true" className="shrink-0 text-text-muted" /><Link className="og-resource-link truncate" title={deviceName} to={`/devices/${edge.device_id}`}>{deviceName}</Link><span className="shrink-0 text-xs text-text-faint">#{edge.device_id}</span></div>{edge.clusters.length > 0 && <div className="mt-1 flex flex-wrap gap-1">{edge.clusters.map(cluster => <ClusterChipLink key={cluster.id} to={`/clusters/${cluster.id}`} name={cluster.name} title={tr(`所属集群：${cluster.name}`, `Cluster: ${cluster.name}`)} />)}</div>}</td>
                   <td className="max-w-48 text-text-muted">{edge.device_id && <DeviceEnvironment key={`${edge.device_id}-${refresh}`} deviceId={edge.device_id} deviceName={deviceName} canEdit={canEdit} />}</td>
                   <td className="max-w-56 px-4 py-3">{failure ? <><Chip tone="warning">{tr('需要处理', 'Needs attention')}</Chip><p title={failure} className="mt-1 truncate text-xs text-text-muted">{failure}</p></> : <span className="inline-flex items-center gap-2 whitespace-nowrap text-xs text-text-muted"><span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${discovering ? 'bg-emerald-500' : 'bg-zinc-500'}`} />{status}</span>}</td>
                   <td className="px-4 py-3 text-right tabular-nums text-text-muted">{discovering && !failure ? groupDiscoveredProcesses(health?.candidates).length : '—'}</td>
                   <td className="px-4 py-3 text-right tabular-nums text-text-muted">{entry?.row ? count || <span className="text-xs text-text-faint">{tr('未配置', 'Not configured')}</span> : '—'}</td>
                   <td className="whitespace-nowrap px-4 py-3 text-xs text-text-muted" title={health?.reported_at}>{health?.reported_at ? relativeTime(health.reported_at) : '—'}</td>
-                  <td className="px-4 py-3 text-right"><Link className="og-button" data-size="sm" data-variant="subtle" to={`/apm/capture/hosts/${edge.id}`}>{canEdit ? tr('配置采集', 'Configure capture') : tr('查看配置', 'View settings')}<ChevronRight size={14} aria-hidden="true" /></Link></td>
+                  <td className="px-4 py-3 text-right"><Link className="og-button" data-size="sm" data-variant="subtle" to={`/apm/capture/devices/${edge.device_id}`}>{canEdit ? tr('配置采集', 'Configure capture') : tr('查看配置', 'View settings')}<ChevronRight size={14} aria-hidden="true" /></Link></td>
                 </tr>;
               })}</tbody>
             </table></div>}

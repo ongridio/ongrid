@@ -3,7 +3,7 @@ import { Check, FileText, Pencil, Plus, RefreshCw, Search, Terminal, Trash2 } fr
 import { Modal } from '@/components/Modal';
 import { Autocomplete, Button, Card, Chip, EmptyState, Input, Label, Radio } from '@/components/ui';
 import { useI18n } from '@/i18n/locale';
-import { listEdgePlugins, type PluginRow, type PluginHealth } from '@/api/integrations';
+import { listEdgePlugins, listHostPlugins, type PluginRow, type PluginHealth } from '@/api/integrations';
 import { useAutoAPMOptions } from './useAutoAPMOptions';
 import { groupDiscoveredProcesses, matchesProcess } from './hostProcesses';
 
@@ -11,6 +11,7 @@ type Target = { target_id?: string; executable: string; port: number; service_na
 type Spec = { environment?: string; targets?: Target[] };
 type Props = {
   edgeId: number;
+ deviceId?: number;
   deviceName: string;
   online: boolean;
   row: PluginRow;
@@ -18,7 +19,7 @@ type Props = {
   onSave(body: { enabled: boolean; spec?: Record<string, unknown> }): Promise<PluginRow | void>;
 };
 
-export function AutoAPMCard({ edgeId, deviceName, online, row, canEdit = true, onSave }: Props) {
+export function AutoAPMCard({ edgeId, deviceId, deviceName, online, row, canEdit = true, onSave }: Props) {
   const { tr } = useI18n();
   const { options, error: optionsError } = useAutoAPMOptions();
   const [spec, setSpec] = useState<Spec>(() => row.spec ?? {});
@@ -37,14 +38,14 @@ export function AutoAPMCard({ edgeId, deviceName, online, row, canEdit = true, o
     let timer: ReturnType<typeof setTimeout>;
     const refresh = async () => {
       try {
-        const response = await listEdgePlugins(edgeId);
+        const response = await (deviceId ? listHostPlugins(deviceId) : listEdgePlugins(edgeId));
         if (!cancelled) { setHealth(response.items.find(item => item.plugin_name === 'autoapm')?.health); setPollError(''); }
       } catch (e) { if (!cancelled) setPollError((e as Error).message); }
       finally { if (!cancelled) { setCheckedAt(Date.now()); timer = setTimeout(() => void refresh(), 5000); } }
     };
     void refresh();
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [edgeId, online, refresh]);
+  }, [edgeId, deviceId, online, refresh]);
 
   const targets = spec.targets ?? [];
   const defaultEnvironment = row.defaults ? row.defaults.environment || '' : spec.environment || '';

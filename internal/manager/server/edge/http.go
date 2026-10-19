@@ -197,6 +197,8 @@ func (h *Handler) Register(r chi.Router) {
 	r.Get("/v1/edges/{id}/processes", h.getProcesses)
 	// Plugin runtime
 	r.Get("/v1/edges/{id}/plugins", h.listPlugins)
+	r.Get("/v1/devices/{id}/plugins", h.listHostPlugins)
+	r.With(h.writeMW("edge:plugin")).Put("/v1/devices/{id}/plugins/{name}", h.setHostPlugin)
 	r.Get("/v1/integrations/autoapm-options", h.autoAPMOptions)
 	r.With(h.writeMW("edge:plugin")).Put("/v1/edges/{id}/plugins/{name}", h.setPlugin)
 	r.Get("/v1/integrations/plugin-counts", h.pluginCounts)
@@ -219,6 +221,10 @@ func (h *Handler) listPlugins(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	h.writePluginRows(w, r, id, rows)
+}
+
+func (h *Handler) writePluginRows(w http.ResponseWriter, r *http.Request, id uint64, rows []biz.PluginRow) {
 	// Merge in live runtime health (heartbeat-fed, in-memory) keyed by
 	// plugin name so each toggle row also shows running/crashed + the
 	// crash reason. Health absent (edge offline / pre-introduction agent)

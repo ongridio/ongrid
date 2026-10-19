@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	edgemodel "github.com/ongridio/ongrid/internal/manager/model/edge"
 	"gorm.io/gorm"
 
 	model "github.com/ongridio/ongrid/internal/manager/model/device"
@@ -53,6 +54,12 @@ func Migrate(db *gorm.DB) error {
 		return err
 	}
 	if err := initializeCurrentHostEdges(db); err != nil {
+		return err
+	}
+	if err := db.AutoMigrate(&edgemodel.HostPluginConfig{}); err != nil {
+		return err
+	}
+	if err := initializeHostPluginConfigs(db); err != nil {
 		return err
 	}
 	return backfillDeviceEnvironments(db)

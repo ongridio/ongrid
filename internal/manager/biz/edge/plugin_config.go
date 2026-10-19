@@ -69,6 +69,8 @@ type PluginRuntimeOverlayProvider interface {
 // the affected edge so changes propagate within seconds, not within the
 // edge's 60s safety-net poll window.
 type PluginConfigUC struct {
+	hostScoped                 bool
+	hostTarget                 HostConfigTarget
 	kubernetesTelemetryCluster func(context.Context, uint64) (uint64, uint64, error)
 	kubernetesLogPaths         func(context.Context, uint64) ([]string, bool, error)
 	kubernetesAutoAPM          func(context.Context, uint64) (*autoapm.Spec, bool, error)
@@ -324,7 +326,7 @@ type SetInput struct {
 // Set upserts one plugin config and (best-effort) notifies the edge to
 // reload. Validates plugin name + spec marshallability.
 func (uc *PluginConfigUC) Set(ctx context.Context, edgeID uint64, plugin string, in SetInput) (*PluginRow, error) {
-	if edgeID == 0 {
+	if edgeID == 0 && !uc.hostScoped {
 		return nil, fmt.Errorf("%w: edge_id required", errs.ErrInvalid)
 	}
 	if !model.IsKnownPluginName(plugin) {
@@ -608,7 +610,7 @@ func (uc *PluginConfigUC) CountByPlugin(ctx context.Context) (map[string]int64, 
 // caller. Errors are logged only — the edge's 60s safety net catches
 // missed pushes anyway.
 func (uc *PluginConfigUC) notify(ctx context.Context, edgeID uint64, plugin string) {
-	if uc.notifier == nil {
+	if uc.notifier == nil || edgeID == 0 {
 		uc.log.Debug("notifier not wired; skipping push", slog.Uint64("edge_id", edgeID))
 		return
 	}
