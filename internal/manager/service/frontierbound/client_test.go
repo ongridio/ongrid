@@ -245,6 +245,7 @@ func TestClient_Call_Success(t *testing.T) {
 	fs := newFakeService()
 	fs.respData = []byte(`{"ok":true}`)
 	c := newWithService(fs, slog.Default())
+	c.bindEdgeTransport(1042, 42)
 
 	out, err := c.Call(context.Background(), 42, "some_method", []byte(`{"x":1}`))
 	if err != nil {
@@ -253,8 +254,8 @@ func TestClient_Call_Success(t *testing.T) {
 	if string(out) != `{"ok":true}` {
 		t.Errorf("Call out = %q, want {\"ok\":true}", string(out))
 	}
-	if fs.lastEdgeID != 42 {
-		t.Errorf("lastEdgeID = %d, want 42", fs.lastEdgeID)
+	if fs.lastEdgeID != 1042 {
+		t.Errorf("lastEdgeID = %d, want 1042", fs.lastEdgeID)
 	}
 	if fs.lastMethod != "some_method" {
 		t.Errorf("lastMethod = %q, want some_method", fs.lastMethod)
@@ -306,8 +307,33 @@ func TestClient_OpenStreamWithMeta_UsesEmbeddedEndOptions(t *testing.T) {
 
 func TestClient_OpenStreamWithMeta_FailsClosedWithoutMetadataSupport(t *testing.T) {
 	c := newWithService(newFakeService(), slog.Default())
+	c.bindEdgeTransport(1002, 2)
 	if _, err := c.OpenStreamWithMeta(context.Background(), 2, []byte(`{"kind":"webshell"}`)); err == nil {
 		t.Fatal("OpenStreamWithMeta silently dropped required metadata")
+	}
+}
+
+// A missing binding must fail closed on every outbound path, including when
+// another edge's transport ID happens to equal the requested edge ID.
+func TestClient_MissingTransportBinding_FailsClosed(t *testing.T) {
+	raw := &fakeRawEnd{}
+	fs := newFakeService()
+	fs.End = raw
+	c := newWithService(fs, slog.Default())
+	// Transport 7 belongs to edge 9; edge 7 has no binding at all.
+	c.bindEdgeTransport(7, 9)
+
+	if _, err := c.Call(context.Background(), 7, "m", nil); !errors.Is(err, ErrNoTransport) {
+		t.Errorf("Call err = %v, want ErrNoTransport", err)
+	}
+	if _, err := c.OpenStream(context.Background(), 7); !errors.Is(err, ErrNoTransport) {
+		t.Errorf("OpenStream err = %v, want ErrNoTransport", err)
+	}
+	if _, err := c.OpenStreamWithMeta(context.Background(), 7, []byte(`{}`)); !errors.Is(err, ErrNoTransport) {
+		t.Errorf("OpenStreamWithMeta err = %v, want ErrNoTransport", err)
+	}
+	if fs.lastMethod != "" || raw.peer != "" {
+		t.Errorf("dispatched despite missing binding: method=%q peer=%q", fs.lastMethod, raw.peer)
 	}
 }
 
@@ -315,6 +341,7 @@ func TestClient_Call_RemoteError(t *testing.T) {
 	fs := newFakeService()
 	fs.respErr = errors.New("edge said no")
 	c := newWithService(fs, slog.Default())
+	c.bindEdgeTransport(1001, 1)
 
 	_, err := c.Call(context.Background(), 1, "m", nil)
 	if err == nil {
@@ -329,6 +356,7 @@ func TestClient_Call_TransportError(t *testing.T) {
 	fs := newFakeService()
 	fs.callErr = errors.New("boom")
 	c := newWithService(fs, slog.Default())
+	c.bindEdgeTransport(1001, 1)
 
 	_, err := c.Call(context.Background(), 1, "m", nil)
 	if err == nil {
@@ -477,8 +505,8 @@ func TestClient_BindAndUnbindTransport(t *testing.T) {
 	if got := c.canonicalizeEdgeID(1001); got != 2 {
 		t.Fatalf("canonicalizeEdgeID(1001) = %d, want 2", got)
 	}
-	if got := c.resolveTransportID(2); got != 1001 {
-		t.Fatalf("resolveTransportID(2) = %d, want 1001", got)
+	if got, ok := c.resolveTransportID(2); !ok || got != 1001 {
+		t.Fatalf("resolveTransportID(2) = %d, %v, want 1001, true", got, ok)
 	}
 	if !c.isKubernetesController(2) {
 		t.Fatal("edge 2 should be tracked as a Kubernetes controller")
@@ -492,8 +520,8 @@ func TestClient_BindAndUnbindTransport(t *testing.T) {
 	if got := c.canonicalizeEdgeID(1001); got != 0 {
 		t.Fatalf("canonicalizeEdgeID after unbind = %d, want 0 (unknown sentinel)", got)
 	}
-	if got := c.resolveTransportID(2); got != 2 {
-		t.Fatalf("resolveTransportID after unbind = %d, want 2", got)
+	if got, ok := c.resolveTransportID(2); ok {
+		t.Fatalf("resolveTransportID after unbind = %d, true, want no mapping", got)
 	}
 	if c.isKubernetesController(2) {
 		t.Fatal("unbound edge should not remain tracked as a Kubernetes controller")

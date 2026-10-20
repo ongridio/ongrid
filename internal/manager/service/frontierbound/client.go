@@ -116,6 +116,12 @@ func newWithService(svc service, log *slog.Logger) *Client {
 // client (return nil) since there is no broker to register against.
 var ErrDisabled = errors.New("frontierbound: disabled")
 
+// ErrNoTransport is returned from Call / OpenStream / OpenStreamWithMeta
+// when the edge has no authenticated transport binding. Nothing is
+// dispatched: an edge ID is a different ID namespace from a geminio
+// transport ID, so it must never be used as a stand-in.
+var ErrNoTransport = errors.New("frontierbound: no transport for edge")
+
 // NewDisabled returns a Client whose svc is nil. All outbound calls
 // fail with ErrDisabled; all reverse-call Registers are no-ops; Close
 // is a no-op. Used by main.go when ONGRID_FRONTIER_DISABLED=true to
@@ -142,7 +148,10 @@ func (c *Client) Call(ctx context.Context, edgeID uint64, method string, body []
 	if c.svc == nil {
 		return nil, ErrDisabled
 	}
-	transportID := c.resolveTransportID(edgeID)
+	transportID, ok := c.resolveTransportID(edgeID)
+	if !ok {
+		return nil, fmt.Errorf("frontierbound: call %q edge=%d: %w", method, edgeID, ErrNoTransport)
+	}
 	req := c.svc.NewRequest(body)
 	rsp, err := c.svc.Call(ctx, transportID, method, req)
 	if err != nil {
@@ -243,7 +252,10 @@ func (c *Client) OpenStream(ctx context.Context, edgeID uint64) (geminio.Stream,
 	if c.svc == nil {
 		return nil, ErrDisabled
 	}
-	transportID := c.resolveTransportID(edgeID)
+	transportID, ok := c.resolveTransportID(edgeID)
+	if !ok {
+		return nil, fmt.Errorf("frontierbound: open stream edge=%d: %w", edgeID, ErrNoTransport)
+	}
 	s, err := c.svc.OpenStream(ctx, transportID)
 	if err != nil {
 		return nil, fmt.Errorf("frontierbound: open stream edge=%d transport=%d: %w", edgeID, transportID, err)
@@ -255,7 +267,10 @@ func (c *Client) OpenStreamWithMeta(ctx context.Context, edgeID uint64, meta []b
 	if c.svc == nil {
 		return nil, ErrDisabled
 	}
-	transportID := c.resolveTransportID(edgeID)
+	transportID, ok := c.resolveTransportID(edgeID)
+	if !ok {
+		return nil, fmt.Errorf("frontierbound: open stream edge=%d: %w", edgeID, ErrNoTransport)
+	}
 	opt := options.OpenStream()
 	opt.SetPeer(fmt.Sprintf("%d", transportID))
 	opt.SetMeta(meta)
@@ -411,14 +426,14 @@ func (c *Client) CanonicalizeEdgeID(edgeID uint64) uint64 {
 	return c.canonicalizeEdgeID(edgeID)
 }
 
-func (c *Client) resolveTransportID(edgeID uint64) uint64 {
+// resolveTransportID maps an edge ID to its authenticated transport ID.
+// ok is false when no binding exists; callers must not dispatch then.
+func (c *Client) resolveTransportID(edgeID uint64) (transportID uint64, ok bool) {
 	if edgeID == 0 {
-		return 0
+		return 0, false
 	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	if transportID, ok := c.edgeIDToTransport[edgeID]; ok {
-		return transportID
-	}
-	return edgeID
+	transportID, ok = c.edgeIDToTransport[edgeID]
+	return transportID, ok
 }
