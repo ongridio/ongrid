@@ -65,8 +65,16 @@ func (m *budgetStopModel) synthesizeAfterToolBudget(ctx context.Context, input [
 	}
 	reminder := schema.SystemMessage("The per-tool circuit breaker for `" + tool + "` has been reached in this user turn. Do not call that tool again. Either synthesize the answer from existing evidence or call a different tool only when it provides materially different evidence. Follow the configured response language, explain evidence limits honestly, and never paste raw tool JSON or internal reasoning.")
 	prompt := make([]*schema.Message, 0, len(input)+1)
-	prompt = append(prompt, input...)
 	prompt = append(prompt, reminder)
+	if len(input) > 0 && input[0] != nil && input[0].Role == schema.System {
+		// Keep one leading system message without mutating the shared history.
+		system := *input[0]
+		system.Content += "\n\n" + reminder.Content
+		prompt[0] = &system
+		prompt = append(prompt, input[1:]...)
+	} else {
+		prompt = append(prompt, input...)
+	}
 	msg, err := m.inner.Generate(ctx, prompt, opts...)
 	if err != nil {
 		return nil, err
