@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -32,12 +33,16 @@ func TestShellRunnerEnvInjectionAndExit(t *testing.T) {
 
 func TestShellRunnerTimeout(t *testing.T) {
 	r := NewShellRunner()
+	start := time.Now()
 	res, err := r.Run(context.Background(), Spec{Script: "sleep 5", Timeout: 200 * time.Millisecond})
-	if err == nil || !strings.Contains(err.Error(), "timed out") {
+	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("want timeout error, got %v", err)
 	}
 	if res.ExitCode != -1 {
 		t.Fatalf("exit = %d, want -1 on timeout", res.ExitCode)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("timeout=200ms, returned after %s", elapsed)
 	}
 }
 

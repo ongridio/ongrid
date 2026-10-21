@@ -10,10 +10,13 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"os"
 	"os/exec"
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/ongridio/ongrid/internal/pkg/runner"
 )
 
 // sandbox.go is the executor that turns a Decision into actual exec
@@ -160,10 +163,14 @@ func (s *Sandbox) Exec(ctx context.Context, cmd string) (*ShellResult, error) {
 	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
 		// Non-timeout startup error (binary missing post-policy etc.).
 		// Surface as a non-zero exit + the underlying message.
+		message := err.Error()
+		if errors.Is(err, context.Canceled) {
+			message = "cmdpolicy: command canceled"
+		}
 		return &ShellResult{
 			Allowed:    true,
 			Stdout:     stdout,
-			Stderr:     err.Error(),
+			Stderr:     message,
 			ExitCode:   -1,
 			Truncated:  truncated,
 			DurationMs: dur.Milliseconds(),
@@ -220,25 +227,32 @@ func (s *Sandbox) ExecRaw(ctx context.Context, cmd string) (*ShellResult, error)
 		"LANG=C.UTF-8",
 		"LC_ALL=C.UTF-8",
 	}
-	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	outW := &capWriter{buf: &bytes.Buffer{}, cap: s.Policy.StdoutCap}
 	errW := &capWriter{buf: &bytes.Buffer{}, cap: s.Policy.StderrCap}
 	c.Stdout = outW
 	c.Stderr = errW
 
-	runErr := c.Run()
+	wait, runErr := runner.StartCommand(cctx, c)
+	if runErr == nil {
+		runErr = wait()
+	}
 	dur := time.Since(start)
 	trunc := capHit(outW) || capHit(errW)
 
-	if errors.Is(cctx.Err(), context.DeadlineExceeded) {
+	if err := cctx.Err(); err != nil {
+		message := "cmdpolicy: command canceled"
+		if errors.Is(err, context.DeadlineExceeded) {
+			message = "cmdpolicy: command timed out"
+		}
 		return &ShellResult{
-			Allowed: true, Stdout: outW.buf.String(), Stderr: "cmdpolicy: command timed out",
+			Allowed: true, Stdout: outW.buf.String(), Stderr: message,
 			ExitCode: -1, Truncated: trunc, DurationMs: dur.Milliseconds(),
 		}, nil
 	}
 	exitCode := 0
 	if runErr != nil {
-		if ee, ok := runErr.(*exec.ExitError); ok {
+		var ee *exec.ExitError
+		if errors.As(runErr, &ee) {
 			exitCode = ee.ExitCode()
 		} else {
 			// OS-level startup failure (e.g. /bin/sh missing).
@@ -261,11 +275,13 @@ func capHit(w *capWriter) bool {
 
 // runPipeline wires the segments through stdin/stdout pipes and runs
 // them. Returns (stdout, stderr, exitCode, truncated, err). err is
-// non-nil only for OS-level startup failures.
+// non-nil for startup, cancellation, or I/O failures.
 func (s *Sandbox) runPipeline(ctx context.Context, segments [][]string) (string, string, int, bool, error) {
 	if len(segments) == 0 {
 		return "", "", -1, false, errors.New("cmdpolicy: no segments to run")
 	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	cmds := make([]*exec.Cmd, 0, len(segments))
 	for _, seg := range segments {
 		bp := s.Policy.Lookup(seg[0])
@@ -278,19 +294,27 @@ func (s *Sandbox) runPipeline(ctx context.Context, segments [][]string) (string,
 			"LANG=C.UTF-8",
 			"LC_ALL=C.UTF-8",
 		}
-		// Best-effort process group so we can kill the whole pipeline
-		// on timeout. SysProcAttr.Setpgid is Linux+Darwin compatible.
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		cmds = append(cmds, cmd)
 	}
 
-	// Wire pipes.
+	// Own the pipeline ends so an upstream Wait cannot close a downstream
+	// reader before it has drained the remaining output.
+	var pipes []*os.File
+	closePipes := func() {
+		for _, p := range pipes {
+			// These private ends may already be closed after startup.
+			_ = p.Close()
+		}
+	}
+	defer closePipes()
 	for i := 0; i < len(cmds)-1; i++ {
-		pipe, err := cmds[i].StdoutPipe()
+		r, w, err := os.Pipe()
 		if err != nil {
 			return "", "", -1, false, fmt.Errorf("cmdpolicy: stdout pipe seg %d: %w", i, err)
 		}
-		cmds[i+1].Stdin = pipe
+		pipes = append(pipes, r, w)
+		cmds[i].Stdout = w
+		cmds[i+1].Stdin = r
 	}
 	// Capture last segment's stdout + per-segment stderr.
 	var lastStdout bytes.Buffer
@@ -303,44 +327,51 @@ func (s *Sandbox) runPipeline(ctx context.Context, segments [][]string) (string,
 		stderrs[i] = w
 	}
 
-	// Start all (stdout pipes only resolve when their producer is started).
+	var waits []func() error
 	for i, c := range cmds {
-		if err := c.Start(); err != nil {
-			// Tear down any already-started.
-			for j := 0; j < i; j++ {
-				_ = cmds[j].Process.Kill()
+		wait, err := runner.StartCommand(ctx, c)
+		if err != nil {
+			cancel()
+			closePipes()
+			for _, wait := range waits {
+				// Cancellation is intentional; still reap every started child.
+				_ = wait()
 			}
 			return "", "", -1, false, fmt.Errorf("cmdpolicy: start seg %d (%s): %w",
 				i, c.Path, err)
 		}
+		waits = append(waits, wait)
 	}
+	closePipes()
 	// Wait. Pipeline exit code = last segment's. Errors from earlier
 	// segments are surfaced via stderr.
 	var lastExit int
-	for i, c := range cmds {
-		err := c.Wait()
+	var pipelineErr error
+	for i, wait := range waits {
+		err := wait()
 		if err != nil {
 			// Closed pipe (broken pipe when downstream exits early)
 			// is benign for non-last segments.
 			if i != len(cmds)-1 && isBrokenPipe(err) {
 				continue
 			}
-			if ee, ok := err.(*exec.ExitError); ok && i == len(cmds)-1 {
-				lastExit = ee.ExitCode()
+			var ee *exec.ExitError
+			if errors.As(err, &ee) {
+				if i == len(cmds)-1 {
+					lastExit = ee.ExitCode()
+				}
 				continue
 			}
-			if i == len(cmds)-1 {
-				if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-					return lastStdout.String(), joinStderrs(stderrs), -1, anyTruncated(lastStdout, stderrs, s.Policy), context.DeadlineExceeded
-				}
-				return lastStdout.String(), joinStderrs(stderrs), -1, anyTruncated(lastStdout, stderrs, s.Policy), err
-			}
+			pipelineErr = errors.Join(pipelineErr, err)
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		lastExit, pipelineErr = -1, err
 	}
 	stdout := lastStdout.String()
 	stderr := joinStderrs(stderrs)
 	truncated := anyTruncated(lastStdout, stderrs, s.Policy)
-	return stdout, stderr, lastExit, truncated, nil
+	return stdout, stderr, lastExit, truncated, pipelineErr
 }
 
 // joinStderrs concatenates per-segment stderr into one stream, in order.

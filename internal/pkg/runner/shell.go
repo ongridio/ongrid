@@ -77,7 +77,10 @@ func (r *ShellRunner) Run(ctx context.Context, spec Spec) (Result, error) {
 	cmd.Stderr = errBuf
 
 	start := time.Now()
-	runErr := cmd.Run()
+	wait, runErr := StartCommand(cctx, cmd)
+	if runErr == nil {
+		runErr = wait()
+	}
 	dur := time.Since(start)
 
 	res := Result{
@@ -86,9 +89,12 @@ func (r *ShellRunner) Run(ctx context.Context, spec Spec) (Result, error) {
 		Truncated: outBuf.truncated || errBuf.truncated,
 		Duration:  dur,
 	}
-	if cctx.Err() == context.DeadlineExceeded {
+	if err := cctx.Err(); err != nil {
 		res.ExitCode = -1
-		return res, fmt.Errorf("runner: timed out after %s", timeout)
+		if errors.Is(err, context.DeadlineExceeded) {
+			return res, fmt.Errorf("runner: timed out after %s: %w", timeout, err)
+		}
+		return res, fmt.Errorf("runner: canceled: %w", err)
 	}
 	if runErr != nil {
 		var ee *exec.ExitError
@@ -96,6 +102,7 @@ func (r *ShellRunner) Run(ctx context.Context, spec Spec) (Result, error) {
 			res.ExitCode = ee.ExitCode()
 			return res, nil // non-zero exit is a result, not a runner error
 		}
+		res.ExitCode = -1
 		return res, fmt.Errorf("runner: exec: %w", runErr)
 	}
 	return res, nil
