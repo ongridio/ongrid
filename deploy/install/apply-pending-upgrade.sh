@@ -4,8 +4,8 @@
 # Runs as root via the ongrid-edge-upgrade.service oneshot, which
 # ongrid-edge.service pulls in (Wants= + After=) so this runs before every
 # agent start — including each Restart=always auto-restart. It runs as a
-# separate root unit (not the agent's own ExecStartPre) because ongrid-edge
-# runs sandboxed + non-root and cannot write /usr/local; the old
+# separate root unit (not the agent's own ExecStartPre) because the agent's
+# filesystem sandbox makes /usr/local read-only; the old
 # `ExecStartPre=-+...` relied on the `+` root-exec prefix, which systemd < 231
 # (CentOS 7 = 219) silently ignores, so the swap never applied there.
 #
@@ -50,28 +50,6 @@ LEGACY_PENDING_SHA=$STAGE_DIR/pending.sha256
 LEGACY_PREVIOUS=$STAGE_DIR/previous
 
 log() { logger -t ongrid-edge-upgrade "$*"; }
-
-# ----- Pre-start: ensure log-read group membership -------------------------
-#
-# install-edge.sh adds ongrid-edge to adm + systemd-journal so the logs
-# logs Collector can read /var/log/* (root:adm 640) and the journal.
-# Bundle upgrades (ADR-024) DON'T re-run install-edge.sh, so a box that was
-# installed before that grant — or one whose groups got dropped — would
-# silently ship empty logs forever. Re-assert membership here: this hook
-# runs as root on every start (via the ongrid-edge-upgrade.service oneshot,
-# ordered Before=ongrid-edge.service), and systemd resolves supplementary
-# groups when it forks the agent's ExecStart, so a group added now takes
-# effect for the agent that starts moments later. Idempotent
-# (usermod -aG is a no-op if already a member).
-ensure_log_groups() {
-  id ongrid-edge >/dev/null 2>&1 || return 0
-  for grp in adm systemd-journal; do
-    if getent group "$grp" >/dev/null 2>&1; then
-      usermod -aG "$grp" ongrid-edge 2>/dev/null || true
-    fi
-  done
-}
-ensure_log_groups
 
 # ----- Mode 1: auto-rollback ------------------------------------------------
 #

@@ -44,8 +44,8 @@ SERVICE_FILE="/etc/systemd/system/ongrid-edge.service"
 UPGRADE_SERVICE_FILE="/etc/systemd/system/ongrid-edge-upgrade.service"
 LOG_DIR="/var/log/ongrid-edge"
 STATE_DIR="/var/lib/ongrid-edge"
-SERVICE_USER="ongrid-edge"
-SERVICE_GROUP="ongrid-edge"
+TMP_BIN=""
+PENDING_ENV_FILE=""
 
 UNINSTALL=0
 
@@ -73,7 +73,14 @@ log_warn()  { printf '%s[WARN]%s  %s\n' "$C_YELLOW" "$C_RESET" "$*"; }
 log_error() { printf '%s[ERROR]%s %s\n' "$C_RED"    "$C_RESET" "$*" >&2; }
 log_ok()    { printf '%s[OK]%s    %s\n' "$C_GREEN"  "$C_RESET" "$*"; }
 
-trap 'log_error "install failed at line $LINENO (exit $?)"' ERR
+on_error() {
+    local exit_code=$?
+    log_error "install failed at line $1 (exit $exit_code)"
+    # Cleanup must not replace the original failure status.
+    rm -f "${TMP_BIN:-}" "${PENDING_ENV_FILE:-}" || true
+    exit "$exit_code"
+}
+trap 'on_error "$LINENO"' ERR
 
 # --- arg parsing -------------------------------------------------------------
 
@@ -165,8 +172,6 @@ URL="https://${SERVER_HTTP_ADDR}/edge/${BINARY}"
 
 log_info "downloading ${URL}"
 TMP_BIN=$(mktemp /tmp/ongrid-edge.XXXXXX)
-PENDING_ENV_FILE=""
-trap 'rm -f "${TMP_BIN:-}"; if [[ -n "${PENDING_ENV_FILE:-}" ]]; then rm -f "$PENDING_ENV_FILE"; fi; log_error "install failed at line $LINENO (exit $?)"' ERR
 if ! curl -fLk --retry 3 --retry-delay 2 -o "$TMP_BIN" "$URL"; then
     log_error "download failed: ${URL}"
     log_error "  - check that the http endpoint is correct and reachable"
@@ -263,42 +268,17 @@ for pbin in obi obi.NOTICES node_exporter process_exporter otelcol-contrib mysql
 done
 if [[ -f "${APPLY_HOOK_DIR}/obi.NOTICES" ]]; then chmod 0644 "${APPLY_HOOK_DIR}/obi.NOTICES"; fi
 
-# --- service user ------------------------------------------------------------
-
-if ! id -u "$SERVICE_USER" >/dev/null 2>&1; then
-    log_info "creating system user ${SERVICE_USER}"
-    useradd --system --no-create-home --shell /usr/sbin/nologin "$SERVICE_USER"
-fi
-
-# Grant log-read group membership so the logs Collector can read
-# /var/log/* (root:adm 640) and the journal (systemd-journal). Idempotent.
-# Re-asserted on every root start by apply-pending-upgrade.sh, so bundle
-# upgrades that skip this installer don't silently lose it.
-# lldpd exposes its read-only control socket to the _lldpd group. Add the
-# service user when lldpd is installed so the optional LLDP collector works
-# under the non-root systemd service; on hosts without lldpd this is a no-op.
-for grp in adm systemd-journal _lldpd; do
-    if getent group "$grp" >/dev/null 2>&1; then
-        usermod -aG "$grp" "$SERVICE_USER" 2>/dev/null || true
-    fi
-done
-
 # --- log dir -----------------------------------------------------------------
 
+# The systemd service runs as root; no dedicated account is required.
 mkdir -p "$LOG_DIR"
-chown "$SERVICE_USER":"$SERVICE_GROUP" "$LOG_DIR"
+chown root:root "$LOG_DIR"
 chmod 750 "$LOG_DIR"
 
 # --- env dir + file ----------------------------------------------------------
-#
-# Group ownership matters here: the service runs as ${SERVICE_USER} and must
-# be able to traverse ${ENV_DIR} (mode 750 needs the group bit). Without the
-# explicit chown, the dir stays root:root → service can't read scrape.yaml,
-# you see the misleading "permission denied" in the journal, and the agent
-# silently runs without any scrape config.
 
 mkdir -p "$ENV_DIR"
-chown "root:${SERVICE_GROUP}" "$ENV_DIR"
+chown root:root "$ENV_DIR"
 chmod 750 "$ENV_DIR"
 
 # Preserve only this setting; never source the credentials file as shell code.
@@ -310,7 +290,7 @@ elif [[ -f "$ENV_FILE" ]]; then
     METRICS_ENV_LINE=$(sed -n '/^ONGRID_EDGE_METRICS_ADDR=/p' "$ENV_FILE")
 fi
 if [[ -n "$PENDING_ENV_FILE" ]]; then
-    install -m 0640 -o root -g "$SERVICE_GROUP" "$PENDING_ENV_FILE" "$ENV_FILE"
+    install -m 0640 -o root -g root "$PENDING_ENV_FILE" "$ENV_FILE"
     rm -f "$PENDING_ENV_FILE"
     PENDING_ENV_FILE=""
 else
@@ -324,23 +304,13 @@ if [[ -n "$METRICS_ENV_LINE" ]]; then
     printf '\n%s\n' "$METRICS_ENV_LINE" >> "$ENV_FILE"
 fi
 chmod 640 "$ENV_FILE"
-chown "root:${SERVICE_GROUP}" "$ENV_FILE"
-trap 'log_error "install failed at line $LINENO (exit $?)"' ERR
+chown root:root "$ENV_FILE"
 
 # --- state dir ---------------------------------------------------------------
 #
-# The unit below sets StateDirectory=ongrid-edge so systemd creates
-# /var/lib/ongrid-edge (owned by the service user) at start. But
-# StateDirectory= requires systemd >= 235 and is SILENTLY IGNORED on older
-# releases — CentOS/RHEL 7 ships systemd 219. When ignored, the base dir is
-# never created, /var/lib stays root:root 0755, and the agent — running
-# unprivileged as ${SERVICE_USER} — cannot mkdir its plugin work dirs beneath
-# it. Every collector plugin then fails `configure` with EACCES, no exporter
-# starts, and the edge shows up "online but with no data". Create the dir
-# explicitly so the installer is correct regardless of systemd version. This
-# is idempotent and a harmless no-op where StateDirectory= already made it.
+# Older systemd versions ignore StateDirectory=; prepare the path explicitly.
 mkdir -p "$STATE_DIR"
-chown "$SERVICE_USER":"$SERVICE_GROUP" "$STATE_DIR"
+chown root:root "$STATE_DIR"
 chmod 0755 "$STATE_DIR"
 
 # --- systemd units -----------------------------------------------------------
@@ -494,7 +464,7 @@ for tool in obi otelcol-contrib node_exporter process_exporter mysqld_exporter p
         SELFCHECK_FAIL=1
     fi
 done
-# State dir must exist and be writable by the service user. On systemd < 235
+# State dir must exist and be writable by the runtime user. On systemd < 235
 # (CentOS/RHEL 7) the unit's StateDirectory= is silently ignored, so this is
 # the probe that catches the "online but no data" failure: without a writable
 # /var/lib/ongrid-edge every collector plugin fails `configure` with EACCES.
@@ -503,10 +473,13 @@ RUNTIME_USER=$(systemctl show -p User --value ongrid-edge 2>/dev/null || true)
 RUNTIME_USER=${RUNTIME_USER:-root}
 if [[ "$RUNTIME_USER" == "root" ]]; then
     SVC_W=(test -w "$STATE_DIR")
+    JREAD=(journalctl -n 1 --no-pager)
 elif command -v runuser >/dev/null 2>&1; then
     SVC_W=(runuser -u "$RUNTIME_USER" -- test -w "$STATE_DIR")
+    JREAD=(runuser -u "$RUNTIME_USER" -- journalctl -n 1 --no-pager)
 else
     SVC_W=(sudo -u "$RUNTIME_USER" test -w "$STATE_DIR")
+    JREAD=(sudo -u "$RUNTIME_USER" journalctl -n 1 --no-pager)
 fi
 if [[ -d "$STATE_DIR" ]] && "${SVC_W[@]}" 2>/dev/null; then
     log_ok "state dir writable by ${RUNTIME_USER}: ${STATE_DIR}"
@@ -515,16 +488,11 @@ else
     log_error "  fix: mkdir -p ${STATE_DIR}; chmod 0755 ${STATE_DIR}; systemctl restart ongrid-edge"
     SELFCHECK_FAIL=1
 fi
-if command -v runuser >/dev/null 2>&1; then
-    JREAD=(runuser -u "$SERVICE_USER" -- journalctl -n 1 --no-pager)
-else
-    JREAD=(sudo -u "$SERVICE_USER" journalctl -n 1 --no-pager)
-fi
 if "${JREAD[@]}" >/dev/null 2>&1; then
-    log_ok "journald readable by ${SERVICE_USER}"
+    log_ok "journald readable by ${RUNTIME_USER}"
 else
-    log_error "${SERVICE_USER} cannot read the journal — journald log shipping will be empty"
-    log_error "  fix: usermod -aG systemd-journal ${SERVICE_USER}; ensure persistent journal (/var/log/journal)"
+    log_error "${RUNTIME_USER} cannot read the journal — journald log shipping will be empty"
+    log_error "  check journal permissions for ${RUNTIME_USER} and persistent journal (/var/log/journal)"
     SELFCHECK_FAIL=1
 fi
 if [[ $SELFCHECK_FAIL -eq 0 ]]; then

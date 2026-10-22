@@ -22,8 +22,6 @@ log_error() { printf '%s[ERROR]%s %s\n' "$C_RED"    "$C_RESET" "$*" >&2; }
 
 trap 'log_error "install-edge failed at line $LINENO"' ERR
 
-SERVICE_USER=ongrid-edge
-SERVICE_GROUP=ongrid-edge
 BIN_DEST=/usr/local/bin/ongrid-edge
 PLUGIN_BIN_DIR=/usr/local/lib/ongrid-edge   # bundled plugin binaries (otelcol-contrib, exporters)
 STATE_DIR=/var/lib/ongrid-edge               # agent state root (StateDirectory=)
@@ -125,25 +123,6 @@ if [[ -z "${ONGRID_CLOUD_ADDR:-}" || -z "${EDGE_ACCESS_KEY:-}" || -z "${EDGE_SEC
     exit 1
 fi
 
-# ---------- system user ----------
-if ! id "$SERVICE_USER" >/dev/null 2>&1; then
-    log_info "creating system user $SERVICE_USER"
-    useradd --system --no-create-home --shell /usr/sbin/nologin "$SERVICE_USER" || true
-fi
-# Grant read access to standard log dirs so the logs Collector can
-# tail /var/log/syslog, auth.log, etc. These files are typically
-# root:adm 640. systemd-journal lets the journald receiver read
-# /var/log/journal/. Both groups are membership-only — no privilege
-# escalation. Idempotent: usermod is a no-op if already a member.
-# lldpd exposes its read-only control socket to the _lldpd group. Add the
-# service user when lldpd is installed so the optional LLDP collector works
-# under the non-root systemd service; on hosts without lldpd this is a no-op.
-for grp in adm systemd-journal _lldpd; do
-    if getent group "$grp" >/dev/null 2>&1; then
-        usermod -aG "$grp" "$SERVICE_USER" 2>/dev/null || true
-    fi
-done
-
 # ---------- install binary ----------
 log_info "installing binary to $BIN_DEST"
 install -m 0755 -o root -g root "$BIN_SRC" "$BIN_DEST"
@@ -153,19 +132,12 @@ install -m 0755 -o root -g root "$BIN_SRC" "$BIN_DEST"
 # Per-platform variant lives under SCRIPT_DIR with the same -OS-ARCH suffix
 # as the main edge binary.
 mkdir -p "$PLUGIN_BIN_DIR"
-# Base state dir. The subdirs below (plugins/, .upgrade/) get created and
-# chowned individually, but the agent also needs to own the base
-# /var/lib/ongrid-edge itself so it can create further state dirs at runtime.
-# The unit's StateDirectory= only guarantees that on systemd >= 235; it is
-# silently ignored on older releases (CentOS/RHEL 7 = systemd 219), which
-# otherwise leaves the base root-owned and unwritable by the service user —
-# every collector plugin then fails `configure` and the edge ships no data.
-# Create it explicitly so this holds regardless of systemd version.
+# The service runs as root. Prepare paths even when systemd ignores StateDirectory=.
 mkdir -p "$STATE_DIR"
-chown "$SERVICE_USER":"$SERVICE_GROUP" "$STATE_DIR" 2>/dev/null || true
+chown root:root "$STATE_DIR"
 chmod 0755 "$STATE_DIR"
 mkdir -p "$PLUGIN_WORK_DIR"
-chown "$SERVICE_USER":"$SERVICE_GROUP" "$PLUGIN_WORK_DIR" 2>/dev/null || true
+chown root:root "$PLUGIN_WORK_DIR"
 chmod 750 "$PLUGIN_WORK_DIR"
 
 # C11 Phase-B / ADR-024 remote upgrade hook — `apply-pending-upgrade.sh`
@@ -185,7 +157,7 @@ fi
 # script reads it. Pre-create so the agent doesn't need to chown at
 # runtime.
 mkdir -p /var/lib/ongrid-edge/.upgrade
-chown -R "$SERVICE_USER":"$SERVICE_GROUP" /var/lib/ongrid-edge/.upgrade
+chown -R root:root /var/lib/ongrid-edge/.upgrade
 chmod 0750 /var/lib/ongrid-edge/.upgrade
 
 # otelcol-contrib (logs, traces, and application profiles plugins).
@@ -250,7 +222,7 @@ fi
 log_info "rendering $ENV_FILE"
 mkdir -p "$CONFIG_DIR"
 chmod 750 "$CONFIG_DIR"
-chown root:"$SERVICE_GROUP" "$CONFIG_DIR" 2>/dev/null || true
+chown root:root "$CONFIG_DIR"
 
 # Escape sed replacement chars.
 esc() { printf '%s' "$1" | sed -e 's/[\\|&]/\\&/g'; }
@@ -269,11 +241,11 @@ if [[ -n "$METRICS_ENV_LINE" ]]; then
     printf '\n%s\n' "$METRICS_ENV_LINE" >> "$ENV_FILE"
 fi
 chmod 640 "$ENV_FILE"
-chown root:"$SERVICE_GROUP" "$ENV_FILE" 2>/dev/null || true
+chown root:root "$ENV_FILE"
 
 # ---------- log dir ----------
 mkdir -p "$LOG_DIR"
-chown "$SERVICE_USER":"$SERVICE_GROUP" "$LOG_DIR" 2>/dev/null || true
+chown root:root "$LOG_DIR"
 chmod 750 "$LOG_DIR"
 
 # ---------- systemd units ----------
@@ -338,10 +310,13 @@ RUNTIME_USER=$(systemctl show -p User --value ongrid-edge 2>/dev/null || true)
 RUNTIME_USER=${RUNTIME_USER:-root}
 if [[ "$RUNTIME_USER" == "root" ]]; then
     SVC_W=(test -w "$STATE_DIR")
+    JREAD=(journalctl -n 1 --no-pager)
 elif command -v runuser >/dev/null 2>&1; then
     SVC_W=(runuser -u "$RUNTIME_USER" -- test -w "$STATE_DIR")
+    JREAD=(runuser -u "$RUNTIME_USER" -- journalctl -n 1 --no-pager)
 else
     SVC_W=(sudo -u "$RUNTIME_USER" test -w "$STATE_DIR")
+    JREAD=(sudo -u "$RUNTIME_USER" journalctl -n 1 --no-pager)
 fi
 if [[ -d "$STATE_DIR" ]] && "${SVC_W[@]}" 2>/dev/null; then
     log_info "state dir writable by $RUNTIME_USER: $STATE_DIR"
@@ -351,18 +326,12 @@ else
     SELFCHECK_FAIL=1
 fi
 
-# 2) service user can read the journal (logs plugin journald source).
-# Group membership added above is visible to a fresh runuser/sudo session.
-if command -v runuser >/dev/null 2>&1; then
-    JREAD=(runuser -u "$SERVICE_USER" -- journalctl -n 1 --no-pager)
-else
-    JREAD=(sudo -u "$SERVICE_USER" journalctl -n 1 --no-pager)
-fi
+# 2) The actual runtime user can read the journal (logs plugin journald source).
 if "${JREAD[@]}" >/dev/null 2>&1; then
-    log_info "journald readable by $SERVICE_USER"
+    log_info "journald readable by $RUNTIME_USER"
 else
-    log_error "$SERVICE_USER cannot read the journal — journald log shipping will be empty"
-    log_error "  fix: usermod -aG systemd-journal $SERVICE_USER ; ensure persistent journal (/var/log/journal)"
+    log_error "$RUNTIME_USER cannot read the journal — journald log shipping will be empty"
+    log_error "  check journal permissions for $RUNTIME_USER and persistent journal (/var/log/journal)"
     SELFCHECK_FAIL=1
 fi
 

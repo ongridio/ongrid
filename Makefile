@@ -140,6 +140,11 @@ test-edge-metrics-env: ## Edge 诊断端口安装配置保留检查
 	bash -n deploy/install/edge/install.sh deploy/install/edge/install-edge.sh
 	python3 scripts/test-edge-metrics-env.py
 
+.PHONY: test-edge-root-install
+test-edge-root-install: ## Edge root 安装、重装和升级回归检查（隔离容器）
+	docker run --rm --network none --mount "type=bind,source=$(CURDIR),target=/src,readonly" \
+		ubuntu:22.04 bash /src/scripts/test-edge-root-install.sh
+
 test-integration: ## 集成测试（build tag: integration）
 	go test -tags=integration ./...
 
@@ -853,6 +858,7 @@ package-all: ## [release] 打 amd64 + arm64 两个生产安装包到 dist/out/
 	done
 
 test-release-package: ## [test] 校验安装 URL 与 Compose 发布包内容
+	$(MAKE) --no-print-directory test-edge-root-install
 	bash scripts/test-public-url.sh
 	bash scripts/test-upgrade-data-permissions.sh
 	bash scripts/test-install-asset-modes.sh
