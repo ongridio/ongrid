@@ -177,9 +177,9 @@ func (u *Usecase) Delete(ctx context.Context, id uint64) error {
 }
 
 // Trigger starts a manual run (the HTTP "Run" button). Thin wrapper over
-// triggerRun pinned to the manual entry node.
+// triggerRun scoped to manual trigger nodes.
 func (u *Usecase) Trigger(ctx context.Context, id uint64, input map[string]any, by *uint64) (*model.FlowRun, error) {
-	return u.triggerRun(ctx, id, NodeTriggerManual, input, by, true)
+	return u.triggerRun(ctx, id, NodeTriggerManual, "", input, by, true)
 }
 
 // TestNode executes a single node in isolation and returns its output —
@@ -262,19 +262,22 @@ func (u *Usecase) ListEnabledFlows(ctx context.Context) ([]*model.Flow, error) {
 }
 
 // TriggerEvent starts a run from a non-manual source (alert dispatcher /
-// cron scheduler). entryType is the trigger node type to enter at
-// (NodeTriggerAlert / NodeTriggerCron); payload becomes {{trigger.*}}.
-// Returns ErrNotFound-class silently-skippable errors when the flow has
-// no matching trigger (caller already pre-filtered, but races happen).
-func (u *Usecase) TriggerEvent(ctx context.Context, flowID uint64, entryType string, payload map[string]any) (*model.FlowRun, error) {
-	return u.triggerRun(ctx, flowID, entryType, payload, nil, false)
+// cron scheduler). entryType and entryNodeID identify the matched trigger;
+// payload becomes {{trigger.*}}.
+// Returns ErrInvalid when the selected node was removed or changed after
+// the caller scanned it, so another branch is never started instead.
+func (u *Usecase) TriggerEvent(ctx context.Context, flowID uint64, entryType, entryNodeID string, payload map[string]any) (*model.FlowRun, error) {
+	if entryNodeID == "" {
+		return nil, fmt.Errorf("%w: trigger node id required", errs.ErrInvalid)
+	}
+	return u.triggerRun(ctx, flowID, entryType, entryNodeID, payload, nil, false)
 }
 
 // triggerRun is the shared run-launch core. requireEnabled distinguishes
 // the manual path (surfaces "flow disabled" as a user error) from event
 // paths (caller already filtered to enabled flows; a disabled flow here
 // is a benign race → skip).
-func (u *Usecase) triggerRun(ctx context.Context, id uint64, entryType string, input map[string]any, by *uint64, requireEnabled bool) (*model.FlowRun, error) {
+func (u *Usecase) triggerRun(ctx context.Context, id uint64, entryType, entryNodeID string, input map[string]any, by *uint64, requireEnabled bool) (*model.FlowRun, error) {
 	if u.repo == nil || u.runs == nil || u.engine == nil {
 		return nil, errs.ErrNotWiredYet
 	}
@@ -295,13 +298,16 @@ func (u *Usecase) triggerRun(ctx context.Context, id uint64, entryType string, i
 	// Confirm the requested entry trigger exists in this graph.
 	hasEntry := false
 	for _, t := range g.Triggers() {
-		if t.Type == entryType {
+		if t.Type == entryType && (entryNodeID == "" || t.ID == entryNodeID) {
 			hasEntry = true
 			break
 		}
 	}
 	if !hasEntry {
-		return nil, fmt.Errorf("%w: graph has no %s trigger", errs.ErrInvalid, entryType)
+		if entryNodeID == "" {
+			return nil, fmt.Errorf("%w: graph has no %s trigger", errs.ErrInvalid, entryType)
+		}
+		return nil, fmt.Errorf("%w: graph has no %s trigger node %q", errs.ErrInvalid, entryType, entryNodeID)
 	}
 
 	tb, _ := json.Marshal(input)
@@ -328,7 +334,7 @@ func (u *Usecase) triggerRun(ctx context.Context, id uint64, entryType string, i
 	// cancel in-flight work).
 	go func() {
 		bg := context.Background()
-		status, execErr := u.engine.Execute(bg, run, g, entryType)
+		status, execErr := u.engine.Execute(bg, run, g, entryType, entryNodeID)
 		fin := time.Now().UTC()
 		run.Status = status
 		run.FinishedAt = &fin

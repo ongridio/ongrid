@@ -69,10 +69,10 @@ func (d *Dispatcher) dispatch(incidentID uint64, ruleKey, ruleName, severity str
 			if !alertMatches(t.Config, ruleKey, ruleName, severity) {
 				continue
 			}
-			if _, err := d.uc.TriggerEvent(ctx, f.ID, NodeTriggerAlert, payload); err != nil {
-				d.log.Warn("flow alert trigger failed", slog.Uint64("flow_id", f.ID), slog.Any("err", err))
+			if _, err := d.uc.TriggerEvent(ctx, f.ID, NodeTriggerAlert, t.ID, payload); err != nil {
+				d.log.Warn("flow alert trigger failed", slog.Uint64("flow_id", f.ID), slog.String("node_id", t.ID), slog.Any("err", err))
 			} else {
-				d.log.Info("flow triggered by alert", slog.Uint64("flow_id", f.ID), slog.Uint64("incident_id", incidentID))
+				d.log.Info("flow triggered by alert", slog.Uint64("flow_id", f.ID), slog.String("node_id", t.ID), slog.Uint64("incident_id", incidentID))
 			}
 			break // one run per flow per alert
 		}
