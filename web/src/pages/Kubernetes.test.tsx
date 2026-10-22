@@ -392,10 +392,18 @@ describe('KubernetesPage', () => {
     expect(command).toHaveTextContent("enrollment.nodeBootstrapToken='n-token'");
     expect(screen.queryByText('Controller bootstrap token')).not.toBeInTheDocument();
     expect(screen.queryByText('Node bootstrap token')).not.toBeInTheDocument();
-    expect(screen.getByText('安装命令（执行一次）')).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: '复制' })).toHaveLength(1);
+    expect(screen.getByText('安装Helm命令（执行一次）')).toBeInTheDocument();
+    expect(screen.getByText(/get-helm-3/)).toBeInTheDocument();
+    expect(screen.getByText('安装应用命令（执行一次）')).toBeInTheDocument();
+    const copyButtons = screen.getAllByRole('button', { name: '复制' });
+    expect(copyButtons).toHaveLength(2);
 
-    fireEvent.click(screen.getByRole('button', { name: '复制' }));
+    fireEvent.click(copyButtons[0]);
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(expect.stringContaining('get-helm-3'));
+    });
+
+    fireEvent.click(copyButtons[1]);
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith(expect.stringContaining('helm upgrade --install ongrid-edge'));
     });
