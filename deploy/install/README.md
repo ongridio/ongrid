@@ -349,9 +349,9 @@ sudo ONGRID_CLOUD_ADDR=ongrid.example.com:40012 \
 脚本会：
 
 - 根据 `uname -s/-m` 挑选 `ongrid-edge-<os>-<arch>` 二进制，拷贝到 `/usr/local/bin/ongrid-edge`。
-- 创建系统用户 `ongrid-edge`、日志目录 `/var/log/ongrid-edge`。
+- 准备 `root:root` 所有的配置、状态和日志目录，不再创建专用系统用户；已有账户保持不变。
 - 渲染 `/etc/ongrid-edge/ongrid-edge.env` 并安装 systemd unit。
-- `systemctl enable --now ongrid-edge` 并打印状态与最近 20 行日志。
+- 执行 `systemctl enable ongrid-edge` 和 `systemctl restart ongrid-edge`，以 root 身份运行服务，并打印状态与最近 20 行日志。
 
 卸载：`sudo /path/to/install-edge.sh --uninstall`。
 
