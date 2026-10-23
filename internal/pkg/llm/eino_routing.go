@@ -417,6 +417,9 @@ func (c *clientChatModel) buildChatReq(input []*schema.Message, common *model.Op
 		Tools:    llmTools,
 		UserID:   c.userID,
 	}
+	if common.MaxTokens != nil {
+		req.MaxTokens = *common.MaxTokens
+	}
 	if common.Temperature != nil {
 		req.Temperature = *common.Temperature
 	}
@@ -490,6 +493,7 @@ func einoMessageFromChatResp(resp *ChatResp) *schema.Message {
 		}
 	}
 	m.ResponseMeta = &schema.ResponseMeta{
+		FinishReason: resp.FinishReason,
 		Usage: &schema.TokenUsage{
 			PromptTokens:     resp.Usage.PromptTokens,
 			CompletionTokens: resp.Usage.CompletionTokens,
