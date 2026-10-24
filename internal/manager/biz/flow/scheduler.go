@@ -28,7 +28,7 @@ type Scheduler struct {
 	log       *slog.Logger
 	interval  time.Duration
 	mu        sync.Mutex
-	next      map[string]time.Time // "flowID:nodeID" → next fire (UTC)
+	next      map[string]time.Time // "flowID:nodeID:spec" → next fire (UTC)
 	lastPrune time.Time            // last run-retention sweep (UTC)
 }
 
@@ -92,7 +92,11 @@ func (s *Scheduler) tick(ctx context.Context, now time.Time) {
 			if err != nil {
 				continue // invalid cron — UI validates; skip silently here
 			}
-			key := fmt.Sprintf("%d:%s", f.ID, node.ID)
+			// The spec is part of the key: an edited cron gets a new key that
+			// is armed from the new spec, and the old key (still holding the
+			// old spec's next fire) is swept below. An unchanged spec keeps
+			// its key, so unrelated graph edits don't shift the schedule.
+			key := fmt.Sprintf("%d:%s:%s", f.ID, node.ID, spec)
 			live[key] = true
 
 			s.mu.Lock()
@@ -118,8 +122,8 @@ func (s *Scheduler) tick(ctx context.Context, now time.Time) {
 			}
 		}
 	}
-	// Forget schedules whose flow/trigger vanished (disabled/deleted/edited)
-	// so an edited cron re-arms cleanly next sighting.
+	// Forget schedules whose flow/trigger/spec vanished (disabled, deleted,
+	// or cron edited) so a re-enabled or edited trigger re-arms cleanly.
 	s.mu.Lock()
 	for k := range s.next {
 		if !live[k] {
