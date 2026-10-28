@@ -119,13 +119,16 @@ type ChatReq struct {
 	Messages    []Message
 	Tools       []ToolSchema
 	Temperature float32
-	UserID      uint64 // optional; used for budget scoping + logging only
+	// MaxTokens is an explicit output limit; zero keeps the provider default.
+	MaxTokens int
+	UserID    uint64 // optional; used for budget scoping + logging only
 }
 
 // ChatResp is the output of Client.Chat.
 type ChatResp struct {
-	Assistant Message // role=assistant; may have empty Content + non-empty ToolCalls
-	Usage     Usage
+	Assistant    Message // role=assistant; may have empty Content + non-empty ToolCalls
+	Usage        Usage
+	FinishReason string // preserves provider completion/truncation signals
 }
 
 // BudgetChecker gates Chat requests against a token budget. Called with an
@@ -402,7 +405,21 @@ func (t *zhipuJWTTransport) RoundTrip(req *http.Request) (*http.Response, error)
 }
 
 // Chat implements Client.
-func (c *openaiClient) Chat(ctx context.Context, req ChatReq) (result *ChatResp, retErr error) {
+func (c *openaiClient) Chat(ctx context.Context, req ChatReq) (*ChatResp, error) {
+	if req.MaxTokens < 0 {
+		return nil, errors.New("llm: max tokens must not be negative")
+	}
+	// One deadline covers the initial completion, backoff, and recovery.
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.cfg.Timeout)
+		defer cancel()
+	}
+	return recoverCompletion(ctx, req, c.chatOnce)
+}
+
+// chatOnce retains per-request budget checks, accounting, and instrumentation.
+func (c *openaiClient) chatOnce(ctx context.Context, req ChatReq) (result *ChatResp, retErr error) {
 	// Resolve effective credentials for this call. Resolver overrides cfg;
 	// empty fields fall back to cfg (env-seeded at startup).
 	apiKey, defaultModel, baseURL, _ := c.effectiveCreds(ctx)
@@ -445,13 +462,8 @@ func (c *openaiClient) Chat(ctx context.Context, req ChatReq) (result *ChatResp,
 		tracing.RecordAgentContent(span, "input.value", sdkReq.Messages)
 	}
 
-	// 3. Bound ctx to cfg.Timeout if caller provided no deadline.
+	// 3. Reuse the deadline shared by all completion attempts.
 	callCtx := ctx
-	if _, ok := ctx.Deadline(); !ok {
-		var cancel context.CancelFunc
-		callCtx, cancel = context.WithTimeout(ctx, c.cfg.Timeout)
-		defer cancel()
-	}
 
 	// 4. Issue the request through the SDK matching the resolved creds.
 	// 旧消息没有可恢复的思考字段；DeepSeek 接受显式空值，但 SDK 的
@@ -537,13 +549,17 @@ func (c *openaiClient) Chat(ctx context.Context, req ChatReq) (result *ChatResp,
 		slog.Int("completion_tokens", usage.CompletionTokens),
 		slog.Int("total_tokens", usage.TotalTokens),
 		slog.Int("tool_calls", len(assistant.ToolCalls)),
+		slog.String("finish_reason", string(sdkResp.Choices[0].FinishReason)),
 		slog.Duration("duration", dur),
 	)
 
 	if !callbackOwned && len(sdkResp.Choices) > 0 {
 		tracing.RecordAgentContent(span, "output.value", sdkResp.Choices[0].Message)
 	}
-	return &ChatResp{Assistant: assistant, Usage: usage}, nil
+	if sdkResp.Choices[0].Message.Refusal != "" {
+		return nil, ErrCompletionRefused
+	}
+	return &ChatResp{Assistant: assistant, Usage: usage, FinishReason: string(sdkResp.Choices[0].FinishReason)}, nil
 }
 
 // toOpenAIReq translates the public ChatReq to the SDK request shape.
@@ -599,12 +615,21 @@ func (c *openaiClient) toOpenAIReq(req ChatReq, model string) (openai.ChatComple
 		}
 	}
 
-	return openai.ChatCompletionRequest{
+	sdkReq := openai.ChatCompletionRequest{
 		Model:       model,
 		Messages:    msgs,
 		Tools:       tools,
 		Temperature: temp,
-	}, nil
+	}
+	// OpenAI reasoning families use max_completion_tokens; other compatible
+	// providers (including DeepSeek and Kimi) retain max_tokens.
+	m := strings.ToLower(model)
+	if m == "o1" || m == "o3" || m == "o4" || strings.HasPrefix(m, "o1-") || strings.HasPrefix(m, "o3-") || strings.HasPrefix(m, "o4-") || strings.HasPrefix(m, "gpt-5") {
+		sdkReq.MaxCompletionTokens = req.MaxTokens
+	} else {
+		sdkReq.MaxTokens = req.MaxTokens
+	}
+	return sdkReq, nil
 }
 
 func toOpenAIMessage(m Message) (openai.ChatCompletionMessage, error) {
