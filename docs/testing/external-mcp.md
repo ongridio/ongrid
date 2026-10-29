@@ -168,3 +168,13 @@ server/biz externalmcp 与 iam/biz/integrationtoken 三个包的 race 通过。�
 PAT 设置页与操作确认页共 14 项前端测试通过；最终前端镜像构建通过，lint 为 0 error、43 条既有 warning。接入指南的 16 项 Chromium 回归覆盖四档宽度、中英文、深浅主题及键盘交互；最后的 MCP 图标调整另实看深浅主题截图，图标与模型项均为 14px，页面无横向溢出。
 
 `make proto`、两份变更 proto 的同配置 Buf lint 与 `git diff --check` 通过。原样 `make arch-lint` 仍报告前文记录的两项问题。现有工作流未包含 govulncheck、依赖漏洞与镜像漏洞检查；本次不改动无关 CI 配置。未执行生产容量、真实主机/Kubernetes 动作或豆包工作端到端验收，入口和写入默认关闭。
+
+## 审查修复回归（2026-10-29）
+
+拓扑节点类型和关系类型使用 upsert，统一要求确认。真实拓扑 Handler 回归验证已有关系类型在确认前不变，确认后才更新方向、语义与故障传播设置；风险策略测试同时覆盖两个类型接口。
+
+静默请求在恢复已有幂等记录后才检查当前截止时间。回归验证已完成和待确认操作过期后仍返回原记录；同键改参仍冲突；过期、超过 30 天和格式错误的新请求及过期 dry-run 被拒绝；无效请求不占用幂等键，过期后确认不会新增静默。两个集成回归在修复前失败，修复后相关 MCP 包的 race 检查通过。
+
+本轮 `go test ./...` 仍受 macOS 上的 Edge 平台构建限制及既有 `TestValidateEntry_DestWhitelist` 大小写路径失败影响。`make arch-lint` 仍报已有生成 K8s→Edge API 依赖和 `web/node_modules/flatted` 未分类文件，共 2 项，与修复前一致；不能记为全量检查通过。
+
+本轮未更新本机或生产部署，未重跑外部客户端与 MySQL 验收。

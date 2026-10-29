@@ -223,8 +223,8 @@ func TestAPIRiskPolicyKeepsDestructiveAndMixedChangesGated(t *testing.T) {
 	}{
 		{"post_topology_nodes", nil, true},
 		{"post_topology_relations", nil, true},
-		{"post_topology_node_types", nil, true},
-		{"post_topology_relation_types", nil, true},
+		{"post_topology_node_types", nil, false},
+		{"post_topology_relation_types", nil, false},
 		{"post_chat_sessions", nil, true},
 		{"patch_topology_nodes_id", map[string]any{"name": "new"}, true},
 		{"patch_topology_nodes_id", map[string]any{"name": "new", "props": map[string]any{"environment": "prod"}}, false},

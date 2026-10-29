@@ -165,13 +165,21 @@ func (r Resources) Tools() []biz.Tool {
 				if err := only(a, "incident_id", "action", "until"); err != nil {
 					return err
 				}
-				until, err := time.Parse(time.RFC3339, biz.String(a, "until"))
-				if err != nil || !until.After(time.Now()) || until.After(time.Now().Add(30*24*time.Hour)) {
+				if _, err := time.Parse(time.RFC3339, biz.String(a, "until")); err != nil {
 					return errs.ErrInvalid
 				}
 				return requireReason(a)
 			}
 			return only(a, "incident_id", "action", "note")
+		}, ValidateNew: func(a biz.Arguments) error {
+			if biz.String(a, "action") == "silence" {
+				until, err := time.Parse(time.RFC3339, biz.String(a, "until"))
+				now := time.Now()
+				if err != nil || !until.After(now) || until.After(now.Add(30*24*time.Hour)) {
+					return errs.ErrInvalid
+				}
+			}
+			return nil
 		}, Policy: func(a biz.Arguments) (biz.Policy, error) {
 			return biz.Policy{Target: target("incident", uint64(biz.Number(a, "incident_id")))}, nil
 		}, Run: r.updateIncident},

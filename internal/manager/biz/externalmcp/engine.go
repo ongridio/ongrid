@@ -116,6 +116,12 @@ func (e *Engine) Call(ctx context.Context, identity integrationauth.Identity, na
 	if tool.Mutation && !Bool(args, "dry_run") {
 		return e.submit(ctx, identity, tool, args)
 	}
+	if tool.ValidateNew != nil {
+		if err := tool.ValidateNew(args); err != nil {
+			e.Reject(ctx, identity, ErrorCode(err))
+			return nil, err
+		}
+	}
 	if err := e.record(ctx, identity, name, requestID, "started", ""); err != nil {
 		return nil, ErrAuditUnavailable
 	}
@@ -236,6 +242,11 @@ func (e *Engine) submit(ctx context.Context, identity integrationauth.Identity, 
 			}
 			return nil
 		}
+		if tool.ValidateNew != nil {
+			if err := tool.ValidateNew(args); err != nil {
+				return err
+			}
+		}
 		if err := e.record(tx, identity, tool.Name, op.ID, "accepted", "", map[string]string{"target": policy.Target.Key, "request_digest": op.RequestDigest, "action": String(args, "action"), "expected_revision": String(args, "expected_revision")}); err != nil {
 			return ErrAuditUnavailable
 		}
@@ -255,6 +266,9 @@ func (e *Engine) submit(ctx context.Context, identity integrationauth.Identity, 
 		return e.Store.Update(tx, op.ID, []string{op.State}, map[string]any{"approval_id": a.ID})
 	})
 	if err != nil {
+		if errors.Is(err, errs.ErrInvalid) {
+			e.Reject(ctx, identity, ErrorCode(err))
+		}
 		return nil, err
 	}
 	if _, err := e.Auth.Revalidate(ctx, identity); err != nil {

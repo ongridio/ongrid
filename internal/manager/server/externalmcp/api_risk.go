@@ -9,8 +9,7 @@ import (
 // Only reviewed, non-destructive actions bypass confirmation. New actions fail closed.
 func (op apiOperation) lowRisk(a biz.Arguments) bool {
 	switch op.ID {
-	case "post_topology_nodes", "post_topology_relations", "post_topology_node_types", "post_topology_relation_types",
-		"post_chat_sessions":
+	case "post_topology_nodes", "post_topology_relations", "post_chat_sessions":
 		return true
 	case "patch_topology_nodes_id":
 		return metadataOnly(a, "name")

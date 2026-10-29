@@ -39,9 +39,11 @@ type Tool struct {
 	ActionScopes   map[string][]string
 	RequiredScopes func(Arguments) []string
 	Validate       func(Arguments) error
-	Policy         func(Arguments) (Policy, error)
-	Run            func(context.Context, Arguments) (any, error)
-	resolved       *jsonschema.Resolved
+	// ValidateNew runs time-sensitive checks after idempotency recovery, or before a dry run.
+	ValidateNew func(Arguments) error
+	Policy      func(Arguments) (Policy, error)
+	Run         func(context.Context, Arguments) (any, error)
+	resolved    *jsonschema.Resolved
 }
 
 func (t Tool) Visible(identity integrationauth.Identity) bool {
