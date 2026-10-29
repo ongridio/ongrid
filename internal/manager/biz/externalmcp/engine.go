@@ -326,7 +326,13 @@ func (e *Engine) CancelOperation(ctx context.Context, identity integrationauth.I
 		if err := e.record(tx, identity, op.Kind, op.ID, "cancelled", ""); err != nil {
 			return ErrAuditUnavailable
 		}
-		return e.Store.Update(tx, id, []string{operation.OperationStateQueued, operation.OperationStateAwaitingApproval}, map[string]any{"state": operation.OperationStateCancelled, "terminal_at": time.Now().UTC()})
+		if err := e.Store.Update(tx, id, []string{operation.OperationStateQueued, operation.OperationStateAwaitingApproval}, map[string]any{"state": operation.OperationStateCancelled, "terminal_at": time.Now().UTC()}); err != nil {
+			return err
+		}
+		if op.ApprovalID != "" {
+			return e.Approvals.InvalidatePending(tx, op.ApprovalID, "Operation cancelled by its caller")
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err

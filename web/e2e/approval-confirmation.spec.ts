@@ -45,6 +45,14 @@ for (const width of [390, 768, 1280, 1920]) for (const locale of ['zh-CN', 'en-U
     expect(layout.pageOverflow).toBeLessThanOrEqual(1);
     expect(layout.controlsContained).toBe(true);
     await page.screenshot({ path: test.info().outputPath('approval.png') });
+    await page.route('**/api/v1/approvals/fixture-approval', route => route.fulfill({ json: {
+      ...approval, status: 'failed', reason: 'Operation cancelled by its caller',
+      operation: { operation_id: 'fixture-operation', state: 'cancelled', applied: false },
+    } }));
+    await page.getByRole('button', { name: locale === 'zh-CN' ? '刷新状态' : 'Refresh status', exact: true }).click();
+    await expect(page.getByRole('status')).toHaveText(locale === 'zh-CN' ? '已取消' : 'Cancelled');
+    await expect(page.getByRole('button', { name: locale === 'zh-CN' ? '确认并执行' : 'Confirm and execute', exact: true })).toHaveCount(0);
+    await page.screenshot({ path: test.info().outputPath('cancelled.png') });
   });
 }
 

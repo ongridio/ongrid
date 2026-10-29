@@ -61,8 +61,8 @@ it('shows a failed read with retry and no confirmation controls', async () => {
   expect(approveApproval).not.toHaveBeenCalled();
 });
 
-it('does not allow confirmation of cancelled operations', async () => {
-  vi.mocked(getApproval).mockResolvedValue({ ...pending, operation: { ...pending.operation!, state: 'cancelled', applied: false } });
+it('shows cancellation when the linked approval is invalidated', async () => {
+  vi.mocked(getApproval).mockResolvedValue({ ...pending, status: 'failed', operation: { ...pending.operation!, state: 'cancelled', applied: false } });
   show();
   expect(await screen.findByText('Cancelled')).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Confirm and execute' })).not.toBeInTheDocument();

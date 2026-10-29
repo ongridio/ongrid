@@ -60,7 +60,7 @@ export default function ApprovalConfirmationPage() {
     cancelled: tr('已取消', 'Cancelled'), failed: tr('执行失败', 'Failed'), partial: tr('已应用，结果不完整', 'Applied, incomplete result'),
     unknown: tr('结果未知，请核实目标', 'Outcome unknown; inspect the target'),
   };
-  const status = approval?.status === 'rejected' ? 'rejected' : approval?.status === 'failed' ? 'failed' : state;
+  const status = state === 'cancelled' ? 'cancelled' : approval?.status === 'rejected' ? 'rejected' : approval?.status === 'failed' ? 'failed' : state;
   return <main className="anim-fade flex min-w-0 flex-1 flex-col overflow-y-auto">
     <PageHeader title={tr('确认操作', 'Confirm operation')} subtitle={tr('核对本次变更，确认一次后执行。', 'Review this change and confirm once to execute.')} actions={
       <Button variant="outline" disabled={busy || loading} onClick={() => void load()}><RefreshCw size={14} />{tr('刷新状态', 'Refresh status')}</Button>

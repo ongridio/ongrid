@@ -403,7 +403,7 @@ func TestOwnershipScopeAndApprovalRecovery(t *testing.T) {
 	a, err = f.e.Approvals.Get(ctx, op.ApprovalID)
 	require.NoError(t, err)
 	_, err = f.e.Approvals.Approve(ctx, f.id.Owner.UserID, a.ID)
-	require.NoError(t, err)
+	require.ErrorIs(t, err, errs.ErrNotFound)
 	row, err := f.store.Get(ctx, op.OperationID)
 	require.NoError(t, err)
 	require.Equal(t, operation.OperationStateCancelled, row.State)

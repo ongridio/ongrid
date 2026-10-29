@@ -178,3 +178,11 @@ PAT 设置页与操作确认页共 14 项前端测试通过；最终前端镜像
 本轮 `go test ./...` 仍受 macOS 上的 Edge 平台构建限制及既有 `TestValidateEntry_DestWhitelist` 大小写路径失败影响。`make arch-lint` 仍报已有生成 K8s→Edge API 依赖和 `web/node_modules/flatted` 未分类文件，共 2 项，与修复前一致；不能记为全量检查通过。
 
 本轮未更新本机或生产部署，未重跑外部客户端与 MySQL 验收。
+
+## 取消审批修复回归（2026-10-29）
+
+取消 MCP 操作时，在同一事务内使关联的待审批记录失效；复用 `InvalidatePending`，不覆盖已经做出的审批决定。取消后的待审批计数归零，重复取消返回相同操作；模拟超过 30 天的 Operation 清理后，保留的审批详情仍返回 HTTP 200。注入审批更新失败时，Operation 状态、终态时间和取消审计一并回滚。
+
+相关 MCP 与审批包的 Go race 检查通过，新增取消/清理/回滚测试及既有审批恢复测试通过。确认页优先展示 Operation 的“已取消”状态，4 项前端单元测试通过；17 项 Chromium 测试通过，覆盖 390/768/1280/1920px、中英文及深浅主题，并实看取消状态的 light/dark 截图。`npm run build`、`npm run lint`（0 error、43 条既有 warning）和 `git diff --check` 通过。
+
+本轮重跑 `go test ./...` 仍有既有 macOS Edge 平台构建及 `TestValidateEntry_DestWhitelist` 路径大小写问题。未重跑 MySQL、外部客户端、全仓库 race 或生产验收；未更新部署。
