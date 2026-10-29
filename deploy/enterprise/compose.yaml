@@ -1,0 +1,31 @@
+name: enterprise-ai-demo
+services:
+  web:
+    image: enterprise-ai-demo:${ENTERPRISE_VERSION:?Set ENTERPRISE_VERSION}
+    build: .
+    restart: unless-stopped
+    ports:
+      - "18860:8080"
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    cpus: 1.0
+    mem_limit: 512m
+    pids_limit: 100
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8080/healthz]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 10.253.57.0/28

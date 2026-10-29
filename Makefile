@@ -926,3 +926,25 @@ test-agent-runtime: ## 统一 Agent runtime 回归（tools 依赖 Linux cmdpolic
 build-host-identity-probe: ## 构建 Host/Edge 隔离验收探针（不执行系统命令）
 	@mkdir -p $(BIN_DIR)
 	$(GO_BUILD) -o $(BIN_DIR)/host-identity-probe ./tests/acceptance/hostidentity/probe
+
+.PHONY: build-enterprise-demo package-enterprise-demo test-enterprise-demo
+build-enterprise-demo: ## Build the independent enterprise browser sandbox
+	cd web && VITE_ENTERPRISE_VERSION=$$(git rev-parse --short=12 HEAD) npm run build
+
+package-enterprise-demo: build-enterprise-demo ## Package tracked source, manual and Web deployment
+	node scripts/package-enterprise-demo.mjs
+
+test-enterprise-demo: ## Run sandbox unit and real-browser regressions
+	cd web && npm test -- src/enterprise/data.test.ts
+	cd web && npx playwright test --config playwright.enterprise.config.ts
+
+.PHONY: bootstrap-enterprise-demo deploy-enterprise-demo
+bootstrap-enterprise-demo: build-enterprise-demo ## Package an initial deployment for manual screenshots
+	ENTERPRISE_BOOTSTRAP=1 node scripts/package-enterprise-demo.mjs
+
+deploy-enterprise-demo: ## Deploy the prepared package to the authorized test server
+	bash scripts/deploy-enterprise-demo.sh
+
+.PHONY: capture-enterprise-manual
+capture-enterprise-manual: ## Capture the authorized demo deployment for the Word manual
+	node scripts/capture-enterprise-manual.mjs

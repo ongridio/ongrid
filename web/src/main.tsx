@@ -4,14 +4,13 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { TooltipProvider } from './components/ui/Tooltip';
 import './styles/index.css';
-import { applyAccentOnBoot } from './store/theme';
-import { applyThemeOnBoot } from './store/mode';
+import { bootEnterpriseTheme } from './enterprise/theme';
+import './enterprise/enterprise.css';
 import { getLocale } from './i18n/locale';
 
 // Apply persisted theme + accent + lang before first paint. Each is
 // one DOM write; cheap to run unconditionally.
-applyThemeOnBoot();
-applyAccentOnBoot();
+bootEnterpriseTheme();
 document.documentElement.lang = getLocale();
 
 const rootEl = document.getElementById('root');
