@@ -10,6 +10,12 @@ option go_package = "github.com/singchia/ongrid/api/gen/iam/v1;iamv1";
 // 所有 RPC 都不在请求体里带 org_id / user_id — 那些来自 JWT claims 与 URL path，
 // 由 internal/pkg/auth middleware 注入 context.Context（见 ADR-003）。
 service IamService {
+    // JWT + current admin role; GET/POST /api/v1/iam/mcp-tokens.
+    rpc ListMcpTokens(ListMcpTokensRequest) returns (ListMcpTokensResponse);
+    rpc CreateMcpToken(CreateMcpTokenRequest) returns (CreateMcpTokenResponse);
+    // PUT/DELETE /api/v1/iam/mcp-tokens/{public_id}; owned tokens only.
+    rpc UpdateMcpToken(UpdateMcpTokenRequest) returns (UpdateMcpTokenResponse);
+    rpc DeleteMcpToken(DeleteMcpTokenRequest) returns (DeleteMcpTokenResponse);
     // Register 用邮箱 + 密码注册；同步创建隐式个人 org + owner membership，
     // 返回一对 access / refresh token（claims 里 org_id 指向新建的个人 org）。
     rpc Register(RegisterRequest) returns (RegisterResponse);
@@ -40,6 +46,48 @@ service IamService {
     // 目标 org 必须是当前 user 的成员，否则 403。
     rpc SwitchOrg(SwitchOrgRequest) returns (SwitchOrgResponse);
 }
+
+message McpToken {
+    string public_id = 1 [json_name = "public_id"];
+    string name = 2 [json_name = "name"];
+    repeated string scopes = 3 [json_name = "scopes"];
+    google.protobuf.Timestamp created_at = 4 [json_name = "created_at"];
+    // Absent / REST null means no time expiry; deletion still invalidates it.
+    google.protobuf.Timestamp expires_at = 5 [json_name = "expires_at"];
+    reserved 6;
+    reserved "revoked_at";
+}
+message CreateMcpTokenRequest {
+    string name = 1 [json_name = "name"];
+    repeated string scopes = 2 [json_name = "scopes"];
+    google.protobuf.Timestamp expires_at = 3 [json_name = "expires_at"];
+}
+message CreateMcpTokenResponse {
+    McpToken item = 1 [json_name = "item"];
+    // Returned once. Never stored as plaintext or included in list responses.
+    string token = 2 [json_name = "token"];
+}
+message ListMcpTokensRequest {
+    int32 limit = 1 [json_name = "limit"];
+    int32 offset = 2 [json_name = "offset"];
+}
+message ListMcpTokensResponse {
+    repeated McpToken items = 1 [json_name = "items"];
+    int64 total = 2 [json_name = "total"];
+    repeated string scopes = 3 [json_name = "scopes"];
+    bool enabled = 4 [json_name = "enabled"];
+    string endpoint = 5 [json_name = "endpoint"];
+    bool writes_enabled = 6 [json_name = "writes_enabled"];
+}
+message UpdateMcpTokenRequest {
+    string public_id = 1 [json_name = "public_id"];
+    string name = 2 [json_name = "name"];
+    repeated string scopes = 3 [json_name = "scopes"];
+    google.protobuf.Timestamp expires_at = 4 [json_name = "expires_at"];
+}
+message UpdateMcpTokenResponse { McpToken item = 1 [json_name = "item"]; }
+message DeleteMcpTokenRequest { string public_id = 1 [json_name = "public_id"]; }
+message DeleteMcpTokenResponse {}
 
 // ---------- 领域类型 ----------
 

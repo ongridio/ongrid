@@ -323,6 +323,11 @@ function Row({ label, value, mono }: { label: string; value: string; mono?: bool
 type Tr = (zh: string, en: string) => string;
 
 const ACTION_LABELS: Record<string, [string, string]> = {
+  mcp_call: ['外部 MCP 调用', 'External MCP call'],
+  mcp_token_create: ['创建接入 Token', 'Create access token'],
+  mcp_token_revoke: ['撤销接入 Token', 'Revoke access token'],
+  mcp_token_update: ['编辑接入 Token', 'Edit access token'],
+  mcp_token_delete: ['删除接入 Token', 'Delete access token'],
   auth_login_failed: ['登录失败', 'Sign-in failed'],
   user_create: ['新建用户', 'Create user'],
   user_update: ['修改用户', 'Update user'],
@@ -349,6 +354,8 @@ const ACTION_LABELS: Record<string, [string, string]> = {
 };
 
 const RESOURCE_LABELS: Record<string, [string, string]> = {
+  external_mcp: ['外部 MCP', 'External MCP'],
+  integration_token: ['接入 Token', 'Access token'],
   user: ['用户', 'User'],
   device: ['设备', 'Device'],
   incident: ['告警事件', 'Incident'],

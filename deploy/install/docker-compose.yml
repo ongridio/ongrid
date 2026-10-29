@@ -158,6 +158,9 @@ services:
       # plugin endpoints — edges can't push logs/traces. install.sh
       # populates from operator's domain at first run.
       ONGRID_PUBLIC_URL: ${ONGRID_PUBLIC_URL:-}
+      ONGRID_EXTERNAL_MCP_ENABLED: ${ONGRID_EXTERNAL_MCP_ENABLED:-false}
+      ONGRID_EXTERNAL_MCP_WRITES_ENABLED: ${ONGRID_EXTERNAL_MCP_WRITES_ENABLED:-false}
+      ONGRID_EXTERNAL_MCP_ALLOWED_ORIGINS: ${ONGRID_EXTERNAL_MCP_ALLOWED_ORIGINS:-}
       ONGRID_TUNNEL_ADDR: ${ONGRID_TUNNEL_ADDR:-}
       # Private native PCAP parser. Docker-only HTTP is protected by the
       # signed request and single-use artifact capability below; the parser

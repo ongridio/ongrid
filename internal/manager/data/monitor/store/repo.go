@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/pkg/dbx"
 	"gorm.io/gorm"
 
 	model "github.com/ongridio/ongrid/internal/manager/model/monitor"
@@ -27,7 +28,7 @@ func NewRepo(db *gorm.DB) *Repo { return &Repo{db: db} }
 // refreshes.
 func (r *Repo) List(ctx context.Context) ([]*model.Panel, error) {
 	var out []*model.Panel
-	if err := r.db.WithContext(ctx).
+	if err := dbx.WithContext(ctx, r.db).
 		Order("ordinal asc").
 		Order("id asc").
 		Find(&out).Error; err != nil {
@@ -42,7 +43,7 @@ func (r *Repo) Get(ctx context.Context, id uint64) (*model.Panel, error) {
 		return nil, fmt.Errorf("%w: id required", errs.ErrInvalid)
 	}
 	var p model.Panel
-	if err := r.db.WithContext(ctx).First(&p, id).Error; err != nil {
+	if err := dbx.WithContext(ctx, r.db).First(&p, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errs.ErrNotFound
 		}
@@ -56,7 +57,7 @@ func (r *Repo) Get(ctx context.Context, id uint64) (*model.Panel, error) {
 // end without forcing the caller to read the list first.
 func (r *Repo) MaxOrdinal(ctx context.Context) (int, error) {
 	var n int
-	row := r.db.WithContext(ctx).
+	row := dbx.WithContext(ctx, r.db).
 		Model(&model.Panel{}).
 		Select("COALESCE(MAX(ordinal), 0)").
 		Row()
@@ -72,7 +73,7 @@ func (r *Repo) Create(ctx context.Context, p *model.Panel) (*model.Panel, error)
 	if p == nil {
 		return nil, fmt.Errorf("%w: panel required", errs.ErrInvalid)
 	}
-	if err := r.db.WithContext(ctx).Create(p).Error; err != nil {
+	if err := dbx.WithContext(ctx, r.db).Create(p).Error; err != nil {
 		return nil, err
 	}
 	return p, nil
@@ -90,7 +91,7 @@ func (r *Repo) Update(ctx context.Context, id uint64, fields map[string]any) (*m
 	if len(fields) == 0 {
 		return r.Get(ctx, id)
 	}
-	res := r.db.WithContext(ctx).
+	res := dbx.WithContext(ctx, r.db).
 		Model(&model.Panel{}).
 		Where("id = ?", id).
 		Updates(fields)
@@ -114,7 +115,7 @@ func (r *Repo) SetSyncResult(ctx context.Context, id uint64, errMsg string) erro
 		return fmt.Errorf("%w: id required", errs.ErrInvalid)
 	}
 	now := time.Now().UTC()
-	return r.db.WithContext(ctx).
+	return dbx.WithContext(ctx, r.db).
 		Model(&model.Panel{}).
 		Where("id = ?", id).
 		Updates(map[string]any{
@@ -129,7 +130,7 @@ func (r *Repo) Delete(ctx context.Context, id uint64) error {
 	if id == 0 {
 		return fmt.Errorf("%w: id required", errs.ErrInvalid)
 	}
-	res := r.db.WithContext(ctx).Delete(&model.Panel{}, id)
+	res := dbx.WithContext(ctx, r.db).Delete(&model.Panel{}, id)
 	if res.Error != nil {
 		return res.Error
 	}

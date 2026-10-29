@@ -23,7 +23,7 @@ type httpModule struct {
 	metricsServer *httpserver.Server
 }
 
-func buildHTTPServers(cfg *config.Config, log *slog.Logger, reg *prometheus.Registry, iam *iamModule, settings *settingsModule, devices *devicesModule, telemetry *telemetryModule, tunnel *tunnelModule, aiops *aiopsModule, runtime *runtimeModule, imbridge *imbridgeModule, automation *automationModule, system *systemModule, extensions *extensionsModule) *httpModule {
+func buildHTTPServers(cfg *config.Config, log *slog.Logger, reg *prometheus.Registry, iam *iamModule, settings *settingsModule, devices *devicesModule, telemetry *telemetryModule, tunnel *tunnelModule, aiops *aiopsModule, runtime *runtimeModule, imbridge *imbridgeModule, automation *automationModule, system *systemModule, extensions *extensionsModule, external *externalMCPModule) (*httpModule, error) {
 	promProxySvc := managersvcprom.New(iam.signer)
 	// Wire the cloud-Prom query client into the proxy handler so the
 	// SPA's Monitor page can issue range queries through the same
@@ -53,6 +53,60 @@ func buildHTTPServers(cfg *config.Config, log *slog.Logger, reg *prometheus.Regi
 	}
 
 	pagesHandler := pagesserver.NewHandler(extensions.pageStore, cfg.JWT.Secret)
+	registerProtected := func(protected chi.Router) {
+		// /v1/version — manager binary version, used by the SPA to
+		// flag edges whose agent_version drifts from the manager's.
+		// Inline rather than its own handler package because the
+		// payload is one field; growing this past version + maybe a
+		// build SHA would warrant lifting it out.
+		protected.Get("/v1/version", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("content-type", "application/json")
+			_, _ = w.Write([]byte(`{"manager_version":"` + version + `"}`))
+		})
+		pagesHandler.RegisterProtected(protected)
+		iam.iamHandler.RegisterProtected(protected)
+		devices.edgeHandler.Register(protected)
+		devices.edgeEnrollmentHandler.RegisterProtected(protected)
+		extensions.k8sHandler.RegisterProtected(protected)
+		tunnel.webshellHandler.Register(protected)
+		devices.deviceHandler.Register(protected)
+		devices.topologyHandler.Register(protected)
+		telemetry.metricHandler.Register(protected)
+		settings.monitorHandler.Register(protected)
+		telemetry.logsHandler.Register(protected)
+		telemetry.tracesHandler.Register(protected)
+		telemetry.apmHandler.Register(protected)
+		telemetry.agentTraceHandler.Register(protected)
+		telemetry.profilesHandler.Register(protected)
+		runtime.aiopsHandler.Register(protected)
+		system.alertHandler.Register(protected)
+		system.systemHealthHandler.Register(protected)
+		system.systemUpgradeHandler.Register(protected)
+		imbridge.imbridgeHandler.RegisterProtected(protected)
+		extensions.skillHandler.Register(protected)
+		extensions.operatorRunHandler.Register(protected)
+		if system.knowledgeHandler != nil {
+			system.knowledgeHandler.Register(protected)
+		}
+		settings.settingHandler.Register(protected)
+		telemetry.integrationHandler.Register(protected)
+		extensions.marketplaceHandler.Register(protected)
+		extensions.secretHandler.Register(protected)
+		extensions.mcpHandler.Register(protected)
+		extensions.approvalHandler.Register(protected)
+		promProxyHandler.RegisterProtected(protected)
+		managerserveraudit.NewHandler(settings.auditUC).Register(protected)
+		automation.reportHandler.Register(protected)
+		automation.flowHandler.Register(protected)
+		aiops.packetCaptureHandler.Register(protected)
+	}
+	if external.engine != nil {
+		apiRouter := chi.NewRouter()
+		registerProtected(apiRouter)
+		if err := external.addAPITools(apiRouter); err != nil {
+			return nil, err
+		}
+	}
 
 	// Top-level mux.
 	mux := chi.NewRouter()
@@ -88,6 +142,9 @@ func buildHTTPServers(cfg *config.Config, log *slog.Logger, reg *prometheus.Regi
 	// chi.Router.Group.
 	mux.Route("/api", func(api chi.Router) {
 		iam.iamHandler.RegisterPublic(api)
+		if external.handler != nil {
+			api.Handle("/v1/integrations/mcp", external.handler)
+		}
 		tunnel.webshellHandler.RegisterPublic(api)
 		promProxyHandler.RegisterPublic(api)
 		// IM webhooks live OUTSIDE the bearer group — Feishu / DingTalk
@@ -104,51 +161,8 @@ func buildHTTPServers(cfg *config.Config, log *slog.Logger, reg *prometheus.Regi
 
 		api.Group(func(protected chi.Router) {
 			protected.Use(auth.Middleware(iam.signer))
-			// /v1/version — manager binary version, used by the SPA to
-			// flag edges whose agent_version drifts from the manager's.
-			// Inline rather than its own handler package because the
-			// payload is one field; growing this past version + maybe a
-			// build SHA would warrant lifting it out.
-			protected.Get("/v1/version", func(w http.ResponseWriter, _ *http.Request) {
-				w.Header().Set("content-type", "application/json")
-				_, _ = w.Write([]byte(`{"manager_version":"` + version + `"}`))
-			})
-			pagesHandler.RegisterProtected(protected)
-			iam.iamHandler.RegisterProtected(protected)
-			devices.edgeHandler.Register(protected)
-			devices.edgeEnrollmentHandler.RegisterProtected(protected)
-			extensions.k8sHandler.RegisterProtected(protected)
-			tunnel.webshellHandler.Register(protected)
-			devices.deviceHandler.Register(protected)
-			devices.topologyHandler.Register(protected)
-			telemetry.metricHandler.Register(protected)
-			settings.monitorHandler.Register(protected)
-			telemetry.logsHandler.Register(protected)
-			telemetry.tracesHandler.Register(protected)
-			telemetry.apmHandler.Register(protected)
-			telemetry.agentTraceHandler.Register(protected)
-			telemetry.profilesHandler.Register(protected)
-			runtime.aiopsHandler.Register(protected)
-			system.alertHandler.Register(protected)
-			system.systemHealthHandler.Register(protected)
-			system.systemUpgradeHandler.Register(protected)
-			imbridge.imbridgeHandler.RegisterProtected(protected)
-			extensions.skillHandler.Register(protected)
-			extensions.operatorRunHandler.Register(protected)
-			if system.knowledgeHandler != nil {
-				system.knowledgeHandler.Register(protected)
-			}
-			settings.settingHandler.Register(protected)
-			telemetry.integrationHandler.Register(protected)
-			extensions.marketplaceHandler.Register(protected)
-			extensions.secretHandler.Register(protected)
-			extensions.mcpHandler.Register(protected)
-			extensions.approvalHandler.Register(protected)
-			promProxyHandler.RegisterProtected(protected)
-			managerserveraudit.NewHandler(settings.auditUC).Register(protected)
-			automation.reportHandler.Register(protected)
-			automation.flowHandler.Register(protected)
-			aiops.packetCaptureHandler.Register(protected)
+			external.tokens.Register(protected)
+			registerProtected(protected)
 		})
 	})
 
@@ -167,5 +181,5 @@ func buildHTTPServers(cfg *config.Config, log *slog.Logger, reg *prometheus.Regi
 	return &httpModule{
 		apiServer:     apiServer,
 		metricsServer: metricsServer,
-	}
+	}, nil
 }

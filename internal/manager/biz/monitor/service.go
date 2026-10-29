@@ -31,6 +31,7 @@ import (
 	"time"
 
 	model "github.com/ongridio/ongrid/internal/manager/model/monitor"
+	"github.com/ongridio/ongrid/internal/pkg/dbx"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
 
@@ -58,10 +59,10 @@ type GrafanaSyncer interface {
 
 // Service is the biz-layer orchestrator.
 type Service struct {
-	repo    Repo
-	syncer  GrafanaSyncer
-	log     *slog.Logger
-	syncTO  time.Duration
+	repo   Repo
+	syncer GrafanaSyncer
+	log    *slog.Logger
+	syncTO time.Duration
 }
 
 // New builds the service. syncer may be nil. log may be nil (defaults
@@ -160,7 +161,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*model.Panel, err
 	if err != nil {
 		return nil, err
 	}
-	s.kickSync("create", saved.ID)
+	dbx.AfterCommit(ctx, func() { s.kickSync("create", saved.ID) })
 	return saved, nil
 }
 
@@ -206,7 +207,7 @@ func (s *Service) Update(ctx context.Context, id uint64, in UpdateInput) (*model
 	if err != nil {
 		return nil, err
 	}
-	s.kickSync("update", id)
+	dbx.AfterCommit(ctx, func() { s.kickSync("update", id) })
 	return updated, nil
 }
 
@@ -217,7 +218,7 @@ func (s *Service) Delete(ctx context.Context, id uint64) error {
 	if err := s.repo.Delete(ctx, id); err != nil {
 		return err
 	}
-	s.kickSync("delete", id)
+	dbx.AfterCommit(ctx, func() { s.kickSync("delete", id) })
 	return nil
 }
 

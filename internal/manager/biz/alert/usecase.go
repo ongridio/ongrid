@@ -11,6 +11,7 @@ import (
 	"time"
 
 	model "github.com/ongridio/ongrid/internal/manager/model/alert"
+	"github.com/ongridio/ongrid/internal/pkg/dbx"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/logquery"
 	"github.com/ongridio/ongrid/internal/pkg/notify"
@@ -133,7 +134,7 @@ func (u *Usecase) createEvent(ctx context.Context, ev *model.Event, ruleKey stri
 		// Emit the metric on success only — a failed write would inflate
 		// the counter past the actual row count and confuse rules that
 		// alert on event-write outcome.
-		prom.IncAlertEvent(ev.EventType, ev.Severity, ruleKey)
+		dbx.AfterCommit(ctx, func() { prom.IncAlertEvent(ev.EventType, ev.Severity, ruleKey) })
 	}
 	return err
 }
@@ -743,6 +744,12 @@ func (u *Usecase) DeleteRule(ctx context.Context, id uint64) error {
 		return fmt.Errorf("%w: built-in rules cannot be deleted", errs.ErrForbidden)
 	}
 	return u.repo.DeleteRule(ctx, id)
+}
+
+// ValidateRule checks a preview with the same rules used by Create/Update.
+func ValidateRule(in RuleInput, requireKey bool) error {
+	_, err := buildRuleRow(in, requireKey)
+	return err
 }
 
 func buildRuleRow(in RuleInput, requireKey bool) (*model.Rule, error) {

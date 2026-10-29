@@ -7,11 +7,13 @@ package audit
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"time"
 
 	model "github.com/ongridio/ongrid/internal/manager/model/audit"
 	"github.com/ongridio/ongrid/internal/pkg/auditctx"
+	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
 
 // Repo is the persistence seam the usecase consumes. Implemented by
@@ -87,6 +89,26 @@ func (u *Usecase) Emit(ctx context.Context, ev Event) {
 			slog.String("resource_id", ev.ResourceID),
 			slog.Any("err", err))
 	}
+}
+
+// Record is the fail-closed entry point for external integrations. Emit keeps
+// its existing best-effort behavior for all current callers.
+func (u *Usecase) Record(ctx context.Context, ev Event) error {
+	if u == nil || u.repo == nil {
+		return errs.ErrNotWiredYet
+	}
+	if ev.Action == "" || (ev.Status != auditctx.StatusSuccess && ev.Status != auditctx.StatusFailure && ev.Status != auditctx.StatusDenied) {
+		return errs.ErrInvalid
+	}
+	row := &model.Log{OccurredAt: time.Now().UTC(), UserID: ev.UserID, UserEmail: ev.UserEmail, Role: ev.Role, IP: ev.IP, UserAgent: ev.UserAgent, Action: ev.Action, ResourceType: ev.ResourceType, ResourceID: ev.ResourceID, ResourceName: ev.ResourceName, Status: ev.Status, ErrorCode: ev.ErrorCode, ErrorMessage: truncate(ev.ErrorMessage, 512), RequestID: ev.RequestID}
+	if ev.Payload != nil {
+		b, err := json.Marshal(ev.Payload)
+		if err != nil {
+			return fmt.Errorf("audit payload: %w", err)
+		}
+		row.PayloadJSON = string(b)
+	}
+	return u.repo.Insert(ctx, row)
 }
 
 // List is the read path for the admin UI.

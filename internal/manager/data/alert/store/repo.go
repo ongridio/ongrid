@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/pkg/dbx"
 	"gorm.io/gorm"
 
 	biz "github.com/ongridio/ongrid/internal/manager/biz/alert"
@@ -23,7 +24,7 @@ func NewRepo(db *gorm.DB) *Repo { return &Repo{db: db} }
 var _ biz.Repo = (*Repo)(nil)
 
 func (r *Repo) ListIncidents(ctx context.Context, f biz.IncidentFilter) ([]*model.Incident, error) {
-	tx := r.db.WithContext(ctx).Model(&model.Incident{})
+	tx := dbx.WithContext(ctx, r.db).Model(&model.Incident{})
 	if f.Status != "" {
 		tx = tx.Where("status = ?", f.Status)
 	}
@@ -54,7 +55,7 @@ func (r *Repo) ListIncidents(ctx context.Context, f biz.IncidentFilter) ([]*mode
 // global count stay in sync — fixes the "badge says 1 but page shows 9"
 // bug caused by the handler taking total = len(items).
 func (r *Repo) CountIncidents(ctx context.Context, f biz.IncidentFilter) (int64, error) {
-	tx := r.db.WithContext(ctx).Model(&model.Incident{})
+	tx := dbx.WithContext(ctx, r.db).Model(&model.Incident{})
 	if f.Status != "" {
 		tx = tx.Where("status = ?", f.Status)
 	}
@@ -76,7 +77,7 @@ func (r *Repo) CountIncidents(ctx context.Context, f biz.IncidentFilter) (int64,
 
 func (r *Repo) GetIncidentByID(ctx context.Context, id uint64) (*model.Incident, error) {
 	var in model.Incident
-	if err := r.db.WithContext(ctx).First(&in, id).Error; err != nil {
+	if err := dbx.WithContext(ctx, r.db).First(&in, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errs.ErrNotFound
 		}
@@ -86,7 +87,7 @@ func (r *Repo) GetIncidentByID(ctx context.Context, id uint64) (*model.Incident,
 }
 
 func (r *Repo) ListIncidentRows(ctx context.Context, filter IncidentFilter) ([]*model.Incident, error) {
-	tx := r.db.WithContext(ctx).Model(&model.Incident{})
+	tx := dbx.WithContext(ctx, r.db).Model(&model.Incident{})
 	if filter.Status != "" {
 		tx = tx.Where("status = ?", filter.Status)
 	}
@@ -118,7 +119,7 @@ func (r *Repo) UpdateIncident(ctx context.Context, in *model.Incident) error {
 	}
 	in.Title = limitAlertTitle(in.Title)
 	in.DedupeKey = normalizeAlertDedupeKey(in.DedupeKey)
-	res := r.db.WithContext(ctx).Model(&model.Incident{}).Where("id = ?", in.ID).Updates(in)
+	res := dbx.WithContext(ctx, r.db).Model(&model.Incident{}).Where("id = ?", in.ID).Updates(in)
 	if res.Error != nil {
 		return res.Error
 	}
@@ -134,7 +135,7 @@ func (r *Repo) CreateAlertIncident(ctx context.Context, in *model.Incident) erro
 	}
 	in.Title = limitAlertTitle(in.Title)
 	in.DedupeKey = normalizeAlertDedupeKey(in.DedupeKey)
-	return r.db.WithContext(ctx).Create(in).Error
+	return dbx.WithContext(ctx, r.db).Create(in).Error
 }
 
 func (r *Repo) GetIncidentByDedupeKey(ctx context.Context, dedupeKey string) (*model.Incident, error) {
@@ -144,7 +145,7 @@ func (r *Repo) GetIncidentByDedupeKey(ctx context.Context, dedupeKey string) (*m
 		keys = append(keys, normalized)
 	}
 	var in model.Incident
-	if err := r.db.WithContext(ctx).Where("dedupe_key IN ?", keys).First(&in).Error; err != nil {
+	if err := dbx.WithContext(ctx, r.db).Where("dedupe_key IN ?", keys).First(&in).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errs.ErrNotFound
 		}
@@ -171,7 +172,7 @@ func (r *Repo) UpdateIncidentStatus(ctx context.Context, id uint64, status strin
 		updates["resolved_at"] = occurredAt
 		updates["resolved_by"] = actorID
 	}
-	res := r.db.WithContext(ctx).Model(&model.Incident{}).Where("id = ?", id).Updates(updates)
+	res := dbx.WithContext(ctx, r.db).Model(&model.Incident{}).Where("id = ?", id).Updates(updates)
 	if res.Error != nil {
 		return res.Error
 	}
@@ -192,7 +193,7 @@ func (r *Repo) BumpIncidentFiring(ctx context.Context, id uint64, firedAt time.T
 	if firedAt.IsZero() {
 		firedAt = time.Now().UTC()
 	}
-	res := r.db.WithContext(ctx).Model(&model.Incident{}).Where("id = ?", id).Updates(map[string]any{
+	res := dbx.WithContext(ctx, r.db).Model(&model.Incident{}).Where("id = ?", id).Updates(map[string]any{
 		"last_fired_at": firedAt,
 		"event_count":   gorm.Expr("event_count + ?", 1),
 		"summary":       summary,
@@ -217,7 +218,7 @@ func (r *Repo) ReopenIncident(ctx context.Context, id uint64, firedAt time.Time,
 	if firedAt.IsZero() {
 		firedAt = time.Now().UTC()
 	}
-	res := r.db.WithContext(ctx).Model(&model.Incident{}).Where("id = ?", id).Updates(map[string]any{
+	res := dbx.WithContext(ctx, r.db).Model(&model.Incident{}).Where("id = ?", id).Updates(map[string]any{
 		"status":         model.StatusOpen,
 		"last_fired_at":  firedAt,
 		"event_count":    gorm.Expr("event_count + ?", 1),
@@ -244,7 +245,7 @@ func (r *Repo) MarkIncidentNotified(ctx context.Context, id uint64, at time.Time
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
-	res := r.db.WithContext(ctx).Model(&model.Incident{}).Where("id = ?", id).Update("last_notified_at", at)
+	res := dbx.WithContext(ctx, r.db).Model(&model.Incident{}).Where("id = ?", id).Update("last_notified_at", at)
 	if res.Error != nil {
 		return res.Error
 	}
@@ -267,7 +268,7 @@ func (r *Repo) ListActiveSilences(ctx context.Context, at time.Time) ([]*model.S
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
-	tx := r.db.WithContext(ctx).Model(&model.Silence{}).
+	tx := dbx.WithContext(ctx, r.db).Model(&model.Silence{}).
 		Where("status = ?", model.SilenceStatusActive).
 		Where("starts_at <= ? AND ends_at > ?", at, at)
 	var out []*model.Silence
@@ -282,7 +283,7 @@ func (r *Repo) ListActiveSilences(ctx context.Context, at time.Time) ([]*model.S
 // a notify attempt happens.
 func (r *Repo) GetChannelByName(ctx context.Context, name string) (*model.Channel, error) {
 	var c model.Channel
-	if err := r.db.WithContext(ctx).Where("name = ?", name).First(&c).Error; err != nil {
+	if err := dbx.WithContext(ctx, r.db).Where("name = ?", name).First(&c).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errs.ErrNotFound
 		}
@@ -295,7 +296,7 @@ func (r *Repo) GetChannelByName(ctx context.Context, name string) (*model.Channe
 // The Notification Router consumes this list per-incident.
 func (r *Repo) ListEnabledChannels(ctx context.Context) ([]*model.Channel, error) {
 	var out []*model.Channel
-	if err := r.db.WithContext(ctx).Model(&model.Channel{}).
+	if err := dbx.WithContext(ctx, r.db).Model(&model.Channel{}).
 		Where("enabled = ?", true).
 		Order("id ASC").
 		Find(&out).Error; err != nil {
@@ -312,7 +313,7 @@ func (r *Repo) ListRetriableDeliveries(ctx context.Context, maxAttempts uint32, 
 		limit = 100
 	}
 	var out []*model.Delivery
-	tx := r.db.WithContext(ctx).Model(&model.Delivery{}).
+	tx := dbx.WithContext(ctx, r.db).Model(&model.Delivery{}).
 		Where("status = ?", model.DeliveryStatusFailed).
 		Where("attempt_count < ?", maxAttempts)
 	if !before.IsZero() {
@@ -332,9 +333,9 @@ func (r *Repo) UpsertChannelByName(ctx context.Context, in *model.Channel) (*mod
 		return nil, errs.ErrInvalid
 	}
 	var existing model.Channel
-	err := r.db.WithContext(ctx).Where("name = ?", in.Name).First(&existing).Error
+	err := dbx.WithContext(ctx, r.db).Where("name = ?", in.Name).First(&existing).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		if err := r.db.WithContext(ctx).Create(in).Error; err != nil {
+		if err := dbx.WithContext(ctx, r.db).Create(in).Error; err != nil {
 			return nil, err
 		}
 		return in, nil
@@ -347,7 +348,7 @@ func (r *Repo) UpsertChannelByName(ctx context.Context, in *model.Channel) (*mod
 		"enabled":      in.Enabled,
 		"config_json":  in.ConfigJSON,
 	}
-	if err := r.db.WithContext(ctx).Model(&existing).Updates(updates).Error; err != nil {
+	if err := dbx.WithContext(ctx, r.db).Model(&existing).Updates(updates).Error; err != nil {
 		return nil, err
 	}
 	return &existing, nil
@@ -358,7 +359,7 @@ func (r *Repo) CreateEvent(ctx context.Context, ev *model.Event) error {
 		return errs.ErrInvalid
 	}
 	ev.Title = limitAlertTitle(ev.Title)
-	return r.db.WithContext(ctx).Create(ev).Error
+	return dbx.WithContext(ctx, r.db).Create(ev).Error
 }
 
 // CountEventsByType counts up to limit matching events created at or after since.
@@ -367,7 +368,7 @@ func (r *Repo) CountEventsByType(ctx context.Context, eventType string, since ti
 	if limit <= 0 {
 		return 0, errs.ErrInvalid
 	}
-	tx := r.db.WithContext(ctx).Model(&model.Event{}).
+	tx := dbx.WithContext(ctx, r.db).Model(&model.Event{}).
 		Where("event_type = ? AND created_at >= ?", eventType, since)
 	if filterSeverity != "" {
 		tx = tx.Where("severity = ?", filterSeverity)
@@ -375,19 +376,19 @@ func (r *Repo) CountEventsByType(ctx context.Context, eventType string, since ti
 	if filterRule != "" {
 		// Rule filter requires a join with alert_incidents — use a sub-
 		// query so the index on incident_id stays useful.
-		tx = tx.Where("incident_id IN (?)", r.db.WithContext(ctx).
+		tx = tx.Where("incident_id IN (?)", dbx.WithContext(ctx, r.db).
 			Model(&model.Incident{}).Select("id").Where("rule = ?", filterRule))
 	}
 	var n int64
 	// Limit the input rows: LIMIT on COUNT(*) itself would still count every match.
-	if err := r.db.WithContext(ctx).Table("(?) AS matching_events", tx.Select("1").Limit(limit)).Count(&n).Error; err != nil {
+	if err := dbx.WithContext(ctx, r.db).Table("(?) AS matching_events", tx.Select("1").Limit(limit)).Count(&n).Error; err != nil {
 		return 0, err
 	}
 	return n, nil
 }
 
 func (r *Repo) ListEventsByIncident(ctx context.Context, incidentID uint64, limit int) ([]*model.Event, error) {
-	tx := r.db.WithContext(ctx).Model(&model.Event{}).Where("incident_id = ?", incidentID).Order("created_at DESC").Order("id DESC")
+	tx := dbx.WithContext(ctx, r.db).Model(&model.Event{}).Where("incident_id = ?", incidentID).Order("created_at DESC").Order("id DESC")
 	if limit > 0 {
 		tx = tx.Limit(limit)
 	}
@@ -402,12 +403,12 @@ func (r *Repo) CreateSilence(ctx context.Context, s *model.Silence) error {
 	if s == nil {
 		return errs.ErrInvalid
 	}
-	return r.db.WithContext(ctx).Create(s).Error
+	return dbx.WithContext(ctx, r.db).Create(s).Error
 }
 
 func (r *Repo) GetSilenceByID(ctx context.Context, id uint64) (*model.Silence, error) {
 	var in model.Silence
-	if err := r.db.WithContext(ctx).First(&in, id).Error; err != nil {
+	if err := dbx.WithContext(ctx, r.db).First(&in, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errs.ErrNotFound
 		}
@@ -417,7 +418,7 @@ func (r *Repo) GetSilenceByID(ctx context.Context, id uint64) (*model.Silence, e
 }
 
 func (r *Repo) ListSilenceRows(ctx context.Context, filter SilenceFilter) ([]*model.Silence, error) {
-	tx := r.db.WithContext(ctx).Model(&model.Silence{})
+	tx := dbx.WithContext(ctx, r.db).Model(&model.Silence{})
 	if filter.Status != "" {
 		tx = tx.Where("status = ?", filter.Status)
 	}
@@ -448,7 +449,7 @@ func (r *Repo) UpdateSilenceStatus(ctx context.Context, id uint64, status string
 	if cancelledAt != nil {
 		updates["cancelled_at"] = *cancelledAt
 	}
-	res := r.db.WithContext(ctx).Model(&model.Silence{}).Where("id = ?", id).Updates(updates)
+	res := dbx.WithContext(ctx, r.db).Model(&model.Silence{}).Where("id = ?", id).Updates(updates)
 	if res.Error != nil {
 		return res.Error
 	}
@@ -462,12 +463,12 @@ func (r *Repo) CreateRule(ctx context.Context, in *model.Rule) error {
 	if in == nil {
 		return errs.ErrInvalid
 	}
-	return r.db.WithContext(ctx).Create(in).Error
+	return dbx.WithContext(ctx, r.db).Create(in).Error
 }
 
 func (r *Repo) GetRuleByID(ctx context.Context, id uint64) (*model.Rule, error) {
 	var in model.Rule
-	if err := r.db.WithContext(ctx).First(&in, id).Error; err != nil {
+	if err := dbx.WithContext(ctx, r.db).First(&in, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errs.ErrNotFound
 		}
@@ -477,7 +478,7 @@ func (r *Repo) GetRuleByID(ctx context.Context, id uint64) (*model.Rule, error) 
 }
 
 func (r *Repo) ListRuleRows(ctx context.Context, filter RuleFilter) ([]*model.Rule, error) {
-	tx := r.db.WithContext(ctx).Model(&model.Rule{})
+	tx := dbx.WithContext(ctx, r.db).Model(&model.Rule{})
 	if filter.Enabled != nil {
 		tx = tx.Where("enabled = ?", *filter.Enabled)
 	}
@@ -505,7 +506,7 @@ func (r *Repo) ListRuleRows(ctx context.Context, filter RuleFilter) ([]*model.Ru
 // uses ListAllEnabledRules + in-memory bucketing instead.
 func (r *Repo) ListEnabledRulesByScope(ctx context.Context, scopeType string) ([]*model.Rule, error) {
 	var out []*model.Rule
-	tx := r.db.WithContext(ctx).Model(&model.Rule{}).
+	tx := dbx.WithContext(ctx, r.db).Model(&model.Rule{}).
 		Where("enabled = ?", true).
 		Where("scope_type = ?", scopeType).
 		Order("id ASC")
@@ -520,7 +521,7 @@ func (r *Repo) ListEnabledRulesByScope(ctx context.Context, scopeType string) ([
 // rows by Kind in-memory.
 func (r *Repo) ListAllEnabledRules(ctx context.Context) ([]*model.Rule, error) {
 	var out []*model.Rule
-	if err := r.db.WithContext(ctx).Model(&model.Rule{}).
+	if err := dbx.WithContext(ctx, r.db).Model(&model.Rule{}).
 		Where("enabled = ?", true).
 		Order("id ASC").
 		Find(&out).Error; err != nil {
@@ -535,7 +536,7 @@ func (r *Repo) GetRuleByKey(ctx context.Context, key string) (*model.Rule, error
 		return nil, errs.ErrInvalid
 	}
 	var out model.Rule
-	if err := r.db.WithContext(ctx).Where("rule_key = ?", key).First(&out).Error; err != nil {
+	if err := dbx.WithContext(ctx, r.db).Where("rule_key = ?", key).First(&out).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errs.ErrNotFound
 		}
@@ -552,9 +553,9 @@ func (r *Repo) UpsertBuiltinRule(ctx context.Context, in *model.Rule) (*model.Ru
 		return nil, errs.ErrInvalid
 	}
 	var existing model.Rule
-	err := r.db.WithContext(ctx).Where("rule_key = ?", in.RuleKey).First(&existing).Error
+	err := dbx.WithContext(ctx, r.db).Where("rule_key = ?", in.RuleKey).First(&existing).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		if err := r.db.WithContext(ctx).Create(in).Error; err != nil {
+		if err := dbx.WithContext(ctx, r.db).Create(in).Error; err != nil {
 			return nil, err
 		}
 		return in, nil
@@ -568,7 +569,7 @@ func (r *Repo) UpsertBuiltinRule(ctx context.Context, in *model.Rule) (*model.Ru
 }
 
 func (r *Repo) UpdateRuleEnabled(ctx context.Context, id uint64, enabled bool) error {
-	res := r.db.WithContext(ctx).Model(&model.Rule{}).Where("id = ?", id).Update("enabled", enabled)
+	res := dbx.WithContext(ctx, r.db).Model(&model.Rule{}).Where("id = ?", id).Update("enabled", enabled)
 	if res.Error != nil {
 		return res.Error
 	}
@@ -581,7 +582,7 @@ func (r *Repo) UpdateRuleEnabled(ctx context.Context, id uint64, enabled bool) e
 // ListRules returns all non-deleted rules for the given scope. An empty
 // scopeType returns rules across all scopes.
 func (r *Repo) ListRules(ctx context.Context, scopeType string) ([]*model.Rule, error) {
-	tx := r.db.WithContext(ctx).Model(&model.Rule{})
+	tx := dbx.WithContext(ctx, r.db).Model(&model.Rule{})
 	if scopeType != "" {
 		tx = tx.Where("scope_type = ?", scopeType)
 	}
@@ -616,7 +617,7 @@ func (r *Repo) UpdateRule(ctx context.Context, id uint64, in *model.Rule) error 
 		"notify_min_fires":        in.NotifyMinFires,
 		"notify_channel_ids_json": in.NotifyChannelIDsJSON,
 	}
-	res := r.db.WithContext(ctx).Model(&model.Rule{}).Where("id = ?", id).Updates(updates)
+	res := dbx.WithContext(ctx, r.db).Model(&model.Rule{}).Where("id = ?", id).Updates(updates)
 	if res.Error != nil {
 		return res.Error
 	}
@@ -632,7 +633,7 @@ func (r *Repo) MigrateLegacyLogRules(ctx context.Context, migrations []biz.Legac
 	if len(migrations) == 0 {
 		return nil
 	}
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return dbx.WithContext(ctx, r.db).Transaction(func(tx *gorm.DB) error {
 		for _, migration := range migrations {
 			if migration.ID == 0 || migration.FromKind == "" || migration.ConditionsJSON == "" {
 				return errs.ErrInvalid
@@ -657,7 +658,7 @@ func (r *Repo) MigrateLegacyLogRules(ctx context.Context, migrations []biz.Legac
 // DeleteRule hard-deletes a custom rule so its unique rule_key can be reused.
 // The biz layer blocks built-in rules before reaching this repo method.
 func (r *Repo) DeleteRule(ctx context.Context, id uint64) error {
-	res := r.db.WithContext(ctx).Unscoped().Delete(&model.Rule{}, id)
+	res := dbx.WithContext(ctx, r.db).Unscoped().Delete(&model.Rule{}, id)
 	if res.Error != nil {
 		return res.Error
 	}
@@ -671,12 +672,12 @@ func (r *Repo) CreateChannel(ctx context.Context, in *model.Channel) error {
 	if in == nil {
 		return errs.ErrInvalid
 	}
-	return r.db.WithContext(ctx).Create(in).Error
+	return dbx.WithContext(ctx, r.db).Create(in).Error
 }
 
 func (r *Repo) GetChannelByID(ctx context.Context, id uint64) (*model.Channel, error) {
 	var in model.Channel
-	if err := r.db.WithContext(ctx).First(&in, id).Error; err != nil {
+	if err := dbx.WithContext(ctx, r.db).First(&in, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errs.ErrNotFound
 		}
@@ -686,7 +687,7 @@ func (r *Repo) GetChannelByID(ctx context.Context, id uint64) (*model.Channel, e
 }
 
 func (r *Repo) ListChannelRows(ctx context.Context, filter ChannelFilter) ([]*model.Channel, error) {
-	tx := r.db.WithContext(ctx).Model(&model.Channel{})
+	tx := dbx.WithContext(ctx, r.db).Model(&model.Channel{})
 	if filter.Enabled != nil {
 		tx = tx.Where("enabled = ?", *filter.Enabled)
 	}
@@ -719,7 +720,7 @@ func (r *Repo) ListChannels(ctx context.Context, filter biz.ChannelFilter) ([]*m
 }
 
 func (r *Repo) UpdateChannelEnabled(ctx context.Context, id uint64, enabled bool) error {
-	res := r.db.WithContext(ctx).Model(&model.Channel{}).Where("id = ?", id).Update("enabled", enabled)
+	res := dbx.WithContext(ctx, r.db).Model(&model.Channel{}).Where("id = ?", id).Update("enabled", enabled)
 	if res.Error != nil {
 		return res.Error
 	}
@@ -743,7 +744,7 @@ func (r *Repo) UpdateChannel(ctx context.Context, id uint64, in *model.Channel) 
 		"match_severity_min": in.MatchSeverityMin,
 		"match_scope_types":  in.MatchScopeTypes,
 	}
-	res := r.db.WithContext(ctx).Model(&model.Channel{}).Where("id = ?", id).Updates(updates)
+	res := dbx.WithContext(ctx, r.db).Model(&model.Channel{}).Where("id = ?", id).Updates(updates)
 	if res.Error != nil {
 		return res.Error
 	}
@@ -758,7 +759,7 @@ func (r *Repo) UpdateChannel(ctx context.Context, id uint64, in *model.Channel) 
 // Rules that pinned this channel via notify_channel_ids_json fall
 // through to the global default channel set on next firing.
 func (r *Repo) PurgeLegacyLogChannels(ctx context.Context) error {
-	res := r.db.WithContext(ctx).
+	res := dbx.WithContext(ctx, r.db).
 		Where("channel_type = ?", "log").
 		Delete(&model.Channel{})
 	if res.Error != nil {
@@ -769,7 +770,7 @@ func (r *Repo) PurgeLegacyLogChannels(ctx context.Context) error {
 
 // DeleteChannel soft-deletes a channel via gorm's DeletedAt column.
 func (r *Repo) DeleteChannel(ctx context.Context, id uint64) error {
-	res := r.db.WithContext(ctx).Delete(&model.Channel{}, id)
+	res := dbx.WithContext(ctx, r.db).Delete(&model.Channel{}, id)
 	if res.Error != nil {
 		return res.Error
 	}
@@ -805,7 +806,7 @@ func (r *Repo) CountRulesReferencingChannel(ctx context.Context, channelID uint6
 	cond := "notify_channel_ids_json LIKE ? OR notify_channel_ids_json LIKE ? OR notify_channel_ids_json LIKE ? OR notify_channel_ids_json LIKE ?"
 	args := []any{patterns[0], patterns[1], patterns[2], patterns[3]}
 	var count int64
-	if err := r.db.WithContext(ctx).
+	if err := dbx.WithContext(ctx, r.db).
 		Model(&model.Rule{}).
 		Where("notify_channel_ids_json IS NOT NULL").
 		Where(cond, args...).
@@ -819,12 +820,12 @@ func (r *Repo) CreateDelivery(ctx context.Context, in *model.Delivery) error {
 	if in == nil {
 		return errs.ErrInvalid
 	}
-	return r.db.WithContext(ctx).Create(in).Error
+	return dbx.WithContext(ctx, r.db).Create(in).Error
 }
 
 func (r *Repo) GetDeliveryByID(ctx context.Context, id uint64) (*model.Delivery, error) {
 	var in model.Delivery
-	if err := r.db.WithContext(ctx).First(&in, id).Error; err != nil {
+	if err := dbx.WithContext(ctx, r.db).First(&in, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errs.ErrNotFound
 		}
@@ -834,7 +835,7 @@ func (r *Repo) GetDeliveryByID(ctx context.Context, id uint64) (*model.Delivery,
 }
 
 func (r *Repo) ListDeliveryRows(ctx context.Context, filter DeliveryFilter) ([]*model.Delivery, error) {
-	tx := r.db.WithContext(ctx).Model(&model.Delivery{})
+	tx := dbx.WithContext(ctx, r.db).Model(&model.Delivery{})
 	if filter.IncidentID != nil {
 		tx = tx.Where("incident_id = ?", *filter.IncidentID)
 	}
@@ -872,7 +873,7 @@ func (r *Repo) UpdateDeliveryStatus(ctx context.Context, id uint64, status strin
 	if providerMessageID != nil {
 		updates["provider_message_id"] = *providerMessageID
 	}
-	res := r.db.WithContext(ctx).Model(&model.Delivery{}).Where("id = ?", id).Updates(updates)
+	res := dbx.WithContext(ctx, r.db).Model(&model.Delivery{}).Where("id = ?", id).Updates(updates)
 	if res.Error != nil {
 		return res.Error
 	}

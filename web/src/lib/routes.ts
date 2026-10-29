@@ -45,6 +45,7 @@ const ROUTE_DEFS: RouteDef[] = [
   { path: '/alerts/rules', zh: '告警规则', en: 'Alert rules', keywords: ['rules', 'guize'], group: '监控告警' },
 
   { path: '/settings/integrations', zh: '设置 / 集成', en: 'Settings / Integrations', keywords: ['settings', 'integrations', 'shezhi'], group: '设置' },
+  { path: '/settings/external-ai', zh: '设置 / MCP 访问', en: 'Settings / MCP access', keywords: ['mcp', 'pat', 'token', 'doubao', 'workbuddy'], group: '设置' },
   { path: '/settings/llm', zh: '设置 / LLM', en: 'Settings / LLM', keywords: ['llm', 'model', 'moxing'], group: '设置' },
   { path: '/settings/notifications', zh: '设置 / 通知', en: 'Settings / Notifications', keywords: ['notifications', 'tongzhi', 'communications'], group: '设置' },
   { path: '/settings/channels', zh: '设置 / 渠道', en: 'Settings / Channels', keywords: ['channels', 'qudao', 'bots', 'im'], group: '设置' },

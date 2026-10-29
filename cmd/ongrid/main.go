@@ -90,8 +90,15 @@ func run() (runErr error) {
 	automation := bootstrapAutomation(rootCtx, cfg, log, reg, notifyRouter, &cleanup, storage, settings, models, alerts, telemetry, aiops, runtime)
 	system := bootstrapSystem(cfg, storage, iam, settings, models, telemetry, aiops, knowledge, automation)
 	extensions := bootstrapExtensions(rootCtx, cfg, log, reg, notifyRouter, storage, settings, devices, alerts, tunnel, aiops, runtime, automation)
-	http := buildHTTPServers(cfg, log, reg, iam, settings, devices, telemetry, tunnel, aiops, runtime, imbridge, automation, system, extensions)
-	return runWorkers(rootCtx, cfg, log, notifyRouter, storage, settings, devices, alerts, telemetry, aiops, runtime, automation, http)
+	external, err := bootstrapExternalMCP(cfg, log, reg, storage, settings, devices, tunnel, aiops, extensions)
+	if err != nil {
+		return err
+	}
+	http, err := buildHTTPServers(cfg, log, reg, iam, settings, devices, telemetry, tunnel, aiops, runtime, imbridge, automation, system, extensions, external)
+	if err != nil {
+		return err
+	}
+	return runWorkers(rootCtx, cfg, log, notifyRouter, storage, settings, devices, alerts, telemetry, aiops, runtime, automation, http, external)
 }
 
 // startupCleanup preserves the original reverse shutdown order.

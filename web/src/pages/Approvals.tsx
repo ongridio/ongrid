@@ -2,8 +2,9 @@ import { EmptyStateCard } from '@/components/ui';
 import { Button } from '@/components/ui';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { ShieldCheck, RefreshCw, Check, X, ChevronDown, ChevronRight } from 'lucide-react';
-import { listApprovals, approveApproval, rejectApproval, type Approval } from '@/api/approvals';
+import { listApprovals, getApproval, approveApproval, rejectApproval, type Approval } from '@/api/approvals';
 import { ApiError } from '@/api/client';
 import { useI18n } from '@/i18n/locale';
 import { PageHeader } from '@/components/ui';
@@ -17,6 +18,8 @@ const STATUSES = ['pending', 'approved', 'executed', 'rejected', 'failed'] as co
 export default function ApprovalsPage() {
   const { confirmAction, promptAction, dialog } = useDialogs();
   const { tr } = useI18n();
+  const [params, setParams] = useSearchParams();
+  const selectedId = params.get('approval');
   const [items, setItems] = useState<Approval[]>([]);
   const [status, setStatus] = useState<string>('pending');
   const [loading, setLoading] = useState(true);
@@ -27,15 +30,15 @@ export default function ApprovalsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await listApprovals(status);
-      setItems(r.items ?? []);
+      if (selectedId) setItems([await getApproval(selectedId)]);
+      else setItems((await listApprovals(status)).items ?? []);
       setErr(null);
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : (e as Error).message);
     } finally {
       setLoading(false);
     }
-  }, [status]);
+  }, [status, selectedId]);
 
   useEffect(() => {
     void load();
@@ -72,7 +75,7 @@ export default function ApprovalsPage() {
     <>{dialog}<main className="anim-fade flex flex-1 flex-col overflow-hidden">
       <PageHeader
         title={tr('待确认', 'Approvals')}
-        subtitle={tr('Agent / 工作流提交的危险操作，需人工批准后才执行', 'Dangerous actions proposed by agents / flows — execute only after a human approves')}
+        subtitle={tr('Agent、工作流和 MCP 提交的危险操作，需人工批准后才执行', 'Dangerous actions from agents, workflows and MCP need approval before execution')}
         actions={
           <Button variant="outline" size="sm"
             type="button"
@@ -84,12 +87,12 @@ export default function ApprovalsPage() {
           </Button>
         }
         extra={
-          <div className="-mb-2 flex items-center gap-1">
+          <div className="-mb-2 flex flex-wrap items-center gap-1">
             {STATUSES.map((s) => (
               <Button variant="subtle" size="sm"
                 key={s}
                 type="button"
-                onClick={() => setStatus(s)}
+                onClick={() => { setParams({}); setStatus(s); }}
                 className={`rounded-md px-2.5 py-1 text-[12px] transition-colors ${
                   status === s ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
                 }`}
@@ -111,18 +114,19 @@ export default function ApprovalsPage() {
           <div className="space-y-2">
             {items.map((a) => (
               <div key={a.id} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
-                <div className="flex items-start gap-3">
+                <div className="flex flex-wrap items-start gap-3">
                   <Button variant="subtle" size="sm"
                     type="button"
+                    aria-label={tr('展开操作内容', 'Expand action payload')}
                     onClick={() => setExpanded((e) => ({ ...e, [a.id]: !e[a.id] }))}
                     className="mt-0.5"
                   >
                     {expanded[a.id] ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                   </Button>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-zinc-100">{a.title}</span>
-                      <StatusChip status={a.status} tr={tr} />
+                  <div className="min-w-0 flex-1 basis-48">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="break-words font-medium text-zinc-100">{a.title}</span>
+                      <StatusChip status={a.status} tr={tr} queued={a.kind === 'external_mcp'} />
                       <span className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-[10px] text-zinc-500">{a.kind}</span>
                     </div>
                     {a.summary && <div className="mt-1 whitespace-pre-wrap text-[12px] text-zinc-400">{a.summary}</div>}
@@ -130,14 +134,14 @@ export default function ApprovalsPage() {
                       {tr('来源', 'source')}: {a.source}
                       {a.session_id ? ` · ${a.session_id.slice(0, 8)}` : ''} · {new Date(a.created_at).toLocaleString()}
                     </div>
-                    {expanded[a.id] && (
+                    {(expanded[a.id] || a.kind === 'external_mcp') && (
                       <div className="mt-2 space-y-1">
                         <div className="text-[11px] text-zinc-500">{tr('操作内容', 'Action payload')}</div>
-                        <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all rounded bg-zinc-950 p-2 text-[10px] text-zinc-400">{prettify(a.payload)}</pre>
+                        <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all rounded bg-zinc-950 p-2 text-xs text-text-muted">{prettify(a.payload)}</pre>
                         {a.result && (
                           <>
                             <div className="text-[11px] text-zinc-500">{tr('执行结果', 'Result')}</div>
-                            <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all rounded bg-zinc-950 p-2 text-[10px] text-zinc-400">{prettify(a.result)}</pre>
+                            <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all rounded bg-zinc-950 p-2 text-xs text-text-muted">{prettify(a.result)}</pre>
                           </>
                         )}
                         {a.reason && <div className="text-[11px] text-amber-400/80">{tr('原因', 'reason')}: {a.reason}</div>}
@@ -145,7 +149,7 @@ export default function ApprovalsPage() {
                     )}
                   </div>
                   {a.status === 'pending' && (
-                    <div className="flex shrink-0 items-center gap-1.5">
+                    <div className="ml-auto flex shrink-0 items-center gap-1.5">
                       <Button variant="outline" size="sm"
                         type="button"
                         onClick={() => void onApprove(a)}
@@ -193,7 +197,7 @@ function statusLabel(s: string, tr: (zh: string, en: string) => string): string 
   }
 }
 
-function StatusChip({ status, tr }: { status: string; tr: (zh: string, en: string) => string }) {
+function StatusChip({ status, tr, queued }: { status: string; queued?: boolean; tr: (zh: string, en: string) => string }) {
   const cls =
     status === 'pending'
       ? 'bg-amber-900/40 text-amber-300'
@@ -202,7 +206,7 @@ function StatusChip({ status, tr }: { status: string; tr: (zh: string, en: strin
         : status === 'failed'
           ? 'bg-red-900/40 text-red-300'
           : 'bg-zinc-800 text-zinc-400';
-  return <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${cls}`}>{statusLabel(status, tr)}</span>;
+  return <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${cls}`}>{queued && status === 'executed' ? tr('已入队', 'Queued') : statusLabel(status, tr)}</span>;
 }
 
 function prettify(s: string): string {

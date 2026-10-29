@@ -1,7 +1,7 @@
 import { Button } from '@/components/ui/Button';
 import { Label, Input } from '@/components/ui';
 import { useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { login } from '@/api/auth';
 import { useAuth } from '@/store/auth';
@@ -11,6 +11,7 @@ import { useI18n } from '@/i18n/locale';
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const setSession = useAuth((s) => s.setSession);
   const { tr } = useI18n();
   const [email, setEmail] = useState('');
@@ -30,7 +31,8 @@ export default function LoginPage() {
         role: res.user?.role ?? res.role ?? 'user',
         email: res.user?.email ?? res.email ?? email.trim(),
       });
-      navigate('/', { replace: true });
+      const from = location.state?.from;
+      navigate(typeof from === 'string' && from.startsWith('/') && !from.startsWith('//') && !from.startsWith('/login') ? from : '/', { replace: true });
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         setError(tr('邮箱或密码错误', 'Invalid email or password'));

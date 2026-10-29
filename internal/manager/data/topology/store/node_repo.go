@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/ongridio/ongrid/internal/pkg/dbx"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -23,11 +24,11 @@ func NewNodeRepo(db *gorm.DB) *NodeRepo { return &NodeRepo{db: db} }
 var _ biz.NodeRepo = (*NodeRepo)(nil)
 
 func (r *NodeRepo) Create(ctx context.Context, n *model.Node) error {
-	return r.db.WithContext(ctx).Create(n).Error
+	return dbx.WithContext(ctx, r.db).Create(n).Error
 }
 
 func (r *NodeRepo) Update(ctx context.Context, id uint64, name, propsJSON string) error {
-	res := r.db.WithContext(ctx).Model(&model.Node{}).Where("id = ?", id).Updates(map[string]any{
+	res := dbx.WithContext(ctx, r.db).Model(&model.Node{}).Where("id = ?", id).Updates(map[string]any{
 		"name":        name,
 		"props_jsonb": propsJSON,
 	})
@@ -42,7 +43,7 @@ func (r *NodeRepo) Update(ctx context.Context, id uint64, name, propsJSON string
 
 func (r *NodeRepo) Get(ctx context.Context, id uint64) (*model.Node, error) {
 	var n model.Node
-	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&n).Error; err != nil {
+	if err := dbx.WithContext(ctx, r.db).Where("id = ?", id).First(&n).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errs.ErrNotFound
 		}
@@ -58,7 +59,7 @@ func (r *NodeRepo) MergeProps(ctx context.Context, id uint64, name *string, prop
 	if err := json.Unmarshal([]byte(propsJSON), &patch); err != nil {
 		return err
 	}
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return dbx.WithContext(ctx, r.db).Transaction(func(tx *gorm.DB) error {
 		var node model.Node
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&node, id).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -96,7 +97,7 @@ func (r *NodeRepo) GetMany(ctx context.Context, ids []uint64) (map[uint64]*model
 		return out, nil
 	}
 	var rows []*model.Node
-	if err := r.db.WithContext(ctx).Where("id IN ?", ids).Find(&rows).Error; err != nil {
+	if err := dbx.WithContext(ctx, r.db).Where("id IN ?", ids).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	for _, n := range rows {
@@ -106,7 +107,7 @@ func (r *NodeRepo) GetMany(ctx context.Context, ids []uint64) (map[uint64]*model
 }
 
 func (r *NodeRepo) List(ctx context.Context, f biz.NodeListFilter) ([]*model.Node, error) {
-	q := r.db.WithContext(ctx).Model(&model.Node{})
+	q := dbx.WithContext(ctx, r.db).Model(&model.Node{})
 	q = applyNodeFilter(q, f)
 	q = q.Order("id DESC")
 	if f.Limit > 0 {
@@ -123,7 +124,7 @@ func (r *NodeRepo) List(ctx context.Context, f biz.NodeListFilter) ([]*model.Nod
 }
 
 func (r *NodeRepo) Count(ctx context.Context, f biz.NodeListFilter) (int64, error) {
-	q := r.db.WithContext(ctx).Model(&model.Node{})
+	q := dbx.WithContext(ctx, r.db).Model(&model.Node{})
 	q = applyNodeFilter(q, f)
 	var n int64
 	if err := q.Count(&n).Error; err != nil {
@@ -133,7 +134,7 @@ func (r *NodeRepo) Count(ctx context.Context, f biz.NodeListFilter) (int64, erro
 }
 
 func (r *NodeRepo) Delete(ctx context.Context, id uint64) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return dbx.WithContext(ctx, r.db).Transaction(func(tx *gorm.DB) error {
 		var node model.Node
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).First(&node).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -169,7 +170,7 @@ func applyNodeFilter(q *gorm.DB, f biz.NodeListFilter) *gorm.DB {
 // 与回填共用事务，避免并发注册或回填产生孤立节点、覆盖已有绑定。
 func (r *NodeRepo) EnsureForDevice(ctx context.Context, deviceID uint64, name string) (*model.Node, error) {
 	var node model.Node
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := dbx.WithContext(ctx, r.db).Transaction(func(tx *gorm.DB) error {
 		// 先获取写锁：MySQL 锁定设备行，SQLite 获取写事务锁，避免读后升级锁失败。
 		// 不改变字段值，也不触发 GORM 的 updated_at 更新。
 		if err := tx.Exec("UPDATE devices SET node_id = node_id WHERE id = ? AND deleted_at IS NULL", deviceID).Error; err != nil {

@@ -3,6 +3,7 @@
 package approval
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -10,12 +11,51 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	bizapproval "github.com/ongridio/ongrid/internal/manager/biz/approval"
+	externalbiz "github.com/ongridio/ongrid/internal/manager/biz/externalmcp"
+	approvalmodel "github.com/ongridio/ongrid/internal/manager/model/approval"
+	externalsvc "github.com/ongridio/ongrid/internal/manager/service/externalmcp"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
+	"github.com/ongridio/ongrid/internal/pkg/integrationauth"
+	"github.com/ongridio/ongrid/internal/pkg/secretbox"
 	"github.com/ongridio/ongrid/internal/pkg/tenantctx"
 )
 
+type operationReader interface {
+	ApprovalOperation(context.Context, *approvalmodel.Approval) (externalbiz.OperationResult, error)
+}
+
 // Handler serves /v1/approvals.
-type Handler struct{ uc *bizapproval.Usecase }
+type Handler struct {
+	uc         *bizapproval.Usecase
+	operations operationReader
+}
+
+func (h *Handler) SetExternalOperations(reader operationReader) { h.operations = reader }
+
+func (h *Handler) detail(w http.ResponseWriter, r *http.Request, a *approvalmodel.Approval) {
+	view, err := presentApproval(r, a)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	var op *externalbiz.OperationResult
+	_, external := integrationauth.From(r.Context())
+	if a.Kind == externalbiz.ApprovalKind && h.operations != nil && !external {
+		result, err := h.operations.ApprovalOperation(r.Context(), a)
+		if err != nil && !(errors.Is(err, errs.ErrNotFound) && a.Status != approvalmodel.StatusPending) {
+			writeErr(w, err)
+			return
+		}
+		if err == nil {
+			op = &result
+		}
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, struct {
+		*approvalmodel.Approval
+		Operation *externalbiz.OperationResult `json:"operation,omitempty"`
+	}{view, op})
+}
 
 // NewHandler wires the usecase.
 func NewHandler(uc *bizapproval.Usecase) *Handler { return &Handler{uc: uc} }
@@ -39,6 +79,14 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	for i, item := range items {
+		items[i], err = presentApproval(r, item)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+	}
+	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
@@ -63,10 +111,14 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, a)
+	h.detail(w, r, a)
 }
 
 func (h *Handler) approve(w http.ResponseWriter, r *http.Request) {
+	if _, external := integrationauth.From(r.Context()); external {
+		writeErr(w, errs.ErrForbidden)
+		return
+	}
 	c, ok := requireAdmin(w, r)
 	if !ok {
 		return
@@ -76,10 +128,54 @@ func (h *Handler) approve(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, a)
+	h.detail(w, r, a)
+}
+
+func presentApproval(r *http.Request, a *approvalmodel.Approval) (*approvalmodel.Approval, error) {
+	owner, ok := tenantctx.From(r.Context())
+	if !ok || owner.Role != "admin" {
+		return nil, errs.ErrForbidden
+	}
+	if a.Kind != externalbiz.ApprovalKind {
+		return a, nil
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(a.PayloadJSON), &payload); err != nil {
+		return nil, err
+	}
+	ciphertext, ok := payload["encrypted_request"].(string)
+	if !ok {
+		return a, nil
+	}
+	delete(payload, "encrypted_request")
+	// The MCP API bridge may read approval metadata, never decrypted arguments.
+	if _, external := integrationauth.From(r.Context()); !external {
+		plain, err := secretbox.Decrypt(ciphertext)
+		if err != nil {
+			return nil, err
+		}
+		var request struct {
+			Arguments externalbiz.Arguments `json:"arguments"`
+		}
+		if err := json.Unmarshal([]byte(plain), &request); err != nil {
+			return nil, err
+		}
+		payload["arguments"] = externalsvc.ReviewArguments(request.Arguments)
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	copy := *a
+	copy.PayloadJSON = string(raw)
+	return &copy, nil
 }
 
 func (h *Handler) reject(w http.ResponseWriter, r *http.Request) {
+	if _, external := integrationauth.From(r.Context()); external {
+		writeErr(w, errs.ErrForbidden)
+		return
+	}
 	c, ok := requireAdmin(w, r)
 	if !ok {
 		return

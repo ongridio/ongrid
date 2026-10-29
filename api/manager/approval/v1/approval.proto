@@ -1,6 +1,7 @@
 syntax = "proto3";
 package ongrid.manager.approval.v1;
 import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
 option go_package = "github.com/ongridio/ongrid/api/gen/manager/approval/v1;approvalv1";
 
 // Approval is the read-only record returned by the existing approval inbox.
@@ -23,4 +24,21 @@ message Approval {
   google.protobuf.Timestamp executed_at = 15;
   // Empty for historical or non-runtime proposals; never inferred at approval.
   string runtime_version = 16;
+  // Live external operation state on console detail and decision responses.
+  ExternalOperationResult operation = 17;
+}
+
+message ExternalOperationResult {
+  string operation_id = 1;
+  string state = 2;
+  string tool = 3;
+  // Absent/null means the effect is not yet known.
+  optional bool applied = 4;
+  string verification = 5;
+  google.protobuf.Value data = 6;
+  string approval_id = 7;
+  string approval_url = 8;
+  string next_action = 9;
+  string error_code = 10;
+  bool retryable = 11;
 }

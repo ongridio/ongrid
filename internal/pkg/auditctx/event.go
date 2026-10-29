@@ -52,6 +52,10 @@ const (
 	// out the mutation signal. We keep auth_login_failed because a
 	// brute-force pattern still wants to be visible.
 	ActionAuthLoginFailed = "auth_login_failed"
+	ActionMCPCall         = "mcp_call"
+	ActionMCPTokenCreate  = "mcp_token_create"
+	ActionMCPTokenUpdate  = "mcp_token_update"
+	ActionMCPTokenDelete  = "mcp_token_delete"
 
 	// User CRUD. role / password / profile field changes all surface as
 	// user_update — the payload field carries which field flipped.

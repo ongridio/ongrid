@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/ongridio/ongrid/internal/pkg/dbx"
 	"gorm.io/gorm"
 
 	biz "github.com/ongridio/ongrid/internal/iam/biz/user"
@@ -28,13 +29,13 @@ func (r *Repo) Create(ctx context.Context, u *model.User) error {
 	if u == nil {
 		return fmt.Errorf("%w: nil user", errs.ErrInvalid)
 	}
-	return r.db.WithContext(ctx).Create(u).Error
+	return dbx.WithContext(ctx, r.db).Create(u).Error
 }
 
 // GetByEmail returns the user matching email or errs.ErrNotFound.
 func (r *Repo) GetByEmail(ctx context.Context, email string) (*model.User, error) {
 	var u model.User
-	if err := r.db.WithContext(ctx).Where("email = ?", email).First(&u).Error; err != nil {
+	if err := dbx.WithContext(ctx, r.db).Where("email = ?", email).First(&u).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errs.ErrNotFound
 		}
@@ -46,7 +47,7 @@ func (r *Repo) GetByEmail(ctx context.Context, email string) (*model.User, error
 // GetByID returns the user matching id or errs.ErrNotFound.
 func (r *Repo) GetByID(ctx context.Context, id uint64) (*model.User, error) {
 	var u model.User
-	if err := r.db.WithContext(ctx).First(&u, id).Error; err != nil {
+	if err := dbx.WithContext(ctx, r.db).First(&u, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errs.ErrNotFound
 		}
@@ -58,7 +59,7 @@ func (r *Repo) GetByID(ctx context.Context, id uint64) (*model.User, error) {
 // List returns every user ordered by id asc.
 func (r *Repo) List(ctx context.Context) ([]*model.User, error) {
 	var out []*model.User
-	if err := r.db.WithContext(ctx).Order("id asc").Find(&out).Error; err != nil {
+	if err := dbx.WithContext(ctx, r.db).Order("id asc").Find(&out).Error; err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -67,7 +68,7 @@ func (r *Repo) List(ctx context.Context) ([]*model.User, error) {
 // Count returns the total number of users.
 func (r *Repo) Count(ctx context.Context) (int64, error) {
 	var n int64
-	if err := r.db.WithContext(ctx).Model(&model.User{}).Count(&n).Error; err != nil {
+	if err := dbx.WithContext(ctx, r.db).Model(&model.User{}).Count(&n).Error; err != nil {
 		return 0, err
 	}
 	return n, nil
@@ -75,7 +76,7 @@ func (r *Repo) Count(ctx context.Context) (int64, error) {
 
 // Delete removes a user by id. A missing row maps to errs.ErrNotFound.
 func (r *Repo) Delete(ctx context.Context, id uint64) error {
-	res := r.db.WithContext(ctx).Delete(&model.User{}, id)
+	res := dbx.WithContext(ctx, r.db).Delete(&model.User{}, id)
 	if res.Error != nil {
 		return res.Error
 	}
@@ -87,7 +88,7 @@ func (r *Repo) Delete(ctx context.Context, id uint64) error {
 
 // UpdateRole sets role on the row with id=id. Missing row -> ErrNotFound.
 func (r *Repo) UpdateRole(ctx context.Context, id uint64, role string) error {
-	res := r.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", id).Update("role", role)
+	res := dbx.WithContext(ctx, r.db).Model(&model.User{}).Where("id = ?", id).Update("role", role)
 	if res.Error != nil {
 		return res.Error
 	}
@@ -99,7 +100,7 @@ func (r *Repo) UpdateRole(ctx context.Context, id uint64, role string) error {
 
 // UpdateProfile sets display_name and phone. Missing row -> ErrNotFound.
 func (r *Repo) UpdateProfile(ctx context.Context, id uint64, displayName, phone string) error {
-	res := r.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", id).Updates(map[string]any{
+	res := dbx.WithContext(ctx, r.db).Model(&model.User{}).Where("id = ?", id).Updates(map[string]any{
 		"display_name": displayName,
 		"phone":        phone,
 	})
@@ -114,7 +115,7 @@ func (r *Repo) UpdateProfile(ctx context.Context, id uint64, displayName, phone 
 
 // UpdateStatus flips active/disabled. Missing row -> ErrNotFound.
 func (r *Repo) UpdateStatus(ctx context.Context, id uint64, status string) error {
-	res := r.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", id).Update("status", status)
+	res := dbx.WithContext(ctx, r.db).Model(&model.User{}).Where("id = ?", id).Update("status", status)
 	if res.Error != nil {
 		return res.Error
 	}
@@ -126,7 +127,7 @@ func (r *Repo) UpdateStatus(ctx context.Context, id uint64, status string) error
 
 // UpdateSuperuser toggles is_superuser. ErrNotFound on missing row.
 func (r *Repo) UpdateSuperuser(ctx context.Context, id uint64, isSuperuser bool) error {
-	res := r.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", id).Update("is_superuser", isSuperuser)
+	res := dbx.WithContext(ctx, r.db).Model(&model.User{}).Where("id = ?", id).Update("is_superuser", isSuperuser)
 	if res.Error != nil {
 		return res.Error
 	}
@@ -139,7 +140,7 @@ func (r *Repo) UpdateSuperuser(ctx context.Context, id uint64, isSuperuser bool)
 // UpdatePassHash sets the argon2id-encoded password hash. ErrNotFound
 // on missing row.
 func (r *Repo) UpdatePassHash(ctx context.Context, id uint64, passHash string) error {
-	res := r.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", id).Update("pass_hash", passHash)
+	res := dbx.WithContext(ctx, r.db).Model(&model.User{}).Where("id = ?", id).Update("pass_hash", passHash)
 	if res.Error != nil {
 		return res.Error
 	}

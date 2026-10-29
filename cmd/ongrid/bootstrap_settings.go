@@ -22,6 +22,7 @@ import (
 )
 
 type settingsModule struct {
+	monitorSvc         *managerbizmonitor.Service
 	settingSvc         *managerbizsetting.Service
 	queryFallback      string
 	promResolver       *managerbizsetting.PromResolver
@@ -163,6 +164,7 @@ func bootstrapSettings(rootCtx context.Context, cfg *config.Config, log *slog.Lo
 	}
 
 	return &settingsModule{
+		monitorSvc:         monitorSvc,
 		settingSvc:         settingSvc,
 		queryFallback:      queryFallback,
 		promResolver:       promResolver,

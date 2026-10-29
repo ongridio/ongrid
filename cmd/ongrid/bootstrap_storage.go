@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"database/sql"
+	externalmcpdata "github.com/ongridio/ongrid/internal/manager/data/externalmcp"
 	"log/slog"
 
+	iamdatatoken "github.com/ongridio/ongrid/internal/iam/data/integrationtoken"
 	iamdatamembership "github.com/ongridio/ongrid/internal/iam/data/membership/store"
 	iamdataorg "github.com/ongridio/ongrid/internal/iam/data/org/store"
 	iamdatauser "github.com/ongridio/ongrid/internal/iam/data/user/sqlite"
@@ -56,6 +58,7 @@ func bootstrapStorage(rootCtx context.Context, cfg *config.Config, log *slog.Log
 	upgradingExistingInstall := db.Migrator().HasTable("devices")
 	if err := dbx.RunMigrations(db, log,
 		iamdatauser.Migrate,
+		iamdatatoken.Migrate,
 		iamdataorg.Migrate,
 		iamdatamembership.Migrate,
 		manageralertdata.Migrate,
@@ -66,6 +69,7 @@ func bootstrapStorage(rootCtx context.Context, cfg *config.Config, log *slog.Log
 		managertopologydata.Migrate,
 		managermetricdata.Migrate,
 		manageraiopsdata.Migrate,
+		externalmcpdata.Migrate,
 		managerbizskill.Migrate,
 		managersettingdata.Migrate,
 		managermarketplacedata.Migrate,

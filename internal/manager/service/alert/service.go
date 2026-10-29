@@ -608,6 +608,14 @@ func (s *Service) CreateRule(ctx context.Context, caller Caller, in RuleInput) (
 	return toServiceRule(row)
 }
 
+// ValidateRule uses the create/update validation without persisting a draft.
+func (s *Service) ValidateRule(in RuleInput, create bool) error {
+	if err := validateRuleInput(in, create); err != nil {
+		return err
+	}
+	return bizalert.ValidateRule(toBizRuleInput(in), create)
+}
+
 func (s *Service) UpdateRule(ctx context.Context, _ Caller, id uint64, in RuleInput) (*Rule, error) {
 	if id == 0 {
 		return nil, fmt.Errorf("%w: rule id required", errs.ErrInvalid)

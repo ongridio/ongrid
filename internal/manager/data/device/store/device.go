@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/pkg/dbx"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -36,7 +37,7 @@ func (r *Repo) DeviceIDsForNodes(ctx context.Context, nodeIDs []uint64) ([]uint6
 	if len(nodeIDs) == 0 {
 		return ids, nil
 	}
-	err := r.db.WithContext(ctx).Model(&model.Device{}).
+	err := dbx.WithContext(ctx, r.db).Model(&model.Device{}).
 		Joins("JOIN nodes ON nodes.id = devices.node_id AND nodes.type = 'device' AND nodes.deleted_at IS NULL").
 		Where("devices.node_id IN ?", nodeIDs).Limit(5001).Pluck("devices.id", &ids).Error
 	return ids, err
@@ -50,7 +51,7 @@ func (r *Repo) FindOrCreateByFingerprint(ctx context.Context, seed *model.Device
 	if seed == nil || seed.Fingerprint == "" {
 		return nil, errs.ErrInvalid
 	}
-	tx := r.db.WithContext(ctx).Clauses(clause.OnConflict{
+	tx := dbx.WithContext(ctx, r.db).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "fingerprint"}, {Name: "delete_marker"}},
 		DoNothing: true,
 	}).Create(seed)
@@ -58,7 +59,7 @@ func (r *Repo) FindOrCreateByFingerprint(ctx context.Context, seed *model.Device
 		return nil, tx.Error
 	}
 	var out model.Device
-	if err := r.db.WithContext(ctx).Where("fingerprint = ?", seed.Fingerprint).First(&out).Error; err != nil {
+	if err := dbx.WithContext(ctx, r.db).Where("fingerprint = ?", seed.Fingerprint).First(&out).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errs.ErrNotFound
 		}
@@ -76,7 +77,7 @@ func (r *Repo) RebindFingerprint(ctx context.Context, oldFP, newFP string) error
 	// Skip if newFP already exists — the v2 device already won; nothing to
 	// migrate (and the UPDATE would hit the unique index anyway).
 	var cnt int64
-	if err := r.db.WithContext(ctx).Model(&model.Device{}).
+	if err := dbx.WithContext(ctx, r.db).Model(&model.Device{}).
 		Where("fingerprint = ?", newFP).Count(&cnt).Error; err != nil {
 		return err
 	}
@@ -86,7 +87,7 @@ func (r *Repo) RebindFingerprint(ctx context.Context, oldFP, newFP string) error
 	// In-place rebind: same row, only the fingerprint column changes, so
 	// device.ID / junction / history all carry over. Idempotent — if no row
 	// carries oldFP, this updates nothing.
-	return r.db.WithContext(ctx).Model(&model.Device{}).
+	return dbx.WithContext(ctx, r.db).Model(&model.Device{}).
 		Where("fingerprint = ?", oldFP).
 		Update("fingerprint", newFP).Error
 }
@@ -104,7 +105,7 @@ func (r *Repo) UpdateCurrentHostFacts(ctx context.Context, id, edgeID uint64, f 
 }
 
 func (r *Repo) updateHostFacts(ctx context.Context, id uint64, edgeID *uint64, f biz.HostFacts) error {
-	q := r.db.WithContext(ctx).Model(&model.Device{}).Where("id = ?", id)
+	q := dbx.WithContext(ctx, r.db).Model(&model.Device{}).Where("id = ?", id)
 	if edgeID != nil {
 		q = q.Where("current_edge_id = ?", *edgeID)
 	}
@@ -137,7 +138,7 @@ func (r *Repo) updateHostFacts(ctx context.Context, id uint64, edgeID *uint64, f
 
 // UpdateUsage refreshes the live usage gauges.
 func (r *Repo) UpdateUsage(ctx context.Context, id uint64, u biz.Usage) error {
-	res := r.db.WithContext(ctx).Model(&model.Device{}).Where("id = ?", id).Updates(map[string]any{
+	res := dbx.WithContext(ctx, r.db).Model(&model.Device{}).Where("id = ?", id).Updates(map[string]any{
 		"cpu_usage_pct":  u.CPUPct,
 		"mem_usage_pct":  u.MemPct,
 		"disk_usage_pct": u.DiskPct,
@@ -153,7 +154,7 @@ func (r *Repo) UpdateUsage(ctx context.Context, id uint64, u biz.Usage) error {
 
 // UpdateRoles writes the operator-assigned role bit mask.
 func (r *Repo) UpdateRoles(ctx context.Context, id uint64, roles uint8) error {
-	res := r.db.WithContext(ctx).Model(&model.Device{}).Where("id = ?", id).Update("roles", roles)
+	res := dbx.WithContext(ctx, r.db).Model(&model.Device{}).Where("id = ?", id).Update("roles", roles)
 	if res.Error != nil {
 		return res.Error
 	}
@@ -169,7 +170,7 @@ func (r *Repo) UpdateRoles(ctx context.Context, id uint64, roles uint8) error {
 // without redundant writes). Returns ErrNotFound when the device row
 // is gone.
 func (r *Repo) SetNodeID(ctx context.Context, id, nodeID uint64) error {
-	res := r.db.WithContext(ctx).Model(&model.Device{}).
+	res := dbx.WithContext(ctx, r.db).Model(&model.Device{}).
 		Where("id = ? AND (node_id IS NULL OR node_id <> ?)", id, nodeID).
 		Update("node_id", nodeID)
 	if res.Error != nil {
@@ -179,7 +180,7 @@ func (r *Repo) SetNodeID(ctx context.Context, id, nodeID uint64) error {
 	// this value; check the row to disambiguate.
 	if res.RowsAffected == 0 {
 		var exists int64
-		if err := r.db.WithContext(ctx).Model(&model.Device{}).Where("id = ?", id).Count(&exists).Error; err != nil {
+		if err := dbx.WithContext(ctx, r.db).Model(&model.Device{}).Where("id = ?", id).Count(&exists).Error; err != nil {
 			return err
 		}
 		if exists == 0 {
@@ -191,7 +192,7 @@ func (r *Repo) SetNodeID(ctx context.Context, id, nodeID uint64) error {
 
 // UpdateNameDescription writes the operator-editable display fields.
 func (r *Repo) UpdateNameDescription(ctx context.Context, id uint64, name, description string) error {
-	res := r.db.WithContext(ctx).Model(&model.Device{}).Where("id = ?", id).Updates(map[string]any{
+	res := dbx.WithContext(ctx, r.db).Model(&model.Device{}).Where("id = ?", id).Updates(map[string]any{
 		"name":        name,
 		"description": description,
 	})
@@ -205,7 +206,7 @@ func (r *Repo) UpdateNameDescription(ctx context.Context, id uint64, name, descr
 }
 
 func (r *Repo) UpdateEnvironment(ctx context.Context, id uint64, environment string) error {
-	res := r.db.WithContext(ctx).Model(&model.Device{}).Where("id = ?", id).Update("environment", environment)
+	res := dbx.WithContext(ctx, r.db).Model(&model.Device{}).Where("id = ?", id).Update("environment", environment)
 	if res.Error != nil {
 		return res.Error
 	}
@@ -219,7 +220,7 @@ func (r *Repo) UpdateEnvironment(ctx context.Context, id uint64, environment str
 // MarkOnline flips online=true and bumps last_seen_at.
 func (r *Repo) MarkOnline(ctx context.Context, id uint64) error {
 	now := time.Now().UTC()
-	res := r.db.WithContext(ctx).Model(&model.Device{}).Where("id = ?", id).Updates(map[string]any{
+	res := dbx.WithContext(ctx, r.db).Model(&model.Device{}).Where("id = ?", id).Updates(map[string]any{
 		"online":       true,
 		"last_seen_at": now,
 	})
@@ -235,7 +236,7 @@ func (r *Repo) MarkOnline(ctx context.Context, id uint64) error {
 // MarkOffline flips online=false (last_seen_at left untouched so callers
 // can still see "last contacted" time).
 func (r *Repo) MarkOffline(ctx context.Context, id uint64) error {
-	res := r.db.WithContext(ctx).Model(&model.Device{}).Where("id = ?", id).Update("online", false)
+	res := dbx.WithContext(ctx, r.db).Model(&model.Device{}).Where("id = ?", id).Update("online", false)
 	if res.Error != nil {
 		return res.Error
 	}
@@ -267,7 +268,7 @@ WHERE delete_marker = 0 AND online = ?
 // ReconcileOfflineOrphans implements biz/device.Repo. See the interface doc.
 func (r *Repo) ReconcileOfflineOrphans(ctx context.Context) (int64, error) {
 	now := time.Now().UTC()
-	res := r.db.WithContext(ctx).Exec(reconcileOfflineOrphansSQL, false, now, true, "online")
+	res := dbx.WithContext(ctx, r.db).Exec(reconcileOfflineOrphansSQL, false, now, true, "online")
 	if res.Error != nil {
 		return 0, res.Error
 	}
@@ -277,7 +278,7 @@ func (r *Repo) ReconcileOfflineOrphans(ctx context.Context) (int64, error) {
 // Get returns the device by primary key.
 func (r *Repo) Get(ctx context.Context, id uint64) (*model.Device, error) {
 	var d model.Device
-	if err := r.db.WithContext(ctx).First(&d, id).Error; err != nil {
+	if err := dbx.WithContext(ctx, r.db).First(&d, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errs.ErrNotFound
 		}
@@ -292,7 +293,7 @@ func (r *Repo) GetMany(ctx context.Context, ids []uint64) (map[uint64]*model.Dev
 		return map[uint64]*model.Device{}, nil
 	}
 	var rows []*model.Device
-	if err := r.db.WithContext(ctx).Where("id IN ?", ids).Find(&rows).Error; err != nil {
+	if err := dbx.WithContext(ctx, r.db).Where("id IN ?", ids).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	out := make(map[uint64]*model.Device, len(rows))
@@ -304,7 +305,7 @@ func (r *Repo) GetMany(ctx context.Context, ids []uint64) (map[uint64]*model.Dev
 
 // List returns devices matching f.
 func (r *Repo) List(ctx context.Context, f biz.ListFilter) ([]*model.Device, error) {
-	tx := r.db.WithContext(ctx).Model(&model.Device{})
+	tx := dbx.WithContext(ctx, r.db).Model(&model.Device{})
 	switch {
 	case f.RolesUnknownOnly:
 		tx = tx.Where("roles = ?", 0)
@@ -339,7 +340,7 @@ func (r *Repo) List(ctx context.Context, f biz.ListFilter) ([]*model.Device, err
 // Count returns the non-soft-deleted device count.
 func (r *Repo) Count(ctx context.Context) (int64, error) {
 	var n int64
-	if err := r.db.WithContext(ctx).Model(&model.Device{}).Count(&n).Error; err != nil {
+	if err := dbx.WithContext(ctx, r.db).Model(&model.Device{}).Count(&n).Error; err != nil {
 		return 0, err
 	}
 	return n, nil
@@ -349,7 +350,7 @@ func (r *Repo) Count(ctx context.Context) (int64, error) {
 // node is still live. It is intentionally not part of biz/device.Repo; the
 // device usecase probes for it at boot to clean historical topology leaks.
 func (r *Repo) ListDeletedWithNodeID(ctx context.Context, limit int) ([]*model.Device, error) {
-	q := r.db.WithContext(ctx).Unscoped().
+	q := dbx.WithContext(ctx, r.db).Unscoped().
 		Model(&model.Device{}).
 		Joins("JOIN nodes ON nodes.id = devices.node_id AND nodes.deleted_at IS NULL").
 		Where("devices.delete_marker <> 0 AND devices.node_id IS NOT NULL").
@@ -368,7 +369,7 @@ func (r *Repo) ListDeletedWithNodeID(ctx context.Context, limit int) ([]*model.D
 // no longer point at any live edge. These rows are historical leftovers from
 // the old DELETE /edges behavior.
 func (r *Repo) ListWithoutLiveEdges(ctx context.Context, limit int) ([]*model.Device, error) {
-	q := r.db.WithContext(ctx).
+	q := dbx.WithContext(ctx, r.db).
 		Model(&model.Device{}).
 		Where(`NOT EXISTS (
 			SELECT 1
@@ -392,7 +393,7 @@ func (r *Repo) ListWithoutLiveEdges(ctx context.Context, limit int) ([]*model.De
 
 // Delete soft-deletes a device by id.
 func (r *Repo) Delete(ctx context.Context, id uint64) error {
-	res := r.db.WithContext(ctx).Delete(&model.Device{}, id)
+	res := dbx.WithContext(ctx, r.db).Delete(&model.Device{}, id)
 	if res.Error != nil {
 		return res.Error
 	}
@@ -407,7 +408,7 @@ func (r *Repo) Delete(ctx context.Context, id uint64) error {
 // credentials are tombstoned before the edge row is soft-deleted so a deleted
 // installation cannot keep a reusable access/secret pair around.
 func (r *Repo) DeleteOfflineWithLinkedEdges(ctx context.Context, id uint64) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return dbx.WithContext(ctx, r.db).Transaction(func(tx *gorm.DB) error {
 		var d model.Device
 		if err := tx.First(&d, id).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -487,5 +488,5 @@ func (r *Repo) UpdateHostPresence(ctx context.Context, hostID, edgeID uint64, on
 	if online {
 		updates["last_seen_at"] = time.Now().UTC()
 	}
-	return r.db.WithContext(ctx).Model(&model.Device{}).Where("id = ? AND current_edge_id = ?", hostID, edgeID).Updates(updates).Error
+	return dbx.WithContext(ctx, r.db).Model(&model.Device{}).Where("id = ? AND current_edge_id = ?", hostID, edgeID).Updates(updates).Error
 }

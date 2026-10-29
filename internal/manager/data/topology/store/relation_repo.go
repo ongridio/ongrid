@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/ongridio/ongrid/internal/pkg/dbx"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -24,7 +25,7 @@ func (r *RelationRepo) Create(ctx context.Context, rel *model.Relation) error {
 	if rel == nil {
 		return errs.ErrInvalid
 	}
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return dbx.WithContext(ctx, r.db).Transaction(func(tx *gorm.DB) error {
 		var endpoints []*model.Node
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("id IN ?", []uint64{rel.SrcID, rel.DstID}).
@@ -63,7 +64,7 @@ func (r *RelationRepo) Create(ctx context.Context, rel *model.Relation) error {
 }
 
 func (r *RelationRepo) Update(ctx context.Context, id uint64, propsJSON string) error {
-	res := r.db.WithContext(ctx).Model(&model.Relation{}).Where("id = ?", id).Update("props_jsonb", propsJSON)
+	res := dbx.WithContext(ctx, r.db).Model(&model.Relation{}).Where("id = ?", id).Update("props_jsonb", propsJSON)
 	if res.Error != nil {
 		return res.Error
 	}
@@ -75,7 +76,7 @@ func (r *RelationRepo) Update(ctx context.Context, id uint64, propsJSON string) 
 
 func (r *RelationRepo) Get(ctx context.Context, id uint64) (*model.Relation, error) {
 	var rel model.Relation
-	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&rel).Error; err != nil {
+	if err := dbx.WithContext(ctx, r.db).Where("id = ?", id).First(&rel).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errs.ErrNotFound
 		}
@@ -85,7 +86,7 @@ func (r *RelationRepo) Get(ctx context.Context, id uint64) (*model.Relation, err
 }
 
 func (r *RelationRepo) List(ctx context.Context, f biz.RelationListFilter) ([]*model.Relation, error) {
-	q := r.db.WithContext(ctx).Model(&model.Relation{})
+	q := dbx.WithContext(ctx, r.db).Model(&model.Relation{})
 	q = applyRelationFilter(q, f)
 	q = q.Order("id DESC")
 	if f.Limit > 0 {
@@ -102,7 +103,7 @@ func (r *RelationRepo) List(ctx context.Context, f biz.RelationListFilter) ([]*m
 }
 
 func (r *RelationRepo) Count(ctx context.Context, f biz.RelationListFilter) (int64, error) {
-	q := r.db.WithContext(ctx).Model(&model.Relation{})
+	q := dbx.WithContext(ctx, r.db).Model(&model.Relation{})
 	q = applyRelationFilter(q, f)
 	var n int64
 	if err := q.Count(&n).Error; err != nil {
@@ -112,7 +113,7 @@ func (r *RelationRepo) Count(ctx context.Context, f biz.RelationListFilter) (int
 }
 
 func (r *RelationRepo) Delete(ctx context.Context, id uint64) error {
-	res := r.db.WithContext(ctx).Where("id = ?", id).Delete(&model.Relation{})
+	res := dbx.WithContext(ctx, r.db).Where("id = ?", id).Delete(&model.Relation{})
 	if res.Error != nil {
 		return res.Error
 	}

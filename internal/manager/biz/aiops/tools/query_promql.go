@@ -151,7 +151,7 @@ func (t *QueryPromQLTool) InvokableRun(ctx context.Context, argsJSON string, _ .
 		in.LookbackSeconds = maxQueryPromQLLookbackSeconds
 	}
 
-	end := time.Now()
+	end := basetool.ObservationTime(ctx)
 	start := end.Add(-time.Duration(in.LookbackSeconds) * time.Second)
 	step := stepFor(in.LookbackSeconds)
 

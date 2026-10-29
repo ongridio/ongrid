@@ -5,6 +5,7 @@ import {
   KeyRound,
   Bell,
   Bot,
+  Cable,
   Loader2,
   MessagesSquare,
   Gauge,
@@ -43,6 +44,7 @@ const RAIL_ITEMS: RailItem[] = [
   // /skills?tab=install so the whole skill story (loaded + installed)
   // lives on one page. The Settings route still redirects bookmarks.
   { to: 'llm', icon: KeyRound, labelZh: '模型', labelEn: 'LLM', hintZh: 'OpenAI / 兼容服务', hintEn: 'OpenAI / compatible providers' },
+  { to: 'external-ai', icon: Cable, labelZh: 'MCP 访问', labelEn: 'MCP access', hintZh: '客户端访问 Token 与权限', hintEn: 'Client access tokens and permissions' },
   { to: 'secrets', icon: Lock, labelZh: '凭证', labelEn: 'Credentials', hintZh: '技能 / MCP 注入的凭据（env / 文件）', hintEn: 'Credentials injected into skills / MCP (env / files)' },
   // 通知 = 单向告警推送(channel in the alert sense). channels = 双向 chat
   // bot(IM in the messaging sense). We pair URL ↔ label so the route name

@@ -5,6 +5,7 @@ import { request } from './client';
 // here for a human to approve (→ executes) or reject. Admin-only.
 
 export interface Approval {
+  operation?: { operation_id: string; state: string; verification: string; applied: boolean | null; error_code?: string; data?: unknown };
   runtime_version?: string;
   id: string;
   kind: string;

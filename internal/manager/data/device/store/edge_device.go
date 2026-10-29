@@ -5,6 +5,7 @@ import (
 	"errors"
 	edgemodel "github.com/ongridio/ongrid/internal/manager/model/edge"
 
+	"github.com/ongridio/ongrid/internal/pkg/dbx"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -30,7 +31,7 @@ func (r *EdgeDeviceRepo) Link(ctx context.Context, edgeID, deviceID uint64, t mo
 	if edgeID == 0 || deviceID == 0 {
 		return errs.ErrInvalid
 	}
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return dbx.WithContext(ctx, r.db).Transaction(func(tx *gorm.DB) error {
 		if t == model.EdgeDeviceRelationHost {
 			if tx.Migrator().HasTable("edges") {
 				var edge edgemodel.Edge
@@ -80,7 +81,7 @@ func (r *EdgeDeviceRepo) Link(ctx context.Context, edgeID, deviceID uint64, t mo
 
 // Unlink soft-deletes the (edge, device, type) row. Idempotent.
 func (r *EdgeDeviceRepo) Unlink(ctx context.Context, edgeID, deviceID uint64, t model.EdgeDeviceRelationType) error {
-	res := r.db.WithContext(ctx).
+	res := dbx.WithContext(ctx, r.db).
 		Where("edge_id = ? AND device_id = ? AND type = ?", edgeID, deviceID, t).
 		Delete(&model.EdgeDevice{})
 	if res.Error != nil {
@@ -93,7 +94,7 @@ func (r *EdgeDeviceRepo) Unlink(ctx context.Context, edgeID, deviceID uint64, t 
 // junction row.
 func (r *EdgeDeviceRepo) LookupHostDevice(ctx context.Context, edgeID uint64) (uint64, error) {
 	var row model.EdgeDevice
-	if err := r.db.WithContext(ctx).
+	if err := dbx.WithContext(ctx, r.db).
 		Where("edge_id = ? AND type = ?", edgeID, model.EdgeDeviceRelationHost).
 		Order("id DESC").
 		First(&row).Error; err != nil {
@@ -110,7 +111,7 @@ func (r *EdgeDeviceRepo) LookupHostDevice(ctx context.Context, edgeID uint64) (u
 func (r *EdgeDeviceRepo) LookupEdgeForDevice(ctx context.Context, deviceID uint64, t model.EdgeDeviceRelationType) (uint64, error) {
 	if t == model.EdgeDeviceRelationHost {
 		var host model.Device
-		if err := r.db.WithContext(ctx).First(&host, deviceID).Error; err != nil {
+		if err := dbx.WithContext(ctx, r.db).First(&host, deviceID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return 0, errs.ErrNotFound
 			}
@@ -120,7 +121,7 @@ func (r *EdgeDeviceRepo) LookupEdgeForDevice(ctx context.Context, deviceID uint6
 			return 0, errs.ErrNotFound
 		}
 		var link model.EdgeDevice
-		if err := r.db.WithContext(ctx).Where("edge_id = ? AND device_id = ? AND type = ?", *host.CurrentEdgeID, deviceID, t).First(&link).Error; err != nil {
+		if err := dbx.WithContext(ctx, r.db).Where("edge_id = ? AND device_id = ? AND type = ?", *host.CurrentEdgeID, deviceID, t).First(&link).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return 0, errs.ErrNotFound
 			}
@@ -130,7 +131,7 @@ func (r *EdgeDeviceRepo) LookupEdgeForDevice(ctx context.Context, deviceID uint6
 	}
 
 	var row model.EdgeDevice
-	if err := r.db.WithContext(ctx).
+	if err := dbx.WithContext(ctx, r.db).
 		Where("device_id = ? AND type = ?", deviceID, t).
 		Order("id DESC").
 		First(&row).Error; err != nil {
@@ -145,7 +146,7 @@ func (r *EdgeDeviceRepo) LookupEdgeForDevice(ctx context.Context, deviceID uint6
 // ListDevicesForEdge returns every junction row for this edge.
 func (r *EdgeDeviceRepo) ListDevicesForEdge(ctx context.Context, edgeID uint64) ([]*model.EdgeDevice, error) {
 	var rows []*model.EdgeDevice
-	if err := r.db.WithContext(ctx).
+	if err := dbx.WithContext(ctx, r.db).
 		Where("edge_id = ?", edgeID).
 		Order("id ASC").
 		Find(&rows).Error; err != nil {
@@ -157,7 +158,7 @@ func (r *EdgeDeviceRepo) ListDevicesForEdge(ctx context.Context, edgeID uint64) 
 // ListEdgesForDevice returns every junction row for this device.
 func (r *EdgeDeviceRepo) ListEdgesForDevice(ctx context.Context, deviceID uint64) ([]*model.EdgeDevice, error) {
 	var rows []*model.EdgeDevice
-	if err := r.db.WithContext(ctx).
+	if err := dbx.WithContext(ctx, r.db).
 		Where("device_id = ?", deviceID).
 		Order("id ASC").
 		Find(&rows).Error; err != nil {

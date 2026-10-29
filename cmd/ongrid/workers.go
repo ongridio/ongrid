@@ -18,8 +18,11 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func runWorkers(rootCtx context.Context, cfg *config.Config, log *slog.Logger, notifyRouter *notify.Router, storage *storageModule, settings *settingsModule, devices *devicesModule, alerts *alertsModule, telemetry *telemetryModule, aiops *aiopsModule, runtime *runtimeModule, automation *automationModule, http *httpModule) error {
+func runWorkers(rootCtx context.Context, cfg *config.Config, log *slog.Logger, notifyRouter *notify.Router, storage *storageModule, settings *settingsModule, devices *devicesModule, alerts *alertsModule, telemetry *telemetryModule, aiops *aiopsModule, runtime *runtimeModule, automation *automationModule, http *httpModule, external *externalMCPModule) error {
 	eg, egCtx := errgroup.WithContext(rootCtx)
+	if external.engine != nil {
+		eg.Go(func() error { return external.engine.Run(egCtx) })
+	}
 	// PR-F: legacy metricIngester.Start flush loop removed — no MySQL writes.
 	// eg.Go(func() error { return metricIngester.Start(egCtx) })
 	eg.Go(func() error { return http.apiServer.Start(egCtx) })

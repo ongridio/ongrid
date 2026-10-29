@@ -6,6 +6,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/ongridio/ongrid/internal/pkg/dbx"
 	"gorm.io/gorm"
 
 	model "github.com/ongridio/ongrid/internal/manager/model/audit"
@@ -29,7 +30,7 @@ func New(db *gorm.DB) *Repo {
 // (see biz.Usecase.Emit) to honour HLD-010's "audit write failure
 // must never block the request".
 func (r *Repo) Insert(ctx context.Context, log *model.Log) error {
-	return r.db.WithContext(ctx).Create(log).Error
+	return dbx.WithContext(ctx, r.db).Create(log).Error
 }
 
 // ListFilters captures all the GET /v1/admin/audit-logs querystring
@@ -41,7 +42,7 @@ type ListFilters = model.ListFilters
 // same filters (excluding limit/offset) so the UI can render
 // "showing N of total".
 func (r *Repo) List(ctx context.Context, f ListFilters) ([]model.Log, int64, error) {
-	q := r.db.WithContext(ctx).Model(&model.Log{})
+	q := dbx.WithContext(ctx, r.db).Model(&model.Log{})
 	if f.UserEmail != "" {
 		q = q.Where("user_email = ?", f.UserEmail)
 	}
@@ -87,6 +88,6 @@ func (r *Repo) List(ctx context.Context, f ListFilters) ([]model.Log, int64, err
 // DeleteOlderThan implements the retention sweep. Returns the number of
 // rows removed. Called from the daily retention goroutine in biz layer.
 func (r *Repo) DeleteOlderThan(ctx context.Context, cutoff time.Time) (int64, error) {
-	res := r.db.WithContext(ctx).Where("occurred_at < ?", cutoff).Delete(&model.Log{})
+	res := dbx.WithContext(ctx, r.db).Where("occurred_at < ?", cutoff).Delete(&model.Log{})
 	return res.RowsAffected, res.Error
 }

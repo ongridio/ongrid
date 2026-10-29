@@ -44,6 +44,7 @@ import (
 )
 
 type extensionsModule struct {
+	approvalUC         *managerbizapproval.Usecase
 	skillHandler       *managerserverskill.Handler
 	operatorRunHandler *managerserveroperatorrun.Handler
 	marketplaceHandler *managerservermarketplace.Handler
@@ -313,6 +314,7 @@ func bootstrapExtensions(rootCtx context.Context, cfg *config.Config, log *slog.
 	}
 
 	return &extensionsModule{
+		approvalUC:         approvalUC,
 		skillHandler:       skillHandler,
 		operatorRunHandler: operatorRunHandler,
 		marketplaceHandler: marketplaceHandler,

@@ -8,33 +8,44 @@ import (
 )
 
 const (
-	OperationStateCreated   = "created"
-	OperationStateQueued    = "queued"
-	OperationStateRunning   = "running"
-	OperationStateCanceling = "canceling"
-	OperationStateSucceeded = "succeeded"
-	OperationStateFailed    = "failed"
-	OperationStateCancelled = "cancelled"
+	OperationStateCreated          = "created"
+	OperationStateQueued           = "queued"
+	OperationStateRunning          = "running"
+	OperationStateCanceling        = "canceling"
+	OperationStateSucceeded        = "succeeded"
+	OperationStateFailed           = "failed"
+	OperationStateCancelled        = "cancelled"
+	OperationStateAwaitingApproval = "awaiting_approval"
+	OperationStateUnknown          = "unknown"
+	OperationStatePartial          = "partial"
 )
 
 // Operation is the durable execution commitment created by an AgentLoop.
 // Tool calls remain ephemeral observations; Operations are reserved for work
 // that can outlive the current turn, be cancelled, or produce artifacts.
 type Operation struct {
-	ID            string         `gorm:"primaryKey;type:char(36);column:id"`
-	ChatSessionID string         `gorm:"type:char(36);not null;index;column:chat_session_id"`
-	CreatedBy     uint64         `gorm:"not null;index;column:created_by"`
-	Kind          string         `gorm:"size:64;not null;index;column:kind"`
-	State         string         `gorm:"size:32;not null;index;column:state"`
-	Title         string         `gorm:"size:255;not null;column:title"`
-	Summary       string         `gorm:"type:text;not null;column:summary"`
-	InputJSON     string         `gorm:"type:text;not null;column:input_json"`
-	ActionsJSON   string         `gorm:"type:text;not null;column:actions_json"`
-	DetailURL     string         `gorm:"size:512;not null;default:'';column:detail_url"`
-	TerminalAt    *time.Time     `gorm:"index;column:terminal_at"`
-	CreatedAt     time.Time      `gorm:"autoCreateTime;column:created_at"`
-	UpdatedAt     time.Time      `gorm:"autoUpdateTime;column:updated_at"`
-	DeletedAt     gorm.DeletedAt `gorm:"index;column:deleted_at"`
+	ID             string         `gorm:"primaryKey;type:char(36);column:id"`
+	Source         string         `gorm:"size:32;not null;default:chat;index"`
+	TokenID        *string        `gorm:"size:32;uniqueIndex:idx_operation_token_key,priority:1"`
+	IdempotencyKey *string        `gorm:"size:128;uniqueIndex:idx_operation_token_key,priority:2"`
+	RequestDigest  string         `gorm:"size:64"`
+	ResultJSON     string         `gorm:"type:mediumtext"`
+	AuditPending   bool           `gorm:"not null;default:false;index"`
+	ApprovalID     string         `gorm:"size:36;index"`
+	LeaseUntil     *time.Time     `gorm:"index"`
+	ChatSessionID  string         `gorm:"type:char(36);not null;index;column:chat_session_id"`
+	CreatedBy      uint64         `gorm:"not null;index;column:created_by"`
+	Kind           string         `gorm:"size:64;not null;index;column:kind"`
+	State          string         `gorm:"size:32;not null;index;column:state"`
+	Title          string         `gorm:"size:255;not null;column:title"`
+	Summary        string         `gorm:"type:text;not null;column:summary"`
+	InputJSON      string         `gorm:"type:text;not null;column:input_json"`
+	ActionsJSON    string         `gorm:"type:text;not null;column:actions_json"`
+	DetailURL      string         `gorm:"size:512;not null;default:'';column:detail_url"`
+	TerminalAt     *time.Time     `gorm:"index;column:terminal_at"`
+	CreatedAt      time.Time      `gorm:"autoCreateTime;column:created_at"`
+	UpdatedAt      time.Time      `gorm:"autoUpdateTime;column:updated_at"`
+	DeletedAt      gorm.DeletedAt `gorm:"index;column:deleted_at"`
 }
 
 func (Operation) TableName() string { return "aiops_operations" }
