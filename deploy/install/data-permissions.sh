@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared data-directory ownership and recovery helpers for Compose upgrades.
+# Shared data-directory ownership and recovery helpers for Compose installs/upgrades.
 #
 # Normal upgrades must stay O(number of top-level directories): files already
 # written by a running service have the correct numeric owner, and recursively

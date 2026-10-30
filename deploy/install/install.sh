@@ -574,20 +574,8 @@ if (( ${#LEGACY_VOLS[@]} > 0 )); then
     log_warn "see README.md '数据卷迁移' to copy data into $ONGRID_DATA_DIR before bringing the stack up"
 fi
 
-mkdir -p \
-    "$ONGRID_DATA_DIR/mysql" \
-    "$ONGRID_DATA_DIR/prometheus" \
-    "$ONGRID_DATA_DIR/loki" \
-    "$ONGRID_DATA_DIR/tempo" \
-    "$ONGRID_DATA_DIR/qdrant" \
-    "$ONGRID_DATA_DIR/grafana" \
-    "$ONGRID_DATA_DIR/embeddings" \
-    "$ONGRID_DATA_DIR/skills" \
-    "$ONGRID_DATA_DIR/pages" \
-    "$ONGRID_DATA_DIR/packet-captures" \
-    "$ONGRID_DATA_DIR/workspace" \
-    "$ONGRID_DATA_DIR/tools" \
-    "$ONGRID_LOG_DIR"
+# Keep first-install and upgrade mount-point ownership in one shared list.
+ongrid_prepare_data_directories "$ONGRID_DATA_DIR" "$ONGRID_LOG_DIR"
 
 # Stage the bundled fastembed model (ADR-027 Phase-2 offline RAG).
 # Skip if operator already has files in there (e.g. a custom model).
@@ -601,23 +589,8 @@ if [[ -d "$SCRIPT_DIR/embeddings/fast-bge-small-zh-v1.5" ]]; then
         cp -rf "$SCRIPT_DIR/embeddings/fast-bge-small-zh-v1.5/." "$target/"
     fi
 fi
-# Manager runs as uid 65532 (nonroot in the image); the embedding
-# cache must be readable by that uid AND writable so fastembed-go can
-# write its own progress / lock files on first load.
-chmod -R 0755 "$ONGRID_DATA_DIR/embeddings" 2>/dev/null || true
-chown -R 65532:65532 "$ONGRID_DATA_DIR/embeddings" 2>/dev/null || true
-# HLD-017 marketplace skills dir — manager (uid 65532) installs packs here;
-# must be writable by that uid (cf. embeddings). Without this a fresh install
-# fails at "move staging → install: permission denied".
-chown -R 65532:65532 "$ONGRID_DATA_DIR/skills" 2>/dev/null || true
-# Manager-written runtime dirs (uid 65532), all bind-mounted into the container.
-# Without chown, docker creates them root-owned on first `up` and the nonroot
-# manager can't write: serve_page fails "mkdir page dir: permission denied",
-# cloud_bash fails "mkdir session" (workspace) + can't install tools.
-chown -R 65532:65532 "$ONGRID_DATA_DIR/pages" 2>/dev/null || true
-chown -R 65532:65532 "$ONGRID_DATA_DIR/packet-captures" 2>/dev/null || true
-chown -R 65532:65532 "$ONGRID_DATA_DIR/workspace" 2>/dev/null || true
-chown -R 65532:65532 "$ONGRID_DATA_DIR/tools" 2>/dev/null || true
+# Re-install still repairs existing files, including the model just staged.
+ongrid_repair_data_permissions "$ONGRID_DATA_DIR"
 
 # pcap-parser is a separate, private image. Bootstrap only the Manager request
 # signer; its Docker-only HTTP path is protected by this signature and the
@@ -626,18 +599,6 @@ ongrid_prepare_pcap_parser_auth "$ONGRID_DATA_DIR" || {
     log_error "could not prepare pcap-parser request signing material"
     exit 1
 }
-
-# Image uids — pinned to what the upstream images run as. Bumping the
-# image tag in docker-compose.yml without updating these here will fail
-# on first boot (chown to the wrong uid → service can't write).
-chown -R 999:999       "$ONGRID_DATA_DIR/mysql"      2>/dev/null || true   # mysql:8.0
-chown -R 65534:65534   "$ONGRID_DATA_DIR/prometheus" 2>/dev/null || true   # prom/prometheus runs as nobody
-chown -R 10001:10001   "$ONGRID_DATA_DIR/loki"       2>/dev/null || true   # grafana/loki
-chown -R 10001:10001   "$ONGRID_DATA_DIR/tempo"      2>/dev/null || true   # grafana/tempo
-chown -R 472:472       "$ONGRID_DATA_DIR/grafana"    2>/dev/null || true   # grafana/grafana-oss
-# qdrant runs as root inside the container — no chown needed.
-# manager log dir: container's ongrid user writes here.
-chmod 755 "$ONGRID_DATA_DIR" "$ONGRID_LOG_DIR"
 
 # Export so the docker compose subprocess inherits — compose substitutes
 # ${ONGRID_DATA_DIR:-...} into the bind paths at up time.
