@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
+	"net/http"
 	"reflect"
 	"strings"
 	"sync"
@@ -14,6 +16,7 @@ import (
 	"github.com/singchia/geminio"
 
 	edgebiz "github.com/ongridio/ongrid/internal/manager/biz/edge"
+	pkgpromwrite "github.com/ongridio/ongrid/internal/pkg/promwrite"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
 
@@ -55,15 +58,17 @@ func (f *fakePromIngester) PushKubernetes(_ context.Context, clusterID uint64, s
 }
 
 // fakeMetricIngester is a minimal stub for the existing MetricIngester
-// requirement of Install. push_host_metrics tests aren't run here.
+// requirement of Install. wantErr lets the permanent-error tests exercise
+// the push_host_metrics failure branch.
 type fakeMetricIngester struct {
 	gotDevice uint64
 	gotPoints []tunnel.HostMetricPoint
+	wantErr   error
 }
 
 func (f *fakeMetricIngester) Push(_ context.Context, deviceID uint64, points []tunnel.HostMetricPoint) error {
 	f.gotDevice, f.gotPoints = deviceID, points
-	return nil
+	return f.wantErr
 }
 
 type fakeEdgeAuthenticator struct {
@@ -761,5 +766,192 @@ func TestInstall_PushPromSamples_BadBody(t *testing.T) {
 	}
 	if pi.pushCnt != 0 {
 		t.Errorf("ingester should not be called, got pushCnt=%d", pi.pushCnt)
+	}
+}
+
+// A permanent remote_write rejection (4xx, e.g. Prometheus 400 "out of
+// order sample" for samples older than storage.tsdb.out_of_order_time_window)
+// can never be satisfied by replaying the batch. The Edge only advances its
+// per-source snapshot cursor when the RPC reports the batch as accepted, so
+// surfacing this as an error makes every MetricsInterval re-send the same
+// stale snapshot forever — the positive feedback loop that OOM-killed the
+// manager in the 2026-10 incident. The handler must therefore confirm and
+// drop it, mirroring the "Prom disabled" branch that returns Accepted=n to
+// stop the Edge from retrying.
+//
+// Retryable failures (5xx / timeouts, which the client returns as plain
+// errors) must keep the old behaviour so the batch is retried.
+func TestInstall_PushPromSamples_PermanentRejectionIsConfirmedAndDropped(t *testing.T) {
+	permanent := &pkgpromwrite.PermanentError{
+		URL:    "http://prometheus:9090/api/v1/write",
+		Status: http.StatusBadRequest,
+		Body:   "out of order sample",
+	}
+	for _, tc := range []struct {
+		name      string
+		err       error
+		permanent bool
+	}{
+		{name: "permanent 400", err: permanent, permanent: true},
+		{
+			name:      "wrapped permanent",
+			err:       fmt.Errorf("promwrite: write failed: %w", permanent),
+			permanent: true,
+		},
+		{
+			name: "retryable 503",
+			err:  errors.New("promwrite: http://prometheus:9090/api/v1/write returned 503: Service Unavailable"),
+		},
+		{
+			name: "retryable transport",
+			err:  errors.New("promwrite: post http://prometheus:9090/api/v1/write: context deadline exceeded (Client.Timeout exceeded while awaiting headers)"),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pi := &fakePromIngester{wantErr: tc.err}
+			_, c, rpc := installAndDispatch(t, Wiring{PromIngester: pi, Log: slog.Default()})
+			c.bindEdgeTransport(42, 42)
+
+			body, err := json.Marshal(tunnel.PushPromSamplesRequest{
+				EdgeID: 42,
+				Source: "embedded:gopsutil",
+				Samples: []tunnel.PromSample{
+					{Name: "node_cpu_seconds_total", Value: 1, TsMs: 100},
+					{Name: "node_memory_MemAvailable_bytes", Value: 3, TsMs: 300},
+				},
+			})
+			if err != nil {
+				t.Fatalf("marshal request: %v", err)
+			}
+			if pi.pushCnt != 0 {
+				t.Fatalf("ingester called before dispatch")
+			}
+			rsp := &fakeResp{}
+			rpc(context.Background(), &fakeReq{data: body, clientID: 42}, rsp)
+			if pi.pushCnt != 1 {
+				t.Fatalf("Push called %d times, want 1", pi.pushCnt)
+			}
+
+			var out tunnel.PushPromSamplesResponse
+			if len(rsp.data) > 0 {
+				if err := json.Unmarshal(rsp.data, &out); err != nil {
+					t.Fatalf("decode response: %v", err)
+				}
+			}
+			if tc.permanent {
+				if rsp.err != nil {
+					t.Fatalf("permanent rejection surfaced as RPC error: %v", rsp.err)
+				}
+				if out.Accepted != 2 {
+					t.Fatalf("Accepted = %d, want 2 (confirm so the Edge stops replaying)", out.Accepted)
+				}
+				return
+			}
+			if rsp.err == nil {
+				t.Fatal("retryable rejection was silently accepted; the Edge would drop the batch")
+			}
+			if out.Accepted != 0 {
+				t.Fatalf("Accepted = %d on a retryable failure, want 0 (unconfirmed)", out.Accepted)
+			}
+		})
+	}
+}
+
+// The k8s-source branch and the device_id-unresolved cluster fallback use
+// PushKubernetes; both must apply the same confirm-and-drop rule.
+func TestInstall_PushPromSamples_K8sPermanentRejectionIsConfirmedAndDropped(t *testing.T) {
+	pi := &fakePromIngester{wantK8sErr: &pkgpromwrite.PermanentError{Status: http.StatusBadRequest, Body: "out of order sample"}}
+	_, c, rpc := installAndDispatch(t, Wiring{
+		PromIngester:   pi,
+		DeviceResolver: &fakeDeviceResolver{err: errors.New("no host junction")},
+		K8sRegistry:    fakeK8sRegistry{clusterID: 7},
+		Log:            slog.Default(),
+	})
+	c.bindEdgeTransport(41, 41)
+
+	body, err := json.Marshal(tunnel.PushPromSamplesRequest{
+		EdgeID:  41,
+		Source:  "k8s:kube-state-metrics",
+		Samples: []tunnel.PromSample{{Name: "kube_pod_status_phase", Value: 1, TsMs: 1}},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	rsp := &fakeResp{}
+	rpc(context.Background(), &fakeReq{data: body, clientID: 41}, rsp)
+	if rsp.err != nil {
+		t.Fatalf("permanent k8s rejection surfaced as RPC error: %v", rsp.err)
+	}
+	if pi.pushK8sPushCnt != 1 {
+		t.Fatalf("PushKubernetes called %d times, want 1", pi.pushK8sPushCnt)
+	}
+	var out tunnel.PushPromSamplesResponse
+	if err := json.Unmarshal(rsp.data, &out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if out.Accepted != 1 {
+		t.Fatalf("Accepted = %d, want 1", out.Accepted)
+	}
+}
+
+// push_host_metrics keeps the same contract with its uint32 Accepted field.
+// Today the wired ingester is a no-op (host metrics come from
+// push_prom_samples), so this covers the handler branch defensively.
+func TestInstall_PushHostMetrics_ErrorDisposition(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		err      error
+		accepted uint32
+		wantErr  bool
+	}{
+		{
+			name:     "permanent dropped",
+			err:      &pkgpromwrite.PermanentError{Status: http.StatusBadRequest, Body: "out of order sample"},
+			accepted: 2,
+		},
+		{
+			name:    "retryable surfaced",
+			err:     errors.New("db unavailable"),
+			wantErr: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mi := &fakeMetricIngester{wantErr: tc.err}
+			fs, c, _ := installAndDispatch(t, Wiring{MetricIngester: mi, Log: slog.Default()})
+			c.bindEdgeTransport(7, 42)
+
+			body, err := json.Marshal(tunnel.PushHostMetricsRequest{
+				EdgeID: 42,
+				Points: []tunnel.HostMetricPoint{{Ts: 1, CPUPct: 1}, {Ts: 2, CPUPct: 2}},
+			})
+			if err != nil {
+				t.Fatalf("marshal request: %v", err)
+			}
+			rpc, ok := fs.rpcs[tunnel.MethodPushHostMetrics]
+			if !ok {
+				t.Fatal("push_host_metrics not registered")
+			}
+			rsp := &fakeResp{}
+			rpc(context.Background(), &fakeReq{data: body, clientID: 7}, rsp)
+			if mi.gotDevice != 42 || len(mi.gotPoints) != 2 {
+				t.Fatalf("ingester saw device=%d points=%d", mi.gotDevice, len(mi.gotPoints))
+			}
+			if tc.wantErr {
+				if rsp.err == nil {
+					t.Fatal("retryable failure was silently accepted")
+				}
+				return
+			}
+			if rsp.err != nil {
+				t.Fatalf("permanent rejection surfaced as RPC error: %v", rsp.err)
+			}
+			var out tunnel.PushHostMetricsResponse
+			if err := json.Unmarshal(rsp.data, &out); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if out.Accepted != tc.accepted {
+				t.Fatalf("Accepted = %d, want %d", out.Accepted, tc.accepted)
+			}
+		})
 	}
 }
