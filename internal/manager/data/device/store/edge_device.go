@@ -27,10 +27,20 @@ var _ biz.EdgeDeviceRepo = (*EdgeDeviceRepo)(nil)
 // Link upserts the (edge, device, type) row. Duplicate triple is
 // silently a no-op (ON CONFLICT DO NOTHING) so callers can call this
 // every register without first checking existence.
+//
+// 并发重连时 Link 会与其它 Edge 的注册事务竞争，InnoDB 可能回滚其中一方
+// 并返回 1213/1205。事务本身可安全重复（全部语句幂等），因此在此入口做
+// 有界退避重试，避免把一次死锁放大成整台 Edge 注册失败。
 func (r *EdgeDeviceRepo) Link(ctx context.Context, edgeID, deviceID uint64, t model.EdgeDeviceRelationType) error {
 	if edgeID == 0 || deviceID == 0 {
 		return errs.ErrInvalid
 	}
+	return retryTransientTx(ctx, func() error {
+		return r.linkOnce(ctx, edgeID, deviceID, t)
+	})
+}
+
+func (r *EdgeDeviceRepo) linkOnce(ctx context.Context, edgeID, deviceID uint64, t model.EdgeDeviceRelationType) error {
 	return dbx.WithContext(ctx, r.db).Transaction(func(tx *gorm.DB) error {
 		if t == model.EdgeDeviceRelationHost {
 			if tx.Migrator().HasTable("edges") {
@@ -72,6 +82,13 @@ func (r *EdgeDeviceRepo) Link(ctx context.Context, edgeID, deviceID uint64, t mo
 				if err := tx.Model(&model.Device{}).Where("id = ?", deviceID).Update("current_edge_id", edgeID).Error; err != nil {
 					return err
 				}
+			}
+			if err == nil {
+				// 关联行已存在且指向同一 Host：不再重复 INSERT。
+				// INSERT 会先向自增主键尾部写入再撞 uk_edge_device_unique，
+				// 39 台 Edge 并发重连时这里与 host_plugin_configs 是同一种
+				// 尾部间隙死锁形态，稳态下直接跳过。
+				return nil
 			}
 		}
 		row := model.EdgeDevice{EdgeID: edgeID, DeviceID: deviceID, Type: t}
