@@ -80,9 +80,15 @@ stay attached to the original row. Repeated registration is a no-op.
 
 A failed v0.19.0 registration can already have created a duplicate Host. The
 transaction may soft-delete that row only when it has no current installation,
-topology, historical Edge or node references, plugin settings or user edits.
+historical Edge or node references, plugin settings or user edits. Manager
+startup can have backfilled its topology node. That node is removed in the same
+transaction only if it still has the generated type/name, empty properties,
+unchanged timestamps, and no current or historical references from relations,
+other Hosts or clusters. Edited or used topology is retained.
+Reference checks use locking reads so MySQL's repeatable-read snapshots cannot
+hide a relation committed before the topology lock was acquired.
 An occupied fingerprint or inconsistent binding fails closed; the migration does
-not move an Edge to another Host. A database failure rolls back both changes.
+not move an Edge to another Host. A database failure rolls back all changes.
 
 Upgrade Manager before restarting the node Agent. This is an on-registration
 data migration, without a schema change. After it succeeds, downgrading to an
@@ -110,3 +116,10 @@ Its healthy neighboring node starts with the Agent's actual name-based Host
 fingerprint and acquires its UID while preserving its Host ID. Store tests cover
 an earlier failed-registration orphan, repeated migration, conflicting bindings,
 an occupied fingerprint, preserved user settings and transaction rollback.
+The restart scenario first invokes the old registration order to create the
+orphan, reruns the production device/Edge/Kubernetes/topology migrations, then
+registers the node through the fixed path. It verifies that the original Host
+survives and both the duplicate Host and its generated topology are removed.
+A MySQL regression commits a topology relation while migration is in progress
+and verifies that the referenced Host and node are retained. CI runs it through
+the existing `ONGRID_TEST_MYSQL_DSN` test database configuration.

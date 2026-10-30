@@ -29,7 +29,10 @@ import (
 	devicestore "github.com/ongridio/ongrid/internal/manager/data/device/store"
 	edgestore "github.com/ongridio/ongrid/internal/manager/data/edge/store"
 	k8sstore "github.com/ongridio/ongrid/internal/manager/data/k8s/store"
+	topologystore "github.com/ongridio/ongrid/internal/manager/data/topology/store"
+	devicemodel "github.com/ongridio/ongrid/internal/manager/model/device"
 	k8smodel "github.com/ongridio/ongrid/internal/manager/model/k8s"
+	topologymodel "github.com/ongridio/ongrid/internal/manager/model/topology"
 	k8shttp "github.com/ongridio/ongrid/internal/manager/server/k8s"
 	edgesvc "github.com/ongridio/ongrid/internal/manager/service/edge"
 	k8ssvc "github.com/ongridio/ongrid/internal/manager/service/k8s"
@@ -39,7 +42,7 @@ import (
 )
 
 func TestKubernetesNodeCredentialRecoveryChain(t *testing.T) {
-	for _, startup := range []string{"ready", "manager-unavailable", "inventory-delayed"} {
+	for _, startup := range []string{"ready", "manager-unavailable", "inventory-delayed", "manager-restart-after-failed-upgrade"} {
 		t.Run(startup, func(t *testing.T) {
 			ctx := t.Context()
 			db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "recovery.db")), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
@@ -52,7 +55,8 @@ func TestKubernetesNodeCredentialRecoveryChain(t *testing.T) {
 			}
 			sqlDB.SetMaxOpenConns(1)
 			t.Cleanup(func() { _ = sqlDB.Close() })
-			for _, migrate := range []func(*gorm.DB) error{edgestore.Migrate, devicestore.Migrate, k8sstore.Migrate} {
+			migrations := []func(*gorm.DB) error{devicestore.Migrate, edgestore.Migrate, k8sstore.Migrate, topologystore.Migrate}
+			for _, migrate := range migrations {
 				if err := migrate(db); err != nil {
 					t.Fatal(err)
 				}
@@ -193,7 +197,7 @@ func TestKubernetesNodeCredentialRecoveryChain(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					wantPending := tc.replaced && startup != "ready"
+					wantPending := tc.replaced && (startup == "manager-unavailable" || startup == "inventory-delayed")
 					if pending != wantPending {
 						t.Fatalf("pending=%v, want %v", pending, wantPending)
 					}
@@ -221,7 +225,34 @@ func TestKubernetesNodeCredentialRecoveryChain(t *testing.T) {
 					if (session.EdgeID != tc.cached.EdgeID) != tc.replaced || info.NodeUID != tc.uid {
 						t.Fatalf("unexpected recovered identity: edge=%d nodeUID=%q", session.EdgeID, info.NodeUID)
 					}
+					var orphan devicemodel.Device
+					if !tc.replaced && startup == "manager-restart-after-failed-upgrade" {
+						// The unpatched registration creates a Host before rejecting its binding.
+						seed := fmt.Sprintf("k8s-node:%d:%s", reg.Cluster.ID, info.NodeUID)
+						if err := edges.HandleRegister(ctx, session.EdgeID, tunnel.HostInfo{Hostname: tc.name, Fingerprint: seed, HardwareFingerprint: seed}, "v0.19.0"); !errors.Is(err, errs.ErrInvalid) {
+							t.Fatalf("old registration did not reproduce the upgrade failure: %v", err)
+						}
+						if err := db.Where("hostname = ? AND id <> ?", tc.name, *healthyBefore.DeviceID).First(&orphan).Error; err != nil || orphan.NodeID != nil {
+							t.Fatalf("old registration did not leave an unused Host: %v", err)
+						}
+						for _, migrate := range migrations {
+							if err := migrate(db); err != nil {
+								t.Fatal(err)
+							}
+						}
+						if err := db.First(&orphan, orphan.ID).Error; err != nil || orphan.NodeID == nil {
+							t.Fatalf("Manager startup did not backfill orphan topology: %v", err)
+						}
+					}
 					register(t, &k8sbiz.EnrollResult{EdgeID: session.EdgeID}, tc.name, tc.uid)
+					if orphan.ID != 0 {
+						if err := db.First(&devicemodel.Device{}, orphan.ID).Error; !errors.Is(err, gorm.ErrRecordNotFound) {
+							t.Fatalf("recovery retained the duplicate Host: %v", err)
+						}
+						if err := db.First(&topologymodel.Node{}, *orphan.NodeID).Error; !errors.Is(err, gorm.ErrRecordNotFound) {
+							t.Fatalf("recovery retained orphan topology: %v", err)
+						}
+					}
 					bound, err := nodeRepo.GetNodeByClusterUID(ctx, reg.Cluster.ID, tc.uid)
 					if err != nil || bound.EdgeID == nil || *bound.EdgeID != session.EdgeID || bound.DeviceID == nil {
 						t.Fatalf("recovered node is not registered: %v", err)

@@ -13,6 +13,7 @@ import (
 	devicemodel "github.com/ongridio/ongrid/internal/manager/model/device"
 	edgemodel "github.com/ongridio/ongrid/internal/manager/model/edge"
 	model "github.com/ongridio/ongrid/internal/manager/model/k8s"
+	topologymodel "github.com/ongridio/ongrid/internal/manager/model/topology"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
 
@@ -60,19 +61,22 @@ func (r *Repo) MigrateNodeHostFingerprint(ctx context.Context, nodeID, edgeID ui
 		}
 		if err == nil {
 			// Earlier failed registrations can leave an unused row; never merge used Hosts.
-			if duplicate.CurrentEdgeID != nil || duplicate.NodeID != nil || duplicate.Hostname != node.NodeName ||
+			if duplicate.CurrentEdgeID != nil || duplicate.Hostname != node.NodeName ||
 				duplicate.Name != node.NodeName || duplicate.Description != "" || duplicate.Environment != nil || duplicate.Roles != 0 ||
 				!sameUserID(duplicate.UserID, host.UserID) {
 				return fmt.Errorf("%w: node UID fingerprint belongs to another host", errs.ErrConflict)
 			}
 			for _, table := range []string{"edges", "edge_devices", "k8s_nodes", "host_plugin_configs"} {
 				var count int64
-				if err := tx.Table(table).Where("device_id = ?", duplicate.ID).Count(&count).Error; err != nil {
+				if err := tx.Table(table).Clauses(clause.Locking{Strength: "UPDATE"}).Where("device_id = ?", duplicate.ID).Count(&count).Error; err != nil {
 					return err
 				}
 				if count != 0 {
 					return fmt.Errorf("%w: node UID fingerprint host has %s references", errs.ErrConflict, table)
 				}
+			}
+			if err := deleteUnusedHostTopology(tx, &duplicate); err != nil {
+				return err
 			}
 			if err := tx.Delete(&duplicate).Error; err != nil {
 				return err
@@ -80,6 +84,35 @@ func (r *Repo) MigrateNodeHostFingerprint(ctx context.Context, nodeID, edgeID ui
 		}
 		return tx.Model(&host).Update("fingerprint", fingerprint).Error
 	})
+}
+
+func deleteUnusedHostTopology(tx *gorm.DB, host *devicemodel.Device) error {
+	if host.NodeID == nil {
+		return nil
+	}
+	var node topologymodel.Node
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&node, *host.NodeID).Error; err != nil {
+		return err
+	}
+	// Startup backfills even failed-registration Hosts; retain any edited or used node.
+	if node.Type != string(topologymodel.NodeTypeDevice) || node.Name != host.Name || node.PropsJSON != "" || !node.CreatedAt.Equal(node.UpdatedAt) {
+		return fmt.Errorf("%w: node UID fingerprint host has edited topology", errs.ErrConflict)
+	}
+	for _, query := range []*gorm.DB{
+		tx.Unscoped().Model(&topologymodel.Relation{}).Where("src_id = ? OR dst_id = ?", node.ID, node.ID),
+		tx.Unscoped().Model(&devicemodel.Device{}).Where("node_id = ? AND id <> ?", node.ID, host.ID),
+		tx.Unscoped().Model(&model.Cluster{}).Where("node_id = ?", node.ID),
+	} {
+		var count int64
+		// Locking reads include references committed after an earlier MySQL snapshot.
+		if err := query.Clauses(clause.Locking{Strength: "UPDATE"}).Count(&count).Error; err != nil {
+			return err
+		}
+		if count != 0 {
+			return fmt.Errorf("%w: node UID fingerprint host has topology references", errs.ErrConflict)
+		}
+	}
+	return tx.Delete(&node).Error
 }
 
 func nodeHostFingerprint(clusterID uint64, identity string) string {
