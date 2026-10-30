@@ -72,6 +72,7 @@ type Repository interface {
 	UpsertNode(ctx context.Context, n *model.Node) error
 	DeleteDuplicateNodesByName(ctx context.Context, clusterID uint64, nodeName, keepUID string) error
 	UpdateNodeEdge(ctx context.Context, nodeID, edgeID uint64, deviceID *uint64, lastSeen time.Time) error
+	MigrateNodeHostFingerprint(ctx context.Context, nodeID, edgeID uint64, nodeUID string) error
 	UpsertWorkloads(ctx context.Context, items []*model.Workload) error
 	UpsertPods(ctx context.Context, items []*model.Pod) error
 	UpsertEvents(ctx context.Context, items []*model.Event) error
@@ -1553,6 +1554,11 @@ func (u *Usecase) HandleRegister(ctx context.Context, edgeID uint64, deviceID *u
 		}
 		if uid := strings.TrimSpace(info.NodeUID); uid != "" && uid != node.NodeUID {
 			return errors.Join(errs.ErrForbidden, fmt.Errorf("edge %d is not enrolled for node uid %q", edgeID, uid))
+		}
+		if deviceID == nil && node.DeviceID != nil && strings.TrimSpace(info.NodeUID) != "" && !strings.HasPrefix(node.NodeUID, "name:") {
+			if err := u.repo.MigrateNodeHostFingerprint(ctx, node.ID, edgeID, strings.TrimSpace(info.NodeUID)); err != nil {
+				return fmt.Errorf("migrate k8s node host identity: %w", err)
+			}
 		}
 		if err := u.repo.UpdateNodeEdge(ctx, node.ID, edgeID, deviceID, now); err != nil {
 			return fmt.Errorf("refresh k8s node edge: %w", err)

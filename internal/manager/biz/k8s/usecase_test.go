@@ -2460,6 +2460,10 @@ func (r *fakeRepo) DeleteDuplicateNodesByName(_ context.Context, clusterID uint6
 	return nil
 }
 
+func (r *fakeRepo) MigrateNodeHostFingerprint(context.Context, uint64, uint64, string) error {
+	return nil
+}
+
 func (r *fakeRepo) UpdateNodeEdge(_ context.Context, nodeID, edgeID uint64, deviceID *uint64, lastSeen time.Time) error {
 	if r.failUpdateNodeEdge {
 		return errors.New("update node edge failed")

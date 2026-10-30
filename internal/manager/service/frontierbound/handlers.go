@@ -277,6 +277,12 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 			}
 			c.setKubernetesController(canonicalEdgeID, true)
 		} else {
+			// Confirm node identity and migrate its legacy Host before fingerprint lookup.
+			if in.Kubernetes != nil && w.K8sRegistry != nil {
+				if err := w.K8sRegistry.HandleRegister(rpcCtx, canonicalEdgeID, nil, *in.Kubernetes); err != nil {
+					return nil, fmt.Errorf("register_edge: k8s node: %w", err)
+				}
+			}
 			if err := w.EdgeUC.HandleRegister(rpcCtx, canonicalEdgeID, in.HostInfo, in.AgentVersion); err != nil {
 				log.Error("frontierbound: HandleRegister",
 					slog.Uint64("edge_id", canonicalEdgeID),

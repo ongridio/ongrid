@@ -60,10 +60,40 @@ replacement, the Agent first persists that credential, then exits so Kubernetes
 restarts it with the new identity. This also works when the old tunnel connected
 before inventory deleted its Edge. The tunnel's reconnect loop is unchanged.
 
-There is no database migration. Reverting the code leaves newly issued Edge
+Credential recovery does not change the database schema. Reverting the code leaves newly issued Edge
 credentials and the credential file format readable by older Agents. An older
 Agent still needs a valid cached credential; rollback does not restore a deleted
 Edge identity.
+
+### Legacy Host fingerprint upgrade
+
+PR #521 (`a90d4b19`, 2026-10-16) added Node UID discovery but did not migrate
+the Host fingerprint of an existing name-based node. PR #528 (`9b0999f0`,
+2026-10-19) made the existing Edge-to-Host binding immutable, so the mismatch
+became a registration failure. v0.19.0 is the first release containing both.
+
+Before the generic Host lookup, Manager validates the authenticated node against
+its enrolled cluster, name and UID. For a current, mutually linked installation,
+it changes only the original Host's name-based fingerprint to the UID-based
+fingerprint in one transaction. Host ID, topology, metadata and plugin settings
+stay attached to the original row. Repeated registration is a no-op.
+
+A failed v0.19.0 registration can already have created a duplicate Host. The
+transaction may soft-delete that row only when it has no current installation,
+historical Edge or node references, plugin settings or user edits. Manager
+startup can have backfilled its topology node. That node is removed in the same
+transaction only if it still has the generated type/name, empty properties,
+unchanged timestamps, and no current or historical references from relations,
+other Hosts or clusters. Edited or used topology is retained.
+Reference checks use locking reads so MySQL's repeatable-read snapshots cannot
+hide a relation committed before the topology lock was acquired.
+An occupied fingerprint or inconsistent binding fails closed; the migration does
+not move an Edge to another Host. A database failure rolls back all changes.
+
+Upgrade Manager before restarting the node Agent. This is an on-registration
+data migration, without a schema change. After it succeeds, downgrading to an
+Agent that reports only a node name requires a coordinated identity rollback;
+do not downgrade the binary alone. Preserve the pre-upgrade database backup.
 
 ## Verification
 
@@ -82,3 +112,14 @@ the Agent, and checks that a neighboring healthy node keeps its Edge, secret
 hash, and device binding. The Kubernetes API is a local TLS test server.
 The same chain runs with an initial Manager 503 and with inventory arriving
 after Agent startup, including the restart request and loading the new file.
+Its healthy neighboring node starts with the Agent's actual name-based Host
+fingerprint and acquires its UID while preserving its Host ID. Store tests cover
+an earlier failed-registration orphan, repeated migration, conflicting bindings,
+an occupied fingerprint, preserved user settings and transaction rollback.
+The restart scenario first invokes the old registration order to create the
+orphan, reruns the production device/Edge/Kubernetes/topology migrations, then
+registers the node through the fixed path. It verifies that the original Host
+survives and both the duplicate Host and its generated topology are removed.
+A MySQL regression commits a topology relation while migration is in progress
+and verifies that the referenced Host and node are retained. CI runs it through
+the existing `ONGRID_TEST_MYSQL_DSN` test database configuration.
