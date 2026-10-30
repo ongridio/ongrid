@@ -21,14 +21,6 @@ ONGRID_EXTERNAL_MCP_ALLOWED_ORIGINS=
 
 PAT 只显示一次，保存到客户端私有配置，不写入项目、Skill 或对话。可从同一页面编辑名称、有效期和权限，保存后继续使用原 Token，客户端无需重配。不再使用时删除，Token 会从列表移除并立即失效。所有权限覆盖此 Ongrid 部署；普通成员不能创建或使用。账号禁用、管理员权限丢失、到期或删除均阻断后续请求与未执行任务。
 
-## 豆包工作
-
-在豆包工作打开「插件·技能·伙伴 → 插件 → + 添加 → 新建自定义插件」。服务器名称填 Ongrid，传输类型选 HTTP，服务器 URL 使用本页 MCP 服务地址。点击「自定义 Headers → + 添加」，名称填 `Authorization`，值填 `Bearer <PAT>`（Bearer 后保留一个空格），保存。新工作任务中通过输入框下方「插件」选择 Ongrid。
-
-先测试工具发现与小范围查询，再通过客户端技能入口导入本仓库 `integrations/external-ai/skills/` 中所需的 Skill 文件夹。是否需要打包为 zip 以实际客户端入口为准。不要把 Ongrid 内部向外连接 MCP 的管理页作为此服务地址。
-
-官方依据：[客户端插件帮助](https://www.doubao.com/work/docs/zh-cn/articles/705018132598)、[插件接入指南](https://open.doubao.com/document/doubao-developer-guide/plugin-integration-guide)。本次未做豆包账号实机验收。
-
 ## WorkBuddy
 
 在 WorkBuddy 打开「专家·技能·连接器 → 连接器 → 自定义连接器」。部分版本入口为「插件 → MCP 服务器 → 配置 MCP」；官方说明也提供用户级 `~/.workbuddy/mcp.json`。将下方 `ongrid` 项加入 `mcpServers`，保留已有服务，将占位符替换为独立 PAT。保存并启用后，在任务输入框「+ → 连接器」中选择 Ongrid。
@@ -50,7 +42,7 @@ timeout 为客户端连接选项，不代表后台 Operation 执行期限。实�
 
 官方依据：[客户端连接器](https://www.codebuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/Function-Description/Connector)、[MCP 配置](https://www.codebuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/Function-Description/MCP-Guide)、[连接器说明](https://open.workbuddy.cn/docs/connector)。本机 WorkBuddy 5.9.3 已验证连接及 51 个工具的发现，真实资源动作尚未验收；详见[验证记录](../testing/external-mcp.md#workbuddy-连接修复2026-10-29)。
 
-客户端必须能访问所填 HTTPS 地址并信任其证书；若从云端调用，该地址也需从云端可达。控制台「设置 → MCP 访问」点击页头「接入指南」按钮，在弹窗中查看两种客户端的指引；WorkBuddy 示例自动使用本部署的 MCP 地址，但始终保留 Token 占位符。
+客户端必须能访问所填 HTTPS 地址并信任其证书；若从云端调用，该地址也需从云端可达。控制台「设置 → MCP 访问」点击页头「接入指南」按钮，在弹窗中查看 WorkBuddy 接入指引；WorkBuddy 示例自动使用本部署的 MCP 地址，但始终保留 Token 占位符。
 
 ## 读写验证
 

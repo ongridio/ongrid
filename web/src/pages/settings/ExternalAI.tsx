@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { BookOpen, Copy, ExternalLink, KeyRound, Plus, RefreshCw } from 'lucide-react';
-import { Button, Card, Checkbox, Chip, EmptyStateCard, Input, Label, PaginationFooter, Select, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui';
+import { Button, Card, Checkbox, Chip, EmptyStateCard, Input, Label, PaginationFooter, Select } from '@/components/ui';
 import { Modal } from '@/components/Modal';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { useI18n } from '@/i18n/locale';
@@ -153,42 +153,23 @@ export default function ExternalAIPage() {
       <div className="space-y-1">
         <p className="text-text-muted">{tr('先在本页为客户端创建独立 Token，选择所需权限，并复制创建后显示的 Token。', 'Create a separate token for your client on this page, choose its permissions, and copy the token shown after creation.')}</p>
       </div>
-      <Tabs defaultValue="workbuddy" className="min-w-0">
-        <TabsList aria-label={tr('选择客户端', 'Choose a client')}>
-          <TabsTrigger value="workbuddy">WorkBuddy</TabsTrigger>
-          <TabsTrigger value="doubao">{tr('豆包工作', 'Doubao Work')}</TabsTrigger>
-        </TabsList>
-        <TabsContent value="workbuddy" className="min-w-0 space-y-3 pt-3">
-          <ol className="list-decimal space-y-2 pl-5 leading-relaxed">
-            <li>{tr('打开 WorkBuddy「专家·技能·连接器 → 连接器 → 自定义连接器」。部分版本入口为「插件 → MCP 服务器 → 配置 MCP」。', 'In WorkBuddy, open Experts · Skills · Connectors → Connectors → Custom connector. Some versions use Plugins → MCP servers → Configure MCP.')}</li>
-            <li>{tr('在 MCP JSON 配置中加入下方 ongrid 项，保留已有的其他服务；将 <Token> 替换为刚创建的 Token。', 'Add the ongrid entry below to your MCP JSON configuration and keep your existing servers. Replace <Token> with the token you just created.')}</li>
-            <li>{tr('保存并启用 Ongrid。在任务输入框的「+ → 连接器」中选中 Ongrid。', 'Save and enable Ongrid. Select it from + → Connectors in the task input.')}</li>
-          </ol>
-          <div className="min-w-0 space-y-2">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="font-medium">{tr('MCP JSON 配置', 'MCP JSON configuration')}</span>
-              <Button size="sm" aria-label={tr('复制 WorkBuddy 配置', 'Copy WorkBuddy configuration')} onClick={() => void copy(workbuddyConfig)}><Copy size={13} />{tr('复制配置', 'Copy configuration')}</Button>
-            </div>
-            <pre className="min-w-0 whitespace-pre-wrap break-all rounded-md border border-border bg-bg p-3 font-mono text-xs leading-relaxed"><code>{workbuddyConfig}</code></pre>
-            <p className="text-text-muted">{tr('Token 只在创建后显示一次。复制的配置仅含占位符，请在客户端内替换。', 'Tokens are shown only once after creation. The copied configuration contains a placeholder; replace it inside your client.')}</p>
+      <section className="min-w-0 space-y-3">
+        <h3 className="font-medium">WorkBuddy</h3>
+        <ol className="list-decimal space-y-2 pl-5 leading-relaxed">
+          <li>{tr('打开 WorkBuddy「专家·技能·连接器 → 连接器 → 自定义连接器」。部分版本入口为「插件 → MCP 服务器 → 配置 MCP」。', 'In WorkBuddy, open Experts · Skills · Connectors → Connectors → Custom connector. Some versions use Plugins → MCP servers → Configure MCP.')}</li>
+          <li>{tr('在 MCP JSON 配置中加入下方 ongrid 项，保留已有的其他服务；将 <Token> 替换为刚创建的 Token。', 'Add the ongrid entry below to your MCP JSON configuration and keep your existing servers. Replace <Token> with the token you just created.')}</li>
+          <li>{tr('保存并启用 Ongrid。在任务输入框的「+ → 连接器」中选中 Ongrid。', 'Save and enable Ongrid. Select it from + → Connectors in the task input.')}</li>
+        </ol>
+        <div className="min-w-0 space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="font-medium">{tr('MCP JSON 配置', 'MCP JSON configuration')}</span>
+            <Button size="sm" aria-label={tr('复制 WorkBuddy 配置', 'Copy WorkBuddy configuration')} onClick={() => void copy(workbuddyConfig)}><Copy size={13} />{tr('复制配置', 'Copy configuration')}</Button>
           </div>
-          <a className="og-resource-link inline-flex items-center gap-1" href="https://www.codebuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/Function-Description/Connector" target="_blank" rel="noreferrer noopener">{tr('WorkBuddy 官方文档', 'WorkBuddy documentation')}<ExternalLink size={12} aria-hidden="true" /></a>
-        </TabsContent>
-        <TabsContent value="doubao" className="min-w-0 space-y-3 pt-3">
-          <ol className="list-decimal space-y-2 pl-5 leading-relaxed">
-            <li>{tr('打开豆包工作「插件·技能·伙伴 → 插件 → + 添加 → 新建自定义插件」。', 'In Doubao Work, open Plugins · Skills · Partners → Plugins → + Add → Create custom plugin.')}</li>
-            <li>{tr('服务器名称填写 Ongrid，传输类型选择 HTTP，服务器 URL 填写下方地址。', 'Set the server name to Ongrid, choose HTTP as the transport, and enter the server URL below.')}</li>
-            <li>{tr('在「自定义 Headers」点击「+ 添加」，填写下方请求头；将 <Token> 替换为刚创建的 Token，Bearer 后保留一个空格。', 'Under Custom Headers, click + Add and enter the header below. Replace <Token> with your token and keep one space after Bearer.')}</li>
-            <li>{tr('保存插件。在新工作任务中点击输入框下方的「插件」，选择 Ongrid。', 'Save the plugin. In a new work task, click Plugins below the input and select Ongrid.')}</li>
-          </ol>
-          <dl className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 rounded-md border border-border bg-bg p-3">
-            <dt className="text-text-muted">{tr('服务器 URL', 'Server URL')}</dt><dd className="break-all font-mono">{endpoint}</dd>
-            <dt className="text-text-muted">{tr('请求头名称', 'Header name')}</dt><dd className="break-all font-mono">Authorization</dd>
-            <dt className="text-text-muted">{tr('请求头值', 'Header value')}</dt><dd className="break-all font-mono">{'Bearer <Token>'}</dd>
-          </dl>
-          <a className="og-resource-link inline-flex items-center gap-1" href="https://www.doubao.com/work/docs/zh-cn/articles/705018132598" target="_blank" rel="noreferrer noopener">{tr('豆包工作官方文档', 'Doubao Work documentation')}<ExternalLink size={12} aria-hidden="true" /></a>
-        </TabsContent>
-      </Tabs>
+          <pre className="min-w-0 whitespace-pre-wrap break-all rounded-md border border-border bg-bg p-3 font-mono text-xs leading-relaxed"><code>{workbuddyConfig}</code></pre>
+          <p className="text-text-muted">{tr('Token 只在创建后显示一次。复制的配置仅含占位符，请在客户端内替换。', 'Tokens are shown only once after creation. The copied configuration contains a placeholder; replace it inside your client.')}</p>
+        </div>
+        <a className="og-resource-link inline-flex items-center gap-1" href="https://www.codebuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/Function-Description/Connector" target="_blank" rel="noreferrer noopener">{tr('WorkBuddy 官方文档', 'WorkBuddy documentation')}<ExternalLink size={12} aria-hidden="true" /></a>
+      </section>
       <p className="border-t border-border pt-3 text-text-muted">{tr('使用客户端可访问且证书受信任的 HTTPS 地址。若请求从云端发出，该地址也需从云端可达。', 'Use an HTTPS address that your client can reach, with a trusted certificate. If requests run in the cloud, the address must also be reachable from there.')}</p>
       {notice && <p role="status" className="break-words text-text-muted">{notice}</p>}
       </div>

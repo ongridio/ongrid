@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 test.use({ storageState: { cookies: [], origins: [] } });
 
 for (const width of [390, 768, 1280, 1920]) for (const locale of ['zh-CN', 'en-US']) for (const theme of ['light', 'dark']) {
-  test(`MCP client guides fit ${width}px ${locale} ${theme}`, async ({ page }) => {
+  test(`WorkBuddy guide fits ${width}px ${locale} ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 });
     await page.addInitScript(({ locale, theme }) => {
       localStorage.setItem('ongrid-locale', locale);
@@ -27,7 +27,7 @@ for (const width of [390, 768, 1280, 1920]) for (const locale of ['zh-CN', 'en-U
     const guide = page.getByRole('dialog', { name: title });
     await expect(trigger).toBeEnabled();
     await expect(guide).toHaveCount(0);
-    await expect(page.getByRole('tab', { name: 'WorkBuddy', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'WorkBuddy', exact: true })).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
     await page.screenshot({ path: test.info().outputPath('page-collapsed.png'), fullPage: true });
     await expect(page.getByText(name, { exact: true })).toBeVisible();
@@ -36,36 +36,31 @@ for (const width of [390, 768, 1280, 1920]) for (const locale of ['zh-CN', 'en-U
     await trigger.focus();
     await page.keyboard.press('Enter');
     await expect(guide).toBeVisible();
-    for (const client of ['WorkBuddy', locale === 'zh-CN' ? '豆包工作' : 'Doubao Work']) {
-      await guide.getByRole('tab', { name: client, exact: true }).click();
-      const panel = guide.getByRole('tabpanel', { name: client, exact: true });
-      await expect(panel).toContainText(endpoint);
-      await expect(panel).toContainText('Bearer <Token>');
-      const layout = await guide.evaluate(element => {
-        const rect = element.getBoundingClientRect();
-        const content = element.parentElement!;
-        return {
-          guideOverflow: element.scrollWidth - element.clientWidth,
-          contentOverflow: content.scrollWidth - content.clientWidth,
-          documentOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
-          contained: [...element.querySelectorAll('button, a, pre, dl, dt, dd, li')].filter(node => node.getClientRects().length).every(node => {
-            const bounds = node.getBoundingClientRect();
-            return bounds.left >= rect.left && bounds.right <= rect.right + 1;
-          }),
-          codeOverflow: [...element.querySelectorAll('pre, dd')].filter(node => node.getClientRects().length).map(node => node.scrollWidth - node.clientWidth),
-        };
-      });
-      expect(layout.guideOverflow).toBeLessThanOrEqual(1);
-      expect(layout.contentOverflow).toBeLessThanOrEqual(1);
-      expect(layout.documentOverflow).toBeLessThanOrEqual(1);
-      expect(layout.contained).toBe(true);
-      expect(layout.codeOverflow.every(overflow => overflow <= 1)).toBe(true);
-      await guide.screenshot({ path: test.info().outputPath(`${client === 'WorkBuddy' ? 'workbuddy' : 'doubao'}.png`) });
-    }
-    const firstTab = guide.getByRole('tab', { name: 'WorkBuddy', exact: true });
-    await firstTab.focus();
-    await page.keyboard.press('ArrowRight');
-    await expect(guide.getByRole('tab', { name: locale === 'zh-CN' ? '豆包工作' : 'Doubao Work', exact: true })).toBeFocused();
+    await expect(guide.getByRole('heading', { name: 'WorkBuddy', exact: true })).toBeVisible();
+    await expect(guide).not.toContainText(/豆包|Doubao/);
+    await expect(guide.getByRole('tab')).toHaveCount(0);
+    await expect(guide).toContainText(endpoint);
+    await expect(guide).toContainText('Bearer <Token>');
+    const layout = await guide.evaluate(element => {
+      const rect = element.getBoundingClientRect();
+      const content = element.parentElement!;
+      return {
+        guideOverflow: element.scrollWidth - element.clientWidth,
+        contentOverflow: content.scrollWidth - content.clientWidth,
+        documentOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        contained: [...element.querySelectorAll('button, a, pre, dl, dt, dd, li')].filter(node => node.getClientRects().length).every(node => {
+          const bounds = node.getBoundingClientRect();
+          return bounds.left >= rect.left && bounds.right <= rect.right + 1;
+        }),
+        codeOverflow: [...element.querySelectorAll('pre, dd')].filter(node => node.getClientRects().length).map(node => node.scrollWidth - node.clientWidth),
+      };
+    });
+    expect(layout.guideOverflow).toBeLessThanOrEqual(1);
+    expect(layout.contentOverflow).toBeLessThanOrEqual(1);
+    expect(layout.documentOverflow).toBeLessThanOrEqual(1);
+    expect(layout.contained).toBe(true);
+    expect(layout.codeOverflow.every(overflow => overflow <= 1)).toBe(true);
+    await guide.screenshot({ path: test.info().outputPath('workbuddy.png') });
     await page.keyboard.press('Escape');
     await expect(guide).toHaveCount(0);
     await expect(trigger).toBeFocused();

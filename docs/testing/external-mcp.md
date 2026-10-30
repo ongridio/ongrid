@@ -186,3 +186,9 @@ PAT 设置页与操作确认页共 14 项前端测试通过；最终前端镜像
 相关 MCP 与审批包的 Go race 检查通过，新增取消/清理/回滚测试及既有审批恢复测试通过。确认页优先展示 Operation 的“已取消”状态，4 项前端单元测试通过；17 项 Chromium 测试通过，覆盖 390/768/1280/1920px、中英文及深浅主题，并实看取消状态的 light/dark 截图。`npm run build`、`npm run lint`（0 error、43 条既有 warning）和 `git diff --check` 通过。
 
 本轮重跑 `go test ./...` 仍有既有 macOS Edge 平台构建及 `TestValidateEntry_DestWhitelist` 路径大小写问题。未重跑 MySQL、外部客户端、全仓库 race 或生产验收；未更新部署。
+
+## 接入指南暂时仅保留 WorkBuddy（2026-10-30）
+
+豆包工作接入尚未验证通过，已从控制台接入指南和安装文档中移除其配置说明、入口与官方链接。指南弹窗直接展示 WorkBuddy，不再提供客户端切换；WorkBuddy 配置、复制及关闭行为保持不变。
+
+10 项前端单元测试、16 项 Chromium 回归、`npm run build`、`npm run lint`（0 error、43 条既有 warning）及 `git diff --check` 通过。浏览器覆盖 390/768/1280/1920px、中英文、深浅主题、长地址、键盘开关弹窗和焦点返回，并实看页面及弹窗的 light/dark 截图。本轮仅调整指南，未重跑后端或真实客户端接入，未更新部署。
