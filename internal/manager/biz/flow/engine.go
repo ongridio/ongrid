@@ -3,7 +3,8 @@
 // anything; only agent-node interiors are non-deterministic.
 //
 // Scheduling semantics (MVP):
-//   - execution starts at every trigger node;
+//   - execution starts at the selected trigger node (or matching nodes
+//     when no node ID is specified);
 //   - when a node finishes it fires ONE control port; every edge on
 //     that port activates its target (fan-out runs branches
 //     concurrently, capped);
@@ -66,14 +67,14 @@ type runState struct {
 // Execute runs the graph to completion and returns the terminal run
 // status. It is synchronous — the usecase calls it from a goroutine.
 //
-// entryType scopes which trigger nodes start the run: "" starts every
-// trigger (legacy manual behaviour), a specific type (e.g.
-// trigger.alert_fired) starts only matching triggers so a flow with both
-// a manual and an alert trigger doesn't double-fire the manual branch on
-// an alert.
-func (e *Engine) Execute(ctx context.Context, run *model.FlowRun, g *Graph, entryType string) (status string, runErr error) {
+// entryType scopes the trigger type; entryNodeID selects one matching
+// trigger for an event. An empty node ID preserves manual-run behavior.
+func (e *Engine) Execute(ctx context.Context, run *model.FlowRun, g *Graph, entryType, entryNodeID string) (status string, runErr error) {
 	ctx, span := flowTracer.Start(ctx, "flow.Engine.Execute",
-		trace.WithAttributes(attribute.String("flow.entry_type", entryTypeLabel(entryType))),
+		trace.WithAttributes(
+			attribute.String("flow.entry_type", entryTypeLabel(entryType)),
+			attribute.String("flow.entry_node_id", entryNodeID),
+		),
 	)
 	defer func() {
 		span.SetAttributes(attribute.String("flow.status", status))
@@ -90,12 +91,15 @@ func (e *Engine) Execute(ctx context.Context, run *model.FlowRun, g *Graph, entr
 	all := g.Triggers()
 	triggers := all[:0:0]
 	for _, t := range all {
-		if entryType == "" || t.Type == entryType {
+		if (entryType == "" || t.Type == entryType) && (entryNodeID == "" || t.ID == entryNodeID) {
 			triggers = append(triggers, t)
 		}
 	}
 	if len(triggers) == 0 {
-		return model.RunStatusFailed, fmt.Errorf("graph has no %s trigger node", entryTypeLabel(entryType))
+		if entryNodeID == "" {
+			return model.RunStatusFailed, fmt.Errorf("graph has no %s trigger node", entryTypeLabel(entryType))
+		}
+		return model.RunStatusFailed, fmt.Errorf("graph has no %s trigger node %q", entryTypeLabel(entryType), entryNodeID)
 	}
 
 	var trigger map[string]any
