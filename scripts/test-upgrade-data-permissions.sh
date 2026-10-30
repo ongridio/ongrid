@@ -3,6 +3,7 @@ set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 permissions_lib="$repo_root/deploy/install/data-permissions.sh"
+install_script="$repo_root/deploy/install/install.sh"
 upgrade_script="$repo_root/deploy/install/upgrade.sh"
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT
@@ -95,6 +96,63 @@ grep -Fqx "chown 65532:65532 $data_dir/chat-attachments" "$command_log" \
 if grep -Eq '^(chown|chmod) -R ' "$command_log"; then
     fail "normal preparation recursively traversed a data directory"
 fi
+
+# Execute the installer's data setup without root or a running Docker daemon.
+install_setup="$tmp_dir/install-data-setup.sh"
+sed -n '/^# ---------- host data dirs /,/^export ONGRID_DATA_DIR ONGRID_LOG_DIR$/p' \
+    "$install_script" >"$install_setup"
+[[ -s "$install_setup" ]] || fail "could not extract install data setup"
+log_info() { :; }
+log_warn() { :; }
+log_error() { printf '%s\n' "$*" >&2; }
+ongrid_prepare_pcap_parser_auth() { :; }
+package_dir="$tmp_dir/package"
+model_dir="embeddings/fast-bge-small-zh-v1.5"
+mkdir -p "$package_dir/$model_dir"
+printf 'bundled model\n' >"$package_dir/$model_dir/model_optimized.onnx"
+
+for scenario in fresh reinstall owner-failure repair-failure; do
+    : >"$command_log"
+    chown_should_fail=0
+    stat_owner_state=expected
+    case "$scenario" in
+        owner-failure) chown_should_fail=1; stat_owner_state=wrong ;;
+        repair-failure) chown_should_fail=1 ;;
+    esac
+    # Do not put the subshell in an `if`: that disables the installer's errexit.
+    set +e
+    (
+        set -e
+        SCRIPT_DIR="$package_dir"
+        ONGRID_DATA_DIR="$tmp_dir/install data"
+        ONGRID_LOG_DIR="$tmp_dir/install log"
+        data_dir="$ONGRID_DATA_DIR"
+        source "$install_setup"
+    ) >"$tmp_dir/install-$scenario.log" 2>&1
+    install_rc=$?
+    set -e
+    if [[ "$scenario" == *-failure ]]; then
+        [[ "$install_rc" != 0 ]] || fail "install ignored $scenario"
+        case "$scenario" in
+            owner-failure) expected_error='could not set owner' ;;
+            repair-failure) expected_error='could not recursively set owner' ;;
+        esac
+        grep -Fq "$expected_error" "$tmp_dir/install-$scenario.log" \
+            || fail "install failed for an unexpected reason: $scenario"
+        continue
+    fi
+    [[ "$install_rc" == 0 ]] || fail "install data setup failed: $scenario"
+    [[ -d "$tmp_dir/install data/chat-attachments" ]] \
+        || fail "install did not create the chat attachment directory"
+    grep -Fqx "chown 65532:65532 $tmp_dir/install data/chat-attachments" "$command_log" \
+        || fail "install did not initialize the chat attachment owner"
+    grep -Fqx "chown -R 65532:65532 $tmp_dir/install data/chat-attachments" "$command_log" \
+        || fail "install did not repair existing chat attachments"
+    grep -Fqx "chown -R 65532:65532 $tmp_dir/install data/embeddings" "$command_log" \
+        || fail "install did not repair the staged embedding model owner"
+    grep -Fqx 'bundled model' "$tmp_dir/install data/$model_dir/model_optimized.onnx" \
+        || fail "install did not preserve the bundled embedding model"
+done
 
 chown_should_fail=1
 stat_owner_state=expected
