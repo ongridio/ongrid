@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -69,16 +70,25 @@ func TestKubernetesNodeCredentialRecoveryChain(t *testing.T) {
 				t.Fatal(err)
 			}
 			clusterUID := "physical-cluster"
-			register := func(cred *k8sbiz.EnrollResult, name, uid string) {
+			register := func(t *testing.T, cred *k8sbiz.EnrollResult, name, uid string) {
 				t.Helper()
-				if err := edges.HandleRegister(ctx, cred.EdgeID, tunnel.HostInfo{Hostname: name, Fingerprint: name}, "test"); err != nil {
+				info := tunnel.KubernetesInfo{ClusterID: reg.Cluster.ID, ClusterUID: clusterUID, Role: "node", NodeName: name, NodeUID: uid}
+				if err := nodes.HandleRegister(ctx, cred.EdgeID, nil, info); err != nil {
+					t.Fatal(err)
+				}
+				identity := uid
+				if identity == "" {
+					identity = "name:" + name
+				}
+				seed := fmt.Sprintf("k8s-node:%d:%s", reg.Cluster.ID, identity)
+				if err := edges.HandleRegister(ctx, cred.EdgeID, tunnel.HostInfo{Hostname: name, Fingerprint: seed, HardwareFingerprint: seed}, "test"); err != nil {
 					t.Fatal(err)
 				}
 				edge, err := edgeRepo.GetByID(ctx, cred.EdgeID)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := nodes.HandleRegister(ctx, cred.EdgeID, edge.DeviceID, tunnel.KubernetesInfo{ClusterID: reg.Cluster.ID, ClusterUID: clusterUID, Role: "node", NodeName: name, NodeUID: uid}); err != nil {
+				if err := nodes.HandleRegister(ctx, cred.EdgeID, edge.DeviceID, info); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -88,11 +98,11 @@ func TestKubernetesNodeCredentialRecoveryChain(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				register(out, name, uid)
+				register(t, out, name, uid)
 				return out
 			}
 			old := enroll("node-a", "uid-old")
-			healthy := enroll("node-b", "uid-healthy")
+			healthy := enroll("node-b", "")
 			healthyBefore, err := edgeRepo.GetByID(ctx, healthy.EdgeID)
 			if err != nil {
 				t.Fatal(err)
@@ -211,7 +221,7 @@ func TestKubernetesNodeCredentialRecoveryChain(t *testing.T) {
 					if (session.EdgeID != tc.cached.EdgeID) != tc.replaced || info.NodeUID != tc.uid {
 						t.Fatalf("unexpected recovered identity: edge=%d nodeUID=%q", session.EdgeID, info.NodeUID)
 					}
-					register(&k8sbiz.EnrollResult{EdgeID: session.EdgeID}, tc.name, tc.uid)
+					register(t, &k8sbiz.EnrollResult{EdgeID: session.EdgeID}, tc.name, tc.uid)
 					bound, err := nodeRepo.GetNodeByClusterUID(ctx, reg.Cluster.ID, tc.uid)
 					if err != nil || bound.EdgeID == nil || *bound.EdgeID != session.EdgeID || bound.DeviceID == nil {
 						t.Fatalf("recovered node is not registered: %v", err)

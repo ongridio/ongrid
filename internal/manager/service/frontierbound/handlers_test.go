@@ -326,6 +326,28 @@ func TestInstall_RegisterEdgeRejectsMissingAuthenticatedClientID(t *testing.T) {
 	}
 }
 
+type rejectingNodeRegistry struct{ fakeK8sRegistry }
+
+func (rejectingNodeRegistry) HandleRegister(context.Context, uint64, *uint64, tunnel.KubernetesInfo) error {
+	return errors.New("node identity rejected")
+}
+
+func TestInstall_RegisterNodeValidatesIdentityBeforeHostLookup(t *testing.T) {
+	fs, _, _ := installAndDispatch(t, Wiring{K8sRegistry: rejectingNodeRegistry{}})
+	body, err := json.Marshal(tunnel.RegisterEdgeRequest{
+		HostInfo:   tunnel.HostInfo{Hostname: "node-a"},
+		Kubernetes: &tunnel.KubernetesInfo{ClusterID: 3, Role: "node", NodeName: "node-a", NodeUID: "uid-a"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rsp := &fakeResp{}
+	fs.rpcs[tunnel.MethodRegisterEdge](t.Context(), &fakeReq{data: body, clientID: 42}, rsp)
+	if rsp.err == nil || !strings.Contains(rsp.err.Error(), "node identity rejected") {
+		t.Fatalf("host lookup ran before node validation: %v", rsp.err)
+	}
+}
+
 func TestInstall_GetPluginConfigs_UsesResolvedDeviceIDAsWireLabelID(t *testing.T) {
 	fs := newFakeService()
 	c := newWithService(fs, slog.Default())
