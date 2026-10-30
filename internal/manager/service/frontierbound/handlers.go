@@ -3,6 +3,7 @@ package frontierbound
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -12,6 +13,7 @@ import (
 	edgebiz "github.com/ongridio/ongrid/internal/manager/biz/edge"
 	bizlogs "github.com/ongridio/ongrid/internal/manager/biz/logs"
 	metricbiz "github.com/ongridio/ongrid/internal/manager/biz/metric"
+	pkgpromwrite "github.com/ongridio/ongrid/internal/pkg/promwrite"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
 
@@ -458,6 +460,14 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 			return json.Marshal(tunnel.PushHostMetricsResponse{Accepted: 0})
 		}
 		if err := w.MetricIngester.Push(rpcCtx, deviceID, in.Points); err != nil {
+			// Defensive symmetry with push_prom_samples: today's
+			// MetricIngester (metric.IngestService / the no-op host
+			// ingester) never returns a remote_write error, but if it is
+			// ever backed by Prom again a permanent rejection must be
+			// confirmed-and-dropped instead of retried by the Edge.
+			if dropPermanentPromSamples(log, err, canonicalEdgeID, "host_metrics", len(in.Points)) {
+				return json.Marshal(tunnel.PushHostMetricsResponse{Accepted: uint32(len(in.Points))})
+			}
 			log.Warn("frontierbound: ingest push",
 				slog.Uint64("edge_id", canonicalEdgeID),
 				slog.Uint64("transport_edge_id", edgeID),
@@ -513,6 +523,9 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 				return json.Marshal(tunnel.PushPromSamplesResponse{Accepted: 0})
 			}
 			if err := w.PromIngester.PushKubernetes(rpcCtx, clusterID, in.Source, in.Samples); err != nil {
+				if dropPermanentPromSamples(log, err, canonicalEdgeID, in.Source, n) {
+					return json.Marshal(tunnel.PushPromSamplesResponse{Accepted: n})
+				}
 				log.Warn("frontierbound: k8s prom ingest push",
 					slog.Uint64("edge_id", canonicalEdgeID),
 					slog.Uint64("transport_edge_id", edgeID),
@@ -530,6 +543,9 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 			clusterID := lookupK8sControllerCluster(rpcCtx, w.K8sRegistry, canonicalEdgeID, log)
 			if clusterID != 0 {
 				if err := w.PromIngester.PushKubernetes(rpcCtx, clusterID, in.Source, in.Samples); err != nil {
+					if dropPermanentPromSamples(log, err, canonicalEdgeID, in.Source, n) {
+						return json.Marshal(tunnel.PushPromSamplesResponse{Accepted: n})
+					}
 					log.Warn("frontierbound: k8s prom ingest push",
 						slog.Uint64("edge_id", canonicalEdgeID),
 						slog.Uint64("transport_edge_id", edgeID),
@@ -553,6 +569,9 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 			return json.Marshal(tunnel.PushPromSamplesResponse{Accepted: 0})
 		}
 		if err := w.PromIngester.Push(rpcCtx, deviceID, in.Source, in.Samples); err != nil {
+			if dropPermanentPromSamples(log, err, canonicalEdgeID, in.Source, n) {
+				return json.Marshal(tunnel.PushPromSamplesResponse{Accepted: n})
+			}
 			log.Warn("frontierbound: prom ingest push",
 				slog.Uint64("edge_id", canonicalEdgeID),
 				slog.Uint64("transport_edge_id", edgeID),
@@ -742,6 +761,42 @@ func isKubernetesControllerRole(role string) bool {
 	default:
 		return false
 	}
+}
+
+// dropPermanentPromSamples reports whether a failed ingest must be
+// confirmed-and-discarded rather than surfaced as an RPC error.
+//
+// Permanent rejections (4xx such as Prometheus 400 "out of order sample"
+// for samples older than storage.tsdb.out_of_order_time_window) can never
+// be satisfied by replaying the same bytes: the batch is already too old.
+// The Edge only advances its per-source snapshot cursor once the RPC
+// reports the batch as accepted, so returning an error here makes every
+// MetricsInterval re-encode and re-send the identical stale snapshot
+// forever. Accepting it with Accepted=n and a nil error is the same
+// contract the "Prom disabled" branch of push_prom_samples already relies
+// on ("Quiet drop, return Accepted=n so the edge does not retry"); the
+// difference is that this path discards real data, so it logs at WARN —
+// that WARN is the primary signal for the resulting data gap.
+//
+// Retryable failures (5xx, 408, 429, transport timeouts) are NOT dropped
+// here: callers keep the previous behaviour of returning the error so the
+// Edge retries on its next tick.
+//
+// The boolean is computed with errors.As rather than IsPermanent because
+// the WARN wants the structured status/body.
+func dropPermanentPromSamples(log *slog.Logger, err error, edgeID uint64, source string, n int) bool {
+	var perr *pkgpromwrite.PermanentError
+	if !errors.As(err, &perr) {
+		return false
+	}
+	log.Warn("frontierbound: prom samples dropped — permanent remote_write rejection (batch can never be accepted; confirm to the Edge to stop the replay loop)",
+		slog.Uint64("edge_id", edgeID),
+		slog.String("source", source),
+		slog.Int("n", n),
+		slog.Int("status", perr.Status),
+		slog.String("body", perr.Body),
+	)
+	return true
 }
 
 // NotifyPluginConfigsChanged pushes a reload notification to one edge.

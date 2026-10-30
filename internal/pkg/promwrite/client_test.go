@@ -3,6 +3,8 @@ package promwrite
 import (
 	"context"
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"math"
@@ -10,6 +12,7 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/golang/snappy"
 	"google.golang.org/protobuf/encoding/protowire"
@@ -163,6 +166,7 @@ type fakeServer struct {
 	gotSamples     []decodedSample
 	requests       int
 	status         int
+	body           string // optional response body emitted with status
 }
 
 func newFakeServer(t *testing.T) (*httptest.Server, *fakeServer) {
@@ -196,6 +200,9 @@ func newFakeServer(t *testing.T) (*httptest.Server, *fakeServer) {
 		}
 		fs.gotSamples = samples
 		w.WriteHeader(fs.status)
+		if fs.body != "" {
+			_, _ = w.Write([]byte(fs.body))
+		}
 	}))
 	return srv, fs
 }
@@ -322,5 +329,119 @@ func TestClient_Write_BatchOfThree(t *testing.T) {
 	}
 	if got := len(fs.gotSamples); got != 3 {
 		t.Errorf("got %d samples, want 3", got)
+	}
+}
+
+// oneSample is the minimal batch used by the failure-classification tests.
+func oneSample() []Sample {
+	return []Sample{{
+		Labels: []Label{{Name: "__name__", Value: "x"}},
+		Value:  1,
+		TsMs:   1,
+	}}
+}
+
+// status-400 is the incident case: Prometheus answers 400 "out of order
+// sample" for samples older than storage.tsdb.out_of_order_time_window.
+// Retrying the identical batch can never succeed, so the error must be
+// classified permanent; 408/429 are 4xx but transient by definition, and
+// 5xx / transport failures may recover on their own.
+func TestClient_Write_PermanentClassification(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		status    int
+		body      string
+		permanent bool
+	}{
+		{"400 out of order", http.StatusBadRequest, "out of order sample", true},
+		{"401 unauthorized", http.StatusUnauthorized, "unauthorized", true},
+		{"404 wrong endpoint", http.StatusNotFound, "not found", true},
+		{"408 request timeout", http.StatusRequestTimeout, "timeout", false},
+		{"429 too many requests", http.StatusTooManyRequests, "slow down", false},
+		{"500 internal", http.StatusInternalServerError, "boom", false},
+		{"503 unavailable", http.StatusServiceUnavailable, "Service Unavailable", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, fs := newFakeServer(t)
+			defer srv.Close()
+			fs.status = tc.status
+			fs.body = tc.body
+
+			c := New(srv.URL, slog.Default())
+			err := c.Write(context.Background(), oneSample())
+			if err == nil {
+				t.Fatalf("Write() = nil, want error for status %d", tc.status)
+			}
+			if got := IsPermanent(err); got != tc.permanent {
+				t.Fatalf("IsPermanent(%d) = %v, want %v", tc.status, got, tc.permanent)
+			}
+
+			var perr *PermanentError
+			found := errors.As(err, &perr)
+			if !tc.permanent {
+				if found {
+					t.Fatalf("retryable status %d produced a PermanentError", tc.status)
+				}
+				return
+			}
+			if !found {
+				t.Fatalf("errors.As(*PermanentError) failed for status %d", tc.status)
+			}
+			if perr.Status != tc.status {
+				t.Errorf("Status = %d, want %d", perr.Status, tc.status)
+			}
+			if perr.Body != tc.body {
+				t.Errorf("Body = %q, want %q", perr.Body, tc.body)
+			}
+			// The wrapped form is what upper layers hand around, so the
+			// predicate must survive %w chains.
+			if !IsPermanent(fmt.Errorf("promwrite: write failed: %w", err)) {
+				t.Error("IsPermanent() lost the classification through fmt.Errorf %w")
+			}
+		})
+	}
+}
+
+// A transport failure (deadline exceeded, connection refused) is retryable:
+// the receiver never produced a verdict, so the batch may still be accepted.
+func TestClient_Write_TransportFailureIsRetryable(t *testing.T) {
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer slow.Close()
+
+	slowClient := NewWithHTTPClient(slow.URL, &http.Client{Timeout: 10 * time.Millisecond}, slog.Default())
+	if err := slowClient.Write(context.Background(), oneSample()); err == nil {
+		t.Fatal("Write() = nil, want a client timeout error")
+	} else if IsPermanent(err) {
+		t.Fatalf("timeout classified as permanent: %v", err)
+	}
+
+	// Connection refused: the receiver is unreachable, not refusing data.
+	dead, _ := newFakeServer(t)
+	deadURL := dead.URL
+	dead.Close()
+	if err := New(deadURL, slog.Default()).Write(context.Background(), oneSample()); err == nil {
+		t.Fatal("Write() = nil, want a connection error")
+	} else if IsPermanent(err) {
+		t.Fatalf("network error classified as permanent: %v", err)
+	}
+}
+
+// Probe shares post(), so a permanent URL/auth rejection must classify the
+// same way there (callers surface the connection-test verdict to the admin).
+func TestClient_Probe_PermanentClassification(t *testing.T) {
+	srv, fs := newFakeServer(t)
+	defer srv.Close()
+	fs.status = http.StatusUnauthorized
+	fs.body = "unauthorized"
+
+	err := New(srv.URL, slog.Default()).Probe(context.Background())
+	if err == nil {
+		t.Fatal("Probe() = nil, want error")
+	}
+	if !IsPermanent(err) {
+		t.Fatalf("Probe() 401 not classified permanent: %v", err)
 	}
 }

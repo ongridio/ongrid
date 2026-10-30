@@ -40,6 +40,59 @@ type EndpointResolver interface {
 	ResolveWriteURL(ctx context.Context) (string, error)
 }
 
+// PermanentError is a remote_write rejection that replaying the same
+// payload can never fix — the receiver understood the request and refused
+// the data. The canonical case is Prometheus answering 400 "out of order
+// sample" for samples older than storage.tsdb.out_of_order_time_window:
+// the batch is already too old, so every retry fails identically.
+//
+// Callers on the confirm-and-drop side of an RPC boundary (see
+// manager/service/frontierbound) must use this distinction: a permanent
+// rejection has to be acknowledged and discarded, otherwise a client that
+// only advances on success replays the same stale batch forever.
+//
+// Use errors.As to recover the status, or IsPermanent for the bare check.
+type PermanentError struct {
+	// URL is the resolved remote_write endpoint that rejected the batch.
+	URL string
+	// Status is the HTTP status code the receiver returned.
+	Status int
+	// Body is the truncated (max 1KiB) response body, kept for diagnosis.
+	Body string
+}
+
+// Error mirrors the message of a plain non-2xx failure so log greps and
+// dashboards keep working after the split into permanent/retryable.
+func (e *PermanentError) Error() string {
+	return fmt.Sprintf("promwrite: %s returned %d: %s", e.URL, e.Status, e.Body)
+}
+
+// IsPermanent reports whether err is, or wraps, a PermanentError.
+func IsPermanent(err error) bool {
+	var perr *PermanentError
+	return errors.As(err, &perr)
+}
+
+// permanentStatus classifies an HTTP status returned by a remote_write
+// receiver:
+//
+//   - 4xx is permanent. The request was well-formed and rejected on its
+//     content (out of order, malformed label set, bad auth). Re-sending the
+//     same bytes produces the same answer, so the writer must drop it.
+//   - 408 (request timeout) and 429 (too many requests) are 4xx but
+//     explicitly transient by definition, matching the prometheus/common
+//     remote_write client, which retries both. They stay retryable here.
+//   - everything else (5xx, 3xx, and network/timeout errors that never
+//     reach this function) stays retryable: the receiver or the path may
+//     recover on its own.
+func permanentStatus(code int) bool {
+	switch code {
+	case http.StatusRequestTimeout, http.StatusTooManyRequests:
+		return false
+	}
+	return code >= 400 && code < 500
+}
+
 // Client posts samples to the configured Prometheus instance. It is safe
 // for concurrent use.
 type Client struct {
@@ -123,6 +176,10 @@ func newClient(r EndpointResolver, hc *http.Client, log *slog.Logger) *Client {
 // internal backoff (matches the prometheus/common remote_write client
 // behaviour).
 //
+// Callers must inspect the failure before retrying: a *PermanentError
+// (see IsPermanent) means the batch was refused on its content and must be
+// dropped instead of re-sent.
+//
 // Empty samples slice is a no-op (returns nil) so callers don't have to
 // branch.
 func (c *Client) Write(ctx context.Context, samples []Sample) error {
@@ -184,5 +241,8 @@ func (c *Client) post(ctx context.Context, raw []byte, sampleCount int) error {
 		slog.Int("samples", sampleCount),
 		slog.String("body", string(body)),
 	)
+	if permanentStatus(resp.StatusCode) {
+		return &PermanentError{URL: url, Status: resp.StatusCode, Body: string(body)}
+	}
 	return fmt.Errorf("promwrite: %s returned %d: %s", url, resp.StatusCode, string(body))
 }
