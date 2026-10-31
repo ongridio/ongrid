@@ -310,7 +310,7 @@ grep -Fq 'ongrid_restore_existing_stack "$INSTALL_DIR"' "$upgrade_script" \
     || fail "upgrade.sh does not restore the existing stack after preparation failure"
 grep -Fq 'ongrid_restore_edge_directory "$INSTALL_DIR" "$EDGE_BACKUP_DIR"' "$upgrade_script" \
     || fail "upgrade.sh does not restore the previous Edge directory after a post-swap failure"
-grep -Fq 'upgrade health check failed: ongrid did not become healthy within 90s' "$upgrade_script" \
+grep -Fq 'upgrade health check failed: ongrid or CMDB did not become healthy within 90s' "$upgrade_script" \
     || fail "upgrade.sh still reports a failed health check as a warning"
 grep -Fq 'manual Edge rollback: rm -rf --' "$upgrade_script" \
     || fail "upgrade.sh does not print an actionable Edge rollback command"

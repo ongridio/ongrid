@@ -1,0 +1,344 @@
+[
+ {
+  "desc": "The AMI launch index, which can be used to find this instance in the launch group.",
+  "example": "",
+  "name": "amiLaunchIndex",
+  "type": "Integer"
+ },
+ {
+  "desc": "The architecture of the image.",
+  "example": "i386",
+  "name": "architecture",
+  "type": "String"
+ },
+ {
+  "desc": "Any block device mapping entries for the instance.",
+  "example": "",
+  "name": "blockDeviceMapping",
+  "type": "Array of InstanceBlockDeviceMapping objects"
+ },
+ {
+  "desc": "The boot mode that was specified by the AMI. If the value is uefi-preferred, the AMI supports both UEFI and Legacy BIOS. The currentInstanceBootMode parameter is the boot mode that is used to boot the instance at launch or start. For more information, see Boot modes in the Amazon EC2 User Guide.",
+  "example": "legacy-bios",
+  "name": "bootMode",
+  "type": "String"
+ },
+ {
+  "desc": "The ID of the Capacity Reservation.",
+  "example": "",
+  "name": "capacityReservationId",
+  "type": "String"
+ },
+ {
+  "desc": "Information about the Capacity Reservation targeting option.",
+  "example": "",
+  "name": "capacityReservationSpecification",
+  "type": "CapacityReservationSpecificationResponse object"
+ },
+ {
+  "desc": "The idempotency token you provided when you launched the instance, if applicable.",
+  "example": "",
+  "name": "clientToken",
+  "type": "String"
+ },
+ {
+  "desc": "The CPU options for the instance.",
+  "example": "",
+  "name": "cpuOptions",
+  "type": "CpuOptions object"
+ },
+ {
+  "desc": "The boot mode that is used to boot the instance at launch or start. For more information, see Boot modes in the Amazon EC2 User Guide.",
+  "example": "legacy-bios",
+  "name": "currentInstanceBootMode",
+  "type": "String"
+ },
+ {
+  "desc": "[IPv4 only] The public DNS name assigned to the instance. This name is not available until the instance enters the running state. This name is only available if you've enabled DNS hostnames for your VPC.",
+  "example": "",
+  "name": "dnsName",
+  "type": "String"
+ },
+ {
+  "desc": "Indicates whether the instance is optimized for Amazon EBS I/O. This optimization provides dedicated throughput to Amazon EBS and an optimized configuration stack to provide optimal I/O performance. This optimization isn't available with all instance types. Additional usage charges apply when using an EBS Optimized instance.",
+  "example": "",
+  "name": "ebsOptimized",
+  "type": "Boolean"
+ },
+ {
+  "desc": "The Elastic GPU associated with the instance.",
+  "example": "",
+  "name": "elasticGpuAssociationSet",
+  "type": "Array of ElasticGpuAssociation objects"
+ },
+ {
+  "desc": "The elastic inference accelerator associated with the instance.",
+  "example": "",
+  "name": "elasticInferenceAcceleratorAssociationSet",
+  "type": "Array of ElasticInferenceAcceleratorAssociation objects"
+ },
+ {
+  "desc": "Specifies whether enhanced networking with ENA is enabled.",
+  "example": "",
+  "name": "enaSupport",
+  "type": "Boolean"
+ },
+ {
+  "desc": "Indicates whether the instance is enabled for AWS Nitro Enclaves.",
+  "example": "",
+  "name": "enclaveOptions",
+  "type": "EnclaveOptions object"
+ },
+ {
+  "desc": "The security groups for the instance.",
+  "example": "",
+  "name": "groupSet",
+  "type": "Array of GroupIdentifier objects"
+ },
+ {
+  "desc": "Indicates whether the instance is enabled for hibernation.",
+  "example": "",
+  "name": "hibernationOptions",
+  "type": "HibernationOptions object"
+ },
+ {
+  "desc": "The hypervisor type of the instance. The value xen is used for both Xen and Nitro hypervisors.",
+  "example": "ovm",
+  "name": "hypervisor",
+  "type": "String"
+ },
+ {
+  "desc": "The IAM instance profile associated with the instance, if applicable.",
+  "example": "",
+  "name": "iamInstanceProfile",
+  "type": "IamInstanceProfile object"
+ },
+ {
+  "desc": "The ID of the AMI used to launch the instance.",
+  "example": "",
+  "name": "imageId",
+  "type": "String"
+ },
+ {
+  "desc": "The ID of the instance.",
+  "example": "",
+  "name": "instanceId",
+  "type": "String"
+ },
+ {
+  "desc": "Indicates whether this is a Spot Instance or a Scheduled Instance.",
+  "example": "spot",
+  "name": "instanceLifecycle",
+  "type": "String"
+ },
+ {
+  "desc": "The current state of the instance.",
+  "example": "",
+  "name": "instanceState",
+  "type": "InstanceState object"
+ },
+ {
+  "desc": "The instance type.",
+  "example": "a1.medium",
+  "name": "instanceType",
+  "type": "String"
+ },
+ {
+  "desc": "The public IPv4 address, or the Carrier IP address assigned to the instance, if applicable. A Carrier IP address only applies to an instance launched in a subnet associated with a Wavelength Zone.",
+  "example": "Required: No",
+  "name": "ipAddress",
+  "type": "String"
+ },
+ {
+  "desc": "The IPv6 address assigned to the instance.",
+  "example": "",
+  "name": "ipv6Address",
+  "type": "String"
+ },
+ {
+  "desc": "The kernel associated with this instance, if applicable.",
+  "example": "",
+  "name": "kernelId",
+  "type": "String"
+ },
+ {
+  "desc": "The name of the key pair, if this instance was launched with an associated key pair.",
+  "example": "",
+  "name": "keyName",
+  "type": "String"
+ },
+ {
+  "desc": "The time the instance was launched.",
+  "example": "",
+  "name": "launchTime",
+  "type": "Timestamp"
+ },
+ {
+  "desc": "The license configurations for the instance.",
+  "example": "",
+  "name": "licenseSet",
+  "type": "Array of LicenseConfiguration objects"
+ },
+ {
+  "desc": "Provides information on the recovery and maintenance options of your instance.",
+  "example": "",
+  "name": "maintenanceOptions",
+  "type": "InstanceMaintenanceOptions object"
+ },
+ {
+  "desc": "The metadata options for the instance.",
+  "example": "",
+  "name": "metadataOptions",
+  "type": "InstanceMetadataOptionsResponse object"
+ },
+ {
+  "desc": "The monitoring for the instance.",
+  "example": "",
+  "name": "monitoring",
+  "type": "Monitoring object"
+ },
+ {
+  "desc": "The network interfaces for the instance.",
+  "example": "",
+  "name": "networkInterfaceSet",
+  "type": "Array of InstanceNetworkInterface objects"
+ },
+ {
+  "desc": "The Amazon Resource Name (ARN) of the Outpost.",
+  "example": "",
+  "name": "outpostArn",
+  "type": "String"
+ },
+ {
+  "desc": "The location where the instance launched, if applicable.",
+  "example": "",
+  "name": "placement",
+  "type": "Placement object"
+ },
+ {
+  "desc": "The platform. This value is windows for Windows instances; otherwise, it is empty.",
+  "example": "windows",
+  "name": "platform",
+  "type": "String"
+ },
+ {
+  "desc": "The platform details value for the instance. For more information, see AMI billing information fields in the Amazon EC2 User Guide.",
+  "example": "",
+  "name": "platformDetails",
+  "type": "String"
+ },
+ {
+  "desc": "[IPv4 only] The private DNS hostname name assigned to the instance. This DNS hostname can only be used inside the Amazon EC2 network. This name is not available until the instance enters the running state. The Amazon-provided DNS server resolves Amazon-provided private DNS hostnames if you've enabled DNS resolution and DNS hostnames in your VPC. If you are not using the Amazon-provided DNS server in your VPC, your custom domain name servers must resolve the hostname as appropriate.",
+  "example": "Required: No",
+  "name": "privateDnsName",
+  "type": "String"
+ },
+ {
+  "desc": "The options for the instance hostname.",
+  "example": "",
+  "name": "privateDnsNameOptions",
+  "type": "PrivateDnsNameOptionsResponse object"
+ },
+ {
+  "desc": "The private IPv4 address assigned to the instance.",
+  "example": "",
+  "name": "privateIpAddress",
+  "type": "String"
+ },
+ {
+  "desc": "The product codes attached to this instance, if applicable.",
+  "example": "",
+  "name": "productCodes",
+  "type": "Array of ProductCode objects"
+ },
+ {
+  "desc": "The RAM disk associated with this instance, if applicable.",
+  "example": "",
+  "name": "ramdiskId",
+  "type": "String"
+ },
+ {
+  "desc": "The reason for the most recent state transition. This might be an empty string.",
+  "example": "",
+  "name": "reason",
+  "type": "String"
+ },
+ {
+  "desc": "The device name of the root device volume (for example, /dev/sda1).",
+  "example": "",
+  "name": "rootDeviceName",
+  "type": "String"
+ },
+ {
+  "desc": "The root device type used by the AMI. The AMI can use an EBS volume or an instance store volume.",
+  "example": "ebs",
+  "name": "rootDeviceType",
+  "type": "String"
+ },
+ {
+  "desc": "Indicates whether source/destination checking is enabled.",
+  "example": "",
+  "name": "sourceDestCheck",
+  "type": "Boolean"
+ },
+ {
+  "desc": "If the request is a Spot Instance request, the ID of the request.",
+  "example": "",
+  "name": "spotInstanceRequestId",
+  "type": "String"
+ },
+ {
+  "desc": "Specifies whether enhanced networking with the Intel 82599 Virtual Function interface is enabled.",
+  "example": "",
+  "name": "sriovNetSupport",
+  "type": "String"
+ },
+ {
+  "desc": "The reason for the most recent state transition.",
+  "example": "",
+  "name": "stateReason",
+  "type": "StateReason object"
+ },
+ {
+  "desc": "The ID of the subnet in which the instance is running.",
+  "example": "",
+  "name": "subnetId",
+  "type": "String"
+ },
+ {
+  "desc": "Any tags assigned to the instance.",
+  "example": "",
+  "name": "tagSet",
+  "type": "Array of Tag objects"
+ },
+ {
+  "desc": "If the instance is configured for NitroTPM support, the value is v2.0. For more information, see NitroTPM in the Amazon EC2 User Guide.",
+  "example": "",
+  "name": "tpmSupport",
+  "type": "String"
+ },
+ {
+  "desc": "The usage operation value for the instance. For more information, see AMI billing information fields in the Amazon EC2 User Guide.",
+  "example": "",
+  "name": "usageOperation",
+  "type": "String"
+ },
+ {
+  "desc": "The time that the usage operation was last updated.",
+  "example": "",
+  "name": "usageOperationUpdateTime",
+  "type": "Timestamp"
+ },
+ {
+  "desc": "The virtualization type of the instance.",
+  "example": "hvm",
+  "name": "virtualizationType",
+  "type": "String"
+ },
+ {
+  "desc": "The ID of the VPC in which the instance is running.",
+  "example": "",
+  "name": "vpcId",
+  "type": "String"
+ }
+]

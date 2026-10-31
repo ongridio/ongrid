@@ -32,6 +32,7 @@ PACKAGE_CLEAN ?= 1
 CLOUD_IMAGE_PLATFORMS ?= linux/amd64,linux/arm64
 CLOUD_IMAGE_REPO ?= docker.cnb.cool/ongridio/ongrid
 CLOUD_MANAGER_IMAGE_REF ?= $(CLOUD_IMAGE_REPO):$(VERSION)
+CLOUD_CMDB_IMAGE_REF ?= $(CLOUD_IMAGE_REPO)/ongrid-cmdb:$(VERSION)
 CLOUD_WEB_IMAGE_REF ?= $(CLOUD_IMAGE_REPO)/ongrid-web:$(VERSION)
 FRONTIER_VERSION ?= 1.2.6
 FRONTIER_SOURCE_IMAGES ?= docker.io/singchia/frontier:$(FRONTIER_VERSION)
@@ -85,12 +86,16 @@ help: ## 列出全部 target
 # build
 # ----------------------------------------------------------------------------
 
-.PHONY: build build-ongrid build-ongrid-edge
-build: build-ongrid build-ongrid-edge ## 构建 ongrid 与 ongrid-edge
+.PHONY: build build-ongrid build-ongrid-cmdb build-ongrid-edge
+build: build-ongrid build-ongrid-cmdb build-ongrid-edge ## 构建 ongrid、CMDB 与 ongrid-edge
 
 build-ongrid: ## 构建云端 ongrid
 	@mkdir -p $(BIN_DIR)
 	$(GO_BUILD) -o $(BIN_DIR)/ongrid ./cmd/ongrid
+
+build-ongrid-cmdb: ## 构建 CMDB 独立服务
+	@mkdir -p $(BIN_DIR)
+	$(GO_BUILD) -o $(BIN_DIR)/ongrid-cmdb ./cmd/ongrid-cmdb
 
 build-ongrid-edge: ## 构建边端 ongrid-edge
 	@mkdir -p $(BIN_DIR)
@@ -208,12 +213,22 @@ proto: ## [api] 重新生成 proto（优先 buf，回退 protoc + protoc-gen-go/
 
 ONGRID_DOCKERFILE ?= deploy/Dockerfile.ongrid
 ONGRID_BUILD_CONTEXT ?= .
+# Override on build hosts without gcr.io access:
+#   make docker-ongrid-cmdb ONGRID_CMDB_RUNTIME_IMAGE=gcr.m.daocloud.io/distroless/base-debian12:nonroot
+ONGRID_CMDB_RUNTIME_IMAGE ?= gcr.io/distroless/base-debian12:nonroot
 
-.PHONY: docker docker-ongrid docker-ongrid-edge
-docker: docker-ongrid docker-ongrid-edge ## 构建全部镜像
+.PHONY: docker docker-ongrid docker-ongrid-cmdb docker-ongrid-edge
+docker: docker-ongrid docker-ongrid-cmdb docker-ongrid-edge ## 构建全部镜像
 
 docker-ongrid: ## 构建 ongrid 镜像
 	docker build --build-arg VERSION=$(VERSION) -t ongrid:$(VERSION) -f "$(ONGRID_DOCKERFILE)" "$(ONGRID_BUILD_CONTEXT)"
+
+docker-ongrid-cmdb: ## 构建 CMDB 独立服务镜像
+	docker build \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg RUNTIME_IMAGE=$(ONGRID_CMDB_RUNTIME_IMAGE) \
+		-t ongrid-cmdb:$(VERSION) \
+		-f deploy/Dockerfile.ongrid-cmdb "$(ONGRID_BUILD_CONTEXT)"
 
 docker-ongrid-edge: ## 构建 ongrid-edge 镜像
 	docker build \
@@ -245,9 +260,14 @@ compose-down: ## 本地 docker compose 停止
 # run
 # ----------------------------------------------------------------------------
 
-.PHONY: run-ongrid run-ongrid-edge
+.PHONY: run-ongrid run-ongrid-cmdb run-ongrid-edge
 run-ongrid: ## 本地直接跑 ongrid
 	go run ./cmd/ongrid
+
+run-ongrid-cmdb: ## 本地直接跑 CMDB 独立服务
+	ONGRID_HTTP_ADDR=$${ONGRID_CMDB_HTTP_ADDR:-:8082} \
+	ONGRID_METRICS_ADDR=$${ONGRID_CMDB_METRICS_ADDR:-:9102} \
+	go run ./cmd/ongrid-cmdb
 
 run-ongrid-edge: ## 本地直接跑 ongrid-edge
 	go run ./cmd/ongrid-edge
@@ -334,7 +354,7 @@ docker-build-web: ## [release] 构建 ongrid-web:$(VERSION) 镜像（前端 SPA 
 		$(DOCKER_BUILD_WEB_CACHE_ARGS) \
 		--load "$(WEB_BUILD_CONTEXT)"
 
-.PHONY: docker-push-cloud-manager docker-push-cloud-manager-platform docker-merge-cloud-manager docker-push-cloud-web docker-push-cloud-images docker-push-release-images release-image-refs verify-release-images test-release-manifest-filter test-release-image-publish
+.PHONY: docker-push-cloud-manager docker-push-cloud-manager-platform docker-merge-cloud-manager docker-push-cloud-cmdb docker-push-cloud-web docker-push-cloud-images docker-push-release-images release-image-refs verify-release-images test-release-manifest-filter test-release-image-publish
 docker-push-cloud-manager: ## [release] 发布 manager 多架构镜像到 CNB（兼容本地串行发布）
 	bash "$(RELEASE_IMAGE_PUBLISHER)" \
 		"$(CLOUD_MANAGER_IMAGE_REF)" \
@@ -371,6 +391,18 @@ docker-merge-cloud-manager: ## [release] 将原生 amd64/arm64 manager digest �
 		"$(RELEASE_MANAGER_AMD64_DIGEST_FILE)" \
 		"$(RELEASE_MANAGER_ARM64_DIGEST_FILE)"
 
+docker-push-cloud-cmdb: ## [release] 发布 CMDB 多架构镜像到 CNB
+	bash "$(RELEASE_IMAGE_PUBLISHER)" \
+		"$(CLOUD_CMDB_IMAGE_REF)" \
+		"$(RELEASE_MANIFEST_PLATFORM_FILTER)" \
+		-- docker buildx build \
+		--platform $(CLOUD_IMAGE_PLATFORMS) \
+		--build-arg VERSION=$(VERSION) \
+		-t $(CLOUD_CMDB_IMAGE_REF) \
+		-f deploy/Dockerfile.ongrid-cmdb \
+		$(DOCKER_BUILD_CACHE_ARGS) \
+		--push .
+
 docker-push-cloud-web: ## [release] 发布 Web 多架构镜像到 CNB
 	bash "$(RELEASE_IMAGE_PUBLISHER)" \
 		"$(CLOUD_WEB_IMAGE_REF)" \
@@ -383,7 +415,7 @@ docker-push-cloud-web: ## [release] 发布 Web 多架构镜像到 CNB
 		$(DOCKER_BUILD_WEB_CACHE_ARGS) \
 		--push .
 
-docker-push-cloud-images: docker-push-cloud-manager docker-push-cloud-web ## [release] 发布 manager + Web 多架构镜像到 CNB
+docker-push-cloud-images: docker-push-cloud-manager docker-push-cloud-cmdb docker-push-cloud-web ## [release] 发布 manager + CMDB + Web 多架构镜像到 CNB
 
 .PHONY: docker-build-k8s-edge docker-push-k8s-edge k8s-edge-image-ref
 docker-build-k8s-edge: ## [dev] 构建本地 Kubernetes ongrid-edge 镜像（默认 linux/amd64）
@@ -422,13 +454,14 @@ k8s-edge-image-ref:
 docker-push-release-images: docker-push-cloud-images docker-push-k8s-edge ## [release] 发布全部项目自身多架构镜像
 
 release-image-refs: ## [release] 打印本次发布的项目自身镜像
-	@printf '%s\n' "$(CLOUD_MANAGER_IMAGE_REF)" "$(CLOUD_WEB_IMAGE_REF)" "$(K8S_EDGE_IMAGE_REF)"
+	@printf '%s\n' "$(CLOUD_MANAGER_IMAGE_REF)" "$(CLOUD_CMDB_IMAGE_REF)" "$(CLOUD_WEB_IMAGE_REF)" "$(K8S_EDGE_IMAGE_REF)"
 
 verify-release-images: ## [release] 校验项目自身镜像均包含 amd64 + arm64 manifest
 	@command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 1; }
 	bash scripts/verify-release-images.sh \
 		"$(RELEASE_MANIFEST_PLATFORM_FILTER)" \
 		"$(CLOUD_MANAGER_IMAGE_REF)" \
+		"$(CLOUD_CMDB_IMAGE_REF)" \
 		"$(CLOUD_WEB_IMAGE_REF)" \
 		"$(K8S_EDGE_IMAGE_REF)"
 
@@ -907,6 +940,10 @@ check-issue-templates: ## Validate GitHub Issue Forms and chooser metadata
 test-web-ci-apm: ## Run the serial APM frontend CI tests (requires npm ci in web)
 	cd web && npm test -- --run --no-file-parallelism \
 		src/api/apm.test.ts src/components/apm src/pages/Apm
+
+.PHONY: test-web-ci-cmdb
+test-web-ci-cmdb: ## Run the CMDB frontend CI tests (requires npm ci in web)
+	cd web && npm test -- --run src/cmdb
 
 .PHONY: test-web-ci-platform
 test-web-ci-platform: ## Run the serial platform frontend CI tests (requires npm ci in web)

@@ -42,6 +42,7 @@ import { OngridLogo } from './OngridLogo';
 import { SessionRevealRegion } from './SessionRevealRegion';
 import { Button } from './ui';
 import { useI18n } from '@/i18n/locale';
+import { cmdbNavSection } from '@/cmdb';
 import { useThemeMode } from '@/store/mode';
 import { Sun, Moon, Monitor, Languages } from 'lucide-react';
 import { cn } from '@/lib/cn';
@@ -61,6 +62,8 @@ type SidebarSectionItem = {
   exact?: boolean;
   exactQuery?: boolean;
   badge?: number;
+  /** Optional localized subgroup heading rendered inside the section. */
+  group?: string;
 };
 
 export function Sidebar() {
@@ -414,6 +417,8 @@ export function Sidebar() {
           ]}
         />
 
+        <CollapsibleSection {...cmdbNavSection(tr)} />
+
         <CollapsibleSection
           storageKey="operations"
           title={tr('日常', 'Daily')}
@@ -615,27 +620,34 @@ function CollapsibleSection({
       </div>
       {open ? (
         <div className="space-y-0.5">
-          {visibleItems.map((item) => (
-            <div key={item.key} className="group/item relative">
-              <SidebarNavItem
-                to={item.to}
-                icon={item.icon}
-                iconSize={item.iconSize}
-                label={item.label}
-                exact={item.exact}
-                exactQuery={item.exactQuery}
-                badge={item.badge}
-                reserveTrailingAction
-              />
-              <Hint content={tr('从侧栏取消固定', 'Unpin from sidebar')}><Button variant="subtle" size="sm"
-                type="button"
-                onClick={() => setItemVisible(item.key, false)}
-                aria-label={tr(`从侧栏取消固定${item.label}`, `Unpin ${item.label} from sidebar`)}
+          {visibleItems.map((item, index) => (
+            <div key={item.key}>
+              {item.group && item.group !== visibleItems[index - 1]?.group && (
+                <div className="px-2 pb-0.5 pt-2 text-[10px] font-medium uppercase tracking-wide text-zinc-600">
+                  {item.group}
+                </div>
+              )}
+              <div className="group/item relative">
+                <SidebarNavItem
+                  to={item.to}
+                  icon={item.icon}
+                  iconSize={item.iconSize}
+                  label={item.label}
+                  exact={item.exact}
+                  exactQuery={item.exactQuery}
+                  badge={item.badge}
+                  reserveTrailingAction
+                />
+                <Hint content={tr('从侧栏取消固定', 'Unpin from sidebar')}><Button variant="subtle" size="sm"
+                  type="button"
+                  onClick={() => setItemVisible(item.key, false)}
+                  aria-label={tr(`从侧栏取消固定${item.label}`, `Unpin ${item.label} from sidebar`)}
 
-                className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 p-1 opacity-0 transition-opacity group-hover/item:pointer-events-auto group-hover/item:opacity-100 group-focus-within/item:pointer-events-auto group-focus-within/item:opacity-100"
-              >
-                <PinOff size={12} />
-              </Button></Hint>
+                  className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 p-1 opacity-0 transition-opacity group-hover/item:pointer-events-auto group-hover/item:opacity-100 group-focus-within/item:pointer-events-auto group-focus-within/item:opacity-100"
+                >
+                  <PinOff size={12} />
+                </Button></Hint>
+              </div>
             </div>
           ))}
         </div>

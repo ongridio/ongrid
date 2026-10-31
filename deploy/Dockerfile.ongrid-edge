@@ -21,7 +21,11 @@ FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
 
 ARG VERSION
 ARG TARGETARCH
-ARG GOPROXY=https://proxy.golang.org,direct
+# Module proxy — see the same block in deploy/Dockerfile.ongrid for why
+# the mirror must come first (Go does not fall through to the next
+# GOPROXY entry on a dial timeout, so an unreachable first entry makes
+# `go mod download` look hung).
+ARG GOPROXY=https://goproxy.cn,https://proxy.golang.org,direct
 ENV GOPROXY=${GOPROXY}
 WORKDIR /app
 

@@ -35,6 +35,11 @@ components:
   edgeagent_biz:     { in: internal/edgeagent/biz/** }
   edgeagent_model:   { in: internal/edgeagent/model/** }
 
+  cmdb_server: { in: internal/cmdb/server/** }
+  cmdb_biz:    { in: internal/cmdb/biz/** }
+  cmdb_data:   { in: internal/cmdb/data/** }
+  cmdb_model:  { in: internal/cmdb/model/** }
+
   observability_preview: { in: scripts/agent-observability/** }
   test_harness: { in: tests/** }
   shared_skill: { in: internal/skill/** }
@@ -65,6 +70,7 @@ components:
   api:        { in: api/** }
   cmd_manager: { in: cmd/ongrid/** }
   cmd_edge: { in: [cmd/ongrid-edge/**, cmd/ongrid-edge-supervisor/**] }
+  cmd_ongrid_cmdb: { in: cmd/ongrid-cmdb/** }
 
 # 允许依赖的正向清单（未列出 = 禁止）
 deps:
@@ -110,6 +116,16 @@ deps:
   shared_skill:
     mayDependOn: [shared_skill, shared_pkg]
 
+  # ---------------- cmdb BC ----------------
+  cmdb_server:
+    mayDependOn: [cmdb_server, cmdb_biz, cmdb_model, shared_pkg, api]
+  cmdb_biz:
+    mayDependOn: [cmdb_biz, cmdb_model, shared_pkg]
+  cmdb_data:
+    mayDependOn: [cmdb_data, cmdb_biz, cmdb_model, shared_pkg]
+  cmdb_model:
+    mayDependOn: [cmdb_model, shared_pkg]
+
   # ---------------- 共享 ----------------
   shared_pkg:
     # 不得依赖任何 BC（业务无关）
@@ -123,8 +139,15 @@ deps:
     mayDependOn: [cmd_manager, iam_server, iam_service, iam_biz, iam_data, iam_model, manager_server, manager_service, manager_biz, manager_data, manager_model, shared_pkg, shared_skill, api]
   cmd_edge:
     mayDependOn: [cmd_edge, edgeagent_service, edgeagent_biz, edgeagent_model, edgeagent_runtime, shared_pkg, shared_skill, api]
+  cmd_ongrid_cmdb:
+    mayDependOn: [cmd_ongrid_cmdb, cmdb_server, cmdb_biz, cmdb_data, cmdb_model, shared_pkg, api]
 
 commonComponents: []
 # 包内测试允许组装真实存储/跨域 fixture；生产文件仍严格执行分层。
 excludeFiles:
   - "_test\\.go$"
+
+# Installed web dependencies are not project Go code. Without this, a local
+# `npm install` makes the scan report node_modules' Go files as unattached.
+exclude:
+  - web/node_modules

@@ -54,6 +54,12 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      // The CMDB service runs on its own port; keep the specific prefix
+      // before the catch-all so Vite does not send it to the manager proxy.
+      '/api/v1/cmdb': {
+        target: 'http://localhost:8082',
+        changeOrigin: true,
+      },
       '/api': {
         target: 'http://localhost:8090',
         changeOrigin: true,
