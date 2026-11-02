@@ -28,11 +28,11 @@ func (r *PluginConfigRepo) hostForEdge(ctx context.Context, edgeID uint64) (uint
 	if host.CurrentEdgeID == nil || *host.CurrentEdgeID != edgeID {
 		return 0, fmt.Errorf("%w: superseded edge installation", errs.ErrConflict)
 	}
-	var count int64
-	if err := r.db.WithContext(ctx).Model(&device.EdgeDevice{}).Where("edge_id = ? AND device_id = ? AND type = ?", edgeID, host.ID, device.EdgeDeviceRelationHost).Count(&count).Error; err != nil {
+	var links []device.EdgeDevice
+	if err := r.db.WithContext(ctx).Select("id").Where("edge_id = ? AND device_id = ? AND type = ?", edgeID, host.ID, device.EdgeDeviceRelationHost).Limit(2).Find(&links).Error; err != nil {
 		return 0, err
 	}
-	if count != 1 {
+	if len(links) != 1 {
 		return 0, fmt.Errorf("%w: host/edge association mismatch", errs.ErrConflict)
 	}
 	return host.ID, nil

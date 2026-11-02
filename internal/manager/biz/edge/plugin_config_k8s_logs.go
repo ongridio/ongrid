@@ -1,9 +1,50 @@
 package edge
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"regexp"
+
+	model "github.com/ongridio/ongrid/internal/manager/model/edge"
+	"github.com/ongridio/ongrid/internal/pkg/errs"
+)
+
+var journalUnitPattern = regexp.MustCompile(`^(?:[A-Za-z0-9_.:@*?-]|\\x[0-9A-Fa-f]{2})+$`)
 
 func (uc *PluginConfigUC) SetKubernetesLogPathsProvider(provider func(context.Context, uint64) ([]string, bool, error)) {
 	uc.kubernetesLogPaths = provider
+}
+
+// Update only the unit filter. Host settings can outlive this Kubernetes installation.
+func (uc *PluginConfigUC) nodeJournalUpdate(ctx context.Context, edgeID uint64, in SetInput) (*model.PluginConfig, error) {
+	units, present, err := stringSliceValue(in.Spec["journald_units"])
+	if len(in.Spec) != 1 || !present || err != nil || len(units) > 64 {
+		return nil, fmt.Errorf("%w: Kubernetes nodes accept only journald_units, an array of up to 64 unit names", errs.ErrInvalid)
+	}
+	for _, unit := range units {
+		if len(unit) > 255 || !journalUnitPattern.MatchString(unit) {
+			return nil, fmt.Errorf("%w: invalid journald unit name", errs.ErrInvalid)
+		}
+	}
+	return uc.repo.UpdateNodeLogSpec(ctx, edgeID, uc.hostID, func(raw string) (string, error) {
+		var saved map[string]json.RawMessage
+		if raw != "" {
+			if err := json.Unmarshal([]byte(raw), &saved); err != nil {
+				return "", fmt.Errorf("decode saved logs config: %w", err)
+			}
+		}
+		if saved == nil {
+			saved = make(map[string]json.RawMessage)
+		}
+		filter, err := json.Marshal(units)
+		if err != nil {
+			return "", err
+		}
+		saved["journald_units"] = filter
+		encoded, err := json.Marshal(saved)
+		return string(encoded), err
+	})
 }
 
 // Node system logs remain on; cluster service selection owns container logs.

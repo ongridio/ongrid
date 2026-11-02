@@ -30,6 +30,8 @@ message HostPluginConfiguration {
  string plugin_name = 1;
  bool enabled = 2;
  google.protobuf.Struct spec = 3;
+ // Cluster-managed node logs allow only journald_units to be edited.
+ bool cluster_managed = 4 [json_name = "cluster_managed"];
 }
 // PUT /v1/devices/{id}/plugins/{name} (admin)，无需在线即可保存普通配置。
 // Profiles 属于实例会话，不支持此入口；数据库凭据写入仍需要当前连接。
@@ -38,6 +40,8 @@ message SetHostPluginRequest {
  string name = 2;
  bool enabled = 3;
  google.protobuf.Struct spec = 4;
+ // Reject a node-only edit if the host's current installation has changed to an unmanaged one.
+ bool cluster_managed = 5 [json_name = "cluster_managed"];
 }
 
 // PATCH /v1/devices/{id}/network/polling (admin).

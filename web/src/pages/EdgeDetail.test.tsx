@@ -50,6 +50,44 @@ vi.stubGlobal(
   },
 );
 
+it('在 K8s 节点只保存 journald_units，移除最后一项即恢复全部单元', async () => {
+  localStorage.setItem('ongrid-locale', 'zh-CN');
+  const row = {
+    plugin_name: 'logs', enabled: true, cluster_managed: true,
+    spec: { mode: 'kubernetes', enable_journald: true, pod_log_paths: ['/var/log/pods/shop_*_*/*/*.log'] },
+  };
+  const writes: unknown[] = [];
+  server.use(
+    http.get('/api/v1/devices/586', () => HttpResponse.json({ id: 586, name: 'node', online: true })),
+    http.get('/api/v1/devices/586/edges', () => HttpResponse.json({ items: [] })),
+    http.get('/api/v1/devices/586/plugins', () => HttpResponse.json({ items: [row] })),
+    http.put('/api/v1/devices/586/plugins/logs', async ({ request }) => {
+      const body = await request.json() as { spec: { journald_units: string[] } };
+      writes.push(body);
+      return HttpResponse.json({ ...row, spec: { ...row.spec, ...body.spec } });
+    }),
+  );
+  useMetricsSeries([]);
+  render(
+    <MemoryRouter initialEntries={['/devices/586?tab=plugins']}>
+      <Routes><Route path="/devices/:edgeId" element={<EdgeDetailPage />} /></Routes>
+    </MemoryRouter>,
+  );
+  fireEvent.click(await screen.findByRole('button', { name: '编辑配置' }));
+  expect(screen.queryByRole('button', { name: 'enabled' })).not.toBeInTheDocument();
+  expect(screen.queryByText('file_paths')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '添加' }));
+  fireEvent.change(screen.getByPlaceholderText('kubelet.service'), { target: { value: 'containerd.service' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  await screen.findByRole('status');
+  expect(writes).toEqual([{ cluster_managed: true, enabled: true, spec: { journald_units: ['containerd.service'] } }]);
+  expect(screen.getByDisplayValue('containerd.service')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '移除' }));
+  fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  await waitFor(() => expect(writes[1]).toEqual({ cluster_managed: true, enabled: true, spec: { journald_units: [] } }));
+  expect(screen.getByText('采集所有 systemd 单元')).toBeInTheDocument();
+});
+
 describe('EdgeDetailPage high-cardinality metrics', () => {
   beforeEach(() => {
     localStorage.setItem('ongrid-locale', 'zh-CN');
