@@ -395,8 +395,57 @@ func kubernetesReceiver(spec map[string]interface{}, edgeID uint64, clusterID, n
 		"include_file_path": true, "include_file_name": false,
 		"exclude_older_than": "24h", "max_log_size": "256KiB",
 		"resource":         resource,
-		"operators":        []interface{}{map[string]interface{}{"id": "container-parser", "type": "container", "max_log_size": "256KiB"}},
+		"operators":        kubernetesLogOperators(),
 		"retry_on_failure": receiverRetry(),
+	}
+}
+
+const (
+	javaClass     = `(?:[\w$]+\.)*[\w$]+`
+	javaFrame     = `[ \t]+at[ \t]+[^\s(]+\.[^\s(.]+\([^()\r\n]*\)`
+	javaStackLine = `(?:` + javaFrame +
+		`|[ \t]*(?:Caused by:|Suppressed:)[ \t]+(?:` + javaClass + `(?::|$)|\[CIRCULAR REFERENCE:)` +
+		`|[ \t]+(?:\[CIRCULAR REFERENCE:|\.\.\. [0-9]+ (?:more|common frames omitted)\b))`
+	javaContinuation = "^" + javaStackLine
+	javaThrowable    = "^" + javaClass + `(?::[^\r\n]*)?\n` + javaStackLine
+	javaLogHeader    = `(?i)^[ \t]*(?:(?:\d{4}-\d\d-\d\d[ T])?\d\d:\d\d:\d\d(?:[.,]\d+)?(?:Z|[+-]\d\d:?\d\d)?[ \t]+)?` +
+		`(?:\[[^\]\r\n]+\][ \t]+)*\[?(?:ERROR|WARN(?:ING)?|FATAL|SEVERE)\b[^\r\n]*$`
+)
+
+func kubernetesLogOperators() []map[string]interface{} {
+	const (
+		stream = `attributes.ongrid_java.stream`
+		line   = `attributes.ongrid_java.line`
+		tail   = `attributes.ongrid_java.tail`
+		// Docker includes its line ending in body. Keep the original body for single records.
+		plainLine = `trimSuffix(trimSuffix(body, "\n"), "\r")`
+	)
+	continuation := line + " matches " + strconv.Quote(javaContinuation)
+	throwable := line + " matches " + strconv.Quote(javaThrowable)
+	header := line + " matches " + strconv.Quote(javaLogHeader)
+	return []map[string]interface{}{
+		// The container parser buffers CRI fragments by file path. Isolate stderr
+		// before parsing so a stdout record cannot terminate a partial stderr line.
+		{"type": "router", "routes": []map[string]interface{}{
+			{"expr": `body matches "^[0-9]{4}-[^ ]+ stderr "`, "output": "cri-stderr"},
+		}, "default": "container-parser"},
+		{"id": "cri-stderr", "type": "container", "max_log_size": "256KiB", "output": "java-stream"},
+		{"id": "container-parser", "type": "container", "max_log_size": "256KiB", "output": "java-stream"},
+		{"id": "java-stream", "type": "add", "field": stream, "value": `EXPR(attributes["log.file.path"] + ":" + (attributes["log.iostream"] ?? ""))`},
+		{"id": "java-line", "type": "add", "field": line, "value": "EXPR(" + plainLine + ")"},
+		// shortcut: interleaved stacks on one stream are ambiguous, use per-line event IDs if the producer supplies them.
+		{"id": "java-stack", "type": "recombine", "source_identifier": stream, "combine_field": line,
+			"is_first_entry": "!(" + continuation + ")", "force_flush_period": "1s", "max_batch_size": 0, "max_log_size": "256KiB"},
+		// Only headers have an empty tail and stay pending. A stack or the "pass" marker
+		// exceeds one byte and flushes immediately. Each non-stack starts a new record.
+		{"id": "java-tail", "type": "add", "field": tail,
+			"value": fmt.Sprintf(`EXPR(%s ? %s : (%s ? "" : "pass"))`, throwable, line, header)},
+		{"id": "java-header", "type": "recombine", "source_identifier": stream, "combine_field": tail, "combine_with": "",
+			"is_first_entry": "!(" + throwable + ")", "max_batch_size": 2, "force_flush_period": "3s", "max_log_size": 1},
+		{"id": "java-header-body", "type": "add", "field": line, "if": tail + ` != "" && ` + header,
+			"value": `EXPR(` + line + ` + "\n" + ` + tail + `)`},
+		{"id": "java-body", "type": "add", "if": line + " != " + plainLine, "field": "body", "value": "EXPR(" + line + ")"},
+		{"type": "remove", "field": "attributes.ongrid_java"},
 	}
 }
 

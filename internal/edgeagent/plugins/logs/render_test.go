@@ -321,9 +321,13 @@ func TestRenderKubernetesMode(t *testing.T) {
 		t.Fatalf("unexpected kubernetes resource attributes: %#v", resource)
 	}
 	operators := list(t, kubernetes["operators"])
-	container := asObject(t, operators[0])
-	if scalar(t, container, "type") != "container" {
-		t.Fatalf("operator = %#v", container)
+	if scalar(t, asObject(t, operators[0]), "type") != "router" {
+		t.Fatal("route CRI streams before reassembling fragments")
+	}
+	for _, operator := range operators[1:3] {
+		if scalar(t, asObject(t, operator), "type") != "container" {
+			t.Fatalf("container parser = %#v", operator)
+		}
 	}
 	processors := object(t, root, "processors")
 	if _, exists := processors["k8sattributes/logs"]; exists {
