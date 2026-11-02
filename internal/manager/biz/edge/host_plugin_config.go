@@ -54,7 +54,7 @@ func (uc *PluginConfigUC) forHost(ctx context.Context, id uint64) (*PluginConfig
 	// 按请求复制无锁依赖容器，不修改共享 UC 或其 providers。
 	view := *uc
 	view.repo = hostConfigView{PluginConfigRepo: uc.repo, host: repo, id: id}
-	view.hostScoped = true
+	view.hostID = id
 	if edgeID == 0 {
 		view.kubernetesAutoAPM = nil
 		view.kubernetesLogPaths = nil

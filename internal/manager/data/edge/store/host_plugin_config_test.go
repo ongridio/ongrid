@@ -2,13 +2,17 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
+	"time"
 
 	biz "github.com/ongridio/ongrid/internal/manager/biz/edge"
 	deviceStore "github.com/ongridio/ongrid/internal/manager/data/device/store"
 	device "github.com/ongridio/ongrid/internal/manager/model/device"
 	model "github.com/ongridio/ongrid/internal/manager/model/edge"
+	"github.com/ongridio/ongrid/internal/pkg/autoapm"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
 
@@ -160,5 +164,126 @@ func TestDeletedHostDoesNotContributePluginOptionsOrCounts(t *testing.T) {
 	specs, err := configs.ListAutoAPMSpecs(ctx)
 	if err != nil || len(specs) != 0 {
 		t.Fatalf("deleted options: %v %v", specs, err)
+	}
+}
+
+type pausedNodeLogRepo struct {
+	*PluginConfigRepo
+	ready  chan struct{}
+	resume chan struct{}
+}
+
+func (r *pausedNodeLogRepo) UpdateNodeLogSpec(ctx context.Context, edgeID, hostID uint64, patch func(string) (string, error)) (*model.PluginConfig, error) {
+	close(r.ready)
+	select {
+	case <-r.resume:
+		return r.PluginConfigRepo.UpdateNodeLogSpec(ctx, edgeID, hostID, patch)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func TestNodeJournalEditPreservesConcurrentHostConfig(t *testing.T) {
+	for _, name := range []string{"still bound", "unlinked"} {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			db := newTestRepo(t).db
+			if err := deviceStore.Migrate(db); err != nil {
+				t.Fatal(err)
+			}
+			const hostID, edgeID = 10, 42
+			if err := db.Create(&device.Device{ID: hostID, Name: "node", Fingerprint: "node-edit"}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&model.Edge{ID: edgeID, AccessKeyID: "node-edit"}).Error; err != nil {
+				t.Fatal(err)
+			}
+			links := deviceStore.NewEdgeDeviceRepo(db)
+			if err := links.Link(ctx, edgeID, hostID, device.EdgeDeviceRelationHost); err != nil {
+				t.Fatal(err)
+			}
+			repo := &pausedNodeLogRepo{NewPluginConfigRepo(db), make(chan struct{}), make(chan struct{})}
+			if _, err := repo.UpsertHost(ctx, hostID, &model.PluginConfig{PluginName: "logs", Enabled: true, SpecJSON: `{"file_paths":["/var/log/old"]}`}); err != nil {
+				t.Fatal(err)
+			}
+			uc := biz.NewPluginConfigUC(repo, nil, nil, nil)
+			uc.SetHostConfigTarget(func(ctx context.Context, id uint64) (uint64, *biz.AutoAPMDefaults, error) {
+				current, err := links.LookupEdgeForDevice(ctx, id, device.EdgeDeviceRelationHost)
+				if errors.Is(err, errs.ErrNotFound) {
+					return 0, nil, nil
+				}
+				return current, nil, err
+			})
+			uc.SetKubernetesAutoAPMProvider(func(context.Context, uint64) (*autoapm.Spec, bool, error) { return &autoapm.Spec{}, true, nil }, nil)
+			uc.SetKubernetesLogPathsProvider(func(context.Context, uint64) ([]string, bool, error) { return nil, true, nil })
+
+			done := make(chan error, 1)
+			go func() {
+				_, err := uc.SetForHost(ctx, hostID, "logs", biz.SetInput{Enabled: true, ClusterManaged: true, Spec: map[string]interface{}{"journald_units": []string{"kubelet.service"}}})
+				done <- err
+			}()
+			select {
+			case <-repo.ready:
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			unlinked := name == "unlinked"
+			if unlinked {
+				if err := links.Unlink(ctx, edgeID, hostID, device.EdgeDeviceRelationHost); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := uc.SetForHost(ctx, hostID, "logs", biz.SetInput{Enabled: false, Spec: map[string]interface{}{"file_paths": []string{"/var/log/new"}}}); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if _, err := repo.UpsertHost(ctx, hostID, &model.PluginConfig{PluginName: "logs", Enabled: false, SpecJSON: `{"file_paths":["/var/log/new"]}`}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			close(repo.resume)
+			err := <-done
+			if unlinked && !errors.Is(err, errs.ErrConflict) || !unlinked && err != nil {
+				t.Fatalf("node save: %v", err)
+			}
+			row, err := repo.GetByHost(ctx, hostID, "logs")
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := map[string][]string{"file_paths": {"/var/log/new"}}
+			if !unlinked {
+				want["journald_units"] = []string{"kubelet.service"}
+			}
+			var got map[string][]string
+			if err := json.Unmarshal([]byte(row.SpecJSON), &got); err != nil {
+				t.Fatal(err)
+			}
+			if row.Enabled || !reflect.DeepEqual(got, want) {
+				t.Fatalf("after node save: enabled=%v, spec=%v, want disabled and %v", row.Enabled, got, want)
+			}
+		})
+	}
+}
+
+func TestNodeLogSpecBeforeHostBinding(t *testing.T) {
+	ctx := t.Context()
+	db := newTestRepo(t).db
+	const edgeID = 42
+	if err := db.Create(&model.Edge{ID: edgeID, AccessKeyID: "edge-only"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	repo := NewPluginConfigRepo(db)
+	patch := func(string) (string, error) { return `{"journald_units":["kubelet.service"]}`, nil }
+	if _, err := repo.UpdateNodeLogSpec(ctx, edgeID, 10, patch); !errors.Is(err, errs.ErrConflict) {
+		t.Fatalf("unbound installation accepted a host-scoped update: %v", err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := repo.UpdateNodeLogSpec(ctx, edgeID, 0, patch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	row, err := repo.Get(ctx, edgeID, model.PluginNameLogs)
+	if err != nil || !row.Enabled || row.SpecJSON != `{"journald_units":["kubelet.service"]}` {
+		t.Fatalf("edge-only config: %+v %v", row, err)
 	}
 }

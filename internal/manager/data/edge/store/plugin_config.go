@@ -64,6 +64,10 @@ func (r *PluginConfigRepo) Get(ctx context.Context, edgeID uint64, plugin string
 	if resolveErr != nil {
 		return nil, resolveErr
 	}
+	return r.getBound(ctx, edgeID, hostID, plugin)
+}
+
+func (r *PluginConfigRepo) getBound(ctx context.Context, edgeID, hostID uint64, plugin string) (*model.PluginConfig, error) {
 	if hostID != 0 && model.DurableHostPlugin(plugin) {
 		row, err := r.GetByHost(ctx, hostID, plugin)
 		if row != nil {
@@ -92,6 +96,10 @@ func (r *PluginConfigRepo) Upsert(ctx context.Context, in *model.PluginConfig) (
 	if err != nil {
 		return nil, err
 	}
+	return r.upsertBound(ctx, hostID, in)
+}
+
+func (r *PluginConfigRepo) upsertBound(ctx context.Context, hostID uint64, in *model.PluginConfig) (*model.PluginConfig, error) {
 	if hostID != 0 && model.DurableHostPlugin(in.PluginName) {
 		return r.UpsertHost(ctx, hostID, in)
 	}
@@ -100,7 +108,7 @@ func (r *PluginConfigRepo) Upsert(ctx context.Context, in *model.PluginConfig) (
 		in.CreatedAt = now
 	}
 	in.UpdatedAt = now
-	err = r.db.WithContext(ctx).Clauses(clause.OnConflict{
+	err := r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "edge_id"}, {Name: "plugin_name"}, {Name: "delete_marker"}},
 		DoUpdates: clause.AssignmentColumns([]string{"enabled", "spec_json", "updated_at"}),
 	}).Create(in).Error
@@ -108,6 +116,37 @@ func (r *PluginConfigRepo) Upsert(ctx context.Context, in *model.PluginConfig) (
 		return nil, err
 	}
 	return in, nil
+}
+
+// UpdateNodeLogSpec locks the installation, its host binding and the config before applying the patch.
+func (r *PluginConfigRepo) UpdateNodeLogSpec(ctx context.Context, edgeID, expectedHostID uint64, patch func(string) (string, error)) (*model.PluginConfig, error) {
+	var saved *model.PluginConfig
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		locked := NewPluginConfigRepo(tx.Clauses(clause.Locking{Strength: "UPDATE"}))
+		hostID, err := locked.hostForEdge(ctx, edgeID)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return errs.ErrConflict
+		}
+		if err != nil {
+			return err
+		}
+		if expectedHostID != 0 && hostID != expectedHostID {
+			return errs.ErrConflict
+		}
+		row, err := locked.getBound(ctx, edgeID, hostID, model.PluginNameLogs)
+		if errors.Is(err, errs.ErrNotFound) {
+			row = &model.PluginConfig{EdgeID: edgeID, PluginName: model.PluginNameLogs, Enabled: true}
+		} else if err != nil {
+			return err
+		}
+		row.SpecJSON, err = patch(row.SpecJSON)
+		if err != nil {
+			return err
+		}
+		saved, err = NewPluginConfigRepo(tx).upsertBound(ctx, hostID, row)
+		return err
+	})
+	return saved, err
 }
 
 // Delete removes one (edge_id, plugin_name) row. Idempotent (no error

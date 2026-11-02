@@ -12,6 +12,20 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
 
+func (r *fakePluginConfigRepo) UpdateNodeLogSpec(ctx context.Context, edgeID, _ uint64, patch func(string) (string, error)) (*model.PluginConfig, error) {
+	row, err := r.Get(ctx, edgeID, model.PluginNameLogs)
+	if errors.Is(err, errs.ErrNotFound) {
+		row = &model.PluginConfig{EdgeID: edgeID, PluginName: model.PluginNameLogs, Enabled: true}
+	} else if err != nil {
+		return nil, err
+	}
+	row.SpecJSON, err = patch(row.SpecJSON)
+	if err != nil {
+		return nil, err
+	}
+	return r.Upsert(ctx, row)
+}
+
 func TestKubernetesLogsUseServiceSelectionAcrossAllConfigViews(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakePluginConfigRepo()

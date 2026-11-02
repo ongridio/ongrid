@@ -16,6 +16,7 @@ import (
 // PluginConfigRepo is the narrow persistence contract this biz layer
 // needs. *sqlite.PluginConfigRepo satisfies it.
 type PluginConfigRepo interface {
+	UpdateNodeLogSpec(ctx context.Context, edgeID, expectedHostID uint64, patch func(string) (string, error)) (*model.PluginConfig, error)
 	ListByEdge(ctx context.Context, edgeID uint64) ([]*model.PluginConfig, error)
 	ListAutoAPMSpecs(ctx context.Context) ([]string, error)
 	Get(ctx context.Context, edgeID uint64, plugin string) (*model.PluginConfig, error)
@@ -69,7 +70,7 @@ type PluginRuntimeOverlayProvider interface {
 // the affected edge so changes propagate within seconds, not within the
 // edge's 60s safety-net poll window.
 type PluginConfigUC struct {
-	hostScoped                 bool
+	hostID                     uint64
 	hostTarget                 HostConfigTarget
 	kubernetesTelemetryCluster func(context.Context, uint64) (uint64, uint64, error)
 	kubernetesLogPaths         func(context.Context, uint64) ([]string, bool, error)
@@ -329,7 +330,7 @@ type SetInput struct {
 // Set upserts one plugin config and (best-effort) notifies the edge to
 // reload. Validates plugin name + spec marshallability.
 func (uc *PluginConfigUC) Set(ctx context.Context, edgeID uint64, plugin string, in SetInput) (*PluginRow, error) {
-	if edgeID == 0 && !uc.hostScoped {
+	if edgeID == 0 && uc.hostID == 0 {
 		return nil, fmt.Errorf("%w: edge_id required", errs.ErrInvalid)
 	}
 	if !model.IsKnownPluginName(plugin) {
@@ -337,7 +338,6 @@ func (uc *PluginConfigUC) Set(ctx context.Context, edgeID uint64, plugin string,
 	}
 	var databaseSecretReqs []tunnel.WriteDatabaseMetricsSecretRequest
 	var previous *model.PluginConfig
-	var managedLogs WireConfig
 	switch plugin {
 	case model.PluginNameLogs:
 		cfg, managed, err := uc.kubernetesLogsConfig(ctx, edgeID)
@@ -351,11 +351,12 @@ func (uc *PluginConfigUC) Set(ctx context.Context, edgeID uint64, plugin string,
 			if cfg.Spec["enable_journald"] != true || !in.Enabled {
 				return nil, fmt.Errorf("%w: Kubernetes log capture is managed by the cluster", errs.ErrInvalid)
 			}
-			in, err = uc.nodeJournalUpdate(ctx, edgeID, in)
+			row, err := uc.nodeJournalUpdate(ctx, edgeID, in)
 			if err != nil {
 				return nil, err
 			}
-			managedLogs = cfg
+			uc.notify(ctx, edgeID, plugin)
+			return &PluginRow{PluginName: plugin, Enabled: cfg.Enabled, ClusterManaged: true, Spec: mergeRuntimeOverlay(decodeSpec(row.SpecJSON), cfg.Spec)}, nil
 		}
 	case model.PluginNameAutoAPM:
 		if uc.kubernetesAutoAPM != nil {
@@ -441,13 +442,7 @@ func (uc *PluginConfigUC) Set(ctx context.Context, edgeID uint64, plugin string,
 		}
 	}
 	uc.notify(ctx, edgeID, plugin)
-	out := &PluginRow{PluginName: row.PluginName, Enabled: row.Enabled, Spec: decodeSpec(row.SpecJSON)}
-	if managedLogs.Spec != nil {
-		out.ClusterManaged = true
-		out.Enabled = managedLogs.Enabled
-		out.Spec = mergeRuntimeOverlay(out.Spec, managedLogs.Spec)
-	}
-	return out, nil
+	return &PluginRow{PluginName: row.PluginName, Enabled: row.Enabled, Spec: decodeSpec(row.SpecJSON)}, nil
 }
 
 func (uc *PluginConfigUC) rollbackPluginConfig(ctx context.Context, edgeID uint64, plugin string, previous *model.PluginConfig) error {
