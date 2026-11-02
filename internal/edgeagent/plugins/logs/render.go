@@ -392,7 +392,7 @@ func kubernetesReceiver(spec map[string]interface{}, edgeID uint64, clusterID, n
 	return map[string]interface{}{
 		"include": podPaths, "exclude": excludes,
 		"start_at": startAt, "storage": logsStorageExtension,
-		"include_file_path": true, "include_file_name": false, "include_file_record_number": true,
+		"include_file_path": true, "include_file_name": false,
 		"exclude_older_than": "24h", "max_log_size": "256KiB",
 		"resource":         resource,
 		"operators":        kubernetesLogOperators(),
@@ -401,14 +401,14 @@ func kubernetesReceiver(spec map[string]interface{}, edgeID uint64, clusterID, n
 }
 
 const (
-	javaClass        = `(?:[\w$]+\.)*[\w$]+`
-	javaFrame        = `[ \t]+at[ \t]+[^\s(]+\.[^\s(.]+\([^()\r\n]*\)`
-	javaContinuation = `^(?:` + javaFrame +
+	javaClass     = `(?:[\w$]+\.)*[\w$]+`
+	javaFrame     = `[ \t]+at[ \t]+[^\s(]+\.[^\s(.]+\([^()\r\n]*\)`
+	javaStackLine = `(?:` + javaFrame +
 		`|[ \t]*(?:Caused by:|Suppressed:)[ \t]+(?:` + javaClass + `(?::|$)|\[CIRCULAR REFERENCE:)` +
 		`|[ \t]+(?:\[CIRCULAR REFERENCE:|\.\.\. [0-9]+ (?:more|common frames omitted)\b))`
-	javaThrowable = `^(?:(?:(?:[\w$]+\.)+[A-Z][\w$]*|(?:[A-Z][\w$]*)?(?:Exception|Error|Throwable))(?::|\n|$)` +
-		`|[A-Z][\w$]*(?::[^\r\n]*)?\n` + javaFrame + `)`
-	javaLogHeader = `(?i)^[ \t]*(?:(?:\d{4}-\d\d-\d\d[ T])?\d\d:\d\d:\d\d(?:[.,]\d+)?(?:Z|[+-]\d\d:?\d\d)?[ \t]+)?` +
+	javaContinuation = "^" + javaStackLine
+	javaThrowable    = "^" + javaClass + `(?::[^\r\n]*)?\n` + javaStackLine
+	javaLogHeader    = `(?i)^[ \t]*(?:(?:\d{4}-\d\d-\d\d[ T])?\d\d:\d\d:\d\d(?:[.,]\d+)?(?:Z|[+-]\d\d:?\d\d)?[ \t]+)?` +
 		`(?:\[[^\]\r\n]+\][ \t]+)*\[?(?:ERROR|WARN(?:ING)?|FATAL|SEVERE)\b[^\r\n]*$`
 )
 
@@ -416,8 +416,7 @@ func kubernetesLogOperators() []map[string]interface{} {
 	const (
 		stream = `attributes.ongrid_java.stream`
 		line   = `attributes.ongrid_java.line`
-		pair   = `attributes.ongrid_java.pair`
-		number = `attributes["log.file.record_number"]`
+		tail   = `attributes.ongrid_java.tail`
 		// Docker includes its line ending in body. Keep the original body for single records.
 		plainLine = `trimSuffix(trimSuffix(body, "\n"), "\r")`
 	)
@@ -431,14 +430,16 @@ func kubernetesLogOperators() []map[string]interface{} {
 		// shortcut: interleaved stacks on one stream are ambiguous, use per-line event IDs if the producer supplies them.
 		{"id": "java-stack", "type": "recombine", "source_identifier": stream, "combine_field": line,
 			"is_first_entry": "!(" + continuation + ")", "force_flush_period": "1s", "max_batch_size": 0, "max_log_size": "256KiB"},
-		// Pair a logger header only with the throwable on the next physical line of the same stream.
-		{"id": "java-header-key", "type": "add", "field": pair, "if": header + " or " + throwable,
-			"value": fmt.Sprintf(`EXPR(%s + ":" + string(%s - (%s ? 1 : 0)))`, stream, number, throwable)},
-		{"id": "java-header", "type": "recombine", "if": pair + " != nil", "source_identifier": pair, "combine_field": line,
-			"is_last_entry": throwable, "max_batch_size": 2, "force_flush_period": "3s", "max_log_size": "256KiB"},
+		// Only headers have an empty tail and stay pending. A stack or the "pass" marker
+		// exceeds one byte and flushes immediately. Each non-stack starts a new record.
+		{"id": "java-tail", "type": "add", "field": tail,
+			"value": fmt.Sprintf(`EXPR(%s ? %s : (%s ? "" : "pass"))`, throwable, line, header)},
+		{"id": "java-header", "type": "recombine", "source_identifier": stream, "combine_field": tail, "combine_with": "",
+			"is_first_entry": "!(" + throwable + ")", "max_batch_size": 2, "force_flush_period": "3s", "max_log_size": 1},
+		{"id": "java-header-body", "type": "add", "field": line, "if": tail + ` != "" && ` + header,
+			"value": `EXPR(` + line + ` + "\n" + ` + tail + `)`},
 		{"id": "java-body", "type": "add", "if": line + " != " + plainLine, "field": "body", "value": "EXPR(" + line + ")"},
 		{"type": "remove", "field": "attributes.ongrid_java"},
-		{"id": "remove-record-number", "type": "remove", "field": number},
 	}
 }
 

@@ -30,6 +30,7 @@ func TestJavaStackBoundaries(t *testing.T) {
 		{javaContinuation, "Caused by: [CIRCULAR REFERENCE: java.io.IOException]", "Caused by: network congestion"},
 		{javaContinuation, "\t... 3 common frames omitted", "java.lang.IllegalStateException: next"},
 		{javaThrowable, "PaymentDeclined: denied\n\tat Pay.run(Pay.java:4)", "INFO next request"},
+		{javaThrowable, "Error: upload rejected\n\tat Pay.run(Pay.java:4)", "Error: upload rejected"},
 		{javaLogHeader, "07:00:00.001 [main] ERROR checkout failed", "07:00:00.001 INFO no ERROR today"},
 	} {
 		re := regexp.MustCompile(tc.pattern)
@@ -50,7 +51,8 @@ func TestCollectorRecombinesKubernetesJavaStacks(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := []string{
-		"stderr F ERROR checkout failed",
+		"stderr P ERROR check", "stderr F out failed",
+		"stdout F INFO health OK",
 		"stderr F java.lang.IllegalStateException: checkout unavailable",
 		"stdout P partial-", "stdout F control",
 		"stderr F \tat example.Checkout.submit(Checkout.java:42)",
@@ -61,6 +63,13 @@ func TestCollectorRecombinesKubernetesJavaStacks(t *testing.T) {
 		"stderr F \tSuppressed: java.io.IOException: close failed",
 		"stderr F \t\t... 1 more",
 		"stderr F INFO next request",
+		"stdout F WARN disk usage high",
+		"stdout F Error: upload rejected",
+		"stdout F INFO resumed",
+		"stdout F WARN unrelated",
+		"stdout F INFO new request",
+		"stdout F java.lang.AssertionError: standalone",
+		"stdout F \tat example.App.run(App.java:1)",
 	}
 	var input strings.Builder
 	for i, line := range lines {
@@ -110,7 +119,9 @@ func TestCollectorRecombinesKubernetesJavaStacks(t *testing.T) {
 	want := []string{
 		"ERROR checkout failed\njava.lang.IllegalStateException: checkout unavailable\n\tat example.Checkout.submit(Checkout.java:42)\nCaused by: java.io.IOException: timeout\n\tat example.Client.read(Client.java:17)",
 		"java.lang.AssertionError: second exception\n\tat example.Checkout.test(Native Method)\n\tSuppressed: java.io.IOException: close failed\n\t\t... 1 more",
-		"partial-control", "INFO next request",
+		"INFO health OK", "partial-control", "INFO next request",
+		"WARN disk usage high", "Error: upload rejected", "INFO resumed",
+		"WARN unrelated", "INFO new request", "java.lang.AssertionError: standalone\n\tat example.App.run(App.java:1)",
 	}
 	var got []string
 	scanner := bufio.NewScanner(output)
