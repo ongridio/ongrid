@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { Label, Input, Textarea } from '@/components/ui';
 import { Hint } from '@/components/ui/Tooltip';
 import { Switch } from '@/components/ui/Switch';
@@ -165,6 +166,13 @@ export default function McpPage() {
     },
     [refresh, tr],
   );
+
+  useAssistantPage('MCP 服务', 'MCP servers', {
+    server_count: servers.length,
+    visible_count: shownServers.length,
+    sample_server_ids: shownServers.slice(0, 6).map(item => item.id).join(', '),
+    loading,
+  });
 
   return (
     <main className="anim-fade flex flex-1 flex-col overflow-hidden">

@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { Button } from '@/components/ui/Button';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -136,6 +137,14 @@ export default function SettingsHealth() {
   const checkedAt = report?.checked_at
     ? new Date(report.checked_at).toLocaleString(locale === 'zh-CN' ? 'zh-CN' : 'en-US')
     : tr('尚未检查', 'Not checked');
+
+  useAssistantPage('系统健康', 'System health', {
+    status: report?.status,
+    failed: report?.summary.failed,
+    degraded: report?.summary.degraded,
+    checked_at: report?.checked_at,
+    loading,
+  });
 
   return (
     <div className="space-y-3" aria-busy={loading}>

@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { Button } from '@/components/ui';
 import { Hint } from '@/components/ui/Tooltip';
 // ReportCards — the reusable report-artifact grid. Used by the 产物 page's
@@ -230,6 +231,10 @@ export function ReportCards({
     void load();
   }, [load]);
   usePoll(load, POLL_MS);
+
+  useAssistantPage('报告列表', 'Reports', taskRef ? undefined : {
+    kind: kindFilter, status: statusFilter, total, page, loading,
+  });
 
   return (
     <div className="flex flex-1 flex-col">

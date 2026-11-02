@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
@@ -240,6 +241,17 @@ export default function AgentObservability() {
     }
     setRefresh((value) => value + 1);
   };
+  useAssistantPage('Agent 观测', 'Agent observability', {
+    tab,
+    trace_id: traceID,
+    session_id: sessionID,
+    start: window.start,
+    end: window.end,
+    run_count: runs.length,
+    issue_count: issueCount,
+    loading,
+  });
+
   return (
     <div className="agent-page flex h-full min-h-0 min-w-0 flex-1 flex-col">
       {!traceID && (

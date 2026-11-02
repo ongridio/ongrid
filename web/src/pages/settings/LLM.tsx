@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { Input, Label } from '@/components/ui';
 // LLM 模型配置页 — 每个 provider 一张子卡，含 API key / Base URL /
 // 模型列表 / 默认模型。改完保存自动让 manager 失效缓存（≤1 秒生效）。
@@ -250,6 +251,11 @@ export default function SettingsLLM() {
 
   const visibleProviders = providers.filter((meta) => visibleProviderIDs.includes(meta.id));
   const availableProviders = providers.filter((meta) => !visibleProviderIDs.includes(meta.id));
+
+  useAssistantPage('模型配置', 'Model settings', {
+    visible_providers: visibleProviderIDs.join(", "),
+    provider_count: providers.length,
+  });
 
   return (
     <div className="space-y-4">

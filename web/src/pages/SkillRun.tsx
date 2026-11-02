@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { Button, Label, Input } from '@/components/ui';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { Select } from '@/components/ui/Select';
@@ -148,6 +149,13 @@ export default function SkillRunPage() {
       setExecuting(false);
     }
   };
+
+  useAssistantPage('运行技能', 'Run skill', {
+    skill: skillKey,
+    device_id: deviceID,
+    executing,
+    run_count: history.length,
+  });
 
   return (
     <main className="anim-fade flex flex-1 flex-col overflow-hidden">

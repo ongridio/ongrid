@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { EmptyStateCard } from '@/components/ui';
 import { TimeRangePicker } from '@/components/ui/TimeRangePicker';
 import { FilterField } from '@/components/ui/FilterField';
@@ -401,6 +402,18 @@ export default function TracesPage() {
     });
     void openObservabilityUrl(url);
   }, [grafanaBaseUrl, grafanaOrgId, range, serviceFilter, operationFilter, peerFilter, scope, traceQL, quickFilter, absoluteStart, absoluteEnd]);
+
+  useAssistantPage('链路查询', 'Traces', {
+    trace_id: routeTraceId || selectedRow?.traceId,
+    service: submitted.service,
+    operation: submitted.operation,
+    range: submitted.range,
+    start: lastWindow.current?.start,
+    end: lastWindow.current?.end,
+    custom_query: Boolean(submitted.traceQL),
+    result_count: rows.length,
+    loading,
+  });
 
   return (
     <main className="anim-fade flex flex-1 flex-col overflow-hidden">

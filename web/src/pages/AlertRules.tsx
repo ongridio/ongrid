@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { EmptyStateCard } from '@/components/ui';
 import { CommunicationProviderIcon } from '@/components/icons/Provider';
 import { Button, Input, Label, Textarea } from '@/components/ui';
@@ -259,6 +260,13 @@ export default function AlertRulesPage() {
     }
     return { total: items.length, enabled, builtin, byKind };
   }, [items]);
+
+  useAssistantPage('告警规则', 'Alert rules', {
+    rule_count: items.length,
+    sample_rules: items.slice(0, 6).map(item => item.rule_key).join(', '),
+    enabled_count: items.filter(item => item.enabled).length,
+    loading,
+  });
 
   return (
     <>{dialog}<>

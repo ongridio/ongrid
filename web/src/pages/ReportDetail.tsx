@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { Button } from '@/components/ui';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { useCallback, useEffect, useState } from 'react';
@@ -18,16 +19,21 @@ export default function ReportDetailPage() {
   const { canMutate } = usePermissions();
   const [report, setReport] = useState<ReportDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [shareUrl, setShareUrl] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
       const r = await getReport(id);
       setReport(r);
+      setLoadError('');
+    } catch (err) {
+      setReport(null);
+      setLoadError(err instanceof Error ? err.message : tr('报告加载失败', 'Failed to load report'));
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, tr]);
 
   useEffect(() => {
     void load();
@@ -48,6 +54,13 @@ export default function ReportDetailPage() {
     window.location.href = '/pages?tab=reports';
   }, [confirmAction, id, tr]);
 
+  useAssistantPage('报告详情', 'Report details', {
+    report_id: id,
+    kind: report?.kind,
+    status: report?.status,
+    state: loading ? 'loading' : report ? 'ready' : 'unavailable',
+  });
+
   if (loading) {
     return (
       <div className="py-20 text-center text-sm text-zinc-500">
@@ -57,7 +70,7 @@ export default function ReportDetailPage() {
     );
   }
   if (!report) {
-    return <div className="py-20 text-center text-sm text-zinc-500">{tr('报告不存在', 'Report not found')}</div>;
+    return <div className="py-20 text-center text-sm text-zinc-500">{loadError || tr('报告不存在', 'Report not found')}</div>;
   }
 
   return (

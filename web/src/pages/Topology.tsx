@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { FilterField } from '@/components/ui/FilterField';
 import { Input, Textarea, Label } from '@/components/ui';
 import { useDialogs } from '@/components/ui/useDialogs';
@@ -203,6 +204,10 @@ function NodesTab({ isAdmin }: { isAdmin: boolean }) {
   useEffect(() => {
     fetchNodes();
   }, [fetchNodes]);
+
+  useAssistantPage('拓扑节点', 'Topology nodes', {
+    node_type: typeFilter, total, selected_node_id: selected?.id, loading,
+  });
 
   return (
     <div className="flex flex-1 overflow-hidden">
@@ -1215,6 +1220,8 @@ function RelationTypesTab({ isAdmin }: { isAdmin: boolean }) {
     fetch();
   }, [fetch]);
 
+  useAssistantPage('拓扑类型', 'Topology types', { relation_types: items.length, loading });
+
   return (
     <div className="flex flex-col">
       <div className="flex items-center justify-between gap-2 border-b border-zinc-800/60 px-6 py-3">
@@ -1620,6 +1627,11 @@ function GraphTab({ isAdmin }: { isAdmin: boolean }) {
     () => buildTypeChips(nodes, nodeTypes, locale),
     [nodes, nodeTypes, locale],
   );
+
+  useAssistantPage('拓扑图谱', 'Topology graph', {
+    nodes: nodes.length, relations: relations.length, node_type: typeFilter,
+    focused_app_id: appFocus, selected_node_id: selected?.id, hide_orphans: hideOrphans, loading,
+  });
 
   return (
     <div className="flex flex-1 overflow-hidden">

@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { Label, Input, Radio, Select } from '@/components/ui';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
 import { Checkbox } from '@/components/ui/Checkbox';
@@ -992,6 +993,11 @@ function LogsIntegrationCard() {
     selected === 'elasticsearch' ? 'ongrid-elasticsearch' : 'ongrid-loki',
     selected === 'elasticsearch' ? '*' : '{ongrid_source=~".+"}',
   );
+
+  useAssistantPage('集成设置', 'Integrations', {
+    log_backend: current, selected_log_backend: selected, loading, unavailable: Boolean(error),
+    services: 'Prometheus, Grafana, logs, Tempo, web search',
+  });
 
   const refresh = useCallback(async (initial = false) => {
     try {

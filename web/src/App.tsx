@@ -1,3 +1,5 @@
+import { AgentSidePanel } from '@/components/AgentSidePanel';
+import { AssistantRoute } from '@/lib/assistantPage';
 import { lazy, type ReactNode } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { safeLoginReturn } from '@/lib/loginReturn';
@@ -80,7 +82,7 @@ function RequireAuth({ children }: { children: ReactNode }) {
   if (!token) {
     return <Navigate to="/login" replace state={{ from: location.pathname + location.search + location.hash }} />;
   }
-  return <>{children}</>;
+  return <AssistantRoute.Provider value={location.key}>{children}<AgentSidePanel /></AssistantRoute.Provider>;
 }
 
 function PublicOnly({ children }: { children: ReactNode }) {
@@ -140,7 +142,7 @@ export default function App() {
         {/* 报告 folded into 产物's 报告 tab; schedules became 任务. Old links redirect. */}
         <Route path="/reports" element={<Navigate to="/pages?tab=reports" replace />} />
         <Route path="/reports/schedules" element={<Navigate to="/tasks" replace />} />
-        <Route path="/reports/:id" element={<ReportDetailPage />} />
+        <Route path="/reports/:id" element={<ReportDetailPage key={location.pathname} />} />
         <Route path="/tasks" element={<TasksPage />} />
         <Route path="/tasks/:id" element={<TasksPage />} />
         <Route path="/tools" element={<DailyToolsPage />} />

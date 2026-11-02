@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { usePermissions } from '@/store/me';
 import { Input, Label, Textarea } from '@/components/ui';
 import { Hint } from '@/components/ui/Tooltip';
@@ -277,6 +278,14 @@ export default function KnowledgePage() {
     }
     return { builtin, org, total: items.length };
   }, [items]);
+
+  useAssistantPage('知识库', 'Knowledge', {
+    source: sourceScope,
+    folder: activePath,
+    visible_documents: visibleDocs.length,
+    sample_document_ids: visibleDocs.slice(0, 6).map(doc => doc.id).join(', '),
+    loading,
+  });
 
   return (
     <main className="anim-fade flex flex-1 flex-col overflow-hidden">

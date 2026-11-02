@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { Input, Label, Textarea } from '@/components/ui';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { Hint } from '@/components/ui/Tooltip';
@@ -107,6 +108,13 @@ function TaskList() {
     },
     [confirmAction, load, tr],
   );
+
+  useAssistantPage('任务列表', 'Tasks', {
+    count: items.length,
+    sample_task_ids: items.slice(0, 4).map(item => item.id).join(', '),
+    task_kinds: [...new Set(items.map(item => item.kind))].join(", "),
+    loading,
+  });
 
   return (
     <>{dialog}<main className="anim-fade flex flex-1 flex-col overflow-hidden">
@@ -331,6 +339,12 @@ function TaskDetail({ id }: { id: string }) {
       setRunning(false);
     }
   };
+
+  useAssistantPage('任务详情', 'Task details', {
+    task_id: id,
+    kind: task?.kind,
+    enabled: task?.enabled,
+  });
 
   return (
     <main className="anim-fade flex flex-1 flex-col overflow-hidden">

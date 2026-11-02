@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -250,6 +251,12 @@ export default function HomePage() {
   }
 
   const showEmptyState = deviceTotal === 0;
+
+  useAssistantPage('首页', 'Home', {
+    device_count: deviceTotal,
+    model: selectedModel?.model,
+    web_search: webSearchEnabled,
+  });
 
   return (
     <main className="flex min-w-0 flex-1 flex-col overflow-hidden">

@@ -924,3 +924,53 @@ html.light .og-chip[data-tone="accent"] { color: rgb(67 56 202); }
   .chat-session-row:hover .chat-session-title,
   .chat-session-link:focus-visible .chat-session-title { white-space: normal; overflow-wrap: anywhere; }
 }
+
+.og-assistant-bounds {
+  position: fixed; z-index: 40; pointer-events: none;
+  inset: max(16px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+}
+.og-assistant-launcher {
+  position: absolute; right: 0; bottom: 0; pointer-events: auto;
+  touch-action: none; user-select: none; cursor: grab;
+  height: 48px; padding: 0 17px 0 12px; gap: 8px; border-radius: 999px;
+  font-size: 14px; font-weight: 650; color: rgb(var(--text)); background: rgb(var(--card));
+  border-color: rgb(var(--border)); box-shadow: 0 5px 20px rgb(25 24 60 / .16);
+}
+.og-assistant-launcher:active { cursor: grabbing; }
+.og-assistant-launcher:hover, .og-assistant-launcher[aria-expanded="true"] {
+  background: color-mix(in srgb, rgb(var(--accent)) 8%, rgb(var(--card)));
+}
+.og-assistant-welcome { padding: clamp(26px, 5.1vh, 48px) 19px 24px; }
+.og-assistant-prompts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 29px; }
+.og-assistant-prompt {
+  --prompt-tone: var(--accent);
+  display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start;
+  height: auto; min-height: 106px; padding: 14px; gap: 6px; white-space: normal; text-align: left;
+  border-radius: 8px; border-color: rgb(var(--prompt-tone) / .22); background: rgb(var(--prompt-tone) / .07);
+  color: color-mix(in srgb, rgb(var(--prompt-tone)) 70%, rgb(var(--text)));
+}
+.og-assistant-prompt:nth-child(2) { --prompt-tone: var(--info); }
+.og-assistant-prompt:hover { border-color: rgb(var(--prompt-tone) / .6); background: rgb(var(--prompt-tone) / .12); }
+@media (min-width: 601px) {
+  .og-dialog-content[data-placement="assistant"][data-expanded] {
+    width: min(690px, var(--assistant-room-width)); max-width: none;
+    height: min(800px, var(--assistant-room-height));
+  }
+}
+.og-dialog-content[data-placement="assistant"] {
+  --assistant-room-width: calc(100vw - max(20px, env(safe-area-inset-left)) - max(20px, env(safe-area-inset-right)));
+  --assistant-room-height: calc(100dvh - max(16px, env(safe-area-inset-top)) - max(20px, env(safe-area-inset-bottom)) - 60px);
+  inset: auto max(20px, env(safe-area-inset-right)) calc(60px + max(20px, env(safe-area-inset-bottom))) auto;
+  width: min(420px, var(--assistant-room-width));
+  height: min(650px, var(--assistant-room-height));
+  max-height: none;
+  transform: none;
+  overflow: hidden;
+  z-index: 44;
+}
+@media (max-width: 600px) {
+  .og-dialog-content[data-placement="assistant"] {
+    inset: 0; width: 100%; max-width: none; height: 100dvh; border-radius: 0;
+    padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); z-index: 51;
+  }
+}

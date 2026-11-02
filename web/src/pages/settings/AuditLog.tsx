@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { FilterField } from '@/components/ui/FilterField';
 import { Input } from '@/components/ui';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/Dialog';
@@ -66,6 +67,13 @@ export default function SettingsAuditLog() {
     (r: string) => formatAuditResource(r, tr),
     [tr],
   );
+
+  useAssistantPage('审计日志', 'Audit log', {
+    total,
+    page,
+    selected_event_id: selected?.id,
+    loading,
+  });
 
   if (meLoading) {
     return (

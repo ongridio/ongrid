@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { Input, Label } from '@/components/ui';
 import { Hint } from '@/components/ui/Tooltip';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/DropdownMenu';
@@ -135,6 +136,11 @@ export default function SettingsUsers() {
       setToast({ kind: 'err', text: errMsg(e) });
     }
   };
+
+  useAssistantPage('用户管理', 'Users', {
+    user_count: items.length,
+    loading,
+  });
 
   if (meLoading && !me) {
     return (

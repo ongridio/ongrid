@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
 import { ChatInput, type ModelSelection, type SubmitPayload } from '@/components/ChatInput';
@@ -30,6 +31,7 @@ import { useI18n } from '@/i18n/locale';
 import { buildConfigDraftConfirmMessage, configDraftApplyTool } from '@/lib/configDraftConfirmation';
 import {
   getChatTurnController,
+  subscribeChatTurns,
   registerChatTurnController,
   unregisterChatTurnController,
 } from '@/lib/chatTurnRegistry';
@@ -219,9 +221,18 @@ export default function ChatThreadPage() {
       if (submittingRef.current) return;
       refetch(false);
     };
+    const unsubscribe = subscribeChatTurns(id => {
+      if (id !== sessionId) return;
+      const controller = getChatTurnController(id);
+      abortRef.current = controller;
+      submittingRef.current = controller !== null;
+      setSubmitting(controller !== null);
+      if (!controller) refetch(false);
+    });
     const intervalID = window.setInterval(tick, 5000);
     return () => {
       cancelled = true;
+      unsubscribe();
       window.clearInterval(intervalID);
     };
   }, [sessionId]);
@@ -272,7 +283,7 @@ export default function ChatThreadPage() {
     mentions: Mention[],
     opts: { expectedTool?: string; displayContent?: string; attachments?: File[] } = {},
   ): Promise<boolean> {
-    if (!sessionId || (!content.trim() && !opts.attachments?.length)) return false;
+    if (!sessionId || getChatTurnController(sessionId) || (!content.trim() && !opts.attachments?.length)) return false;
     const turnSessionID = sessionId;
     setError(null);
     setSubmitting(true);
@@ -502,6 +513,7 @@ export default function ChatThreadPage() {
   // normal behavior (closing menus, blurring inputs).
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      if (e.defaultPrevented || (e.target instanceof Element && e.target.closest('[data-placement="assistant"]'))) return;
       if (e.key !== 'Escape' || !submittingRef.current || !sessionId) return;
       void stopSession(sessionId).catch(() => {});
       abortRef.current?.abort();
@@ -614,6 +626,13 @@ export default function ChatThreadPage() {
       return next;
     });
   }, []);
+
+  useAssistantPage('完整会话', 'Conversation', {
+    session_id: sessionId,
+    agent: sessionAgentID,
+    message_count: messages.length,
+    generating: submitting,
+  });
 
   return (
     <main className="flex flex-1 flex-col overflow-hidden">

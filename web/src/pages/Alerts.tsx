@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { Button, Label, Textarea, PageHeader, EmptyStateCard } from '@/components/ui';
 import { Hint } from '@/components/ui/Tooltip';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -142,6 +143,15 @@ export default function AlertsPage() {
     }
     return { total: pageTotal, open, critical };
   }, [items]);
+
+  useAssistantPage('告警列表', 'Alerts', {
+    status: statusFilter,
+    severity: severityFilter,
+    page,
+    total,
+    incident_ids: items.slice(0, 8).map(item => item.id).join(", "),
+    loading,
+  });
 
   return (
     <>

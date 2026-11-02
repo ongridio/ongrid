@@ -2,7 +2,6 @@ import { Suspense, useEffect } from 'react';
 import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { CommandPalette } from './CommandPalette';
-import { AgentSidePanel } from './AgentSidePanel';
 import { useUi } from '@/store/ui';
 import { useIncidentBadge } from '@/store/incidentBadge';
 import { tr as trInline } from '@/i18n/locale';
@@ -20,28 +19,18 @@ export function Layout() {
 
   const paletteOpen = useUi((s) => s.paletteOpen);
   const setPaletteOpen = useUi((s) => s.setPaletteOpen);
-  const agentPanelOpen = useUi((s) => s.agentPanelOpen);
-  const setAgentPanelOpen = useUi((s) => s.setAgentPanelOpen);
-
-  // Global hotkeys: ⌘K opens the agent side panel, ⌘P opens the
-  // command palette. We bind on window so the keystroke catches even
-  // when no input has focus. Inputs that need to handle ⌘K/⌘P
-  // themselves can stopPropagation, but none currently do.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const ctrl = e.ctrlKey || e.metaKey;
       if (!ctrl) return;
-      if (e.key === 'k' || e.key === 'K') {
-        e.preventDefault();
-        setAgentPanelOpen(!useUi.getState().agentPanelOpen);
-      } else if (e.key === 'p' || e.key === 'P') {
+      if (e.key === 'p' || e.key === 'P') {
         e.preventDefault();
         setPaletteOpen(!useUi.getState().paletteOpen);
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [setAgentPanelOpen, setPaletteOpen]);
+  }, [setPaletteOpen]);
 
   return (
     <div className="flex h-screen min-h-0 w-screen min-w-0 overflow-hidden bg-zinc-950 text-zinc-100">
@@ -52,7 +41,6 @@ export function Layout() {
         </Suspense>
       </div>
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
-      <AgentSidePanel open={agentPanelOpen} onClose={() => setAgentPanelOpen(false)} />
     </div>
   );
 }

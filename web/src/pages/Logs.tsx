@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { EmptyStateCard } from '@/components/ui';
 import { TimeRangePicker } from '@/components/ui/TimeRangePicker';
 import { FilterField } from '@/components/ui/FilterField';
@@ -811,6 +812,22 @@ export default function LogsPage() {
   const selectedWindowLabel = range === 'custom' && customStart && customEnd
     ? `${formatSelectedTime(customStart)} → ${formatSelectedTime(customEnd)}`
     : '';
+
+  useAssistantPage('日志查询', 'Log search', {
+    start: pageRequestRef.current?.start,
+    end: pageRequestRef.current?.end,
+    services: pageRequestRef.current?.scope?.service_names?.join(", "),
+    devices: pageRequestRef.current?.scope?.device_ids?.join(", "),
+    levels: pageRequestRef.current?.scope?.levels?.join(", "),
+    namespaces: pageRequestRef.current?.scope?.namespaces?.join(', '),
+    workloads: pageRequestRef.current?.scope?.workloads?.join(', '),
+    clusters: pageRequestRef.current?.scope?.cluster_ids?.join(', '),
+    pods: pageRequestRef.current?.scope?.pods?.join(', '),
+    partial: Boolean(Object.keys(pageRequestRef.current?.scope ?? {}).some(key => !['device_ids', 'service_names', 'levels', 'namespaces', 'workloads', 'cluster_ids', 'pods'].includes(key)) || pageRequestRef.current?.filters?.length || pageRequestRef.current?.keywords?.include?.length || pageRequestRef.current?.keywords?.exclude?.length),
+    result_count: records.length,
+    completed: hasCompletedSearch,
+    loading,
+  });
 
   return (
     <Tabs value={viewMode} onValueChange={setViewMode} className="contents"><main className="anim-fade flex min-h-0 flex-1 flex-col overflow-hidden">

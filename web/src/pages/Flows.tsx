@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { Label, Input, Textarea } from '@/components/ui';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { Hint } from '@/components/ui/Tooltip';
@@ -114,6 +115,14 @@ export default function FlowsPage() {
       setBusyId(null);
     }
   };
+
+  useAssistantPage('工作流列表', 'Workflows', {
+    total,
+    page,
+    visible_count: shown.length,
+    sample_workflow_ids: shown.slice(0, 8).map(f => f.id).join(', '),
+    loading,
+  });
 
   return (
     <>{dialog}<main className="anim-fade flex flex-1 flex-col overflow-hidden">

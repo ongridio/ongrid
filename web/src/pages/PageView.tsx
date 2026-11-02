@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 // PageView — full-screen viewer for a hosted serve_page artifact, opened in a
 // NEW TAB from the 产物 list's 打开 button. Pages are private (authed): we fetch
 // the HTML with the bearer (token in localStorage, shared across tabs) and
@@ -27,6 +28,11 @@ export default function PageView() {
       alive = false;
     };
   }, [id]);
+
+  useAssistantPage('产物查看器', 'Artifact viewer', {
+    artifact_id: id,
+    state: failed ? "failed" : html == null ? "loading" : "ready",
+  });
 
   if (failed) {
     return (

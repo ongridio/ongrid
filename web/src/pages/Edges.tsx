@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { NetworkSNMPModal } from '@/components/NetworkSNMPModal';
 import { ClusterChipLink } from "@/components/ClusterChipLink";
 import { loadTopologyClusters } from "@/lib/deviceClusters";
@@ -620,6 +621,16 @@ export default function EdgesPage() {
       setBatchBusy(false);
     }
   }
+
+  useAssistantPage('设备列表', 'Devices', {
+    view: discoveryView ? "discovery" : "inventory",
+    roles: rolesFilter,
+    device_count: devices.length,
+    selected_count: selected.size,
+    selected_device_ids: [...selected].slice(0, 8).join(', '),
+    sample_device_ids: devices.slice(0, 8).map(d => d.id).join(', '),
+    loading,
+  });
 
   return (
     <>{dialog}<Tabs value={discoveryView ? 'network-discovery' : 'devices'} onValueChange={(next) => navigate(next === 'devices' ? '/devices' : '/devices?view=network-discovery')} className="contents"><>
