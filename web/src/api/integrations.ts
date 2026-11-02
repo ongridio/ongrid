@@ -59,6 +59,7 @@ export type PluginHealth = {
 // enabled defaults to false, spec is undefined. health is the live
 // heartbeat-reported runtime state (undefined until the edge reports).
 export type PluginRow = {
+  cluster_managed?: boolean;
   plugin_name: PluginName;
   enabled: boolean;
   spec?: Record<string, unknown>;
@@ -86,7 +87,7 @@ export function listEdgePlugins(edgeId: number | string): Promise<PluginListResp
 export function setEdgePlugin(
   edgeId: number | string,
   name: string,
-  body: { enabled: boolean; spec?: Record<string, unknown> }
+  body: Pick<PluginRow, 'enabled' | 'spec' | 'cluster_managed'>
 ): Promise<PluginRow> {
   return request<PluginRow>(
     'PUT',
@@ -107,6 +108,6 @@ export function getPluginCounts(): Promise<PluginCountsResp> {
 export function listHostPlugins(deviceId: number | string): Promise<PluginListResp> {
  return request<PluginListResp>('GET', `/devices/${encodeURIComponent(String(deviceId))}/plugins`);
 }
-export function setHostPlugin(deviceId: number | string, name: string, body: { enabled: boolean; spec?: Record<string, unknown> }): Promise<PluginRow> {
+export function setHostPlugin(deviceId: number | string, name: string, body: Pick<PluginRow, 'enabled' | 'spec' | 'cluster_managed'>): Promise<PluginRow> {
  return request<PluginRow>('PUT', `/devices/${encodeURIComponent(String(deviceId))}/plugins/${encodeURIComponent(name)}`, body);
 }

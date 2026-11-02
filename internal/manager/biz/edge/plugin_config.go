@@ -199,10 +199,11 @@ func (uc *PluginConfigUC) IsEnabled(ctx context.Context, edgeID uint64, plugin s
 
 // PluginRow is the UI/HTTP-friendly view of one plugin row.
 type PluginRow struct {
-	PluginName string                 `json:"plugin_name"`
-	Enabled    bool                   `json:"enabled"`
-	Spec       map[string]interface{} `json:"spec,omitempty"`
-	Defaults   *AutoAPMDefaults       `json:"defaults,omitempty"`
+	ClusterManaged bool                   `json:"cluster_managed,omitempty"`
+	PluginName     string                 `json:"plugin_name"`
+	Enabled        bool                   `json:"enabled"`
+	Spec           map[string]interface{} `json:"spec,omitempty"`
+	Defaults       *AutoAPMDefaults       `json:"defaults,omitempty"`
 }
 
 // pluginDefaultEnabled declares the on-by-default policy for fresh
@@ -281,6 +282,7 @@ func (uc *PluginConfigUC) ListForUI(ctx context.Context, edgeID uint64) ([]Plugi
 				return nil, err
 			}
 			if managed {
+				row.ClusterManaged = true
 				row.Enabled = cfg.Enabled
 				row.Spec = mergeRuntimeOverlay(row.Spec, cfg.Spec)
 			} else {
@@ -319,8 +321,9 @@ func (uc *PluginConfigUC) ListForUI(ctx context.Context, edgeID uint64) ([]Plugi
 
 // SetInput is the mutation payload from the UI / API.
 type SetInput struct {
-	Enabled bool                   `json:"enabled"`
-	Spec    map[string]interface{} `json:"spec,omitempty"`
+	ClusterManaged bool                   `json:"cluster_managed,omitempty"`
+	Enabled        bool                   `json:"enabled"`
+	Spec           map[string]interface{} `json:"spec,omitempty"`
 }
 
 // Set upserts one plugin config and (best-effort) notifies the edge to
@@ -334,12 +337,25 @@ func (uc *PluginConfigUC) Set(ctx context.Context, edgeID uint64, plugin string,
 	}
 	var databaseSecretReqs []tunnel.WriteDatabaseMetricsSecretRequest
 	var previous *model.PluginConfig
+	var managedLogs WireConfig
 	switch plugin {
 	case model.PluginNameLogs:
-		if _, managed, err := uc.kubernetesLogsConfig(ctx, edgeID); err != nil {
+		cfg, managed, err := uc.kubernetesLogsConfig(ctx, edgeID)
+		if err != nil {
 			return nil, err
-		} else if managed {
-			return nil, fmt.Errorf("%w: configure Kubernetes log capture in service discovery", errs.ErrInvalid)
+		}
+		if in.ClusterManaged && !managed {
+			return nil, fmt.Errorf("%w: node log configuration changed, reload the device", errs.ErrConflict)
+		}
+		if managed {
+			if cfg.Spec["enable_journald"] != true || !in.Enabled {
+				return nil, fmt.Errorf("%w: Kubernetes log capture is managed by the cluster", errs.ErrInvalid)
+			}
+			in, err = uc.nodeJournalUpdate(ctx, edgeID, in)
+			if err != nil {
+				return nil, err
+			}
+			managedLogs = cfg
 		}
 	case model.PluginNameAutoAPM:
 		if uc.kubernetesAutoAPM != nil {
@@ -425,7 +441,13 @@ func (uc *PluginConfigUC) Set(ctx context.Context, edgeID uint64, plugin string,
 		}
 	}
 	uc.notify(ctx, edgeID, plugin)
-	return &PluginRow{PluginName: row.PluginName, Enabled: row.Enabled, Spec: decodeSpec(row.SpecJSON)}, nil
+	out := &PluginRow{PluginName: row.PluginName, Enabled: row.Enabled, Spec: decodeSpec(row.SpecJSON)}
+	if managedLogs.Spec != nil {
+		out.ClusterManaged = true
+		out.Enabled = managedLogs.Enabled
+		out.Spec = mergeRuntimeOverlay(out.Spec, managedLogs.Spec)
+	}
+	return out, nil
 }
 
 func (uc *PluginConfigUC) rollbackPluginConfig(ctx context.Context, edgeID uint64, plugin string, previous *model.PluginConfig) error {

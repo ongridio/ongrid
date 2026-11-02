@@ -301,6 +301,7 @@ func TestRenderKubernetesMode(t *testing.T) {
 		Spec: map[string]interface{}{
 			"mode": "kubernetes", "cluster_id": float64(7), "node_name": "kind-worker",
 			"pod_log_paths":        []string{"/var/log/pods/shop_orders_uid/app/*.log", "/var/log/pods/billing_*_*/*/*.log"},
+			"journald_units":       []interface{}{"kubelet.service", "containerd.service"},
 			"pod_log_self_exclude": "/var/log/pods/custom_custom-edge-node-x_*/*/*.log",
 		},
 	})
@@ -308,6 +309,9 @@ func TestRenderKubernetesMode(t *testing.T) {
 	if _, exists := receivers["journald/system"]; !exists {
 		t.Fatal("Kubernetes node must retain system journald")
 	}
+	units := object(t, receivers, "journald/system")["units"]
+	assertStringListContains(t, units, "kubelet.service")
+	assertStringListContains(t, units, "containerd.service")
 	kubernetes := object(t, receivers, "filelog/kubernetes")
 	assertStringListContains(t, kubernetes["include"], "/var/log/pods/shop_orders_uid/app/*.log")
 	assertStringListContains(t, kubernetes["include"], "/var/log/pods/billing_*_*/*/*.log")

@@ -1359,13 +1359,14 @@ function PluginsTab({ edgeId, deviceId }: { edgeId: number; deviceId?: number })
     setRows((cur) =>
       cur.map((r) =>
         r.plugin_name === name
-          ? { ...r, enabled: body.enabled, spec: body.spec ?? r.spec }
+          ? { ...r, enabled: body.enabled, spec: r.cluster_managed ? r.spec : body.spec ?? r.spec }
           : r
       )
     );
     try {
-      const updated = await (deviceId ? setHostPlugin(deviceId, name, body) : setEdgePlugin(edgeId, name, body));
-      setRows((cur) => cur.map((r) => (r.plugin_name === name ? updated : r)));
+      const input = previous?.cluster_managed ? { ...body, cluster_managed: true } : body;
+      const updated = await (deviceId ? setHostPlugin(deviceId, name, input) : setEdgePlugin(edgeId, name, input));
+      setRows((cur) => cur.map((r) => (r.plugin_name === name ? { ...updated, health: updated.health ?? r.health } : r)));
       setSaveNotice(tr(`${name} 配置已保存，正在推送到 edge。`, `${name} config saved and is being pushed to the edge.`));
       return updated;
     } catch (e) {
@@ -1471,6 +1472,8 @@ function PluginCard({
   // child metric collectors, so the useful operator controls are the
   // children shown inside this card.
   const isMetricsBuiltin = row.plugin_name === 'metrics';
+  const clusterLogs = row.plugin_name === 'logs' && row.cluster_managed === true;
+  const canEditSpec = !clusterLogs || row.spec?.enable_journald === true;
   // State pill: prefer the live heartbeat-reported health (running / crashed
   // / starting / stopped). Falls back to inferring from enabled when the edge
   // hasn't reported yet (offline / pre-introduction agent). This is what
@@ -1551,7 +1554,7 @@ function PluginCard({
             <span className="inline-flex items-center gap-1 rounded-md border border-amber-700/40 bg-amber-500/5 px-2 py-1 text-[11px] text-amber-300">
               always on
             </span>
-          ) : (
+          ) : !clusterLogs && (
             <Button variant="subtle" size="sm"
               type="button"
               onClick={() => void toggle()}
@@ -1568,7 +1571,7 @@ function PluginCard({
           {/* The expand chevron is also shown for metrics when it has
               child collectors, so
               operators can reach those without an Edit-config target. */}
-          {(!isMetricsBuiltin || children.length > 0) && (
+          {(!isMetricsBuiltin || children.length > 0) && canEditSpec && (
             <Button variant="outline" size="sm"
               type="button"
               onClick={onToggleExpand}
@@ -1603,10 +1606,11 @@ function PluginCard({
           )}
           {/* Main spec editor — only shown for non-builtin plugins (the
               built-in metrics row has no useful spec). */}
-          {!isMetricsBuiltin && (
+          {!isMetricsBuiltin && canEditSpec && (
             <PluginSpecEditor
               name={row.plugin_name}
               spec={row.spec ?? {}}
+              nodeLogs={clusterLogs}
               enabled={row.enabled}
               onSave={onSave}
             />
@@ -1824,12 +1828,14 @@ function PluginSpecEditor({
   spec,
   enabled,
   targetHealth = [],
+  nodeLogs = false,
   onSave,
 }: {
   name: string;
   spec: Record<string, unknown>;
   enabled: boolean;
   targetHealth?: PluginTargetHealth[];
+  nodeLogs?: boolean;
   onSave(body: { enabled: boolean; spec?: Record<string, unknown> }): Promise<PluginRow | void>;
 }) {
   const { tr } = useI18n();
@@ -1839,7 +1845,7 @@ function PluginSpecEditor({
     name === 'traces' ||
     name === 'custommetrics' ||
     name === 'databasemetrics';
-  const allowJSON = name !== 'databasemetrics';
+  const allowJSON = name !== 'databasemetrics' && !nodeLogs;
   const [mode, setMode] = useState<'form' | 'json'>(supportsForm ? 'form' : 'json');
   const [draft, setDraft] = useState<Record<string, unknown>>(spec);
   const [jsonText, setJsonText] = useState<string>(() =>
@@ -1885,6 +1891,9 @@ function PluginSpecEditor({
       }
     } else {
       payloadSpec = draft;
+    }
+    if (nodeLogs) {
+      payloadSpec = { journald_units: asStringArray(draft.journald_units) };
     }
     if (name === 'databasemetrics') {
       payloadSpec = normalizeDatabaseMetricTLSForSave(payloadSpec);
@@ -1953,7 +1962,7 @@ function PluginSpecEditor({
       </div>
 
       {mode === 'form' && name === 'logs' && (
-        <LogsSpecForm draft={draft} onChange={updateDraft} />
+        <LogsSpecForm draft={draft} onChange={updateDraft} nodeLogs={nodeLogs} />
       )}
       {mode === 'form' && name === 'traces' && (
         <TracesSpecForm draft={draft} onChange={updateDraft} />
@@ -4116,9 +4125,11 @@ function SpecNumberInput({
 function LogsSpecForm({
   draft,
   onChange,
+  nodeLogs,
 }: {
   draft: Record<string, unknown>;
   onChange(next: Record<string, unknown>): void;
+  nodeLogs: boolean;
 }) {
   const { tr } = useI18n();
   // journald is the default source (systemd-journald is universal on
@@ -4141,6 +4152,20 @@ function LogsSpecForm({
   const setEnableJournald = (next: boolean) => {
     onChange({ ...draft, enable_journald: next });
   };
+
+  const unitFilter = (
+    <StringListField
+      label="journald_units"
+      placeholder={nodeLogs ? 'kubelet.service' : 'docker.service'}
+      values={journaldUnits}
+      onChange={(next) => onChange({ ...draft, journald_units: next })}
+      emptyText={tr('采集所有 systemd 单元', 'Collect all systemd units')}
+      hint={nodeLogs
+        ? tr('留空采集此节点的所有 systemd 单元。Pod 日志范围由集群的服务发现配置。', 'Leave empty to collect all systemd units on this node. Cluster service discovery controls Pod log collection.')
+        : tr('留空采集所有单元。添加后，只采集所列单元的日志。', 'Leave empty to collect all units. Add units to collect only their logs.')}
+    />
+  );
+  if (nodeLogs) return unitFilter;
 
   return (
     <div className="space-y-4">
@@ -4168,15 +4193,7 @@ function LogsSpecForm({
           </span>
         </span>
       </Label>
-      {enableJournald && (
-        <StringListField
-          label="journald_units"
-          placeholder="docker.service"
-          values={journaldUnits}
-          onChange={(next) => onChange({ ...draft, journald_units: next })}
-          hint={tr('可选：留空则采集所有 unit；填入则按 OR 匹配（含 .service / .socket 等）', 'Optional: empty = collect every unit; otherwise OR-match (includes .service / .socket / etc.)')}
-        />
-      )}
+      {enableJournald && unitFilter}
       <div>
         <div className="mb-1 flex items-center justify-between">
           <span className="text-xs text-zinc-400">extra_labels</span>

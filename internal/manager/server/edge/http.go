@@ -260,11 +260,12 @@ func (h *Handler) writePluginRows(w http.ResponseWriter, r *http.Request, id uin
 	items := make([]pluginItemDTO, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, pluginItemDTO{
-			PluginName: row.PluginName,
-			Enabled:    row.Enabled,
-			Spec:       row.Spec,
-			Defaults:   row.Defaults,
-			Health:     healthByName[row.PluginName],
+			ClusterManaged: row.ClusterManaged,
+			PluginName:     row.PluginName,
+			Enabled:        row.Enabled,
+			Spec:           row.Spec,
+			Defaults:       row.Defaults,
+			Health:         healthByName[row.PluginName],
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
@@ -273,11 +274,12 @@ func (h *Handler) writePluginRows(w http.ResponseWriter, r *http.Request, id uin
 // pluginItemDTO is one row of the per-edge plugins list: static config
 // (enabled/spec) plus the optional live runtime health.
 type pluginItemDTO struct {
-	PluginName string                 `json:"plugin_name"`
-	Enabled    bool                   `json:"enabled"`
-	Spec       map[string]interface{} `json:"spec,omitempty"`
-	Defaults   *biz.AutoAPMDefaults   `json:"defaults,omitempty"`
-	Health     *pluginHealthDTO       `json:"health,omitempty"`
+	ClusterManaged bool                   `json:"cluster_managed,omitempty"`
+	PluginName     string                 `json:"plugin_name"`
+	Enabled        bool                   `json:"enabled"`
+	Spec           map[string]interface{} `json:"spec,omitempty"`
+	Defaults       *biz.AutoAPMDefaults   `json:"defaults,omitempty"`
+	Health         *pluginHealthDTO       `json:"health,omitempty"`
 }
 
 // autoAPMOptions lists values already used in saved capture settings.
