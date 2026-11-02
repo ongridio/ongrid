@@ -106,7 +106,11 @@ func (r *Repo) ListByOrg(ctx context.Context, orgID uint64) ([]MembershipWithUse
 	}
 	out := make([]MembershipWithUser, 0, len(ms))
 	for _, m := range ms {
-		out = append(out, MembershipWithUser{OrgMembership: m, User: byID[m.UserID]})
+		user, exists := byID[m.UserID]
+		if !exists {
+			continue // Older user deletions could leave orphaned memberships.
+		}
+		out = append(out, MembershipWithUser{OrgMembership: m, User: user})
 	}
 	return out, nil
 }

@@ -74,16 +74,22 @@ func (r *Repo) Count(ctx context.Context) (int64, error) {
 	return n, nil
 }
 
-// Delete removes a user by id. A missing row maps to errs.ErrNotFound.
+// Delete removes a user and their memberships atomically. A missing user maps to errs.ErrNotFound.
 func (r *Repo) Delete(ctx context.Context, id uint64) error {
-	res := dbx.WithContext(ctx, r.db).Delete(&model.User{}, id)
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return errs.ErrNotFound
-	}
-	return nil
+	return dbx.Transaction(ctx, r.db, func(tx context.Context) error {
+		db := dbx.WithContext(tx, r.db)
+		res := db.Delete(&model.User{}, id)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return errs.ErrNotFound
+		}
+		if err := db.Where("user_id = ?", id).Delete(&model.OrgMembership{}).Error; err != nil {
+			return fmt.Errorf("delete user memberships: %w", err)
+		}
+		return nil
+	})
 }
 
 // UpdateRole sets role on the row with id=id. Missing row -> ErrNotFound.
