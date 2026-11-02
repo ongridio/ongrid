@@ -424,8 +424,14 @@ func kubernetesLogOperators() []map[string]interface{} {
 	throwable := line + " matches " + strconv.Quote(javaThrowable)
 	header := line + " matches " + strconv.Quote(javaLogHeader)
 	return []map[string]interface{}{
-		{"id": "container-parser", "type": "container", "max_log_size": "256KiB"},
-		{"type": "add", "field": stream, "value": `EXPR(attributes["log.file.path"] + ":" + (attributes["log.iostream"] ?? ""))`},
+		// The container parser buffers CRI fragments by file path. Isolate stderr
+		// before parsing so a stdout record cannot terminate a partial stderr line.
+		{"type": "router", "routes": []map[string]interface{}{
+			{"expr": `body matches "^[0-9]{4}-[^ ]+ stderr "`, "output": "cri-stderr"},
+		}, "default": "container-parser"},
+		{"id": "cri-stderr", "type": "container", "max_log_size": "256KiB", "output": "java-stream"},
+		{"id": "container-parser", "type": "container", "max_log_size": "256KiB", "output": "java-stream"},
+		{"id": "java-stream", "type": "add", "field": stream, "value": `EXPR(attributes["log.file.path"] + ":" + (attributes["log.iostream"] ?? ""))`},
 		{"id": "java-line", "type": "add", "field": line, "value": "EXPR(" + plainLine + ")"},
 		// shortcut: interleaved stacks on one stream are ambiguous, use per-line event IDs if the producer supplies them.
 		{"id": "java-stack", "type": "recombine", "source_identifier": stream, "combine_field": line,

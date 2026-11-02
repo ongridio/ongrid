@@ -51,7 +51,7 @@ func TestCollectorRecombinesKubernetesJavaStacks(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := []string{
-		"stderr P ERROR check", "stderr F out failed",
+		"stderr P ERROR check", "stdout F INFO during fragment", "stderr F out failed",
 		"stdout F INFO health OK",
 		"stderr F java.lang.IllegalStateException: checkout unavailable",
 		"stdout P partial-", "stdout F control",
@@ -119,7 +119,7 @@ func TestCollectorRecombinesKubernetesJavaStacks(t *testing.T) {
 	want := []string{
 		"ERROR checkout failed\njava.lang.IllegalStateException: checkout unavailable\n\tat example.Checkout.submit(Checkout.java:42)\nCaused by: java.io.IOException: timeout\n\tat example.Client.read(Client.java:17)",
 		"java.lang.AssertionError: second exception\n\tat example.Checkout.test(Native Method)\n\tSuppressed: java.io.IOException: close failed\n\t\t... 1 more",
-		"INFO health OK", "partial-control", "INFO next request",
+		"INFO during fragment", "INFO health OK", "partial-control", "INFO next request",
 		"WARN disk usage high", "Error: upload rejected", "INFO resumed",
 		"WARN unrelated", "INFO new request", "java.lang.AssertionError: standalone\n\tat example.App.run(App.java:1)",
 	}
