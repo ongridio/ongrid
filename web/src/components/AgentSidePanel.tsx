@@ -93,12 +93,12 @@ function FloatingAssistant() {
     if (isHome) setOpen(false);
   }, [isHome]);
   useEffect(() => {
-    if (open && scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight;
+    if (open && scroller.current) scroller.current.scrollTop = messages.length ? scroller.current.scrollHeight : 0;
   }, [open, history, messages, status]);
   useEffect(() => {
     if (!open) { setHistory(false); setExpanded(false); }
-    else if (!history) input.current?.focus();
-  }, [open, history]);
+    else if (!history && !narrow) input.current?.focus();
+  }, [open, history, narrow]);
 
   useEffect(() => {
     if (!open) return;
@@ -232,13 +232,13 @@ function FloatingAssistant() {
       </Button>
     </div>
     <Dialog open={open} onOpenChange={setOpen} modal={narrow} disablePointerDismissal>
-      <DialogContent ref={placement.setPanel} id="floating-assistant" placement="assistant" data-expanded={expanded || undefined} initialFocus={input} finalFocus={isHome ? undefined : launcher} aria-label={tr('Ongrid AI 助理', 'Ongrid AI assistant')}>
+      <DialogContent ref={placement.setPanel} id="floating-assistant" placement="assistant" data-expanded={expanded || undefined} initialFocus={narrow ? undefined : input} finalFocus={isHome ? undefined : launcher} aria-label={tr('Ongrid AI 助理', 'Ongrid AI assistant')}>
         <header className="flex shrink-0 items-center gap-1 border-b border-border px-3 py-2 pl-4 min-[601px]:touch-none min-[601px]:select-none min-[601px]:cursor-grab min-[601px]:active:cursor-grabbing" {...(narrow ? {} : placement.handlers)}>
           <img src="/favicon.svg" draggable={false} alt="" className="mr-1 h-5 w-5" />
           <DialogTitle tabIndex={narrow ? undefined : 0} title={narrow ? undefined : moveHint} aria-describedby={narrow ? undefined : "assistant-move-hint"} className="min-w-0 flex-1 rounded-sm text-sm font-semibold">{tr('Ongrid AI 助理', 'Ongrid AI assistant')}</DialogTitle>
           <Button variant="subtle" size="icon" disabled={locked} title={tr('新对话', 'New conversation')} aria-label={tr('新对话', 'New conversation')} onClick={() => void startNew()}><Plus size={17}/></Button>
           <Button variant="subtle" size="icon" disabled={locked} aria-pressed={history} title={tr('会话历史', 'Conversation history')} aria-label={tr('会话历史', 'Conversation history')} onClick={() => setHistory(v => !v)}><History size={17}/></Button>
-          {!narrow && <Button variant="subtle" size="icon" aria-pressed={expanded} title={expanded ? tr('还原窗口', 'Restore window') : tr('展开窗口', 'Expand window')} aria-label={expanded ? tr('还原窗口', 'Restore window') : tr('展开窗口', 'Expand window')} onClick={() => setExpanded(v => !v)}>{expanded ? <Minimize2 size={16}/> : <Maximize2 size={16}/>}</Button>}
+          <Button variant="subtle" size="icon" aria-pressed={expanded} title={expanded ? tr('还原窗口', 'Restore window') : tr('展开窗口', 'Expand window')} aria-label={expanded ? tr('还原窗口', 'Restore window') : tr('展开窗口', 'Expand window')} onClick={() => setExpanded(v => !v)}>{expanded ? <Minimize2 size={16}/> : <Maximize2 size={16}/>}</Button>
           <DialogClose render={<Button variant="subtle" size="icon" title={tr('收起助理', 'Hide assistant')} aria-label={tr('收起助理', 'Hide assistant')} />}><X size={17}/></DialogClose>
         </header>
         {history && open ? <AssistantHistory currentId={sessionId} onBack={() => setHistory(false)}
@@ -255,7 +255,7 @@ function FloatingAssistant() {
         <div ref={scroller} className="min-h-0 flex-1 overflow-auto">
           {!messages.length && <div className="og-assistant-welcome">
             <img src="/favicon.svg" alt="" width={43} height={43} className="mb-6" />
-            <h2 className="text-[clamp(23px,2.1vw,29px)] font-semibold leading-snug tracking-tight">{tr('你好，我是 ', 'Hello, I’m your ')}<span className="text-accent">{tr('Ongrid 助理', 'Ongrid assistant')}</span></h2>
+            <h2 className="text-[27px] font-semibold leading-snug tracking-tight">{tr('你好，我是 ', 'Hello, I’m your ')}<span className="text-accent">{tr('Ongrid 助理', 'Ongrid assistant')}</span></h2>
             <p className="mt-1.5 text-[13px] leading-relaxed text-text-muted">{snapshot
               ? tr('可以直接问我关于「' + snapshot.page + '」的问题。', 'Ask me about this view: ' + snapshot.page + '.')
               : tr('可以直接提问，也可以在下方附上页面引用。', 'Ask a question, or attach the current view below.')}</p>

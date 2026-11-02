@@ -30,13 +30,24 @@ for (const width of [390, 768, 1280, 1920]) {
     const a = dialog.getByRole('button', { name: /了解当前页|Understand this view/ });
     const b = dialog.getByRole('button', { name: /下一步排查|Next steps/ });
     const [left, right, frame] = await Promise.all([a.boundingBox(), b.boundingBox(), dialog.boundingBox()]);
-    expect(left!.height).toBeGreaterThanOrEqual(106);
-    expect(left!.y).toBe(right!.y);
-    expect(left!.x + left!.width).toBeLessThan(right!.x);
+    const scale = frame!.width / 420;
+    expect(Math.abs(frame!.height - 650 * scale)).toBeLessThan(1);
+    expect(left!.height).toBeGreaterThanOrEqual(106 * scale - 1);
+    expect(left!.y).toBeCloseTo(right!.y, 0);
+    expect(Math.abs(right!.x - (left!.x + left!.width) - 10 * scale)).toBeLessThan(1);
     expect(right!.x + right!.width).toBeLessThanOrEqual(width);
+    const logo = (await dialog.locator('.og-assistant-welcome > img').boundingBox())!;
+    expect(Math.abs(logo.width - 43 * scale)).toBeLessThan(1);
+    expect(Math.abs(logo.height - logo.width)).toBeLessThan(1);
     expect(frame!.x).toBeGreaterThanOrEqual(0);
     expect(frame!.y).toBeGreaterThanOrEqual(0);
-    expect(frame!.width).toBe(width === 390 ? width : 420);
+    expect(frame!.height).toBeLessThanOrEqual(820 * 0.7 + 1);
+    if (width === 390) {
+      expect(frame!.width).toBeLessThan(width);
+      expect(frame!.y + frame!.height).toBeCloseTo(812, 0);
+    } else {
+      expect(frame!.width).toBeLessThan(420);
+    }
     await b.click();
     await expect(dialog.getByRole('textbox')).toBeFocused();
     const model = dialog.getByLabel(zh ? '选择模型' : 'Select model', { exact: true });
@@ -52,15 +63,17 @@ for (const width of [390, 768, 1280, 1920]) {
     expect(modelBox!.x + modelBox!.width).toBeLessThan(sendBox!.x);
     expect(sendBox!.x + sendBox!.width).toBeLessThanOrEqual(width);
     const expand = dialog.getByRole('button', { name: /展开窗口|Expand window/ });
-    if (width === 390) {
-      await expect(expand).toHaveCount(0);
-      expect(frame!.height).toBe(820);
-    } else {
-      await expand.click();
-      expect((await dialog.boundingBox())!.width).toBe(690);
-      await dialog.getByRole('button', { name: /还原窗口|Restore window/ }).click();
-      expect((await dialog.boundingBox())!.width).toBe(420);
+    await expand.click();
+    const enlarged = (await dialog.boundingBox())!;
+    expect(enlarged.height).toBeGreaterThan(frame!.height);
+    if (width === 390) expect(enlarged.height).toBe(820);
+    else {
+      expect(enlarged.width).toBeGreaterThan(frame!.width + 80);
+      expect(Math.abs(enlarged.height - enlarged.width * 800 / 690)).toBeLessThan(1);
     }
+    await dialog.getByRole('button', { name: /还原窗口|Restore window/ }).click();
+    expect((await dialog.boundingBox())!.width).toBeCloseTo(frame!.width);
+    expect((await dialog.boundingBox())!.height).toBeCloseTo(frame!.height);
     await dialog.getByRole('button', { name: /会话历史|Conversation history/ }).click();
     await expect(dialog.getByText(/还没有历史对话|No conversations yet/)).toBeVisible();
     await dialog.getByRole('button', { name: /返回对话|Back to chat/ }).click();
@@ -119,13 +132,16 @@ test('dragging the launcher and desktop title frees the covered area and remembe
   await dialog.getByRole('button', { name: '收起助理' }).click();
   await launcher.press('Home');
   await page.setViewportSize({ width: 1280, height: 820 });
-  await expect.poll(async () => (await launcher.boundingBox())!.x).toBeCloseTo(original.x);
+  await expect.poll(async () => {
+    const box = (await launcher.boundingBox())!;
+    return box.x + box.width;
+  }).toBeCloseTo(original.x + original.width, 0);
   expect((await launcher.boundingBox())!.y).toBeCloseTo(original.y);
 });
 
 test.describe('touch placement', () => {
   test.use({ hasTouch: true });
-  test('drag and cancel are distinct from tapping to open the full-screen chat', async ({ page, context }) => {
+  test('drag and cancel are distinct from tapping to open the chat sheet', async ({ page, context }) => {
     await openTestPage(page, 390);
     const launcher = page.getByRole('button', { name: 'AI 助理', exact: true });
     const dialog = page.getByRole('dialog', { name: 'Ongrid AI 助理' });
@@ -143,7 +159,7 @@ test.describe('touch placement', () => {
     await expect(dialog).toHaveCount(0);
     await launcher.tap();
     await expect(dialog).toBeVisible();
-    expect((await dialog.boundingBox())!.width).toBe(390);
+    expect((await dialog.boundingBox())!.height).toBeLessThan(820 * 0.72);
     await dialog.getByRole('button', { name: '收起助理' }).tap();
     expect((await launcher.boundingBox())!.y).toBeCloseTo(100);
   });
@@ -193,4 +209,35 @@ test('home hides the launcher and preserves the floating draft across navigation
   await page.goto('/?from=test#home');
   await expect(composer).toBeVisible();
   await expect(launcher).toBeHidden();
+});
+
+test('resizes an open assistant with the viewport and keeps its composer reachable', async ({ page }) => {
+  await openTestPage(page, 1728);
+  await page.setViewportSize({ width: 1728, height: 960 });
+  await page.getByRole('button', { name: 'AI 助理', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Ongrid AI 助理' });
+  const input = dialog.getByRole('textbox', { name: '你的问题' });
+  await input.fill('保留我的草稿');
+  const large = (await dialog.boundingBox())!;
+  await page.setViewportSize({ width: 1280, height: 720 });
+  const small = (await dialog.boundingBox())!;
+  expect(small.width).toBeLessThan(large.width - 20);
+  expect(small.height).toBeLessThan(large.height - 40);
+  expect(small.height).toBeLessThan(720 * 0.68);
+  const lastCard = dialog.getByRole('button', { name: /下一步排查/ });
+  await expect(lastCard).toBeInViewport({ ratio: 1 });
+  for (const [width, height] of [[844, 390], [320, 568]]) {
+    await page.setViewportSize({ width, height });
+    await expect(input).toHaveValue('保留我的草稿');
+    const frame = (await dialog.boundingBox())!;
+    const send = (await dialog.getByRole('button', { name: '发送', exact: true }).boundingBox())!;
+    expect(Math.abs(frame.height - frame.width * 650 / 420)).toBeLessThan(1);
+    expect(Math.abs(send.width - 36 * frame.width / 420)).toBeLessThan(1);
+    expect(frame.x).toBeGreaterThanOrEqual(0);
+    expect(frame.y).toBeGreaterThanOrEqual(0);
+    expect(frame.x + frame.width).toBeLessThanOrEqual(width + 1);
+    expect(frame.y + frame.height).toBeLessThanOrEqual(height + 1);
+    expect(send.y + send.height).toBeLessThanOrEqual(frame.y + frame.height);
+    expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  }
 });

@@ -36,8 +36,14 @@ export function useAssistantPosition(launcher: RefObject<HTMLButtonElement>, nar
     const p = position.current;
     const buttonLeft = p.x * (area.width - button.width);
     let buttonTop = p.y * (area.height - button.height);
-    if (panel && !narrow) {
-      const frame = panel.getBoundingClientRect();
+    const frame = panel?.getBoundingClientRect();
+    if (panel && frame) {
+      // Keep hit-testing and drag coordinates in viewport pixels; scale only the contents.
+      const baseWidth = Number(getComputedStyle(panel).getPropertyValue('--assistant-base-width'));
+      const fullscreen = narrow && panel.hasAttribute('data-expanded');
+      if (baseWidth > 0) panel.style.setProperty('--assistant-scale', String(fullscreen ? 1 : frame.width / baseWidth));
+    }
+    if (panel && frame && !narrow) {
       const row = button.height + gap;
       // Keep the launcher next to the window even when neither side of its saved position has room.
       const top = p.panelBelow
