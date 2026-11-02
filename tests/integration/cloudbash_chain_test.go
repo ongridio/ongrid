@@ -52,6 +52,8 @@ func TestCloudBashChain_CredentialInjectedOnApprove(t *testing.T) {
 
 	secretUC := bizsecret.NewUsecase(secretstore.NewRepo(db))
 	approvalUC := bizapproval.NewUsecase(approvalstore.NewRepo(db), nil)
+
+	approvalUC.RequireAuthorization(bizapproval.AuthorizerFunc(func(context.Context, uint64) error { return nil }))
 	sh := runner.NewShellRunner()
 
 	// Register the SAME executor cmd/main.go wires for cloud_bash: resolve
@@ -126,6 +128,8 @@ func TestCloudBashChain_RejectDoesNotRun(t *testing.T) {
 	ctx := context.Background()
 	db := openDB(t)
 	approvalUC := bizapproval.NewUsecase(approvalstore.NewRepo(db), nil)
+
+	approvalUC.RequireAuthorization(bizapproval.AuthorizerFunc(func(context.Context, uint64) error { return nil }))
 
 	ran := false
 	approvalUC.RegisterExecutor("cloud_bash", func(context.Context, string) (string, error) {

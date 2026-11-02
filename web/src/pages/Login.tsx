@@ -2,6 +2,7 @@ import { Button } from '@/components/ui/Button';
 import { Label, Input } from '@/components/ui';
 import { useState, type FormEvent } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { safeLoginReturn } from '@/lib/loginReturn';
 import { Loader2 } from 'lucide-react';
 import { login } from '@/api/auth';
 import { useAuth } from '@/store/auth';
@@ -31,8 +32,7 @@ export default function LoginPage() {
         role: res.user?.role ?? res.role ?? 'user',
         email: res.user?.email ?? res.email ?? email.trim(),
       });
-      const from = location.state?.from;
-      navigate(typeof from === 'string' && from.startsWith('/') && !from.startsWith('//') && !from.startsWith('/login') ? from : '/', { replace: true });
+      navigate(safeLoginReturn(location.state?.from), { replace: true });
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         setError(tr('邮箱或密码错误', 'Invalid email or password'));

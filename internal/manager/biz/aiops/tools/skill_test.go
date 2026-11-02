@@ -45,7 +45,7 @@ func TestGraphCatalogIncludesAndExecutesSafeSkills(t *testing.T) {
 		t.Fatal("search must fail closed")
 	}
 	ctx := basetool.WithWebSearchAllowed(context.Background(), true)
-	if _, err := tool.InvokableRun(ctx, `{"query":"test","device_id":42}`); err != nil {
+	if _, err := tool.InvokableRun(ctx, `{"query":"test"}`); err != nil {
 		t.Fatal(err)
 	}
 	if runner.gotIn.Key != "web_search" || runner.gotIn.EdgeID != 0 || string(runner.gotIn.Params) != `{"query":"test"}` {
@@ -256,25 +256,31 @@ func TestBridge_ManagerScopeSkill_NoEdgeIDRequired(t *testing.T) {
 	}
 }
 
-func TestBridge_ManagerScope_StripsAccidentalEdgeID(t *testing.T) {
+func TestBridge_ManagerScope_RejectsAccidentalEdgeID(t *testing.T) {
 	const key = "stub_bridge_manager_strip"
 	skillcore.Register(stubManagerSkill{key: key})
 	defer unregisterSkillForTest(key)
-
 	r := &Registry{log: slog.Default()}
 	runner := &fakeSkillRunner{result: json.RawMessage(`{}`)}
 	r.SetSkillRunner(runner)
-
 	tool := baseToolByName(t, r.BuildBaseTools(), key)
-	// LLM mistakenly sends edge_id even though it's not in the schema.
-	if _, err := tool.InvokableRun(context.Background(), `{"query":"hi","edge_id":99}`); err != nil {
-		t.Fatalf("execute: %v", err)
+	if _, err := tool.InvokableRun(context.Background(), `{"query":"hi","edge_id":99}`); err == nil {
+		t.Fatal("unknown target silently accepted")
 	}
-	if runner.gotIn.EdgeID != 0 {
-		t.Errorf("manager-scope skill must ignore stray edge_id; runner saw %d", runner.gotIn.EdgeID)
+	if runner.gotIn.Key != "" {
+		t.Fatal("invalid input reached runner")
 	}
-	if strings.Contains(string(runner.gotIn.Params), "edge_id") {
-		t.Errorf("edge_id should be stripped from params; got %s", string(runner.gotIn.Params))
+}
+
+func TestBridge_ManagerScope_PreservesDeclaredBusinessFields(t *testing.T) {
+	r := &Registry{log: slog.Default()}
+	runner := &fakeSkillRunner{result: json.RawMessage(`{}`)}
+	run := r.newSkillExecutor(runner, "external", skillcore.ScopeManager)
+	if _, err := run(context.Background(), json.RawMessage(`{"device_id":42}`)); err != nil {
+		t.Fatal(err)
+	}
+	if string(runner.gotIn.Params) != `{"device_id":42}` {
+		t.Fatalf("business field lost: %s", runner.gotIn.Params)
 	}
 }
 
@@ -289,4 +295,31 @@ func unregisterSkillForTest(key string) {
 	// a no-op; the registered skill stays in the global registry for
 	// the lifetime of the test binary, which is fine.
 	_ = key
+}
+
+type contractHostSkill struct{ raw json.RawMessage }
+
+func (s contractHostSkill) Metadata() skillcore.Metadata {
+	return skillcore.Metadata{Key: "contract_host_skill", Class: skillcore.ClassSafe, Scope: skillcore.ScopeHost}
+}
+func (s contractHostSkill) JSONSchema() json.RawMessage { return s.raw }
+func (s contractHostSkill) Execute(context.Context, json.RawMessage) (json.RawMessage, error) {
+	return json.RawMessage(`{}`), nil
+}
+func TestHostSkillSchemaRejectsLegacyTarget(t *testing.T) {
+	_, err := buildSkillToolSchema(contractHostSkill{json.RawMessage(`{"type":"object","properties":{"edge_id":{"type":"integer"}},"required":["edge_id"]}`)})
+	if err == nil || !strings.Contains(err.Error(), "device_id") {
+		t.Fatalf("err=%v", err)
+	}
+	raw, err := buildSkillToolSchema(contractHostSkill{json.RawMessage(`{"type":"object","properties":{"cmd":{"type":"string"}},"required":["cmd"]}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool := basetool.WithValidation(schemaContractProbe{raw})
+	if _, err := tool.InvokableRun(context.Background(), `{"cmd":"uptime"}`); err == nil {
+		t.Fatal("missing device accepted")
+	}
+	if _, err := tool.InvokableRun(context.Background(), `{"cmd":"uptime","device_id":1}`); err != nil {
+		t.Fatal(err)
+	}
 }

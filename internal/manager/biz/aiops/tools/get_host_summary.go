@@ -18,7 +18,7 @@ import (
 )
 
 const ToolNameGetHostSummary = "get_host_summary"
-const GetHostSummaryDescription = "Summarize hosts by device_id: persistent host metadata, current Edge connection, live load when available and recent host incidents. Offline hosts retain identity and history. current_edge.edge_version is the Edge binary version, not the chat Agent runtime version. plugin_status=not_queried means unknown, not disabled or unsupported."
+const GetHostSummaryDescription = "Summarize hosts by device_id: persistent host metadata, current Edge connection, live load when available and recent host incidents. Offline hosts retain identity and history. current_edge.edge_version is the Edge binary version, not the chat Agent runtime version. plugin_status=not_queried means unknown, not disabled or unsupported. Interpret host_load.cpu_pct only when cpu_sample_status=valid; unknown/unavailable/warming_up does not mean zero utilization."
 
 var GetHostSummarySchema = GetHostSummaryBatchSchema
 
@@ -141,7 +141,7 @@ var GetHostSummaryBatchSchema = json.RawMessage(`{
   "properties": {
     "device_ids": {
       "type": "array",
-      "items": {"type": "integer"},
+      "items": {"type": "integer", "minimum": 1},
       "minItems": 0,
       "maxItems": 16,
       "description": "设备 id 列表，一次最多 16 个，把它们的 metadata + host_load + 24h incidents 一次性全拿回来（省得逐台单独调）。【省略或留空 = 汇总全部主机（最多 16 个）】，适合「巡检 / 体检所有设备」这类不指定具体 id 的请求，无需先查设备清单。"
@@ -216,6 +216,9 @@ func (t *GetHostSummaryTool) singleHostSummary(ctx context.Context, deviceID uin
 						if err := json.Unmarshal(result, &load); err != nil {
 							out["host_load_error"] = err.Error()
 						} else {
+							if load.CPUSampleStatus == "" {
+								load.CPUSampleStatus = "unknown"
+							}
 							out["host_load"] = load
 						}
 					}

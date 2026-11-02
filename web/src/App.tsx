@@ -1,5 +1,6 @@
 import { lazy, type ReactNode } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { safeLoginReturn } from '@/lib/loginReturn';
 import { Layout } from '@/components/Layout';
 import { ChatLayout } from '@/components/ChatLayout';
 import { useAuth } from '@/store/auth';
@@ -32,7 +33,7 @@ const PagesPage = lazy(() => import('@/pages/Pages'));
 const PageViewPage = lazy(() => import('@/pages/PageView'));
 const SkillsPage = lazy(() => import('@/pages/Skills'));
 const ApprovalsPage = lazy(() => import('@/pages/Approvals'));
-const ApprovalConfirmationPage = lazy(() => import('@/pages/ApprovalConfirmation'));
+const ApprovalDetailPage = lazy(() => import('@/pages/ApprovalDetail'));
 const SkillRunPage = lazy(() => import('@/pages/SkillRun'));
 const AgentsPage = lazy(() => import('@/pages/Agents'));
 const McpPage = lazy(() => import('@/pages/Mcp'));
@@ -85,8 +86,7 @@ function RequireAuth({ children }: { children: ReactNode }) {
 function PublicOnly({ children }: { children: ReactNode }) {
   const token = useAuth((s) => s.token);
   const location = useLocation();
-  const from = location.state?.from;
-  if (token) return <Navigate to={typeof from === 'string' && from.startsWith('/') && !from.startsWith('//') && !from.startsWith('/login') ? from : '/'} replace />;
+  if (token) return <Navigate to={safeLoginReturn(location.state?.from)} replace />;
   return <>{children}</>;
 }
 
@@ -151,7 +151,7 @@ export default function App() {
         <Route path="/pages/:id" element={<PagesPage />} />
         <Route path="/skills" element={<SkillsPage />} />
         <Route path="/approvals" element={<ApprovalsPage />} />
-        <Route path="/approvals/:id" element={<ApprovalConfirmationPage key={location.pathname} />} />
+        <Route path="/approvals/:id" element={<ApprovalDetailPage key={location.pathname} />} />
         <Route path="/skills/:key" element={<SkillRunPage />} />
         <Route path="/agents" element={<AgentsPage />} />
         <Route path="/mcp" element={<McpPage />} />

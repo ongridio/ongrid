@@ -234,6 +234,9 @@ func normalizeQueryK8sLogsArgs(in QueryK8sLogsArgs) (tunnel.KubernetesPodLogsReq
 	if pod == "" {
 		return tunnel.KubernetesPodLogsRequest{}, fmt.Errorf("%s: pod is required", ToolNameQueryK8sLogs)
 	}
+	if in.LimitBytes > 0 && in.LimitBytes < 1024 {
+		return tunnel.KubernetesPodLogsRequest{}, fmt.Errorf("%s: limit_bytes must be at least 1024", ToolNameQueryK8sLogs)
+	}
 	req := tunnel.KubernetesPodLogsRequest{
 		ClusterID:    in.ClusterID,
 		Namespace:    namespace,

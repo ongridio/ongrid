@@ -22,6 +22,7 @@ type runtimeTool struct {
 func cloneToolInfo(info *basetool.ToolInfo) *basetool.ToolInfo {
 	copy := *info
 	copy.Parameters = append([]byte(nil), info.Parameters...)
+	copy.ExecutionParameters = append([]byte(nil), info.ExecutionParameters...)
 	return &copy
 }
 

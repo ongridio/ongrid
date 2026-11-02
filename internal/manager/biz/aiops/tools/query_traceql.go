@@ -37,7 +37,8 @@ var QueryTraceQLSchema = json.RawMessage(`{
   "properties": {
     "trace_id": {
       "type": "string",
-      "description": "Read this 16- or 32-character hexadecimal trace ID instead of searching. Do not combine with search filters or time bounds."
+      "description": "Read this 16- or 32-character hexadecimal trace ID instead of searching. Do not combine with search filters or time bounds.",
+      "pattern": "^(?:[0-9a-fA-F]{16}|[0-9a-fA-F]{32})$"
     },
     "span_offset": {
       "type": "integer",
@@ -83,7 +84,136 @@ var QueryTraceQLSchema = json.RawMessage(`{
       "type": "string",
       "description": "Maximum trace duration as a Go duration string."
     }
-  }
+  },
+  "oneOf": [
+    {
+      "required": [
+        "trace_id"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "query"
+            ]
+          },
+          {
+            "required": [
+              "device_id"
+            ]
+          },
+          {
+            "required": [
+              "service"
+            ]
+          },
+          {
+            "required": [
+              "operation"
+            ]
+          },
+          {
+            "required": [
+              "min_duration"
+            ]
+          },
+          {
+            "required": [
+              "max_duration"
+            ]
+          },
+          {
+            "required": [
+              "start"
+            ]
+          },
+          {
+            "required": [
+              "end"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "trace_id"
+            ]
+          },
+          {
+            "required": [
+              "span_offset"
+            ]
+          }
+        ]
+      },
+      "anyOf": [
+        {
+          "required": [
+            "query"
+          ],
+          "properties": {
+            "query": {
+              "type": "string",
+              "pattern": "\\S"
+            }
+          }
+        },
+        {
+          "required": [
+            "device_id"
+          ]
+        },
+        {
+          "required": [
+            "service"
+          ],
+          "properties": {
+            "service": {
+              "type": "string",
+              "pattern": "\\S"
+            }
+          }
+        },
+        {
+          "required": [
+            "operation"
+          ],
+          "properties": {
+            "operation": {
+              "type": "string",
+              "pattern": "\\S"
+            }
+          }
+        },
+        {
+          "required": [
+            "min_duration"
+          ],
+          "properties": {
+            "min_duration": {
+              "type": "string",
+              "pattern": "\\S"
+            }
+          }
+        },
+        {
+          "required": [
+            "max_duration"
+          ],
+          "properties": {
+            "max_duration": {
+              "type": "string",
+              "pattern": "\\S"
+            }
+          }
+        }
+      ]
+    }
+  ]
 }`)
 
 // QueryTraceQLArgs is the typed form of QueryTraceQLSchema.
@@ -258,7 +388,7 @@ func (t *QueryTraceQLTool) InvokableRun(ctx context.Context, argsJSON string, _ 
 		strings.TrimSpace(in.Operation) == "" &&
 		strings.TrimSpace(in.MinDuration) == "" &&
 		strings.TrimSpace(in.MaxDuration) == "" {
-		return "", fmt.Errorf("query_traceql: at least one of query/service/operation/min_duration/max_duration required")
+		return "", fmt.Errorf("query_traceql: at least one of query/device_id/service/operation/min_duration/max_duration required")
 	}
 
 	end := time.Now()

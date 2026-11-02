@@ -2,8 +2,13 @@ package main
 
 import (
 	"context"
+	managerapprovaldata "github.com/ongridio/ongrid/internal/manager/data/approval/store"
 	managersvcimbridge "github.com/ongridio/ongrid/internal/manager/service/imbridge"
+	"github.com/ongridio/ongrid/internal/pkg/config"
+	"github.com/prometheus/client_golang/prometheus"
 	"log/slog"
+	"os"
+	"strings"
 
 	managerbizaiopsmentions "github.com/ongridio/ongrid/internal/manager/biz/aiops/mentions"
 	managerbizimbridge "github.com/ongridio/ongrid/internal/manager/biz/imbridge"
@@ -20,7 +25,7 @@ type imbridgeModule struct {
 	imbridgeHandler *managerserverimbridge.Handler
 }
 
-func bootstrapIMBridge(rootCtx context.Context, log *slog.Logger, storage *storageModule, models *modelsModule, devices *devicesModule, alerts *alertsModule, telemetry *telemetryModule, aiops *aiopsModule, runtime *runtimeModule) *imbridgeModule {
+func bootstrapIMBridge(rootCtx context.Context, cfg *config.Config, log *slog.Logger, storage *storageModule, models *modelsModule, devices *devicesModule, alerts *alertsModule, telemetry *telemetryModule, aiops *aiopsModule, runtime *runtimeModule, extensions *extensionsModule, reg *prometheus.Registry) *imbridgeModule {
 	// IM bridge: multi-turn chat via Feishu (S1) / DingTalk
 	// (S2 follow-up). Inbound webhooks land outside the bearer-auth
 	// group; signature verification is enforced inside the handler.
@@ -29,9 +34,41 @@ func bootstrapIMBridge(rootCtx context.Context, log *slog.Logger, storage *stora
 	// Service-account user_id: superuser admin (id=1 on every install
 	// thanks to bootstrap). Future: take from cfg.
 	const imBridgeServiceUserID uint64 = 1
-	imbridgeAgentAdapter := managersvcimbridge.NewAiopsAdapter(runtime.aiopsSvc, imBridgeServiceUserID, models.llmSettingsResolver, log)
-	imbridgeSvc := managerbizimbridge.NewBridge(aiops.imbridgeRepo, imbridgeAgentAdapter, imBridgeServiceUserID, log)
+	imbridgeAgentAdapter := managersvcimbridge.NewAiopsAdapter(runtime.aiopsSvc, imBridgeServiceUserID, models.llmSettingsResolver, log, managersvcimbridge.WithApprovals(managerapprovaldata.NewRepo(storage.db)))
+	publicURL, urlErr := managerbizimbridge.ApprovalPublicURL(cfg.PublicURL)
+	if urlErr != nil {
+		log.Warn("IM approval links disabled: invalid ONGRID_PUBLIC_URL", slog.Any("err", urlErr))
+	}
+	var interaction *managerbizimbridge.Interaction
+	imbridgeSvc := managerbizimbridge.NewBridge(aiops.imbridgeRepo, imbridgeAgentAdapter, imBridgeServiceUserID, log, managerbizimbridge.WithApprovalPublicURL(publicURL))
+	// Opt-in until real provider E2E and deployment migration checks complete.
+	if os.Getenv("ONGRID_IM_APPROVAL_DELIVERY") == "true" {
+		if providers := strings.TrimSpace(os.Getenv("ONGRID_IM_NATIVE_APPROVAL_PROVIDERS")); providers != "" {
+			interaction = managerbizimbridge.NewInteraction(aiops.imbridgeRepo, extensions.approvalUC, imBridgeServiceUserID, strings.Split(providers, ","), log)
+			go interaction.Run(rootCtx)
+		}
+		delivery := managerbizimbridge.NewApprovalDelivery(aiops.imbridgeRepo, imbridgeAgentAdapter, imBridgeServiceUserID, publicURL,
+			map[string]managerbizimbridge.ApprovalSenderFactory{
+				"feishu":   managerbizimbridgefeishu.NewApprovalSender,
+				"slack":    managerbizimbridgeslack.NewApprovalSender,
+				"telegram": managerbizimbridgetelegram.NewApprovalSender,
+				"dingtalk": managerbizimbridgedingtalk.NewApprovalSender,
+			}, log)
+		imbridgeSvc = managerbizimbridge.NewBridge(aiops.imbridgeRepo, imbridgeAgentAdapter, imBridgeServiceUserID, log, managerbizimbridge.WithApprovalPublicURL(publicURL), managerbizimbridge.WithApprovalDelivery(delivery))
+		delivery.SetInteraction(interaction)
+		metrics, err := managerbizimbridge.NewDeliveryMetrics(reg)
+		if err != nil {
+			log.Error("IM delivery metrics registration failed", "err", err)
+		} else {
+			delivery.SetMetrics(metrics)
+		}
+		if interaction != nil {
+			managerbizimbridge.WithInteraction(interaction)(imbridgeSvc)
+		}
+		go delivery.Run(rootCtx)
+	}
 	imbridgeHandler := managerserverimbridge.NewHandler(imbridgeSvc, aiops.imbridgeRepo, aiops.imbridgeUC, log)
+	imbridgeHandler.SetInteraction(interaction)
 
 	// Stream supervisor: long-connection mode. Runs one
 	// goroutine per (enabled, stream-mode) ImApp; reconciles every

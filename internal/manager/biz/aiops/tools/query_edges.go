@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
@@ -29,7 +28,7 @@ const ToolNameQueryEdges = "query_devices"
 // devices (machines) match a coarse status / role / freshness filter.
 const QueryEdgesDescription = "List ongrid-managed devices (hosts) filtered by role, online status, last-seen freshness, name substring, or IP address. " +
 	"Use this whenever the question is about which machines exist or which ones match a coarse attribute. " +
-	"Returns an array of {device_id, name, hostname, ip_address, online, roles, last_seen_at}; use device_id (NOT edge_id) in any PromQL/LogQL/TraceQL you generate."
+	"Returns devices with device_type and status. online is only present for Hosts; SNMP targets use reachability_status and collection_status, with scanner and polling evidence. use device_id (NOT edge_id) in any PromQL/LogQL/TraceQL you generate."
 
 // QueryEdgesSchema is the JSON Schema of the tool's argument object.
 var QueryEdgesSchema = json.RawMessage(`{
@@ -42,8 +41,8 @@ var QueryEdgesSchema = json.RawMessage(`{
     },
     "status": {
       "type": "string",
-      "enum": ["online", "offline"],
-      "description": "Filter by current online status. Optional."
+      "enum": ["online", "offline", "unknown"],
+      "description": "Host: Edge heartbeat. SNMP: online means fresh reachable evidence; offline requires explicit unreachable evidence. Collection errors, disabled/stale data or unavailable scanner are unknown."
     },
     "last_seen_within_minutes": {
       "type": "integer",
@@ -82,11 +81,14 @@ type QueryEdgesArgs struct {
 // Kept narrow on purpose: the LLM gets only the columns it can reason
 // over without leaking secret_key_hash / access_key_id.
 type EdgeRow struct {
-	ID         uint64     `json:"device_id"`
-	Name       string     `json:"name"`
-	Hostname   string     `json:"hostname,omitempty"`
-	IPAddress  string     `json:"ip_address,omitempty"`
-	Online     bool       `json:"online"`
+	ID         uint64 `json:"device_id"`
+	Name       string `json:"name"`
+	Hostname   string `json:"hostname,omitempty"`
+	IPAddress  string `json:"ip_address,omitempty"`
+	Online     *bool  `json:"online,omitempty"`
+	DeviceType string `json:"device_type"`
+	Status     string `json:"status"`
+	*NetworkDeviceStatus
 	Roles      []string   `json:"roles"`
 	LastSeenAt *time.Time `json:"last_seen_at,omitempty"`
 }
@@ -97,6 +99,7 @@ const queryEdgesCallTimeout = 60 * time.Second
 // QueryEdgesTool lists durable devices independently of Edge installations.
 type QueryEdgesTool struct {
 	devices *devicebiz.Usecase
+	details networkDetailReader
 	edges   *edgebiz.Usecase
 	log     *slog.Logger
 }
@@ -106,7 +109,11 @@ func NewQueryEdgesTool(devices *devicebiz.Usecase, edges *edgebiz.Usecase, log *
 	if log == nil {
 		log = slog.Default()
 	}
-	return &QueryEdgesTool{devices: devices, edges: edges, log: log}
+	t := &QueryEdgesTool{devices: devices, edges: edges, log: log}
+	if devices != nil && devices.NetworkDiscovery() != nil {
+		t.details = devices.NetworkDiscovery()
+	}
+	return t
 }
 
 // queryEdgesWhenToUse — usually the FIRST tool in any incident triage
@@ -154,13 +161,9 @@ func (t *QueryEdgesTool) InvokableRun(ctx context.Context, argsJSON string, _ ..
 			Limit:     in.Limit,
 		}
 		switch in.Status {
-		case "":
-		case "online":
-			b := true
-			f.Online = &b
-		case "offline":
-			b := false
-			f.Online = &b
+		case "", "online", "offline", "unknown":
+		default:
+			return "", fmt.Errorf("query_devices: invalid status %q", in.Status)
 		}
 		switch in.Role {
 		case "":
@@ -178,36 +181,72 @@ func (t *QueryEdgesTool) InvokableRun(ctx context.Context, argsJSON string, _ ..
 			return "", fmt.Errorf("query_devices: invalid role %q", in.Role)
 		}
 
-		all, err := t.devices.List(callCtx, f)
-		if err != nil {
-			return "", fmt.Errorf("query_devices: list: %w", err)
-		}
 		var cutoff time.Time
 		if in.LastSeenWithinMinutes > 0 {
 			cutoff = time.Now().UTC().Add(-time.Duration(in.LastSeenWithinMinutes) * time.Minute)
 		}
-		rows := make([]EdgeRow, 0, len(all))
-		for _, d := range all {
-			if !cutoff.IsZero() {
-				if d.LastSeenAt == nil || d.LastSeenAt.Before(cutoff) {
+		rows := make([]EdgeRow, 0, in.Limit)
+		f.Limit = 500
+		for {
+			if err := callCtx.Err(); err != nil {
+				return "", err
+			}
+			all, err := t.devices.List(callCtx, f)
+			if err != nil {
+				return "", fmt.Errorf("query_devices: list: %w", err)
+			}
+			for _, d := range all {
+				if d == nil {
 					continue
 				}
+				online := d.Online
+				row := EdgeRow{ID: d.ID, Name: d.Name, Hostname: d.Hostname, IPAddress: d.IPAddress, Online: &online, DeviceType: "host", Roles: devicemodel.DecodeRoles(d.Roles), LastSeenAt: d.LastSeenAt, Status: "offline"}
+				if online {
+					row.Status = "online"
+				}
+				statusFilter := row.Status
+				if isVerifiedNetworkDevice(d) {
+					row.Online = nil
+					row.DeviceType = "snmp"
+					row.Status = "unknown"
+					row.LastSeenAt = nil
+					var detail *devicebiz.NetworkDeviceDetail
+					if t.details != nil {
+						detail, err = t.details.GetNetworkDeviceDetail(callCtx, d.ID)
+						if err != nil {
+							return "", fmt.Errorf("query_devices: network detail: %w", err)
+						}
+					}
+					state, err := networkStatus(callCtx, t.devices, detail, time.Now().UTC())
+					if err != nil {
+						return "", fmt.Errorf("query_devices: scanner status: %w", err)
+					}
+					row.NetworkDeviceStatus = &state
+					row.Status = state.ReachabilityStatus
+					row.LastSeenAt = state.LastReachableAt
+					statusFilter = "unknown"
+					if state.ReachabilityStatus == "reachable" {
+						statusFilter = "online"
+					}
+					if state.ReachabilityStatus == "unreachable" {
+						statusFilter = "offline"
+					}
+				}
+				if in.Status != "" && in.Status != statusFilter {
+					continue
+				}
+				if !cutoff.IsZero() && (row.LastSeenAt == nil || row.LastSeenAt.Before(cutoff)) {
+					continue
+				}
+				rows = append(rows, row)
+				if len(rows) >= in.Limit {
+					break
+				}
 			}
-			if in.NameContains != "" && !strings.Contains(d.Name, in.NameContains) && !strings.Contains(d.Hostname, in.NameContains) {
-				continue
-			}
-			rows = append(rows, EdgeRow{
-				ID:         d.ID,
-				Name:       d.Name,
-				Hostname:   d.Hostname,
-				IPAddress:  d.IPAddress,
-				Online:     d.Online,
-				Roles:      devicemodel.DecodeRoles(d.Roles),
-				LastSeenAt: d.LastSeenAt,
-			})
-			if len(rows) >= in.Limit {
+			if len(rows) >= in.Limit || len(all) < f.Limit {
 				break
 			}
+			f.Offset += len(all)
 		}
 		out, err := json.Marshal(map[string]any{
 			"devices": rows,

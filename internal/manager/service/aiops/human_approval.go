@@ -36,10 +36,11 @@ type HumanApprovalBroker struct {
 	mu      sync.Mutex
 	uc      *managerbizapproval.Usecase
 	pending map[string]pendingToolExecution
+	owner   string
 }
 
 func NewHumanApprovalBroker() *HumanApprovalBroker {
-	return &HumanApprovalBroker{pending: make(map[string]pendingToolExecution)}
+	return &HumanApprovalBroker{owner: uuid.NewString(), pending: make(map[string]pendingToolExecution)}
 }
 
 func (b *HumanApprovalBroker) SetUsecase(uc *managerbizapproval.Usecase) {
@@ -67,7 +68,14 @@ func (b *HumanApprovalBroker) ProposeAndAwait(ctx context.Context, req aiopstool
 		delete(b.pending, token)
 		b.mu.Unlock()
 	}
-	a, err := uc.Propose(ctx, managerbizapproval.ProposeInput{
+	var lease *time.Time
+	owner := ""
+	if uc.SupportsExecutionLeases() {
+		until := time.Now().UTC().Add(time.Minute)
+		lease = &until
+		owner = b.owner
+	}
+	a, err := uc.Propose(ctx, managerbizapproval.ProposeInput{ExecutionOwner: owner, ExecutionLeaseUntil: lease,
 		RuntimeVersion: string(aiopschatruntime.VersionFromContext(ctx)),
 		Kind:           GenericToolApprovalKind,
 		Title:          truncateApprovalTitle(req.ToolName + " confirmation"),
@@ -94,6 +102,7 @@ func (b *HumanApprovalBroker) ProposeAndAwait(ctx context.Context, req aiopstool
 		})
 	}
 
+	lastRenewed := time.Now()
 	deadline := time.Now().Add(ApprovalWaitTimeout)
 	ticker := time.NewTicker(approvalPollInterval)
 	defer ticker.Stop()
@@ -113,13 +122,22 @@ func (b *HumanApprovalBroker) ProposeAndAwait(ctx context.Context, req aiopstool
 			switch row.Status {
 			case "executed", "failed":
 				cleanup()
-				if row.ResultJSON != nil {
-					return *row.ResultJSON, nil
-				}
-				return fmt.Sprintf(`{"status":%q}`, row.Status), nil
+				return approvalToolResult(row)
 			case "rejected":
 				cleanup()
 				return `{"status":"rejected","message":"The user rejected this action; it was not run. Do not retry it without new instructions."}`, nil
+			}
+			if owner != "" && row.Status == "pending" && time.Since(lastRenewed) >= 10*time.Second {
+				if err := uc.RenewExecutionLease(ctx, a.ID, owner); err != nil {
+					// 批准可能在读取 pending 与续租之间胜出，不应撤掉已批准操作的执行闭包。
+					latest, readErr := uc.Get(ctx, a.ID)
+					if readErr == nil && latest.Status != "pending" {
+						continue
+					}
+					cleanup()
+					return "", fmt.Errorf("renew approval execution context: %w", err)
+				}
+				lastRenewed = time.Now()
 			}
 			if time.Now().After(deadline) {
 				cleanup()

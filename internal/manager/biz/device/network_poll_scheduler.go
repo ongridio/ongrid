@@ -35,12 +35,18 @@ func (s *NetworkPollScheduler) Start(ctx context.Context) {
 		ticker := time.NewTicker(s.interval)
 		defer ticker.Stop()
 		s.log.Info("network poll scheduler started", slog.Duration("interval", s.interval))
+		var topologyCursor uint64
 		for {
 			select {
 			case <-ctx.Done():
 				s.log.Info("network poll scheduler stopped")
 				return
 			case now := <-ticker.C:
+				next, err := s.uc.ReconcileCollectionTopology(ctx, topologyCursor)
+				topologyCursor = next
+				if err != nil {
+					s.log.Warn("network topology reconciliation failed", slog.Any("err", err))
+				}
 				if _, err := s.uc.PollDueNetworkDevices(ctx, now.UTC(), 10); err != nil {
 					s.log.Warn("network poll tick failed", slog.Any("err", err))
 				}

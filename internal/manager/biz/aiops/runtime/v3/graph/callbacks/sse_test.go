@@ -220,3 +220,15 @@ func TestSSEEvent_TaskNotification_Shape(t *testing.T) {
 		t.Errorf("usage.duration_ms = %v", n.Usage["duration_ms"])
 	}
 }
+
+func TestSSEHandler_FailureEnvelopeIsError(t *testing.T) {
+	cap := &captureSSE{}
+	h := NewSSEHandler(cap.emit)
+	ctx := WithToolCallID(context.Background(), "tc-1")
+	h.OnStart(ctx, toolInfo("query_promql"), &einotool.CallbackInput{ArgumentsInJSON: `{}`})
+	h.OnEnd(ctx, toolInfo("query_promql"), &einotool.CallbackOutput{Response: `{"status":"failed","error":"invalid parameter"}`})
+	events := cap.snapshot()
+	if len(events) != 2 || events[1].Tool.Status != "error" || events[1].Tool.Error != "invalid parameter" {
+		t.Fatalf("events=%+v", events)
+	}
+}

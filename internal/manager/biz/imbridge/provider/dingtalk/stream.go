@@ -4,13 +4,16 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"runtime/debug"
 	"strings"
+	"time"
 
 	"github.com/open-dingtalk/dingtalk-stream-sdk-go/chatbot"
 	"github.com/open-dingtalk/dingtalk-stream-sdk-go/client"
 
 	bizbridge "github.com/ongridio/ongrid/internal/manager/biz/imbridge"
+	"github.com/ongridio/ongrid/internal/manager/biz/imbridge/imformat"
 	model "github.com/ongridio/ongrid/internal/manager/model/imbridge"
 )
 
@@ -54,6 +57,7 @@ func (c *StreamClient) Run(ctx context.Context) error {
 		client.NewAppCredentialConfig(c.app.AppID, c.app.AppSecret),
 	))
 	stream.RegisterChatBotCallbackRouter(c.onMessage)
+	stream.RegisterCardCallbackRouter(c.onCard)
 	c.log.Info("starting dingtalk stream connection")
 	if err := stream.Start(ctx); err != nil {
 		return fmt.Errorf("start dingtalk stream: %w", err)
@@ -69,9 +73,19 @@ func (c *StreamClient) onMessage(_ context.Context, data *chatbot.BotCallbackDat
 	if !ok {
 		return nil, nil
 	}
+	space, callbackChat := "", data.ConversationId
+	if data.ConversationType == "2" {
+		space = "dtv1.card//IM_GROUP." + data.ConversationId
+	} else if data.SenderStaffId != "" {
+		space = "dtv1.card//IM_ROBOT." + data.SenderStaffId
+		callbackChat = data.SenderStaffId
+	}
+	in.ConnectionIdentity = bizbridge.ConnectionIdentity(c.app)
 	sender := senderAdapter{
-		webhook: data.SessionWebhook,
-		replier: chatbot.NewChatbotReplier(),
+		deliverySpace: space, callbackChat: callbackChat,
+		webhook:   data.SessionWebhook,
+		expiresAt: time.UnixMilli(data.SessionWebhookExpiredTime),
+		replier:   chatbot.NewChatbotReplier(),
 	}
 	go func() {
 		defer func() {
@@ -97,7 +111,13 @@ func inboundFromCallback(appID string, data *chatbot.BotCallbackDataModel) (bizb
 	if openID == "" {
 		openID = data.SenderId
 	}
+	scope := data.SenderCorpId
+	if scope == "" {
+		scope = data.ChatbotCorpId
+	}
 	return bizbridge.InboundMessage{
+		Subject:       bizbridge.Subject{Scope: scope, User: data.SenderStaffId},
+		Private:       data.ConversationType == "1",
 		Provider:      model.ProviderDingTalk,
 		AppID:         appID,
 		ChatID:        data.ConversationId,
@@ -117,15 +137,17 @@ type markdownReplier interface {
 // per-message session webhook cannot edit a prior message, so the bridge
 // buffers streamed output and invokes one native Markdown reply with the final answer.
 type senderAdapter struct {
-	webhook string
-	replier markdownReplier
+	deliverySpace, callbackChat string
+	webhook                     string
+	expiresAt                   time.Time
+	replier                     markdownReplier
 }
 
 func (s senderAdapter) SendText(ctx context.Context, _, _ string, text string) (string, error) {
 	if s.webhook == "" {
 		return "", fmt.Errorf("dingtalk: session webhook required")
 	}
-	if err := s.replier.SimpleReplyMarkdown(ctx, s.webhook, []byte("Ongrid"), []byte(text)); err != nil {
+	if err := s.replier.SimpleReplyMarkdown(ctx, s.webhook, []byte("Ongrid"), []byte(imformat.DingTalk(text))); err != nil {
 		return "", fmt.Errorf("dingtalk reply markdown: %w", err)
 	}
 	return "sent", nil
@@ -138,4 +160,20 @@ func NewStreamFactory(log *slog.Logger) bizbridge.StreamClientFactory {
 		}
 		return NewStreamClient(app, bridge, log), nil
 	}
+}
+
+func (s senderAdapter) SplitText(text string) []string {
+	return imformat.MarkdownPages(text, func(page string) bool { return len(imformat.DingTalk(page)) <= 16000 })
+}
+
+func (s senderAdapter) ApprovalReplyContext() (string, time.Time) { return s.webhook, s.expiresAt }
+
+func NewApprovalSender(app *model.ImApp, target *model.ApprovalTarget, webhook string) (bizbridge.Sender, error) {
+	if app.ApprovalTemplateID != "" && target.DeliverySpace != "" {
+		return &approvalSender{app: app, target: target, http: &http.Client{}, base: "https://api.dingtalk.com"}, nil
+	}
+	if webhook == "" || target.ExpiresAt == nil || !target.ExpiresAt.After(time.Now()) {
+		return nil, fmt.Errorf("dingtalk reply context expired")
+	}
+	return senderAdapter{webhook: webhook, expiresAt: *target.ExpiresAt, replier: chatbot.NewChatbotReplier()}, nil
 }

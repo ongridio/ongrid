@@ -39,6 +39,8 @@ func TestMCPApprovalLifecycle(t *testing.T) {
 				t.Fatal(err)
 			}
 			uc := approval.NewUsecase(store.NewRepo(db), nil)
+
+			uc.RequireAuthorization(approval.AuthorizerFunc(func(context.Context, uint64) error { return nil }))
 			var executions atomic.Int32
 			RegisterRuntimeApprovalExecutor(uc, "mcp_call", contract.V3, func(execCtx context.Context, payload string) (string, error) {
 				if contract.VersionFromContext(execCtx) != contract.V3 {
@@ -95,7 +97,7 @@ func TestMCPApprovalLifecycle(t *testing.T) {
 			if executions.Load() != 0 {
 				t.Fatal("executed before confirmation")
 			}
-			want := `{"clusters":["test"]}`
+			want := `"clusters":["test"]`
 			switch decision {
 			case "reject":
 				if err := uc.Reject(ctx, 7, id, "no"); err != nil {
@@ -120,6 +122,17 @@ func TestMCPApprovalLifecycle(t *testing.T) {
 			case got := <-done:
 				if got.err != nil || !strings.Contains(got.result, want) {
 					t.Fatalf("unexpected outcome: %+v; want %s", got, want)
+				}
+				if decision == "approve" || decision == "failure" {
+					var result struct {
+						Approval struct{ ID, Decision, Status string } `json:"_ongrid_approval"`
+					}
+					if err := json.Unmarshal([]byte(got.result), &result); err != nil {
+						t.Fatal(err)
+					}
+					if result.Approval.ID != id || result.Approval.Decision != "approved" {
+						t.Fatalf("model lost human approval evidence: %+v", result.Approval)
+					}
 				}
 			case <-time.After(5 * time.Second):
 				t.Fatal("approval did not complete")

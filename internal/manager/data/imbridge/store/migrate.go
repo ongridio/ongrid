@@ -16,7 +16,7 @@ func Migrate(db *gorm.DB) error {
 			return err
 		}
 	}
-	if err := db.AutoMigrate(&model.ImApp{}, &model.ImThread{}); err != nil {
+	if err := db.AutoMigrate(&model.ImApp{}, &model.ImThread{}, &model.ApprovalTarget{}, &model.ApprovalNotification{}, &model.BindingChallenge{}, &model.IdentityBinding{}, &model.ActionToken{}, &model.DecisionCommand{}, &model.DeliveryGate{}); err != nil {
 		return err
 	}
 	return dbx.BackfillDeleteMarker(db, model.ImApp{}.TableName())

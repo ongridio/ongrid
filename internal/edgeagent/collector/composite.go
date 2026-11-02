@@ -70,7 +70,7 @@ func (c *CompositeCollector) GetHostLoad(ctx context.Context) (tunnel.GetHostLoa
 		if err != nil {
 			return resp, err
 		}
-		if resp.CPUPct != 0 || resp.MemPct != 0 || resp.Load1 != 0 {
+		if resp.CPUSampleStatus == "valid" || resp.CPUPct != 0 || resp.MemPct != 0 || resp.Load1 != 0 {
 			return resp, nil
 		}
 	}

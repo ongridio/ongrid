@@ -1,0 +1,19 @@
+groups:
+  - name: ongrid-im-approvals
+    rules:
+      - alert: OngridIMApprovalDeliveryDelayed
+        expr: ongrid_im_approval_oldest_seconds > 300
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'IM approval delivery delayed for {{ $labels.provider }}'
+          runbook_url: https://github.com/ongridio/ongrid/blob/main/docs/runbooks/im-approval-delivery.md
+      - alert: OngridIMApprovalDeliveryBacklog
+        expr: ongrid_im_approval_backlog > 100
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'IM approval backlog for {{ $labels.provider }}'
+          runbook_url: https://github.com/ongridio/ongrid/blob/main/docs/runbooks/im-approval-delivery.md

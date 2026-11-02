@@ -132,3 +132,56 @@ func TestHostReinstallKeepsIdentityAndRejectsStalePresence(t *testing.T) {
 		t.Fatal("old heartbeat revived current host")
 	}
 }
+
+func TestSNMPScannerBackfillUsesHostAssociationAndPreservesExplicitSelection(t *testing.T) {
+	db := newDeviceTestDB(t)
+	if err := db.AutoMigrate(&edgemodel.Edge{}); err != nil {
+		t.Fatal(err)
+	}
+	host := sampleDevice("scanner")
+	host.ID = 3
+	if err := db.Create(host).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&edgemodel.Edge{ID: 17, AccessKeyID: "snmp-test", DeviceID: &host.ID}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.EdgeDevice{EdgeID: 17, DeviceID: 3, Type: model.EdgeDeviceRelationHost}).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []uint64{19, 20} {
+		if err := db.Create(&model.DeviceNetwork{DeviceID: id}).Error; err != nil {
+			t.Fatal(err)
+		}
+		source := uint64(17)
+		if id == 20 {
+			source = 3
+		} // Same number as a Host is not an association.
+		if err := db.Create(&model.NetworkDiscoveryCandidate{ObserverEdgeID: source, ObservationKey: string(rune(id)), PromotedDeviceID: &id}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := backfillNetworkScanners(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	var p model.DeviceNetwork
+	if err := db.First(&p, "device_id = ?", 19).Error; err != nil {
+		t.Fatal(err)
+	}
+	if p.PollScannerHostDeviceID != 3 {
+		t.Fatalf("scanner=%d want Host 3", p.PollScannerHostDeviceID)
+	}
+	if err := db.Model(&model.DeviceNetwork{}).Where("device_id = ?", 19).Update("poll_scanner_host_device_id", 4).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := backfillNetworkScanners(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	var profiles []model.DeviceNetwork
+	if err := db.Order("device_id").Find(&profiles).Error; err != nil {
+		t.Fatal(err)
+	}
+	if profiles[0].PollScannerHostDeviceID != 4 || profiles[1].PollScannerHostDeviceID != 0 {
+		t.Fatalf("backfill overwrote selection or guessed identity: %+v", profiles)
+	}
+}

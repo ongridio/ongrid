@@ -249,6 +249,7 @@ const (
 	RelMonitors     = "monitors"
 	RelRoutesTo     = "routes_to"
 	RelConnectedTo  = "connected_to"
+	RelCollectsFrom = "collects_from"
 )
 
 // BuiltinRelationTypes is the built-in seed set. The
@@ -315,6 +316,13 @@ func BuiltinRelationTypes() []RelationType {
 			Direction:         string(DirectionSrcToDst),
 			SemanticsTag:      string(SemanticsTraffic),
 			Description:       "src 把流量打到 dst（lb → service, gateway → backend）；上游故障导致下游不可达。",
+		},
+		{
+			Name:        RelCollectsFrom,
+			DisplayName: "采集自", DisplayNameEN: "Collects from", Builtin: true,
+			PropagatesFailure: false, Direction: string(DirectionSrcToDst),
+			SemanticsTag: string(SemanticsObservation),
+			Description:  "扫描源 Host 从目标设备采集数据；不代表网卡直连或物理邻接，不传播故障。",
 		},
 		{
 			Name:              RelConnectedTo,

@@ -12,6 +12,7 @@ import (
 	einomodel "github.com/cloudwego/eino/components/model"
 	einotool "github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 )
 
 // AuditDeps configures the audit handler. Logger is required (a nil
@@ -173,6 +174,7 @@ func (h *AuditHandler) OnEnd(ctx context.Context, info *callbacks.RunInfo, outpu
 		if tout := einotool.ConvCallbackOutput(output); tout != nil {
 			body = tout.Response
 		}
+		status, _ := basetool.ResultOutcome(body)
 		h.deps.Logger.Info("graph stage end",
 			slog.String("session_id", h.deps.SessionID),
 			slog.Uint64("user_id", h.deps.UserID),
@@ -181,7 +183,7 @@ func (h *AuditHandler) OnEnd(ctx context.Context, info *callbacks.RunInfo, outpu
 			slog.String("tool_call_id", entry.toolCallID),
 			slog.Int64("duration_ms", dur.Milliseconds()),
 			slog.Int("result_bytes", len(body)),
-			slog.String("status", "success"),
+			slog.String("status", status),
 		)
 	}
 	return ctx

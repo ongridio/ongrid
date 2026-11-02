@@ -118,19 +118,45 @@ var BashSchema = json.RawMessage(`{
   "properties": {
     "device_ids": {
       "type": "array",
-      "items": {"type": "integer"},
+      "items": {
+        "type": "integer",
+        "minimum": 1
+      },
       "minItems": 1,
       "maxItems": 16,
       "description": "设备 id 列表，一次最多 16 个。fleet 视角看同一条 cmd 在每台机器的输出。"
     },
     "device_id": {
       "type": "integer",
-      "description": "兼容旧参数：单台设备 id。优先使用 device_ids。"
+      "description": "兼容旧参数：单台设备 id。优先使用 device_ids。",
+      "minimum": 1
     },
-    "cmd": {"type": "string", "description": "**单条** shell-like 命令，跑在每个 device_id 上。读命令直接走只读 sandbox；写命令只在用户明确要求时触发内置确认卡，批准后才执行。支持 pipes (|)；读路径不支持 redirects / ; && || $() <() heredocs / backticks。如果想跑两条不同命令，分两次调用。"},
-    "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 300, "description": "Optional per-device timeout override. Default 300s; max 300s. 共享给所有 device。"}
+    "cmd": {
+      "type": "string",
+      "description": "**单条** shell-like 命令，跑在每个 device_id 上。读命令直接走只读 sandbox；写命令只在用户明确要求时触发内置确认卡，批准后才执行。支持 pipes (|)；读路径不支持 redirects / ; && || $() <() heredocs / backticks。如果想跑两条不同命令，分两次调用。"
+    },
+    "timeout_seconds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 300,
+      "description": "Optional per-device timeout override. Default 300s; max 300s. 共享给所有 device。"
+    }
   },
-  "required": ["cmd"]
+  "required": [
+    "cmd"
+  ],
+  "anyOf": [
+    {
+      "required": [
+        "device_ids"
+      ]
+    },
+    {
+      "required": [
+        "device_id"
+      ]
+    }
+  ]
 }`)
 
 // bashCallTimeout caps the manager → edge round-trip. The edge

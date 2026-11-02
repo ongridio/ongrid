@@ -8,6 +8,7 @@ import (
 	"time"
 
 	bizbridge "github.com/ongridio/ongrid/internal/manager/biz/imbridge"
+	"github.com/ongridio/ongrid/internal/manager/biz/imbridge/imformat"
 	model "github.com/ongridio/ongrid/internal/manager/model/imbridge"
 )
 
@@ -80,7 +81,13 @@ func (c *StreamClient) Run(ctx context.Context) error {
 			if u.UpdateID >= offset {
 				offset = u.UpdateID + 1 // ack so this update isn't redelivered
 			}
-			c.handle(u)
+			if u.CallbackQuery != nil {
+				if err := c.handleCallback(ctx, u.CallbackQuery); err != nil {
+					c.log.Warn("telegram approval callback acknowledgement failed")
+				}
+			} else {
+				c.handle(u)
+			}
 		}
 	}
 }
@@ -109,7 +116,9 @@ func (c *StreamClient) handle(u Update) {
 			slog.String("chat_id", chatID))
 		return
 	}
-	in := bizbridge.InboundMessage{
+	in := bizbridge.InboundMessage{ConnectionIdentity: bizbridge.ConnectionIdentity(c.app),
+		Subject:       bizbridge.Subject{User: openID},
+		Private:       m.Chat.Type == "private",
 		Provider:      model.ProviderTelegram,
 		AppID:         c.app.AppID,
 		ChatID:        chatID,
@@ -165,4 +174,14 @@ func NewStreamFactory(log *slog.Logger) bizbridge.StreamClientFactory {
 		}
 		return NewStreamClient(app, bridge, log), nil
 	}
+}
+
+func (s senderAdapter) SplitText(text string) []string {
+	return imformat.MarkdownPages(text, func(page string) bool { return imformat.TelegramFits(page) })
+}
+
+func NewApprovalSender(app *model.ImApp, target *model.ApprovalTarget, _ string) (bizbridge.Sender, error) {
+	client := NewClient(app.AppSecret)
+	client.durable = true
+	return senderAdapter{client: client, chatID: target.ChatID}, nil
 }

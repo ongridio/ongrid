@@ -1,0 +1,2 @@
+# Unified diff context uses a leading space before the original Go tabs.
+deploy/frontier-patches/*.patch whitespace=-space-before-tab

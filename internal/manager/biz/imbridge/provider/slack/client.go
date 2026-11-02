@@ -19,8 +19,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	bridge "github.com/ongridio/ongrid/internal/manager/biz/imbridge"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -156,6 +158,10 @@ func (c *Client) call(ctx context.Context, method, token string, body any, dst a
 	}
 	raw, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
+	if resp.StatusCode == 429 {
+		seconds, _ := strconv.Atoi(resp.Header.Get("Retry-After"))
+		return &bridge.DeliveryError{Code: "rate_limited", RetryAfter: time.Duration(max(seconds, 1)) * time.Second}
+	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("slack %s: status %s body=%s", method, resp.Status, truncate(raw, 200))
 	}
@@ -164,6 +170,12 @@ func (c *Client) call(ctx context.Context, method, token string, body any, dst a
 		return fmt.Errorf("slack %s: decode envelope: %w (body=%s)", method, uerr, truncate(raw, 200))
 	}
 	if !env.OK {
+		switch env.Error {
+		case "message_not_found", "cant_update_message":
+			return &bridge.DeliveryError{Code: "cannot_edit", CannotEdit: true}
+		case "channel_not_found", "not_in_channel", "invalid_auth", "account_inactive", "token_revoked":
+			return &bridge.DeliveryError{Code: env.Error, Permanent: true}
+		}
 		return fmt.Errorf("slack %s: %s", method, env.Error)
 	}
 	if dst != nil {

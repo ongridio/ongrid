@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	bridge "github.com/ongridio/ongrid/internal/manager/biz/imbridge"
 	"io"
 	"net/http"
 	"strings"
@@ -40,9 +41,10 @@ func backoffDelay(attempt int) time.Duration {
 // the manager's proxy config carries it out to api.telegram.org. Per-call
 // timeouts come from the caller's context (long-poll vs. send differ).
 type Client struct {
-	token string
-	hc    *http.Client
-	base  string // API root; overridable in tests, defaults to the public API
+	durable bool
+	token   string
+	hc      *http.Client
+	base    string // API root; overridable in tests, defaults to the public API
 }
 
 // NewClient builds a client for one bot token.
@@ -100,7 +102,7 @@ func (c *Client) call(ctx context.Context, method string, body any) (json.RawMes
 		// errors (5xx) — decided on HTTP status before decoding, since a 5xx
 		// body may not even be valid JSON. Other 4xx (400/401/403) are hard
 		// errors; retrying won't help.
-		if attempt < maxCallRetries && (resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500) {
+		if !c.durable && attempt < maxCallRetries && (resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500) {
 			wait := backoffDelay(attempt)
 			if resp.StatusCode == http.StatusTooManyRequests {
 				var e apiResp
@@ -124,6 +126,22 @@ func (c *Client) call(ctx context.Context, method string, body any) (json.RawMes
 			return nil, fmt.Errorf("%s decode: %w (body=%s)", method, uerr, truncate(raw, 200))
 		}
 		if !env.OK {
+			if c.durable {
+				if env.ErrorCode == 429 {
+					wait := time.Second
+					if env.Parameters != nil && env.Parameters.RetryAfter > 0 {
+						wait = time.Duration(env.Parameters.RetryAfter) * time.Second
+					}
+					return nil, &bridge.DeliveryError{Code: "rate_limited", RetryAfter: wait}
+				}
+				if strings.Contains(env.Description, "message to edit not found") || strings.Contains(env.Description, "message can't be edited") {
+					return nil, &bridge.DeliveryError{Code: "cannot_edit", CannotEdit: true}
+				}
+				if env.ErrorCode == 401 || env.ErrorCode == 403 {
+					return nil, &bridge.DeliveryError{Code: "access_unavailable", Permanent: true}
+				}
+			}
+
 			return nil, fmt.Errorf("telegram %s: %d %s", method, env.ErrorCode, env.Description)
 		}
 		return env.Result, nil
@@ -132,8 +150,9 @@ func (c *Client) call(ctx context.Context, method string, body any) (json.RawMes
 
 // Update is one getUpdates entry (only the fields the bridge consumes).
 type Update struct {
-	UpdateID int `json:"update_id"`
-	Message  *struct {
+	UpdateID      int            `json:"update_id"`
+	CallbackQuery *callbackQuery `json:"callback_query"`
+	Message       *struct {
 		MessageID int `json:"message_id"`
 		From      *struct {
 			ID        int64  `json:"id"`
@@ -154,7 +173,7 @@ func (c *Client) GetUpdates(ctx context.Context, offset, timeoutSec int) ([]Upda
 	res, err := c.call(ctx, "getUpdates", map[string]any{
 		"offset":          offset,
 		"timeout":         timeoutSec,
-		"allowed_updates": []string{"message"},
+		"allowed_updates": []string{"message", "callback_query"},
 	})
 	if err != nil {
 		return nil, err

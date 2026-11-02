@@ -487,6 +487,16 @@ docker-build-broker: ## [dev] 从上游源码本地构建 singchia/frontier:$(FR
 			--load $(FRONTIER_SRC); \
 	fi
 
+# Candidate fix, deliberately separate from release and normal broker builds.
+FRONTIER_RPC_FIX_IMAGE ?= singchia/frontier:1.2.4-ongrid-rpc.1
+.PHONY: docker-build-broker-rpc-fix
+docker-build-broker-rpc-fix: ## [dev] 构建待验收的 Frontier v1.2.4 RPC deadline 补丁镜像
+	test -d "$(FRONTIER_SRC)"
+	docker buildx build --platform $(PLATFORM) \
+		--build-context ongrid-frontier-patches=./deploy/frontier-patches \
+		-t "$(FRONTIER_RPC_FIX_IMAGE)" -f deploy/Dockerfile.frontier-rpc-fix \
+		$(DOCKER_BUILD_BROKER_CACHE_ARGS) --load "$(FRONTIER_SRC)"
+
 FETCH_CURL_FLAGS ?= -fL --retry 3 --retry-all-errors --retry-delay 3 --connect-timeout 15 --speed-time 60 --speed-limit 1024 --show-error
 
 # OpenTelemetry Collector contrib bundle (logs, traces, and profiles plugins).
@@ -926,3 +936,10 @@ test-agent-runtime: ## 统一 Agent runtime 回归（tools 依赖 Linux cmdpolic
 build-host-identity-probe: ## 构建 Host/Edge 隔离验收探针（不执行系统命令）
 	@mkdir -p $(BIN_DIR)
 	$(GO_BUILD) -o $(BIN_DIR)/host-identity-probe ./tests/acceptance/hostidentity/probe
+
+.PHONY: test-im-approval test-im-approval-mysql
+test-im-approval: ## IM 绑定、审批回调、持久化和平台契约回归
+	go test -race ./tests/imapproval ./internal/manager/biz/imbridge/... ./internal/manager/data/imbridge/store ./internal/manager/biz/approval ./internal/manager/data/approval/store ./internal/manager/server/imbridge
+
+test-im-approval-mysql: ## 独立 MySQL 8.4 容器验证 IM 审批增量迁移与执行链路
+	bash scripts/tests/im-approval-mysql.sh

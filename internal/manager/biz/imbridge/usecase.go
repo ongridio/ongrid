@@ -40,16 +40,17 @@ func NewUC(repo AdminRepo, health *StreamHealthStore) *UC {
 
 // AppInput is the mutation payload.
 type AppInput struct {
-	Provider      string
-	Mode          string
-	Name          string
-	AppID         string
-	AppSecret     string
-	VerifyToken   string
-	EncryptKey    string
-	AllowFrom     string // Telegram / Slack sender allowlist; see ParseAllowFrom
-	Enabled       bool
-	DefaultLocale string // "" | "en" | "zh" — see model.ImApp.DefaultLocale
+	ApprovalTemplateID string
+	Provider           string
+	Mode               string
+	Name               string
+	AppID              string
+	AppSecret          string
+	VerifyToken        string
+	EncryptKey         string
+	AllowFrom          string // Telegram / Slack sender allowlist; see ParseAllowFrom
+	Enabled            bool
+	DefaultLocale      string // "" | "en" | "zh" — see model.ImApp.DefaultLocale
 }
 
 // ParseAllowFrom splits a raw allowlist (comma / space / newline / semicolon
@@ -102,6 +103,9 @@ func (in *AppInput) validate() error {
 	// {en, zh} is rejected so a typo'd "EN-us" doesn't silently degrade
 	// to no-directive behaviour. Strip the region tag down to the primary
 	// subtag so en-US / zh-CN are also accepted.
+	if len(in.ApprovalTemplateID) > 128 {
+		return fmt.Errorf("%w: approval template too long", errs.ErrInvalid)
+	}
 	loc := strings.ToLower(strings.TrimSpace(in.DefaultLocale))
 	if loc != "" {
 		loc = strings.SplitN(loc, "-", 2)[0]
@@ -212,18 +216,19 @@ func (uc *UC) CreateApp(ctx context.Context, in AppInput) (*model.ImApp, error) 
 	}
 	now := time.Now().UTC()
 	app := &model.ImApp{
-		Provider:      in.Provider,
-		Mode:          in.Mode,
-		Name:          in.Name,
-		AppID:         in.AppID,
-		AppSecret:     in.AppSecret,
-		VerifyToken:   in.VerifyToken,
-		EncryptKey:    in.EncryptKey,
-		AllowFrom:     in.AllowFrom,
-		Enabled:       in.Enabled,
-		DefaultLocale: in.DefaultLocale,
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		Provider:           in.Provider,
+		Mode:               in.Mode,
+		Name:               in.Name,
+		AppID:              in.AppID,
+		AppSecret:          in.AppSecret,
+		VerifyToken:        in.VerifyToken,
+		EncryptKey:         in.EncryptKey,
+		AllowFrom:          in.AllowFrom,
+		Enabled:            in.Enabled,
+		DefaultLocale:      in.DefaultLocale,
+		ApprovalTemplateID: in.ApprovalTemplateID,
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	}
 	if err := uc.repo.CreateApp(ctx, app); err != nil {
 		return nil, fmt.Errorf("create im_app: %w", err)
@@ -253,6 +258,7 @@ func (uc *UC) UpdateApp(ctx context.Context, id uint64, in AppInput) (*model.ImA
 	cur.AllowFrom = in.AllowFrom
 	cur.Enabled = in.Enabled
 	cur.DefaultLocale = in.DefaultLocale
+	cur.ApprovalTemplateID = in.ApprovalTemplateID
 	cur.UpdatedAt = time.Now().UTC()
 	if err := uc.repo.UpdateApp(ctx, cur); err != nil {
 		return nil, fmt.Errorf("update im_app: %w", err)

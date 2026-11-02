@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime"
-	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -18,7 +17,6 @@ import (
 	"github.com/shirou/gopsutil/v3/load"
 	"github.com/shirou/gopsutil/v3/mem"
 	gnet "github.com/shirou/gopsutil/v3/net"
-	"github.com/shirou/gopsutil/v3/process"
 
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
@@ -115,62 +113,29 @@ func (c *EmbeddedCollector) HostInfo(ctx context.Context) (tunnel.HostInfo, erro
 // and running the mapper. Result is the same shape Collect returns but
 // in the wire response struct.
 func (c *EmbeddedCollector) GetHostLoad(ctx context.Context) (tunnel.GetHostLoadResponse, error) {
+	// 独立采样基线，交互式请求不改变定时采集的 counter 窗口。
+	mapper := NewMapper()
+	first, err := c.snapshot(ctx)
+	if err != nil && len(first) == 0 {
+		return tunnel.GetHostLoadResponse{}, fmt.Errorf("host load snapshot: %w", err)
+	}
+	mapper.MapToHostPoint(time.Now(), first)
+	if err := waitCPUSample(ctx); err != nil {
+		return tunnel.GetHostLoadResponse{}, err
+	}
+	families, err := c.snapshot(ctx)
+	if err != nil && len(families) == 0 {
+		return tunnel.GetHostLoadResponse{}, fmt.Errorf("host load snapshot: %w", err)
+	}
 	now := time.Now()
-	families, _ := c.snapshot(ctx)
-	hp := c.mapper.MapToHostPoint(now, families)
-	return tunnel.GetHostLoadResponse{
-		CPUPct:      hp.CPUPct,
-		MemPct:      hp.MemPct,
-		DiskUsedPct: hp.DiskUsedPct,
-		Load1:       hp.Load1,
-		Load5:       hp.Load5,
-		Load15:      hp.Load15,
-		SampledAt:   now.Unix(),
-	}, nil
+	hp := mapper.MapToHostPoint(now, families)
+	return tunnel.GetHostLoadResponse{CPUPct: hp.CPUPct, CPUSampleStatus: hp.CPUSampleStatus, CPUWindowSeconds: hp.CPUWindowSeconds, MemPct: hp.MemPct, DiskUsedPct: hp.DiskUsedPct, Load1: hp.Load1, Load5: hp.Load5, Load15: hp.Load15, SampledAt: now.Unix()}, nil
 }
 
 // GetProcessList walks the kernel process table via gopsutil and returns
 // topN entries sorted by cpu or mem.
 func (c *EmbeddedCollector) GetProcessList(ctx context.Context, topN int, sortBy string) (tunnel.GetProcessListResponse, error) {
-	if topN <= 0 {
-		topN = 20
-	}
-	resp := tunnel.GetProcessListResponse{SampledAt: time.Now().Unix()}
-	procs, err := process.ProcessesWithContext(ctx)
-	if err != nil {
-		return resp, fmt.Errorf("processes: %w", err)
-	}
-	out := make([]tunnel.ProcessInfo, 0, len(procs))
-	for _, p := range procs {
-		pi := tunnel.ProcessInfo{PID: p.Pid}
-		if name, err := p.NameWithContext(ctx); err == nil {
-			pi.Name = name
-		}
-		if cmd, err := p.CmdlineWithContext(ctx); err == nil {
-			pi.Cmdline = cmd
-		}
-		if u, err := p.UsernameWithContext(ctx); err == nil {
-			pi.User = u
-		}
-		if c, err := p.CPUPercentWithContext(ctx); err == nil {
-			pi.CPUPct = c
-		}
-		if m, err := p.MemoryPercentWithContext(ctx); err == nil {
-			pi.MemPct = float64(m)
-		}
-		out = append(out, pi)
-	}
-	switch sortBy {
-	case tunnel.ProcessSortByMem:
-		sort.Slice(out, func(i, j int) bool { return out[i].MemPct > out[j].MemPct })
-	default:
-		sort.Slice(out, func(i, j int) bool { return out[i].CPUPct > out[j].CPUPct })
-	}
-	if len(out) > topN {
-		out = out[:topN]
-	}
-	resp.Processes = out
-	return resp, nil
+	return collectHostProcesses(ctx, topN, sortBy)
 }
 
 // snapshot reads all configured gopsutil sources and converts them into a

@@ -20,7 +20,6 @@ import (
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/host"
 	"github.com/shirou/gopsutil/v3/mem"
-	"github.com/shirou/gopsutil/v3/process"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
@@ -251,7 +250,7 @@ func (s *Scraper) HostInfo(ctx context.Context) (tunnel.HostInfo, error) {
 // host-level metrics.
 func (s *Scraper) GetHostLoad(ctx context.Context) (tunnel.GetHostLoadResponse, error) {
 	now := time.Now()
-	resp := tunnel.GetHostLoadResponse{SampledAt: now.Unix()}
+	resp := tunnel.GetHostLoadResponse{SampledAt: now.Unix(), CPUSampleStatus: "unavailable"}
 
 	s.mu.RLock()
 	keys := make([]string, 0, len(s.snapshot))
@@ -272,10 +271,12 @@ func (s *Scraper) GetHostLoad(ctx context.Context) (tunnel.GetHostLoadResponse, 
 			continue
 		}
 		hp := snap.hostPoint
-		if hp.CPUPct == 0 && hp.MemPct == 0 && hp.Load1 == 0 {
+		if hp.CPUSampleStatus != "valid" && hp.CPUPct == 0 && hp.MemPct == 0 && hp.Load1 == 0 {
 			continue
 		}
 		resp.CPUPct = hp.CPUPct
+		resp.CPUSampleStatus = hp.CPUSampleStatus
+		resp.CPUWindowSeconds = hp.CPUWindowSeconds
 		resp.MemPct = hp.MemPct
 		resp.DiskUsedPct = hp.DiskUsedPct
 		resp.Load1 = hp.Load1
@@ -290,45 +291,7 @@ func (s *Scraper) GetHostLoad(ctx context.Context) (tunnel.GetHostLoadResponse, 
 // GetProcessList delegates to gopsutil — scraped targets don't carry
 // process tables in any standard form.
 func (s *Scraper) GetProcessList(ctx context.Context, topN int, sortBy string) (tunnel.GetProcessListResponse, error) {
-	if topN <= 0 {
-		topN = 20
-	}
-	resp := tunnel.GetProcessListResponse{SampledAt: time.Now().Unix()}
-	procs, err := process.ProcessesWithContext(ctx)
-	if err != nil {
-		return resp, fmt.Errorf("processes: %w", err)
-	}
-	out := make([]tunnel.ProcessInfo, 0, len(procs))
-	for _, p := range procs {
-		pi := tunnel.ProcessInfo{PID: p.Pid}
-		if name, err := p.NameWithContext(ctx); err == nil {
-			pi.Name = name
-		}
-		if cmd, err := p.CmdlineWithContext(ctx); err == nil {
-			pi.Cmdline = cmd
-		}
-		if u, err := p.UsernameWithContext(ctx); err == nil {
-			pi.User = u
-		}
-		if c, err := p.CPUPercentWithContext(ctx); err == nil {
-			pi.CPUPct = c
-		}
-		if m, err := p.MemoryPercentWithContext(ctx); err == nil {
-			pi.MemPct = float64(m)
-		}
-		out = append(out, pi)
-	}
-	switch sortBy {
-	case tunnel.ProcessSortByMem:
-		sort.Slice(out, func(i, j int) bool { return out[i].MemPct > out[j].MemPct })
-	default:
-		sort.Slice(out, func(i, j int) bool { return out[i].CPUPct > out[j].CPUPct })
-	}
-	if len(out) > topN {
-		out = out[:topN]
-	}
-	resp.Processes = out
-	return resp, nil
+	return collectHostProcesses(ctx, topN, sortBy)
 }
 
 // --- helpers ------------------------------------------------------------

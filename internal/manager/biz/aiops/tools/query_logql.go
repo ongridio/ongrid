@@ -203,11 +203,17 @@ func runQueryLogQL(ctx context.Context, querier LogQuerier, args []byte) ([]byte
 	if limit <= 0 {
 		limit = 200
 	}
+	if limit > 5000 {
+		return nil, fmt.Errorf("query_logql: limit must not exceed 5000")
+	}
 	direction := in.Direction
 	if direction == "" {
 		direction = "backward"
 	}
 
+	if direction != "backward" && direction != "forward" {
+		return nil, fmt.Errorf("query_logql: direction must be backward or forward")
+	}
 	callCtx, cancel := context.WithTimeout(ctx, queryLogqlCallTimeout)
 	defer cancel()
 

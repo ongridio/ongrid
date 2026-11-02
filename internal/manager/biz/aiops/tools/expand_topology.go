@@ -39,16 +39,20 @@ var expandTopologySchema = json.RawMessage(`{
   "properties": {
     "node_id": {
       "type": "integer",
-      "description": "Topology node id to BFS from. Mutually exclusive with device_id; one of the two is required."
+      "description": "Topology node id to BFS from. Mutually exclusive with device_id; one of the two is required.",
+      "minimum": 1
     },
     "device_id": {
       "type": "integer",
-      "description": "Resolve a Device's linked node and BFS from there. Convenience for when the LLM has a device_id from query_devices but not yet a node_id."
+      "description": "Resolve a Device's linked node and BFS from there. Convenience for when the LLM has a device_id from query_devices but not yet a node_id.",
+      "minimum": 1
     },
     "depth": {
       "type": "integer",
       "description": "Max BFS hops. Default 2; cap 5.",
-      "default": 2
+      "default": 2,
+      "minimum": 1,
+      "maximum": 5
     },
     "only_propagating": {
       "type": "boolean",
@@ -57,11 +61,27 @@ var expandTopologySchema = json.RawMessage(`{
     },
     "direction": {
       "type": "string",
-      "enum": ["both", "downstream", "upstream"],
+      "enum": [
+        "both",
+        "downstream",
+        "upstream"
+      ],
       "description": "downstream = follow propagation direction (failure on src reaches these); upstream = inverse (these can cause failure on src). Default both for a symmetric blast radius.",
       "default": "both"
     }
-  }
+  },
+  "oneOf": [
+    {
+      "required": [
+        "node_id"
+      ]
+    },
+    {
+      "required": [
+        "device_id"
+      ]
+    }
+  ]
 }`)
 
 // expandTopologyArgs mirrors expandTopologySchema. The LLM marshals
@@ -135,6 +155,9 @@ func (t *ExpandTopologyTool) InvokableRun(ctx context.Context, argsJSON string, 
 	var in expandTopologyArgs
 	if err := json.Unmarshal([]byte(argsJSON), &in); err != nil {
 		return "", fmt.Errorf("expand_topology: bad args: %w", err)
+	}
+	if in.NodeID != 0 && in.DeviceID != 0 {
+		return "", fmt.Errorf("expand_topology: node_id and device_id are mutually exclusive")
 	}
 	if in.NodeID == 0 && in.DeviceID == 0 {
 		return "", fmt.Errorf("expand_topology: one of node_id or device_id is required")

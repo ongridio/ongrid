@@ -68,10 +68,14 @@ func (t *TenantBoundTool) InvokableRun(ctx context.Context, argsJSON string, opt
 	// inspect the schema. If the schema doesn't declare it, skip
 	// injection — keeps this decorator safe to apply to every tool.
 	info, err := t.inner.Info(ctx)
-	if err != nil || info == nil || len(info.Parameters) == 0 {
+	if err != nil || info == nil {
 		return t.inner.InvokableRun(ctx, argsJSON, opts...)
 	}
-	if !schemaHasTenantID(info.Parameters) {
+	parameters := info.Parameters
+	if len(info.ExecutionParameters) > 0 {
+		parameters = info.ExecutionParameters
+	}
+	if !schemaHasTenantID(parameters) {
 		return t.inner.InvokableRun(ctx, argsJSON, opts...)
 	}
 

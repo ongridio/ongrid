@@ -120,6 +120,16 @@ func newFixture(t *testing.T, confirmation ...bool) *fixture {
 	require.NoError(t, err)
 	s := store.New(db)
 	a := approval.NewUsecase(approvaldata.NewRepo(db), log)
+	a.RequireAuthorization(approval.AuthorizerFunc(func(ctx context.Context, id uint64) error {
+		var current iammodel.User
+		if err := db.WithContext(ctx).First(&current, id).Error; err != nil {
+			return err
+		}
+		if current.Role != iammodel.RoleAdmin || current.Status != iammodel.StatusActive {
+			return errs.ErrForbidden
+		}
+		return nil
+	}))
 	e := &biz.Engine{Auth: auth, Audit: audit, Store: s, Approvals: a, WritesEnabled: true, Log: log, BaseURL: "https://example.test"}
 	resources := service.Resources{Monitor: monitorbiz.New(monitordata.NewRepo(db), nil, log)}
 	e.Catalog, err = biz.NewCatalog(append(service.ProjectTools(resources.Tools()), e.ControlTools()...))

@@ -75,8 +75,8 @@ export function NodeNeighbors({ nodeID, limit = 200 }: Props) {
     return (
       <div className="rounded-lg border border-dashed border-zinc-800 bg-zinc-900/30 px-4 py-6 text-center text-xs text-zinc-500">
         {tr(
-          '该设备尚未链到拓扑节点（node_id 为空）— 等下次后台 migrate 补齐',
-          'This device is not yet linked to a topology node (node_id is null) — the next backend migrate will backfill it',
+          '设备拓扑信息尚未就绪，请稍后刷新。',
+          'Device topology is not ready yet. Refresh shortly.',
         )}
       </div>
     );
@@ -122,8 +122,8 @@ export function NodeNeighbors({ nodeID, limit = 200 }: Props) {
       {neighbors.length === 0 ? (
         <div className="rounded-lg border border-dashed border-zinc-800 px-3 py-4 text-center text-xs text-zinc-500">
           {tr(
-            '没有关系。去 /topology 给它加成员 / 依赖关系。',
-            'No relations. Go to /topology to add member_of / depends_on edges.',
+            '暂无关联关系。',
+            'No relationships yet.',
           )}
         </div>
       ) : (
@@ -175,8 +175,9 @@ function NeighborRow({
     <li className="flex items-center gap-2 rounded-md border border-zinc-800/60 bg-zinc-900/30 px-2.5 py-1.5 text-[11px]">
       <span className={`font-mono ${TAG_COLOR[tag] ?? 'text-zinc-500'}`}>{arrow}</span>
       <span className={`rounded bg-zinc-800 px-1 py-0.5 font-mono ${TAG_COLOR[tag] ?? 'text-zinc-300'}`}>
-        {rel.type}
+        {rel.type === 'collects_from' ? tr('采集关系', 'Collection') : rel.type}
       </span>
+      {rel.type === 'collects_from' && <span className="text-zinc-500">{rel.props?.enabled === false ? tr('轮询已停用', 'Polling disabled') : tr('SNMP 采集', 'SNMP collection')}</span>}
       {propagates && (
         <span className="rounded bg-amber-500/15 px-1 py-0.5 text-[10px] text-amber-300">
           {tr('传故障', 'propagates')}

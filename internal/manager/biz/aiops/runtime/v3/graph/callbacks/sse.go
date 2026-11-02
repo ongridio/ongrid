@@ -2,6 +2,7 @@ package callbacks
 
 import (
 	"context"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -320,13 +321,15 @@ func (h *SSEHandler) OnEnd(ctx context.Context, info *callbacks.RunInfo, output 
 		if tout != nil {
 			body = tout.Response
 		}
+		status, detail := basetool.ResultOutcome(body)
 		h.emit(SSEEvent{
 			Type: SSEEventToolEnd,
 			Tool: &ToolPayload{
 				ToolCallID: key,
 				Name:       info.Name,
 				ArgsJSON:   ts.argsJSON,
-				Status:     "success",
+				Status:     status,
+				Error:      detail,
 				StartedAt:  ts.at,
 				EndedAt:    &endedAt,
 				DurationMs: dur,

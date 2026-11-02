@@ -67,7 +67,7 @@ type Props = {
 };
 
 export function MessageBubble({ message, sessionId, onConfirmConfigDraft, hideActiveOperations }: Props) {
-  if (message.kind === 'tool_card' && message.tool_call) {
+  if ((message.kind === 'tool_card' || message.role === 'tool') && message.tool_call) {
     return <ToolCallSummaryBlock call={fromSummary(message.tool_call)} onConfirmConfigDraft={onConfirmConfigDraft} hideActiveOperations={hideActiveOperations} />;
   }
   if (message.role === 'tool') return <ToolBubble message={message} onConfirmConfigDraft={onConfirmConfigDraft} hideActiveOperations={hideActiveOperations} />;
@@ -280,7 +280,7 @@ function ToolCallSummaryBlock({
         )}
         {typeof call.device_id === 'number' && (
           <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">
-            edge#{call.device_id}
+            host#{call.device_id}
           </span>
         )}
         <span className="ml-auto flex items-center gap-2 text-[11px] text-zinc-500">

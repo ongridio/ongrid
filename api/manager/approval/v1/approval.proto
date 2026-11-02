@@ -26,6 +26,7 @@ message Approval {
   string runtime_version = 16;
   // Live external operation state on console detail and decision responses.
   ExternalOperationResult operation = 17;
+  google.protobuf.Timestamp execution_lease_until = 18;
 }
 
 message ExternalOperationResult {

@@ -2,6 +2,7 @@ package aiops
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -36,8 +37,14 @@ func (m *v2MCPReviewModel) Generate(_ context.Context, input []*schema.Message, 
 		return &schema.Message{Role: schema.Assistant, ToolCalls: []schema.ToolCall{{ID: "call-445", Type: "function", Function: schema.FunctionCall{Name: tools.MCPToolName("test", "cluster.list"), Arguments: `{}`}}}}, nil
 	}
 	for _, msg := range input {
-		if msg.Role == schema.Tool && msg.Content == `{"clusters":["test"]}` {
-			m.sawResult = true
+		if msg.Role == schema.Tool {
+			var result struct {
+				Clusters []string                              `json:"clusters"`
+				Approval struct{ ID, Decision, Status string } `json:"_ongrid_approval"`
+			}
+			if err := json.Unmarshal([]byte(msg.Content), &result); err == nil {
+				m.sawResult = len(result.Clusters) == 1 && result.Clusters[0] == "test" && result.Approval.ID != "" && result.Approval.Decision == "approved" && result.Approval.Status == "executed"
+			}
 		}
 	}
 	return &schema.Message{Role: schema.Assistant, Content: "Cluster result received"}, nil
@@ -75,6 +82,8 @@ func TestV2MCPApprovalRuntimeResumesWithResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	uc := approval.NewUsecase(approvalstore.NewRepo(db), nil)
+
+	uc.RequireAuthorization(approval.AuthorizerFunc(func(context.Context, uint64) error { return nil }))
 	uc.RegisterRuntimeExecutor("mcp_call", "v2", func(context.Context, string) (string, error) { return `{"clusters":["test"]}`, nil })
 	repo := chatstore.NewSessionRepoWithAttachmentRoot(db, t.TempDir())
 	sess := &chatmodel.Session{ID: "session-445", UserID: 7}

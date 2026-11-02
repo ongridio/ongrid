@@ -17,6 +17,8 @@ import (
 
 // Approval is one pending/decided dangerous action.
 type Approval struct {
+	ExecutionOwner      string     `gorm:"size:64" json:"-"`
+	ExecutionLeaseUntil *time.Time `gorm:"index" json:"execution_lease_until,omitempty"`
 	// RuntimeVersion is immutable execution ownership, independent of the current default.
 	RuntimeVersion string `gorm:"size:16;column:runtime_version" json:"runtime_version,omitempty"`
 	ID             string `gorm:"primaryKey;type:char(36);column:id" json:"id"`
@@ -82,3 +84,6 @@ const (
 	SourceAgent = "agent"
 	SourceFlow  = "flow"
 )
+
+// AgentWaitTimeout 与同步会话等待保持一致；工作流和异步安装审批不受此限制。
+const AgentWaitTimeout = 30 * time.Minute

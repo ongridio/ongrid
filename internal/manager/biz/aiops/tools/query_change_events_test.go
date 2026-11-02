@@ -93,3 +93,14 @@ func TestQueryChangeEventsTool_BadArgs(t *testing.T) {
 		t.Error("expected error for non-RFC3339 around_ts")
 	}
 }
+
+func TestQueryChangeEventsRejectsOversizedWindowBeforeIO(t *testing.T) {
+	fake := &fakeAuditLister{}
+	tool := NewQueryChangeEventsTool(fake, nil)
+	if _, err := tool.InvokableRun(context.Background(), `{"window_minutes":1441}`); err == nil {
+		t.Fatal("oversized window accepted")
+	}
+	if !fake.gotFrom.IsZero() {
+		t.Fatal("invalid window reached storage")
+	}
+}

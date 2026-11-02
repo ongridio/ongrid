@@ -51,6 +51,61 @@ LEGACY_PREVIOUS=$STAGE_DIR/previous
 
 log() { logger -t ongrid-edge-upgrade "$*"; }
 
+# 配置迁移使用独立 drop-in，保留用户 unit 的其余配置。测试可重定向目录。
+SYSTEMD_UNIT_DIR=${ONGRID_EDGE_UPGRADE_SYSTEMD_DIR:-/etc/systemd/system}
+CONFIG_DROPIN=$SYSTEMD_UNIT_DIR/ongrid-edge.service.d/90-ongrid-host-filesystem.conf
+CONFIG_BACKUP=$STAGE_DIR/systemd_config.previous
+CONFIG_STATE=$STAGE_DIR/systemd_config_previous_state
+CONFIG_READY=$STAGE_DIR/systemd_config_ready
+BOOTSTRAP_REQUEST=$STAGE_DIR/systemd_bootstrap_request
+
+restore_systemd_config() {
+  [[ -f $CONFIG_STATE ]] || return 0
+  case "$(cat "$CONFIG_STATE")" in
+    existing) cp -p "$CONFIG_BACKUP" "$CONFIG_DROPIN.restore" && mv -f "$CONFIG_DROPIN.restore" "$CONFIG_DROPIN" || return 1 ;;
+    absent) rm -f "$CONFIG_DROPIN" || return 1 ;;
+    *) return 1 ;;
+  esac
+  systemctl daemon-reload || return 1
+  rm -f "$CONFIG_STATE" "$CONFIG_BACKUP" "$CONFIG_READY" "$BOOTSTRAP_REQUEST"
+}
+
+migrate_systemd_config() {
+  # 非 systemd 测试/安装不迁移；实际升级只作用于已经安装的 Edge unit。
+  [[ -f $SYSTEMD_UNIT_DIR/ongrid-edge.service ]] || return 0
+  [[ -s $LAST_UPGRADE_VER ]] || return 1
+  local desired=$STAGE_DIR/systemd_config.desired
+  mkdir -p "$(dirname "$CONFIG_DROPIN")" || return 1
+  [[ ! -L $CONFIG_DROPIN && ! -L $(dirname "$CONFIG_DROPIN") ]] || return 1
+  cat > "$desired" <<'CONFIG'
+# Managed by Ongrid upgrade: host command filesystem visibility.
+[Service]
+ProtectSystem=false
+ProtectHome=false
+PrivateTmp=false
+ReadWritePaths=
+CONFIG
+  if ! cmp -s "$desired" "$CONFIG_DROPIN"; then
+    if [[ ! -f $CONFIG_STATE ]]; then
+      if [[ -e $CONFIG_DROPIN ]]; then
+        cp -p "$CONFIG_DROPIN" "$CONFIG_BACKUP" || return 1
+        printf 'existing\n' > "$CONFIG_STATE" || return 1
+      else
+        printf 'absent\n' > "$CONFIG_STATE" || return 1
+      fi
+    fi
+    install -m 0644 "$desired" "$CONFIG_DROPIN.new" && mv -f "$CONFIG_DROPIN.new" "$CONFIG_DROPIN" || return 1
+    if ! systemctl daemon-reload; then
+      log "systemd migration: daemon-reload failed; restoring configuration"
+      restore_systemd_config || log "systemd migration: configuration recovery failed"
+      return 1
+    fi
+    log "systemd migration: configuration changed and reloaded"
+  fi
+  cp "$LAST_UPGRADE_VER" "$CONFIG_READY.tmp" && mv -f "$CONFIG_READY.tmp" "$CONFIG_READY" || return 1
+  rm -f "$desired" "$BOOTSTRAP_REQUEST"
+}
+
 # ----- Mode 1: auto-rollback ------------------------------------------------
 #
 # Trigger: a prior boot ran apply (LAST_UPGRADE_AT exists) AND the agent
@@ -67,6 +122,7 @@ maybe_rollback() {
       # Last upgrade was healthy — nothing to roll back. Clean the
       # marker now that we've confirmed it, so the next upgrade
       # cycle starts from a clean slate.
+      rm -f "$CONFIG_STATE" "$CONFIG_BACKUP" "$BOOTSTRAP_REQUEST"
       rm -f "$LAST_UPGRADE_AT" "$LAST_UPGRADE_VER" "$NEW_TARGETS"
       # Best-effort: prune the .previous side of every swap target so
       # the disk doesn't fill with old bundles.
@@ -75,6 +131,11 @@ maybe_rollback() {
     fi
   fi
 
+  if ! restore_systemd_config; then
+    log "auto-rollback: failed restoring systemd configuration; retain rollback state"
+    return 1
+  fi
+  rm -f "$CONFIG_READY" "$BOOTSTRAP_REQUEST"
   log "auto-rollback: prior upgrade ($(cat "$LAST_UPGRADE_VER" 2>/dev/null)) never reported healthy — restoring .previous files"
   rolled_back=0
   while IFS= read -r -d '' prev; do
@@ -289,6 +350,18 @@ apply_legacy() {
   log "legacy apply: applied pending single-file upgrade"
 }
 
+# 旧 hook 已完成二进制替换；新 Edge 在注册前请求新 hook 完成配置迁移。
+# 只接受当前待验证版本，且 ready 后不再接受请求，避免无限跳过回滚。
+if [[ -s $LAST_UPGRADE_AT && -s $BOOTSTRAP_REQUEST ]]    && cmp -s "$BOOTSTRAP_REQUEST" "$LAST_UPGRADE_VER"    && ! cmp -s "$CONFIG_READY" "$LAST_UPGRADE_VER"; then
+  if migrate_systemd_config; then
+    log "systemd bootstrap: ready for registration"
+    exit 0
+  fi
+  rm -f "$BOOTSTRAP_REQUEST"
+  maybe_rollback
+  exit 0
+fi
+
 # Run mode 1 first. If it touched anything (rolled back), do not apply another
 # payload during the same boot. A whole bundle supersedes the legacy single-
 # file staging path: applying both would replace the freshly upgraded Agent
@@ -299,7 +372,12 @@ if maybe_rollback; then
     # is lost after the bundle swap, a later boot must never apply an older
     # single-file payload over the new Agent while retaining new plugins.
     rm -f "$LEGACY_PENDING" "$LEGACY_PENDING_SHA"
-    apply_bundle
+    if apply_bundle; then
+      if ! migrate_systemd_config; then
+        log "systemd migration failed; rolling back bundle"
+        maybe_rollback
+      fi
+    fi
   else
     apply_legacy
   fi

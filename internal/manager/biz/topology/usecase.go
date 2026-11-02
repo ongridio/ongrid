@@ -341,6 +341,56 @@ func (u *Usecase) EnsureDeviceConnection(ctx context.Context, deviceID, peerDevi
 	return err
 }
 
+// EnsureNetworkCollection mirrors a configured scanner Host -> target relation.
+// Only relations owned by network discovery are replaced; manual and physical
+// connections remain untouched. It is safe to retry after partial failure.
+func (u *Usecase) EnsureNetworkCollection(ctx context.Context, hostNodeID, targetNodeID uint64, propsJSON string) error {
+	if hostNodeID == 0 || targetNodeID == 0 || hostNodeID == targetNodeID {
+		return fmt.Errorf("%w: distinct scanner and target nodes are required", errs.ErrInvalid)
+	}
+	existing, err := u.relations.List(ctx, RelationListFilter{SrcID: hostNodeID, DstID: targetNodeID, Type: model.RelCollectsFrom})
+	if err != nil {
+		return err
+	}
+	if len(existing) == 0 {
+		if _, err := u.CreateRelation(ctx, hostNodeID, targetNodeID, model.RelCollectsFrom, propsJSON); err != nil {
+			return err
+		}
+	} else if existing[0].PropsJSON != propsJSON {
+		// An operator-owned relation on this same pair must not be overwritten.
+		if topologyPropsSource(existing[0].PropsJSON) == "network_collection" {
+			if err := u.relations.Update(ctx, existing[0].ID, propsJSON); err != nil {
+				return err
+			}
+		}
+	}
+	// Read all pages before deleting, so pagination cannot skip shifted rows.
+	var stale []*model.Relation
+	for offset := 0; ; offset += 200 {
+		rows, err := u.relations.List(ctx, RelationListFilter{SrcOrDstID: targetNodeID, Limit: 200, Offset: offset})
+		if err != nil {
+			return err
+		}
+		for _, row := range rows {
+			source := topologyPropsSource(row.PropsJSON)
+			oldScanner := row.Type == model.RelCollectsFrom && row.DstID == targetNodeID && row.SrcID != hostNodeID && source == "network_collection"
+			legacyDiscovery := row.Type == model.RelConnectedTo && source == "network_discovery"
+			if oldScanner || legacyDiscovery {
+				stale = append(stale, row)
+			}
+		}
+		if len(rows) < 200 {
+			break
+		}
+	}
+	for _, row := range stale {
+		if err := u.relations.Delete(ctx, row.ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // UpdateRelation rewrites only the props bag — the (src, dst, type)
 // triple is the identity and changing it is just "delete and recreate".
 func (u *Usecase) UpdateRelation(ctx context.Context, id uint64, propsJSON string) error {

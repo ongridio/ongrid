@@ -156,3 +156,9 @@ func TestQueryK8sLogsRegisteredInBaseToolCatalog(t *testing.T) {
 }
 
 var _ basetool.BaseTool = (*QueryK8sLogsTool)(nil)
+
+func TestQueryK8sLogsRejectsBelowMinimumBytes(t *testing.T) {
+	if _, err := normalizeQueryK8sLogsArgs(QueryK8sLogsArgs{ClusterID: 1, Namespace: "default", Pod: "api", LimitBytes: 1}); err == nil {
+		t.Fatal("limit_bytes below schema minimum accepted")
+	}
+}

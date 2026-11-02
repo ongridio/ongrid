@@ -413,9 +413,10 @@ func (c *clientChatModel) buildChatReq(input []*schema.Message, common *model.Op
 	}
 
 	req := ChatReq{
-		Messages: msgs,
-		Tools:    llmTools,
-		UserID:   c.userID,
+		Messages:     msgs,
+		Tools:        llmTools,
+		UserID:       c.userID,
+		DisableTools: common.ToolChoice != nil && *common.ToolChoice == schema.ToolChoiceForbidden,
 	}
 	if common.Temperature != nil {
 		req.Temperature = *common.Temperature

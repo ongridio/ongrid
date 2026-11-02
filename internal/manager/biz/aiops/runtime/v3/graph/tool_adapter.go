@@ -9,7 +9,6 @@ import (
 
 	einotool "github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
-	"github.com/eino-contrib/jsonschema"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -368,14 +367,9 @@ func (a *einoToolAdapter) Info(ctx context.Context) (*schema.ToolInfo, error) {
 		Desc: desc,
 	}
 	if len(info.Parameters) > 0 {
-		// Preserve the existing JSON-Schema bytes verbatim by re-parsing
-		// into eino's jsonschema.Schema. PR-3's basetool.ToolInfo carries
-		// the schema as raw JSON; eino's ParamsOneOf wants a typed
-		// *jsonschema.Schema, so we deserialize. A failure here means the
-		// upstream tool produced invalid JSON Schema — bubble it as an
-		// error so the graph build refuses to compile.
-		js := &jsonschema.Schema{}
-		if err := json.Unmarshal(info.Parameters, js); err != nil {
+		// 保留 SDK 类型未声明的关键字，避免 MCP 的 definitions/$ref 在模型侧丢失。
+		js, err := basetool.ModelSchema(info.Parameters)
+		if err != nil {
 			return nil, fmt.Errorf("graph: tool %q: parse parameters JSON Schema: %w", info.Name, err)
 		}
 		out.ParamsOneOf = schema.NewParamsOneOfByJSONSchema(js)
@@ -492,7 +486,7 @@ func (a *einoToolAdapter) InvokableRun(ctx context.Context, argumentsInJSON stri
 	}
 	// Cache successful read-tool results only — a failed call stays
 	// retryable (a transient error shouldn't be pinned for the whole run).
-	if memoKey != "" {
+	if outcome, _ := basetool.ResultOutcome(out); memoKey != "" && outcome == "success" {
 		a.memo.put(memoKey, out)
 	}
 	return out, nil

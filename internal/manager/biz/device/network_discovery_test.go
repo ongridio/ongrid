@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sort"
 	"testing"
 	"time"
 
@@ -21,10 +22,12 @@ type fakeNetworkDiscoveryRepo struct {
 type fakeNetworkSNMPCaller struct {
 	response []byte
 	calls    int
+	edgeID   uint64
 }
 
-func (f *fakeNetworkSNMPCaller) Call(context.Context, uint64, string, []byte) ([]byte, error) {
+func (f *fakeNetworkSNMPCaller) Call(_ context.Context, edgeID uint64, _ string, _ []byte) ([]byte, error) {
 	f.calls++
+	f.edgeID = edgeID
 	return f.response, nil
 }
 
@@ -87,6 +90,9 @@ func (f *fakeNetworkDiscoveryRepo) GetNetworkDeviceDetail(_ context.Context, dev
 				Candidate: row,
 			}, nil
 		}
+	}
+	if p := f.profiles[deviceID]; p != nil {
+		return &NetworkDeviceDetail{Profile: p, Interfaces: f.interfaces[deviceID]}, nil
 	}
 	return nil, errs.ErrNotFound
 }
@@ -186,7 +192,7 @@ func TestPollNetworkDevicePersistsInterfaceSnapshot(t *testing.T) {
 	}
 	caller := &fakeNetworkSNMPCaller{response: response}
 	uc := NewNetworkDiscoveryUsecase(repo)
-	uc.SetPromotionDependencies(repo, nil, nil)
+	uc.SetPromotionDependencies(repo, snmpTestHosts(), &snmpTestLinks{edgeID: 17})
 	uc.SetEdgeCaller(caller)
 	uc.SetCredentialResolver(fakeNetworkCredentialResolver{fields: map[string]string{"version": "v2c", "community": "test"}})
 	now := time.Now().UTC()
@@ -305,4 +311,60 @@ func TestScanAndPromoteCandidateRefreshesExistingNetworkDevice(t *testing.T) {
 	if candidateRepo.rows[0].Status != NetworkCandidateStatusPromoted {
 		t.Fatalf("status=%q", candidateRepo.rows[0].Status)
 	}
+}
+
+func (f *fakeNetworkDiscoveryRepo) UpdateNetworkPolling(ctx context.Context, p *model.DeviceNetwork) error {
+	return f.UpsertDeviceNetwork(ctx, p)
+}
+func (f *fakeNetworkDiscoveryRepo) UpdateNetworkPollObservation(ctx context.Context, p *model.DeviceNetwork, candidate *model.NetworkDiscoveryCandidate, interfaces []*model.NetworkInterface) error {
+	if p.LastPollError == "" {
+		if candidate != nil {
+			if err := f.UpdateCandidate(ctx, candidate); err != nil {
+				return err
+			}
+		}
+		if err := f.ReplaceNetworkInterfaces(ctx, p.DeviceID, interfaces); err != nil {
+			return err
+		}
+	}
+	return f.UpsertDeviceNetwork(ctx, p)
+}
+
+type snmpTestLinks struct {
+	fakeLinks
+	edgeID uint64
+}
+
+func (l *snmpTestLinks) LookupHostDevice(context.Context, uint64) (uint64, error) { return 3, nil }
+func (l *snmpTestLinks) LookupEdgeForDevice(context.Context, uint64, model.EdgeDeviceRelationType) (uint64, error) {
+	return l.edgeID, nil
+}
+func snmpTestHosts() *fakeRepo {
+	edgeID := uint64(17)
+	return &fakeRepo{byID: map[uint64]*model.Device{3: {ID: 3, Name: "scanner", Online: true, CurrentEdgeID: &edgeID}}}
+}
+
+func (f *fakeNetworkDiscoveryRepo) CreateSNMPDevice(ctx context.Context, seed *model.Device, profile *model.DeviceNetwork, interfaces []*model.NetworkInterface) (*NetworkDeviceDetail, error) {
+	profile.DeviceID = 100
+	if err := f.UpsertDeviceNetwork(ctx, profile); err != nil {
+		return nil, err
+	}
+	if err := f.ReplaceNetworkInterfaces(ctx, 100, interfaces); err != nil {
+		return nil, err
+	}
+	return f.GetNetworkDeviceDetail(ctx, 100)
+}
+
+func (f *fakeNetworkDiscoveryRepo) ListNetworkTopologyDeviceIDs(_ context.Context, after uint64, limit int) ([]uint64, error) {
+	var ids []uint64
+	for id := range f.profiles {
+		if id > after {
+			ids = append(ids, id)
+		}
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	if len(ids) > limit {
+		ids = ids[:limit]
+	}
+	return ids, nil
 }

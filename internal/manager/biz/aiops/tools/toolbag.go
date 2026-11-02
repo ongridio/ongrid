@@ -29,7 +29,8 @@
 // Info() call. Invocation passes through unchanged so an LLM that
 // somehow already knows the parameter shape (e.g. from system prompt
 // context) can still call the tool — the inner Tool's argsJSON
-// validation handles any malformed input.
+// validation handles any malformed input. The catalog wraps every entry
+// with schema validation, including appended and dynamically replaced tools.
 package tools
 
 import (
@@ -185,6 +186,13 @@ type ToolBag struct {
 // production main.go passes envIntDefault so 0 isn't reachable through
 // normal env config.
 func NewToolBag(all []basetool.BaseTool, threshold int) *ToolBag {
+	validated := make([]basetool.BaseTool, 0, len(all))
+	for _, tool := range all {
+		if tool != nil {
+			validated = append(validated, basetool.WithValidation(tool))
+		}
+	}
+	all = validated
 	bag := &ToolBag{threshold: threshold}
 	// Below-or-equal threshold: keep flat. We treat "exactly equal"
 	// as still flat so the threshold reads as a high-water mark
@@ -304,7 +312,7 @@ func (b *ToolBag) WithExtra(t basetool.BaseTool) *ToolBag {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.extras = append(b.extras, t)
+	b.extras = append(b.extras, basetool.WithValidation(t))
 	return b
 }
 
@@ -320,6 +328,7 @@ func (b *ToolBag) WithExtra(t basetool.BaseTool) *ToolBag {
 // ONGRID_TOOLBAG_DEFERRAL_THRESHOLD or wait for marketplace tools to
 // land in NewToolBag's input slice directly.
 func (b *ToolBag) Append(t basetool.BaseTool) *ToolBag {
+	t = basetool.WithValidation(t)
 	if b == nil || t == nil {
 		return b
 	}
@@ -401,6 +410,9 @@ func (r redactedTool) Info(ctx context.Context) (*basetool.ToolInfo, error) {
 		`{"type":"object","properties":{},"description":"Schema redacted; call ToolSearch with query='select:%s' to load the full schema before invoking."}`,
 		info.Name,
 	)
+	if len(out.ExecutionParameters) == 0 {
+		out.ExecutionParameters = append(json.RawMessage(nil), info.Parameters...)
+	}
 	out.Parameters = json.RawMessage(hint)
 	return &out, nil
 }

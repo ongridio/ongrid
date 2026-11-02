@@ -664,6 +664,7 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (result *Reply, ret
 	invokeOpts = append(invokeOpts, compose.WithToolsNodeOption(
 		compose.WithToolOption(
 			graph.WithInvokeOpts(
+				basetool.WithUserID(req.UserID),
 				basetool.WithUserText(req.UserText),
 				basetool.WithConfirmedDeviceIDs(confirmedDeviceIDs(req.Mentions)),
 				basetool.WithHostWritePermission(writeEnabled && !viewerOnly),

@@ -41,7 +41,7 @@ type BaseTool interface {
 // and — Description is the LLM-visible blurb summarising what the
 // tool does; WhenToUse is the routing hint summarising when to pick it
 // over its siblings. Decorators that mutate args (e.g. tenant_bind)
-// inspect Parameters to decide whether to inject.
+// inspect the execution schema to decide whether to inject.
 type ToolInfo struct {
 	// Name is the stable wire name the LLM sees. Must match the tool
 	// name in tool_call.function.name. Snake_case, no spaces.
@@ -58,11 +58,13 @@ type ToolInfo struct {
 	// rewriting the description.
 	WhenToUse string
 
-	// Parameters is the JSON Schema of the argument object. Decorators
-	// (tenant_bind) may parse this to decide whether to inject fields
-	// like tenant_id; tool implementations parse it implicitly via
-	// json.Unmarshal into a typed args struct.
+	// Parameters 是提供给模型的参数 Schema。未裁剪时也作为执行契约；
+	// 裁剪后，参数校验及 tenant_bind 等执行包装器使用 ExecutionParameters。
 	Parameters json.RawMessage
+
+	// ExecutionParameters 保存完整执行契约；仅当展示 Schema 被裁剪时设置。
+	// 包装器必须保留此字段，模型只接收 Parameters。
+	ExecutionParameters json.RawMessage
 
 	// Class records the tool's effect on the world. Used by the agent
 	// loop / future SOP gating to decide whether double-sign is required.

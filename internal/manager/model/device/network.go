@@ -6,30 +6,31 @@ import "time"
 // device still uses the shared devices.id identity; this table only stores
 // fields that do not make sense for a host device.
 type DeviceNetwork struct {
-	DeviceID              uint64     `gorm:"column:device_id;primaryKey"`
-	DeviceKind            string     `gorm:"column:device_kind;size:64;not null;default:''"`
-	Vendor                string     `gorm:"column:vendor;size:128;not null;default:''"`
-	Model                 string     `gorm:"column:model;size:128;not null;default:''"`
-	SerialNumber          string     `gorm:"column:serial_number;size:255;not null;default:''"`
-	ManagementAddress     string     `gorm:"column:management_address;size:255;not null;default:''"`
-	SysName               string     `gorm:"column:sys_name;size:255;not null;default:''"`
-	SysDescription        string     `gorm:"column:sys_description;type:text"`
-	SnmpEngineID          string     `gorm:"column:snmp_engine_id;size:255;not null;default:''"`
-	LldpChassisID         string     `gorm:"column:lldp_chassis_id;size:255;not null;default:''"`
-	LldpChassisSubtype    string     `gorm:"column:lldp_chassis_subtype;size:32;not null;default:''"`
-	BridgeBaseMAC         string     `gorm:"column:bridge_base_mac;size:32;not null;default:''"`
-	CapabilitiesJSON      string     `gorm:"column:capabilities_json;type:text"`
-	ReachabilityStatus    string     `gorm:"column:reachability_status;size:32;not null;default:'unknown'"`
-	LastReachableAt       *time.Time `gorm:"column:last_reachable_at;index"`
-	PollEnabled           bool       `gorm:"column:poll_enabled;not null;default:false"`
-	PollIntervalSeconds   uint32     `gorm:"column:poll_interval_seconds;not null;default:300"`
-	PollCredentialName    string     `gorm:"column:poll_credential_name;size:128;not null;default:''"`
-	PollPort              uint16     `gorm:"column:poll_port;not null;default:161"`
-	LastPollAt            *time.Time `gorm:"column:last_poll_at;index"`
-	LastPollError         string     `gorm:"column:last_poll_error;size:512;not null;default:''"`
-	NetworkRoleSuppressed bool       `gorm:"column:network_role_suppressed;not null;default:false"`
-	CreatedAt             time.Time  `gorm:"column:created_at"`
-	UpdatedAt             time.Time  `gorm:"column:updated_at"`
+	DeviceID                uint64     `gorm:"column:device_id;primaryKey"`
+	DeviceKind              string     `gorm:"column:device_kind;size:64;not null;default:''"`
+	Vendor                  string     `gorm:"column:vendor;size:128;not null;default:''"`
+	Model                   string     `gorm:"column:model;size:128;not null;default:''"`
+	SerialNumber            string     `gorm:"column:serial_number;size:255;not null;default:''"`
+	ManagementAddress       string     `gorm:"column:management_address;size:255;not null;default:''"`
+	SysName                 string     `gorm:"column:sys_name;size:255;not null;default:''"`
+	SysDescription          string     `gorm:"column:sys_description;type:text"`
+	SnmpEngineID            string     `gorm:"column:snmp_engine_id;size:255;not null;default:''"`
+	LldpChassisID           string     `gorm:"column:lldp_chassis_id;size:255;not null;default:''"`
+	LldpChassisSubtype      string     `gorm:"column:lldp_chassis_subtype;size:32;not null;default:''"`
+	BridgeBaseMAC           string     `gorm:"column:bridge_base_mac;size:32;not null;default:''"`
+	CapabilitiesJSON        string     `gorm:"column:capabilities_json;type:text"`
+	ReachabilityStatus      string     `gorm:"column:reachability_status;size:32;not null;default:'unknown'"`
+	LastReachableAt         *time.Time `gorm:"column:last_reachable_at;index"`
+	PollScannerHostDeviceID uint64     `gorm:"column:poll_scanner_host_device_id;not null;default:0;index"`
+	PollEnabled             bool       `gorm:"column:poll_enabled;not null;default:false"`
+	PollIntervalSeconds     uint32     `gorm:"column:poll_interval_seconds;not null;default:300"`
+	PollCredentialName      string     `gorm:"column:poll_credential_name;size:128;not null;default:''"`
+	PollPort                uint16     `gorm:"column:poll_port;not null;default:161"`
+	LastPollAt              *time.Time `gorm:"column:last_poll_at;index"`
+	LastPollError           string     `gorm:"column:last_poll_error;size:512;not null;default:''"`
+	NetworkRoleSuppressed   bool       `gorm:"column:network_role_suppressed;not null;default:false"`
+	CreatedAt               time.Time  `gorm:"column:created_at"`
+	UpdatedAt               time.Time  `gorm:"column:updated_at"`
 }
 
 func (DeviceNetwork) TableName() string { return "device_network" }

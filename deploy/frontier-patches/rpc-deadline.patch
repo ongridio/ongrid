@@ -1,0 +1,96 @@
+--- a/pkg/frontier/exchange/forward.go
++++ b/pkg/frontier/exchange/forward.go
+@@ -53,7 +53,11 @@
+ 		r3 := edge.NewRequest(r1.Data(), ropt)
+ 		// call option
+ 		copt := options.Call()
+-		copt.SetTimeout(30 * time.Second)
++		// Preserve the caller deadline for long-running RPCs.
++		// Calls without a deadline retain the existing bounded default.
++		if _, bounded := ctx.Deadline(); !bounded {
++			copt.SetTimeout(30 * time.Second)
++		}
+ 		r4, err := edge.Call(ctx, method, r3, copt)
+ 		if err != nil {
+ 			klog.V(2).Infof("service forward rpc, serviceID: %d, call edgeID: %d, err: %s", serviceID, edgeID, err)
+@@ -173,7 +177,11 @@
+ 		r3 := svc.NewRequest(r1.Data(), ropt)
+ 		// call option
+ 		copt := options.Call()
+-		copt.SetTimeout(30 * time.Second)
++		// Preserve the caller deadline for long-running RPCs.
++		// Calls without a deadline retain the existing bounded default.
++		if _, bounded := ctx.Deadline(); !bounded {
++			copt.SetTimeout(30 * time.Second)
++		}
+ 		r4, err := svc.Call(ctx, method, r3, copt)
+ 		if err != nil {
+ 			if err != apis.ErrRPCNotOnline {
+--- /dev/null
++++ b/pkg/frontier/exchange/ongrid_deadline_test.go
+@@ -0,0 +1,65 @@
++package exchange
++
++import (
++	"context"
++	"github.com/singchia/frontier/api/dataplane/v1/edge"
++	"github.com/singchia/frontier/api/dataplane/v1/service"
++	"github.com/singchia/geminio"
++	"github.com/stretchr/testify/require"
++	"testing"
++	"time"
++)
++
++// Exercise actual SDK -> broker -> SDK calls, not only timeout selection.
++func TestOngridForwardedRPCDeadline(t *testing.T) {
++	newHarness(t)
++	e, err := edge.NewEdge(edgeDial())
++	require.NoError(t, err)
++	t.Cleanup(func() { require.NoError(t, e.Close()) })
++	svc, err := service.NewService(svcDial(), service.OptionServiceName("deadline-test"))
++	require.NoError(t, err)
++	t.Cleanup(func() { require.NoError(t, svc.Close()) })
++	handler := func(ctx context.Context, req geminio.Request, resp geminio.Response) {
++		delay, err := time.ParseDuration(string(req.Data()))
++		if err != nil {
++			resp.SetError(err)
++			return
++		}
++		select {
++		case <-time.After(delay):
++			resp.SetData([]byte("finished"))
++		case <-ctx.Done():
++			resp.SetError(ctx.Err())
++		}
++	}
++	require.NoError(t, e.Register(context.Background(), "deadline-edge", handler))
++	require.NoError(t, svc.Register(context.Background(), "deadline-service", handler))
++	time.Sleep(50 * time.Millisecond)
++	for _, direction := range []string{"to-edge", "to-service"} {
++		t.Run(direction, func(t *testing.T) {
++			call := func(ctx context.Context, delay string) (geminio.Response, error) {
++				if direction == "to-edge" {
++					return svc.Call(ctx, e.EdgeID(), "deadline-edge", svc.NewRequest([]byte(delay)))
++				}
++				return e.Call(ctx, "deadline-service", e.NewRequest([]byte(delay)))
++			}
++			ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
++			resp, err := call(ctx, "31s")
++			cancel()
++			require.NoError(t, err)
++			require.Equal(t, "finished", string(resp.Data()))
++			ctx, cancel = context.WithTimeout(context.Background(), 100*time.Millisecond)
++			started := time.Now()
++			_, err = call(ctx, "5s")
++			cancel()
++			require.Error(t, err)
++			require.Less(t, time.Since(started), 2*time.Second)
++			// Calls without a deadline must still time out at the existing default.
++			started = time.Now()
++			_, err = call(context.Background(), "35s")
++			require.Error(t, err)
++			require.Greater(t, time.Since(started), 29*time.Second)
++			require.Less(t, time.Since(started), 34*time.Second)
++		})
++	}
++}

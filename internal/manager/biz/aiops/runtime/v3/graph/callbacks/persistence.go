@@ -17,6 +17,7 @@ package callbacks
 import (
 	"context"
 	"errors"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	"log/slog"
 	"sync"
 	"time"
@@ -801,6 +802,11 @@ func (h *PersistenceHandler) persistToolEnd(ctx context.Context, info *callbacks
 	} else if tout != nil {
 		s := tout.Response
 		resultPtr = &s
+		var detail string
+		status, detail = basetool.ResultOutcome(s)
+		if detail != "" {
+			errStr = &detail
+		}
 	}
 
 	writeCtx, cancel := persistenceWriteContext(ctx)

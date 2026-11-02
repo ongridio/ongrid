@@ -554,3 +554,21 @@ func TestChain_NilInnerReturnsNil(t *testing.T) {
 		t.Errorf("Wrap(nil) = %T, want nil", got)
 	}
 }
+
+func TestWrapRejectsInvalidArgumentsBeforeApproval(t *testing.T) {
+	inner := &fakeTool{name: "write_contract", class: "write", params: json.RawMessage(`{"type":"object","properties":{"device_id":{"type":"integer","minimum":1}},"required":["device_id"]}`)}
+	proposer := &fakeHumanApprovalProposer{execute: true}
+	tool := Wrap(inner, Deps{HumanApproval: proposer, Registerer: prometheus.NewRegistry()})
+	if _, err := tool.InvokableRun(context.Background(), `{"edge_id":1}`); err == nil {
+		t.Fatal("invalid target accepted")
+	}
+	if proposer.calls != 0 || inner.calls != 0 {
+		t.Fatalf("invalid call created approval or executed: proposer=%d inner=%d", proposer.calls, inner.calls)
+	}
+	if _, err := tool.InvokableRun(context.Background(), `{"device_id":1}`); err != nil {
+		t.Fatal(err)
+	}
+	if proposer.calls != 1 || inner.calls != 1 {
+		t.Fatalf("valid call bypassed approval: proposer=%d inner=%d", proposer.calls, inner.calls)
+	}
+}

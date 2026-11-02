@@ -153,3 +153,45 @@ func TestBuildReActGraph_ToolBudgetSynthesisWithStrictUpstream(t *testing.T) {
 		t.Fatal("synthesis changed the preceding user/assistant/tool messages")
 	}
 }
+
+func TestIterationFinalizationRemovesProviderTools(t *testing.T) {
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req openai.ChatCompletionRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Error(err)
+			http.Error(w, "invalid", 400)
+			return
+		}
+		calls++
+		if len(req.Tools) != 0 {
+			t.Errorf("summary request still contains %d tools", len(req.Tools))
+		}
+		if req.ToolChoice != "none" {
+			t.Errorf("summary tool_choice=%v", req.ToolChoice)
+		}
+		if len(req.Messages) < 2 || !strings.Contains(req.Messages[0].Content, "final response") {
+			t.Error("missing summary instruction")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(openai.ChatCompletionResponse{Choices: []openai.ChatCompletionChoice{{Message: openai.ChatCompletionMessage{Role: "assistant", Content: "summary"}, FinishReason: "stop"}}}); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+	client := llm.New(llm.Config{APIKey: "test", Model: "test", BaseURL: server.URL + "/v1"}, nil, prometheus.NewRegistry())
+	cm, err := llm.NewClientChatModel(llm.ClientChatModelConfig{Client: client})
+	if err != nil {
+		t.Fatal(err)
+	}
+	info := []*schema.ToolInfo{{Name: "read", ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{})}}
+	bound, err := cm.(einomodel.ToolCallingChatModel).WithTools(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrapped := wrapBudgetStopModel(bound, 1)
+	result, err := wrapped.Generate(context.Background(), []*schema.Message{schema.UserMessage("inspect")}, einomodel.WithTools(info))
+	if err != nil || result.Content != "summary" || calls != 1 {
+		t.Fatalf("result=%+v calls=%d err=%v", result, calls, err)
+	}
+}
