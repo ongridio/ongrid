@@ -56,3 +56,9 @@ describe('工具调用状态在实时结果和历史加载间保持一致', () =
     expect(icon()).toHaveClass('text-red-400');
   });
 });
+
+it('历史工具消息使用执行表的状态，无需 kind 字段', () => {
+ render(<MessageBubble message={{ id:'history',role:'tool',tool_name:toolName,content:'{"result":[]}',tool_call:{name:toolName,status:'success',result_raw:'{"result":[]}'}}} />);
+ expect(icon()).toHaveClass('text-emerald-400');
+ expect(screen.queryByText('状态未知')).not.toBeInTheDocument();
+});

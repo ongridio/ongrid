@@ -55,7 +55,7 @@ type Deps struct {
 
 // Wrap returns inner wrapped by the standard decorator stack:
 //
-//	tenant_bind → review_gate → human_approval → timeout → audit → ratelimit → metric
+//	tenant_bind → schema_validation → review_gate → human_approval → timeout → audit → ratelimit → metric
 //
 // Reading top-down (ASCII flow + SOP gating):
 // a request hits tenant_bind first (it's the outermost wrapper),
@@ -125,6 +125,8 @@ func Wrap(inner basetool.BaseTool, deps Deps) basetool.BaseTool {
 			Timeout:       deps.ReviewerTimeout,
 		})
 	}
+	// 参数错误必须在创建审批或 reviewer 任务之前返回。
+	tool = basetool.WithValidation(tool)
 	tool = WithTenantBind(tool)
 	return tool
 }

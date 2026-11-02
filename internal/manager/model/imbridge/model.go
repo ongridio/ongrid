@@ -50,8 +50,9 @@ const (
 // platform-side identifier (Feishu app_id, DingTalk AppKey); the secret
 // is encrypted at rest by SystemSetting reveal/store flow.
 type ImApp struct {
-	ID       uint64 `gorm:"primaryKey;autoIncrement"`
-	Provider string `gorm:"size:16;not null;uniqueIndex:uk_provider_app_id,priority:1"`
+	ApprovalTemplateID string `gorm:"size:128"`
+	ID                 uint64 `gorm:"primaryKey;autoIncrement"`
+	Provider           string `gorm:"size:16;not null;uniqueIndex:uk_provider_app_id,priority:1"`
 	// Mode = ModeStream (default) or ModeWebhook. Stream apps are
 	// supervised by imbridge.StreamSupervisor; webhook apps wait for
 	// inbound HTTP at /api/v1/im/{provider}/events.

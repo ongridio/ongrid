@@ -116,6 +116,7 @@ export type NetworkDeviceDetail = {
   bridge_base_mac?: string;
   reachability_status: string;
   last_reachable_at?: string;
+  poll_scanner_host_device_id?: number;
   poll_enabled?: boolean;
   poll_interval_seconds?: number;
   poll_credential_name?: string;
@@ -144,6 +145,8 @@ export function listNetworkCandidates(params?: { status?: string }) {
 }
 
 export type NetworkPollingInput = {
+  address?: string;
+  scanner_host_device_id?: number;
   enabled: boolean;
   interval_seconds?: number;
   credential_name?: string;
@@ -216,4 +219,20 @@ export function getDeviceEnvironment(id: number) {
 
 export function setDeviceEnvironment(id: number, environment: string) {
   return request<{ data: DeviceEnvironment }>('PUT', `/devices/${id}/environment`, { environment }).then(r => r.data);
+}
+
+export type NetworkSNMPTestResult = { ok: boolean; sys_name: string; interface_count: number; duration_ms: number };
+export function testNetworkSNMP(id: number, candidate: boolean, input: NetworkPollingInput) {
+  const path = candidate ? `/network-discovery/candidates/${id}/snmp-test` : `/devices/${id}/network/snmp-test`;
+  return request<NetworkSNMPTestResult>('POST', path, input);
+}
+export function configureCandidateSNMP(id: number, input: NetworkPollingInput) {
+  return request<NetworkDeviceDetail>('POST', `/network-discovery/candidates/${id}/snmp-config`, input);
+}
+
+export function testNewNetworkSNMP(input: NetworkPollingInput) {
+  return request<NetworkSNMPTestResult>('POST', '/network-devices/snmp-test', input);
+}
+export function createNetworkSNMP(input: NetworkPollingInput) {
+  return request<NetworkDeviceDetail>('POST', '/network-devices', input);
 }

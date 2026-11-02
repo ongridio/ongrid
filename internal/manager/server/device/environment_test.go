@@ -68,3 +68,32 @@ func TestDeviceEnvironmentHTTP(t *testing.T) {
 		t.Fatal("clearing the environment did not persist")
 	}
 }
+
+func TestSNMPRoutesRequireAdministrator(t *testing.T) {
+	router := chi.NewRouter()
+	uc := biz.NewUsecase(&environmentRepo{}, nil, nil)
+	uc.SetNetworkDiscovery(biz.NewNetworkDiscoveryUsecase(nil))
+	NewHandler(uc).Register(router)
+	for _, endpoint := range []struct{ method, path string }{
+		{"POST", "/v1/network-devices"},
+		{"POST", "/v1/network-devices/snmp-test"},
+		{"POST", "/v1/devices/9/network/snmp-test"},
+		{"PATCH", "/v1/devices/9/network/polling"},
+		{"POST", "/v1/network-discovery/candidates/9/snmp-test"},
+		{"POST", "/v1/network-discovery/candidates/9/snmp-config"},
+	} {
+		for _, role := range []string{"", "user"} {
+			req := httptest.NewRequest(endpoint.method, endpoint.path, strings.NewReader(`{}`))
+			status := http.StatusUnauthorized
+			if role != "" {
+				req = req.WithContext(tenantctx.With(req.Context(), tenantctx.Tenant{UserID: 1, Role: role}))
+				status = http.StatusForbidden
+			}
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+			if w.Code != status {
+				t.Fatalf("%s %s role=%q: got %d want %d", endpoint.method, endpoint.path, role, w.Code, status)
+			}
+		}
+	}
+}

@@ -28,7 +28,7 @@ const (
 const queryNetworkDevicesDescription = "List verified network devices with SNMP identity, reachability, management address, discovery source, and interface/link counts. " +
 	"Use this for switches, routers, firewalls, or other network assets. It never returns SNMP credentials."
 
-const queryNetworkDevicesWhenToUse = "When the user asks which network devices exist, which switch or router is reachable, or wants SNMP-discovered inventory. " +
+const queryNetworkDevicesWhenToUse = "Use reachability_status, never Host/Edge online, for SNMP targets. Disabled, stale, scanner_offline and collection errors mean target state unknown, not offline. " + "When the user asks which network devices exist, which switch or router is reachable, or wants SNMP-discovered inventory. " +
 	"Use get_network_neighbors after this when the question is about the hosts connected to one network device. " +
 	"NOT for unverified ARP or LLDP candidates (those remain in the network discovery UI)."
 
@@ -42,10 +42,10 @@ var queryNetworkDevicesSchema = json.RawMessage(`{
   }
 }`)
 
-const getNetworkNeighborsDescription = "Return verified topology neighbors of one network device, including the connected host or peer node, discovery source, observer Edge, and last relationship observation."
+const getNetworkNeighborsDescription = "Return physical topology neighbors and separate collection_sources for a network device. Collection sources are scanner Hosts, not physical neighbors or direct interface connections."
 
 const getNetworkNeighborsWhenToUse = "After query_network_devices identifies a network device, use this to answer which hosts or peers it is connected to. " +
-	"The relation is an observed adjacency, not an application dependency or a routing-table claim. " +
+	"Physical neighbors are observed connections. collection_sources only identify configured scanner Hosts; never infer physical adjacency from collection. " +
 	"NOT for an inferred blast radius; use expand_topology for dependency propagation."
 
 var getNetworkNeighborsSchema = json.RawMessage(`{
@@ -100,25 +100,22 @@ type queryNetworkDevicesArgs struct {
 }
 
 type networkDeviceRow struct {
-	DeviceID           uint64     `json:"device_id"`
-	Name               string     `json:"name"`
-	Hostname           string     `json:"hostname,omitempty"`
-	ManagementAddress  string     `json:"management_address,omitempty"`
-	Online             bool       `json:"online"`
-	DeviceKind         string     `json:"device_kind,omitempty"`
-	Vendor             string     `json:"vendor,omitempty"`
-	Model              string     `json:"model,omitempty"`
-	SerialNumber       string     `json:"serial_number,omitempty"`
-	SysName            string     `json:"sys_name,omitempty"`
-	ReachabilityStatus string     `json:"reachability_status,omitempty"`
-	LastReachableAt    *time.Time `json:"last_reachable_at,omitempty"`
-	DiscoverySource    string     `json:"discovery_source,omitempty"`
-	ScannerEdgeID      uint64     `json:"scanner_edge_id,omitempty"`
-	ScannerEdgeName    string     `json:"scanner_edge_name,omitempty"`
-	ScannerHostName    string     `json:"scanner_host_name,omitempty"`
-	LastObservedAt     *time.Time `json:"last_observed_at,omitempty"`
-	InterfaceCount     int        `json:"interface_count"`
-	LinkCount          int        `json:"link_count"`
+	DeviceID          uint64 `json:"device_id"`
+	Name              string `json:"name"`
+	Hostname          string `json:"hostname,omitempty"`
+	ManagementAddress string `json:"management_address,omitempty"`
+	NetworkDeviceStatus
+	DeviceKind      string     `json:"device_kind,omitempty"`
+	Vendor          string     `json:"vendor,omitempty"`
+	Model           string     `json:"model,omitempty"`
+	SerialNumber    string     `json:"serial_number,omitempty"`
+	SysName         string     `json:"sys_name,omitempty"`
+	DiscoverySource string     `json:"discovery_source,omitempty"`
+	ScannerEdgeID   uint64     `json:"scanner_edge_id,omitempty"`
+	ScannerEdgeName string     `json:"scanner_edge_name,omitempty"`
+	LastObservedAt  *time.Time `json:"last_observed_at,omitempty"`
+	InterfaceCount  int        `json:"interface_count"`
+	LinkCount       int        `json:"link_count"`
 }
 
 type QueryNetworkDevicesTool struct {
@@ -158,33 +155,40 @@ func (t *QueryNetworkDevicesTool) InvokableRun(ctx context.Context, argsJSON str
 
 	callCtx, cancel := context.WithTimeout(ctx, networkInventoryCallTimeout)
 	defer cancel()
-	devices, err := t.devices.List(callCtx, devicebiz.ListFilter{
-		RolesAny: devicemodel.RoleBitNetwork,
-		Limit:    networkInventoryMaxLimit,
-	})
-	if err != nil {
-		return "", fmt.Errorf("query_network_devices: list devices: %w", err)
-	}
-
-	rows := make([]networkDeviceRow, 0, min(len(devices), in.Limit))
-	for _, device := range devices {
-		if device == nil || !isVerifiedNetworkDevice(device) {
-			continue
+	rows := make([]networkDeviceRow, 0, in.Limit)
+	for offset := 0; len(rows) < in.Limit; offset += networkInventoryMaxLimit {
+		if err := callCtx.Err(); err != nil {
+			return "", err
 		}
-		detail, err := t.details.GetNetworkDeviceDetail(callCtx, device.ID)
+		devices, err := t.devices.List(callCtx, devicebiz.ListFilter{RolesAny: devicemodel.RoleBitNetwork, Limit: networkInventoryMaxLimit, Offset: offset})
 		if err != nil {
-			return "", fmt.Errorf("query_network_devices: get network detail for device %d: %w", device.ID, err)
+			return "", fmt.Errorf("query_network_devices: list devices: %w", err)
 		}
-		row := networkDeviceRowFromDetail(device, detail)
-		if !matchesNetworkDevice(row, in) {
-			continue
+		for _, device := range devices {
+			if device == nil || !isVerifiedNetworkDevice(device) {
+				continue
+			}
+			detail, err := t.details.GetNetworkDeviceDetail(callCtx, device.ID)
+			if err != nil {
+				return "", fmt.Errorf("query_network_devices: get network detail for device %d: %w", device.ID, err)
+			}
+			row := networkDeviceRowFromDetail(device, detail)
+			row.NetworkDeviceStatus, err = networkStatus(callCtx, t.devices, detail, time.Now().UTC())
+			if err != nil {
+				return "", fmt.Errorf("query_network_devices: scanner status: %w", err)
+			}
+			if !matchesNetworkDevice(row, in) {
+				continue
+			}
+			rows = append(rows, row)
+			if len(rows) >= in.Limit {
+				break
+			}
 		}
-		rows = append(rows, row)
-		if len(rows) >= in.Limit {
+		if len(devices) < networkInventoryMaxLimit {
 			break
 		}
 	}
-
 	out, err := json.Marshal(map[string]any{"devices": rows, "count": len(rows)})
 	if err != nil {
 		return "", fmt.Errorf("query_network_devices: marshal: %w", err)
@@ -423,6 +427,36 @@ func (t *GetNetworkNeighborsTool) InvokableRun(ctx context.Context, argsJSON str
 	if device.NodeID == nil || *device.NodeID == 0 {
 		return "", fmt.Errorf("get_network_neighbors: network device %d has no topology node", in.NetworkDeviceID)
 	}
+	collectionRelations, _, err := t.topology.ListRelations(callCtx, topologybiz.RelationListFilter{
+		DstID: *device.NodeID, Type: topologymodel.RelCollectsFrom, Limit: in.Limit,
+	})
+	if err != nil {
+		return "", fmt.Errorf("get_network_neighbors: list collection sources: %w", err)
+	}
+	type collectionSource struct {
+		NodeID       uint64 `json:"node_id"`
+		Name         string `json:"name"`
+		RelationType string `json:"relation_type"`
+		HostID       uint64 `json:"scanner_host_device_id"`
+		Enabled      bool   `json:"enabled"`
+	}
+	sources := make([]collectionSource, 0, len(collectionRelations))
+	for _, rel := range collectionRelations {
+		node, err := t.topology.GetNode(callCtx, rel.SrcID)
+		if err != nil {
+			return "", fmt.Errorf("get_network_neighbors: get scanner: %w", err)
+		}
+		row := collectionSource{NodeID: node.ID, Name: node.Name, RelationType: rel.Type}
+		var props struct {
+			HostID  uint64 `json:"scanner_host_device_id"`
+			Enabled bool   `json:"enabled"`
+		}
+		if err := json.Unmarshal([]byte(rel.PropsJSON), &props); err != nil {
+			return "", fmt.Errorf("get_network_neighbors: decode collection: %w", err)
+		}
+		row.HostID, row.Enabled = props.HostID, props.Enabled
+		sources = append(sources, row)
+	}
 	relations, _, err := t.topology.ListRelations(callCtx, topologybiz.RelationListFilter{
 		SrcOrDstID: *device.NodeID,
 		Type:       topologymodel.RelConnectedTo,
@@ -451,10 +485,11 @@ func (t *GetNetworkNeighborsTool) InvokableRun(ctx context.Context, argsJSON str
 	}
 
 	out, err := json.Marshal(map[string]any{
-		"network_device_id": in.NetworkDeviceID,
-		"network_node_id":   *device.NodeID,
-		"neighbors":         rows,
-		"count":             len(rows),
+		"network_device_id":  in.NetworkDeviceID,
+		"network_node_id":    *device.NodeID,
+		"neighbors":          rows,
+		"collection_sources": sources,
+		"count":              len(rows),
 	})
 	if err != nil {
 		return "", fmt.Errorf("get_network_neighbors: marshal: %w", err)
@@ -483,7 +518,7 @@ func isVerifiedNetworkDevice(device *devicemodel.Device) bool {
 }
 
 func networkDeviceRowFromDetail(device *devicemodel.Device, detail *devicebiz.NetworkDeviceDetail) networkDeviceRow {
-	row := networkDeviceRow{DeviceID: device.ID, Name: device.Name, Hostname: device.Hostname, Online: device.Online}
+	row := networkDeviceRow{DeviceID: device.ID, Name: device.Name, Hostname: device.Hostname}
 	if detail == nil || detail.Profile == nil {
 		return row
 	}
@@ -505,6 +540,9 @@ func networkDeviceRowFromDetail(device *devicemodel.Device, detail *devicebiz.Ne
 		row.LastObservedAt = &seen
 		row.InterfaceCount = jsonArrayLength(candidate.InterfacesJSON)
 		row.LinkCount = jsonArrayLength(candidate.LinksJSON)
+	}
+	if len(detail.Interfaces) > 0 || detail.Candidate == nil || profile.LastPollAt != nil {
+		row.InterfaceCount = len(detail.Interfaces)
 	}
 	return row
 }

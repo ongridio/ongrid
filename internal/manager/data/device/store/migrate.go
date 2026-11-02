@@ -2,6 +2,7 @@
 package store
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -60,6 +61,9 @@ func Migrate(db *gorm.DB) error {
 		return err
 	}
 	if err := initializeHostPluginConfigs(db); err != nil {
+		return err
+	}
+	if err := backfillNetworkScanners(context.Background(), db); err != nil {
 		return err
 	}
 	return backfillDeviceEnvironments(db)
@@ -208,4 +212,28 @@ func backfillDeviceEnvironments(db *gorm.DB) error {
 		}
 	}
 	return nil
+}
+
+// Bind existing profiles once to the authenticated discovery Host, never to a numeric Edge fallback.
+func backfillNetworkScanners(ctx context.Context, db *gorm.DB) error {
+	if !db.Migrator().HasTable("edges") {
+		return nil
+	}
+	repo := NewNetworkDiscoveryRepo(db)
+	var batch []model.DeviceNetwork
+	return db.WithContext(ctx).Where("poll_scanner_host_device_id = ?", 0).FindInBatches(&batch, 100, func(tx *gorm.DB, _ int) error {
+		for _, profile := range batch {
+			detail, err := repo.GetNetworkDeviceDetail(ctx, profile.DeviceID)
+			if err != nil {
+				return err
+			}
+			if detail.Candidate == nil || detail.Candidate.ObserverHostDeviceID == nil {
+				continue
+			}
+			if err := tx.Model(&model.DeviceNetwork{}).Where("device_id = ? AND poll_scanner_host_device_id = ?", profile.DeviceID, 0).Update("poll_scanner_host_device_id", *detail.Candidate.ObserverHostDeviceID).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	}).Error
 }

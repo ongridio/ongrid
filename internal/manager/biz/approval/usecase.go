@@ -41,6 +41,7 @@ type executorKey struct{ kind, runtimeVersion string }
 
 // Usecase is the inbox facade.
 type Usecase struct {
+	authorizer Authorizer
 	executorMu sync.RWMutex
 	repo       Repo
 	log        *slog.Logger
@@ -71,14 +72,16 @@ func (u *Usecase) RegisterRuntimeExecutor(kind, runtimeVersion string, fn Execut
 
 // ProposeInput is what a producer queues.
 type ProposeInput struct {
-	RuntimeVersion string
-	Kind           string
-	Title          string
-	Summary        string
-	Payload        any    // marshaled to PayloadJSON
-	Source         string // SourceAgent / SourceFlow
-	SessionID      string
-	ProposedBy     uint64
+	ExecutionOwner      string
+	ExecutionLeaseUntil *time.Time
+	RuntimeVersion      string
+	Kind                string
+	Title               string
+	Summary             string
+	Payload             any    // marshaled to PayloadJSON
+	Source              string // SourceAgent / SourceFlow
+	SessionID           string
+	ProposedBy          uint64
 }
 
 // Propose records a pending action. Producer-facing (not admin-gated — the
@@ -98,7 +101,7 @@ func (u *Usecase) Propose(ctx context.Context, in ProposeInput) (*model.Approval
 	if src == "" {
 		src = model.SourceAgent
 	}
-	a := &model.Approval{
+	a := &model.Approval{ExecutionOwner: in.ExecutionOwner, ExecutionLeaseUntil: in.ExecutionLeaseUntil,
 		RuntimeVersion: in.RuntimeVersion,
 		Kind:           in.Kind, Title: in.Title, Summary: in.Summary,
 		PayloadJSON: string(payload), Source: src, SessionID: in.SessionID,
@@ -127,6 +130,9 @@ func (u *Usecase) CountPending(ctx context.Context) (int64, error) { return u.re
 // its Kind, runs the action and records the result. Only a pending row can
 // be approved (the repo guards against double-decisions).
 func (u *Usecase) Approve(ctx context.Context, approverID uint64, id string) (*model.Approval, error) {
+	if err := u.AuthorizeApproval(ctx, approverID); err != nil {
+		return nil, err
+	}
 	now := time.Now().UTC()
 	if err := u.repo.Decide(ctx, id, map[string]any{
 		"status": model.StatusApproved, "approved_by": approverID, "decided_at": now,
@@ -170,6 +176,9 @@ func (u *Usecase) Approve(ctx context.Context, approverID uint64, id string) (*m
 
 // Reject marks the proposal rejected with a reason. No execution.
 func (u *Usecase) Reject(ctx context.Context, approverID uint64, id, reason string) error {
+	if err := u.AuthorizeApproval(ctx, approverID); err != nil {
+		return err
+	}
 	now := time.Now().UTC()
 	return u.repo.Decide(ctx, id, map[string]any{
 		"status": model.StatusRejected, "approved_by": approverID,

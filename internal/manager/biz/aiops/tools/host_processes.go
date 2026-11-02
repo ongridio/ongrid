@@ -18,7 +18,7 @@ const ToolNameGetProcessList = "get_host_processes"
 
 // GetProcessListDescription is the single-sentence description the model
 // reads when deciding whether to call this tool.
-const GetProcessListDescription = "Return the top-N processes on the named edge host, sorted by CPU or memory usage."
+const GetProcessListDescription = "Return the top-N processes on the selected host, sorted by CPU or memory usage. CPU is a short-interval delta normalized to total host capacity when cpu_basis=host_total; inspect cpu_sample_status and cpu_window_seconds. legacy_unspecified values must not be compared to current host utilization."
 
 // processListCallTimeout caps how long a single dispatch may wait. Same
 // rationale as hostLoadCallTimeout.
@@ -81,7 +81,7 @@ var GetProcessListBatchSchema = json.RawMessage(`{
   "properties": {
     "device_ids": {
       "type": "array",
-      "items": {"type": "integer"},
+      "items": {"type": "integer", "minimum": 1},
       "minItems": 1,
       "maxItems": 16,
       "description": "设备 id 列表，一次最多 16 个。fleet 视角看进程对比应该一次性给所有 id。"
@@ -154,6 +154,14 @@ func (t *GetProcessListTool) singleProcessList(ctx context.Context, deviceID uin
 		entry.Error = fmt.Sprintf("decode resp: %v", err)
 		return entry
 	}
+	if resp.CPUBasis == "" {
+		resp.CPUBasis = "legacy_unspecified"
+	}
+	for i := range resp.Processes {
+		if resp.Processes[i].CPUSampleStatus == "" {
+			resp.Processes[i].CPUSampleStatus = "unknown"
+		}
+	}
 	entry.ProcessList = &resp
 	return entry
 }
@@ -172,6 +180,9 @@ func (t *GetProcessListTool) InvokableRun(ctx context.Context, argsJSON string, 
 	}
 	if in.TopN == 0 {
 		in.TopN = 10
+	}
+	if in.TopN > 100 {
+		return "", fmt.Errorf("get_host_processes: top_n must not exceed 100")
 	}
 	switch in.SortBy {
 	case tunnel.ProcessSortByCPU, tunnel.ProcessSortByMem:

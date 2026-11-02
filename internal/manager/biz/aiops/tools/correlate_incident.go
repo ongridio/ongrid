@@ -466,7 +466,7 @@ var CorrelateIncidentBatchSchema = json.RawMessage(`{
   "properties": {
     "incident_ids": {
       "type": "array",
-      "items": {"type": "integer"},
+      "items": {"type": "integer", "minimum": 1},
       "minItems": 1,
       "maxItems": 16,
       "description": "告警 id 列表，一次最多 16 个。**典型 2-4 个**——每个 incident 内部已经 3 路并发，给 16 个会成本爆炸。"

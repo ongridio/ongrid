@@ -82,7 +82,7 @@ var GetIncidentDetailBatchSchema = json.RawMessage(`{
   "properties": {
     "incident_ids": {
       "type": "array",
-      "items": {"type": "integer"},
+      "items": {"type": "integer", "minimum": 1},
       "minItems": 1,
       "maxItems": 16,
       "description": "告警 id 列表，一次最多 16 个。LLM 经常同时关联多个 alert，一次拉一组比逐个调省 4-8 轮。"

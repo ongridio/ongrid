@@ -19,7 +19,7 @@ const ToolNameGetHostLoad = "get_host_load"
 // GetHostLoadDescription is the single-sentence description the model reads
 // when deciding whether to call this tool. Accuracy here directly affects
 // dispatch quality; keep it concrete.
-const GetHostLoadDescription = "Return current CPU percent, memory percent, and 1/5/15-minute load averages of the named edge host."
+const GetHostLoadDescription = "Return current CPU percent, memory percent, and 1/5/15-minute load averages of the selected host. Only interpret cpu_pct when cpu_sample_status is valid; unknown/unavailable/warming_up is not zero utilization. cpu_window_seconds identifies the sampling window."
 
 // hostLoadCallTimeout caps how long a single tool dispatch may wait on
 // the frontier round-trip. We derive a child ctx with this deadline so
@@ -91,7 +91,7 @@ var GetHostLoadBatchSchema = json.RawMessage(`{
   "properties": {
     "device_ids": {
       "type": "array",
-      "items": {"type": "integer"},
+      "items": {"type": "integer", "minimum": 1},
       "minItems": 1,
       "maxItems": 16,
       "description": "设备 id 列表，一次最多 16 个。fleet 视角问题（'哪台 cpu 最高'/'对比这几台 mem'）用此一次性拉，避免单设备多次调用。"
@@ -103,7 +103,7 @@ var GetHostLoadBatchSchema = json.RawMessage(`{
 // getHostLoadWhenToUse — batch-first routing hint (N+15).
 const getHostLoadWhenToUse = "对一组设备一次性抓 cpu/mem/load 实时值。**优先一次给多个 device_id** " +
 	"做横向对比（'哪台 cpu 最高'）；单设备调用是反模式（fleet 问题应该一次性给所有 id）。" +
-	"NOT for: 历史趋势（用 query_promql）/ 进程清单（用 get_process_list）/ " +
+	"NOT for: 历史趋势（用 query_promql）/ 进程清单（用 get_host_processes）/ " +
 	"日志（用 query_logql）/ 单设备深查（用 host_bash）。"
 
 // Info — pure metadata. Class=read because get_host_load only observes.
@@ -154,6 +154,9 @@ func (t *GetHostLoadTool) singleHostLoad(ctx context.Context, deviceID uint64) H
 	if err := json.Unmarshal(respBody, &resp); err != nil {
 		entry.Error = fmt.Sprintf("decode resp: %v", err)
 		return entry
+	}
+	if resp.CPUSampleStatus == "" {
+		resp.CPUSampleStatus = "unknown"
 	}
 	entry.HostLoad = &resp
 	return entry

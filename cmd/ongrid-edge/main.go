@@ -105,6 +105,14 @@ func run() error {
 		return err
 	}
 
+	// 配置迁移必须在注册和健康标记之前完成；首次自举退出交还 systemd。
+	if restart, err := prepareSystemdUpgrade(context.Background(), os.Getenv("ONGRID_EDGE_UPGRADE_STAGE_DIR"), version); err != nil {
+		return err
+	} else if restart {
+		fmt.Fprintln(os.Stderr, "systemd configuration bootstrap requested; restarting before registration")
+		return nil
+	}
+
 	log := logger.WithService(logger.New(slog.LevelInfo), "ongrid-edge")
 	log.Info("configuration loaded",
 		slog.String("cloud_addr", cfg.Edge.CloudAddr),

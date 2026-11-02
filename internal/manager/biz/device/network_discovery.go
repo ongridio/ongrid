@@ -3,6 +3,7 @@ package device
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -42,13 +43,17 @@ type NetworkSNMPCaller interface {
 type NetworkTopologyMirror interface {
 	EnsureNodeForDevice(ctx context.Context, deviceID uint64, deviceName string) (uint64, error)
 	EnsureNetworkDeviceNode(ctx context.Context, deviceID uint64, deviceName string) (uint64, error)
-	EnsureDeviceConnection(ctx context.Context, deviceNodeID, peerNodeID uint64, propsJSON string) error
+	EnsureNetworkCollection(ctx context.Context, hostNodeID, targetNodeID uint64, propsJSON string) error
 }
 
 type NetworkPromotionRepo interface {
+	ListNetworkTopologyDeviceIDs(ctx context.Context, after uint64, limit int) ([]uint64, error)
+	CreateSNMPDevice(ctx context.Context, seed *model.Device, profile *model.DeviceNetwork, interfaces []*model.NetworkInterface) (*NetworkDeviceDetail, error)
 	GetCandidate(ctx context.Context, id uint64) (*model.NetworkDiscoveryCandidate, error)
 	MarkCandidatePromoted(ctx context.Context, id, deviceID uint64) error
 	UpsertDeviceNetwork(ctx context.Context, profile *model.DeviceNetwork) error
+	UpdateNetworkPolling(ctx context.Context, profile *model.DeviceNetwork) error
+	UpdateNetworkPollObservation(ctx context.Context, profile *model.DeviceNetwork, candidate *model.NetworkDiscoveryCandidate, interfaces []*model.NetworkInterface) error
 	GetNetworkDeviceDetail(ctx context.Context, deviceID uint64) (*NetworkDeviceDetail, error)
 	ListDueNetworkPolls(ctx context.Context, now time.Time, limit int) ([]*NetworkDeviceDetail, error)
 	ReplaceNetworkInterfaces(ctx context.Context, deviceID uint64, rows []*model.NetworkInterface) error
@@ -69,8 +74,9 @@ type NetworkDiscoveryEnabledProvider func(ctx context.Context) bool
 // candidate carries the latest protocol observation while Profile contains
 // the durable identity promoted into the device inventory.
 type NetworkDeviceDetail struct {
-	Profile   *model.DeviceNetwork
-	Candidate *model.NetworkDiscoveryCandidate
+	Profile    *model.DeviceNetwork
+	Candidate  *model.NetworkDiscoveryCandidate
+	Interfaces []*model.NetworkInterface
 }
 
 type NetworkCandidateFilter struct {
@@ -135,56 +141,6 @@ func (u *NetworkDiscoveryUsecase) GetNetworkDeviceDetail(ctx context.Context, de
 	return u.promotion.GetNetworkDeviceDetail(ctx, deviceID)
 }
 
-// ConfigureNetworkPolling enables or disables periodic read-only SNMP
-// collection. The device profile stores only a credential name; secret values
-// remain sealed in the shared vault and are resolved immediately before use.
-func (u *NetworkDiscoveryUsecase) ConfigureNetworkPolling(ctx context.Context, deviceID uint64, enabled bool, intervalSeconds uint32, credentialName string, port uint16) (*NetworkDeviceDetail, error) {
-	if u == nil || u.promotion == nil {
-		return nil, errs.ErrNotWiredYet
-	}
-	detail, err := u.promotion.GetNetworkDeviceDetail(ctx, deviceID)
-	if err != nil {
-		return nil, err
-	}
-	if detail.Profile == nil {
-		return nil, errs.ErrNotFound
-	}
-	if intervalSeconds == 0 {
-		intervalSeconds = 300
-	}
-	if intervalSeconds < 30 || intervalSeconds > 86400 {
-		return nil, fmt.Errorf("%w: poll interval must be between 30 and 86400 seconds", errs.ErrInvalid)
-	}
-	if port == 0 {
-		port = 161
-	}
-	if enabled {
-		credentialName = strings.TrimSpace(credentialName)
-		if credentialName == "" || u.credentials == nil {
-			return nil, fmt.Errorf("%w: an SNMP credential is required for polling", errs.ErrInvalid)
-		}
-		fields, err := u.credentials.ResolveFields(ctx, credentialName)
-		if err != nil {
-			return nil, fmt.Errorf("resolve SNMP credential: %w", err)
-		}
-		if err := validateSNMPCredentialFields(fields); err != nil {
-			return nil, err
-		}
-	}
-	detail.Profile.PollEnabled = enabled
-	detail.Profile.PollIntervalSeconds = intervalSeconds
-	detail.Profile.PollCredentialName = strings.TrimSpace(credentialName)
-	detail.Profile.PollPort = port
-	if !enabled {
-		detail.Profile.PollCredentialName = ""
-		detail.Profile.LastPollError = ""
-	}
-	if err := u.promotion.UpsertDeviceNetwork(ctx, detail.Profile); err != nil {
-		return nil, err
-	}
-	return u.promotion.GetNetworkDeviceDetail(ctx, deviceID)
-}
-
 func validateSNMPCredentialFields(fields map[string]string) error {
 	version := strings.ToLower(strings.TrimSpace(fields["version"]))
 	if version == "" {
@@ -239,60 +195,39 @@ func (u *NetworkDiscoveryUsecase) PollNetworkDevice(ctx context.Context, deviceI
 		return err
 	}
 	profile, candidate := detail.Profile, detail.Candidate
-	if profile == nil || candidate == nil || !profile.PollEnabled {
+	if profile == nil || !profile.PollEnabled {
 		return errs.ErrInvalid
 	}
-	fields, err := u.credentials.ResolveFields(ctx, profile.PollCredentialName)
+	in, err := u.normalizeSNMPConfig(ctx, NetworkSNMPConfig{}, detail)
 	if err != nil {
-		return u.recordNetworkPollFailure(ctx, profile, now, "SNMP credential unavailable")
+		return u.recordNetworkPollFailure(ctx, profile, now, "scanner or configuration unavailable")
 	}
-	req := tunnel.ProbeNetworkSNMPRequest{Address: firstNonEmpty(profile.ManagementAddress, candidate.IPAddress), Port: profile.PollPort, Version: fields["version"], Community: fields["community"], Username: fields["username"], AuthProtocol: fields["auth_protocol"], AuthSecret: fields["auth_secret"], PrivacyProtocol: fields["privacy_protocol"], PrivacySecret: fields["privacy_secret"], TimeoutMilliseconds: 5000, Retries: 1}
-	if strings.TrimSpace(req.Version) == "" {
-		req.Version = "v2c"
-	}
-	if strings.TrimSpace(req.Address) == "" {
-		return u.recordNetworkPollFailure(ctx, profile, now, "network device has no management address")
-	}
-	body, err := json.Marshal(req)
+	response, err := u.probeSNMPConfig(ctx, in)
 	if err != nil {
-		return fmt.Errorf("marshal SNMP poll: %w", err)
+		return u.recordNetworkPollFailure(ctx, profile, now, err.Error())
 	}
-	pollCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-	responseBody, err := u.edgeCaller.Call(pollCtx, candidate.ObserverEdgeID, tunnel.MethodProbeNetworkSNMP, body)
-	if err != nil {
-		return u.recordNetworkPollFailure(ctx, profile, now, "SNMP poll failed")
+	if err := verifySNMPIdentity(profile, response); err != nil {
+		return u.recordNetworkPollFailure(ctx, profile, now, "SNMP identity mismatch")
 	}
-	var response tunnel.ProbeNetworkSNMPResponse
-	if err := json.Unmarshal(responseBody, &response); err != nil {
-		return u.recordNetworkPollFailure(ctx, profile, now, "invalid SNMP poll response")
-	}
-	if !response.OK {
-		return u.recordNetworkPollFailure(ctx, profile, now, "SNMP poll failed")
-	}
-	if err := mergeSNMPProbe(candidate, response); err != nil {
-		return err
-	}
-	if err := u.repo.UpdateCandidate(ctx, candidate); err != nil {
-		return err
+	if candidate != nil {
+		if err := mergeSNMPProbe(candidate, *response); err != nil {
+			return err
+		}
 	}
 	interfaces := networkInterfacesFromReports(deviceID, response.Interfaces, now)
-	if err := u.promotion.ReplaceNetworkInterfaces(ctx, deviceID, interfaces); err != nil {
-		return err
-	}
 	profile.ReachabilityStatus, profile.LastPollError = "reachable", ""
 	profile.LastPollAt, profile.LastReachableAt = &now, &now
-	if err := u.promotion.UpsertDeviceNetwork(ctx, profile); err != nil {
+	if err := u.promotion.UpdateNetworkPollObservation(ctx, profile, candidate, interfaces); err != nil {
 		return err
 	}
 	return nil
 }
 
 func (u *NetworkDiscoveryUsecase) recordNetworkPollFailure(ctx context.Context, profile *model.DeviceNetwork, now time.Time, message string) error {
-	profile.ReachabilityStatus = "unreachable"
+	profile.ReachabilityStatus = "unknown"
 	profile.LastPollAt = &now
 	profile.LastPollError = message
-	if err := u.promotion.UpsertDeviceNetwork(ctx, profile); err != nil {
+	if err := u.promotion.UpdateNetworkPollObservation(ctx, profile, nil, nil); err != nil {
 		return err
 	}
 	return fmt.Errorf("%s", message)
@@ -383,40 +318,100 @@ func (u *NetworkDiscoveryUsecase) ensureTopologyConnection(ctx context.Context, 
 	if u.topology == nil {
 		return nil
 	}
-	hostDeviceID, err := u.links.LookupHostDevice(ctx, candidate.ObserverEdgeID)
+	detail, err := u.promotion.GetNetworkDeviceDetail(ctx, networkDevice.ID)
 	if err != nil {
-		return fmt.Errorf("resolve observer host device: %w", err)
+		return err
 	}
-	hostDevice, err := u.devices.Get(ctx, hostDeviceID)
-	if err != nil {
-		return fmt.Errorf("load observer host device: %w", err)
+	if detail.Candidate == nil {
+		detail.Candidate = candidate
 	}
-	hostNodeID, err := u.topology.EnsureNodeForDevice(ctx, hostDevice.ID, firstNonEmpty(hostDevice.Name, hostDevice.Hostname, fmt.Sprintf("device-%d", hostDevice.ID)))
-	if err != nil {
-		return fmt.Errorf("mirror observer device node: %w", err)
+	return u.ensureCollectionTopology(ctx, detail)
+}
+
+// ensureCollectionTopology uses durable Host identity, never a runtime Edge ID
+// or an inferred interface adjacency. Disabled polling retains the configured relation.
+func (u *NetworkDiscoveryUsecase) ensureCollectionTopology(ctx context.Context, detail *NetworkDeviceDetail) error {
+	if u.topology == nil {
+		return nil
 	}
-	if hostDevice.NodeID == nil || *hostDevice.NodeID != hostNodeID {
-		if err := u.devices.SetNodeID(ctx, hostDevice.ID, hostNodeID); err != nil {
-			return fmt.Errorf("link observer device node: %w", err)
+	profile := detail.Profile
+	hostID := profile.PollScannerHostDeviceID
+	if hostID == 0 && detail.Candidate != nil {
+		var err error
+		hostID, err = u.links.LookupHostDevice(ctx, detail.Candidate.ObserverEdgeID)
+		if err != nil {
+			return fmt.Errorf("resolve scanner Host: %w", err)
 		}
 	}
-	networkNodeID, err := u.topology.EnsureNetworkDeviceNode(ctx, networkDevice.ID, firstNonEmpty(networkDevice.Name, networkDevice.Hostname, fmt.Sprintf("network-device-%d", networkDevice.ID)))
+	target, err := u.devices.Get(ctx, profile.DeviceID)
+	if err != nil {
+		return err
+	}
+	targetNodeID, err := u.topology.EnsureNetworkDeviceNode(ctx, target.ID, firstNonEmpty(target.Name, target.Hostname, fmt.Sprintf("network-device-%d", target.ID)))
 	if err != nil {
 		return fmt.Errorf("mirror network device node: %w", err)
 	}
-	if networkDevice.NodeID == nil || *networkDevice.NodeID != networkNodeID {
-		if err := u.devices.SetNodeID(ctx, networkDevice.ID, networkNodeID); err != nil {
-			return fmt.Errorf("link network device node: %w", err)
+	if target.NodeID == nil || *target.NodeID != targetNodeID {
+		if err := u.devices.SetNodeID(ctx, target.ID, targetNodeID); err != nil {
+			return err
 		}
 	}
-	props, err := json.Marshal(map[string]any{
-		"source": "network_discovery", "candidate_id": candidate.ID,
-		"observer_edge_id": candidate.ObserverEdgeID,
-	})
-	if err != nil {
-		return fmt.Errorf("encode topology connection: %w", err)
+	if hostID == 0 {
+		return nil
 	}
-	return u.topology.EnsureDeviceConnection(ctx, hostNodeID, networkNodeID, string(props))
+	host, err := u.devices.Get(ctx, hostID)
+	if err != nil {
+		if !profile.PollEnabled && errors.Is(err, errs.ErrNotFound) {
+			return nil
+		}
+		return fmt.Errorf("load scanner Host: %w", err)
+	}
+	hostNodeID, err := u.topology.EnsureNodeForDevice(ctx, host.ID, firstNonEmpty(host.Name, host.Hostname, fmt.Sprintf("device-%d", host.ID)))
+	if err != nil {
+		return err
+	}
+	if host.NodeID == nil || *host.NodeID != hostNodeID {
+		if err := u.devices.SetNodeID(ctx, host.ID, hostNodeID); err != nil {
+			return err
+		}
+	}
+	props, err := json.Marshal(struct {
+		Source         string `json:"source"`
+		ScannerHostID  uint64 `json:"scanner_host_device_id"`
+		TargetDeviceID uint64 `json:"target_device_id"`
+		Protocol       string `json:"protocol"`
+		Enabled        bool   `json:"enabled"`
+	}{"network_collection", hostID, target.ID, "snmp", profile.PollEnabled})
+	if err != nil {
+		return err
+	}
+	return u.topology.EnsureNetworkCollection(ctx, hostNodeID, targetNodeID, string(props))
+}
+
+// ReconcileCollectionTopology repairs existing inventory and retries incomplete
+// mirrors in bounded pages, including disabled targets and offline scanners.
+func (u *NetworkDiscoveryUsecase) ReconcileCollectionTopology(ctx context.Context, after uint64) (uint64, error) {
+	if u.topology == nil || u.promotion == nil {
+		return 0, nil
+	}
+	ids, err := u.promotion.ListNetworkTopologyDeviceIDs(ctx, after, 100)
+	if err != nil {
+		return after, err
+	}
+	var firstErr error
+	for _, id := range ids {
+		detail, err := u.promotion.GetNetworkDeviceDetail(ctx, id)
+		if err == nil {
+			err = u.ensureCollectionTopology(ctx, detail)
+		}
+		if err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("reconcile network device %d: %w", id, err)
+		}
+	}
+	if len(ids) < 100 {
+		return 0, firstErr
+	}
+	return ids[len(ids)-1], firstErr
 }
 
 // ScanAndPromoteCandidate performs a one-shot read-only SNMP probe through the

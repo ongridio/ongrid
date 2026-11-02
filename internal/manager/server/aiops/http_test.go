@@ -531,3 +531,15 @@ func TestSessionDTO_RuntimeVersion(t *testing.T) {
 		}
 	}
 }
+
+func TestMessageDTOIncludesPersistedToolExecution(t *testing.T) {
+	result := `{"result":[]}`
+	detail := "invalid arguments"
+	at := time.Now().UTC()
+	end := at.Add(123 * time.Millisecond)
+	msg := &model.Message{Role: model.RoleTool, Content: &result, ToolExecution: &model.ToolCall{ToolName: "query_promql", Status: model.StatusError, Error: &detail, ArgumentsJSON: `{}`, ResultJSON: &result, StartedAt: at, EndedAt: &end}}
+	out := toMessageDTO(msg)
+	if out.ToolCall == nil || out.ToolCall.Status != model.StatusError || out.ToolCall.Error != detail || out.ToolCall.DurationMs != 123 || out.ToolCall.ResultRaw != result {
+		t.Fatalf("DTO=%+v", out.ToolCall)
+	}
+}

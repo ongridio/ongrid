@@ -1,0 +1,33 @@
+syntax = "proto3";
+package ongrid.manager.imbridge.v1;
+option go_package = "github.com/ongridio/ongrid/api/gen/manager/imbridge/v1;imbridgev1";
+
+// 受登录身份保护；user_id 从认证上下文取得，不能由请求指定。
+message CreateBindingChallengeRequest { uint64 app_id = 1; }
+message BindingChallengeResponse {
+ string id = 1;
+ string code = 2; // 只在创建时返回，十分钟有效；数据库仅保存摘要。
+ string expires_at = 3;
+ string subject = 4; // 仅供发起者核对平台不可变身份。
+ bool claimed = 5;
+}
+message ConfirmBindingRequest { string challenge_id = 1; }
+message BindingResponse { string id = 1; uint64 app_id = 2; string subject = 3; }
+message ListBindingsResponse { repeated BindingResponse items = 1; }
+// POST /v1/im/bindings/challenges
+// GET /v1/im/bindings/challenges/{id}
+// POST /v1/im/bindings/challenges/{id}/confirm
+// GET /v1/im/bindings
+// DELETE /v1/im/bindings/{id}
+// 平台原生回调只接受不可猜测的 action token，禁止接收执行参数。
+
+// IM 应用 CRUD 增量字段；原有字段保持兼容。
+message ApprovalAppSettings { string approval_template_id = 1; }
+
+// POST /v1/im/bindings/preauthorize
+// 管理员预先授权本人在平台的精确身份；不接受 user_id、不按昵称匹配。
+message PreauthorizeBindingRequest {
+ uint64 app_id = 1;
+ string scope = 2;
+ string platform_user_id = 3;
+}

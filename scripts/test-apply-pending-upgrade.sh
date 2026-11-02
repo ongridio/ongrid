@@ -99,3 +99,62 @@ test ! -e "$stage/pending"
 test ! -e "$stage/pending.sha256"
 
 echo "apply-pending-upgrade tests passed"
+
+# systemd bootstrap: an old hook has already installed the new binary/script.
+# Only a matching one-shot request may defer rollback; reload only on change.
+rm -rf "$stage"; mkdir -p "$stage"
+systemd_dir="$tmp_dir/systemd"
+mkdir -p "$systemd_dir" "$tmp_dir/mock-bin"
+printf '[Service]\nProtectSystem=strict\nEnvironment=CUSTOM=preserved\n' > "$systemd_dir/ongrid-edge.service"
+cat > "$tmp_dir/mock-bin/systemctl" <<'MOCK'
+#!/bin/bash
+[[ $* == daemon-reload ]] || exit 99
+printf 'reload\n' >> "$SYSTEMD_RELOAD_LOG"
+[[ ! -f "$SYSTEMD_FAIL_FLAG" ]]
+MOCK
+chmod +x "$tmp_dir/mock-bin/systemctl"
+export PATH="$tmp_dir/mock-bin:$PATH"
+export ONGRID_EDGE_UPGRADE_SYSTEMD_DIR="$systemd_dir"
+export SYSTEMD_RELOAD_LOG="$tmp_dir/reloads" SYSTEMD_FAIL_FLAG="$tmp_dir/fail-reload"
+: > "$SYSTEMD_RELOAD_LOG"
+printf 'old-agent\n' > "$bin_dir/ongrid-edge.previous"
+printf 'bootstrap-agent\n' > "$bin_dir/ongrid-edge"
+printf 'v-bootstrap\n' > "$stage/last_upgrade_ver"
+printf 'now\n' > "$stage/last_upgrade_at"
+printf 'v-bootstrap\n' > "$stage/systemd_bootstrap_request"
+run_hook
+grep -Fxq bootstrap-agent "$bin_dir/ongrid-edge"
+grep -Fxq v-bootstrap "$stage/systemd_config_ready"
+test ! -e "$stage/systemd_bootstrap_request"
+grep -Fxq Environment=CUSTOM=preserved "$systemd_dir/ongrid-edge.service"
+grep -Fxq ProtectSystem=false "$systemd_dir/ongrid-edge.service.d/90-ongrid-host-filesystem.conf"
+test "$(wc -l < "$SYSTEMD_RELOAD_LOG" | tr -d ' ')" = 1
+# No health acknowledgement -> restore config and program together.
+run_hook
+grep -Fxq old-agent "$bin_dir/ongrid-edge"
+test ! -e "$systemd_dir/ongrid-edge.service.d/90-ongrid-host-filesystem.conf"
+test "$(wc -l < "$SYSTEMD_RELOAD_LOG" | tr -d ' ')" = 2
+# New hook does migration in the same pre-start invocation.
+write_bundle v-config agent-config plugin-config
+run_hook
+printf 'v-config\n' > "$stage/healthy_marker"
+run_hook
+reloads=$(wc -l < "$SYSTEMD_RELOAD_LOG")
+write_bundle v-binary-only agent-next plugin-next
+run_hook
+grep -Fxq v-binary-only "$stage/systemd_config_ready"
+test "$(wc -l < "$SYSTEMD_RELOAD_LOG")" = "$reloads"
+printf 'v-binary-only\n' > "$stage/healthy_marker"
+run_hook
+# Reload failure must not advertise readiness; recovery metadata survives
+# if even the restorative reload is unavailable.
+printf '[Service]\nProtectSystem=strict\n' > "$systemd_dir/ongrid-edge.service.d/90-ongrid-host-filesystem.conf"
+touch "$SYSTEMD_FAIL_FLAG"
+write_bundle v-failed agent-failed plugin-failed
+run_hook
+test -e "$stage/systemd_config_previous_state"
+rm "$SYSTEMD_FAIL_FLAG"
+run_hook
+grep -Fxq agent-next "$bin_dir/ongrid-edge"
+grep -Fxq ProtectSystem=strict "$systemd_dir/ongrid-edge.service.d/90-ongrid-host-filesystem.conf"
+echo 'edge upgrade systemd bootstrap / conditional reload / rollback: ok'

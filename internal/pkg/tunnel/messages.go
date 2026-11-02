@@ -414,15 +414,17 @@ type HeartbeatResponse struct{}
 
 // HostMetricPoint is one sample in a metrics batch.
 type HostMetricPoint struct {
-	Ts          int64   `json:"ts"` // unix seconds
-	CPUPct      float64 `json:"cpu_pct"`
-	MemPct      float64 `json:"mem_pct"`
-	Load1       float64 `json:"load1"`
-	Load5       float64 `json:"load5"`
-	Load15      float64 `json:"load15"`
-	NetRxBps    uint64  `json:"net_rx_bps"`
-	NetTxBps    uint64  `json:"net_tx_bps"`
-	DiskUsedPct float64 `json:"disk_used_pct"`
+	Ts               int64   `json:"ts"` // unix seconds
+	CPUPct           float64 `json:"cpu_pct"`
+	MemPct           float64 `json:"mem_pct"`
+	Load1            float64 `json:"load1"`
+	Load5            float64 `json:"load5"`
+	Load15           float64 `json:"load15"`
+	NetRxBps         uint64  `json:"net_rx_bps"`
+	NetTxBps         uint64  `json:"net_tx_bps"`
+	DiskUsedPct      float64 `json:"disk_used_pct"`
+	CPUSampleStatus  string  `json:"cpu_sample_status,omitempty"`
+	CPUWindowSeconds float64 `json:"cpu_window_seconds,omitempty"`
 }
 
 // PushHostMetricsRequest pushes a batch of points (ring-buffered edge side).
@@ -843,11 +845,13 @@ type GetHostLoadResponse struct {
 	// collector). Added to plug a real-world LLM mis-read where models
 	// answered "disk usage = mem_pct" because no disk field was present
 	// here — see session a16dec3d-1a3f-40b6-8fed-553b7b6cb9b9.
-	DiskUsedPct float64 `json:"disk_used_pct"`
-	Load1       float64 `json:"load1"`
-	Load5       float64 `json:"load5"`
-	Load15      float64 `json:"load15"`
-	SampledAt   int64   `json:"sampled_at"` // unix seconds
+	DiskUsedPct      float64 `json:"disk_used_pct"`
+	Load1            float64 `json:"load1"`
+	Load5            float64 `json:"load5"`
+	Load15           float64 `json:"load15"`
+	SampledAt        int64   `json:"sampled_at"` // unix seconds
+	CPUSampleStatus  string  `json:"cpu_sample_status"`
+	CPUWindowSeconds float64 `json:"cpu_window_seconds"`
 }
 
 // ---------------------------------------------------------------------
@@ -862,12 +866,13 @@ const (
 
 // ProcessInfo is one row in the top-N processes result.
 type ProcessInfo struct {
-	PID     int32   `json:"pid"`
-	Name    string  `json:"name"`
-	Cmdline string  `json:"cmdline"`
-	CPUPct  float64 `json:"cpu_pct"`
-	MemPct  float64 `json:"mem_pct"`
-	User    string  `json:"user"`
+	PID             int32   `json:"pid"`
+	Name            string  `json:"name"`
+	Cmdline         string  `json:"cmdline"`
+	CPUPct          float64 `json:"cpu_pct"`
+	MemPct          float64 `json:"mem_pct"`
+	User            string  `json:"user"`
+	CPUSampleStatus string  `json:"cpu_sample_status"`
 }
 
 // GetProcessListRequest asks for the top N processes sorted by cpu/mem.
@@ -878,8 +883,10 @@ type GetProcessListRequest struct {
 
 // GetProcessListResponse is the top-N result.
 type GetProcessListResponse struct {
-	Processes []ProcessInfo `json:"processes"`
-	SampledAt int64         `json:"sampled_at"`
+	Processes        []ProcessInfo `json:"processes"`
+	SampledAt        int64         `json:"sampled_at"`
+	CPUBasis         string        `json:"cpu_basis"`
+	CPUWindowSeconds float64       `json:"cpu_window_seconds"`
 }
 
 // ---------------------------------------------------------------------

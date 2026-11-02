@@ -2,6 +2,7 @@ package imbridge
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"sync"
@@ -20,6 +21,11 @@ type Sender interface {
 // MessageEditor is implemented by providers such as Feishu, Telegram,
 // and Slack. DingTalk's session webhook only creates messages, so it
 // intentionally does not implement this interface.
+// MessageSplitter returns provider-sized Markdown pages.
+type MessageSplitter interface {
+	SplitText(text string) []string
+}
+
 type MessageEditor interface {
 	// EditText replaces the body of a previously-sent text message.
 	EditText(ctx context.Context, messageID, text string) error
@@ -40,9 +46,16 @@ type streamEditor struct {
 	locale        string // app.DefaultLocale, drives the OnFatal apology language
 	log           *slog.Logger
 
-	mu     sync.Mutex
-	buf    string
-	lastAt time.Time
+	publicURL        string
+	durableApprovals bool
+	approvalReader   ApprovalStatusReader
+	sessionID        string
+	approvals        []approvalNotice
+	flushMu          sync.Mutex
+	pages            []sentPage
+	mu               sync.Mutex
+	buf              string
+	lastAt           time.Time
 	// throttle: every 800ms or 200 char delta
 }
 
@@ -72,6 +85,14 @@ func newStreamEditor(ctx context.Context, sender Sender, chatID, receiveIDType, 
 // messages.
 func (e *streamEditor) OnEvent(ev chatprotocol.Event) {
 	switch ev.Type {
+	case chatprotocol.EventApprovalPending:
+		if err := e.notifyApproval(ev.Approval); err != nil {
+			e.log.Warn("imbridge: approval notice failed", slog.Any("err", err))
+		}
+	case chatprotocol.EventToolEnd:
+		if err := e.refreshApprovals(); err != nil {
+			e.log.Warn("imbridge: approval status refresh failed", slog.Any("err", err))
+		}
 	case chatprotocol.EventAssistant:
 		// Pull the text content out of the event. chatprotocol.Event for
 		// assistant carries the persisted assistant turn — we
@@ -114,7 +135,10 @@ func (e *streamEditor) OnFatal(err error) error {
 
 // Flush is the bridge's final post-run nudge — ensures the last buf
 // has been written even if the agent terminated without emitting Done.
-func (e *streamEditor) Flush() error { return e.flush() }
+func (e *streamEditor) Flush() error {
+	// A status lookup failure must not suppress the assistant's final answer.
+	return errors.Join(e.flush(), e.refreshApprovals())
+}
 
 func (e *streamEditor) shouldFlushLocked() bool {
 	if time.Since(e.lastAt) >= editIntervalMs*time.Millisecond {
@@ -123,7 +147,15 @@ func (e *streamEditor) shouldFlushLocked() bool {
 	return false
 }
 
+type sentPage struct{ id, text string }
+
 func (e *streamEditor) flush() error {
+	e.flushMu.Lock()
+	defer e.flushMu.Unlock()
+	if splitter, ok := e.sender.(MessageSplitter); ok {
+		return e.flushPages(splitter)
+	}
+
 	e.mu.Lock()
 	buf := e.buf
 	mid := e.messageID
@@ -172,4 +204,55 @@ func assistantText(ev chatprotocol.Event) string {
 		return ""
 	}
 	return ev.Assistant.Content
+}
+
+// flushPages records each successful page immediately so a later failure can
+// retry the remainder without duplicating pages already delivered.
+func (e *streamEditor) flushPages(splitter MessageSplitter) error {
+	e.mu.Lock()
+	body := e.buf
+	e.lastAt = time.Now()
+	e.mu.Unlock()
+	if body == "" {
+		return nil
+	}
+	parts := splitter.SplitText(body)
+	if len(e.pages) == 0 && e.messageID != "" {
+		e.pages = append(e.pages, sentPage{id: e.messageID})
+	}
+	for i, part := range parts {
+		if i < len(e.pages) {
+			if e.pages[i].text == part || e.editor == nil {
+				continue
+			}
+			if err := e.editor.EditText(e.ctx, e.pages[i].id, part); err != nil {
+				return err
+			}
+			e.pages[i].text = part
+		} else {
+			id, err := e.sender.SendText(e.ctx, e.chatID, e.receiveIDType, part)
+			if err != nil {
+				return err
+			}
+			e.pages = append(e.pages, sentPage{id: id, text: part})
+		}
+	}
+	// A rewritten/fatal response can be shorter than the streamed draft.
+	// Clear stale trailing content instead of leaving contradictory output.
+	if e.editor != nil {
+		note := "（内容已更新，请查看前文）"
+		if strings.HasPrefix(strings.ToLower(e.locale), "en") {
+			note = "(Content updated; see the preceding message.)"
+		}
+		for i := len(parts); i < len(e.pages); i++ {
+			if e.pages[i].text == note {
+				continue
+			}
+			if err := e.editor.EditText(e.ctx, e.pages[i].id, note); err != nil {
+				return err
+			}
+			e.pages[i].text = note
+		}
+	}
+	return nil
 }

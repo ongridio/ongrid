@@ -702,3 +702,21 @@ func counterValue(t *testing.T, reg *prometheus.Registry, name string, labelValu
 	}
 	return -1
 }
+
+func TestPersistenceHandler_FailureEnvelopeIsError(t *testing.T) {
+	repo := newFakeSessionRepo()
+	h := NewPersistenceHandler(PersistenceDeps{SessionID: "sess-1", Repo: repo})
+	ctx := WithToolCallID(WithMessageID(context.Background(), "msg-1"), "call-1")
+	h.OnStart(ctx, toolInfo("query_promql"), &einotool.CallbackInput{ArgumentsInJSON: `{}`})
+	h.OnEnd(ctx, toolInfo("query_promql"), &einotool.CallbackOutput{Response: `{"status":"failed","error":"invalid parameter"}`})
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	if len(repo.toolCalls) != 1 {
+		t.Fatal("missing execution")
+	}
+	for _, tc := range repo.toolCalls {
+		if tc.Status != model.StatusError || tc.Error == nil || *tc.Error != "invalid parameter" {
+			t.Fatalf("execution=%+v", tc)
+		}
+	}
+}

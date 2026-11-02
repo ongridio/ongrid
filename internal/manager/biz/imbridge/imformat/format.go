@@ -15,6 +15,7 @@ import (
 	"github.com/yuin/goldmark/extension"
 	extast "github.com/yuin/goldmark/extension/ast"
 	"github.com/yuin/goldmark/text"
+	"github.com/yuin/goldmark/util"
 	xhtml "golang.org/x/net/html"
 )
 
@@ -31,6 +32,7 @@ const (
 	dialectPlain dialect = iota
 	dialectSlack
 	dialectTelegramHTML
+	dialectDingTalk
 )
 
 // Plain strips presentation syntax while retaining readable structure. It is
@@ -60,11 +62,22 @@ func Slack(markdown string) string {
 // limit. Oversized indivisible blocks fall back to plain text before splitting
 // so a cut can never leave malformed mrkdwn links or emphasis markers.
 func SlackSections(markdown string) []string {
-	body := Slack(markdown)
-	if body == "" {
-		return nil
+	source := []byte(strings.TrimSpace(markdown))
+	doc := goldmark.New(goldmark.WithExtensions(extension.GFM)).Parser().Parse(text.NewReader(source))
+	// 按语法块分段，代码块内部的空行不能成为消息边界。
+	var paragraphs []string
+	for node := doc.FirstChild(); node != nil; node = node.NextSibling() {
+		r := renderer{source: source, dialect: dialectSlack}
+		r.renderBlock(node, 0)
+		body := strings.TrimSpace(r.out.String())
+		if utf8.RuneCountInString(body) > slackSectionMaxRunes {
+			plain := renderer{source: source, dialect: dialectPlain}
+			plain.renderBlock(node, 0)
+			paragraphs = append(paragraphs, escapedChunks(strings.TrimSpace(plain.out.String()), slackSectionMaxRunes, escapeSlack)...)
+			continue
+		}
+		paragraphs = append(paragraphs, body)
 	}
-	paragraphs := strings.Split(body, "\n\n")
 	sections := make([]string, 0, len(paragraphs))
 	var current strings.Builder
 	flush := func() {
@@ -77,18 +90,6 @@ func SlackSections(markdown string) []string {
 	for _, paragraph := range paragraphs {
 		paragraph = strings.TrimSpace(paragraph)
 		if paragraph == "" {
-			continue
-		}
-		if utf8.RuneCountInString(paragraph) > slackSectionMaxRunes {
-			flush()
-			plain := Plain(paragraph)
-			for utf8.RuneCountInString(plain) > slackSectionMaxRunes && len(sections) < slackMaxSections {
-				sections = append(sections, truncateRunes(plain, slackSectionMaxRunes))
-				plain = string([]rune(plain)[slackSectionMaxRunes:])
-			}
-			if plain != "" && len(sections) < slackMaxSections {
-				sections = append(sections, plain)
-			}
 			continue
 		}
 		separator := ""
@@ -106,7 +107,17 @@ func SlackSections(markdown string) []string {
 		current.WriteString(paragraph)
 	}
 	flush()
+	if len(sections) == slackMaxSections {
+		// 达到平台块数上限时明确提示，避免静默丢失尾部内容。
+		sections[len(sections)-1] = "…（内容过长，请在 Ongrid 会话中查看完整回复 / View the full reply in Ongrid）"
+	}
 	return sections
+}
+
+// DingTalk normalizes GFM to the robot Markdown subset. Tables become
+// labeled rows, so cells remain associated even without native table support.
+func DingTalk(markdown string) string {
+	return render(markdown, dialectDingTalk, 0)
 }
 
 // TelegramHTML converts CommonMark/GFM into Telegram's HTML parse mode. HTML
@@ -130,11 +141,12 @@ func render(markdown string, d dialect, maxRunes int) string {
 }
 
 type renderer struct {
-	source   []byte
-	dialect  dialect
-	maxRunes int
-	out      strings.Builder
-	stopped  bool
+	source        []byte
+	dialect       dialect
+	maxRunes      int
+	out           strings.Builder
+	stopped       bool
+	preserveLinks bool
 }
 
 func (r *renderer) renderChildren(parent ast.Node, quoteDepth int) {
@@ -154,6 +166,8 @@ func (r *renderer) renderBlock(node ast.Node, quoteDepth int) {
 			return
 		}
 		switch r.dialect {
+		case dialectDingTalk:
+			r.writeBlock("**" + body + "**")
 		case dialectSlack:
 			r.writeBlock("*" + body + "*")
 		case dialectTelegramHTML:
@@ -200,7 +214,10 @@ func (r *renderer) renderBlock(node ast.Node, quoteDepth int) {
 func (r *renderer) renderList(list *ast.List, quoteDepth int) {
 	index := list.Start
 	for item := list.FirstChild(); item != nil && !r.stopped; item = item.NextSibling() {
-		body := strings.TrimSpace(r.renderInlines(item))
+		// 递归渲染条目的块，保留嵌套列表、段落和代码。
+		child := renderer{source: r.source, dialect: r.dialect}
+		child.renderChildren(item, 0)
+		body := strings.TrimSpace(child.out.String())
 		if body == "" {
 			continue
 		}
@@ -223,9 +240,11 @@ func (r *renderer) renderCode(code, language string) {
 		return
 	}
 	switch r.dialect {
+	case dialectDingTalk:
+		r.writeBlock("```\n" + strings.ReplaceAll(code, "```", "\u200b```") + "\n```")
 	case dialectSlack:
 		code = strings.ReplaceAll(code, "```", "'''")
-		r.writeBlock("```" + code + "```")
+		r.writeBlock("```" + escapeSlack(code) + "```")
 	case dialectTelegramHTML:
 		lang := safeLanguage(language)
 		open := "<pre><code>"
@@ -240,12 +259,24 @@ func (r *renderer) renderCode(code, language string) {
 
 func (r *renderer) renderTable(table *extast.Table) {
 	rows := make([]string, 0, table.ChildCount())
+	var headers []string
 	for row := table.FirstChild(); row != nil; row = row.NextSibling() {
 		cells := make([]string, 0, row.ChildCount())
 		for cell := row.FirstChild(); cell != nil; cell = cell.NextSibling() {
 			cells = append(cells, strings.TrimSpace(plainInline(cell, r.source)))
 		}
 		if len(cells) > 0 {
+			if r.dialect == dialectDingTalk {
+				if headers == nil {
+					headers = cells
+					continue
+				}
+				for i, cell := range cells {
+					if i < len(headers) {
+						cells[i] = escapeText(headers[i], r.dialect) + ": " + escapeText(cell, r.dialect)
+					}
+				}
+			}
 			rows = append(rows, strings.Join(cells, " | "))
 		}
 	}
@@ -282,7 +313,7 @@ type inlineStyle struct {
 func (r *renderer) renderInline(b *strings.Builder, node ast.Node, style inlineStyle) {
 	switch n := node.(type) {
 	case *ast.Text:
-		value := string(n.Value(r.source))
+		value := string(util.UnescapePunctuations(n.Value(r.source)))
 		if n.SoftLineBreak() || n.HardLineBreak() {
 			value += "\n"
 		}
@@ -340,8 +371,28 @@ func (r *renderer) writeStyled(b *strings.Builder, value string, style inlineSty
 	if value == "" {
 		return
 	}
-	value = escapeText(value, r.dialect)
+	if !(r.dialect == dialectDingTalk && style.code) {
+		value = escapeText(value, r.dialect)
+	}
 	switch r.dialect {
+	case dialectPlain:
+		if r.preserveLinks && style.link != "" && value != style.link {
+			value += " (" + style.link + ")"
+		}
+	case dialectDingTalk:
+		if style.code {
+			value = "`" + strings.ReplaceAll(value, "`", "'") + "`"
+		} else {
+			if style.bold {
+				value = "**" + value + "**"
+			}
+			if style.italic {
+				value = "*" + value + "*"
+			}
+		}
+		if style.link != "" {
+			value = "[" + value + "](" + strings.NewReplacer("(", "%28", ")", "%29").Replace(style.link) + ")"
+		}
 	case dialectSlack:
 		if style.code {
 			value = "`" + strings.ReplaceAll(value, "`", "'") + "`"
@@ -420,7 +471,10 @@ func (r *renderer) writeBlock(block string) {
 	excerpt := truncateRunes(stripTags(block), remaining-utf8.RuneCountInString(marker))
 	r.out.WriteString(separator)
 	if r.dialect == dialectTelegramHTML {
-		r.out.WriteString(html.EscapeString(excerpt))
+		chunks := escapedChunks(excerpt, remaining-1, html.EscapeString)
+		if len(chunks) > 0 {
+			r.out.WriteString(chunks[0])
+		}
 	} else {
 		r.out.WriteString(excerpt)
 	}
@@ -432,6 +486,8 @@ func escapeText(s string, d dialect) string {
 	switch d {
 	case dialectSlack:
 		return escapeSlack(s)
+	case dialectDingTalk:
+		return strings.NewReplacer("\\", "\\\\", "*", "\\*", "_", "\\_", "[", "\\[", "]", "\\]", "<", "&lt;", ">", "&gt;").Replace(s)
 	case dialectTelegramHTML:
 		return html.EscapeString(s)
 	default:
@@ -488,7 +544,7 @@ func plainInline(parent ast.Node, source []byte) string {
 		}
 		switch n := node.(type) {
 		case *ast.Text:
-			b.Write(n.Value(source))
+			b.Write(util.UnescapePunctuations(n.Value(source)))
 			if n.SoftLineBreak() || n.HardLineBreak() {
 				b.WriteByte('\n')
 			}
@@ -541,4 +597,34 @@ func itoa(v int) string {
 		v /= 10
 	}
 	return string(buf[i:])
+}
+
+// escapedChunks 在转义之后计量长度，且不拆开 HTML entity 或 Unicode 字符。
+func escapedChunks(value string, limit int, escape func(string) string) []string {
+	var chunks []string
+	var b strings.Builder
+	size := 0
+	for _, ch := range value {
+		encoded := escape(string(ch))
+		n := utf8.RuneCountInString(encoded)
+		if size+n > limit && size > 0 {
+			chunks = append(chunks, b.String())
+			b.Reset()
+			size = 0
+		}
+		if n > limit {
+			continue
+		}
+		b.WriteString(encoded)
+		size += n
+	}
+	if b.Len() > 0 {
+		chunks = append(chunks, b.String())
+	}
+	return chunks
+}
+
+// TelegramFits checks the untruncated HTML representation, including tags.
+func TelegramFits(markdown string) bool {
+	return utf8.RuneCountInString(render(markdown, dialectTelegramHTML, 0)) <= 3900
 }

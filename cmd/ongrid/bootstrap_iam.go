@@ -21,6 +21,7 @@ import (
 )
 
 type iamModule struct {
+	userUC     *iambizuser.Usecase
 	signer     *auth.Signer
 	iamHandler *iamserver.Handler
 	authzMW    *authzmw.Middleware
@@ -138,7 +139,7 @@ func bootstrapIAM(rootCtx context.Context, cfg *config.Config, log *slog.Logger,
 	// lock the system administrator out.
 	authzMW := authzmw.New(authzEnf, log.With(slog.String("comp", "authzmw")))
 
-	return &iamModule{
+	return &iamModule{userUC: userUC,
 		signer:     signer,
 		iamHandler: iamHandler,
 		authzMW:    authzMW,

@@ -12,6 +12,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	bizbridge "github.com/ongridio/ongrid/internal/manager/biz/imbridge"
+	"github.com/ongridio/ongrid/internal/manager/biz/imbridge/imformat"
 	model "github.com/ongridio/ongrid/internal/manager/model/imbridge"
 )
 
@@ -163,8 +164,7 @@ func (c *StreamClient) Run(ctx context.Context) error {
 			return nil
 		default:
 			// envelope_id-carrying events (events_api / interactive /
-			// slash_commands). We only handle events_api today; others
-			// still get ack'd so Slack doesn't retry them at us forever.
+			// slash_commands). 审批和绑定先完成有界持久化，再 ACK。
 		}
 		var env envelope
 		if uerr := json.Unmarshal(raw, &env); uerr != nil {
@@ -179,9 +179,22 @@ func (c *StreamClient) Run(ctx context.Context) error {
 			slog.String("envelope_type", env.Type),
 			slog.String("envelope_id", env.EnvelopeID),
 			slog.Int("retry_attempt", env.RetryAttempt))
-		// ack FIRST, handle second. Slack times the ack window from
-		// envelope delivery (~3s); handing inbound off to the bridge
-		// before ack would race that and trigger Slack-side retries.
+		// 交互回调限制在 2 秒内持久化；长时间执行由后台 worker 完成。
+		// 普通聊天仍在 ACK 后异步处理。
+		if env.Type == "slash_commands" {
+			actionCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			if err := c.handleBindingCommand(actionCtx, env.Payload); err != nil {
+				c.log.Warn("slack binding command not accepted")
+			}
+			cancel()
+		}
+		if env.Type == "interactive" {
+			actionCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			if err := c.handleInteraction(actionCtx, env.Payload); err != nil {
+				c.log.Warn("slack approval callback not accepted; use Ongrid to verify")
+			}
+			cancel()
+		}
 		if env.EnvelopeID != "" {
 			ackBody, _ := json.Marshal(map[string]string{"envelope_id": env.EnvelopeID})
 			if werr := conn.WriteMessage(websocket.TextMessage, ackBody); werr != nil {
@@ -247,7 +260,9 @@ func (c *StreamClient) handleEvent(payload json.RawMessage) {
 			slog.String("channel", ev.Channel))
 		return
 	}
-	in := bizbridge.InboundMessage{
+	in := bizbridge.InboundMessage{ConnectionIdentity: bizbridge.ConnectionIdentity(c.app),
+		Subject:       bizbridge.Subject{Scope: p.TeamID, User: ev.User},
+		Private:       strings.HasPrefix(ev.Channel, "D"),
 		Provider:      model.ProviderSlack,
 		AppID:         c.app.AppID,
 		ChatID:        ev.Channel,
@@ -310,8 +325,9 @@ func stripMentions(s string) string {
 // EditText. Slack updates only need (channel, ts) — same as Telegram
 // chat_id+message_id.
 type senderAdapter struct {
-	client  *Client
-	channel string
+	threadTS string
+	client   *Client
+	channel  string
 }
 
 func (s senderAdapter) SendText(ctx context.Context, receiveID, _ string, text string) (string, error) {
@@ -332,4 +348,16 @@ func NewStreamFactory(log *slog.Logger) bizbridge.StreamClientFactory {
 	return func(app *model.ImApp, bridge *bizbridge.Bridge) (bizbridge.StreamClient, error) {
 		return NewStreamClient(app, bridge, log)
 	}
+}
+
+func (s senderAdapter) SplitText(text string) []string {
+	return imformat.MarkdownPages(text, func(page string) bool { return len(page) <= 12000 && len(imformat.Slack(page)) <= 12000 })
+}
+
+func NewApprovalSender(app *model.ImApp, target *model.ApprovalTarget, _ string) (bizbridge.Sender, error) {
+	client, err := NewClientFromSecret(app.AppSecret)
+	if err != nil {
+		return nil, err
+	}
+	return senderAdapter{client: client, channel: target.ChatID, threadTS: target.PlatformThreadID}, nil
 }

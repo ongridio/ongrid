@@ -84,7 +84,7 @@ func BuildReActGraph(
 		return nil, errors.New("graph: BuildReActGraph: model is required")
 	}
 	cfg = cfg.applyDefaults()
-	model = wrapBudgetStopModel(model)
+	model = wrapBudgetStopModel(model, cfg.MaxIterations)
 
 	// 1. Build the inner eino react agent. We pass our adapted tools
 	//    in via ToolsConfig.Tools — eino infers the schema by calling

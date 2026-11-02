@@ -171,3 +171,66 @@ func FuzzRenderers_NeverPanicOrExceedTelegramLimit(f *testing.F) {
 		}
 	})
 }
+
+func TestNestedListsPreserveChildrenAndCode(t *testing.T) {
+	input := "- parent\n  - child\n    - grandchild\n\n  ```sh\n  echo hello\n  ```"
+	for name, render := range map[string]func(string) string{"slack": Slack, "telegram": TelegramHTML, "dingtalk": DingTalk, "plain": Plain} {
+		t.Run(name, func(t *testing.T) {
+			got := render(input)
+			for _, want := range []string{"parent", "• child", "• grandchild", "echo hello"} {
+				if !strings.Contains(got, want) {
+					t.Errorf("missing %q: %s", want, got)
+				}
+			}
+		})
+	}
+}
+
+func TestSlackSectionsKeepCodeBlocksTogether(t *testing.T) {
+	sections := SlackSections("before\n\n```sh\necho first\n\necho second\n```\n\nafter")
+	for _, s := range sections {
+		if strings.Count(s, "```")%2 != 0 {
+			t.Fatalf("broken code fence: %s", s)
+		}
+	}
+	if !strings.Contains(strings.Join(sections, "\n"), "echo first\n\necho second") {
+		t.Fatal("lost code spacing")
+	}
+}
+
+func TestSlackLongEscapedBlocksRemainBounded(t *testing.T) {
+	sections := SlackSections("```\n" + strings.Repeat("<>&你好", 2000) + "\n```")
+	for _, s := range sections {
+		if utf8.RuneCountInString(s) > slackSectionMaxRunes {
+			t.Fatal("oversized section")
+		}
+		if strings.Contains(s, "<") {
+			t.Fatal("unescaped markup")
+		}
+	}
+	if len(sections) < 2 {
+		t.Fatal("expected splitting")
+	}
+}
+
+func TestTelegramEscapedLongTextRemainsBounded(t *testing.T) {
+	got := TelegramHTML(strings.Repeat("& < > ", 2000))
+	if utf8.RuneCountInString(got) > telegramMaxRunes {
+		t.Fatal("escaped message exceeds limit")
+	}
+	if !strings.HasSuffix(got, "…") {
+		t.Fatal("missing truncation marker")
+	}
+}
+
+func TestDingTalkReadableRichText(t *testing.T) {
+	got := DingTalk(sample + "\n\n- [x] done\n\n[bad](javascript:alert(1))")
+	for _, want := range []string{"**Incident summary**", "**Root cause:**", "[deploy](https://example.com/r/42?a=1&b=2)", "Service: checkout | Impact: 27%", "SELECT * FROM requests", "☑ done"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q: %s", want, got)
+		}
+	}
+	if strings.Contains(got, "javascript:") {
+		t.Fatal("unsafe link passed through")
+	}
+}

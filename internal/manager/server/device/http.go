@@ -60,7 +60,12 @@ func (h *Handler) Register(r chi.Router) {
 	r.Get("/v1/devices/{id}/edges", h.listEdges)
 	r.Get("/v1/devices/{id}/network", h.getNetworkDevice)
 	if h.uc.NetworkDiscovery() != nil {
+		r.With(h.requireAdmin).Post("/v1/network-devices", h.createNetworkSNMP)
+		r.With(h.requireAdmin).Post("/v1/network-devices/snmp-test", h.testNewNetworkSNMP)
 		r.With(h.requireAdmin).Patch("/v1/devices/{id}/network/polling", h.configureNetworkPolling)
+		r.With(h.requireAdmin).Post("/v1/devices/{id}/network/snmp-test", h.testNetworkSNMP)
+		r.With(h.requireAdmin).Post("/v1/network-discovery/candidates/{id}/snmp-test", h.testNetworkSNMP)
+		r.With(h.requireAdmin).Post("/v1/network-discovery/candidates/{id}/snmp-config", h.configureNetworkPolling)
 		r.Get("/v1/network-discovery/candidates", h.listNetworkCandidates)
 		r.With(h.requireAdmin).Post("/v1/network-discovery/candidates/{id}/snmp-scan", h.scanNetworkCandidate)
 		r.With(h.requireAdmin).Post("/v1/network-discovery/candidates/{id}/promote", h.promoteNetworkCandidate)
@@ -162,34 +167,35 @@ type networkCandidateItem struct {
 }
 
 type networkDeviceDetailItem struct {
-	DeviceID            uint64          `json:"device_id"`
-	DeviceKind          string          `json:"device_kind"`
-	Vendor              string          `json:"vendor,omitempty"`
-	Model               string          `json:"model,omitempty"`
-	SerialNumber        string          `json:"serial_number,omitempty"`
-	ManagementAddress   string          `json:"management_address,omitempty"`
-	SysName             string          `json:"sys_name,omitempty"`
-	SysDescription      string          `json:"sys_description,omitempty"`
-	SNMPEngineID        string          `json:"snmp_engine_id,omitempty"`
-	LLDPChassisID       string          `json:"lldp_chassis_id,omitempty"`
-	BridgeBaseMAC       string          `json:"bridge_base_mac,omitempty"`
-	ReachabilityStatus  string          `json:"reachability_status"`
-	LastReachableAt     *time.Time      `json:"last_reachable_at,omitempty"`
-	PollEnabled         bool            `json:"poll_enabled"`
-	PollIntervalSeconds uint32          `json:"poll_interval_seconds,omitempty"`
-	PollCredentialName  string          `json:"poll_credential_name,omitempty"`
-	PollPort            uint16          `json:"poll_port,omitempty"`
-	LastPollAt          *time.Time      `json:"last_poll_at,omitempty"`
-	LastPollError       string          `json:"last_poll_error,omitempty"`
-	DiscoverySource     string          `json:"discovery_source,omitempty"`
-	ScannerEdgeID       uint64          `json:"scanner_edge_id,omitempty"`
-	ScannerEdgeName     string          `json:"scanner_edge_name,omitempty"`
-	ScannerHostID       *uint64         `json:"scanner_host_device_id,omitempty"`
-	ScannerHostName     string          `json:"scanner_host_name,omitempty"`
-	LastObservedAt      *time.Time      `json:"last_observed_at,omitempty"`
-	SourceData          json.RawMessage `json:"source_data,omitempty"`
-	Interfaces          json.RawMessage `json:"interfaces,omitempty"`
-	Links               json.RawMessage `json:"links,omitempty"`
+	PollScannerHostDeviceID uint64          `json:"poll_scanner_host_device_id,omitempty"`
+	DeviceID                uint64          `json:"device_id"`
+	DeviceKind              string          `json:"device_kind"`
+	Vendor                  string          `json:"vendor,omitempty"`
+	Model                   string          `json:"model,omitempty"`
+	SerialNumber            string          `json:"serial_number,omitempty"`
+	ManagementAddress       string          `json:"management_address,omitempty"`
+	SysName                 string          `json:"sys_name,omitempty"`
+	SysDescription          string          `json:"sys_description,omitempty"`
+	SNMPEngineID            string          `json:"snmp_engine_id,omitempty"`
+	LLDPChassisID           string          `json:"lldp_chassis_id,omitempty"`
+	BridgeBaseMAC           string          `json:"bridge_base_mac,omitempty"`
+	ReachabilityStatus      string          `json:"reachability_status"`
+	LastReachableAt         *time.Time      `json:"last_reachable_at,omitempty"`
+	PollEnabled             bool            `json:"poll_enabled"`
+	PollIntervalSeconds     uint32          `json:"poll_interval_seconds,omitempty"`
+	PollCredentialName      string          `json:"poll_credential_name,omitempty"`
+	PollPort                uint16          `json:"poll_port,omitempty"`
+	LastPollAt              *time.Time      `json:"last_poll_at,omitempty"`
+	LastPollError           string          `json:"last_poll_error,omitempty"`
+	DiscoverySource         string          `json:"discovery_source,omitempty"`
+	ScannerEdgeID           uint64          `json:"scanner_edge_id,omitempty"`
+	ScannerEdgeName         string          `json:"scanner_edge_name,omitempty"`
+	ScannerHostID           *uint64         `json:"scanner_host_device_id,omitempty"`
+	ScannerHostName         string          `json:"scanner_host_name,omitempty"`
+	LastObservedAt          *time.Time      `json:"last_observed_at,omitempty"`
+	SourceData              json.RawMessage `json:"source_data,omitempty"`
+	Interfaces              json.RawMessage `json:"interfaces,omitempty"`
+	Links                   json.RawMessage `json:"links,omitempty"`
 }
 
 // --- handlers ---
@@ -404,50 +410,26 @@ func (h *Handler) getNetworkDevice(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	item := networkDeviceDetailItem{
-		DeviceID: detail.Profile.DeviceID, DeviceKind: detail.Profile.DeviceKind,
-		Vendor: detail.Profile.Vendor, Model: detail.Profile.Model,
-		SerialNumber: detail.Profile.SerialNumber, ManagementAddress: detail.Profile.ManagementAddress,
-		SysName: detail.Profile.SysName, SysDescription: detail.Profile.SysDescription,
-		SNMPEngineID: detail.Profile.SnmpEngineID, LLDPChassisID: detail.Profile.LldpChassisID,
-		BridgeBaseMAC: detail.Profile.BridgeBaseMAC, ReachabilityStatus: detail.Profile.ReachabilityStatus,
-		LastReachableAt: detail.Profile.LastReachableAt,
-		PollEnabled:     detail.Profile.PollEnabled, PollIntervalSeconds: detail.Profile.PollIntervalSeconds,
-		PollCredentialName: detail.Profile.PollCredentialName, PollPort: detail.Profile.PollPort,
-		LastPollAt: detail.Profile.LastPollAt, LastPollError: detail.Profile.LastPollError,
-	}
-	if candidate := detail.Candidate; candidate != nil {
-		lastObserved := candidate.LastSeenAt
-		item.DiscoverySource = candidate.Source
-		item.ScannerEdgeID = candidate.ObserverEdgeID
-		item.ScannerEdgeName = candidate.ObserverEdgeName
-		item.ScannerHostID = candidate.ObserverHostDeviceID
-		item.ScannerHostName = candidate.ObserverHostName
-		item.LastObservedAt = &lastObserved
-		item.SourceData = json.RawMessage(defaultJSON(candidate.SourceDataJSON))
-		item.Interfaces = json.RawMessage(defaultJSONArray(candidate.InterfacesJSON))
-		item.Links = json.RawMessage(defaultJSONArray(candidate.LinksJSON))
-	}
-	writeJSON(w, http.StatusOK, item)
+	writeJSON(w, http.StatusOK, networkDeviceDetailToItem(detail))
 }
 
+// configureNetworkPolling saves SNMP settings; admin only, secrets are vault references.
+// @Summary Configure network device SNMP collection
+// @Router /v1/devices/{id}/network/polling [patch]
+// @Router /v1/network-discovery/candidates/{id}/snmp-config [post]
+// @Success 200 {object} networkDeviceDetailItem
 func (h *Handler) configureNetworkPolling(w http.ResponseWriter, r *http.Request) {
 	id, err := parseID(r)
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	var in struct {
-		Enabled         bool   `json:"enabled"`
-		IntervalSeconds uint32 `json:"interval_seconds"`
-		CredentialName  string `json:"credential_name"`
-		Port            uint16 `json:"port"`
-	}
+	var in devicebiz.NetworkSNMPConfig
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&in); err != nil {
 		writeErr(w, errors.Join(errs.ErrInvalid, err))
 		return
 	}
-	detail, err := h.uc.NetworkDiscovery().ConfigureNetworkPolling(r.Context(), id, in.Enabled, in.IntervalSeconds, in.CredentialName, in.Port)
+	detail, err := h.uc.NetworkDiscovery().ConfigureNetworkSNMP(r.Context(), id, strings.Contains(r.URL.Path, "/candidates/"), in)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -457,7 +439,8 @@ func (h *Handler) configureNetworkPolling(w http.ResponseWriter, r *http.Request
 
 func networkDeviceDetailToItem(detail *devicebiz.NetworkDeviceDetail) networkDeviceDetailItem {
 	item := networkDeviceDetailItem{
-		DeviceID: detail.Profile.DeviceID, DeviceKind: detail.Profile.DeviceKind, Vendor: detail.Profile.Vendor, Model: detail.Profile.Model,
+		PollScannerHostDeviceID: detail.Profile.PollScannerHostDeviceID,
+		DeviceID:                detail.Profile.DeviceID, DeviceKind: detail.Profile.DeviceKind, Vendor: detail.Profile.Vendor, Model: detail.Profile.Model,
 		SerialNumber: detail.Profile.SerialNumber, ManagementAddress: detail.Profile.ManagementAddress, SysName: detail.Profile.SysName,
 		SysDescription: detail.Profile.SysDescription, SNMPEngineID: detail.Profile.SnmpEngineID, LLDPChassisID: detail.Profile.LldpChassisID,
 		BridgeBaseMAC: detail.Profile.BridgeBaseMAC, ReachabilityStatus: detail.Profile.ReachabilityStatus, LastReachableAt: detail.Profile.LastReachableAt,
@@ -469,6 +452,20 @@ func networkDeviceDetailToItem(detail *devicebiz.NetworkDeviceDetail) networkDev
 		item.DiscoverySource, item.ScannerEdgeID, item.ScannerEdgeName = candidate.Source, candidate.ObserverEdgeID, candidate.ObserverEdgeName
 		item.ScannerHostID, item.ScannerHostName, item.LastObservedAt = candidate.ObserverHostDeviceID, candidate.ObserverHostName, &lastObserved
 		item.SourceData, item.Interfaces, item.Links = json.RawMessage(defaultJSON(candidate.SourceDataJSON)), json.RawMessage(defaultJSONArray(candidate.InterfacesJSON)), json.RawMessage(defaultJSONArray(candidate.LinksJSON))
+	}
+	if len(detail.Interfaces) > 0 || detail.Candidate == nil || detail.Profile.LastPollAt != nil {
+		reports := make([]tunnel.NetworkInterfaceReport, 0, len(detail.Interfaces))
+		for _, row := range detail.Interfaces {
+			var addresses []string
+			if row.AddressesJSON != "" {
+				if err := json.Unmarshal([]byte(row.AddressesJSON), &addresses); err != nil {
+					addresses = nil
+				}
+			}
+			reports = append(reports, tunnel.NetworkInterfaceReport{IfIndex: row.IfIndex, Name: row.Name, MAC: row.MAC, InterfaceKind: row.InterfaceKind, Description: row.Description, AdminStatus: row.AdminStatus, OperStatus: row.OperStatus, SpeedBps: row.SpeedBps, InOctets: row.InOctets, OutOctets: row.OutOctets, InErrors: row.InErrors, OutErrors: row.OutErrors, Addresses: addresses})
+		}
+		// This DTO contains only concrete scalar fields and string slices; marshal cannot fail.
+		item.Interfaces, _ = json.Marshal(reports)
 	}
 	return item
 }
@@ -703,3 +700,63 @@ func errCode(err error) string {
 
 // (compile-time guard) ensure context import is kept lint-clean.
 var _ = context.Background
+
+// testNetworkSNMP verifies unsaved settings without changing inventory; admin only.
+// @Summary Test network device SNMP settings
+// @Router /v1/devices/{id}/network/snmp-test [post]
+// @Router /v1/network-discovery/candidates/{id}/snmp-test [post]
+// @Success 200 {object} devicebiz.NetworkSNMPTestResult
+func (h *Handler) testNetworkSNMP(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	var in devicebiz.NetworkSNMPConfig
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&in); err != nil {
+		writeErr(w, errors.Join(errs.ErrInvalid, err))
+		return
+	}
+	result, err := h.uc.NetworkDiscovery().TestNetworkSNMP(r.Context(), id, strings.Contains(r.URL.Path, "/candidates/"), in)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// createNetworkSNMP adds a manually configured network device; admin only.
+// @Summary Add a network device by SNMP address
+// @Router /v1/network-devices [post]
+// @Success 201 {object} networkDeviceDetailItem
+func (h *Handler) createNetworkSNMP(w http.ResponseWriter, r *http.Request) {
+	var in devicebiz.NetworkSNMPConfig
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&in); err != nil {
+		writeErr(w, errors.Join(errs.ErrInvalid, err))
+		return
+	}
+	detail, err := h.uc.NetworkDiscovery().CreateNetworkSNMP(r.Context(), in)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, networkDeviceDetailToItem(detail))
+}
+
+// testNewNetworkSNMP tests an address before any inventory record exists; admin only.
+// @Summary Test a manually entered SNMP address
+// @Router /v1/network-devices/snmp-test [post]
+// @Success 200 {object} devicebiz.NetworkSNMPTestResult
+func (h *Handler) testNewNetworkSNMP(w http.ResponseWriter, r *http.Request) {
+	var in devicebiz.NetworkSNMPConfig
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&in); err != nil {
+		writeErr(w, errors.Join(errs.ErrInvalid, err))
+		return
+	}
+	result, err := h.uc.NetworkDiscovery().TestNetworkSNMP(r.Context(), 0, false, in)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}

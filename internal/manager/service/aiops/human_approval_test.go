@@ -2,6 +2,16 @@ package aiops
 
 import (
 	"context"
+	"encoding/json"
+	"path/filepath"
+	"time"
+
+	"github.com/glebarez/sqlite"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/decorators"
+	"github.com/ongridio/ongrid/internal/manager/biz/approval"
+	"github.com/ongridio/ongrid/internal/manager/data/approval/store"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -64,5 +74,86 @@ func TestHumanApprovalExecutorAcceptsOriginRuntimeOnce(t *testing.T) {
 	}
 	if _, err := broker.Execute(ctx, `{"execution_token":"pinned"}`); err == nil {
 		t.Fatal("capability reused")
+	}
+}
+
+func TestHumanApprovalBrokerReturnsDecisionEvidenceAfterApproval(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "approval.db")), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() {
+		if err := sqlDB.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	if err := store.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	uc := approval.NewUsecase(store.NewRepo(db), nil)
+	uc.RequireAuthorization(approval.AuthorizerFunc(func(context.Context, uint64) error { return nil }))
+	broker := NewHumanApprovalBroker()
+	broker.SetUsecase(uc)
+	uc.RegisterRuntimeExecutor(GenericToolApprovalKind, "v3", broker.Execute)
+	ctx, cancel := context.WithTimeout(contract.WithVersion(context.Background(), contract.V3), 10*time.Second)
+	defer cancel()
+	events := make(chan string, 1)
+	ctx = contract.WithEmit(ctx, func(e contract.Event) {
+		if e.Type == contract.EventApprovalPending {
+			events <- e.Approval.ApprovalID
+		}
+	})
+	var executions atomic.Int32
+	type outcome struct {
+		value string
+		err   error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		value, err := broker.ProposeAndAwait(ctx, decorators.HumanApprovalRequest{ToolName: "test_write", ArgsJSON: "{}", SessionID: "test-session", UserID: 42}, func(context.Context) (string, error) { executions.Add(1); return `{"ok":true}`, nil })
+		done <- outcome{value, err}
+	}()
+	var id string
+	select {
+	case id = <-events:
+	case <-ctx.Done():
+		t.Fatal("approval not proposed")
+	}
+	if executions.Load() != 0 {
+		t.Fatal("executed before approval")
+	}
+	select {
+	case <-done:
+		t.Fatal("returned before approval")
+	default:
+	}
+	if _, err := uc.Approve(ctx, 42, id); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-done:
+		if got.err != nil {
+			t.Fatal(got.err)
+		}
+		var result struct {
+			OK       bool                                  `json:"ok"`
+			Approval struct{ ID, Decision, Status string } `json:"_ongrid_approval"`
+		}
+		if err := json.Unmarshal([]byte(got.value), &result); err != nil {
+			t.Fatal(err)
+		}
+		if !result.OK || result.Approval.ID != id || result.Approval.Decision != "approved" || result.Approval.Status != "executed" {
+			t.Fatalf("missing result or decision: %+v", result)
+		}
+	case <-ctx.Done():
+		t.Fatal("approval did not resume")
+	}
+	if executions.Load() != 1 {
+		t.Fatal("execution count incorrect")
 	}
 }

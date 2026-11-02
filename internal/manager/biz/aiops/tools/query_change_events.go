@@ -127,6 +127,9 @@ func (t *QueryChangeEventsTool) InvokableRun(ctx context.Context, argsJSON strin
 	if win <= 0 {
 		win = 30
 	}
+	if win > 1440 {
+		return "", fmt.Errorf("query_change_events: window_minutes must not exceed 1440")
+	}
 	limit := in.Limit
 	if limit <= 0 {
 		limit = 50

@@ -285,6 +285,9 @@ func (r *SessionRepo) ListMessages(ctx context.Context, sessionID string, limit 
 	if err := r.hydrateToolCalls(ctx, out); err != nil {
 		return nil, err
 	}
+	if err := r.hydrateToolResults(ctx, out); err != nil {
+		return nil, err
+	}
 	if err := r.hydrateAttachments(ctx, out); err != nil {
 		return nil, err
 	}
@@ -404,4 +407,48 @@ func (r *SessionRepo) FinalizePendingToolCalls(ctx context.Context, sessionID st
 		return 0, res.Error
 	}
 	return res.RowsAffected, nil
+}
+
+// 工具结果与执行表按会话和调用 ID 关联；LLM 可能跨轮复用 ID，须取结果之前最近的一次执行。
+func (r *SessionRepo) hydrateToolResults(ctx context.Context, msgs []*model.Message) error {
+	ids := []string{}
+	sessions := []string{}
+	for _, m := range msgs {
+		if m.Role == model.RoleTool && m.ToolCallID != nil {
+			ids = append(ids, *m.ToolCallID)
+			sessions = append(sessions, m.SessionID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	type executionRow struct {
+		model.ToolCall
+		SessionID string
+	}
+	var rows []executionRow
+	err := r.db.WithContext(ctx).Table("chat_tool_calls AS tc").Select("tc.*, m.session_id AS session_id").Joins("JOIN chat_messages AS m ON m.id = tc.message_id").Where("m.session_id IN ? AND (tc.llm_call_id IN ? OR tc.id IN ?)", sessions, ids, ids).Order("tc.created_at ASC, tc.id ASC").Scan(&rows).Error
+	if err != nil {
+		return err
+	}
+	for _, m := range msgs {
+		if m.Role != model.RoleTool || m.ToolCallID == nil {
+			continue
+		}
+		for i := range rows {
+			r := &rows[i]
+			if r.SessionID != m.SessionID || r.CreatedAt.After(m.CreatedAt) {
+				continue
+			}
+			if r.ID != *m.ToolCallID && (r.LLMCallID == nil || *r.LLMCallID != *m.ToolCallID) {
+				continue
+			}
+			if m.ToolName != nil && r.ToolName != *m.ToolName {
+				continue
+			}
+			copy := r.ToolCall
+			m.ToolExecution = &copy
+		}
+	}
+	return nil
 }

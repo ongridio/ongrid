@@ -51,3 +51,31 @@ func gaugeMetric(labelName, labelValue string, value float64) *dto.Metric {
 		Gauge: &dto.Gauge{Value: &value},
 	}
 }
+
+func TestCPUValidityDistinguishesMissingWarmupIdleAndReset(t *testing.T) {
+	mapper := NewMapper()
+	at := time.Unix(100, 0)
+	if hp := mapper.MapToHostPoint(at, nil); hp.CPUSampleStatus != "unavailable" {
+		t.Fatal(hp)
+	}
+	family := func(idle, user float64) []*dto.MetricFamily {
+		name, label := "node_cpu_seconds_total", "mode"
+		idleMode, userMode := "idle", "user"
+		return []*dto.MetricFamily{{Name: &name, Metric: []*dto.Metric{
+			{Label: []*dto.LabelPair{{Name: &label, Value: &idleMode}}, Counter: &dto.Counter{Value: &idle}},
+			{Label: []*dto.LabelPair{{Name: &label, Value: &userMode}}, Counter: &dto.Counter{Value: &user}},
+		}}}
+	}
+	if hp := mapper.MapToHostPoint(at, family(10, 10)); hp.CPUSampleStatus != "warming_up" {
+		t.Fatal(hp)
+	}
+	if hp := mapper.MapToHostPoint(at.Add(time.Second), family(11, 10)); hp.CPUPct != 0 || hp.CPUSampleStatus != "valid" || hp.CPUWindowSeconds != 1 {
+		t.Fatal(hp)
+	}
+	if hp := mapper.MapToHostPoint(at.Add(2*time.Second), family(12, 11)); hp.CPUPct != 50 || hp.CPUSampleStatus != "valid" {
+		t.Fatal(hp)
+	}
+	if hp := mapper.MapToHostPoint(at.Add(3*time.Second), family(1, 1)); hp.CPUSampleStatus != "warming_up" {
+		t.Fatal(hp)
+	}
+}

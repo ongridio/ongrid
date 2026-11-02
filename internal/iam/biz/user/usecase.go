@@ -430,3 +430,15 @@ func (u *Usecase) issuePair(user *model.User) (*TokenPair, error) {
 		UserID:       user.ID,
 	}, nil
 }
+
+// AuthorizeApproval 对审批重新读取当前账号权限，避免撤权后继续使用旧登录凭证。
+func (u *Usecase) AuthorizeApproval(ctx context.Context, userID uint64) error {
+	user, err := u.repo.GetByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if user.Status != "active" || user.Role != "admin" {
+		return errs.ErrForbidden
+	}
+	return nil
+}

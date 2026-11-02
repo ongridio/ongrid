@@ -362,22 +362,14 @@ RestartSec=5
 # only the manager-approved Unrestricted request bypasses that sandbox.
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
 NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-PrivateTmp=true
-# StateDirectory auto-creates /var/lib/ongrid-edge at start and implicitly
-# adds it to ReadWritePaths. Without this, ProtectSystem=strict makes /var/lib
-# read-only and the agent's runtime mkdir of /var/lib/ongrid-edge/.upgrade
-# fails EROFS.
-#
-# StateDirectory= needs systemd >= 235. On 233/234 ProtectSystem=strict and
-# ReadWritePaths= are honored but StateDirectory= is not, so its implicit
-# writable path is lost and the sandboxed agent still can't write the state
-# dir even after the installer pre-created it. List it in ReadWritePaths=
-# explicitly so writability never depends on StateDirectory= taking effect.
+# 主机维护必须使用宿主机文件系统视图；写权限由 Manager 开关、
+# 操作审批和 Edge cmdpolicy 控制，不使用只读挂载代替命令授权。
+ProtectSystem=false
+ProtectHome=false
+PrivateTmp=false
+# 保留状态目录创建，兼容旧 systemd 的目录创建仍由安装器负责。
 StateDirectory=ongrid-edge
 StateDirectoryMode=0755
-ReadWritePaths=/var/lib/ongrid-edge /var/log/ongrid-edge
 StandardOutput=journal
 StandardError=journal
 

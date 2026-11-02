@@ -10,6 +10,7 @@ import (
 	larkws "github.com/larksuite/oapi-sdk-go/v3/ws"
 
 	bizbridge "github.com/ongridio/ongrid/internal/manager/biz/imbridge"
+	"github.com/ongridio/ongrid/internal/manager/biz/imbridge/imformat"
 	model "github.com/ongridio/ongrid/internal/manager/model/imbridge"
 )
 
@@ -44,6 +45,7 @@ func (c *StreamClient) Run(ctx context.Context) error {
 		OnP2MessageReceiveV1(func(_ context.Context, ev *larkim.P2MessageReceiveV1) error {
 			return c.onMessage(ev)
 		})
+	disp.OnP2CardActionTrigger(c.onCard)
 	wsClient := larkws.NewClient(c.app.AppID, c.app.AppSecret,
 		larkws.WithEventHandler(disp),
 		larkws.WithAutoReconnect(true),
@@ -92,7 +94,13 @@ func (c *StreamClient) onMessage(ev *larkim.P2MessageReceiveV1) error {
 	if ev.Event.Sender != nil && ev.Event.Sender.SenderId != nil && ev.Event.Sender.SenderId.OpenId != nil {
 		openID = *ev.Event.Sender.SenderId.OpenId
 	}
-	in := bizbridge.InboundMessage{
+	scope := ""
+	if ev.EventV2Base != nil && ev.EventV2Base.Header != nil {
+		scope = ev.EventV2Base.Header.TenantKey
+	}
+	in := bizbridge.InboundMessage{ConnectionIdentity: bizbridge.ConnectionIdentity(c.app),
+		Subject:       bizbridge.Subject{Scope: scope, User: openID},
+		Private:       msg.ChatType != nil && *msg.ChatType == "p2p",
 		Provider:      model.ProviderFeishu,
 		AppID:         c.app.AppID,
 		ChatID:        *msg.ChatId,
@@ -120,7 +128,9 @@ func (c *StreamClient) onMessage(ev *larkim.P2MessageReceiveV1) error {
 
 // senderAdapter wraps Client to satisfy bizbridge.Sender.
 type senderAdapter struct {
-	client *Client
+	threadID string
+	chatID   string
+	client   *Client
 }
 
 func (s senderAdapter) SendText(ctx context.Context, receiveID, receiveIDType, text string) (string, error) {
@@ -138,4 +148,13 @@ func NewStreamFactory(log *slog.Logger) bizbridge.StreamClientFactory {
 	return func(app *model.ImApp, bridge *bizbridge.Bridge) (bizbridge.StreamClient, error) {
 		return NewStreamClient(app, bridge, log), nil
 	}
+}
+
+func (s senderAdapter) SplitText(text string) []string {
+	return imformat.MarkdownPages(text, func(page string) bool { return len(page) <= 3000 })
+}
+
+// NewApprovalSender restores outbound access using the current app credentials.
+func NewApprovalSender(app *model.ImApp, target *model.ApprovalTarget, _ string) (bizbridge.Sender, error) {
+	return senderAdapter{client: NewClient(app.AppID, app.AppSecret), chatID: target.ChatID, threadID: target.PlatformThreadID}, nil
 }

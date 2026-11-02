@@ -55,7 +55,7 @@ type extensionsModule struct {
 	pageStore          pagesdata.FileStore
 }
 
-func bootstrapExtensions(rootCtx context.Context, cfg *config.Config, log *slog.Logger, reg *prometheus.Registry, notifyRouter *notify.Router, storage *storageModule, settings *settingsModule, devices *devicesModule, alerts *alertsModule, tunnel *tunnelModule, aiops *aiopsModule, runtime *runtimeModule, automation *automationModule) *extensionsModule {
+func bootstrapExtensions(rootCtx context.Context, cfg *config.Config, log *slog.Logger, reg *prometheus.Registry, notifyRouter *notify.Router, storage *storageModule, settings *settingsModule, devices *devicesModule, alerts *alertsModule, tunnel *tunnelModule, aiops *aiopsModule, runtime *runtimeModule, automation *automationModule, iam *iamModule) *extensionsModule {
 	skillSvc := aiops.skillSvc
 	// HLD-017: surface chatruntime SKILL.md skills (built-in + marketplace-
 	// installed) in the /v1/skills catalog. They live in a separate registry
@@ -136,6 +136,8 @@ func bootstrapExtensions(rootCtx context.Context, cfg *config.Config, log *slog.
 	approvalUC.RegisterExecutor(managersvcaiops.GenericToolApprovalKind, runtime.humanApprovalBroker.Execute)
 	managersvcaiops.RegisterRuntimeApprovalExecutor(approvalUC, managersvcaiops.GenericToolApprovalKind, contract.V3, runtime.humanApprovalBroker.Execute)
 	managersvcaiops.RegisterRuntimeApprovalExecutor(approvalUC, managersvcaiops.GenericToolApprovalKind, contract.V2, runtime.humanApprovalBroker.Execute)
+	approvalUC.RequireAuthorization(iam.userUC)
+	go approvalUC.RunExecutionLeaseReconciler(rootCtx)
 	approvalHandler := managerserverapproval.NewHandler(approvalUC)
 	// HLD-017 cloud_bash producer: register the execute-on-approve executor
 	// (resolve the bound credential → inject into the Runner sandbox → run)

@@ -1,3 +1,4 @@
+import { NetworkSNMPModal } from '@/components/NetworkSNMPModal';
 import { ClusterChipLink } from "@/components/ClusterChipLink";
 import { loadTopologyClusters } from "@/lib/deviceClusters";
 import { selectHostEdgesByDevice } from '@/lib/edgeSelection';
@@ -36,7 +37,7 @@ import {
 } from "lucide-react";
 import { StatusPill } from "@/components/StatusPill";
 import { Modal } from "@/components/Modal";
-import { Button, PageHeader } from "@/components/ui";
+import { Button, EmptyStateCard, PageHeader } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { openMetricDrilldown } from "@/lib/drilldown";
 import { relativeTime } from "@/lib/format";
@@ -77,11 +78,9 @@ import {
   getNetworkDeviceDetail,
   listDevices,
   listNetworkCandidates,
-  scanNetworkCandidate,
   type Device,
   type NetworkDiscoveryCandidate,
   type NetworkDeviceDetail,
-  type NetworkSNMPScanInput,
 } from "@/api/devices";
 import {
   filterVisibleDeviceEdges,
@@ -178,7 +177,7 @@ export default function EdgesPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { tr } = useI18n();
-  const { canMutate } = usePermissions();
+  const { canMutate, isAdmin } = usePermissions();
   // Sidebar sub-items navigate by appending a canonical role filter.
   // No param = "全部". We forward the param to the backend so filtering uses the
   // sargable IN-list path (see internal/manager/biz/edge.ListFilter).
@@ -245,6 +244,8 @@ export default function EdgesPage() {
   const [batchUpgradeOpen, setBatchUpgradeOpen] = useState(false);
   // True while any batch RPC is in flight (disables the toolbar buttons).
   const [batchBusy, setBatchBusy] = useState(false);
+  const [snmpCreateOpen, setSnmpCreateOpen] = useState(false);
+  const [snmpDevice, setSnmpDevice] = useState<Device | null>(null);
   const [snmpTarget, setSnmpTarget] = useState<NetworkDiscoveryCandidate | null>(null);
   const pendingCandidateCount = candidates.filter(
     (candidate) =>
@@ -628,7 +629,7 @@ export default function EdgesPage() {
           subtitle={discoveryView
                 ? tr(`${pendingCandidateCount} 个候选等待 SNMP 校验`, `${pendingCandidateCount} candidates awaiting SNMP verification`)
                 : tr(`${devices.length} 台设备 · 每 10 秒自动刷新`, `${devices.length} device(s) · auto-refresh every 10s`)}
-          actions={!discoveryView && rolesFilter !== "network" && (
+          actions={!discoveryView && rolesFilter === "network" ? (isAdmin && <Button variant="primary" size="sm" onClick={() => setSnmpCreateOpen(true)}><Plus size={14} />{tr("添加 SNMP 设备", "Add SNMP device")}</Button>) : !discoveryView && (
           <div className="flex items-center gap-2">
             <Hint content={tr(
                 "WebSSH 会话审计 / 活跃会话",
@@ -729,6 +730,25 @@ export default function EdgesPage() {
             </div>
           )}
 
+          {devices.length === 0 ? (
+            <EmptyStateCard
+              icon={rolesFilter === "network" ? Network : Server}
+              title={loading ? tr("加载中…", "Loading…") : rolesFilter === "network" ? tr("暂无网络设备，可直接填写 SNMP 地址添加。", "No network devices yet. Add one by entering its SNMP address.") : rolesFilter
+                        ? tr(
+                            `没有 ${ROLE_FILTER_TITLES[rolesFilter]?.[0] ?? rolesFilter} 设备。点设备名打开详情后可在右上角分配角色。`,
+                            `No ${ROLE_FILTER_TITLES[rolesFilter]?.[1] ?? rolesFilter} devices. Open a device detail page to assign roles.`,
+                          )
+                        : tr(
+                            '暂无设备。点击右上角"新建"创建一个。',
+                            'No devices yet. Click "New" in the top right to create one.',
+                          )}
+              action={loading ? undefined : rolesFilter === "network" && isAdmin ? (
+                  <Button variant="primary" onClick={() => setSnmpCreateOpen(true)}><Plus size={14} />{tr("添加 SNMP 设备", "Add SNMP device")}</Button>
+                ) : !rolesFilter && canMutate ? (
+                  <Button variant="primary" onClick={() => setCreateOpen(true)}><Plus size={12} />{tr("新建设备", "New device")}</Button>
+                ) : undefined}
+            />
+          ) : (
           <div className="device-list-table w-full min-w-0 max-w-full overflow-x-auto rounded-xl border border-zinc-800/60 bg-zinc-900/40">
             <table
               className={cn(
@@ -835,34 +855,7 @@ export default function EdgesPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800/40">
-                {loading && devices.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={compactNetworkTable ? 10 : 12}
-                      className="px-4 py-10 text-center text-zinc-500"
-                    >
-                      {tr("加载中…", "Loading…")}
-                    </td>
-                  </tr>
-                ) : devices.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={compactNetworkTable ? 10 : 12}
-                      className="px-4 py-10 text-center text-zinc-500"
-                    >
-                      {rolesFilter
-                        ? tr(
-                            `没有 ${ROLE_FILTER_TITLES[rolesFilter]?.[0] ?? rolesFilter} 设备。点设备名打开详情后可在右上角分配角色。`,
-                            `No ${ROLE_FILTER_TITLES[rolesFilter]?.[1] ?? rolesFilter} devices. Open a device detail page to assign roles.`,
-                          )
-                        : tr(
-                            '暂无设备。点击右上角"新建"创建一个。',
-                            'No devices yet. Click "New" in the top right to create one.',
-                          )}
-                      {!rolesFilter && canMutate && <div className="mt-3"><Button variant="primary" onClick={() => setCreateOpen(true)}><Plus size={12} />{tr('新建设备', 'New device')}</Button></div>}
-                    </td>
-                  </tr>
-                ) : (
+                {
                   devices.map((d) => {
                     const edge = d.hostEdge;
                     const networkDevice = isManagedNetworkDevice(d);
@@ -980,6 +973,7 @@ export default function EdgesPage() {
                               <ExternalLink size={14} />
                               {tr("查看拓扑", "View topology")}
                             </Button>
+                            {isAdmin && <Button size="sm" variant="subtle" onClick={() => setSnmpDevice(d)}>{tr("配置 SNMP", "Configure SNMP")}</Button>}
                             <RowMenu
                               onRename={canMutate ? () => setRenameTarget(d) : undefined}
                               onViewTopology={() =>
@@ -1184,6 +1178,7 @@ export default function EdgesPage() {
                                 <ExternalLink size={14} />
                                 {tr("查看拓扑", "View topology")}
                               </Button>
+                              {isAdmin && <Button size="sm" variant="subtle" onClick={() => setSnmpDevice(d)}>{tr("配置 SNMP", "Configure SNMP")}</Button>}
                               <RowMenu
                                 onRename={canMutate ? () => setRenameTarget(d) : undefined}
                                 onViewTopology={() =>
@@ -1261,10 +1256,11 @@ export default function EdgesPage() {
                       </tr>
                     );
                   })
-                )}
+                }
               </tbody>
             </table>
           </div>
+          )}
           </>}</TabsContent>
         </div>
       </main>
@@ -1349,17 +1345,18 @@ export default function EdgesPage() {
         />
       )}
       {snmpTarget && (
-        <SNMPScanModal
+        <NetworkSNMPModal
           candidate={snmpTarget}
           onClose={() => setSnmpTarget(null)}
-          onComplete={() => {
+          onSaved={() => {
             setSnmpTarget(null);
             void refresh();
             navigate("/devices");
           }}
-          tr={tr}
         />
       )}
+      {snmpCreateOpen && <NetworkSNMPModal onClose={() => setSnmpCreateOpen(false)} onSaved={() => { setSnmpCreateOpen(false); void refresh(); }} />}
+      {snmpDevice && <NetworkSNMPModal device={snmpDevice} onClose={() => setSnmpDevice(null)} onSaved={(detail) => { setNetworkDetails(current => ({ ...current, [detail.device_id]: detail })); setSnmpDevice(null); void refresh(); }} />}
       {toast && (
         <div
           role="status"
@@ -1441,6 +1438,7 @@ function NetworkDiscoveryTable({
   onConfigure(candidate: NetworkDiscoveryCandidate): void;
   tr: (zh: string, en: string) => string;
 }) {
+  const { isAdmin } = usePermissions();
   const sourceLabel = (source: string) => {
     switch (source.toLowerCase()) {
       case "arp": return tr("ARP 邻居", "ARP neighbor");
@@ -1490,7 +1488,7 @@ function NetworkDiscoveryTable({
                 </td>
                 <td className="whitespace-nowrap px-3 py-2.5 text-xs text-zinc-500">{candidate.last_seen_at ? relativeTime(candidate.last_seen_at) : "—"}</td>
                 <td className="whitespace-nowrap px-3 py-2.5 text-right">
-                  {!promoted && <Button variant="ghost" className="whitespace-nowrap" onClick={() => onConfigure(candidate)}><ShieldCheck size={13} />{tr("配置 SNMP", "Configure SNMP")}</Button>}
+                  {!promoted && isAdmin && <Button variant="ghost" className="whitespace-nowrap" onClick={() => onConfigure(candidate)}><ShieldCheck size={13} />{tr("配置 SNMP", "Configure SNMP")}</Button>}
                 </td>
               </tr>
             );
@@ -1498,145 +1496,6 @@ function NetworkDiscoveryTable({
         </tbody>
       </table>
     </div>
-  );
-}
-
-function SNMPScanModal({
-  candidate,
-  onClose,
-  onComplete,
-  tr,
-}: {
-  candidate: NetworkDiscoveryCandidate;
-  onClose(): void;
-  onComplete(): void;
-  tr: (zh: string, en: string) => string;
-}) {
-  const [input, setInput] = useState<NetworkSNMPScanInput>({
-    version: "v2c",
-    address: candidate.ip_address ?? "",
-    port: 161,
-    community: "",
-    timeout_ms: 3000,
-    retries: 1,
-  });
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const set = <K extends keyof NetworkSNMPScanInput>(key: K, value: NetworkSNMPScanInput[K]) => setInput((prev) => ({ ...prev, [key]: value }));
-  async function submit() {
-    setBusy(true);
-    setError(null);
-    try {
-      await scanNetworkCandidate(candidate.id, input);
-      onComplete();
-    } catch (err) {
-      setError((err as Error).message || tr("SNMP 校验失败", "SNMP verification failed"));
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <Modal open onClose={onClose} title={tr("验证网络设备", "Verify network device")} size="lg" footer={<div className="flex justify-end gap-2"><Button onClick={onClose}>{tr("取消", "Cancel")}</Button><Button variant="primary" disabled={busy} onClick={() => void submit()}><ShieldCheck size={13} />{busy ? tr("校验中…", "Verifying…") : tr("校验并加入设备", "Verify and add")}</Button></div>}>
-      <div className="space-y-4 text-xs">
-        <p className="text-zinc-400">{tr("只有 SNMP 读取成功后，候选设备才会进入全部设备和正式拓扑。凭证不会保存。", "The candidate enters All devices and the formal topology only after a successful SNMP read. Credentials are not stored.")}</p>
-        {error && <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-red-300">{error}</div>}
-        <div className="grid grid-cols-2 gap-3">
-          <Label className="text-zinc-400">{tr("设备名称", "Device name")}<Input value={input.name ?? ""} onChange={(e) => set("name", e.target.value)} placeholder={tr("可选，默认使用 sysName", "Optional, defaults to sysName")} className="mt-1 w-full" /></Label>
-          <Label className="text-zinc-400">{tr("地址", "Address")}<Input value={input.address ?? ""} onChange={(e) => set("address", e.target.value)} className="mt-1 w-full font-mono" /></Label>
-          <Label className="text-zinc-400">{tr("版本", "Version")}<Select value={input.version} onValueChange={(selectedValue) => set("version", selectedValue as "v2c" | "v3")} className="mt-1 w-full"><option value="v2c">SNMP v2c</option><option value="v3">SNMP v3</option></Select></Label>
-          <Label className="text-zinc-400">Port<Input type="number" value={input.port ?? 161} onChange={(e) => set("port", Number(e.target.value))} className="mt-1 w-full font-mono" /></Label>
-        </div>
-        {input.version === "v2c" ? (
-          <Label className="block text-zinc-400">
-            Community
-            <Input
-              value={input.community ?? ""}
-              onChange={(event) => set("community", event.target.value)}
-              className="mt-1 w-full font-mono"
-            />
-          </Label>
-        ) : (
-          <div className="grid grid-cols-2 gap-3">
-            <Label className="text-zinc-400">
-              Username
-              <Input
-                value={input.username ?? ""}
-                onChange={(event) => set("username", event.target.value)}
-                className="mt-1 w-full"
-              />
-            </Label>
-            <Label className="text-zinc-400">
-              {tr("认证协议", "Auth protocol")}
-              <Select
-                value={input.auth_protocol ?? "none"}
-                onValueChange={(selectedValue) => {
-                  const authProtocol = selectedValue;
-                  setInput((current) => ({
-                    ...current,
-                    auth_protocol: authProtocol,
-                    ...(authProtocol === "none"
-                      ? {
-                          auth_secret: "",
-                          privacy_protocol: "none",
-                          privacy_secret: "",
-                        }
-                      : {}),
-                  }));
-                }}
-                className="mt-1 w-full"
-              >
-                <option value="none">{tr("不认证", "No authentication")}</option>
-                <option value="sha256">SHA-256</option>
-                <option value="sha384">SHA-384</option>
-                <option value="sha512">SHA-512</option>
-                <option value="sha224">SHA-224</option>
-                <option value="sha1">{tr("SHA-1（旧）", "SHA-1 (legacy)")}</option>
-                <option value="md5">{tr("MD5（旧）", "MD5 (legacy)")}</option>
-              </Select>
-            </Label>
-            {input.auth_protocol && input.auth_protocol !== "none" && (
-              <Label className="text-zinc-400">
-                {tr("认证密钥", "Auth secret")}
-                <Input
-                  type="password"
-                  value={input.auth_secret ?? ""}
-                  onChange={(event) => set("auth_secret", event.target.value)}
-                  className="mt-1 w-full"
-                />
-              </Label>
-            )}
-            <Label className="text-zinc-400">
-              {tr("隐私协议", "Privacy protocol")}
-              <Select
-                value={input.privacy_protocol ?? "none"}
-                disabled={!input.auth_protocol || input.auth_protocol === "none"}
-                onValueChange={(selectedValue) => set("privacy_protocol", selectedValue)}
-                className="mt-1 w-full"
-              >
-                <option value="none">{tr("不加密", "No privacy")}</option>
-                <option value="aes128">AES-128</option>
-                <option value="aes256c">AES-256 (Reeder)</option>
-                <option value="aes192c">AES-192 (Reeder)</option>
-                <option value="aes256">AES-256 (Blumenthal)</option>
-                <option value="aes192">AES-192 (Blumenthal)</option>
-                <option value="des">{tr("DES（旧）", "DES (legacy)")}</option>
-              </Select>
-            </Label>
-            {input.privacy_protocol && input.privacy_protocol !== "none" && (
-              <Label className="text-zinc-400">
-                {tr("隐私密钥", "Privacy secret")}
-                <Input
-                  type="password"
-                  value={input.privacy_secret ?? ""}
-                  onChange={(event) => set("privacy_secret", event.target.value)}
-                  className="mt-1 w-full"
-                />
-              </Label>
-            )}
-          </div>
-        )}
-      </div>
-    </Modal>
   );
 }
 

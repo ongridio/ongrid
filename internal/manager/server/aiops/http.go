@@ -443,7 +443,18 @@ type postMessageResp struct {
 	Iterations       int                 `json:"iterations"`
 }
 
+type toolExecutionDTO struct {
+	Name         string  `json:"name"`
+	Status       string  `json:"status"`
+	Error        string  `json:"error,omitempty"`
+	DurationMs   int64   `json:"duration_ms"`
+	ArgumentsRaw string  `json:"arguments_raw"`
+	ResultRaw    string  `json:"result_raw,omitempty"`
+	DeviceID     *uint64 `json:"device_id,omitempty"`
+}
+
 type messageDTO struct {
+	ToolCall    *toolExecutionDTO  `json:"tool_call,omitempty"`
 	ID          string             `json:"id"`
 	Role        string             `json:"role"`
 	Content     string             `json:"content,omitempty"`
@@ -1288,6 +1299,20 @@ func toMessageDTO(m *model.Message) messageDTO {
 	if m.Model != nil {
 		out.Model = *m.Model
 	}
+	if tc := m.ToolExecution; tc != nil {
+		x := &toolExecutionDTO{Name: tc.ToolName, Status: tc.Status, ArgumentsRaw: tc.ArgumentsJSON, DeviceID: tc.DeviceID}
+		if tc.Error != nil {
+			x.Error = *tc.Error
+		}
+		if tc.ResultJSON != nil {
+			x.ResultRaw = *tc.ResultJSON
+		}
+		if tc.EndedAt != nil {
+			x.DurationMs = tc.EndedAt.Sub(tc.StartedAt).Milliseconds()
+		}
+		out.ToolCall = x
+	}
+
 	return out
 }
 

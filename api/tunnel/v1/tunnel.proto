@@ -48,6 +48,8 @@ message HostMetricPoint {
     uint64 net_rx_bps = 7 [json_name = "net_rx_bps"];
     uint64 net_tx_bps = 8 [json_name = "net_tx_bps"];
     float disk_used_pct = 9 [json_name = "disk_used_pct"];
+    string cpu_sample_status = 10 [json_name = "cpu_sample_status"];
+    double cpu_window_seconds = 11 [json_name = "cpu_window_seconds"];
 }
 
 // ============================================================
@@ -141,6 +143,9 @@ message GetHostLoadResponse {
     float load5 = 4 [json_name = "load5"];
     float load15 = 5 [json_name = "load15"];
     google.protobuf.Timestamp sampled_at = 6 [json_name = "sampled_at"];
+    float disk_used_pct = 7 [json_name = "disk_used_pct"];
+    string cpu_sample_status = 8 [json_name = "cpu_sample_status"];
+    double cpu_window_seconds = 9 [json_name = "cpu_window_seconds"];
 }
 
 // ============================================================
@@ -162,6 +167,7 @@ message ProcessInfo {
     float cpu_pct = 4 [json_name = "cpu_pct"];
     float mem_pct = 5 [json_name = "mem_pct"];
     string user = 6 [json_name = "user"];
+    string cpu_sample_status = 7 [json_name = "cpu_sample_status"];
 }
 
 message GetProcessListRequest {
@@ -172,6 +178,8 @@ message GetProcessListRequest {
 message GetProcessListResponse {
     repeated ProcessInfo processes = 1 [json_name = "processes"];
     google.protobuf.Timestamp sampled_at = 2 [json_name = "sampled_at"];
+    string cpu_basis = 3 [json_name = "cpu_basis"];
+    double cpu_window_seconds = 4 [json_name = "cpu_window_seconds"];
 }
 
 // ============================================================

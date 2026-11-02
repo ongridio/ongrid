@@ -199,7 +199,8 @@ type Message struct {
 	// orphan role=tool message and strict providers (DeepSeek v4+)
 	// reject the request with "tool must follow tool_calls". Transient:
 	// `gorm:"-"` keeps it out of the chat_messages schema.
-	ToolCalls []ToolCall `gorm:"-"`
+	ToolCalls     []ToolCall `gorm:"-"`
+	ToolExecution *ToolCall  `gorm:"-" json:"-"`
 }
 
 // Attachment stores metadata for a file uploaded to a chat session. The file

@@ -722,7 +722,7 @@ func TestDeviceMirrorIdentity(t *testing.T) {
 	}
 	uc := biz.NewUsecase(store.NewNodeRepo(db), nil, nil, nil, nil)
 	ctx := context.Background()
-	first, err := uc.EnsureNodeForDevice(ctx, 1, "VM-0-6-ubuntu")
+	first, err := uc.EnsureNodeForDevice(ctx, 1, "example-host")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -750,5 +750,58 @@ func TestDeviceMirrorIdentity(t *testing.T) {
 	}
 	if linked != first {
 		t.Fatalf("device linked to %d, want %d", linked, first)
+	}
+}
+
+func TestNetworkCollectionReplacesOnlyOwnedRelations(t *testing.T) {
+	uc := newUC(t)
+	ctx := context.Background()
+	target, err := uc.CreateNode(ctx, "device", "switch", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, err := uc.CreateNode(ctx, "device", "old-scanner", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := uc.CreateNode(ctx, "device", "current-scanner", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := uc.EnsureDeviceConnection(ctx, old.ID, target.ID, `{"source":"network_discovery","candidate_id":1}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := uc.EnsureDeviceConnection(ctx, current.ID, target.ID, `{"source":"manual"}`); err != nil {
+		t.Fatal(err)
+	}
+	enabled := `{"source":"network_collection","enabled":true}`
+	if err := uc.EnsureNetworkCollection(ctx, old.ID, target.ID, enabled); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := uc.EnsureNetworkCollection(ctx, current.ID, target.ID, enabled); err != nil {
+			t.Fatal(err)
+		}
+	}
+	disabled := `{"source":"network_collection","enabled":false}`
+	if err := uc.EnsureNetworkCollection(ctx, current.ID, target.ID, disabled); err != nil {
+		t.Fatal(err)
+	}
+	rows, _, err := uc.ListRelations(ctx, biz.RelationListFilter{Type: model.RelCollectsFrom})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].SrcID != current.ID || rows[0].DstID != target.ID || rows[0].PropsJSON != disabled {
+		t.Fatalf("collection direction/state: %+v", rows)
+	}
+	rows, _, err = uc.ListRelations(ctx, biz.RelationListFilter{Type: model.RelConnectedTo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].PropsJSON != `{"source":"manual"}` {
+		t.Fatalf("manual physical relation changed: %+v", rows)
+	}
+	if err := uc.EnsureNetworkCollection(ctx, target.ID, target.ID, enabled); !errors.Is(err, errs.ErrInvalid) {
+		t.Fatalf("self relation accepted: %v", err)
 	}
 }

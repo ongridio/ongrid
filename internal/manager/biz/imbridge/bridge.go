@@ -56,7 +56,10 @@ type Bridge struct {
 	// ServiceUserID is the ongrid users.id used as owner_user_id for
 	// IM-originated chat sessions until per-IM-user binding (S3)
 	// lands. Configured at boot via NewBridge.
-	serviceUserID uint64
+	serviceUserID    uint64
+	publicURL        string
+	approvalDelivery *ApprovalDelivery
+	interaction      *Interaction
 	// per-provider client cache so we don't rebuild HTTP / token
 	// state on every inbound event. Keyed by app_id.
 	feishuCache sync.Map // app_id -> *feishu.Client
@@ -67,32 +70,46 @@ type Bridge struct {
 	log  *slog.Logger
 }
 
-func NewBridge(repo Repo, agent AgentSession, serviceUserID uint64, log *slog.Logger) *Bridge {
+func NewBridge(repo Repo, agent AgentSession, serviceUserID uint64, log *slog.Logger, options ...BridgeOption) *Bridge {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Bridge{
+	b := &Bridge{
 		repo:          repo,
 		agent:         agent,
 		serviceUserID: serviceUserID,
 		seen:          newDedupSet(2048),
 		log:           log.With(slog.String("comp", "imbridge")),
 	}
+	for _, option := range options {
+		option(b)
+	}
+	return b
+}
+
+type BridgeOption func(*Bridge)
+
+// WithApprovalPublicURL accepts a value validated by ApprovalPublicURL.
+func WithApprovalPublicURL(base string) BridgeOption {
+	return func(b *Bridge) { b.publicURL = base }
 }
 
 // InboundMessage describes a normalized inbound event the bridge can
 // process. The provider-specific webhook handler decrypts + decodes
 // to this shape so the bridge stays platform-agnostic.
 type InboundMessage struct {
-	Provider      string // "feishu" | "dingtalk"
-	AppID         string // platform-side app_id (== ImApp.AppID)
-	ChatID        string // platform chat / conversation id
-	ThreadID      string // optional reply thread id (Feishu root_id)
-	OpenID        string // platform user id of the sender (we currently use this only for logging; S3 will bind)
-	UserName      string // sender display name (logging only)
-	Text          string // normalized message body — text/plain
-	EventID       string // platform event id, used for dedup
-	ReceiveIDType string // platform-specific hint: "chat_id" / "open_id" / "union_id"
+	ConnectionIdentity string
+	Subject            Subject
+	Private            bool
+	Provider           string // "feishu" | "dingtalk"
+	AppID              string // platform-side app_id (== ImApp.AppID)
+	ChatID             string // platform chat / conversation id
+	ThreadID           string // optional reply thread id (Feishu root_id)
+	OpenID             string // platform user id of the sender (we currently use this only for logging; S3 will bind)
+	UserName           string // sender display name (logging only)
+	Text               string // normalized message body — text/plain
+	EventID            string // platform event id, used for dedup
+	ReceiveIDType      string // platform-specific hint: "chat_id" / "open_id" / "union_id"
 }
 
 // HandleInbound resolves the IM thread → ongrid session and kicks off
@@ -143,6 +160,36 @@ func (b *Bridge) HandleInbound(ctx context.Context, sender Sender, msg InboundMe
 	}
 	if !app.Enabled {
 		return errors.New("imbridge: app disabled")
+	}
+
+	if strings.TrimSpace(msg.Text) == "/whoami" {
+		reply := "请在机器人私聊中查询你的审批身份。"
+		if msg.Private && msg.ConnectionIdentity == ConnectionIdentity(app) && msg.Subject.valid(app.Provider) {
+			reply = fmt.Sprintf("你的平台身份（不会自动授予审批权限）：\nApp ID: %s\nScope: %s\nUser ID: %s\n请交由 Ongrid 管理员核对并预先授权。授权后可直接在卡片中批准或拒绝，无需跳转网页。", app.AppID, msg.Subject.Scope, msg.Subject.User)
+		}
+		_, err := sender.SendText(ctx, msg.ChatID, msg.ReceiveIDType, reply)
+		return err
+	}
+
+	if strings.HasPrefix(strings.TrimSpace(msg.Text), "/bind") {
+		reply := ApprovalReceipt(ErrIdentityUnbound, app.DefaultLocale, app.Provider)
+		parts := strings.Fields(msg.Text)
+		if b.interaction != nil && msg.ConnectionIdentity == ConnectionIdentity(app) && msg.Private && len(parts) == 2 && parts[0] == "/bind" {
+			if err := b.interaction.ClaimBinding(ctx, app, msg.Subject, parts[1]); err == nil {
+				reply = (ApprovalCard{Locale: app.DefaultLocale}).Label("已收到绑定请求，尚未完成绑定。请回到 Ongrid「设置 → IM → 我的 IM 审批身份」核对并确认；完成后可直接点击有效的审批卡片。", "Binding request received, but not yet confirmed. Return to Ongrid Settings > IM > My IM approval identities to verify and confirm. Then use a valid approval card.")
+			}
+		}
+		_, err := sender.SendText(ctx, msg.ChatID, msg.ReceiveIDType, reply)
+		return err
+	}
+	// 文字同意不是审批回调。不能让它启动新回合并取消正在等待卡片决策的回合。
+	if b.interaction != nil && b.interaction.Enabled(app) && isApprovalReply(msg.Text) {
+		reply := "请直接点击审批卡片的「批准执行」或「拒绝」，无需发送文字确认。若没有有效卡片，请重新说明具体操作；文字同意不会执行任何操作。"
+		if app.DefaultLocale == "en" {
+			reply = "Use Approve execution or Reject on the approval card. Text replies do not approve operations. If no active card exists, describe the operation again."
+		}
+		_, err := sender.SendText(ctx, msg.ChatID, msg.ReceiveIDType, reply)
+		return err
 	}
 
 	thread, err := b.repo.FindThread(ctx, app.ID, msg.ChatID, msg.ThreadID)
@@ -204,6 +251,14 @@ func (b *Bridge) HandleInbound(ctx context.Context, sender Sender, msg InboundMe
 		return nil
 	}
 
+	// Persist the original route before a proposal can be created. If persistence
+	// fails, stop before running tools rather than silently losing approval notices.
+	if b.approvalDelivery != nil {
+		if err := b.approvalDelivery.register(ctx, app, thread, sender, msg.ReceiveIDType); err != nil {
+			return fmt.Errorf("register IM approval target: %w", err)
+		}
+	}
+
 	// 3. Send a placeholder only when the provider can edit it. Providers
 	//    backed by one-shot webhooks (DingTalk) buffer the stream and send
 	//    the final answer once, avoiding one message per chunk.
@@ -221,6 +276,12 @@ func (b *Bridge) HandleInbound(ctx context.Context, sender Sender, msg InboundMe
 	//    language regardless of persona / model defaults. Empty locale =
 	//    auto = LLM mirrors the user. See [[feedback_ai_output_locale]].
 	editor := newStreamEditor(ctx, sender, msg.ChatID, msg.ReceiveIDType, placeholder, app.DefaultLocale, b.log)
+	editor.publicURL = b.publicURL
+	editor.sessionID = thread.OngridSessionID
+	if b.approvalDelivery == nil {
+		editor.approvalReader, _ = b.agent.(ApprovalStatusReader)
+	}
+	editor.durableApprovals = b.approvalDelivery != nil
 	emit := func(e chatprotocol.Event) {
 		editor.OnEvent(e)
 	}
@@ -313,4 +374,13 @@ func shortChatLabel(id string) string {
 		return id
 	}
 	return id[:4] + "…" + id[len(id)-4:]
+}
+
+func isApprovalReply(text string) bool {
+	switch strings.ToLower(strings.Trim(strings.TrimSpace(text), "。！.! ")) {
+	case "确认", "批准", "同意", "确认执行", "批准执行", "同意执行", "confirm", "approve", "approved":
+		return true
+	default:
+		return false
+	}
 }

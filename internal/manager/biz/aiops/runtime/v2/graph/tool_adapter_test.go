@@ -688,3 +688,30 @@ func TestEinoToolAdapter_NoMemoByDefault(t *testing.T) {
 		t.Errorf("memo-less adapter must execute each call; want 2, got %d", got)
 	}
 }
+
+func TestModelAdapterPreservesMCPDefinitions(t *testing.T) {
+	const raw = `{"type":"object","definitions":{"id":{"type":"integer"}},"properties":{"id":{"$ref":"#/definitions/id"}}}`
+	tool := WrapBaseTool(&fakeBaseTool{name: "mcp_definition_probe", parameters: raw})
+	info, err := tool.Info(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema, err := info.ParamsOneOf.ToJSONSchema()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var original, emitted map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &original); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(encoded, &emitted); err != nil {
+		t.Fatal(err)
+	}
+	if string(original["definitions"]) != string(emitted["definitions"]) {
+		t.Fatalf("definitions lost: %s", encoded)
+	}
+}

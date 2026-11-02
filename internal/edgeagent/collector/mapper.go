@@ -41,7 +41,7 @@ func NewMapper() *Mapper {
 // Missing inputs leave their corresponding field at zero — never errors.
 //
 // First-call semantics: rate-derived fields (CPUPct, NetRxBps, NetTxBps)
-// return 0 because no prior counter sample exists. Subsequent calls
+// return 0 with CPU status warming_up because no prior counter sample exists. Subsequent calls
 // compute (now-prev) / dt against the cached previous reading.
 func (m *Mapper) MapToHostPoint(now time.Time, families []*dto.MetricFamily) tunnel.HostMetricPoint {
 	m.mu.Lock()
@@ -50,7 +50,7 @@ func (m *Mapper) MapToHostPoint(now time.Time, families []*dto.MetricFamily) tun
 	hp := tunnel.HostMetricPoint{Ts: now.Unix()}
 	idx := indexFamilies(families)
 
-	hp.CPUPct = m.cpuPct(now, idx)
+	hp.CPUPct, hp.CPUSampleStatus, hp.CPUWindowSeconds = m.cpuPct(now, idx)
 	hp.MemPct = memPct(idx)
 	hp.Load1 = simpleGauge(idx, "node_load1")
 	hp.Load5 = simpleGauge(idx, "node_load5")
@@ -230,39 +230,51 @@ func matchGauge(idx map[string]*dto.MetricFamily, name, key, want string) float6
 // Implementation note: keys are (metric_name + sorted labels) so the same
 // (cpu, mode) tuple always maps to the same cache slot across calls. The
 // idle mode is bucketed separately so the math is one-pass.
-func (m *Mapper) cpuPct(now time.Time, idx map[string]*dto.MetricFamily) float64 {
-	mf, ok := idx["node_cpu_seconds_total"]
-	if !ok {
-		return 0
+func (m *Mapper) cpuPct(now time.Time, idx map[string]*dto.MetricFamily) (float64, string, float64) {
+	mf := idx["node_cpu_seconds_total"]
+	if mf == nil {
+		return 0, "unavailable", 0
 	}
-	var totalDelta, idleDelta float64
-	hadPrev := false
+	var total, idle, window float64
+	complete, seen := true, false
 	for _, met := range mf.GetMetric() {
 		if met.Counter == nil {
 			continue
 		}
-		v := met.Counter.GetValue()
-		key := counterKey("node_cpu_seconds_total", met.GetLabel())
 		mode := labelValue(met.GetLabel(), "mode")
-		prev, ok := m.last[key]
-		m.last[key] = counterSample{t: now, v: v}
-		if !ok {
+		// guest 时间已包含在 user/nice，不能重复累计。
+		if mode == "guest" || mode == "guest_nice" {
 			continue
 		}
-		hadPrev = true
-		dv := v - prev.v
-		if dv < 0 {
-			dv = 0
+		seen = true
+		key := counterKey("node_cpu_seconds_total", met.GetLabel())
+		value := met.Counter.GetValue()
+		prev, ok := m.last[key]
+		m.last[key] = counterSample{t: now, v: value}
+		dt := now.Sub(prev.t).Seconds()
+		if !ok || value < prev.v || dt <= 0 {
+			complete = false
+			continue
 		}
-		totalDelta += dv
+		if window == 0 || dt < window {
+			window = dt
+		}
+		delta := value - prev.v
+		total += delta
 		if mode == "idle" {
-			idleDelta += dv
+			idle += delta
 		}
 	}
-	if !hadPrev || totalDelta <= 0 {
-		return 0
+	if !seen {
+		return 0, "unavailable", 0
 	}
-	return (totalDelta - idleDelta) / totalDelta * 100.0
+	if !complete {
+		return 0, "warming_up", 0
+	}
+	if total <= 0 {
+		return 0, "unavailable", window
+	}
+	return (total - idle) / total * 100, "valid", window
 }
 
 // netRate sums the per-device counter delta of the named family and

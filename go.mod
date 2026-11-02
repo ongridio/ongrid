@@ -3,6 +3,7 @@ module github.com/ongridio/ongrid
 go 1.25.0
 
 require (
+	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
 	github.com/anush008/fastembed-go v1.0.0
 	github.com/casbin/casbin/v2 v2.103.0
 	github.com/casbin/gorm-adapter/v3 v3.32.0

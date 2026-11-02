@@ -10,7 +10,9 @@ import (
 
 	"github.com/cloudwego/eino/callbacks"
 	"github.com/cloudwego/eino/components"
+	einotool "github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -197,11 +199,11 @@ func (h *MetricsHandler) OnEnd(ctx context.Context, info *callbacks.RunInfo, out
 		if ok {
 			h.collectors.toolDuration.WithLabelValues(info.Name).Observe(time.Since(started).Seconds())
 		}
-		// We can't tell from CallbackOutput alone whether the tool
-		// returned an error payload (it's just a JSON string). Treat
-		// this hook as "success" — the OnError path covers actual
-		// failures returned via tool.InvokableRun.
-		h.collectors.toolInvocations.WithLabelValues(info.Name, "success").Inc()
+		status := "success"
+		if tout := einotool.ConvCallbackOutput(output); tout != nil {
+			status, _ = basetool.ResultOutcome(tout.Response)
+		}
+		h.collectors.toolInvocations.WithLabelValues(info.Name, status).Inc()
 	default:
 		// Graph-scope terminal: success.
 		if h.terminated.CompareAndSwap(false, true) {

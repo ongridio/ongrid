@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -69,8 +70,11 @@ func (h *Handler) Register(r chi.Router) {
 	r.Post("/v1/approvals/{id}/reject", h.reject)
 }
 
+// @Summary 查询审批记录
+// @Router /v1/approvals [get]
+// @Success 200 {object} map[string]interface{}
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
-	if _, ok := requireAdmin(w, r); !ok {
+	if _, ok := h.requireAdmin(w, r); !ok {
 		return
 	}
 	status := r.URL.Query().Get("status")
@@ -90,8 +94,11 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
+// @Summary 查询待审批数量
+// @Router /v1/approvals/count [get]
+// @Success 200 {object} map[string]interface{}
 func (h *Handler) count(w http.ResponseWriter, r *http.Request) {
-	if _, ok := requireAdmin(w, r); !ok {
+	if _, ok := h.requireAdmin(w, r); !ok {
 		return
 	}
 	n, err := h.uc.CountPending(r.Context())
@@ -102,8 +109,11 @@ func (h *Handler) count(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"pending": n})
 }
 
+// @Summary 查询审批详情
+// @Router /v1/approvals/{id} [get]
+// @Success 200 {object} map[string]interface{}
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
-	if _, ok := requireAdmin(w, r); !ok {
+	if _, ok := h.requireAdmin(w, r); !ok {
 		return
 	}
 	a, err := h.uc.Get(r.Context(), chi.URLParam(r, "id"))
@@ -114,12 +124,15 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	h.detail(w, r, a)
 }
 
+// @Summary 批准并执行操作
+// @Router /v1/approvals/{id}/approve [post]
+// @Success 200 {object} map[string]interface{}
 func (h *Handler) approve(w http.ResponseWriter, r *http.Request) {
 	if _, external := integrationauth.From(r.Context()); external {
 		writeErr(w, errs.ErrForbidden)
 		return
 	}
-	c, ok := requireAdmin(w, r)
+	c, ok := h.requireAdmin(w, r)
 	if !ok {
 		return
 	}
@@ -171,19 +184,25 @@ func presentApproval(r *http.Request, a *approvalmodel.Approval) (*approvalmodel
 	return &copy, nil
 }
 
+// @Summary 拒绝操作
+// @Router /v1/approvals/{id}/reject [post]
+// @Success 200 {object} map[string]interface{}
 func (h *Handler) reject(w http.ResponseWriter, r *http.Request) {
 	if _, external := integrationauth.From(r.Context()); external {
 		writeErr(w, errs.ErrForbidden)
 		return
 	}
-	c, ok := requireAdmin(w, r)
+	c, ok := h.requireAdmin(w, r)
 	if !ok {
 		return
 	}
 	var in struct {
 		Reason string `json:"reason"`
 	}
-	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&in)
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&in); err != nil && !errors.Is(err, io.EOF) {
+		writeErr(w, errs.ErrInvalid)
+		return
+	}
 	if err := h.uc.Reject(r.Context(), c.UserID, chi.URLParam(r, "id"), in.Reason); err != nil {
 		writeErr(w, err)
 		return
@@ -198,7 +217,7 @@ type caller struct {
 	Role   string
 }
 
-func requireAdmin(w http.ResponseWriter, r *http.Request) (caller, bool) {
+func (h *Handler) requireAdmin(w http.ResponseWriter, r *http.Request) (caller, bool) {
 	t, ok := tenantctx.From(r.Context())
 	if !ok {
 		writeErr(w, errs.ErrUnauthorized)
@@ -206,6 +225,10 @@ func requireAdmin(w http.ResponseWriter, r *http.Request) (caller, bool) {
 	}
 	if t.Role != "admin" {
 		writeErr(w, errs.ErrForbidden)
+		return caller{}, false
+	}
+	if err := h.uc.AuthorizeApproval(r.Context(), t.UserID); err != nil {
+		writeErr(w, err)
 		return caller{}, false
 	}
 	return caller{UserID: t.UserID, Role: t.Role}, true

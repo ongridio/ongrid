@@ -61,6 +61,9 @@ func buildSkillToolSchema(e skillcore.Executor) (json.RawMessage, error) {
 			props = map[string]any{}
 			base["properties"] = props
 		}
+		if _, exists := props["edge_id"]; exists {
+			return nil, fmt.Errorf("skill %q: host schema must use device_id, not edge_id", meta.Key)
+		}
 		// Schema-level identifier is `device_id` — matches @-mention chip
 		// id and Prom label. Executor still resolves it to an edge_id for
 		// the tunnel call. `edge_id` lingered as a confusing alias before
@@ -68,14 +71,17 @@ func buildSkillToolSchema(e skillcore.Executor) (json.RawMessage, error) {
 		// prevents prompts from latching back onto it.
 		props["device_id"] = map[string]any{
 			"type":        "integer",
+			"minimum":     1,
 			"description": "Device id to run this skill on (required). Same id as the @-mention chip and the Prom device_id label.",
 		}
 		required, _ := base["required"].([]any)
 		hasDeviceID := false
 		for _, name := range required {
+			if name == "edge_id" {
+				return nil, fmt.Errorf("skill %q: host schema must use device_id, not edge_id", meta.Key)
+			}
 			if name == "device_id" {
 				hasDeviceID = true
-				break
 			}
 		}
 		if !hasDeviceID {
@@ -103,7 +109,9 @@ func (r *Registry) newSkillExecutor(svc SkillRunner, key string, scope skillcore
 		var edgeID, deviceID uint64
 		if scope == skillcore.ScopeHost {
 			if raw, ok := envelope["device_id"]; ok {
-				if err := json.Unmarshal(raw, &deviceID); err != nil {
+				var err error
+				deviceID, err = basetool.DecodeUint64(raw)
+				if err != nil {
 					return ExecuteResult{}, fmt.Errorf("skill %q: device_id must be integer: %w", key, err)
 				}
 				delete(envelope, "device_id")
@@ -125,13 +133,6 @@ func (r *Registry) newSkillExecutor(svc SkillRunner, key string, scope skillcore
 			if edgeID == 0 {
 				return ExecuteResult{}, fmt.Errorf("skill %q: device_id=%d has no host-edge link (try query_devices to list available device ids)", key, deviceID)
 			}
-		} else {
-			// Manager-scoped skills shouldn't get an edge_id / device_id,
-			// but if a confused LLM sends one we strip rather than
-			// erroring — the model tends to recover better from silent
-			// ignore.
-			delete(envelope, "edge_id")
-			delete(envelope, "device_id")
 		}
 
 		params, err := json.Marshal(envelope)

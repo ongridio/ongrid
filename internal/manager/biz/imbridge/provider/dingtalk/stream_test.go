@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/open-dingtalk/dingtalk-stream-sdk-go/chatbot"
@@ -97,5 +98,17 @@ func TestProbeGetsStreamEndpoint(t *testing.T) {
 
 	if err := Probe(context.Background(), "app", "secret", client.WithOpenApiHost(srv.URL)); err != nil {
 		t.Fatalf("Probe: %v", err)
+	}
+}
+
+func TestSenderAdapter_NormalizesRichTextBeforeSending(t *testing.T) {
+	replier := &fakeReplier{}
+	sender := senderAdapter{webhook: "https://example.invalid/session", replier: replier}
+	_, err := sender.SendText(context.Background(), "", "", "# Report\n\n| Host | State |\n| --- | --- |\n| db1 | ok |")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(replier.text, "**Report**") || !strings.Contains(replier.text, "Host: db1 | State: ok") {
+		t.Fatalf("raw GFM sent: %s", replier.text)
 	}
 }

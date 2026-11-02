@@ -115,7 +115,7 @@ const queryPromQLWhenToUse = "When the user asks about metric values, time-serie
 	"NOT for log content (use query_logql) or filesystem state (use host-level tools). " +
 	"For fleet / multi-device / multi-mountpoint questions, prefer one PromQL call with by(device_id, ...) " +
 	"or topk/ranking over repeated per-device queries. " +
-	"Prefer query_promql over the narrower get_host_load / get_process_list when the " +
+	"Prefer query_promql over the narrower get_host_load / get_host_processes when the " +
 	"question spans more than one host or asks for derivatives / aggregates."
 
 // Info returns the tool metadata. — Info is pure (no I/O).

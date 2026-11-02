@@ -1,3 +1,4 @@
+import { IMBindings } from './IMBindings';
 import { Input, Label } from '@/components/ui';
 import { Hint } from '@/components/ui/Tooltip';
 import { Checkbox } from '@/components/ui/Checkbox';
@@ -126,6 +127,7 @@ export default function SettingsChannels() {
   return (
     <>
       <div className="space-y-4">
+        <IMBindings apps={items} />
         <div className="rounded-lg border border-zinc-800/60 bg-zinc-900/30 px-4 py-3 text-[12px] text-zinc-400">
           <div className="mb-1 flex items-center gap-2 text-zinc-200">
             <MessagesSquare size={14} className="text-zinc-400" />
@@ -350,6 +352,7 @@ function IMAppEditor({
   const [name, setName] = useState(target?.name ?? '');
   const [appID, setAppID] = useState(target?.app_id ?? '');
   const [appSecret, setAppSecret] = useState('');
+ const [approvalTemplate, setApprovalTemplate] = useState(target?.approval_template_id ?? '');
   // Slack needs two tokens (app_token = xapp-…, bot_token = xoxb-…); the
   // backend stores them together as JSON in the single app_secret column.
   // Kept as separate UI state so the operator pastes each into its own
@@ -408,6 +411,7 @@ function IMAppEditor({
     setBusy(true);
     try {
       const payload: IMAppPayload = {
+ approval_template_id: approvalTemplate.trim(),
         provider,
         mode,
         name: name.trim(),
@@ -462,6 +466,8 @@ function IMAppEditor({
       }
     >
       <div className="space-y-4 text-sm">
+ {provider === 'dingtalk' && <Field label={tr('审批卡片模板 ID', 'Approval card template ID')} hint={tr('可选。使用 Ongrid 审批变量和按钮回传契约配置模板；留空时使用 Web 审批链接。', 'Optional. Configure the template with Ongrid approval variables and callbacks; leave empty for Web approval links.')}><Input value={approvalTemplate} onChange={e => setApprovalTemplate(e.target.value)} maxLength={128} /></Field>}
+
         {err && (
           <div className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">{err}</div>
         )}
@@ -599,7 +605,7 @@ function IMAppEditor({
             <Input
               value={allowFrom}
               onChange={(e) => setAllowFrom(e.target.value)}
-              placeholder={provider === 'telegram' ? '8211893274, 123456789' : 'U0ABCD1234, U0EFGH5678'}
+              placeholder={provider === 'telegram' ? '123456789, 987654321' : 'U0ABCD1234, U0EFGH5678'}
               className="w-full font-mono"
             />
           </Field>

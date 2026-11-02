@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/ongridio/ongrid/internal/manager/biz/imbridge/imformat"
 	"io"
 	"net/http"
 	"sync"
@@ -221,7 +222,7 @@ func messageContent(markdown string) (string, []byte, error) {
 	if len(rich) <= 28*1024 {
 		return "post", rich, nil
 	}
-	plain, err := json.Marshal(map[string]string{"text": markdown})
+	plain, err := json.Marshal(map[string]string{"text": imformat.Plain(markdown)})
 	if err != nil {
 		return "", nil, err
 	}

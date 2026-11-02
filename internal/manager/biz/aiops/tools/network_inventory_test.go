@@ -29,7 +29,14 @@ func (f *fakeNetworkDeviceReader) Get(_ context.Context, id uint64) (*devicemode
 
 func (f *fakeNetworkDeviceReader) List(_ context.Context, filter devicebiz.ListFilter) ([]*devicemodel.Device, error) {
 	f.listFilter = filter
-	return f.devices, nil
+	if filter.Offset >= len(f.devices) {
+		return nil, nil
+	}
+	rows := f.devices[filter.Offset:]
+	if filter.Limit > 0 && len(rows) > filter.Limit {
+		rows = rows[:filter.Limit]
+	}
+	return rows, nil
 }
 
 type fakeNetworkDetailReader struct {
@@ -60,19 +67,31 @@ func (f *fakeNetworkTopologyReader) GetNode(_ context.Context, id uint64) (*topo
 
 func (f *fakeNetworkTopologyReader) ListRelations(_ context.Context, filter topologybiz.RelationListFilter) ([]*topologymodel.Relation, int64, error) {
 	f.listFilter = filter
-	return f.relations, int64(len(f.relations)), nil
+	var rows []*topologymodel.Relation
+	for _, r := range f.relations {
+		if filter.Type != "" && r.Type != filter.Type {
+			continue
+		}
+		if filter.DstID != 0 && r.DstID != filter.DstID {
+			continue
+		}
+		rows = append(rows, r)
+	}
+	return rows, int64(len(rows)), nil
 }
 
 func TestQueryNetworkDevicesToolReturnsVerifiedSNMPAssets(t *testing.T) {
-	lastSeen := time.Date(2026, time.August, 5, 10, 0, 0, 0, time.UTC)
-	devices := &fakeNetworkDeviceReader{devices: []*devicemodel.Device{
+	lastSeen := time.Now().UTC()
+	devices := &fakeNetworkDeviceReader{getByID: map[uint64]*devicemodel.Device{3: {ID: 3, Name: "host-a", Online: true}}, devices: []*devicemodel.Device{
 		{ID: 10, Name: "core-sw-01", Hostname: "core-sw-01", OS: "network", Roles: devicemodel.RoleBitNetwork, Online: true},
 		{ID: 11, Name: "app-host", Hostname: "app-host", OS: "linux", Roles: devicemodel.RoleBitNetwork},
 	}}
 	details := &fakeNetworkDetailReader{details: map[uint64]*devicebiz.NetworkDeviceDetail{
 		10: {
+			Interfaces: []*devicemodel.NetworkInterface{{Name: "xe-0/0/1"}, {Name: "xe-0/0/2"}},
 			Profile: &devicemodel.DeviceNetwork{
-				DeviceID:           10,
+				DeviceID:    10,
+				PollEnabled: true, PollScannerHostDeviceID: 3, LastPollAt: &lastSeen, PollIntervalSeconds: 60,
 				DeviceKind:         "switch",
 				Vendor:             "Acme",
 				Model:              "X-48",
@@ -216,5 +235,27 @@ func TestGetNetworkNeighborsToolRejectsNonNetworkDevice(t *testing.T) {
 	tool := NewGetNetworkNeighborsTool(devices, &fakeNetworkTopologyReader{}, nil)
 	if _, err := tool.InvokableRun(context.Background(), `{"network_device_id":10}`); err == nil {
 		t.Fatal("expected host device to be rejected")
+	}
+}
+
+func TestNetworkCollectionIsNotReportedAsPhysicalNeighbor(t *testing.T) {
+	nodeID := uint64(42)
+	devices := &fakeNetworkDeviceReader{getByID: map[uint64]*devicemodel.Device{10: {ID: 10, OS: "network", NodeID: &nodeID}}}
+	topology := &fakeNetworkTopologyReader{nodes: map[uint64]*topologymodel.Node{88: {ID: 88, Name: "scanner", Type: "device"}}, relations: []*topologymodel.Relation{{ID: 7, SrcID: 88, DstID: 42, Type: topologymodel.RelCollectsFrom, PropsJSON: `{"source":"network_collection","scanner_host_device_id":3,"enabled":true}`}}}
+	result, err := NewGetNetworkNeighborsTool(devices, topology, nil).InvokableRun(context.Background(), `{"network_device_id":10}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Neighbors []networkNeighborRow `json:"neighbors"`
+		Sources   []struct {
+			HostID uint64 `json:"scanner_host_device_id"`
+		} `json:"collection_sources"`
+	}
+	if err := json.Unmarshal([]byte(result), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Neighbors) != 0 || len(got.Sources) != 1 || got.Sources[0].HostID != 3 {
+		t.Fatalf("collection mistaken for adjacency: %s", result)
 	}
 }

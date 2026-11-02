@@ -10,8 +10,8 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/ongridio/ongrid/internal/pkg/errs"
 	model "github.com/ongridio/ongrid/internal/manager/model/imbridge"
+	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
 
 type Repo struct {

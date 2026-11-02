@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/ongridio/ongrid/internal/manager/biz/imbridge/imformat"
 	"io"
 	"log/slog"
 	"net/http"
@@ -52,10 +53,11 @@ type AppRepo interface {
 }
 
 type Handler struct {
-	bridge *bizbridge.Bridge
-	apps   AppRepo
-	uc     *bizbridge.UC
-	log    *slog.Logger
+	interaction *bizbridge.Interaction
+	bridge      *bizbridge.Bridge
+	apps        AppRepo
+	uc          *bizbridge.UC
+	log         *slog.Logger
 }
 
 func NewHandler(bridge *bizbridge.Bridge, apps AppRepo, uc *bizbridge.UC, log *slog.Logger) *Handler {
@@ -76,6 +78,12 @@ func (h *Handler) RegisterPublic(r chi.Router) {
 // RegisterProtected adds the admin CRUD endpoints. Authenticated
 // (bearer) and gated to superusers / admins at the call site.
 func (h *Handler) RegisterProtected(r chi.Router) {
+	r.Post("/v1/im/bindings/preauthorize", h.preauthorizeBinding)
+	r.Post("/v1/im/bindings/challenges", h.startBinding)
+	r.Get("/v1/im/bindings/challenges/{id}", h.bindingChallenge)
+	r.Post("/v1/im/bindings/challenges/{id}/confirm", h.confirmBinding)
+	r.Get("/v1/im/bindings", h.bindings)
+	r.Delete("/v1/im/bindings/{id}", h.unbind)
 	r.Get("/v1/im/apps", h.listApps)
 	r.Post("/v1/im/apps", h.createApp)
 	r.Get("/v1/im/apps/{id}", h.getApp)
@@ -288,6 +296,10 @@ type feishuSender struct {
 	client *feishu.Client
 }
 
+func (s feishuSender) SplitText(text string) []string {
+	return imformat.MarkdownPages(text, func(page string) bool { return len(page) <= 3000 })
+}
+
 func (s feishuSender) SendText(ctx context.Context, receiveID, receiveIDType, text string) (string, error) {
 	return s.client.SendText(ctx, receiveID, receiveIDType, text)
 }
@@ -308,6 +320,7 @@ var _ = errors.New
 // ---- admin CRUD ----------------------------------------------------
 
 type appDTO struct {
+	ApprovalTemplateID string `json:"approval_template_id,omitempty"`
 	ID                 uint64 `json:"id"`
 	Provider           string `json:"provider"`
 	Mode               string `json:"mode"`
@@ -340,6 +353,7 @@ func toAppDTO(a *model.ImApp) appDTO {
 		VerifyToken:        a.VerifyToken,
 		EncryptKey:         a.EncryptKey,
 		AllowFrom:          a.AllowFrom,
+		ApprovalTemplateID: a.ApprovalTemplateID,
 		DefaultLocale:      a.DefaultLocale,
 		Enabled:            a.Enabled,
 		IdleTimeoutSeconds: a.IdleTimeoutSeconds,
@@ -368,30 +382,32 @@ func (h *Handler) appDTOWithStream(a *model.ImApp) appDTO {
 }
 
 type appPayload struct {
-	Provider      string `json:"provider"`
-	Mode          string `json:"mode"`
-	Name          string `json:"name"`
-	AppID         string `json:"app_id"`
-	AppSecret     string `json:"app_secret,omitempty"`
-	VerifyToken   string `json:"verify_token,omitempty"`
-	EncryptKey    string `json:"encrypt_key,omitempty"`
-	AllowFrom     string `json:"allow_from,omitempty"`
-	DefaultLocale string `json:"default_locale,omitempty"`
-	Enabled       bool   `json:"enabled"`
+	ApprovalTemplateID string `json:"approval_template_id,omitempty"`
+	Provider           string `json:"provider"`
+	Mode               string `json:"mode"`
+	Name               string `json:"name"`
+	AppID              string `json:"app_id"`
+	AppSecret          string `json:"app_secret,omitempty"`
+	VerifyToken        string `json:"verify_token,omitempty"`
+	EncryptKey         string `json:"encrypt_key,omitempty"`
+	AllowFrom          string `json:"allow_from,omitempty"`
+	DefaultLocale      string `json:"default_locale,omitempty"`
+	Enabled            bool   `json:"enabled"`
 }
 
 func (p appPayload) toInput() bizbridge.AppInput {
 	return bizbridge.AppInput{
-		Provider:      p.Provider,
-		Mode:          p.Mode,
-		Name:          p.Name,
-		AppID:         p.AppID,
-		AppSecret:     p.AppSecret,
-		VerifyToken:   p.VerifyToken,
-		EncryptKey:    p.EncryptKey,
-		AllowFrom:     p.AllowFrom,
-		DefaultLocale: p.DefaultLocale,
-		Enabled:       p.Enabled,
+		Provider:           p.Provider,
+		Mode:               p.Mode,
+		Name:               p.Name,
+		AppID:              p.AppID,
+		AppSecret:          p.AppSecret,
+		VerifyToken:        p.VerifyToken,
+		EncryptKey:         p.EncryptKey,
+		AllowFrom:          p.AllowFrom,
+		ApprovalTemplateID: p.ApprovalTemplateID,
+		DefaultLocale:      p.DefaultLocale,
+		Enabled:            p.Enabled,
 	}
 }
 

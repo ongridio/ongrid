@@ -19,7 +19,7 @@ const ToolNameRankHosts = "rank_hosts"
 // question is "which top/bottom N machines by a host metric".
 const RankHostsDescription = "Rank hosts by a closed-set host metric (cpu, mem, disk, load, composite) and return top-N or bottom-N. " +
 	"Use this for 'find the most/least loaded N machines' style questions. " +
-	"Composite is the unweighted mean of cpu_pct + mem_pct + disk_used_pct."
+	"CPU is the last 5-minute average normalized across host cores, not an instantaneous process sample. Composite is the unweighted mean of cpu_pct + mem_pct + disk_used_pct."
 
 // RankHostsSchema is the JSON Schema of the tool's argument object.
 var RankHostsSchema = json.RawMessage(`{

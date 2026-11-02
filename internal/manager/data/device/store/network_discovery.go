@@ -260,6 +260,9 @@ func (r *NetworkDiscoveryRepo) GetNetworkDeviceDetail(ctx context.Context, devic
 		return nil, err
 	}
 	detail := &biz.NetworkDeviceDetail{Profile: &profile}
+	if err := r.db.WithContext(ctx).Where("device_id = ?", deviceID).Order("if_index, id").Find(&detail.Interfaces).Error; err != nil {
+		return nil, err
+	}
 	if err == nil {
 		rows := []*model.NetworkDiscoveryCandidate{&candidate}
 		if err := r.hydrateObserverSources(ctx, rows); err != nil {
@@ -301,4 +304,81 @@ func (r *NetworkDiscoveryRepo) ReplaceNetworkInterfaces(ctx context.Context, dev
 		}
 		return tx.Create(&rows).Error
 	})
+}
+
+// UpdateNetworkPolling changes configuration without overwriting concurrent observations.
+func (r *NetworkDiscoveryRepo) UpdateNetworkPolling(ctx context.Context, p *model.DeviceNetwork) error {
+	return r.db.WithContext(ctx).Model(&model.DeviceNetwork{}).Where("device_id = ?", p.DeviceID).Updates(map[string]any{
+		"poll_scanner_host_device_id": p.PollScannerHostDeviceID, "management_address": p.ManagementAddress,
+		"poll_credential_name": p.PollCredentialName, "poll_port": p.PollPort,
+		"poll_interval_seconds": p.PollIntervalSeconds, "poll_enabled": p.PollEnabled, "last_poll_error": "",
+	}).Error
+}
+
+// A completed poll must never restore an old configuration or overwrite a newer scanner's status.
+func (r *NetworkDiscoveryRepo) UpdateNetworkPollObservation(ctx context.Context, p *model.DeviceNetwork, candidate *model.NetworkDiscoveryCandidate, interfaces []*model.NetworkInterface) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&model.DeviceNetwork{}).
+			Where("device_id = ? AND poll_enabled = ? AND poll_scanner_host_device_id = ? AND management_address = ? AND poll_credential_name = ? AND poll_port = ?", p.DeviceID, true, p.PollScannerHostDeviceID, p.ManagementAddress, p.PollCredentialName, p.PollPort).
+			Updates(map[string]any{"reachability_status": p.ReachabilityStatus, "last_poll_at": p.LastPollAt, "last_reachable_at": p.LastReachableAt, "last_poll_error": p.LastPollError})
+		if result.Error != nil {
+			return result.Error
+		}
+		// The conditional update locks the matching profile through the snapshot commit.
+		// A changed/disabled configuration discards the entire old observation.
+		if result.RowsAffected == 0 || p.LastPollError != "" {
+			return nil
+		}
+		snapshotRepo := NewNetworkDiscoveryRepo(tx)
+		if candidate != nil {
+			if err := snapshotRepo.UpdateCandidate(ctx, candidate); err != nil {
+				return err
+			}
+		}
+		return snapshotRepo.ReplaceNetworkInterfaces(ctx, p.DeviceID, interfaces)
+	})
+}
+
+// CreateSNMPDevice commits inventory, configuration, and ports as one unit.
+func (r *NetworkDiscoveryRepo) CreateSNMPDevice(ctx context.Context, seed *model.Device, profile *model.DeviceNetwork, interfaces []*model.NetworkInterface) (*biz.NetworkDeviceDetail, error) {
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "fingerprint"}, {Name: "delete_marker"}}, DoNothing: true}).Create(seed)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return errs.ErrConflict
+		}
+		profile.DeviceID = seed.ID
+		// Also rejects duplicates on MySQL variants that report a matched no-op insert.
+		result = tx.Clauses(clause.OnConflict{DoNothing: true}).Create(profile)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return errs.ErrConflict
+		}
+		for _, row := range interfaces {
+			row.DeviceID = seed.ID
+		}
+		if len(interfaces) != 0 {
+			return tx.Create(&interfaces).Error
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return r.GetNetworkDeviceDetail(ctx, seed.ID)
+}
+
+func (r *NetworkDiscoveryRepo) ListNetworkTopologyDeviceIDs(ctx context.Context, after uint64, limit int) ([]uint64, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	var ids []uint64
+	err := r.db.WithContext(ctx).Table("device_network").
+		Joins("JOIN devices ON devices.id = device_network.device_id AND devices.deleted_at IS NULL").
+		Where("device_network.device_id > ?", after).Order("device_network.device_id ASC").Limit(limit).Pluck("device_network.device_id", &ids).Error
+	return ids, err
 }

@@ -52,5 +52,11 @@
   {"method":"GET","path":"/v1/profiles/download","reason":"Streaming, multipart, or binary transport; use the console or authenticated download."},
   {"method":"POST","path":"/v1/prometheus/launch","reason":"Browser, upload, or temporary access ticket endpoint."},
   {"method":"POST","path":"/v1/reports/{id}/share","reason":"Issues enrollment, data-plane, or public-sharing credentials; use the console."},
-  {"method":"GET","path":"/v1/system-settings/{category}/{key}/reveal","reason":"Authentication, credential disclosure, and approval decisions stay in the trusted console."}
+  {"method":"GET","path":"/v1/system-settings/{category}/{key}/reveal","reason":"Authentication, credential disclosure, and approval decisions stay in the trusted console."},
+  {"method":"POST","path":"/v1/im/bindings/preauthorize","reason":"IM identity binding and approval authority must remain in the trusted administrator console."},
+  {"method":"POST","path":"/v1/im/bindings/challenges","reason":"IM identity binding and approval authority must remain in the trusted administrator console."},
+  {"method":"GET","path":"/v1/im/bindings/challenges/{id}","reason":"IM identity binding and approval authority must remain in the trusted administrator console."},
+  {"method":"POST","path":"/v1/im/bindings/challenges/{id}/confirm","reason":"IM identity binding and approval authority must remain in the trusted administrator console."},
+  {"method":"GET","path":"/v1/im/bindings","reason":"IM identity binding and approval authority must remain in the trusted administrator console."},
+  {"method":"DELETE","path":"/v1/im/bindings/{id}","reason":"IM identity binding and approval authority must remain in the trusted administrator console."}
 ]

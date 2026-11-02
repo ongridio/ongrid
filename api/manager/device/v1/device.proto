@@ -39,3 +39,31 @@ message SetHostPluginRequest {
  bool enabled = 3;
  google.protobuf.Struct spec = 4;
 }
+
+// PATCH /v1/devices/{id}/network/polling (admin).
+// POST /v1/devices/{id}/network/snmp-test (admin): read-only, never saves.
+// POST /v1/network-discovery/candidates/{id}/snmp-config (admin): verify, promote, configure.
+// POST /v1/network-discovery/candidates/{id}/snmp-test (admin): read-only, never promotes.
+message NetworkSNMPConfiguration {
+ bool enabled = 1;
+ uint32 interval_seconds = 2;
+ string credential_name = 3;
+ uint32 port = 4;
+ string address = 5;
+ uint64 scanner_host_device_id = 6;
+}
+message NetworkSNMPTestResult {
+ bool ok = 1;
+ string sys_name = 2;
+ uint32 interface_count = 3;
+ int64 duration_ms = 4;
+}
+// Additive fields on network detail; scanner_host_device_id remains discovery provenance.
+message NetworkPollingSource {
+ uint64 poll_scanner_host_device_id = 1;
+}
+
+// POST /v1/network-devices/snmp-test (admin): test a manually entered address.
+// POST /v1/network-devices (admin): verify and create directly, without a discovery candidate.
+// Both accept NetworkSNMPConfiguration. Create returns the network device detail;
+// an already managed identity returns 409 rather than replacing its configuration.

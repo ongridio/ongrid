@@ -31,6 +31,7 @@ type LLMDefaultProvider interface {
 // authenticate as a fixed "service account" user (configured at boot)
 // until per-IM-user binding lands.
 type AiopsServiceAdapter struct {
+	approvals     ApprovalRepository
 	svc           *svcaiops.Service
 	serviceUserID uint64
 	defaults      LLMDefaultProvider
@@ -40,16 +41,20 @@ type AiopsServiceAdapter struct {
 // NewAiopsAdapter wires the adapter. defaults is optional — when nil
 // the adapter uses empty RunOptions and follows the router default. Pass the LLMSettingsResolver
 // so the IM path picks up the same default the SPA picker writes.
-func NewAiopsAdapter(svc *svcaiops.Service, serviceUserID uint64, defaults LLMDefaultProvider, log *slog.Logger) *AiopsServiceAdapter {
+func NewAiopsAdapter(svc *svcaiops.Service, serviceUserID uint64, defaults LLMDefaultProvider, log *slog.Logger, options ...func(*AiopsServiceAdapter)) *AiopsServiceAdapter {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &AiopsServiceAdapter{
+	a := &AiopsServiceAdapter{
 		svc:           svc,
 		serviceUserID: serviceUserID,
 		defaults:      defaults,
 		log:           log.With(slog.String("comp", "imbridge.adapter")),
 	}
+	for _, option := range options {
+		option(a)
+	}
+	return a
 }
 
 func (a *AiopsServiceAdapter) caller() svcaiops.Caller {

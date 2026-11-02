@@ -114,6 +114,9 @@ func (t *FindOutlierHostsTool) InvokableRun(ctx context.Context, argsJSON string
 	if in.Sigma <= 0 {
 		in.Sigma = 2
 	}
+	if in.Sigma > 0 && in.Sigma < 0.5 {
+		return "", fmt.Errorf("find_outlier_hosts: sigma must be at least 0.5")
+	}
 	if in.Sigma > 10 {
 		in.Sigma = 10
 	}

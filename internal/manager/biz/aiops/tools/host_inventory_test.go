@@ -30,6 +30,10 @@ func (f *hostInventoryFixture) List(_ context.Context, filter devicebiz.ListFilt
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	if filter.Offset >= len(out) {
+		return nil, nil
+	}
+	out = out[filter.Offset:]
 	if filter.Limit > 0 && len(out) > filter.Limit {
 		out = out[:filter.Limit]
 	}

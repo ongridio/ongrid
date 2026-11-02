@@ -118,3 +118,14 @@ func TestMetricsHandler_NeededGating(t *testing.T) {
 		t.Error("Tool OnStartWithStreamInput should NOT be needed")
 	}
 }
+
+func TestMetricsHandler_FailureEnvelopeIncrementsError(t *testing.T) {
+	h := NewMetricsHandler(MetricsDeps{Registerer: prometheus.NewRegistry()})
+	h.OnEnd(context.Background(), toolInfo("query_promql"), &einotool.CallbackOutput{Response: `{"status":"failed","error":"invalid"}`})
+	if got := testutil.ToFloat64(h.collectors.toolInvocations.WithLabelValues("query_promql", "error")); got != 1 {
+		t.Fatalf("error count=%v", got)
+	}
+	if got := testutil.ToFloat64(h.collectors.toolInvocations.WithLabelValues("query_promql", "success")); got != 0 {
+		t.Fatalf("success count=%v", got)
+	}
+}

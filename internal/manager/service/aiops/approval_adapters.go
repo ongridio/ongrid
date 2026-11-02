@@ -15,6 +15,7 @@ import (
 	managerbizapproval "github.com/ongridio/ongrid/internal/manager/biz/approval"
 	managerbizmcp "github.com/ongridio/ongrid/internal/manager/biz/mcp"
 	managerbizsecret "github.com/ongridio/ongrid/internal/manager/biz/secret"
+	approvalmodel "github.com/ongridio/ongrid/internal/manager/model/approval"
 )
 
 // cloudBashPayload is the approval payload for a queued cloud_bash command.
@@ -57,7 +58,7 @@ type K8sActionPayload struct {
 // terminal timeout blob. The decorator timeout that wraps the tool is set a
 // minute longer (cbDeps.Timeout) so THIS budget is the one that fires first
 // with a clean message.
-const ApprovalWaitTimeout = 30 * time.Minute
+const ApprovalWaitTimeout = approvalmodel.AgentWaitTimeout
 
 // approvalPollInterval is how often the blocking tool re-reads the approval
 // row while waiting for the human decision.
@@ -228,16 +229,8 @@ func (s CloudBashProposer) awaitDecision(ctx context.Context, id string) (string
 				continue // transient read error — keep polling
 			}
 			switch a.Status {
-			case "executed":
-				if a.ResultJSON != nil {
-					return *a.ResultJSON, nil
-				}
-				return `{"status":"executed"}`, nil
-			case "failed":
-				if a.ResultJSON != nil {
-					return *a.ResultJSON, nil
-				}
-				return `{"status":"failed","message":"The approved command failed to run."}`, nil
+			case "executed", "failed":
+				return approvalToolResult(a)
 			case "rejected":
 				return `{"status":"rejected","message":"The user rejected this command; it was not run. Do not retry it without new instructions."}`, nil
 			}

@@ -1,3 +1,4 @@
+import { NetworkSNMPModal } from '@/components/NetworkSNMPModal';
 import { DeviceEnvironment } from '@/components/DeviceEnvironment';
 import { Card, Label, Input, Textarea, Slider } from '@/components/ui';
 import { Hint } from '@/components/ui/Tooltip';
@@ -55,14 +56,12 @@ import {
 import { ApiError } from '@/api/client';
 import {
   getDevice,
-	configureNetworkPolling,
   getNetworkDeviceDetail,
   listDeviceEdges,
   type Device,
   type NetworkDeviceDetail,
   type NetworkInterface,
 } from '@/api/devices';
-import { listSecrets, type SecretView } from '@/api/secrets';
 import { usePermissions } from '@/store/me';
 import { NodeNeighbors } from '@/components/topology/NodeNeighbors';
 import { tr as trInline, useI18n } from '@/i18n/locale';
@@ -375,6 +374,7 @@ export default function EdgeDetailPage() {
   if (isNetworkDevice && device) {
     return (
       <NetworkDevicePage
+        key={device.id}
         device={device}
         detail={networkDetail}
         error={networkDetailErr ?? edgeErr}
@@ -555,7 +555,7 @@ export default function EdgeDetailPage() {
 
 function NetworkDevicePage({
   device,
-  detail,
+  detail: initialDetail,
   error,
   deviceID,
   onBack,
@@ -570,47 +570,13 @@ function NetworkDevicePage({
 	const { isAdmin } = usePermissions();
   const location = useLocation();
   const navigate = useNavigate();
+  const [savedDetail, setSavedDetail] = useState<NetworkDeviceDetail | null>(null);
+  const detail = savedDetail ?? initialDetail;
   const [tab, setTab] = useState<NetworkTab>('overview');
   const interfaces = detail?.interfaces ?? [];
   const scanner = detail?.scanner_host_name || detail?.scanner_edge_name;
   const reachable = detail?.reachability_status === 'reachable';
 	const [pollingOpen, setPollingOpen] = useState(false);
-	const [secrets, setSecrets] = useState<SecretView[]>([]);
-	const [pollEnabled, setPollEnabled] = useState(Boolean(detail?.poll_enabled));
-	const [pollInterval, setPollInterval] = useState(detail?.poll_interval_seconds || 300);
-	const [credentialName, setCredentialName] = useState(detail?.poll_credential_name || '');
-	const [pollBusy, setPollBusy] = useState(false);
-	const [pollError, setPollError] = useState<string | null>(null);
-
-	useEffect(() => {
-		setPollEnabled(Boolean(detail?.poll_enabled));
-		setPollInterval(detail?.poll_interval_seconds || 300);
-		setCredentialName(detail?.poll_credential_name || '');
-	}, [detail?.poll_enabled, detail?.poll_interval_seconds, detail?.poll_credential_name]);
-
-	const openPolling = async () => {
-		setPollError(null);
-		try {
-			const response = await listSecrets();
-			setSecrets((response.items || []).filter((secret) => secret.type === 'snmp'));
-			setPollingOpen(true);
-		} catch (err) {
-			setPollError((err as Error).message || tr('加载 SNMP 凭证失败', 'Failed to load SNMP credentials'));
-		}
-	};
-
-	const savePolling = async () => {
-		if (!deviceID) return;
-		setPollBusy(true); setPollError(null);
-		try {
-			await configureNetworkPolling(deviceID, { enabled: pollEnabled, interval_seconds: pollInterval, credential_name: credentialName, port: detail?.poll_port || 161 });
-			setPollingOpen(false);
-			window.location.reload();
-		} catch (err) {
-			setPollError((err as Error).message || tr('保存轮询配置失败', 'Failed to save polling configuration'));
-		} finally { setPollBusy(false); }
-	};
-
   useEffect(() => {
     const requested = new URLSearchParams(location.search).get('tab');
     if (
@@ -636,7 +602,7 @@ function NetworkDevicePage({
 
   return (
     <Tabs value={tab} onValueChange={selectTab} className="contents"><main className="anim-fade flex min-w-0 flex-1 flex-col overflow-hidden">
-      <header className="app-header flex items-center justify-between border-b border-zinc-800 px-6 py-4">
+      <header className="app-header flex items-center justify-between !border-b-0 px-6 py-4">
         <div className="flex min-w-0 items-center gap-3">
           <Button variant="subtle" size="sm"
             type="button"
@@ -706,7 +672,7 @@ function NetworkDevicePage({
             <section className="overflow-hidden rounded-lg border border-zinc-800/60 bg-zinc-900/40">
               <div className="flex items-center justify-between border-b border-zinc-800/60 px-4 py-3">
                 <h2 className="text-sm font-medium text-zinc-100">{tr('SNMP 轮询', 'SNMP polling')}</h2>
-                {isAdmin && <Button variant="subtle" size="sm" type="button" onClick={() => void openPolling()} className="text-indigo-300">{tr('配置', 'Configure')}</Button>}
+                {isAdmin && <Button variant="subtle" size="sm" type="button" onClick={() => setPollingOpen(true)} className="text-indigo-300">{tr('配置', 'Configure')}</Button>}
               </div>
               <dl className="grid grid-cols-1 divide-y divide-zinc-800/50 md:grid-cols-3 md:divide-y-0">
                 <NetworkDetailField label={tr('状态', 'Status')} value={detail?.poll_enabled ? tr('已启用', 'Enabled') : tr('未启用', 'Disabled')} />
@@ -750,15 +716,7 @@ function NetworkDevicePage({
         )}
       </div>
 
-      <Modal open={pollingOpen} onClose={() => setPollingOpen(false)} title={tr('配置 SNMP 轮询', 'Configure SNMP polling')} size="sm" footer={<><Button onClick={() => setPollingOpen(false)}>{tr('取消', 'Cancel')}</Button><Button variant="primary" disabled={pollBusy} onClick={() => void savePolling()}>{pollBusy ? tr('保存中…', 'Saving…') : tr('保存', 'Save')}</Button></>}>
-        <div className="space-y-4 text-xs">
-          {pollError && <div role="alert" className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-red-300">{pollError}</div>}
-          <Label className="flex items-center gap-2 text-zinc-300"><Checkbox  checked={pollEnabled} onCheckedChange={(checkedValue) => setPollEnabled(checkedValue)} />{tr('启用定时采集', 'Enable scheduled collection')}</Label>
-          <Label className="block text-zinc-400">{tr('SNMP 凭证', 'SNMP credential')}<Select disabled={!pollEnabled} value={credentialName} onValueChange={(selectedValue) => setCredentialName(selectedValue)} className="mt-1 w-full"><option value="">{tr('选择设置中的 SNMP 凭证', 'Select an SNMP credential')}</option>{secrets.map((secret) => <option key={secret.id} value={secret.name}>{secret.name}</option>)}</Select></Label>
-          <Label className="block text-zinc-400">{tr('轮询间隔（秒）', 'Polling interval (seconds)')}<Input type="number" min={30} max={86400} value={pollInterval} onChange={(event) => setPollInterval(Number(event.target.value))} disabled={!pollEnabled} className="mt-1 w-full font-mono" /></Label>
-          {pollEnabled && secrets.length === 0 && <p className="text-zinc-500">{tr('先在 设置 → Secrets 创建 SNMP 凭证。', 'Create an SNMP credential in Settings → Secrets first.')}</p>}
-        </div>
-      </Modal></TabsContent>
+      {pollingOpen && <NetworkSNMPModal device={device} onClose={() => setPollingOpen(false)} onSaved={(updated) => { setSavedDetail(updated); setPollingOpen(false); }} />}</TabsContent>
     </main></Tabs>
   );
 }
@@ -776,14 +734,14 @@ function NetworkInterfacesTable({ interfaces }: { interfaces: NetworkInterface[]
   const { tr } = useI18n();
   return (
     <section className="overflow-x-auto rounded-lg border border-zinc-800/60 bg-zinc-900/40">
-      <table className="w-full min-w-[1100px] table-fixed text-xs">
+      <table className="w-full min-w-[1360px] table-fixed text-xs">
         <thead className="border-b border-zinc-800/60 bg-zinc-950/40 text-[11px] uppercase text-zinc-500">
           <tr>
             <th className="w-16 px-3 py-2.5 text-left">Index</th>
             <th className="w-40 px-3 py-2.5 text-left">{tr('接口', 'Interface')}</th>
             <th className="w-32 px-3 py-2.5 text-left">{tr('类型', 'Type')}</th>
             <th className="w-48 px-3 py-2.5 text-left">MAC</th>
-            <th className="px-3 py-2.5 text-left">{tr('地址', 'Addresses')}</th>
+            <th className="w-48 whitespace-nowrap px-3 py-2.5 text-left">{tr('地址', 'Addresses')}</th>
             <th className="w-24 px-3 py-2.5 text-left">Admin</th>
             <th className="w-24 px-3 py-2.5 text-left">Oper</th>
 			<th className="w-28 px-3 py-2.5 text-right">{tr('速率', 'Speed')}</th>
@@ -1345,8 +1303,8 @@ function TopologyTab({ deviceID }: { deviceID: number | null }) {
     <div className="space-y-3">
       <div className="text-xs text-zinc-500">
         {tr(
-          '本设备所在的业务拓扑邻居。在 /topology 加成员 / 依赖关系后会出现在下方。',
-          'Business topology neighbours of this device. Wire member_of / depends_on edges in /topology and they will appear below.',
+          '展示设备的采集、连接及业务关系。采集关系不代表网卡直连。',
+          'Device collection, connectivity and business relationships. Collection does not imply a direct interface connection.',
         )}
       </div>
       <NodeNeighbors nodeID={nodeID} />

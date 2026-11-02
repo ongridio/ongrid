@@ -26,7 +26,11 @@ const ExecuteK8sActionDescription = "Execute a small, audited Kubernetes write t
 
 var ExecuteK8sActionSchema = json.RawMessage(`{
   "type": "object",
-  "required": ["cluster_id", "action", "name"],
+  "required": [
+    "cluster_id",
+    "action",
+    "name"
+  ],
   "properties": {
     "cluster_id": {
       "type": "integer",
@@ -35,7 +39,15 @@ var ExecuteK8sActionSchema = json.RawMessage(`{
     },
     "action": {
       "type": "string",
-      "enum": ["rollout_restart", "scale", "delete_pod", "evict_pod", "cordon", "uncordon", "drain"],
+      "enum": [
+        "rollout_restart",
+        "scale",
+        "delete_pod",
+        "evict_pod",
+        "cordon",
+        "uncordon",
+        "drain"
+      ],
       "description": "Kubernetes write action to execute."
     },
     "kind": {
@@ -111,7 +123,85 @@ var ExecuteK8sActionSchema = json.RawMessage(`{
       "type": "string",
       "description": "Why the action is requested. Included in review/audit context."
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "enum": [
+              "scale",
+              "rollout_restart"
+            ]
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "required": [
+          "kind",
+          "namespace"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "scale"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "required": [
+          "replicas"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "enum": [
+              "delete_pod",
+              "evict_pod"
+            ]
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "required": [
+          "namespace"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "dry_run": {
+            "const": true
+          }
+        },
+        "required": [
+          "dry_run"
+        ]
+      },
+      "else": {
+        "required": [
+          "preflight_token",
+          "expected_resource_version"
+        ]
+      }
+    }
+  ]
 }`)
 
 const executeK8sActionWhenToUse = "Use ONLY when the user explicitly asks to mutate Kubernetes state: rollout restart a Deployment/StatefulSet/DaemonSet, " +

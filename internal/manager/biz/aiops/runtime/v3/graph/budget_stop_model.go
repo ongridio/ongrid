@@ -15,20 +15,28 @@ import (
 )
 
 type budgetStopModel struct {
-	inner einomodel.ToolCallingChatModel
+	inner         einomodel.ToolCallingChatModel
+	maxIterations int
 }
 
-func wrapBudgetStopModel(inner einomodel.ToolCallingChatModel) einomodel.ToolCallingChatModel {
+func wrapBudgetStopModel(inner einomodel.ToolCallingChatModel, limits ...int) einomodel.ToolCallingChatModel {
 	if inner == nil {
 		return nil
 	}
-	return &budgetStopModel{inner: inner}
+	limit := 0
+	if len(limits) > 0 {
+		limit = limits[0]
+	}
+	return &budgetStopModel{inner: inner, maxIterations: limit}
 }
 
 func (m *budgetStopModel) Generate(ctx context.Context, input []*schema.Message, opts ...einomodel.Option) (*schema.Message, error) {
 	// 回调只能标记预算拒绝；在普通推理和工具熔断总结之前终止模型调用。
 	if err := llm.BudgetRejectionFromContext(ctx); err != nil {
 		return nil, err
+	}
+	if m.shouldFinalize(input) {
+		return m.finalizeTurn(ctx, input, opts...)
 	}
 	if env, ok := latestTerminalToolBudget(input); ok {
 		return m.synthesizeAfterToolBudget(ctx, input, env.Tool, opts...)
@@ -47,6 +55,13 @@ func (m *budgetStopModel) Generate(ctx context.Context, input []*schema.Message,
 func (m *budgetStopModel) Stream(ctx context.Context, input []*schema.Message, opts ...einomodel.Option) (*schema.StreamReader[*schema.Message], error) {
 	if err := llm.BudgetRejectionFromContext(ctx); err != nil {
 		return nil, err
+	}
+	if m.shouldFinalize(input) {
+		msg, err := m.finalizeTurn(ctx, input, opts...)
+		if err != nil {
+			return nil, err
+		}
+		return schema.StreamReaderFromArray([]*schema.Message{msg}), nil
 	}
 	if env, ok := latestTerminalToolBudget(input); ok {
 		msg, err := m.synthesizeAfterToolBudget(ctx, input, env.Tool, opts...)
@@ -516,7 +531,7 @@ func (m *budgetStopModel) WithTools(tools []*schema.ToolInfo) (einomodel.ToolCal
 	if err != nil {
 		return nil, err
 	}
-	return &budgetStopModel{inner: next}, nil
+	return &budgetStopModel{inner: next, maxIterations: m.maxIterations}, nil
 }
 
 func finalAnswerAfterToolBudget(messages []*schema.Message) (*schema.Message, bool) {
@@ -584,4 +599,73 @@ func wantsEnglishResponse(messages []*schema.Message) bool {
 		}
 	}
 	return false
+}
+
+// 根据本轮历史计数，不在可复用模型上保存回合计数，避免并发会话互相消耗预算。
+func (m *budgetStopModel) shouldFinalize(input []*schema.Message) bool {
+	if m.maxIterations <= 0 {
+		return false
+	}
+	turns := 0
+	for i := len(input) - 1; i >= 0; i-- {
+		msg := input[i]
+		if msg == nil {
+			continue
+		}
+		if msg.Role == schema.User && !isSystemReminderMessage(msg.Content) {
+			break
+		}
+		if msg.Role == schema.Assistant && len(msg.ToolCalls) > 0 {
+			turns++
+		}
+	}
+	return turns >= m.maxIterations-1
+}
+
+func (m *budgetStopModel) finalizeTurn(ctx context.Context, input []*schema.Message, opts ...einomodel.Option) (*schema.Message, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := llm.BudgetRejectionFromContext(ctx); err != nil {
+		return nil, err
+	}
+	finalModel, err := m.inner.WithTools(nil)
+	if err != nil {
+		return nil, err
+	}
+	prompt := append([]*schema.Message(nil), input...)
+	instruction := "This is the final response for the current user turn. Tool investigation has reached its turn budget. Do not call tools or propose further execution in this turn. Answer the original request using evidence already collected: distinguish confirmed findings, empty results, failed queries, and unresolved questions. Do not claim the investigation is complete when evidence is insufficient. Do not infer zero utilization from unavailable samples or disabled telemetry from empty search results. Never paste raw tool JSON or internal reasoning. Follow the user's response language."
+	if len(prompt) > 0 && prompt[0] != nil && prompt[0].Role == schema.System {
+		copy := *prompt[0]
+		copy.Content += "\n\n" + instruction
+		prompt[0] = &copy
+	} else {
+		prompt = append([]*schema.Message{schema.SystemMessage(instruction)}, prompt...)
+	}
+	// 明确结束调查阶段，避免部分模型沿历史工具协议继续生成调用标记。
+	prompt = append(prompt, schema.UserMessage("<system-reminder>The investigation phase has ended. Produce the final user-facing answer now using the tool results above. Summarize the concrete observations and state which requested checks were not performed. Do not announce another query, output tool-call markup, or ask the user to read raw tool output. No further actions are available in this turn. Follow the user's response language.</system-reminder>"))
+	finalOpts := append([]einomodel.Option(nil), opts...)
+	finalOpts = append(finalOpts, einomodel.WithTools(nil), einomodel.WithToolChoice(schema.ToolChoiceForbidden))
+	msg, err := finalModel.Generate(ctx, prompt, finalOpts...)
+	if err != nil {
+		return nil, err
+	}
+	if msg != nil && len(msg.ToolCalls) == 0 && strings.TrimSpace(msg.Content) != "" && !containsToolProtocolMarkup(msg.Content) {
+		return msg, nil
+	}
+	content := "本轮已达到调查轮次上限，现有证据尚不足以形成可靠结论。已停止继续执行工具；请根据已返回的结果缩小目标或补充时间范围。"
+	if wantsEnglishResponse(input) {
+		content = "The investigation reached its turn limit, but the available evidence is insufficient for a reliable conclusion. No further tools were executed."
+	}
+	fallback := &schema.Message{Role: schema.Assistant, Content: content}
+	if msg != nil {
+		fallback.ResponseMeta = msg.ResponseMeta
+	}
+	return fallback, nil
+}
+
+// 工具协议标记不是用户可读的调查结论，不能作为成功总结展示。
+func containsToolProtocolMarkup(content string) bool {
+	lower := strings.ToLower(content)
+	return strings.Contains(lower, "<｜｜dsml｜｜") || strings.Contains(lower, "<|dsml|") || strings.Contains(lower, "<tool_call>") || strings.Contains(lower, "<function_calls>")
 }

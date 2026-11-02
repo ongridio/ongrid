@@ -3,8 +3,10 @@ package builtin
 import (
 	"context"
 	"encoding/json"
+	"os/exec"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/ongridio/ongrid/internal/skill"
 )
@@ -73,5 +75,41 @@ func TestReadJournal_Execute_InvalidParams(t *testing.T) {
 	if _, err := (ReadJournal{}).Execute(context.Background(),
 		json.RawMessage(`{"lines":"not-a-number"}`)); err == nil {
 		t.Fatal("expected error for wrong type on lines")
+	}
+}
+
+func TestJournalSinceNormalizesDuration(t *testing.T) {
+	for input, want := range map[string]string{"": "600 seconds ago", "10m": "600 seconds ago", "1h30m": "5400 seconds ago", "500ms": "1 seconds ago", " 1m ": "60 seconds ago", "yesterday": "yesterday", "2026-10-31 10:00:00": "2026-10-31 10:00:00"} {
+		got, err := journalSince(input)
+		if err != nil || got != want {
+			t.Errorf("%q => %q, %v; want %q", input, got, err, want)
+		}
+	}
+	for _, input := range []string{"0s", "-1m"} {
+		if _, err := journalSince(input); err == nil {
+			t.Errorf("accepted %s", input)
+		}
+	}
+}
+
+func TestJournalSinceAcceptedByLinuxJournalctl(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux journalctl integration")
+	}
+	binary, err := exec.LookPath("journalctl")
+	if err != nil {
+		t.Skip("journalctl not installed")
+	}
+	for _, input := range []string{"", "10m", "1h30m"} {
+		since, err := journalSince(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		out, err := exec.CommandContext(ctx, binary, "--since", since, "-n", "0", "--no-pager").CombinedOutput()
+		cancel()
+		if err != nil {
+			t.Fatalf("since=%q: %v: %s", since, err, out)
+		}
 	}
 }

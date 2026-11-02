@@ -82,9 +82,12 @@ func (r *Repo) CountPending(ctx context.Context) (int64, error) {
 // transitions a row still in `pending` (optimistic guard against double
 // decisions). Returns ErrNotFound when no pending row matched.
 func (r *Repo) Decide(ctx context.Context, id string, fields map[string]any) error {
-	res := dbx.WithContext(ctx, r.db).Model(&model.Approval{}).
-		Where("id = ? AND status = ?", id, model.StatusPending).
-		Updates(fields)
+	q := dbx.WithContext(ctx, r.db).Model(&model.Approval{}).Where("id = ? AND status = ?", id, model.StatusPending)
+	if fields["status"] == model.StatusApproved {
+		q = q.Where("execution_owner = ? OR execution_owner IS NULL OR execution_lease_until > ?", "", time.Now().UTC()).
+			Where("NOT ("+expiredAgentWaitSQL+")", model.SourceAgent, "", blockingAgentKinds(), time.Now().UTC().Add(-model.AgentWaitTimeout))
+	}
+	res := q.Updates(fields)
 	if res.Error != nil {
 		return res.Error
 	}

@@ -49,7 +49,7 @@ func TestMessageContent_LargeReplyFallsBackToText(t *testing.T) {
 	if err := json.Unmarshal(raw, &content); err != nil {
 		t.Fatalf("decode content: %v", err)
 	}
-	if content["text"] != input {
+	if content["text"] != strings.TrimSpace(input) {
 		t.Fatal("text fallback changed content")
 	}
 }
@@ -113,5 +113,19 @@ func TestClientProbeValidatesCredentialsWithoutSending(t *testing.T) {
 
 	if err := NewClient("app", "secret", WithBaseURL(srv.URL), WithHTTPClient(srv.Client())).Probe(context.Background()); err != nil {
 		t.Fatalf("Probe: %v", err)
+	}
+}
+
+func TestMessageContent_LongRichTextFallbackIsReadable(t *testing.T) {
+	kind, raw, err := messageContent(strings.Repeat("**diagnostic**\n\n", 3000))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatal(err)
+	}
+	if kind != "text" || strings.Contains(body["text"], "**") || strings.Count(body["text"], "diagnostic") != 3000 {
+		t.Fatal("fallback lost content or kept markup")
 	}
 }

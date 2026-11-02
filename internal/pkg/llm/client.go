@@ -114,12 +114,13 @@ type Usage struct {
 // "zhipu", "gemini"). Empty → router uses the default provider. The
 // non-multi-provider single-client path ignores Provider.
 type ChatReq struct {
-	Model       string
-	Provider    string
-	Messages    []Message
-	Tools       []ToolSchema
-	Temperature float32
-	UserID      uint64 // optional; used for budget scoping + logging only
+	Model        string
+	Provider     string
+	Messages     []Message
+	Tools        []ToolSchema
+	DisableTools bool // Summary-only turns forbid provider tool calls, including tools inferred from history.
+	Temperature  float32
+	UserID       uint64 // optional; used for budget scoping + logging only
 }
 
 // ChatResp is the output of Client.Chat.
@@ -599,10 +600,16 @@ func (c *openaiClient) toOpenAIReq(req ChatReq, model string) (openai.ChatComple
 		}
 	}
 
+	var toolChoice any // SDK uses a union: string or named-tool object.
+	if req.DisableTools {
+		tools = nil
+		toolChoice = "none"
+	}
 	return openai.ChatCompletionRequest{
 		Model:       model,
 		Messages:    msgs,
 		Tools:       tools,
+		ToolChoice:  toolChoice,
 		Temperature: temp,
 	}, nil
 }

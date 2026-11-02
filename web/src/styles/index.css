@@ -74,6 +74,7 @@
    via tailwind's color extension (`rgb(var(--token) / <alpha-value>)`).
    Light/branded themes can later override `:root.<theme>` selectors. */
 :root.dark {
+  --chart-grid: 39 39 42;
   /* Background palette tinted ~3% toward the brand purple (#8C6DF0)
      so the canvas feels related to the logo without going purple-loud.
      Pure zinc-950 read as "anonymous black"; this reads as "Ongrid". */
@@ -104,6 +105,7 @@
    highlights — the primary CTA uses a neutral dark fill (see remap
    below) so the UI doesn't feel like "purple soup". */
 :root.light {
+  --chart-grid: 228 228 231;
   --bg: 244 245 248;          /* GitHub-ish cool off-white */
   --card: 255 255 255;        /* pure white */
   --card-soft: 250 250 252 / 0.85;

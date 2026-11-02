@@ -38,6 +38,7 @@ export type IMApp = {
   // Empty = "auto" (LLM mirrors the user). "en" / "zh" pins the reply
   // language regardless of persona — bridge appends a directive to every
   // inbound user message. Mirrors the RCA-side locale knob.
+  approval_template_id?: string;
   default_locale?: '' | 'en' | 'zh';
   enabled: boolean;
   idle_timeout_seconds: number;
@@ -59,6 +60,7 @@ export type IMAppPayload = {
   verify_token?: string;
   encrypt_key?: string;
   allow_from?: string;
+  approval_template_id?: string;
   default_locale?: '' | 'en' | 'zh';
   enabled: boolean;
 };

@@ -568,6 +568,7 @@ func (rt *Runtime) runWorker(ctx context.Context, agentDef *Agent, sessID, userT
 	}
 	invokeOpts = append(invokeOpts, compose.WithToolsNodeOption(
 		compose.WithToolOption(graph.WithInvokeOpts(
+			basetool.WithUserID(session.UserID),
 			basetool.WithUserText(userText),
 			basetool.WithHostWritePermission(basetool.HostWriteAllowedFromContext(ctx)),
 		)),

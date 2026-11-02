@@ -76,6 +76,16 @@ message ToolResult {
 }
 
 // ChatMessage 一条消息，兼容 user / assistant / tool / system。
+message ToolExecution {
+    string name = 1;
+    string status = 2;
+    string error = 3;
+    int64 duration_ms = 4;
+    string arguments_raw = 5;
+    string result_raw = 6;
+    uint64 device_id = 7;
+}
+
 message ChatMessage {
     uint64 id = 1 [json_name = "id"];
     uint64 session_id = 2 [json_name = "session_id"];
@@ -88,6 +98,7 @@ message ChatMessage {
     uint32 prompt_tokens = 8 [json_name = "prompt_tokens"];
     uint32 completion_tokens = 9 [json_name = "completion_tokens"];
     google.protobuf.Timestamp created_at = 10 [json_name = "created_at"];
+    ToolExecution tool_call = 11 [json_name = "tool_call"];
 }
 
 // TokenUsage 单次 agent 循环总 token 消耗（跨多轮 LLM 调用累加）。
