@@ -163,3 +163,6 @@ both alias directions.
 The upgrade tests also freeze update timestamps to check that MySQL no-change
 updates to node bindings and Edge registration, name and version succeed, while
 updates to missing records still fail.
+`TestSQLiteRegistrationDuringHeartbeat` uses two connections to verify that
+registration acquires the SQLite writer lock before reading, completes without
+a stale-snapshot failure, and releases the lock for the pending heartbeat.

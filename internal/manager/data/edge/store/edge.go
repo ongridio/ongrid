@@ -28,8 +28,15 @@ var _ biz.Repo = (*Repo)(nil)
 
 func (r *Repo) WithLockedEdge(ctx context.Context, edgeID uint64, fn func(context.Context) error) error {
 	return dbx.Transaction(ctx, r.db, func(ctx context.Context) error {
+		tx := dbx.WithContext(ctx, r.db)
+		if tx.Dialector.Name() == "sqlite" {
+			// Acquire the writer lock before reading; SQLite ignores FOR UPDATE.
+			if err := tx.Model(&model.Edge{}).Where("id = ?", edgeID).UpdateColumn("id", gorm.Expr("id")).Error; err != nil {
+				return err
+			}
+		}
 		var edge model.Edge
-		if err := dbx.WithContext(ctx, r.db).Clauses(clause.Locking{Strength: "UPDATE"}).First(&edge, edgeID).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&edge, edgeID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return errs.ErrNotFound
 			}
