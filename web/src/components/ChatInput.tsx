@@ -1,17 +1,13 @@
 import { Button, Label, Textarea } from '@/components/ui';
-import { Select } from '@/components/ui/Select';
-import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/Popover';
+import { ModelDropdown, WebSearchToggle } from '@/components/ChatModelControls';
 import {
   useEffect,
-  useMemo,
   useRef,
   useState,
   type KeyboardEvent,
 } from 'react';
-import { Link } from 'react-router-dom';
 import {
   Send,
-  Globe,
   // Paperclip / Puzzle removed when the home toolbar's attachments +
   // plugins picker was parked — see todo/home-chat-toolbar.md.
   Mail,
@@ -34,8 +30,8 @@ import {
   type MentionItem,
   type MentionType,
   type LLMProvider,
+  type ModelSelection,
 } from '@/api/chat';
-import { ModelIcon } from '@/components/icons/Provider';
 import { Modal } from '@/components/Modal';
 import { tr as trInline, useI18n } from '@/i18n/locale';
 
@@ -50,10 +46,7 @@ export type SubmitPayload = {
 
 type PendingAttachment = { file: File; previewURL: string };
 
-// ModelSelection is the per-session (provider, model) pair. The host
-// page persists this into chat session state; ChatInput renders it
-// as a pill above the toolbar.
-export type ModelSelection = { provider: string; model: string };
+export type { ModelSelection } from '@/api/chat';
 
 type Props = {
   value?: string;
@@ -136,9 +129,6 @@ export function ChatInput({
   // so on selection we can replace just the `@<term>` slice with the
   // structured token. -1 = popover closed.
   const mentionAnchorRef = useRef<number>(-1);
-
-  // model dropdown state
-  const [modelMenuOpen, setModelMenuOpen] = useState(false);
 
   // auto-grow
   useEffect(() => {
@@ -362,18 +352,6 @@ export function ChatInput({
   };
 
   const empty = value.trim().length === 0 && attachments.length === 0;
-  const hasModels = (providers?.length ?? 0) > 0;
-  // Resolve the active model slug + the provider id that owns it. The
-  // dropdown shows [providerIcon] modelSlug — no provider label text,
-  // because the icon already implies the provider. When nothing is
-  // selected we still show an actionable label ("选择模型" / "未配置模型")
-  // so the affordance is never silently dead.
-  const currentSelection = useMemo(() => {
-    if (!hasModels) return null;
-    if (!selectedModel) return null;
-    return selectedModel;
-  }, [hasModels, selectedModel]);
-
   return (
     <div ref={containerRef} className={cn('relative w-full', className)}>
       {/* Mention chips strip: visible only when there are chips. */}
@@ -493,14 +471,9 @@ export function ChatInput({
         <div className="flex items-center justify-between gap-2 px-3 pb-3 pt-1">
           <div className="flex items-center gap-1.5">
             <ModelDropdown
-              open={modelMenuOpen}
-              setOpen={setModelMenuOpen}
               providers={providers ?? []}
-              selected={currentSelection}
-              onPick={(m) => {
-                onModelChange?.(m);
-                setModelMenuOpen(false);
-              }}
+              selected={selectedModel ?? null}
+              onPick={onModelChange}
             />
             <WebSearchToggle
               enabled={!!webSearchEnabled}
@@ -718,70 +691,6 @@ function MentionIcon({ type }: { type: MentionType }) {
     case 'file':
       return <FileText size={12} className={cls} />;
   }
-}
-
-function ModelDropdown({
-  open,
-  setOpen,
-  providers,
-  selected,
-  onPick,
-}: {
-  open: boolean;
-  setOpen: (v: boolean) => void;
-  providers: LLMProvider[];
-  selected: ModelSelection | null;
-  onPick: (m: ModelSelection) => void;
-}) {
-  const { tr } = useI18n();
-  const options = providers.flatMap((provider) => (provider.models.length > 0 ? provider.models : provider.model ? [provider.model] : []).map((model) => ({
-    value: JSON.stringify([provider.id, model]), label: model,
-    icon: <ModelIcon model={model} provider={provider.id} size={15} />,
-  })));
-  if (options.length === 0) return <Popover open={open} onOpenChange={setOpen}>
-    <PopoverTrigger className="rounded-md px-2.5 py-1.5 text-xs text-text-muted">{tr('未配置模型', 'No model configured')}</PopoverTrigger>
-    <PopoverContent className="w-72 text-xs" aria-label={tr('配置模型', 'Configure model')}>
-      <p>{tr('还未配置任何可用模型。', 'No usable model configured yet.')}</p>
-      <Link to="/settings/integrations" onClick={() => setOpen(false)} className="mt-2 block text-indigo-500">{tr('设置 → 集成 → LLM 模型', 'Settings → Integrations → LLM models')}</Link>
-    </PopoverContent>
-  </Popover>;
-  return <Select
-    open={open} onOpenChange={setOpen} label={tr('选择模型', 'Select model')}
-    value={selected ? JSON.stringify([selected.provider, selected.model]) : options[0].value}
-    options={options} searchable variant="ghost" className="h-8 w-auto max-w-xs"
-    onValueChange={(value) => {
-      const [provider, model] = JSON.parse(value) as [string, string];
-      onPick({ provider, model });
-    }}
-  />;
-}
-
-// WebSearchToggle is the chat toolbar's globe icon. Click flips the
-// shared state in the parent; when on, the chat send payload tells the
-// agent to expose `web_search` to the LLM. Visual states:
-//   off → dim icon, no ring
-//   on  → emerald-tinted icon, emerald ring around the button
-function WebSearchToggle({
-  enabled,
-  onToggle,
-}: {
-  enabled: boolean;
-  onToggle: (next: boolean) => void;
-}) {
-  const { tr } = useI18n();
-  return (
-    <Button
-      variant="plain" size="sm" role="switch" aria-checked={enabled}
-      aria-label={enabled ? tr('关闭联网搜索', 'Disable web search') : tr('开启联网搜索', 'Enable web search')}
-      title={enabled ? tr('关闭联网搜索', 'Disable web search') : tr('开启联网搜索', 'Enable web search')}
-      onClick={() => onToggle(!enabled)}
-      className={cn('w-7 p-0', enabled
-        ? 'bg-emerald-500/10 text-emerald-600 ring-1 ring-emerald-500/40 hover:bg-emerald-500/20 dark:text-emerald-400'
-        : 'text-text-muted hover:bg-muted')}
-    >
-      <Globe size={15} />
-    </Button>
-  );
 }
 
 function SkillIcon({

@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, Boxes, Server } from 'lucide-react';
@@ -42,6 +43,12 @@ export default function ApmCapturePage() {
   }, [kind, id, valid, refresh]);
   const name = resource?.kind === 'devices' ? resource.device.name : resource?.cluster.name;
   const ResourceIcon = kind === 'kubernetes' ? Boxes : Server;
+  useAssistantPage('应用采集', 'Application capture', {
+    resource_kind: kind,
+    resource_id: id,
+    resource_name: name,
+  });
+
   return <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
     <PageHeader title={name ? tr(`配置采集 · ${name}`, `Configure capture · ${name}`) : tr('配置采集', 'Configure capture')}
       subtitle={<span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1"><span className="inline-flex items-center gap-1.5"><ResourceIcon size={13} aria-hidden="true" />{kind === 'kubernetes' ? tr('Kubernetes 集群', 'Kubernetes cluster') : tr('普通设备', 'Host')}</span>{resource?.kind === 'kubernetes' && resource.cluster.version && <span>{resource.cluster.version}</span>}</span>}

@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { IMBindings } from './IMBindings';
 import { Input, Label } from '@/components/ui';
 import { Hint } from '@/components/ui/Tooltip';
@@ -123,6 +124,12 @@ export default function SettingsChannels() {
       setTestingID(null);
     }
   }, []);
+
+  useAssistantPage('IM 渠道', 'IM channels', {
+    configured_count: items.length,
+    providers: configuredProviders.join(", "),
+    loading,
+  });
 
   return (
     <>

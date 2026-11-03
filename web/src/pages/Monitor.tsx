@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { TimeRangePicker } from '@/components/ui/TimeRangePicker';
 import { absoluteWindow } from '@/lib/telemetryContext';
 import { FilterField } from '@/components/ui/FilterField';
@@ -497,6 +498,15 @@ export default function MonitorPage() {
     },
     [grafanaBase, fromMs, toMs, orgId, dashboardUid],
   );
+
+  useAssistantPage('监控', 'Monitoring', {
+    range,
+    start: selectedStart,
+    end: selectedEnd,
+    role: roleFilter,
+    device: deviceFilter,
+    panel_count: panels.length,
+  });
 
   return (
     <>{dialog}<main className="anim-fade flex flex-1 flex-col overflow-hidden">

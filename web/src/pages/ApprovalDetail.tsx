@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ShieldCheck } from 'lucide-react';
@@ -76,6 +77,13 @@ export default function ApprovalDetailPage() {
     executed: tr('已执行', 'Executed'), rejected: tr('已拒绝', 'Rejected'),
     failed: tr('执行失败或请求已失效', 'Execution failed or request invalidated'),
   };
+  useAssistantPage('审批详情', 'Approval details', {
+    approval_id: id,
+    kind: item?.kind,
+    status: item?.status,
+    loading,
+  });
+
   if (role === 'admin' && item?.kind === 'external_mcp') return <ApprovalConfirmationPage key={id} />;
   return <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
     {dialog}

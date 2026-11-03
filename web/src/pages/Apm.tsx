@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { AutoAPMManagement } from '@/components/autoapm/AutoAPMManagement';
 import { FilterField } from '@/components/ui/FilterField';
 import { Label, Input } from '@/components/ui';
@@ -593,6 +594,14 @@ export default function ApmPage() {
       </div>
     )
   );
+
+  useAssistantPage('应用性能', 'Application performance', {
+    tab,
+    period,
+    service: context.get('service_name') || context.get('service'),
+    environment: context.get('environment'),
+    instance_count: instances.length,
+  });
 
   return (
     <Tabs value={operation && ['overview', 'operations'].includes(tab) ? 'operations' : tab} className="contents"><div className="apm-page flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">

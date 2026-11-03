@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, Download, FileCode2, Loader2 } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
@@ -41,6 +42,12 @@ export default function PacketArtifactDetailPage() {
       setDownloading(false);
     }
   }, [capture]);
+
+  useAssistantPage('抓包产物', 'Packet artifact', {
+    artifact_id: artifactID,
+    state: capture?.state,
+    loading,
+  });
 
   return (
     <main className="anim-fade flex min-w-0 flex-1 flex-col overflow-hidden">

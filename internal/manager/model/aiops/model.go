@@ -72,6 +72,8 @@ type Session struct {
 	// has not been classified; migrations must not guess v2 versus v3.
 	RuntimeVersion string `gorm:"size:16;column:runtime_version"`
 
+	PageContext *PageContext `gorm:"serializer:json;type:text;column:page_context"`
+
 	APMSource *APMSourceScope `gorm:"serializer:json;type:text;column:apm_source"`
 
 	ID        string  `gorm:"primaryKey;type:char(36);column:id"`

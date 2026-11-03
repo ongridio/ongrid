@@ -14,6 +14,7 @@ import (
 	aiopstoolsdec "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/decorators"
 	managerserveraiops "github.com/ongridio/ongrid/internal/manager/server/aiops"
 	managersvcaiops "github.com/ongridio/ongrid/internal/manager/service/aiops"
+	managersvcalert "github.com/ongridio/ongrid/internal/manager/service/alert"
 	"github.com/ongridio/ongrid/internal/pkg/config"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -146,6 +147,10 @@ func bootstrapRuntime(rootCtx context.Context, cfg *config.Config, log *slog.Log
 
 	aiopsSvc := managersvcaiops.New(aiopsRuntime, aiops.aiopsRepo, aiops.aiopsUsage, log)
 	aiopsSvc.SetMutatingProposalRepo(aiops.mutatingProposalRepo)
+	aiopsSvc.SetPageIncidentCheck(func(ctx context.Context, caller managersvcaiops.Caller, id uint64) error {
+		_, err := aiops.alertSvc.GetIncident(ctx, managersvcalert.Caller{UserID: caller.UserID, Role: caller.Role}, id)
+		return err
+	})
 	aiopsSvc.WithAPMSourceResolver(telemetry.apmService)
 	aiopsSvc.SetAttachmentRepo(aiops.aiopsRepo)
 	aiopsSvc.SetModelCatalog(models.llmRouter)

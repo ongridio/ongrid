@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { FilterField } from '@/components/ui/FilterField';
 import { Label, Input } from '@/components/ui';
 import { useDialogs } from '@/components/ui/useDialogs';
@@ -891,6 +892,16 @@ export function KubernetesClusterDetailPage({ kubernetesClusterID }: { kubernete
           `${cluster.mode} · ${cluster.status} · last sync ${relativeTime(clusterSyncTime(cluster))}`,
         )
     : tr('加载中…', 'Loading…');
+
+  useAssistantPage('Kubernetes 集群', 'Kubernetes cluster', {
+    cluster_id: clusterId,
+    tab: activeTab,
+    namespace: resourceNamespace,
+    issues_only: resourceIssueOnly,
+    pod_count: pods.length,
+    warning_events: warningEventTotal,
+    loading,
+  });
 
   return (
     <>{dialog}<Tabs value={activeTab} onValueChange={(next) => openResourceTab(next, { scroll: true, resetFilters: true })} className="contents"><>

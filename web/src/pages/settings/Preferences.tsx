@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { Button } from '@/components/ui';
 import { Hint } from '@/components/ui/Tooltip';
 import { Check, Gauge, Globe, Monitor, Moon, Palette, Sun } from 'lucide-react';
@@ -17,6 +18,12 @@ export default function SettingsPreferences() {
   const setAccent = useTheme((s) => s.setAccent);
   const { tr, locale, setLocale } = useI18n();
   const { preference: themePref, setPreference: setTheme } = useThemeMode();
+  useAssistantPage('偏好设置', 'Preferences', {
+    locale,
+    theme: themePref,
+    accent: accentId,
+  });
+
   return (
     <div className="space-y-4">
       {/* Language */}

@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { Button } from '@/components/ui';
 import { Hint } from '@/components/ui/Tooltip';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -314,6 +315,14 @@ export default function DashboardPage() {
   const lastRefreshedLabel = lastRefreshedAt
     ? formatRefreshedAgo(now.getTime() - lastRefreshedAt.getTime())
     : tr('尚未刷新', 'not refreshed yet');
+
+  useAssistantPage('总览', 'Dashboard', {
+    device_count: devices.length,
+    open_incidents: activeIncidentsTotal,
+    sample_incident_ids: activeIncidents.slice(0, 8).map(item => item.id).join(', '),
+    refreshed_at: lastRefreshedAt?.toISOString(),
+    loading: initialLoading,
+  });
 
   return (
     <main className="anim-fade flex flex-1 flex-col overflow-hidden">

@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { Input, Textarea, Label } from '@/components/ui';
 import { Hint } from '@/components/ui/Tooltip';
 import { Select } from '@/components/ui/Select';
@@ -258,6 +259,12 @@ export default function SettingsOrgs() {
       setToast({ kind: 'err', text: errMsg(e) });
     }
   };
+
+  useAssistantPage('组织管理', 'Organizations', {
+    organization_count: orgs.length,
+    selected_org_id: selectedId,
+    member_count: members.length,
+  });
 
   return (
     <div className="space-y-4 p-6">

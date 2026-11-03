@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { usePermissions } from '@/store/me';
 import { Label, Input, Textarea } from '@/components/ui';
 import { Hint } from '@/components/ui/Tooltip';
@@ -111,6 +112,14 @@ export default function AgentsPage() {
       return a.name.localeCompare(b.name);
     });
   }, [items, query]);
+
+  useAssistantPage('助理列表', 'Agents', {
+    agent_count: items.length,
+    visible_count: filtered.length,
+    visible_agents: filtered.slice(0, 6).map(agent => agent.name).join(', '),
+    selected_agent: viewing?.name,
+    loading,
+  });
 
   return (
     <main className="anim-fade flex flex-1 flex-col overflow-hidden">

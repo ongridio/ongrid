@@ -311,11 +311,12 @@ func operationArtifactDTOs(items []*model.OperationArtifact) []operationArtifact
 }
 
 type createSessionReq struct {
-	APMSource *model.APMSourceTarget `json:"apm_source,omitempty"`
-	Title     string                 `json:"title"`
-	Scope     []string               `json:"scope,omitempty"`
-	Provider  string                 `json:"provider,omitempty"`
-	Model     string                 `json:"model,omitempty"`
+	PageContext *model.PageContext     `json:"page_context,omitempty"`
+	APMSource   *model.APMSourceTarget `json:"apm_source,omitempty"`
+	Title       string                 `json:"title"`
+	Scope       []string               `json:"scope,omitempty"`
+	Provider    string                 `json:"provider,omitempty"`
+	Model       string                 `json:"model,omitempty"`
 	// RelatedIncidentID links the session back to an alert incident.
 	// Set by the IncidentDetail "深入诊断" button so the per-incident
 	// agent-timeline panel can list this session under the incident.
@@ -327,6 +328,7 @@ type createSessionReq struct {
 }
 
 type sessionDTO struct {
+	PageContext       *model.PageContext    `json:"page_context,omitempty"`
 	RuntimeVersion    string                `json:"runtime_version,omitempty"`
 	APMSource         *model.APMSourceScope `json:"apm_source,omitempty"`
 	ID                string                `json:"id"`
@@ -515,6 +517,7 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, errs.ErrUnauthorized)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxMessageBodyBytes)
 	var req createSessionReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, errors.Join(errs.ErrInvalid, err))
@@ -523,6 +526,7 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 	s, err := h.svc.CreateSession(r.Context(), caller, svc.CreateSessionInput{
 		Title:             req.Title,
 		APMSource:         req.APMSource,
+		PageContext:       req.PageContext,
 		Scope:             req.Scope,
 		RelatedIncidentID: req.RelatedIncidentID,
 		AgentID:           req.AgentID,
@@ -839,10 +843,12 @@ func (h *Handler) postMessageStream(w http.ResponseWriter, r *http.Request) {
 
 	reply, err := h.svc.PostMessageStreamWithOpts(r.Context(), caller, id, req.Content, emit, opts)
 	if err != nil {
-		writeSSE(w, flusher, "error", map[string]string{
-			"error": err.Error(),
-			"code":  errCode(err),
-		})
+		payload := map[string]any{"error": err.Error(), "code": errCode(err)}
+		var rejected *svc.TurnRejectedError
+		if errors.As(err, &rejected) {
+			payload["turn_rejected"] = true
+		}
+		writeSSE(w, flusher, "error", payload)
 		return
 	}
 	// Belt-and-suspenders: if the agent returned without emitting a
@@ -1263,6 +1269,7 @@ func toSessionDTO(s *model.Session) sessionDTO {
 		UserID:            s.UserID,
 		Title:             s.Title,
 		APMSource:         s.APMSource,
+		PageContext:       s.PageContext,
 		RelatedIncidentID: s.RelatedIncidentID,
 		AgentID:           s.AgentID,
 		Provider:          s.Provider,

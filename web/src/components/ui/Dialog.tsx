@@ -7,6 +7,12 @@ export const DialogTrigger = Primitive.Trigger;
 export const DialogTitle = Primitive.Title;
 export const DialogDescription = Primitive.Description;
 export const DialogClose = Primitive.Close;
-export const DialogContent = forwardRef<HTMLDivElement, Omit<Primitive.Popup.Props, 'className'> & { className?: string; placement?: 'center' | 'right' }>(function DialogContent({ className, placement = 'center', ...props }, ref) {
-  return <Primitive.Portal><Primitive.Backdrop className="og-dialog-overlay" /><Primitive.Popup ref={ref} data-placement={placement} className={cn('og-dialog-content', className)} {...props} /></Primitive.Portal>;
+export const DialogContent = forwardRef<HTMLDivElement, Omit<Primitive.Popup.Props, 'className'> & { className?: string; placement?: 'center' | 'right' | 'assistant' }>(function DialogContent({ className, placement = 'center', children, ...props }, ref) {
+  const assistant = placement === 'assistant';
+  return <Primitive.Portal>
+    <Primitive.Backdrop className={cn('og-dialog-overlay', assistant && 'bg-black/25 min-[601px]:hidden')} />
+    <Primitive.Popup ref={ref} data-placement={placement} className={cn('og-dialog-content', className)} {...props}>
+      {assistant ? <div className="og-assistant-content">{children}</div> : children}
+    </Primitive.Popup>
+  </Primitive.Portal>;
 });

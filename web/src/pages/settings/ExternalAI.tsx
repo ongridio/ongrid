@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { BookOpen, Copy, ExternalLink, KeyRound, Plus, RefreshCw } from 'lucide-react';
 import { Button, Card, Checkbox, Chip, EmptyStateCard, Input, Label, PaginationFooter, Select } from '@/components/ui';
@@ -105,6 +106,12 @@ export default function ExternalAIPage() {
   const allScopesSelected = availableScopes.length > 0 && availableScopes.every((scope) => scopes.includes(scope));
   const endpoint = data?.endpoint.startsWith('/') ? `${window.location.origin}${data.endpoint}` : data?.endpoint ?? '';
   const workbuddyConfig = JSON.stringify({ mcpServers: { ongrid: { type: 'streamableHttp', url: endpoint, headers: { Authorization: 'Bearer <Token>' } } } }, null, 2);
+
+  useAssistantPage('外部 AI 接入', 'External AI', {
+    token_count: data?.total,
+    page,
+    loading,
+  });
 
   return <div className="min-w-0 space-y-5 text-xs text-text">
     {dialog}

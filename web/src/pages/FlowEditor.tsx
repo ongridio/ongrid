@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { Button, Input, Textarea, Label } from '@/components/ui';
 import { Hint } from '@/components/ui/Tooltip';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/Popover';
@@ -670,6 +671,14 @@ export default function FlowEditorPage() {
   useEffect(() => {
     if (showRuns) void loadRuns();
   }, [showRuns, loadRuns]);
+
+  useAssistantPage('工作流编辑器', 'Workflow editor', {
+    workflow_id: flowID,
+    node_count: nodes.length,
+    edge_count: edges.length,
+    selected_node: selectedID,
+    has_unsaved_changes: dirty,
+  });
 
   if (!flow) {
     return (

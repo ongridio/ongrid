@@ -44,14 +44,15 @@ type APMSourceResolver interface {
 }
 
 type Service struct {
-	apmSource    APMSourceResolver
-	runtime      RuntimeHandler
-	sessions     biz.SessionRepo
-	attachments  biz.AttachmentRepo
-	modelCatalog modelCapabilityCatalog
-	proposals    biz.MutatingProposalRepo
-	usage        *biz.UsageUsecase
-	log          *slog.Logger
+	checkPageIncident func(context.Context, Caller, uint64) error
+	apmSource         APMSourceResolver
+	runtime           RuntimeHandler
+	sessions          biz.SessionRepo
+	attachments       biz.AttachmentRepo
+	modelCatalog      modelCapabilityCatalog
+	proposals         biz.MutatingProposalRepo
+	usage             *biz.UsageUsecase
+	log               *slog.Logger
 
 	// cancels maps an in-flight turn's session id to its cancel func, so an
 	// explicit user "stop" (Esc) can interrupt the turn. This is needed
@@ -172,7 +173,8 @@ func (s *Service) ListMutatingProposals(ctx context.Context, caller Caller, f bi
 // the signature stays additive (callers don't break when a new field
 // like RelatedIncidentID lands).
 type CreateSessionInput struct {
-	APMSource *model.APMSourceTarget
+	PageContext *model.PageContext
+	APMSource   *model.APMSourceTarget
 
 	Title             string
 	Scope             []string
@@ -191,8 +193,35 @@ type CreateSessionInput struct {
 // WithAPMSourceResolver is configured at startup.
 func (s *Service) WithAPMSourceResolver(resolver APMSourceResolver) { s.apmSource = resolver }
 
+func (s *Service) SetPageIncidentCheck(check func(context.Context, Caller, uint64) error) {
+	s.checkPageIncident = check
+}
+
+func (s *Service) validatePageIncident(ctx context.Context, caller Caller, page *model.PageContext, related *uint64) error {
+	if page == nil {
+		return nil
+	}
+	id, ok := page.Fields["incident_id"]
+	if !ok {
+		return nil
+	}
+	if related == nil || *related == 0 || id != fmt.Sprint(*related) {
+		return fmt.Errorf("%w: inconsistent incident reference", errs.ErrInvalid)
+	}
+	if s.checkPageIncident == nil {
+		return errs.ErrNotWiredYet
+	}
+	return s.checkPageIncident(ctx, caller, *related)
+}
+
 // CreateSession opens a new chat session for the caller.
 func (s *Service) CreateSession(ctx context.Context, caller Caller, in CreateSessionInput) (*model.Session, error) {
+	if err := in.PageContext.Validate(); err != nil {
+		return nil, fmt.Errorf("%w: %v", errs.ErrInvalid, err)
+	}
+	if err := s.validatePageIncident(ctx, caller, in.PageContext, in.RelatedIncidentID); err != nil {
+		return nil, err
+	}
 	title := strings.TrimSpace(in.Title)
 	if title == "" {
 		title = "Untitled"
@@ -218,6 +247,7 @@ func (s *Service) CreateSession(ctx context.Context, caller Caller, in CreateSes
 		UserID:            caller.UserID,
 		Title:             title,
 		RelatedIncidentID: in.RelatedIncidentID,
+		PageContext:       in.PageContext,
 		Initiator:         model.SessionInitiatorUser,
 		Audience:          model.SessionAudienceUser,
 		CreatedAt:         time.Now().UTC(),
@@ -365,19 +395,27 @@ func (s *Service) PostMessageStreamWithOpts(ctx context.Context, caller Caller, 
 	return s.runChat(ctx, caller, sessionID, content, emit, opts)
 }
 
+// TurnRejectedError means the runtime never received the user message.
+type TurnRejectedError struct{ error }
+
+func (e *TurnRejectedError) Unwrap() error { return e.error }
+
 // runChat 是聊天请求的统一入口，完成鉴权、取消管理后调用 Graph runtime。
 func (s *Service) runChat(ctx context.Context, caller Caller, sessionID string, content string, emit chatprotocol.Emit, opts chatprotocol.RunOptions) (*chatprotocol.Reply, error) {
 	content = strings.TrimSpace(content)
 	if content == "" && len(opts.Attachments) == 0 {
-		return nil, fmt.Errorf("%w: content required", errs.ErrInvalid)
+		return nil, &TurnRejectedError{fmt.Errorf("%w: content required", errs.ErrInvalid)}
 	}
 	sess, err := s.GetSession(ctx, caller, sessionID)
 	if err != nil {
-		return nil, err
+		return nil, &TurnRejectedError{err}
+	}
+	if err := s.validatePageIncident(ctx, caller, sess.PageContext, sess.RelatedIncidentID); err != nil {
+		return nil, &TurnRejectedError{err}
 	}
 	if len(opts.Attachments) > 0 {
 		if s.attachments == nil {
-			return nil, errs.ErrNotWiredYet
+			return nil, &TurnRejectedError{errs.ErrNotWiredYet}
 		}
 		ids := make([]string, 0, len(opts.Attachments))
 		for _, attachment := range opts.Attachments {
@@ -385,14 +423,14 @@ func (s *Service) runChat(ctx context.Context, caller Caller, sessionID string, 
 		}
 		resolved, resolveErr := s.attachments.ResolveAttachments(ctx, sessionID, ids, caller.UserID, caller.IsAdmin())
 		if resolveErr != nil {
-			return nil, resolveErr
+			return nil, &TurnRejectedError{resolveErr}
 		}
 		var total int64
 		for _, attachment := range resolved {
 			total += attachment.Size
 		}
 		if total > 20<<20 {
-			return nil, fmt.Errorf("%w: image attachments exceed 20 MiB", errs.ErrInvalid)
+			return nil, &TurnRejectedError{fmt.Errorf("%w: image attachments exceed 20 MiB", errs.ErrInvalid)}
 		}
 		opts.Attachments = resolved
 	}
@@ -401,7 +439,7 @@ func (s *Service) runChat(ctx context.Context, caller Caller, sessionID string, 
 	// deployment-wide default.
 	opts = resolveSessionRunOptions(sess, opts)
 	if err := s.validateImageContext(ctx, sessionID, &opts); err != nil {
-		return nil, err
+		return nil, &TurnRejectedError{err}
 	}
 
 	// HLD-021: detach the chat turn from the HTTP request lifecycle. A turn now
@@ -423,7 +461,7 @@ func (s *Service) runChat(ctx context.Context, caller Caller, sessionID string, 
 	defer s.unregisterCancel(sess.ID, cancel)
 
 	if s.runtime == nil {
-		return nil, fmt.Errorf("chat runtime unavailable: %w", errs.ErrNotWiredYet)
+		return nil, &TurnRejectedError{fmt.Errorf("chat runtime unavailable: %w", errs.ErrNotWiredYet)}
 	}
 	return s.runGraph(ctx, sess, content, emit, opts)
 }

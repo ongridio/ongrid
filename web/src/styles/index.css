@@ -924,3 +924,62 @@ html.light .og-chip[data-tone="accent"] { color: rgb(67 56 202); }
   .chat-session-row:hover .chat-session-title,
   .chat-session-link:focus-visible .chat-session-title { white-space: normal; overflow-wrap: anywhere; }
 }
+
+.og-assistant-bounds {
+  position: fixed; z-index: 40; pointer-events: none;
+  inset: max(16px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+}
+.og-assistant-launcher {
+  position: absolute; right: 0; bottom: 0; pointer-events: auto;
+  touch-action: none; user-select: none; cursor: grab;
+  height: 48px; padding: 0 17px 0 12px; gap: 8px; border-radius: 999px;
+  font-size: 14px; font-weight: 650; color: rgb(var(--text)); background: rgb(var(--card));
+  border-color: rgb(var(--border)); box-shadow: 0 5px 20px rgb(25 24 60 / .16);
+}
+.og-assistant-launcher:active { cursor: grabbing; }
+.og-assistant-launcher:hover, .og-assistant-launcher[aria-expanded="true"] {
+  background: color-mix(in srgb, rgb(var(--accent)) 8%, rgb(var(--card)));
+}
+.og-assistant-welcome { padding: 40px 19px 24px; }
+.og-assistant-prompts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 29px; }
+.og-assistant-prompt {
+  --prompt-tone: var(--accent);
+  display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start;
+  height: auto; min-height: 106px; padding: 14px; gap: 6px; white-space: normal; text-align: left;
+  border-radius: 8px; border-color: rgb(var(--prompt-tone) / .22); background: rgb(var(--prompt-tone) / .07);
+  color: color-mix(in srgb, rgb(var(--prompt-tone)) 70%, rgb(var(--text)));
+}
+.og-assistant-prompt:nth-child(2) { --prompt-tone: var(--info); }
+.og-assistant-prompt:hover { border-color: rgb(var(--prompt-tone) / .6); background: rgb(var(--prompt-tone) / .12); }
+.og-dialog-content[data-placement="assistant"] {
+  --assistant-base-width: 420;
+  --assistant-base-height: 650;
+  --assistant-room-width: calc(100vw - max(20px, env(safe-area-inset-left)) - max(20px, env(safe-area-inset-right)));
+  --assistant-room-height: calc(100dvh - max(16px, env(safe-area-inset-top)) - max(20px, env(safe-area-inset-bottom)) - 60px);
+  --assistant-preferred-width: clamp(300px, min(180px + 9vw, 180px + 17dvh), 420px);
+  --assistant-width: min(var(--assistant-preferred-width), var(--assistant-room-width),
+    calc(var(--assistant-room-height) * var(--assistant-base-width) / var(--assistant-base-height)));
+  inset: auto max(20px, env(safe-area-inset-right)) calc(60px + max(20px, env(safe-area-inset-bottom))) auto;
+  width: var(--assistant-width);
+  height: calc(var(--assistant-width) * var(--assistant-base-height) / var(--assistant-base-width));
+  max-width: none; max-height: none; transform: none; overflow: hidden; z-index: 44;
+}
+.og-assistant-content { display: flex; flex: 1; flex-direction: column; min-height: 0; zoom: var(--assistant-scale, 1); }
+@media (min-width: 601px) {
+  .og-dialog-content[data-placement="assistant"][data-expanded] {
+    --assistant-base-width: 690; --assistant-base-height: 800; --assistant-preferred-width: 690px;
+  }
+}
+@media (max-width: 600px) {
+  .og-dialog-content[data-placement="assistant"] {
+    --assistant-preferred-width: 420px;
+    --assistant-room-width: calc(100vw - max(8px, env(safe-area-inset-left)) - max(8px, env(safe-area-inset-right)));
+    --assistant-room-height: min(70dvh, calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
+    inset: auto env(safe-area-inset-right) max(8px, env(safe-area-inset-bottom)) env(safe-area-inset-left);
+    margin-inline: auto; z-index: 50;
+  }
+  .og-dialog-content[data-placement="assistant"][data-expanded] {
+    inset: 0; width: 100%; height: 100dvh; border-radius: 0;
+    padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom);
+  }
+}

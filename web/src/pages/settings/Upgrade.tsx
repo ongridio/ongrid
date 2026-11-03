@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
@@ -64,6 +65,13 @@ export default function SettingsUpgrade() {
     setCopied(command.id);
     window.setTimeout(() => setCopied((current) => (current === command.id ? null : current)), 1600);
   };
+
+  useAssistantPage('系统升级', 'System upgrade', {
+    current_version: info?.current_version,
+    latest_version: info?.latest_version,
+    update_available: info?.update_available,
+    loading,
+  });
 
   return (
     <div className="space-y-4" aria-busy={loading}>

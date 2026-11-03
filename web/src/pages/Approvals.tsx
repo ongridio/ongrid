@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { EmptyStateCard } from '@/components/ui';
 import { Button } from '@/components/ui';
 import { useDialogs } from '@/components/ui/useDialogs';
@@ -70,6 +71,14 @@ export default function ApprovalsPage() {
       setBusy('');
     }
   };
+
+  useAssistantPage('审批列表', 'Approvals', {
+    status,
+    count: items.length,
+    selected_approval_id: selectedId,
+    sample_approval_ids: items.slice(0, 4).map(a => a.id).join(', '),
+    loading,
+  });
 
   return (
     <>{dialog}<main className="anim-fade flex flex-1 flex-col overflow-hidden">

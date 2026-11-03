@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { EmptyStateCard } from '@/components/ui';
 import { TimeRangePicker } from '@/components/ui/TimeRangePicker';
 import { FilterField } from '@/components/ui/FilterField';
@@ -180,7 +181,7 @@ export default function TracesPage() {
   const [selectedTrace, setSelectedTrace] = useState<TraceGetResponse | null>(null);
   const [selectedTraceLoading, setSelectedTraceLoading] = useState(false);
   const [selectedTraceErr, setSelectedTraceErr] = useState<string | null>(null);
-  const lastWindow = useRef<{ start: string; end: string } | null>(null);
+  const lastSearch = useRef<(typeof submitted & { start: string; end: string }) | null>(null);
   const requestSeq = useRef(0);
   const detailRequestSeq = useRef(0);
 
@@ -218,9 +219,10 @@ export default function TracesPage() {
 
   const openTrace = useCallback((row: TraceRow) => {
     const next = new URLSearchParams(searchParams);
-    const query = traceSearchQuery(submitted.traceQL, submitted.service, submitted.operation, submitted.peer, submitted.scope);
+    const filters = lastSearch.current ?? submitted;
+    const query = traceSearchQuery(filters.traceQL, filters.service, filters.operation, filters.peer, filters.scope, filters.quickFilter);
     next.set('q', query);
-    if (lastWindow.current) { next.set('start', lastWindow.current.start); next.set('end', lastWindow.current.end); }
+    if (lastSearch.current) { next.set('start', lastSearch.current.start); next.set('end', lastSearch.current.end); }
     if (searchParams.get('q') && query !== traceSearchQuery(searchParams.get('q')!, '', '', '', 'all')) {
       for (const key of ['service_name', 'service_namespace', 'environment', 'operation']) next.delete(key);
     }
@@ -268,7 +270,11 @@ export default function TracesPage() {
         limit: PAGE_LIMIT,
       });
       if (seq !== requestSeq.current) return;
-      lastWindow.current = { start, end };
+      lastSearch.current = {
+        start, end, range: submitted.range, traceQL: submitted.traceQL,
+        service: submitted.service, operation: submitted.operation, peer: submitted.peer,
+        scope: submitted.scope, quickFilter: submitted.quickFilter,
+      };
       const incoming = (resp.traces ?? []).map(normalizeRow);
       // Newest first by start time — Tempo usually returns this order
       // already but be defensive.
@@ -277,6 +283,7 @@ export default function TracesPage() {
     } catch (e) {
       if (seq !== requestSeq.current) return;
       setErr(e instanceof ApiError ? e.message : (e as Error).message);
+      lastSearch.current = null;
       setRows([]);
     } finally {
       if (seq === requestSeq.current) setLoading(false);
@@ -401,6 +408,25 @@ export default function TracesPage() {
     });
     void openObservabilityUrl(url);
   }, [grafanaBaseUrl, grafanaOrgId, range, serviceFilter, operationFilter, peerFilter, scope, traceQL, quickFilter, absoluteStart, absoluteEnd]);
+
+  const applied = lastSearch.current;
+  const customQuery = Boolean(applied?.traceQL.trim());
+  useAssistantPage('链路查询', 'Traces', {
+    trace_id: routeTraceId || selectedRow?.traceId,
+    service: customQuery ? undefined : applied?.service,
+    operation: customQuery ? undefined : applied?.operation,
+    peer: customQuery ? undefined : applied?.peer,
+    scope: customQuery ? undefined : applied?.scope,
+    quick_filter: customQuery ? undefined : applied?.quickFilter,
+    range: applied?.range,
+    start: applied?.start,
+    end: applied?.end,
+    custom_query: customQuery,
+    partial: customQuery || undefined,
+    result_count: applied ? rows.length : undefined,
+    failed: Boolean(err) || undefined,
+    loading,
+  });
 
   return (
     <main className="anim-fade flex flex-1 flex-col overflow-hidden">

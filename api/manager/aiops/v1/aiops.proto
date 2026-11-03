@@ -25,7 +25,8 @@ service AiopsService {
     rpc PostMessage(PostMessageRequest) returns (PostMessageResponse);
 
     // StreamMessage 与 PostMessage 同语义，但以 server-streaming 下发 token-by-token 片段，
-    // 供 SSE / WebSocket 的流式 UX 使用。
+    // 供 SSE / WebSocket 的流式 UX 使用。HTTP SSE 的 error 帧仅在进入运行时前被拒绝时
+    // 返回 turn_rejected: true，此时客户端可以恢复未发送的草稿。
     rpc StreamMessage(PostMessageRequest) returns (stream StreamChunk);
 
     // ListMessages 取某个 session 的历史消息（含 tool 调用）。
@@ -43,6 +44,12 @@ enum ChatRole {
     CHAT_ROLE_TOOL = 4;
 }
 
+// A bounded snapshot of the business view explicitly attached by the user.
+message ConsolePageContext {
+    string page = 1;
+    map<string, string> fields = 2;
+}
+
 // ChatSession 一次对话的元数据；消息单独落 chat_messages。
 message ChatSession {
     uint64 id = 1 [json_name = "id"];
@@ -58,6 +65,7 @@ message ChatSession {
     APMSourceScope apm_source = 10 [json_name = "apm_source"];
     // Server-assigned execution version. Empty for unclassified historical sessions.
     string runtime_version = 11 [json_name = "runtime_version"];
+    ConsolePageContext page_context = 12 [json_name = "page_context"];
 }
 
 // ToolCall 一次 LLM 发起的工具调用（OpenAI tool_calls 的投影）。
@@ -134,6 +142,7 @@ message CreateChatSessionRequest {
     string provider = 3 [json_name = "provider"];
     string model = 4 [json_name = "model"];
     APMSourceTarget apm_source = 5 [json_name = "apm_source"];
+    ConsolePageContext page_context = 6 [json_name = "page_context"];
 }
 
 message CreateChatSessionResponse {

@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { Button, Input, Label } from '@/components/ui';
 import { Hint } from '@/components/ui/Tooltip';
 import { Select } from '@/components/ui/Select';
@@ -110,6 +111,12 @@ export default function SecretsPage() {
   };
 
   const isCustom = typeName === CUSTOM;
+
+  useAssistantPage('凭据管理', 'Credentials', {
+    credential_count: items.length,
+    credential_type_count: types.length,
+    loading,
+  });
 
   return (
     <div className="anim-fade space-y-5">

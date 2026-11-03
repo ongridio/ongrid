@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { Button, Label, Input, Textarea } from '@/components/ui';
 import { Hint } from '@/components/ui/Tooltip';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -127,6 +128,16 @@ export default function IncidentDetailPage() {
     return Date.now() - fired <= AI_FAST_POLL_WINDOW_MS;
   }, [incident, events]);
   usePoll(() => fetchAll(true), AI_FAST_POLL_MS, fastPollEnabled);
+
+  useAssistantPage('告警详情', 'Incident details', incident?.id === incidentId && !err && !loading ? {
+    incident_id: incident.id,
+    rule: incident.rule_key,
+    severity: incident.severity,
+    status: incident.status,
+    fired_at: incident.fired_at,
+    target_type: incident.target_type,
+    target_id: incident.target_id,
+  } : null);
 
   return (
     <>

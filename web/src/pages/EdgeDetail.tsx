@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { NetworkSNMPModal } from '@/components/NetworkSNMPModal';
 import { DeviceEnvironment } from '@/components/DeviceEnvironment';
 import { Card, Label, Input, Textarea, Slider } from '@/components/ui';
@@ -370,6 +371,14 @@ export default function EdgeDetailPage() {
   const status = device ? (device.online ? 'online' : 'offline') : edge?.status;
   const lastSeen = device?.last_seen_at ?? edge?.last_seen_at;
   const deviceID = device?.id ?? edge?.device_id ?? null;
+
+  useAssistantPage('设备详情', 'Device details', {
+    device_id: isDeviceRoute ? edgeId : edge?.device_id,
+    edge_id: isDeviceRoute ? edge?.id : edgeId,
+    name: isDeviceRoute ? (String(device?.id) === edgeId ? device?.name : undefined) : (String(edge?.id) === edgeId ? edge?.name : undefined),
+    state: edgeErr ? 'unavailable' : device || edge ? 'ready' : 'loading',
+    tab,
+  });
 
   if (isNetworkDevice && device) {
     return (

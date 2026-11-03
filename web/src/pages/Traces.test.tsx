@@ -5,6 +5,7 @@ import { expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import { getTrace, listTraceTagValues, searchTraces } from '@/api/traces';
 import TracesPage from './Traces';
+import { AssistantRoute, useAssistantSource } from '@/lib/assistantPage';
 
 vi.mock('@/api/traces', () => ({
   getTrace: vi.fn(),
@@ -15,7 +16,7 @@ vi.mock('@/components/traces/TraceWaterfall', () => ({ TraceWaterfall: () => nul
 
 it('快捷筛选叠加现有条件，切换服务后仍生效，重置清空所有条件', async () => {
   localStorage.setItem('ongrid-locale', 'zh-CN');
-  render(<MemoryRouter><TracesPage /></MemoryRouter>);
+  render(<MemoryRouter><AssistantRoute.Provider value="traces"><TracesPage /></AssistantRoute.Provider></MemoryRouter>);
   await selectOption(screen.getByRole('combobox', { name: 'service.name' }), 'zp-cms');
   await selectOption(screen.getByRole('combobox', { name: 'operation' }), 'GET /orders');
   await selectOption(screen.getByRole('combobox', { name: 'peer.service' }), 'mysql');
@@ -28,6 +29,9 @@ it('快捷筛选叠加现有条件，切换服务后仍生效，重置清空所�
       expect(query()).toContain('span:name = "GET /orders"');
       expect(query()).toContain('span.peer.service = "mysql"');
       expect(query()).toContain('trace:rootName !~');
+      expect(useAssistantSource.getState().snapshot?.fields).toMatchObject({
+        service: 'zp-cms', operation: 'GET /orders', peer: 'mysql', scope: 'business', quick_filter: condition, loading: 'false',
+      });
     });
     fireEvent.click(screen.getByRole('button', { name: label }));
     await waitFor(() => expect(query()).not.toContain(condition));
@@ -49,6 +53,9 @@ it('快捷筛选叠加现有条件，切换服务后仍生效，重置清空所�
   fireEvent.change(screen.getByPlaceholderText('{ resource.service.name="my-api" && duration > 200ms }'), { target: { value: '{ span:name = "custom" }' } });
   fireEvent.click(screen.getByRole('button', { name: '查询' }));
   await waitFor(() => expect(query()).toBe('{ span:name = "custom" } with (most_recent=true)'));
+  await waitFor(() => expect(useAssistantSource.getState().snapshot?.fields).toMatchObject({ partial: 'true', custom_query: 'true', loading: 'false' }));
+  expect(useAssistantSource.getState().snapshot?.fields).not.toHaveProperty('quick_filter');
+  expect(useAssistantSource.getState().snapshot?.fields).not.toHaveProperty('service');
   fireEvent.click(screen.getByRole('button', { name: '时间范围' }));
   fireEvent.click(screen.getByRole('button', { name: '1 天' }));
   fireEvent.change(screen.getByRole('textbox', { name: 'trace_id' }), { target: { value: 'abc123' } });

@@ -15,11 +15,6 @@ type UiState = {
   // and the global keyboard handler in Layout can both flip it.
   paletteOpen: boolean;
   setPaletteOpen(v: boolean): void;
-  // Agent side panel (⌘K) — same rationale; surfaced via global hotkey
-  // for now, but kept open here so future entry points (status row,
-  // empty state CTAs) can pop it without prop-drilling.
-  agentPanelOpen: boolean;
-  setAgentPanelOpen(v: boolean): void;
 };
 
 export const useUi = create<UiState>()(
@@ -36,8 +31,6 @@ export const useUi = create<UiState>()(
       setSessionsTriggerHovered: (v) => set({ sessionsTriggerHovered: v, ...(v && get().sessionsCollapsed ? { sessionsPreviewOpen: true } : {}) }),
       paletteOpen: false,
       setPaletteOpen: (v) => set({ paletteOpen: v }),
-      agentPanelOpen: false,
-      setAgentPanelOpen: (v) => set({ agentPanelOpen: v }),
     }),
     {
       name: 'ongrid.ui',

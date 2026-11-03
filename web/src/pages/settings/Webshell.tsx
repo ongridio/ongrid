@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { Label, Input } from '@/components/ui';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { Hint } from '@/components/ui/Tooltip';
@@ -239,6 +240,13 @@ export default function SettingsWebshell() {
       </span>
     </Button>
   );
+
+  useAssistantPage('终端审计', 'Terminal audit', {
+    status: statusFilter,
+    session_count: items.length,
+    visible_count: visibleItems.length,
+    loading,
+  });
 
   return (
     <>{dialog}<main className="anim-fade flex flex-1 flex-col overflow-hidden">

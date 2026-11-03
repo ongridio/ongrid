@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 // Settings → About. Product identity: version (live from the manager), the
 // public GitHub repo, and the license. Lives here because the brand mark in the
 // sidebar no longer shows the version.
@@ -28,6 +29,10 @@ export default function About() {
       cancelled = true;
     };
   }, []);
+
+  useAssistantPage('关于 Ongrid', 'About Ongrid', {
+    version: version || "loading",
+  });
 
   return (
     <div className="mx-auto max-w-2xl">

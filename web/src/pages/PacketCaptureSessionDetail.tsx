@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { AlertTriangle, ChevronLeft, ExternalLink, Sparkles } from 'lucide-react';
@@ -65,6 +66,12 @@ export default function PacketCaptureSessionDetailPage() {
       setAnalyzing(false);
     }
   };
+
+  useAssistantPage('抓包会话', 'Packet capture session', {
+    session_id: sessionID,
+    capture_count: captures.length,
+    ready_count: readyCount,
+  });
 
   return (
     <main className="anim-fade flex min-w-0 flex-1 flex-col overflow-hidden">

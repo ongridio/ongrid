@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { Input, Label } from '@/components/ui';
 import { Hint } from '@/components/ui/Tooltip';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
@@ -156,6 +157,10 @@ export default function SettingsMarketplace() {
 
   const toggleExpand = (packId: string) =>
     setExpanded((cur) => ({ ...cur, [packId]: !cur[packId] }));
+
+  useAssistantPage('技能扩展', 'Skill extensions', {
+    installed_packs: packs.length, loading: packsLoading, installing,
+  });
 
   return (
     <div className="space-y-5">

@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { Input, Label } from '@/components/ui';
 import { Hint } from '@/components/ui/Tooltip';
 import { Checkbox } from '@/components/ui/Checkbox';
@@ -193,6 +194,12 @@ export default function SettingsNotifications() {
     return m;
   }, [items]);
   const configuredCards = orderedCards.filter((meta) => grouped.has(meta.type));
+
+  useAssistantPage('通知渠道', 'Notifications', {
+    channel_count: items.length,
+    configured_types: configuredCards.map(card => card.type).join(", "),
+    loading,
+  });
 
   return (
     <>

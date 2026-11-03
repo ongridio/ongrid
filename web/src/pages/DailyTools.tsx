@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { useSearchParams } from 'react-router-dom';
 import { absoluteWindow } from '@/lib/telemetryContext';
 import { Label, Input } from '@/components/ui';
@@ -742,6 +743,12 @@ export default function DailyToolsPage() {
   const canRun = active === 'profile'
     ? selectedEdges.length === 1 && Boolean(selectedEdges[0].device_id) && profileCanStart(profile) && !profileSaving && !profileSessionActive
     : selectedEdges.length > 0 && toolInputReady(active, { ping, dns, tcp, http, capture });
+  useAssistantPage('日常工具', 'Tools', {
+    tool: active,
+    selected_edges: selectedEdgeIDs.join(", "),
+    execution_count: runs.length,
+  });
+
   return (
     <main className="anim-fade flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <PageHeader

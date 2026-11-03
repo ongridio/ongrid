@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { Input } from '@/components/ui';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { Hint } from '@/components/ui/Tooltip';
@@ -208,6 +209,15 @@ export default function ClustersPage() {
                     <DropdownMenuItem onClick={() => setKubernetesCreateOpen(true)}>{tr('Kubernetes 接入', 'Kubernetes enrollment')}</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>;
+
+  useAssistantPage('集群列表', 'Clusters', {
+    cluster_count: summaries.length,
+    sample_cluster_ids: visible.slice(0, 6).map(item => item.cluster.id).join(', '),
+    visible_count: visible.length,
+    device_count: deviceTotal,
+    online: onlineTotal,
+    loading,
+  });
 
   return (
     <>
@@ -530,6 +540,10 @@ export function ClusterDetailPage() {
     }).catch((err: Error) => { if (!cancelled) setError(err.message); });
     return () => { cancelled = true; };
   }, [clusterId, tr]);
+  useAssistantPage('集群详情', 'Cluster details', error || !node || String(node.id) !== clusterId
+    ? { cluster_id: clusterId, state: error ? 'unavailable' : 'loading' }
+    : undefined);
+
   if (error) return <EmptyState title={error} action={<Link to="/clusters">{tr('返回集群', 'Back to clusters')}</Link>} />;
   if (!node || String(node.id) !== clusterId) return <TableLoading label={tr('正在加载集群…', 'Loading cluster…')} />;
   if (node.props?.source === 'kubernetes') {
@@ -806,6 +820,13 @@ export function DeviceClusterDetailPage() {
               "Delete all active installation batches before deleting the cluster.",
             )
           : undefined;
+
+  useAssistantPage('设备集群', 'Device cluster', {
+    cluster_id: clusterId,
+    device_count: devices.length,
+    online,
+    loading,
+  });
 
   if (loading) {
     return (

@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { Label, Input } from '@/components/ui';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { Hint } from '@/components/ui/Tooltip';
@@ -226,6 +227,13 @@ export default function PagesPage() {
     return (p.title ?? '').toLowerCase().includes(q) || p.id.includes(q);
   });
 
+  useAssistantPage('产物', 'Artifacts', tab === 'pages' ? {
+    tab,
+    page_count: items.length,
+    selected_id: preview?.id ?? routeId,
+    loading,
+  } : undefined);
+
   return (
     <>{dialog}<Tabs value={tab} onValueChange={setTab} className="contents"><main className="anim-fade flex flex-1 flex-col overflow-hidden">
       <PageHeader
@@ -428,6 +436,8 @@ function PacketCaptureSessionsView() {
     }
   }, [page]);
   useEffect(()=>{void refresh();},[refresh]);
+  useAssistantPage('抓包产物列表', 'Packet captures', { total, page, loading });
+
   return (
     <div>
       {error && <div className="mb-4 rounded-md border border-red-900/50 bg-red-950/30 px-3 py-2 text-xs text-red-300">{error}</div>}

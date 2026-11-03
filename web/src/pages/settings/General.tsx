@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { Switch } from '@/components/ui/Switch';
 import { useCallback, useEffect, useState } from 'react';
 import { Loader2, Network } from 'lucide-react';
@@ -51,6 +52,11 @@ export default function SettingsGeneral() {
       setSaving(false);
     }
   }, []);
+
+  useAssistantPage('通用设置', 'General settings', {
+    network_discovery_enabled: enabled,
+    loading,
+  });
 
   return (
     <div className="space-y-4">

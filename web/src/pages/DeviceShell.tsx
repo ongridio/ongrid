@@ -1,3 +1,4 @@
+import { useAssistantPage } from '@/lib/assistantPage';
 import { Label, Radio, Input } from '@/components/ui';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { Hint } from '@/components/ui/Tooltip';
@@ -81,6 +82,7 @@ function ansiDim(s: string): string {
 export default function DeviceShellPage() {
   const { tr } = useI18n();
   const { canMutate } = usePermissions();
+  useAssistantPage('设备终端', 'Device terminal', canMutate ? undefined : { access: 'read_only' });
   // viewer is read-only. Short-circuit before any WS setup
   // happens — backend rejects too (skill execute / shell open both
   // require non-viewer), but stopping at the page boundary keeps the
@@ -491,6 +493,11 @@ export function DeviceShell() {
 
   const hostname =
     extractHostname(edge?.host_info) || edge?.name || deviceId || tr('设备', 'device');
+
+  useAssistantPage('设备终端', 'Device terminal', {
+    device_id: deviceId,
+    connection: conn.kind,
+  });
 
   return (
     <>{dialog}<main ref={workspaceRef} className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-hidden bg-bg p-3 sm:p-6">

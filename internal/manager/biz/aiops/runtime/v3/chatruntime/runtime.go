@@ -696,7 +696,7 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (result *Reply, ret
 		UserText:         req.UserText,
 		UserImages:       imageInputParts(req.Attachments),
 		WebSearchEnabled: req.WebSearchEnabled,
-		MentionsRendered: mentionsRendered,
+		MentionsRendered: sess.PageContext.UserReferences(mentionsRendered),
 		AgentReminder:    agentReminder,
 		DynamicHints:     dynamicHints,
 		Locale:           req.Locale,
