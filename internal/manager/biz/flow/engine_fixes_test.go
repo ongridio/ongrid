@@ -32,7 +32,7 @@ func TestEngineConcurrentSetVarsNoRace(t *testing.T) {
 
 	tools := &fakeTools{}
 	eng := NewEngine(Executors{Tools: tools}, &fakeRunRepo{}, nil)
-	status, err := eng.Execute(context.Background(), &model.FlowRun{ID: "race", TriggerJSON: "{}"}, g, "")
+	status, err := eng.Execute(context.Background(), &model.FlowRun{ID: "race", TriggerJSON: "{}"}, g, "", "")
 	if err != nil || status != model.RunStatusSucceeded {
 		t.Fatalf("Execute = %s, %v", status, err)
 	}
@@ -63,7 +63,7 @@ func TestEngineConditionReadsContextNoRace(t *testing.T) {
 	eng := NewEngine(Executors{}, &fakeRunRepo{}, nil)
 	for i := 0; i < 20; i++ {
 		run := &model.FlowRun{ID: "cond-race", TriggerJSON: `{"msg":"{{vars.k}}"}`}
-		status, err := eng.Execute(context.Background(), run, g, "")
+		status, err := eng.Execute(context.Background(), run, g, "", "")
 		if err != nil || status != model.RunStatusSucceeded {
 			t.Fatalf("Execute = %s, %v", status, err)
 		}
@@ -90,7 +90,7 @@ func TestEngineFanOutNodePanicRecovered(t *testing.T) {
 		"edges":[{"id":"e1","source":"t","target":"p"}]
 	}`)
 	eng := NewEngine(Executors{}, &fakeRunRepo{}, nil)
-	status, err := eng.Execute(context.Background(), &model.FlowRun{ID: "panic", TriggerJSON: "{}"}, g, "")
+	status, err := eng.Execute(context.Background(), &model.FlowRun{ID: "panic", TriggerJSON: "{}"}, g, "", "")
 	if status != model.RunStatusFailed || err == nil {
 		t.Fatalf("want failed run, got %s, %v", status, err)
 	}
@@ -116,7 +116,7 @@ func TestEngineEntryTypeScoping(t *testing.T) {
 	}`)
 	tools := &fakeTools{}
 	eng := NewEngine(Executors{Tools: tools}, &fakeRunRepo{}, nil)
-	status, err := eng.Execute(context.Background(), &model.FlowRun{ID: "ent", TriggerJSON: "{}"}, g, NodeTriggerAlert)
+	status, err := eng.Execute(context.Background(), &model.FlowRun{ID: "ent", TriggerJSON: "{}"}, g, NodeTriggerAlert, "")
 	if err != nil || status != model.RunStatusSucceeded {
 		t.Fatalf("Execute = %s, %v", status, err)
 	}

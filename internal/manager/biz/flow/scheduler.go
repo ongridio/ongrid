@@ -115,10 +115,10 @@ func (s *Scheduler) tick(ctx context.Context, now time.Time) {
 			s.mu.Unlock()
 
 			payload := map[string]any{"fired_at": now.Format(time.RFC3339), "cron": spec}
-			if _, err := s.uc.TriggerEvent(ctx, f.ID, NodeTriggerCron, payload); err != nil {
-				s.log.Warn("flow cron trigger failed", slog.Uint64("flow_id", f.ID), slog.Any("err", err))
+			if _, err := s.uc.TriggerEvent(ctx, f.ID, NodeTriggerCron, node.ID, payload); err != nil {
+				s.log.Warn("flow cron trigger failed", slog.Uint64("flow_id", f.ID), slog.String("node_id", node.ID), slog.Any("err", err))
 			} else {
-				s.log.Info("flow triggered by cron", slog.Uint64("flow_id", f.ID), slog.String("cron", spec))
+				s.log.Info("flow triggered by cron", slog.Uint64("flow_id", f.ID), slog.String("node_id", node.ID), slog.String("cron", spec))
 			}
 		}
 	}
