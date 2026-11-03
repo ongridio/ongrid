@@ -189,6 +189,43 @@ func TestK8sTelemetryGatewayFetcherUsesIndependentBackendAuth(t *testing.T) {
 	}
 }
 
+func TestK8sTelemetryGatewayFetcherKeepsBackendPasswordWhitespace(t *testing.T) {
+	const pass = "  demo pass\t"
+	dir := t.TempDir()
+	files := map[string]string{
+		"telemetry-cluster-id":                "7",
+		"telemetry-cluster-node-id":           "132",
+		"telemetry-access-key":                "kt_access",
+		"telemetry-secret-key":                "ks_secret",
+		"telemetry-traces-endpoint":           "https://tempo.example/v1/traces",
+		"telemetry-traces-auth-mode":          telemetrySignalAuthBackend,
+		"telemetry-traces-basic-user":         " tempo-user\n",
+		"telemetry-traces-basic-pass":         pass,
+		"telemetry-logs-endpoint":             "https://loki.example/loki/api/v1/push",
+		"telemetry-logs-auth-mode":            telemetrySignalAuthBackend,
+		"telemetry-logs-basic-user":           "loki-user",
+		"telemetry-logs-basic-pass":           pass,
+		"telemetry-remote-write-endpoint":     "https://metrics.example/api/v1/write",
+		"telemetry-remote-write-tls-insecure": "false",
+	}
+	for name, value := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(value), 0600); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	got, err := readTelemetryFiles(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("readTelemetryFiles() error = %v", err)
+	}
+	if got.tracesAuthPass != pass || got.logsAuthPass != pass {
+		t.Fatalf("passwords = traces %q, logs %q; want %q", got.tracesAuthPass, got.logsAuthPass, pass)
+	}
+	if got.tracesAuthUser != "tempo-user" {
+		t.Fatalf("user should still be trimmed, got %q", got.tracesAuthUser)
+	}
+}
+
 func TestReadTelemetryFilesRejectsMissingWriteEndpoint(t *testing.T) {
 	dir := t.TempDir()
 	for name, value := range map[string]string{

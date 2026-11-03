@@ -335,7 +335,7 @@ func readTelemetrySignalAuth(ctx context.Context, dir, signal, accessKey, secret
 	if err != nil {
 		return telemetrySignalAuth{}, err
 	}
-	password, err := readTelemetryFile(ctx, dir, prefix+"basic-pass", false)
+	password, err := readTelemetryPasswordFile(ctx, dir, prefix+"basic-pass")
 	if err != nil {
 		return telemetrySignalAuth{}, err
 	}
@@ -445,21 +445,37 @@ func validateTelemetryEndpoint(name, raw string) error {
 }
 
 func readTelemetryFile(ctx context.Context, dir, name string, required bool) (string, error) {
-	if err := ctx.Err(); err != nil {
+	raw, found, err := readTelemetryBytes(ctx, dir, name, required)
+	if err != nil || !found {
 		return "", err
 	}
-	raw, err := os.ReadFile(filepath.Join(dir, name))
-	if err != nil {
-		if !required && errors.Is(err, os.ErrNotExist) {
-			return "", nil
-		}
-		return "", fmt.Errorf("read kubernetes telemetry config %s: %w", name, err)
-	}
-	value := strings.TrimSpace(string(raw))
+	value := strings.TrimSpace(raw)
 	if required && value == "" {
 		return "", fmt.Errorf("kubernetes telemetry config %s is empty", name)
 	}
 	return value, nil
+}
+
+// readTelemetryPasswordFile returns an optional password file exactly as
+// stored. The Manager writes the Secret value without adding a newline, so
+// leading and trailing whitespace belongs to the password.
+func readTelemetryPasswordFile(ctx context.Context, dir, name string) (string, error) {
+	raw, _, err := readTelemetryBytes(ctx, dir, name, false)
+	return raw, err
+}
+
+func readTelemetryBytes(ctx context.Context, dir, name string, required bool) (string, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return "", false, err
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		if !required && errors.Is(err, os.ErrNotExist) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("read kubernetes telemetry config %s: %w", name, err)
+	}
+	return string(raw), true, nil
 }
 
 func waitForRemoteWriteFiles(ctx context.Context, dir string) (telemetryFiles, error) {

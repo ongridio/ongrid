@@ -493,6 +493,26 @@ func TestResolveTelemetryConfigPublishesIndependentExternalTraceAndLogTargets(t 
 	}
 }
 
+func TestResolveTelemetryConfigKeepsExternalPasswordWhitespace(t *testing.T) {
+	const pass = "  demo pass\t"
+	uc := NewUsecase(nil, nil, Config{PublicURL: "https://manager.example"})
+	uc.SetTelemetryTargetResolver(staticTelemetryTargetResolver{targets: map[string]TelemetryTarget{
+		TelemetrySignalTraces: {Endpoint: "https://tempo.example/v1/traces", BasicUser: " tempo-user ", BasicPassword: pass},
+		TelemetrySignalLogs:   {Endpoint: "https://loki.example/loki/api/v1/push", BasicUser: "loki-user", BasicPassword: pass},
+	}})
+
+	out, err := uc.resolveTelemetryConfig(context.Background(), &model.Cluster{ID: 7}, "kt_access", "ks_secret")
+	if err != nil {
+		t.Fatalf("resolveTelemetryConfig() error = %v", err)
+	}
+	if out.TracesBasicPass != pass || out.LogsBasicPass != pass {
+		t.Fatalf("passwords = traces %q, logs %q; want %q", out.TracesBasicPass, out.LogsBasicPass, pass)
+	}
+	if out.TracesBasicUser != "tempo-user" {
+		t.Fatalf("user should still be trimmed, got %q", out.TracesBasicUser)
+	}
+}
+
 func TestUsecaseControllerEnrollmentPublishesResolvedExternalRemoteWrite(t *testing.T) {
 	ctx := context.Background()
 	uc := NewUsecase(newFakeRepo(), newFakeIssuer(), Config{PublicURL: "https://manager.example"})

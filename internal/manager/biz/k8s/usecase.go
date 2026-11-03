@@ -2398,7 +2398,7 @@ func (u *Usecase) resolveTelemetryTarget(ctx context.Context, signal, fallbackEn
 	}
 	out.AuthMode = telemetryAuthModeBackend
 	out.BasicUser = strings.TrimSpace(target.BasicUser)
-	out.BasicPass = strings.TrimSpace(target.BasicPassword)
+	out.BasicPass = target.BasicPassword
 	if (out.BasicUser == "") != (out.BasicPass == "") {
 		return resolvedTelemetryTarget{}, fmt.Errorf("resolve kubernetes %s target: basic auth requires both username and password", signal)
 	}
