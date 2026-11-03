@@ -283,47 +283,54 @@ func (u *Usecase) HandleRegister(ctx context.Context, edgeID uint64, info tunnel
 		return errs.ErrNotWiredYet
 	}
 
-	edge, err := u.repo.GetByID(ctx, edgeID)
-	if err != nil {
-		return fmt.Errorf("get edge: %w", err)
-	}
-
-	fp := deviceFingerprint(info)
-	// Migrate a device registered under the legacy HostID-derived fingerprint
-	// to the hardware fingerprint (v3) in place — so a host that previously
-	// registered under its gopsutil HostID, then upgrades to an agent that
-	// also reports HardwareFingerprint, keeps its device.ID / history instead
-	// of orphaning into a fresh row. The new agent still sends HostID in
-	// info.Fingerprint, so the old fp is recomputable here. Best-effort: on
-	// failure the device is simply re-created under the new fp on this
-	// register (see RebindFingerprint for the ghost-row caveat).
-	if oldFP := deviceFingerprintLegacy(info); oldFP != fp {
-		if err := u.devices.RebindFingerprint(ctx, oldFP, fp); err != nil && u.log != nil {
-			u.log.Warn("device fingerprint rebind failed", "old", oldFP, "new", fp, "err", err)
-		}
-	}
-	seed := &devicemodel.Device{
-		Fingerprint:   fp,
-		UserID:        edge.CreatedBy,
-		Name:          info.Hostname,
-		Hostname:      info.Hostname,
-		OS:            info.OS,
-		Arch:          info.Arch,
-		KernelVersion: info.KernelVersion,
-		CPUCount:      info.CPUCount,
-		MemTotalBytes: info.MemTotalBytes,
-		IPAddress:     info.IPAddress,
-		Online:        true,
-	}
-	dev, err := u.devices.FindOrCreateByFingerprint(ctx, seed)
-	if err != nil {
-		return fmt.Errorf("upsert device: %w", err)
-	}
 	if u.links == nil {
 		return errs.ErrNotWiredYet
 	}
-	if err := u.links.Link(ctx, edgeID, dev.ID, devicemodel.EdgeDeviceRelationHost); err != nil {
-		return fmt.Errorf("link edge to host: %w", err)
+	var edge *model.Edge
+	var dev *devicemodel.Device
+	err := u.repo.WithLockedEdge(ctx, edgeID, func(ctx context.Context) error {
+		var err error
+		edge, err = u.repo.GetByID(ctx, edgeID)
+		if err != nil {
+			return fmt.Errorf("get edge: %w", err)
+		}
+
+		fp := deviceFingerprint(info)
+		// Migrate a device registered under the legacy HostID-derived fingerprint
+		// to the hardware fingerprint (v3) in place — so a host that previously
+		// registered under its gopsutil HostID, then upgrades to an agent that
+		// also reports HardwareFingerprint, keeps its device.ID / history instead
+		// of orphaning into a fresh row. The new agent still sends HostID in
+		// info.Fingerprint, so the old fp is recomputable here.
+		if oldFP := deviceFingerprintLegacy(info); oldFP != fp {
+			if err := u.devices.RebindFingerprint(ctx, oldFP, fp); err != nil {
+				return fmt.Errorf("migrate host fingerprint: %w", err)
+			}
+		}
+		seed := &devicemodel.Device{
+			Fingerprint:   fp,
+			UserID:        edge.CreatedBy,
+			Name:          info.Hostname,
+			Hostname:      info.Hostname,
+			OS:            info.OS,
+			Arch:          info.Arch,
+			KernelVersion: info.KernelVersion,
+			CPUCount:      info.CPUCount,
+			MemTotalBytes: info.MemTotalBytes,
+			IPAddress:     info.IPAddress,
+			Online:        true,
+		}
+		dev, err = u.devices.FindOrCreateByFingerprint(ctx, seed)
+		if err != nil {
+			return fmt.Errorf("upsert device: %w", err)
+		}
+		if err := u.links.Link(ctx, edgeID, dev.ID, devicemodel.EdgeDeviceRelationHost); err != nil {
+			return fmt.Errorf("link edge to host: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 	current, err := u.links.LookupEdgeForDevice(ctx, dev.ID, devicemodel.EdgeDeviceRelationHost)
 	if err != nil {

@@ -154,6 +154,10 @@ func countToolName(names []string, want string) int {
 }
 
 // fakeEdgeRepo is an in-memory edge.Repo for registry tests.
+func (r *fakeEdgeRepo) WithLockedEdge(ctx context.Context, _ uint64, fn func(context.Context) error) error {
+	return fn(ctx)
+}
+
 type fakeEdgeRepo struct {
 	byID   map[uint64]*edgemodel.Edge
 	byName map[string]*edgemodel.Edge

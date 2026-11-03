@@ -92,7 +92,8 @@ func (m *memSessions) GetSession(_ context.Context, id string) (*model.Session, 
 	if !ok {
 		return nil, errs.ErrNotFound
 	}
-	return s, nil
+	cp := *s
+	return &cp, nil
 }
 func (m *memSessions) ListSessions(_ context.Context, _ uint64, _, _ int, _ *uint64) ([]*model.Session, error) {
 	return nil, nil

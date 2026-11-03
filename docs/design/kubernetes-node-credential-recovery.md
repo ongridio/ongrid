@@ -73,10 +73,16 @@ the Host fingerprint of an existing name-based node. PR #528 (`9b0999f0`,
 became a registration failure. v0.19.0 is the first release containing both.
 
 Before the generic Host lookup, Manager validates the authenticated node against
-its enrolled cluster, name and UID. For a current, mutually linked installation,
-it changes only the original Host's name-based fingerprint to the UID-based
-fingerprint in one transaction. Host ID, topology, metadata and plugin settings
-stay attached to the original row. Repeated registration is a no-op.
+its enrolled cluster, name and UID. It derives the Host identity from that
+enrollment. If an older Agent omits its UID, Manager uses the known UID, or the
+enrolled name when no UID is known yet. A different nonempty UID is rejected;
+neither an IP address nor a matching name is sufficient to merge Hosts.
+For a current, mutually linked installation, Manager changes only the original
+Host's name-based fingerprint to the UID-based fingerprint in one transaction.
+Host ID, topology, metadata and plugin settings stay attached to the original row.
+Host creation and Edge binding share a separate transaction and an Edge row lock,
+so a rejected or concurrent registration cannot leave an unbound Host.
+Node metadata and topology reconciliation remain retryable after Host binding.
 
 A failed v0.19.0 registration can already have created a duplicate Host. The
 transaction may soft-delete that row only when it has no current installation,
@@ -87,13 +93,34 @@ unchanged timestamps, and no current or historical references from relations,
 other Hosts or clusters. Edited or used topology is retained.
 Reference checks use locking reads so MySQL's repeatable-read snapshots cannot
 hide a relation committed before the topology lock was acquired.
-An occupied fingerprint or inconsistent binding fails closed; the migration does
-not move an Edge to another Host. A database failure rolls back all changes.
+The same cleanup applies when the original Host already has its UID fingerprint
+and a late name-only registration created a legacy alias. If that alias has user
+edits or references, Manager retains it and logs the reason; the valid UID Host
+can still register. An occupied target UID fingerprint or inconsistent binding
+fails closed; the migration does not move an Edge to another Host. A database
+failure rolls back that Host's migration and cleanup.
 
-Upgrade Manager before restarting the node Agent. This is an on-registration
-data migration, without a schema change. After it succeeds, downgrading to an
-Agent that reports only a node name requires a coordinated identity rollback;
-do not downgrade the binary alone. Preserve the pre-upgrade database backup.
+Manager runs this repair after its normal schema and topology migrations, before
+serving requests. It scans active, UID-bound nodes in batches of 200, including
+offline nodes, and uses one transaction per node. Each startup repeats the safe,
+idempotent repair; registration also retries it. Conflicting or incomplete
+bindings are retained with a warning. Database errors stop startup, leaving
+already repaired nodes committed and the failing node unchanged.
+
+Upgrade all Manager instances before restarting node Agents. This repair has no
+schema or wire-format change and supports old name-only Agents alongside newer
+UID Agents. An older Manager still serving requests can recreate the alias, so
+complete the Manager rollout before relying on the repair. Preserve a database
+backup before upgrade. After startup, verify that each affected node keeps its
+original Host ID, Edge binding and plugin settings. Check the Manager logs for
+`host identity repair skipped` or `retained legacy Host` before manually resolving
+any retained alias; do not delete it by matching IP alone.
+
+An Agent-only downgrade remains compatible while the fixed Manager runs.
+Reverting Manager removes name-only compatibility and automatic repair. A
+name-only Agent with a migrated Host then needs a coordinated identity rollback
+or restoration of the pre-upgrade database; reverting the Manager binary alone
+does not undo migrated fingerprints or restore soft-deleted aliases.
 
 ## Verification
 
@@ -123,3 +150,19 @@ survives and both the duplicate Host and its generated topology are removed.
 A MySQL regression commits a topology relation while migration is in progress
 and verifies that the referenced Host and node are retained. CI runs it through
 the existing `ONGRID_TEST_MYSQL_DSN` test database configuration.
+
+`TestKubernetesHostRollingUpgrade` and
+`TestKubernetesHostRollingUpgradeMySQL` seed the v0.18.0 binding shape, run the
+current migrations and startup repair, then alternate UID and name-only
+registrations. They verify original IDs and plugin settings, reject mismatched
+cluster/name/UID values, and inject a binding failure to verify rollback. MySQL
+also runs eight concurrent registrations. Startup store tests cover both alias
+directions, repeated repair, protected aliases and a cleanup failure that must
+retain both Host and topology. The concurrent-topology MySQL regression covers
+both alias directions.
+The upgrade tests also freeze update timestamps to check that MySQL no-change
+updates to node bindings and Edge registration, name and version succeed, while
+updates to missing records still fail.
+`TestSQLiteRegistrationDuringHeartbeat` uses two connections to verify that
+registration acquires the SQLite writer lock before reading, completes without
+a stale-snapshot failure, and releases the lock for the pending heartbeat.

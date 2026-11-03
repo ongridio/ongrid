@@ -216,6 +216,10 @@ func (d *fakeDeviceRepo) ReconcileOfflineOrphans(_ context.Context) (int64, erro
 // fakeRepo is an in-memory biz.Repo for usecase-level tests. Mirrors the
 // SQLite implementation's observable semantics (soft-delete hides rows,
 // lookups by AccessKey exclude deleted, etc.) without dragging in gorm.
+func (r *fakeRepo) WithLockedEdge(ctx context.Context, _ uint64, fn func(context.Context) error) error {
+	return fn(ctx)
+}
+
 type fakeRepo struct {
 	mu     sync.Mutex
 	byID   map[uint64]*model.Edge

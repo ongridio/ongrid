@@ -21,6 +21,17 @@ import (
 )
 
 func TestMigrateNodeHostFingerprintRetainsConcurrentTopologyMySQL(t *testing.T) {
+	for _, migrated := range []bool{false, true} {
+		name := "legacy Host"
+		if migrated {
+			name = "UID Host"
+		}
+		t.Run(name, func(t *testing.T) { testNodeHostConcurrentTopologyMySQL(t, migrated) })
+	}
+}
+
+func testNodeHostConcurrentTopologyMySQL(t *testing.T, migrated bool) {
+	t.Helper()
 	dsn := os.Getenv("ONGRID_TEST_MYSQL_DSN")
 	if dsn == "" {
 		t.Skip("set ONGRID_TEST_MYSQL_DSN to run MySQL identity migration regression")
@@ -66,7 +77,14 @@ func TestMigrateNodeHostFingerprintRetainsConcurrentTopologyMySQL(t *testing.T) 
 		t.Fatal(err)
 	}
 	sqlDB.SetMaxOpenConns(4)
-	duplicate := devicemodel.Device{Fingerprint: nodeHostFingerprint(node.ClusterID, node.NodeUID), Name: node.NodeName, Hostname: node.NodeName}
+	alias := nodeHostFingerprint(node.ClusterID, node.NodeUID)
+	if migrated {
+		alias = host.Fingerprint
+		if err := db.Model(&host).Update("fingerprint", nodeHostFingerprint(node.ClusterID, node.NodeUID)).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	duplicate := devicemodel.Device{Fingerprint: alias, Name: node.NodeName, Hostname: node.NodeName}
 	if err := db.Create(&duplicate).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +128,7 @@ func TestMigrateNodeHostFingerprintRetainsConcurrentTopologyMySQL(t *testing.T) 
 	release()
 	select {
 	case err := <-result:
-		if !errors.Is(err, errs.ErrConflict) {
+		if migrated && err != nil || !migrated && !errors.Is(err, errs.ErrConflict) {
 			t.Fatalf("migration ignored a newly committed topology relation: %v", err)
 		}
 	case <-ctx.Done():

@@ -92,6 +92,10 @@ func bootstrapStorage(rootCtx context.Context, cfg *config.Config, log *slog.Log
 	} else if migrated > 0 {
 		log.Info("migrated legacy workflow IM notification tools", slog.Int("flow_count", migrated))
 	}
+	if err := managerk8sdata.RepairNodeHostIdentities(rootCtx, db, log); err != nil {
+		log.Error("repair kubernetes host identities", slog.Any("err", err))
+		return nil, err
+	}
 	// The encrypted credential vault is shared by multiple bounded contexts.
 	// Construct it immediately after migrations so log backend wiring can use
 	// separate read/write API keys without delaying the HTTP/query services.

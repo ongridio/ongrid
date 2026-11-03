@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"gorm.io/gorm"
@@ -17,7 +18,7 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
 
-// MigrateNodeHostFingerprint preserves a legacy node's Host when it first reports its UID.
+// MigrateNodeHostFingerprint preserves the enrolled Host and removes unused aliases in either direction.
 func (r *Repo) MigrateNodeHostFingerprint(ctx context.Context, nodeID, edgeID uint64, nodeUID string) error {
 	if nodeID == 0 || edgeID == 0 || nodeUID == "" || strings.HasPrefix(nodeUID, "name:") {
 		return errs.ErrInvalid
@@ -50,40 +51,81 @@ func (r *Repo) MigrateNodeHostFingerprint(ctx context.Context, nodeID, edgeID ui
 			return err
 		}
 		legacy := nodeHostFingerprint(node.ClusterID, "name:"+node.NodeName)
-		if host.Fingerprint != legacy {
-			return nil
-		}
 		fingerprint := nodeHostFingerprint(node.ClusterID, nodeUID)
-		var duplicate devicemodel.Device
-		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("fingerprint = ?", fingerprint).First(&duplicate).Error
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		switch host.Fingerprint {
+		case legacy:
+			if err := deleteUnusedNodeHost(tx, &node, &host, fingerprint); err != nil {
+				return err
+			}
+			return tx.Model(&host).Update("fingerprint", fingerprint).Error
+		case fingerprint:
+			err := deleteUnusedNodeHost(tx, &node, &host, legacy)
+			if errors.Is(err, errs.ErrConflict) {
+				// An edited alias must not stop the already valid UID installation.
+				tx.Logger.Warn(ctx, "k8s: retained legacy Host for node %d: %v", node.ID, err)
+				return nil
+			}
+			return err
+		default:
+			return fmt.Errorf("%w: enrolled host has an unrelated fingerprint", errs.ErrConflict)
+		}
+	})
+}
+
+func deleteUnusedNodeHost(tx *gorm.DB, node *model.Node, host *devicemodel.Device, fingerprint string) error {
+	var duplicate devicemodel.Device
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("fingerprint = ?", fingerprint).First(&duplicate).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if duplicate.CurrentEdgeID != nil || duplicate.Hostname != node.NodeName ||
+		duplicate.Name != node.NodeName || duplicate.Description != "" || duplicate.Environment != nil || duplicate.Roles != 0 ||
+		!sameUserID(duplicate.UserID, host.UserID) {
+		return fmt.Errorf("%w: alias host %d is edited or occupied", errs.ErrConflict, duplicate.ID)
+	}
+	for _, table := range []string{"edges", "edge_devices", "k8s_nodes", "host_plugin_configs"} {
+		var count int64
+		if err := tx.Table(table).Clauses(clause.Locking{Strength: "UPDATE"}).Where("device_id = ?", duplicate.ID).Count(&count).Error; err != nil {
 			return err
 		}
-		if err == nil {
-			// Earlier failed registrations can leave an unused row; never merge used Hosts.
-			if duplicate.CurrentEdgeID != nil || duplicate.Hostname != node.NodeName ||
-				duplicate.Name != node.NodeName || duplicate.Description != "" || duplicate.Environment != nil || duplicate.Roles != 0 ||
-				!sameUserID(duplicate.UserID, host.UserID) {
-				return fmt.Errorf("%w: node UID fingerprint belongs to another host", errs.ErrConflict)
-			}
-			for _, table := range []string{"edges", "edge_devices", "k8s_nodes", "host_plugin_configs"} {
-				var count int64
-				if err := tx.Table(table).Clauses(clause.Locking{Strength: "UPDATE"}).Where("device_id = ?", duplicate.ID).Count(&count).Error; err != nil {
-					return err
-				}
-				if count != 0 {
-					return fmt.Errorf("%w: node UID fingerprint host has %s references", errs.ErrConflict, table)
-				}
-			}
-			if err := deleteUnusedHostTopology(tx, &duplicate); err != nil {
-				return err
-			}
-			if err := tx.Delete(&duplicate).Error; err != nil {
-				return err
-			}
+		if count != 0 {
+			return fmt.Errorf("%w: alias host %d has %s references", errs.ErrConflict, duplicate.ID, table)
 		}
-		return tx.Model(&host).Update("fingerprint", fingerprint).Error
-	})
+	}
+	if err := deleteUnusedHostTopology(tx, &duplicate); err != nil {
+		return err
+	}
+	return tx.Delete(&duplicate).Error
+}
+
+// RepairNodeHostIdentities also repairs offline installations during Manager startup.
+func RepairNodeHostIdentities(ctx context.Context, db *gorm.DB, log *slog.Logger) error {
+	repo := NewRepo(db)
+	var cursor uint64
+	for {
+		var nodes []model.Node
+		if err := db.WithContext(ctx).Select("id", "edge_id", "node_uid").
+			Where("id > ? AND edge_id IS NOT NULL AND device_id IS NOT NULL AND node_uid <> '' AND node_uid NOT LIKE ?", cursor, "name:%").
+			Where("cluster_id IN (?)", db.Model(&model.Cluster{}).Select("id")).
+			Order("id").Limit(200).Find(&nodes).Error; err != nil {
+			return err
+		}
+		if len(nodes) == 0 {
+			return nil
+		}
+		for _, node := range nodes {
+			if err := repo.MigrateNodeHostFingerprint(ctx, node.ID, *node.EdgeID, node.NodeUID); err != nil {
+				if !errors.Is(err, errs.ErrConflict) && !errors.Is(err, gorm.ErrRecordNotFound) {
+					return fmt.Errorf("repair node %d host identity: %w", node.ID, err)
+				}
+				log.WarnContext(ctx, "k8s: host identity repair skipped", "node_id", node.ID, "err", err)
+			}
+			cursor = node.ID
+		}
+	}
 }
 
 func deleteUnusedHostTopology(tx *gorm.DB, host *devicemodel.Device) error {

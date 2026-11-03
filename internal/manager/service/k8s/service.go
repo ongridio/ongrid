@@ -122,6 +122,10 @@ func (s *Service) HandleRegister(ctx context.Context, edgeID uint64, deviceID *u
 	return s.uc.HandleRegister(ctx, edgeID, deviceID, info)
 }
 
+func (s *Service) PrepareNodeHost(ctx context.Context, edgeID uint64, info tunnel.KubernetesInfo, host tunnel.HostInfo) (tunnel.HostInfo, error) {
+	return s.uc.PrepareNodeHost(ctx, edgeID, info, host)
+}
+
 func (s *Service) LookupControllerCluster(ctx context.Context, edgeID uint64) (uint64, error) {
 	return s.uc.LookupControllerCluster(ctx, edgeID)
 }

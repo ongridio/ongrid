@@ -43,6 +43,7 @@ type DeviceResolver interface {
 // Implemented by manager/service/k8s without importing that package here.
 type KubernetesRegistry interface {
 	HandleRegister(ctx context.Context, edgeID uint64, deviceID *uint64, info tunnel.KubernetesInfo) error
+	PrepareNodeHost(ctx context.Context, edgeID uint64, info tunnel.KubernetesInfo, host tunnel.HostInfo) (tunnel.HostInfo, error)
 	HandleControllerHeartbeat(ctx context.Context, edgeID uint64) error
 	LookupControllerCluster(ctx context.Context, edgeID uint64) (uint64, error)
 }
@@ -277,9 +278,14 @@ func Install(ctx context.Context, c *Client, w Wiring) error {
 			}
 			c.setKubernetesController(canonicalEdgeID, true)
 		} else {
-			// Confirm node identity and migrate its legacy Host before fingerprint lookup.
-			if in.Kubernetes != nil && w.K8sRegistry != nil {
-				if err := w.K8sRegistry.HandleRegister(rpcCtx, canonicalEdgeID, nil, *in.Kubernetes); err != nil {
+			// Normalize old and new Agent payloads before the generic Host lookup.
+			if in.Kubernetes != nil {
+				if w.K8sRegistry == nil {
+					return nil, fmt.Errorf("register_edge: k8s registry is unavailable")
+				}
+				var err error
+				in.HostInfo, err = w.K8sRegistry.PrepareNodeHost(rpcCtx, canonicalEdgeID, *in.Kubernetes, in.HostInfo)
+				if err != nil {
 					return nil, fmt.Errorf("register_edge: k8s node: %w", err)
 				}
 			}
