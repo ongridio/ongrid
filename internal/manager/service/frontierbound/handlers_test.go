@@ -125,6 +125,10 @@ func (f fakeK8sRegistry) HandleRegister(_ context.Context, _ uint64, _ *uint64, 
 	return nil
 }
 
+func (f fakeK8sRegistry) PrepareNodeHost(_ context.Context, _ uint64, _ tunnel.KubernetesInfo, host tunnel.HostInfo) (tunnel.HostInfo, error) {
+	return host, nil
+}
+
 func (f fakeK8sRegistry) HandleControllerHeartbeat(_ context.Context, _ uint64) error {
 	return nil
 }
@@ -143,6 +147,10 @@ type trackingK8sRegistry struct {
 
 func (f *trackingK8sRegistry) HandleRegister(_ context.Context, _ uint64, _ *uint64, _ tunnel.KubernetesInfo) error {
 	return nil
+}
+
+func (f *trackingK8sRegistry) PrepareNodeHost(_ context.Context, _ uint64, _ tunnel.KubernetesInfo, host tunnel.HostInfo) (tunnel.HostInfo, error) {
+	return host, nil
 }
 
 func (f *trackingK8sRegistry) HandleControllerHeartbeat(_ context.Context, _ uint64) error {
@@ -330,6 +338,10 @@ type rejectingNodeRegistry struct{ fakeK8sRegistry }
 
 func (rejectingNodeRegistry) HandleRegister(context.Context, uint64, *uint64, tunnel.KubernetesInfo) error {
 	return errors.New("node identity rejected")
+}
+
+func (rejectingNodeRegistry) PrepareNodeHost(context.Context, uint64, tunnel.KubernetesInfo, tunnel.HostInfo) (tunnel.HostInfo, error) {
+	return tunnel.HostInfo{}, errors.New("node identity rejected")
 }
 
 func TestInstall_RegisterNodeValidatesIdentityBeforeHostLookup(t *testing.T) {

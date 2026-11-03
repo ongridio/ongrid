@@ -2,6 +2,8 @@ package store
 
 import (
 	"errors"
+	"io"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -198,5 +200,108 @@ func TestMigrateNodeHostFingerprintRejectsConflictingBindings(t *testing.T) {
 				t.Fatalf("failed migration deleted orphan topology: %v", err)
 			}
 		})
+	}
+}
+
+func TestRepairNodeHostIdentitiesOnStartup(t *testing.T) {
+	for _, state := range []string{"legacy host", "UID host", "edited alias", "referenced alias", "deleted alias", "broken binding"} {
+		t.Run(state, func(t *testing.T) {
+			db, _, node, host := legacyNodeHost(t)
+			if err := db.Create(&model.Cluster{ID: node.ClusterID, Name: "repair-test"}).Error; err != nil {
+				t.Fatal(err)
+			}
+			canonical := nodeHostFingerprint(node.ClusterID, node.NodeUID)
+			alias := canonical
+			if state != "legacy host" {
+				alias = host.Fingerprint
+				if err := db.Model(&host).Update("fingerprint", canonical).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			duplicate := devicemodel.Device{Fingerprint: alias, Name: node.NodeName, Hostname: node.NodeName}
+			if err := db.Create(&duplicate).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := topologystore.Migrate(db); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.First(&duplicate, duplicate.ID).Error; err != nil || duplicate.NodeID == nil {
+				t.Fatalf("missing alias topology: %v", err)
+			}
+			switch state {
+			case "edited alias":
+				if err := db.Model(&duplicate).Update("description", "keep user metadata").Error; err != nil {
+					t.Fatal(err)
+				}
+			case "referenced alias":
+				if err := db.Create(&devicemodel.EdgeDevice{EdgeID: 99, DeviceID: duplicate.ID, Type: devicemodel.EdgeDeviceRelationHost, DeleteMarker: 1}).Error; err != nil {
+					t.Fatal(err)
+				}
+			case "deleted alias":
+				if err := db.Delete(&duplicate).Error; err != nil {
+					t.Fatal(err)
+				}
+			case "broken binding":
+				if err := db.Model(&edgemodel.Edge{}).Where("id = ?", *node.EdgeID).Update("device_id", duplicate.ID).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			for range 2 {
+				if err := RepairNodeHostIdentities(t.Context(), db, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var after devicemodel.Device
+			if err := db.First(&after, host.ID).Error; err != nil || after.Fingerprint != canonical || after.Name != host.Name || after.Description != host.Description || *after.CurrentEdgeID != *host.CurrentEdgeID {
+				t.Fatalf("original Host changed: %+v %v", after, err)
+			}
+			var config edgemodel.HostPluginConfig
+			if err := db.Where("device_id = ?", host.ID).First(&config).Error; err != nil || config.SpecJSON != `{"journald_units":["sshd"]}` {
+				t.Fatalf("original config changed: %v", err)
+			}
+			retained := state == "edited alias" || state == "referenced alias" || state == "broken binding"
+			err := db.First(&devicemodel.Device{}, duplicate.ID).Error
+			if retained && err != nil || !retained && !errors.Is(err, gorm.ErrRecordNotFound) {
+				t.Fatalf("alias retained=%v err=%v", retained, err)
+			}
+			if state == "legacy host" || state == "UID host" {
+				if err := db.First(&topologymodel.Node{}, *duplicate.NodeID).Error; !errors.Is(err, gorm.ErrRecordNotFound) {
+					t.Fatalf("orphan topology retained: %v", err)
+				}
+				if err := db.Unscoped().First(&duplicate, duplicate.ID).Error; err != nil || duplicate.DeletedAt == nil {
+					t.Fatalf("alias must be soft-deleted: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestUIDHostCleanupRollsBackOnDeleteFailure(t *testing.T) {
+	db, repo, node, host := legacyNodeHost(t)
+	legacy := host.Fingerprint
+	if err := db.Model(&host).Update("fingerprint", nodeHostFingerprint(node.ClusterID, node.NodeUID)).Error; err != nil {
+		t.Fatal(err)
+	}
+	duplicate := devicemodel.Device{Fingerprint: legacy, Name: node.NodeName, Hostname: node.NodeName}
+	if err := db.Create(&duplicate).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := topologystore.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(&duplicate, duplicate.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`CREATE TRIGGER reject_alias_delete BEFORE UPDATE OF deleted_at ON devices BEGIN SELECT RAISE(ABORT, 'alias delete failed'); END`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.MigrateNodeHostFingerprint(t.Context(), node.ID, *node.EdgeID, node.NodeUID); err == nil {
+		t.Fatal("ignored delete failure")
+	}
+	if err := db.First(&devicemodel.Device{}, duplicate.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(&topologymodel.Node{}, *duplicate.NodeID).Error; err != nil {
+		t.Fatalf("partial topology deletion: %v", err)
 	}
 }

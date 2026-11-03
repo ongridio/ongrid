@@ -6,9 +6,11 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	biz "github.com/ongridio/ongrid/internal/manager/biz/edge"
 	model "github.com/ongridio/ongrid/internal/manager/model/edge"
+	"github.com/ongridio/ongrid/internal/pkg/dbx"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
 
@@ -24,6 +26,19 @@ func NewRepo(db *gorm.DB) *Repo { return &Repo{db: db} }
 // compile-time interface check.
 var _ biz.Repo = (*Repo)(nil)
 
+func (r *Repo) WithLockedEdge(ctx context.Context, edgeID uint64, fn func(context.Context) error) error {
+	return dbx.Transaction(ctx, r.db, func(ctx context.Context) error {
+		var edge model.Edge
+		if err := dbx.WithContext(ctx, r.db).Clauses(clause.Locking{Strength: "UPDATE"}).First(&edge, edgeID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errs.ErrNotFound
+			}
+			return err
+		}
+		return fn(ctx)
+	})
+}
+
 // Create inserts e. Any insert-side failure (unique violation, etc.) is
 // returned unwrapped so the caller can errors.Is on gorm.ErrDuplicatedKey
 // if desired.
@@ -38,7 +53,7 @@ func (r *Repo) Create(ctx context.Context, e *model.Edge) error {
 // by gorm's default DeletedAt handling.
 func (r *Repo) GetByID(ctx context.Context, id uint64) (*model.Edge, error) {
 	var e model.Edge
-	if err := r.db.WithContext(ctx).First(&e, id).Error; err != nil {
+	if err := dbx.WithContext(ctx, r.db).First(&e, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errs.ErrNotFound
 		}
@@ -172,7 +187,9 @@ func (r *Repo) MarkRegistered(ctx context.Context, id uint64, registeredAt time.
 		return res.Error
 	}
 	if res.RowsAffected == 0 {
-		return errs.ErrNotFound
+		// A concurrent registration can write the same values within MySQL's timestamp precision.
+		_, err := r.GetByID(ctx, id)
+		return err
 	}
 	return nil
 }
@@ -187,7 +204,8 @@ func (r *Repo) UpdateName(ctx context.Context, id uint64, name string) error {
 		return res.Error
 	}
 	if res.RowsAffected == 0 {
-		return errs.ErrNotFound
+		_, err := r.GetByID(ctx, id)
+		return err
 	}
 	return nil
 }
@@ -227,7 +245,8 @@ func (r *Repo) SetAgentVersion(ctx context.Context, id uint64, version string) e
 		return res.Error
 	}
 	if res.RowsAffected == 0 {
-		return errs.ErrNotFound
+		_, err := r.GetByID(ctx, id)
+		return err
 	}
 	return nil
 }

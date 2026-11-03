@@ -1518,6 +1518,28 @@ func (u *Usecase) lockEnrollment(clusterID uint64, role, nodeName string) func()
 	}
 }
 
+// PrepareNodeHost uses the enrolled identity even when an older Agent omits its UID.
+func (u *Usecase) PrepareNodeHost(ctx context.Context, edgeID uint64, info tunnel.KubernetesInfo, host tunnel.HostInfo) (tunnel.HostInfo, error) {
+	if normalizeRole(info.Role) != model.RoleNode {
+		return host, errs.ErrInvalid
+	}
+	if err := u.HandleRegister(ctx, edgeID, nil, info); err != nil {
+		return host, err
+	}
+	node, err := u.repo.GetNodeByEdgeID(ctx, edgeID)
+	if err != nil {
+		return host, err
+	}
+	identity := node.NodeUID
+	if identity == "" {
+		identity = "name:" + node.NodeName
+	}
+	seed := fmt.Sprintf("k8s-node:%d:%s", node.ClusterID, identity)
+	host.Hostname = node.NodeName
+	host.Fingerprint, host.HardwareFingerprint = seed, seed
+	return host, nil
+}
+
 // HandleRegister reconciles the optional KubernetesInfo attached to register_edge.
 // It is intentionally separate from Enroll: enroll proves bootstrap-token
 // possession and issues credentials, while register proves the tunnel identity is
@@ -1555,8 +1577,8 @@ func (u *Usecase) HandleRegister(ctx context.Context, edgeID uint64, deviceID *u
 		if uid := strings.TrimSpace(info.NodeUID); uid != "" && uid != node.NodeUID {
 			return errors.Join(errs.ErrForbidden, fmt.Errorf("edge %d is not enrolled for node uid %q", edgeID, uid))
 		}
-		if deviceID == nil && node.DeviceID != nil && strings.TrimSpace(info.NodeUID) != "" && !strings.HasPrefix(node.NodeUID, "name:") {
-			if err := u.repo.MigrateNodeHostFingerprint(ctx, node.ID, edgeID, strings.TrimSpace(info.NodeUID)); err != nil {
+		if deviceID == nil && node.DeviceID != nil && node.NodeUID != "" && !strings.HasPrefix(node.NodeUID, "name:") {
+			if err := u.repo.MigrateNodeHostFingerprint(ctx, node.ID, edgeID, node.NodeUID); err != nil {
 				return fmt.Errorf("migrate k8s node host identity: %w", err)
 			}
 		}

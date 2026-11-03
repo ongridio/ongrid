@@ -26,6 +26,8 @@ type ListFilter struct {
 // internal/manager/data/edge/store. Post-pivot there is no org_id
 // parameter.
 type Repo interface {
+	// WithLockedEdge serializes registration and commits Host creation and binding together.
+	WithLockedEdge(ctx context.Context, edgeID uint64, fn func(context.Context) error) error
 	Create(ctx context.Context, e *model.Edge) error
 	GetByID(ctx context.Context, id uint64) (*model.Edge, error)
 	GetByAccessKey(ctx context.Context, accessKey string) (*model.Edge, error)

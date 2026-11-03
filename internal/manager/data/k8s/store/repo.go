@@ -509,12 +509,20 @@ func (r *Repo) UpdateNodeEdge(ctx context.Context, nodeID, edgeID uint64, device
 	if deviceID != nil {
 		updates["device_id"] = *deviceID
 	}
-	res := r.db.WithContext(ctx).Model(&model.Node{}).Where("id = ?", nodeID).Updates(updates)
+	q := r.db.WithContext(ctx).Model(&model.Node{}).Where("id = ?", nodeID)
+	res := q.Updates(updates)
 	if res.Error != nil {
 		return res.Error
 	}
 	if res.RowsAffected == 0 {
-		return errs.ErrNotFound
+		// MySQL reports zero changed rows for identical re-registrations.
+		var count int64
+		if err := q.Count(&count).Error; err != nil {
+			return err
+		}
+		if count == 0 {
+			return errs.ErrNotFound
+		}
 	}
 	return nil
 }

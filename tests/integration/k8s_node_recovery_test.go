@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -77,15 +78,16 @@ func TestKubernetesNodeCredentialRecoveryChain(t *testing.T) {
 			register := func(t *testing.T, cred *k8sbiz.EnrollResult, name, uid string) {
 				t.Helper()
 				info := tunnel.KubernetesInfo{ClusterID: reg.Cluster.ID, ClusterUID: clusterUID, Role: "node", NodeName: name, NodeUID: uid}
-				if err := nodes.HandleRegister(ctx, cred.EdgeID, nil, info); err != nil {
-					t.Fatal(err)
-				}
 				identity := uid
 				if identity == "" {
 					identity = "name:" + name
 				}
 				seed := fmt.Sprintf("k8s-node:%d:%s", reg.Cluster.ID, identity)
-				if err := edges.HandleRegister(ctx, cred.EdgeID, tunnel.HostInfo{Hostname: name, Fingerprint: seed, HardwareFingerprint: seed}, "test"); err != nil {
+				host, err := nodes.PrepareNodeHost(ctx, cred.EdgeID, info, tunnel.HostInfo{Hostname: name, Fingerprint: seed, HardwareFingerprint: seed})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := edges.HandleRegister(ctx, cred.EdgeID, host, "test"); err != nil {
 					t.Fatal(err)
 				}
 				edge, err := edgeRepo.GetByID(ctx, cred.EdgeID)
@@ -227,8 +229,12 @@ func TestKubernetesNodeCredentialRecoveryChain(t *testing.T) {
 					}
 					var orphan devicemodel.Device
 					if !tc.replaced && startup == "manager-restart-after-failed-upgrade" {
-						// The unpatched registration creates a Host before rejecting its binding.
+						// Reproduce the old non-transactional insert before binding was rejected.
 						seed := fmt.Sprintf("k8s-node:%d:%s", reg.Cluster.ID, info.NodeUID)
+						hash := sha256.Sum256([]byte("hw:" + seed))
+						if _, err := devicestore.NewRepo(db).FindOrCreateByFingerprint(ctx, &devicemodel.Device{Fingerprint: fmt.Sprintf("fp_%x", hash[:16]), Name: tc.name, Hostname: tc.name}); err != nil {
+							t.Fatal(err)
+						}
 						if err := edges.HandleRegister(ctx, session.EdgeID, tunnel.HostInfo{Hostname: tc.name, Fingerprint: seed, HardwareFingerprint: seed}, "v0.19.0"); !errors.Is(err, errs.ErrInvalid) {
 							t.Fatalf("old registration did not reproduce the upgrade failure: %v", err)
 						}
