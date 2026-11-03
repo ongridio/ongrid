@@ -14,6 +14,7 @@ import (
 
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	knowledgebiz "github.com/ongridio/ongrid/internal/manager/biz/knowledge"
+	"github.com/ongridio/ongrid/internal/pkg/textutil"
 )
 
 // ToolNameQueryKnowledge is the wire name.
@@ -154,11 +155,11 @@ func (t *QueryKnowledgeTool) InvokableRun(ctx context.Context, argsJSON string, 
 	out := queryKnowledgeResponse{Query: args.Query}
 	for _, h := range hits {
 		preview := h.Doc.Content
-		// Cap at ~800 chars per hit so a max_results=5 reply stays
+		// Cap at ~800 bytes per hit (cut on a rune boundary) so a max_results=5 reply stays
 		// under ~4k tokens. The LLM can re-ask for full content via
 		// a follow-up if needed (future doc-fetch tool).
 		if len(preview) > 800 {
-			preview = preview[:800] + "…"
+			preview = textutil.TruncateBytes(preview, 800) + "…"
 			out.Truncated = true
 		}
 		out.Items = append(out.Items, queryKnowledgeHit{
