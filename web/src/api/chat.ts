@@ -290,6 +290,9 @@ export type ApprovalPendingStreamEvent = {
   credentials?: string[];
 };
 
+// Only a rejection before runtime dispatch guarantees that resubmission is safe.
+export class RejectedChatTurnError extends ApiError {}
+
 export type StreamCallbacks = {
   onAssistant?: (e: AssistantStreamEvent) => void;
   onToolStart?: (e: ToolStreamEvent) => void;
@@ -405,8 +408,9 @@ function dispatchFrame(raw: string, cbs: StreamCallbacks) {
       cbs.onDone?.(payload as PostMessageResponse);
       break;
     case 'error': {
-      const obj = payload as { error?: string };
-      cbs.onError?.(new Error(obj.error || 'stream error'));
+      const obj = payload as { error?: string; code?: string; turn_rejected?: boolean };
+      const StreamError = obj.turn_rejected === true ? RejectedChatTurnError : ApiError;
+      cbs.onError?.(new StreamError(obj.error || 'stream error', 200, obj.code));
       break;
     }
     default:

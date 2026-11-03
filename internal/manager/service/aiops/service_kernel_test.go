@@ -219,3 +219,19 @@ func TestService_Graph_Ownership(t *testing.T) {
 		t.Errorf("runtime must NOT be consulted for non-owner, got %d", rt.calls.Load())
 	}
 }
+
+func TestTurnRejectionEndsAtRuntimeDispatch(t *testing.T) {
+	store, id := newSeededSessions(7)
+	rt := &fakeRuntime{err: errs.ErrNotFound}
+	service := New(rt, store, nil, nil)
+	for _, tc := range []struct {
+		user     uint64
+		rejected bool
+	}{{8, true}, {7, false}} {
+		_, err := service.PostMessageStream(context.Background(), Caller{UserID: tc.user}, id, "hello", nil)
+		var rejected *TurnRejectedError
+		if !errors.Is(err, errs.ErrNotFound) || errors.As(err, &rejected) != tc.rejected {
+			t.Fatalf("user %d: got %T %v, want not-found with rejected=%v", tc.user, err, err, tc.rejected)
+		}
+	}
+}

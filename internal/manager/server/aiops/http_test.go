@@ -302,6 +302,28 @@ func TestPostMessageSessionNotFound(t *testing.T) {
 	}
 }
 
+func TestStreamErrorMarksOnlyPreDispatchRejections(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		service  AIOpsService
+		rejected bool
+	}{
+		{"empty message", svc.New(nil, nil, nil, nil), true},
+		{"runtime error", &fakeService{postErr: errs.ErrInvalid}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := buildRouter(NewHandler(tc.service), tenantctx.Tenant{UserID: 1, Role: "user"})
+			req := httptest.NewRequest(http.MethodPost, "/v1/chat/sessions/7/messages/stream", strings.NewReader(`{"content":""}`))
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			body := w.Body.String()
+			if w.Code != http.StatusOK || !strings.Contains(body, "event: error") || !strings.Contains(body, `"code":"invalid"`) || strings.Contains(body, `"turn_rejected":true`) != tc.rejected {
+				t.Fatalf("unexpected stream: %d %s", w.Code, body)
+			}
+		})
+	}
+}
+
 func TestListSessionsHappyPath(t *testing.T) {
 	f := &fakeService{
 		listResp: []*model.Session{

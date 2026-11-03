@@ -241,3 +241,97 @@ test('resizes an open assistant with the viewport and keeps its composer reachab
     expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
   }
 });
+
+test.describe('mobile confirmations', () => {
+  test.use({ hasTouch: true });
+  for (const zh of [true, false]) {
+    test(`expanded assistant accepts touch on nested confirmations (${zh ? 'light' : 'dark'})`, async ({ page }, testInfo) => {
+      await openTestPage(page, 390, zh);
+      // A custom TraceQL query is deliberately omitted from the snapshot.
+      await page.goto('/traces?q=%7B%20span%3Astatus%20%3D%20error%20%7D');
+      await page.getByRole('button', { name: zh ? 'AI 助理' : 'AI assistant', exact: true }).tap();
+      const panel = page.locator('#floating-assistant');
+      await panel.getByRole('button', { name: /展开窗口|Expand window/ }).tap();
+      const input = panel.getByRole('textbox');
+      await input.fill('Explain this trace query');
+      await panel.getByRole('button', { name: /新对话|New conversation/ }).tap();
+      const confirm = page.getByRole('dialog', { name: /确认操作|Confirm action/ });
+      await expect(confirm).toBeVisible();
+      await testInfo.attach('expanded confirmation', { body: await page.screenshot(), contentType: 'image/png' });
+      await confirm.getByRole('button', { name: /取消|Cancel/ }).tap();
+      await expect(input).toHaveValue('Explain this trace query');
+      await panel.getByRole('button', { name: /新对话|New conversation/ }).tap();
+      await confirm.getByRole('button', { name: /^(确认|Confirm)$/ }).tap();
+      await expect(input).toHaveValue('');
+      await input.fill('Explain this trace query');
+      await panel.getByRole('button', { name: /^(发送|Send)$/ }).tap();
+      await expect(confirm).toContainText(/部分筛选|Some filters/);
+      await confirm.getByRole('button', { name: /取消|Cancel/ }).tap();
+      await expect(input).toHaveValue('Explain this trace query');
+    });
+  }
+});
+
+async function mockFloatingSession(page: Page) {
+  await page.route('**/api/v1/chat/sessions', route => route.fulfill({ json: route.request().method() === 'POST'
+    ? { ...route.request().postDataJSON(), id: 'review-session', user_id: 1 }
+    : { items: [], total: 0 } }));
+  await page.getByRole('button', { name: 'AI 助理', exact: true }).click();
+  return page.locator('#floating-assistant');
+}
+
+test('restores a rejected draft and keeps an ambiguous stream failure locked', async ({ page }) => {
+  await openTestPage(page, 1280);
+  const panel = await mockFloatingSession(page);
+  const input = panel.getByRole('textbox');
+  const question = '  inspect this session  ';
+  let rejected = true;
+  await page.route('**/messages/stream', route => route.fulfill({
+    contentType: 'text/event-stream',
+    body: 'event: error\ndata: ' + JSON.stringify({ error: 'not found', code: 'not-found', turn_rejected: rejected || undefined }) + '\n\n',
+  }));
+  await input.fill(question);
+  await panel.getByRole('button', { name: '发送', exact: true }).click();
+  await expect(panel.getByRole('alert')).toHaveText('not found');
+  await expect(input).toBeEditable();
+  await expect(input).toHaveValue(question);
+  await expect(panel.getByRole('log')).toBeEmpty();
+  rejected = false;
+  await panel.getByRole('button', { name: '发送', exact: true }).click();
+  await expect(panel.getByRole('button', { name: '在完整会话核对结果' })).toBeVisible();
+  await expect(input).toBeDisabled();
+  await expect(panel.getByRole('log')).toContainText(question.trim());
+});
+
+test('full conversation can decide an approval created after handoff', async ({ page }) => {
+  await openTestPage(page, 1280);
+  const panel = await mockFloatingSession(page);
+  const approval = { id: 'handoff', session_id: 'review-session', status: 'pending', kind: 'cloud_bash', payload: '{"command":"hostname"}' };
+  let pending = false;
+  await page.route('**/approvals?status=pending', route => route.fulfill({ json: { items: pending ? [approval] : [] } }));
+  await page.route('**/approvals/handoff', route => route.fulfill({ json: approval }));
+  await page.route('**/approvals/handoff/reject', route => route.fulfill({ json: { ok: true } }));
+  const stream = page.waitForEvent('request', req => req.url().endsWith('/messages/stream'));
+  let finish!: () => void;
+  const decision = new Promise<void>(resolve => { finish = resolve; });
+  await page.route('**/messages/stream', async route => {
+    await decision;
+    await route.fulfill({ contentType: 'text/event-stream', body: 'event: done\ndata: {}\n\n' });
+  });
+  try {
+    await panel.getByRole('textbox').fill('Inspect the host');
+    await panel.getByRole('button', { name: '发送', exact: true }).click();
+    await stream;
+    const initial = page.waitForResponse(resp => resp.url().endsWith('/approvals?status=pending'));
+    await panel.getByRole('button', { name: '打开完整会话' }).click();
+    await initial;
+    await expect(page).toHaveURL(/\/chat\/review-session$/);
+    pending = true;
+    const decided = page.waitForResponse(resp => resp.url().endsWith('/approvals/handoff/reject'));
+    await page.getByRole('button', { name: '拒绝', exact: true }).click();
+    await decided;
+    await expect(page.getByText('已拒绝，未执行')).toBeVisible();
+  } finally {
+    finish();
+  }
+});

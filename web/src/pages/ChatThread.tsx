@@ -60,6 +60,7 @@ export default function ChatThreadPage() {
   // abortRef holds the in-flight turn's AbortController so Esc can cancel the
   // stream client-side (instant UI) alongside the server-side stop call.
   const abortRef = useRef<AbortController | null>(null);
+  const localStreams = useRef(new WeakSet<AbortController>());
   // React Router reuses this page between /chat/:sessionId routes. Keep the
   // visible session explicit so callbacks from an older stream cannot mutate it.
   const activeSessionRef = useRef(sessionId);
@@ -173,7 +174,15 @@ export default function ChatThreadPage() {
     // Fingerprint the response and skip setMessages when nothing
     // actually changed.
     const fingerprintRef = { current: '' };
+    // Other views own their SSE callbacks. Keep polling their messages and pending approvals.
+    const ownsStream = () => {
+      const controller = getChatTurnController(sessionId);
+      return controller !== null && localStreams.current.has(controller);
+    };
+    let nextRequest = 0;
+    let lastApplied = 0;
     const refetch = (initial: boolean) => {
+      const request = ++nextRequest;
       if (initial) setLoading(true);
       Promise.all([
         getMessages(sessionId),
@@ -186,8 +195,8 @@ export default function ChatThreadPage() {
         listApprovals('pending').catch(() => ({ items: [] as Approval[] })),
       ])
         .then(([r, ap]) => {
-          if (cancelled) return;
-          if (!initial && submittingRef.current) return;
+          if (cancelled || request < lastApplied || ownsStream()) return;
+          lastApplied = request;
           const items = r.items ?? [];
           const pending = (ap.items ?? []).filter((a) => a.session_id === sessionId);
           const merged = pending.length
@@ -206,7 +215,7 @@ export default function ChatThreadPage() {
           setMessages(merged);
         })
         .catch(() => {
-          if (cancelled || !initial) return;
+          if (cancelled || request < lastApplied || !initial || ownsStream()) return;
           setMessages([]);
         })
         .finally(() => {
@@ -218,7 +227,7 @@ export default function ChatThreadPage() {
     const tick = () => {
       if (cancelled) return;
       if (document.visibilityState !== 'visible') return;
-      if (submittingRef.current) return;
+      if (ownsStream()) return;
       refetch(false);
     };
     const unsubscribe = subscribeChatTurns(id => {
@@ -289,6 +298,7 @@ export default function ChatThreadPage() {
     setSubmitting(true);
     const ac = new AbortController();
     abortRef.current = ac;
+    localStreams.current.add(ac);
     registerChatTurnController(turnSessionID, ac);
 
     let uploadedAttachments: ImageAttachment[] = [];

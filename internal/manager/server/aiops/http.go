@@ -843,10 +843,12 @@ func (h *Handler) postMessageStream(w http.ResponseWriter, r *http.Request) {
 
 	reply, err := h.svc.PostMessageStreamWithOpts(r.Context(), caller, id, req.Content, emit, opts)
 	if err != nil {
-		writeSSE(w, flusher, "error", map[string]string{
-			"error": err.Error(),
-			"code":  errCode(err),
-		})
+		payload := map[string]any{"error": err.Error(), "code": errCode(err)}
+		var rejected *svc.TurnRejectedError
+		if errors.As(err, &rejected) {
+			payload["turn_rejected"] = true
+		}
+		writeSSE(w, flusher, "error", payload)
 		return
 	}
 	// Belt-and-suspenders: if the agent returned without emitting a

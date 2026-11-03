@@ -395,22 +395,27 @@ func (s *Service) PostMessageStreamWithOpts(ctx context.Context, caller Caller, 
 	return s.runChat(ctx, caller, sessionID, content, emit, opts)
 }
 
+// TurnRejectedError means the runtime never received the user message.
+type TurnRejectedError struct{ error }
+
+func (e *TurnRejectedError) Unwrap() error { return e.error }
+
 // runChat 是聊天请求的统一入口，完成鉴权、取消管理后调用 Graph runtime。
 func (s *Service) runChat(ctx context.Context, caller Caller, sessionID string, content string, emit chatprotocol.Emit, opts chatprotocol.RunOptions) (*chatprotocol.Reply, error) {
 	content = strings.TrimSpace(content)
 	if content == "" && len(opts.Attachments) == 0 {
-		return nil, fmt.Errorf("%w: content required", errs.ErrInvalid)
+		return nil, &TurnRejectedError{fmt.Errorf("%w: content required", errs.ErrInvalid)}
 	}
 	sess, err := s.GetSession(ctx, caller, sessionID)
 	if err != nil {
-		return nil, err
+		return nil, &TurnRejectedError{err}
 	}
 	if err := s.validatePageIncident(ctx, caller, sess.PageContext, sess.RelatedIncidentID); err != nil {
-		return nil, err
+		return nil, &TurnRejectedError{err}
 	}
 	if len(opts.Attachments) > 0 {
 		if s.attachments == nil {
-			return nil, errs.ErrNotWiredYet
+			return nil, &TurnRejectedError{errs.ErrNotWiredYet}
 		}
 		ids := make([]string, 0, len(opts.Attachments))
 		for _, attachment := range opts.Attachments {
@@ -418,14 +423,14 @@ func (s *Service) runChat(ctx context.Context, caller Caller, sessionID string, 
 		}
 		resolved, resolveErr := s.attachments.ResolveAttachments(ctx, sessionID, ids, caller.UserID, caller.IsAdmin())
 		if resolveErr != nil {
-			return nil, resolveErr
+			return nil, &TurnRejectedError{resolveErr}
 		}
 		var total int64
 		for _, attachment := range resolved {
 			total += attachment.Size
 		}
 		if total > 20<<20 {
-			return nil, fmt.Errorf("%w: image attachments exceed 20 MiB", errs.ErrInvalid)
+			return nil, &TurnRejectedError{fmt.Errorf("%w: image attachments exceed 20 MiB", errs.ErrInvalid)}
 		}
 		opts.Attachments = resolved
 	}
@@ -434,7 +439,7 @@ func (s *Service) runChat(ctx context.Context, caller Caller, sessionID string, 
 	// deployment-wide default.
 	opts = resolveSessionRunOptions(sess, opts)
 	if err := s.validateImageContext(ctx, sessionID, &opts); err != nil {
-		return nil, err
+		return nil, &TurnRejectedError{err}
 	}
 
 	// HLD-021: detach the chat turn from the HTTP request lifecycle. A turn now
@@ -456,7 +461,7 @@ func (s *Service) runChat(ctx context.Context, caller Caller, sessionID string, 
 	defer s.unregisterCancel(sess.ID, cancel)
 
 	if s.runtime == nil {
-		return nil, fmt.Errorf("chat runtime unavailable: %w", errs.ErrNotWiredYet)
+		return nil, &TurnRejectedError{fmt.Errorf("chat runtime unavailable: %w", errs.ErrNotWiredYet)}
 	}
 	return s.runGraph(ctx, sess, content, emit, opts)
 }

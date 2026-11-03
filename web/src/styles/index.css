@@ -976,7 +976,7 @@ html.light .og-chip[data-tone="accent"] { color: rgb(67 56 202); }
     --assistant-room-width: calc(100vw - max(8px, env(safe-area-inset-left)) - max(8px, env(safe-area-inset-right)));
     --assistant-room-height: min(70dvh, calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
     inset: auto env(safe-area-inset-right) max(8px, env(safe-area-inset-bottom)) env(safe-area-inset-left);
-    margin-inline: auto; z-index: 51;
+    margin-inline: auto; z-index: 50;
   }
   .og-dialog-content[data-placement="assistant"][data-expanded] {
     inset: 0; width: 100%; height: 100dvh; border-radius: 0;

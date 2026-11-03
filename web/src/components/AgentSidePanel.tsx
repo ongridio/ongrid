@@ -6,7 +6,7 @@ import { MessageBubble } from '@/components/MessageBubble';
 import { Button, EmptyState, Textarea } from '@/components/ui';
 import { Dialog, DialogClose, DialogContent, DialogTitle } from '@/components/ui/Dialog';
 import { useDialogs } from '@/components/ui/useDialogs';
-import { createSession, deleteSession, getMessages, listModels, listSessions, streamMessage, updateSessionModel, type ChatMessage, type ChatSession, type ModelCatalog, type ModelSelection } from '@/api/chat';
+import { createSession, deleteSession, getMessages, listModels, listSessions, RejectedChatTurnError, streamMessage, updateSessionModel, type ChatMessage, type ChatSession, type ModelCatalog, type ModelSelection } from '@/api/chat';
 import { ApiError } from '@/api/client';
 import { useI18n } from '@/i18n/locale';
 import { useAssistantSource, type AssistantPage } from '@/lib/assistantPage';
@@ -203,9 +203,11 @@ function FloatingAssistant() {
     } catch (err) {
       if (!controller.signal.aborted) {
         setError(err instanceof Error ? err.message : tr('请求失败', 'Request failed'));
-        if (posted && err instanceof ApiError && [400, 401, 403, 404, 413, 429].includes(err.status)) {
+        const rejected = err instanceof RejectedChatTurnError ||
+          (err instanceof ApiError && [400, 401, 403, 404, 413, 429].includes(err.status));
+        if (posted && rejected) {
           setMessages(old => old.slice(0, -2));
-          setDraft(question);
+          setDraft(draft);
         } else if (posted) {
           setUncertain(true);
         }
