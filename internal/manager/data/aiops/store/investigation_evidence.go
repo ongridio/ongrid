@@ -49,7 +49,7 @@ func (r *SessionRepo) investigationSessions(ctx context.Context, root string) ([
 }
 
 func (r *SessionRepo) investigationCalls(ctx context.Context, ids []string, before time.Time) *gorm.DB {
-	// SUBSTR is supported by both MySQL and SQLite. Clip again in Go by bytes:
+	// SUBSTR bounds the SQL read; BoundContent omits oversized fields before redaction.
 	// SQL character limits alone do not bound multibyte result payloads.
 	byteLengths := "LENGTH(tc.arguments_json) AS arguments_bytes, LENGTH(tc.result_json) AS result_bytes"
 	if r.db.Dialector.Name() == "sqlite" {

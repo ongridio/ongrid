@@ -37,6 +37,12 @@ Limits: 32 sessions, 128 executions, 64 sources, 32 KiB per stored result read,
 12 KiB of additional observation catalog input, and a three-second read timeout.
 Record, preview, or prompt truncation makes completeness explicit. The report
 extractor keeps its existing provider, model, timeout and single-call behavior.
+Oversized arguments/results and potentially truncated error summaries are
+omitted before redaction; partial JSON cannot be safely masked. Complete fields
+remain available. Errors at the runtime's 512-character cap are treated as
+potentially truncated, including copies of errors from otherwise complete results.
+Evidence reads and extraction have their own bounded timeouts after the worker
+finishes, so the worker's elapsed time does not consume the extraction budget.
 
 ## Storage, API, and permissions
 
@@ -109,7 +115,11 @@ Local validation passed the affected Go packages with race detection, manager
 bootstrap tests, six component tests, the frontend build/lint (45 existing lint
 warnings), and all 16 browser combinations. The all-package Go run is not green
 on macOS: Linux-only Edge symbols/cmdpolicy and an existing upgrade-path case test
-fail. Architecture lint could not run because `go-arch-lint` is not installed.
+fail. Architecture lint v1.19.0 passes on a copy of the current tracked files;
+the development checkout's `node_modules` contains unrelated Go sources.
+Regression tests also cover oversized field omission at the SQL reader and
+prompt/detail boundaries, complete LogQL arguments, failed-batch targets, and
+the extractor's independent deadline. These pass with race detection.
 MySQL migration/runtime, real providers, and production rollout remain untested.
 
 ## Controlled UI comparison

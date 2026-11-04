@@ -89,8 +89,10 @@ func TestInvestigationEvidenceBoundsRowsAndUnicodePayloads(t *testing.T) {
 	for i := 0; i < investigator.MaxEvidenceCalls+1; i++ {
 		addEvidenceCall(t, r, "root", fmt.Sprintf("call-%03d", i), `{}`, now)
 	}
-	large := `{"records":["` + strings.Repeat("中", investigator.MaxEvidenceResultBytes) + `"]}`
-	if err := r.db.Model(&model.ToolCall{}).Where("id = ?", "call-000").Update("result_json", large).Error; err != nil {
+	large := `{"password":"dummy-sensitive-value","records":["` + strings.Repeat("中", investigator.MaxEvidenceResultBytes) + `"]}`
+	if err := r.db.Model(&model.ToolCall{}).Where("id = ?", "call-000").Updates(map[string]any{
+		"result_json": large, "arguments_json": large, "error": large,
+	}).Error; err != nil {
 		t.Fatal(err)
 	}
 	rows, err := r.ListInvestigationCalls(context.Background(), "root", now.Add(time.Second))
@@ -103,6 +105,15 @@ func TestInvestigationEvidenceBoundsRowsAndUnicodePayloads(t *testing.T) {
 	first := rows.Calls[0]
 	if !first.Truncated || first.ResultBytes != len(large) || len(*first.ResultJSON) > investigator.MaxEvidenceResultBytes || !utf8.ValidString(*first.ResultJSON) {
 		t.Fatalf("payload cap failed: bytes=%d original=%d truncated=%v", len(*first.ResultJSON), first.ResultBytes, first.Truncated)
+	}
+	detail, _, err := r.GetInvestigationCall(context.Background(), "root", "call-000", now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, call := range []investigator.EvidenceCall{first, detail} {
+		if call.Error == nil || !call.Truncated || strings.Contains(call.ArgumentsJSON+*call.ResultJSON+*call.Error, "dummy-sensitive-value") {
+			t.Fatal("SQL reader returned oversized field content instead of an omission marker")
+		}
 	}
 }
 

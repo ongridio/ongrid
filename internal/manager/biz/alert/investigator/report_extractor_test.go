@@ -17,6 +17,12 @@ type fakeSummarizer struct {
 	calls   int
 }
 
+type summarizerFunc func(context.Context, llm.ChatReq) (*llm.ChatResp, error)
+
+func (f summarizerFunc) Chat(ctx context.Context, req llm.ChatReq) (*llm.ChatResp, error) {
+	return f(ctx, req)
+}
+
 func (f *fakeSummarizer) Chat(_ context.Context, req llm.ChatReq) (*llm.ChatResp, error) {
 	f.calls++
 	f.lastReq = req

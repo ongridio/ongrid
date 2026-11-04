@@ -676,9 +676,9 @@ func (uc *Usecase) run(reportID string, incident alertmodel.Incident, dedupKeyVa
 		return
 	}
 
-	// Reuse the extraction call; provenance is checked against recorded executions.
-	sources := uc.collectEvidence(ctx, worker.SessionID)
-	fields := uc.extractStructured(ctx, incident, finalAnswer, sources.CallCount, locale, sources)
+	// Post-processing keeps its own bounded timeouts after the worker finishes.
+	sources := uc.collectEvidence(context.Background(), worker.SessionID)
+	fields := uc.extractStructured(context.Background(), incident, finalAnswer, sources.CallCount, locale, sources)
 
 	if err := uc.repo.MarkReady(context.Background(), reportID, fields); err != nil {
 		uc.log.Warn("mark ready failed",

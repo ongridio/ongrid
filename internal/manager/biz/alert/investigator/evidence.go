@@ -32,11 +32,21 @@ type EvidenceCall struct {
 }
 
 func (c *EvidenceCall) BoundContent() {
-	c.Truncated = c.ArgumentsBytes > MaxEvidenceResultBytes || c.ResultBytes > MaxEvidenceResultBytes || len(c.ArgumentsJSON) > MaxEvidenceResultBytes || (c.ResultJSON != nil && len(*c.ResultJSON) > MaxEvidenceResultBytes)
-	c.ArgumentsJSON = clipEvidence(c.ArgumentsJSON, MaxEvidenceResultBytes)
-	if c.ResultJSON != nil {
-		result := clipEvidence(*c.ResultJSON, MaxEvidenceResultBytes)
+	// SQL may already have cut JSON mid-field; a partial document cannot be safely redacted.
+	const omitted = "[omitted: content exceeds evidence read limit]"
+	if c.ArgumentsBytes > MaxEvidenceResultBytes || len(c.ArgumentsJSON) > MaxEvidenceResultBytes {
+		c.Truncated = true
+		c.ArgumentsJSON = omitted
+	}
+	if c.ResultBytes > MaxEvidenceResultBytes || (c.ResultJSON != nil && len(*c.ResultJSON) > MaxEvidenceResultBytes) {
+		c.Truncated = true
+		result := omitted
 		c.ResultJSON = &result
+	}
+	// ResultOutcome may already have cut the persisted error at 512 runes.
+	if c.Error != nil && utf8.RuneCountInString(*c.Error) >= 512 {
+		errText := "[omitted: error may be truncated]"
+		c.Error = &errText
 	}
 }
 
@@ -154,6 +164,13 @@ func describeEvidence(call EvidenceCall, raw string, index *int) alertmodel.Evid
 		s.State, s.Reason = "truncated", "result_limit"
 		return s
 	}
+	var obj map[string]json.RawMessage
+	decodeErr := json.Unmarshal([]byte(raw), &obj)
+	if decodeErr == nil {
+		if id := strings.Trim(string(obj["device_id"]), `"`); id != "" && id != "null" {
+			s.Target = "device_id=" + clipEvidence(id, 80)
+		}
+	}
 	if call.Status != aiopsmodel.StatusSuccess {
 		s.State = call.Status
 		if s.State != "error" && s.State != "timeout" && s.State != "pending" {
@@ -170,13 +187,9 @@ func describeEvidence(call EvidenceCall, raw string, index *int) alertmodel.Evid
 		s.State, s.Reason = status, "execution_"+status
 		return s
 	}
-	var obj map[string]json.RawMessage
-	if json.Unmarshal([]byte(raw), &obj) != nil || obj == nil {
+	if decodeErr != nil || obj == nil {
 		s.State, s.Reason = "unsupported", "result_shape_unknown"
 		return s
-	}
-	if id := strings.Trim(string(obj["device_id"]), `"`); id != "" && id != "null" {
-		s.Target = "device_id=" + clipEvidence(id, 80)
 	}
 	switch call.ToolName {
 	case "query_promql", "query_logql":

@@ -83,6 +83,26 @@ func TestEvidencePipelinePersistsCheckWithAuditSession(t *testing.T) {
 	}
 }
 
+func TestEvidencePipelineKeepsIndependentExtractionTimeout(t *testing.T) {
+	uc, _, sum, incident := replayInputs()
+	repo := &fakeRepo{}
+	uc.repo = repo
+	uc.spawner = &fakeSpawner{worker: &chatruntime.Worker{ID: "worker", SessionID: "investigation", Result: replayNarrative}}
+	uc.cfg.WorkerTimeout = time.Minute
+	uc.cfg.SummarizerTimeout = time.Hour
+	uc.summarizer = summarizerFunc(func(ctx context.Context, req llm.ChatReq) (*llm.ChatResp, error) {
+		deadline, ok := ctx.Deadline()
+		if !ok || time.Until(deadline) < 59*time.Minute || time.Until(deadline) > time.Hour {
+			t.Errorf("extractor did not receive its own bounded budget: deadline=%v", deadline)
+		}
+		return sum.Chat(ctx, req)
+	})
+	uc.run("report", incident, "42", "en")
+	if len(repo.ready) != 1 || repo.ready[0].fields.RootCause == "" || sum.calls != 1 {
+		t.Fatalf("structured extraction did not finish: %+v", repo.ready)
+	}
+}
+
 func writeReplayArtifact(t *testing.T, version string, fields ReadyFields) {
 	t.Helper()
 	dir := os.Getenv("ONGRID_EVIDENCE_REPLAY_DIR")

@@ -9,6 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	aiopsmodel "github.com/ongridio/ongrid/internal/manager/model/aiops"
 	alertmodel "github.com/ongridio/ongrid/internal/manager/model/alert"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
@@ -85,7 +86,7 @@ func TestEvidenceBatchSeparatesTargetsAndFencesInventedReferences(t *testing.T) 
 	if len(set.Sources) != 2 || set.Sources[0].State != "available" || set.Sources[1].State != "error" {
 		t.Fatalf("sources=%+v", set.Sources)
 	}
-	if set.Sources[0].Target == set.Sources[1].Target || set.Sources[0].SessionID != "specialist-child" {
+	if set.Sources[0].Target != "device_id=42" || set.Sources[1].Target != "device_id=43" || set.Sources[0].SessionID != "specialist-child" {
 		t.Fatalf("lost identity: %+v", set.Sources)
 	}
 	for _, tt := range []struct {
@@ -202,5 +203,89 @@ func TestEvidenceDetailEnforcesReportAndTranscriptBoundary(t *testing.T) {
 	r.records.Calls = nil
 	if _, err := ReadEvidenceDetail(context.Background(), r, rep, "report", "E1", 7, false); !errors.Is(err, errs.ErrNotFound) {
 		t.Fatalf("deleted source: %v", err)
+	}
+}
+
+func TestEvidenceOversizedJSONDoesNotExposeCredentials(t *testing.T) {
+	for _, field := range []string{"arguments", "result"} {
+		t.Run(field, func(t *testing.T) {
+			call := evidenceCall("call", "query_logql", "success", `{"records":[]}`)
+			call.ArgumentsJSON = `{"query":"{device_id=\"42\"} |= \"OOM\""}`
+			raw := `{"password":"dummy-sensitive-value","pass\u0077ord":"dummy-sensitive-value","nested":"{\"api_key\":\"dummy-sensitive-value\"}","token":"dummy-sensitive-value` + strings.Repeat("中", MaxEvidenceResultBytes) + `"}`
+			// Match the SQL reader: original byte count plus an already clipped prefix.
+			prefix := clipEvidence(raw, MaxEvidenceResultBytes)
+			if field == "arguments" {
+				call.ArgumentsJSON, call.ArgumentsBytes = prefix, len(raw)
+			} else {
+				call.ResultJSON, call.ResultBytes = &prefix, len(raw)
+			}
+			call.BoundContent()
+			r := &evidenceReaderFake{records: EvidenceRecords{OwnerID: 7, Calls: []EvidenceCall{call}}}
+			set := (&Usecase{}).WithEvidenceReader(r).collectEvidence(context.Background(), "investigation")
+			if len(set.Sources) != 1 || set.Sources[0].State != "truncated" || strings.Contains(set.Prompt, "dummy-sensitive-value") {
+				t.Fatal("oversized source was not safely omitted from the extractor input")
+			}
+			check := marshalOrDefault(alertmodel.EvidenceCheck{Version: 1, Sources: set.Sources}, "{}")
+			root := "investigation"
+			rep := &alertmodel.InvestigationReport{ID: "report", AuditSessionID: &root, ReadyAt: call.EndedAt, EvidenceCheckJSON: &check}
+			detail, err := ReadEvidenceDetail(context.Background(), r, rep, rep.ID, "E1", 7, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !detail.Truncated || strings.Contains(detail.Arguments+detail.Result, "dummy-sensitive-value") {
+				t.Fatal("oversized source leaked through the original-result endpoint")
+			}
+			if field == "arguments" && detail.Result != `{"records":[]}` {
+				t.Fatal("complete result was lost when only the arguments exceeded the limit")
+			}
+			if field == "result" && !strings.Contains(detail.Arguments, `device_id=\"42\"`) {
+				t.Fatal("complete LogQL arguments were lost when only the result exceeded the limit")
+			}
+		})
+	}
+}
+
+func TestEvidenceContentLimitPreservesCompleteFieldsAndRepeatedBounds(t *testing.T) {
+	raw := `{"message":"` + strings.Repeat("x", MaxEvidenceResultBytes-len(`{"message":""}`)) + `"}`
+	call := evidenceCall("call", "query_logql", "success", raw)
+	call.ArgumentsJSON = raw
+	call.BoundContent()
+	if call.Truncated || call.ArgumentsJSON != raw || *call.ResultJSON != raw {
+		t.Fatal("complete fields at the read limit must remain available")
+	}
+	raw += " "
+	call.ArgumentsJSON = raw
+	call.ResultJSON = &raw
+	call.BoundContent()
+	first := call
+	call.BoundContent()
+	if !call.Truncated || call.ArgumentsJSON != first.ArgumentsJSON || *call.ResultJSON != *first.ResultJSON {
+		t.Fatal("repeated bounding lost the omission or truncation status")
+	}
+	if len(call.ArgumentsJSON) > MaxEvidenceResultBytes || len(*call.ResultJSON) > MaxEvidenceResultBytes {
+		t.Fatal("oversized fields exceeded the read limit without SQL byte metadata")
+	}
+}
+
+func TestEvidenceDetailOmitsClippedErrorCopy(t *testing.T) {
+	for _, size := range []int{1024, MaxEvidenceResultBytes} {
+		rawError := `{"password":"dummy-sensitive-value","padding":"` + strings.Repeat("x", size) + `"}`
+		result := marshalOrDefault(map[string]string{"error": rawError}, "{}")
+		status, storedError := basetool.ResultOutcome(result)
+		call := evidenceCall("call", "query_logql", status, result)
+		call.Error = &storedError
+		call.BoundContent()
+		r := &evidenceReaderFake{records: EvidenceRecords{OwnerID: 7, Calls: []EvidenceCall{call}}}
+		set := (&Usecase{}).WithEvidenceReader(r).collectEvidence(context.Background(), "investigation")
+		check := marshalOrDefault(alertmodel.EvidenceCheck{Version: 1, Sources: set.Sources}, "{}")
+		root := "investigation"
+		rep := &alertmodel.InvestigationReport{ID: "report", AuditSessionID: &root, ReadyAt: call.EndedAt, EvidenceCheckJSON: &check}
+		detail, err := ReadEvidenceDetail(context.Background(), r, rep, rep.ID, "E1", 7, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(set.Prompt+detail.Result+detail.Error, "dummy-sensitive-value") || !strings.Contains(detail.Error, "omitted") {
+			t.Fatalf("clipped error copy was not safely omitted for result size %d", size)
+		}
 	}
 }
