@@ -725,13 +725,13 @@ func renderAlertPrompt(in *alertmodel.Incident, locale string) string {
 		b.WriteString(fmt.Sprintf("  description: %s\n", in.Description))
 	}
 	b.WriteString("\nStart with correlate_incident to pull metrics + logs + traces + topology around the fire window. ")
-	b.WriteString("Then drill in to identify the specific process / service / time. End with a clear root-cause paragraph.\n")
+	b.WriteString("Then investigate causes supported by the observations. Report confirmed facts, supported explanations or hypotheses, remaining unknowns, and useful next checks. A specific cause may remain unknown; do not invent a causal chain or onset time. Keep the same uncertainty in the narrative and conclusion.\n")
 	// HARD budget — keep it in the user prompt because models (especially
 	// GLM / non-frontier) follow user-message constraints more strictly
 	// than system-message ones. Without this, repeated empty logql/promql
 	// variants burn the eino MaxStep cap (v0.7.51..v0.7.55 failed RCAs).
 	b.WriteString("\nBUDGET: hard cap 10 tool calls. By tool call #7 you MUST start writing the final report; by #10 you MUST emit it even if some signals are unclear. ")
-	b.WriteString("If a tool returns empty (result:[] or streams:[]) twice in the same direction, STOP that line — empty is a finding, write it into the report and move on. ")
+	b.WriteString("If a tool returns empty (result:[] or streams:[]) twice in the same direction, STOP that line. Record that the query had no matches, not that the event is absent or the target healthy. Failed queries mean evidence was not obtained. Move on. ")
 	b.WriteString("Never call the same tool more than 3 times.\n")
 	// Language directive last — last-in-prompt instructions are stickier in
 	// practice, and the persona file (Chinese) tries to set the language
@@ -753,9 +753,9 @@ func localeDirective(locale string) string {
 	primary := strings.ToLower(strings.SplitN(strings.TrimSpace(locale), "-", 2)[0])
 	switch primary {
 	case "en":
-		return "LANGUAGE: Write the entire final report in English. Every field — root cause, causal chain, evidence summaries, suggested actions — must be English. The persona description happens to be Chinese; ignore that and respond in English."
+		return "LANGUAGE: Write the entire final report in English. Every field — observed facts, cause assessment, unknowns, suggested actions — must be English. The persona description happens to be Chinese; ignore that and respond in English."
 	case "zh":
-		return "LANGUAGE: 全程用简体中文撰写最终报告（根因 / 因果链 / 证据 / 建议动作 各字段都用中文）。"
+		return "LANGUAGE: 全程用简体中文撰写最终报告（已确认事实 / 原因判断 / 未确认部分 / 建议动作 各字段都用中文）。"
 	default:
 		return ""
 	}

@@ -144,6 +144,18 @@
         {
           "expr": "100 * (1 - avg by (device_id) (rate(node_cpu_seconds_total{device_id=~\"42|43\",mode=\"idle\"}[5m])))",
           "lookback_seconds": 1200
+        },
+        {
+          "expr": "100 * (1 - avg by (device_id) (rate(node_cpu_seconds_total{device_id=~\"42|43\",mode=\"idle\"}[5m])))",
+          "lookback_seconds": 3600
+        },
+        {
+          "expr": "100 * (1 - avg by (device_id) (rate(node_cpu_seconds_total{device_id=~\"42|43\",mode=\"idle\"}[5m])))",
+          "lookback_seconds": 7200
+        },
+        {
+          "expr": "100 * (1 - avg by (device_id) (rate(node_cpu_seconds_total{device_id=~\"42|43\",mode=\"idle\"}[5m])))",
+          "lookback_seconds": 86400
         }
       ],
       "result": {
@@ -423,6 +435,87 @@
           "from": "2026-11-04T05:20:00Z",
           "to": "2026-11-04T07:20:00Z"
         }
+      }
+    },
+    {
+      "id": "correlation_60m",
+      "tool": "correlate_incident",
+      "args": [
+        {
+          "incident_ids": [
+            101
+          ],
+          "window_minutes": 60
+        }
+      ],
+      "result": {
+        "success_count": 1,
+        "error_count": 0,
+        "results": [
+          {
+            "incident_id": 101,
+            "bundle": {
+              "incident": {
+                "id": 101,
+                "title": "同组设备 42、43 的 CPU 采样在 06:20 分别为 95%、94%，需要对比排查。",
+                "rule_key": "fleet_cpu_high",
+                "rule_name": "fleet_cpu_high",
+                "severity": "critical",
+                "status": "open",
+                "scope_type": "host",
+                "device_id": 42,
+                "first_fired_at": "2026-11-04T06:20:00Z",
+                "last_fired_at": "2026-11-04T06:20:00Z",
+                "event_count": 1,
+                "labels": {
+                  "metric": "cpu_pct"
+                }
+              },
+              "window": {
+                "start": "2026-11-04T05:50:00Z",
+                "end": "2026-11-04T06:50:00Z"
+              },
+              "metric_panel": [
+                {
+                  "labels": {
+                    "device_id": "42"
+                  },
+                  "values": [
+                    [
+                      1793772000,
+                      "30"
+                    ],
+                    [
+                      1793772600,
+                      "90"
+                    ],
+                    [
+                      1793773200,
+                      "95"
+                    ]
+                  ]
+                }
+              ],
+              "host": {
+                "current_edge_id": 1042,
+                "id": 42,
+                "name": "eval-host-42",
+                "status": "online",
+                "roles": [
+                  "server"
+                ],
+                "last_seen_at": "2026-11-04T06:20:00Z",
+                "current_load": {
+                  "cpu_pct": 95
+                },
+                "recent_incidents_24h": 1
+              },
+              "skipped": {
+                "trace_panel": "no service label on incident"
+              }
+            }
+          }
+        ]
       }
     }
   ],
