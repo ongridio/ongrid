@@ -1,0 +1,468 @@
+{
+  "id": "cpu_process",
+  "title": "CPU 高：定位具体进程",
+  "incident": {
+    "id": 101,
+    "device_id": 42,
+    "rule": "cpu_high",
+    "summary": "device 42 在 06:10、06:20 的 CPU 采样分别为 94%、96%。",
+    "description": "Synthetic incident at 2026-11-04T06:20:00Z. Alert expression: 100 * (1 - avg by (device_id) (rate(node_cpu_seconds_total{device_id=\"42\",mode=\"idle\"}[5m]))). Observation window: 2026-11-04T06:00:00Z to 2026-11-04T06:20:00Z. All observations are fixture data.",
+    "at": "2026-11-04T06:20:00Z",
+    "labels": {
+      "metric": "cpu_pct"
+    }
+  },
+  "fixtures": [
+    {
+      "id": "incident",
+      "tool": "get_incident_detail",
+      "args": [
+        {
+          "incident_ids": [
+            101
+          ]
+        }
+      ],
+      "result": {
+        "success_count": 1,
+        "error_count": 0,
+        "results": [
+          {
+            "incident_id": 101,
+            "incident": {
+              "acknowledged_at": null,
+              "description": "Synthetic incident at 2026-11-04T06:20:00Z. Alert expression: 100 * (1 - avg by (device_id) (rate(node_cpu_seconds_total{device_id=\"42\",mode=\"idle\"}[5m]))). Observation window: 2026-11-04T06:00:00Z to 2026-11-04T06:20:00Z. All observations are fixture data.",
+              "device_id": 42,
+              "event_count": 1,
+              "first_fired_at": "2026-11-04T06:20:00Z",
+              "id": 101,
+              "last_fired_at": "2026-11-04T06:20:00Z",
+              "last_notified_at": null,
+              "resolved_at": null,
+              "rule": "cpu_high",
+              "rule_name": "cpu_high",
+              "runbook_url": "",
+              "scope_type": "host",
+              "severity": "critical",
+              "silenced_until": null,
+              "status": "open",
+              "summary": "device 42 在 06:10、06:20 的 CPU 采样分别为 94%、96%。",
+              "threshold": null,
+              "title": "device 42 在 06:10、06:20 的 CPU 采样分别为 94%、96%。",
+              "value": null
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "correlation",
+      "tool": "correlate_incident",
+      "args": [
+        {
+          "incident_ids": [
+            101
+          ]
+        },
+        {
+          "incident_ids": [
+            101
+          ],
+          "window_minutes": 30
+        }
+      ],
+      "result": {
+        "success_count": 1,
+        "error_count": 0,
+        "results": [
+          {
+            "incident_id": 101,
+            "bundle": {
+              "incident": {
+                "id": 101,
+                "title": "device 42 在 06:10、06:20 的 CPU 采样分别为 94%、96%。",
+                "rule_key": "cpu_high",
+                "rule_name": "cpu_high",
+                "severity": "critical",
+                "status": "open",
+                "scope_type": "host",
+                "device_id": 42,
+                "first_fired_at": "2026-11-04T06:20:00Z",
+                "last_fired_at": "2026-11-04T06:20:00Z",
+                "event_count": 1,
+                "labels": {
+                  "metric": "cpu_pct"
+                }
+              },
+              "window": {
+                "start": "2026-11-04T06:05:00Z",
+                "end": "2026-11-04T06:35:00Z"
+              },
+              "metric_panel": [
+                {
+                  "labels": {
+                    "device_id": "42"
+                  },
+                  "values": [
+                    [
+                      1793772600,
+                      "94"
+                    ],
+                    [
+                      1793773200,
+                      "96"
+                    ]
+                  ]
+                }
+              ],
+              "host": {
+                "current_edge_id": 1042,
+                "id": 42,
+                "name": "eval-host-42",
+                "status": "online",
+                "roles": [
+                  "server"
+                ],
+                "last_seen_at": "2026-11-04T06:20:00Z",
+                "current_load": {
+                  "cpu_pct": 96
+                },
+                "recent_incidents_24h": 1
+              },
+              "skipped": {
+                "trace_panel": "no service label on incident"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "metrics",
+      "tool": "query_promql",
+      "args": [
+        {
+          "expr": "100 * (1 - avg by (device_id) (rate(node_cpu_seconds_total{device_id=\"42\",mode=\"idle\"}[5m])))",
+          "lookback_seconds": 1200
+        }
+      ],
+      "result": {
+        "resultType": "matrix",
+        "result": [
+          {
+            "metric": {
+              "device_id": "42"
+            },
+            "values": [
+              [
+                1793772000,
+                "20"
+              ],
+              [
+                1793772600,
+                "94"
+              ],
+              [
+                1793773200,
+                "96"
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "changes",
+      "tool": "query_change_events",
+      "args": [
+        {
+          "around_ts": "2026-11-04T06:20:00Z"
+        },
+        {
+          "around_ts": "2026-11-04T06:20:00Z",
+          "window_minutes": 30
+        },
+        {
+          "around_ts": "2026-11-04T06:20:00Z",
+          "window_minutes": 30,
+          "limit": 50
+        }
+      ],
+      "result": {
+        "changes": [],
+        "count": 0,
+        "window": {
+          "from": "2026-11-04T05:50:00Z",
+          "to": "2026-11-04T06:50:00Z"
+        }
+      }
+    },
+    {
+      "id": "processes",
+      "tool": "get_host_processes",
+      "args": [
+        {
+          "device_ids": [
+            42
+          ]
+        },
+        {
+          "device_ids": [
+            42
+          ],
+          "sort_by": "cpu",
+          "top_n": 5
+        },
+        {
+          "device_ids": [
+            42
+          ],
+          "top_n": 1,
+          "sort_by": "cpu"
+        },
+        {
+          "device_ids": [
+            42
+          ],
+          "top_n": 3,
+          "sort_by": "cpu"
+        },
+        {
+          "device_ids": [
+            42
+          ],
+          "top_n": 15,
+          "sort_by": "cpu"
+        },
+        {
+          "device_ids": [
+            42
+          ],
+          "top_n": 20,
+          "sort_by": "cpu"
+        },
+        {
+          "device_ids": [
+            42
+          ],
+          "top_n": 50,
+          "sort_by": "cpu"
+        },
+        {
+          "device_ids": [
+            42
+          ],
+          "top_n": 100,
+          "sort_by": "cpu"
+        }
+      ],
+      "result": {
+        "success_count": 1,
+        "error_count": 0,
+        "results": [
+          {
+            "device_id": 42,
+            "process_list": {
+              "sampled_at": 1793773200,
+              "cpu_basis": "host_total",
+              "cpu_window_seconds": 1,
+              "processes": [
+                {
+                  "pid": 812,
+                  "name": "pigz",
+                  "cmdline": "/usr/bin/pigz -p 8 /data/archive/events-20261104.tar",
+                  "cpu_pct": 91,
+                  "mem_pct": 4,
+                  "cpu_sample_status": "valid",
+                  "user": "app"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "metrics_5m",
+      "tool": "query_promql",
+      "args": [
+        {
+          "expr": "100 * (1 - avg by (device_id) (rate(node_cpu_seconds_total{device_id=\"42\",mode=\"idle\"}[5m])))"
+        }
+      ],
+      "result": {
+        "resultType": "matrix",
+        "result": [
+          {
+            "metric": {
+              "device_id": "42"
+            },
+            "values": [
+              [
+                1793773200,
+                "96"
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "metrics_30m",
+      "tool": "query_promql",
+      "args": [
+        {
+          "expr": "100 * (1 - avg by (device_id) (rate(node_cpu_seconds_total{device_id=\"42\",mode=\"idle\"}[5m])))",
+          "lookback_seconds": 1800
+        }
+      ],
+      "result": {
+        "resultType": "matrix",
+        "result": [
+          {
+            "metric": {
+              "device_id": "42"
+            },
+            "values": [
+              [
+                1793772000,
+                "20"
+              ],
+              [
+                1793772600,
+                "94"
+              ],
+              [
+                1793773200,
+                "96"
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "host_load",
+      "tool": "get_host_load",
+      "args": [
+        {
+          "device_ids": [
+            42
+          ]
+        }
+      ],
+      "result": {
+        "success_count": 1,
+        "error_count": 0,
+        "results": [
+          {
+            "device_id": 42,
+            "host_load": {
+              "cpu_pct": 96,
+              "mem_pct": 30,
+              "load1": 8,
+              "load5": 7,
+              "load15": 4,
+              "cpu_sample_status": "valid",
+              "cpu_window_seconds": 1,
+              "sampled_at": 1793773200,
+              "disk_used_pct": 25
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "changes_60m",
+      "tool": "query_change_events",
+      "args": [
+        {
+          "around_ts": "2026-11-04T06:20:00Z",
+          "window_minutes": 60
+        },
+        {
+          "around_ts": "2026-11-04T06:20:00Z",
+          "window_minutes": 60,
+          "limit": 50
+        }
+      ],
+      "result": {
+        "changes": [],
+        "count": 0,
+        "window": {
+          "from": "2026-11-04T05:20:00Z",
+          "to": "2026-11-04T07:20:00Z"
+        }
+      }
+    }
+  ],
+  "rubric": {
+    "acceptable": [
+      "pigz PID 812 在采样时压缩 /data/archive/events-20261104.tar，1 秒窗口占用主机 91% CPU，是当前主要 CPU 消耗来源。",
+      "主机指标显示高 CPU；单次进程快照不足以证明该进程在整个 20 分钟窗口持续占用，启动原因未知。"
+    ],
+    "forbidden": [
+      "没有依据宣称恶意进程、CPU 硬件损坏或已恢复。",
+      "不能把单次进程快照说成整个告警窗口持续占用。"
+    ],
+    "required_observations": [
+      "metrics",
+      "processes",
+      "host_load"
+    ],
+    "next_steps": [
+      "核对压缩任务启动时间和调度来源，确认是否允许限速或调整时段。"
+    ]
+  },
+  "smoke": {
+    "steps": [
+      {
+        "fixture": "correlation"
+      },
+      {
+        "fixture": "metrics"
+      },
+      {
+        "fixture": "processes"
+      },
+      {
+        "fixture": "host_load"
+      },
+      {
+        "content": "采样时 pigz PID 812 压缩归档文件，占用整机 91% CPU，是当前主要消耗来源；此前是否持续占用及启动原因尚未确认。"
+      }
+    ],
+    "extraction": {
+      "root_cause": "采样时 pigz PID 812 压缩归档文件，占用整机 91% CPU，是当前主要消耗来源；此前是否持续占用及启动原因尚未确认。",
+      "root_cause_source_ids": [
+        "E2",
+        "E3",
+        "E4"
+      ],
+      "affected_window": "2026-11-04T06:00:00Z/2026-11-04T06:20:00Z",
+      "evidence": [
+        {
+          "summary": "告警窗口内的指标采样值，包含设备及维度标签。",
+          "source_ids": [
+            "E2"
+          ]
+        },
+        {
+          "summary": "pigz PID 812 的 1 秒 CPU 采样为整机容量的 91%，同时主机 CPU 为 96%。",
+          "source_ids": [
+            "E3",
+            "E4"
+          ]
+        }
+      ],
+      "suggested_actions": [
+        {
+          "label": "核对压缩任务启动时间和调度来源，确认是否允许限速或调整时段。",
+          "category": "observe",
+          "danger": "none"
+        }
+      ],
+      "confidence": 0.6
+    }
+  }
+}

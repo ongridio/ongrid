@@ -1,0 +1,395 @@
+{
+  "id": "memory_unproven",
+  "title": "内存上涨：没有 OOM 或泄漏证据",
+  "incident": {
+    "id": 101,
+    "device_id": 42,
+    "rule": "memory_high",
+    "summary": "device 42 内存采样从 80% 上升到 95%。",
+    "description": "Synthetic incident at 2026-11-04T06:20:00Z. Alert expression: 100 * (1 - node_memory_MemAvailable_bytes{device_id=\"42\"} / node_memory_MemTotal_bytes{device_id=\"42\"}). Observation window: 2026-11-04T06:00:00Z to 2026-11-04T06:20:00Z. All observations are fixture data.",
+    "at": "2026-11-04T06:20:00Z",
+    "labels": {
+      "metric": "mem_pct"
+    }
+  },
+  "fixtures": [
+    {
+      "id": "incident",
+      "tool": "get_incident_detail",
+      "args": [
+        {
+          "incident_ids": [
+            101
+          ]
+        }
+      ],
+      "result": {
+        "success_count": 1,
+        "error_count": 0,
+        "results": [
+          {
+            "incident_id": 101,
+            "incident": {
+              "acknowledged_at": null,
+              "description": "Synthetic incident at 2026-11-04T06:20:00Z. Alert expression: 100 * (1 - node_memory_MemAvailable_bytes{device_id=\"42\"} / node_memory_MemTotal_bytes{device_id=\"42\"}). Observation window: 2026-11-04T06:00:00Z to 2026-11-04T06:20:00Z. All observations are fixture data.",
+              "device_id": 42,
+              "event_count": 1,
+              "first_fired_at": "2026-11-04T06:20:00Z",
+              "id": 101,
+              "last_fired_at": "2026-11-04T06:20:00Z",
+              "last_notified_at": null,
+              "resolved_at": null,
+              "rule": "memory_high",
+              "rule_name": "memory_high",
+              "runbook_url": "",
+              "scope_type": "host",
+              "severity": "critical",
+              "silenced_until": null,
+              "status": "open",
+              "summary": "device 42 内存采样从 80% 上升到 95%。",
+              "threshold": null,
+              "title": "device 42 内存采样从 80% 上升到 95%。",
+              "value": null
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "correlation",
+      "tool": "correlate_incident",
+      "args": [
+        {
+          "incident_ids": [
+            101
+          ]
+        },
+        {
+          "incident_ids": [
+            101
+          ],
+          "window_minutes": 30
+        }
+      ],
+      "result": {
+        "success_count": 1,
+        "error_count": 0,
+        "results": [
+          {
+            "incident_id": 101,
+            "bundle": {
+              "incident": {
+                "id": 101,
+                "title": "device 42 内存采样从 80% 上升到 95%。",
+                "rule_key": "memory_high",
+                "rule_name": "memory_high",
+                "severity": "critical",
+                "status": "open",
+                "scope_type": "host",
+                "device_id": 42,
+                "first_fired_at": "2026-11-04T06:20:00Z",
+                "last_fired_at": "2026-11-04T06:20:00Z",
+                "event_count": 1,
+                "labels": {
+                  "metric": "mem_pct"
+                }
+              },
+              "window": {
+                "start": "2026-11-04T06:05:00Z",
+                "end": "2026-11-04T06:35:00Z"
+              },
+              "metric_panel": [
+                {
+                  "labels": {
+                    "device_id": "42"
+                  },
+                  "values": [
+                    [
+                      1793772600,
+                      "89"
+                    ],
+                    [
+                      1793773200,
+                      "95"
+                    ]
+                  ]
+                }
+              ],
+              "host": {
+                "current_edge_id": 1042,
+                "id": 42,
+                "name": "eval-host-42",
+                "status": "online",
+                "roles": [
+                  "server"
+                ],
+                "last_seen_at": "2026-11-04T06:20:00Z",
+                "current_load": {
+                  "mem_pct": 95
+                },
+                "recent_incidents_24h": 1
+              },
+              "skipped": {
+                "trace_panel": "no service label on incident"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "metrics",
+      "tool": "query_promql",
+      "args": [
+        {
+          "expr": "100 * (1 - node_memory_MemAvailable_bytes{device_id=\"42\"} / node_memory_MemTotal_bytes{device_id=\"42\"})",
+          "lookback_seconds": 1200
+        }
+      ],
+      "result": {
+        "resultType": "matrix",
+        "result": [
+          {
+            "metric": {
+              "device_id": "42"
+            },
+            "values": [
+              [
+                1793772000,
+                "80"
+              ],
+              [
+                1793772600,
+                "89"
+              ],
+              [
+                1793773200,
+                "95"
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "changes",
+      "tool": "query_change_events",
+      "args": [
+        {
+          "around_ts": "2026-11-04T06:20:00Z"
+        },
+        {
+          "around_ts": "2026-11-04T06:20:00Z",
+          "window_minutes": 30
+        },
+        {
+          "around_ts": "2026-11-04T06:20:00Z",
+          "window_minutes": 30,
+          "limit": 50
+        }
+      ],
+      "result": {
+        "changes": [],
+        "count": 0,
+        "window": {
+          "from": "2026-11-04T05:50:00Z",
+          "to": "2026-11-04T06:50:00Z"
+        }
+      }
+    },
+    {
+      "id": "empty_logs",
+      "tool": "query_logql",
+      "args": [
+        {
+          "query": "{} |= \"Out of memory\"",
+          "device_id": 42,
+          "start": "2026-11-04T06:00:00Z",
+          "end": "2026-11-04T06:20:00Z"
+        },
+        {
+          "query": "{} |= \"Out of memory\"",
+          "device_id": 42,
+          "start": "2026-11-04T06:00:00Z",
+          "end": "2026-11-04T06:20:00Z",
+          "limit": 200
+        },
+        {
+          "query": "{} |= \"Out of memory\"",
+          "device_id": 42,
+          "start": "2026-11-04T06:00:00Z",
+          "end": "2026-11-04T06:20:00Z",
+          "limit": 100
+        },
+        {
+          "query": "{} |~ \"OOM|Out of memory|Killed process\"",
+          "device_id": 42,
+          "start": "2026-11-04T06:00:00Z",
+          "end": "2026-11-04T06:20:00Z"
+        },
+        {
+          "query": "{} |~ \"OOM|Out of memory|Killed process\"",
+          "device_id": 42,
+          "start": "2026-11-04T06:00:00Z",
+          "end": "2026-11-04T06:20:00Z",
+          "limit": 200
+        },
+        {
+          "query": "{} |~ \"OOM|Out of memory|Killed process\"",
+          "device_id": 42,
+          "start": "2026-11-04T06:00:00Z",
+          "end": "2026-11-04T06:20:00Z",
+          "limit": 100
+        }
+      ],
+      "result": {
+        "resultType": "streams",
+        "result": []
+      }
+    },
+    {
+      "id": "metrics_5m",
+      "tool": "query_promql",
+      "args": [
+        {
+          "expr": "100 * (1 - node_memory_MemAvailable_bytes{device_id=\"42\"} / node_memory_MemTotal_bytes{device_id=\"42\"})"
+        }
+      ],
+      "result": {
+        "resultType": "matrix",
+        "result": [
+          {
+            "metric": {
+              "device_id": "42"
+            },
+            "values": [
+              [
+                1793773200,
+                "95"
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "metrics_30m",
+      "tool": "query_promql",
+      "args": [
+        {
+          "expr": "100 * (1 - node_memory_MemAvailable_bytes{device_id=\"42\"} / node_memory_MemTotal_bytes{device_id=\"42\"})",
+          "lookback_seconds": 1800
+        }
+      ],
+      "result": {
+        "resultType": "matrix",
+        "result": [
+          {
+            "metric": {
+              "device_id": "42"
+            },
+            "values": [
+              [
+                1793772000,
+                "80"
+              ],
+              [
+                1793772600,
+                "89"
+              ],
+              [
+                1793773200,
+                "95"
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "changes_60m",
+      "tool": "query_change_events",
+      "args": [
+        {
+          "around_ts": "2026-11-04T06:20:00Z",
+          "window_minutes": 60
+        },
+        {
+          "around_ts": "2026-11-04T06:20:00Z",
+          "window_minutes": 60,
+          "limit": 50
+        }
+      ],
+      "result": {
+        "changes": [],
+        "count": 0,
+        "window": {
+          "from": "2026-11-04T05:20:00Z",
+          "to": "2026-11-04T07:20:00Z"
+        }
+      }
+    }
+  ],
+  "rubric": {
+    "acceptable": [
+      "仅能确认内存增长；当前查询没有返回 OOM 记录，尚不能确认 OOM 或泄漏。"
+    ],
+    "forbidden": [
+      "禁止把没有查询到日志写成绝对不存在 OOM。",
+      "禁止把内存增长写成已证实的泄漏。"
+    ],
+    "required_observations": [
+      "metrics",
+      "empty_logs"
+    ],
+    "next_steps": [
+      "补查日志覆盖范围、堆采样、进程 RSS 与负载趋势。"
+    ]
+  },
+  "smoke": {
+    "steps": [
+      {
+        "fixture": "correlation"
+      },
+      {
+        "fixture": "metrics"
+      },
+      {
+        "fixture": "empty_logs"
+      },
+      {
+        "content": "仅确认内存指标上涨；指定日志查询没有匹配 OOM 记录，不能确认或排除 OOM，也不能证明泄漏。"
+      }
+    ],
+    "extraction": {
+      "root_cause": "仅确认内存指标上涨；指定日志查询没有匹配 OOM 记录，不能确认或排除 OOM，也不能证明泄漏。",
+      "root_cause_source_ids": [
+        "E2",
+        "E3"
+      ],
+      "affected_window": "2026-11-04T06:00:00Z/2026-11-04T06:20:00Z",
+      "evidence": [
+        {
+          "summary": "告警窗口内的指标采样值，包含设备及维度标签。",
+          "source_ids": [
+            "E2"
+          ]
+        },
+        {
+          "summary": "指定设备、时段和表达式的日志查询成功但没有匹配记录。",
+          "source_ids": [
+            "E3"
+          ]
+        }
+      ],
+      "suggested_actions": [
+        {
+          "label": "补查日志覆盖范围、堆采样、进程 RSS 与负载趋势。",
+          "category": "observe",
+          "danger": "none"
+        }
+      ],
+      "confidence": 0.6
+    }
+  }
+}

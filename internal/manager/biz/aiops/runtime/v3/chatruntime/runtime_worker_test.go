@@ -95,6 +95,40 @@ func TestSpawnWorker_Sync(t *testing.T) {
 	}
 }
 
+type sessionCaptureTool struct {
+	fakeTool
+	mu       sync.Mutex
+	sessions []string
+}
+
+func (t *sessionCaptureTool) InvokableRun(ctx context.Context, _ string, _ ...basetool.InvokeOption) (string, error) {
+	t.mu.Lock()
+	t.sessions = append(t.sessions, basetool.SessionIDFromContext(ctx))
+	t.mu.Unlock()
+	return `{"ok":true}`, nil
+}
+
+func TestWorkerToolContextUsesOwnSessionOnSpawnAndFollowup(t *testing.T) {
+	toolCall := &schema.Message{Role: schema.Assistant, ToolCalls: []schema.ToolCall{{ID: "call-session", Type: "function", Function: schema.FunctionCall{Name: "query_promql", Arguments: `{}`}}}}
+	cm := newScriptedChatModel(toolCall, &schema.Message{Role: schema.Assistant, Content: "done"}, toolCall, &schema.Message{Role: schema.Assistant, Content: "done again"})
+	store, parent := newSeededRuntimeStore(t, 7)
+	tool := &sessionCaptureTool{fakeTool: fakeTool{name: "query_promql", schema: `{"type":"object"}`}}
+	rt := newRuntimeWithStore(t, "incident-investigator", cm, []basetool.BaseTool{tool}, store)
+	ctx := basetool.WithSessionID(context.Background(), parent)
+	w, err := rt.SpawnWorker(ctx, SpawnRequest{AgentName: "incident-investigator", Prompt: "investigate", ParentSession: parent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.SendToWorker(ctx, w.ID, "check again"); err != nil {
+		t.Fatal(err)
+	}
+	tool.mu.Lock()
+	defer tool.mu.Unlock()
+	if len(tool.sessions) != 2 || tool.sessions[0] != w.SessionID || tool.sessions[1] != w.SessionID {
+		t.Fatalf("tool sessions=%v, worker=%s parent=%s", tool.sessions, w.SessionID, parent)
+	}
+}
+
 func TestSpawnWorker_Sync_ForwardsWorkerToolEventsToParent(t *testing.T) {
 	scripted := newScriptedChatModel(
 		&schema.Message{

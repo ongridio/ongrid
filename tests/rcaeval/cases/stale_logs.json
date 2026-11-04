@@ -1,0 +1,410 @@
+{
+  "id": "stale_logs",
+  "title": "日志与指标时间不一致",
+  "incident": {
+    "id": 101,
+    "device_id": 42,
+    "rule": "memory_high",
+    "summary": "device 42 当前 06:00–06:20 的内存从 80% 上升到 95%。",
+    "description": "Synthetic incident at 2026-11-04T06:20:00Z. Alert expression: 100 * (1 - node_memory_MemAvailable_bytes{device_id=\"42\"} / node_memory_MemTotal_bytes{device_id=\"42\"}). Observation window: 2026-11-04T06:00:00Z to 2026-11-04T06:20:00Z. All observations are fixture data. A historical ticket mentions a similar incident on this host at 2026-11-03T06:00:00Z–2026-11-03T06:20:00Z; historical logs are available for comparison.",
+    "at": "2026-11-04T06:20:00Z",
+    "labels": {
+      "metric": "mem_pct"
+    }
+  },
+  "fixtures": [
+    {
+      "id": "incident",
+      "tool": "get_incident_detail",
+      "args": [
+        {
+          "incident_ids": [
+            101
+          ]
+        }
+      ],
+      "result": {
+        "success_count": 1,
+        "error_count": 0,
+        "results": [
+          {
+            "incident_id": 101,
+            "incident": {
+              "acknowledged_at": null,
+              "description": "Synthetic incident at 2026-11-04T06:20:00Z. Alert expression: 100 * (1 - node_memory_MemAvailable_bytes{device_id=\"42\"} / node_memory_MemTotal_bytes{device_id=\"42\"}). Observation window: 2026-11-04T06:00:00Z to 2026-11-04T06:20:00Z. All observations are fixture data. A historical ticket mentions a similar incident on this host at 2026-11-03T06:00:00Z–2026-11-03T06:20:00Z; historical logs are available for comparison.",
+              "device_id": 42,
+              "event_count": 1,
+              "first_fired_at": "2026-11-04T06:20:00Z",
+              "id": 101,
+              "last_fired_at": "2026-11-04T06:20:00Z",
+              "last_notified_at": null,
+              "resolved_at": null,
+              "rule": "memory_high",
+              "rule_name": "memory_high",
+              "runbook_url": "",
+              "scope_type": "host",
+              "severity": "critical",
+              "silenced_until": null,
+              "status": "open",
+              "summary": "device 42 当前 06:00–06:20 的内存从 80% 上升到 95%。",
+              "threshold": null,
+              "title": "device 42 当前 06:00–06:20 的内存从 80% 上升到 95%。",
+              "value": null
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "correlation",
+      "tool": "correlate_incident",
+      "args": [
+        {
+          "incident_ids": [
+            101
+          ]
+        },
+        {
+          "incident_ids": [
+            101
+          ],
+          "window_minutes": 30
+        }
+      ],
+      "result": {
+        "success_count": 1,
+        "error_count": 0,
+        "results": [
+          {
+            "incident_id": 101,
+            "bundle": {
+              "incident": {
+                "id": 101,
+                "title": "device 42 当前 06:00–06:20 的内存从 80% 上升到 95%。",
+                "rule_key": "memory_high",
+                "rule_name": "memory_high",
+                "severity": "critical",
+                "status": "open",
+                "scope_type": "host",
+                "device_id": 42,
+                "first_fired_at": "2026-11-04T06:20:00Z",
+                "last_fired_at": "2026-11-04T06:20:00Z",
+                "event_count": 1,
+                "labels": {
+                  "metric": "mem_pct"
+                }
+              },
+              "window": {
+                "start": "2026-11-04T06:05:00Z",
+                "end": "2026-11-04T06:35:00Z"
+              },
+              "metric_panel": [
+                {
+                  "labels": {
+                    "device_id": "42"
+                  },
+                  "values": [
+                    [
+                      1793772600,
+                      "90"
+                    ],
+                    [
+                      1793773200,
+                      "95"
+                    ]
+                  ]
+                }
+              ],
+              "host": {
+                "current_edge_id": 1042,
+                "id": 42,
+                "name": "eval-host-42",
+                "status": "online",
+                "roles": [
+                  "server"
+                ],
+                "last_seen_at": "2026-11-04T06:20:00Z",
+                "current_load": {
+                  "mem_pct": 95
+                },
+                "recent_incidents_24h": 1
+              },
+              "skipped": {
+                "trace_panel": "no service label on incident"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "metrics",
+      "tool": "query_promql",
+      "args": [
+        {
+          "expr": "100 * (1 - node_memory_MemAvailable_bytes{device_id=\"42\"} / node_memory_MemTotal_bytes{device_id=\"42\"})",
+          "lookback_seconds": 1200
+        }
+      ],
+      "result": {
+        "resultType": "matrix",
+        "result": [
+          {
+            "metric": {
+              "device_id": "42"
+            },
+            "values": [
+              [
+                1793772000,
+                "80"
+              ],
+              [
+                1793772600,
+                "90"
+              ],
+              [
+                1793773200,
+                "95"
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "changes",
+      "tool": "query_change_events",
+      "args": [
+        {
+          "around_ts": "2026-11-04T06:20:00Z"
+        },
+        {
+          "around_ts": "2026-11-04T06:20:00Z",
+          "window_minutes": 30
+        },
+        {
+          "around_ts": "2026-11-04T06:20:00Z",
+          "window_minutes": 30,
+          "limit": 50
+        }
+      ],
+      "result": {
+        "changes": [],
+        "count": 0,
+        "window": {
+          "from": "2026-11-04T05:50:00Z",
+          "to": "2026-11-04T06:50:00Z"
+        }
+      }
+    },
+    {
+      "id": "current_logs",
+      "tool": "query_logql",
+      "args": [
+        {
+          "query": "{} |= \"Out of memory\"",
+          "device_id": 42,
+          "start": "2026-11-04T06:00:00Z",
+          "end": "2026-11-04T06:20:00Z"
+        },
+        {
+          "query": "{} |= \"Out of memory\"",
+          "device_id": 42,
+          "start": "2026-11-04T06:00:00Z",
+          "end": "2026-11-04T06:20:00Z",
+          "limit": 200
+        },
+        {
+          "query": "{} |= \"Out of memory\"",
+          "device_id": 42,
+          "start": "2026-11-04T06:00:00Z",
+          "end": "2026-11-04T06:20:00Z",
+          "limit": 100
+        }
+      ],
+      "result": {
+        "resultType": "streams",
+        "result": []
+      }
+    },
+    {
+      "id": "old_logs",
+      "tool": "query_logql",
+      "args": [
+        {
+          "query": "{} |= \"Out of memory\"",
+          "device_id": 42,
+          "start": "2026-11-03T06:00:00Z",
+          "end": "2026-11-03T06:20:00Z"
+        }
+      ],
+      "result": {
+        "resultType": "streams",
+        "result": [
+          {
+            "stream": {
+              "device_id": "42",
+              "unit": "kernel"
+            },
+            "values": [
+              [
+                "1793686800000000000",
+                "Out of memory: Killed process 755 (old-batch-job)"
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "metrics_5m",
+      "tool": "query_promql",
+      "args": [
+        {
+          "expr": "100 * (1 - node_memory_MemAvailable_bytes{device_id=\"42\"} / node_memory_MemTotal_bytes{device_id=\"42\"})"
+        }
+      ],
+      "result": {
+        "resultType": "matrix",
+        "result": [
+          {
+            "metric": {
+              "device_id": "42"
+            },
+            "values": [
+              [
+                1793773200,
+                "95"
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "metrics_30m",
+      "tool": "query_promql",
+      "args": [
+        {
+          "expr": "100 * (1 - node_memory_MemAvailable_bytes{device_id=\"42\"} / node_memory_MemTotal_bytes{device_id=\"42\"})",
+          "lookback_seconds": 1800
+        }
+      ],
+      "result": {
+        "resultType": "matrix",
+        "result": [
+          {
+            "metric": {
+              "device_id": "42"
+            },
+            "values": [
+              [
+                1793772000,
+                "80"
+              ],
+              [
+                1793772600,
+                "90"
+              ],
+              [
+                1793773200,
+                "95"
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "changes_60m",
+      "tool": "query_change_events",
+      "args": [
+        {
+          "around_ts": "2026-11-04T06:20:00Z",
+          "window_minutes": 60
+        },
+        {
+          "around_ts": "2026-11-04T06:20:00Z",
+          "window_minutes": 60,
+          "limit": 50
+        }
+      ],
+      "result": {
+        "changes": [],
+        "count": 0,
+        "window": {
+          "from": "2026-11-04T05:20:00Z",
+          "to": "2026-11-04T07:20:00Z"
+        }
+      }
+    }
+  ],
+  "rubric": {
+    "acceptable": [
+      "当前内存上涨，旧 OOM 发生于前一天，不能用来解释本次告警。",
+      "当前窗口查询为空，也不足以排除未采集到的 OOM。"
+    ],
+    "forbidden": [
+      "不能把前一天 PID 755 的 OOM 记录拼到本次因果链。"
+    ],
+    "required_observations": [
+      "metrics",
+      "current_logs",
+      "old_logs"
+    ],
+    "next_steps": [
+      "补齐本次窗口日志及进程内存数据，核对采集时钟与日志覆盖。"
+    ]
+  },
+  "smoke": {
+    "steps": [
+      {
+        "fixture": "correlation"
+      },
+      {
+        "fixture": "metrics"
+      },
+      {
+        "fixture": "current_logs"
+      },
+      {
+        "fixture": "old_logs"
+      },
+      {
+        "content": "当前仅确认内存上涨；同窗口日志没有匹配 OOM，前一天 PID 755 的 OOM 记录不能证明本次发生 OOM。"
+      }
+    ],
+    "extraction": {
+      "root_cause": "当前仅确认内存上涨；同窗口日志没有匹配 OOM，前一天 PID 755 的 OOM 记录不能证明本次发生 OOM。",
+      "root_cause_source_ids": [
+        "E2",
+        "E3",
+        "E4"
+      ],
+      "affected_window": "2026-11-04T06:00:00Z/2026-11-04T06:20:00Z",
+      "evidence": [
+        {
+          "summary": "告警窗口内的指标采样值，包含设备及维度标签。",
+          "source_ids": [
+            "E2"
+          ]
+        },
+        {
+          "summary": "当天查询没有匹配记录；OOM PID 755 的历史记录属于前一天，不是当天故障的因果依据。",
+          "source_ids": [
+            "E3",
+            "E4"
+          ]
+        }
+      ],
+      "suggested_actions": [
+        {
+          "label": "补齐本次窗口日志及进程内存数据，核对采集时钟与日志覆盖。",
+          "category": "observe",
+          "danger": "none"
+        }
+      ],
+      "confidence": 0.6
+    }
+  }
+}
