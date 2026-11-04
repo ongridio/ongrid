@@ -39,6 +39,19 @@ func (r *LokiResolver) get(ctx context.Context, key string) string {
 	return strings.TrimSpace(v)
 }
 
+// getRaw returns the stored value untouched. Passwords may legitimately
+// start or end with whitespace, so they must not go through get.
+func (r *LokiResolver) getRaw(ctx context.Context, key string) string {
+	if r == nil || r.svc == nil {
+		return ""
+	}
+	v, _, err := r.svc.Get(ctx, model.CategoryLoki, key)
+	if err != nil {
+		return ""
+	}
+	return v
+}
+
 // URL returns the resolved Loki base URL with trailing slashes trimmed.
 // Falls back to the env-seeded value when the DB row is empty.
 func (r *LokiResolver) URL(ctx context.Context) string {
@@ -56,7 +69,7 @@ func (r *LokiResolver) Auth(ctx context.Context) (basicUser, basicPassword strin
 	if r == nil {
 		return "", ""
 	}
-	return r.get(ctx, model.KeyLokiBasicUser), r.get(ctx, model.KeyLokiBasicPassword)
+	return r.get(ctx, model.KeyLokiBasicUser), r.getRaw(ctx, model.KeyLokiBasicPassword)
 }
 
 // TLSInsecure reports whether TLS verification should be skipped. The
@@ -93,6 +106,19 @@ func (r *TempoResolver) get(ctx context.Context, key string) string {
 	return strings.TrimSpace(v)
 }
 
+// getRaw returns the stored value untouched. Passwords may legitimately
+// start or end with whitespace, so they must not go through get.
+func (r *TempoResolver) getRaw(ctx context.Context, key string) string {
+	if r == nil || r.svc == nil {
+		return ""
+	}
+	v, _, err := r.svc.Get(ctx, model.CategoryTempo, key)
+	if err != nil {
+		return ""
+	}
+	return v
+}
+
 // URL returns the resolved Tempo OTLP HTTP push URL. Falls back to
 // the env-seeded value.
 func (r *TempoResolver) URL(ctx context.Context) string {
@@ -110,7 +136,7 @@ func (r *TempoResolver) Auth(ctx context.Context) (basicUser, basicPassword stri
 	if r == nil {
 		return "", ""
 	}
-	return r.get(ctx, model.KeyTempoBasicUser), r.get(ctx, model.KeyTempoBasicPassword)
+	return r.get(ctx, model.KeyTempoBasicUser), r.getRaw(ctx, model.KeyTempoBasicPassword)
 }
 
 // TLSInsecure reports whether TLS verification should be skipped.

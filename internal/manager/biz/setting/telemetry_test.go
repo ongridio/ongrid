@@ -94,3 +94,28 @@ func TestTempoResolverPrefersDB(t *testing.T) {
 		t.Fatalf("URL = %q", got)
 	}
 }
+
+// TestTelemetryResolverAuthKeepsPasswordWhitespace verifies a saved basic-auth
+// password is returned exactly as stored, so it matches what the connection
+// test used.
+func TestTelemetryResolverAuthKeepsPasswordWhitespace(t *testing.T) {
+	const pw = "  pa ss\t"
+	ctx := context.Background()
+	svc := New(newFakeRepo(), nil)
+	if err := svc.Set(ctx, model.CategoryLoki, model.KeyLokiBasicUser, " alice ", false); err != nil {
+		t.Fatalf("Set loki user: %v", err)
+	}
+	if err := svc.Set(ctx, model.CategoryLoki, model.KeyLokiBasicPassword, pw, true); err != nil {
+		t.Fatalf("Set loki password: %v", err)
+	}
+	if err := svc.Set(ctx, model.CategoryTempo, model.KeyTempoBasicPassword, pw, true); err != nil {
+		t.Fatalf("Set tempo password: %v", err)
+	}
+	user, pass := NewLokiResolver(svc, "").Auth(ctx)
+	if user != "alice" || pass != pw {
+		t.Fatalf("loki Auth = (%q,%q), want (alice,%q)", user, pass, pw)
+	}
+	if _, pass := NewTempoResolver(svc, "").Auth(ctx); pass != pw {
+		t.Fatalf("tempo password = %q, want %q", pass, pw)
+	}
+}
