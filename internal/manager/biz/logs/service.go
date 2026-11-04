@@ -365,7 +365,7 @@ func (s *Service) Save(ctx context.Context, input SaveInput) (view *BackendView,
 		}
 		createdManagedRefs = append(createdManagedRefs, queryRef)
 	}
-	if writeRef == queryRef {
+	if normalized.AuthType == authTypeAPIKey && writeRef == queryRef {
 		return nil, fmt.Errorf("%w: write and query credentials must be different", errs.ErrInvalid)
 	}
 

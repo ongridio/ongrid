@@ -18,14 +18,22 @@ import (
 )
 
 func TestBasicAuthBackendLifecycle(t *testing.T) {
-	for _, queryUser := range []string{"reader", "writer"} {
-		t.Run(queryUser, func(t *testing.T) {
-			testBasicAuthBackendLifecycle(t, queryUser)
+	for _, tc := range []struct {
+		name         string
+		queryUser    string
+		useSharedRef bool
+	}{
+		{"separate accounts", "reader", false},
+		{"shared account", "writer", false},
+		{"shared reference", "writer", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			testBasicAuthBackendLifecycle(t, tc.queryUser, tc.useSharedRef)
 		})
 	}
 }
 
-func testBasicAuthBackendLifecycle(t *testing.T, queryUser string) {
+func testBasicAuthBackendLifecycle(t *testing.T, queryUser string, useSharedRef bool) {
 	t.Helper()
 	const password = " space:$${env:NOT_A_VARIABLE}:密码\n "
 	es := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -67,10 +75,19 @@ func testBasicAuthBackendLifecycle(t *testing.T, queryUser string) {
 		WriteEndpoints: []string{es.URL}, TLSInsecure: true, AuthType: "basic",
 		WriteUsername: "writer", WritePassword: password, QueryUsername: queryUser, QueryPassword: password,
 	}
+	if useSharedRef {
+		const ref = "ongrid-managed-logs-es-shared"
+		if err := secrets.CreateManaged(t.Context(), ref, "elasticsearch", "", map[string]string{"username": "writer", "password": password}); err != nil {
+			t.Fatal(err)
+		}
+		input.WriteCredentialRef, input.QueryCredentialRef = ref, ref
+		input.WriteUsername, input.WritePassword, input.QueryUsername, input.QueryPassword = "", "", "", ""
+	}
+	initialSecretCount := secrets.createCount()
 	if _, err := svc.TestDraft(t.Context(), input); err != nil {
 		t.Fatalf("draft probe: %v", err)
 	}
-	if secrets.createCount() != 0 {
+	if secrets.createCount() != initialSecretCount {
 		t.Fatal("draft probe persisted credentials")
 	}
 	first, err := svc.Save(t.Context(), input)
@@ -79,6 +96,9 @@ func testBasicAuthBackendLifecycle(t *testing.T, queryUser string) {
 	}
 	if first.AuthType != "basic" {
 		t.Fatalf("auth type = %q", first.AuthType)
+	}
+	if useSharedRef && (first.WriteCredentialRef != input.WriteCredentialRef || first.QueryCredentialRef != input.QueryCredentialRef || secrets.createCount() != initialSecretCount) {
+		t.Fatal("save replaced the shared credential reference")
 	}
 	for _, ref := range []string{first.WriteCredentialRef, first.QueryCredentialRef} {
 		fields, err := secrets.ResolveFields(t.Context(), ref)
