@@ -1242,10 +1242,6 @@ function ElasticsearchLogsCard({ current, exploreUrl, onBackendChange }: { curre
         setMessage({ ok: false, text: tr('请填写完整的查询用户名和密码；已保存时两项同时留空可保留原凭证。', 'Enter both query username and password, or leave both blank to keep stored credentials.') });
         return null;
       }
-      if (form.writeUsername.trim() && form.writeUsername.trim() === form.queryUsername.trim()) {
-        setMessage({ ok: false, text: tr('写入和查询必须使用不同账号。', 'Use separate accounts for writing and querying.') });
-        return null;
-      }
     } else {
       if (!writeAPIKey && !form.writeCredentialRef) {
         setMessage({ ok: false, text: tr('请直接粘贴 ES 写入 API Key。', 'Paste an ES write API key.') });
@@ -1402,7 +1398,7 @@ function ElasticsearchLogsCard({ current, exploreUrl, onBackendChange }: { curre
             </div>
             {form.authType === 'basic' ? <>
               <PromField label={tr('ES 写入用户名', 'ES write username')} hint={tr('仅授予目标 data stream 的 auto_configure、create_doc 权限。', 'Grant auto_configure and create_doc on the target data stream only.')} value={form.writeUsername} onChange={(value) => update('writeUsername', value)} placeholder={form.writeCredentialRef ? tr('已保存；与密码一起留空可保留', 'Stored; leave both username and password blank to keep') : 'ongrid-writer'} />
-              <PromField label={tr('ES 查询用户名', 'ES query username')} hint={tr('使用独立账号，授予 monitor、read 和 view_index_metadata 权限。', 'Use a separate account with monitor, read, and view_index_metadata privileges.')} value={form.queryUsername} onChange={(value) => update('queryUsername', value)} placeholder={form.queryCredentialRef ? tr('已保存；与密码一起留空可保留', 'Stored; leave both username and password blank to keep') : 'ongrid-reader'} />
+              <PromField label={tr('ES 查询用户名', 'ES query username')} hint={tr('需要 monitor、read 和 view_index_metadata 权限；可与写入账号相同。', 'Requires monitor, read, and view_index_metadata privileges; the write account can also be used.')} value={form.queryUsername} onChange={(value) => update('queryUsername', value)} placeholder={form.queryCredentialRef ? tr('已保存；与密码一起留空可保留', 'Stored; leave both username and password blank to keep') : 'ongrid-reader'} />
               <PromField label={tr('ES 写入密码', 'ES write password')} value={form.writePassword} onChange={(value) => update('writePassword', value)} sensitive revealed={revealedKeys.write} onToggleReveal={() => setRevealedKeys((current) => ({ ...current, write: !current.write }))} />
               <PromField label={tr('ES 查询密码', 'ES query password')} value={form.queryPassword} onChange={(value) => update('queryPassword', value)} sensitive revealed={revealedKeys.query} onToggleReveal={() => setRevealedKeys((current) => ({ ...current, query: !current.query }))} />
             </> : <>
@@ -1432,7 +1428,7 @@ function ElasticsearchLogsCard({ current, exploreUrl, onBackendChange }: { curre
 
           {editingCurrent && <p className="mt-3 text-[11px] leading-5 text-zinc-500">{tr('保存不会影响当前日志链路；点击“设为当前”会在 Manager 连接与权限测试通过后切换，设备同步可另行检查。', 'Saving does not affect the current log pipeline. Selecting switches after Manager connectivity and privilege checks; device convergence can be checked separately.')}</p>}
 
-          <div className="mt-2 text-[11px] leading-5 text-zinc-500">{tr('凭证加密保存，不会回显。写入和查询使用独立凭证；编辑时留空可保留原凭证，Basic Auth 的用户名和密码需同时填写或同时留空。', 'Credentials are encrypted and never returned. Writing and querying use separate credentials. Leave fields blank to keep stored credentials; for Basic Auth, enter or omit both username and password together.')}</div>
+          <div className="mt-2 text-[11px] leading-5 text-zinc-500">{tr('凭证加密保存，不会回显。Basic Auth 可共用读写账号，账号需同时具备读写权限。编辑时留空可保留原凭证，用户名和密码需同时填写或同时留空。', 'Credentials are encrypted and never returned. Basic Auth can share an account with both read and write privileges. Leave fields blank to keep stored credentials; enter or omit both username and password together.')}</div>
 
           <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-zinc-800/70 pt-4">
             <Button onClick={() => void testElasticsearch()} disabled={!canTest || busy !== null} variant="ghost">{busy === 'test' ? <Loader2 size={14} className="animate-spin" /> : <PlugZap size={14} />}<span>{tr('测试连接', 'Test connection')}</span></Button>

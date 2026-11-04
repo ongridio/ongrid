@@ -18,16 +18,25 @@ import (
 )
 
 func TestBasicAuthBackendLifecycle(t *testing.T) {
+	for _, queryUser := range []string{"reader", "writer"} {
+		t.Run(queryUser, func(t *testing.T) {
+			testBasicAuthBackendLifecycle(t, queryUser)
+		})
+	}
+}
+
+func testBasicAuthBackendLifecycle(t *testing.T, queryUser string) {
+	t.Helper()
 	const password = " space:$${env:NOT_A_VARIABLE}:密码\n "
 	es := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, pass, ok := r.BasicAuth()
-		if !ok || pass != password || (user != "writer" && user != "reader") {
+		if !ok || pass != password || (user != "writer" && user != queryUser) {
 			t.Error("request did not preserve Basic Auth credentials")
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if user == "writer" && r.URL.Path != "/_security/user/_has_privileges" {
+		if queryUser != "writer" && user == "writer" && r.URL.Path != "/_security/user/_has_privileges" {
 			t.Error("write credentials used for a query or cluster probe")
 		}
 		var response any
@@ -56,7 +65,7 @@ func TestBasicAuthBackendLifecycle(t *testing.T) {
 	svc := bizlogs.NewService(repo, secrets, nil)
 	input := bizlogs.SaveInput{
 		WriteEndpoints: []string{es.URL}, TLSInsecure: true, AuthType: "basic",
-		WriteUsername: "writer", WritePassword: password, QueryUsername: "reader", QueryPassword: password,
+		WriteUsername: "writer", WritePassword: password, QueryUsername: queryUser, QueryPassword: password,
 	}
 	if _, err := svc.TestDraft(t.Context(), input); err != nil {
 		t.Fatalf("draft probe: %v", err)
@@ -99,7 +108,7 @@ func TestBasicAuthBackendLifecycle(t *testing.T) {
 		t.Fatalf("Basic Auth search: %v", err)
 	}
 	grafana, err := svc.SelectedElasticsearchDatasource(t.Context())
-	if err != nil || grafana == nil || grafana.BasicUser != "reader" || grafana.BasicPassword != password || grafana.APIKey != "" {
+	if err != nil || grafana == nil || grafana.BasicUser != queryUser || grafana.BasicPassword != password || grafana.APIKey != "" {
 		t.Fatalf("Grafana did not receive query credentials: %v", err)
 	}
 	overlay, err := svc.PluginRuntimeOverlay(t.Context(), 42, "logs")
@@ -140,7 +149,6 @@ func TestBasicAuthRejectsInvalidCredentialsWithoutWrites(t *testing.T) {
 	}{
 		{"missing password", func(in *bizlogs.SaveInput) { in.WritePassword = "" }},
 		{"missing username", func(in *bizlogs.SaveInput) { in.QueryUsername = "" }},
-		{"same user", func(in *bizlogs.SaveInput) { in.QueryUsername = in.WriteUsername }},
 		{"colon in user", func(in *bizlogs.SaveInput) { in.WriteUsername = "writer:other" }},
 		{"control in user", func(in *bizlogs.SaveInput) { in.WriteUsername = "writer\x00" }},
 		{"oversized password", func(in *bizlogs.SaveInput) { in.WritePassword = strings.Repeat("x", 16385) }},

@@ -102,11 +102,7 @@ func (s *Service) resolveInputCredentials(ctx context.Context, input *SaveInput,
 			return write, query, fmt.Errorf("%w: invalid %s credential for %s authentication", errs.ErrInvalid, role.name, input.AuthType)
 		}
 	}
-	if input.AuthType == authTypeBasic {
-		if write.BasicUser == query.BasicUser {
-			return write, query, fmt.Errorf("%w: write and query usernames must differ", errs.ErrInvalid)
-		}
-	} else if subtle.ConstantTimeCompare([]byte(write.APIKey), []byte(query.APIKey)) == 1 {
+	if input.AuthType == authTypeAPIKey && subtle.ConstantTimeCompare([]byte(write.APIKey), []byte(query.APIKey)) == 1 {
 		return write, query, fmt.Errorf("%w: write and query API keys must differ", errs.ErrInvalid)
 	}
 	return write, query, nil

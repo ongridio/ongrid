@@ -312,7 +312,8 @@ describe('SettingsIntegrations log backend presentation', () => {
     });
   });
 
-  it('switches from API keys to Basic Auth and saves passwords verbatim', async () => {
+  it.each(['reader', 'writer'])('saves Basic Auth with query user %s and preserves passwords', async (queryUsername) => {
+    const queryPassword = queryUsername === 'writer' ? ' write:$password ' : ' read:$password ';
     vi.mocked(getLogBackend).mockResolvedValue(backend('unselected', 'loki'));
     vi.mocked(saveLogBackend).mockResolvedValue({ ...backend('unselected', 'loki'), auth_type: 'basic' });
     render(<MemoryRouter initialEntries={['/settings/integrations?focus=logs']}><SettingsIntegrations /></MemoryRouter>);
@@ -325,13 +326,13 @@ describe('SettingsIntegrations log backend presentation', () => {
     expect(testLogBackendDraft).not.toHaveBeenCalled();
     expect(section.getByText(/请填写完整的写入用户名和密码/)).toBeVisible();
     fireEvent.change(section.getByRole('textbox', { name: /ES 写入用户名/ }), { target: { value: 'writer' } });
-    fireEvent.change(section.getByRole('textbox', { name: /ES 查询用户名/ }), { target: { value: 'reader' } });
+    fireEvent.change(section.getByRole('textbox', { name: /ES 查询用户名/ }), { target: { value: queryUsername } });
     fireEvent.change(section.getByLabelText(/ES 写入密码/), { target: { value: ' write:$password ' } });
-    fireEvent.change(section.getByLabelText(/ES 查询密码/), { target: { value: ' read:$password ' } });
+    fireEvent.change(section.getByLabelText(/ES 查询密码/), { target: { value: queryPassword } });
     await act(async () => user.click(section.getByRole('button', { name: '测试连接' })));
     await waitFor(() => expect(section.getByRole('button', { name: '保存' })).toBeEnabled());
     const input = vi.mocked(testLogBackendDraft).mock.calls[0][0];
-    expect(input).toMatchObject({ auth_type: 'basic', write_username: 'writer', query_username: 'reader', write_password: ' write:$password ', query_password: ' read:$password ' });
+    expect(input).toMatchObject({ auth_type: 'basic', write_username: 'writer', query_username: queryUsername, write_password: ' write:$password ', query_password: queryPassword });
     expect(input.write_api_key).toBeUndefined();
     expect(input.query_api_key).toBeUndefined();
     expect(input.write_credential_ref).toBeUndefined();
