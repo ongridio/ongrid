@@ -1,4 +1,5 @@
 import { useAssistantPage } from '@/lib/assistantPage';
+import { InvestigationEvidence } from '@/components/alerts/InvestigationEvidence';
 import { Button, Label, Input, Textarea } from '@/components/ui';
 import { Hint } from '@/components/ui/Tooltip';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -250,7 +251,7 @@ function Header({
 
   return (
     <header className="app-header border-b border-zinc-800/60 px-6 py-4">
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 text-xs text-zinc-500">
             <Link to="/alerts" className="inline-flex items-center gap-1 text-zinc-400 hover:text-zinc-200">
@@ -297,7 +298,7 @@ function Header({
           )}
         </div>
 
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2 xl:shrink-0">
           <Button variant="outline" size="sm"
             type="button"
             onClick={onRefresh}
@@ -590,27 +591,22 @@ function InvestigationReportPanel({ incidentId }: { incidentId: number }) {
   const conf = report.confidence ?? null;
   const target = report.pinpointed_target ?? {};
   const targetStr = formatTarget(target);
-  const evidence = report.evidence ?? [];
   const actions = report.suggested_actions ?? [];
 
   return (
-    <section className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 shadow-sm">
-      <header className="flex items-center justify-between gap-3 border-b border-emerald-500/20 px-4 py-2.5">
+    <section className="min-w-0 rounded-lg border border-border bg-card shadow-sm">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-2.5">
         <div className="flex items-center gap-2">
           <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-emerald-500/20 text-emerald-300 ring-1 ring-inset ring-emerald-500/40">
             <Sparkles size={13} />
           </span>
-          <span className="text-sm font-medium text-emerald-100">
+          <span className="text-sm font-medium text-text">
             {tr('根因分析报告', 'Root cause report')}
           </span>
           <StatusPill status="ready" />
-          {conf != null && (
-            <span className="text-[11px] text-emerald-200/70">
-              {tr('置信度', 'confidence')} {Math.round(conf * 100)}%
-            </span>
-          )}
+
         </div>
-        <div className="flex items-center gap-3 text-[11px] text-zinc-500">
+        <div className="flex flex-wrap items-center gap-3 text-[11px] text-zinc-500">
           {elapsedText && <span>{tr('耗时', 'elapsed')} {elapsedText}</span>}
           {(report.tool_call_count ?? 0) > 0 && (
             <span>{report.tool_call_count} {tr('个 tool call', 'tool calls')}</span>
@@ -629,8 +625,8 @@ function InvestigationReportPanel({ incidentId }: { incidentId: number }) {
       <div className="space-y-3 px-4 py-3 text-[13px] text-zinc-100">
         {report.root_cause && (
           <div>
-            <div className="mb-1 text-[11px] uppercase tracking-wider text-emerald-300/70">
-              {tr('根因', 'Root cause')}
+            <div className="mb-1 text-[11px] font-medium text-text-muted">
+              {report.evidence_check?.root_cause.status === 'traceable' ? tr('根因假设', 'Root cause hypothesis') : tr('待核实假设', 'Hypothesis to verify')}
             </div>
             <div className="text-[14px] leading-relaxed">{report.root_cause}</div>
           </div>
@@ -653,26 +649,7 @@ function InvestigationReportPanel({ incidentId }: { incidentId: number }) {
           </div>
         )}
 
-        {evidence.length > 0 && (
-          <div>
-            <div className="mb-1 text-[11px] uppercase tracking-wider text-emerald-300/70">
-              {tr('证据链', 'Evidence')}
-            </div>
-            <ol className="space-y-1 text-[12px]">
-              {evidence.map((e, i) => (
-                <li key={i} className="flex gap-2">
-                  <span className="text-zinc-500">{e.step ?? i + 1}.</span>
-                  {e.tool && (
-                    <span className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-[11px] text-zinc-300">
-                      {e.tool}
-                    </span>
-                  )}
-                  <span className="text-zinc-300">{e.summary}</span>
-                </li>
-              ))}
-            </ol>
-          </div>
-        )}
+        <InvestigationEvidence report={report} />
 
         {(report.related_alerts?.length ?? 0) > 0 && (
           <div>
@@ -741,11 +718,13 @@ function InvestigationReportPanel({ incidentId }: { incidentId: number }) {
             >
               {expandFindings ? '▾' : '▸'}{' '}
               {expandFindings
-                ? tr('收起完整 markdown', 'Hide full markdown')
-                : tr('展开完整 markdown', 'Show full markdown')}
+                ? tr('收起分析记录', 'Hide analysis record')
+                : tr('展开分析记录', 'Show analysis record')}
             </Button>
             {expandFindings && (
               <div className="md-body mt-2 rounded-md border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-[13px] leading-relaxed text-zinc-100">
+                <p className="mb-2 text-xs text-text-muted">{tr('以下是 Agent 的分析记录，未逐句核对。', 'This is the Agent analysis record; it has not been checked sentence by sentence.')}</p>
+                {conf != null && <p className="mb-2 text-xs text-text-muted">{tr('模型自评（不代表正确率）', 'Model self-assessment (not measured accuracy)')}: {Math.round(conf * 100)}%</p>}
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{report.findings_md}</ReactMarkdown>
               </div>
             )}

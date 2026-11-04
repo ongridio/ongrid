@@ -125,6 +125,7 @@ func bootstrapAutomation(rootCtx context.Context, cfg *config.Config, log *slog.
 				// chat_messages and synthesise a low-confidence
 				// report instead of an empty failure.
 				WithMessageReader(aiops.aiopsRepo).
+				WithEvidenceReader(aiops.aiopsRepo).
 				WithLocaleResolver(settings.settingSvc)
 			rcaInv = rcaInvConcrete
 			log.Info("alert: structured RCA investigator wired",

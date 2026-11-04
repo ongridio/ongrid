@@ -97,6 +97,40 @@ export type InvestigationEvidence = {
   tool?: string;
   summary?: string;
   tool_call_id?: string;
+  source_ids?: string[];
+  status?: string;
+  issues?: string[];
+};
+
+export type InvestigationEvidenceSource = {
+  id: string;
+  tool_call_id: string;
+  session_id: string;
+  tool: string;
+  state: string;
+  reason?: string;
+  target?: string;
+  started_at: string;
+  ended_at?: string;
+  data_start?: string;
+  data_end?: string;
+  result_index?: number;
+};
+
+export type InvestigationEvidenceCheck = {
+  version: number;
+  status: string;
+  root_cause: { source_ids: string[]; status: string; issues?: string[] };
+  sources: InvestigationEvidenceSource[];
+  issues?: string[];
+};
+
+export type InvestigationEvidenceDetail = {
+  source: InvestigationEvidenceSource;
+  arguments: string;
+  result: string;
+  error?: string;
+  truncated: boolean;
 };
 
 export type InvestigationSuggestion = {
@@ -125,6 +159,7 @@ export type InvestigationReport = {
     last_fired_at: string;
   }>;
   evidence?: InvestigationEvidence[];
+  evidence_check?: InvestigationEvidenceCheck;
   suggested_actions?: InvestigationSuggestion[];
   findings_md?: string;
   confidence?: number;
@@ -138,6 +173,10 @@ export type InvestigationReport = {
 
 export function getIncidentInvestigation(id: number) {
   return request<InvestigationReport>('GET', `/alerts/incidents/${id}/investigation`);
+}
+
+export function getInvestigationEvidence(incidentId: number, reportId: string, sourceId: string) {
+  return request<InvestigationEvidenceDetail>('GET', `/alerts/incidents/${incidentId}/investigation/${encodeURIComponent(reportId)}/evidence/${encodeURIComponent(sourceId)}`);
 }
 
 // Manually enqueue an investigation for an incident that didn't

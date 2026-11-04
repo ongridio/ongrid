@@ -152,10 +152,10 @@ func (r *InvestigationRepo) AttachWorker(ctx context.Context, id, workerID, audi
 	res := r.db.WithContext(ctx).Model(&model.InvestigationReport{}).
 		Where("id = ?", id).
 		Updates(map[string]any{
-			"worker_id":         workerID,
-			"audit_session_id":  auditSessionID,
-			"status":            model.InvestigationStatusRunning,
-			"status_reason":     "",
+			"worker_id":        workerID,
+			"audit_session_id": auditSessionID,
+			"status":           model.InvestigationStatusRunning,
+			"status_reason":    "",
 		})
 	if res.Error != nil {
 		return res.Error
@@ -171,19 +171,20 @@ func (r *InvestigationRepo) AttachWorker(ctx context.Context, id, workerID, audi
 func (r *InvestigationRepo) MarkReady(ctx context.Context, id string, fields investigator.ReadyFields) error {
 	now := time.Now().UTC()
 	updates := map[string]any{
-		"status":                    model.InvestigationStatusReady,
-		"status_reason":             "",
-		"root_cause":                fields.RootCause,
-		"affected_window":           fields.AffectedWindow,
-		"pinpointed_target_json":    fields.PinpointedTargetJSON,
-		"related_alerts_json":       fields.RelatedAlertsJSON,
-		"evidence_json":             fields.EvidenceJSON,
-		"suggested_actions_json":    fields.SuggestedActionsJSON,
-		"findings_md":               fields.FindingsMD,
-		"confidence":                fields.Confidence,
-		"confidence_factors_json":   fields.ConfidenceFactorsJSON,
-		"tool_call_count":           fields.ToolCallCount,
-		"ready_at":                  &now,
+		"status":                  model.InvestigationStatusReady,
+		"status_reason":           "",
+		"root_cause":              fields.RootCause,
+		"affected_window":         fields.AffectedWindow,
+		"pinpointed_target_json":  fields.PinpointedTargetJSON,
+		"related_alerts_json":     fields.RelatedAlertsJSON,
+		"evidence_json":           fields.EvidenceJSON,
+		"evidence_check_json":     fields.EvidenceCheckJSON,
+		"suggested_actions_json":  fields.SuggestedActionsJSON,
+		"findings_md":             fields.FindingsMD,
+		"confidence":              fields.Confidence,
+		"confidence_factors_json": fields.ConfidenceFactorsJSON,
+		"tool_call_count":         fields.ToolCallCount,
+		"ready_at":                &now,
 	}
 	res := r.db.WithContext(ctx).Model(&model.InvestigationReport{}).
 		Where("id = ?", id).Updates(updates)

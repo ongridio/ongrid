@@ -12,12 +12,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	bizaudit "github.com/ongridio/ongrid/internal/manager/biz/audit"
 	"github.com/ongridio/ongrid/internal/manager/biz/alert/investigator"
+	bizaudit "github.com/ongridio/ongrid/internal/manager/biz/audit"
 	alertmodel "github.com/ongridio/ongrid/internal/manager/model/alert"
 	auditmodel "github.com/ongridio/ongrid/internal/manager/model/audit"
-	svc "github.com/ongridio/ongrid/internal/manager/service/alert"
 	auditmw "github.com/ongridio/ongrid/internal/manager/server/middleware"
+	svc "github.com/ongridio/ongrid/internal/manager/service/alert"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/tenantctx"
 )
@@ -83,24 +83,25 @@ type InvestigationTrigger interface {
 // payloads so the SPA doesn't have to double-decode and so we don't
 // leak the storage representation.
 type InvestigationReport struct {
-	ID               string          `json:"id"`
-	IncidentID       uint64          `json:"incident_id"`
-	Status           string          `json:"status"`
-	StatusReason     string          `json:"status_reason,omitempty"`
-	RootCause        string          `json:"root_cause,omitempty"`
-	AffectedWindow   string          `json:"affected_window,omitempty"`
-	PinpointedTarget json.RawMessage `json:"pinpointed_target,omitempty"`
-	RelatedAlerts    json.RawMessage `json:"related_alerts,omitempty"`
-	Evidence         json.RawMessage `json:"evidence,omitempty"`
-	SuggestedActions json.RawMessage `json:"suggested_actions,omitempty"`
-	FindingsMD       string          `json:"findings_md,omitempty"`
-	Confidence       *float64        `json:"confidence,omitempty"`
+	ID                string          `json:"id"`
+	IncidentID        uint64          `json:"incident_id"`
+	Status            string          `json:"status"`
+	StatusReason      string          `json:"status_reason,omitempty"`
+	RootCause         string          `json:"root_cause,omitempty"`
+	AffectedWindow    string          `json:"affected_window,omitempty"`
+	PinpointedTarget  json.RawMessage `json:"pinpointed_target,omitempty"`
+	RelatedAlerts     json.RawMessage `json:"related_alerts,omitempty"`
+	Evidence          json.RawMessage `json:"evidence,omitempty"`
+	EvidenceCheck     json.RawMessage `json:"evidence_check,omitempty"`
+	SuggestedActions  json.RawMessage `json:"suggested_actions,omitempty"`
+	FindingsMD        string          `json:"findings_md,omitempty"`
+	Confidence        *float64        `json:"confidence,omitempty"`
 	ConfidenceFactors json.RawMessage `json:"confidence_factors,omitempty"`
-	AuditSessionID   *string         `json:"audit_session_id,omitempty"`
-	WorkerID         *string         `json:"worker_id,omitempty"`
-	ToolCallCount    int             `json:"tool_call_count"`
-	CreatedAt        string          `json:"created_at"`
-	ReadyAt          *string         `json:"ready_at,omitempty"`
+	AuditSessionID    *string         `json:"audit_session_id,omitempty"`
+	WorkerID          *string         `json:"worker_id,omitempty"`
+	ToolCallCount     int             `json:"tool_call_count"`
+	CreatedAt         string          `json:"created_at"`
+	ReadyAt           *string         `json:"ready_at,omitempty"`
 }
 
 type Handler struct {
@@ -109,6 +110,7 @@ type Handler struct {
 	rules                 RuleService
 	investigations        InvestigationReader
 	investigationsTrigger InvestigationTrigger
+	evidenceReader        investigator.EvidenceReader
 	// runtime knobs exposed as informational metadata via
 	// GET /v1/alerts/runtime-info — kept on the handler so the SPA can
 	// surface "this rule evaluates every 5min" without the operator
@@ -156,6 +158,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Get("/v1/alerts/incidents/{id}", h.getIncident)
 	r.Get("/v1/alerts/incidents/{id}/events", h.listIncidentEvents)
 	r.Get("/v1/alerts/incidents/{id}/investigation", h.getIncidentInvestigation)
+	r.Get("/v1/alerts/incidents/{id}/investigation/{reportID}/evidence/{sourceID}", h.getInvestigationEvidence)
 	r.Post("/v1/alerts/incidents/{id}/investigation", h.triggerIncidentInvestigation)
 	r.Post("/v1/alerts/incidents/{id}/ack", h.ackIncident)
 	r.Post("/v1/alerts/incidents/{id}/resolve", h.resolveIncident)
@@ -178,6 +181,48 @@ func (h *Handler) Register(r chi.Router) {
 		r.Post("/v1/alert-rules/{id}/enabled", h.setRuleEnabled)
 		r.Delete("/v1/alert-rules/{id}", h.deleteRule)
 	}
+}
+
+func (h *Handler) WithEvidenceReader(reader investigator.EvidenceReader) *Handler {
+	h.evidenceReader = reader
+	return h
+}
+
+// GET /v1/alerts/incidents/{id}/investigation/{reportID}/evidence/{sourceID}
+// requires authenticated incident access plus transcript ownership/admin access.
+// It returns bounded, credential-masked content from this report's source only.
+func (h *Handler) getInvestigationEvidence(w http.ResponseWriter, r *http.Request) {
+	caller, ok := callerFromRequest(r)
+	if !ok {
+		writeErr(w, errs.ErrUnauthorized)
+		return
+	}
+	id, err := parseID(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if _, err := h.incidents.GetIncident(r.Context(), caller, id); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if h.investigations == nil {
+		writeErr(w, errs.ErrNotFound)
+		return
+	}
+	rep, err := h.investigations.GetByIncident(r.Context(), id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	detail, err := investigator.ReadEvidenceDetail(r.Context(), h.evidenceReader, rep,
+		chi.URLParam(r, "reportID"), chi.URLParam(r, "sourceID"), caller.UserID, caller.Role == "admin")
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, detail)
 }
 
 type listIncidentsResp struct {
@@ -206,15 +251,15 @@ type listRulesResp struct {
 }
 
 type ruleReq struct {
-	RuleKey    string              `json:"rule_key"`
-	Kind       string              `json:"kind,omitempty"`
-	Name       string              `json:"name"`
-	ScopeType  string              `json:"scope_type"`
-	JoinMode   string              `json:"join_mode"`
-	Severity   string              `json:"severity"`
-	Enabled    bool                `json:"enabled"`
-	Conditions []svc.RuleCondition `json:"conditions,omitempty"`
-	Spec       map[string]any      `json:"spec,omitempty"`
+	RuleKey          string              `json:"rule_key"`
+	Kind             string              `json:"kind,omitempty"`
+	Name             string              `json:"name"`
+	ScopeType        string              `json:"scope_type"`
+	JoinMode         string              `json:"join_mode"`
+	Severity         string              `json:"severity"`
+	Enabled          bool                `json:"enabled"`
+	Conditions       []svc.RuleCondition `json:"conditions,omitempty"`
+	Spec             map[string]any      `json:"spec,omitempty"`
 	Labels           map[string]string   `json:"labels,omitempty"`
 	RunbookURL       string              `json:"runbook_url,omitempty"`
 	NotifyChannelIDs []uint64            `json:"notify_channel_ids,omitempty"`
@@ -304,6 +349,7 @@ func (h *Handler) getIncident(w http.ResponseWriter, r *http.Request) {
 // the incident. 404 when:
 //   - investigator not wired (h.investigations == nil)
 //   - no report yet for this incident (errs.ErrNotFound from the repo)
+//
 // The SPA distinguishes the two cases by reading the response body —
 // nil-wired path returns {"status":"feature_disabled"} so the operator
 // sees a clear "投资分析未启用" badge instead of a misleading
@@ -430,6 +476,9 @@ func investigationReportToWire(rep *alertmodel.InvestigationReport) *Investigati
 		WorkerID:          rep.WorkerID,
 		ToolCallCount:     rep.ToolCallCount,
 		CreatedAt:         rep.CreatedAt.UTC().Format(time.RFC3339),
+	}
+	if rep.EvidenceCheckJSON != nil {
+		out.EvidenceCheck = rawOrNil(*rep.EvidenceCheckJSON)
 	}
 	if rep.ReadyAt != nil {
 		s := rep.ReadyAt.UTC().Format(time.RFC3339)
@@ -863,7 +912,6 @@ func (h *Handler) deleteRule(w http.ResponseWriter, r *http.Request) {
 	})
 	w.WriteHeader(http.StatusNoContent)
 }
-
 
 func ruleReqToSvc(req ruleReq) svc.RuleInput {
 	return svc.RuleInput{

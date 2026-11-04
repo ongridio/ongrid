@@ -64,6 +64,8 @@ type InvestigationReport struct {
 	// produced the conclusion. Each entry references a
 	// chat_tool_calls row for raw drill-down.
 	EvidenceJSON string `gorm:"column:evidence_json;type:text;not null"`
+	// Nullable for historical reports and rolling upgrades; absence never means checked.
+	EvidenceCheckJSON *string `gorm:"column:evidence_check_json;type:text"`
 
 	// SuggestedActionsJSON is the array of recommended next steps.
 	// First version is display-only (no one-click execute) — operators
