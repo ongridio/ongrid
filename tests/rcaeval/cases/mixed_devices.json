@@ -1,0 +1,499 @@
+{
+  "id": "mixed_devices",
+  "title": "两台设备：成功与失败不得混用",
+  "incident": {
+    "id": 101,
+    "device_id": 42,
+    "rule": "fleet_cpu_high",
+    "summary": "同组设备 42、43 的 CPU 采样在 06:20 分别为 95%、94%，需要对比排查。",
+    "description": "Synthetic incident at 2026-11-04T06:20:00Z. Alert expression: 100 * (1 - avg by (device_id) (rate(node_cpu_seconds_total{device_id=~\"42|43\",mode=\"idle\"}[5m]))). Observation window: 2026-11-04T06:00:00Z to 2026-11-04T06:20:00Z. All observations are fixture data.",
+    "at": "2026-11-04T06:20:00Z",
+    "labels": {
+      "metric": "cpu_pct"
+    }
+  },
+  "fixtures": [
+    {
+      "id": "incident",
+      "tool": "get_incident_detail",
+      "args": [
+        {
+          "incident_ids": [
+            101
+          ]
+        }
+      ],
+      "result": {
+        "success_count": 1,
+        "error_count": 0,
+        "results": [
+          {
+            "incident_id": 101,
+            "incident": {
+              "acknowledged_at": null,
+              "description": "Synthetic incident at 2026-11-04T06:20:00Z. Alert expression: 100 * (1 - avg by (device_id) (rate(node_cpu_seconds_total{device_id=~\"42|43\",mode=\"idle\"}[5m]))). Observation window: 2026-11-04T06:00:00Z to 2026-11-04T06:20:00Z. All observations are fixture data.",
+              "device_id": 42,
+              "event_count": 1,
+              "first_fired_at": "2026-11-04T06:20:00Z",
+              "id": 101,
+              "last_fired_at": "2026-11-04T06:20:00Z",
+              "last_notified_at": null,
+              "resolved_at": null,
+              "rule": "fleet_cpu_high",
+              "rule_name": "fleet_cpu_high",
+              "runbook_url": "",
+              "scope_type": "host",
+              "severity": "critical",
+              "silenced_until": null,
+              "status": "open",
+              "summary": "同组设备 42、43 的 CPU 采样在 06:20 分别为 95%、94%，需要对比排查。",
+              "threshold": null,
+              "title": "同组设备 42、43 的 CPU 采样在 06:20 分别为 95%、94%，需要对比排查。",
+              "value": null
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "correlation",
+      "tool": "correlate_incident",
+      "args": [
+        {
+          "incident_ids": [
+            101
+          ]
+        },
+        {
+          "incident_ids": [
+            101
+          ],
+          "window_minutes": 30
+        }
+      ],
+      "result": {
+        "success_count": 1,
+        "error_count": 0,
+        "results": [
+          {
+            "incident_id": 101,
+            "bundle": {
+              "incident": {
+                "id": 101,
+                "title": "同组设备 42、43 的 CPU 采样在 06:20 分别为 95%、94%，需要对比排查。",
+                "rule_key": "fleet_cpu_high",
+                "rule_name": "fleet_cpu_high",
+                "severity": "critical",
+                "status": "open",
+                "scope_type": "host",
+                "device_id": 42,
+                "first_fired_at": "2026-11-04T06:20:00Z",
+                "last_fired_at": "2026-11-04T06:20:00Z",
+                "event_count": 1,
+                "labels": {
+                  "metric": "cpu_pct"
+                }
+              },
+              "window": {
+                "start": "2026-11-04T06:05:00Z",
+                "end": "2026-11-04T06:35:00Z"
+              },
+              "metric_panel": [
+                {
+                  "labels": {
+                    "device_id": "42"
+                  },
+                  "values": [
+                    [
+                      1793772600,
+                      "90"
+                    ],
+                    [
+                      1793773200,
+                      "95"
+                    ]
+                  ]
+                }
+              ],
+              "host": {
+                "current_edge_id": 1042,
+                "id": 42,
+                "name": "eval-host-42",
+                "status": "online",
+                "roles": [
+                  "server"
+                ],
+                "last_seen_at": "2026-11-04T06:20:00Z",
+                "current_load": {
+                  "cpu_pct": 95
+                },
+                "recent_incidents_24h": 1
+              },
+              "skipped": {
+                "trace_panel": "no service label on incident"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "metrics",
+      "tool": "query_promql",
+      "args": [
+        {
+          "expr": "100 * (1 - avg by (device_id) (rate(node_cpu_seconds_total{device_id=~\"42|43\",mode=\"idle\"}[5m])))",
+          "lookback_seconds": 1200
+        }
+      ],
+      "result": {
+        "resultType": "matrix",
+        "result": [
+          {
+            "metric": {
+              "device_id": "42"
+            },
+            "values": [
+              [
+                1793772000,
+                "30"
+              ],
+              [
+                1793772600,
+                "90"
+              ],
+              [
+                1793773200,
+                "95"
+              ]
+            ]
+          },
+          {
+            "metric": {
+              "device_id": "43"
+            },
+            "values": [
+              [
+                1793772000,
+                "40"
+              ],
+              [
+                1793772600,
+                "93"
+              ],
+              [
+                1793773200,
+                "94"
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "changes",
+      "tool": "query_change_events",
+      "args": [
+        {
+          "around_ts": "2026-11-04T06:20:00Z"
+        },
+        {
+          "around_ts": "2026-11-04T06:20:00Z",
+          "window_minutes": 30
+        },
+        {
+          "around_ts": "2026-11-04T06:20:00Z",
+          "window_minutes": 30,
+          "limit": 50
+        }
+      ],
+      "result": {
+        "changes": [],
+        "count": 0,
+        "window": {
+          "from": "2026-11-04T05:50:00Z",
+          "to": "2026-11-04T06:50:00Z"
+        }
+      }
+    },
+    {
+      "id": "batch_processes",
+      "tool": "get_host_processes",
+      "args": [
+        {
+          "device_ids": [
+            42,
+            43
+          ]
+        },
+        {
+          "device_ids": [
+            42,
+            43
+          ],
+          "sort_by": "cpu",
+          "top_n": 5
+        },
+        {
+          "device_ids": [
+            42,
+            43
+          ],
+          "top_n": 1,
+          "sort_by": "cpu"
+        },
+        {
+          "device_ids": [
+            42,
+            43
+          ],
+          "top_n": 3,
+          "sort_by": "cpu"
+        },
+        {
+          "device_ids": [
+            42,
+            43
+          ],
+          "top_n": 15,
+          "sort_by": "cpu"
+        },
+        {
+          "device_ids": [
+            42,
+            43
+          ],
+          "top_n": 20,
+          "sort_by": "cpu"
+        },
+        {
+          "device_ids": [
+            42,
+            43
+          ],
+          "top_n": 50,
+          "sort_by": "cpu"
+        },
+        {
+          "device_ids": [
+            42,
+            43
+          ],
+          "top_n": 100,
+          "sort_by": "cpu"
+        }
+      ],
+      "result": {
+        "success_count": 1,
+        "error_count": 1,
+        "results": [
+          {
+            "device_id": 42,
+            "process_list": {
+              "sampled_at": 1793773200,
+              "cpu_basis": "host_total",
+              "cpu_window_seconds": 1,
+              "processes": [
+                {
+                  "pid": 812,
+                  "name": "pigz",
+                  "cmdline": "/usr/bin/pigz -p 8 /data/archive/events-20261104.tar",
+                  "cpu_pct": 91,
+                  "mem_pct": 4,
+                  "cpu_sample_status": "valid",
+                  "user": "app"
+                }
+              ]
+            }
+          },
+          {
+            "device_id": 43,
+            "error": "dispatch: edge offline"
+          }
+        ]
+      }
+    },
+    {
+      "id": "metrics_5m",
+      "tool": "query_promql",
+      "args": [
+        {
+          "expr": "100 * (1 - avg by (device_id) (rate(node_cpu_seconds_total{device_id=~\"42|43\",mode=\"idle\"}[5m])))"
+        }
+      ],
+      "result": {
+        "resultType": "matrix",
+        "result": [
+          {
+            "metric": {
+              "device_id": "42"
+            },
+            "values": [
+              [
+                1793773200,
+                "95"
+              ]
+            ]
+          },
+          {
+            "metric": {
+              "device_id": "43"
+            },
+            "values": [
+              [
+                1793773200,
+                "94"
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "metrics_30m",
+      "tool": "query_promql",
+      "args": [
+        {
+          "expr": "100 * (1 - avg by (device_id) (rate(node_cpu_seconds_total{device_id=~\"42|43\",mode=\"idle\"}[5m])))",
+          "lookback_seconds": 1800
+        }
+      ],
+      "result": {
+        "resultType": "matrix",
+        "result": [
+          {
+            "metric": {
+              "device_id": "42"
+            },
+            "values": [
+              [
+                1793772000,
+                "30"
+              ],
+              [
+                1793772600,
+                "90"
+              ],
+              [
+                1793773200,
+                "95"
+              ]
+            ]
+          },
+          {
+            "metric": {
+              "device_id": "43"
+            },
+            "values": [
+              [
+                1793772000,
+                "40"
+              ],
+              [
+                1793772600,
+                "93"
+              ],
+              [
+                1793773200,
+                "94"
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "changes_60m",
+      "tool": "query_change_events",
+      "args": [
+        {
+          "around_ts": "2026-11-04T06:20:00Z",
+          "window_minutes": 60
+        },
+        {
+          "around_ts": "2026-11-04T06:20:00Z",
+          "window_minutes": 60,
+          "limit": 50
+        }
+      ],
+      "result": {
+        "changes": [],
+        "count": 0,
+        "window": {
+          "from": "2026-11-04T05:20:00Z",
+          "to": "2026-11-04T07:20:00Z"
+        }
+      }
+    }
+  ],
+  "rubric": {
+    "acceptable": [
+      "设备 42 的 pigz PID 812 在采样时占用主机 91% CPU；设备 43 有独立的高 CPU 指标，但进程采集失败，不能确定其进程原因。"
+    ],
+    "forbidden": [
+      "不能把设备 42 的进程、PID 或利用率归因到设备 43。",
+      "不能把整体调用成功写成两台设备都查询成功。",
+      "采集连接失败不等同于主机宕机，不能将 edge offline 直接写成主机离线。"
+    ],
+    "required_observations": [
+      "metrics",
+      "batch_processes"
+    ],
+    "next_steps": [
+      "恢复设备 43 的连接并独立采集其进程数据。"
+    ]
+  },
+  "smoke": {
+    "steps": [
+      {
+        "fixture": "correlation"
+      },
+      {
+        "fixture": "metrics"
+      },
+      {
+        "fixture": "batch_processes"
+      },
+      {
+        "content": "设备 42 当前主要 CPU 消耗来自 pigz PID 812；设备 43 的进程采集失败，其高 CPU 原因仍未知，不能据此认定主机宕机。"
+      }
+    ],
+    "extraction": {
+      "root_cause": "设备 42 当前主要 CPU 消耗来自 pigz PID 812；设备 43 的进程采集失败，其高 CPU 原因仍未知，不能据此认定主机宕机。",
+      "root_cause_source_ids": [
+        "E2",
+        "E3",
+        "E4"
+      ],
+      "affected_window": "2026-11-04T06:00:00Z/2026-11-04T06:20:00Z",
+      "evidence": [
+        {
+          "summary": "告警窗口内的指标采样值，包含设备及维度标签。",
+          "source_ids": [
+            "E2"
+          ]
+        },
+        {
+          "summary": "设备 42 的进程采样成功，pigz 占整机 CPU 91%。",
+          "source_ids": [
+            "E3"
+          ]
+        },
+        {
+          "summary": "设备 43 的进程采集连接失败，只能说明当前未取到进程数据。",
+          "source_ids": [
+            "E4"
+          ]
+        }
+      ],
+      "suggested_actions": [
+        {
+          "label": "恢复设备 43 的连接并独立采集其进程数据。",
+          "category": "observe",
+          "danger": "none"
+        }
+      ],
+      "confidence": 0.6
+    }
+  }
+}

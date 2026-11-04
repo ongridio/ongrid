@@ -1,0 +1,489 @@
+{
+  "id": "disk_log_growth",
+  "title": "磁盘满：日志文件持续增长",
+  "incident": {
+    "id": 101,
+    "device_id": 42,
+    "rule": "disk_high",
+    "summary": "device 42 /var 使用率从 75% 升至 100%，应用日志写入失败。",
+    "description": "Synthetic incident at 2026-11-04T06:20:00Z. Alert expression: 100 * (1 - node_filesystem_avail_bytes{device_id=\"42\",mountpoint=\"/var\"} / node_filesystem_size_bytes{device_id=\"42\",mountpoint=\"/var\"}). Observation window: 2026-11-04T06:00:00Z to 2026-11-04T06:20:00Z. All observations are fixture data.",
+    "at": "2026-11-04T06:20:00Z"
+  },
+  "fixtures": [
+    {
+      "id": "incident",
+      "tool": "get_incident_detail",
+      "args": [
+        {
+          "incident_ids": [
+            101
+          ]
+        }
+      ],
+      "result": {
+        "success_count": 1,
+        "error_count": 0,
+        "results": [
+          {
+            "incident_id": 101,
+            "incident": {
+              "acknowledged_at": null,
+              "description": "Synthetic incident at 2026-11-04T06:20:00Z. Alert expression: 100 * (1 - node_filesystem_avail_bytes{device_id=\"42\",mountpoint=\"/var\"} / node_filesystem_size_bytes{device_id=\"42\",mountpoint=\"/var\"}). Observation window: 2026-11-04T06:00:00Z to 2026-11-04T06:20:00Z. All observations are fixture data.",
+              "device_id": 42,
+              "event_count": 1,
+              "first_fired_at": "2026-11-04T06:20:00Z",
+              "id": 101,
+              "last_fired_at": "2026-11-04T06:20:00Z",
+              "last_notified_at": null,
+              "resolved_at": null,
+              "rule": "disk_high",
+              "rule_name": "disk_high",
+              "runbook_url": "",
+              "scope_type": "host",
+              "severity": "critical",
+              "silenced_until": null,
+              "status": "open",
+              "summary": "device 42 /var 使用率从 75% 升至 100%，应用日志写入失败。",
+              "threshold": null,
+              "title": "device 42 /var 使用率从 75% 升至 100%，应用日志写入失败。",
+              "value": null
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "correlation",
+      "tool": "correlate_incident",
+      "args": [
+        {
+          "incident_ids": [
+            101
+          ]
+        },
+        {
+          "incident_ids": [
+            101
+          ],
+          "window_minutes": 30
+        }
+      ],
+      "result": {
+        "success_count": 1,
+        "error_count": 0,
+        "results": [
+          {
+            "incident_id": 101,
+            "bundle": {
+              "incident": {
+                "id": 101,
+                "title": "device 42 /var 使用率从 75% 升至 100%，应用日志写入失败。",
+                "rule_key": "disk_high",
+                "rule_name": "disk_high",
+                "severity": "critical",
+                "status": "open",
+                "scope_type": "host",
+                "device_id": 42,
+                "first_fired_at": "2026-11-04T06:20:00Z",
+                "last_fired_at": "2026-11-04T06:20:00Z",
+                "event_count": 1
+              },
+              "window": {
+                "start": "2026-11-04T06:05:00Z",
+                "end": "2026-11-04T06:35:00Z"
+              },
+              "log_panel": [
+                {
+                  "ts": "2026-11-04T06:20:00Z",
+                  "line": "2026-11-04T06:20:00Z path=/var/log/checkout/app.log size_bytes=99857989632 allocated_bytes=99857989632 write failed: no space left on device",
+                  "labels": {
+                    "device_id": "42",
+                    "unit": "disk-sampler.service"
+                  }
+                }
+              ],
+              "host": {
+                "current_edge_id": 1042,
+                "id": 42,
+                "name": "eval-host-42",
+                "status": "online",
+                "roles": [
+                  "server"
+                ],
+                "last_seen_at": "2026-11-04T06:20:00Z",
+                "recent_incidents_24h": 1
+              },
+              "skipped": {
+                "metric_panel": "rule kind unsupported or expression unavailable",
+                "trace_panel": "no service label on incident"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "metrics",
+      "tool": "query_promql",
+      "args": [
+        {
+          "expr": "100 * (1 - node_filesystem_avail_bytes{device_id=\"42\",mountpoint=\"/var\"} / node_filesystem_size_bytes{device_id=\"42\",mountpoint=\"/var\"})",
+          "lookback_seconds": 1200
+        }
+      ],
+      "result": {
+        "resultType": "matrix",
+        "result": [
+          {
+            "metric": {
+              "device_id": "42",
+              "mountpoint": "/var"
+            },
+            "values": [
+              [
+                1793772000,
+                "75"
+              ],
+              [
+                1793772600,
+                "88"
+              ],
+              [
+                1793773200,
+                "100"
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "changes",
+      "tool": "query_change_events",
+      "args": [
+        {
+          "around_ts": "2026-11-04T06:20:00Z"
+        },
+        {
+          "around_ts": "2026-11-04T06:20:00Z",
+          "window_minutes": 30
+        },
+        {
+          "around_ts": "2026-11-04T06:20:00Z",
+          "window_minutes": 30,
+          "limit": 50
+        }
+      ],
+      "result": {
+        "changes": [],
+        "count": 0,
+        "window": {
+          "from": "2026-11-04T05:50:00Z",
+          "to": "2026-11-04T06:50:00Z"
+        }
+      }
+    },
+    {
+      "id": "large_files",
+      "tool": "host_find_large_files",
+      "args": [
+        {
+          "device_id": 42,
+          "paths": [
+            "/var/log"
+          ]
+        },
+        {
+          "device_id": 42,
+          "paths": [
+            "/var/log"
+          ],
+          "top_n": 20
+        }
+      ],
+      "result": {
+        "device_id": 42,
+        "success_count": 1,
+        "error_count": 0,
+        "results": [
+          {
+            "path": "/var/log",
+            "files": [
+              {
+                "path": "/var/log/checkout/app.log",
+                "size_bytes": 99857989632,
+                "mtime": "2026-11-04T06:20:00Z",
+                "size_human": "93 GiB",
+                "owner": "app"
+              }
+            ],
+            "scanned_path": "/var/log"
+          }
+        ]
+      }
+    },
+    {
+      "id": "file_growth",
+      "tool": "query_logql",
+      "args": [
+        {
+          "query": "{} |= \"app.log\"",
+          "device_id": 42,
+          "start": "2026-11-04T06:00:00Z",
+          "end": "2026-11-04T06:20:00Z"
+        },
+        {
+          "query": "{} |= \"app.log\"",
+          "device_id": 42,
+          "start": "2026-11-04T06:00:00Z",
+          "end": "2026-11-04T06:20:00Z",
+          "limit": 200
+        },
+        {
+          "query": "{} |= \"app.log\"",
+          "device_id": 42,
+          "start": "2026-11-04T06:00:00Z",
+          "end": "2026-11-04T06:20:00Z",
+          "limit": 100
+        }
+      ],
+      "result": {
+        "resultType": "streams",
+        "result": [
+          {
+            "stream": {
+              "device_id": "42",
+              "unit": "disk-sampler.service"
+            },
+            "values": [
+              [
+                "1793773200000000000",
+                "2026-11-04T06:20:00Z path=/var/log/checkout/app.log size_bytes=99857989632 allocated_bytes=99857989632 write failed: no space left on device"
+              ],
+              [
+                "1793772000000000000",
+                "2026-11-04T06:00:00Z path=/var/log/checkout/app.log size_bytes=73014444032 allocated_bytes=73014444032"
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "metrics_5m",
+      "tool": "query_promql",
+      "args": [
+        {
+          "expr": "100 * (1 - node_filesystem_avail_bytes{device_id=\"42\",mountpoint=\"/var\"} / node_filesystem_size_bytes{device_id=\"42\",mountpoint=\"/var\"})"
+        }
+      ],
+      "result": {
+        "resultType": "matrix",
+        "result": [
+          {
+            "metric": {
+              "device_id": "42",
+              "mountpoint": "/var"
+            },
+            "values": [
+              [
+                1793773200,
+                "100"
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "metrics_30m",
+      "tool": "query_promql",
+      "args": [
+        {
+          "expr": "100 * (1 - node_filesystem_avail_bytes{device_id=\"42\",mountpoint=\"/var\"} / node_filesystem_size_bytes{device_id=\"42\",mountpoint=\"/var\"})",
+          "lookback_seconds": 1800
+        }
+      ],
+      "result": {
+        "resultType": "matrix",
+        "result": [
+          {
+            "metric": {
+              "device_id": "42",
+              "mountpoint": "/var"
+            },
+            "values": [
+              [
+                1793772000,
+                "75"
+              ],
+              [
+                1793772600,
+                "88"
+              ],
+              [
+                1793773200,
+                "100"
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "changes_60m",
+      "tool": "query_change_events",
+      "args": [
+        {
+          "around_ts": "2026-11-04T06:20:00Z",
+          "window_minutes": 60
+        },
+        {
+          "around_ts": "2026-11-04T06:20:00Z",
+          "window_minutes": 60,
+          "limit": 50
+        }
+      ],
+      "result": {
+        "changes": [],
+        "count": 0,
+        "window": {
+          "from": "2026-11-04T05:20:00Z",
+          "to": "2026-11-04T07:20:00Z"
+        }
+      }
+    },
+    {
+      "id": "disk_usage",
+      "tool": "host_du_summary",
+      "args": [
+        {
+          "device_id": 42,
+          "paths": [
+            "/var"
+          ]
+        },
+        {
+          "device_id": 42,
+          "paths": [
+            "/var"
+          ],
+          "depth": 1
+        }
+      ],
+      "result": {
+        "device_id": 42,
+        "success_count": 1,
+        "error_count": 0,
+        "results": [
+          {
+            "path": "/var",
+            "subpaths": [
+              {
+                "subpath": "/var/log",
+                "size_bytes": 99857989632,
+                "size_human": "93 GiB"
+              },
+              {
+                "subpath": "/var/lib",
+                "size_bytes": 7516192768,
+                "size_human": "7 GiB"
+              }
+            ],
+            "total_size_bytes": 107374182400,
+            "total_size_human": "100 GiB"
+          }
+        ],
+        "filesystems": [
+          {
+            "mountpoint": "/var",
+            "used_bytes": 107374182400,
+            "size_bytes": 107374182400,
+            "used_human": "100 GiB",
+            "size_human": "100 GiB"
+          }
+        ]
+      }
+    }
+  ],
+  "rubric": {
+    "acceptable": [
+      "同一 /var 文件系统容量为 100 GiB，已用从 75% 到 100%；app.log 实际占用从 68 GiB 到 93 GiB，增量 25 GiB 与文件系统增量一致，是主要空间占用来源。",
+      "这些观测支持日志占用原因，不能证明日志轮转失效、写入进程身份或错误风暴的上游原因。"
+    ],
+    "forbidden": [
+      "禁止未验证就认定文件系统损坏。",
+      "禁止报告已删除日志或磁盘已恢复。"
+    ],
+    "required_observations": [
+      "metrics",
+      "large_files",
+      "file_growth",
+      "disk_usage"
+    ],
+    "next_steps": [
+      "核对日志生成速率和轮转配置；变更前确认保留和归档要求。"
+    ]
+  },
+  "smoke": {
+    "steps": [
+      {
+        "fixture": "correlation"
+      },
+      {
+        "fixture": "metrics"
+      },
+      {
+        "fixture": "large_files"
+      },
+      {
+        "fixture": "file_growth"
+      },
+      {
+        "fixture": "disk_usage"
+      },
+      {
+        "content": "app.log 在 06:00–06:20 增长 25 GiB，占用 93 GiB，与 /var 已用空间增加一致；日志是主要占用来源，写入及轮转原因尚待核实。"
+      }
+    ],
+    "extraction": {
+      "root_cause": "app.log 在 06:00–06:20 增长 25 GiB，占用 93 GiB，与 /var 已用空间增加一致；日志是主要占用来源，写入及轮转原因尚待核实。",
+      "root_cause_source_ids": [
+        "E2",
+        "E3",
+        "E4",
+        "E5"
+      ],
+      "affected_window": "2026-11-04T06:00:00Z/2026-11-04T06:20:00Z",
+      "evidence": [
+        {
+          "summary": "告警窗口内的指标采样值，包含设备及维度标签。",
+          "source_ids": [
+            "E2"
+          ]
+        },
+        {
+          "summary": "app.log 实际占用从 68 GiB 到 93 GiB，日志时间与样本时间一致。",
+          "source_ids": [
+            "E3",
+            "E4"
+          ]
+        },
+        {
+          "summary": "/var 容量 100 GiB、已用 100 GiB，其中 /var/log 为 93 GiB。",
+          "source_ids": [
+            "E5"
+          ]
+        }
+      ],
+      "suggested_actions": [
+        {
+          "label": "核对日志生成速率和轮转配置；变更前确认保留和归档要求。",
+          "category": "observe",
+          "danger": "none"
+        }
+      ],
+      "confidence": 0.6
+    }
+  }
+}

@@ -1,0 +1,497 @@
+{
+  "id": "downstream_dependency",
+  "title": "下游依赖失败：采样请求与专家证据",
+  "incident": {
+    "id": 101,
+    "device_id": 42,
+    "rule": "service_errors",
+    "summary": "checkout-api 请求错误率 35%，相关 trace_id=0123456789abcdef0123456789abcdef",
+    "description": "Synthetic incident at 2026-11-04T06:20:00Z. Alert expression: http_error_ratio{service_name=\"checkout-api\",device_id=\"42\"}. Observation window: 2026-11-04T06:00:00Z to 2026-11-04T06:20:00Z. All observations are fixture data. The application exposes the recording rule http_error_ratio: 5-minute failed-request count / total-request count, grouped by service_name and device_id.",
+    "at": "2026-11-04T06:20:00Z",
+    "labels": {
+      "service": "checkout-api"
+    }
+  },
+  "fixtures": [
+    {
+      "id": "incident",
+      "tool": "get_incident_detail",
+      "args": [
+        {
+          "incident_ids": [
+            101
+          ]
+        }
+      ],
+      "result": {
+        "success_count": 1,
+        "error_count": 0,
+        "results": [
+          {
+            "incident_id": 101,
+            "incident": {
+              "acknowledged_at": null,
+              "description": "Synthetic incident at 2026-11-04T06:20:00Z. Alert expression: http_error_ratio{service_name=\"checkout-api\",device_id=\"42\"}. Observation window: 2026-11-04T06:00:00Z to 2026-11-04T06:20:00Z. All observations are fixture data. The application exposes the recording rule http_error_ratio: 5-minute failed-request count / total-request count, grouped by service_name and device_id.",
+              "device_id": 42,
+              "event_count": 1,
+              "first_fired_at": "2026-11-04T06:20:00Z",
+              "id": 101,
+              "last_fired_at": "2026-11-04T06:20:00Z",
+              "last_notified_at": null,
+              "resolved_at": null,
+              "rule": "service_errors",
+              "rule_name": "service_errors",
+              "runbook_url": "",
+              "scope_type": "host",
+              "severity": "critical",
+              "silenced_until": null,
+              "status": "open",
+              "summary": "checkout-api 请求错误率 35%，相关 trace_id=0123456789abcdef0123456789abcdef",
+              "threshold": null,
+              "title": "checkout-api 请求错误率 35%，相关 trace_id=0123456789abcdef0123456789abcdef",
+              "value": null
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "correlation",
+      "tool": "correlate_incident",
+      "args": [
+        {
+          "incident_ids": [
+            101
+          ]
+        },
+        {
+          "incident_ids": [
+            101
+          ],
+          "window_minutes": 30
+        }
+      ],
+      "result": {
+        "success_count": 1,
+        "error_count": 0,
+        "results": [
+          {
+            "incident_id": 101,
+            "bundle": {
+              "incident": {
+                "id": 101,
+                "title": "checkout-api 请求错误率 35%，相关 trace_id=0123456789abcdef0123456789abcdef",
+                "rule_key": "service_errors",
+                "rule_name": "service_errors",
+                "severity": "critical",
+                "status": "open",
+                "scope_type": "host",
+                "device_id": 42,
+                "first_fired_at": "2026-11-04T06:20:00Z",
+                "last_fired_at": "2026-11-04T06:20:00Z",
+                "event_count": 1,
+                "labels": {
+                  "service": "checkout-api"
+                }
+              },
+              "window": {
+                "start": "2026-11-04T06:05:00Z",
+                "end": "2026-11-04T06:35:00Z"
+              },
+              "log_panel": [
+                {
+                  "ts": "2026-11-04T06:18:02.08Z",
+                  "line": "inventory-api ERROR db pool timeout: active=20 max=20 waiters=80 trace_id=0123456789abcdef0123456789abcdef",
+                  "labels": {
+                    "device_id": "42",
+                    "trace_id": "0123456789abcdef0123456789abcdef",
+                    "unit": "inventory-api.service"
+                  }
+                }
+              ],
+              "trace_panel": [
+                {
+                  "trace_id": "0123456789abcdef0123456789abcdef",
+                  "service": "checkout-api",
+                  "root_name": "POST /checkout",
+                  "duration_ms": 2100,
+                  "start_time": "1793773080000000000"
+                }
+              ],
+              "host": {
+                "current_edge_id": 1042,
+                "id": 42,
+                "name": "eval-host-42",
+                "status": "online",
+                "roles": [
+                  "server"
+                ],
+                "last_seen_at": "2026-11-04T06:20:00Z",
+                "recent_incidents_24h": 1
+              },
+              "skipped": {
+                "metric_panel": "rule kind unsupported or expression unavailable"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "metrics",
+      "tool": "query_promql",
+      "args": [
+        {
+          "expr": "http_error_ratio{service_name=\"checkout-api\",device_id=\"42\"}",
+          "lookback_seconds": 1200
+        }
+      ],
+      "result": {
+        "resultType": "matrix",
+        "result": [
+          {
+            "metric": {
+              "__name__": "http_error_ratio",
+              "device_id": "42",
+              "service_name": "checkout-api"
+            },
+            "values": [
+              [
+                1793772000,
+                "0.01"
+              ],
+              [
+                1793772600,
+                "0.01"
+              ],
+              [
+                1793773200,
+                "0.35"
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "changes",
+      "tool": "query_change_events",
+      "args": [
+        {
+          "around_ts": "2026-11-04T06:20:00Z"
+        },
+        {
+          "around_ts": "2026-11-04T06:20:00Z",
+          "window_minutes": 30
+        },
+        {
+          "around_ts": "2026-11-04T06:20:00Z",
+          "window_minutes": 30,
+          "limit": 50
+        }
+      ],
+      "result": {
+        "changes": [],
+        "count": 0,
+        "window": {
+          "from": "2026-11-04T05:50:00Z",
+          "to": "2026-11-04T06:50:00Z"
+        }
+      }
+    },
+    {
+      "id": "trace",
+      "tool": "query_traceql",
+      "args": [
+        {
+          "trace_id": "0123456789abcdef0123456789abcdef"
+        }
+      ],
+      "result": {
+        "trace_id": "0123456789abcdef0123456789abcdef",
+        "total_spans": 2,
+        "spans": [
+          {
+            "resource": {
+              "attributes": [
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "checkout-api"
+                  }
+                },
+                {
+                  "key": "device_id",
+                  "value": {
+                    "stringValue": "42"
+                  }
+                }
+              ]
+            },
+            "span": {
+              "traceId": "0123456789abcdef0123456789abcdef",
+              "spanId": "0000000000000001",
+              "name": "POST /checkout",
+              "startTimeUnixNano": "1793773080000000000",
+              "endTimeUnixNano": "1793773082100000000",
+              "status": {
+                "code": 2,
+                "message": "downstream request failed"
+              }
+            }
+          },
+          {
+            "resource": {
+              "attributes": [
+                {
+                  "key": "service.name",
+                  "value": {
+                    "stringValue": "inventory-api"
+                  }
+                },
+                {
+                  "key": "device_id",
+                  "value": {
+                    "stringValue": "42"
+                  }
+                }
+              ]
+            },
+            "span": {
+              "traceId": "0123456789abcdef0123456789abcdef",
+              "spanId": "0000000000000002",
+              "name": "reserve",
+              "startTimeUnixNano": "1793773080000000000",
+              "endTimeUnixNano": "1793773082080000000",
+              "status": {
+                "code": 2,
+                "message": "db pool timeout"
+              },
+              "parentSpanId": "0000000000000001",
+              "events": [
+                {
+                  "timeUnixNano": "1793773082080000000",
+                  "name": "db pool timeout: active=20 max=20 waiters=80"
+                }
+              ]
+            }
+          }
+        ],
+        "truncated": false
+      }
+    },
+    {
+      "id": "dependency_logs",
+      "tool": "query_logql",
+      "args": [
+        {
+          "query": "{unit=\"inventory-api.service\"} |= \"pool\"",
+          "device_id": 42,
+          "start": "2026-11-04T06:00:00Z",
+          "end": "2026-11-04T06:20:00Z"
+        },
+        {
+          "query": "{unit=\"inventory-api.service\"} |= \"pool\"",
+          "device_id": 42,
+          "start": "2026-11-04T06:00:00Z",
+          "end": "2026-11-04T06:20:00Z",
+          "limit": 200
+        },
+        {
+          "query": "{unit=\"inventory-api.service\"} |= \"pool\"",
+          "device_id": 42,
+          "start": "2026-11-04T06:00:00Z",
+          "end": "2026-11-04T06:20:00Z",
+          "limit": 100
+        }
+      ],
+      "result": {
+        "resultType": "streams",
+        "result": [
+          {
+            "stream": {
+              "device_id": "42",
+              "unit": "inventory-api.service",
+              "trace_id": "0123456789abcdef0123456789abcdef"
+            },
+            "values": [
+              [
+                "1793773082080000000",
+                "inventory-api ERROR db pool timeout: active=20 max=20 waiters=80 trace_id=0123456789abcdef0123456789abcdef"
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "metrics_5m",
+      "tool": "query_promql",
+      "args": [
+        {
+          "expr": "http_error_ratio{service_name=\"checkout-api\",device_id=\"42\"}"
+        }
+      ],
+      "result": {
+        "resultType": "matrix",
+        "result": [
+          {
+            "metric": {
+              "__name__": "http_error_ratio",
+              "device_id": "42",
+              "service_name": "checkout-api"
+            },
+            "values": [
+              [
+                1793773200,
+                "0.35"
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "metrics_30m",
+      "tool": "query_promql",
+      "args": [
+        {
+          "expr": "http_error_ratio{service_name=\"checkout-api\",device_id=\"42\"}",
+          "lookback_seconds": 1800
+        }
+      ],
+      "result": {
+        "resultType": "matrix",
+        "result": [
+          {
+            "metric": {
+              "__name__": "http_error_ratio",
+              "device_id": "42",
+              "service_name": "checkout-api"
+            },
+            "values": [
+              [
+                1793772000,
+                "0.01"
+              ],
+              [
+                1793772600,
+                "0.01"
+              ],
+              [
+                1793773200,
+                "0.35"
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "changes_60m",
+      "tool": "query_change_events",
+      "args": [
+        {
+          "around_ts": "2026-11-04T06:20:00Z",
+          "window_minutes": 60
+        },
+        {
+          "around_ts": "2026-11-04T06:20:00Z",
+          "window_minutes": 60,
+          "limit": 50
+        }
+      ],
+      "result": {
+        "changes": [],
+        "count": 0,
+        "window": {
+          "from": "2026-11-04T05:20:00Z",
+          "to": "2026-11-04T07:20:00Z"
+        }
+      }
+    }
+  ],
+  "rubric": {
+    "acceptable": [
+      "采样 trace 显示 checkout-api 的请求错误沿 inventory-api 数据库连接池等待超时传播；同一 trace 的日志有 active=max=20、waiters=80。",
+      "该请求的故障环节可定位；连接池耗尽原因以及它是否解释全部 35% 错误请求仍需额外样本。"
+    ],
+    "forbidden": [
+      "不能把 checkout-api 自身 CPU 高或数据库宕机当作已证实根因。",
+      "不能仅凭池满认定数据库连接泄漏。",
+      "不能用一个 trace 证明所有错误请求具有相同根因。"
+    ],
+    "required_observations": [
+      "metrics",
+      "trace",
+      "dependency_logs"
+    ],
+    "next_steps": [
+      "检查 inventory-api 连接持有时间、慢查询和请求量。"
+    ]
+  },
+  "smoke": {
+    "steps": [
+      {
+        "fixture": "correlation"
+      },
+      {
+        "fixture": "metrics"
+      },
+      {
+        "fixture": "trace"
+      },
+      {
+        "tool": "AgentTool",
+        "args": {
+          "description": "追查下游调用失败",
+          "subagent_type": "specialist-sre",
+          "prompt": "核对 inventory-api 的连接池日志，device_id=42，窗口 2026-11-04T06:00:00Z 至 2026-11-04T06:20:00Z。主调查已读取 trace_id=0123456789abcdef0123456789abcdef：checkout-api 父 span 报 downstream request failed；inventory-api 子 span reserve 持续 2080ms，报 db pool timeout。请用同 trace 日志检查饱和状态，区分观察与推测。"
+        }
+      },
+      {
+        "content": "采样请求的 checkout-api 错误沿 inventory-api 连接池等待超时传播；池耗尽原因及全部错误请求的归因尚未确认。"
+      }
+    ],
+    "specialist": [
+      {
+        "fixture": "dependency_logs"
+      },
+      {
+        "content": "同 trace 的 inventory-api 日志显示 db pool timeout，active=max=20、waiters=80；与主调查提供的 Trace 一致。池耗尽的上游原因及其他错误请求仍未确认。"
+      }
+    ],
+    "extraction": {
+      "root_cause": "采样请求的 checkout-api 错误沿 inventory-api 连接池等待超时传播；池耗尽原因及全部错误请求的归因尚未确认。",
+      "root_cause_source_ids": [
+        "E2",
+        "E3",
+        "E5"
+      ],
+      "affected_window": "2026-11-04T06:00:00Z/2026-11-04T06:20:00Z",
+      "evidence": [
+        {
+          "summary": "告警窗口内的指标采样值，包含设备及维度标签。",
+          "source_ids": [
+            "E2"
+          ]
+        },
+        {
+          "summary": "同一采样请求中，checkout-api 上游错误与 inventory-api 连接池等待超时相连。",
+          "source_ids": [
+            "E3",
+            "E5"
+          ]
+        }
+      ],
+      "suggested_actions": [
+        {
+          "label": "检查 inventory-api 连接持有时间、慢查询和请求量。",
+          "category": "observe",
+          "danger": "none"
+        }
+      ],
+      "confidence": 0.6
+    }
+  }
+}

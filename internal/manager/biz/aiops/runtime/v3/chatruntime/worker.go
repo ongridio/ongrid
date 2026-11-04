@@ -440,6 +440,7 @@ func (rt *Runtime) GetWorker(workerID string) (*Worker, bool) {
 // matching Handle()'s "user message lands on disk before the LLM call"
 // invariant — same survival semantics on a graph crash.
 func (rt *Runtime) runWorker(ctx context.Context, agentDef *Agent, sessID, userText, locale string, parentEmit Emit, workerID string) (result string, retErr error) {
+	ctx = basetool.WithSessionID(ctx, sessID)
 	session := &aiopsmodel.Session{ID: sessID}
 	if rt.cfg.Sessions != nil && sessID != "" {
 		var err error
