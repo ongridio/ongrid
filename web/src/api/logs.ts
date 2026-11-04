@@ -113,6 +113,7 @@ export type LogBackend = {
   id: number;
   name: string;
   type: 'elasticsearch';
+  auth_type?: 'api_key' | 'basic';
   current_backend?: 'loki' | 'elasticsearch';
   current_backend_id?: number;
   status: 'selected' | 'unselected';
@@ -140,6 +141,11 @@ export function currentLogBackend(backend: LogBackend | null): LogBackendKind {
 }
 
 export type SaveLogBackendInput = {
+  auth_type?: 'api_key' | 'basic';
+  write_username?: string;
+  write_password?: string;
+  query_username?: string;
+  query_password?: string;
   name?: string;
   write_endpoints: string[];
   query_endpoint: string;

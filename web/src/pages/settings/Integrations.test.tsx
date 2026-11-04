@@ -312,6 +312,53 @@ describe('SettingsIntegrations log backend presentation', () => {
     });
   });
 
+  it.each(['reader', 'writer'])('saves Basic Auth with query user %s and preserves passwords', async (queryUsername) => {
+    const queryPassword = queryUsername === 'writer' ? ' write:$password ' : ' read:$password ';
+    vi.mocked(getLogBackend).mockResolvedValue(backend('unselected', 'loki'));
+    vi.mocked(saveLogBackend).mockResolvedValue({ ...backend('unselected', 'loki'), auth_type: 'basic' });
+    render(<MemoryRouter initialEntries={['/settings/integrations?focus=logs']}><SettingsIntegrations /></MemoryRouter>);
+    const user = userEvent.setup();
+    await act(async () => user.click(await screen.findByRole('tab', { name: /Elasticsearch/ })));
+    const section = within(await screen.findByRole('region', { name: 'Elasticsearch 日志后端配置' }));
+    await act(async () => user.click(section.getByRole('combobox', { name: '认证方式' })));
+    await act(async () => user.click(await screen.findByRole('option', { name: 'Basic Auth' })));
+    await act(async () => user.click(section.getByRole('button', { name: '测试连接' })));
+    expect(testLogBackendDraft).not.toHaveBeenCalled();
+    expect(section.getByText(/请填写完整的写入用户名和密码/)).toBeVisible();
+    fireEvent.change(section.getByRole('textbox', { name: /ES 写入用户名/ }), { target: { value: 'writer' } });
+    fireEvent.change(section.getByRole('textbox', { name: /ES 查询用户名/ }), { target: { value: queryUsername } });
+    fireEvent.change(section.getByLabelText(/ES 写入密码/), { target: { value: ' write:$password ' } });
+    fireEvent.change(section.getByLabelText(/ES 查询密码/), { target: { value: queryPassword } });
+    await act(async () => user.click(section.getByRole('button', { name: '测试连接' })));
+    await waitFor(() => expect(section.getByRole('button', { name: '保存' })).toBeEnabled());
+    const input = vi.mocked(testLogBackendDraft).mock.calls[0][0];
+    expect(input).toMatchObject({ auth_type: 'basic', write_username: 'writer', query_username: queryUsername, write_password: ' write:$password ', query_password: queryPassword });
+    expect(input.write_api_key).toBeUndefined();
+    expect(input.query_api_key).toBeUndefined();
+    expect(input.write_credential_ref).toBeUndefined();
+    expect(input.query_credential_ref).toBeUndefined();
+    await act(async () => user.click(section.getByRole('button', { name: '保存' })));
+    await waitFor(() => expect(saveLogBackend).toHaveBeenCalledWith(input));
+    expect(section.getByLabelText(/ES 写入密码/)).toHaveValue('');
+    expect(section.getByLabelText(/ES 查询密码/)).toHaveValue('');
+  });
+
+  it('retains stored Basic Auth pairs and rejects partial replacements', async () => {
+    vi.mocked(getLogBackend).mockResolvedValue({ ...backend('unselected', 'loki'), auth_type: 'basic' });
+    render(<MemoryRouter initialEntries={['/settings/integrations?focus=logs']}><SettingsIntegrations /></MemoryRouter>);
+    const user = userEvent.setup();
+    await act(async () => user.click(await screen.findByRole('tab', { name: /Elasticsearch/ })));
+    const section = within(await screen.findByRole('region', { name: 'Elasticsearch 日志后端配置' }));
+    await act(async () => user.click(section.getByRole('button', { name: '测试连接' })));
+    await waitFor(() => expect(testLogBackendDraft).toHaveBeenCalledOnce());
+    expect(vi.mocked(testLogBackendDraft).mock.calls[0][0]).toMatchObject({ auth_type: 'basic', write_credential_ref: 'write-key', query_credential_ref: 'query-key' });
+    fireEvent.change(section.getByRole('textbox', { name: /ES 写入用户名/ }), { target: { value: 'new-writer' } });
+    await act(async () => user.click(section.getByRole('button', { name: '测试连接' })));
+    expect(testLogBackendDraft).toHaveBeenCalledOnce();
+    expect(section.getByText(/请填写完整的写入用户名和密码/)).toBeVisible();
+    expect(section.getByRole('button', { name: '保存' })).toBeDisabled();
+  });
+
   it('selects an unselected Elasticsearch configuration directly', async () => {
     const unselected = backend('unselected', 'loki');
     const selected = { ...unselected, status: 'selected' as const, current_backend: 'elasticsearch' as const };
@@ -540,7 +587,7 @@ describe('SettingsIntegrations log backend presentation', () => {
       query_endpoint: 'https://es.example.com:9200',
     })));
     expect(selectLogBackend).not.toHaveBeenCalled();
-    expect(screen.getByText(/连接测试通过；查询\/写入端点及 API Key 权限有效（Elasticsearch 8\.16\.3）/)).toBeVisible();
+    expect(screen.getByText(/连接测试通过；查询\/写入端点及凭证权限有效（Elasticsearch 8\.16\.3）/)).toBeVisible();
   });
 
   it('keeps shared log actions ordered and exposes device checks for both backends', async () => {

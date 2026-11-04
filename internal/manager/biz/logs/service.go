@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
@@ -34,6 +33,7 @@ import (
 const (
 	DefaultBackendName      = "external-elasticsearch"
 	SecretSlotESAPIKey      = "elasticsearch_api_key"
+	SecretSlotESBasicAuth   = "elasticsearch_basic_auth"
 	SecretSlotLokiBasicAuth = "loki_basic_auth"
 	managedLogsSecretPrefix = "ongrid-managed-logs-es-"
 	elasticsearchCredType   = "elasticsearch"
@@ -69,7 +69,7 @@ type SecretResolver interface {
 
 // ManagedSecretStore is implemented by Manager's encrypted credential vault.
 // It is intentionally an in-process capability rather than an HTTP API: direct
-// API keys submitted with a log backend are write-only request fields and are
+// credentials submitted with a log backend are write-only request fields and are
 // converted to ordinary credential references before the backend is persisted.
 type ManagedSecretStore interface {
 	SecretResolver
@@ -135,6 +135,11 @@ type SaveInput struct {
 	Namespace          string   `json:"namespace"`
 	WriteCredentialRef string   `json:"write_credential_ref,omitempty"`
 	QueryCredentialRef string   `json:"query_credential_ref,omitempty"`
+	AuthType           string   `json:"auth_type,omitempty"`
+	WriteUsername      string   `json:"write_username,omitempty"`
+	WritePassword      string   `json:"write_password,omitempty"`
+	QueryUsername      string   `json:"query_username,omitempty"`
+	QueryPassword      string   `json:"query_password,omitempty"`
 	WriteAPIKey        string   `json:"write_api_key,omitempty"`
 	QueryAPIKey        string   `json:"query_api_key,omitempty"`
 	CAPEM              string   `json:"ca_pem,omitempty"`
@@ -144,6 +149,7 @@ type SaveInput struct {
 }
 
 type BackendView struct {
+	AuthType           string              `json:"auth_type"`
 	ID                 uint64              `json:"id"`
 	Name               string              `json:"name"`
 	Type               model.BackendType   `json:"type"`
@@ -312,7 +318,7 @@ func (s *Service) Save(ctx context.Context, input SaveInput) (view *BackendView,
 		}
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), managedSecretCleanupTTL)
 		defer cancel()
-		if cleanupErr := s.deleteManagedAPIKeys(cleanupCtx, createdManagedRefs); cleanupErr != nil {
+		if cleanupErr := s.deleteManagedCredentials(cleanupCtx, createdManagedRefs); cleanupErr != nil {
 			retErr = errors.Join(retErr, fmt.Errorf("cleanup managed Elasticsearch credentials: %w", cleanupErr))
 		}
 	}()
@@ -339,59 +345,27 @@ func (s *Service) Save(ctx context.Context, input SaveInput) (view *BackendView,
 		}
 	}
 
-	writeRef := normalized.WriteCredentialRef
-	queryRef := normalized.QueryCredentialRef
-	if loadErr == nil {
-		// Direct key fields are write-only. An empty value means "keep the
-		// current key", so clients never need to fetch plaintext to edit the
-		// non-sensitive parts of an existing backend.
-		if writeRef == "" {
-			writeRef = previous.WriteCredentialRef
-		}
-		if queryRef == "" {
-			queryRef = previous.QueryCredentialRef
-		}
+	writeKey, queryKey, err := s.resolveInputCredentials(ctx, &normalized, previous)
+	if err != nil {
+		return nil, err
 	}
-	writeKey := normalized.WriteAPIKey
-	if writeKey == "" {
-		if writeRef == "" {
-			return nil, fmt.Errorf("%w: write API key or credential ref is required", errs.ErrInvalid)
-		}
-		writeKey, err = s.apiKey(ctx, writeRef)
-		if err != nil {
-			return nil, fmt.Errorf("%w: invalid write credential", errs.ErrInvalid)
-		}
-	}
-	queryKey := normalized.QueryAPIKey
-	if queryKey == "" {
-		if queryRef == "" {
-			return nil, fmt.Errorf("%w: query API key or credential ref is required", errs.ErrInvalid)
-		}
-		queryKey, err = s.apiKey(ctx, queryRef)
-		if err != nil {
-			return nil, fmt.Errorf("%w: invalid query credential", errs.ErrInvalid)
-		}
-	}
-	// The write and query principals are intentionally distinct: Edge only
-	// receives the write key, while Manager only needs read privileges.
-	if subtle.ConstantTimeCompare([]byte(writeKey), []byte(queryKey)) == 1 {
-		return nil, fmt.Errorf("%w: write and query API keys must differ", errs.ErrInvalid)
-	}
-	if normalized.WriteAPIKey != "" {
-		writeRef, err = s.storeManagedAPIKey(ctx, "write", writeKey, generation)
+	writeRef, queryRef := normalized.WriteCredentialRef, normalized.QueryCredentialRef
+
+	if normalized.WriteAPIKey != "" || normalized.WriteUsername != "" {
+		writeRef, err = s.storeManagedCredential(ctx, "write", writeKey, generation)
 		if err != nil {
 			return nil, err
 		}
 		createdManagedRefs = append(createdManagedRefs, writeRef)
 	}
-	if normalized.QueryAPIKey != "" {
-		queryRef, err = s.storeManagedAPIKey(ctx, "query", queryKey, generation)
+	if normalized.QueryAPIKey != "" || normalized.QueryUsername != "" {
+		queryRef, err = s.storeManagedCredential(ctx, "query", queryKey, generation)
 		if err != nil {
 			return nil, err
 		}
 		createdManagedRefs = append(createdManagedRefs, queryRef)
 	}
-	if writeRef == queryRef {
+	if normalized.AuthType == authTypeAPIKey && writeRef == queryRef {
 		return nil, fmt.Errorf("%w: write and query credentials must be different", errs.ErrInvalid)
 	}
 
@@ -400,6 +374,7 @@ func (s *Service) Save(ctx context.Context, input SaveInput) (view *BackendView,
 		return nil, fmt.Errorf("encode Elasticsearch endpoints: %w", err)
 	}
 	backend := &model.Backend{
+		AuthType:           normalized.AuthType,
 		Name:               normalized.Name,
 		Type:               model.BackendTypeElasticsearch,
 		Status:             model.BackendStatusUnselected,
@@ -433,7 +408,7 @@ func (s *Service) Save(ctx context.Context, input SaveInput) (view *BackendView,
 	}
 	backendPersisted = true
 	if editableInPlace {
-		s.cleanupSupersededManagedAPIKeys(ctx, previous, backend)
+		s.cleanupSupersededManagedCredentials(ctx, previous, backend)
 	}
 	s.invalidateCache()
 	return s.view(ctx, backend)
@@ -447,8 +422,8 @@ func (s *Service) Get(ctx context.Context) (*BackendView, error) {
 	return s.view(ctx, backend)
 }
 
-// Test validates the saved Elasticsearch query/write endpoints and their API
-// key privileges without notifying Edge or changing the
+// Test validates the saved Elasticsearch query/write endpoints and credential
+// privileges without notifying Edge or changing the
 // selected log backend. Select repeats these checks before switching the global
 // read/write backend. Edge connectivity is checked independently after selection.
 func (s *Service) Test(ctx context.Context, id uint64) (*BackendTestResult, error) {
@@ -483,37 +458,9 @@ func (s *Service) TestDraft(ctx context.Context, input SaveInput) (*BackendTestR
 	if loadErr != nil && !errors.Is(loadErr, errs.ErrNotFound) {
 		return nil, loadErr
 	}
-	writeRef, queryRef := normalized.WriteCredentialRef, normalized.QueryCredentialRef
-	if loadErr == nil {
-		if writeRef == "" {
-			writeRef = previous.WriteCredentialRef
-		}
-		if queryRef == "" {
-			queryRef = previous.QueryCredentialRef
-		}
-	}
-	writeKey := normalized.WriteAPIKey
-	if writeKey == "" {
-		if writeRef == "" {
-			return nil, fmt.Errorf("%w: write API key or credential ref is required", errs.ErrInvalid)
-		}
-		writeKey, err = s.apiKey(ctx, writeRef)
-		if err != nil {
-			return nil, fmt.Errorf("%w: invalid write credential", errs.ErrInvalid)
-		}
-	}
-	queryKey := normalized.QueryAPIKey
-	if queryKey == "" {
-		if queryRef == "" {
-			return nil, fmt.Errorf("%w: query API key or credential ref is required", errs.ErrInvalid)
-		}
-		queryKey, err = s.apiKey(ctx, queryRef)
-		if err != nil {
-			return nil, fmt.Errorf("%w: invalid query credential", errs.ErrInvalid)
-		}
-	}
-	if subtle.ConstantTimeCompare([]byte(writeKey), []byte(queryKey)) == 1 {
-		return nil, fmt.Errorf("%w: write and query API keys must differ", errs.ErrInvalid)
+	writeKey, queryKey, err := s.resolveInputCredentials(ctx, &normalized, previous)
+	if err != nil {
+		return nil, err
 	}
 	endpointsJSON, err := json.Marshal(normalized.WriteEndpoints)
 	if err != nil {
@@ -527,7 +474,7 @@ func (s *Service) TestDraft(ctx context.Context, input SaveInput) (*BackendTestR
 		WriteEndpointsJSON: string(endpointsJSON), QueryEndpoint: normalized.QueryEndpoint,
 		IndexPattern: indexPattern(normalized.Namespace), CAPEM: caPEM, TLSInsecure: normalized.TLSInsecure,
 	}
-	version, err := s.probeBackendWithKeys(ctx, backend, writeKey, queryKey)
+	version, err := s.probeBackendWithCredentials(ctx, backend, writeKey, queryKey)
 	if err != nil {
 		return nil, err
 	}
@@ -845,7 +792,7 @@ func (s *Service) SelectedElasticsearchDatasource(ctx context.Context) (*pkggraf
 }
 
 // PluginRuntimeOverlay implements edge.PluginRuntimeOverlayProvider without
-// importing the edge bounded context. Values are non-sensitive; the API key is
+// importing the edge bounded context. Values are non-sensitive; the credential is
 // fetched separately by the authenticated Edge and materialized as a file.
 func (s *Service) PluginRuntimeOverlay(ctx context.Context, edgeID uint64, plugin string) (map[string]interface{}, error) {
 	if plugin != "logs" {
@@ -899,6 +846,9 @@ func (s *Service) PluginRuntimeOverlay(ctx context.Context, edgeID uint64, plugi
 		"elasticsearch_tls_insecure_skip_verify": runtime.TLSInsecure,
 		"elasticsearch_secret_slot":              SecretSlotESAPIKey,
 	}
+	if backendAuthType(backend) == authTypeBasic {
+		overlay["elasticsearch_secret_slot"] = SecretSlotESBasicAuth
+	}
 	if assignment != nil && assignment.ProbeID != "" {
 		overlay["log_probe_id"] = assignment.ProbeID
 	}
@@ -913,8 +863,8 @@ func (s *Service) PluginSecretForEdge(ctx context.Context, edgeID uint64, plugin
 		return nil, errs.ErrForbidden
 	}
 	switch slot {
-	case SecretSlotESAPIKey:
-		return s.elasticsearchSecretForEdge(ctx, edgeID, generation)
+	case SecretSlotESAPIKey, SecretSlotESBasicAuth:
+		return s.elasticsearchSecretForEdge(ctx, edgeID, generation, slot)
 	case SecretSlotLokiBasicAuth:
 		return s.lokiSecretForEdge(ctx, edgeID, generation)
 	default:
@@ -922,7 +872,7 @@ func (s *Service) PluginSecretForEdge(ctx context.Context, edgeID uint64, plugin
 	}
 }
 
-func (s *Service) elasticsearchSecretForEdge(ctx context.Context, edgeID, generation uint64) (*PluginSecret, error) {
+func (s *Service) elasticsearchSecretForEdge(ctx context.Context, edgeID, generation uint64, slot string) (*PluginSecret, error) {
 	backend, assignment, err := s.backendForEdgeGeneration(ctx, edgeID, generation)
 	if err != nil {
 		return nil, err
@@ -930,13 +880,17 @@ func (s *Service) elasticsearchSecretForEdge(ctx context.Context, edgeID, genera
 	if generation == 0 || generation != backend.Generation {
 		return nil, fmt.Errorf("%w: stale log backend generation", errs.ErrConflict)
 	}
-	fields, err := s.secrets.ResolveFields(ctx, backend.WriteCredentialRef)
+	authType := backendAuthType(backend)
+	if (slot == SecretSlotESBasicAuth) != (authType == authTypeBasic) {
+		return nil, errs.ErrForbidden
+	}
+	credential, err := s.credential(ctx, backend.WriteCredentialRef, authType)
 	if err != nil {
 		return nil, fmt.Errorf("resolve Elasticsearch write credential: %w", err)
 	}
-	apiKey := strings.TrimSpace(fields["api_key"])
-	if apiKey == "" {
-		return nil, fmt.Errorf("%w: Elasticsearch credential has no api_key", errs.ErrInvalid)
+	content := credential.APIKey
+	if authType == authTypeBasic {
+		content = "Basic " + base64.StdEncoding.EncodeToString([]byte(credential.BasicUser+":"+credential.BasicPassword))
 	}
 	if assignment != nil {
 		assignment.DesiredGeneration = backend.Generation
@@ -950,8 +904,8 @@ func (s *Service) elasticsearchSecretForEdge(ctx context.Context, edgeID, genera
 			return nil, err
 		}
 	}
-	sum := sha256.Sum256([]byte(apiKey))
-	return &PluginSecret{Generation: backend.Generation, Content: apiKey, SHA256: hex.EncodeToString(sum[:])}, nil
+	sum := sha256.Sum256([]byte(content))
+	return &PluginSecret{Generation: backend.Generation, Content: content, SHA256: hex.EncodeToString(sum[:])}, nil
 }
 
 func (s *Service) lokiSecretForEdge(ctx context.Context, edgeID, generation uint64) (*PluginSecret, error) {
@@ -1217,7 +1171,7 @@ func (s *Service) verifyEdgeProbe(ctx context.Context, backend *model.Backend, a
 	if deviceID == 0 {
 		return fmt.Errorf("resolve host device for Edge %d: empty device id", assignment.EdgeID)
 	}
-	queryKey, err := s.apiKey(ctx, backend.QueryCredentialRef)
+	queryKey, err := s.credential(ctx, backend.QueryCredentialRef, backendAuthType(backend))
 	if err != nil {
 		return err
 	}
@@ -1323,7 +1277,7 @@ func (s *Service) elasticsearchDatasourceConfig(ctx context.Context, backend *mo
 	if backend == nil {
 		return nil, errors.New("selected Elasticsearch backend is nil")
 	}
-	queryKey, err := s.apiKey(ctx, backend.QueryCredentialRef)
+	queryKey, err := s.credential(ctx, backend.QueryCredentialRef, backendAuthType(backend))
 	if err != nil {
 		return nil, fmt.Errorf("resolve Elasticsearch query credential for Grafana: %w", err)
 	}
@@ -1335,11 +1289,13 @@ func (s *Service) elasticsearchDatasourceConfig(ctx context.Context, backend *mo
 		// QueryEndpoint is explicitly Manager-scoped and may be a loopback
 		// address. Grafana runs in a separate process/container, so point it at
 		// the first endpoint already verified for direct Edge access instead.
-		URL:          endpoints[0],
-		IndexPattern: backend.IndexPattern,
-		APIKey:       queryKey,
-		CAPEM:        backend.CAPEM,
-		TLSInsecure:  backend.TLSInsecure,
+		URL:           endpoints[0],
+		IndexPattern:  backend.IndexPattern,
+		APIKey:        queryKey.APIKey,
+		BasicUser:     queryKey.BasicUser,
+		BasicPassword: queryKey.BasicPassword,
+		CAPEM:         backend.CAPEM,
+		TLSInsecure:   backend.TLSInsecure,
 	}, nil
 }
 
@@ -1473,18 +1429,18 @@ func newConnectionCheckGeneration() (uint64, error) {
 }
 
 func (s *Service) probeBackend(ctx context.Context, backend *model.Backend) (string, error) {
-	queryKey, err := s.apiKey(ctx, backend.QueryCredentialRef)
+	queryKey, err := s.credential(ctx, backend.QueryCredentialRef, backendAuthType(backend))
 	if err != nil {
 		return "", err
 	}
-	writeKey, err := s.apiKey(ctx, backend.WriteCredentialRef)
+	writeKey, err := s.credential(ctx, backend.WriteCredentialRef, backendAuthType(backend))
 	if err != nil {
 		return "", err
 	}
-	return s.probeBackendWithKeys(ctx, backend, writeKey, queryKey)
+	return s.probeBackendWithCredentials(ctx, backend, writeKey, queryKey)
 }
 
-func (s *Service) probeBackendWithKeys(ctx context.Context, backend *model.Backend, writeKey, queryKey string) (string, error) {
+func (s *Service) probeBackendWithCredentials(ctx context.Context, backend *model.Backend, writeKey, queryKey elasticsearchCredential) (string, error) {
 	queryClient, err := s.newESClient(backend.QueryEndpoint, backend.IndexPattern, queryKey, backend)
 	if err != nil {
 		return "", err
@@ -1539,41 +1495,26 @@ func (s *Service) probeBackendWithKeys(ctx context.Context, backend *model.Backe
 	return queryInfo.Version, nil
 }
 
-func (s *Service) apiKey(ctx context.Context, ref string) (string, error) {
-	if s.secrets == nil {
-		return "", errors.New("log backend secret resolver is disabled")
-	}
-	fields, err := s.secrets.ResolveFields(ctx, ref)
-	if err != nil {
-		return "", fmt.Errorf("resolve Elasticsearch credential: %w", err)
-	}
-	key := strings.TrimSpace(fields["api_key"])
-	if key == "" {
-		return "", errors.New("Elasticsearch credential has no api_key")
-	}
-	return key, nil
-}
-
-func (s *Service) storeManagedAPIKey(ctx context.Context, role, apiKey string, generation uint64) (string, error) {
+func (s *Service) storeManagedCredential(ctx context.Context, role string, credential elasticsearchCredential, generation uint64) (string, error) {
 	store, ok := s.secrets.(ManagedSecretStore)
 	if !ok {
 		return "", errors.New("encrypted log backend credential storage is unavailable")
 	}
-	// A directly pasted key always gets a new isolated reference. The backend
-	// row is switched only after both keys validate and are stored, so a failed
+	// A submitted credential always gets a new isolated reference. The backend
+	// row is switched only after both credentials validate and are stored, so a failed
 	// save cannot rotate the credential referenced by the current generation.
 	name, err := newManagedLogsSecretName(role, generation)
 	if err != nil {
 		return "", fmt.Errorf("generate managed Elasticsearch credential name: %w", err)
 	}
-	description := fmt.Sprintf("Managed by Ongrid logs backend (%s key, generation %d)", role, generation)
-	if err := store.CreateManaged(ctx, name, elasticsearchCredType, description, map[string]string{"api_key": apiKey}); err != nil {
+	description := fmt.Sprintf("Managed by Ongrid logs backend (%s credential, generation %d)", role, generation)
+	if err := store.CreateManaged(ctx, name, elasticsearchCredType, description, credential.fields()); err != nil {
 		return "", fmt.Errorf("store managed Elasticsearch %s credential: %w", role, err)
 	}
 	return name, nil
 }
 
-func (s *Service) deleteManagedAPIKeys(ctx context.Context, refs []string) error {
+func (s *Service) deleteManagedCredentials(ctx context.Context, refs []string) error {
 	store, ok := s.secrets.(ManagedSecretStore)
 	if !ok {
 		return errors.New("encrypted log backend credential storage is unavailable")
@@ -1587,20 +1528,20 @@ func (s *Service) deleteManagedAPIKeys(ctx context.Context, refs []string) error
 	return cleanupErr
 }
 
-func (s *Service) cleanupSupersededManagedAPIKeys(ctx context.Context, previous, current *model.Backend) {
-	refs := supersededManagedAPIKeyRefs(previous, current)
+func (s *Service) cleanupSupersededManagedCredentials(ctx context.Context, previous, current *model.Backend) {
+	refs := supersededManagedCredentialRefs(previous, current)
 	if len(refs) == 0 {
 		return
 	}
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), managedSecretCleanupTTL)
 	defer cancel()
-	if err := s.deleteManagedAPIKeys(cleanupCtx, refs); err != nil {
+	if err := s.deleteManagedCredentials(cleanupCtx, refs); err != nil {
 		s.log.WarnContext(cleanupCtx, "failed to delete superseded managed Elasticsearch credentials",
 			slog.Int("credential_count", len(refs)), slog.Any("error", err))
 	}
 }
 
-func supersededManagedAPIKeyRefs(previous, current *model.Backend) []string {
+func supersededManagedCredentialRefs(previous, current *model.Backend) []string {
 	if previous == nil || current == nil {
 		return nil
 	}
@@ -1637,7 +1578,7 @@ func newManagedLogsSecretName(role string, generation uint64) (string, error) {
 	return fmt.Sprintf("%s%s-g%d-%s", managedLogsSecretPrefix, role, generation, hex.EncodeToString(random)), nil
 }
 
-func (s *Service) newESClient(endpoint, pattern, apiKey string, backend *model.Backend) (*logquery.ElasticsearchClient, error) {
+func (s *Service) newESClient(endpoint, pattern string, credential elasticsearchCredential, backend *model.Backend) (*logquery.ElasticsearchClient, error) {
 	httpClient, err := backendHTTPClient(backend)
 	if err != nil {
 		return nil, err
@@ -1645,7 +1586,9 @@ func (s *Service) newESClient(endpoint, pattern, apiKey string, backend *model.B
 	return logquery.NewElasticsearchClient(logquery.ElasticsearchConfig{
 		Endpoint:          endpoint,
 		IndexPattern:      pattern,
-		APIKey:            apiKey,
+		APIKey:            credential.APIKey,
+		BasicUser:         credential.BasicUser,
+		BasicPassword:     credential.BasicPassword,
 		AllowInsecureHTTP: backend.TLSInsecure,
 	}, httpClient, nil)
 }
@@ -1665,7 +1608,8 @@ func (s *Service) view(ctx context.Context, backend *model.Backend) (*BackendVie
 		return nil, selectedErr
 	}
 	return &BackendView{
-		ID: backend.ID, Name: backend.Name, Type: backend.Type, CurrentBackend: currentBackend, CurrentBackendID: currentBackendID, Status: backend.Status,
+		AuthType: backendAuthType(backend),
+		ID:       backend.ID, Name: backend.Name, Type: backend.Type, CurrentBackend: currentBackend, CurrentBackendID: currentBackendID, Status: backend.Status,
 		Generation: backend.Generation, WriteEndpoints: endpoints, QueryEndpoint: backend.QueryEndpoint,
 		Dataset: backend.Dataset, Namespace: backend.Namespace, IndexPattern: backend.IndexPattern,
 		WriteCredentialRef: backend.WriteCredentialRef, QueryCredentialRef: backend.QueryCredentialRef,
@@ -1741,6 +1685,12 @@ func normalizeSaveInput(input SaveInput) (SaveInput, error) {
 	if !namespaceRE.MatchString(input.Namespace) {
 		return SaveInput{}, fmt.Errorf("%w: invalid data stream namespace", errs.ErrInvalid)
 	}
+	input.AuthType = strings.TrimSpace(input.AuthType)
+	if input.AuthType != "" && input.AuthType != authTypeAPIKey && input.AuthType != authTypeBasic {
+		return SaveInput{}, fmt.Errorf("%w: unsupported auth_type", errs.ErrInvalid)
+	}
+	input.WriteUsername = strings.TrimSpace(input.WriteUsername)
+	input.QueryUsername = strings.TrimSpace(input.QueryUsername)
 	input.WriteCredentialRef = strings.TrimSpace(input.WriteCredentialRef)
 	input.QueryCredentialRef = strings.TrimSpace(input.QueryCredentialRef)
 	if len(input.WriteCredentialRef) > 128 || len(input.QueryCredentialRef) > 128 {

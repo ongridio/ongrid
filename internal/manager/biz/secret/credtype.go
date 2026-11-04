@@ -113,9 +113,11 @@ func init() {
 		InjectEnv: map[string]string{"GITHUB_TOKEN": "{{token}}"},
 	})
 	registerCredType(&CredType{
-		Name: "elasticsearch", Label: "Elasticsearch API Key", Builtin: true,
+		Name: "elasticsearch", Label: "Elasticsearch", Builtin: true,
 		Fields: []CredField{
 			{Key: "api_key", Label: "Encoded API Key", Secret: true},
+			{Key: "username", Label: "Username"},
+			{Key: "password", Label: "Password", Secret: true},
 		},
 		// The log backend control plane resolves this field directly. It is
 		// deliberately not exposed as a generic process environment variable.

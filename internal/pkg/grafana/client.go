@@ -105,11 +105,13 @@ type Datasource struct {
 // be the read-only query credential; it is never persisted in a Grafana
 // datasource's ordinary jsonData.
 type ElasticsearchDatasourceConfig struct {
-	URL          string
-	IndexPattern string
-	APIKey       string
-	CAPEM        string
-	TLSInsecure  bool
+	URL           string
+	IndexPattern  string
+	APIKey        string
+	BasicUser     string
+	BasicPassword string
+	CAPEM         string
+	TLSInsecure   bool
 }
 
 // UpsertDatasource creates or replaces by UID. Grafana doesn't have a

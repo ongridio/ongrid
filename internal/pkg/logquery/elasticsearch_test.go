@@ -505,6 +505,10 @@ func TestNewElasticsearchClient_RejectsUnsafeEndpointAndIndexPattern(t *testing.
 		{Endpoint: "https://user:pass@es.example", APIKey: "key"},
 		{Endpoint: "https://es.example", APIKey: "key", IndexPattern: "*"},
 		{Endpoint: "https://es.example", APIKey: ""},
+		{Endpoint: "https://es.example", BasicUser: "reader"},
+		{Endpoint: "https://es.example", BasicPassword: "test-password"},
+		{Endpoint: "https://es.example", BasicUser: "reader:other", BasicPassword: "test-password"},
+		{Endpoint: "https://es.example", APIKey: "key", BasicUser: "reader", BasicPassword: "test-password"},
 	}
 	for _, cfg := range cases {
 		if _, err := NewElasticsearchClient(cfg, nil, nil); err == nil {

@@ -661,8 +661,10 @@ func logsExporter(cfg plugins.PluginConfig, spec map[string]interface{}, backend
 		return "otlphttp/builtin_loki", exporter, nil
 	}
 
-	if _, present := spec["elasticsearch_api_key"]; present {
-		return "", nil, errors.New("logs plugin: inline Elasticsearch API key is forbidden")
+	for _, key := range []string{"elasticsearch_api_key", "elasticsearch_username", "elasticsearch_password", "elasticsearch_authorization"} {
+		if _, present := spec[key]; present {
+			return "", nil, errors.New("logs plugin: inline Elasticsearch credentials are forbidden")
+		}
 	}
 	endpoints := normalizedStrings(stringSlice(spec, "elasticsearch_endpoints"), 8)
 	if len(endpoints) == 0 {
@@ -679,8 +681,14 @@ func logsExporter(cfg plugins.PluginConfig, spec map[string]interface{}, backend
 		}
 	}
 	keyFile := strings.TrimSpace(stringSpec(spec, "elasticsearch_api_key_file"))
-	if !filepath.IsAbs(keyFile) || strings.Contains(keyFile, "..") {
-		return "", nil, errors.New("logs plugin: managed Elasticsearch API key file is required")
+	authFile := strings.TrimSpace(stringSpec(spec, "elasticsearch_authorization_file"))
+	if (keyFile == "") == (authFile == "") {
+		return "", nil, errors.New("logs plugin: exactly one managed Elasticsearch credential file is required")
+	}
+	for _, path := range []string{keyFile, authFile} {
+		if path != "" && (!filepath.IsAbs(path) || strings.Contains(path, "..")) {
+			return "", nil, errors.New("logs plugin: invalid managed Elasticsearch credential file")
+		}
 	}
 	tlsConfig := map[string]interface{}{
 		"insecure_skip_verify": esTLSInsecure,
@@ -695,7 +703,7 @@ func logsExporter(cfg plugins.PluginConfig, spec map[string]interface{}, backend
 		"flush_timeout": "1s", "min_size": 1_000_000, "max_size": 5_000_000, "sizer": "bytes",
 	}
 	exporter := map[string]interface{}{
-		"endpoints": endpoints, "api_key": "${file:" + keyFile + "}",
+		"endpoints": endpoints,
 		// Pin the only accepted mapping mode. New exporter releases ignore the
 		// deprecated mapping.mode knob and otherwise allow metadata to select a
 		// different document schema, which would invalidate the query adapter.
@@ -707,6 +715,11 @@ func logsExporter(cfg plugins.PluginConfig, spec map[string]interface{}, backend
 		},
 	}
 	generation := strings.TrimSpace(stringSpec(spec, "backend_generation"))
+	if authFile != "" {
+		exporter["headers"] = map[string]interface{}{"Authorization": "${file:" + authFile + "}"}
+	} else {
+		exporter["api_key"] = "${file:" + keyFile + "}"
+	}
 	parsedGeneration, err := strconv.ParseUint(generation, 10, 64)
 	if err != nil || parsedGeneration == 0 {
 		return "", nil, errors.New("logs plugin: Elasticsearch backend generation is required")

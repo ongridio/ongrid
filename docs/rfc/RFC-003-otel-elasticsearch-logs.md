@@ -30,6 +30,10 @@
 - Manager 查询 Key 只允许所需的版本探测、`read` 和 `view_index_metadata`。
 - Manager 固定 endpoint、data stream pattern、时间窗、字段、limit、超时和响应大小。
 
+认证支持 API Key 和 Basic Auth，默认保留 API Key。Basic Auth 可使用独立的读写账号，也可共用一个同时具备上述读写权限的账号；用户名与密码作为一组加密保存，配置响应不回显。编辑时两项同时留空保留原凭证，切换认证方式必须提供新凭证。保存、连接测试、查询和 Grafana 同步使用同一认证方式。
+
+Basic Auth 的 Edge 写凭证通过独立的 `elasticsearch_basic_auth` secret slot 下发，在本地以 0600 文件保存编码后的 Authorization 值，Collector 通过文件引用读取。启用前需升级 Manager 和所有日志采集 Edge；旧 Edge 会拒绝未知 slot。回滚到旧版本前，先切回 API Key 或 Loki 并确认设备同步；仅保存配置不会切换当前日志链路。
+
 ### 3. 简单选择状态
 
 - `log_backends` 只保存 ES 配置及 `selected`/`unselected`。
