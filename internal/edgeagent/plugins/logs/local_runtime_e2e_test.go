@@ -4,6 +4,7 @@ package logs
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -77,6 +78,53 @@ func TestLocalRuntimeLogPipelines(t *testing.T) {
 		defer stop()
 		waitForRuntimeLog(t, newES(t, namespace), deviceID, message)
 	})
+}
+
+func TestLocalRuntimeElasticsearchBasicAuth(t *testing.T) {
+	credentialFile := os.Getenv("ONGRID_LOGS_E2E_ES_BASIC_CREDENTIAL_FILE")
+	if credentialFile == "" {
+		t.Skip("ONGRID_LOGS_E2E_ES_BASIC_CREDENTIAL_FILE is not set")
+	}
+	collector := requireEnv(t, "ONGRID_TEST_OTELCOL_BINARY")
+	endpoint := requireEnv(t, "ONGRID_LOGS_E2E_ES_URL")
+	writeEndpoint := os.Getenv("ONGRID_LOGS_E2E_ES_WRITE_URL")
+	if writeEndpoint == "" {
+		writeEndpoint = endpoint
+	}
+	var credentials struct {
+		WriteUsername string `json:"write_username"`
+		WritePassword string `json:"write_password"`
+		QueryUsername string `json:"query_username"`
+		QueryPassword string `json:"query_password"`
+	}
+	raw, err := os.ReadFile(credentialFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &credentials); err != nil {
+		t.Fatal(err)
+	}
+	const deviceID, namespace = uint64(990003), "e2e-basic"
+	message := fmt.Sprintf("ongrid-runtime-es-basic-%d", time.Now().UnixNano())
+	source := writeRuntimeLog(t, message)
+	authFile := filepath.Join(t.TempDir(), "authorization")
+	if err := os.WriteFile(authFile, []byte("Basic "+base64.StdEncoding.EncodeToString([]byte(credentials.WriteUsername+":"+credentials.WritePassword))), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	spec := baseRuntimeSpec(source)
+	addElasticsearchSpec(spec, writeEndpoint, "", namespace, 1)
+	delete(spec, "elasticsearch_api_key_file")
+	spec["elasticsearch_authorization_file"] = authFile
+	stop := startRuntimePlugin(t, collector, plugins.PluginConfig{Enabled: true, EdgeID: deviceID, Spec: spec})
+	defer stop()
+	client, err := logquery.NewElasticsearchClient(logquery.ElasticsearchConfig{
+		Endpoint: endpoint, IndexPattern: "logs-ongrid.host.otel-" + namespace, AllowInsecureHTTP: true,
+		BasicUser: credentials.QueryUsername, BasicPassword: credentials.QueryPassword,
+	}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForRuntimeLog(t, client, deviceID, message)
 }
 
 func requireEnv(t *testing.T, key string) string {

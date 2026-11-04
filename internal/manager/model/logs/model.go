@@ -37,6 +37,7 @@ type Backend struct {
 	IndexPattern       string                `gorm:"column:index_pattern;type:varchar(255);not null;default:'logs-ongrid.*.otel-*'" json:"index_pattern"`
 	WriteCredentialRef string                `gorm:"column:write_credential_ref;type:varchar(128);not null;default:''" json:"write_credential_ref"`
 	QueryCredentialRef string                `gorm:"column:query_credential_ref;type:varchar(128);not null;default:''" json:"query_credential_ref"`
+	AuthType           string                `gorm:"column:auth_type;type:varchar(16);not null;default:'api_key'" json:"auth_type"`
 	CAPEM              string                `gorm:"column:ca_pem;type:text;not null" json:"-"`
 	KibanaURL          string                `gorm:"column:kibana_url;type:varchar(2048);not null;default:''" json:"kibana_url,omitempty"`
 	TLSInsecure        bool                  `gorm:"column:tls_insecure;not null;default:false" json:"tls_insecure"`

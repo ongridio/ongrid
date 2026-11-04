@@ -19,6 +19,7 @@ import (
 	"context"
 	"crypto/tls"
 	"embed"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -372,8 +373,15 @@ func elasticsearchDatasource(config pkggrafana.ElasticsearchDatasourceConfig) (p
 	if config.IndexPattern == "" {
 		return pkggrafana.Datasource{}, errors.New("grafana: cannot sync Elasticsearch datasource: index pattern is empty")
 	}
+	authorization := "ApiKey " + config.APIKey
+	if config.APIKey != "" && (config.BasicUser != "" || config.BasicPassword != "") {
+		return pkggrafana.Datasource{}, errors.New("grafana: Elasticsearch authentication methods are mutually exclusive")
+	}
 	if config.APIKey == "" {
-		return pkggrafana.Datasource{}, errors.New("grafana: cannot sync Elasticsearch datasource: query API key is empty")
+		if config.BasicUser == "" || config.BasicPassword == "" || strings.ContainsAny(config.BasicUser, ":\r\n") {
+			return pkggrafana.Datasource{}, errors.New("grafana: valid Elasticsearch query credentials are required")
+		}
+		authorization = "Basic " + base64.StdEncoding.EncodeToString([]byte(config.BasicUser+":"+config.BasicPassword))
 	}
 	ds := pkggrafana.Datasource{
 		UID:    esDatasourceUID,
@@ -389,7 +397,7 @@ func elasticsearchDatasource(config pkggrafana.ElasticsearchDatasourceConfig) (p
 			"httpHeaderName1": "Authorization",
 		},
 		SecureJSONData: map[string]string{
-			"httpHeaderValue1": "ApiKey " + config.APIKey,
+			"httpHeaderValue1": authorization,
 		},
 	}
 	if config.TLSInsecure {

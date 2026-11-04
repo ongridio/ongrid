@@ -3,6 +3,7 @@ package plugins
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -16,13 +17,14 @@ import (
 )
 
 const (
-	logsExternalBackend = "external_elasticsearch"
-	logsESSecretSlot    = "elasticsearch_api_key"
-	logsLokiSecretSlot  = "loki_basic_auth"
+	logsExternalBackend   = "external_elasticsearch"
+	logsESSecretSlot      = "elasticsearch_api_key"
+	logsESBasicSecretSlot = "elasticsearch_basic_auth"
+	logsLokiSecretSlot    = "loki_basic_auth"
 )
 
 var logsProbeIDPattern = regexp.MustCompile(`^ongrid-log-probe-[A-Za-z0-9_-]{20,64}$`)
-var logsManagedRuntimeFilePattern = regexp.MustCompile(`^(elasticsearch_api_key\.g[1-9][0-9]*(\.generation)?|loki_authorization\.g[1-9][0-9]*(\.generation)?|elasticsearch_ca\.g[1-9][0-9]*\.pem|logs_probe\.g[1-9][0-9]*\.[0-9a-f]{16}\.log)$`)
+var logsManagedRuntimeFilePattern = regexp.MustCompile(`^(elasticsearch_(api_key|authorization)\.g[1-9][0-9]*(\.generation)?|loki_authorization\.g[1-9][0-9]*(\.generation)?|elasticsearch_ca\.g[1-9][0-9]*\.pem|logs_probe\.g[1-9][0-9]*\.[0-9a-f]{16}\.log)$`)
 
 func (t *TunnelConfigFetcher) materializeLogsRuntime(ctx context.Context, cfg PluginConfig) (PluginConfig, error) {
 	spec := copySpec(cfg.Spec)
@@ -50,7 +52,13 @@ func (t *TunnelConfigFetcher) materializeLogsRuntime(ctx context.Context, cfg Pl
 		if keyErr != nil {
 			return PluginConfig{}, keyErr
 		}
-		spec["elasticsearch_api_key_file"] = keyPath
+		delete(spec, "elasticsearch_api_key_file")
+		delete(spec, "elasticsearch_authorization_file")
+		if slot == logsESBasicSecretSlot {
+			spec["elasticsearch_authorization_file"] = keyPath
+		} else {
+			spec["elasticsearch_api_key_file"] = keyPath
+		}
 		delete(spec, "elasticsearch_secret_slot")
 
 		if caPEM := configString(spec, "elasticsearch_ca_pem"); caPEM != "" {
@@ -97,7 +105,7 @@ func (t *TunnelConfigFetcher) pruneLogsRuntimeFiles(ctx context.Context, dir str
 func logsRuntimeKeepPaths(dir string, spec map[string]interface{}) map[string]struct{} {
 	keep := make(map[string]struct{}, 4)
 	for _, key := range []string{
-		"elasticsearch_api_key_file", "loki_authorization_file", "elasticsearch_ca_file", "log_probe_file",
+		"elasticsearch_api_key_file", "elasticsearch_authorization_file", "loki_authorization_file", "elasticsearch_ca_file", "log_probe_file",
 	} {
 		path := filepath.Clean(configString(spec, key))
 		if path == "." || filepath.Dir(path) != filepath.Clean(dir) {
@@ -108,7 +116,7 @@ func logsRuntimeKeepPaths(dir string, spec map[string]interface{}) map[string]st
 			continue
 		}
 		keep[name] = struct{}{}
-		if strings.HasPrefix(name, "elasticsearch_api_key.g") || strings.HasPrefix(name, "loki_authorization.g") {
+		if strings.HasPrefix(name, "elasticsearch_api_key.g") || strings.HasPrefix(name, "elasticsearch_authorization.g") || strings.HasPrefix(name, "loki_authorization.g") {
 			keep[name+".generation"] = struct{}{}
 		}
 	}
@@ -149,14 +157,14 @@ func logsProbeFilename(generation uint64, probeID string) string {
 }
 
 func (t *TunnelConfigFetcher) fetchAndMaterializeESKey(ctx context.Context, dir string, generation uint64, slot string) (string, error) {
-	if slot != logsESSecretSlot {
+	if slot != logsESSecretSlot && slot != logsESBasicSecretSlot {
 		return "", errors.New("unsupported Elasticsearch secret slot")
 	}
 	var secret tunnel.GetPluginSecretResponse
 	if err := t.client.Call(ctx, tunnel.MethodGetPluginSecret, tunnel.GetPluginSecretRequest{
 		Plugin: "logs", Slot: slot, Generation: generation,
 	}, &secret); err != nil {
-		return "", fmt.Errorf("fetch Elasticsearch API key generation %d: %w", generation, err)
+		return "", fmt.Errorf("fetch Elasticsearch credential generation %d: %w", generation, err)
 	}
 	if secret.Generation != generation || strings.TrimSpace(secret.Content) == "" {
 		return "", errors.New("invalid Elasticsearch secret response")
@@ -166,8 +174,19 @@ func (t *TunnelConfigFetcher) fetchAndMaterializeESKey(ctx context.Context, dir 
 		return "", errors.New("Elasticsearch secret checksum mismatch")
 	}
 	keyPath := filepath.Join(dir, fmt.Sprintf("elasticsearch_api_key.g%d", generation))
+	if slot == logsESBasicSecretSlot {
+		if !strings.HasPrefix(secret.Content, "Basic ") || strings.ContainsAny(secret.Content, "\r\n") || strings.TrimSpace(secret.Content) != secret.Content {
+			return "", errors.New("invalid Elasticsearch Basic Auth response")
+		}
+		decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(secret.Content, "Basic "))
+		user, password, ok := strings.Cut(string(decoded), ":")
+		if err != nil || !ok || user == "" || password == "" {
+			return "", errors.New("invalid Elasticsearch Basic Auth response")
+		}
+		keyPath = filepath.Join(dir, fmt.Sprintf("elasticsearch_authorization.g%d", generation))
+	}
 	if err := materializeGenerationFile(dir, keyPath, generation, []byte(secret.Content)); err != nil {
-		return "", fmt.Errorf("write Elasticsearch API key: %w", err)
+		return "", fmt.Errorf("write Elasticsearch credential: %w", err)
 	}
 	return keyPath, nil
 }

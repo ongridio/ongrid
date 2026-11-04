@@ -28,7 +28,7 @@
 
 ### 外部 Elasticsearch 接入
 
-- 管理员可以在日志后端表单中直接粘贴 Elasticsearch 创建接口返回的 encoded 写 API Key 和只读 API Key，无需先跳转到通用凭证页创建记录；设置页不再暴露通用凭证复用入口。
+- 管理员可以在日志后端表单中选择 API Key 或 Basic Auth：直接粘贴 encoded 写 API Key 和只读 API Key，或填写独立的写入与查询账号密码；无需先跳转到通用凭证页创建记录。凭证加密保存且不回显，Basic Auth 编辑时用户名和密码同时留空保留原凭证。
 - 直接提交的 Key 是只写字段：Manager 立即将其写入加密 secret vault，并只在 `log_backends` 保存托管引用；敏感值不可由读取 API 返回。空值表示保留当前 Key。
 - 生产模式下写凭证与查询凭证必须分离；兼容测试可显式复用同一个 Key，但 Manager 仍生成两个独立托管引用，且页面必须提示扩大权限的风险。
 - 设为当前前必须通过 Manager 的查询端点、写入端点和 API Key 权限测试；Edge 在线状态不阻断选择。

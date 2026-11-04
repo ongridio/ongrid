@@ -264,7 +264,7 @@ func (s *Service) elasticsearchClient(ctx context.Context, backend *model.Backen
 		return client, nil
 	}
 	s.mu.RUnlock()
-	apiKey, err := s.apiKey(ctx, backend.QueryCredentialRef)
+	apiKey, err := s.credential(ctx, backend.QueryCredentialRef, backendAuthType(backend))
 	if err != nil {
 		return nil, err
 	}

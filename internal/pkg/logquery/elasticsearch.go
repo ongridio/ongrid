@@ -36,6 +36,8 @@ type ElasticsearchConfig struct {
 	Endpoint          string
 	IndexPattern      string
 	APIKey            string
+	BasicUser         string
+	BasicPassword     string
 	AllowInsecureHTTP bool
 }
 
@@ -43,11 +45,11 @@ type ElasticsearchConfig struct {
 // the Elasticsearch REST API. It deliberately owns a fixed index pattern and
 // never accepts index names or raw query DSL from callers.
 type ElasticsearchClient struct {
-	endpoint     string
-	indexPattern string
-	apiKey       string
-	httpClient   *http.Client
-	log          *slog.Logger
+	endpoint      string
+	indexPattern  string
+	authorization string
+	httpClient    *http.Client
+	log           *slog.Logger
 }
 
 type elasticsearchCursor struct {
@@ -69,8 +71,21 @@ func NewElasticsearchClient(cfg ElasticsearchConfig, hc *http.Client, log *slog.
 	if err := validateElasticsearchIndexPattern(indexPattern); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(cfg.APIKey) == "" {
-		return nil, errors.New("logquery: Elasticsearch API key is required")
+	apiKey := strings.TrimSpace(cfg.APIKey)
+	if apiKey != "" && (cfg.BasicUser != "" || cfg.BasicPassword != "") {
+		return nil, errors.New("logquery: Elasticsearch API key and Basic Auth are mutually exclusive")
+	}
+	authRequest := &http.Request{Header: make(http.Header)}
+	if apiKey != "" {
+		if strings.ContainsAny(apiKey, " \t\r\n") {
+			return nil, errors.New("logquery: invalid Elasticsearch API key")
+		}
+		authRequest.Header.Set("Authorization", "ApiKey "+apiKey)
+	} else {
+		if cfg.BasicUser == "" || cfg.BasicPassword == "" || strings.ContainsAny(cfg.BasicUser, ":\r\n") {
+			return nil, errors.New("logquery: Elasticsearch API key or valid Basic Auth credentials are required")
+		}
+		authRequest.SetBasicAuth(cfg.BasicUser, cfg.BasicPassword)
 	}
 	if hc == nil {
 		hc = &http.Client{Timeout: defaultTimeout}
@@ -80,11 +95,11 @@ func NewElasticsearchClient(cfg ElasticsearchConfig, hc *http.Client, log *slog.
 		log = slog.Default()
 	}
 	return &ElasticsearchClient{
-		endpoint:     endpoint,
-		indexPattern: indexPattern,
-		apiKey:       strings.TrimSpace(cfg.APIKey),
-		httpClient:   hc,
-		log:          log,
+		endpoint:      endpoint,
+		indexPattern:  indexPattern,
+		authorization: authRequest.Header.Get("Authorization"),
+		httpClient:    hc,
+		log:           log,
 	}, nil
 }
 
@@ -470,7 +485,7 @@ func (c *ElasticsearchClient) Probe(ctx context.Context) (string, error) {
 	return info.Version, nil
 }
 
-// RequirePrivileges verifies the API key against the fixed product index
+// RequirePrivileges verifies the credential against the fixed product index
 // pattern owned by this client. Elasticsearch permits an API key to inspect
 // its own effective privileges, so this check does not require granting the
 // Edge write credential any cluster-wide monitoring permission.
@@ -517,9 +532,9 @@ func (c *ElasticsearchClient) RequirePrivileges(ctx context.Context, clusterPriv
 	}
 	sort.Strings(missing)
 	if len(missing) == 0 {
-		return errors.New("logquery: Elasticsearch API key lacks required privileges")
+		return errors.New("logquery: Elasticsearch credential lacks required privileges")
 	}
-	return fmt.Errorf("logquery: Elasticsearch API key lacks required privileges: %s", strings.Join(missing, ", "))
+	return fmt.Errorf("logquery: Elasticsearch credential lacks required privileges: %s", strings.Join(missing, ", "))
 }
 
 func (c *ElasticsearchClient) openPIT(ctx context.Context) (string, error) {
@@ -798,7 +813,7 @@ func (c *ElasticsearchClient) doJSONWithLimit(ctx context.Context, method, path 
 		return fmt.Errorf("logquery: build Elasticsearch request: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Authorization", "ApiKey "+c.apiKey)
+	req.Header.Set("Authorization", c.authorization)
 	req.Header.Set("User-Agent", "ongrid-logquery/0.2")
 	if input != nil {
 		req.Header.Set("Content-Type", "application/json")

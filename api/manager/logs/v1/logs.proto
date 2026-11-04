@@ -228,6 +228,7 @@ message LogBackend {
   google.protobuf.Timestamp updated_at = 25;
   string current_backend = 26;
   uint64 current_backend_id = 27;
+  string auth_type = 28;
 }
 
 message GetLogBackendRequest {}
@@ -253,6 +254,13 @@ message PutLogBackendRequest {
   bool preserve_ca = 17;
   string kibana_url = 18;
   bool tls_insecure = 19;
+  // Empty preserves the existing type, or defaults to api_key for a new backend.
+  string auth_type = 20;
+  // Basic Auth credentials are write-only. Leave both fields empty to retain a pair.
+  string write_username = 21;
+  string write_password = 22;
+  string query_username = 23;
+  string query_password = 24;
 }
 
 message PutLogBackendResponse {

@@ -941,6 +941,11 @@ function usePluginCount(name: string): number | null | 'err' {
 }
 
 type ElasticsearchLogsForm = {
+  authType: 'api_key' | 'basic';
+  writeUsername: string;
+  writePassword: string;
+  queryUsername: string;
+  queryPassword: string;
   name: string;
   writeEndpoints: string;
   queryEndpoint: string;
@@ -955,6 +960,11 @@ const defaultElasticsearchDataset = 'ongrid.system';
 const defaultElasticsearchNamespace = 'default';
 
 const emptyElasticsearchLogsForm: ElasticsearchLogsForm = {
+  authType: 'api_key',
+  writeUsername: '',
+  writePassword: '',
+  queryUsername: '',
+  queryPassword: '',
   name: 'external-elasticsearch',
   writeEndpoints: '',
   queryEndpoint: '',
@@ -971,6 +981,8 @@ function integrationError(error: unknown): string {
 
 function backendToForm(backend: LogBackend): ElasticsearchLogsForm {
   return {
+    ...emptyElasticsearchLogsForm,
+    authType: backend.auth_type ?? 'api_key',
     name: backend.name,
     writeEndpoints: backend.write_endpoints.join('\n'),
     queryEndpoint: backend.query_endpoint,
@@ -1205,26 +1217,55 @@ function ElasticsearchLogsCard({ current, exploreUrl, onBackendChange }: { curre
     setMessage(null);
     setDirty(true);
     setValidated(false);
-    setForm((current) => ({ ...current, [key]: value }));
+    setForm((current) => ({
+      ...current,
+      ...(key === 'authType' ? {
+        writeAPIKey: '', queryAPIKey: '', writeUsername: '', writePassword: '', queryUsername: '', queryPassword: '',
+        writeCredentialRef: value === (backend?.auth_type ?? 'api_key') ? backend?.write_credential_ref ?? '' : '',
+        queryCredentialRef: value === (backend?.auth_type ?? 'api_key') ? backend?.query_credential_ref ?? '' : '',
+      } : {}),
+      [key]: value,
+    }));
+    if (key === 'authType') setRevealedKeys({ write: false, query: false });
   };
 
   const saveInput = (): SaveLogBackendInput | null => {
     const endpoints = form.writeEndpoints.split(/[\n,]+/).map((value) => value.trim()).filter(Boolean);
     const writeAPIKey = form.writeAPIKey.trim();
     const queryAPIKey = form.queryAPIKey.trim();
-    if (!writeAPIKey && !form.writeCredentialRef) {
-      setMessage({ ok: false, text: tr('请直接粘贴 ES 写入 API Key。', 'Paste an ES write API key.') });
-      return null;
-    }
-    if (!queryAPIKey && !form.queryCredentialRef) {
-      setMessage({ ok: false, text: tr('请粘贴只读查询 API Key。', 'Paste a read-only query API key.') });
-      return null;
-    }
-    if (!writeAPIKey && !queryAPIKey && form.writeCredentialRef === form.queryCredentialRef) {
-      setMessage({ ok: false, text: tr('写入 API Key 和只读查询 API Key 必须是两个不同凭证。', 'Write and read-only query API keys must use different credentials.') });
-      return null;
+    if (form.authType === 'basic') {
+      if ((!form.writeUsername.trim() || !form.writePassword) && (form.writeUsername.trim() || form.writePassword || !form.writeCredentialRef)) {
+        setMessage({ ok: false, text: tr('请填写完整的写入用户名和密码；已保存时两项同时留空可保留原凭证。', 'Enter both write username and password, or leave both blank to keep stored credentials.') });
+        return null;
+      }
+      if ((!form.queryUsername.trim() || !form.queryPassword) && (form.queryUsername.trim() || form.queryPassword || !form.queryCredentialRef)) {
+        setMessage({ ok: false, text: tr('请填写完整的查询用户名和密码；已保存时两项同时留空可保留原凭证。', 'Enter both query username and password, or leave both blank to keep stored credentials.') });
+        return null;
+      }
+      if (form.writeUsername.trim() && form.writeUsername.trim() === form.queryUsername.trim()) {
+        setMessage({ ok: false, text: tr('写入和查询必须使用不同账号。', 'Use separate accounts for writing and querying.') });
+        return null;
+      }
+    } else {
+      if (!writeAPIKey && !form.writeCredentialRef) {
+        setMessage({ ok: false, text: tr('请直接粘贴 ES 写入 API Key。', 'Paste an ES write API key.') });
+        return null;
+      }
+      if (!queryAPIKey && !form.queryCredentialRef) {
+        setMessage({ ok: false, text: tr('请粘贴只读查询 API Key。', 'Paste a read-only query API key.') });
+        return null;
+      }
+      if (!writeAPIKey && !queryAPIKey && form.writeCredentialRef === form.queryCredentialRef) {
+        setMessage({ ok: false, text: tr('写入 API Key 和只读查询 API Key 必须是两个不同凭证。', 'Write and read-only query API keys must use different credentials.') });
+        return null;
+      }
     }
     return {
+      auth_type: form.authType,
+      write_username: form.authType === 'basic' ? form.writeUsername.trim() || undefined : undefined,
+      write_password: form.authType === 'basic' ? form.writePassword || undefined : undefined,
+      query_username: form.authType === 'basic' ? form.queryUsername.trim() || undefined : undefined,
+      query_password: form.authType === 'basic' ? form.queryPassword || undefined : undefined,
       name: form.name.trim(),
       write_endpoints: endpoints,
       query_endpoint: form.queryEndpoint.trim(),
@@ -1232,8 +1273,8 @@ function ElasticsearchLogsCard({ current, exploreUrl, onBackendChange }: { curre
       namespace: backend?.namespace.trim() || defaultElasticsearchNamespace,
       write_credential_ref: form.writeCredentialRef || undefined,
       query_credential_ref: form.queryCredentialRef || undefined,
-      write_api_key: writeAPIKey || undefined,
-      query_api_key: queryAPIKey || undefined,
+      write_api_key: form.authType === 'api_key' ? writeAPIKey || undefined : undefined,
+      query_api_key: form.authType === 'api_key' ? queryAPIKey || undefined : undefined,
       preserve_ca: Boolean(backend?.has_custom_ca),
       kibana_url: backend?.kibana_url || undefined,
       tls_insecure: form.tlsInsecure,
@@ -1312,8 +1353,8 @@ function ElasticsearchLogsCard({ current, exploreUrl, onBackendChange }: { curre
       setMessage({
         ok: true,
         text: tr(
-          `连接测试通过；查询/写入端点及 API Key 权限有效${version}。`,
-          `Connection test passed. Query/write endpoints and API key privileges are valid${version}.`,
+          `连接测试通过；查询/写入端点及凭证权限有效${version}。`,
+          `Connection test passed. Query/write endpoints and credential privileges are valid${version}.`,
         ),
       });
       setValidated(true);
@@ -1352,32 +1393,46 @@ function ElasticsearchLogsCard({ current, exploreUrl, onBackendChange }: { curre
           <fieldset disabled={!canEdit || busy !== null} className="mt-5 grid grid-cols-1 gap-4 disabled:opacity-65 md:grid-cols-2">
             <PromField label={tr('写入 endpoints（每行一个）', 'Write endpoints (one per line)')} hint={tr('仅允许根路径；生产环境要求 HTTPS。', 'Root URLs only; HTTPS is required in production.')} value={form.writeEndpoints} onChange={(value) => update('writeEndpoints', value)} placeholder="https://es-data-1.example.com:9200" />
             <PromField label={tr('Manager 查询 endpoint', 'Manager query endpoint')} hint={tr('必须可从 Manager 网络访问。', 'Must be reachable from the Manager network.')} value={form.queryEndpoint} onChange={(value) => update('queryEndpoint', value)} placeholder="https://es-query.example.com:9200" />
-            <PromField
-              label={tr('ES 写入 Encoded API Key', 'ES write Encoded API Key')}
-              hint={tr('在 Elasticsearch 中创建后直接粘贴 encoded 值；已保存时留空即保持原 Key。', 'Paste the encoded value created in Elasticsearch; leave blank after saving to keep the current key.')}
-              value={form.writeAPIKey}
-              onChange={(value) => update('writeAPIKey', value)}
-              placeholder={backend ? tr('已安全保存；留空保持不变', 'Stored securely; leave blank to keep') : 'ZXlKaGJHY2lPaUpJVXpJMU5pSjkuLi4='}
-              sensitive
-              revealed={revealedKeys.write}
-              onToggleReveal={() => setRevealedKeys((current) => ({ ...current, write: !current.write }))}
-            />
-            <PromField
-              label={tr('ES 只读查询 Encoded API Key', 'ES read-only query Encoded API Key')}
-              hint={tr('建议仅授予目标 data stream 的读取、字段与聚合权限。', 'Grant only read, field, and aggregation access to the target data stream.')}
-              value={form.queryAPIKey}
-              onChange={(value) => update('queryAPIKey', value)}
-              placeholder={backend ? tr('已安全保存；留空保持不变', 'Stored securely; leave blank to keep') : 'ZXlKaGJHY2lPaUpJVXpJMU5pSjkuLi4='}
-              sensitive
-              revealed={revealedKeys.query}
-              onToggleReveal={() => setRevealedKeys((current) => ({ ...current, query: !current.query }))}
-            />
+            <div className="md:col-span-2">
+              <Label htmlFor="es-auth-type" className="mb-1.5 block text-xs text-zinc-300">{tr('认证方式', 'Authentication')}</Label>
+              <Select id="es-auth-type" aria-label={tr('认证方式', 'Authentication')} value={form.authType} onValueChange={(value) => { if (value === 'api_key' || value === 'basic') update('authType', value); }} className="w-full">
+                <option value="api_key">API Key</option>
+                <option value="basic">Basic Auth</option>
+              </Select>
+            </div>
+            {form.authType === 'basic' ? <>
+              <PromField label={tr('ES 写入用户名', 'ES write username')} hint={tr('仅授予目标 data stream 的 auto_configure、create_doc 权限。', 'Grant auto_configure and create_doc on the target data stream only.')} value={form.writeUsername} onChange={(value) => update('writeUsername', value)} placeholder={form.writeCredentialRef ? tr('已保存；与密码一起留空可保留', 'Stored; leave both username and password blank to keep') : 'ongrid-writer'} />
+              <PromField label={tr('ES 查询用户名', 'ES query username')} hint={tr('使用独立账号，授予 monitor、read 和 view_index_metadata 权限。', 'Use a separate account with monitor, read, and view_index_metadata privileges.')} value={form.queryUsername} onChange={(value) => update('queryUsername', value)} placeholder={form.queryCredentialRef ? tr('已保存；与密码一起留空可保留', 'Stored; leave both username and password blank to keep') : 'ongrid-reader'} />
+              <PromField label={tr('ES 写入密码', 'ES write password')} value={form.writePassword} onChange={(value) => update('writePassword', value)} sensitive revealed={revealedKeys.write} onToggleReveal={() => setRevealedKeys((current) => ({ ...current, write: !current.write }))} />
+              <PromField label={tr('ES 查询密码', 'ES query password')} value={form.queryPassword} onChange={(value) => update('queryPassword', value)} sensitive revealed={revealedKeys.query} onToggleReveal={() => setRevealedKeys((current) => ({ ...current, query: !current.query }))} />
+            </> : <>
+              <PromField
+                label={tr('ES 写入 Encoded API Key', 'ES write Encoded API Key')}
+                hint={tr('在 Elasticsearch 中创建后直接粘贴 encoded 值；已保存时留空即保持原 Key。', 'Paste the encoded value created in Elasticsearch; leave blank after saving to keep the current key.')}
+                value={form.writeAPIKey}
+                onChange={(value) => update('writeAPIKey', value)}
+                placeholder={backend ? tr('已安全保存；留空保持不变', 'Stored securely; leave blank to keep') : 'ZXlKaGJHY2lPaUpJVXpJMU5pSjkuLi4='}
+                sensitive
+                revealed={revealedKeys.write}
+                onToggleReveal={() => setRevealedKeys((current) => ({ ...current, write: !current.write }))}
+              />
+              <PromField
+                label={tr('ES 只读查询 Encoded API Key', 'ES read-only query Encoded API Key')}
+                hint={tr('建议仅授予目标 data stream 的读取、字段与聚合权限。', 'Grant only read, field, and aggregation access to the target data stream.')}
+                value={form.queryAPIKey}
+                onChange={(value) => update('queryAPIKey', value)}
+                placeholder={backend ? tr('已安全保存；留空保持不变', 'Stored securely; leave blank to keep') : 'ZXlKaGJHY2lPaUpJVXpJMU5pSjkuLi4='}
+                sensitive
+                revealed={revealedKeys.query}
+                onToggleReveal={() => setRevealedKeys((current) => ({ ...current, query: !current.query }))}
+              />
+            </>}
             <Label className="flex items-center gap-2 text-xs text-zinc-300 md:col-span-2"><Checkbox  checked={form.tlsInsecure} onCheckedChange={(checkedValue) => update('tlsInsecure', checkedValue)}  />{tr('测试环境：允许 HTTP / 跳过 TLS 校验', 'Test environments: allow HTTP / skip TLS verification')}</Label>
           </fieldset>
 
           {editingCurrent && <p className="mt-3 text-[11px] leading-5 text-zinc-500">{tr('保存不会影响当前日志链路；点击“设为当前”会在 Manager 连接与权限测试通过后切换，设备同步可另行检查。', 'Saving does not affect the current log pipeline. Selecting switches after Manager connectivity and privilege checks; device convergence can be checked separately.')}</p>}
 
-          <div className="mt-2 text-[11px] leading-5 text-zinc-500">{tr('API Key 是只写字段：Manager 接收后立即放入加密凭证库，读取后端配置时不会回显；Edge 只通过专用密钥通道取得写 Key。', 'API keys are write-only: Manager immediately stores them in the encrypted credential vault and never echoes them when reading backend configuration; Edge receives only the write key through the dedicated secret channel.')}</div>
+          <div className="mt-2 text-[11px] leading-5 text-zinc-500">{tr('凭证加密保存，不会回显。写入和查询使用独立凭证；编辑时留空可保留原凭证，Basic Auth 的用户名和密码需同时填写或同时留空。', 'Credentials are encrypted and never returned. Writing and querying use separate credentials. Leave fields blank to keep stored credentials; for Basic Auth, enter or omit both username and password together.')}</div>
 
           <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-zinc-800/70 pt-4">
             <Button onClick={() => void testElasticsearch()} disabled={!canTest || busy !== null} variant="ghost">{busy === 'test' ? <Loader2 size={14} className="animate-spin" /> : <PlugZap size={14} />}<span>{tr('测试连接', 'Test connection')}</span></Button>

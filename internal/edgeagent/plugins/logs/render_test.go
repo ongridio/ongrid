@@ -31,6 +31,10 @@ func TestRenderedConfigsAcceptedByCollector(t *testing.T) {
 	if err := os.WriteFile(apiKeyPath, []byte("id:secret"), 0o600); err != nil {
 		t.Fatalf("write API key: %v", err)
 	}
+	authPath := filepath.Join(dir, "es-basic-auth")
+	if err := os.WriteFile(authPath, []byte("Basic dXNlcjpwYXNz"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	cases := map[string]plugins.PluginConfig{
 		"builtin-loki-host": {
 			Enabled: true, EdgeID: 42, Endpoint: "https://manager.example.com/loki/api/v1/push",
@@ -44,6 +48,16 @@ func TestRenderedConfigsAcceptedByCollector(t *testing.T) {
 				"elasticsearch_endpoints":    []interface{}{"https://es.example.com:9200"},
 				"elasticsearch_api_key_file": apiKeyPath,
 				"elasticsearch_dataset":      "ongrid.host", "elasticsearch_namespace": "default",
+				"enable_journald": false, "file_paths": []interface{}{`/var/log/*.log`},
+			},
+		},
+		"external-elasticsearch-basic": {
+			Enabled: true, EdgeID: 42,
+			Spec: map[string]interface{}{
+				"backend": backendExternalES, "backend_generation": uint64(3),
+				"elasticsearch_endpoints":          []interface{}{"https://es.example.com:9200"},
+				"elasticsearch_authorization_file": authPath,
+				"elasticsearch_dataset":            "ongrid.host", "elasticsearch_namespace": "default",
 				"enable_journald": false, "file_paths": []interface{}{`/var/log/*.log`},
 			},
 		},
@@ -414,6 +428,12 @@ func TestRenderExternalElasticsearchRejectsUnsafeConfiguration(t *testing.T) {
 		mutate func(map[string]interface{})
 	}{
 		{name: "inline API key", mutate: func(spec map[string]interface{}) { spec["elasticsearch_api_key"] = "secret" }},
+		{name: "inline password", mutate: func(spec map[string]interface{}) { spec["elasticsearch_password"] = "secret" }},
+		{name: "ambiguous credentials", mutate: func(spec map[string]interface{}) { spec["elasticsearch_authorization_file"] = "/secrets/basic" }},
+		{name: "relative Basic Auth path", mutate: func(spec map[string]interface{}) {
+			delete(spec, "elasticsearch_api_key_file")
+			spec["elasticsearch_authorization_file"] = "secrets/basic"
+		}},
 		{name: "plain HTTP", mutate: func(spec map[string]interface{}) {
 			spec["elasticsearch_endpoints"] = []interface{}{"http://es.example.com:9200"}
 		}},
@@ -435,6 +455,27 @@ func TestRenderExternalElasticsearchRejectsUnsafeConfiguration(t *testing.T) {
 				t.Fatal("render accepted unsafe Elasticsearch configuration")
 			}
 		})
+	}
+}
+
+func TestRenderElasticsearchBasicAuthUsesOnlyManagedHeader(t *testing.T) {
+	root := renderConfig(t, plugins.PluginConfig{
+		Enabled: true, EdgeID: 42,
+		Spec: map[string]interface{}{
+			"backend": backendExternalES, "backend_generation": uint64(3),
+			"elasticsearch_endpoints":          []string{"https://es.example.com:9200"},
+			"elasticsearch_authorization_file": "/secrets/es-basic.g3",
+			"elasticsearch_dataset":            "ongrid.host", "elasticsearch_namespace": "default",
+		},
+	})
+	es := object(t, object(t, root, "exporters"), "elasticsearch/generation_3")
+	if got := scalar(t, object(t, es, "headers"), "Authorization"); got != "${file:/secrets/es-basic.g3}" {
+		t.Fatalf("unexpected authorization file reference: %q", got)
+	}
+	for _, field := range []string{"api_key", "user", "password"} {
+		if _, exists := es[field]; exists {
+			t.Fatalf("Basic Auth exporter also contains %s", field)
+		}
 	}
 }
 
