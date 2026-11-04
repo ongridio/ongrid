@@ -209,7 +209,7 @@ func TestEnqueue_ConcurrencyCap(t *testing.T) {
 }
 
 // TestEnqueue_HappyPath — gate passes, row created, worker spawned,
-// final answer written as findings_md + first line as root_cause.
+// final answer is preserved; missing extraction never invents a root cause.
 func TestEnqueue_HappyPath(t *testing.T) {
 	repo := &fakeRepo{}
 	spawner := &fakeSpawner{
@@ -261,7 +261,7 @@ func TestEnqueue_HappyPath(t *testing.T) {
 		t.Fatalf("want 1 MarkReady call, got %d", len(repo.ready))
 	}
 	got := repo.ready[0].fields
-	if got.RootCause != "Root cause: PID 8821 saturated CPU on pg-replica-7." {
+	if got.RootCause != "" {
 		t.Errorf("root_cause = %q", got.RootCause)
 	}
 	if got.FindingsMD != "Root cause: PID 8821 saturated CPU on pg-replica-7.\n\nDetails follow..." {
@@ -321,28 +321,6 @@ func TestSeverityRank(t *testing.T) {
 	for _, tc := range cases {
 		if got := severityRank(tc.s); got != tc.want {
 			t.Errorf("severityRank(%q) = %d, want %d", tc.s, got, tc.want)
-		}
-	}
-}
-
-// TestFirstParagraphOneLine — strips markdown noise and clamps length.
-func TestFirstParagraphOneLine(t *testing.T) {
-	cases := []struct {
-		in, want string
-		maxRunes int
-	}{
-		{"## Root\n\npg-replica-7 saturated", "pg-replica-7 saturated", 200},
-		{"\n\n", "", 200},
-		{"a very long line that exceeds the cap", "a very …", 8},
-		// Bold section header must be skipped (not mangled into "现象**") —
-		// land on the prose beneath. Matches the investigator's "**根因**"
-		// / "**现象**" output format.
-		{"**现象**\nPID 12345 /usr/bin/foo 吃满 CPU", "PID 12345 /usr/bin/foo 吃满 CPU", 200},
-		{"**根因（0 号病人）**\npg-replica-7 主从复制中断", "pg-replica-7 主从复制中断", 200},
-	}
-	for _, tc := range cases {
-		if got := firstParagraphOneLine(tc.in, tc.maxRunes); got != tc.want {
-			t.Errorf("firstParagraphOneLine(%q, %d) = %q, want %q", tc.in, tc.maxRunes, got, tc.want)
 		}
 	}
 }

@@ -6,10 +6,9 @@
 // writes the result back as an investigation_reports row that the
 // SPA's IncidentDetail page renders.
 //
-// PR-2 first version: the worker's final assistant message is written
-// verbatim into findings_md, with root_cause set to the first line
-// (or first ~120 chars). PR-3 wires a structured second LLM pass over
-// the transcript to fill the rest of the fields.
+// The final narrative is preserved in findings_md. Structured extraction
+// cites persisted observations, and deterministic checks record provenance
+// separately from the report lifecycle and model self-assessment.
 //
 // Failure modes are intentionally non-fatal — a missing chatruntime
 // runtime, an over-budget tenant, or an LLM crash all log + set the
@@ -62,6 +61,7 @@ type ReadyFields struct {
 	PinpointedTargetJSON  string
 	RelatedAlertsJSON     string
 	EvidenceJSON          string
+	EvidenceCheckJSON     *string
 	SuggestedActionsJSON  string
 	FindingsMD            string
 	Confidence            *float64
@@ -175,6 +175,7 @@ type Usecase struct {
 	summarizer LLMSummarizer
 	related    RelatedAlertQuerier
 	messages   MessageReader
+	evidence   EvidenceReader
 	locales    LocaleResolver
 	cfg        Config
 	log        *slog.Logger
@@ -199,7 +200,7 @@ type Usecase struct {
 // Enqueue returns a "skipped: spawner not wired" status row instead
 // of attempting to invoke the worker. summarizer may be nil — when
 // nil, the structured-extraction step is skipped and the report
-// ships findings_md + first-line root_cause only.
+// preserves findings_md and marks structured extraction incomplete.
 func NewUsecase(repo Repo, spawner WorkerSpawner, summarizer LLMSummarizer, cfg Config, log *slog.Logger) *Usecase {
 	if log == nil {
 		log = slog.Default()
@@ -254,6 +255,11 @@ func (uc *Usecase) WithRelatedQuerier(q RelatedAlertQuerier) *Usecase {
 // see MessageReader doc + the "exceeds max steps" handler in run().
 func (uc *Usecase) WithMessageReader(m MessageReader) *Usecase {
 	uc.messages = m
+	return uc
+}
+
+func (uc *Usecase) WithEvidenceReader(r EvidenceReader) *Usecase {
+	uc.evidence = r
 	return uc
 }
 
@@ -670,14 +676,9 @@ func (uc *Usecase) run(reportID string, incident alertmodel.Incident, dedupKeyVa
 		return
 	}
 
-	// PR-3: structured extraction. Falls back internally to the first-
-	// paragraph heuristic when summarizer is nil / LLM errors / JSON
-	// parse fails — caller sees a fully-populated ReadyFields either way.
-	// tool_call_count is read back from the worker transcript (chat_messages
-	// by session_id) so the report + UI show how many tools the
-	// investigation actually invoked instead of a hardcoded 0.
-	toolCalls := uc.countToolCalls(worker.SessionID)
-	fields := uc.extractStructured(context.Background(), incident, finalAnswer, toolCalls, locale)
+	// Post-processing keeps its own bounded timeouts after the worker finishes.
+	sources := uc.collectEvidence(context.Background(), worker.SessionID)
+	fields := uc.extractStructured(context.Background(), incident, finalAnswer, sources.CallCount, locale, sources)
 
 	if err := uc.repo.MarkReady(context.Background(), reportID, fields); err != nil {
 		uc.log.Warn("mark ready failed",
@@ -776,30 +777,6 @@ func isMaxStepsError(s string) bool {
 		strings.Contains(low, "graphrunerror")
 }
 
-// countToolCalls reads the worker's transcript and counts tool-result
-// turns (role=="tool") — i.e. how many tools the investigation actually
-// invoked. Best-effort: returns 0 when the message reader isn't wired or
-// the session has no rows. Surfaces as the report's tool_call_count and
-// the "调查过程" step count on the incident page (previously hardcoded 0).
-func (uc *Usecase) countToolCalls(sessionID string) int {
-	if uc.messages == nil || sessionID == "" {
-		return 0
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	msgs, err := uc.messages.ListMessages(ctx, sessionID, 200)
-	if err != nil {
-		return 0
-	}
-	n := 0
-	for _, m := range msgs {
-		if m != nil && m.Role == "tool" {
-			n++
-		}
-	}
-	return n
-}
-
 // salvagePartialAnswer pulls the worker's chat trail and synthesises a
 // markdown summary of what it discovered before running out of budget.
 // Returns "" when no useful messages were captured (e.g. session id
@@ -868,59 +845,4 @@ func severityRank(s string) int {
 	// Unknown → treat as warning so existing rules without a severity
 	// still trigger an investigation under the default floor.
 	return 2
-}
-
-// firstParagraphOneLine returns the first prose-looking line of s,
-// trimmed and truncated to max runes. Lines that are pure markdown
-// scaffolding (headings, dividers, table separators) get skipped so
-// root_cause reads as a sentence not as a section title.
-func firstParagraphOneLine(s string, max int) string {
-	for _, raw := range strings.Split(s, "\n") {
-		line := strings.TrimSpace(raw)
-		if line == "" {
-			continue
-		}
-		// Pure headings — "# Title" / "## Section" — drop entirely so
-		// we land on the first prose paragraph below them.
-		if strings.HasPrefix(line, "#") {
-			continue
-		}
-		// Pure dividers — "---", "===" — drop.
-		if onlyChars(line, "-=") {
-			continue
-		}
-		// Bold section headers — "**现象**" / "**根因（0 号病人）**" — are
-		// titles, not prose. Skip short ones so root_cause lands on the
-		// paragraph beneath; for a longer fully-bold line keep the content
-		// but drop the wrapping "**". (The "现象**" bug: the TrimLeft below
-		// only stripped the *leading* "**", leaving the trailing pair.)
-		if strings.HasPrefix(line, "**") && strings.HasSuffix(line, "**") && len(line) > 4 {
-			inner := strings.TrimSpace(line[2 : len(line)-2])
-			if inner == "" || len([]rune(inner)) <= 24 {
-				continue // pure section header → skip to the prose below
-			}
-			line = inner // long fully-bold line → keep content, drop markers
-		}
-		// Strip leading list / quote markers so "* bullet" → "bullet".
-		line = strings.TrimLeft(line, "*-> \t")
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		runes := []rune(line)
-		if len(runes) > max {
-			return string(runes[:max-1]) + "…"
-		}
-		return line
-	}
-	return ""
-}
-
-func onlyChars(s, allowed string) bool {
-	for _, r := range s {
-		if !strings.ContainsRune(allowed, r) {
-			return false
-		}
-	}
-	return s != ""
 }

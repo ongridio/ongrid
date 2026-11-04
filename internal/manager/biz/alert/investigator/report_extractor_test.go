@@ -17,6 +17,12 @@ type fakeSummarizer struct {
 	calls   int
 }
 
+type summarizerFunc func(context.Context, llm.ChatReq) (*llm.ChatResp, error)
+
+func (f summarizerFunc) Chat(ctx context.Context, req llm.ChatReq) (*llm.ChatResp, error) {
+	return f(ctx, req)
+}
+
 func (f *fakeSummarizer) Chat(_ context.Context, req llm.ChatReq) (*llm.ChatResp, error) {
 	f.calls++
 	f.lastReq = req
@@ -62,7 +68,7 @@ func TestExtractStructured_RelatedAlerts(t *testing.T) {
 	uc := (&Usecase{
 		cfg: Config{},
 	}).WithRelatedQuerier(related)
-	fields := uc.extractStructured(context.Background(), alertmodel.Incident{ID: 99, DeviceID: &dev}, "narrative", 0, "")
+	fields := uc.extractStructured(context.Background(), alertmodel.Incident{ID: 99, DeviceID: &dev}, "narrative", 0, "", evidenceSet{})
 
 	if fields.RelatedAlertsJSON == "[]" {
 		t.Fatalf("related_alerts_json not populated: %q", fields.RelatedAlertsJSON)
@@ -129,13 +135,12 @@ func TestExtractJSONBlob_VariousWrappers(t *testing.T) {
 }
 
 // TestExtractStructured_SummarizerNil — when no summarizer wired, the
-// extractor falls back to first-paragraph root_cause + verbatim
-// findings_md. Same shape as the PR-2 behaviour.
+// extractor preserves findings_md without manufacturing a root cause.
 func TestExtractStructured_SummarizerNil(t *testing.T) {
 	uc := &Usecase{cfg: Config{SummarizerTimeout: time.Second}}
 	final := "## Root\n\npg-replica-7 saturated"
-	fields := uc.extractStructured(context.Background(), alertmodel.Incident{ID: 1}, final, 3, "")
-	if fields.RootCause != "pg-replica-7 saturated" {
+	fields := uc.extractStructured(context.Background(), alertmodel.Incident{ID: 1}, final, 3, "", evidenceSet{})
+	if fields.RootCause != "" {
 		t.Errorf("root_cause = %q", fields.RootCause)
 	}
 	if fields.FindingsMD != final {
@@ -175,7 +180,7 @@ func TestExtractStructured_ParsesValid(t *testing.T) {
 			SummarizerTimeout: time.Second,
 		},
 	}
-	fields := uc.extractStructured(context.Background(), alertmodel.Incident{ID: 1}, "narrative", 7, "")
+	fields := uc.extractStructured(context.Background(), alertmodel.Incident{ID: 1}, "narrative", 7, "", evidenceSet{})
 
 	if fields.RootCause != "PID 8821 saturated CPU on pg-replica-7" {
 		t.Errorf("root_cause = %q", fields.RootCause)
@@ -212,7 +217,7 @@ func TestExtractStructured_EmptyModelUsesRouterDefault(t *testing.T) {
 		cfg:        Config{SummarizerTimeout: time.Second},
 	}
 
-	fields := uc.extractStructured(context.Background(), alertmodel.Incident{ID: 1}, "narrative", 2, "")
+	fields := uc.extractStructured(context.Background(), alertmodel.Incident{ID: 1}, "narrative", 2, "", evidenceSet{})
 	if fields.RootCause != "router default" {
 		t.Fatalf("root_cause = %q, want router default", fields.RootCause)
 	}
@@ -225,8 +230,7 @@ func TestExtractStructured_EmptyModelUsesRouterDefault(t *testing.T) {
 }
 
 // TestExtractStructured_LLMError — when the summarizer call errors,
-// fall back silently to PR-2 behaviour. The report still ships, just
-// without the structured fields.
+// preserve the narrative and mark the reference check incomplete.
 func TestExtractStructured_LLMError(t *testing.T) {
 	sum := &fakeSummarizer{err: errors.New("rate limited")}
 	uc := &Usecase{
@@ -234,8 +238,8 @@ func TestExtractStructured_LLMError(t *testing.T) {
 		cfg:        Config{SummarizerModel: "glm-4-air", SummarizerTimeout: time.Second},
 	}
 	final := "Root cause line\n\nbody"
-	fields := uc.extractStructured(context.Background(), alertmodel.Incident{ID: 1}, final, 0, "")
-	if fields.RootCause != "Root cause line" {
+	fields := uc.extractStructured(context.Background(), alertmodel.Incident{ID: 1}, final, 0, "", evidenceSet{})
+	if fields.RootCause != "" {
 		t.Errorf("root_cause fallback = %q", fields.RootCause)
 	}
 	if fields.FindingsMD != final {
@@ -250,8 +254,8 @@ func TestExtractStructured_BadJSON(t *testing.T) {
 		Assistant: llm.Message{Role: "assistant", Content: "I think the cause is..."},
 	}}
 	uc := &Usecase{summarizer: sum, cfg: Config{SummarizerModel: "glm-4-air", SummarizerTimeout: time.Second}}
-	fields := uc.extractStructured(context.Background(), alertmodel.Incident{ID: 1}, "narrative body", 0, "")
-	if fields.RootCause != "narrative body" {
+	fields := uc.extractStructured(context.Background(), alertmodel.Incident{ID: 1}, "narrative body", 0, "", evidenceSet{})
+	if fields.RootCause != "" {
 		t.Errorf("fallback root_cause = %q", fields.RootCause)
 	}
 	if fields.Confidence != nil {
@@ -277,7 +281,7 @@ func TestExtractStructured_ConfidenceClamp(t *testing.T) {
 			Assistant: llm.Message{Role: "assistant",
 				Content: `{"root_cause":"x","confidence":` + fmtFloat(raw) + `}`}}}
 		uc := &Usecase{summarizer: sum, cfg: Config{SummarizerModel: "m", SummarizerTimeout: time.Second}}
-		fields := uc.extractStructured(context.Background(), alertmodel.Incident{ID: 1}, "narr", 0, "")
+		fields := uc.extractStructured(context.Background(), alertmodel.Incident{ID: 1}, "narr", 0, "", evidenceSet{})
 		if fields.Confidence == nil {
 			t.Errorf("raw=%v: confidence nil", raw)
 			continue
