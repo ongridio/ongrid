@@ -12,6 +12,53 @@ beforeEach(() => {
   localStorage.setItem('ongrid-locale', 'en-US');
 });
 
+describe('SettingsAgent command policy approval', () => {
+  const label = 'Allow command policy bypass after approval';
+
+  it('defaults off and persists an explicit opt-in and opt-out', async () => {
+    const saved: unknown[] = [];
+    server.use(
+      http.get('/api/v1/system-settings', () => HttpResponse.json({ items: [], total: 0 })),
+      http.put('/api/v1/system-settings/agent/command_policy_approval_enabled', async ({ request }) => {
+        saved.push(await request.json());
+        return HttpResponse.json({});
+      }),
+    );
+    render(<MemoryRouter><SettingsAgent /></MemoryRouter>);
+    const toggle = await screen.findByRole('switch', { name: label });
+    await waitFor(() => expect(toggle).not.toHaveAttribute('aria-disabled', 'true'));
+    expect(toggle).not.toBeChecked();
+    expect(screen.getByText(/Also requires “Allow Agent write actions”/)).toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(toggle);
+    await waitFor(() => expect(saved).toEqual([{ value: 'true', sensitive: false }]));
+    await waitFor(() => expect(toggle).not.toHaveAttribute('aria-disabled', 'true'));
+    await user.click(toggle);
+    await waitFor(() => expect(saved).toEqual([{ value: 'true', sensitive: false }, { value: 'false', sensitive: false }]));
+  });
+
+  it('loads the saved setting and restores it when saving fails', async () => {
+    server.use(
+      http.get('/api/v1/system-settings', () => HttpResponse.json({ items: [{ key: 'command_policy_approval_enabled', value: 'true' }], total: 1 })),
+      http.put('/api/v1/system-settings/agent/command_policy_approval_enabled', () => HttpResponse.json({ error: 'Policy save failed' }, { status: 500 })),
+    );
+    render(<MemoryRouter><SettingsAgent /></MemoryRouter>);
+    const toggle = await screen.findByRole('switch', { name: label });
+    await waitFor(() => expect(toggle).toBeChecked());
+    await userEvent.setup().click(toggle);
+    expect(await screen.findByText('Policy save failed')).toBeInTheDocument();
+    expect(toggle).toBeChecked();
+    expect(toggle).not.toHaveAttribute('aria-disabled', 'true');
+  });
+
+  it('cannot enable policy approval when loading settings fails', async () => {
+    server.use(http.get('/api/v1/system-settings', () => HttpResponse.json({ error: 'Settings unavailable' }, { status: 500 })));
+    render(<MemoryRouter><SettingsAgent /></MemoryRouter>);
+    await screen.findByText('Settings unavailable');
+    expect(screen.getByRole('switch', { name: label })).toHaveAttribute('aria-disabled', 'true');
+  });
+});
+
 describe('SettingsAgent LLM timeout', () => {
   it('loads the default and persists a validated timeout', async () => {
     let saved: Record<string, unknown> | null = null;

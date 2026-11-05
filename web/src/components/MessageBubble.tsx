@@ -967,6 +967,7 @@ function PendingApprovalCard({ approvalID, kind, toolName, command }: { approval
   const [approvalKind, setApprovalKind] = useState(kind);
   const [approvedToolName, setApprovedToolName] = useState(toolName);
   const [creds, setCreds] = useState<string[]>([]);
+  const [policyReason, setPolicyReason] = useState('');
   const isHostBash = approvalKind === 'host_bash';
 
   // Reconcile with the authoritative server status on mount. When chat
@@ -984,10 +985,11 @@ function PendingApprovalCard({ approvalID, kind, toolName, command }: { approval
         if (!alive) return;
         setApprovalKind(a.kind || approvalKind);
         try {
-          const p = JSON.parse(a.payload) as { command?: string; credentials?: string[]; tool_name?: string; summary?: string };
+          const p = JSON.parse(a.payload) as { command?: string; credentials?: string[]; tool_name?: string; summary?: string; policy_reason?: string };
           if (!cmd && (p.command || p.summary)) setCmd(p.command ?? p.summary ?? '');
           if (p.tool_name) setApprovedToolName(p.tool_name);
           if (Array.isArray(p.credentials)) setCreds(p.credentials.filter(Boolean));
+          setPolicyReason(typeof p.policy_reason === 'string' ? p.policy_reason : '');
         } catch {
           /* payload not JSON — leave placeholder */
         }
@@ -1054,6 +1056,12 @@ function PendingApprovalCard({ approvalID, kind, toolName, command }: { approval
         </span>
       </div>
       <div className="px-3 pb-2.5">
+        {policyReason && (
+          <div className="my-2 break-words text-text-muted">
+            <p>{tr('此命令被 Edge 策略拦截。批准后将绕过命令策略，仅执行本次命令。', 'Edge policy blocked this command. Approval bypasses command policy for this command only.')}</p>
+            <p className="mt-1 whitespace-pre-wrap">{policyReason}</p>
+          </div>
+        )}
         <pre className="mb-2 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-zinc-950 p-2 text-[11px] text-zinc-300">
           {cmd || tr('(待执行操作)', '(proposed action)')}
         </pre>

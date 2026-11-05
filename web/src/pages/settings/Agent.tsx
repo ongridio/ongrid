@@ -18,6 +18,7 @@ import { useI18n } from '@/i18n/locale';
 // server (fail-safe default), so we treat a missing row as OFF.
 const CATEGORY = 'agent';
 const KEY = 'write_enabled';
+const COMMAND_POLICY_APPROVAL_KEY = 'command_policy_approval_enabled';
 const LLM_TIMEOUT_KEY = 'llm_timeout_seconds';
 const OUTPUT_LOCALE_KEY = 'output_locale';
 const RUNTIME_VERSION_KEY = 'runtime_version';
@@ -28,6 +29,8 @@ const MAX_LLM_TIMEOUT_SECONDS = 900;
 export default function SettingsAgent() {
   const { tr } = useI18n();
   const [writeEnabled, setWriteEnabled] = useState(false);
+  const [policyApprovalEnabled, setPolicyApprovalEnabled] = useState(false);
+  const [savingPolicyApproval, setSavingPolicyApproval] = useState(false);
   const [llmTimeoutSeconds, setLLMTimeoutSeconds] = useState(String(DEFAULT_LLM_TIMEOUT_SECONDS));
   const [outputLocale, setOutputLocale] = useState<'' | 'zh' | 'en'>('');
   const [runtimeVersion, setRuntimeVersion] = useState('release');
@@ -53,6 +56,7 @@ export default function SettingsAgent() {
       const localeRow = res.items.find((i) => i.key === OUTPUT_LOCALE_KEY);
       // Missing row → server default is DISABLED (fail-safe).
       setWriteEnabled(row ? row.value === 'true' : false);
+      setPolicyApprovalEnabled(res.items.some((i) => i.key === COMMAND_POLICY_APPROVAL_KEY && i.value === 'true'));
       // Missing timeout row → server and UI both use the stable 120s default.
       setLLMTimeoutSeconds(timeoutRow?.value || String(DEFAULT_LLM_TIMEOUT_SECONDS));
       setOutputLocale(localeRow?.value === 'zh' || localeRow?.value === 'en' ? localeRow.value : '');
@@ -110,6 +114,20 @@ export default function SettingsAgent() {
     }
   }, [llmTimeoutSeconds, tr]);
 
+  const onTogglePolicyApproval = async (next: boolean) => {
+    setSavingPolicyApproval(true);
+    setPolicyApprovalEnabled(next);
+    setErr(null);
+    try {
+      await setSetting(CATEGORY, COMMAND_POLICY_APPROVAL_KEY, next ? 'true' : 'false', false);
+    } catch (e) {
+      setPolicyApprovalEnabled(!next);
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingPolicyApproval(false);
+    }
+  };
+
   const onSaveLocale = useCallback(async () => {
     setSavingLocale(true);
     setErr(null);
@@ -140,6 +158,7 @@ export default function SettingsAgent() {
   useAssistantPage('Agent 设置', 'Agent settings', {
     runtime: savedRuntimeVersion,
     write_enabled: writeEnabled,
+    command_policy_approval_enabled: policyApprovalEnabled,
     loading,
   });
 
@@ -183,7 +202,7 @@ export default function SettingsAgent() {
                 </div>
               </div>
             </div>
-            <Switch checked={writeEnabled} disabled={saving} onCheckedChange={(next) => void onToggle(next)} aria-label={tr('允许 Agent 执行写操作', 'Allow Agent write actions')} />
+            <Switch checked={writeEnabled} disabled={saving || loadFailed} onCheckedChange={(next) => void onToggle(next)} aria-label={tr('允许 Agent 执行写操作', 'Allow Agent write actions')} />
           </div>
         )}
         <p className="mt-4 text-[11px] leading-relaxed text-zinc-600">
@@ -192,6 +211,36 @@ export default function SettingsAgent() {
             'Note: takes effect immediately on the next chat turn for every user, no restart needed. Tool calls already in flight are unaffected.',
           )}
         </p>
+      </Card>
+
+      <Card className="p-5">
+        <div className="mb-3 flex items-center gap-2">
+          <ShieldCheck size={14} className="text-zinc-400" />
+          <h2 className="text-sm font-medium text-zinc-100">{tr('受限命令人工确认', 'Approval for restricted commands')}</h2>
+        </div>
+        <p id="command-policy-approval-description" className="mb-4 text-xs leading-relaxed text-zinc-500">
+          {tr(
+            '开启后，被 Edge 命令白名单、参数、路径或网络策略拦截的主机命令会转为人工确认卡。批准后，仅对卡片中的命令和目标主机绕过命令策略执行；拒绝或确认过期则不执行。批量操作中已执行的主机不会重复执行。',
+            'When enabled, host commands blocked by Edge command, argument, path or network policies request human approval. Approval bypasses command policy only for the exact command and hosts on the card. Rejected or expired requests do not run. Hosts that already ran are not retried.',
+          )}
+        </p>
+        <div className="flex items-center justify-between gap-4 rounded-lg border border-zinc-800 bg-zinc-950/40 px-4 py-3">
+          <div className="min-w-0">
+            <div className="text-[13px] font-medium text-zinc-200">
+              {tr('允许通过人工确认绕过命令策略', 'Allow command policy bypass after approval')}
+            </div>
+            <div className="mt-0.5 text-[11px] text-zinc-500">
+              {tr('默认关闭。需同时开启「允许 Agent 执行写操作」，按 Edge 进程权限执行。', 'Off by default. Also requires “Allow Agent write actions”. Commands run with the Edge process permissions.')}
+            </div>
+          </div>
+          <Switch
+            checked={policyApprovalEnabled}
+            disabled={loading || loadFailed || savingPolicyApproval}
+            onCheckedChange={(next) => void onTogglePolicyApproval(next)}
+            aria-label={tr('允许通过人工确认绕过命令策略', 'Allow command policy bypass after approval')}
+            aria-describedby="command-policy-approval-description"
+          />
+        </div>
       </Card>
 
       <Card className="p-5">

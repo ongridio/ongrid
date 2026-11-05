@@ -35,13 +35,13 @@ type cloudBashPayload struct {
 	SessionID string `json:"session_id,omitempty"`
 }
 
-// hostBashPayload is the approval payload for mutating host_bash commands.
-// Read-only host_bash calls never create approvals; this payload is only for
-// user-requested host mutations such as deleting a known file.
+// hostBashPayload freezes the command and targets for host writes or an
+// explicitly enabled command-policy override.
 type hostBashPayload struct {
 	DeviceIDs      []uint64 `json:"device_ids"`
 	Command        string   `json:"command"`
 	TimeoutSeconds int      `json:"timeout_seconds,omitempty"`
+	PolicyReason   string   `json:"policy_reason,omitempty"`
 }
 
 // K8sActionPayload stores the exact preflight-validated action plus the
@@ -179,8 +179,13 @@ func (s CloudBashProposer) ProposeAndAwait(ctx context.Context, command string, 
 // approval card flow as cloud_bash.
 type HostBashProposer struct{ Usecase *managerbizapproval.Usecase }
 
-func (s HostBashProposer) ProposeAndAwait(ctx context.Context, deviceIDs []uint64, command string, timeoutSeconds int, sessionID, toolCallID string, userID uint64) (string, error) {
+func (s HostBashProposer) ProposeAndAwait(ctx context.Context, deviceIDs []uint64, command string, timeoutSeconds int, sessionID, toolCallID string, userID uint64, policyReason string) (string, error) {
 	title := fmt.Sprintf("host_bash device_ids=%v %s", deviceIDs, command)
+	summary := fmt.Sprintf("device_ids=%v", deviceIDs)
+	if policyReason != "" {
+		title = "Command policy override: " + title
+		summary += "\nHuman approval bypasses the Edge command policy for this command only.\n" + policyReason
+	}
 	if len(title) > 100 {
 		title = title[:100] + "…"
 	}
@@ -188,8 +193,8 @@ func (s HostBashProposer) ProposeAndAwait(ctx context.Context, deviceIDs []uint6
 		RuntimeVersion: string(aiopschatruntime.VersionFromContext(ctx)),
 		Kind:           "host_bash",
 		Title:          title,
-		Summary:        fmt.Sprintf("device_ids=%v", deviceIDs),
-		Payload:        hostBashPayload{DeviceIDs: deviceIDs, Command: command, TimeoutSeconds: timeoutSeconds},
+		Summary:        summary,
+		Payload:        hostBashPayload{DeviceIDs: deviceIDs, Command: command, TimeoutSeconds: timeoutSeconds, PolicyReason: policyReason},
 		Source:         "agent",
 		SessionID:      sessionID,
 		ProposedBy:     userID,

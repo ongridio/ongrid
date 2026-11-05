@@ -73,6 +73,9 @@ const (
 	// tools. Only "true" enables write tools; unset / any other value keeps the
 	// agent read-only (only Class=="read" tools exposed to the LLM).
 	KeyAgentWriteEnabled = "write_enabled"
+	// KeyAgentCommandPolicyApprovalEnabled allows policy-denied host commands
+	// to request human approval. Unset defaults to disabled.
+	KeyAgentCommandPolicyApprovalEnabled = "command_policy_approval_enabled"
 	// KeyAgentRuntimeVersion selects the runtime for new sessions only.
 	KeyAgentRuntimeVersion = "runtime_version"
 	// KeyAgentLLMTimeoutSeconds bounds an assistant LLM request and report

@@ -167,6 +167,7 @@ func bootstrapExtensions(rootCtx context.Context, cfg *config.Config, log *slog.
 	}).Register(approvalUC)
 	aiops.toolsReg.SetCloudBashProposer(managersvcaiops.CloudBashProposer{Usecase: approvalUC})
 	aiops.toolsReg.SetHostBashProposer(managersvcaiops.HostBashProposer{Usecase: approvalUC})
+	aiops.toolsReg.SetHostBashPolicyApprovalEnabledProvider(settings.settingSvc.AgentCommandPolicyApprovalEnabled)
 	// The Actions page is a read-only projection over two immutable audit
 	// sources: graph ReviewGate decisions and legacy human approvals.
 	k8sHandler := managerserverk8s.NewHandler(devices.k8sSvc, managersvck8s.NewActionAuditReader(aiops.mutatingProposalRepo, approvalUC))
@@ -237,7 +238,7 @@ func bootstrapExtensions(rootCtx context.Context, cfg *config.Config, log *slog.
 			HumanApproval: runtime.humanApprovalBroker,
 		}
 		if err := rt.AppendToolBag([]aiopstoolsbase.BaseTool{
-			aiopstoolsdec.Wrap(aiopstools.NewBashToolWithProposer(tunnel.fbClient, devices.edgeUC, devices.deviceUC, managersvcaiops.HostBashProposer{Usecase: approvalUC}, log), cbDeps),
+			aiopstoolsdec.Wrap(aiopstools.NewBashToolWithProposer(tunnel.fbClient, devices.edgeUC, devices.deviceUC, managersvcaiops.HostBashProposer{Usecase: approvalUC}, settings.settingSvc.AgentCommandPolicyApprovalEnabled, log), cbDeps),
 			aiopstoolsdec.Wrap(aiopstools.NewCloudBashTool(managersvcaiops.CloudBashProposer{Usecase: approvalUC}, log), cbDeps),
 			aiopstoolsdec.Wrap(aiopstools.NewInstallSkillTool(managersvcaiops.InstallSkillProposer{Usecase: approvalUC}, log), cbDeps),
 			aiopstoolsdec.Wrap(aiopstools.NewServePageTool(pageStore, log), quickDeps),
