@@ -182,7 +182,7 @@ func (e ApprovalExecutors) Register(approvalUC *managerbizapproval.Usecase) {
 		if err := json.Unmarshal([]byte(payloadJSON), &p); err != nil {
 			return "", err
 		}
-		tool := aiopstools.NewBashToolWithProposer(e.Frontier, e.Edges, e.Devices, nil, e.Log)
+		tool := aiopstools.NewBashToolWithProposer(e.Frontier, e.Edges, e.Devices, nil, nil, e.Log)
 		return tool.RunApproved(ctx, p.DeviceIDs, p.Command, p.TimeoutSeconds)
 	})
 	// HLD-018 P2: mcp_call executor — on approve, connect the server and run

@@ -106,7 +106,7 @@ type recHostBashProposer struct {
 	called    bool
 }
 
-func (r *recHostBashProposer) ProposeAndAwait(_ context.Context, deviceIDs []uint64, command string, _ int, _, _ string, _ uint64) (string, error) {
+func (r *recHostBashProposer) ProposeAndAwait(_ context.Context, deviceIDs []uint64, command string, _ int, _, _ string, _ uint64, _ string) (string, error) {
 	r.called = true
 	r.deviceIDs = append([]uint64(nil), deviceIDs...)
 	r.command = command

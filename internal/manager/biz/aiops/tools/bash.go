@@ -49,7 +49,7 @@ import (
 const ToolNameBash = "host_bash"
 
 // BashDescription is the one-line "what does this tool do" blurb.
-const BashDescription = "Run a shell command on edge hosts. Read commands run through the edge read-only sandbox. Write commands are never executed directly: when agent writes are enabled they first show an inline approval card, then run only after approval."
+const BashDescription = "Run a shell command on edge hosts. Read commands run through the edge read-only sandbox. Write commands require an inline approval card when agent writes are enabled. If command policy approval is also enabled, sandbox-denied commands request human approval for the denied hosts before unrestricted execution."
 
 // bashWhenToUse — batch-first routing hint (N+15). Fleet semantics:
 // one cmd, many devices. List of allowed binaries is replicated here
@@ -110,7 +110,8 @@ NOT FOR:
   - 单文件 size / mtime / owner → 用 host_stat_file（一次 batch 多文件）
   - 找大文件 → 用 host_find_large_files（top-N，size>X）
 
-If a per-device result returns Allowed=false, READ THE REASON — it tells you exactly which token tripped the policy. Adjust the command (e.g. drop -i from sed, replace > with --output-file) and try again. Do NOT retry the exact same command expecting different result.`
+If command policy approval is enabled together with agent writes, this tool automatically requests human approval for sandbox-denied hosts and returns their post-approval results. Approval applies only to the exact command and listed hosts. Hosts that already ran are not retried. Rejection, cancellation or expiry does not execute the denied command.
+If a per-device result still returns Allowed=false, READ THE REASON and explain the restriction. Do not disguise the command to evade policy or retry the same command expecting a different result.`
 
 // BashSchema is the JSON Schema the LLM sees. device_ids[] + single cmd.
 var BashSchema = json.RawMessage(`{
@@ -181,7 +182,7 @@ type bashBatchArgs struct {
 // cmd wiring over the approval inbox; kept as a local seam so tools does not
 // import the approval biz package.
 type HostBashProposer interface {
-	ProposeAndAwait(ctx context.Context, deviceIDs []uint64, command string, timeoutSeconds int, sessionID, toolCallID string, userID uint64) (string, error)
+	ProposeAndAwait(ctx context.Context, deviceIDs []uint64, command string, timeoutSeconds int, sessionID, toolCallID string, userID uint64, policyReason string) (string, error)
 }
 
 // BashResultEntry is one slot in the batch envelope. Cmd is NOT
@@ -213,29 +214,31 @@ type BashBatchResponse struct {
 
 // BashTool is the BaseTool implementation.
 type BashTool struct {
-	caller   Caller
-	resolver hostFilesDeviceResolver
-	proposer HostBashProposer
-	log      *slog.Logger
+	caller                Caller
+	resolver              hostFilesDeviceResolver
+	proposer              HostBashProposer
+	policyApprovalEnabled func(context.Context) bool
+	log                   *slog.Logger
 }
 
 // NewBashTool builds a new BaseTool. Pass nil log to default to
 // slog.Default().
 func NewBashTool(c Caller, e *edgebiz.Usecase, d *devicebiz.Usecase, log *slog.Logger) *BashTool {
-	return NewBashToolWithProposer(c, e, d, nil, log)
+	return NewBashToolWithProposer(c, e, d, nil, nil, log)
 }
 
 // NewBashToolWithProposer builds host_bash with the optional mutating-command
 // approval seam wired.
-func NewBashToolWithProposer(c Caller, e *edgebiz.Usecase, d *devicebiz.Usecase, proposer HostBashProposer, log *slog.Logger) *BashTool {
+func NewBashToolWithProposer(c Caller, e *edgebiz.Usecase, d *devicebiz.Usecase, proposer HostBashProposer, policyApprovalEnabled func(context.Context) bool, log *slog.Logger) *BashTool {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &BashTool{
-		caller:   c,
-		resolver: deviceResolverAdapter{inner: NewDeviceResolver(d, e)},
-		proposer: proposer,
-		log:      log,
+		caller:                c,
+		resolver:              deviceResolverAdapter{inner: NewDeviceResolver(d, e)},
+		proposer:              proposer,
+		policyApprovalEnabled: policyApprovalEnabled,
+		log:                   log,
 	}
 }
 
@@ -364,7 +367,7 @@ func (t *BashTool) InvokableRun(ctx context.Context, argsJSON string, opts ...ba
 		if t.proposer == nil {
 			return "", fmt.Errorf("%s: approval inbox not wired for mutating command", ToolNameBash)
 		}
-		return t.proposer.ProposeAndAwait(ctx, in.DeviceIDs, in.Cmd, in.TimeoutSeconds, basetool.SessionIDFromContext(ctx), compose.GetToolCallID(ctx), invokeCfg.UserID)
+		return t.proposer.ProposeAndAwait(ctx, in.DeviceIDs, in.Cmd, in.TimeoutSeconds, basetool.SessionIDFromContext(ctx), compose.GetToolCallID(ctx), invokeCfg.UserID, "")
 	}
 
 	batchCtx, cancel := context.WithTimeout(ctx, bashBatchTimeout)
@@ -377,7 +380,67 @@ func (t *BashTool) InvokableRun(ctx context.Context, argsJSON string, opts ...ba
 		// 才允许 Unrestricted。
 		return t.singleBash(ctx, id, in.Cmd, in.TimeoutSeconds, false)
 	})
+	if hostWriteAllowed && t.proposer != nil && t.policyApprovalEnabled != nil && t.policyApprovalEnabled(ctx) && ctx.Err() == nil {
+		var deniedIDs []uint64
+		var reasons []string
+		for _, result := range results {
+			// Allowed=false is the wire guarantee that no process was started.
+			// Transport failures and executed commands must never be retried here.
+			if result.Error == "" && !result.Allowed && result.Reason != "" {
+				deniedIDs = append(deniedIDs, result.DeviceID)
+				reasons = append(reasons, fmt.Sprintf("device_id=%d: %s", result.DeviceID, result.Reason))
+			}
+		}
+		if len(deniedIDs) > 0 {
+			approved, err := t.proposer.ProposeAndAwait(ctx, deniedIDs, in.Cmd, in.TimeoutSeconds, basetool.SessionIDFromContext(ctx), compose.GetToolCallID(ctx), invokeCfg.UserID, strings.Join(reasons, "\n"))
+			if err != nil {
+				// Preserve completed hosts so an approval failure cannot hide them.
+				raw, _ := json.Marshal(map[string]string{"status": "error", "error": err.Error()})
+				approved = string(raw)
+			}
+			return mergeBashApprovalResult(in.Cmd, results, deniedIDs, approved)
+		}
+	}
 	return marshalBashEnvelope(in.Cmd, results)
+}
+
+// Keep the batch shape and approval evidence while replacing only denied hosts.
+func mergeBashApprovalResult(cmd string, results []BashResultEntry, deniedIDs []uint64, approved string) (string, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(approved), &fields); err != nil || fields == nil {
+		return "", fmt.Errorf("%s: invalid approval result", ToolNameBash)
+	}
+	var replacements []BashResultEntry
+	if raw, ok := fields["results"]; ok {
+		if err := json.Unmarshal(raw, &replacements); err != nil {
+			return "", fmt.Errorf("%s: decode approved host results: %w", ToolNameBash, err)
+		}
+	}
+	for i, result := range results {
+		if !slices.Contains(deniedIDs, result.DeviceID) {
+			continue
+		}
+		for _, replacement := range replacements {
+			if replacement.DeviceID == result.DeviceID {
+				results[i] = replacement
+				break
+			}
+		}
+	}
+	batch, err := marshalBashEnvelope(cmd, results)
+	if err != nil {
+		return "", err
+	}
+	var batchFields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(batch), &batchFields); err != nil {
+		return "", err
+	}
+	for key, value := range batchFields {
+		fields[key] = value
+	}
+	fields["policy_approval_device_ids"], _ = json.Marshal(deniedIDs)
+	out, err := json.Marshal(fields)
+	return string(out), err
 }
 
 func marshalBashEnvelope(cmd string, results []BashResultEntry) (string, error) {

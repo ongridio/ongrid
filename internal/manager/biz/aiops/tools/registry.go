@@ -95,7 +95,8 @@ type Registry struct {
 	cloudBashProposer CloudBashProposer
 	// hostBashProposer wires mutating host_bash commands to the same inline
 	// approval flow. nil → host_bash remains read-only only.
-	hostBashProposer HostBashProposer
+	hostBashProposer              HostBashProposer
+	hostBashPolicyApprovalEnabled func(context.Context) bool
 
 	// notificationSender wires send_notification to the channel store + notify
 	// router. Set post-construction; nil → the tool is not registered.
@@ -123,6 +124,11 @@ func (r *Registry) SetCloudBashProposer(p CloudBashProposer) { r.cloudBashPropos
 
 // SetHostBashProposer wires mutating host_bash commands to the approval inbox.
 func (r *Registry) SetHostBashProposer(p HostBashProposer) { r.hostBashProposer = p }
+
+// SetHostBashPolicyApprovalEnabledProvider wires the live opt-in setting.
+func (r *Registry) SetHostBashPolicyApprovalEnabledProvider(fn func(context.Context) bool) {
+	r.hostBashPolicyApprovalEnabled = fn
+}
 
 // SetNotificationSender wires send_notification → channel store + notify router.
 func (r *Registry) SetNotificationSender(s NotificationSender) { r.notificationSender = s }
@@ -407,7 +413,7 @@ func (r *Registry) BuildBaseTools() *ToolBag {
 	// approval proposer. Class stays "read" so diagnostic bash remains
 	// visible when writes are disabled.
 	if r.caller != nil && r.edges != nil && r.devices != nil {
-		out = append(out, NewBashToolWithProposer(r.caller, r.edges, r.devices, r.hostBashProposer, r.log))
+		out = append(out, NewBashToolWithProposer(r.caller, r.edges, r.devices, r.hostBashProposer, r.hostBashPolicyApprovalEnabled, r.log))
 	}
 
 	// cloud_bash — manager-side command runner (sibling of host_bash). Gated

@@ -37,6 +37,13 @@ func (s *Service) AgentWriteEnabled(ctx context.Context) bool {
 	return v == "true"
 }
 
+// AgentCommandPolicyApprovalEnabled opts policy-denied host commands into the
+// existing human approval flow. Missing settings and read errors fail closed.
+func (s *Service) AgentCommandPolicyApprovalEnabled(ctx context.Context) bool {
+	v, found, err := s.Get(ctx, model.CategoryAgent, model.KeyAgentCommandPolicyApprovalEnabled)
+	return err == nil && found && v == "true"
+}
+
 // AgentLLMTimeout returns the live assistant LLM timeout. Missing, malformed,
 // or out-of-range values fall back to the stable 120 second default so a bad
 // setting cannot make assistant work unbounded or immediately fail.
@@ -93,6 +100,11 @@ func (s *Service) AgentRuntimeVersion(ctx context.Context) (string, error) {
 // agent keys remain backwards-compatible with the generic setting store.
 func validateAgentSetting(key, value string) error {
 	switch key {
+	case model.KeyAgentCommandPolicyApprovalEnabled:
+		if value != "true" && value != "false" {
+			return fmt.Errorf("%w: command_policy_approval_enabled must be true or false", errs.ErrInvalid)
+		}
+		return nil
 	case model.KeyAgentRuntimeVersion:
 		if value != "release" && value != "v3" && value != "v2" {
 			return fmt.Errorf("%w: runtime_version must be release, v3 or v2; v1 is no longer supported", errs.ErrInvalid)
