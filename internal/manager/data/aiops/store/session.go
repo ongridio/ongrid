@@ -147,9 +147,9 @@ func (r *SessionRepo) RenameSession(ctx context.Context, id string, title string
 // UpdateSessionModel stores the conversation's model route as one atomic
 // update so readers never observe a provider from one selection and a model
 // from another.
-func (r *SessionRepo) UpdateSessionModel(ctx context.Context, id string, provider string, selectedModel string) error {
+func (r *SessionRepo) UpdateSessionModel(ctx context.Context, id string, provider string, selectedModel string, reasoningEffort string) error {
 	now := time.Now().UTC()
-	updates := map[string]any{"updated_at": now}
+	updates := map[string]any{"updated_at": now, "reasoning_effort": reasoningEffort}
 	if provider == "" && selectedModel == "" {
 		updates["provider"] = nil
 		updates["model"] = nil

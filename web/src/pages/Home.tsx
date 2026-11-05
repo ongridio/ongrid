@@ -1,5 +1,5 @@
 import { useAssistantPage } from '@/lib/assistantPage';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Activity,
@@ -22,7 +22,8 @@ import { useModelSelection } from '@/store/modelSelection';
 import { PromptCard } from '@/components/PromptCard';
 import { StatusRow } from '@/components/StatusRow';
 import { createSession, listModels, type LLMProvider } from '@/api/chat';
-import { setSetting, invalidateLLMRouter } from '@/api/settings';
+import { saveLLMDefault } from '@/api/settings';
+import { usePermissions } from '@/store/me';
 import { listDevices } from '@/api/devices';
 import { useI18n } from '@/i18n/locale';
 
@@ -145,14 +146,16 @@ function samplePrompts(n: number): typeof PROMPT_POOL {
 export default function HomePage() {
   const { tr } = useI18n();
   const navigate = useNavigate();
+  const { isAdmin } = usePermissions();
+  const [savingModel, setSavingModel] = useState(false);
+  const savingModelRef = useRef(false);
+  const [loadingModels, setLoadingModels] = useState(true);
   const [draft, setDraft] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deviceTotal, setDeviceTotal] = useState<number | null>(null);
   const [providers, setProviders] = useState<LLMProvider[]>([]);
-  // Model selection lives in a persisted store (shared with ChatThread), so a
-  // pick survives navigation + reload and the launched session inherits it.
-  // selected==null → fall back to the live catalog default.
+  // The browser store holds the current draft; each visit reloads the saved server default.
   const storeModel = useModelSelection((s) => s.selected);
   const setStoreModel = useModelSelection((s) => s.setSelected);
   const [catalogDefault, setCatalogDefault] = useState<ModelSelection | null>(null);
@@ -181,51 +184,44 @@ export default function HomePage() {
         if (cancelled) return;
         setProviders(cat.providers ?? []);
         if (cat.default && cat.default.provider) {
-          const d: ModelSelection = { provider: cat.default.provider, model: cat.default.model || '' };
+          const d: ModelSelection = { ...cat.default, reasoning_effort: cat.default.reasoning_effort || '' };
           setCatalogDefault(d);
-          // The server default (default_provider + <provider>_default_model) is
-          // authoritative. A persisted pick can go stale — the default was
-          // changed in Settings, or the settings were reseeded — and would
-          // otherwise pin an outdated model both here and in the launched
-          // session (which inherits the store). Reconcile a stale/absent store
-          // to the server default; an in-session pick still wins (it updates
-          // the store after this mount-time effect has run).
-          const cur = useModelSelection.getState().selected;
-          if (!cur || cur.provider !== d.provider || cur.model !== d.model) {
-            setStoreModel(d);
-          }
+          // The server default includes effort; browser-local preferences may be stale.
+          setStoreModel(d);
         }
       })
       .catch(() => {
         if (!cancelled) setProviders([]);
-      });
+      })
+      .finally(() => { if (!cancelled) setLoadingModels(false); });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [setStoreModel]);
 
-  // Persist a home-page pick as the GLOBAL default (default_provider +
-  // <provider>_default_model) so every server-side LLM consumer that doesn't
-  // pin a model — the RCA investigator worker, query_translate — and the chat
-  // default all use the same model shown here. The pick also rides the shared
-  // store so the launched chat session inherits it. Per-message overrides
-  // inside a chat thread stay transient (ChatThread never writes the default).
+  // Administrators save the shared default; other users can choose for their next chat.
   async function handleModelChange(sel: ModelSelection | null) {
+    if (!sel || savingModelRef.current || loadingModels) return;
+    const previous = useModelSelection.getState().selected;
+    if (previous?.provider === sel.provider && previous.model === sel.model && (previous.reasoning_effort || '') === (sel.reasoning_effort || '')) return;
     setStoreModel(sel);
-    if (!sel?.provider) return;
+    if (!isAdmin) return;
+    savingModelRef.current = true;
+    setSavingModel(true);
+    setError(null);
     try {
-      await setSetting('llm', 'default_provider', sel.provider, false);
-      if (sel.model) {
-        await setSetting('llm', `${sel.provider}_default_model`, sel.model, false);
-      }
-      await invalidateLLMRouter();
-    } catch {
-      /* non-fatal — the pick still rides the per-session store */
+      setStoreModel(await saveLLMDefault(sel));
+    } catch (err) {
+      setStoreModel(previous);
+      setError((err as Error).message || tr('保存默认模型失败', 'Failed to save the default model'));
+    } finally {
+      savingModelRef.current = false;
+      setSavingModel(false);
     }
   }
 
   async function startSession(content: string, attachments: File[] = []) {
-    if ((!content.trim() && attachments.length === 0) || submitting) return;
+    if ((!content.trim() && attachments.length === 0) || submitting || savingModelRef.current || loadingModels) return;
     setError(null);
     setSubmitting(true);
     try {
@@ -238,6 +234,7 @@ export default function HomePage() {
         agent_id: 'default',
         provider: selectedModel?.provider,
         model: selectedModel?.model,
+        reasoning_effort: selectedModel?.reasoning_effort,
       });
       // Don't post here — ChatThread takes the initialPrompt and runs it
       // through the SSE streamMessage path so the user sees tool cards and
@@ -276,7 +273,7 @@ export default function HomePage() {
               void startSession(p.text, p.attachments);
             }}
             allowAttachments
-            disabled={submitting}
+            disabled={submitting || savingModel || loadingModels}
             autoFocus
             providers={providers}
             selectedModel={selectedModel}

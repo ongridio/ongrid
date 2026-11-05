@@ -68,6 +68,7 @@ type APMSourceScope struct {
 }
 
 type Session struct {
+	ReasoningEffort string `gorm:"size:32;column:reasoning_effort;not null;default:''"`
 	// RuntimeVersion pins execution policy. Empty means historical provenance
 	// has not been classified; migrations must not guess v2 versus v3.
 	RuntimeVersion string `gorm:"size:16;column:runtime_version"`

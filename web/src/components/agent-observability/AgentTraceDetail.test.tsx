@@ -64,6 +64,20 @@ function step(
 
 describe('Agent trace inspection', () => {
   it.each([
+    ['high', 'High'], ['default', 'Default'], ['none', 'Off'],
+    ['custom_effort', 'custom_effort'], [undefined, '未记录'],
+  ])('shows the recorded request effort %s without guessing missing history', (effort, label) => {
+    const model = step('model', '', {
+      kind: 'llm', model: 'Fixture-Model',
+      attributes: effort ? { 'ongrid.llm.reasoning_effort': effort } : {},
+    });
+    const trace: AgentTrace = { trace_id: '1'.repeat(32), issues: [], runs: [], steps: [model] };
+    const { container } = render(<MemoryRouter><AgentTraceDetail trace={trace} onSelectSpan={vi.fn()} onSelectRun={vi.fn()} /></MemoryRouter>);
+    expect(container.querySelector('.agent-step-header')).toHaveTextContent(`推理级别 ${label}`);
+    expect(container.querySelector('.agent-step-button')).toHaveTextContent(`推理级别 ${label}`);
+  });
+
+  it.each([
     ['ok', 0, ''],
     ['unset', 0, ''],
     ['error', 0, '失败'],

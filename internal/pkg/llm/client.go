@@ -53,11 +53,13 @@ const defaultTimeout = 120 * time.Second
 // without reshaping the interface. Timeout applies when the caller's ctx has
 // no deadline; default is 120s.
 type Config struct {
-	TLSInsecure bool
-	APIKey      string
-	Model       string
-	BaseURL     string
-	Timeout     time.Duration
+	Provider              string
+	ReasoningCapabilities map[string]ReasoningCapability
+	TLSInsecure           bool
+	APIKey                string
+	Model                 string
+	BaseURL               string
+	Timeout               time.Duration
 }
 
 // Message is one entry in the chat completions messages array. The shape is
@@ -94,7 +96,8 @@ type ToolCall struct {
 }
 
 // ToolSchema is the JSON-Schema description of a tool exposed to the model.
-// Parameters is passed through as-is (JSON Schema draft-07).
+// Parameters is projected for provider compatibility; execution must validate
+// arguments against the original JSON Schema.
 type ToolSchema struct {
 	Name        string
 	Description string
@@ -114,13 +117,14 @@ type Usage struct {
 // "zhipu", "gemini"). Empty → router uses the default provider. The
 // non-multi-provider single-client path ignores Provider.
 type ChatReq struct {
-	Model        string
-	Provider     string
-	Messages     []Message
-	Tools        []ToolSchema
-	DisableTools bool // Summary-only turns forbid provider tool calls, including tools inferred from history.
-	Temperature  float32
-	UserID       uint64 // optional; used for budget scoping + logging only
+	ReasoningEffort string
+	Model           string
+	Provider        string
+	Messages        []Message
+	Tools           []ToolSchema
+	DisableTools    bool // Summary-only turns forbid provider tool calls, including tools inferred from history.
+	Temperature     float32
+	UserID          uint64 // optional; used for budget scoping + logging only
 }
 
 // ChatResp is the output of Client.Chat.
@@ -333,7 +337,7 @@ func (c *openaiClient) sdkFor(apiKey, baseURL string) *openai.Client {
 	if baseURL != "" {
 		sdkCfg.BaseURL = baseURL
 	}
-	transport := http.RoundTripper(&deepSeekReasoningTransport{base: NewHTTPTransport(c.cfg.TLSInsecure)})
+	transport := http.RoundTripper(&responsesTransport{base: &deepSeekReasoningTransport{base: NewHTTPTransport(c.cfg.TLSInsecure)}})
 	if zhipuauth.LooksLikeZhipuURL(baseURL) && zhipuauth.LooksLikeZhipuKey(apiKey) {
 		sdkCfg.HTTPClient = &http.Client{
 			Transport: &zhipuJWTTransport{apiKey: apiKey, base: transport},
@@ -442,6 +446,12 @@ func (c *openaiClient) Chat(ctx context.Context, req ChatReq) (result *ChatResp,
 	if err != nil {
 		return nil, fmt.Errorf("llm: build request: %w", err)
 	}
+	effort := req.ReasoningEffort
+	if effort == "" {
+		effort = "default"
+	}
+	// Record the request choice, not an inferred provider compute budget.
+	span.SetAttributes(attribute.String("ongrid.llm.reasoning_effort", effort))
 	if !callbackOwned {
 		tracing.RecordAgentContent(span, "input.value", sdkReq.Messages)
 	}
@@ -455,11 +465,7 @@ func (c *openaiClient) Chat(ctx context.Context, req ChatReq) (result *ChatResp,
 	}
 
 	// 4. Issue the request through the SDK matching the resolved creds.
-	// 旧消息没有可恢复的思考字段；DeepSeek 接受显式空值，但 SDK 的
-	// omitempty 会删掉它。仅对需要此兼容处理的请求补齐空字段。
-	if needsDeepSeekReasoningCompatibility(sdkReq) {
-		callCtx = context.WithValue(callCtx, deepSeekReasoningKey{}, true)
-	}
+	callCtx = context.WithValue(callCtx, reasoningCapabilityKey{}, c.reasoningCapability(req.Provider, model))
 	sdk := c.sdkFor(apiKey, baseURL)
 	start := time.Now()
 	sdkResp, err := sdk.CreateChatCompletion(callCtx, sdkReq)
@@ -503,6 +509,10 @@ func (c *openaiClient) Chat(ctx context.Context, req ChatReq) (result *ChatResp,
 	if err != nil {
 		c.metrics.requestsTotal.WithLabelValues(model, "error").Inc()
 		return nil, fmt.Errorf("llm: decode assistant message: %w", err)
+	}
+	if req.DisableTools && len(assistant.ToolCalls) > 0 {
+		c.metrics.requestsTotal.WithLabelValues(model, "error").Inc()
+		return nil, fmt.Errorf("llm: provider returned tool calls while tools were disabled")
 	}
 	usage := Usage{
 		PromptTokens:     sdkResp.Usage.PromptTokens,
@@ -549,6 +559,9 @@ func (c *openaiClient) Chat(ctx context.Context, req ChatReq) (result *ChatResp,
 
 // toOpenAIReq translates the public ChatReq to the SDK request shape.
 func (c *openaiClient) toOpenAIReq(req ChatReq, model string) (openai.ChatCompletionRequest, error) {
+	if err := c.reasoningCapability(req.Provider, model).Validate(req.Provider, model, req.ReasoningEffort); err != nil {
+		return openai.ChatCompletionRequest{}, err
+	}
 	// Reasoning models (o-series, gpt-5.x) fix temperature/top_p/n at 1 and
 	// 400 on any other value, so we must NOT send a temperature for them.
 	// A zero Temperature is dropped by the SDK's `omitempty` tag, letting the
@@ -561,7 +574,7 @@ func (c *openaiClient) toOpenAIReq(req ChatReq, model string) (openai.ChatComple
 	if temp == 0 && !isReasoningModel(model) && !c.modelRejectsSampling(model) {
 		temp = 0.1
 	}
-	if isReasoningModel(model) || c.modelRejectsSampling(model) {
+	if isReasoningModel(model) || c.modelRejectsSampling(model) || req.ReasoningEffort != "" {
 		temp = 0
 	}
 
@@ -578,16 +591,9 @@ func (c *openaiClient) toOpenAIReq(req ChatReq, model string) (openai.ChatComple
 	if len(req.Tools) > 0 {
 		tools = make([]openai.Tool, 0, len(req.Tools))
 		for i, t := range req.Tools {
-			// Parameters is passed through as json.RawMessage; the SDK
-			// accepts `any` and re-marshals. Validate it is valid JSON up
-			// front so a malformed schema surfaces here, not at send time.
-			var params any = t.Parameters
-			if len(t.Parameters) > 0 {
-				var tmp any
-				if err := json.Unmarshal(t.Parameters, &tmp); err != nil {
-					return openai.ChatCompletionRequest{}, fmt.Errorf("tool[%d] %q parameters: %w", i, t.Name, err)
-				}
-				params = json.RawMessage(t.Parameters)
+			params, err := modelToolParameters(t.Parameters)
+			if err != nil {
+				return openai.ChatCompletionRequest{}, fmt.Errorf("tool[%d] %q parameters: %w", i, t.Name, err)
 			}
 			tools = append(tools, openai.Tool{
 				Type: openai.ToolTypeFunction,
@@ -606,11 +612,12 @@ func (c *openaiClient) toOpenAIReq(req ChatReq, model string) (openai.ChatComple
 		toolChoice = "none"
 	}
 	return openai.ChatCompletionRequest{
-		Model:       model,
-		Messages:    msgs,
-		Tools:       tools,
-		ToolChoice:  toolChoice,
-		Temperature: temp,
+		Model:           model,
+		Messages:        msgs,
+		Tools:           tools,
+		ToolChoice:      toolChoice,
+		Temperature:     temp,
+		ReasoningEffort: req.ReasoningEffort,
 	}, nil
 }
 

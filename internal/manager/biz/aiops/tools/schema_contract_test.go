@@ -8,6 +8,8 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -15,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
+	"github.com/ongridio/ongrid/internal/pkg/llm"
 )
 
 type schemaContractProbe struct{ raw json.RawMessage }
@@ -28,6 +31,31 @@ func (p schemaContractProbe) InvokableRun(context.Context, string, ...basetool.I
 
 // 编译所有静态 Schema，不依赖某种部署恰好注册了哪些工具。
 func TestAllStaticToolSchemasCompile(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Tools []struct {
+				Function struct{ Parameters map[string]json.RawMessage }
+			} `json:"tools"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || len(request.Tools) != 1 {
+			t.Errorf("invalid model request: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		params := request.Tools[0].Function.Parameters
+		if string(params["type"]) != `"object"` {
+			t.Error("tool parameters must be an object")
+		}
+		for _, key := range []string{"oneOf", "anyOf", "allOf", "enum", "const", "not"} {
+			if params[key] != nil {
+				t.Errorf("unsupported root keyword %s", key)
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"}}]}`))
+	}))
+	t.Cleanup(server.Close)
+	client := llm.New(llm.Config{APIKey: "test", Model: "test", BaseURL: server.URL}, nil, prometheus.NewRegistry())
 	entries, err := os.ReadDir(".")
 	if err != nil {
 		t.Fatal(err)
@@ -68,6 +96,9 @@ func TestAllStaticToolSchemasCompile(t *testing.T) {
 				count++
 				t.Run(entry.Name()+"/"+name.Name, func(t *testing.T) {
 					if _, err := basetool.WithValidation(schemaContractProbe{json.RawMessage(raw)}).Info(context.Background()); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := client.Chat(context.Background(), llm.ChatReq{Messages: []llm.Message{{Role: "user", Content: "test"}}, Tools: []llm.ToolSchema{{Name: "contract", Parameters: json.RawMessage(raw)}}}); err != nil {
 						t.Fatal(err)
 					}
 				})

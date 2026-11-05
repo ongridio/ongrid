@@ -4,14 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"sort"
 	"strings"
 
 	settingmodel "github.com/ongridio/ongrid/internal/manager/model/setting"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/llm"
-	openai "github.com/sashabaranov/go-openai"
 )
 
 // ErrLLMModelsUnavailable hides untrusted upstream response details while
@@ -21,8 +19,9 @@ var ErrLLMModelsUnavailable = errors.New("provider models unavailable")
 // LLMModelsResult is a provider catalog fetched from an unsaved draft. It does
 // not imply that every returned model supports chat completions.
 type LLMModelsResult struct {
-	Models    []string `json:"models"`
-	Truncated bool     `json:"truncated"`
+	ReasoningCapabilities map[string]llm.ReasoningCapability `json:"reasoning_capabilities,omitempty"`
+	Models                []string                           `json:"models"`
+	Truncated             bool                               `json:"truncated"`
 }
 
 // FetchModels queries only the supplied draft and never persists credentials.
@@ -51,42 +50,39 @@ func (s *LLMConfigurationService) FetchModels(ctx context.Context, in LLMProbeIn
 		return LLMModelsResult{}, fmt.Errorf("invalid base URL: %w", errs.ErrInvalid)
 	}
 
-	config := openai.DefaultConfig(in.APIKey)
-	if baseURL != "" {
-		config.BaseURL = strings.TrimRight(baseURL, "/")
+	if err := llm.ValidateReasoningOverrides(provider, in.ReasoningOverrides); err != nil {
+		return LLMModelsResult{}, fmt.Errorf("%w: %v", errs.ErrInvalid, err)
 	}
-	transport := llm.NewHTTPTransport(in.TLSInsecure)
-	defer transport.CloseIdleConnections()
-	config.HTTPClient = &http.Client{
-		Transport: transport,
-		Timeout:   defaultLLMProbeTimeout,
-		// Never forward draft credentials to a redirected endpoint.
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return errors.New("model endpoint redirects are not allowed")
-		},
-	}
-	queryCtx, cancel := context.WithTimeout(ctx, defaultLLMProbeTimeout)
+	queryCtx, cancel := context.WithTimeout(ctx, s.probe.timeout)
 	defer cancel()
-	catalog, err := openai.NewClientWithConfig(config).ListModels(queryCtx)
+	catalog, err := llm.FetchModelCatalog(queryCtx, provider, llm.Config{APIKey: in.APIKey, BaseURL: baseURL, TLSInsecure: in.TLSInsecure, Timeout: s.probe.timeout})
 	if err != nil {
 		code, _ := classifyLLMProbeError(err, in.APIKey)
 		return LLMModelsResult{}, fmt.Errorf("fetch models failed (%s): %w", code, ErrLLMModelsUnavailable)
 	}
 
-	models := make([]string, 0, len(catalog.Models))
+	models := make([]string, 0, len(catalog))
+	discovered := make(map[string]llm.ReasoningCapability)
 	seen := make(map[string]bool)
-	for _, item := range catalog.Models {
+	for _, item := range catalog {
 		id := strings.TrimSpace(item.ID)
 		if id == "" || len(id) > maxLLMModelBytes || seen[id] {
 			continue
 		}
 		seen[id] = true
 		models = append(models, id)
+		if item.Reasoning != nil {
+			discovered[id] = *item.Reasoning
+		}
 	}
 	sort.Strings(models)
 	truncated := len(models) > maxLLMModels
 	if truncated {
 		models = models[:maxLLMModels]
 	}
-	return LLMModelsResult{Models: models, Truncated: truncated}, nil
+	capabilities := make(map[string]llm.ReasoningCapability, len(models))
+	for _, model := range models {
+		capabilities[model] = llm.ResolveReasoning(provider, model, discovered, in.ReasoningOverrides)
+	}
+	return LLMModelsResult{Models: models, Truncated: truncated, ReasoningCapabilities: capabilities}, nil
 }

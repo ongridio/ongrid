@@ -1,0 +1,10 @@
+<!DOCTYPE html><html class="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0"><div id="root"></div><script type="module">
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import { MemoryRouter } from 'react-router-dom';
+import { ChatInput } from '/src/components/ChatInput.tsx';
+import '/src/styles/index.css';
+const providers=[{id:'openai',label:'OpenAI',models:['gpt-6.1-terra','gpt-4o','very-long-model-name-for-reasoning-layout-2026-11-05'],reasoning_efforts:{'very-long-model-name-for-reasoning-layout-2026-11-05':['none','low','medium','high','xhigh','max'],'gpt-6.1-terra':['none','low','medium','high','xhigh','max']}},{id:'deepseek',label:'DeepSeek',models:['deepseek-v4-flash'],reasoning_efforts:{'deepseek-v4-flash':['none','low','high','max']}}];
+function Demo(){const [model,setModel]=React.useState({provider:'openai',model:'very-long-model-name-for-reasoning-layout-2026-11-05'});return React.createElement('main',{style:{margin:'24px auto',maxWidth:760,padding:16}},React.createElement(ChatInput,{providers,selectedModel:model,onModelChange:setModel,onSubmit:()=>{},allowAttachments:true}));}
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(MemoryRouter,null,React.createElement(Demo)));
+</script></body></html>

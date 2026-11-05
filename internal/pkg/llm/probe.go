@@ -46,13 +46,15 @@ func ProbeChatCompletion(ctx context.Context, cfg Config) (*ProbeResult, error) 
 	}
 	baseTransport := NewHTTPTransport(cfg.TLSInsecure)
 	defer baseTransport.CloseIdleConnections()
-	transport := http.RoundTripper(baseTransport)
+	transport := http.RoundTripper(&responsesTransport{base: &deepSeekReasoningTransport{base: baseTransport}})
 	if zhipuauth.LooksLikeZhipuURL(baseURL) && zhipuauth.LooksLikeZhipuKey(cfg.APIKey) {
 		transport = &zhipuJWTTransport{apiKey: cfg.APIKey, base: transport}
 	}
 	sdkCfg.HTTPClient = &http.Client{Timeout: cfg.Timeout, Transport: transport}
 
 	sdk := openai.NewClientWithConfig(sdkCfg)
+	capability := ResolveReasoning(cfg.Provider, cfg.Model, cfg.ReasoningCapabilities, nil)
+	callCtx = context.WithValue(callCtx, reasoningCapabilityKey{}, capability)
 	resp, err := sdk.CreateChatCompletion(callCtx, openai.ChatCompletionRequest{
 		Model: cfg.Model,
 		Messages: []openai.ChatCompletionMessage{

@@ -26,6 +26,16 @@ export function runTitle(run: AgentRun) {
   return run.chat_session_id && run.input_preview ? run.input_preview : run.name;
 }
 
+export function reasoningEffort(step: AgentStep): string | null {
+  const value = step.attributes['ongrid.llm.reasoning_effort'];
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const labels: Record<string, string> = {
+    default: 'Default', none: 'Off', enabled: 'On', minimal: 'Minimal',
+    low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max',
+  };
+  return labels[value] ?? value;
+}
+
 export function contentStateLabel(
   state: string | undefined,
   tr: (zh: string, en: string) => string,

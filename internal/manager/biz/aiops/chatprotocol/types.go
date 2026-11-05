@@ -134,6 +134,7 @@ type Mention struct {
 // keeps the contract honest: a stale tool_call from history replay
 // never silently slips through.)
 type RunOptions struct {
+	ReasoningEffort  *string
 	Provider         string
 	Model            string
 	Mentions         []Mention

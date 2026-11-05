@@ -1,7 +1,7 @@
 import { useState, type ComponentProps } from 'react';
 import { Link } from 'react-router-dom';
 import { Globe } from 'lucide-react';
-import type { LLMProvider, ModelSelection } from '@/api/chat';
+import { chatReasoningEffort, type LLMProvider, type ModelSelection } from '@/api/chat';
 import { ModelIcon } from '@/components/icons/Provider';
 import { Button } from '@/components/ui/Button';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/Popover';
@@ -41,16 +41,29 @@ export function ModelDropdown({
   if (selected && !options.some(option => option.value === value)) {
     options.push({ value, label: selected.model, icon: <ModelIcon model={selected.model} provider={selected.provider} size={15}/>, disabled: true });
   }
-  return <Select
+  const levels = (selected ? providers.find(p => p.id === selected.provider)?.reasoning_efforts?.[selected.model] ?? [] : []).filter(level => level !== 'none');
+  const labels: Record<string, string> = {
+    enabled: 'On', minimal: 'Minimal', low: 'Low',
+    medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max',
+  };
+  return <div className="flex min-w-0 flex-wrap items-center gap-1">
+  <Select
     open={open} onOpenChange={setOpen} disabled={disabled} label={tr('选择模型', 'Select model')}
     value={value}
-    options={options} searchable variant="ghost" className="h-8 w-auto max-w-xs"
+    options={options} searchable variant="ghost" className="h-8 w-auto max-w-full"
     onValueChange={(value) => {
       const [provider, model] = JSON.parse(value) as [string, string];
-      onPick?.({ provider, model });
+      onPick?.({ provider, model, reasoning_effort: '' });
       setOpen(false);
     }}
-  />;
+  />
+  {selected && levels.length > 0 && <Select
+    disabled={disabled} label={tr('推理级别', 'Reasoning effort')}
+    value={chatReasoningEffort(selected.reasoning_effort) || ''} variant="ghost" className="h-8 w-auto max-w-full"
+    options={[{ value: '', label: 'Default' }, ...levels.map(level => ({ value: level, label: labels[level] ?? level }))]}
+    onValueChange={reasoning_effort => onPick?.({ ...selected, reasoning_effort })}
+  />}
+  </div>;
 }
 
 // WebSearchToggle is the chat toolbar's globe icon. Click flips the

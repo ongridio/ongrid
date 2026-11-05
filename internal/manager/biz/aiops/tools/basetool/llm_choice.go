@@ -49,3 +49,14 @@ func LLMModelFromContext(ctx context.Context) string {
 	v, _ := ctx.Value(llmModelCtxKey).(string)
 	return v
 }
+
+// The selected effort follows delegated workers along with the model route.
+type reasoningEffortCtxKey struct{}
+
+func WithReasoningEffort(ctx context.Context, effort string) context.Context {
+	return context.WithValue(ctx, reasoningEffortCtxKey{}, effort)
+}
+func ReasoningEffortFromContext(ctx context.Context) string {
+	effort, _ := ctx.Value(reasoningEffortCtxKey{}).(string)
+	return effort
+}

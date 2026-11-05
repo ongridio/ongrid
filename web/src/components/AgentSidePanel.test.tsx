@@ -149,11 +149,38 @@ describe('global assistant', () => {
     expect(model).toHaveTextContent('pro');
     expect(panel.getByLabelText('你的问题')).toHaveValue('follow up');
     await pick('fast');
-    expect(updateSessionModel).toHaveBeenLastCalledWith('s1', 'provider', 'fast');
+    expect(updateSessionModel).toHaveBeenLastCalledWith('s1', 'provider', 'fast', '');
     expect(model).toHaveTextContent('fast');
     fireEvent.click(panel.getByRole('button', { name: '发送' }));
     expect(vi.mocked(streamMessage).mock.lastCall?.slice(0, 2)).toEqual(['s1', 'follow up']);
     expect(vi.mocked(streamMessage).mock.lastCall?.[3]).toMatchObject({ model: 'fast' });
     expect(createSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('creates a provider-default conversation after switching back from the configured high default', async () => {
+    const user = userEvent.setup();
+    vi.mocked(listModels).mockResolvedValue({
+      providers: [{ id: 'provider', label: 'Provider', models: ['fast', 'pro'], reasoning_efforts: { fast: ['low', 'high'] } }],
+      default: { provider: 'provider', model: 'fast', reasoning_effort: 'high' },
+    });
+    vi.mocked(createSession).mockImplementation(async ({ title, provider, model, reasoning_effort, page_context }) => ({
+      title, provider, model, reasoning_effort, page_context, id: 'default-session', user_id: 9,
+    }));
+    render(<MemoryRouter initialEntries={['/alert']}><Console/></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: 'AI 助理' }));
+    const panel = within(await screen.findByRole('dialog', { name: 'Ongrid AI 助理' }));
+    const model = await panel.findByLabelText('选择模型');
+    expect(panel.getByLabelText('推理级别')).toHaveTextContent('High');
+    for (const name of ['pro', 'fast']) {
+      await act(async () => user.click(model));
+      const option = await screen.findByRole('option', { name });
+      await act(async () => user.click(option));
+    }
+    expect(panel.getByLabelText('推理级别')).toHaveTextContent('Default');
+    fireEvent.change(panel.getByLabelText('你的问题'), { target: { value: 'test default' } });
+    fireEvent.click(panel.getByRole('button', { name: '发送' }));
+    await waitFor(() => expect(streamMessage).toHaveBeenCalled());
+    expect(createSession).toHaveBeenCalledWith(expect.objectContaining({ provider: 'provider', model: 'fast', reasoning_effort: '' }));
+    expect(vi.mocked(streamMessage).mock.lastCall?.[3]).toMatchObject({ reasoning_effort: '' });
   });
 });

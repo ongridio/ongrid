@@ -28,6 +28,7 @@ import {
 import {
   duration,
   inspectionSteps,
+  reasoningEffort,
   runTitle,
   sdkLabels,
   stepRows,
@@ -469,6 +470,12 @@ export function AgentTraceDetail({
                                 : ''}
                             </span>
                           )}
+                        {step.kind === 'llm' && (
+                          <span className="agent-step-caption">
+                            {tr('推理级别', 'Reasoning effort')}{' '}
+                            {reasoningEffort(step) ?? tr('未记录', 'Not recorded')}
+                          </span>
+                        )}
                       </span>
                       {step.status === 'error' && (
                         <span
@@ -596,6 +603,15 @@ export function AgentTraceDetail({
               <span>{selected.kind}</span>
               {selected.model && (
                 <span className="break-all text-text">{selected.model}</span>
+              )}
+              {selected.kind === 'llm' && (
+                <span
+                  className="break-all"
+                  title={tr('本次请求指定的档位；Default 表示使用厂商默认值。', 'The requested level for this call; Default uses the provider default.')}
+                >
+                  {tr('推理级别', 'Reasoning effort')}{' '}
+                  {reasoningEffort(selected) ?? tr('未记录', 'Not recorded')}
+                </span>
               )}
               <span className="font-mono">
                 {duration(selected.duration_ms)}

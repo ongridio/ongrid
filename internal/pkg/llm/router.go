@@ -31,22 +31,26 @@ import (
 // closed-set of model slugs the operator wants to expose for this
 // provider; Label is the human-readable name shown in the UI dropdown.
 type ProviderConfig struct {
-	TLSInsecure bool
-	ID          string   // stable provider id, e.g. "openai" or "minimax"
-	Label       string   // display name
-	APIKey      string   // empty → provider not configured (skipped at build)
-	Model       string   // default model
-	BaseURL     string   // optional base URL override
-	Models      []string // closed-set of allowed models for the UI selector
+	DefaultReasoningEffort string
+	ReasoningOverrides     map[string]ReasoningOverride
+	TLSInsecure            bool
+	ID                     string   // stable provider id, e.g. "openai" or "minimax"
+	Label                  string   // display name
+	APIKey                 string   // empty → provider not configured (skipped at build)
+	Model                  string   // default model
+	BaseURL                string   // optional base URL override
+	Models                 []string // closed-set of allowed models for the UI selector
 }
 
 // ProviderInfo is the subset of ProviderConfig safe to leak through the
 // HTTP /v1/aiops/models endpoint (no API key).
 type ProviderInfo struct {
-	ID          string
-	Label       string
-	Model       string
-	Models      []string
+	DefaultReasoningEffort string
+	ReasoningCapabilities  map[string]ReasoningCapability
+	ID                     string
+	Label                  string
+	Model                  string
+	Models                 []string
 }
 
 // ProvidersResolver supplies a fresh provider catalog at call time. The
@@ -66,6 +70,7 @@ type ProvidersResolver interface {
 // each Chat / Providers / Default call (TTL cache so a slow resolver
 // does not block hot paths).
 type MultiClient struct {
+	discovery *ReasoningDiscovery
 	// Static provider set — built at construction. Used as the seed and
 	// as the fallback when no resolver is wired.
 	staticSubs  map[string]Client
@@ -80,6 +85,7 @@ type MultiClient struct {
 	resolveTTL time.Duration
 
 	mu          sync.RWMutex
+	generation  uint64
 	dynSubs     map[string]Client
 	dynInfos    []ProviderInfo
 	dynDefID    string
@@ -106,13 +112,14 @@ func NewMultiClient(providers []ProviderConfig, defaultProvider string, fallback
 		if strings.TrimSpace(p.APIKey) == "" {
 			continue
 		}
-		sub := New(Config{APIKey: p.APIKey, Model: p.Model, BaseURL: p.BaseURL, TLSInsecure: p.TLSInsecure}, nil, nil)
+		capabilities := providerReasoning(p, nil)
+		sub := New(Config{Provider: p.ID, ReasoningCapabilities: capabilities, APIKey: p.APIKey, Model: p.Model, BaseURL: p.BaseURL, TLSInsecure: p.TLSInsecure}, nil, nil)
 		mc.staticSubs[p.ID] = sub
 		models := p.Models
 		if len(models) == 0 && p.Model != "" {
 			models = []string{p.Model}
 		}
-		mc.staticInfos = append(mc.staticInfos, ProviderInfo{ID: p.ID, Label: p.Label, Model: p.Model, Models: models})
+		mc.staticInfos = append(mc.staticInfos, ProviderInfo{DefaultReasoningEffort: p.DefaultReasoningEffort, ReasoningCapabilities: capabilities, ID: p.ID, Label: p.Label, Model: p.Model, Models: models})
 	}
 	// Sort infos for stable JSON output.
 	sort.Slice(mc.staticInfos, func(i, j int) bool { return mc.staticInfos[i].ID < mc.staticInfos[j].ID })
@@ -129,6 +136,15 @@ func NewMultiClient(providers []ProviderConfig, defaultProvider string, fallback
 	return mc
 }
 
+// EnableReasoningDiscovery is wired at bootstrap, after the settings resolver.
+// Tests and standalone clients can use the offline baseline without network IO.
+func (m *MultiClient) EnableReasoningDiscovery() {
+	m.mu.Lock()
+	m.discovery = &ReasoningDiscovery{}
+	m.dynLoadedAt = time.Time{}
+	m.mu.Unlock()
+}
+
 // SetProvidersResolver wires a dynamic catalog source. Pass nil to clear.
 // The resolver is queried lazily (TTL = 60s) on each Chat / Providers /
 // Default call. A successful empty result disables the static set; only a
@@ -137,6 +153,7 @@ func (m *MultiClient) SetProvidersResolver(r ProvidersResolver) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.resolver = r
+	m.generation++
 	// Invalidate dynamic cache so the next call rebuilds.
 	m.dynSubs = nil
 	m.dynInfos = nil
@@ -159,12 +176,14 @@ func (m *MultiClient) SetResolveTTL(d time.Duration) {
 func (m *MultiClient) activeSubs(ctx context.Context) (map[string]Client, []ProviderInfo, string, bool) {
 	m.mu.RLock()
 	resolver := m.resolver
+	discovery := m.discovery
 	ttl := m.resolveTTL
 	loadedAt := m.dynLoadedAt
 	dynActive := m.dynActive
 	subs := m.dynSubs
 	infos := m.dynInfos
 	defID := m.dynDefID
+	generation := m.generation
 	m.mu.RUnlock()
 
 	if resolver == nil {
@@ -179,6 +198,10 @@ func (m *MultiClient) activeSubs(ctx context.Context) (map[string]Client, []Prov
 		// Soft-fail: fall back to static set, refresh the timestamp so a
 		// flaky resolver doesn't hammer the DB.
 		m.mu.Lock()
+		if generation != m.generation {
+			m.mu.Unlock()
+			return m.staticSubs, m.staticInfos, m.staticDefID, true
+		}
 		m.dynLoadedAt = time.Now()
 		m.dynActive = false
 		m.dynSubs = nil
@@ -188,19 +211,33 @@ func (m *MultiClient) activeSubs(ctx context.Context) (map[string]Client, []Prov
 		return m.staticSubs, m.staticInfos, m.staticDefID, true
 	}
 
+	capabilities := make([]map[string]ReasoningCapability, len(cfgs))
+	var discoveries sync.WaitGroup
+	for i, p := range cfgs {
+		if discovery == nil || strings.TrimSpace(p.APIKey) == "" {
+			capabilities[i] = providerReasoning(p, nil)
+			continue
+		}
+		discoveries.Add(1)
+		go func(i int, p ProviderConfig) {
+			defer discoveries.Done()
+			capabilities[i] = providerReasoning(p, discovery.capabilities(ctx, p))
+		}(i, p)
+	}
+	discoveries.Wait()
 	newSubs := make(map[string]Client, len(cfgs))
 	newInfos := make([]ProviderInfo, 0, len(cfgs))
-	for _, p := range cfgs {
+	for i, p := range cfgs {
 		if strings.TrimSpace(p.APIKey) == "" {
 			continue
 		}
-		sub := New(Config{APIKey: p.APIKey, Model: p.Model, BaseURL: p.BaseURL, TLSInsecure: p.TLSInsecure}, nil, nil)
+		sub := New(Config{Provider: p.ID, ReasoningCapabilities: capabilities[i], APIKey: p.APIKey, Model: p.Model, BaseURL: p.BaseURL, TLSInsecure: p.TLSInsecure}, nil, nil)
 		newSubs[p.ID] = sub
 		models := p.Models
 		if len(models) == 0 && p.Model != "" {
 			models = []string{p.Model}
 		}
-		newInfos = append(newInfos, ProviderInfo{ID: p.ID, Label: p.Label, Model: p.Model, Models: models})
+		newInfos = append(newInfos, ProviderInfo{DefaultReasoningEffort: p.DefaultReasoningEffort, ReasoningCapabilities: capabilities[i], ID: p.ID, Label: p.Label, Model: p.Model, Models: models})
 	}
 	sort.Slice(newInfos, func(i, j int) bool { return newInfos[i].ID < newInfos[j].ID })
 
@@ -215,6 +252,12 @@ func (m *MultiClient) activeSubs(ctx context.Context) (map[string]Client, []Prov
 	}
 
 	m.mu.Lock()
+	// A configuration save can finish while provider metadata is in flight.
+	// Its invalidation must not be overwritten by the older snapshot.
+	if generation != m.generation {
+		m.mu.Unlock()
+		return newSubs, newInfos, resolvedDef, false
+	}
 	m.dynSubs = newSubs
 	m.dynInfos = newInfos
 	m.dynDefID = resolvedDef
@@ -230,6 +273,7 @@ func (m *MultiClient) activeSubs(ctx context.Context) (map[string]Client, []Prov
 // apply immediately rather than on the next 60s tick.
 func (m *MultiClient) Invalidate() {
 	m.mu.Lock()
+	m.generation++
 	m.dynLoadedAt = time.Time{}
 	m.dynActive = false
 	m.dynSubs = nil
@@ -241,10 +285,29 @@ func (m *MultiClient) Invalidate() {
 // Providers returns the currently-configured provider catalog.
 // Read-only; safe to share.
 func (m *MultiClient) Providers() []ProviderInfo {
-	_, infos, _, _ := m.activeSubs(context.Background())
+	return m.ProvidersContext(context.Background())
+}
+
+func (m *MultiClient) ProvidersContext(ctx context.Context) []ProviderInfo {
+	_, infos, _, _ := m.activeSubs(ctx)
 	out := make([]ProviderInfo, len(infos))
-	copy(out, infos)
+	for i, info := range infos {
+		out[i] = info
+		out[i].Models = append([]string(nil), info.Models...)
+		out[i].ReasoningCapabilities = make(map[string]ReasoningCapability, len(info.ReasoningCapabilities))
+		for model, capability := range info.ReasoningCapabilities {
+			capability.Levels = append([]string{}, capability.Levels...)
+			out[i].ReasoningCapabilities[model] = capability
+		}
+	}
 	return out
+}
+
+func (p ProviderInfo) Reasoning(model string) ReasoningCapability {
+	if capability, ok := p.ReasoningCapabilities[model]; ok {
+		return capability
+	}
+	return BuiltinReasoning(p.ID, model)
 }
 
 // Default returns the default (provider, model) pair. Empty strings
@@ -351,10 +414,10 @@ func llmStatusFor(err error) string {
 // shape the /v1/aiops/models response. Lives here so the wire shape is
 // co-located with the router definition.
 type ProviderInfoToWire struct {
-	ID          string   `json:"id"`
-	Label       string   `json:"label"`
-	Models      []string `json:"models"`
-	Model       string   `json:"model,omitempty"`
+	ID     string   `json:"id"`
+	Label  string   `json:"label"`
+	Models []string `json:"models"`
+	Model  string   `json:"model,omitempty"`
 }
 
 // AsWire renders the router's provider catalog into the JSON DTO the
@@ -364,10 +427,10 @@ func (m *MultiClient) AsWire() []ProviderInfoToWire {
 	out := make([]ProviderInfoToWire, 0, len(infos))
 	for _, p := range infos {
 		out = append(out, ProviderInfoToWire{
-			ID:          p.ID,
-			Label:       p.Label,
-			Models:      p.Models,
-			Model:       p.Model,
+			ID:     p.ID,
+			Label:  p.Label,
+			Models: p.Models,
+			Model:  p.Model,
 		})
 	}
 	return out

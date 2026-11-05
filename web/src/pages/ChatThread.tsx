@@ -1,3 +1,4 @@
+import { modelSelectionForCatalog } from '@/api/chat';
 import { useAssistantPage } from '@/lib/assistantPage';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
@@ -89,10 +90,10 @@ export default function ChatThreadPage() {
   // route use the live server catalog default.
   const [catalogDefault, setCatalogDefault] = useState<ModelSelection | null>(null);
   const persistedSessionModel = sessionMeta?.provider && sessionMeta?.model
-    ? { provider: sessionMeta.provider, model: sessionMeta.model }
+    ? { provider: sessionMeta.provider, model: sessionMeta.model, reasoning_effort: sessionMeta.reasoning_effort }
     : null;
   const [pendingSessionModel, setPendingSessionModel] = useState<ModelSelection | null>(null);
-  const selectedModel = pendingSessionModel ?? persistedSessionModel ?? catalogDefault;
+  const selectedModel = modelSelectionForCatalog(pendingSessionModel ?? persistedSessionModel ?? catalogDefault, providers);
   // Web-search toggle is per-thread (not per-message): once a user
   // enables it for a topic, every follow-up turn until they disable it
   // also exposes the skill. Defaults ON because SearXNG (default provider)
@@ -106,7 +107,7 @@ export default function ChatThreadPage() {
         if (cancelled) return;
         setProviders(cat.providers ?? []);
         if (cat.default && cat.default.provider) {
-          setCatalogDefault({ provider: cat.default.provider, model: cat.default.model || '' });
+          setCatalogDefault({ ...cat.default, reasoning_effort: cat.default.reasoning_effort || '' });
         }
       })
       .catch(() => {
@@ -123,7 +124,7 @@ export default function ChatThreadPage() {
 
   useEffect(() => {
     if (!pendingSessionModel || !persistedSessionModel) return;
-    if (pendingSessionModel.provider === persistedSessionModel.provider && pendingSessionModel.model === persistedSessionModel.model) {
+    if (pendingSessionModel.provider === persistedSessionModel.provider && pendingSessionModel.model === persistedSessionModel.model && (pendingSessionModel.reasoning_effort || '') === (persistedSessionModel.reasoning_effort || '')) {
       setPendingSessionModel(null);
     }
   }, [pendingSessionModel, persistedSessionModel]);
@@ -131,7 +132,7 @@ export default function ChatThreadPage() {
   async function handleSessionModelChange(selection: ModelSelection) {
     setPendingSessionModel(selection);
     try {
-      await updateSessionModel(sessionId, selection.provider, selection.model);
+      await updateSessionModel(sessionId, selection.provider, selection.model, selection.reasoning_effort);
       invalidateChatSessions();
     } catch (err) {
       setPendingSessionModel(null);
@@ -479,6 +480,7 @@ export default function ChatThreadPage() {
           mentions,
           provider: selectedModel?.provider,
           model: selectedModel?.model,
+          reasoning_effort: selectedModel?.reasoning_effort,
           attachmentIds: uploadedAttachments.map((attachment) => attachment.id),
           webSearchEnabled,
           locale,

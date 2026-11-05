@@ -1,5 +1,7 @@
 import { useAssistantPage } from '@/lib/assistantPage';
 import { Input, Label } from '@/components/ui';
+import { listModels, type ReasoningCapability } from '@/api/chat';
+import { ReasoningSettings } from './ReasoningSettings';
 // LLM 模型配置页 — 每个 provider 一张子卡，含 API key / Base URL /
 // 模型列表 / 默认模型。改完保存自动让 manager 失效缓存（≤1 秒生效）。
 //
@@ -17,6 +19,7 @@ import {
   testLLMConfiguration,
   type LLMConfigurationProbeResult,
   type SystemSetting,
+  type ReasoningOverride,
 } from '@/api/settings';
 import { Button, Card, Chip } from '@/components/ui';
 import { ProviderIcon } from '@/components/icons/Provider';
@@ -27,6 +30,7 @@ import { useI18n } from '@/i18n/locale';
 type LLMProviderID = 'openai' | 'anthropic' | 'zhipu' | 'gemini' | 'deepseek' | 'kimi' | 'minimax' | 'xiaomi' | 'custom';
 
 type LLMProviderForm = {
+  reasoning_overrides: Record<string, ReasoningOverride>;
   tls_insecure: boolean;
   api_key: string;
   base_url: string;
@@ -212,6 +216,7 @@ function orderedProviders(locale: string): LLMProviderMeta[] {
 }
 
 const emptyLLMForm: LLMProviderForm = {
+  reasoning_overrides: {},
   tls_insecure: false,
   api_key: '',
   base_url: '',
@@ -321,6 +326,8 @@ function LLMProviderCard({ meta, initialSettings }: { meta: LLMProviderMeta; ini
   const [savedOk, setSavedOk] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [newModel, setNewModel] = useState('');
+  const [capabilities, setCapabilities] = useState<Record<string, ReasoningCapability>>({});
+  const [capabilityError, setCapabilityError] = useState(false);
   const [modelListTouched, setModelListTouched] = useState(false);
   const [probe, setProbe] = useState<LLMProbeState>({ kind: 'idle' });
   const probeVersion = useRef(0);
@@ -330,8 +337,9 @@ function LLMProviderCard({ meta, initialSettings }: { meta: LLMProviderMeta; ini
     setErr(null);
     try {
       const items = initial ?? (await listSettings('llm')).items as SystemSetting[];
-      const next: LLMProviderForm = { ...emptyLLMForm, models: [] };
+      const next: LLMProviderForm = { ...emptyLLMForm, models: [], reasoning_overrides: {} };
       for (const it of items) {
+        if (it.key === `${meta.id}_reasoning_overrides` && it.value) next.reasoning_overrides = JSON.parse(it.value);
         if (meta.custom && it.key === 'custom_tls_insecure') next.tls_insecure = it.value === 'true';
         if (it.key === meta.keyBaseURL) next.base_url = it.value ?? '';
         if (it.key === meta.keyDefaultModel) next.default_model = it.value ?? '';
@@ -377,7 +385,8 @@ function LLMProviderCard({ meta, initialSettings }: { meta: LLMProviderMeta; ini
     draft.api_key !== server.api_key ||
     draft.base_url !== server.base_url ||
     draft.default_model !== server.default_model ||
-    JSON.stringify(draft.models) !== JSON.stringify(server.models);
+    JSON.stringify(draft.models) !== JSON.stringify(server.models) ||
+    JSON.stringify(draft.reasoning_overrides) !== JSON.stringify(server.reasoning_overrides);
 
   const update = <K extends keyof LLMProviderForm>(k: K, v: LLMProviderForm[K]) => {
     setSavedOk(false);
@@ -426,6 +435,7 @@ function LLMProviderCard({ meta, initialSettings }: { meta: LLMProviderMeta; ini
   };
 
   const signatureFor = (form: LLMProviderForm) => JSON.stringify([
+    form.reasoning_overrides,
     form.tls_insecure,
     meta.id,
     form.api_key,
@@ -448,10 +458,13 @@ function LLMProviderCard({ meta, initialSettings }: { meta: LLMProviderMeta; ini
         base_url: draft.base_url.trim(),
         default_model: draft.default_model.trim(),
         models: draft.models,
+        reasoning_overrides: draft.reasoning_overrides,
         ...(meta.custom ? { tls_insecure: draft.tls_insecure } : {}),
       });
       // Do not let an older request overwrite edits made while it was running.
       if (probeVersion.current !== requestVersion) return;
+      setCapabilities(result.reasoning_capabilities ?? {});
+      setCapabilityError(false);
       if (result.models.length === 0) {
         setModelFetchMessage(tr('服务未返回任何模型，已保留原列表。', 'The provider returned no models; the existing list is unchanged.'));
         return;
@@ -488,6 +501,7 @@ function LLMProviderCard({ meta, initialSettings }: { meta: LLMProviderMeta; ini
         base_url: draft.base_url.trim(),
         default_model: draft.default_model.trim(),
         models: draft.models,
+        reasoning_overrides: draft.reasoning_overrides,
         ...(meta.custom ? { tls_insecure: draft.tls_insecure } : {}),
       });
       if (probeVersion.current !== requestVersion) return null;
@@ -529,6 +543,7 @@ function LLMProviderCard({ meta, initialSettings }: { meta: LLMProviderMeta; ini
         base_url: snapshot.base_url.trim(),
         default_model: snapshot.default_model.trim(),
         models: snapshot.models,
+        reasoning_overrides: snapshot.reasoning_overrides,
         ...(meta.custom ? { tls_insecure: snapshot.tls_insecure } : {}),
       });
       if (probeVersion.current !== requestVersion) return;
@@ -622,6 +637,20 @@ function LLMProviderCard({ meta, initialSettings }: { meta: LLMProviderMeta; ini
               </div>
             </details>
           )}
+
+          <ReasoningSettings
+            models={draft.models}
+            overrides={draft.reasoning_overrides}
+            capabilities={capabilities}
+            loadError={capabilityError}
+            onOpen={() => {
+              void listModels().then((catalog) => {
+                setCapabilities(catalog.providers.find((provider) => provider.id === meta.id)?.reasoning_capabilities ?? {});
+                setCapabilityError(false);
+              }).catch(() => setCapabilityError(true));
+            }}
+            onChange={(value) => update('reasoning_overrides', value)}
+          />
 
           <div>
             <div className="mb-2 flex items-center justify-between gap-2">
