@@ -1,0 +1,18 @@
+<!DOCTYPE html><html class="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0"><div id="root"></div><script type="module">
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import { MemoryRouter } from 'react-router-dom';
+import { AgentTraceDetail } from '/src/components/agent-observability/AgentTraceDetail.tsx';
+import '/src/styles/index.css';
+import '/src/pages/AgentObservability.css';
+const usage={input_tokens:42,output_tokens:8,total_tokens:50,cached_tokens:null,reported_cost:null,conflict:false,complete:true};
+const identity={service_name:'synthetic-agent',service_namespace:'test',environment:'test'};
+const base={parent_span_id:'',name:'Synthetic model call',kind:'llm',sdk:'otel',identity,start:'2026-11-05T00:00:00Z',duration_ms:100,status:'ok',model:'very-long-model-name-for-reasoning-layout-2026-11-05',provider:'fixture',session_id:'',input:{state:'not_recorded'},output:{state:'not_recorded'},usage,scope:{name:'fixture',version:'1'},resource:{},events:[],links:[],issues:[],raw:{}};
+const trace={trace_id:'1'.repeat(32),runs:[],issues:[],steps:[
+  {...base,span_id:'1'.repeat(16),attributes:{'ongrid.llm.reasoning_effort':'high'}},
+  {...base,span_id:'2'.repeat(16),attributes:{'ongrid.llm.reasoning_effort':'default'}},
+  {...base,span_id:'3'.repeat(16),attributes:{}},
+]};
+function Demo(){const [selected,setSelected]=React.useState(trace.steps[0].span_id);return React.createElement('main',{style:{padding:16}},React.createElement(AgentTraceDetail,{trace,selectedSpanID:selected,onSelectSpan:setSelected,onSelectRun:()=>{}}));}
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(MemoryRouter,null,React.createElement(Demo)));
+</script></body></html>

@@ -446,6 +446,12 @@ func (c *openaiClient) Chat(ctx context.Context, req ChatReq) (result *ChatResp,
 	if err != nil {
 		return nil, fmt.Errorf("llm: build request: %w", err)
 	}
+	effort := req.ReasoningEffort
+	if effort == "" {
+		effort = "default"
+	}
+	// Record the request choice, not an inferred provider compute budget.
+	span.SetAttributes(attribute.String("ongrid.llm.reasoning_effort", effort))
 	if !callbackOwned {
 		tracing.RecordAgentContent(span, "input.value", sdkReq.Messages)
 	}

@@ -174,6 +174,16 @@ binary leaves the additive column intact; older binaries ignore the preference.
 
 ## Validation
 
+Each model span records the request choice in `ongrid.llm.reasoning_effort`,
+including `default` when no explicit control is sent. Agent trace inspection
+shows this value in the execution tree and model-step header. It describes the
+request, not the provider's actual compute budget. Historical spans without the
+attribute display `Not recorded`; current session settings are never used to
+backfill old runs. The existing span attributes carry this metadata without an
+API or database schema change.
+`web/e2e/agent-reasoning.browser.mjs` checks trace detail geometry in four viewport
+widths, both locales and themes; its fixture covers long model names.
+
 The regression suite covers capability rejection, Chat Completions and Responses
 wire formats, session persistence and defaults, runtime/worker propagation, and
 model-specific picker options. `web/e2e/reasoning-picker.browser.mjs` checks actual

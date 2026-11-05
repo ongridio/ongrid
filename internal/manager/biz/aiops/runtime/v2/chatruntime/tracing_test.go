@@ -235,6 +235,11 @@ func testAgentTracingRealGraphModelAndTool(t *testing.T, capture, large bool) {
 		t.Fatalf("normalize: trace=%v err=%v", normalized, err)
 	}
 	run := normalized.Runs[0]
+	for _, step := range normalized.Steps {
+		if step.Kind == "llm" && step.Attributes["ongrid.llm.reasoning_effort"] != "default" {
+			t.Errorf("model request effort lost through callback and normalization: %v", step.Attributes["ongrid.llm.reasoning_effort"])
+		}
+	}
 	if run.Usage.TotalTokens == nil || *run.Usage.TotalTokens != 100 || run.Usage.Conflict || run.ContentAvailable != capture {
 		t.Fatalf("official callback must preserve the capture policy and exactly 100 tokens: %+v", run)
 	}
