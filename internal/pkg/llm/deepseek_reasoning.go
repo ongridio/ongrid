@@ -15,7 +15,8 @@ import (
 type deepSeekReasoningKey struct{}
 
 func needsDeepSeekReasoningCompatibility(req openai.ChatCompletionRequest) bool {
-	if len(req.Tools) == 0 || !strings.Contains(strings.ToLower(req.Model), "deepseek") {
+	name := strings.ToLower(req.Model)
+	if len(req.Tools) == 0 || (!strings.Contains(name, "deepseek") && !strings.HasPrefix(name, "mimo-")) {
 		return false
 	}
 	for _, m := range req.Messages {
@@ -26,7 +27,7 @@ func needsDeepSeekReasoningCompatibility(req openai.ChatCompletionRequest) bool 
 	return false
 }
 
-// deepSeekReasoningTransport 弥补 SDK string+omitempty 无法发送空字段的问题。
+// deepSeekReasoningTransport 弥补 DeepSeek/MiMo 下 SDK string+omitempty 无法发送空字段的问题。
 // 原模型输出原样回传；历史缺失值只发送空字符串，不伪造思考内容。
 type deepSeekReasoningTransport struct {
 	base http.RoundTripper

@@ -93,6 +93,29 @@ type modelCapabilityCatalog interface {
 
 func (s *Service) SetModelCatalog(catalog modelCapabilityCatalog) { s.modelCatalog = catalog }
 
+func (s *Service) modelProviders(ctx context.Context) []llm.ProviderInfo {
+	if catalog, ok := s.modelCatalog.(interface {
+		ProvidersContext(context.Context) []llm.ProviderInfo
+	}); ok {
+		return catalog.ProvidersContext(ctx)
+	}
+	return s.modelCatalog.Providers()
+}
+
+func (s *Service) validateReasoningEffort(ctx context.Context, provider, model, effort string) error {
+	if effort == "" {
+		return nil
+	}
+	if s.modelCatalog != nil {
+		for _, entry := range s.modelProviders(ctx) {
+			if entry.ID == provider {
+				return entry.Reasoning(model).Validate(provider, model, effort)
+			}
+		}
+	}
+	return llm.ValidateReasoningEffort(provider, model, effort)
+}
+
 func (s *Service) UploadAttachment(ctx context.Context, caller Caller, sessionID, name, mimeType string, size int64, src io.Reader) (*model.Attachment, error) {
 	if caller.IsViewer() {
 		return nil, errs.ErrForbidden
@@ -173,8 +196,9 @@ func (s *Service) ListMutatingProposals(ctx context.Context, caller Caller, f bi
 // the signature stays additive (callers don't break when a new field
 // like RelatedIncidentID lands).
 type CreateSessionInput struct {
-	PageContext *model.PageContext
-	APMSource   *model.APMSourceTarget
+	ReasoningEffort *string
+	PageContext     *model.PageContext
+	APMSource       *model.APMSourceTarget
 
 	Title             string
 	Scope             []string
@@ -230,6 +254,27 @@ func (s *Service) CreateSession(ctx context.Context, caller Caller, in CreateSes
 	if (provider == "") != (selectedModel == "") {
 		return nil, fmt.Errorf("%w: provider and model must be supplied together", errs.ErrInvalid)
 	}
+	effort := ""
+	if s.modelCatalog != nil {
+		if provider == "" {
+			provider, selectedModel = s.modelCatalog.Default()
+		}
+		if in.ReasoningEffort == nil {
+
+			for _, entry := range s.modelProviders(ctx) {
+				if entry.ID == provider {
+					effort = entry.DefaultEffort(selectedModel)
+					break
+				}
+			}
+		}
+	}
+	if in.ReasoningEffort != nil {
+		effort = *in.ReasoningEffort
+	}
+	if err := s.validateReasoningEffort(ctx, provider, selectedModel, effort); err != nil {
+		return nil, fmt.Errorf("%w: %v", errs.ErrInvalid, err)
+	}
 	// The current direct-runtime compatibility path is v3. Production uses
 	// the router's validated default; no caller-facing version override yet.
 	version := chatruntime.V3
@@ -243,6 +288,7 @@ func (s *Service) CreateSession(ctx context.Context, caller Caller, in CreateSes
 		}
 	}
 	sess := &model.Session{
+		ReasoningEffort:   effort,
 		RuntimeVersion:    string(version),
 		UserID:            caller.UserID,
 		Title:             title,
@@ -353,7 +399,7 @@ func (s *Service) RenameSession(ctx context.Context, caller Caller, sessionID st
 // UpdateSessionModel changes the persisted LLM route for one owned session.
 // Provider/model form a pair; accepting only one would create an ambiguous
 // route and could send a model slug to the wrong upstream.
-func (s *Service) UpdateSessionModel(ctx context.Context, caller Caller, sessionID string, provider string, selectedModel string) error {
+func (s *Service) UpdateSessionModel(ctx context.Context, caller Caller, sessionID string, provider string, selectedModel string, reasoningEffort string) error {
 	if _, err := s.GetSession(ctx, caller, sessionID); err != nil {
 		return err
 	}
@@ -362,7 +408,10 @@ func (s *Service) UpdateSessionModel(ctx context.Context, caller Caller, session
 	if (provider == "") != (selectedModel == "") {
 		return fmt.Errorf("%w: provider and model must be supplied together", errs.ErrInvalid)
 	}
-	return s.sessions.UpdateSessionModel(ctx, sessionID, provider, selectedModel)
+	if err := s.validateReasoningEffort(ctx, provider, selectedModel, reasoningEffort); err != nil {
+		return fmt.Errorf("%w: %v", errs.ErrInvalid, err)
+	}
+	return s.sessions.UpdateSessionModel(ctx, sessionID, provider, selectedModel, reasoningEffort)
 }
 
 // PostMessage runs one user turn through the agent and returns the final
@@ -438,6 +487,11 @@ func (s *Service) runChat(ctx context.Context, caller Caller, sessionID string, 
 	// Empty legacy session fields deliberately fall through to the router's
 	// deployment-wide default.
 	opts = resolveSessionRunOptions(sess, opts)
+	if opts.ReasoningEffort != nil {
+		if err := s.validateReasoningEffort(ctx, opts.Provider, opts.Model, *opts.ReasoningEffort); err != nil {
+			return nil, &TurnRejectedError{fmt.Errorf("%w: %v", errs.ErrInvalid, err)}
+		}
+	}
 	if err := s.validateImageContext(ctx, sessionID, &opts); err != nil {
 		return nil, &TurnRejectedError{err}
 	}
@@ -500,6 +554,10 @@ func resolveSessionRunOptions(sess *model.Session, opts chatprotocol.RunOptions)
 	}
 	if strings.TrimSpace(opts.Model) == "" && sess.Model != nil {
 		opts.Model = strings.TrimSpace(*sess.Model)
+	}
+	if opts.ReasoningEffort == nil && sess.Provider != nil && sess.Model != nil && opts.Provider == *sess.Provider && opts.Model == *sess.Model {
+		effort := sess.ReasoningEffort
+		opts.ReasoningEffort = &effort
 	}
 	return opts
 }
@@ -588,6 +646,9 @@ func (s *Service) runGraph(ctx context.Context, sess *model.Session, content str
 		Locale:           opts.Locale,
 		Attachments:      opts.Attachments,
 		Emit:             graphEmit,
+	}
+	if opts.ReasoningEffort != nil {
+		req.ReasoningEffort = *opts.ReasoningEffort
 	}
 	reply, err := s.runtime.Handle(ctx, req)
 	if err != nil {

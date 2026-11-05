@@ -114,6 +114,7 @@ func TestAgentTool_Sync_HappyPath(t *testing.T) {
 	tool := NewAgentTool(sp, fakeSubagentRegistry{names: map[string]bool{"general-purpose": true}}, nil)
 
 	ctx := basetool.WithSessionID(context.Background(), "parent-session-1")
+	ctx = basetool.WithReasoningEffort(ctx, "high")
 	out, err := tool.InvokableRun(ctx,
 		`{"description":"check disk","subagent_type":"general-purpose","prompt":"please check"}`)
 	if err != nil {
@@ -134,6 +135,9 @@ func TestAgentTool_Sync_HappyPath(t *testing.T) {
 	}
 	if sp.lastSpawn.AgentName != "general-purpose" {
 		t.Errorf("forwarded agent name = %q", sp.lastSpawn.AgentName)
+	}
+	if sp.lastSpawn.ReasoningEffort != "high" {
+		t.Fatalf("worker lost effort: %+v", sp.lastSpawn)
 	}
 	if sp.lastSpawn.ParentSession != "parent-session-1" {
 		t.Errorf("forwarded parent session = %q", sp.lastSpawn.ParentSession)

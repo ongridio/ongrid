@@ -52,6 +52,7 @@ type fakeService struct {
 	lastCreateModel    string
 	lastUpdateProvider string
 	lastUpdateModel    string
+	lastUpdateEffort   string
 }
 
 func TestValidateImageAttachments(t *testing.T) {
@@ -124,9 +125,10 @@ func (f *fakeService) RenameSession(_ context.Context, c svc.Caller, _, _ string
 	return f.closeErr
 }
 
-func (f *fakeService) UpdateSessionModel(_ context.Context, _ svc.Caller, _, provider, selectedModel string) error {
+func (f *fakeService) UpdateSessionModel(_ context.Context, _ svc.Caller, _, provider, selectedModel string, reasoningEffort string) error {
 	f.lastUpdateProvider = provider
 	f.lastUpdateModel = selectedModel
+	f.lastUpdateEffort = reasoningEffort
 	return nil
 }
 func (f *fakeService) PostMessage(_ context.Context, c svc.Caller, _ string, content string) (*chatprotocol.Reply, error) {
@@ -212,13 +214,13 @@ func TestUpdateSessionModel(t *testing.T) {
 	f := &fakeService{}
 	h := NewHandler(f)
 	r := buildRouter(h, tenantctx.Tenant{UserID: 1, Role: "user"})
-	req := httptest.NewRequest(http.MethodPatch, "/v1/chat/sessions/session-1", strings.NewReader(`{"provider":"deepseek","model":"deepseek-chat"}`))
+	req := httptest.NewRequest(http.MethodPatch, "/v1/chat/sessions/session-1", strings.NewReader(`{"provider":"deepseek","model":"deepseek-v4-flash","reasoning_effort":"high"}`))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("code = %d, body = %s", w.Code, w.Body.String())
 	}
-	if f.lastUpdateProvider != "deepseek" || f.lastUpdateModel != "deepseek-chat" {
+	if f.lastUpdateProvider != "deepseek" || f.lastUpdateModel != "deepseek-v4-flash" || f.lastUpdateEffort != "high" {
 		t.Fatalf("update route = %q/%q", f.lastUpdateProvider, f.lastUpdateModel)
 	}
 }

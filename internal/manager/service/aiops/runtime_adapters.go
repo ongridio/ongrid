@@ -49,14 +49,15 @@ type WorkerSpawner struct {
 
 func (s WorkerSpawner) SpawnWorker(ctx context.Context, req aiopstools.SpawnWorkerRequest) (*aiopstools.WorkerHandle, error) {
 	w, err := s.Runtime.SpawnWorker(ctx, contract.SpawnRequest{
-		AgentName:     req.AgentName,
-		Prompt:        req.Prompt,
-		Background:    req.Background,
-		ParentSession: req.ParentSession,
-		ParentEmit:    contract.EmitFromContext(ctx),
-		Locale:        req.Locale,
-		Provider:      req.Provider,
-		Model:         req.Model,
+		AgentName:       req.AgentName,
+		Prompt:          req.Prompt,
+		Background:      req.Background,
+		ParentSession:   req.ParentSession,
+		ParentEmit:      contract.EmitFromContext(ctx),
+		Locale:          req.Locale,
+		Provider:        req.Provider,
+		Model:           req.Model,
+		ReasoningEffort: req.ReasoningEffort,
 	})
 	if err != nil {
 		return nil, err

@@ -669,6 +669,7 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (result *Reply, ret
 	// ("openai"), and installs without an OpenAI key see specialists
 	// fail with `provider "openai" not configured`.
 	ctx = basetool.WithLLMChoice(ctx, req.Provider, req.Model)
+	ctx = basetool.WithReasoningEffort(ctx, req.ReasoningEffort)
 	// HLD-019: attach the session id so cloud_bash can resolve a per-session
 	// agent workspace at exec time (files persist across commands in a session
 	// instead of running in a throwaway temp dir).
@@ -1215,6 +1216,9 @@ func chatModelOpts(req *Request) []model.Option {
 	}
 	if m := strings.TrimSpace(req.Model); m != "" {
 		opts = append(opts, model.WithModel(m))
+	}
+	if req.ReasoningEffort != "" {
+		opts = append(opts, llm.WithReasoningEffort(req.ReasoningEffort))
 	}
 	return opts
 }

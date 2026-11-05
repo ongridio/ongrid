@@ -50,10 +50,11 @@ type WorkerSpawner interface {
 // kept generic — the tools package doesn't know about
 // chatruntime.Event, so the wiring shim translates between the two.
 type SpawnWorkerRequest struct {
-	AgentName     string
-	Prompt        string
-	Background    bool
-	ParentSession string
+	ReasoningEffort string
+	AgentName       string
+	Prompt          string
+	Background      bool
+	ParentSession   string
 	// Locale carries the coordinator's UI locale ("en", "zh-CN", ...)
 	// down to the sub-agent so it answers in the same language. Empty
 	// = no directive (back-compat for callers that don't have a UI
@@ -316,12 +317,13 @@ func (t *AgentTool) InvokableRun(ctx context.Context, argsJSON string, opts ...b
 	// stays false — see schema comment for why we don't expose async
 	// to the coordinator anymore.
 	w, err := t.spawner.SpawnWorker(ctx, SpawnWorkerRequest{
-		AgentName:     args.SubagentType,
-		Prompt:        args.Prompt,
-		ParentSession: parentSession,
-		Locale:        basetool.LocaleFromContext(ctx),
-		Provider:      basetool.LLMProviderFromContext(ctx),
-		Model:         basetool.LLMModelFromContext(ctx),
+		AgentName:       args.SubagentType,
+		Prompt:          args.Prompt,
+		ParentSession:   parentSession,
+		Locale:          basetool.LocaleFromContext(ctx),
+		Provider:        basetool.LLMProviderFromContext(ctx),
+		Model:           basetool.LLMModelFromContext(ctx),
+		ReasoningEffort: basetool.ReasoningEffortFromContext(ctx),
 	})
 	if err != nil {
 		return "", fmt.Errorf("AgentTool: spawn: %w", err)

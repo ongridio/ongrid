@@ -95,8 +95,9 @@ type Emit func(Event)
 
 // Request bundles every per-call input the runtime needs.
 type Request struct {
-	SessionID string
-	UserID    uint64
+	ReasoningEffort string
+	SessionID       string
+	UserID          uint64
 	// Role is the caller's system role (admin | user | viewer).
 	// gates the toolbag against this — viewer drops Class!=read so the
 	// LLM cannot reach mutating tools no matter what the persona allows.
@@ -182,6 +183,7 @@ type Worker struct {
 // SpawnRequest describes a worker to spawn. See AgentTool.InvokableRun
 // for the LLM-facing argument shape that produces this struct.
 type SpawnRequest struct {
+	ReasoningEffort string
 	// AgentName is the persona name (frontmatter `name`). Must be
 	// resolvable through the Runtime's AgentRegistry.
 	AgentName string

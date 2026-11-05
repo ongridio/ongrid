@@ -149,7 +149,7 @@ describe('global assistant', () => {
     expect(model).toHaveTextContent('pro');
     expect(panel.getByLabelText('你的问题')).toHaveValue('follow up');
     await pick('fast');
-    expect(updateSessionModel).toHaveBeenLastCalledWith('s1', 'provider', 'fast');
+    expect(updateSessionModel).toHaveBeenLastCalledWith('s1', 'provider', 'fast', undefined);
     expect(model).toHaveTextContent('fast');
     fireEvent.click(panel.getByRole('button', { name: '发送' }));
     expect(vi.mocked(streamMessage).mock.lastCall?.slice(0, 2)).toEqual(['s1', 'follow up']);

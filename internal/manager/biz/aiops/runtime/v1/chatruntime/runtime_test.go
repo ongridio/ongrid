@@ -541,6 +541,6 @@ func (f *fakeTool) InvokableRun(_ context.Context, _ string, _ ...basetool.Invok
 }
 
 // Compatibility with the current shared repository contract; v1 never calls this method.
-func (r *memSessions) UpdateSessionModel(context.Context, string, string, string) error {
+func (r *memSessions) UpdateSessionModel(context.Context, string, string, string, string) error {
 	return errs.ErrNotWiredYet
 }

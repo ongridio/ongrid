@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -58,12 +59,13 @@ const (
 // persisted only by LLMConfigurationService.Save; it must never be logged or
 // copied into LLMProbeResult.
 type LLMProbeInput struct {
-	TLSInsecure  bool     `json:"tls_insecure"`
-	Provider     string   `json:"provider"`
-	APIKey       string   `json:"api_key"`
-	BaseURL      string   `json:"base_url"`
-	DefaultModel string   `json:"default_model"`
-	Models       []string `json:"models"`
+	ReasoningOverrides map[string]llm.ReasoningOverride `json:"reasoning_overrides,omitempty"`
+	TLSInsecure        bool                             `json:"tls_insecure"`
+	Provider           string                           `json:"provider"`
+	APIKey             string                           `json:"api_key"`
+	BaseURL            string                           `json:"base_url"`
+	DefaultModel       string                           `json:"default_model"`
+	Models             []string                         `json:"models"`
 }
 
 // LLMProbeResult is a stable, language-neutral validation result. The SPA maps
@@ -103,19 +105,21 @@ func NewLLMConfigProbe(defaults map[string]EnvProviderDefaults) *LLMConfigProbe 
 }
 
 type validatedLLMConfig struct {
-	tlsInsecure      bool
-	provider         string
-	apiKey           string
-	storedBaseURL    string
-	effectiveBaseURL string
-	defaultModel     string
-	models           []string
+	reasoningOverrides map[string]llm.ReasoningOverride
+	tlsInsecure        bool
+	provider           string
+	apiKey             string
+	storedBaseURL      string
+	effectiveBaseURL   string
+	defaultModel       string
+	models             []string
 }
 
 // LLMConfigurationService binds the exact draft that was probed to the exact
 // tuple persisted by Service.SetBatch. This server-side boundary prevents a UI
 // or API client from validating one value and then saving a different one.
 type LLMConfigurationService struct {
+	catalog  llmModelCatalog
 	probe    *LLMConfigProbe
 	settings *Service
 }
@@ -176,6 +180,13 @@ func (s *LLMConfigurationService) Save(ctx context.Context, in LLMProbeInput) (L
 		{Category: settingmodel.CategoryLLM, Key: keys.defaultModel, Value: cfg.defaultModel},
 		{Category: settingmodel.CategoryLLM, Key: keys.models, Value: modelsJSON},
 	}
+	if cfg.reasoningOverrides != nil {
+		raw, err := json.Marshal(cfg.reasoningOverrides)
+		if err != nil {
+			return result, fmt.Errorf("encode reasoning overrides: %w", err)
+		}
+		rows = append(rows, settingmodel.Setting{Category: settingmodel.CategoryLLM, Key: cfg.provider + "_reasoning_overrides", Value: string(raw)})
+	}
 	if cfg.provider == settingmodel.LLMProviderCustom {
 		rows = append(rows, settingmodel.Setting{
 			Category: settingmodel.CategoryLLM,
@@ -218,11 +229,12 @@ func (p *LLMConfigProbe) validateInput(in LLMProbeInput, operational bool) (vali
 	defaultModel := strings.TrimSpace(in.DefaultModel)
 	result := LLMProbeResult{Code: LLMProbeCodeOK, Provider: provider, Model: defaultModel}
 	cfg := validatedLLMConfig{
-		tlsInsecure:   in.TLSInsecure,
-		provider:      provider,
-		apiKey:        in.APIKey,
-		storedBaseURL: strings.TrimSpace(in.BaseURL),
-		defaultModel:  defaultModel,
+		reasoningOverrides: in.ReasoningOverrides,
+		tlsInsecure:        in.TLSInsecure,
+		provider:           provider,
+		apiKey:             in.APIKey,
+		storedBaseURL:      strings.TrimSpace(in.BaseURL),
+		defaultModel:       defaultModel,
 	}
 
 	if in.TLSInsecure && provider != settingmodel.LLMProviderCustom {
@@ -232,6 +244,10 @@ func (p *LLMConfigProbe) validateInput(in LLMProbeInput, operational bool) (vali
 	}
 	if !isKnownLLMProvider(provider) {
 		result.Code = LLMProbeCodeUnsupportedProvider
+		return cfg, result, false
+	}
+	if err := llm.ValidateReasoningOverrides(provider, in.ReasoningOverrides); err != nil {
+		result.Code, result.Detail = LLMProbeCodeInvalidRequest, err.Error()
 		return cfg, result, false
 	}
 	if operational && strings.TrimSpace(in.APIKey) == "" {
@@ -330,11 +346,13 @@ func (p *LLMConfigProbe) probeValidated(ctx context.Context, cfg validatedLLMCon
 	}
 	for _, modelName := range models {
 		_, err := p.call(probeCtx, llm.Config{
-			TLSInsecure: cfg.tlsInsecure,
-			APIKey:      cfg.apiKey,
-			Model:       modelName,
-			BaseURL:     cfg.effectiveBaseURL,
-			Timeout:     p.timeout,
+			Provider:              cfg.provider,
+			ReasoningCapabilities: map[string]llm.ReasoningCapability{modelName: llm.ResolveReasoning(cfg.provider, modelName, nil, cfg.reasoningOverrides)},
+			TLSInsecure:           cfg.tlsInsecure,
+			APIKey:                cfg.apiKey,
+			Model:                 modelName,
+			BaseURL:               cfg.effectiveBaseURL,
+			Timeout:               p.timeout,
 		})
 		if err != nil {
 			result.Model = modelName

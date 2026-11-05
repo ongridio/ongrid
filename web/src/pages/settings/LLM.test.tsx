@@ -52,6 +52,40 @@ beforeEach(() => {
 });
 
 describe('SettingsLLM model discovery and custom TLS', () => {
+  it('saves model capability overrides and can return to automatic discovery', async () => {
+    let rows = baseRows();
+    const saved: unknown[] = [];
+    server.use(
+      http.get('/api/v1/system-settings', () => HttpResponse.json({ items: rows, total: rows.length })),
+      http.get('/api/v1/system-settings/llm/openai_api_key/reveal', () => HttpResponse.json({ value: 'secret-key' })),
+      http.get('/api/v1/aiops/models', () => HttpResponse.json({ providers: [{ id: 'openai', reasoning_capabilities: { 'gpt-test': { levels: ['low', 'high'], mode: 'effort', source: 'fallback' } } }] })),
+      http.post('/api/v1/integrations/llm/validate-and-save', async ({ request }) => {
+        const body = await request.json() as { reasoning_overrides: Record<string, unknown> };
+        saved.push(body.reasoning_overrides);
+        rows = [...baseRows(), { category: 'llm', key: 'openai_reasoning_overrides', value: JSON.stringify(body.reasoning_overrides), sensitive: false, updated_at: now }];
+        return HttpResponse.json({ valid: true, saved: true, code: 'ok' });
+      }),
+    );
+    await renderPage();
+    const { controls } = await openAIControls();
+    await userEvent.click(controls.getByText('高级 · 推理能力'));
+    expect(await controls.findByText(/厂商最新默认规则 · low, high/)).toBeInTheDocument();
+    await userEvent.click(controls.getByRole('checkbox', { name: '覆盖 gpt-test' }));
+    const input = controls.getByRole('textbox', { name: 'gpt-test 可用档位' });
+    await userEvent.clear(input);
+    await userEvent.type(input, 'low,ultra');
+    await userEvent.click(controls.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(saved).toEqual([{ 'gpt-test': { levels: ['low', 'ultra'], mode: '' } }]));
+    await controls.findByRole('button', { name: '已保存' });
+    const summary = controls.getByText('高级 · 推理能力');
+    if (!(summary.closest('details') as HTMLDetailsElement).open) await userEvent.click(summary);
+    const checkbox = await controls.findByRole('checkbox', { name: '覆盖 gpt-test' });
+    await waitFor(() => expect(checkbox).toBeChecked());
+    await userEvent.click(checkbox);
+    await waitFor(() => expect(checkbox).not.toBeChecked());
+    await userEvent.click(controls.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(saved[1]).toEqual({}));
+  });
   it('fetches models from the unsaved draft without saving', async () => {
     let body: Record<string, unknown> | null = null;
     let saves = 0;
@@ -175,6 +209,7 @@ describe('SettingsLLM configuration probe', () => {
       base_url: '',
       default_model: 'gpt-test',
       models: ['gpt-test', 'gpt-extra'],
+      reasoning_overrides: {},
     });
   });
 

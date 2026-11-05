@@ -225,13 +225,15 @@ func (r *LLMSettingsResolver) ResolveProviders(ctx context.Context) ([]llm.Provi
 			}
 		}
 		out = append(out, llm.ProviderConfig{
-			TLSInsecure: tlsInsecure,
-			ID:          pk.id,
-			Label:       label,
-			APIKey:      apiKey,
-			Model:       defaultModel,
-			BaseURL:     baseURL,
-			Models:      models,
+			ReasoningOverrides:     r.reasoningOverrides(ctx, pk.id),
+			DefaultReasoningEffort: r.defaultReasoningEffort(ctx, pk.id, defaultModel),
+			TLSInsecure:            tlsInsecure,
+			ID:                     pk.id,
+			Label:                  label,
+			APIKey:                 apiKey,
+			Model:                  defaultModel,
+			BaseURL:                baseURL,
+			Models:                 models,
 		})
 	}
 
@@ -242,6 +244,23 @@ func (r *LLMSettingsResolver) ResolveProviders(ctx context.Context) ([]llm.Provi
 		def = strings.TrimSpace(r.envDefaultProvider)
 	}
 	return out, def, nil
+}
+
+func (r *LLMSettingsResolver) reasoningOverrides(ctx context.Context, provider string) map[string]llm.ReasoningOverride {
+	raw, found, err := r.svc.Get(ctx, model.CategoryLLM, provider+"_reasoning_overrides")
+	if err != nil {
+		r.svc.log.Warn("read reasoning overrides failed", "provider", provider)
+		return nil
+	}
+	if !found || raw == "" {
+		return nil
+	}
+	overrides, err := decodeReasoningOverrides(provider, raw)
+	if err != nil {
+		r.svc.log.Warn("invalid reasoning overrides; using automatic capabilities", "provider", provider)
+		return nil
+	}
+	return overrides
 }
 
 // EncodeModelsList serialises a closed-set of model slugs into the JSON

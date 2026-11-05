@@ -167,7 +167,7 @@ func TestIterationFinalizationRemovesProviderTools(t *testing.T) {
 		if len(req.Tools) != 0 {
 			t.Errorf("summary request still contains %d tools", len(req.Tools))
 		}
-		if req.ToolChoice != "none" {
+		if req.ToolChoice != nil {
 			t.Errorf("summary tool_choice=%v", req.ToolChoice)
 		}
 		if len(req.Messages) < 2 || !strings.Contains(req.Messages[0].Content, "final response") {

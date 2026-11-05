@@ -295,6 +295,6 @@ func TestPersistenceHandler_NeededFiltersComponent(t *testing.T) {
 }
 
 // Compatibility with the current shared repository contract; v1 never calls this method.
-func (r *fakeSessionRepo) UpdateSessionModel(context.Context, string, string, string) error {
+func (r *fakeSessionRepo) UpdateSessionModel(context.Context, string, string, string, string) error {
 	return errs.ErrNotWiredYet
 }

@@ -1,4 +1,5 @@
 [
+  {"method":"PUT","path":"/v1/integrations/llm/default","reason":"Global model and reasoning defaults remain console-only; no external mutation policy is defined."},
   {"method":"POST","path":"/internal/edge/enroll","reason":"Internal, public, or browser-only route; use the authenticated product surface."},
   {"method":"POST","path":"/internal/k8s/enroll","reason":"Internal, public, or browser-only route; use the authenticated product surface."},
   {"method":"POST","path":"/internal/k8s/reconcile-node","reason":"Internal, public, or browser-only route; use the authenticated product surface."},

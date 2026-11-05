@@ -69,6 +69,7 @@ type LLMRouterInvalidator interface {
 // biz/setting implementation performs one minimal upstream completion and
 // returns stable, secret-free failure codes.
 type LLMConfigProbe interface {
+	SaveDefault(context.Context, bizsetting.LLMDefaultSelection) (bizsetting.LLMDefaultSelection, error)
 	FetchModels(ctx context.Context, in bizsetting.LLMProbeInput) (bizsetting.LLMModelsResult, error)
 	Probe(ctx context.Context, in bizsetting.LLMProbeInput) (bizsetting.LLMProbeResult, error)
 	Save(ctx context.Context, in bizsetting.LLMProbeInput) (bizsetting.LLMProbeResult, error)
@@ -129,6 +130,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Post("/v1/integrations/llm/models", h.fetchLLMModels)
 	r.Post("/v1/integrations/llm/validate-and-save", h.validateAndSaveLLMConfiguration)
 	r.Post("/v1/integrations/llm/invalidate", h.invalidateLLM)
+	r.Put("/v1/integrations/llm/default", h.saveLLMDefault)
 	r.Get("/v1/observability/dashboards/{uid}", h.fetchDashboard)
 }
 

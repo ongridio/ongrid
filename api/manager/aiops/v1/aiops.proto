@@ -66,6 +66,7 @@ message ChatSession {
     // Server-assigned execution version. Empty for unclassified historical sessions.
     string runtime_version = 11 [json_name = "runtime_version"];
     ConsolePageContext page_context = 12 [json_name = "page_context"];
+    string reasoning_effort = 13 [json_name = "reasoning_effort"];
 }
 
 // ToolCall 一次 LLM 发起的工具调用（OpenAI tool_calls 的投影）。
@@ -143,6 +144,8 @@ message CreateChatSessionRequest {
     string model = 4 [json_name = "model"];
     APMSourceTarget apm_source = 5 [json_name = "apm_source"];
     ConsolePageContext page_context = 6 [json_name = "page_context"];
+    // Omitted inherits the saved model default; empty explicitly uses the provider default.
+    optional string reasoning_effort = 7 [json_name = "reasoning_effort"];
 }
 
 message CreateChatSessionResponse {
@@ -164,6 +167,7 @@ message UpdateChatSessionRequest {
     optional string title = 2 [json_name = "title"];
     optional string provider = 3 [json_name = "provider"];
     optional string model = 4 [json_name = "model"];
+    optional string reasoning_effort = 5 [json_name = "reasoning_effort"];
 }
 
 message UpdateChatSessionResponse {
@@ -175,6 +179,7 @@ message PostMessageRequest {
     string text = 2 [json_name = "text"];
     string provider = 3 [json_name = "provider"];
     string model = 4 [json_name = "model"];
+    optional string reasoning_effort = 5 [json_name = "reasoning_effort"];
 }
 
 message PostMessageResponse {

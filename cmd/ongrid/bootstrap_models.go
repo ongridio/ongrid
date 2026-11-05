@@ -251,6 +251,7 @@ func bootstrapModels(rootCtx context.Context, cfg *config.Config, log *slog.Logg
 	}
 	llmSettingsResolver := managerbizsetting.NewLLMSettingsResolver(settings.settingSvc, llmEnvDefaults, cfg.LLM.Default)
 	llmRouter.SetProvidersResolver(llmSettingsResolver)
+	llmRouter.EnableReasoningDiscovery()
 
 	// All downstream agent/investigator wiring takes the router so a
 	// per-request Provider override flows through; absent that, behaviour

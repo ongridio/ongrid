@@ -167,11 +167,14 @@ export function invalidateLLMRouter(): Promise<{ status: string }> {
 
 export function fetchLLMModels(
   input: LLMConfigurationProbeInput,
-): Promise<{ models: string[]; truncated: boolean }> {
-  return request<{ models: string[]; truncated: boolean }>('POST', '/integrations/llm/models', input);
+): Promise<{ models: string[]; truncated: boolean; reasoning_capabilities?: Record<string, import('./chat').ReasoningCapability> }> {
+  return request('POST', '/integrations/llm/models', input);
 }
 
+export type ReasoningOverride = { levels: string[]; mode?: string };
+
 export type LLMConfigurationProbeInput = {
+  reasoning_overrides?: Record<string, ReasoningOverride>;
   tls_insecure?: boolean;
   provider: string;
   api_key: string;
@@ -210,4 +213,8 @@ export function saveLLMConfiguration(
 
 export function saveWebSearchConfiguration(input: WebSearchConfigurationProbeInput): Promise<WebSearchProbeResult> {
   return request<WebSearchProbeResult>('POST', '/integrations/websearch/validate-and-save', input);
+}
+
+export function saveLLMDefault(selection: import('./chat').ModelSelection) {
+  return request<import('./chat').ModelSelection>('PUT', '/integrations/llm/default', { ...selection, reasoning_effort: selection.reasoning_effort || '' });
 }

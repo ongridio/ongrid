@@ -53,7 +53,7 @@ type SessionRepo interface {
 	RenameSession(ctx context.Context, id string, title string) error
 	// UpdateSessionModel persists the provider/model pair selected for a
 	// conversation. Empty values clear the pin and restore global fallback.
-	UpdateSessionModel(ctx context.Context, id string, provider string, model string) error
+	UpdateSessionModel(ctx context.Context, id string, provider string, model string, reasoningEffort string) error
 	// DeleteSession hard-deletes the session and every dependent row
 	// (messages + tool calls). Used by the UI delete action.
 	DeleteSession(ctx context.Context, id string) error

@@ -162,6 +162,22 @@ func (s *Service) SetBatch(ctx context.Context, settings []model.Setting) error 
 
 func validateSetting(category, key, value string) error {
 	switch category {
+	case model.CategoryLLM:
+		if strings.HasSuffix(key, "_reasoning_default") {
+			provider := strings.TrimSuffix(key, "_reasoning_default")
+			if _, err := decodeLLMDefault(provider, value); err != nil {
+				return fmt.Errorf("%w: %v", errs.ErrInvalid, err)
+			}
+		}
+		if strings.HasSuffix(key, "_reasoning_overrides") {
+			if !isKnownLLMProvider(strings.TrimSuffix(key, "_reasoning_overrides")) {
+				return fmt.Errorf("%w: unknown reasoning provider", errs.ErrInvalid)
+			}
+			if _, err := decodeReasoningOverrides(strings.TrimSuffix(key, "_reasoning_overrides"), value); err != nil {
+				return fmt.Errorf("%w: %v", errs.ErrInvalid, err)
+			}
+		}
+		return nil
 	case model.CategoryPlatform:
 		if key == model.KeyAutoAPMEnabled && value != "true" && value != "false" {
 			return fmt.Errorf("%w: auto_apm_enabled must be true or false", errs.ErrInvalid)

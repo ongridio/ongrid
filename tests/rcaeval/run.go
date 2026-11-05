@@ -102,7 +102,7 @@ func (s evaluationSpawner) SpawnWorker(ctx context.Context, req contract.SpawnRe
 
 func (a workerAdapter) SpawnWorker(ctx context.Context, req toolkit.SpawnWorkerRequest) (*toolkit.WorkerHandle, error) {
 	w, err := a.rt.SpawnWorker(ctx, contract.SpawnRequest{AgentName: req.AgentName, Prompt: req.Prompt,
-		ParentSession: req.ParentSession, Locale: req.Locale, Provider: req.Provider, Model: req.Model})
+		ParentSession: req.ParentSession, Locale: req.Locale, Provider: req.Provider, Model: req.Model, ReasoningEffort: req.ReasoningEffort})
 	if err != nil {
 		return nil, err
 	}

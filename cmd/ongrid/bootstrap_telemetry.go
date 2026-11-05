@@ -117,7 +117,9 @@ func bootstrapTelemetry(rootCtx context.Context, cfg *config.Config, log *slog.L
 	webSearchProbe := managerbizsetting.NewWebSearchProbe(managerbizsetting.NewWebSearchResolver(settings.settingSvc))
 	integrationHandler := managerserverintegration.NewHandler(settings.grafanaSvc, promProbe, lokiProbe, tempoIngestProbe, webSearchProbe)
 	integrationHandler.SetLLMRouter(models.llmRouter)
-	integrationHandler.SetLLMProbe(managerbizsetting.NewLLMConfigurationService(models.llmEnvDefaults, settings.settingSvc))
+	llmConfiguration := managerbizsetting.NewLLMConfigurationService(models.llmEnvDefaults, settings.settingSvc)
+	llmConfiguration.SetModelCatalog(models.llmRouter)
+	integrationHandler.SetLLMProbe(llmConfiguration)
 
 	// Prom-backed metric read handler (PR-F replacement for the MySQL
 	// fast path). When prom is disabled the handler still installs but
