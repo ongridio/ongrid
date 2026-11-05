@@ -9,8 +9,9 @@
 //   - keywords: extra fuzzy-match terms (English / pinyin-ish / synonyms)
 //   - group:   coarse grouping for display in the palette
 import { tr as trInline } from '@/i18n/locale';
+import { cmdbPaletteRoutes } from '@/cmdb';
 
-export type AppRouteGroup = '主页' | 'Agent' | '知识库' | '基础设施' | '监控告警' | '日常' | '设置' | '用户管理';
+export type AppRouteGroup = '主页' | 'Agent' | '知识库' | '基础设施' | 'CMDB' | '监控告警' | '日常' | '设置' | '用户管理';
 
 export type AppRoute = {
   path: string;
@@ -55,6 +56,10 @@ const ROUTE_DEFS: RouteDef[] = [
   { path: '/admin/users', zh: '用户管理 / 用户', en: 'Admin / Users', keywords: ['users', 'yonghu', 'admin'], group: '用户管理' },
   { path: '/admin/orgs', zh: '用户管理 / 组织', en: 'Admin / Orgs', keywords: ['orgs', 'org', 'team', 'zuzhi'], group: '用户管理' },
   { path: '/edges/shell-sessions', zh: '设备 / WebSSH 会话', en: 'Devices / WebSSH sessions', keywords: ['webssh', 'shell', 'sessions', 'huihua'], group: '基础设施' },
+
+  // The CMDB module contributes its own entries, so adding a page does not edit
+  // this file. See web/src/cmdb/routes.tsx.
+  ...cmdbPaletteRoutes,
 ];
 
 // APP_ROUTES: labels resolved per current locale via trInline (reads

@@ -44,6 +44,11 @@ services:
       dockerfile: deploy/Dockerfile.ongrid
       args:
         VERSION: ${VERSION:-dev}
+        # Go module proxy for the image build. Default mirrors the value
+        # in deploy/Dockerfile.ongrid (that file is authoritative) so a
+        # build host that can't reach proxy.golang.org still works; export
+        # GOPROXY to point at a different mirror / corporate Athens.
+        GOPROXY: ${GOPROXY:-https://goproxy.cn,https://proxy.golang.org,direct}
     image: ongrid:${VERSION:-dev}
     container_name: ongrid
     restart: unless-stopped
@@ -191,6 +196,47 @@ services:
     networks:
       - ongrid_net
 
+  # Standalone CMDB API. The manager no longer mounts /v1/cmdb; nginx sends
+  # /api/v1/cmdb/* here. Same database and JWT secret as the manager; the
+  # service owns the CMDB AutoMigrate run (with an advisory lock).
+  ongrid-cmdb:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.ongrid-cmdb
+      args:
+        VERSION: ${VERSION:-dev}
+        GOPROXY: ${GOPROXY:-https://goproxy.cn,https://proxy.golang.org,direct}
+        RUNTIME_IMAGE: ${ONGRID_CMDB_RUNTIME_IMAGE:-gcr.io/distroless/base-debian12:nonroot}
+    image: ongrid-cmdb:${VERSION:-dev}
+    container_name: ongrid-cmdb
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      ONGRID_HTTP_ADDR: ${ONGRID_CMDB_HTTP_ADDR:-:8082}
+      ONGRID_METRICS_ADDR: ${ONGRID_CMDB_METRICS_ADDR:-:9102}
+      ONGRID_DB_DIALECT: ${ONGRID_DB_DIALECT:-mysql}
+      ONGRID_DB_DSN: ${ONGRID_DB_DSN:-ongrid:ongrid@tcp(mysql:3306)/ongrid?parseTime=true&charset=utf8mb4&loc=Local}
+      # The CMDB service is a second client; keep its pool small so the
+      # manager (50) plus CMDB (20) stay inside the database budget.
+      ONGRID_DB_MAX_OPEN_CONNS: ${ONGRID_CMDB_DB_MAX_OPEN_CONNS:-20}
+      ONGRID_DB_MAX_IDLE_CONNS: ${ONGRID_CMDB_DB_MAX_IDLE_CONNS:-5}
+      ONGRID_JWT_SECRET: ${ONGRID_JWT_SECRET:-change-me-to-a-long-random-string}
+      ONGRID_SECRET_KEY: ${ONGRID_SECRET_KEY:-}
+      ONGRID_OTEL_ENDPOINT: ${ONGRID_OTEL_ENDPOINT:-tempo:4318}
+      ONGRID_OTEL_SAMPLING_RATIO: ${ONGRID_OTEL_SAMPLING_RATIO:-1}
+      # SQLite opt-in: with ONGRID_DB_DIALECT=sqlite, uncomment this path and
+      # the shared ./data mount below. Without the shared mount the manager
+      # and CMDB would each get a separate database file. The default stack is
+      # MySQL and uses neither.
+      # ONGRID_DB_PATH: ${ONGRID_DB_PATH:-/data/ongrid.db}
+    # No host port: nginx and Prometheus reach it on the compose network.
+    networks:
+      - ongrid_net
+    # volumes:
+    #   - ./data:/data
+
   # ADR-008: TLS termination + frontend SPA + /api reverse proxy. Same
   # shape as deploy/install/docker-compose.yml; suitable for local dev.
   nginx:
@@ -204,6 +250,8 @@ services:
     restart: unless-stopped
     depends_on:
       ongrid:
+        condition: service_started
+      ongrid-cmdb:
         condition: service_started
       profiles-gateway:
         condition: service_started
@@ -230,7 +278,7 @@ services:
     volumes:
       - ./install/frontier.yaml:/usr/conf/frontier.yaml:ro
     ports:
-      - "40012:40012"
+      - "${ONGRID_FRONTIER_PORT:-40012}:40012"
     networks:
       - ongrid_net
 

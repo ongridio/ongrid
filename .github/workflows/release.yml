@@ -122,6 +122,45 @@ jobs:
           set -euo pipefail
           make docker-push-cloud-web
 
+  cmdb-image:
+    name: Publish CMDB multi-arch image
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || github.ref }}
+
+      - name: Resolve tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${RELEASE_TAG}"
+          version="$(tr -d '[:space:]' < VERSION)"
+          if [[ ! "$tag" =~ $RELEASE_TAG_PATTERN || "$version" != "$tag" ]]; then
+            echo "VERSION ($version) must match release tag ($tag)" >&2
+            exit 2
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to CNB registry
+        uses: docker/login-action@v3
+        with:
+          registry: docker.cnb.cool
+          username: cnb
+          password: ${{ secrets.CNB_TOKEN }}
+
+      - name: Publish CMDB image
+        shell: bash
+        run: |
+          set -euo pipefail
+          make docker-push-cloud-cmdb
+
   k8s-edge-image:
     name: Publish Kubernetes Edge multi-arch image
     if: github.event_name != 'workflow_dispatch'
@@ -166,10 +205,11 @@ jobs:
     if: >-
       always() && !cancelled() &&
       (github.event_name == 'workflow_dispatch' ||
-       (needs.manager-image.result == 'success' && needs.web-image.result == 'success' && needs.k8s-edge-image.result == 'success'))
+       (needs.manager-image.result == 'success' && needs.cmdb-image.result == 'success' && needs.web-image.result == 'success' && needs.k8s-edge-image.result == 'success'))
     runs-on: ubuntu-24.04
     needs:
       - manager-image
+      - cmdb-image
       - web-image
       - k8s-edge-image
     timeout-minutes: 30

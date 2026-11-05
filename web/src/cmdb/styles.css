@@ -1,0 +1,51 @@
+/*
+ * CMDB-only rules, scoped under the module's own wrapper classes.
+ *
+ * WHY THIS FILE EXISTS AT ALL. The shared `.og-*` rules already say what a table
+ * looks like, and pages must not restate them. But two CMDB states have no shared
+ * rule yet: a selected row, and the sticky operation cell of a selected row.
+ * The design language is explicit that a selection tint has to appear on BOTH —
+ * a sticky cell painted with the shared background would cut a stripe out of the
+ * highlighted row.
+ *
+ * WHY NOT EXTEND styles/index.css. The CMDB is meant to be pullable out of (and
+ * independently rebased onto) the upstream tree; every line added to a shared
+ * stylesheet is a line that can conflict on the next upstream pull. So the
+ * overrides live here, scoped under `.cmdb-table`, and are imported once by the
+ * CMDB entry point.
+ *
+ * THE SELECTOR WEIGHT IS DELIBERATE. `.og-action-table tbody tr > td.sticky`
+ * is what paints the sticky column, and a single utility class cannot beat it.
+ * A scoped selector with one more class can, without `!important`.
+ */
+
+.cmdb-table .og-resource-table tbody tr[data-selected] {
+  background-color: rgb(99 102 241 / 0.1);
+}
+
+.cmdb-table .og-action-table tbody tr[data-selected],
+.cmdb-table .og-action-table tbody tr[data-selected] > td.sticky {
+  background-color: rgb(99 102 241 / 0.1);
+}
+
+/* The hover tint must not erase the selection tint while the pointer is over a
+   selected row — the operator is usually about to act on it. */
+.cmdb-table .og-action-table tbody tr[data-selected]:hover,
+.cmdb-table .og-action-table tbody tr[data-selected]:hover > td.sticky {
+  background-color: rgb(99 102 241 / 0.16);
+}
+
+/* A tree row is a button in a list, not a table row: it needs its own focus ring
+   because the shared table styles do not apply, and keyboard navigation is the
+   only way to move through a large tree. */
+.cmdb-tree [role='treeitem']:focus-visible {
+  outline: 2px solid rgb(99 102 241);
+  outline-offset: -2px;
+}
+
+/* A chip's label is one word, not a paragraph: "启用" broken over two lines reads
+   as two glyphs rather than a status. Scoped to the CMDB table so the shared
+   `.og-chip` keeps whatever the rest of the console wants. */
+.cmdb-table .og-chip {
+  white-space: nowrap;
+}
