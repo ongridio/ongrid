@@ -2,10 +2,16 @@ package alert
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	model "github.com/ongridio/ongrid/internal/manager/model/alert"
+	"github.com/ongridio/ongrid/internal/pkg/notify"
 )
 
 func TestRetryWorkerSucceedsOnRecover(t *testing.T) {
@@ -29,7 +35,7 @@ func TestRetryWorkerSucceedsOnRecover(t *testing.T) {
 	if err := repo.CreateIncident(context.Background(), incident); err != nil {
 		t.Fatalf("seed incident: %v", err)
 	}
-	repo.channels["log"] = &model.Channel{ID: 7, Name: "log", ChannelType: model.ChannelTypeWebhook, Enabled: true}
+	repo.channels["log"] = &model.Channel{ID: 7, Name: "log", ChannelType: model.ChannelTypeWebhook, Enabled: true, ConfigJSON: `{"endpoint":"https://hooks.example.test/ongrid"}`}
 	finished := now.Add(-5 * time.Minute)
 	failedAt := now.Add(-5 * time.Minute)
 	repo.deliveries = append(repo.deliveries, &model.Delivery{
@@ -65,6 +71,105 @@ func TestRetryWorkerSucceedsOnRecover(t *testing.T) {
 	}
 	if !hasEventType(repo.events, model.EventTypeNotificationSent) {
 		t.Errorf("notification_sent event missing on retry")
+	}
+}
+
+func TestRetryWorkerSendsThroughPersistedChannelConfig(t *testing.T) {
+	now := time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name        string
+		channelType string
+		withURL     bool
+		// staleEnvSender registers a router sender with the channel's name
+		// pointing elsewhere, like a seeded channel edited after boot.
+		staleEnvSender bool
+		wantStatus     string
+		wantHits       int32
+		wantErr        string
+	}{
+		{name: "ui webhook", channelType: model.ChannelTypeWebhook, withURL: true, wantStatus: model.DeliveryStatusSuccess, wantHits: 1},
+		{name: "ui wecom", channelType: model.ChannelTypeWeCom, withURL: true, wantStatus: model.DeliveryStatusSuccess, wantHits: 1},
+		{name: "edited seeded channel", channelType: model.ChannelTypeWebhook, withURL: true, staleEnvSender: true, wantStatus: model.DeliveryStatusSuccess, wantHits: 1},
+		{name: "no endpoint", channelType: model.ChannelTypeWebhook, wantStatus: model.DeliveryStatusFailed, wantErr: "has no endpoint"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var hits, staleHits atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				hits.Add(1)
+				_, _ = w.Write([]byte(`{"errcode":0,"errmsg":"ok"}`))
+			}))
+			defer srv.Close()
+			stale := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				staleHits.Add(1)
+			}))
+			defer stale.Close()
+
+			repo := newFakeRepo()
+			incident := &model.Incident{
+				Title:       "disk full",
+				ScopeType:   model.RuleScopeGlobal,
+				Rule:        "disk_full",
+				Severity:    "critical",
+				Status:      model.IncidentStatusOpen,
+				DedupeKey:   "global:disk_full",
+				Summary:     "disk full",
+				LastFiredAt: now.Add(-time.Minute),
+			}
+			if err := repo.CreateIncident(context.Background(), incident); err != nil {
+				t.Fatalf("seed incident: %v", err)
+			}
+			configJSON := `{}`
+			if tc.withURL {
+				configJSON = fmt.Sprintf(`{"endpoint":%q}`, srv.URL)
+			}
+			repo.channels["ops"] = &model.Channel{ID: 9, Name: "ops", ChannelType: tc.channelType, Enabled: true, ConfigJSON: configJSON}
+			finished := now.Add(-5 * time.Minute)
+			repo.deliveries = append(repo.deliveries, &model.Delivery{
+				ID:           1,
+				IncidentID:   &incident.ID,
+				ChannelID:    9,
+				Status:       model.DeliveryStatusFailed,
+				AttemptCount: 1,
+				SentAt:       &finished,
+				FinishedAt:   &finished,
+			})
+
+			var envSenders []notify.Sender
+			if tc.staleEnvSender {
+				envSenders = append(envSenders, notify.NewGenericWebhookSender("ops", stale.URL, "", nil))
+			}
+			worker := NewRetryWorker(RetryWorkerOpts{
+				Repo:              repo,
+				Notifier:          notify.NewRouter(true, time.Second, nil, envSenders...),
+				Usecase:           NewUsecase(repo, nil),
+				MaxAttempts:       5,
+				BackoffPerAttempt: time.Minute,
+				Now:               func() time.Time { return now },
+			})
+			worker.RunOnce(context.Background())
+
+			d := repo.deliveries[0]
+			gotErr := ""
+			if d.ErrorMessage != nil {
+				gotErr = *d.ErrorMessage
+			}
+			if d.Status != tc.wantStatus {
+				t.Fatalf("delivery status = %q (error %q), want %q", d.Status, gotErr, tc.wantStatus)
+			}
+			if d.AttemptCount != 2 {
+				t.Errorf("attempt_count = %d, want 2", d.AttemptCount)
+			}
+			if tc.wantErr != "" && !strings.Contains(gotErr, tc.wantErr) {
+				t.Errorf("error = %q, want it to contain %q", gotErr, tc.wantErr)
+			}
+			if got := hits.Load(); got != tc.wantHits {
+				t.Errorf("channel endpoint hits = %d, want %d", got, tc.wantHits)
+			}
+			if got := staleHits.Load(); got != 0 {
+				t.Errorf("stale env-config endpoint hits = %d, want 0", got)
+			}
+		})
 	}
 }
 
