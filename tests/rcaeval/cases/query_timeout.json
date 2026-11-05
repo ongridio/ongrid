@@ -145,6 +145,18 @@
         {
           "expr": "100 * (1 - node_memory_MemAvailable_bytes{device_id=\"42\"} / node_memory_MemTotal_bytes{device_id=\"42\"})",
           "lookback_seconds": 1200
+        },
+        {
+          "expr": "100 * (1 - node_memory_MemAvailable_bytes{device_id=\"42\"} / node_memory_MemTotal_bytes{device_id=\"42\"})",
+          "lookback_seconds": 3600
+        },
+        {
+          "expr": "100 * (1 - node_memory_MemAvailable_bytes{device_id=\"42\"} / node_memory_MemTotal_bytes{device_id=\"42\"})",
+          "lookback_seconds": 7200
+        },
+        {
+          "expr": "100 * (1 - node_memory_MemAvailable_bytes{device_id=\"42\"} / node_memory_MemTotal_bytes{device_id=\"42\"})",
+          "lookback_seconds": 86400
         }
       ],
       "result": {
@@ -325,6 +337,88 @@
           "from": "2026-11-04T05:20:00Z",
           "to": "2026-11-04T07:20:00Z"
         }
+      }
+    },
+    {
+      "id": "correlation_60m",
+      "tool": "correlate_incident",
+      "args": [
+        {
+          "incident_ids": [
+            101
+          ],
+          "window_minutes": 60
+        }
+      ],
+      "result": {
+        "success_count": 1,
+        "error_count": 0,
+        "results": [
+          {
+            "incident_id": 101,
+            "bundle": {
+              "incident": {
+                "id": 101,
+                "title": "device 42 内存从 80% 上升到 95%。",
+                "rule_key": "memory_high",
+                "rule_name": "memory_high",
+                "severity": "critical",
+                "status": "open",
+                "scope_type": "host",
+                "device_id": 42,
+                "first_fired_at": "2026-11-04T06:20:00Z",
+                "last_fired_at": "2026-11-04T06:20:00Z",
+                "event_count": 1,
+                "labels": {
+                  "metric": "mem_pct"
+                }
+              },
+              "window": {
+                "start": "2026-11-04T05:50:00Z",
+                "end": "2026-11-04T06:50:00Z"
+              },
+              "metric_panel": [
+                {
+                  "labels": {
+                    "device_id": "42"
+                  },
+                  "values": [
+                    [
+                      1793772000,
+                      "80"
+                    ],
+                    [
+                      1793772600,
+                      "90"
+                    ],
+                    [
+                      1793773200,
+                      "95"
+                    ]
+                  ]
+                }
+              ],
+              "host": {
+                "current_edge_id": 1042,
+                "id": 42,
+                "name": "eval-host-42",
+                "status": "online",
+                "roles": [
+                  "server"
+                ],
+                "last_seen_at": "2026-11-04T06:20:00Z",
+                "current_load": {
+                  "mem_pct": 95
+                },
+                "recent_incidents_24h": 1
+              },
+              "skipped": {
+                "log_panel": "log query failed: context deadline exceeded",
+                "trace_panel": "no service label on incident"
+              }
+            }
+          }
+        ]
       }
     }
   ],

@@ -76,6 +76,14 @@ not. Each `args` entry explicitly declares one supported query. Returned metric
 samples must lie in that query's range. Relative metric ranges use `incident.at`
 as the corpus clock; fixed process snapshots also describe that instant.
 
+For `memory_oom` and `query_timeout`, unmatched log queries also use the real
+log tool with a local backend that filters only the case's existing log rows.
+This requires the incident device ID and explicit RFC3339 start/end times.
+Supported syntax is an equality/regexp stream selector with at most one literal
+(`|=`) or regexp (`|~`) line filter. Time, labels and case-sensitive filters still
+apply; valid timeout queries remain failures. Unsupported syntax or scope remains
+a coverage gap. This is bounded observation replay, not a general LogQL engine.
+
 Unsupported queries return `fixture_coverage_gap`, never fabricated success or
 an empty result. A run with any gap is unscorable. Inspect its actual query, add
 a justified observation/variant, and start a new corpus version. Do not label

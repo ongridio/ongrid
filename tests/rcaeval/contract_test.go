@@ -1,14 +1,11 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
-	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -21,7 +18,6 @@ import (
 	alertmodel "github.com/ongridio/ongrid/internal/manager/model/alert"
 	auditmodel "github.com/ongridio/ongrid/internal/manager/model/audit"
 	devicemodel "github.com/ongridio/ongrid/internal/manager/model/device"
-	"github.com/ongridio/ongrid/internal/pkg/logquery"
 	"github.com/ongridio/ongrid/internal/pkg/promquery"
 	"github.com/ongridio/ongrid/internal/pkg/tracequery"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
@@ -30,10 +26,6 @@ import (
 type metricRow struct {
 	Metric map[string]string    `json:"metric"`
 	Values [][2]json.RawMessage `json:"values"`
-}
-type logStream struct {
-	Stream map[string]string `json:"stream"`
-	Values [][2]string       `json:"values"`
 }
 
 func fixtureByID(c evalCase, id string) fixture {
@@ -44,16 +36,6 @@ func fixtureByID(c evalCase, id string) fixture {
 	}
 	return fixture{}
 }
-
-func decodeStrict(raw []byte, value any) error {
-	d := json.NewDecoder(bytes.NewReader(raw))
-	d.DisallowUnknownFields()
-	return d.Decode(value)
-}
-
-// These are backend observations, not a second implementation of a tool.
-// Real tool executors below build the incident/correlation/log/trace envelopes.
-type corpusBackend struct{ c evalCase }
 
 func (b corpusBackend) GetIncident(_ context.Context, id uint64) (*alertmodel.Incident, error) {
 	if id != b.c.Incident.ID {
@@ -146,124 +128,6 @@ func (b corpusBackend) QueryRange(_ context.Context, expr string, start, end tim
 	return &promquery.InstantResult{ResultType: "matrix", Result: data}, err
 }
 
-func selectorMatches(selector string, labels map[string]string) (bool, error) {
-	// The shipped corpus uses equality/regexp label matchers only.
-	matcher := regexp.MustCompile(`([a-zA-Z_][a-zA-Z0-9_]*)\s*(=~|=)\s*("(?:\\.|[^"\\])*")`)
-	rest := matcher.ReplaceAllString(selector, "")
-	if strings.Trim(rest, " ,\t\r\n") != "" {
-		return false, fmt.Errorf("unsupported corpus selector %s", selector)
-	}
-	for _, m := range matcher.FindAllStringSubmatch(selector, -1) {
-		value, err := strconv.Unquote(m[3])
-		if err != nil {
-			return false, err
-		}
-		if m[2] == "=" && labels[m[1]] != value {
-			return false, nil
-		}
-		if m[2] == "=~" {
-			r, err := regexp.Compile("^(?:" + value + ")$")
-			if err != nil {
-				return false, err
-			}
-			if !r.MatchString(labels[m[1]]) {
-				return false, nil
-			}
-		}
-	}
-	return true, nil
-}
-func logMatches(query string, labels map[string]string, line string) (bool, error) {
-	i := strings.IndexByte(query, '}')
-	if !strings.HasPrefix(query, "{") || i < 0 {
-		return false, fmt.Errorf("unsupported corpus LogQL %s", query)
-	}
-	ok, err := selectorMatches(query[1:i], labels)
-	if err != nil || !ok {
-		return ok, err
-	}
-	tail := strings.TrimSpace(query[i+1:])
-	if tail == "" {
-		return true, nil
-	}
-	if !strings.HasPrefix(tail, "|=") && !strings.HasPrefix(tail, "|~") {
-		return false, fmt.Errorf("unsupported corpus line filter %s", tail)
-	}
-	value, err := strconv.Unquote(strings.TrimSpace(tail[2:]))
-	if err != nil {
-		return false, err
-	}
-	if tail[:2] == "|=" {
-		return strings.Contains(line, value), nil
-	}
-	r, err := regexp.Compile(value)
-	if err != nil {
-		return false, err
-	}
-	return r.MatchString(line), nil
-}
-func (b corpusBackend) QueryLogQL(_ context.Context, opts logquery.QueryRangeOptions) (logquery.QueryLogQLResult, error) {
-	if b.c.ID == "query_timeout" {
-		return nil, context.DeadlineExceeded
-	}
-	streams := map[string]*logStream{}
-	seen := map[string]bool{}
-	for _, f := range b.c.Fixtures {
-		if f.Tool != "query_logql" || f.Error != "" {
-			continue
-		}
-		var raw struct {
-			ResultType string      `json:"resultType"`
-			Result     []logStream `json:"result"`
-		}
-		if err := decodeStrict(f.Result, &raw); err != nil {
-			return nil, err
-		}
-		for _, s := range raw.Result {
-			key := hashValue(s.Stream)
-			for _, v := range s.Values {
-				ns, err := strconv.ParseInt(v[0], 10, 64)
-				if err != nil {
-					return nil, err
-				}
-				ok, err := logMatches(opts.Query, s.Stream, v[1])
-				if err != nil {
-					return nil, err
-				}
-				identity := key + v[0] + v[1]
-				if !ok || ns < opts.Start.UnixNano() || ns > opts.End.UnixNano() || seen[identity] {
-					continue
-				}
-				seen[identity] = true
-				if streams[key] == nil {
-					streams[key] = &logStream{Stream: s.Stream}
-				}
-				streams[key].Values = append(streams[key].Values, v)
-			}
-		}
-	}
-	keys := make([]string, 0, len(streams))
-	for k := range streams {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	result := []logStream{}
-	for _, k := range keys {
-		s := streams[k]
-		sort.Slice(s.Values, func(i, j int) bool {
-			if opts.Direction == "forward" {
-				return s.Values[i][0] < s.Values[j][0]
-			}
-			return s.Values[i][0] > s.Values[j][0]
-		})
-		if len(s.Values) > opts.Limit {
-			return nil, errors.New("corpus contract fixture exceeds log limit")
-		}
-		result = append(result, *s)
-	}
-	raw, err := json.Marshal(result)
-	return &logquery.QueryRangeResult{ResultType: "streams", Result: raw}, err
-}
 func (b corpusBackend) GetTrace(_ context.Context, id string) (*tracequery.TraceResult, error) {
 	var f struct {
 		TraceID string `json:"trace_id"`

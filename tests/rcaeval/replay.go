@@ -14,8 +14,7 @@ import (
 
 var errBudget = errors.New("evaluation budget exhausted")
 
-// shortcut: replay accepts declared argument variants only, expand fixtures when
-// legitimate queries produce coverage gaps; never guess query equivalence.
+// Declared variants normalize only JSON formatting and documented defaults.
 func queryKey(name string, raw json.RawMessage) (string, error) {
 	var args map[string]any
 	d := json.NewDecoder(bytes.NewReader(raw))
@@ -49,6 +48,7 @@ type replayCall struct {
 
 type replayState struct {
 	mu       sync.Mutex
+	c        evalCase
 	fixtures map[string]fixture
 	calls    []replayCall
 	maxCalls int
@@ -56,7 +56,7 @@ type replayState struct {
 }
 
 func newReplay(c evalCase, max int) (*replayState, error) {
-	r := &replayState{fixtures: map[string]fixture{}, maxCalls: max}
+	r := &replayState{c: c, fixtures: map[string]fixture{}, maxCalls: max}
 	for _, f := range c.Fixtures {
 		if len(f.Result) > 0 {
 			var compact bytes.Buffer
@@ -100,6 +100,9 @@ func (t *replayTool) InvokableRun(ctx context.Context, args string, opts ...base
 		return "", errBudget
 	}
 	f, found := t.state.fixtures[key]
+	if !found && keyErr == nil && t.info.Name == "query_logql" {
+		f, found = replayLogs(ctx, t.state.c, args)
+	}
 	if t.delegate != nil {
 		c.Fixture = "delegation"
 	} else if keyErr != nil || !found {
@@ -124,8 +127,8 @@ func (t *replayTool) InvokableRun(ctx context.Context, args string, opts ...base
 	return string(f.Result), nil
 }
 
-// Only Info is used from the real tool implementations. No production executor
-// is connected, including host tools and tools not covered by a case.
+// The catalog supplies schemas. Replay uses fixtures or the bounded local log
+// backend; no host or external backend is connected.
 func toolCatalog() []basetool.BaseTool {
 	return []basetool.BaseTool{
 		toolkit.NewGetIncidentDetailTool(nil, nil),
