@@ -55,6 +55,9 @@ type Service struct {
 
 	mu    sync.RWMutex
 	cache map[string]string // key = "category|key"
+	// gen is bumped on every invalidation so a Get whose repo read raced
+	// a write does not repopulate the cache with the pre-write value.
+	gen uint64
 }
 
 // New builds the service. log may be nil.
@@ -86,6 +89,7 @@ func (s *Service) Get(ctx context.Context, category, key string) (string, bool, 
 
 	s.mu.RLock()
 	v, ok := s.cache[ck]
+	gen := s.gen
 	s.mu.RUnlock()
 	if ok {
 		return v, true, nil
@@ -100,7 +104,9 @@ func (s *Service) Get(ctx context.Context, category, key string) (string, bool, 
 	}
 
 	s.mu.Lock()
-	s.cache[ck] = row.Value
+	if gen == s.gen {
+		s.cache[ck] = row.Value
+	}
 	s.mu.Unlock()
 	return row.Value, true, nil
 }
@@ -118,6 +124,7 @@ func (s *Service) Set(ctx context.Context, category, key, value string, sensitiv
 		return err
 	}
 	s.mu.Lock()
+	s.gen++
 	delete(s.cache, cacheKey(category, key))
 	s.mu.Unlock()
 	s.log.Info("setting updated",
@@ -149,6 +156,7 @@ func (s *Service) SetBatch(ctx context.Context, settings []model.Setting) error 
 	}
 
 	s.mu.Lock()
+	s.gen++
 	for i := range settings {
 		delete(s.cache, cacheKey(settings[i].Category, settings[i].Key))
 	}
@@ -279,6 +287,7 @@ func (s *Service) Delete(ctx context.Context, category, key string) error {
 		return err
 	}
 	s.mu.Lock()
+	s.gen++
 	delete(s.cache, cacheKey(category, key))
 	s.mu.Unlock()
 	return nil
@@ -289,6 +298,7 @@ func (s *Service) Delete(ctx context.Context, category, key string) error {
 // value (e.g. after a manual DB edit).
 func (s *Service) InvalidateAll() {
 	s.mu.Lock()
+	s.gen++
 	s.cache = make(map[string]string)
 	s.mu.Unlock()
 }
