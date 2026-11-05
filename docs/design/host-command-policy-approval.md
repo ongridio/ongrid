@@ -22,7 +22,9 @@ The setting is injected into every active runtime's host tool and the tool
 registry. The existing per-call write permission still excludes viewers and
 read-only callers. A missing setting, read error or unwired proposer keeps the
 existing denial behavior. The new setting does not change approvals for
-commands already classified as writes.
+commands already classified as writes. The setting is read directly from the
+shared store for each check, so later calls observe updates across Manager
+instances without relying on process-local cache invalidation.
 
 Approval bypasses binary, argument, path and network policy checks. The
 command still runs with the Edge process's OS permissions and existing time
