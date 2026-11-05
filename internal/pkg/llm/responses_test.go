@@ -54,6 +54,42 @@ func TestTerraColdStartUsesResponsesOnOfficialEndpoint(t *testing.T) {
 	}
 }
 
+func TestForeignHistoryToReasoningChat(t *testing.T) {
+	for _, model := range []string{"deepseek-v4-flash", "mimo-v2.6-flash"} {
+		for _, prefix := range []string{responsesHistoryPrefix, anthropicHistoryPrefix, chatExtrasPrefix} {
+			t.Run(model+"/"+prefix, func(t *testing.T) {
+				_, cfg := fakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+					var payload struct {
+						Messages []map[string]json.RawMessage `json:"messages"`
+					}
+					require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+					if string(payload.Messages[1]["reasoning_content"]) != `""` {
+						t.Error("foreign history must become explicit empty reasoning_content")
+						http.Error(w, `{"error":{"message":"missing reasoning_content"}}`, http.StatusBadRequest)
+						return
+					}
+					require.Equal(t, `"native reasoning"`, string(payload.Messages[3]["reasoning_content"]))
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write(sampleChatResponse("OK", nil))
+				})
+				cfg.Model = model
+				history := prefix + `{"model":"other-model","message":{"role":"assistant","content":"previous answer"}}`
+				_, err := newTestClient(t, cfg, nil).Chat(context.Background(), ChatReq{
+					Messages: []Message{
+						{Role: "user", Content: "first"},
+						{Role: "assistant", Content: "previous answer", ReasoningContent: history},
+						{Role: "user", Content: "second"},
+						{Role: "assistant", Content: "native answer", ReasoningContent: "native reasoning"},
+						{Role: "user", Content: "next"},
+					},
+					Tools: []ToolSchema{{Name: "probe", Parameters: json.RawMessage(`{"type":"object"}`)}},
+				})
+				require.NoError(t, err)
+			})
+		}
+	}
+}
+
 func TestResponsesFallbackPreservesToolHistory(t *testing.T) {
 	chatCalls, responseCalls := 0, 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -2,6 +2,7 @@ package llm
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -104,6 +105,10 @@ func (t *responsesTransport) RoundTrip(req *http.Request) (*http.Response, error
 	request, err := requestWithJSON(req, payload)
 	if err != nil {
 		return nil, err
+	}
+	// Foreign history must be cleared before checking for missing reasoning.
+	if needsDeepSeekReasoningCompatibility(clean) {
+		request = request.WithContext(context.WithValue(request.Context(), deepSeekReasoningKey{}, true))
 	}
 	resp, err := t.base.RoundTrip(request)
 	if err != nil || resp.StatusCode != http.StatusBadRequest {

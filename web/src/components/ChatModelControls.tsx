@@ -53,7 +53,7 @@ export function ModelDropdown({
     options={options} searchable variant="ghost" className="h-8 w-auto max-w-full"
     onValueChange={(value) => {
       const [provider, model] = JSON.parse(value) as [string, string];
-      onPick?.({ provider, model });
+      onPick?.({ provider, model, reasoning_effort: '' });
       setOpen(false);
     }}
   />

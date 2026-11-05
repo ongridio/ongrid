@@ -149,6 +149,8 @@ updates persist all three values atomically. Selecting another model clears the
 old effort. Administrators save the home selection as the server default, which
 new sessions inherit; existing sessions and background investigations keep their
 own behavior. Non-admin selections apply only to their next conversation.
+Switching models explicitly selects the provider default, including when
+switching back to a model whose configured default uses a specific effort.
 
 For message overrides, an omitted field inherits the saved effort only when the
 effective model route still matches the saved route. An empty string explicitly
@@ -169,8 +171,13 @@ They are not shown as chat text. Claude responses have an 8,192-token output cap
 responses that exhaust it fail explicitly rather than execute incomplete tools.
 
 The normal GORM migration adds `chat_sessions.reasoning_effort` with an empty
-default. Existing sessions retain their previous behavior. Rolling back the
-binary leaves the additive column intact; older binaries ignore the preference.
+default and expands earlier 16-character columns to 32 characters, matching the
+accepted effort-name limit. Existing values remain unchanged. MySQL applies the
+widening during startup; large installations should assess metadata-lock waits
+before rollout. Binaries predating this field ignore it. Do not roll back to an
+intermediate binary that declares 16 characters while longer values exist: its
+AutoMigrate can attempt to shrink the column. Keep the widened schema definition
+in the rollback build, or reset those preferences before using that binary.
 
 ## Validation
 

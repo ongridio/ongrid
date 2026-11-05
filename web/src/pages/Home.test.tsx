@@ -20,6 +20,7 @@ vi.mock('@/components/ChatInput', () => ({
   }) => <div>
     <output data-testid="selection">{JSON.stringify(selectedModel)}</output>
     <button disabled={disabled} onClick={() => onModelChange({ provider: 'openai', model: 'gpt-6.1-terra', reasoning_effort: 'high' })}>Pick High</button>
+    <button disabled={disabled} onClick={() => onModelChange({ provider: 'openai', model: 'gpt-6.1-terra', reasoning_effort: '' })}>Pick Default</button>
     <button disabled={disabled} onClick={() => onModelChange({ provider: 'openai', model: 'gpt-4o', reasoning_effort: '' })}>Pick plain model</button>
     <button disabled={disabled} onClick={() => onSubmit({ text: 'test', attachments: [] })}>Start</button>
   </div>,
@@ -72,4 +73,15 @@ it('keeps non-admin choices scoped to their next conversation', async () => {
   await user.click(screen.getByRole('button', { name: 'Start' }));
   expect(saveLLMDefault).not.toHaveBeenCalled();
   expect(createSession).toHaveBeenCalledWith(expect.objectContaining({ reasoning_effort: 'high' }));
+});
+
+it('sends an explicit default for non-admin session creation without changing the server default', async () => {
+  permissions.isAdmin = false;
+  saved.reasoning_effort = 'high';
+  const user = userEvent.setup(); show(); await loaded();
+  await user.click(screen.getByRole('button', { name: 'Pick plain model' }));
+  await user.click(screen.getByRole('button', { name: 'Pick Default' }));
+  await user.click(screen.getByRole('button', { name: 'Start' }));
+  expect(saveLLMDefault).not.toHaveBeenCalled();
+  expect(createSession).toHaveBeenCalledWith(expect.objectContaining({ provider: 'openai', model: 'gpt-6.1-terra', reasoning_effort: '' }));
 });

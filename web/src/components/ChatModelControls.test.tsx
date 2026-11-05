@@ -1,9 +1,16 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
+import { useState } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ModelDropdown } from './ChatModelControls';
 import type { LLMProvider, ModelSelection } from '@/api/chat';
+
+vi.stubGlobal('ResizeObserver', class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+});
 
 const providers: LLMProvider[] = [{
   id: 'openai', label: 'OpenAI', models: ['gpt-6.1-terra', 'gpt-4o'],
@@ -17,6 +24,23 @@ const providers: LLMProvider[] = [{
 }];
 beforeEach(() => localStorage.setItem('ongrid-locale', 'en-US'));
 afterEach(cleanup);
+
+it('sends an explicit provider default when switching away and back to a reasoning model', async () => {
+  const user = userEvent.setup();
+  const onPick = vi.fn();
+  function Composer() {
+    const [selected, setSelected] = useState<ModelSelection>({ provider: 'openai', model: 'gpt-6.1-terra', reasoning_effort: 'high' });
+    return <ModelDropdown providers={providers} selected={selected} onPick={value => { onPick(value); setSelected(value); }}/>;
+  }
+  render(<MemoryRouter><Composer/></MemoryRouter>);
+  for (const model of ['gpt-4o', 'gpt-6.1-terra']) {
+    await act(async () => { await user.click(screen.getByRole('combobox', { name: 'Select model' })); });
+    const option = await screen.findByRole('option', { name: model });
+    await act(async () => { await user.click(option); });
+    expect(onPick).toHaveBeenLastCalledWith({ provider: 'openai', model, reasoning_effort: '' });
+  }
+  expect(screen.getByRole('combobox', { name: 'Reasoning effort' })).toHaveTextContent('Default');
+});
 
 it('shows model-specific efforts without the off choice', async () => {
   const user = userEvent.setup();

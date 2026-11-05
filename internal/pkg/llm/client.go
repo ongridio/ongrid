@@ -465,11 +465,6 @@ func (c *openaiClient) Chat(ctx context.Context, req ChatReq) (result *ChatResp,
 	}
 
 	// 4. Issue the request through the SDK matching the resolved creds.
-	// 旧消息没有可恢复的思考字段；DeepSeek 接受显式空值，但 SDK 的
-	// omitempty 会删掉它。仅对需要此兼容处理的请求补齐空字段。
-	if needsDeepSeekReasoningCompatibility(sdkReq) {
-		callCtx = context.WithValue(callCtx, deepSeekReasoningKey{}, true)
-	}
 	callCtx = context.WithValue(callCtx, reasoningCapabilityKey{}, c.reasoningCapability(req.Provider, model))
 	sdk := c.sdkFor(apiKey, baseURL)
 	start := time.Now()
