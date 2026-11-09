@@ -259,9 +259,8 @@ func execLLM(ctx context.Context, x Executors, cfg map[string]any, _ *RunContext
 		sb, _ := json.Marshal(schema)
 		prompt = prompt + "\n\nReturn ONLY a single JSON object matching this JSON Schema (no prose, no code fence):\n" + string(sb)
 	}
-	lctx, cancel := context.WithTimeout(ctx, llmNodeTimeout)
-	defer cancel()
-	answer, err := x.LLM.RunLLM(lctx, system, prompt)
+	// Let the LLM client apply the configured request timeout.
+	answer, err := x.LLM.RunLLM(ctx, system, prompt)
 	if err != nil {
 		return NodeResult{}, fmt.Errorf("llm node: %w", err)
 	}

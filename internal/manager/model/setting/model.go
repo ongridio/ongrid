@@ -78,7 +78,7 @@ const (
 	KeyAgentCommandPolicyApprovalEnabled = "command_policy_approval_enabled"
 	// KeyAgentRuntimeVersion selects the runtime for new sessions only.
 	KeyAgentRuntimeVersion = "runtime_version"
-	// KeyAgentLLMTimeoutSeconds bounds an assistant LLM request and report
+	// KeyAgentLLMTimeoutSeconds bounds assistant/workflow LLM requests and report
 	// generation in seconds. The typed setting accessor owns its default and
 	// range validation so callers cannot accidentally accept an unbounded value.
 	KeyAgentLLMTimeoutSeconds = "llm_timeout_seconds"
