@@ -39,7 +39,8 @@ type Notifier interface {
 // transforms (summarize / rewrite / classify / extract) where a full
 // ReAct agent node is overkill. Implemented in main.go over the routing
 // llm.Client (provider/model omitted → DefaultResolver picks the
-// configured default). nil → the llm node degrades with a clear error.
+// configured default). The client owns the request timeout. nil → the
+// llm node degrades with a clear error.
 type LLMRunner interface {
 	RunLLM(ctx context.Context, system, user string) (string, error)
 }
@@ -65,13 +66,11 @@ type Executors struct {
 	Notify Notifier
 }
 
-// defaultNodeTimeout bounds every non-agent node. Agent nodes get the
-// longer budget — a ReAct worker legitimately runs minutes. The llm
-// node sits between: a single completion, no tool loop.
+// Tool and notify nodes use the default timeout; agent workers get a
+// longer budget. LLM nodes use the client's configured request timeout.
 const (
 	defaultNodeTimeout = 2 * time.Minute
 	agentNodeTimeout   = 15 * time.Minute
-	llmNodeTimeout     = 3 * time.Minute
 )
 
 // execute runs one node by dispatching to its registered NodeSpec. cfg is

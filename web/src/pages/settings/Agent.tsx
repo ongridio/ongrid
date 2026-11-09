@@ -345,8 +345,8 @@ export default function SettingsAgent() {
         </div>
         <p className="mb-4 text-xs leading-relaxed text-zinc-500">
           {tr(
-            '设置助理单次 LLM 请求的最长等待时间，也用作巡检报告的总生成窗口。默认 120 秒；工作流和工具的专用超时保持不变。',
-            'Sets the longest wait for one assistant LLM request and the total inspection-report generation window. Defaults to 120 seconds; workflow and tool-specific timeouts stay unchanged.',
+            '设置助理和工作流 LLM（单次）节点的请求超时，也用作巡检报告的总生成窗口。默认 120 秒；工作流智能体节点和工具的专用超时保持不变。',
+            'Sets the request timeout for assistant LLM calls and workflow LLM nodes, plus the total inspection-report generation window. Defaults to 120 seconds; workflow agent nodes and tools keep their own timeouts.',
           )}
         </p>
         {loading ? (
