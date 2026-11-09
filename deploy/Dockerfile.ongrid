@@ -14,6 +14,18 @@ FROM golang:1.25-bookworm AS builder
 
 ARG VERSION
 ARG TARGETARCH
+
+# Module proxy. The Go toolchain default (proxy.golang.org) is
+# unreachable from CN networks, and GOPROXY is NOT a fail-fast list:
+# Go tries the entries in order and does NOT fall through to the next
+# one on a dial timeout — it hard-fails after ~60s per module. Without
+# a reachable mirror first, the `go mod download` step below reads as
+# hung. Keep a reachable mirror FIRST; override per build with
+# `--build-arg GOPROXY=<mirror>` (deploy/docker-compose.yml forwards
+# $GOPROXY, Makefile targets can pass it directly).
+ARG GOPROXY=https://goproxy.cn,https://proxy.golang.org,direct
+ENV GOPROXY=${GOPROXY}
+
 WORKDIR /app
 
 RUN set -eux; \

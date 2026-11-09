@@ -1,0 +1,235 @@
+[
+ {
+  "en": "aliyun",
+  "is_inner": true,
+  "is_plugin": false,
+  "name": "阿里云",
+  "option": {
+   "en": "aliyun",
+   "icon": {
+    "name": "caise-aliyun"
+   }
+  },
+  "type": "http"
+ },
+ {
+  "en": "tencentcloud",
+  "is_inner": true,
+  "is_plugin": false,
+  "name": "腾讯云",
+  "option": {
+   "en": "tencentcloud",
+   "icon": {
+    "name": "caise-tengxunyun"
+   }
+  },
+  "type": "http"
+ },
+ {
+  "en": "huaweicloud",
+  "is_inner": true,
+  "is_plugin": false,
+  "name": "华为云",
+  "option": {
+   "en": "huaweicloud",
+   "icon": {
+    "name": "caise-huaweiyun"
+   }
+  },
+  "type": "http"
+ },
+ {
+  "en": "aws",
+  "is_inner": true,
+  "is_plugin": false,
+  "name": "AWS",
+  "option": {
+   "en": "aws",
+   "icon": {
+    "name": "caise-aws"
+   }
+  },
+  "type": "http"
+ },
+ {
+  "en": "vcenter",
+  "is_inner": true,
+  "is_plugin": false,
+  "name": "VCenter",
+  "option": {
+   "category": "private_cloud",
+   "en": "vcenter",
+   "icon": {
+    "name": "cmdb-vcenter"
+   }
+  },
+  "type": "http"
+ },
+ {
+  "en": "kvm",
+  "is_inner": true,
+  "is_plugin": false,
+  "name": "KVM",
+  "option": {
+   "category": "private_cloud",
+   "en": "kvm",
+   "icon": {
+    "name": "ops-KVM"
+   }
+  },
+  "type": "http"
+ },
+ {
+  "en": "nginx",
+  "is_inner": true,
+  "is_plugin": false,
+  "name": "Nginx",
+  "option": {
+   "collect_key": "nginx",
+   "en": "nginx",
+   "icon": {
+    "name": "caise-nginx"
+   }
+  },
+  "type": "components"
+ },
+ {
+  "en": "apache",
+  "is_inner": true,
+  "is_plugin": false,
+  "name": "Apache",
+  "option": {
+   "collect_key": "apache",
+   "en": "apache",
+   "icon": {
+    "name": "caise-apache"
+   }
+  },
+  "type": "components"
+ },
+ {
+  "en": "tomcat",
+  "is_inner": true,
+  "is_plugin": false,
+  "name": "Tomcat",
+  "option": {
+   "collect_key": "tomcat",
+   "en": "tomcat",
+   "icon": {
+    "name": "caise-tomcat"
+   }
+  },
+  "type": "components"
+ },
+ {
+  "en": "mysql",
+  "is_inner": true,
+  "is_plugin": false,
+  "name": "MySQL",
+  "option": {
+   "collect_key": "mysql",
+   "en": "mysql",
+   "icon": {
+    "name": "caise-mySQL"
+   }
+  },
+  "type": "components"
+ },
+ {
+  "en": "mssql",
+  "is_inner": true,
+  "is_plugin": false,
+  "name": "MSSQL",
+  "option": {
+   "collect_key": "sqlserver",
+   "en": "mssql",
+   "icon": {
+    "name": "caise-SQLServer"
+   }
+  },
+  "type": "components"
+ },
+ {
+  "en": "oracle",
+  "is_inner": true,
+  "is_plugin": false,
+  "name": "Oracle",
+  "option": {
+   "collect_key": "oracle",
+   "en": "oracle",
+   "icon": {
+    "name": "caise-oracle"
+   }
+  },
+  "type": "components"
+ },
+ {
+  "en": "redis",
+  "is_inner": true,
+  "is_plugin": false,
+  "name": "Redis",
+  "option": {
+   "collect_key": "redis",
+   "en": "redis",
+   "icon": {
+    "name": "caise-redis"
+   }
+  },
+  "type": "components"
+ },
+ {
+  "is_inner": true,
+  "is_plugin": false,
+  "name": "交换机",
+  "option": {
+   "icon": {
+    "name": "caise-jiaohuanji"
+   }
+  },
+  "type": "snmp"
+ },
+ {
+  "is_inner": true,
+  "is_plugin": false,
+  "name": "路由器",
+  "option": {
+   "icon": {
+    "name": "caise-luyouqi"
+   }
+  },
+  "type": "snmp"
+ },
+ {
+  "is_inner": true,
+  "is_plugin": false,
+  "name": "防火墙",
+  "option": {
+   "icon": {
+    "name": "caise-fanghuoqiang"
+   }
+  },
+  "type": "snmp"
+ },
+ {
+  "is_inner": true,
+  "is_plugin": false,
+  "name": "光纤交换机",
+  "option": {
+   "icon": {
+    "name": "caise-fiber"
+   }
+  },
+  "type": "snmp"
+ },
+ {
+  "is_inner": true,
+  "is_plugin": false,
+  "name": "F5",
+  "option": {
+   "icon": {
+    "name": "caise-F5"
+   }
+  },
+  "type": "snmp"
+ }
+]

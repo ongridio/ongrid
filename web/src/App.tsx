@@ -6,6 +6,7 @@ import { safeLoginReturn } from '@/lib/loginReturn';
 import { Layout } from '@/components/Layout';
 import { ChatLayout } from '@/components/ChatLayout';
 import { useAuth } from '@/store/auth';
+import { cmdbRoutes } from '@/cmdb';
 
 const LoginPage = lazy(() => import('@/pages/Login'));
 const HomePage = lazy(() => import('@/pages/Home'));
@@ -164,6 +165,12 @@ export default function App() {
         <Route path="/clusters" element={<ClustersPage />} />
         <Route path="/clusters/:clusterId" element={<ClusterDetailPage />} />
         <Route path="/topology" element={<TopologyPage />} />
+        {/* CMDB mounts from its own module: `cmdbRoutes` carries the paths, the
+            pages and their suspense boundary, so this table never grows a line
+            per CMDB page. See web/src/cmdb/routes.tsx. */}
+        {cmdbRoutes.map((route) => (
+          <Route key={route.path} path={route.path} element={route.element} />
+        ))}
         {/* Old per-entity routes — folded into /topology with a type
             chip. Redirect (without query string) so bookmarks open the
             unified page; the operator picks the type chip themselves. */}
