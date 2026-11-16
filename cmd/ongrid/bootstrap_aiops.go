@@ -5,10 +5,13 @@ import (
 	"fmt"
 	managerbizsetting "github.com/ongridio/ongrid/internal/manager/biz/setting"
 	managerbizskill "github.com/ongridio/ongrid/internal/manager/biz/skill"
+	resultbiz "github.com/ongridio/ongrid/internal/manager/biz/toolresult"
+	resultdata "github.com/ongridio/ongrid/internal/manager/data/toolresult/store"
 	skillcore "github.com/ongridio/ongrid/internal/skill"
 	skillbuiltin "github.com/ongridio/ongrid/internal/skill/builtin"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 
 	managerbizaiops "github.com/ongridio/ongrid/internal/manager/biz/aiops"
@@ -28,6 +31,8 @@ import (
 )
 
 type aiopsModule struct {
+	resultRepo           *resultdata.Repo
+	results              *resultbiz.Usecase
 	alertSvc             *managersvcalert.Service
 	imbridgeRepo         *managerimbridgedata.Repo
 	imbridgeUC           *managerbizimbridge.UC
@@ -76,6 +81,20 @@ func bootstrapAIOps(cfg *config.Config, log *slog.Logger, notifyRouter *notify.R
 	// callback chain checks before each ChatModel turn — see Phase 4 cbDeps
 	// build below where the checker is set when the limit > 0.
 	aiopsRepo := manageraiopsdata.NewSessionRepo(storage.db)
+	quota := resultdata.DefaultQuota
+	if value := os.Getenv("ONGRID_TOOL_RESULTS_MAX_BYTES"); value != "" {
+		parsed, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || parsed < 128<<20 {
+			log.Error("invalid tool result quota; using default")
+		} else {
+			quota = parsed
+		}
+	}
+	resultRepo := resultdata.New(storage.db, firstNonEmpty(os.Getenv("ONGRID_TOOL_RESULTS_DIR"), "/var/lib/ongrid/tool-results"), quota)
+	results := resultbiz.New(resultRepo, aiopsRepo, []byte("tool-result-cursors:"+cfg.JWT.Secret), log)
+	captureResults := os.Getenv("ONGRID_TOOL_RESULTS_ENABLED") == "true"
+	results.SetCaptureEnabled(captureResults)
+
 	operationUC := managerbizaiops.NewOperationUsecase(aiopsRepo)
 	mutatingProposalRepo := manageraiopsdata.NewMutatingProposalRepo(storage.db)
 	// PromQuerier is the interface tools/registry takes; passing a typed-nil
@@ -94,6 +113,7 @@ func bootstrapAIOps(cfg *config.Config, log *slog.Logger, notifyRouter *notify.R
 		traceQuerier = telemetry.traceQuery
 	}
 	toolsReg := aiopstools.NewRegistry(tunnel.fbClient, devices.edgeUC, devices.deviceUC, promQuerier, logQuerier, traceQuerier, alerts.alertUC, log)
+	toolsReg.SetToolResults(results)
 	packetCaptureUC := managerbizpacketcapture.New(
 		managerpacketcapturedata.New(storage.db),
 		tunnel.fbClient,
@@ -202,7 +222,11 @@ func bootstrapAIOps(cfg *config.Config, log *slog.Logger, notifyRouter *notify.R
 		log.Warn("ONGRID_AGENT_KERNEL is obsolete; unified runtime is always used", slog.String("value", value))
 	}
 
+	if !captureResults {
+		resultRepo = nil
+	} // existing references remain readable after capture is disabled
 	return &aiopsModule{
+		resultRepo: resultRepo, results: results,
 		alertSvc:             alertSvc,
 		imbridgeRepo:         imbridgeRepo,
 		imbridgeUC:           imbridgeUC,

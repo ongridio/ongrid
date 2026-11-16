@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/ongridio/ongrid/internal/pkg/toolcapture"
 	"sync"
 	"time"
 
@@ -122,6 +123,7 @@ func (b *HumanApprovalBroker) ProposeAndAwait(ctx context.Context, req aiopstool
 			switch row.Status {
 			case "executed", "failed":
 				cleanup()
+				toolcapture.Link(ctx, row.ResultID)
 				return approvalToolResult(row)
 			case "rejected":
 				cleanup()

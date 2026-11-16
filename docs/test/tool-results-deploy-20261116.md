@@ -1,0 +1,37 @@
+# 工具大结果测试环境部署与演示（2026-11-16）
+
+- 环境：本机 OrbStack，https://localhost:8443。用户授权更新测试环境并保留演示会话。
+- Manager/Web：`v0.20.0-tool-results.20261116`；基于 `5d22f5d7` 和本分支未提交改动。
+- 保留现有环境变量、挂载、网络和端口；新增持久卷 `ongrid-tool-results-test-20261116`，开启 `ONGRID_TOOL_RESULTS_ENABLED=true`。
+- 数据库备份完成（84 表），MySQL 迁移验证结果表及 LONGTEXT 字段；首页、healthz、readyz 均 200，更新后容器重启计数为 0。
+- 部署前 Linux 关键路径测试通过；补充并验证 MCP 短文字说明配大型 structuredContent 时仍返回结果读取引用。
+
+## 可体验会话
+
+全部使用只读模拟 MCP `result_demo`，模型为现有配置的 `openai / gpt-6.1-terra`，会话推理级别为 low，不修改全局模型配置。
+
+| 会话 | 原文字节 | 压缩载荷字节 | 原工具调用 | 后续读取/查询 |
+| --- | ---: | ---: | ---: | ---: |
+| [大结果演示 1 · 12000 个项目精准筛选](https://localhost:8443/chat/e0bd2e12-0487-46f6-a3a5-3142b65764e3) | 3253482 | 32800 | 1 | 3 |
+| [大结果演示 2 · 32000 行日志定位错误](https://localhost:8443/chat/17953b9a-7e53-467e-8a24-e06cf194e0d0) | 3456175 | 63674 | 1 | 4 |
+| [大结果演示 3 · 失败结果保留与追问](https://localhost:8443/chat/c2426c4e-08ac-4992-a232-64c35ec88f6c) | 4825845 | 36387 | 1 | 1 |
+
+三份载荷均为 zstd_seekable，完整保存；下载 SHA-256 与存储元信息一致。项目清单的超大整数 ID 保真。失败诊断显示 execution_status=error、storage_status=ready，未重复执行源工具。压缩数字不含索引/manifest，也不代表真实业务数据压缩率。
+
+真实页面完成“展开工具结果 → 查看保存的结果 → 搜索 payments-11999 → 下载原文”，截图已检查。UI 验证复用了用户现有登录态；临时认证文件已删除。
+
+## 部署记录与停用
+
+构建、私有备份及配置快照、验收 JSON 位于工作树 `output/tool-results-test-20261116/`（不入 Git）；私有文件包含敏感配置，仅当前用户可读。
+
+关闭新捕获而继续读取已有结果：
+
+```bash
+python3 output/tool-results-test-20261116/deploy.py disable-capture
+```
+
+不要直接用旧二进制回滚 LONGTEXT 与引用记录；完整降级需单独评估数据转换。数据库快照和原镜像已保留。
+
+模拟服务 `ongrid-tool-results-demo-20261116` 无主机发布端口，只连接现有测试容器网络，以非 root、只读根文件系统运行。用户体验期间保留。停用时先在 MCP 页面禁用 `result_demo`，再停止该容器；无需删除演示会话或结果卷。
+
+未更新 Edge、生产环境或其他基础服务。此次验收是小规模合成数据演示，不替代容量压测或全部生产 MCP 的兼容性验收。

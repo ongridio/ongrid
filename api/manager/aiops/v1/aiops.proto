@@ -31,6 +31,11 @@ service AiopsService {
 
     // ListMessages 取某个 session 的历史消息（含 tool 调用）。
     rpc ListMessages(ListMessagesRequest) returns (ListMessagesResponse);
+    // HTTP: GET /v1/chat/sessions/{session_id}/tool-results/{result_id}
+    rpc GetSavedToolResult(GetSavedToolResultRequest) returns (GetSavedToolResultResponse);
+    // HTTP: POST .../{result_id}/read or /query. Download is GET .../download
+    // and streams the original bytes with Content-Disposition: attachment.
+    rpc ReadSavedToolResult(ReadSavedToolResultRequest) returns (ReadSavedToolResultResponse);
 }
 
 // ---------- 领域类型 ----------
@@ -82,6 +87,7 @@ message ToolResult {
     string tool_name = 2 [json_name = "tool_name"];
     string result_json = 3 [json_name = "result_json"];
     string error = 4 [json_name = "error"]; // 非空表示工具执行失败
+    string result_id = 5;
 }
 
 // ChatMessage 一条消息，兼容 user / assistant / tool / system。
@@ -93,6 +99,7 @@ message ToolExecution {
     string arguments_raw = 5;
     string result_raw = 6;
     uint64 device_id = 7;
+    string result_id = 8;
 }
 
 message ChatMessage {
@@ -108,6 +115,7 @@ message ChatMessage {
     uint32 completion_tokens = 9 [json_name = "completion_tokens"];
     google.protobuf.Timestamp created_at = 10 [json_name = "created_at"];
     ToolExecution tool_call = 11 [json_name = "tool_call"];
+    string result_id = 12;
 }
 
 // TokenUsage 单次 agent 循环总 token 消耗（跨多轮 LLM 调用累加）。
@@ -233,4 +241,69 @@ message ListMessagesRequest {
 
 message ListMessagesResponse {
     repeated ChatMessage messages = 1 [json_name = "messages"];
+}
+
+// Saved results are immutable. IDs carry no authorization; each operation
+// re-checks the session owner/admin and the stored parent/worker relationship.
+message GetSavedToolResultRequest {
+    string session_id = 1;
+    string result_id = 2;
+}
+message GetSavedToolResultResponse {
+    string id = 1;
+    string session_id = 2;
+    string tool_name = 3;
+    string execution_status = 4;
+    string capture_status = 5;
+    string capture_reason = 6;
+    string storage_status = 7;
+    string content_type = 8;
+    int64 captured_bytes = 9;
+    int64 expected_bytes = 10;
+    int64 stored_bytes = 11;
+    string sha256 = 12;
+    string encoding = 13;
+    google.protobuf.Timestamp created_at = 14;
+    google.protobuf.Timestamp expires_at = 15;
+}
+message ReadSavedToolResultRequest {
+    string session_id = 1;
+    string result_id = 2;
+    // bytes/lines: start is an original byte offset; json: element offset.
+    string mode = 3;
+    int64 start = 4;
+    string cursor = 5;
+    int32 limit = 6;
+    string collection_pointer = 7;
+    repeated string fields = 8;
+    string contains = 9;
+    string filter_pointer = 10;
+    // Exact JSON literal as text; preserves integers beyond float64 precision.
+    string equals_json = 11;
+    bool count = 12;
+    bool query = 13;
+}
+message SavedToolResultItem {
+    int64 start = 1;
+    int64 end = 2;
+    optional int64 record = 3;
+    string data_json = 4;
+    string text = 5;
+    bool fragment = 6;
+}
+message ReadSavedToolResultResponse {
+    string result_id = 1;
+    string capture_status = 2;
+    string storage_status = 3;
+    string mode = 4;
+    repeated SavedToolResultItem items = 5;
+    string next_cursor = 6;
+    int64 scanned_bytes = 7;
+    int64 scan_start = 8;
+    int64 scan_end = 9;
+    bool scan_complete = 10;
+    int64 count = 11;
+    bool count_exact = 12;
+    string count_scope = 13;
+    string notice = 14;
 }

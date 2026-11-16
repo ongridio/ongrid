@@ -44,7 +44,7 @@ expected_owner_for_path() {
         "$data_dir/loki"|"$data_dir/tempo") printf '10001:10001\n' ;;
         "$data_dir/grafana") printf '472:472\n' ;;
         "$data_dir/embeddings"|"$data_dir/skills"|"$data_dir/pages"|"$data_dir/packet-captures"|\
-            "$data_dir/chat-attachments"|\
+            "$data_dir/chat-attachments"|"$data_dir/tool-results"|\
             "$data_dir/workspace"|"$data_dir/tools") printf '65532:65532\n' ;;
         *) printf '0:0\n' ;;
     esac
@@ -93,6 +93,9 @@ grep -Fqx "chown 65532:65532 $data_dir/packet-captures" "$command_log" \
     || fail "normal preparation did not set the packet capture root directory owner"
 grep -Fqx "chown 65532:65532 $data_dir/chat-attachments" "$command_log" \
     || fail "normal preparation did not set the chat attachment root directory owner"
+grep -Fqx "chown 65532:65532 $data_dir/tool-results" "$command_log" \
+    || fail "normal preparation did not set the tool result directory owner"
+[[ -d "$data_dir/tool-results" ]] || fail "tool result directory missing"
 if grep -Eq '^(chown|chmod) -R ' "$command_log"; then
     fail "normal preparation recursively traversed a data directory"
 fi
@@ -324,7 +327,7 @@ grep -Fq '"$INSTALL_DIR"/ongrid-v*-linux.tar.xz' "$upgrade_script" \
     || fail "upgrade.sh does not include universal xz release packages in retention cleanup"
 grep -Fq '"$INSTALL_DIR"/ongrid-v*-linux-*.tar.xz' "$upgrade_script" \
     || fail "upgrade.sh no longer includes legacy architecture-specific xz packages in cleanup"
-for persistent_dir in mysql prometheus loki tempo grafana skills pages packet-captures chat-attachments workspace tools; do
+for persistent_dir in mysql prometheus loki tempo grafana skills pages packet-captures chat-attachments tool-results workspace tools; do
     if grep -Eq "chown -R .*ONGRID_DATA_DIR/${persistent_dir}" "$upgrade_script"; then
         fail "upgrade.sh directly recurses through $persistent_dir outside the repair helper"
     fi

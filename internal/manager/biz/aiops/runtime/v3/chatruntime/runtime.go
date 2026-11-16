@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/ongridio/ongrid/internal/manager/biz/toolresult"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -57,6 +58,7 @@ const (
 // caller's job at construction time so the decorator deps (audit
 // sink, limiter, registerer) live exactly once per process.
 type Config struct {
+	Results *toolresult.Usecase
 	// SkillRegistry holds the parsed SKILL.md descriptors. May be
 	// empty (nil-safe ComposeSystemPrompt).
 	SkillRegistry *SkillRegistry
@@ -599,6 +601,9 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (result *Reply, ret
 	toolPersistence := callbacks.EnableSynchronousToolPersistence(handlers)
 	graphCfg.ToolPersistence = toolPersistence
 	sessionToolBag = skillLoader.bind(sessionToolBag, rt.cfg.CredentialBinder)
+	if rt.cfg.Results != nil {
+		sessionToolBag = rt.cfg.Results.BindTools(toolresult.Scope{SessionID: sess.ID, UserID: sess.UserID}, sessionToolBag)
+	}
 	g, err := graph.BuildReActGraph(rt.cfg.ChatModel, sessionToolBag, graphCfg)
 	if err != nil {
 		return nil, fmt.Errorf("chatruntime: build graph: %w", err)

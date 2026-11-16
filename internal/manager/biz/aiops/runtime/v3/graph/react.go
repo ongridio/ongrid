@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ongridio/ongrid/internal/pkg/llm"
 	"strings"
 
 	einomodel "github.com/cloudwego/eino/components/model"
@@ -84,7 +85,7 @@ func BuildReActGraph(
 		return nil, errors.New("graph: BuildReActGraph: model is required")
 	}
 	cfg = cfg.applyDefaults()
-	model = wrapBudgetStopModel(model, cfg.MaxIterations)
+	model = wrapBudgetStopModel(llm.WithContextBudget(model, cfg.ContextBudget), cfg.MaxIterations)
 
 	// 1. Build the inner eino react agent. We pass our adapted tools
 	//    in via ToolsConfig.Tools — eino infers the schema by calling

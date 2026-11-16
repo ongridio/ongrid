@@ -17,6 +17,7 @@ import (
 
 // Approval is one pending/decided dangerous action.
 type Approval struct {
+	ResultID            string     `gorm:"type:char(36);column:result_id;index" json:"result_id,omitempty"`
 	ExecutionOwner      string     `gorm:"size:64" json:"-"`
 	ExecutionLeaseUntil *time.Time `gorm:"index" json:"execution_lease_until,omitempty"`
 	// RuntimeVersion is immutable execution ownership, independent of the current default.
@@ -52,7 +53,7 @@ type Approval struct {
 	// Reason is the approver's note / reject rationale. ResultJSON holds
 	// the execution outcome after an approve runs the action.
 	Reason     *string `gorm:"type:text" json:"reason,omitempty"`
-	ResultJSON *string `gorm:"type:text" json:"result,omitempty"`
+	ResultJSON *string `gorm:"type:longtext" json:"result,omitempty"`
 
 	CreatedAt  time.Time  `json:"created_at"`
 	DecidedAt  *time.Time `json:"decided_at,omitempty"`

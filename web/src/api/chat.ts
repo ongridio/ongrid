@@ -13,6 +13,7 @@ export type ImageAttachment = {
 };
 
 export type ToolCallSummary = {
+  result_id?: string;
   id?: string; // server tool_call_id (UUID); absent on history-replay rows
   name: string;
   device_id?: number;
@@ -29,6 +30,7 @@ export type ToolCallSummary = {
 };
 
 export type ChatMessage = {
+  result_id?: string;
   // Server ids are UUIDs (post-2026-05 change); we still accept the
   // optimistic-render synthetic ids that the client mints locally —
   // those are short non-UUID strings ("user-<ts>", "tool-<id>", …).

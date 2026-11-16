@@ -200,12 +200,14 @@ func buildV2AIOpsRuntime(
 		SkillRegistry:   skillReg,
 		AgentRegistry:   agentReg,
 		Sessions:        sessions,
+		Results:         toolsReg.ToolResults(),
 		ChatModel:       chatModel,
 		ToolBag:         wrapped,
 		MentionResolver: nil, // wired below if we have a searcher
 		BasePrompt:      managersvcaiops.BasePrompt(),
 		HistoryLimit:    50,
 		GraphCfg: aiopsgraph.Config{
+			ContextBudget: llm.ContextBudget{Window: cfg.LLM.ContextWindow, Output: cfg.LLM.OutputTokens},
 			Model:         cfg.OpenAI.Model,
 			Temperature:   0.1,
 			MaxIterations: 30,

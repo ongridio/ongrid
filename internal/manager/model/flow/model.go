@@ -105,7 +105,7 @@ type FlowRunNode struct {
 	// InputJSON is the node config after expression resolution — what
 	// the executor actually received. OutputJSON is its data output.
 	InputJSON  string `gorm:"type:text;not null"`
-	OutputJSON string `gorm:"type:text;not null"`
+	OutputJSON string `gorm:"type:longtext;not null"`
 	// FiredPort is the control port the node emitted (next / true /
 	// false / error / ...) — the run viewer colors edges with it.
 	FiredPort string `gorm:"size:32;not null"`

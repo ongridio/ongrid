@@ -136,6 +136,7 @@ type Output struct {
 // 改进点 #5: MaxIterations 内嵌 — eino's ReAct accepts
 // MaxStep at construction; we expose it here.
 type Config struct {
+	ContextBudget llm.ContextBudget
 	// ToolPersistence is a per-run sink invoked directly by each tool adapter.
 	// It is deliberately injected at graph construction because nested Eino
 	// ToolsNode callbacks are not reliable for durable tool-result writes.

@@ -1,3 +1,4 @@
+import { SavedToolResult } from './SavedToolResult';
 import { Hint } from '@/components/ui/Tooltip';
 import { useState, useEffect } from 'react';
 import { resolveToolStatus } from '@/lib/toolStatus';
@@ -68,9 +69,9 @@ type Props = {
 
 export function MessageBubble({ message, sessionId, onConfirmConfigDraft, hideActiveOperations }: Props) {
   if ((message.kind === 'tool_card' || message.role === 'tool') && message.tool_call) {
-    return <ToolCallSummaryBlock call={fromSummary(message.tool_call)} onConfirmConfigDraft={onConfirmConfigDraft} hideActiveOperations={hideActiveOperations} />;
+    return <ToolCallSummaryBlock sessionId={sessionId} call={{...fromSummary(message.tool_call), result_id: message.tool_call.result_id ?? message.result_id}} onConfirmConfigDraft={onConfirmConfigDraft} hideActiveOperations={hideActiveOperations} />;
   }
-  if (message.role === 'tool') return <ToolBubble message={message} onConfirmConfigDraft={onConfirmConfigDraft} hideActiveOperations={hideActiveOperations} />;
+  if (message.role === 'tool') return <ToolBubble sessionId={sessionId} message={message} onConfirmConfigDraft={onConfirmConfigDraft} hideActiveOperations={hideActiveOperations} />;
   if (message.role === 'user') return <UserBubble message={message} sessionId={sessionId} />;
   // Tool-only assistant rows (empty content + has tool_calls) shouldn't
   // appear during streaming; on history reload they would, so suppress.
@@ -81,7 +82,7 @@ export function MessageBubble({ message, sessionId, onConfirmConfigDraft, hideAc
   ) {
     return null;
   }
-  return <AssistantBubble message={message} onConfirmConfigDraft={onConfirmConfigDraft} hideActiveOperations={hideActiveOperations} />;
+  return <AssistantBubble sessionId={sessionId} message={message} onConfirmConfigDraft={onConfirmConfigDraft} hideActiveOperations={hideActiveOperations} />;
 }
 
 // fromSummary maps the wire-level ToolCallSummary (server SSE shape) to
@@ -91,6 +92,7 @@ function fromSummary(tc: ToolCallSummary) {
   const result = tc.result ?? (tc.result_raw ? safeParse(tc.result_raw) : undefined);
   return {
     name: tc.name,
+    result_id: tc.result_id,
     device_id: tc.device_id,
     status: tc.status,
     duration_ms: tc.duration_ms,
@@ -180,7 +182,7 @@ function compactUserContent(
   return tr('确认创建这条告警规则', 'Confirm creating this alert rule');
 }
 
-function AssistantBubble({ message, onConfirmConfigDraft, hideActiveOperations }: Props) {
+function AssistantBubble({ message, sessionId, onConfirmConfigDraft, hideActiveOperations }: Props) {
   // Codex-style: no rounded card around assistant prose. Render markdown
   // flush against the column so headings/lists/code blocks read like a
   // document. Tool calls (when attached) appear as their own rows inside
@@ -197,22 +199,24 @@ function AssistantBubble({ message, onConfirmConfigDraft, hideActiveOperations }
         </div>
       )}
       {message.tool_calls?.map((tc, i) => (
-        <ToolCallSummaryBlock key={`${tc.name}-${i}`} call={tc} onConfirmConfigDraft={onConfirmConfigDraft} hideActiveOperations={hideActiveOperations} />
+        <ToolCallSummaryBlock sessionId={sessionId} key={`${tc.name}-${i}`} call={tc} onConfirmConfigDraft={onConfirmConfigDraft} hideActiveOperations={hideActiveOperations} />
       ))}
     </div>
   );
 }
 
-function ToolBubble({ message, onConfirmConfigDraft, hideActiveOperations }: Props) {
+function ToolBubble({ message, sessionId, onConfirmConfigDraft, hideActiveOperations }: Props) {
   // History-reload path: the message persisted by the agent loop only
   // carries the tool name + JSON result string. We don't have args for
   // these (would need to join chat_tool_calls); show what we have.
   const result = message.content ? safeParse(message.content) : undefined;
   return (
     <ToolCallSummaryBlock
+      sessionId={sessionId}
       onConfirmConfigDraft={onConfirmConfigDraft}
       call={{
         name: message.tool_name ?? 'tool',
+        result_id: message.result_id,
         // 历史消息没有执行状态，仅从明确的结果字段恢复。
         result,
       }}
@@ -223,10 +227,13 @@ function ToolBubble({ message, onConfirmConfigDraft, hideActiveOperations }: Pro
 
 function ToolCallSummaryBlock({
   call,
+  sessionId,
   onConfirmConfigDraft,
   hideActiveOperations,
 }: {
+  sessionId?: string;
   call: {
+    result_id?: string;
     name: string;
     device_id?: number;
     status?: string;
@@ -257,6 +264,8 @@ function ToolCallSummaryBlock({
     return <OperationCard operation={operation} />;
   }
   const configDraft = !isError ? asConfigDraft(call.result) : null;
+  const candidate = call.result && typeof call.result === 'object' ? call.result as Record<string, unknown> : undefined;
+  const resultId = call.result_id ?? (candidate?.kind === 'tool_result' && typeof candidate.result_id === 'string' ? candidate.result_id : undefined);
   return (
     <div
       className={cn(
@@ -314,7 +323,7 @@ function ToolCallSummaryBlock({
           )}
           {call.result !== undefined && (
             <div>
-              <div className="mb-1 text-[10px] uppercase tracking-wide text-zinc-500">{tr('结果', 'Result')}</div>
+              <div className="mb-1 flex flex-wrap items-center justify-between gap-2"><span className="text-[10px] uppercase tracking-wide text-zinc-500">{tr('结果', 'Result')}</span>{sessionId && resultId && <SavedToolResult sessionId={sessionId} resultId={resultId} />}</div>
               <pre className="max-h-72 overflow-auto text-[11px] leading-5 text-zinc-300">
                 {typeof call.result === 'string'
                   ? call.result

@@ -60,5 +60,8 @@
   {"method":"GET","path":"/v1/im/bindings/challenges/{id}","reason":"IM identity binding and approval authority must remain in the trusted administrator console."},
   {"method":"POST","path":"/v1/im/bindings/challenges/{id}/confirm","reason":"IM identity binding and approval authority must remain in the trusted administrator console."},
   {"method":"GET","path":"/v1/im/bindings","reason":"IM identity binding and approval authority must remain in the trusted administrator console."},
-  {"method":"DELETE","path":"/v1/im/bindings/{id}","reason":"IM identity binding and approval authority must remain in the trusted administrator console."}
+  {"method":"DELETE","path":"/v1/im/bindings/{id}","reason":"IM identity binding and approval authority must remain in the trusted administrator console."},
+  {"method":"GET","path":"/v1/chat/sessions/{id}/tool-results/{resultID}","reason":"Saved tool evidence is scoped to an authenticated chat session; external MCP has no session capability."},
+  {"method":"GET","path":"/v1/chat/sessions/{id}/tool-results/{resultID}/{resultAction}","reason":"Saved tool evidence is scoped to an authenticated chat session; external MCP has no session capability."},
+  {"method":"POST","path":"/v1/chat/sessions/{id}/tool-results/{resultID}/{resultAction}","reason":"Saved tool evidence is scoped to an authenticated chat session; external MCP has no session capability."}
 ]

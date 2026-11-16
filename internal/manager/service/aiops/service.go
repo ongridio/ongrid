@@ -13,6 +13,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/ongridio/ongrid/internal/manager/biz/toolresult"
 	"io"
 	"log/slog"
 	"reflect"
@@ -44,6 +45,7 @@ type APMSourceResolver interface {
 }
 
 type Service struct {
+	results           *toolresult.Usecase
 	checkPageIncident func(context.Context, Caller, uint64) error
 	apmSource         APMSourceResolver
 	runtime           RuntimeHandler
