@@ -3,7 +3,6 @@ package graph
 import (
 	"context"
 	"encoding/json"
-	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	"regexp"
 	"strconv"
 	"strings"
@@ -11,6 +10,8 @@ import (
 	einomodel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 
+	aiopstools "github.com/ongridio/ongrid/internal/manager/biz/aiops/tools"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	"github.com/ongridio/ongrid/internal/pkg/llm"
 )
 
@@ -74,6 +75,9 @@ func (m *budgetStopModel) Stream(ctx context.Context, input []*schema.Message, o
 }
 
 func (m *budgetStopModel) synthesizeAfterToolBudget(ctx context.Context, input []*schema.Message, tool string, opts ...einomodel.Option) (*schema.Message, error) {
+	if content := pendingConfigDraftContent(input); content != "" {
+		return &schema.Message{Role: schema.Assistant, Content: content}, nil
+	}
 	tool = strings.TrimSpace(tool)
 	if tool == "" {
 		tool = "tool"
@@ -227,7 +231,8 @@ func priorToolCounts(messages []*schema.Message) map[string]int {
 			continue
 		}
 		name := basetool.CanonicalName(strings.TrimSpace(msg.ToolName))
-		if name == "" {
+		// Match the adapter: repairable draft results do not consume the successful-draft limit.
+		if name == "" || !countSuccessfulToolCall(name, msg.Content) {
 			continue
 		}
 		counts[name]++
@@ -243,6 +248,57 @@ func budgetPrunedFinalContent(messages []*schema.Message, tool string) string {
 		return "This turn reached the per-tool safety limit for `" + tool + "`, and the model did not produce a usable synthesis. No raw tool output is shown. Send a narrower target or time window to continue in a new turn."
 	}
 	return "本轮 `" + tool + "` 已达到单工具安全上限，模型未能生成可用的归纳结论。这里不会展示工具原始结果；请在下一条消息给出更窄的目标或时间窗后继续。"
+}
+
+func pendingConfigDraftContent(messages []*schema.Message) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg == nil {
+			continue
+		}
+		if msg.Role == schema.User && !isSystemReminderMessage(msg.Content) {
+			break
+		}
+		if msg.Role != schema.Tool {
+			continue
+		}
+		name := basetool.CanonicalName(msg.ToolName)
+		// An apply attempt may have changed the resource; do not describe it as pending.
+		if name == aiopstools.ToolNameApplyConfigChange {
+			break
+		}
+		if name != toolNameDraftConfigChange {
+			continue
+		}
+		var draft aiopstools.ConfigDraft
+		if json.Unmarshal([]byte(msg.Content), &draft) != nil || draft.Kind != aiopstools.ConfigResultKindDraft || strings.TrimSpace(draft.DraftHash) == "" {
+			continue
+		}
+		if wantsEnglishResponse(messages) {
+			scope := "not specified"
+			if draft.Scope != nil {
+				switch draft.Scope.Type {
+				case "host":
+					scope = "host-level"
+				case "global":
+					scope = "global"
+				case "monitoring_pipeline":
+					scope = "monitoring platform"
+				}
+			}
+			return "One alert-rule draft is ready and has not been applied.\n\nSummary: " + draft.Summary + "\nScope: " + scope + "\n\nReview this draft and reply “ok” to apply it, or describe the changes you need. Drafts are handled one at a time; for multiple rules, confirm this draft first, then continue in a later message."
+		}
+		scope := "未提供"
+		if draft.Scope != nil && strings.TrimSpace(draft.Scope.Label) != "" {
+			scope = draft.Scope.Label
+		}
+		confirmation := strings.TrimSpace(draft.ConfirmationPrompt)
+		if confirmation == "" {
+			confirmation = "请检查草案，确认无误后回复“ok”应用，或说明需要修改的内容。"
+		}
+		return "已生成一条告警规则草案，尚未应用。\n\n摘要：" + draft.Summary + "\n告警范围：" + scope + "\n\n" + confirmation + "\n\n每轮处理一条草案；如需多条，请先确认当前草案，再在后续消息中继续。"
+	}
+	return ""
 }
 
 func summarizeRecentToolEvidence(messages []*schema.Message) string {
@@ -573,7 +629,7 @@ func latestTerminalToolBudget(messages []*schema.Message) (toolBudgetEnvelope, b
 		if err := json.Unmarshal([]byte(msg.Content), &env); err != nil {
 			continue
 		}
-		if env.Status == "call_budget_exceeded" && env.FinalAnswer {
+		if env.Status == "call_budget_exceeded" && (env.FinalAnswer || basetool.CanonicalName(env.Tool) == toolNameDraftConfigChange) {
 			return env, true
 		}
 	}
@@ -628,6 +684,9 @@ func (m *budgetStopModel) finalizeTurn(ctx context.Context, input []*schema.Mess
 	}
 	if err := llm.BudgetRejectionFromContext(ctx); err != nil {
 		return nil, err
+	}
+	if content := pendingConfigDraftContent(input); content != "" {
+		return &schema.Message{Role: schema.Assistant, Content: content}, nil
 	}
 	finalModel, err := m.inner.WithTools(nil)
 	if err != nil {
