@@ -227,7 +227,8 @@ func priorToolCounts(messages []*schema.Message) map[string]int {
 			continue
 		}
 		name := basetool.CanonicalName(strings.TrimSpace(msg.ToolName))
-		if name == "" {
+		// Match the adapter: repairable draft results do not consume the successful-draft limit.
+		if name == "" || !countSuccessfulToolCall(name, msg.Content) {
 			continue
 		}
 		counts[name]++

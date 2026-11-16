@@ -195,3 +195,74 @@ func TestIterationFinalizationRemovesProviderTools(t *testing.T) {
 		t.Fatalf("result=%+v calls=%d err=%v", result, calls, err)
 	}
 }
+
+func TestBudgetStopModel_DraftRepairDoesNotConsumeSuccessfulDraftLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		result string
+	}{
+		{"catalog preflight", `{"status":"blocked","error":"metric_catalog_required"}`},
+		{"validation failure", `{"kind":"config_validation_failed","validation":{"status":"failed"}}`},
+		{"tool error", `{"status":"failed","error":"invalid scope"}`},
+		{"incomplete draft", `{"kind":"config_draft"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			call := makeAssistantToolCall("", "retry_draft", toolNameDraftConfigChange, `{}`)
+			inner := newScriptedChatModel(call)
+			got, err := wrapBudgetStopModel(inner).Generate(context.Background(), []*schema.Message{
+				schema.UserMessage("创建一条 K8s 告警规则"),
+				schema.ToolMessage(tc.result, "first_draft", schema.WithToolName(toolNameDraftConfigChange)),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got.ToolCalls) != 1 || got.ToolCalls[0].ID != "retry_draft" || inner.generateCalls() != 1 {
+				t.Fatalf("repair should reach the tool without budget synthesis: message=%+v model calls=%d", got, inner.generateCalls())
+			}
+		})
+	}
+}
+
+func TestBudgetStopModel_ConfirmedDraftStillConsumesLimit(t *testing.T) {
+	call := makeAssistantToolCall("", "second_draft", toolNameDraftConfigChange, `{}`)
+	inner := newScriptedChatModel(call, makeAssistantNoTools("请先确认已有草案。"))
+	got, err := wrapBudgetStopModel(inner).Generate(context.Background(), []*schema.Message{
+		schema.UserMessage("创建几个 K8s 告警规则"),
+		schema.ToolMessage(`{"kind":"config_draft","draft_hash":"sha256:valid"}`, "first_draft", schema.WithToolName(toolNameDraftConfigChange)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.ToolCalls) != 0 || got.Content != "请先确认已有草案。" || inner.generateCalls() != 2 {
+		t.Fatalf("second successful draft should remain blocked: message=%+v model calls=%d", got, inner.generateCalls())
+	}
+}
+
+func TestBuildReActGraph_RepairsDraftAfterMetricCatalogPreflight(t *testing.T) {
+	const args = `{"domain":"alert_rule","rule":{"kind":"metric_raw","spec":{"expr":"up == 0"}}}`
+	const result = `{"kind":"config_draft","draft_hash":"sha256:valid"}`
+	model := newScriptedChatModel(
+		makeAssistantToolCall("", "draft_before_catalog", toolNameDraftConfigChange, args),
+		makeAssistantToolCall("", "catalog", toolNameListMetricCatalog, `{}`),
+		makeAssistantToolCall("", "draft_after_catalog", toolNameDraftConfigChange, args),
+		makeAssistantNoTools("请确认草案。"),
+	)
+	draft := &fakeBaseTool{name: toolNameDraftConfigChange, class: "read", parameters: `{"type":"object"}`, runResp: result}
+	catalog := &fakeBaseTool{name: toolNameListMetricCatalog, class: "read", parameters: `{"type":"object"}`, runResp: `{"metrics":[{"name":"up"}]}`}
+	sink := &recordingToolPersistence{}
+	g, err := BuildReActGraph(model, []basetool.BaseTool{draft, catalog}, Config{MaxIterations: 8, ToolPersistence: sink})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := g.Invoke(context.Background(), &Input{UserText: "创建一条 K8s 告警规则"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.AssistantMessage.Content != "请确认草案。" || draft.calls.Load() != 1 || catalog.calls.Load() != 1 {
+		t.Fatalf("draft should execute after catalog repair: message=%+v draft calls=%d catalog calls=%d", out.AssistantMessage, draft.calls.Load(), catalog.calls.Load())
+	}
+	_, ends := sink.records()
+	if len(ends) != 3 || ends[2] != toolNameDraftConfigChange+":"+result {
+		t.Fatalf("confirmable draft should be persisted after the blocked attempt: %v", ends)
+	}
+}
