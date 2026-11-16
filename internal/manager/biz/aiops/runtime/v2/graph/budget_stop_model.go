@@ -75,10 +75,8 @@ func (m *budgetStopModel) Stream(ctx context.Context, input []*schema.Message, o
 }
 
 func (m *budgetStopModel) synthesizeAfterToolBudget(ctx context.Context, input []*schema.Message, tool string, opts ...einomodel.Option) (*schema.Message, error) {
-	if basetool.CanonicalName(tool) == toolNameDraftConfigChange {
-		if content := pendingConfigDraftContent(input); content != "" {
-			return &schema.Message{Role: schema.Assistant, Content: content}, nil
-		}
+	if content := pendingConfigDraftContent(input); content != "" {
+		return &schema.Message{Role: schema.Assistant, Content: content}, nil
 	}
 	tool = strings.TrimSpace(tool)
 	if tool == "" {
