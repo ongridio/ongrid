@@ -733,13 +733,14 @@ ONGRID_HTTP_PORT=$(grep -E '^ONGRID_HTTP_PORT=' "$ENV_FILE" | cut -d= -f2- || ec
 
 # nginx terminates TLS on host port ${ONGRID_HTTP_PORT}; -k tolerates
 # self-signed cert so existing installs keep working post-upgrade.
-log_info "waiting for /healthz on https://localhost:${ONGRID_HTTP_PORT} (up to 90s)"
+log_info "waiting for /healthz and /cmdb-readyz on https://localhost:${ONGRID_HTTP_PORT} (up to 90s)"
 HEALTH_OK=0
 for i in $(seq 1 45); do
-    if curl -fsSk "https://localhost:${ONGRID_HTTP_PORT}/healthz" >/dev/null 2>&1; then
+    if curl -fsSk "https://localhost:${ONGRID_HTTP_PORT}/healthz" >/dev/null 2>&1 \
+        && curl -fsSk "https://localhost:${ONGRID_HTTP_PORT}/cmdb-readyz" >/dev/null 2>&1; then
         HEALTH_OK=1
         EDGE_SWAP_COMPLETE=0
-        log_info "ongrid healthy (took ~$((i*2))s)"
+        log_info "ongrid and CMDB healthy (took ~$((i*2))s)"
         break
     fi
     printf '.'
@@ -747,8 +748,9 @@ for i in $(seq 1 45); do
 done
 printf '\n'
 if [[ $HEALTH_OK -eq 0 ]]; then
-    log_error "upgrade health check failed: ongrid did not become healthy within 90s"
+    log_error "upgrade health check failed: ongrid or CMDB did not become healthy within 90s"
     log_error "check: docker compose -f $INSTALL_DIR/docker-compose.yml logs ongrid"
+    log_error "       docker compose -f $INSTALL_DIR/docker-compose.yml logs ongrid-cmdb"
     if [[ -n "$EDGE_BACKUP_DIR" && -d "$EDGE_BACKUP_DIR/edge" ]]; then
         printf -v rollback_current '%q' "$INSTALL_DIR/edge"
         printf -v rollback_source '%q' "$EDGE_BACKUP_DIR/edge"
@@ -794,6 +796,7 @@ if [[ $HEALTH_OK -eq 1 ]]; then
     # for unrelated workloads; filter to ongrid* repos.
     for repo in \
         docker.cnb.cool/ongridio/ongrid \
+        docker.cnb.cool/ongridio/ongrid/ongrid-cmdb \
         docker.cnb.cool/ongridio/ongrid/ongrid-web; do
         # List image refs matching <repo>:* and drop those that don't
         # match $NEW_VERSION. compose holds the running tag, so docker

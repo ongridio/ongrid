@@ -66,6 +66,10 @@ if bash "$repo_root/deploy/install/uninstall.sh" --mode=systemd >"$tmp_dir/unins
   echo "uninstall unexpectedly accepted --mode=systemd" >&2
   exit 1
 fi
+grep -Fq 'ongrid/ongrid-cmdb:${VERSION_FROM_FILE}' "$repo_root/deploy/install/uninstall.sh" || {
+  echo "uninstall --purge leaves the ongrid-cmdb image on disk" >&2
+  exit 1
+}
 if [[ -d "$repo_root/deploy/install/systemd" ]] \
     && find "$repo_root/deploy/install/systemd" -type f -print -quit | grep -q .; then
   echo "Manager systemd install files still exist" >&2
@@ -156,6 +160,10 @@ for arch in amd64 arm64; do
     "$extract_dir/$package_root/install.sh"
   cmp "$repo_root/deploy/install/profiles-gateway.yaml" \
     "$extract_dir/$package_root/profiles-gateway.yaml"
+  grep -Fq 'ongrid-cmdb:' "$extract_dir/$package_root/docker-compose.yml"
+  grep -Fq 'image: docker.cnb.cool/ongridio/ongrid/ongrid-cmdb:${ONGRID_VERSION}' \
+    "$extract_dir/$package_root/docker-compose.yml"
+  grep -Fq 'ONGRID_CMDB_METRICS_PORT' "$extract_dir/$package_root/.env.example"
   grep -Fq 'pcap-parser:' "$extract_dir/$package_root/docker-compose.yml"
   grep -Fq 'ONGRID_PACKET_PARSER_URL: http://pcap-parser:8080' \
     "$extract_dir/$package_root/docker-compose.yml"

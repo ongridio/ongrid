@@ -131,6 +131,8 @@ sudo ./uninstall.sh --purge --yes
 | `ONGRID_HTTP_REDIRECT_PORT` | nginx HTTP→HTTPS 跳转端口（默认 80），置 `0` 可禁用 | 默认 80 |
 | `ONGRID_TUNNEL_PORT` | Edge 连接端口（默认 40012） | 默认 40012 |
 | `ONGRID_METRICS_PORT` | Prometheus 抓取端口（默认 9100） | 默认 9100 |
+| `ONGRID_CMDB_METRICS_PORT` | CMDB 服务 metrics 宿主机端口 | 默认 9102 |
+| `ONGRID_CMDB_DB_MAX_OPEN_CONNS` / `ONGRID_CMDB_DB_MAX_IDLE_CONNS` | CMDB 数据库连接预算；与 manager 的 50/10 一起计入 MySQL `max_connections` | 默认 20 / 5 |
 | `PROM_PORT` | 留作历史兼容（ADR-009 后 Prometheus 默认不发布到 host） | 默认 9090（不发布） |
 | `ONGRID_PROM_ENABLED` | manager 是否将 push_prom_samples 转发给 cloud Prometheus + 注册 query_promql AI 工具（ADR-009） | 默认 `true` |
 | `ONGRID_PROM_URL` | manager 访问 cloud Prometheus 的 URL，默认走 docker 内网 | 默认 `http://prometheus:9090` |

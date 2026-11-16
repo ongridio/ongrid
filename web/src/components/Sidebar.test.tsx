@@ -67,6 +67,18 @@ describe('Sidebar configurable sections', () => {
     } finally { vi.unstubAllGlobals(); }
   });
 
+  it('groups the CMDB entries under model and resource headings', async () => {
+    render(
+      <MemoryRouter>
+        <Sidebar />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'CMDB' }));
+    expect(await screen.findByText('模型管理')).toBeInTheDocument();
+    expect(screen.getByText('资源管理')).toBeInTheDocument();
+  });
+
   it('隐藏子菜单并从父菜单管理入口恢复', async () => {
     const user = userEvent.setup({ skipHover: true });
     render(

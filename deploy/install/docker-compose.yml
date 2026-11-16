@@ -278,6 +278,44 @@ services:
         max-size: 50m
         max-file: "5"
 
+  # Standalone CMDB API. The manager no longer mounts /v1/cmdb; nginx sends
+  # /api/v1/cmdb/* here. Shares the manager's database and JWT secret, and
+  # owns the CMDB AutoMigrate run (with an advisory lock).
+  ongrid-cmdb:
+    image: docker.cnb.cool/ongridio/ongrid/ongrid-cmdb:${ONGRID_VERSION}
+    container_name: ongrid-cmdb
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      ONGRID_HTTP_ADDR: ${ONGRID_CMDB_HTTP_ADDR:-:8082}
+      ONGRID_METRICS_ADDR: ${ONGRID_CMDB_METRICS_ADDR:-:9102}
+      ONGRID_DB_DIALECT: mysql
+      ONGRID_DB_DSN: ongrid:${MYSQL_PASSWORD}@tcp(mysql:3306)/ongrid?parseTime=true&charset=utf8mb4&loc=Local
+      # Second database client: keep it small so the manager (50) plus CMDB
+      # (20) stay inside the deployment's connection budget.
+      ONGRID_DB_MAX_OPEN_CONNS: ${ONGRID_CMDB_DB_MAX_OPEN_CONNS:-20}
+      ONGRID_DB_MAX_IDLE_CONNS: ${ONGRID_CMDB_DB_MAX_IDLE_CONNS:-5}
+      ONGRID_JWT_SECRET: ${ONGRID_JWT_SECRET:?ONGRID_JWT_SECRET is required in .env}
+      ONGRID_SECRET_KEY: ${ONGRID_SECRET_KEY:-}
+      ONGRID_OTEL_ENDPOINT: ${ONGRID_OTEL_ENDPOINT:-tempo:4318}
+      ONGRID_OTEL_SAMPLING_RATIO: ${ONGRID_OTEL_SAMPLING_RATIO:-1}
+    healthcheck:
+      test: ["CMD", "/ongrid-cmdb", "--healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    ports:
+      # Metrics only; the API is reached through nginx on the compose network.
+      - "${ONGRID_CMDB_METRICS_PORT:-9102}:9102"
+    logging:
+      driver: json-file
+      options:
+        max-size: 50m
+        max-file: "5"
+
   frontier:
     # Upstream broker mirrored to the project CNB registry. The pinned tag is
     # bumped together with Makefile var FRONTIER_VERSION.
@@ -307,6 +345,8 @@ services:
     restart: unless-stopped
     depends_on:
       ongrid:
+        condition: service_started
+      ongrid-cmdb:
         condition: service_started
       profiles-gateway:
         condition: service_started

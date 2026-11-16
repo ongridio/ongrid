@@ -1,0 +1,248 @@
+[
+ {
+  "desc": "实例所在的位置。",
+  "example": "",
+  "name": "Placement",
+  "type": "Placement"
+ },
+ {
+  "desc": "实例ID。",
+  "example": "ins-9bxebleo",
+  "name": "InstanceId",
+  "type": "String"
+ },
+ {
+  "desc": "实例机型。",
+  "example": "S1.SMALL1",
+  "name": "InstanceType",
+  "type": "String"
+ },
+ {
+  "desc": "实例的CPU核数，单位：核。",
+  "example": "1",
+  "name": "CPU",
+  "type": "Integer"
+ },
+ {
+  "desc": "实例内存容量，单位：GB。",
+  "example": "1",
+  "name": "Memory",
+  "type": "Integer"
+ },
+ {
+  "desc": "NORMAL：表示正常状态的实例\nEXPIRED：表示过期的实例\nPROTECTIVELY_ISOLATED：表示被安全隔离的实例。",
+  "example": "NORMAL",
+  "name": "RestrictState",
+  "type": "String"
+ },
+ {
+  "desc": "实例名称。",
+  "example": "测试实例",
+  "name": "InstanceName",
+  "type": "String"
+ },
+ {
+  "desc": "PREPAID：表示预付费，即包年包月\nPOSTPAID_BY_HOUR：表示后付费，即按量计费\nCDHPAID：专用宿主机付费，即只对专用宿主机计费，不对专用宿主机上的实例计费。\nSPOTPAID：表示竞价实例付费。",
+  "example": "PREPAID",
+  "name": "InstanceChargeType",
+  "type": "String"
+ },
+ {
+  "desc": "实例系统盘信息。",
+  "example": "",
+  "name": "SystemDisk",
+  "type": "SystemDisk"
+ },
+ {
+  "desc": "实例数据盘信息。",
+  "example": "",
+  "name": "DataDisks",
+  "type": "Array of DataDisk"
+ },
+ {
+  "desc": "实例主网卡的内网IP列表。",
+  "example": "[\"172.16.32.78\"]",
+  "name": "PrivateIpAddresses",
+  "type": "Array of String"
+ },
+ {
+  "desc": "实例主网卡的公网IP列表。注意：此字段可能返回 null，表示取不到有效值。",
+  "example": "[\"123.207.11.190\"]",
+  "name": "PublicIpAddresses",
+  "type": "Array of String"
+ },
+ {
+  "desc": "实例带宽信息。",
+  "example": "",
+  "name": "InternetAccessible",
+  "type": "InternetAccessible"
+ },
+ {
+  "desc": "实例所属虚拟私有网络信息。",
+  "example": "",
+  "name": "VirtualPrivateCloud",
+  "type": "VirtualPrivateCloud"
+ },
+ {
+  "desc": "生产实例所使用的镜像ID。",
+  "example": "img-9qabwvbn",
+  "name": "ImageId",
+  "type": "String"
+ },
+ {
+  "desc": "NOTIFY_AND_MANUAL_RENEW：表示通知即将过期，但不自动续费\nNOTIFY_AND_AUTO_RENEW：表示通知即将过期，而且自动续费\nDISABLE_NOTIFY_AND_MANUAL_RENEW：表示不通知即将过期，也不自动续费。\n注意：后付费模式本项为null",
+  "example": "NOTIFY_AND_MANUAL_RENEW",
+  "name": "RenewFlag",
+  "type": "String"
+ },
+ {
+  "desc": "创建时间。按照ISO8601标准表示，并且使用UTC时间。格式为：YYYY-MM-DDThh:mm:ssZ。",
+  "example": "2020-03-10T02:43:51Z",
+  "name": "CreatedTime",
+  "type": "Timestamp ISO8601"
+ },
+ {
+  "desc": "到期时间。按照ISO8601标准表示，并且使用UTC时间。格式为：YYYY-MM-DDThh:mm:ssZ。注意：后付费模式本项为null",
+  "example": "2020-04-10T02:47:36Z",
+  "name": "ExpiredTime",
+  "type": "Timestamp ISO8601"
+ },
+ {
+  "desc": "操作系统名称。",
+  "example": "CentOS 7.6 64bit",
+  "name": "OsName",
+  "type": "String"
+ },
+ {
+  "desc": "实例所属安全组。该参数可以通过调用 DescribeSecurityGroups 的返回值中的sgId字段来获取。",
+  "example": "[\"sg-p1ezv4wz\"]",
+  "name": "SecurityGroupIds",
+  "type": "Array of String"
+ },
+ {
+  "desc": "实例登录设置。目前只返回实例所关联的密钥。",
+  "example": "",
+  "name": "LoginSettings",
+  "type": "LoginSettings"
+ },
+ {
+  "desc": "PENDING：表示创建中\nLAUNCH_FAILED：表示创建失败\nRUNNING：表示运行中\nSTOPPED：表示关机\nSTARTING：表示开机中\nSTOPPING：表示关机中\nREBOOTING：表示重启中\nSHUTDOWN：表示停止待销毁\nTERMINATING：表示销毁中。",
+  "example": "",
+  "name": "InstanceState",
+  "type": "String"
+ },
+ {
+  "desc": "实例关联的标签列表。",
+  "example": "",
+  "name": "Tags",
+  "type": "Array of Tag"
+ },
+ {
+  "desc": "KEEP_CHARGING：关机继续收费\nSTOP_CHARGING：关机停止收费\nNOT_APPLICABLE：实例处于非关机状态或者不适用关机停止计费的条件",
+  "example": "NOT_APPLICABLE",
+  "name": "StopChargingMode",
+  "type": "String"
+ },
+ {
+  "desc": "实例全局唯一ID",
+  "example": "68b510db-b4c1-4630-a62b-73d0c7c970f9",
+  "name": "Uuid",
+  "type": "String"
+ },
+ {
+  "desc": "实例的最新操作。例：StopInstances、ResetInstance。注意：此字段可能返回 null，表示取不到有效值。",
+  "example": "RenewInstances",
+  "name": "LatestOperation",
+  "type": "String"
+ },
+ {
+  "desc": "SUCCESS：表示操作成功\nOPERATING：表示操作执行中\nFAILED：表示操作失败注意：此字段可能返回 null，表示取不到有效值。",
+  "example": "SUCCESS",
+  "name": "LatestOperationState",
+  "type": "String"
+ },
+ {
+  "desc": "实例最新操作的唯一请求 ID。注意：此字段可能返回 null，表示取不到有效值。",
+  "example": "3554eb5b-1cfa-471a-ae76-dc436c9d43e8",
+  "name": "LatestOperationRequestId",
+  "type": "String"
+ },
+ {
+  "desc": "分散置放群组ID。注意：此字段可能返回 null，表示取不到有效值。",
+  "example": "null",
+  "name": "DisasterRecoverGroupId",
+  "type": "String"
+ },
+ {
+  "desc": "实例的IPv6地址。注意：此字段可能返回 null，表示取不到有效值。",
+  "example": "null",
+  "name": "IPv6Addresses",
+  "type": "Array of String"
+ },
+ {
+  "desc": "CAM角色名。注意：此字段可能返回 null，表示取不到有效值。",
+  "example": "null",
+  "name": "CamRoleName",
+  "type": "String"
+ },
+ {
+  "desc": "高性能计算集群ID。注意：此字段可能返回 null，表示取不到有效值。",
+  "example": "null",
+  "name": "HpcClusterId",
+  "type": "String"
+ },
+ {
+  "desc": "高性能计算集群IP列表。注意：此字段可能返回 null，表示取不到有效值。",
+  "example": "null",
+  "name": "RdmaIpAddresses",
+  "type": "Array of String"
+ },
+ {
+  "desc": "实例所在的专用集群ID。注意：此字段可能返回 null，表示取不到有效值。",
+  "example": "cluster-du3jken",
+  "name": "DedicatedClusterId",
+  "type": "String"
+ },
+ {
+  "desc": "ARREAR：表示欠费隔离\nEXPIRE：表示到期隔离\nMANMADE：表示主动退还隔离\nNOTISOLATED：表示未隔离",
+  "example": "",
+  "name": "IsolatedSource",
+  "type": "String"
+ },
+ {
+  "desc": "GPU信息。如果是gpu类型子机，该值会返回GPU信息，如果是其他类型子机则不返回。注意：此字段可能返回 null，表示取不到有效值。",
+  "example": "",
+  "name": "GPUInfo",
+  "type": "GPUInfo"
+ },
+ {
+  "desc": "实例的操作系统许可类型，默认为TencentCloud",
+  "example": "TencentCloud",
+  "name": "LicenseType",
+  "type": "String"
+ },
+ {
+  "desc": "TRUE：表示开启实例保护，不允许通过api接口删除实例\nFALSE：表示关闭实例保护，允许通过api接口删除实例默认取值：FALSE。",
+  "example": "false",
+  "name": "DisableApiTermination",
+  "type": "Boolean"
+ },
+ {
+  "desc": "默认登录用户。",
+  "example": "root",
+  "name": "DefaultLoginUser",
+  "type": "String"
+ },
+ {
+  "desc": "默认登录端口。",
+  "example": "22",
+  "name": "DefaultLoginPort",
+  "type": "Integer"
+ },
+ {
+  "desc": "实例的最新操作错误信息。注意：此字段可能返回 null，表示取不到有效值。",
+  "example": "None",
+  "name": "LatestOperationErrorMsg",
+  "type": "String"
+ }
+]

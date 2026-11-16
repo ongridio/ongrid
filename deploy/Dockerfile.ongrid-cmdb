@@ -1,0 +1,49 @@
+# syntax=docker/dockerfile:1.7
+# ongrid-cmdb — standalone CMDB API service. Multi-stage, pure Go, distroless.
+# Build context MUST be the repo root (see Makefile target `docker-ongrid-cmdb`).
+
+ARG VERSION=dev
+
+# Runtime base image. Build hosts that cannot reach gcr.io can override it, e.g.
+#   --build-arg RUNTIME_IMAGE=gcr.m.daocloud.io/distroless/base-debian12:nonroot
+ARG RUNTIME_IMAGE=gcr.io/distroless/base-debian12:nonroot
+
+# ---------- Stage 1: builder ----------
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
+
+ARG VERSION
+ARG TARGETARCH
+
+# Module proxy. Keep a reachable mirror first for CN build hosts; see the
+# same block in deploy/Dockerfile.ongrid for why the order matters.
+ARG GOPROXY=https://goproxy.cn,https://proxy.golang.org,direct
+ENV GOPROXY=${GOPROXY}
+
+WORKDIR /app
+
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
+
+COPY . .
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux GOARCH="${TARGETARCH:-$(go env GOARCH)}" \
+    go build -trimpath \
+    -ldflags="-s -w -X main.version=${VERSION}" \
+    -o /out/ongrid-cmdb ./cmd/ongrid-cmdb
+
+# ---------- Stage 2: runtime ----------
+# Pure Go: no ONNX, no embedded model files, no skills/agents bundles.
+FROM ${RUNTIME_IMAGE}
+
+COPY --from=builder /out/ongrid-cmdb /ongrid-cmdb
+
+# 8082 = HTTP API, 9102 = Prometheus /metrics. The binary applies these as
+# its own defaults before config.Load, so a bare `docker run` is consistent
+# with the exposed ports and with `--healthcheck`.
+EXPOSE 8082 9102
+
+USER nonroot
+ENTRYPOINT ["/ongrid-cmdb"]
