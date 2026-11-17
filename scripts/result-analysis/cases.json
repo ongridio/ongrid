@@ -1,0 +1,8 @@
+[
+  {"id":"filter","session":"structured","question":"这是合成数据验证，不访问生产系统。请从 analysis_demo 的 current_projects 获取当前项目清单，找出名称包含 payments、status 为 failed 且 cost_cents 大于等于 80000 的全部项目，按完整整数 ID 升序排列。用 JSON 回答：total 是检查的全部记录数，matches 数组每项有 id、name、cost_cents。不要省略匹配项。"},
+  {"id":"groups","session":"structured","question":"继续用刚才的数据，不重新获取源清单。按 region 统计全部项目数量和 cost_cents 总和，空 region 归为 unknown。用 JSON 回答：total 和 groups；groups 每项为 region、count、cost_cents，并按 region 字母顺序排列。"},
+  {"id":"top","session":"structured","question":"仍用已有数据，不重新获取清单。找出 duration_ms 最高的前 5 条，时长相同时按完整整数 ID 升序。用 JSON 回答：total 和 top，top 每项为 id、duration_ms。"},
+  {"id":"quality","session":"legacy","question":"这是合成数据验证。请从 analysis_demo 的 legacy_projects 获取项目清单，统计缺少 owner（null 或空字符串）的记录数、出现多次的 external_key 个数，以及这些重复键涉及的记录总数。同时确认是否存在 status=critical 的记录。用 JSON 回答 total、missing_owner、duplicate_keys、duplicate_rows、critical（记录数）。所有计数必须覆盖完整清单。"},
+  {"id":"csv","session":"csv","question":"这是合成数据验证。请读取 analysis_demo 的 projects_csv，统计数据记录总数、cost_cents 精确整数总和、最小和最大完整整数 ID，以及 status=failed 的记录数。注意 CSV 中的字段可能含引号、逗号或换行。用 JSON 回答 total、cost_cents、min_id、max_id、failed。"},
+  {"id":"compare","session":"compare","question":"这是合成数据验证。请比较 analysis_demo 的 current_projects 和 previous_projects，以完整整数 id 匹配，统计当前新增、当前已删除、两份中都存在但 status 变化，以及两份中都存在且由非 failed 变成 failed 的记录数。用 JSON 回答 current_total、previous_total、added、removed、status_changed、new_failures。"}
+]

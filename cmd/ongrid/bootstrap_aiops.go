@@ -28,6 +28,7 @@ import (
 	managersvcalert "github.com/ongridio/ongrid/internal/manager/service/alert"
 	"github.com/ongridio/ongrid/internal/pkg/config"
 	"github.com/ongridio/ongrid/internal/pkg/notify"
+	"github.com/ongridio/ongrid/internal/pkg/resultanalysis"
 )
 
 type aiopsModule struct {
@@ -94,6 +95,14 @@ func bootstrapAIOps(cfg *config.Config, log *slog.Logger, notifyRouter *notify.R
 	results := resultbiz.New(resultRepo, aiopsRepo, []byte("tool-result-cursors:"+cfg.JWT.Secret), log)
 	captureResults := os.Getenv("ONGRID_TOOL_RESULTS_ENABLED") == "true"
 	results.SetCaptureEnabled(captureResults)
+	if captureResults {
+		analyzer, err := resultanalysis.NewClient()
+		if err != nil {
+			log.Error("tool result analysis disabled", slog.Any("err", err))
+		} else {
+			results.SetAnalyzer(analyzer)
+		}
+	}
 
 	operationUC := managerbizaiops.NewOperationUsecase(aiopsRepo)
 	mutatingProposalRepo := manageraiopsdata.NewMutatingProposalRepo(storage.db)

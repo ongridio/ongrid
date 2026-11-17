@@ -22,7 +22,11 @@ func (u *Usecase) BindTools(scope Scope, tools []basetool.BaseTool) []basetool.B
 		}
 	}
 	budget := &readBudget{}
-	return append(out, &readerTool{u: u, scope: scope, budget: budget}, &readerTool{u: u, scope: scope, budget: budget, query: true})
+	out = append(out, &readerTool{u: u, scope: scope, budget: budget}, &readerTool{u: u, scope: scope, budget: budget, query: true})
+	if u.analyzer != nil && u.captureEnabled {
+		out = append(out, &analysisTool{u: u, scope: scope})
+	}
+	return out
 }
 
 type capturedTool struct {

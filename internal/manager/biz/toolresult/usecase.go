@@ -49,6 +49,8 @@ type Usecase struct {
 	sessions       Sessions
 	key            []byte
 	log            *slog.Logger
+	analyzer       Analyzer
+	analysisSlots  chan struct{}
 }
 
 func New(repo Repo, sessions Sessions, signingKey []byte, log *slog.Logger) *Usecase {
@@ -198,7 +200,11 @@ func (u *Usecase) Capture(ctx context.Context, scope Scope, executionID, tool, o
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 	defer cancel()
 	err := u.repo.Save(writeCtx, row, raw, refs)
-	v := View{Kind: "tool_result", ResultID: row.ID, Status: status, ExecutionStatus: executionStatus, CaptureStatus: row.CaptureStatus, StorageStatus: "ready", ViewStatus: "excerpt", CapturedBytes: int64(len(raw)), Preview: prefix(string(raw), 2048), Instruction: "Use query_tool_result to select evidence, or read_tool_result for a bounded page. Preview is only an excerpt; do not re-run the original tool to retrieve more data."}
+	instruction := "Use query_tool_result to select evidence, or read_tool_result for a bounded page. Preview is only an excerpt; do not re-run the original tool to retrieve more data."
+	if u.analyzer != nil && u.captureEnabled {
+		instruction += " For whole-dataset questions, custom calculations, joins or nested formats, use analyze_tool_results to evaluate jq expressions over the complete saved inputs."
+	}
+	v := View{Kind: "tool_result", ResultID: row.ID, Status: status, ExecutionStatus: executionStatus, CaptureStatus: row.CaptureStatus, StorageStatus: "ready", ViewStatus: "excerpt", CapturedBytes: int64(len(raw)), Preview: prefix(string(raw), 2048), Instruction: instruction}
 	if err != nil {
 		u.log.Error("tool result persistence failed", slog.String("result_id", row.ID), slog.Any("err", err))
 		v.StorageStatus = "failed"

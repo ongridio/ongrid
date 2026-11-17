@@ -255,7 +255,7 @@ type ToolCall struct {
 	ID            string  `gorm:"primaryKey;type:char(36);column:id"`
 	MessageID     string  `gorm:"index;type:char(36);not null;column:message_id"`
 	ToolName      string  `gorm:"size:64;not null;column:tool_name"`
-	ArgumentsJSON string  `gorm:"type:text;not null;column:arguments_json"`
+	ArgumentsJSON string  `gorm:"type:longtext;not null;column:arguments_json"`
 	ResultJSON    *string `gorm:"type:longtext;column:result_json"`
 	Status        string  `gorm:"size:16;not null;default:pending;check:status IN ('pending','success','error','timeout')"`
 	Error         *string `gorm:"size:512;column:error"`
