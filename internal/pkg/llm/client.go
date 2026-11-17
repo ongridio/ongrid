@@ -34,6 +34,8 @@ import (
 var (
 	// ErrBudgetExceeded is returned when the daily token budget is hit.
 	ErrBudgetExceeded = errors.New("llm: budget exceeded")
+	// ErrContextBudgetExceeded is returned when a request cannot fit the context window.
+	ErrContextBudgetExceeded = errors.New("llm: context budget exceeded")
 	// ErrNoAPIKey is returned by the noop client when OPENAI_API_KEY is unset.
 	ErrNoAPIKey = errors.New("llm: OPENAI_API_KEY not set")
 )

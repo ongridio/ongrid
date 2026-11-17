@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -70,14 +71,26 @@ func TestContextBudgetIncludesSchemasAndRejectsPinnedOverflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = bound.Generate(context.Background(), []*schema.Message{schema.UserMessage("hi")}); err == nil {
-		t.Fatal("tool schemas not counted")
+	if _, err = bound.Generate(context.Background(), []*schema.Message{schema.UserMessage("hi")}); !errors.Is(err, ErrContextBudgetExceeded) {
+		t.Fatalf("tool schemas: got %v, want context budget error", err)
 	}
 	if stub.callCnt.Load() != 0 {
 		t.Fatal("over-budget request reached provider")
 	}
-	if _, err = bounded.Generate(context.Background(), []*schema.Message{schema.UserMessage(strings.Repeat("中文", 3000))}); err == nil {
-		t.Fatal("oversized current user input not rejected")
+	if _, err = bounded.Generate(context.Background(), []*schema.Message{schema.UserMessage(strings.Repeat("中文", 3000))}); !errors.Is(err, ErrContextBudgetExceeded) {
+		t.Fatalf("oversized current user input: got %v, want context budget error", err)
+	}
+	for _, m := range []model.ToolCallingChatModel{bound, bounded} {
+		stream, err := m.Stream(context.Background(), []*schema.Message{schema.UserMessage(strings.Repeat("中文", 3000))})
+		if stream != nil {
+			stream.Close()
+		}
+		if !errors.Is(err, ErrContextBudgetExceeded) || errors.Is(err, ErrBudgetExceeded) {
+			t.Fatalf("stream: got %v, want only context budget error", err)
+		}
+	}
+	if stub.callCnt.Load() != 0 {
+		t.Fatal("context rejection reached provider")
 	}
 	if _, err = bound.Generate(context.Background(), []*schema.Message{schema.UserMessage("summarize")}, model.WithToolChoice(schema.ToolChoiceForbidden)); err != nil {
 		t.Fatal(err)

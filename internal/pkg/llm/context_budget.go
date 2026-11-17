@@ -90,7 +90,7 @@ func (m *contextBudgetModel) prepare(input []*schema.Message, opts []model.Optio
 	// Protocol framing and provider-specific reasoning/tool wrappers need room.
 	limit := m.budget.Window - output - 4096 - definitions
 	if limit <= 0 || output <= 0 {
-		return nil, nil, fmt.Errorf("LLM context budget: tool definitions and output reserve exceed context window")
+		return nil, nil, fmt.Errorf("%w: tool definitions and output reserve exceed context window", ErrContextBudgetExceeded)
 	}
 	available := limit
 	limit -= 512 // reserve the explicit omission notice before trimming
@@ -196,7 +196,7 @@ func (m *contextBudgetModel) prepare(input []*schema.Message, opts []model.Optio
 		msgs = append([]*schema.Message{schema.SystemMessage("Earlier evidence was omitted to fit the context budget. Tool previews and query pages are partial; use saved result IDs to retrieve specific evidence. Do not infer completeness or repeat completed actions.")}, msgs...)
 	}
 	if size() > available {
-		return nil, nil, fmt.Errorf("LLM context budget exceeded: required messages need %d estimated tokens, available %d; reduce input or tool definitions", size(), available)
+		return nil, nil, fmt.Errorf("%w: required messages need %d estimated tokens, available %d; reduce input or tool definitions", ErrContextBudgetExceeded, size(), available)
 	}
 	options := append([]model.Option(nil), opts...)
 	options = append(options, model.WithMaxTokens(output))
