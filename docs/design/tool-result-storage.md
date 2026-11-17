@@ -105,7 +105,7 @@ flowchart TD
 | 读取 | index_version、index_status、已知时的行数 / 记录数、source_has_more |
 | 生命周期 | expires_at、updated_at、finalized_at |
 
-`inline_body` 使用二进制字段存储字节，应用上限先定为 32 KiB。MySQL 与 SQLite 分别验证映射。大小按序列化后的 UTF-8 字节计算，不按字符数判断。
+`inline_body` 使用二进制字段存储字节，应用上限为 50 KiB（51,200 字节）。MySQL 与 SQLite 分别验证映射。大小按序列化后的 UTF-8 字节计算，不按字符数判断。
 
 新增小表 `tool_result_refs`，把一个结果关联到 chat_tool_call、chat_message、approval、flow_run_node、operation 或报告证据。唯一键为 `(ref_kind, ref_id, slot)`；`result_id`、到期时间建立索引。它解决跨入口复用和清理问题，不授予读取权限。
 
@@ -149,8 +149,8 @@ tool-results/<date>/<shard>/<result-id>/
 
 | 载荷 | 默认策略 |
 | --- | --- |
-| ≤32 KiB | 数据库内联，不压缩 |
-| >32 KiB 且 <1 MiB | 持久文件，不压缩 |
+| ≤50 KiB | 数据库内联，不压缩 |
+| >50 KiB 且 <1 MiB | 持久文件，不压缩 |
 | ≥1 MiB 的文本、日志、JSON | Zstd 独立帧；每帧约 1 MiB 未压缩字节，从低压缩级别开始压测 |
 | JPEG、ZIP 等已压缩内容 | 保留原编码，默认不再次压缩；MCP 里的 Base64 由附件策略处理 |
 
@@ -300,7 +300,7 @@ cursor 绑定 result_id、内容版本、part、查询指纹、偏移和有效�
 
 | 项目 | 建议起点 | 作用 |
 | --- | --- | --- |
-| 数据库内联原文 | ≤32 KiB | 小结果少一次文件读取 |
+| 数据库内联原文 | ≤50 KiB | 小结果少一次文件读取 |
 | 首次模型视图 / 读取页 | 首期最多 4,000 个序列化 UTF-8 字节 | 防止中文、转义或元信息放大载荷 |
 | 一页记录数 | 默认 50，上限 200；仍服从字节上限 | 避免超长单页 |
 | 单个结果保存上限 | 默认 64 MiB 未压缩业务载荷 | 约束磁盘、内存及异常工具 |
@@ -518,8 +518,8 @@ cursor 绑定 result_id、内容版本、part、查询指纹、偏移和有效�
 flowchart TD
   A[工具返回 / MCP 原始业务 JSON] --> B[结果捕获：原文与执行状态]
   B --> C{原文大小}
-  C -->|不超过 32 KiB| D[SQL 内联原文]
-  C -->|32 KiB 至 1 MiB| E[私有持久文件]
+  C -->|不超过 50 KiB| D[SQL 内联原文]
+  C -->|超过 50 KiB 且不足 1 MiB| E[私有持久文件]
   C -->|文本或 JSON 至少 1 MiB| F[独立 Zstd 帧 + 定位表]
   D --> G[结果 ID + 有界预览]
   E --> G

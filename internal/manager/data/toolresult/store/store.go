@@ -26,7 +26,7 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/resultfile"
 )
 
-const InlineLimit = 32 << 10
+const InlineLimit = 50 << 10
 
 type Repo struct {
 	quota      int64

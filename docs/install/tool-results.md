@@ -15,7 +15,7 @@ Saved-result previews and read/query pages have byte limits. This feature does n
 
 The installer Compose file mounts `${ONGRID_DATA_DIR:-/var/lib/ongrid}/tool-results` from the host. The development Compose file mounts `../.cache/ongrid-tool-results`. Existing installer permission repair creates the directory for UID/GID 65532. For a manual development deployment, create the bind-mount directory with that owner before starting the non-root Manager. Do not place this directory under nginx's web root or expose it as a static download directory.
 
-The quota counts compressed payload, index and manifest file sizes. It is not a filesystem reservation. Keep at least 73 MiB free for write preflight and allow more headroom for concurrent processes and filesystem overhead. Small results up to 32 KiB remain in SQL; results of at least 1 MiB use compression when they are text or JSON. A captured result is limited to 64 MiB; the MCP response limit is 16 MiB.
+The quota counts compressed payload, index and manifest file sizes. It is not a filesystem reservation. Keep at least 73 MiB free for write preflight and allow more headroom for concurrent processes and filesystem overhead. Small results up to 50 KiB remain in SQL; results of at least 1 MiB use compression when they are text or JSON. A captured result is limited to 64 MiB; the MCP response limit is 16 MiB.
 
 ## Upgrade
 

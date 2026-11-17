@@ -47,7 +47,7 @@ func testRow(body []byte) *model.Result {
 }
 
 func TestSaveAndReadSmallPlainCompressed(t *testing.T) {
-	for _, size := range []int{0, 200, InlineLimit, InlineLimit + 1, resultfile.BlockSize + 25} {
+	for _, size := range []int{0, 200, (32 << 10) + 1, 50 << 10, (50 << 10) + 1, resultfile.BlockSize + 25} {
 		r := testRepo(t)
 		body := bytes.Repeat([]byte("a"), size)
 		row := testRow(body)
@@ -58,7 +58,7 @@ func TestSaveAndReadSmallPlainCompressed(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if (stored.StorageKey == "") != (size <= InlineLimit) {
+		if (stored.StorageKey == "") != (size <= 50<<10) {
 			t.Fatal("wrong inline policy")
 		}
 		if (stored.Encoding == resultfile.Seekable) != (size >= resultfile.BlockSize) {
