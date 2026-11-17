@@ -42,20 +42,19 @@ type Scope struct {
 	UserID    uint64
 }
 type Usecase struct {
-	captureEnabled bool
-	repo           Repo
-	sessions       Sessions
-	key            []byte
-	log            *slog.Logger
-	analyzer       Analyzer
-	analysisSlots  chan struct{}
+	repo          Repo
+	sessions      Sessions
+	key           []byte
+	log           *slog.Logger
+	analyzer      Analyzer
+	analysisSlots chan struct{}
 }
 
 func New(repo Repo, sessions Sessions, signingKey []byte, log *slog.Logger) *Usecase {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Usecase{captureEnabled: true, repo: repo, sessions: sessions, key: append([]byte(nil), signingKey...), log: log}
+	return &Usecase{repo: repo, sessions: sessions, key: append([]byte(nil), signingKey...), log: log}
 }
 
 func (u *Usecase) Preflight(ctx context.Context, scope Scope) error {
@@ -200,7 +199,7 @@ func (u *Usecase) Capture(ctx context.Context, scope Scope, executionID, tool, o
 	defer cancel()
 	err := u.repo.Save(writeCtx, row, raw, refs)
 	instruction := "Use query_tool_result to select evidence, or read_tool_result for a bounded page. Preview is only an excerpt; do not re-run the original tool to retrieve more data."
-	if u.analyzer != nil && u.captureEnabled {
+	if u.analyzer != nil {
 		instruction += " For whole-dataset questions, custom calculations, joins or nested formats, use analyze_tool_results to evaluate jq expressions over the complete saved inputs."
 	}
 	v := View{Kind: "tool_result", ResultID: row.ID, Status: status, ExecutionStatus: executionStatus, CaptureStatus: row.CaptureStatus, StorageStatus: "ready", ViewStatus: "excerpt", CapturedBytes: int64(len(raw)), Preview: prefix(string(raw), 2048), Instruction: instruction}
@@ -260,10 +259,6 @@ func (u *Usecase) resume(value string, row *model.Result, fingerprint string) (i
 func (u *Usecase) continuation(row *model.Result, fingerprint string, offset int64) string {
 	return u.sign(cursor{row.ID, row.SHA256, fingerprint, offset, time.Now().Add(time.Hour).Unix()})
 }
-
-// SetCaptureEnabled is called only during startup; existing evidence remains readable.
-func (u *Usecase) SetCaptureEnabled(enabled bool) { u.captureEnabled = enabled }
-func (u *Usecase) CaptureEnabled() bool           { return u.captureEnabled }
 
 // Only the internal capture tool may carry UI controls into a bounded view.
 func captureOperation(tool, output string) *basetool.Operation {

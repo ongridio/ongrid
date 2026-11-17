@@ -15,15 +15,11 @@ import (
 func (u *Usecase) BindTools(scope Scope, tools []basetool.BaseTool) []basetool.BaseTool {
 	out := make([]basetool.BaseTool, 0, len(tools)+2)
 	for _, t := range tools {
-		if u.captureEnabled {
-			out = append(out, &capturedTool{BaseTool: t, u: u, scope: scope})
-		} else {
-			out = append(out, t)
-		}
+		out = append(out, &capturedTool{BaseTool: t, u: u, scope: scope})
 	}
 	budget := &readBudget{}
 	out = append(out, &readerTool{u: u, scope: scope, budget: budget}, &readerTool{u: u, scope: scope, budget: budget, query: true})
-	if u.analyzer != nil && u.captureEnabled {
+	if u.analyzer != nil {
 		out = append(out, &analysisTool{u: u, scope: scope})
 	}
 	return out

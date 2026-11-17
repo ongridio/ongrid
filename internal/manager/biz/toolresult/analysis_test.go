@@ -120,13 +120,6 @@ func TestAnalysisRejectsPartialAndPreservesFailure(t *testing.T) {
 	if err != nil || row.ExecutionStatus != "error" || row.CaptureStatus != "complete" {
 		t.Fatalf("failed execution lost: %+v %v", row, err)
 	}
-	u.SetCaptureEnabled(false)
-	for _, tool := range u.BindTools(scope, nil) {
-		info, _ := tool.Info(ctx)
-		if info.Name == "analyze_tool_results" {
-			t.Fatal("analysis still creates results with capture disabled")
-		}
-	}
 }
 
 func TestAnalysisPreservesTimeoutAndOutputLimit(t *testing.T) {

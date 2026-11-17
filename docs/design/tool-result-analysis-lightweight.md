@@ -55,8 +55,8 @@ gojq 反复更新不断增大的对象可能产生大量复制。真实模型验
 
 ## 运维与验证
 
-沿用 `ONGRID_TOOL_RESULTS_ENABLED`，不增加部署服务或专用分析开关。表达式参数经既有 AutoMigrate 扩为 LONGTEXT，避免 JSON 转义后超过 TEXT 容量。来源和派生结果继续遵循现有保留期；删除会话尚不立即清除载荷。
+结果捕获和 Linux 分析始终开启，不增加部署服务或启停配置。表达式参数经既有 AutoMigrate 扩为 LONGTEXT，避免 JSON 转义后超过 TEXT 容量。来源和派生结果继续遵循现有保留期；删除会话尚不立即清除载荷。
 
-关闭捕获可以停止新分析并保留已有结果读取。保留数据库、LONGTEXT 列和结果卷；旧版本可能缩列，不能直接当作安全回滚目标。详细操作见[安装说明](../install/tool-results.md#streaming-result-analysis)。
+保留数据库、LONGTEXT 列和结果卷；旧版本可能缩列，不能直接当作安全回滚目标。详细操作见[安装说明](../install/tool-results.md#streaming-result-analysis)。
 
 可复现的只读 MCP、自然语言问题、独立 SQLite 答案核对、Linux worker 边界检查和内存测量位于 [scripts/result-analysis](../../scripts/result-analysis/README.md)。它们使用合成项目数据，不构成生产业务或容量验收。

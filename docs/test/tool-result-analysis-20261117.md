@@ -65,7 +65,7 @@
 
 脚本与复现步骤见 [README](../../scripts/result-analysis/README.md)。原始输出保留在工作树忽略目录 `output/tool-result-analysis-lightweight-20261117/`：`transcript.json`、`answers.json`、失败尝试导出、`worker-check-final.json`、`memory-check.json` 和构建/测试日志。私有备份及配置不提交。
 
-分析与捕获共用开关；关闭后保留已有读取，但维护任务也停止。不要删除结果卷或用可能缩列的旧版本直接回滚。源结果和派生结果遵循现有保留期，删除会话尚不立即删除文件。见[安装及回滚说明](../install/tool-results.md)。
+后续已移除启停开关；结果捕获、Linux 分析和维护随 Manager 启动。不要删除结果卷或用可能缩列的旧版本直接回滚。源结果和派生结果遵循现有保留期，删除会话尚不立即删除文件。见[安装及回滚说明](../install/tool-results.md)。
 
 ## 后续修复：预算错误分类
 

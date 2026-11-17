@@ -93,15 +93,11 @@ func bootstrapAIOps(cfg *config.Config, log *slog.Logger, notifyRouter *notify.R
 	}
 	resultRepo := resultdata.New(storage.db, firstNonEmpty(os.Getenv("ONGRID_TOOL_RESULTS_DIR"), "/var/lib/ongrid/tool-results"), quota)
 	results := resultbiz.New(resultRepo, aiopsRepo, []byte("tool-result-cursors:"+cfg.JWT.Secret), log)
-	captureResults := os.Getenv("ONGRID_TOOL_RESULTS_ENABLED") == "true"
-	results.SetCaptureEnabled(captureResults)
-	if captureResults {
-		analyzer, err := resultanalysis.NewClient()
-		if err != nil {
-			log.Error("tool result analysis disabled", slog.Any("err", err))
-		} else {
-			results.SetAnalyzer(analyzer)
-		}
+	analyzer, err := resultanalysis.NewClient()
+	if err != nil {
+		log.Error("tool result analysis disabled", slog.Any("err", err))
+	} else {
+		results.SetAnalyzer(analyzer)
 	}
 
 	operationUC := managerbizaiops.NewOperationUsecase(aiopsRepo)
@@ -231,9 +227,6 @@ func bootstrapAIOps(cfg *config.Config, log *slog.Logger, notifyRouter *notify.R
 		log.Warn("ONGRID_AGENT_KERNEL is obsolete; unified runtime is always used", slog.String("value", value))
 	}
 
-	if !captureResults {
-		resultRepo = nil
-	} // existing references remain readable after capture is disabled
 	return &aiopsModule{
 		resultRepo: resultRepo, results: results,
 		alertSvc:             alertSvc,

@@ -2,7 +2,7 @@
 
 - 环境：本机 OrbStack，https://localhost:8443。用户授权更新测试环境并保留演示会话。
 - Manager/Web：`v0.20.0-tool-results.20261116`；基于 `5d22f5d7` 和本分支未提交改动。
-- 保留现有环境变量、挂载、网络和端口；新增持久卷 `ongrid-tool-results-test-20261116`，开启 `ONGRID_TOOL_RESULTS_ENABLED=true`。
+- 保留现有环境变量、挂载、网络和端口；新增持久卷 `ongrid-tool-results-test-20261116`，启用结果捕获。
 - 数据库备份完成（84 表），MySQL 迁移验证结果表及 LONGTEXT 字段；首页、healthz、readyz 均 200，更新后容器重启计数为 0。
 - 部署前 Linux 关键路径测试通过；补充并验证 MCP 短文字说明配大型 structuredContent 时仍返回结果读取引用。
 
@@ -24,11 +24,7 @@
 
 构建、私有备份及配置快照、验收 JSON 位于工作树 `output/tool-results-test-20261116/`（不入 Git）；私有文件包含敏感配置，仅当前用户可读。
 
-关闭新捕获而继续读取已有结果：
-
-```bash
-python3 output/tool-results-test-20261116/deploy.py disable-capture
-```
+后续已移除捕获开关；旧部署脚本的 `disable-capture` 操作不再适用于当前版本。结果捕获、恢复与清理随 Manager 启动。
 
 不要直接用旧二进制回滚 LONGTEXT 与引用记录；完整降级需单独评估数据转换。数据库快照和原镜像已保留。
 

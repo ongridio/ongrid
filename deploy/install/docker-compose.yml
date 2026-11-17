@@ -67,7 +67,6 @@ services:
       ONGRID_DB_DSN: ongrid:${MYSQL_PASSWORD}@tcp(mysql:3306)/ongrid?parseTime=true&charset=utf8mb4&loc=Local
       ONGRID_DB_MAX_OPEN_CONNS: ${ONGRID_DB_MAX_OPEN_CONNS:-50}
       ONGRID_DB_MAX_IDLE_CONNS: ${ONGRID_DB_MAX_IDLE_CONNS:-10}
-      ONGRID_TOOL_RESULTS_ENABLED: ${ONGRID_TOOL_RESULTS_ENABLED:-false}
       ONGRID_TOOL_RESULTS_MAX_BYTES: ${ONGRID_TOOL_RESULTS_MAX_BYTES:-10737418240}
       ONGRID_JWT_SECRET: ${ONGRID_JWT_SECRET:?ONGRID_JWT_SECRET is required in .env}
       # HLD-017 credential vault at-rest key (AES-256-GCM). Lives in .env

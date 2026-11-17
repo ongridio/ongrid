@@ -138,7 +138,7 @@ func (u *Usecase) Approve(ctx context.Context, approverID uint64, id string) (*m
 		return nil, err
 	}
 
-	if u.results != nil && u.results.CaptureEnabled() {
+	if u.results != nil {
 		proposed, err := u.repo.Get(ctx, id)
 		if err != nil {
 			return nil, err
@@ -182,7 +182,7 @@ func (u *Usecase) Approve(ctx context.Context, approverID uint64, id string) (*m
 		res = string(payload)
 	}
 
-	if u.results != nil && u.results.CaptureEnabled() && a.Source == model.SourceAgent && a.SessionID != "" {
+	if u.results != nil && a.Source == model.SourceAgent && a.SessionID != "" {
 		until := time.Now().UTC().Add(90 * 24 * time.Hour)
 		res = u.results.Capture(ctx, toolresult.Scope{SessionID: a.SessionID, UserID: a.ProposedBy}, "approval:"+a.ID, a.Kind, res, runErr, []resultmodel.Reference{{Kind: "approval", ID: a.ID, RetainUntil: &until}})
 		_, a.ResultID, _ = toolcapture.Get(ctx)
