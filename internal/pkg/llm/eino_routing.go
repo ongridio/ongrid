@@ -413,7 +413,7 @@ func (c *clientChatModel) buildChatReq(input []*schema.Message, common *model.Op
 	}
 
 	tools := c.boundTools
-	if common.Tools != nil {
+	if len(common.Tools) > 0 {
 		tools = common.Tools
 	}
 	llmTools, err := einoToolsToLLM(tools)
@@ -426,9 +426,6 @@ func (c *clientChatModel) buildChatReq(input []*schema.Message, common *model.Op
 		Tools:        llmTools,
 		UserID:       c.userID,
 		DisableTools: common.ToolChoice != nil && *common.ToolChoice == schema.ToolChoiceForbidden,
-	}
-	if common.MaxTokens != nil {
-		req.MaxTokens = *common.MaxTokens
 	}
 	if common.Temperature != nil {
 		req.Temperature = *common.Temperature

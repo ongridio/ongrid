@@ -1582,8 +1582,6 @@ func buildGraphErrorApology(err error) string {
 	msg := err.Error()
 	low := strings.ToLower(msg)
 	switch {
-	case errors.Is(err, llm.ErrContextBudgetExceeded):
-		return "本次请求超过模型上下文上限。请缩小问题范围、减少输入内容，或新建会话后重试；若仍出现，请联系管理员检查工具定义和上下文配置。"
 	case errors.Is(err, llm.ErrBudgetExceeded):
 		return "今日 LLM token 预算不足，无法继续调用。请联系管理员调整每日限额，或等待预算重置。"
 	// LLM hallucinated a tool name not in its actual schema (e.g.

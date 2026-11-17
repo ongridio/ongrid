@@ -104,11 +104,9 @@ func (t *responsesTransport) roundTripAnthropic(original *http.Request, chat ope
 			messages = append(messages, anthropicMessage{Role: role, Content: content})
 		}
 	}
-	// Keep the native default for callers without an explicit output reserve.
+	// The shared request has no output-token option. Keep a bounded native limit,
+	// including room for the 2,048-token budget on legacy thinking models.
 	payload := map[string]any{"model": chat.Model, "messages": messages, "max_tokens": 8192}
-	if chat.MaxTokens > 0 {
-		payload["max_tokens"] = chat.MaxTokens
-	}
 	if len(system) > 0 {
 		payload["system"] = strings.Join(system, "\n")
 	}
@@ -121,9 +119,6 @@ func (t *responsesTransport) roundTripAnthropic(original *http.Request, chat ope
 			}
 			switch capability.Thinking {
 			case "enabled":
-				if chat.MaxTokens > 0 && chat.MaxTokens <= 2048 {
-					return nil, fmt.Errorf("anthropic: output reserve must exceed the 2048-token thinking budget")
-				}
 				payload["thinking"] = map[string]any{"type": "enabled", "budget_tokens": 2048}
 			case "adaptive":
 				payload["thinking"] = map[string]string{"type": "adaptive"}

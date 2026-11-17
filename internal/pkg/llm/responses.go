@@ -62,11 +62,6 @@ func (t *responsesTransport) RoundTrip(req *http.Request) (*http.Response, error
 	// A chat may switch providers. Never send opaque Responses state as a
 	// DeepSeek reasoning string (or as an unknown Chat Completions field).
 	clean := chat
-	if clean.MaxTokens > 0 && (strings.HasPrefix(chat.Model, "gpt-5") || strings.HasPrefix(chat.Model, "gpt-6") || strings.HasPrefix(chat.Model, "o1") || strings.HasPrefix(chat.Model, "o3") || strings.HasPrefix(chat.Model, "o4")) {
-		clean.MaxCompletionTokens = clean.MaxTokens
-		clean.MaxTokens = 0
-	}
-
 	// Chat Completions rejects tool_choice without tools; Responses accepts
 	// it and uses it to forbid tools inferred from history.
 	if len(clean.Tools) == 0 {
@@ -212,9 +207,6 @@ func (t *responsesTransport) roundTripResponses(original *http.Request, chat ope
 			tools = append(tools, map[string]any{"type": "function", "name": tool.Function.Name, "description": tool.Function.Description, "parameters": tool.Function.Parameters, "strict": false})
 		}
 		payload["tools"] = tools
-	}
-	if chat.MaxTokens > 0 {
-		payload["max_output_tokens"] = chat.MaxTokens
 	}
 	if chat.ToolChoice != nil {
 		payload["tool_choice"] = chat.ToolChoice

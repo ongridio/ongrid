@@ -132,7 +132,7 @@ func testAgentTracingRealGraphModelAndTool(t *testing.T, capture, large bool) {
 		Sessions: newMemSessions(session), ChatModel: chatModel.(einomodel.ToolCallingChatModel),
 		BasePrompt:   basePrompt,
 		ToolBag:      []basetool.BaseTool{&fakeTool{name: "query_traceql", schema: `{"type":"object","properties":{}}`}},
-		GraphCfg:     graph.Config{MaxIterations: 5, ContextBudget: llm.ContextBudget{Window: 1 << 20}},
+		GraphCfg:     graph.Config{MaxIterations: 5},
 		CallbackDeps: callbacks.Deps{Tracing: handler},
 	})
 	if err != nil {

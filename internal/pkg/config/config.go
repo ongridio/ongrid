@@ -371,15 +371,13 @@ type LLMProviderConfig struct {
 // its own top-level field for legacy reasons (see OpenAIConfig); the
 // non-OpenAI providers cluster here.
 type LLMConfig struct {
-	ContextWindow int
-	OutputTokens  int
-	Anthropic     LLMProviderConfig
-	Zhipu         LLMProviderConfig
-	Gemini        LLMProviderConfig
-	DeepSeek      LLMProviderConfig
-	Kimi          LLMProviderConfig
-	MiniMax       LLMProviderConfig
-	Xiaomi        LLMProviderConfig
+	Anthropic LLMProviderConfig
+	Zhipu     LLMProviderConfig
+	Gemini    LLMProviderConfig
+	DeepSeek  LLMProviderConfig
+	Kimi      LLMProviderConfig
+	MiniMax   LLMProviderConfig
+	Xiaomi    LLMProviderConfig
 	// Default is the provider id used when a chat-send request does not
 	// specify Provider. Empty → first configured provider (deterministic
 	// alphabetical ordering, see llm.NewMultiClient).
@@ -563,8 +561,6 @@ func Load() (*Config, error) {
 	c.LLM.Xiaomi.BaseURL = getEnv("ONGRID_XIAOMI_BASE_URL", "")
 	c.LLM.Xiaomi.Models = splitProviderModels(getEnv("ONGRID_XIAOMI_MODELS", "mimo-v2.5-pro,mimo-v2.5"))
 	c.LLM.Default = getEnv("ONGRID_LLM_DEFAULT_PROVIDER", "")
-	c.LLM.ContextWindow = getEnvInt("ONGRID_LLM_CONTEXT_WINDOW", 131072)
-	c.LLM.OutputTokens = getEnvInt("ONGRID_LLM_OUTPUT_TOKENS", 8192)
 	c.LLM.DailyTokenLimit = getEnvInt("ONGRID_LLM_DAILY_TOKEN_LIMIT", 0)
 
 	c.Admin.Email = getEnv("ONGRID_ADMIN_EMAIL", "")

@@ -4,17 +4,15 @@ Ongrid can keep large chat tool results in a private persistent directory, compr
 
 The [design](../design/tool-result-storage.md) describes the contracts and deferred work. This change covers v2/v3 chat, workers, MCP capture and chat approvals. It does not remove existing Edge/Shell capture limits or convert workflow and report payloads to references.
 
-## Configure storage and budgets
+## Configure storage
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `ONGRID_TOOL_RESULTS_ENABLED` | `false` | Capture new tool results; exact value `true` enables capture and maintenance |
 | `ONGRID_TOOL_RESULTS_DIR` | `/var/lib/ongrid/tool-results` | Manager path; Compose mounts this fixed container path |
 | `ONGRID_TOOL_RESULTS_MAX_BYTES` | `10737418240` | Directory file-byte quota, minimum 128 MiB; excludes SQL inline data |
-| `ONGRID_LLM_CONTEXT_WINDOW` | `131072` | Conservative total token budget for each v2/v3 model request |
-| `ONGRID_LLM_OUTPUT_TOKENS` | `8192` | Reserved output tokens, also sent to the provider |
 
-Use a context window no larger than the smallest model that users can select. These LLM limits apply even with capture disabled. Input estimation uses serialized UTF-8 bytes for text, schemas and reasoning data. Images are counted separately using pixel dimensions, with a fixed allowance when dimensions are unavailable; their Base64 data is not charged as text. These allowances remain approximate, and requests retain the same global context and output limits. After removing old evidence, requests that still exceed the budget fail before reaching the provider.
+Saved-result previews and read/query pages have byte limits. This feature does not add a model-request context budget, trim conversation history by token size, or set a new output-token limit. Existing history-count, iteration and daily-token limits remain in place; the provider enforces its actual context capacity.
 
 The installer Compose file mounts `${ONGRID_DATA_DIR:-/var/lib/ongrid}/tool-results` from the host. The development Compose file mounts `../.cache/ongrid-tool-results`. Existing installer permission repair creates the directory for UID/GID 65532. For a manual development deployment, create the bind-mount directory with that owner before starting the non-root Manager. Do not place this directory under nginx's web root or expose it as a static download directory.
 
@@ -41,11 +39,11 @@ Recovery currently scans the local tree. If one corrupted manifest stops a pass,
 
 Ordinary results expire after 30 days. Chat approval references retain results for 90 days. Reads enforce expiration even before file cleanup. Cleanup retains a metadata tombstone and removes unpinned payloads. Automatic report/RCA retention references are not yet wired. Disabling capture also stops maintenance; monitor disk usage if leaving it disabled for a long period.
 
-Back up the result directory and SQL together, and validate a restore with checksums. Saving only the database is insufficient for file-backed results. Compressing files does not reduce model context consumption; only bounded previews, queries and per-request history selection do that.
+Back up the result directory and SQL together, and validate a restore with checksums. Saving only the database is insufficient for file-backed results. Compressing files does not reduce model context consumption; bounded previews, queries and analysis reduce the data sent to the model.
 
 ## Roll back
 
-Set `ONGRID_TOOL_RESULTS_ENABLED=false` to stop new captures. Keep the reference-aware code, result tables, LONGTEXT columns and volume so existing results can still be read. Context budgets remain active and can be adjusted to the model's supported limits.
+Set `ONGRID_TOOL_RESULTS_ENABLED=false` to stop new captures. Keep the reference-aware code, result tables, LONGTEXT columns and volume so existing results can still be read.
 
 An arbitrary older binary is not a safe rollback target: it may not understand references and may run TEXT migrations. Do not shrink columns or delete the result volume as part of rollback. Returning to a version without reference support requires a separate data-conversion plan; results beyond its inline capacity cannot be restored losslessly to that format.
 
