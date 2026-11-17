@@ -76,7 +76,7 @@ func TestReadQueryAuthCursorAndExactJSONNumbers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.NextCursor == "" || len(p.Items) != 5 || !strings.Contains(string(p.Items[0].Data), "9007199254740993") {
+	if p.NextCursor == "" || len(p.Items) != 5 || !strings.Contains(p.Items[0].JSON, "9007199254740993") {
 		t.Fatalf("bad page %+v", p)
 	}
 	req.Cursor = p.NextCursor
@@ -123,7 +123,7 @@ func TestReadQueryAuthCursorAndExactJSONNumbers(t *testing.T) {
 }
 
 func TestMCPRawPreservedAndOversizedRecordMakesProgress(t *testing.T) {
-	u, repo, _, scope := fixture(t)
+	u, _, _, scope := fixture(t)
 	ctx := toolcapture.WithState(context.Background())
 	raw := `{"content":[{"type":"image","data":"private-bytes","mimeType":"image/png"}],"structuredContent":{"items":[{"id":9007199254740993}]},"unknown":{"keep":true}}`
 	toolcapture.Raw(ctx, []byte(raw), false)
@@ -131,11 +131,12 @@ func TestMCPRawPreservedAndOversizedRecordMakesProgress(t *testing.T) {
 		t.Fatal("small-result compatibility changed")
 	}
 	_, id, _ := toolcapture.Get(ctx)
-	row, err := u.Metadata(ctx, scope, id)
+	_, reader, err := u.Open(ctx, scope, id)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := repo.Read(ctx, row, 0, len(raw))
+	got, readErr := io.ReadAll(reader)
+	err = errors.Join(readErr, reader.Close())
 	if err != nil || string(got) != raw {
 		t.Fatal("MCP raw result lost")
 	}
@@ -154,7 +155,7 @@ func TestMCPRawPreservedAndOversizedRecordMakesProgress(t *testing.T) {
 		t.Fatalf("large record stuck: %+v", p)
 	}
 	page, err := u.Read(ctx, scope, biz.Request{ResultID: id, Mode: "json", Limit: 1, Cursor: p.NextCursor}, false)
-	if err != nil || string(page.Items[0].Data) != `{"ok":true}` {
+	if err != nil || page.Items[0].JSON != `{"ok":true}` {
 		t.Fatalf("next record unavailable: %v", err)
 	}
 }

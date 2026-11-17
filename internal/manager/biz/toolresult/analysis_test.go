@@ -69,8 +69,12 @@ func TestAnalysisAuthorizesAllInputsAndSavesProvenance(t *testing.T) {
 	if err != nil || row.ToolName != "analyze_tool_results" || row.ExecutionStatus != "success" {
 		t.Fatalf("analysis not persisted: %+v %v", row, err)
 	}
-	body, err := repo.Read(ctx, row, 0, int(row.CapturedBytes))
+	_, reader, err := u.Open(ctx, scope, id)
 	if err != nil {
+		t.Fatal(err)
+	}
+	body, readErr := io.ReadAll(reader)
+	if err = errors.Join(readErr, reader.Close()); err != nil {
 		t.Fatal(err)
 	}
 	var report struct {

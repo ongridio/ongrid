@@ -32,13 +32,12 @@ type Request struct {
 	Count         bool     `json:"count,omitempty"`
 }
 type Item struct {
-	Start    int64           `json:"start"`
-	End      int64           `json:"end"`
-	Record   *int64          `json:"record,omitempty"`
-	Data     json.RawMessage `json:"-"`
-	JSON     string          `json:"data_json,omitempty"`
-	Text     string          `json:"text,omitempty"`
-	Fragment bool            `json:"fragment,omitempty"`
+	Start    int64  `json:"start"`
+	End      int64  `json:"end"`
+	Record   *int64 `json:"record,omitempty"`
+	JSON     string `json:"data_json,omitempty"`
+	Text     string `json:"text,omitempty"`
+	Fragment bool   `json:"fragment,omitempty"`
 }
 type Page struct {
 	ResultID      string `json:"result_id"`
@@ -243,13 +242,12 @@ func (u *Usecase) jsonPage(ctx context.Context, row *model.Result, req Request, 
 				return err
 			}
 		}
-		item := Item{Start: span.Start, End: span.End, Record: &i, Data: json.RawMessage(body), JSON: string(body)}
+		item := Item{Start: span.Start, End: span.End, Record: &i, JSON: string(body)}
 		if !fits(p, item) {
 			if len(p.Items) > 0 {
 				p.ScanEnd = i
 				break
 			}
-			item.Data = nil
 			item.JSON = ""
 			item.Text = prefix(string(body), 256)
 			item.Fragment = true

@@ -120,7 +120,12 @@ func TestRecoveryPublishesDurableOutputWithoutToolExecution(t *testing.T) {
 		if got.UserID != 7 || got.ExecutionKey != row.ExecutionKey || got.StorageKey == "" {
 			t.Fatal("recovery lost private metadata")
 		}
-		payload, err := r.Read(context.Background(), got, 0, size)
+		reader, err := r.Open(context.Background(), got)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload, readErr := io.ReadAll(reader)
+		err = errors.Join(readErr, reader.Close())
 		if err != nil || !bytes.Equal(payload, body) {
 			t.Fatalf("read=%v", err)
 		}

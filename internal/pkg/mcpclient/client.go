@@ -59,7 +59,6 @@ type Tool struct {
 // CallResult is the tools/call payload. Content blocks are flattened to text
 // by TextContent() for the agent-facing result.
 type CallResult struct {
-	Raw               json.RawMessage `json:"-"`
 	StructuredContent json.RawMessage `json:"structuredContent,omitempty"`
 	Content           []ContentBlock  `json:"content"`
 	IsError           bool            `json:"isError"`
@@ -173,7 +172,6 @@ func (c *Client) CallTool(ctx context.Context, name string, args map[string]any)
 	if err := json.Unmarshal(raw, &res); err != nil {
 		return nil, fmt.Errorf("mcp: decode tools/call: %w", err)
 	}
-	res.Raw = append(json.RawMessage(nil), raw...)
 	return &res, nil
 }
 
@@ -256,7 +254,7 @@ func (c *Client) post(ctx context.Context, body map[string]any) ([]byte, string,
 	ct := resp.Header.Get("Content-Type")
 	if strings.Contains(ct, "text/event-stream") {
 		var captured bytes.Buffer
-		msg, err := firstSSEData(io.TeeReader(io.LimitReader(resp.Body, MaxResponseBytes+1), &captured), body["id"])
+		msg, err := firstSSEData(io.TeeReader(resp.Body, &captured), body["id"])
 		if err != nil && body["method"] == "tools/call" {
 			toolcapture.Raw(ctx, captured.Bytes()[:min(captured.Len(), MaxResponseBytes)], true)
 		}
@@ -287,7 +285,7 @@ func (c *Client) post(ctx context.Context, body map[string]any) ([]byte, string,
 // one we want.
 const MaxResponseBytes = 16 << 20
 
-func firstSSEData(r io.Reader, expected ...any) ([]byte, error) {
+func firstSSEData(r io.Reader, expected any) ([]byte, error) {
 	sc := bufio.NewScanner(io.LimitReader(r, MaxResponseBytes+1))
 	sc.Buffer(make([]byte, 0, 64<<10), MaxResponseBytes+1)
 	var data strings.Builder
@@ -303,8 +301,8 @@ func firstSSEData(r io.Reader, expected ...any) ([]byte, error) {
 		if json.Unmarshal(b, &message) != nil || (len(message.Result) == 0 && len(message.Error) == 0) {
 			return nil, false
 		}
-		if len(expected) > 0 && expected[0] != nil {
-			id, err := json.Marshal(expected[0])
+		if expected != nil {
+			id, err := json.Marshal(expected)
 			if err != nil || !bytes.Equal(id, message.ID) {
 				return nil, false
 			}

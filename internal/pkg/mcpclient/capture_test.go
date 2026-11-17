@@ -32,7 +32,7 @@ func TestCallCapturesUnmodifiedResultAndTransportLimit(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "exceeds") || !partial || len(raw) != MaxResponseBytes {
 				t.Fatalf("limit: %v partial=%v bytes=%d", err, partial, len(raw))
 			}
-		} else if err != nil || partial || string(raw) != original || string(result.Raw) != original || !result.IsError {
+		} else if err != nil || partial || string(raw) != original || !result.IsError {
 			t.Fatalf("capture: %v partial=%v raw=%s", err, partial, raw)
 		}
 	}

@@ -105,7 +105,7 @@ func (r *Repo) Save(ctx context.Context, row *model.Result, body []byte, refs []
 	if len(body) > resultfile.MaxSize {
 		return errs.ErrInvalid
 	}
-	if existing, err := r.FindExecution(ctx, row.ExecutionKey); err == nil {
+	if existing, err := r.findExecution(ctx, row.ExecutionKey); err == nil {
 		digest := sha256.Sum256(body)
 		if existing.SHA256 != hex.EncodeToString(digest[:]) || existing.SessionID != row.SessionID || existing.UserID != row.UserID {
 			return errs.ErrConflict
@@ -282,7 +282,7 @@ func (r *Repo) publish(ctx context.Context, row *model.Result, refs []model.Refe
 	})
 }
 
-func (r *Repo) FindExecution(ctx context.Context, key string) (*model.Result, error) {
+func (r *Repo) findExecution(ctx context.Context, key string) (*model.Result, error) {
 	var row model.Result
 	err := r.db.WithContext(ctx).Where("execution_key = ?", key).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -309,44 +309,6 @@ func (r *Repo) Get(ctx context.Context, id string) (*model.Result, error) {
 	return &row, err
 }
 
-func (r *Repo) Read(ctx context.Context, row *model.Result, offset int64, limit int) ([]byte, error) {
-	if offset < 0 || limit < 0 || limit > resultfile.BlockSize || offset > row.CapturedBytes {
-		return nil, errs.ErrInvalid
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	if row.StorageStatus != "ready" {
-		return nil, fmt.Errorf("tool result is %s", row.StorageStatus)
-	}
-	end := min(row.CapturedBytes, offset+int64(limit))
-	if row.StorageKey == "" {
-		digest := sha256.Sum256(row.InlineBody)
-		if int64(len(row.InlineBody)) != row.CapturedBytes || hex.EncodeToString(digest[:]) != row.SHA256 {
-			return nil, resultfile.ErrCorrupt
-		}
-		return append([]byte(nil), row.InlineBody[offset:end]...), nil
-	}
-	path, err := r.payloadPath(row)
-	if err != nil {
-		return nil, err
-	}
-	var meta resultfile.Metadata
-	if err = json.Unmarshal([]byte(row.ManifestJSON), &meta); err != nil {
-		return nil, resultfile.ErrCorrupt
-	}
-	if meta.Size != row.CapturedBytes || meta.SHA256 != row.SHA256 || meta.Encoding != row.Encoding {
-		return nil, resultfile.ErrCorrupt
-	}
-	reader, err := resultfile.Open(ctx, path, meta)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]byte, end-offset)
-	_, err = reader.ReadAt(out, offset)
-	return out, errors.Join(err, reader.Close())
-}
-
 func (r *Repo) payloadPath(row *model.Result) (string, error) {
 	if _, err := uuid.Parse(row.ID); err != nil {
 		return "", errs.ErrInvalid
@@ -356,19 +318,6 @@ func (r *Repo) payloadPath(row *model.Result) (string, error) {
 		return "", resultfile.ErrCorrupt
 	}
 	return filepath.Join(r.root, expected, "payload.data"), nil
-}
-
-func (r *Repo) AddReference(ctx context.Context, ref model.Reference) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	row, err := r.Get(ctx, ref.ResultID)
-	if err != nil {
-		return err
-	}
-	if row.StorageStatus != "ready" {
-		return errs.ErrConflict
-	}
-	return r.publish(ctx, row, []model.Reference{ref})
 }
 
 // Cleanup leaves expired metadata as a tombstone so callers can distinguish

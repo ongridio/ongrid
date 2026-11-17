@@ -85,7 +85,7 @@ func (r *Repo) Recover(ctx context.Context) (int, error) {
 		if err != nil || filepath.Dir(payload) != filepath.Dir(path) {
 			return errs.ErrInvalid
 		}
-		if existing, err := r.FindExecution(ctx, row.ExecutionKey); err == nil {
+		if existing, err := r.findExecution(ctx, row.ExecutionKey); err == nil {
 			if existing.ID != row.ID || existing.SHA256 != row.SHA256 {
 				return errs.ErrConflict
 			}

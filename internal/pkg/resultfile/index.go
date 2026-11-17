@@ -13,18 +13,12 @@ type Span struct {
 	Start int64 `json:"start"`
 	End   int64 `json:"end"`
 }
-type LinePoint struct {
-	Line   int64 `json:"line"`
-	Offset int64 `json:"offset"`
-}
 type Collection struct {
 	Items    []Span `json:"items"`
 	Complete bool   `json:"complete"`
 }
 type Index struct {
 	Version     int                   `json:"version"`
-	Lines       []LinePoint           `json:"lines"`
-	LineCount   int64                 `json:"line_count"`
 	Collections map[string]Collection `json:"collections,omitempty"`
 }
 
@@ -33,18 +27,6 @@ type Index struct {
 // remain available through byte reads instead of creating an unbounded index.
 func BuildIndex(body []byte) Index {
 	idx := Index{Version: 1, Collections: map[string]Collection{}}
-	if len(body) > 0 {
-		idx.LineCount = 1
-		idx.Lines = append(idx.Lines, LinePoint{1, 0})
-		for i, b := range body {
-			if b == '\n' && i+1 < len(body) {
-				idx.LineCount++
-				if idx.LineCount%256 == 1 && len(idx.Lines) < MaxIndexEntries {
-					idx.Lines = append(idx.Lines, LinePoint{idx.LineCount, int64(i + 1)})
-				}
-			}
-		}
-	}
 	if !json.Valid(body) {
 		return idx
 	}

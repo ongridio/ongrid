@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 
@@ -80,7 +81,12 @@ func TestApprovalRecoveryNeverRepeatsExecution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = r.Read(context.Background(), row, 0, 100); err != nil {
+	reader, err := r.Open(context.Background(), row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, readErr := io.ReadAll(io.LimitReader(reader, 100))
+	if err = errors.Join(readErr, reader.Close()); err != nil {
 		t.Fatal(err)
 	}
 }

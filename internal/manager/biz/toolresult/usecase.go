@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -32,10 +31,8 @@ type Repo interface {
 	CheckWritable(context.Context) error
 	Save(context.Context, *model.Result, []byte, []model.Reference) error
 	Get(context.Context, string) (*model.Result, error)
-	FindExecution(context.Context, string) (*model.Result, error)
 	Open(context.Context, *model.Result) (io.ReadSeekCloser, error)
 	Index(context.Context, *model.Result) (resultfile.Index, error)
-	AddReference(context.Context, model.Reference) error
 }
 type Sessions interface {
 	GetSession(context.Context, string) (*session.Session, error)
@@ -262,15 +259,6 @@ func (u *Usecase) resume(value string, row *model.Result, fingerprint string) (i
 }
 func (u *Usecase) continuation(row *model.Result, fingerprint string, offset int64) string {
 	return u.sign(cursor{row.ID, row.SHA256, fingerprint, offset, time.Now().Add(time.Hour).Unix()})
-}
-
-// ConfirmedReference uses a server-created association, never a result_id
-// parsed out of an untrusted tool response.
-func (u *Usecase) Reference(ctx context.Context, ref model.Reference) error {
-	if ref.ResultID == "" {
-		return fmt.Errorf("%w: missing result", errs.ErrInvalid)
-	}
-	return u.repo.AddReference(ctx, ref)
 }
 
 // SetCaptureEnabled is called only during startup; existing evidence remains readable.
