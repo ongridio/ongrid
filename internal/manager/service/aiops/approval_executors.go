@@ -21,6 +21,7 @@ import (
 	managerbizsecret "github.com/ongridio/ongrid/internal/manager/biz/secret"
 	managersvcfb "github.com/ongridio/ongrid/internal/manager/service/frontierbound"
 	"github.com/ongridio/ongrid/internal/pkg/runner"
+	"github.com/ongridio/ongrid/internal/pkg/toolcapture"
 	"github.com/ongridio/ongrid/internal/pkg/workspace"
 )
 
@@ -171,10 +172,14 @@ func (e ApprovalExecutors) Register(approvalUC *managerbizapproval.Usecase) {
 		if err != nil {
 			return "", err
 		}
-		out, _ := json.Marshal(map[string]any{
+		out, err := json.Marshal(map[string]any{
 			"stdout": res.Stdout, "stderr": res.Stderr,
 			"exit_code": res.ExitCode, "truncated": res.Truncated,
 		})
+		if err != nil {
+			return "", fmt.Errorf("encode command result: %w", err)
+		}
+		toolcapture.Raw(ctx, out, res.Truncated)
 		return string(out), nil
 	})
 	register("host_bash", func(ctx context.Context, payloadJSON string) (string, error) {

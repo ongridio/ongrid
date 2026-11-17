@@ -275,6 +275,31 @@ func (r *Repo) publish(ctx context.Context, row *model.Result, refs []model.Refe
 				if err = tx.Model(&approvalmodel.Approval{}).Where("id = ? AND status = ?", ref.ID, approvalmodel.StatusApproved).Updates(map[string]any{"status": status, "result_json": string(body), "result_id": row.ID, "executed_at": row.CreatedAt}).Error; err != nil {
 					return err
 				}
+				// A completed approval may have saved its pending view before recovery.
+				var completed approvalmodel.Approval
+				err = tx.Select("result_json").Where("id = ? AND result_id = ? AND status IN ?", ref.ID, row.ID, []string{approvalmodel.StatusExecuted, approvalmodel.StatusFailed}).Take(&completed).Error
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					continue
+				}
+				if err != nil {
+					return err
+				}
+				if completed.ResultJSON == nil {
+					continue
+				}
+				var view map[string]json.RawMessage
+				if json.Unmarshal([]byte(*completed.ResultJSON), &view) != nil || string(view["kind"]) != `"tool_result"` || string(view["result_id"]) != `"`+row.ID+`"` || string(view["storage_status"]) != `"pending"` {
+					continue // Only repair our pending storage view, never other terminal output.
+				}
+				view["storage_status"] = json.RawMessage(`"ready"`)
+				delete(view, "instruction")
+				body, err = json.Marshal(view)
+				if err != nil {
+					return err
+				}
+				if err = tx.Model(&approvalmodel.Approval{}).Where("id = ? AND result_id = ? AND result_json = ? AND status IN ?", ref.ID, row.ID, *completed.ResultJSON, []string{approvalmodel.StatusExecuted, approvalmodel.StatusFailed}).Update("result_json", string(body)).Error; err != nil {
+					return err
+				}
 			}
 
 		}

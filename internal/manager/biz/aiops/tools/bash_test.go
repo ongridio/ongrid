@@ -9,6 +9,7 @@ import (
 	"github.com/ongridio/ongrid/internal/edgeagent/cmdpolicy"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
+	"github.com/ongridio/ongrid/internal/pkg/toolcapture"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
 
@@ -74,6 +75,41 @@ func TestBashTool_LegacyDeviceIDRunsReadOnly(t *testing.T) {
 	}
 	if len(env.Results) != 1 || env.Results[0].DeviceID != 1 {
 		t.Fatalf("legacy device_id should normalize to one device result: %+v", env.Results)
+	}
+}
+
+func TestBashToolPropagatesSourceTruncation(t *testing.T) {
+	for _, approved := range []bool{false, true} {
+		for _, truncated := range []bool{false, true} {
+			tool := &BashTool{
+				resolver: &fakeHostFilesResolver{mapping: map[uint64]uint64{1: 1, 2: 2}},
+				caller: policyBashCaller(func(_ context.Context, id uint64, req tunnel.BashExecRequest) ([]byte, error) {
+					if req.Unrestricted != approved {
+						t.Error("execution approval changed")
+					}
+					return json.Marshal(tunnel.BashExecResponse{Allowed: true, Stdout: "captured output", Truncated: truncated && id == 1})
+				}),
+			}
+			ctx := toolcapture.WithState(context.Background())
+			var out string
+			var err error
+			if approved {
+				out, err = tool.RunApproved(ctx, []uint64{1, 2}, "df -h", 0)
+			} else {
+				out, err = tool.InvokableRun(ctx, `{"device_ids":[1,2],"cmd":"df -h"}`)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			var batch BashBatchResponse
+			if err = json.Unmarshal([]byte(out), &batch); err != nil || len(batch.Results) != 2 {
+				t.Fatalf("batch changed: %s %v", out, err)
+			}
+			raw, _, partial := toolcapture.Get(ctx)
+			if partial != truncated || raw != nil {
+				t.Fatalf("approved=%v truncated=%v partial=%v raw=%q", approved, truncated, partial, raw)
+			}
+		}
 	}
 }
 

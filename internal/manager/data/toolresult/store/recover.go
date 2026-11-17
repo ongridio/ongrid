@@ -89,6 +89,9 @@ func (r *Repo) Recover(ctx context.Context) (int, error) {
 			if existing.ID != row.ID || existing.SHA256 != row.SHA256 {
 				return errs.ErrConflict
 			}
+			if existing.StorageStatus == "ready" && len(saved.Manifest.References) > 0 {
+				return r.publish(ctx, existing, saved.Manifest.References)
+			}
 			return nil
 		} else if !errors.Is(err, errs.ErrNotFound) {
 			return err

@@ -199,7 +199,9 @@ func (u *Usecase) Capture(ctx context.Context, scope Scope, executionID, tool, o
 	defer cancel()
 	err := u.repo.Save(writeCtx, row, raw, refs)
 	instruction := "Use query_tool_result to select evidence, or read_tool_result for a bounded page. Preview is only an excerpt; do not re-run the original tool to retrieve more data."
-	if u.analyzer != nil {
+	if row.CaptureStatus == "partial" {
+		instruction += " The source or capture limit omitted data; saved evidence is incomplete and cannot establish whole-dataset counts or absence."
+	} else if u.analyzer != nil {
 		instruction += " For whole-dataset questions, custom calculations, joins or nested formats, use analyze_tool_results to evaluate jq expressions over the complete saved inputs."
 	}
 	v := View{Kind: "tool_result", ResultID: row.ID, Status: status, ExecutionStatus: executionStatus, CaptureStatus: row.CaptureStatus, StorageStatus: "ready", ViewStatus: "excerpt", CapturedBytes: int64(len(raw)), Preview: prefix(string(raw), 2048), Instruction: instruction}

@@ -15,7 +15,7 @@ Saved-result previews and read/query pages have byte limits. This feature does n
 
 The installer Compose file mounts `${ONGRID_DATA_DIR:-/var/lib/ongrid}/tool-results` from the host. The development Compose file mounts `../.cache/ongrid-tool-results`. Existing installer permission repair creates the directory for UID/GID 65532. For a manual development deployment, create the bind-mount directory with that owner before starting the non-root Manager. Do not place this directory under nginx's web root or expose it as a static download directory.
 
-The quota counts compressed payload, index and manifest file sizes. It is not a filesystem reservation. Keep at least 73 MiB free for write preflight and allow more headroom for concurrent processes and filesystem overhead. Small results up to 50 KiB remain in SQL; results of at least 1 MiB use compression when they are text or JSON. A captured result is limited to 64 MiB; the MCP response limit is 16 MiB.
+The quota counts compressed payload, index and manifest file sizes. It is not a filesystem reservation. Keep at least 73 MiB free for write preflight and allow more headroom for concurrent processes and filesystem overhead. Small results up to 50 KiB remain in SQL; results of at least 1 MiB use compression when they are text or JSON. A captured result is limited to 64 MiB; the MCP response limit is 16 MiB. Known Shell/Edge output truncation marks new captures as `partial`: the saved bytes remain readable, but full-result analysis is rejected. Bytes already discarded by the source cannot be recovered; existing capture metadata is not backfilled.
 
 ## Upgrade
 
@@ -32,7 +32,7 @@ The model uses `read_tool_result` and `query_tool_result`; the console's saved-r
 
 Execution, capture and storage have separate status fields. A tool may have completed even if storing its result failed. Do not repeat a write to retrieve its output.
 
-File publication precedes SQL metadata. If SQL fails after publication, the manifest and captured bytes remain available for recovery. The Manager runs recovery and cleanup at startup and every five minutes. Recovery publishes up to 100 new records per pass; maintenance has a 30-second timeout. It also repairs linked chat approval results without executing the approval again. Investigate persistence/recovery errors in the Manager logs and check database health, directory permissions, free space and quota.
+File publication precedes SQL metadata. If SQL fails after publication, the manifest and captured bytes remain available for recovery. The Manager runs recovery and cleanup at startup and every five minutes. Recovery publishes up to 100 new records per pass; maintenance has a 30-second timeout. It also repairs linked chat approval results without executing the approval again. For completed approvals, recovery refreshes a matching pending storage view while preserving execution status, time and preview. Investigate persistence/recovery errors in the Manager logs and check database health, directory permissions, free space and quota.
 
 Recovery currently scans the local tree. If one corrupted manifest stops a pass, preserve its files for diagnosis and restore a verified copy from backup; do not blindly delete evidence or rerun the tool. Scale testing and a dedicated pending-work queue are required before using this backend for a very large result population.
 
